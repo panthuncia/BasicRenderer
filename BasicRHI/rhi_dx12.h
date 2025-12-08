@@ -2509,7 +2509,6 @@ namespace rhi {
 		}
 
 		// Resource to clear
-		
 		ID3D12Resource* res = nullptr;
 		if (u.resource.IsTexture()) {
 			res = impl->textures.get(u.resource.GetHandle())->res.Get();
@@ -2522,7 +2521,7 @@ namespace rhi {
 		}
 
 		// NOTE: caller must have bound the shader-visible heap via SetDescriptorHeaps()
-		// and transitioned 'res' to UAV/UNORDERED_ACCESS with your enhanced barriers.
+		// and transitioned 'res' to UAV/UNORDERED_ACCESS
 		rec->cl->ClearUnorderedAccessViewUint(gpu, cpu, res, v.v, 0, nullptr);
 	}
 

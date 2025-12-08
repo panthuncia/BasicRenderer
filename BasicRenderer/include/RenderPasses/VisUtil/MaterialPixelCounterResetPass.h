@@ -8,8 +8,7 @@ public:
     MaterialPixelCounterResetPass() {}
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override {
-        builder->WithUnorderedAccess("Builtin::VisUtil::MaterialPixelCountBuffer",
-                                     "Builtin::VisUtil::NumMaterialsBuffer");
+        builder->WithUnorderedAccess("Builtin::VisUtil::MaterialPixelCountBuffer");
     }
 
     void Setup() override {
@@ -21,7 +20,6 @@ public:
             "ClearMaterialCountersPSO");
 
         RegisterUAV("Builtin::VisUtil::MaterialPixelCountBuffer");
-        RegisterSRV("Builtin::VisUtil::NumMaterialsBuffer"); // read-only SRV for numMaterials (or CBV)
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -37,9 +35,7 @@ public:
         auto numMaterials = context.materialManager->GetMaterialSlotsUsed();
         // Push: UintRootConstant0 = MaterialCount SRV descriptor index, UintRootConstant1 = MaterialPixelCountBuffer UAV index
         unsigned int rc[NumMiscUintRootConstants] = {};
-        rc[0] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex("Builtin::VisUtil::NumMaterialsBuffer");
-        rc[1] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex("Builtin::VisUtil::MaterialPixelCountBuffer");
-        rc[2] = numMaterials;
+        rc[0] = numMaterials;
         cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, rc);
         
 		unsigned int threadGroupCount = (numMaterials + 63) / 64;

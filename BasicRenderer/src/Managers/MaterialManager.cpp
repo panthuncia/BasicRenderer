@@ -3,15 +3,22 @@
 MaterialManager::MaterialManager() {
 	auto& rm = ResourceManager::GetInstance();
 
-    m_materialPixelCountBuffer = rm.CreateIndexedDynamicStructuredBuffer<uint32_t>(m_materialSlotsUsed, L"VisUtil::MaterialPixelCountBuffer");
+    m_materialPixelCountBuffer = rm.CreateIndexedDynamicStructuredBuffer<uint32_t>(m_materialSlotsUsed, L"VisUtil::MaterialPixelCountBuffer", true);
 
-    m_materialOffsetBuffer = rm.CreateIndexedDynamicStructuredBuffer<uint32_t>(m_materialSlotsUsed, L"VisUtil::MaterialOffsetBuffer");
+    m_materialOffsetBuffer = rm.CreateIndexedDynamicStructuredBuffer<uint32_t>(m_materialSlotsUsed, L"VisUtil::MaterialOffsetBuffer", true);
 
-	m_materialWriteCursorBuffer = rm.CreateIndexedDynamicStructuredBuffer<uint32_t>(m_materialSlotsUsed, L"VisUtil::MaterialWriteCursorBuffer");
+	m_materialWriteCursorBuffer = rm.CreateIndexedDynamicStructuredBuffer<uint32_t>(m_materialSlotsUsed, L"VisUtil::MaterialWriteCursorBuffer", true);
+
+	// Per-block arrays for hierarchical scan
+	const uint32_t numBlocks = (m_materialSlotsUsed + kScanBlockSize - 1u) / kScanBlockSize;
+	m_blockSumsBuffer = rm.CreateIndexedDynamicStructuredBuffer<uint32_t>(std::max(1u, numBlocks), L"VisUtil::BlockSumsBuffer", true);
+	m_scannedBlockSumsBuffer = rm.CreateIndexedDynamicStructuredBuffer<uint32_t>(std::max(1u, numBlocks), L"VisUtil::ScannedBlockSumsBuffer", true);
 
 	m_resources["Builtin::VisUtil::MaterialPixelCountBuffer"] = m_materialPixelCountBuffer;
 	m_resources["Builtin::VisUtil::MaterialOffsetBuffer"] = m_materialOffsetBuffer;
 	m_resources["Builtin::VisUtil::MaterialWriteCursorBuffer"] = m_materialWriteCursorBuffer;
+	m_resources["Builtin::VisUtil::BlockSumsBuffer"] = m_blockSumsBuffer;
+	m_resources["Builtin::VisUtil::ScannedBlockSumsBuffer"] = m_scannedBlockSumsBuffer;
 }
 
 void MaterialManager::IncrementMaterialUsageCount(MaterialCompileFlags flags) {
@@ -31,7 +38,6 @@ void MaterialManager::DecrementMaterialUsageCount(MaterialCompileFlags flags) {
 }
 
 unsigned int MaterialManager::GetMaterialSlot(MaterialCompileFlags flags) {
-	std::lock_guard<std::mutex> lock(m_materialSlotMappingMutex);
 	unsigned int slot;
 	auto it = m_materialSlotMapping.find(flags);
 	if (it != m_materialSlotMapping.end()) {
@@ -48,6 +54,10 @@ unsigned int MaterialManager::GetMaterialSlot(MaterialCompileFlags flags) {
 		// Resize resources to accommodate new material slot
 		m_materialPixelCountBuffer->Resize(m_materialSlotsUsed);
 		m_materialOffsetBuffer->Resize(m_materialSlotsUsed);
+		// Resize per-block buffers to match new block count
+		const uint32_t numBlocks = (m_materialSlotsUsed + kScanBlockSize - 1u) / kScanBlockSize;
+		m_blockSumsBuffer->Resize(std::max(1u, numBlocks));
+		m_scannedBlockSumsBuffer->Resize(std::max(1u, numBlocks));
 	}
 	m_materialSlotMapping[flags] = slot;
 	return slot;

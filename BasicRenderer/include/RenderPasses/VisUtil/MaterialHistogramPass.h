@@ -38,11 +38,6 @@ public:
         cl.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
         BindResourceDescriptorIndices(cl, m_pso.GetResourceDescriptorSlots());
 
-        // UintRootConstant0: MaterialPixelCountBuffer UAV index
-        unsigned int rc[NumMiscUintRootConstants] = {};
-        rc[0] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex("Builtin::VisUtil::MaterialPixelCountBuffer");
-        cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, rc);
-
         const uint32_t groupSizeX = 8, groupSizeY = 8;
         uint32_t x = (ctx.renderResolution.x + groupSizeX - 1) / groupSizeX;
         uint32_t y = (ctx.renderResolution.y + groupSizeY - 1) / groupSizeY;

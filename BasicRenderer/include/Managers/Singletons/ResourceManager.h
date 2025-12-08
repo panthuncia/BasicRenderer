@@ -265,6 +265,22 @@ public:
 		srvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
         pDynamicBuffer->SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, {{srvInfo}});
 
+		if (UAV) {
+			rhi::UavDesc uavDesc = {};
+			uavDesc.dimension = rhi::UavDim::Buffer;
+			uavDesc.buffer.kind = rhi::BufferViewKind::Structured;
+			uavDesc.buffer.numElements = capacity;
+			uavDesc.buffer.structureByteStride = sizeof(T);
+            uavDesc.buffer.counterOffsetInBytes = 0;
+            // Shader visible UAV
+			unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
+            device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), uavShaderVisibleIndex}, pDynamicBuffer->GetAPIResource().GetHandle(), uavDesc);
+            ShaderVisibleIndexInfo uavInfo;
+			uavInfo.slot.index = static_cast<int>(uavShaderVisibleIndex);
+            uavInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
+            pDynamicBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, {{uavInfo}}, 0);
+		}
+
         return pDynamicBuffer;
     }
 

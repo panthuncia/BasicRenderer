@@ -11,7 +11,8 @@
 #include "RenderPasses/VisUtil/EvaluateMaterialGroupsPass.h"
 #include "RenderPasses/VisUtil/MaterialHistogramPass.h"
 #include "RenderPasses/VisUtil/MaterialPixelCounterResetPass.h"
-#include "RenderPasses/VisUtil/MaterialPrefixSumPass.h"
+#include "RenderPasses/VisUtil/MaterialBlockScanPass.h"
+#include "RenderPasses/VisUtil/MaterialBlockOffsetsPass.h"
 
 void CreateGBufferResources(RenderGraph* graph) {
     // GBuffer resources
@@ -40,7 +41,7 @@ void CreateGBufferResources(RenderGraph* graph) {
     visibilityDesc.hasSRV = true;
     visibilityDesc.imageDimensions.emplace_back(resolution.x, resolution.y, 0, 0);
 	visibilityDesc.clearColor[0] = 0;
-	visibilityDesc.clearColor[1] = 0xFFFFFFFF;
+	visibilityDesc.clearColor[1] = static_cast<float>(0xFFFFFFFF);
     auto visibilityBuffer = PixelBuffer::Create(visibilityDesc);
 	visibilityBuffer->SetName(L"Visibility Buffer");
     graph->RegisterResource(Builtin::PrimaryCamera::VisibilityTexture, visibilityBuffer);
@@ -225,7 +226,7 @@ inline void RegisterVisUtilResources(RenderGraph* graph)
     // 2) Per-material prefix sum offsets (uint[numMaterials])
 
     // 3) Total pixel count buffer (uint[1])
-    auto totalPixelCountBuffer = rm.CreateIndexedStructuredBuffer(1, sizeof(uint32_t), /*shaderVisible=*/true, /*cpuVisible=*/false);
+    auto totalPixelCountBuffer = rm.CreateIndexedStructuredBuffer(1, sizeof(uint32_t), true, false);
     totalPixelCountBuffer->SetName(L"VisUtil::TotalPixelCountBuffer");
     graph->RegisterResource("Builtin::VisUtil::TotalPixelCountBuffer", totalPixelCountBuffer);
 
@@ -235,12 +236,12 @@ inline void RegisterVisUtilResources(RenderGraph* graph)
     // PixelRef layout: uint2 pixelXY; uint dcElemIndex; uint primId; -> 4 uints (16 bytes) or 3 uints + 2 uint -> 20 bytes.
     // We'll pack as 4 uints (16 bytes): pixelX, pixelY, dcElemIndex, primId to keep alignment simple.
     struct PixelRefPOD { uint32_t a, b, c, d; };
-    auto pixelListBuffer = rm.CreateIndexedStructuredBuffer(maxPixels, sizeof(PixelRefPOD), /*shaderVisible=*/true, /*cpuVisible=*/false);
+    auto pixelListBuffer = rm.CreateIndexedStructuredBuffer(maxPixels, sizeof(PixelRefPOD), true, false);
     pixelListBuffer->SetName(L"VisUtil::PixelListBuffer");
     graph->RegisterResource("Builtin::VisUtil::PixelListBuffer", pixelListBuffer);
 
     // a single-element buffer storing NumMaterials
-    //auto numMaterialsBuffer = rm.CreateIndexedStructuredBuffer(1, sizeof(uint32_t), /*shaderVisible=*/true, /*cpuVisible=*/true);
+    //auto numMaterialsBuffer = rm.CreateIndexedStructuredBuffer(1, sizeof(uint32_t), true, false);
     //numMaterialsBuffer->SetName(L"VisUtil::NumMaterialsBuffer");
     //graph->RegisterResource("Builtin::VisUtil::NumMaterialsBuffer", numMaterialsBuffer);
 
@@ -277,6 +278,25 @@ void BuildVisibilityPipeline(RenderGraph* graph) {
             useMeshShaders,
             indirect,
             clearRTVs);
+
+    // Reset material counters
+	graph->BuildComputePass("MaterialPixelCounterResetPass")
+        .Build<MaterialPixelCounterResetPass>();
+    
+	// Build material histogram
+    graph->BuildComputePass("MaterialHistogramPass")
+		.Build<MaterialHistogramPass>();
+
+    // Prefix sum material histogram
+	graph->BuildComputePass("MaterialBlockScanPass")
+        .Build<MaterialBlockScanPass>();
+
+    graph->BuildComputePass("MaterialBlockOffsetsPass")
+		.Build<MaterialBlockOffsetsPass>();
+
+ //   // Build pixel list
+ //   graph->BuildComputePass("BuildPixelListPass")
+ //       .Build<BuildPixelListPass>();
 
 	// Copy depth to a separate resource for post-processing use
     graph->BuildComputePass("PrimaryDepthCopyPass")

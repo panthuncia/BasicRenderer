@@ -33,13 +33,13 @@ uint GetMaterialIdFromCluster(uint clusterIndex,
 }
 
 // 2) Clear counters – can be ClearUAV or compute. Compute version:
+// UintRootConstant0 = NumMaterials
 [numthreads(64, 1, 1)]
 void ClearMaterialCountersCS(uint3 tid : SV_DispatchThreadID)
 {
-    ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
-    RWStructuredBuffer<uint> materialPixelCount = ResourceDescriptorHeap[UintRootConstant1];
+    RWStructuredBuffer<uint> materialPixelCount = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisUtil::MaterialPixelCountBuffer)];
 
-    uint numMaterials = UintRootConstant2;
+    uint numMaterials = UintRootConstant0;
     uint i = tid.x;
     if (i < numMaterials)
     {
@@ -48,6 +48,7 @@ void ClearMaterialCountersCS(uint3 tid : SV_DispatchThreadID)
 }
 
 // 3) Histogram: one thread per pixel, atomic into count[m].
+// TODO: optimize with shared-memory tiling?
 [numthreads(8, 8, 1)]
 void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
 {
@@ -62,7 +63,7 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
 
-    RWStructuredBuffer<uint> materialPixelCount = ResourceDescriptorHeap[UintRootConstant0];
+    RWStructuredBuffer<uint> materialPixelCount = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisUtil::MaterialPixelCountBuffer)];
 
     uint2 pixel = dtid.xy;
     uint2 vis = visibility[pixel];
@@ -78,54 +79,6 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
     uint matId = GetMaterialIdFromCluster(clusterIndex, visibleClusterTable, perMeshInstance, perMeshBuffer);
 
     InterlockedAdd(materialPixelCount[matId], 1);
-}
-
-// Prefix sum over counts -> offsets, also compute TotalPixelCount.
-groupshared uint s_data[1024]; // adjust if dispatching >1024 threads per group
-
-[numthreads(256, 1, 1)]
-void MaterialPrefixSumCS(uint3 tid : SV_DispatchThreadID, uint3 gid : SV_GroupID)
-{
-    // Single-dispatch scan across N = NumMaterials. For large N, use multi-pass scan.
-    StructuredBuffer<uint> materialCount = ResourceDescriptorHeap[UintRootConstant0];
-    RWStructuredBuffer<uint> materialOffset = ResourceDescriptorHeap[UintRootConstant1];
-    RWStructuredBuffer<uint> totalPixelCountBuffer = ResourceDescriptorHeap[UintRootConstant2]; // size 1
-
-    uint numMaterials = UintRootConstant3;
-    // Here, we'll use push-constant: UintRootConstant3 = numMaterials
-    uint N = UintRootConstant3;
-    uint i = tid.x;
-
-    // Load counts to LDS
-    if (i < N)
-        s_data[i] = materialCount[i];
-    GroupMemoryBarrierWithGroupSync();
-
-    // Exclusive scan
-    // Hillis-Steele
-    for (uint offset = 1; offset < N; offset <<= 1)
-    {
-        uint val = 0;
-        if (i >= offset && i < N)
-            val = s_data[i - offset];
-        GroupMemoryBarrierWithGroupSync();
-        if (i < N)
-            s_data[i] += val;
-        GroupMemoryBarrierWithGroupSync();
-    }
-
-    // Convert to exclusive: shift right by 1, s_data[0]=0
-    if (i < N)
-    {
-        uint inclusive = s_data[i];
-        uint exclusive = (i == 0) ? 0 : s_data[i - 1];
-        materialOffset[i] = exclusive;
-        if (i == N - 1)
-        {
-            // total = inclusive
-            totalPixelCountBuffer[0] = inclusive;
-        }
-    }
 }
 
 // 5) Build grouped pixel list: use offsets[] as base and a per-material write cursor (atomic++).

@@ -8,7 +8,7 @@
 
 // Manages buffers for per-material-compile-flag work (e.g., visibility buffer per-material)
 class MaterialManager : public IResourceProvider {
-	public:
+public:
 	static std::unique_ptr<MaterialManager> CreateUnique() {
 		return std::unique_ptr<MaterialManager>(new MaterialManager());
 	}
@@ -28,11 +28,15 @@ private:
 	std::unordered_map <MaterialCompileFlags, unsigned int> m_materialSlotMapping;
 	std::atomic<unsigned int> m_nextMaterialSlot;
 	std::vector<unsigned int> m_freeMaterialSlots;
-	std::vector<unsigned int> m_materialUsageCounts;
+	std::vector<unsigned int> m_materialUsageCounts = { 0 };
 	std::mutex m_materialSlotMappingMutex;
 	unsigned int m_materialSlotsUsed = 1;
+
+	static constexpr unsigned int kScanBlockSize = 1024;
 
 	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_materialPixelCountBuffer;
 	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_materialOffsetBuffer;
 	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_materialWriteCursorBuffer;
+	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_blockSumsBuffer;
+	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_scannedBlockSumsBuffer;
 };
