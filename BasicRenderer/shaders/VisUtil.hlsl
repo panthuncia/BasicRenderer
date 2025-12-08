@@ -96,10 +96,10 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
 
-    StructuredBuffer<uint> materialOffset = ResourceDescriptorHeap[UintRootConstant0];
-    RWStructuredBuffer<uint> materialWriteCursor = ResourceDescriptorHeap[UintRootConstant1];
+    StructuredBuffer<uint> materialOffset = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisUtil::MaterialOffsetBuffer)];
+    RWStructuredBuffer<uint> materialWriteCursor = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisUtil::MaterialWriteCursorBuffer)];
 
-    RWStructuredBuffer<PixelRef> pixelList = ResourceDescriptorHeap[UintRootConstant2];
+    RWStructuredBuffer<PixelRef> pixelList = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisUtil::PixelListBuffer)];
 
     uint2 pixel = dtid.xy;
     uint2 vis = visibility[pixel];
@@ -121,22 +121,113 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
     pixelList[dst] = ref;
 }
 
-// 6) Per-material evaluation scaffold (Compute pass per material group).
-// Dispatch with x = ceil(count[m] / kGroupSize), push constants: materialId, baseOffset, count
+// Indirect command record layout: 4 root constants + 3 dispatch args.
+// This must match the command signature (Constant, Constant, Constant, Constant, Dispatch).
+struct MaterialEvaluationIndirectArgs {
+    // Root constants (all uints):
+    uint materialId; // UintRootConstant0
+    uint baseOffset; // UintRootConstant1
+    uint count; // UintRootConstant2
+
+    // Dispatch arguments:
+    uint dispatchX; // D3D12_DISPATCH_ARGUMENTS.x
+    uint dispatchY; // D3D12_DISPATCH_ARGUMENTS.y
+    uint dispatchZ; // D3D12_DISPATCH_ARGUMENTS.z
+};
+
+#define MATERIAL_EXECUTION_GROUP_SIZE 64u
+
+// Build per-material indirect compute args.
+// Inputs:
+//  - counts[m] = number of pixels for material m
+//  - offsets[m] = base offset into PixelListBuffer where this material’s pixels start
+// Root constants:
+//  - UintRootConstant0 = NumMaterials
+//  - UintRootConstant1 = PixelList SRV descriptor index
+// Output:
+//  - one ComputeIndirectArgs per material, written at index=materialId
 [numthreads(64, 1, 1)]
-void EvaluateMaterialGroupCS(uint3 dtid : SV_DispatchThreadID)
+void BuildEvaluateIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
+{
+    uint numMaterials = UintRootConstant0;
+    if (dtid.x >= numMaterials)
+        return;
+
+    StructuredBuffer<uint> counts = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisUtil::MaterialPixelCountBuffer)];
+    StructuredBuffer<uint> offsets = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisUtil::MaterialOffsetBuffer)];
+    RWStructuredBuffer<MaterialEvaluationIndirectArgs> outArgs = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer)];
+
+    uint materialId = dtid.x;
+    uint count = counts[materialId];
+
+    // If material has no pixels, write a zero-dispatch
+    if (count == 0)
+    {
+        MaterialEvaluationIndirectArgs zero = (MaterialEvaluationIndirectArgs) 0;
+        outArgs[materialId] = zero;
+        return;
+    }
+
+    uint baseOffset = offsets[materialId];
+    uint pixelListSrvIndex = UintRootConstant1;
+
+    // We index the pixel list linearly; pick 2D dispatch that minimizes wasted threads.
+
+    // Number of thread groups required overall (linear space):
+    uint groupsNeeded = (count + MATERIAL_EXECUTION_GROUP_SIZE - 1u) / MATERIAL_EXECUTION_GROUP_SIZE;
+
+    // Pick 2D dispatch that fits DX12 limits and keeps near-square shape
+    const uint kMaxDim = 65535u;
+    // Start from sqrt(groupsNeeded) for near-square tiling
+    uint dispatchX = (uint) ceil(sqrt((float) groupsNeeded));
+    if (dispatchX > kMaxDim)
+        dispatchX = kMaxDim;
+    uint dispatchY = (groupsNeeded + dispatchX - 1u) / dispatchX;
+    if (dispatchY > kMaxDim)
+    {
+        dispatchY = kMaxDim; // With screen sizes in practice, this won't clamp
+    }
+    
+    MaterialEvaluationIndirectArgs args;
+    args.materialId = materialId;
+    args.baseOffset = baseOffset;
+    args.count = count;
+
+    args.dispatchX = dispatchX;
+    args.dispatchY = dispatchY;
+    args.dispatchZ = 1;
+
+    outArgs[materialId] = args;
+}
+
+// Root constants (via ExecuteIndirect / command signature):
+//   UintRootConstant0 = materialId
+//   UintRootConstant1 = baseOffset into PixelListBuffer
+//   UintRootConstant2 = count (number of pixels for this material)
+//
+// Thread layout must match what the command builder assumed (64 here).
+[numthreads(64, 1, 1)]
+void EvaluateMaterialGroupBasicCS(
+    uint3 dispatchThreadId : SV_DispatchThreadID
+)
 {
     uint materialId = UintRootConstant0;
     uint baseOffset = UintRootConstant1;
     uint count = UintRootConstant2;
 
-    StructuredBuffer<PixelRef> pixelList = ResourceDescriptorHeap[UintRootConstant3];
-
-    uint idx = dtid.x;
+    uint idx = dispatchThreadId.x;
     if (idx >= count)
         return;
 
+    StructuredBuffer<PixelRef> pixelList = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisUtil::PixelListBuffer)];
+
+    // Look up this thread's pixel
     PixelRef ref = pixelList[baseOffset + idx];
+
+    // Unpack to xy
+    uint2 pixel;
+    pixel.x = ref.pixelXY & 0xFFFFu;
+    pixel.y = ref.pixelXY >> 16;
 
     // TODO
 }

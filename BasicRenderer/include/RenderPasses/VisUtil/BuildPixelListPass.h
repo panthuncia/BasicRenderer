@@ -19,7 +19,7 @@ public:
     void Setup() override {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
             PSOManager::GetInstance().GetComputeRootSignature(),
-            L"shaders/VisUtils.hlsl",
+            L"shaders/VisUtil.hlsl",
             L"BuildPixelListCS",
             {},
             "BuildPixelListPSO");
@@ -42,13 +42,6 @@ public:
         cl.BindLayout(pm.GetComputeRootSignature().GetHandle());
         cl.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
         BindResourceDescriptorIndices(cl, m_pso.GetResourceDescriptorSlots());
-
-        // Push: offsets SRV, cursors UAV, pixelList UAV
-        unsigned int rc[NumMiscUintRootConstants] = {};
-        rc[0] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex("Builtin::VisUtil::MaterialOffsetBuffer");
-        rc[1] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex("Builtin::VisUtil::MaterialWriteCursorBuffer");
-        rc[2] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex("Builtin::VisUtil::PixelListBuffer");
-        cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, rc);
 
         const uint32_t gsX = 8, gsY = 8;
         uint32_t x = (ctx.renderResolution.x + gsX - 1) / gsX;

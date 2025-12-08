@@ -13,6 +13,7 @@
 #include "RenderPasses/VisUtil/MaterialPixelCounterResetPass.h"
 #include "RenderPasses/VisUtil/MaterialBlockScanPass.h"
 #include "RenderPasses/VisUtil/MaterialBlockOffsetsPass.h"
+#include "RenderPasses/VisUtil/BuildMaterialIndirectCommandBufferPass.h"
 
 void CreateGBufferResources(RenderGraph* graph) {
     // GBuffer resources
@@ -294,9 +295,17 @@ void BuildVisibilityPipeline(RenderGraph* graph) {
     graph->BuildComputePass("MaterialBlockOffsetsPass")
 		.Build<MaterialBlockOffsetsPass>();
 
- //   // Build pixel list
- //   graph->BuildComputePass("BuildPixelListPass")
- //       .Build<BuildPixelListPass>();
+    // Build pixel list
+    graph->BuildComputePass("BuildPixelListPass")
+        .Build<BuildPixelListPass>();
+
+	// Build indirect command buffer for material passes
+    graph->BuildComputePass("BuildMaterialIndirectCommandBufferPass")
+		.Build<BuildMaterialIndirectCommandBufferPass>();
+
+	// Evaluate material groups
+    graph->BuildComputePass("EvaluateMaterialGroupsPass")
+		.Build<EvaluateMaterialGroupsPass>();
 
 	// Copy depth to a separate resource for post-processing use
     graph->BuildComputePass("PrimaryDepthCopyPass")

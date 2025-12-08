@@ -5,6 +5,7 @@
 #include "Materials/Material.h"
 #include "Interfaces/IResourceProvider.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
+#include "Render/IndirectCommand.h"
 
 // Manages buffers for per-material-compile-flag work (e.g., visibility buffer per-material)
 class MaterialManager : public IResourceProvider {
@@ -20,6 +21,7 @@ public:
 	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
 	std::vector<ResourceIdentifier> GetSupportedKeys() override;
 
+	const std::vector<unsigned int>& GetActiveMaterialSlots() const { return m_activeMaterialSlots; }
 	unsigned int GetMaterialSlotsUsed() const { return m_materialSlotsUsed; }
 private:
 	MaterialManager();
@@ -29,6 +31,7 @@ private:
 	std::atomic<unsigned int> m_nextMaterialSlot;
 	std::vector<unsigned int> m_freeMaterialSlots;
 	std::vector<unsigned int> m_materialUsageCounts = { 0 };
+	std::vector<unsigned int> m_activeMaterialSlots;
 	std::mutex m_materialSlotMappingMutex;
 	unsigned int m_materialSlotsUsed = 1;
 
@@ -39,4 +42,5 @@ private:
 	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_materialWriteCursorBuffer;
 	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_blockSumsBuffer;
 	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_scannedBlockSumsBuffer;
+	std::shared_ptr<DynamicStructuredBuffer<MaterialEvaluationIndirectCommand>> m_materialEvaluationCommandBuffer;
 };
