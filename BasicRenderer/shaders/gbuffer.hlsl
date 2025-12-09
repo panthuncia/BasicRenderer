@@ -219,7 +219,13 @@ void PrimaryDepthCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     // .x = 7 bits for meshlet triangle index, 25 bits for visible cluster index
     // .y = 32-bit depth
     Texture2D<uint2> visibilityTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
-    float depth = asfloat(visibilityTexture[pixel].y);
+    
+    uint visibilityDataY = visibilityTexture[pixel].y;
+    float depth = 2147483647; // TODO: Can we get true float max in a shader?
+    if (!(visibilityDataY == 0xFFFFFFFFu))
+    {
+        depth = asfloat(visibilityDataY);
+    }
 
     RWTexture2D<float> linearDepthTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::LinearDepthMap)];
     linearDepthTexture[pixel] = depth;
