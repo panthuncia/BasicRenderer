@@ -5,7 +5,9 @@
 
 struct PixelRef
 {
-    uint pixelXY; // 32 bits: x = low 16, y = high 16
+    uint pixelX;
+    uint pixelY;
+    uint pad[2];
 };
 
 uint DecodeClusterIndex(uint packed)
@@ -208,8 +210,8 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
     uint base = materialOffset[matId];
     uint dst = base + groupBase + rankInGroup;
 
-    PixelRef ref;
-    ref.pixelXY = (pixel.x & 0xFFFFu) | ((pixel.y & 0xFFFFu) << 16); // pack xy
+    PixelRef ref = { pixel.x, pixel.y, 0, 0 }; // pack xy
+    //ref.PixelXY = (pixel.x & 0xFFFFu) | ((pixel.y & 0xFFFFu) << 16);
     pixelList[dst] = ref;
 }
 
@@ -324,8 +326,8 @@ void EvaluateMaterialGroupBasicCS(
 
     // Unpack to xy
     uint2 pixel;
-    pixel.x = ref.pixelXY & 0xFFFFu;
-    pixel.y = ref.pixelXY >> 16;
+    pixel.x = ref.pixelX;//Y & 0xFFFFu;
+    pixel.y = ref.pixelY; // >> 16;
 
     EvaluateGBuffer(pixel);
 }
