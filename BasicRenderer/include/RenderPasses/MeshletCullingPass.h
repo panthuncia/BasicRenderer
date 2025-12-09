@@ -309,3 +309,89 @@ private:
 	std::function<uint8_t()> getNumDirectionalLightCascades;
 	std::function<bool()> getShadowsEnabled;
 };
+
+class RewriteOccluderMeshletVisibilityPass : public ComputePass {
+public:
+	RewriteOccluderMeshletVisibilityPass() = default;
+	~RewriteOccluderMeshletVisibilityPass() override = default;
+
+	void Setup() override {
+		m_rewriteVisibilityPSO = PSOManager::GetInstance().MakeComputePipeline(
+			PSOManager::GetInstance().GetComputeRootSignature(),
+			L"shaders/meshletCulling.hlsl",
+			L"RewriteOccluderMeshletVisibilityCS",
+			{},
+			"Rewrite Occluder Meshlet Visibility Compute Pipeline");
+
+		RegisterSRV(Builtin::PerObjectBuffer);
+		RegisterSRV(Builtin::CameraBuffer);
+		RegisterSRV(Builtin::PerMeshBuffer);
+		RegisterSRV(Builtin::PerMeshInstanceBuffer);
+		RegisterSRV(Builtin::MeshResources::MeshletBounds);
+
+		RegisterUAV(Builtin::PrimaryCamera::VisibleClusterTable);
+		RegisterUAV(Builtin::PrimaryCamera::VisibleClusterTableCounter);
+		RegisterUAV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
+
+		m_primaryCameraMeshletBitfieldBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+		m_primaryCameraMeshletCullingIndirectCommandBuffer = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling);
+	}
+
+	void DeclareResourceUsages(ComputePassBuilder* builder) override {
+		builder->WithShaderResource(Builtin::PerObjectBuffer,
+			Builtin::PerMeshBuffer,
+			Builtin::PerMeshInstanceBuffer,
+			Builtin::MeshResources::MeshletBounds,
+			Builtin::CameraBuffer)
+			.WithUnorderedAccess(Builtin::MeshletCullingBitfieldGroup,
+				Builtin::PrimaryCamera::MeshletBitfield,
+				Builtin::PrimaryCamera::VisibleClusterTable,
+				Builtin::PrimaryCamera::VisibleClusterTableCounter,
+				Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer)
+			.WithIndirectArguments(
+				Builtin::IndirectCommandBuffers::MeshletCulling,
+				Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling);
+	}
+
+	PassReturn Execute(RenderContext& context) override {
+		unsigned int numDraws = context.drawStats.numDrawsInScene;
+		if (numDraws == 0) {
+			return {};
+		}
+
+		auto& commandList = context.commandList;
+		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
+		commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
+		commandList.BindPipeline(m_rewriteVisibilityPSO.GetAPIPipelineState().GetHandle());
+		BindResourceDescriptorIndices(commandList, m_rewriteVisibilityPSO.GetResourceDescriptorSlots());
+
+		unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
+		miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &miscRootConstants);
+
+		auto primaryCameraView = context.viewManager->Get(context.currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID);
+		unsigned int cameraIndex = primaryCameraView->gpu.cameraBufferIndex;
+		commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &cameraIndex);
+
+		auto& commandSignature = CommandSignatureManager::GetInstance().GetDispatchCommandSignature();
+		auto indirectBuffer = m_primaryCameraMeshletCullingIndirectCommandBuffer;
+
+		commandList.ExecuteIndirect(
+			commandSignature.GetHandle(),
+			indirectBuffer->GetResource()->GetAPIResource().GetHandle(),
+			0,
+			indirectBuffer->GetResource()->GetAPIResource().GetHandle(),
+			indirectBuffer->GetResource()->GetUAVCounterOffset(),
+			numDraws);
+
+		return {};
+	}
+
+	void Cleanup(RenderContext& context) override {
+	}
+
+private:
+	PipelineState m_rewriteVisibilityPSO;
+	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletBitfieldBuffer = nullptr;
+	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletCullingIndirectCommandBuffer = nullptr;
+};

@@ -63,7 +63,8 @@ void MeshInstance::SetClusterToVisibleClusterIndicesBufferView(std::unique_ptr<B
 	if (m_clusterToVisibleClusterIndicesBufferView == nullptr) {
 		return; // no need to update
 	}
-	m_perMeshInstanceBufferData.clusterToVisibleClusterTableStartIndex = static_cast<uint32_t>(m_clusterToVisibleClusterIndicesBufferView->GetOffset() / sizeof(uint32_t));
+	m_perMeshInstanceBufferData.clusterToVisibleClusterTableStartIndex =
+		static_cast<uint32_t>(m_clusterToVisibleClusterIndicesBufferView->GetOffset() / sizeof(uint32_t));
 	m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
 }
 

@@ -135,6 +135,10 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
     graph->BuildComputePass("BuildOccluderDrawCommandsPass") // Builds draw command list for last frame's occluders
         .Build<ObjectCullingPass>(true, false);
 
+    // Rebuild visible clusters table for occluders
+    graph->BuildComputePass("RewriteOccluderMeshletVisibilityPass")
+		.Build<RewriteOccluderMeshletVisibilityPass>();
+
     // We need to draw occluder shadows early
     auto drawShadows = graph->RequestResource(Builtin::Shadows::ShadowMaps) != nullptr && shadowsEnabled;
     if (drawShadows) {
@@ -155,6 +159,10 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
             meshShadersEnabled,
             true,
             true);
+
+    // Copy depth to a separate resource for downsampling
+    graph->BuildComputePass("PrimaryDepthCopyPass")
+        .Build<PrimaryDepthCopyPass>();
 
     // Single-pass downsample on all occluder-only depth maps
     // TODO: Case where HZB is not conservative when downsampling mips with non-even resolutions (bottom/side pixels get dropped), handled sub-optimally
@@ -234,8 +242,8 @@ inline void RegisterVisUtilResources(RenderGraph* graph)
     // 4) Per-material write cursors (uint[numMaterials]) used in pass 5
 
     // 5) Pixel list buffer (PixelRef[maxPixels])
-	// PixelRef: uint x, uint y, uint pad[2] for testing
-    struct PixelRefPOD { uint32_t x, y, pad[2]; };
+	// PixelRef: uint pixelXY; (packed)
+    struct PixelRefPOD { uint32_t pixelXY; };
     auto pixelListBuffer = rm.CreateIndexedStructuredBuffer(maxPixels, sizeof(PixelRefPOD), true, false);
     pixelListBuffer->SetName(L"VisUtil::PixelListBuffer");
     graph->RegisterResource("Builtin::VisUtil::PixelListBuffer", pixelListBuffer);
@@ -482,10 +490,6 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
 		// GBuffer construction pass
         //graph->BuildComputePass("GBuffer Construction Pass")
         //    .Build<GBufferConstructionPass>();
-
-		// Reset visible cluster table counter
-		graph->BuildRenderPass("VisibleClusterTableCounterResetPass") // TODO: Where to put this?
-			.Build<VisibleClusterTableCounterResetPass>();
 
 		// Deferred shading pass
         graph->BuildComputePass(primaryPassName).Build<DeferredShadingPass>();

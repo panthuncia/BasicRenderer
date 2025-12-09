@@ -139,3 +139,31 @@ void ClearMeshletCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThread
     
     ClearBitAtomic(meshletBitfieldBuffer, meshletBitfieldIndex);
 }
+
+// Rewrite occluder meshlet visibility to ensure that all meshlets that were
+// marked visible last frame are included in this frame's visible cluster table.
+[numthreads(64, 1, 1)]
+void RewriteOccluderMeshletVisibilityCS(const uint3 vDispatchThreadID : SV_DispatchThreadID)
+{
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+    
+    if (perMeshBuffer[perMeshBufferIndex].numMeshlets <= vDispatchThreadID.x)
+    {
+        return;
+    }
+
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+    PerMeshInstanceBuffer meshInstanceBuffer = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
+
+    RWByteAddressBuffer meshletBitfieldBuffer = ResourceDescriptorHeap[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX];
+
+    uint meshletBitfieldIndex = meshInstanceBuffer.meshletBitfieldStartIndex + vDispatchThreadID.x;
+    
+    // If meshlet was culled last frame, skip.
+    if (GetBit(meshletBitfieldBuffer, meshletBitfieldIndex))
+    {
+        return;
+    }
+    
+    WriteMeshletVisibilityUnpackData(meshInstanceBuffer.clusterToVisibleClusterTableStartIndex, vDispatchThreadID.x);
+}

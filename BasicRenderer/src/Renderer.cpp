@@ -1072,6 +1072,10 @@ void Renderer::CreateRenderGraph() {
 	newGraph->BuildComputePass("ClearVisibilityBufferPass")
         .Build<ClearVisibilityBufferPass>();
 
+    // Reset visible cluster table counter
+    newGraph->BuildRenderPass("VisibleClusterTableCounterResetPass") // TODO: Where to put this?
+        .Build<VisibleClusterTableCounterResetPass>();
+
     if (indirect) {
         if (m_occlusionCulling) {
             BuildOcclusionCullingPipeline(newGraph.get());
