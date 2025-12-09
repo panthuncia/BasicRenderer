@@ -282,7 +282,7 @@ void BuildVisibilityPipeline(RenderGraph* graph) {
 
     // Reset material counters
 	graph->BuildComputePass("MaterialPixelCounterResetPass")
-        .Build<MaterialPixelCounterResetPass>();
+        .Build<MaterialUAVResetPass>();
     
 	// Build material histogram
     graph->BuildComputePass("MaterialHistogramPass")
@@ -481,11 +481,11 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
 
     if (deferredRendering) {
 		// GBuffer construction pass
-        graph->BuildComputePass("GBuffer Construction Pass")
-            .Build<GBufferConstructionPass>();
+        //graph->BuildComputePass("GBuffer Construction Pass")
+        //    .Build<GBufferConstructionPass>();
 
 		// Reset visible cluster table counter
-        graph->BuildRenderPass("VisibleClusterTableCounterResetPass")
+		graph->BuildRenderPass("VisibleClusterTableCounterResetPass") // TODO: Where to put this?
 			.Build<VisibleClusterTableCounterResetPass>();
 
 		// Deferred shading pass

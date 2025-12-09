@@ -29,7 +29,7 @@ void CommandSignatureManager::Initialize() {
         computeLayout.GetHandle());
 
     rhi::IndirectArg materialEvaluationArgs[] = {
-        { .kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { MiscUintRootSignatureIndex, 0, 3 } } },
+        { .kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { MiscUintRootSignatureIndex, 0, 4 } } },
         { .kind = rhi::IndirectArgKind::Dispatch }
 	};
     m_materialEvaluationCommandSignature = device.CreateCommandSignature(

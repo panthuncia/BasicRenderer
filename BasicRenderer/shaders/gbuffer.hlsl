@@ -84,20 +84,13 @@ void LoadTriangleVertices(
     v2 = LoadVertex(byteOffset2, setup.vertexBuffer, setup.meshBuffer.vertexFlags);
 }
 
-[numthreads(8, 8, 1)]
-void GBufferConstructionCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+void EvaluateGBuffer(in uint2 pixel)
 {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
 
     uint screenW = perFrameBuffer.screenResX;
     uint screenH = perFrameBuffer.screenResY;
 
-    if (dispatchThreadId.x >= screenW || dispatchThreadId.y >= screenH)
-    {
-        return;
-    }
-    
-    uint2 pixel = dispatchThreadId.xy;
     // .x = 7 bits for meshlet triangle index, 25 bits for visible cluster index
     // .y = 32-bit depth
     Texture2D<uint2> visibilityTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
@@ -127,14 +120,14 @@ void GBufferConstructionCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         return; // Invalid; skip
     }
-    
-    float2 pixelUv = (float2(dispatchThreadId.xy) + 0.5f) / float2(screenW, screenH);
-        // NDC: x in [-1,1], y in [-1,1] with Y up
-        float2 pixelNdc = float2(
+
+    // NDC: x in [-1,1], y in [-1,1] with Y up    
+    float2 pixelUv = (float2(pixel) + 0.5f) / float2(screenW, screenH);
+    float2 pixelNdc = float2(
         pixelUv.x * 2.0f - 1.0f,
         (1.0f - pixelUv.y) * 2.0f - 1.0f
     );
-    
+
     BarycentricDeriv bary = CalcFullBary(clip0, clip1, clip2, pixelNdc, float2(screenW, screenH));
     
     Vertex v0, v1, v2;

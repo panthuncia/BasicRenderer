@@ -14,7 +14,20 @@ public:
     EvaluateMaterialGroupsPass() = default;
 
     void DeclareResourceUsages(ComputePassBuilder* b) override {
-        b->WithShaderResource("Builtin::VisUtil::PixelListBuffer")
+        b->WithShaderResource("Builtin::VisUtil::PixelListBuffer",
+            MESH_RESOURCE_IDFENTIFIERS,
+            Builtin::PrimaryCamera::VisibilityTexture,
+            Builtin::PrimaryCamera::VisibleClusterTable,
+            Builtin::PerMeshInstanceBuffer,
+            Builtin::PerObjectBuffer,
+            Builtin::PerMeshBuffer,
+            Builtin::CameraBuffer,
+            Builtin::PostSkinningVertices,
+            Builtin::NormalMatrixBuffer)
+            .WithUnorderedAccess(Builtin::GBuffer::Normals,
+                Builtin::GBuffer::Albedo,
+                Builtin::GBuffer::Emissive,
+                Builtin::GBuffer::MetallicRoughness)
             .WithIndirectArguments("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }
 
@@ -28,6 +41,22 @@ public:
             "VisUtil_EvaluateMaterialGroupsPSO");
 
         RegisterSRV("Builtin::VisUtil::PixelListBuffer");
+        RegisterSRV(Builtin::MeshResources::MeshletOffsets);
+        RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
+        RegisterSRV(Builtin::MeshResources::MeshletTriangles);
+        RegisterSRV(Builtin::PerMeshInstanceBuffer);
+        RegisterSRV(Builtin::PerObjectBuffer);
+        RegisterSRV(Builtin::PerMeshBuffer);
+        RegisterSRV(Builtin::PrimaryCamera::VisibilityTexture);
+        RegisterSRV(Builtin::PrimaryCamera::VisibleClusterTable);
+        RegisterSRV(Builtin::CameraBuffer);
+        RegisterSRV(Builtin::PostSkinningVertices);
+        RegisterSRV(Builtin::NormalMatrixBuffer);
+
+        RegisterUAV(Builtin::GBuffer::Normals);
+        RegisterUAV(Builtin::GBuffer::Albedo);
+        RegisterUAV(Builtin::GBuffer::Emissive);
+        RegisterUAV(Builtin::GBuffer::MetallicRoughness);
 
         m_materialEvalCmds = m_resourceRegistryView->Request<Resource>("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }

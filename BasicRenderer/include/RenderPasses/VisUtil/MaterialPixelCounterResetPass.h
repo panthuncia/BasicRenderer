@@ -3,12 +3,13 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 
-class MaterialPixelCounterResetPass : public ComputePass {
+class MaterialUAVResetPass : public ComputePass {
 public:
-    MaterialPixelCounterResetPass() {}
+    MaterialUAVResetPass() {}
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override {
-        builder->WithUnorderedAccess("Builtin::VisUtil::MaterialPixelCountBuffer");
+        builder->WithUnorderedAccess("Builtin::VisUtil::MaterialPixelCountBuffer",
+            "Builtin::VisUtil::MaterialWriteCursorBuffer");
     }
 
     void Setup() override {
@@ -20,6 +21,7 @@ public:
             "ClearMaterialCountersPSO");
 
         RegisterUAV("Builtin::VisUtil::MaterialPixelCountBuffer");
+		RegisterUAV("Builtin::VisUtil::MaterialWriteCursorBuffer");
     }
 
     PassReturn Execute(RenderContext& context) override {

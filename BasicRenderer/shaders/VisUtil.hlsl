@@ -38,17 +38,30 @@ uint GetMaterialIdFromCluster(uint clusterIndex,
 void ClearMaterialCountersCS(uint3 tid : SV_DispatchThreadID)
 {
     RWStructuredBuffer<uint> materialPixelCount = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisUtil::MaterialPixelCountBuffer)];
-
+    RWStructuredBuffer<uint> materialWriteCursor = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisUtil::MaterialWriteCursorBuffer)];
+    
     uint numMaterials = UintRootConstant0;
     uint i = tid.x;
     if (i < numMaterials)
     {
         materialPixelCount[i] = 0;
+        materialWriteCursor[i] = 0;
     }
 }
 
 // 3) Histogram: one thread per pixel, atomic into count[m].
-// TODO: optimize with shared-memory tiling?
+uint CountBits128(uint4 m)
+{
+    return countbits(m.x) + countbits(m.y) + countbits(m.z) + countbits(m.w);
+}
+
+bool IsWaveGroupLeader(uint4 mask)
+{
+    // Find highest set bit across the 128-bit mask (matches MS docs pattern)
+    int4 highLanes = (int4) (firstbithigh(mask) | uint4(0, 0x20, 0x40, 0x60));
+    uint highLane = (uint) max(max(max(highLanes.x, highLanes.y), highLanes.z), highLanes.w);
+    return WaveGetLaneIndex() == highLane;
+}
 [numthreads(8, 8, 1)]
 void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
 {
@@ -78,7 +91,67 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
     // Derive material ID
     uint matId = GetMaterialIdFromCluster(clusterIndex, visibleClusterTable, perMeshInstance, perMeshBuffer);
 
-    InterlockedAdd(materialPixelCount[matId], 1);
+    // Group threads in the wave by matId
+    uint4 mask = WaveMatch(matId);
+
+    // Fast full-uniform case
+    if (WaveActiveAllEqual(matId))
+    {
+        if (WaveGetLaneIndex() == 0)
+        {
+            uint lanes = WaveActiveCountBits(true);
+            InterlockedAdd(materialPixelCount[matId], lanes);
+        }
+    }
+    else
+    {
+        // General case: one atomic per unique matId in the wave
+        if (IsWaveGroupLeader(mask))
+        {
+            uint groupSize = CountBits128(mask);
+            InterlockedAdd(materialPixelCount[matId], groupSize);
+        }
+    }
+}
+
+// Get leader lane index for a WaveMatch mask
+uint GetWaveGroupLeaderLane(uint4 mask)
+{
+    // Find highest set bit across 128-bit mask (matches DX docs pattern)
+    int4 highLanes = (int4) (firstbithigh(mask) | uint4(0, 0x20, 0x40, 0x60));
+    uint highLane = (uint) max(max(max(highLanes.x, highLanes.y), highLanes.z), highLanes.w);
+    return highLane; // lane index 0..(waveSize-1)
+}
+
+// For a given mask + lane index, count how many lanes in the group come before us
+uint GetLaneRankInGroup(uint4 mask, uint laneIndex)
+{
+    uint word = laneIndex >> 5; // / 32
+    uint bit = laneIndex & 31; // % 32
+
+    uint4 prefixMask = uint4(0, 0, 0, 0);
+
+    // Lanes in earlier 32-bit words: keep whole mask
+    [unroll]
+    for (uint i = 0; i < 4; ++i)
+    {
+        if (i < word)
+        {
+            prefixMask[i] = mask[i];
+        }
+        else if (i == word)
+        {
+            // Only keep bits below our bit in this word
+            uint lowerBitsMask = (bit == 0) ? 0u : ((1u << bit) - 1u);
+            prefixMask[i] = mask[i] & lowerBitsMask;
+        }
+        else
+        {
+            prefixMask[i] = 0;
+        }
+    }
+
+    return CountBits128(prefixMask);
 }
 
 // 5) Build grouped pixel list: use offsets[] as base and a per-material write cursor (atomic++).
@@ -101,6 +174,7 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
 
     RWStructuredBuffer<PixelRef> pixelList = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisUtil::PixelListBuffer)];
 
+    
     uint2 pixel = dtid.xy;
     uint2 vis = visibility[pixel];
     uint packed = vis.x;
@@ -111,11 +185,29 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
     uint primId = DecodePrimID(packed);
     uint matId = GetMaterialIdFromCluster(clusterIndex, visibleClusterTable, perMeshInstance, perMeshBuffer);
 
-    uint base = materialOffset[matId];
-    uint localIndex;
-    InterlockedAdd(materialWriteCursor[matId], 1, localIndex);
+    // Group threads in this wave by matId
+    uint4 groupMask = WaveMatch(matId);
+    uint groupSize = CountBits128(groupMask);
+    uint lane = WaveGetLaneIndex();
+    uint leaderLane = GetWaveGroupLeaderLane(groupMask);
 
-    uint dst = base + localIndex;
+    // One atomic per (wave, matId) group
+    uint groupBase = 0;
+    if (lane == leaderLane)
+    {
+        InterlockedAdd(materialWriteCursor[matId], groupSize, groupBase);
+    }
+
+    // Broadcast base index from leader to all lanes in the group
+    groupBase = WaveReadLaneAt(groupBase, leaderLane);
+
+    // Compute our rank within this matId group
+    uint rankInGroup = GetLaneRankInGroup(groupMask, lane);
+
+    // Final index into pixel list
+    uint base = materialOffset[matId];
+    uint dst = base + groupBase + rankInGroup;
+
     PixelRef ref;
     ref.pixelXY = (pixel.x & 0xFFFFu) | ((pixel.y & 0xFFFFu) << 16); // pack xy
     pixelList[dst] = ref;
@@ -128,6 +220,7 @@ struct MaterialEvaluationIndirectArgs {
     uint materialId; // UintRootConstant0
     uint baseOffset; // UintRootConstant1
     uint count; // UintRootConstant2
+    uint dispatchXDimension; // UintRootConstant3
 
     // Dispatch arguments:
     uint dispatchX; // D3D12_DISPATCH_ARGUMENTS.x
@@ -192,6 +285,7 @@ void BuildEvaluateIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
     args.materialId = materialId;
     args.baseOffset = baseOffset;
     args.count = count;
+    args.dispatchXDimension = dispatchX * MATERIAL_EXECUTION_GROUP_SIZE; // total threads in X
 
     args.dispatchX = dispatchX;
     args.dispatchY = dispatchY;
@@ -199,6 +293,8 @@ void BuildEvaluateIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
 
     outArgs[materialId] = args;
 }
+
+#include "gbuffer.hlsl"
 
 // Root constants (via ExecuteIndirect / command signature):
 //   UintRootConstant0 = materialId
@@ -211,11 +307,13 @@ void EvaluateMaterialGroupBasicCS(
     uint3 dispatchThreadId : SV_DispatchThreadID
 )
 {
-    uint materialId = UintRootConstant0;
+    uint materialId = UintRootConstant0; // Not needed?
     uint baseOffset = UintRootConstant1;
     uint count = UintRootConstant2;
+    uint dispatchXDimension = UintRootConstant3;
 
-    uint idx = dispatchThreadId.x;
+    // This is a 2D dispatch; linearize to get pixel index
+    uint idx = dispatchThreadId.y * dispatchXDimension + dispatchThreadId.x;
     if (idx >= count)
         return;
 
@@ -229,5 +327,5 @@ void EvaluateMaterialGroupBasicCS(
     pixel.x = ref.pixelXY & 0xFFFFu;
     pixel.y = ref.pixelXY >> 16;
 
-    // TODO
+    EvaluateGBuffer(pixel);
 }
