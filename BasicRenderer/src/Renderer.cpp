@@ -52,6 +52,7 @@
 #include "RenderPasses/PostProcessing/SpecularIBLPass.h"
 #include "RenderPasses/PostProcessing/luminanceHistogram.h"
 #include "RenderPasses/PostProcessing/luminanceHistogramAverage.h"
+#include "RenderPasses/ClearVisibilityBufferPass.h"
 #include "Resources/TextureDescription.h"
 #include "Menu/Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -1067,6 +1068,9 @@ void Renderer::CreateRenderGraph() {
     }
 
     CreateGBufferResources(newGraph.get());
+
+	newGraph->BuildComputePass("ClearVisibilityBufferPass")
+        .Build<ClearVisibilityBufferPass>();
 
     if (indirect) {
         if (m_occlusionCulling) {

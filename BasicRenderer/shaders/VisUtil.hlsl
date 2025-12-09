@@ -92,27 +92,16 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
 
     // Derive material ID
     uint matId = GetMaterialIdFromCluster(clusterIndex, visibleClusterTable, perMeshInstance, perMeshBuffer);
-
+    
     // Group threads in the wave by matId
     uint4 mask = WaveMatch(matId);
 
-    // Fast full-uniform case
-    if (WaveActiveAllEqual(matId))
+    // TODO: Can we optimize other cases?
+    // General case: one atomic per unique matId in the wave
+    if (IsWaveGroupLeader(mask))
     {
-        if (WaveGetLaneIndex() == 0)
-        {
-            uint lanes = WaveActiveCountBits(true);
-            InterlockedAdd(materialPixelCount[matId], lanes);
-        }
-    }
-    else
-    {
-        // General case: one atomic per unique matId in the wave
-        if (IsWaveGroupLeader(mask))
-        {
-            uint groupSize = CountBits128(mask);
-            InterlockedAdd(materialPixelCount[matId], groupSize);
-        }
+        uint groupSize = CountBits128(mask);
+        InterlockedAdd(materialPixelCount[matId], groupSize);
     }
 }
 
@@ -164,7 +153,9 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
     uint screenW = perFrame.screenResX;
     uint screenH = perFrame.screenResY;
     if (dtid.x >= screenW || dtid.y >= screenH)
+    {
         return;
+    }
 
     Texture2D<uint2> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
     StructuredBuffer<VisibleClusterInfo> visibleClusterTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibleClusterTable)];
@@ -180,8 +171,10 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
     uint2 pixel = dtid.xy;
     uint2 vis = visibility[pixel];
     uint packed = vis.x;
-    if (packed == 0)
+    if (packed == 0xFFFFFFFF)
+    {
         return;
+    }
 
     uint clusterIndex = DecodeClusterIndex(packed);
     uint primId = DecodePrimID(packed);

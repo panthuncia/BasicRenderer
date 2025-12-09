@@ -40,9 +40,9 @@ void CreateGBufferResources(RenderGraph* graph) {
     visibilityDesc.format = rhi::Format::R32G32_UInt;
     visibilityDesc.hasRTV = true;
     visibilityDesc.hasSRV = true;
+	visibilityDesc.hasUAV = true; // For clearing
+	visibilityDesc.hasNonShaderVisibleUAV = true; // For clearing with ClearUnorderedAccessViewUint
     visibilityDesc.imageDimensions.emplace_back(resolution.x, resolution.y, 0, 0);
-	visibilityDesc.clearColor[0] = 0;
-	visibilityDesc.clearColor[1] = static_cast<float>(0xFFFFFFFF);
     auto visibilityBuffer = PixelBuffer::Create(visibilityDesc);
 	visibilityBuffer->SetName(L"Visibility Buffer");
     graph->RegisterResource(Builtin::PrimaryCamera::VisibilityTexture, visibilityBuffer);
@@ -234,9 +234,8 @@ inline void RegisterVisUtilResources(RenderGraph* graph)
     // 4) Per-material write cursors (uint[numMaterials]) used in pass 5
 
     // 5) Pixel list buffer (PixelRef[maxPixels])
-    // PixelRef layout: uint2 pixelXY; uint dcElemIndex; uint primId; -> 4 uints (16 bytes) or 3 uints + 2 uint -> 20 bytes.
-    // We'll pack as 4 uints (16 bytes): pixelX, pixelY, dcElemIndex, primId to keep alignment simple.
-    struct PixelRefPOD { uint32_t a, b, c, d; };
+	// PixelRef: uint x, uint y, uint pad[2] for testing
+    struct PixelRefPOD { uint32_t x, y, pad[2]; };
     auto pixelListBuffer = rm.CreateIndexedStructuredBuffer(maxPixels, sizeof(PixelRefPOD), true, false);
     pixelListBuffer->SetName(L"VisUtil::PixelListBuffer");
     graph->RegisterResource("Builtin::VisUtil::PixelListBuffer", pixelListBuffer);

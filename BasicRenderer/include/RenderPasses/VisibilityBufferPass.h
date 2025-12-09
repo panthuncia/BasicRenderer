@@ -153,18 +153,7 @@ private:
             rhi::ColorAttachment ca{};
             ca.rtv = m_pVisibilityBuffer->GetRTVInfo(0).slot;
             ca.storeOp = rhi::StoreOp::Store;
-            if (m_clearGbuffer) {
-                ca.loadOp = rhi::LoadOp::Clear;
-                ca.clear.type = rhi::ClearValueType::Color;
-                ca.clear.format = rhi::Format::R32G32_UInt;
-                ca.clear.rgba[0] = m_pVisibilityBuffer->GetClearColor().rgba[0];
-                ca.clear.rgba[1] = m_pVisibilityBuffer->GetClearColor().rgba[1];
-                ca.clear.rgba[2] = m_pVisibilityBuffer->GetClearColor().rgba[2];
-                ca.clear.rgba[3] = m_pVisibilityBuffer->GetClearColor().rgba[3];
-            }
-            else {
-                ca.loadOp = rhi::LoadOp::Load;
-            }
+			ca.loadOp = rhi::LoadOp::Load; // Clearing is handled in a separate pass
             colors.push_back(ca);
         }
 
