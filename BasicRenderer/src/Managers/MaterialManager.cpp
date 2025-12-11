@@ -29,12 +29,13 @@ MaterialManager::MaterialManager() {
 	m_resources[Builtin::PerMaterialDataBuffer] = m_perMaterialDataBuffer;
 }
 
-void MaterialManager::IncrementMaterialUsageCount(const Material& material) {
+void MaterialManager::IncrementMaterialUsageCount(Material& material) {
 	//std::lock_guard<std::mutex> lock(m_materialSlotMappingMutex);
 	auto& flags = material.Technique().compileFlags;
 	unsigned int flagsSlot = GetCompileFlagsSlot(flags);
 	m_compileFlagsUsageCounts[flagsSlot]++;
 	uint32_t materialID = material.GetMaterialID();
+	material.SetCompileFlagsID(flagsSlot);
 	unsigned int materialSlot = GetMaterialSlot(materialID, material.GetData());
 	m_materialUsageCounts[materialSlot]++;
 }
@@ -48,6 +49,7 @@ void MaterialManager::DecrementMaterialUsageCount(const Material& material) {
 		m_freeCompileFlagsSlots.push_back(flagsSlot);
 		m_compileFlagsSlotMapping.erase(flags);
 		m_activeCompileFlagsSlots.erase(std::remove(m_activeCompileFlagsSlots.begin(), m_activeCompileFlagsSlots.end(), flagsSlot), m_activeCompileFlagsSlots.end());
+		m_activeCompileFlags.erase(std::remove(m_activeCompileFlags.begin(), m_activeCompileFlags.end(), flags), m_activeCompileFlags.end());
 	}
 
 	m_materialUsageCounts[GetMaterialSlot(material.GetMaterialID())]--;
@@ -116,6 +118,9 @@ unsigned int MaterialManager::GetCompileFlagsSlot(MaterialCompileFlags flags) {
 	m_compileFlagsSlotMapping[flags] = slot;
 	if (std::find(m_activeCompileFlagsSlots.begin(), m_activeCompileFlagsSlots.end(), slot) == m_activeCompileFlagsSlots.end()) {
 		m_activeCompileFlagsSlots.push_back(slot);
+	}
+	if (std::find(m_activeCompileFlags.begin(), m_activeCompileFlags.end(), flags) == m_activeCompileFlags.end()) {
+		m_activeCompileFlags.push_back(flags);
 	}
 	return slot;
 }

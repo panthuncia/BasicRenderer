@@ -297,7 +297,7 @@ void BuildEvaluateIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
 //
 // Thread layout must match what the command builder assumed (64 here).
 [numthreads(64, 1, 1)]
-void EvaluateMaterialGroupBasicCS(
+void EvaluateMaterialGroupCS(
     uint3 dispatchThreadId : SV_DispatchThreadID
 )
 {

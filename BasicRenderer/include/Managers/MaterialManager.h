@@ -16,7 +16,7 @@ public:
 	unsigned int GetCompileFlagsSlot(MaterialCompileFlags flags);
 	unsigned int GetMaterialSlot(unsigned int materialID, std::optional<PerMaterialCB> data = std::nullopt);
 
-	void IncrementMaterialUsageCount(const Material& material);
+	void IncrementMaterialUsageCount(Material& material);
 	void DecrementMaterialUsageCount(const Material& material);
 
 	void UpdateMaterialDataBuffer(const Material& material) {
@@ -27,6 +27,7 @@ public:
 	std::vector<ResourceIdentifier> GetSupportedKeys() override;
 
 	const std::vector<unsigned int>& GetActiveCompileFlagsSlots() const { return m_activeCompileFlagsSlots; }
+	const std::vector<MaterialCompileFlags>& GetActiveCompileFlags() const { return m_activeCompileFlags; }
 	unsigned int GetCompileFlagsSlotsUsed() const { return m_compileFlagsSlotsUsed; }
 private:
 	MaterialManager();
@@ -37,6 +38,7 @@ private:
 	std::vector<unsigned int> m_freeCompileFlagsSlots;
 	std::vector<unsigned int> m_compileFlagsUsageCounts = { 0 };
 	std::vector<unsigned int> m_activeCompileFlagsSlots;
+	std::vector<MaterialCompileFlags> m_activeCompileFlags;
 	//std::mutex m_compileFlagsSlotMappingMutex;
 	unsigned int m_compileFlagsSlotsUsed = 1;
 

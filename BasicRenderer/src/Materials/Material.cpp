@@ -138,6 +138,10 @@ void Material::SetHeightmapScale(float scale) {
     m_materialData.heightMapScale = scale;
 }
 
+void Material::SetCompileFlagsID(uint32_t id) {
+    m_materialData.compileFlagsID = id;
+}
+
 std::shared_ptr<Material> Material::GetDefaultMaterial() {
     if (defaultMaterial) {
         return defaultMaterial;

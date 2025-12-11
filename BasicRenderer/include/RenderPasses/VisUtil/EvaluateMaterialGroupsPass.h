@@ -33,14 +33,6 @@ public:
     }
 
     void Setup() override {
-        // TODO: Variants
-        m_pso = PSOManager::GetInstance().MakeComputePipeline(
-            PSOManager::GetInstance().GetComputeRootSignature(),
-            L"shaders/VisUtil.hlsl",
-            L"EvaluateMaterialGroupBasicCS",
-            {},
-            "VisUtil_EvaluateMaterialGroupsPSO");
-
         RegisterSRV("Builtin::VisUtil::PixelListBuffer");
         RegisterSRV(Builtin::MeshResources::MeshletOffsets);
         RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
@@ -69,17 +61,35 @@ public:
 
         cl.SetDescriptorHeaps(ctx.textureDescriptorHeap.GetHandle(), ctx.samplerDescriptorHeap.GetHandle());
         cl.BindLayout(psoMgr.GetComputeRootSignature().GetHandle());
-        cl.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-        BindResourceDescriptorIndices(cl, m_pso.GetResourceDescriptorSlots());
 
         // Execute one indirect compute per active material slot.
-        const auto& active = ctx.materialManager->GetActiveCompileFlagsSlots();
+        const auto& active = ctx.materialManager->GetActiveCompileFlags();
         const auto& sig = CommandSignatureManager::GetInstance().GetMaterialEvaluationCommandSignature();
 
         const uint64_t stride = sizeof(MaterialEvaluationIndirectCommand);
         auto argBuf = m_materialEvalCmds->GetAPIResource();
 
-        for (unsigned int slot : active) {
+        for (MaterialCompileFlags flags : active) {
+			unsigned int slot = ctx.materialManager->GetCompileFlagsSlot(flags);
+			// Bind pipeline for this material compile flag set
+            auto psoIter = m_psoCache.find(flags);
+            if (psoIter == m_psoCache.end()) {
+                auto [newIter, _] = m_psoCache.emplace(
+                    flags,
+                    psoMgr.MakeComputePipeline(
+                        psoMgr.GetComputeRootSignature(),
+                        L"shaders/VisUtil.hlsl",
+                        L"EvaluateMaterialGroupCS",
+                        psoMgr.GetShaderDefines(0, flags),
+                        "VisUtil_EvaluateMaterialGroupPSO"));
+                psoIter = newIter;
+            }
+
+            PipelineState& pso = psoIter->second;
+
+            cl.BindPipeline(pso.GetAPIPipelineState().GetHandle());
+            BindResourceDescriptorIndices(cl, pso.GetResourceDescriptorSlots());
+
             const uint64_t argOffset = static_cast<uint64_t>(slot) * stride;
             cl.ExecuteIndirect(
                 sig.GetHandle(),
@@ -95,6 +105,6 @@ public:
     void Cleanup(RenderContext&) override {}
 
 private:
-    PipelineState m_pso;
+    std::unordered_map<MaterialCompileFlags, PipelineState> m_psoCache;
     std::shared_ptr<Resource> m_materialEvalCmds;
 };

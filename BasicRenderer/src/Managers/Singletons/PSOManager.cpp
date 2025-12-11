@@ -904,6 +904,12 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags, MaterialCompi
         macro.Name = L"PSO_BLEND";
         defines.insert(defines.begin(), macro);
     }
+    if (materialFlags & MaterialCompileFlags::MaterialCompileBaseColorTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_BASE_COLOR_TEXTURE";
+		defines.insert(defines.begin(), macro);
+	}
     if (materialFlags & MaterialCompileFlags::MaterialCompileParallax) {
         DxcDefine macro;
         macro.Value = L"1";
