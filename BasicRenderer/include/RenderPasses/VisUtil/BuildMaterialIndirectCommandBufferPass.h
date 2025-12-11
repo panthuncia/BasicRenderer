@@ -46,7 +46,7 @@ public:
         // Push constants:
         // UintRootConstant0 = NumMaterials
         unsigned int rc[NumMiscUintRootConstants] = {};
-        rc[0] = ctx.materialManager->GetMaterialSlotsUsed();
+        rc[0] = ctx.materialManager->GetCompileFlagsSlotsUsed();
         cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, rc);
 
         // Dispatch: one thread per material, rounded up by 64

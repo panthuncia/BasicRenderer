@@ -103,7 +103,8 @@ void TestAlpha(in float2 texcoords)
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     uint meshBufferIndex = perMeshBufferIndex;
     PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndex];
-    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
+    StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
+    MaterialInfo materialInfo = materialDataBuffer[meshBuffer.materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
         
     float4 baseColor = materialInfo.baseColorFactor;
@@ -138,7 +139,7 @@ void SampleMaterialCore(
     in float2 uv,
     in float3 normalWSBase,
     in float3 posWS,
-    in ConstantBuffer<MaterialInfo> materialInfo,
+    in MaterialInfo materialInfo,
     in uint materialFlags,
     in float3x3 TBN, // Precomputed TBN (only valid if flags need it)
     out MaterialInputs ret)
@@ -272,7 +273,7 @@ void SampleMaterialCorePrecompiled(
     in float2 uv,
     in float3 normalWSBase,
     in float3 posWS,
-    in ConstantBuffer<MaterialInfo> materialInfo,
+    in MaterialInfo materialInfo,
     in uint materialFlags,
     in float3x3 TBN, // Precomputed TBN (only valid if flags need it)
     out MaterialInputs ret)
@@ -338,7 +339,6 @@ void SampleMaterialCorePrecompiled(
 
         metallic = DynamicSwizzle(metallicSample, materialInfo.metallicChannel) * materialInfo.metallicFactor;
         roughness = DynamicSwizzle(roughnessSample, materialInfo.roughnessChannel) * materialInfo.roughnessFactor;
-    }
 #else
         metallic = materialInfo.metallicFactor;
         roughness = materialInfo.roughnessFactor;
@@ -400,7 +400,8 @@ void SampleMaterial(
     in uint materialDataIndex,
     out MaterialInputs ret)
 {
-    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[materialDataIndex];
+    StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
+    MaterialInfo materialInfo = materialDataBuffer[materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
 
     // Build TBN if needed
@@ -428,7 +429,8 @@ void SampleMaterialPrecompiled(
     in uint materialDataIndex,
     out MaterialInputs ret)
 {
-    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[materialDataIndex];
+    StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
+    MaterialInfo materialInfo = materialDataBuffer[materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
 
     // Build TBN if needed
@@ -476,7 +478,8 @@ void SampleMaterialCS(
     in float2 dUVdy,
     out MaterialInputs ret)
 {
-    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[materialDataIndex];
+    StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
+    MaterialInfo materialInfo = materialDataBuffer[materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
 
     float3x3 TBN = (float3x3) 0.0f;
@@ -567,7 +570,7 @@ void GetFragmentInfoScreenSpace(in uint2 pixelCoordinates, in float3 viewWS, in 
     ret.dielectricF0 *= (1.0 - ret.metallic);
 }
 
-void FillFragmentInfoDirect(inout FragmentInfo ret, in MaterialInputs materialInfo)
+void FillFragmentInfoDirect(inout FragmentInfo ret, in MaterialInputs materialInfo, in float3 viewWS, in float2 pixelCoords, in bool transparent, in bool isFrontFace)
 {
     ret.metallic = materialInfo.metallic;
     float perceptualRoughness = materialInfo.roughness;
@@ -607,9 +610,8 @@ void FillFragmentInfoDirect(inout FragmentInfo ret, in MaterialInputs materialIn
         ret.alpha = 1.0; // Opaque objects
         if (enableGTAO)
         {
-            float2 pixelCoordinates = input.position.xy;
             Texture2D<uint> aoTexture = ResourceDescriptorHeap[OptionalResourceDescriptorIndex(Builtin::GTAO::OutputAOTerm)];
-            ret.diffuseAmbientOcclusion = min(materialInfo.ambientOcclusion, float(aoTexture[pixelCoordinates].x) / 255.0);
+            ret.diffuseAmbientOcclusion = min(materialInfo.ambientOcclusion, float(aoTexture[pixelCoords].x) / 255.0);
         }
         else
         {
@@ -635,7 +637,7 @@ void GetFragmentInfoDirectPrecompiled(in PSInput input, in float3 viewWS, bool e
     MaterialInputs materialInfo;
     GetMaterialInfoForFragmentPrecompiled(input, materialInfo);
     
-    FillFragmentInfoDirect(ret, materialInfo);
+    FillFragmentInfoDirect(ret, materialInfo, viewWS, input.position.xy, transparent, isFrontFace);
 }
 
 void GetFragmentInfoDirect(in PSInput input, in float3 viewWS, bool enableGTAO, bool transparent, bool isFrontFace, out FragmentInfo ret)
@@ -647,7 +649,7 @@ void GetFragmentInfoDirect(in PSInput input, in float3 viewWS, bool enableGTAO, 
     MaterialInputs materialInfo;
     GetMaterialInfoForFragment(input, materialInfo);
 
-    FillFragmentInfoDirect(ret, materialInfo);
+    FillFragmentInfoDirect(ret, materialInfo, viewWS, input.position.xy, transparent, isFrontFace);
 }
 
 float unprojectDepth(float depth, float near, float far)

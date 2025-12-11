@@ -67,6 +67,7 @@ struct Builtin {
     inline static constexpr std::string_view DataBuffer = "Builtin::PPLL::DataBuffer";
     inline static constexpr std::string_view HeadPointerTexture = "Builtin::PPLL::HeadPointerTexture";
   };
+  inline static constexpr std::string_view PerMaterialDataBuffer = "Builtin::PerMaterialDataBuffer";
   inline static constexpr std::string_view PerMeshBuffer = "Builtin::PerMeshBuffer";
   inline static constexpr std::string_view PerMeshInstanceBuffer = "Builtin::PerMeshInstanceBuffer";
   inline static constexpr std::string_view PerObjectBuffer = "Builtin::PerObjectBuffer";

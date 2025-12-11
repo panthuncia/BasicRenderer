@@ -10,7 +10,8 @@ public:
                               Builtin::PrimaryCamera::VisibilityTexture,
                               Builtin::PrimaryCamera::VisibleClusterTable,
                               Builtin::PerMeshInstanceBuffer,
-                              Builtin::PerMeshBuffer)
+                              Builtin::PerMeshBuffer,
+                              Builtin::PerMaterialDataBuffer)
          .WithUnorderedAccess("Builtin::VisUtil::MaterialPixelCountBuffer");
     }
 
@@ -26,6 +27,7 @@ public:
         RegisterSRV(Builtin::PrimaryCamera::VisibleClusterTable);
         RegisterSRV(Builtin::PerMeshInstanceBuffer);
         RegisterSRV(Builtin::PerMeshBuffer);
+        RegisterSRV(Builtin::PerMaterialDataBuffer);
         RegisterUAV("Builtin::VisUtil::MaterialPixelCountBuffer");
     }
 

@@ -23,7 +23,8 @@ public:
             Builtin::PerMeshBuffer,
             Builtin::CameraBuffer,
             Builtin::PostSkinningVertices,
-            Builtin::NormalMatrixBuffer)
+            Builtin::NormalMatrixBuffer,
+            Builtin::PerMaterialDataBuffer)
             .WithUnorderedAccess(Builtin::GBuffer::Normals,
                 Builtin::GBuffer::Albedo,
                 Builtin::GBuffer::Emissive,
@@ -47,6 +48,7 @@ public:
         RegisterSRV(Builtin::PerMeshInstanceBuffer);
         RegisterSRV(Builtin::PerObjectBuffer);
         RegisterSRV(Builtin::PerMeshBuffer);
+        RegisterSRV(Builtin::PerMaterialDataBuffer);
         RegisterSRV(Builtin::PrimaryCamera::VisibilityTexture);
         RegisterSRV(Builtin::PrimaryCamera::VisibleClusterTable);
         RegisterSRV(Builtin::CameraBuffer);
@@ -71,7 +73,7 @@ public:
         BindResourceDescriptorIndices(cl, m_pso.GetResourceDescriptorSlots());
 
         // Execute one indirect compute per active material slot.
-        const auto& active = ctx.materialManager->GetActiveMaterialSlots();
+        const auto& active = ctx.materialManager->GetActiveCompileFlagsSlots();
         const auto& sig = CommandSignatureManager::GetInstance().GetMaterialEvaluationCommandSignature();
 
         const uint64_t stride = sizeof(MaterialEvaluationIndirectCommand);

@@ -142,7 +142,6 @@ public:
     }
     ~Material();
 
-    UINT GetMaterialBufferIndex();
     void SetHeightmap(std::shared_ptr<Texture> heightmap);
     void SetTextureScale(float scale);
     void SetHeightmapScale(float scale);
@@ -153,7 +152,11 @@ public:
     static void DestroyDefaultMaterial() {
         defaultMaterial.reset();
     }
+    uint32_t GetMaterialID() const { return m_materialID; }
+	PerMaterialCB const& GetData() const { return m_materialData; }
 private:
+	inline static std::atomic<uint32_t> globalMaterialCount;
+	const uint32_t m_materialID = globalMaterialCount.fetch_add(1, std::memory_order_relaxed);
 
     std::string m_name;
     std::shared_ptr<Texture> m_baseColorTexture;
@@ -232,6 +235,5 @@ private:
             alphaCutoff));
     }
 
-    std::shared_ptr<Buffer> m_perMaterialHandle;
     inline static std::shared_ptr<Material> defaultMaterial;
 };

@@ -11,6 +11,7 @@ public:
                               Builtin::PrimaryCamera::VisibleClusterTable,
                               Builtin::PerMeshInstanceBuffer,
                               Builtin::PerMeshBuffer,
+                              Builtin::PerMaterialDataBuffer,
                               "Builtin::VisUtil::MaterialOffsetBuffer")
          .WithUnorderedAccess("Builtin::VisUtil::MaterialWriteCursorBuffer",
                               "Builtin::VisUtil::PixelListBuffer");
@@ -28,6 +29,7 @@ public:
         RegisterSRV(Builtin::PrimaryCamera::VisibleClusterTable);
         RegisterSRV(Builtin::PerMeshInstanceBuffer);
         RegisterSRV(Builtin::PerMeshBuffer);
+        RegisterSRV(Builtin::PerMaterialDataBuffer);
         RegisterSRV("Builtin::VisUtil::MaterialOffsetBuffer");
 
         RegisterUAV("Builtin::VisUtil::MaterialWriteCursorBuffer");

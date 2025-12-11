@@ -20,7 +20,6 @@ Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertex
 	if (skinningVertices.has_value()) {
 		m_skinningVertices = std::move(skinningVertices.value());
 	}
-	m_perMeshBufferData.materialDataIndex = material->GetMaterialBufferIndex();
 	m_perMeshBufferData.vertexFlags = flags;
 	m_perMeshBufferData.vertexByteSize = vertexSize;
 	m_perMeshBufferData.numVertices = static_cast<uint32_t>(m_vertices->size() / vertexSize);
@@ -294,6 +293,13 @@ void Mesh::SetBaseSkin(std::shared_ptr<Skeleton> skeleton) {
 
 void Mesh::UpdateVertexCount(bool meshletReorderedVertices) {
 	m_perMeshBufferData.numVertices = static_cast<uint32_t>(meshletReorderedVertices ? m_meshletReorderedVertices.size() / m_perMeshBufferData.vertexByteSize : m_vertices->size() / m_perMeshBufferData.vertexByteSize);
+	if (m_pCurrentMeshManager != nullptr) {
+		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
+	}
+}
+
+void Mesh::SetMaterialDataIndex(unsigned int index) {
+	m_perMeshBufferData.materialDataIndex = index;
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}

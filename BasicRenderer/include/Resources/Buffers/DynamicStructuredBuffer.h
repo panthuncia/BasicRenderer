@@ -57,6 +57,7 @@ public:
         if (newCapacity > m_capacity) {
             CreateBuffer(newCapacity, m_capacity);
             m_capacity = newCapacity;
+            onResized(m_globalResizableBufferID, sizeof(T), m_capacity, this);
         }
 
     }
@@ -121,6 +122,7 @@ private:
         auto device = DeviceManager::GetInstance().GetDevice();
 
         auto newDataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, sizeof(T) * capacity, m_UAV);
+		newDataBuffer->SetName(m_name.c_str());
         if (m_dataBuffer != nullptr) {
             UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity);
             DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);

@@ -40,6 +40,7 @@ public:
 				Builtin::NormalMatrixBuffer,
 				Builtin::PerMeshBuffer,
 				Builtin::PerMeshInstanceBuffer,
+				Builtin::PerMaterialDataBuffer,
 				Builtin::Environment::PrefilteredCubemapsGroup,
 				Builtin::Environment::InfoBuffer,
 				Builtin::CameraBuffer,
@@ -100,6 +101,7 @@ public:
 		RegisterSRV(Builtin::CameraBuffer);
 		RegisterSRV(Builtin::PerMeshInstanceBuffer);
 		RegisterSRV(Builtin::PerMeshBuffer);
+		RegisterSRV(Builtin::PerMaterialDataBuffer);
 		RegisterSRV(Builtin::GBuffer::Normals);
 
 		if (m_clusteredLightingEnabled) {

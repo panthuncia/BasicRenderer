@@ -32,7 +32,7 @@ public:
         auto& pm = PSOManager::GetInstance();
         auto& cl = ctx.commandList;
 
-		auto numMaterials = ctx.materialManager->GetMaterialSlotsUsed();
+		auto numMaterials = ctx.materialManager->GetCompileFlagsSlotsUsed();
         // numBlocks = ceil(N / K)
         const uint32_t numBlocks = (numMaterials + m_blockSize - 1) / m_blockSize;
 

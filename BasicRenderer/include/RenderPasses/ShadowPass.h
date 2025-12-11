@@ -40,6 +40,7 @@ public:
             Builtin::NormalMatrixBuffer,
             Builtin::PerMeshBuffer,
             Builtin::PerMeshInstanceBuffer,
+            Builtin::PerMaterialDataBuffer,
             Builtin::PostSkinningVertices,
             Builtin::CameraBuffer,
             Builtin::Light::ViewResourceGroup,
@@ -78,6 +79,7 @@ public:
         RegisterSRV(Builtin::CameraBuffer);
         RegisterSRV(Builtin::PerMeshInstanceBuffer);
         RegisterSRV(Builtin::PerMeshBuffer);
+        RegisterSRV(Builtin::PerMaterialDataBuffer);
 
         RegisterSRV(Builtin::Light::InfoBuffer);
         RegisterSRV(Builtin::Light::PointLightCubemapBuffer);
