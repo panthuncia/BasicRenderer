@@ -28,7 +28,8 @@ public:
             .WithUnorderedAccess(Builtin::GBuffer::Normals,
                 Builtin::GBuffer::Albedo,
                 Builtin::GBuffer::Emissive,
-                Builtin::GBuffer::MetallicRoughness)
+                Builtin::GBuffer::MetallicRoughness,
+                Builtin::GBuffer::MotionVectors)
             .WithIndirectArguments("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }
 
@@ -51,6 +52,7 @@ public:
         RegisterUAV(Builtin::GBuffer::Albedo);
         RegisterUAV(Builtin::GBuffer::Emissive);
         RegisterUAV(Builtin::GBuffer::MetallicRoughness);
+		RegisterUAV(Builtin::GBuffer::MotionVectors);
 
         m_materialEvalCmds = m_resourceRegistryView->Request<Resource>("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }

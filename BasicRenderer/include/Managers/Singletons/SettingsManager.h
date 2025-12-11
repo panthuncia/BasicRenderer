@@ -108,9 +108,28 @@ public:
         s.removeObserver(id);
     }
 
+    // Registers a dependency where 'controlledName' is updated based on 'controllerName' changing.
+    // The resolver function takes (newControllerValue, currentControlledValue) and returns the newControlledValue.
+    template<typename TController, typename TControlled>
+    void registerDependency(const std::string& controllerName, const std::string& controlledName,
+        std::function<TControlled(const TController&, const TControlled&)> resolver)
+    {
+        auto sub = addObserver<TController>(controllerName,
+            [this, controlledName, resolver](const TController& controllerVal) {
+                auto getter = getSettingGetter<TControlled>(controlledName);
+                TControlled currentVal = getter();
+                TControlled newVal = resolver(controllerVal, currentVal);
+                if (newVal != currentVal) {
+                    getSettingSetter<TControlled>(controlledName)(newVal);
+                }
+            });
+        m_dependencySubscriptions.push_back(std::move(sub));
+    }
+
 private:
     std::unordered_map<std::string, std::unique_ptr<ISetting>> settings;
-   
+    std::vector<Subscription> m_dependencySubscriptions;
+
     SettingsManager() = default;
     // Helper function to retrieve a setting by name
     ISetting& getSettingByName(const std::string& name) {

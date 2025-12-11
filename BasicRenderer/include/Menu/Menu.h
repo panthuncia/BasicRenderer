@@ -147,6 +147,10 @@ private:
 	std::function<bool()> getDeferredRenderingEnabled;
 	std::function<void(bool)> setDeferredRenderingEnabled;
 
+	bool m_visibilityRenderingEnabled = true;
+	std::function<bool()> getVisibilityRenderingEnabled;
+	std::function<void(bool)> setVisibilityRenderingEnabled;
+
 	bool m_gtaoEnabled = true;
 	std::function<bool()> getGTAOEnabled;
 	std::function<void(bool)> setGTAOEnabled;
@@ -292,6 +296,10 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
 	getDeferredRenderingEnabled = settingsManager.getSettingGetter<bool>("enableDeferredRendering");
 	deferredRendering = getDeferredRenderingEnabled();
 
+	setVisibilityRenderingEnabled = settingsManager.getSettingSetter<bool>("enableVisibilityRendering");
+	getVisibilityRenderingEnabled = settingsManager.getSettingGetter<bool>("enableVisibilityRendering");
+	m_visibilityRenderingEnabled = getVisibilityRenderingEnabled();
+
 	getGTAOEnabled = settingsManager.getSettingGetter<bool>("enableGTAO");
 	setGTAOEnabled = settingsManager.getSettingSetter<bool>("enableGTAO");
 	m_gtaoEnabled = getGTAOEnabled();
@@ -376,39 +384,18 @@ inline void Menu::Render(RenderContext& context) {
 		}
         if (m_meshShadersSupported) {
             if (ImGui::Checkbox("Use Mesh Shaders", &meshShaderEnabled)) {
-                if (!meshShaderEnabled) {
-                    if (indirectDrawsEnabled) {
-                        setIndirectDrawsEnabled(false);
-                    }
-                }
-                else {
-                    if (indirectDrawsEnabled) {
-                        setIndirectDrawsEnabled(true);
-                    }
-                }
                 setMeshShaderEnabled(meshShaderEnabled);
             }
         }
         else {
             ImGui::Text("Your GPU does not support mesh shaders!");
         }
-		if (!meshShaderEnabled) {
-			ImGui::Text("Mesh Shaders must be enabled to use Indirect Draws.");
-		}
-        else {
-            if (ImGui::Checkbox("Use Indirect Draws", &indirectDrawsEnabled)) {
-                setIndirectDrawsEnabled(indirectDrawsEnabled);
-            }
+        if (ImGui::Checkbox("Use Indirect Draws", &indirectDrawsEnabled)) {
+            setIndirectDrawsEnabled(indirectDrawsEnabled);
         }
-		if (ImGui::Checkbox("Occlusion Culling", &occlusionCulling)) {
-			setOcclusionCullingEnabled(occlusionCulling);
-            if (occlusionCulling) {
-				if (!deferredRendering) { // Occlusion culling requires deferred rendering
-					setDeferredRenderingEnabled(true);
-					deferredRendering = true;
-                }
-            }
-		}
+        if (ImGui::Checkbox("Occlusion Culling", &occlusionCulling)) {
+            setOcclusionCullingEnabled(occlusionCulling);
+        }
 		if (ImGui::Checkbox("Meshlet Culling", &meshletCulling)) {
 			setMeshletCullingEnabled(meshletCulling);
 		}
@@ -424,17 +411,12 @@ inline void Menu::Render(RenderContext& context) {
         if (ImGui::Checkbox("Clustered Lighting", &clusteredLighting)) {
 			setClusteredLightingEnabled(clusteredLighting);
         }
-        if (occlusionCulling) {
-            ImGui::Text("Deferred rendering cannot be disabled if occlusion culling is on");
+        if (ImGui::Checkbox("Deferred Rendering", &deferredRendering)) {
+            setDeferredRenderingEnabled(deferredRendering);
         }
-        else if (m_screenSpaceReflectionsEnabled) {
-            ImGui::Text("Deferred rendering cannot be disabled if SSR is on");
-        }
-        else {
-            if (ImGui::Checkbox("Deferred Rendering", &deferredRendering)) {
-                setDeferredRenderingEnabled(deferredRendering);
-            }
-        }
+        if (ImGui::Checkbox("Visibility Rendering", &m_visibilityRenderingEnabled)) {
+            setVisibilityRenderingEnabled(m_visibilityRenderingEnabled);
+		}
 		if (ImGui::Checkbox("Enable GTAO", &m_gtaoEnabled)) {
 			setGTAOEnabled(m_gtaoEnabled);
 		}

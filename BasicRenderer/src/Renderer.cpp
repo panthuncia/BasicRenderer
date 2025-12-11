@@ -329,6 +329,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<bool>("enableClusteredLighting", m_clusteredLighting);
     settingsManager.registerSetting<DirectX::XMUINT3>("lightClusterSize", m_lightClusterSize);
 	settingsManager.registerSetting<bool>("enableDeferredRendering", m_deferredRendering);
+	settingsManager.registerSetting<bool>("enableVisibilityRendering", m_visibilityRendering);
     settingsManager.registerSetting<bool>("collectPipelineStatistics", false);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
@@ -412,6 +413,10 @@ void Renderer::SetSettings() {
 		m_deferredRendering = newValue;
 		rebuildRenderGraph = true;
 		}));
+	m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableVisibilityRendering", [this](const bool& newValue) {
+		m_visibilityRendering = newValue;
+		rebuildRenderGraph = true;
+		}));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableOcclusionCulling", [this](const bool& newValue) {
 		m_occlusionCulling = newValue;
 		rebuildRenderGraph = true;
@@ -467,6 +472,27 @@ void Renderer::SetSettings() {
 		m_screenSpaceReflections = newValue;
 		rebuildRenderGraph = true;
 		}));
+
+    // If Mesh Shaders are disabled, Indirect Draws MUST be disabled.
+    settingsManager.registerDependency<bool, bool>("enableMeshShader", "enableIndirectDraws",
+        [](bool meshShaderEnabled, bool currentIndirectDraws) {
+            // If mesh shaders are off, force indirect draws off. Otherwise keep current value.
+            return meshShaderEnabled ? currentIndirectDraws : false;
+        });
+    // If Occlusion Culling is enabled, Deferred Rendering MUST be enabled.
+    settingsManager.registerDependency<bool, bool>("enableOcclusionCulling", "enableDeferredRendering",
+        [](bool occlusionCulling, bool currentDeferred) {
+            // If occlusion culling is on, force deferred on.
+            return occlusionCulling ? true : currentDeferred;
+        });
+	// Occlusion culling requires meshlet culling to be enabled.
+    settingsManager.registerDependency<bool, bool>("enableOcclusionCulling", "enableMeshletCulling",
+        [](bool occlusionCulling, bool currentMeshletCulling) {
+			// If occlusion culling is
+            return occlusionCulling ? true : currentMeshletCulling;
+		});
+
+
 }
 
 void Renderer::ToggleMeshShaders(bool useMeshShaders) {
@@ -618,6 +644,8 @@ void Renderer::CreateTextures() {
     motionVectors.format = rhi::Format::R16G16_Float;
     motionVectors.generateMipMaps = false;
     motionVectors.hasSRV = true;
+    motionVectors.hasUAV = true;
+    motionVectors.hasNonShaderVisibleUAV = true;
     motionVectors.srvFormat = rhi::Format::R16G16_Float;
     ImageDimensions motionVectorsDims = { resolution.x, resolution.y, 0, 0 };
     motionVectors.imageDimensions.push_back(motionVectorsDims);
@@ -1073,8 +1101,10 @@ void Renderer::CreateRenderGraph() {
         .Build<ClearVisibilityBufferPass>();
 
     // Reset visible cluster table counter
-    newGraph->BuildRenderPass("VisibleClusterTableCounterResetPass") // TODO: Where to put this?
-        .Build<VisibleClusterTableCounterResetPass>();
+    if (m_useMeshShaders) {
+        newGraph->BuildRenderPass("VisibleClusterTableCounterResetPass")
+            .Build<VisibleClusterTableCounterResetPass>();
+    }
 
     if (indirect) {
         if (m_occlusionCulling) {
@@ -1083,8 +1113,8 @@ void Renderer::CreateRenderGraph() {
         BuildGeneralCullingPipeline(newGraph.get());
     }
 
-    // Z prepass goes before light clustering for when active cluster determination is implemented
-    BuildVisibilityPipeline(newGraph.get());
+	// Either visibility or standard GBuffer pass
+    BuildGBufferPipeline(newGraph.get());
 
     // GTAO pass
     if (m_gtaoEnabled) {
@@ -1119,7 +1149,7 @@ void Renderer::CreateRenderGraph() {
 
 	// Start of post-processing passes
 
-	if (m_screenSpaceReflections && m_deferredRendering) { // SSSR requires deferred rendering for gbuffer
+	if (m_screenSpaceReflections) {
         BuildSSRPasses(newGraph.get());
     }
 

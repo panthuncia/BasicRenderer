@@ -45,6 +45,7 @@ public:
             Builtin::NormalMatrixBuffer,
             Builtin::PerMeshBuffer,
             Builtin::PerMeshInstanceBuffer,
+            Builtin::PerMaterialDataBuffer,
             Builtin::PostSkinningVertices,
             Builtin::CameraBuffer)
             .WithRenderTarget(
@@ -107,6 +108,7 @@ public:
         RegisterSRV(Builtin::CameraBuffer);
         RegisterSRV(Builtin::PerMeshInstanceBuffer);
         RegisterSRV(Builtin::PerMeshBuffer);
+		RegisterSRV(Builtin::PerMaterialDataBuffer);
     }
 
     PassReturn Execute(RenderContext& context) override {

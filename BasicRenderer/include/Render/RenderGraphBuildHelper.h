@@ -28,6 +28,7 @@ void CreateGBufferResources(RenderGraph* graph) {
     normalsWorldSpaceDesc.hasSRV = true;
     normalsWorldSpaceDesc.srvFormat = rhi::Format::R32G32B32A32_Float;
     normalsWorldSpaceDesc.hasUAV = true;
+	normalsWorldSpaceDesc.hasNonShaderVisibleUAV = true;
 	normalsWorldSpaceDesc.uavFormat = rhi::Format::R32G32B32A32_Float;
     ImageDimensions dims = { resolution.x, resolution.y, 0, 0 };
     normalsWorldSpaceDesc.imageDimensions.push_back(dims);
@@ -57,6 +58,7 @@ void CreateGBufferResources(RenderGraph* graph) {
         albedoDesc.format = rhi::Format::R8G8B8A8_UNorm;
         albedoDesc.hasSRV = true;
 		albedoDesc.hasUAV = true;
+        albedoDesc.hasNonShaderVisibleUAV = true;
         ImageDimensions albedoDims = { resolution.x, resolution.y, 0, 0 };
         albedoDesc.imageDimensions.push_back(albedoDims);
         albedo = PixelBuffer::Create(albedoDesc);
@@ -69,6 +71,7 @@ void CreateGBufferResources(RenderGraph* graph) {
         metallicRoughnessDesc.format = rhi::Format::R8G8_UNorm;
         metallicRoughnessDesc.hasSRV = true;
 		metallicRoughnessDesc.hasUAV = true;
+		metallicRoughnessDesc.hasNonShaderVisibleUAV = true;
         ImageDimensions metallicRoughnessDims = { resolution.x, resolution.y, 0, 0 };
         metallicRoughnessDesc.imageDimensions.push_back(metallicRoughnessDims);
         metallicRoughness = PixelBuffer::Create(metallicRoughnessDesc);
@@ -81,6 +84,7 @@ void CreateGBufferResources(RenderGraph* graph) {
         emissiveDesc.format = rhi::Format::R16G16B16A16_Float;
         emissiveDesc.hasSRV = true;
 		emissiveDesc.hasUAV = true;
+		emissiveDesc.hasNonShaderVisibleUAV = true;
         ImageDimensions emissiveDims = { resolution.x, resolution.y, 0, 0 };
         emissiveDesc.imageDimensions.push_back(emissiveDims);
         emissive = PixelBuffer::Create(emissiveDesc);
@@ -116,7 +120,7 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
 	bool shadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows")();
 	bool meshShadersEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
 	bool wireframeEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
-
+	bool visibilityRenderingEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableVisibilityRendering")();
 	// Create mesh cluster id buffer, two UINTs per cluster, used by visibility buffer and occlusion culling
     // 2^25 visible clusters allowed due to index precision
 	auto clusterIDBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(static_cast<size_t>(pow(2, 25)), sizeof(VisibleClusterInfo), true, false);
@@ -146,19 +150,22 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
             .Build<ShadowPass>(wireframeEnabled, meshShadersEnabled, true, false, true);
     }
 
-    //graph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
-    //    .Build<GBufferPass>(
-    //    wireframeEnabled, 
-    //    meshShadersEnabled, 
-    //    true, 
-    //    true);
 
-    graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
-        .Build<VisibilityBufferPass>(
-            wireframeEnabled,
-            meshShadersEnabled,
-            true,
-            true);
+    if (!visibilityRenderingEnabled) {
+        graph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
+            .Build<GBufferPass>(
+                wireframeEnabled,
+                meshShadersEnabled,
+                true,
+                true);
+    } else {
+        graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
+            .Build<VisibilityBufferPass>(
+                wireframeEnabled,
+                meshShadersEnabled,
+                true,
+                true);
+    }
 
     // Copy depth to a separate resource for downsampling
     graph->BuildComputePass("PrimaryDepthCopyPass")
@@ -181,19 +188,21 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
             .Build<ShadowPass>(wireframeEnabled, meshShadersEnabled, true, false, false);
     }
 
-    //graph->BuildRenderPass("OccluderRemaindersPrepass") // Draws prepass for last frame's occluders
-    //    .Build<GBufferPass>(
-    //    wireframeEnabled, 
-    //    meshShadersEnabled, 
-    //    true, 
-    //    false);
-
-    graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
-        .Build<VisibilityBufferPass>(
-            wireframeEnabled,
-            meshShadersEnabled,
-            true,
-            false);
+    if (!visibilityRenderingEnabled) {
+        graph->BuildRenderPass("OccluderRemaindersPrepass") // Draws prepass for last frame's occluders
+            .Build<GBufferPass>(
+                wireframeEnabled,
+                meshShadersEnabled,
+                true,
+                false);
+    } else {
+        graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
+            .Build<VisibilityBufferPass>(
+                wireframeEnabled,
+                meshShadersEnabled,
+                true,
+                false);
+    }
 
     // After the remainders are rendered, we need to cull all meshlets that weren't marked as an occluder remainder. TODO: This duplicates culling work on non-visible meshlets
     //newGraph->BuildComputePass("OccludersMeshletCullingPass")
@@ -258,12 +267,14 @@ inline void RegisterVisUtilResources(RenderGraph* graph)
     //QUEUE_UPLOAD(&numMaterialsValue, sizeof(uint32_t), numMaterialsBuffer.get(), 0);
 }
 
-void BuildVisibilityPipeline(RenderGraph* graph) {
+void BuildGBufferPipeline(RenderGraph* graph) {
     RegisterVisUtilResources(graph);
     bool occlusionCulling = SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")();
 	bool enableWireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 	bool useMeshShaders = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
 	bool indirect = SettingsManager::GetInstance().getSettingGetter<bool>("enableIndirectDraws")();
+	bool visibilityRendering = SettingsManager::GetInstance().getSettingGetter<bool>("enableVisibilityRendering")();
+
     if (!useMeshShaders) {
         indirect = false; // Mesh shader pipelines are required for indirect draws
 	}
@@ -273,50 +284,54 @@ void BuildVisibilityPipeline(RenderGraph* graph) {
     if (!occlusionCulling || !indirect) {
         clearRTVs = true; // We will not run an earlier pass
     }
-    //graph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
-    //    .Build<GBufferPass>(
-    //    enableWireframe, 
-    //    useMeshShaders,
-    //    indirect, 
-    //    clearRTVs);
 
-	graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
-        .Build<VisibilityBufferPass>(
-            enableWireframe,
-            useMeshShaders,
-            indirect,
-            clearRTVs);
+    if (!visibilityRendering) {
+        graph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
+            .Build<GBufferPass>(
+                enableWireframe,
+                useMeshShaders,
+                indirect,
+                clearRTVs);
+    }
+    else {
+        graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
+            .Build<VisibilityBufferPass>(
+                enableWireframe,
+                useMeshShaders,
+                indirect,
+                clearRTVs);
 
-    // Reset material counters
-	graph->BuildComputePass("MaterialPixelCounterResetPass")
-        .Build<MaterialUAVResetPass>();
-    
-	// Build material histogram
-    graph->BuildComputePass("MaterialHistogramPass")
-		.Build<MaterialHistogramPass>();
+        // Reset material counters
+        graph->BuildComputePass("MaterialPixelCounterResetPass")
+            .Build<MaterialUAVResetPass>();
 
-    // Prefix sum material histogram
-	graph->BuildComputePass("MaterialBlockScanPass")
-        .Build<MaterialBlockScanPass>();
+        // Build material histogram
+        graph->BuildComputePass("MaterialHistogramPass")
+            .Build<MaterialHistogramPass>();
 
-    graph->BuildComputePass("MaterialBlockOffsetsPass")
-		.Build<MaterialBlockOffsetsPass>();
+        // Prefix sum material histogram
+        graph->BuildComputePass("MaterialBlockScanPass")
+            .Build<MaterialBlockScanPass>();
 
-    // Build pixel list
-    graph->BuildComputePass("BuildPixelListPass")
-        .Build<BuildPixelListPass>();
+        graph->BuildComputePass("MaterialBlockOffsetsPass")
+            .Build<MaterialBlockOffsetsPass>();
 
-	// Build indirect command buffer for material passes
-    graph->BuildComputePass("BuildMaterialIndirectCommandBufferPass")
-		.Build<BuildMaterialIndirectCommandBufferPass>();
+        // Build pixel list
+        graph->BuildComputePass("BuildPixelListPass")
+            .Build<BuildPixelListPass>();
 
-	// Evaluate material groups
-    graph->BuildComputePass("EvaluateMaterialGroupsPass")
-		.Build<EvaluateMaterialGroupsPass>();
+        // Build indirect command buffer for material passes
+        graph->BuildComputePass("BuildMaterialIndirectCommandBufferPass")
+            .Build<BuildMaterialIndirectCommandBufferPass>();
 
-	// Copy depth to a separate resource for post-processing use
-    graph->BuildComputePass("PrimaryDepthCopyPass")
-		.Build<PrimaryDepthCopyPass>();
+        // Evaluate material groups
+        graph->BuildComputePass("EvaluateMaterialGroupsPass")
+            .Build<EvaluateMaterialGroupsPass>();
+
+        // Copy depth to a separate resource for post-processing use
+        graph->BuildComputePass("PrimaryDepthCopyPass")
+            .Build<PrimaryDepthCopyPass>();
+    }
 }
 
 void RegisterGTAOResources(RenderGraph* graph) {
@@ -487,10 +502,6 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
     std::string primaryPassName = deferredRendering ? "Deferred Pass" : "Forward Pass";
 
     if (deferredRendering) {
-		// GBuffer construction pass
-        //graph->BuildComputePass("GBuffer Construction Pass")
-        //    .Build<GBufferConstructionPass>();
-
 		// Deferred shading pass
         graph->BuildComputePass(primaryPassName).Build<DeferredShadingPass>();
     }

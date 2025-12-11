@@ -207,16 +207,97 @@ void EvaluateGBuffer(in uint2 pixel)
         dpdx, dpdy, dudx, dudy,
         materialInputs);
     
+// Motion vector reconstruction
+
+    // Rebuild per-vertex current clip positions from current world positions.
+    float4 v0World = float4(v0WorldPos, 1.0f);
+    float4 v1World = float4(v1WorldPos, 1.0f);
+    float4 v2World = float4(v2WorldPos, 1.0f);
+
+    float4 v0View = mul(v0World, cam.view);
+    float4 v1View = mul(v1World, cam.view);
+    float4 v2View = mul(v2World, cam.view);
+
+    float4 v0Clip = mul(v0View, cam.unjitteredProjection);
+    float4 v1Clip = mul(v1View, cam.unjitteredProjection);
+    float4 v2Clip = mul(v2View, cam.unjitteredProjection);
+
+    // Previous-frame positions:
+    // - For rigid meshes: same as current position but with prevView (matches VS / mesh shader).
+    // - For skinned meshes: read from previous post-skinning buffer like GetVertexAttributes.
+    ByteAddressBuffer vertexBuffer = meshletSetup.vertexBuffer;
+    uint baseOffset = meshletSetup.postSkinningBufferOffset;
+    uint prevBaseOffset = meshletSetup.prevPostSkinningBufferOffset;
+    uint stride = meshletSetup.meshBuffer.vertexByteSize;
+    uint flags = meshletSetup.meshBuffer.vertexFlags;
+
+    float3 v0PrevPosObject;
+    float3 v1PrevPosObject;
+    float3 v2PrevPosObject;
+
+    if (flags & VERTEX_SKINNED)
+    {
+        // Positions in the post-skinning buffer are already skinned, so "object space" here is
+        // effectively post-skinning space
+        uint byteOffset0Prev = prevBaseOffset + (meshletSetup.vertOffset + triangleIndices.x) * stride;
+        uint byteOffset1Prev = prevBaseOffset + (meshletSetup.vertOffset + triangleIndices.y) * stride;
+        uint byteOffset2Prev = prevBaseOffset + (meshletSetup.vertOffset + triangleIndices.z) * stride;
+
+        v0PrevPosObject = LoadFloat3(byteOffset0Prev, vertexBuffer);
+        v1PrevPosObject = LoadFloat3(byteOffset1Prev, vertexBuffer);
+        v2PrevPosObject = LoadFloat3(byteOffset2Prev, vertexBuffer);
+    }
+    else
+    {
+        // Non-skinned: previous position == current position in object space.
+        v0PrevPosObject = v0.position;
+        v1PrevPosObject = v1.position;
+        v2PrevPosObject = v2.position;
+    }
+
+    float4 v0PrevWorld = mul(float4(v0PrevPosObject, 1.0f), objectBuffer.model);
+    float4 v1PrevWorld = mul(float4(v1PrevPosObject, 1.0f), objectBuffer.model);
+    float4 v2PrevWorld = mul(float4(v2PrevPosObject, 1.0f), objectBuffer.model);
+
+    float4 v0PrevView = mul(v0PrevWorld, cam.prevView);
+    float4 v1PrevView = mul(v1PrevWorld, cam.prevView);
+    float4 v2PrevView = mul(v2PrevWorld, cam.prevView);
+
+    float4 v0PrevClip = mul(v0PrevView, cam.unjitteredProjection);
+    float4 v1PrevClip = mul(v1PrevView, cam.unjitteredProjection);
+    float4 v2PrevClip = mul(v2PrevView, cam.unjitteredProjection);
+
+    // Interpolate current / previous clip positions at this pixel
+    float3 interpClipX = InterpolateWithDeriv(bary, v0Clip.x, v1Clip.x, v2Clip.x);
+    float3 interpClipY = InterpolateWithDeriv(bary, v0Clip.y, v1Clip.y, v2Clip.y);
+    float3 interpClipZ = InterpolateWithDeriv(bary, v0Clip.z, v1Clip.z, v2Clip.z);
+    float3 interpClipW = InterpolateWithDeriv(bary, v0Clip.w, v1Clip.w, v2Clip.w);
+
+    float3 interpPrevClipX = InterpolateWithDeriv(bary, v0PrevClip.x, v1PrevClip.x, v2PrevClip.x);
+    float3 interpPrevClipY = InterpolateWithDeriv(bary, v0PrevClip.y, v1PrevClip.y, v2PrevClip.y);
+    float3 interpPrevClipZ = InterpolateWithDeriv(bary, v0PrevClip.z, v1PrevClip.z, v2PrevClip.z);
+    float3 interpPrevClipW = InterpolateWithDeriv(bary, v0PrevClip.w, v1PrevClip.w, v2PrevClip.w);
+
+    float4 clipCur = float4(interpClipX.x, interpClipY.x, interpClipZ.x, interpClipW.x);
+    float4 clipPrev = float4(interpPrevClipX.x, interpPrevClipY.x, interpPrevClipZ.x, interpPrevClipW.x);
+
+    float3 ndcCur = clipCur.xyz / clipCur.w;
+    float3 ndcPrev = clipPrev.xyz / clipPrev.w;
+
+    float2 motionVector = (ndcCur - ndcPrev).xy;
+    
     // Write to G-buffer
     RWTexture2D<float4> normalsTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Normals)];
     RWTexture2D<float4> albedoTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Albedo)];
     RWTexture2D<float4> emissiveTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Emissive)];
     RWTexture2D<float2> metallicRoughnessTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::MetallicRoughness)];
+    RWTexture2D<float2> motionVectorTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::MotionVectors)];
 
     normalsTexture[pixel].xyz = materialInputs.normalWS;
     albedoTexture[pixel] = float4(materialInputs.albedo, materialInputs.ambientOcclusion);
     emissiveTexture[pixel] = float4(materialInputs.emissive, 0.0f);
     metallicRoughnessTexture[pixel] = float2(materialInputs.metallic, materialInputs.roughness);
+    motionVectorTexture[pixel] = motionVector;
 }
 
 [numthreads(8, 8, 1)]
