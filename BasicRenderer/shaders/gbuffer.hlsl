@@ -10,7 +10,6 @@ struct BarycentricDeriv
     float3 m_lambda;
     float3 m_ddx;
     float3 m_ddy;
-    bool isFrontFace;
 };
 
 BarycentricDeriv CalcFullBary(float4 pt0, float4 pt1, float4 pt2, float2 pixelNdc, float2 winSize)
@@ -23,12 +22,7 @@ BarycentricDeriv CalcFullBary(float4 pt0, float4 pt1, float4 pt2, float2 pixelNd
     float2 ndc1 = pt1.xy * invW.y;
     float2 ndc2 = pt2.xy * invW.z;
 
-    float det = determinant(float2x2(ndc2 - ndc1, ndc0 - ndc1));
-    // Positive determinant = Counter-Clockwise = Front Face
-    ret.isFrontFace = det > 0.0;
-    
-    float invDet = rcp(det);
-    
+    float invDet = rcp(determinant(float2x2(ndc2 - ndc1, ndc0 - ndc1)));
     ret.m_ddx = float3(ndc1.y - ndc2.y, ndc2.y - ndc0.y, ndc0.y - ndc1.y) * invDet * invW;
     ret.m_ddy = float3(ndc2.x - ndc1.x, ndc0.x - ndc2.x, ndc1.x - ndc0.x) * invDet * invW;
     float ddxSum = dot(ret.m_ddx, float3(1, 1, 1));
@@ -177,7 +171,19 @@ void EvaluateGBuffer(in uint2 pixel)
     
     float3 worldNormal = normalize(mul(interpNormal, normalMatrix)).xyz;
     
-    if (!bary.isFrontFace)
+    // TOOD: Maybe sacrifice a bit of depth precision to store face orientation?
+    // Calculate geometric normal to determine face orientation
+    float3 geoNormal = cross(v1WorldPos - v0WorldPos, v2WorldPos - v0WorldPos);
+
+    // Get camera position
+    StructuredBuffer<Camera> cameraBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+    Camera cam = cameraBuffer[perFrameBuffer.mainCameraIndex];
+    float3 viewVec = worldPosition - cam.positionWorldSpace.xyz;
+
+    // If dot(geoNormal, viewVec) > 0, it's a back face (normal points same direction as view vector)
+    bool isBackFace = dot(geoNormal, viewVec) > 0.0f;
+
+    if (isBackFace)
     {
         worldNormal = -worldNormal;
     }

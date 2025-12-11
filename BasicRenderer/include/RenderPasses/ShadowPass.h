@@ -47,7 +47,8 @@ public:
             Builtin::Light::InfoBuffer,
             Builtin::Light::PointLightCubemapBuffer,
             Builtin::Light::DirectionalLightCascadeBuffer,
-            Builtin::Light::SpotLightMatrixBuffer)
+            Builtin::Light::SpotLightMatrixBuffer,
+            Builtin::MeshletCullingBitfieldGroup)
             .WithRenderTarget(Subresources(Builtin::Shadows::LinearShadowMaps, Mip{ 0, 1 }))
             .WithDepthReadWrite(Builtin::Shadows::ShadowMaps)
             .IsGeometryPass();
