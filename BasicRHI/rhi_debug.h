@@ -10,6 +10,9 @@
 // - RHI_ENABLE_VULKAN_MARKERS -> enable VK_EXT_debug_utils markers on Vulkan
 
 #if __has_include(<pix3.h>)
+#ifndef USE_PIX
+#define USE_PIX 1
+#endif
 #include <pix3.h>
 #ifndef RHI_ENABLE_PIX
 #define RHI_ENABLE_PIX 1

@@ -10,6 +10,9 @@
 #include <io.h>        // _pipe, _dup2, _read, _close
 #include <fcntl.h>     // _O_BINARY
 #include <thread>
+#ifndef USE_PIX
+#define USE_PIX 1
+#endif
 #include <pix3.h>
 
 #include "Mesh/Mesh.h"
@@ -34,8 +37,6 @@ extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 614;}
 
 extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D\\"; }
 
-
-#define USE_PIX
 #pragma comment(lib, "WinPixEventRuntime.lib")
 
 Renderer renderer;

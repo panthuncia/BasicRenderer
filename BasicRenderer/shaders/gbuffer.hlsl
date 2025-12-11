@@ -10,6 +10,7 @@ struct BarycentricDeriv
     float3 m_lambda;
     float3 m_ddx;
     float3 m_ddy;
+    bool isFrontFace;
 };
 
 BarycentricDeriv CalcFullBary(float4 pt0, float4 pt1, float4 pt2, float2 pixelNdc, float2 winSize)
@@ -22,7 +23,12 @@ BarycentricDeriv CalcFullBary(float4 pt0, float4 pt1, float4 pt2, float2 pixelNd
     float2 ndc1 = pt1.xy * invW.y;
     float2 ndc2 = pt2.xy * invW.z;
 
-    float invDet = rcp(determinant(float2x2(ndc2 - ndc1, ndc0 - ndc1)));
+    float det = determinant(float2x2(ndc2 - ndc1, ndc0 - ndc1));
+    // Positive determinant = Counter-Clockwise = Front Face
+    ret.isFrontFace = det > 0.0;
+    
+    float invDet = rcp(det);
+    
     ret.m_ddx = float3(ndc1.y - ndc2.y, ndc2.y - ndc0.y, ndc0.y - ndc1.y) * invDet * invW;
     ret.m_ddy = float3(ndc2.x - ndc1.x, ndc0.x - ndc2.x, ndc1.x - ndc0.x) * invDet * invW;
     float ddxSum = dot(ret.m_ddx, float3(1, 1, 1));
@@ -170,6 +176,11 @@ void EvaluateGBuffer(in uint2 pixel)
     float3x3 normalMatrix = (float3x3) normalMatrixBuffer[objectBuffer.normalMatrixBufferIndex];
     
     float3 worldNormal = normalize(mul(interpNormal, normalMatrix)).xyz;
+    
+    if (!bary.isFrontFace)
+    {
+        worldNormal = -worldNormal;
+    }
     
     // Get material info
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];

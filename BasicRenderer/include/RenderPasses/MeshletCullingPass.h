@@ -118,7 +118,7 @@ public:
 
 		commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
 
-		auto& pso = m_isRemaindersPass ? m_cullingPSO : m_cullingWithVisibilityDataPSO; // Only write visibility data for main culling pass
+		auto& pso = m_cullingWithVisibilityDataPSO;
 
 		commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
