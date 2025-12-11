@@ -1,7 +1,8 @@
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
 #include "include/utilities.hlsli"
-#include "Include/meshletCommon.hlsli"
+#include "include/meshletCommon.hlsli"
+#include "include/waveIntrinsicsHelpers.hlsli"
 
 struct PixelRef
 {
@@ -51,18 +52,6 @@ void ClearMaterialCountersCS(uint3 tid : SV_DispatchThreadID)
 }
 
 // 3) Histogram: one thread per pixel, atomic into count[m].
-uint CountBits128(uint4 m)
-{
-    return countbits(m.x) + countbits(m.y) + countbits(m.z) + countbits(m.w);
-}
-
-bool IsWaveGroupLeader(uint4 mask)
-{
-    // Find highest set bit across the 128-bit mask (matches MS docs pattern)
-    int4 highLanes = (int4) (firstbithigh(mask) | uint4(0, 0x20, 0x40, 0x60));
-    uint highLane = (uint) max(max(max(highLanes.x, highLanes.y), highLanes.z), highLanes.w);
-    return WaveGetLaneIndex() == highLane;
-}
 [numthreads(8, 8, 1)]
 void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
 {
@@ -102,15 +91,6 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
         uint groupSize = CountBits128(mask);
         InterlockedAdd(materialPixelCount[matId], groupSize);
     }
-}
-
-// Get leader lane index for a WaveMatch mask
-uint GetWaveGroupLeaderLane(uint4 mask)
-{
-    // Find highest set bit across 128-bit mask (matches DX docs pattern)
-    int4 highLanes = (int4) (firstbithigh(mask) | uint4(0, 0x20, 0x40, 0x60));
-    uint highLane = (uint) max(max(max(highLanes.x, highLanes.y), highLanes.z), highLanes.w);
-    return highLane; // lane index 0..(waveSize-1)
 }
 
 // For a given mask + lane index, count how many lanes in the group come before us
