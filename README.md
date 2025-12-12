@@ -24,7 +24,7 @@ Feature development is driven purely by what I'm interested in at the moment.
 - Low-level RHI (Only DX12 backend implemented, for now, but built to support Vulkan)
 - GPU-driven rendering with compute culling & ExecuteIndirect
 - Per-meshlet occlusion & frustrum culling
-- Forward+ and Deferred rendering
+- Visibility buffer (UE5-style), Deferred, and forward+ rendering
 - Clustered lighting with a paged linked-list
 - A render graph for automatic resource transitions and queue synchronization, supporting symbolic subresoruce ranges
 - Async-compute
@@ -66,6 +66,7 @@ Feature development is driven purely by what I'm interested in at the moment.
 - [OpenUSD](https://github.com/PixarAnimationStudios/OpenUSD)
   
 ## Notable sources for development ideas
+[Visibility Buffer Rendering with Material Graphs](http://filmicworlds.com/blog/visibility-buffer-rendering-with-material-graphs/), by John Hable
 
 [Filament](https://github.com/google/filament) for the material model, with additions from [MaterialX](https://github.com/AcademySoftwareFoundation/MaterialX)
 
