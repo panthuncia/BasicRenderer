@@ -245,6 +245,7 @@ void Scene::ActivateCamera(flecs::entity& entity) {
 	entity.set<Components::Camera> (newCameraInfo);
 
 	auto renderView = m_managerInterface.GetViewManager()->CreateView(newCameraInfo.info, ViewFlags::PrimaryCamera());
+	m_managerInterface.GetViewManager()->AttachDepth(renderView, depth.depthMap, depth.linearDepthMap);
 	entity.set<Components::RenderViewRef>({renderView});
 	entity.set<Components::DepthMap>(depth);
 

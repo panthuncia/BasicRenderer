@@ -103,6 +103,9 @@ AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
 			viewInfo.linearDepthMap = linearMap;
 			viewInfo.depthResX = map->GetWidth();
 			viewInfo.depthResY = map->GetHeight();
+			for (auto viewId : viewInfo.viewIDs) {
+				m_pViewManager->AttachDepth(viewId, map, linearMap);
+			}
         }
     }
 
