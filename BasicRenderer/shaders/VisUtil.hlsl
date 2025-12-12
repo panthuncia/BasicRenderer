@@ -93,37 +93,6 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
     }
 }
 
-// For a given mask + lane index, count how many lanes in the group come before us
-uint GetLaneRankInGroup(uint4 mask, uint laneIndex)
-{
-    uint word = laneIndex >> 5; // / 32
-    uint bit = laneIndex & 31; // % 32
-
-    uint4 prefixMask = uint4(0, 0, 0, 0);
-
-    // Lanes in earlier 32-bit words: keep whole mask
-    [unroll]
-    for (uint i = 0; i < 4; ++i)
-    {
-        if (i < word)
-        {
-            prefixMask[i] = mask[i];
-        }
-        else if (i == word)
-        {
-            // Only keep bits below our bit in this word
-            uint lowerBitsMask = (bit == 0) ? 0u : ((1u << bit) - 1u);
-            prefixMask[i] = mask[i] & lowerBitsMask;
-        }
-        else
-        {
-            prefixMask[i] = 0;
-        }
-    }
-
-    return CountBits128(prefixMask);
-}
-
 // 5) Build grouped pixel list: use offsets[] as base and a per-material write cursor (atomic++).
 [numthreads(8, 8, 1)]
 void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
@@ -278,7 +247,8 @@ void BuildEvaluateIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
 // Thread layout must match what the command builder assumed (64 here).
 [numthreads(64, 1, 1)]
 void EvaluateMaterialGroupCS(
-    uint3 dispatchThreadId : SV_DispatchThreadID
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint groupIndex : SV_GroupIndex
 )
 {
     uint materialId = UintRootConstant0; // Not needed?
@@ -301,5 +271,7 @@ void EvaluateMaterialGroupCS(
     pixel.x = ref.pixelXY & 0xFFFFu;
     pixel.y = ref.pixelXY >> 16;
 
-    EvaluateGBuffer(pixel);
+    InitGroupConstants(groupIndex);
+    
+    EvaluateGBufferOptimized(pixel);
 }

@@ -145,49 +145,4 @@ uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
     return uint3(b0, b1, b2);
 }
 
-// Load one vertex position (world/view/clip) in the main camera
-float4 LoadVertexClipPosition(MeshletSetup setup, uint localVertexIndex)
-{
-    uint byteOffset = setup.postSkinningBufferOffset + (setup.vertOffset + localVertexIndex) * setup.meshBuffer.vertexByteSize;
-    Vertex v = LoadVertex(byteOffset, setup.vertexBuffer, setup.meshBuffer.vertexFlags);
-
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
-    Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
-
-    float4 pos = float4(v.position.xyz, 1.0f);
-    float4 worldPosition = mul(pos, setup.objectBuffer.model);
-    float4 viewPosition = mul(worldPosition, mainCamera.view);
-    return mul(viewPosition, mainCamera.projection);
-}
-
-bool LoadTriangleClipPositions(
-    uint drawCallID,
-    uint meshletLocalIndex,
-    uint triLocalIndex,
-    out MeshletSetup setup,
-    out uint3 triangleVertexIndices,
-    out float4 clip0,
-    out float4 clip1,
-    out float4 clip2)
-{
-    if (!InitializeMeshletFromDrawCall(drawCallID, meshletLocalIndex, setup))
-    {
-        clip0 = clip1 = clip2 = 0;
-        return false;
-    }
-
-    if (triLocalIndex >= setup.triCount)
-    {
-        clip0 = clip1 = clip2 = 0;
-        return false;
-    }
-
-    triangleVertexIndices = DecodeTriangle(triLocalIndex, setup);
-    clip0 = LoadVertexClipPosition(setup, triangleVertexIndices.x);
-    clip1 = LoadVertexClipPosition(setup, triangleVertexIndices.y);
-    clip2 = LoadVertexClipPosition(setup, triangleVertexIndices.z);
-    return true;
-}
-
 #endif // MESHLET_COMMON_HLSLI

@@ -56,7 +56,6 @@ void DeferredCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 lighting = lightingOutput.lighting;
 
     RWTexture2D<float4> hdrTarget = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Color::HDRColorTarget)];
-    hdrTarget[pixel] = float4(1.0, 0, 0, 1.0);
     
     float4 outColor;
     switch (perFrameBuffer.outputType)

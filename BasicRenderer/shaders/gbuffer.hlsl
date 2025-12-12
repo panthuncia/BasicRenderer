@@ -3,6 +3,7 @@
 #include "include/meshletCommon.hlsli"
 #include "include/vertex.hlsli"
 #include "include/utilities.hlsli"
+#include "include/waveIntrinsicsHelpers.hlsli"
 
 // http://filmicworlds.com/blog/visibility-buffer-rendering-with-material-graphs/
 struct BarycentricDeriv
@@ -63,230 +64,361 @@ float3 InterpolateWithDeriv(BarycentricDeriv deriv, float v0, float v1, float v2
     return ret;
 }
 
-void LoadTriangleVertices(
-    uint drawCallID,
-    uint meshletLocalIndex,
-    uint triLocalIndex,
-    in MeshletSetup setup,
-    in uint3 triangleVertexIndices,
-    out Vertex v0,
-    out Vertex v1,
-    out Vertex v2)
+float3 LoadPositionOnly(uint baseByteOffset, ByteAddressBuffer buffer)
 {
-    // Compute byte offsets into the post-skinning vertex buffer
-    uint byteOffset0 = setup.postSkinningBufferOffset + (setup.vertOffset + triangleVertexIndices.x) * setup.meshBuffer.vertexByteSize;
-    uint byteOffset1 = setup.postSkinningBufferOffset + (setup.vertOffset + triangleVertexIndices.y) * setup.meshBuffer.vertexByteSize;
-    uint byteOffset2 = setup.postSkinningBufferOffset + (setup.vertOffset + triangleVertexIndices.z) * setup.meshBuffer.vertexByteSize;
-
-    // Load vertices
-    v0 = LoadVertex(byteOffset0, setup.vertexBuffer, setup.meshBuffer.vertexFlags);
-    v1 = LoadVertex(byteOffset1, setup.vertexBuffer, setup.meshBuffer.vertexFlags);
-    v2 = LoadVertex(byteOffset2, setup.vertexBuffer, setup.meshBuffer.vertexFlags);
+    return LoadFloat3(baseByteOffset, buffer); // position is first
 }
 
-void EvaluateGBuffer(in uint2 pixel)
+float3 LoadNormalOnly(uint baseByteOffset, ByteAddressBuffer buffer)
 {
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    return LoadFloat3(baseByteOffset + 12u, buffer); // normal after position
+}
 
-    uint screenW = perFrameBuffer.screenResX;
-    uint screenH = perFrameBuffer.screenResY;
+float2 LoadTexcoordOnly(uint baseByteOffset, ByteAddressBuffer buffer, uint flags)
+{
+    if (flags & VERTEX_TEXCOORDS)
+        return LoadFloat2(baseByteOffset + 24u, buffer); // texcoord after pos+normal
 
-    // .x = 7 bits for meshlet triangle index, 25 bits for visible cluster index
-    // .y = 32-bit depth
+    return float2(0.0, 0.0);
+}
+
+void ComputeTriVertexByteOffsets(in MeshletSetup setup, uint3 triIdx, out uint o0, out uint o1, out uint o2)
+{
+    uint stride = setup.meshBuffer.vertexByteSize;
+    uint base = setup.postSkinningBufferOffset + setup.vertOffset * stride;
+
+    o0 = base + triIdx.x * stride;
+    o1 = base + triIdx.y * stride;
+    o2 = base + triIdx.z * stride;
+}
+
+groupshared uint gs_screenW;
+groupshared uint gs_screenH;
+groupshared float3 gs_camPos;
+
+groupshared float4x4 gs_view;
+groupshared float4x4 gs_prevView;
+groupshared float4x4 gs_proj; // jittered, matches visibility pass
+groupshared float4x4 gs_unjitteredProj;
+
+groupshared float4x4 gs_viewProj; // view * proj (row-vector convention)
+groupshared float4x4 gs_unjitteredViewProj; // view * unjitteredProj
+groupshared float4x4 gs_prevUnjitteredViewProj; // prevView * unjitteredProj
+
+void InitGroupConstants(uint groupIndex)
+{
+    if (groupIndex == 0)
+    {
+        ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
+        gs_screenW = perFrame.screenResX;
+        gs_screenH = perFrame.screenResY;
+
+        StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+        Camera cam = cameras[perFrame.mainCameraIndex];
+
+        gs_camPos = cam.positionWorldSpace.xyz;
+
+        gs_view = cam.view;
+        gs_prevView = cam.prevView;
+        gs_proj = cam.projection;
+        gs_unjitteredProj = cam.unjitteredProjection;
+
+        gs_viewProj = mul(gs_view, gs_proj);
+        gs_unjitteredViewProj = mul(gs_view, gs_unjitteredProj);
+        gs_prevUnjitteredViewProj = mul(gs_prevView, gs_unjitteredProj);
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+}
+
+struct MeshletResolveData {
+    // Identifiers
+    uint2 drawcallAndMeshlet; // x = perMeshInstanceBufferIndex (drawcall), y = drawCallMeshletIndex
+    uint2 objAndMesh; // x = perObjectBufferIndex, y = perMeshBufferIndex
+
+    // Mesh info
+    uint4 meshInfo; // x = vertexByteSize, y = vertexFlags, z = numVertices, w = meshletTrianglesBufferOffset
+    uint materialDataIndex;
+
+    // Meshlet info
+    uint4 meshletInfo; // x = vertOffset, y = triOffset, z = vertCount, w = triCount
+
+    // Post-skinning ping-pong byte offsets
+    uint2 postBases; // x = postSkinningBase, y = prevPostSkinningBase
+};
+
+MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
+{
+    MeshletResolveData d = (MeshletResolveData) 0;
+
+    uint4 mask = WaveMatch(clusterIndex);
+    uint leader = WaveFirstLaneFromMask(mask);
+    bool isLeader = (WaveGetLaneIndex() == leader);
+
+    if (isLeader)
+    {
+        ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
+
+        StructuredBuffer<VisibleClusterInfo> visibleClusterTable =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibleClusterTable)];
+        StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+        StructuredBuffer<PerMeshBuffer> perMeshBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+        StructuredBuffer<Meshlet> meshletBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletOffsets)];
+
+        VisibleClusterInfo clusterData = visibleClusterTable[clusterIndex];
+        d.drawcallAndMeshlet = clusterData.drawcallIndexAndMeshletIndex;
+
+        PerMeshInstanceBuffer inst = perMeshInstanceBuffer[d.drawcallAndMeshlet.x];
+        d.objAndMesh = uint2(inst.perObjectBufferIndex, inst.perMeshBufferIndex);
+
+        PerMeshBuffer mesh = perMeshBuffer[d.objAndMesh.y];
+
+        d.meshInfo = uint4(mesh.vertexByteSize, mesh.vertexFlags, mesh.numVertices, mesh.meshletTrianglesBufferOffset);
+        d.materialDataIndex = mesh.materialDataIndex;
+
+        Meshlet m = meshletBuffer[mesh.meshletBufferOffset + d.drawcallAndMeshlet.y];
+        d.meshletInfo = uint4(m.VertOffset, m.TriOffset, m.VertCount, m.TriCount);
+
+        // ping-pong base offsets
+        uint postBase = inst.postSkinningVertexBufferOffset;
+        uint prevBase = postBase;
+
+        if (mesh.vertexFlags & VERTEX_SKINNED)
+        {
+            uint strideBytes = mesh.vertexByteSize * mesh.numVertices;
+            postBase += strideBytes * (perFrame.frameIndex % 2);
+            prevBase += strideBytes * ((perFrame.frameIndex + 1) % 2);
+        }
+
+        d.postBases = uint2(postBase, prevBase);
+    }
+
+    // Broadcast
+    d.drawcallAndMeshlet = WaveReadLaneAt(d.drawcallAndMeshlet, leader);
+    d.objAndMesh = WaveReadLaneAt(d.objAndMesh, leader);
+    d.meshInfo = WaveReadLaneAt(d.meshInfo, leader);
+    d.materialDataIndex = WaveReadLaneAt(d.materialDataIndex, leader);
+    d.meshletInfo = WaveReadLaneAt(d.meshletInfo, leader);
+    d.postBases = WaveReadLaneAt(d.postBases, leader);
+
+    return d;
+}
+
+uint3 DecodeTriangleCompact(uint triLocalIndex, MeshletResolveData d, ByteAddressBuffer meshletTrianglesBuffer)
+{
+    // triOffsetBytes = meshletTrianglesBufferOffset + meshletTriOffset + triLocalIndex * 3
+    uint triOffset = d.meshInfo.w + d.meshletInfo.y + triLocalIndex * 3u;
+
+    uint alignedOffset = (triOffset / 4u) * 4u;
+    uint firstWord = meshletTrianglesBuffer.Load(alignedOffset);
+    uint byteOffset = triOffset % 4u;
+
+    uint b0 = (firstWord >> (byteOffset * 8u)) & 0xFFu;
+    uint b1, b2;
+
+    if (byteOffset <= 1u)
+    {
+        b1 = (firstWord >> ((byteOffset + 1u) * 8u)) & 0xFFu;
+        b2 = (firstWord >> ((byteOffset + 2u) * 8u)) & 0xFFu;
+    }
+    else if (byteOffset == 2u)
+    {
+        b1 = (firstWord >> ((byteOffset + 1u) * 8u)) & 0xFFu;
+        uint secondWord = meshletTrianglesBuffer.Load(alignedOffset + 4u);
+        b2 = secondWord & 0xFFu;
+    }
+    else // byteOffset == 3
+    {
+        uint secondWord = meshletTrianglesBuffer.Load(alignedOffset + 4u);
+        b1 = secondWord & 0xFFu;
+        b2 = (secondWord >> 8u) & 0xFFu;
+    }
+
+    return uint3(b0, b1, b2);
+}
+
+void ComputeTriVertexByteOffsetsCompact(MeshletResolveData d, uint3 triIdx, out uint o0, out uint o1, out uint o2)
+{
+    uint stride = d.meshInfo.x; // vertexByteSize
+    uint base = d.postBases.x + d.meshletInfo.x * stride; // postBase + vertOffset * stride
+
+    o0 = base + triIdx.x * stride;
+    o1 = base + triIdx.y * stride;
+    o2 = base + triIdx.z * stride;
+}
+
+
+// Note: relies on gs_* groupshared values being initialized.
+void EvaluateGBufferOptimized(uint2 pixel)
+{
     Texture2D<uint2> visibilityTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
-    uint2 visibilityData = visibilityTexture[pixel];
-    
-    uint clusterIndex = visibilityData.x & 0x1FFFFFFu; // low 25 bits
+    uint2 vis = visibilityTexture[pixel];
+
+    uint depthBitsRaw = vis.y;
+    bool isFrontFace = ((depthBitsRaw & 0x80000000u) != 0);
+
+    uint clusterIndex = vis.x & 0x1FFFFFFu;
     if (clusterIndex == 0x1FFFFFFu)
+        return;
+
+    uint meshletTriangleIndex = vis.x >> 25;
+
+    // Meshlet-level wave dedup (key = clusterIndex)
+    // This optimization did not help much in testing; keeping because it didn't hurt.
+    MeshletResolveData md = LoadMeshletResolveData_Wave(clusterIndex);
+
+    // per-lane validity checks using broadcasted triCount
+    if (meshletTriangleIndex >= md.meshletInfo.w) // triCount
+        return;
+
+    // Resources (no need to broadcast handles)
+    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostSkinningVertices)];
+    ByteAddressBuffer meshletTrianglesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletTriangles)];
+
+    // Triangle-level wave dedup (key = triKey) for DecodeTriangle + position loads
+    // This optimization did help somewhat
+    uint triKey = (clusterIndex << 7) | (meshletTriangleIndex & 0x7Fu);
+
+    uint4 triMask = WaveMatch(triKey);
+    uint triLeader = WaveFirstLaneFromMask(triMask);
+    bool triIsLeader = (WaveGetLaneIndex() == triLeader);
+
+    uint3 triIdx = 0;
+    float3 p0 = 0, p1 = 0, p2 = 0;
+
+    if (triIsLeader)
     {
-        return; // No visible cluster
-    }
-    uint meshletTriangleIndex = visibilityData.x >> 25; // high 7 bits
-    
-    // .x = drawcall index, .y = meshlet-local triangle index
-    StructuredBuffer<VisibleClusterInfo> visibleClusterTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibleClusterTable)];
-    VisibleClusterInfo clusterData = visibleClusterTable[clusterIndex];
+        triIdx = DecodeTriangleCompact(meshletTriangleIndex, md, meshletTrianglesBuffer);
 
-    uint perMeshInstanceBufferIndex = clusterData.drawcallIndexAndMeshletIndex.x;    
-    uint drawCallMeshletIndex = clusterData.drawcallIndexAndMeshletIndex.y;
-    
-    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-    PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
-    
-    float4 clip0, clip1, clip2;
-    MeshletSetup meshletSetup;
-    uint3 triangleIndices;
-    if (!LoadTriangleClipPositions(perMeshInstanceBufferIndex, drawCallMeshletIndex, meshletTriangleIndex, meshletSetup, triangleIndices, clip0, clip1, clip2))
-    {
-        return; // Invalid; skip
+        uint o0, o1, o2;
+        ComputeTriVertexByteOffsetsCompact(md, triIdx, o0, o1, o2);
+
+        p0 = LoadPositionOnly(o0, vertexBuffer);
+        p1 = LoadPositionOnly(o1, vertexBuffer);
+        p2 = LoadPositionOnly(o2, vertexBuffer);
     }
 
-    // NDC: x in [-1,1], y in [-1,1] with Y up    
-    float2 pixelUv = (float2(pixel) + 0.5f) / float2(screenW, screenH);
-    float2 pixelNdc = float2(
-        pixelUv.x * 2.0f - 1.0f,
-        (1.0f - pixelUv.y) * 2.0f - 1.0f
-    );
+    triIdx = WaveReadLaneAt(triIdx, triLeader);
+    p0 = WaveReadLaneAt(p0, triLeader);
+    p1 = WaveReadLaneAt(p1, triLeader);
+    p2 = WaveReadLaneAt(p2, triLeader);
 
-    BarycentricDeriv bary = CalcFullBary(clip0, clip1, clip2, pixelNdc, float2(screenW, screenH));
-    
-    Vertex v0, v1, v2;
-    LoadTriangleVertices( // TODO: This loads positions again; optimize by saving positions earlier and loading a position-less vertex here
-        perMeshInstanceBufferIndex,
-        drawCallMeshletIndex,
-        meshletTriangleIndex,
-        meshletSetup,
-        triangleIndices,
-        v0,
-        v1,
-        v2);
-    
-    // TODO: Color, tangent, etc.
-    float3 interpTexcoordX = InterpolateWithDeriv(bary, v0.texcoord.x, v1.texcoord.x, v2.texcoord.x);
-    float3 interpTexcoordY = InterpolateWithDeriv(bary, v0.texcoord.y, v1.texcoord.y, v2.texcoord.y);
-    
-    float3 interpNormalX = InterpolateWithDeriv(bary, v0.normal.x, v1.normal.x, v2.normal.x);
-    float3 interpNormalY = InterpolateWithDeriv(bary, v0.normal.y, v1.normal.y, v2.normal.y);
-    float3 interpNormalZ = InterpolateWithDeriv(bary, v0.normal.z, v1.normal.z, v2.normal.z);
-    
-    // World positions
+    uint o0, o1, o2;
+    ComputeTriVertexByteOffsetsCompact(md, triIdx, o0, o1, o2);
+
+    // Object buffer (per-lane; is it worth broadcasting?)
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
-    PerObjectBuffer objectBuffer = perObjectBuffer[instanceData.perObjectBufferIndex]; // TODO: Store earlier? Store in instance buffer?
-    
-    float3 v0WorldPos = mul(float4(v0.position, 1.0f), objectBuffer.model).xyz;
-    float3 v1WorldPos = mul(float4(v1.position, 1.0f), objectBuffer.model).xyz;
-    float3 v2WorldPos = mul(float4(v2.position, 1.0f), objectBuffer.model).xyz;
-    
-    // TODO: Benchmark against calculating from depth
-    float3 interpPositionX = InterpolateWithDeriv(bary, v0WorldPos.x, v1WorldPos.x, v2WorldPos.x);
-    float3 interpPositionY = InterpolateWithDeriv(bary, v0WorldPos.y, v1WorldPos.y, v2WorldPos.y);
-    float3 interpPositionZ = InterpolateWithDeriv(bary, v0WorldPos.z, v1WorldPos.z, v2WorldPos.z);
-    
-    float2 interpTexcoord = float2(interpTexcoordX.x, interpTexcoordY.x);
-    float3 interpNormal = normalize(float3(interpNormalX.x, interpNormalY.x, interpNormalZ.x));
-    float3 worldPosition = float3(interpPositionX.x, interpPositionY.x, interpPositionZ.x);
-    
+    PerObjectBuffer obj = perObjectBuffer[md.objAndMesh.x];
+
+    float4x4 objectToClip = mul(obj.model, gs_viewProj);
+    float4 clip0 = mul(float4(p0, 1.0f), objectToClip);
+    float4 clip1 = mul(float4(p1, 1.0f), objectToClip);
+    float4 clip2 = mul(float4(p2, 1.0f), objectToClip);
+
+    float2 winSize = float2(gs_screenW, gs_screenH);
+    float2 pixelUv = (float2(pixel) + 0.5f) / winSize;
+    float2 pixelNdc = float2(pixelUv.x * 2.0f - 1.0f, (1.0f - pixelUv.y) * 2.0f - 1.0f);
+
+    BarycentricDeriv bary = CalcFullBary(clip0, clip1, clip2, pixelNdc, winSize);
+
+    // Attribute-only loads
+    float3 n0 = LoadNormalOnly(o0, vertexBuffer);
+    float3 n1 = LoadNormalOnly(o1, vertexBuffer);
+    float3 n2 = LoadNormalOnly(o2, vertexBuffer);
+
+    float2 uv0 = LoadTexcoordOnly(o0, vertexBuffer, md.meshInfo.y);
+    float2 uv1 = LoadTexcoordOnly(o1, vertexBuffer, md.meshInfo.y);
+    float2 uv2 = LoadTexcoordOnly(o2, vertexBuffer, md.meshInfo.y);
+
+    // Interpolate UV + derivs
+    float3 interpU = InterpolateWithDeriv(bary, uv0.x, uv1.x, uv2.x);
+    float3 interpV = InterpolateWithDeriv(bary, uv0.y, uv1.y, uv2.y);
+
+    float2 uv = float2(interpU.x, interpV.x);
+    float2 dudx = float2(interpU.y, interpV.y);
+    float2 dudy = float2(interpU.z, interpV.z);
+
+    // Interpolate position in post-skinning/object space, then transform once
+    float3 interpPosX = InterpolateWithDeriv(bary, p0.x, p1.x, p2.x);
+    float3 interpPosY = InterpolateWithDeriv(bary, p0.y, p1.y, p2.y);
+    float3 interpPosZ = InterpolateWithDeriv(bary, p0.z, p1.z, p2.z);
+
+    float3 posOS = float3(interpPosX.x, interpPosY.x, interpPosZ.x);
+    float3 dpdxOS = float3(interpPosX.y, interpPosY.y, interpPosZ.y);
+    float3 dpdyOS = float3(interpPosX.z, interpPosY.z, interpPosZ.z);
+
+    float3 worldPosition = mul(float4(posOS, 1.0f), obj.model).xyz;
+
+    float3x3 M = (float3x3) obj.model;
+    float3 dpdx = mul(dpdxOS, M);
+    float3 dpdy = mul(dpdyOS, M);
+
+    // Interpolate normal in object space
+    float3 interpNX = InterpolateWithDeriv(bary, n0.x, n1.x, n2.x).x;
+    float3 interpNY = InterpolateWithDeriv(bary, n0.y, n1.y, n2.y).x;
+    float3 interpNZ = InterpolateWithDeriv(bary, n0.z, n1.z, n2.z).x;
+    float3 normalOS = normalize(float3(interpNX.x, interpNY.x, interpNZ.x));
+
     StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
-    float3x3 normalMatrix = (float3x3) normalMatrixBuffer[objectBuffer.normalMatrixBufferIndex];
-    
-    float3 worldNormal = normalize(mul(interpNormal, normalMatrix)).xyz;
-    
-    // TOOD: Maybe sacrifice a bit of depth precision to store face orientation?
-    // Calculate geometric normal to determine face orientation
-    float3 geoNormal = cross(v1WorldPos - v0WorldPos, v2WorldPos - v0WorldPos);
+    float3x3 normalMatrix = (float3x3) normalMatrixBuffer[obj.normalMatrixBufferIndex];
 
-    // Get camera position
-    StructuredBuffer<Camera> cameraBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
-    Camera cam = cameraBuffer[perFrameBuffer.mainCameraIndex];
-    float3 viewVec = worldPosition - cam.positionWorldSpace.xyz;
+    float3 worldNormal = normalize(mul(normalOS, normalMatrix));
 
-    // If dot(geoNormal, viewVec) > 0, it's a back face (normal points same direction as view vector)
-    bool isBackFace = dot(geoNormal, viewVec) > 0.0f;
-
-    if (isBackFace)
-    {
+    if (!isFrontFace) {
         worldNormal = -worldNormal;
     }
-    
-    // Get material info
-    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
-    PerMeshBuffer meshBuffer = perMeshBuffer[instanceData.perMeshBufferIndex];
-    
-    float3 dpdx = float3(interpPositionX.y, interpPositionY.y, interpPositionZ.y);
-    float3 dpdy = float3(interpPositionX.z, interpPositionY.z, interpPositionZ.z);
-    
-    float2 dudx = float2(interpTexcoordX.y, interpTexcoordY.y);
-    float2 dudy = float2(interpTexcoordX.z, interpTexcoordY.z);
-    
+
+    // Material fetch
     MaterialInputs materialInputs;
     SampleMaterialCS(
-        interpTexcoord,
+        uv,
         worldNormal,
         worldPosition,
-        meshBuffer.materialDataIndex,
+        md.materialDataIndex,
         dpdx, dpdy, dudx, dudy,
         materialInputs);
-    
-// Motion vector reconstruction
 
-    // Rebuild per-vertex current clip positions from current world positions.
-    float4 v0World = float4(v0WorldPos, 1.0f);
-    float4 v1World = float4(v1WorldPos, 1.0f);
-    float4 v2World = float4(v2WorldPos, 1.0f);
+    // Motion vectors from per-pixel world position, no per-vertex reprojection
+    // TODO: I think this is correct? Validate.
+    float4 clipCur = mul(float4(worldPosition, 1.0f), gs_unjitteredViewProj);
 
-    float4 v0View = mul(v0World, cam.view);
-    float4 v1View = mul(v1World, cam.view);
-    float4 v2View = mul(v2World, cam.view);
+    float3 prevWorldPosition = worldPosition;
 
-    float4 v0Clip = mul(v0View, cam.unjitteredProjection);
-    float4 v1Clip = mul(v1View, cam.unjitteredProjection);
-    float4 v2Clip = mul(v2View, cam.unjitteredProjection);
-
-    // Previous-frame positions:
-    // - For rigid meshes: same as current position but with prevView (matches VS / mesh shader).
-    // - For skinned meshes: read from previous post-skinning buffer like GetVertexAttributes.
-    ByteAddressBuffer vertexBuffer = meshletSetup.vertexBuffer;
-    uint baseOffset = meshletSetup.postSkinningBufferOffset;
-    uint prevBaseOffset = meshletSetup.prevPostSkinningBufferOffset;
-    uint stride = meshletSetup.meshBuffer.vertexByteSize;
-    uint flags = meshletSetup.meshBuffer.vertexFlags;
-
-    float3 v0PrevPosObject;
-    float3 v1PrevPosObject;
-    float3 v2PrevPosObject;
-
-    if (flags & VERTEX_SKINNED)
+    uint vertexFlags = md.meshInfo.y;
+    if (vertexFlags & VERTEX_SKINNED)
     {
-        // Positions in the post-skinning buffer are already skinned, so "object space" here is
-        // effectively post-skinning space
-        uint byteOffset0Prev = prevBaseOffset + (meshletSetup.vertOffset + triangleIndices.x) * stride;
-        uint byteOffset1Prev = prevBaseOffset + (meshletSetup.vertOffset + triangleIndices.y) * stride;
-        uint byteOffset2Prev = prevBaseOffset + (meshletSetup.vertOffset + triangleIndices.z) * stride;
+        uint stride = md.meshInfo.x;
+        uint vertOffset = md.meshletInfo.x;
+        uint prevBase = md.postBases.y;
+        // For skinned meshes, reconstruct prev position from prev post-skinning buffer
 
-        v0PrevPosObject = LoadFloat3(byteOffset0Prev, vertexBuffer);
-        v1PrevPosObject = LoadFloat3(byteOffset1Prev, vertexBuffer);
-        v2PrevPosObject = LoadFloat3(byteOffset2Prev, vertexBuffer);
-    }
-    else
-    {
-        // Non-skinned: previous position == current position in object space.
-        v0PrevPosObject = v0.position;
-        v1PrevPosObject = v1.position;
-        v2PrevPosObject = v2.position;
+        uint o0Prev = prevBase + triIdx.x * stride;
+        uint o1Prev = prevBase + triIdx.y * stride;
+        uint o2Prev = prevBase + triIdx.z * stride;
+
+        float3 p0Prev = LoadPositionOnly(o0Prev, vertexBuffer);
+        float3 p1Prev = LoadPositionOnly(o1Prev, vertexBuffer);
+        float3 p2Prev = LoadPositionOnly(o2Prev, vertexBuffer);
+
+        float3 prevX = InterpolateWithDeriv(bary, p0Prev.x, p1Prev.x, p2Prev.x);
+        float3 prevY = InterpolateWithDeriv(bary, p0Prev.y, p1Prev.y, p2Prev.y);
+        float3 prevZ = InterpolateWithDeriv(bary, p0Prev.z, p1Prev.z, p2Prev.z);
+
+        float3 prevPosOS = float3(prevX.x, prevY.x, prevZ.x);
+        prevWorldPosition = mul(float4(prevPosOS, 1.0f), obj.prevModel).xyz;
     }
 
-    float4 v0PrevWorld = mul(float4(v0PrevPosObject, 1.0f), objectBuffer.model);
-    float4 v1PrevWorld = mul(float4(v1PrevPosObject, 1.0f), objectBuffer.model);
-    float4 v2PrevWorld = mul(float4(v2PrevPosObject, 1.0f), objectBuffer.model);
+    float4 clipPrev = mul(float4(prevWorldPosition, 1.0f), gs_prevUnjitteredViewProj);
 
-    float4 v0PrevView = mul(v0PrevWorld, cam.prevView);
-    float4 v1PrevView = mul(v1PrevWorld, cam.prevView);
-    float4 v2PrevView = mul(v2PrevWorld, cam.prevView);
+    float2 ndcCur = (clipCur.xy / clipCur.w);
+    float2 ndcPrev = (clipPrev.xy / clipPrev.w);
 
-    float4 v0PrevClip = mul(v0PrevView, cam.unjitteredProjection);
-    float4 v1PrevClip = mul(v1PrevView, cam.unjitteredProjection);
-    float4 v2PrevClip = mul(v2PrevView, cam.unjitteredProjection);
+    float2 motionVector = ndcCur - ndcPrev;
 
-    // Interpolate current / previous clip positions at this pixel
-    float3 interpClipX = InterpolateWithDeriv(bary, v0Clip.x, v1Clip.x, v2Clip.x);
-    float3 interpClipY = InterpolateWithDeriv(bary, v0Clip.y, v1Clip.y, v2Clip.y);
-    float3 interpClipZ = InterpolateWithDeriv(bary, v0Clip.z, v1Clip.z, v2Clip.z);
-    float3 interpClipW = InterpolateWithDeriv(bary, v0Clip.w, v1Clip.w, v2Clip.w);
-
-    float3 interpPrevClipX = InterpolateWithDeriv(bary, v0PrevClip.x, v1PrevClip.x, v2PrevClip.x);
-    float3 interpPrevClipY = InterpolateWithDeriv(bary, v0PrevClip.y, v1PrevClip.y, v2PrevClip.y);
-    float3 interpPrevClipZ = InterpolateWithDeriv(bary, v0PrevClip.z, v1PrevClip.z, v2PrevClip.z);
-    float3 interpPrevClipW = InterpolateWithDeriv(bary, v0PrevClip.w, v1PrevClip.w, v2PrevClip.w);
-
-    float4 clipCur = float4(interpClipX.x, interpClipY.x, interpClipZ.x, interpClipW.x);
-    float4 clipPrev = float4(interpPrevClipX.x, interpPrevClipY.x, interpPrevClipZ.x, interpPrevClipW.x);
-
-    float3 ndcCur = clipCur.xyz / clipCur.w;
-    float3 ndcPrev = clipPrev.xyz / clipPrev.w;
-
-    float2 motionVector = (ndcCur - ndcPrev).xy;
-    
-    // Write to G-buffer
+    // Write G-buffer (still unpacked, TODO)
     RWTexture2D<float4> normalsTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Normals)];
     RWTexture2D<float4> albedoTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Albedo)];
     RWTexture2D<float4> emissiveTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Emissive)];
@@ -295,7 +427,7 @@ void EvaluateGBuffer(in uint2 pixel)
 
     normalsTexture[pixel].xyz = materialInputs.normalWS;
     albedoTexture[pixel] = float4(materialInputs.albedo, materialInputs.ambientOcclusion);
-    emissiveTexture[pixel] = float4(materialInputs.emissive, 0.0f);
+    emissiveTexture[pixel].xyz = materialInputs.emissive;
     metallicRoughnessTexture[pixel] = float2(materialInputs.metallic, materialInputs.roughness);
     motionVectorTexture[pixel] = motionVector;
 }
@@ -319,10 +451,12 @@ void PrimaryDepthCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     Texture2D<uint2> visibilityTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
     
     uint visibilityDataY = visibilityTexture[pixel].y;
-    float depth = 2147483647; // TODO: Can we get true float max in a shader?
+    float depth = asfloat(0x7F7FFFFF); // FLT_MAX
     if (!(visibilityDataY == 0xFFFFFFFFu))
     {
         depth = asfloat(visibilityDataY);
+        // Sign bit was stolen for face orientation; clear it
+        depth = asfloat(asuint(depth) & 0x7FFFFFFF);
     }
 
     RWTexture2D<float> linearDepthTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::LinearDepthMap)];
