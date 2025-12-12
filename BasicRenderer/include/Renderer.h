@@ -164,7 +164,6 @@ private:
 	bool m_clusteredLighting = true;
     bool m_imageBasedLighting = true;
 	bool m_gtaoEnabled = true;
-	bool m_deferredRendering = true;
 	bool m_visibilityRendering = true;
 	bool m_occlusionCulling = true;
 	bool m_meshletCulling = true;

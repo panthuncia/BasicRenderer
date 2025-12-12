@@ -328,7 +328,6 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("drawBoundingSpheres", false);
     settingsManager.registerSetting<bool>("enableClusteredLighting", m_clusteredLighting);
     settingsManager.registerSetting<DirectX::XMUINT3>("lightClusterSize", m_lightClusterSize);
-	settingsManager.registerSetting<bool>("enableDeferredRendering", m_deferredRendering);
 	settingsManager.registerSetting<bool>("enableVisibilityRendering", m_visibilityRendering);
     settingsManager.registerSetting<bool>("collectPipelineStatistics", false);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
@@ -409,10 +408,6 @@ void Renderer::SetSettings() {
 		m_gtaoEnabled = newValue;
 		rebuildRenderGraph = true;
 		}));
-    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableDeferredRendering", [this](const bool& newValue) {
-		m_deferredRendering = newValue;
-		rebuildRenderGraph = true;
-		}));
 	m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableVisibilityRendering", [this](const bool& newValue) {
 		m_visibilityRendering = newValue;
 		rebuildRenderGraph = true;
@@ -473,26 +468,21 @@ void Renderer::SetSettings() {
 		rebuildRenderGraph = true;
 		}));
 
-    // If Mesh Shaders are disabled, Indirect Draws MUST be disabled.
-    settingsManager.registerDependency<bool, bool>("enableMeshShader", "enableIndirectDraws",
-        [](bool meshShaderEnabled, bool currentIndirectDraws) {
-            // If mesh shaders are off, force indirect draws off. Otherwise keep current value.
-            return meshShaderEnabled ? currentIndirectDraws : false;
-        });
-    // If Occlusion Culling is enabled, Deferred Rendering MUST be enabled.
-    settingsManager.registerDependency<bool, bool>("enableOcclusionCulling", "enableDeferredRendering",
-        [](bool occlusionCulling, bool currentDeferred) {
-            // If occlusion culling is on, force deferred on.
-            return occlusionCulling ? true : currentDeferred;
-        });
-	// Occlusion culling requires meshlet culling to be enabled.
-    settingsManager.registerDependency<bool, bool>("enableOcclusionCulling", "enableMeshletCulling",
-        [](bool occlusionCulling, bool currentMeshletCulling) {
-			// If occlusion culling is
-            return occlusionCulling ? true : currentMeshletCulling;
-		});
 
+	// Indirect draws require mesh shaders (due to not having implemented indirect draws with traditional pipelines)
+	settingsManager.addImplicationConstraint("enableIndirectDraws", "enableMeshShader");
 
+	// Occlusion culling requires meshlet culling (due to object occlusion and meshlet occlusion not being separate yet)
+	settingsManager.addImplicationConstraint("enableOcclusionCulling", "enableMeshletCulling");
+
+	// Visibility rendering requires mesh shaders (due to not having implemented visibility VS)
+    settingsManager.addImplicationConstraint("enableVisibilityRendering", "enableMeshShader");
+
+    // Visibility rendering requires meshlet culling (due to reliance on visible clusters list)
+	settingsManager.addImplicationConstraint("enableVisibilityRendering", "enableMeshletCulling");
+
+    //Visibility rendering requires indirect draws (because of a bug) TODO: fix
+	settingsManager.addImplicationConstraint("enableVisibilityRendering", "enableIndirectDraws");
 }
 
 void Renderer::ToggleMeshShaders(bool useMeshShaders) {
@@ -803,9 +793,6 @@ void Renderer::Render() {
 	if (m_clusteredLighting) {
 		globalPSOFlags |= PSOFlags::PSO_CLUSTERED_LIGHTING;
 	}
-	if (m_deferredRendering) {
-		globalPSOFlags |= PSOFlags::PSO_DEFERRED;
-	}
     if (m_screenSpaceReflections) {
         globalPSOFlags |= PSOFlags::PSO_SCREENSPACE_REFLECTIONS;
     }
@@ -921,6 +908,7 @@ void Renderer::Cleanup() {
     m_hierarchySystem.destruct();
     m_settingsSubscriptions.clear();
     Material::DestroyDefaultMaterial();
+    Menu::GetInstance().Cleanup();
     ECSManager::GetInstance().GetWorld().release();
     DeletionManager::GetInstance().Cleanup();
 }
@@ -1097,11 +1085,22 @@ void Renderer::CreateRenderGraph() {
 
     CreateGBufferResources(newGraph.get());
 
-	newGraph->BuildComputePass("ClearVisibilityBufferPass")
-        .Build<ClearVisibilityBufferPass>();
+    if (m_visibilityRendering) {
+        newGraph->BuildComputePass("ClearVisibilityBufferPass")
+            .Build<ClearVisibilityBufferPass>();
+    }
 
     // Reset visible cluster table counter
-    if (m_useMeshShaders) {
+    if (m_meshletCulling) {
+        // Create mesh cluster id buffer, two UINTs per cluster, used by visibility buffer and occlusion culling
+        // 2^25 visible clusters allowed due to index precision
+        auto clusterIDBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(static_cast<size_t>(pow(2, 25)), sizeof(VisibleClusterInfo), true, false);
+        clusterIDBuffer->SetName(L"Visible Cluster Table");
+        newGraph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTable, clusterIDBuffer);
+        auto clusterIDBufferCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(UINT), true, false);
+        clusterIDBufferCounter->SetName(L"Visible Cluster Table Counter");
+        newGraph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTableCounter, clusterIDBufferCounter);
+
         newGraph->BuildRenderPass("VisibleClusterTableCounterResetPass")
             .Build<VisibleClusterTableCounterResetPass>();
     }

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <functional>
 #include <memory>
@@ -124,6 +124,259 @@ public:
                 }
             });
         m_dependencySubscriptions.push_back(std::move(sub));
+    }
+
+    // Convenience helpers for common logical constraint patterns.
+    //
+    // Naming notes:
+    // - "Implication" means A ⇒ B (if A then B).
+    // - "Equivalence" means A ⇔ B (A if-and-only-if B).
+    // - "Exclusion" means ¬(A ∧ B) (not both true).
+    // - These helpers *enforce* constraints by writing settings when violated.
+    //
+    // Important: if you want a constraint to hold no matter which side the user edits,
+    // you typically need dependencies in both directions (or a dedicated observer-based solver).
+
+    // -----------------------------------------------------------------------------
+    // Generic value implication: (controller == requiredValue) ⇒ (controlled = impliedValue)
+    // If antecedent is false, controlled is left unchanged.
+    template<typename TController, typename TControlled>
+    void addImplicationEqValue(const std::string& controllerName,
+        const std::string& controlledName,
+        const TController& requiredValue,
+        const TControlled& impliedValue)
+    {
+        registerDependency<TController, TControlled>(
+            controllerName,
+            controlledName,
+            [requiredValue, impliedValue](const TController& ctrl, const TControlled& current) {
+                // (ctrl == requiredValue) ⇒ (controlled := impliedValue)
+                return (ctrl == requiredValue) ? impliedValue : current;
+            });
+    }
+
+    // Generic "functional dependence":
+    // controlled := f(controller, currentControlled)
+    template<typename TController, typename TControlled, typename F>
+    void addFunctionalDependency(const std::string& controllerName,
+        const std::string& controlledName,
+        F&& computeNewValue)
+    {
+        registerDependency<TController, TControlled>(
+            controllerName,
+            controlledName,
+            [fn = std::forward<F>(computeNewValue)](const TController& ctrl, const TControlled& current) {
+                return fn(ctrl, current);
+            });
+    }
+
+    // -----------------------------------------------------------------------------
+    // Bool implication: A ⇒ B
+    //
+    // - If A becomes true, force B true.
+    // - If B becomes false, force A false.
+    //
+    //  A on  => B on
+    //  B off => A off
+    //  A off => B unconstrained
+    void addImplicationConstraint(const std::string& antecedentName,
+        const std::string& consequentName)
+    {
+        // Antecedent → Consequent : A ⇒ B
+        registerDependency<bool, bool>(
+            antecedentName,
+            consequentName,
+            [](bool A, bool Bcur) {
+                // A ⇒ B  (if A is true, force B true)
+                return A ? true : Bcur;
+            });
+
+        // Contrapositive (enforcement direction): ¬B ⇒ ¬A
+        registerDependency<bool, bool>(
+            consequentName,
+            antecedentName,
+            [](bool B, bool Acur) {
+                // ¬B ⇒ ¬A (if B is false, force A false)
+                return (!B) ? false : Acur;
+            });
+    }
+
+    // Bool implication with explicit truth values:
+    // (A == aVal) ⇒ (B = bVal), enforced from either side
+    //
+    // Enforcement behavior:
+    // - If A becomes aVal, force B to bVal.
+    // - If B becomes not bVal, force A to not aVal.
+    void addImplicationConstraint(const std::string& AName, bool aVal,
+        const std::string& BName, bool bVal)
+    {
+        registerDependency<bool, bool>(
+            AName,
+            BName,
+            [aVal, bVal](bool A, bool Bcur) {
+                // (A == aVal) ⇒ (B := bVal)
+                return (A == aVal) ? bVal : Bcur;
+            });
+
+        registerDependency<bool, bool>(
+            BName,
+            AName,
+            [aVal, bVal](bool B, bool Acur) {
+                // ¬(B == bVal) ⇒ ¬(A == aVal)
+                // i.e. if B != bVal, force A != aVal
+                return (B != bVal) ? (!aVal) : Acur;
+            });
+    }
+
+    // -----------------------------------------------------------------------------
+    // Equivalence: A ⇔ B  (same-typed settings; changes propagate both ways)
+    //
+    // Logical relation: (A == B) as an invariant.
+    // Implementation: mirror changes via observers, avoiding infinite loops via != check.
+    template<typename T>
+    void addEquivalence(const std::string& nameA, const std::string& nameB)
+    {
+        // A -> B
+        {
+            auto sub = addObserver<T>(nameA,
+                [this, nameB](const T& newVal) {
+                    auto getterB = getSettingGetter<T>(nameB);
+                    T curB = getterB();
+                    if (curB != newVal) {
+                        getSettingSetter<T>(nameB)(newVal);
+                    }
+                });
+            m_dependencySubscriptions.push_back(std::move(sub));
+        }
+
+        // B -> A
+        {
+            auto sub = addObserver<T>(nameB,
+                [this, nameA](const T& newVal) {
+                    auto getterA = getSettingGetter<T>(nameA);
+                    T curA = getterA();
+                    if (curA != newVal) {
+                        getSettingSetter<T>(nameA)(newVal);
+                    }
+                });
+            m_dependencySubscriptions.push_back(std::move(sub));
+        }
+    }
+
+    // Exclusion: ¬(A ∧ B)  (mutually exclusive)
+    // If either becomes true, force the other false.
+    // Unline XOR, this allows both to be false.
+    void addExclusion(const std::string& nameA, const std::string& nameB)
+    {
+        // A ⇒ ¬B
+        registerDependency<bool, bool>(
+            nameA,
+            nameB,
+            [](bool A, bool Bcur) {
+                // if A then not B
+                return A ? false : Bcur;
+            });
+
+        // B ⇒ ¬A
+        registerDependency<bool, bool>(
+            nameB,
+            nameA,
+            [](bool B, bool Acur) {
+                // if B then not A
+                return B ? false : Acur;
+            });
+    }
+
+    // XOR (exactly one true): (A ⊕ B)
+    // Equivalent to: (A ∨ B) ∧ ¬(A ∧ B)
+    //
+    // - If user turns one ON, force the other OFF.  (exclusion)
+    // - If user turns one OFF and that would make both OFF, force the other ON.
+    void addExclusiveOr(const std::string& nameA, const std::string& nameB)
+    {
+        // First enforce ¬(A ∧ B)
+        addExclusion(nameA, nameB);
+
+        // Now enforce (A ∨ B)
+        // If A becomes false while B is false -> force B true
+        {
+            auto sub = addObserver<bool>(nameA,
+                [this, nameB](bool Anew) {
+                    if (Anew) return; // OR already satisfied
+                    auto getB = getSettingGetter<bool>(nameB);
+                    if (!getB()) {
+                        getSettingSetter<bool>(nameB)(true);
+                    }
+                });
+            m_dependencySubscriptions.push_back(std::move(sub));
+        }
+
+        // If B becomes false while A is false -> force A true
+        {
+            auto sub = addObserver<bool>(nameB,
+                [this, nameA](bool Bnew) {
+                    if (Bnew) return; // OR already satisfied
+                    auto getA = getSettingGetter<bool>(nameA);
+                    if (!getA()) {
+                        getSettingSetter<bool>(nameA)(true);
+                    }
+                });
+            m_dependencySubscriptions.push_back(std::move(sub));
+        }
+    }
+
+    //
+    // Group constraints (bool): AtMostOne / ExactlyOne
+    //
+
+    // AtMostOneTrue: for a set S, enforce that no two are true.
+    // Logical relation: for all i!=j, ¬(Si ∧ Sj)
+    void addAtMostOneTrue(const std::vector<std::string>& names)
+    {
+        for (size_t i = 0; i < names.size(); ++i) {
+            const std::string& controller = names[i];
+            auto sub = addObserver<bool>(controller,
+                [this, names, controller](bool controllerVal) {
+                    if (!controllerVal) return;
+                    // controller became true -> force all others false
+                    for (const auto& other : names) {
+                        if (other == controller) continue;
+                        auto getOther = getSettingGetter<bool>(other);
+                        if (getOther()) {
+                            getSettingSetter<bool>(other)(false);
+                        }
+                    }
+                });
+            m_dependencySubscriptions.push_back(std::move(sub));
+        }
+    }
+
+    // ExactlyOneTrue: for a set S, enforce:
+    // - AtMostOneTrue(S)
+    // - AtLeastOneTrue(S)  (if user turns the last true off, pick a deterministic fallback)
+    //
+    // Fallback policy: if all become false, force names[0] true.
+    void addExactlyOneTrue(const std::vector<std::string>& names)
+    {
+        if (names.empty()) return;
+
+        addAtMostOneTrue(names);
+
+        // Enforce "at least one" with a fallback.
+        // Whenever any setting flips, if all are false -> force the first true.
+        for (const auto& n : names) {
+            auto sub = addObserver<bool>(n,
+                [this, names](bool /*unused*/) {
+                    bool anyTrue = false;
+                    for (const auto& s : names) {
+                        if (getSettingGetter<bool>(s)()) { anyTrue = true; break; }
+                    }
+                    if (!anyTrue) {
+                        getSettingSetter<bool>(names[0])(true);
+                    }
+                });
+            m_dependencySubscriptions.push_back(std::move(sub));
+        }
     }
 
 private:

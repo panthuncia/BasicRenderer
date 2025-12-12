@@ -4,7 +4,6 @@
 
 #include "ShaderBuffers.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
-#include "Materials/MaterialBuckets.h"
 #include "Interfaces/IResourceProvider.h"
 
 class Mesh;

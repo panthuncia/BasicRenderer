@@ -291,21 +291,14 @@ PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, MaterialCompileFlags m
     rhi::SubobjDepth soDepth{ ds };
 
     rhi::RenderTargets rts{};
-    if (psoFlags & PSO_DEFERRED) {
-        rts.count = 6;
-        rts.formats[0] = rhi::Format::R32G32B32A32_Float;   // Normals
-        rts.formats[1] = rhi::Format::R16G16_Float;         // Motion vector
-        rts.formats[2] = rhi::Format::R32_Float;            // Depth
-        rts.formats[3] = rhi::Format::R8G8B8A8_UNorm;       // Albedo
-        rts.formats[4] = rhi::Format::R8G8_UNorm;           // Metallic+Roughness
-        rts.formats[5] = rhi::Format::R16G16B16A16_Float;   // Emissive
-    }
-    else {
-        rts.count = 3;
-        rts.formats[0] = rhi::Format::R32G32B32A32_Float;   // Normals
-        rts.formats[1] = rhi::Format::R16G16_Float;         // Motion vector
-        rts.formats[2] = rhi::Format::R32_Float;            // Depth
-    }
+    rts.count = 6;
+    rts.formats[0] = rhi::Format::R32G32B32A32_Float;   // Normals
+    rts.formats[1] = rhi::Format::R16G16_Float;         // Motion vector
+    rts.formats[2] = rhi::Format::R32_Float;            // Depth
+    rts.formats[3] = rhi::Format::R8G8B8A8_UNorm;       // Albedo
+    rts.formats[4] = rhi::Format::R8G8_UNorm;           // Metallic+Roughness
+    rts.formats[5] = rhi::Format::R16G16B16A16_Float;   // Emissive
+
     rhi::SubobjRTVs soRTV{ rts };
 
     rhi::SubobjDSV    soDSV{ rhi::Format::D32_Float };
@@ -719,21 +712,14 @@ PipelineState PSOManager::CreateMeshPrePassPSO(
     rhi::SubobjDepth soDepth{ ds };
 
     rhi::RenderTargets rts{};
-    if (psoFlags & PSO_DEFERRED) {
-        rts.count = 6;
-        rts.formats[0] = rhi::Format::R32G32B32A32_Float;   // Normals
-        rts.formats[1] = rhi::Format::R16G16_Float;         // Motion vector
-        rts.formats[2] = rhi::Format::R32_Float;            // Depth
-        rts.formats[3] = rhi::Format::R8G8B8A8_UNorm;       // Albedo
-        rts.formats[4] = rhi::Format::R8G8_UNorm;           // Metallic+Roughness
-        rts.formats[5] = rhi::Format::R16G16B16A16_Float;   // Emissive
-    }
-    else {
-        rts.count = 3;
-        rts.formats[0] = rhi::Format::R32G32B32A32_Float;   // Normals
-        rts.formats[1] = rhi::Format::R16G16_Float;         // Motion vector
-        rts.formats[2] = rhi::Format::R32_Float;            // Depth
-    }
+    rts.count = 6;
+    rts.formats[0] = rhi::Format::R32G32B32A32_Float;   // Normals
+    rts.formats[1] = rhi::Format::R16G16_Float;         // Motion vector
+    rts.formats[2] = rhi::Format::R32_Float;            // Depth
+    rts.formats[3] = rhi::Format::R8G8B8A8_UNorm;       // Albedo
+    rts.formats[4] = rhi::Format::R8G8_UNorm;           // Metallic+Roughness
+    rts.formats[5] = rhi::Format::R16G16B16A16_Float;   // Emissive
+
     rhi::SubobjRTVs soRTV{ rts };
 
     rhi::SubobjDSV   soDSV{ rhi::Format::D32_Float };
@@ -804,21 +790,14 @@ PipelineState PSOManager::CreateMeshPPLLPSO(
     rhi::SubobjDepth     soDepth{ ds };
 
     rhi::RenderTargets   rts{};
-    if (psoFlags & PSO_DEFERRED) {
-        rts.count = 6;
-        rts.formats[0] = rhi::Format::R32G32B32A32_Float;
-        rts.formats[1] = rhi::Format::R16G16_Float;
-        rts.formats[2] = rhi::Format::R32_Float;
-        rts.formats[3] = rhi::Format::R8G8B8A8_UNorm;
-        rts.formats[4] = rhi::Format::R8G8_UNorm;
-        rts.formats[5] = rhi::Format::R16G16B16A16_Float;
-    }
-    else {
-        rts.count = 3;
-        rts.formats[0] = rhi::Format::R32G32B32A32_Float;
-        rts.formats[1] = rhi::Format::R16G16_Float;
-        rts.formats[2] = rhi::Format::R32_Float;
-    }
+    rts.count = 6;
+    rts.formats[0] = rhi::Format::R32G32B32A32_Float;
+    rts.formats[1] = rhi::Format::R16G16_Float;
+    rts.formats[2] = rhi::Format::R32_Float;
+    rts.formats[3] = rhi::Format::R8G8B8A8_UNorm;
+    rts.formats[4] = rhi::Format::R8G8_UNorm;
+    rts.formats[5] = rhi::Format::R16G16B16A16_Float;
+
     rhi::SubobjRTVs      soRTV{ rts };
 
     rhi::SubobjDSV       soDSV{ rhi::Format::D32_Float };
@@ -965,11 +944,11 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags, MaterialCompi
 		macro.Name = L"PSO_PREPASS";
 		defines.insert(defines.begin(), macro);
 	}
-	if (psoFlags & PSOFlags::PSO_DEFERRED) {
+    if (psoFlags & PSOFlags::PSO_DEFERRED) {
         DxcDefine macro;
-		macro.Value = L"1";
-		macro.Name = L"PSO_DEFERRED";
-		defines.insert(defines.begin(), macro);
+        macro.Value = L"1";
+        macro.Name = L"PSO_DEFERRED";
+        defines.insert(defines.begin(), macro);
 	}
     if (!(psoFlags & PSOFlags::PSO_SCREENSPACE_REFLECTIONS)) {
         DxcDefine macro;

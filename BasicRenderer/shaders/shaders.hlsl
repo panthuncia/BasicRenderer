@@ -132,11 +132,9 @@ struct PrePassPSOutput
     float4 normal;
     float2 motionVector;
     float linearDepth;
-#if defined(PSO_DEFERRED)
     float4 albedo;
     float2 metallicRoughness;
     float4 emissive;
-#endif
 };
 
 PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET

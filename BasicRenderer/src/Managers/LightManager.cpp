@@ -6,7 +6,6 @@
 #include "Resources/ShadowMaps.h"
 #include "Resources/DynamicResource.h"
 #include "Managers/IndirectCommandBufferManager.h"
-#include "Materials/MaterialBuckets.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Managers/ViewManager.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
