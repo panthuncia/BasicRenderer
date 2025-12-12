@@ -17,6 +17,7 @@
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
 
+// TODO: Prepass for forward-rendered geometry, requires better object and indirect workload queries
 class GBufferPass : public RenderPass {
 public:
     GBufferPass(
