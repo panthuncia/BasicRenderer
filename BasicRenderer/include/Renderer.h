@@ -31,6 +31,7 @@
 #include "Managers/ObjectManager.h"
 #include "Managers/IndirectCommandBufferManager.h"
 #include "Managers/EnvironmentManager.h"
+#include "Managers/MaterialManager.h"
 #include "Scene/MovementState.h"
 #include "Scene/Components.h"
 #include "../generated/BuiltinResources.h"
@@ -123,6 +124,7 @@ private:
     std::unique_ptr<IndirectCommandBufferManager> m_pIndirectCommandBufferManager = nullptr;
     std::unique_ptr<ViewManager> m_pViewManager = nullptr;
 	std::unique_ptr<EnvironmentManager> m_pEnvironmentManager = nullptr;
+	std::unique_ptr<MaterialManager> m_pMaterialManager = nullptr;
 
 	ManagerInterface m_managerInterface;
     flecs::system m_hierarchySystem;
@@ -162,7 +164,7 @@ private:
 	bool m_clusteredLighting = true;
     bool m_imageBasedLighting = true;
 	bool m_gtaoEnabled = true;
-	bool m_deferredRendering = true;
+	bool m_visibilityRendering = true;
 	bool m_occlusionCulling = true;
 	bool m_meshletCulling = true;
     bool m_bloom = true;

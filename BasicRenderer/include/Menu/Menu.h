@@ -50,6 +50,9 @@ public:
     void Render(RenderContext& context);
     bool HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 	void SetRenderGraph(std::shared_ptr<RenderGraph> renderGraph) { m_renderGraph = renderGraph; }
+    void Cleanup() {
+		m_settingSubscriptions.clear();
+    }
 
 private:
     rhi::DescriptorHeapPtr g_pd3dSrvDescHeap;
@@ -143,9 +146,9 @@ private:
 	std::function<bool()> getClusteredLightingEnabled;
 	std::function<void(bool)> setClusteredLightingEnabled;
 
-	bool deferredRendering = true;
-	std::function<bool()> getDeferredRenderingEnabled;
-	std::function<void(bool)> setDeferredRenderingEnabled;
+	bool m_visibilityRenderingEnabled = true;
+	std::function<bool()> getVisibilityRenderingEnabled;
+	std::function<void(bool)> setVisibilityRenderingEnabled;
 
 	bool m_gtaoEnabled = true;
 	std::function<bool()> getGTAOEnabled;
@@ -180,6 +183,7 @@ private:
     std::function<void(bool)> setUseAsyncCompute;
 
 	std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)> appendScene;
+	std::vector<SettingsManager::Subscription> m_settingSubscriptions;
 };
 
 inline Menu& Menu::GetInstance() {
@@ -228,6 +232,14 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
 
     g_hSwapChainWaitableObject = m_pSwapChain->GetFrameLatencyWaitableObject();
 
+	// Helper to set an observer on a setting which updates local copies of settings
+    auto observerSetting = [&](auto& localCopy, const std::string& settingName) {
+        m_settingSubscriptions.push_back(SettingsManager::GetInstance().addObserver<std::decay_t<decltype(localCopy)>>(settingName,
+            [&localCopy](const std::decay_t<decltype(localCopy)>& newValue) {
+                localCopy = newValue;
+            }));
+		};
+
 	getEnvironmentName = SettingsManager::GetInstance().getSettingGetter<std::string>("environmentName");
 	setEnvironment = SettingsManager::GetInstance().getSettingSetter<std::string>("environmentName");
 
@@ -235,14 +247,17 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
     setImageBasedLightingEnabled = settingsManager.getSettingSetter<bool>("enableImageBasedLighting");
 	imageBasedLightingEnabled = getImageBasedLightingEnabled();
+	observerSetting(imageBasedLightingEnabled, "enableImageBasedLighting");
 
 	getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
 	setPunctualLightingEnabled = settingsManager.getSettingSetter<bool>("enablePunctualLighting");
 	punctualLightingEnabled = getPunctualLightingEnabled();
+	observerSetting(punctualLightingEnabled, "enablePunctualLighting");
 
 	getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
 	setShadowsEnabled = settingsManager.getSettingSetter<bool>("enableShadows");
 	shadowsEnabled = getShadowsEnabled();
+	observerSetting(shadowsEnabled, "enableShadows");
 
     hdrFiles = GetFilesInDirectoryMatchingExtension(environmentsDir.wstring(), L".hdr");
 	environmentName = getEnvironmentName();
@@ -259,54 +274,67 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
 	setMeshShaderEnabled = settingsManager.getSettingSetter<bool>("enableMeshShader");
 	getMeshShaderEnabled = settingsManager.getSettingGetter<bool>("enableMeshShader");
 	meshShaderEnabled = getMeshShaderEnabled();
+	observerSetting(meshShaderEnabled, "enableMeshShader");
 
 	setIndirectDrawsEnabled = settingsManager.getSettingSetter<bool>("enableIndirectDraws");
 	getIndirectDrawsEnabled = settingsManager.getSettingGetter<bool>("enableIndirectDraws");
 	indirectDrawsEnabled = getIndirectDrawsEnabled();
+	observerSetting(indirectDrawsEnabled, "enableIndirectDraws");
 
 	getOcclusionCullingEnabled = settingsManager.getSettingGetter<bool>("enableOcclusionCulling");
 	setOcclusionCullingEnabled = settingsManager.getSettingSetter<bool>("enableOcclusionCulling");
 	occlusionCulling = getOcclusionCullingEnabled();
+	observerSetting(occlusionCulling, "enableOcclusionCulling");
 
 	getMeshletCullingEnabled = settingsManager.getSettingGetter<bool>("enableMeshletCulling");
 	setMeshletCullingEnabled = settingsManager.getSettingSetter<bool>("enableMeshletCulling");
 	meshletCulling = getMeshletCullingEnabled();
+	observerSetting(meshletCulling, "enableMeshletCulling");
 
 	setWireframeEnabled = settingsManager.getSettingSetter<bool>("enableWireframe");
 	getWireframeEnabled = settingsManager.getSettingGetter<bool>("enableWireframe");
 	wireframeEnabled = getWireframeEnabled();
+	observerSetting(wireframeEnabled, "enableWireframe");
 
 	setAllowTearing = settingsManager.getSettingSetter<bool>("allowTearing");
 	getAllowTearing = settingsManager.getSettingGetter<bool>("allowTearing");
 	allowTearing = getAllowTearing();
+	observerSetting(allowTearing, "allowTearing");
 
 	setDrawBoundingSpheres = settingsManager.getSettingSetter<bool>("drawBoundingSpheres");
 	getDrawBoundingSpheres = settingsManager.getSettingGetter<bool>("drawBoundingSpheres");
 	drawBoundingSpheres = getDrawBoundingSpheres();
+	observerSetting(drawBoundingSpheres, "drawBoundingSpheres");
 
 	setClusteredLightingEnabled = settingsManager.getSettingSetter<bool>("enableClusteredLighting");
 	getClusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting");
 	clusteredLighting = getClusteredLightingEnabled();
+	observerSetting(clusteredLighting, "enableClusteredLighting");
 
-	setDeferredRenderingEnabled = settingsManager.getSettingSetter<bool>("enableDeferredRendering");
-	getDeferredRenderingEnabled = settingsManager.getSettingGetter<bool>("enableDeferredRendering");
-	deferredRendering = getDeferredRenderingEnabled();
+	setVisibilityRenderingEnabled = settingsManager.getSettingSetter<bool>("enableVisibilityRendering");
+	getVisibilityRenderingEnabled = settingsManager.getSettingGetter<bool>("enableVisibilityRendering");
+	m_visibilityRenderingEnabled = getVisibilityRenderingEnabled();
+	observerSetting(m_visibilityRenderingEnabled, "enableVisibilityRendering");
 
 	getGTAOEnabled = settingsManager.getSettingGetter<bool>("enableGTAO");
 	setGTAOEnabled = settingsManager.getSettingSetter<bool>("enableGTAO");
 	m_gtaoEnabled = getGTAOEnabled();
+	observerSetting(m_gtaoEnabled, "enableGTAO");
 
 	setBloomEnabled = settingsManager.getSettingSetter<bool>("enableBloom");
 	getBloomEnabled = settingsManager.getSettingGetter<bool>("enableBloom");
 	m_bloomEnabled = getBloomEnabled();
+	observerSetting(m_bloomEnabled, "enableBloom");
 
 	setScreenSpaceReflectionsEnabled = settingsManager.getSettingSetter<bool>("enableScreenSpaceReflections");
 	getScreenSpaceReflectionsEnabled = settingsManager.getSettingGetter<bool>("enableScreenSpaceReflections");
 	m_screenSpaceReflectionsEnabled = getScreenSpaceReflectionsEnabled();
+	observerSetting(m_screenSpaceReflectionsEnabled, "enableScreenSpaceReflections");
 
     setJitterEnabled = settingsManager.getSettingSetter<bool>("enableJitter");
     getJitterEnabled = settingsManager.getSettingGetter<bool>("enableJitter");
     m_jitterEnabled = getJitterEnabled();
+	observerSetting(m_jitterEnabled, "enableJitter");
 
 	getCollectPipelineStatistics = settingsManager.getSettingGetter<bool>("collectPipelineStatistics");
 	setCollectPipelineStatistics = settingsManager.getSettingSetter<bool>("collectPipelineStatistics");
@@ -315,14 +343,17 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     getUpscalingMode = settingsManager.getSettingGetter<UpscalingMode>("upscalingMode");
     setUpscalingMode = settingsManager.getSettingSetter<UpscalingMode>("upscalingMode");
     m_currentUpscalingMode = getUpscalingMode();
+	observerSetting(m_currentUpscalingMode, "upscalingMode");
 
 	getUpscalingQualityMode = settingsManager.getSettingGetter<UpscaleQualityMode>("upscalingQualityMode");
     setUpscalingQualityMode = settingsManager.getSettingSetter<UpscaleQualityMode>("upscalingQualityMode");
     m_currentUpscalingQualityMode = getUpscalingQualityMode();
+	observerSetting(m_currentUpscalingQualityMode, "upscalingQualityMode");
 
 	getUseAsyncCompute = settingsManager.getSettingGetter<bool>("useAsyncCompute");
     setUseAsyncCompute = settingsManager.getSettingSetter<bool>("useAsyncCompute");
     m_useAsyncCompute = getUseAsyncCompute();
+	observerSetting(m_useAsyncCompute, "useAsyncCompute");
 
 	appendScene = settingsManager.getSettingGetter<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene")();
 
@@ -376,39 +407,18 @@ inline void Menu::Render(RenderContext& context) {
 		}
         if (m_meshShadersSupported) {
             if (ImGui::Checkbox("Use Mesh Shaders", &meshShaderEnabled)) {
-                if (!meshShaderEnabled) {
-                    if (indirectDrawsEnabled) {
-                        setIndirectDrawsEnabled(false);
-                    }
-                }
-                else {
-                    if (indirectDrawsEnabled) {
-                        setIndirectDrawsEnabled(true);
-                    }
-                }
                 setMeshShaderEnabled(meshShaderEnabled);
             }
         }
         else {
             ImGui::Text("Your GPU does not support mesh shaders!");
         }
-		if (!meshShaderEnabled) {
-			ImGui::Text("Mesh Shaders must be enabled to use Indirect Draws.");
-		}
-        else {
-            if (ImGui::Checkbox("Use Indirect Draws", &indirectDrawsEnabled)) {
-                setIndirectDrawsEnabled(indirectDrawsEnabled);
-            }
+        if (ImGui::Checkbox("Use Indirect Draws", &indirectDrawsEnabled)) {
+            setIndirectDrawsEnabled(indirectDrawsEnabled);
         }
-		if (ImGui::Checkbox("Occlusion Culling", &occlusionCulling)) {
-			setOcclusionCullingEnabled(occlusionCulling);
-            if (occlusionCulling) {
-				if (!deferredRendering) { // Occlusion culling requires deferred rendering
-					setDeferredRenderingEnabled(true);
-					deferredRendering = true;
-                }
-            }
-		}
+        if (ImGui::Checkbox("Occlusion Culling", &occlusionCulling)) {
+            setOcclusionCullingEnabled(occlusionCulling);
+        }
 		if (ImGui::Checkbox("Meshlet Culling", &meshletCulling)) {
 			setMeshletCullingEnabled(meshletCulling);
 		}
@@ -424,17 +434,9 @@ inline void Menu::Render(RenderContext& context) {
         if (ImGui::Checkbox("Clustered Lighting", &clusteredLighting)) {
 			setClusteredLightingEnabled(clusteredLighting);
         }
-        if (occlusionCulling) {
-            ImGui::Text("Deferred rendering cannot be disabled if occlusion culling is on");
-        }
-        else if (m_screenSpaceReflectionsEnabled) {
-            ImGui::Text("Deferred rendering cannot be disabled if SSR is on");
-        }
-        else {
-            if (ImGui::Checkbox("Deferred Rendering", &deferredRendering)) {
-                setDeferredRenderingEnabled(deferredRendering);
-            }
-        }
+        if (ImGui::Checkbox("Visibility Rendering", &m_visibilityRenderingEnabled)) {
+            setVisibilityRenderingEnabled(m_visibilityRenderingEnabled);
+		}
 		if (ImGui::Checkbox("Enable GTAO", &m_gtaoEnabled)) {
 			setGTAOEnabled(m_gtaoEnabled);
 		}
@@ -443,10 +445,6 @@ inline void Menu::Render(RenderContext& context) {
 		}
         if (ImGui::Checkbox("Enable Screen Space Reflections", &m_screenSpaceReflectionsEnabled)) {
             setScreenSpaceReflectionsEnabled(m_screenSpaceReflectionsEnabled);
-            if (!deferredRendering) { // SSR requires deferred rendering
-                setDeferredRenderingEnabled(true);
-                deferredRendering = true;
-            }
 		}
         if (ImGui::Checkbox("Enable Jitter", &m_jitterEnabled)) {
             setJitterEnabled(m_jitterEnabled);

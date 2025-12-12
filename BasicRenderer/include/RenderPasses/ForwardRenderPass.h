@@ -36,7 +36,6 @@ public:
         getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
         m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
         m_clusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting")();
-        m_deferred = settingsManager.getSettingGetter<bool>("enableDeferredRendering")();
     }
 
     ~ForwardRenderPass() {
@@ -281,7 +280,6 @@ private:
     unsigned int m_aoTextureDescriptorIndex;
     bool m_gtaoEnabled = true;
     bool m_clusteredLightingEnabled = true;
-    bool m_deferred = false;
 
 	RenderPhase m_renderPhase = Engine::Primary::ForwardPass;
 

@@ -6,15 +6,6 @@ using Microsoft::WRL::ComPtr;
 
 thread_local CommandRecordingManager::ThreadState CommandRecordingManager::s_tls{};
 
-static D3D12_COMMAND_LIST_TYPE kListTypeFor(QueueKind qk) {
-    switch (qk) {
-    case QueueKind::Graphics: return D3D12_COMMAND_LIST_TYPE_DIRECT;
-    case QueueKind::Compute:  return D3D12_COMMAND_LIST_TYPE_COMPUTE;
-    case QueueKind::Copy:     return D3D12_COMMAND_LIST_TYPE_COPY;
-    default:                  return D3D12_COMMAND_LIST_TYPE_DIRECT;
-    }
-}
-
 CommandRecordingManager::CommandRecordingManager(const Init& init) {
     m_bind[static_cast<size_t>(QueueKind::Graphics)] =
     { init.graphicsQ, init.graphicsF, init.graphicsPool, rhi::QueueKind::Graphics };

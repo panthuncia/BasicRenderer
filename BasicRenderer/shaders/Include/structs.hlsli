@@ -17,8 +17,11 @@ struct PSInput {
 struct VisBufferPSInput
 {
     float4 position : SV_POSITION; // Screen-space position, required for rasterization
-    uint meshletIndex : TEXCOORD0;
-    uint meshletVertexIndex : TEXCOORD1;
+    nointerpolation uint visibleClusterTableIndex : TEXCOORD0;
+    float linearDepth : TEXCOORD1;
+#if defined (PSO_ALPHA_TEST)
+    float2 texcoord : TEXCOORD2;
+#endif
 };
 
 struct ClippingPlane {
@@ -142,7 +145,7 @@ struct MaterialInfo {
     uint4 baseColorChannels;
     
     uint3 normalChannels;
-    float pad0;
+    uint compileFlagsID;
     
     uint aoChannel;
     uint heightChannel;
@@ -150,18 +153,11 @@ struct MaterialInfo {
     uint roughnessChannel;
 
     uint3 emissiveChannels;
-    float pad1;
+    float pad0;
 };
 
 struct SingleMatrix {
     row_major matrix value;
-};
-
-struct Meshlet {
-    uint VertOffset;
-    uint TriOffset;
-    uint VertCount;
-    uint TriCount;
 };
 
 struct PerObjectBuffer {
@@ -190,10 +186,14 @@ struct PerMeshBuffer {
 };
 
 struct PerMeshInstanceBuffer {
+    uint perMeshBufferIndex;
+    uint perObjectBufferIndex;
     uint boneTransformBufferIndex;
     uint postSkinningVertexBufferOffset;
     uint meshletBoundsBufferStartIndex;
     uint meshletBitfieldStartIndex;
+    uint clusterToVisibleClusterTableStartIndex;
+    uint pad[1];
 };
 
 #define LIGHTS_PER_PAGE 12
@@ -311,6 +311,22 @@ struct LPMConstants
     uint displayMode;
     uint pad;
     float4x4 inputToOutputMatrix;
+};
+
+struct MaterialInputs
+{
+    float3 albedo;
+    float3 normalWS;
+    float3 emissive;
+    float metallic;
+    float roughness;
+    float opacity;
+    float ambientOcclusion;
+};
+
+struct VisibleClusterInfo {
+    uint2 drawcallIndexAndMeshletIndex; // .x = drawcall index, .y = meshlet local index
+    uint pad[2];
 };
 
 #endif // __STRUCTS_HLSL__

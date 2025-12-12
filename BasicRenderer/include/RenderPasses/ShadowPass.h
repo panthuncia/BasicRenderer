@@ -40,13 +40,15 @@ public:
             Builtin::NormalMatrixBuffer,
             Builtin::PerMeshBuffer,
             Builtin::PerMeshInstanceBuffer,
+            Builtin::PerMaterialDataBuffer,
             Builtin::PostSkinningVertices,
             Builtin::CameraBuffer,
             Builtin::Light::ViewResourceGroup,
             Builtin::Light::InfoBuffer,
             Builtin::Light::PointLightCubemapBuffer,
             Builtin::Light::DirectionalLightCascadeBuffer,
-            Builtin::Light::SpotLightMatrixBuffer)
+            Builtin::Light::SpotLightMatrixBuffer,
+            Builtin::MeshletCullingBitfieldGroup)
             .WithRenderTarget(Subresources(Builtin::Shadows::LinearShadowMaps, Mip{ 0, 1 }))
             .WithDepthReadWrite(Builtin::Shadows::ShadowMaps)
             .IsGeometryPass();
@@ -78,6 +80,7 @@ public:
         RegisterSRV(Builtin::CameraBuffer);
         RegisterSRV(Builtin::PerMeshInstanceBuffer);
         RegisterSRV(Builtin::PerMeshBuffer);
+        RegisterSRV(Builtin::PerMaterialDataBuffer);
 
         RegisterSRV(Builtin::Light::InfoBuffer);
         RegisterSRV(Builtin::Light::PointLightCubemapBuffer);

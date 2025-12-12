@@ -1,5 +1,4 @@
-﻿#include <directx/d3dx12.h> // Included here to avoid conflicts with Windows SDK headers
-#include <iostream>
+﻿#include <iostream>
 #include <Windows.h>
 #include <windowsx.h>
 #include <iostream>
@@ -11,6 +10,9 @@
 #include <io.h>        // _pipe, _dup2, _read, _close
 #include <fcntl.h>     // _O_BINARY
 #include <thread>
+#ifndef USE_PIX
+#define USE_PIX 1
+#endif
 #include <pix3.h>
 
 #include "Mesh/Mesh.h"
@@ -35,8 +37,6 @@ extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 614;}
 
 extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D\\"; }
 
-
-#define USE_PIX
 #pragma comment(lib, "WinPixEventRuntime.lib")
 
 Renderer renderer;
@@ -273,13 +273,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto tigerScene = LoadModel("models/tiger.glb");
     tigerScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
+	//auto shiba = LoadModel("models/shiba.glb");
+
     //auto usdScene = LoadModel("models/sponza.usdz");
     
     //auto bistro = LoadModel("models/bistroExterior.usdz");
     //auto wine = LoadModel("models/bistroInterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
-    //auto robot = LoadModel("models/robot.usdz");
+    auto robot = LoadModel("models/robot.usdz");
 
 	//auto sphereScene = LoadModel("models/sphere.glb");
 
@@ -293,11 +295,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     renderer.GetCurrentScene()->AppendScene(carScene->Clone());
     renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
     renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
+	//renderer.GetCurrentScene()->AppendScene(shiba->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(bistro->Clone());
     //renderer.GetCurrentScene()->AppendScene(wine->Clone());
     
-	//renderer.GetCurrentScene()->AppendScene(robot->Clone());
+	renderer.GetCurrentScene()->AppendScene(robot->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
 

@@ -1131,8 +1131,11 @@ namespace rhi {
 				return Result::InvalidArg;
 			}
 			pResource = T->res.Get();
-
-			desc.Format = T->fmt;
+			if (dv.formatOverride != Format::Unknown) {
+				desc.Format = ToDxgi(dv.formatOverride);
+			} else {
+				desc.Format = T->fmt;
+			}
 			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE1D;
 			desc.Texture1D.MipSlice = dv.texture1D.mipSlice;
 
@@ -1149,7 +1152,12 @@ namespace rhi {
 			}
 			pResource = T->res.Get();
 
-			desc.Format = T->fmt;
+			if (dv.formatOverride != Format::Unknown) {
+				desc.Format = ToDxgi(dv.formatOverride);
+			}
+			else {
+				desc.Format = T->fmt;
+			}
 			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE1DARRAY;
 			desc.Texture1DArray.MipSlice = dv.texture1DArray.mipSlice;
 			desc.Texture1DArray.FirstArraySlice = dv.texture1DArray.firstArraySlice;
@@ -1168,8 +1176,12 @@ namespace rhi {
 			}
 			pResource = T->res.Get();
 
-			desc.Format = T->fmt;
-			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+			if (dv.formatOverride != Format::Unknown) {
+				desc.Format = ToDxgi(dv.formatOverride);
+			}
+			else {
+				desc.Format = T->fmt;
+			}			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
 			desc.Texture2D.MipSlice = dv.texture2D.mipSlice;
 			desc.Texture2D.PlaneSlice = dv.texture2D.planeSlice;
 
@@ -1186,8 +1198,12 @@ namespace rhi {
 			}
 			pResource = T->res.Get();
 
-			desc.Format = T->fmt;
-			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+			if (dv.formatOverride != Format::Unknown) {
+				desc.Format = ToDxgi(dv.formatOverride);
+			}
+			else {
+				desc.Format = T->fmt;
+			}			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
 			desc.Texture2DArray.MipSlice = dv.texture2DArray.mipSlice;
 			desc.Texture2DArray.FirstArraySlice = dv.texture2DArray.firstArraySlice;
 			desc.Texture2DArray.ArraySize = dv.texture2DArray.arraySize;
@@ -1206,8 +1222,12 @@ namespace rhi {
 			}
 			pResource = T->res.Get();
 
-			desc.Format = T->fmt;
-			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
+			if (dv.formatOverride != Format::Unknown) {
+				desc.Format = ToDxgi(dv.formatOverride);
+			}
+			else {
+				desc.Format = T->fmt;
+			}			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
 			desc.Texture3D.MipSlice = dv.texture3D.mipSlice;
 			desc.Texture3D.FirstWSlice = dv.texture3D.firstWSlice;
 			desc.Texture3D.WSize = (dv.texture3D.wSize == 0) ? UINT(-1) : dv.texture3D.wSize;
@@ -2489,7 +2509,6 @@ namespace rhi {
 		}
 
 		// Resource to clear
-		
 		ID3D12Resource* res = nullptr;
 		if (u.resource.IsTexture()) {
 			res = impl->textures.get(u.resource.GetHandle())->res.Get();
@@ -2502,7 +2521,7 @@ namespace rhi {
 		}
 
 		// NOTE: caller must have bound the shader-visible heap via SetDescriptorHeaps()
-		// and transitioned 'res' to UAV/UNORDERED_ACCESS with your enhanced barriers.
+		// and transitioned 'res' to UAV/UNORDERED_ACCESS
 		rec->cl->ClearUnorderedAccessViewUint(gpu, cpu, res, v.v, 0, nullptr);
 	}
 
@@ -2864,7 +2883,8 @@ namespace rhi {
 		if ((uint32_t)stages & (uint32_t)ShaderStage::Compute) {
 			impl->cl->SetComputeRoot32BitConstants(rc->rootIndex, num32, p32, dstOffset32);
 		}
-		else {
+		// If any graphics states are set, write there too
+		if ((uint32_t)stages & (uint32_t)(ShaderStage::AllGraphics)) {
 			impl->cl->SetGraphicsRoot32BitConstants(rc->rootIndex, num32, p32, dstOffset32);
 		}
 	}

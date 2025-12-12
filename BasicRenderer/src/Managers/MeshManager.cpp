@@ -18,9 +18,10 @@ MeshManager::MeshManager() {
 	m_meshletTriangles = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletTriangles", true);
 	m_meshletBoundsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(BoundingSphere), 1, L"meshletBoundsBuffer", false, true);
 	m_meshletBitfieldBuffer = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletBitfieldBuffer", true, true);
+	m_clusterToVisibleClusterTableIndexBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(unsigned int), 1, L"clusterIndicesBuffer", false, true);
 
 	m_perMeshBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, L"PerMeshBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
-	
+
 	m_perMeshInstanceBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, L"perMeshInstanceBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
 
 	m_resources[Builtin::PreSkinningVertices] = m_preSkinningVertices;
@@ -31,6 +32,7 @@ MeshManager::MeshManager() {
 	m_resources[Builtin::MeshResources::MeshletOffsets] = m_meshletOffsets;
 	m_resources[Builtin::MeshResources::MeshletVertexIndices] = m_meshletVertexIndices;
 	m_resources[Builtin::MeshResources::MeshletTriangles] = m_meshletTriangles;
+	m_resources[Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer] = m_clusterToVisibleClusterTableIndexBuffer;
 }
 
 void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedVertices) {
@@ -38,10 +40,10 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	auto& vertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedVertices() : mesh->GetVertices();
 	auto& skinningVertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedSkinningVertices() : mesh->GetSkinningVertices();
 	auto numVertices = mesh->GetNumVertices(useMeshletReorderedVertices);
-    if (vertices.empty()) {
-        // Handle empty vertices case
+	if (vertices.empty()) {
+		// Handle empty vertices case
 		throw std::runtime_error("Mesh vertices are empty");
-    }
+	}
 
 	std::unique_ptr<BufferView> postSkinningView = nullptr;
 	std::unique_ptr<BufferView> preSkinningView = nullptr;
@@ -150,13 +152,21 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 
 	auto meshletBitfieldView = m_meshletBitfieldBuffer->Allocate(bytesToAllocate, 1); // 1 bit per meshlet
 	if (meshletBitfieldSize != m_meshletBitfieldBuffer->Size()) {
-		m_pViewManager->ResizeMeshletBitfields(m_meshletBitfieldBuffer->Size()*8); // All render views must be updated
+		m_pViewManager->ResizeMeshletBitfields(m_meshletBitfieldBuffer->Size() * 8); // All render views must be updated
 	}
 	mesh->SetMeshletBitfieldBufferView(std::move(meshletBitfieldView));
+
+	uint32_t perMeshIndex = static_cast<uint32_t>(
+		mesh->GetMesh()->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
+	mesh->SetPerMeshBufferIndex(perMeshIndex);
+
+	// This buffer is used for draw call indexing in the visibility buffer, to unpack uint25 visibility data
+	auto clusterIndicesView = m_clusterToVisibleClusterTableIndexBuffer->Allocate(mesh->GetMesh()->GetMeshletCount() * sizeof(unsigned int), sizeof(unsigned int));
+	mesh->SetClusterToVisibleClusterIndicesBufferView(std::move(clusterIndicesView));
 }
 
 void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
-	
+
 	// Things to remove:
 	// - Post-skinning vertices
 	// - Per-mesh instance buffer
@@ -196,4 +206,3 @@ std::vector<ResourceIdentifier> MeshManager::GetSupportedKeys() {
 
 	return keys;
 }
-

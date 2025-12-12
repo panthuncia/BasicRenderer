@@ -99,10 +99,14 @@ struct PerMeshCB {
 };
 
 struct PerMeshInstanceCB {
+    unsigned int perMeshBufferIndex;
+    unsigned int perObjectBufferIndex;
     unsigned int boneTransformBufferIndex;
     unsigned int postSkinningVertexBufferOffset;
 	unsigned int meshletBoundsBufferStartIndex;
     unsigned int meshletBitfieldStartIndex;
+	unsigned int clusterToVisibleClusterTableStartIndex;
+	unsigned int pad[1];
 };
 
 struct PerMaterialCB {
@@ -141,7 +145,7 @@ struct PerMaterialCB {
     DirectX::XMUINT4 baseColorChannels;
 
     DirectX::XMUINT3 normalChannels;
-    float pad0;
+    unsigned int compileFlagsID;
 
 	unsigned int aoChannel;
     unsigned int heightChannel;
@@ -149,7 +153,7 @@ struct PerMaterialCB {
     unsigned int roughnessChannel;
     
     DirectX::XMUINT3 emissiveChannels;
-	float pad1;
+	float pad0;
 };
 
 struct LightInfo {
@@ -268,6 +272,11 @@ struct LPMConstants {
     uint displayMode;
     uint pad;
     DirectX::XMMATRIX inputToOutputMatrix;
+};
+
+struct VisibleClusterInfo {
+    DirectX::XMUINT2 drawcallIndexAndMeshletIndex; // .x = drawcall index, .y = meshlet local index
+    unsigned int pad[2];
 };
 
 

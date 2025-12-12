@@ -54,6 +54,7 @@ struct Builtin {
   inline static constexpr std::string_view MeshInstanceMeshletCullingBitfieldGroup = "Builtin::MeshInstanceMeshletCullingBitfieldGroup";
   inline static constexpr std::string_view MeshInstanceOcclusionCullingBitfieldGroup = "Builtin::MeshInstanceOcclusionCullingBitfieldGroup";
   struct MeshResources {
+    inline static constexpr std::string_view ClusterToVisibleClusterTableIndexBuffer = "Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer";
     inline static constexpr std::string_view MeshletBounds = "Builtin::MeshResources::MeshletBounds";
     inline static constexpr std::string_view MeshletOffsets = "Builtin::MeshResources::MeshletOffsets";
     inline static constexpr std::string_view MeshletTriangles = "Builtin::MeshResources::MeshletTriangles";
@@ -66,6 +67,7 @@ struct Builtin {
     inline static constexpr std::string_view DataBuffer = "Builtin::PPLL::DataBuffer";
     inline static constexpr std::string_view HeadPointerTexture = "Builtin::PPLL::HeadPointerTexture";
   };
+  inline static constexpr std::string_view PerMaterialDataBuffer = "Builtin::PerMaterialDataBuffer";
   inline static constexpr std::string_view PerMeshBuffer = "Builtin::PerMeshBuffer";
   inline static constexpr std::string_view PerMeshInstanceBuffer = "Builtin::PerMeshInstanceBuffer";
   inline static constexpr std::string_view PerObjectBuffer = "Builtin::PerObjectBuffer";
@@ -87,6 +89,8 @@ struct Builtin {
     inline static constexpr std::string_view LinearDepthMap = "Builtin::PrimaryCamera::LinearDepthMap";
     inline static constexpr std::string_view MeshletBitfield = "Builtin::PrimaryCamera::MeshletBitfield";
     inline static constexpr std::string_view VisibilityTexture = "Builtin::PrimaryCamera::VisibilityTexture";
+    inline static constexpr std::string_view VisibleClusterTable = "Builtin::PrimaryCamera::VisibleClusterTable";
+    inline static constexpr std::string_view VisibleClusterTableCounter = "Builtin::PrimaryCamera::VisibleClusterTableCounter";
   };
   struct Shadows {
     inline static constexpr std::string_view LinearShadowMaps = "Builtin::Shadows::LinearShadowMaps";

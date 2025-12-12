@@ -15,3 +15,12 @@ struct DispatchIndirectCommand {
 	unsigned int perMeshInstanceBufferIndex;
 	D3D12_DISPATCH_ARGUMENTS dispatchArguments;
 };
+
+struct MaterialEvaluationIndirectCommand {
+	// Root constants (all uints):
+	unsigned int materialId; // UintRootConstant0
+	unsigned int baseOffset; // UintRootConstant1
+	unsigned int count; // UintRootConstant2
+	unsigned int dispatchXDimension; // UintRootConstant3
+	D3D12_DISPATCH_ARGUMENTS dispatchArguments;
+};

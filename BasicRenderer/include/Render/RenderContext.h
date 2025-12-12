@@ -11,6 +11,7 @@ class IndirectCommandBufferManager;
 class ViewManager;
 class LightManager;
 class EnvironmentManager;
+class MaterialManager;
 class PixelBuffer;
 
 class RenderContext {
@@ -22,6 +23,8 @@ public:
 	ViewManager* viewManager;
     LightManager* lightManager;
 	EnvironmentManager* environmentManager;
+	MaterialManager* materialManager;
+
     Scene* currentScene;
     rhi::Device device;
     rhi::CommandList commandList;

@@ -148,7 +148,9 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
     float3 lighting = float3(0.0, 0.0, 0.0);
     float3 debugDiffuse = float3(0, 0, 0);
     float3 debugSpecular = float3(0, 0, 0);
-    
+
+    LightingOutput output;
+
 #if defined(PSO_IMAGE_BASED_LIGHTING)
     evaluateIBL(lighting,
                 debugDiffuse,
@@ -165,9 +167,8 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
                 activeEnvironmentIndex, 
                 environmentBufferDescriptorIndex);
 #endif // IMAGE_BASED_LIGHTING
-    
+
     // Direct lighting
-    LightingOutput output;
         
     if (enablePunctualLights)
     {
@@ -180,18 +181,18 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
         lightingParameters.roughness = fragmentInfo.roughness;
         lightingParameters.F0 = fragmentInfo.F0;
         
-        /* // TODO: Parallax shadows will require a forward pass
-        parallaxShadowParameters parallaxShadowParams;
-        if (materialInfo.materialFlags & MATERIAL_PARALLAX)
-        {
-            parallaxShadowParams.parallaxTexture = ResourceDescriptorHeap[materialInfo.heightMapIndex];
-            parallaxShadowParams.parallaxSampler = ResourceDescriptorHeap[materialInfo.heightSamplerIndex];
-            parallaxShadowParams.TBN = TBN;
-            parallaxShadowParams.heightmapScale = materialInfo.heightMapScale;
-            parallaxShadowParams.lightToFrag = viewDir;
-            parallaxShadowParams.viewDir = viewDir;
-            parallaxShadowParams.uv = uv;
-        }*/
+        // TODO: Parallax shadows will require a forward pass
+        //parallaxShadowParameters parallaxShadowParams;
+        //if (materialInfo.materialFlags & MATERIAL_PARALLAX)
+        // {
+        //    parallaxShadowParams.parallaxTexture = ResourceDescriptorHeap[materialInfo.heightMapIndex];
+        //    parallaxShadowParams.parallaxSampler = ResourceDescriptorHeap[materialInfo.heightSamplerIndex];
+        //    parallaxShadowParams.TBN = TBN;
+        //    parallaxShadowParams.heightmapScale = materialInfo.heightMapScale;
+        //    parallaxShadowParams.lightToFrag = viewDir;
+        //    parallaxShadowParams.viewDir = viewDir;
+        //    parallaxShadowParams.uv = uv;
+        //}
         
         StructuredBuffer<unsigned int> pointShadowViewInfoIndexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::PointLightCubemapBuffer)];
         StructuredBuffer<unsigned int> spotShadowViewInfoIndexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::SpotLightMatrixBuffer)];
@@ -230,7 +231,6 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
         {
             unsigned int index = activeLightIndices[i];
 #endif
-
             LightInfo light = lights[index];
             float shadow = 0.0;
             if (enableShadows)
@@ -252,7 +252,7 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
                         }
                     case 2:{// Directional light
                             shadow = calculateCascadedShadow(fragmentInfo.fragPosWorldSpace, fragmentInfo.fragPosViewSpace, fragmentInfo.normalWS, light, perFrameBuffer.numShadowCascades, perFrameBuffer.shadowCascadeSplits, directionalShadowViewInfoIndexBuffer, cameraBuffer);
-                                //break;
+                            break;
                         }
                     }
                 }
@@ -268,17 +268,17 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
                 continue;
             }
             lighting += (1.0 - shadow) * calculateLightContributionPBR(lightFragmentInfo, lightingParameters);
-            /*if (materialInfo.materialFlags & MATERIAL_PARALLAX)
-            {
-                float parallaxShadow = getParallaxShadow(parallaxShadowParams);
-            }*/
+            //if (materialInfo.materialFlags & MATERIAL_PARALLAX)
+            //{
+            //    float parallaxShadow = getParallaxShadow(parallaxShadowParams);
+            //}
         }
 #if defined(PSO_CLUSTERED_LIGHTING)
             pageIndex = lightPagesBuffer[pageIndex].ptrNextPage;
         }
 #endif
     }
-    
+
     lighting += fragmentInfo.emissive;
     
     output.lighting = lighting;

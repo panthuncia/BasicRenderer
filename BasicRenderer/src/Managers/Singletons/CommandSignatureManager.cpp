@@ -9,8 +9,8 @@ void CommandSignatureManager::Initialize() {
     auto device = DeviceManager::GetInstance().GetDevice();
 
     rhi::IndirectArg args[] = {
-        { .kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { 0, 0, 1 } } },
-        { .kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { 1, 0, 2 } } },
+        { .kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { PerObjectRootSignatureIndex, 0, 1 } } },
+        { .kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { PerMeshRootSignatureIndex, 0, 2 } } },
         { .kind = rhi::IndirectArgKind::DispatchMesh }
     };
 	auto& graphicsLayout = PSOManager::GetInstance().GetRootSignature();
@@ -19,21 +19,20 @@ void CommandSignatureManager::Initialize() {
         graphicsLayout.GetHandle());
 
     rhi::IndirectArg args2[] = {
-        { .kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { 0, 0, 1 } } },
-        { .kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { 1, 0, 2 } } },
+        { .kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { PerObjectRootSignatureIndex, 0, 1 } } },
+        { .kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { PerMeshRootSignatureIndex, 0, 2 } } },
         { .kind = rhi::IndirectArgKind::Dispatch }
 	};
 	auto& computeLayout = PSOManager::GetInstance().GetComputeRootSignature();
     m_dispatchCommandSignature = device.CreateCommandSignature(
         rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(args2, 3), sizeof(DispatchIndirectCommand) },
         computeLayout.GetHandle());
-}
 
-const rhi::CommandSignature& CommandSignatureManager::GetDispatchMeshCommandSignature() {
-	return m_dispatchMeshCommandSignature.Get();
+    rhi::IndirectArg materialEvaluationArgs[] = {
+        { .kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { MiscUintRootSignatureIndex, 0, 4 } } },
+        { .kind = rhi::IndirectArgKind::Dispatch }
+	};
+    m_materialEvaluationCommandSignature = device.CreateCommandSignature(
+        rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(materialEvaluationArgs, 2), sizeof(MaterialEvaluationIndirectCommand) },
+		computeLayout.GetHandle());
 }
-
-const rhi::CommandSignature& CommandSignatureManager::GetDispatchCommandSignature() {
-    return m_dispatchCommandSignature.Get();
-}
-

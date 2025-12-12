@@ -40,6 +40,7 @@ public:
 				Builtin::NormalMatrixBuffer,
 				Builtin::PerMeshBuffer,
 				Builtin::PerMeshInstanceBuffer,
+				Builtin::PerMaterialDataBuffer,
 				Builtin::Environment::PrefilteredCubemapsGroup,
 				Builtin::Environment::InfoBuffer,
 				Builtin::CameraBuffer,
@@ -100,6 +101,7 @@ public:
 		RegisterSRV(Builtin::CameraBuffer);
 		RegisterSRV(Builtin::PerMeshInstanceBuffer);
 		RegisterSRV(Builtin::PerMeshBuffer);
+		RegisterSRV(Builtin::PerMaterialDataBuffer);
 		RegisterSRV(Builtin::GBuffer::Normals);
 
 		if (m_clusteredLightingEnabled) {
@@ -198,16 +200,6 @@ private:
 		barriers.textures = { &headPointerBarrier };
 		barriers.buffers = { &counterBarrier };
 		commandList.Barriers(barriers);
-
-
-		//CD3DX12_VIEWPORT viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, static_cast<float>(context.renderResolution.x), static_cast<float>(context.renderResolution.y));
-		//CD3DX12_RECT scissorRect = CD3DX12_RECT(0, 0, context.renderResolution.x, context.renderResolution.y);
-		//commandList->RSSetViewports(1, &viewport);
-		//commandList->RSSetScissorRects(1, &scissorRect);
-
-		//// Set the render target
-		//auto dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
-		//commandList->OMSetRenderTargets(0, nullptr, FALSE, &dsvHandle);
 
 		rhi::PassBeginInfo passInfo = {};
 		rhi::DepthAttachment depthAttachment = {};

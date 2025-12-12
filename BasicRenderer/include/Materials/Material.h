@@ -48,6 +48,24 @@ inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) {
         }
 		tech.passes.insert(Engine::Primary::GBufferPass);
     }
+	if (d.baseColor.texture) {
+		tech.compileFlags |= MaterialCompileFlags::MaterialCompileBaseColorTexture;
+	}
+	if (d.normal.texture) {
+		tech.compileFlags |= MaterialCompileFlags::MaterialCompileNormalMap;
+	}
+	if (d.aoMap.texture) {
+		tech.compileFlags |= MaterialCompileFlags::MaterialCompileAOTexture;
+	}
+	if (d.metallic.texture || d.roughness.texture) {
+		tech.compileFlags |= MaterialCompileFlags::MaterialCompilePBRMaps;
+	}
+	if (d.emissive.texture) {
+		tech.compileFlags |= MaterialCompileFlags::MaterialCompileEmissiveTexture;
+	}
+	if (d.heightMap.texture) {
+		tech.compileFlags |= MaterialCompileFlags::MaterialCompileParallax;
+	}
     return tech;
 }
 
@@ -124,10 +142,10 @@ public:
     }
     ~Material();
 
-    UINT GetMaterialBufferIndex();
     void SetHeightmap(std::shared_ptr<Texture> heightmap);
     void SetTextureScale(float scale);
     void SetHeightmapScale(float scale);
+    void SetCompileFlagsID(uint32_t id);
     PSOFlags GetPSOFlags() const { return m_psoFlags; }
     MaterialFlags GetMaterialFlags() const { return static_cast<MaterialFlags>(m_materialData.materialFlags); }
     static std::shared_ptr<Material> GetDefaultMaterial();
@@ -135,7 +153,11 @@ public:
     static void DestroyDefaultMaterial() {
         defaultMaterial.reset();
     }
+    uint32_t GetMaterialID() const { return m_materialID; }
+	PerMaterialCB const& GetData() const { return m_materialData; }
 private:
+	inline static std::atomic<uint32_t> globalMaterialCount;
+	const uint32_t m_materialID = globalMaterialCount.fetch_add(1, std::memory_order_relaxed);
 
     std::string m_name;
     std::shared_ptr<Texture> m_baseColorTexture;
@@ -214,6 +236,5 @@ private:
             alphaCutoff));
     }
 
-    std::shared_ptr<Buffer> m_perMaterialHandle;
     inline static std::shared_ptr<Material> defaultMaterial;
 };

@@ -44,10 +44,6 @@ public:
 		m_pSSSROutput = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PostProcessing::ScreenSpaceReflections);
     }
 
-    void RegisterCommandLists(std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> commandLists) {
-    }
-
-
     PassReturn Execute(RenderContext& context) override {
 
 		// Clear the render target of the SSSR output

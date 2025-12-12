@@ -50,6 +50,7 @@ public:
 	}
 
     void SetMeshletBitfieldBufferView(std::unique_ptr<BufferView> meshletBitfieldBufferView);
+    void SetClusterToVisibleClusterIndicesBufferView(std::unique_ptr<BufferView> clusterIndicesBufferView);
 
 	void SetAnimationSpeed(float speed) {
 		m_animationSpeed = speed;
@@ -72,6 +73,9 @@ public:
         return m_meshletBoundsBufferView.get();
     }
 
+    void SetPerObjectBufferIndex(uint32_t index);
+    void SetPerMeshBufferIndex(uint32_t index);
+
 private:
     MeshInstance(std::shared_ptr<Mesh> mesh)
         : m_mesh(mesh) {
@@ -79,7 +83,7 @@ private:
             SetSkeleton(mesh->GetBaseSkin()->CopySkeleton());
         }
     }
-	PerMeshInstanceCB m_perMeshInstanceBufferData;
+    PerMeshInstanceCB m_perMeshInstanceBufferData = {};
     std::shared_ptr<Mesh> m_mesh;
     std::shared_ptr<Skeleton> m_skeleton; // Instance-specific skeleton
     MeshManager* m_pCurrentMeshManager = nullptr;
@@ -87,5 +91,6 @@ private:
     std::unique_ptr<BufferView> m_perMeshInstanceBufferView;
 	std::unique_ptr<BufferView> m_meshletBitfieldBufferView = nullptr;
     std::unique_ptr<BufferView> m_meshletBoundsBufferView = nullptr;
+	std::unique_ptr<BufferView> m_clusterToVisibleClusterIndicesBufferView = nullptr;
 	float m_animationSpeed = 1.0f;
 };

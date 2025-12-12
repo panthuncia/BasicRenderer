@@ -4,8 +4,6 @@
 #include <spdlog/spdlog.h>
 #include <tree_sitter/api.h>
 
-#include <directx/d3dx12.h>
-
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Materials/TechniqueDescriptor.h"
@@ -98,6 +96,22 @@ const PipelineState& PSOManager::GetMeshPPLLPSO(UINT psoFlags, MaterialCompileFl
         m_meshPPLLPSOCache[key] = CreateMeshPPLLPSO(psoFlags, materialCompileFlags, wireframe);
     }
     return m_meshPPLLPSOCache[key];
+}
+
+const PipelineState& PSOManager::GetVisibilityBufferPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
+    PSOKey key(psoFlags, materialCompileFlags, wireframe);
+    if (m_visibilityBufferPSOCache.find(key) == m_visibilityBufferPSOCache.end()) {
+        m_visibilityBufferPSOCache[key] = CreateVisibilityBufferPSO(psoFlags, materialCompileFlags, wireframe);
+    }
+    return m_visibilityBufferPSOCache[key];
+}
+
+const PipelineState& PSOManager::GetVisibilityBufferMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
+    PSOKey key(psoFlags, materialCompileFlags, wireframe);
+    if (m_visibilityBufferMeshPSOCache.find(key) == m_visibilityBufferMeshPSOCache.end()) {
+        m_visibilityBufferMeshPSOCache[key] = CreateVisibilityBufferMeshPSO(psoFlags, materialCompileFlags, wireframe);
+    }
+    return m_visibilityBufferMeshPSOCache[key];
 }
 
 const PipelineState& PSOManager::GetDeferredPSO(UINT psoFlags) {
@@ -277,21 +291,14 @@ PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, MaterialCompileFlags m
     rhi::SubobjDepth soDepth{ ds };
 
     rhi::RenderTargets rts{};
-    if (psoFlags & PSO_DEFERRED) {
-        rts.count = 6;
-        rts.formats[0] = rhi::Format::R32G32B32A32_Float;   // Normals
-        rts.formats[1] = rhi::Format::R16G16_Float;         // Motion vector
-        rts.formats[2] = rhi::Format::R32_Float;            // Depth
-        rts.formats[3] = rhi::Format::R8G8B8A8_UNorm;       // Albedo
-        rts.formats[4] = rhi::Format::R8G8_UNorm;           // Metallic+Roughness
-        rts.formats[5] = rhi::Format::R16G16B16A16_Float;   // Emissive
-    }
-    else {
-        rts.count = 3;
-        rts.formats[0] = rhi::Format::R32G32B32A32_Float;   // Normals
-        rts.formats[1] = rhi::Format::R16G16_Float;         // Motion vector
-        rts.formats[2] = rhi::Format::R32_Float;            // Depth
-    }
+    rts.count = 6;
+    rts.formats[0] = rhi::Format::R32G32B32A32_Float;   // Normals
+    rts.formats[1] = rhi::Format::R16G16_Float;         // Motion vector
+    rts.formats[2] = rhi::Format::R32_Float;            // Depth
+    rts.formats[3] = rhi::Format::R8G8B8A8_UNorm;       // Albedo
+    rts.formats[4] = rhi::Format::R8G8_UNorm;           // Metallic+Roughness
+    rts.formats[5] = rhi::Format::R16G16B16A16_Float;   // Emissive
+
     rhi::SubobjRTVs soRTV{ rts };
 
     rhi::SubobjDSV    soDSV{ rhi::Format::D32_Float };
@@ -313,6 +320,140 @@ PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, MaterialCompileFlags m
     rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
     if (!pso->IsValid()) {
         throw std::runtime_error("Failed to create PrePass PSO");
+    }
+
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+}
+
+PipelineState PSOManager::CreateVisibilityBufferPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
+{
+    auto defines = GetShaderDefines(psoFlags, materialCompileFlags);
+
+    Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.vertexShader = { L"shaders/shaders.hlsl", L"VisibilityBufferVSMain",        L"vs_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"VisibilityBufferPSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    vsBlob = compiledBundle.vertexShader;
+    psBlob = compiledBundle.pixelShader;
+
+    auto& layout = GetRootSignature(); // PipelineLayoutHandle
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
+
+    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()) };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()) };
+
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (materialCompileFlags & MaterialCompileFlags::MaterialCompileDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
+
+    rhi::BlendState rhiBlend = GetBlendDesc(materialCompileFlags);
+    rhi::SubobjBlend soBlend{ rhiBlend };
+
+    rhi::DepthStencilState ds{}; // defaults: depth test on, write on, LessEqual
+    rhi::SubobjDepth soDepth{ ds };
+
+    rhi::RenderTargets rts{};
+
+    rts.count = 1;
+    rts.formats[0] = rhi::Format::R32G32_UInt; // packed visibility
+
+    rhi::SubobjRTVs soRTV{ rts };
+
+    rhi::SubobjDSV    soDSV{ rhi::Format::D32_Float };
+    rhi::SubobjSample soSmp{ rhi::SampleDesc{1,0} };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soVS),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+        rhi::Make(soBlend),
+        rhi::Make(soDepth),
+        rhi::Make(soRTV),
+        rhi::Make(soDSV),
+        rhi::Make(soSmp),
+    };
+
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso->IsValid()) {
+        throw std::runtime_error("Failed to create PrePass PSO");
+    }
+
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+}
+
+PipelineState PSOManager::CreateVisibilityBufferMeshPSO(
+    UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
+    auto defines = GetShaderDefines(psoFlags, materialCompileFlags);
+
+    Microsoft::WRL::ComPtr<ID3DBlob> asBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.amplificationShader = { L"shaders/amplification.hlsl", L"ASMain", L"as_6_6" };
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl",          L"VisibilityBufferMSMain", L"ms_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl",       L"VisibilityBufferPSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    asBlob = compiledBundle.amplificationShader;
+    msBlob = compiledBundle.meshShader;
+    psBlob = compiledBundle.pixelShader;
+
+    auto& layout = GetRootSignature();
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
+    rhi::SubobjShader soTask{ rhi::ShaderStage::Task, rhi::DXIL(asBlob.Get()) };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()) };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()) };
+
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (materialCompileFlags & MaterialCompileFlags::MaterialCompileDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
+
+    rhi::BlendState rhiBlend = GetBlendDesc(materialCompileFlags);
+    rhi::SubobjBlend soBlend{ rhiBlend };
+
+    rhi::DepthStencilState ds{};
+    rhi::SubobjDepth soDepth{ ds };
+
+    rhi::RenderTargets rts{};
+    
+    rts.count = 1;
+    rts.formats[0] = rhi::Format::R32G32_UInt; // packed visibility
+
+    rhi::SubobjRTVs soRTV{ rts };
+
+    rhi::SubobjDSV   soDSV{ rhi::Format::D32_Float };
+    rhi::SubobjSample soSmp{ rhi::SampleDesc{1,0} };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soTask),
+        rhi::Make(soMesh),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+        rhi::Make(soBlend),
+        rhi::Make(soDepth),
+        rhi::Make(soRTV),
+        rhi::Make(soDSV),
+        rhi::Make(soSmp),
+    };
+
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
+    if (!pso->IsValid()) {
+        throw std::runtime_error("Failed to create Mesh PrePass PSO");
     }
 
     return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
@@ -571,21 +712,14 @@ PipelineState PSOManager::CreateMeshPrePassPSO(
     rhi::SubobjDepth soDepth{ ds };
 
     rhi::RenderTargets rts{};
-    if (psoFlags & PSO_DEFERRED) {
-        rts.count = 6;
-        rts.formats[0] = rhi::Format::R32G32B32A32_Float;   // Normals
-        rts.formats[1] = rhi::Format::R16G16_Float;         // Motion vector
-        rts.formats[2] = rhi::Format::R32_Float;            // Depth
-        rts.formats[3] = rhi::Format::R8G8B8A8_UNorm;       // Albedo
-        rts.formats[4] = rhi::Format::R8G8_UNorm;           // Metallic+Roughness
-        rts.formats[5] = rhi::Format::R16G16B16A16_Float;   // Emissive
-    }
-    else {
-        rts.count = 3;
-        rts.formats[0] = rhi::Format::R32G32B32A32_Float;   // Normals
-        rts.formats[1] = rhi::Format::R16G16_Float;         // Motion vector
-        rts.formats[2] = rhi::Format::R32_Float;            // Depth
-    }
+    rts.count = 6;
+    rts.formats[0] = rhi::Format::R32G32B32A32_Float;   // Normals
+    rts.formats[1] = rhi::Format::R16G16_Float;         // Motion vector
+    rts.formats[2] = rhi::Format::R32_Float;            // Depth
+    rts.formats[3] = rhi::Format::R8G8B8A8_UNorm;       // Albedo
+    rts.formats[4] = rhi::Format::R8G8_UNorm;           // Metallic+Roughness
+    rts.formats[5] = rhi::Format::R16G16B16A16_Float;   // Emissive
+
     rhi::SubobjRTVs soRTV{ rts };
 
     rhi::SubobjDSV   soDSV{ rhi::Format::D32_Float };
@@ -656,21 +790,14 @@ PipelineState PSOManager::CreateMeshPPLLPSO(
     rhi::SubobjDepth     soDepth{ ds };
 
     rhi::RenderTargets   rts{};
-    if (psoFlags & PSO_DEFERRED) {
-        rts.count = 6;
-        rts.formats[0] = rhi::Format::R32G32B32A32_Float;
-        rts.formats[1] = rhi::Format::R16G16_Float;
-        rts.formats[2] = rhi::Format::R32_Float;
-        rts.formats[3] = rhi::Format::R8G8B8A8_UNorm;
-        rts.formats[4] = rhi::Format::R8G8_UNorm;
-        rts.formats[5] = rhi::Format::R16G16B16A16_Float;
-    }
-    else {
-        rts.count = 3;
-        rts.formats[0] = rhi::Format::R32G32B32A32_Float;
-        rts.formats[1] = rhi::Format::R16G16_Float;
-        rts.formats[2] = rhi::Format::R32_Float;
-    }
+    rts.count = 6;
+    rts.formats[0] = rhi::Format::R32G32B32A32_Float;
+    rts.formats[1] = rhi::Format::R16G16_Float;
+    rts.formats[2] = rhi::Format::R32_Float;
+    rts.formats[3] = rhi::Format::R8G8B8A8_UNorm;
+    rts.formats[4] = rhi::Format::R8G8_UNorm;
+    rts.formats[5] = rhi::Format::R16G16B16A16_Float;
+
     rhi::SubobjRTVs      soRTV{ rts };
 
     rhi::SubobjDSV       soDSV{ rhi::Format::D32_Float };
@@ -692,81 +819,14 @@ PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags)
 {
     auto defines = GetShaderDefines(psoFlags, MaterialCompileFlags::MaterialCompileNone);
 
-    Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
-    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
-
-    ShaderInfoBundle shaderInfoBundle;
-    shaderInfoBundle.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6" };
-    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl",      L"PSMainDeferred",   L"ps_6_6" };
-    shaderInfoBundle.defines = defines;
-
-    auto compiledBundle = CompileShaders(shaderInfoBundle);
-    vsBlob = compiledBundle.vertexShader;
-    psBlob = compiledBundle.pixelShader;
-
-    auto& layout = GetRootSignature(); // PipelineLayoutHandle
-    rhi::SubobjLayout soLayout{ layout.GetHandle() };
-
-    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()) };
-    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()) };
-
-    rhi::RasterState rs{};
-    rs.fill = rhi::FillMode::Solid;
-    rs.cull = rhi::CullMode::None;
-    rs.frontCCW = false;
-    rhi::SubobjRaster soRaster{ rs };
-
-    rhi::BlendState bs{};
-    bs.alphaToCoverage = false;
-    bs.independentBlend = false;
-    bs.numAttachments = 1;
-    {
-        auto& a = bs.attachments[0];
-        a.enable = true;
-        a.srcColor = rhi::BlendFactor::SrcAlpha;
-        a.dstColor = rhi::BlendFactor::InvSrcAlpha;
-        a.colorOp = rhi::BlendOp::Add;
-        a.srcAlpha = rhi::BlendFactor::One;
-        a.dstAlpha = rhi::BlendFactor::InvSrcAlpha;
-        a.alphaOp = rhi::BlendOp::Add;
-        a.writeMask = rhi::ColorWriteEnable::All;
-    }
-    rhi::SubobjBlend soBlend{ bs };
-
-    // Depth: GREATER, writes disabled
-    rhi::DepthStencilState ds{};
-    ds.depthEnable = true;
-    ds.depthWrite = false;                    // D3D12_DEPTH_WRITE_MASK_ZERO
-    ds.depthFunc = rhi::CompareOp::Greater;  // D3D12_COMPARISON_FUNC_GREATER
-    rhi::SubobjDepth soDepth{ ds };
-
-    rhi::RenderTargets rts{};
-    rts.count = 1;
-    rts.formats[0] = rhi::Format::R16G16B16A16_Float; // DXGI_FORMAT_R16G16B16A16_FLOAT
-    rhi::SubobjRTVs soRTV{ rts };
-
-    rhi::SubobjDSV    soDSV{ rhi::Format::D32_Float }; // DXGI_FORMAT_D32_FLOAT
-    rhi::SubobjSample soSmp{ rhi::SampleDesc{1,0} };
-
-    const rhi::PipelineStreamItem items[] = {
-        rhi::Make(soLayout),
-        rhi::Make(soVS),
-        rhi::Make(soPS),
-        rhi::Make(soRaster),
-        rhi::Make(soBlend),
-        rhi::Make(soDepth),
-        rhi::Make(soRTV),
-        rhi::Make(soDSV),
-        rhi::Make(soSmp),
-    };
-
-    auto dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso->IsValid()) {
-        throw std::runtime_error("Failed to create Deferred PSO (RHI)");
-    }
-
-    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+    PipelineState pso = MakeComputePipeline(
+        GetComputeRootSignature(),
+        L"shaders/deferred.hlsl",
+        L"DeferredCSMain",
+        defines,
+        "DeferredComputePSO"
+    );
+    return pso;
 }
 
 PipelineState PSOManager::MakeComputePipeline(rhi::PipelineLayout layout,
@@ -823,6 +883,43 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags, MaterialCompi
         macro.Name = L"PSO_BLEND";
         defines.insert(defines.begin(), macro);
     }
+    if (materialFlags & MaterialCompileFlags::MaterialCompileBaseColorTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_BASE_COLOR_TEXTURE";
+		defines.insert(defines.begin(), macro);
+	}
+    if (materialFlags & MaterialCompileFlags::MaterialCompileParallax) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_PARALLAX";
+        defines.insert(defines.begin(), macro);
+	}
+    if (materialFlags & MaterialCompileFlags::MaterialCompileNormalMap) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_NORMAL_MAP";
+        defines.insert(defines.begin(), macro);
+	}
+	if (materialFlags & MaterialCompileFlags::MaterialCompileEmissiveTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_EMISSIVE_TEXTURE";
+        defines.insert(defines.begin(), macro);
+    }
+    if (materialFlags & MaterialCompileFlags::MaterialCompilePBRMaps) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_PBR_MAPS";
+        defines.insert(defines.begin(), macro);
+	}
+    if (materialFlags & MaterialCompileFlags::MaterialCompileAOTexture) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_AO_TEXTURE";
+        defines.insert(defines.begin(), macro);
+	}
+
     if (psoFlags & PSOFlags::PSO_SHADOW) {
         DxcDefine macro;
         macro.Value = L"1";
@@ -847,11 +944,11 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags, MaterialCompi
 		macro.Name = L"PSO_PREPASS";
 		defines.insert(defines.begin(), macro);
 	}
-	if (psoFlags & PSOFlags::PSO_DEFERRED) {
+    if (psoFlags & PSOFlags::PSO_DEFERRED) {
         DxcDefine macro;
-		macro.Value = L"1";
-		macro.Name = L"PSO_DEFERRED";
-		defines.insert(defines.begin(), macro);
+        macro.Value = L"1";
+        macro.Name = L"PSO_DEFERRED";
+        defines.insert(defines.begin(), macro);
 	}
     if (!(psoFlags & PSOFlags::PSO_SCREENSPACE_REFLECTIONS)) {
         DxcDefine macro;

@@ -12,9 +12,7 @@ Material::Material(const std::string& name,
     MaterialFlags materialFlags, PSOFlags psoFlags)
     : m_name(name), m_psoFlags(psoFlags) {
     auto& resourceManager = ResourceManager::GetInstance();
-    m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
     m_materialData.materialFlags = materialFlags;
-    QUEUE_UPLOAD(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
 }
 
 Material::Material(const std::string& name,
@@ -119,57 +117,9 @@ Material::Material(const std::string& name,
 		opacityTexture->GetBuffer()->SetName(L"OpacityTexture");
     }
 
-    auto& resourceManager = ResourceManager::GetInstance();
-    m_perMaterialHandle = resourceManager.CreateIndexedConstantBuffer<PerMaterialCB>();
-    m_perMaterialHandle->SetName(L"PerMaterialCB (" + s2ws(name) + L")");
-
-    QUEUE_UPLOAD(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
 }
 
 Material::~Material() {
-    DeletionManager::GetInstance().MarkForDelete(m_perMaterialHandle);
-}
-
-//std::shared_ptr<Texture> Material::CreateDefaultTexture() {
-//    // Create a 1x1 white texture
-//    static const uint8_t whitePixel[4] = { 255, 255, 255, 255 };
-//
-//	TextureDescription desc;
-//	desc.channels = 4;
-//    ImageDimensions dims;
-//	dims.width = 1;
-//	dims.height = 1;
-//	dims.rowPitch = 4;
-//	dims.slicePitch = 4;
-//	desc.imageDimensions.push_back(dims);
-//	desc.format = DXGI_FORMAT_R8G8B8A8_UNORM;
-//
-//    std::shared_ptr<PixelBuffer>defaultImage = PixelBuffer::Create(desc, {whitePixel});
-//
-//    D3D12_SAMPLER_DESC defaultSamplerDesc = {};
-//    defaultSamplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-//    defaultSamplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-//    defaultSamplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-//    defaultSamplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-//    defaultSamplerDesc.MipLODBias = 0.0f;
-//    defaultSamplerDesc.MaxAnisotropy = 1;
-//    defaultSamplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
-//    defaultSamplerDesc.BorderColor[0] = 0.0f;
-//    defaultSamplerDesc.BorderColor[1] = 0.0f;
-//    defaultSamplerDesc.BorderColor[2] = 0.0f;
-//    defaultSamplerDesc.BorderColor[3] = 0.0f;
-//    defaultSamplerDesc.MinLOD = 0.f;
-//    defaultSamplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
-//
-//    std::shared_ptr<Sampler> defaultSampler = Sampler::CreateSampler(defaultSamplerDesc);
-//
-//    std::shared_ptr<Texture> defaultTexture = std::make_shared<Texture>(defaultImage, defaultSampler);
-//
-//    return defaultTexture;
-//}
-
-UINT Material::GetMaterialBufferIndex() {
-    return m_perMaterialHandle->GetCBVInfo().slot.index;
 }
 
 void Material::SetHeightmap(std::shared_ptr<Texture> heightmap) {
@@ -178,17 +128,18 @@ void Material::SetHeightmap(std::shared_ptr<Texture> heightmap) {
     heightmap->GetBuffer()->SetName(L"HeightMap");
     m_materialData.heightMapIndex = heightmap->GetBuffer()->GetSRVInfo(0).slot.index;
     m_materialData.heightSamplerIndex = heightmap->GetSamplerDescriptorIndex();
-    QUEUE_UPLOAD(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
 }
 
 void Material::SetTextureScale(float scale) {
     m_materialData.textureScale = scale;
-    QUEUE_UPLOAD(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
 }
 
 void Material::SetHeightmapScale(float scale) {
     m_materialData.heightMapScale = scale;
-    QUEUE_UPLOAD(&m_materialData, sizeof(PerMaterialCB), m_perMaterialHandle.get(), 0);
+}
+
+void Material::SetCompileFlagsID(uint32_t id) {
+    m_materialData.compileFlagsID = id;
 }
 
 std::shared_ptr<Material> Material::GetDefaultMaterial() {

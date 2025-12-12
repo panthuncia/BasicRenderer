@@ -53,7 +53,8 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
 
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     
-    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
+    StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
+    MaterialInfo materialInfo = materialDataBuffer[meshBuffer.materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
     
     if (materialFlags & MATERIAL_TEXTURED) {
@@ -131,11 +132,9 @@ struct PrePassPSOutput
     float4 normal;
     float2 motionVector;
     float linearDepth;
-#if defined(PSO_DEFERRED)
     float4 albedo;
     float2 metallicRoughness;
     float4 emissive;
-#endif
 };
 
 PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
@@ -171,16 +170,27 @@ PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) 
 
 struct VisBufferOutput
 {
-    uint drawCallIDAndMeshletVertexIndex;
-    uint meshletIndex;
+    uint2 visibility; // first element packed drawcall id and meshlet-local vertex index, second component per-drawcall meshlet index
 };
 
-VisBufferOutput VisBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
+VisBufferOutput VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFrontFace, uint primID : SV_PrimitiveID) : SV_TARGET
 {
+    // Need to check alpha for alpha-tested materials
+#if defined(PSO_ALPHA_TEST)
+    TestAlpha(input.texcoord);
+#endif
+    
     VisBufferOutput output;
-    // Pack draw call ID and meshlet vertex index into a single uint, max 256 vertices per meshlet, so 8 bits for vertex index and 24 bits for draw call ID
-    output.drawCallIDAndMeshletVertexIndex = (perObjectBufferIndex << 8) | (input.meshletVertexIndex & 0xFF);
-    output.meshletIndex = input.meshletIndex;
+    // 7 bits for meshlet-local triangle index, 25 bits for visible cluster index
+    output.visibility.x = (primID << 25) | input.visibleClusterTableIndex;
+    
+    uint uintDepth = asuint(input.linearDepth);
+    // Pack isFrontFace into sign bit of depth, since depth is always positive
+    if (isFrontFace) {
+        uintDepth |= 0x80000000;
+    }
+
+    output.visibility.y = uintDepth;
     return output;
 }
 
@@ -196,7 +206,8 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     uint meshBufferIndex = perMeshBufferIndex;
     PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndex];
-    ConstantBuffer<MaterialInfo> materialInfo = ResourceDescriptorHeap[meshBuffer.materialDataIndex];
+    StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
+    MaterialInfo materialInfo = materialDataBuffer[meshBuffer.materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
 #if defined(PSO_SHADOW)
 #if !defined(PSO_ALPHA_TEST) && !defined(PSO_BLEND)
@@ -283,84 +294,4 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
             return float4(1.0, 0.0, 0.0, 1.0);
     }
 #endif // PSO_SHADOW
-}
-
-float4 PSMainDeferred(FULLSCREEN_VS_OUTPUT input) : SV_Target
-{    
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
-    Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
-    
-    Texture2D<float> depthTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::DepthTexture)];
-    float depth = depthTexture[input.position.xy];
-    
-    float linearZ = unprojectDepth(depth, mainCamera.zNear, mainCamera.zFar);
-    
-    float2 pixel = input.position.xy;
-    //float2 uv = (pixel) / float2(perFrameBuffer.screenResX, perFrameBuffer.screenResY); // [0,1] over screen
-    float2 ndc = input.uv * 2.0f - 1.0f;
-    
-    float4 clipPos = float4(ndc, 1.0f, 1.0f);
-
-    // unproject back into view space:
-    float4 viewPosH = mul(clipPos, mainCamera.projectionInverse);
-
-    float3 positionVS = viewPosH.xyz * linearZ;
-    //positionVS.y = -positionVS.y;
-    
-    float4 worldPosH = mul(float4(positionVS, 1.0f), mainCamera.viewInverse);
-    float3 positionWS = worldPosH.xyz;
-    
-    float3 viewDirWS = normalize(mainCamera.positionWorldSpace.xyz - positionWS.xyz);
-    
-    FragmentInfo fragmentInfo;
-    GetFragmentInfoScreenSpace(input.position.xy, viewDirWS, positionVS.xyz, positionWS.xyz, enableGTAO, fragmentInfo);
-        
-    LightingOutput lightingOutput = lightFragment(fragmentInfo, mainCamera, perFrameBuffer.activeEnvironmentIndex, ResourceDescriptorIndex(Builtin::Environment::InfoBuffer), true);
-    
-    float3 lighting = lightingOutput.lighting;
-    
-    switch (perFrameBuffer.outputType)
-    {
-        case OUTPUT_COLOR:
-            return float4(lighting, 1.0);
-        case OUTPUT_NORMAL: // Normal
-            return float4(fragmentInfo.normalWS * 0.5 + 0.5, 1.0);
-        case OUTPUT_ALBEDO:
-            return float4(fragmentInfo.albedo.rgb, 1.0);
-        case OUTPUT_METALLIC:
-            return float4(fragmentInfo.metallic, fragmentInfo.metallic, fragmentInfo.metallic, 1.0);
-        case OUTPUT_ROUGHNESS:
-            return float4(fragmentInfo.roughness, fragmentInfo.roughness, fragmentInfo.roughness, 1.0);
-        case OUTPUT_EMISSIVE:
-            return float4(fragmentInfo.emissive.rgb, 1.0);
-        case OUTPUT_AO:
-            return float4(fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.diffuseAmbientOcclusion, 1.0);
-        case OUTPUT_DEPTH:{
-                float scaledDepth = abs(linearZ) * 0.1;
-                //float scaledDepth = depth * 0.1;
-                return float4(scaledDepth, scaledDepth, scaledDepth, 1.0);
-            }
-#if defined(PSO_IMAGE_BASED_LIGHTING)
-        case OUTPUT_DIFFUSE_IBL:
-            return float4(lightingOutput.diffuseIBL.rgb, 1.0);
-        case OUTPUT_SPECULAR_IBL:
-            return float4(lightingOutput.specularIBL.rgb, 1.0);
-#endif // IMAGE_BASED_LIGHTING
-        /*case OUTPUT_MESHLETS:{
-                return lightUints(input.meshletIndex, fragmentInfo.normalWS, viewDir);
-            }*/
-        /*case OUTPUT_MODEL_NORMALS:{
-                return float4(input.normalModelSpace * 0.5 + 0.5, 1.0);
-            }*/
-//        case OUTPUT_LIGHT_CLUSTER_ID:{
-//                return lightUints(lightingOutput.clusterID, lightingOutput.normalWS, lightingOutput.viewDir);
-//            }
-//        case OUTPUT_LIGHT_CLUSTER_LIGHT_COUNT:{
-//                return lightUints(lightingOutput.clusterLightCount, lightingOutput.normalWS, lightingOutput.viewDir);
-//            }
-        default:
-            return float4(1.0, 0.0, 0.0, 1.0);
-    }
 }

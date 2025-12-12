@@ -3,7 +3,6 @@
 #include <rhi_helpers.h>
 
 #include "Utilities/Utilities.h"
-#include "DirectX/d3dx12.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "Managers/Singletons/SettingsManager.h"

@@ -100,7 +100,7 @@ public:
 			return resourceAndAccessor.resource.index;
 		}
 	}
-	unsigned int GetResourceDescriptorIndex(ResourceIdentifier& id, bool allowFail = true) {
+	unsigned int GetResourceDescriptorIndex(const ResourceIdentifier& id, bool allowFail = true) {
 		return GetResourceDescriptorIndex(id.hash, allowFail);
 	}
 private:

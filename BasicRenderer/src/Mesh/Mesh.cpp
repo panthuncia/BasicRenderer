@@ -2,7 +2,6 @@
 
 #include <meshoptimizer.h>
 
-#include "DirectX/d3dx12.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Render/PSOFlags.h"
@@ -21,7 +20,6 @@ Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertex
 	if (skinningVertices.has_value()) {
 		m_skinningVertices = std::move(skinningVertices.value());
 	}
-	m_perMeshBufferData.materialDataIndex = material->GetMaterialBufferIndex();
 	m_perMeshBufferData.vertexFlags = flags;
 	m_perMeshBufferData.vertexByteSize = vertexSize;
 	m_perMeshBufferData.numVertices = static_cast<uint32_t>(m_vertices->size() / vertexSize);
@@ -48,8 +46,10 @@ void Mesh::CreateVertexBuffer() {
 void Mesh::CreateMeshlets(const std::vector<UINT32>& indices) {
 	unsigned int maxVertices = MS_MESHLET_SIZE; // TODO: Separate config for max vertices and max primitives per meshlet
 	unsigned int maxPrimitives = MS_MESHLET_SIZE;
+	unsigned int minVertices = MS_MESHLET_MIN_SIZE;
+	unsigned int minPrimitives = MS_MESHLET_MIN_SIZE;
 
-	size_t maxMeshlets = meshopt_buildMeshletsBound(indices.size(), maxVertices, maxPrimitives);
+	size_t maxMeshlets = meshopt_buildMeshletsBound(indices.size(), maxVertices, minPrimitives);
 
 	m_meshlets.resize(maxMeshlets);
 	m_meshletVertices.resize(maxMeshlets * maxVertices);
@@ -59,7 +59,20 @@ void Mesh::CreateMeshlets(const std::vector<UINT32>& indices) {
 	m_meshletVertices = std::vector<unsigned int>(maxMeshlets*maxVertices);
 	m_meshletTriangles = std::vector<unsigned char>(maxMeshlets * maxPrimitives * 3);
     
-	auto meshletCount = meshopt_buildMeshlets(m_meshlets.data(), m_meshletVertices.data(), m_meshletTriangles.data(), indices.data(), indices.size(), (float*)m_vertices->data(), m_vertices->size()/m_perMeshBufferData.vertexByteSize, m_perMeshBufferData.vertexByteSize, maxVertices, maxPrimitives, 0);
+	auto meshletCount = meshopt_buildMeshletsSpatial(
+		m_meshlets.data(), 
+		m_meshletVertices.data(), 
+		m_meshletTriangles.data(), 
+		indices.data(), 
+		indices.size(), 
+		(float*)m_vertices->data(), 
+		m_vertices->size() / m_perMeshBufferData.vertexByteSize, 
+		m_perMeshBufferData.vertexByteSize, 
+		maxVertices, 
+		minPrimitives,
+		maxPrimitives, 
+		0.5);
+
 	m_meshlets.resize(meshletCount);
 
 	size_t globalVertexCount =
@@ -280,6 +293,13 @@ void Mesh::SetBaseSkin(std::shared_ptr<Skeleton> skeleton) {
 
 void Mesh::UpdateVertexCount(bool meshletReorderedVertices) {
 	m_perMeshBufferData.numVertices = static_cast<uint32_t>(meshletReorderedVertices ? m_meshletReorderedVertices.size() / m_perMeshBufferData.vertexByteSize : m_vertices->size() / m_perMeshBufferData.vertexByteSize);
+	if (m_pCurrentMeshManager != nullptr) {
+		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
+	}
+}
+
+void Mesh::SetMaterialDataIndex(unsigned int index) {
+	m_perMeshBufferData.materialDataIndex = index;
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}

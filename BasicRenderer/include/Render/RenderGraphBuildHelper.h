@@ -4,94 +4,91 @@
 #include "../../generated/BuiltinResources.h"
 #include "RenderPasses/PostProcessing/BloomSamplePass.h"
 #include "RenderPasses/PostProcessing/BloomBlendPass.h"
-
-void BuildVisibilityPass(RenderGraph* graph) {
-    auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
-
-    TextureDescription visibilityDesc;
-    visibilityDesc.channels = 2;
-    visibilityDesc.format = rhi::Format::R32G32_UInt;
-    visibilityDesc.hasRTV = true;
-    visibilityDesc.hasUAV = true;
-    visibilityDesc.imageDimensions.emplace_back(resolution.x, resolution.y);
-    auto visibilityTexture = PixelBuffer::Create(visibilityDesc);
-    visibilityTexture->SetName(L"Visibility buffer");
-    graph->RegisterResource(Builtin::PrimaryCamera::VisibilityTexture, visibilityTexture);
-
-    /*graph->BuildRenderPass("Visibility pass")
-        .Build<VisibilityPass>();*/
-}
+#include "RenderPasses/VisibilityBufferPass.h"
+#include "RenderPasses/GBufferConstructionPass.h"
+#include "RenderPasses/PrimaryDepthCopyPass.h"
+#include "RenderPasses/VisUtil/BuildPixelListPass.h"
+#include "RenderPasses/VisUtil/EvaluateMaterialGroupsPass.h"
+#include "RenderPasses/VisUtil/MaterialHistogramPass.h"
+#include "RenderPasses/VisUtil/MaterialPixelCounterResetPass.h"
+#include "RenderPasses/VisUtil/MaterialBlockScanPass.h"
+#include "RenderPasses/VisUtil/MaterialBlockOffsetsPass.h"
+#include "RenderPasses/VisUtil/BuildMaterialIndirectCommandBufferPass.h"
 
 void CreateGBufferResources(RenderGraph* graph) {
     // GBuffer resources
 	auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
-	bool deferredRendering = SettingsManager::GetInstance().getSettingGetter<bool>("enableDeferredRendering")();
 
     TextureDescription normalsWorldSpaceDesc;
-    normalsWorldSpaceDesc.arraySize = 1;
     normalsWorldSpaceDesc.channels = 3;
-    normalsWorldSpaceDesc.isCubemap = false;
     normalsWorldSpaceDesc.format = rhi::Format::R32G32B32A32_Typeless;
     normalsWorldSpaceDesc.hasRTV = true;
 	normalsWorldSpaceDesc.rtvFormat = rhi::Format::R32G32B32A32_Float;
-    normalsWorldSpaceDesc.generateMipMaps = false;
     normalsWorldSpaceDesc.hasSRV = true;
     normalsWorldSpaceDesc.srvFormat = rhi::Format::R32G32B32A32_Float;
+    normalsWorldSpaceDesc.hasUAV = true;
+	normalsWorldSpaceDesc.hasNonShaderVisibleUAV = true;
+	normalsWorldSpaceDesc.uavFormat = rhi::Format::R32G32B32A32_Float;
     ImageDimensions dims = { resolution.x, resolution.y, 0, 0 };
     normalsWorldSpaceDesc.imageDimensions.push_back(dims);
     auto normalsWorldSpace = PixelBuffer::Create(normalsWorldSpaceDesc);
     normalsWorldSpace->SetName(L"Normals World Space");
     graph->RegisterResource(Builtin::GBuffer::Normals, normalsWorldSpace);
 
+    TextureDescription visibilityDesc;
+    visibilityDesc.channels = 2;
+    visibilityDesc.format = rhi::Format::R32G32_UInt;
+    visibilityDesc.hasRTV = true;
+    visibilityDesc.hasSRV = true;
+	visibilityDesc.hasUAV = true; // For clearing
+	visibilityDesc.hasNonShaderVisibleUAV = true; // For clearing with ClearUnorderedAccessViewUint
+    visibilityDesc.imageDimensions.emplace_back(resolution.x, resolution.y, 0, 0);
+    auto visibilityBuffer = PixelBuffer::Create(visibilityDesc);
+	visibilityBuffer->SetName(L"Visibility Buffer");
+    graph->RegisterResource(Builtin::PrimaryCamera::VisibilityTexture, visibilityBuffer);
+
     std::shared_ptr<PixelBuffer> albedo;
     std::shared_ptr<PixelBuffer> metallicRoughness;
     std::shared_ptr<PixelBuffer> emissive;
-    if (deferredRendering) {
-        TextureDescription albedoDesc;
-        albedoDesc.arraySize = 1;
-        albedoDesc.channels = 4;
-        albedoDesc.isCubemap = false;
-        albedoDesc.hasRTV = true;
-        albedoDesc.format = rhi::Format::R8G8B8A8_UNorm;
-        albedoDesc.generateMipMaps = false;
-        albedoDesc.hasSRV = true;
-        albedoDesc.srvFormat = rhi::Format::R8G8B8A8_UNorm;
-        ImageDimensions albedoDims = { resolution.x, resolution.y, 0, 0 };
-        albedoDesc.imageDimensions.push_back(albedoDims);
-        albedo = PixelBuffer::Create(albedoDesc);
-        albedo->SetName(L"Albedo");
-        graph->RegisterResource(Builtin::GBuffer::Albedo, albedo);
 
-        TextureDescription metallicRoughnessDesc;
-        metallicRoughnessDesc.arraySize = 1;
-        metallicRoughnessDesc.channels = 2;
-        metallicRoughnessDesc.isCubemap = false;
-        metallicRoughnessDesc.hasRTV = true;
-        metallicRoughnessDesc.format = rhi::Format::R8G8_UNorm;
-        metallicRoughnessDesc.generateMipMaps = false;
-        metallicRoughnessDesc.hasSRV = true;
-        metallicRoughnessDesc.srvFormat = rhi::Format::R8G8_UNorm;
-        ImageDimensions metallicRoughnessDims = { resolution.x, resolution.y, 0, 0 };
-        metallicRoughnessDesc.imageDimensions.push_back(metallicRoughnessDims);
-        metallicRoughness = PixelBuffer::Create(metallicRoughnessDesc);
-        metallicRoughness->SetName(L"Metallic Roughness");
-        graph->RegisterResource(Builtin::GBuffer::MetallicRoughness, metallicRoughness);
+    TextureDescription albedoDesc;
+    albedoDesc.channels = 4;
+    albedoDesc.hasRTV = true;
+    albedoDesc.format = rhi::Format::R8G8B8A8_UNorm;
+    albedoDesc.hasSRV = true;
+	albedoDesc.hasUAV = true;
+    albedoDesc.hasNonShaderVisibleUAV = true;
+    ImageDimensions albedoDims = { resolution.x, resolution.y, 0, 0 };
+    albedoDesc.imageDimensions.push_back(albedoDims);
+    albedo = PixelBuffer::Create(albedoDesc);
+    albedo->SetName(L"Albedo");
+    graph->RegisterResource(Builtin::GBuffer::Albedo, albedo);
 
-        TextureDescription emissiveDesc;
-        emissiveDesc.arraySize = 1;
-        emissiveDesc.channels = 4;
-        emissiveDesc.isCubemap = false;
-        emissiveDesc.hasRTV = true;
-        emissiveDesc.format = rhi::Format::R16G16B16A16_Float;
-        emissiveDesc.generateMipMaps = false;
-        emissiveDesc.hasSRV = true;
-        emissiveDesc.srvFormat = rhi::Format::R16G16B16A16_Float;
-        ImageDimensions emissiveDims = { resolution.x, resolution.y, 0, 0 };
-        emissiveDesc.imageDimensions.push_back(emissiveDims);
-        emissive = PixelBuffer::Create(emissiveDesc);
-        emissive->SetName(L"Emissive");
-        graph->RegisterResource(Builtin::GBuffer::Emissive, emissive);
-    }
+    TextureDescription metallicRoughnessDesc;
+    metallicRoughnessDesc.channels = 2;
+    metallicRoughnessDesc.hasRTV = true;
+    metallicRoughnessDesc.format = rhi::Format::R8G8_UNorm;
+    metallicRoughnessDesc.hasSRV = true;
+	metallicRoughnessDesc.hasUAV = true;
+	metallicRoughnessDesc.hasNonShaderVisibleUAV = true;
+    ImageDimensions metallicRoughnessDims = { resolution.x, resolution.y, 0, 0 };
+    metallicRoughnessDesc.imageDimensions.push_back(metallicRoughnessDims);
+    metallicRoughness = PixelBuffer::Create(metallicRoughnessDesc);
+    metallicRoughness->SetName(L"Metallic Roughness");
+    graph->RegisterResource(Builtin::GBuffer::MetallicRoughness, metallicRoughness);
+
+    TextureDescription emissiveDesc;
+    emissiveDesc.channels = 4;
+    emissiveDesc.hasRTV = true;
+    emissiveDesc.format = rhi::Format::R16G16B16A16_Float;
+    emissiveDesc.hasSRV = true;
+	emissiveDesc.hasUAV = true;
+	emissiveDesc.hasNonShaderVisibleUAV = true;
+    ImageDimensions emissiveDims = { resolution.x, resolution.y, 0, 0 };
+    emissiveDesc.imageDimensions.push_back(emissiveDims);
+    emissive = PixelBuffer::Create(emissiveDesc);
+    emissive->SetName(L"Emissive");
+    graph->RegisterResource(Builtin::GBuffer::Emissive, emissive);
 }
 
 void BuildBRDFIntegrationPass(RenderGraph* graph) {
@@ -121,6 +118,7 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
 	bool shadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows")();
 	bool meshShadersEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
 	bool wireframeEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
+	bool visibilityRenderingEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableVisibilityRendering")();
 
     graph->BuildRenderPass("ClearLastFrameIndirectDrawUAVsPass") // Clears indirect draws from last frame
         .Build<ClearIndirectDrawCommandUAVsPass>(false);
@@ -131,6 +129,10 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
     graph->BuildComputePass("BuildOccluderDrawCommandsPass") // Builds draw command list for last frame's occluders
         .Build<ObjectCullingPass>(true, false);
 
+    // Rebuild visible clusters table for occluders
+    graph->BuildComputePass("RewriteOccluderMeshletVisibilityPass")
+		.Build<RewriteOccluderMeshletVisibilityPass>();
+
     // We need to draw occluder shadows early
     auto drawShadows = graph->RequestResource(Builtin::Shadows::ShadowMaps) != nullptr && shadowsEnabled;
     if (drawShadows) {
@@ -138,12 +140,26 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
             .Build<ShadowPass>(wireframeEnabled, meshShadersEnabled, true, false, true);
     }
 
-    graph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
-        .Build<GBufferPass>(
-        wireframeEnabled, 
-        meshShadersEnabled, 
-        true, 
-        true);
+
+    if (!visibilityRenderingEnabled) {
+        graph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
+            .Build<GBufferPass>(
+                wireframeEnabled,
+                meshShadersEnabled,
+                true,
+                true);
+    } else {
+        graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
+            .Build<VisibilityBufferPass>(
+                wireframeEnabled,
+                meshShadersEnabled,
+                true,
+                true);
+    
+        // Copy depth to a separate resource for downsampling
+        graph->BuildComputePass("PrimaryDepthCopyPass")
+            .Build<PrimaryDepthCopyPass>();
+    }
 
     // Single-pass downsample on all occluder-only depth maps
     // TODO: Case where HZB is not conservative when downsampling mips with non-even resolutions (bottom/side pixels get dropped), handled sub-optimally
@@ -162,12 +178,21 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
             .Build<ShadowPass>(wireframeEnabled, meshShadersEnabled, true, false, false);
     }
 
-    graph->BuildRenderPass("OccluderRemaindersPrepass") // Draws prepass for last frame's occluders
-        .Build<GBufferPass>(
-        wireframeEnabled, 
-        meshShadersEnabled, 
-        true, 
-        false);
+    if (!visibilityRenderingEnabled) {
+        graph->BuildRenderPass("OccluderRemaindersPrepass") // Draws prepass for last frame's occluders
+            .Build<GBufferPass>(
+                wireframeEnabled,
+                meshShadersEnabled,
+                true,
+                false);
+    } else {
+        graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
+            .Build<VisibilityBufferPass>(
+                wireframeEnabled,
+                meshShadersEnabled,
+                true,
+                false);
+    }
 
     // After the remainders are rendered, we need to cull all meshlets that weren't marked as an occluder remainder. TODO: This duplicates culling work on non-visible meshlets
     //newGraph->BuildComputePass("OccludersMeshletCullingPass")
@@ -197,11 +222,49 @@ void BuildGeneralCullingPipeline(RenderGraph* graph) {
     }
 }
 
-void BuildZPrepass(RenderGraph* graph) {
+inline void RegisterVisUtilResources(RenderGraph* graph)
+{
+    auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+    const uint32_t maxPixels = resolution.x * resolution.y;
+
+    auto& rm = ResourceManager::GetInstance();
+
+    // 1) Per-material pixel count buffer (uint[numMaterials])
+
+    // 2) Per-material prefix sum offsets (uint[numMaterials])
+
+    // 3) Total pixel count buffer (uint[1])
+    auto totalPixelCountBuffer = rm.CreateIndexedStructuredBuffer(1, sizeof(uint32_t), true, false);
+    totalPixelCountBuffer->SetName(L"VisUtil::TotalPixelCountBuffer");
+    graph->RegisterResource("Builtin::VisUtil::TotalPixelCountBuffer", totalPixelCountBuffer);
+
+    // 4) Per-material write cursors (uint[numMaterials]) used in pass 5
+
+    // 5) Pixel list buffer (PixelRef[maxPixels])
+	// PixelRef: uint pixelXY; (packed)
+    struct PixelRefPOD { uint32_t pixelXY; };
+    auto pixelListBuffer = rm.CreateIndexedStructuredBuffer(maxPixels, sizeof(PixelRefPOD), true, false);
+    pixelListBuffer->SetName(L"VisUtil::PixelListBuffer");
+    graph->RegisterResource("Builtin::VisUtil::PixelListBuffer", pixelListBuffer);
+
+    // a single-element buffer storing NumMaterials
+    //auto numMaterialsBuffer = rm.CreateIndexedStructuredBuffer(1, sizeof(uint32_t), true, false);
+    //numMaterialsBuffer->SetName(L"VisUtil::NumMaterialsBuffer");
+    //graph->RegisterResource("Builtin::VisUtil::NumMaterialsBuffer", numMaterialsBuffer);
+
+    // Initialize NumMaterials on upload heap (for Clear pass)
+    //uint32_t numMaterialsValue = numMaterials;
+    //QUEUE_UPLOAD(&numMaterialsValue, sizeof(uint32_t), numMaterialsBuffer.get(), 0);
+}
+
+void BuildGBufferPipeline(RenderGraph* graph) {
+    RegisterVisUtilResources(graph);
     bool occlusionCulling = SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")();
 	bool enableWireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 	bool useMeshShaders = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
 	bool indirect = SettingsManager::GetInstance().getSettingGetter<bool>("enableIndirectDraws")();
+	bool visibilityRendering = SettingsManager::GetInstance().getSettingGetter<bool>("enableVisibilityRendering")();
+
     if (!useMeshShaders) {
         indirect = false; // Mesh shader pipelines are required for indirect draws
 	}
@@ -211,12 +274,54 @@ void BuildZPrepass(RenderGraph* graph) {
     if (!occlusionCulling || !indirect) {
         clearRTVs = true; // We will not run an earlier pass
     }
-    graph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
-        .Build<GBufferPass>(
-        enableWireframe, 
-        useMeshShaders,
-        indirect, 
-        clearRTVs);
+
+    if (!visibilityRendering) {
+        graph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
+            .Build<GBufferPass>(
+                enableWireframe,
+                useMeshShaders,
+                indirect,
+                clearRTVs);
+    }
+    else {
+        graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
+            .Build<VisibilityBufferPass>(
+                enableWireframe,
+                useMeshShaders,
+                indirect,
+                clearRTVs);
+
+        // Reset material counters
+        graph->BuildComputePass("MaterialPixelCounterResetPass")
+            .Build<MaterialUAVResetPass>();
+
+        // Build material histogram
+        graph->BuildComputePass("MaterialHistogramPass")
+            .Build<MaterialHistogramPass>();
+
+        // Prefix sum material histogram
+        graph->BuildComputePass("MaterialBlockScanPass")
+            .Build<MaterialBlockScanPass>();
+
+        graph->BuildComputePass("MaterialBlockOffsetsPass")
+            .Build<MaterialBlockOffsetsPass>();
+
+        // Build pixel list
+        graph->BuildComputePass("BuildPixelListPass")
+            .Build<BuildPixelListPass>();
+
+        // Build indirect command buffer for material passes
+        graph->BuildComputePass("BuildMaterialIndirectCommandBufferPass")
+            .Build<BuildMaterialIndirectCommandBufferPass>();
+
+        // Evaluate material groups
+        graph->BuildComputePass("EvaluateMaterialGroupsPass")
+            .Build<EvaluateMaterialGroupsPass>();
+
+        // Copy depth to a separate resource for post-processing use
+        graph->BuildComputePass("PrimaryDepthCopyPass")
+            .Build<PrimaryDepthCopyPass>();
+    }
 }
 
 void RegisterGTAOResources(RenderGraph* graph) {
@@ -378,25 +483,20 @@ void BuildMainShadowPass(RenderGraph* graph) {
 
 void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
 
-	bool deferredRendering = SettingsManager::GetInstance().getSettingGetter<bool>("enableDeferredRendering")();
 	bool gtaoEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableGTAO")();
 	bool meshShaders = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
 	bool indirect = SettingsManager::GetInstance().getSettingGetter<bool>("enableIndirectDraws")();
 	bool wireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 
-    std::string primaryPassName = deferredRendering ? "Deferred Pass" : "Forward Pass";
-    auto primaryPassBuilder = graph->BuildRenderPass(primaryPassName);
+	// Uses existing GBuffer resources
+    graph->BuildComputePass("Deferred render pass").Build<DeferredShadingPass>();
 
-    if (deferredRendering) {
-        primaryPassBuilder.Build<DeferredRenderPass>();
-    }
-    else {
-        primaryPassBuilder.Build<ForwardRenderPass>(
-            wireframe, 
-            meshShaders, 
-            indirect, 
-            gtaoEnabled ? graph->RequestResource<PixelBuffer>(Builtin::GTAO::OutputAOTerm)->GetSRVInfo(0).slot.index : 0);
-    }
+	// Forward pass for materials incompatible with deferred rendering
+    graph->BuildRenderPass("Forward render pass").Build<ForwardRenderPass>(
+        wireframe, 
+        meshShaders, 
+        indirect, 
+        gtaoEnabled ? graph->RequestResource<PixelBuffer>(Builtin::GTAO::OutputAOTerm)->GetSRVInfo(0).slot.index : 0);
 }
 
 void BuildPPLLPipeline(RenderGraph* graph) {

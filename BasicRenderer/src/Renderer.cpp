@@ -43,7 +43,7 @@
 #include "RenderPasses/GTAO/XeGTAOFilterPass.h"
 #include "RenderPasses/GTAO/XeGTAOMainPass.h"
 #include "RenderPasses/GTAO/XeGTAODenoisePass.h"
-#include "RenderPasses/DeferredRenderPass.h"
+#include "RenderPasses/DeferredShadingPass.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
 #include "RenderPasses/PostProcessing/Tonemapping.h"
 #include "RenderPasses/PostProcessing/Upscaling.h"
@@ -52,6 +52,7 @@
 #include "RenderPasses/PostProcessing/SpecularIBLPass.h"
 #include "RenderPasses/PostProcessing/luminanceHistogram.h"
 #include "RenderPasses/PostProcessing/luminanceHistogramAverage.h"
+#include "RenderPasses/ClearVisibilityBufferPass.h"
 #include "Resources/TextureDescription.h"
 #include "Menu/Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -176,12 +177,13 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	m_pIndirectCommandBufferManager = IndirectCommandBufferManager::CreateUnique();
 	m_pViewManager = ViewManager::CreateUnique();
 	m_pEnvironmentManager = EnvironmentManager::CreateUnique();
+	m_pMaterialManager = MaterialManager::CreateUnique();
 	//ResourceManager::GetInstance().SetEnvironmentBufferDescriptorIndex(m_pEnvironmentManager->GetEnvironmentBufferSRVDescriptorIndex());
 	m_pLightManager->SetViewManager(m_pViewManager.get()); // Light manager needs access to view manager for shadow cameras
 	m_pViewManager->SetIndirectCommandBufferManager(m_pIndirectCommandBufferManager.get()); // View manager needs to make indirect command buffers
     m_pMeshManager->SetViewManager(m_pViewManager.get());
 
-	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pViewManager.get(), m_pLightManager.get(), m_pEnvironmentManager.get());
+	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pViewManager.get(), m_pLightManager.get(), m_pEnvironmentManager.get(), m_pMaterialManager.get());
 
     auto& world = ECSManager::GetInstance().GetWorld();
     world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
@@ -326,7 +328,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("drawBoundingSpheres", false);
     settingsManager.registerSetting<bool>("enableClusteredLighting", m_clusteredLighting);
     settingsManager.registerSetting<DirectX::XMUINT3>("lightClusterSize", m_lightClusterSize);
-	settingsManager.registerSetting<bool>("enableDeferredRendering", m_deferredRendering);
+	settingsManager.registerSetting<bool>("enableVisibilityRendering", m_visibilityRendering);
     settingsManager.registerSetting<bool>("collectPipelineStatistics", false);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
@@ -338,7 +340,7 @@ void Renderer::SetSettings() {
     bool meshShaderSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 	settingsManager.registerSetting<bool>("enableMeshShader", meshShaderSupported && m_useMeshShaders);
 	settingsManager.registerSetting<bool>("enableIndirectDraws", meshShaderSupported);
-	settingsManager.registerSetting<bool>("enableGTAO", true);
+	settingsManager.registerSetting<bool>("enableGTAO", m_gtaoEnabled);
 	settingsManager.registerSetting<bool>("enableOcclusionCulling", m_occlusionCulling);
 	settingsManager.registerSetting<bool>("enableMeshletCulling", m_meshletCulling);
     settingsManager.registerSetting<bool>("enableBloom", m_bloom);
@@ -406,8 +408,8 @@ void Renderer::SetSettings() {
 		m_gtaoEnabled = newValue;
 		rebuildRenderGraph = true;
 		}));
-    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableDeferredRendering", [this](const bool& newValue) {
-		m_deferredRendering = newValue;
+	m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableVisibilityRendering", [this](const bool& newValue) {
+		m_visibilityRendering = newValue;
 		rebuildRenderGraph = true;
 		}));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableOcclusionCulling", [this](const bool& newValue) {
@@ -465,6 +467,22 @@ void Renderer::SetSettings() {
 		m_screenSpaceReflections = newValue;
 		rebuildRenderGraph = true;
 		}));
+
+
+	// Indirect draws require mesh shaders (due to not having implemented indirect draws with traditional pipelines)
+	settingsManager.addImplicationConstraint("enableIndirectDraws", "enableMeshShader");
+
+	// Occlusion culling requires meshlet culling (due to object occlusion and meshlet occlusion not being separate yet)
+	settingsManager.addImplicationConstraint("enableOcclusionCulling", "enableMeshletCulling");
+
+	// Visibility rendering requires mesh shaders (due to not having implemented visibility VS)
+    settingsManager.addImplicationConstraint("enableVisibilityRendering", "enableMeshShader");
+
+    // Visibility rendering requires meshlet culling (due to reliance on visible clusters list)
+	settingsManager.addImplicationConstraint("enableVisibilityRendering", "enableMeshletCulling");
+
+    //Visibility rendering requires indirect draws (because of a bug) TODO: fix
+	settingsManager.addImplicationConstraint("enableVisibilityRendering", "enableIndirectDraws");
 }
 
 void Renderer::ToggleMeshShaders(bool useMeshShaders) {
@@ -616,6 +634,8 @@ void Renderer::CreateTextures() {
     motionVectors.format = rhi::Format::R16G16_Float;
     motionVectors.generateMipMaps = false;
     motionVectors.hasSRV = true;
+    motionVectors.hasUAV = true;
+    motionVectors.hasNonShaderVisibleUAV = true;
     motionVectors.srvFormat = rhi::Format::R16G16_Float;
     ImageDimensions motionVectorsDims = { resolution.x, resolution.y, 0, 0 };
     motionVectors.imageDimensions.push_back(motionVectorsDims);
@@ -762,6 +782,7 @@ void Renderer::Render() {
 	m_context.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
 	m_context.lightManager = m_pLightManager.get();
 	m_context.environmentManager = m_pEnvironmentManager.get();
+	m_context.materialManager = m_pMaterialManager.get();
 	m_context.drawStats = drawStats;
 	m_context.deltaTime = deltaTime;
 
@@ -771,9 +792,6 @@ void Renderer::Render() {
     }
 	if (m_clusteredLighting) {
 		globalPSOFlags |= PSOFlags::PSO_CLUSTERED_LIGHTING;
-	}
-	if (m_deferredRendering) {
-		globalPSOFlags |= PSOFlags::PSO_DEFERRED;
 	}
     if (m_screenSpaceReflections) {
         globalPSOFlags |= PSOFlags::PSO_SCREENSPACE_REFLECTIONS;
@@ -890,6 +908,7 @@ void Renderer::Cleanup() {
     m_hierarchySystem.destruct();
     m_settingsSubscriptions.clear();
     Material::DestroyDefaultMaterial();
+    Menu::GetInstance().Cleanup();
     ECSManager::GetInstance().GetWorld().release();
     DeletionManager::GetInstance().Cleanup();
 }
@@ -1034,6 +1053,7 @@ void Renderer::CreateRenderGraph() {
     newGraph->RegisterProvider(m_pLightManager.get());
     newGraph->RegisterProvider(m_pEnvironmentManager.get());
     newGraph->RegisterProvider(m_pIndirectCommandBufferManager.get());
+	newGraph->RegisterProvider(m_pMaterialManager.get());
     newGraph->RegisterProvider(&m_coreResourceProvider);
 
 	auto& depth = currentScene->GetPrimaryCamera().get<Components::DepthMap>();
@@ -1065,6 +1085,26 @@ void Renderer::CreateRenderGraph() {
 
     CreateGBufferResources(newGraph.get());
 
+    if (m_visibilityRendering) {
+        newGraph->BuildComputePass("ClearVisibilityBufferPass")
+            .Build<ClearVisibilityBufferPass>();
+    }
+
+    // Reset visible cluster table counter
+    if (m_meshletCulling) {
+        // Create mesh cluster id buffer, two UINTs per cluster, used by visibility buffer and occlusion culling
+        // 2^25 visible clusters allowed due to index precision
+        auto clusterIDBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(static_cast<size_t>(pow(2, 25)), sizeof(VisibleClusterInfo), true, false);
+        clusterIDBuffer->SetName(L"Visible Cluster Table");
+        newGraph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTable, clusterIDBuffer);
+        auto clusterIDBufferCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(UINT), true, false);
+        clusterIDBufferCounter->SetName(L"Visible Cluster Table Counter");
+        newGraph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTableCounter, clusterIDBufferCounter);
+
+        newGraph->BuildRenderPass("VisibleClusterTableCounterResetPass")
+            .Build<VisibleClusterTableCounterResetPass>();
+    }
+
     if (indirect) {
         if (m_occlusionCulling) {
             BuildOcclusionCullingPipeline(newGraph.get());
@@ -1072,8 +1112,8 @@ void Renderer::CreateRenderGraph() {
         BuildGeneralCullingPipeline(newGraph.get());
     }
 
-    // Z prepass goes before light clustering for when active cluster determination is implemented
-    BuildZPrepass(newGraph.get());
+	// Either visibility or standard GBuffer pass
+    BuildGBufferPipeline(newGraph.get());
 
     // GTAO pass
     if (m_gtaoEnabled) {
@@ -1108,7 +1148,7 @@ void Renderer::CreateRenderGraph() {
 
 	// Start of post-processing passes
 
-	if (m_screenSpaceReflections && m_deferredRendering) { // SSSR requires deferred rendering for gbuffer
+	if (m_screenSpaceReflections) {
         BuildSSRPasses(newGraph.get());
     }
 

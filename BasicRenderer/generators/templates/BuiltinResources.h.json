@@ -1,10 +1,13 @@
 {
   "Builtin": {
+    "PerMaterialDataBuffer": {},
     "PrimaryCamera": {
       "LinearDepthMap": {},
       "DepthTexture": {},
       "VisibilityTexture": {},
       "MeshletBitfield": {},
+      "VisibleClusterTable": {},
+      "VisibleClusterTableCounter": {},
       "IndirectCommandBuffers": {
         "Primary": {},
         "MeshletCulling": {},
@@ -21,7 +24,8 @@
       "MeshletOffsets": {},
       "MeshletVertexIndices": {},
       "MeshletTriangles": {},
-      "MeshletBounds": {}
+      "MeshletBounds": {},
+      "ClusterToVisibleClusterTableIndexBuffer": {}
     },
     "MeshletCullingBitfieldGroup": {},
     "MeshInstanceMeshletCullingBitfieldGroup": {},
@@ -48,7 +52,7 @@
       "CurrentPrefilteredCubemap": {}
     },
     "IndirectCommandBuffers": {
-      "Primary": {}, 
+      "Primary": {},
       "MeshletCulling": {},
       "Master": {}
     },

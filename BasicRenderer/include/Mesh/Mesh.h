@@ -111,6 +111,8 @@ public:
 		return m_meshletBoundsBufferView.get();
 	}
 
+	void SetMaterialDataIndex(unsigned int index);
+
 private:
     Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags);
     void CreateVertexBuffer();

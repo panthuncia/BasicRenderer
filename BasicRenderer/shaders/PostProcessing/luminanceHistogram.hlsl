@@ -1,5 +1,6 @@
 #include "include/cbuffers.hlsli"
 #include "PerPassRootConstants/luminanceHistogramRootConstants.h"
+#include "include/waveIntrinsicsHelpers.hlsli"
 
 // https://bruop.github.io/exposure/
 static const uint GROUP_SIZE = 256;
@@ -27,35 +28,31 @@ uint colorToBin(float3 hdrColor, float minLogLum, float inverseLogLumRange)
 
 [numthreads(16, 16, 1)]
 void CSMain(
-    uint3 dispatchThreadID : SV_DispatchThreadID, // global coords
-    uint3 groupThreadID : SV_GroupThreadID, // local 2D coords
-    uint groupIndex : SV_GroupIndex // linear local index [0..255]
+    uint3 dispatchThreadID : SV_DispatchThreadID
 )
 {
-    // Zero out our local-bin
-    histogramShared[groupIndex] = 0;
-    GroupMemoryBarrierWithGroupSync();
-
     Texture2D<float4> s_texColor = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Color::HDRColorTarget)];
     RWStructuredBuffer<uint> histogram = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostProcessing::LuminanceHistogram)];
-    
-    // If inside image bounds, compute this pixel's bin and atomically increment local
+
     uint width, height;
     s_texColor.GetDimensions(width, height);
-    if (dispatchThreadID.x < width && dispatchThreadID.y < height)
-    {
-        float3 hdr = s_texColor.Load(int3(dispatchThreadID.xy, 0)).xyz;
-        uint bin = colorToBin(hdr, MIN_LOG_LUMINANCE, INVERSE_LOG_LUM_RANGE);
-        uint unused;
-        InterlockedAdd(histogramShared[bin], 1, unused);
-    }
 
-    // Wait for all lanes, then push local bins to the global histogram
-    GroupMemoryBarrierWithGroupSync();
+    // Inactive lanes bail out early; only active lanes participate in wave ops.
+    if (dispatchThreadID.x >= width || dispatchThreadID.y >= height)
+        return;
 
+    float3 hdr = s_texColor.Load(int3(dispatchThreadID.xy, 0)).xyz;
+    uint bin = colorToBin(hdr, MIN_LOG_LUMINANCE, INVERSE_LOG_LUM_RANGE);
+
+    // Group threads in the wave by histogram bin
+    uint4 mask       = WaveMatch(bin);         // same mask in all lanes that share 'bin'
+    uint  groupCount = CountBits128(mask);     // how many lanes have this bin
+    uint  lane       = WaveGetLaneIndex();
+    uint  leaderLane = GetWaveGroupLeaderLane(mask);
+
+    // One atomic per (wave, bin) group
+    if (lane == leaderLane)
     {
-        uint unused;
-        //histogram.InterlockedAdd(groupIndex, histogramShared[groupIndex], unused);
-        InterlockedAdd(histogram[groupIndex], histogramShared[groupIndex], unused);
+        InterlockedAdd(histogram[bin], groupCount);
     }
 }

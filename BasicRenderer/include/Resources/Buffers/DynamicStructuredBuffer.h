@@ -57,6 +57,7 @@ public:
         if (newCapacity > m_capacity) {
             CreateBuffer(newCapacity, m_capacity);
             m_capacity = newCapacity;
+            onResized(m_globalResizableBufferID, sizeof(T), m_capacity, this);
         }
 
     }
@@ -86,15 +87,10 @@ protected:
     }
 
 private:
-    DynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false)
+    DynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring bufName = L"", bool UAV = false)
         : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
+		name = bufName;
         CreateBuffer(capacity);
-        if (name != L"") {
-            m_dataBuffer->SetName((m_name + L": " + name).c_str());
-        }
-        else {
-            m_dataBuffer->SetName(m_name.c_str());
-        }
     }
 
     void OnSetName() override {
@@ -121,6 +117,7 @@ private:
         auto device = DeviceManager::GetInstance().GetDevice();
 
         auto newDataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, sizeof(T) * capacity, m_UAV);
+		newDataBuffer->SetName((m_name+ L": " + name).c_str());
         if (m_dataBuffer != nullptr) {
             UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity);
             DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);

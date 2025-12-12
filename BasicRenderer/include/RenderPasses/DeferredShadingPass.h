@@ -3,7 +3,7 @@
 #include <unordered_map>
 #include <functional>
 
-#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Mesh/Mesh.h"
@@ -15,9 +15,9 @@
 #include "Managers/Singletons/UploadManager.h"
 #include "Managers/ObjectManager.h"
 
-class DeferredRenderPass : public RenderPass {
+class DeferredShadingPass : public ComputePass {
 public:
-	DeferredRenderPass() {
+	DeferredShadingPass() {
 		auto& settingsManager = SettingsManager::GetInstance();
 		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
@@ -26,7 +26,7 @@ public:
 		m_clusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting")();
 	}
 
-	void DeclareResourceUsages(RenderPassBuilder* builder) override {
+	void DeclareResourceUsages(ComputePassBuilder* builder) override {
 		builder->WithShaderResource(Builtin::CameraBuffer,
 			Builtin::Environment::PrefilteredCubemapsGroup,
 			Builtin::Light::ActiveLightIndices,
@@ -42,8 +42,7 @@ public:
 			Builtin::PrimaryCamera::DepthTexture,
 			Builtin::Environment::CurrentCubemap,
 			Builtin::Shadows::ShadowMaps)
-			.WithRenderTarget(Builtin::Color::HDRColorTarget)
-			.WithDepthRead(Builtin::PrimaryCamera::DepthTexture);
+			.WithUnorderedAccess(Builtin::Color::HDRColorTarget);
 
 		if (m_clusteredLightingEnabled) {
 			builder->WithShaderResource(Builtin::Light::ClusterBuffer, Builtin::Light::PagesBuffer);
@@ -55,9 +54,6 @@ public:
 	}
 
 	void Setup() override {
-
-		m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
-		m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 		
 		if (m_clusteredLightingEnabled) {
 			RegisterSRV(Builtin::Light::ClusterBuffer);
@@ -80,27 +76,19 @@ public:
 		RegisterSRV(Builtin::GBuffer::Emissive);
 		RegisterSRV(Builtin::GBuffer::MetallicRoughness);
 		RegisterSRV(Builtin::PrimaryCamera::DepthTexture);
+
+		RegisterUAV(Builtin::Color::HDRColorTarget);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
 		auto& psoManager = PSOManager::GetInstance();
 		auto& commandList = context.commandList;
 
-		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
+		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(),
+			context.samplerDescriptorHeap.GetHandle());
 
-		rhi::PassBeginInfo passInfo{};
-		rhi::ColorAttachment colorAttachment{};
-		colorAttachment.rtv = m_pHDRTarget->GetRTVInfo(0).slot;
-		colorAttachment.loadOp = rhi::LoadOp::Clear;
-		colorAttachment.storeOp = rhi::StoreOp::Store;
-		colorAttachment.clear = m_pHDRTarget->GetClearColor();
-		passInfo.colors = { &colorAttachment };
-		passInfo.height = context.renderResolution.y;
-		passInfo.width = context.renderResolution.x;
+		commandList.BindLayout(psoManager.GetComputeRootSignature().GetHandle());
 
-		commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);
-
-		commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
 		auto& pso = psoManager.GetDeferredPSO(context.globalPSOFlags);
 		commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
@@ -110,9 +98,18 @@ public:
 		settings[EnableShadows] = getShadowsEnabled();
 		settings[EnablePunctualLights] = getPunctualLightingEnabled();
 		settings[EnableGTAO] = m_gtaoEnabled;
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, SettingsRootSignatureIndex, 0, NumSettingsRootConstants, &settings);
+		commandList.PushConstants(rhi::ShaderStage::Compute, 0,
+			SettingsRootSignatureIndex, 0,
+			NumSettingsRootConstants, &settings);
 
-		commandList.Draw(3, 1, 0, 0); // Fullscreen triangle
+		uint32_t w = context.renderResolution.x;
+		uint32_t h = context.renderResolution.y;
+		const uint32_t groupSizeX = 8;
+		const uint32_t groupSizeY = 8;
+		uint32_t groupsX = (w + groupSizeX - 1) / groupSizeX;
+		uint32_t groupsY = (h + groupSizeY - 1) / groupSizeY;
+
+		commandList.Dispatch(groupsX, groupsY, 1);
 		return {};
 	}
 
@@ -125,9 +122,6 @@ private:
 	std::function<bool()> getImageBasedLightingEnabled;
 	std::function<bool()> getPunctualLightingEnabled;
 	std::function<bool()> getShadowsEnabled;
-
-	std::shared_ptr<PixelBuffer> m_pHDRTarget;
-	std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer;
 
 	bool m_gtaoEnabled = true;
 	bool m_clusteredLightingEnabled = true;

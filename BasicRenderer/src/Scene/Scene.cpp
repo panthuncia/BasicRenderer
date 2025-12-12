@@ -15,6 +15,7 @@
 #include "Managers/MeshManager.h"
 #include "Managers/LightManager.h"
 #include "Managers/IndirectCommandBufferManager.h"
+#include "Managers/MaterialManager.h"
 #include "Mesh/MeshInstance.h"
 #include "Animation/AnimationController.h"
 #include "Utilities/MathUtils.h"
@@ -164,6 +165,11 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 		//e.add<Components::OpaqueMeshInstances>(drawInfo.opaque.value());
 		for (auto& meshInstance : meshInstances->meshInstances) {
 
+			// Increment material usage count
+			m_managerInterface.GetMaterialManager()->IncrementMaterialUsageCount(*meshInstance->GetMesh()->material);
+			auto materialDataIndex = m_managerInterface.GetMaterialManager()->GetMaterialSlot(meshInstance->GetMesh()->material->GetMaterialID());
+			meshInstance->GetMesh()->SetMaterialDataIndex(materialDataIndex);
+
 			// Register mesh if not already present
 			if (!globalMeshLibrary.meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
 				globalMeshLibrary.meshes[meshInstance->GetMesh()->GetGlobalID()] = meshInstance->GetMesh();
@@ -192,6 +198,7 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 				}
 				perPassMeshes.meshesByPass[pass.hash].push_back(meshInstance);
 			}
+
 			entity.set<Components::PerPassMeshes>(perPassMeshes);
 		}
 	}

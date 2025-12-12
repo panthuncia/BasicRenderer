@@ -17,6 +17,7 @@
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
 
+// TODO: Prepass for forward-rendered geometry, requires better object and indirect workload queries
 class GBufferPass : public RenderPass {
 public:
     GBufferPass(
@@ -33,7 +34,6 @@ public:
         getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
         getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
         getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
-        m_deferred = settingsManager.getSettingGetter<bool>("enableDeferredRendering")();
     }
 
     ~GBufferPass() {
@@ -45,20 +45,18 @@ public:
             Builtin::NormalMatrixBuffer,
             Builtin::PerMeshBuffer,
             Builtin::PerMeshInstanceBuffer,
+            Builtin::PerMaterialDataBuffer,
             Builtin::PostSkinningVertices,
             Builtin::CameraBuffer)
             .WithRenderTarget(
                 Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 }),
                 Builtin::GBuffer::Normals,
-                Builtin::GBuffer::MotionVectors)
-            .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
-            .IsGeometryPass();
-        if (m_deferred) {
-            builder->WithRenderTarget(
+                Builtin::GBuffer::MotionVectors,
                 Builtin::GBuffer::Albedo,
                 Builtin::GBuffer::MetallicRoughness,
-                Builtin::GBuffer::Emissive);
-        }
+                Builtin::GBuffer::Emissive)
+            .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
+            .IsGeometryPass();
 
         if (m_meshShaders) {
             builder->WithShaderResource(Builtin::PerMeshBuffer, Builtin::PrimaryCamera::MeshletBitfield);
@@ -84,12 +82,9 @@ public:
         m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
         m_pNormals = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::Normals);
         m_pMotionVectors = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::MotionVectors);
-
-        if (m_deferred) {
-            m_pAlbedo = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::Albedo);
-            m_pMetallicRoughness = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::MetallicRoughness);
-            m_pEmissive = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::Emissive);
-        }
+        m_pAlbedo = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::Albedo);
+        m_pMetallicRoughness = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::MetallicRoughness);
+        m_pEmissive = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::Emissive);
 
         if (m_meshShaders) {
             m_primaryCameraMeshletBitfield = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
@@ -107,6 +102,7 @@ public:
         RegisterSRV(Builtin::CameraBuffer);
         RegisterSRV(Builtin::PerMeshInstanceBuffer);
         RegisterSRV(Builtin::PerMeshBuffer);
+		RegisterSRV(Builtin::PerMaterialDataBuffer);
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -211,51 +207,49 @@ private:
             colors.push_back(ca);
         }
 
-        if (context.globalPSOFlags & PSOFlags::PSO_DEFERRED) {
-            // albedo
-            {
-                rhi::ColorAttachment ca{};
-                ca.rtv = m_pAlbedo->GetRTVInfo(0).slot;
-                ca.storeOp = rhi::StoreOp::Store;
-                if (m_clearGbuffer) {
-                    ca.loadOp = rhi::LoadOp::Clear;
-					ca.clear = m_pAlbedo->GetClearColor();
-                }
-                else {
-                    ca.loadOp = rhi::LoadOp::Load;
-                }
-                colors.push_back(ca);
+        // albedo
+        {
+            rhi::ColorAttachment ca{};
+            ca.rtv = m_pAlbedo->GetRTVInfo(0).slot;
+            ca.storeOp = rhi::StoreOp::Store;
+            if (m_clearGbuffer) {
+                ca.loadOp = rhi::LoadOp::Clear;
+				ca.clear = m_pAlbedo->GetClearColor();
             }
+            else {
+                ca.loadOp = rhi::LoadOp::Load;
+            }
+            colors.push_back(ca);
+        }
 
-            // metallic/roughness
-            {
-                rhi::ColorAttachment ca{};
-                ca.rtv = m_pMetallicRoughness->GetRTVInfo(0).slot;
-                ca.storeOp = rhi::StoreOp::Store;
-                if (m_clearGbuffer) {
-                    ca.loadOp = rhi::LoadOp::Clear;
-					ca.clear = m_pMetallicRoughness->GetClearColor();
-                }
-                else {
-                    ca.loadOp = rhi::LoadOp::Load;
-                }
-                colors.push_back(ca);
+        // metallic/roughness
+        {
+            rhi::ColorAttachment ca{};
+            ca.rtv = m_pMetallicRoughness->GetRTVInfo(0).slot;
+            ca.storeOp = rhi::StoreOp::Store;
+            if (m_clearGbuffer) {
+                ca.loadOp = rhi::LoadOp::Clear;
+				ca.clear = m_pMetallicRoughness->GetClearColor();
             }
+            else {
+                ca.loadOp = rhi::LoadOp::Load;
+            }
+            colors.push_back(ca);
+        }
 
-			// emissive
-            {
-				rhi::ColorAttachment ca{};
-				ca.rtv = m_pEmissive->GetRTVInfo(0).slot;
-				ca.storeOp = rhi::StoreOp::Store;
-                if (m_clearGbuffer) {
-                    ca.loadOp = rhi::LoadOp::Clear;
-					ca.clear = m_pEmissive->GetClearColor();
-                }
-                else {
-                    ca.loadOp = rhi::LoadOp::Load;
-				}
-				colors.push_back(ca);
+		// emissive
+        {
+			rhi::ColorAttachment ca{};
+			ca.rtv = m_pEmissive->GetRTVInfo(0).slot;
+			ca.storeOp = rhi::StoreOp::Store;
+            if (m_clearGbuffer) {
+                ca.loadOp = rhi::LoadOp::Clear;
+				ca.clear = m_pEmissive->GetClearColor();
             }
+            else {
+                ca.loadOp = rhi::LoadOp::Load;
+			}
+			colors.push_back(ca);
         }
 
         p.colors = { colors.data(), (uint32_t)colors.size() };
@@ -290,13 +284,13 @@ private:
 
         // Opaque objects
         m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes opaqueMeshes) {
-            auto& meshes = opaqueMeshes.meshesByPass[m_renderPhase.hash];
+            auto& meshes = opaqueMeshes.meshesByPass[m_GBufferRenderPhase.hash];
 
 			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto& pso = psoManager.GetPrePassPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->Technique().compileFlags);
+                auto& pso = psoManager.GetPrePassPSO(context.globalPSOFlags | mesh.material->GetPSOFlags() | PSOFlags::PSO_DEFERRED, mesh.material->Technique().compileFlags);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
@@ -316,13 +310,13 @@ private:
         auto& psoManager = PSOManager::GetInstance();
 
         m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes perPassMeshes) {
-            auto& meshes = perPassMeshes.meshesByPass[m_renderPhase.hash];
+            auto& meshes = perPassMeshes.meshesByPass[m_GBufferRenderPhase.hash];
 
 			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
             for (auto& pMesh : meshes) {
                 auto& mesh = *pMesh->GetMesh();
-                auto& pso = psoManager.GetMeshPrePassPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->Technique().compileFlags);
+                auto& pso = psoManager.GetMeshPrePassPSO(context.globalPSOFlags | mesh.material->GetPSOFlags() | PSOFlags::PSO_DEFERRED, mesh.material->Technique().compileFlags);
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
@@ -346,10 +340,9 @@ private:
         // Opaque indirect draws
         auto workloads = context.indirectCommandBufferManager->GetBuffersForRenderPhase(
             context.currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID,
-			m_renderPhase);
+            m_GBufferRenderPhase);
 		for (auto& workload : workloads) {
-
-            auto& pso = psoManager.GetMeshPrePassPSO(context.globalPSOFlags, workload.first, m_wireframe);
+            auto& pso = psoManager.GetMeshPrePassPSO(context.globalPSOFlags | PSOFlags::PSO_DEFERRED, workload.first, m_wireframe);
             BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 			commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
@@ -373,7 +366,6 @@ private:
     bool m_meshShaders;
     bool m_indirect;
     bool m_clearGbuffer = true;
-    bool m_deferred = false;
 
     std::shared_ptr<PixelBuffer> m_pLinearDepthBuffer;
     std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer;
@@ -387,7 +379,8 @@ private:
     std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraOpaqueIndirectCommandBuffer;
     std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraAlphaTestIndirectCommandBuffer;
 
-	RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
+	RenderPhase m_GBufferRenderPhase = Engine::Primary::GBufferPass;
+	RenderPhase m_PrePassRenderPhase = Engine::Primary::ZPrepass;
 
     std::function<bool()> getImageBasedLightingEnabled;
     std::function<bool()> getPunctualLightingEnabled;

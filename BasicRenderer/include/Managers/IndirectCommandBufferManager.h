@@ -6,7 +6,6 @@
 #include <span>
 #include <spdlog/spdlog.h>
 
-#include "Materials/MaterialBuckets.h" // you can remove this include once old code is gone
 #include "Scene/Components.h"
 #include "Interfaces/IResourceProvider.h"
 #include "Materials/TechniqueDescriptor.h"
