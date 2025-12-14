@@ -234,8 +234,6 @@ namespace rhi {
         }
     }
 
-    enum class Memory : uint32_t { DeviceLocal, Upload, Readback };
-
     enum class ViewKind : uint32_t { SRV, UAV, RTV, DSV };
     struct TextureSubresourceRange { uint32_t baseMip = 0, mipCount = 1; uint32_t baseLayer = 0, layerCount = 1; };
     struct ViewDesc { ViewKind kind = ViewKind::SRV; ResourceHandle texture{}; TextureSubresourceRange range{}; Format formatOverride = Format::Unknown; };
@@ -788,6 +786,7 @@ namespace rhi {
         RF_VideoDecodeReferenceOnly = 1 << 6,
         RF_VideoEncodeReferenceOnly = 1 << 7,
         RF_RaytracingAccelerationStructure = 1 << 8,
+        RF_UseTightAlignment = 1 << 9
     };
 	// Define |= for ResourceFlags
 	inline ResourceFlags operator|(ResourceFlags a, ResourceFlags b) {
@@ -810,10 +809,24 @@ namespace rhi {
         ResourceLayout initialLayout = ResourceLayout::Undefined;
         const ClearValue* optimizedClear = nullptr;    // optional, if RTV/DSV
     };
+
+    enum class HeapType {
+        DeviceLocal, // D3D12: DEFAULT; Vulkan: DEVICE_LOCAL
+        HostVisibleCoherent, // D3D12: UPLOAD; Vulkan: HOST_VISIBLE + HOST_COHERENT
+        Upload = HostVisibleCoherent,
+        HostVisibleCached, // D3D12: READBACK; Vulkan: HOST_VISIBLE + HOST_CACHED
+        Readback = HostVisibleCached,
+        HostCached, // D3D12: CUSTOM; Vulkan: HOST_CACHED
+		HostVisibleDeviceLocal, // D3D12: GPU_UPLOAD; Vulkan: HOST_VISIBLE + DEVICE_LOCAL
+		GPUUpload = HostVisibleDeviceLocal,
+        Custom // D3D12: CUSTOM; Vulkan: CUSTOM
+    };
+
+
 	enum class ResourceType : uint32_t { Unknown, Buffer, Texture1D, Texture2D, Texture3D};
     struct ResourceDesc { 
         ResourceType type = ResourceType::Unknown; 
-        Memory memory = Memory::DeviceLocal;
+        HeapType memory = HeapType::DeviceLocal;
         ResourceFlags flags;
         const char* debugName = nullptr;
         union { 
@@ -838,15 +851,54 @@ namespace rhi {
         AllowAllBuffersAndTextures = 1u << 10  // D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES
     };
 
-    inline HeapFlags operator|(HeapFlags a, HeapFlags b) {
+    inline constexpr HeapFlags operator|(const HeapFlags a, const HeapFlags b) {
         return static_cast<HeapFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
     }
-    inline HeapFlags& operator|=(HeapFlags& a, HeapFlags b) { a = a | b; return a; }
+    inline constexpr HeapFlags& operator|=(HeapFlags& a, const HeapFlags b) { a = a | b; return a; }
+
+    inline constexpr uint32_t to_u32(HeapFlags v) {
+        return static_cast<uint32_t>(v);
+    }
+
+    inline constexpr HeapFlags operator&(HeapFlags a, HeapFlags b) {
+        return static_cast<HeapFlags>(to_u32(a) & to_u32(b));
+    }
+    inline constexpr HeapFlags& operator&=(HeapFlags& a, HeapFlags b) {
+        a = a & b;
+        return a;
+    }
+
+    inline constexpr HeapFlags operator~(HeapFlags a) {
+        return static_cast<HeapFlags>(~to_u32(a));
+    }
+    inline constexpr HeapFlags operator^(HeapFlags a, HeapFlags b) {
+        return static_cast<HeapFlags>(to_u32(a) ^ to_u32(b));
+    }
+    inline constexpr HeapFlags& operator^=(HeapFlags& a, HeapFlags b) {
+        a = a ^ b;
+        return a;
+    }
+    // == operator
+    inline constexpr bool operator==(HeapFlags a, HeapFlags b) {
+        return to_u32(a) == to_u32(b);
+	}
+    
+    inline constexpr bool operator==(HeapFlags a, uint32_t b) {
+        return to_u32(a) == b;
+    }
+
+    inline constexpr bool operator!=(HeapFlags a, HeapFlags b) {
+        return !(a == b);
+	}
+
+    inline constexpr bool operator!=(HeapFlags a, uint32_t b) {
+        return !(a == b);
+	}
 
     struct HeapDesc {
-        uint64_t   sizeBytes = 0;      // total heap size
-        uint64_t   alignment = 0;      // 0 -> choose default; otherwise 64KB or 4MB (MSAA) on DX12
-        Memory     memory = Memory::DeviceLocal; // maps to HEAP_PROPERTIES.Type
+        uint64_t   sizeBytes = 0; // total heap size
+        uint64_t   alignment = 0; // 0 -> choose default; otherwise 64KB or 4MB (MSAA) on DX12
+        HeapType     memory = HeapType::DeviceLocal; // maps to HEAP_PROPERTIES.Type
         HeapFlags  flags = HeapFlags::None;
         const char* debugName{ nullptr };
     };
@@ -1023,6 +1075,20 @@ namespace rhi {
 
 	enum class PrimitiveTopology : uint32_t { PointList, LineList, LineStrip, TriangleList, TriangleStrip, TriangleFan };
 
+    struct ResourceAllocationInfo { uint64_t offset; uint64_t alignment; uint64_t sizeInBytes; };
+    struct HeapProperties { HeapType type; bool cpuVisible; bool gpuVisible; bool cached; bool coherent; uint32_t memoryTypeBits; };
+    struct MemoryBudget { uint64_t budgetBytes; uint64_t usageBytes; };
+
+	enum ResidencyPriority : uint32_t { // Same as D3D12_RESIDENCY_PRIORITY
+        Minimum = 0x28000000, 
+        Low = 0x50000000, 
+        Normal = 0x78000000, 
+		High = 0xA0010000,
+		Maximum = 0xC8000000
+    };
+
+#define DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT 65536ull // 64KB // DX12 default requirement
+#define DEFAULT_MSAA_RESOURCE_PLACEMENT_ALIGNMENT 4194304ull // 4MB // DX12 requirement for MSAA textures
     // ---------------- POD wrappers + VTables ----------------
     class Device;       class Queue;       class CommandList;        class Swapchain;       class CommandAllocator;
     struct DeviceVTable; struct QueueVTable; struct CommandListVTable; struct SwapchainVTable; struct CommandAllocatorVTable;
@@ -1561,6 +1627,7 @@ namespace rhi {
         uint32_t(*getDescriptorHandleIncrementSize)(Device*, DescriptorHeapType) noexcept;
         TimestampCalibration(*getTimestampCalibration)(Device*, QueueKind) noexcept;
         CopyableFootprintsInfo(*getCopyableFootprints)(Device*, const FootprintRangeDesc&, CopyableFootprint* out, uint32_t outCap) noexcept;
+        Result(*getResourceAllocationInfo)(Device*, const ResourceDesc*, uint32_t, ResourceAllocationInfo*) noexcept;
 
 		// Optional debug name setters (can be nullopt)
         void (*setNameBuffer)(Device*, ResourceHandle, const char*) noexcept;
@@ -1671,6 +1738,9 @@ namespace rhi {
         inline TimestampCalibration GetTimestampCalibration(QueueKind q) noexcept { return vt->getTimestampCalibration(this, q); }
         inline CopyableFootprintsInfo GetCopyableFootprints(const FootprintRangeDesc& r, CopyableFootprint* out, uint32_t outCap) noexcept {
             return vt->getCopyableFootprints(this, r, out, outCap);
+		}
+        inline void GetResourceAllocationInfo(const ResourceDesc* resourceDescriptions, uint32_t numResourceDescriptions, ResourceAllocationInfo* outAllocationInfo) noexcept {
+            vt->getResourceAllocationInfo(this, resourceDescriptions, numResourceDescriptions, outAllocationInfo);
 		}
         inline void Destroy() noexcept { vt->destroyDevice(this); impl = nullptr; vt = nullptr; }
     };

@@ -46,7 +46,7 @@ void ResourceManager::Initialize(rhi::Queue commandQueue) {
 	InitializeTransitionCommandList();
 	SetTransitionCommandQueue(commandQueue);
 
-	m_uavCounterReset = device.CreateCommittedResource(rhi::helpers::ResourceDesc::Buffer(sizeof(UINT), rhi::Memory::Upload));
+	m_uavCounterReset = device.CreateCommittedResource(rhi::helpers::ResourceDesc::Buffer(sizeof(UINT), rhi::HeapType::Upload));
 
 	void* pMappedCounterReset = nullptr;
 	
@@ -180,7 +180,7 @@ void ResourceManager::ExecuteAndWaitForCommandList(rhi::CommandListPtr& commandL
 
 std::shared_ptr<Buffer> ResourceManager::CreateBuffer(size_t bufferSize, void* pInitialData, bool UAV) {
 	auto device = DeviceManager::GetInstance().GetDevice();
-	auto dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, bufferSize, UAV);
+	auto dataBuffer = Buffer::CreateShared(device, rhi::HeapType::DeviceLocal, bufferSize, UAV);
 	if (pInitialData) {
 		QUEUE_UPLOAD(pInitialData, bufferSize, dataBuffer.get(), 0);
 	}

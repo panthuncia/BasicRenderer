@@ -113,7 +113,7 @@ namespace rhi {
 
             // Factories
             static constexpr ResourceDesc Buffer(uint64_t sizeBytes,
-                Memory memory = Memory::DeviceLocal,
+                HeapType memory = HeapType::DeviceLocal,
                 ResourceFlags flags = {},
                 const char* debugName = nullptr) noexcept
             {
@@ -129,7 +129,7 @@ namespace rhi {
             static constexpr ResourceDesc Texture(
 				ResourceType type,
                 Format format,
-                Memory memory,
+                HeapType memory,
                 uint32_t width,
                 uint32_t height = 1,
                 uint16_t depthOrLayers = 1,
@@ -170,7 +170,7 @@ namespace rhi {
             //        fmt, w, 1, array, mips, initial, clear, flags, name);
             //}
 
-            static constexpr ResourceDesc Tex2D(Format fmt, Memory memory, uint32_t w, uint32_t h,
+            static constexpr ResourceDesc Tex2D(Format fmt, HeapType memory, uint32_t w, uint32_t h,
                 uint16_t mips = 1, uint32_t sampleCount = 1, uint16_t array = 1,
                 ResourceLayout initial = ResourceLayout::Undefined,
                 const ClearValue* clear = nullptr,
@@ -181,7 +181,7 @@ namespace rhi {
                     fmt, memory, w, h, array, mips, sampleCount, initial, clear, flags, name);
             }
 
-            static constexpr ResourceDesc Tex3D(Format fmt, Memory memory, uint32_t w, uint32_t h, uint16_t d,
+            static constexpr ResourceDesc Tex3D(Format fmt, HeapType memory, uint32_t w, uint32_t h, uint16_t d,
 				uint16_t mips = 1, uint32_t sampleCount = 1,
                 ResourceLayout initial = ResourceLayout::Undefined,
                 const ClearValue* clear = nullptr,
@@ -191,7 +191,7 @@ namespace rhi {
                 return Texture(ResourceType::Texture3D, fmt, memory, w, h, d, mips, sampleCount, initial, clear, flags, name);
             }
 
-            static constexpr ResourceDesc TexCube(Format fmt, Memory memory, uint32_t edge,
+            static constexpr ResourceDesc TexCube(Format fmt, HeapType memory, uint32_t edge,
                 uint16_t mips = 1, uint32_t sampleCount = 1, uint16_t cubes = 1,
                 ResourceLayout initial = ResourceLayout::Undefined,
                 const ClearValue* clear = nullptr,
@@ -301,7 +301,7 @@ namespace rhi {
                 return 12; // 96bpp
             case Format::R32G32B32A32_Float: case Format::R32G32B32A32_UInt: case Format::R32G32B32A32_SInt: case Format::R32G32B32A32_Typeless:
                 return 16; // 128bpp
-            default: return 4; // conservative default
+			default: return 0; // Unsupported / unknown
             }
         }
 
@@ -392,7 +392,7 @@ namespace rhi {
             // Create UPLOAD buffer
             ResourceDesc upDesc{};
             upDesc.type = ResourceType::Buffer;
-            upDesc.memory = Memory::Upload;
+            upDesc.memory = HeapType::Upload;
             upDesc.flags = rhi::ResourceFlags::RF_None;
             upDesc.buffer.sizeBytes = totalSize;
             upDesc.debugName = "TextureUpload";

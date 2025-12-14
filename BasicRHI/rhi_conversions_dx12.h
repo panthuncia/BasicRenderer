@@ -275,11 +275,12 @@ namespace rhi {
 	}
 
 
-	inline static D3D12_HEAP_TYPE ToDx(const Memory m) {
+	inline static D3D12_HEAP_TYPE ToDx(const HeapType m) {
 		switch (m) {
-		case Memory::Upload:   return D3D12_HEAP_TYPE_UPLOAD;
-		case Memory::Readback: return D3D12_HEAP_TYPE_READBACK;
-		default:               return D3D12_HEAP_TYPE_DEFAULT;
+		case HeapType::DeviceLocal:    return D3D12_HEAP_TYPE_DEFAULT;
+		case HeapType::HostVisibleCoherent: return D3D12_HEAP_TYPE_UPLOAD;
+		case HeapType::HostVisibleCached: return D3D12_HEAP_TYPE_READBACK;
+		default: return D3D12_HEAP_TYPE_CUSTOM;
 		}
 	}
 
@@ -458,6 +459,43 @@ namespace rhi {
 		return q == QueueKind::Graphics ? D3D12_COMMAND_LIST_TYPE_DIRECT
 			: q == QueueKind::Compute ? D3D12_COMMAND_LIST_TYPE_COMPUTE
 			: D3D12_COMMAND_LIST_TYPE_COPY;
+	}
+
+	inline static D3D12_RESOURCE_DESC1 ToDX(const ResourceDesc& desc) {
+		switch (desc.type) {
+		case ResourceType::Buffer: {
+			D3D12_RESOURCE_DESC1 d{};
+			d.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+			d.Alignment = 0;
+			d.Width = desc.buffer.sizeBytes;
+			d.Height = 1;
+			d.DepthOrArraySize = 1;
+			d.MipLevels = 1;
+			d.Format = DXGI_FORMAT_UNKNOWN;
+			d.SampleDesc.Count = 1;
+			d.SampleDesc.Quality = 0;
+			d.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+			d.Flags = ToDX(desc.flags);
+			return d;
+		} break;
+		default: {
+			D3D12_RESOURCE_DESC1 d{};
+			d.Dimension = desc.type == ResourceType::Texture1D ? D3D12_RESOURCE_DIMENSION_TEXTURE1D
+				: desc.type == ResourceType::Texture2D ? D3D12_RESOURCE_DIMENSION_TEXTURE2D
+				: D3D12_RESOURCE_DIMENSION_TEXTURE3D;
+			d.Alignment = 0;
+			d.Width = desc.texture.width;
+			d.Height = desc.texture.height;
+			d.DepthOrArraySize = desc.texture.depthOrLayers;
+			d.MipLevels = desc.texture.mipLevels;
+			d.Format = ToDxgi(desc.texture.format);
+			d.SampleDesc.Count = desc.texture.sampleCount;
+			d.SampleDesc.Quality = 0;
+			d.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+			d.Flags = ToDX(desc.flags);
+			return d;
+		} break;
+		}
 	}
 
 }

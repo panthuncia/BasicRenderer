@@ -19,6 +19,8 @@
 #include "Resources/TextureDescription.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 
+#include "rhi_allocator.h"
+
 using namespace Microsoft::WRL;
 
 class BufferView;
@@ -67,7 +69,7 @@ public:
         UINT bufferSize = (sizeof(T) + 255) & ~255;
 
         // Create the buffer
-        auto dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, bufferSize, false);
+        auto dataBuffer = Buffer::CreateShared(device, rhi::HeapType::DeviceLocal, bufferSize, false);
 		dataBuffer->SetName(name);
 
 		rhi::CbvDesc cbvDesc = {};
@@ -113,7 +115,7 @@ public:
             assert(counterOffset % 4096 == 0);
 		}
 
-        auto dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, bufferSize, UAV);
+        auto dataBuffer = Buffer::CreateShared(device, rhi::HeapType::DeviceLocal, bufferSize, UAV);
 
         unsigned int index = m_cbvSrvUavHeap->AllocateDescriptor();
 
@@ -181,7 +183,7 @@ public:
 
         const size_t bufferSize = numElements * elementSize;
 
-        auto dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, bufferSize, UAV);
+        auto dataBuffer = Buffer::CreateShared(device, rhi::HeapType::DeviceLocal, bufferSize, UAV);
 
         unsigned int srvIndex = m_cbvSrvUavHeap->AllocateDescriptor();
 
@@ -437,7 +439,7 @@ public:
 		// Calculate the size of the buffer to be 256-byte aligned
 		UINT bufferSize = (sizeof(T) + 255) & ~255;
 
-        auto dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, bufferSize, false);
+        auto dataBuffer = Buffer::CreateShared(device, rhi::HeapType::DeviceLocal, bufferSize, false);
 		dataBuffer->SetName(name);
 
 

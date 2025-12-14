@@ -41,8 +41,6 @@ inline std::wstring s2ws(const std::string & s) {
 	return ws;
 }
 
-
-
 namespace rhi {
 	using Microsoft::WRL::ComPtr;
 	struct Dx12Device;
@@ -2053,6 +2051,49 @@ namespace rhi {
 		}
 
 		return { totalSubs, totalBytes };
+	}
+
+	static Result d_getResourceAllocationInfo(
+		Device* d,
+		const ResourceDesc* resources,
+		uint32_t resourceCount,
+		ResourceAllocationInfo* outInfos) noexcept
+	{
+		// Validate inputs
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (!impl || !resources || resourceCount == 0 || !outInfos) {
+			BreakIfDebugging();
+			return Result::InvalidArg;
+		}
+		// TODO: Should we store this elsewhere to avoid reallocating every call?
+		std::vector<D3D12_RESOURCE_DESC1> descs; 
+		descs.resize(resourceCount);
+		for (size_t i = 0; i < resourceCount; ++i) {
+			switch (resources[i].type) {
+			case ResourceType::Buffer:
+				descs[i] = MakeBufferDesc1(resources[i].buffer.sizeBytes, ToDX(resources[i].flags));
+				break;
+			case ResourceType::Texture1D:
+			case ResourceType::Texture2D:
+			case ResourceType::Texture3D:
+				descs[i] = MakeTexDesc1(resources[i]);
+				break;
+			default:
+				BreakIfDebugging();
+				return Result::InvalidArg;
+			}
+		}
+		// Out array
+		std::vector<D3D12_RESOURCE_ALLOCATION_INFO1> dxInfos;
+		dxInfos.resize(resourceCount);
+		impl->dev->GetResourceAllocationInfo2(0, resourceCount, descs.data(), dxInfos.data());
+		// Pack back
+		for (size_t i = 0; i < resourceCount; ++i) {
+			outInfos[i].offset = dxInfos[i].Offset;
+			outInfos[i].alignment = dxInfos[i].Alignment;
+			outInfos[i].sizeInBytes = dxInfos[i].SizeInBytes;
+		}
+		return Result::Ok;
 	}
 
 	// ---------------- Queue vtable funcs ----------------

@@ -44,6 +44,7 @@ namespace rhi {
 		&d_getDescriptorHandleIncrementSize,
 		&d_getTimestampCalibration,
 		&d_getCopyableFootprints,
+		&d_getResourceAllocationInfo,
 
 		&d_setNameBuffer,
 		&d_setNameTexture,

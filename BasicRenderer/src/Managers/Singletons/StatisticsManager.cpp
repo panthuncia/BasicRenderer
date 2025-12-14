@@ -73,8 +73,8 @@ void StatisticsManager::SetupQueryHeap() {
     auto tsInfo = m_timestampPool->GetQueryResultInfo();
     auto psInfo = m_pipelineStatsPool->GetQueryResultInfo();
 
-    rhi::ResourceDesc tsRb = rhi::helpers::ResourceDesc::Buffer(uint64_t(tsInfo.elementSize) * tsInfo.count, rhi::Memory::Readback);
-    rhi::ResourceDesc psRb = rhi::helpers::ResourceDesc::Buffer(uint64_t(psInfo.elementSize) * psInfo.count, rhi::Memory::Readback);
+    rhi::ResourceDesc tsRb = rhi::helpers::ResourceDesc::Buffer(uint64_t(tsInfo.elementSize) * tsInfo.count, rhi::HeapType::Readback);
+    rhi::ResourceDesc psRb = rhi::helpers::ResourceDesc::Buffer(uint64_t(psInfo.elementSize) * psInfo.count, rhi::HeapType::Readback);
 
     for (auto& kv : m_timestampBuffers) {
         auto& buf = kv.second;

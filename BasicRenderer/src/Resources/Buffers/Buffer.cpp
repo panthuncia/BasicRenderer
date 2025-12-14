@@ -10,7 +10,7 @@ using namespace Microsoft::WRL;
 
 Buffer::Buffer(
 	rhi::Device& device, 
-	rhi::Memory accessType, 
+	rhi::HeapType accessType,
 	uint64_t bufferSize, 
 	bool unorderedAccess) : 
 	GloballyIndexedResource(){

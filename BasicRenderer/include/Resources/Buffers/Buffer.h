@@ -18,14 +18,14 @@ class Buffer : public GloballyIndexedResource{
 public:
 	static std::shared_ptr<Buffer> CreateShared(
 		rhi::Device& device,
-		rhi::Memory accessType, 
+		rhi::HeapType accessType,
 		uint64_t bufferSize, 
 		bool unorderedAccess = false) {
 		return std::shared_ptr<Buffer>(new Buffer(device, accessType, bufferSize, unorderedAccess));
 	}
 	static std::unique_ptr<Buffer> CreateUnique(
 		rhi::Device& device, 
-		rhi::Memory accessType, 
+		rhi::HeapType accessType,
 		uint64_t bufferSize,
 		bool unorderedAccess = false) {
 		return std::unique_ptr<Buffer>(new Buffer(device, accessType, bufferSize, unorderedAccess));
@@ -34,7 +34,7 @@ public:
 	~Buffer() {
 		m_buffer.Reset();
 	}
-	rhi::Memory m_accessType;
+	rhi::HeapType m_accessType;
 	rhi::ResourcePtr m_buffer;
 	rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
 	size_t GetSize() const { return m_size; }
@@ -48,7 +48,7 @@ private:
 	rhi::BufferBarrier m_barrier = {};
 
 	Buffer(rhi::Device& device, 
-		rhi::Memory accessType, 
+		rhi::HeapType accessType,
 		uint64_t bufferSize, 
 		bool unorderedAccess = false);
 };

@@ -118,7 +118,7 @@ void DynamicBuffer::Deallocate(const BufferView* view) {
 void DynamicBuffer::CreateBuffer(size_t capacity) {
     auto device = DeviceManager::GetInstance().GetDevice();
     m_capacity = capacity;
-    m_dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, capacity, m_UAV);
+    m_dataBuffer = Buffer::CreateShared(device, rhi::HeapType::DeviceLocal, capacity, m_UAV);
     m_memoryBlocks.push_back({ 0, capacity, true });
 }
 
@@ -127,7 +127,7 @@ void DynamicBuffer::GrowBuffer(size_t newSize) {
     if (m_dataBuffer != nullptr) {
         DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
     }
-    auto newDataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, newSize, m_UAV);
+    auto newDataBuffer = Buffer::CreateShared(device, rhi::HeapType::DeviceLocal, newSize, m_UAV);
 	UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, m_capacity);
 	m_dataBuffer = newDataBuffer;
 
