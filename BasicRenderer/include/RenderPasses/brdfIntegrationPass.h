@@ -109,8 +109,8 @@ private:
             rhi::Make(soSmp),
         };
 
-        PSO = dev.CreatePipeline(items, (uint32_t)std::size(items));
-        if (!PSO || !PSO->IsValid()) {
+        auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), PSO);
+        if (Failed(result)) {
             throw std::runtime_error("Failed to create BRDF integration PSO (RHI)");
         }
         PSO->SetName("BRDFIntegration.PSO");

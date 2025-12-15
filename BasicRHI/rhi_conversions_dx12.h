@@ -497,5 +497,129 @@ namespace rhi {
 		} break;
 		}
 	}
+	inline static ShaderModel ToRHI(D3D_SHADER_MODEL model)
+	{
+		switch (model)
+		{
+			case D3D_SHADER_MODEL_6_9: return ShaderModel::SM_6_9;
+			case D3D_SHADER_MODEL_6_8: return ShaderModel::SM_6_8;
+			case D3D_SHADER_MODEL_6_7: return ShaderModel::SM_6_7;
+			case D3D_SHADER_MODEL_6_6: return ShaderModel::SM_6_6;
+			case D3D_SHADER_MODEL_6_5: return ShaderModel::SM_6_5;
+			case D3D_SHADER_MODEL_6_4: return ShaderModel::SM_6_4;
+			case D3D_SHADER_MODEL_6_3: return ShaderModel::SM_6_3;
+			case D3D_SHADER_MODEL_6_2: return ShaderModel::SM_6_2;
+			case D3D_SHADER_MODEL_6_1: return ShaderModel::SM_6_1;
+			case D3D_SHADER_MODEL_6_0: return ShaderModel::SM_6_0;
+			default: return ShaderModel::Unknown;
+		}
+	}
+	inline static Result ToRHI(HRESULT hr)
+	{
+		if (hr == S_OK)
+			return Result::Ok;
+
+		switch (hr)
+		{
+		// -----------------------------------------------------------------
+		// Success-with-info (mostly Present-related)
+		// -----------------------------------------------------------------
+		case DXGI_STATUS_OCCLUDED:                      return Result::PresentOccluded;
+		case DXGI_STATUS_CLIPPED:                       return Result::PresentClipped;
+		case DXGI_STATUS_UNOCCLUDED:                    return Result::PresentUnoccluded;
+		case DXGI_STATUS_PRESENT_REQUIRED:              return Result::PresentRequired;
+		case DXGI_STATUS_NO_REDIRECTION:                return Result::NoRedirection;
+		case DXGI_STATUS_NO_DESKTOP_ACCESS:             return Result::NoDesktopAccess;
+		case DXGI_STATUS_GRAPHICS_VIDPN_SOURCE_IN_USE:  return Result::VidPnSourceInUse;
+		case DXGI_STATUS_MODE_CHANGED:                  return Result::ModeChanged;
+		case DXGI_STATUS_MODE_CHANGE_IN_PROGRESS:       return Result::ModeChangeInProgress;
+		case DXGI_STATUS_DDA_WAS_STILL_DRAWING:         return Result::DdaWasStillDrawing;
+
+		// -----------------------------------------------------------------
+		// Generic HRESULTs
+		// -----------------------------------------------------------------
+		case E_FAIL:            return Result::Failed;
+		case E_UNEXPECTED:      return Result::Unexpected;
+		case E_ABORT:           return Result::Aborted;
+		case E_ACCESSDENIED:    return Result::AccessDenied;
+		case E_INVALIDARG:      return Result::InvalidArgument;
+		case E_POINTER:         return Result::InvalidNativePointer;
+		case E_NOINTERFACE:     return Result::NoInterface;
+		case E_NOTIMPL:         return Result::NotImplemented;
+		case E_OUTOFMEMORY:     return Result::OutOfMemory;
+		case E_HANDLE:          return Result::InvalidNativeHandle;
+
+		// -----------------------------------------------------------------
+		// DXGI / D3D12 / Presentation errors
+		// -----------------------------------------------------------------
+		case DXGI_ERROR_INVALID_CALL:                   return Result::InvalidCall;
+		case DXGI_ERROR_UNSUPPORTED:                    return Result::Unsupported;
+		case DXGI_ERROR_SDK_COMPONENT_MISSING:          return Result::SdkComponentMissing;
+		case DXGI_ERROR_DYNAMIC_CODE_POLICY_VIOLATION:  return Result::DynamicCodePolicyViolation;
+
+		case DXGI_ERROR_NOT_FOUND:                      return Result::NotFound;
+		case DXGI_ERROR_MORE_DATA:                      return Result::MoreData;
+		case DXGI_ERROR_ALREADY_EXISTS:                 return Result::AlreadyExists;
+		case DXGI_ERROR_NAME_ALREADY_EXISTS:            return Result::NameAlreadyExists;
+
+		case DXGI_ERROR_DEVICE_REMOVED:                 return Result::DeviceRemoved;
+		case DXGI_ERROR_DEVICE_HUNG:                    return Result::DeviceHung;
+		case DXGI_ERROR_DEVICE_RESET:                   return Result::DeviceReset;
+		case DXGI_ERROR_DRIVER_INTERNAL_ERROR:          return Result::DriverInternalError;
+
+		case DXGI_ERROR_WAS_STILL_DRAWING:              return Result::StillDrawing;
+		case DXGI_ERROR_WAIT_TIMEOUT:                   return Result::WaitTimeout;
+
+		case DXGI_ERROR_NOT_CURRENT:                    return Result::NotCurrent;
+		case DXGI_ERROR_MODE_CHANGE_IN_PROGRESS:        return Result::ModeChangeBlocked;
+		case DXGI_ERROR_SESSION_DISCONNECTED:           return Result::SessionDisconnected;
+		case DXGI_ERROR_REMOTE_CLIENT_DISCONNECTED:     return Result::RemoteClientDisconnected;
+		case DXGI_ERROR_RESTRICT_TO_OUTPUT_STALE:       return Result::RestrictToOutputStale;
+		case DXGI_ERROR_NON_COMPOSITED_UI:              return Result::NonCompositedUi;
+		case DXGI_ERROR_SETDISPLAYMODE_REQUIRED:        return Result::SetDisplayModeRequired;
+		case DXGI_ERROR_FRAME_STATISTICS_DISJOINT:      return Result::FrameStatisticsDisjoint;
+
+		case DXGI_ERROR_ACCESS_LOST:                    return Result::AccessLost;
+		case DXGI_ERROR_NONEXCLUSIVE:                   return Result::NonExclusive;
+
+		case DXGI_ERROR_CANNOT_PROTECT_CONTENT:         return Result::CannotProtectContent;
+		case DXGI_ERROR_HW_PROTECTION_OUTOFMEMORY:      return Result::HwProtectionOutOfMemory;
+
+		case DXGI_ERROR_CACHE_CORRUPT:                  return Result::CacheCorrupt;
+		case DXGI_ERROR_CACHE_FULL:                     return Result::CacheFull;
+		case DXGI_ERROR_CACHE_HASH_COLLISION:           return Result::CacheHashCollision;
+
+		case D3D12_ERROR_ADAPTER_NOT_FOUND:             return Result::AdapterNotFound;
+		case D3D12_ERROR_DRIVER_VERSION_MISMATCH:       return Result::DriverVersionMismatch;
+		case D3D12_ERROR_INVALID_REDIST:                return Result::InvalidRedistributable;
+
+		case DXGI_ERROR_MPO_UNPINNED:                   return Result::MpoUnpinned;
+		case DXGI_ERROR_REMOTE_OUTOFMEMORY:             return Result::RemoteOutOfMemory;
+
+		case PRESENTATION_ERROR_LOST:                   return Result::PresentationLost;
+
+		// DXGI has a specific AccessDenied too (shared resources etc.)
+		case DXGI_ERROR_ACCESS_DENIED:                  return Result::AccessDenied;
+
+		// -----------------------------------------------------------------
+		// Non-DXGI Win32-derived HRESULTs (shader/file IO, waits, etc.)
+		// -----------------------------------------------------------------
+		//case HRESULT_FROM_WIN32(ERROR_INVALID_HANDLE):  return Result::InvalidNativeHandle;
+
+		case HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND):  return Result::FileNotFound;
+		case HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND):  return Result::PathNotFound;
+		case HRESULT_FROM_WIN32(ERROR_INVALID_DATA):    return Result::InvalidData;
+		case HRESULT_FROM_WIN32(ERROR_DISK_FULL):       return Result::DiskFull;
+		case HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION): return Result::SharingViolation;
+
+		// Win32 waits can also be surfaced as HRESULTs in some layers.
+		case HRESULT_FROM_WIN32(WAIT_TIMEOUT):          return Result::WaitTimeout;
+
+		default:
+			// If it's a success code we didn't explicitly model, treat as Ok.
+			// Otherwise use the caller's generic "unmapped HRESULT" bucket.
+			return SUCCEEDED(hr) ? Result::Ok : Result::Unknown;
+		}
+	}
 
 }

@@ -45,6 +45,7 @@ namespace rhi {
 		&d_getTimestampCalibration,
 		&d_getCopyableFootprints,
 		&d_getResourceAllocationInfo,
+		&d_queryFeatureInfo,
 
 		&d_setNameBuffer,
 		&d_setNameTexture,

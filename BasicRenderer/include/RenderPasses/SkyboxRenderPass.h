@@ -294,9 +294,10 @@ private:
 			rhi::Make(soLayoutIL)
         };
 
-        m_skyboxPSO = dev.CreatePipeline(items, (uint32_t)std::size(items));
-        if (!m_skyboxPSO || !m_skyboxPSO->IsValid())
+        auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_skyboxPSO);
+        if (Failed(result)) {
             throw std::runtime_error("Skybox: CreatePipeline failed");
+        }
         m_skyboxPSO->SetName("Skybox.GraphicsPSO");
     }
 };

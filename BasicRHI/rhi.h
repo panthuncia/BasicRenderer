@@ -10,6 +10,7 @@
 #include <memory>
 
 #include "resource_states.h"
+#include "rhi_feature_Info.h"
 
 namespace rhi {
 
@@ -98,7 +99,148 @@ namespace rhi {
     enum class Backend : uint32_t { Null, D3D12, Vulkan };
     enum class QueueKind : uint32_t { Graphics, Compute, Copy };
 
-    enum class Result : uint32_t { Ok, Failed, Unsupported, OutOfMemory, InvalidArg, DeviceLost };
+    enum class Result : uint32_t
+    {
+		Ok = 0, // S_OK
+		Unknown = 1, // Should not happen
+
+        // "Success with info" (mostly Present / Desktop Duplication scenarios)
+        PresentOccluded,              // DXGI_STATUS_OCCLUDED
+        PresentClipped,               // DXGI_STATUS_CLIPPED
+        PresentUnoccluded,            // DXGI_STATUS_UNOCCLUDED
+        PresentRequired,              // DXGI_STATUS_PRESENT_REQUIRED
+        NoRedirection,                // DXGI_STATUS_NO_REDIRECTION
+        NoDesktopAccess,              // DXGI_STATUS_NO_DESKTOP_ACCESS
+        VidPnSourceInUse,             // DXGI_STATUS_GRAPHICS_VIDPN_SOURCE_IN_USE
+        ModeChanged,                  // DXGI_STATUS_MODE_CHANGED
+        ModeChangeInProgress,         // DXGI_STATUS_MODE_CHANGE_IN_PROGRESS
+        DdaWasStillDrawing,           // DXGI_STATUS_DDA_WAS_STILL_DRAWING
+
+        // ---------------------------------------------------------------------
+        // Generic failures
+        // ---------------------------------------------------------------------
+        Failed,                       // E_FAIL (generic)
+        Unexpected,                   // E_UNEXPECTED
+        Aborted,                      // E_ABORT
+        AccessDenied,                 // E_ACCESSDENIED
+        InvalidArgument,              // E_INVALIDARG
+        InvalidNativeHandle,          // E_HANDLE / HRESULT_FROM_WIN32(ERROR_INVALID_HANDLE)
+        InvalidNativePointer,         // E_POINTER
+        NoInterface,                  // E_NOINTERFACE
+        NotImplemented,               // E_NOTIMPL
+        OutOfMemory,                  // E_OUTOFMEMORY
+
+        // ---------------------------------------------------------------------
+        // DXGI / D3D12 call correctness & capability
+        // ---------------------------------------------------------------------
+        InvalidCall,                  // DXGI_ERROR_INVALID_CALL
+        Unsupported,                  // DXGI_ERROR_UNSUPPORTED
+        SdkComponentMissing,          // DXGI_ERROR_SDK_COMPONENT_MISSING
+        DynamicCodePolicyViolation,   // DXGI_ERROR_DYNAMIC_CODE_POLICY_VIOLATION
+
+        // ---------------------------------------------------------------------
+        // Existence / sizing / uniqueness
+        // ---------------------------------------------------------------------
+        NotFound,                     // DXGI_ERROR_NOT_FOUND
+        MoreData,                     // DXGI_ERROR_MORE_DATA
+        AlreadyExists,                // DXGI_ERROR_ALREADY_EXISTS
+        NameAlreadyExists,            // DXGI_ERROR_NAME_ALREADY_EXISTS
+
+        // ---------------------------------------------------------------------
+        // Device / driver loss (important for recovery decisions)
+        // ---------------------------------------------------------------------
+        DeviceLost,                   // umbrella 
+        DeviceRemoved,                // DXGI_ERROR_DEVICE_REMOVED
+        DeviceHung,                   // DXGI_ERROR_DEVICE_HUNG
+        DeviceReset,                  // DXGI_ERROR_DEVICE_RESET
+        DriverInternalError,          // DXGI_ERROR_DRIVER_INTERNAL_ERROR
+
+        // ---------------------------------------------------------------------
+        // "Try again later" / synchronization
+        // ---------------------------------------------------------------------
+        StillDrawing,                 // DXGI_ERROR_WAS_STILL_DRAWING
+        WaitTimeout,                  // DXGI_ERROR_WAIT_TIMEOUT (+ WAIT_TIMEOUT from Win32 waits)
+
+        // ---------------------------------------------------------------------
+        // Presentation / session / output lifetime
+        // ---------------------------------------------------------------------
+        NotCurrent,                   // DXGI_ERROR_NOT_CURRENT
+        ModeChangeBlocked,            // DXGI_ERROR_MODE_CHANGE_IN_PROGRESS (retry later)
+        SessionDisconnected,          // DXGI_ERROR_SESSION_DISCONNECTED
+        RemoteClientDisconnected,     // DXGI_ERROR_REMOTE_CLIENT_DISCONNECTED
+        RestrictToOutputStale,        // DXGI_ERROR_RESTRICT_TO_OUTPUT_STALE
+        NonCompositedUi,              // DXGI_ERROR_NON_COMPOSITED_UI
+        PresentationLost,             // PRESENTATION_ERROR_LOST
+        SetDisplayModeRequired,       // DXGI_ERROR_SETDISPLAYMODE_REQUIRED
+        FrameStatisticsDisjoint,      // DXGI_ERROR_FRAME_STATISTICS_DISJOINT
+
+        // ---------------------------------------------------------------------
+        // Sharing / keyed mutex / global counters
+        // ---------------------------------------------------------------------
+        AccessLost,                   // DXGI_ERROR_ACCESS_LOST
+        NonExclusive,                 // DXGI_ERROR_NONEXCLUSIVE
+
+        // ---------------------------------------------------------------------
+        // Content protection / protected memory
+        // ---------------------------------------------------------------------
+        CannotProtectContent,         // DXGI_ERROR_CANNOT_PROTECT_CONTENT
+        HwProtectionOutOfMemory,      // DXGI_ERROR_HW_PROTECTION_OUTOFMEMORY
+
+        // ---------------------------------------------------------------------
+        // Shader cache (worth surfacing if you rely on it)
+        // ---------------------------------------------------------------------
+        CacheCorrupt,                 // DXGI_ERROR_CACHE_CORRUPT
+        CacheFull,                    // DXGI_ERROR_CACHE_FULL
+        CacheHashCollision,           // DXGI_ERROR_CACHE_HASH_COLLISION
+
+        // ---------------------------------------------------------------------
+        // D3D12-specific “configuration mismatch” errors
+        // ---------------------------------------------------------------------
+        AdapterNotFound,              // D3D12_ERROR_ADAPTER_NOT_FOUND
+        DriverVersionMismatch,        // D3D12_ERROR_DRIVER_VERSION_MISMATCH
+        InvalidRedistributable,       // D3D12_ERROR_INVALID_REDIST
+
+        // ---------------------------------------------------------------------
+        // Rare
+        // ---------------------------------------------------------------------
+        MpoUnpinned,                  // DXGI_ERROR_MPO_UNPINNED
+        RemoteOutOfMemory,            // DXGI_ERROR_REMOTE_OUTOFMEMORY
+
+        // ---------------------------------------------------------------------
+        // Non-DXGI Win32 errors
+        // (shader loading/includes, file mapping, waits, etc.)
+        // ---------------------------------------------------------------------
+        FileNotFound,                 // HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)
+        PathNotFound,                 // HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND)
+        InvalidData,                  // HRESULT_FROM_WIN32(ERROR_INVALID_DATA)
+        DiskFull,                     // HRESULT_FROM_WIN32(ERROR_DISK_FULL)
+        SharingViolation,             // HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION)
+    };
+
+    constexpr bool IsOk(Result r) noexcept
+    {
+        switch (r)
+        {
+        case Result::Ok:
+        case Result::PresentOccluded:
+        case Result::PresentClipped:
+        case Result::PresentUnoccluded:
+        case Result::PresentRequired:
+        case Result::NoRedirection:
+        case Result::NoDesktopAccess:
+        case Result::VidPnSourceInUse:
+        case Result::ModeChanged:
+        case Result::ModeChangeInProgress:
+        case Result::DdaWasStillDrawing:
+            return true;
+
+        default:
+            return false;
+        }
+    }
+
+    constexpr bool Failed(Result r) noexcept { return !IsOk(r); }
+
 
     template<typename T>
     struct Span {
@@ -1587,7 +1729,7 @@ namespace rhi {
 	struct DeviceDeletionContext;
 
     struct DeviceVTable {
-        PipelinePtr(*createPipelineFromStream)(Device*, const PipelineStreamItem* items, uint32_t count) noexcept;
+        Result(*createPipelineFromStream)(Device*, const PipelineStreamItem* items, uint32_t count, PipelinePtr& out) noexcept;
         PipelineLayoutPtr(*createPipelineLayout)(Device*, const PipelineLayoutDesc&) noexcept;
         CommandSignaturePtr(*createCommandSignature)(Device*, const CommandSignatureDesc&, PipelineLayoutHandle /*layoutOrNull*/) noexcept;
         CommandAllocatorPtr(*createCommandAllocator)(Device*, QueueKind) noexcept;
@@ -1628,6 +1770,7 @@ namespace rhi {
         TimestampCalibration(*getTimestampCalibration)(Device*, QueueKind) noexcept;
         CopyableFootprintsInfo(*getCopyableFootprints)(Device*, const FootprintRangeDesc&, CopyableFootprint* out, uint32_t outCap) noexcept;
         Result(*getResourceAllocationInfo)(Device*, const ResourceDesc*, uint32_t, ResourceAllocationInfo*) noexcept;
+        Result(*queryFeatureInfo)(Device*, FeatureInfoHeader* chain) noexcept;
 
 		// Optional debug name setters (can be nullopt)
         void (*setNameBuffer)(Device*, ResourceHandle, const char*) noexcept;
@@ -1700,7 +1843,7 @@ namespace rhi {
         }
         constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
         constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
-        inline PipelinePtr CreatePipeline(const PipelineStreamItem* items, uint32_t count) noexcept { return vt->createPipelineFromStream(this, items, count); }
+        inline Result CreatePipeline(const PipelineStreamItem* items, uint32_t count, PipelinePtr& out) noexcept { return vt->createPipelineFromStream(this, items, count, out); }
         inline CommandListPtr CreateCommandList(QueueKind q, CommandAllocator alloc) noexcept { return vt->createCommandList(this, q, alloc); }
         inline void DestroyCommandList(CommandList* cl) noexcept { deletionContext.DestroyCommandList(cl); }
         inline Queue GetQueue(QueueKind q) noexcept { return vt->getQueue(this, q); }
@@ -1742,6 +1885,7 @@ namespace rhi {
         inline void GetResourceAllocationInfo(const ResourceDesc* resourceDescriptions, uint32_t numResourceDescriptions, ResourceAllocationInfo* outAllocationInfo) noexcept {
             vt->getResourceAllocationInfo(this, resourceDescriptions, numResourceDescriptions, outAllocationInfo);
 		}
+        inline Result QueryFeatureInfo(FeatureInfoHeader* chain) noexcept { return vt->queryFeatureInfo(this, chain); }
         inline void Destroy() noexcept { vt->destroyDevice(this); impl = nullptr; vt = nullptr; }
     };
 

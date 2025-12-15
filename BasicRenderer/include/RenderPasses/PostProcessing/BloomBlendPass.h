@@ -133,8 +133,8 @@ private:
         };
 
         // 3) Create PSO
-        m_pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-        if (!m_pso || !m_pso->IsValid()) {
+        auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);
+        if (Failed(result)) {
             throw std::runtime_error("Failed to create upsample PSO (RHI)");
         }
         m_pso->SetName("BloomBlend (RHI)");

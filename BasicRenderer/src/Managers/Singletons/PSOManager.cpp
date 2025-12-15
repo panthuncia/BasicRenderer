@@ -184,8 +184,9 @@ PipelineState PSOManager::CreatePSO(UINT psoFlags, MaterialCompileFlags material
     };
 
     auto dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso->IsValid()) {
+    rhi::PipelinePtr pso; 
+	auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
         throw std::runtime_error("Failed to create PSO (RHI)");
     }
 
@@ -247,8 +248,9 @@ PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, MaterialCompileFlags ma
     };
 
     auto dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso->IsValid()) {
+    rhi::PipelinePtr pso;
+	auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
         throw std::runtime_error("Failed to create Shadow PSO (RHI)");
     }
 
@@ -317,8 +319,9 @@ PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, MaterialCompileFlags m
     };
 
     auto dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso->IsValid()) {
+    rhi::PipelinePtr pso;
+	auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
         throw std::runtime_error("Failed to create PrePass PSO");
     }
 
@@ -382,8 +385,9 @@ PipelineState PSOManager::CreateVisibilityBufferPSO(UINT psoFlags, MaterialCompi
     };
 
     auto dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso->IsValid()) {
+    rhi::PipelinePtr pso;
+	auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
         throw std::runtime_error("Failed to create PrePass PSO");
     }
 
@@ -451,8 +455,9 @@ PipelineState PSOManager::CreateVisibilityBufferMeshPSO(
     };
 
     auto dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso->IsValid()) {
+    rhi::PipelinePtr pso;
+    auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
         throw std::runtime_error("Failed to create Mesh PrePass PSO");
     }
 
@@ -518,8 +523,9 @@ PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, MaterialCompileFlags mate
     };
 
     auto dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso->IsValid()) {
+    rhi::PipelinePtr pso;
+    auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
         throw std::runtime_error("Failed to create PPLL PSO");
     }
 
@@ -595,8 +601,9 @@ PipelineState PSOManager::CreateMeshPSO(
     };
 
     auto dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso->IsValid()) {
+    rhi::PipelinePtr pso;
+    auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
         throw std::runtime_error("Failed to create Mesh PSO");
     }
 
@@ -666,8 +673,9 @@ PipelineState PSOManager::CreateShadowMeshPSO(
     };
 
     auto dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso->IsValid()) {
+    rhi::PipelinePtr pso;
+    auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
         throw std::runtime_error("Failed to create Shadow Mesh PSO");
     }
 
@@ -739,8 +747,9 @@ PipelineState PSOManager::CreateMeshPrePassPSO(
     };
 
 	auto dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso->IsValid()) {
+    rhi::PipelinePtr pso;
+    auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
         throw std::runtime_error("Failed to create Mesh PrePass PSO");
     }
 
@@ -810,7 +819,12 @@ PipelineState PSOManager::CreateMeshPPLLPSO(
       rhi::Make(soRTV), rhi::Make(soDSV), rhi::Make(soSmp),
     };
 	auto device = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelinePtr psoPrepass = device.CreatePipeline(items, (uint32_t)std::size(items));
+    rhi::PipelinePtr psoPrepass;
+
+    auto result = device.CreatePipeline(items, (uint32_t)std::size(items), psoPrepass);
+    if (Failed(result)) {
+        throw std::runtime_error("Failed to create Mesh PrePass PSO");
+    }
 
     return { std::move(psoPrepass), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
@@ -849,8 +863,9 @@ PipelineState PSOManager::MakeComputePipeline(rhi::PipelineLayout layout,
     };
 
     auto dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelinePtr pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-    if (!pso->IsValid()) {
+    rhi::PipelinePtr pso;
+    auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
         throw std::runtime_error("Failed to create compute PSO (RHI)");
     }
     if (debugName) pso->SetName(debugName);

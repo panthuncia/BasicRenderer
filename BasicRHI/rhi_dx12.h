@@ -34,7 +34,7 @@ inline void BreakIfDebugging() {
 #endif
 }
 
-inline std::wstring s2ws(const std::string & s) {
+inline std::wstring s2ws(const std::string& s) {
 	int buffSize = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), NULL, 0);
 	std::wstring ws(buffSize, 0);
 	MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), ws.data(), buffSize);
@@ -45,33 +45,33 @@ namespace rhi {
 	using Microsoft::WRL::ComPtr;
 	struct Dx12Device;
 
-	struct Dx12Buffer { 
+	struct Dx12Buffer {
 		explicit Dx12Buffer(ComPtr<ID3D12Resource> r, std::shared_ptr<Dx12Device> d) : res(r), dev(d) {}
 		ComPtr<ID3D12Resource> res;
 		std::shared_ptr<Dx12Device> dev;
 	};
-	struct Dx12Texture { 
-		explicit Dx12Texture(ComPtr<ID3D12Resource> r, DXGI_FORMAT f, uint32_t width, uint32_t height, uint16_t mips, uint16_t arraySize, D3D12_RESOURCE_DIMENSION dim, uint16_t depth, std::shared_ptr<Dx12Device> d) 
+	struct Dx12Texture {
+		explicit Dx12Texture(ComPtr<ID3D12Resource> r, DXGI_FORMAT f, uint32_t width, uint32_t height, uint16_t mips, uint16_t arraySize, D3D12_RESOURCE_DIMENSION dim, uint16_t depth, std::shared_ptr<Dx12Device> d)
 			: res(r), fmt(f), w(width), h(height), mips(mips), arraySize(arraySize), dim(dim), depth(depth), dev(d) {
 		}
-		ComPtr<ID3D12Resource> res; 
-		DXGI_FORMAT fmt{ DXGI_FORMAT_UNKNOWN }; 
-		uint32_t w = 0, h = 0; 
+		ComPtr<ID3D12Resource> res;
+		DXGI_FORMAT fmt{ DXGI_FORMAT_UNKNOWN };
+		uint32_t w = 0, h = 0;
 		uint16_t mips = 1;
 		uint16_t arraySize = 1; // for 1D/2D/cube (cube arrays should already multiply by 6)
 		D3D12_RESOURCE_DIMENSION dim = D3D12_RESOURCE_DIMENSION_UNKNOWN;
 		uint16_t depth = 1;
 		std::shared_ptr<Dx12Device> dev;
 	};
-	struct Dx12Sampler { 
+	struct Dx12Sampler {
 		explicit Dx12Sampler(SamplerDesc d, std::shared_ptr<Dx12Device> device) : desc(d), dev(device) {}
 		SamplerDesc desc;
 		std::shared_ptr<Dx12Device> dev;
 	};
-	struct Dx12Pipeline { 
+	struct Dx12Pipeline {
 		explicit Dx12Pipeline(Microsoft::WRL::ComPtr<ID3D12PipelineState> p, bool isComp, std::shared_ptr<Dx12Device> device) : pso(p), isCompute(isComp), dev(device) {}
-		Microsoft::WRL::ComPtr<ID3D12PipelineState> pso; 
-		bool isCompute; 
+		Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
+		bool isCompute;
 		std::shared_ptr<Dx12Device> dev;
 	};
 	struct Dx12PipelineLayout {
@@ -111,17 +111,17 @@ namespace rhi {
 
 	struct Dx12Allocator {
 		explicit Dx12Allocator(Microsoft::WRL::ComPtr<ID3D12CommandAllocator> a, D3D12_COMMAND_LIST_TYPE t, std::shared_ptr<Dx12Device> d) : alloc(a), type(t), dev(d) {}
-		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> alloc; 
-		D3D12_COMMAND_LIST_TYPE type{}; 
+		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> alloc;
+		D3D12_COMMAND_LIST_TYPE type{};
 		std::shared_ptr<Dx12Device> dev;
 	};
-	struct Dx12CommandList { 
+	struct Dx12CommandList {
 		explicit Dx12CommandList(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> c, Microsoft::WRL::ComPtr<ID3D12CommandAllocator> a, D3D12_COMMAND_LIST_TYPE t, std::shared_ptr<Dx12Device> d)
 			: cl(c), alloc(a), type(t), dev(d) {
 		}
-		Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> cl; 
+		Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> cl;
 		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> alloc;
-		D3D12_COMMAND_LIST_TYPE type{}; 
+		D3D12_COMMAND_LIST_TYPE type{};
 		PipelineLayoutHandle boundLayout{};
 		Dx12PipelineLayout* boundLayoutPtr = nullptr;
 		std::shared_ptr<Dx12Device> dev;
@@ -186,7 +186,7 @@ namespace rhi {
 		std::shared_ptr<Dx12Device> dev;
 	};
 
-	struct Dx12Timeline { 
+	struct Dx12Timeline {
 		explicit Dx12Timeline(Microsoft::WRL::ComPtr<ID3D12Fence> f, std::shared_ptr<Dx12Device> d) : fence(f), dev(d) {}
 		Microsoft::WRL::ComPtr<ID3D12Fence> fence;
 		std::shared_ptr<Dx12Device> dev;
@@ -194,7 +194,7 @@ namespace rhi {
 
 	struct Dx12QueueState {
 		Microsoft::WRL::ComPtr<ID3D12CommandQueue> q;
-		Microsoft::WRL::ComPtr<ID3D12Fence> fence; 
+		Microsoft::WRL::ComPtr<ID3D12Fence> fence;
 		UINT64 value = 0;
 #if BUILD_TYPE == BUILD_DEBUG
 		std::unordered_map<TimelineHandle, uint64_t, HandleHash<TimelineHandle>, HandleEqual<TimelineHandle>> lastSignaledValue; // track last signaled value per timeline
@@ -205,22 +205,22 @@ namespace rhi {
 	struct Dx12Swapchain {
 		explicit Dx12Swapchain(ComPtr<IDXGISwapChain3> s, DXGI_FORMAT f, UINT width, UINT height, UINT c,
 			std::vector<ComPtr<ID3D12Resource>> images,
-			std::vector<ResourceHandle> imageHandles, 
+			std::vector<ResourceHandle> imageHandles,
 			std::shared_ptr<Dx12Device> d)
 			: sc(s), fmt(f), w(width), h(height), count(c), images(images), imageHandles(imageHandles), dev(d) {
 		}
-		ComPtr<IDXGISwapChain3> sc; 
-		DXGI_FORMAT fmt{}; 
-		UINT w{}, h{}, count{}; 
+		ComPtr<IDXGISwapChain3> sc;
+		DXGI_FORMAT fmt{};
+		UINT w{}, h{}, count{};
 		UINT current{};
 		std::vector<ComPtr<ID3D12Resource>> images;
-		std::vector<ResourceHandle> imageHandles; 
+		std::vector<ResourceHandle> imageHandles;
 		std::shared_ptr<Dx12Device> dev;
 	};
 
-	struct Dx12Heap { 
+	struct Dx12Heap {
 		explicit Dx12Heap(Microsoft::WRL::ComPtr<ID3D12Heap> h, uint64_t s, std::shared_ptr<Dx12Device> d) : heap(h), size(s), dev(d) {}
-		Microsoft::WRL::ComPtr<ID3D12Heap> heap; 
+		Microsoft::WRL::ComPtr<ID3D12Heap> heap;
 		uint64_t size{};
 		std::shared_ptr<Dx12Device> dev;
 	};
@@ -293,7 +293,7 @@ namespace rhi {
 
 	struct Dx12Device {
 		Device self{};
-		ComPtr<IDXGIFactory7> factory; 
+		ComPtr<IDXGIFactory7> factory;
 		ComPtr<ID3D12Device10> dev;
 		ComPtr<IDXGIAdapter4>  adapter;
 
@@ -321,10 +321,10 @@ namespace rhi {
 	};
 
 	// ---------------- VTables forward ----------------
-	extern const DeviceVTable g_devvt; 
-	extern const QueueVTable g_qvt; 
-	extern const CommandListVTable g_clvt; 
-	extern const SwapchainVTable g_scvt; 
+	extern const DeviceVTable g_devvt;
+	extern const QueueVTable g_qvt;
+	extern const CommandListVTable g_clvt;
+	extern const SwapchainVTable g_scvt;
 	extern const CommandAllocatorVTable g_calvt;
 	extern const ResourceVTable g_buf_rvt;
 	extern const ResourceVTable g_tex_rvt;
@@ -403,9 +403,10 @@ namespace rhi {
 		}
 	};
 
-	static PipelinePtr d_createPipelineFromStream(Device* d,
+	static Result d_createPipelineFromStream(Device* d,
 		const PipelineStreamItem* items,
-		uint32_t count) noexcept
+		uint32_t count,
+		PipelinePtr& out) noexcept
 	{
 		auto* dimpl = static_cast<Dx12Device*>(d->impl);
 
@@ -430,7 +431,7 @@ namespace rhi {
 			case PsoSubobj::Layout: {
 				auto& L = *static_cast<const SubobjLayout*>(items[i].data);
 				auto* pl = dimpl->pipelineLayouts.get(L.layout);
-				if (!pl || !pl->root) { 
+				if (!pl || !pl->root) {
 					BreakIfDebugging();
 					return {};
 				};
@@ -522,7 +523,7 @@ namespace rhi {
 			return {};        // no shaders
 		}
 		const bool isCompute = hasCS;
-		
+
 		PsoStreamBuilder sb;
 		sb.push(SO_RootSignature{ .Value = root });
 
@@ -545,17 +546,19 @@ namespace rhi {
 		auto sd = sb.desc();
 
 		ComPtr<ID3D12PipelineState> pso;
-		if (FAILED(dimpl->dev->CreatePipelineState(&sd, IID_PPV_ARGS(&pso)))) {
+		auto hr = dimpl->dev->CreatePipelineState(&sd, IID_PPV_ARGS(&pso));
+		if (FAILED(hr)) {
 			BreakIfDebugging();
-			return {};
+			return ToRHI(hr);
 		}
 
-		auto handle = dimpl->pipelines.alloc(Dx12Pipeline( pso, isCompute, dimpl->selfWeak.lock() ));
-		Pipeline out(handle);
-		out.vt = &g_psovt;
-		out.impl = dimpl->pipelines.get(handle);;
+		auto handle = dimpl->pipelines.alloc(Dx12Pipeline(pso, isCompute, dimpl->selfWeak.lock()));
+		Pipeline ret(handle);
+		ret.vt = &g_psovt;
+		ret.impl = dimpl->pipelines.get(handle);
 
-		return MakePipelinePtr(d, out);
+		out = MakePipelinePtr(d, ret);
+		return Result::Ok;
 	}
 
 	static void d_destroyBuffer(DeviceDeletionContext* d, ResourceHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->buffers.free(h); }
@@ -564,9 +567,9 @@ namespace rhi {
 	static void d_destroyPipeline(DeviceDeletionContext* d, PipelineHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->pipelines.free(h); }
 
 	static void d_destroyCommandList(DeviceDeletionContext* d, CommandList* p) noexcept {
-		if (!d || !p || !p->IsValid()) { 
+		if (!d || !p || !p->IsValid()) {
 			BreakIfDebugging();
-			return; 
+			return;
 		}
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		impl->commandLists.free(p->GetHandle());
@@ -575,7 +578,7 @@ namespace rhi {
 
 	static Queue d_getQueue(Device* d, QueueKind qk) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		Queue out{qk}; out.vt = &g_qvt;
+		Queue out{ qk }; out.vt = &g_qvt;
 		Dx12QueueState* s = (qk == QueueKind::Graphics ? &impl->gfx : qk == QueueKind::Compute ? &impl->comp : &impl->copy);
 		s->dev = impl->selfWeak.lock();
 		out.impl = s;
@@ -621,7 +624,7 @@ namespace rhi {
 			BreakIfDebugging();
 			return {};
 		}
-		ComPtr<IDXGISwapChain3> sc; 
+		ComPtr<IDXGISwapChain3> sc;
 		sc1.As(&sc);
 
 		std::vector<ComPtr<ID3D12Resource>> imgs(bufferCount);
@@ -761,6 +764,283 @@ namespace rhi {
 		return MakePipelineLayoutPtr(d, out);
 	}
 
+	static void CopyUtf8FromWide(const wchar_t* src, char* dst, size_t dstCap) {
+		if (!dst || dstCap == 0) return;
+		dst[0] = '\0';
+		if (!src) return;
+		int written = WideCharToMultiByte(
+			CP_UTF8,
+			0, src,
+			-1, dst,
+			static_cast<int>(dstCap),
+			nullptr,
+			nullptr);
+		if (written <= 0) dst[0] = '\0';
+		dst[dstCap - 1] = '\0';
+	}
+
+	inline std::vector<D3D_SHADER_MODEL> shaderModels = {
+		D3D_SHADER_MODEL_6_8,
+		D3D_SHADER_MODEL_6_7,
+		D3D_SHADER_MODEL_6_6,
+		D3D_SHADER_MODEL_6_5,
+		D3D_SHADER_MODEL_6_4,
+		D3D_SHADER_MODEL_6_3,
+		D3D_SHADER_MODEL_6_2,
+		D3D_SHADER_MODEL_6_1,
+		D3D_SHADER_MODEL_6_0,
+	};
+
+	inline static D3D_SHADER_MODEL getHighestShaderModel(ID3D12Device* dev)
+	{
+		if (!dev) return D3D_SHADER_MODEL_6_0;
+
+		for (const auto& model : shaderModels) {
+			D3D12_FEATURE_DATA_SHADER_MODEL sm{};
+			sm.HighestShaderModel = model;
+			if (SUCCEEDED(dev->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &sm, sizeof(sm)))) {
+				return model;
+			}
+		}
+		BreakIfDebugging(); // Nothing under 6_0 is supported
+		return D3D_SHADER_MODEL_6_0;
+	}
+
+	template<class T>
+	concept HasPerPrimitiveVrs = requires(T t) { t.PerPrimitiveShadingRateSupportedWithViewportIndexing; };
+
+	template<class T>
+	concept HasAdditionalVrsRates = requires(T t) { t.AdditionalShadingRatesSupported; };
+
+	static Result d_queryFeatureInfo(Device* d, FeatureInfoHeader* chain) noexcept
+	{
+		if (!d || !chain) return Result::InvalidArgument;
+
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (!impl || !impl->dev) return Result::Failed;
+
+		ID3D12Device* dev = impl->dev.Get();
+
+		D3D12_FEATURE_DATA_D3D12_OPTIONS   opt0{};
+		D3D12_FEATURE_DATA_D3D12_OPTIONS1  opt1{};
+		D3D12_FEATURE_DATA_D3D12_OPTIONS3  opt3{};
+		D3D12_FEATURE_DATA_D3D12_OPTIONS5  opt5{};
+		D3D12_FEATURE_DATA_D3D12_OPTIONS6  opt6{};
+		D3D12_FEATURE_DATA_D3D12_OPTIONS7  opt7{};
+		D3D12_FEATURE_DATA_D3D12_OPTIONS9  opt9{};
+		D3D12_FEATURE_DATA_D3D12_OPTIONS11 opt11{};
+		D3D12_FEATURE_DATA_D3D12_OPTIONS12 opt12{};
+		D3D12_FEATURE_DATA_D3D12_OPTIONS16 opt16{};
+		D3D12_FEATURE_DATA_TIGHT_ALIGNMENT ta{};
+
+		// Note: if a CheckFeatureSupport fails, the struct stays zeroed => “unsupported”.
+		(void)dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &opt0, sizeof(opt0));
+		(void)dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1, &opt1, sizeof(opt1));
+		(void)dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS3, &opt3, sizeof(opt3));
+		(void)dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &opt5, sizeof(opt5));
+		auto hasOptions6 = SUCCEEDED(dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS6, &opt6, sizeof(opt6)));
+		auto hasOptions7 = SUCCEEDED(dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &opt7, sizeof(opt7)));
+		auto hasOptions9 = SUCCEEDED(dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS9, &opt9, sizeof(opt9)));
+		auto hasOptions11 = SUCCEEDED(dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS11, &opt11, sizeof(opt11)));
+		auto hasOptions12 = SUCCEEDED(dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS12, &opt12, sizeof(opt12)));
+		auto hasOptions16 = SUCCEEDED(dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS16, &opt16, sizeof(opt16)));
+		auto hasTightAlignment = SUCCEEDED(dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_TIGHT_ALIGNMENT, &ta, sizeof(ta)));
+
+		D3D12_FEATURE_DATA_SHADER_MODEL sm{};
+		sm.HighestShaderModel = getHighestShaderModel(dev);
+
+		// Architecture (UMA, etc.)
+		D3D12_FEATURE_DATA_ARCHITECTURE1 arch{};
+		arch.NodeIndex = 0;
+		(void)dev->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1, &arch, sizeof(arch));
+
+		bool gpuUploadHeapSupported = false;
+		if (hasOptions16) {
+			gpuUploadHeapSupported = opt16.GPUUploadHeapSupported;
+		}
+
+		bool tightAlignmentSupported = false;
+		if (hasTightAlignment) {
+			tightAlignmentSupported = (ta.SupportTier >= D3D12_TIGHT_ALIGNMENT_TIER_1);
+		}
+
+		const bool createNotZeroedSupported = hasOptions7;
+
+		const bool hasMeshShaders =
+			(opt7.MeshShaderTier == D3D12_MESH_SHADER_TIER_1);
+
+		const bool hasRayTracingPipeline =
+			(opt5.RaytracingTier == D3D12_RAYTRACING_TIER_1_0) ||
+			(opt5.RaytracingTier == D3D12_RAYTRACING_TIER_1_1);
+
+		const bool hasRayTracing11 =
+			(opt5.RaytracingTier == D3D12_RAYTRACING_TIER_1_1);
+
+		const bool hasVrsPerDraw =
+			(opt6.VariableShadingRateTier == D3D12_VARIABLE_SHADING_RATE_TIER_1) ||
+			(opt6.VariableShadingRateTier == D3D12_VARIABLE_SHADING_RATE_TIER_2);
+
+		const bool hasVrsAttachment =
+			(opt6.VariableShadingRateTier == D3D12_VARIABLE_SHADING_RATE_TIER_2);
+
+		const bool unifiedResourceHeaps =
+			(opt0.ResourceHeapTier == D3D12_RESOURCE_HEAP_TIER_2);
+
+		const bool unboundedDescriptorTables =
+			(opt0.ResourceBindingTier == D3D12_RESOURCE_BINDING_TIER_3);
+
+		// Optional DX12 Options11-derived semantics
+		bool derivativesInMeshAndTask = false;
+		bool atomicInt64GroupShared = false;
+		bool atomicInt64Typed = false;
+		bool atomicInt64OnDescriptorHeapResources = false;
+		if (hasOptions9) {
+			derivativesInMeshAndTask = opt9.DerivativesInMeshAndAmplificationShadersSupported;
+			atomicInt64GroupShared = opt9.AtomicInt64OnGroupSharedSupported;
+			atomicInt64Typed = opt9.AtomicInt64OnTypedResourceSupported;
+		}
+		if (hasOptions11) {
+			atomicInt64OnDescriptorHeapResources = opt11.AtomicInt64OnDescriptorHeapResourceSupported;
+		}
+
+		//Walk requested chain and fill
+		for (FeatureInfoHeader* h = chain; h; h = h->pNext) {
+			if (h->structSize < sizeof(FeatureInfoHeader))
+				return Result::InvalidArgument;
+
+			switch (h->sType) {
+			case FeatureInfoStructType::AdapterInfo: {
+				if (h->structSize < sizeof(AdapterFeatureInfo)) return Result::InvalidArgument;
+				auto* out = reinterpret_cast<AdapterFeatureInfo*>(h);
+
+				DXGI_ADAPTER_DESC3 desc{};
+				if (impl->adapter && SUCCEEDED(impl->adapter->GetDesc3(&desc))) {
+					CopyUtf8FromWide(desc.Description, out->name, sizeof(out->name));
+					out->vendorId = desc.VendorId;
+					out->deviceId = desc.DeviceId;
+					out->dedicatedVideoMemory = desc.DedicatedVideoMemory;
+					out->dedicatedSystemMemory = desc.DedicatedSystemMemory;
+					out->sharedSystemMemory = desc.SharedSystemMemory;
+				}
+				else {
+					// Leave defaults if adapter unavailable.
+					out->name[0] = '\0';
+					out->vendorId = out->deviceId = 0;
+					out->dedicatedVideoMemory = out->dedicatedSystemMemory = out->sharedSystemMemory = 0;
+				}
+			} break;
+
+			case FeatureInfoStructType::Architecture: {
+				if (h->structSize < sizeof(ArchitectureFeatureInfo)) return Result::InvalidArgument;
+				auto* out = reinterpret_cast<ArchitectureFeatureInfo*>(h);
+				out->uma = (arch.UMA != 0);
+				out->cacheCoherentUMA = (arch.CacheCoherentUMA != 0);
+				out->isolatedMMU = (arch.IsolatedMMU != 0);
+			} break;
+
+			case FeatureInfoStructType::Features: {
+				if (h->structSize < sizeof(ShaderFeatureInfo)) return Result::InvalidArgument;
+				auto* out = reinterpret_cast<ShaderFeatureInfo*>(h);
+
+				out->maxShaderModel = ToRHI(sm.HighestShaderModel);
+
+				// Tier-derived semantics:
+				out->unifiedResourceHeaps = unifiedResourceHeaps;
+				out->unboundedDescriptorTables = unboundedDescriptorTables;
+
+				// "Actual shader capability" bits:
+				out->waveOps = (opt1.WaveOps != 0);
+				out->int64ShaderOps = (opt1.Int64ShaderOps != 0);
+				out->barycentrics = (opt3.BarycentricsSupported != 0);
+
+				// Options11-derived bits (or false if not available):
+				out->derivativesInMeshAndTaskShaders = derivativesInMeshAndTask;
+				out->atomicInt64OnGroupShared = atomicInt64GroupShared;
+				out->atomicInt64OnTypedResource = atomicInt64Typed;
+				out->atomicInt64OnDescriptorHeapResources = atomicInt64OnDescriptorHeapResources;
+			} break;
+
+			case FeatureInfoStructType::MeshShaders: {
+				if (h->structSize < sizeof(MeshShaderFeatureInfo)) return Result::InvalidArgument;
+				auto* out = reinterpret_cast<MeshShaderFeatureInfo*>(h);
+
+				// DX12 exposes this as a single tier: if present, both mesh+amplification exist.
+				out->meshShader = hasMeshShaders;
+				out->taskShader = hasMeshShaders;
+
+				// Derivatives support is independent (Options11). Only meaningful if mesh shaders exist.
+				out->derivatives = hasMeshShaders && derivativesInMeshAndTask;
+			} break;
+
+			case FeatureInfoStructType::RayTracing: {
+				if (h->structSize < sizeof(RayTracingFeatureInfo)) return Result::InvalidArgument;
+				auto* out = reinterpret_cast<RayTracingFeatureInfo*>(h);
+
+				// DXR tier -> semantic bits.
+				out->pipeline = hasRayTracingPipeline;
+
+				// DXR 1.1 implies inline raytracing
+				out->rayQuery = hasRayTracing11;
+
+				// Also a heuristic: "indirect trace" is not a single clean DX12 bit in core options;
+				out->indirect = hasRayTracing11;
+			} break;
+
+			case FeatureInfoStructType::ShadingRate: {
+				if (h->structSize < sizeof(ShadingRateFeatureInfo)) return Result::InvalidArgument;
+				auto* out = reinterpret_cast<ShadingRateFeatureInfo*>(h);
+
+				out->perDrawRate = hasVrsPerDraw;
+				out->attachmentRate = hasVrsAttachment;
+
+				// Only meaningful if attachmentRate.
+				out->tileSize = hasVrsAttachment ? opt6.ShadingRateImageTileSize : 0;
+
+				if constexpr (HasAdditionalVrsRates<decltype(opt6)>) {
+					out->additionalRates = (opt6.AdditionalShadingRatesSupported != 0);
+				}
+				else {
+					out->additionalRates = false;
+				}
+
+				if constexpr (HasPerPrimitiveVrs<decltype(opt6)>) {
+					out->perPrimitiveRate = (opt6.PerPrimitiveShadingRateSupportedWithViewportIndexing != 0);
+				}
+				else {
+					out->perPrimitiveRate = false;
+				}
+			} break;
+
+			case FeatureInfoStructType::EnhancedBarriers: {
+				if (h->structSize < sizeof(EnhancedBarriersFeatureInfo)) return Result::InvalidArgument;
+				auto* out = reinterpret_cast<EnhancedBarriersFeatureInfo*>(h);
+
+				if (hasOptions12) {
+					out->enhancedBarriers = (opt12.EnhancedBarriersSupported != 0);
+					out->relaxedFormatCasting = (opt12.RelaxedFormatCastingSupported != 0);
+				}
+				else {
+					out->enhancedBarriers = false;
+					out->relaxedFormatCasting = false;
+				}
+			} break;
+			case FeatureInfoStructType::ResourceAllocation: {
+				if (h->structSize < sizeof(ResourceAllocationFeatureInfo)) return Result::InvalidArgument;
+				auto* out = reinterpret_cast<ResourceAllocationFeatureInfo*>(h);
+
+				out->gpuUploadHeapSupported = gpuUploadHeapSupported;
+				out->tightAlignmentSupported = tightAlignmentSupported;
+				out->createNotZeroedHeapSupported = createNotZeroedSupported;
+			} break;
+			default:
+				// Unknown sType: ignore
+				break;
+			}
+		}
+
+		return Result::Ok;
+	}
+
 
 	static void d_destroyPipelineLayout(DeviceDeletionContext* d, PipelineLayoutHandle h) noexcept {
 		static_cast<Dx12Device*>(d->impl)->pipelineLayouts.free(h);
@@ -827,9 +1107,9 @@ namespace rhi {
 		desc.ByteStride = cd.byteStride;
 
 		Microsoft::WRL::ComPtr<ID3D12CommandSignature> cs;
-		if (FAILED(impl->dev->CreateCommandSignature(&desc, rs, IID_PPV_ARGS(&cs)))) { 
+		if (FAILED(impl->dev->CreateCommandSignature(&desc, rs, IID_PPV_ARGS(&cs)))) {
 			BreakIfDebugging();
-			return {}; 
+			return {};
 		}
 		Dx12CommandSignature S(cs, cd.byteStride, impl->selfWeak.lock());
 		auto handle = impl->commandSignatures.alloc(std::move(S));
@@ -852,9 +1132,9 @@ namespace rhi {
 		desc.Flags = hd.shaderVisible ? D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE : D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 
 		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> heap;
-		if (FAILED(impl->dev->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&heap)))) { 
+		if (FAILED(impl->dev->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&heap)))) {
 			BreakIfDebugging();
-			return {}; 
+			return {};
 		}
 
 		auto descriptorSize = impl->dev->GetDescriptorHandleIncrementSize(desc.Type);
@@ -893,7 +1173,7 @@ namespace rhi {
 		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
 		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) {
 			BreakIfDebugging();
-			return Result::InvalidArg;
+			return Result::InvalidArgument;
 		}
 
 		D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
@@ -904,9 +1184,9 @@ namespace rhi {
 		switch (dv.dimension) {
 		case SrvDim::Buffer: {
 			auto* B = impl->buffers.get(resource);
-			if (!B || !B->res) { 
+			if (!B || !B->res) {
 				BreakIfDebugging();
-				return Result::InvalidArg;
+				return Result::InvalidArgument;
 			}
 
 			desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
@@ -938,7 +1218,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture1D: {
-			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE1D;
 			desc.Texture1D.MostDetailedMip = dv.tex1D.mostDetailedMip;
@@ -949,7 +1229,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture1DArray: {
-			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE1DARRAY;
 			desc.Texture1DArray.MostDetailedMip = dv.tex1DArray.mostDetailedMip;
@@ -963,7 +1243,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture2D: {
-			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
 			desc.Texture2D.MostDetailedMip = dv.tex2D.mostDetailedMip;
@@ -975,7 +1255,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture2DArray: {
-			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
 			desc.Texture2DArray.MostDetailedMip = dv.tex2DArray.mostDetailedMip;
@@ -989,7 +1269,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture2DMS: {
-			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMS;
 			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
@@ -997,7 +1277,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture2DMSArray: {
-			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMSARRAY;
 			desc.Texture2DMSArray.FirstArraySlice = dv.tex2DMSArray.firstArraySlice;
@@ -1007,7 +1287,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture3D: {
-			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
 			desc.Texture3D.MostDetailedMip = dv.tex3D.mostDetailedMip;
@@ -1018,7 +1298,7 @@ namespace rhi {
 		}
 
 		case SrvDim::TextureCube: {
-			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
 			desc.TextureCube.MostDetailedMip = dv.cube.mostDetailedMip;
@@ -1029,7 +1309,7 @@ namespace rhi {
 		}
 
 		case SrvDim::TextureCubeArray: {
-			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArg;
+			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
 			desc.TextureCubeArray.MostDetailedMip = dv.cubeArray.mostDetailedMip;
@@ -1043,7 +1323,7 @@ namespace rhi {
 
 		case SrvDim::AccelerationStruct: {
 			// AS is stored in a buffer with ResourceFlags::RaytracingAccelerationStructure
-			auto* B = impl->buffers.get(resource); if (!B || !B->res) return Result::InvalidArg;
+			auto* B = impl->buffers.get(resource); if (!B || !B->res) return Result::InvalidArgument;
 			desc.Format = DXGI_FORMAT_UNKNOWN;
 			desc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
 			desc.RaytracingAccelerationStructure.Location = B->res->GetGPUVirtualAddress();
@@ -1054,13 +1334,13 @@ namespace rhi {
 		default: break;
 		}
 		BreakIfDebugging();
-		return Result::InvalidArg;
+		return Result::InvalidArgument;
 	}
 
 	static Result d_createUnorderedAccessView(Device* d, DescriptorSlot s, const ResourceHandle& resource, const UavDesc& dv) noexcept
 	{
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl) { 
+		if (!impl) {
 			BreakIfDebugging();
 			return Result::Failed;
 		};
@@ -1068,7 +1348,7 @@ namespace rhi {
 		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
 		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) {
 			BreakIfDebugging();
-			return Result::InvalidArg;
+			return Result::InvalidArgument;
 		}
 
 		D3D12_UNORDERED_ACCESS_VIEW_DESC desc{};
@@ -1081,9 +1361,9 @@ namespace rhi {
 		case UavDim::Buffer:
 		{
 			auto* B = impl->buffers.get(resource);
-			if (!B || !B->res) { 
+			if (!B || !B->res) {
 				BreakIfDebugging();
-				return Result::InvalidArg; 
+				return Result::InvalidArgument;
 			}
 
 			pResource = B->res.Get();
@@ -1126,12 +1406,13 @@ namespace rhi {
 			auto* T = impl->textures.get(resource);
 			if (!T || !T->res) {
 				BreakIfDebugging();
-				return Result::InvalidArg;
+				return Result::InvalidArgument;
 			}
 			pResource = T->res.Get();
 			if (dv.formatOverride != Format::Unknown) {
 				desc.Format = ToDxgi(dv.formatOverride);
-			} else {
+			}
+			else {
 				desc.Format = T->fmt;
 			}
 			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE1D;
@@ -1144,9 +1425,9 @@ namespace rhi {
 		case UavDim::Texture1DArray:
 		{
 			auto* T = impl->textures.get(resource);
-			if (!T || !T->res) { 
+			if (!T || !T->res) {
 				BreakIfDebugging();
-				return Result::InvalidArg;
+				return Result::InvalidArgument;
 			}
 			pResource = T->res.Get();
 
@@ -1168,9 +1449,9 @@ namespace rhi {
 		case UavDim::Texture2D:
 		{
 			auto* T = impl->textures.get(resource);
-			if (!T || !T->res) { 
+			if (!T || !T->res) {
 				BreakIfDebugging();
-				return Result::InvalidArg;
+				return Result::InvalidArgument;
 			}
 			pResource = T->res.Get();
 
@@ -1190,9 +1471,9 @@ namespace rhi {
 		case UavDim::Texture2DArray:
 		{
 			auto* T = impl->textures.get(resource);
-			if (!T || !T->res) { 
+			if (!T || !T->res) {
 				BreakIfDebugging();
-				return Result::InvalidArg;
+				return Result::InvalidArgument;
 			}
 			pResource = T->res.Get();
 
@@ -1214,9 +1495,9 @@ namespace rhi {
 		case UavDim::Texture3D:
 		{
 			auto* T = impl->textures.get(resource);
-			if (!T || !T->res) { 
+			if (!T || !T->res) {
 				BreakIfDebugging();
-				return Result::InvalidArg;
+				return Result::InvalidArgument;
 			}
 			pResource = T->res.Get();
 
@@ -1241,16 +1522,16 @@ namespace rhi {
 			return Result::Unsupported;
 		}
 		BreakIfDebugging();
-		return Result::InvalidArg;
+		return Result::InvalidArgument;
 	}
 
 	static Result d_createConstantBufferView(Device* d, DescriptorSlot s, const ResourceHandle& bh, const CbvDesc& dv) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
-		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) return Result::InvalidArg;
-		auto* B = impl->buffers.get(bh); if (!B) { 
+		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) return Result::InvalidArgument;
+		auto* B = impl->buffers.get(bh); if (!B) {
 			BreakIfDebugging();
-			return Result::InvalidArg;
+			return Result::InvalidArgument;
 		}
 
 		D3D12_CONSTANT_BUFFER_VIEW_DESC desc{};
@@ -1264,9 +1545,9 @@ namespace rhi {
 	{
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
-		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER)) { 
+		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER)) {
 			BreakIfDebugging();
-			return Result::InvalidArg;
+			return Result::InvalidArgument;
 		}
 
 		D3D12_SAMPLER_DESC desc{};
@@ -1295,7 +1576,7 @@ namespace rhi {
 	static Result d_createRenderTargetView(Device* d, DescriptorSlot s, const ResourceHandle& texture, const RtvDesc& rd) noexcept
 	{
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl) { 
+		if (!impl) {
 			BreakIfDebugging();
 			return Result::Failed;
 		}
@@ -1303,14 +1584,14 @@ namespace rhi {
 		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
 		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_RTV)) {
 			BreakIfDebugging();
-			return Result::InvalidArg;
+			return Result::InvalidArgument;
 		}
 
 		// For texture RTVs we expect a texture resource
 		auto* T = impl->textures.get(texture);
-		if (!T && rd.dimension != RtvDim::Buffer) { 
+		if (!T && rd.dimension != RtvDim::Buffer) {
 			BreakIfDebugging();
-			return Result::InvalidArg;
+			return Result::InvalidArgument;
 		}
 
 		D3D12_RENDER_TARGET_VIEW_DESC r{};
@@ -1417,13 +1698,13 @@ namespace rhi {
 		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
 		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_DSV)) {
 			BreakIfDebugging();
-			return Result::InvalidArg;
+			return Result::InvalidArgument;
 		}
 
 		auto* T = impl->textures.get(texture);
-		if (!T) { 
+		if (!T) {
 			BreakIfDebugging();
-			return Result::InvalidArg; 
+			return Result::InvalidArgument;
 		}
 
 		D3D12_DEPTH_STENCIL_VIEW_DESC z{};
@@ -1487,7 +1768,7 @@ namespace rhi {
 		Dx12Allocator A(a, ToDX(q), impl->selfWeak.lock());
 		auto h = impl->allocators.alloc(std::move(A));
 
-		CommandAllocator out{h};
+		CommandAllocator out{ h };
 		out.impl = impl->allocators.get(h);
 		out.vt = &g_calvt;
 		return MakeCommandAllocatorPtr(d, out);
@@ -1501,20 +1782,20 @@ namespace rhi {
 	static CommandListPtr d_createCommandList(Device* d, QueueKind q, CommandAllocator ca) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		auto* A = static_cast<Dx12Allocator*>(ca.impl);
-		if (!A) { 
+		if (!A) {
 			BreakIfDebugging();
 			return {};
 		}
 
 		ComPtr<ID3D12GraphicsCommandList7> cl;
-		if (FAILED(impl->dev->CreateCommandList(0, A->type, A->alloc.Get(), nullptr, IID_PPV_ARGS(&cl)))) { 
+		if (FAILED(impl->dev->CreateCommandList(0, A->type, A->alloc.Get(), nullptr, IID_PPV_ARGS(&cl)))) {
 			BreakIfDebugging();
-			return {}; 
+			return {};
 		}
 		Dx12CommandList rec(cl, A->alloc, A->type, impl->selfWeak.lock());
 		auto h = impl->commandLists.alloc(std::move(rec));
 
-		CommandList out{h};
+		CommandList out{ h };
 		Dx12CommandList* implCL = impl->commandLists.get(h);
 		out.impl = implCL;
 		out.vt = &g_clvt;
@@ -1523,9 +1804,9 @@ namespace rhi {
 
 	static ResourcePtr d_createCommittedBuffer(Device* d, const ResourceDesc& bd) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl || !impl->dev || bd.buffer.sizeBytes == 0) { 
+		if (!impl || !impl->dev || bd.buffer.sizeBytes == 0) {
 			BreakIfDebugging();
-			return {}; 
+			return {};
 		}
 
 		D3D12_HEAP_PROPERTIES hp{};
@@ -1617,7 +1898,7 @@ namespace rhi {
 				: D3D12_RESOURCE_DIMENSION_TEXTURE1D), depth, impl->selfWeak.lock());
 
 		auto handle = impl->textures.alloc(std::move(T));
-		
+
 		Resource out{ handle, true };
 		out.impl = impl->textures.get(handle);
 		out.vt = &g_tex_rvt;
@@ -1677,7 +1958,7 @@ namespace rhi {
 			return {};
 		}
 		D3D12_HEAP_PROPERTIES props{};
-		props.Type = ToDx(hd.memory);         // same helper you already have (Upload/Readback/Default)
+		props.Type = ToDx(hd.memory);
 		props.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
 		props.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
 		props.CreationNodeMask = 1;
@@ -1716,7 +1997,7 @@ namespace rhi {
 	}
 
 	static void d_setNameBuffer(Device* d, ResourceHandle b, const char* n) noexcept {
-		if (!n) { 
+		if (!n) {
 			BreakIfDebugging();
 			return;
 		}
@@ -1726,7 +2007,7 @@ namespace rhi {
 			B->res->SetName(w.c_str());
 		}
 	}
-	
+
 	static void d_setNameTexture(Device* d, ResourceHandle t, const char* n) noexcept {
 		if (!n) {
 			BreakIfDebugging();
@@ -1837,7 +2118,7 @@ namespace rhi {
 				: D3D12_RESOURCE_DIMENSION_TEXTURE1D),
 			(td.type == ResourceType::Texture3D) ? td.texture.depthOrLayers : 1,
 			impl->selfWeak.lock());
-		
+
 		auto handle = impl->textures.alloc(std::move(T));
 		Resource out(handle, true);
 		out.impl = impl->textures.get(handle);
@@ -1870,7 +2151,7 @@ namespace rhi {
 			/*numCastableFormats*/   0,
 			/*pProtectedSession*/   nullptr,
 			IID_PPV_ARGS(&res));
-		if (FAILED(hr)) { 
+		if (FAILED(hr)) {
 			BreakIfDebugging();
 			return {};
 		}
@@ -1885,7 +2166,7 @@ namespace rhi {
 
 	static ResourcePtr d_createPlacedResource(Device* d, HeapHandle hh, uint64_t offset, const ResourceDesc& rd) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl) { 
+		if (!impl) {
 			BreakIfDebugging();
 			return {};
 		}
@@ -2034,7 +2315,7 @@ namespace rhi {
 			&desc,
 			firstSubresource,
 			totalSubs,
-			in.baseOffset, // base offset you want footprints relative to
+			in.baseOffset,
 			placed.data(),
 			numRows.data(),
 			rowSizes.data(),
@@ -2063,10 +2344,10 @@ namespace rhi {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl || !resources || resourceCount == 0 || !outInfos) {
 			BreakIfDebugging();
-			return Result::InvalidArg;
+			return Result::InvalidArgument;
 		}
 		// TODO: Should we store this elsewhere to avoid reallocating every call?
-		std::vector<D3D12_RESOURCE_DESC1> descs; 
+		std::vector<D3D12_RESOURCE_DESC1> descs;
 		descs.resize(resourceCount);
 		for (size_t i = 0; i < resourceCount; ++i) {
 			switch (resources[i].type) {
@@ -2080,7 +2361,7 @@ namespace rhi {
 				break;
 			default:
 				BreakIfDebugging();
-				return Result::InvalidArg;
+				return Result::InvalidArgument;
 			}
 		}
 		// Out array
@@ -2099,7 +2380,7 @@ namespace rhi {
 	// ---------------- Queue vtable funcs ----------------
 	static Result q_submit(Queue* q, Span<CommandList> lists, const SubmitDesc& s) noexcept {
 		auto* qs = static_cast<Dx12QueueState*>(q->impl);
-		auto* dev = qs->dev.get(); 
+		auto* dev = qs->dev.get();
 		if (!dev) {
 			BreakIfDebugging();
 			return Result::Failed;
@@ -2109,7 +2390,7 @@ namespace rhi {
 		for (auto& w : s.waits) {
 			auto* TL = dev->timelines.get(w.t); if (!TL) {
 				BreakIfDebugging();
-				return Result::InvalidArg;
+				return Result::InvalidArgument;
 			}
 			if (FAILED(qs->q->Wait(TL->fence.Get(), w.value))) {
 				BreakIfDebugging();
@@ -2129,7 +2410,7 @@ namespace rhi {
 		for (auto& sgn : s.signals) {
 			auto* TL = dev->timelines.get(sgn.t); if (!TL) {
 				BreakIfDebugging();
-				return Result::InvalidArg;
+				return Result::InvalidArgument;
 			}
 			if (FAILED(qs->q->Signal(TL->fence.Get(), sgn.value))) {
 				BreakIfDebugging();
@@ -2141,20 +2422,20 @@ namespace rhi {
 
 	static Result q_signal(Queue* q, const TimelinePoint& p) noexcept {
 		auto* qs = static_cast<Dx12QueueState*>(q->impl);
-		auto* dev = qs->dev.get(); 
+		auto* dev = qs->dev.get();
 		if (!dev) {
 			BreakIfDebugging();
 			return Result::Failed;
 		}
 		auto* TL = dev->timelines.get(p.t); if (!TL) {
 			BreakIfDebugging();
-			return Result::InvalidArg;
+			return Result::InvalidArgument;
 		}
 #if BUILD_TYPE == BUILD_DEBUG
 		auto last = qs->lastSignaledValue.find(p.t);
 		if (last != qs->lastSignaledValue.end() && p.value <= last->second) {
 			BreakIfDebugging();
-			return Result::InvalidArg; // must be strictly greater
+			return Result::InvalidArgument; // must be strictly greater
 		}
 		qs->lastSignaledValue[p.t] = p.value;
 #endif
@@ -2169,7 +2450,7 @@ namespace rhi {
 		}
 		auto* TL = dev->timelines.get(p.t); if (!TL) {
 			BreakIfDebugging();
-			return Result::InvalidArg;
+			return Result::InvalidArgument;
 		}
 		return SUCCEEDED(qs->q->Wait(TL->fence.Get(), p.value)) ? Result::Ok : Result::Failed;
 	}
@@ -2208,8 +2489,8 @@ namespace rhi {
 		auto* a = static_cast<Dx12Allocator*>(ca.impl);
 #if BUILD_TYPE == BUILD_DEBUG
 		if (!l) {
-			BreakIfDebugging(); 
-			spdlog::error("cl_reset: invalid command list"); 
+			BreakIfDebugging();
+			spdlog::error("cl_reset: invalid command list");
 		}
 		if (!a) {
 			BreakIfDebugging();
@@ -2270,18 +2551,18 @@ namespace rhi {
 			return;
 		}
 
-		switch(impl->type){
-			case D3D12_COMMAND_LIST_TYPE_DIRECT:
-				impl->cl->SetGraphicsRootSignature(L->root.Get());
-				impl->cl->SetComputeRootSignature(L->root.Get());
-				break;
-			case D3D12_COMMAND_LIST_TYPE_COMPUTE:
-				impl->cl->SetComputeRootSignature(L->root.Get());
-				break;
-			case D3D12_COMMAND_LIST_TYPE_COPY:
-				// no root signature for copy-only lists
-				BreakIfDebugging();
-				break;
+		switch (impl->type) {
+		case D3D12_COMMAND_LIST_TYPE_DIRECT:
+			impl->cl->SetGraphicsRootSignature(L->root.Get());
+			impl->cl->SetComputeRootSignature(L->root.Get());
+			break;
+		case D3D12_COMMAND_LIST_TYPE_COMPUTE:
+			impl->cl->SetComputeRootSignature(L->root.Get());
+			break;
+		case D3D12_COMMAND_LIST_TYPE_COPY:
+			// no root signature for copy-only lists
+			BreakIfDebugging();
+			break;
 		}
 
 		impl->boundLayout = layoutH;
@@ -2323,7 +2604,7 @@ namespace rhi {
 		l->cl->DrawInstanced(vc, ic, fv, fi);
 	}
 	static void cl_drawIndexed(CommandList* cl, uint32_t ic, uint32_t inst, uint32_t firstIdx, int32_t vtxOff, uint32_t firstInst) noexcept {
-		auto* l = static_cast<Dx12CommandList*>(cl->impl); 
+		auto* l = static_cast<Dx12CommandList*>(cl->impl);
 		l->cl->DrawIndexedInstanced(ic, inst, firstIdx, vtxOff, firstInst);
 	}
 	static void cl_dispatch(CommandList* cl, uint32_t x, uint32_t y, uint32_t z) noexcept {
@@ -2553,7 +2834,8 @@ namespace rhi {
 		ID3D12Resource* res = nullptr;
 		if (u.resource.IsTexture()) {
 			res = impl->textures.get(u.resource.GetHandle())->res.Get();
-		} else {
+		}
+		else {
 			res = impl->buffers.get(u.resource.GetHandle())->res.Get();
 		}
 		if (!res) {
@@ -2734,7 +3016,7 @@ namespace rhi {
 			&srcBox);
 	}
 
-	static void cl_copyBufferRegion( CommandList* cl,
+	static void cl_copyBufferRegion(CommandList* cl,
 		ResourceHandle dst, uint64_t dstOffset,
 		ResourceHandle src, uint64_t srcOffset,
 		uint64_t numBytes) noexcept
@@ -2974,10 +3256,11 @@ namespace rhi {
 			return;
 		}
 		auto* B = static_cast<Dx12Buffer*>(r->impl);
-		if (!B || !B->res) { 
-			*data = nullptr; 
-			BreakIfDebugging(); 
-			return; }
+		if (!B || !B->res) {
+			*data = nullptr;
+			BreakIfDebugging();
+			return;
+		}
 
 		D3D12_RANGE readRange{};
 		D3D12_RANGE* pRange = nullptr;
@@ -3030,8 +3313,8 @@ namespace rhi {
 			return;
 		}
 		auto* T = static_cast<Dx12Texture*>(r->impl);
-		if (!T || !T->res) { 
-			*data = nullptr; 
+		if (!T || !T->res) {
+			*data = nullptr;
 			BreakIfDebugging();
 			return;
 		}
@@ -3151,7 +3434,7 @@ namespace rhi {
 			auto push = [&](PipelineStatTypes f, size_t off) {
 				tmp.push_back({ f, uint32_t(off), uint32_t(sizeof(uint64_t)), true });
 				};
-			
+
 			for (unsigned int i = 0; i < cap; i++) {
 				auto type = outBuf[i].field;
 				switch (type) {
@@ -3270,8 +3553,8 @@ namespace rhi {
 			return Result::Failed;
 		}
 		HRESULT hr = TL->fence->SetEventOnCompletion(p, e);
-		if (FAILED(hr)) { 
-			CloseHandle(e); 
+		if (FAILED(hr)) {
+			CloseHandle(e);
 			BreakIfDebugging();
 			return Result::Failed;
 		}

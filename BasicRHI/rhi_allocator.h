@@ -168,6 +168,11 @@ namespace rhi::ma
     }
     inline AllocationFlags& operator|=(AllocationFlags& a, AllocationFlags b) noexcept { a = a | b; return a; }
 
+    inline AllocationFlags operator&(AllocationFlags a, AllocationFlags b) noexcept
+    {
+        return static_cast<AllocationFlags>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
+	}
+
     enum class PoolFlags : uint32_t
     {
         None = 0,
@@ -182,6 +187,11 @@ namespace rhi::ma
         return static_cast<PoolFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
     }
     inline PoolFlags& operator|=(PoolFlags& a, PoolFlags b) noexcept { a = a | b; return a; }
+
+    inline PoolFlags operator&(PoolFlags a, PoolFlags b) noexcept
+    {
+        return static_cast<PoolFlags>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
+    }
 
     enum class AllocatorFlags : uint32_t
     {
@@ -198,6 +208,11 @@ namespace rhi::ma
         return static_cast<AllocatorFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
     }
     inline AllocatorFlags& operator|=(AllocatorFlags& a, AllocatorFlags b) noexcept { a = a | b; return a; }
+
+    inline AllocatorFlags operator&(AllocatorFlags a, AllocatorFlags b) noexcept
+    {
+        return static_cast<AllocatorFlags>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
+    }
 
     // ---------------- Descriptors ----------------
 
@@ -240,7 +255,7 @@ namespace rhi::ma
 
         // Device that allocator uses to create heaps/resources.
         // Lifetime must outlive the allocator.
-        rhi::Device device{};
+        Device device;
 
         uint64_t preferredBlockSize = 0;
 
@@ -391,6 +406,18 @@ namespace rhi::ma
         uint32_t abi_version = 1;
     };
 
+    /// \cond INTERNAL
+    class DefragmentationContextPimpl;
+    class AllocatorPimpl;
+    class PoolPimpl;
+    class NormalBlock;
+    class BlockVector;
+    class CommittedAllocationList;
+    class JsonWriter;
+    class VirtualBlockPimpl;
+    /// \endcond
+
+
     class Allocation
     {
     public:
@@ -423,13 +450,38 @@ namespace rhi::ma
     private:
         friend class BlockMetadata_Linear;
         friend class JsonWriter;
-
+        friend struct CommittedAllocationListItemTraits;
         enum Type
         {
             TYPE_COMMITTED,
             TYPE_PLACED,
             TYPE_HEAP,
             TYPE_COUNT
+        };
+
+        union
+        {
+            struct
+            {
+                CommittedAllocationList* list;
+                Allocation* prev;
+                Allocation* next;
+            } m_Committed;
+
+            struct
+            {
+                AllocHandle allocHandle;
+                NormalBlock* block;
+            } m_Placed;
+
+            struct
+            {
+                // Beginning must be compatible with m_Committed.
+                CommittedAllocationList* list;
+                Allocation* prev;
+                Allocation* next;
+                HeapHandle heap;
+            } m_Heap;
         };
 
         struct PackedData
@@ -459,17 +511,55 @@ namespace rhi::ma
 		AllocHandle GetAllocHandle() const noexcept { return vt->getAllocHandle(this); }
     };
 
+    /// Single move of an allocation to be done for defragmentation.
     struct DefragmentationMove
     {
-        DefragmentationMoveOperation operation = DefragmentationMoveOperation::Copy;
-        Allocation srcAllocation{};
-        Allocation dstTmpAllocation{};
+        /** \brief Operation to be performed on the allocation by DefragmentationContext::EndPass().
+        Default value is #DEFRAGMENTATION_MOVE_OPERATION_COPY. You can modify it.
+        */
+        DefragmentationMoveOperation operation;
+        /// %Allocation that should be moved.
+        Allocation* pSrcAllocation;
+        /** \brief Temporary allocation pointing to destination memory that will replace `pSrcAllocation`.
+
+        Use it to retrieve new `ID3D12Heap` and offset to create new `ID3D12Resource` and then store it here via Allocation::SetResource().
+
+        \warning Do not store this allocation in your data structures! It exists only temporarily, for the duration of the defragmentation pass,
+        to be used for storing newly created resource. DefragmentationContext::EndPass() will destroy it and make `pSrcAllocation` point to this memory.
+        */
+        Allocation* pDstTmpAllocation;
     };
 
-    struct DefragmentationPassMoveInfo
+    /** \brief Parameters for incremental defragmentation steps.
+
+    To be used with function DefragmentationContext::BeginPass().
+    */
+	struct DefragmentationPassMoveInfo
     {
-        uint32_t moveCount = 0;
-        DefragmentationMove* moves = nullptr; // owned by allocator/context, valid until EndPass
+        /// Number of elements in the `pMoves` array.
+        UINT32 moveCount;
+        /** \brief Array of moves to be performed by the user in the current defragmentation pass.
+
+        Pointer to an array of `MoveCount` elements, owned by %D3D12MA, created in DefragmentationContext::BeginPass(), destroyed in DefragmentationContext::EndPass().
+
+        For each element, you should:
+
+        1. Create a new resource in the place pointed by `pMoves[i].pDstTmpAllocation->GetHeap()` + `pMoves[i].pDstTmpAllocation->GetOffset()`.
+        2. Store new resource in `pMoves[i].pDstTmpAllocation` by using Allocation::SetResource(). It will later replace old resource from `pMoves[i].pSrcAllocation`.
+        3. Copy data from the `pMoves[i].pSrcAllocation` e.g. using `D3D12GraphicsCommandList::CopyResource`.
+        4. Make sure these commands finished executing on the GPU.
+
+        Only then you can finish defragmentation pass by calling DefragmentationContext::EndPass().
+        After this call, the allocation will point to the new place in memory.
+
+        Alternatively, if you cannot move specific allocation,
+        you can set DEFRAGMENTATION_MOVE::Operation to D3D12MA::DEFRAGMENTATION_MOVE_OPERATION_IGNORE.
+
+        Alternatively, if you decide you want to completely remove the allocation,
+        set DEFRAGMENTATION_MOVE::Operation to D3D12MA::DEFRAGMENTATION_MOVE_OPERATION_DESTROY.
+        Then, after DefragmentationContext::EndPass() the allocation will be released.
+        */
+        DefragmentationMove* pMoves;
     };
 
     using AllocationPtr = Unique<Allocation>;

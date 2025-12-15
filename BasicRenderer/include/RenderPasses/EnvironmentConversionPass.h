@@ -122,8 +122,10 @@ private:
             rhi::Make(soLayout),
             rhi::Make(soCS),
         };
-        m_pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-        if (!m_pso || !m_pso->IsValid()) throw std::runtime_error("EnvConvert: PSO failed");
+        auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);
+        if (Failed(result)) {
+            throw std::runtime_error("EnvConvert: PSO failed");
+        }
         m_pso->SetName("EnvConvert.ComputePSO");
     }
 };

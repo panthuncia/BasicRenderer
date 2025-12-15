@@ -163,8 +163,8 @@ private:
                 rhi::Make(soSample),
             };
 
-            m_downsamplePso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-            if (!m_downsamplePso || !m_downsamplePso->IsValid()) {
+            auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_downsamplePso);
+            if (Failed(result)) {
                 throw std::runtime_error("Failed to create bloom downsample PSO (RHI)");
             }
             m_downsamplePso->SetName("Bloom.Downsample");
@@ -207,8 +207,8 @@ private:
                 rhi::Make(soSample),
             };
 
-            m_upsamplePso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-            if (!m_upsamplePso || !m_upsamplePso->IsValid()) {
+            auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_upsamplePso);
+            if (Failed(result)) {
                 throw std::runtime_error("Failed to create bloom upsample PSO (RHI)");
             }
             m_upsamplePso->SetName("Bloom.Upsample");
