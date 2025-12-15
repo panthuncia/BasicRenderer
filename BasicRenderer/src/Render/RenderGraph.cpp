@@ -516,10 +516,10 @@ void RenderGraph::Setup() {
 	m_computeCommandListPool = std::make_unique<CommandListPool>(device, rhi::QueueKind::Compute);
 	m_copyCommandListPool = std::make_unique<CommandListPool>(device, rhi::QueueKind::Copy);
 
-	m_graphicsQueueFence = device.CreateTimeline();
-	m_computeQueueFence = device.CreateTimeline();
-	m_copyQueueFence = device.CreateTimeline();
-	m_frameStartSyncFence = device.CreateTimeline();
+	auto result = device.CreateTimeline(m_graphicsQueueFence);
+	result = device.CreateTimeline(m_computeQueueFence);
+	result = device.CreateTimeline(m_copyQueueFence);
+	result = device.CreateTimeline(m_frameStartSyncFence);
 
 	m_getUseAsyncCompute = SettingsManager::GetInstance().getSettingGetter<bool>("useAsyncCompute");
 

@@ -21,7 +21,7 @@ Buffer::Buffer(
 		desc.flags |= rhi::ResourceFlags::RF_AllowUnorderedAccess;
 	}
 	desc.memory = accessType;
-	m_buffer = device.CreateCommittedResource(desc);
+	auto result = device.CreateCommittedResource(desc, m_buffer);
 
 	m_size = bufferSize;
 }

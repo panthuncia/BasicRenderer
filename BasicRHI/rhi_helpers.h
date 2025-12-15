@@ -7,6 +7,7 @@
 #include <type_traits> // std::is_trivially_copyable_v
 #include <dxgi1_6.h>
 #include <string>
+#include <stdexcept>
 
 namespace rhi {
     namespace helpers {
@@ -396,8 +397,12 @@ namespace rhi {
             upDesc.flags = rhi::ResourceFlags::RF_None;
             upDesc.buffer.sizeBytes = totalSize;
             upDesc.debugName = "TextureUpload";
-            auto upload = dev.CreateCommittedResource(upDesc);
-            if (!upload) return {};
+            ResourcePtr upload;
+        	auto result = dev.CreateCommittedResource(upDesc, upload);
+            if (Failed(result)) {
+				throw std::runtime_error("Failed to create texture upload buffer.");
+                return {};
+            }
 
             // Map once, copy rows for each valid subresource
             void* mapped = nullptr;

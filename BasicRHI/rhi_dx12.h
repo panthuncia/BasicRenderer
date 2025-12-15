@@ -599,7 +599,7 @@ namespace rhi {
 	static void   d_flushDeletionQueue(Device*) noexcept {}
 
 	// Swapchain create/destroy
-	static SwapchainPtr d_createSwapchain(Device* d, void* hwnd, uint32_t w, uint32_t h, Format fmt, uint32_t bufferCount, bool allowTearing) noexcept {
+	static Result d_createSwapchain(Device* d, void* hwnd, const uint32_t w, const uint32_t h, const Format fmt, const uint32_t bufferCount, const bool allowTearing, SwapchainPtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		DXGI_SWAP_CHAIN_DESC1 desc{};
 		desc.BufferCount = bufferCount;
@@ -618,11 +618,10 @@ namespace rhi {
 		ComPtr<IDXGISwapChain1> sc1;
 		IDXGIFactory7* facForCreate = impl->upgradeFn && impl->slFactory ? impl->slFactory.Get()
 			: impl->factory.Get();
-		auto hr = facForCreate->CreateSwapChainForHwnd(impl->gfx.q.Get(), (HWND)hwnd, &desc, nullptr, nullptr, &sc1);
-		if (FAILED(hr)) {
+		if (const auto hr = facForCreate->CreateSwapChainForHwnd(impl->gfx.q.Get(), static_cast<HWND>(hwnd), &desc, nullptr, nullptr, &sc1); FAILED(hr)) {
 			spdlog::error("DX12 CreateSwapChainForHwnd failed: {0}", std::to_string(hr));
 			BreakIfDebugging();
-			return {};
+			return ToRHI(hr);
 		}
 		ComPtr<IDXGISwapChain3> sc;
 		sc1.As(&sc);
@@ -644,10 +643,11 @@ namespace rhi {
 			impl->selfWeak.lock()
 		);
 
-		Swapchain out{};
-		out.impl = scWrap;
-		out.vt = &g_scvt;
-		return MakeSwapchainPtr(d, out);
+		Swapchain ret{};
+		ret.impl = scWrap;
+		ret.vt = &g_scvt;
+		out = MakeSwapchainPtr(d, ret);
+		return Result::Ok;
 	}
 
 	static void d_destroySwapchain(DeviceDeletionContext*, Swapchain* sc) noexcept {
@@ -672,7 +672,7 @@ namespace rhi {
 		}
 	}
 
-	static PipelineLayoutPtr d_createPipelineLayout(Device* d, const PipelineLayoutDesc& ld) noexcept {
+	static Result d_createPipelineLayout(Device* d, const PipelineLayoutDesc& ld, PipelineLayoutPtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 
 		// Root parameters: push constants only (bindless tables omitted for brevity)
@@ -731,15 +731,17 @@ namespace rhi {
 
 
 		Microsoft::WRL::ComPtr<ID3DBlob> blob, err;
-		if (FAILED(D3DX12SerializeVersionedRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1_1, &blob, &err))) {
+		HRESULT hr = D3DX12SerializeVersionedRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1_1, &blob, &err);
+		if (FAILED(hr)) {
 			BreakIfDebugging();
-			return {};
+			return ToRHI(hr);
 		}
 		Microsoft::WRL::ComPtr<ID3D12RootSignature> root;
-		if (FAILED(impl->dev->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(),
-			IID_PPV_ARGS(&root)))) {
+		hr = impl->dev->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(),
+			IID_PPV_ARGS(&root));
+		if (FAILED(hr)) {
 			BreakIfDebugging();
-			return {};
+			return ToRHI(hr);
 		}
 
 		Dx12PipelineLayout L(ld, impl->selfWeak.lock());
@@ -754,14 +756,16 @@ namespace rhi {
 					});
 			}
 		}
-		if (ld.staticSamplers.size && ld.staticSamplers.data)
+		if (ld.staticSamplers.size && ld.staticSamplers.data) {
 			L.staticSamplers.assign(ld.staticSamplers.data, ld.staticSamplers.data + ld.staticSamplers.size);
+		}
 		L.root = root;
-		auto handle = impl->pipelineLayouts.alloc(std::move(L));
-		PipelineLayout out(handle);
-		out.vt = &g_plvt;
-		out.impl = impl->pipelineLayouts.get(handle);
-		return MakePipelineLayoutPtr(d, out);
+		auto handle = impl->pipelineLayouts.alloc(L);
+		PipelineLayout ret(handle);
+		ret.vt = &g_plvt;
+		ret.impl = impl->pipelineLayouts.get(handle);
+		out = MakePipelineLayoutPtr(d, ret);
+		return Result::Ok;
 	}
 
 	static void CopyUtf8FromWide(const wchar_t* src, char* dst, size_t dstCap) {
@@ -1078,9 +1082,9 @@ namespace rhi {
 
 	static bool FillDx12Arg(const IndirectArg& a, D3D12_INDIRECT_ARGUMENT_DESC& out);
 
-	static CommandSignaturePtr d_createCommandSignature(Device* d,
+	static Result d_createCommandSignature(Device* d,
 		const CommandSignatureDesc& cd,
-		PipelineLayoutHandle layout) noexcept
+		const PipelineLayoutHandle layout, CommandSignaturePtr& out) noexcept
 	{
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 
@@ -1103,27 +1107,28 @@ namespace rhi {
 
 		D3D12_COMMAND_SIGNATURE_DESC desc{};
 		desc.pArgumentDescs = dxArgs.data();
-		desc.NumArgumentDescs = (UINT)dxArgs.size();
+		desc.NumArgumentDescs = static_cast<UINT>(dxArgs.size());
 		desc.ByteStride = cd.byteStride;
 
 		Microsoft::WRL::ComPtr<ID3D12CommandSignature> cs;
-		if (FAILED(impl->dev->CreateCommandSignature(&desc, rs, IID_PPV_ARGS(&cs)))) {
+		if (const auto hr = impl->dev->CreateCommandSignature(&desc, rs, IID_PPV_ARGS(&cs)); FAILED(hr)) {
 			BreakIfDebugging();
 			return {};
 		}
-		Dx12CommandSignature S(cs, cd.byteStride, impl->selfWeak.lock());
-		auto handle = impl->commandSignatures.alloc(std::move(S));
-		CommandSignature out(handle);
-		out.vt = &g_csvt;
-		out.impl = impl->commandSignatures.get(handle);
-		return MakeCommandSignaturePtr(d, out);
+		const Dx12CommandSignature s(cs, cd.byteStride, impl->selfWeak.lock());
+		const auto handle = impl->commandSignatures.alloc(s);
+		CommandSignature ret(handle);
+		ret.vt = &g_csvt;
+		ret.impl = impl->commandSignatures.get(handle);
+		out = MakeCommandSignaturePtr(d, ret);
+		return Result::Ok;
 	}
 
 	static void d_destroyCommandSignature(DeviceDeletionContext* d, CommandSignatureHandle h) noexcept {
 		static_cast<Dx12Device*>(d->impl)->commandSignatures.free(h);
 	}
 
-	static DescriptorHeapPtr d_createDescriptorHeap(Device* d, const DescriptorHeapDesc& hd) noexcept {
+	static Result d_createDescriptorHeap(Device* d, const DescriptorHeapDesc& hd, DescriptorHeapPtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 
 		D3D12_DESCRIPTOR_HEAP_DESC desc{};
@@ -1132,19 +1137,20 @@ namespace rhi {
 		desc.Flags = hd.shaderVisible ? D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE : D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 
 		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> heap;
-		if (FAILED(impl->dev->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&heap)))) {
+		if (const auto hr = impl->dev->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&heap)); FAILED(hr)) {
 			BreakIfDebugging();
 			return {};
 		}
 
-		auto descriptorSize = impl->dev->GetDescriptorHandleIncrementSize(desc.Type);
-		Dx12DescriptorHeap H(heap, desc.Type, descriptorSize, (desc.Flags & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) != 0, impl->selfWeak.lock());
+		const auto descriptorSize = impl->dev->GetDescriptorHandleIncrementSize(desc.Type);
+		const Dx12DescriptorHeap H(heap, desc.Type, descriptorSize, (desc.Flags & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) != 0, impl->selfWeak.lock());
 
-		auto handle = impl->descHeaps.alloc(std::move(H));
-		DescriptorHeap out(handle);
-		out.vt = &g_dhvt;
-		out.impl = impl->descHeaps.get(handle);
-		return MakeDescriptorHeapPtr(d, out);
+		const auto handle = impl->descHeaps.alloc(H);
+		DescriptorHeap ret(handle);
+		ret.vt = &g_dhvt;
+		ret.impl = impl->descHeaps.get(handle);
+		out = MakeDescriptorHeapPtr(d, ret);
+		return Result::Ok;
 	}
 	static void d_destroyDescriptorHeap(DeviceDeletionContext* d, DescriptorHeapHandle h) noexcept {
 		static_cast<Dx12Device*>(d->impl)->descHeaps.free(h);
@@ -1757,21 +1763,22 @@ namespace rhi {
 		return Result::Ok;
 	}
 
-	static CommandAllocatorPtr d_createCommandAllocator(Device* d, QueueKind q) noexcept {
+	static Result d_createCommandAllocator(Device* d, QueueKind q, CommandAllocatorPtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> a;
-		if (FAILED(impl->dev->CreateCommandAllocator(ToDX(q), IID_PPV_ARGS(&a)))) {
+		if (const auto hr = impl->dev->CreateCommandAllocator(ToDX(q), IID_PPV_ARGS(&a)); FAILED(hr)) {
 			__debugbreak();
-			return {};
+			return ToRHI(hr);
 		}
 
 		Dx12Allocator A(a, ToDX(q), impl->selfWeak.lock());
-		auto h = impl->allocators.alloc(std::move(A));
+		const auto h = impl->allocators.alloc(A);
 
-		CommandAllocator out{ h };
-		out.impl = impl->allocators.get(h);
-		out.vt = &g_calvt;
-		return MakeCommandAllocatorPtr(d, out);
+		CommandAllocator ret{ h };
+		ret.impl = impl->allocators.get(h);
+		ret.vt = &g_calvt;
+		out = MakeCommandAllocatorPtr(d, ret);
+		return Result::Ok;
 	}
 
 	static void d_destroyCommandAllocator(DeviceDeletionContext* d, CommandAllocator* ca) noexcept {
@@ -1779,30 +1786,31 @@ namespace rhi {
 		impl->allocators.free(ca->GetHandle());
 	}
 
-	static CommandListPtr d_createCommandList(Device* d, QueueKind q, CommandAllocator ca) noexcept {
+	static Result d_createCommandList(Device* d, QueueKind q, CommandAllocator ca, CommandListPtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		auto* A = static_cast<Dx12Allocator*>(ca.impl);
+		const auto* A = static_cast<Dx12Allocator*>(ca.impl);
 		if (!A) {
 			BreakIfDebugging();
 			return {};
 		}
 
 		ComPtr<ID3D12GraphicsCommandList7> cl;
-		if (FAILED(impl->dev->CreateCommandList(0, A->type, A->alloc.Get(), nullptr, IID_PPV_ARGS(&cl)))) {
+		if (const auto hr = impl->dev->CreateCommandList(0, A->type, A->alloc.Get(), nullptr, IID_PPV_ARGS(&cl)); FAILED(hr)) {
 			BreakIfDebugging();
-			return {};
+			return ToRHI(hr);
 		}
-		Dx12CommandList rec(cl, A->alloc, A->type, impl->selfWeak.lock());
-		auto h = impl->commandLists.alloc(std::move(rec));
+		const Dx12CommandList rec(cl, A->alloc, A->type, impl->selfWeak.lock());
+		const auto h = impl->commandLists.alloc(rec);
 
-		CommandList out{ h };
+		CommandList ret{ h };	
 		Dx12CommandList* implCL = impl->commandLists.get(h);
-		out.impl = implCL;
-		out.vt = &g_clvt;
-		return MakeCommandListPtr(d, out);
+		ret.impl = implCL;
+		ret.vt = &g_clvt;
+		out = MakeCommandListPtr(d, ret);
+		return Result::Ok;
 	}
 
-	static ResourcePtr d_createCommittedBuffer(Device* d, const ResourceDesc& bd) noexcept {
+	static Result d_createCommittedBuffer(Device* d, const ResourceDesc& bd, ResourcePtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl || !impl->dev || bd.buffer.sizeBytes == 0) {
 			BreakIfDebugging();
@@ -1819,9 +1827,9 @@ namespace rhi {
 
 		Microsoft::WRL::ComPtr<ID3D12Resource> res;
 		// Buffers must use UNDEFINED layout per spec
-		const D3D12_BARRIER_LAYOUT initialLayout = D3D12_BARRIER_LAYOUT_UNDEFINED;
+		constexpr D3D12_BARRIER_LAYOUT initialLayout = D3D12_BARRIER_LAYOUT_UNDEFINED;
 
-		HRESULT hr = impl->dev->CreateCommittedResource3(
+		const HRESULT hr = impl->dev->CreateCommittedResource3(
 			&hp,
 			D3D12_HEAP_FLAG_NONE,
 			&desc,
@@ -1833,21 +1841,24 @@ namespace rhi {
 			IID_PPV_ARGS(&res));
 		if (FAILED(hr)) {
 			BreakIfDebugging();
-			return {};
+			return ToRHI(hr);
 		}
 
-		if (bd.debugName) res->SetName(std::wstring(bd.debugName, bd.debugName + ::strlen(bd.debugName)).c_str());
+		if (bd.debugName) {
+			res->SetName(std::wstring(bd.debugName, bd.debugName + ::strlen(bd.debugName)).c_str());
+		}
 
 		Dx12Buffer B(std::move(res), impl->selfWeak.lock());
-		auto handle = impl->buffers.alloc(std::move(B));
+		const auto handle = impl->buffers.alloc(B);
 
-		Resource out{ handle, false };
-		out.impl = impl->buffers.get(handle);
-		out.vt = &g_buf_rvt;
-		return MakeBufferPtr(d, out);
+		Resource ret{ handle, false };
+		ret.impl = impl->buffers.get(handle);
+		ret.vt = &g_buf_rvt;
+		out = MakeBufferPtr(d, ret);
+		return Result::Ok;
 	}
 
-	static ResourcePtr d_createCommittedTexture(Device* d, const ResourceDesc& td) noexcept {
+	static Result d_createCommittedTexture(Device* d, const ResourceDesc& td, ResourcePtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl || !impl->dev || td.texture.width == 0 || td.texture.height == 0 || td.texture.format == Format::Unknown) {
 			BreakIfDebugging();
@@ -1884,65 +1895,67 @@ namespace rhi {
 		if (FAILED(hr)) {
 			spdlog::error("Failed to create committed texture: {0}", hr);
 			BreakIfDebugging();
-			return {};
+			return ToRHI(hr);
 		};
 
 		if (td.debugName) res->SetName(std::wstring(td.debugName, td.debugName + ::strlen(td.debugName)).c_str());
 
-		auto arraySize = td.type == ResourceType::Texture3D ? 1 : td.texture.depthOrLayers;
-		auto depth = td.type == ResourceType::Texture3D ? td.texture.depthOrLayers : 1;
+		const auto arraySize = td.type == ResourceType::Texture3D ? 1 : td.texture.depthOrLayers;
+		const auto depth = td.type == ResourceType::Texture3D ? td.texture.depthOrLayers : 1;
 		Dx12Texture T(std::move(res), desc.Format, td.texture.width, td.texture.height,
 			td.texture.mipLevels, arraySize, (td.type == ResourceType::Texture3D)
 			? D3D12_RESOURCE_DIMENSION_TEXTURE3D
 			: (td.type == ResourceType::Texture2D ? D3D12_RESOURCE_DIMENSION_TEXTURE2D
 				: D3D12_RESOURCE_DIMENSION_TEXTURE1D), depth, impl->selfWeak.lock());
 
-		auto handle = impl->textures.alloc(std::move(T));
+		auto handle = impl->textures.alloc(T);
 
-		Resource out{ handle, true };
-		out.impl = impl->textures.get(handle);
-		out.vt = &g_tex_rvt;
+		Resource ret{ handle, true };
+		ret.impl = impl->textures.get(handle);
+		ret.vt = &g_tex_rvt;
 
-		return MakeTexturePtr(d, out);
+		out = MakeTexturePtr(d, ret);
+		return Result::Ok;
 	}
 
-	static ResourcePtr d_createCommittedResource(Device* d, const ResourceDesc& td) noexcept {
+	static Result d_createCommittedResource(Device* d, const ResourceDesc& td, ResourcePtr& out) noexcept {
 		switch (td.type) {
-		case ResourceType::Buffer:  return d_createCommittedBuffer(d, td);
+		case ResourceType::Buffer:  return d_createCommittedBuffer(d, td, out);
 		case ResourceType::Texture3D:
 		case ResourceType::Texture2D:
 		case ResourceType::Texture1D:
-			return d_createCommittedTexture(d, td);
+			return d_createCommittedTexture(d, td, out);
 		case ResourceType::Unknown: {
 			BreakIfDebugging();
-			return {};
+			return Result::InvalidArgument;
 		}
 		}
 		BreakIfDebugging();
-		return {};
+		return Result::Unexpected;
 	}
 
 	static uint32_t d_getDescriptorHandleIncrementSize(Device* d, DescriptorHeapType type) noexcept {
-		auto* impl = static_cast<Dx12Device*>(d->impl);
+		const auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl || !impl->dev) return 0;
 		const D3D12_DESCRIPTOR_HEAP_TYPE t = ToDX(type);
 		return (uint32_t)impl->dev->GetDescriptorHandleIncrementSize(t);
 	}
 
-	static TimelinePtr d_createTimeline(Device* d, uint64_t initial, const char* dbg) noexcept {
+	static Result d_createTimeline(Device* d, uint64_t initial, const char* dbg, TimelinePtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		Microsoft::WRL::ComPtr<ID3D12Fence> f;
-		if (FAILED(impl->dev->CreateFence(initial, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&f)))) {
+		if (const auto hr = impl->dev->CreateFence(initial, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&f)); FAILED(hr)) {
 			BreakIfDebugging();
 			return {};
 		}
 		if (dbg) { std::wstring w(dbg, dbg + ::strlen(dbg)); f->SetName(w.c_str()); }
-		Dx12Timeline T(f, impl->selfWeak.lock());
-		auto h = impl->timelines.alloc(std::move(T));
-		Timeline out{ h };
-		out.impl = impl->timelines.get(h);
-		out.vt = &g_tlvt;
-		return MakeTimelinePtr(d, out);
+		const Dx12Timeline T(f, impl->selfWeak.lock());
+		const auto h = impl->timelines.alloc(T);
+		Timeline ret{ h };
+		ret.impl = impl->timelines.get(h);
+		ret.vt = &g_tlvt;
+		out = MakeTimelinePtr(d, ret);
+		return Result::Ok;
 	}
 
 
@@ -1951,7 +1964,7 @@ namespace rhi {
 		impl->timelines.free(t);
 	}
 
-	static HeapPtr d_createHeap(Device* d, const HeapDesc& hd) noexcept {
+	static Result d_createHeap(Device* d, const HeapDesc& hd, HeapPtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl || !impl->dev || hd.sizeBytes == 0) {
 			BreakIfDebugging();
@@ -1971,20 +1984,21 @@ namespace rhi {
 		desc.Flags = ToDX(hd.flags);
 
 		Microsoft::WRL::ComPtr<ID3D12Heap> heap;
-		if (FAILED(impl->dev->CreateHeap(&desc, IID_PPV_ARGS(&heap)))) {
-			return {};
+		if (const auto hr = impl->dev->CreateHeap(&desc, IID_PPV_ARGS(&heap)); FAILED(hr)) {
+			return ToRHI(hr);
 		}
 
 #ifdef _WIN32
-		if (hd.debugName) { std::wstring w(hd.debugName, hd.debugName + ::strlen(hd.debugName)); heap->SetName(w.c_str()); }
+		if (hd.debugName) { const std::wstring w(hd.debugName, hd.debugName + ::strlen(hd.debugName)); heap->SetName(w.c_str()); }
 #endif
 
-		Dx12Heap H(heap, hd.sizeBytes, impl->selfWeak.lock());
-		auto h = impl->heaps.alloc(std::move(H));
-		Heap out{ h };
-		out.impl = impl->heaps.get(h);
-		out.vt = &g_hevt;
-		return MakeHeapPtr(d, out);
+		const Dx12Heap H(heap, hd.sizeBytes, impl->selfWeak.lock());
+		const auto h = impl->heaps.alloc(H);
+		Heap ret{ h };
+		ret.impl = impl->heaps.get(h);
+		ret.vt = &g_hevt;
+		out = MakeHeapPtr(d, ret);
+		return Result::Ok;
 	}
 
 	static void d_destroyHeap(DeviceDeletionContext* d, HeapHandle h) noexcept {
@@ -2073,13 +2087,13 @@ namespace rhi {
 		}
 	}
 
-	static ResourcePtr d_createPlacedTexture(Device* d, HeapHandle hh, uint64_t offset, const ResourceDesc& td) noexcept {
+	static Result d_createPlacedTexture(Device* d, HeapHandle hh, uint64_t offset, const ResourceDesc& td, ResourcePtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl) {
 			BreakIfDebugging();
 			return {};
 		}
-		auto* H = impl->heaps.get(hh); if (!H || !H->heap) {
+		const auto* H = impl->heaps.get(hh); if (!H || !H->heap) {
 			BreakIfDebugging();
 			return {};
 		}
@@ -2097,7 +2111,7 @@ namespace rhi {
 		// Textures can specify InitialLayout (enhanced barriers)
 		const D3D12_BARRIER_LAYOUT initialLayout = ToDX(td.texture.initialLayout);
 		Microsoft::WRL::ComPtr<ID3D12Resource> res;
-		HRESULT hr = impl->dev->CreatePlacedResource2(
+		const HRESULT hr = impl->dev->CreatePlacedResource2(
 			H->heap.Get(),
 			offset,
 			&desc,
@@ -2119,23 +2133,24 @@ namespace rhi {
 			(td.type == ResourceType::Texture3D) ? td.texture.depthOrLayers : 1,
 			impl->selfWeak.lock());
 
-		auto handle = impl->textures.alloc(std::move(T));
-		Resource out(handle, true);
-		out.impl = impl->textures.get(handle);
-		out.vt = &g_tex_rvt;
-		return MakeTexturePtr(d, out);
+		const auto handle = impl->textures.alloc(T);
+		Resource ret(handle, true);
+		ret.impl = impl->textures.get(handle);
+		ret.vt = &g_tex_rvt;
+		out = MakeTexturePtr(d, ret);
+		return Result::Ok;
 	}
 
-	static ResourcePtr d_createPlacedBuffer(Device* d, HeapHandle hh, uint64_t offset, const ResourceDesc& bd) noexcept {
+	static Result d_createPlacedBuffer(Device* d, const HeapHandle hh, const uint64_t offset, const ResourceDesc& bd, ResourcePtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl) {
 			return {};
 		}
-		auto* H = impl->heaps.get(hh); if (!H || !H->heap) {
+		const auto* H = impl->heaps.get(hh); if (!H || !H->heap) {
 			return {};
 		}
 		if (bd.buffer.sizeBytes == 0) {
-			return {};
+			return Result::InvalidArgument;
 		}
 		const D3D12_RESOURCE_FLAGS flags = ToDX(bd.flags);
 		const D3D12_RESOURCE_DESC1  desc = MakeBufferDesc1(bd.buffer.sizeBytes, flags);
@@ -2153,18 +2168,19 @@ namespace rhi {
 			IID_PPV_ARGS(&res));
 		if (FAILED(hr)) {
 			BreakIfDebugging();
-			return {};
+			return ToRHI(hr);
 		}
 		if (bd.debugName) res->SetName(std::wstring(bd.debugName, bd.debugName + ::strlen(bd.debugName)).c_str());
-		Dx12Buffer B(std::move(res), impl->selfWeak.lock());
-		auto handle = impl->buffers.alloc(std::move(B));
-		Resource out{ handle, false };
-		out.impl = impl->buffers.get(handle);
-		out.vt = &g_buf_rvt;
-		return MakeBufferPtr(d, out);
+		const Dx12Buffer B(std::move(res), impl->selfWeak.lock());
+		const auto handle = impl->buffers.alloc(B);
+		Resource ret{ handle, false };
+		ret.impl = impl->buffers.get(handle);
+		ret.vt = &g_buf_rvt;
+		out = MakeBufferPtr(d, ret);
+		return Result::Ok;
 	}
 
-	static ResourcePtr d_createPlacedResource(Device* d, HeapHandle hh, uint64_t offset, const ResourceDesc& rd) noexcept {
+	static Result d_createPlacedResource(Device* d, const HeapHandle hh, const uint64_t offset, const ResourceDesc& rd, ResourcePtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl) {
 			BreakIfDebugging();
@@ -2175,21 +2191,21 @@ namespace rhi {
 			return {};
 		}
 		switch (rd.type) {
-		case ResourceType::Buffer:  return d_createPlacedBuffer(d, hh, offset, rd);
+		case ResourceType::Buffer:  return d_createPlacedBuffer(d, hh, offset, rd, out);
 		case ResourceType::Texture3D:
 		case ResourceType::Texture2D:
 		case ResourceType::Texture1D:
-			return d_createPlacedTexture(d, hh, offset, rd);
+			return d_createPlacedTexture(d, hh, offset, rd, out);
 		case ResourceType::Unknown: {
 			BreakIfDebugging();
-			return {};
+			return Result::InvalidArgument;
 		}
 		}
 		BreakIfDebugging();
-		return {};
+		return Result::Unexpected;
 	}
 
-	static QueryPoolPtr d_createQueryPool(Device* d, const QueryPoolDesc& qd) noexcept {
+	static Result d_createQueryPool(Device* d, const QueryPoolDesc& qd, QueryPoolPtr& out) noexcept {
 		auto* dimpl = static_cast<Dx12Device*>(d->impl);
 		if (!dimpl || qd.count == 0) {
 			BreakIfDebugging();
@@ -2238,12 +2254,13 @@ namespace rhi {
 		Dx12QueryPool qp(heap, type, qd.count, dimpl->selfWeak.lock());
 		qp.usePSO1 = usePSO1;
 
-		auto handle = dimpl->queryPools.alloc(std::move(qp));
-		QueryPool out{ handle };
-		out.impl = dimpl->queryPools.get(handle);
-		out.vt = &g_qpvt;
+		const auto handle = dimpl->queryPools.alloc(qp);
+		QueryPool ret{ handle };
+		ret.impl = dimpl->queryPools.get(handle);
+		ret.vt = &g_qpvt;
 
-		return MakeQueryPoolPtr(d, out);
+		out = MakeQueryPoolPtr(d, ret);
+		return Result::Ok;
 	}
 
 	static void d_destroyQueryPool(DeviceDeletionContext* d, QueryPoolHandle h) noexcept {

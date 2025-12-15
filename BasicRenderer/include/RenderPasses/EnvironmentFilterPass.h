@@ -110,7 +110,7 @@ private:
         ld.flags = rhi::PipelineLayoutFlags::PF_None;
         ld.pushConstants = { &pc, 1 };
         ld.staticSamplers = { &s, 1 };
-        m_layout = dev.CreatePipelineLayout(ld);
+        auto result = dev.CreatePipelineLayout(ld, m_layout);
         if (!m_layout || !m_layout->IsValid()) throw std::runtime_error("EnvFilter: layout failed");
         m_layout->SetName("EnvFilter.ComputeLayout");
 
@@ -127,7 +127,7 @@ private:
             rhi::Make(soLayout),
             rhi::Make(soCS),
         };
-        auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);
+        result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);
         if (Failed(result)) {
             throw std::runtime_error("EnvFilter: PSO failed");
         }

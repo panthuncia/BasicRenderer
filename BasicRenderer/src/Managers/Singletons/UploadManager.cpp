@@ -27,8 +27,12 @@ void UploadManager::Initialize() {
 
 	// create one allocator+list per frame
 	for (int i = 0; i < m_numFramesInFlight; i++) {
-		m_commandAllocators.push_back(device.CreateCommandAllocator(rhi::QueueKind::Graphics));
-		m_commandLists.push_back(device.CreateCommandList(rhi::QueueKind::Graphics, m_commandAllocators.back().Get()));
+		rhi::CommandAllocatorPtr allocator;
+		auto result = device.CreateCommandAllocator(rhi::QueueKind::Graphics, allocator);
+		rhi::CommandListPtr list;
+		result = device.CreateCommandList(rhi::QueueKind::Graphics, allocator.Get(), list);
+		m_commandAllocators.push_back(std::move(allocator));
+		m_commandLists.push_back(std::move(list));
 		m_commandLists.back()->End();
 	}
 

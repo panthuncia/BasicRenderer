@@ -544,7 +544,7 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 
     UpscalingManager::GetInstance().InitializeAdapter();
 
-    m_swapChain = device.CreateSwapchain(hwnd, x_res, y_res, rhi::Format::R8G8B8A8_UNorm, m_numFramesInFlight, m_allowTearing);
+    auto result = device.CreateSwapchain(hwnd, x_res, y_res, rhi::Format::R8G8B8A8_UNorm, m_numFramesInFlight, m_allowTearing, m_swapChain);
 
 
 #if defined(ENABLE_NSIGHT_AFTERMATH)
@@ -566,7 +566,7 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     rtvHeapDesc.type = rhi::DescriptorHeapType::RTV;
 	rtvHeapDesc.shaderVisible = false;
 	rtvHeapDesc.debugName = "RTV Descriptor Heap";
-    rtvHeap = device.CreateDescriptorHeap(rtvHeapDesc);
+    result = device.CreateDescriptorHeap(rtvHeapDesc, rtvHeap);
 
     rtvDescriptorSize = device.GetDescriptorHandleIncrementSize(rhi::DescriptorHeapType::RTV);
 
@@ -583,8 +583,12 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 	m_commandAllocators.resize(m_numFramesInFlight);
 	m_commandLists.resize(m_numFramesInFlight);
     for (int i = 0; i < m_numFramesInFlight; i++) {
-		m_commandAllocators[i] = device.CreateCommandAllocator(rhi::QueueKind::Graphics);
-		m_commandLists[i] = device.CreateCommandList(rhi::QueueKind::Graphics, m_commandAllocators[i].Get());
+        rhi::CommandAllocatorPtr commandAllocator;
+        rhi::CommandListPtr commandList;
+        result = device.CreateCommandAllocator(rhi::QueueKind::Graphics, commandAllocator);
+        result = device.CreateCommandList(rhi::QueueKind::Graphics, commandAllocator.Get(), commandList);
+		m_commandAllocators[i] = std::move(commandAllocator);
+		m_commandLists[i] = std::move(commandList);
         m_commandLists[i]->End();
     }
 
@@ -594,8 +598,8 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
 		m_frameFenceValues[i] = 0;
 	}
 
-    m_frameFence = device.CreateTimeline();
-	m_readbackFence = device.CreateTimeline();
+    result = device.CreateTimeline(m_frameFence);
+    result = device.CreateTimeline(m_readbackFence);
 }
 
 void Renderer::CreateTextures() {
@@ -874,7 +878,8 @@ void Renderer::FlushCommandQueue() {
     // Create a fence and an event to wait on
 
 	auto device = DeviceManager::GetInstance().GetDevice();
-    rhi::TimelinePtr flushFence = device.CreateTimeline();
+    rhi::TimelinePtr flushFence; 
+	auto result = device.CreateTimeline(flushFence);
 
 	auto graphicsQueue = DeviceManager::GetInstance().GetGraphicsQueue();
     auto computeQueue = DeviceManager::GetInstance().GetComputeQueue();

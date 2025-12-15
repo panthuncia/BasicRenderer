@@ -202,7 +202,7 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     environmentsDir = std::filesystem::path(GetExePath()) / "textures" / "environment";
 
 	auto device = DeviceManager::GetInstance().GetDevice();
-	g_pd3dSrvDescHeap = device.CreateDescriptorHeap({ rhi::DescriptorHeapType::CbvSrvUav, 1, true });
+	auto result = device.CreateDescriptorHeap({ rhi::DescriptorHeapType::CbvSrvUav, 1, true }, g_pd3dSrvDescHeap);
 
     // Setup Platform/Renderer backends
     ImGui_ImplWin32_Init(hwnd);

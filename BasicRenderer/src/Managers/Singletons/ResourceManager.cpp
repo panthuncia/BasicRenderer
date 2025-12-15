@@ -46,7 +46,7 @@ void ResourceManager::Initialize(rhi::Queue commandQueue) {
 	InitializeTransitionCommandList();
 	SetTransitionCommandQueue(commandQueue);
 
-	m_uavCounterReset = device.CreateCommittedResource(rhi::helpers::ResourceDesc::Buffer(sizeof(UINT), rhi::HeapType::Upload));
+	auto result = device.CreateCommittedResource(rhi::helpers::ResourceDesc::Buffer(sizeof(UINT), rhi::HeapType::Upload), m_uavCounterReset);
 
 	void* pMappedCounterReset = nullptr;
 	
@@ -98,21 +98,25 @@ void ResourceManager::WaitForTransitionQueue() {
 void ResourceManager::InitializeCopyCommandQueue() {
 	auto device = DeviceManager::GetInstance().GetDevice();
 
-	copyCommandQueue = device.GetQueue(rhi::QueueKind::Graphics); // TODO: async copy queue
-	copyCommandAllocator = device.CreateCommandAllocator(rhi::QueueKind::Graphics);
-	copyCommandList = device.CreateCommandList(rhi::QueueKind::Graphics, copyCommandAllocator.Get());
+	rhi::Result result;
 
-	copyFence = device.CreateTimeline(copyFenceValue, "CopyFence");
+	copyCommandQueue = device.GetQueue(rhi::QueueKind::Graphics); // TODO: async copy queue
+	result = device.CreateCommandAllocator(rhi::QueueKind::Graphics, copyCommandAllocator);
+	result = device.CreateCommandList(rhi::QueueKind::Graphics, copyCommandAllocator.Get(), copyCommandList);
+
+	result = device.CreateTimeline(copyFence, copyFenceValue, "CopyFence");
 }
 
 void ResourceManager::InitializeTransitionCommandList() {
 	auto device = DeviceManager::GetInstance().GetDevice();
 
-	transitionCommandQueue = device.GetQueue(rhi::QueueKind::Graphics);
-	transitionCommandAllocator = device.CreateCommandAllocator(rhi::QueueKind::Graphics);
-	transitionCommandList = device.CreateCommandList(rhi::QueueKind::Graphics, transitionCommandAllocator.Get());
+	rhi::Result result;
 
-	transitionFence = device.CreateTimeline(transitionFenceValue, "TransitionFence");
+	transitionCommandQueue = device.GetQueue(rhi::QueueKind::Graphics);
+	result = device.CreateCommandAllocator(rhi::QueueKind::Graphics, transitionCommandAllocator);
+	result = device.CreateCommandList(rhi::QueueKind::Graphics, transitionCommandAllocator.Get(), transitionCommandList);
+
+	result = device.CreateTimeline(transitionFence, transitionFenceValue, "TransitionFence");
 }
 
 void ResourceManager::SetTransitionCommandQueue(rhi::Queue queue) {
@@ -135,8 +139,8 @@ void ResourceManager::GetCopyCommandList(rhi::CommandListPtr& commandList, rhi::
 
 	// Create a new command allocator if none is available or reuse an existing one
 	if (!commandAllocator || !commandList) {
-		commandAllocator = device.CreateCommandAllocator(rhi::QueueKind::Graphics);
-		commandList = device.CreateCommandList(rhi::QueueKind::Graphics, commandAllocator.Get());
+		auto result = device.CreateCommandAllocator(rhi::QueueKind::Graphics, commandAllocator);
+		result = device.CreateCommandList(rhi::QueueKind::Graphics, commandAllocator.Get(), commandList);
 	}
 	commandList->Recycle(commandAllocator.Get());
 	commandList->End();
@@ -157,7 +161,7 @@ void ResourceManager::ExecuteAndWaitForCommandList(rhi::CommandListPtr& commandL
 
 	// Create a fence for synchronization if it hasn't been created yet
 	if (!copyFenceEventCreated) {
-		copyFence = device.CreateTimeline(copyFenceValue, "TempCopyFence");
+		auto result = device.CreateTimeline(copyFence, copyFenceValue, "TempCopyFence");
 		copyFenceEventCreated = true;
 	}
 
@@ -391,7 +395,7 @@ std::pair<rhi::ResourcePtr,rhi::HeapHandle> ResourceManager::CreateTextureResour
 		throw std::runtime_error("Aliasing resources not implemented yet");
 	}
 	else {
-		textureResource = device.CreateCommittedResource(textureDesc);
+		auto result = device.CreateCommittedResource(textureDesc, textureResource);
 	}
 
 	return std::make_pair(std::move(textureResource), placedResourceHeap);

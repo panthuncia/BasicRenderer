@@ -1730,12 +1730,12 @@ namespace rhi {
 
     struct DeviceVTable {
         Result(*createPipelineFromStream)(Device*, const PipelineStreamItem* items, uint32_t count, PipelinePtr& out) noexcept;
-        PipelineLayoutPtr(*createPipelineLayout)(Device*, const PipelineLayoutDesc&) noexcept;
-        CommandSignaturePtr(*createCommandSignature)(Device*, const CommandSignatureDesc&, PipelineLayoutHandle /*layoutOrNull*/) noexcept;
-        CommandAllocatorPtr(*createCommandAllocator)(Device*, QueueKind) noexcept;
-        CommandListPtr(*createCommandList)(Device*, QueueKind, CommandAllocator) noexcept;
-        SwapchainPtr(*createSwapchain)(Device*, void* hwnd, uint32_t w, uint32_t h, Format fmt, uint32_t bufferCount, bool allowTearing) noexcept;
-        DescriptorHeapPtr(*createDescriptorHeap)(Device*, const DescriptorHeapDesc&) noexcept;
+        Result(*createPipelineLayout)(Device*, const PipelineLayoutDesc&, PipelineLayoutPtr& out) noexcept;
+        Result(*createCommandSignature)(Device*, const CommandSignatureDesc&, PipelineLayoutHandle /*layoutOrNull*/, CommandSignaturePtr& out) noexcept;
+        Result(*createCommandAllocator)(Device*, QueueKind, CommandAllocatorPtr& out) noexcept;
+        Result(*createCommandList)(Device*, QueueKind, CommandAllocator, CommandListPtr& out) noexcept;
+        Result(*createSwapchain)(Device*, void* hwnd, uint32_t w, uint32_t h, Format fmt, uint32_t bufferCount, bool allowTearing, SwapchainPtr& out) noexcept;
+        Result(*createDescriptorHeap)(Device*, const DescriptorHeapDesc&, DescriptorHeapPtr& out) noexcept;
 
         Result(*createConstantBufferView)(Device*, DescriptorSlot dst, const ResourceHandle&, const CbvDesc&) noexcept;
         Result(*createShaderResourceView)(Device*, DescriptorSlot dst, const ResourceHandle& resource, const SrvDesc&) noexcept;
@@ -1743,11 +1743,11 @@ namespace rhi {
         Result(*createRenderTargetView)(Device*, DescriptorSlot dst, const ResourceHandle& resource, const RtvDesc&) noexcept;
         Result(*createDepthStencilView)(Device*, DescriptorSlot dst, const ResourceHandle&, const DsvDesc&) noexcept;
         Result(*createSampler)(Device*, DescriptorSlot dst, const SamplerDesc&) noexcept;
-        ResourcePtr(*createCommittedResource)(Device*, const ResourceDesc&) noexcept;
-        TimelinePtr(*createTimeline)(Device*, uint64_t initialValue, const char* debugName) noexcept;
-        HeapPtr(*createHeap)(Device*, const HeapDesc&) noexcept;
-        ResourcePtr(*createPlacedResource)(Device*, HeapHandle, uint64_t offset, const ResourceDesc&) noexcept;
-        QueryPoolPtr(*createQueryPool)(Device*, const QueryPoolDesc&) noexcept;
+        Result(*createCommittedResource)(Device*, const ResourceDesc&, ResourcePtr& out) noexcept;
+        Result(*createTimeline)(Device*, uint64_t initialValue, const char* debugName, TimelinePtr& out) noexcept;
+        Result(*createHeap)(Device*, const HeapDesc&, HeapPtr& out) noexcept;
+        Result(*createPlacedResource)(Device*, HeapHandle, uint64_t offset, const ResourceDesc&, ResourcePtr& out) noexcept;
+        Result(*createQueryPool)(Device*, const QueryPoolDesc&, QueryPoolPtr& out) noexcept;
 
         void (*destroySampler)(DeviceDeletionContext*, SamplerHandle) noexcept;
         void (*destroyPipelineLayout)(DeviceDeletionContext*, PipelineLayoutHandle) noexcept;
@@ -1844,18 +1844,18 @@ namespace rhi {
         constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
         constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
         inline Result CreatePipeline(const PipelineStreamItem* items, uint32_t count, PipelinePtr& out) noexcept { return vt->createPipelineFromStream(this, items, count, out); }
-        inline CommandListPtr CreateCommandList(QueueKind q, CommandAllocator alloc) noexcept { return vt->createCommandList(this, q, alloc); }
+        inline Result CreateCommandList(QueueKind q, CommandAllocator alloc, CommandListPtr& out) noexcept { return vt->createCommandList(this, q, alloc, out); }
         inline void DestroyCommandList(CommandList* cl) noexcept { deletionContext.DestroyCommandList(cl); }
         inline Queue GetQueue(QueueKind q) noexcept { return vt->getQueue(this, q); }
         inline Result WaitIdle() noexcept { return vt->deviceWaitIdle(this); }
         inline void FlushDeletionQueue() noexcept { vt->flushDeletionQueue(this); }
-        inline SwapchainPtr CreateSwapchain(void* hwnd, uint32_t w, uint32_t h, Format fmt, uint32_t buffers, bool allowTearing) noexcept { return vt->createSwapchain(this, hwnd, w, h, fmt, buffers, allowTearing); }
+        inline Result CreateSwapchain(void* hwnd, const uint32_t w, const uint32_t h, const Format fmt, const uint32_t buffers, const bool allowTearing, SwapchainPtr& out) noexcept { return vt->createSwapchain(this, hwnd, w, h, fmt, buffers, allowTearing, out); }
 		inline void DestroySwapchain(Swapchain* sc) noexcept { deletionContext.DestroySwapchain(sc); }
-        inline PipelineLayoutPtr CreatePipelineLayout(const PipelineLayoutDesc& d) noexcept { return vt->createPipelineLayout(this, d); }
+        inline Result CreatePipelineLayout(const PipelineLayoutDesc& d, PipelineLayoutPtr& out) noexcept { return vt->createPipelineLayout(this, d, out); }
 		inline void DestroyPipelineLayout(PipelineLayoutHandle h) noexcept { deletionContext.DestroyPipelineLayout(h); }
-        inline CommandSignaturePtr CreateCommandSignature(const CommandSignatureDesc& d, PipelineLayoutHandle layout) noexcept { return vt->createCommandSignature(this, d, layout); }
+        inline Result CreateCommandSignature(const CommandSignatureDesc& d, const PipelineLayoutHandle layout, CommandSignaturePtr& out) noexcept { return vt->createCommandSignature(this, d, layout, out); }
 		inline void DestroyCommandSignature(CommandSignatureHandle h) noexcept { deletionContext.DestroyCommandSignature(h); }
-		inline DescriptorHeapPtr CreateDescriptorHeap(const DescriptorHeapDesc& d) noexcept { return vt->createDescriptorHeap(this, d); }
+		inline Result CreateDescriptorHeap(const DescriptorHeapDesc& d, DescriptorHeapPtr& out) noexcept { return vt->createDescriptorHeap(this, d, out); }
 		inline void DestroyDescriptorHeap(DescriptorHeapHandle h) noexcept { deletionContext.DestroyDescriptorHeap(h); }
         inline Result CreateConstantBufferView(DescriptorSlot s, const ResourceHandle& b, const CbvDesc& d) noexcept { return vt->createConstantBufferView(this, s, b, d); }
         inline Result CreateShaderResourceView(DescriptorSlot s, const ResourceHandle& resource, const SrvDesc& d) noexcept { return vt->createShaderResourceView(this, s, resource, d); }
@@ -1863,20 +1863,20 @@ namespace rhi {
         inline Result CreateSampler(DescriptorSlot s, const SamplerDesc& d) noexcept { return vt->createSampler(this, s, d); }
         inline Result CreateRenderTargetView(DescriptorSlot s, const ResourceHandle& resource, const RtvDesc& d) noexcept { return vt->createRenderTargetView(this, s, resource, d); }
         inline Result CreateDepthStencilView(DescriptorSlot s, const ResourceHandle& resource, const DsvDesc& d) noexcept { return vt->createDepthStencilView(this, s, resource, d); }
-        inline CommandAllocatorPtr CreateCommandAllocator(QueueKind q) noexcept { return vt->createCommandAllocator(this, q); }
+        inline Result CreateCommandAllocator(const QueueKind q, CommandAllocatorPtr& out) noexcept { return vt->createCommandAllocator(this, q, out); }
 		inline void DestroyCommandAllocator(CommandAllocator* a) noexcept { deletionContext.DestroyCommandAllocator(a); }
-		inline ResourcePtr CreateCommittedResource(const ResourceDesc& d) noexcept { return vt->createCommittedResource(this, d); }
+		inline Result CreateCommittedResource(const ResourceDesc& d, ResourcePtr& out) noexcept { return vt->createCommittedResource(this, d, out); }
 		inline void DestroySampler(SamplerHandle h) noexcept { deletionContext.DestroySampler(h); }
 		inline void DestroyPipeline(PipelineHandle h) noexcept { deletionContext.DestroyPipeline(h); }
 		inline void DestroyBuffer(ResourceHandle h) noexcept { deletionContext.DestroyBuffer(h); }
 		inline void DestroyTexture(ResourceHandle h) noexcept { deletionContext.DestroyTexture(h); }
 		inline uint32_t GetDescriptorHandleIncrementSize(DescriptorHeapType t) noexcept { return vt->getDescriptorHandleIncrementSize(this, t); }
-        inline TimelinePtr CreateTimeline(uint64_t initial = 0, const char* name = nullptr) noexcept { return vt->createTimeline(this, initial, name); }
+        inline Result CreateTimeline(TimelinePtr& out, uint64_t initial = 0, const char* name = nullptr) noexcept { return vt->createTimeline(this, initial, name, out); }
 		inline void DestroyTimeline(TimelineHandle t) noexcept { deletionContext.DestroyTimeline(t); }
-        inline HeapPtr CreateHeap(const HeapDesc& h) noexcept { return vt->createHeap(this, h); }
+        inline Result CreateHeap(const HeapDesc& h, HeapPtr& out) noexcept { return vt->createHeap(this, h, out); }
 		inline void DestroyHeap(HeapHandle h) noexcept { deletionContext.DestroyHeap(h); }
-        inline ResourcePtr CreatePlacedResource(HeapHandle heap, uint64_t offset, const ResourceDesc& rd) noexcept { return vt->createPlacedResource(this, heap, offset, rd); }
-        inline QueryPoolPtr CreateQueryPool(const QueryPoolDesc& d) noexcept { return vt->createQueryPool(this, d); }
+        inline Result CreatePlacedResource(const HeapHandle heap, const uint64_t offset, const ResourceDesc& rd, ResourcePtr& out) noexcept { return vt->createPlacedResource(this, heap, offset, rd, out); }
+        inline Result CreateQueryPool(const QueryPoolDesc& d, QueryPoolPtr& out) noexcept { return vt->createQueryPool(this, d, out); }
 		inline void DestroyQueryPool(QueryPoolHandle h) noexcept { deletionContext.DestroyQueryPool(h); }
         inline TimestampCalibration GetTimestampCalibration(QueueKind q) noexcept { return vt->getTimestampCalibration(this, q); }
         inline CopyableFootprintsInfo GetCopyableFootprints(const FootprintRangeDesc& r, CopyableFootprint* out, uint32_t outCap) noexcept {

@@ -110,7 +110,7 @@ private:
 		desc.ranges = rhi::Span<rhi::LayoutBindingRange>{ &binding, 1 };
 		desc.pushConstants = rhi::Span<rhi::PushConstantRangeDesc>{ &pushConstant };
 		desc.staticSamplers = rhi::Span<rhi::StaticSamplerDesc>{};
-		m_debugLayout = device.CreatePipelineLayout(desc);
+		auto result = device.CreatePipelineLayout(desc, m_debugLayout);
 
 	}
 

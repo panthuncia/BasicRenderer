@@ -208,7 +208,7 @@ private:
         ld.pushConstants = { pcs, (uint32_t)std::size(pcs) };
         ld.staticSamplers = { sms, (uint32_t)std::size(sms) };
 
-        m_skyboxRootSignature = dev.CreatePipelineLayout(ld);
+        auto result = dev.CreatePipelineLayout(ld, m_skyboxRootSignature);
         if (!m_skyboxRootSignature || !m_skyboxRootSignature->IsValid())
             throw std::runtime_error("Skybox: CreatePipelineLayout failed");
         m_skyboxRootSignature->SetName("Skybox.Layout");

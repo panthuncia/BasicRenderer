@@ -1937,21 +1937,23 @@ void PSOManager::createRootSignature() {
     {.sampler = linearClamp, .visibility = rhi::ShaderStage::All, .set = 0, .binding = 1, .arrayCount = 1 }, // fill filter to linear in DX12 map
     };
 
-    m_rootSignature = device.CreatePipelineLayout(
+    auto result = device.CreatePipelineLayout(
         rhi::PipelineLayoutDesc{
             .ranges = {},
             .pushConstants = rhi::Span<rhi::PushConstantRangeDesc>(pcs, std::size(pcs)),
             .staticSamplers = rhi::Span<rhi::StaticSamplerDesc>(staticSamplers, std::size(staticSamplers)),
             .flags = rhi::PipelineLayoutFlags::PF_AllowInputAssembler
-        });
+        },
+        m_rootSignature);
 
-    m_computeRootSignature = device.CreatePipelineLayout(
+    result = device.CreatePipelineLayout(
         rhi::PipelineLayoutDesc{
             .ranges = {},
             .pushConstants = rhi::Span<rhi::PushConstantRangeDesc>(pcs, std::size(pcs)),
             .staticSamplers = rhi::Span<rhi::StaticSamplerDesc>(staticSamplers, std::size(staticSamplers)),
             .flags = rhi::PipelineLayoutFlags::PF_None
-        });
+        },
+        m_computeRootSignature);
 }
 
 const rhi::PipelineLayout& PSOManager::GetRootSignature() {
