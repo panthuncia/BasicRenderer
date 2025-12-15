@@ -284,6 +284,7 @@ namespace rhi {
             case Format::R8G8_Typeless: return 2;
             case Format::R8G8B8A8_UNorm: case Format::R8G8B8A8_UNorm_sRGB: case Format::R8G8B8A8_UInt:
             case Format::R8G8B8A8_SNorm: case Format::R8G8B8A8_SInt: case Format::R8G8B8A8_Typeless:
+            case Format::B8G8R8A8_Typeless: case Format::B8G8R8A8_UNorm: case Format::B8G8R8A8_UNorm_sRGB:
             case Format::R16_UNorm: case Format::R16_UInt: case Format::R16_SNorm: case Format::R16_SInt:
             case Format::R16_Float: case Format::R16_Typeless:
                 return 4; // 32bpp (either RGBA8 or R16)
