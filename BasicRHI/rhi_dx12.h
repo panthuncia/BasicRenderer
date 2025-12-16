@@ -45,24 +45,42 @@ namespace rhi {
 	using Microsoft::WRL::ComPtr;
 	struct Dx12Device;
 
-	struct Dx12Buffer {
-		explicit Dx12Buffer(ComPtr<ID3D12Resource> r, std::shared_ptr<Dx12Device> d) : res(r), dev(d) {}
-		ComPtr<ID3D12Resource> res;
-		std::shared_ptr<Dx12Device> dev;
-	};
-	struct Dx12Texture {
-		explicit Dx12Texture(ComPtr<ID3D12Resource> r, DXGI_FORMAT f, uint32_t width, uint32_t height, uint16_t mips, uint16_t arraySize, D3D12_RESOURCE_DIMENSION dim, uint16_t depth, std::shared_ptr<Dx12Device> d)
-			: res(r), fmt(f), w(width), h(height), mips(mips), arraySize(arraySize), dim(dim), depth(depth), dev(d) {
+	enum class Dx12ResourceKind : uint8_t { Buffer, Texture };
+
+	struct Dx12Resource {
+		// Texture constructor
+		explicit Dx12Resource(ComPtr<ID3D12Resource> r, DXGI_FORMAT f, uint32_t width, uint32_t height, uint16_t mips, uint16_t arraySize, D3D12_RESOURCE_DIMENSION dim, uint16_t depth, std::shared_ptr<Dx12Device> d)
+			: res(r), fmt(f), tex({ width, height, mips, arraySize, depth }), dev(d) {
 		}
-		ComPtr<ID3D12Resource> res;
-		DXGI_FORMAT fmt{ DXGI_FORMAT_UNKNOWN };
-		uint32_t w = 0, h = 0;
-		uint16_t mips = 1;
-		uint16_t arraySize = 1; // for 1D/2D/cube (cube arrays should already multiply by 6)
+		// Buffer constructor
+		explicit Dx12Resource(ComPtr<ID3D12Resource> r, uint64_t size, std::shared_ptr<Dx12Device> d)
+			: res(r), kind(Dx12ResourceKind::Buffer), buf({ size }), dev(d) {
+		}
+		Microsoft::WRL::ComPtr<ID3D12Resource> res;
+		Dx12ResourceKind kind;
+
+		DXGI_FORMAT fmt = DXGI_FORMAT_UNKNOWN;
+		//uint32_t w = 0, h = 0;
+		//uint16_t mips = 1, arraySize = 1, depth = 1;
+		struct Buffer { // for buffers
+			uint64_t size = 0;
+		};
+		struct Texture { // for textures
+			uint32_t w = 0, h = 0;
+			uint16_t mips = 1;
+			uint16_t arraySize = 1; // for 1D/2D/cube (cube arrays should already multiply by 6)
+			uint16_t depth = 1;
+		};
+		union
+		{
+			Buffer buf;
+			Texture tex;
+		};
+
 		D3D12_RESOURCE_DIMENSION dim = D3D12_RESOURCE_DIMENSION_UNKNOWN;
-		uint16_t depth = 1;
 		std::shared_ptr<Dx12Device> dev;
 	};
+
 	struct Dx12Sampler {
 		explicit Dx12Sampler(SamplerDesc d, std::shared_ptr<Dx12Device> device) : desc(d), dev(device) {}
 		SamplerDesc desc;
@@ -140,7 +158,7 @@ namespace rhi {
 		d.MipLevels = td.texture.mipLevels;
 		d.Format = ToDxgi(td.texture.format);
 		d.SampleDesc = { td.texture.sampleCount, 0 };
-		d.Flags = ToDX(td.flags);
+		d.Flags = ToDX(td.resourceFlags);
 		d.SamplerFeedbackMipRegion = {};
 
 		switch (td.type) {
@@ -239,8 +257,7 @@ namespace rhi {
 	// tiny handle registry
 	template<class Obj> struct HandleFor;  // no default
 
-	template<> struct HandleFor<Dx12Buffer> { using type = ResourceHandle; };
-	template<> struct HandleFor<Dx12Texture> { using type = ResourceHandle; };
+	template<> struct HandleFor<Dx12Resource> { using type = ResourceHandle; };
 	template<> struct HandleFor<Dx12Sampler> { using type = SamplerHandle; };
 	template<> struct HandleFor<Dx12PipelineLayout> { using type = PipelineLayoutHandle; };
 	template<> struct HandleFor<Dx12Pipeline> { using type = PipelineHandle; };
@@ -301,8 +318,7 @@ namespace rhi {
 		Microsoft::WRL::ComPtr<IDXGIFactory7>  slFactory;   // upgraded proxy
 		Microsoft::WRL::ComPtr<ID3D12Device>   slDeviceBase;// upgraded base iface
 
-		Registry<Dx12Buffer> buffers;
-		Registry<Dx12Texture> textures;
+		Registry<Dx12Resource> resources;
 		Registry<Dx12Sampler> samplers;
 		Registry<Dx12PipelineLayout> pipelineLayouts;
 		Registry<Dx12Pipeline> pipelines;
@@ -561,8 +577,8 @@ namespace rhi {
 		return Result::Ok;
 	}
 
-	static void d_destroyBuffer(DeviceDeletionContext* d, ResourceHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->buffers.free(h); }
-	static void d_destroyTexture(DeviceDeletionContext* d, ResourceHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->textures.free(h); }
+	static void d_destroyBuffer(DeviceDeletionContext* d, ResourceHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->resources.free(h); }
+	static void d_destroyTexture(DeviceDeletionContext* d, ResourceHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->resources.free(h); }
 	static void d_destroySampler(DeviceDeletionContext* d, SamplerHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->samplers.free(h); }
 	static void d_destroyPipeline(DeviceDeletionContext* d, PipelineHandle h) noexcept { static_cast<Dx12Device*>(d->impl)->pipelines.free(h); }
 
@@ -632,8 +648,8 @@ namespace rhi {
 		for (UINT i = 0; i < bufferCount; i++) {
 			sc->GetBuffer(i, IID_PPV_ARGS(&imgs[i]));
 			// Register as a TextureHandle
-			Dx12Texture t(imgs[i], desc.Format, w, h, 1, 1, D3D12_RESOURCE_DIMENSION_TEXTURE2D, 1, impl->selfWeak.lock());
-			imgHandles[i] = impl->textures.alloc(t);
+			Dx12Resource t(imgs[i], desc.Format, w, h, 1, 1, D3D12_RESOURCE_DIMENSION_TEXTURE2D, 1, impl->selfWeak.lock());
+			imgHandles[i] = impl->resources.alloc(t);
 
 		}
 
@@ -816,7 +832,7 @@ namespace rhi {
 	template<class T>
 	concept HasAdditionalVrsRates = requires(T t) { t.AdditionalShadingRatesSupported; };
 
-	static Result d_queryFeatureInfo(Device* d, FeatureInfoHeader* chain) noexcept
+	static Result d_queryFeatureInfo(const Device* d, FeatureInfoHeader* chain) noexcept
 	{
 		if (!d || !chain) return Result::InvalidArgument;
 
@@ -937,9 +953,10 @@ namespace rhi {
 			case FeatureInfoStructType::Architecture: {
 				if (h->structSize < sizeof(ArchitectureFeatureInfo)) return Result::InvalidArgument;
 				auto* out = reinterpret_cast<ArchitectureFeatureInfo*>(h);
-				out->uma = (arch.UMA != 0);
-				out->cacheCoherentUMA = (arch.CacheCoherentUMA != 0);
-				out->isolatedMMU = (arch.IsolatedMMU != 0);
+				out->uma = arch.UMA;
+				out->cacheCoherentUMA = arch.CacheCoherentUMA;
+				out->isolatedMMU = arch.IsolatedMMU;
+				out->tileBasedRenderer = arch.TileBasedRenderer;
 			} break;
 
 			case FeatureInfoStructType::Features: {
@@ -953,9 +970,9 @@ namespace rhi {
 				out->unboundedDescriptorTables = unboundedDescriptorTables;
 
 				// "Actual shader capability" bits:
-				out->waveOps = (opt1.WaveOps != 0);
-				out->int64ShaderOps = (opt1.Int64ShaderOps != 0);
-				out->barycentrics = (opt3.BarycentricsSupported != 0);
+				out->waveOps = opt1.WaveOps;
+				out->int64ShaderOps = opt1.Int64ShaderOps;
+				out->barycentrics = opt3.BarycentricsSupported;
 
 				// Options11-derived bits (or false if not available):
 				out->derivativesInMeshAndTaskShaders = derivativesInMeshAndTask;
@@ -1045,6 +1062,41 @@ namespace rhi {
 		return Result::Ok;
 	}
 
+	static Result d_queryVideoMemoryInfo(
+		const Device* d,
+		uint32_t nodeIndex,
+		MemorySegmentGroup segmentGroup,
+		VideoMemoryInfo& out) noexcept
+	{
+		if (!d) return Result::InvalidArgument;
+
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (!impl || !impl->adapter) return Result::Failed;
+
+		ComPtr<IDXGIAdapter3> a3;
+		HRESULT hr = impl->adapter.As(&a3);
+		if (FAILED(hr) || !a3) return Result::Unsupported;
+
+		DXGI_MEMORY_SEGMENT_GROUP dxGroup = DXGI_MEMORY_SEGMENT_GROUP_LOCAL;
+		switch (segmentGroup) {
+		case MemorySegmentGroup::Local:    dxGroup = DXGI_MEMORY_SEGMENT_GROUP_LOCAL; break;
+		case MemorySegmentGroup::NonLocal: dxGroup = DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL; break;
+		default: return Result::InvalidArgument;
+		}
+
+		DXGI_QUERY_VIDEO_MEMORY_INFO info{};
+		hr = a3->QueryVideoMemoryInfo(nodeIndex, dxGroup, &info);
+
+		if (FAILED(hr)) {
+			return ToRHI(hr);
+		}
+
+		out.budgetBytes = info.Budget;
+		out.currentUsageBytes = info.CurrentUsage;
+		out.availableForReservationBytes = info.AvailableForReservation;
+		out.currentReservationBytes = info.CurrentReservation;
+		return Result::Ok;
+	}
 
 	static void d_destroyPipelineLayout(DeviceDeletionContext* d, PipelineLayoutHandle h) noexcept {
 		static_cast<Dx12Device*>(d->impl)->pipelineLayouts.free(h);
@@ -1189,7 +1241,7 @@ namespace rhi {
 
 		switch (dv.dimension) {
 		case SrvDim::Buffer: {
-			auto* B = impl->buffers.get(resource);
+			auto* B = impl->resources.get(resource);
 			if (!B || !B->res) {
 				BreakIfDebugging();
 				return Result::InvalidArgument;
@@ -1224,7 +1276,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture1D: {
-			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArgument;
+			auto* T = impl->resources.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE1D;
 			desc.Texture1D.MostDetailedMip = dv.tex1D.mostDetailedMip;
@@ -1235,7 +1287,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture1DArray: {
-			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArgument;
+			auto* T = impl->resources.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE1DARRAY;
 			desc.Texture1DArray.MostDetailedMip = dv.tex1DArray.mostDetailedMip;
@@ -1249,7 +1301,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture2D: {
-			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArgument;
+			auto* T = impl->resources.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
 			desc.Texture2D.MostDetailedMip = dv.tex2D.mostDetailedMip;
@@ -1261,7 +1313,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture2DArray: {
-			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArgument;
+			auto* T = impl->resources.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
 			desc.Texture2DArray.MostDetailedMip = dv.tex2DArray.mostDetailedMip;
@@ -1275,7 +1327,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture2DMS: {
-			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArgument;
+			auto* T = impl->resources.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMS;
 			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
@@ -1283,7 +1335,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture2DMSArray: {
-			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArgument;
+			auto* T = impl->resources.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMSARRAY;
 			desc.Texture2DMSArray.FirstArraySlice = dv.tex2DMSArray.firstArraySlice;
@@ -1293,7 +1345,7 @@ namespace rhi {
 		}
 
 		case SrvDim::Texture3D: {
-			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArgument;
+			auto* T = impl->resources.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
 			desc.Texture3D.MostDetailedMip = dv.tex3D.mostDetailedMip;
@@ -1304,7 +1356,7 @@ namespace rhi {
 		}
 
 		case SrvDim::TextureCube: {
-			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArgument;
+			auto* T = impl->resources.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
 			desc.TextureCube.MostDetailedMip = dv.cube.mostDetailedMip;
@@ -1315,7 +1367,7 @@ namespace rhi {
 		}
 
 		case SrvDim::TextureCubeArray: {
-			auto* T = impl->textures.get(resource); if (!T || !T->res) return Result::InvalidArgument;
+			auto* T = impl->resources.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
 			desc.TextureCubeArray.MostDetailedMip = dv.cubeArray.mostDetailedMip;
@@ -1329,7 +1381,7 @@ namespace rhi {
 
 		case SrvDim::AccelerationStruct: {
 			// AS is stored in a buffer with ResourceFlags::RaytracingAccelerationStructure
-			auto* B = impl->buffers.get(resource); if (!B || !B->res) return Result::InvalidArgument;
+			auto* B = impl->resources.get(resource); if (!B || !B->res) return Result::InvalidArgument;
 			desc.Format = DXGI_FORMAT_UNKNOWN;
 			desc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
 			desc.RaytracingAccelerationStructure.Location = B->res->GetGPUVirtualAddress();
@@ -1366,7 +1418,7 @@ namespace rhi {
 			// ========================= Buffer UAV =========================
 		case UavDim::Buffer:
 		{
-			auto* B = impl->buffers.get(resource);
+			auto* B = impl->resources.get(resource);
 			if (!B || !B->res) {
 				BreakIfDebugging();
 				return Result::InvalidArgument;
@@ -1409,7 +1461,7 @@ namespace rhi {
 		// ========================= Texture UAVs =========================
 		case UavDim::Texture1D:
 		{
-			auto* T = impl->textures.get(resource);
+			auto* T = impl->resources.get(resource);
 			if (!T || !T->res) {
 				BreakIfDebugging();
 				return Result::InvalidArgument;
@@ -1430,7 +1482,7 @@ namespace rhi {
 
 		case UavDim::Texture1DArray:
 		{
-			auto* T = impl->textures.get(resource);
+			auto* T = impl->resources.get(resource);
 			if (!T || !T->res) {
 				BreakIfDebugging();
 				return Result::InvalidArgument;
@@ -1454,7 +1506,7 @@ namespace rhi {
 
 		case UavDim::Texture2D:
 		{
-			auto* T = impl->textures.get(resource);
+			auto* T = impl->resources.get(resource);
 			if (!T || !T->res) {
 				BreakIfDebugging();
 				return Result::InvalidArgument;
@@ -1476,7 +1528,7 @@ namespace rhi {
 
 		case UavDim::Texture2DArray:
 		{
-			auto* T = impl->textures.get(resource);
+			auto* T = impl->resources.get(resource);
 			if (!T || !T->res) {
 				BreakIfDebugging();
 				return Result::InvalidArgument;
@@ -1500,7 +1552,7 @@ namespace rhi {
 
 		case UavDim::Texture3D:
 		{
-			auto* T = impl->textures.get(resource);
+			auto* T = impl->resources.get(resource);
 			if (!T || !T->res) {
 				BreakIfDebugging();
 				return Result::InvalidArgument;
@@ -1535,7 +1587,7 @@ namespace rhi {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		D3D12_CPU_DESCRIPTOR_HANDLE dst{};
 		if (!DxGetDstCpu(impl, s, dst, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) return Result::InvalidArgument;
-		auto* B = impl->buffers.get(bh); if (!B) {
+		auto* B = impl->resources.get(bh); if (!B) {
 			BreakIfDebugging();
 			return Result::InvalidArgument;
 		}
@@ -1594,7 +1646,7 @@ namespace rhi {
 		}
 
 		// For texture RTVs we expect a texture resource
-		auto* T = impl->textures.get(texture);
+		auto* T = impl->resources.get(texture);
 		if (!T && rd.dimension != RtvDim::Buffer) {
 			BreakIfDebugging();
 			return Result::InvalidArgument;
@@ -1707,7 +1759,7 @@ namespace rhi {
 			return Result::InvalidArgument;
 		}
 
-		auto* T = impl->textures.get(texture);
+		auto* T = impl->resources.get(texture);
 		if (!T) {
 			BreakIfDebugging();
 			return Result::InvalidArgument;
@@ -1818,26 +1870,33 @@ namespace rhi {
 		}
 
 		D3D12_HEAP_PROPERTIES hp{};
-		hp.Type = ToDx(bd.memory);
+		hp.Type = ToDx(bd.heapType);
 		hp.CreationNodeMask = 1;
 		hp.VisibleNodeMask = 1;
 
-		const D3D12_RESOURCE_FLAGS flags = ToDX(bd.flags);
+		const auto hf = ToDX(bd.heapFlags);
+
+		const D3D12_RESOURCE_FLAGS flags = ToDX(bd.resourceFlags);
 		const D3D12_RESOURCE_DESC1  desc = MakeBufferDesc1(bd.buffer.sizeBytes, flags);
 
 		Microsoft::WRL::ComPtr<ID3D12Resource> res;
 		// Buffers must use UNDEFINED layout per spec
 		constexpr D3D12_BARRIER_LAYOUT initialLayout = D3D12_BARRIER_LAYOUT_UNDEFINED;
 
+		std::vector<DXGI_FORMAT> castableFormats;
+		for (const auto& fmt : bd.castableFormats) {
+			castableFormats.push_back(ToDxgi(fmt));
+		}
+
 		const HRESULT hr = impl->dev->CreateCommittedResource3(
 			&hp,
-			D3D12_HEAP_FLAG_NONE,
+			hf,
 			&desc,
 			initialLayout,
 			/*pOptimizedClearValue*/ nullptr,        // buffers: must be null
 			/*pProtectedSession*/   nullptr,
-			/*NumCastableFormats*/   0,
-			/*pCastableFormats*/     nullptr,
+			/*NumCastableFormats*/   static_cast<uint32_t>(castableFormats.size()),
+			/*pCastableFormats*/     castableFormats.data(),
 			IID_PPV_ARGS(&res));
 		if (FAILED(hr)) {
 			BreakIfDebugging();
@@ -1848,11 +1907,11 @@ namespace rhi {
 			res->SetName(std::wstring(bd.debugName, bd.debugName + ::strlen(bd.debugName)).c_str());
 		}
 
-		Dx12Buffer B(std::move(res), impl->selfWeak.lock());
-		const auto handle = impl->buffers.alloc(B);
+		Dx12Resource B(std::move(res), bd.buffer.sizeBytes, impl->selfWeak.lock());
+		const auto handle = impl->resources.alloc(B);
 
 		Resource ret{ handle, false };
-		ret.impl = impl->buffers.get(handle);
+		ret.impl = impl->resources.get(handle);
 		ret.vt = &g_buf_rvt;
 		out = MakeBufferPtr(d, ret);
 		return Result::Ok;
@@ -1866,9 +1925,11 @@ namespace rhi {
 		}
 
 		D3D12_HEAP_PROPERTIES hp{};
-		hp.Type = ToDx(td.memory);
+		hp.Type = ToDx(td.heapType);
 		hp.CreationNodeMask = 1;
 		hp.VisibleNodeMask = 1;
+
+		const auto hf = ToDX(td.heapFlags);
 
 		const D3D12_RESOURCE_DESC1 desc = MakeTexDesc1(td);
 
@@ -1881,16 +1942,21 @@ namespace rhi {
 		// Textures can specify InitialLayout (enhanced barriers)
 		const D3D12_BARRIER_LAYOUT initialLayout = ToDX(td.texture.initialLayout);
 
+		std::vector<DXGI_FORMAT> castableFormats;
+		for (const auto& fmt : td.castableFormats) {
+			castableFormats.push_back(ToDxgi(fmt));
+		}
+
 		Microsoft::WRL::ComPtr<ID3D12Resource> res;
 		HRESULT hr = impl->dev->CreateCommittedResource3(
 			&hp,
-			D3D12_HEAP_FLAG_NONE,
+			hf,
 			&desc,
 			initialLayout,
 			pClear,
 			/*pProtectedSession*/ nullptr,
-			/*NumCastableFormats*/ 0,
-			/*pCastableFormats*/   nullptr,
+			/*NumCastableFormats*/ static_cast<uint32_t>(castableFormats.size()),
+			/*pCastableFormats*/   castableFormats.data(),
 			IID_PPV_ARGS(&res));
 		if (FAILED(hr)) {
 			spdlog::error("Failed to create committed texture: {0}", hr);
@@ -1902,16 +1968,16 @@ namespace rhi {
 
 		const auto arraySize = td.type == ResourceType::Texture3D ? 1 : td.texture.depthOrLayers;
 		const auto depth = td.type == ResourceType::Texture3D ? td.texture.depthOrLayers : 1;
-		Dx12Texture T(std::move(res), desc.Format, td.texture.width, td.texture.height,
+		Dx12Resource T(std::move(res), desc.Format, td.texture.width, td.texture.height,
 			td.texture.mipLevels, arraySize, (td.type == ResourceType::Texture3D)
 			? D3D12_RESOURCE_DIMENSION_TEXTURE3D
 			: (td.type == ResourceType::Texture2D ? D3D12_RESOURCE_DIMENSION_TEXTURE2D
 				: D3D12_RESOURCE_DIMENSION_TEXTURE1D), depth, impl->selfWeak.lock());
 
-		auto handle = impl->textures.alloc(T);
+		auto handle = impl->resources.alloc(T);
 
 		Resource ret{ handle, true };
-		ret.impl = impl->textures.get(handle);
+		ret.impl = impl->resources.get(handle);
 		ret.vt = &g_tex_rvt;
 
 		out = MakeTexturePtr(d, ret);
@@ -2016,7 +2082,7 @@ namespace rhi {
 			return;
 		}
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (auto* B = impl->buffers.get(b)) {
+		if (auto* B = impl->resources.get(b)) {
 			std::wstring w(n, n + ::strlen(n));
 			B->res->SetName(w.c_str());
 		}
@@ -2028,7 +2094,7 @@ namespace rhi {
 			return;
 		}
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (auto* T = impl->textures.get(t)) {
+		if (auto* T = impl->resources.get(t)) {
 			std::wstring w(n, n + ::strlen(n));
 			T->res->SetName(w.c_str());
 		}
@@ -2110,6 +2176,12 @@ namespace rhi {
 		}
 		// Textures can specify InitialLayout (enhanced barriers)
 		const D3D12_BARRIER_LAYOUT initialLayout = ToDX(td.texture.initialLayout);
+
+		std::vector<DXGI_FORMAT> castableFormats;
+		for (const auto& fmt : td.castableFormats) {
+			castableFormats.push_back(ToDxgi(fmt));
+		}
+
 		Microsoft::WRL::ComPtr<ID3D12Resource> res;
 		const HRESULT hr = impl->dev->CreatePlacedResource2(
 			H->heap.Get(),
@@ -2117,15 +2189,15 @@ namespace rhi {
 			&desc,
 			initialLayout,
 			pClear,
-			/*numCastableFormats*/ 0,
-			/*pProtectedSession*/ nullptr,
+			/*numCastableFormats*/ static_cast<uint32_t>(castableFormats.size()),
+			/*pProtectedSession*/ castableFormats.data(),
 			IID_PPV_ARGS(&res));
 		if (FAILED(hr)) {
 			BreakIfDebugging();
 			return {};
 		}
 		if (td.debugName) res->SetName(std::wstring(td.debugName, td.debugName + ::strlen(td.debugName)).c_str());
-		Dx12Texture T(std::move(res), desc.Format, td.texture.width, td.texture.height,
+		Dx12Resource T(std::move(res), desc.Format, td.texture.width, td.texture.height,
 			td.texture.mipLevels, (td.type == ResourceType::Texture3D) ? 1 : td.texture.depthOrLayers,
 			(td.type == ResourceType::Texture3D) ? D3D12_RESOURCE_DIMENSION_TEXTURE3D
 			: (td.type == ResourceType::Texture2D ? D3D12_RESOURCE_DIMENSION_TEXTURE2D
@@ -2133,9 +2205,9 @@ namespace rhi {
 			(td.type == ResourceType::Texture3D) ? td.texture.depthOrLayers : 1,
 			impl->selfWeak.lock());
 
-		const auto handle = impl->textures.alloc(T);
+		const auto handle = impl->resources.alloc(T);
 		Resource ret(handle, true);
-		ret.impl = impl->textures.get(handle);
+		ret.impl = impl->resources.get(handle);
 		ret.vt = &g_tex_rvt;
 		out = MakeTexturePtr(d, ret);
 		return Result::Ok;
@@ -2152,10 +2224,16 @@ namespace rhi {
 		if (bd.buffer.sizeBytes == 0) {
 			return Result::InvalidArgument;
 		}
-		const D3D12_RESOURCE_FLAGS flags = ToDX(bd.flags);
+		const D3D12_RESOURCE_FLAGS flags = ToDX(bd.resourceFlags);
 		const D3D12_RESOURCE_DESC1  desc = MakeBufferDesc1(bd.buffer.sizeBytes, flags);
 		// Buffers must use UNDEFINED layout per spec
 		const D3D12_BARRIER_LAYOUT initialLayout = D3D12_BARRIER_LAYOUT_UNDEFINED;
+
+		std::vector<DXGI_FORMAT> castableFormats;
+		for (const auto& fmt : bd.castableFormats) {
+			castableFormats.push_back(ToDxgi(fmt));
+		}
+
 		Microsoft::WRL::ComPtr<ID3D12Resource> res;
 		HRESULT hr = impl->dev->CreatePlacedResource2(
 			H->heap.Get(),
@@ -2163,18 +2241,18 @@ namespace rhi {
 			&desc,
 			initialLayout,
 			/*pOptimizedClearValue*/ nullptr,        // buffers: must be null
-			/*numCastableFormats*/   0,
-			/*pProtectedSession*/   nullptr,
+			/*numCastableFormats*/   static_cast<uint32_t>(castableFormats.size()),
+			/*pProtectedSession*/   castableFormats.data(),
 			IID_PPV_ARGS(&res));
 		if (FAILED(hr)) {
 			BreakIfDebugging();
 			return ToRHI(hr);
 		}
 		if (bd.debugName) res->SetName(std::wstring(bd.debugName, bd.debugName + ::strlen(bd.debugName)).c_str());
-		const Dx12Buffer B(std::move(res), impl->selfWeak.lock());
-		const auto handle = impl->buffers.alloc(B);
+		const Dx12Resource B(std::move(res), bd.buffer.sizeBytes, impl->selfWeak.lock());
+		const auto handle = impl->resources.alloc(B);
 		Resource ret{ handle, false };
-		ret.impl = impl->buffers.get(handle);
+		ret.impl = impl->resources.get(handle);
 		ret.vt = &g_buf_rvt;
 		out = MakeBufferPtr(d, ret);
 		return Result::Ok;
@@ -2287,7 +2365,7 @@ namespace rhi {
 			return {};
 		}
 
-		auto* T = impl->textures.get(in.texture);
+		auto* T = impl->resources.get(in.texture);
 		if (!T || !T->res) {
 			BreakIfDebugging();
 			return {};
@@ -2352,7 +2430,7 @@ namespace rhi {
 	}
 
 	static Result d_getResourceAllocationInfo(
-		Device* d,
+		const Device* d,
 		const ResourceDesc* resources,
 		uint32_t resourceCount,
 		ResourceAllocationInfo* outInfos) noexcept
@@ -2369,7 +2447,7 @@ namespace rhi {
 		for (size_t i = 0; i < resourceCount; ++i) {
 			switch (resources[i].type) {
 			case ResourceType::Buffer:
-				descs[i] = MakeBufferDesc1(resources[i].buffer.sizeBytes, ToDX(resources[i].flags));
+				descs[i] = MakeBufferDesc1(resources[i].buffer.sizeBytes, ToDX(resources[i].resourceFlags));
 				break;
 			case ResourceType::Texture1D:
 			case ResourceType::Texture2D:
@@ -2391,6 +2469,105 @@ namespace rhi {
 			outInfos[i].alignment = dxInfos[i].Alignment;
 			outInfos[i].sizeInBytes = dxInfos[i].SizeInBytes;
 		}
+		return Result::Ok;
+	}
+
+	static Result d_setResidencyPriority(
+		const Device* d,
+		const Span<PageableRef> objects,
+		ResidencyPriority priority) noexcept
+	{
+		auto* impl = static_cast<Dx12Device*>(d->impl);
+		if (!impl || !impl->dev) {
+			BreakIfDebugging();
+			return Result::Failed;
+		}
+
+		if (objects.size == 0) return Result::Ok;
+
+		std::vector<ID3D12Pageable*> pageables;
+		pageables.reserve(objects.size);
+
+		std::vector<D3D12_RESIDENCY_PRIORITY> priorities;
+		priorities.resize(objects.size, ToDX(priority));
+
+		for (uint32_t i = 0; i < objects.size; ++i)
+		{
+			const PageableRef& o = objects.data[i];
+			ID3D12Pageable* native = nullptr;
+
+			switch (o.kind)
+			{
+			case PageableKind::Resource:
+			{
+				auto* R = impl->resources.get(o.resource);
+				if (!R || !R->res) {
+					BreakIfDebugging();
+					return Result::InvalidArgument;
+				}
+				native = R->res.Get(); // ID3D12Resource* -> ID3D12Pageable*
+			} break;
+
+			case PageableKind::Heap:
+			{
+				auto* H = impl->heaps.get(o.heap);
+				if (!H || !H->heap) {
+					BreakIfDebugging();
+					return Result::InvalidArgument;
+				}
+				native = H->heap.Get(); // ID3D12Heap* -> ID3D12Pageable*
+			} break;
+
+			case PageableKind::DescriptorHeap:
+			{
+				auto* DH = impl->descHeaps.get(o.descHeap);
+				if (!DH || !DH->heap) {
+					BreakIfDebugging();
+					return Result::InvalidArgument;
+				}
+				native = DH->heap.Get(); // ID3D12DescriptorHeap* -> ID3D12Pageable*
+			} break;
+
+			case PageableKind::QueryPool:
+			{
+				auto* QH = impl->queryPools.get(o.queryPool);
+				if (!QH || !QH->heap) {
+					BreakIfDebugging();
+					return Result::InvalidArgument;
+				}
+				native = QH->heap.Get(); // ID3D12QueryHeap* -> ID3D12Pageable*
+			} break;
+
+			case PageableKind::Pipeline:
+			{
+				auto* P = impl->pipelines.get(o.pipeline);
+				if (!P || !P->pso) {
+					BreakIfDebugging();
+					return Result::InvalidArgument;
+				}
+				native = P->pso.Get(); // ID3D12PipelineState* -> ID3D12Pageable*
+			} break;
+
+			default:
+				BreakIfDebugging();
+				return Result::InvalidArgument;
+			}
+
+			// Defensive (should never happen if the above is correct)
+			if (!native) {
+				BreakIfDebugging();
+				return Result::InvalidArgument;
+			}
+
+			pageables.push_back(native);
+		}
+
+		const HRESULT hr = impl->dev->SetResidencyPriority(
+			static_cast<UINT>(pageables.size()),
+			pageables.data(),
+			priorities.data());
+
+		if (FAILED(hr)) return ToRHI(hr);
 		return Result::Ok;
 	}
 
@@ -2492,9 +2669,9 @@ namespace rhi {
 		return (std::max)(1u, base >> mip);
 	}
 
-	static inline UINT CalcSubresourceFor(const Dx12Texture& T, UINT mip, UINT arraySlice) {
+	static inline UINT CalcSubresourceFor(const Dx12Resource& T, UINT mip, UINT arraySlice) {
 		// PlaneSlice = 0 (non-planar). TODO: support planar formats
-		return D3D12CalcSubresource(mip, arraySlice, 0, T.mips, T.arraySize);
+		return D3D12CalcSubresource(mip, arraySlice, 0, T.tex.mips, T.tex.arraySize);
 	}
 
 	static void cl_end(CommandList* cl) noexcept {
@@ -2597,7 +2774,7 @@ namespace rhi {
 		std::vector<D3D12_VERTEX_BUFFER_VIEW> views; views.resize(numViews);
 		auto* dev = l->dev.get();
 		for (uint32_t i = 0; i < numViews; ++i) {
-			if (auto* B = dev->buffers.get(pBufferViews[i].buffer)) {
+			if (auto* B = dev->resources.get(pBufferViews[i].buffer)) {
 				views[i].BufferLocation = B->res->GetGPUVirtualAddress() + pBufferViews[i].offset;
 				views[i].SizeInBytes = pBufferViews[i].sizeBytes;
 				views[i].StrideInBytes = pBufferViews[i].stride;
@@ -2608,7 +2785,7 @@ namespace rhi {
 	static void cl_setIB(CommandList* cl, const IndexBufferView& view) noexcept {
 		auto* l = static_cast<Dx12CommandList*>(cl->impl);
 		auto* dev = l->dev.get();
-		if (auto* B = dev->buffers.get(view.buffer)) {
+		if (auto* B = dev->resources.get(view.buffer)) {
 			D3D12_INDEX_BUFFER_VIEW ibv{};
 			ibv.BufferLocation = B->res->GetGPUVirtualAddress() + view.offset;
 			ibv.SizeInBytes = view.sizeBytes;
@@ -2691,7 +2868,7 @@ namespace rhi {
 			return;
 		}
 
-		auto* argB = dev->buffers.get(argBufH);
+		auto* argB = dev->resources.get(argBufH);
 		if (!argB || !argB->res) {
 			BreakIfDebugging();
 			return;
@@ -2699,7 +2876,7 @@ namespace rhi {
 
 		ID3D12Resource* cntRes = nullptr;
 		if (cntBufH.valid()) {
-			auto* c = dev->buffers.get(cntBufH);
+			auto* c = dev->resources.get(cntBufH);
 			if (c && c->res) cntRes = c->res.Get();
 		}
 
@@ -2751,7 +2928,7 @@ namespace rhi {
 		// Textures
 		for (uint32_t i = 0; i < b.textures.size; ++i) {
 			const auto& t = b.textures.data[i];
-			auto* T = dev->textures.get(t.texture);
+			auto* T = dev->resources.get(t.texture);
 			if (!T || !T->res) continue;
 
 			D3D12_TEXTURE_BARRIER tb{};
@@ -2769,7 +2946,7 @@ namespace rhi {
 		// Buffers
 		for (uint32_t i = 0; i < b.buffers.size; ++i) {
 			const auto& br = b.buffers.data[i];
-			auto* B = dev->buffers.get(br.buffer);
+			auto* B = dev->resources.get(br.buffer);
 			if (!B || !B->res) continue;
 
 			D3D12_BUFFER_BARRIER bb{};
@@ -2850,10 +3027,10 @@ namespace rhi {
 		// Resource to clear
 		ID3D12Resource* res = nullptr;
 		if (u.resource.IsTexture()) {
-			res = impl->textures.get(u.resource.GetHandle())->res.Get();
+			res = impl->resources.get(u.resource.GetHandle())->res.Get();
 		}
 		else {
-			res = impl->buffers.get(u.resource.GetHandle())->res.Get();
+			res = impl->resources.get(u.resource.GetHandle())->res.Get();
 		}
 		if (!res) {
 			BreakIfDebugging();
@@ -2889,10 +3066,10 @@ namespace rhi {
 
 		ID3D12Resource* res = nullptr;
 		if (u.resource.IsTexture()) {
-			res = impl->textures.get(u.resource.GetHandle())->res.Get();
+			res = impl->resources.get(u.resource.GetHandle())->res.Get();
 		}
 		else {
-			res = impl->buffers.get(u.resource.GetHandle())->res.Get();
+			res = impl->resources.get(u.resource.GetHandle())->res.Get();
 		}
 		if (!res) {
 			BreakIfDebugging();
@@ -2913,8 +3090,8 @@ namespace rhi {
 			return;
 		}
 
-		auto* T = impl->textures.get(r.texture);
-		auto* B = impl->buffers.get(r.buffer);
+		auto* T = impl->resources.get(r.texture);
+		auto* B = impl->resources.get(r.buffer);
 		if (!T || !B || !T->res || !B->res) {
 			BreakIfDebugging();
 			return;
@@ -2949,8 +3126,8 @@ namespace rhi {
 			return;
 		}
 
-		auto* T = impl->textures.get(r.texture);
-		auto* B = impl->buffers.get(r.buffer);
+		auto* T = impl->resources.get(r.texture);
+		auto* B = impl->resources.get(r.buffer);
 		if (!T || !B || !T->res || !B->res) {
 			BreakIfDebugging();
 			return;
@@ -2987,8 +3164,8 @@ namespace rhi {
 			return;
 		}
 
-		auto* DstT = impl->textures.get(dst.texture);
-		auto* SrcT = impl->textures.get(src.texture);
+		auto* DstT = impl->resources.get(dst.texture);
+		auto* SrcT = impl->resources.get(src.texture);
 		if (!DstT || !SrcT || !DstT->res || !SrcT->res) {
 			BreakIfDebugging();
 			return;
@@ -3008,10 +3185,10 @@ namespace rhi {
 			(SrcT->dim == D3D12_RESOURCE_DIMENSION_TEXTURE3D) ? 0u : src.arraySlice);
 
 		// If width/height/depth are zero, treat them as "copy full mip slice from src starting at (src.x,src.y,src.z)"
-		UINT srcW = src.width ? src.width : MipDim(SrcT->w, src.mip);
-		UINT srcH = src.height ? src.height : MipDim(SrcT->h, src.mip);
+		UINT srcW = src.width ? src.width : MipDim(SrcT->tex.w, src.mip);
+		UINT srcH = src.height ? src.height : MipDim(SrcT->tex.h, src.mip);
 		UINT srcD = src.depth ? src.depth : ((SrcT->dim == D3D12_RESOURCE_DIMENSION_TEXTURE3D)
-			? MipDim(SrcT->depth, src.mip) : 1u);
+			? MipDim(SrcT->tex.depth, src.mip) : 1u);
 
 		// Clamp box to the src subresource bounds just in case
 		if (SrcT->dim != D3D12_RESOURCE_DIMENSION_TEXTURE3D) { srcD = 1; }
@@ -3051,8 +3228,8 @@ namespace rhi {
 		}
 
 		// Look up buffer resources
-		auto* D = dev->buffers.get(dst);
-		auto* S = dev->buffers.get(src);
+		auto* D = dev->resources.get(dst);
+		auto* S = dev->resources.get(src);
 		if (!D || !S || !D->res || !S->res) {
 			BreakIfDebugging();
 			return;
@@ -3170,7 +3347,7 @@ namespace rhi {
 		}
 
 		// Resolve to the given buffer (assumed COPY_DEST)
-		auto* B = impl->buffers.get(dst);
+		auto* B = impl->resources.get(dst);
 		if (!B || !B->res) {
 			BreakIfDebugging();
 			return;
@@ -3272,7 +3449,7 @@ namespace rhi {
 			BreakIfDebugging();
 			return;
 		}
-		auto* B = static_cast<Dx12Buffer*>(r->impl);
+		auto* B = static_cast<Dx12Resource*>(r->impl);
 		if (!B || !B->res) {
 			*data = nullptr;
 			BreakIfDebugging();
@@ -3298,7 +3475,7 @@ namespace rhi {
 	}
 
 	static void buf_unmap(Resource* r, uint64_t writeOffset, uint64_t writeSize) noexcept {
-		auto* B = static_cast<Dx12Buffer*>(r->impl);
+		auto* B = static_cast<Dx12Resource*>(r->impl);
 		if (!B || !B->res) {
 			BreakIfDebugging();
 			return;
@@ -3316,7 +3493,7 @@ namespace rhi {
 			BreakIfDebugging();
 			return;
 		}
-		auto* B = static_cast<Dx12Buffer*>(r->impl);
+		auto* B = static_cast<Dx12Resource*>(r->impl);
 		if (!B || !B->res) {
 			BreakIfDebugging();
 			return;
@@ -3329,7 +3506,7 @@ namespace rhi {
 			BreakIfDebugging();
 			return;
 		}
-		auto* T = static_cast<Dx12Texture*>(r->impl);
+		auto* T = static_cast<Dx12Resource*>(r->impl);
 		if (!T || !T->res) {
 			*data = nullptr;
 			BreakIfDebugging();
@@ -3344,7 +3521,7 @@ namespace rhi {
 		*data = SUCCEEDED(hr) ? ptr : nullptr;
 	}
 	static void tex_unmap(Resource* r, uint64_t writeOffset, uint64_t writeSize) noexcept {
-		auto* T = static_cast<Dx12Texture*>(r->impl);
+		auto* T = static_cast<Dx12Resource*>(r->impl);
 		if (T && T->res) T->res->Unmap(0, nullptr);
 	}
 
@@ -3353,7 +3530,7 @@ namespace rhi {
 			BreakIfDebugging();
 			return;
 		}
-		auto* T = static_cast<Dx12Texture*>(r->impl);
+		auto* T = static_cast<Dx12Resource*>(r->impl);
 		if (!T || !T->res) {
 			BreakIfDebugging();
 			return;

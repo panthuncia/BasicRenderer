@@ -120,10 +120,10 @@ namespace rhi {
             {
                 rhi::helpers::ResourceDesc d{};
                 d.type = ResourceType::Buffer;
-                d.flags = flags;
+                d.resourceFlags = flags;
                 d.debugName = debugName;
                 d.buffer = BufferDesc{ sizeBytes };
-                d.memory = memory;
+                d.heapType = memory;
                 return d;
             }
 
@@ -143,9 +143,9 @@ namespace rhi {
             {
                 ResourceDesc d{};
                 d.type = type;
-                d.flags = flags;
+                d.resourceFlags = flags;
                 d.debugName = debugName;
-                d.memory = memory;
+                d.heapType = memory;
                 d.texture = TextureDesc{
                     /*format*/        format,
                     /*width*/         width,
@@ -206,8 +206,8 @@ namespace rhi {
             }
 
             // Light builder API: works with lvalues and rvalues
-            constexpr ResourceDesc& WithFlags(ResourceFlags f) & noexcept { this->flags = f; return *this; }
-            constexpr ResourceDesc&& WithFlags(ResourceFlags f) && noexcept { this->flags = f; return std::move(*this); }
+            constexpr ResourceDesc& WithFlags(ResourceFlags f) & noexcept { this->resourceFlags = f; return *this; }
+            constexpr ResourceDesc&& WithFlags(ResourceFlags f) && noexcept { this->resourceFlags = f; return std::move(*this); }
 
             constexpr ResourceDesc& DebugName(const char* n) & noexcept { this->debugName = n; return *this; }
             constexpr ResourceDesc&& DebugName(const char* n) && noexcept { this->debugName = n; return std::move(*this); }
@@ -394,8 +394,8 @@ namespace rhi {
             // Create UPLOAD buffer
             ResourceDesc upDesc{};
             upDesc.type = ResourceType::Buffer;
-            upDesc.memory = HeapType::Upload;
-            upDesc.flags = rhi::ResourceFlags::RF_None;
+            upDesc.heapType = HeapType::Upload;
+            upDesc.resourceFlags = rhi::ResourceFlags::RF_None;
             upDesc.buffer.sizeBytes = totalSize;
             upDesc.debugName = "TextureUpload";
             ResourcePtr upload;

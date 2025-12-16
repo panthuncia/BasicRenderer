@@ -84,30 +84,15 @@ namespace rhi {
         if (iid != RHI_IID_D3D12_RESOURCE) return false;
         if (outSize < sizeof(D3D12ResourceInfo)) return false;
 		// Cast to Dx12Buffer or Dx12Texture based on h.IsTexture()
-		Dx12Texture* texRec = nullptr;
-		Dx12Buffer* bufRec = nullptr;
-		if (h.IsTexture()) {
-			texRec = static_cast<Dx12Texture*>(h.impl);
-		}
-		else {
-			bufRec = static_cast<Dx12Buffer*>(h.impl);
-		}
-
-        if (h.IsTexture()) {
-            if (!texRec || !texRec->res) return false;
-            auto* out = reinterpret_cast<D3D12ResourceInfo*>(outStruct);
-            out->resource = texRec->res.Get(); // ID3D12Resource*
-            out->version = 1;
-            return true;
+		Dx12Resource* resRec = nullptr;
+        resRec = static_cast<Dx12Resource*>(h.impl);
+        if (!resRec || !resRec->res) {
+            return false;
         }
-        else {
-            if (!bufRec || !bufRec->res) return false;
-            auto* out = reinterpret_cast<D3D12ResourceInfo*>(outStruct);
-            out->resource = bufRec->res.Get(); // ID3D12Resource*
-            out->version = 1;
-            return true;
-        }
-		return false;
+        auto* out = reinterpret_cast<D3D12ResourceInfo*>(outStruct);
+        out->resource = resRec->res.Get(); // ID3D12Resource*
+        out->version = 1;
+        return true;
 	}
 
     bool QueryNativeHeap(Heap h, uint32_t iid, void* outStruct, uint32_t outSize) noexcept {

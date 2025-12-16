@@ -8,6 +8,7 @@
 #include <array>
 #include <unordered_map>
 #include <memory>
+#include <utility> // C++23: std::to_underlying
 
 #include "resource_states.h"
 #include "rhi_feature_Info.h"
@@ -964,23 +965,9 @@ namespace rhi {
         Custom // D3D12: CUSTOM; Vulkan: CUSTOM
     };
 
-
-	enum class ResourceType : uint32_t { Unknown, Buffer, Texture1D, Texture2D, Texture3D};
-    struct ResourceDesc { 
-        ResourceType type = ResourceType::Unknown; 
-        HeapType memory = HeapType::DeviceLocal;
-        ResourceFlags flags;
-        const char* debugName = nullptr;
-        union { 
-            TextureDesc texture; 
-            BufferDesc buffer; 
-        }; 
-    };
-
     enum class HeapFlags : uint32_t {
         None = 0,
-        // Mirror the most useful D3D12 flags
-        AllowOnlyBuffers = 1u << 0,  // D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS
+    	AllowOnlyBuffers = 1u << 0,  // D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS
         AllowOnlyNonRtDsTextures = 1u << 1,  // D3D12_HEAP_FLAG_ALLOW_ONLY_NON_RT_DS_TEXTURES
         AllowOnlyRtDsTextures = 1u << 2,  // D3D12_HEAP_FLAG_ALLOW_ONLY_RT_DS_TEXTURES
         DenyBuffers = 1u << 3,  // D3D12_HEAP_FLAG_DENY_BUFFERS
@@ -990,7 +977,11 @@ namespace rhi {
         SharedCrossAdapter = 1u << 7,  // D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER
         CreateNotResident = 1u << 8,  // D3D12_HEAP_FLAG_CREATE_NOT_RESIDENT
         CreateNotZeroed = 1u << 9,  // D3D12_HEAP_FLAG_CREATE_NOT_ZEROED
-        AllowAllBuffersAndTextures = 1u << 10  // D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES
+        AllowAllBuffersAndTextures = 1u << 10,  // D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES
+        AllowDisplay = 1u << 11,  // D3D12_HEAP_FLAG_ALLOW_DISPLAY
+        HardwareProtected = 1u << 12,  // D3D12_HEAP_FLAG_HARDWARE_PROTECTED 
+        AllowWriteWatch = 1u << 13,  // D3D12_HEAP_FLAG_ALLOW_WRITE_WATCH
+        AllowCrossAdapterShaderAtomics = 1u << 14,  // D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS
     };
 
     inline constexpr HeapFlags operator|(const HeapFlags a, const HeapFlags b) {
@@ -1023,19 +1014,44 @@ namespace rhi {
     // == operator
     inline constexpr bool operator==(HeapFlags a, HeapFlags b) {
         return to_u32(a) == to_u32(b);
-	}
-    
+    }
+
     inline constexpr bool operator==(HeapFlags a, uint32_t b) {
         return to_u32(a) == b;
     }
 
     inline constexpr bool operator!=(HeapFlags a, HeapFlags b) {
         return !(a == b);
-	}
+    }
 
     inline constexpr bool operator!=(HeapFlags a, uint32_t b) {
         return !(a == b);
-	}
+    }
+
+    template <class E>
+    constexpr bool Any(E e) noexcept
+        requires std::is_enum_v<E>
+    {
+#if __cpp_lib_to_underlying >= 202102L
+        return std::to_underlying(e) != 0;
+#else
+        return static_cast<std::underlying_type_t<E>>(e) != 0;
+#endif
+    }
+
+	enum class ResourceType : uint32_t { Unknown, Buffer, Texture1D, Texture2D, Texture3D};
+    struct ResourceDesc { 
+        ResourceType type = ResourceType::Unknown; 
+        HeapType heapType = HeapType::DeviceLocal;
+        HeapFlags heapFlags = HeapFlags::None;
+        ResourceFlags resourceFlags;
+        const char* debugName = nullptr;
+        Span<Format> castableFormats;
+        union { 
+            TextureDesc texture; 
+            BufferDesc buffer; 
+        }; 
+    };
 
     struct HeapDesc {
         uint64_t   sizeBytes = 0; // total heap size
@@ -1218,15 +1234,45 @@ namespace rhi {
 	enum class PrimitiveTopology : uint32_t { PointList, LineList, LineStrip, TriangleList, TriangleStrip, TriangleFan };
 
     struct ResourceAllocationInfo { uint64_t offset; uint64_t alignment; uint64_t sizeInBytes; };
-    struct HeapProperties { HeapType type; bool cpuVisible; bool gpuVisible; bool cached; bool coherent; uint32_t memoryTypeBits; };
+    struct HeapProperties { HeapType type; };
     struct MemoryBudget { uint64_t budgetBytes; uint64_t usageBytes; };
 
 	enum ResidencyPriority : uint32_t { // Same as D3D12_RESIDENCY_PRIORITY
-        Minimum = 0x28000000, 
-        Low = 0x50000000, 
-        Normal = 0x78000000, 
-		High = 0xA0010000,
-		Maximum = 0xC8000000
+        ResidencyPriorityMinimum = 0x28000000, 
+        ResidencyPriorityLow = 0x50000000, 
+        ResidencyPriorityNormal = 0x78000000, 
+		ResidencyPriorityHigh = 0xA0010000,
+		ResidencyPriorityMaximum = 0xC8000000
+    };
+
+    enum class PageableKind : uint8_t {
+        Resource,
+        Heap,
+        DescriptorHeap,
+        QueryPool,   // maps to ID3D12QueryHeap
+        Pipeline,    // maps to ID3D12PipelineState
+    };
+
+    struct PageableRef {
+		PageableRef(const ResourceHandle& r) : kind(PageableKind::Resource), resource(r) {}
+		PageableRef(const HeapHandle& h) : kind(PageableKind::Heap), heap(h) {}
+		PageableRef(const DescriptorHeapHandle& d) : kind(PageableKind::DescriptorHeap), descHeap(d) {}
+		PageableRef(const QueryPoolHandle& q) : kind(PageableKind::QueryPool), queryPool(q) {}
+		PageableRef(const PipelineHandle& p) : kind(PageableKind::Pipeline), pipeline(p) {}
+
+        PageableKind kind;
+        union {
+            ResourceHandle        resource;
+            HeapHandle            heap;
+            DescriptorHeapHandle  descHeap;
+            QueryPoolHandle       queryPool;
+            PipelineHandle        pipeline;
+        };
+    };
+
+    struct ResidencyPriorityItem {
+        PageableRef object;
+        ResidencyPriority priority;
     };
 
 #define DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT 65536ull // 64KB // DX12 default requirement
@@ -1522,6 +1568,14 @@ namespace rhi {
 		CopyableFootprint footprint;
     };
 
+    enum class MemorySegmentGroup : uint32_t { Local, NonLocal };
+
+    struct VideoMemoryInfo {
+        uint64_t budgetBytes = 0;                  // OS budget for this segment group
+        uint64_t currentUsageBytes = 0;            // current usage
+        uint64_t availableForReservationBytes = 0; // how much can be reserved
+        uint64_t currentReservationBytes = 0;      // current reservation level
+    };
 
     struct CommandListVTable {
         void (*end)(CommandList*) noexcept;
@@ -1729,25 +1783,25 @@ namespace rhi {
 	struct DeviceDeletionContext;
 
     struct DeviceVTable {
-        Result(*createPipelineFromStream)(Device*, const PipelineStreamItem* items, uint32_t count, PipelinePtr& out) noexcept;
-        Result(*createPipelineLayout)(Device*, const PipelineLayoutDesc&, PipelineLayoutPtr& out) noexcept;
-        Result(*createCommandSignature)(Device*, const CommandSignatureDesc&, PipelineLayoutHandle /*layoutOrNull*/, CommandSignaturePtr& out) noexcept;
-        Result(*createCommandAllocator)(Device*, QueueKind, CommandAllocatorPtr& out) noexcept;
-        Result(*createCommandList)(Device*, QueueKind, CommandAllocator, CommandListPtr& out) noexcept;
-        Result(*createSwapchain)(Device*, void* hwnd, uint32_t w, uint32_t h, Format fmt, uint32_t bufferCount, bool allowTearing, SwapchainPtr& out) noexcept;
-        Result(*createDescriptorHeap)(Device*, const DescriptorHeapDesc&, DescriptorHeapPtr& out) noexcept;
+        Result(*createPipelineFromStream)(Device*, const PipelineStreamItem*, uint32_t, PipelinePtr&) noexcept;
+        Result(*createPipelineLayout)(Device*, const PipelineLayoutDesc&, PipelineLayoutPtr&) noexcept;
+        Result(*createCommandSignature)(Device*, const CommandSignatureDesc&, PipelineLayoutHandle /*layoutOrNull*/, CommandSignaturePtr&) noexcept;
+        Result(*createCommandAllocator)(Device*, QueueKind, CommandAllocatorPtr&) noexcept;
+        Result(*createCommandList)(Device*, QueueKind, CommandAllocator, CommandListPtr&) noexcept;
+        Result(*createSwapchain)(Device*, void*, uint32_t, uint32_t, Format, uint32_t, bool, SwapchainPtr&) noexcept;
+        Result(*createDescriptorHeap)(Device*, const DescriptorHeapDesc&, DescriptorHeapPtr&) noexcept;
 
-        Result(*createConstantBufferView)(Device*, DescriptorSlot dst, const ResourceHandle&, const CbvDesc&) noexcept;
-        Result(*createShaderResourceView)(Device*, DescriptorSlot dst, const ResourceHandle& resource, const SrvDesc&) noexcept;
-        Result(*createUnorderedAccessView)(Device*, DescriptorSlot dst, const ResourceHandle&, const UavDesc&) noexcept;
-        Result(*createRenderTargetView)(Device*, DescriptorSlot dst, const ResourceHandle& resource, const RtvDesc&) noexcept;
-        Result(*createDepthStencilView)(Device*, DescriptorSlot dst, const ResourceHandle&, const DsvDesc&) noexcept;
-        Result(*createSampler)(Device*, DescriptorSlot dst, const SamplerDesc&) noexcept;
-        Result(*createCommittedResource)(Device*, const ResourceDesc&, ResourcePtr& out) noexcept;
-        Result(*createTimeline)(Device*, uint64_t initialValue, const char* debugName, TimelinePtr& out) noexcept;
-        Result(*createHeap)(Device*, const HeapDesc&, HeapPtr& out) noexcept;
-        Result(*createPlacedResource)(Device*, HeapHandle, uint64_t offset, const ResourceDesc&, ResourcePtr& out) noexcept;
-        Result(*createQueryPool)(Device*, const QueryPoolDesc&, QueryPoolPtr& out) noexcept;
+        Result(*createConstantBufferView)(Device*, DescriptorSlot, const ResourceHandle&, const CbvDesc&) noexcept;
+        Result(*createShaderResourceView)(Device*, DescriptorSlot, const ResourceHandle&, const SrvDesc&) noexcept;
+        Result(*createUnorderedAccessView)(Device*, DescriptorSlot, const ResourceHandle&, const UavDesc&) noexcept;
+        Result(*createRenderTargetView)(Device*, DescriptorSlot, const ResourceHandle&, const RtvDesc&) noexcept;
+        Result(*createDepthStencilView)(Device*, DescriptorSlot, const ResourceHandle&, const DsvDesc&) noexcept;
+        Result(*createSampler)(Device*, DescriptorSlot, const SamplerDesc&) noexcept;
+        Result(*createCommittedResource)(Device*, const ResourceDesc&, ResourcePtr&) noexcept;
+        Result(*createTimeline)(Device*, uint64_t, const char*, TimelinePtr&) noexcept;
+        Result(*createHeap)(Device*, const HeapDesc&, HeapPtr&) noexcept;
+        Result(*createPlacedResource)(Device*, HeapHandle, uint64_t, const ResourceDesc&, ResourcePtr&) noexcept;
+        Result(*createQueryPool)(Device*, const QueryPoolDesc&, QueryPoolPtr&) noexcept;
 
         void (*destroySampler)(DeviceDeletionContext*, SamplerHandle) noexcept;
         void (*destroyPipelineLayout)(DeviceDeletionContext*, PipelineLayoutHandle) noexcept;
@@ -1768,9 +1822,11 @@ namespace rhi {
         void (*flushDeletionQueue)(Device*) noexcept;
         uint32_t(*getDescriptorHandleIncrementSize)(Device*, DescriptorHeapType) noexcept;
         TimestampCalibration(*getTimestampCalibration)(Device*, QueueKind) noexcept;
-        CopyableFootprintsInfo(*getCopyableFootprints)(Device*, const FootprintRangeDesc&, CopyableFootprint* out, uint32_t outCap) noexcept;
-        Result(*getResourceAllocationInfo)(Device*, const ResourceDesc*, uint32_t, ResourceAllocationInfo*) noexcept;
-        Result(*queryFeatureInfo)(Device*, FeatureInfoHeader* chain) noexcept;
+        CopyableFootprintsInfo(*getCopyableFootprints)(Device*, const FootprintRangeDesc&, CopyableFootprint*, uint32_t) noexcept;
+        Result(*getResourceAllocationInfo)(const Device*, const ResourceDesc*, uint32_t, ResourceAllocationInfo*) noexcept;
+        Result(*queryFeatureInfo)(const Device*, FeatureInfoHeader*) noexcept;
+		Result(*setResidencyPriority)(const Device*, Span<PageableRef>, ResidencyPriority) noexcept; // TODO: I don't think this will map to Vulkan.
+        Result(*queryVideoMemoryInfo)(const Device*, uint32_t, MemorySegmentGroup, VideoMemoryInfo&) noexcept;
 
 		// Optional debug name setters (can be nullopt)
         void (*setNameBuffer)(Device*, ResourceHandle, const char*) noexcept;
@@ -1882,11 +1938,15 @@ namespace rhi {
         inline CopyableFootprintsInfo GetCopyableFootprints(const FootprintRangeDesc& r, CopyableFootprint* out, uint32_t outCap) noexcept {
             return vt->getCopyableFootprints(this, r, out, outCap);
 		}
-        inline void GetResourceAllocationInfo(const ResourceDesc* resourceDescriptions, uint32_t numResourceDescriptions, ResourceAllocationInfo* outAllocationInfo) noexcept {
+        inline void GetResourceAllocationInfo(const ResourceDesc* resourceDescriptions, uint32_t numResourceDescriptions, ResourceAllocationInfo* outAllocationInfo) const noexcept {
             vt->getResourceAllocationInfo(this, resourceDescriptions, numResourceDescriptions, outAllocationInfo);
 		}
-        inline Result QueryFeatureInfo(FeatureInfoHeader* chain) noexcept { return vt->queryFeatureInfo(this, chain); }
-        inline void Destroy() noexcept { vt->destroyDevice(this); impl = nullptr; vt = nullptr; }
+        inline Result QueryFeatureInfo(FeatureInfoHeader* chain) const noexcept { return vt->queryFeatureInfo(this, chain); }
+		inline Result SetResidencyPriority(const Span<PageableRef>& resources, ResidencyPriority p) const noexcept { return vt->setResidencyPriority(this, resources, p); }
+        inline Result QueryVideoMemoryInfo(uint32_t nodeIndex, MemorySegmentGroup segmentGroup, VideoMemoryInfo& out) const noexcept {
+            return vt->queryVideoMemoryInfo(this, nodeIndex, segmentGroup, out);
+        }
+    	inline void Destroy() noexcept { vt->destroyDevice(this); impl = nullptr; vt = nullptr; }
     };
 
     class DevicePtr : public ObjectPtr<Device> {

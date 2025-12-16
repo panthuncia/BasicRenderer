@@ -7,14 +7,52 @@
 #include "rhi.h"
 
 // Backend-agnostic GPU memory allocator API (D3D12MA-inspired) expressed in terms of rhi::* types.
-// Declaration-only: concrete implementations live in backend modules.
-//
 // Design notes:
-// - Uses the same “POD wrapper + function-pointer vtable” pattern as rhi::Resource, rhi::Heap, etc.
-// - Provides optional RAII helpers (Unique<T>) for convenience.
 // - No DX12 / DXGI / Windows headers are required.
 // - Result codes use rhi::Result instead of HRESULT.
 // - Names are UTF-8 const char* (instead of WCHAR/LPCWSTR).
+// - Some D3D12MA defines are left as-is: TODO rename them to RHI_MA_*
+
+#ifndef D3D12MA_USE_SMALL_RESOURCE_PLACEMENT_ALIGNMENT
+    /** \brief
+    When defined to value other than 0, the library will try to use
+    `D3D12_SMALL_RESOURCE_PLACEMENT_ALIGNMENT` or `D3D12_SMALL_MSAA_RESOURCE_PLACEMENT_ALIGNMENT`
+    for created textures when possible, which can save memory because some small textures
+    may get their alignment 4 KB and their size a multiply of 4 KB instead of 64 KB.
+
+    - `#define D3D12MA_USE_SMALL_RESOURCE_PLACEMENT_ALIGNMENT 0` -
+      Disables small texture alignment.
+    - `#define D3D12MA_USE_SMALL_RESOURCE_PLACEMENT_ALIGNMENT 1` (the default) -
+      Enables conservative algorithm that will use small alignment only for some textures
+      that are surely known to support it.
+    - `#define D3D12MA_USE_SMALL_RESOURCE_PLACEMENT_ALIGNMENT 2` -
+      Enables query for small alignment to D3D12 (based on Microsoft sample) which will
+      enable small alignment for more textures, but will also generate D3D Debug Layer
+      error #721 on call to `ID3D12Device::GetResourceAllocationInfo`, which you should just
+      ignore.
+    */
+#define D3D12MA_USE_SMALL_RESOURCE_PLACEMENT_ALIGNMENT 1
+#endif
+
+#ifndef D3D12MA_RECOMMENDED_ALLOCATOR_FLAGS
+    /// Set of flags recommended for use in D3D12MA::ALLOCATOR_DESC::Flags for optimal performance.
+#define D3D12MA_RECOMMENDED_ALLOCATOR_FLAGS (D3D12MA::ALLOCATOR_FLAG_DEFAULT_POOLS_NOT_ZEROED | D3D12MA::ALLOCATOR_FLAG_MSAA_TEXTURES_ALWAYS_COMMITTED)
+#endif
+
+#ifndef D3D12MA_RECOMMENDED_HEAP_FLAGS
+#if D3D12MA_CREATE_NOT_ZEROED_AVAILABLE
+#define D3D12MA_RECOMMENDED_HEAP_FLAGS (D3D12_HEAP_FLAG_CREATE_NOT_ZEROED)
+#else
+    /// Set of flags recommended for use in D3D12MA::POOL_DESC::HeapFlags for optimal performance.
+#define D3D12MA_RECOMMENDED_HEAP_FLAGS (D3D12_HEAP_FLAG_NONE)
+#endif
+#endif
+
+#ifndef D3D12MA_RECOMMENDED_POOL_FLAGS
+    /// Set of flags recommended for use in D3D12MA::POOL_DESC::Flags for optimal performance.
+#define D3D12MA_RECOMMENDED_POOL_FLAGS (D3D12MA::POOL_FLAG_MSAA_TEXTURES_ALWAYS_COMMITTED)
+#endif
+
 
 namespace rhi::ma
 {
@@ -144,23 +182,23 @@ namespace rhi::ma
 
     // ---------------- Flags ----------------
 
-    enum class AllocationFlags : uint32_t
+    enum AllocationFlags : uint32_t
     {
-        None = 0,
-        Committed = 0x1,
-        NeverAllocate = 0x2,
-        WithinBudget = 0x4,
-        UpperAddress = 0x8,
-        CanAlias = 0x10,
+        AllocationFlagNone = 0,
+        AllocationFlagCommitted = 0x1,
+        AllocationFlagNeverAllocate = 0x2,
+        AllocationFlagWithinBudget = 0x4,
+        AllocationFlagUpperAddress = 0x8,
+        AllocationFlagCanAlias = 0x10,
 
-        StrategyMinMemory = 0x00010000,
-        StrategyMinTime = 0x00020000,
-        StrategyMinOffset = 0x00040000,
+        AllocationFlagStrategyMinMemory = 0x00010000,
+        AllocationFlagStrategyMinTime = 0x00020000,
+        AllocationFlagStrategyMinOffset = 0x00040000,
 
-        StrategyBestFit = StrategyMinMemory,
-        StrategyFirstFit = StrategyMinTime,
+        AllocationFlagStrategyBestFit = AllocationFlagStrategyMinMemory,
+        AllocationFlagStrategyFirstFit = AllocationFlagStrategyMinTime,
 
-        StrategyMask = StrategyMinMemory | StrategyMinTime | StrategyMinOffset
+        AllocationFlagStrategyMask = AllocationFlagStrategyMinMemory | AllocationFlagStrategyMinTime | AllocationFlagStrategyMinOffset
     };
     inline AllocationFlags operator|(AllocationFlags a, AllocationFlags b) noexcept
     {
@@ -218,7 +256,7 @@ namespace rhi::ma
 
     struct AllocationDesc
     {
-        AllocationFlags flags = AllocationFlags::None;
+        AllocationFlags flags = AllocationFlags::AllocationFlagNone;
 
         // Ignored if customPool != nullptr.
         rhi::HeapType  heapType = rhi::HeapType::DeviceLocal;
@@ -244,7 +282,7 @@ namespace rhi::ma
 
         // Optional backend-specific fields (kept generic).
         void* protectedSession = nullptr;
-        uint32_t residencyPriority = 0;
+        ResidencyPriority residencyPriority = ResidencyPriorityNormal;
 
         const char* debugName = nullptr;
     };
@@ -451,6 +489,10 @@ namespace rhi::ma
         friend class BlockMetadata_Linear;
         friend class JsonWriter;
         friend struct CommittedAllocationListItemTraits;
+        friend class AllocatorPimpl;
+        friend class AllocationObjectAllocator;
+        template<typename T> friend class PoolAllocator;
+
         enum Type
         {
             TYPE_COMMITTED,
@@ -508,7 +550,15 @@ namespace rhi::ma
             UINT m_TextureLayout : 9;      // enum ResourceLayout
         } m_PackedData;
 
+        Allocation(AllocatorPimpl* allocator, UINT64 size, UINT64 alignment);
+
+        void InitCommitted(CommittedAllocationList* list);
+        void InitPlaced(AllocHandle allocHandle, NormalBlock* block);
+        void InitHeap(CommittedAllocationList* list, HeapPtr heap);
+        void SwapBlockAllocation(Allocation* allocation);
+
 		AllocHandle GetAllocHandle() const noexcept { return vt->getAllocHandle(this); }
+        void SetResourcePointer(ResourceHandle resource, const ResourceDesc* pResourceDesc);
     };
 
     /// Single move of an allocation to be done for defragmentation.
@@ -585,15 +635,15 @@ namespace rhi::ma
     class Pool
     {
     public:
-        void* impl{};
+        PoolPimpl* m_Pimpl{};
         const PoolVTable* vt{};
 
         explicit constexpr operator bool() const noexcept
         {
-            return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_MA_POOL_ABI_MIN;
+            return m_Pimpl != nullptr && vt != nullptr && vt->abi_version >= RHI_MA_POOL_ABI_MIN;
         }
         constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
-        constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
+        constexpr void Reset() noexcept { m_Pimpl = nullptr; vt = nullptr; }
 
         void Destroy() noexcept { vt->destroy(this); }
 
@@ -855,7 +905,7 @@ namespace rhi::ma
         explicit CAllocationDesc(const AllocationDesc& o) noexcept : AllocationDesc(o) {}
 
         explicit CAllocationDesc(Pool* pool,
-            AllocationFlags f = AllocationFlags::None,
+            AllocationFlags f = AllocationFlags::AllocationFlagNone,
             void* priv = nullptr) noexcept
         {
             flags = f;
@@ -866,7 +916,7 @@ namespace rhi::ma
         }
 
         explicit CAllocationDesc(rhi::HeapType ht,
-            AllocationFlags f = AllocationFlags::None,
+            AllocationFlags f = AllocationFlags::AllocationFlagNone,
             void* priv = nullptr,
             rhi::HeapFlags extra = RecommendedHeapFlags) noexcept
         {

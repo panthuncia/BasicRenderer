@@ -379,13 +379,13 @@ std::pair<rhi::ResourcePtr,rhi::HeapHandle> ResourceManager::CreateTextureResour
 		}
 	};
 	if (desc.hasRTV) {
-		textureDesc.flags |= rhi::ResourceFlags::RF_AllowRenderTarget;
+		textureDesc.resourceFlags |= rhi::ResourceFlags::RF_AllowRenderTarget;
 	}
 	if (desc.hasDSV) {
-		textureDesc.flags |= rhi::ResourceFlags::RF_AllowDepthStencil;
+		textureDesc.resourceFlags |= rhi::ResourceFlags::RF_AllowDepthStencil;
 	}
 	if (desc.hasUAV) {
-		textureDesc.flags |= rhi::ResourceFlags::RF_AllowUnorderedAccess;
+		textureDesc.resourceFlags |= rhi::ResourceFlags::RF_AllowUnorderedAccess;
 	}
 	// Create the texture resource
 

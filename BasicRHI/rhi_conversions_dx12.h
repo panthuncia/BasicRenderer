@@ -353,8 +353,13 @@ namespace rhi {
 		if (test(HeapFlags::CreateNotResident))           out |= D3D12_HEAP_FLAG_CREATE_NOT_RESIDENT;
 		if (test(HeapFlags::CreateNotZeroed))             out |= D3D12_HEAP_FLAG_CREATE_NOT_ZEROED;
 		if (test(HeapFlags::AllowAllBuffersAndTextures))  out |= D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES;
+		if (test(HeapFlags::AllowDisplay))                out |= D3D12_HEAP_FLAG_ALLOW_DISPLAY;
+		if (test(HeapFlags::HardwareProtected))           out |= D3D12_HEAP_FLAG_HARDWARE_PROTECTED;
+		if (test(HeapFlags::AllowWriteWatch))				out |= D3D12_HEAP_FLAG_ALLOW_WRITE_WATCH;
+		if (test(HeapFlags::AllowCrossAdapterShaderAtomics))			out |= D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS;
 		return out;
 	}
+
 	inline static D3D12_FILTER_TYPE ToDX(Filter f) noexcept {
 		return (f == Filter::Linear) ? D3D12_FILTER_TYPE_LINEAR : D3D12_FILTER_TYPE_POINT;
 	}
@@ -475,7 +480,7 @@ namespace rhi {
 			d.SampleDesc.Count = 1;
 			d.SampleDesc.Quality = 0;
 			d.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-			d.Flags = ToDX(desc.flags);
+			d.Flags = ToDX(desc.resourceFlags);
 			return d;
 		} break;
 		default: {
@@ -492,7 +497,7 @@ namespace rhi {
 			d.SampleDesc.Count = desc.texture.sampleCount;
 			d.SampleDesc.Quality = 0;
 			d.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-			d.Flags = ToDX(desc.flags);
+			d.Flags = ToDX(desc.resourceFlags);
 			return d;
 		} break;
 		}
@@ -619,6 +624,17 @@ namespace rhi {
 			// If it's a success code we didn't explicitly model, treat as Ok.
 			// Otherwise use the caller's generic "unmapped HRESULT" bucket.
 			return SUCCEEDED(hr) ? Result::Ok : Result::Unknown;
+		}
+	}
+
+	inline static D3D12_RESIDENCY_PRIORITY ToDX(ResidencyPriority p) {
+		switch (p) {
+		case ResidencyPriority::ResidencyPriorityMinimum:      return D3D12_RESIDENCY_PRIORITY_MINIMUM;
+		case ResidencyPriority::ResidencyPriorityLow:          return D3D12_RESIDENCY_PRIORITY_LOW;
+		case ResidencyPriority::ResidencyPriorityNormal:       return D3D12_RESIDENCY_PRIORITY_NORMAL;
+		case ResidencyPriority::ResidencyPriorityHigh:         return D3D12_RESIDENCY_PRIORITY_HIGH;
+		case ResidencyPriority::ResidencyPriorityMaximum:      return D3D12_RESIDENCY_PRIORITY_MAXIMUM;
+		default: return D3D12_RESIDENCY_PRIORITY_NORMAL;
 		}
 	}
 

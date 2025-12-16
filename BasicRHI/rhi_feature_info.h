@@ -51,6 +51,7 @@ struct ArchitectureFeatureInfo {
     bool uma = false;
     bool cacheCoherentUMA = false;
     bool isolatedMMU = false;
+    bool tileBasedRenderer = false;
 };
 
 struct ShaderFeatureInfo {

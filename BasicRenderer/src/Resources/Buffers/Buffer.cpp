@@ -18,9 +18,9 @@ Buffer::Buffer(
 
 	rhi::ResourceDesc desc = rhi::helpers::ResourceDesc::Buffer(bufferSize);
 	if (unorderedAccess) {
-		desc.flags |= rhi::ResourceFlags::RF_AllowUnorderedAccess;
+		desc.resourceFlags |= rhi::ResourceFlags::RF_AllowUnorderedAccess;
 	}
-	desc.memory = accessType;
+	desc.heapType = accessType;
 	auto result = device.CreateCommittedResource(desc, m_buffer);
 
 	m_size = bufferSize;

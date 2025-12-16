@@ -46,6 +46,8 @@ namespace rhi {
 		&d_getCopyableFootprints,
 		&d_getResourceAllocationInfo,
 		&d_queryFeatureInfo,
+		&d_setResidencyPriority,
+		&d_queryVideoMemoryInfo,
 
 		&d_setNameBuffer,
 		&d_setNameTexture,
