@@ -1141,9 +1141,9 @@ namespace rhi::ma {
         StringBuilder(const AllocationCallbacks& allocationCallbacks) : m_Data(allocationCallbacks) {}
 
         size_t GetLength() const { return m_Data.size(); }
-        LPCWSTR GetData() const { return m_Data.data(); }
+        const char* GetData() const { return m_Data.data(); }
 
-        void Add(WCHAR ch) { m_Data.push_back(ch); }
+        void Add(char ch) { m_Data.push_back(ch); }
         void Add(LPCWSTR str);
         void AddNewLine() { Add(L'\n'); }
         void AddNumber(UINT num);
@@ -1151,7 +1151,7 @@ namespace rhi::ma {
         void AddPointer(const void* ptr);
 
     private:
-        Vector<WCHAR> m_Data;
+        Vector<char> m_Data;
     };
 
 #ifndef _D3D12MA_STRING_BUILDER_FUNCTIONS
@@ -5184,7 +5184,7 @@ namespace rhi::ma {
         HeapFlags GetHeapFlags() const { return m_HeapFlags; }
         UINT64 GetSize() const { return m_Size; }
         UINT GetId() const { return m_Id; }
-        HeapHandle GetHeap() const { return m_Heap; }
+        HeapHandle GetHeap() const { return m_Heap->GetHandle(); }
 
     protected:
         AllocatorPimpl* const m_Allocator;
@@ -5196,7 +5196,7 @@ namespace rhi::ma {
         Result Init(bool denyMsaaTextures);
 
     private:
-        HeapHandle m_Heap;
+        HeapPtr m_Heap;
 
         D3D12MA_CLASS_NO_COPY(MemoryBlock)
     };
@@ -5723,9 +5723,9 @@ Synchronized internally with a mutex.
 
         [[nodiscard]] AllocatorPimpl* GetAllocator() const { return m_Allocator; }
         [[nodiscard]] const PoolDesc& GetDesc() const { return m_Desc; }
-        [[nodiscard]] bool AlwaysCommitted() const { return (m_Desc.flags & PoolFlags::AlwaysCommitted) != PoolFlags::None; }
+        [[nodiscard]] bool AlwaysCommitted() const { return (m_Desc.flags & PoolFlagsAlwaysCommitted) != PoolFlagsNone; }
         [[nodiscard]] bool SupportsCommittedAllocations() const { return m_Desc.blockSize == 0; }
-        [[nodiscard]] LPCWSTR GetName() const { return m_Name; }
+        [[nodiscard]] const char* GetName() const { return m_Name; }
 
         BlockVector* GetBlockVector() { return m_BlockVector; }
         CommittedAllocationList* GetCommittedAllocationList() { return SupportsCommittedAllocations() ? &m_CommittedAllocations : nullptr; }
@@ -5734,14 +5734,14 @@ Synchronized internally with a mutex.
         void GetStatistics(Statistics& outStats);
         void CalculateStatistics(DetailedStatistics& outStats);
         void AddDetailedStatistics(DetailedStatistics& inoutStats);
-        void SetName(LPCWSTR Name);
+        void SetName(const char* Name);
 
     private:
         AllocatorPimpl* m_Allocator; // Externally owned object.
         PoolDesc m_Desc;
         BlockVector* m_BlockVector; // Owned object.
         CommittedAllocationList m_CommittedAllocations;
-        wchar_t* m_Name;
+        char* m_Name;
         PoolPimpl* m_PrevPool = nullptr;
         PoolPimpl* m_NextPool = nullptr;
 
@@ -5862,8 +5862,8 @@ Synchronized internally with a mutex.
         void GetBudget(Budget* outLocalBudget, Budget* outNonLocalBudget);
         void GetBudgetForHeapType(Budget& outBudget, HeapType heapType);
 
-        void BuildStatsString(WCHAR** ppStatsString, BOOL detailedMap);
-        void FreeStatsString(WCHAR* pStatsString);
+        void BuildStatsString(char** ppStatsString, BOOL detailedMap);
+        void FreeStatsString(char* pStatsString);
 
     private:
         using PoolList = IntrusiveLinkedList<PoolListItemTraits>;
@@ -6584,7 +6584,7 @@ Synchronized internally with a mutex.
         }
     }
 
-    void AllocatorPimpl::BuildStatsString(WCHAR** ppStatsString, BOOL detailedMap)
+    void AllocatorPimpl::BuildStatsString(char** ppStatsString, BOOL detailedMap)
     {
         StringBuilder sb(GetAllocs());
         {
@@ -6903,7 +6903,7 @@ Synchronized internally with a mutex.
                 {
                     MutexLockRead mutex(m_PoolsMutex[heapTypeIndex], m_UseMutex);
                     auto* item = m_Pools[heapTypeIndex].Front();
-                    if (item != NULL)
+                    if (item != nullptr)
                     {
                         size_t index = 0;
                         json.WriteString(HeapTypeNames[heapTypeIndex]);
@@ -6917,13 +6917,13 @@ Synchronized internally with a mutex.
                             if (item->GetName())
                             {
                                 json.ContinueString(L" - ");
-                                json.ContinueString(item->GetName());
+                                json.ContinueString(s2ws(item->GetName()).c_str());
                             }
                             json.EndString();
 
                             writeHeapInfo(item->GetBlockVector(), item->GetCommittedAllocationList(), heapTypeIndex == 3);
                             json.EndObject();
-                        } while ((item = PoolList::GetNext(item)) != NULL);
+                        } while ((item = PoolList::GetNext(item)) != nullptr);
                         json.EndArray();
                     }
                 }
@@ -6933,14 +6933,15 @@ Synchronized internally with a mutex.
         }
 
         const size_t length = sb.GetLength();
-        WCHAR* result = AllocateArray<WCHAR>(GetAllocs(), length + 2);
+        char* result = AllocateArray<char>(GetAllocs(), length + 2);
         result[0] = 0xFEFF;
-        memcpy(result + 1, sb.GetData(), length * sizeof(WCHAR));
-        result[length + 1] = L'\0';
+        memcpy(result + 1, sb.GetData(), length * sizeof(char));
+        result[length + 1] = '\0';
+
         *ppStatsString = result;
     }
 
-    void AllocatorPimpl::FreeStatsString(WCHAR* pStatsString)
+    void AllocatorPimpl::FreeStatsString(char* pStatsString)
     {
         D3D12MA_ASSERT(pStatsString);
         Free(GetAllocs(), pStatsString);
@@ -6991,7 +6992,7 @@ Synchronized internally with a mutex.
                         (*ppAllocation)->SetResourcePointer(out->GetHandle(), createParams.GetResourceDesc());
                         return hr;
                     }
-                    out.Release();
+                    out.Reset();
                 }
                 FreeHeapMemory(*ppAllocation);
             }
@@ -7388,4 +7389,2133 @@ Synchronized internally with a mutex.
 
 #endif // _D3D12MA_ALLOCATOR_PIMPL_FUNCTIONS
 #endif // _D3D12MA_ALLOCATOR_PIMPL
+
+#ifndef _D3D12MA_VIRTUAL_BLOCK_PIMPL
+    class VirtualBlockPimpl
+    {
+    public:
+        const AllocationCallbacks m_AllocationCallbacks;
+        const UINT64 m_Size;
+        BlockMetadata* m_Metadata;
+
+        VirtualBlockPimpl(const AllocationCallbacks& allocationCallbacks, const VirtualBlockDesc& desc);
+        ~VirtualBlockPimpl();
+    };
+
+#ifndef _D3D12MA_VIRTUAL_BLOCK_PIMPL_FUNCTIONS
+    VirtualBlockPimpl::VirtualBlockPimpl(const AllocationCallbacks& allocationCallbacks, const VirtualBlockDesc& desc)
+        : m_AllocationCallbacks(allocationCallbacks), m_Size(desc.size)
+    {
+        switch (desc.flags & VirtualBlockFlags::AlgorithmMask)
+        {
+        case VirtualBlockFlags::AlgorithmLinear:
+            m_Metadata = D3D12MA_NEW(allocationCallbacks, BlockMetadata_Linear)(&m_AllocationCallbacks, true);
+            break;
+        default:
+            D3D12MA_ASSERT(0);
+        case 0:
+            m_Metadata = D3D12MA_NEW(allocationCallbacks, BlockMetadata_TLSF)(&m_AllocationCallbacks, true);
+            break;
+        }
+        m_Metadata->Init(m_Size);
+    }
+
+    VirtualBlockPimpl::~VirtualBlockPimpl()
+    {
+        D3D12MA_DELETE(m_AllocationCallbacks, m_Metadata);
+    }
+#endif // _D3D12MA_VIRTUAL_BLOCK_PIMPL_FUNCTIONS
+#endif // _D3D12MA_VIRTUAL_BLOCK_PIMPL
+
+
+#ifndef _D3D12MA_MEMORY_BLOCK_FUNCTIONS
+    MemoryBlock::MemoryBlock(
+        AllocatorPimpl* allocator,
+        const HeapProperties& heapProps,
+        HeapFlags heapFlags,
+        UINT64 size,
+        UINT id)
+        : m_Allocator(allocator),
+        m_HeapProps(heapProps),
+        m_HeapFlags(heapFlags),
+        m_Size(size),
+        m_Id(id) {
+    }
+
+    MemoryBlock::~MemoryBlock()
+    {
+        if (m_Heap->IsValid())
+        {
+            m_Heap.Reset();
+            m_Allocator->m_Budget.RemoveBlock(
+                m_Allocator->HeapPropertiesToMemorySegmentGroup(m_HeapProps), m_Size);
+        }
+    }
+
+    Result MemoryBlock::Init(/*ID3D12ProtectedResourceSession* pProtectedSession, */bool denyMsaaTextures)
+    {
+        D3D12MA_ASSERT((!m_Heap->IsValid()) && m_Size > 0);
+
+        HeapDesc heapDesc = {};
+        heapDesc.sizeBytes = m_Size;
+        heapDesc.memory = m_HeapProps.type;
+        heapDesc.alignment = HeapFlagsToAlignment(m_HeapFlags, denyMsaaTextures);
+        heapDesc.flags = m_HeapFlags;
+
+        Result hr = m_Allocator->GetDevice().CreateHeap(heapDesc, m_Heap);
+
+        if (IsOk(hr))
+        {
+            m_Allocator->m_Budget.AddBlock(
+                m_Allocator->HeapPropertiesToMemorySegmentGroup(m_HeapProps), m_Size);
+        }
+        return hr;
+    }
+#endif // _D3D12MA_MEMORY_BLOCK_FUNCTIONS
+
+#ifndef _D3D12MA_NORMAL_BLOCK_FUNCTIONS
+    NormalBlock::NormalBlock(
+        AllocatorPimpl* allocator,
+        BlockVector* blockVector,
+        const HeapProperties& heapProps,
+        HeapFlags heapFlags,
+        UINT64 size,
+        UINT id)
+        : MemoryBlock(allocator, heapProps, heapFlags, size, id),
+        m_pMetadata(NULL),
+        m_BlockVector(blockVector) {
+    }
+
+    NormalBlock::~NormalBlock()
+    {
+        if (m_pMetadata != NULL)
+        {
+            // Define macro D3D12MA_DEBUG_LOG to receive the list of the unfreed allocations.
+            if (!m_pMetadata->IsEmpty())
+                m_pMetadata->DebugLogAllAllocations();
+
+            // THIS IS THE MOST IMPORTANT ASSERT IN THE ENTIRE LIBRARY!
+            // Hitting it means you have some memory leak - unreleased Allocation objects.
+            D3D12MA_ASSERT(m_pMetadata->IsEmpty() && "Some allocations were not freed before destruction of this memory block!");
+
+            D3D12MA_DELETE(m_Allocator->GetAllocs(), m_pMetadata);
+        }
+    }
+
+    Result NormalBlock::Init(UINT32 algorithm,/* ID3D12ProtectedResourceSession* pProtectedSession,*/ bool denyMsaaTextures)
+    {
+        auto hr = MemoryBlock::Init(/*pProtectedSession,*/ denyMsaaTextures);
+        if (Failed(hr))
+        {
+            return hr;
+        }
+
+        switch (algorithm)
+        {
+        case PoolFlagsAlgorithmLinear:
+            m_pMetadata = D3D12MA_NEW(m_Allocator->GetAllocs(), BlockMetadata_Linear)(&m_Allocator->GetAllocs(), false);
+            break;
+        default:
+            D3D12MA_ASSERT(0);
+        case 0:
+            m_pMetadata = D3D12MA_NEW(m_Allocator->GetAllocs(), BlockMetadata_TLSF)(&m_Allocator->GetAllocs(), false);
+            break;
+        }
+        m_pMetadata->Init(m_Size);
+
+        return hr;
+    }
+
+    bool NormalBlock::Validate() const
+    {
+        D3D12MA_VALIDATE(GetHeap().valid() &&
+            m_pMetadata &&
+            m_pMetadata->GetSize() != 0 &&
+            m_pMetadata->GetSize() == GetSize());
+        return m_pMetadata->Validate();
+    }
+#endif // _D3D12MA_NORMAL_BLOCK_FUNCTIONS
+
+#ifndef _D3D12MA_COMMITTED_ALLOCATION_LIST_FUNCTIONS
+    void CommittedAllocationList::Init(bool useMutex, HeapType heapType, PoolPimpl* pool)
+    {
+        m_UseMutex = useMutex;
+        m_HeapType = heapType;
+        m_Pool = pool;
+    }
+
+    CommittedAllocationList::~CommittedAllocationList()
+    {
+        if (!m_AllocationList.IsEmpty())
+        {
+            D3D12MA_ASSERT(0 && "Unfreed committed allocations found!");
+        }
+    }
+
+    UINT CommittedAllocationList::GetMemorySegmentGroup(AllocatorPimpl* allocator) const
+    {
+        if (m_Pool)
+            return allocator->HeapPropertiesToMemorySegmentGroup({ m_Pool->GetDesc().heapType });
+        else
+            return allocator->StandardHeapTypeToMemorySegmentGroup(m_HeapType);
+    }
+
+    void CommittedAllocationList::AddStatistics(Statistics& inoutStats)
+    {
+        MutexLockRead lock(m_Mutex, m_UseMutex);
+
+        for (Allocation* alloc = m_AllocationList.Front();
+            alloc != nullptr; alloc = m_AllocationList.GetNext(alloc))
+        {
+            const UINT64 size = alloc->GetSize();
+            inoutStats.blockCount++;
+            inoutStats.allocationCount++;
+            inoutStats.blockBytes += size;
+            inoutStats.allocationBytes += size;
+        }
+    }
+
+    void CommittedAllocationList::AddDetailedStatistics(DetailedStatistics& inoutStats)
+    {
+        MutexLockRead lock(m_Mutex, m_UseMutex);
+
+        for (Allocation* alloc = m_AllocationList.Front();
+            alloc != nullptr; alloc = m_AllocationList.GetNext(alloc))
+        {
+            const UINT64 size = alloc->GetSize();
+            inoutStats.stats.blockCount++;
+            inoutStats.stats.blockBytes += size;
+            AddDetailedStatisticsAllocation(inoutStats, size);
+        }
+    }
+
+    void CommittedAllocationList::BuildStatsString(JsonWriter& json)
+    {
+        MutexLockRead lock(m_Mutex, m_UseMutex);
+
+        for (Allocation* alloc = m_AllocationList.Front();
+            alloc != nullptr; alloc = m_AllocationList.GetNext(alloc))
+        {
+            json.BeginObject(true);
+            json.AddAllocationToObject(*alloc);
+            json.EndObject();
+        }
+    }
+
+    void CommittedAllocationList::Register(Allocation* alloc)
+    {
+        MutexLockWrite lock(m_Mutex, m_UseMutex);
+        m_AllocationList.PushBack(alloc);
+    }
+
+    void CommittedAllocationList::Unregister(Allocation* alloc)
+    {
+        MutexLockWrite lock(m_Mutex, m_UseMutex);
+        m_AllocationList.Remove(alloc);
+    }
+#endif // _D3D12MA_COMMITTED_ALLOCATION_LIST_FUNCTIONS
+
+#ifndef _D3D12MA_BLOCK_VECTOR_FUNCTIONS
+    BlockVector::BlockVector(
+        AllocatorPimpl* hAllocator,
+        const HeapProperties& heapProps,
+        HeapFlags heapFlags,
+        UINT64 preferredBlockSize,
+        size_t minBlockCount,
+        size_t maxBlockCount,
+        bool explicitBlockSize,
+        UINT64 minAllocationAlignment,
+        UINT32 algorithm,
+        bool denyMsaaTextures,
+        //ID3D12ProtectedResourceSession* pProtectedSession,
+        ResidencyPriority residencyPriority)
+        : m_hAllocator(hAllocator),
+        m_HeapProps(heapProps),
+        m_HeapFlags(heapFlags),
+        m_PreferredBlockSize(preferredBlockSize),
+        m_MinBlockCount(minBlockCount),
+        m_MaxBlockCount(maxBlockCount),
+        m_ExplicitBlockSize(explicitBlockSize),
+        m_MinAllocationAlignment(D3D12MA_MAX(minAllocationAlignment, static_cast<UINT64>(D3D12MA_DEBUG_ALIGNMENT))),
+        m_Algorithm(algorithm),
+        m_DenyMsaaTextures(denyMsaaTextures),
+        //m_ProtectedSession(pProtectedSession),
+        m_ResidencyPriority(residencyPriority),
+        m_HasEmptyBlock(false),
+        m_Blocks(hAllocator->GetAllocs()),
+        m_NextBlockId(0) {
+    }
+
+    BlockVector::~BlockVector()
+    {
+        for (size_t i = m_Blocks.size(); i--; )
+        {
+            D3D12MA_DELETE(m_hAllocator->GetAllocs(), m_Blocks[i]);
+        }
+    }
+
+    Result BlockVector::CreateMinBlocks()
+    {
+        for (size_t i = 0; i < m_MinBlockCount; ++i)
+        {
+            Result hr = CreateBlock(m_PreferredBlockSize, nullptr);
+            if (Failed(hr))
+            {
+                return hr;
+            }
+        }
+        return Result::Ok;
+    }
+
+    bool BlockVector::IsEmpty()
+    {
+        MutexLockRead lock(m_Mutex, m_hAllocator->UseMutex());
+        return m_Blocks.empty();
+    }
+
+    Result BlockVector::Allocate(
+        UINT64 size,
+        UINT64 alignment,
+        const AllocationDesc& allocDesc,
+        bool committedAllowed,
+        size_t allocationCount,
+        Allocation** pAllocations)
+    {
+        size_t allocIndex;
+        Result hr = Result::Ok;
+
+        {
+            MutexLockWrite lock(m_Mutex, m_hAllocator->UseMutex());
+            for (allocIndex = 0; allocIndex < allocationCount; ++allocIndex)
+            {
+                hr = AllocatePage(
+                    size,
+                    alignment,
+                    allocDesc,
+                    committedAllowed,
+                    pAllocations + allocIndex);
+                if (Failed(hr))
+                {
+                    break;
+                }
+            }
+        }
+
+        if (Failed(hr))
+        {
+            // Free all already created allocations.
+            while (allocIndex--)
+            {
+                Free(pAllocations[allocIndex]);
+            }
+            ZeroMemory(pAllocations, sizeof(Allocation*) * allocationCount);
+        }
+
+        return hr;
+    }
+
+    void BlockVector::Free(Allocation* hAllocation)
+    {
+        NormalBlock* pBlockToDelete = nullptr;
+
+        bool budgetExceeded = false;
+        if (IsHeapTypeStandard(m_HeapProps.type))
+        {
+            Budget budget = {};
+            m_hAllocator->GetBudgetForHeapType(budget, m_HeapProps.type);
+            budgetExceeded = budget.usageBytes >= budget.budgetBytes;
+        }
+
+        // Scope for lock.
+        {
+            MutexLockWrite lock(m_Mutex, m_hAllocator->UseMutex());
+
+            NormalBlock* pBlock = hAllocation->m_Placed.block;
+
+            pBlock->m_pMetadata->Free(hAllocation->GetAllocHandle());
+            D3D12MA_HEAVY_ASSERT(pBlock->Validate());
+
+            const size_t blockCount = m_Blocks.size();
+            // pBlock became empty after this deallocation.
+            if (pBlock->m_pMetadata->IsEmpty())
+            {
+                // Already has empty Allocation. We don't want to have two, so delete this one.
+                if ((m_HasEmptyBlock || budgetExceeded) &&
+                    blockCount > m_MinBlockCount)
+                {
+                    pBlockToDelete = pBlock;
+                    Remove(pBlock);
+                }
+                // We now have first empty block.
+                else
+                {
+                    m_HasEmptyBlock = true;
+                }
+            }
+            // pBlock didn't become empty, but we have another empty block - find and free that one.
+            // (This is optional, heuristics.)
+            else if (m_HasEmptyBlock && blockCount > m_MinBlockCount)
+            {
+                NormalBlock* pLastBlock = m_Blocks.back();
+                if (pLastBlock->m_pMetadata->IsEmpty())
+                {
+                    pBlockToDelete = pLastBlock;
+                    m_Blocks.pop_back();
+                    m_HasEmptyBlock = false;
+                }
+            }
+
+            IncrementallySortBlocks();
+        }
+
+        // Destruction of a free Allocation. Deferred until this point, outside of mutex
+        // lock, for performance reason.
+        if (pBlockToDelete != nullptr)
+        {
+            D3D12MA_DELETE(m_hAllocator->GetAllocs(), pBlockToDelete);
+        }
+    }
+
+    Result BlockVector::CreateResource(
+        UINT64 size,
+        UINT64 alignment,
+        const AllocationDesc& allocDesc,
+        const CreateResourceParams& createParams,
+        bool committedAllowed,
+        Allocation** ppAllocation,
+        ResourcePtr& out)
+    {
+        Result hr = Allocate(size, alignment, allocDesc, committedAllowed, 1, ppAllocation);
+        if (Failed(hr))
+        {
+            return hr;
+        }
+
+        hr = m_hAllocator->CreatePlacedResourceWrap(
+            (*ppAllocation)->m_Placed.block->GetHeap(),
+            (*ppAllocation)->GetOffset(),
+            createParams,
+            out);
+        if (IsOk(hr))
+        {
+                (*ppAllocation)->SetResourcePointer(out->GetHandle(), createParams.GetResourceDesc());
+        }
+        return hr;
+    }
+
+    void BlockVector::AddStatistics(Statistics& inoutStats)
+    {
+        MutexLockRead lock(m_Mutex, m_hAllocator->UseMutex());
+
+        for (const NormalBlock* const pBlock : m_Blocks)
+        {
+            D3D12MA_ASSERT(pBlock);
+            D3D12MA_HEAVY_ASSERT(pBlock->Validate());
+            pBlock->m_pMetadata->AddStatistics(inoutStats);
+        }
+    }
+
+    void BlockVector::AddDetailedStatistics(DetailedStatistics& inoutStats)
+    {
+        MutexLockRead lock(m_Mutex, m_hAllocator->UseMutex());
+
+        for (const NormalBlock* const pBlock : m_Blocks)
+        {
+            D3D12MA_ASSERT(pBlock);
+            D3D12MA_HEAVY_ASSERT(pBlock->Validate());
+            pBlock->m_pMetadata->AddDetailedStatistics(inoutStats);
+        }
+    }
+
+    void BlockVector::WriteBlockInfoToJson(JsonWriter& json)
+    {
+        MutexLockRead lock(m_Mutex, m_hAllocator->UseMutex());
+
+        json.BeginObject();
+
+        for (const NormalBlock* const pBlock : m_Blocks)
+        {
+            D3D12MA_ASSERT(pBlock);
+            D3D12MA_HEAVY_ASSERT(pBlock->Validate());
+            json.BeginString();
+            json.ContinueString(pBlock->GetId());
+            json.EndString();
+
+            json.BeginObject();
+            pBlock->m_pMetadata->WriteAllocationInfoToJson(json);
+            json.EndObject();
+        }
+
+        json.EndObject();
+    }
+
+    UINT64 BlockVector::CalcSumBlockSize() const
+    {
+        UINT64 result = 0;
+        for (size_t i = m_Blocks.size(); i--; )
+        {
+            result += m_Blocks[i]->m_pMetadata->GetSize();
+        }
+        return result;
+    }
+
+    UINT64 BlockVector::CalcMaxBlockSize() const
+    {
+        UINT64 result = 0;
+        for (size_t i = m_Blocks.size(); i--; )
+        {
+            result = D3D12MA_MAX(result, m_Blocks[i]->m_pMetadata->GetSize());
+            if (result >= m_PreferredBlockSize)
+            {
+                break;
+            }
+        }
+        return result;
+    }
+
+    void BlockVector::Remove(NormalBlock* pBlock)
+    {
+        for (size_t blockIndex = 0; blockIndex < m_Blocks.size(); ++blockIndex)
+        {
+            if (m_Blocks[blockIndex] == pBlock)
+            {
+                m_Blocks.remove(blockIndex);
+                return;
+            }
+        }
+        D3D12MA_ASSERT(0);
+    }
+
+    void BlockVector::IncrementallySortBlocks()
+    {
+        if (!m_IncrementalSort)
+            return;
+        // Bubble sort only until first swap.
+        for (size_t i = 1; i < m_Blocks.size(); ++i)
+        {
+            if (m_Blocks[i - 1]->m_pMetadata->GetSumFreeSize() > m_Blocks[i]->m_pMetadata->GetSumFreeSize())
+            {
+                D3D12MA_SWAP(m_Blocks[i - 1], m_Blocks[i]);
+                return;
+            }
+        }
+    }
+
+    void BlockVector::SortByFreeSize()
+    {
+        D3D12MA_SORT(m_Blocks.begin(), m_Blocks.end(),
+            [](auto* b1, auto* b2)
+            {
+                return b1->m_pMetadata->GetSumFreeSize() < b2->m_pMetadata->GetSumFreeSize();
+            });
+    }
+
+    Result BlockVector::AllocatePage(
+        UINT64 size,
+        UINT64 alignment,
+        const AllocationDesc& allocDesc,
+        bool committedAllowed,
+        Allocation** pAllocation)
+    {
+        // Early reject: requested allocation size is larger that maximum block size for this block vector.
+        if (size + D3D12MA_DEBUG_MARGIN > m_PreferredBlockSize)
+        {
+            return Result::OutOfMemory;
+        }
+
+        UINT64 freeMemory = UINT64_MAX;
+        if (IsHeapTypeStandard(m_HeapProps.type))
+        {
+            Budget budget = {};
+            m_hAllocator->GetBudgetForHeapType(budget, m_HeapProps.type);
+            freeMemory = (budget.usageBytes < budget.budgetBytes) ? (budget.budgetBytes - budget.usageBytes) : 0;
+        }
+
+        const bool canExceedFreeMemory = !committedAllowed;
+
+        bool canCreateNewBlock =
+            ((allocDesc.flags & AllocationFlagNeverAllocate) == 0) &&
+            (m_Blocks.size() < m_MaxBlockCount);
+
+        // Even if we don't have to stay within budget with this allocation, when the
+        // budget would be exceeded, we don't want to allocate new blocks, but always
+        // create resources as committed.
+        if (freeMemory < size && !canExceedFreeMemory)
+        {
+            canCreateNewBlock = false;
+        }
+
+        // 1. Search existing allocations
+        {
+            // Forward order in m_Blocks - prefer blocks with smallest amount of free space.
+            for (size_t blockIndex = 0; blockIndex < m_Blocks.size(); ++blockIndex)
+            {
+                NormalBlock* const pCurrBlock = m_Blocks[blockIndex];
+                D3D12MA_ASSERT(pCurrBlock);
+                auto hr = AllocateFromBlock(
+                    pCurrBlock,
+                    size,
+                    alignment,
+                    allocDesc.flags,
+                    allocDesc.privateData,
+                    allocDesc.flags & AllocationFlagStrategyMask,
+                    pAllocation);
+                if (IsOk(hr))
+                {
+                    return hr;
+                }
+            }
+        }
+
+        // 2. Try to create new block.
+        if (canCreateNewBlock)
+        {
+            // Calculate optimal size for new block.
+            UINT64 newBlockSize = m_PreferredBlockSize;
+            UINT newBlockSizeShift = 0;
+
+            if (!m_ExplicitBlockSize)
+            {
+                // Allocate 1/8, 1/4, 1/2 as first blocks.
+                const UINT64 maxExistingBlockSize = CalcMaxBlockSize();
+                for (UINT i = 0; i < NEW_BLOCK_SIZE_SHIFT_MAX; ++i)
+                {
+                    const UINT64 smallerNewBlockSize = newBlockSize / 2;
+                    if (smallerNewBlockSize > maxExistingBlockSize && smallerNewBlockSize >= size * 2)
+                    {
+                        newBlockSize = smallerNewBlockSize;
+                        ++newBlockSizeShift;
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+            }
+
+            size_t newBlockIndex = SIZE_MAX;
+            Result hr = Result::OutOfMemory;
+            if (newBlockSize <= freeMemory || canExceedFreeMemory)
+            {
+                hr = CreateBlock(newBlockSize, &newBlockIndex);
+            }
+            // Allocation of this size failed? Try 1/2, 1/4, 1/8 of m_PreferredBlockSize.
+            if (!m_ExplicitBlockSize)
+            {
+                while (Failed(hr) && newBlockSizeShift < NEW_BLOCK_SIZE_SHIFT_MAX)
+                {
+                    const UINT64 smallerNewBlockSize = newBlockSize / 2;
+                    if (smallerNewBlockSize < size)
+                    {
+                        break;
+                    }
+
+                    newBlockSize = smallerNewBlockSize;
+                    ++newBlockSizeShift;
+                    if (newBlockSize <= freeMemory || canExceedFreeMemory)
+                    {
+                        hr = CreateBlock(newBlockSize, &newBlockIndex);
+                    }
+                }
+            }
+
+            if (IsOk(hr))
+            {
+                NormalBlock* const pBlock = m_Blocks[newBlockIndex];
+                D3D12MA_ASSERT(pBlock->m_pMetadata->GetSize() >= size);
+
+                hr = AllocateFromBlock(
+                    pBlock,
+                    size,
+                    alignment,
+                    allocDesc.flags,
+                    allocDesc.privateData,
+                    allocDesc.flags & AllocationFlagStrategyMask,
+                    pAllocation);
+                if (IsOk(hr))
+                {
+                    return hr;
+                }
+                else
+                {
+                    // Allocation from new block failed, possibly due to D3D12MA_DEBUG_MARGIN or alignment.
+                    return Result::OutOfMemory;
+                }
+            }
+        }
+
+        return Result::OutOfMemory;
+    }
+
+    Result BlockVector::AllocateFromBlock(
+        NormalBlock* pBlock,
+        UINT64 size,
+        UINT64 alignment,
+        AllocationFlags allocFlags,
+        void* pPrivateData,
+        UINT32 strategy,
+        Allocation** pAllocation)
+    {
+        alignment = D3D12MA_MAX(alignment, m_MinAllocationAlignment);
+
+        AllocationRequest currRequest = {};
+        if (pBlock->m_pMetadata->CreateAllocationRequest(
+            size,
+            alignment,
+            allocFlags & AllocationFlagUpperAddress,
+            strategy,
+            &currRequest))
+        {
+            return CommitAllocationRequest(currRequest, pBlock, size, alignment, pPrivateData, pAllocation);
+        }
+        return Result::OutOfMemory;
+    }
+
+    Result BlockVector::CommitAllocationRequest(
+        AllocationRequest& allocRequest,
+        NormalBlock* pBlock,
+        UINT64 size,
+        UINT64 alignment,
+        void* pPrivateData,
+        Allocation** pAllocation)
+    {
+        // We no longer have an empty Allocation.
+        if (pBlock->m_pMetadata->IsEmpty())
+            m_HasEmptyBlock = false;
+
+        *pAllocation = m_hAllocator->GetAllocationObjectAllocator().Allocate(m_hAllocator, size, alignment);
+        pBlock->m_pMetadata->Alloc(allocRequest, size, *pAllocation);
+
+        (*pAllocation)->InitPlaced(allocRequest.allocHandle, pBlock);
+        (*pAllocation)->SetPrivateData(pPrivateData);
+
+        D3D12MA_HEAVY_ASSERT(pBlock->Validate());
+        m_hAllocator->m_Budget.AddAllocation(m_hAllocator->HeapPropertiesToMemorySegmentGroup(m_HeapProps), size);
+
+        return Result::Ok;
+    }
+
+    Result BlockVector::CreateBlock(
+        UINT64 blockSize,
+        size_t* pNewBlockIndex)
+    {
+        NormalBlock* const pBlock = D3D12MA_NEW(m_hAllocator->GetAllocs(), NormalBlock)(
+            m_hAllocator,
+            this,
+            m_HeapProps,
+            m_HeapFlags,
+            blockSize,
+            m_NextBlockId++);
+        auto hr = pBlock->Init(m_Algorithm/*, m_ProtectedSession*/, m_DenyMsaaTextures);
+        if (Failed(hr))
+        {
+            D3D12MA_DELETE(m_hAllocator->GetAllocs(), pBlock);
+            return hr;
+        }
+
+        m_hAllocator->SetResidencyPriority(pBlock->GetHeap(), m_ResidencyPriority);
+
+        m_Blocks.push_back(pBlock);
+        if (pNewBlockIndex != NULL)
+        {
+            *pNewBlockIndex = m_Blocks.size() - 1;
+        }
+
+        return hr;
+    }
+#endif // _D3D12MA_BLOCK_VECTOR_FUNCTIONS
+
+#ifndef _D3D12MA_DEFRAGMENTATION_CONTEXT_PIMPL_FUNCTIONS
+    DefragmentationContextPimpl::DefragmentationContextPimpl(
+        AllocatorPimpl* hAllocator,
+        const DefragmentationDesc& desc,
+        BlockVector* poolVector)
+        : m_MaxPassBytes(desc.maxBytesPerPass == 0 ? UINT64_MAX : desc.maxBytesPerPass),
+        m_MaxPassAllocations(desc.maxAllocationsPerPass == 0 ? UINT32_MAX : desc.maxAllocationsPerPass),
+        m_Moves(hAllocator->GetAllocs())
+    {
+        m_Algorithm = desc.flags & DefragmentationFlagsAlgorithmMask;
+
+        if (poolVector != NULL)
+        {
+            m_BlockVectorCount = 1;
+            m_PoolBlockVector = poolVector;
+            m_pBlockVectors = &m_PoolBlockVector;
+            m_PoolBlockVector->SetIncrementalSort(false);
+            m_PoolBlockVector->SortByFreeSize();
+        }
+        else
+        {
+            m_BlockVectorCount = hAllocator->GetDefaultPoolCount();
+            m_PoolBlockVector = NULL;
+            m_pBlockVectors = hAllocator->GetDefaultPools();
+            for (UINT32 i = 0; i < m_BlockVectorCount; ++i)
+            {
+                BlockVector* vector = m_pBlockVectors[i];
+                if (vector != NULL)
+                {
+                    vector->SetIncrementalSort(false);
+                    vector->SortByFreeSize();
+                }
+            }
+        }
+
+        switch (m_Algorithm)
+        {
+        case 0: // Default algorithm
+            m_Algorithm = DefragmentationFlagsAlgorithmBalanced;
+        case DefragmentationFlagsAlgorithmBalanced:
+        {
+            m_AlgorithmState = D3D12MA_NEW_ARRAY(hAllocator->GetAllocs(), StateBalanced, m_BlockVectorCount);
+            break;
+        }
+        }
+    }
+
+    DefragmentationContextPimpl::~DefragmentationContextPimpl()
+    {
+        if (m_PoolBlockVector != NULL)
+            m_PoolBlockVector->SetIncrementalSort(true);
+        else
+        {
+            for (UINT32 i = 0; i < m_BlockVectorCount; ++i)
+            {
+                BlockVector* vector = m_pBlockVectors[i];
+                if (vector != NULL)
+                    vector->SetIncrementalSort(true);
+            }
+        }
+
+        if (m_AlgorithmState)
+        {
+            switch (m_Algorithm)
+            {
+            case DefragmentationFlagsAlgorithmBalanced:
+                D3D12MA_DELETE_ARRAY(m_Moves.GetAllocs(), reinterpret_cast<StateBalanced*>(m_AlgorithmState), m_BlockVectorCount);
+                break;
+            default:
+                D3D12MA_ASSERT(0);
+            }
+        }
+    }
+
+    Result DefragmentationContextPimpl::DefragmentPassBegin(DefragmentationPassMoveInfo& moveInfo)
+    {
+        if (m_PoolBlockVector != NULL)
+        {
+            MutexLockWrite lock(m_PoolBlockVector->GetMutex(), m_PoolBlockVector->m_hAllocator->UseMutex());
+
+            if (m_PoolBlockVector->GetBlockCount() > 1)
+                ComputeDefragmentation(*m_PoolBlockVector, 0);
+            else if (m_PoolBlockVector->GetBlockCount() == 1)
+                ReallocWithinBlock(*m_PoolBlockVector, m_PoolBlockVector->GetBlock(0));
+
+            // Setup index into block vector
+            for (size_t i = 0; i < m_Moves.size(); ++i)
+                m_Moves[i].pDstTmpAllocation->SetPrivateData(0);
+        }
+        else
+        {
+            for (UINT32 i = 0; i < m_BlockVectorCount; ++i)
+            {
+                if (m_pBlockVectors[i] != NULL)
+                {
+                    MutexLockWrite lock(m_pBlockVectors[i]->GetMutex(), m_pBlockVectors[i]->m_hAllocator->UseMutex());
+
+                    bool end = false;
+                    size_t movesOffset = m_Moves.size();
+                    if (m_pBlockVectors[i]->GetBlockCount() > 1)
+                    {
+                        end = ComputeDefragmentation(*m_pBlockVectors[i], i);
+                    }
+                    else if (m_pBlockVectors[i]->GetBlockCount() == 1)
+                    {
+                        end = ReallocWithinBlock(*m_pBlockVectors[i], m_pBlockVectors[i]->GetBlock(0));
+                    }
+
+                    // Setup index into block vector
+                    for (; movesOffset < m_Moves.size(); ++movesOffset)
+                        m_Moves[movesOffset].pDstTmpAllocation->SetPrivateData(reinterpret_cast<void*>(static_cast<uintptr_t>(i)));
+
+                    if (end)
+                        break;
+                }
+            }
+        }
+
+        moveInfo.moveCount = static_cast<UINT32>(m_Moves.size());
+        if (moveInfo.moveCount > 0)
+        {
+            moveInfo.pMoves = m_Moves.data();
+            return Result::False;
+        }
+
+        moveInfo.pMoves = nullptr;
+        return Result::Ok;
+    }
+
+    Result DefragmentationContextPimpl::DefragmentPassEnd(DefragmentationPassMoveInfo& moveInfo)
+    {
+        D3D12MA_ASSERT(moveInfo.moveCount > 0 ? moveInfo.pMoves != NULL : true);
+
+        Result result = Result::Ok;
+        Vector<FragmentedBlock> immovableBlocks(m_Moves.GetAllocs());
+
+        for (uint32_t i = 0; i < moveInfo.moveCount; ++i)
+        {
+            DefragmentationMove& move = moveInfo.pMoves[i];
+            size_t prevCount = 0, currentCount = 0;
+            UINT64 freedBlockSize = 0;
+
+            UINT32 vectorIndex;
+            BlockVector* vector;
+            if (m_PoolBlockVector != nullptr)
+            {
+                vectorIndex = 0;
+                vector = m_PoolBlockVector;
+            }
+            else
+            {
+                vectorIndex = static_cast<UINT32>(reinterpret_cast<uintptr_t>(move.pDstTmpAllocation->GetPrivateData()));
+                vector = m_pBlockVectors[vectorIndex];
+                D3D12MA_ASSERT(vector != NULL);
+            }
+
+            switch (move.operation)
+            {
+            case DefragmentationMoveOperation::Copy:
+            {
+                move.pSrcAllocation->SwapBlockAllocation(move.pDstTmpAllocation);
+
+                // Scope for locks, Free have it's own lock
+                {
+                    MutexLockRead lock(vector->GetMutex(), vector->m_hAllocator->UseMutex());
+                    prevCount = vector->GetBlockCount();
+                    freedBlockSize = move.pDstTmpAllocation->GetBlock()->m_pMetadata->GetSize();
+                }
+                move.pDstTmpAllocation->Reset();
+                {
+                    MutexLockRead lock(vector->GetMutex(), vector->m_hAllocator->UseMutex());
+                    currentCount = vector->GetBlockCount();
+                }
+
+                result = Result::False;
+                break;
+            }
+            case DefragmentationMoveOperation::Ignore:
+            {
+                m_PassStats.bytesMoved -= move.pSrcAllocation->GetSize();
+                --m_PassStats.allocationsMoved;
+                move.pDstTmpAllocation->Reset();
+
+                NormalBlock* newBlock = move.pSrcAllocation->GetBlock();
+                bool notPresent = true;
+                for (const FragmentedBlock& block : immovableBlocks)
+                {
+                    if (block.block == newBlock)
+                    {
+                        notPresent = false;
+                        break;
+                    }
+                }
+                if (notPresent)
+                    immovableBlocks.push_back({ vectorIndex, newBlock });
+                break;
+            }
+            case DefragmentationMoveOperation::Destroy:
+            {
+                m_PassStats.bytesMoved -= move.pSrcAllocation->GetSize();
+                --m_PassStats.allocationsMoved;
+                // Scope for locks, Free have it's own lock
+                {
+                    MutexLockRead lock(vector->GetMutex(), vector->m_hAllocator->UseMutex());
+                    prevCount = vector->GetBlockCount();
+                    freedBlockSize = move.pSrcAllocation->GetBlock()->m_pMetadata->GetSize();
+                }
+                move.pSrcAllocation->Reset();
+                {
+                    MutexLockRead lock(vector->GetMutex(), vector->m_hAllocator->UseMutex());
+                    currentCount = vector->GetBlockCount();
+                }
+                freedBlockSize *= prevCount - currentCount;
+
+                UINT64 dstBlockSize;
+                {
+                    MutexLockRead lock(vector->GetMutex(), vector->m_hAllocator->UseMutex());
+                    dstBlockSize = move.pDstTmpAllocation->GetBlock()->m_pMetadata->GetSize();
+                }
+                move.pDstTmpAllocation->Reset();
+                {
+                    MutexLockRead lock(vector->GetMutex(), vector->m_hAllocator->UseMutex());
+                    freedBlockSize += dstBlockSize * (currentCount - vector->GetBlockCount());
+                    currentCount = vector->GetBlockCount();
+                }
+
+                result = Result::False;
+                break;
+            }
+            default:
+                D3D12MA_ASSERT(0);
+            }
+
+            if (prevCount > currentCount)
+            {
+                size_t freedBlocks = prevCount - currentCount;
+                m_PassStats.heapsFreed += static_cast<UINT32>(freedBlocks);
+                m_PassStats.bytesFreed += freedBlockSize;
+            }
+        }
+        moveInfo.moveCount = 0;
+        moveInfo.pMoves = nullptr;
+        m_Moves.clear();
+
+        // Update stats
+        m_GlobalStats.allocationsMoved += m_PassStats.allocationsMoved;
+        m_GlobalStats.bytesFreed += m_PassStats.bytesFreed;
+        m_GlobalStats.bytesMoved += m_PassStats.bytesMoved;
+        m_GlobalStats.heapsFreed += m_PassStats.heapsFreed;
+        m_PassStats = { 0 };
+
+        // Move blocks with immovable allocations according to algorithm
+        if (immovableBlocks.size() > 0)
+        {
+            // Move to the begining
+            for (const FragmentedBlock& block : immovableBlocks)
+            {
+                BlockVector* vector = m_pBlockVectors[block.data];
+                MutexLockWrite lock(vector->GetMutex(), vector->m_hAllocator->UseMutex());
+
+                for (size_t i = m_ImmovableBlockCount; i < vector->GetBlockCount(); ++i)
+                {
+                    if (vector->GetBlock(i) == block.block)
+                    {
+                        D3D12MA_SWAP(vector->m_Blocks[i], vector->m_Blocks[m_ImmovableBlockCount++]);
+                        break;
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    bool DefragmentationContextPimpl::ComputeDefragmentation(BlockVector& vector, size_t index)
+    {
+        switch (m_Algorithm)
+        {
+        case DefragmentationFlagsAlgorithmFast:
+            return ComputeDefragmentation_Fast(vector);
+        default:
+            D3D12MA_ASSERT(0);
+        case DefragmentationFlagsAlgorithmBalanced:
+            return ComputeDefragmentation_Balanced(vector, index, true);
+        case DefragmentationFlagsAlgorithmFull:
+            return ComputeDefragmentation_Full(vector);
+        }
+    }
+
+    DefragmentationContextPimpl::MoveAllocationData DefragmentationContextPimpl::GetMoveData(
+        AllocHandle handle, BlockMetadata* metadata)
+    {
+        MoveAllocationData moveData;
+        moveData.move.pSrcAllocation = (Allocation*)metadata->GetAllocationPrivateData(handle);
+        moveData.size = moveData.move.pSrcAllocation->GetSize();
+        moveData.alignment = moveData.move.pSrcAllocation->GetAlignment();
+        moveData.flags = AllocationFlagNone;
+
+        return moveData;
+    }
+
+    DefragmentationContextPimpl::CounterStatus DefragmentationContextPimpl::CheckCounters(UINT64 bytes)
+    {
+        // Ignore allocation if will exceed max size for copy
+        if (m_PassStats.bytesMoved + bytes > m_MaxPassBytes)
+        {
+            if (++m_IgnoredAllocs < MAX_ALLOCS_TO_IGNORE)
+                return CounterStatus::Ignore;
+            else
+                return CounterStatus::End;
+        }
+        return CounterStatus::Pass;
+    }
+
+    bool DefragmentationContextPimpl::IncrementCounters(UINT64 bytes)
+    {
+        m_PassStats.bytesMoved += bytes;
+        // Early return when max found
+        if (++m_PassStats.allocationsMoved >= m_MaxPassAllocations || m_PassStats.bytesMoved >= m_MaxPassBytes)
+        {
+            D3D12MA_ASSERT((m_PassStats.allocationsMoved == m_MaxPassAllocations ||
+                m_PassStats.bytesMoved == m_MaxPassBytes) && "Exceeded maximal pass threshold!");
+            return true;
+        }
+        return false;
+    }
+
+    bool DefragmentationContextPimpl::ReallocWithinBlock(BlockVector& vector, NormalBlock* block)
+    {
+        BlockMetadata* metadata = block->m_pMetadata;
+
+        for (AllocHandle handle = metadata->GetAllocationListBegin();
+            handle != (AllocHandle)0;
+            handle = metadata->GetNextAllocation(handle))
+        {
+            MoveAllocationData moveData = GetMoveData(handle, metadata);
+            // Ignore newly created allocations by defragmentation algorithm
+            if (moveData.move.pSrcAllocation->GetPrivateData() == this)
+                continue;
+            switch (CheckCounters(moveData.move.pSrcAllocation->GetSize()))
+            {
+            case CounterStatus::Ignore:
+                continue;
+            case CounterStatus::End:
+                return true;
+            default:
+                D3D12MA_ASSERT(0);
+            case CounterStatus::Pass:
+                break;
+            }
+
+            UINT64 offset = moveData.move.pSrcAllocation->GetOffset();
+            if (offset != 0 && metadata->GetSumFreeSize() >= moveData.size)
+            {
+                AllocationRequest request = {};
+                if (metadata->CreateAllocationRequest(
+                    moveData.size,
+                    moveData.alignment,
+                    false,
+                    AllocationFlagStrategyMinOffset,
+                    &request))
+                {
+                    if (metadata->GetAllocationOffset(request.allocHandle) < offset)
+                    {
+                        if (SUCCEEDED(vector.CommitAllocationRequest(
+                            request,
+                            block,
+                            moveData.size,
+                            moveData.alignment,
+                            this,
+                            &moveData.move.pDstTmpAllocation)))
+                        {
+                            m_Moves.push_back(moveData.move);
+                            if (IncrementCounters(moveData.size))
+                                return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    bool DefragmentationContextPimpl::AllocInOtherBlock(size_t start, size_t end, MoveAllocationData& data, BlockVector& vector)
+    {
+        for (; start < end; ++start)
+        {
+            NormalBlock* dstBlock = vector.GetBlock(start);
+            if (dstBlock->m_pMetadata->GetSumFreeSize() >= data.size)
+            {
+                if (IsOk(vector.AllocateFromBlock(dstBlock,
+                    data.size,
+                    data.alignment,
+                    data.flags,
+                    this,
+                    0,
+                    &data.move.pDstTmpAllocation)))
+                {
+                    m_Moves.push_back(data.move);
+                    if (IncrementCounters(data.size))
+                        return true;
+                    break;
+                }
+            }
+        }
+        return false;
+    }
+
+    bool DefragmentationContextPimpl::ComputeDefragmentation_Fast(BlockVector& vector)
+    {
+        // Move only between blocks
+
+        // Go through allocations in last blocks and try to fit them inside first ones
+        for (size_t i = vector.GetBlockCount() - 1; i > m_ImmovableBlockCount; --i)
+        {
+            BlockMetadata* metadata = vector.GetBlock(i)->m_pMetadata;
+
+            for (AllocHandle handle = metadata->GetAllocationListBegin();
+                handle != (AllocHandle)0;
+                handle = metadata->GetNextAllocation(handle))
+            {
+                MoveAllocationData moveData = GetMoveData(handle, metadata);
+                // Ignore newly created allocations by defragmentation algorithm
+                if (moveData.move.pSrcAllocation->GetPrivateData() == this)
+                    continue;
+                switch (CheckCounters(moveData.move.pSrcAllocation->GetSize()))
+                {
+                case CounterStatus::Ignore:
+                    continue;
+                case CounterStatus::End:
+                    return true;
+                default:
+                    D3D12MA_ASSERT(0);
+                case CounterStatus::Pass:
+                    break;
+                }
+
+                // Check all previous blocks for free space
+                if (AllocInOtherBlock(0, i, moveData, vector))
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    bool DefragmentationContextPimpl::ComputeDefragmentation_Balanced(BlockVector& vector, size_t index, bool update)
+    {
+        // Go over every allocation and try to fit it in previous blocks at lowest offsets,
+        // if not possible: realloc within single block to minimize offset (exclude offset == 0),
+        // but only if there are noticable gaps between them (some heuristic, ex. average size of allocation in block)
+        D3D12MA_ASSERT(m_AlgorithmState != NULL);
+
+        StateBalanced& vectorState = reinterpret_cast<StateBalanced*>(m_AlgorithmState)[index];
+        if (update && vectorState.avgAllocSize == UINT64_MAX)
+            UpdateVectorStatistics(vector, vectorState);
+
+        const size_t startMoveCount = m_Moves.size();
+        UINT64 minimalFreeRegion = vectorState.avgFreeSize / 2;
+        for (size_t i = vector.GetBlockCount() - 1; i > m_ImmovableBlockCount; --i)
+        {
+            NormalBlock* block = vector.GetBlock(i);
+            BlockMetadata* metadata = block->m_pMetadata;
+            UINT64 prevFreeRegionSize = 0;
+
+            for (AllocHandle handle = metadata->GetAllocationListBegin();
+                handle != (AllocHandle)0;
+                handle = metadata->GetNextAllocation(handle))
+            {
+                MoveAllocationData moveData = GetMoveData(handle, metadata);
+                // Ignore newly created allocations by defragmentation algorithm
+                if (moveData.move.pSrcAllocation->GetPrivateData() == this)
+                    continue;
+                switch (CheckCounters(moveData.move.pSrcAllocation->GetSize()))
+                {
+                case CounterStatus::Ignore:
+                    continue;
+                case CounterStatus::End:
+                    return true;
+                default:
+                    D3D12MA_ASSERT(0);
+                case CounterStatus::Pass:
+                    break;
+                }
+
+                // Check all previous blocks for free space
+                const size_t prevMoveCount = m_Moves.size();
+                if (AllocInOtherBlock(0, i, moveData, vector))
+                    return true;
+
+                UINT64 nextFreeRegionSize = metadata->GetNextFreeRegionSize(handle);
+                // If no room found then realloc within block for lower offset
+                UINT64 offset = moveData.move.pSrcAllocation->GetOffset();
+                if (prevMoveCount == m_Moves.size() && offset != 0 && metadata->GetSumFreeSize() >= moveData.size)
+                {
+                    // Check if realloc will make sense
+                    if (prevFreeRegionSize >= minimalFreeRegion ||
+                        nextFreeRegionSize >= minimalFreeRegion ||
+                        moveData.size <= vectorState.avgFreeSize ||
+                        moveData.size <= vectorState.avgAllocSize)
+                    {
+                        AllocationRequest request = {};
+                        if (metadata->CreateAllocationRequest(
+                            moveData.size,
+                            moveData.alignment,
+                            false,
+                            AllocationFlagStrategyMinOffset,
+                            &request))
+                        {
+                            if (metadata->GetAllocationOffset(request.allocHandle) < offset)
+                            {
+                                if (IsOk(vector.CommitAllocationRequest(
+                                    request,
+                                    block,
+                                    moveData.size,
+                                    moveData.alignment,
+                                    this,
+                                    &moveData.move.pDstTmpAllocation)))
+                                {
+                                    m_Moves.push_back(moveData.move);
+                                    if (IncrementCounters(moveData.size))
+                                        return true;
+                                }
+                            }
+                        }
+                    }
+                }
+                prevFreeRegionSize = nextFreeRegionSize;
+            }
+        }
+
+        // No moves perfomed, update statistics to current vector state
+        if (startMoveCount == m_Moves.size() && !update)
+        {
+            vectorState.avgAllocSize = UINT64_MAX;
+            return ComputeDefragmentation_Balanced(vector, index, false);
+        }
+        return false;
+    }
+
+    bool DefragmentationContextPimpl::ComputeDefragmentation_Full(BlockVector& vector)
+    {
+        // Go over every allocation and try to fit it in previous blocks at lowest offsets,
+        // if not possible: realloc within single block to minimize offset (exclude offset == 0)
+
+        for (size_t i = vector.GetBlockCount() - 1; i > m_ImmovableBlockCount; --i)
+        {
+            NormalBlock* block = vector.GetBlock(i);
+            BlockMetadata* metadata = block->m_pMetadata;
+
+            for (AllocHandle handle = metadata->GetAllocationListBegin();
+                handle != (AllocHandle)0;
+                handle = metadata->GetNextAllocation(handle))
+            {
+                MoveAllocationData moveData = GetMoveData(handle, metadata);
+                // Ignore newly created allocations by defragmentation algorithm
+                if (moveData.move.pSrcAllocation->GetPrivateData() == this)
+                    continue;
+                switch (CheckCounters(moveData.move.pSrcAllocation->GetSize()))
+                {
+                case CounterStatus::Ignore:
+                    continue;
+                case CounterStatus::End:
+                    return true;
+                default:
+                    D3D12MA_ASSERT(0);
+                case CounterStatus::Pass:
+                    break;
+                }
+
+                // Check all previous blocks for free space
+                const size_t prevMoveCount = m_Moves.size();
+                if (AllocInOtherBlock(0, i, moveData, vector))
+                    return true;
+
+                // If no room found then realloc within block for lower offset
+                UINT64 offset = moveData.move.pSrcAllocation->GetOffset();
+                if (prevMoveCount == m_Moves.size() && offset != 0 && metadata->GetSumFreeSize() >= moveData.size)
+                {
+                    AllocationRequest request = {};
+                    if (metadata->CreateAllocationRequest(
+                        moveData.size,
+                        moveData.alignment,
+                        false,
+                        AllocationFlagStrategyMinOffset,
+                        &request))
+                    {
+                        if (metadata->GetAllocationOffset(request.allocHandle) < offset)
+                        {
+                            if (IsOk(vector.CommitAllocationRequest(
+                                request,
+                                block,
+                                moveData.size,
+                                moveData.alignment,
+                                this,
+                                &moveData.move.pDstTmpAllocation)))
+                            {
+                                m_Moves.push_back(moveData.move);
+                                if (IncrementCounters(moveData.size))
+                                    return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    void DefragmentationContextPimpl::UpdateVectorStatistics(BlockVector& vector, StateBalanced& state)
+    {
+        size_t allocCount = 0;
+        size_t freeCount = 0;
+        state.avgFreeSize = 0;
+        state.avgAllocSize = 0;
+
+        for (size_t i = 0; i < vector.GetBlockCount(); ++i)
+        {
+            BlockMetadata* metadata = vector.GetBlock(i)->m_pMetadata;
+
+            allocCount += metadata->GetAllocationCount();
+            freeCount += metadata->GetFreeRegionsCount();
+            state.avgFreeSize += metadata->GetSumFreeSize();
+            state.avgAllocSize += metadata->GetSize();
+        }
+
+        state.avgAllocSize = (state.avgAllocSize - state.avgFreeSize) / allocCount;
+        state.avgFreeSize /= freeCount;
+    }
+#endif // _D3D12MA_DEFRAGMENTATION_CONTEXT_PIMPL_FUNCTIONS
+
+#ifndef _D3D12MA_POOL_PIMPL_FUNCTIONS
+    PoolPimpl::PoolPimpl(AllocatorPimpl* allocator, const PoolDesc& desc)
+        : m_Allocator(allocator),
+        m_Desc(desc),
+        m_BlockVector(nullptr),
+        m_Name(nullptr)
+    {
+        const bool explicitBlockSize = desc.blockSize != 0;
+        const UINT64 preferredBlockSize = explicitBlockSize ? desc.blockSize : D3D12MA_DEFAULT_BLOCK_SIZE;
+        UINT maxBlockCount = desc.maxBlockCount != 0 ? desc.maxBlockCount : UINT_MAX;
+
+        //D3D12MA_ASSERT(m_Desc.protectedSession == nullptr);
+
+        const UINT64 minAlignment = desc.minAllocationAlignment > 0 ? desc.minAllocationAlignment : D3D12MA_DEFAULT_ALIGNMENT;
+
+        m_BlockVector = D3D12MA_NEW(allocator->GetAllocs(), BlockVector)(
+            allocator, { desc.heapType }, desc.heapFlags,
+            preferredBlockSize,
+            desc.minBlockCount, maxBlockCount,
+            explicitBlockSize,
+            minAlignment,
+            (desc.flags & PoolFlagsAlgorithmMask) != 0,
+            (desc.flags & PoolFlagsMsaaTexturesAlwaysCommitted) != 0,
+            //desc.pProtectedSession,
+            desc.residencyPriority);
+    }
+
+    PoolPimpl::~PoolPimpl()
+    {
+        D3D12MA_ASSERT(m_PrevPool == NULL && m_NextPool == NULL);
+        FreeName();
+        D3D12MA_DELETE(m_Allocator->GetAllocs(), m_BlockVector);
+    }
+
+    Result PoolPimpl::Init()
+    {
+        m_CommittedAllocations.Init(m_Allocator->UseMutex(), m_Desc.heapType, this);
+        return m_BlockVector->CreateMinBlocks();
+    }
+
+    void PoolPimpl::GetStatistics(Statistics& outStats)
+    {
+        ClearStatistics(outStats);
+        m_BlockVector->AddStatistics(outStats);
+        m_CommittedAllocations.AddStatistics(outStats);
+    }
+
+    void PoolPimpl::CalculateStatistics(DetailedStatistics& outStats)
+    {
+        ClearDetailedStatistics(outStats);
+        AddDetailedStatistics(outStats);
+    }
+
+    void PoolPimpl::AddDetailedStatistics(DetailedStatistics& inoutStats)
+    {
+        m_BlockVector->AddDetailedStatistics(inoutStats);
+        m_CommittedAllocations.AddDetailedStatistics(inoutStats);
+    }
+
+    void PoolPimpl::SetName(const char* Name)
+    {
+        FreeName();
+
+        if (Name)
+        {
+            const size_t nameCharCount = strlen(Name) + 1;
+            m_Name = D3D12MA_NEW_ARRAY(m_Allocator->GetAllocs(), char, nameCharCount);
+            memcpy(m_Name, Name, nameCharCount * sizeof(char));
+        }
+    }
+
+    void PoolPimpl::FreeName()
+    {
+        if (m_Name)
+        {
+            const size_t nameCharCount = strlen(m_Name) + 1;
+            D3D12MA_DELETE_ARRAY(m_Allocator->GetAllocs(), m_Name, nameCharCount);
+            m_Name = NULL;
+        }
+    }
+#endif // _D3D12MA_POOL_PIMPL_FUNCTIONS
+
+
+#ifndef _D3D12MA_PUBLIC_INTERFACE
+    Result CreateAllocator(const AllocatorDesc* pDesc, Allocator** ppAllocator)
+    {
+        if (!pDesc || !ppAllocator || !pDesc->device.IsValid() ||
+            !(pDesc->preferredBlockSize == 0 || (pDesc->preferredBlockSize >= 16 && pDesc->preferredBlockSize < 0x10000000000ull)))
+        {
+            D3D12MA_ASSERT(0 && "Invalid arguments passed to CreateAllocator.");
+            return Result::InvalidArgument;
+        }
+
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+
+            AllocationCallbacks allocationCallbacks;
+        SetupAllocationCallbacks(allocationCallbacks, pDesc->allocationCallbacks);
+
+        *ppAllocator = D3D12MA_NEW(allocationCallbacks, Allocator)(allocationCallbacks, *pDesc);
+        Result hr = (*ppAllocator)->m_Pimpl->Init(*pDesc);
+        if (Failed(hr))
+        {
+            D3D12MA_DELETE(allocationCallbacks, *ppAllocator);
+            *ppAllocator = nullptr;
+        }
+        return hr;
+    }
+
+    HRESULT CreateVirtualBlock(const VirtualBlockDesc* pDesc, VirtualBlock** ppVirtualBlock)
+    {
+        if (!pDesc || !ppVirtualBlock)
+        {
+            D3D12MA_ASSERT(0 && "Invalid arguments passed to CreateVirtualBlock.");
+            return E_INVALIDARG;
+        }
+
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+
+            AllocationCallbacks allocationCallbacks;
+        SetupAllocationCallbacks(allocationCallbacks, pDesc->allocationCallbacks);
+
+        *ppVirtualBlock = D3D12MA_NEW(allocationCallbacks, VirtualBlock)(allocationCallbacks, *pDesc);
+        return S_OK;
+    }
+
+#ifndef _D3D12MA_ALLOCATION_FUNCTIONS
+    void Allocation::PackedData::SetType(Type type)
+    {
+        const UINT u = (UINT)type;
+        D3D12MA_ASSERT(u < (1u << 2));
+        m_Type = u;
+    }
+
+    void Allocation::PackedData::SetResourceDimension(ResourceType resourceDimension)
+    {
+        const UINT u = static_cast<UINT>(resourceDimension);
+        //D3D12MA_ASSERT(u < (1u << 3));
+        m_ResourceDimension = u;
+    }
+
+    void Allocation::PackedData::SetResourceFlags(ResourceFlags resourceFlags)
+    {
+        const UINT u = static_cast<UINT>(resourceFlags);
+        D3D12MA_ASSERT(u < (1u << 24));
+        m_ResourceFlags = u;
+    }
+
+    void Allocation::PackedData::SetTextureLayout(ResourceLayout textureLayout)
+    {
+        const UINT u = static_cast<UINT>(textureLayout);
+        D3D12MA_ASSERT(u < (1u << 9));
+        m_TextureLayout = u;
+    }
+
+    uint64_t Allocation::GetOffset() const
+    {
+        switch (m_PackedData.GetType())
+        {
+        case TYPE_COMMITTED:
+        case TYPE_HEAP:
+            return 0;
+        case TYPE_PLACED:
+            return m_Placed.block->m_pMetadata->GetAllocationOffset(m_Placed.allocHandle);
+        default:
+            D3D12MA_ASSERT(0);
+            return 0;
+        }
+    }
+
+    void Allocation::SetResource(ResourceHandle pResource)
+    {
+		m_resource = pResource;
+    }
+
+    HeapHandle Allocation::GetHeap() const
+    {
+        switch (m_PackedData.GetType())
+        {
+        case TYPE_COMMITTED:
+            return {};
+        case TYPE_PLACED:
+            return m_Placed.block->GetHeap();
+        case TYPE_HEAP:
+            return m_Heap.heap->GetHandle();
+        default:
+            D3D12MA_ASSERT(0);
+            return {};
+        }
+    }
+
+    void Allocation::SetName(const char* Name)
+    {
+        FreeName();
+
+        if (Name)
+        {
+            const size_t nameCharCount = strlen(Name) + 1;
+            m_name = D3D12MA_NEW_ARRAY(m_allocator->GetAllocs(), char, nameCharCount);
+            memcpy((void*)m_name, Name, nameCharCount * sizeof(WCHAR));
+        }
+    }
+
+    void Allocation::ReleaseThis()
+    {
+        //SAFE_RELEASE(m_Resource);
+
+        switch (m_PackedData.GetType())
+        {
+        case TYPE_COMMITTED:
+            m_allocator->FreeCommittedMemory(this);
+            break;
+        case TYPE_PLACED:
+            m_allocator->FreePlacedMemory(this);
+            break;
+        case TYPE_HEAP:
+            m_allocator->FreeHeapMemory(this);
+            break;
+        }
+
+        FreeName();
+
+        m_allocator->GetAllocationObjectAllocator().Free(this);
+    }
+
+    Allocation::Allocation(AllocatorPimpl* allocator, UINT64 size, UINT64 alignment)
+        : m_allocator{ allocator },
+        m_size{ size },
+        m_alignment{ alignment },
+        m_resource{ },
+        //m_pPrivateData{ NULL },
+        m_name{ NULL }
+    {
+        D3D12MA_ASSERT(allocator);
+
+        m_PackedData.SetType(TYPE_COUNT);
+        m_PackedData.SetResourceDimension(ResourceType::Unknown);
+        m_PackedData.SetResourceFlags(ResourceFlags::RF_None);
+        m_PackedData.SetTextureLayout(ResourceLayout::Undefined);
+    }
+
+    void Allocation::InitCommitted(CommittedAllocationList* list)
+    {
+        m_PackedData.SetType(TYPE_COMMITTED);
+        m_Committed.list = list;
+        m_Committed.prev = nullptr;
+        m_Committed.next = nullptr;
+    }
+
+    void Allocation::InitPlaced(AllocHandle allocHandle, NormalBlock* block)
+    {
+        m_PackedData.SetType(TYPE_PLACED);
+        m_Placed.allocHandle = allocHandle;
+        m_Placed.block = block;
+    }
+
+    void Allocation::InitHeap(CommittedAllocationList* list, HeapPtr heap)
+    {
+        m_PackedData.SetType(TYPE_HEAP);
+        m_Heap.list = list;
+        m_Committed.prev = nullptr;
+        m_Committed.next = nullptr;
+        m_Heap.heap = std::move(heap);
+    }
+
+    void Allocation::SwapBlockAllocation(Allocation* allocation)
+    {
+        D3D12MA_ASSERT(allocation != nullptr);
+        D3D12MA_ASSERT(m_PackedData.GetType() == TYPE_PLACED);
+        D3D12MA_ASSERT(allocation->m_PackedData.GetType() == TYPE_PLACED);
+
+        D3D12MA_SWAP(m_resource, allocation->m_resource);
+        m_Placed.block->m_pMetadata->SetAllocationPrivateData(m_Placed.allocHandle, allocation);
+        D3D12MA_SWAP(m_Placed, allocation->m_Placed);
+        m_Placed.block->m_pMetadata->SetAllocationPrivateData(m_Placed.allocHandle, this);
+    }
+
+    AllocHandle Allocation::GetAllocHandle() const
+    {
+        switch (m_PackedData.GetType())
+        {
+        case TYPE_COMMITTED:
+        case TYPE_HEAP:
+            return (AllocHandle)0;
+        case TYPE_PLACED:
+            return m_Placed.allocHandle;
+        default:
+            D3D12MA_ASSERT(0);
+            return (AllocHandle)0;
+        }
+    }
+
+    NormalBlock* Allocation::GetBlock()
+    {
+        switch (m_PackedData.GetType())
+        {
+        case TYPE_COMMITTED:
+        case TYPE_HEAP:
+            return NULL;
+        case TYPE_PLACED:
+            return m_Placed.block;
+        default:
+            D3D12MA_ASSERT(0);
+            return NULL;
+        }
+    }
+
+    void Allocation::SetResourcePointer(ResourceHandle resource, const ResourceDesc* pResourceDesc)
+    {
+        D3D12MA_ASSERT(!m_resource.valid() && pResourceDesc);
+        m_resource = resource;
+        m_PackedData.SetResourceDimension(pResourceDesc->type);
+        m_PackedData.SetResourceFlags(pResourceDesc->resourceFlags);
+        m_PackedData.SetTextureLayout(pResourceDesc->texture.initialLayout);
+    }
+
+    void Allocation::FreeName()
+    {
+        if (m_name)
+        {
+            const size_t nameCharCount = strlen(m_name) + 1;
+            D3D12MA_DELETE_ARRAY(m_allocator->GetAllocs(), m_name, nameCharCount);
+            m_name = nullptr;
+        }
+    }
+#endif // _D3D12MA_ALLOCATION_FUNCTIONS
+
+#ifndef _D3D12MA_DEFRAGMENTATION_CONTEXT_FUNCTIONS
+    Result DefragmentationContext::BeginPass(DefragmentationPassMoveInfo* pPassInfo)
+    {
+        D3D12MA_ASSERT(pPassInfo);
+        return m_Pimpl->DefragmentPassBegin(*pPassInfo);
+    }
+
+    Result DefragmentationContext::EndPass(DefragmentationPassMoveInfo* pPassInfo)
+    {
+        D3D12MA_ASSERT(pPassInfo);
+        return m_Pimpl->DefragmentPassEnd(*pPassInfo);
+    }
+
+    void DefragmentationContext::GetStats(DefragmentationStats* pStats)
+    {
+        D3D12MA_ASSERT(pStats);
+        m_Pimpl->GetStats(*pStats);
+    }
+
+    void DefragmentationContext::ReleaseThis()
+    {
+        D3D12MA_DELETE(m_Pimpl->GetAllocs(), this);
+    }
+
+    DefragmentationContext::DefragmentationContext(AllocatorPimpl* allocator,
+        const DefragmentationDesc& desc,
+        BlockVector* poolVector)
+        : m_Pimpl(D3D12MA_NEW(allocator->GetAllocs(), DefragmentationContextPimpl)(allocator, desc, poolVector)) {
+    }
+
+    DefragmentationContext::~DefragmentationContext()
+    {
+        D3D12MA_DELETE(m_Pimpl->GetAllocs(), m_Pimpl);
+    }
+#endif // _D3D12MA_DEFRAGMENTATION_CONTEXT_FUNCTIONS
+
+#ifndef _D3D12MA_POOL_FUNCTIONS
+    PoolDesc Pool::GetDesc() const
+    {
+        return m_Pimpl->GetDesc();
+    }
+
+    void Pool::GetStatistics(Statistics* pStats)
+    {
+        D3D12MA_ASSERT(pStats);
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+            m_Pimpl->GetStatistics(*pStats);
+    }
+
+    void Pool::CalculateStatistics(DetailedStatistics* pStats)
+    {
+        D3D12MA_ASSERT(pStats);
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+            m_Pimpl->CalculateStatistics(*pStats);
+    }
+
+    void Pool::SetName(const char* Name)
+    {
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+            m_Pimpl->SetName(Name);
+    }
+
+    const char* Pool::GetName() const
+    {
+        return m_Pimpl->GetName();
+    }
+
+    Result Pool::BeginDefragmentation(const DefragmentationDesc* pDesc, DefragmentationContext** ppContext)
+    {
+        D3D12MA_ASSERT(pDesc && ppContext);
+
+        // Check for support
+        if (m_Pimpl->GetBlockVector()->GetAlgorithm() & PoolFlagsAlgorithmLinear)
+            return Result::NoInterface;
+        if (m_Pimpl->AlwaysCommitted())
+            return Result::NoInterface;
+
+        AllocatorPimpl* allocator = m_Pimpl->GetAllocator();
+        *ppContext = D3D12MA_NEW(allocator->GetAllocs(), DefragmentationContext)(allocator, *pDesc, m_Pimpl->GetBlockVector());
+        return Result::Ok;
+    }
+
+    void Pool::ReleaseThis()
+    {
+        D3D12MA_DELETE(m_Pimpl->GetAllocator()->GetAllocs(), this);
+    }
+
+    Pool::Pool(Allocator* allocator, const PoolDesc& desc)
+        : m_Pimpl(D3D12MA_NEW(allocator->m_Pimpl->GetAllocs(), PoolPimpl)(allocator->m_Pimpl, desc)) {
+    }
+
+    Pool::~Pool()
+    {
+        m_Pimpl->GetAllocator()->UnregisterPool(this, m_Pimpl->GetDesc().heapType);
+
+        D3D12MA_DELETE(m_Pimpl->GetAllocator()->GetAllocs(), m_Pimpl);
+    }
+#endif // _D3D12MA_POOL_FUNCTIONS
+
+#ifndef _D3D12MA_ALLOCATOR_FUNCTIONS
+    //const  D3D12_FEATURE_DATA_D3D12_OPTIONS& Allocator::GetD3D12Options() const
+    //{
+    //    return m_Pimpl->GetD3D12Options();
+    //}
+
+    bool Allocator::IsUMA() const
+    {
+        return m_Pimpl->IsUMA();
+    }
+
+    bool Allocator::IsCacheCoherentUMA() const
+    {
+        return m_Pimpl->IsCacheCoherentUMA();
+    }
+
+    bool Allocator::IsGPUUploadHeapSupported() const
+    {
+        return m_Pimpl->IsGPUUploadHeapSupported();
+    }
+
+    bool Allocator::IsTightAlignmentSupported() const
+    {
+        return m_Pimpl->IsTightAlignmentSupported();
+    }
+
+    UINT64 Allocator::GetMemoryCapacity(UINT memorySegmentGroup) const
+    {
+        return m_Pimpl->GetMemoryCapacity(memorySegmentGroup);
+    }
+
+
+    Result Allocator::CreateResource(
+        const AllocationDesc* pAllocDesc,
+        const ResourceDesc* pResourceDesc,
+        ResourceLayout InitialLayout,
+        const ClearValue* pOptimizedClearValue,
+        UINT32 NumCastableFormats,
+        const Format* pCastableFormats,
+        Allocation** ppAllocation,
+        ResourcePtr& out)
+    {
+        if (!pAllocDesc || !pResourceDesc || !ppAllocation)
+        {
+            D3D12MA_ASSERT(0 && "Invalid arguments passed to Allocator::CreateResource3.");
+            return Result::InvalidArgument;
+        }
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+            return m_Pimpl->CreateResource(
+                pAllocDesc,
+                CreateResourceParams(pResourceDesc, InitialLayout, pOptimizedClearValue, NumCastableFormats, pCastableFormats),
+                ppAllocation,
+                out);
+    }
+
+    Result Allocator::AllocateMemory( // TODO: Why did original use ptrs?
+        const AllocationDesc& pAllocDesc,
+        const ResourceAllocationInfo& pAllocInfo,
+        Allocation* ppAllocation)
+    {
+        if (!ValidateAllocateMemoryParameters(&pAllocDesc, &pAllocInfo, &ppAllocation))
+        {
+            D3D12MA_ASSERT(0 && "Invalid arguments passed to Allocator::AllocateMemory.");
+            return Result::InvalidArgument;
+        }
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+            return m_Pimpl->AllocateMemory(&pAllocDesc, &pAllocInfo, &ppAllocation);
+    }
+
+    Result Allocator::CreateAliasingResource(
+        Allocation* pAllocation,
+        UINT64 AllocationLocalOffset,
+        const ResourceDesc* pResourceDesc,
+        ResourceLayout InitialLayout,
+        const ClearValue* pOptimizedClearValue,
+        UINT32 NumCastableFormats,
+        const Format* pCastableFormats,
+        ResourcePtr& out)
+    {
+        if (!pAllocation || !pResourceDesc)
+        {
+            D3D12MA_ASSERT(0 && "Invalid arguments passed to Allocator::CreateAliasingResource.");
+            return Result::InvalidArgument;
+        }
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+            return m_Pimpl->CreateAliasingResource(
+                pAllocation,
+                AllocationLocalOffset,
+                CreateResourceParams(pResourceDesc, InitialLayout, pOptimizedClearValue, NumCastableFormats, pCastableFormats),
+                out);
+    }
+
+    Result Allocator::CreatePool(
+        const PoolDesc* pPoolDesc,
+        Pool** ppPool)
+    {
+        if (!pPoolDesc || !ppPool ||
+            (pPoolDesc->maxBlockCount > 0 && pPoolDesc->maxBlockCount < pPoolDesc->minBlockCount) ||
+            (pPoolDesc->minAllocationAlignment > 0 && !IsPow2(pPoolDesc->minAllocationAlignment)))
+        {
+            D3D12MA_ASSERT(0 && "Invalid arguments passed to Allocator::CreatePool.");
+            return Result::InvalidArgument;
+        }
+        if ((pPoolDesc->flags & PoolFlagsAlwaysCommitted) != 0 &&
+            (pPoolDesc->blockSize != 0 || pPoolDesc->minBlockCount > 0))
+        {
+            D3D12MA_ASSERT(0 && "Invalid arguments passed to Allocator::CreatePool while POOL_FLAG_ALWAYS_COMMITTED is specified.");
+            return Result::InvalidArgument;
+        }
+        if (!m_Pimpl->HeapFlagsFulfillResourceHeapTier(pPoolDesc->heapFlags))
+        {
+            D3D12MA_ASSERT(0 && "Invalid pPoolDesc->HeapFlags passed to Allocator::CreatePool. Did you forget to handle ResourceHeapTier=1?");
+            return Result::InvalidArgument;
+        }
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+            * ppPool = D3D12MA_NEW(m_Pimpl->GetAllocs(), Pool)(this, *pPoolDesc);
+        Result hr = (*ppPool)->m_Pimpl->Init();
+        if (SUCCEEDED(hr))
+        {
+            m_Pimpl->RegisterPool(*ppPool, pPoolDesc->heapType);
+        }
+        else
+        {
+            D3D12MA_DELETE(m_Pimpl->GetAllocs(), *ppPool);
+            *ppPool = NULL;
+        }
+        return hr;
+    }
+
+    void Allocator::SetCurrentFrameIndex(UINT frameIndex)
+    {
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+            m_Pimpl->SetCurrentFrameIndex(frameIndex);
+    }
+
+    void Allocator::GetBudget(Budget* pLocalBudget, Budget* pNonLocalBudget)
+    {
+        if (pLocalBudget == NULL && pNonLocalBudget == NULL)
+        {
+            return;
+        }
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+            m_Pimpl->GetBudget(pLocalBudget, pNonLocalBudget);
+    }
+
+    void Allocator::CalculateStatistics(TotalStatistics* pStats)
+    {
+        D3D12MA_ASSERT(pStats);
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+            m_Pimpl->CalculateStatistics(*pStats);
+    }
+
+    void Allocator::BuildStatsString(char** ppStatsString, bool detailedMap) const
+    {
+        D3D12MA_ASSERT(ppStatsString);
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+            m_Pimpl->BuildStatsString(ppStatsString, detailedMap);
+    }
+
+    void Allocator::FreeStatsString(char* pStatsString) const
+    {
+        if (pStatsString != NULL)
+        {
+            D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+                m_Pimpl->FreeStatsString(pStatsString);
+        }
+    }
+
+    void Allocator::BeginDefragmentation(const DefragmentationDesc* pDesc, DefragmentationContext** ppContext)
+    {
+        D3D12MA_ASSERT(pDesc && ppContext);
+
+        *ppContext = D3D12MA_NEW(m_Pimpl->GetAllocs(), DefragmentationContext)(m_Pimpl, *pDesc, NULL);
+    }
+
+    void Allocator::ReleaseThis()
+    {
+        // Copy is needed because otherwise we would call destructor and invalidate the structure with callbacks before using it to free memory.
+        const AllocationCallbacks allocationCallbacksCopy = m_Pimpl->GetAllocs();
+        D3D12MA_DELETE(allocationCallbacksCopy, this);
+    }
+
+    Allocator::Allocator(const AllocationCallbacks& allocationCallbacks, const AllocatorDesc& desc)
+        : m_Pimpl(D3D12MA_NEW(allocationCallbacks, AllocatorPimpl)(allocationCallbacks, desc)) {
+    }
+
+    Allocator::~Allocator()
+    {
+        D3D12MA_DELETE(m_Pimpl->GetAllocs(), m_Pimpl);
+    }
+#endif // _D3D12MA_ALLOCATOR_FUNCTIONS
+
+#ifndef _D3D12MA_VIRTUAL_BLOCK_FUNCTIONS
+    BOOL VirtualBlock::IsEmpty() const
+    {
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+            return m_Pimpl->m_Metadata->IsEmpty() ? TRUE : FALSE;
+    }
+
+    void VirtualBlock::GetAllocationInfo(VirtualAllocation allocation, VirtualAllocationInfo* pInfo) const
+    {
+        D3D12MA_ASSERT(allocation.AllocHandle != (AllocHandle)0 && pInfo);
+
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+            m_Pimpl->m_Metadata->GetAllocationInfo(allocation.AllocHandle, *pInfo);
+    }
+
+    HRESULT VirtualBlock::Allocate(const VIRTUAL_ALLOCATION_DESC* pDesc, VirtualAllocation* pAllocation, UINT64* pOffset)
+    {
+        if (!pDesc || !pAllocation || pDesc->Size == 0 || !IsPow2(pDesc->Alignment))
+        {
+            D3D12MA_ASSERT(0 && "Invalid arguments passed to VirtualBlock::Allocate.");
+            return E_INVALIDARG;
+        }
+
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+
+            const UINT64 alignment = pDesc->Alignment != 0 ? pDesc->Alignment : 1;
+        AllocationRequest allocRequest = {};
+        if (m_Pimpl->m_Metadata->CreateAllocationRequest(
+            pDesc->Size,
+            alignment,
+            pDesc->Flags & VIRTUAL_ALLOCATION_FLAG_UPPER_ADDRESS,
+            pDesc->Flags & VIRTUAL_ALLOCATION_FLAG_STRATEGY_MASK,
+            &allocRequest))
+        {
+            m_Pimpl->m_Metadata->Alloc(allocRequest, pDesc->Size, pDesc->pPrivateData);
+            D3D12MA_HEAVY_ASSERT(m_Pimpl->m_Metadata->Validate());
+            pAllocation->AllocHandle = allocRequest.allocHandle;
+
+            if (pOffset)
+                *pOffset = m_Pimpl->m_Metadata->GetAllocationOffset(allocRequest.allocHandle);
+            return S_OK;
+        }
+
+        pAllocation->AllocHandle = (AllocHandle)0;
+        if (pOffset)
+            *pOffset = UINT64_MAX;
+
+        return E_OUTOFMEMORY;
+    }
+
+    void VirtualBlock::FreeAllocation(VirtualAllocation allocation)
+    {
+        if (allocation.AllocHandle == (AllocHandle)0)
+            return;
+
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+
+            m_Pimpl->m_Metadata->Free(allocation.AllocHandle);
+        D3D12MA_HEAVY_ASSERT(m_Pimpl->m_Metadata->Validate());
+    }
+
+    void VirtualBlock::Clear()
+    {
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+
+            m_Pimpl->m_Metadata->Clear();
+        D3D12MA_HEAVY_ASSERT(m_Pimpl->m_Metadata->Validate());
+    }
+
+    void VirtualBlock::SetAllocationPrivateData(VirtualAllocation allocation, void* pPrivateData)
+    {
+        D3D12MA_ASSERT(allocation.AllocHandle != (AllocHandle)0);
+
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+            m_Pimpl->m_Metadata->SetAllocationPrivateData(allocation.AllocHandle, pPrivateData);
+    }
+
+    void VirtualBlock::GetStatistics(Statistics* pStats) const
+    {
+        D3D12MA_ASSERT(pStats);
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+            D3D12MA_HEAVY_ASSERT(m_Pimpl->m_Metadata->Validate());
+        ClearStatistics(*pStats);
+        m_Pimpl->m_Metadata->AddStatistics(*pStats);
+    }
+
+    void VirtualBlock::CalculateStatistics(DetailedStatistics* pStats) const
+    {
+        D3D12MA_ASSERT(pStats);
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+            D3D12MA_HEAVY_ASSERT(m_Pimpl->m_Metadata->Validate());
+        ClearDetailedStatistics(*pStats);
+        m_Pimpl->m_Metadata->AddDetailedStatistics(*pStats);
+    }
+
+    void VirtualBlock::BuildStatsString(WCHAR** ppStatsString) const
+    {
+        D3D12MA_ASSERT(ppStatsString);
+
+        D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+
+            StringBuilder sb(m_Pimpl->m_AllocationCallbacks);
+        {
+            JsonWriter json(m_Pimpl->m_AllocationCallbacks, sb);
+            D3D12MA_HEAVY_ASSERT(m_Pimpl->m_Metadata->Validate());
+            json.BeginObject();
+            m_Pimpl->m_Metadata->WriteAllocationInfoToJson(json);
+            json.EndObject();
+        } // Scope for JsonWriter
+
+        const size_t length = sb.GetLength();
+        WCHAR* result = AllocateArray<WCHAR>(m_Pimpl->m_AllocationCallbacks, length + 1);
+        memcpy(result, sb.GetData(), length * sizeof(WCHAR));
+        result[length] = L'\0';
+        *ppStatsString = result;
+    }
+
+    void VirtualBlock::FreeStatsString(WCHAR* pStatsString) const
+    {
+        if (pStatsString != NULL)
+        {
+            D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+                D3D12MA::Free(m_Pimpl->m_AllocationCallbacks, pStatsString);
+        }
+    }
+
+    void VirtualBlock::ReleaseThis()
+    {
+        // Copy is needed because otherwise we would call destructor and invalidate the structure with callbacks before using it to free memory.
+        const ALLOCATION_CALLBACKS allocationCallbacksCopy = m_Pimpl->m_AllocationCallbacks;
+        D3D12MA_DELETE(allocationCallbacksCopy, this);
+    }
+
+    VirtualBlock::VirtualBlock(const ALLOCATION_CALLBACKS& allocationCallbacks, const VIRTUAL_BLOCK_DESC& desc)
+        : m_Pimpl(D3D12MA_NEW(allocationCallbacks, VirtualBlockPimpl)(allocationCallbacks, desc)) {
+    }
+
+    VirtualBlock::~VirtualBlock()
+    {
+        // THIS IS AN IMPORTANT ASSERT!
+        // Hitting it means you have some memory leak - unreleased allocations in this virtual block.
+        D3D12MA_ASSERT(m_Pimpl->m_Metadata->IsEmpty() && "Some allocations were not freed before destruction of this virtual block!");
+
+        D3D12MA_DELETE(m_Pimpl->m_AllocationCallbacks, m_Pimpl);
+    }
+#endif // _D3D12MA_VIRTUAL_BLOCK_FUNCTIONS
+#endif // _D3D12MA_PUBLIC_INTERFACE
 } // namespace rhi::ma

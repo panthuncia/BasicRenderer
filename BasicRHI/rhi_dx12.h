@@ -2030,7 +2030,7 @@ namespace rhi {
 		impl->timelines.free(t);
 	}
 
-	static Result d_createHeap(Device* d, const HeapDesc& hd, HeapPtr& out) noexcept {
+	static Result d_createHeap(const Device* d, const HeapDesc& hd, HeapPtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl || !impl->dev || hd.sizeBytes == 0) {
 			BreakIfDebugging();

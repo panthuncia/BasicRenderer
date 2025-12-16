@@ -211,14 +211,14 @@ namespace rhi::ma
         return static_cast<AllocationFlags>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
 	}
 
-    enum class PoolFlags : uint32_t
+    enum PoolFlags : uint32_t
     {
-        None = 0,
-        AlgorithmLinear = 0x1,
-        MsaaTexturesAlwaysCommitted = 0x2,
-        AlwaysCommitted = 0x4,
+        PoolFlagsNone = 0,
+        PoolFlagsAlgorithmLinear = 0x1,
+        PoolFlagsMsaaTexturesAlwaysCommitted = 0x2,
+        PoolFlagsAlwaysCommitted = 0x4,
 
-        AlgorithmMask = AlgorithmLinear
+        PoolFlagsAlgorithmMask = PoolFlagsAlgorithmLinear
     };
     inline PoolFlags operator|(PoolFlags a, PoolFlags b) noexcept
     {
@@ -305,14 +305,14 @@ namespace rhi::ma
 
     // ---------------- Defragmentation ----------------
 
-    enum class DefragmentationFlags : uint32_t
+    enum DefragmentationFlags : uint32_t
     {
         None = 0,
-        AlgorithmFast = 0x1,
-        AlgorithmBalanced = 0x2,
-        AlgorithmFull = 0x4,
+        DefragmentationFlagsAlgorithmFast = 0x1,
+        DefragmentationFlagsAlgorithmBalanced = 0x2,
+        DefragmentationFlagsAlgorithmFull = 0x4,
 
-        AlgorithmMask = AlgorithmFast | AlgorithmBalanced | AlgorithmFull
+        DefragmentationFlagsAlgorithmMask = DefragmentationFlagsAlgorithmFast | DefragmentationFlagsAlgorithmBalanced | DefragmentationFlagsAlgorithmFull
     };
     inline DefragmentationFlags operator|(DefragmentationFlags a, DefragmentationFlags b) noexcept
     {
@@ -342,12 +342,6 @@ namespace rhi::ma
         uint32_t heapsFreed = 0;
     };
 
-    enum class DefragmentationPassResult : uint32_t
-    {
-        Finished, // no more moves possible
-        HasMoves  // pass contains moves to execute
-    };
-
     // ---------------- Virtual allocator ----------------
 
     struct VirtualAllocation
@@ -367,6 +361,11 @@ namespace rhi::ma
         return static_cast<VirtualBlockFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
     }
     inline VirtualBlockFlags& operator|=(VirtualBlockFlags& a, VirtualBlockFlags b) noexcept { a = a | b; return a; }
+
+    inline VirtualBlockFlags operator&(VirtualBlockFlags a, VirtualBlockFlags b) noexcept
+    {
+        return static_cast<VirtualBlockFlags>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
+	}
 
     struct VirtualBlockDesc
     {
@@ -417,7 +416,7 @@ namespace rhi::ma
         rhi::HeapFlags::CreateNotZeroed;
 
     inline PoolFlags RecommendedPoolFlags =
-        PoolFlags::MsaaTexturesAlwaysCommitted;
+        PoolFlagsMsaaTexturesAlwaysCommitted;
 
     // ---------------- Allocation wrapper ----------------
 
@@ -459,32 +458,22 @@ namespace rhi::ma
     class Allocation
     {
     public:
-        void* impl{};
-        const AllocationVTable* vt{};
 
-        explicit constexpr operator bool() const noexcept
-        {
-            return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_MA_ALLOCATION_ABI_MIN;
-        }
-        constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
-        constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
+        uint64_t GetOffset() const;
+        uint64_t GetAlignment()const  noexcept;
+        uint64_t GetSize() const noexcept;
 
-        void Destroy() noexcept { vt->destroy(this); }
+        rhi::HeapHandle GetHeap() const noexcept;
+        rhi::ResourceHandle GetResource() noexcept;
+        void SetResource(rhi::ResourceHandle r);
 
-        uint64_t GetOffset() const noexcept { return vt->getOffset(this); }
-        uint64_t GetAlignment()const  noexcept { return vt->getAlignment(this); }
-        uint64_t GetSize() const noexcept { return vt->getSize(this); }
+        void SetPrivateData(void* p) noexcept;
+        void* GetPrivateData() const noexcept;
 
-        rhi::HeapHandle GetHeap() noexcept { return vt->getHeap(this); }
-        rhi::ResourceHandle GetResource() noexcept { return vt->getResource(this); }
-        void SetResource(rhi::ResourceHandle r) noexcept { vt->setResource(this, r); }
-
-        void SetPrivateData(void* p) noexcept { vt->setPrivateData(this, p); }
-        void* GetPrivateData() const noexcept { return vt->getPrivateData(this); }
-
-        void SetName(const char* n) noexcept { vt->setName(this, n); }
-        const char* GetName() const noexcept { return vt->getName(this); }
-
+        void SetName(const char* n) noexcept;
+        const char* GetName() const noexcept;
+    protected:
+        void ReleaseThis();
     private:
         friend class BlockMetadata_Linear;
         friend class JsonWriter;
@@ -492,6 +481,8 @@ namespace rhi::ma
         friend class AllocatorPimpl;
         friend class AllocationObjectAllocator;
         template<typename T> friend class PoolAllocator;
+        friend class BlockVector;
+        friend class DefragmentationContextPimpl;
 
         enum Type
         {
@@ -522,7 +513,7 @@ namespace rhi::ma
                 CommittedAllocationList* list;
                 Allocation* prev;
                 Allocation* next;
-                HeapHandle heap;
+                HeapPtr heap;
             } m_Heap;
         };
 
@@ -550,6 +541,12 @@ namespace rhi::ma
             UINT m_TextureLayout : 9;      // enum ResourceLayout
         } m_PackedData;
 
+        ResourceHandle m_resource;
+        const char* m_name;
+        AllocatorPimpl* m_allocator;
+        uint64_t m_size;
+        uint64_t m_alignment;
+
         Allocation(AllocatorPimpl* allocator, UINT64 size, UINT64 alignment);
 
         void InitCommitted(CommittedAllocationList* list);
@@ -557,8 +554,10 @@ namespace rhi::ma
         void InitHeap(CommittedAllocationList* list, HeapPtr heap);
         void SwapBlockAllocation(Allocation* allocation);
 
-		AllocHandle GetAllocHandle() const noexcept { return vt->getAllocHandle(this); }
+        AllocHandle GetAllocHandle() const noexcept;
+        NormalBlock* GetBlock();
         void SetResourcePointer(ResourceHandle resource, const ResourceDesc* pResourceDesc);
+        void FreeName();
     };
 
     /// Single move of an allocation to be done for defragmentation.
@@ -614,166 +613,65 @@ namespace rhi::ma
 
     using AllocationPtr = Unique<Allocation>;
 
-    // ---------------- Pool wrapper ----------------
-
-    struct PoolVTable
-    {
-        void (*destroy)(Pool*) noexcept;
-
-        PoolDesc(*getDesc)(Pool*) noexcept;
-        void (*getStatistics)(Pool*, Statistics*) noexcept;
-        void (*calculateStatistics)(Pool*, DetailedStatistics*) noexcept;
-
-        void (*setName)(Pool*, const char*) noexcept;
-        const char* (*getName)(Pool*) noexcept;
-
-        rhi::Result(*beginDefragmentation)(Pool*, const DefragmentationDesc&, DefragmentationContext* outCtx) noexcept;
-
-        uint32_t abi_version = 1;
-    };
-
     class Pool
     {
     public:
         PoolPimpl* m_Pimpl{};
-        const PoolVTable* vt{};
-
-        explicit constexpr operator bool() const noexcept
-        {
-            return m_Pimpl != nullptr && vt != nullptr && vt->abi_version >= RHI_MA_POOL_ABI_MIN;
-        }
-        constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
-        constexpr void Reset() noexcept { m_Pimpl = nullptr; vt = nullptr; }
-
-        void Destroy() noexcept { vt->destroy(this); }
-
-        PoolDesc GetDesc() noexcept { return vt->getDesc(this); }
-        void GetStatistics(Statistics* s) noexcept { vt->getStatistics(this, s); }
-        void CalculateStatistics(DetailedStatistics* s) noexcept { vt->calculateStatistics(this, s); }
-
-        void SetName(const char* n) noexcept { vt->setName(this, n); }
-        const char* GetName() noexcept { return vt->getName(this); }
-
-        rhi::Result BeginDefragmentation(const DefragmentationDesc& d, DefragmentationContext* outCtx) noexcept
-        {
-            return vt->beginDefragmentation(this, d, outCtx);
-        }
+        Pool(Allocator* allocator, const PoolDesc& desc);
+        ~Pool();
+        PoolDesc GetDesc() const noexcept;
+        void GetStatistics(Statistics* s) noexcept;
+        void CalculateStatistics(DetailedStatistics* s) noexcept;
+        Result BeginDefragmentation(const DefragmentationDesc* pDesc, DefragmentationContext** ppContext) noexcept;
+        void SetName(const char* n) noexcept;
+        const char* GetName() const noexcept;
+        void ReleaseThis();
     };
 
     using PoolPtr = Unique<Pool>;
 
-    // ---------------- Defragmentation context wrapper ----------------
-
-    struct DefragmentationContextVTable
-    {
-        void (*destroy)(DefragmentationContext*) noexcept;
-
-        rhi::Result(*beginPass)(DefragmentationContext*, DefragmentationPassMoveInfo* outInfo, DefragmentationPassResult* outResult) noexcept;
-        rhi::Result(*endPass)(DefragmentationContext*, DefragmentationPassMoveInfo* inOutInfo, DefragmentationPassResult* outResult) noexcept;
-
-        void (*getStats)(DefragmentationContext*, DefragmentationStats*) noexcept;
-
-        uint32_t abi_version = 1;
-    };
-
     class DefragmentationContext
     {
     public:
-        void* impl{};
-        const DefragmentationContextVTable* vt{};
+        DefragmentationContextPimpl* m_Pimpl{};
+        DefragmentationContext(AllocatorPimpl* allocator,
+            const DefragmentationDesc& desc,
+            BlockVector* poolVector);
+        ~DefragmentationContext();
 
-        explicit constexpr operator bool() const noexcept
-        {
-            return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_MA_DEFRAG_ABI_MIN;
-        }
-        constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
-        constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
+        rhi::Result BeginPass(DefragmentationPassMoveInfo* outInfo) noexcept;
+        rhi::Result EndPass(DefragmentationPassMoveInfo* inOutInfo) noexcept;
 
-        void Destroy() noexcept { vt->destroy(this); }
-
-        rhi::Result BeginPass(DefragmentationPassMoveInfo* outInfo, DefragmentationPassResult* outResult) noexcept
-        {
-            return vt->beginPass(this, outInfo, outResult);
-        }
-
-        rhi::Result EndPass(DefragmentationPassMoveInfo* inOutInfo, DefragmentationPassResult* outResult) noexcept
-        {
-            return vt->endPass(this, inOutInfo, outResult);
-        }
-
-        void GetStats(DefragmentationStats* s) noexcept { vt->getStats(this, s); }
+        void GetStats(DefragmentationStats* s) noexcept;
+        void ReleaseThis();
     };
 
     using DefragmentationContextPtr = Unique<DefragmentationContext>;
 
-    // ---------------- Virtual block wrapper ----------------
-
-    struct VirtualBlockVTable
-    {
-        void (*destroy)(VirtualBlock*) noexcept;
-
-        bool (*isEmpty)(VirtualBlock*) noexcept;
-        void (*getAllocationInfo)(VirtualBlock*, VirtualAllocation, VirtualAllocationInfo*) noexcept;
-
-        rhi::Result(*allocate)(VirtualBlock*, const VirtualAllocationDesc&, VirtualAllocation* outAlloc, uint64_t* outOffset) noexcept;
-        void (*freeAllocation)(VirtualBlock*, VirtualAllocation) noexcept;
-        void (*clear)(VirtualBlock*) noexcept;
-
-        void (*setAllocationPrivateData)(VirtualBlock*, VirtualAllocation, void*) noexcept;
-
-        void (*getStatistics)(VirtualBlock*, Statistics*) noexcept;
-        void (*calculateStatistics)(VirtualBlock*, DetailedStatistics*) noexcept;
-
-        void (*buildStatsString)(VirtualBlock*, char** outStatsString) noexcept;
-        void (*freeStatsString)(VirtualBlock*, char* statsString) noexcept;
-
-        uint32_t abi_version = 1;
-    };
-
     class VirtualBlock
     {
     public:
-        void* impl{};
-        const VirtualBlockVTable* vt{};
+        VirtualBlockPimpl* m_Pimpl{};
 
-        explicit constexpr operator bool() const noexcept
-        {
-            return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_MA_VBLOCK_ABI_MIN;
-        }
-        constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
-        constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
+        void GetAllocationInfo(VirtualAllocation a, VirtualAllocationInfo* outInfo) const noexcept;
 
-        void Destroy() noexcept { vt->destroy(this); }
+        rhi::Result Allocate(const VirtualAllocationDesc& d, VirtualAllocation* outAlloc, uint64_t* outOffset = nullptr) noexcept;
 
-        bool IsEmpty() noexcept { return vt->isEmpty(this); }
-        void GetAllocationInfo(VirtualAllocation a, VirtualAllocationInfo* outInfo) noexcept
-        {
-            vt->getAllocationInfo(this, a, outInfo);
-        }
+        void FreeAllocation(VirtualAllocation a) noexcept;
+        void Clear() noexcept;
 
-        rhi::Result Allocate(const VirtualAllocationDesc& d, VirtualAllocation* outAlloc, uint64_t* outOffset = nullptr) noexcept
-        {
-            return vt->allocate(this, d, outAlloc, outOffset);
-        }
+        void SetAllocationPrivateData(VirtualAllocation a, void* p) noexcept;
 
-        void FreeAllocation(VirtualAllocation a) noexcept { vt->freeAllocation(this, a); }
-        void Clear() noexcept { vt->clear(this); }
+        void GetStatistics(Statistics* s) noexcept;
+        void CalculateStatistics(DetailedStatistics* s) noexcept;
 
-        void SetAllocationPrivateData(VirtualAllocation a, void* p) noexcept
-        {
-            vt->setAllocationPrivateData(this, a, p);
-        }
+        void BuildStatsString(char** outJson) noexcept;
+        void FreeStatsString(char* json) noexcept;
+        BOOL IsEmpty() const;
 
-        void GetStatistics(Statistics* s) noexcept { vt->getStatistics(this, s); }
-        void CalculateStatistics(DetailedStatistics* s) noexcept { vt->calculateStatistics(this, s); }
-
-        void BuildStatsString(char** outJson) noexcept { vt->buildStatsString(this, outJson); }
-        void FreeStatsString(char* json) noexcept { vt->freeStatsString(this, json); }
     };
 
     using VirtualBlockPtr = Unique<VirtualBlock>;
-
-    // ---------------- Allocator wrapper ----------------
 
     struct AllocatorCaps
     {
@@ -783,105 +681,58 @@ namespace rhi::ma
         bool isTightAlignmentSupported = false;
     };
 
-    struct AllocatorVTable
-    {
-        void (*destroy)(Allocator*) noexcept;
-
-        AllocatorCaps(*getCaps)(Allocator*) noexcept;
-        uint64_t(*getMemoryCapacity)(Allocator*, MemorySegmentGroup) noexcept;
-
-        rhi::Result(*createResource)(
-            Allocator*,
-            const AllocationDesc&,
-            const rhi::ResourceDesc&,
-            Allocation* outAllocation,
-            rhi::ResourcePtr* outResource /*optional, can be null*/
-            ) noexcept;
-
-        rhi::Result(*allocateMemory)(
-            Allocator*,
-            const AllocationDesc&,
-            const rhi::ResourceAllocationInfo&,
-            Allocation* outAllocation
-            ) noexcept;
-
-        rhi::Result(*createAliasingResource)(
-            Allocator*,
-            const Allocation& existingAllocation,
-            uint64_t allocationLocalOffset,
-            const rhi::ResourceDesc&,
-            rhi::ResourcePtr* outResource
-            ) noexcept;
-
-        rhi::Result(*createPool)(
-            Allocator*,
-            const PoolDesc&,
-            Pool* outPool
-            ) noexcept;
-
-        void (*setCurrentFrameIndex)(Allocator*, uint32_t frameIndex) noexcept;
-
-        void (*getBudget)(Allocator*, Budget* outLocal, Budget* outNonLocal) noexcept;
-        void (*calculateStatistics)(Allocator*, TotalStatistics* outStats) noexcept;
-
-        void (*buildStatsString)(Allocator*, char** outJson, bool detailedMap) noexcept;
-        void (*freeStatsString)(Allocator*, char* json) noexcept;
-
-        rhi::Result(*beginDefragmentation)(Allocator*, const DefragmentationDesc&, DefragmentationContext* outCtx) noexcept;
-
-        uint32_t abi_version = 1;
-    };
-
     class Allocator
     {
     public:
-        void* impl{};
-        const AllocatorVTable* vt{};
+        AllocatorPimpl* m_Pimpl{};
 
-        explicit constexpr operator bool() const noexcept
-        {
-            return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_MA_ALLOCATOR_ABI_MIN;
-        }
-        constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
-        constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
+        Allocator(const AllocationCallbacks& allocationCallbacks, const AllocatorDesc& desc);
+        ~Allocator();
+        void ReleaseThis();
+        AllocatorCaps GetCaps() noexcept;
+        uint64_t GetMemoryCapacity(MemorySegmentGroup g) noexcept;
 
-        void Destroy() noexcept { vt->destroy(this); }
+        Result CreateResource(
+            const AllocationDesc* pAllocDesc,
+            const ResourceDesc* pResourceDesc,
+            ResourceLayout InitialLayout,
+            const ClearValue* pOptimizedClearValue,
+            UINT32 NumCastableFormats,
+            const Format* pCastableFormats,
+            Allocation** ppAllocation,
+            ResourcePtr& out) noexcept;
 
-        AllocatorCaps GetCaps() noexcept { return vt->getCaps(this); }
-        uint64_t GetMemoryCapacity(MemorySegmentGroup g) noexcept { return vt->getMemoryCapacity(this, g); }
+        rhi::Result AllocateMemory(const AllocationDesc& a, const rhi::ResourceAllocationInfo& info, Allocation* outAlloc) noexcept;
 
-        rhi::Result CreateResource(const AllocationDesc& a, const rhi::ResourceDesc& rd, Allocation* outAlloc, rhi::ResourcePtr* outRes = nullptr) noexcept
-        {
-            return vt->createResource(this, a, rd, outAlloc, outRes);
-        }
+        Result Allocator::CreateAliasingResource(
+            Allocation* pAllocation,
+            UINT64 AllocationLocalOffset,
+            const ResourceDesc* pResourceDesc,
+            ResourceLayout InitialLayout,
+            const ClearValue* pOptimizedClearValue,
+            UINT32 NumCastableFormats,
+            const Format* pCastableFormats,
+            ResourcePtr& out);
 
-        rhi::Result AllocateMemory(const AllocationDesc& a, const rhi::ResourceAllocationInfo& info, Allocation* outAlloc) noexcept
-        {
-            return vt->allocateMemory(this, a, info, outAlloc);
-        }
+        rhi::Result CreatePool(
+            const PoolDesc* pPoolDesc,
+            Pool** ppPool) noexcept;
 
-        rhi::Result CreateAliasingResource(const Allocation& existing, uint64_t localOffset, const rhi::ResourceDesc& rd, rhi::ResourcePtr* outRes) noexcept
-        {
-            return vt->createAliasingResource(this, existing, localOffset, rd, outRes);
-        }
+        void SetCurrentFrameIndex(uint32_t frameIndex) noexcept;
 
-        rhi::Result CreatePool(const PoolDesc& pd, Pool* outPool) noexcept
-        {
-            return vt->createPool(this, pd, outPool);
-        }
+        void GetBudget(Budget* local, Budget* nonLocal) noexcept;
+        void CalculateStatistics(TotalStatistics* s) noexcept;
 
-        void SetCurrentFrameIndex(uint32_t frameIndex) noexcept { vt->setCurrentFrameIndex(this, frameIndex); }
+        void BuildStatsString(char** outJson, bool detailedMap) const noexcept;
+        void FreeStatsString(char* json) const noexcept;
 
-        void GetBudget(Budget* local, Budget* nonLocal) noexcept { vt->getBudget(this, local, nonLocal); }
-        void CalculateStatistics(TotalStatistics* s) noexcept { vt->calculateStatistics(this, s); }
+    	void BeginDefragmentation(const DefragmentationDesc* pDesc, DefragmentationContext** ppContext)noexcept;
 
-        void BuildStatsString(char** outJson, bool detailedMap) noexcept { vt->buildStatsString(this, outJson, detailedMap); }
-        void FreeStatsString(char* json) noexcept { vt->freeStatsString(this, json); }
-
-        rhi::Result BeginDefragmentation(const DefragmentationDesc& d, DefragmentationContext* outCtx) noexcept
-        {
-            return vt->beginDefragmentation(this, d, outCtx);
-        }
+        bool IsUMA() const;
+        bool IsCacheCoherentUMA() const;
+        bool IsGPUUploadHeapSupported() const;
+        bool IsTightAlignmentSupported() const;
+        uint64_t GetMemoryCapacity(UINT memorySegmentGroup) const;
     };
 
     using AllocatorPtr = Unique<Allocator>;
@@ -895,7 +746,7 @@ namespace rhi::ma
     // Creates a standalone virtual allocator block (no GPU memory). Implemented in shared module.
     rhi::Result CreateVirtualBlock(const VirtualBlockDesc* desc, VirtualBlock* outBlock) noexcept;
 
-    // ---------------- Optional helper “C*” descriptors ----------------
+    // ---------------- Optional helper "C*" descriptors ----------------
 
 #ifndef RHI_MA_NO_HELPERS
 

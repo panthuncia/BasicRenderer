@@ -103,7 +103,8 @@ namespace rhi {
     enum class Result : uint32_t
     {
 		Ok = 0, // S_OK
-		Unknown = 1, // Should not happen
+		False = 1, // S_FALSE
+		Unknown = 2, // Should not happen
 
         // "Success with info" (mostly Present / Desktop Duplication scenarios)
         PresentOccluded,              // DXGI_STATUS_OCCLUDED
@@ -223,6 +224,7 @@ namespace rhi {
         switch (r)
         {
         case Result::Ok:
+        case Result::False:
         case Result::PresentOccluded:
         case Result::PresentClipped:
         case Result::PresentUnoccluded:
@@ -1799,7 +1801,7 @@ namespace rhi {
         Result(*createSampler)(Device*, DescriptorSlot, const SamplerDesc&) noexcept;
         Result(*createCommittedResource)(Device*, const ResourceDesc&, ResourcePtr&) noexcept;
         Result(*createTimeline)(Device*, uint64_t, const char*, TimelinePtr&) noexcept;
-        Result(*createHeap)(Device*, const HeapDesc&, HeapPtr&) noexcept;
+        Result(*createHeap)(const Device*, const HeapDesc&, HeapPtr&) noexcept;
         Result(*createPlacedResource)(Device*, HeapHandle, uint64_t, const ResourceDesc&, ResourcePtr&) noexcept;
         Result(*createQueryPool)(Device*, const QueryPoolDesc&, QueryPoolPtr&) noexcept;
 
@@ -1929,7 +1931,7 @@ namespace rhi {
 		inline uint32_t GetDescriptorHandleIncrementSize(DescriptorHeapType t) noexcept { return vt->getDescriptorHandleIncrementSize(this, t); }
         inline Result CreateTimeline(TimelinePtr& out, uint64_t initial = 0, const char* name = nullptr) noexcept { return vt->createTimeline(this, initial, name, out); }
 		inline void DestroyTimeline(TimelineHandle t) noexcept { deletionContext.DestroyTimeline(t); }
-        inline Result CreateHeap(const HeapDesc& h, HeapPtr& out) noexcept { return vt->createHeap(this, h, out); }
+        inline Result CreateHeap(const HeapDesc& h, HeapPtr& out) const noexcept { return vt->createHeap(this, h, out); }
 		inline void DestroyHeap(HeapHandle h) noexcept { deletionContext.DestroyHeap(h); }
         inline Result CreatePlacedResource(const HeapHandle heap, const uint64_t offset, const ResourceDesc& rd, ResourcePtr& out) noexcept { return vt->createPlacedResource(this, heap, offset, rd, out); }
         inline Result CreateQueryPool(const QueryPoolDesc& d, QueryPoolPtr& out) noexcept { return vt->createQueryPool(this, d, out); }
