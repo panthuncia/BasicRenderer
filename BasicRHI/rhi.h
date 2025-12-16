@@ -2024,7 +2024,7 @@ namespace rhi {
                  blob ? static_cast<uint32_t>(blob->GetBufferSize()) : 0u };
     }
 
-    inline CommandAllocatorPtr MakeCommandAllocatorPtr(Device* d, CommandAllocator ca) noexcept {
+    inline CommandAllocatorPtr MakeCommandAllocatorPtr(const Device* d, CommandAllocator ca) noexcept {
         return CommandAllocatorPtr(
             *d, ca,
             // Destroy
@@ -2033,21 +2033,21 @@ namespace rhi {
         );
     }
 
-    inline CommandListPtr MakeCommandListPtr(Device* d, CommandList cl) noexcept {
+    inline CommandListPtr MakeCommandListPtr(const Device* d, CommandList cl) noexcept {
         return CommandListPtr(
             *d, cl,
             [](Device& dev, CommandList& p) noexcept { if (dev && p) dev.DestroyCommandList(&p); }
         );
     }
 
-    inline SwapchainPtr MakeSwapchainPtr(Device* d, Swapchain sc) noexcept {
+    inline SwapchainPtr MakeSwapchainPtr(const Device* d, Swapchain sc) noexcept {
         return SwapchainPtr(
             *d, sc,
             [](Device& dev, Swapchain& p) noexcept { if (dev && p) dev.DestroySwapchain(&p); }
         );
     }
 
-    inline DevicePtr MakeDevicePtr(Device* d, std::shared_ptr<void> lifetimeHandle) noexcept {
+    inline DevicePtr MakeDevicePtr(const Device* d, std::shared_ptr<void> lifetimeHandle) noexcept {
         return DevicePtr(
             *d,
             // DestroyFn for Device ignores the TObject* and calls destroy on the object itself
@@ -2057,54 +2057,54 @@ namespace rhi {
 			// TODO: Name hook for Device?
         );
     }
-    inline ResourcePtr MakeTexturePtr(Device* d, Resource r) noexcept {
+    inline ResourcePtr MakeTexturePtr(const Device* d, Resource r) noexcept {
         return ResourcePtr(
             *d, r,
             [](Device& dev, Resource& p) noexcept { if (dev && p) dev.DestroyTexture(p.GetHandle()); }
         );
 	}
-    inline ResourcePtr MakeBufferPtr(Device* d, Resource r) noexcept {
+    inline ResourcePtr MakeBufferPtr(const Device* d, Resource r) noexcept {
         return ResourcePtr(
             *d, r,
             [](Device& dev, Resource& p) noexcept { if (dev && p) dev.DestroyBuffer(p.GetHandle()); }
         );
 	}
-    inline QueryPoolPtr MakeQueryPoolPtr(Device* d, QueryPool h) noexcept {
+    inline QueryPoolPtr MakeQueryPoolPtr(const Device* d, QueryPool h) noexcept {
         return QueryPoolPtr(*d, h,
             [](Device& dev, QueryPool& hh) noexcept { if (dev) dev.DestroyQueryPool(hh.GetHandle()); }
 		);
 	}
-    inline PipelinePtr MakePipelinePtr(Device* d, Pipeline h) noexcept {
+    inline PipelinePtr MakePipelinePtr(const Device* d, Pipeline h) noexcept {
         return PipelinePtr(*d, h,
             [](Device& dev, Pipeline& hh) noexcept { if (dev) dev.DestroyPipeline(hh.GetHandle()); }
         );
 	}
-    inline PipelineLayoutPtr MakePipelineLayoutPtr(Device* d, PipelineLayout h) noexcept {
+    inline PipelineLayoutPtr MakePipelineLayoutPtr(const Device* d, PipelineLayout h) noexcept {
         return PipelineLayoutPtr(*d, h,
             [](Device& dev, PipelineLayout& hh) noexcept { if (dev) dev.DestroyPipelineLayout(hh.GetHandle()); }
 		);
 	}
-    inline CommandSignaturePtr MakeCommandSignaturePtr(Device* d, CommandSignature h) noexcept {
+    inline CommandSignaturePtr MakeCommandSignaturePtr(const Device* d, CommandSignature h) noexcept {
         return CommandSignaturePtr(*d, h,
             [](Device& dev, CommandSignature& hh) noexcept { if (dev) dev.DestroyCommandSignature(hh.GetHandle()); }
 		);
 	}
-	inline DescriptorHeapPtr MakeDescriptorHeapPtr(Device* d, DescriptorHeap h) noexcept {
+	inline DescriptorHeapPtr MakeDescriptorHeapPtr(const Device* d, DescriptorHeap h) noexcept {
         return DescriptorHeapPtr(*d, h,
 			[](Device& dev, DescriptorHeap& hh) noexcept { if (dev) dev.DestroyDescriptorHeap(hh.GetHandle()); }
 		);
 	}
-	inline SamplerPtr MakeSamplerPtr(Device* d, Sampler h) noexcept {
+	inline SamplerPtr MakeSamplerPtr(const Device* d, Sampler h) noexcept {
 		return SamplerPtr(*d, h,
 			[](Device& dev, Sampler& hh) noexcept { if (dev) dev.DestroySampler(hh.GetHandle()); }
 		);
 	}
-    inline TimelinePtr MakeTimelinePtr(Device* d, Timeline h) noexcept {
+    inline TimelinePtr MakeTimelinePtr(const Device* d, Timeline h) noexcept {
         return TimelinePtr(*d, h,
             [](Device& dev, Timeline& hh) noexcept { if (dev) dev.DestroyTimeline(hh.GetHandle()); }
         );
 	}
-    inline HeapPtr MakeHeapPtr(Device* d, Heap h) noexcept {
+    inline HeapPtr MakeHeapPtr(const Device* d, Heap h) noexcept {
         return HeapPtr(*d, h,
             [](Device& dev, Heap& hh) noexcept { if (dev) dev.DestroyHeap(hh.GetHandle()); }
 		);

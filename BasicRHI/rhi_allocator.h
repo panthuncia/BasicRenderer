@@ -269,7 +269,7 @@ namespace rhi::ma
 
     struct PoolDesc
     {
-        PoolFlags flags = PoolFlags::None;
+        PoolFlags flags = PoolFlagsNone;
 
         rhi::HeapType heapType = rhi::HeapType::DeviceLocal;
         rhi::HeapFlags heapFlags = rhi::HeapFlags::None;
@@ -374,16 +374,16 @@ namespace rhi::ma
         const AllocationCallbacks* allocationCallbacks = nullptr;
     };
 
-    enum class VirtualAllocationFlags : uint32_t
+    enum VirtualAllocationFlags : uint32_t
     {
-        None = 0,
-        UpperAddress = 0x8,
+        VirtualAllocationFlagsNone = AllocationFlagNone,
+        VirtualAllocationFlagsUpperAddress = AllocationFlagUpperAddress,
 
-        StrategyMinMemory = 0x00010000,
-        StrategyMinTime = 0x00020000,
-        StrategyMinOffset = 0x00040000,
+        VirtualAllocationFlagsStrategyMinMemory = AllocationFlagStrategyMinMemory,
+        VirtualAllocationFlagsStrategyMinTime = AllocationFlagStrategyMinTime,
+        VirtualAllocationFlagsStrategyMinOffset = AllocationFlagStrategyMinOffset,
 
-        StrategyMask = StrategyMinMemory | StrategyMinTime | StrategyMinOffset
+        VirtualAllocationFlagsStrategyMask = AllocationFlagStrategyMask
     };
     inline VirtualAllocationFlags operator|(VirtualAllocationFlags a, VirtualAllocationFlags b) noexcept
     {
@@ -393,7 +393,7 @@ namespace rhi::ma
 
     struct VirtualAllocationDesc
     {
-        VirtualAllocationFlags flags = VirtualAllocationFlags::None;
+        VirtualAllocationFlags flags = VirtualAllocationFlagsNone;
         uint64_t size = 0;
         uint64_t alignment = 0; // 0 == 1
         void* privateData = nullptr;
@@ -548,7 +548,7 @@ namespace rhi::ma
         uint64_t m_alignment;
 
         Allocation(AllocatorPimpl* allocator, UINT64 size, UINT64 alignment);
-
+        ~Allocation();
         void InitCommitted(CommittedAllocationList* list);
         void InitPlaced(AllocHandle allocHandle, NormalBlock* block);
         void InitHeap(CommittedAllocationList* list, HeapPtr heap);
@@ -653,21 +653,25 @@ namespace rhi::ma
     public:
         VirtualBlockPimpl* m_Pimpl{};
 
+        VirtualBlock(const AllocationCallbacks& allocationCallbacks, const VirtualBlockDesc& desc);
+        ~VirtualBlock();
+
         void GetAllocationInfo(VirtualAllocation a, VirtualAllocationInfo* outInfo) const noexcept;
 
-        rhi::Result Allocate(const VirtualAllocationDesc& d, VirtualAllocation* outAlloc, uint64_t* outOffset = nullptr) noexcept;
+        rhi::Result Allocate(const VirtualAllocationDesc* pDesc, VirtualAllocation* pAllocation, UINT64* pOffset) noexcept;
 
         void FreeAllocation(VirtualAllocation a) noexcept;
         void Clear() noexcept;
 
         void SetAllocationPrivateData(VirtualAllocation a, void* p) noexcept;
 
-        void GetStatistics(Statistics* s) noexcept;
-        void CalculateStatistics(DetailedStatistics* s) noexcept;
+        void GetStatistics(Statistics* s) const noexcept;
+        void CalculateStatistics(DetailedStatistics* s) const noexcept;
 
-        void BuildStatsString(char** outJson) noexcept;
-        void FreeStatsString(char* json) noexcept;
+        void BuildStatsString(char** outJson) const noexcept;
+        void FreeStatsString(char* json) const noexcept;
         BOOL IsEmpty() const;
+        void ReleaseThis();
 
     };
 
@@ -704,7 +708,7 @@ namespace rhi::ma
 
         rhi::Result AllocateMemory(const AllocationDesc& a, const rhi::ResourceAllocationInfo& info, Allocation* outAlloc) noexcept;
 
-        Result Allocator::CreateAliasingResource(
+        Result CreateAliasingResource(
             Allocation* pAllocation,
             UINT64 AllocationLocalOffset,
             const ResourceDesc* pResourceDesc,
@@ -824,7 +828,7 @@ namespace rhi::ma
 
         explicit CVirtualAllocationDesc(uint64_t sz,
             uint64_t align = 0,
-            VirtualAllocationFlags f = VirtualAllocationFlags::None,
+            VirtualAllocationFlags f = VirtualAllocationFlagsNone,
             void* priv = nullptr) noexcept
         {
             flags = f;

@@ -60,20 +60,20 @@ namespace rhi::ma {
     // Minimum size of a free suballocation to register it in the free suballocation collection.
     static const UINT64 MIN_FREE_SUBALLOCATION_SIZE_TO_REGISTER = 16;
 
-    static const WCHAR* const HeapTypeNames[] =
+    static const char* const HeapTypeNames[] =
     {
-        L"DEFAULT",
-        L"UPLOAD",
-        L"READBACK",
-        L"CUSTOM",
-        L"GPU_UPLOAD",
+        "DEFAULT",
+        "UPLOAD",
+        "READBACK",
+        "CUSTOM",
+        "GPU_UPLOAD",
     };
-    static const WCHAR* const StandardHeapTypeNames[] =
+    static const char* const StandardHeapTypeNames[] =
     {
-        L"DEFAULT",
-        L"UPLOAD",
-        L"READBACK",
-        L"GPU_UPLOAD",
+        "DEFAULT",
+        "UPLOAD",
+        "READBACK",
+        "GPU_UPLOAD",
     };
 
     static const HeapFlags RESOURCE_CLASS_HEAP_FLAGS =
@@ -168,7 +168,7 @@ namespace rhi::ma {
             {
                 memory[i].~T();
             }
-            Free(allocs, memory);
+            Free(allocs, (void*)memory);
         }
     }
 
@@ -1134,80 +1134,118 @@ namespace rhi::ma {
 #endif // _D3D12MA_VECTOR_FUNCTIONS
 #endif // _D3D12MA_VECTOR
 
-#ifndef _D3D12MA_STRING_BUILDER
+#ifndef _D3D12MA_STRING_BUILDER_UTF8
     class StringBuilder
     {
     public:
-        StringBuilder(const AllocationCallbacks& allocationCallbacks) : m_Data(allocationCallbacks) {}
+        StringBuilder(const AllocationCallbacks& allocationCallbacks)
+            : m_Data(allocationCallbacks)
+        {
+        }
 
         size_t GetLength() const { return m_Data.size(); }
         const char* GetData() const { return m_Data.data(); }
 
         void Add(char ch) { m_Data.push_back(ch); }
-        void Add(LPCWSTR str);
-        void AddNewLine() { Add(L'\n'); }
+
+        // Adds a null-terminated UTF-8 string.
+        void Add(const char* str);
+
+        // Adds an arbitrary byte span (not required, but very useful).
+        void Add(const char* data, size_t len);
+
+        void AddNewLine() { Add('\n'); }
+
         void AddNumber(UINT num);
         void AddNumber(UINT64 num);
+
+        // Pointer formatted as lowercase/uppercase hex digits (no 0x prefix),
+        // matching your old behavior.
         void AddPointer(const void* ptr);
 
     private:
+        static char HexDigitToChar(UINT8 v);
+
         Vector<char> m_Data;
     };
 
-#ifndef _D3D12MA_STRING_BUILDER_FUNCTIONS
-    void StringBuilder::Add(LPCWSTR str)
+#ifndef _D3D12MA_STRING_BUILDER_UTF8_FUNCTIONS
+
+    void StringBuilder::Add(const char* str)
     {
-        const size_t len = wcslen(str);
-        if (len > 0)
-        {
-            const size_t oldCount = m_Data.size();
-            m_Data.resize(oldCount + len);
-            memcpy(m_Data.data() + oldCount, str, len * sizeof(WCHAR));
-        }
+        if (!str) return;
+        const size_t len = strlen(str);
+        Add(str, len);
+    }
+
+    void StringBuilder::Add(const char* data, size_t len)
+    {
+        if (!data || len == 0) return;
+
+        const size_t oldCount = m_Data.size();
+        m_Data.resize(oldCount + len);
+        memcpy(m_Data.data() + oldCount, data, len);
     }
 
     void StringBuilder::AddNumber(UINT num)
     {
-        WCHAR buf[11];
-        buf[10] = L'\0';
-        WCHAR* p = &buf[10];
+        // Max UINT32 is 10 digits.
+        char buf[11];
+        buf[10] = '\0';
+        char* p = &buf[10];
+
         do
         {
-            *--p = L'0' + (num % 10);
+            *--p = char('0' + (num % 10));
             num /= 10;
         } while (num);
+
         Add(p);
     }
 
     void StringBuilder::AddNumber(UINT64 num)
     {
-        WCHAR buf[21];
-        buf[20] = L'\0';
-        WCHAR* p = &buf[20];
+        // Max UINT64 is 20 digits.
+        char buf[21];
+        buf[20] = '\0';
+        char* p = &buf[20];
+
         do
         {
-            *--p = L'0' + (num % 10);
+            *--p = char('0' + (num % 10));
             num /= 10;
         } while (num);
+
         Add(p);
+    }
+
+    char StringBuilder::HexDigitToChar(UINT8 v)
+    {
+        v &= 0xF;
+        return (v < 10) ? char('0' + v) : char('A' + (v - 10));
     }
 
     void StringBuilder::AddPointer(const void* ptr)
     {
-        WCHAR buf[21];
+        // Enough for 64-bit pointer in hex (16 digits) + '\0' (extra slack kept from original).
+        char buf[21];
         uintptr_t num = (uintptr_t)ptr;
-        buf[20] = L'\0';
-        WCHAR* p = &buf[20];
+
+        buf[20] = '\0';
+        char* p = &buf[20];
+
         do
         {
             *--p = HexDigitToChar((UINT8)(num & 0xF));
             num >>= 4;
         } while (num);
+
         Add(p);
     }
 
-#endif // _D3D12MA_STRING_BUILDER_FUNCTIONS
-#endif // _D3D12MA_STRING_BUILDER
+#endif // _D3D12MA_STRING_BUILDER_UTF8_FUNCTIONS
+#endif // _D3D12MA_STRING_BUILDER_UTF8
+
 
     inline std::wstring s2ws(const std::string& s) {
         int buffSize = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), NULL, 0);
@@ -1216,66 +1254,48 @@ namespace rhi::ma {
         return ws;
     }
 
-#ifndef _D3D12MA_JSON_WRITER
+#ifndef _D3D12MA_JSON_WRITER_UTF8
     /*
     Allows to conveniently build a correct JSON document to be written to the
     StringBuilder passed to the constructor.
+
+    This UTF-8 version:
+    - Accepts UTF-8 input strings (const char*).
+    - Emits UTF-8 JSON.
+    - Escapes JSON control characters and quotes/backslashes.
+    - Leaves valid non-ASCII UTF-8 bytes as-is (JSON is UTF-8 by default).
     */
     class JsonWriter
     {
     public:
-        // stringBuilder - string builder to write the document to. Must remain alive for the whole lifetime of this object.
         JsonWriter(const AllocationCallbacks& allocationCallbacks, StringBuilder& stringBuilder);
         ~JsonWriter();
 
-        // Begins object by writing "{".
-        // Inside an object, you must call pairs of WriteString and a value, e.g.:
-        // j.BeginObject(true); j.WriteString("A"); j.WriteNumber(1); j.WriteString("B"); j.WriteNumber(2); j.EndObject();
-        // Will write: { "A": 1, "B": 2 }
         void BeginObject(bool singleLine = false);
-        // Ends object by writing "}".
         void EndObject();
 
-        // Begins array by writing "[".
-        // Inside an array, you can write a sequence of any values.
         void BeginArray(bool singleLine = false);
-        // Ends array by writing "[".
         void EndArray();
 
-        // Writes a string value inside "".
-        // pStr can contain any UTF-16 characters, including '"', new line etc. - they will be properly escaped.
-        void WriteString(LPCWSTR pStr);
+        void WriteString(const char* pStr);
 
-        // Begins writing a string value.
-        // Call BeginString, ContinueString, ContinueString, ..., EndString instead of
-        // WriteString to conveniently build the string content incrementally, made of
-        // parts including numbers.
-        void BeginString(LPCWSTR pStr = NULL);
-        // Posts next part of an open string.
-        void ContinueString(LPCWSTR pStr);
-        // Posts next part of an open string. The number is converted to decimal characters.
+        void BeginString(const char* pStr = NULL);
+        void ContinueString(const char* pStr);
         void ContinueString(UINT num);
         void ContinueString(UINT64 num);
         void ContinueString_Pointer(const void* ptr);
-        // Posts next part of an open string. Pointer value is converted to characters
-        // using "%p" formatting - shown as hexadecimal number, e.g.: 000000081276Ad00
-        // void ContinueString_Pointer(const void* ptr);
-        // Ends writing a string value by writing '"'.
-        void EndString(LPCWSTR pStr = NULL);
+        void EndString(const char* pStr = NULL);
 
-        // Writes a number value.
         void WriteNumber(UINT num);
         void WriteNumber(UINT64 num);
-        // Writes a boolean value - false or true.
         void WriteBool(bool b);
-        // Writes a null value.
         void WriteNull();
 
         void AddAllocationToObject(const Allocation& alloc);
         void AddDetailedStatisticsInfoObject(const DetailedStatistics& stats);
 
     private:
-        static const WCHAR* const INDENT;
+        static const char* const INDENT;
 
         enum CollectionType
         {
@@ -1295,15 +1315,20 @@ namespace rhi::ma {
 
         void BeginValue(bool isString);
         void WriteIndent(bool oneLess = false);
+
+        // UTF-8 helpers
+        static bool DecodeUtf8CodePoint(const unsigned char* s, size_t* outLen, uint32_t* outCp);
+        void AppendEscapedUtf8(const char* s);
     };
 
-#ifndef _D3D12MA_JSON_WRITER_FUNCTIONS
-    const WCHAR* const JsonWriter::INDENT = L"  ";
+#ifndef _D3D12MA_JSON_WRITER_UTF8_FUNCTIONS
+    const char* const JsonWriter::INDENT = "  ";
 
     JsonWriter::JsonWriter(const AllocationCallbacks& allocationCallbacks, StringBuilder& stringBuilder)
         : m_SB(stringBuilder),
         m_Stack(allocationCallbacks),
-        m_InsideString(false) {
+        m_InsideString(false)
+    {
     }
 
     JsonWriter::~JsonWriter()
@@ -1317,7 +1342,7 @@ namespace rhi::ma {
         D3D12MA_ASSERT(!m_InsideString);
 
         BeginValue(false);
-        m_SB.Add(L'{');
+        m_SB.Add('{');
 
         StackItem stackItem;
         stackItem.type = COLLECTION_TYPE_OBJECT;
@@ -1333,7 +1358,7 @@ namespace rhi::ma {
         D3D12MA_ASSERT(m_Stack.back().valueCount % 2 == 0);
 
         WriteIndent(true);
-        m_SB.Add(L'}');
+        m_SB.Add('}');
 
         m_Stack.pop_back();
     }
@@ -1343,7 +1368,7 @@ namespace rhi::ma {
         D3D12MA_ASSERT(!m_InsideString);
 
         BeginValue(false);
-        m_SB.Add(L'[');
+        m_SB.Add('[');
 
         StackItem stackItem;
         stackItem.type = COLLECTION_TYPE_ARRAY;
@@ -1358,77 +1383,35 @@ namespace rhi::ma {
         D3D12MA_ASSERT(!m_Stack.empty() && m_Stack.back().type == COLLECTION_TYPE_ARRAY);
 
         WriteIndent(true);
-        m_SB.Add(L']');
+        m_SB.Add(']');
 
         m_Stack.pop_back();
     }
 
-    void JsonWriter::WriteString(LPCWSTR pStr)
+    void JsonWriter::WriteString(const char* pStr)
     {
         BeginString(pStr);
         EndString();
     }
 
-    void JsonWriter::BeginString(LPCWSTR pStr)
+    void JsonWriter::BeginString(const char* pStr)
     {
         D3D12MA_ASSERT(!m_InsideString);
 
         BeginValue(true);
         m_InsideString = true;
-        m_SB.Add(L'"');
+        m_SB.Add('"');
+
         if (pStr != NULL)
-        {
             ContinueString(pStr);
-        }
     }
 
-    void JsonWriter::ContinueString(LPCWSTR pStr)
+    void JsonWriter::ContinueString(const char* pStr)
     {
         D3D12MA_ASSERT(m_InsideString);
         D3D12MA_ASSERT(pStr);
 
-        for (const WCHAR* p = pStr; *p; ++p)
-        {
-            // the strings we encode are assumed to be in UTF-16LE format, the native
-            // windows wide character Unicode format. In this encoding Unicode code
-            // points U+0000 to U+D7FF and U+E000 to U+FFFF are encoded in two bytes,
-            // and everything else takes more than two bytes. We will reject any
-            // multi wchar character encodings for simplicity.
-            UINT val = (UINT)*p;
-            D3D12MA_ASSERT(((val <= 0xD7FF) || (0xE000 <= val && val <= 0xFFFF)) &&
-                "Character not currently supported.");
-            switch (*p)
-            {
-            case L'"':  m_SB.Add(L'\\'); m_SB.Add(L'"');  break;
-            case L'\\': m_SB.Add(L'\\'); m_SB.Add(L'\\'); break;
-            case L'/':  m_SB.Add(L'\\'); m_SB.Add(L'/');  break;
-            case L'\b': m_SB.Add(L'\\'); m_SB.Add(L'b');  break;
-            case L'\f': m_SB.Add(L'\\'); m_SB.Add(L'f');  break;
-            case L'\n': m_SB.Add(L'\\'); m_SB.Add(L'n');  break;
-            case L'\r': m_SB.Add(L'\\'); m_SB.Add(L'r');  break;
-            case L'\t': m_SB.Add(L'\\'); m_SB.Add(L't');  break;
-            default:
-                // conservatively use encoding \uXXXX for any Unicode character
-                // requiring more than one byte.
-                if (32 <= val && val < 256)
-                    m_SB.Add(*p);
-                else
-                {
-                    m_SB.Add(L'\\');
-                    m_SB.Add(L'u');
-                    for (UINT i = 0; i < 4; ++i)
-                    {
-                        UINT hexDigit = (val & 0xF000) >> 12;
-                        val <<= 4;
-                        if (hexDigit < 10)
-                            m_SB.Add(L'0' + (WCHAR)hexDigit);
-                        else
-                            m_SB.Add(L'A' + (WCHAR)hexDigit);
-                    }
-                }
-                break;
-            }
-        }
+        AppendEscapedUtf8(pStr);
     }
 
     void JsonWriter::ContinueString(UINT num)
@@ -1449,13 +1432,14 @@ namespace rhi::ma {
         m_SB.AddPointer(ptr);
     }
 
-    void JsonWriter::EndString(LPCWSTR pStr)
+    void JsonWriter::EndString(const char* pStr)
     {
         D3D12MA_ASSERT(m_InsideString);
 
         if (pStr)
             ContinueString(pStr);
-        m_SB.Add(L'"');
+
+        m_SB.Add('"');
         m_InsideString = false;
     }
 
@@ -1477,98 +1461,76 @@ namespace rhi::ma {
     {
         D3D12MA_ASSERT(!m_InsideString);
         BeginValue(false);
-        if (b)
-            m_SB.Add(L"true");
-        else
-            m_SB.Add(L"false");
+        m_SB.Add(b ? "true" : "false");
     }
 
     void JsonWriter::WriteNull()
     {
         D3D12MA_ASSERT(!m_InsideString);
         BeginValue(false);
-        m_SB.Add(L"null");
+        m_SB.Add("null");
     }
 
     void JsonWriter::AddAllocationToObject(const Allocation& alloc)
     {
-        WriteString(L"Type");
+        WriteString("Type");
         switch (alloc.m_PackedData.GetResourceDimension()) {
-        case ResourceType::Unknown:
-            WriteString(L"UNKNOWN");
-            break;
-        case ResourceType::Buffer:
-            WriteString(L"BUFFER");
-            break;
-        case ResourceType::Texture1D:
-            WriteString(L"TEXTURE1D");
-            break;
-        case ResourceType::Texture2D:
-            WriteString(L"TEXTURE2D");
-            break;
-        case ResourceType::Texture3D:
-            WriteString(L"TEXTURE3D");
-            break;
+        case ResourceType::Unknown:   WriteString("UNKNOWN");  break;
+        case ResourceType::Buffer:    WriteString("BUFFER");   break;
+        case ResourceType::Texture1D: WriteString("TEXTURE1D"); break;
+        case ResourceType::Texture2D: WriteString("TEXTURE2D"); break;
+        case ResourceType::Texture3D: WriteString("TEXTURE3D"); break;
         default: D3D12MA_ASSERT(0); break;
         }
 
-        WriteString(L"Size");
+        WriteString("Size");
         WriteNumber(alloc.GetSize());
-        WriteString(L"Usage");
+
+        WriteString("Usage");
         WriteNumber((UINT)alloc.m_PackedData.GetResourceFlags());
 
         void* privateData = alloc.GetPrivateData();
         if (privateData)
         {
-            WriteString(L"CustomData");
+            WriteString("CustomData");
             BeginString();
             ContinueString_Pointer(privateData);
             EndString();
         }
 
-        auto str = s2ws(alloc.GetName());
-        LPCWSTR name = str.c_str();
-        if (name != NULL)
+        // Assuming alloc.GetName() is UTF-8 already (std::string).
+        const std::string& nameStr = alloc.GetName();
+        if (!nameStr.empty())
         {
-            WriteString(L"Name");
-            WriteString(name);
+            WriteString("Name");
+            WriteString(nameStr.c_str());
         }
-        //if (alloc.m_PackedData.GetTextureLayout() != 0)
-        //{
-        WriteString(L"Layout");
+
+        WriteString("Layout");
         WriteNumber((UINT)alloc.m_PackedData.GetTextureLayout());
-        //}
     }
 
     void JsonWriter::AddDetailedStatisticsInfoObject(const DetailedStatistics& stats)
     {
         BeginObject();
 
-        WriteString(L"BlockCount");
-        WriteNumber(stats.stats.blockCount);
-        WriteString(L"BlockBytes");
-        WriteNumber(stats.stats.blockBytes);
-        WriteString(L"AllocationCount");
-        WriteNumber(stats.stats.allocationCount);
-        WriteString(L"AllocationBytes");
-        WriteNumber(stats.stats.allocationBytes);
-        WriteString(L"UnusedRangeCount");
-        WriteNumber(stats.unusedRangeCount);
+        WriteString("BlockCount");        WriteNumber(stats.stats.blockCount);
+        WriteString("BlockBytes");        WriteNumber(stats.stats.blockBytes);
+        WriteString("AllocationCount");   WriteNumber(stats.stats.allocationCount);
+        WriteString("AllocationBytes");   WriteNumber(stats.stats.allocationBytes);
+        WriteString("UnusedRangeCount");  WriteNumber(stats.unusedRangeCount);
 
         if (stats.stats.allocationCount > 1)
         {
-            WriteString(L"AllocationSizeMin");
-            WriteNumber(stats.allocationSizeMin);
-            WriteString(L"AllocationSizeMax");
-            WriteNumber(stats.allocationSizeMax);
+            WriteString("AllocationSizeMin"); WriteNumber(stats.allocationSizeMin);
+            WriteString("AllocationSizeMax"); WriteNumber(stats.allocationSizeMax);
         }
         if (stats.unusedRangeCount > 1)
         {
-            WriteString(L"UnusedRangeSizeMin");
-            WriteNumber(stats.unusedRangeSizeMin);
-            WriteString(L"UnusedRangeSizeMax");
-            WriteNumber(stats.unusedRangeSizeMax);
+            WriteString("UnusedRangeSizeMin"); WriteNumber(stats.unusedRangeSizeMin);
+            WriteString("UnusedRangeSizeMax"); WriteNumber(stats.unusedRangeSizeMax);
         }
+
         EndObject();
     }
 
@@ -1579,16 +1541,16 @@ namespace rhi::ma {
             StackItem& currItem = m_Stack.back();
             if (currItem.type == COLLECTION_TYPE_OBJECT && currItem.valueCount % 2 == 0)
             {
-                D3D12MA_ASSERT(isString);
+                D3D12MA_ASSERT(isString); // object keys must be strings
             }
 
             if (currItem.type == COLLECTION_TYPE_OBJECT && currItem.valueCount % 2 == 1)
             {
-                m_SB.Add(L':'); m_SB.Add(L' ');
+                m_SB.Add(':'); m_SB.Add(' ');
             }
             else if (currItem.valueCount > 0)
             {
-                m_SB.Add(L','); m_SB.Add(L' ');
+                m_SB.Add(','); m_SB.Add(' ');
                 WriteIndent();
             }
             else
@@ -1607,17 +1569,135 @@ namespace rhi::ma {
 
             size_t count = m_Stack.size();
             if (count > 0 && oneLess)
-            {
                 --count;
-            }
+
             for (size_t i = 0; i < count; ++i)
-            {
                 m_SB.Add(INDENT);
-            }
         }
     }
-#endif // _D3D12MA_JSON_WRITER_FUNCTIONS
-#endif // _D3D12MA_JSON_WRITER
+
+    // ---- UTF-8 escaping ----
+    //
+    // We only *need* to escape: control chars (< 0x20), backslash, quote.
+    // We also escape U+2028/U+2029 for JS-safety (optional but common).
+    //
+    // For invalid UTF-8 sequences, this implementation:
+    // - asserts in debug
+    // - emits \uFFFD replacement in release-like behavior.
+
+    bool JsonWriter::DecodeUtf8CodePoint(const unsigned char* s, size_t* outLen, uint32_t* outCp)
+    {
+        // Returns true if valid; outLen is 1..4.
+        const unsigned char b0 = s[0];
+        if (b0 < 0x80)
+        {
+            *outLen = 1;
+            *outCp = b0;
+            return true;
+        }
+
+        auto isCont = [](unsigned char b) { return (b & 0xC0) == 0x80; };
+
+        if ((b0 & 0xE0) == 0xC0) // 2 bytes
+        {
+            const unsigned char b1 = s[1];
+            if (!isCont(b1)) return false;
+            uint32_t cp = ((b0 & 0x1F) << 6) | (b1 & 0x3F);
+            if (cp < 0x80) return false; // overlong
+            *outLen = 2; *outCp = cp; return true;
+        }
+        if ((b0 & 0xF0) == 0xE0) // 3 bytes
+        {
+            const unsigned char b1 = s[1], b2 = s[2];
+            if (!isCont(b1) || !isCont(b2)) return false;
+            uint32_t cp = ((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F);
+            if (cp < 0x800) return false;                 // overlong
+            if (0xD800 <= cp && cp <= 0xDFFF) return false; // UTF-16 surrogate range invalid in UTF-8
+            *outLen = 3; *outCp = cp; return true;
+        }
+        if ((b0 & 0xF8) == 0xF0) // 4 bytes
+        {
+            const unsigned char b1 = s[1], b2 = s[2], b3 = s[3];
+            if (!isCont(b1) || !isCont(b2) || !isCont(b3)) return false;
+            uint32_t cp = ((b0 & 0x07) << 18) | ((b1 & 0x3F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F);
+            if (cp < 0x10000) return false; // overlong
+            if (cp > 0x10FFFF) return false;
+            *outLen = 4; *outCp = cp; return true;
+        }
+
+        return false;
+    }
+
+    void JsonWriter::AppendEscapedUtf8(const char* s)
+    {
+        const unsigned char* p = (const unsigned char*)s;
+
+        while (*p)
+        {
+            const unsigned char b = *p;
+
+            // Fast-path ASCII
+            if (b < 0x80)
+            {
+                switch (b)
+                {
+                case '\"': m_SB.Add('\\'); m_SB.Add('\"'); break;
+                case '\\': m_SB.Add('\\'); m_SB.Add('\\'); break;
+                case '/':  m_SB.Add('\\'); m_SB.Add('/');  break;
+                case '\b': m_SB.Add('\\'); m_SB.Add('b');  break;
+                case '\f': m_SB.Add('\\'); m_SB.Add('f');  break;
+                case '\n': m_SB.Add('\\'); m_SB.Add('n');  break;
+                case '\r': m_SB.Add('\\'); m_SB.Add('r');  break;
+                case '\t': m_SB.Add('\\'); m_SB.Add('t');  break;
+                default:
+                    if (b < 0x20)
+                    {
+                        // \u00XX
+                        static const char hex[] = "0123456789ABCDEF";
+                        m_SB.Add('\\'); m_SB.Add('u'); m_SB.Add('0'); m_SB.Add('0');
+                        m_SB.Add(hex[(b >> 4) & 0xF]);
+                        m_SB.Add(hex[b & 0xF]);
+                    }
+                    else
+                    {
+                        m_SB.Add((char)b);
+                    }
+                    break;
+                }
+                ++p;
+                continue;
+            }
+
+            // Non-ASCII: validate and copy UTF-8 sequence as-is (or escape some code points)
+            size_t len = 0;
+            uint32_t cp = 0;
+            if (!DecodeUtf8CodePoint(p, &len, &cp))
+            {
+                D3D12MA_ASSERT(false && "Invalid UTF-8 in JsonWriter::ContinueString");
+                // Emit U+FFFD replacement: \uFFFD
+                m_SB.Add('\\'); m_SB.Add('u'); m_SB.Add('F'); m_SB.Add('F'); m_SB.Add('F'); m_SB.Add('D');
+                ++p; // advance one byte to avoid infinite loop
+                continue;
+            }
+
+            // Optional JS-safety: escape U+2028 and U+2029
+            if (cp == 0x2028 || cp == 0x2029)
+            {
+                m_SB.Add('\\'); m_SB.Add('u'); m_SB.Add('2'); m_SB.Add('0'); m_SB.Add('2');
+                m_SB.Add(cp == 0x2028 ? '8' : '9');
+            }
+            else
+            {
+                // Copy original bytes
+                for (size_t i = 0; i < len; ++i)
+                    m_SB.Add((char)p[i]);
+            }
+
+            p += len;
+        }
+    }
+#endif // _D3D12MA_JSON_WRITER_UTF8_FUNCTIONS
+#endif // _D3D12MA_JSON_WRITER_UTF8
 
 #ifndef _D3D12MA_POOL_ALLOCATOR
     /*
@@ -2939,19 +3019,19 @@ namespace rhi::ma {
     void BlockMetadata::PrintDetailedMap_Begin(JsonWriter& json,
         UINT64 unusedBytes, size_t allocationCount, size_t unusedRangeCount) const
     {
-        json.WriteString(L"TotalBytes");
+        json.WriteString("TotalBytes");
         json.WriteNumber(GetSize());
 
-        json.WriteString(L"UnusedBytes");
+        json.WriteString("UnusedBytes");
         json.WriteNumber(unusedBytes);
 
-        json.WriteString(L"Allocations");
+        json.WriteString("Allocations");
         json.WriteNumber((UINT64)allocationCount);
 
-        json.WriteString(L"UnusedRanges");
+        json.WriteString("UnusedRanges");
         json.WriteNumber((UINT64)unusedRangeCount);
 
-        json.WriteString(L"Suballocations");
+        json.WriteString("Suballocations");
         json.BeginArray();
     }
 
@@ -2960,16 +3040,16 @@ namespace rhi::ma {
     {
         json.BeginObject(true);
 
-        json.WriteString(L"Offset");
+        json.WriteString("Offset");
         json.WriteNumber(offset);
 
         if (IsVirtual())
         {
-            json.WriteString(L"Size");
+            json.WriteString("Size");
             json.WriteNumber(size);
             if (privateData)
             {
-                json.WriteString(L"CustomData");
+                json.WriteString("CustomData");
                 json.WriteNumber((uintptr_t)privateData);
             }
         }
@@ -2987,13 +3067,13 @@ namespace rhi::ma {
     {
         json.BeginObject(true);
 
-        json.WriteString(L"Offset");
+        json.WriteString("Offset");
         json.WriteNumber(offset);
 
-        json.WriteString(L"Type");
-        json.WriteString(L"FREE");
+        json.WriteString("Type");
+        json.WriteString("FREE");
 
-        json.WriteString(L"Size");
+        json.WriteString("Size");
         json.WriteNumber(size);
 
         json.EndObject();
@@ -6598,20 +6678,20 @@ Synchronized internally with a mutex.
             JsonWriter json(GetAllocs(), sb);
             json.BeginObject();
             {
-                json.WriteString(L"General");
+                json.WriteString("General");
                 json.BeginObject();
                 {
-                    json.WriteString(L"API");
-                    json.WriteString(L"Direct3D 12");
+                    json.WriteString("API");
+                    json.WriteString("Direct3D 12");
 
-                    json.WriteString(L"GPU");
-                    json.WriteString(s2ws(m_adapterFeatureInfo.name).c_str());
+                    json.WriteString("GPU");
+                    json.WriteString(m_adapterFeatureInfo.name);
 
-                    json.WriteString(L"DedicatedVideoMemory");
+                    json.WriteString("DedicatedVideoMemory");
                     json.WriteNumber((UINT64)m_adapterFeatureInfo.dedicatedVideoMemory);
-                    json.WriteString(L"DedicatedSystemMemory");
+                    json.WriteString("DedicatedSystemMemory");
                     json.WriteNumber((UINT64)m_adapterFeatureInfo.dedicatedSystemMemory);
-                    json.WriteString(L"SharedSystemMemory");
+                    json.WriteString("SharedSystemMemory");
                     json.WriteNumber((UINT64)m_adapterFeatureInfo.sharedSystemMemory);
 
                     //json.WriteString(L"ResourceHeapTier");
@@ -6623,83 +6703,83 @@ Synchronized internally with a mutex.
                     //json.WriteString(L"TiledResourcesTier");
                     //json.WriteNumber(static_cast<UINT>(m_D3D12Options.TiledResourcesTier));
 
-                    json.WriteString(L"TileBasedRenderer");
+                    json.WriteString("TileBasedRenderer");
                     json.WriteBool(m_tileBasedRenderer);
 
-                    json.WriteString(L"UMA");
+                    json.WriteString("UMA");
                     json.WriteBool(m_UMA);
-                    json.WriteString(L"CacheCoherentUMA");
+                    json.WriteString("CacheCoherentUMA");
                     json.WriteBool(m_CacheCoherentUMA);
 
-                    json.WriteString(L"GPUUploadHeapSupported");
+                    json.WriteString("GPUUploadHeapSupported");
                     json.WriteBool(m_GPUUploadHeapSupported != FALSE);
 
-                    json.WriteString(L"TightAlignmentSupported");
+                    json.WriteString("TightAlignmentSupported");
                     json.WriteBool(m_TightAlignmentSupported != FALSE);
                 }
                 json.EndObject();
             }
             {
-                json.WriteString(L"Total");
+                json.WriteString("Total");
                 json.AddDetailedStatisticsInfoObject(stats.total);
             }
             {
-                json.WriteString(L"MemoryInfo");
+                json.WriteString("MemoryInfo");
                 json.BeginObject();
                 {
-                    json.WriteString(L"L0");
+                    json.WriteString("L0");
                     json.BeginObject();
                     {
-                        json.WriteString(L"Budget");
+                        json.WriteString("Budget");
                         WriteBudgetToJson(json, IsUMA() ? localBudget : nonLocalBudget); // When UMA device only L0 present as local
 
-                        json.WriteString(L"Stats");
+                        json.WriteString("Stats");
                         json.AddDetailedStatisticsInfoObject(stats.memorySegmentGroup[!IsUMA()]);
 
-                        json.WriteString(L"MemoryPools");
+                        json.WriteString("MemoryPools");
                         json.BeginObject();
                         {
                             if (IsUMA())
                             {
-                                json.WriteString(L"DEFAULT");
+                                json.WriteString("DEFAULT");
                                 json.BeginObject();
                                 {
-                                    json.WriteString(L"Stats");
+                                    json.WriteString("Stats");
                                     json.AddDetailedStatisticsInfoObject(stats.heapType[0]);
                                 }
                                 json.EndObject();
 
                                 if (IsGPUUploadHeapSupported())
                                 {
-                                    json.WriteString(L"GPU_UPLOAD");
+                                    json.WriteString("GPU_UPLOAD");
                                     json.BeginObject();
                                     {
-                                        json.WriteString(L"Stats");
+                                        json.WriteString("Stats");
                                         json.AddDetailedStatisticsInfoObject(stats.heapType[4]);
                                     }
                                     json.EndObject();
                                 }
                             }
-                            json.WriteString(L"UPLOAD");
+                            json.WriteString("UPLOAD");
                             json.BeginObject();
                             {
-                                json.WriteString(L"Stats");
+                                json.WriteString("Stats");
                                 json.AddDetailedStatisticsInfoObject(stats.heapType[1]);
                             }
                             json.EndObject();
 
-                            json.WriteString(L"READBACK");
+                            json.WriteString("READBACK");
                             json.BeginObject();
                             {
-                                json.WriteString(L"Stats");
+                                json.WriteString("Stats");
                                 json.AddDetailedStatisticsInfoObject(stats.heapType[2]);
                             }
                             json.EndObject();
 
-                            json.WriteString(L"CUSTOM");
+                            json.WriteString("CUSTOM");
                             json.BeginObject();
                             {
-                                json.WriteString(L"Stats");
+                                json.WriteString("Stats");
                                 json.AddDetailedStatisticsInfoObject(customHeaps[!IsUMA()]);
                             }
                             json.EndObject();
@@ -6709,41 +6789,41 @@ Synchronized internally with a mutex.
                     json.EndObject();
                     if (!IsUMA())
                     {
-                        json.WriteString(L"L1");
+                        json.WriteString("L1");
                         json.BeginObject();
                         {
-                            json.WriteString(L"Budget");
+                            json.WriteString("Budget");
                             WriteBudgetToJson(json, localBudget);
 
-                            json.WriteString(L"Stats");
+                            json.WriteString("Stats");
                             json.AddDetailedStatisticsInfoObject(stats.memorySegmentGroup[0]);
 
-                            json.WriteString(L"MemoryPools");
+                            json.WriteString("MemoryPools");
                             json.BeginObject();
                             {
-                                json.WriteString(L"DEFAULT");
+                                json.WriteString("DEFAULT");
                                 json.BeginObject();
                                 {
-                                    json.WriteString(L"Stats");
+                                    json.WriteString("Stats");
                                     json.AddDetailedStatisticsInfoObject(stats.heapType[0]);
                                 }
                                 json.EndObject();
 
                                 if (IsGPUUploadHeapSupported())
                                 {
-                                    json.WriteString(L"GPU_UPLOAD");
+                                    json.WriteString("GPU_UPLOAD");
                                     json.BeginObject();
                                     {
-                                        json.WriteString(L"Stats");
+                                        json.WriteString("Stats");
                                         json.AddDetailedStatisticsInfoObject(stats.heapType[4]);
                                     }
                                     json.EndObject();
                                 }
 
-                                json.WriteString(L"CUSTOM");
+                                json.WriteString("CUSTOM");
                                 json.BeginObject();
                                 {
-                                    json.WriteString(L"Stats");
+                                    json.WriteString("Stats");
                                     json.AddDetailedStatisticsInfoObject(customHeaps[0]);
                                 }
                                 json.EndObject();
@@ -6763,21 +6843,21 @@ Synchronized internally with a mutex.
                         D3D12MA_ASSERT(blockVector);
 
                         HeapFlags flags = blockVector->GetHeapFlags();
-                        json.WriteString(L"Flags");
+                        json.WriteString("Flags");
                         json.BeginArray(true);
                         {
                             if (Any(flags & HeapFlags::Shared))
-                                json.WriteString(L"HEAP_FLAG_SHARED");
+                                json.WriteString("HEAP_FLAG_SHARED");
                             if (Any(flags & HeapFlags::AllowDisplay))
-                                json.WriteString(L"HEAP_FLAG_ALLOW_DISPLAY");
+                                json.WriteString("HEAP_FLAG_ALLOW_DISPLAY");
                             if (Any(flags & HeapFlags::SharedCrossAdapter))
-                                json.WriteString(L"HEAP_FLAG_CROSS_ADAPTER");
+                                json.WriteString("HEAP_FLAG_CROSS_ADAPTER");
                             if (Any(flags & HeapFlags::HardwareProtected))
-                                json.WriteString(L"HEAP_FLAG_HARDWARE_PROTECTED");
+                                json.WriteString("HEAP_FLAG_HARDWARE_PROTECTED");
                             if (Any(flags & HeapFlags::AllowWriteWatch))
-                                json.WriteString(L"HEAP_FLAG_ALLOW_WRITE_WATCH");
+                                json.WriteString("HEAP_FLAG_ALLOW_WRITE_WATCH");
                             if (Any(flags & HeapFlags::AllowCrossAdapterShaderAtomics))
-                                json.WriteString(L"HEAP_FLAG_ALLOW_SHADER_ATOMICS");
+                                json.WriteString("HEAP_FLAG_ALLOW_SHADER_ATOMICS");
 #ifdef __ID3D12Device8_INTERFACE_DEFINED__
                             if (Any(flags & HeapFlags::CreateNotResident))
                                 json.WriteString(L"HEAP_FLAG_CREATE_NOT_RESIDENT");
@@ -6786,11 +6866,11 @@ Synchronized internally with a mutex.
 #endif
 
                             if (Any(flags & HeapFlags::DenyBuffers))
-                                json.WriteString(L"HEAP_FLAG_DENY_BUFFERS");
+                                json.WriteString("HEAP_FLAG_DENY_BUFFERS");
                             if (Any(flags & HeapFlags::DenyRtDsTextures))
-                                json.WriteString(L"HEAP_FLAG_DENY_RT_DS_TEXTURES");
+                                json.WriteString("HEAP_FLAG_DENY_RT_DS_TEXTURES");
                             if (Any(flags & HeapFlags::DenyNonRtDsTextures))
-                                json.WriteString(L"HEAP_FLAG_DENY_NON_RT_DS_TEXTURES");
+                                json.WriteString("HEAP_FLAG_DENY_NON_RT_DS_TEXTURES");
 
                             flags &= ~(HeapFlags::Shared
                                 | HeapFlags::DenyBuffers
@@ -6811,8 +6891,8 @@ Synchronized internally with a mutex.
                             if (customHeap)
                             {
                                 const HeapProperties& properties = blockVector->GetHeapProperties();
-                                json.WriteString(L"MEMORY_POOL_UNKNOWN");
-                                json.WriteString(L"CPU_PAGE_PROPERTY_UNKNOWN");
+                                json.WriteString("MEMORY_POOL_UNKNOWN");
+                                json.WriteString("CPU_PAGE_PROPERTY_UNKNOWN");
                                 //switch (properties.memoryPoolPreference)
                                 //{
                                 //default:
@@ -6848,20 +6928,20 @@ Synchronized internally with a mutex.
                         }
                         json.EndArray();
 
-                        json.WriteString(L"PreferredBlockSize");
+                        json.WriteString("PreferredBlockSize");
                         json.WriteNumber(blockVector->GetPreferredBlockSize());
 
-                        json.WriteString(L"Blocks");
+                        json.WriteString("Blocks");
                         blockVector->WriteBlockInfoToJson(json);
 
-                        json.WriteString(L"DedicatedAllocations");
+                        json.WriteString("DedicatedAllocations");
                         json.BeginArray();
                         if (committedAllocs)
                             committedAllocs->BuildStatsString(json);
                         json.EndArray();
                     };
 
-                json.WriteString(L"DefaultPools");
+                json.WriteString("DefaultPools");
                 json.BeginObject();
                 {
                     if (true/*SupportsResourceHeapTier2()*/) // TODO
@@ -6880,10 +6960,10 @@ Synchronized internally with a mutex.
                         {
                             for (uint8_t heapSubType = 0; heapSubType < 3; ++heapSubType)
                             {
-                                static const WCHAR* const heapSubTypeName[] = {
-                                    L" - Buffers",
-                                    L" - Textures",
-                                    L" - Textures RT/DS",
+                                static const char* const heapSubTypeName[] = {
+                                    " - Buffers",
+                                    " - Textures",
+                                    " - Textures RT/DS",
                                 };
                                 json.BeginString(StandardHeapTypeNames[heapType]);
                                 json.EndString(heapSubTypeName[heapSubType]);
@@ -6897,7 +6977,7 @@ Synchronized internally with a mutex.
                 }
                 json.EndObject();
 
-                json.WriteString(L"CustomPools");
+                json.WriteString("CustomPools");
                 json.BeginObject();
                 for (uint8_t heapTypeIndex = 0; heapTypeIndex < HEAP_TYPE_COUNT; ++heapTypeIndex)
                 {
@@ -6911,13 +6991,13 @@ Synchronized internally with a mutex.
                         do
                         {
                             json.BeginObject();
-                            json.WriteString(L"Name");
+                            json.WriteString("Name");
                             json.BeginString();
                             json.ContinueString(index++);
                             if (item->GetName())
                             {
-                                json.ContinueString(L" - ");
-                                json.ContinueString(s2ws(item->GetName()).c_str());
+                                json.ContinueString(" - ");
+                                json.ContinueString(item->GetName());
                             }
                             json.EndString();
 
@@ -6934,9 +7014,11 @@ Synchronized internally with a mutex.
 
         const size_t length = sb.GetLength();
         char* result = AllocateArray<char>(GetAllocs(), length + 2);
-        result[0] = 0xFEFF;
-        memcpy(result + 1, sb.GetData(), length * sizeof(char));
-        result[length + 1] = '\0';
+        result[0] = static_cast<char>(0xEF);
+        result[1] = static_cast<char>(0xBB);
+        result[2] = static_cast<char>(0xBF);
+        memcpy(result + 3, sb.GetData(), length);
+        result[length + 3] = '\0';
 
         *ppStatsString = result;
     }
@@ -7379,9 +7461,9 @@ Synchronized internally with a mutex.
     {
         json.BeginObject();
         {
-            json.WriteString(L"BudgetBytes");
+            json.WriteString("BudgetBytes");
             json.WriteNumber(budget.budgetBytes);
-            json.WriteString(L"UsageBytes");
+            json.WriteString("UsageBytes");
             json.WriteNumber(budget.usageBytes);
         }
         json.EndObject();
@@ -7411,11 +7493,11 @@ Synchronized internally with a mutex.
         case VirtualBlockFlags::AlgorithmLinear:
             m_Metadata = D3D12MA_NEW(allocationCallbacks, BlockMetadata_Linear)(&m_AllocationCallbacks, true);
             break;
-        default:
-            D3D12MA_ASSERT(0);
-        case 0:
+        case VirtualBlockFlags::None :
             m_Metadata = D3D12MA_NEW(allocationCallbacks, BlockMetadata_TLSF)(&m_AllocationCallbacks, true);
             break;
+        default:
+            D3D12MA_ASSERT(0);
         }
         m_Metadata->Init(m_Size);
     }
@@ -8293,7 +8375,7 @@ Synchronized internally with a mutex.
                     prevCount = vector->GetBlockCount();
                     freedBlockSize = move.pDstTmpAllocation->GetBlock()->m_pMetadata->GetSize();
                 }
-                move.pDstTmpAllocation->Reset();
+                move.pDstTmpAllocation->ReleaseThis(); // TODO: Are these ReleaseThis calls acceptable? Original uses refcounted ptrs.
                 {
                     MutexLockRead lock(vector->GetMutex(), vector->m_hAllocator->UseMutex());
                     currentCount = vector->GetBlockCount();
@@ -8306,7 +8388,7 @@ Synchronized internally with a mutex.
             {
                 m_PassStats.bytesMoved -= move.pSrcAllocation->GetSize();
                 --m_PassStats.allocationsMoved;
-                move.pDstTmpAllocation->Reset();
+                move.pDstTmpAllocation->ReleaseThis();
 
                 NormalBlock* newBlock = move.pSrcAllocation->GetBlock();
                 bool notPresent = true;
@@ -8332,7 +8414,7 @@ Synchronized internally with a mutex.
                     prevCount = vector->GetBlockCount();
                     freedBlockSize = move.pSrcAllocation->GetBlock()->m_pMetadata->GetSize();
                 }
-                move.pSrcAllocation->Reset();
+                move.pSrcAllocation->ReleaseThis();
                 {
                     MutexLockRead lock(vector->GetMutex(), vector->m_hAllocator->UseMutex());
                     currentCount = vector->GetBlockCount();
@@ -8344,7 +8426,7 @@ Synchronized internally with a mutex.
                     MutexLockRead lock(vector->GetMutex(), vector->m_hAllocator->UseMutex());
                     dstBlockSize = move.pDstTmpAllocation->GetBlock()->m_pMetadata->GetSize();
                 }
-                move.pDstTmpAllocation->Reset();
+                move.pDstTmpAllocation->ReleaseThis();
                 {
                     MutexLockRead lock(vector->GetMutex(), vector->m_hAllocator->UseMutex());
                     freedBlockSize += dstBlockSize * (currentCount - vector->GetBlockCount());
@@ -8928,7 +9010,7 @@ Synchronized internally with a mutex.
 		m_resource = pResource;
     }
 
-    HeapHandle Allocation::GetHeap() const
+    HeapHandle Allocation::GetHeap() const noexcept
     {
         switch (m_PackedData.GetType())
         {
@@ -8944,7 +9026,7 @@ Synchronized internally with a mutex.
         }
     }
 
-    void Allocation::SetName(const char* Name)
+    void Allocation::SetName(const char* Name) noexcept
     {
         FreeName();
 
@@ -9030,7 +9112,7 @@ Synchronized internally with a mutex.
         m_Placed.block->m_pMetadata->SetAllocationPrivateData(m_Placed.allocHandle, this);
     }
 
-    AllocHandle Allocation::GetAllocHandle() const
+    AllocHandle Allocation::GetAllocHandle() const noexcept
     {
         switch (m_PackedData.GetType())
         {
@@ -9081,19 +9163,19 @@ Synchronized internally with a mutex.
 #endif // _D3D12MA_ALLOCATION_FUNCTIONS
 
 #ifndef _D3D12MA_DEFRAGMENTATION_CONTEXT_FUNCTIONS
-    Result DefragmentationContext::BeginPass(DefragmentationPassMoveInfo* pPassInfo)
+    Result DefragmentationContext::BeginPass(DefragmentationPassMoveInfo* pPassInfo) noexcept
     {
         D3D12MA_ASSERT(pPassInfo);
         return m_Pimpl->DefragmentPassBegin(*pPassInfo);
     }
 
-    Result DefragmentationContext::EndPass(DefragmentationPassMoveInfo* pPassInfo)
+    Result DefragmentationContext::EndPass(DefragmentationPassMoveInfo* pPassInfo) noexcept
     {
         D3D12MA_ASSERT(pPassInfo);
         return m_Pimpl->DefragmentPassEnd(*pPassInfo);
     }
 
-    void DefragmentationContext::GetStats(DefragmentationStats* pStats)
+    void DefragmentationContext::GetStats(DefragmentationStats* pStats) noexcept
     {
         D3D12MA_ASSERT(pStats);
         m_Pimpl->GetStats(*pStats);
@@ -9117,37 +9199,37 @@ Synchronized internally with a mutex.
 #endif // _D3D12MA_DEFRAGMENTATION_CONTEXT_FUNCTIONS
 
 #ifndef _D3D12MA_POOL_FUNCTIONS
-    PoolDesc Pool::GetDesc() const
+    PoolDesc Pool::GetDesc() const noexcept
     {
         return m_Pimpl->GetDesc();
     }
 
-    void Pool::GetStatistics(Statistics* pStats)
+    void Pool::GetStatistics(Statistics* pStats) noexcept
     {
         D3D12MA_ASSERT(pStats);
         D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
             m_Pimpl->GetStatistics(*pStats);
     }
 
-    void Pool::CalculateStatistics(DetailedStatistics* pStats)
+    void Pool::CalculateStatistics(DetailedStatistics* pStats) noexcept
     {
         D3D12MA_ASSERT(pStats);
         D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
             m_Pimpl->CalculateStatistics(*pStats);
     }
 
-    void Pool::SetName(const char* Name)
+    void Pool::SetName(const char* Name) noexcept
     {
         D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
             m_Pimpl->SetName(Name);
     }
 
-    const char* Pool::GetName() const
+    const char* Pool::GetName() const noexcept
     {
         return m_Pimpl->GetName();
     }
 
-    Result Pool::BeginDefragmentation(const DefragmentationDesc* pDesc, DefragmentationContext** ppContext)
+    Result Pool::BeginDefragmentation(const DefragmentationDesc* pDesc, DefragmentationContext** ppContext) noexcept
     {
         D3D12MA_ASSERT(pDesc && ppContext);
 
@@ -9219,7 +9301,7 @@ Synchronized internally with a mutex.
         UINT32 NumCastableFormats,
         const Format* pCastableFormats,
         Allocation** ppAllocation,
-        ResourcePtr& out)
+        ResourcePtr& out) noexcept
     {
         if (!pAllocDesc || !pResourceDesc || !ppAllocation)
         {
@@ -9237,7 +9319,7 @@ Synchronized internally with a mutex.
     Result Allocator::AllocateMemory( // TODO: Why did original use ptrs?
         const AllocationDesc& pAllocDesc,
         const ResourceAllocationInfo& pAllocInfo,
-        Allocation* ppAllocation)
+        Allocation* ppAllocation) noexcept
     {
         if (!ValidateAllocateMemoryParameters(&pAllocDesc, &pAllocInfo, &ppAllocation))
         {
@@ -9273,7 +9355,7 @@ Synchronized internally with a mutex.
 
     Result Allocator::CreatePool(
         const PoolDesc* pPoolDesc,
-        Pool** ppPool)
+        Pool** ppPool) noexcept
     {
         if (!pPoolDesc || !ppPool ||
             (pPoolDesc->maxBlockCount > 0 && pPoolDesc->maxBlockCount < pPoolDesc->minBlockCount) ||
@@ -9308,13 +9390,13 @@ Synchronized internally with a mutex.
         return hr;
     }
 
-    void Allocator::SetCurrentFrameIndex(UINT frameIndex)
+    void Allocator::SetCurrentFrameIndex(UINT frameIndex) noexcept
     {
         D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
             m_Pimpl->SetCurrentFrameIndex(frameIndex);
     }
 
-    void Allocator::GetBudget(Budget* pLocalBudget, Budget* pNonLocalBudget)
+    void Allocator::GetBudget(Budget* pLocalBudget, Budget* pNonLocalBudget) noexcept
     {
         if (pLocalBudget == NULL && pNonLocalBudget == NULL)
         {
@@ -9324,21 +9406,21 @@ Synchronized internally with a mutex.
             m_Pimpl->GetBudget(pLocalBudget, pNonLocalBudget);
     }
 
-    void Allocator::CalculateStatistics(TotalStatistics* pStats)
+    void Allocator::CalculateStatistics(TotalStatistics* pStats) noexcept
     {
         D3D12MA_ASSERT(pStats);
         D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
             m_Pimpl->CalculateStatistics(*pStats);
     }
 
-    void Allocator::BuildStatsString(char** ppStatsString, bool detailedMap) const
+    void Allocator::BuildStatsString(char** ppStatsString, bool detailedMap) const noexcept
     {
         D3D12MA_ASSERT(ppStatsString);
         D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
             m_Pimpl->BuildStatsString(ppStatsString, detailedMap);
     }
 
-    void Allocator::FreeStatsString(char* pStatsString) const
+    void Allocator::FreeStatsString(char* pStatsString) const noexcept
     {
         if (pStatsString != NULL)
         {
@@ -9347,7 +9429,7 @@ Synchronized internally with a mutex.
         }
     }
 
-    void Allocator::BeginDefragmentation(const DefragmentationDesc* pDesc, DefragmentationContext** ppContext)
+    void Allocator::BeginDefragmentation(const DefragmentationDesc* pDesc, DefragmentationContext** ppContext) noexcept
     {
         D3D12MA_ASSERT(pDesc && ppContext);
 
@@ -9378,61 +9460,61 @@ Synchronized internally with a mutex.
             return m_Pimpl->m_Metadata->IsEmpty() ? TRUE : FALSE;
     }
 
-    void VirtualBlock::GetAllocationInfo(VirtualAllocation allocation, VirtualAllocationInfo* pInfo) const
+    void VirtualBlock::GetAllocationInfo(VirtualAllocation allocation, VirtualAllocationInfo* pInfo) const noexcept
     {
-        D3D12MA_ASSERT(allocation.AllocHandle != (AllocHandle)0 && pInfo);
+        D3D12MA_ASSERT(allocation.handle != (AllocHandle)0 && pInfo);
 
         D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
-            m_Pimpl->m_Metadata->GetAllocationInfo(allocation.AllocHandle, *pInfo);
+            m_Pimpl->m_Metadata->GetAllocationInfo(allocation.handle, *pInfo);
     }
 
-    HRESULT VirtualBlock::Allocate(const VIRTUAL_ALLOCATION_DESC* pDesc, VirtualAllocation* pAllocation, UINT64* pOffset)
+    Result VirtualBlock::Allocate(const VirtualAllocationDesc* pDesc, VirtualAllocation* pAllocation, UINT64* pOffset) noexcept
     {
-        if (!pDesc || !pAllocation || pDesc->Size == 0 || !IsPow2(pDesc->Alignment))
+        if (!pDesc || !pAllocation || pDesc->size == 0 || !IsPow2(pDesc->alignment))
         {
             D3D12MA_ASSERT(0 && "Invalid arguments passed to VirtualBlock::Allocate.");
-            return E_INVALIDARG;
+            return Result::InvalidArgument;
         }
 
         D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
 
-            const UINT64 alignment = pDesc->Alignment != 0 ? pDesc->Alignment : 1;
+            const UINT64 alignment = pDesc->alignment != 0 ? pDesc->alignment : 1;
         AllocationRequest allocRequest = {};
         if (m_Pimpl->m_Metadata->CreateAllocationRequest(
-            pDesc->Size,
+            pDesc->size,
             alignment,
-            pDesc->Flags & VIRTUAL_ALLOCATION_FLAG_UPPER_ADDRESS,
-            pDesc->Flags & VIRTUAL_ALLOCATION_FLAG_STRATEGY_MASK,
+            pDesc->flags & VirtualAllocationFlagsUpperAddress,
+            pDesc->flags & VirtualAllocationFlagsStrategyMask,
             &allocRequest))
         {
-            m_Pimpl->m_Metadata->Alloc(allocRequest, pDesc->Size, pDesc->pPrivateData);
+            m_Pimpl->m_Metadata->Alloc(allocRequest, pDesc->size, pDesc->privateData);
             D3D12MA_HEAVY_ASSERT(m_Pimpl->m_Metadata->Validate());
-            pAllocation->AllocHandle = allocRequest.allocHandle;
+            pAllocation->handle = allocRequest.allocHandle;
 
             if (pOffset)
                 *pOffset = m_Pimpl->m_Metadata->GetAllocationOffset(allocRequest.allocHandle);
-            return S_OK;
+            return Result::Ok;
         }
 
-        pAllocation->AllocHandle = (AllocHandle)0;
+        pAllocation->handle = (AllocHandle)0;
         if (pOffset)
             *pOffset = UINT64_MAX;
 
-        return E_OUTOFMEMORY;
+        return Result::OutOfMemory;
     }
 
-    void VirtualBlock::FreeAllocation(VirtualAllocation allocation)
+    void VirtualBlock::FreeAllocation(VirtualAllocation allocation) noexcept
     {
-        if (allocation.AllocHandle == (AllocHandle)0)
+        if (allocation.handle == (AllocHandle)0)
             return;
 
         D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
 
-            m_Pimpl->m_Metadata->Free(allocation.AllocHandle);
+            m_Pimpl->m_Metadata->Free(allocation.handle);
         D3D12MA_HEAVY_ASSERT(m_Pimpl->m_Metadata->Validate());
     }
 
-    void VirtualBlock::Clear()
+    void VirtualBlock::Clear() noexcept
     {
         D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
 
@@ -9440,15 +9522,15 @@ Synchronized internally with a mutex.
         D3D12MA_HEAVY_ASSERT(m_Pimpl->m_Metadata->Validate());
     }
 
-    void VirtualBlock::SetAllocationPrivateData(VirtualAllocation allocation, void* pPrivateData)
+    void VirtualBlock::SetAllocationPrivateData(VirtualAllocation allocation, void* pPrivateData) noexcept
     {
-        D3D12MA_ASSERT(allocation.AllocHandle != (AllocHandle)0);
+        D3D12MA_ASSERT(allocation.handle != (AllocHandle)0);
 
         D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
-            m_Pimpl->m_Metadata->SetAllocationPrivateData(allocation.AllocHandle, pPrivateData);
+            m_Pimpl->m_Metadata->SetAllocationPrivateData(allocation.handle, pPrivateData);
     }
 
-    void VirtualBlock::GetStatistics(Statistics* pStats) const
+    void VirtualBlock::GetStatistics(Statistics* pStats) const noexcept
     {
         D3D12MA_ASSERT(pStats);
         D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
@@ -9457,7 +9539,7 @@ Synchronized internally with a mutex.
         m_Pimpl->m_Metadata->AddStatistics(*pStats);
     }
 
-    void VirtualBlock::CalculateStatistics(DetailedStatistics* pStats) const
+    void VirtualBlock::CalculateStatistics(DetailedStatistics* pStats) const noexcept
     {
         D3D12MA_ASSERT(pStats);
         D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
@@ -9466,7 +9548,7 @@ Synchronized internally with a mutex.
         m_Pimpl->m_Metadata->AddDetailedStatistics(*pStats);
     }
 
-    void VirtualBlock::BuildStatsString(WCHAR** ppStatsString) const
+    void VirtualBlock::BuildStatsString(char** ppStatsString) const noexcept
     {
         D3D12MA_ASSERT(ppStatsString);
 
@@ -9482,29 +9564,29 @@ Synchronized internally with a mutex.
         } // Scope for JsonWriter
 
         const size_t length = sb.GetLength();
-        WCHAR* result = AllocateArray<WCHAR>(m_Pimpl->m_AllocationCallbacks, length + 1);
-        memcpy(result, sb.GetData(), length * sizeof(WCHAR));
+        char* result = AllocateArray<char>(m_Pimpl->m_AllocationCallbacks, length + 1);
+        memcpy(result, sb.GetData(), length * sizeof(char));
         result[length] = L'\0';
         *ppStatsString = result;
     }
 
-    void VirtualBlock::FreeStatsString(WCHAR* pStatsString) const
+    void VirtualBlock::FreeStatsString(char* pStatsString) const noexcept
     {
-        if (pStatsString != NULL)
+        if (pStatsString != nullptr)
         {
             D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
-                D3D12MA::Free(m_Pimpl->m_AllocationCallbacks, pStatsString);
+                Free(m_Pimpl->m_AllocationCallbacks, pStatsString);
         }
     }
 
     void VirtualBlock::ReleaseThis()
     {
         // Copy is needed because otherwise we would call destructor and invalidate the structure with callbacks before using it to free memory.
-        const ALLOCATION_CALLBACKS allocationCallbacksCopy = m_Pimpl->m_AllocationCallbacks;
+        const AllocationCallbacks allocationCallbacksCopy = m_Pimpl->m_AllocationCallbacks;
         D3D12MA_DELETE(allocationCallbacksCopy, this);
     }
 
-    VirtualBlock::VirtualBlock(const ALLOCATION_CALLBACKS& allocationCallbacks, const VIRTUAL_BLOCK_DESC& desc)
+    VirtualBlock::VirtualBlock(const AllocationCallbacks& allocationCallbacks, const VirtualBlockDesc& desc)
         : m_Pimpl(D3D12MA_NEW(allocationCallbacks, VirtualBlockPimpl)(allocationCallbacks, desc)) {
     }
 
