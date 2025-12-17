@@ -36,8 +36,7 @@ namespace rhi {
 				auto& L = *static_cast<const SubobjLayout*>(items[i].data);
 				auto* pl = dimpl->pipelineLayouts.get(L.layout);
 				if (!pl || !pl->root) {
-					BreakIfDebugging();
-					return {};
+					RHI_FAIL(Result::InvalidArgument);
 				};
 				root = pl->root.Get();
 			} break;
@@ -109,7 +108,7 @@ namespace rhi {
 			case PsoSubobj::InputLayout: {
 				hasInputLayout = true;
 				ToDx12InputLayout(static_cast<const SubobjInputLayout*>(items[i].data)->il, inputLayout);
-				inputLayoutDesc = { inputLayout.data(), (UINT)inputLayout.size() };
+				inputLayoutDesc = { inputLayout.data(), static_cast<uint32_t>(inputLayout.size()) };
 			} break;
 			default: break;
 			}
@@ -118,13 +117,11 @@ namespace rhi {
 		// Validate & decide kind
 		if (hasCS && hasGfx) {
 			spdlog::error("DX12 pipeline creation: cannot mix compute and graphics shaders in one PSO");
-			BreakIfDebugging();
-			return {};          // invalid mix
+			RHI_FAIL(Result::InvalidArgument);
 		}
 		if (!hasCS && !hasGfx) {
 			spdlog::error("DX12 pipeline creation: no shaders specified");
-			BreakIfDebugging();
-			return {};        // no shaders
+			RHI_FAIL(Result::InvalidArgument);
 		}
 		const bool isCompute = hasCS;
 
@@ -152,8 +149,7 @@ namespace rhi {
 		ComPtr<ID3D12PipelineState> pso;
 		auto hr = dimpl->dev->CreatePipelineState(&sd, IID_PPV_ARGS(&pso));
 		if (FAILED(hr)) {
-			BreakIfDebugging();
-			return ToRHI(hr);
+			RHI_FAIL(ToRHI(hr));
 		}
 
 		auto handle = dimpl->pipelines.alloc(Dx12Pipeline(pso, isCompute, dimpl->selfWeak.lock()));
@@ -236,8 +232,7 @@ namespace rhi {
 			: impl->factory.Get();
 		if (const auto hr = facForCreate->CreateSwapChainForHwnd(impl->gfx.q.Get(), static_cast<HWND>(hwnd), &desc, nullptr, nullptr, &sc1); FAILED(hr)) {
 			spdlog::error("DX12 CreateSwapChainForHwnd failed: {0}", std::to_string(hr));
-			BreakIfDebugging();
-			return ToRHI(hr);
+			RHI_FAIL(ToRHI(hr));
 		}
 		ComPtr<IDXGISwapChain3> sc;
 		sc1.As(&sc);
@@ -253,22 +248,46 @@ namespace rhi {
 
 		}
 
-		auto* scWrap = new Dx12Swapchain(
+		auto scWrap = Dx12Swapchain(
 			sc, desc.Format, w, h, bufferCount,
 			imgs, imgHandles,
 			impl->selfWeak.lock()
 		);
 
-		Swapchain ret{};
-		ret.impl = scWrap;
+		auto scHandle = impl->swapchains.alloc(scWrap);
+
+		Swapchain ret{ scHandle };
+		ret.impl = impl;
 		ret.vt = &g_scvt;
 		out = MakeSwapchainPtr(d, ret);
 		return Result::Ok;
 	}
 
 	static void d_destroySwapchain(DeviceDeletionContext*, Swapchain* sc) noexcept {
-		auto* s = static_cast<Dx12Swapchain*>(sc->impl);
-		delete s; sc->impl = nullptr;
+		auto* s = dx12_detail::SC(sc);
+		if (!s) { sc->impl = nullptr; sc->vt = nullptr; return; }
+
+		// Ensure GPU is idle before ripping out backbuffers.
+		if (s->dev && s->dev->self.vt && s->dev->self.vt->deviceWaitIdle) {
+			(void)s->dev->self.vt->deviceWaitIdle(&s->dev->self);
+		}
+
+		if (s->dev)
+		{
+			// Release references held by the resource registry and free the handles.
+			for (auto h : s->imageHandles)
+			{
+				if (h.generation != 0) // invalid guard
+				{
+					if (auto* r = s->dev->resources.get(h))
+						r->res.Reset(); // drop ID3D12Resource ref so DXGI can actually destroy
+					s->dev->resources.free(h);
+				}
+			}
+		}
+
+		delete s;
+		sc->impl = nullptr;
 		sc->vt = nullptr;
 	}
 
@@ -349,15 +368,13 @@ namespace rhi {
 		Microsoft::WRL::ComPtr<ID3DBlob> blob, err;
 		HRESULT hr = D3DX12SerializeVersionedRootSignature(&rs, D3D_ROOT_SIGNATURE_VERSION_1_1, &blob, &err);
 		if (FAILED(hr)) {
-			BreakIfDebugging();
-			return ToRHI(hr);
+			RHI_FAIL(ToRHI(hr));
 		}
 		Microsoft::WRL::ComPtr<ID3D12RootSignature> root;
 		hr = impl->dev->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(),
 			IID_PPV_ARGS(&root));
 		if (FAILED(hr)) {
-			BreakIfDebugging();
-			return ToRHI(hr);
+			RHI_FAIL(ToRHI(hr));
 		}
 
 		Dx12PipelineLayout L(ld, impl->selfWeak.lock());
@@ -743,7 +760,9 @@ namespace rhi {
 		std::vector<D3D12_INDIRECT_ARGUMENT_DESC> dxArgs(cd.args.size);
 		bool hasRoot = false;
 		for (uint32_t i = 0; i < cd.args.size; ++i) {
-			if (!FillDx12Arg(cd.args.data[i], dxArgs[i])) return {};
+			if (!FillDx12Arg(cd.args.data[i], dxArgs[i])) {
+				RHI_FAIL(Result::InvalidArgument);
+			}
 			hasRoot |= (cd.args.data[i].kind == IndirectArgKind::Constant);
 		}
 
@@ -751,8 +770,7 @@ namespace rhi {
 		if (hasRoot) {
 			auto* L = impl->pipelineLayouts.get(layout);
 			if (!L || !L->root) {
-				BreakIfDebugging();
-				return {};
+				RHI_FAIL(Result::InvalidArgument);
 			}
 			rs = L->root.Get();
 		}
@@ -764,8 +782,7 @@ namespace rhi {
 
 		Microsoft::WRL::ComPtr<ID3D12CommandSignature> cs;
 		if (const auto hr = impl->dev->CreateCommandSignature(&desc, rs, IID_PPV_ARGS(&cs)); FAILED(hr)) {
-			BreakIfDebugging();
-			return {};
+			RHI_FAIL(ToRHI(hr));
 		}
 		const Dx12CommandSignature s(cs, cd.byteStride, impl->selfWeak.lock());
 		const auto handle = impl->commandSignatures.alloc(s);
@@ -790,8 +807,7 @@ namespace rhi {
 
 		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> heap;
 		if (const auto hr = impl->dev->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&heap)); FAILED(hr)) {
-			BreakIfDebugging();
-			return {};
+			RHI_FAIL(ToRHI(hr));
 		}
 
 		const auto descriptorSize = impl->dev->GetDescriptorHandleIncrementSize(desc.Type);
@@ -1441,14 +1457,12 @@ namespace rhi {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		const auto* A = dx12_detail::Alloc(&ca);
 		if (!A) {
-			BreakIfDebugging();
-			return {};
+			RHI_FAIL(Result::InvalidArgument);
 		}
 
 		ComPtr<ID3D12GraphicsCommandList7> cl;
 		if (const auto hr = impl->dev->CreateCommandList(0, A->type, A->alloc.Get(), nullptr, IID_PPV_ARGS(&cl)); FAILED(hr)) {
-			BreakIfDebugging();
-			return ToRHI(hr);
+			RHI_FAIL(ToRHI(hr));
 		}
 		const Dx12CommandList rec(cl, A->alloc, A->type, impl->selfWeak.lock());
 		const auto h = impl->commandLists.alloc(rec);
@@ -1463,8 +1477,7 @@ namespace rhi {
 	static Result d_createCommittedBuffer(Device* d, const ResourceDesc& bd, ResourcePtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl || !impl->dev || bd.buffer.sizeBytes == 0) {
-			BreakIfDebugging();
-			return {};
+			RHI_FAIL(Result::InvalidArgument);
 		}
 
 		D3D12_HEAP_PROPERTIES hp{};
@@ -1497,8 +1510,7 @@ namespace rhi {
 			/*pCastableFormats*/     castableFormats.data(),
 			IID_PPV_ARGS(&res));
 		if (FAILED(hr)) {
-			BreakIfDebugging();
-			return ToRHI(hr);
+			RHI_FAIL(ToRHI(hr));
 		}
 
 		if (bd.debugName) {
@@ -1518,8 +1530,7 @@ namespace rhi {
 	static Result d_createCommittedTexture(Device* d, const ResourceDesc& td, ResourcePtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl || !impl->dev || td.texture.width == 0 || td.texture.height == 0 || td.texture.format == Format::Unknown) {
-			BreakIfDebugging();
-			return {};
+			RHI_FAIL(Result::InvalidArgument);
 		}
 
 		D3D12_HEAP_PROPERTIES hp{};
@@ -1558,8 +1569,7 @@ namespace rhi {
 			IID_PPV_ARGS(&res));
 		if (FAILED(hr)) {
 			spdlog::error("Failed to create committed texture: {0}", hr);
-			BreakIfDebugging();
-			return ToRHI(hr);
+			RHI_FAIL(ToRHI(hr));
 		};
 
 		if (td.debugName) res->SetName(std::wstring(td.debugName, td.debugName + ::strlen(td.debugName)).c_str());
@@ -1609,8 +1619,7 @@ namespace rhi {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		Microsoft::WRL::ComPtr<ID3D12Fence> f;
 		if (const auto hr = impl->dev->CreateFence(initial, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&f)); FAILED(hr)) {
-			BreakIfDebugging();
-			return {};
+			RHI_FAIL(ToRHI(hr));
 		}
 		if (dbg) { std::wstring w(dbg, dbg + ::strlen(dbg)); f->SetName(w.c_str()); }
 		const Dx12Timeline T(f, impl->selfWeak.lock());
@@ -1630,8 +1639,7 @@ namespace rhi {
 	static Result d_createHeap(const Device* d, const HeapDesc& hd, HeapPtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl || !impl->dev || hd.sizeBytes == 0) {
-			BreakIfDebugging();
-			return {};
+			RHI_FAIL(Result::InvalidArgument);
 		}
 		D3D12_HEAP_PROPERTIES props{};
 		props.Type = ToDx(hd.memory);
@@ -1748,16 +1756,13 @@ namespace rhi {
 	static Result d_createPlacedTexture(Device* d, HeapHandle hh, uint64_t offset, const ResourceDesc& td, ResourcePtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl) {
-			BreakIfDebugging();
-			return {};
+			RHI_FAIL(Result::InvalidArgument);
 		}
 		const auto* H = impl->heaps.get(hh); if (!H || !H->heap) {
-			BreakIfDebugging();
-			return {};
+			RHI_FAIL(Result::InvalidArgument);
 		}
 		if (td.texture.width == 0 || td.texture.height == 0 || td.texture.format == Format::Unknown) {
-			BreakIfDebugging();
-			return {};
+			RHI_FAIL(Result::InvalidArgument);
 		}
 		const D3D12_RESOURCE_DESC1 desc = MakeTexDesc1(td);
 		D3D12_CLEAR_VALUE* pClear = nullptr;
@@ -1785,8 +1790,7 @@ namespace rhi {
 			/*pProtectedSession*/ castableFormats.data(),
 			IID_PPV_ARGS(&res));
 		if (FAILED(hr)) {
-			BreakIfDebugging();
-			return {};
+			RHI_FAIL(ToRHI(hr));
 		}
 		if (td.debugName) res->SetName(std::wstring(td.debugName, td.debugName + ::strlen(td.debugName)).c_str());
 		Dx12Resource T(std::move(res), desc.Format, td.texture.width, td.texture.height,
@@ -1808,10 +1812,10 @@ namespace rhi {
 	static Result d_createPlacedBuffer(Device* d, const HeapHandle hh, const uint64_t offset, const ResourceDesc& bd, ResourcePtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl) {
-			return {};
+			RHI_FAIL(Result::InvalidArgument);
 		}
 		const auto* H = impl->heaps.get(hh); if (!H || !H->heap) {
-			return {};
+			RHI_FAIL(Result::InvalidArgument);
 		}
 		if (bd.buffer.sizeBytes == 0) {
 			return Result::InvalidArgument;
@@ -1837,8 +1841,7 @@ namespace rhi {
 			/*pProtectedSession*/   castableFormats.data(),
 			IID_PPV_ARGS(&res));
 		if (FAILED(hr)) {
-			BreakIfDebugging();
-			return ToRHI(hr);
+			RHI_FAIL(ToRHI(hr));
 		}
 		if (bd.debugName) res->SetName(std::wstring(bd.debugName, bd.debugName + ::strlen(bd.debugName)).c_str());
 		const Dx12Resource B(std::move(res), bd.buffer.sizeBytes, impl->selfWeak.lock());
@@ -1853,12 +1856,10 @@ namespace rhi {
 	static Result d_createPlacedResource(Device* d, const HeapHandle hh, const uint64_t offset, const ResourceDesc& rd, ResourcePtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl) {
-			BreakIfDebugging();
-			return {};
+			RHI_FAIL(Result::InvalidArgument);
 		}
 		auto* H = impl->heaps.get(hh); if (!H || !H->heap) {
-			BreakIfDebugging();
-			return {};
+			RHI_FAIL(Result::InvalidArgument);
 		}
 		switch (rd.type) {
 		case ResourceType::Buffer:  return d_createPlacedBuffer(d, hh, offset, rd, out);
@@ -1878,8 +1879,7 @@ namespace rhi {
 	static Result d_createQueryPool(Device* d, const QueryPoolDesc& qd, QueryPoolPtr& out) noexcept {
 		auto* dimpl = static_cast<Dx12Device*>(d->impl);
 		if (!dimpl || qd.count == 0) {
-			BreakIfDebugging();
-			return {};
+			RHI_FAIL(Result::InvalidArgument);
 		}
 		D3D12_QUERY_HEAP_DESC desc{};
 		desc.Count = qd.count;
@@ -1905,8 +1905,7 @@ namespace rhi {
 			bool canMeshStats = haveOpt9 && !!opts9.MeshShaderPipelineStatsSupported;
 
 			if (needMesh && !canMeshStats && qd.requireAllStats) {
-				BreakIfDebugging();
-				return {}; // Unsupported
+				RHI_FAIL(Result::InvalidArgument);
 			}
 
 			desc.Type = needMesh && canMeshStats
@@ -1918,8 +1917,8 @@ namespace rhi {
 		}
 
 		Microsoft::WRL::ComPtr<ID3D12QueryHeap> heap;
-		if (FAILED(dimpl->dev->CreateQueryHeap(&desc, IID_PPV_ARGS(&heap)))) {
-			return {};
+		if (const auto hr = dimpl->dev->CreateQueryHeap(&desc, IID_PPV_ARGS(&heap)); FAILED(hr)) {
+			RHI_FAIL(ToRHI(hr));
 		}
 		Dx12QueryPool qp(heap, type, qd.count, dimpl->selfWeak.lock());
 		qp.usePSO1 = usePSO1;
@@ -2030,8 +2029,7 @@ namespace rhi {
 		// Validate inputs
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl || !resources || resourceCount == 0 || !outInfos) {
-			BreakIfDebugging();
-			return Result::InvalidArgument;
+			RHI_FAIL(Result::InvalidArgument);
 		}
 		// TODO: Should we store this elsewhere to avoid reallocating every call?
 		std::vector<D3D12_RESOURCE_DESC1> descs;
@@ -2047,8 +2045,7 @@ namespace rhi {
 				descs[i] = MakeTexDesc1(resources[i]);
 				break;
 			default:
-				BreakIfDebugging();
-				return Result::InvalidArgument;
+				RHI_FAIL(Result::InvalidArgument);
 			}
 		}
 		// Out array
@@ -2071,8 +2068,7 @@ namespace rhi {
 	{
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		if (!impl || !impl->dev) {
-			BreakIfDebugging();
-			return Result::Failed;
+			RHI_FAIL(Result::InvalidArgument);
 		}
 
 		if (objects.size == 0) return Result::Ok;
@@ -2094,8 +2090,7 @@ namespace rhi {
 			{
 				auto* R = impl->resources.get(o.resource);
 				if (!R || !R->res) {
-					BreakIfDebugging();
-					return Result::InvalidArgument;
+					RHI_FAIL(Result::InvalidArgument);
 				}
 				native = R->res.Get(); // ID3D12Resource* -> ID3D12Pageable*
 			} break;
@@ -2104,8 +2099,7 @@ namespace rhi {
 			{
 				auto* H = impl->heaps.get(o.heap);
 				if (!H || !H->heap) {
-					BreakIfDebugging();
-					return Result::InvalidArgument;
+					RHI_FAIL(Result::InvalidArgument);
 				}
 				native = H->heap.Get(); // ID3D12Heap* -> ID3D12Pageable*
 			} break;
@@ -2114,8 +2108,7 @@ namespace rhi {
 			{
 				auto* DH = impl->descHeaps.get(o.descHeap);
 				if (!DH || !DH->heap) {
-					BreakIfDebugging();
-					return Result::InvalidArgument;
+					RHI_FAIL(Result::InvalidArgument);
 				}
 				native = DH->heap.Get(); // ID3D12DescriptorHeap* -> ID3D12Pageable*
 			} break;
@@ -2124,8 +2117,7 @@ namespace rhi {
 			{
 				auto* QH = impl->queryPools.get(o.queryPool);
 				if (!QH || !QH->heap) {
-					BreakIfDebugging();
-					return Result::InvalidArgument;
+					RHI_FAIL(Result::InvalidArgument);
 				}
 				native = QH->heap.Get(); // ID3D12QueryHeap* -> ID3D12Pageable*
 			} break;
@@ -2134,21 +2126,18 @@ namespace rhi {
 			{
 				auto* P = impl->pipelines.get(o.pipeline);
 				if (!P || !P->pso) {
-					BreakIfDebugging();
-					return Result::InvalidArgument;
+					RHI_FAIL(Result::InvalidArgument);
 				}
 				native = P->pso.Get(); // ID3D12PipelineState* -> ID3D12Pageable*
 			} break;
 
 			default:
-				BreakIfDebugging();
-				return Result::InvalidArgument;
+				RHI_FAIL(Result::InvalidArgument);
 			}
 
 			// Defensive (should never happen if the above is correct)
 			if (!native) {
-				BreakIfDebugging();
-				return Result::InvalidArgument;
+				RHI_FAIL(Result::InvalidArgument);
 			}
 
 			pageables.push_back(native);
@@ -2168,19 +2157,16 @@ namespace rhi {
 		auto* qs = dx12_detail::QState(q);
 		auto* dev = qs->dev.get();
 		if (!dev) {
-			BreakIfDebugging();
-			return Result::Failed;
+			RHI_FAIL(Result::InvalidArgument);
 		}
 
 		// Pre-waits
 		for (auto& w : s.waits) {
 			auto* TL = dev->timelines.get(w.t); if (!TL) {
-				BreakIfDebugging();
-				return Result::InvalidArgument;
+				RHI_FAIL(Result::InvalidArgument);
 			}
 			if (FAILED(qs->q->Wait(TL->fence.Get(), w.value))) {
-				BreakIfDebugging();
-				return Result::Failed;
+				RHI_FAIL(Result::InvalidArgument);
 			}
 		}
 
@@ -2195,12 +2181,10 @@ namespace rhi {
 		// Post-signals
 		for (auto& sgn : s.signals) {
 			auto* TL = dev->timelines.get(sgn.t); if (!TL) {
-				BreakIfDebugging();
-				return Result::InvalidArgument;
+				RHI_FAIL(Result::InvalidArgument);
 			}
-			if (FAILED(qs->q->Signal(TL->fence.Get(), sgn.value))) {
-				BreakIfDebugging();
-				return Result::Failed;
+			if (const auto hr = qs->q->Signal(TL->fence.Get(), sgn.value); FAILED(hr)) {
+				RHI_FAIL(ToRHI(hr));
 			}
 		}
 		return Result::Ok;
@@ -2210,8 +2194,7 @@ namespace rhi {
 		auto* qs = dx12_detail::QState(q);
 		auto* dev = qs->dev.get();
 		if (!dev) {
-			BreakIfDebugging();
-			return Result::Failed;
+			RHI_FAIL(Result::InvalidArgument);
 		}
 		auto* TL = dev->timelines.get(p.t); if (!TL) {
 			BreakIfDebugging();
@@ -2231,12 +2214,10 @@ namespace rhi {
 	static Result q_wait(Queue* q, const TimelinePoint& p) noexcept {
 		auto* qs = dx12_detail::QState(q);
 		auto* dev = qs->dev.get(); if (!dev) {
-			BreakIfDebugging();
-			return Result::Failed;
+			RHI_FAIL(Result::InvalidArgument);
 		}
 		auto* TL = dev->timelines.get(p.t); if (!TL) {
-			BreakIfDebugging();
-			return Result::InvalidArgument;
+			RHI_FAIL(Result::InvalidArgument);
 		}
 		return SUCCEEDED(qs->q->Wait(TL->fence.Get(), p.value)) ? Result::Ok : Result::Failed;
 	}
@@ -2989,11 +2970,11 @@ namespace rhi {
 
 		// Write to requested stages. On DX12, graphics/compute have distinct root constant slots.
 		const auto* p32 = static_cast<const uint32_t*>(data);
-		if ((uint32_t)stages & (uint32_t)ShaderStage::Compute) {
+		if (static_cast<uint32_t>(stages) & static_cast<uint32_t>(ShaderStage::Compute)) {
 			impl->cl->SetComputeRoot32BitConstants(rc->rootIndex, num32, p32, dstOffset32);
 		}
 		// If any graphics states are set, write there too
-		if ((uint32_t)stages & (uint32_t)(ShaderStage::AllGraphics)) {
+		if (static_cast<uint32_t>(stages) & static_cast<uint32_t>(ShaderStage::AllGraphics)) {
 			impl->cl->SetGraphicsRoot32BitConstants(rc->rootIndex, num32, p32, dstOffset32);
 		}
 	}
@@ -3017,20 +2998,115 @@ namespace rhi {
 	}
 
 	// ---------------- Swapchain vtable funcs ----------------
-	static uint32_t sc_count(Swapchain* sc) noexcept { return static_cast<Dx12Swapchain*>(sc->impl)->count; }
-	static uint32_t sc_curr(Swapchain* sc) noexcept { return static_cast<Dx12Swapchain*>(sc->impl)->sc->GetCurrentBackBufferIndex(); }
+	static uint32_t sc_count(Swapchain* sc) noexcept { return dx12_detail::SC(sc)->count; }
+	static uint32_t sc_curr(Swapchain* sc) noexcept { return dx12_detail::SC(sc)->sc->GetCurrentBackBufferIndex(); }
 	//static ViewHandle sc_rtv(Swapchain* sc, uint32_t i) noexcept { return static_cast<Dx12Swapchain*>(sc->impl)->rtvHandles[i]; }
-	static ResourceHandle sc_img(Swapchain* sc, uint32_t i) noexcept { return static_cast<Dx12Swapchain*>(sc->impl)->imageHandles[i]; }
+	static ResourceHandle sc_img(Swapchain* sc, uint32_t i) noexcept { return dx12_detail::SC(sc)->imageHandles[i]; }
 	static Result sc_present(Swapchain* sc, bool vsync) noexcept {
-		auto* s = static_cast<Dx12Swapchain*>(sc->impl);
+		auto* s = dx12_detail::SC(sc);
 		UINT sync = vsync ? 1 : 0; UINT flags = 0;
 		return s->sc->Present(sync, flags) == S_OK ? Result::Ok : Result::Failed;
 	}
-	static Result sc_resizeBuffers(Swapchain* sc, uint32_t numBuffers, uint32_t w, uint32_t h, Format newFormat, uint32_t flags) noexcept {
+
+	static Result sc_resizeBuffers(
+		Swapchain* sc,
+		uint32_t numBuffers,
+		uint32_t w, uint32_t h,
+		Format newFormat,
+		uint32_t flags) noexcept
+	{
 		auto* s = static_cast<Dx12Swapchain*>(sc->impl);
-		s->fmt = ToDxgi(newFormat);
-		s->count = numBuffers;
-		s->sc->ResizeBuffers(s->count, w, h, s->fmt, flags); // TODO: Is there anything else to do here?
+		if (!s || !s->sc || !s->dev) return Result::InvalidNativePointer;
+
+		auto* dev = s->dev.get();
+
+		const uint32_t oldCount = s->count;
+		const uint32_t newCount = (numBuffers != 0) ? numBuffers : oldCount;
+		const DXGI_FORMAT newFmt = (newFormat != Format::Unknown) ? ToDxgi(newFormat) : s->fmt;
+
+		// Ensure nothing is using the old backbuffers.
+		if (dev->self.vt && dev->self.vt->deviceWaitIdle)
+			(void)dev->self.vt->deviceWaitIdle(&dev->self);
+
+		// Release all refs to old backbuffers.
+		for (uint32_t i = 0; i < oldCount; ++i)
+		{
+			if (i < s->images.size())
+				s->images[i].Reset();
+
+			if (i < s->imageHandles.size())
+			{
+				const auto hnd = s->imageHandles[i];
+				if (hnd.generation != 0)
+					if (auto* r = dev->resources.get(hnd))
+						r->res.Reset();
+			}
+		}
+
+		// Resize swapchain buffers.
+		HRESULT hr = s->sc->ResizeBuffers((UINT)newCount, (UINT)w, (UINT)h, newFmt, (UINT)flags);
+		if (FAILED(hr)) return ToRHI(hr);
+
+		// If w/h were 0, query actual post-resize dims.
+		if (w == 0 || h == 0)
+		{
+			DXGI_SWAP_CHAIN_DESC1 d{};
+			if (SUCCEEDED(s->sc->GetDesc1(&d))) { s->w = d.Width; s->h = d.Height; }
+		}
+		else { s->w = (UINT)w; s->h = (UINT)h; }
+
+		s->fmt = newFmt;
+		s->count = (UINT)newCount;
+
+		// Adjust handle arrays (free excess if shrinking, alloc new if growing).
+		if (newCount < s->imageHandles.size())
+		{
+			for (uint32_t i = newCount; i < (uint32_t)s->imageHandles.size(); ++i)
+			{
+				const auto hnd = s->imageHandles[i];
+				if (hnd.generation != 0)
+				{
+					if (auto* r = dev->resources.get(hnd))
+						r->res.Reset();
+					dev->resources.free(hnd);
+				}
+			}
+			s->imageHandles.resize(newCount);
+		}
+		else
+		{
+			s->imageHandles.resize(newCount); // default init new entries
+		}
+
+		s->images.resize(newCount);
+
+		// Reacquire and re-register/update resources.
+		for (uint32_t i = 0; i < newCount; ++i)
+		{
+			ComPtr<ID3D12Resource> img;
+			hr = s->sc->GetBuffer((UINT)i, IID_PPV_ARGS(&img));
+			if (FAILED(hr)) return ToRHI(hr);
+
+			s->images[i] = img;
+
+			Dx12Resource t(img, newFmt, s->w, s->h, 1, 1, D3D12_RESOURCE_DIMENSION_TEXTURE2D, 1, s->dev);
+
+			// Preserve existing handle if possible, in case they're being stored externally
+			// otherwise allocate a new one.
+			if (s->imageHandles[i].generation != 0)
+			{
+				if (auto* r = dev->resources.get(s->imageHandles[i]))
+					*r = t;
+				else
+					s->imageHandles[i] = dev->resources.alloc(t);
+			}
+			else
+			{
+				s->imageHandles[i] = dev->resources.alloc(t);
+			}
+		}
+
+		s->current = s->sc->GetCurrentBackBufferIndex();
 		return Result::Ok;
 	}
 	static void sc_setName(Swapchain* sc, const char* n) noexcept {} // Cannot name IDXGISwapChain

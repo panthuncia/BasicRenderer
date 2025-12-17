@@ -71,7 +71,7 @@ namespace rhi {
         if (iid != RHI_IID_D3D12_SWAPCHAIN) return false;
         if (outSize < sizeof(D3D12SwapchainInfo)) return false;
 
-        auto* s = static_cast<Dx12Swapchain*>(sc.impl);
+        auto* s = dx12_detail::SC(&sc);
         if (!s || !s->sc) return false;
 
         auto* out = reinterpret_cast<D3D12SwapchainInfo*>(outStruct);

@@ -15,6 +15,15 @@
 
 namespace rhi {
 
+	inline void BreakIfDebugging() {
+#if BUILD_TYPE == BUILD_DEBUG
+		if (IsDebuggerPresent()) {
+			__debugbreak();
+		}
+#endif
+	}
+#define RHI_FAIL(x) do { rhi::BreakIfDebugging(); return (x); } while(0)
+
 	inline constexpr uint32_t RHI_DEVICE_ABI_MIN = 1;
 	inline constexpr uint32_t RHI_QUEUE_ABI_MIN = 1;
 	inline constexpr uint32_t RHI_CL_ABI_MIN = 1;
@@ -47,6 +56,7 @@ namespace rhi {
 		struct HCommandList {};
 		struct HHeap {};
 		struct HQueryPool {};
+		struct HSwapChain {};
 
 		// forward-declared trait; default is no-op (safe in release)
 		template<class Tag> struct NameOps {
@@ -58,7 +68,7 @@ namespace rhi {
 	struct Handle {
 		uint32_t index{ 0xFFFFFFFFu };
 		uint32_t generation{ 0 };
-		constexpr bool valid() const noexcept { return index != 0xFFFFFFFFu; }
+		constexpr bool valid() const noexcept { return index != 0xFFFFFFFFu && generation != 0; }
 	};
 
 	// hash for handles
@@ -94,6 +104,7 @@ namespace rhi {
 	using CommandListHandle = Handle<detail::HCommandList>;
 	using HeapHandle = Handle<detail::HHeap>;
 	using QueryPoolHandle = Handle<detail::HQueryPool>;
+	using SwapChainHandle = Handle<detail::HSwapChain>;
 
 	// ---------------- Enums & structs ----------------
 
@@ -1694,6 +1705,8 @@ namespace rhi {
 
 	class Swapchain {
 	public:
+		Swapchain() = default;
+		explicit Swapchain(SwapChainHandle handle) : handle(handle){}
 		void* impl{};
 		const SwapchainVTable* vt{};
 		explicit constexpr operator bool() const noexcept {
@@ -1701,6 +1714,8 @@ namespace rhi {
 		}
 		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
 		constexpr void reset() noexcept { impl = nullptr; vt = nullptr; }
+		const SwapChainHandle& GetHandle() const noexcept { return handle; }
+
 		inline uint32_t ImageCount() noexcept;
 		inline uint32_t CurrentImageIndex() noexcept;
 		//inline ViewHandle RTV(uint32_t i) noexcept;
@@ -1709,6 +1724,8 @@ namespace rhi {
 		inline Result ResizeBuffers(uint32_t bufferCount, uint32_t w, uint32_t h, Format newFmt, uint32_t flags) noexcept {
 			return vt->resizeBuffers ? vt->resizeBuffers(this, bufferCount, w, h, newFmt, flags) : Result::Unsupported;
 		}
+	private:
+		SwapChainHandle handle;
 	};
 
 	template<class TObject>

@@ -26,14 +26,6 @@
 #define SAFE_RELEASE(p) if(p){ (p)->Release(); (p)=nullptr; }
 #endif
 
-inline void BreakIfDebugging() {
-#if BUILD_TYPE == BUILD_DEBUG
-	if (IsDebuggerPresent()) {
-		__debugbreak();
-	}
-#endif
-}
-
 inline std::wstring s2ws(const std::string& s) {
 	int buffSize = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), NULL, 0);
 	std::wstring ws(buffSize, 0);
@@ -49,8 +41,9 @@ namespace rhi {
 
 	struct Dx12Resource {
 		// Texture constructor
+		Dx12Resource() {}
 		explicit Dx12Resource(ComPtr<ID3D12Resource> r, DXGI_FORMAT f, uint32_t width, uint32_t height, uint16_t mips, uint16_t arraySize, D3D12_RESOURCE_DIMENSION dim, uint16_t depth, std::shared_ptr<Dx12Device> d)
-			: res(r), fmt(f), tex({ width, height, mips, arraySize, depth }), dev(d) {
+			: res(r), fmt(f), tex({ width, height, mips, arraySize, depth }), dev(d), kind(Dx12ResourceKind::Texture) {
 		}
 		// Buffer constructor
 		explicit Dx12Resource(ComPtr<ID3D12Resource> r, uint64_t size, std::shared_ptr<Dx12Device> d)
@@ -82,17 +75,20 @@ namespace rhi {
 	};
 
 	struct Dx12Sampler {
+		Dx12Sampler() {}
 		explicit Dx12Sampler(SamplerDesc d, std::shared_ptr<Dx12Device> device) : desc(d), dev(device) {}
 		SamplerDesc desc;
 		std::shared_ptr<Dx12Device> dev;
 	};
 	struct Dx12Pipeline {
+		Dx12Pipeline(){}
 		explicit Dx12Pipeline(Microsoft::WRL::ComPtr<ID3D12PipelineState> p, bool isComp, std::shared_ptr<Dx12Device> device) : pso(p), isCompute(isComp), dev(device) {}
 		Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
 		bool isCompute;
 		std::shared_ptr<Dx12Device> dev;
 	};
 	struct Dx12PipelineLayout {
+		Dx12PipelineLayout() {}
 		explicit Dx12PipelineLayout(const PipelineLayoutDesc& d, std::shared_ptr<Dx12Device> device)
 			: desc(d), dev(device) {
 			// build root constant param lookup
@@ -121,6 +117,7 @@ namespace rhi {
 	};
 
 	struct Dx12CommandSignature {
+		Dx12CommandSignature(){}
 		explicit Dx12CommandSignature(Microsoft::WRL::ComPtr<ID3D12CommandSignature> s, uint32_t str, std::shared_ptr<Dx12Device> device) : sig(s), stride(str), dev(device) {}
 		Microsoft::WRL::ComPtr<ID3D12CommandSignature> sig;
 		uint32_t stride = 0;
@@ -128,12 +125,14 @@ namespace rhi {
 	};
 
 	struct Dx12Allocator {
+		Dx12Allocator(){}
 		explicit Dx12Allocator(Microsoft::WRL::ComPtr<ID3D12CommandAllocator> a, D3D12_COMMAND_LIST_TYPE t, std::shared_ptr<Dx12Device> d) : alloc(a), type(t), dev(d) {}
 		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> alloc;
 		D3D12_COMMAND_LIST_TYPE type{};
 		std::shared_ptr<Dx12Device> dev;
 	};
 	struct Dx12CommandList {
+		Dx12CommandList(){}
 		explicit Dx12CommandList(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> c, Microsoft::WRL::ComPtr<ID3D12CommandAllocator> a, D3D12_COMMAND_LIST_TYPE t, std::shared_ptr<Dx12Device> d)
 			: cl(c), alloc(a), type(t), dev(d) {
 		}
@@ -188,6 +187,7 @@ namespace rhi {
 	}
 
 	struct Dx12DescriptorHeap {
+		Dx12DescriptorHeap(){}
 		explicit Dx12DescriptorHeap(Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> h, D3D12_DESCRIPTOR_HEAP_TYPE t, UINT incrementSize, bool sv, std::shared_ptr<Dx12Device> d)
 			: heap(h), type(t), inc(incrementSize), shaderVisible(sv), dev(d) {
 			cpuStart = heap->GetCPUDescriptorHandleForHeapStart();
@@ -205,12 +205,14 @@ namespace rhi {
 	};
 
 	struct Dx12Timeline {
+		Dx12Timeline(){}
 		explicit Dx12Timeline(Microsoft::WRL::ComPtr<ID3D12Fence> f, std::shared_ptr<Dx12Device> d) : fence(f), dev(d) {}
 		Microsoft::WRL::ComPtr<ID3D12Fence> fence;
 		std::shared_ptr<Dx12Device> dev;
 	};
 
 	struct Dx12QueueState {
+		Dx12QueueState(){}
 		Microsoft::WRL::ComPtr<ID3D12CommandQueue> q;
 		Microsoft::WRL::ComPtr<ID3D12Fence> fence;
 		UINT64 value = 0;
@@ -221,6 +223,7 @@ namespace rhi {
 	};
 
 	struct Dx12Swapchain {
+		Dx12Swapchain(){}
 		explicit Dx12Swapchain(ComPtr<IDXGISwapChain3> s, DXGI_FORMAT f, UINT width, UINT height, UINT c,
 			std::vector<ComPtr<ID3D12Resource>> images,
 			std::vector<ResourceHandle> imageHandles,
@@ -237,6 +240,7 @@ namespace rhi {
 	};
 
 	struct Dx12Heap {
+		Dx12Heap(){}
 		explicit Dx12Heap(Microsoft::WRL::ComPtr<ID3D12Heap> h, uint64_t s, std::shared_ptr<Dx12Device> d) : heap(h), size(s), dev(d) {}
 		Microsoft::WRL::ComPtr<ID3D12Heap> heap;
 		uint64_t size{};
@@ -244,6 +248,7 @@ namespace rhi {
 	};
 
 	struct Dx12QueryPool {
+		Dx12QueryPool(){}
 		explicit Dx12QueryPool(Microsoft::WRL::ComPtr<ID3D12QueryHeap> h, D3D12_QUERY_HEAP_TYPE t, uint32_t c, std::shared_ptr<Dx12Device> d) : heap(h), type(t), count(c), dev(d) {}
 		Microsoft::WRL::ComPtr<ID3D12QueryHeap> heap;
 		D3D12_QUERY_HEAP_TYPE type{};
@@ -268,6 +273,7 @@ namespace rhi {
 	template<> struct HandleFor<Dx12CommandList> { using type = CommandListHandle; };
 	template<> struct HandleFor<Dx12Heap> { using type = HeapHandle; };
 	template<> struct HandleFor<Dx12QueryPool> { using type = QueryPoolHandle; };
+	template<> struct HandleFor<Dx12Swapchain> { using type = SwapChainHandle; };
 
 	template<typename T>
 	struct Slot { T obj{}; uint32_t generation{ 1 }; bool alive{ false }; };
@@ -296,7 +302,9 @@ namespace rhi {
 			if (i >= slots.size()) return;
 			auto& s = slots[i];
 			if (!s.alive || s.generation != h.generation) return;
-			s.alive = false; freelist.push_back(i);
+			s.alive = false; 
+			s.obj = T{};  // force release of previous DX resources
+			freelist.push_back(i);
 		}
 
 		T* get(HandleT h) {
@@ -329,6 +337,7 @@ namespace rhi {
 		Registry<Dx12Timeline> timelines;
 		Registry<Dx12Heap> heaps;
 		Registry<Dx12QueryPool> queryPools;
+		Registry<Dx12Swapchain> swapchains; // For uniformity, not really part of device
 
 		Dx12QueueState gfx{}, comp{}, copy{};
 

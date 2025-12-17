@@ -101,4 +101,10 @@ namespace rhi::dx12_detail
 		Dx12Device* dev = Dev(qp);
 		return (dev && qp) ? dev->queryPools.get(qp->GetHandle()) : nullptr;
 	}
+
+	[[nodiscard]] inline Dx12Swapchain* SC(const Swapchain* sc) noexcept
+	{
+		Dx12Device* dev = Dev(sc);
+		return (dev && sc) ? dev->swapchains.get(sc->GetHandle()) : nullptr;
+	}
 }

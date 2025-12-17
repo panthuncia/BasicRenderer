@@ -903,6 +903,7 @@ void Renderer::Cleanup() {
     spdlog::info("In cleanup");
     // Wait for all GPU frames to complete
 	StallPipeline();
+    m_swapChain.Reset();
     currentRenderGraph.reset();
 	currentScene.reset();
 	m_pIndirectCommandBufferManager.reset();
