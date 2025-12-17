@@ -23,7 +23,7 @@ add_library(BasicRHI STATIC
     "rhi_debug.h"
     "rhi_colors.h"
     "rhi_allocator.h" 
-    "rhi_allocator.cpp" "rhi_feature_info.h")
+    "rhi_allocator.cpp" "rhi_feature_info.h" "rhi_dx12_casting.h")
 
 target_compile_options(BasicRHI PRIVATE /WX)
 target_compile_options(BasicRHI PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)

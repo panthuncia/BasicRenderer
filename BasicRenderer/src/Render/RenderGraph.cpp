@@ -735,10 +735,10 @@ void RenderGraph::Execute(RenderContext& context) {
 	UINT64 currentComputeQueueFenceOffset = m_computeQueueFenceValue * context.frameFenceValue;
 
 	if (!alias) {
-		computeQueue->Signal({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
-		graphicsQueue->Wait({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
-		graphicsQueue->Signal({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
-		computeQueue->Wait({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
+		//computeQueue->Signal({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
+		//graphicsQueue->Wait({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
+		//graphicsQueue->Signal({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
+		//computeQueue->Wait({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
 	}
 
 	auto& statisticsManager = StatisticsManager::GetInstance();

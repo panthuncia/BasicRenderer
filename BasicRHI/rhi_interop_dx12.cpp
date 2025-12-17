@@ -1,5 +1,6 @@
 #include "rhi_dx12.h"
 #include "rhi_interop.h"
+#include "rhi_dx12_casting.h"
 
 // Returns non-owning raw pointers. Caller must not store them long-term without AddRef/Release.
 
@@ -37,7 +38,7 @@ namespace rhi {
         if (iid != RHI_IID_D3D12_QUEUE) return false;
         if (outSize < sizeof(D3D12QueueInfo)) return false;
 
-        auto* s = static_cast<Dx12QueueState*>(q.impl);
+        auto* s = dx12_detail::QState(&q);
         if (!s || !s->q) return false;
 
         auto* out = reinterpret_cast<D3D12QueueInfo*>(outStruct);
@@ -51,7 +52,7 @@ namespace rhi {
         if (iid != RHI_IID_D3D12_CMD_LIST) return false;
         if (outSize < sizeof(D3D12CmdListInfo)) return false;
 
-        auto* rec = static_cast<Dx12CommandList*>(cl.impl);
+        auto* rec = dx12_detail::CL(&cl);
         if (!rec || !rec->cl) return false;
 
         // Hand out ID3D12GraphicsCommandList* (QI from v7 to base)
@@ -85,7 +86,7 @@ namespace rhi {
         if (outSize < sizeof(D3D12ResourceInfo)) return false;
 		// Cast to Dx12Buffer or Dx12Texture based on h.IsTexture()
 		Dx12Resource* resRec = nullptr;
-        resRec = static_cast<Dx12Resource*>(h.impl);
+        resRec = dx12_detail::Res(&h);
         if (!resRec || !resRec->res) {
             return false;
         }
@@ -99,7 +100,7 @@ namespace rhi {
         if (!h.IsValid() || !outStruct) return false;
         if (iid != RHI_IID_D3D12_HEAP) return false;
         if (outSize < sizeof(D3D12HeapInfo)) return false;
-        auto* rec = static_cast<Dx12Heap*>(h.impl);
+        auto* rec = dx12_detail::Hp(&h);
         if (!rec || !rec->heap) return false;
         auto* out = reinterpret_cast<D3D12HeapInfo*>(outStruct);
         out->heap = rec->heap.Get(); // ID3D12Heap*
@@ -111,7 +112,7 @@ namespace rhi {
 		if (!qp.IsValid() || !outStruct) return false;
 		if (iid != RHI_IID_D3D12_QUERY_POOL) return false;
 		if (outSize < sizeof(D3D12QueryPoolInfo)) return false;
-		auto* rec = static_cast<Dx12QueryPool*>(qp.impl);
+        auto* rec = dx12_detail::QP(&qp);
 		if (!rec || !rec->heap) return false;
 		auto* out = reinterpret_cast<D3D12QueryPoolInfo*>(outStruct);
 		out->queryPool = rec->heap.Get(); // ID3D12QueryHeap*
@@ -123,7 +124,7 @@ namespace rhi {
         if (!p.IsValid() || !outStruct) return false;
         if (iid != RHI_IID_D3D12_PIPELINE) return false;
         if (outSize < sizeof(D3D12PipelineInfo)) return false;
-        auto* rec = static_cast<Dx12Pipeline*>(p.impl);
+        auto* rec = dx12_detail::Pso(&p);
         if (!rec || !rec->pso) return false;
         auto* out = reinterpret_cast<D3D12PipelineInfo*>(outStruct);
         out->pipeline = rec->pso.Get(); // ID3D12PipelineState*
@@ -135,7 +136,7 @@ namespace rhi {
         if (!pl.IsValid() || !outStruct) return false;
         if (iid != RHI_IID_D3D12_PIPELINE_LAYOUT) return false;
         if (outSize < sizeof(D3D12PipelineLayoutInfo)) return false;
-        auto* rec = static_cast<Dx12PipelineLayout*>(pl.impl);
+        auto* rec = dx12_detail::PL(&pl);
         if (!rec || !rec->root) return false;
         auto* out = reinterpret_cast<D3D12PipelineLayoutInfo*>(outStruct);
         out->layout = rec->root.Get(); // ID3D12RootSignature*
@@ -147,7 +148,7 @@ namespace rhi {
         if (!dh.IsValid() || !outStruct) return false;
         if (iid != RHI_IID_D3D12_DESCRIPTOR_HEAP) return false;
         if (outSize < sizeof(D3D12DescriptorHeapInfo)) return false;
-        auto* rec = static_cast<Dx12DescriptorHeap*>(dh.impl);
+        auto* rec = dx12_detail::DH(&dh);
         if (!rec || !rec->heap) return false;
         auto* out = reinterpret_cast<D3D12DescriptorHeapInfo*>(outStruct);
         out->descHeap = rec->heap.Get(); // ID3D12DescriptorHeap*
@@ -159,7 +160,7 @@ namespace rhi {
         if (!cs.IsValid() || !outStruct) return false;
         if (iid != RHI_IID_D3D12_COMMAND_SIGNATURE) return false;
         if (outSize < sizeof(D3D12CommandSignatureInfo)) return false;
-        auto* rec = static_cast<Dx12CommandSignature*>(cs.impl);
+        auto* rec = dx12_detail::CSig(&cs);
         if (!rec || !rec->sig) return false;
         auto* out = reinterpret_cast<D3D12CommandSignatureInfo*>(outStruct);
         out->cmdSig = rec->sig.Get(); // ID3D12CommandSignature*
@@ -171,7 +172,7 @@ namespace rhi {
         if (!t.IsValid() || !outStruct) return false;
         if (iid != RHI_IID_D3D12_TIMELINE) return false;
         if (outSize < sizeof(D3D12TimelineInfo)) return false;
-        auto* rec = static_cast<Dx12Timeline*>(t.impl);
+        auto* rec = dx12_detail::TL(&t);
         if (!rec || !rec->fence) return false;
         auto* out = reinterpret_cast<D3D12TimelineInfo*>(outStruct);
         out->timeline = rec->fence.Get(); // ID3D12Fence*
