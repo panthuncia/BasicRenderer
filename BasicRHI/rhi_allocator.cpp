@@ -9297,9 +9297,9 @@ Synchronized internally with a mutex.
         const ClearValue* pOptimizedClearValue,
         UINT32 NumCastableFormats,
         const Format* pCastableFormats,
-        Allocation** ppAllocation) noexcept
+        AllocationPtr& outAllocation) noexcept
     {
-        if (!pAllocDesc || !pResourceDesc || !ppAllocation)
+        if (!pAllocDesc || !pResourceDesc)
         {
             D3D12MA_ASSERT(0 && "Invalid arguments passed to Allocator::CreateResource3.");
             return Result::InvalidArgument;
@@ -9309,11 +9309,11 @@ Synchronized internally with a mutex.
             return m_Pimpl->CreateResource(
                 pAllocDesc,
                 CreateResourceParams(pResourceDesc, InitialLayout, pOptimizedClearValue, NumCastableFormats, pCastableFormats),
-                ppAllocation,
+                outAllocation.Put(),
                 std::move(ptr));
     }
 
-    Result Allocator::AllocateMemory( // TODO: Why did original use ptrs?
+    Result Allocator::AllocateMemory(
         const AllocationDesc& pAllocDesc,
         const ResourceAllocationInfo& pAllocInfo,
         Allocation* ppAllocation) noexcept

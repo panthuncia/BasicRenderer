@@ -21,18 +21,18 @@ Buffer::Buffer(
 	auto device = DeviceManager::GetInstance().GetDevice();
 	auto allocator = DeviceManager::GetInstance().GetAllocator();
 
-	//rhi::ma::AllocationDesc allocationDesc;
-	//allocationDesc.heapType = accessType;
-	//allocator->CreateResource(
-	//	&allocationDesc,
-	//	&desc,
-	//	rhi::ResourceLayout::Common,
-	//	nullptr,
-	//	0,
-	//	nullptr,
-	//	&m_bufferAllocation);
+	rhi::ma::AllocationDesc allocationDesc;
+	allocationDesc.heapType = accessType;
+	allocator->CreateResource(
+		&allocationDesc,
+		&desc,
+		rhi::ResourceLayout::Common,
+		nullptr,
+		0,
+		nullptr,
+		m_bufferAllocation);
 
-	auto result = device.CreateCommittedResource(desc, m_buffer);
+	//auto result = device.CreateCommittedResource(desc, m_buffer);
 
 	m_size = bufferSize;
 }

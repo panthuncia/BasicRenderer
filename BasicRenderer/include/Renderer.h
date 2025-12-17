@@ -98,7 +98,7 @@ private:
 	uint8_t m_numFramesInFlight = 3;
     rhi::TimelinePtr m_frameFence;
     std::vector<UINT64> m_frameFenceValues; // Store fence values per frame
-    UINT64 m_currentFrameFenceValue = 0;
+    UINT64 m_currentFrameFenceValue = 1; // Start at 1, waiting on 0 is meaningless
 
 	rhi::TimelinePtr m_readbackFence;
 

@@ -59,6 +59,45 @@ namespace rhi::ma
 
     // ---------------- Common types ----------------
 
+    namespace detail {
+        template<class T>
+        struct Releaser {
+            void operator()(T* p) const noexcept { if (p) p->ReleaseThis(); }
+        };
+    } // namespace detail
+
+    template<class T, class Deleter>
+    class Unique {
+    public:
+        Unique() = default;
+        explicit Unique(T* p) noexcept : p_(p) {}
+        ~Unique() { Reset(); }
+
+        Unique(Unique&& o) noexcept : p_(std::exchange(o.p_, nullptr)) {}
+        Unique& operator=(Unique&& o) noexcept {
+            if (this != &o) { Reset(); p_ = std::exchange(o.p_, nullptr); }
+            return *this;
+        }
+
+        Unique(const Unique&) = delete;
+        Unique& operator=(const Unique&) = delete;
+
+        T* Get() const noexcept { return p_; }
+        T* operator->() const noexcept { return p_; }
+        explicit operator bool() const noexcept { return p_ != nullptr; }
+
+        void Reset() noexcept {
+            if (p_) Deleter{}(p_);
+            p_ = nullptr;
+        }
+
+        T** Put() noexcept { Reset(); return &p_; }
+
+    private:
+        T* p_ = nullptr;
+    };
+
+
     using AllocHandle = uint64_t;
 
     using AllocateFuncPtr = void* (*)(size_t size, size_t alignment, void* userData);
@@ -401,6 +440,7 @@ namespace rhi::ma
         template<typename T> friend class PoolAllocator;
         friend class BlockVector;
         friend class DefragmentationContextPimpl;
+        template<class> friend struct rhi::ma::detail::Releaser;
 
         enum Type
         {
@@ -599,6 +639,8 @@ namespace rhi::ma
         bool isTightAlignmentSupported = false;
     };
 
+    using AllocationPtr = Unique<Allocation, detail::Releaser<Allocation>>;
+
     class Allocator
     {
     public:
@@ -618,7 +660,7 @@ namespace rhi::ma
             const ClearValue* pOptimizedClearValue,
             UINT32 NumCastableFormats,
             const Format* pCastableFormats,
-            Allocation** ppAllocation) noexcept;
+            AllocationPtr& outAllocation) noexcept;
 
         rhi::Result AllocateMemory(const AllocationDesc& a, const rhi::ResourceAllocationInfo& info, Allocation* outAlloc) noexcept;
 
@@ -641,19 +683,21 @@ namespace rhi::ma
         void BuildStatsString(char** outJson, bool detailedMap) const noexcept;
         void FreeStatsString(char* json) const noexcept;
         void BeginDefragmentation(const DefragmentationDesc* pDesc, DefragmentationContext** ppContext)noexcept;
-
+        // Don't call this
         AllocatorPimpl* m_Pimpl{};
     private:
-    	
+        template<class> friend struct rhi::ma::detail::Releaser;
+
     	void ReleaseThis();
         void SetCurrentFrameIndex(uint32_t frameIndex) noexcept;
         D3D12MA_CLASS_NO_COPY(Allocator)
     };
 
-    // ---------------- Creation entry points ----------------
+    using AllocationPtr = Unique<Allocation, detail::Releaser<Allocation>>;
+	
+	// ---------------- Creation entry points ----------------
 
-    // Creates a backend allocator instance using the provided Device and configuration.
-    // Implemented by backends (D3D12/Vulkan) or a platform module.
+    // Creates an allocator instance using the provided configuration.
     rhi::Result CreateAllocator(const AllocatorDesc* desc, Allocator** outAllocator) noexcept;
 
     // Creates a standalone virtual allocator block (no GPU memory). Implemented in shared module.
