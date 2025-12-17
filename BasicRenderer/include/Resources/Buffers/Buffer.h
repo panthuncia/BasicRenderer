@@ -17,18 +17,16 @@ class RenderContext;
 class Buffer : public GloballyIndexedResource{
 public:
 	static std::shared_ptr<Buffer> CreateShared(
-		rhi::Device& device,
 		rhi::HeapType accessType,
 		uint64_t bufferSize, 
 		bool unorderedAccess = false) {
-		return std::shared_ptr<Buffer>(new Buffer(device, accessType, bufferSize, unorderedAccess));
+		return std::shared_ptr<Buffer>(new Buffer(accessType, bufferSize, unorderedAccess));
 	}
 	static std::unique_ptr<Buffer> CreateUnique(
-		rhi::Device& device, 
 		rhi::HeapType accessType,
 		uint64_t bufferSize,
 		bool unorderedAccess = false) {
-		return std::unique_ptr<Buffer>(new Buffer(device, accessType, bufferSize, unorderedAccess));
+		return std::unique_ptr<Buffer>(new Buffer(accessType, bufferSize, unorderedAccess));
 	}
 
 	~Buffer() {
@@ -47,7 +45,7 @@ private:
 	size_t m_size = 0;
 	rhi::BufferBarrier m_barrier = {};
 
-	Buffer(rhi::Device& device, 
+	Buffer(
 		rhi::HeapType accessType,
 		uint64_t bufferSize, 
 		bool unorderedAccess = false);

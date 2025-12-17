@@ -297,10 +297,10 @@ namespace rhi::ma
 
         uint64_t preferredBlockSize = 0;
 
+        // Optional
         const AllocationCallbacks* allocationCallbacks = nullptr;
 
-        // Optional backend-native adapter pointer (e.g. IDXGIAdapter*) — treated as opaque.
-        void* nativeAdapter = nullptr;
+        //void* nativeAdapter = nullptr;
     };
 
     // ---------------- Defragmentation ----------------
@@ -460,18 +460,18 @@ namespace rhi::ma
     public:
 
         uint64_t GetOffset() const;
-        uint64_t GetAlignment()const  noexcept;
-        uint64_t GetSize() const noexcept;
+        uint64_t GetAlignment()const noexcept { return m_alignment; }
+        uint64_t GetSize() const noexcept { return m_size; }
 
         rhi::HeapHandle GetHeap() const noexcept;
         rhi::ResourceHandle GetResource() noexcept;
-        void SetResource(rhi::ResourceHandle r);
+        void SetResource(rhi::ResourcePtr r);
 
-        void SetPrivateData(void* p) noexcept;
-        void* GetPrivateData() const noexcept;
+        void SetPrivateData(void* p) noexcept { m_privateData = p; }
+        void* GetPrivateData() const noexcept { return m_privateData; };
 
         void SetName(const char* n) noexcept;
-        const char* GetName() const noexcept;
+        const char* GetName() const noexcept { return m_name; }
     protected:
         void ReleaseThis();
     private:
@@ -541,14 +541,15 @@ namespace rhi::ma
             UINT m_TextureLayout : 9;      // enum ResourceLayout
         } m_PackedData;
 
-        ResourceHandle m_resource;
+        ResourcePtr m_resource; // Owning
         const char* m_name;
         AllocatorPimpl* m_allocator;
         uint64_t m_size;
         uint64_t m_alignment;
+        void* m_privateData;
 
         Allocation(AllocatorPimpl* allocator, UINT64 size, UINT64 alignment);
-        ~Allocation();
+        virtual ~Allocation() {};
         void InitCommitted(CommittedAllocationList* list);
         void InitPlaced(AllocHandle allocHandle, NormalBlock* block);
         void InitHeap(CommittedAllocationList* list, HeapPtr heap);
@@ -556,7 +557,7 @@ namespace rhi::ma
 
         AllocHandle GetAllocHandle() const noexcept;
         NormalBlock* GetBlock();
-        void SetResourcePointer(ResourceHandle resource, const ResourceDesc* pResourceDesc);
+        void SetResourcePointer(ResourcePtr resource, const ResourceDesc* pResourceDesc);
         void FreeName();
     };
 
@@ -703,8 +704,7 @@ namespace rhi::ma
             const ClearValue* pOptimizedClearValue,
             UINT32 NumCastableFormats,
             const Format* pCastableFormats,
-            Allocation** ppAllocation,
-            ResourcePtr& out) noexcept;
+            Allocation** ppAllocation) noexcept;
 
         rhi::Result AllocateMemory(const AllocationDesc& a, const rhi::ResourceAllocationInfo& info, Allocation* outAlloc) noexcept;
 
@@ -745,7 +745,7 @@ namespace rhi::ma
 
     // Creates a backend allocator instance using the provided Device and configuration.
     // Implemented by backends (D3D12/Vulkan) or a platform module.
-    rhi::Result CreateAllocator(const AllocatorDesc* desc, Allocator* outAllocator) noexcept;
+    rhi::Result CreateAllocator(const AllocatorDesc* desc, Allocator** outAllocator) noexcept;
 
     // Creates a standalone virtual allocator block (no GPU memory). Implemented in shared module.
     rhi::Result CreateVirtualBlock(const VirtualBlockDesc* desc, VirtualBlock* outBlock) noexcept;

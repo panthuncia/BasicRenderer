@@ -7,6 +7,7 @@
 
 #include <rhi.h>
 #include <rhi_interop_dx12.h>
+#include <rhi_allocator.h>
 
 #include "Managers/Singletons/SettingsManager.h"
 
@@ -31,6 +32,10 @@ public:
 		return m_copyQueue;
 	}
 
+	rhi::ma::Allocator* GetAllocator() {
+		return m_allocator;
+	}
+
 	bool GetMeshShadersSupported() {
 		return m_meshShadersSupported;
 	}
@@ -43,6 +48,7 @@ private:
 	rhi::Queue m_computeQueue;
 	rhi::Queue m_copyQueue;
 	bool m_meshShadersSupported = false;
+	rhi::ma::Allocator* m_allocator;
 
     void CheckGPUFeatures();
 
@@ -64,6 +70,10 @@ inline void DeviceManager::Initialize() {
 	m_computeQueue = m_device->GetQueue(rhi::QueueKind::Compute);
 	m_copyQueue = m_device->GetQueue(rhi::QueueKind::Copy);
 	CheckGPUFeatures();
+
+	rhi::ma::AllocatorDesc desc;
+	desc.device = m_device.Get();
+	rhi::ma::CreateAllocator(&desc, &m_allocator);
 }
 
 inline void DeviceManager::CheckGPUFeatures() {

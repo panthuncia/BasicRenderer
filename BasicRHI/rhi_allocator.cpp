@@ -202,6 +202,9 @@ namespace rhi::ma {
     template<typename T>
     static void D3D12MA_SWAP(T& a, T& b) { T tmp = a; a = b; b = tmp; }
 
+    template<typename T>
+    static void MOVE_SWAP(T& a, T& b) { T tmp = std::move(a); a = std::move(b); b = std::move(tmp); }
+
     // Scans integer for index of first nonzero bit from the Least Significant Bit (LSB). If mask is 0 then returns UINT8_MAX
     static UINT8 BitScanLSB(UINT64 mask)
     {
@@ -5503,8 +5506,8 @@ Synchronized internally with a mutex.
             const AllocationDesc& allocDesc,
             const CreateResourceParams& createParams,
             bool committedAllowed,
-            Allocation** ppAllocation,
-            ResourcePtr& out);
+            Allocation** ppOutAllocation,
+            ResourcePtr ptr);
 
         void AddStatistics(Statistics& inoutStats);
         void AddDetailedStatistics(DetailedStatistics& inoutStats);
@@ -5889,7 +5892,7 @@ Synchronized internally with a mutex.
         */
         UINT GetDefaultPoolCount() const
         {
-            return 12; // TODO
+            return 4; // TODO
 	        //return SupportsResourceHeapTier2() ? 4 : 12;
         }
         BlockVector** GetDefaultPools() { return m_BlockVectors; }
@@ -5910,7 +5913,7 @@ Synchronized internally with a mutex.
             const AllocationDesc* pAllocDesc,
             const CreateResourceParams& createParams,
             Allocation** ppAllocation,
-            ResourcePtr& out);
+            ResourcePtr out);
 
         Result CreateAliasingResource(
             Allocation* pAllocation,
@@ -5990,7 +5993,8 @@ Synchronized internally with a mutex.
             const CommittedAllocationParameters& committedAllocParams,
             UINT64 resourceSize, bool withinBudget, void* pPrivateData,
             const CreateResourceParams& createParams,
-            Allocation** ppAllocation, ResourcePtr& out);
+            Allocation** ppOutAllocation,
+            ResourcePtr ptr);
 
         // Allocates and registers new heap without any resources placed in it, as dedicated allocation.
         // Creates and returns Allocation object.
@@ -6266,7 +6270,7 @@ Synchronized internally with a mutex.
         const AllocationDesc* pAllocDesc,
         const CreateResourceParams& createParams,
         Allocation** ppAllocation,
-        ResourcePtr& out)
+        ResourcePtr out)
     {
         D3D12MA_ASSERT(pAllocDesc && createParams.GetResourceDesc() && ppAllocation);
 
@@ -6317,7 +6321,7 @@ Synchronized internally with a mutex.
         {
             hr = AllocateCommittedResource(committedAllocationParams,
                 resAllocInfo.sizeInBytes, withinBudget, pAllocDesc->privateData,
-                finalCreateParams, ppAllocation, out);
+                finalCreateParams, ppAllocation, std::move(out));
             if (IsOk(hr)) {
                 return hr;
             }
@@ -6326,7 +6330,7 @@ Synchronized internally with a mutex.
         {
             hr = blockVector->CreateResource(resAllocInfo.sizeInBytes, resAllocInfo.alignment,
                 *pAllocDesc, finalCreateParams, committedAllocationParams.IsValid(),
-                ppAllocation, out);
+                ppAllocation, std::move(out));
             if (IsOk(hr)) {
                 return hr;
             }
@@ -6335,7 +6339,7 @@ Synchronized internally with a mutex.
         {
             hr = AllocateCommittedResource(committedAllocationParams,
                 resAllocInfo.sizeInBytes, withinBudget, pAllocDesc->privateData,
-                finalCreateParams, ppAllocation, out);
+                finalCreateParams, ppAllocation, std::move(out));
             if (IsOk(hr)) {
                 return hr;
             }
@@ -7050,33 +7054,33 @@ Synchronized internally with a mutex.
         const CommittedAllocationParameters& committedAllocParams,
         UINT64 resourceSize, bool withinBudget, void* pPrivateData,
         const CreateResourceParams& createParams,
-        Allocation** ppAllocation, ResourcePtr& out)
+        Allocation** ppOutAllocation,
+        ResourcePtr ptr)
     {
         D3D12MA_ASSERT(committedAllocParams.IsValid());
 
         Result hr;
-        //ResourcePtr res
         // Allocate aliasing memory with explicit heap
         if (committedAllocParams.m_CanAlias)
         {
             ResourceAllocationInfo heapAllocInfo = {};
             heapAllocInfo.sizeInBytes = resourceSize;
             heapAllocInfo.alignment = HeapFlagsToAlignment(committedAllocParams.m_HeapFlags, m_MsaaAlwaysCommitted);
-            hr = AllocateHeap(committedAllocParams, heapAllocInfo, withinBudget, pPrivateData, ppAllocation);
+            hr = AllocateHeap(committedAllocParams, heapAllocInfo, withinBudget, pPrivateData, ppOutAllocation);
             if (IsOk(hr))
             {
-                hr = CreatePlacedResourceWrap((*ppAllocation)->GetHeap(), 0,
-                    createParams, out);
+                hr = CreatePlacedResourceWrap((*ppOutAllocation)->GetHeap(), 0,
+                    createParams, ptr);
                 if (IsOk(hr))
                 {
                     if (IsOk(hr))
                     {
-                        (*ppAllocation)->SetResourcePointer(out->GetHandle(), createParams.GetResourceDesc());
+                        (*ppOutAllocation)->SetResourcePointer(std::move(ptr), createParams.GetResourceDesc());
                         return hr;
                     }
-                    out.Reset();
+                    ptr.Reset();
                 }
-                FreeHeapMemory(*ppAllocation);
+                FreeHeapMemory(*ppOutAllocation);
             }
             return hr;
         }
@@ -7100,11 +7104,11 @@ Synchronized internally with a mutex.
 
 
 
-        hr = m_Device.CreateCommittedResource(*createParams.GetResourceDesc(),out);
+        hr = m_Device.CreateCommittedResource(*createParams.GetResourceDesc(),ptr);
 
         if (IsOk(hr))
         {
-            SetResidencyPriority(out->GetHandle(), committedAllocParams.m_ResidencyPriority);
+            SetResidencyPriority(ptr->GetHandle(), committedAllocParams.m_ResidencyPriority);
 
             // TODO: Original MA wanted alignment from the desc struct, but we don't specify that. 
             // Is there any reason using output from GetResourceAllocationInfo would be suboptimal?
@@ -7114,10 +7118,10 @@ Synchronized internally with a mutex.
             Allocation* alloc = m_AllocationObjectAllocator.Allocate(
                 this, resourceSize, info.alignment);
             alloc->InitCommitted(committedAllocParams.m_List);
-            alloc->SetResourcePointer(out->GetHandle(), createParams.GetResourceDesc());
+            alloc->SetResourcePointer(std::move(ptr), createParams.GetResourceDesc());
             alloc->SetPrivateData(pPrivateData);
 
-            *ppAllocation = alloc;
+            *ppOutAllocation = alloc;
 
             committedAllocParams.m_List->Register(alloc);
 
@@ -7864,23 +7868,23 @@ Synchronized internally with a mutex.
         const AllocationDesc& allocDesc,
         const CreateResourceParams& createParams,
         bool committedAllowed,
-        Allocation** ppAllocation,
-        ResourcePtr& out)
+        Allocation** ppOutAllocation,
+        ResourcePtr ptr)
     {
-        Result hr = Allocate(size, alignment, allocDesc, committedAllowed, 1, ppAllocation);
+        Result hr = Allocate(size, alignment, allocDesc, committedAllowed, 1, ppOutAllocation);
         if (Failed(hr))
         {
             return hr;
         }
 
         hr = m_hAllocator->CreatePlacedResourceWrap(
-            (*ppAllocation)->m_Placed.block->GetHeap(),
-            (*ppAllocation)->GetOffset(),
+            (*ppOutAllocation)->m_Placed.block->GetHeap(),
+            (*ppOutAllocation)->GetOffset(),
             createParams,
-            out);
+            ptr);
         if (IsOk(hr))
         {
-                (*ppAllocation)->SetResourcePointer(out->GetHandle(), createParams.GetResourceDesc());
+                (*ppOutAllocation)->SetResourcePointer(std::move(ptr), createParams.GetResourceDesc());
         }
         return hr;
     }
@@ -8920,7 +8924,7 @@ Synchronized internally with a mutex.
 
 
 #ifndef _D3D12MA_PUBLIC_INTERFACE
-    Result CreateAllocator(const AllocatorDesc* pDesc, Allocator** ppAllocator)
+    Result CreateAllocator(const AllocatorDesc* pDesc, Allocator** ppAllocator) noexcept
     {
         if (!pDesc || !ppAllocator || !pDesc->device.IsValid() ||
             !(pDesc->preferredBlockSize == 0 || (pDesc->preferredBlockSize >= 16 && pDesc->preferredBlockSize < 0x10000000000ull)))
@@ -9005,9 +9009,9 @@ Synchronized internally with a mutex.
         }
     }
 
-    void Allocation::SetResource(ResourceHandle pResource)
+    void Allocation::SetResource(ResourcePtr pResource)
     {
-		m_resource = pResource;
+		m_resource = std::move(pResource);
     }
 
     HeapHandle Allocation::GetHeap() const noexcept
@@ -9106,9 +9110,9 @@ Synchronized internally with a mutex.
         D3D12MA_ASSERT(m_PackedData.GetType() == TYPE_PLACED);
         D3D12MA_ASSERT(allocation->m_PackedData.GetType() == TYPE_PLACED);
 
-        D3D12MA_SWAP(m_resource, allocation->m_resource);
+        MOVE_SWAP(m_resource, allocation->m_resource);
         m_Placed.block->m_pMetadata->SetAllocationPrivateData(m_Placed.allocHandle, allocation);
-        D3D12MA_SWAP(m_Placed, allocation->m_Placed);
+        MOVE_SWAP(m_Placed, allocation->m_Placed);
         m_Placed.block->m_pMetadata->SetAllocationPrivateData(m_Placed.allocHandle, this);
     }
 
@@ -9142,10 +9146,10 @@ Synchronized internally with a mutex.
         }
     }
 
-    void Allocation::SetResourcePointer(ResourceHandle resource, const ResourceDesc* pResourceDesc)
+    void Allocation::SetResourcePointer(ResourcePtr resource, const ResourceDesc* pResourceDesc)
     {
-        D3D12MA_ASSERT(!m_resource.valid() && pResourceDesc);
-        m_resource = resource;
+        D3D12MA_ASSERT(!m_resource->IsValid() && pResourceDesc);
+        m_resource = std::move(resource);
         m_PackedData.SetResourceDimension(pResourceDesc->type);
         m_PackedData.SetResourceFlags(pResourceDesc->resourceFlags);
         m_PackedData.SetTextureLayout(pResourceDesc->texture.initialLayout);
@@ -9300,8 +9304,7 @@ Synchronized internally with a mutex.
         const ClearValue* pOptimizedClearValue,
         UINT32 NumCastableFormats,
         const Format* pCastableFormats,
-        Allocation** ppAllocation,
-        ResourcePtr& out) noexcept
+        Allocation** ppAllocation) noexcept
     {
         if (!pAllocDesc || !pResourceDesc || !ppAllocation)
         {
@@ -9309,11 +9312,12 @@ Synchronized internally with a mutex.
             return Result::InvalidArgument;
         }
         D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
+            ResourcePtr ptr;
             return m_Pimpl->CreateResource(
                 pAllocDesc,
                 CreateResourceParams(pResourceDesc, InitialLayout, pOptimizedClearValue, NumCastableFormats, pCastableFormats),
                 ppAllocation,
-                out);
+                std::move(ptr));
     }
 
     Result Allocator::AllocateMemory( // TODO: Why did original use ptrs?

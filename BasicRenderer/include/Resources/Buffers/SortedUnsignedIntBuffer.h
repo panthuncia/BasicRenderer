@@ -141,7 +141,7 @@ private:
     void CreateBuffer(uint64_t capacity) {
         auto device = DeviceManager::GetInstance().GetDevice();
         m_capacity = capacity;
-        m_dataBuffer = Buffer::CreateShared(device, rhi::HeapType::DeviceLocal, capacity * sizeof(unsigned int), m_UAV);
+        m_dataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, capacity * sizeof(unsigned int), m_UAV);
     }
 
     void GrowBuffer(uint64_t newSize) {
@@ -149,7 +149,7 @@ private:
         if (m_dataBuffer != nullptr) {
             DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
         }
-        auto newDataBuffer = Buffer::CreateShared(device, rhi::HeapType::DeviceLocal, newSize * sizeof(unsigned int), m_UAV);
+        auto newDataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, newSize * sizeof(unsigned int), m_UAV);
         // Copy old content
         UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, m_capacity * sizeof(unsigned int));
         m_dataBuffer = newDataBuffer;

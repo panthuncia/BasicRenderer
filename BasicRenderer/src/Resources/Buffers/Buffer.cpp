@@ -1,15 +1,12 @@
 #include "Resources/Buffers/Buffer.h"
 
-#include <stdexcept>
 #include <rhi_helpers.h>
 
-#include "spdlog/spdlog.h"
-#include "Render/RenderContext.h"
+#include "Managers/Singletons/DeviceManager.h"
 
 using namespace Microsoft::WRL;
 
 Buffer::Buffer(
-	rhi::Device& device, 
 	rhi::HeapType accessType,
 	uint64_t bufferSize, 
 	bool unorderedAccess) : 
@@ -21,6 +18,7 @@ Buffer::Buffer(
 		desc.resourceFlags |= rhi::ResourceFlags::RF_AllowUnorderedAccess;
 	}
 	desc.heapType = accessType;
+	auto device = DeviceManager::GetInstance().GetDevice();
 	auto result = device.CreateCommittedResource(desc, m_buffer);
 
 	m_size = bufferSize;

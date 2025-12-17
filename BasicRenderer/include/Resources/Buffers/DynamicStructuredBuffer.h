@@ -114,9 +114,7 @@ private:
     bool m_UAV = false;
 
     void CreateBuffer(size_t capacity, size_t previousCapacity = 0) {
-        auto device = DeviceManager::GetInstance().GetDevice();
-
-        auto newDataBuffer = Buffer::CreateShared(device, rhi::HeapType::DeviceLocal, sizeof(T) * capacity, m_UAV);
+        auto newDataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, sizeof(T) * capacity, m_UAV);
 		newDataBuffer->SetName((m_name+ L": " + name).c_str());
         if (m_dataBuffer != nullptr) {
             UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity);
