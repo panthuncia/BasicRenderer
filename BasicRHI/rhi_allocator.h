@@ -56,58 +56,6 @@
 
 namespace rhi::ma
 {
-    // ---------------- ABI versioning ----------------
-    inline constexpr uint32_t RHI_MA_ALLOCATOR_ABI_MIN = 1;
-    inline constexpr uint32_t RHI_MA_POOL_ABI_MIN = 1;
-    inline constexpr uint32_t RHI_MA_ALLOCATION_ABI_MIN = 1;
-    inline constexpr uint32_t RHI_MA_DEFRAG_ABI_MIN = 1;
-    inline constexpr uint32_t RHI_MA_VBLOCK_ABI_MIN = 1;
-
-    // ---------------- Convenience RAII wrapper ----------------
-    template<class TObject>
-    class Unique
-    {
-    public:
-        Unique() = default;
-        explicit Unique(TObject obj) noexcept : obj_(obj) {}
-        ~Unique() { Reset(); }
-
-        Unique(const Unique&) = delete;
-        Unique& operator=(const Unique&) = delete;
-
-        Unique(Unique&& o) noexcept : obj_(o.obj_) { o.obj_ = {}; }
-        Unique& operator=(Unique&& o) noexcept
-        {
-            if (this != &o)
-            {
-                Reset();
-                obj_ = o.obj_;
-                o.obj_ = {};
-            }
-            return *this;
-        }
-
-        TObject* operator->() noexcept { return &obj_; }
-        const TObject* operator->() const noexcept { return &obj_; }
-        TObject& Get() noexcept { return obj_; }
-        const TObject& Get() const noexcept { return obj_; }
-        explicit operator bool() const noexcept { return static_cast<bool>(obj_); }
-
-        void Reset() noexcept
-        {
-            if (static_cast<bool>(obj_))
-                obj_.Destroy();
-            obj_ = {};
-        }
-
-        TObject Release() noexcept
-        {
-            return std::exchange(obj_, {});
-        }
-
-    private:
-        TObject obj_{};
-    };
 
     // ---------------- Common types ----------------
 
@@ -148,12 +96,6 @@ namespace rhi::ma
         uint64_t   allocationSizeMax = 0;
         uint64_t   unusedRangeSizeMin = (std::numeric_limits<uint64_t>::max)();
         uint64_t   unusedRangeSizeMax = 0;
-    };
-
-    enum class MemorySegmentGroup : uint32_t
-    {
-        Local = 0,
-        NonLocal = 1
     };
 
     struct TotalStatistics
@@ -418,30 +360,6 @@ namespace rhi::ma
     inline PoolFlags RecommendedPoolFlags =
         PoolFlagsMsaaTexturesAlwaysCommitted;
 
-    // ---------------- Allocation wrapper ----------------
-
-    struct AllocationVTable
-    {
-        void (*destroy)(Allocation*) noexcept;
-
-        uint64_t(*getOffset)(const Allocation*) noexcept;
-        uint64_t(*getAlignment)(const Allocation*) noexcept;
-        uint64_t(*getSize)(const Allocation*) noexcept;
-
-        rhi::HeapHandle(*getHeap)(const Allocation*) noexcept;
-        rhi::ResourceHandle(*getResource)(const Allocation*) noexcept;
-        void (*setResource)(Allocation*, rhi::ResourceHandle) noexcept;
-
-        void (*setPrivateData)(Allocation*, void*) noexcept;
-        void* (*getPrivateData)(const Allocation*) noexcept;
-
-        void (*setName)(Allocation*, const char*) noexcept;
-        const char* (*getName)(const Allocation*) noexcept;
-
-		AllocHandle(*getAllocHandle)(const Allocation*) noexcept;
-
-        uint32_t abi_version = 1;
-    };
 
     /// \cond INTERNAL
     class DefragmentationContextPimpl;
@@ -464,7 +382,7 @@ namespace rhi::ma
         uint64_t GetSize() const noexcept { return m_size; }
 
         rhi::HeapHandle GetHeap() const noexcept;
-        rhi::ResourceHandle GetResource() noexcept;
+        rhi::Resource GetResource() noexcept { return m_resource.Get(); }
         void SetResource(rhi::ResourcePtr r);
 
         void SetPrivateData(void* p) noexcept { m_privateData = p; }
@@ -559,6 +477,7 @@ namespace rhi::ma
         NormalBlock* GetBlock();
         void SetResourcePointer(ResourcePtr resource, const ResourceDesc* pResourceDesc);
         void FreeName();
+        D3D12MA_CLASS_NO_COPY(Allocation)
     };
 
     /// Single move of an allocation to be done for defragmentation.
@@ -612,8 +531,6 @@ namespace rhi::ma
         DefragmentationMove* pMoves;
     };
 
-    using AllocationPtr = Unique<Allocation>;
-
     class Pool
     {
     public:
@@ -629,8 +546,6 @@ namespace rhi::ma
         void ReleaseThis();
     };
 
-    using PoolPtr = Unique<Pool>;
-
     class DefragmentationContext
     {
     public:
@@ -645,9 +560,9 @@ namespace rhi::ma
 
         void GetStats(DefragmentationStats* s) noexcept;
         void ReleaseThis();
-    };
+        D3D12MA_CLASS_NO_COPY(DefragmentationContext)
 
-    using DefragmentationContextPtr = Unique<DefragmentationContext>;
+    };
 
     class VirtualBlock
     {
@@ -676,8 +591,6 @@ namespace rhi::ma
 
     };
 
-    using VirtualBlockPtr = Unique<VirtualBlock>;
-
     struct AllocatorCaps
     {
         bool isUma = false;
@@ -689,13 +602,14 @@ namespace rhi::ma
     class Allocator
     {
     public:
-        AllocatorPimpl* m_Pimpl{};
-
         Allocator(const AllocationCallbacks& allocationCallbacks, const AllocatorDesc& desc);
         ~Allocator();
-        void ReleaseThis();
-        AllocatorCaps GetCaps() noexcept;
-        uint64_t GetMemoryCapacity(MemorySegmentGroup g) noexcept;
+
+        bool IsUMA() const;
+        bool IsCacheCoherentUMA() const;
+        bool IsGPUUploadHeapSupported() const;
+        bool IsTightAlignmentSupported() const;
+        uint64_t GetMemoryCapacity(MemorySegmentGroup memorySegmentGroup) const;
 
         Result CreateResource(
             const AllocationDesc* pAllocDesc,
@@ -722,24 +636,19 @@ namespace rhi::ma
             const PoolDesc* pPoolDesc,
             Pool** ppPool) noexcept;
 
-        void SetCurrentFrameIndex(uint32_t frameIndex) noexcept;
-
-        void GetBudget(Budget* local, Budget* nonLocal) noexcept;
+        void GetBudget(Budget* pLocalBudget, Budget* pNonLocalBudget) noexcept;
         void CalculateStatistics(TotalStatistics* s) noexcept;
-
         void BuildStatsString(char** outJson, bool detailedMap) const noexcept;
         void FreeStatsString(char* json) const noexcept;
+        void BeginDefragmentation(const DefragmentationDesc* pDesc, DefragmentationContext** ppContext)noexcept;
 
-    	void BeginDefragmentation(const DefragmentationDesc* pDesc, DefragmentationContext** ppContext)noexcept;
-
-        bool IsUMA() const;
-        bool IsCacheCoherentUMA() const;
-        bool IsGPUUploadHeapSupported() const;
-        bool IsTightAlignmentSupported() const;
-        uint64_t GetMemoryCapacity(UINT memorySegmentGroup) const;
+        AllocatorPimpl* m_Pimpl{};
+    private:
+    	
+    	void ReleaseThis();
+        void SetCurrentFrameIndex(uint32_t frameIndex) noexcept;
+        D3D12MA_CLASS_NO_COPY(Allocator)
     };
-
-    using AllocatorPtr = Unique<Allocator>;
 
     // ---------------- Creation entry points ----------------
 

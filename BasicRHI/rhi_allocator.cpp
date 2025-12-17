@@ -85,14 +85,6 @@ namespace rhi::ma {
 
 #ifndef _D3D12MA_ENUM_DECLARATIONS
 
-    // Local copy of this enum, as it is provided only by <dxgi1_4.h>, so it may not be available.
-    enum DXGI_MEMORY_SEGMENT_GROUP_COPY
-    {
-        DXGI_MEMORY_SEGMENT_GROUP_LOCAL_COPY = 0,
-        DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL_COPY = 1,
-        DXGI_MEMORY_SEGMENT_GROUP_COUNT
-    };
-
     enum class ResourceClass
     {
         Unknown, Buffer, Non_RT_DS_Texture, RT_DS_Texture
@@ -5601,16 +5593,16 @@ Synchronized internally with a mutex.
         void RemoveBlock(UINT group, UINT64 blockBytes);
 
     private:
-        D3D12MA_ATOMIC_UINT32 m_BlockCount[DXGI_MEMORY_SEGMENT_GROUP_COUNT] = {};
-        D3D12MA_ATOMIC_UINT32 m_AllocationCount[DXGI_MEMORY_SEGMENT_GROUP_COUNT] = {};
-        D3D12MA_ATOMIC_UINT64 m_BlockBytes[DXGI_MEMORY_SEGMENT_GROUP_COUNT] = {};
-        D3D12MA_ATOMIC_UINT64 m_AllocationBytes[DXGI_MEMORY_SEGMENT_GROUP_COUNT] = {};
+        D3D12MA_ATOMIC_UINT32 m_BlockCount[static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::Count)] = {};
+        D3D12MA_ATOMIC_UINT32 m_AllocationCount[static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::Count)] = {};
+        D3D12MA_ATOMIC_UINT64 m_BlockBytes[static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::Count)] = {};
+        D3D12MA_ATOMIC_UINT64 m_AllocationBytes[static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::Count)] = {};
 
         D3D12MA_ATOMIC_UINT32 m_OperationsSinceBudgetFetch = { 0 };
         D3D12MA_RW_MUTEX m_BudgetMutex;
-        UINT64 m_D3D12Usage[DXGI_MEMORY_SEGMENT_GROUP_COUNT] = {};
-        UINT64 m_D3D12Budget[DXGI_MEMORY_SEGMENT_GROUP_COUNT] = {};
-        UINT64 m_BlockBytesAtD3D12Fetch[DXGI_MEMORY_SEGMENT_GROUP_COUNT] = {};
+        UINT64 m_D3D12Usage[static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::Count)] = {};
+        UINT64 m_D3D12Budget[static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::Count)] = {};
+        UINT64 m_BlockBytesAtD3D12Fetch[static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::Count)] = {};
     };
 
 #ifndef _D3D12MA_CURRENT_BUDGET_DATA_FUNCTIONS
@@ -5630,25 +5622,26 @@ Synchronized internally with a mutex.
 
         if (outLocalUsage)
         {
-            const UINT64 D3D12Usage = m_D3D12Usage[DXGI_MEMORY_SEGMENT_GROUP_LOCAL_COPY];
-            const UINT64 blockBytes = m_BlockBytes[DXGI_MEMORY_SEGMENT_GROUP_LOCAL_COPY];
-            const UINT64 blockBytesAtD3D12Fetch = m_BlockBytesAtD3D12Fetch[DXGI_MEMORY_SEGMENT_GROUP_LOCAL_COPY];
+            const UINT64 D3D12Usage = m_D3D12Usage[static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::Local)];
+            const UINT64 blockBytes = m_BlockBytes[static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::Local)];
+            const UINT64 blockBytesAtD3D12Fetch = m_BlockBytesAtD3D12Fetch[static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::Local)];
             *outLocalUsage = D3D12Usage + blockBytes > blockBytesAtD3D12Fetch ?
                 D3D12Usage + blockBytes - blockBytesAtD3D12Fetch : 0;
         }
         if (outLocalBudget)
-            *outLocalBudget = m_D3D12Budget[DXGI_MEMORY_SEGMENT_GROUP_LOCAL_COPY];
+            *outLocalBudget = m_D3D12Budget[static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::Local)];
 
         if (outNonLocalUsage)
         {
-            const UINT64 D3D12Usage = m_D3D12Usage[DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL_COPY];
-            const UINT64 blockBytes = m_BlockBytes[DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL_COPY];
-            const UINT64 blockBytesAtD3D12Fetch = m_BlockBytesAtD3D12Fetch[DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL_COPY];
+            const UINT64 D3D12Usage = m_D3D12Usage[static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::NonLocal)];
+            const UINT64 blockBytes = m_BlockBytes[static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::NonLocal)];
+            const UINT64 blockBytesAtD3D12Fetch = m_BlockBytesAtD3D12Fetch[static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::NonLocal)];
             *outNonLocalUsage = D3D12Usage + blockBytes > blockBytesAtD3D12Fetch ?
                 D3D12Usage + blockBytes - blockBytesAtD3D12Fetch : 0;
         }
-        if (outNonLocalBudget)
-            *outNonLocalBudget = m_D3D12Budget[DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL_COPY];
+        if (outNonLocalBudget) {
+            *outNonLocalBudget = m_D3D12Budget[static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::NonLocal)];
+        }
     }
 
     Result CurrentBudgetData::UpdateBudget(const Device& d, bool useMutex)
@@ -5901,7 +5894,7 @@ Synchronized internally with a mutex.
         bool HeapFlagsFulfillResourceHeapTier(HeapFlags flags) const;
         UINT StandardHeapTypeToMemorySegmentGroup(HeapType heapType) const;
         UINT HeapPropertiesToMemorySegmentGroup(const HeapProperties& heapProps) const;
-        UINT64 GetMemoryCapacity(UINT memorySegmentGroup) const;
+        UINT64 GetMemoryCapacity(MemorySegmentGroup memorySegmentGroup) const;
 
         Result CreatePlacedResourceWrap(
             HeapHandle pHeap,
@@ -6226,30 +6219,32 @@ Synchronized internally with a mutex.
     UINT AllocatorPimpl::StandardHeapTypeToMemorySegmentGroup(HeapType heapType) const
     {
         D3D12MA_ASSERT(IsHeapTypeStandard(heapType));
-        if (IsUMA())
-            return DXGI_MEMORY_SEGMENT_GROUP_LOCAL_COPY;
+        if (IsUMA()) {
+            return static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::Local);
+        }
         return (heapType == HeapType::DeviceLocal || heapType == D3D12_HEAP_TYPE_GPU_UPLOAD_COPY) ?
-            DXGI_MEMORY_SEGMENT_GROUP_LOCAL_COPY : DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL_COPY;
+            static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::Local) : static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::NonLocal);
     }
 
     UINT AllocatorPimpl::HeapPropertiesToMemorySegmentGroup(const HeapProperties& heapProps) const
     {
-        if (IsUMA())
-            return DXGI_MEMORY_SEGMENT_GROUP_LOCAL_COPY;
+        if (IsUMA()) {
+            return static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::Local);
+        }
         if (true) // TODO: Support custom pool preference
             return StandardHeapTypeToMemorySegmentGroup(heapProps.type);
         //return heapProps.MemoryPoolPreference == D3D12_MEMORY_POOL_L1 ?
             //DXGI_MEMORY_SEGMENT_GROUP_LOCAL_COPY : DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL_COPY;
     }
 
-    UINT64 AllocatorPimpl::GetMemoryCapacity(UINT memorySegmentGroup) const
+    UINT64 AllocatorPimpl::GetMemoryCapacity(MemorySegmentGroup memorySegmentGroup) const
     {
         switch (memorySegmentGroup)
         {
-        case DXGI_MEMORY_SEGMENT_GROUP_LOCAL_COPY:
+        case MemorySegmentGroup::Local:
             return IsUMA() ?
                 m_adapterFeatureInfo.dedicatedVideoMemory + m_adapterFeatureInfo.sharedSystemMemory : m_adapterFeatureInfo.dedicatedVideoMemory;
-        case DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL_COPY:
+        case MemorySegmentGroup::NonLocal:
             return IsUMA() ? 0 : m_adapterFeatureInfo.sharedSystemMemory;
         default:
             D3D12MA_ASSERT(0);
@@ -6488,10 +6483,12 @@ Synchronized internally with a mutex.
     void AllocatorPimpl::CalculateStatistics(TotalStatistics& outStats, DetailedStatistics outCustomHeaps[2])
     {
         // Init stats
-        for (size_t i = 0; i < HEAP_TYPE_COUNT; i++)
+        for (size_t i = 0; i < HEAP_TYPE_COUNT; i++) {
             ClearDetailedStatistics(outStats.heapType[i]);
-        for (size_t i = 0; i < DXGI_MEMORY_SEGMENT_GROUP_COUNT; i++)
+        }
+        for (size_t i = 0; i < static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::Count); i++) {
             ClearDetailedStatistics(outStats.memorySegmentGroup[i]);
+        }
         ClearDetailedStatistics(outStats.total);
         if (outCustomHeaps)
         {
@@ -6616,48 +6613,44 @@ Synchronized internally with a mutex.
     void AllocatorPimpl::GetBudget(Budget* outLocalBudget, Budget* outNonLocalBudget)
     {
         if (outLocalBudget)
-            m_Budget.GetStatistics(outLocalBudget->stats, DXGI_MEMORY_SEGMENT_GROUP_LOCAL_COPY);
+            m_Budget.GetStatistics(outLocalBudget->stats, static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::Local));
         if (outNonLocalBudget)
-            m_Budget.GetStatistics(outNonLocalBudget->stats, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL_COPY);
+            m_Budget.GetStatistics(outNonLocalBudget->stats, static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::NonLocal));
 
-#if D3D12MA_DXGI_1_4
-        if (m_Adapter3)
+
+        if (!m_Budget.ShouldUpdateBudget())
         {
-            if (!m_Budget.ShouldUpdateBudget())
-            {
-                m_Budget.GetBudget(m_UseMutex,
-                    outLocalBudget ? &outLocalBudget->UsageBytes : NULL,
-                    outLocalBudget ? &outLocalBudget->BudgetBytes : NULL,
-                    outNonLocalBudget ? &outNonLocalBudget->UsageBytes : NULL,
-                    outNonLocalBudget ? &outNonLocalBudget->BudgetBytes : NULL);
-                return;
-            }
-
-            if (IsOk(UpdateD3D12Budget()))
-            {
-                GetBudget(outLocalBudget, outNonLocalBudget); // Recursion.
-                return;
-            }
+            m_Budget.GetBudget(m_UseMutex,
+                outLocalBudget ? &outLocalBudget->usageBytes : nullptr,
+                outLocalBudget ? &outLocalBudget->budgetBytes : nullptr,
+                outNonLocalBudget ? &outNonLocalBudget->usageBytes : nullptr,
+                outNonLocalBudget ? &outNonLocalBudget->budgetBytes : nullptr);
+            return;
         }
-#endif
+
+        if (IsOk(UpdateD3D12Budget()))
+        {
+            GetBudget(outLocalBudget, outNonLocalBudget); // Recursion.
+            return;
+        }
 
         // Fallback path - manual calculation, not real budget.
-        if (outLocalBudget)
-        {
-            outLocalBudget->usageBytes = outLocalBudget->stats.blockBytes;
-            outLocalBudget->budgetBytes = GetMemoryCapacity(DXGI_MEMORY_SEGMENT_GROUP_LOCAL_COPY) * 8 / 10; // 80% heuristics.
-        }
-        if (outNonLocalBudget)
-        {
-            outNonLocalBudget->usageBytes = outNonLocalBudget->stats.blockBytes;
-            outNonLocalBudget->budgetBytes = GetMemoryCapacity(DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL_COPY) * 8 / 10; // 80% heuristics.
-        }
+        //if (outLocalBudget)
+        //{
+        //    outLocalBudget->usageBytes = outLocalBudget->stats.blockBytes;
+        //    outLocalBudget->budgetBytes = GetMemoryCapacity(MemorySegmentGroup::Local) * 8 / 10; // 80% heuristics.
+        //}
+        //if (outNonLocalBudget)
+        //{
+        //    outNonLocalBudget->usageBytes = outNonLocalBudget->stats.blockBytes;
+        //    outNonLocalBudget->budgetBytes = GetMemoryCapacity(MemorySegmentGroup::NonLocal) * 8 / 10; // 80% heuristics.
+        //}
     }
 
     void AllocatorPimpl::GetBudgetForHeapType(Budget& outBudget, HeapType heapType)
     {
         const bool isLocal = StandardHeapTypeToMemorySegmentGroup(heapType) ==
-            DXGI_MEMORY_SEGMENT_GROUP_LOCAL_COPY;
+            static_cast<std::underlying_type_t<MemorySegmentGroup>>(MemorySegmentGroup::Local);
         if (isLocal)
         {
             GetBudget(&outBudget, nullptr);
@@ -9291,7 +9284,7 @@ Synchronized internally with a mutex.
         return m_Pimpl->IsTightAlignmentSupported();
     }
 
-    UINT64 Allocator::GetMemoryCapacity(UINT memorySegmentGroup) const
+    UINT64 Allocator::GetMemoryCapacity(MemorySegmentGroup memorySegmentGroup) const
     {
         return m_Pimpl->GetMemoryCapacity(memorySegmentGroup);
     }
@@ -9402,7 +9395,7 @@ Synchronized internally with a mutex.
 
     void Allocator::GetBudget(Budget* pLocalBudget, Budget* pNonLocalBudget) noexcept
     {
-        if (pLocalBudget == NULL && pNonLocalBudget == NULL)
+        if (pLocalBudget == nullptr && pNonLocalBudget == nullptr)
         {
             return;
         }

@@ -87,9 +87,9 @@ void UploadManager::UploadData(const void* data, size_t size, Resource* resource
 	page->tailOffset += size;
 
 	uint8_t* mapped = nullptr;
-	page->buffer->m_buffer->Map(reinterpret_cast<void**>(&mapped), 0, size);
+	page->buffer->GetAPIResource().Map(reinterpret_cast<void**>(&mapped), 0, size);
 	memcpy(mapped + uploadOffset, data, size);
-	page->buffer->m_buffer->Unmap(0, 0);
+	page->buffer->GetAPIResource().Unmap(0, 0);
 
 	// queue up the GPU copy
 	ResourceUpdate update;

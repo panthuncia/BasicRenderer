@@ -149,7 +149,7 @@ public:
 
 			// Shader visible UAV
 			unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
-			device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), uavShaderVisibleIndex}, dataBuffer->m_buffer->GetHandle(), uavDesc);
+			device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), uavShaderVisibleIndex}, dataBuffer->GetAPIResource().GetHandle(), uavDesc);
 
 			ShaderVisibleIndexInfo uavInfo;
 			uavInfo.slot.index = uavShaderVisibleIndex;
@@ -158,7 +158,7 @@ public:
 
 			// Non-shader visible UAV
 			unsigned int uavNonShaderVisibleIndex = m_nonShaderVisibleHeap->AllocateDescriptor();
-			device.CreateUnorderedAccessView({ m_nonShaderVisibleHeap->GetHeap().GetHandle(), uavNonShaderVisibleIndex }, dataBuffer->m_buffer->GetHandle(), uavDesc);
+			device.CreateUnorderedAccessView({ m_nonShaderVisibleHeap->GetHeap().GetHandle(), uavNonShaderVisibleIndex }, dataBuffer->GetAPIResource().GetHandle(), uavDesc);
 
 			NonShaderVisibleIndexInfo uavNonShaderInfo;
 			uavNonShaderInfo.slot.index = uavNonShaderVisibleIndex;
@@ -194,7 +194,7 @@ public:
         srvDesc.buffer.numElements = static_cast<UINT>(numElements);
         srvDesc.buffer.structureByteStride = 0; // ignored for typed
 
-        device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), srvIndex }, dataBuffer->m_buffer->GetHandle(), srvDesc);
+        device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), srvIndex }, dataBuffer->GetAPIResource().GetHandle(), srvDesc);
 
         ShaderVisibleIndexInfo srvInfo{};
         srvInfo.slot.index = srvIndex;
@@ -213,7 +213,7 @@ public:
 
             // Shader-visible UAV
             unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
-            device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), uavShaderVisibleIndex }, dataBuffer->m_buffer->GetHandle(), uavDesc);
+            device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), uavShaderVisibleIndex }, dataBuffer->GetAPIResource().GetHandle(), uavDesc);
 
             ShaderVisibleIndexInfo uavInfo{};
             uavInfo.slot.index = uavShaderVisibleIndex;
@@ -223,7 +223,7 @@ public:
 
             // Non-shader-visible UAV (for clears / CPU-side ops)
             unsigned int uavNonShaderVisibleIndex = m_nonShaderVisibleHeap->AllocateDescriptor();
-            device.CreateUnorderedAccessView({ m_nonShaderVisibleHeap->GetHeap().GetHandle(), uavNonShaderVisibleIndex }, dataBuffer->m_buffer->GetHandle(), uavDesc);
+            device.CreateUnorderedAccessView({ m_nonShaderVisibleHeap->GetHeap().GetHandle(), uavNonShaderVisibleIndex }, dataBuffer->GetAPIResource().GetHandle(), uavDesc);
 
             NonShaderVisibleIndexInfo uavNonShaderInfo{};
             uavNonShaderInfo.slot.index = uavNonShaderVisibleIndex;

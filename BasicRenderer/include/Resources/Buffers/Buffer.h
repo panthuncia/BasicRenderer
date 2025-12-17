@@ -11,6 +11,7 @@
 #include "Resources/HeapIndexInfo.h"
 #include "Resources/GloballyIndexedResource.h"
 #include "Utilities/Utilities.h"
+#include "rhi_allocator.h"
 
 class RenderContext;
 
@@ -30,16 +31,16 @@ public:
 	}
 
 	~Buffer() {
-		m_buffer.Reset();
 	}
 	rhi::HeapType m_accessType;
+	//rhi::ma::Allocation* m_bufferAllocation;
 	rhi::ResourcePtr m_buffer;
 	rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
 	size_t GetSize() const { return m_size; }
 
 	rhi::Resource GetAPIResource() override { return m_buffer.Get(); }
 protected:
-	void OnSetName() override { m_buffer->SetName(ws2s(name).c_str()); }
+	void OnSetName() override { m_buffer.Get().SetName(ws2s(name).c_str()); }
 private:
 
 	size_t m_size = 0;
