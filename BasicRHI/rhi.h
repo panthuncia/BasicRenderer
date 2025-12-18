@@ -1731,6 +1731,7 @@ namespace rhi {
 		SwapChainHandle handle;
 	};
 
+
 	template<class TObject>
 	class ObjectPtr {
 	public:

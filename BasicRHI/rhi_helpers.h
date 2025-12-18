@@ -12,6 +12,158 @@
 namespace rhi {
     namespace helpers {
 
+		// AnyObjectPtr - type-erased, move-only holder for ObjectPtr<T>.
+		//
+		// Stores any of the ObjectPtr<> specializations inline
+		// so they can live together in a single container (e.g. a deletion queue).
+        namespace detail {
+            template<size_t A, size_t B>
+            struct static_max2 { static constexpr size_t value = (A > B) ? A : B; };
+
+            template<size_t A, size_t... Rest>
+            struct static_max : static_max2<A, static_max<Rest...>::value> {};
+            template<size_t A>
+            struct static_max<A> { static constexpr size_t value = A; };
+
+            template<class... Ts>
+            struct max_sizeof : static_max<sizeof(Ts)...> {};
+            template<class... Ts>
+            struct max_alignof : static_max<alignof(Ts)...> {};
+        } // namespace detail
+
+        inline constexpr size_t RHI_ANYOBJECTPTR_INLINE_SIZE = detail::max_sizeof<
+            CommandAllocatorPtr,
+            CommandListPtr,
+            SwapchainPtr,
+            ResourcePtr,
+            QueryPoolPtr,
+            PipelinePtr,
+            PipelineLayoutPtr,
+            CommandSignaturePtr,
+            DescriptorHeapPtr,
+            SamplerPtr,
+            TimelinePtr,
+            HeapPtr,
+            DevicePtr
+        >::value;
+
+        inline constexpr size_t RHI_ANYOBJECTPTR_INLINE_ALIGN = detail::max_alignof<
+            CommandAllocatorPtr,
+            CommandListPtr,
+            SwapchainPtr,
+            ResourcePtr,
+            QueryPoolPtr,
+            PipelinePtr,
+            PipelineLayoutPtr,
+            CommandSignaturePtr,
+            DescriptorHeapPtr,
+            SamplerPtr,
+            TimelinePtr,
+            HeapPtr,
+            DevicePtr
+        >::value;
+
+        class AnyObjectPtr {
+        public:
+            AnyObjectPtr() = default;
+            ~AnyObjectPtr() { Reset(); }
+
+            AnyObjectPtr(const AnyObjectPtr&) = delete;
+            AnyObjectPtr& operator=(const AnyObjectPtr&) = delete;
+
+            AnyObjectPtr(AnyObjectPtr&& o) noexcept { MoveFrom(o); }
+            AnyObjectPtr& operator=(AnyObjectPtr&& o) noexcept {
+                if (this != &o) {
+                    Reset();
+                    MoveFrom(o);
+                }
+                return *this;
+            }
+
+            // Construct from any ObjectPtr<T> rvalue.
+            template<class TObject>
+            AnyObjectPtr(ObjectPtr<TObject>&& p) noexcept {
+                Emplace<ObjectPtr<TObject>>(std::move(p));
+            }
+
+            AnyObjectPtr(DevicePtr&& p) noexcept { Emplace<DevicePtr>(std::move(p)); }
+
+            // In-place construct a specific ObjectPtr type.
+            template<class T, class... Args>
+            T& Emplace(Args&&... args) noexcept {
+                static_assert(std::is_nothrow_move_constructible_v<T>,
+                    "AnyObjectPtr requires nothrow-move types.");
+                static_assert(sizeof(T) <= RHI_ANYOBJECTPTR_INLINE_SIZE,
+                    "Type too large for AnyObjectPtr inline storage. Increase RHI_ANYOBJECTPTR_INLINE_SIZE.");
+                static_assert(alignof(T) <= RHI_ANYOBJECTPTR_INLINE_ALIGN,
+                    "Type alignment too strict for AnyObjectPtr inline storage. Increase RHI_ANYOBJECTPTR_INLINE_ALIGN.");
+
+                Reset();
+                vt_ = VTableFor<T>();
+                return *::new (static_cast<void*>(storage_)) T(std::forward<Args>(args)...);
+            }
+
+            void Reset() noexcept {
+                if (vt_) {
+                    vt_->destroy(storage_);
+                    vt_ = nullptr;
+                }
+            }
+
+            explicit operator bool() const noexcept { return vt_ != nullptr; }
+            bool HasValue() const noexcept { return vt_ != nullptr; }
+
+            // Query / access (optional convenience)
+            template<class T>
+            bool Is() const noexcept {
+                return vt_ == VTableFor<T>();
+            }
+
+            template<class T>
+            T* GetIf() noexcept {
+                return Is<T>() ? reinterpret_cast<T*>(storage_) : nullptr;
+            }
+
+            template<class T>
+            const T* GetIf() const noexcept {
+                return Is<T>() ? reinterpret_cast<const T*>(storage_) : nullptr;
+            }
+
+        private:
+            struct VTable {
+                void (*destroy)(void*) noexcept;
+                void (*move)(void* dst, void* src) noexcept;
+            };
+
+            template<class T>
+            static const VTable* VTableFor() noexcept {
+                static const VTable v{
+                    // destroy
+                    [](void* p) noexcept {
+                        static_cast<T*>(p)->~T();
+                    },
+                    // move-construct into dst, then destroy src
+                    [](void* dst, void* src) noexcept {
+                        new (dst) T(std::move(*static_cast<T*>(src)));
+                        static_cast<T*>(src)->~T();
+                    }
+                };
+                return &v;
+            }
+
+            void MoveFrom(AnyObjectPtr& o) noexcept {
+                vt_ = o.vt_;
+                if (vt_) {
+                    vt_->move(storage_, o.storage_);
+                    o.vt_ = nullptr;
+                }
+            }
+
+        private:
+            alignas(RHI_ANYOBJECTPTR_INLINE_ALIGN) std::byte storage_[RHI_ANYOBJECTPTR_INLINE_SIZE]{};
+            const VTable* vt_ = nullptr;
+        };
+
         static inline Format ToRHI(const DXGI_FORMAT f) {
             switch (f) {
             case DXGI_FORMAT_UNKNOWN: return Format::Unknown;
