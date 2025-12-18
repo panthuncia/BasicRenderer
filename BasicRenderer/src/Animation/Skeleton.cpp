@@ -19,7 +19,7 @@ Skeleton::Skeleton(const std::vector<flecs::entity>& nodes, const std::vector<XM
     m_transformsBuffer->SetName(L"BoneTransforms");
     m_inverseBindMatricesBuffer = resourceManager.CreateIndexedStructuredBuffer(nodes.size(), sizeof(DirectX::XMMATRIX));
 	m_inverseBindMatricesBuffer->SetName(L"InverseBindMatrices");
-    QUEUE_UPLOAD(m_inverseBindMatrices.data(), nodes.size() * sizeof(XMMATRIX), m_inverseBindMatricesBuffer.get(), 0);
+    QUEUE_UPLOAD(m_inverseBindMatrices.data(), nodes.size() * sizeof(XMMATRIX), m_inverseBindMatricesBuffer, 0);
 	m_isBaseSkeleton = true;
     FindRoot();
 }
@@ -122,8 +122,6 @@ std::shared_ptr<Skeleton> Skeleton::CopySkeleton(bool retainIsBaseSkeleton) {
 
 Skeleton::~Skeleton() {
 	auto& deletionManager = DeletionManager::GetInstance();
-	deletionManager.MarkForDelete(m_transformsBuffer);
-	deletionManager.MarkForDelete(m_inverseBindMatricesBuffer);
 }
 
 
@@ -162,7 +160,7 @@ void Skeleton::UpdateTransforms() {
 		const Components::Matrix transform = m_bones[i].get<Components::Matrix>();
         memcpy(&m_boneTransforms[i * 16], &transform.matrix, sizeof(XMMATRIX));
     }
-    QUEUE_UPLOAD(m_boneTransforms.data(), m_bones.size() * sizeof(XMMATRIX), m_transformsBuffer.get(), 0);
+    QUEUE_UPLOAD(m_boneTransforms.data(), m_bones.size() * sizeof(XMMATRIX), m_transformsBuffer, 0);
 }
 
 uint32_t Skeleton::GetTransformsBufferIndex() {

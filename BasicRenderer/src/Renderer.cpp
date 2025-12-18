@@ -617,7 +617,7 @@ void Renderer::CreateTextures() {
     dims.height = resolution.y;
     dims.width = resolution.x;
     hdrDesc.imageDimensions.push_back(dims);
-    auto hdrColorTarget = PixelBuffer::Create(hdrDesc);
+    auto hdrColorTarget = PixelBuffer::CreateShared(hdrDesc);
     hdrColorTarget->SetName(L"Primary Camera HDR Color Target");
 	m_coreResourceProvider.m_HDRColorTarget = hdrColorTarget;
 
@@ -625,7 +625,7 @@ void Renderer::CreateTextures() {
     hdrDesc.imageDimensions[0].width = outputResolution.x;
     hdrDesc.imageDimensions[0].height = outputResolution.y;
     hdrDesc.generateMipMaps = true;
-	auto upscaledHDRColorTarget = PixelBuffer::Create(hdrDesc);
+	auto upscaledHDRColorTarget = PixelBuffer::CreateShared(hdrDesc);
 	upscaledHDRColorTarget->SetName(L"Upscaled HDR Color Target");
 	m_coreResourceProvider.m_upscaledHDRColorTarget = upscaledHDRColorTarget;
 
@@ -642,7 +642,7 @@ void Renderer::CreateTextures() {
     motionVectors.srvFormat = rhi::Format::R16G16_Float;
     ImageDimensions motionVectorsDims = { resolution.x, resolution.y, 0, 0 };
     motionVectors.imageDimensions.push_back(motionVectorsDims);
-    auto motionVectorsBuffer = PixelBuffer::Create(motionVectors);
+    auto motionVectorsBuffer = PixelBuffer::CreateShared(motionVectors);
     motionVectorsBuffer->SetName(L"Motion Vectors");
 	m_coreResourceProvider.m_gbufferMotionVectors = motionVectorsBuffer;
 }
@@ -902,19 +902,25 @@ void Renderer::Cleanup() {
     spdlog::info("In cleanup");
     // Wait for all GPU frames to complete
 	StallPipeline();
+    m_coreResourceProvider.Cleanup();
     m_swapChain.Reset();
     currentRenderGraph.reset();
+    m_currentEnvironment.reset();
 	currentScene.reset();
 	m_pIndirectCommandBufferManager.reset();
 	m_pViewManager.reset();
 	m_pLightManager.reset();
 	m_pMeshManager.reset();
 	m_pObjectManager.reset();
+    m_pMaterialManager.reset();
+    m_pEnvironmentManager.reset();
     m_hierarchySystem.destruct();
     m_settingsSubscriptions.clear();
     Material::DestroyDefaultMaterial();
     Menu::GetInstance().Cleanup();
     ECSManager::GetInstance().GetWorld().release();
+    UploadManager::GetInstance().Cleanup();
+    ResourceManager::GetInstance().Cleanup();
     DeletionManager::GetInstance().Cleanup();
 }
 
@@ -943,9 +949,6 @@ std::shared_ptr<Scene>& Renderer::GetCurrentScene() {
 }
 
 void Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
-	if (currentScene) {
-		DeletionManager::GetInstance().MarkForDelete(currentScene);
-	}
 	newScene->GetRoot().add<Components::ActiveScene>();
     currentScene = newScene;
     //currentScene->SetDepthMap(m_depthMap);
@@ -1194,7 +1197,6 @@ void Renderer::CreateRenderGraph() {
     newGraph->Compile();
     newGraph->Setup();
 
-    DeletionManager::GetInstance().MarkForDelete(currentRenderGraph);
 	currentRenderGraph = std::move(newGraph);
 
 	Menu::GetInstance().SetRenderGraph(currentRenderGraph);

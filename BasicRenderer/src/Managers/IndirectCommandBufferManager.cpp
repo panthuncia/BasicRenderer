@@ -26,13 +26,6 @@ IndirectCommandBufferManager::IndirectCommandBufferManager() {
 IndirectCommandBufferManager::~IndirectCommandBufferManager() {
     auto& deletion = DeletionManager::GetInstance();
     for (auto& [viewID, perView] : m_viewIDToBuffers) {
-        for (auto& [flags, buf] : perView.buffersByFlags) {
-            deletion.MarkForDelete(buf.buffer->GetResource()); // delay delete
-        }
-        if (perView.meshletCullingIndirectCommandBuffer)
-            deletion.MarkForDelete(perView.meshletCullingIndirectCommandBuffer->GetResource());
-        if (perView.meshletCullingResetIndirectCommandBuffer)
-            deletion.MarkForDelete(perView.meshletCullingResetIndirectCommandBuffer->GetResource());
     }
 }
 
@@ -126,15 +119,12 @@ void IndirectCommandBufferManager::UnregisterBuffers(uint64_t viewID) {
     auto& deletion = DeletionManager::GetInstance();
 
     for (auto& [flags, dyn] : perView.buffersByFlags) {
-        deletion.MarkForDelete(dyn.buffer->GetResource());
         m_indirectCommandsResourceGroup->RemoveResource(dyn.buffer->GetResource().get());
     }
     if (perView.meshletCullingIndirectCommandBuffer) {
-        deletion.MarkForDelete(perView.meshletCullingIndirectCommandBuffer->GetResource());
         m_meshletCullingCommandResourceGroup->RemoveResource(perView.meshletCullingIndirectCommandBuffer->GetResource().get());
     }
     if (perView.meshletCullingResetIndirectCommandBuffer) {
-        deletion.MarkForDelete(perView.meshletCullingResetIndirectCommandBuffer->GetResource());
         m_meshletCullingCommandResourceGroup->RemoveResource(perView.meshletCullingResetIndirectCommandBuffer->GetResource().get());
     }
 
@@ -172,7 +162,6 @@ void IndirectCommandBufferManager::UpdateBuffersForTechnique(TechniqueDescriptor
         auto it = perView.buffersByFlags.find(technique.compileFlags);
         if (it != perView.buffersByFlags.end()) {
             // Replace existing
-            deletion.MarkForDelete(it->second.buffer->GetResource());
             auto res = ResourceManager::GetInstance()
                 .CreateIndexedStructuredBuffer(curr, sizeof(DispatchMeshIndirectCommand), true, true);
             res->SetName(L"IndirectCommandBuffer(flags=" + s2ws(GetDebugNameForTechnique(technique)) +
@@ -319,10 +308,8 @@ void IndirectCommandBufferManager::RecreateMeshletBuffersForAllViews() {
     auto& deletion = DeletionManager::GetInstance();
     for (auto& [viewID, perView] : m_viewIDToBuffers) {
         if (perView.meshletCullingIndirectCommandBuffer) {
-            deletion.MarkForDelete(perView.meshletCullingIndirectCommandBuffer->GetResource());
         }
         if (perView.meshletCullingResetIndirectCommandBuffer) {
-            deletion.MarkForDelete(perView.meshletCullingResetIndirectCommandBuffer->GetResource());
         }
 
         if (m_totalIndirectCommands == 0) {

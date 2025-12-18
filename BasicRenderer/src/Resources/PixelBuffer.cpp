@@ -10,15 +10,17 @@
 #include "Render/RenderContext.h"
 
 std::shared_ptr<PixelBuffer>
-PixelBuffer::Create(const TextureDescription& desc,
-    const std::vector<const stbi_uc*>& initialData,
-    PixelBuffer* aliasTarget)
+PixelBuffer::CreateShared(const TextureDescription& desc,
+	const std::vector<const stbi_uc*>& initialData,
+	PixelBuffer* aliasTarget)
 {
-    auto pb = std::shared_ptr<PixelBuffer>(new PixelBuffer());
-    pb->initialize(desc, initialData, aliasTarget);
-    return pb;
+	auto pb = std::make_shared<PixelBuffer>(CreateTag{});
+	pb->initialize(desc, initialData, aliasTarget);
+#if BUILD_TYPE == BUILD_DEBUG
+	pb->m_creation = std::stacktrace::current();
+#endif
+	return pb;
 }
-
 
 void PixelBuffer::initialize(const TextureDescription& desc,
     const std::vector<const stbi_uc*>& initialData,

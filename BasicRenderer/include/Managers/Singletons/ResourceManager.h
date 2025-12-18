@@ -34,13 +34,14 @@ public:
     }
 
     void Initialize();
+    void Cleanup();
 
     rhi::DescriptorHeap GetSRVDescriptorHeap();
     rhi::DescriptorHeap GetSamplerDescriptorHeap();
     void UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, DirectX::XMUINT2 screenRes, DirectX::XMUINT3 clusterSizes, unsigned int frameIndex);
     
     std::shared_ptr<Buffer>& GetPerFrameBuffer() {
-		return perFrameBufferHandle;
+		return m_perFrameBuffer;
     }
 
 	void SetDirectionalCascadeSplits(const std::vector<float>& splits) {
@@ -482,7 +483,7 @@ private:
     std::unordered_map<UINT, UINT> bufferIDDescriptorIndexMap;
 
 
-    std::shared_ptr<Buffer> perFrameBufferHandle;
+    std::shared_ptr<Buffer> m_perFrameBuffer;
     UINT8* pPerFrameConstantBuffer;
     PerFrameCB perFrameCBData;
     UINT currentFrameIndex;

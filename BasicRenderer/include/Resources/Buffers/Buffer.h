@@ -3,15 +3,15 @@
 #include <stdint.h>
 #include <string>
 #include <memory>
-#include <rhi.h>
+#include <stacktrace>
 
+#include <rhi.h>
 #include <resource_states.h>
 
-#include "Render/DescriptorHeap.h"
-#include "Resources/HeapIndexInfo.h"
 #include "Resources/GloballyIndexedResource.h"
 #include "Utilities/Utilities.h"
 #include "rhi_allocator.h"
+#include "Managers/Singletons/DeletionManager.h"
 
 class RenderContext;
 
@@ -21,16 +21,25 @@ public:
 		rhi::HeapType accessType,
 		uint64_t bufferSize, 
 		bool unorderedAccess = false) {
-		return std::shared_ptr<Buffer>(new Buffer(accessType, bufferSize, unorderedAccess));
+		auto sp = std::shared_ptr<Buffer>(new Buffer(accessType, bufferSize, unorderedAccess));
+#if BUILD_TYPE == BUILD_DEBUG
+		sp->m_creation = std::stacktrace::current();
+#endif
+		return sp;
 	}
 	static std::unique_ptr<Buffer> CreateUnique(
 		rhi::HeapType accessType,
 		uint64_t bufferSize,
 		bool unorderedAccess = false) {
-		return std::unique_ptr<Buffer>(new Buffer(accessType, bufferSize, unorderedAccess));
+		auto sp = std::unique_ptr<Buffer>(new Buffer(accessType, bufferSize, unorderedAccess));
+#if BUILD_TYPE == BUILD_DEBUG
+		sp->m_creation = std::stacktrace::current();
+#endif
+		return sp;
 	}
 
 	~Buffer() {
+		DeletionManager::GetInstance().MarkForDelete(std::move(m_bufferAllocation));
 	}
 	rhi::HeapType m_accessType;
 	rhi::ma::AllocationPtr m_bufferAllocation;
@@ -42,7 +51,9 @@ public:
 protected:
 	void OnSetName() override { m_bufferAllocation->GetResource().SetName(ws2s(name).c_str()); }
 private:
-
+#if BUILD_TYPE == BUILD_DEBUG
+	std::stacktrace m_creation;
+#endif
 	size_t m_size = 0;
 	rhi::BufferBarrier m_barrier = {};
 

@@ -61,11 +61,6 @@ LightManager::LightManager() {
 
 LightManager::~LightManager() {
 	auto& deletionManager = DeletionManager::GetInstance();
-	deletionManager.MarkForDelete(m_lightBuffer);
-	deletionManager.MarkForDelete(m_spotViewInfo);
-	deletionManager.MarkForDelete(m_pointViewInfo);
-	deletionManager.MarkForDelete(m_directionalViewInfo);
-	deletionManager.MarkForDelete(m_activeLightIndices);
 }
 
 AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {

@@ -2,7 +2,6 @@
 
 #include <memory>
 
-#include <rhi.h>
 
 #include "Render/RenderContext.h"
 #include "Resources/GloballyIndexedResource.h"

@@ -31,7 +31,7 @@ void CreateGBufferResources(RenderGraph* graph) {
 	normalsWorldSpaceDesc.uavFormat = rhi::Format::R32G32B32A32_Float;
     ImageDimensions dims = { resolution.x, resolution.y, 0, 0 };
     normalsWorldSpaceDesc.imageDimensions.push_back(dims);
-    auto normalsWorldSpace = PixelBuffer::Create(normalsWorldSpaceDesc);
+    auto normalsWorldSpace = PixelBuffer::CreateShared(normalsWorldSpaceDesc);
     normalsWorldSpace->SetName(L"Normals World Space");
     graph->RegisterResource(Builtin::GBuffer::Normals, normalsWorldSpace);
 
@@ -43,7 +43,7 @@ void CreateGBufferResources(RenderGraph* graph) {
 	visibilityDesc.hasUAV = true; // For clearing
 	visibilityDesc.hasNonShaderVisibleUAV = true; // For clearing with ClearUnorderedAccessViewUint
     visibilityDesc.imageDimensions.emplace_back(resolution.x, resolution.y, 0, 0);
-    auto visibilityBuffer = PixelBuffer::Create(visibilityDesc);
+    auto visibilityBuffer = PixelBuffer::CreateShared(visibilityDesc);
 	visibilityBuffer->SetName(L"Visibility Buffer");
     graph->RegisterResource(Builtin::PrimaryCamera::VisibilityTexture, visibilityBuffer);
 
@@ -60,7 +60,7 @@ void CreateGBufferResources(RenderGraph* graph) {
     albedoDesc.hasNonShaderVisibleUAV = true;
     ImageDimensions albedoDims = { resolution.x, resolution.y, 0, 0 };
     albedoDesc.imageDimensions.push_back(albedoDims);
-    albedo = PixelBuffer::Create(albedoDesc);
+    albedo = PixelBuffer::CreateShared(albedoDesc);
     albedo->SetName(L"Albedo");
     graph->RegisterResource(Builtin::GBuffer::Albedo, albedo);
 
@@ -73,7 +73,7 @@ void CreateGBufferResources(RenderGraph* graph) {
 	metallicRoughnessDesc.hasNonShaderVisibleUAV = true;
     ImageDimensions metallicRoughnessDims = { resolution.x, resolution.y, 0, 0 };
     metallicRoughnessDesc.imageDimensions.push_back(metallicRoughnessDims);
-    metallicRoughness = PixelBuffer::Create(metallicRoughnessDesc);
+    metallicRoughness = PixelBuffer::CreateShared(metallicRoughnessDesc);
     metallicRoughness->SetName(L"Metallic Roughness");
     graph->RegisterResource(Builtin::GBuffer::MetallicRoughness, metallicRoughness);
 
@@ -86,7 +86,7 @@ void CreateGBufferResources(RenderGraph* graph) {
 	emissiveDesc.hasNonShaderVisibleUAV = true;
     ImageDimensions emissiveDims = { resolution.x, resolution.y, 0, 0 };
     emissiveDesc.imageDimensions.push_back(emissiveDims);
-    emissive = PixelBuffer::Create(emissiveDesc);
+    emissive = PixelBuffer::CreateShared(emissiveDesc);
     emissive->SetName(L"Emissive");
     graph->RegisterResource(Builtin::GBuffer::Emissive, emissive);
 }
@@ -105,7 +105,7 @@ void BuildBRDFIntegrationPass(RenderGraph* graph) {
 	brdfDesc.uavFormat = rhi::Format::R16G16_Float;
     ImageDimensions dims = { 512, 512, 0, 0 };
     brdfDesc.imageDimensions.push_back(dims);
-    auto brdfIntegrationTexture = PixelBuffer::Create(brdfDesc);
+    auto brdfIntegrationTexture = PixelBuffer::CreateShared(brdfDesc);
     brdfIntegrationTexture->SetName(L"BRDF Integration Texture");
 	graph->RegisterResource(Builtin::BRDFLUT, brdfIntegrationTexture);
 
@@ -337,7 +337,7 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingDepthsDesc.generateMipMaps = true;
     ImageDimensions dims1 = { resolution.x, resolution.y, 0, 0 };
     workingDepthsDesc.imageDimensions.push_back(dims1);
-    auto workingDepths = PixelBuffer::Create(workingDepthsDesc);
+    auto workingDepths = PixelBuffer::CreateShared(workingDepthsDesc);
     workingDepths->SetName(L"GTAO Working Depths");
 
     TextureDescription workingEdgesDesc;
@@ -349,7 +349,7 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingEdgesDesc.format = rhi::Format::R8_UNorm;
     workingEdgesDesc.generateMipMaps = false;
     workingEdgesDesc.imageDimensions.push_back(dims1);
-    auto workingEdges = PixelBuffer::Create(workingEdgesDesc);
+    auto workingEdges = PixelBuffer::CreateShared(workingEdgesDesc);
     workingEdges->SetName(L"GTAO Working Edges");
 
     TextureDescription workingAOTermDesc;
@@ -361,11 +361,11 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingAOTermDesc.format = rhi::Format::R8_UInt;
     workingAOTermDesc.generateMipMaps = false;
     workingAOTermDesc.imageDimensions.push_back(dims1);
-    auto workingAOTerm1 = PixelBuffer::Create(workingAOTermDesc);
+    auto workingAOTerm1 = PixelBuffer::CreateShared(workingAOTermDesc);
     workingAOTerm1->SetName(L"GTAO Working AO Term 1");
-    auto workingAOTerm2 = PixelBuffer::Create(workingAOTermDesc);
+    auto workingAOTerm2 = PixelBuffer::CreateShared(workingAOTermDesc);
     workingAOTerm2->SetName(L"GTAO Working AO Term 2");
-    std::shared_ptr<PixelBuffer> outputAO = PixelBuffer::Create(workingAOTermDesc);
+    std::shared_ptr<PixelBuffer> outputAO = PixelBuffer::CreateShared(workingAOTermDesc);
     outputAO->SetName(L"GTAO Output AO Term");
 
     graph->RegisterResource(Builtin::GTAO::WorkingAOTerm1, workingAOTerm1);
@@ -428,7 +428,7 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
     gtaoInfo.g_srcWorkingEdgesDescriptorIndex = workingEdges->GetSRVInfo(0).slot.index;
     gtaoInfo.g_outFinalAOTermDescriptorIndex = outputAO->GetUAVShaderVisibleInfo(0).slot.index;
 
-    QUEUE_UPLOAD(&gtaoInfo, sizeof(GTAOInfo), GTAOConstantBuffer.get(), 0);
+    QUEUE_UPLOAD(&gtaoInfo, sizeof(GTAOInfo), GTAOConstantBuffer, 0);
 
     graph->BuildComputePass("GTAOFilterPass") // Depth filter pass
         .Build<GTAOFilterPass>(GTAOConstantBuffer);
@@ -523,7 +523,7 @@ void BuildPPLLPipeline(RenderGraph* graph) {
     desc.hasRTV = false;
     desc.hasUAV = true;
     desc.hasNonShaderVisibleUAV = true;
-    auto PPLLHeadPointerTexture = PixelBuffer::Create(desc);
+    auto PPLLHeadPointerTexture = PixelBuffer::CreateShared(desc);
     PPLLHeadPointerTexture->SetName(L"PPLLHeadPointerTexture");
     auto PPLLBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numPPLLNodes, PPLLNodeSize, true, false);
     PPLLBuffer->SetName(L"PPLLBuffer");
@@ -588,7 +588,7 @@ void BuildSSRPasses(RenderGraph* graph) {
 	ssrDesc.hasNonShaderVisibleUAV = true; // For ClearUnorderedAccessView
     ImageDimensions dims = { resolution.x, resolution.y, 0, 0 };
     ssrDesc.imageDimensions.push_back(dims);
-    auto ssrTexture = PixelBuffer::Create(ssrDesc);
+    auto ssrTexture = PixelBuffer::CreateShared(ssrDesc);
     ssrTexture->SetName(L"SSR Texture");
 	graph->RegisterResource(Builtin::PostProcessing::ScreenSpaceReflections, ssrTexture);
 

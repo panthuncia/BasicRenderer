@@ -43,17 +43,17 @@ public:
 		switch (light->type) {
 		case Components::LightType::Point: // Cubemap
 			desc.isCubemap = true;
-			shadowMap = PixelBuffer::Create(desc);
+			shadowMap = PixelBuffer::CreateShared(desc);
 			shadowMap->SetName(L"PointShadowMap");
 			break;
 		case Components::LightType::Spot: // 2D texture
-			shadowMap = PixelBuffer::Create(desc);
+			shadowMap = PixelBuffer::CreateShared(desc);
 			shadowMap->SetName(L"SpotShadowMap");
 			break;
 		case Components::LightType::Directional: // Texture array
 			desc.isArray = true;
 			desc.arraySize = getNumCascades();
-			shadowMap = PixelBuffer::Create(desc);
+			shadowMap = PixelBuffer::CreateShared(desc);
 			shadowMap->SetName(L"DirectionalShadowMap");
 			break;
 
@@ -103,17 +103,17 @@ public:
 		switch (light->type) {
 		case Components::LightType::Point: // Cubemap
 			desc.isCubemap = true;
-			shadowMap = PixelBuffer::Create(desc);
+			shadowMap = PixelBuffer::CreateShared(desc);
 			shadowMap->SetName(L"linearShadowMap");
 			break;
 		case Components::LightType::Spot: // 2D texture
-			shadowMap = PixelBuffer::Create(desc);
+			shadowMap = PixelBuffer::CreateShared(desc);
 			shadowMap->SetName(L"linearShadowMap");
 			break;
 		case Components::LightType::Directional: // Texture array
 			desc.isArray = true;
 			desc.arraySize = getNumCascades();
-			shadowMap = PixelBuffer::Create(desc);
+			shadowMap = PixelBuffer::CreateShared(desc);
 			shadowMap->SetName(L"linearShadowMap");
 			break;
 

@@ -53,7 +53,7 @@ std::unique_ptr<Environment> EnvironmentManager::CreateEnvironment(std::wstring 
 	prefilteredDesc.generateMipMaps = true;
 	prefilteredDesc.hasUAV = true;
 
-	auto prefilteredEnvironmentCubemap = PixelBuffer::Create(prefilteredDesc);
+	auto prefilteredEnvironmentCubemap = PixelBuffer::CreateShared(prefilteredDesc);
 	auto sampler = Sampler::GetDefaultSampler();
 	auto prefilteredEnvironment = std::make_shared<Texture>(prefilteredEnvironmentCubemap, sampler);
 	prefilteredEnvironment->SetName(L"Environment prefiltered cubemap");
@@ -100,7 +100,7 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 		skyboxDesc.format = rhi::Format::R8G8B8A8_UNorm;
 		skyboxDesc.hasUAV = true;
 
-		auto envCubemap = PixelBuffer::Create(skyboxDesc);
+		auto envCubemap = PixelBuffer::CreateShared(skyboxDesc);
 		auto sampler = Sampler::GetDefaultSampler();
 		skybox = std::make_shared<Texture>(envCubemap, sampler);
 		skybox->SetName(L"Environment cubemap");
@@ -135,7 +135,7 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 	prefilteredDesc.generateMipMaps = true;
 	prefilteredDesc.hasUAV = true;
 
-	auto prefilteredEnvironmentCubemap = PixelBuffer::Create(prefilteredDesc);
+	auto prefilteredEnvironmentCubemap = PixelBuffer::CreateShared(prefilteredDesc);
 	auto sampler = Sampler::GetDefaultSampler();
 	auto prefilteredEnvironment = std::make_shared<Texture>(prefilteredEnvironmentCubemap, sampler);
 	prefilteredEnvironment->SetName(L"Environment prefiltered cubemap");

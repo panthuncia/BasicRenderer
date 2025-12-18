@@ -101,7 +101,7 @@ namespace AssimpLoader {
                     }
                 }
 
-                auto pBuffer = PixelBuffer::Create(desc, { rawData.data() });
+                auto pBuffer = PixelBuffer::CreateShared(desc, { rawData.data() });
                 return std::make_shared<Texture>(pBuffer, sampler);
             }
         }

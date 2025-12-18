@@ -240,7 +240,15 @@ private:
 				Builtin::PostProcessing::UpscaledHDR,
 			};
         }
-
+        void Cleanup() {
+            m_shadowMaps = nullptr;
+            m_linearShadowMaps = nullptr;
+            m_currentDebugTexture = nullptr;
+            m_primaryCameraMeshletBitfield = nullptr;
+			m_HDRColorTarget = nullptr;
+			m_upscaledHDRColorTarget = nullptr;
+			m_gbufferMotionVectors = nullptr;
+        }
     };
 	CoreResourceProvider m_coreResourceProvider;
 };

@@ -101,8 +101,6 @@ void ObjectManager::RemoveObject(const Components::ObjectDrawInfo* drawInfo) {
 
 	m_perObjectBuffers->Deallocate(drawInfo->perObjectCBView.get());
 
-	DeletionManager::GetInstance().MarkForDelete(drawInfo->perObjectCBView);
-
 	// Remove the object's draw set commands from the draw set buffers
 	auto& views = drawInfo;
 	unsigned int i = 0;

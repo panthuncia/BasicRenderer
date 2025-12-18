@@ -1,23 +1,30 @@
 #pragma once
-#include <initguid.h> // Why is this needed? Without it I get a linker error for IID_ID3D12Device.
-
 #include <rhi.h>
+#include <stacktrace>
 
 #include "ThirdParty/stb/stb_image.h"
-#include <array>
 
 #include "Resources/GloballyIndexedResource.h"
 #include "Resources/TextureDescription.h"
 #include "Utilities/Utilities.h"
+#include "Managers/Singletons/DeletionManager.h"
 using Microsoft::WRL::ComPtr;
 
 class PixelBuffer : public GloballyIndexedResource {
 public:
-    static std::shared_ptr<PixelBuffer>
-        Create(const TextureDescription& desc,
-            const std::vector<const stbi_uc*>& initialData = {},
-            PixelBuffer* aliasTarget = nullptr);
+	// Don't use this.
+	struct CreateTag {}; // TODO: Figure out why 'new' isn't working on PixelBuffer
 
+	static std::shared_ptr<PixelBuffer>
+		CreateShared(const TextureDescription& desc,
+			const std::vector<const stbi_uc*>& initialData = {},
+			PixelBuffer* aliasTarget = nullptr);
+
+	explicit PixelBuffer(CreateTag) {}
+	~PixelBuffer()
+	{
+		DeletionManager::GetInstance().MarkForDelete(std::move(m_texture));
+	}
 	unsigned int GetWidth() const { return m_width; }
 	unsigned int GetHeight() const { return m_height; }
 	unsigned int GetChannels() const { return m_channels; }
@@ -49,7 +56,9 @@ public:
 	}
 
 private:
-    PixelBuffer() = default;
+#if BUILD_TYPE == BUILD_DEBUG
+	std::stacktrace m_creation;
+#endif
     void initialize(const TextureDescription& desc,
         const std::vector<const stbi_uc*>& initialData,
         PixelBuffer* aliasTarget);

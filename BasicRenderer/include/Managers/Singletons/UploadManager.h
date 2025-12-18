@@ -15,7 +15,7 @@ class ResourceUpdate {
 public:
 	ResourceUpdate() = default;
 	size_t size{};
-	Resource* resourceToUpdate{};
+	std::shared_ptr<Resource> resourceToUpdate{};
 	std::shared_ptr<Resource> uploadBuffer;
 	size_t uploadBufferOffset{};
 	size_t dataBufferOffset{};
@@ -77,7 +77,7 @@ public:
 	static UploadManager& GetInstance();
 	void Initialize();
 #ifdef _DEBUG
-	void UploadData(const void* data, size_t size, Resource* resourceToUpdate, size_t dataBufferOffset, const char* file, int line);
+	void UploadData(const void* data, size_t size, std::shared_ptr<Resource> resourceToUpdate, size_t dataBufferOffset, const char* file, int line);
 	void UploadTextureSubresources(
 		rhi::Resource& dstTexture,
 		rhi::Format fmt,
@@ -91,7 +91,7 @@ public:
 		const char* file,
 		int line);
 #else
-	void UploadData(const void* data, size_t size, Resource* resourceToUpdate, size_t dataBufferOffset);
+	void UploadData(const void* data, size_t size, std::shared_ptr<Resource> resourceToUpdate, size_t dataBufferOffset);
 	void UploadTextureSubresources(
 		rhi::Resource& dstTexture,
 		rhi::Format fmt,
@@ -108,7 +108,7 @@ public:
 	void ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue);
 	void ResetAllocators(uint8_t frameIndex);
 	void ProcessDeferredReleases(uint8_t frameIndex);
-
+	void Cleanup();
 private:
 	UploadManager() = default;
 	bool AllocateUploadRegion(size_t size, size_t alignment, std::shared_ptr<Resource>& outUploadBuffer, size_t& outOffset);

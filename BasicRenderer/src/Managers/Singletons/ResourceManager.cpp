@@ -22,7 +22,7 @@ void ResourceManager::Initialize() {
 	m_dsvHeap = std::make_shared<DescriptorHeap>(device, rhi::DescriptorHeapType::DSV, 10000, false);
 	m_nonShaderVisibleHeap = std::make_shared<DescriptorHeap>(device, rhi::DescriptorHeapType::CbvSrvUav, 100000, false);
 
-	perFrameBufferHandle = CreateIndexedConstantBuffer<PerFrameCB>(L"PerFrameCB");
+	m_perFrameBuffer = CreateIndexedConstantBuffer<PerFrameCB>(L"PerFrameCB");
 
 	perFrameCBData.ambientLighting = DirectX::XMVectorSet(0.1f, 0.1f, 0.1f, 1.0f);
 	perFrameCBData.numShadowCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
@@ -71,7 +71,7 @@ void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, Dir
 	perFrameCBData.clusterZSplitDepth = 6.0f;
 	perFrameCBData.frameIndex = frameIndex % 64; // Wrap around every 64 frames
 
-	QUEUE_UPLOAD(&perFrameCBData, sizeof(PerFrameCB), perFrameBufferHandle.get(), 0);
+	QUEUE_UPLOAD(&perFrameCBData, sizeof(PerFrameCB), m_perFrameBuffer, 0);
 }
 
 UINT ResourceManager::CreateIndexedSampler(const rhi::SamplerDesc& samplerDesc) {
@@ -90,7 +90,7 @@ std::shared_ptr<Buffer> ResourceManager::CreateBuffer(size_t bufferSize, void* p
 	auto device = DeviceManager::GetInstance().GetDevice();
 	auto dataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, bufferSize, UAV);
 	if (pInitialData) {
-		QUEUE_UPLOAD(pInitialData, bufferSize, dataBuffer.get(), 0);
+		QUEUE_UPLOAD(pInitialData, bufferSize, dataBuffer, 0);
 	}
 
 	return dataBuffer;
@@ -363,4 +363,9 @@ void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const Texture
 		srd.data(),
 		static_cast<uint32_t>(srd.size()));
 
+}
+
+void ResourceManager::Cleanup()
+{
+	m_perFrameBuffer.reset();
 }

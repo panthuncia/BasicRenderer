@@ -35,10 +35,13 @@ public:
 	}
 
     std::shared_ptr<BufferView> Add() {
+        auto viewedWeak = std::weak_ptr<ViewedDynamicBufferBase>(
+            std::dynamic_pointer_cast<ViewedDynamicBufferBase>(Resource::weak_from_this().lock())
+        );
 		if (!m_freeIndices.empty()) { // Reuse a free index
 			uint64_t index = m_freeIndices.front();
 			m_freeIndices.pop_front();
-            return BufferView::CreateShared(this, index * m_elementSize, m_elementSize, sizeof(T));
+            return BufferView::CreateShared(viewedWeak, index * m_elementSize, m_elementSize, sizeof(T));
         }
         m_usedCapacity++;
 		if (m_usedCapacity > m_capacity) { // Resize the buffer if necessary
@@ -46,7 +49,7 @@ public:
             onResized(m_globalResizableBufferID, m_elementSize, m_capacity, this, m_UAV);
         }
 		size_t index = m_usedCapacity - 1;
-        return BufferView::CreateShared(this, index * m_elementSize, m_elementSize, sizeof(T));
+        return BufferView::CreateShared(viewedWeak, index * m_elementSize, m_elementSize, sizeof(T));
     }
 
 	std::shared_ptr<BufferView> Add(const T& data) {
@@ -68,7 +71,7 @@ public:
     }
 
     void UpdateView(BufferView* view, const void* data) {
-        QUEUE_UPLOAD(data, sizeof(T), this, view->GetOffset());
+        QUEUE_UPLOAD(data, sizeof(T), shared_from_this(), view->GetOffset());
     }
 
 
@@ -132,7 +135,6 @@ private:
         auto newDataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, m_elementSize * capacity, m_UAV);
         if (m_dataBuffer != nullptr) {
             UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity*sizeof(T));
-            DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
         }
         m_dataBuffer = newDataBuffer;
         SetName(name);

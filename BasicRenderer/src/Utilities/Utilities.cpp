@@ -182,7 +182,7 @@ CreateTextureFromRaw(const RawImage& img, std::shared_ptr<Sampler> sampler, bool
 	desc.hasRTV = allowRTV;
 	desc.hasUAV = allowUAV;
 
-    auto buffer = PixelBuffer::Create(desc, { img.pixels });
+    auto buffer = PixelBuffer::CreateShared(desc, { img.pixels });
 
     if (!sampler) sampler = Sampler::GetDefaultSampler();
 
@@ -450,7 +450,7 @@ std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bo
 	desc.format = rhi::Format::R8G8B8A8_UNorm;
 	desc.isCubemap = true;
 
-    auto buffer = PixelBuffer::Create(desc, {right.data, left.data, top.data, bottom.data, front.data, back.data });
+    auto buffer = PixelBuffer::CreateShared(desc, {right.data, left.data, top.data, bottom.data, front.data, back.data });
     auto sampler = Sampler::GetDefaultSampler();
     return std::make_shared<Texture>(buffer, sampler);
 }
@@ -499,7 +499,7 @@ std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allo
 		desc.generateMipMaps = true;
     }
 
-	auto buffer = PixelBuffer::Create(desc, faces);
+	auto buffer = PixelBuffer::CreateShared(desc, faces);
 
     auto sampler = Sampler::GetDefaultSampler();
     return std::make_shared<Texture>(buffer, sampler);
@@ -1499,7 +1499,7 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
 	desc.dsvFormat = rhi::Format::D32_Float;
     desc.generateMipMaps = false;
 
-	std::shared_ptr<PixelBuffer> depthBuffer = PixelBuffer::Create(desc);
+	std::shared_ptr<PixelBuffer> depthBuffer = PixelBuffer::CreateShared(desc);
 	depthBuffer->SetName(L"Depth Buffer");
 
     TextureDescription downsampledDesc;
@@ -1523,7 +1523,7 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
     downsampledDesc.clearColor[0] = std::numeric_limits<float>().max();
 	downsampledDesc.padInternalResolution = true;
 
-    std::shared_ptr<PixelBuffer> linearDepthBuffer = PixelBuffer::Create(downsampledDesc, {}, nullptr/* depthBuffer.get()*/);
+    std::shared_ptr<PixelBuffer> linearDepthBuffer = PixelBuffer::CreateShared(downsampledDesc, {}, nullptr/* depthBuffer.get()*/);
     linearDepthBuffer->SetName(L"linear Depth Buffer");
 
 

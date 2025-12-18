@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <memory>
 
 #include <resource_states.h>
 #include <rhi.h>
@@ -12,7 +13,7 @@
 
 class RenderContext;
 
-class Resource {
+class Resource : public std::enable_shared_from_this<Resource> {
 public:
     Resource() {
         m_globalResourceID = globalResourceCount.fetch_add(1, std::memory_order_relaxed);

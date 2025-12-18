@@ -25,9 +25,11 @@ std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementS
                 // Split the block
                 m_memoryBlocks.insert(it + 1, { offset + requiredSize, remainingSize, true });
             }
-
+            auto viewedWeak = std::weak_ptr(
+                std::dynamic_pointer_cast<DynamicBuffer>(Resource::weak_from_this().lock())
+            );
             // Return BufferView
-            return BufferView::CreateUnique(this, offset, requiredSize, elementSize);
+            return BufferView::CreateUnique(viewedWeak, offset, requiredSize, elementSize);
         }
     }
 
@@ -66,14 +68,14 @@ std::unique_ptr<BufferView> DynamicBuffer::AddData(const void* data, size_t size
 	std::unique_ptr<BufferView> view = Allocate(actualSize, elementSize);
     
 	if (data != nullptr) {
-        QUEUE_UPLOAD(data, size, this, view->GetOffset());
+        QUEUE_UPLOAD(data, size, shared_from_this(), view->GetOffset());
 	}
 
 	return std::move(view);
 }
 
 void DynamicBuffer::UpdateView(BufferView* view, const void* data) {
-    QUEUE_UPLOAD(data, view->GetSize(), this, view->GetOffset());
+    QUEUE_UPLOAD(data, view->GetSize(), shared_from_this(), view->GetOffset());
 }
 
 void DynamicBuffer::Deallocate(const BufferView* view) {
@@ -124,9 +126,6 @@ void DynamicBuffer::CreateBuffer(size_t capacity) {
 
 void DynamicBuffer::GrowBuffer(size_t newSize) {
     auto device = DeviceManager::GetInstance().GetDevice();
-    if (m_dataBuffer != nullptr) {
-        DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
-    }
     auto newDataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, newSize, m_UAV);
 	UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, m_capacity);
 	m_dataBuffer = newDataBuffer;

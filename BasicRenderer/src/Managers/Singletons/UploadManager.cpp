@@ -91,9 +91,9 @@ bool UploadManager::AllocateUploadRegion(size_t size, size_t alignment, std::sha
 
 
 #ifdef _DEBUG
-void UploadManager::UploadData(const void* data, size_t size, Resource* resourceToUpdate, size_t dataBufferOffset, const char* file, int line)
+void UploadManager::UploadData(const void* data, size_t size, std::shared_ptr<Resource> resourceToUpdate, size_t dataBufferOffset, const char* file, int line)
 #else
-void UploadManager::UploadData(const void* data, size_t size, Resource* resourceToUpdate, size_t dataBufferOffset)
+void UploadManager::UploadData(const void* data, size_t size, std::shared_ptr<Resource> resourceToUpdate, size_t dataBufferOffset)
 #endif 
 {
 	if (size > kPageSize) {
@@ -281,7 +281,7 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, rhi::Queue queue) {
 	// TODO: Should we do any barriers here?
 	unsigned int i = 0;
 	for (auto& update : m_resourceUpdates) {
-		Resource* buffer = update.resourceToUpdate;
+		Resource* buffer = update.resourceToUpdate.get();
 		commandList->CopyBufferRegion(
 			buffer->GetAPIResource().GetHandle(),
 			update.dataBufferOffset,
@@ -392,4 +392,11 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue) 
 void UploadManager::ResetAllocators(uint8_t frameIndex) {
 	auto& commandAllocator = m_commandAllocators[frameIndex];
 	commandAllocator->Recycle();
+}
+
+void UploadManager::Cleanup() {
+	m_pages.clear();
+	m_resourceUpdates.clear();
+	m_textureUpdates.clear();
+	queuedResourceCopies.clear();
 }

@@ -2,9 +2,9 @@
 
 #include <vector>
 #include <functional>
-#include <typeinfo>
 #include <string>
 #include <rhi.h>
+#include <memory>
 
 #include "Managers/Singletons/DeviceManager.h"
 #include "Resources/Buffers/Buffer.h"
@@ -33,7 +33,7 @@ public:
 
         unsigned int index = static_cast<uint32_t>(m_data.size()) - 1; // TODO: Fix buffer max sizes
 
-        QUEUE_UPLOAD(&element, sizeof(T), this, index * sizeof(T));
+        QUEUE_UPLOAD(&element, sizeof(T), shared_from_this(), index * sizeof(T));
 
         return index;
     }
@@ -63,7 +63,7 @@ public:
     }
 
     void UpdateAt(UINT index, const T& element) {
-        QUEUE_UPLOAD(&element, sizeof(T), this, index * sizeof(T));
+        QUEUE_UPLOAD(&element, sizeof(T), shared_from_this(), index * sizeof(T));
     }
 
     void SetOnResized(const std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)>& callback) {
@@ -118,7 +118,6 @@ private:
 		newDataBuffer->SetName((m_name+ L": " + name).c_str());
         if (m_dataBuffer != nullptr) {
             UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity);
-            DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
         }
 		m_dataBuffer = newDataBuffer;
     }

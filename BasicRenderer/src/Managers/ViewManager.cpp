@@ -105,15 +105,12 @@ void ViewManager::DestroyView(uint64_t viewID) {
     // Bitfields
     if (v.gpu.meshletBitfieldBuffer) {
         m_meshletBitfieldGroup->RemoveResource(v.gpu.meshletBitfieldBuffer.get());
-        DeletionManager::GetInstance().MarkForDelete(v.gpu.meshletBitfieldBuffer->GetResource());
     }
     if (v.gpu.meshInstanceMeshletCullingBitfieldBuffer) {
         m_meshInstanceMeshletCullingBitfieldGroup->RemoveResource(v.gpu.meshInstanceMeshletCullingBitfieldBuffer.get());
-        DeletionManager::GetInstance().MarkForDelete(v.gpu.meshInstanceMeshletCullingBitfieldBuffer->GetResource());
     }
     if (v.gpu.meshInstanceOcclusionCullingBitfieldBuffer) {
         m_meshInstanceOcclusionCullingBitfieldGroup->RemoveResource(v.gpu.meshInstanceOcclusionCullingBitfieldBuffer.get());
-        DeletionManager::GetInstance().MarkForDelete(v.gpu.meshInstanceOcclusionCullingBitfieldBuffer->GetResource());
     }
 
     m_views.erase(it);
@@ -143,7 +140,6 @@ void ViewManager::ResizeMeshletBitfields(uint64_t numMeshlets) {
     m_currentMeshletBitfieldSizeBits = numMeshlets;
     auto& rm = ResourceManager::GetInstance();
     for (auto& [id, v] : m_views) {
-        DeletionManager::GetInstance().MarkForDelete(v.gpu.meshletBitfieldBuffer->GetResource());
         auto words = (numMeshlets + 31) / 32;
         auto res = rm.CreateIndexedStructuredBuffer(words, sizeof(unsigned int), true, false);
         res->SetName(L"MeshletBitfieldBuffer(view=" + std::to_wstring(id) + L")");
@@ -157,13 +153,11 @@ void ViewManager::ResizeInstanceBitfields(uint32_t numInstances) {
     auto bytes = (numInstances + 7) / 8;
     for (auto& [id, v] : m_views) {
         // Meshlet culling
-        DeletionManager::GetInstance().MarkForDelete(v.gpu.meshInstanceMeshletCullingBitfieldBuffer->GetResource());
         auto cullRes = rm.CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), true, false);
         cullRes->SetName(L"MeshInstanceMeshletCullingBitfield(view=" + std::to_wstring(id) + L")");
         v.gpu.meshInstanceMeshletCullingBitfieldBuffer->SetResource(cullRes);
 
         // Occlusion
-        DeletionManager::GetInstance().MarkForDelete(v.gpu.meshInstanceOcclusionCullingBitfieldBuffer->GetResource());
         auto occRes = rm.CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), true, false);
         occRes->SetName(L"MeshInstanceOcclusionCullingBitfield(view=" + std::to_wstring(id) + L")");
         v.gpu.meshInstanceOcclusionCullingBitfieldBuffer->SetResource(occRes);
