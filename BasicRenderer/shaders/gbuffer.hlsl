@@ -54,6 +54,11 @@ BarycentricDeriv CalcFullBary(float4 pt0, float4 pt1, float4 pt2, float2 pixelNd
     return ret;
 }
 
+float Interp(BarycentricDeriv b, float a, float c, float d)
+{
+    return dot(float3(a, c, d), b.m_lambda);
+}
+
 float3 InterpolateWithDeriv(BarycentricDeriv deriv, float v0, float v1, float v2)
 {
     float3 mergedV = float3(v0, v1, v2);
@@ -288,12 +293,12 @@ void EvaluateGBufferOptimized(uint2 pixel)
 
     uint3 triIdx = 0;
     float3 p0 = 0, p1 = 0, p2 = 0;
-
+    uint o0, o1, o2;
+    
     if (triIsLeader)
     {
         triIdx = DecodeTriangleCompact(meshletTriangleIndex, md, meshletTrianglesBuffer);
 
-        uint o0, o1, o2;
         ComputeTriVertexByteOffsetsCompact(md, triIdx, o0, o1, o2);
 
         p0 = LoadPositionOnly(o0, vertexBuffer);
@@ -306,8 +311,9 @@ void EvaluateGBufferOptimized(uint2 pixel)
     p1 = WaveReadLaneAt(p1, triLeader);
     p2 = WaveReadLaneAt(p2, triLeader);
 
-    uint o0, o1, o2;
-    ComputeTriVertexByteOffsetsCompact(md, triIdx, o0, o1, o2);
+    o0 = WaveReadLaneAt(o0, triLeader);
+    o1 = WaveReadLaneAt(o1, triLeader);
+    o2 = WaveReadLaneAt(o2, triLeader);
 
     // Object buffer (per-lane; is it worth broadcasting?)
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
@@ -357,10 +363,10 @@ void EvaluateGBufferOptimized(uint2 pixel)
     float3 dpdy = mul(dpdyOS, M);
 
     // Interpolate normal in object space
-    float3 interpNX = InterpolateWithDeriv(bary, n0.x, n1.x, n2.x).x;
-    float3 interpNY = InterpolateWithDeriv(bary, n0.y, n1.y, n2.y).x;
-    float3 interpNZ = InterpolateWithDeriv(bary, n0.z, n1.z, n2.z).x;
-    float3 normalOS = normalize(float3(interpNX.x, interpNY.x, interpNZ.x));
+    float interpNX = Interp(bary, n0.x, n1.x, n2.x).x;
+    float interpNY = Interp(bary, n0.y, n1.y, n2.y).x;
+    float interpNZ = Interp(bary, n0.z, n1.z, n2.z).x;
+    float3 normalOS = normalize(float3(interpNX, interpNY, interpNZ));
 
     StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
     float3x3 normalMatrix = (float3x3) normalMatrixBuffer[obj.normalMatrixBufferIndex];

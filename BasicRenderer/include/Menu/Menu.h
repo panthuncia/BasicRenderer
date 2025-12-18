@@ -26,6 +26,7 @@
 #include "Managers/Singletons/StatisticsManager.h"
 #include "Managers/Singletons/UpscalingManager.h"
 #include "Menu/RenderGraphInspector.h"
+#include "Managers/Singletons/DeviceManager.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -464,8 +465,22 @@ inline void Menu::Render(RenderContext& context) {
 			setUseAsyncCompute(m_useAsyncCompute);
 		}
         ImGui::Checkbox("Render Graph Inspector", &showRG);
+        ImGui::Text("Render Resolution: %d x %d | Output Resolution: %d x %d", context.renderResolution.x, context.renderResolution.y, context.outputResolution.x, context.outputResolution.y);
 		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
-		ImGui::Text("Render Resolution: %d x %d | Output Resolution: %d x %d" , context.renderResolution.x, context.renderResolution.y, context.outputResolution.x, context.outputResolution.y);
+        auto allocator = DeviceManager::GetInstance().GetAllocator();
+        rhi::ma::Budget localBudget;
+        allocator->GetBudget(&localBudget, nullptr);
+        // Format bytes to KB, MB, GB depending on size
+        float usage = static_cast<float>(localBudget.usageBytes);
+        std::string usageString = "VRAM usage: ";
+        if (usage<1000000) {
+            usageString += std::format("{:.3f}", usage / 1000) + " KB"; // KB
+        } else if (usage < 1000000000) {
+            usageString += std::format("{:.3f}", usage / 1000000) + " MB"; // MB
+        } else {
+            usageString += std::format("{:.3f}", usage / 1000000000) + " GB"; //GB
+        }
+        ImGui::Text(usageString.c_str());
 		ImGui::End();
 	}
 

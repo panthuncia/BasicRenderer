@@ -65,7 +65,7 @@ void ThrowIfFailed(HRESULT hr) {
     }
 }
 
-std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name) {
+std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::vector<uint32_t> indices, std::wstring name) {
     bool hasTexcoords = !meshData.texcoords.empty();
     bool hasJoints = !meshData.joints.empty() && !meshData.weights.empty();
 
@@ -108,7 +108,117 @@ std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name) 
 		skinningVertices = std::move(skinningData);
 	}
 
-    return Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningVertices), skinningVertexSize, meshData.indices, meshData.material, meshData.flags);
+    return Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningVertices), skinningVertexSize, indices, meshData.material, meshData.flags);
+}
+
+std::shared_ptr<MeshSharedGeometry> BuildSharedGeometryFromMeshData(const MeshData& meshData)
+{
+    const bool hasTexcoords = !meshData.texcoords.empty();
+    const bool hasJoints = !meshData.joints.empty() && !meshData.weights.empty();
+
+    auto geom = std::make_shared<MeshSharedGeometry>();
+    geom->vertexFlags = meshData.flags;
+
+    const uint32_t numVertices = static_cast<uint32_t>(meshData.positions.size()) / 3;
+
+    // position, normal, texcoord?
+    const uint32_t vertexSize =
+        sizeof(DirectX::XMFLOAT3) +
+        sizeof(DirectX::XMFLOAT3) +
+        (hasTexcoords ? sizeof(DirectX::XMFLOAT2) : 0);
+
+    auto rawData = std::make_shared<std::vector<std::byte>>();
+    rawData->resize(size_t(numVertices) * vertexSize);
+
+    for (uint32_t i = 0; i < numVertices; ++i) {
+        const size_t baseOffset = size_t(i) * vertexSize;
+
+        memcpy(rawData->data() + baseOffset,
+            &meshData.positions[i * 3],
+            sizeof(DirectX::XMFLOAT3));
+
+        size_t offset = sizeof(DirectX::XMFLOAT3);
+
+        memcpy(rawData->data() + baseOffset + offset,
+            &meshData.normals[i * 3],
+            sizeof(DirectX::XMFLOAT3));
+
+        offset += sizeof(DirectX::XMFLOAT3);
+
+        if (hasTexcoords) {
+            memcpy(rawData->data() + baseOffset + offset,
+                &meshData.texcoords[i * 2],
+                sizeof(DirectX::XMFLOAT2));
+        }
+    }
+
+    geom->vertices = std::move(rawData);
+    geom->vertexByteSize = vertexSize;
+
+    // skinning blob (optional)
+    const uint32_t skinningVertexSize =
+        sizeof(DirectX::XMFLOAT3) +
+        sizeof(DirectX::XMFLOAT3) +
+        sizeof(DirectX::XMUINT4) +
+        sizeof(DirectX::XMFLOAT4);
+
+    if (hasJoints) {
+        auto skinningData = std::make_shared<std::vector<std::byte>>();
+        skinningData->resize(size_t(numVertices) * skinningVertexSize);
+
+        for (uint32_t i = 0; i < numVertices; ++i) {
+            const size_t baseOffset = size_t(i) * skinningVertexSize;
+
+            memcpy(skinningData->data() + baseOffset,
+                &meshData.positions[i * 3],
+                sizeof(DirectX::XMFLOAT3));
+
+            size_t offset = sizeof(DirectX::XMFLOAT3);
+
+            memcpy(skinningData->data() + baseOffset + offset,
+                &meshData.normals[i * 3],
+                sizeof(DirectX::XMFLOAT3));
+
+            offset += sizeof(DirectX::XMFLOAT3);
+
+            memcpy(skinningData->data() + baseOffset + offset,
+                &meshData.joints[i * 4],
+                sizeof(DirectX::XMUINT4));
+
+            offset += sizeof(DirectX::XMUINT4);
+
+            memcpy(skinningData->data() + baseOffset + offset,
+                &meshData.weights[i * 4],
+                sizeof(DirectX::XMFLOAT4));
+        }
+
+        geom->skinningVertices = std::move(skinningData);
+        geom->skinningVertexByteSize = skinningVertexSize;
+    }
+    else {
+        geom->skinningVertices = nullptr;
+        geom->skinningVertexByteSize = skinningVertexSize; // ok to keep, but unused
+    }
+
+    return geom;
+}
+
+
+std::shared_ptr<Mesh> MeshFromSharedGeometry(
+    const std::shared_ptr<MeshSharedGeometry>& shared,
+    std::vector<uint32_t>&& indices,
+    const std::shared_ptr<Material>& material,
+    std::wstring name)
+{
+
+    // CPU-only by default. Upload later via mesh->EnsureGpuBuffersCreated().
+    auto mesh = Mesh::CreateFromSharedGeometry(
+        shared,
+        indices,
+        material,
+        /*createGpuBuffers*/ false);
+
+    return mesh;
 }
 
 XMMATRIX RemoveScalingFromMatrix(const XMMATRIX& initialMatrix) {

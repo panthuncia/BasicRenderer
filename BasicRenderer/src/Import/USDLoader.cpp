@@ -581,6 +581,7 @@ namespace USDLoader {
 
 	void LoadGeom(
 		MeshData& meshData,
+		std::vector<uint32_t>& outIndices,
 		const UsdGeomMesh& mesh,
 		const std::optional<UsdGeomSubset> subset,
 		double metersPerUnit,
@@ -589,9 +590,7 @@ namespace USDLoader {
 		const VtTokenArray& skelJointOrderRaw,
 		const VtTokenArray& skelJointOrderMapped)
 	{
-
 		// If we have a skeleton, build joint mappings
-
 		std::unordered_map<unsigned int, unsigned int> jointMapping;
 		// Build integer mapping from mapped to raw joint order
 		for (unsigned int i = 0; i < skelJointOrderMapped.size(); i++) {
@@ -602,18 +601,19 @@ namespace USDLoader {
 				[&jointName](const pxr::TfToken& token) {
 					return token.GetString() == jointName;
 				});
+
 			// Get index
 			if (it != skelJointOrderRaw.end()) {
 				unsigned int rawIndex = static_cast<unsigned int>(std::distance(skelJointOrderRaw.begin(), it));
 				jointMapping[i] = rawIndex;
 			}
 			else {
-				spdlog::error("Joint {} not found in raw joint order.", jointName);
-				throw std::runtime_error("Invalid joint name in mapped joint orrder");
+				spdlog::warn("Joint '{}' not found in raw joint order", jointName);
+				jointMapping[i] = 0;
 			}
 		}
 
-		// positions
+		// points
 		VtArray<GfVec3f> usdPts;
 		mesh.GetPointsAttr().Get(&usdPts);
 
@@ -634,18 +634,20 @@ namespace USDLoader {
 				if (fi >= 0 && (size_t)fi < useFace.size()) useFace[fi] = 1;
 		}
 
-		// raw index list into control mesh points
-		std::vector<uint32_t> rawIndices =
-			TriangulateIndices(faceVertCounts, faceVertIndices);
-
 		std::string primName = mesh.GetPrim().GetName().GetString();
 
-		// Reserve final arrays
-		size_t cornerCount = rawIndices.size();
+		// Reserve index buffer for triangle corners (worst case: fully deindexed)
+		size_t cornerCount = 0;
+		for (size_t f = 0; f < faceVertCounts.size(); ++f) {
+			const int fc = faceVertCounts[f];
+			if (fc >= 3 && (!subset || useFace[f])) {
+				cornerCount += size_t(fc - 2) * 3;
+			}
+		}
+		outIndices.reserve(cornerCount);
 		meshData.positions.reserve(cornerCount * 3);
 
 		// normals
-
 		VtArray<GfVec3f> usdNormals;
 		bool gotNormals = mesh.GetNormalsAttr().Get(&usdNormals);
 
@@ -654,25 +656,26 @@ namespace USDLoader {
 		UsdAttribute nIdxAttr = mesh.GetPrim().GetAttribute(TfToken("normals:indices"));
 		bool hasNIdx = nIdxAttr && nIdxAttr.Get(&nIdx);
 
-		if (gotNormals && hasNIdx) {
-			VtArray<GfVec3f> deindexed;
-			deindexed.resize(nIdx.size());
-			for (size_t i = 0; i < nIdx.size(); ++i) {
-				int src = nIdx[i];
-				if (src >= 0 && (size_t)src < usdNormals.size()) {
-					deindexed[i] = usdNormals[src];
-				}
-				else {
-					spdlog::warn("Invalid normal index {} in 'normals:indices' for prim '{}'", src, primName);
-				}
-			}
-			usdNormals.swap(deindexed);
-		}
-
 		std::vector<float> rawNormals;
 		if (gotNormals) {
-			FlattenVecArray<GfVec3f>(usdNormals, rawNormals, 1.0f);
-			meshData.flags |= VertexFlags::VERTEX_NORMALS;
+			if (hasNIdx) {
+				VtArray<GfVec3f> deindexed;
+				deindexed.resize(nIdx.size());
+				for (size_t i = 0; i < nIdx.size(); ++i) {
+					int src = nIdx[i];
+					if (src >= 0 && (size_t)src < usdNormals.size()) {
+						deindexed[i] = usdNormals[src];
+					}
+					else {
+						spdlog::warn("Invalid normal index {} in 'normals:indices' for prim '{}'", src, primName);
+						deindexed[i] = GfVec3f(0, 1, 0);
+					}
+				}
+				FlattenVecArray<GfVec3f>(deindexed, rawNormals, 1.0f);
+			}
+			else {
+				FlattenVecArray<GfVec3f>(usdNormals, rawNormals, 1.0f);
+			}
 		}
 
 		InterpolationType normInterp = gotNormals
@@ -687,9 +690,9 @@ namespace USDLoader {
 		InterpolationType tcInterp = gotTC
 			? GetInterpolationType(uvPrim.GetInterpolation())
 			: InterpolationType::Vertex;
+
 		std::vector<float> rawTC;
 		if (gotTC) {
-			VtIntArray stIndices;
 			// flip Y for DX
 			rawTC.reserve(usdTC.size() * 2);
 			for (auto const& uv : usdTC) {
@@ -701,27 +704,22 @@ namespace USDLoader {
 
 		// skinning
 		UsdSkelBindingAPI bindAPI(mesh.GetPrim());
-		UsdSkelSkeleton    skel = bindAPI.GetInheritedSkeleton();
+		UsdSkelSkeleton   skel = bindAPI.GetInheritedSkeleton();
 		std::vector<uint32_t> rawJoints;
 		std::vector<float>    rawWeights;
-		InterpolationType jointInterp = InterpolationType::Vertex,
-			weightInterp = InterpolationType::Vertex;
+		InterpolationType jointInterp = InterpolationType::Vertex;
+		InterpolationType weightInterp = InterpolationType::Vertex;
 
 		if (skinQ) {
-
 			// compute per-point joint influences
 			VtIntArray   jointIndices;
 			VtFloatArray jointWeights;
 			skinQ.value().ComputeVaryingJointInfluences(
 				usdPts.size(), &jointIndices, &jointWeights);
 
-			// flatten into rawJoints/rawWeights
-			rawJoints.reserve(jointIndices.size());
-			rawWeights.reserve(jointWeights.size());
-
 			unsigned int influencesPerPoint = skinQ.value().GetNumInfluencesPerComponent();
-			// reserve numPoints*slots
 			unsigned short maxInfluencesPerJoint = 4; // TODO: Support arbitrary numbers of influences
+
 			rawJoints.reserve(usdPts.size() * maxInfluencesPerJoint);
 			rawWeights.reserve(usdPts.size() * maxInfluencesPerJoint);
 
@@ -729,8 +727,12 @@ namespace USDLoader {
 			for (size_t pt = 0; pt < usdPts.size(); ++pt) {
 				for (unsigned int slot = 0; slot < maxInfluencesPerJoint; ++slot) {
 					if (slot < influencesPerPoint) {
-						if (cursor < jointIndices.size()) {
-							rawJoints.push_back((uint32_t)jointMapping[jointIndices[cursor]]);
+						if (cursor < (size_t)jointIndices.size()) {
+							const int mapped = jointIndices[cursor];
+							uint32_t raw = 0u;
+							auto it = jointMapping.find((unsigned int)mapped);
+							if (it != jointMapping.end()) raw = (uint32_t)it->second;
+							rawJoints.push_back(raw);
 							rawWeights.push_back(jointWeights[cursor]);
 							++cursor;
 						}
@@ -740,7 +742,7 @@ namespace USDLoader {
 						}
 					}
 					else {
-						rawJoints.push_back(0u); // padding
+						rawJoints.push_back(0u);    // padding
 						rawWeights.push_back(0.0f); // padding
 					}
 				}
@@ -759,19 +761,89 @@ namespace USDLoader {
 			meshData.flags |= VertexFlags::VERTEX_SKINNED;
 		}
 
-		// Flatten to "vertex" arrays
-		// Triangulate while PRESERVING original fv order
-		size_t fvOffset = 0;
-		uint32_t vtxCounter = 0;
-		for (size_t f = 0; f < faceVertCounts.size(); ++f) {
-			int fc = faceVertCounts[f];
-			if (!subset || useFace[f]) {
-				for (int i = 1; i + 1 < fc; ++i) {
-					int cornerIdxs[3] = { 0, i, i + 1 };
-					for (int c = 0; c < 3; ++c) {
-						size_t fvIndex = fvOffset + cornerIdxs[c];
-						uint32_t vertIdx = faceVertIndices[fvIndex];
+		// ---- NEW: dedup + real index buffer ----
 
+		constexpr uint32_t kInvalid = 0xFFFFFFFFu;
+
+		auto ElemIndex = [](InterpolationType interp, size_t faceIndex, size_t fvIndex, uint32_t vertIndex) -> uint32_t {
+			switch (interp) {
+			case InterpolationType::Constant:    return 0u;
+			case InterpolationType::Uniform:     return (uint32_t)faceIndex;
+			case InterpolationType::Vertex:
+			case InterpolationType::Varying:     return vertIndex;
+			case InterpolationType::FaceVarying: return (uint32_t)fvIndex;
+			}
+			return vertIndex;
+			};
+
+		struct VertexKey {
+			uint32_t p;
+			uint32_t n;
+			uint32_t uv;
+			uint32_t j;
+			uint32_t w;
+
+			bool operator==(const VertexKey& o) const noexcept {
+				return p == o.p && n == o.n && uv == o.uv && j == o.j && w == o.w;
+			}
+		};
+
+		struct VertexKeyHash {
+			size_t operator()(const VertexKey& k) const noexcept {
+				// Simple 64-bit hash combine
+				uint64_t h = 1469598103934665603ull;
+				auto mix = [&](uint32_t v) {
+					h ^= (uint64_t)v + 0x9e3779b9u + (h << 6) + (h >> 2);
+					};
+				mix(k.p); mix(k.n); mix(k.uv); mix(k.j); mix(k.w);
+				return (size_t)h;
+			}
+		};
+
+		std::unordered_map<VertexKey, uint32_t, VertexKeyHash> dedup;
+		dedup.reserve(cornerCount);
+
+		uint32_t nextIndex = 0;
+
+		// Triangulate while preserving original FV order
+		size_t fvOffset = 0;
+		for (size_t f = 0; f < faceVertCounts.size(); ++f) {
+			const int fc = faceVertCounts[f];
+
+			if (fc < 3) {
+				fvOffset += fc;
+				continue;
+			}
+
+			if (subset && !useFace[f]) {
+				fvOffset += fc;
+				continue;
+			}
+
+			for (int i = 1; i + 1 < fc; ++i) {
+				const int cornerIdxs[3] = { 0, i, i + 1 };
+
+				for (int c = 0; c < 3; ++c) {
+					const size_t fvIndex = fvOffset + size_t(cornerIdxs[c]);
+					const int v = faceVertIndices[fvIndex];
+
+					if (v < 0 || (size_t)v >= usdPts.size()) {
+						spdlog::warn("Invalid faceVertIndex {} at fvIndex {} for prim '{}'", v, fvIndex, primName);
+						continue;
+					}
+
+					const uint32_t vertIdx = (uint32_t)v;
+
+					VertexKey key{};
+					key.p = vertIdx;
+					key.n = gotNormals ? ElemIndex(normInterp, f, fvIndex, vertIdx) : kInvalid;
+					key.uv = gotTC ? ElemIndex(tcInterp, f, fvIndex, vertIdx) : kInvalid;
+					key.j = skinQ ? ElemIndex(jointInterp, f, fvIndex, vertIdx) : kInvalid;
+					key.w = skinQ ? ElemIndex(weightInterp, f, fvIndex, vertIdx) : kInvalid;
+
+					auto [it, inserted] = dedup.try_emplace(key, nextIndex);
+					if (inserted) {
+						// Emit each stream once for this unique vertex
 						EmitPrimvar(meshData.positions, ctrlPos, 3, InterpolationType::Vertex, f, fvIndex, vertIdx);
 
 						if (gotNormals) {
@@ -779,32 +851,25 @@ namespace USDLoader {
 						}
 
 						if (gotTC) {
-							EmitPrimvar(meshData.texcoords, rawTC, 2,
-								tcInterp,
-								f, fvIndex, vertIdx);
+							EmitPrimvar(meshData.texcoords, rawTC, 2, tcInterp, f, fvIndex, vertIdx);
 						}
 
-						if (!rawJoints.empty()) {
-							EmitPrimvar(meshData.joints,
-								rawJoints,
-								4,
-								jointInterp,
-								f, fvIndex, vertIdx);
-
-							EmitPrimvar(meshData.weights,
-								rawWeights,
-								4,
-								weightInterp,
-								f, fvIndex, vertIdx);
+						if (skinQ) {
+							EmitPrimvar(meshData.joints, rawJoints, 4, jointInterp, f, fvIndex, vertIdx);
+							EmitPrimvar(meshData.weights, rawWeights, 4, weightInterp, f, fvIndex, vertIdx);
 						}
 
-						meshData.indices.push_back(vtxCounter++);
+						++nextIndex;
 					}
+
+					outIndices.push_back(it->second);
 				}
 			}
+
 			fvOffset += fc;
 		}
 	}
+
 
 	std::string& uvSetFor(const UsdShadeMaterial& mat)
 	{
@@ -845,15 +910,15 @@ namespace USDLoader {
 			auto mat = matAPI.ComputeBoundMaterial();
 			ProcessMaterial(mat, stage, isUSDZ, directory);
 			MeshData geomData;
-			LoadGeom(geomData, mesh, std::nullopt, metersPerUnit, uvSetFor(mat), skinQ, skelJointOrderRaw, skelJointOrderMapped);
+			std::vector<uint32_t> indices;
+			LoadGeom(geomData, indices, mesh, std::nullopt, metersPerUnit, uvSetFor(mat), skinQ, skelJointOrderRaw, skelJointOrderMapped);
 			auto mtlPtr = loadingCache.materialCache.find(
 				mat.GetPrim().GetPath().GetString());
 			geomData.material = mtlPtr != loadingCache.materialCache.end()
 				? mtlPtr->second
 				: nullptr;
-			auto mPtr = MeshFromData(
-				geomData,
-				s2ws(mesh.GetPrim().GetName().GetString()));
+			auto sharedGeom = BuildSharedGeometryFromMeshData(geomData);
+			auto mPtr = Mesh::CreateFromSharedGeometry(sharedGeom, indices, geomData.material);
 			outMeshes.push_back(mPtr);
 		}
 		else {
@@ -863,8 +928,10 @@ namespace USDLoader {
 				auto mat = UsdShadeMaterialBindingAPI(subset).ComputeBoundMaterial();
 				ProcessMaterial(mat, stage, isUSDZ, directory);
 				MeshData geomData;
+				std::vector<uint32_t> indices;
 				LoadGeom(
 					geomData,
+					indices,
 					mesh,
 					subset,
 					metersPerUnit,
@@ -878,10 +945,8 @@ namespace USDLoader {
 				geomData.material = mtlPtr != loadingCache.materialCache.end()
 					? mtlPtr->second
 					: nullptr;
-				auto mPtr = MeshFromData(
-					geomData,
-					s2ws(mesh.GetPrim().GetName().GetString()) +
-					L"_" + s2ws(subset.GetPrim().GetName().GetString()));
+				auto sharedGeom = BuildSharedGeometryFromMeshData(geomData);
+				auto mPtr = Mesh::CreateFromSharedGeometry(sharedGeom, indices, geomData.material);
 				outMeshes.push_back(mPtr);
 			}
 		}

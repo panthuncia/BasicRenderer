@@ -229,32 +229,18 @@ inline void RegisterVisUtilResources(RenderGraph* graph)
 
     auto& rm = ResourceManager::GetInstance();
 
-    // 1) Per-material pixel count buffer (uint[numMaterials])
-
-    // 2) Per-material prefix sum offsets (uint[numMaterials])
-
-    // 3) Total pixel count buffer (uint[1])
+    // Total pixel count buffer (uint[1])
     auto totalPixelCountBuffer = rm.CreateIndexedStructuredBuffer(1, sizeof(uint32_t), true, false);
     totalPixelCountBuffer->SetName(L"VisUtil::TotalPixelCountBuffer");
     graph->RegisterResource("Builtin::VisUtil::TotalPixelCountBuffer", totalPixelCountBuffer);
 
-    // 4) Per-material write cursors (uint[numMaterials]) used in pass 5
 
-    // 5) Pixel list buffer (PixelRef[maxPixels])
+    // Pixel list buffer (PixelRef[maxPixels])
 	// PixelRef: uint pixelXY; (packed)
     struct PixelRefPOD { uint32_t pixelXY; };
     auto pixelListBuffer = rm.CreateIndexedStructuredBuffer(maxPixels, sizeof(PixelRefPOD), true, false);
     pixelListBuffer->SetName(L"VisUtil::PixelListBuffer");
     graph->RegisterResource("Builtin::VisUtil::PixelListBuffer", pixelListBuffer);
-
-    // a single-element buffer storing NumMaterials
-    //auto numMaterialsBuffer = rm.CreateIndexedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    //numMaterialsBuffer->SetName(L"VisUtil::NumMaterialsBuffer");
-    //graph->RegisterResource("Builtin::VisUtil::NumMaterialsBuffer", numMaterialsBuffer);
-
-    // Initialize NumMaterials on upload heap (for Clear pass)
-    //uint32_t numMaterialsValue = numMaterials;
-    //QUEUE_UPLOAD(&numMaterialsValue, sizeof(uint32_t), numMaterialsBuffer.get(), 0);
 }
 
 void BuildGBufferPipeline(RenderGraph* graph) {

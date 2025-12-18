@@ -31,6 +31,7 @@ class DescriptorHeap;
 class Mesh;
 class Sampler;
 class Texture;
+struct MeshSharedGeometry;
 
 void ThrowIfFailed(HRESULT hr);
 
@@ -39,7 +40,8 @@ void print(Args... args) {
 	(std::cout << ... << args) << std::endl;
 }
 
-std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name);
+std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::vector<uint32_t> indices, std::wstring name);
+std::shared_ptr<MeshSharedGeometry> BuildSharedGeometryFromMeshData(const MeshData& meshData);
 
 DirectX::XMMATRIX RemoveScalingFromMatrix(const DirectX::XMMATRIX& initialMatrix);
 

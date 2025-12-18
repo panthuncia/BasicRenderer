@@ -18,6 +18,22 @@ uint DecodePrimID(uint packed)
     return packed >> 25;
 }
 
+// Indirect command record layout: 4 root constants + 3 dispatch args.
+// This must match the command signature (Constant, Constant, Constant, Constant, Dispatch).
+struct MaterialEvaluationIndirectArgs
+{
+    // Root constants (all uints):
+    uint materialId; // UintRootConstant0
+    uint baseOffset; // UintRootConstant1
+    uint count; // UintRootConstant2
+    uint dispatchXDimension; // UintRootConstant3
+
+    // Dispatch arguments:
+    uint dispatchX; // D3D12_DISPATCH_ARGUMENTS.x
+    uint dispatchY; // D3D12_DISPATCH_ARGUMENTS.y
+    uint dispatchZ; // D3D12_DISPATCH_ARGUMENTS.z
+};
+
 uint GetMaterialIdFromCluster(uint clusterIndex,
                               StructuredBuffer<VisibleClusterInfo> visibleClusterTable,
                               StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance,
@@ -41,7 +57,7 @@ void ClearMaterialCountersCS(uint3 tid : SV_DispatchThreadID)
 {
     RWStructuredBuffer<uint> materialPixelCount = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisUtil::MaterialPixelCountBuffer)];
     RWStructuredBuffer<uint> materialWriteCursor = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisUtil::MaterialWriteCursorBuffer)];
-    
+
     uint numMaterials = UintRootConstant0;
     uint i = tid.x;
     if (i < numMaterials)
@@ -155,21 +171,6 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
     ref.pixelXY = (pixel.x & 0xFFFFu) | ((pixel.y & 0xFFFFu) << 16);
     pixelList[dst] = ref;
 }
-
-// Indirect command record layout: 4 root constants + 3 dispatch args.
-// This must match the command signature (Constant, Constant, Constant, Constant, Dispatch).
-struct MaterialEvaluationIndirectArgs {
-    // Root constants (all uints):
-    uint materialId; // UintRootConstant0
-    uint baseOffset; // UintRootConstant1
-    uint count; // UintRootConstant2
-    uint dispatchXDimension; // UintRootConstant3
-
-    // Dispatch arguments:
-    uint dispatchX; // D3D12_DISPATCH_ARGUMENTS.x
-    uint dispatchY; // D3D12_DISPATCH_ARGUMENTS.y
-    uint dispatchZ; // D3D12_DISPATCH_ARGUMENTS.z
-};
 
 #define MATERIAL_EXECUTION_GROUP_SIZE 64u
 

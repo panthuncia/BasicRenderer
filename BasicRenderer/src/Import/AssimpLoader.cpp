@@ -442,10 +442,11 @@ namespace AssimpLoader {
             }
 
             // Indices
+            std::vector<unsigned int> indices;
             for (unsigned int f = 0; f < aMesh->mNumFaces; f++) {
                 const aiFace& face = aMesh->mFaces[f];
                 for (unsigned int idx = 0; idx < face.mNumIndices; idx++) {
-                    geometry.indices.push_back(face.mIndices[idx]);
+                    indices.push_back(face.mIndices[idx]);
                 }
             }
 
@@ -490,7 +491,7 @@ namespace AssimpLoader {
                 }
             }
 
-            meshes.push_back(MeshFromData(geometry, s2ws(aMesh->mName.C_Str())));
+            meshes.push_back(MeshFromData(geometry, indices, s2ws(aMesh->mName.C_Str())));
         }
 
         return { meshes , meshSkinIndices };
