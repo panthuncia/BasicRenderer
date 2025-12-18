@@ -16,7 +16,7 @@ void UploadManager::Initialize() {
 
 	m_currentCapacity = 1024 * 1024 * 4; // 4MB
 
-	m_pages.push_back({ Buffer::CreateShared(rhi::HeapType::Upload, kPageSize, false), 0});
+	m_pages.push_back({ Buffer::CreateShared(rhi::HeapType::Upload, kPageSize, false), 0 });
 
 	// ring buffer pointers
 	m_headOffset = 0;
@@ -43,6 +43,53 @@ void UploadManager::Initialize() {
 	m_frameStart.resize(m_numFramesInFlight, 0);
 }
 
+
+static inline size_t AlignUpSizeT(size_t v, size_t a) noexcept {
+	return (v + (a - 1)) & ~(a - 1);
+}
+
+bool UploadManager::AllocateUploadRegion(size_t size, size_t alignment, std::shared_ptr<Resource>& outUploadBuffer, size_t& outOffset)
+{
+	if (alignment == 0) alignment = 1;
+	if (m_pages.empty()) {
+		m_pages.push_back({ Buffer::CreateShared(rhi::HeapType::Upload, kPageSize, false), 0 });
+		m_activePage = 0;
+	}
+
+	UploadPage* page = &m_pages[m_activePage];
+
+	size_t alignedTail = AlignUpSizeT(page->tailOffset, alignment);
+
+	// If it won't fit in the rest of this page, open a new page
+	if (alignedTail + size > page->buffer->GetSize()) {
+		++m_activePage;
+		if (m_activePage >= m_pages.size()) {
+			// allocate another fresh page sized to the request (at least kPageSize)
+			size_t allocSize = std::max(kPageSize, size);
+			m_pages.push_back({ Buffer::CreateShared(rhi::HeapType::Upload, allocSize, false), 0 });
+		}
+		page = &m_pages[m_activePage];
+		page->tailOffset = 0;
+		alignedTail = AlignUpSizeT(page->tailOffset, alignment);
+
+		// If it still doesn't fit (should only happen if GetSize() < size), allocate a dedicated page.
+		if (alignedTail + size > page->buffer->GetSize()) {
+			size_t allocSize = std::max(kPageSize, size);
+			m_pages.push_back({ Buffer::CreateShared(rhi::HeapType::Upload, allocSize, false), 0 });
+			m_activePage = m_pages.size() - 1;
+			page = &m_pages[m_activePage];
+			page->tailOffset = 0;
+			alignedTail = AlignUpSizeT(page->tailOffset, alignment);
+		}
+	}
+
+	outOffset = alignedTail;
+	page->tailOffset = alignedTail + size;
+	outUploadBuffer = page->buffer;
+	return true;
+}
+
+
 #ifdef _DEBUG
 void UploadManager::UploadData(const void* data, size_t size, Resource* resourceToUpdate, size_t dataBufferOffset, const char* file, int line)
 #else
@@ -51,7 +98,7 @@ void UploadManager::UploadData(const void* data, size_t size, Resource* resource
 {
 	if (size > kPageSize) {
 		// break it into multiple sub uploads
-		size_t done     = 0;
+		size_t done = 0;
 		size_t dstOffset = dataBufferOffset;
 		while (done < size) {
 			size_t chunk = (std::min)(size - done, kPageSize);
@@ -61,7 +108,7 @@ void UploadManager::UploadData(const void* data, size_t size, Resource* resource
 				resourceToUpdate,
 				dstOffset
 			);
-			done     += chunk;
+			done += chunk;
 			dstOffset += chunk;
 		}
 		return;
@@ -69,14 +116,14 @@ void UploadManager::UploadData(const void* data, size_t size, Resource* resource
 
 	UploadPage* page = &m_pages[m_activePage];
 
-	// if it won’t fit in the rest of this page, open a new page
+	// if it won't fit in the rest of this page, open a new page
 	if (page->tailOffset + size > page->buffer->GetSize()) {
 		++m_activePage;
 		if (m_activePage >= m_pages.size()) {
 			// allocate another fresh page
 			size_t allocSize = std::max(kPageSize, size);
 			auto device = DeviceManager::GetInstance().GetDevice();
-			m_pages.push_back({ Buffer::CreateShared(rhi::HeapType::Upload, allocSize, false), 0});
+			m_pages.push_back({ Buffer::CreateShared(rhi::HeapType::Upload, allocSize, false), 0 });
 		}
 		page = &m_pages[m_activePage];
 		page->tailOffset = 0;
@@ -114,6 +161,84 @@ void UploadManager::UploadData(const void* data, size_t size, Resource* resource
 	m_resourceUpdates.push_back(update);
 }
 
+#ifdef _DEBUG
+void UploadManager::UploadTextureSubresources(
+	rhi::Resource& dstTexture,
+	rhi::Format fmt,
+	uint32_t baseWidth,
+	uint32_t baseHeight,
+	uint32_t depthOrLayers,
+	uint32_t mipLevels,
+	uint32_t arraySize,
+	const rhi::helpers::SubresourceData* srcSubresources,
+	uint32_t srcCount,
+	const char* file,
+	int line)
+#else
+void UploadManager::UploadTextureSubresources(
+	rhi::Resource& dstTexture,
+	rhi::Format fmt,
+	uint32_t baseWidth,
+	uint32_t baseHeight,
+	uint32_t depthOrLayers,
+	uint32_t mipLevels,
+	uint32_t arraySize,
+	const rhi::helpers::SubresourceData* srcSubresources,
+	uint32_t srcCount)
+#endif
+{
+	if (!srcSubresources || srcCount == 0) return;
+
+	rhi::Span<const rhi::helpers::SubresourceData> srcSpan{ srcSubresources, srcCount };
+
+	const auto plan = rhi::helpers::PlanTextureUploadSubresources(
+		fmt, baseWidth, baseHeight, depthOrLayers, mipLevels, arraySize, srcSpan);
+
+	if (plan.totalSize == 0 || plan.footprints.empty()) {
+		return;
+	}
+
+	// Allocate subregion from the upload pages with proper placement alignment.
+	std::shared_ptr<Resource> uploadBuffer;
+	size_t uploadBaseOffset = 0;
+	AllocateUploadRegion(static_cast<size_t>(plan.totalSize), /*alignment*/512, uploadBuffer, uploadBaseOffset);
+
+	uint8_t* mapped = nullptr;
+	uploadBuffer->GetAPIResource().Map(reinterpret_cast<void**>(&mapped), 0, uploadBaseOffset + static_cast<size_t>(plan.totalSize));
+	rhi::helpers::WriteTextureUploadSubresources(plan, srcSpan, mapped, static_cast<uint64_t>(uploadBaseOffset));
+	uploadBuffer->GetAPIResource().Unmap(0, 0);
+
+	// Queue up the GPU copies (one per subresource).
+	for (const auto& fp : plan.footprints) {
+		rhi::BufferTextureCopyFootprint f{};
+		f.buffer = uploadBuffer->GetAPIResource().GetHandle();
+		f.texture = dstTexture.GetHandle();
+
+		f.arraySlice = fp.arraySlice;
+		f.mip = fp.mip;
+		f.x = 0;
+		f.y = 0;
+		f.z = fp.zSlice;
+
+		f.footprint.offset = static_cast<uint64_t>(uploadBaseOffset) + fp.offset;
+		f.footprint.rowPitch = fp.rowPitch;
+		f.footprint.width = fp.width;
+		f.footprint.height = fp.height;
+		f.footprint.depth = fp.depth;
+
+		TextureUpdate update;
+		update.copy = f;
+		update.uploadBuffer = uploadBuffer;
+#ifdef _DEBUG
+		update.file = file;
+		update.line = line;
+		update.threadID = std::this_thread::get_id();
+#endif
+		m_textureUpdates.push_back(std::move(update));
+	}
+}
+
+
 void UploadManager::ProcessDeferredReleases(uint8_t frameIndex)
 {
 	// The page where this frame started uploading
@@ -134,9 +259,9 @@ void UploadManager::ProcessDeferredReleases(uint8_t frameIndex)
 		if (eraseCount > 0) {
 			m_pages.erase(m_pages.begin(), m_pages.begin() + eraseCount);
 
-			// 4) Shift all of our indices down by eraseCount
+			// Shift all of our indices down by eraseCount
 			m_activePage -= eraseCount;
-			for (auto &start : m_frameStart) {
+			for (auto& start : m_frameStart) {
 				start = (start >= eraseCount ? start - eraseCount : 0);
 			}
 		}
@@ -166,21 +291,26 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, rhi::Queue queue) {
 		);
 		++i;
 	}
+
+	for (auto& texUpdate : m_textureUpdates) {
+		commandList->CopyBufferToTexture(texUpdate.copy);
+	}
 	rhi::debug::End(commandList.Get());
 
 	commandList->End();
 
-	queue.Submit({ &commandList.Get()});
+	queue.Submit({ &commandList.Get() });
 
 	m_resourceUpdates.clear();
+	m_textureUpdates.clear();
 }
 
 void UploadManager::QueueResourceCopy(const std::shared_ptr<Resource>& destination, const std::shared_ptr<Resource>& source, size_t size) {
 	ResourceCopy copy;
-    copy.source = source;
-    copy.destination = destination;
+	copy.source = source;
+	copy.destination = destination;
 	copy.size = size;
-    queuedResourceCopies.push_back(copy);
+	queuedResourceCopies.push_back(copy);
 }
 
 void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue) {
@@ -216,18 +346,18 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue) 
 			auto sourceTransition = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
 			sourceTransitions.push_back(sourceTransition);
 		}
-		
+
 		auto batch = rhi::helpers::CombineBarrierBatches(sourceTransitions);
 
 		commandList->Barriers(batch.View());
 
 		// Perform the copy
-        commandList->CopyBufferRegion(
-            copy.destination->GetAPIResource().GetHandle(),
-            0,
-            copy.source->GetAPIResource().GetHandle(),
-            0,
-            copy.size);
+		commandList->CopyBufferRegion(
+			copy.destination->GetAPIResource().GetHandle(),
+			0,
+			copy.source->GetAPIResource().GetHandle(),
+			0,
+			copy.size);
 
 		barriers.clear();
 		transitions.clear();
@@ -246,7 +376,7 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue) 
 			auto sourceTransition = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
 			sourceTransitions.push_back(std::move(sourceTransition));
 		}
-		
+
 		batch = rhi::helpers::CombineBarrierBatches(sourceTransitions);
 
 		commandList->Barriers(batch.View());

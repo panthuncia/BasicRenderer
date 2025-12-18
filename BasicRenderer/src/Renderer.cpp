@@ -154,8 +154,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     UpscalingManager::GetInstance().InitFFX(); // Needs device
     FFXManager::GetInstance().InitFFX();
     SetSettings();
-    auto graphicsQueue = DeviceManager::GetInstance().GetGraphicsQueue();
-    ResourceManager::GetInstance().Initialize(graphicsQueue);
+    ResourceManager::GetInstance().Initialize();
     PSOManager::GetInstance().initialize();
     UploadManager::GetInstance().Initialize();
     DeletionManager::GetInstance().Initialize();

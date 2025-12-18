@@ -6,8 +6,7 @@
 #include <rhi.h>
 #include <thread>
 
-#include "Resources/Buffers/BufferView.h"
-#include "Resources/Buffers/MemoryBlock.h"
+#include "rhi_helpers.h"
 
 class Buffer;
 class Resource;
@@ -31,12 +30,29 @@ public:
 	uint8_t stackSize{};
 #endif
 };
+
+class TextureUpdate {
+public:
+	TextureUpdate() = default;
+	rhi::BufferTextureCopyFootprint copy{};
+	std::shared_ptr<Resource> uploadBuffer;
+#ifdef _DEBUG
+	const char* file{};
+	int line{};
+	std::thread::id threadID;
+#endif
+};
+
 #ifdef _DEBUG
 #define QUEUE_UPLOAD(data,size,res,offset) \
     UploadManager::GetInstance().UploadData((data),(size),(res),(offset),__FILE__,__LINE__)
+#define TEXTURE_UPLOAD_SUBRESOURCES(dstTexture,fmt,baseWidth,baseHeight,depthOrLayers,mipLevels,arraySize,srcSubresources,srcCount) \
+	UploadManager::GetInstance().UploadTextureSubresources((dstTexture),(fmt),(baseWidth),(baseHeight),(depthOrLayers),(mipLevels),(arraySize),(srcSubresources),(srcCount),__FILE__,__LINE__)
 #else
 #define QUEUE_UPLOAD(data,size,res,offset) \
     UploadManager::GetInstance().UploadData((data),(size),(res),(offset))
+#define TEXTURE_UPLOAD_SUBRESOURCES(dstTexture,fmt,baseWidth,baseHeight,depthOrLayers,mipLevels,arraySize,srcSubresources,srcCount) \
+	UploadManager::GetInstance().UploadTextureSubresources((dstTexture),(fmt),(baseWidth),(baseHeight),(depthOrLayers),(mipLevels),(arraySize),(srcSubresources),(srcCount))
 #endif
 
 struct ResourceCopy {
@@ -62,8 +78,30 @@ public:
 	void Initialize();
 #ifdef _DEBUG
 	void UploadData(const void* data, size_t size, Resource* resourceToUpdate, size_t dataBufferOffset, const char* file, int line);
+	void UploadTextureSubresources(
+		rhi::Resource& dstTexture,
+		rhi::Format fmt,
+		uint32_t baseWidth,
+		uint32_t baseHeight,
+		uint32_t depthOrLayers,
+		uint32_t mipLevels,
+		uint32_t arraySize,
+		const rhi::helpers::SubresourceData* srcSubresources,
+		uint32_t srcCount,
+		const char* file,
+		int line);
 #else
 	void UploadData(const void* data, size_t size, Resource* resourceToUpdate, size_t dataBufferOffset);
+	void UploadTextureSubresources(
+		rhi::Resource& dstTexture,
+		rhi::Format fmt,
+		uint32_t baseWidth,
+		uint32_t baseHeight,
+		uint32_t depthOrLayers,
+		uint32_t mipLevels,
+		uint32_t arraySize,
+		const rhi::helpers::SubresourceData* srcSubresources,
+		uint32_t srcCount);
 #endif	
 	void ProcessUploads(uint8_t frameIndex, rhi::Queue queue);
 	void QueueResourceCopy(const std::shared_ptr<Resource>& destination, const std::shared_ptr<Resource>& source, size_t size);
@@ -73,6 +111,7 @@ public:
 
 private:
 	UploadManager() = default;
+	bool AllocateUploadRegion(size_t size, size_t alignment, std::shared_ptr<Resource>& outUploadBuffer, size_t& outOffset);
 
 	size_t                 m_currentCapacity = 0;
 	size_t                 m_headOffset      = 0;   // oldest in flight allocation
@@ -91,6 +130,7 @@ private:
 
 	std::function<uint8_t()> getNumFramesInFlight;
 	std::vector<ResourceUpdate> m_resourceUpdates;
+	std::vector<TextureUpdate> m_textureUpdates;
 
 	std::vector<ResourceCopy> queuedResourceCopies;
 };

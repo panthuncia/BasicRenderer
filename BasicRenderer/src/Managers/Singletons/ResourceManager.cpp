@@ -9,7 +9,7 @@
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "Managers/Singletons/UploadManager.h"
-void ResourceManager::Initialize(rhi::Queue commandQueue) {
+void ResourceManager::Initialize() {
 	//for (int i = 0; i < 3; i++) {
 	//    frameResourceCopies[i] = std::make_unique<FrameResource>();
 	//    frameResourceCopies[i]->Initialize();
@@ -40,11 +40,6 @@ void ResourceManager::Initialize(rhi::Queue commandQueue) {
 	case 4:
 		perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(shadowCascadeSplits[0], shadowCascadeSplits[1], shadowCascadeSplits[2], shadowCascadeSplits[3]);
 	}
-
-	//InitializeUploadHeap();
-	InitializeCopyCommandQueue();
-	InitializeTransitionCommandList();
-	SetTransitionCommandQueue(commandQueue);
 
 	auto result = device.CreateCommittedResource(rhi::helpers::ResourceDesc::Buffer(sizeof(UINT), rhi::HeapType::Upload), m_uavCounterReset);
 
@@ -79,50 +74,6 @@ void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, Dir
 	QUEUE_UPLOAD(&perFrameCBData, sizeof(PerFrameCB), perFrameBufferHandle.get(), 0);
 }
 
-void ResourceManager::WaitForCopyQueue() {
-	auto device = DeviceManager::GetInstance().GetDevice();
-	copyCommandQueue.Signal({ copyFence->GetHandle(), ++copyFenceValue});
-	if (copyFence->GetCompletedValue() < copyFenceValue) {
-		copyFence->HostWait(copyFenceValue);
-	}
-}
-
-void ResourceManager::WaitForTransitionQueue() {
-	auto device = DeviceManager::GetInstance().GetDevice();
-	transitionCommandQueue.Signal({ transitionFence->GetHandle(), ++transitionFenceValue});
-	if (transitionFence->GetCompletedValue() < transitionFenceValue) {
-		transitionFence->HostWait(transitionFenceValue);
-	}
-}
-
-void ResourceManager::InitializeCopyCommandQueue() {
-	auto device = DeviceManager::GetInstance().GetDevice();
-
-	rhi::Result result;
-
-	copyCommandQueue = device.GetQueue(rhi::QueueKind::Graphics); // TODO: async copy queue
-	result = device.CreateCommandAllocator(rhi::QueueKind::Graphics, copyCommandAllocator);
-	result = device.CreateCommandList(rhi::QueueKind::Graphics, copyCommandAllocator.Get(), copyCommandList);
-
-	result = device.CreateTimeline(copyFence, copyFenceValue, "CopyFence");
-}
-
-void ResourceManager::InitializeTransitionCommandList() {
-	auto device = DeviceManager::GetInstance().GetDevice();
-
-	rhi::Result result;
-
-	transitionCommandQueue = device.GetQueue(rhi::QueueKind::Graphics);
-	result = device.CreateCommandAllocator(rhi::QueueKind::Graphics, transitionCommandAllocator);
-	result = device.CreateCommandList(rhi::QueueKind::Graphics, transitionCommandAllocator.Get(), transitionCommandList);
-
-	result = device.CreateTimeline(transitionFence, transitionFenceValue, "TransitionFence");
-}
-
-void ResourceManager::SetTransitionCommandQueue(rhi::Queue queue) {
-	transitionCommandQueue = queue;
-}
-
 UINT ResourceManager::CreateIndexedSampler(const rhi::SamplerDesc& samplerDesc) {
 	auto device = DeviceManager::GetInstance().GetDevice();
 
@@ -134,65 +85,14 @@ UINT ResourceManager::CreateIndexedSampler(const rhi::SamplerDesc& samplerDesc) 
 	return index;
 }
 
-void ResourceManager::GetCopyCommandList(rhi::CommandListPtr& commandList, rhi::CommandAllocatorPtr& commandAllocator) {
-	auto device = DeviceManager::GetInstance().GetDevice();
-
-	// Create a new command allocator if none is available or reuse an existing one
-	if (!commandAllocator || !commandList) {
-		auto result = device.CreateCommandAllocator(rhi::QueueKind::Graphics, commandAllocator);
-		result = device.CreateCommandList(rhi::QueueKind::Graphics, commandAllocator.Get(), commandList);
-	}
-	commandList->Recycle(commandAllocator.Get());
-	commandList->End();
-	commandAllocator->Recycle();
-
-}
-void ResourceManager::ExecuteAndWaitForCommandList(rhi::CommandListPtr& commandList, rhi::CommandAllocatorPtr& commandAllocator) {
-	auto device = DeviceManager::GetInstance().GetDevice();
-	static rhi::Queue copyCommandQueue;
-	static rhi::TimelinePtr copyFence;
-	static UINT64 copyFenceValue = 0;
-	static bool copyFenceEventCreated = false;
-
-	// Create the command queue if it hasn't been created yet
-	if (!copyCommandQueue) {
-		copyCommandQueue = device.GetQueue(rhi::QueueKind::Graphics);
-	}
-
-	// Create a fence for synchronization if it hasn't been created yet
-	if (!copyFenceEventCreated) {
-		auto result = device.CreateTimeline(copyFence, copyFenceValue, "TempCopyFence");
-		copyFenceEventCreated = true;
-	}
-
-	// Close the command list and execute it
-	commandList->End();
-	copyCommandQueue.Submit({ &commandList.Get(), 1}, {});
-
-	// Increment the fence value and signal the fence
-	++copyFenceValue;
-	copyCommandQueue.Signal({ copyFence->GetHandle(), copyFenceValue});
-
-	// Wait until the fence is completed
-	if (copyFence->GetCompletedValue() < copyFenceValue) {
-		copyFence->HostWait(copyFenceValue);
-	}
-
-	commandAllocator->Recycle();
-	commandList->Recycle(commandAllocator.Get());
-}
 
 std::shared_ptr<Buffer> ResourceManager::CreateBuffer(size_t bufferSize, void* pInitialData, bool UAV) {
+	auto device = DeviceManager::GetInstance().GetDevice();
 	auto dataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, bufferSize, UAV);
 	if (pInitialData) {
 		QUEUE_UPLOAD(pInitialData, bufferSize, dataBuffer.get(), 0);
 	}
 
-//	ResourceTransition transition = { dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
-//#if defined(_DEBUG)
-//		transition.name = L"Buffer";
-//#endif
-//	QueueResourceTransition(transition);
 	return dataBuffer;
 }
 
@@ -213,14 +113,7 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 	// Create the dynamic structured buffer instance
 	UINT bufferID = GetNextResizableBufferID();
 	std::shared_ptr<DynamicBuffer> pDynamicBuffer = DynamicBuffer::CreateShared(byteAddress, elementSize, bufferID, bufferSize, name, UAV);
-//	ResourceTransition transition;
-//	transition.resource = pDynamicBuffer.get();
-//	transition.beforeState = ResourceState::UNKNOWN;
-//	transition.afterState = usage;
-//#if defined(_DEBUG)
-//	transition.name = name;
-//#endif
-//	QueueResourceTransition(transition);
+
 	pDynamicBuffer->SetOnResized([this](UINT bufferID, size_t typeSize, size_t capacity, bool byteAddress, DynamicBufferBase* buffer, bool UAV) {
 		this->onDynamicBufferResized(bufferID, typeSize, capacity, byteAddress, buffer, UAV);
 		});
@@ -279,14 +172,7 @@ std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUns
 
 	UINT bufferID = GetInstance().GetNextResizableBufferID();
 	std::shared_ptr<SortedUnsignedIntBuffer> pBuffer = SortedUnsignedIntBuffer::CreateShared(bufferID, capacity, name);
-//	ResourceTransition transition;
-//	transition.resource = pBuffer.get();
-//	transition.beforeState = ResourceState::UNKNOWN;
-//	transition.afterState = usage;
-//#if defined(_DEBUG)
-//	transition.name = name;
-//#endif
-	//QueueResourceTransition(transition);
+
 	pBuffer->SetOnResized([this](UINT bufferID, UINT capacity, UINT numElements, DynamicBufferBase* buffer) {
 		this->onDynamicStructuredBufferResized(bufferID, capacity, numElements, buffer, false);
 		});
@@ -461,43 +347,20 @@ void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const Texture
 		}
 	}
 
-	// Record the uploads (helper creates an upload buffer, maps & packs rows, then emits the copies).
-	// depthOrLayers = 1 for 2D/cube textures.
 	const uint32_t baseW = desc.imageDimensions[0].width;
 	const uint32_t baseH = desc.imageDimensions[0].height;
 
 	auto device = DeviceManager::GetInstance().GetDevice();
 
-	rhi::ResourcePtr upload = rhi::helpers::UpdateTextureSubresources(
-		device,
-		copyCommandList.Get(),
+	TEXTURE_UPLOAD_SUBRESOURCES(
 		dstTexture,
-		desc.format,                               // rhi::Format
+		desc.format,
 		baseW,
 		baseH,
 		/*depthOrLayers*/ 1,
 		static_cast<uint32_t>(mipLevels),
 		arraySlices,
-		{ srd.data(), static_cast<uint32_t>(srd.size()) }
-	);
-
-	// Transition out of CopyDest
-	//rhi::TextureBarrier tb{};
-	//tb.texture = dstTexture.GetHandle();
-	//tb.range = { /*baseMip*/0, static_cast<uint32_t>(mipLevels),
-	//	/*baseLayer*/0, arraySlices };
-	//tb.beforeSync = rhi::ResourceSyncState::Copy;
-	//tb.afterSync = rhi::ResourceSyncState::All;
-	//tb.beforeAccess = rhi::ResourceAccessType::CopyDest;
-	//tb.afterAccess = rhi::ResourceAccessType::Common;
-	//tb.beforeLayout = rhi::ResourceLayout::CopyDest;
-	//tb.afterLayout = rhi::ResourceLayout::Common;
-
-	//rhi::BarrierBatch bb{};
-	//bb.textures = { &tb, 1 };
-	//copyCommandList->Barriers(bb);
-
-
-	ExecuteAndWaitForCommandList(copyCommandList, copyCommandAllocator); // TODO - Replace this by using UploadManager
+		srd.data(),
+		static_cast<uint32_t>(srd.size()));
 
 }

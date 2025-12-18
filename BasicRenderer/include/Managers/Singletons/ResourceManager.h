@@ -33,7 +33,7 @@ public:
         return instance;
     }
 
-    void Initialize(rhi::Queue commandQueue);
+    void Initialize();
 
     rhi::DescriptorHeap GetSRVDescriptorHeap();
     rhi::DescriptorHeap GetSamplerDescriptorHeap();
@@ -472,14 +472,6 @@ public:
     
 private:
     ResourceManager(){};
-    void WaitForCopyQueue();
-    void WaitForTransitionQueue();
-    void InitializeCopyCommandQueue();
-    void InitializeTransitionCommandList();
-	void SetTransitionCommandQueue(rhi::Queue commandQueue);
-    void GetCopyCommandList(rhi::CommandListPtr& commandList, rhi::CommandAllocatorPtr& commandAllocator);
-    void GetDirectCommandList(rhi::CommandListPtr& commandList, rhi::CommandAllocatorPtr& commandAllocator);
-    void ExecuteAndWaitForCommandList(rhi::CommandListPtr& commandList, rhi::CommandAllocatorPtr& commandAllocator);
 
     std::shared_ptr<DescriptorHeap> m_cbvSrvUavHeap;
     std::shared_ptr<DescriptorHeap> m_samplerHeap;
@@ -489,19 +481,6 @@ private:
     UINT numResizableBuffers;
     std::unordered_map<UINT, UINT> bufferIDDescriptorIndexMap;
 
-    rhi::Queue copyCommandQueue;
-    rhi::CommandAllocatorPtr copyCommandAllocator;
-    rhi::CommandListPtr copyCommandList;
-    rhi::TimelinePtr copyFence;
-    HANDLE copyFenceEvent;
-    UINT64 copyFenceValue = 0;
-
-    rhi::Queue transitionCommandQueue;
-    rhi::CommandAllocatorPtr transitionCommandAllocator;
-    rhi::CommandListPtr transitionCommandList;
-    rhi::TimelinePtr transitionFence;
-    HANDLE transitionFenceEvent;
-    UINT64 transitionFenceValue = 0;
 
     std::shared_ptr<Buffer> perFrameBufferHandle;
     UINT8* pPerFrameConstantBuffer;

@@ -269,6 +269,9 @@ namespace rhi {
 		uint32_t size{};
 		const T* begin() const noexcept { return data; }
 		const T* end()   const noexcept { return data + size; }
+		const T& operator[](size_t index) const noexcept {
+			return data[index];
+		}
 	};
 
 	// ---------------- Formats & resource descriptors (trimmed) ----------------

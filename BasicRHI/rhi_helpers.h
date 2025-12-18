@@ -85,9 +85,9 @@ namespace rhi {
             case DXGI_FORMAT_BC5_TYPELESS: return Format::BC5_Typeless;
             case DXGI_FORMAT_BC5_UNORM: return Format::BC5_UNorm;
             case DXGI_FORMAT_BC5_SNORM: return Format::BC5_SNorm;
-			case DXGI_FORMAT_B8G8R8A8_TYPELESS: return Format::B8G8R8A8_Typeless;
-			case DXGI_FORMAT_B8G8R8A8_UNORM: return Format::B8G8R8A8_UNorm;
-			case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: return Format::B8G8R8A8_UNorm_sRGB;
+            case DXGI_FORMAT_B8G8R8A8_TYPELESS: return Format::B8G8R8A8_Typeless;
+            case DXGI_FORMAT_B8G8R8A8_UNORM: return Format::B8G8R8A8_UNorm;
+            case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: return Format::B8G8R8A8_UNorm_sRGB;
             case DXGI_FORMAT_BC6H_TYPELESS: return Format::BC6H_Typeless;
             case DXGI_FORMAT_BC6H_UF16: return Format::BC6H_UF16;
             case DXGI_FORMAT_BC6H_SF16: return Format::BC6H_SF16;
@@ -102,7 +102,7 @@ namespace rhi {
             return (type == ResourceType::Texture1D ||
                 type == ResourceType::Texture2D ||
                 type == ResourceType::Texture3D);
-		}
+        }
         // --- Helper in the style of CD3DX12_RESOURCE_DESC ---
         struct ResourceDesc : public rhi::ResourceDesc
         {
@@ -128,14 +128,14 @@ namespace rhi {
             }
 
             static constexpr ResourceDesc Texture(
-				ResourceType type,
+                ResourceType type,
                 Format format,
                 HeapType memory,
                 uint32_t width,
                 uint32_t height = 1,
                 uint16_t depthOrLayers = 1,
                 uint16_t mipLevels = 1,
-				uint32_t sampleCount = 1,
+                uint32_t sampleCount = 1,
                 ResourceLayout initial = ResourceLayout::Undefined,
                 const ClearValue* clear = nullptr,
                 ResourceFlags flags = {},
@@ -152,7 +152,7 @@ namespace rhi {
                     /*height*/        height,
                     /*depthOrLayers*/ depthOrLayers,
                     /*mipLevels*/     mipLevels,
-					/*sampleCount*/   sampleCount,
+                    /*sampleCount*/   sampleCount,
                     /*initialLayout*/ initial,
                     /*optimizedClear*/clear
                 };
@@ -183,7 +183,7 @@ namespace rhi {
             }
 
             static constexpr ResourceDesc Tex3D(Format fmt, HeapType memory, uint32_t w, uint32_t h, uint16_t d,
-				uint16_t mips = 1, uint32_t sampleCount = 1,
+                uint16_t mips = 1, uint32_t sampleCount = 1,
                 ResourceLayout initial = ResourceLayout::Undefined,
                 const ClearValue* clear = nullptr,
                 ResourceFlags flags = {},
@@ -303,7 +303,7 @@ namespace rhi {
                 return 12; // 96bpp
             case Format::R32G32B32A32_Float: case Format::R32G32B32A32_UInt: case Format::R32G32B32A32_SInt: case Format::R32G32B32A32_Typeless:
                 return 16; // 128bpp
-			default: return 0; // Unsupported / unknown
+            default: return 0; // Unsupported / unknown
             }
         }
 
@@ -315,6 +315,135 @@ namespace rhi {
             uint32_t    rowPitch = 0;   // bytes in source
             uint32_t    slicePitch = 0; // bytes in source (rowPitch * rows for 2D)
         };
+
+
+        struct TextureUploadFootprint {
+            uint64_t offset = 0;   // bytes from start of upload allocation
+            uint32_t rowPitch = 0; // destination row pitch in upload buffer
+            uint32_t rowSize = 0;  // bytes to copy per row (no padding)
+            uint32_t rows = 0;     // number of rows to copy
+            uint32_t width = 0;
+            uint32_t height = 0;
+            uint32_t depth = 1;
+
+            uint32_t mip = 0;
+            uint32_t arraySlice = 0;
+            uint32_t zSlice = 0;
+
+            uint32_t srcIndex = 0; // index into the provided SubresourceData span
+        };
+
+        struct TextureUploadPlan {
+            uint64_t totalSize = 0;
+            std::vector<TextureUploadFootprint> footprints;
+        };
+
+        // Computes the required upload buffer size and a list of placed footprints for all non-null subresources.
+        // Intended for 2D, 2D arrays, and cubemaps (depthOrLayers should be 1 in those cases).
+        // 3D texture support is intentionally limited (footprints are generated per Z slice, but copies are still 2D-style).
+        inline TextureUploadPlan PlanTextureUploadSubresources(
+            Format fmt,
+            uint32_t baseWidth,
+            uint32_t baseHeight,
+            uint32_t depthOrLayers,
+            uint32_t mipLevels,
+            uint32_t arraySize,
+            Span<const SubresourceData> srcSubresources)
+        {
+            TextureUploadPlan plan{};
+
+            const bool bc = IsBlockCompressed(fmt);
+            const uint32_t blockW = bc ? 4u : 1u;
+            const uint32_t blockH = bc ? 4u : 1u;
+            const uint32_t bytesPerBlock = BytesPerBlock(fmt);
+
+            // Safe cross-API alignment (matches D3D12 requirements; Vulkan is OK with these too)
+            constexpr uint32_t RowPitchAlign = 256;  // D3D12_TEXTURE_DATA_PITCH_ALIGNMENT
+            constexpr uint64_t PlacementAlign = 512; // D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT
+
+            const uint32_t depthSlices = (arraySize > 1) ? 1u : std::max(1u, depthOrLayers);
+
+            auto idxOf = [&](uint32_t a, uint32_t m, uint32_t z) -> uint32_t {
+                return (a * mipLevels + m) * depthSlices + z;
+                };
+
+            uint64_t total = 0;
+            plan.footprints.reserve(size_t(arraySize) * size_t(mipLevels) * size_t(depthSlices));
+
+            for (uint32_t a = 0; a < arraySize; ++a) {
+                for (uint32_t m = 0; m < mipLevels; ++m) {
+                    const uint32_t mipW = std::max(1u, baseWidth >> m);
+                    const uint32_t mipH = std::max(1u, baseHeight >> m);
+
+                    const uint32_t bw = (mipW + (blockW - 1)) / blockW; // in blocks
+                    const uint32_t bh = (mipH + (blockH - 1)) / blockH; // in blocks
+
+                    const uint32_t rowSize = bc ? (bw * bytesPerBlock) : (mipW * bytesPerBlock);
+                    const uint32_t rows = bc ? bh : mipH;
+
+                    const uint32_t rowPitch = AlignUp(rowSize, RowPitchAlign);
+                    const uint32_t slicePitch = rowPitch * rows;
+
+                    for (uint32_t z = 0; z < depthSlices; ++z) {
+                        const uint32_t srcIndex = idxOf(a, m, z);
+                        if (srcIndex >= srcSubresources.size) {
+                            continue;
+                        }
+
+                        const auto& src = srcSubresources[srcIndex];
+                        if (!src.pData) continue;
+
+                        TextureUploadFootprint fp{};
+                        fp.offset = AlignUp64(total, PlacementAlign);
+                        fp.rowPitch = rowPitch;
+                        fp.rowSize = rowSize;
+                        fp.rows = rows;
+                        fp.width = mipW;
+                        fp.height = mipH;
+                        fp.depth = 1;
+                        fp.mip = m;
+                        fp.arraySlice = a;
+                        fp.zSlice = z;
+                        fp.srcIndex = srcIndex;
+
+                        total = fp.offset + slicePitch;
+                        plan.footprints.push_back(fp);
+                    }
+                }
+            }
+
+            plan.totalSize = total;
+            return plan;
+        }
+
+        // Writes the planned subresources into an already-mapped upload buffer allocation.
+        // baseOffset is added to each footprint offset (useful when sub-allocating from a ring/page allocator).
+        inline void WriteTextureUploadSubresources(
+            const TextureUploadPlan& plan,
+            Span<const SubresourceData> srcSubresources,
+            void* mappedUpload,
+            uint64_t baseOffset = 0)
+        {
+            if (!mappedUpload) return;
+            uint8_t* dstBase = static_cast<uint8_t*>(mappedUpload);
+
+            for (const auto& fp : plan.footprints) {
+                if (fp.srcIndex >= srcSubresources.size) continue;
+                const auto& src = srcSubresources[fp.srcIndex];
+                if (!src.pData) continue;
+
+                const uint8_t* srcPtr = static_cast<const uint8_t*>(src.pData);
+                uint8_t* dstPtr = dstBase + baseOffset + fp.offset;
+
+                for (uint32_t r = 0; r < fp.rows; ++r) {
+                    const uint8_t* s = srcPtr + size_t(r) * src.rowPitch;
+                    uint8_t* d = dstPtr + size_t(r) * fp.rowPitch;
+                    std::memcpy(d, s, fp.rowSize);
+                }
+
+                // NOTE: 3D uploads would need per-z repetition into subsequent slicePitch regions.
+            }
+        }
 
         // Returns an upload buffer and records CopyBufferToTexture calls for all non-null subresources.
         // Assumes destination texture is already in CopyDest state/layout.
@@ -331,63 +460,10 @@ namespace rhi {
             uint32_t arraySize,       // number of array slices (for cube use 6*layers)
             Span<const SubresourceData> srcSubresources) // size expected: arraySize * mipLevels * (depth if 3D)
         {
-            const bool bc = IsBlockCompressed(fmt);
-            const uint32_t blockW = bc ? 4u : 1u;
-            const uint32_t blockH = bc ? 4u : 1u;
-            const uint32_t bytesPerBlock = BytesPerBlock(fmt);
+            TextureUploadPlan plan = PlanTextureUploadSubresources(
+                fmt, baseWidth, baseHeight, depthOrLayers, mipLevels, arraySize, srcSubresources);
 
-            // Safe cross-API alignment
-            constexpr uint32_t RowPitchAlign = 256;  // D3D12_TEXTURE_DATA_PITCH_ALIGNMENT
-            constexpr uint64_t PlacementAlign = 512; // D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT
-
-            // Plan buffer size and individual placed footprints
-            struct Footprint {
-                uint64_t offset;
-                uint32_t rowPitch;   // destination row pitch in upload buffer
-                uint32_t slicePitch; // destination slice pitch in upload buffer
-                uint32_t width, height, depth; // in texels (per mip)
-                uint32_t mip, arraySlice, zSlice;
-                bool     valid;       // whether we have data to copy
-            };
-            std::vector<Footprint> fps;
-            fps.reserve(arraySize * mipLevels * depthOrLayers);
-
-            uint64_t totalSize = 0;
-            auto idxOf = [&](uint32_t a, uint32_t m, uint32_t z) {
-                return (size_t(a) * mipLevels + m) * depthOrLayers + z;
-                };
-
-            for (uint32_t a = 0; a < arraySize; ++a) {
-                for (uint32_t m = 0; m < mipLevels; ++m) {
-                    const uint32_t mipW = std::max(1u, baseWidth >> m);
-                    const uint32_t mipH = std::max(1u, baseHeight >> m);
-                    const uint32_t bw = (mipW + (blockW - 1)) / blockW; // in blocks
-                    const uint32_t bh = (mipH + (blockH - 1)) / blockH; // in blocks
-                    const uint32_t rowSize = bc ? (bw * bytesPerBlock) : (mipW * bytesPerBlock);
-                    const uint32_t rows = bc ? bh : mipH;
-                    const uint32_t rowPitch = AlignUp(rowSize, RowPitchAlign);
-                    const uint32_t slicePitch = rowPitch * rows;
-
-                    const uint32_t depthSlices = depthOrLayers; // for 2D array/cube, this is 1 per subresource (handled by arraySize)
-
-                    for (uint32_t z = 0; z < depthSlices; ++z) {
-                        Footprint fp{};
-                        fp.offset = AlignUp64(totalSize, PlacementAlign);
-                        fp.rowPitch = rowPitch;
-                        fp.slicePitch = slicePitch;
-                        fp.width = mipW; fp.height = mipH; fp.depth = 1;
-                        fp.mip = m; fp.arraySlice = a; fp.zSlice = z;
-
-                        const size_t srcIdx = idxOf(a, m, z);
-                        fp.valid = (srcIdx < srcSubresources.size) && (srcSubresources.data[srcIdx].pData != nullptr);
-
-                        totalSize = fp.offset + fp.slicePitch; // for 2D/cube
-                        fps.push_back(fp);
-                    }
-                }
-            }
-
-            if (totalSize == 0) {
+            if (plan.totalSize == 0 || plan.footprints.empty()) {
                 return {}; // nothing to upload
             }
 
@@ -396,65 +472,42 @@ namespace rhi {
             upDesc.type = ResourceType::Buffer;
             upDesc.heapType = HeapType::Upload;
             upDesc.resourceFlags = rhi::ResourceFlags::RF_None;
-            upDesc.buffer.sizeBytes = totalSize;
+            upDesc.buffer.sizeBytes = plan.totalSize;
             upDesc.debugName = "TextureUpload";
             ResourcePtr upload;
-        	auto result = dev.CreateCommittedResource(upDesc, upload);
+            auto result = dev.CreateCommittedResource(upDesc, upload);
             if (Failed(result)) {
-				throw std::runtime_error("Failed to create texture upload buffer.");
+                throw std::runtime_error("Failed to create texture upload buffer.");
                 return {};
             }
 
-            // Map once, copy rows for each valid subresource
+            // Map once, copy rows for each planned subresource
             void* mapped = nullptr;
-            upload->Map(&mapped, 0, totalSize);
-            uint8_t* dstBase = static_cast<uint8_t*>(mapped);
-
-            for (const auto& fp : fps) {
-                const size_t srcIdx = idxOf(fp.arraySlice, fp.mip, fp.zSlice);
-                if (!fp.valid) continue;
-                const auto& src = srcSubresources.data[srcIdx];
-
-                const bool srcCompressed = bc; // assume source matches fmt
-                const uint32_t rows = srcCompressed ? ((fp.height + (blockH - 1)) / blockH) : fp.height;
-                const uint32_t rowSize = srcCompressed
-                    ? (((fp.width + (blockW - 1)) / blockW) * bytesPerBlock)
-                    : (fp.width * bytesPerBlock);
-
-                const uint8_t* srcPtr = static_cast<const uint8_t*>(src.pData);
-                uint8_t* dstPtr = dstBase + fp.offset;
-
-                for (uint32_t r = 0; r < rows; ++r) {
-                    const uint8_t* s = srcPtr + size_t(r) * src.rowPitch;
-                    uint8_t* d = dstPtr + size_t(r) * fp.rowPitch;
-                    std::memcpy(d, s, rowSize);
-                }
-                // TODO: for 3D, repeat per z-slice into subsequent slicePitch regions
-            }
-
-			upload->Unmap(0, 0); // Full range
+            upload->Map(&mapped, 0, plan.totalSize);
+            WriteTextureUploadSubresources(plan, srcSubresources, mapped, 0);
+            upload->Unmap(0, 0);
 
             // Record GPU copies: one per subresource (or Z slice)
-            for (const auto& fp : fps) {
-                if (!fp.valid) continue;
+            for (const auto& fp : plan.footprints) {
+                rhi::BufferTextureCopyFootprint f{};
+                f.buffer = upload->GetHandle();
+                f.texture = dstTexture.GetHandle();
+                f.arraySlice = fp.arraySlice;
+                f.mip = fp.mip;
+                f.x = 0; f.y = 0; f.z = fp.zSlice;
 
-				rhi::BufferTextureCopyFootprint f{};
-				f.arraySlice = fp.arraySlice;
-				f.buffer = upload->GetHandle();
-				f.footprint.depth = 1;
-				f.footprint.height = fp.height;
-				f.footprint.offset = fp.offset;
+                f.footprint.offset = fp.offset;
                 f.footprint.rowPitch = fp.rowPitch;
-				f.footprint.width = fp.width;
-				f.mip = fp.mip;
-				f.texture = dstTexture.GetHandle();
-				f.x = 0; f.y = 0; f.z = fp.zSlice;
+                f.footprint.width = fp.width;
+                f.footprint.height = fp.height;
+                f.footprint.depth = fp.depth;
 
                 cl.CopyBufferToTexture(f);
             }
 
             return upload; // keep alive until GPU finishes (caller can fence/wait)
         }
+
         struct OwnedBarrierBatch {
             std::vector<TextureBarrier> textures;
             std::vector<BufferBarrier>  buffers;
@@ -484,10 +537,10 @@ namespace rhi {
                     const auto* p = src.globals.data;
                     globals.insert(globals.end(), p, p + src.globals.size);
                 }
-			}
+            }
             bool Empty() const noexcept {
                 return textures.empty() && buffers.empty() && globals.empty();
-			}
+            }
 
             void Clear() noexcept { textures.clear(); buffers.clear(); globals.clear(); }
         };
