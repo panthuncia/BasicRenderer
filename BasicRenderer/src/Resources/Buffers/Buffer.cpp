@@ -26,8 +26,6 @@ Buffer::Buffer(
 	allocator->CreateResource(
 		&allocationDesc,
 		&desc,
-		rhi::ResourceLayout::Common,
-		nullptr,
 		0,
 		nullptr,
 		m_bufferAllocation);

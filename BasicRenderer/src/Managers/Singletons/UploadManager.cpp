@@ -102,7 +102,7 @@ void UploadManager::UploadData(const void* data, size_t size, std::shared_ptr<Re
 		size_t dstOffset = dataBufferOffset;
 		while (done < size) {
 			size_t chunk = (std::min)(size - done, kPageSize);
-			QUEUE_UPLOAD(
+			BUFFER_UPLOAD(
 				reinterpret_cast<const uint8_t*>(data) + done,
 				chunk,
 				resourceToUpdate,

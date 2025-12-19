@@ -656,8 +656,6 @@ namespace rhi::ma
         Result CreateResource(
             const AllocationDesc* pAllocDesc,
             const ResourceDesc* pResourceDesc,
-            ResourceLayout InitialLayout,
-            const ClearValue* pOptimizedClearValue,
             UINT32 NumCastableFormats,
             const Format* pCastableFormats,
             AllocationPtr& outAllocation) noexcept;
@@ -668,8 +666,6 @@ namespace rhi::ma
             Allocation* pAllocation,
             UINT64 AllocationLocalOffset,
             const ResourceDesc* pResourceDesc,
-            ResourceLayout InitialLayout,
-            const ClearValue* pOptimizedClearValue,
             UINT32 NumCastableFormats,
             const Format* pCastableFormats,
             ResourcePtr& out);

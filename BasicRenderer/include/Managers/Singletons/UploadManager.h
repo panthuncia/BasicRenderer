@@ -44,12 +44,12 @@ public:
 };
 
 #ifdef _DEBUG
-#define QUEUE_UPLOAD(data,size,res,offset) \
+#define BUFFER_UPLOAD(data,size,res,offset) \
     UploadManager::GetInstance().UploadData((data),(size),(res),(offset),__FILE__,__LINE__)
 #define TEXTURE_UPLOAD_SUBRESOURCES(dstTexture,fmt,baseWidth,baseHeight,depthOrLayers,mipLevels,arraySize,srcSubresources,srcCount) \
 	UploadManager::GetInstance().UploadTextureSubresources((dstTexture),(fmt),(baseWidth),(baseHeight),(depthOrLayers),(mipLevels),(arraySize),(srcSubresources),(srcCount),__FILE__,__LINE__)
 #else
-#define QUEUE_UPLOAD(data,size,res,offset) \
+#define BUFFER_UPLOAD(data,size,res,offset) \
     UploadManager::GetInstance().UploadData((data),(size),(res),(offset))
 #define TEXTURE_UPLOAD_SUBRESOURCES(dstTexture,fmt,baseWidth,baseHeight,depthOrLayers,mipLevels,arraySize,srcSubresources,srcCount) \
 	UploadManager::GetInstance().UploadTextureSubresources((dstTexture),(fmt),(baseWidth),(baseHeight),(depthOrLayers),(mipLevels),(arraySize),(srcSubresources),(srcCount))

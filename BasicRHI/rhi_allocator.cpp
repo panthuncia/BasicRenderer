@@ -5396,13 +5396,11 @@ namespace rhi::ma {
         //#ifdef __ID3D12Device10_INTERFACE_DEFINED__
         CreateResourceParams(
             const ResourceDesc* pResourceDesc,
-            ResourceLayout InitialLayout,
-            const ClearValue* pOptimizedClearValue,
             UINT32 NumCastableFormats,
             const Format* pCastableFormats)
             : pResourceDesc(pResourceDesc)
-            , initialLayout(InitialLayout)
-            , pOptimizedClearValue(pOptimizedClearValue)
+            , initialLayout(pResourceDesc->texture.initialLayout)
+            , pOptimizedClearValue(pResourceDesc->texture.optimizedClear)
             , numCastableFormats(NumCastableFormats)
             , pCastableFormats(pCastableFormats)
         {
@@ -9293,8 +9291,6 @@ Synchronized internally with a mutex.
     Result Allocator::CreateResource(
         const AllocationDesc* pAllocDesc,
         const ResourceDesc* pResourceDesc,
-        ResourceLayout InitialLayout,
-        const ClearValue* pOptimizedClearValue,
         UINT32 NumCastableFormats,
         const Format* pCastableFormats,
         AllocationPtr& outAllocation) noexcept
@@ -9308,7 +9304,7 @@ Synchronized internally with a mutex.
             ResourcePtr ptr;
             return m_Pimpl->CreateResource(
                 pAllocDesc,
-                CreateResourceParams(pResourceDesc, InitialLayout, pOptimizedClearValue, NumCastableFormats, pCastableFormats),
+                CreateResourceParams(pResourceDesc, NumCastableFormats, pCastableFormats),
                 outAllocation.Put(),
                 std::move(ptr));
     }
@@ -9331,8 +9327,6 @@ Synchronized internally with a mutex.
         Allocation* pAllocation,
         UINT64 AllocationLocalOffset,
         const ResourceDesc* pResourceDesc,
-        ResourceLayout InitialLayout,
-        const ClearValue* pOptimizedClearValue,
         UINT32 NumCastableFormats,
         const Format* pCastableFormats,
         ResourcePtr& out)
@@ -9346,7 +9340,7 @@ Synchronized internally with a mutex.
             return m_Pimpl->CreateAliasingResource(
                 pAllocation,
                 AllocationLocalOffset,
-                CreateResourceParams(pResourceDesc, InitialLayout, pOptimizedClearValue, NumCastableFormats, pCastableFormats),
+                CreateResourceParams(pResourceDesc, NumCastableFormats, pCastableFormats),
                 out);
     }
 

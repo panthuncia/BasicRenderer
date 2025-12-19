@@ -66,7 +66,7 @@ public:
 	virtual void Update() override {
 		// Reset UAV counter
 		uint32_t zero = 0;
-		QUEUE_UPLOAD(&zero, sizeof(uint32_t), m_pLightPagesCounter, 0);
+		BUFFER_UPLOAD(&zero, sizeof(uint32_t), m_pLightPagesCounter, 0);
 	}
 
 private:

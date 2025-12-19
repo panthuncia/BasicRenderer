@@ -71,7 +71,7 @@ void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, Dir
 	perFrameCBData.clusterZSplitDepth = 6.0f;
 	perFrameCBData.frameIndex = frameIndex % 64; // Wrap around every 64 frames
 
-	QUEUE_UPLOAD(&perFrameCBData, sizeof(PerFrameCB), m_perFrameBuffer, 0);
+	BUFFER_UPLOAD(&perFrameCBData, sizeof(PerFrameCB), m_perFrameBuffer, 0);
 }
 
 UINT ResourceManager::CreateIndexedSampler(const rhi::SamplerDesc& samplerDesc) {
@@ -90,7 +90,7 @@ std::shared_ptr<Buffer> ResourceManager::CreateBuffer(size_t bufferSize, void* p
 	auto device = DeviceManager::GetInstance().GetDevice();
 	auto dataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, bufferSize, UAV);
 	if (pInitialData) {
-		QUEUE_UPLOAD(pInitialData, bufferSize, dataBuffer, 0);
+		BUFFER_UPLOAD(pInitialData, bufferSize, dataBuffer, 0);
 	}
 
 	return dataBuffer;

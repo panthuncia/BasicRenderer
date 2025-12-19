@@ -71,7 +71,7 @@ public:
     }
 
     void UpdateView(BufferView* view, const void* data) {
-        QUEUE_UPLOAD(data, sizeof(T), shared_from_this(), view->GetOffset());
+        BUFFER_UPLOAD(data, sizeof(T), shared_from_this(), view->GetOffset());
     }
 
 

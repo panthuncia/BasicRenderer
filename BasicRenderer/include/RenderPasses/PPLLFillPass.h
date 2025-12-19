@@ -151,7 +151,7 @@ public:
 	virtual void Update() override {
 		// Reset UAV counter
 		uint32_t zero = 0;
-		QUEUE_UPLOAD(&zero, sizeof(uint32_t), m_PPLLCounter, 0);
+		BUFFER_UPLOAD(&zero, sizeof(uint32_t), m_PPLLCounter, 0);
 	}
 
 	void Cleanup(RenderContext& context) override {
