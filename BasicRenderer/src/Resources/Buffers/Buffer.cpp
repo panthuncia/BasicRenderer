@@ -19,13 +19,12 @@ Buffer::Buffer(
 	}
 	desc.heapType = accessType;
 	auto device = DeviceManager::GetInstance().GetDevice();
-	auto allocator = DeviceManager::GetInstance().GetAllocator();
 
 	rhi::ma::AllocationDesc allocationDesc;
 	allocationDesc.heapType = accessType;
-	allocator->CreateResource(
-		&allocationDesc,
-		&desc,
+	DeviceManager::GetInstance().CreateResourceTracked(
+		allocationDesc,
+		desc,
 		0,
 		nullptr,
 		m_bufferAllocation);

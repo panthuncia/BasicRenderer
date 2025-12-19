@@ -12,6 +12,7 @@
 #include "Utilities/Utilities.h"
 #include "rhi_allocator.h"
 #include "Managers/Singletons/DeletionManager.h"
+#include "Resources/TrackedAllocation.h"
 
 class RenderContext;
 
@@ -42,7 +43,7 @@ public:
 		DeletionManager::GetInstance().MarkForDelete(std::move(m_bufferAllocation));
 	}
 	rhi::HeapType m_accessType;
-	rhi::ma::AllocationPtr m_bufferAllocation;
+	TrackedAllocation m_bufferAllocation;
 	//rhi::ResourcePtr m_buffer;
 	rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
 	size_t GetSize() const { return m_size; }

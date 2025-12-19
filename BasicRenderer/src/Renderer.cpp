@@ -918,7 +918,7 @@ void Renderer::Cleanup() {
     m_settingsSubscriptions.clear();
     Material::DestroyDefaultMaterial();
     Menu::GetInstance().Cleanup();
-    ECSManager::GetInstance().GetWorld().release();
+    ECSManager::GetInstance().Cleanup();
     UploadManager::GetInstance().Cleanup();
     ResourceManager::GetInstance().Cleanup();
     DeletionManager::GetInstance().Cleanup();
