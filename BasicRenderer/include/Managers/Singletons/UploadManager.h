@@ -19,6 +19,7 @@ public:
 	std::shared_ptr<Resource> uploadBuffer;
 	size_t uploadBufferOffset{};
 	size_t dataBufferOffset{};
+	bool active = true;
 #ifdef _DEBUG
 	uint64_t resourceID{};
 	const char* file{};
@@ -113,12 +114,29 @@ private:
 	UploadManager() = default;
 	bool AllocateUploadRegion(size_t size, size_t alignment, std::shared_ptr<Resource>& outUploadBuffer, size_t& outOffset);
 
+	// Coalescing / last-write-wins helpers
+	static bool RangesOverlap(size_t a0, size_t a1, size_t b0, size_t b1) noexcept;
+	static bool RangeContains(size_t outer0, size_t outer1, size_t inner0, size_t inner1) noexcept;
+
+	static bool TryCoalesceAppend(ResourceUpdate& last, const ResourceUpdate& next) noexcept;
+	bool TryPatchContainedUpdate(const void* src, size_t size, std::shared_ptr<Resource> resourceToUpdate, size_t dataBufferOffset
+#ifdef _DEBUG
+		, const char* file, int line
+#endif
+	) noexcept;
+
+	// Mutates newUpdate (may expand into a union update); may mark old updates inactive; may deactivate newUpdate if patched into an older containing update.
+	void ApplyLastWriteWins(ResourceUpdate& newUpdate) noexcept;
+
+	static void MapUpload(const std::shared_ptr<Resource>& uploadBuffer, size_t mapSize, uint8_t** outMapped) noexcept;
+	static void UnmapUpload(const std::shared_ptr<Resource>& uploadBuffer) noexcept;
+
 	size_t                 m_currentCapacity = 0;
-	size_t                 m_headOffset      = 0;   // oldest in flight allocation
-	size_t                 m_tailOffset      = 0;   // where next allocation comes from
+	size_t                 m_headOffset = 0;   // oldest in flight allocation
+	size_t                 m_tailOffset = 0;   // where next allocation comes from
 	std::vector<UploadPage>    m_pages;
 	size_t                     m_activePage = 0;
-	static constexpr size_t    kPageSize    = 256 * 1024 * 1024; // 256 MB
+	static constexpr size_t    kPageSize = 256 * 1024 * 1024; // 256 MB
 	static constexpr size_t    kMaxPageSize = 4294967296; // 4 GB
 	static constexpr size_t	   maxSingleUploadSize = 4294967296; // 4 GB
 	std::vector<size_t>           m_frameStart;      // size = numFramesInFlight

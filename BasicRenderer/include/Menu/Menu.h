@@ -464,8 +464,28 @@ inline void Menu::Render(RenderContext& context) {
 			setUseAsyncCompute(m_useAsyncCompute);
 		}
         ImGui::Checkbox("Render Graph Inspector", &showRG);
+        ImGui::Text("Render Resolution: %d x %d | Output Resolution: %d x %d", context.renderResolution.x, context.renderResolution.y, context.outputResolution.x, context.outputResolution.y);
+        rhi::ma::Budget localBudget;
+        std::string memoryString = "Memory usage: ";
+        DeviceManager::GetInstance().GetAllocator()->GetBudget(&localBudget, nullptr);
+        const double KiB = 1024.0;
+        const double MiB = KiB * 1024.0;
+        const double GiB = MiB * 1024.0;
+        const auto usage = static_cast<double>(localBudget.usageBytes);
+
+        const auto [div, suffix] =
+            (usage >= GiB) ? std::pair{ GiB, "GB" } :
+            (usage >= MiB) ? std::pair{ MiB, "MB" } :
+            (usage >= KiB) ? std::pair{ KiB, "KB" } :
+            std::pair{ 1.0, "B" };
+
+        memoryString += std::format("{:.2f} {} / {:.2f} GB",
+            usage / div, suffix,
+            static_cast<double>(localBudget.budgetBytes) / GiB);
+
+        ImGui::Text(memoryString.c_str());
+
 		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
-		ImGui::Text("Render Resolution: %d x %d | Output Resolution: %d x %d" , context.renderResolution.x, context.renderResolution.y, context.outputResolution.x, context.outputResolution.y);
 		ImGui::End();
 	}
 

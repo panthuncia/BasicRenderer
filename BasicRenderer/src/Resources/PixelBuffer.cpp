@@ -31,7 +31,7 @@ void PixelBuffer::initialize(const TextureDescription& desc,
     // create the raw resource
     auto [texture, placedHeap] =
 		rm.CreateTextureResource(desc, aliasTarget != nullptr ? aliasTarget->GetPlacedResourceHeap() : rhi::HeapHandle());
-    m_texture    = std::move(texture);
+    m_textureAllocation    = std::move(texture);
     m_placedResourceHeap = placedHeap;
 
 	m_width  = desc.imageDimensions[0].width;
@@ -49,8 +49,9 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 	}
 
     // Upload initial data if any
+	auto resource = m_textureAllocation->GetResource();
 	if (!initialData.empty()) {
-		rm.UploadTextureData(m_texture.Get(), desc, initialData, m_mipLevels);
+		rm.UploadTextureData(resource, desc, initialData, m_mipLevels);
 	}
 
     size_t subCount = m_mipLevels * m_arraySize;
@@ -75,7 +76,7 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 	const auto& dsvHeap = rm.GetDSVHeap();
 	auto srvInfo = CreateShaderResourceViewsPerMip(
 		device,
-		m_texture.Get(),
+		resource,
 		desc.srvFormat == rhi::Format::Unknown ? desc.format : desc.srvFormat,
 		cbvSrvUavHeap.get(),
 		m_mipLevels,
@@ -102,7 +103,7 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 		std::vector<std::vector<ShaderVisibleIndexInfo>> secondarySrvInfos;
 		secondarySrvInfos = CreateShaderResourceViewsPerMip(
 			device,
-			m_texture.Get(),
+			resource,
 			desc.srvFormat == rhi::Format::Unknown ? desc.format : desc.srvFormat,
 			cbvSrvUavHeap.get(),
 			m_mipLevels,
@@ -118,7 +119,7 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 	if (desc.hasUAV) {
 		uavInfo = CreateUnorderedAccessViewsPerMip(
 			device,
-			m_texture.Get(),
+			resource,
 			desc.uavFormat == rhi::Format::Unknown ? desc.format : desc.uavFormat,
 			cbvSrvUavHeap.get(),
 			m_mipLevels,
@@ -135,7 +136,7 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 	if (desc.hasNonShaderVisibleUAV) {
 		nonShaderUavInfo = CreateNonShaderVisibleUnorderedAccessViewsPerMip(
 			device,
-			m_texture.Get(),
+			resource,
 			desc.uavFormat == rhi::Format::Unknown ? desc.format : desc.uavFormat,
 			nonShaderVisibleHeap.get(),
 			m_mipLevels,
@@ -151,7 +152,7 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 	if (desc.hasRTV) {
 		rtvInfos = CreateRenderTargetViews(
 			device,
-			m_texture.Get(),
+			resource,
 			desc.rtvFormat == rhi::Format::Unknown ? desc.format : desc.rtvFormat,
 			rtvHeap.get(),
 			desc.isCubemap,
@@ -167,7 +168,7 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 	if (desc.hasDSV) {
 		dsvInfos = CreateDepthStencilViews(
 			device,
-			m_texture.Get(),
+			resource,
 			dsvHeap.get(),
 			desc.dsvFormat == rhi::Format::Unknown ? desc.format : desc.dsvFormat,
 			desc.isCubemap,
@@ -194,7 +195,7 @@ rhi::BarrierBatch PixelBuffer::GetEnhancedBarrierGroup(RangeSpec range, rhi::Res
 	m_barrier.beforeSync = prevSyncState;
 	m_barrier.discard = false;
 	m_barrier.range = { resolvedRange.firstMip, resolvedRange.mipCount, resolvedRange.firstSlice, resolvedRange.sliceCount };
-	m_barrier.texture = m_texture->GetHandle();
+	m_barrier.texture = m_textureAllocation->GetResource().GetHandle();
 
 	batch.textures = { &m_barrier };
 
