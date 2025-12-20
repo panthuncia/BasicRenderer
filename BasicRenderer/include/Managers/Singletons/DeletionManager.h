@@ -26,7 +26,7 @@ public:
 		m_allocationDeletionQueue[0].push_back(std::move(ptr));
 	}
 
-	void MarkForDelete(TrackedAllocation&& alloc) {
+	void MarkForDelete(TrackedHandle&& alloc) {
 		m_trackedAllocationDeletionQueue[0].push_back(std::move(alloc));
 	}
 
@@ -56,7 +56,7 @@ private:
 
 	std::vector<std::vector<rhi::helpers::AnyObjectPtr>> m_deletionQueue;
 	std::vector<std::vector<rhi::ma::AllocationPtr>> m_allocationDeletionQueue;
-	std::vector<std::vector<TrackedAllocation>> m_trackedAllocationDeletionQueue;
+	std::vector<std::vector<TrackedHandle>> m_trackedAllocationDeletionQueue;
 };
 
 inline DeletionManager& DeletionManager::GetInstance() {

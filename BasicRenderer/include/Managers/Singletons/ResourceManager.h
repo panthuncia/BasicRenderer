@@ -449,7 +449,7 @@ public:
 
     std::shared_ptr<Buffer> CreateBuffer(size_t size, void* pInitialData, bool UAV = false);
 
-    std::pair<rhi::ma::AllocationPtr, rhi::HeapHandle> CreateTextureResource(
+    std::pair<TrackedHandle, rhi::HeapHandle> CreateTextureResource(
         const TextureDescription& desc,
         rhi::HeapHandle placedResourceHeap = {});
 

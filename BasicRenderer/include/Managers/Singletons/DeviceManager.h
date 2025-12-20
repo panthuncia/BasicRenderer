@@ -50,9 +50,18 @@ public:
 		const rhi::ResourceDesc& resourceDesc,
 		UINT32 numCastableFormats,
 		const rhi::Format* pCastableFormats,
-		TrackedAllocation& outAllocation,
+		TrackedHandle& outAllocation,
 		std::optional<AllocationTrackDesc> trackDesc = std::nullopt
 	) const noexcept;
+
+	rhi::Result CreateAliasingResourceTracked(
+		rhi::ma::Allocation& allocation,
+		UINT64 allocationLocalOffset,
+		const rhi::ResourceDesc& resourceDesc,
+		UINT32 numCastableFormats,
+		const rhi::Format* pCastableFormats,
+		TrackedHandle& out,
+		std::optional<AllocationTrackDesc> trackDesc) const noexcept;
 
 private:
 
@@ -80,11 +89,16 @@ inline rhi::Result DeviceManager::CreateResourceTracked(
 	const rhi::ResourceDesc& resourceDesc, 
 	UINT32 numCastableFormats, 
 	const rhi::Format* pCastableFormats, 
-	TrackedAllocation& outAllocation,
+	TrackedHandle& outAllocation,
 	std::optional<AllocationTrackDesc> trackDesc) const noexcept
 {
 	rhi::ma::AllocationPtr alloc;
-	const auto result = m_allocator->CreateResource(&allocDesc, &resourceDesc, numCastableFormats, pCastableFormats, alloc);
+	const auto result = m_allocator->CreateResource(
+		&allocDesc, 
+		&resourceDesc, 
+		numCastableFormats, 
+		pCastableFormats, 
+		alloc);
 
 	// Create or reuse entity
 	flecs::entity e;
@@ -104,9 +118,51 @@ inline rhi::Result DeviceManager::CreateResourceTracked(
 
 	// Apply caller-provided bundle
 	track.attach.ApplyTo(e);
-
+	TrackedEntityToken tok(ECSManager::GetInstance().GetWorld(), e);
 	// Return wrapper that will delete entity when allocation is destroyed
-	outAllocation = { std::move(alloc), std::move(e) };
+	outAllocation = TrackedHandle::FromAllocation(std::move(alloc), std::move(tok));
+	return result;
+}
+
+inline rhi::Result DeviceManager::CreateAliasingResourceTracked(
+	rhi::ma::Allocation& allocation,
+	UINT64 allocationLocalOffset,
+	const rhi::ResourceDesc& resourceDesc,
+	UINT32 numCastableFormats,
+	const rhi::Format* pCastableFormats,
+	TrackedHandle& outResource,
+	std::optional<AllocationTrackDesc> trackDesc) const noexcept
+{
+	rhi::ResourcePtr res;
+	const auto result = m_allocator->CreateAliasingResource(
+		&allocation,
+		allocationLocalOffset,
+		&resourceDesc, 
+		numCastableFormats, 
+		pCastableFormats, 
+		res);
+
+	// Create or reuse entity
+	flecs::entity e;
+	AllocationTrackDesc track;
+	if (trackDesc.has_value()) {
+		track = trackDesc.value();
+		e = track.existing;
+	}
+	if (!e.is_alive()) {
+		e = ECSManager::GetInstance().GetWorld().entity();
+	}
+
+	// Attach base info (size, kind, etc.)
+	const uint64_t sizeBytes = 0; // TODO
+	e.set<MemoryStatisticsComponents::MemSizeBytes>({ sizeBytes });
+	if (track.id) e.set<ResourceIdentifier>(track.id.value());
+
+	// Apply caller-provided bundle
+	track.attach.ApplyTo(e);
+	TrackedEntityToken tok(ECSManager::GetInstance().GetWorld(), e);
+	// Return wrapper that will delete entity when allocation is destroyed
+	outResource = TrackedHandle::FromResource(std::move(res), std::move(tok));
 	return result;
 }
 

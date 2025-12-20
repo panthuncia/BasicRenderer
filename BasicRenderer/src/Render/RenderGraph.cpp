@@ -27,12 +27,6 @@ void RenderGraph::AddTransition(
 {
 
 	auto& resource = r.resourceAndRange.resource;
-	if (resource->GetName() == L"Environment prefiltered cubemap") {
-		spdlog::info("0");
-	}
-	if (resource->GetName() == L"EnvironmentPrefilteredCubemapGroup") {
-		spdlog::info("0");
-	}
 	std::vector<ResourceTransition> transitions;
 	resource->GetStateTracker()->Apply(r.resourceAndRange.range, resource.get(), r.state, transitions);
 
@@ -41,10 +35,6 @@ void RenderGraph::AddTransition(
 	}
 
 	currentBatch.passBatchTrackers[resource->GetGlobalResourceID()] = resource->GetStateTracker(); // We will need to chack subsequent passes against this
-
-	if (resource->GetName().contains(L"MeshletBitfield")) {
-		spdlog::info("1");
-	}
 
 	// Check if this is a resource group
 	//std::vector<ResourceTransition> independantlyManagedTransitions;
@@ -123,7 +113,6 @@ void RenderGraph::ProcessResourceRequirements(
 
 void RenderGraph::Compile() {
 	// Register resource providers from pass builders
-
 
 	for (auto& v : m_passBuilders) {
 		std::visit([this](auto& builder) {
@@ -224,10 +213,6 @@ void RenderGraph::Compile() {
 
 	unsigned int currentBatchIndex = 0;
     for (auto& pr : passes) {
-
-		if (pr.name == "Screen-Space Reflections Pass") {
-			spdlog::info("Screen-Space Reflections Pass");
-		}
 
 		bool isCompute = (pr.type == PassType::Compute);
 

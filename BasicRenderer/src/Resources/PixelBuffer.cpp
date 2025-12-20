@@ -31,7 +31,7 @@ void PixelBuffer::initialize(const TextureDescription& desc,
     // create the raw resource
     auto [texture, placedHeap] =
 		rm.CreateTextureResource(desc, aliasTarget != nullptr ? aliasTarget->GetPlacedResourceHeap() : rhi::HeapHandle());
-    m_textureAllocation    = std::move(texture);
+    m_textureHandle    = std::move(texture);
     m_placedResourceHeap = placedHeap;
 
 	m_width  = desc.imageDimensions[0].width;
@@ -49,7 +49,7 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 	}
 
     // Upload initial data if any
-	auto resource = m_textureAllocation->GetResource();
+	auto resource = m_textureHandle.GetResource();
 	if (!initialData.empty()) {
 		rm.UploadTextureData(resource, desc, initialData, m_mipLevels);
 	}
@@ -195,7 +195,7 @@ rhi::BarrierBatch PixelBuffer::GetEnhancedBarrierGroup(RangeSpec range, rhi::Res
 	m_barrier.beforeSync = prevSyncState;
 	m_barrier.discard = false;
 	m_barrier.range = { resolvedRange.firstMip, resolvedRange.mipCount, resolvedRange.firstSlice, resolvedRange.sliceCount };
-	m_barrier.texture = m_textureAllocation->GetResource().GetHandle();
+	m_barrier.texture = m_textureHandle.GetResource().GetHandle();
 
 	batch.textures = { &m_barrier };
 

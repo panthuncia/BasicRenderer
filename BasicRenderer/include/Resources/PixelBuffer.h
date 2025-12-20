@@ -23,19 +23,19 @@ public:
 	explicit PixelBuffer(CreateTag) {}
 	~PixelBuffer()
 	{
-		DeletionManager::GetInstance().MarkForDelete(std::move(m_textureAllocation));
+		DeletionManager::GetInstance().MarkForDelete(std::move(m_textureHandle));
 	}
 	unsigned int GetWidth() const { return m_width; }
 	unsigned int GetHeight() const { return m_height; }
 	unsigned int GetChannels() const { return m_channels; }
     rhi::Resource GetTexture() {
-		return m_textureAllocation->GetResource();
+		return m_textureHandle.GetResource();
     }
     rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
 
-    virtual void SetName(const std::wstring& newName) { name = newName; m_textureAllocation->GetResource().SetName(ws2s(newName).c_str()); }
+    virtual void SetName(const std::wstring& newName) { name = newName; m_textureHandle.GetResource().SetName(ws2s(newName).c_str()); }
 
-	rhi::Resource GetAPIResource() override { return m_textureAllocation->GetResource(); }
+	rhi::Resource GetAPIResource() override { return m_textureHandle.GetResource(); }
 
 	rhi::HeapHandle GetPlacedResourceHeap() const {
 		return m_placedResourceHeap;
@@ -66,7 +66,7 @@ private:
     unsigned int m_width;
     unsigned int m_height;
 	unsigned int m_channels;
-    rhi::ma::AllocationPtr m_textureAllocation;
+    TrackedHandle m_textureHandle;
     rhi::Format m_format;
 	TextureDescription m_desc;
 	rhi::ClearValue m_clearColor;

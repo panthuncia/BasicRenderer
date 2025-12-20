@@ -421,7 +421,7 @@ namespace rhi::ma
         uint64_t GetSize() const noexcept { return m_size; }
 
         rhi::HeapHandle GetHeap() const noexcept;
-        rhi::Resource GetResource() noexcept { return m_resource.Get(); }
+        rhi::Resource& GetResource() noexcept { return m_resource.Get(); }
         void SetResource(rhi::ResourcePtr r);
 
         void SetPrivateData(void* p) noexcept { m_privateData = p; }

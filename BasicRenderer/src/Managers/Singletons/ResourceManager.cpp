@@ -202,7 +202,7 @@ std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUns
 	return pBuffer;
 }
 
-std::pair<rhi::ma::AllocationPtr,rhi::HeapHandle> ResourceManager::CreateTextureResource(
+std::pair<TrackedHandle,rhi::HeapHandle> ResourceManager::CreateTextureResource(
 	const TextureDescription& desc,
 	rhi::HeapHandle placedResourceHeap) {
 
@@ -275,22 +275,27 @@ std::pair<rhi::ma::AllocationPtr,rhi::HeapHandle> ResourceManager::CreateTexture
 	// Create the texture resource
 
 	//rhi::ResourcePtr textureResource;
-	rhi::ma::AllocationPtr allocation;
+	TrackedHandle resource;
 	if (desc.allowAlias) {
 		//textureResource = device.CreatePlacedResource(placedResourceHeap, 0, textureDesc); // TODO: handle offset
 		throw std::runtime_error("Aliasing resources not implemented yet");
 	}
 	else {
-		auto allocator = DeviceManager::GetInstance().GetAllocator();
 
 		rhi::ma::AllocationDesc allocationDesc;
 		allocationDesc.heapType = rhi::HeapType::DeviceLocal;
-		allocator->CreateResource(&allocationDesc, &textureDesc, 0, nullptr, allocation);
+		
+		DeviceManager::GetInstance().CreateResourceTracked(
+			allocationDesc, 
+			textureDesc, 
+			0, 
+			nullptr, 
+			resource);
 
 		//auto result = device.CreateCommittedResource(textureDesc, textureResource);
 	}
 
-	return std::make_pair(std::move(allocation), placedResourceHeap);
+	return std::make_pair(std::move(resource), placedResourceHeap);
 }
 
 void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int mipLevels) {
