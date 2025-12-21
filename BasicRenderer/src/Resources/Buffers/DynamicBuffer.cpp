@@ -3,7 +3,7 @@
 #include <spdlog/spdlog.h>
 
 #include "Resources/Buffers/BufferView.h"
-#include "Managers/Singletons/DeletionManager.h"
+#include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/UploadManager.h"
 
 std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementSize) {
@@ -117,11 +117,57 @@ void DynamicBuffer::Deallocate(const BufferView* view) {
     }
 }
 
+void DynamicBuffer::AssignDescriptorSlots()
+{
+    auto& rm = ResourceManager::GetInstance();
+
+    ResourceManager::ViewRequirements req{};
+    ResourceManager::ViewRequirements::BufferViews b{};
+
+    const uint32_t viewElements =
+        static_cast<uint32_t>(m_byteAddress ? (m_capacity / 4) : m_capacity/m_elementSize);
+
+    b.createCBV = false;
+    b.createSRV = true;
+    b.createUAV = m_UAV;
+    b.createNonShaderVisibleUAV = false;
+    b.uavCounterOffset = 0;
+
+    // SRV
+    b.srvDesc = rhi::SrvDesc{
+        .dimension = rhi::SrvDim::Buffer,
+        .formatOverride = m_byteAddress ? rhi::Format::R32_Typeless : rhi::Format::Unknown,
+        .buffer = {
+            .kind = m_byteAddress ? rhi::BufferViewKind::Raw : rhi::BufferViewKind::Structured,
+            .firstElement = 0,
+            .numElements = viewElements,
+            .structureByteStride = static_cast<uint32_t>(m_byteAddress ? 0 : m_elementSize),
+        },
+    };
+
+    // UAV
+    b.uavDesc = rhi::UavDesc{
+        .dimension = rhi::UavDim::Buffer,
+        .buffer = {
+            .kind = m_byteAddress ? rhi::BufferViewKind::Raw : rhi::BufferViewKind::Structured,
+            .firstElement = 0,
+            .numElements = viewElements,
+            .structureByteStride = static_cast<uint32_t>(m_byteAddress ? 0 : m_elementSize),
+        },
+    };
+
+    req.views = b;
+    auto resource = m_dataBuffer->GetAPIResource();
+    rm.AssignDescriptorSlots(*this, resource, req);
+}
+
 void DynamicBuffer::CreateBuffer(size_t capacity) {
     auto device = DeviceManager::GetInstance().GetDevice();
     m_capacity = capacity;
     m_dataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, capacity, m_UAV);
     m_memoryBlocks.push_back({ 0, capacity, true });
+
+	AssignDescriptorSlots();
 }
 
 void DynamicBuffer::GrowBuffer(size_t newSize) {
@@ -131,6 +177,8 @@ void DynamicBuffer::GrowBuffer(size_t newSize) {
 	m_dataBuffer = newDataBuffer;
 
     m_capacity = newSize;
-    onResized(m_elementSize, m_capacity/m_elementSize, m_byteAddress, this, m_UAV);
+
+    AssignDescriptorSlots();
+
 	SetName(m_name);
 }

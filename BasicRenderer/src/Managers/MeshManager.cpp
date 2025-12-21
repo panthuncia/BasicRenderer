@@ -11,18 +11,18 @@
 
 MeshManager::MeshManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
-	m_preSkinningVertices = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"preSkinnedVertices", true);
-	m_postSkinningVertices = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"PostSkinnedvertices", true, true);
-	m_meshletOffsets = resourceManager.CreateIndexedDynamicBuffer(sizeof(meshopt_Meshlet), 1, L"meshletOffsets");
-	m_meshletVertexIndices = resourceManager.CreateIndexedDynamicBuffer(sizeof(unsigned int), 1, L"meshletVertexIndices");
-	m_meshletTriangles = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletTriangles", true);
-	m_meshletBoundsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(BoundingSphere), 1, L"meshletBoundsBuffer", false, true);
-	m_meshletBitfieldBuffer = resourceManager.CreateIndexedDynamicBuffer(1, 4, L"meshletBitfieldBuffer", true, true);
-	m_clusterToVisibleClusterTableIndexBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(unsigned int), 1, L"clusterIndicesBuffer", false, true);
+	m_preSkinningVertices = DynamicBuffer::CreateShared(1, 4, L"preSkinnedVertices", true);
+	m_postSkinningVertices = DynamicBuffer::CreateShared(1, 4, L"PostSkinnedvertices", true, true);
+	m_meshletOffsets = DynamicBuffer::CreateShared(sizeof(meshopt_Meshlet), 1, L"meshletOffsets");
+	m_meshletVertexIndices = DynamicBuffer::CreateShared(sizeof(unsigned int), 1, L"meshletVertexIndices");
+	m_meshletTriangles = DynamicBuffer::CreateShared(1, 4, L"meshletTriangles", true);
+	m_meshletBoundsBuffer = DynamicBuffer::CreateShared(sizeof(BoundingSphere), 1, L"meshletBoundsBuffer", false, true);
+	m_meshletBitfieldBuffer = DynamicBuffer::CreateShared(1, 4, L"meshletBitfieldBuffer", true, true);
+	m_clusterToVisibleClusterTableIndexBuffer = DynamicBuffer::CreateShared(sizeof(unsigned int), 1, L"clusterIndicesBuffer", false, true);
 
-	m_perMeshBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, L"PerMeshBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
+	m_perMeshBuffers = DynamicBuffer::CreateShared(sizeof(PerMeshCB), 1, L"PerMeshBuffers");
 
-	m_perMeshInstanceBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerMeshCB), 1, L"perMeshInstanceBuffers");//resourceManager.CreateIndexedLazyDynamicStructuredBuffer<PerMeshCB>(ResourceState::ALL_SRV, 1, L"perMeshBuffers<PerMeshCB>", 1);
+	m_perMeshInstanceBuffers = DynamicBuffer::CreateShared(sizeof(PerMeshCB), 1, L"perMeshInstanceBuffers");
 
 	m_resources[Builtin::PreSkinningVertices] = m_preSkinningVertices;
 	m_resources[Builtin::PostSkinningVertices] = m_postSkinningVertices;
