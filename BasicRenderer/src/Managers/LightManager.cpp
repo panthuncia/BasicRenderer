@@ -16,7 +16,7 @@
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
 
-	m_activeLightIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(1, L"activeLightIndices");
+	m_activeLightIndices = SortedUnsignedIntBuffer::CreateShared(1, L"activeLightIndices");
     m_lightBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<LightInfo>(10, L"lightBuffer<LightInfo>");
     m_spotViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(1, L"spotViewInfo<uint>");
     m_pointViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(1, L"pointViewInfo<uint>");

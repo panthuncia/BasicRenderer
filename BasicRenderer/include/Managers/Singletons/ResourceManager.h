@@ -385,9 +385,6 @@ public:
         return pDynamicBuffer;
     }
 
-    //std::shared_ptr<DynamicBuffer> CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, std::wstring name, bool byteAddress = false, bool UAV = false);
-	std::shared_ptr<SortedUnsignedIntBuffer> CreateIndexedSortedUnsignedIntBuffer(uint64_t capacity, std::wstring name = L"");
-
     void onDynamicStructuredBufferResized(uint32_t typeSize, uint32_t capacity, DynamicBufferBase* buffer, bool UAV) {
         //UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
         auto device = DeviceManager::GetInstance().GetDevice();

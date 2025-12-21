@@ -64,7 +64,7 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 			indices.push_back(index);
 			auto materialFlags = meshInstance->GetMesh()->material->Technique().compileFlags;
 			if (!m_activeDrawSetIndices.contains(materialFlags)) {
-				m_activeDrawSetIndices[materialFlags] = ResourceManager::GetInstance().CreateIndexedSortedUnsignedIntBuffer(1, L"activeDrawSetIndices(flags=" + std::to_wstring(static_cast<uint64_t>(materialFlags)) + L")");
+				m_activeDrawSetIndices[materialFlags] = SortedUnsignedIntBuffer::CreateShared(1, L"activeDrawSetIndices(flags=" + std::to_wstring(static_cast<uint64_t>(materialFlags)) + L")");
 				auto& buf = m_activeDrawSetIndices[materialFlags];
 				buf->GetECSEntity().add<Components::IsActiveDrawSetIndices>();
 				buf->GetECSEntity().set<Components::Resource>({ buf });
