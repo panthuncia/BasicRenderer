@@ -26,6 +26,7 @@
 #include "Managers/Singletons/StatisticsManager.h"
 #include "Managers/Singletons/UpscalingManager.h"
 #include "Menu/RenderGraphInspector.h"
+#include "Menu/MemoryIntrospectionWidget.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -486,6 +487,17 @@ inline void Menu::Render(RenderContext& context) {
         ImGui::Text(memoryString.c_str());
 
 		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+		ImGui::End();
+	}
+	{
+        static ui::MemoryIntrospectionWidget g_memWidget;
+        ImGui::Begin("Memory Introspection", nullptr);
+        double timeSeconds = 0;
+        uint64_t totalBytes = 0;
+        g_memWidget.PushFrameSample(timeSeconds, totalBytes);
+        bool open = true;
+        ui::MemorySnapshot snapshot; // later: fill with real category/resource data
+        g_memWidget.Draw(&open, &snapshot);
 		ImGui::End();
 	}
 

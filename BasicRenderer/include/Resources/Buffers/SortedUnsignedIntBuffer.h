@@ -15,8 +15,8 @@ using Microsoft::WRL::ComPtr;
 
 class SortedUnsignedIntBuffer : public DynamicBufferBase {
 public:
-    static std::shared_ptr<SortedUnsignedIntBuffer> CreateShared(UINT id = 0, uint64_t capacity = 64, std::wstring name = L"", bool UAV = false) {
-        return std::shared_ptr<SortedUnsignedIntBuffer>(new SortedUnsignedIntBuffer(id, capacity, name, UAV));
+    static std::shared_ptr<SortedUnsignedIntBuffer> CreateShared(uint64_t capacity = 64, std::wstring name = L"", bool UAV = false) {
+        return std::shared_ptr<SortedUnsignedIntBuffer>(new SortedUnsignedIntBuffer(capacity, name, UAV));
     }
 
     // Insert an element while maintaining sorted order (deduped)
@@ -88,7 +88,7 @@ public:
         return m_data[index];
     }
 
-    void SetOnResized(const std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)>& callback) {
+    void SetOnResized(const std::function<void(UINT, UINT, DynamicBufferBase* buffer)>& callback) {
         onResized = callback;
     }
 
@@ -110,8 +110,8 @@ protected:
     }
 
 private:
-    SortedUnsignedIntBuffer(UINT id = 0, uint64_t capacity = 64, std::wstring name = L"", bool UAV = false)
-        : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_earliestModifiedIndex(0) {
+    SortedUnsignedIntBuffer(uint64_t capacity = 64, std::wstring name = L"", bool UAV = false)
+        : m_capacity(capacity), m_UAV(UAV), m_earliestModifiedIndex(0) {
         CreateBuffer(capacity);
         SetName(name);
     }
@@ -131,9 +131,7 @@ private:
     uint64_t m_capacity;
     uint64_t m_earliestModifiedIndex; // To avoid updating the entire buffer every time
 
-    UINT m_globalResizableBufferID;
-
-    std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)> onResized;
+    std::function<void(UINT, UINT, DynamicBufferBase* buffer)> onResized;
     inline static std::wstring m_name = L"SortedUnsignedIntBuffer";
 
     bool m_UAV = false;
@@ -152,7 +150,7 @@ private:
         m_dataBuffer = newDataBuffer;
 
         m_capacity = newSize;
-        onResized(m_globalResizableBufferID, static_cast<uint32_t>(sizeof(uint32_t)), static_cast<uint32_t>(m_capacity), this);
+        onResized(static_cast<uint32_t>(sizeof(uint32_t)), static_cast<uint32_t>(m_capacity), this);
         SetName(name);
     }
 };

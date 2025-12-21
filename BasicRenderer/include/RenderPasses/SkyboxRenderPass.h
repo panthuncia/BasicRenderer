@@ -154,7 +154,8 @@ private:
 
         const UINT vertexBufferSize = static_cast<UINT>(36 * sizeof(SkyboxVertex));
 
-        m_vertexBuffer = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, (void*)skyboxVertices);
+        m_vertexBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, vertexBufferSize);
+        BUFFER_UPLOAD(skyboxVertices, vertexBufferSize, m_vertexBuffer, 0);
 		m_vertexBuffer->SetName(L"Skybox VB");
 
         BUFFER_UPLOAD((void*)skyboxVertices, vertexBufferSize, m_vertexBuffer, 0);

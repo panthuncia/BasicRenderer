@@ -19,14 +19,14 @@ template<class T>
 class DynamicStructuredBuffer : public DynamicBufferBase {
 public:
 
-    static std::shared_ptr<DynamicStructuredBuffer<T>> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false) {
-        return std::shared_ptr<DynamicStructuredBuffer<T>>(new DynamicStructuredBuffer<T>(id, capacity, name, UAV));
+    static std::shared_ptr<DynamicStructuredBuffer<T>> CreateShared(UINT capacity = 64, std::wstring name = L"", bool UAV = false) {
+        return std::shared_ptr<DynamicStructuredBuffer<T>>(new DynamicStructuredBuffer<T>(capacity, name, UAV));
     }
 
     unsigned int Add(const T& element) {
         if (m_data.size() >= m_capacity) {
             Resize(m_capacity * 2);
-            onResized(m_globalResizableBufferID, sizeof(T), m_capacity, this);
+            onResized(sizeof(T), m_capacity, this);
         }
         m_data.push_back(element);
         m_needsUpdate = true;
@@ -57,7 +57,7 @@ public:
         if (newCapacity > m_capacity) {
             CreateBuffer(newCapacity, m_capacity);
             m_capacity = newCapacity;
-            onResized(m_globalResizableBufferID, sizeof(T), m_capacity, this);
+            onResized(sizeof(T), m_capacity, this);
         }
 
     }
@@ -66,7 +66,7 @@ public:
         BUFFER_UPLOAD(&element, sizeof(T), shared_from_this(), index * sizeof(T));
     }
 
-    void SetOnResized(const std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)>& callback) {
+    void SetOnResized(const std::function<void(UINT, UINT, DynamicBufferBase* buffer)>& callback) {
         onResized = callback;
     }
 
@@ -87,8 +87,8 @@ protected:
     }
 
 private:
-    DynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring bufName = L"", bool UAV = false)
-        : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
+    DynamicStructuredBuffer(UINT capacity = 64, std::wstring bufName = L"", bool UAV = false)
+        : m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
 		name = bufName;
         CreateBuffer(capacity);
     }
@@ -106,9 +106,7 @@ private:
     uint32_t m_capacity;
     bool m_needsUpdate;
 
-    UINT m_globalResizableBufferID;
-
-    std::function<void(UINT, uint32_t, uint32_t, DynamicBufferBase* buffer)> onResized;
+    std::function<void(uint32_t, uint32_t, DynamicBufferBase* buffer)> onResized;
     inline static std::wstring m_name = L"DynamicStructuredBuffer";
 
     bool m_UAV = false;

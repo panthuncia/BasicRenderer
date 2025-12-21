@@ -85,18 +85,6 @@ UINT ResourceManager::CreateIndexedSampler(const rhi::SamplerDesc& samplerDesc) 
 	return index;
 }
 
-
-std::shared_ptr<Buffer> ResourceManager::CreateBuffer(size_t bufferSize, void* pInitialData, bool UAV) {
-	auto device = DeviceManager::GetInstance().GetDevice();
-	auto dataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, bufferSize, UAV);
-	if (pInitialData) {
-		BUFFER_UPLOAD(pInitialData, bufferSize, dataBuffer, 0);
-	}
-
-	return dataBuffer;
-}
-
-
 std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, std::wstring name, bool byteAddress, bool UAV) {
 #if defined(_DEBUG)
 	assert(numElements > 0 && byteAddress ? elementSize == 1 : (elementSize > 0 && elementSize % 4 == 0));
@@ -111,11 +99,10 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 		if (rem) bufferSize += (align - rem); // Align up to 4 bytes
 	}
 	// Create the dynamic structured buffer instance
-	UINT bufferID = GetNextResizableBufferID();
-	std::shared_ptr<DynamicBuffer> pDynamicBuffer = DynamicBuffer::CreateShared(byteAddress, elementSize, bufferID, bufferSize, name, UAV);
+	std::shared_ptr<DynamicBuffer> pDynamicBuffer = DynamicBuffer::CreateShared(byteAddress, elementSize, bufferSize, name, UAV);
 
-	pDynamicBuffer->SetOnResized([this](UINT bufferID, size_t typeSize, size_t capacity, bool byteAddress, DynamicBufferBase* buffer, bool UAV) {
-		this->onDynamicBufferResized(bufferID, typeSize, capacity, byteAddress, buffer, UAV);
+	pDynamicBuffer->SetOnResized([this](size_t typeSize, size_t capacity, bool byteAddress, DynamicBufferBase* buffer, bool UAV) {
+		this->onDynamicBufferResized(typeSize, capacity, byteAddress, buffer, UAV);
 		});
 
 	// Create an SRV for the buffer
@@ -170,11 +157,10 @@ std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_
 std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUnsignedIntBuffer(uint64_t capacity, std::wstring name) {
 	auto device = DeviceManager::GetInstance().GetDevice();
 
-	UINT bufferID = GetInstance().GetNextResizableBufferID();
-	std::shared_ptr<SortedUnsignedIntBuffer> pBuffer = SortedUnsignedIntBuffer::CreateShared(bufferID, capacity, name);
+	std::shared_ptr<SortedUnsignedIntBuffer> pBuffer = SortedUnsignedIntBuffer::CreateShared(capacity, name);
 
-	pBuffer->SetOnResized([this](UINT bufferID, UINT capacity, UINT numElements, DynamicBufferBase* buffer) {
-		this->onDynamicStructuredBufferResized(bufferID, capacity, numElements, buffer, false);
+	pBuffer->SetOnResized([this](UINT capacity, UINT numElements, DynamicBufferBase* buffer) {
+		this->onDynamicStructuredBufferResized(capacity, numElements, buffer, false);
 		});
 
 	// Create an SRV for the buffer
@@ -202,179 +188,209 @@ std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUns
 	return pBuffer;
 }
 
-std::pair<TrackedHandle,rhi::HeapHandle> ResourceManager::CreateTextureResource(
-	const TextureDescription& desc,
-	rhi::HeapHandle placedResourceHeap) {
+void ResourceManager::AssignDescriptorSlots(
+    GloballyIndexedResource& target,
+    rhi::Resource& apiResource,
+    const ViewRequirements& req)
+{
+    auto device = DeviceManager::GetInstance().GetDevice();
 
-	auto device = DeviceManager::GetInstance().GetDevice();
+    if (!m_cbvSrvUavHeap || !m_samplerHeap || !m_rtvHeap || !m_dsvHeap || !m_nonShaderVisibleHeap) {
+        spdlog::error("ResourceManager::AssignDescriptorSlots called before ResourceManager::Initialize");
+        throw std::runtime_error("ResourceManager::AssignDescriptorSlots called before ResourceManager::Initialize");
+    }
 
-	// Determine the number of mip levels
-	uint16_t mipLevels = desc.generateMipMaps ? CalculateMipLevels(desc.imageDimensions[0].width, desc.imageDimensions[0].height) : 1;
+    // Texture path
+    if (const auto* tex = std::get_if<ViewRequirements::TextureViews>(&req.views))
+    {
+        const auto& cbvSrvUavHeap = m_cbvSrvUavHeap;
+        const auto& nonShaderVisibleHeap = m_nonShaderVisibleHeap;
+        const auto& rtvHeap = m_rtvHeap;
+        const auto& dsvHeap = m_dsvHeap;
 
-	// Determine the array size
-	uint32_t arraySize = desc.arraySize;
-	if (!desc.isArray && !desc.isCubemap) {
-		arraySize = 1;
-	}
+        // SRV
+        if (tex->createSRV)
+        {
+            auto srvInfos = CreateShaderResourceViewsPerMip(
+                device,
+                apiResource,
+                tex->srvFormat == rhi::Format::Unknown ? tex->baseFormat : tex->srvFormat,
+                cbvSrvUavHeap.get(),
+                tex->mipLevels,
+                tex->isCubemap,
+                tex->isArray,
+                tex->arraySize);
 
-	// Create the texture resource description
-	auto width = desc.imageDimensions[0].width;
-	auto height = desc.imageDimensions[0].height;
-	if (desc.padInternalResolution) { // Pad the width and height to the next power of two
-		width = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(width)))));
-		height = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(height)))));
-	}
+            SRVViewType srvViewType = SRVViewType::Invalid;
+            if (tex->isArray) {
+                srvViewType = tex->isCubemap ? SRVViewType::TextureCubeArray : SRVViewType::Texture2DArray;
+            }
+            else if (tex->isCubemap) {
+                srvViewType = SRVViewType::TextureCube;
+            }
+            else {
+                srvViewType = SRVViewType::Texture2D;
+            }
 
-	if (width > std::numeric_limits<uint32_t>().max() || height > std::numeric_limits<uint32_t>().max()) {
-		spdlog::error("Texture dimensions above uint32_max not implemented");
-	}
+            target.SetDefaultSRVViewType(srvViewType);
+            target.SetSRVView(srvViewType, cbvSrvUavHeap, srvInfos);
 
-	// Handle clear values for RTV and DSV
-	rhi::ClearValue* clearValue = nullptr;
-	rhi::ClearValue depthClearValue = {};
-	rhi::ClearValue colorClearValue = {};
-	if (desc.hasDSV) {
-		depthClearValue.type = rhi::ClearValueType::DepthStencil;
-		depthClearValue.format = desc.dsvFormat == rhi::Format::Unknown ? desc.format : desc.dsvFormat;
-		depthClearValue.depthStencil.depth = desc.depthClearValue;
-		depthClearValue.depthStencil.stencil = 0;
-		clearValue = &depthClearValue;
-	}
-	else if (desc.hasRTV) {
-		colorClearValue.type = rhi::ClearValueType::Color;
-		colorClearValue.format = desc.rtvFormat == rhi::Format::Unknown ? desc.format : desc.rtvFormat;
-		colorClearValue.rgba[0] = desc.clearColor[0];
-		colorClearValue.rgba[1] = desc.clearColor[1];
-		colorClearValue.rgba[2] = desc.clearColor[2];
-		colorClearValue.rgba[3] = desc.clearColor[3];
-		clearValue = &colorClearValue;
-	}
+            // Optional: view cubemap as Texture2DArray
+            if (tex->createCubemapAsArraySRV && tex->isCubemap)
+            {
+                auto secondarySrvInfos = CreateShaderResourceViewsPerMip(
+                    device,
+                    apiResource,
+                    tex->srvFormat == rhi::Format::Unknown ? tex->baseFormat : tex->srvFormat,
+                    cbvSrvUavHeap.get(),
+                    tex->mipLevels,
+                    /*isCubemap*/ false,
+                    /*isArray*/   tex->isArray,
+                    /*arraySize*/ 6u);
 
-	rhi::ResourceDesc textureDesc{
-		.type = rhi::ResourceType::Texture2D,
-		.texture = {
-			.format = desc.format,
-			.width = static_cast<uint32_t>(width),
-			.height = static_cast<uint32_t>(height),
-			.depthOrLayers = static_cast<uint16_t>(desc.isCubemap ? 6 * arraySize : arraySize),
-			.mipLevels = mipLevels,
-			.sampleCount = 1,
-			.initialLayout = rhi::ResourceLayout::Common,
-			.optimizedClear = clearValue
-		}
-	};
-	if (desc.hasRTV) {
-		textureDesc.resourceFlags |= rhi::ResourceFlags::RF_AllowRenderTarget;
-	}
-	if (desc.hasDSV) {
-		textureDesc.resourceFlags |= rhi::ResourceFlags::RF_AllowDepthStencil;
-	}
-	if (desc.hasUAV) {
-		textureDesc.resourceFlags |= rhi::ResourceFlags::RF_AllowUnorderedAccess;
-	}
-	// Create the texture resource
+                target.SetSRVView(SRVViewType::Texture2DArray, cbvSrvUavHeap, secondarySrvInfos);
+            }
+        }
 
-	//rhi::ResourcePtr textureResource;
-	TrackedHandle resource;
-	if (desc.allowAlias) {
-		//textureResource = device.CreatePlacedResource(placedResourceHeap, 0, textureDesc); // TODO: handle offset
-		throw std::runtime_error("Aliasing resources not implemented yet");
-	}
-	else {
+        // UAV (shader visible)
+        if (tex->createUAV)
+        {
+            auto uavInfos = CreateUnorderedAccessViewsPerMip(
+                device,
+                apiResource,
+                tex->uavFormat == rhi::Format::Unknown ? tex->baseFormat : tex->uavFormat,
+                cbvSrvUavHeap.get(),
+                tex->mipLevels,
+                tex->isArray,
+                tex->totalArraySlices,
+                tex->uavFirstMip,
+                tex->isCubemap);
 
-		rhi::ma::AllocationDesc allocationDesc;
-		allocationDesc.heapType = rhi::HeapType::DeviceLocal;
-		
-		DeviceManager::GetInstance().CreateResourceTracked(
-			allocationDesc, 
-			textureDesc, 
-			0, 
-			nullptr, 
-			resource);
+            target.SetUAVGPUDescriptors(cbvSrvUavHeap, uavInfos);
+        }
 
-		//auto result = device.CreateCommittedResource(textureDesc, textureResource);
-	}
+        // UAV (non-shader visible)
+        if (tex->createNonShaderVisibleUAV)
+        {
+            auto nonShaderUavInfos = CreateNonShaderVisibleUnorderedAccessViewsPerMip(
+                device,
+                apiResource,
+                tex->uavFormat == rhi::Format::Unknown ? tex->baseFormat : tex->uavFormat,
+                nonShaderVisibleHeap.get(),
+                tex->mipLevels,
+                tex->isArray,
+                tex->arraySize,
+                tex->uavFirstMip);
 
-	return std::make_pair(std::move(resource), placedResourceHeap);
-}
+            target.SetUAVCPUDescriptors(nonShaderVisibleHeap, nonShaderUavInfos);
+        }
 
-void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int mipLevels) {
+        // RTV
+        if (tex->createRTV)
+        {
+            auto rtvInfos = CreateRenderTargetViews(
+                device,
+                apiResource,
+                tex->rtvFormat == rhi::Format::Unknown ? tex->baseFormat : tex->rtvFormat,
+                rtvHeap.get(),
+                tex->isCubemap,
+                tex->isArray,
+                tex->arraySize,
+                tex->mipLevels);
 
-	if (initialData.empty()) return;
+            target.SetRTVDescriptors(rtvHeap, rtvInfos);
+        }
 
-	// effective array slices = arraySize * (isCubemap ? 6 : 1)
-	const uint32_t faces = desc.isCubemap ? 6u : 1u;
-	const uint32_t arraySlices = faces * static_cast<uint32_t>(desc.arraySize);
-	const uint32_t numSubres = arraySlices * static_cast<uint32_t>(mipLevels);
+        // DSV
+        if (tex->createDSV)
+        {
+            auto dsvInfos = CreateDepthStencilViews(
+                device,
+                apiResource,
+                dsvHeap.get(),
+                tex->dsvFormat == rhi::Format::Unknown ? tex->baseFormat : tex->dsvFormat,
+                tex->isCubemap,
+                tex->isArray,
+                tex->arraySize,
+                tex->mipLevels);
 
-	// Build a dense SubresourceData table (nullptr entries are allowed; they'll be skipped)
-	std::vector<rhi::helpers::SubresourceData> srd(numSubres);
-	std::vector<std::vector<stbi_uc>> expandedImages;   // keep storage alive during copy
-	expandedImages.reserve(numSubres);
+            target.SetDSVDescriptors(dsvHeap, dsvInfos);
+        }
 
-	// If caller passed fewer than numSubres pointers, pad with nullptrs.
-	std::vector<const stbi_uc*> fullInitial(numSubres, nullptr);
-	std::copy(initialData.begin(), initialData.end(), fullInitial.begin());
+        return;
+    }
 
-	int i = -1;
-	for (uint32_t a = 0; a < arraySlices; ++a) {
-		for (uint32_t m = 0; m < mipLevels; ++m) {
-			++i;
-			const uint32_t subIdx = m + a * mipLevels;
+    // Buffer path
+    if (const auto* buf = std::get_if<ViewRequirements::BufferViews>(&req.views))
+    {
+        // CBV
+        if (buf->createCBV)
+        {
+            const uint32_t index = m_cbvSrvUavHeap->AllocateDescriptor();
+            ShaderVisibleIndexInfo cbvInfo{};
+            cbvInfo.slot.index = index;
+            cbvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
 
-			const stbi_uc* imageData = fullInitial[subIdx];
+            target.SetCBVDescriptor(m_cbvSrvUavHeap, cbvInfo);
+            device.CreateConstantBufferView(
+                { m_cbvSrvUavHeap->GetHeap().GetHandle(), index },
+                apiResource.GetHandle(),
+                buf->cbvDesc);
+        }
 
-			uint32_t width = std::max(1u, static_cast<uint32_t>(desc.imageDimensions[i].width >> m));
-			uint32_t height = std::max(1u, static_cast<uint32_t>(desc.imageDimensions[i].height >> m));
-			uint32_t channels = desc.channels;
+        // SRV
+        if (buf->createSRV)
+        {
+            const uint32_t index = m_cbvSrvUavHeap->AllocateDescriptor();
+            ShaderVisibleIndexInfo srvInfo{};
+            srvInfo.slot.index = index;
+            srvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
 
-			auto& out = srd[subIdx];
+            device.CreateShaderResourceView(
+                { m_cbvSrvUavHeap->GetHeap().GetHandle(), index },
+                apiResource.GetHandle(),
+                buf->srvDesc);
 
-			// If provided pitches don't match raw (width*channels), treat as "pre-padded or compressed"
-			if ((width * channels != desc.imageDimensions[i].rowPitch) ||
-				(width * channels * height != desc.imageDimensions[i].slicePitch))
-			{
-				out.pData = imageData;
-				out.rowPitch = static_cast<uint32_t>(desc.imageDimensions[i].rowPitch);
-				out.slicePitch = static_cast<uint32_t>(desc.imageDimensions[i].slicePitch);
-			}
-			else {
-				if (imageData) {
-					const stbi_uc* ptr = imageData;
-					if (channels == 3) {
-						// Expand to RGBA8
-						expandedImages.emplace_back(ExpandImageData(imageData, width, height));
-						ptr = expandedImages.back().data();
-						channels = 4;
-					}
-					out.pData = ptr;
-					out.rowPitch = width * channels; // tightly packed
-					out.slicePitch = out.rowPitch * height;
-				}
-				else {
-					out.pData = nullptr;
-					out.rowPitch = out.slicePitch = 0;
-				}
-			}
-		}
-	}
+            target.SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, { { srvInfo } });
+        }
 
-	const uint32_t baseW = desc.imageDimensions[0].width;
-	const uint32_t baseH = desc.imageDimensions[0].height;
+        // UAV (shader visible)
+        if (buf->createUAV)
+        {
+            const uint32_t index = m_cbvSrvUavHeap->AllocateDescriptor();
+            ShaderVisibleIndexInfo uavInfo{};
+            uavInfo.slot.index = index;
+            uavInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
 
-	auto device = DeviceManager::GetInstance().GetDevice();
+            device.CreateUnorderedAccessView(
+                { m_cbvSrvUavHeap->GetHeap().GetHandle(), index },
+                apiResource.GetHandle(),
+                buf->uavDesc);
 
-	TEXTURE_UPLOAD_SUBRESOURCES(
-		dstTexture,
-		desc.format,
-		baseW,
-		baseH,
-		/*depthOrLayers*/ 1,
-		static_cast<uint32_t>(mipLevels),
-		arraySlices,
-		srd.data(),
-		static_cast<uint32_t>(srd.size()));
+            target.SetUAVGPUDescriptors(m_cbvSrvUavHeap, { { uavInfo } }, buf->uavCounterOffset);
+        }
 
+        // UAV (non-shader visible)
+        if (buf->createNonShaderVisibleUAV)
+        {
+            const uint32_t index = m_nonShaderVisibleHeap->AllocateDescriptor();
+            NonShaderVisibleIndexInfo uavInfo{};
+            uavInfo.slot.index = index;
+            uavInfo.slot.heap = m_nonShaderVisibleHeap->GetHeap().GetHandle();
+
+            device.CreateUnorderedAccessView(
+                { m_nonShaderVisibleHeap->GetHeap().GetHandle(), index },
+                apiResource.GetHandle(),
+                buf->uavDesc);
+
+            target.SetUAVCPUDescriptors(m_nonShaderVisibleHeap, { { uavInfo } });
+        }
+
+        return;
+    }
+
+    spdlog::error("ResourceManager::AssignDescriptorSlots: invalid ViewRequirements variant");
+    throw std::runtime_error("ResourceManager::AssignDescriptorSlots: invalid ViewRequirements");
 }
 
 void ResourceManager::Cleanup()

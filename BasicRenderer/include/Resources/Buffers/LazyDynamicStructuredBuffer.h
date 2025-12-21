@@ -30,8 +30,8 @@ template <typename T>
 class LazyDynamicStructuredBuffer : public LazyDynamicStructuredBufferBase {
 public:
 
-	static std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"", uint64_t alignment = 1, bool UAV = false) {
-		return std::shared_ptr<LazyDynamicStructuredBuffer<T>>(new LazyDynamicStructuredBuffer<T>(id, capacity, name, alignment, UAV));
+	static std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateShared(UINT capacity = 64, std::wstring name = L"", uint64_t alignment = 1, bool UAV = false) {
+		return std::shared_ptr<LazyDynamicStructuredBuffer<T>>(new LazyDynamicStructuredBuffer<T>(capacity, name, alignment, UAV));
 	}
 
     std::shared_ptr<BufferView> Add() {
@@ -46,7 +46,7 @@ public:
         m_usedCapacity++;
 		if (m_usedCapacity > m_capacity) { // Resize the buffer if necessary
             Resize(m_capacity * 2);
-            onResized(m_globalResizableBufferID, m_elementSize, m_capacity, this, m_UAV);
+            onResized(m_elementSize, m_capacity, this, m_UAV);
         }
 		size_t index = m_usedCapacity - 1;
         return BufferView::CreateShared(viewedWeak, index * m_elementSize, m_elementSize, sizeof(T));
@@ -75,7 +75,7 @@ public:
     }
 
 
-    void SetOnResized(const std::function<void(UINT, uint32_t, uint32_t, DynamicBufferBase* buffer, bool)>& callback) {
+    void SetOnResized(const std::function<void(uint32_t, uint32_t, DynamicBufferBase* buffer, bool)>& callback) {
         onResized = callback;
     }
 
@@ -101,8 +101,8 @@ protected:
     }
 
 private:
-    LazyDynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring name = L"", uint64_t alignment = 1, bool UAV = false)
-        : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
+    LazyDynamicStructuredBuffer(UINT capacity = 64, std::wstring name = L"", uint64_t alignment = 1, bool UAV = false)
+        : m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
         if (alignment == 0) {
 			alignment = 1;
         }
@@ -123,10 +123,9 @@ private:
     uint64_t m_usedCapacity = 0;
     bool m_needsUpdate;
 	std::deque<uint64_t> m_freeIndices;
-    UINT m_globalResizableBufferID;
     uint32_t m_elementSize = 0;
 
-    std::function<void(UINT, uint32_t, uint32_t, DynamicBufferBase* buffer, bool)> onResized;
+    std::function<void(uint32_t, uint32_t, DynamicBufferBase* buffer, bool)> onResized;
     inline static std::wstring m_name = L"LazyDynamicStructuredBuffer";
 
     bool m_UAV = false;

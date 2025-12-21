@@ -36,7 +36,8 @@ void Mesh::CreateVertexBuffer() {
     
     const UINT vertexBufferSize = static_cast<UINT>(m_vertices->size());
 
-	m_vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, (void*)m_vertices->data());
+	m_vertexBufferHandle = Buffer::CreateShared(rhi::HeapType::DeviceLocal, vertexBufferSize);
+	BUFFER_UPLOAD(m_vertices->data(), vertexBufferSize, m_vertexBufferHandle, 0);
 
     m_vertexBufferView.buffer = m_vertexBufferHandle->GetAPIResource().GetHandle();
     m_vertexBufferView.stride = sizeof(m_perMeshBufferData.vertexByteSize);
@@ -188,7 +189,9 @@ void Mesh::CreateBuffers(const std::vector<UINT32>& indices) {
     const UINT indexBufferSize = static_cast<UINT>(indices.size() * sizeof(UINT32));
     m_indexCount = static_cast<uint32_t>(indices.size());
 
-	m_indexBufferHandle = ResourceManager::GetInstance().CreateBuffer(indexBufferSize, (void*)indices.data());
+	m_indexBufferHandle = Buffer::CreateShared(rhi::HeapType::DeviceLocal, indexBufferSize);
+
+	BUFFER_UPLOAD(indices.data(), indexBufferSize, m_indexBufferHandle, 0);
 
     m_indexBufferView.buffer = m_indexBufferHandle->GetAPIResource().GetHandle();
     m_indexBufferView.format = rhi::Format::R32_UInt;

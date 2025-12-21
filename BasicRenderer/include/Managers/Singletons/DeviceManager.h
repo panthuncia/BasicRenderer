@@ -12,7 +12,7 @@
 #include "Managers/Singletons/ECSManager.h"
 #include "Resources/ResourceIdentifier.h"
 #include "Resources/TrackedAllocation.h"
-
+#include "Resources/MemoryStatisticsComponents.h"
 #include "Managers/Singletons/SettingsManager.h"
 
 class DeviceManager {
@@ -77,13 +77,6 @@ private:
 
 };
 
-namespace MemoryStatisticsComponents
-{
-	struct MemSizeBytes{
-		uint64_t size;
-	};
-}
-
 inline rhi::Result DeviceManager::CreateResourceTracked(
 	const rhi::ma::AllocationDesc& allocDesc, 
 	const rhi::ResourceDesc& resourceDesc, 
@@ -102,7 +95,7 @@ inline rhi::Result DeviceManager::CreateResourceTracked(
 
 	// Create or reuse entity
 	flecs::entity e;
-	AllocationTrackDesc track;
+	AllocationTrackDesc track(-1);
 	if (trackDesc.has_value()) {
 		track = trackDesc.value();
 		e = track.existing;
@@ -144,7 +137,7 @@ inline rhi::Result DeviceManager::CreateAliasingResourceTracked(
 
 	// Create or reuse entity
 	flecs::entity e;
-	AllocationTrackDesc track;
+	AllocationTrackDesc track(-1);
 	if (trackDesc.has_value()) {
 		track = trackDesc.value();
 		e = track.existing;

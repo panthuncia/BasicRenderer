@@ -9,6 +9,33 @@
 #include "resources/ResourceIdentifier.h"
 #include "Managers/Singletons/ECSManager.h"
 
+struct EntityComponentBundle {
+    std::vector<std::function<void(flecs::entity)>> ops;
+
+    template<class T>
+    EntityComponentBundle& Add() {
+        ops.emplace_back([](flecs::entity e) { e.add<T>(); });
+        return *this;
+    }
+
+    template<class T>
+    EntityComponentBundle& Set(T value) {
+        ops.emplace_back([v = std::move(value)](flecs::entity e) mutable { e.set<T>(v); });
+        return *this;
+    }
+
+    // pairs/relationships
+    template<class Rel>
+    EntityComponentBundle& Pair(flecs::entity target) {
+        ops.emplace_back([target](flecs::entity e) { e.add<Rel>(target); });
+        return *this;
+    }
+
+    void ApplyTo(flecs::entity e) const {
+        for (auto& op : ops) op(e);
+    }
+};
+
 struct TrackedEntityToken {
     flecs::world* world = nullptr;
     flecs::entity_t id = 0;
@@ -34,6 +61,13 @@ struct TrackedEntityToken {
     TrackedEntityToken& operator=(const TrackedEntityToken&) = delete;
 
     ~TrackedEntityToken() { Reset(); }
+
+    void ApplyAttachBundle(const EntityComponentBundle& bundle) const noexcept {
+        if (world && id) {
+			auto e = flecs::entity{ *world, id };
+			bundle.ApplyTo(e);
+        }
+    }
 
     void Disarm() noexcept { world = nullptr; id = 0; }
 
@@ -71,6 +105,10 @@ public:
     TrackedHandle& operator=(const TrackedHandle&) = delete;
 
     ~TrackedHandle() { Reset(); }
+
+    void ApplyComponentBundle(const EntityComponentBundle& bundle) noexcept {
+        tok_.ApplyAttachBundle(bundle);
+    }
 
     explicit operator bool() const noexcept {
         return std::visit([](auto const& v) -> bool {
@@ -117,34 +155,13 @@ private:
     TrackedEntityToken tok_;
 };
 
-struct EntityAttachBundle {
-	std::vector<std::function<void(flecs::entity)>> ops;
-
-	template<class T>
-	EntityAttachBundle& Add() {
-		ops.emplace_back([](flecs::entity e) { e.add<T>(); });
-		return *this;
-	}
-
-	template<class T>
-	EntityAttachBundle& Set(T value) {
-		ops.emplace_back([v = std::move(value)](flecs::entity e) mutable { e.set<T>(v); });
-		return *this;
-	}
-
-	// pairs/relationships
-	template<class Rel>
-	EntityAttachBundle& Pair(flecs::entity target) {
-		ops.emplace_back([target](flecs::entity e) { e.add<Rel>(target); });
-		return *this;
-	}
-
-	void ApplyTo(flecs::entity e) const {
-		for (auto& op : ops) op(e);
-	}
-};
-
 struct AllocationTrackDesc {
+    AllocationTrackDesc(const int globalResourceID)
+    {
+	    this->globalResourceID = globalResourceID;
+    }
+
+    int globalResourceID;
 	// Optionally let caller provide an existing entity (rarely needed).
 	flecs::entity existing = {};
 
@@ -152,5 +169,5 @@ struct AllocationTrackDesc {
 	std::optional<ResourceIdentifier> id;
 
 	// Arbitrary attachments
-	EntityAttachBundle attach;
+    EntityComponentBundle attach;
 };

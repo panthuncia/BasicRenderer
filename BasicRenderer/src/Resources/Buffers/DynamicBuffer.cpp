@@ -131,6 +131,6 @@ void DynamicBuffer::GrowBuffer(size_t newSize) {
 	m_dataBuffer = newDataBuffer;
 
     m_capacity = newSize;
-    onResized(m_globalResizableBufferID, m_elementSize, m_capacity/m_elementSize, m_byteAddress, this, m_UAV);
+    onResized(m_elementSize, m_capacity/m_elementSize, m_byteAddress, this, m_UAV);
 	SetName(m_name);
 }

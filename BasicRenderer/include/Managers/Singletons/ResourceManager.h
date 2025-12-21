@@ -3,7 +3,7 @@
 #include <wrl.h>
 #include <vector>
 #include <stdexcept>
-#include <queue>
+#include <variant>
 
 #include <rhi.h>
 #include <rhi_helpers.h>
@@ -14,12 +14,8 @@
 #include "Resources/PixelBuffer.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Render/DescriptorHeap.h"
-#include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"
-#include "Resources/TextureDescription.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
-
-#include "rhi_allocator.h"
 
 using namespace Microsoft::WRL;
 
@@ -28,6 +24,59 @@ class SortedUnsignedIntBuffer;
 
 class ResourceManager {
 public:
+
+    struct ViewRequirements {
+        struct TextureViews {
+            // Resource shape
+            uint32_t mipLevels = 1;
+            bool isCubemap = false;
+            bool isArray = false;
+            uint32_t arraySize = 1;        // number of array elements (for cubemaps: number of cubes)
+            uint32_t totalArraySlices = 1; // total slices (for cubemaps: arraySize * 6)
+
+            // Formats
+            rhi::Format baseFormat = rhi::Format::Unknown;
+            rhi::Format srvFormat = rhi::Format::Unknown;
+            rhi::Format uavFormat = rhi::Format::Unknown;
+            rhi::Format rtvFormat = rhi::Format::Unknown;
+            rhi::Format dsvFormat = rhi::Format::Unknown;
+
+            // Which views to create
+            bool createSRV = true;
+            bool createUAV = false;
+            bool createNonShaderVisibleUAV = false;
+            bool createRTV = false;
+            bool createDSV = false;
+
+            // Extra (common for cubemaps): also create a Texture2DArray SRV view.
+            bool createCubemapAsArraySRV = false;
+
+            // UAV options
+            uint32_t uavFirstMip = 0;
+        };
+
+        struct BufferViews {
+            bool createCBV = false;
+            bool createSRV = false;
+            bool createUAV = false;
+            bool createNonShaderVisibleUAV = false;
+
+            rhi::CbvDesc cbvDesc{};
+            rhi::SrvDesc srvDesc{};
+            rhi::UavDesc uavDesc{};
+
+            // Some resources (e.g. structured buffers) track the counter offset separately.
+            uint64_t uavCounterOffset = 0;
+        };
+
+        std::variant<TextureViews, BufferViews> views;
+    };
+
+    void AssignDescriptorSlots(
+        GloballyIndexedResource& target,
+        rhi::Resource& apiResource,
+        const ViewRequirements& req);
+
     static ResourceManager& GetInstance() {
         static ResourceManager instance;
         return instance;
@@ -244,11 +293,10 @@ public:
         auto device = DeviceManager::GetInstance().GetDevice();
 
         // Create the dynamic structured buffer instance
-        UINT bufferID = GetNextResizableBufferID();
-        std::shared_ptr<DynamicStructuredBuffer<T>> pDynamicBuffer = DynamicStructuredBuffer<T>::CreateShared(bufferID, capacity, name, UAV);
+        std::shared_ptr<DynamicStructuredBuffer<T>> pDynamicBuffer = DynamicStructuredBuffer<T>::CreateShared(capacity, name, UAV);
 
-        pDynamicBuffer->SetOnResized([this](UINT bufferID, UINT typeSize, UINT capacity, DynamicBufferBase* buffer) {
-            this->onDynamicStructuredBufferResized(bufferID, typeSize, capacity, buffer, false);
+        pDynamicBuffer->SetOnResized([this](UINT typeSize, UINT capacity, DynamicBufferBase* buffer) {
+            this->onDynamicStructuredBufferResized(typeSize, capacity, buffer, false);
             });
 
 		rhi::SrvDesc srvDesc = {};
@@ -260,7 +308,6 @@ public:
 
 
         UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
-        bufferIDDescriptorIndexMap[bufferID] = index;
 		device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), index}, pDynamicBuffer->GetAPIResource().GetHandle(), srvDesc);
 
         ShaderVisibleIndexInfo srvInfo;
@@ -294,11 +341,10 @@ public:
         auto device = DeviceManager::GetInstance().GetDevice();
 
         // Create the dynamic structured buffer instance
-        UINT bufferID = GetNextResizableBufferID();
-        std::shared_ptr<LazyDynamicStructuredBuffer<T>> pDynamicBuffer = LazyDynamicStructuredBuffer<T>::CreateShared(bufferID, capacity, name, alignment, UAV);
+        std::shared_ptr<LazyDynamicStructuredBuffer<T>> pDynamicBuffer = LazyDynamicStructuredBuffer<T>::CreateShared(capacity, name, alignment, UAV);
 
-        pDynamicBuffer->SetOnResized([this](UINT bufferID, uint32_t typeSize, uint32_t capacity, DynamicBufferBase* buffer, bool uav) {
-            this->onDynamicStructuredBufferResized(bufferID, typeSize, capacity, buffer, uav);
+        pDynamicBuffer->SetOnResized([this](uint32_t typeSize, uint32_t capacity, DynamicBufferBase* buffer, bool uav) {
+            this->onDynamicStructuredBufferResized(typeSize, capacity, buffer, uav);
             });
 
 		rhi::SrvDesc srvDesc = {};
@@ -309,7 +355,6 @@ public:
 		srvDesc.buffer.kind = rhi::BufferViewKind::Structured;
 
         UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
-        bufferIDDescriptorIndexMap[bufferID] = index;
 		device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), index}, pDynamicBuffer->GetAPIResource().GetHandle(), srvDesc);
 
 		ShaderVisibleIndexInfo srvInfo;
@@ -343,13 +388,7 @@ public:
     std::shared_ptr<DynamicBuffer> CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, std::wstring name, bool byteAddress = false, bool UAV = false);
 	std::shared_ptr<SortedUnsignedIntBuffer> CreateIndexedSortedUnsignedIntBuffer(uint64_t capacity, std::wstring name = L"");
 
-    UINT GetNextResizableBufferID() {
-        UINT val = numResizableBuffers;
-        numResizableBuffers++;
-        return val;
-    }
-
-    void onDynamicStructuredBufferResized(UINT bufferID, uint32_t typeSize, uint32_t capacity, DynamicBufferBase* buffer, bool UAV) {
+    void onDynamicStructuredBufferResized(uint32_t typeSize, uint32_t capacity, DynamicBufferBase* buffer, bool UAV) {
         //UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
         auto device = DeviceManager::GetInstance().GetDevice();
 
@@ -386,12 +425,12 @@ public:
         }
     }
 
-    void onDynamicBufferResized(UINT bufferID, size_t elementSize, size_t numElements, bool byteAddress, DynamicBufferBase* buffer, bool UAV) {
+    void onDynamicBufferResized(size_t elementSize, size_t numElements, bool byteAddress, DynamicBufferBase* buffer, bool UAV) {
 
         // If debug mode, check buffer size
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
 		if (numElements * elementSize > std::numeric_limits<uint32_t>::max()) {
-			spdlog::error("Buffer size exceeds maximum limit for ID: {}", bufferID);
+			spdlog::error("Buffer size exceeds maximum limit");
 			throw std::runtime_error("Buffer size exceeds maximum limit");
 		}
 #endif
@@ -447,14 +486,6 @@ public:
         return dataBuffer;
     }
 
-    std::shared_ptr<Buffer> CreateBuffer(size_t size, void* pInitialData, bool UAV = false);
-
-    std::pair<TrackedHandle, rhi::HeapHandle> CreateTextureResource(
-        const TextureDescription& desc,
-        rhi::HeapHandle placedResourceHeap = {});
-
-    void UploadTextureData(rhi::Resource& pResource, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int mipLevels);
-
     UINT CreateIndexedSampler(const rhi::SamplerDesc& samplerDesc);
 
 	//void QueueResourceTransition(const ResourceTransition& transition);
@@ -479,9 +510,6 @@ private:
     std::shared_ptr<DescriptorHeap> m_rtvHeap;
     std::shared_ptr<DescriptorHeap> m_dsvHeap;
     std::shared_ptr<DescriptorHeap> m_nonShaderVisibleHeap;
-    UINT numResizableBuffers;
-    std::unordered_map<UINT, UINT> bufferIDDescriptorIndexMap;
-
 
     std::shared_ptr<Buffer> m_perFrameBuffer;
     UINT8* pPerFrameConstantBuffer;
