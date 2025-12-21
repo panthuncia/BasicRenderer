@@ -9,7 +9,7 @@
 
 ViewManager::ViewManager() {
     auto& resourceManager = ResourceManager::GetInstance();
-    m_cameraBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<CameraInfo>(1, L"cameraBuffer<ViewManager>");
+    m_cameraBuffer = LazyDynamicStructuredBuffer<CameraInfo>::CreateShared(1, L"cameraBuffer<ViewManager>");
 
     m_meshletBitfieldGroup = std::make_shared<ResourceGroup>(L"MeshletCullingBitfieldGroup");
     m_meshInstanceMeshletCullingBitfieldGroup = std::make_shared<ResourceGroup>(L"MeshInstanceMeshletCullingBitfieldGroup");

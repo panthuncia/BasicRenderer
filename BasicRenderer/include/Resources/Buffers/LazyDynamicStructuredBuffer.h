@@ -1,10 +1,7 @@
 #pragma once
 
 #include <vector>
-#include <functional>
-#include <typeinfo>
 #include <string>
-#include <concepts>
 #include <memory>
 #include <deque>
 #include <rhi.h>
@@ -13,9 +10,8 @@
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
-#include "Concepts/HasIsValid.h"
 #include "Resources/Buffers/BufferView.h"
-#include "Managers/Singletons/DeletionManager.h"
+#include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/UploadManager.h"
 
 using Microsoft::WRL::ComPtr;
@@ -46,7 +42,6 @@ public:
         m_usedCapacity++;
 		if (m_usedCapacity > m_capacity) { // Resize the buffer if necessary
             Resize(m_capacity * 2);
-            onResized(m_elementSize, m_capacity, this, m_UAV);
         }
 		size_t index = m_usedCapacity - 1;
         return BufferView::CreateShared(viewedWeak, index * m_elementSize, m_elementSize, sizeof(T));
@@ -72,11 +67,6 @@ public:
 
     void UpdateView(BufferView* view, const void* data) {
         BUFFER_UPLOAD(data, sizeof(T), shared_from_this(), view->GetOffset());
-    }
-
-
-    void SetOnResized(const std::function<void(uint32_t, uint32_t, DynamicBufferBase* buffer, bool)>& callback) {
-        onResized = callback;
     }
 
     std::shared_ptr<Buffer>& GetBuffer() {
@@ -125,10 +115,52 @@ private:
 	std::deque<uint64_t> m_freeIndices;
     uint32_t m_elementSize = 0;
 
-    std::function<void(uint32_t, uint32_t, DynamicBufferBase* buffer, bool)> onResized;
     inline static std::wstring m_name = L"LazyDynamicStructuredBuffer";
 
     bool m_UAV = false;
+
+    void AssignDescriptorSlots(uint32_t newCapacity)
+    {
+        auto& rm = ResourceManager::GetInstance();
+
+        ResourceManager::ViewRequirements req{};
+        ResourceManager::ViewRequirements::BufferViews b{};
+
+        b.createCBV = false;
+        b.createSRV = true;
+        b.createUAV = m_UAV;
+        b.createNonShaderVisibleUAV = false;
+        b.uavCounterOffset = 0;
+
+        // SRV (structured)
+        b.srvDesc = rhi::SrvDesc{
+            .dimension = rhi::SrvDim::Buffer,
+            .formatOverride = rhi::Format::Unknown,
+            .buffer = {
+                .kind = rhi::BufferViewKind::Structured,
+                .firstElement = 0,
+                .numElements = newCapacity,
+                .structureByteStride = static_cast<uint32_t>(sizeof(T)),
+            },
+        };
+
+        // UAV (structured), no counter
+        b.uavDesc = rhi::UavDesc{
+            .dimension = rhi::UavDim::Buffer,
+            .formatOverride = rhi::Format::Unknown,
+            .buffer = {
+                .kind = rhi::BufferViewKind::Structured,
+                .firstElement = 0,
+                .numElements = newCapacity,
+                .structureByteStride = static_cast<uint32_t>(sizeof(T)),
+                .counterOffsetInBytes = 0,
+            },
+        };
+
+        req.views = b;
+        auto resource = m_dataBuffer->GetAPIResource();
+        rm.AssignDescriptorSlots(*this, resource, req);
+    }
 
     void CreateBuffer(uint64_t capacity, size_t previousCapacity = 0) {
         auto newDataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, m_elementSize * capacity, m_UAV);
@@ -136,6 +168,9 @@ private:
             UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity*sizeof(T));
         }
         m_dataBuffer = newDataBuffer;
+
+        AssignDescriptorSlots(static_cast<uint32_t>(capacity));
+
         SetName(name);
 
     }

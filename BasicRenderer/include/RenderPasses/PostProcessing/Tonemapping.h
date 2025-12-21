@@ -29,7 +29,7 @@ public:
 	TonemappingPass() {
 		CreatePSO();
 		getTonemapType = SettingsManager::GetInstance().getSettingGetter<unsigned int>("tonemapType");
-        m_pLPMConstants = ResourceManager::GetInstance().CreateIndexedLazyDynamicStructuredBuffer<LPMConstants>(1, L"AMD LPM constants", 1, true);
+        m_pLPMConstants = LazyDynamicStructuredBuffer<LPMConstants>::CreateShared(1, L"AMD LPM constants", 1, true);
 	}
 
     std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override {

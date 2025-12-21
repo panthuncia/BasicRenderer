@@ -9,6 +9,7 @@ DescriptorHeap::DescriptorHeap(rhi::Device& device, rhi::DescriptorHeapType type
 
 	rhi::DescriptorHeapDesc heapDesc = {.type = type, .capacity = numDescriptors, .shaderVisible = shaderVisible, .debugName = name.c_str()};
     auto result = device.CreateDescriptorHeap(heapDesc, m_heap);
+    m_heap->SetName(name.c_str());
 
     m_descriptorSize = device.GetDescriptorHandleIncrementSize(type);
     m_totalSize = numDescriptors;

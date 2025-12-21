@@ -6,7 +6,7 @@
 #include <rhi.h>
 #include <memory>
 
-#include "Managers/Singletons/DeviceManager.h"
+#include "Managers/Singletons/ResourceManager.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
@@ -26,7 +26,6 @@ public:
     unsigned int Add(const T& element) {
         if (m_data.size() >= m_capacity) {
             Resize(m_capacity * 2);
-            onResized(sizeof(T), m_capacity, this);
         }
         m_data.push_back(element);
         m_needsUpdate = true;
@@ -57,17 +56,12 @@ public:
         if (newCapacity > m_capacity) {
             CreateBuffer(newCapacity, m_capacity);
             m_capacity = newCapacity;
-            onResized(sizeof(T), m_capacity, this);
         }
 
     }
 
     void UpdateAt(UINT index, const T& element) {
         BUFFER_UPLOAD(&element, sizeof(T), shared_from_this(), index * sizeof(T));
-    }
-
-    void SetOnResized(const std::function<void(UINT, UINT, DynamicBufferBase* buffer)>& callback) {
-        onResized = callback;
     }
 
     std::shared_ptr<Buffer>& GetBuffer() {
@@ -106,10 +100,54 @@ private:
     uint32_t m_capacity;
     bool m_needsUpdate;
 
-    std::function<void(uint32_t, uint32_t, DynamicBufferBase* buffer)> onResized;
     inline static std::wstring m_name = L"DynamicStructuredBuffer";
 
     bool m_UAV = false;
+
+    void AssignDescriptorSlots(uint32_t capacity)
+    {
+        auto& rm = ResourceManager::GetInstance();
+
+        ResourceManager::ViewRequirements req{};
+        ResourceManager::ViewRequirements::BufferViews b{};
+
+        b.createCBV = false;
+        b.createSRV = true;
+        b.createUAV = m_UAV;
+        b.createNonShaderVisibleUAV = false;
+        b.uavCounterOffset = 0;
+
+        // SRV (structured buffer)
+        b.srvDesc = rhi::SrvDesc{
+        	.dimension = rhi::SrvDim::Buffer,
+        	.formatOverride = rhi::Format::Unknown,
+            .buffer = {
+                .kind = rhi::BufferViewKind::Structured,
+                .firstElement = 0,
+                .numElements = capacity,
+                .structureByteStride = static_cast<uint32_t>(sizeof(T)),
+            },
+        };
+
+        // UAV (structured buffer), no counter
+        b.uavDesc = rhi::UavDesc{
+        	.dimension = rhi::UavDim::Buffer,
+        	.formatOverride = rhi::Format::Unknown,
+            .buffer = {
+                .kind = rhi::BufferViewKind::Structured,
+                .firstElement = 0,
+                .numElements = capacity,
+                .structureByteStride = static_cast<uint32_t>(sizeof(T)),
+                .counterOffsetInBytes = 0,
+            },
+        };
+
+
+        req.views = b;
+        auto resource = m_dataBuffer->GetAPIResource();
+        rm.AssignDescriptorSlots(*this, resource, req);
+    }
+
 
     void CreateBuffer(size_t capacity, size_t previousCapacity = 0) {
         auto newDataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, sizeof(T) * capacity, m_UAV);
@@ -118,5 +156,6 @@ private:
             UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity);
         }
 		m_dataBuffer = newDataBuffer;
+        AssignDescriptorSlots(static_cast<uint32_t>(capacity));
     }
 };

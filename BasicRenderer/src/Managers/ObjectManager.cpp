@@ -19,7 +19,7 @@ ObjectManager::ObjectManager() {
 	m_perObjectBuffers = DynamicBuffer::CreateShared(sizeof(PerObjectCB), 1, L"perObjectBuffers<PerObjectCB>");
 	m_masterIndirectCommandsBuffer = DynamicBuffer::CreateShared(sizeof(DispatchMeshIndirectCommand), 1, L"masterIndirectCommandsBuffer<IndirectCommand>");
 
-	m_normalMatrixBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>(1, L"preSkinningNormalMatrixBuffer");
+	m_normalMatrixBuffer = LazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>::CreateShared(1, L"preSkinningNormalMatrixBuffer");
 
 	//m_activeDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(1, L"activeOpaqueDrawSetIndices");
 

@@ -4,23 +4,45 @@
 
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "Resources/Buffers/DynamicBuffer.h"
-#include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "Managers/Singletons/UploadManager.h"
 void ResourceManager::Initialize() {
-	//for (int i = 0; i < 3; i++) {
-	//    frameResourceCopies[i] = std::make_unique<FrameResource>();
-	//    frameResourceCopies[i]->Initialize();
-	//}
 
 	auto device = DeviceManager::GetInstance().GetDevice();
-	m_cbvSrvUavHeap = std::make_shared<DescriptorHeap>(device, rhi::DescriptorHeapType::CbvSrvUav, 1000000 /*D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1*/, true);
-	m_samplerHeap = std::make_shared<DescriptorHeap>(device, rhi::DescriptorHeapType::Sampler, 2048, true);
-	m_rtvHeap = std::make_shared<DescriptorHeap>(device, rhi::DescriptorHeapType::RTV, 10000, false);
-	m_dsvHeap = std::make_shared<DescriptorHeap>(device, rhi::DescriptorHeapType::DSV, 10000, false);
-	m_nonShaderVisibleHeap = std::make_shared<DescriptorHeap>(device, rhi::DescriptorHeapType::CbvSrvUav, 100000, false);
+	m_cbvSrvUavHeap = std::make_shared<DescriptorHeap>(
+        device, 
+        rhi::DescriptorHeapType::CbvSrvUav, 
+        1000000 /*D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1*/, 
+        true,
+        "cbvSrvUavHeap");
+
+	m_samplerHeap = std::make_shared<DescriptorHeap>(
+        device, 
+        rhi::DescriptorHeapType::Sampler, 
+        2048, 
+        true,
+        "samplerHeap");
+
+	m_rtvHeap = std::make_shared<DescriptorHeap>(
+        device, 
+        rhi::DescriptorHeapType::RTV, 
+        10000, 
+        false,
+        "rtvHeap");
+
+	m_dsvHeap = std::make_shared<DescriptorHeap>(
+        device, 
+        rhi::DescriptorHeapType::DSV,
+        10000, 
+        false,
+        "dsvHeap");
+
+	m_nonShaderVisibleHeap = std::make_shared<DescriptorHeap>(
+        device, 
+        rhi::DescriptorHeapType::CbvSrvUav, 
+        100000, 
+        false,
+        "nonShaderVisibleHeap");
 
 	m_perFrameBuffer = CreateIndexedConstantBuffer<PerFrameCB>(L"PerFrameCB");
 
@@ -78,9 +100,7 @@ UINT ResourceManager::CreateIndexedSampler(const rhi::SamplerDesc& samplerDesc) 
 	auto device = DeviceManager::GetInstance().GetDevice();
 
 	UINT index = m_samplerHeap->AllocateDescriptor();
-	//D3D12_CPU_DESCRIPTOR_HANDLE handle = m_samplerHeap->GetCPUHandle(index);
 
-	//device->CreateSampler(&samplerDesc, handle);
 	device.CreateSampler({ m_samplerHeap->GetHeap().GetHandle(), index}, samplerDesc);
 	return index;
 }
@@ -132,7 +152,7 @@ void ResourceManager::AssignDescriptorSlots(
             target.SetDefaultSRVViewType(srvViewType);
             target.SetSRVView(srvViewType, cbvSrvUavHeap, srvInfos);
 
-            // Optional: view cubemap as Texture2DArray
+            // View cubemap as Texture2DArray
             if (tex->createCubemapAsArraySRV && tex->isCubemap)
             {
                 auto secondarySrvInfos = CreateShaderResourceViewsPerMip(

@@ -10,12 +10,11 @@
 
 #include "ShaderBuffers.h"
 #include "spdlog/spdlog.h"
-#include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Render/DescriptorHeap.h"
 #include "Utilities/Utilities.h"
-#include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
+#include "Managers/Singletons/DeviceManager.h"
 
 using namespace Microsoft::WRL;
 
@@ -284,189 +283,6 @@ public:
         return dataBuffer;
     }
 
-
-
-    template<typename T>
-    std::shared_ptr<DynamicStructuredBuffer<T>> CreateIndexedDynamicStructuredBuffer(UINT capacity = 64, std::wstring name = "", bool UAV = false) {
-        static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
-
-        auto device = DeviceManager::GetInstance().GetDevice();
-
-        // Create the dynamic structured buffer instance
-        std::shared_ptr<DynamicStructuredBuffer<T>> pDynamicBuffer = DynamicStructuredBuffer<T>::CreateShared(capacity, name, UAV);
-
-        pDynamicBuffer->SetOnResized([this](UINT typeSize, UINT capacity, DynamicBufferBase* buffer) {
-            this->onDynamicStructuredBufferResized(typeSize, capacity, buffer, false);
-            });
-
-		rhi::SrvDesc srvDesc = {};
-		srvDesc.dimension = rhi::SrvDim::Buffer;
-		srvDesc.buffer.kind = rhi::BufferViewKind::Structured;
-		srvDesc.buffer.firstElement = 0;
-		srvDesc.buffer.numElements = capacity;
-		srvDesc.buffer.structureByteStride = sizeof(T);
-
-
-        UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
-		device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), index}, pDynamicBuffer->GetAPIResource().GetHandle(), srvDesc);
-
-        ShaderVisibleIndexInfo srvInfo;
-        srvInfo.slot.index = index;
-		srvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
-        pDynamicBuffer->SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, {{srvInfo}});
-
-		if (UAV) {
-			rhi::UavDesc uavDesc = {};
-			uavDesc.dimension = rhi::UavDim::Buffer;
-			uavDesc.buffer.kind = rhi::BufferViewKind::Structured;
-			uavDesc.buffer.numElements = capacity;
-			uavDesc.buffer.structureByteStride = sizeof(T);
-            uavDesc.buffer.counterOffsetInBytes = 0;
-            // Shader visible UAV
-			unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
-            device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), uavShaderVisibleIndex}, pDynamicBuffer->GetAPIResource().GetHandle(), uavDesc);
-            ShaderVisibleIndexInfo uavInfo;
-			uavInfo.slot.index = static_cast<int>(uavShaderVisibleIndex);
-            uavInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
-            pDynamicBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, {{uavInfo}}, 0);
-		}
-
-        return pDynamicBuffer;
-    }
-
-    template<typename T>
-    std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateIndexedLazyDynamicStructuredBuffer(uint32_t capacity = 64, std::wstring name = "", uint64_t alignment = 1, bool UAV = false) {
-        static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for structured buffers.");
-
-        auto device = DeviceManager::GetInstance().GetDevice();
-
-        // Create the dynamic structured buffer instance
-        std::shared_ptr<LazyDynamicStructuredBuffer<T>> pDynamicBuffer = LazyDynamicStructuredBuffer<T>::CreateShared(capacity, name, alignment, UAV);
-
-        pDynamicBuffer->SetOnResized([this](uint32_t typeSize, uint32_t capacity, DynamicBufferBase* buffer, bool uav) {
-            this->onDynamicStructuredBufferResized(typeSize, capacity, buffer, uav);
-            });
-
-		rhi::SrvDesc srvDesc = {};
-		srvDesc.formatOverride = rhi::Format::Unknown;
-		srvDesc.dimension = rhi::SrvDim::Buffer;
-		srvDesc.buffer.numElements = capacity;
-		srvDesc.buffer.structureByteStride = sizeof(T);
-		srvDesc.buffer.kind = rhi::BufferViewKind::Structured;
-
-        UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
-		device.CreateShaderResourceView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), index}, pDynamicBuffer->GetAPIResource().GetHandle(), srvDesc);
-
-		ShaderVisibleIndexInfo srvInfo;
-		srvInfo.slot.index = static_cast<int>(index);
-		srvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
-        pDynamicBuffer->SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, {{srvInfo}});
-
-        if (UAV) {
-
-			rhi::UavDesc uavDesc = {};
-			uavDesc.dimension = rhi::UavDim::Buffer;
-			uavDesc.buffer.kind = rhi::BufferViewKind::Structured;
-			uavDesc.formatOverride = rhi::Format::Unknown;
-			uavDesc.buffer.numElements = capacity;
-			uavDesc.buffer.structureByteStride = sizeof(T);
-			uavDesc.buffer.counterOffsetInBytes = 0;
-
-            // Shader visible UAV
-            unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
-			device.CreateUnorderedAccessView({ m_cbvSrvUavHeap->GetHeap().GetHandle(), uavShaderVisibleIndex}, pDynamicBuffer->GetAPIResource().GetHandle(), uavDesc);
-
-            ShaderVisibleIndexInfo uavInfo;
-            uavInfo.slot.index = static_cast<int>(uavShaderVisibleIndex);
-			uavInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
-            pDynamicBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, {{uavInfo}}, 0);
-        }
-
-        return pDynamicBuffer;
-    }
-
-    void onDynamicStructuredBufferResized(uint32_t typeSize, uint32_t capacity, DynamicBufferBase* buffer, bool UAV) {
-        //UINT descriptorIndex = bufferIDDescriptorIndexMap[bufferID];
-        auto device = DeviceManager::GetInstance().GetDevice();
-
-        if (buffer->HasSRV()) {
-            // Create a Shader Resource View for the buffer
-            rhi::SrvDesc srvDesc = {};
-            srvDesc.formatOverride = rhi::Format::Unknown;
-            srvDesc.dimension = rhi::SrvDim::Buffer;
-            srvDesc.buffer.numElements = capacity;
-            srvDesc.buffer.structureByteStride = typeSize;
-            srvDesc.buffer.kind = rhi::BufferViewKind::Structured;
-            srvDesc.buffer.firstElement = 0;
-            srvDesc.buffer.numElements = capacity;
-            srvDesc.buffer.structureByteStride = typeSize;
-
-            device.CreateShaderResourceView(buffer->GetSRVInfo(0).slot, buffer->GetAPIResource().GetHandle(), srvDesc); // TODO: More advanced handling for multiple views
-        }
-
-        rhi::UavDesc uavDesc = {};
-        uavDesc.formatOverride = rhi::Format::Unknown;
-        uavDesc.dimension = rhi::UavDim::Buffer;
-        uavDesc.buffer.kind = rhi::BufferViewKind::Structured;
-        uavDesc.buffer.numElements = capacity;
-        uavDesc.buffer.structureByteStride = typeSize;
-        uavDesc.buffer.counterOffsetInBytes = 0;
-        if (buffer->HasUAVShaderVisible()){
-            // Shader visible UAV
-			device.CreateUnorderedAccessView(buffer->GetUAVShaderVisibleInfo(0).slot , buffer->GetAPIResource().GetHandle(), uavDesc);
-        }
-
-        if (buffer->HasUAVNonShaderVisible()) {
-            // Non-shader visible UAV
-            device.CreateUnorderedAccessView(buffer->GetUAVNonShaderVisibleInfo(0).slot, buffer->GetAPIResource().GetHandle(), uavDesc);
-        }
-    }
-
-    void onDynamicBufferResized(size_t elementSize, size_t numElements, bool byteAddress, DynamicBufferBase* buffer, bool UAV) {
-
-        // If debug mode, check buffer size
-#if BUILD_TYPE == BUILD_TYPE_DEBUG
-		if (numElements * elementSize > std::numeric_limits<uint32_t>::max()) {
-			spdlog::error("Buffer size exceeds maximum limit");
-			throw std::runtime_error("Buffer size exceeds maximum limit");
-		}
-#endif
-        auto device = DeviceManager::GetInstance().GetDevice();
-
-        // Create a Shader Resource View for the buffer
-
-        if (buffer->HasSRV()) {
-            rhi::SrvDesc srvDesc = {};
-            srvDesc.formatOverride = byteAddress ? rhi::Format::R32_Typeless : rhi::Format::Unknown;
-            srvDesc.dimension = rhi::SrvDim::Buffer;
-            srvDesc.buffer.firstElement = 0;
-            srvDesc.buffer.numElements = static_cast<UINT>(byteAddress ? numElements / 4 : numElements);
-            srvDesc.buffer.structureByteStride = static_cast<UINT>(byteAddress ? 0 : elementSize);
-            srvDesc.buffer.kind = byteAddress ? rhi::BufferViewKind::Raw : rhi::BufferViewKind::Structured;
-
-            device.CreateShaderResourceView(buffer->GetSRVInfo(0).slot, buffer->GetAPIResource().GetHandle(), srvDesc);
-        }
-
-        rhi::UavDesc uavDesc = {};
-        uavDesc.dimension = rhi::UavDim::Buffer;
-        uavDesc.buffer.kind = byteAddress ? rhi::BufferViewKind::Raw : rhi::BufferViewKind::Structured;
-        uavDesc.formatOverride = byteAddress ? rhi::Format::R32_Typeless : rhi::Format::Unknown;
-        uavDesc.buffer.numElements = static_cast<UINT>(byteAddress ? numElements / 4 : numElements);
-        uavDesc.buffer.structureByteStride = static_cast<UINT>(byteAddress ? 0 : elementSize);
-        uavDesc.buffer.counterOffsetInBytes = 0;
-
-        if (buffer->HasUAVShaderVisible()) {
-            // Shader visible UAV
-			device.CreateUnorderedAccessView(buffer->GetUAVShaderVisibleInfo(0).slot, buffer->GetAPIResource().GetHandle(), uavDesc);
-        }
-
-        if (buffer->HasUAVNonShaderVisible()) {
-            // Non-shader visible UAV
-            device.CreateUnorderedAccessView(buffer->GetUAVNonShaderVisibleInfo(0).slot, buffer->GetAPIResource().GetHandle(), uavDesc);
-        }
-
-    }
-
     template<typename T>
     std::shared_ptr<Buffer> CreateConstantBuffer(std::wstring name = L"") {
         static_assert(std::is_standard_layout<T>::value, "T must be a standard layout type for constant buffers.");
@@ -512,14 +328,6 @@ private:
     UINT8* pPerFrameConstantBuffer;
     PerFrameCB perFrameCBData;
     UINT currentFrameIndex;
-
-    //std::shared_ptr<DynamicStructuredBuffer<LightInfo>> lightBufferPtr;
-
-    std::vector<std::shared_ptr<Buffer>> buffersToUpdate;
-    std::vector<DynamicBufferBase*> dynamicBuffersToUpdate;
-	std::vector<ViewedDynamicBufferBase*> dynamicBuffersToUpdateViews;
-
-	//std::vector<ResourceTransition> queuedResourceTransitions;
 
     rhi::ResourcePtr m_uavCounterReset;
 

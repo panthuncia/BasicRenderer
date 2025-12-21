@@ -7,7 +7,7 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "ThirdParty/stb/stb_image.h"
 #include "Managers/Singletons/ResourceManager.h"
-#include "Render/RenderContext.h"
+#include "Managers/Singletons/UploadManager.h"
 
 void UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int mipLevels) {
 

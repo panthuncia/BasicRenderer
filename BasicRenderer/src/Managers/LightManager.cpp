@@ -17,10 +17,10 @@ LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
 
 	m_activeLightIndices = SortedUnsignedIntBuffer::CreateShared(1, L"activeLightIndices");
-    m_lightBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<LightInfo>(10, L"lightBuffer<LightInfo>");
-    m_spotViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(1, L"spotViewInfo<uint>");
-    m_pointViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(1, L"pointViewInfo<uint>");
-    m_directionalViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(1, L"direcitonalViewInfo<uint>");
+    m_lightBuffer = LazyDynamicStructuredBuffer<LightInfo>::CreateShared(10, L"lightBuffer<LightInfo>");
+    m_spotViewInfo = DynamicStructuredBuffer<unsigned int>::CreateShared(1, L"spotViewInfo<uint>");
+    m_pointViewInfo = DynamicStructuredBuffer<unsigned int>::CreateShared(1, L"pointViewInfo<uint>");
+    m_directionalViewInfo = DynamicStructuredBuffer<unsigned int>::CreateShared(1, L"direcitonalViewInfo<uint>");
 
 	getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");

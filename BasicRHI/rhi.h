@@ -576,8 +576,8 @@ namespace rhi {
 	using ComponentMapping = uint32_t;
 
 	struct SrvDesc {
-		SrvDim        dimension{ SrvDim::Undefined };
-		Format        formatOverride{ Format::Unknown }; // textures + typed buffers
+		SrvDim	dimension{ SrvDim::Undefined };
+		Format	formatOverride{ Format::Unknown }; // textures + typed buffers
 		ComponentMapping componentMapping{ 0 };          // optional, 0 = default
 
 		union {
@@ -656,9 +656,9 @@ namespace rhi {
 	};
 
 	struct UavDesc {
-		Format          formatOverride{ Format::Unknown }; // textures + typed buffers
+		UavDim	dimension{ UavDim::Buffer };
+		Format	formatOverride{ Format::Unknown }; // textures + typed buffers
 		// Texture path
-		UavDim        dimension{ UavDim::Buffer };
 		union {
 			struct { // ===== Buffer UAV =====
 				BufferViewKind kind{ BufferViewKind::Raw }; // Raw/Structured/Typed
