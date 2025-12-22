@@ -1,4 +1,4 @@
-#include "Resources/Buffers/GpuBufferBacking.h"
+#include "Resources/GPUBacking/GpuBufferBacking.h"
 
 #include <rhi_helpers.h>
 
@@ -30,6 +30,7 @@ GpuBufferBacking::GpuBufferBacking(
 	if (name != nullptr) {
 		allocationBundle.Set<MemoryStatisticsComponents::ResourceName>({ name });
 	}
+
 	allocationBundle
 		.Set<MemoryStatisticsComponents::MemSizeBytes>({ allocInfo.sizeInBytes })
 		.Set<MemoryStatisticsComponents::ResourceType>({ rhi::ResourceType::Buffer })
@@ -47,6 +48,12 @@ GpuBufferBacking::GpuBufferBacking(
 		trackDesc);
 
 	m_size = bufferSize;
+}
+
+void GpuBufferBacking::SetName(const char* name)
+{
+	m_bufferAllocation.ApplyComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceName>({ name }));
+	m_bufferAllocation.GetResource().SetName(name);
 }
 
 rhi::BarrierBatch GpuBufferBacking::GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {

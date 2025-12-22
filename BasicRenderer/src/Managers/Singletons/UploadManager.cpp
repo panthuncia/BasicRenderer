@@ -702,7 +702,7 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue) 
 	queue.Submit({ &commandList.Get() });
 
 	queuedResourceCopies.clear();
-	queuedDiscardCopies.clear();
+	queuedDiscardCopies.clear(); // Discards owned resources
 }
 
 void UploadManager::ResetAllocators(uint8_t frameIndex) {

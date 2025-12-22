@@ -7,7 +7,7 @@
 #include <typeinfo>
 #include <string>
 
-#include "Resources/Buffers/GpuBufferBacking.h"
+#include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Resources/Buffers/MemoryBlock.h"

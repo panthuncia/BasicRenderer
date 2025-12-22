@@ -1,7 +1,6 @@
 #pragma once
 
 #include <stdint.h>
-#include <string>
 #include <memory>
 #include <stacktrace>
 
@@ -41,7 +40,7 @@ public:
 	size_t GetSize() const { return m_size; }
 
 	rhi::Resource GetAPIResource() { return m_bufferAllocation.GetResource(); }
-	void SetName(const char* name) { m_bufferAllocation.GetResource().SetName(name); }
+	void SetName(const char* name);
 
 private:
 #if BUILD_TYPE == BUILD_DEBUG

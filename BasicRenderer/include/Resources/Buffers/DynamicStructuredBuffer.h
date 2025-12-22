@@ -7,7 +7,7 @@
 #include <memory>
 
 #include "Managers/Singletons/ResourceManager.h"
-#include "Resources/Buffers/GpuBufferBacking.h"
+#include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Managers/Singletons/UploadManager.h"

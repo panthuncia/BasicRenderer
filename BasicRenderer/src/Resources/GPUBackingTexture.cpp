@@ -1,4 +1,4 @@
-#include "Resources/PixelBuffer.h"
+#include "Resources/GPUBacking/GPUTextureBacking.h"
 #include <string>
 #include <stdexcept>
 
@@ -88,12 +88,12 @@ void UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc
 		static_cast<uint32_t>(srd.size()));
 }
 
-std::shared_ptr<PixelBuffer>
-PixelBuffer::CreateShared(const TextureDescription& desc,
+std::shared_ptr<GpuTextureBacking>
+GpuTextureBacking::CreateShared(const TextureDescription& desc,
 	const std::vector<const stbi_uc*>& initialData,
-	PixelBuffer* aliasTarget)
+	GpuTextureBacking* aliasTarget)
 {
-	auto pb = std::make_shared<PixelBuffer>(CreateTag{});
+	auto pb = std::make_shared<GpuTextureBacking>(CreateTag{});
 	pb->initialize(desc, initialData, aliasTarget);
 #if BUILD_TYPE == BUILD_DEBUG
 	pb->m_creation = std::stacktrace::current();
@@ -101,15 +101,13 @@ PixelBuffer::CreateShared(const TextureDescription& desc,
 	return pb;
 }
 
-void PixelBuffer::initialize(const TextureDescription& desc,
+void GpuTextureBacking::initialize(const TextureDescription& desc,
     const std::vector<const stbi_uc*>& initialData,
-    PixelBuffer* aliasTarget)
+	GpuTextureBacking* aliasTarget)
 {
     ResourceManager& rm = ResourceManager::GetInstance();
 
-    // create the raw resource
-
-		// Determine the number of mip levels
+	// Determine the number of mip levels
 	uint16_t mipLevels = desc.generateMipMaps ? CalculateMipLevels(desc.imageDimensions[0].width, desc.imageDimensions[0].height) : 1;
 
 	// Determine the array size
@@ -273,8 +271,13 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 	}
 }
 
+void GpuTextureBacking::SetName(const std::string& newName)
+{
+	m_textureHandle.ApplyComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceName>({ newName }));
+	m_textureHandle.GetResource().SetName(newName.c_str());
+}
 
-rhi::BarrierBatch PixelBuffer::GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
+rhi::BarrierBatch GpuTextureBacking::GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
 
 	rhi::BarrierBatch batch = {};
 

@@ -7,7 +7,7 @@
 #include <rhi.h>
 
 #include "Managers/Singletons/DeviceManager.h"
-#include "Resources/Buffers/GpuBufferBacking.h"
+#include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Resources/Buffers/BufferView.h"

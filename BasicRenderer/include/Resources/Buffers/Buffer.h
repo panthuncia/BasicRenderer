@@ -4,7 +4,7 @@
 #include <rhi.h>
 #include <memory>
 
-#include "Resources/Buffers/GpuBufferBacking.h"
+#include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Managers/Singletons/UploadManager.h"

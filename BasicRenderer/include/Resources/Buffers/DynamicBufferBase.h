@@ -5,7 +5,7 @@
 
 #include "Render/RenderContext.h"
 #include "Resources/GloballyIndexedResource.h"
-#include "Resources/Buffers/GpuBufferBacking.h"
+#include "Resources/GPUBacking/GpuBufferBacking.h"
 
 class BufferView;
 

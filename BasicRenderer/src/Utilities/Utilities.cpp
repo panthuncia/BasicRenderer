@@ -1579,7 +1579,7 @@ std::shared_ptr<Buffer> CreateIndexedStructuredBuffer(size_t numElements, unsign
     ResourceManager::ViewRequirements req{};
     ResourceManager::ViewRequirements::BufferViews b{};
     const uint64_t effectiveCounterOffset = (UAV && UAVCounter) ? counterOffset : 0;
-    b.uavCounterOffset = effectiveCounterOffset; // matches dataBuffer->SetUAVGPUDescriptors(..., counterOffset)
+    b.uavCounterOffset = effectiveCounterOffset;
 
 	b.createSRV = true;
 	b.createUAV = UAV;

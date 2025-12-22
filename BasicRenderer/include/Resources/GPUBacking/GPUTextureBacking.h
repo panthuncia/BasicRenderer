@@ -10,18 +10,18 @@
 #include "Managers/Singletons/DeletionManager.h"
 using Microsoft::WRL::ComPtr;
 
-class PixelBuffer : public GloballyIndexedResource {
+class GpuTextureBacking {
 public:
 	// Don't use this.
 	struct CreateTag {}; // TODO: Figure out why 'new' isn't working on PixelBuffer
 
-	static std::shared_ptr<PixelBuffer>
+	static std::shared_ptr<GpuTextureBacking>
 		CreateShared(const TextureDescription& desc,
 			const std::vector<const stbi_uc*>& initialData = {},
-			PixelBuffer* aliasTarget = nullptr);
+			GpuTextureBacking* aliasTarget = nullptr);
 
-	explicit PixelBuffer(CreateTag) {}
-	~PixelBuffer()
+	explicit GpuTextureBacking(CreateTag) {}
+	~GpuTextureBacking()
 	{
 		DeletionManager::GetInstance().MarkForDelete(std::move(m_textureHandle));
 	}
@@ -33,9 +33,9 @@ public:
     }
     rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
 
-    virtual void SetName(const std::string& newName) { name = newName; m_textureHandle.GetResource().SetName(newName.c_str()); }
+	void SetName(const std::string& newName);
 
-	rhi::Resource GetAPIResource() override { return m_textureHandle.GetResource(); }
+	rhi::Resource GetAPIResource() { return m_textureHandle.GetResource(); }
 
 	rhi::HeapHandle GetPlacedResourceHeap() const {
 		return m_placedResourceHeap;
@@ -61,7 +61,7 @@ private:
 #endif
     void initialize(const TextureDescription& desc,
         const std::vector<const stbi_uc*>& initialData,
-        PixelBuffer* aliasTarget);
+		GpuTextureBacking* aliasTarget);
 
     unsigned int m_width;
     unsigned int m_height;

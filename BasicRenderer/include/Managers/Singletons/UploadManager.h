@@ -8,7 +8,7 @@
 
 #include "rhi_helpers.h"
 #include "Resources/ResourceStateTracker.h"
-#include "Resources/Buffers/GpuBufferBacking.h"
+#include "Resources/GPUBacking/GpuBufferBacking.h"
 
 class Buffer;
 class Resource;
