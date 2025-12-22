@@ -18,7 +18,7 @@
 #include <sl_consts.h>
 #include <sl_dlss.h>
 #include <sl_security.h>
-#include <slHooks.h>
+#include "rhi_interop_dx12.h"
 
 PFunCreateDXGIFactory slCreateDXGIFactory = nullptr;
 PFunCreateDXGIFactory1 slCreateDXGIFactory1 = nullptr;

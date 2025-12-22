@@ -1102,10 +1102,10 @@ void Renderer::CreateRenderGraph() {
     if (m_meshletCulling) {
         // Create mesh cluster id buffer, two UINTs per cluster, used by visibility buffer and occlusion culling
         // 2^25 visible clusters allowed due to index precision
-        auto clusterIDBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(static_cast<size_t>(pow(2, 25)), sizeof(VisibleClusterInfo), true, false);
+        auto clusterIDBuffer = CreateIndexedStructuredBuffer(static_cast<size_t>(pow(2, 25)), sizeof(VisibleClusterInfo), true, false);
         clusterIDBuffer->SetName(L"Visible Cluster Table");
         newGraph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTable, clusterIDBuffer);
-        auto clusterIDBufferCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(UINT), true, false);
+        auto clusterIDBufferCounter = CreateIndexedStructuredBuffer(1, sizeof(UINT), true, false);
         clusterIDBufferCounter->SetName(L"Visible Cluster Table Counter");
         newGraph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTableCounter, clusterIDBufferCounter);
 
@@ -1160,9 +1160,9 @@ void Renderer::CreateRenderGraph() {
         BuildSSRPasses(newGraph.get());
     }
 
-	auto adaptedLuminanceBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(float), true, false);
+	auto adaptedLuminanceBuffer = CreateIndexedStructuredBuffer(1, sizeof(float), true, false);
     newGraph->RegisterResource(Builtin::PostProcessing::AdaptedLuminance, adaptedLuminanceBuffer);
-	auto histogramBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(255, sizeof(uint32_t), true, false);
+	auto histogramBuffer = CreateIndexedStructuredBuffer(255, sizeof(uint32_t), true, false);
 	newGraph->RegisterResource(Builtin::PostProcessing::LuminanceHistogram, histogramBuffer);
 
     newGraph->BuildComputePass("luminanceHistogramPass")

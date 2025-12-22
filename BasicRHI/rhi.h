@@ -1056,7 +1056,7 @@ namespace rhi {
 #endif
 	}
 
-	enum class ResourceType : uint32_t { Unknown, Buffer, Texture1D, Texture2D, Texture3D };
+	enum class ResourceType : uint32_t { Unknown, Buffer, Texture1D, Texture2D, Texture3D, AccelerationStructure };
 	struct ResourceDesc {
 		ResourceType type = ResourceType::Unknown;
 		HeapType heapType = HeapType::DeviceLocal;

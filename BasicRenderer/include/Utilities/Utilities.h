@@ -2,21 +2,17 @@
 
 #include <windows.h>
 #include <iostream>
-#include <wrl/client.h>
 #include <ThirdParty/stb/stb_image.h>
 #include <array>
 #include <memory>
 #include <DirectXMath.h>
 #include <unordered_map>
 #include <DirectXTex.h>
-#include <cstdint>
-#include <cstring>
 
 #include "Import/MeshData.h"
 #include "Render/DescriptorHeap.h"
 #include "Resources/HeapIndexInfo.h"
 #include "ShaderBuffers.h"
-#include "Import/Filetypes.h"
 #include "Scene/Components.h"
 #include "Resources/TextureDescription.h"
 
@@ -31,6 +27,7 @@ class DescriptorHeap;
 class Mesh;
 class Sampler;
 class Texture;
+class Buffer;
 
 void ThrowIfFailed(HRESULT hr);
 
@@ -254,3 +251,13 @@ std::string GetDirectoryFromPath(const std::string& path);
 constexpr UINT CalcSubresource(UINT MipSlice, UINT ArraySlice, UINT PlaneSlice, UINT MipLevels, UINT ArraySize) noexcept {
 	return MipSlice + ArraySlice * MipLevels + PlaneSlice * MipLevels * ArraySize;
 }
+
+std::shared_ptr<Buffer> CreateIndexedStructuredBuffer(size_t numElements, unsigned int elementSize, bool UAV = false, bool UAVCounter = false);
+
+std::shared_ptr<Buffer> CreateIndexedTypedBuffer(
+	uint32_t        numElements,
+	rhi::Format   elementFormat,
+	bool          UAV = false);
+
+
+std::shared_ptr<Buffer> CreateIndexedConstantBuffer(size_t bufferSize, std::wstring name = L"");

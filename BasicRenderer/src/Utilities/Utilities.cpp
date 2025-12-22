@@ -1546,3 +1546,158 @@ std::string GetDirectoryFromPath(const std::string& path) {
 	}
 	return path.substr(0, lastSlash);
 }
+
+std::shared_ptr<Buffer> CreateIndexedStructuredBuffer(size_t numElements, unsigned int elementSize, bool UAV, bool UAVCounter) {
+    auto device = DeviceManager::GetInstance().GetDevice();
+    size_t bufferSize = numElements * elementSize;
+    size_t counterOffset = 0;
+    if (UAVCounter) {
+        size_t requiredSize = (numElements * elementSize) + sizeof(UINT); // Add space for the counter
+        unsigned int alignment = elementSize; // Buffer should be a multiple of sizeof(T)
+
+        // Ensure bufferSize is a multiple of typeSize and meets requiredSize
+        bufferSize = ((requiredSize + alignment - 1) / alignment) * alignment;
+
+        // Find the next 4096-aligned address after requiredSize
+        size_t potentialCounterOffset = (requiredSize + 4095) & ~4095;
+
+        // If the 4096-aligned address is within the buffer, we can use it
+        if (potentialCounterOffset + sizeof(unsigned int) <= bufferSize) {
+            counterOffset = potentialCounterOffset;
+        }
+        else {
+            // Otherwise, expand the buffer to fit the 4096-aligned counter offset
+            bufferSize = ((potentialCounterOffset + sizeof(unsigned int) + alignment - 1) / alignment) * alignment;
+            counterOffset = potentialCounterOffset;
+        }
+
+        assert(counterOffset % 4096 == 0);
+    }
+
+    auto dataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, bufferSize, UAV);
+
+    ResourceManager::ViewRequirements req{};
+    ResourceManager::ViewRequirements::BufferViews b{};
+    const uint64_t effectiveCounterOffset = (UAV && UAVCounter) ? counterOffset : 0;
+    b.uavCounterOffset = effectiveCounterOffset; // matches dataBuffer->SetUAVGPUDescriptors(..., counterOffset)
+
+	b.createSRV = true;
+	b.createUAV = UAV;
+
+    // SRV (structured)
+    b.srvDesc = rhi::SrvDesc{
+        .dimension = rhi::SrvDim::Buffer,
+        .formatOverride = rhi::Format::Unknown,
+        .buffer = {
+            .kind = rhi::BufferViewKind::Structured,
+            .firstElement = 0,
+            .numElements = static_cast<uint32_t>(numElements),
+            .structureByteStride = elementSize,
+        },
+    };
+
+    // UAV (structured), with optional counter offset
+    b.uavDesc = rhi::UavDesc{
+        .dimension = rhi::UavDim::Buffer,
+        .formatOverride = rhi::Format::Unknown,
+        .buffer = {
+            .kind = rhi::BufferViewKind::Structured,
+            .firstElement = 0,
+            .numElements = static_cast<uint32_t>(numElements),
+            .structureByteStride = elementSize,
+            .counterOffsetInBytes = static_cast<uint32_t>(effectiveCounterOffset),
+        },
+    };
+
+    req.views = b;
+
+    auto res = dataBuffer->GetAPIResource();
+    ResourceManager::GetInstance().AssignDescriptorSlots(*dataBuffer, res, req);
+
+    return dataBuffer;
+}
+
+std::shared_ptr<Buffer> CreateIndexedTypedBuffer(
+    uint32_t        numElements,
+    rhi::Format   elementFormat,
+    bool          UAV)
+{
+
+    auto device = DeviceManager::GetInstance().GetDevice();
+
+    const size_t elementSize = rhi::helpers::BytesPerBlock(elementFormat);
+    assert(elementFormat != rhi::Format::Unknown && "Typed buffers require a concrete format");
+    assert(elementSize > 0 && "Unsupported/invalid format for typed buffer");
+
+    const size_t bufferSize = numElements * elementSize;
+
+    auto dataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, bufferSize, UAV);
+
+    ResourceManager::ViewRequirements req{};
+    ResourceManager::ViewRequirements::BufferViews b{};
+
+    b.createCBV = false;
+    b.createSRV = true;
+    b.createUAV = UAV;
+    b.createNonShaderVisibleUAV = UAV;
+    b.uavCounterOffset = 0;                  // typed UAVs cannot have counters
+
+    // SRV (typed)
+    b.srvDesc = rhi::SrvDesc{
+        .dimension = rhi::SrvDim::Buffer,
+        .formatOverride = elementFormat, // required for typed SRV
+        .buffer = {
+            .kind = rhi::BufferViewKind::Typed,
+            .firstElement = 0,
+            .numElements = numElements,
+            .structureByteStride = 0,    // ignored for typed
+        },
+    };
+
+    // UAV (typed)
+    b.uavDesc = rhi::UavDesc{
+        .dimension = rhi::UavDim::Buffer,
+        .formatOverride = elementFormat, // required for typed UAV
+        .buffer = {
+            .kind = rhi::BufferViewKind::Typed,
+            .firstElement = 0,
+            .numElements = numElements,
+            .structureByteStride = 0,    // ignored for typed
+            .counterOffsetInBytes = 0,   // no counter
+        },
+    };
+
+    req.views = b;
+
+    auto res = dataBuffer->GetAPIResource();
+    ResourceManager::GetInstance().AssignDescriptorSlots(*dataBuffer, res, req);
+
+    return dataBuffer;
+}
+
+std::shared_ptr<Buffer> CreateIndexedConstantBuffer(size_t bufferSize, std::wstring name) {
+    auto device = DeviceManager::GetInstance().GetDevice();
+
+    // Calculate the size of the buffer to be 256-byte aligned
+    UINT paddedSize = (bufferSize + 255) & ~255;
+
+    auto dataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, paddedSize, false);
+    dataBuffer->SetName(name);
+
+    ResourceManager::ViewRequirements req{};
+    ResourceManager::ViewRequirements::BufferViews b{};
+
+    b.createCBV = true;
+
+    b.cbvDesc = {
+        .byteOffset = 0,
+        .byteSize = paddedSize,
+    };
+
+	req.views = b;
+
+    auto res = dataBuffer->GetAPIResource();
+    ResourceManager::GetInstance().AssignDescriptorSlots(*dataBuffer, res, req);
+
+    return dataBuffer;
+}

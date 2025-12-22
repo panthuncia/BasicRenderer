@@ -229,32 +229,16 @@ inline void RegisterVisUtilResources(RenderGraph* graph)
 
     auto& rm = ResourceManager::GetInstance();
 
-    // 1) Per-material pixel count buffer (uint[numMaterials])
-
-    // 2) Per-material prefix sum offsets (uint[numMaterials])
-
-    // 3) Total pixel count buffer (uint[1])
-    auto totalPixelCountBuffer = rm.CreateIndexedStructuredBuffer(1, sizeof(uint32_t), true, false);
+    // Total pixel count buffer (uint[1])
+    auto totalPixelCountBuffer = CreateIndexedStructuredBuffer(1, sizeof(uint32_t), true, false);
     totalPixelCountBuffer->SetName(L"VisUtil::TotalPixelCountBuffer");
     graph->RegisterResource("Builtin::VisUtil::TotalPixelCountBuffer", totalPixelCountBuffer);
 
-    // 4) Per-material write cursors (uint[numMaterials]) used in pass 5
-
-    // 5) Pixel list buffer (PixelRef[maxPixels])
 	// PixelRef: uint pixelXY; (packed)
     struct PixelRefPOD { uint32_t pixelXY; };
-    auto pixelListBuffer = rm.CreateIndexedStructuredBuffer(maxPixels, sizeof(PixelRefPOD), true, false);
+    auto pixelListBuffer = CreateIndexedStructuredBuffer(maxPixels, sizeof(PixelRefPOD), true, false);
     pixelListBuffer->SetName(L"VisUtil::PixelListBuffer");
     graph->RegisterResource("Builtin::VisUtil::PixelListBuffer", pixelListBuffer);
-
-    // a single-element buffer storing NumMaterials
-    //auto numMaterialsBuffer = rm.CreateIndexedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    //numMaterialsBuffer->SetName(L"VisUtil::NumMaterialsBuffer");
-    //graph->RegisterResource("Builtin::VisUtil::NumMaterialsBuffer", numMaterialsBuffer);
-
-    // Initialize NumMaterials on upload heap (for Clear pass)
-    //uint32_t numMaterialsValue = numMaterials;
-    //QUEUE_UPLOAD(&numMaterialsValue, sizeof(uint32_t), numMaterialsBuffer.get(), 0);
 }
 
 void BuildGBufferPipeline(RenderGraph* graph) {
@@ -376,7 +360,7 @@ void RegisterGTAOResources(RenderGraph* graph) {
 }
 
 void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCamera) {
-    auto GTAOConstantBuffer = ResourceManager::GetInstance().CreateIndexedConstantBuffer<GTAOInfo>(L"GTAO constants");
+    auto GTAOConstantBuffer = CreateIndexedConstantBuffer(sizeof(GTAOInfo),L"GTAO constants");
     auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 
     // Point-clamp sampler
@@ -442,7 +426,7 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
 
 void BuildLightClusteringPipeline(RenderGraph* graph) {
     // light pages counter
-    auto lightPagesCounter = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int), true, false);
+    auto lightPagesCounter = CreateIndexedStructuredBuffer(1, sizeof(unsigned int), true, false);
     lightPagesCounter->SetName(L"Light Pages Counter");
     graph->RegisterResource(Builtin::Light::PagesCounter, lightPagesCounter);
 
@@ -525,9 +509,9 @@ void BuildPPLLPipeline(RenderGraph* graph) {
     desc.hasNonShaderVisibleUAV = true;
     auto PPLLHeadPointerTexture = PixelBuffer::CreateShared(desc);
     PPLLHeadPointerTexture->SetName(L"PPLLHeadPointerTexture");
-    auto PPLLBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numPPLLNodes, PPLLNodeSize, true, false);
+    auto PPLLBuffer = CreateIndexedStructuredBuffer(numPPLLNodes, PPLLNodeSize, true, false);
     PPLLBuffer->SetName(L"PPLLBuffer");
-	auto PPLLCounter = ResourceManager::GetInstance().CreateIndexedTypedBuffer(1, rhi::Format::R32_UInt, true);
+	auto PPLLCounter = CreateIndexedTypedBuffer(1, rhi::Format::R32_UInt, true);
     PPLLCounter->SetName(L"PPLLCounter");
 
     graph->RegisterResource(Builtin::PPLL::HeadPointerTexture, PPLLHeadPointerTexture);

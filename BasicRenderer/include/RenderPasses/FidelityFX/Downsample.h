@@ -252,7 +252,7 @@ private:
         mapInfo.pConstantsBufferView = view;
         mapInfo.dispatchThreadGroupCountXY[0] = threadGroupCountXY[0];
         mapInfo.dispatchThreadGroupCountXY[1] = threadGroupCountXY[1];
-        mapInfo.pCounterResource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int)*6*6, true); // 6 ints per slice, up to 6 slices
+        mapInfo.pCounterResource = CreateIndexedStructuredBuffer(1, sizeof(unsigned int)*6*6, true); // 6 ints per slice, up to 6 slices
         m_perViewMapInfo[e.id()] = mapInfo;
     }
 

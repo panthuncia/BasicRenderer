@@ -3,7 +3,7 @@
 
 #include <directx/d3d12.h>
 #include <rhi.h>
-#include <rhi_interop.h>
+#include <rhi_interop_dx12.h>
 #include <memory>
 #include <imgui.h>
 #include <imgui_impl_win32.h>
@@ -27,21 +27,94 @@
 #include "Managers/Singletons/UpscalingManager.h"
 #include "Menu/RenderGraphInspector.h"
 #include "Menu/MemoryIntrospectionWidget.h"
+#include "Resources/MemoryStatisticsComponents.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-//struct FrameContext {
-//    ID3D12CommandAllocator* CommandAllocator;
-//    UINT64                  FenceValue;
-//};
+static inline const char* MajorCategory(rhi::ResourceType t) {
+    using RT = rhi::ResourceType;
+    switch (t) {
+    case RT::Buffer:                return "Buffers";
+    case RT::Texture1D:             return "Textures";
+    case RT::Texture2D:             return "Textures";
+    case RT::Texture3D:             return "Textures";
+    case RT::AccelerationStructure: return "AccelStructs";
+    default:                        return "Other";
+    }
+}
 
-//static UINT g_frameIndex = 0;
-static HANDLE g_hSwapChainWaitableObject = nullptr;
-//constexpr unsigned int NUM_FRAMES_IN_FLIGHT = 3;
-//static FrameContext g_frameContext[NUM_FRAMES_IN_FLIGHT] = {};
-//static ID3D12Fence* g_fence = nullptr;
-//static HANDLE g_fenceEvent = nullptr;
-//static UINT64 g_fenceLastSignaledValue = 0;
+static void BuildMemorySnapshotFromFlecs(
+    ui::MemorySnapshot& out,
+    flecs::query<const MemoryStatisticsComponents::MemSizeBytes>& q)
+{
+    out.categories.clear();
+    out.resources.clear();
+    out.totalBytes = 0;
+
+    // Accumulate major bytes in fixed buckets for now.
+    // (Later you’ll replace this with subcategories, purpose tags, etc.)
+    struct Bucket { const char* label; uint64_t bytes = 0; };
+    Bucket buckets[] = {
+        {"Textures/All",     0},
+        {"Buffers/All",      0},
+        {"AccelStructs/All", 0},
+        {"Other/All",        0},
+    };
+
+    auto bucketIndexForMajor = [](const char* major) -> int {
+        if (std::string_view(major) == "Textures")     return 0;
+        if (std::string_view(major) == "Buffers")      return 1;
+        if (std::string_view(major) == "AccelStructs") return 2;
+        return 3;
+        };
+
+    q.each([&](flecs::entity e, const MemoryStatisticsComponents::MemSizeBytes& sz) {
+            auto rt = e.try_get<MemoryStatisticsComponents::ResourceType>();
+            auto rname = e.try_get<MemoryStatisticsComponents::ResourceName>();
+            auto rid = e.try_get<MemoryStatisticsComponents::ResourceID>();
+			
+            const uint64_t bytes = sz.size;
+            out.totalBytes += bytes;
+
+            const char* major;
+            if (rt) {
+                major = MajorCategory(rt->type);
+            }else
+            {
+                major = MajorCategory(rhi::ResourceType::Unknown);
+            }
+            buckets[bucketIndexForMajor(major)].bytes += bytes;
+
+            ui::MemoryResourceRow row{};
+            row.bytes = bytes;
+
+            if (rid) {
+                row.uid = rid->id;
+            }
+
+            if (rname && !rname->name.empty()) {
+                row.name = rname->name;
+            }
+            else {
+                if (rid) {
+                    row.name = std::string("Resource ") + std::to_string((unsigned long long)rid->id);
+                } else
+                {
+                    row.name = std::string("Unknown resource");
+                }
+            }
+
+            row.type = major;
+
+            out.resources.push_back(std::move(row));
+        });
+
+    out.categories.reserve(std::size(buckets));
+    for (const auto& b : buckets) {
+        if (b.bytes == 0) continue;
+        out.categories.push_back(ui::MemoryCategorySlice{ b.label, b.bytes });
+    }
+}
 
 class Menu {
 public:
@@ -53,6 +126,7 @@ public:
 	void SetRenderGraph(std::shared_ptr<RenderGraph> renderGraph) { m_renderGraph = renderGraph; }
     void Cleanup() {
 		m_settingSubscriptions.clear();
+        m_memQuery = {}; // Destruct query before ECS world dies
     }
 
 private:
@@ -62,15 +136,12 @@ private:
 		ImPlot::CreateContext();
     };
 	IDXGISwapChain3* m_pSwapChain = nullptr;
-    //Microsoft::WRL::ComPtr<ID3D12Device> device = nullptr;
-    //Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue = nullptr;
-	//Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
-
-    flecs::entity selectedNode;
+	
+    flecs::query<const MemoryStatisticsComponents::MemSizeBytes> m_memQuery;
+    
+	flecs::entity selectedNode;
 
 	std::weak_ptr<RenderGraph> m_renderGraph;
-
-    //FrameContext* WaitForNextFrameResources();
 
     int FindFileIndex(const std::vector<std::string>& hdrFiles, const std::string& existingFile);
 
@@ -231,7 +302,7 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     ImGui::StyleColorsDark();
     //ImGui::StyleColorsLight();
 
-    g_hSwapChainWaitableObject = m_pSwapChain->GetFrameLatencyWaitableObject();
+    m_memQuery = ECSManager::GetInstance().GetWorld().query_builder<const MemoryStatisticsComponents::MemSizeBytes>().build();
 
 	// Helper to set an observer on a setting which updates local copies of settings
     auto observerSetting = [&](auto& localCopy, const std::string& settingName) {
@@ -491,13 +562,16 @@ inline void Menu::Render(RenderContext& context) {
 	}
 	{
         static ui::MemoryIntrospectionWidget g_memWidget;
+
+        ui::MemorySnapshot snap;
+        BuildMemorySnapshotFromFlecs(snap, m_memQuery);
+
         ImGui::Begin("Memory Introspection", nullptr);
         double timeSeconds = 0;
         uint64_t totalBytes = 0;
         g_memWidget.PushFrameSample(timeSeconds, totalBytes);
         bool open = true;
-        ui::MemorySnapshot snapshot; // later: fill with real category/resource data
-        g_memWidget.Draw(&open, &snapshot);
+        g_memWidget.Draw(&open, &snap);
 		ImGui::End();
 	}
 

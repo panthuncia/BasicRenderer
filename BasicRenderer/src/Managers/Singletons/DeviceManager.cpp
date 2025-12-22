@@ -1,5 +1,125 @@
 #include "Managers/Singletons/DeviceManager.h"
+
+#include <spdlog/spdlog.h>
+#include <flecs.h>
+#include <rhi_interop_dx12.h>
+
+#include "Resources/MemoryStatisticsComponents.h"
+#include "Managers/Singletons/SettingsManager.h"
+#include "Managers/Singletons/ECSManager.h"
+#include "Resources/ResourceIdentifier.h"
 #include "Utilities/Utilities.h"
+
+
+rhi::Result DeviceManager::CreateResourceTracked(
+    const rhi::ma::AllocationDesc& allocDesc,
+    const rhi::ResourceDesc& resourceDesc,
+    UINT32 numCastableFormats,
+    const rhi::Format* pCastableFormats,
+    TrackedHandle& outAllocation,
+    std::optional<AllocationTrackDesc> trackDesc) const noexcept
+{
+    rhi::ma::AllocationPtr alloc;
+    const auto result = m_allocator->CreateResource(
+        &allocDesc,
+        &resourceDesc,
+        numCastableFormats,
+        pCastableFormats,
+        alloc);
+
+    // Create or reuse entity
+    flecs::entity e;
+    AllocationTrackDesc track(-1);
+    if (trackDesc.has_value()) {
+        track = trackDesc.value();
+        e = track.existing;
+    }
+    if (!e.is_alive()) {
+        e = ECSManager::GetInstance().GetWorld().entity();
+    }
+
+    // Attach base info (size, kind, etc.)
+    const uint64_t sizeBytes = 0; // TODO
+    e.set<MemoryStatisticsComponents::MemSizeBytes>({ sizeBytes });
+    if (track.id) {
+        e.set<ResourceIdentifier>(track.id.value());
+    }
+
+    // Apply caller-provided bundle
+    track.attach.ApplyTo(e);
+    TrackedEntityToken tok(ECSManager::GetInstance().GetWorld(), e);
+    // Return wrapper that will delete entity when allocation is destroyed
+    outAllocation = TrackedHandle::FromAllocation(std::move(alloc), std::move(tok));
+    return result;
+}
+
+rhi::Result DeviceManager::CreateAliasingResourceTracked(
+    rhi::ma::Allocation& allocation,
+    UINT64 allocationLocalOffset,
+    const rhi::ResourceDesc& resourceDesc,
+    UINT32 numCastableFormats,
+    const rhi::Format* pCastableFormats,
+    TrackedHandle& outResource,
+    std::optional<AllocationTrackDesc> trackDesc) const noexcept
+{
+    rhi::ResourcePtr res;
+    const auto result = m_allocator->CreateAliasingResource(
+        &allocation,
+        allocationLocalOffset,
+        &resourceDesc,
+        numCastableFormats,
+        pCastableFormats,
+        res);
+
+    // Create or reuse entity
+    flecs::entity e;
+    AllocationTrackDesc track(-1);
+    if (trackDesc.has_value()) {
+        track = trackDesc.value();
+        e = track.existing;
+    }
+    if (!e.is_alive()) {
+        e = ECSManager::GetInstance().GetWorld().entity();
+    }
+
+    // Attach base info (size, kind, etc.)
+    const uint64_t sizeBytes = 0; // TODO
+    e.set<MemoryStatisticsComponents::MemSizeBytes>({ sizeBytes });
+    if (track.id) {
+        e.set<ResourceIdentifier>(track.id.value());
+    }
+
+    // Apply caller-provided bundle
+    track.attach.ApplyTo(e);
+    TrackedEntityToken tok(ECSManager::GetInstance().GetWorld(), e);
+    // Return wrapper that will delete entity when allocation is destroyed
+    outResource = TrackedHandle::FromResource(std::move(res), std::move(tok));
+    return result;
+}
+
+void DeviceManager::Initialize() {
+    auto numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
+    bool enableDebug = false;
+#if BUILD_TYPE == BUILD_DEBUG
+    enableDebug = true;
+#endif
+    m_device = rhi::CreateD3D12Device(rhi::DeviceCreateInfo{ .backend = rhi::Backend::D3D12, .framesInFlight = numFramesInFlight, .enableDebug = enableDebug });
+    m_graphicsQueue = m_device->GetQueue(rhi::QueueKind::Graphics);
+    m_computeQueue = m_device->GetQueue(rhi::QueueKind::Compute);
+    m_copyQueue = m_device->GetQueue(rhi::QueueKind::Copy);
+    CheckGPUFeatures();
+
+    rhi::ma::AllocatorDesc desc;
+    desc.device = m_device.Get();
+    rhi::ma::CreateAllocator(&desc, &m_allocator);
+}
+
+void DeviceManager::CheckGPUFeatures() {
+    D3D12_FEATURE_DATA_D3D12_OPTIONS7 features = {}; // TODO: Use query interface in RHI
+    rhi::dx12::get_device(m_device.Get())->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &features, sizeof(features));
+    m_meshShadersSupported = features.MeshShaderTier != D3D12_MESH_SHADER_TIER_NOT_SUPPORTED;
+}
+
 static std::string AutoBreadcrumbOpToString(D3D12_AUTO_BREADCRUMB_OP op) {
     switch (op) {
     case D3D12_AUTO_BREADCRUMB_OP_SETMARKER: return "SetMarker";

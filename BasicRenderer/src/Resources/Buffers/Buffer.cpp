@@ -3,6 +3,7 @@
 #include <rhi_helpers.h>
 
 #include "Managers/Singletons/DeviceManager.h"
+#include "Resources/MemoryStatisticsComponents.h"
 
 using namespace Microsoft::WRL;
 
@@ -25,6 +26,10 @@ Buffer::Buffer(
 
 	AllocationTrackDesc trackDesc(static_cast<int>(GetGlobalResourceID()));
 	EntityComponentBundle allocationBundle;
+	auto name = ws2s(GetName());
+	if (name != "") {
+		allocationBundle.Set<MemoryStatisticsComponents::ResourceName>({ name });
+	}
 	allocationBundle
 		.Set<MemoryStatisticsComponents::MemSizeBytes>({ allocInfo.sizeInBytes })
 		.Set<MemoryStatisticsComponents::ResourceType>({ rhi::ResourceType::Buffer });

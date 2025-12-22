@@ -69,7 +69,7 @@ void ViewManager::AllocateBitfields(View& v) {
     // Meshlet bitfield (bits -> number of 32-bit words)
     auto meshletBits = m_currentMeshletBitfieldSizeBits;
     auto meshletWords = (meshletBits + 31) / 32;
-    auto meshletRes = rm.CreateIndexedStructuredBuffer(meshletWords, sizeof(unsigned int), true, false);
+    auto meshletRes = CreateIndexedStructuredBuffer(meshletWords, sizeof(unsigned int), true, false);
     meshletRes->SetName(L"MeshletBitfieldBuffer(view=" + std::to_wstring(v.id) + L")");
     v.gpu.meshletBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(meshletRes);
     m_meshletBitfieldGroup->AddResource(v.gpu.meshletBitfieldBuffer);
@@ -77,12 +77,12 @@ void ViewManager::AllocateBitfields(View& v) {
     // Instance bitfields (packed bits into bytes)
     auto instBits = m_currentMeshInstanceBitfieldSizeBits;
     auto instBytes = (instBits + 7) / 8;
-    auto instanceMeshletRes = rm.CreateIndexedStructuredBuffer(instBytes, sizeof(unsigned int), true, false);
+    auto instanceMeshletRes = CreateIndexedStructuredBuffer(instBytes, sizeof(unsigned int), true, false);
     instanceMeshletRes->SetName(L"MeshInstanceMeshletCullingBitfield(view=" + std::to_wstring(v.id) + L")");
     v.gpu.meshInstanceMeshletCullingBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(instanceMeshletRes);
     m_meshInstanceMeshletCullingBitfieldGroup->AddResource(v.gpu.meshInstanceMeshletCullingBitfieldBuffer);
 
-    auto instanceOccRes = rm.CreateIndexedStructuredBuffer(instBytes, sizeof(unsigned int), true, false);
+    auto instanceOccRes = CreateIndexedStructuredBuffer(instBytes, sizeof(unsigned int), true, false);
     instanceOccRes->SetName(L"MeshInstanceOcclusionCullingBitfield(view=" + std::to_wstring(v.id) + L")");
     v.gpu.meshInstanceOcclusionCullingBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(instanceOccRes);
     m_meshInstanceOcclusionCullingBitfieldGroup->AddResource(v.gpu.meshInstanceOcclusionCullingBitfieldBuffer);
@@ -138,10 +138,9 @@ void ViewManager::UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo) {
 
 void ViewManager::ResizeMeshletBitfields(uint64_t numMeshlets) {
     m_currentMeshletBitfieldSizeBits = numMeshlets;
-    auto& rm = ResourceManager::GetInstance();
     for (auto& [id, v] : m_views) {
         auto words = (numMeshlets + 31) / 32;
-        auto res = rm.CreateIndexedStructuredBuffer(words, sizeof(unsigned int), true, false);
+        auto res = CreateIndexedStructuredBuffer(words, sizeof(unsigned int), true, false);
         res->SetName(L"MeshletBitfieldBuffer(view=" + std::to_wstring(id) + L")");
         v.gpu.meshletBitfieldBuffer->SetResource(res);
     }
@@ -149,16 +148,15 @@ void ViewManager::ResizeMeshletBitfields(uint64_t numMeshlets) {
 
 void ViewManager::ResizeInstanceBitfields(uint32_t numInstances) {
     m_currentMeshInstanceBitfieldSizeBits = numInstances;
-    auto& rm = ResourceManager::GetInstance();
     auto bytes = (numInstances + 7) / 8;
     for (auto& [id, v] : m_views) {
         // Meshlet culling
-        auto cullRes = rm.CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), true, false);
+        auto cullRes = CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), true, false);
         cullRes->SetName(L"MeshInstanceMeshletCullingBitfield(view=" + std::to_wstring(id) + L")");
         v.gpu.meshInstanceMeshletCullingBitfieldBuffer->SetResource(cullRes);
 
         // Occlusion
-        auto occRes = rm.CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), true, false);
+        auto occRes = CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), true, false);
         occRes->SetName(L"MeshInstanceOcclusionCullingBitfield(view=" + std::to_wstring(id) + L")");
         v.gpu.meshInstanceOcclusionCullingBitfieldBuffer->SetResource(occRes);
     }

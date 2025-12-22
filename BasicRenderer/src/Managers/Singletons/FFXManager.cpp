@@ -7,6 +7,7 @@
 #include "ThirdParty/FFX/host/backends/dx12/ffx_dx12.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Scene/Scene.h"
+#include "rhi_interop_dx12.h"
 
 extern ffxFunctions ffxModule;
 

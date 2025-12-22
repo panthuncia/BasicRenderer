@@ -15,9 +15,9 @@ Skeleton::Skeleton(const std::vector<flecs::entity>& nodes, const std::vector<XM
     : m_bones(nodes), m_inverseBindMatrices(inverseBindMatrices) {
     m_boneTransforms.resize(nodes.size() * 16);
     auto& resourceManager = ResourceManager::GetInstance();
-    m_transformsBuffer = resourceManager.CreateIndexedStructuredBuffer(nodes.size(), sizeof(DirectX::XMMATRIX));
+    m_transformsBuffer = CreateIndexedStructuredBuffer(nodes.size(), sizeof(DirectX::XMMATRIX));
     m_transformsBuffer->SetName(L"BoneTransforms");
-    m_inverseBindMatricesBuffer = resourceManager.CreateIndexedStructuredBuffer(nodes.size(), sizeof(DirectX::XMMATRIX));
+    m_inverseBindMatricesBuffer = CreateIndexedStructuredBuffer(nodes.size(), sizeof(DirectX::XMMATRIX));
 	m_inverseBindMatricesBuffer->SetName(L"InverseBindMatrices");
     BUFFER_UPLOAD(m_inverseBindMatrices.data(), nodes.size() * sizeof(XMMATRIX), m_inverseBindMatricesBuffer, 0);
 	m_isBaseSkeleton = true;
@@ -28,7 +28,7 @@ Skeleton::Skeleton(const std::vector<flecs::entity>& nodes, std::shared_ptr<Buff
     : m_bones(nodes), m_inverseBindMatricesBuffer(inverseBindMatrices) {
     m_boneTransforms.resize(nodes.size() * 16);
     auto& resourceManager = ResourceManager::GetInstance();
-    m_transformsBuffer = resourceManager.CreateIndexedStructuredBuffer(nodes.size(), sizeof(DirectX::XMMATRIX));
+    m_transformsBuffer = CreateIndexedStructuredBuffer(nodes.size(), sizeof(DirectX::XMMATRIX));
     m_transformsBuffer->SetName(L"BoneTransforms");
     FindRoot();
 }
@@ -90,7 +90,7 @@ Skeleton::Skeleton(const Skeleton& other) {
 	m_inverseBindMatrices = other.m_inverseBindMatrices;
     m_boneTransforms.resize(m_bones.size() * 16);
     auto& resourceManager = ResourceManager::GetInstance();
-    m_transformsBuffer = resourceManager.CreateIndexedStructuredBuffer(m_bones.size(), sizeof(DirectX::XMMATRIX));
+    m_transformsBuffer = CreateIndexedStructuredBuffer(m_bones.size(), sizeof(DirectX::XMMATRIX));
     m_transformsBuffer->SetName(L"BoneTransforms");
 }
 

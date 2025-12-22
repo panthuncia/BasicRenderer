@@ -1,8 +1,11 @@
 #include "Managers/Singletons/StatisticsManager.h"
-#include "Managers/Singletons/DeviceManager.h"
-#include "Managers/Singletons/SettingsManager.h"
+
 #include <algorithm>
 #include <rhi_helpers.h>
+#include <spdlog/spdlog.h>
+
+#include "Managers/Singletons/DeviceManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 
 StatisticsManager& StatisticsManager::GetInstance() {
     static StatisticsManager inst;

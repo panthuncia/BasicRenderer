@@ -8,6 +8,7 @@
 #include "ThirdParty/stb/stb_image.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/UploadManager.h"
+#include "Resources/MemoryStatisticsComponents.h"
 
 void UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int mipLevels) {
 
@@ -201,7 +202,8 @@ void PixelBuffer::initialize(const TextureDescription& desc,
 	EntityComponentBundle allocationBundle;
 	allocationBundle
 		.Set<MemoryStatisticsComponents::MemSizeBytes>({ allocInfo.sizeInBytes })
-		.Set<MemoryStatisticsComponents::ResourceType>({ rhi::ResourceType::Buffer });
+		.Set<MemoryStatisticsComponents::ResourceType>({ rhi::ResourceType::Buffer })
+		.Set<MemoryStatisticsComponents::ResourceName>({ ws2s(GetName()) });
 	m_textureHandle.ApplyComponentBundle(allocationBundle);
 
     m_placedResourceHeap = aliasTarget ? aliasTarget->GetPlacedResourceHeap() : rhi::HeapHandle();

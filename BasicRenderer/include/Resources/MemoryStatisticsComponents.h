@@ -19,6 +19,10 @@ namespace MemoryStatisticsComponents
 		uint64_t id;
 	};
 
+	struct ResourceName {
+		std::string name;
+	};
+
 	struct AliasingPool {
 		std::optional<uint64_t> poolID;
 	};
