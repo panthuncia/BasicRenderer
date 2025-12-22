@@ -44,7 +44,7 @@ void ResourceManager::Initialize() {
         false,
         "nonShaderVisibleHeap");
 
-	m_perFrameBuffer = CreateIndexedConstantBuffer(sizeof(PerFrameCB), L"PerFrameCB");
+	m_perFrameBuffer = CreateIndexedConstantBuffer(sizeof(PerFrameCB), "PerFrameCB");
 
 	perFrameCBData.ambientLighting = DirectX::XMVectorSet(0.1f, 0.1f, 0.1f, 1.0f);
 	perFrameCBData.numShadowCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();

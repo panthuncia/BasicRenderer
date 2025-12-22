@@ -24,9 +24,9 @@ enum class SRVViewType : int {
 class GloballyIndexedResource : public GloballyIndexedResourceBase
 {
 public:
-	GloballyIndexedResource(std::wstring name = L"") :
+	GloballyIndexedResource(std::string name = "") :
 		GloballyIndexedResourceBase() {
-		if (name != L"") {
+		if (name != "") {
 			SetName(name);
 		}
 		m_SRVViews.resize(static_cast<unsigned int>(SRVViewType::NumSRVViewTypes));

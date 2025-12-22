@@ -11,7 +11,7 @@
 
 class ResourceGroup : public Resource {
 public:
-    ResourceGroup(const std::wstring& groupName) {
+    ResourceGroup(const std::string& groupName) {
 		name = groupName;
     }
 

@@ -7,7 +7,7 @@
 #include <typeinfo>
 #include <string>
 
-#include "Resources/Buffers/Buffer.h"
+#include "Resources/Buffers/GpuBufferBacking.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Resources/Buffers/MemoryBlock.h"
@@ -17,7 +17,7 @@ class BufferView;
 class DynamicBuffer : public ViewedDynamicBufferBase {
 public:
 
-    static std::shared_ptr<DynamicBuffer> CreateShared(size_t elementSize, size_t capacity = 64, std::wstring name = L"", bool byteAddress = false, bool UAV = false) {
+    static std::shared_ptr<DynamicBuffer> CreateShared(size_t elementSize, size_t capacity = 64, std::string name = "", bool byteAddress = false, bool UAV = false) {
         return std::shared_ptr<DynamicBuffer>(new DynamicBuffer(byteAddress, elementSize, capacity, name, UAV));
     }
 
@@ -25,10 +25,6 @@ public:
     void Deallocate(const BufferView* view);
 	std::unique_ptr<BufferView> AddData(const void* data, size_t size, size_t elementSize, size_t fullAllocationSize = 0);
 	void UpdateView(BufferView* view, const void* data) override;
-
-    std::shared_ptr<Buffer>& GetBuffer() {
-        return m_dataBuffer;
-    }
 
     size_t Size() const {
         return m_capacity;
@@ -46,7 +42,7 @@ protected:
     }
 
 private:
-    DynamicBuffer(bool byteAddress, size_t elementSize, size_t capacity, std::wstring name = L"", bool UAV = false)
+    DynamicBuffer(bool byteAddress, size_t elementSize, size_t capacity, std::string name = "", bool UAV = false)
         : m_byteAddress(byteAddress), m_elementSize(elementSize), m_UAV(UAV), m_needsUpdate(false) {
 
         size_t bufferSize = elementSize * capacity;
@@ -61,9 +57,9 @@ private:
     }
 
     void OnSetName() override {
-        if (name != L"") {
+        if (name != "") {
 			m_name = name;
-			std::wstring newname = m_baseName + L": " + m_name;
+			std::string newname = m_baseName + ": " + m_name;
             m_dataBuffer->SetName(newname.c_str());
         }
         else {
@@ -83,8 +79,8 @@ private:
 
     std::vector<MemoryBlock> m_memoryBlocks;
 
-    inline static std::wstring m_baseName = L"DynamicBuffer";
-	std::wstring m_name = m_baseName;
+    inline static std::string m_baseName = "DynamicBuffer";
+	std::string m_name = m_baseName;
 
     bool m_UAV = false;
 

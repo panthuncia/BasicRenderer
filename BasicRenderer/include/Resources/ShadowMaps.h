@@ -17,7 +17,7 @@
 #include "Resources/TextureDescription.h"
 class ShadowMaps : public ResourceGroup {
 public:
-    ShadowMaps(const std::wstring& name)
+    ShadowMaps(const std::string& name)
         : ResourceGroup(name) {
 		getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	}
@@ -44,17 +44,17 @@ public:
 		case Components::LightType::Point: // Cubemap
 			desc.isCubemap = true;
 			shadowMap = PixelBuffer::CreateShared(desc);
-			shadowMap->SetName(L"PointShadowMap");
+			shadowMap->SetName("PointShadowMap");
 			break;
 		case Components::LightType::Spot: // 2D texture
 			shadowMap = PixelBuffer::CreateShared(desc);
-			shadowMap->SetName(L"SpotShadowMap");
+			shadowMap->SetName("SpotShadowMap");
 			break;
 		case Components::LightType::Directional: // Texture array
 			desc.isArray = true;
 			desc.arraySize = getNumCascades();
 			shadowMap = PixelBuffer::CreateShared(desc);
-			shadowMap->SetName(L"DirectionalShadowMap");
+			shadowMap->SetName("DirectionalShadowMap");
 			break;
 
 		}
@@ -76,7 +76,7 @@ private:
 
 class LinearShadowMaps : public ResourceGroup {
 public:
-	LinearShadowMaps(const std::wstring& name)
+	LinearShadowMaps(const std::string& name)
 		: ResourceGroup(name) {
 		getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	}
@@ -104,17 +104,17 @@ public:
 		case Components::LightType::Point: // Cubemap
 			desc.isCubemap = true;
 			shadowMap = PixelBuffer::CreateShared(desc);
-			shadowMap->SetName(L"linearShadowMap");
+			shadowMap->SetName("linearShadowMap");
 			break;
 		case Components::LightType::Spot: // 2D texture
 			shadowMap = PixelBuffer::CreateShared(desc);
-			shadowMap->SetName(L"linearShadowMap");
+			shadowMap->SetName("linearShadowMap");
 			break;
 		case Components::LightType::Directional: // Texture array
 			desc.isArray = true;
 			desc.arraySize = getNumCascades();
 			shadowMap = PixelBuffer::CreateShared(desc);
-			shadowMap->SetName(L"linearShadowMap");
+			shadowMap->SetName("linearShadowMap");
 			break;
 
 		}

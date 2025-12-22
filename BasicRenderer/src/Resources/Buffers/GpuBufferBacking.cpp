@@ -1,4 +1,4 @@
-#include "Resources/Buffers/Buffer.h"
+#include "Resources/Buffers/GpuBufferBacking.h"
 
 #include <rhi_helpers.h>
 
@@ -7,11 +7,12 @@
 
 using namespace Microsoft::WRL;
 
-Buffer::Buffer(
+GpuBufferBacking::GpuBufferBacking(
 	const rhi::HeapType accessType,
-	const uint64_t bufferSize, 
-	const bool unorderedAccess) : 
-	GloballyIndexedResource(){
+	const uint64_t bufferSize,
+	uint64_t owningResourceID,
+	const bool unorderedAccess,
+	const char* name) {
 	m_accessType = accessType;
 
 	rhi::ResourceDesc desc = rhi::helpers::ResourceDesc::Buffer(bufferSize);
@@ -24,15 +25,15 @@ Buffer::Buffer(
 	rhi::ResourceAllocationInfo allocInfo;
 	device.GetResourceAllocationInfo(&desc, 1, &allocInfo);
 
-	AllocationTrackDesc trackDesc(static_cast<int>(GetGlobalResourceID()));
+	AllocationTrackDesc trackDesc(static_cast<int>(owningResourceID));
 	EntityComponentBundle allocationBundle;
-	auto name = ws2s(GetName());
-	if (name != "") {
+	if (name != nullptr) {
 		allocationBundle.Set<MemoryStatisticsComponents::ResourceName>({ name });
 	}
 	allocationBundle
 		.Set<MemoryStatisticsComponents::MemSizeBytes>({ allocInfo.sizeInBytes })
-		.Set<MemoryStatisticsComponents::ResourceType>({ rhi::ResourceType::Buffer });
+		.Set<MemoryStatisticsComponents::ResourceType>({ rhi::ResourceType::Buffer })
+		.Set<MemoryStatisticsComponents::ResourceID>({ owningResourceID });
 	trackDesc.attach = allocationBundle;
 
 	rhi::ma::AllocationDesc allocationDesc;
@@ -48,7 +49,7 @@ Buffer::Buffer(
 	m_size = bufferSize;
 }
 
-rhi::BarrierBatch Buffer::GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
+rhi::BarrierBatch GpuBufferBacking::GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
 
 	rhi::BarrierBatch batch = {};
 	m_barrier = rhi::BufferBarrier{

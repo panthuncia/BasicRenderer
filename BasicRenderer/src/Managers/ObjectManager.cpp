@@ -16,10 +16,10 @@
 
 ObjectManager::ObjectManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
-	m_perObjectBuffers = DynamicBuffer::CreateShared(sizeof(PerObjectCB), 1, L"perObjectBuffers<PerObjectCB>");
-	m_masterIndirectCommandsBuffer = DynamicBuffer::CreateShared(sizeof(DispatchMeshIndirectCommand), 1, L"masterIndirectCommandsBuffer<IndirectCommand>");
+	m_perObjectBuffers = DynamicBuffer::CreateShared(sizeof(PerObjectCB), 1, "perObjectBuffers<PerObjectCB>");
+	m_masterIndirectCommandsBuffer = DynamicBuffer::CreateShared(sizeof(DispatchMeshIndirectCommand), 1, "masterIndirectCommandsBuffer<IndirectCommand>");
 
-	m_normalMatrixBuffer = LazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>::CreateShared(1, L"preSkinningNormalMatrixBuffer");
+	m_normalMatrixBuffer = LazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>::CreateShared(1, "preSkinningNormalMatrixBuffer");
 
 	//m_activeDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(1, L"activeOpaqueDrawSetIndices");
 
@@ -64,7 +64,7 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 			indices.push_back(index);
 			auto materialFlags = meshInstance->GetMesh()->material->Technique().compileFlags;
 			if (!m_activeDrawSetIndices.contains(materialFlags)) {
-				m_activeDrawSetIndices[materialFlags] = SortedUnsignedIntBuffer::CreateShared(1, L"activeDrawSetIndices(flags=" + std::to_wstring(static_cast<uint64_t>(materialFlags)) + L")");
+				m_activeDrawSetIndices[materialFlags] = SortedUnsignedIntBuffer::CreateShared(1, "activeDrawSetIndices(flags=" + std::to_string(static_cast<uint64_t>(materialFlags)) + ")");
 				auto& buf = m_activeDrawSetIndices[materialFlags];
 				buf->GetECSEntity().add<Components::IsActiveDrawSetIndices>();
 				buf->GetECSEntity().set<Components::Resource>({ buf });

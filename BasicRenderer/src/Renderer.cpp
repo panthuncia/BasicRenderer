@@ -293,8 +293,8 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 }
 
 void Renderer::CreateGlobalResources() {
-    m_coreResourceProvider.m_shadowMaps = std::make_shared<ShadowMaps>(L"ShadowMaps");
-    m_coreResourceProvider.m_linearShadowMaps = std::make_shared<LinearShadowMaps>(L"linearShadowMaps");
+    m_coreResourceProvider.m_shadowMaps = std::make_shared<ShadowMaps>("ShadowMaps");
+    m_coreResourceProvider.m_linearShadowMaps = std::make_shared<LinearShadowMaps>("linearShadowMaps");
     //m_shadowMaps->AddAliasedResource(m_downsampledShadowMaps.get());
 	//m_downsampledShadowMaps->AddAliasedResource(m_shadowMaps.get());
 
@@ -618,7 +618,7 @@ void Renderer::CreateTextures() {
     dims.width = resolution.x;
     hdrDesc.imageDimensions.push_back(dims);
     auto hdrColorTarget = PixelBuffer::CreateShared(hdrDesc);
-    hdrColorTarget->SetName(L"Primary Camera HDR Color Target");
+    hdrColorTarget->SetName("Primary Camera HDR Color Target");
 	m_coreResourceProvider.m_HDRColorTarget = hdrColorTarget;
 
     auto outputResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
@@ -626,7 +626,7 @@ void Renderer::CreateTextures() {
     hdrDesc.imageDimensions[0].height = outputResolution.y;
     hdrDesc.generateMipMaps = true;
 	auto upscaledHDRColorTarget = PixelBuffer::CreateShared(hdrDesc);
-	upscaledHDRColorTarget->SetName(L"Upscaled HDR Color Target");
+	upscaledHDRColorTarget->SetName("Upscaled HDR Color Target");
 	m_coreResourceProvider.m_upscaledHDRColorTarget = upscaledHDRColorTarget;
 
     TextureDescription motionVectors;
@@ -643,7 +643,7 @@ void Renderer::CreateTextures() {
     ImageDimensions motionVectorsDims = { resolution.x, resolution.y, 0, 0 };
     motionVectors.imageDimensions.push_back(motionVectorsDims);
     auto motionVectorsBuffer = PixelBuffer::CreateShared(motionVectors);
-    motionVectorsBuffer->SetName(L"Motion Vectors");
+    motionVectorsBuffer->SetName("Motion Vectors");
 	m_coreResourceProvider.m_gbufferMotionVectors = motionVectorsBuffer;
 }
 
@@ -1103,10 +1103,10 @@ void Renderer::CreateRenderGraph() {
         // Create mesh cluster id buffer, two UINTs per cluster, used by visibility buffer and occlusion culling
         // 2^25 visible clusters allowed due to index precision
         auto clusterIDBuffer = CreateIndexedStructuredBuffer(static_cast<size_t>(pow(2, 25)), sizeof(VisibleClusterInfo), true, false);
-        clusterIDBuffer->SetName(L"Visible Cluster Table");
+        clusterIDBuffer->SetName("Visible Cluster Table");
         newGraph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTable, clusterIDBuffer);
         auto clusterIDBufferCounter = CreateIndexedStructuredBuffer(1, sizeof(UINT), true, false);
-        clusterIDBufferCounter->SetName(L"Visible Cluster Table Counter");
+        clusterIDBufferCounter->SetName("Visible Cluster Table Counter");
         newGraph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTableCounter, clusterIDBufferCounter);
 
         newGraph->BuildRenderPass("VisibleClusterTableCounterResetPass")

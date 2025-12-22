@@ -32,7 +32,7 @@ void CreateGBufferResources(RenderGraph* graph) {
     ImageDimensions dims = { resolution.x, resolution.y, 0, 0 };
     normalsWorldSpaceDesc.imageDimensions.push_back(dims);
     auto normalsWorldSpace = PixelBuffer::CreateShared(normalsWorldSpaceDesc);
-    normalsWorldSpace->SetName(L"Normals World Space");
+    normalsWorldSpace->SetName("Normals World Space");
     graph->RegisterResource(Builtin::GBuffer::Normals, normalsWorldSpace);
 
     TextureDescription visibilityDesc;
@@ -44,7 +44,7 @@ void CreateGBufferResources(RenderGraph* graph) {
 	visibilityDesc.hasNonShaderVisibleUAV = true; // For clearing with ClearUnorderedAccessViewUint
     visibilityDesc.imageDimensions.emplace_back(resolution.x, resolution.y, 0, 0);
     auto visibilityBuffer = PixelBuffer::CreateShared(visibilityDesc);
-	visibilityBuffer->SetName(L"Visibility Buffer");
+	visibilityBuffer->SetName("Visibility Buffer");
     graph->RegisterResource(Builtin::PrimaryCamera::VisibilityTexture, visibilityBuffer);
 
     std::shared_ptr<PixelBuffer> albedo;
@@ -61,7 +61,7 @@ void CreateGBufferResources(RenderGraph* graph) {
     ImageDimensions albedoDims = { resolution.x, resolution.y, 0, 0 };
     albedoDesc.imageDimensions.push_back(albedoDims);
     albedo = PixelBuffer::CreateShared(albedoDesc);
-    albedo->SetName(L"Albedo");
+    albedo->SetName("Albedo");
     graph->RegisterResource(Builtin::GBuffer::Albedo, albedo);
 
     TextureDescription metallicRoughnessDesc;
@@ -74,7 +74,7 @@ void CreateGBufferResources(RenderGraph* graph) {
     ImageDimensions metallicRoughnessDims = { resolution.x, resolution.y, 0, 0 };
     metallicRoughnessDesc.imageDimensions.push_back(metallicRoughnessDims);
     metallicRoughness = PixelBuffer::CreateShared(metallicRoughnessDesc);
-    metallicRoughness->SetName(L"Metallic Roughness");
+    metallicRoughness->SetName("Metallic Roughness");
     graph->RegisterResource(Builtin::GBuffer::MetallicRoughness, metallicRoughness);
 
     TextureDescription emissiveDesc;
@@ -87,7 +87,7 @@ void CreateGBufferResources(RenderGraph* graph) {
     ImageDimensions emissiveDims = { resolution.x, resolution.y, 0, 0 };
     emissiveDesc.imageDimensions.push_back(emissiveDims);
     emissive = PixelBuffer::CreateShared(emissiveDesc);
-    emissive->SetName(L"Emissive");
+    emissive->SetName("Emissive");
     graph->RegisterResource(Builtin::GBuffer::Emissive, emissive);
 }
 
@@ -106,7 +106,7 @@ void BuildBRDFIntegrationPass(RenderGraph* graph) {
     ImageDimensions dims = { 512, 512, 0, 0 };
     brdfDesc.imageDimensions.push_back(dims);
     auto brdfIntegrationTexture = PixelBuffer::CreateShared(brdfDesc);
-    brdfIntegrationTexture->SetName(L"BRDF Integration Texture");
+    brdfIntegrationTexture->SetName("BRDF Integration Texture");
 	graph->RegisterResource(Builtin::BRDFLUT, brdfIntegrationTexture);
 
     graph->BuildRenderPass("BRDF Integration Pass")
@@ -231,13 +231,13 @@ inline void RegisterVisUtilResources(RenderGraph* graph)
 
     // Total pixel count buffer (uint[1])
     auto totalPixelCountBuffer = CreateIndexedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    totalPixelCountBuffer->SetName(L"VisUtil::TotalPixelCountBuffer");
+    totalPixelCountBuffer->SetName("VisUtil::TotalPixelCountBuffer");
     graph->RegisterResource("Builtin::VisUtil::TotalPixelCountBuffer", totalPixelCountBuffer);
 
 	// PixelRef: uint pixelXY; (packed)
     struct PixelRefPOD { uint32_t pixelXY; };
     auto pixelListBuffer = CreateIndexedStructuredBuffer(maxPixels, sizeof(PixelRefPOD), true, false);
-    pixelListBuffer->SetName(L"VisUtil::PixelListBuffer");
+    pixelListBuffer->SetName("VisUtil::PixelListBuffer");
     graph->RegisterResource("Builtin::VisUtil::PixelListBuffer", pixelListBuffer);
 }
 
@@ -322,7 +322,7 @@ void RegisterGTAOResources(RenderGraph* graph) {
     ImageDimensions dims1 = { resolution.x, resolution.y, 0, 0 };
     workingDepthsDesc.imageDimensions.push_back(dims1);
     auto workingDepths = PixelBuffer::CreateShared(workingDepthsDesc);
-    workingDepths->SetName(L"GTAO Working Depths");
+    workingDepths->SetName("GTAO Working Depths");
 
     TextureDescription workingEdgesDesc;
     workingEdgesDesc.arraySize = 1;
@@ -334,7 +334,7 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingEdgesDesc.generateMipMaps = false;
     workingEdgesDesc.imageDimensions.push_back(dims1);
     auto workingEdges = PixelBuffer::CreateShared(workingEdgesDesc);
-    workingEdges->SetName(L"GTAO Working Edges");
+    workingEdges->SetName("GTAO Working Edges");
 
     TextureDescription workingAOTermDesc;
     workingAOTermDesc.arraySize = 1;
@@ -346,11 +346,11 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingAOTermDesc.generateMipMaps = false;
     workingAOTermDesc.imageDimensions.push_back(dims1);
     auto workingAOTerm1 = PixelBuffer::CreateShared(workingAOTermDesc);
-    workingAOTerm1->SetName(L"GTAO Working AO Term 1");
+    workingAOTerm1->SetName("GTAO Working AO Term 1");
     auto workingAOTerm2 = PixelBuffer::CreateShared(workingAOTermDesc);
-    workingAOTerm2->SetName(L"GTAO Working AO Term 2");
+    workingAOTerm2->SetName("GTAO Working AO Term 2");
     std::shared_ptr<PixelBuffer> outputAO = PixelBuffer::CreateShared(workingAOTermDesc);
-    outputAO->SetName(L"GTAO Output AO Term");
+    outputAO->SetName("GTAO Output AO Term");
 
     graph->RegisterResource(Builtin::GTAO::WorkingAOTerm1, workingAOTerm1);
     graph->RegisterResource(Builtin::GTAO::WorkingAOTerm2, workingAOTerm2);
@@ -360,7 +360,7 @@ void RegisterGTAOResources(RenderGraph* graph) {
 }
 
 void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCamera) {
-    auto GTAOConstantBuffer = CreateIndexedConstantBuffer(sizeof(GTAOInfo),L"GTAO constants");
+    auto GTAOConstantBuffer = CreateIndexedConstantBuffer(sizeof(GTAOInfo),"GTAO constants");
     auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 
     // Point-clamp sampler
@@ -427,7 +427,7 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
 void BuildLightClusteringPipeline(RenderGraph* graph) {
     // light pages counter
     auto lightPagesCounter = CreateIndexedStructuredBuffer(1, sizeof(unsigned int), true, false);
-    lightPagesCounter->SetName(L"Light Pages Counter");
+    lightPagesCounter->SetName("Light Pages Counter");
     graph->RegisterResource(Builtin::Light::PagesCounter, lightPagesCounter);
 
     graph->BuildComputePass("ClusterGenerationPass")
@@ -508,11 +508,11 @@ void BuildPPLLPipeline(RenderGraph* graph) {
     desc.hasUAV = true;
     desc.hasNonShaderVisibleUAV = true;
     auto PPLLHeadPointerTexture = PixelBuffer::CreateShared(desc);
-    PPLLHeadPointerTexture->SetName(L"PPLLHeadPointerTexture");
+    PPLLHeadPointerTexture->SetName("PPLLHeadPointerTexture");
     auto PPLLBuffer = CreateIndexedStructuredBuffer(numPPLLNodes, PPLLNodeSize, true, false);
-    PPLLBuffer->SetName(L"PPLLBuffer");
+    PPLLBuffer->SetName("PPLLBuffer");
 	auto PPLLCounter = CreateIndexedTypedBuffer(1, rhi::Format::R32_UInt, true);
-    PPLLCounter->SetName(L"PPLLCounter");
+    PPLLCounter->SetName("PPLLCounter");
 
     graph->RegisterResource(Builtin::PPLL::HeadPointerTexture, PPLLHeadPointerTexture);
     graph->RegisterResource(Builtin::PPLL::DataBuffer, PPLLBuffer);
@@ -573,7 +573,7 @@ void BuildSSRPasses(RenderGraph* graph) {
     ImageDimensions dims = { resolution.x, resolution.y, 0, 0 };
     ssrDesc.imageDimensions.push_back(dims);
     auto ssrTexture = PixelBuffer::CreateShared(ssrDesc);
-    ssrTexture->SetName(L"SSR Texture");
+    ssrTexture->SetName("SSR Texture");
 	graph->RegisterResource(Builtin::PostProcessing::ScreenSpaceReflections, ssrTexture);
 
     graph->BuildComputePass("Screen-Space Reflections Pass")

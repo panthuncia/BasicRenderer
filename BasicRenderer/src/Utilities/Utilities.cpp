@@ -1500,7 +1500,7 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
     desc.generateMipMaps = false;
 
 	std::shared_ptr<PixelBuffer> depthBuffer = PixelBuffer::CreateShared(desc);
-	depthBuffer->SetName(L"Depth Buffer");
+	depthBuffer->SetName("Depth Buffer");
 
     TextureDescription downsampledDesc;
     // Pad yres and xres to power of two
@@ -1524,7 +1524,7 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
 	downsampledDesc.padInternalResolution = true;
 
     std::shared_ptr<PixelBuffer> linearDepthBuffer = PixelBuffer::CreateShared(downsampledDesc, {}, nullptr/* depthBuffer.get()*/);
-    linearDepthBuffer->SetName(L"linear Depth Buffer");
+    linearDepthBuffer->SetName("linear Depth Buffer");
 
 
 	Components::DepthMap depthMap;
@@ -1675,7 +1675,7 @@ std::shared_ptr<Buffer> CreateIndexedTypedBuffer(
     return dataBuffer;
 }
 
-std::shared_ptr<Buffer> CreateIndexedConstantBuffer(size_t bufferSize, std::wstring name) {
+std::shared_ptr<Buffer> CreateIndexedConstantBuffer(size_t bufferSize, std::string name) {
     auto device = DeviceManager::GetInstance().GetDevice();
 
     // Calculate the size of the buffer to be 256-byte aligned

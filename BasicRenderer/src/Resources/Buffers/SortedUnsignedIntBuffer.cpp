@@ -66,16 +66,16 @@ void SortedUnsignedIntBuffer::Remove(unsigned int element) {
 void SortedUnsignedIntBuffer::CreateBuffer(uint64_t capacity) {
     auto device = DeviceManager::GetInstance().GetDevice();
     m_capacity = capacity;
-    m_dataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, capacity * sizeof(unsigned int), m_UAV);
+    m_dataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, capacity * sizeof(unsigned int), GetGlobalResourceID(), m_UAV);
     AssignDescriptorSlots();
 }
 
 void SortedUnsignedIntBuffer::GrowBuffer(uint64_t newSize) {
     auto device = DeviceManager::GetInstance().GetDevice();
-    auto newDataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, newSize * sizeof(unsigned int), m_UAV);
-    // Copy old content
-    UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, m_capacity * sizeof(unsigned int));
-    m_dataBuffer = newDataBuffer;
+    auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, newSize * sizeof(unsigned int), GetGlobalResourceID(), m_UAV);
+	// Copy existing data to new buffer and discard old buffer after copy
+    UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), *GetStateTracker(), m_capacity * sizeof(unsigned int));
+    m_dataBuffer = std::move(newDataBuffer);
 
     m_capacity = newSize;
     AssignDescriptorSlots();

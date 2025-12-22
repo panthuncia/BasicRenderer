@@ -1,5 +1,8 @@
 #include "Resources/ResourceStateTracker.h"
 
+#include <optional>
+#include <algorithm>
+
 SubresourceRange ResolveRangeSpec(RangeSpec spec,
     uint32_t totalMips,
     uint32_t totalSlices)

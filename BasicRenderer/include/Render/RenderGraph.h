@@ -104,7 +104,7 @@ public:
 	const std::vector<PassBatch>& GetBatches() const { return batches; }
 	//void AllocateResources(RenderContext& context);
 	//void CreateResource(std::wstring name);
-	std::shared_ptr<Resource> GetResourceByName(const std::wstring& name);
+	std::shared_ptr<Resource> GetResourceByName(const std::string& name);
 	std::shared_ptr<Resource> GetResourceByID(const uint64_t id);
 	std::shared_ptr<RenderPass> GetRenderPassByName(const std::string& name);
 	std::shared_ptr<ComputePass> GetComputePassByName(const std::string& name);
@@ -174,7 +174,7 @@ private:
 	std::vector<AnyPassAndResources> passes;
 	std::unordered_map<std::string, std::shared_ptr<RenderPass>> renderPassesByName;
 	std::unordered_map<std::string, std::shared_ptr<ComputePass>> computePassesByName;
-	std::unordered_map<std::wstring, std::shared_ptr<Resource>> resourcesByName;
+	std::unordered_map<std::string, std::shared_ptr<Resource>> resourcesByName;
 	std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
 	std::unordered_map<uint64_t, uint64_t> independantlyManagedResourceToGroup;
 	std::vector<std::shared_ptr<ResourceGroup>> resourceGroups;

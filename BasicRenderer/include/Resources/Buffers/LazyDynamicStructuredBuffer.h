@@ -7,7 +7,7 @@
 #include <rhi.h>
 
 #include "Managers/Singletons/DeviceManager.h"
-#include "Resources/Buffers/Buffer.h"
+#include "Resources/Buffers/GpuBufferBacking.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Resources/Buffers/BufferView.h"
@@ -26,7 +26,7 @@ template <typename T>
 class LazyDynamicStructuredBuffer : public LazyDynamicStructuredBufferBase {
 public:
 
-	static std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateShared(UINT capacity = 64, std::wstring name = L"", uint64_t alignment = 1, bool UAV = false) {
+	static std::shared_ptr<LazyDynamicStructuredBuffer<T>> CreateShared(UINT capacity = 64, std::string name = "", uint64_t alignment = 1, bool UAV = false) {
 		return std::shared_ptr<LazyDynamicStructuredBuffer<T>>(new LazyDynamicStructuredBuffer<T>(capacity, name, alignment, UAV));
 	}
 
@@ -69,10 +69,6 @@ public:
         BUFFER_UPLOAD(data, sizeof(T), shared_from_this(), view->GetOffset());
     }
 
-    std::shared_ptr<Buffer>& GetBuffer() {
-        return m_dataBuffer;
-    }
-
     UINT Size() {
         return m_usedCapacity;
     }
@@ -91,7 +87,7 @@ protected:
     }
 
 private:
-    LazyDynamicStructuredBuffer(UINT capacity = 64, std::wstring name = L"", uint64_t alignment = 1, bool UAV = false)
+    LazyDynamicStructuredBuffer(UINT capacity = 64, std::string name = "", uint64_t alignment = 1, bool UAV = false)
         : m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
         if (alignment == 0) {
 			alignment = 1;
@@ -101,8 +97,8 @@ private:
 		SetName(name);
     }
     void OnSetName() override {
-        if (name != L"") {
-            m_dataBuffer->SetName((m_name + L": " + name).c_str());
+        if (name != "") {
+            m_dataBuffer->SetName((m_name + ": " + name).c_str());
         }
         else {
             m_dataBuffer->SetName(m_name.c_str());
@@ -115,7 +111,7 @@ private:
 	std::deque<uint64_t> m_freeIndices;
     uint32_t m_elementSize = 0;
 
-    inline static std::wstring m_name = L"LazyDynamicStructuredBuffer";
+    inline static std::string m_name = "LazyDynamicStructuredBuffer";
 
     bool m_UAV = false;
 
@@ -163,11 +159,11 @@ private:
     }
 
     void CreateBuffer(uint64_t capacity, size_t previousCapacity = 0) {
-        auto newDataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, m_elementSize * capacity, m_UAV);
+        auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, m_elementSize * capacity, GetGlobalResourceID(), m_UAV);
         if (m_dataBuffer != nullptr) {
-            UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity*sizeof(T));
+            UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), *GetStateTracker(), previousCapacity*sizeof(T));
         }
-        m_dataBuffer = newDataBuffer;
+        m_dataBuffer = std::move(newDataBuffer);
 
         AssignDescriptorSlots(static_cast<uint32_t>(capacity));
 

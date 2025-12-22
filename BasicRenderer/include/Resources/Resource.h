@@ -29,8 +29,8 @@ public:
 	}
 
 
-    const std::wstring& GetName() const { return name; }
-    virtual void SetName(const std::wstring& newName) { this->name = newName; OnSetName(); }
+    const std::string& GetName() const { return name; }
+    virtual void SetName(const std::string& newName) { this->name = newName; OnSetName(); }
 	virtual rhi::Resource GetAPIResource() = 0;
     virtual uint64_t GetGlobalResourceID() const { return m_globalResourceID; }
     virtual rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) = 0;
@@ -62,7 +62,7 @@ public:
 protected:
     virtual void OnSetName() {}
 
-    std::wstring name;
+    std::string name;
 	bool m_hasLayout = false; // Only textures have a layout
 	std::vector<Resource*> m_aliasedResources; // Resources that are aliased with this resource
 

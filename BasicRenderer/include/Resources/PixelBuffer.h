@@ -33,7 +33,7 @@ public:
     }
     rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
 
-    virtual void SetName(const std::wstring& newName) { name = newName; m_textureHandle.GetResource().SetName(ws2s(newName).c_str()); }
+    virtual void SetName(const std::string& newName) { name = newName; m_textureHandle.GetResource().SetName(newName.c_str()); }
 
 	rhi::Resource GetAPIResource() override { return m_textureHandle.GetResource(); }
 

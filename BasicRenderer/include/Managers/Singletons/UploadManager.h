@@ -7,6 +7,8 @@
 #include <thread>
 
 #include "rhi_helpers.h"
+#include "Resources/ResourceStateTracker.h"
+#include "Resources/Buffers/GpuBufferBacking.h"
 
 class Buffer;
 class Resource;
@@ -62,6 +64,13 @@ struct ResourceCopy {
 	size_t size;
 };
 
+struct DiscardBufferCopy {
+	std::unique_ptr<GpuBufferBacking> sourceOwned; // keeps old backing alive until executed
+	SymbolicTracker 			sourceBarrierState; // Needed to transition old resource before copy
+	std::shared_ptr<Resource>         destination; // new resource
+	size_t                            size = 0;
+};
+
 struct ReleaseRequest {
 	size_t size;
 	uint64_t offset;
@@ -106,6 +115,10 @@ public:
 #endif	
 	void ProcessUploads(uint8_t frameIndex, rhi::Queue queue);
 	void QueueResourceCopy(const std::shared_ptr<Resource>& destination, const std::shared_ptr<Resource>& source, size_t size);
+	void QueueCopyAndDiscard(const std::shared_ptr<Resource>& destination,
+		std::unique_ptr<GpuBufferBacking> sourceToDiscard,
+		SymbolicTracker sourceBarrierState,
+		size_t size);
 	void ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue);
 	void ResetAllocators(uint8_t frameIndex);
 	void ProcessDeferredReleases(uint8_t frameIndex);
@@ -151,6 +164,7 @@ private:
 	std::vector<TextureUpdate> m_textureUpdates;
 
 	std::vector<ResourceCopy> queuedResourceCopies;
+	std::vector<DiscardBufferCopy> queuedDiscardCopies;
 };
 
 inline UploadManager& UploadManager::GetInstance() {

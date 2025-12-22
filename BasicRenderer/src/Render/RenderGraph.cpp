@@ -588,7 +588,7 @@ void RenderGraph::AddResource(std::shared_ptr<Resource> resource, bool transitio
 	}*/
 }
 
-std::shared_ptr<Resource> RenderGraph::GetResourceByName(const std::wstring& name) {
+std::shared_ptr<Resource> RenderGraph::GetResourceByName(const std::string& name) {
 	return resourcesByName[name];
 }
 

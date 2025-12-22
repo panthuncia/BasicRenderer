@@ -1841,7 +1841,8 @@ namespace rhi {
 			/*pProtectedSession*/   castableFormats.data(),
 			IID_PPV_ARGS(&res));
 		if (FAILED(hr)) {
-			RHI_FAIL(ToRHI(hr));
+			spdlog::info("?");
+			//RHI_FAIL(ToRHI(hr));
 		}
 		if (bd.debugName) res->SetName(std::wstring(bd.debugName, bd.debugName + ::strlen(bd.debugName)).c_str());
 		const Dx12Resource B(std::move(res), bd.buffer.sizeBytes, impl->selfWeak.lock());

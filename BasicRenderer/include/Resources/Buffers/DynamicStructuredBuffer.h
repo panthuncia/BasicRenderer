@@ -7,10 +7,9 @@
 #include <memory>
 
 #include "Managers/Singletons/ResourceManager.h"
-#include "Resources/Buffers/Buffer.h"
+#include "Resources/Buffers/GpuBufferBacking.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
-#include "Managers/Singletons/DeletionManager.h"
 #include "Managers/Singletons/UploadManager.h"
 
 using Microsoft::WRL::ComPtr;
@@ -19,7 +18,7 @@ template<class T>
 class DynamicStructuredBuffer : public DynamicBufferBase {
 public:
 
-    static std::shared_ptr<DynamicStructuredBuffer<T>> CreateShared(UINT capacity = 64, std::wstring name = L"", bool UAV = false) {
+    static std::shared_ptr<DynamicStructuredBuffer<T>> CreateShared(UINT capacity = 64, std::string name = "", bool UAV = false) {
         return std::shared_ptr<DynamicStructuredBuffer<T>>(new DynamicStructuredBuffer<T>(capacity, name, UAV));
     }
 
@@ -64,10 +63,6 @@ public:
         BUFFER_UPLOAD(&element, sizeof(T), shared_from_this(), index * sizeof(T));
     }
 
-    std::shared_ptr<Buffer>& GetBuffer() {
-        return m_dataBuffer;
-    }
-
     UINT Size() {
         return static_cast<uint32_t>(m_data.size());
     }
@@ -81,15 +76,15 @@ protected:
     }
 
 private:
-    DynamicStructuredBuffer(UINT capacity = 64, std::wstring bufName = L"", bool UAV = false)
+    DynamicStructuredBuffer(UINT capacity = 64, std::string bufName = "", bool UAV = false)
         : m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
 		name = bufName;
         CreateBuffer(capacity);
     }
 
     void OnSetName() override {
-        if (name != L"") {
-            m_dataBuffer->SetName((m_name + L": " + name).c_str());
+        if (name != "") {
+            m_dataBuffer->SetName((m_name + ": " + name).c_str());
         }
         else {
             m_dataBuffer->SetName(m_name.c_str());
@@ -100,7 +95,7 @@ private:
     uint32_t m_capacity;
     bool m_needsUpdate;
 
-    inline static std::wstring m_name = L"DynamicStructuredBuffer";
+    inline static std::string m_name = "DynamicStructuredBuffer";
 
     bool m_UAV = false;
 
@@ -150,12 +145,12 @@ private:
 
 
     void CreateBuffer(size_t capacity, size_t previousCapacity = 0) {
-        auto newDataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, sizeof(T) * capacity, m_UAV);
-		newDataBuffer->SetName((m_name+ L": " + name).c_str());
+        auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, sizeof(T) * capacity, GetGlobalResourceID(), m_UAV);
+		newDataBuffer->SetName((m_name+ ": " + name).c_str());
         if (m_dataBuffer != nullptr) {
-            UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity);
+            UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), *GetStateTracker(), previousCapacity);
         }
-		m_dataBuffer = newDataBuffer;
+		m_dataBuffer = std::move(newDataBuffer);
         AssignDescriptorSlots(static_cast<uint32_t>(capacity));
     }
 };

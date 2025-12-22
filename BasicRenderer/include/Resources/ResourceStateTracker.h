@@ -1,9 +1,6 @@
 #pragma once
 
-#include <memory>
 #include <vector>
-#include <optional>
-#include <algorithm>
 #include <resource_states.h>
 
 class Resource;

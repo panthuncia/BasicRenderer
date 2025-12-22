@@ -16,9 +16,9 @@ Skeleton::Skeleton(const std::vector<flecs::entity>& nodes, const std::vector<XM
     m_boneTransforms.resize(nodes.size() * 16);
     auto& resourceManager = ResourceManager::GetInstance();
     m_transformsBuffer = CreateIndexedStructuredBuffer(nodes.size(), sizeof(DirectX::XMMATRIX));
-    m_transformsBuffer->SetName(L"BoneTransforms");
+    m_transformsBuffer->SetName("BoneTransforms");
     m_inverseBindMatricesBuffer = CreateIndexedStructuredBuffer(nodes.size(), sizeof(DirectX::XMMATRIX));
-	m_inverseBindMatricesBuffer->SetName(L"InverseBindMatrices");
+	m_inverseBindMatricesBuffer->SetName("InverseBindMatrices");
     BUFFER_UPLOAD(m_inverseBindMatrices.data(), nodes.size() * sizeof(XMMATRIX), m_inverseBindMatricesBuffer, 0);
 	m_isBaseSkeleton = true;
     FindRoot();
@@ -29,7 +29,7 @@ Skeleton::Skeleton(const std::vector<flecs::entity>& nodes, std::shared_ptr<Buff
     m_boneTransforms.resize(nodes.size() * 16);
     auto& resourceManager = ResourceManager::GetInstance();
     m_transformsBuffer = CreateIndexedStructuredBuffer(nodes.size(), sizeof(DirectX::XMMATRIX));
-    m_transformsBuffer->SetName(L"BoneTransforms");
+    m_transformsBuffer->SetName("BoneTransforms");
     FindRoot();
 }
 
@@ -91,7 +91,7 @@ Skeleton::Skeleton(const Skeleton& other) {
     m_boneTransforms.resize(m_bones.size() * 16);
     auto& resourceManager = ResourceManager::GetInstance();
     m_transformsBuffer = CreateIndexedStructuredBuffer(m_bones.size(), sizeof(DirectX::XMMATRIX));
-    m_transformsBuffer->SetName(L"BoneTransforms");
+    m_transformsBuffer->SetName("BoneTransforms");
 }
 
 void Skeleton::FindRoot() {

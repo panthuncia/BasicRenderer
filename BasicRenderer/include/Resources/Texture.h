@@ -19,7 +19,7 @@ public:
 	}
 	void SetFilepath(const std::string& path);
 	rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
-	virtual void SetName(const std::wstring& name);
+	virtual void SetName(const std::string& name);
 	rhi::Resource GetAPIResource() override;
 	void SetFileType(ImageFiletype fileType) { m_fileType = fileType; }
 	ImageFiletype GetFileType() const { return m_fileType; }

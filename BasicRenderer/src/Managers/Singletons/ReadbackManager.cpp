@@ -36,7 +36,7 @@ void ReadbackManager::SaveCubemapToDDS(rhi::Device& device, rhi::CommandList& co
 
 
 	auto readbackBuffer = Buffer::CreateShared(rhi::HeapType::Readback, info.totalBytes);
-    readbackBuffer->SetName(L"Readback");
+    readbackBuffer->SetName("Readback");
 
     //auto initialState = ResourceStateToD3D12(cubemap->GetState());
     //CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(cubemap->GetTexture().Get(), initialState, D3D12_RESOURCE_STATE_COPY_SOURCE);
@@ -164,7 +164,7 @@ void ReadbackManager::SaveTextureToDDS(
 
     // Create a readback buffer sized to hold all subresources
     auto readbackBuffer = Buffer::CreateShared(rhi::HeapType::Readback, info.totalBytes);
-    readbackBuffer->SetName(L"Readback");
+    readbackBuffer->SetName("Readback");
 
     // Issue copy commands for each mip
     for (uint32_t mipLevel = 0; mipLevel < numMipLevels; ++mipLevel)

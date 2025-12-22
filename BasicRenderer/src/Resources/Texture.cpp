@@ -24,7 +24,7 @@ rhi::BarrierBatch Texture::GetEnhancedBarrierGroup(RangeSpec range, rhi::Resourc
 	return m_image->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState); // Transition the underlying PixelBuffer
 }
 
-void Texture::SetName(const std::wstring& name) {
+void Texture::SetName(const std::string& name) {
 	Resource::SetName(name);
 	m_image->SetName(name);
 }

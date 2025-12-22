@@ -6,7 +6,6 @@
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Resource.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "Managers/Singletons/DeletionManager.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 
@@ -546,6 +545,21 @@ void UploadManager::QueueResourceCopy(const std::shared_ptr<Resource>& destinati
 	queuedResourceCopies.push_back(copy);
 }
 
+void UploadManager::QueueCopyAndDiscard(
+	const std::shared_ptr<Resource>& destination,
+	std::unique_ptr<GpuBufferBacking> sourceToDiscard,
+	SymbolicTracker sourceBarrierState,
+	size_t size)
+{
+	DiscardBufferCopy copy;
+	copy.sourceOwned = std::move(sourceToDiscard);
+	copy.sourceBarrierState = std::move(sourceBarrierState);
+	copy.destination = destination;
+	copy.size = size;
+
+	queuedDiscardCopies.push_back(std::move(copy));
+}
+
 void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue) {
 	auto& commandAllocator = m_commandAllocators[frameIndex];
 	auto& commandList = m_commandLists[frameIndex];
@@ -614,12 +628,81 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue) 
 
 		commandList->Barriers(batch.View());
 	}
+
+	for (auto& copy : queuedDiscardCopies) {
+
+		// Copy initial state of the resources
+		auto initialSourceState = copy.sourceBarrierState.GetSegments();
+		auto initialDestinationState = copy.destination->GetStateTracker()->GetSegments();
+
+		RangeSpec range = {};
+		ResourceState sourceState;
+		sourceState.access = rhi::ResourceAccessType::CopySource;
+		sourceState.layout = rhi::ResourceLayout::CopySource;
+		sourceState.sync = rhi::ResourceSyncState::Copy;
+
+		ResourceState destinationState;
+		destinationState.access = rhi::ResourceAccessType::CopyDest;
+		destinationState.layout = rhi::ResourceLayout::CopyDest;
+		destinationState.sync = rhi::ResourceSyncState::Copy;
+
+		// Compute transitions to bring full resources into COPY_SOURCE and COPY_DEST
+		std::vector<ResourceTransition> transitions;
+		copy.sourceBarrierState.Apply(range, nullptr, sourceState, transitions);
+		copy.destination->GetStateTracker()->Apply(range, copy.destination.get(), destinationState, transitions);
+
+		std::vector<D3D12_BARRIER_GROUP> barriers;
+		std::vector<rhi::BarrierBatch> sourceTransitions;
+
+		for (auto& transition : transitions) {
+			rhi::BarrierBatch batch;
+			if (transition.pResource == nullptr) {
+				batch = copy.sourceOwned->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);}
+			else {
+				batch = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
+			}
+			sourceTransitions.push_back(batch);
+		}
+
+		auto batch = rhi::helpers::CombineBarrierBatches(sourceTransitions);
+
+		commandList->Barriers(batch.View());
+
+		// Perform the copy
+		commandList->CopyBufferRegion(
+			copy.destination->GetAPIResource().GetHandle(),
+			0,
+			copy.sourceOwned->GetAPIResource().GetHandle(),
+			0,
+			copy.size);
+
+		barriers.clear();
+		transitions.clear();
+
+		// Copy back the initial state of the resource (source is discarded)
+		for (auto& segment : initialDestinationState) {
+			copy.destination->GetStateTracker()->Apply(segment.rangeSpec, copy.destination.get(), segment.state, transitions);
+		}
+
+		sourceTransitions.clear();
+		batch.Clear();
+		for (auto& transition : transitions) {
+			auto dstTransition = copy.destination->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
+			sourceTransitions.push_back(std::move(dstTransition));
+		}
+
+		batch = rhi::helpers::CombineBarrierBatches(sourceTransitions);
+
+		commandList->Barriers(batch.View());
+	}
+
 	rhi::debug::End(commandList.Get());
 	commandList->End();
 
 	queue.Submit({ &commandList.Get() });
 
 	queuedResourceCopies.clear();
+	queuedDiscardCopies.clear();
 }
 
 void UploadManager::ResetAllocators(uint8_t frameIndex) {

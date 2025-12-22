@@ -14,8 +14,8 @@
 #include "Resources/Components.h"
 
 IndirectCommandBufferManager::IndirectCommandBufferManager() {
-    m_indirectCommandsResourceGroup = std::make_shared<ResourceGroup>(L"IndirectCommandBuffers");
-    m_meshletCullingCommandResourceGroup = std::make_shared<ResourceGroup>(L"MeshletCullingCommandBuffers");
+    m_indirectCommandsResourceGroup = std::make_shared<ResourceGroup>("IndirectCommandBuffers");
+    m_meshletCullingCommandResourceGroup = std::make_shared<ResourceGroup>("MeshletCullingCommandBuffers");
 
     //m_resources[Builtin::IndirectCommandBuffers::Opaque] = m_indirectCommandsResourceGroup;
     //m_resources[Builtin::IndirectCommandBuffers::AlphaTest] = m_indirectCommandsResourceGroup;
@@ -63,8 +63,8 @@ IndirectCommandBufferManager::CreateBuffersForView(uint64_t viewID) {
         if (size == 0) continue; // not yet sized, will be created on first UpdateBuffersForFlags
 
         auto res = CreateIndexedStructuredBuffer(size, sizeof(DispatchMeshIndirectCommand), true, true);
-        res->SetName(L"IndirectCommandBuffer(flags=" + s2ws(GetDebugNameForTechnique(technique)) +
-            L", view=" + std::to_wstring(viewID) + L")");
+        res->SetName("IndirectCommandBuffer(flags=" + GetDebugNameForTechnique(technique) +
+            ", view=" + std::to_string(viewID) + ")");
         auto dyn = std::make_shared<DynamicGloballyIndexedResource>(res);
         auto entity = dyn->GetECSEntity();
 
@@ -88,14 +88,14 @@ IndirectCommandBufferManager::CreateBuffersForView(uint64_t viewID) {
     }
 
     // Meshlet culling buffers sized by total commands across all flags
-    auto makeMeshlet = [&](const wchar_t* label) {
+    auto makeMeshlet = [&](const char* label) {
         auto r = CreateIndexedStructuredBuffer((std::max)(m_totalIndirectCommands, 1u), sizeof(DispatchIndirectCommand), true, true);
-        r->SetName(std::wstring(label) + L" (view=" + std::to_wstring(viewID) + L")");
+        r->SetName(std::string(label) + " (view=" + std::to_string(viewID) + ")");
         auto dyn = std::make_shared<DynamicGloballyIndexedResource>(r);
         dyn->GetECSEntity().set<Components::Resource>({ dyn });
         return dyn;    };
-    perView.meshletCullingIndirectCommandBuffer = makeMeshlet(L"MeshletCullingIndirectCommandBuffer");
-    perView.meshletCullingResetIndirectCommandBuffer = makeMeshlet(L"MeshletCullingResetIndirectCommandBuffer");
+    perView.meshletCullingIndirectCommandBuffer = makeMeshlet("MeshletCullingIndirectCommandBuffer");
+    perView.meshletCullingResetIndirectCommandBuffer = makeMeshlet("MeshletCullingResetIndirectCommandBuffer");
     m_meshletCullingCommandResourceGroup->AddResource(perView.meshletCullingIndirectCommandBuffer);
     m_meshletCullingCommandResourceGroup->AddResource(perView.meshletCullingResetIndirectCommandBuffer);
 
@@ -161,17 +161,17 @@ void IndirectCommandBufferManager::UpdateBuffersForTechnique(TechniqueDescriptor
         if (it != perView.buffersByFlags.end()) {
             // Replace existing
             auto res = CreateIndexedStructuredBuffer(curr, sizeof(DispatchMeshIndirectCommand), true, true);
-            res->SetName(L"IndirectCommandBuffer(flags=" + s2ws(GetDebugNameForTechnique(technique)) +
-                L", view=" + std::to_wstring(viewID) + L")");
+            res->SetName("IndirectCommandBuffer(flags=" + GetDebugNameForTechnique(technique) +
+                ", view=" + std::to_string(viewID) + ")");
             it->second.buffer->SetResource(res);
             it->second.count = numDraws;
         }
         else {
             // Create new buffer for this view (this flags appeared after the view was created)
             auto res = CreateIndexedStructuredBuffer(curr, sizeof(DispatchMeshIndirectCommand), true, true);
-			std::wstring techniqueName = s2ws(GetDebugNameForTechnique(technique));
-            res->SetName(L"IndirectCommandBuffer(flags=" + techniqueName +
-                L", view=" + std::to_wstring(viewID) + L")");
+			std::string techniqueName = GetDebugNameForTechnique(technique);
+            res->SetName("IndirectCommandBuffer(flags=" + techniqueName +
+                ", view=" + std::to_string(viewID) + ")");
             auto dyn = std::make_shared<DynamicGloballyIndexedResource>(res);
             perView.buffersByFlags.emplace(technique.compileFlags, dyn);
             m_indirectCommandsResourceGroup->AddResource(dyn);
@@ -314,16 +314,16 @@ void IndirectCommandBufferManager::RecreateMeshletBuffersForAllViews() {
             continue;
         }
 
-        auto makeMeshlet = [&](const wchar_t* label) {
+        auto makeMeshlet = [&](const char* label) {
             auto r = CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), true, true);
-            r->SetName(std::wstring(label) + L" (view=" + std::to_wstring(viewID) + L")");
+            r->SetName(std::string(label) + " (view=" + std::to_string(viewID) + ")");
             auto dyn = std::make_shared<DynamicGloballyIndexedResource>(r);
             m_meshletCullingCommandResourceGroup->AddResource(dyn);
             return dyn;
             };
 
-        perView.meshletCullingIndirectCommandBuffer = makeMeshlet(L"MeshletCullingIndirectCommandBuffer");
-        perView.meshletCullingResetIndirectCommandBuffer = makeMeshlet(L"MeshletCullingResetIndirectCommandBuffer");
+        perView.meshletCullingIndirectCommandBuffer = makeMeshlet("MeshletCullingIndirectCommandBuffer");
+        perView.meshletCullingResetIndirectCommandBuffer = makeMeshlet("MeshletCullingResetIndirectCommandBuffer");
     }
 }
 
@@ -337,8 +337,8 @@ void IndirectCommandBufferManager::EnsurePerViewFlagsBuffers(uint64_t viewID) {
         if (perView.buffersByFlags.count(technique.compileFlags)) continue;
 
         auto res = CreateIndexedStructuredBuffer(cap, sizeof(DispatchMeshIndirectCommand), true, true);
-        res->SetName(L"IndirectCommandBuffer(flags=" + std::to_wstring(static_cast<uint64_t>(technique.compileFlags)) +
-            L", view=" + std::to_wstring(viewID) + L")");
+        res->SetName("IndirectCommandBuffer(flags=" + std::to_string(static_cast<uint64_t>(technique.compileFlags)) +
+            ", view=" + std::to_string(viewID) + ")");
 
         auto dyn = std::make_shared<DynamicGloballyIndexedResource>(res);
         perView.buffersByFlags.emplace(technique.compileFlags, dyn);

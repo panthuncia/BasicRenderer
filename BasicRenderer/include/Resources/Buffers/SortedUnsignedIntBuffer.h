@@ -14,7 +14,7 @@ using Microsoft::WRL::ComPtr;
 
 class SortedUnsignedIntBuffer : public DynamicBufferBase {
 public:
-    static std::shared_ptr<SortedUnsignedIntBuffer> CreateShared(uint64_t capacity = 64, std::wstring name = L"", bool UAV = false) {
+    static std::shared_ptr<SortedUnsignedIntBuffer> CreateShared(uint64_t capacity = 64, std::string name = "", bool UAV = false) {
         return std::shared_ptr<SortedUnsignedIntBuffer>(new SortedUnsignedIntBuffer(capacity, name, UAV));
     }
 
@@ -33,10 +33,6 @@ public:
         return m_data[index];
     }
 
-    std::shared_ptr<Buffer>& GetBuffer() {
-        return m_dataBuffer;
-    }
-
     UINT Size() const {
         return static_cast<UINT>(m_data.size());
     }
@@ -51,15 +47,15 @@ protected:
     }
 
 private:
-    SortedUnsignedIntBuffer(uint64_t capacity = 64, std::wstring name = L"", bool UAV = false)
+    SortedUnsignedIntBuffer(uint64_t capacity = 64, std::string name = "", bool UAV = false)
         : m_capacity(capacity), m_UAV(UAV), m_earliestModifiedIndex(0) {
         CreateBuffer(capacity);
         SetName(name);
     }
 
     void OnSetName() override {
-        if (name != L"") {
-            m_dataBuffer->SetName((m_name + L": " + name).c_str());
+        if (name != "") {
+            m_dataBuffer->SetName((m_name + ": " + name).c_str());
         }
         else {
             m_dataBuffer->SetName(m_name.c_str());
@@ -74,7 +70,7 @@ private:
     uint64_t m_capacity;
     uint64_t m_earliestModifiedIndex; // To avoid updating the entire buffer every time
 
-    inline static std::wstring m_name = L"SortedUnsignedIntBuffer";
+    inline static std::string m_name = "SortedUnsignedIntBuffer";
 
     bool m_UAV = false;
 

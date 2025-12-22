@@ -164,7 +164,7 @@ void DynamicBuffer::AssignDescriptorSlots()
 void DynamicBuffer::CreateBuffer(size_t capacity) {
     auto device = DeviceManager::GetInstance().GetDevice();
     m_capacity = capacity;
-    m_dataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, capacity, m_UAV);
+    m_dataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, capacity, GetGlobalResourceID(), m_UAV);
     m_memoryBlocks.push_back({ 0, capacity, true });
 
 	AssignDescriptorSlots();
@@ -172,9 +172,9 @@ void DynamicBuffer::CreateBuffer(size_t capacity) {
 
 void DynamicBuffer::GrowBuffer(size_t newSize) {
     auto device = DeviceManager::GetInstance().GetDevice();
-    auto newDataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, newSize, m_UAV);
-	UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, m_capacity);
-	m_dataBuffer = newDataBuffer;
+    auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, newSize, GetGlobalResourceID(), m_UAV);
+	UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), *GetStateTracker(), m_capacity);
+	m_dataBuffer = std::move(newDataBuffer);
 
     m_capacity = newSize;
 

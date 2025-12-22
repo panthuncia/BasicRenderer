@@ -156,7 +156,7 @@ private:
 
         m_vertexBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, vertexBufferSize);
         BUFFER_UPLOAD(skyboxVertices, vertexBufferSize, m_vertexBuffer, 0);
-		m_vertexBuffer->SetName(L"Skybox VB");
+		m_vertexBuffer->SetName("Skybox VB");
 
         BUFFER_UPLOAD((void*)skyboxVertices, vertexBufferSize, m_vertexBuffer, 0);
 

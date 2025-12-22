@@ -260,4 +260,4 @@ std::shared_ptr<Buffer> CreateIndexedTypedBuffer(
 	bool          UAV = false);
 
 
-std::shared_ptr<Buffer> CreateIndexedConstantBuffer(size_t bufferSize, std::wstring name = L"");
+std::shared_ptr<Buffer> CreateIndexedConstantBuffer(size_t bufferSize, std::string name = "");

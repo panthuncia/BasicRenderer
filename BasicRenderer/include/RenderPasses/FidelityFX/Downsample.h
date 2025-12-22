@@ -40,7 +40,7 @@ public:
     }
 
     void Setup() override {
-        m_pDownsampleConstants = LazyDynamicStructuredBuffer<spdConstants>::CreateShared(1, L"Downsample constants");
+        m_pDownsampleConstants = LazyDynamicStructuredBuffer<spdConstants>::CreateShared(1, "Downsample constants");
 		m_pLinearDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
 
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
