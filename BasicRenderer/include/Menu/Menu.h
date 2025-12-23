@@ -43,6 +43,7 @@ static inline const char* MajorCategory(rhi::ResourceType t) {
     }
 }
 
+
 static void BuildMemorySnapshotFromFlecs(
     ui::MemorySnapshot& out,
     flecs::query<const MemoryStatisticsComponents::MemSizeBytes>& q)
@@ -51,69 +52,69 @@ static void BuildMemorySnapshotFromFlecs(
     out.resources.clear();
     out.totalBytes = 0;
 
-    // Accumulate major bytes in fixed buckets for now.
-    // (Later you’ll replace this with subcategories, purpose tags, etc.)
-    struct Bucket { const char* label; uint64_t bytes = 0; };
-    Bucket buckets[] = {
-        {"Textures/All",     0},
-        {"Buffers/All",      0},
-        {"AccelStructs/All", 0},
-        {"Other/All",        0},
-    };
-
-    auto bucketIndexForMajor = [](const char* major) -> int {
-        if (std::string_view(major) == "Textures")     return 0;
-        if (std::string_view(major) == "Buffers")      return 1;
-        if (std::string_view(major) == "AccelStructs") return 2;
-        return 3;
-        };
+    // Key: "Major/Usage" (e.g. "Textures/Material", "Buffers/Vertex", ...)
+    std::unordered_map<std::string, uint64_t> minorBuckets;
+    minorBuckets.reserve(256);
 
     q.each([&](flecs::entity e, const MemoryStatisticsComponents::MemSizeBytes& sz) {
-            auto rt = e.try_get<MemoryStatisticsComponents::ResourceType>();
-            auto rname = e.try_get<MemoryStatisticsComponents::ResourceName>();
-            auto rid = e.try_get<MemoryStatisticsComponents::ResourceID>();
-			
-            const uint64_t bytes = sz.size;
-            out.totalBytes += bytes;
+        auto rt = e.try_get<MemoryStatisticsComponents::ResourceType>();
+        auto rname = e.try_get<MemoryStatisticsComponents::ResourceName>();
+        auto rid = e.try_get<MemoryStatisticsComponents::ResourceID>();
+        auto use = e.try_get<MemoryStatisticsComponents::ResourceUsage>();
 
-            const char* major;
-            if (rt) {
-                major = MajorCategory(rt->type);
-            }else
-            {
-                major = MajorCategory(rhi::ResourceType::Unknown);
-            }
-            buckets[bucketIndexForMajor(major)].bytes += bytes;
+        const uint64_t bytes = sz.size;
+        out.totalBytes += bytes;
 
-            ui::MemoryResourceRow row{};
-            row.bytes = bytes;
+        const char* major = rt ? MajorCategory(rt->type)
+            : MajorCategory(rhi::ResourceType::Unknown);
 
-            if (rid) {
-                row.uid = rid->id;
-            }
+        const char* usage = (use && !use->usage.empty()) ? use->usage.c_str()
+            : "Unspecified";
 
-            if (rname && !rname->name.empty()) {
-                row.name = rname->name;
-            }
-            else {
-                if (rid) {
-                    row.name = std::string("Resource ") + std::to_string((unsigned long long)rid->id);
-                } else
-                {
-                    row.name = std::string("Unknown resource");
-                }
-            }
+        if (use)
+        {
+            spdlog::info("");
+        }
 
-            row.type = major;
+        // Accumulate minor category
+        std::string key;
+        key.reserve(std::char_traits<char>::length(major) + 1 + std::char_traits<char>::length(usage));
+        key.append(major).push_back('/');
+        key.append(usage);
+        minorBuckets[std::move(key)] += bytes;
 
-            out.resources.push_back(std::move(row));
+        // Per-resource row
+        ui::MemoryResourceRow row{};
+        row.bytes = bytes;
+        row.uid = rid ? rid->id : 0;
+
+        if (rname && !rname->name.empty()) {
+            row.name = rname->name;
+        }
+        else if (rid) {
+            row.name = std::string("Resource ") + std::to_string((unsigned long long)rid->id);
+        }
+        else {
+            row.name = "Unknown resource";
+        }
+
+        // Show both major + usage in list view "Type" column
+        row.type = std::string(major) + "/" + usage;
+
+        out.resources.push_back(std::move(row));
         });
 
-    out.categories.reserve(std::size(buckets));
-    for (const auto& b : buckets) {
-        if (b.bytes == 0) continue;
-        out.categories.push_back(ui::MemoryCategorySlice{ b.label, b.bytes });
+    out.categories.reserve(minorBuckets.size());
+    for (auto& [label, bytes] : minorBuckets) {
+        if (bytes == 0) continue;
+        out.categories.push_back(ui::MemoryCategorySlice{ label, bytes });
     }
+
+    // stable ordering in the legend (largest first)
+    std::sort(out.categories.begin(), out.categories.end(),
+        [](const ui::MemoryCategorySlice& a, const ui::MemoryCategorySlice& b) {
+            return a.bytes > b.bytes;
+        });
 }
 
 class Menu {

@@ -14,6 +14,22 @@
 #include "RenderPasses/VisUtil/MaterialBlockScanPass.h"
 #include "RenderPasses/VisUtil/MaterialBlockOffsetsPass.h"
 #include "RenderPasses/VisUtil/BuildMaterialIndirectCommandBufferPass.h"
+#include "RenderPasses/brdfIntegrationPass.h"
+#include "RenderPasses/ShadowPass.h"
+#include "RenderPasses/GBuffer.h"
+#include "RenderPasses/GTAO/XeGTAODenoisePass.h"
+#include "RenderPasses/GTAO/XeGTAOFilterPass.h"
+#include "RenderPasses/GTAO/XeGTAOMainPass.h"
+#include "RenderPasses/LightCullingPass.h"
+#include "RenderPasses/ClusterGenerationPass.h"
+#include "RenderPasses/EnvironmentConversionPass.h"
+#include "RenderPasses/EnvironmentSHPass.h"
+#include "RenderPasses/DeferredShadingPass.h"
+#include "RenderPasses/PPLLFillPass.h"
+#include "RenderPasses/PPLLResolvePass.h"
+#include "RenderPasses/PostProcessing/ScreenSpaceReflectionsPass.h"
+#include "RenderPasses/PostProcessing/SpecularIBLPass.h"
+
 
 void CreateGBufferResources(RenderGraph* graph) {
     // GBuffer resources
@@ -33,6 +49,8 @@ void CreateGBufferResources(RenderGraph* graph) {
     normalsWorldSpaceDesc.imageDimensions.push_back(dims);
     auto normalsWorldSpace = PixelBuffer::CreateShared(normalsWorldSpaceDesc);
     normalsWorldSpace->SetName("Normals World Space");
+    normalsWorldSpace->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
+
     graph->RegisterResource(Builtin::GBuffer::Normals, normalsWorldSpace);
 
     TextureDescription visibilityDesc;
@@ -45,6 +63,7 @@ void CreateGBufferResources(RenderGraph* graph) {
     visibilityDesc.imageDimensions.emplace_back(resolution.x, resolution.y, 0, 0);
     auto visibilityBuffer = PixelBuffer::CreateShared(visibilityDesc);
 	visibilityBuffer->SetName("Visibility Buffer");
+    visibilityBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GBuffer" }));
     graph->RegisterResource(Builtin::PrimaryCamera::VisibilityTexture, visibilityBuffer);
 
     std::shared_ptr<PixelBuffer> albedo;
@@ -62,6 +81,7 @@ void CreateGBufferResources(RenderGraph* graph) {
     albedoDesc.imageDimensions.push_back(albedoDims);
     albedo = PixelBuffer::CreateShared(albedoDesc);
     albedo->SetName("Albedo");
+    albedo->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GBuffer" }));
     graph->RegisterResource(Builtin::GBuffer::Albedo, albedo);
 
     TextureDescription metallicRoughnessDesc;
@@ -75,6 +95,7 @@ void CreateGBufferResources(RenderGraph* graph) {
     metallicRoughnessDesc.imageDimensions.push_back(metallicRoughnessDims);
     metallicRoughness = PixelBuffer::CreateShared(metallicRoughnessDesc);
     metallicRoughness->SetName("Metallic Roughness");
+    metallicRoughness->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GBuffer" }));
     graph->RegisterResource(Builtin::GBuffer::MetallicRoughness, metallicRoughness);
 
     TextureDescription emissiveDesc;
@@ -88,6 +109,7 @@ void CreateGBufferResources(RenderGraph* graph) {
     emissiveDesc.imageDimensions.push_back(emissiveDims);
     emissive = PixelBuffer::CreateShared(emissiveDesc);
     emissive->SetName("Emissive");
+    emissive->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GBuffer" }));
     graph->RegisterResource(Builtin::GBuffer::Emissive, emissive);
 }
 
@@ -232,12 +254,14 @@ inline void RegisterVisUtilResources(RenderGraph* graph)
     // Total pixel count buffer (uint[1])
     auto totalPixelCountBuffer = CreateIndexedStructuredBuffer(1, sizeof(uint32_t), true, false);
     totalPixelCountBuffer->SetName("VisUtil::TotalPixelCountBuffer");
+    totalPixelCountBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
     graph->RegisterResource("Builtin::VisUtil::TotalPixelCountBuffer", totalPixelCountBuffer);
 
 	// PixelRef: uint pixelXY; (packed)
     struct PixelRefPOD { uint32_t pixelXY; };
     auto pixelListBuffer = CreateIndexedStructuredBuffer(maxPixels, sizeof(PixelRefPOD), true, false);
     pixelListBuffer->SetName("VisUtil::PixelListBuffer");
+    pixelListBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
     graph->RegisterResource("Builtin::VisUtil::PixelListBuffer", pixelListBuffer);
 }
 
@@ -322,6 +346,7 @@ void RegisterGTAOResources(RenderGraph* graph) {
     ImageDimensions dims1 = { resolution.x, resolution.y, 0, 0 };
     workingDepthsDesc.imageDimensions.push_back(dims1);
     auto workingDepths = PixelBuffer::CreateShared(workingDepthsDesc);
+    workingDepths->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GTAO resources" }));
     workingDepths->SetName("GTAO Working Depths");
 
     TextureDescription workingEdgesDesc;
@@ -334,6 +359,7 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingEdgesDesc.generateMipMaps = false;
     workingEdgesDesc.imageDimensions.push_back(dims1);
     auto workingEdges = PixelBuffer::CreateShared(workingEdgesDesc);
+    workingDepths->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GTAO resources" }));
     workingEdges->SetName("GTAO Working Edges");
 
     TextureDescription workingAOTermDesc;
@@ -347,10 +373,13 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingAOTermDesc.imageDimensions.push_back(dims1);
     auto workingAOTerm1 = PixelBuffer::CreateShared(workingAOTermDesc);
     workingAOTerm1->SetName("GTAO Working AO Term 1");
+    workingAOTerm1->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GTAO resources" }));
     auto workingAOTerm2 = PixelBuffer::CreateShared(workingAOTermDesc);
     workingAOTerm2->SetName("GTAO Working AO Term 2");
+    workingAOTerm2->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GTAO resources" }));
     std::shared_ptr<PixelBuffer> outputAO = PixelBuffer::CreateShared(workingAOTermDesc);
     outputAO->SetName("GTAO Output AO Term");
+    outputAO->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GTAO resources" }));
 
     graph->RegisterResource(Builtin::GTAO::WorkingAOTerm1, workingAOTerm1);
     graph->RegisterResource(Builtin::GTAO::WorkingAOTerm2, workingAOTerm2);
@@ -509,10 +538,13 @@ void BuildPPLLPipeline(RenderGraph* graph) {
     desc.hasNonShaderVisibleUAV = true;
     auto PPLLHeadPointerTexture = PixelBuffer::CreateShared(desc);
     PPLLHeadPointerTexture->SetName("PPLLHeadPointerTexture");
+    PPLLHeadPointerTexture->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "OIT resources" }));
     auto PPLLBuffer = CreateIndexedStructuredBuffer(numPPLLNodes, PPLLNodeSize, true, false);
     PPLLBuffer->SetName("PPLLBuffer");
+	PPLLBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "OIT resources" }));
 	auto PPLLCounter = CreateIndexedTypedBuffer(1, rhi::Format::R32_UInt, true);
     PPLLCounter->SetName("PPLLCounter");
+	PPLLCounter->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "OIT resources" }));
 
     graph->RegisterResource(Builtin::PPLL::HeadPointerTexture, PPLLHeadPointerTexture);
     graph->RegisterResource(Builtin::PPLL::DataBuffer, PPLLBuffer);
@@ -574,6 +606,7 @@ void BuildSSRPasses(RenderGraph* graph) {
     ssrDesc.imageDimensions.push_back(dims);
     auto ssrTexture = PixelBuffer::CreateShared(ssrDesc);
     ssrTexture->SetName("SSR Texture");
+	ssrTexture->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Post-Processing resources" }));
 	graph->RegisterResource(Builtin::PostProcessing::ScreenSpaceReflections, ssrTexture);
 
     graph->BuildComputePass("Screen-Space Reflections Pass")

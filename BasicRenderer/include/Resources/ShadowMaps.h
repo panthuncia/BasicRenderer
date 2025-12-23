@@ -3,18 +3,17 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include <spdlog/spdlog.h>
 #include <limits>
 #include <rhi.h>
 
 #include "Managers/Singletons/SettingsManager.h"
 #include "Resources/ResourceGroup.h"
 #include "Resources/Texture.h"
-#include "Managers/Singletons/ResourceManager.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/Sampler.h"
 #include "Utilities/Utilities.h"
 #include "Resources/TextureDescription.h"
+#include "Resources/MemoryStatisticsComponents.h"
 class ShadowMaps : public ResourceGroup {
 public:
     ShadowMaps(const std::string& name)
@@ -58,14 +57,15 @@ public:
 			break;
 
 		}
+		shadowMap->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Shadow maps" }));
 		//light->SetShadowMap(map);
         AddResource(shadowMap);
 		return shadowMap;
     }
 
-	void RemoveMap(std::shared_ptr<Texture> map) {
+	void RemoveMap(std::shared_ptr<TextureAsset> map) {
 		if (map != nullptr) {
-			RemoveResource(map.get());
+			RemoveResource(map->ImagePtr().get());
 		}
 
 	}
@@ -118,13 +118,14 @@ public:
 			break;
 
 		}
+		shadowMap->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Shadow maps" }));
 		AddResource(shadowMap);
 		return shadowMap;
 	}
 
-	void RemoveMap(std::shared_ptr<Texture> map) {
+	void RemoveMap(std::shared_ptr<TextureAsset> map) {
 		if (map != nullptr) {
-			RemoveResource(map.get());
+			RemoveResource(map->ImagePtr().get());
 		}
 
 	}

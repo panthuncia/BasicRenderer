@@ -14,12 +14,14 @@
 #include "Resources/Texture.h"
 #include "Managers/Singletons/ReadbackManager.h"
 #include "../../generated/BuiltinResources.h"
+#include "Resources/MemoryStatisticsComponents.h"
 
 EnvironmentManager::EnvironmentManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
 	m_skyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution")();
 	m_reflectionCubemapResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("reflectionCubemapResolution")();
 	m_environmentInfoBuffer = LazyDynamicStructuredBuffer<EnvironmentInfo>::CreateShared(1, "environmentsBuffer", 0, true);
+	m_environmentInfoBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Environment Info" }));
 
 	m_workingEnvironmentCubemapGroup = std::make_shared<ResourceGroup>("EnvironmentCubemapGroup");
 	m_workingHDRIGroup = std::make_shared<ResourceGroup>("WorkingHDRIGroup");
@@ -55,13 +57,13 @@ std::unique_ptr<Environment> EnvironmentManager::CreateEnvironment(std::wstring 
 
 	auto prefilteredEnvironmentCubemap = PixelBuffer::CreateShared(prefilteredDesc);
 	auto sampler = Sampler::GetDefaultSampler();
-	auto prefilteredEnvironment = std::make_shared<Texture>(prefilteredEnvironmentCubemap, sampler);
+	auto prefilteredEnvironment = std::make_shared<TextureAsset>(prefilteredEnvironmentCubemap, sampler, TextureFileMeta());
 	prefilteredEnvironment->SetName("Environment prefiltered cubemap");
 
 	env->SetEnvironmentPrefilteredCubemap(prefilteredEnvironment);
 	env->SetReflectionCubemapResolution(m_reflectionCubemapResolution);
 
-	m_environmentPrefilteredCubemapGroup->AddResource(prefilteredEnvironment);
+	m_environmentPrefilteredCubemapGroup->AddResource(prefilteredEnvironment->ImagePtr());
 
 	return std::move(env);
 }
@@ -73,12 +75,12 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 	auto& name = e->GetName();
 	auto skyboxPath = GetCacheFilePath(name + L"_environment.dds", L"environments");
 
-	std::shared_ptr<Texture> skybox;
+	std::shared_ptr<TextureAsset> skybox;
 	unsigned int res = m_reflectionCubemapResolution;
 	if (std::filesystem::exists(skyboxPath)) {
 		skybox = LoadCubemapFromFile(skyboxPath, true, true);
 		skybox->SetName("Skybox cubemap");
-		res = skybox->GetBuffer()->GetWidth();
+		res = skybox->Image().GetWidth();
 		e->SetReflectionCubemapResolution(res);
 		e->SetEnvironmentCubemap(skybox);
 	}
@@ -102,7 +104,7 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 
 		auto envCubemap = PixelBuffer::CreateShared(skyboxDesc);
 		auto sampler = Sampler::GetDefaultSampler();
-		skybox = std::make_shared<Texture>(envCubemap, sampler);
+		skybox = std::make_shared<TextureAsset>(envCubemap, sampler, TextureFileMeta());
 		skybox->SetName("Environment cubemap");
 
 		e->SetHDRI(skyHDR);
@@ -114,11 +116,11 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 		ReadbackManager::GetInstance().RequestReadback(envCubemap, path, nullptr, true);
 
 		path = GetCacheFilePath(name + L"_prefiltered.dds", L"environments");
-		ReadbackManager::GetInstance().RequestReadback(e->GetEnvironmentPrefilteredCubemap()->GetBuffer(), path, nullptr, true);
+		ReadbackManager::GetInstance().RequestReadback(e->GetEnvironmentPrefilteredCubemap()->ImagePtr(), path, nullptr, true);
 	}
 
 	//Re-create environment cubemap at full res
-	m_environmentPrefilteredCubemapGroup->RemoveResource(e->GetEnvironmentPrefilteredCubemap().get());
+	m_environmentPrefilteredCubemapGroup->RemoveResource(e->GetEnvironmentPrefilteredCubemap()->ImagePtr().get());
 	ImageDimensions dims;
 	dims.height = res;
 	dims.width = res;
@@ -137,22 +139,22 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 
 	auto prefilteredEnvironmentCubemap = PixelBuffer::CreateShared(prefilteredDesc);
 	auto sampler = Sampler::GetDefaultSampler();
-	auto prefilteredEnvironment = std::make_shared<Texture>(prefilteredEnvironmentCubemap, sampler);
+	auto prefilteredEnvironment = std::make_shared<TextureAsset>(prefilteredEnvironmentCubemap, sampler, TextureFileMeta());
 	prefilteredEnvironment->SetName("Environment prefiltered cubemap");
 	e->SetEnvironmentPrefilteredCubemap(prefilteredEnvironment);
-	m_environmentPrefilteredCubemapGroup->AddResource(prefilteredEnvironment);
+	m_environmentPrefilteredCubemapGroup->AddResource(prefilteredEnvironment->ImagePtr());
 
 
 	m_environmentsToComputeSH.push_back(e);
 	m_environmentsToPrefilter.push_back(e);
-	m_workingEnvironmentCubemapGroup->AddResource(skybox);
+	m_workingEnvironmentCubemapGroup->AddResource(skybox->ImagePtr());
 }
 
 void EnvironmentManager::RemoveEnvironment(Environment* e) {
 	std::lock_guard<std::mutex> lock(m_environmentUpdateMutex);
 	m_environmentInfoBuffer->Remove(e->GetEnvironmentBufferView());
-	m_environmentPrefilteredCubemapGroup->RemoveResource(e->GetEnvironmentPrefilteredCubemap().get());
-	m_workingEnvironmentCubemapGroup->RemoveResource(e->GetEnvironmentCubemap().get());
+	m_environmentPrefilteredCubemapGroup->RemoveResource(e->GetEnvironmentPrefilteredCubemap()->ImagePtr().get());
+	m_workingEnvironmentCubemapGroup->RemoveResource(e->GetEnvironmentCubemap()->ImagePtr().get());
 	m_environmentsToConvert.erase(std::remove(m_environmentsToConvert.begin(), m_environmentsToConvert.end(), e), m_environmentsToConvert.end());
 	m_environmentsToPrefilter.erase(std::remove(m_environmentsToPrefilter.begin(), m_environmentsToPrefilter.end(), e), m_environmentsToPrefilter.end());
 }

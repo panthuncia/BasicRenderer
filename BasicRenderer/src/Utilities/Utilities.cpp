@@ -14,18 +14,14 @@
 #include <gsl/gsl>
 #include <rhi_helpers.h>
 
-#include "Render/PSOFlags.h"
 #include "DefaultDirection.h"
 #include "Resources/Sampler.h"
 #include "Render/DescriptorHeap.h"
-#include "Resources/ReadbackRequest.h"
 #include "Materials/Material.h"
-#include "Managers/Singletons/SettingsManager.h"
-#include "Mesh/VertexFlags.h"
-#include "Materials/MaterialFlags.h"
 #include "Mesh/Mesh.h"
 #include "Scene/Components.h"
 #include "NsightAftermathHelpers.h"
+#include "Resources/PixelBuffer.h"
 
 using namespace DirectX;
 
@@ -165,7 +161,7 @@ struct RawImage {
     std::optional<ImageFiletype> fileType;
 };
 
-static std::shared_ptr<Texture>
+static std::shared_ptr<TextureAsset>
 CreateTextureFromRaw(const RawImage& img, std::shared_ptr<Sampler> sampler, bool allowRTV, bool allowUAV)
 {
     ImageDimensions dim{};
@@ -186,10 +182,12 @@ CreateTextureFromRaw(const RawImage& img, std::shared_ptr<Sampler> sampler, bool
 
     if (!sampler) sampler = Sampler::GetDefaultSampler();
 
-    auto texture = std::make_shared<Texture>(buffer, sampler);
-    if (!img.filepathUtf8.empty()) texture->SetFilepath(img.filepathUtf8);
-    if (img.fileType.has_value())  texture->SetFileType(*img.fileType);
-    texture->SetAlphaIsAllOpaque(img.alphaAllOpaque);
+	TextureFileMeta meta{};
+	meta.fileType = img.fileType.value_or(ImageFiletype::UNKNOWN);
+	meta.filePath = img.filepathUtf8;
+	meta.alphaIsAllOpaque = img.alphaAllOpaque;
+
+    auto texture = std::make_shared<TextureAsset>(buffer, sampler, meta);
     return texture;
 }
 
@@ -349,7 +347,7 @@ namespace detail {
     }
 }
 
-std::shared_ptr<Texture>
+std::shared_ptr<TextureAsset>
 LoadTextureFromMemory(const void* bytes, size_t byteCount,
     std::shared_ptr<Sampler> sampler,
     const LoadFlags& flags,
@@ -412,7 +410,7 @@ LoadTextureFromMemory(const void* bytes, size_t byteCount,
     throw std::runtime_error("Unhandled container type");
 }
 
-std::shared_ptr<Texture>
+std::shared_ptr<TextureAsset>
 LoadTextureFromFile(const std::wstring& filePath,
     std::shared_ptr<Sampler> sampler,
     bool preferSRGB,
@@ -429,7 +427,7 @@ LoadTextureFromFile(const std::wstring& filePath,
     return LoadTextureFromMemory(data.data(), data.size(), sampler, localFlags, preferSRGB, allowRTV, allowUAV);
 }
 
-std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath) {
+std::shared_ptr<TextureAsset> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath) {
     ImageData top = LoadSTBImage(topPath);
 	ImageData bottom = LoadSTBImage(bottomPath);
 	ImageData left = LoadSTBImage(leftPath);
@@ -452,10 +450,10 @@ std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bo
 
     auto buffer = PixelBuffer::CreateShared(desc, {right.data, left.data, top.data, bottom.data, front.data, back.data });
     auto sampler = Sampler::GetDefaultSampler();
-    return std::make_shared<Texture>(buffer, sampler);
+    return std::make_shared<TextureAsset>(buffer, sampler, TextureFileMeta());
 }
 
-std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV, bool allowUAV) {
+std::shared_ptr<TextureAsset> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV, bool allowUAV) {
     DirectX::ScratchImage image;
     DirectX::TexMetadata metadata;
     HRESULT hr = DirectX::LoadFromDDSFile(ddsFilePath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, image);
@@ -502,7 +500,13 @@ std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allo
 	auto buffer = PixelBuffer::CreateShared(desc, faces);
 
     auto sampler = Sampler::GetDefaultSampler();
-    return std::make_shared<Texture>(buffer, sampler);
+
+	TextureFileMeta meta{};
+	meta.fileType = ImageFiletype::DDS;
+	meta.filePath = ws2s(ddsFilePath);
+	meta.alphaIsAllOpaque = image.IsAlphaAllOpaque();
+
+    return std::make_shared<TextureAsset>(buffer, sampler, meta);
 }
 
 DirectX::XMMATRIX createDirectionalLightViewMatrix(XMVECTOR lightDir, XMVECTOR center) {
@@ -1523,7 +1527,7 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
     downsampledDesc.clearColor[0] = std::numeric_limits<float>().max();
 	downsampledDesc.padInternalResolution = true;
 
-    std::shared_ptr<PixelBuffer> linearDepthBuffer = PixelBuffer::CreateShared(downsampledDesc, {}, nullptr/* depthBuffer.get()*/);
+    std::shared_ptr<PixelBuffer> linearDepthBuffer = PixelBuffer::CreateShared(downsampledDesc, {});
     linearDepthBuffer->SetName("linear Depth Buffer");
 
 

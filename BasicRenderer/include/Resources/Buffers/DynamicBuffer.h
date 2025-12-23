@@ -36,6 +36,11 @@ public:
 
 	rhi::Resource GetAPIResource() override { return m_dataBuffer->GetAPIResource(); }
 
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) {
+        m_metadataBundles.emplace_back(bundle);
+        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
+    }
+
 protected:
     rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
         return m_dataBuffer->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
@@ -83,6 +88,8 @@ private:
 	std::string m_name = m_baseName;
 
     bool m_UAV = false;
+
+    std::vector<EntityComponentBundle> m_metadataBundles;
 
     void CreateBuffer(size_t capacity);
     void GrowBuffer(size_t newSize);

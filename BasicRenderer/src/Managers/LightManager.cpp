@@ -4,13 +4,13 @@
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Resources/ShadowMaps.h"
-#include "Resources/DynamicResource.h"
 #include "Managers/IndirectCommandBufferManager.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Managers/ViewManager.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "Utilities/MathUtils.h"
 #include "ShaderBuffers.h"
+#include "Resources/PixelBuffer.h"
 #include "../../generated/BuiltinResources.h"
 
 LightManager::LightManager() {

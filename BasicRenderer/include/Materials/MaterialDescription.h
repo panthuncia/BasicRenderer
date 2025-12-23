@@ -7,15 +7,15 @@
 
 #include "Utilities/DefaultOptional.h"
 
-class Texture;
+class TextureAsset;
 
 struct TextureAndConstant {
 	TextureAndConstant() = default;
-    TextureAndConstant(std::shared_ptr<Texture> tex, float f) : texture(tex), factor(f) {
+    TextureAndConstant(std::shared_ptr<TextureAsset> tex, float f) : texture(tex), factor(f) {
     }
-    TextureAndConstant(std::shared_ptr<Texture> tex, float f, std::vector<uint32_t> ch) : texture(tex), factor(f), channels(std::move(ch)) {
+    TextureAndConstant(std::shared_ptr<TextureAsset> tex, float f, std::vector<uint32_t> ch) : texture(tex), factor(f), channels(std::move(ch)) {
 	}
-    std::shared_ptr<Texture> texture;  // null if none
+    std::shared_ptr<TextureAsset> texture;  // null if none
     DefaultedOptional<float> factor = DefaultedOptional<float>(1.0f);
 	std::vector<uint32_t> channels; // For swizzling texture channels, e.g. R, G, B, A
 };

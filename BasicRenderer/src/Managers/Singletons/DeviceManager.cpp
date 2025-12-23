@@ -39,7 +39,8 @@ rhi::Result DeviceManager::CreateResourceTracked(
     }
 
     // Attach base info (size, kind, etc.)
-    const uint64_t sizeBytes = 0; // TODO
+    e.set<MemoryStatisticsComponents::ResourceID>({ track.globalResourceID });
+	const uint64_t sizeBytes = 0; // TODO
     e.set<MemoryStatisticsComponents::MemSizeBytes>({ sizeBytes });
     if (track.id) {
         e.set<ResourceIdentifier>(track.id.value());

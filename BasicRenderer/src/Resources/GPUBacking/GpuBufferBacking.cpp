@@ -25,7 +25,7 @@ GpuBufferBacking::GpuBufferBacking(
 	rhi::ResourceAllocationInfo allocInfo;
 	device.GetResourceAllocationInfo(&desc, 1, &allocInfo);
 
-	AllocationTrackDesc trackDesc(static_cast<int>(owningResourceID));
+	AllocationTrackDesc trackDesc(owningResourceID);
 	EntityComponentBundle allocationBundle;
 	if (name != nullptr) {
 		allocationBundle.Set<MemoryStatisticsComponents::ResourceName>({ name });

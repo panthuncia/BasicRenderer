@@ -39,7 +39,7 @@ public:
 		m_pNormals = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::Normals);
         m_pMetallicRoughness = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::MetallicRoughness);
 		m_pMotionVectors = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::MotionVectors);
-		m_pEnvironmentCubemap = m_resourceRegistryView->Request<Texture>(Builtin::Environment::CurrentPrefilteredCubemap);
+		m_pEnvironmentCubemap = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Environment::CurrentPrefilteredCubemap);
         m_pBRDFLUT = m_resourceRegistryView->Request<PixelBuffer>(Builtin::BRDFLUT);
 		m_pSSSROutput = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PostProcessing::ScreenSpaceReflections);
     }
@@ -74,7 +74,7 @@ public:
 			m_pNormals.get(),
 			m_pMetallicRoughness.get(),
 			m_pMotionVectors.get(),
-            m_pEnvironmentCubemap->GetBuffer().get(),
+            m_pEnvironmentCubemap.get(),
 			m_pBRDFLUT.get(),
             m_pSSSROutput.get()
 		);
@@ -103,7 +103,7 @@ private:
     std::shared_ptr<PixelBuffer> m_pDepthTexture;
 	std::shared_ptr<PixelBuffer> m_pNormals;
 	std::shared_ptr<PixelBuffer> m_pMetallicRoughness;
-	std::shared_ptr<Texture> m_pEnvironmentCubemap;
+	std::shared_ptr<PixelBuffer> m_pEnvironmentCubemap;
 	std::shared_ptr<PixelBuffer> m_pBRDFLUT;
 	std::shared_ptr<PixelBuffer> m_pSSSROutput;
 };

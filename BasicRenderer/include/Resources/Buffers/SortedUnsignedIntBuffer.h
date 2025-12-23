@@ -41,6 +41,11 @@ public:
         return m_dataBuffer->GetAPIResource();
     }
 
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) {
+        m_metadataBundles.emplace_back(bundle);
+        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
+    }
+
 protected:
     rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
         return m_dataBuffer->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
@@ -69,6 +74,8 @@ private:
 
     uint64_t m_capacity;
     uint64_t m_earliestModifiedIndex; // To avoid updating the entire buffer every time
+
+    std::vector<EntityComponentBundle> m_metadataBundles;
 
     inline static std::string m_name = "SortedUnsignedIntBuffer";
 

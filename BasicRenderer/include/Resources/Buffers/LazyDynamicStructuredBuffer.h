@@ -79,6 +79,10 @@ public:
 
 	rhi::Resource GetAPIResource() override { return m_dataBuffer->GetAPIResource(); }
 
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) {
+        m_metadataBundles.emplace_back(bundle);
+        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
+    }
 
 protected:
 
@@ -114,6 +118,8 @@ private:
     inline static std::string m_name = "LazyDynamicStructuredBuffer";
 
     bool m_UAV = false;
+
+    std::vector<EntityComponentBundle> m_metadataBundles;
 
     void AssignDescriptorSlots(uint32_t newCapacity)
     {
@@ -164,6 +170,10 @@ private:
             UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), *GetStateTracker(), previousCapacity*sizeof(T));
         }
         m_dataBuffer = std::move(newDataBuffer);
+
+        for (const auto& bundle : m_metadataBundles) {
+            m_dataBuffer->ApplyMetadataComponentBundle(bundle);
+        }
 
         AssignDescriptorSlots(static_cast<uint32_t>(capacity));
 

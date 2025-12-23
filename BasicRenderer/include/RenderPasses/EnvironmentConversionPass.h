@@ -47,14 +47,14 @@ public:
             auto srcTex = env->GetHDRITexture(); // equirectangular HDRI
             auto dstCubemap = env->GetEnvironmentCubemap(); // cube resource (must support UAV)
 
-            const uint32_t srcSrvIndex = srcTex->GetBuffer()->GetSRVInfo(0).slot.index;
+            const uint32_t srcSrvIndex = srcTex->Image().GetSRVInfo(0).slot.index;
 
             const uint32_t groupSize = 8;
             const uint32_t gx = (skyboxRes + groupSize - 1) / groupSize;
             const uint32_t gy = (skyboxRes + groupSize - 1) / groupSize;
 
             const uint32_t dstCubeUavIndex =
-                dstCubemap->GetBuffer()->GetUAVShaderVisibleInfo(0).slot.index;
+                dstCubemap->Image().GetUAVShaderVisibleInfo(0).slot.index;
             for (uint32_t face = 0; face < 6; ++face)
             {
                 // Root constants payload: [srcSrv, dstFaceUav, face, size]

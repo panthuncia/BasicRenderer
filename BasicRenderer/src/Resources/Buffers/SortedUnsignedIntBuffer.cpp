@@ -67,7 +67,12 @@ void SortedUnsignedIntBuffer::CreateBuffer(uint64_t capacity) {
     auto device = DeviceManager::GetInstance().GetDevice();
     m_capacity = capacity;
     m_dataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, capacity * sizeof(unsigned int), GetGlobalResourceID(), m_UAV);
-    AssignDescriptorSlots();
+    
+    for (const auto& bundle : m_metadataBundles) {
+        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
+	}
+
+	AssignDescriptorSlots();
 }
 
 void SortedUnsignedIntBuffer::GrowBuffer(uint64_t newSize) {

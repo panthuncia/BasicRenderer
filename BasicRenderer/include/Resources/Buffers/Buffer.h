@@ -8,7 +8,6 @@
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Managers/Singletons/UploadManager.h"
-#include "Managers/Singletons/ResourceManager.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -21,6 +20,10 @@ public:
 
     rhi::Resource GetAPIResource() override { return m_dataBuffer->GetAPIResource(); }
     size_t GetSize() const { return m_bufferSize; }
+
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) const {
+        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
+    }
 protected:
 
     rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
@@ -34,20 +37,13 @@ private:
     }
 
     void OnSetName() override {
-        if (name != "") {
-            m_dataBuffer->SetName((m_name + ": " + name).c_str());
-        }
-        else {
-            m_dataBuffer->SetName(m_name.c_str());
-        }
+    	m_dataBuffer->SetName(name.c_str());
     }
 
 	rhi::HeapType m_accessType;
 	std::unique_ptr<GpuBufferBacking> m_dataBuffer;
 
     uint64_t m_bufferSize;
-
-    inline static std::string m_name = "Buffer";
 
     bool m_UAV = false;
 };

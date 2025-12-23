@@ -58,7 +58,7 @@ namespace USDLoader {
 	struct LoadingCaches {
 		std::unordered_map<std::string, std::shared_ptr<Material>> materialCache;
 		std::unordered_map<std::string, std::vector<std::shared_ptr<Mesh>>> meshCache;
-		std::unordered_map<std::string, std::shared_ptr<Texture>> textureCache;
+		std::unordered_map<std::string, std::shared_ptr<TextureAsset>> textureCache;
 		std::unordered_map<std::string, std::string> uvSetCache;
 		//std::unordered_map<std::string, std::shared_ptr<UsdSkelSkeleton>> unprocessedSkeletons;
 		std::unordered_map<std::string, UsdPrim> primsWithSkeletons;
@@ -299,7 +299,7 @@ namespace USDLoader {
 				}
 				else if (name == TfToken("normal")) {
 					result.normal.texture = tex;
-					result.negateNormals = tex->GetFileType() == ImageFiletype::DDS ? true : false;
+					result.negateNormals = tex->Meta().fileType == ImageFiletype::DDS ? true : false;
 					result.invertNormalGreen = false;
 					result.normal.channels = SwizzleToIndices(swizzle);
 				}

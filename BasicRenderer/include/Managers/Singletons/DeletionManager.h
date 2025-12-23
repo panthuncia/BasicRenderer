@@ -39,6 +39,10 @@ public:
 		for (size_t i = m_allocationDeletionQueue.size() - 1; i >= 1; --i) {
 			m_allocationDeletionQueue[i].swap(m_allocationDeletionQueue[i-1]);
 		}
+		m_trackedAllocationDeletionQueue.back().clear();
+		for (size_t i = m_trackedAllocationDeletionQueue.size() - 1; i >= 1; --i) {
+			m_trackedAllocationDeletionQueue[i].swap(m_trackedAllocationDeletionQueue[i-1]);
+		}
 	}
 
     void Cleanup() {

@@ -156,12 +156,12 @@ private:
 };
 
 struct AllocationTrackDesc {
-    AllocationTrackDesc(const int globalResourceID)
+    AllocationTrackDesc(const uint64_t globalResourceID)
     {
 	    this->globalResourceID = globalResourceID;
     }
 
-    int globalResourceID;
+    uint64_t globalResourceID;
 	// Optionally let caller provide an existing entity (rarely needed).
 	flecs::entity existing = {};
 

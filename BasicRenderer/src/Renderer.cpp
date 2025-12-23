@@ -22,34 +22,19 @@
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "RenderPasses/Base/RenderPass.h"
 #include "RenderPasses/ForwardRenderPass.h"
-#include "RenderPasses/ShadowPass.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "RenderPasses/DebugRenderPass.h"
 #include "RenderPasses/SkyboxRenderPass.h"
-#include "RenderPasses/EnvironmentConversionPass.h"
 #include "RenderPasses/EnvironmentFilterPass.h"
-#include "RenderPasses/EnvironmentSHPass.h"
 #include "RenderPasses/ClearUAVsPass.h"
 #include "RenderPasses/ObjectCullingPass.h"
 #include "RenderPasses/MeshletCullingPass.h"
 #include "RenderPasses/DebugSpheresPass.h"
-#include "RenderPasses/PPLLFillPass.h"
-#include "RenderPasses/PPLLResolvePass.h"
 #include "RenderPasses/SkinningPass.h"
 #include "RenderPasses/Base/ComputePass.h"
-#include "RenderPasses/ClusterGenerationPass.h"
-#include "RenderPasses/LightCullingPass.h"
-#include "RenderPasses/GBuffer.h"
-#include "RenderPasses/GTAO/XeGTAOFilterPass.h"
-#include "RenderPasses/GTAO/XeGTAOMainPass.h"
-#include "RenderPasses/GTAO/XeGTAODenoisePass.h"
-#include "RenderPasses/DeferredShadingPass.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
 #include "RenderPasses/PostProcessing/Tonemapping.h"
 #include "RenderPasses/PostProcessing/Upscaling.h"
-#include "RenderPasses/brdfIntegrationPass.h"
-#include "RenderPasses/PostProcessing/ScreenSpaceReflectionsPass.h"
-#include "RenderPasses/PostProcessing/SpecularIBLPass.h"
 #include "RenderPasses/PostProcessing/luminanceHistogram.h"
 #include "RenderPasses/PostProcessing/luminanceHistogramAverage.h"
 #include "RenderPasses/ClearVisibilityBufferPass.h"
@@ -65,7 +50,6 @@
 #include "Managers/IndirectCommandBufferManager.h"
 #include "Utilities/MathUtils.h"
 #include "Scene/MovementState.h"
-#include "Animation/AnimationController.h"
 #include "ThirdParty/XeGTAO.h"
 #include "Managers/EnvironmentManager.h"
 #include "Render/TonemapTypes.h"
@@ -75,7 +59,6 @@
 #include "Render/RenderGraphBuildHelper.h"
 #include "Managers/Singletons/UpscalingManager.h"
 #include "Managers/Singletons/FFXManager.h"
-#include "slHooks.h"
 
 void D3D12DebugCallback(
     D3D12_MESSAGE_CATEGORY Category,
@@ -619,6 +602,7 @@ void Renderer::CreateTextures() {
     hdrDesc.imageDimensions.push_back(dims);
     auto hdrColorTarget = PixelBuffer::CreateShared(hdrDesc);
     hdrColorTarget->SetName("Primary Camera HDR Color Target");
+    hdrColorTarget->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Primary color buffers" }));
 	m_coreResourceProvider.m_HDRColorTarget = hdrColorTarget;
 
     auto outputResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
@@ -627,6 +611,7 @@ void Renderer::CreateTextures() {
     hdrDesc.generateMipMaps = true;
 	auto upscaledHDRColorTarget = PixelBuffer::CreateShared(hdrDesc);
 	upscaledHDRColorTarget->SetName("Upscaled HDR Color Target");
+	upscaledHDRColorTarget->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Upscaled color buffers" }));
 	m_coreResourceProvider.m_upscaledHDRColorTarget = upscaledHDRColorTarget;
 
     TextureDescription motionVectors;
@@ -644,6 +629,7 @@ void Renderer::CreateTextures() {
     motionVectors.imageDimensions.push_back(motionVectorsDims);
     auto motionVectorsBuffer = PixelBuffer::CreateShared(motionVectors);
     motionVectorsBuffer->SetName("Motion Vectors");
+    motionVectorsBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GBuffer" }));
 	m_coreResourceProvider.m_gbufferMotionVectors = motionVectorsBuffer;
 }
 
@@ -1103,10 +1089,12 @@ void Renderer::CreateRenderGraph() {
         // Create mesh cluster id buffer, two UINTs per cluster, used by visibility buffer and occlusion culling
         // 2^25 visible clusters allowed due to index precision
         auto clusterIDBuffer = CreateIndexedStructuredBuffer(static_cast<size_t>(pow(2, 25)), sizeof(VisibleClusterInfo), true, false);
-        clusterIDBuffer->SetName("Visible Cluster Table");
+        clusterIDBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
+    	clusterIDBuffer->SetName("Visible Cluster Table");
         newGraph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTable, clusterIDBuffer);
         auto clusterIDBufferCounter = CreateIndexedStructuredBuffer(1, sizeof(UINT), true, false);
-        clusterIDBufferCounter->SetName("Visible Cluster Table Counter");
+        clusterIDBufferCounter->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
+    	clusterIDBufferCounter->SetName("Visible Cluster Table Counter");
         newGraph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTableCounter, clusterIDBufferCounter);
 
         newGraph->BuildRenderPass("VisibleClusterTableCounterResetPass")
@@ -1144,8 +1132,8 @@ void Renderer::CreateRenderGraph() {
     }
 	
     if (m_currentEnvironment != nullptr) {
-        newGraph->RegisterResource(Builtin::Environment::CurrentCubemap, m_currentEnvironment->GetEnvironmentCubemap());
-        newGraph->RegisterResource(Builtin::Environment::CurrentPrefilteredCubemap, m_currentEnvironment->GetEnvironmentPrefilteredCubemap());
+        newGraph->RegisterResource(Builtin::Environment::CurrentCubemap, m_currentEnvironment->GetEnvironmentCubemap()->ImagePtr());
+        newGraph->RegisterResource(Builtin::Environment::CurrentPrefilteredCubemap, m_currentEnvironment->GetEnvironmentPrefilteredCubemap()->ImagePtr());
         newGraph->BuildRenderPass("SkyboxPass")
             .Build<SkyboxRenderPass>();
     }
@@ -1161,8 +1149,12 @@ void Renderer::CreateRenderGraph() {
     }
 
 	auto adaptedLuminanceBuffer = CreateIndexedStructuredBuffer(1, sizeof(float), true, false);
-    newGraph->RegisterResource(Builtin::PostProcessing::AdaptedLuminance, adaptedLuminanceBuffer);
+    adaptedLuminanceBuffer->SetName("Adapted Luminance");
+    adaptedLuminanceBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Post-Processing resources" }));
+	newGraph->RegisterResource(Builtin::PostProcessing::AdaptedLuminance, adaptedLuminanceBuffer);
 	auto histogramBuffer = CreateIndexedStructuredBuffer(255, sizeof(uint32_t), true, false);
+	histogramBuffer->SetName("Luminance Histogram Buffer");
+	histogramBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Post-Processing resources" }));
 	newGraph->RegisterResource(Builtin::PostProcessing::LuminanceHistogram, histogramBuffer);
 
     newGraph->BuildComputePass("luminanceHistogramPass")

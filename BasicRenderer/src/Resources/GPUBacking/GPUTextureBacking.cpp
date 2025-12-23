@@ -88,22 +88,29 @@ void UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc
 		static_cast<uint32_t>(srd.size()));
 }
 
-std::shared_ptr<GpuTextureBacking>
-GpuTextureBacking::CreateShared(const TextureDescription& desc,
-	const std::vector<const stbi_uc*>& initialData,
-	GpuTextureBacking* aliasTarget)
+GpuTextureBacking::GpuTextureBacking(CreateTag)
 {
-	auto pb = std::make_shared<GpuTextureBacking>(CreateTag{});
-	pb->initialize(desc, initialData, aliasTarget);
+	
+}
+
+std::unique_ptr<GpuTextureBacking>
+GpuTextureBacking::CreateUnique(const TextureDescription& desc,
+	uint64_t owningResourceID,
+	const char* name,
+	const std::vector<const stbi_uc*>& initialData)
+{
+	auto pb = std::make_unique<GpuTextureBacking>(CreateTag{});
+	pb->initialize(desc, owningResourceID, name, initialData);
 #if BUILD_TYPE == BUILD_DEBUG
 	pb->m_creation = std::stacktrace::current();
 #endif
-	return pb;
+	return std::move(pb);
 }
 
 void GpuTextureBacking::initialize(const TextureDescription& desc,
-    const std::vector<const stbi_uc*>& initialData,
-	GpuTextureBacking* aliasTarget)
+	uint64_t owningResourceID,
+	const char* name,
+    const std::vector<const stbi_uc*>& initialData)
 {
     ResourceManager& rm = ResourceManager::GetInstance();
 
@@ -173,6 +180,23 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 	}
 	// Create the texture resource
 
+	AllocationTrackDesc trackDesc(static_cast<int>(owningResourceID));
+	EntityComponentBundle allocationBundle;
+	if (name != nullptr) {
+		allocationBundle.Set<MemoryStatisticsComponents::ResourceName>({ name });
+	}
+
+	auto device = DeviceManager::GetInstance().GetDevice();
+
+	rhi::ResourceAllocationInfo allocInfo;
+	device.GetResourceAllocationInfo(&textureDesc, 1, &allocInfo);
+
+	allocationBundle
+		.Set<MemoryStatisticsComponents::MemSizeBytes>({ allocInfo.sizeInBytes })
+		.Set<MemoryStatisticsComponents::ResourceType>({ rhi::ResourceType::Texture2D });
+		//.Set<MemoryStatisticsComponents::ResourceID>({ owningResourceID });
+	trackDesc.attach = allocationBundle;
+
 	//rhi::ResourcePtr textureResource;
 	if (desc.allowAlias) {
 		//textureResource = device.CreatePlacedResource(placedResourceHeap, 0, textureDesc); // TODO: handle offset
@@ -188,23 +212,13 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 			textureDesc,
 			0,
 			nullptr,
-			m_textureHandle);
+			m_textureHandle,
+			trackDesc);
 
 		//auto result = device.CreateCommittedResource(textureDesc, textureResource);
 	}
 
-	auto device = DeviceManager::GetInstance().GetDevice();
-
-	rhi::ResourceAllocationInfo allocInfo;
-	device.GetResourceAllocationInfo(&textureDesc, 1, &allocInfo);
-	EntityComponentBundle allocationBundle;
-	allocationBundle
-		.Set<MemoryStatisticsComponents::MemSizeBytes>({ allocInfo.sizeInBytes })
-		.Set<MemoryStatisticsComponents::ResourceType>({ rhi::ResourceType::Buffer })
-		.Set<MemoryStatisticsComponents::ResourceName>({ GetName() });
-	m_textureHandle.ApplyComponentBundle(allocationBundle);
-
-    m_placedResourceHeap = aliasTarget ? aliasTarget->GetPlacedResourceHeap() : rhi::HeapHandle();
+    //m_placedResourceHeap = aliasTarget ? aliasTarget->GetPlacedResourceHeap() : rhi::HeapHandle();
 
 	m_width  = desc.imageDimensions[0].width;
 	m_height = desc.imageDimensions[0].height;
@@ -239,36 +253,6 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 		}
 	}
 
-	// Create and assign descriptors through ResourceManager.
-	{
-		ResourceManager::ViewRequirements views;
-		ResourceManager::ViewRequirements::TextureViews texViews;
-		texViews.mipLevels = m_mipLevels;
-		texViews.isCubemap = desc.isCubemap;
-		texViews.isArray = desc.isArray;
-		texViews.arraySize = desc.arraySize;
-		texViews.totalArraySlices = m_arraySize;
-
-		texViews.baseFormat = desc.format;
-		texViews.srvFormat = desc.srvFormat;
-		texViews.uavFormat = desc.uavFormat;
-		texViews.rtvFormat = desc.rtvFormat;
-		texViews.dsvFormat = desc.dsvFormat;
-
-		texViews.createSRV = true;
-		texViews.createUAV = desc.hasUAV;
-		texViews.createNonShaderVisibleUAV = desc.hasNonShaderVisibleUAV;
-		texViews.createRTV = desc.hasRTV;
-		texViews.createDSV = desc.hasDSV;
-
-		// if cubemap, also create Texture2DArray SRV.
-		texViews.createCubemapAsArraySRV = desc.isCubemap;
-
-		texViews.uavFirstMip = 0;
-
-		views.views = texViews;
-		rm.AssignDescriptorSlots(*this, m_textureHandle.GetResource(), views);
-	}
 }
 
 void GpuTextureBacking::SetName(const std::string& newName)

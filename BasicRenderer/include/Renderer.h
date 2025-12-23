@@ -14,11 +14,7 @@
 #include <rhi.h>
 
 #include <sl.h>
-#include <sl_consts.h>
-#include <sl_dlss.h>
 
-#include "Mesh/Mesh.h"
-#include "ShaderBuffers.h"
 #include "Scene/Scene.h"
 #include "Managers/InputManager.h"
 #include "Render/RenderGraph.h"
@@ -33,7 +29,6 @@
 #include "Managers/EnvironmentManager.h"
 #include "Managers/MaterialManager.h"
 #include "Scene/MovementState.h"
-#include "Scene/Components.h"
 #include "../generated/BuiltinResources.h"
 #include "Utilities/Timer.h"
 

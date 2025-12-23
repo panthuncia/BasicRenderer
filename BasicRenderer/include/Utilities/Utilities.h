@@ -26,7 +26,7 @@
 class DescriptorHeap;
 class Mesh;
 class Sampler;
-class Texture;
+class TextureAsset;
 class Buffer;
 
 void ThrowIfFailed(HRESULT hr);
@@ -47,20 +47,20 @@ struct LoadFlags {
 	// HDR has no flags
 };
 
-std::shared_ptr<Texture> LoadTextureFromFile(
+std::shared_ptr<TextureAsset> LoadTextureFromFile(
 	const std::wstring& filePath,
 	std::shared_ptr<Sampler> sampler = nullptr,
 	bool preferSRGB = false,
 	const LoadFlags& flags = {}, bool allowRTV = false, bool allowUAV = false);
 
-std::shared_ptr<Texture> LoadTextureFromMemory(
+std::shared_ptr<TextureAsset> LoadTextureFromMemory(
 	const void* bytes,
 	size_t byteCount,
 	std::shared_ptr<Sampler> sampler = nullptr,
 	const LoadFlags& flags = {},
 	bool preferSRGB = false, bool allowRTV = false , bool allowUAV = false);
-std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath);
-std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV = false, bool allowUAV = false);
+std::shared_ptr<TextureAsset> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath);
+std::shared_ptr<TextureAsset> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV = false, bool allowUAV = false);
 
 #if __has_include(<bit>) && (__cpp_lib_bit_cast >= 201806L)
 #include <bit>

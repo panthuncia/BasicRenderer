@@ -21,6 +21,7 @@
 #include "Utilities/MathUtils.h"
 #include "Resources/Sampler.h"
 #include "Resources/components.h"
+#include "Resources/PixelBuffer.h"
 
 std::atomic<uint64_t> Scene::globalSceneCount = 0;
 

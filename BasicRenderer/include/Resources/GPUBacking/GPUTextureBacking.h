@@ -4,7 +4,6 @@
 
 #include "ThirdParty/stb/stb_image.h"
 
-#include "Resources/GloballyIndexedResource.h"
 #include "Resources/TextureDescription.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -15,12 +14,13 @@ public:
 	// Don't use this.
 	struct CreateTag {}; // TODO: Figure out why 'new' isn't working on PixelBuffer
 
-	static std::shared_ptr<GpuTextureBacking>
-		CreateShared(const TextureDescription& desc,
-			const std::vector<const stbi_uc*>& initialData = {},
-			GpuTextureBacking* aliasTarget = nullptr);
+	static std::unique_ptr<GpuTextureBacking>
+		CreateUnique(const TextureDescription& desc,
+			uint64_t owningResourceID,
+			const char* name = nullptr,
+			const std::vector<const stbi_uc*>& initialData = {});
 
-	explicit GpuTextureBacking(CreateTag) {}
+	explicit GpuTextureBacking(CreateTag);
 	~GpuTextureBacking()
 	{
 		DeletionManager::GetInstance().MarkForDelete(std::move(m_textureHandle));
@@ -37,8 +37,12 @@ public:
 
 	rhi::Resource GetAPIResource() { return m_textureHandle.GetResource(); }
 
-	rhi::HeapHandle GetPlacedResourceHeap() const {
-		return m_placedResourceHeap;
+	//rhi::HeapHandle GetPlacedResourceHeap() const {
+	//	return m_placedResourceHeap;
+	//}
+
+	void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) {
+		m_textureHandle.ApplyComponentBundle(bundle);
 	}
 
 	const rhi::ClearValue& GetClearColor() const {
@@ -55,23 +59,34 @@ public:
 		return m_internalHeight;
 	}
 
+	unsigned int GetMipLevels() const {
+		return m_mipLevels;
+	}
+
+	unsigned int GetArraySize() const {
+		return m_arraySize;
+	}
+
 private:
 #if BUILD_TYPE == BUILD_DEBUG
 	std::stacktrace m_creation;
 #endif
     void initialize(const TextureDescription& desc,
-        const std::vector<const stbi_uc*>& initialData,
-		GpuTextureBacking* aliasTarget);
+		uint64_t owningResourceID,
+		const char* name,
+        const std::vector<const stbi_uc*>& initialData);
 
     unsigned int m_width;
     unsigned int m_height;
 	unsigned int m_channels;
+	unsigned int m_mipLevels;
+	unsigned int m_arraySize;
     TrackedHandle m_textureHandle;
     rhi::Format m_format;
 	TextureDescription m_desc;
 	rhi::ClearValue m_clearColor;
 
-    rhi::HeapHandle m_placedResourceHeap; // If this is a placed resource, this is the heap it was created in
+    //rhi::HeapHandle m_placedResourceHeap; // If this is a placed resource, this is the heap it was created in
 
     // Enhanced barriers
 	rhi::TextureBarrier m_barrier = {};

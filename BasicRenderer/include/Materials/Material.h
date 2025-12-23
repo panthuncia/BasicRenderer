@@ -77,7 +77,7 @@ public:
         materialFlags |= MaterialFlags::MATERIAL_PBR; // TODO: Non-PBR materials
         BlendState blendState = BlendState::BLEND_STATE_OPAQUE; // Default blend state
         if (desc.baseColor.texture) {
-            if (!desc.baseColor.texture->AlphaIsAllOpaque()) {
+            if (!desc.baseColor.texture->Meta().alphaIsAllOpaque) {
                 materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
                 blendState = BlendState::BLEND_STATE_MASK; // Use mask blending for alpha-tested materials
             }
@@ -142,7 +142,7 @@ public:
     }
     ~Material();
 
-    void SetHeightmap(std::shared_ptr<Texture> heightmap);
+    void SetHeightmap(std::shared_ptr<TextureAsset> heightmap);
     void SetTextureScale(float scale);
     void SetHeightmapScale(float scale);
     void SetCompileFlagsID(uint32_t id);
@@ -160,14 +160,14 @@ private:
 	const uint32_t m_materialID = globalMaterialCount.fetch_add(1, std::memory_order_relaxed);
 
     std::string m_name;
-    std::shared_ptr<Texture> m_baseColorTexture;
-    std::shared_ptr<Texture> m_normalTexture;
-    std::shared_ptr<Texture> m_aoMap;
-    std::shared_ptr<Texture> m_heightMap;
-    std::shared_ptr<Texture> m_roughnessTexture;
-    std::shared_ptr<Texture> m_metallicTexture;
-    std::shared_ptr<Texture> m_emissiveTexture;
-    std::shared_ptr<Texture> m_opacityTexture;
+    std::shared_ptr<TextureAsset> m_baseColorTexture;
+    std::shared_ptr<TextureAsset> m_normalTexture;
+    std::shared_ptr<TextureAsset> m_aoMap;
+    std::shared_ptr<TextureAsset> m_heightMap;
+    std::shared_ptr<TextureAsset> m_roughnessTexture;
+    std::shared_ptr<TextureAsset> m_metallicTexture;
+    std::shared_ptr<TextureAsset> m_emissiveTexture;
+    std::shared_ptr<TextureAsset> m_opacityTexture;
     float m_metallicFactor;
     float m_roughnessFactor;
     DirectX::XMFLOAT4 m_baseColorFactor;
@@ -181,14 +181,14 @@ private:
 
     Material(const std::string& name,
         MaterialFlags materialFlags, PSOFlags psoFlags,
-        std::shared_ptr<Texture> baseColorTexture,
-        std::shared_ptr<Texture> normalTexture,
-        std::shared_ptr<Texture> aoMap,
-        std::shared_ptr<Texture> heightMap,
-        std::shared_ptr<Texture> metallicTexture,
-        std::shared_ptr<Texture> m_roughnessTexture,
-        std::shared_ptr<Texture> emissiveTexture,
-        std::shared_ptr<Texture> opacityTexture,
+        std::shared_ptr<TextureAsset> baseColorTexture,
+        std::shared_ptr<TextureAsset> normalTexture,
+        std::shared_ptr<TextureAsset> aoMap,
+        std::shared_ptr<TextureAsset> heightMap,
+        std::shared_ptr<TextureAsset> metallicTexture,
+        std::shared_ptr<TextureAsset> m_roughnessTexture,
+        std::shared_ptr<TextureAsset> emissiveTexture,
+        std::shared_ptr<TextureAsset> opacityTexture,
         float metallicFactor,
         float roughnessFactor,
         DirectX::XMFLOAT4 baseColorFactor,
@@ -205,14 +205,14 @@ private:
 
     static std::shared_ptr<Material> CreateShared(const std::string& name,
         MaterialFlags materialFlags, PSOFlags psoFlags,
-        std::shared_ptr<Texture> baseColorTexture,
-        std::shared_ptr<Texture> normalTexture,
-        std::shared_ptr<Texture> aoMap,
-        std::shared_ptr<Texture> heightMap,
-        std::shared_ptr<Texture> metallicTexture,
-        std::shared_ptr<Texture> roughnessTexture,
-        std::shared_ptr<Texture> emissiveTexture,
-        std::shared_ptr<Texture> opacityTexture,
+        std::shared_ptr<TextureAsset> baseColorTexture,
+        std::shared_ptr<TextureAsset> normalTexture,
+        std::shared_ptr<TextureAsset> aoMap,
+        std::shared_ptr<TextureAsset> heightMap,
+        std::shared_ptr<TextureAsset> metallicTexture,
+        std::shared_ptr<TextureAsset> roughnessTexture,
+        std::shared_ptr<TextureAsset> emissiveTexture,
+        std::shared_ptr<TextureAsset> opacityTexture,
         float metallicFactor,
         float roughnessFactor,
         DirectX::XMFLOAT4 baseColorFactor,

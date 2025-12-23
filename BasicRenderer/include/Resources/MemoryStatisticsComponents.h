@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 
 #include "rhi.h"
 
@@ -25,5 +26,9 @@ namespace MemoryStatisticsComponents
 
 	struct AliasingPool {
 		std::optional<uint64_t> poolID;
+	};
+
+	struct ResourceUsage {
+		std::string usage;
 	};
 }

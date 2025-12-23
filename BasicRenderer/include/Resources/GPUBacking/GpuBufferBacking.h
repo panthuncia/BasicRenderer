@@ -42,6 +42,10 @@ public:
 	rhi::Resource GetAPIResource() { return m_bufferAllocation.GetResource(); }
 	void SetName(const char* name);
 
+	void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) {
+		m_bufferAllocation.ApplyComponentBundle(bundle);
+	}
+
 private:
 #if BUILD_TYPE == BUILD_DEBUG
 	std::stacktrace m_creation;

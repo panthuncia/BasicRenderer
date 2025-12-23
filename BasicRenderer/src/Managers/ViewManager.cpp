@@ -5,6 +5,7 @@
 #include "Resources/ResourceGroup.h"
 #include "../../generated/BuiltinResources.h"
 #include "Resources/DynamicResource.h"
+#include "Resources/MemoryStatisticsComponents.h"
 
 ViewManager::ViewManager() {
     auto& resourceManager = ResourceManager::GetInstance();
@@ -70,6 +71,7 @@ void ViewManager::AllocateBitfields(View& v) {
     auto meshletWords = (meshletBits + 31) / 32;
     auto meshletRes = CreateIndexedStructuredBuffer(meshletWords, sizeof(unsigned int), true, false);
     meshletRes->SetName("MeshletBitfieldBuffer(view=" + std::to_string(v.id) + ")");
+    meshletRes->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Culling bitfields" }));
     v.gpu.meshletBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(meshletRes);
     m_meshletBitfieldGroup->AddResource(v.gpu.meshletBitfieldBuffer);
 
@@ -78,11 +80,13 @@ void ViewManager::AllocateBitfields(View& v) {
     auto instBytes = (instBits + 7) / 8;
     auto instanceMeshletRes = CreateIndexedStructuredBuffer(instBytes, sizeof(unsigned int), true, false);
     instanceMeshletRes->SetName("MeshInstanceMeshletCullingBitfield(view=" + std::to_string(v.id) + ")");
+    instanceMeshletRes->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Culling bitfields" }));
     v.gpu.meshInstanceMeshletCullingBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(instanceMeshletRes);
     m_meshInstanceMeshletCullingBitfieldGroup->AddResource(v.gpu.meshInstanceMeshletCullingBitfieldBuffer);
 
     auto instanceOccRes = CreateIndexedStructuredBuffer(instBytes, sizeof(unsigned int), true, false);
     instanceOccRes->SetName("MeshInstanceOcclusionCullingBitfield(view=" + std::to_string(v.id) + ")");
+	instanceOccRes->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Culling bitfields" }));
     v.gpu.meshInstanceOcclusionCullingBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(instanceOccRes);
     m_meshInstanceOcclusionCullingBitfieldGroup->AddResource(v.gpu.meshInstanceOcclusionCullingBitfieldBuffer);
 }
@@ -141,6 +145,7 @@ void ViewManager::ResizeMeshletBitfields(uint64_t numMeshlets) {
         auto words = (numMeshlets + 31) / 32;
         auto res = CreateIndexedStructuredBuffer(words, sizeof(unsigned int), true, false);
         res->SetName("MeshletBitfieldBuffer(view=" + std::to_string(id) + ")");
+        res->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Culling bitfields" }));
         v.gpu.meshletBitfieldBuffer->SetResource(res);
     }
 }
@@ -152,11 +157,13 @@ void ViewManager::ResizeInstanceBitfields(uint32_t numInstances) {
         // Meshlet culling
         auto cullRes = CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), true, false);
         cullRes->SetName("MeshInstanceMeshletCullingBitfield(view=" + std::to_string(id) + ")");
+		cullRes->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Culling bitfields" }));
         v.gpu.meshInstanceMeshletCullingBitfieldBuffer->SetResource(cullRes);
 
         // Occlusion
         auto occRes = CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), true, false);
         occRes->SetName("MeshInstanceOcclusionCullingBitfield(view=" + std::to_string(id) + ")");
+        occRes->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Culling bitfields" }));
         v.gpu.meshInstanceOcclusionCullingBitfieldBuffer->SetResource(occRes);
     }
 }

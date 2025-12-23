@@ -167,6 +167,10 @@ void DynamicBuffer::CreateBuffer(size_t capacity) {
     m_dataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, capacity, GetGlobalResourceID(), m_UAV);
     m_memoryBlocks.push_back({ 0, capacity, true });
 
+    for (const auto& bundle : m_metadataBundles) {
+        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
+    }
+
 	AssignDescriptorSlots();
 }
 
@@ -177,6 +181,10 @@ void DynamicBuffer::GrowBuffer(size_t newSize) {
 	m_dataBuffer = std::move(newDataBuffer);
 
     m_capacity = newSize;
+
+    for (const auto& bundle : m_metadataBundles) {
+        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
+    }
 
     AssignDescriptorSlots();
 
