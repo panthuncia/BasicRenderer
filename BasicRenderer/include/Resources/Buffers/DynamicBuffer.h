@@ -11,10 +11,11 @@
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Resources/Buffers/MemoryBlock.h"
+#include "Interfaces/IHasMemoryMetadata.h"
 
 class BufferView;
 
-class DynamicBuffer : public ViewedDynamicBufferBase {
+class DynamicBuffer : public ViewedDynamicBufferBase, public IHasMemoryMetadata {
 public:
 
     static std::shared_ptr<DynamicBuffer> CreateShared(size_t elementSize, size_t capacity = 64, std::string name = "", bool byteAddress = false, bool UAV = false) {
@@ -36,7 +37,7 @@ public:
 
 	rhi::Resource GetAPIResource() override { return m_dataBuffer->GetAPIResource(); }
 
-    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) {
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
         m_metadataBundles.emplace_back(bundle);
         m_dataBuffer->ApplyMetadataComponentBundle(bundle);
     }

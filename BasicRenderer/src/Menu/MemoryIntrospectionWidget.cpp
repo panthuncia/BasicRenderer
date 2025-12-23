@@ -1,6 +1,7 @@
 #include "Menu/MemoryIntrospectionWidget.h"
 
 #include <cmath>
+#include <unordered_map>
 
 namespace ui {
 
@@ -10,8 +11,37 @@ namespace ui {
     }
 
     void MemoryIntrospectionWidget::PushFrameSample(double timeSeconds, uint64_t totalBytes) {
-        rtSeries_.push(timeSeconds, (double)totalBytes);
+        const double y = (double)totalBytes;
+
+        const size_t N = rtSeries_.x.size();
+
+        // Target spacing so N samples can cover maxSeconds.
+        double minDt = 0.0;
+        if (rt_.maxSeconds > 0) {
+            minDt = (double)rt_.maxSeconds / (double)std::max<size_t>(1, N - 1);
+        }
+
+        // First sample
+        if (rtSeries_.count == 0) {
+            rtSeries_.push(timeSeconds, y);
+            rtLastCommittedTime_ = timeSeconds;
+            return;
+        }
+
+        // If we're sampling too fast, overwrite the last point instead of pushing a new one.
+        if (minDt > 0.0 && rtLastCommittedTime_ >= 0.0 && (timeSeconds - rtLastCommittedTime_) < minDt) {
+            const size_t lastIdx = (rtSeries_.head + N - 1) % N; // last written
+            rtSeries_.x[lastIdx] = timeSeconds; // keep it "current" visually
+            rtSeries_.y[lastIdx] = y;
+            return;
+        }
+
+        // Commit a new sample
+        rtSeries_.push(timeSeconds, y);
+        rtLastCommittedTime_ = timeSeconds;
     }
+
+
 
     void MemoryIntrospectionWidget::Draw(bool* pOpen,
         const MemorySnapshot* snapshot,
@@ -45,7 +75,7 @@ namespace ui {
         switch (view_) {
         case ViewMode::Pie:      DrawPieView(localMem); break;
         case ViewMode::List:     DrawListView(localMem); break;
-        case ViewMode::Timeline: DrawTimelineView(*fg);  break;
+        case ViewMode::Timeline: DrawTimelineView(*fg, localMem);  break;
         default: break;
         }
 
@@ -241,14 +271,84 @@ namespace ui {
             b = (ImU32)(b * factor);
             return IM_COL32(r, g, b, a);
         }
+        struct CatColorLUT {
+            std::unordered_map<std::string, ImU32> byLabel;
+            ImU32 fallback = IM_COL32(200, 200, 200, 200);
 
+            ImU32 get(const std::string& label) const {
+                auto it = byLabel.find(label);
+                return (it != byLabel.end()) ? it->second : fallback;
+            }
+        };
+
+        static CatColorLUT BuildCategoryColorLUT(const ui::MemorySnapshot& s) {
+            // Same palette as DrawPieView
+            static const ImU32 majorCols[] = {
+                IM_COL32(90, 170, 255, 230),
+                IM_COL32(255, 140,  90, 230),
+                IM_COL32(120, 220, 140, 230),
+                IM_COL32(220, 140, 255, 230),
+                IM_COL32(255, 220, 120, 230),
+                IM_COL32(140, 220, 220, 230),
+                IM_COL32(200, 200, 200, 230),
+            };
+            const int paletteN = (int)(sizeof(majorCols) / sizeof(majorCols[0]));
+
+            struct SubAgg { std::string sub; uint64_t bytes = 0; };
+            struct MajorAgg {
+                std::string maj;
+                uint64_t bytes = 0;
+                std::unordered_map<std::string, uint64_t> subBytes; // sub -> bytes
+            };
+
+            std::vector<MajorAgg> majors;
+
+            auto findMajor = [&](const std::string& m) -> MajorAgg* {
+                for (auto& x : majors) if (x.maj == m) return &x;
+                majors.push_back(MajorAgg{ m });
+                return &majors.back();
+                };
+
+            for (auto& c : s.categories) {
+                if (c.bytes == 0) continue;
+                std::string maj, sub;
+                SplitMajorSub(c.label, maj, sub);
+                if (maj.empty()) maj = "Other";
+                if (sub.empty()) sub = maj;
+
+                auto* M = findMajor(maj);
+                M->bytes += c.bytes;
+                M->subBytes[sub] += c.bytes;
+            }
+
+            std::sort(majors.begin(), majors.end(),
+                [](const MajorAgg& a, const MajorAgg& b) { return a.bytes > b.bytes; });
+
+            CatColorLUT lut;
+            lut.byLabel.reserve(s.categories.size() + 16);
+
+            for (int mi = 0; mi < (int)majors.size(); ++mi) {
+                const ImU32 majorColor = majorCols[mi % paletteN];
+
+                std::vector<std::pair<std::string, uint64_t>> subs;
+                subs.reserve(majors[mi].subBytes.size());
+                for (auto& kv : majors[mi].subBytes) subs.push_back(kv);
+                std::sort(subs.begin(), subs.end(),
+                    [](auto& a, auto& b) { return a.second > b.second; });
+
+                for (int si = 0; si < (int)subs.size(); ++si) {
+                    const float shade = 0.95f - 0.08f * (float)si;
+                    const ImU32 subCol = Shade(majorColor, std::max(0.45f, shade));
+                    lut.byLabel[majors[mi].maj + "/" + subs[si].first] = subCol;
+                }
+            }
+
+            return lut;
+        }
     } // anonymous
 
     void ui::MemoryIntrospectionWidget::DrawPieView(const MemorySnapshot& s) {
         if (ImGui::CollapsingHeader("Pie Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::Checkbox("Hierarchical (sunburst)", &pie_.hierarchical);
-            ImGui::Checkbox("Legend", &pie_.showLegend);
-            ImGui::Checkbox("Percent labels (legend/tooltips)", &pie_.showPercentLabels);
             ImGui::SliderFloat("Min sub-slice % (group into Other)", &pie_.minSlicePct, 0.0f, 10.0f, "%.1f%%");
             ImGui::SliderFloat("Radius", &pie_.radius, 0.2f, 1.0f, "%.2f");
 
@@ -319,7 +419,7 @@ namespace ui {
             return;
         }
 
-        // plot canvas setup (we'll draw in pixel space, but keep a clean plot)
+        // plot canvas setup
         ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoDecorations, ImPlotAxisFlags_NoDecorations);
         ImPlot::SetupAxesLimits(-1, 1, -1, 1, ImGuiCond_Always);
 
@@ -369,7 +469,7 @@ namespace ui {
             const double a1 = aCursor + majFrac * twoPi;
             const ImU32 majorColor = majorCols[mi % paletteN];
 
-            // --- Inner ring: major slice
+            // Inner ring: major slice
             DrawDonutSlice(dl, center, 0.0f, innerR, (float)a0, (float)a1,
                 majorColor, border, 1.0f);
 
@@ -379,7 +479,7 @@ namespace ui {
                 if (AngleInRange(ma, wa0, wa1)) hoveredMajor = mi;
             }
 
-            // --- Outer ring: subs inside major
+            // Outer ring: subs inside major
             // group tiny subs into "Other"
             std::sort(M.subs.begin(), M.subs.end(), [](const Sub& a, const Sub& b) { return a.bytes > b.bytes; });
 
@@ -401,7 +501,7 @@ namespace ui {
                 const double sa0 = subCursor;
                 const double sa1 = subCursor + subFrac * (a1 - a0);
 
-                // shade subs progressively so they’re distinguishable inside the major
+                // shade subs progressively so they're distinguishable inside the major
                 const float shade = 0.95f - 0.08f * (float)si;
                 const ImU32 subCol = Shade(majorColor, std::max(0.45f, shade));
 
@@ -472,11 +572,11 @@ namespace ui {
                 ImGui::Separator();
                 ImGui::Text("Sub: %s", subLabel.c_str());
                 ImGui::Text("Sub: %s", FormatBytes(subBytes).c_str());
-                if (pie_.showPercentLabels && totalBytes != 0) {
+                if (totalBytes != 0) {
                     ImGui::Text("Sub %% of total: %.2f%%", 100.0 * (double)subBytes / (double)totalBytes);
                 }
             }
-            else if (pie_.showPercentLabels && totalBytes != 0) {
+            else if (totalBytes != 0) {
                 ImGui::Text("Major %% of total: %.2f%%", 100.0 * (double)M.bytes / (double)totalBytes);
             }
             ImGui::EndTooltip();
@@ -484,17 +584,15 @@ namespace ui {
 
         ImPlot::EndPlot();
 
-        // Legend (text-based; keeps things readable even with many subs)
-        if (pie_.showLegend) {
-            ImGui::Separator();
-            for (int mi = 0; mi < (int)majors.size(); ++mi) {
-                const auto& M = majors[mi];
-                const double pct = (totalBytes == 0) ? 0.0 : (100.0 * (double)M.bytes / (double)totalBytes);
-                ImGui::BulletText("%s: %s%s",
-                    M.label.c_str(),
-                    FormatBytes(M.bytes).c_str(),
-                    pie_.showPercentLabels ? (std::string("  (") + std::to_string(pct).substr(0, 4) + "%)").c_str() : "");
-            }
+        // Legend
+        ImGui::Separator();
+        for (int mi = 0; mi < (int)majors.size(); ++mi) {
+            const auto& M = majors[mi];
+            const double pct = (totalBytes == 0) ? 0.0 : (100.0 * (double)M.bytes / (double)totalBytes);
+            ImGui::BulletText("%s: %s%s",
+                M.label.c_str(),
+                FormatBytes(M.bytes).c_str(),
+                (std::string("  (") + std::to_string(pct).substr(0, 4) + "%)").c_str());
         }
     }
 
@@ -504,8 +602,6 @@ namespace ui {
             ImGui::Combo("Sort", &list_.sortKey, sortKeys, IM_ARRAYSIZE(sortKeys));
             ImGui::SameLine();
             ImGui::Checkbox("Descending", &list_.descending);
-            ImGui::Checkbox("Zebra rows", &list_.zebra);
-            ImGui::SliderInt("Page size", &list_.pageSize, 50, 2000);
             list_.filter.Draw("Filter (name/type)");
         }
 
@@ -584,7 +680,7 @@ namespace ui {
 
     // ----------------- Timeline view: Real-time + Frame-graph -----------------
 
-    void MemoryIntrospectionWidget::DrawTimelineView(const FrameGraphSnapshot& fg) {
+    void MemoryIntrospectionWidget::DrawTimelineView(const FrameGraphSnapshot& fg, const MemorySnapshot& ms) {
         if (ImGui::CollapsingHeader("Timeline Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
             int m = (int)timelineMode_;
             ImGui::TextUnformatted("Mode:");
@@ -595,14 +691,10 @@ namespace ui {
             ImGui::Separator();
 
             if (timelineMode_ == TimelineMode::RealTime) {
-                ImGui::Checkbox("Auto-fit Y", &rt_.autoFitY);
-                ImGui::Checkbox("Show markers", &rt_.showMarkers);
-                ImGui::Checkbox("Sliding window", &rt_.slidingWindow);
                 ImGui::SliderInt("Max seconds", &rt_.maxSeconds, 1, 60);
             }
             else {
                 ImGui::SliderFloat("Bar plot height", &fg_.barPlotHeightPx, 80.0f, 260.0f, "%.0f px");
-                ImGui::Checkbox("Bars use MiB", &fg_.barsUseMiB);
                 ImGui::Checkbox("Show bar grid", &fg_.showBarGrid);
 
                 ImGui::SeparatorText("Batch slot layout");
@@ -633,7 +725,39 @@ namespace ui {
         }
 
         if (timelineMode_ == TimelineMode::RealTime) DrawRealTimeTimeline();
-        else DrawFrameGraphTimeline(fg);
+        else DrawFrameGraphTimeline(fg, ms);
+    }
+
+    enum class ByteUnit { B, KiB, MiB, GiB };
+
+    static inline const char* UnitLabel(ByteUnit u) {
+        switch (u) {
+        case ByteUnit::B:   return "B";
+        case ByteUnit::KiB: return "KiB";
+        case ByteUnit::MiB: return "MiB";
+        case ByteUnit::GiB: return "GiB";
+        default:            return "B";
+        }
+    }
+
+    static inline double UnitDiv(ByteUnit u) {
+        switch (u) {
+        case ByteUnit::B:   return 1.0;
+        case ByteUnit::KiB: return 1024.0;
+        case ByteUnit::MiB: return 1024.0 * 1024.0;
+        case ByteUnit::GiB: return 1024.0 * 1024.0 * 1024.0;
+        default:            return 1.0;
+        }
+    }
+
+    static inline ByteUnit ChooseUnitForRange(double maxBytes) {
+        const double KiB = 1024.0;
+        const double MiB = 1024.0 * 1024.0;
+        const double GiB = 1024.0 * 1024.0 * 1024.0;
+        if (maxBytes >= GiB) return ByteUnit::GiB;
+        if (maxBytes >= MiB) return ByteUnit::MiB;
+        if (maxBytes >= KiB) return ByteUnit::KiB;
+        return ByteUnit::B;
     }
 
     void MemoryIntrospectionWidget::DrawRealTimeTimeline() {
@@ -643,25 +767,77 @@ namespace ui {
             return;
         }
 
-        if (ImPlot::BeginPlot("##MemoryTimelineRT", ImVec2(-1.0f, -1.0f), ImPlotFlags_NoTitle)) {
-            ImPlot::SetupAxes("Time (s)", "Bytes", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+        // Visible X window
+        double tMax = tmpX_.back();
+        double tMin = tmpX_.front();
+        if (rt_.maxSeconds > 0) {
+            tMin = tMax - (double)rt_.maxSeconds;
+        }
 
-            if (rt_.slidingWindow) {
-                const double tMax = tmpX_.back();
-                const double tMin = tMax - (double)rt_.maxSeconds;
+        auto it = std::lower_bound(tmpX_.begin(), tmpX_.end(), tMin);
+        size_t start = (it == tmpX_.begin()) ? 0 : (size_t)(it - tmpX_.begin() - 1);
+        const size_t n = tmpX_.size() - start;
+
+        const double* xPtr = tmpX_.data() + start;
+        const double* yPtrBytes = tmpY_.data() + start;
+
+        // Compute min/max bytes in visible window for unit + Y padding
+        double minBytes = yPtrBytes[0];
+        double maxBytes = yPtrBytes[0];
+        for (size_t i = 0; i < n; ++i) {
+            minBytes = std::min(minBytes, yPtrBytes[i]);
+            maxBytes = std::max(maxBytes, yPtrBytes[i]);
+        }
+        if (maxBytes <= 0.0) maxBytes = 1.0;
+
+        const ByteUnit unit = ChooseUnitForRange(maxBytes);
+        const double div = UnitDiv(unit);
+
+        // Scale visible Y into chosen unit
+        tmpYScaled_.resize(n);
+        for (size_t i = 0; i < n; ++i)
+            tmpYScaled_[i] = yPtrBytes[i] / div;
+
+        // Y limits with padding (prevents line clipping when flat at extremes)
+        double yMin = minBytes / div;
+        double yMax = maxBytes / div;
+        double yRange = yMax - yMin;
+
+        double pad = 0.0;
+        if (yRange < 1e-9) {
+            // Flat line: give it a visible band
+            pad = std::max(0.1, yMax * 0.05);
+            yMin -= pad;
+            yMax += pad;
+        }
+        else {
+            pad = std::max(0.1, yRange * 0.05);
+            yMin -= pad;
+            yMax += pad;
+        }
+        if (yMin < 0.0) yMin = 0.0; // memory can't be negative
+
+        char yLabel[32];
+        std::snprintf(yLabel, sizeof(yLabel), "Total (%s)", UnitLabel(unit));
+
+        if (ImPlot::BeginPlot("##MemoryTimelineRT", ImVec2(-1.0f, -1.0f), ImPlotFlags_NoTitle)) {
+            // Don't use AutoFit here; set explicit limits with padding.
+            ImPlot::SetupAxes("Time (s)", yLabel, ImPlotAxisFlags_None, ImPlotAxisFlags_None);
+
+            // X window always enforced when sliding
+            if (rt_.maxSeconds > 0) {
                 ImPlot::SetupAxisLimits(ImAxis_X1, tMin, tMax, ImGuiCond_Always);
             }
 
-            ImPlot::PlotLine("Total", tmpX_.data(), tmpY_.data(), (int)tmpX_.size());
+            // Y auto-scale with padding
+        	ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImGuiCond_Always);
 
-            if (rt_.showMarkers) {
-                ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle);
-                ImPlot::PlotScatter("##markers", tmpX_.data(), tmpY_.data(), (int)tmpX_.size());
-            }
+            ImPlot::PlotLine("Total", xPtr, tmpYScaled_.data(), (int)n);
 
             ImPlot::EndPlot();
         }
     }
+
 
     // ----------------- Frame-graph timeline rendering -----------------
 
@@ -729,7 +905,7 @@ namespace ui {
         return mp.x >= a.x && mp.x <= b.x && mp.y >= a.y && mp.y <= b.y;
     }
 
-    void MemoryIntrospectionWidget::DrawFrameGraphTimeline(const FrameGraphSnapshot& fg) {
+    void MemoryIntrospectionWidget::DrawFrameGraphTimeline(const FrameGraphSnapshot& fg, const MemorySnapshot& ms) {
         if (fg.batches.empty()) {
             ImGui::TextUnformatted("No frame-graph batches.");
             return;
@@ -746,15 +922,15 @@ namespace ui {
         // Precompute max footprint for axis limits
         uint64_t maxBytes = 0;
         for (auto& b : fg.batches) maxBytes = std::max(maxBytes, b.footprintBytes);
-        const double maxY = fg_.barsUseMiB ? BytesToMiB(maxBytes) : (double)maxBytes;
+        const double maxY = BytesToMiB(maxBytes);
         const double yPad = (maxY > 0.0) ? (maxY * 0.15) : 1.0;
 
-        // ---- Top plot: bar graph (custom-drawn so bar width matches each slot width) ----
-        if (ImPlot::BeginPlot("##BatchFootprints", ImVec2(-1.0f, topH),
-            ImPlotFlags_NoTitle | ImPlotFlags_NoLegend)) {
-            ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_NoTickLabels | ImPlotAxisFlags_NoLabel);
-            ImPlot::SetupAxis(ImAxis_Y1, fg_.barsUseMiB ? "Footprint (MiB)" : "Footprint (bytes)",
-                fg_.showBarGrid ? ImPlotAxisFlags_AutoFit : (ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_NoGridLines));
+        ImGui::TextUnformatted("Batch footprint (MiB)");
+
+        if (ImPlot::BeginPlot("##BatchFootprints", ImVec2(-1.0f, topH), ImPlotFlags_CanvasOnly)) {
+            ImPlot::SetupAxes(nullptr, nullptr,
+                ImPlotAxisFlags_NoDecorations,
+                ImPlotAxisFlags_NoDecorations);
 
             ImPlot::SetupAxisLimits(ImAxis_X1, -0.1, totalW + 0.1, ImGuiCond_Always);
             ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, maxY + yPad, ImGuiCond_Always);
@@ -769,32 +945,93 @@ namespace ui {
                 dl->AddLine(p0, p1, IM_COL32(180, 180, 180, 64), (i % 5 == 0) ? 2.0f : 1.0f);
             }
 
-            // Bars (one per batch)
+            // Build color mapping from the same categories used by the pie.
+            const CatColorLUT colors = BuildCategoryColorLUT(ms);
+
+            int hoveredBatch = -1;
+            std::string hoveredCat;
+            uint64_t hoveredCatBytes = 0;
+
             for (int i = 0; i < (int)fg.batches.size(); ++i) {
                 const auto& b = fg.batches[i];
                 const auto& L = layouts[i];
 
-                const double y = fg_.barsUseMiB ? BytesToMiB(b.footprintBytes) : (double)b.footprintBytes;
+                // Hover/click region = whole column
+                const bool overColumn = IsMouseOver(ImPlotPoint(L.baseX, 0.0),
+                    ImPlotPoint(L.baseX + L.width, maxY + yPad));
+                if (overColumn && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                    selectedBatch_ = i;
 
-                ImPlotPoint minP(L.baseX, 0.0);
-                ImPlotPoint maxP(L.baseX + L.width, y);
+                // Stack segments bottom-up
+                double y0 = 0.0;
 
-                const bool selected = (selectedBatch_ == i);
-                const ImU32 fill = selected ? IM_COL32(255, 80, 80, 200) : IM_COL32(80, 160, 255, 200);
-                DrawBlock(dl, minP, maxP, fill, IM_COL32(0, 0, 0, 255), 2.0f);
+                // Optional: keep a deterministic order by sorting per batch (largest on top/bottom, your call)
+                std::vector<MemoryCategorySlice> slices = b.categories;
+                std::sort(slices.begin(), slices.end(),
+                    [](const auto& a, const auto& b) { return a.bytes > b.bytes; });
 
-                // Hover / click
-                if (IsMouseOver(minP, ImPlotPoint(L.baseX + L.width, maxY + yPad))) {
-                    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) selectedBatch_ = i;
+                for (const auto& s : slices) {
+                    if (s.bytes == 0) continue;
 
-                    if (ImGui::IsItemHovered() || ImPlot::IsPlotHovered()) {
-                        if (ImGui::BeginTooltip()) {
-                            ImGui::Text("Batch %d: %s", i, b.label.c_str());
-                            ImGui::Text("Footprint: %s", FormatBytes(b.footprintBytes).c_str());
-                            ImGui::EndTooltip();
-                        }
+                    const double segH = BytesToMiB(s.bytes);
+                    const double y1 = y0 + segH;
+
+                    ImPlotPoint segMin(L.baseX, y0);
+                    ImPlotPoint segMax(L.baseX + L.width, y1);
+
+                    const bool overSeg = IsMouseOver(segMin, segMax);
+                    if (overSeg) {
+                        hoveredBatch = i;
+                        hoveredCat = s.label;
+                        hoveredCatBytes = s.bytes;
                     }
+
+                    // Slight highlight on hover or selection
+                    const bool highlight = (selectedBatch_ == i) || overSeg;
+                    ImU32 fill = colors.get(s.label);
+                    if (highlight) fill = IM_COL32((fill >> 0) & 0xFF, (fill >> 8) & 0xFF, (fill >> 16) & 0xFF, 255);
+
+                    DrawBlock(dl, segMin, segMax, fill, IM_COL32(0, 0, 0, 255), 0.0f);
+                    y0 = y1;
                 }
+
+                // Outline the full bar (selection cue)
+                const bool selected = (selectedBatch_ == i);
+                if (selected) {
+                    DrawBlock(dl,
+                        ImPlotPoint(L.baseX, 0.0),
+                        ImPlotPoint(L.baseX + L.width, BytesToMiB(b.footprintBytes)),
+                        IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 255), 2.0f);
+                }
+
+                // assert/visualize mismatch if y0 != y?
+            }
+
+			// Tooltip
+            if (ImPlot::IsPlotHovered() && hoveredBatch >= 0) {
+                const auto& b = fg.batches[hoveredBatch];
+                ImGui::BeginTooltip();
+                ImGui::Text("Batch %d: %s", hoveredBatch, b.label.c_str());
+                ImGui::Separator();
+                ImGui::Text("Footprint: %s", FormatBytes(b.footprintBytes).c_str());
+
+                if (!hoveredCat.empty()) {
+                    ImGui::Separator();
+                    ImGui::Text("Category: %s", hoveredCat.c_str());
+                    ImGui::Text("Size: %s", FormatBytes(hoveredCatBytes).c_str());
+                }
+
+                // Full breakdown list (like pie legend/tooltip)
+                ImGui::Separator();
+                ImGui::TextUnformatted("Breakdown:");
+                // show top N to avoid massive tooltip spam
+                int shown = 0;
+                for (auto& s : b.categories) {
+                    if (s.bytes == 0) continue;
+                    if (shown++ >= 12) { ImGui::TextDisabled("..."); break; }
+                    ImGui::BulletText("%s: %s", s.label.c_str(), FormatBytes(s.bytes).c_str());
+                }
+                ImGui::EndTooltip();
             }
 
             ImPlot::EndPlot();
@@ -802,7 +1039,7 @@ namespace ui {
 
         ImGui::Spacing();
 
-        // ---- Bottom plot: single-lane “frame timeline” with the same sub-blocks (T / P / optional End) ----
+        // Bottom plot: single-lane "frame timeline"
         if (ImPlot::BeginPlot("##FrameGraphTimeline", ImVec2(-1.0f, botH), ImPlotFlags_CanvasOnly)) {
             ImPlot::SetupAxes(nullptr, nullptr,
                 ImPlotAxisFlags_NoTickLabels | ImPlotAxisFlags_NoLabel,
@@ -849,10 +1086,7 @@ namespace ui {
                 const auto& L = layouts[bi];
                 const bool sel = (selectedBatch_ == bi);
 
-                // transitions / passes / optional end transitions
-                draw_block(L.t0, L.t1, IM_COL32(200, 100, 80, 200), sel);
-                draw_block(L.p0, L.p1, IM_COL32(66, 150, 250, 200), sel);
-                if (L.hasEnd) draw_block(L.e0, L.e1, IM_COL32(200, 100, 80, 200), sel);
+                draw_block(L.baseX, L.baseX + L.width, IM_COL32(80, 160, 255, 200), sel);
 
                 // Hover tooltip over the whole batch slot
                 ImPlotPoint slotMin(L.baseX, laneY);
@@ -864,7 +1098,6 @@ namespace ui {
                     ImGui::Text("Batch %d: %s", bi, b.label.c_str());
                     ImGui::Separator();
                     ImGui::Text("Footprint: %s", FormatBytes(b.footprintBytes).c_str());
-                    ImGui::Text("Has End Transitions: %s", b.hasEndTransitions ? "yes" : "no");
 
                     if (fg_.showPassListInTooltip && !b.passNames.empty() && fg_.maxTooltipPasses != 0) {
                         ImGui::Separator();

@@ -55,21 +55,20 @@ namespace ui {
         uint64_t totalBytes = 0;
     };
 
-    // ---- Frame-graph timeline input (you'll fill this from RenderGraph later) ----
+    // Frame-graph timeline input
     struct FrameGraphBatchRow {
-        std::string label;            // e.g. "Batch 7", or "Lighting", etc.
-        uint64_t footprintBytes = 0;  // memory footprint for this batch (your lower-bound)
+        std::string label;
+        uint64_t footprintBytes = 0;  // memory footprint for this batch (lower-bound)
         bool hasEndTransitions = false;
-
-        // Optional: used only for tooltips today.
-        std::vector<std::string> passNames;
+    	std::vector<std::string> passNames;
+        std::vector<MemoryCategorySlice> categories;
     };
 
     struct FrameGraphSnapshot {
         std::vector<FrameGraphBatchRow> batches;
     };
 
-    // ---- Simple ring buffer for real-time timeline ----
+    // Simple ring buffer for real-time timeline
     template <size_t N>
     struct RingSeries {
         std::array<double, N> x{};
@@ -113,12 +112,9 @@ namespace ui {
         enum class TimelineMode : int { RealTime = 0, FrameGraph = 1 };
 
         struct PieSettings {
-            bool showLegend = true;
             float minSlicePct = 1.0f;      // applies to *sub-slices* within each major
-            bool showPercentLabels = true; // legend/tooltips
             float radius = 0.92f;
 
-            bool hierarchical = true;      // sunburst vs old flat pie
             bool autoHeight = true;
             float heightPx = 300.0f;       // used when autoHeight == false
 
@@ -130,19 +126,14 @@ namespace ui {
         struct ListSettings {
             bool descending = true;
             int sortKey = 0; // 0=size, 1=name, 2=type
-            bool zebra = true;
             ImGuiTextFilter filter;
-            int pageSize = 200;
+            int pageSize = 2000; // TODO: Dynamic window?
         };
 
         struct RealTimeTimelineSettings {
-            bool autoFitY = true;
-            bool showMarkers = false;
             int maxSeconds = 10;
-            bool slidingWindow = true;
         };
 
-        // Layout knobs borrowed from your RG inspector style.
         struct FrameGraphTimelineSettings {
             // Plot split
             float barPlotHeightPx = 140.0f;
@@ -159,7 +150,6 @@ namespace ui {
             float lanePad = 0.15f;       // in plot Y units
 
             // Bars
-            bool barsUseMiB = true;      // y-axis is MiB instead of bytes
             bool showBarGrid = true;
 
             // Interaction / display
@@ -189,9 +179,9 @@ namespace ui {
         void DrawPieView(const MemorySnapshot& s);
         void DrawListView(const MemorySnapshot& s);
 
-        void DrawTimelineView(const FrameGraphSnapshot& fg);
+        void DrawTimelineView(const FrameGraphSnapshot& fg, const MemorySnapshot& ms);
         void DrawRealTimeTimeline();
-        void DrawFrameGraphTimeline(const FrameGraphSnapshot& fg);
+        void DrawFrameGraphTimeline(const FrameGraphSnapshot& fg, const MemorySnapshot& ms);
 
         static std::vector<BatchLayout> BuildBatchLayouts(const FrameGraphSnapshot& fg,
             const FrameGraphTimelineSettings& opts,
@@ -217,6 +207,8 @@ namespace ui {
         RingSeries<600> rtSeries_;
         std::vector<double> tmpX_;
         std::vector<double> tmpY_;
+        std::vector<double> tmpYScaled_;
+        double rtLastCommittedTime_ = -1.0;
 
         int selectedBatch_ = -1;
     };

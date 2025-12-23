@@ -8,10 +8,11 @@
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Managers/Singletons/UploadManager.h"
+#include "Interfaces/IHasMemoryMetadata.h"
 
 using Microsoft::WRL::ComPtr;
 
-class Buffer : public GloballyIndexedResource {
+class Buffer : public GloballyIndexedResource, public IHasMemoryMetadata {
 public:
 
     static std::shared_ptr<Buffer> CreateShared(rhi::HeapType accessType, uint64_t bufferSize, bool unorderedAccess = false) {
@@ -21,7 +22,7 @@ public:
     rhi::Resource GetAPIResource() override { return m_dataBuffer->GetAPIResource(); }
     size_t GetSize() const { return m_bufferSize; }
 
-    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) const {
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
         m_dataBuffer->ApplyMetadataComponentBundle(bundle);
     }
 protected:

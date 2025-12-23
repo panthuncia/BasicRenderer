@@ -11,11 +11,12 @@
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Managers/Singletons/UploadManager.h"
+#include "Interfaces/IHasMemoryMetadata.h"
 
 using Microsoft::WRL::ComPtr;
 
 template<class T>
-class DynamicStructuredBuffer : public DynamicBufferBase {
+class DynamicStructuredBuffer : public DynamicBufferBase, public IHasMemoryMetadata {
 public:
 
     static std::shared_ptr<DynamicStructuredBuffer<T>> CreateShared(UINT capacity = 64, std::string name = "", bool UAV = false) {
@@ -69,7 +70,7 @@ public:
 
 	rhi::Resource GetAPIResource() override { return m_dataBuffer->GetAPIResource(); }
 
-    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) {
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
         m_metadataBundles.emplace_back(bundle);
         m_dataBuffer->ApplyMetadataComponentBundle(bundle);
     }

@@ -9,10 +9,11 @@
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
+#include "Interfaces/IHasMemoryMetadata.h"
 
 using Microsoft::WRL::ComPtr;
 
-class SortedUnsignedIntBuffer : public DynamicBufferBase {
+class SortedUnsignedIntBuffer : public DynamicBufferBase, public IHasMemoryMetadata {
 public:
     static std::shared_ptr<SortedUnsignedIntBuffer> CreateShared(uint64_t capacity = 64, std::string name = "", bool UAV = false) {
         return std::shared_ptr<SortedUnsignedIntBuffer>(new SortedUnsignedIntBuffer(capacity, name, UAV));
@@ -41,7 +42,7 @@ public:
         return m_dataBuffer->GetAPIResource();
     }
 
-    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) {
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
         m_metadataBundles.emplace_back(bundle);
         m_dataBuffer->ApplyMetadataComponentBundle(bundle);
     }

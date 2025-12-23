@@ -13,7 +13,7 @@
 #include "Resources/ResourceGroup.h"
 #include "Managers/Singletons/StatisticsManager.h"
 #include "Managers/CommandRecordingManager.h"
-
+#include "Interfaces/IHasMemoryMetadata.h"
 //
 
 // Factory for the transition lambda
@@ -938,6 +938,11 @@ void RenderGraph::RegisterResource(ResourceIdentifier id, std::shared_ptr<Resour
 	AddResource(resource);
 	if (provider) {
 		_providerMap[id] = provider;
+	}
+
+	// If resource can be cast to IHasMemoryMetadata, tag it with this ResouceIdentifier
+	if (const auto hasMemoryMetadata = std::dynamic_pointer_cast<IHasMemoryMetadata>(resource); hasMemoryMetadata) {
+		hasMemoryMetadata->ApplyMetadataComponentBundle(EntityComponentBundle().Set<ResourceIdentifier>(id));
 	}
 }
 

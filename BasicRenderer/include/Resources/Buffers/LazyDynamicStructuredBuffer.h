@@ -13,10 +13,11 @@
 #include "Resources/Buffers/BufferView.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/UploadManager.h"
+#include "Interfaces/IHasMemoryMetadata.h"
 
 using Microsoft::WRL::ComPtr;
 
-class LazyDynamicStructuredBufferBase : public ViewedDynamicBufferBase { // Necessary to store these in a templateless vector
+class LazyDynamicStructuredBufferBase : public ViewedDynamicBufferBase, public IHasMemoryMetadata { // Necessary to store these in a templateless vector
 public:
 	virtual size_t GetElementSize() const = 0;
     virtual void UpdateView(BufferView* view, const void* data) = 0;
@@ -79,7 +80,7 @@ public:
 
 	rhi::Resource GetAPIResource() override { return m_dataBuffer->GetAPIResource(); }
 
-    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) {
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
         m_metadataBundles.emplace_back(bundle);
         m_dataBuffer->ApplyMetadataComponentBundle(bundle);
     }
