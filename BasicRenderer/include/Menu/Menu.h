@@ -565,6 +565,7 @@ inline void Menu::Render(RenderContext& context) {
 
 	ImGui::NewFrame();
     static bool showRG = false;
+    static bool showMemoryIntrospection = false;
 
 	{
 		static float f = 0.0f;
@@ -640,7 +641,7 @@ inline void Menu::Render(RenderContext& context) {
 			setUseAsyncCompute(m_useAsyncCompute);
 		}
         ImGui::Checkbox("Render Graph Inspector", &showRG);
-        ImGui::Text("Render Resolution: %d x %d | Output Resolution: %d x %d", context.renderResolution.x, context.renderResolution.y, context.outputResolution.x, context.outputResolution.y);
+        ImGui::Checkbox("Memory introspection", &showMemoryIntrospection);
         rhi::ma::Budget localBudget;
         std::string memoryString = "Memory usage: ";
         DeviceManager::GetInstance().GetAllocator()->GetBudget(&localBudget, nullptr);
@@ -660,11 +661,11 @@ inline void Menu::Render(RenderContext& context) {
             static_cast<double>(localBudget.budgetBytes) / GiB);
 
         ImGui::Text(memoryString.c_str());
-
+        ImGui::Text("Render Resolution: %d x %d | Output Resolution: %d x %d", context.renderResolution.x, context.renderResolution.y, context.outputResolution.x, context.outputResolution.y);
 		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
 		ImGui::End();
 	}
-	{
+	if (showMemoryIntrospection) {
         static ui::MemoryIntrospectionWidget g_memWidget;
 
         ui::MemorySnapshot snap;
