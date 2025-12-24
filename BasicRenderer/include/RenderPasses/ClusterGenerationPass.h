@@ -4,11 +4,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "Managers/MeshManager.h"
-#include "Managers/ObjectManager.h"
-#include "Managers/Singletons/ECSManager.h"
 
 class ClusterGenerationPass : public ComputePass {
 public:

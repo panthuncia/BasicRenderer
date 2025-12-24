@@ -1040,7 +1040,13 @@ void Renderer::CreateRenderGraph() {
     // TODO: Some of these resources don't really need to be recreated (GTAO, etc.)
     // Instead, just create them externally and register them
 
-	std::shared_ptr<RenderGraph> newGraph = std::make_shared<RenderGraph>();
+    if (!currentRenderGraph)
+    {
+		currentRenderGraph = std::make_shared<RenderGraph>();
+        Menu::GetInstance().SetRenderGraph(currentRenderGraph);
+    }
+
+    auto newGraph = currentRenderGraph;
     newGraph->RegisterProvider(m_pMeshManager.get());
     newGraph->RegisterProvider(m_pObjectManager.get());
     newGraph->RegisterProvider(m_pViewManager.get());
@@ -1189,9 +1195,6 @@ void Renderer::CreateRenderGraph() {
     newGraph->Compile();
     newGraph->Setup();
 
-	currentRenderGraph = std::move(newGraph);
-
-	Menu::GetInstance().SetRenderGraph(currentRenderGraph);
 	rebuildRenderGraph = false;
 }
 

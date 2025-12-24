@@ -1,7 +1,6 @@
 #pragma once
 
 #include <unordered_map>
-#include <functional>
 
 #include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/PSOManager.h"
@@ -9,10 +8,8 @@
 #include "Mesh/Mesh.h"
 #include "Scene/Scene.h"
 #include "Materials/Material.h"
-#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/MeshManager.h"
-#include "Managers/ObjectManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"

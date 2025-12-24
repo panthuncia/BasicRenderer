@@ -4,7 +4,6 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Resources/Texture.h"
-#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/UploadManager.h"
 
 class SkyboxRenderPass : public RenderPass {
@@ -36,21 +35,6 @@ public:
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
         commandList.SetVertexBuffers(0, 1, &m_vertexBufferView);
-
-        //CD3DX12_VIEWPORT viewport(0.0f, 0.0f, static_cast<float>(context.renderResolution.x), static_cast<float>(context.renderResolution.y));
-        //CD3DX12_RECT scissorRect(0, 0, context.renderResolution.x, context.renderResolution.y);
-        //commandList->RSSetViewports(1, &viewport);
-        //commandList->RSSetScissorRects(1, &scissorRect);
-
-        ////CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-        //auto rtvHandle = m_pHDRTarget->GetRTVInfo(0).cpuHandle;
-        //auto& dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
-
-        //// Clear HDR target
-        //auto& clearColor = m_pHDRTarget->GetClearColor();
-        //commandList->ClearRenderTargetView(rtvHandle, &clearColor[0], 0, nullptr);
-
-        //commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
 		rhi::PassBeginInfo passInfo{};
 		passInfo.width = m_pHDRTarget->GetWidth();

@@ -1,14 +1,9 @@
-
-#include <unordered_map>
-#include <functional>
+#pragma once
 
 #include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "Mesh/Mesh.h"
 #include "Scene/Scene.h"
-#include "Resources/TextureDescription.h"
-#include "Managers/Singletons/UploadManager.h"
 #include "../shaders/PerPassRootConstants/bloomSampleRootConstants.h"
 
 class BloomSamplePass : public RenderPass {

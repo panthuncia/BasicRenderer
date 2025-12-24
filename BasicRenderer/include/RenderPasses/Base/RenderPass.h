@@ -7,16 +7,15 @@
 #include <flecs.h>
 
 #include "Resources/Resource.h"
-#include "Render/RenderContext.h"
 #include "Render/ResourceRequirements.h"
 #include "RenderPasses/Base/PassReturn.h"
 #include "Resources/ResourceStateTracker.h"
 #include "Resources/ResourceIdentifier.h"
 #include "Render/ResourceRegistry.h"
-#include "../../../generated/BuiltinResources.h"
 #include "ResourceDescriptorIndexHelper.h"
 #include "Render/PipelineState.h"
 #include "interfaces/IResourceProvider.h"
+#include "Render/PassInputs.h"
 
 struct RenderPassParameters {
     std::vector<ResourceAndRange> shaderResources;
@@ -38,7 +37,7 @@ struct RenderPassParameters {
 
 class RenderPassBuilder;
 
-class RenderPass : public IResourceProvider {
+class RenderPass : public IResourceProvider, public RenderGraphPassBase {
 public:
     virtual ~RenderPass() = default;
 

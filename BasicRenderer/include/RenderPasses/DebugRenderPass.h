@@ -2,10 +2,7 @@
 
 #include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/PSOManager.h"
-#include "Render/RenderContext.h"
 #include "Resources/Texture.h"
-#include "Managers/Singletons/SettingsManager.h"
-#include "Managers/Singletons/UploadManager.h"
 
 class DebugRenderPass : public RenderPass {
 public:

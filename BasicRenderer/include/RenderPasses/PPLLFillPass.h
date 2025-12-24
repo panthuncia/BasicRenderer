@@ -11,7 +11,6 @@
 #include "Materials/Material.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/ResourceManager.h"
-#include "Resources/TextureDescription.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Mesh/MeshInstance.h"

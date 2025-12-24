@@ -1,11 +1,8 @@
 #pragma once
 
 #include "RenderPasses/Base/RenderPass.h"
-#include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "Utilities/Utilities.h"
-#include "Render/IndirectCommand.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Scene/Scene.h"
 #include "Managers/Singletons/ECSManager.h"

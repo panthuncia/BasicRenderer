@@ -1,13 +1,8 @@
 #pragma once
 
-#include <unordered_map>
-#include <functional>
-
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "Managers/Singletons/SettingsManager.h"
-
 
 class ClearVisibilityBufferPass : public ComputePass {
 public:

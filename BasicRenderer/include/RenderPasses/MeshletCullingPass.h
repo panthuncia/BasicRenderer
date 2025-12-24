@@ -6,7 +6,6 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "Managers/MeshManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "../../shaders/PerPassRootConstants/meshletCullingRootConstants.h"
 

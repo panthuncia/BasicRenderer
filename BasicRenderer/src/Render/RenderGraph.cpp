@@ -607,6 +607,15 @@ void RenderGraph::ProcessResourceRequirements(
 }
 
 void RenderGraph::Compile() {
+	// Clear any existing compile state
+	batches.clear();
+	aliasGroups.clear();
+	resourceToAliasGroup.clear();
+	aliasedResources.clear();
+	lastActiveSubresourceInAliasGroup.clear();
+	independantlyManagedResourceToGroup.clear();
+	resourcesFromGroupToManageIndependantly.clear();
+	
 	// Register resource providers from pass builders
 
 	for (auto& v : m_passBuilders) {

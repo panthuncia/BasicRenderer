@@ -6,8 +6,6 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "Managers/MeshManager.h"
-#include "Managers/ObjectManager.h"
 #include "Managers/Singletons/ECSManager.h"
 
 class SkinningPass : public ComputePass {

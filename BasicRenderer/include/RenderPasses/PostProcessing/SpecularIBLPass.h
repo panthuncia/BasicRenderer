@@ -1,14 +1,11 @@
 #pragma once
 
-#include <unordered_map>
 #include <functional>
 
 #include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "Mesh/Mesh.h"
 #include "Scene/Scene.h"
-#include "Resources/TextureDescription.h"
 
 class SpecularIBLPass : public RenderPass {
 public:

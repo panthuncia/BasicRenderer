@@ -5,16 +5,15 @@
 #include <rhi.h>
 
 #include "Resources/Resource.h"
-#include "Render/RenderContext.h"
 #include "Render/ResourceRequirements.h"
 #include "RenderPasses/Base/PassReturn.h"
 #include "Resources/ResourceStateTracker.h"
 #include "Resources/ResourceIdentifier.h"
 #include "Render/ResourceRegistry.h"
-#include "../../../generated/BuiltinResources.h"
 #include "ResourceDescriptorIndexHelper.h"
 #include "Render/PipelineState.h"
 #include "interfaces/IResourceProvider.h"
+#include "Render/PassInputs.h"
 
 struct ComputePassParameters {
 	std::vector<ResourceAndRange> shaderResources;
@@ -30,7 +29,7 @@ struct ComputePassParameters {
 
 class ComputePassBuilder;
 
-class ComputePass : public IResourceProvider {
+class ComputePass : public IResourceProvider, public RenderGraphPassBase {
 public:
 	virtual ~ComputePass() = default;
 

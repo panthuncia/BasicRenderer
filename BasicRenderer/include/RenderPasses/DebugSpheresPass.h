@@ -8,8 +8,6 @@
 #include "Render/RenderContext.h"
 #include "Mesh/Mesh.h"
 #include "Scene/Scene.h"
-#include "Materials/Material.h"
-#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/ECSManager.h"
 
 class DebugSpherePass : public RenderPass {

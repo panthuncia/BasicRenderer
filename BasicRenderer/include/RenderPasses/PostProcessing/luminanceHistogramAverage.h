@@ -3,9 +3,6 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "Resources/Texture.h"
-#include "Managers/Singletons/SettingsManager.h"
-#include "Managers/Singletons/UploadManager.h"
 #include "../shaders/PerPassRootConstants/luminanceHistogramAverageRootConstants.h"
 
 class LuminanceHistogramAveragePass : public ComputePass {
