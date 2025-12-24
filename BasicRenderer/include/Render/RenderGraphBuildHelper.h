@@ -208,7 +208,7 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
                 true,
                 false });
     } else {
-        graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
+        graph->BuildRenderPass("VisibilityPass1") // Build visibility buffer
             .Build<VisibilityBufferPass>(VisibilityBufferPassInputs{
                 wireframeEnabled,
                 meshShadersEnabled,
@@ -292,7 +292,7 @@ void BuildGBufferPipeline(RenderGraph* graph) {
                 clearRTVs });
     }
     else {
-        graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
+        graph->BuildRenderPass("VisibilityPass2") // Build visibility buffer
             .Build<VisibilityBufferPass>(VisibilityBufferPassInputs{
                 enableWireframe,
                 useMeshShaders,
@@ -327,7 +327,7 @@ void BuildGBufferPipeline(RenderGraph* graph) {
             .Build<EvaluateMaterialGroupsPass>();
 
         // Copy depth to a separate resource for post-processing use
-        graph->BuildComputePass("PrimaryDepthCopyPass")
+        graph->BuildComputePass("PrimaryDepthCopyPass1")
             .Build<PrimaryDepthCopyPass>();
     }
 }
@@ -443,6 +443,8 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
 
     BUFFER_UPLOAD(&gtaoInfo, sizeof(GTAOInfo), GTAOConstantBuffer, 0);
 
+    graph->RegisterResource("Builtin::GTAO::ConstantsBuffer", GTAOConstantBuffer);
+
     graph->BuildComputePass("GTAOFilterPass") // Depth filter pass
         .Build<GTAOFilterPass>();
 
@@ -549,7 +551,7 @@ void BuildPPLLPipeline(RenderGraph* graph) {
     graph->RegisterResource(Builtin::PPLL::DataBuffer, PPLLBuffer);
     graph->RegisterResource(Builtin::PPLL::Counter, PPLLCounter);
 
-    auto PPLLFillBuilder = graph->BuildRenderPass("PPFillPass");
+    auto& PPLLFillBuilder = graph->BuildRenderPass("PPFillPass");
 
     PPLLFillBuilder.Build<PPLLFillPass>(PPLLFillPassInputs{
         wireframe,

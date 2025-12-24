@@ -1129,7 +1129,7 @@ void Renderer::CreateRenderGraph() {
 
     BuildEnvironmentPipeline(newGraph.get());
 
-    auto debugPassBuilder = newGraph->BuildRenderPass("DebugPass");
+    auto& debugPassBuilder = newGraph->BuildRenderPass("DebugPass");
 
     auto drawShadows = m_coreResourceProvider.m_shadowMaps != nullptr && getShadowsEnabled();
     if (drawShadows) {

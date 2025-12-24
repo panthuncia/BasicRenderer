@@ -48,7 +48,7 @@ public:
 		colorAttachment.loadOp = rhi::LoadOp::Load;
 		colorAttachment.storeOp = rhi::StoreOp::Store;
 		colorAttachment.clear = m_pHDRTarget->GetClearColor();
-		passInfo.colors = { &colorAttachment };
+		passInfo.colors = &colorAttachment;
 		passInfo.depth = &depthAttachment;
 		commandList.BeginPass(passInfo);
 

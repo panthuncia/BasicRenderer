@@ -28,7 +28,9 @@ public:
 		// Set the compute pipeline state
 		commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
 		commandList.BindPipeline(PrefilterDepths16x16PSO.GetAPIPipelineState().GetHandle());
-        
+
+        BindResourceDescriptorIndices(commandList, PrefilterDepths16x16PSO.GetResourceDescriptorSlots());
+
         // Dispatch
         // note: in CSPrefilterDepths16x16 each is thread group handles a 16x16 block (with [numthreads(8, 8, 1)] and each logical thread handling a 2x2 block)
 		unsigned int x = (context.renderResolution.x + 16 - 1) / 16;

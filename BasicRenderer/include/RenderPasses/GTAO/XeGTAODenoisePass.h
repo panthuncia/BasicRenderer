@@ -31,6 +31,8 @@ public:
 		commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
 		commandList.BindPipeline(DenoiseLastPassPSO.GetAPIPipelineState().GetHandle());
 
+		BindResourceDescriptorIndices(commandList, DenoiseLastPassPSO.GetResourceDescriptorSlots());
+
         unsigned int gtaoConstants[NumMiscUintRootConstants] = {};
         gtaoConstants[UintRootConstant0] = m_workingAOBufferIndex;
             

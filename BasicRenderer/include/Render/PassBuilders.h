@@ -796,6 +796,14 @@ private:
     RenderPassBuilder(RenderGraph* g, std::string name)
         : graph(g), passName(std::move(name)) {}
 
+	// Copy and move constructors are default, but private
+	RenderPassBuilder(const RenderPassBuilder&) = default;
+	RenderPassBuilder(RenderPassBuilder&&) = default;
+
+    // Same for assignment
+	RenderPassBuilder& operator=(const RenderPassBuilder&) = default;
+	RenderPassBuilder& operator=(RenderPassBuilder&&) = default;
+
     void Finalize() {
         if (!built_) return;
 
@@ -1369,6 +1377,14 @@ public:
 private:
     ComputePassBuilder(RenderGraph* g, std::string name)
         : graph(g), passName(std::move(name)) {}
+
+    // Copy and move constructors are default, but private
+    ComputePassBuilder(const ComputePassBuilder&) = default;
+    ComputePassBuilder(ComputePassBuilder&&) = default;
+
+    // Same for assignment
+    ComputePassBuilder& operator=(const ComputePassBuilder&) = default;
+    ComputePassBuilder& operator=(ComputePassBuilder&&) = default;
 
     void Finalize() {
         if (!built_) return;

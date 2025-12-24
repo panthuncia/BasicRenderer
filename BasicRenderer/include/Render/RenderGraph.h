@@ -170,8 +170,9 @@ private:
 	ResourceRegistry _registry;
 	std::unordered_map<ResourceIdentifier, IResourceProvider*, ResourceIdentifier::Hasher> _providerMap;
 
-	//std::vector<BuilderVariant>   m_passBuilders;
+	std::vector<IPassBuilder*> m_passBuilderOrder;
 	std::unordered_map<std::string, std::unique_ptr<IPassBuilder>> m_passBuildersByName;
+	std::unordered_set<std::string> m_passNamesSeenThisReset;
 
 	std::vector<AnyPassAndResources> passes;
 	std::unordered_map<std::string, std::shared_ptr<RenderPass>> renderPassesByName;

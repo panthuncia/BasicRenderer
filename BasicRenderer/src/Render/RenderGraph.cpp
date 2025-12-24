@@ -553,7 +553,7 @@ void RenderGraph::AddTransition(
 			oldSyncHasNonComputeSyncState = true;
 		}
 	}
-	if (isComputePass && oldSyncHasNonComputeSyncState) { // We need to palce transitions on render queue
+	if (isComputePass && oldSyncHasNonComputeSyncState) { // We need to place transitions on render queue
 		for (auto& transition : transitions) {
 			unsigned int gfxBatch = batchOfLastRenderQueueUsage[transition.pResource->GetGlobalResourceID()];
 			batchOfLastRenderQueueUsage[transition.pResource->GetGlobalResourceID()] = gfxBatch; // Can this cause transition overlaps?
@@ -609,6 +609,7 @@ void RenderGraph::ProcessResourceRequirements(
 void RenderGraph::ResetForRecompile()
 {
 	// Clear any existing compile state
+	passes.clear();
 	batches.clear();
 	aliasGroups.clear();
 	resourceToAliasGroup.clear();
@@ -624,16 +625,34 @@ void RenderGraph::ResetForRecompile()
 	// Clear providers
 	_providerMap.clear();
 	_providers.clear();
+
+	// Clear pass ordering
+	m_passBuilderOrder.clear();
+	m_passNamesSeenThisReset.clear();
 }
 
 void RenderGraph::Compile() {
 	// Register resource providers from pass builders
 
-	for (auto& [name, b] : m_passBuildersByName) {
-		RegisterProvider(b->ResourceProvider());
+	std::vector<unsigned int> empty;
+	// Go backwards to build skip list
+	for (int i = static_cast<int>(m_passBuilderOrder.size()) - 1; i >= 0; i--) {
+		auto ptr = m_passBuilderOrder[i];
+		auto prov = ptr->ResourceProvider();
+		if (!prov) {
+			empty.push_back(i); // This pass was not built
+			continue;
+		}
+		RegisterProvider(prov);
 	}
-	for (auto& [name, b] : m_passBuildersByName) {
-		b->Finalize();
+	unsigned int i = 0;
+	for (auto ptr : m_passBuilderOrder) {
+		if (!empty.empty() && empty.back() == i) {
+			empty.pop_back();
+			continue;
+		}
+		ptr->Finalize();
+		i++;
 	}
 
     batches.clear();
@@ -1369,21 +1388,35 @@ std::shared_ptr<Resource> RenderGraph::RequestResource(ResourceIdentifier const&
 
 ComputePassBuilder& RenderGraph::BuildComputePass(std::string const& name) {
 	if (auto it = m_passBuildersByName.find(name); it != m_passBuildersByName.end()) {
-		if (it->second->Kind() != PassBuilderKind::Compute)
+		if (m_passNamesSeenThisReset.contains(name)) {
+			throw std::runtime_error("Pass names must be unique.");
+		}
+		if (it->second->Kind() != PassBuilderKind::Compute) {
 			throw std::runtime_error("Pass builder name collision (render vs compute): " + name);
+		}
+		m_passBuilderOrder.push_back(it->second.get());
 		return static_cast<ComputePassBuilder&>(*(it->second));
 	}
+	m_passNamesSeenThisReset.insert(name);
 	auto ptr = std::unique_ptr<ComputePassBuilder>(new ComputePassBuilder(this, name));
+	m_passBuilderOrder.push_back(ptr.get());
 	m_passBuildersByName.emplace(name, std::move(ptr));
 	return static_cast<ComputePassBuilder&>(*(m_passBuildersByName[name]));
 }
 RenderPassBuilder& RenderGraph::BuildRenderPass(std::string const& name) {
 	if (auto it = m_passBuildersByName.find(name); it != m_passBuildersByName.end()) {
-		if (it->second->Kind() != PassBuilderKind::Render)
+		if (m_passNamesSeenThisReset.contains(name)) {
+			throw std::runtime_error("Pass names must be unique.");
+		}
+		if (it->second->Kind() != PassBuilderKind::Render) {
 			throw std::runtime_error("Pass builder name collision (render vs compute): " + name);
+		}
+		m_passBuilderOrder.push_back(it->second.get());
 		return static_cast<RenderPassBuilder&>(*(it->second));
 	}
+	m_passNamesSeenThisReset.insert(name);
 	auto ptr = std::unique_ptr<RenderPassBuilder>(new RenderPassBuilder(this, name));
+	m_passBuilderOrder.push_back(ptr.get());
 	m_passBuildersByName.emplace(name, std::move(ptr));
 	return static_cast<RenderPassBuilder&>(*(m_passBuildersByName[name]));
 }
