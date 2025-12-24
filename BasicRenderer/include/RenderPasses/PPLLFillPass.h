@@ -15,16 +15,35 @@
 #include "Managers/Singletons/ECSManager.h"
 #include "Mesh/MeshInstance.h"
 
+
+struct PPLLFillPassInputs {
+	bool wireframe;
+	size_t numPPLLNodes;
+	bool meshShaders;
+	bool indirect;
+
+	friend bool operator==(const PPLLFillPassInputs&, const PPLLFillPassInputs&) = default;
+};
+
+inline rg::Hash64 HashValue(const PPLLFillPassInputs& i) {
+	std::size_t seed = 0;
+
+	boost::hash_combine(seed, i.wireframe);
+	boost::hash_combine(seed, i.meshShaders);
+	boost::hash_combine(seed, i.indirect);
+	boost::hash_combine(seed, i.numPPLLNodes);
+	return seed;
+}
+
 class PPLLFillPass : public RenderPass {
 public:
-	PPLLFillPass(bool wireframe, size_t numPPLLNodes, bool meshShaders, bool indirect) : m_wireframe(wireframe), m_meshShaders(meshShaders), m_indirect(indirect) {
+	PPLLFillPass() {
 		auto& settingsManager = SettingsManager::GetInstance();
 		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
 		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
 		m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
 
-		m_numPPLLNodes = numPPLLNodes;
 		m_clusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting")();
 	}
 
@@ -32,6 +51,12 @@ public:
 	}
 
 	void DeclareResourceUsages(RenderPassBuilder* builder) override {
+		auto input = Inputs<PPLLFillPassInputs>();
+		m_wireframe = input.wireframe;
+		m_meshShaders = input.meshShaders;
+		m_indirect = input.indirect;
+		m_numPPLLNodes = input.numPPLLNodes;
+
 		builder->WithUnorderedAccess(Builtin::PPLL::HeadPointerTexture, Builtin::PPLL::DataBuffer, Builtin::PPLL::Counter)
 			.WithShaderResource(Builtin::Light::BufferGroup,
 				Builtin::PostSkinningVertices,

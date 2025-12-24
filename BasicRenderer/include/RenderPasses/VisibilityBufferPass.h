@@ -14,24 +14,40 @@
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
 
+struct VisibilityBufferPassInputs {
+    bool wireframe;
+    bool meshShaders;
+    bool indirect;
+    bool clearGbuffer;
+
+    friend bool operator==(const VisibilityBufferPassInputs&, const VisibilityBufferPassInputs&) = default;
+};
+
+inline rg::Hash64 HashValue(const VisibilityBufferPassInputs& i) {
+    std::size_t seed = 0;
+
+    boost::hash_combine(seed, i.wireframe);
+    boost::hash_combine(seed, i.meshShaders);
+    boost::hash_combine(seed, i.indirect);
+    boost::hash_combine(seed, i.clearGbuffer);
+    return seed;
+}
+
 class VisibilityBufferPass : public RenderPass {
 public:
-    VisibilityBufferPass(
-        bool wireframe,
-        bool meshShaders,
-        bool indirect,
-        bool clearGbuffer)
-        :
-        m_wireframe(wireframe),
-        m_meshShaders(meshShaders),
-        m_indirect(indirect),
-        m_clearGbuffer(clearGbuffer) {
+    VisibilityBufferPass() {
     }
 
     ~VisibilityBufferPass() {
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) {
+		auto input = Inputs<VisibilityBufferPassInputs>();
+		m_wireframe = input.wireframe;
+		m_meshShaders = input.meshShaders;
+		m_indirect = input.indirect;
+		m_clearGbuffer = input.clearGbuffer;
+
         builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
             Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer,
             Builtin::PerObjectBuffer,

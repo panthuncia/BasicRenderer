@@ -2,9 +2,7 @@
 
 #include <vector>
 #include <unordered_set>
-#include <unordered_map>
 #include <rhi.h>
-#include <flecs.h>
 
 #include "Resources/Resource.h"
 #include "Render/ResourceRequirements.h"
@@ -16,6 +14,7 @@
 #include "Render/PipelineState.h"
 #include "interfaces/IResourceProvider.h"
 #include "Render/PassInputs.h"
+#include "ShaderBuffers.h"
 
 struct RenderPassParameters {
     std::vector<ResourceAndRange> shaderResources;

@@ -22,6 +22,7 @@ find_package(unofficial-tree-sitter CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
 find_package(pxr CONFIG REQUIRED)
 find_package(implot CONFIG REQUIRED)
+find_package(Boost REQUIRED COMPONENTS container_hash)
 
 # Build tool for code generation
 add_executable(resource_codegen
@@ -601,6 +602,7 @@ PRIVATE
     usdSkel
     implot::implot
     BasicRHI
+    Boost::container_hash
     "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" 
     "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib" 
     "${CMAKE_SOURCE_DIR}/BasicRenderer/sl.interposer.lib" 

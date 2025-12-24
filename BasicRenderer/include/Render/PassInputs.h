@@ -5,6 +5,7 @@
 #include <typeinfo>
 #include <cassert>
 #include <utility>
+#include <typeindex>
 
 namespace rg {
 
@@ -17,6 +18,15 @@ namespace rg {
             { HashValue(a) } -> std::convertible_to<Hash64>;
             { a == b } -> std::convertible_to<bool>;
     };
+
+	// Dummy hash type for passes with no inputs.
+    using Hash64 = std::uint64_t;
+
+    struct NoInputs {
+        friend bool operator==(const NoInputs&, const NoInputs&) = default;
+    };
+
+    inline Hash64 HashValue(const NoInputs&) noexcept { return 0; }
 
 } // namespace rg
 

@@ -17,22 +17,39 @@
 #include "Managers/LightManager.h"
 #include "../../shaders/PerPassRootConstants/amplificationShaderRootConstants.h"
 
+struct ShadowPassInputs {
+    bool wireframe, meshShaders, indirect, drawBlendShadows, clearDepths;
+
+    friend bool operator==(const ShadowPassInputs&, const ShadowPassInputs&) = default;
+};
+
+inline rg::Hash64 HashValue(const ShadowPassInputs& i) {
+    std::size_t seed = 0;
+
+    boost::hash_combine(seed, i.wireframe);
+    boost::hash_combine(seed, i.meshShaders);
+    boost::hash_combine(seed, i.indirect);
+    boost::hash_combine(seed, i.drawBlendShadows);
+    boost::hash_combine(seed, i.clearDepths);
+    return seed;
+}
+
+
 class ShadowPass : public RenderPass {
 public:
-    ShadowPass(bool wireframe, bool meshShaders, bool indirect, bool drawBlendShadows, bool clearDepths)
-        : m_wireframe(wireframe),
-        m_meshShaders(meshShaders),
-        m_indirect(indirect),
-        m_drawBlendShadows(drawBlendShadows),
-        m_clearDepths(clearDepths) {
+    ShadowPass() {
         getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
         getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
     }
 
-    ~ShadowPass() {
-    }
-
     void DeclareResourceUsages(RenderPassBuilder* builder) {
+		auto input = Inputs<ShadowPassInputs>();
+		m_wireframe = input.wireframe;
+		m_meshShaders = input.meshShaders;
+		m_indirect = input.indirect;
+		m_drawBlendShadows = input.drawBlendShadows;
+		m_clearDepths = input.clearDepths;
+
         builder->WithShaderResource(Builtin::PerObjectBuffer,
             Builtin::NormalMatrixBuffer,
             Builtin::PerMeshBuffer,

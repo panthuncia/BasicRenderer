@@ -606,7 +606,8 @@ void RenderGraph::ProcessResourceRequirements(
 	}
 }
 
-void RenderGraph::Compile() {
+void RenderGraph::ResetForRecompile()
+{
 	// Clear any existing compile state
 	batches.clear();
 	aliasGroups.clear();
@@ -615,19 +616,24 @@ void RenderGraph::Compile() {
 	lastActiveSubresourceInAliasGroup.clear();
 	independantlyManagedResourceToGroup.clear();
 	resourcesFromGroupToManageIndependantly.clear();
-	
+
+	// Clear resources
+	resourcesByID.clear();
+	resourceGroups.clear();
+
+	// Clear providers
+	_providerMap.clear();
+	_providers.clear();
+}
+
+void RenderGraph::Compile() {
 	// Register resource providers from pass builders
 
-	for (auto& v : m_passBuilders) {
-		std::visit([this](auto& builder) {
-			RegisterProvider(builder.pass.get());
-			}, v);
+	for (auto& [name, b] : m_passBuildersByName) {
+		RegisterProvider(b->ResourceProvider());
 	}
-
-	for (auto& v : m_passBuilders) {
-		std::visit([&](auto& builder) {
-			builder.Finalize();
-			}, v);
+	for (auto& [name, b] : m_passBuildersByName) {
+		b->Finalize();
 	}
 
     batches.clear();
@@ -1361,16 +1367,30 @@ std::shared_ptr<Resource> RenderGraph::RequestResource(ResourceIdentifier const&
 	throw std::runtime_error("No resource provider registered for key: " + rid.ToString());
 }
 
-ComputePassBuilder RenderGraph::BuildComputePass(std::string const& name) {
-	return ComputePassBuilder(this, name);
+ComputePassBuilder& RenderGraph::BuildComputePass(std::string const& name) {
+	if (auto it = m_passBuildersByName.find(name); it != m_passBuildersByName.end()) {
+		if (it->second->Kind() != PassBuilderKind::Compute)
+			throw std::runtime_error("Pass builder name collision (render vs compute): " + name);
+		return static_cast<ComputePassBuilder&>(*(it->second));
+	}
+	auto ptr = std::unique_ptr<ComputePassBuilder>(new ComputePassBuilder(this, name));
+	m_passBuildersByName.emplace(name, std::move(ptr));
+	return static_cast<ComputePassBuilder&>(*(m_passBuildersByName[name]));
 }
-RenderPassBuilder RenderGraph::BuildRenderPass(std::string const& name) {
-	return RenderPassBuilder(this, name);
+RenderPassBuilder& RenderGraph::BuildRenderPass(std::string const& name) {
+	if (auto it = m_passBuildersByName.find(name); it != m_passBuildersByName.end()) {
+		if (it->second->Kind() != PassBuilderKind::Render)
+			throw std::runtime_error("Pass builder name collision (render vs compute): " + name);
+		return static_cast<RenderPassBuilder&>(*(it->second));
+	}
+	auto ptr = std::unique_ptr<RenderPassBuilder>(new RenderPassBuilder(this, name));
+	m_passBuildersByName.emplace(name, std::move(ptr));
+	return static_cast<RenderPassBuilder&>(*(m_passBuildersByName[name]));
 }
 
-void RenderGraph::RegisterPassBuilder(RenderPassBuilder&& builder) {
-	m_passBuilders.emplace_back(std::move(builder));
-}
-void RenderGraph::RegisterPassBuilder(ComputePassBuilder&& builder) {
-	m_passBuilders.emplace_back(std::move(builder));
-}
+//void RenderGraph::RegisterPassBuilder(RenderPassBuilder&& builder) {
+//	m_passBuildersByName[builder.passName] = std::move(builder);
+//}
+//void RenderGraph::RegisterPassBuilder(ComputePassBuilder&& builder) {
+//	m_passBuildersByName[builder.passName] = std::move(builder);
+//}

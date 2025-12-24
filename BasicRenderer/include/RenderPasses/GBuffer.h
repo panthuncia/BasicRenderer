@@ -16,19 +16,29 @@
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
 
+struct GBufferPassInputs {
+    bool wireframe;
+    bool meshShaders;
+    bool indirect;
+    bool clearGbuffer;
+
+    friend bool operator==(const GBufferPassInputs&, const GBufferPassInputs&) = default;
+};
+
+inline rg::Hash64 HashValue(const GBufferPassInputs& i) {
+    std::size_t seed = 0;
+
+    boost::hash_combine(seed, i.wireframe);
+    boost::hash_combine(seed, i.meshShaders);
+    boost::hash_combine(seed, i.indirect);
+    boost::hash_combine(seed, i.clearGbuffer);
+    return seed;
+}
+
 // TODO: Prepass for forward-rendered geometry, requires better object and indirect workload queries
 class GBufferPass : public RenderPass {
 public:
-    GBufferPass(
-        bool wireframe,
-        bool meshShaders,
-        bool indirect,
-        bool clearGbuffer)
-        :
-        m_wireframe(wireframe),
-        m_meshShaders(meshShaders),
-        m_indirect(indirect),
-        m_clearGbuffer(clearGbuffer) {
+    GBufferPass(){
         auto& settingsManager = SettingsManager::GetInstance();
         getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
         getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
@@ -39,6 +49,12 @@ public:
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) {
+		auto input = Inputs<GBufferPassInputs>();
+        m_wireframe = input.wireframe;
+		m_meshShaders = input.meshShaders;
+		m_indirect = input.indirect;
+		m_clearGbuffer = input.clearGbuffer;
+
         builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
             Builtin::PerObjectBuffer,
             Builtin::NormalMatrixBuffer,

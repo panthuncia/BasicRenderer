@@ -22,6 +22,7 @@ class Resource;
 class ResourceGroup;
 class RenderPassBuilder;
 class ComputePassBuilder;
+struct IPassBuilder;
 
 template<typename T>
 concept DerivedResource = std::derived_from<T, Resource>;
@@ -100,6 +101,7 @@ public:
 	void Update();
 	void Execute(RenderContext& context);
 	void Compile();
+	void ResetForRecompile();
 	void Setup();
 	const std::vector<PassBatch>& GetBatches() const { return batches; }
 	//void AllocateResources(RenderContext& context);
@@ -140,8 +142,8 @@ public:
 		return derivedPtr;
 	}
 
-	ComputePassBuilder BuildComputePass(std::string const& name);
-	RenderPassBuilder BuildRenderPass(std::string const& name);
+	ComputePassBuilder& BuildComputePass(std::string const& name);
+	RenderPassBuilder& BuildRenderPass(std::string const& name);
 
 private:
 
@@ -168,8 +170,8 @@ private:
 	ResourceRegistry _registry;
 	std::unordered_map<ResourceIdentifier, IResourceProvider*, ResourceIdentifier::Hasher> _providerMap;
 
-	using BuilderVariant = std::variant<RenderPassBuilder, ComputePassBuilder>;
-	std::vector<BuilderVariant>   m_passBuilders;
+	//std::vector<BuilderVariant>   m_passBuilders;
+	std::unordered_map<std::string, std::unique_ptr<IPassBuilder>> m_passBuildersByName;
 
 	std::vector<AnyPassAndResources> passes;
 	std::unordered_map<std::string, std::shared_ptr<RenderPass>> renderPassesByName;
@@ -364,8 +366,8 @@ private:
 		return out;
 	}
 
-	void RegisterPassBuilder(RenderPassBuilder&& builder);
-	void RegisterPassBuilder(ComputePassBuilder&& builder);
+	//void RegisterPassBuilder(RenderPassBuilder&& builder);
+	//void RegisterPassBuilder(ComputePassBuilder&& builder);
 
 	std::unordered_set<uint64_t> GetAllIndependantlyManagedResourcesFromGroup(
 		uint64_t groupGlobalResourceID) const

@@ -43,12 +43,24 @@ private:
 	std::shared_ptr<GloballyIndexedResource> m_counter;
 };
 
+struct MeshletCullingPassInputs {
+	bool isOccludersPass, isRemaindersPass, doResets;
+
+	friend bool operator==(const MeshletCullingPassInputs&, const MeshletCullingPassInputs&) = default;
+};
+
+inline rg::Hash64 HashValue(const MeshletCullingPassInputs& i) {
+	std::size_t seed = 0;
+
+	boost::hash_combine(seed, i.isOccludersPass);
+	boost::hash_combine(seed, i.isRemaindersPass);
+	boost::hash_combine(seed, i.doResets);
+	return seed;
+}
+
 class MeshletCullingPass : public ComputePass {
 public:
-	MeshletCullingPass(bool isOccludersPass, bool isRemaindersPass = false, bool doResets = true) :
-		m_isOccludersPass(isOccludersPass), 
-		m_isRemaindersPass(isRemaindersPass),
-		m_doResets(doResets){
+	MeshletCullingPass() {
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 		getShadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows");
 		m_occlusionCullingEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")();
@@ -58,6 +70,11 @@ public:
 	}
 
 	void Setup() override {
+		auto input = Inputs<MeshletCullingPassInputs>();
+		m_isOccludersPass = input.isOccludersPass;
+		m_isRemaindersPass = input.isRemaindersPass;
+		m_doResets = input.doResets;
+
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().cached().cache_kind(flecs::QueryCacheAll).build();
 

@@ -143,13 +143,13 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
 	bool visibilityRenderingEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableVisibilityRendering")();
 
     graph->BuildRenderPass("ClearLastFrameIndirectDrawUAVsPass") // Clears indirect draws from last frame
-        .Build<ClearIndirectDrawCommandUAVsPass>(false);
+        .Build<ClearIndirectDrawCommandUAVsPass>(ClearIndirectDrawCommandUAVPassInputs{ false });
 
     graph->BuildRenderPass("ClearMeshletCullingCommandUAVsPass0") // Clear meshlet culling reset command buffers from last frame
         .Build<ClearMeshletCullingCommandUAVsPass>();
 
     graph->BuildComputePass("BuildOccluderDrawCommandsPass") // Builds draw command list for last frame's occluders
-        .Build<ObjectCullingPass>(true, false);
+        .Build<ObjectCullingPass>(ObjectCullingPassInputs{ true, false });
 
     // Rebuild visible clusters table for occluders
     graph->BuildComputePass("RewriteOccluderMeshletVisibilityPass")
@@ -159,24 +159,24 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
     auto drawShadows = graph->RequestResource(Builtin::Shadows::ShadowMaps) != nullptr && shadowsEnabled;
     if (drawShadows) {
         graph->BuildRenderPass("OccluderShadowPrepass")
-            .Build<ShadowPass>(wireframeEnabled, meshShadersEnabled, true, false, true);
+            .Build<ShadowPass>(ShadowPassInputs{ wireframeEnabled, meshShadersEnabled, true, false, true });
     }
 
 
     if (!visibilityRenderingEnabled) {
         graph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
-            .Build<GBufferPass>(
+            .Build<GBufferPass>(GBufferPassInputs{
                 wireframeEnabled,
                 meshShadersEnabled,
                 true,
-                true);
+                true });
     } else {
         graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
-            .Build<VisibilityBufferPass>(
+            .Build<VisibilityBufferPass>(VisibilityBufferPassInputs{
                 wireframeEnabled,
                 meshShadersEnabled,
                 true,
-                true);
+                true });
     
         // Copy depth to a separate resource for downsampling
         graph->BuildComputePass("PrimaryDepthCopyPass")
@@ -191,29 +191,29 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
     // After downsample, we need to render the "remainders" of the occluders (meshlets that were culled last frame, but shouldn't be this frame)
     // Using occluder meshlet culling command buffer, cull meshlets, but invert the bitfield and use occlusion culling
     graph->BuildComputePass("OcclusionMeshletRemaindersCullingPass")
-        .Build<MeshletCullingPass>(false, true, true);
+        .Build<MeshletCullingPass>(MeshletCullingPassInputs{ false, true, true });
 
     // Now, render the occluder remainders (prepass & shadows)
     if (drawShadows) {
 
         graph->BuildRenderPass("OccluderRemaindersShadowPass")
-            .Build<ShadowPass>(wireframeEnabled, meshShadersEnabled, true, false, false);
+            .Build<ShadowPass>(ShadowPassInputs{ wireframeEnabled, meshShadersEnabled, true, false, false });
     }
 
     if (!visibilityRenderingEnabled) {
         graph->BuildRenderPass("OccluderRemaindersPrepass") // Draws prepass for last frame's occluders
-            .Build<GBufferPass>(
+            .Build<GBufferPass>(GBufferPassInputs{
                 wireframeEnabled,
                 meshShadersEnabled,
                 true,
-                false);
+                false });
     } else {
         graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
-            .Build<VisibilityBufferPass>(
+            .Build<VisibilityBufferPass>(VisibilityBufferPassInputs{
                 wireframeEnabled,
                 meshShadersEnabled,
                 true,
-                false);
+                false });
     }
 
     // After the remainders are rendered, we need to cull all meshlets that weren't marked as an occluder remainder. TODO: This duplicates culling work on non-visible meshlets
@@ -230,17 +230,17 @@ void BuildGeneralCullingPipeline(RenderGraph* graph) {
 	bool meshletCulling = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshletCulling")();
 
     graph->BuildRenderPass("ClearOccludersIndirectDrawUAVsPass") // Clear command lists after occluders are drawn
-        .Build<ClearIndirectDrawCommandUAVsPass>(true);
+        .Build<ClearIndirectDrawCommandUAVsPass>(ClearIndirectDrawCommandUAVPassInputs{ true });
 
     graph->BuildRenderPass("ClearMeshletCullingCommandUAVsPass1") // Clear meshlet culling reset command buffers from prepass
         .Build<ClearMeshletCullingCommandUAVsPass>();
 
     graph->BuildComputePass("ObjectCullingPass") // Performs frustrum and occlusion culling
-        .Build<ObjectCullingPass>(false, occlusionCulling);
+        .Build<ObjectCullingPass>(ObjectCullingPassInputs{ false, occlusionCulling });
 
     if (meshletCulling || occlusionCulling) {
         graph->BuildComputePass("MeshletCullingPass") // Any meshes that are partially culled are sent to the meshlet culling pass
-            .Build<MeshletCullingPass>(false, false, true);
+            .Build<MeshletCullingPass>(MeshletCullingPassInputs{ false, false, true });
     }
 }
 
@@ -285,19 +285,19 @@ void BuildGBufferPipeline(RenderGraph* graph) {
 
     if (!visibilityRendering) {
         graph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
-            .Build<GBufferPass>(
+            .Build<GBufferPass>(GBufferPassInputs{
                 enableWireframe,
                 useMeshShaders,
                 indirect,
-                clearRTVs);
+                clearRTVs });
     }
     else {
         graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
-            .Build<VisibilityBufferPass>(
+            .Build<VisibilityBufferPass>(VisibilityBufferPassInputs{
                 enableWireframe,
                 useMeshShaders,
                 indirect,
-                clearRTVs);
+                clearRTVs });
 
         // Reset material counters
         graph->BuildComputePass("MaterialPixelCounterResetPass")
@@ -444,13 +444,13 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
     BUFFER_UPLOAD(&gtaoInfo, sizeof(GTAOInfo), GTAOConstantBuffer, 0);
 
     graph->BuildComputePass("GTAOFilterPass") // Depth filter pass
-        .Build<GTAOFilterPass>(GTAOConstantBuffer);
+        .Build<GTAOFilterPass>();
 
     graph->BuildComputePass("GTAOMainPass") // Main pass
-        .Build<GTAOMainPass>(GTAOConstantBuffer);
+        .Build<GTAOMainPass>();
 
     graph->BuildComputePass("GTAODenoisePass") // Denoise pass
-        .Build<GTAODenoisePass>(GTAOConstantBuffer, workingAOTerm1->GetSRVInfo(0).slot.index);
+        .Build<GTAODenoisePass>();
 }
 
 void BuildLightClusteringPipeline(RenderGraph* graph) {
@@ -491,7 +491,7 @@ void BuildMainShadowPass(RenderGraph* graph) {
     }
 
     graph->BuildRenderPass("ShadowPass")
-        .Build<ShadowPass>(wireframe, useMeshShaders, indirect, true, clearRTVs);
+        .Build<ShadowPass>(ShadowPassInputs{ wireframe, useMeshShaders, indirect, true, clearRTVs });
 }
 
 void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
@@ -505,11 +505,10 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
     graph->BuildComputePass("Deferred render pass").Build<DeferredShadingPass>();
 
 	// Forward pass for materials incompatible with deferred rendering
-    graph->BuildRenderPass("Forward render pass").Build<ForwardRenderPass>(
-        wireframe, 
-        meshShaders, 
-        indirect, 
-        gtaoEnabled ? graph->RequestResource<PixelBuffer>(Builtin::GTAO::OutputAOTerm)->GetSRVInfo(0).slot.index : 0);
+    graph->BuildRenderPass("Forward render pass").Build<ForwardRenderPass>(ForwardRenderPassInputs{
+        wireframe,
+        meshShaders,
+        indirect});
 }
 
 void BuildPPLLPipeline(RenderGraph* graph) {
@@ -552,10 +551,11 @@ void BuildPPLLPipeline(RenderGraph* graph) {
 
     auto PPLLFillBuilder = graph->BuildRenderPass("PPFillPass");
 
-    PPLLFillBuilder.Build<PPLLFillPass>(wireframe,
-        numPPLLNodes, 
-        useMeshShaders, 
-        indirect);
+    PPLLFillBuilder.Build<PPLLFillPass>(PPLLFillPassInputs{
+        wireframe,
+        numPPLLNodes,
+        useMeshShaders,
+        indirect });
 
     graph->BuildRenderPass("PPLLResolvePass")
         .Build<PPLLResolvePass>();
@@ -573,13 +573,13 @@ void BuildBloomPipeline(RenderGraph* graph) {
 	// Downsample numBloomMips mips of the HDR color target
     for (unsigned int i = 0; i < numBloomMips; i++) {
         graph->BuildRenderPass("BloomDownsamplePass" + std::to_string(i))
-			.Build<BloomSamplePass>(i, false);
+			.Build<BloomSamplePass>(BloomSamplePassInputs{ i, false });
     }
 
 	// Upsample numBloomMips - 1 mips of the HDR color target, starting from the last mip
     for (unsigned int i = numBloomMips-1; i > 0; i--) {
         graph->BuildRenderPass("BloomUpsamplePass" + std::to_string(i))
-            .Build<BloomSamplePass>(i, true);
+            .Build<BloomSamplePass>(BloomSamplePassInputs{ i, true });
     }
     
     // Upsample and blend the first mip with the HDR color target

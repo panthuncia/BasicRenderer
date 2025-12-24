@@ -17,7 +17,8 @@
     "assimp",
     "curl",
     "ms-gsl",
-    "implot"
+    "implot",
+    "boost-container-hash"
   ],
   "builtin-baseline": "edffab1bcd2cb5b8c17d6ba34d5651ea0bf82979"
 }

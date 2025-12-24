@@ -6,15 +6,18 @@
 
 class GTAODenoisePass : public ComputePass {
 public:
-    GTAODenoisePass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer, int workingBufferIndex) : m_pGTAOConstantBuffer(pGTAOConstantBuffer), m_workingAOBufferIndex(workingBufferIndex) {}
-
-    void Setup() override {
-		CreateXeGTAOComputePSO();
-    }
+    GTAODenoisePass() {}
 
     void DeclareResourceUsages(ComputePassBuilder* builder) {
         builder->WithShaderResource(Builtin::GTAO::WorkingEdges, Builtin::GTAO::WorkingAOTerm1)
-            .WithUnorderedAccess(Builtin::GTAO::OutputAOTerm);
+            .WithUnorderedAccess(Builtin::GTAO::OutputAOTerm)
+            .WithConstantBuffer("Builtin::GTAO::ConstantsBuffer");
+    }
+
+    void Setup() override {
+        CreateXeGTAOComputePSO();
+        RegisterCBV("Builtin::GTAO::ConstantsBuffer");
+        m_workingAOBufferIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::GTAO::WorkingAOTerm1)->GetSRVInfo(0).slot.index;
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -29,8 +32,7 @@ public:
 		commandList.BindPipeline(DenoiseLastPassPSO.GetAPIPipelineState().GetHandle());
 
         unsigned int gtaoConstants[NumMiscUintRootConstants] = {};
-        gtaoConstants[UintRootConstant0] = m_pGTAOConstantBuffer->GetCBVInfo().slot.index;
-        gtaoConstants[UintRootConstant1] = m_workingAOBufferIndex;
+        gtaoConstants[UintRootConstant0] = m_workingAOBufferIndex;
             
 		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, gtaoConstants);
 

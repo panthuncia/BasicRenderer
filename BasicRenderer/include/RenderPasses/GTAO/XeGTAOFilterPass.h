@@ -6,15 +6,17 @@
 
 class GTAOFilterPass : public ComputePass {
 public:
-    GTAOFilterPass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer) : m_pGTAOConstantBuffer(pGTAOConstantBuffer) {}
+    GTAOFilterPass(){}
 
     void Setup() override {
 		CreateXeGTAOComputePSO();
+        RegisterCBV("Builtin::GTAO::ConstantsBuffer");
     }
 
     void DeclareResourceUsages(ComputePassBuilder* builder){
         builder->WithShaderResource(Builtin::GBuffer::Normals, Builtin::PrimaryCamera::DepthTexture)
-            .WithUnorderedAccess(Builtin::GTAO::WorkingDepths);
+            .WithUnorderedAccess(Builtin::GTAO::WorkingDepths)
+            .WithConstantBuffer("Builtin::GTAO::ConstantsBuffer");
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -26,11 +28,6 @@ public:
 		// Set the compute pipeline state
 		commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
 		commandList.BindPipeline(PrefilterDepths16x16PSO.GetAPIPipelineState().GetHandle());
-
-        unsigned int passConstants[NumMiscUintRootConstants] = {};
-        passConstants[0] = m_pGTAOConstantBuffer->GetCBVInfo().slot.index;
-
-		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, passConstants);
         
         // Dispatch
         // note: in CSPrefilterDepths16x16 each is thread group handles a 16x16 block (with [numthreads(8, 8, 1)] and each logical thread handling a 2x2 block)
@@ -46,7 +43,6 @@ public:
     }
 
 private:
-    std::shared_ptr<GloballyIndexedResource> m_pGTAOConstantBuffer;
 
     PipelineState PrefilterDepths16x16PSO;
 

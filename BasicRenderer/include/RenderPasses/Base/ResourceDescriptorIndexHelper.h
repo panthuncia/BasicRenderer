@@ -32,7 +32,8 @@ public:
 
 enum class DescriptorType {
 	SRV,
-	UAV
+	UAV,
+	CBV
 };
 
 struct DescriptorAccessor {
@@ -83,6 +84,13 @@ public:
 		auto resourceIndexOrDynamic = GetResourceIndexOrDynamicResource(id, resource, accessor);
 		m_resourceMap[id.hash] = ResourceAndAccessor{ resourceIndexOrDynamic, accessor };
 	}
+	void RegisterCBV(ResourceIdentifier id) {
+		DescriptorAccessor accessor;
+		accessor.type = DescriptorType::CBV;
+		auto resource = m_resourceRegistryView->Request<Resource>(id);
+		auto resourceIndexOrDynamic = GetResourceIndexOrDynamicResource(id, resource, accessor);
+		m_resourceMap[id.hash] = ResourceAndAccessor{ resourceIndexOrDynamic, accessor };
+	}
 	unsigned int GetResourceDescriptorIndex(size_t hash, bool allowFail = true, const std::string* name = nullptr) const {
 		auto it = m_resourceMap.find(hash);
 		if (it == m_resourceMap.end()) {
@@ -117,6 +125,8 @@ private:
 			}
 		case DescriptorType::UAV:
 			return resource->GetUAVShaderVisibleInfo(accessor.mip, accessor.slice).slot.index;
+		case DescriptorType::CBV:
+			return resource->GetCBVInfo().slot.index;
 		default:
 			throw std::runtime_error("Unsupported descriptor type");
 		}

@@ -17,17 +17,29 @@
 #include "Managers/LightManager.h"
 #include "Resources/ECSResourceResolver.h"
 #include "../../shaders/PerPassRootConstants/amplificationShaderRootConstants.h"
+#include "boost/container_hash/hash.hpp"
+
+struct ForwardRenderPassInputs {
+    bool wireframe;
+    bool meshShaders;
+    bool indirect;
+
+    friend bool operator==(const ForwardRenderPassInputs&, const ForwardRenderPassInputs&) = default;
+};
+
+inline rg::Hash64 HashValue(const ForwardRenderPassInputs& i) {
+    std::size_t seed = 0;
+
+    boost::hash_combine(seed, i.wireframe);
+    boost::hash_combine(seed, i.meshShaders);
+    boost::hash_combine(seed, i.indirect);
+    return seed;
+}
+
 
 class ForwardRenderPass : public RenderPass {
 public:
-    ForwardRenderPass(bool wireframe,
-        bool meshShaders,
-        bool indirect,
-        int aoTextureDescriptorIndex)
-        : m_wireframe(wireframe),
-        m_meshShaders(meshShaders),
-        m_indirect(indirect),
-        m_aoTextureDescriptorIndex(aoTextureDescriptorIndex)
+    ForwardRenderPass()
     {
         auto& settingsManager = SettingsManager::GetInstance();
         getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
@@ -41,6 +53,11 @@ public:
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override {
+		auto inputs = Inputs<ForwardRenderPassInputs>();
+		m_wireframe = inputs.wireframe;
+		m_meshShaders = inputs.meshShaders;
+		m_indirect = inputs.indirect;
+
         builder->WithShaderResource(Builtin::CameraBuffer,
             Builtin::Environment::PrefilteredCubemapsGroup,
             Builtin::Light::ActiveLightIndices,
@@ -276,7 +293,6 @@ private:
     bool m_wireframe;
     bool m_meshShaders;
     bool m_indirect;
-    unsigned int m_aoTextureDescriptorIndex;
     bool m_gtaoEnabled = true;
     bool m_clusteredLightingEnabled = true;
 

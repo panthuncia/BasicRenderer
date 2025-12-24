@@ -6,16 +6,34 @@
 #include "Scene/Scene.h"
 #include "../shaders/PerPassRootConstants/bloomSampleRootConstants.h"
 
+struct BloomSamplePassInputs {
+    unsigned int mipIndex;
+    bool isUpsample;
+    friend bool operator==(const BloomSamplePassInputs&, const BloomSamplePassInputs&) = default;
+};
+
+inline rg::Hash64 HashValue(const BloomSamplePassInputs& i) {
+    std::size_t seed = 0;
+
+    boost::hash_combine(seed, i.mipIndex);
+    boost::hash_combine(seed, i.isUpsample);
+    return seed;
+}
+
 class BloomSamplePass : public RenderPass {
 public:
     // mipIndex selects which mip is used as render target, and which is used as shader resource.
     // E.g. DownsamplePassIndex 0 will downsample from mip 0 to mip 1, and use mip 1 as the render target.
     // If isUpsample is true, it will upsample from mip 1 to mip 0.
-    BloomSamplePass(unsigned int mipIndex, bool isUpsample) : m_mipIndex(mipIndex), m_isUpsample(isUpsample) {
+    BloomSamplePass() {
         CreatePSO();
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override {
+		auto inputs = Inputs<BloomSamplePassInputs>();
+		m_mipIndex = inputs.mipIndex;
+		m_isUpsample = inputs.isUpsample;
+
         if (!m_isUpsample) {
             builder->WithShaderResource(Subresources(Builtin::PostProcessing::UpscaledHDR, Mip{ m_mipIndex, 1 }))
                 .WithRenderTarget(Subresources(Builtin::PostProcessing::UpscaledHDR, Mip{ m_mipIndex + 1, 1 }));

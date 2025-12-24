@@ -404,8 +404,21 @@ concept NotIResourceResolver = !std::derived_from<std::decay_t<T>, IResourceReso
 template<typename T>
 concept DerivedRenderPass = std::derived_from<T, RenderPass>;
 
-class RenderPassBuilder {
+enum class PassBuilderKind { Render, Compute };
+
+struct IPassBuilder {
+    virtual ~IPassBuilder() = default;
+    virtual PassBuilderKind Kind() const noexcept = 0;
+
+	// What the graph needs from the pass builder
+    virtual IResourceProvider* ResourceProvider() noexcept = 0;
+    virtual void Finalize() = 0;
+};
+
+class RenderPassBuilder : public IPassBuilder {
 public:
+    PassBuilderKind Kind() const noexcept override { return PassBuilderKind::Render; }
+    IResourceProvider* ResourceProvider() noexcept override { return pass.get(); }
     // Variadic entry points
 
     //First set, callable on Lvalues
@@ -748,27 +761,33 @@ public:
     }
 
     // First build, callable on Lvalues
-    template<DerivedRenderPass PassT, typename... CtorArgs>
-    void Build(CtorArgs&&... args) & {
-        if (built_) return;
-
-        built_ = true;
-
-        pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-
-        graph->RegisterPassBuilder(std::move(*this));
+    template<DerivedRenderPass PassT, rg::PassInputs InputsT>
+    void Build(InputsT&& inputs) & {
+        if (!built_) {
+            built_ = true;
+            pass = std::make_shared<PassT>();
+        }
+        pass->SetInputs(std::forward<InputsT>(inputs));
     }
 
     // Second build, callable on temporaries
-    template<DerivedRenderPass PassT, typename... CtorArgs>
-    void Build(CtorArgs&&... args) && {
-        if (built_) return;
+    template<DerivedRenderPass PassT, rg::PassInputs InputsT>
+    void Build(InputsT&& inputs) && {
+        if (!built_) {
+            built_ = true;
+            pass = std::make_shared<PassT>();
+        }
+        pass->SetInputs(std::forward<InputsT>(inputs));
+    }
 
-        built_ = true;
+    template<DerivedRenderPass PassT, typename... StableCtorArgs>
+    void Build(StableCtorArgs&&... ctorArgs)& {
+        Build<PassT>(rg::NoInputs{}, std::forward<StableCtorArgs>(ctorArgs)...);
+    }
 
-        pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-
-        graph->RegisterPassBuilder(std::move(*this));
+    template<DerivedRenderPass PassT, typename... StableCtorArgs>
+    void Build(StableCtorArgs&&... ctorArgs)&& {
+        Build<PassT>(rg::NoInputs{}, std::forward<StableCtorArgs>(ctorArgs)...);
     }
 
     auto const& DeclaredResourceIds() const { return _declaredIds; }
@@ -1132,8 +1151,10 @@ private:
 template<typename T>
 concept DerivedComputePass = std::derived_from<T, ComputePass>;
 
-class ComputePassBuilder {
+class ComputePassBuilder : public IPassBuilder {
 public:
+    PassBuilderKind Kind() const noexcept override { return PassBuilderKind::Compute; }
+    IResourceProvider* ResourceProvider() noexcept override { return pass.get(); }
     // Variadic entry points
 
     //First set, callable on Lvalues
@@ -1314,27 +1335,33 @@ public:
     }
 
     // First build, callable on Lvalues
-    template<DerivedComputePass PassT, typename... CtorArgs>
-    void Build(CtorArgs&&... args) & {
-		if (built_) return;
-
-        built_ = true;
-
-        pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-
-        graph->RegisterPassBuilder(std::move(*this));
+    template<DerivedComputePass PassT, rg::PassInputs InputsT>
+    void Build(InputsT&& inputs) & {
+        if (!built_) {
+            built_ = true;
+            pass = std::make_shared<PassT>();
+        }
+        pass->SetInputs(std::forward<InputsT>(inputs));
     }
 
     // Second build, callable on temporaries
-    template<DerivedComputePass PassT, typename... CtorArgs>
-    void Build(CtorArgs&&... args) && {
-        if (built_) return;
+    template<DerivedComputePass PassT, rg::PassInputs InputsT>
+    void Build(InputsT&& inputs) && {
+        if (!built_) {
+            built_ = true;
+            pass = std::make_shared<PassT>();
+        }
+        pass->SetInputs(std::forward<InputsT>(inputs));
+    }
 
-        built_ = true;
+    template<DerivedComputePass PassT, typename... StableCtorArgs>
+    void Build(StableCtorArgs&&... ctorArgs)& {
+        Build<PassT>(rg::NoInputs{}, std::forward<StableCtorArgs>(ctorArgs)...);
+    }
 
-        pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-
-        graph->RegisterPassBuilder(std::move(*this));
+    template<DerivedComputePass PassT, typename... StableCtorArgs>
+    void Build(StableCtorArgs&&... ctorArgs)&& {
+        Build<PassT>(rg::NoInputs{}, std::forward<StableCtorArgs>(ctorArgs)...);
     }
 
     auto const& DeclaredResourceIds() const { return _declaredIds; }

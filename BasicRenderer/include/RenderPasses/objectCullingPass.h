@@ -10,10 +10,26 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/ViewManager.h"
 #include "../../shaders/PerPassRootConstants/objectCullingRootConstants.h"
+#include <boost/container_hash/hash.hpp>
+
+struct ObjectCullingPassInputs {
+	bool isOccludersPass;
+	bool enableOcclusion;
+
+	friend bool operator==(const ObjectCullingPassInputs&, const ObjectCullingPassInputs&) = default;
+};
+
+inline rg::Hash64 HashValue(const ObjectCullingPassInputs& i) {
+	std::size_t seed = 0;
+
+	boost::hash_combine(seed, i.isOccludersPass);
+	boost::hash_combine(seed, i.enableOcclusion);
+	return seed;
+}
 
 class ObjectCullingPass : public ComputePass {
 public:
-	ObjectCullingPass(bool isOccludersPass, bool enableOcclusion) : m_isOccludersPass(isOccludersPass), m_enableOcclusion(enableOcclusion) {
+	ObjectCullingPass(){
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 		getShadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows");
 	}
@@ -22,6 +38,9 @@ public:
 	}
 
 	void DeclareResourceUsages(ComputePassBuilder* builder) {
+		auto input = Inputs<ObjectCullingPassInputs>();
+		m_isOccludersPass = input.isOccludersPass;
+		m_enableOcclusion = input.enableOcclusion;
 		auto ecsWorld = ECSManager::GetInstance().GetWorld();
 		flecs::query<> drawSetIndicesQuery = ecsWorld.query_builder<>()
 			.with<Components::IsActiveDrawSetIndices>()
