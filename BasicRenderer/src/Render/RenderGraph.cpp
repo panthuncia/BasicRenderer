@@ -625,6 +625,7 @@ void RenderGraph::ResetForRecompile()
 	// Clear providers
 	_providerMap.clear();
 	_providers.clear();
+	_registry = ResourceRegistry();
 
 	// Clear pass ordering
 	m_passBuilderOrder.clear();

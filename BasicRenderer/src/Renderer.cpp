@@ -1047,6 +1047,9 @@ void Renderer::CreateRenderGraph() {
     }
 
     auto newGraph = currentRenderGraph;
+
+    newGraph->ResetForRecompile();
+
     newGraph->RegisterProvider(m_pMeshManager.get());
     newGraph->RegisterProvider(m_pObjectManager.get());
     newGraph->RegisterProvider(m_pViewManager.get());
