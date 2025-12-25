@@ -6,11 +6,12 @@
 
 class DebugRenderPass : public RenderPass {
 public:
-    DebugRenderPass() {}
+    DebugRenderPass() {
+        CreateDebugRootSignature();
+        CreateDebugPSO();
+    }
 
     void Setup() override {
-		CreateDebugRootSignature();
-		CreateDebugPSO();
     }
 
     PassReturn Execute(RenderContext& context) override {

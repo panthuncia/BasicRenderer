@@ -11,7 +11,9 @@
 
 class EnvironmentFilterPass : public RenderPass {
 public:
-    EnvironmentFilterPass() = default;
+    EnvironmentFilterPass() {
+        CreatePrefilterPSO();
+    }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override {
         // source cubemap as SRV, destination prefiltered cubemap as UAV
@@ -19,7 +21,7 @@ public:
             .WithUnorderedAccess(Builtin::Environment::PrefilteredCubemapsGroup);
     }
 
-    void Setup() override { CreatePrefilterPSO(); }
+    void Setup() override { }
 
     PassReturn Execute(RenderContext& context) override {
         auto dev = DeviceManager::GetInstance().GetDevice();

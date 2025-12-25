@@ -11,11 +11,11 @@
 class PPLLResolvePass : public RenderPass {
 public:
 	PPLLResolvePass() {
-
 		auto& settingsManager = SettingsManager::GetInstance();
 		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
 		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
+        CreatePSO();
 	}
 
 	void DeclareResourceUsages(RenderPassBuilder* builder) {
@@ -24,7 +24,6 @@ public:
 	}
 
 	void Setup() override {
-		CreatePSO();
 
 		m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
 

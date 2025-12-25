@@ -55,8 +55,21 @@ public:
 	}
 
     void Remove(BufferView* view) {
-		uint64_t index = view->GetOffset() / m_elementSize;
-		m_freeIndices.push_back(index);
+        if (!view) {
+            return;
+        }
+
+        // Reject views not created by this buffer instance (stale view from old pass/buffer)
+        auto owner = view->GetBuffer();
+        if (!owner || owner.get() != static_cast<ViewedDynamicBufferBase*>(this)) {
+#if BUILD_TYPE == BUILD_DEBUG
+			throw std::runtime_error("Attempted to remove a BufferView from a LazyDynamicStructuredBuffer that does not own it.");
+#endif
+            return;
+        }
+
+        const uint64_t index = view->GetOffset() / m_elementSize;
+        m_freeIndices.push_back(index);
     }
 
     void Resize(uint32_t newCapacity) {

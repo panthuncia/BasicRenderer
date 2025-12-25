@@ -10,6 +10,7 @@ class ClusterGenerationPass : public ComputePass {
 public:
 	ClusterGenerationPass() {
 		getClusterSize = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT3>("lightClusterSize");
+		CreatePSO();
 	}
 
 	~ClusterGenerationPass() {
@@ -21,8 +22,6 @@ public:
 	}
 
 	void Setup() override {
-		CreatePSO();
-
 		RegisterSRV(Builtin::CameraBuffer);
 		RegisterUAV(Builtin::Light::ClusterBuffer);
 	}

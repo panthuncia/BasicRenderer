@@ -32,6 +32,10 @@ public:
 	ObjectCullingPass(){
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 		getShadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows");
+		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().cached().cache_kind(flecs::QueryCacheAll).build();
+
+		CreatePSO();
 	}
 
 	~ObjectCullingPass() {
@@ -61,11 +65,6 @@ public:
 	}
 
 	void Setup() override {
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-		lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().cached().cache_kind(flecs::QueryCacheAll).build();
-
-		CreatePSO();
-		
 		RegisterSRV(Builtin::PerObjectBuffer);
 		RegisterSRV(Builtin::CameraBuffer);
 		RegisterSRV(Builtin::PerMeshBuffer);

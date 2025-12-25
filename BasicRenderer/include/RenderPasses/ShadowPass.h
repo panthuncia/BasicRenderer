@@ -40,6 +40,11 @@ public:
     ShadowPass() {
         getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
         getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
+        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+        lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
+        m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
+            .with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ShadowMapsPass))
+            .cached().cache_kind(flecs::QueryCacheAll).build();
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) {
@@ -82,11 +87,6 @@ public:
     }
 
     void Setup() override {
-        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-        lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
-        m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
-			.with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ShadowMapsPass))
-            .cached().cache_kind(flecs::QueryCacheAll).build();
 
         RegisterSRV(Builtin::NormalMatrixBuffer);
         RegisterSRV(Builtin::PostSkinningVertices);

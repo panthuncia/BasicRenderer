@@ -26,7 +26,30 @@ ASU1 mips
 class DownsamplePass : public ComputePass {
 public:
 
-    DownsamplePass() {}
+    DownsamplePass()
+    {
+        m_pDownsampleConstants = LazyDynamicStructuredBuffer<spdConstants>::CreateShared(1, "Downsample constants");
+
+        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+        lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
+        depthQuery = ecsWorld.query_builder<Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
+        // For each existing depth map, allocate a downsample constant
+        depthQuery.each([&](flecs::entity e, Components::DepthMap shadowMap) {
+            AddMapInfo(e, shadowMap);
+            });
+
+        addObserver = ecsWorld.observer<Components::DepthMap>()
+            .event(flecs::OnSet)
+            .each([&](flecs::entity e, const Components::DepthMap& p) {
+            AddMapInfo(e, p);
+                });
+
+        removeObserver = ecsWorld.observer<Components::DepthMap>()
+            .event(flecs::OnRemove)
+            .each([&](flecs::entity e, const Components::DepthMap& p) {
+            RemoveMapInfo(e);
+                });
+    }
     ~DownsamplePass() {
 		addObserver.destruct(); // Needed for clean shutdown
 		removeObserver.destruct();
@@ -38,28 +61,7 @@ public:
     }
 
     void Setup() override {
-        m_pDownsampleConstants = LazyDynamicStructuredBuffer<spdConstants>::CreateShared(1, "Downsample constants");
 		m_pLinearDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
-
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-        lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
-		depthQuery = ecsWorld.query_builder<Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
-        // For each existing depth map, allocate a downsample constant
-        depthQuery.each([&](flecs::entity e, Components::DepthMap shadowMap) {
-			AddMapInfo(e, shadowMap);
-            });
-
-        addObserver = ecsWorld.observer<Components::DepthMap>()
-            .event(flecs::OnSet)
-            .each([&](flecs::entity e, const Components::DepthMap& p) {
-			AddMapInfo(e, p);
-                });
-
-        removeObserver = ecsWorld.observer<Components::DepthMap>()
-            .event(flecs::OnRemove)
-            .each([&](flecs::entity e, const Components::DepthMap& p) {
-			RemoveMapInfo(e);
-                });
 
 		m_numDirectionalCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
         CreateDownsampleComputePSO();

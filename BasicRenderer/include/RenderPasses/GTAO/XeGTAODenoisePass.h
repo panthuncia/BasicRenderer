@@ -6,7 +6,9 @@
 
 class GTAODenoisePass : public ComputePass {
 public:
-    GTAODenoisePass() {}
+    GTAODenoisePass() {
+        CreateXeGTAOComputePSO();
+    }
 
     void DeclareResourceUsages(ComputePassBuilder* builder) {
         builder->WithShaderResource(Builtin::GTAO::WorkingEdges, Builtin::GTAO::WorkingAOTerm1)
@@ -15,7 +17,6 @@ public:
     }
 
     void Setup() override {
-        CreateXeGTAOComputePSO();
         RegisterCBV("Builtin::GTAO::ConstantsBuffer");
         m_workingAOBufferIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::GTAO::WorkingAOTerm1)->GetSRVInfo(0).slot.index;
     }

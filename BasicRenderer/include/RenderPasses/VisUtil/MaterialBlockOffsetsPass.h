@@ -7,7 +7,14 @@
 // Dispatch dimension: x = 1 (single group), unless we implement recursive scan for very large numBlocks.
 class MaterialBlockOffsetsPass : public ComputePass {
 public:
-    MaterialBlockOffsetsPass(){}
+    MaterialBlockOffsetsPass() {
+        m_pso = PSOManager::GetInstance().MakeComputePipeline(
+            PSOManager::GetInstance().GetComputeRootSignature(),
+            L"shaders/materialPrefixSum.hlsl",
+            L"BlockOffsetsCS",
+            {},
+            "VisUtil_BlockOffsetsPSO");
+    }
 
     void DeclareResourceUsages(ComputePassBuilder* b) override {
         b->WithShaderResource("Builtin::VisUtil::MaterialPixelCountBuffer",
@@ -18,12 +25,6 @@ public:
     }
 
     void Setup() override {
-        m_pso = PSOManager::GetInstance().MakeComputePipeline(
-            PSOManager::GetInstance().GetComputeRootSignature(),
-            L"shaders/materialPrefixSum.hlsl",
-            L"BlockOffsetsCS",
-            {},
-            "VisUtil_BlockOffsetsPSO");
 
         RegisterSRV("Builtin::VisUtil::MaterialPixelCountBuffer");
         RegisterSRV("Builtin::VisUtil::BlockSumsBuffer");

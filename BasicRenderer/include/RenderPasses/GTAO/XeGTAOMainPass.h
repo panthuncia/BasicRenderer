@@ -7,7 +7,9 @@
 
 class GTAOMainPass : public ComputePass {
 public:
-    GTAOMainPass() {}
+    GTAOMainPass() {
+        CreateXeGTAOComputePSO();
+    }
 
     void DeclareResourceUsages(ComputePassBuilder* builder) {
         builder->WithShaderResource(Builtin::GBuffer::Normals, Builtin::GTAO::WorkingDepths, Builtin::CameraBuffer)
@@ -16,8 +18,6 @@ public:
     }
 
     void Setup() override {
-		CreateXeGTAOComputePSO();
-
         RegisterSRV(Builtin::CameraBuffer);
         RegisterSRV(Builtin::GBuffer::Normals);
         RegisterCBV("Builtin::GTAO::ConstantsBuffer");

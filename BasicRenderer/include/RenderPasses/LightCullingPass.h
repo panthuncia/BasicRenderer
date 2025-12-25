@@ -14,6 +14,7 @@ class LightCullingPass : public ComputePass {
 public:
 	LightCullingPass() {
 		getClusterSize = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT3>("lightClusterSize");
+		CreatePSO();
 	}
 
 	~LightCullingPass() {
@@ -25,7 +26,6 @@ public:
 	}
 
 	void Setup() override {
-		CreatePSO();
 
 		m_pLightPagesCounter = m_resourceRegistryView->Request<Buffer>(Builtin::Light::PagesCounter);
 	

@@ -19,6 +19,7 @@ public:
 		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
 		m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
 		m_clusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting")();
+		CreatePSO();
 	}
 
 	void DeclareResourceUsages(ComputePassBuilder* builder) override {
@@ -55,8 +56,6 @@ public:
 		RegisterUAV(Builtin::GBuffer::Albedo);
 		RegisterUAV(Builtin::GBuffer::Emissive);
 		RegisterUAV(Builtin::GBuffer::MetallicRoughness);
-
-		CreatePSO();
 
 		m_table = m_resourceRegistryView->Request<Resource>(Builtin::PrimaryCamera::VisibleClusterTable);
 	}

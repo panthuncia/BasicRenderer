@@ -7,6 +7,7 @@
 class BRDFIntegrationPass : public RenderPass {
 public:
     BRDFIntegrationPass() {
+        CreatePSO();
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override {
@@ -14,9 +15,7 @@ public:
     }
 
     void Setup() override {
-
 		m_lutTexture = m_resourceRegistryView->Request<PixelBuffer>(Builtin::BRDFLUT);
-        CreatePSO();
     }
 
     PassReturn Execute(RenderContext& context) override {

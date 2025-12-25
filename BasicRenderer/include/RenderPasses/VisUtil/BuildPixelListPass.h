@@ -5,6 +5,14 @@
 
 class BuildPixelListPass : public ComputePass {
 public:
+    BuildPixelListPass() {
+        m_pso = PSOManager::GetInstance().MakeComputePipeline(
+            PSOManager::GetInstance().GetComputeRootSignature(),
+            L"shaders/VisUtil.hlsl",
+            L"BuildPixelListCS",
+            {},
+            "BuildPixelListPSO");
+	}
     void DeclareResourceUsages(ComputePassBuilder* b) override {
         b->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
                               Builtin::PrimaryCamera::VisibilityTexture,
@@ -18,13 +26,6 @@ public:
     }
 
     void Setup() override {
-        m_pso = PSOManager::GetInstance().MakeComputePipeline(
-            PSOManager::GetInstance().GetComputeRootSignature(),
-            L"shaders/VisUtil.hlsl",
-            L"BuildPixelListCS",
-            {},
-            "BuildPixelListPSO");
-
         RegisterSRV(Builtin::PrimaryCamera::VisibilityTexture);
         RegisterSRV(Builtin::PrimaryCamera::VisibleClusterTable);
         RegisterSRV(Builtin::PerMeshInstanceBuffer);

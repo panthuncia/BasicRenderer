@@ -23,6 +23,8 @@ public:
 		shSamplerDesc.maxLod = (std::numeric_limits<float>::max)();
 
 		m_samplerIndex = ResourceManager::GetInstance().CreateIndexedSampler(shSamplerDesc);
+
+		CreatePSO();
 	}
 
 	~EnvironmentSHPass() {
@@ -34,8 +36,6 @@ public:
 	}
 
 	void Setup() override {
-		CreatePSO();
-		
 		RegisterUAV(Builtin::Environment::InfoBuffer, 0);
 	}
 

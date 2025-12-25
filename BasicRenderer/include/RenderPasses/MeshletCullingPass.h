@@ -64,6 +64,11 @@ public:
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 		getShadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows");
 		m_occlusionCullingEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")();
+
+		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().cached().cache_kind(flecs::QueryCacheAll).build();
+
+		CreatePSO();
 	}
 
 	~MeshletCullingPass() {
@@ -74,11 +79,6 @@ public:
 		m_isOccludersPass = input.isOccludersPass;
 		m_isRemaindersPass = input.isRemaindersPass;
 		m_doResets = input.doResets;
-
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-		lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().cached().cache_kind(flecs::QueryCacheAll).build();
-
-		CreatePSO();
 
 		RegisterSRV(Builtin::PerObjectBuffer);
 		RegisterSRV(Builtin::CameraBuffer);

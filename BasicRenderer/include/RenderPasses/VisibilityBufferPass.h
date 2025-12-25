@@ -36,6 +36,10 @@ inline rg::Hash64 HashValue(const VisibilityBufferPassInputs& i) {
 class VisibilityBufferPass : public RenderPass {
 public:
     VisibilityBufferPass() {
+        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+        m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
+            .with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::GBufferPass))
+            .cached().cache_kind(flecs::QueryCacheAll).build();
     }
 
     ~VisibilityBufferPass() {
@@ -80,10 +84,6 @@ public:
     }
 
     void Setup() override {
-        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-        m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
-            .with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::GBufferPass))
-            .cached().cache_kind(flecs::QueryCacheAll).build();
 
         m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 		m_pVisibilityBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::VisibilityTexture);

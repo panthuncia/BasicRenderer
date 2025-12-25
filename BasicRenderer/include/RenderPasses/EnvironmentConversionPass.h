@@ -10,6 +10,7 @@ class EnvironmentConversionPass : public RenderPass {
 public:
     EnvironmentConversionPass() {
         getSkyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution");
+        CreateEnvironmentConversionPSO();
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override {
@@ -18,7 +19,6 @@ public:
     }
 
     void Setup() override {
-		CreateEnvironmentConversionPSO();
     }
 
 	// This pass was broken into multiple passes to avoid device timeout on slower GPUs

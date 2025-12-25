@@ -6,10 +6,11 @@
 
 class GTAOFilterPass : public ComputePass {
 public:
-    GTAOFilterPass(){}
+    GTAOFilterPass() {
+        CreateXeGTAOComputePSO();
+    }
 
     void Setup() override {
-		CreateXeGTAOComputePSO();
         RegisterCBV("Builtin::GTAO::ConstantsBuffer");
     }
 

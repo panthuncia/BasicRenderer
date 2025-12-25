@@ -9,6 +9,9 @@
 class SkyboxRenderPass : public RenderPass {
 public:
     SkyboxRenderPass() {
+        m_vertexBufferView = CreateSkyboxVertexBuffer();
+        CreateSkyboxRootSignature();
+        CreateSkyboxPSO();
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) {
@@ -18,10 +21,6 @@ public:
     }
 
     void Setup() override {
-        m_vertexBufferView = CreateSkyboxVertexBuffer();
-        CreateSkyboxRootSignature();
-        CreateSkyboxPSO();
-
         m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
         m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 

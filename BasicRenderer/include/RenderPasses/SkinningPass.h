@@ -12,6 +12,9 @@ class SkinningPass : public ComputePass {
 public:
 	SkinningPass() {
 		getMeshShadersEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader");
+		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		skinnedQuery = ecsWorld.query_builder<Components::Skinned, Components::ObjectDrawInfo, Components::MeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
+		CreatePSO();
 	}
 
 	~SkinningPass() {
@@ -23,9 +26,6 @@ public:
 	}
 
 	void Setup() override {
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-		skinnedQuery = ecsWorld.query_builder<Components::Skinned, Components::ObjectDrawInfo, Components::MeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
-		CreatePSO();
 
 		RegisterSRV(Builtin::PreSkinningVertices);
 		RegisterSRV(Builtin::NormalMatrixBuffer);

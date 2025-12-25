@@ -11,7 +11,7 @@
 
 class EvaluateMaterialGroupsPass : public ComputePass {
 public:
-    EvaluateMaterialGroupsPass() = default;
+    EvaluateMaterialGroupsPass() {}
 
     void DeclareResourceUsages(ComputePassBuilder* b) override {
         b->WithShaderResource("Builtin::VisUtil::PixelListBuffer",

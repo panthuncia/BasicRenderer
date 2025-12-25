@@ -5,6 +5,14 @@
 
 class MaterialHistogramPass : public ComputePass {
 public:
+    MaterialHistogramPass() {
+        m_pso = PSOManager::GetInstance().MakeComputePipeline(
+            PSOManager::GetInstance().GetComputeRootSignature(),
+            L"shaders/VisUtil.hlsl",
+            L"MaterialHistogramCS",
+            {},
+            "MaterialHistogramPSO");
+    }
     void DeclareResourceUsages(ComputePassBuilder* b) override {
         b->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
                               Builtin::PrimaryCamera::VisibilityTexture,
@@ -16,12 +24,6 @@ public:
     }
 
     void Setup() override {
-        m_pso = PSOManager::GetInstance().MakeComputePipeline(
-            PSOManager::GetInstance().GetComputeRootSignature(),
-            L"shaders/VisUtil.hlsl",
-            L"MaterialHistogramCS",
-            {},
-            "MaterialHistogramPSO");
 
         RegisterSRV(Builtin::PrimaryCamera::VisibilityTexture);
         RegisterSRV(Builtin::PrimaryCamera::VisibleClusterTable);

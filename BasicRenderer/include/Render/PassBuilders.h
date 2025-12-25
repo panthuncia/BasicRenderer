@@ -751,12 +751,12 @@ public:
 	}
 
 	RenderPassBuilder& IsGeometryPass()& {
-		params.isGeometryPass = true;
+		m_isGeometryPass = true;
 		return *this;
 	}
 
     RenderPassBuilder IsGeometryPass() && {
-        params.isGeometryPass = true;
+        m_isGeometryPass = true;
 		return std::move(*this);
     }
 
@@ -807,8 +807,11 @@ private:
     void Finalize() {
         if (!built_) return;
 
+        params = {}; // Reset params to clear any resources from previous build
+
         pass->DeclareResourceUsages(this);
 
+        params.isGeometryPass = m_isGeometryPass;
         params.identifierSet = _declaredIds;
         params.resourceRequirements = GatherResourceRequirements();
 
@@ -1151,6 +1154,7 @@ private:
     RenderPassParameters     params;
 	std::shared_ptr<RenderPass> pass;
     bool built_ = false;
+    bool m_isGeometryPass = false;
     std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher> _declaredIds;
 
     friend class RenderGraph; // Allow RenderGraph to create instances of this builder
@@ -1388,6 +1392,8 @@ private:
 
     void Finalize() {
         if (!built_) return;
+
+        params = {}; // Reset params to clear any resources from previous build
 
         pass->DeclareResourceUsages(this);
 

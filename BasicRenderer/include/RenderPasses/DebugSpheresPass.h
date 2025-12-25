@@ -15,6 +15,8 @@ public:
 	DebugSpherePass() {
 		CreateDebugRootSignature();
 		CreateDebugMeshPSO();
+		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::MeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 	}
 	~DebugSpherePass() {
 	}
@@ -26,8 +28,6 @@ public:
 	}
 
 	void Setup() override {
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-		m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::MeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 	
 		m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 

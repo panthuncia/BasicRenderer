@@ -7,7 +7,14 @@
 // Dispatch dimension: x = numBlocks, where numBlocks = ceil(NumMaterials / blockSize).
 class MaterialBlockScanPass : public ComputePass {
 public:
-    explicit MaterialBlockScanPass() {}
+    explicit MaterialBlockScanPass() {
+        m_pso = PSOManager::GetInstance().MakeComputePipeline(
+            PSOManager::GetInstance().GetComputeRootSignature(),
+            L"shaders/materialPrefixSum.hlsl",
+            L"BlockScanCS",
+            {},
+            "VisUtil_BlockScanPSO");
+    }
 
     void DeclareResourceUsages(ComputePassBuilder* b) override {
         b->WithShaderResource("Builtin::VisUtil::MaterialPixelCountBuffer")
@@ -16,12 +23,6 @@ public:
     }
 
     void Setup() override {
-        m_pso = PSOManager::GetInstance().MakeComputePipeline(
-            PSOManager::GetInstance().GetComputeRootSignature(),
-            L"shaders/materialPrefixSum.hlsl",
-            L"BlockScanCS",
-            {},
-            "VisUtil_BlockScanPSO");
 
         RegisterSRV("Builtin::VisUtil::MaterialPixelCountBuffer");
         RegisterUAV("Builtin::VisUtil::MaterialOffsetBuffer");

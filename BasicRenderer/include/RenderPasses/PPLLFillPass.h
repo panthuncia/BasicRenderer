@@ -45,6 +45,11 @@ public:
 		m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
 
 		m_clusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting")();
+		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
+			.with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::OITAccumulationPass))
+			.cached().cache_kind(flecs::QueryCacheAll)
+			.build();
 	}
 
 	~PPLLFillPass() {
@@ -100,11 +105,6 @@ public:
 	}
 
 	void Setup() override {
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
-			.with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::OITAccumulationPass))
-			.cached().cache_kind(flecs::QueryCacheAll)
-			.build();
 		
 		m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 		m_PPLLHeadPointerTexture = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PPLL::HeadPointerTexture);

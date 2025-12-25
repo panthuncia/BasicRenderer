@@ -7,7 +7,9 @@
 
 class LuminanceHistogramPass : public ComputePass {
 public:
-    LuminanceHistogramPass() {}
+    LuminanceHistogramPass() {
+        CreateComputePSO();
+    }
 
     void DeclareResourceUsages(ComputePassBuilder* builder) {
         builder->WithShaderResource(Builtin::Color::HDRColorTarget)
@@ -15,8 +17,6 @@ public:
     }
 
     void Setup() override {
-        CreateComputePSO();
-        
 		RegisterSRV(Builtin::Color::HDRColorTarget);
         RegisterUAV(Builtin::PostProcessing::LuminanceHistogram);
     }

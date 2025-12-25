@@ -7,15 +7,15 @@
 
 class LuminanceHistogramAveragePass : public ComputePass {
 public:
-    LuminanceHistogramAveragePass() {}
+    LuminanceHistogramAveragePass() {
+        CreateComputePSO();
+    }
 
     void DeclareResourceUsages(ComputePassBuilder* builder) {
         builder->WithUnorderedAccess(Builtin::PostProcessing::LuminanceHistogram, Builtin::PostProcessing::AdaptedLuminance, "FFX::LPMConstants");
     }
 
     void Setup() override {
-        CreateComputePSO();
-        
 		RegisterUAV(Builtin::PostProcessing::AdaptedLuminance);
         RegisterUAV(Builtin::PostProcessing::LuminanceHistogram);
 		RegisterSRV("FFX::LPMConstants");
