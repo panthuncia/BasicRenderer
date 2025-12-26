@@ -24,10 +24,6 @@ public:
 		m_pUpscaledHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
     }
 
-    void RegisterCommandLists(std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7>> commandLists) {
-    }
-
-
     PassReturn Execute(RenderContext& context) override {
         UpscalingManager::GetInstance().Evaluate(context, m_pHDRTarget.get(), m_pUpscaledHDRTarget.get(), m_pDepthTexture.get(), m_pMotionVectors.get());
         return {};

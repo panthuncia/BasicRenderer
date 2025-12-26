@@ -200,14 +200,14 @@ namespace rhi {
 		HwProtectionOutOfMemory,      // DXGI_ERROR_HW_PROTECTION_OUTOFMEMORY
 
 		// ---------------------------------------------------------------------
-		// Shader cache (worth surfacing if you rely on it)
+		// Shader cache
 		// ---------------------------------------------------------------------
 		CacheCorrupt,                 // DXGI_ERROR_CACHE_CORRUPT
 		CacheFull,                    // DXGI_ERROR_CACHE_FULL
 		CacheHashCollision,           // DXGI_ERROR_CACHE_HASH_COLLISION
 
 		// ---------------------------------------------------------------------
-		// D3D12-specific “configuration mismatch” errors
+		// D3D12-specific "configuration mismatch" errors
 		// ---------------------------------------------------------------------
 		AdapterNotFound,              // D3D12_ERROR_ADAPTER_NOT_FOUND
 		DriverVersionMismatch,        // D3D12_ERROR_DRIVER_VERSION_MISMATCH
@@ -744,7 +744,7 @@ namespace rhi {
 		bool depthEnable = true;
 		bool depthWrite = true;
 		CompareOp depthFunc = CompareOp::LessEqual;
-		// (Stencil omitted here; add if you need it)
+		// TODO: stencil
 	};
 
 	struct BlendAttachment {
@@ -2161,6 +2161,6 @@ namespace rhi {
 		if (d && d->vt && d->vt->setNameHeap) d->vt->setNameHeap(d, h, n);
 	}
 
-	DevicePtr CreateD3D12Device(const DeviceCreateInfo& ci) noexcept; // implemented in rhi_dx12.cpp
+	rhi::Result CreateD3D12Device(const DeviceCreateInfo& ci, DevicePtr& outPtr, bool enableStreamlineInterposer = false) noexcept; // implemented in rhi_dx12.cpp
 
 }

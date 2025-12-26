@@ -83,9 +83,4 @@ namespace rhi::dx12 {
         if (!QueryNativeTimeline(t, RHI_IID_D3D12_TIMELINE, &info, sizeof(info))) return nullptr;
         return static_cast<ID3D12Fence*>(info.timeline);
 	}
-
-    using PFN_UpgradeInterface = sl::Result(*)(void**); // Streamline's slUpgradeInterface-compatible
-    using PFun_slSetD3DDevice = sl::Result(void* d3dDevice);
-    bool enable_streamline_interposer(Device d, PFN_UpgradeInterface upgrade, PFun_slSetD3DDevice setDevice);
-    void disable_streamline_interposer(Device);
 } // namespace rhi::dx12

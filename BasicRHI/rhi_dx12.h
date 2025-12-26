@@ -213,7 +213,8 @@ namespace rhi {
 
 	struct Dx12QueueState {
 		Dx12QueueState(){}
-		Microsoft::WRL::ComPtr<ID3D12CommandQueue> q;
+		Microsoft::WRL::ComPtr<ID3D12CommandQueue> pNativeQueue;
+		Microsoft::WRL::ComPtr<ID3D12CommandQueue> pSLProxyQueue;
 		Microsoft::WRL::ComPtr<ID3D12Fence> fence;
 		UINT64 value = 0;
 #if BUILD_TYPE == BUILD_DEBUG
@@ -224,13 +225,14 @@ namespace rhi {
 
 	struct Dx12Swapchain {
 		Dx12Swapchain(){}
-		explicit Dx12Swapchain(ComPtr<IDXGISwapChain3> s, DXGI_FORMAT f, UINT width, UINT height, UINT c,
+		explicit Dx12Swapchain(ComPtr<IDXGISwapChain3> pNativeSC, ComPtr<IDXGISwapChain3> pSlProxySC, DXGI_FORMAT f, UINT width, UINT height, UINT c,
 			std::vector<ComPtr<ID3D12Resource>> images,
 			std::vector<ResourceHandle> imageHandles,
 			std::shared_ptr<Dx12Device> d)
-			: sc(s), fmt(f), w(width), h(height), count(c), images(images), imageHandles(imageHandles), dev(d) {
+			: pNativeSC(pNativeSC), pSlProxySC(pSlProxySC), fmt(f), w(width), h(height), count(c), images(images), imageHandles(imageHandles), dev(d) {
 		}
-		ComPtr<IDXGISwapChain3> sc;
+		ComPtr<IDXGISwapChain3> pNativeSC;
+		ComPtr<IDXGISwapChain3> pSlProxySC;
 		DXGI_FORMAT fmt{};
 		UINT w{}, h{}, count{};
 		UINT current{};
@@ -318,13 +320,11 @@ namespace rhi {
 
 	struct Dx12Device {
 		Device self{};
-		ComPtr<IDXGIFactory7> factory;
-		ComPtr<ID3D12Device10> dev;
+		ComPtr<IDXGIFactory7> pNativeFactory;
+		Microsoft::WRL::ComPtr<IDXGIFactory7>  pSLProxyFactory;   // upgraded proxy
+		ComPtr<ID3D12Device10> pNativeDevice;
+		Microsoft::WRL::ComPtr<ID3D12Device>   pSLProxyDevice;// upgraded base iface
 		ComPtr<IDXGIAdapter4>  adapter;
-
-		rhi::dx12::PFN_UpgradeInterface upgradeFn = nullptr;
-		Microsoft::WRL::ComPtr<IDXGIFactory7>  slFactory;   // upgraded proxy
-		Microsoft::WRL::ComPtr<ID3D12Device>   slDeviceBase;// upgraded base iface
 
 		Registry<Dx12Resource> resources;
 		Registry<Dx12Sampler> samplers;

@@ -233,11 +233,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // Aftermath
 
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
-    HMODULE pixLoaded = PIXLoadLatestWinPixGpuCapturerLibrary();
-    if (!pixLoaded) {
-        // Print the error code for debugging purposes
-        spdlog::warn("Could not load PIX! Error: {}", GetLastError());
-    }
+    //HMODULE pixLoaded = PIXLoadLatestWinPixGpuCapturerLibrary();
+    //if (!pixLoaded) {
+    //    // Print the error code for debugging purposes
+    //    spdlog::warn("Could not load PIX! Error: {}", GetLastError());
+    //}
 #endif
 
     SetDllDirectoryA(".\\D3D\\");
@@ -258,20 +258,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     auto baseScene = std::make_shared<Scene>();
 
-    //auto dragonScene = LoadModel("models/dragon.glb");
-    //dragonScene->GetRoot().set<Components::Scale>({ 5, 5, 5 });
-    //dragonScene->GetRoot().set<Components::Position>({ 0.0, 1, 0.0 });
+    auto dragonScene = LoadModel("models/dragon.glb");
+    dragonScene->GetRoot().set<Components::Scale>({ 5, 5, 5 });
+    dragonScene->GetRoot().set<Components::Position>({ 0.0, 1, 0.0 });
 
-    //auto carScene = LoadModel("models/porche.glb");
-    //carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
-    //carScene->GetRoot().set<Components::Position>({ 1.0, 0.0, 1.0 });
+    auto carScene = LoadModel("models/porche.glb");
+    carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
+    carScene->GetRoot().set<Components::Position>({ 1.0, 0.0, 1.0 });
 
     auto mountainScene = LoadModel("models/terrain.glb");
     mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
     mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
 
-    //auto tigerScene = LoadModel("models/tiger.glb");
-    //tigerScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
+    auto tigerScene = LoadModel("models/tiger.glb");
+    tigerScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
 	//auto shiba = LoadModel("models/shiba.glb");
 
@@ -281,7 +281,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto wine = LoadModel("models/bistroInterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
-    //auto robot = LoadModel("models/robot.usdz");
+    auto robot = LoadModel("models/robot.usdz");
 
 	//auto sphereScene = LoadModel("models/sphere.glb");
 
@@ -291,16 +291,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //renderer.GetCurrentScene()->AppendScene(usdScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(curtains->Clone());
 
-    //renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
-    //renderer.GetCurrentScene()->AppendScene(carScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(carScene->Clone());
     renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
-    //renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 	//renderer.GetCurrentScene()->AppendScene(shiba->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(bistro->Clone());
     //renderer.GetCurrentScene()->AppendScene(wine->Clone());
     
-	//renderer.GetCurrentScene()->AppendScene(robot->Clone());
+	renderer.GetCurrentScene()->AppendScene(robot->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
 

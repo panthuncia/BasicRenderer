@@ -104,7 +104,10 @@ void DeviceManager::Initialize() {
 #if BUILD_TYPE == BUILD_DEBUG
     enableDebug = true;
 #endif
-    m_device = rhi::CreateD3D12Device(rhi::DeviceCreateInfo{ .backend = rhi::Backend::D3D12, .framesInFlight = numFramesInFlight, .enableDebug = enableDebug });
+	rhi::CreateD3D12Device(
+        rhi::DeviceCreateInfo{ .backend = rhi::Backend::D3D12, .framesInFlight = numFramesInFlight, .enableDebug = enableDebug },
+    m_device,
+        true);
     m_graphicsQueue = m_device->GetQueue(rhi::QueueKind::Graphics);
     m_computeQueue = m_device->GetQueue(rhi::QueueKind::Compute);
     m_copyQueue = m_device->GetQueue(rhi::QueueKind::Copy);

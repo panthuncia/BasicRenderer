@@ -1,7 +1,14 @@
 #include "rhi_dx12.h"
 #include <atlbase.h>
 
+#include <sl.h>
+#include <sl_consts.h>
+#include <sl_core_api.h>
+#include <sl_security.h>
+#include <string>
+
 #include "rhi_dx12_casting.h"
+
 
 #define VERIFY(expr) if (FAILED(expr)) { spdlog::error("Validation error!"); }
 
@@ -147,7 +154,7 @@ namespace rhi {
 		auto sd = sb.desc();
 
 		ComPtr<ID3D12PipelineState> pso;
-		auto hr = dimpl->dev->CreatePipelineState(&sd, IID_PPV_ARGS(&pso));
+		auto hr = dimpl->pNativeDevice->CreatePipelineState(&sd, IID_PPV_ARGS(&pso));
 		if (FAILED(hr)) {
 			RHI_FAIL(ToRHI(hr));
 		}
@@ -199,7 +206,7 @@ namespace rhi {
 
 	static Result d_waitIdle(Device* d) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		impl->gfx.q->Signal(impl->gfx.fence.Get(), ++impl->gfx.value);
+		impl->gfx.pNativeQueue->Signal(impl->gfx.fence.Get(), ++impl->gfx.value);
 		if (impl->gfx.fence->GetCompletedValue() < impl->gfx.value) {
 			HANDLE e = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 			impl->gfx.fence->SetEventOnCompletion(impl->gfx.value, e);
@@ -228,20 +235,24 @@ namespace rhi {
 		desc.Flags = flags;
 
 		ComPtr<IDXGISwapChain1> sc1;
-		IDXGIFactory7* facForCreate = impl->upgradeFn && impl->slFactory ? impl->slFactory.Get()
-			: impl->factory.Get();
-		if (const auto hr = facForCreate->CreateSwapChainForHwnd(impl->gfx.q.Get(), static_cast<HWND>(hwnd), &desc, nullptr, nullptr, &sc1); FAILED(hr)) {
-			spdlog::error("DX12 CreateSwapChainForHwnd failed: {0}", std::to_string(hr));
+		if (const auto hr = impl->pSLProxyFactory->CreateSwapChainForHwnd(impl->gfx.pSLProxyQueue.Get(), static_cast<HWND>(hwnd), &desc, nullptr, nullptr, &sc1); FAILED(hr)) {
 			RHI_FAIL(ToRHI(hr));
 		}
-		ComPtr<IDXGISwapChain3> sc;
-		sc1.As(&sc);
+		ComPtr<IDXGISwapChain3> proxySc3;
+		if (const auto hr = sc1.As(&proxySc3); FAILED(hr)) {
+			RHI_FAIL(ToRHI(hr));
+		}
+
+		IDXGISwapChain3* nativeSc3Raw = nullptr;
+		slGetNativeInterface(proxySc3.Get(), (void**)&nativeSc3Raw);
+		ComPtr<IDXGISwapChain3> nativeSc3;
+		nativeSc3.Attach(nativeSc3Raw);
 
 		std::vector<ComPtr<ID3D12Resource>> imgs(bufferCount);
 		std::vector<ResourceHandle> imgHandles(bufferCount);
 
 		for (UINT i = 0; i < bufferCount; i++) {
-			sc->GetBuffer(i, IID_PPV_ARGS(&imgs[i]));
+			proxySc3->GetBuffer(i, IID_PPV_ARGS(&imgs[i]));
 			// Register as a TextureHandle
 			Dx12Resource t(imgs[i], desc.Format, w, h, 1, 1, D3D12_RESOURCE_DIMENSION_TEXTURE2D, 1, impl->selfWeak.lock());
 			imgHandles[i] = impl->resources.alloc(t);
@@ -249,7 +260,7 @@ namespace rhi {
 		}
 
 		auto scWrap = Dx12Swapchain(
-			sc, desc.Format, w, h, bufferCount,
+			nativeSc3, proxySc3, desc.Format, w, h, bufferCount,
 			imgs, imgHandles,
 			impl->selfWeak.lock()
 		);
@@ -371,7 +382,7 @@ namespace rhi {
 			RHI_FAIL(ToRHI(hr));
 		}
 		Microsoft::WRL::ComPtr<ID3D12RootSignature> root;
-		hr = impl->dev->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(),
+		hr = impl->pNativeDevice->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(),
 			IID_PPV_ARGS(&root));
 		if (FAILED(hr)) {
 			RHI_FAIL(ToRHI(hr));
@@ -454,9 +465,9 @@ namespace rhi {
 		if (!d || !chain) return Result::InvalidArgument;
 
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl || !impl->dev) return Result::Failed;
+		if (!impl || !impl->pNativeDevice) return Result::Failed;
 
-		ID3D12Device* dev = impl->dev.Get();
+		ID3D12Device* dev = impl->pNativeDevice.Get();
 
 		D3D12_FEATURE_DATA_D3D12_OPTIONS   opt0{};
 		D3D12_FEATURE_DATA_D3D12_OPTIONS1  opt1{};
@@ -781,7 +792,7 @@ namespace rhi {
 		desc.ByteStride = cd.byteStride;
 
 		Microsoft::WRL::ComPtr<ID3D12CommandSignature> cs;
-		if (const auto hr = impl->dev->CreateCommandSignature(&desc, rs, IID_PPV_ARGS(&cs)); FAILED(hr)) {
+		if (const auto hr = impl->pNativeDevice->CreateCommandSignature(&desc, rs, IID_PPV_ARGS(&cs)); FAILED(hr)) {
 			RHI_FAIL(ToRHI(hr));
 		}
 		const Dx12CommandSignature s(cs, cd.byteStride, impl->selfWeak.lock());
@@ -806,11 +817,11 @@ namespace rhi {
 		desc.Flags = hd.shaderVisible ? D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE : D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 
 		Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> heap;
-		if (const auto hr = impl->dev->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&heap)); FAILED(hr)) {
+		if (const auto hr = impl->pNativeDevice->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&heap)); FAILED(hr)) {
 			RHI_FAIL(ToRHI(hr));
 		}
 
-		const auto descriptorSize = impl->dev->GetDescriptorHandleIncrementSize(desc.Type);
+		const auto descriptorSize = impl->pNativeDevice->GetDescriptorHandleIncrementSize(desc.Type);
 		const Dx12DescriptorHeap H(heap, desc.Type, descriptorSize, (desc.Flags & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) != 0, impl->selfWeak.lock());
 
 		const auto handle = impl->descHeaps.alloc(H);
@@ -887,7 +898,7 @@ namespace rhi {
 				desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 				break;
 			}
-			impl->dev->CreateShaderResourceView(B->res.Get(), &desc, dst);
+			impl->pNativeDevice->CreateShaderResourceView(B->res.Get(), &desc, dst);
 			return Result::Ok;
 		}
 
@@ -898,7 +909,7 @@ namespace rhi {
 			desc.Texture1D.MostDetailedMip = dv.tex1D.mostDetailedMip;
 			desc.Texture1D.MipLevels = dv.tex1D.mipLevels;
 			desc.Texture1D.ResourceMinLODClamp = dv.tex1D.minLodClamp;
-			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
+			impl->pNativeDevice->CreateShaderResourceView(T->res.Get(), &desc, dst);
 			return Result::Ok;
 		}
 
@@ -912,7 +923,7 @@ namespace rhi {
 			desc.Texture1DArray.ArraySize = dv.tex1DArray.arraySize;
 			desc.Texture1DArray.ResourceMinLODClamp = dv.tex1DArray.minLodClamp;
 			auto* R = T->res.Get();
-			impl->dev->CreateShaderResourceView(R, &desc, dst);
+			impl->pNativeDevice->CreateShaderResourceView(R, &desc, dst);
 			return Result::Ok;
 		}
 
@@ -924,7 +935,7 @@ namespace rhi {
 			desc.Texture2D.MipLevels = dv.tex2D.mipLevels;
 			desc.Texture2D.PlaneSlice = dv.tex2D.planeSlice;
 			desc.Texture2D.ResourceMinLODClamp = dv.tex2D.minLodClamp;
-			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
+			impl->pNativeDevice->CreateShaderResourceView(T->res.Get(), &desc, dst);
 			return Result::Ok;
 		}
 
@@ -938,7 +949,7 @@ namespace rhi {
 			desc.Texture2DArray.ArraySize = dv.tex2DArray.arraySize;
 			desc.Texture2DArray.PlaneSlice = dv.tex2DArray.planeSlice;
 			desc.Texture2DArray.ResourceMinLODClamp = dv.tex2DArray.minLodClamp;
-			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
+			impl->pNativeDevice->CreateShaderResourceView(T->res.Get(), &desc, dst);
 			return Result::Ok;
 		}
 
@@ -946,7 +957,7 @@ namespace rhi {
 			auto* T = impl->resources.get(resource); if (!T || !T->res) return Result::InvalidArgument;
 			desc.Format = (dv.formatOverride == Format::Unknown) ? T->fmt : ToDxgi(dv.formatOverride);
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMS;
-			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
+			impl->pNativeDevice->CreateShaderResourceView(T->res.Get(), &desc, dst);
 			return Result::Ok;
 		}
 
@@ -956,7 +967,7 @@ namespace rhi {
 			desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMSARRAY;
 			desc.Texture2DMSArray.FirstArraySlice = dv.tex2DMSArray.firstArraySlice;
 			desc.Texture2DMSArray.ArraySize = dv.tex2DMSArray.arraySize;
-			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
+			impl->pNativeDevice->CreateShaderResourceView(T->res.Get(), &desc, dst);
 			return Result::Ok;
 		}
 
@@ -967,7 +978,7 @@ namespace rhi {
 			desc.Texture3D.MostDetailedMip = dv.tex3D.mostDetailedMip;
 			desc.Texture3D.MipLevels = dv.tex3D.mipLevels;
 			desc.Texture3D.ResourceMinLODClamp = dv.tex3D.minLodClamp;
-			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
+			impl->pNativeDevice->CreateShaderResourceView(T->res.Get(), &desc, dst);
 			return Result::Ok;
 		}
 
@@ -978,7 +989,7 @@ namespace rhi {
 			desc.TextureCube.MostDetailedMip = dv.cube.mostDetailedMip;
 			desc.TextureCube.MipLevels = dv.cube.mipLevels;
 			desc.TextureCube.ResourceMinLODClamp = dv.cube.minLodClamp;
-			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
+			impl->pNativeDevice->CreateShaderResourceView(T->res.Get(), &desc, dst);
 			return Result::Ok;
 		}
 
@@ -991,7 +1002,7 @@ namespace rhi {
 			desc.TextureCubeArray.First2DArrayFace = dv.cubeArray.first2DArrayFace;
 			desc.TextureCubeArray.NumCubes = dv.cubeArray.numCubes;
 			desc.TextureCubeArray.ResourceMinLODClamp = dv.cubeArray.minLodClamp;
-			impl->dev->CreateShaderResourceView(T->res.Get(), &desc, dst);
+			impl->pNativeDevice->CreateShaderResourceView(T->res.Get(), &desc, dst);
 			return Result::Ok;
 		}
 
@@ -1001,7 +1012,7 @@ namespace rhi {
 			desc.Format = DXGI_FORMAT_UNKNOWN;
 			desc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
 			desc.RaytracingAccelerationStructure.Location = B->res->GetGPUVirtualAddress();
-			impl->dev->CreateShaderResourceView(B->res.Get(), &desc, dst);
+			impl->pNativeDevice->CreateShaderResourceView(B->res.Get(), &desc, dst);
 			return Result::Ok;
 		}
 
@@ -1070,7 +1081,7 @@ namespace rhi {
 				break;
 			}
 
-			impl->dev->CreateUnorderedAccessView(pResource, pCounterResource, &desc, dst);
+			impl->pNativeDevice->CreateUnorderedAccessView(pResource, pCounterResource, &desc, dst);
 			return Result::Ok;
 		}
 
@@ -1092,7 +1103,7 @@ namespace rhi {
 			desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE1D;
 			desc.Texture1D.MipSlice = dv.texture1D.mipSlice;
 
-			impl->dev->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
+			impl->pNativeDevice->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
 			return Result::Ok;
 		}
 
@@ -1116,7 +1127,7 @@ namespace rhi {
 			desc.Texture1DArray.FirstArraySlice = dv.texture1DArray.firstArraySlice;
 			desc.Texture1DArray.ArraySize = dv.texture1DArray.arraySize;
 
-			impl->dev->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
+			impl->pNativeDevice->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
 			return Result::Ok;
 		}
 
@@ -1138,7 +1149,7 @@ namespace rhi {
 			desc.Texture2D.MipSlice = dv.texture2D.mipSlice;
 			desc.Texture2D.PlaneSlice = dv.texture2D.planeSlice;
 
-			impl->dev->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
+			impl->pNativeDevice->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
 			return Result::Ok;
 		}
 
@@ -1162,7 +1173,7 @@ namespace rhi {
 			desc.Texture2DArray.ArraySize = dv.texture2DArray.arraySize;
 			desc.Texture2DArray.PlaneSlice = dv.texture2DArray.planeSlice;
 
-			impl->dev->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
+			impl->pNativeDevice->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
 			return Result::Ok;
 		}
 
@@ -1185,7 +1196,7 @@ namespace rhi {
 			desc.Texture3D.FirstWSlice = dv.texture3D.firstWSlice;
 			desc.Texture3D.WSize = (dv.texture3D.wSize == 0) ? UINT(-1) : dv.texture3D.wSize;
 
-			impl->dev->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
+			impl->pNativeDevice->CreateUnorderedAccessView(pResource, nullptr, &desc, dst);
 			return Result::Ok;
 		}
 
@@ -1211,7 +1222,7 @@ namespace rhi {
 		D3D12_CONSTANT_BUFFER_VIEW_DESC desc{};
 		desc.BufferLocation = B->res->GetGPUVirtualAddress() + dv.byteOffset;
 		desc.SizeInBytes = (UINT)((dv.byteSize + 255) & ~255u);
-		impl->dev->CreateConstantBufferView(&desc, dst);
+		impl->pNativeDevice->CreateConstantBufferView(&desc, dst);
 		return Result::Ok;
 	}
 
@@ -1243,7 +1254,7 @@ namespace rhi {
 
 		FillDxBorderColor(sd, desc.BorderColor);
 
-		impl->dev->CreateSampler(&desc, dst);
+		impl->pNativeDevice->CreateSampler(&desc, dst);
 		return Result::Ok;
 	}
 
@@ -1357,7 +1368,7 @@ namespace rhi {
 			return Result::Unsupported;
 		}
 
-		impl->dev->CreateRenderTargetView(pRes, &r, dst);
+		impl->pNativeDevice->CreateRenderTargetView(pRes, &r, dst);
 		return Result::Ok;
 	}
 
@@ -1427,14 +1438,14 @@ namespace rhi {
 			return Result::Unsupported;
 		}
 
-		impl->dev->CreateDepthStencilView(T->res.Get(), &z, dst);
+		impl->pNativeDevice->CreateDepthStencilView(T->res.Get(), &z, dst);
 		return Result::Ok;
 	}
 
 	static Result d_createCommandAllocator(Device* d, QueueKind q, CommandAllocatorPtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> a;
-		if (const auto hr = impl->dev->CreateCommandAllocator(ToDX(q), IID_PPV_ARGS(&a)); FAILED(hr)) {
+		if (const auto hr = impl->pNativeDevice->CreateCommandAllocator(ToDX(q), IID_PPV_ARGS(&a)); FAILED(hr)) {
 			__debugbreak();
 			return ToRHI(hr);
 		}
@@ -1461,7 +1472,7 @@ namespace rhi {
 		}
 
 		ComPtr<ID3D12GraphicsCommandList7> cl;
-		if (const auto hr = impl->dev->CreateCommandList(0, A->type, A->alloc.Get(), nullptr, IID_PPV_ARGS(&cl)); FAILED(hr)) {
+		if (const auto hr = impl->pNativeDevice->CreateCommandList(0, A->type, A->alloc.Get(), nullptr, IID_PPV_ARGS(&cl)); FAILED(hr)) {
 			RHI_FAIL(ToRHI(hr));
 		}
 		const Dx12CommandList rec(cl, A->alloc, A->type, impl->selfWeak.lock());
@@ -1476,7 +1487,7 @@ namespace rhi {
 
 	static Result d_createCommittedBuffer(Device* d, const ResourceDesc& bd, ResourcePtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl || !impl->dev || bd.buffer.sizeBytes == 0) {
+		if (!impl || !impl->pNativeDevice || bd.buffer.sizeBytes == 0) {
 			RHI_FAIL(Result::InvalidArgument);
 		}
 
@@ -1499,7 +1510,7 @@ namespace rhi {
 			castableFormats.push_back(ToDxgi(fmt));
 		}
 
-		const HRESULT hr = impl->dev->CreateCommittedResource3(
+		const HRESULT hr = impl->pNativeDevice->CreateCommittedResource3(
 			&hp,
 			hf,
 			&desc,
@@ -1529,7 +1540,7 @@ namespace rhi {
 
 	static Result d_createCommittedTexture(Device* d, const ResourceDesc& td, ResourcePtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl || !impl->dev || td.texture.width == 0 || td.texture.height == 0 || td.texture.format == Format::Unknown) {
+		if (!impl || !impl->pNativeDevice || td.texture.width == 0 || td.texture.height == 0 || td.texture.format == Format::Unknown) {
 			RHI_FAIL(Result::InvalidArgument);
 		}
 
@@ -1557,7 +1568,7 @@ namespace rhi {
 		}
 
 		Microsoft::WRL::ComPtr<ID3D12Resource> res;
-		HRESULT hr = impl->dev->CreateCommittedResource3(
+		HRESULT hr = impl->pNativeDevice->CreateCommittedResource3(
 			&hp,
 			hf,
 			&desc,
@@ -1610,15 +1621,15 @@ namespace rhi {
 
 	static uint32_t d_getDescriptorHandleIncrementSize(Device* d, DescriptorHeapType type) noexcept {
 		const auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl || !impl->dev) return 0;
+		if (!impl || !impl->pNativeDevice) return 0;
 		const D3D12_DESCRIPTOR_HEAP_TYPE t = ToDX(type);
-		return (uint32_t)impl->dev->GetDescriptorHandleIncrementSize(t);
+		return (uint32_t)impl->pNativeDevice->GetDescriptorHandleIncrementSize(t);
 	}
 
 	static Result d_createTimeline(Device* d, uint64_t initial, const char* dbg, TimelinePtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		Microsoft::WRL::ComPtr<ID3D12Fence> f;
-		if (const auto hr = impl->dev->CreateFence(initial, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&f)); FAILED(hr)) {
+		if (const auto hr = impl->pNativeDevice->CreateFence(initial, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&f)); FAILED(hr)) {
 			RHI_FAIL(ToRHI(hr));
 		}
 		if (dbg) { std::wstring w(dbg, dbg + ::strlen(dbg)); f->SetName(w.c_str()); }
@@ -1638,7 +1649,7 @@ namespace rhi {
 
 	static Result d_createHeap(const Device* d, const HeapDesc& hd, HeapPtr& out) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl || !impl->dev || hd.sizeBytes == 0) {
+		if (!impl || !impl->pNativeDevice || hd.sizeBytes == 0) {
 			RHI_FAIL(Result::InvalidArgument);
 		}
 		D3D12_HEAP_PROPERTIES props{};
@@ -1655,7 +1666,7 @@ namespace rhi {
 		desc.Flags = ToDX(hd.flags);
 
 		Microsoft::WRL::ComPtr<ID3D12Heap> heap;
-		if (const auto hr = impl->dev->CreateHeap(&desc, IID_PPV_ARGS(&heap)); FAILED(hr)) {
+		if (const auto hr = impl->pNativeDevice->CreateHeap(&desc, IID_PPV_ARGS(&heap)); FAILED(hr)) {
 			return ToRHI(hr);
 		}
 
@@ -1780,7 +1791,7 @@ namespace rhi {
 		}
 
 		Microsoft::WRL::ComPtr<ID3D12Resource> res;
-		const HRESULT hr = impl->dev->CreatePlacedResource2(
+		const HRESULT hr = impl->pNativeDevice->CreatePlacedResource2(
 			H->heap.Get(),
 			offset,
 			&desc,
@@ -1831,7 +1842,7 @@ namespace rhi {
 		}
 
 		Microsoft::WRL::ComPtr<ID3D12Resource> res;
-		HRESULT hr = impl->dev->CreatePlacedResource2(
+		HRESULT hr = impl->pNativeDevice->CreatePlacedResource2(
 			H->heap.Get(),
 			offset,
 			&desc,
@@ -1902,7 +1913,7 @@ namespace rhi {
 			bool needMesh = (qd.statsMask & (PS_TaskInvocations | PS_MeshInvocations | PS_MeshPrimitives)) != 0;
 
 			D3D12_FEATURE_DATA_D3D12_OPTIONS9 opts9{};
-			bool haveOpt9 = SUCCEEDED(dimpl->dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS9, &opts9, sizeof(opts9)));
+			bool haveOpt9 = SUCCEEDED(dimpl->pNativeDevice->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS9, &opts9, sizeof(opts9)));
 			bool canMeshStats = haveOpt9 && !!opts9.MeshShaderPipelineStatsSupported;
 
 			if (needMesh && !canMeshStats && qd.requireAllStats) {
@@ -1918,7 +1929,7 @@ namespace rhi {
 		}
 
 		Microsoft::WRL::ComPtr<ID3D12QueryHeap> heap;
-		if (const auto hr = dimpl->dev->CreateQueryHeap(&desc, IID_PPV_ARGS(&heap)); FAILED(hr)) {
+		if (const auto hr = dimpl->pNativeDevice->CreateQueryHeap(&desc, IID_PPV_ARGS(&heap)); FAILED(hr)) {
 			RHI_FAIL(ToRHI(hr));
 		}
 		Dx12QueryPool qp(heap, type, qd.count, dimpl->selfWeak.lock());
@@ -1941,7 +1952,7 @@ namespace rhi {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		auto* s = (q == QueueKind::Graphics) ? &impl->gfx : (q == QueueKind::Compute ? &impl->comp : &impl->copy);
 		UINT64 freq = 0;
-		if (s->q) s->q->GetTimestampFrequency(&freq);
+		if (s->pNativeQueue) s->pNativeQueue->GetTimestampFrequency(&freq);
 		return { freq };
 	}
 
@@ -1969,7 +1980,7 @@ namespace rhi {
 		const UINT arrayLayers = (desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D) ? 1u : desc.DepthOrArraySize;
 
 		// Plane count per DXGI format
-		const UINT resPlaneCount = D3D12GetFormatPlaneCount(impl->dev.Get(), desc.Format);
+		const UINT resPlaneCount = D3D12GetFormatPlaneCount(impl->pNativeDevice.Get(), desc.Format);
 
 		// Clamp input range to resource
 		const UINT firstMip = std::min<UINT>(in.firstMip, mipLevels ? mipLevels - 1u : 0u);
@@ -1998,7 +2009,7 @@ namespace rhi {
 		std::vector<UINT64> rowSizes(totalSubs);
 		UINT64 totalBytes = 0;
 
-		impl->dev->GetCopyableFootprints(
+		impl->pNativeDevice->GetCopyableFootprints(
 			&desc,
 			firstSubresource,
 			totalSubs,
@@ -2052,7 +2063,7 @@ namespace rhi {
 		// Out array
 		std::vector<D3D12_RESOURCE_ALLOCATION_INFO1> dxInfos;
 		dxInfos.resize(resourceCount);
-		impl->dev->GetResourceAllocationInfo2(0, resourceCount, descs.data(), dxInfos.data());
+		impl->pNativeDevice->GetResourceAllocationInfo2(0, resourceCount, descs.data(), dxInfos.data());
 		// Pack back
 		for (size_t i = 0; i < resourceCount; ++i) {
 			outInfos[i].offset = dxInfos[i].Offset;
@@ -2068,7 +2079,7 @@ namespace rhi {
 		ResidencyPriority priority) noexcept
 	{
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		if (!impl || !impl->dev) {
+		if (!impl || !impl->pNativeDevice) {
 			RHI_FAIL(Result::InvalidArgument);
 		}
 
@@ -2144,7 +2155,7 @@ namespace rhi {
 			pageables.push_back(native);
 		}
 
-		const HRESULT hr = impl->dev->SetResidencyPriority(
+		const HRESULT hr = impl->pNativeDevice->SetResidencyPriority(
 			static_cast<UINT>(pageables.size()),
 			pageables.data(),
 			priorities.data());
@@ -2166,7 +2177,7 @@ namespace rhi {
 			auto* TL = dev->timelines.get(w.t); if (!TL) {
 				RHI_FAIL(Result::InvalidArgument);
 			}
-			if (FAILED(qs->q->Wait(TL->fence.Get(), w.value))) {
+			if (FAILED(qs->pNativeQueue->Wait(TL->fence.Get(), w.value))) {
 				RHI_FAIL(Result::InvalidArgument);
 			}
 		}
@@ -2177,14 +2188,14 @@ namespace rhi {
 			auto* w = dx12_detail::CL(&L);
 			native.push_back(w->cl.Get());
 		}
-		if (!native.empty()) qs->q->ExecuteCommandLists(static_cast<uint32_t>(native.size()), native.data());
+		if (!native.empty()) qs->pNativeQueue->ExecuteCommandLists(static_cast<uint32_t>(native.size()), native.data());
 
 		// Post-signals
 		for (auto& sgn : s.signals) {
 			auto* TL = dev->timelines.get(sgn.t); if (!TL) {
 				RHI_FAIL(Result::InvalidArgument);
 			}
-			if (const auto hr = qs->q->Signal(TL->fence.Get(), sgn.value); FAILED(hr)) {
+			if (const auto hr = qs->pNativeQueue->Signal(TL->fence.Get(), sgn.value); FAILED(hr)) {
 				RHI_FAIL(ToRHI(hr));
 			}
 		}
@@ -2209,7 +2220,7 @@ namespace rhi {
 		}
 		qs->lastSignaledValue[p.t] = p.value;
 #endif
-		return SUCCEEDED(qs->q->Signal(TL->fence.Get(), p.value)) ? Result::Ok : Result::Failed;
+		return SUCCEEDED(qs->pNativeQueue->Signal(TL->fence.Get(), p.value)) ? Result::Ok : Result::Failed;
 	}
 
 	static Result q_wait(Queue* q, const TimelinePoint& p) noexcept {
@@ -2220,7 +2231,7 @@ namespace rhi {
 		auto* TL = dev->timelines.get(p.t); if (!TL) {
 			RHI_FAIL(Result::InvalidArgument);
 		}
-		return SUCCEEDED(qs->q->Wait(TL->fence.Get(), p.value)) ? Result::Ok : Result::Failed;
+		return SUCCEEDED(qs->pNativeQueue->Wait(TL->fence.Get(), p.value)) ? Result::Ok : Result::Failed;
 	}
 
 	static void q_setName(Queue* q, const char* n) noexcept {
@@ -2229,12 +2240,12 @@ namespace rhi {
 			return;
 		}
 		auto* qs = dx12_detail::QState(q);
-		if (!qs || !qs->q) {
+		if (!qs || !qs->pNativeQueue) {
 			BreakIfDebugging();
 			return;
 		}
 		std::wstring w(n, n + ::strlen(n));
-		qs->q->SetName(w.c_str());
+		qs->pNativeQueue->SetName(w.c_str());
 	}
 
 	// ---------------- CommandList vtable funcs ----------------
@@ -3000,13 +3011,13 @@ namespace rhi {
 
 	// ---------------- Swapchain vtable funcs ----------------
 	static uint32_t sc_count(Swapchain* sc) noexcept { return dx12_detail::SC(sc)->count; }
-	static uint32_t sc_curr(Swapchain* sc) noexcept { return dx12_detail::SC(sc)->sc->GetCurrentBackBufferIndex(); }
+	static uint32_t sc_curr(Swapchain* sc) noexcept { return dx12_detail::SC(sc)->pSlProxySC->GetCurrentBackBufferIndex(); }
 	//static ViewHandle sc_rtv(Swapchain* sc, uint32_t i) noexcept { return static_cast<Dx12Swapchain*>(sc->impl)->rtvHandles[i]; }
 	static ResourceHandle sc_img(Swapchain* sc, uint32_t i) noexcept { return dx12_detail::SC(sc)->imageHandles[i]; }
 	static Result sc_present(Swapchain* sc, bool vsync) noexcept {
 		auto* s = dx12_detail::SC(sc);
 		UINT sync = vsync ? 1 : 0; UINT flags = 0;
-		return s->sc->Present(sync, flags) == S_OK ? Result::Ok : Result::Failed;
+		return s->pSlProxySC->Present(sync, flags) == S_OK ? Result::Ok : Result::Failed;
 	}
 
 	static Result sc_resizeBuffers(
@@ -3017,7 +3028,7 @@ namespace rhi {
 		uint32_t flags) noexcept
 	{
 		auto* s = static_cast<Dx12Swapchain*>(sc->impl);
-		if (!s || !s->sc || !s->dev) return Result::InvalidNativePointer;
+		if (!s || !s->pSlProxySC || !s->dev) return Result::InvalidNativePointer;
 
 		auto* dev = s->dev.get();
 
@@ -3045,14 +3056,14 @@ namespace rhi {
 		}
 
 		// Resize swapchain buffers.
-		HRESULT hr = s->sc->ResizeBuffers((UINT)newCount, (UINT)w, (UINT)h, newFmt, (UINT)flags);
+		HRESULT hr = s->pSlProxySC->ResizeBuffers((UINT)newCount, (UINT)w, (UINT)h, newFmt, (UINT)flags);
 		if (FAILED(hr)) return ToRHI(hr);
 
 		// If w/h were 0, query actual post-resize dims.
 		if (w == 0 || h == 0)
 		{
 			DXGI_SWAP_CHAIN_DESC1 d{};
-			if (SUCCEEDED(s->sc->GetDesc1(&d))) { s->w = d.Width; s->h = d.Height; }
+			if (SUCCEEDED(s->pSlProxySC->GetDesc1(&d))) { s->w = d.Width; s->h = d.Height; }
 		}
 		else { s->w = (UINT)w; s->h = (UINT)h; }
 
@@ -3085,7 +3096,7 @@ namespace rhi {
 		for (uint32_t i = 0; i < newCount; ++i)
 		{
 			ComPtr<ID3D12Resource> img;
-			hr = s->sc->GetBuffer((UINT)i, IID_PPV_ARGS(&img));
+			hr = s->pSlProxySC->GetBuffer((UINT)i, IID_PPV_ARGS(&img));
 			if (FAILED(hr)) return ToRHI(hr);
 
 			s->images[i] = img;
@@ -3107,7 +3118,7 @@ namespace rhi {
 			}
 		}
 
-		s->current = s->sc->GetCurrentBackBufferIndex();
+		s->current = s->pSlProxySC->GetCurrentBackBufferIndex();
 		return Result::Ok;
 	}
 	static void sc_setName(Swapchain* sc, const char* n) noexcept {} // Cannot name IDXGISwapChain
@@ -3636,68 +3647,176 @@ namespace rhi {
 		}
 	}
 
-	DevicePtr CreateD3D12Device(const DeviceCreateInfo& ci) noexcept {
+	void SlLogMessageCallback(sl::LogType level, const char* message) {
+		//spdlog::info("Streamline Log: {}", message);
+	}
+	std::wstring GetExePath() {
+		WCHAR buffer[MAX_PATH] = { 0 };
+		GetModuleFileNameW(NULL, buffer, MAX_PATH);
+		std::wstring::size_type pos = std::wstring(buffer).find_last_of(L"\\/");
+		return std::wstring(buffer).substr(0, pos);
+	}
+
+	bool InitSL() noexcept
+	{
+		// IMPORTANT: Always securely load SL library, see source/core/sl.security/secureLoadLibrary for more details
+// Always secure load SL modules
+		if (!sl::security::verifyEmbeddedSignature(L"sl.interposer.dll"))
+		{
+			// SL module not signed, disable SL
+		}
+		else
+		{
+			auto mod = LoadLibraryW(L"sl.interposer.dll");
+
+			if (!mod) {
+				spdlog::error("Failed to load sl.interposer.dll, ensure it is in the correct directory.");
+				return false;
+			}
+
+		}
+
+		sl::Preferences pref{};
+		pref.showConsole = false; // for debugging, set to false in production
+		pref.logLevel = sl::LogLevel::eDefault;
+		auto path = GetExePath() + L"\\NVSL";
+		const wchar_t* path_wchar = path.c_str();
+		pref.pathsToPlugins = { &path_wchar }; // change this if Streamline plugins are not located next to the executable
+		pref.numPathsToPlugins = 1; // change this if Streamline plugins are not located next to the executable
+		pref.pathToLogsAndData = {}; // change this to enable logging to a file
+		pref.logMessageCallback = SlLogMessageCallback; // highly recommended to track warning/error messages in your callback
+		pref.engine = sl::EngineType::eCustom; // If using UE or Unity
+		pref.engineVersion = "0.0.1"; // Optional version
+		pref.projectId = "72a89ee2-1139-4cc5-8daa-d27189bed781"; // Optional project id
+		sl::Feature myFeatures[] = { sl::kFeatureDLSS };
+		pref.featuresToLoad = myFeatures;
+		pref.numFeaturesToLoad = _countof(myFeatures);
+		pref.renderAPI = sl::RenderAPI::eD3D12;
+		pref.flags |= sl::PreferenceFlags::eUseManualHooking;
+		if (SL_FAILED(res, slInit(pref)))
+		{
+			// Handle error, check the logs
+			if (res == sl::Result::eErrorDriverOutOfDate) { /* inform user */ }
+			// and so on ...
+			return false;
+		}
+		return true;
+	}
+
+	rhi::Result CreateD3D12Device(const DeviceCreateInfo& ci, DevicePtr& outPtr, bool enableStreamlineInterposer) noexcept
+	{
+		bool l_enableStreamline = enableStreamlineInterposer;
+		if (l_enableStreamline)
+		{
+			if (!InitSL())
+			{
+				spdlog::error("Failed to initialize NVIDIA Streamline. DLSS will not be available.");
+				l_enableStreamline = false;
+			}
+		}
+
 		UINT flags = 0;
-		if (ci.enableDebug) { ComPtr<ID3D12Debug> dbg; if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dbg)))) dbg->EnableDebugLayer(), flags |= DXGI_CREATE_FACTORY_DEBUG; }
+		if (ci.enableDebug)
+		{
+			ComPtr<ID3D12Debug> dbg;
+			if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dbg))))
+				dbg->EnableDebugLayer(), flags |= DXGI_CREATE_FACTORY_DEBUG;
+		}
+
 		auto impl = std::make_shared<Dx12Device>();
-		CreateDXGIFactory2(flags, IID_PPV_ARGS(&impl->factory));
+		impl->selfWeak = impl;
 
-		// Select default adapter. TODO: expose adapter selection
+		// Native factory/device
+		CreateDXGIFactory2(flags, IID_PPV_ARGS(&impl->pNativeFactory));
+
+		// Streamline manual hooking setup
+		if (l_enableStreamline)
+		{
+			// IMPORTANT: slInit(pref.flags |= eUseManualHooking) must have been called
+			// before this.
+
+			impl->pSLProxyFactory = impl->pNativeFactory;
+			{
+				IDXGIFactory* fac = impl->pSLProxyFactory.Get();
+				if (SL_FAILED(res, slUpgradeInterface(reinterpret_cast<void**>(&fac)))) {
+					RHI_FAIL(Result::Failed);
+				}
+				impl->pSLProxyFactory.Attach(static_cast<IDXGIFactory7*>(fac));
+			}
+		}
+		else
+		{
+			impl->pSLProxyFactory = impl->pNativeFactory;
+		}
+
 		ComPtr<IDXGIAdapter1> adapter;
-		impl->factory->EnumAdapters1(0, &adapter);
-
+		impl->pNativeFactory->EnumAdapters1(0, &adapter);
 		adapter.As(&impl->adapter);
 
-		D3D12CreateDevice(impl->adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&impl->dev));
-		if (ci.enableDebug) {
-			EnableDebug(impl->dev.Get());
-		}
+		D3D12CreateDevice(impl->adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&impl->pNativeDevice));
 
-#if BUILD_TYPE == BUILD_TYPE_DEBUG
-		ComPtr<ID3D12InfoQueue1> infoQueue;
-		if (SUCCEEDED(impl->dev->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
-			infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
-			infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
-			infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE);
-
-			DWORD callbackCookie = 0;
-			//infoQueue->RegisterMessageCallback([](D3D12_MESSAGE_CATEGORY category, D3D12_MESSAGE_SEVERITY severity, D3D12_MESSAGE_ID id, LPCSTR description, void* context) {
-			//	// Log or print the debug messages,
-			//	spdlog::error("D3D12 Debug Message: {}", description);
-			//	}, D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &callbackCookie);
-		}
-#endif
-
-		// Disable unwanted warnings
-		ComPtr<ID3D12InfoQueue> warningInfoQueue;
-		if (SUCCEEDED(impl->dev->QueryInterface(IID_PPV_ARGS(&warningInfoQueue))))
+		// Streamline manual hooking setup
+		if (l_enableStreamline)
 		{
-			D3D12_INFO_QUEUE_FILTER filter = {};
-			D3D12_MESSAGE_ID blockedIDs[] = {
-				(D3D12_MESSAGE_ID)1356, // Barrier-only command lists
-				(D3D12_MESSAGE_ID)1328, // ps output type mismatch
-				(D3D12_MESSAGE_ID)1008 }; // RESOURCE_BARRIER_DUPLICATE_SUBRESOURCE_TRANSITIONS
-			filter.DenyList.NumIDs = _countof(blockedIDs);
-			filter.DenyList.pIDList = blockedIDs;
+			// Tell SL which native device to use
+			if (SL_FAILED(res, slSetD3DDevice(impl->pNativeDevice.Get()))) {
+				RHI_FAIL(Result::Failed);
+			}
 
-			warningInfoQueue->AddStorageFilterEntries(&filter);
+			// Make proxy device/factory via slUpgradeInterface
+			impl->pSLProxyDevice = impl->pNativeDevice;
+			{
+				ID3D12Device* dev = impl->pSLProxyDevice.Get();
+				if (SL_FAILED(res, slUpgradeInterface(reinterpret_cast<void**>(&dev)))) {
+					RHI_FAIL(Result::Failed);
+				}
+				impl->pSLProxyDevice.Attach(dev);
+			}
+		}
+		else
+		{
+			impl->pSLProxyDevice = impl->pNativeDevice;
 		}
 
-		auto makeQ = [&](D3D12_COMMAND_LIST_TYPE t, Dx12QueueState& out) {
-			D3D12_COMMAND_QUEUE_DESC qd{};
-			qd.Type = t;
-			impl->dev->CreateCommandQueue(&qd, IID_PPV_ARGS(&out.q));
-			impl->dev->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&out.fence));
-			out.value = 0;
+		if (ci.enableDebug) EnableDebug(impl->pNativeDevice.Get());
+
+		// Queue creation: MUST go through proxy device, store both proxy+native
+		auto makeQ = [&](D3D12_COMMAND_LIST_TYPE t, Dx12QueueState& out)
+			{
+				D3D12_COMMAND_QUEUE_DESC qd{};
+				qd.Type = t;
+
+				// Hooked API: CreateCommandQueue must be invoked on proxy when SL enabled
+				ComPtr<ID3D12CommandQueue> qProxy;
+				HRESULT hr = impl->pSLProxyDevice->CreateCommandQueue(&qd, IID_PPV_ARGS(&qProxy));
+				if (FAILED(hr)) { /* handle */ }
+
+				out.pSLProxyQueue = qProxy;
+
+				// Extract native queue for normal engine use to avoid proxies internally
+				ID3D12CommandQueue* qNative = nullptr;
+				if (SL_FAILED(res, slGetNativeInterface(out.pSLProxyQueue.Get(), (void**)&qNative)))
+				{
+					// If this fails, fall back to using qProxy as both.
+					out.pNativeQueue = out.pSLProxyQueue;
+				}
+				else
+				{
+					out.pNativeQueue.Attach(qNative); // qNative is returned with refcount
+				}
+				out.dev = impl;
+				impl->pNativeDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&out.fence));
+				out.value = 0;
 			};
+
 		makeQ(D3D12_COMMAND_LIST_TYPE_DIRECT, impl->gfx);
 		makeQ(D3D12_COMMAND_LIST_TYPE_COMPUTE, impl->comp);
 		makeQ(D3D12_COMMAND_LIST_TYPE_COPY, impl->copy);
 
-		impl->selfWeak = impl;
-
-		Device d { impl.get(), &g_devvt};
-		return MakeDevicePtr(&d, impl);
+		Device d{ impl.get(), &g_devvt };
+		outPtr = MakeDevicePtr(&d, impl);
+		return Result::Ok;
 	}
+
 
 }

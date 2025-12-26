@@ -132,8 +132,8 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
     settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { x_res, y_res });
     settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { x_res, y_res });
-	UpscalingManager::GetInstance().InitSL(); // Must be called before LoadPipeline to initialize SL hooks
     LoadPipeline(hwnd, x_res, y_res);
+    UpscalingManager::GetInstance().InitSL();
     UpscalingManager::GetInstance().InitFFX(); // Needs device
     FFXManager::GetInstance().InitFFX();
     SetSettings();

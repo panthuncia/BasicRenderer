@@ -1,6 +1,7 @@
 #include "rhi_dx12.h"
 #include "rhi_interop.h"
 #include "rhi_dx12_casting.h"
+#include "sl_core_api.h"
 
 // Returns non-owning raw pointers. Caller must not store them long-term without AddRef/Release.
 
@@ -19,11 +20,11 @@ namespace rhi {
             // Ensure we hand out an ID3D12Device* (not Device10)
             Microsoft::WRL::ComPtr<ID3D12Device> devBase;
             // If you also stored devBase at creation time, you can skip As() and use that ComPtr.
-            (void)impl->dev.As(&devBase);
+            (void)impl->pNativeDevice.As(&devBase);
 
             auto* out = reinterpret_cast<D3D12DeviceInfo*>(outStruct);
             out->device = devBase.Get();            // ID3D12Device*
-            out->factory = impl->factory.Get();      // IDXGIFactory7*
+            out->factory = impl->pNativeFactory.Get();      // IDXGIFactory7*
             out->adapter = impl->adapter.Get();      // IDXGIAdapter4* (may be null if not stored)
             out->version = 1;
             return true;
@@ -39,10 +40,10 @@ namespace rhi {
         if (outSize < sizeof(D3D12QueueInfo)) return false;
 
         auto* s = dx12_detail::QState(&q);
-        if (!s || !s->q) return false;
+        if (!s || !s->pNativeQueue) return false;
 
         auto* out = reinterpret_cast<D3D12QueueInfo*>(outStruct);
-        out->queue = s->q.Get();   // ID3D12CommandQueue*
+        out->queue = s->pNativeQueue.Get();   // ID3D12CommandQueue*
         out->version = 1;
         return true;
     }
@@ -72,10 +73,10 @@ namespace rhi {
         if (outSize < sizeof(D3D12SwapchainInfo)) return false;
 
         auto* s = dx12_detail::SC(&sc);
-        if (!s || !s->sc) return false;
+        if (!s || !s->pNativeSC) return false;
 
         auto* out = reinterpret_cast<D3D12SwapchainInfo*>(outStruct);
-        out->swapchain = s->sc.Get(); // IDXGISwapChain3*
+        out->swapchain = s->pNativeSC.Get(); // IDXGISwapChain3*
         out->version = 1;
         return true;
     }
@@ -182,37 +183,7 @@ namespace rhi {
 
     namespace dx12 {
 
-        bool enable_streamline_interposer(Device d, PFN_UpgradeInterface upgrade, PFun_slSetD3DDevice setDevice) {
-            auto* impl = static_cast<Dx12Device*>(d.impl);
-
-            // Upgrade factory
-            IDXGIFactory7* fac = impl->factory.Get();
-            if (!(upgrade(reinterpret_cast<void**>(&fac)) == sl::Result::eOk)) return false;
-            impl->slFactory.Attach(fac); // now holds upgraded factory
-
-			// Let Streamline know about our device
-		    if (setDevice(impl->dev.Get()) != sl::Result::eOk) {
-                return false;
-			}
-
-            // upgrade device to base iface
-            ID3D12Device10* dev = impl->dev.Get();
-            if (upgrade(reinterpret_cast<void**>(&dev)) != sl::Result::eOk) {
-                Microsoft::WRL::ComPtr<ID3D12Device> base;
-                dev->QueryInterface(IID_PPV_ARGS(&base));
-                impl->slDeviceBase = std::move(base);
-            }
-
-            impl->upgradeFn = upgrade;
-            return true;
-        }
-
-        void disable_streamline_interposer(Device d) {
-            //auto* impl = static_cast<Dx12Device*>(d.impl);
-			//impl->upgradeFn = nullptr;
-   //         impl->slFactory.Reset();
-			//impl->slDeviceBase.Reset();
-        }
+        
     }
 
 }
