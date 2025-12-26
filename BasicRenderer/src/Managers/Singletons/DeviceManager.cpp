@@ -118,6 +118,13 @@ void DeviceManager::Initialize() {
     rhi::ma::CreateAllocator(&desc, &m_allocator);
 }
 
+void DeviceManager::Cleanup() {
+    //if (m_device) {
+    //    m_device->WaitIdle();
+    //    m_device.Reset();
+    //}
+}
+
 void DeviceManager::CheckGPUFeatures() {
     D3D12_FEATURE_DATA_D3D12_OPTIONS7 features = {}; // TODO: Use query interface in RHI
     rhi::dx12::get_device(m_device.Get())->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &features, sizeof(features));

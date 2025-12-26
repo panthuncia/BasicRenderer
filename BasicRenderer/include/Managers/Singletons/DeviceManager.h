@@ -13,6 +13,7 @@ public:
     static DeviceManager& GetInstance();
 
     void Initialize();
+	void Cleanup();
 	rhi::Device GetDevice() {
         return m_device.Get();
     }

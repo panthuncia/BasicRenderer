@@ -42,12 +42,12 @@ namespace rhi {
 	struct Dx12Resource {
 		// Texture constructor
 		Dx12Resource() {}
-		explicit Dx12Resource(ComPtr<ID3D12Resource> r, DXGI_FORMAT f, uint32_t width, uint32_t height, uint16_t mips, uint16_t arraySize, D3D12_RESOURCE_DIMENSION dim, uint16_t depth, std::shared_ptr<Dx12Device> d)
-			: res(r), fmt(f), tex({ width, height, mips, arraySize, depth }), dev(d), kind(Dx12ResourceKind::Texture) {
+		explicit Dx12Resource(ComPtr<ID3D12Resource> r, DXGI_FORMAT f, uint32_t width, uint32_t height, uint16_t mips, uint16_t arraySize, D3D12_RESOURCE_DIMENSION dim, uint16_t depth)
+			: res(r), fmt(f), tex({ width, height, mips, arraySize, depth }), kind(Dx12ResourceKind::Texture) {
 		}
 		// Buffer constructor
-		explicit Dx12Resource(ComPtr<ID3D12Resource> r, uint64_t size, std::shared_ptr<Dx12Device> d)
-			: res(r), kind(Dx12ResourceKind::Buffer), buf({ size }), dev(d) {
+		explicit Dx12Resource(ComPtr<ID3D12Resource> r, uint64_t size)
+			: res(r), kind(Dx12ResourceKind::Buffer), buf({ size }) {
 		}
 		Microsoft::WRL::ComPtr<ID3D12Resource> res;
 		Dx12ResourceKind kind;
@@ -71,26 +71,23 @@ namespace rhi {
 		};
 
 		D3D12_RESOURCE_DIMENSION dim = D3D12_RESOURCE_DIMENSION_UNKNOWN;
-		std::shared_ptr<Dx12Device> dev;
 	};
 
 	struct Dx12Sampler {
 		Dx12Sampler() {}
-		explicit Dx12Sampler(SamplerDesc d, std::shared_ptr<Dx12Device> device) : desc(d), dev(device) {}
+		explicit Dx12Sampler(SamplerDesc d) : desc(d) {}
 		SamplerDesc desc;
-		std::shared_ptr<Dx12Device> dev;
 	};
 	struct Dx12Pipeline {
 		Dx12Pipeline(){}
-		explicit Dx12Pipeline(Microsoft::WRL::ComPtr<ID3D12PipelineState> p, bool isComp, std::shared_ptr<Dx12Device> device) : pso(p), isCompute(isComp), dev(device) {}
+		explicit Dx12Pipeline(Microsoft::WRL::ComPtr<ID3D12PipelineState> p, bool isComp) : pso(p), isCompute(isComp) {}
 		Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
 		bool isCompute;
-		std::shared_ptr<Dx12Device> dev;
 	};
 	struct Dx12PipelineLayout {
 		Dx12PipelineLayout() {}
-		explicit Dx12PipelineLayout(const PipelineLayoutDesc& d, std::shared_ptr<Dx12Device> device)
-			: desc(d), dev(device) {
+		explicit Dx12PipelineLayout(const PipelineLayoutDesc& d)
+			: desc(d) {
 			// build root constant param lookup
 			for (uint32_t i = 0; i < pcs.size(); ++i) {
 				const auto& p = pcs[i];
@@ -113,35 +110,31 @@ namespace rhi {
 			uint32_t rootIndex;  // root parameter index in this RS
 		};
 		std::vector<RootConstParam> rcParams;
-		std::shared_ptr<Dx12Device> dev;
 	};
 
 	struct Dx12CommandSignature {
 		Dx12CommandSignature(){}
-		explicit Dx12CommandSignature(Microsoft::WRL::ComPtr<ID3D12CommandSignature> s, uint32_t str, std::shared_ptr<Dx12Device> device) : sig(s), stride(str), dev(device) {}
+		explicit Dx12CommandSignature(Microsoft::WRL::ComPtr<ID3D12CommandSignature> s, uint32_t str) : sig(s), stride(str) {}
 		Microsoft::WRL::ComPtr<ID3D12CommandSignature> sig;
 		uint32_t stride = 0;
-		std::shared_ptr<Dx12Device> dev;
 	};
 
 	struct Dx12Allocator {
 		Dx12Allocator(){}
-		explicit Dx12Allocator(Microsoft::WRL::ComPtr<ID3D12CommandAllocator> a, D3D12_COMMAND_LIST_TYPE t, std::shared_ptr<Dx12Device> d) : alloc(a), type(t), dev(d) {}
+		explicit Dx12Allocator(Microsoft::WRL::ComPtr<ID3D12CommandAllocator> a, D3D12_COMMAND_LIST_TYPE t) : alloc(a), type(t) {}
 		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> alloc;
 		D3D12_COMMAND_LIST_TYPE type{};
-		std::shared_ptr<Dx12Device> dev;
 	};
 	struct Dx12CommandList {
 		Dx12CommandList(){}
-		explicit Dx12CommandList(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> c, Microsoft::WRL::ComPtr<ID3D12CommandAllocator> a, D3D12_COMMAND_LIST_TYPE t, std::shared_ptr<Dx12Device> d)
-			: cl(c), alloc(a), type(t), dev(d) {
+		explicit Dx12CommandList(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> c, Microsoft::WRL::ComPtr<ID3D12CommandAllocator> a, D3D12_COMMAND_LIST_TYPE t)
+			: cl(c), alloc(a), type(t) {
 		}
 		Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> cl;
 		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> alloc;
 		D3D12_COMMAND_LIST_TYPE type{};
 		PipelineLayoutHandle boundLayout{};
 		Dx12PipelineLayout* boundLayoutPtr = nullptr;
-		std::shared_ptr<Dx12Device> dev;
 	};
 
 	// Build D3D12_RESOURCE_DESC1 for buffers
@@ -188,8 +181,8 @@ namespace rhi {
 
 	struct Dx12DescriptorHeap {
 		Dx12DescriptorHeap(){}
-		explicit Dx12DescriptorHeap(Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> h, D3D12_DESCRIPTOR_HEAP_TYPE t, UINT incrementSize, bool sv, std::shared_ptr<Dx12Device> d)
-			: heap(h), type(t), inc(incrementSize), shaderVisible(sv), dev(d) {
+		explicit Dx12DescriptorHeap(Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> h, D3D12_DESCRIPTOR_HEAP_TYPE t, UINT incrementSize, bool sv)
+			: heap(h), type(t), inc(incrementSize), shaderVisible(sv) {
 			cpuStart = heap->GetCPUDescriptorHandleForHeapStart();
 			if (shaderVisible) {
 				gpuStart = heap->GetGPUDescriptorHandleForHeapStart();
@@ -201,14 +194,12 @@ namespace rhi {
 		bool shaderVisible{ false };
 		D3D12_CPU_DESCRIPTOR_HANDLE cpuStart{};
 		D3D12_GPU_DESCRIPTOR_HANDLE gpuStart{};
-		std::shared_ptr<Dx12Device> dev;
 	};
 
 	struct Dx12Timeline {
 		Dx12Timeline(){}
-		explicit Dx12Timeline(Microsoft::WRL::ComPtr<ID3D12Fence> f, std::shared_ptr<Dx12Device> d) : fence(f), dev(d) {}
+		explicit Dx12Timeline(Microsoft::WRL::ComPtr<ID3D12Fence> f) : fence(f) {}
 		Microsoft::WRL::ComPtr<ID3D12Fence> fence;
-		std::shared_ptr<Dx12Device> dev;
 	};
 
 	struct Dx12QueueState {
@@ -220,16 +211,14 @@ namespace rhi {
 #if BUILD_TYPE == BUILD_DEBUG
 		std::unordered_map<TimelineHandle, uint64_t, HandleHash<TimelineHandle>, HandleEqual<TimelineHandle>> lastSignaledValue; // track last signaled value per timeline
 #endif
-		std::shared_ptr<Dx12Device> dev;
 	};
 
 	struct Dx12Swapchain {
 		Dx12Swapchain(){}
 		explicit Dx12Swapchain(ComPtr<IDXGISwapChain3> pNativeSC, ComPtr<IDXGISwapChain3> pSlProxySC, DXGI_FORMAT f, UINT width, UINT height, UINT c,
 			std::vector<ComPtr<ID3D12Resource>> images,
-			std::vector<ResourceHandle> imageHandles,
-			std::shared_ptr<Dx12Device> d)
-			: pNativeSC(pNativeSC), pSlProxySC(pSlProxySC), fmt(f), w(width), h(height), count(c), images(images), imageHandles(imageHandles), dev(d) {
+			std::vector<ResourceHandle> imageHandles)
+			: pNativeSC(pNativeSC), pSlProxySC(pSlProxySC), fmt(f), w(width), h(height), count(c), images(images), imageHandles(imageHandles) {
 		}
 		ComPtr<IDXGISwapChain3> pNativeSC;
 		ComPtr<IDXGISwapChain3> pSlProxySC;
@@ -238,27 +227,24 @@ namespace rhi {
 		UINT current{};
 		std::vector<ComPtr<ID3D12Resource>> images;
 		std::vector<ResourceHandle> imageHandles;
-		std::shared_ptr<Dx12Device> dev;
 	};
 
 	struct Dx12Heap {
 		Dx12Heap(){}
-		explicit Dx12Heap(Microsoft::WRL::ComPtr<ID3D12Heap> h, uint64_t s, std::shared_ptr<Dx12Device> d) : heap(h), size(s), dev(d) {}
+		explicit Dx12Heap(Microsoft::WRL::ComPtr<ID3D12Heap> h, uint64_t s) : heap(h), size(s) {}
 		Microsoft::WRL::ComPtr<ID3D12Heap> heap;
 		uint64_t size{};
-		std::shared_ptr<Dx12Device> dev;
 	};
 
 	struct Dx12QueryPool {
 		Dx12QueryPool(){}
-		explicit Dx12QueryPool(Microsoft::WRL::ComPtr<ID3D12QueryHeap> h, D3D12_QUERY_HEAP_TYPE t, uint32_t c, std::shared_ptr<Dx12Device> d) : heap(h), type(t), count(c), dev(d) {}
+		explicit Dx12QueryPool(Microsoft::WRL::ComPtr<ID3D12QueryHeap> h, D3D12_QUERY_HEAP_TYPE t, uint32_t c) : heap(h), type(t), count(c) {}
 		Microsoft::WRL::ComPtr<ID3D12QueryHeap> heap;
 		D3D12_QUERY_HEAP_TYPE type{};
 		uint32_t count = 0;
 
 		// For pipeline stats, remember if we used *_STATISTICS1 (mesh/task) or legacy
 		bool usePSO1 = false;
-		std::shared_ptr<Dx12Device> dev;
 	};
 
 	// tiny handle registry
@@ -316,6 +302,11 @@ namespace rhi {
 			if (!s.alive || s.generation != h.generation) return nullptr;
 			return &s.obj;
 		}
+
+		void clear() {
+			slots.clear();
+			freelist.clear();
+		}
 	};
 
 	struct Dx12Device {
@@ -342,7 +333,7 @@ namespace rhi {
 		Dx12QueueState gfx{}, comp{}, copy{};
 
 		// lifetime anchor
-		std::weak_ptr<Dx12Device> selfWeak;
+		//std::weak_ptr<Dx12Device> selfWeak;
 	};
 
 	// ---------------- VTables forward ----------------

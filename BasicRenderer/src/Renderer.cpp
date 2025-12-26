@@ -907,6 +907,7 @@ void Renderer::Cleanup() {
     UploadManager::GetInstance().Cleanup();
     ResourceManager::GetInstance().Cleanup();
     ECSManager::GetInstance().Cleanup();
+	DeviceManager::GetInstance().Cleanup();
     DeletionManager::GetInstance().Cleanup();
 }
 

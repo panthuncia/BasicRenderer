@@ -1732,63 +1732,86 @@ namespace rhi {
 	};
 
 
-	template<class TObject>
+	template<class T>
 	class ObjectPtr {
 	public:
-		using DestroyFn = void(*)(Device&, TObject&) noexcept;
+		using DestroyFn = void(*)(Device* dev, T* obj) noexcept;
 
-		ObjectPtr() = default;
-		ObjectPtr(Device dev, TObject obj, DestroyFn dfn) noexcept
-			: dev_(dev), obj_(obj), destroy_(dfn) {
+		ObjectPtr() noexcept = default;
+
+		ObjectPtr(T obj, Device dev, DestroyFn fn, std::shared_ptr<void> keepAlive = {}) noexcept
+			: obj_(std::move(obj))
+			, dev_(std::move(dev))
+			, fn_(fn)
+			, keepAlive_(std::move(keepAlive))
+		{
 		}
-
-		~ObjectPtr() { Reset(); }
 
 		ObjectPtr(const ObjectPtr&) = delete;
 		ObjectPtr& operator=(const ObjectPtr&) = delete;
 
-		// MOVE CTOR: steal and null out source
-		ObjectPtr(ObjectPtr&& o) noexcept
-			: dev_(o.dev_), obj_(o.obj_), destroy_(o.destroy_) {
-			o.destroy_ = nullptr;
-			o.obj_ = {};
-		}
-
-		// MOVE ASSIGN: destroy current, steal, null out source
-		ObjectPtr& operator=(ObjectPtr&& o) noexcept {
-			if (this != &o) {
-				Reset();
-				dev_ = o.dev_;
-				obj_ = o.obj_;
-				destroy_ = o.destroy_;
-				o.destroy_ = nullptr;
-				o.obj_ = {};
-			}
+		ObjectPtr(ObjectPtr&& other) noexcept { *this = std::move(other); }
+		ObjectPtr& operator=(ObjectPtr&& other) noexcept {
+			if (this == &other) return *this;
+			Reset();
+			obj_ = std::move(other.obj_);
+			dev_ = std::move(other.dev_);
+			fn_ = other.fn_;
+			keepAlive_ = std::move(other.keepAlive_);
+			other.fn_ = nullptr;
+			other.obj_ = {};
+			other.dev_ = {};
 			return *this;
 		}
 
-		TObject* operator->() noexcept { return &obj_; }
-		const TObject* operator->() const noexcept { return &obj_; }
-		explicit operator bool() const noexcept { return static_cast<bool>(obj_); }
-		TObject& Get() noexcept { return obj_; }
-		const TObject& Get() const noexcept { return obj_; }
+		~ObjectPtr() noexcept { Reset(); }
 
 		void Reset() noexcept {
-			if (destroy_ && static_cast<bool>(obj_)) destroy_(dev_, obj_);
-			destroy_ = nullptr;
+			if (!fn_) {
+				keepAlive_.reset();
+				obj_ = {};
+				dev_ = {};
+				return;
+			}
+
+			// Keep backend alive during destruction
+			auto keepAlive = std::move(keepAlive_);
+			auto fn = fn_;
+
+			// Take copies of the raw handles in case fn() touches *this*
+			Device dev = dev_;
+			T obj = obj_;
+
+			// invalidate this handle first (so double-Reset is safe)
+			fn_ = nullptr;
 			obj_ = {};
+			dev_ = {};
+			keepAlive_.reset();
+
+			// Now destroy
+			fn(&dev, &obj);
+
+			// keepAlive drops here
 		}
 
-		TObject Release() noexcept {
-			destroy_ = nullptr;
-			return std::exchange(obj_, {});
+		const std::shared_ptr<void>& KeepAliveRef() const noexcept { return keepAlive_; }
+		std::shared_ptr<void> KeepAlive() const noexcept { return keepAlive_; }
+
+		T* Get() noexcept { return &obj_; }
+		const T* Get() const noexcept { return &obj_; }
+
+		explicit operator bool() const noexcept {
+			// Use your own “is valid handle” test here
+			return fn_ != nullptr;
 		}
 
-	private:
-		Device    dev_{};
-		TObject   obj_{};
-		DestroyFn destroy_{};
+	protected:
+		T obj_{};
+		Device dev_{};
+		DestroyFn fn_ = nullptr;
+		std::shared_ptr<void> keepAlive_;
 	};
+
 
 
 	using CommandAllocatorPtr = ObjectPtr<CommandAllocator>;
@@ -1971,15 +1994,17 @@ namespace rhi {
 		Result QueryVideoMemoryInfo(uint32_t nodeIndex, MemorySegmentGroup segmentGroup, VideoMemoryInfo& out) const noexcept {
 			return vt->queryVideoMemoryInfo(this, nodeIndex, segmentGroup, out);
 		}
-		void Destroy() noexcept { vt->destroyDevice(this); impl = nullptr; vt = nullptr; }
+		void Destroy() noexcept { 
+			vt->destroyDevice(this); 
+			impl = nullptr; 
+			vt = nullptr; }
 	};
 
 	class DevicePtr : public ObjectPtr<Device> {
 	public:
-		DevicePtr() = default;
-		explicit DevicePtr(Device d, DestroyFn fn, std::shared_ptr<void> backendLifetimeHandle) noexcept : ObjectPtr<Device>(d, d, fn), backendLifetimeHandle_(backendLifetimeHandle) {}
-	private:
-		std::shared_ptr<void> backendLifetimeHandle_; // keep backend alive while device is alive
+		using ObjectPtr<Device>::ObjectPtr;
+		using ObjectPtr<Device>::KeepAlive;
+		using ObjectPtr<Device>::KeepAliveRef;
 	};
 
 	inline Result Queue::Submit(Span<CommandList> lists, const SubmitDesc& s) noexcept { return vt->submit(this, lists, s); }
@@ -2070,20 +2095,14 @@ namespace rhi {
 		);
 	}
 
-	inline DevicePtr MakeDevicePtr(const Device* d, std::shared_ptr<void> lifetimeHandle) noexcept {
-		return DevicePtr(
-			*d,
-			// DestroyFn for Device ignores the TObject* and calls destroy on the object itself
-			[](Device& /*ignored*/, Device& self) noexcept {
-				if (self && self.IsValid()) self.Destroy();
-			}, lifetimeHandle
-			// TODO: Name hook for Device?
-				);
+	DevicePtr MakeDevicePtr(Device d, ObjectPtr<Device>::DestroyFn fn, std::shared_ptr<void> backend) {
+		return DevicePtr{ d, d, fn, std::move(backend) };
 	}
+
 	inline ResourcePtr MakeTexturePtr(const Device* d, Resource r) noexcept {
 		return ResourcePtr(
 			*d, r,
-			[](Device& dev, Resource& p) noexcept { if (dev && p) dev.DestroyTexture(p.GetHandle()); }
+			[](Device& dev, Resource& p) noexcept { if (dev && p) dev.DestroyTexture(p.GetHandle()); },
 		);
 	}
 	inline ResourcePtr MakeBufferPtr(const Device* d, Resource r) noexcept {
