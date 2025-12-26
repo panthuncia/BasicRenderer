@@ -1709,7 +1709,7 @@ namespace rhi {
 	class Swapchain {
 	public:
 		Swapchain() = default;
-		explicit Swapchain(SwapChainHandle handle) : handle(handle){}
+		explicit Swapchain(SwapChainHandle handle) : handle(handle) {}
 		void* impl{};
 		const SwapchainVTable* vt{};
 		explicit constexpr operator bool() const noexcept {
@@ -1732,86 +1732,90 @@ namespace rhi {
 	};
 
 
-	template<class T>
+	template<class TObject>
 	class ObjectPtr {
 	public:
-		using DestroyFn = void(*)(Device* dev, T* obj) noexcept;
+		using DestroyFn = void(*)(Device&, TObject&) noexcept;
 
-		ObjectPtr() noexcept = default;
+		ObjectPtr() = default;
 
-		ObjectPtr(T obj, Device dev, DestroyFn fn, std::shared_ptr<void> keepAlive = {}) noexcept
-			: obj_(std::move(obj))
-			, dev_(std::move(dev))
-			, fn_(fn)
+		ObjectPtr(Device dev, TObject obj, DestroyFn dfn, std::shared_ptr<void> keepAlive = {}) noexcept
+			: dev_(dev)
+			, obj_(obj)
+			, destroy_(dfn)
 			, keepAlive_(std::move(keepAlive))
 		{
 		}
 
+		~ObjectPtr() noexcept { Reset(); }
+
 		ObjectPtr(const ObjectPtr&) = delete;
 		ObjectPtr& operator=(const ObjectPtr&) = delete;
 
-		ObjectPtr(ObjectPtr&& other) noexcept { *this = std::move(other); }
-		ObjectPtr& operator=(ObjectPtr&& other) noexcept {
-			if (this == &other) return *this;
+		ObjectPtr(ObjectPtr&& o) noexcept { *this = std::move(o); }
+		ObjectPtr& operator=(ObjectPtr&& o) noexcept {
+			if (this == &o) return *this;
 			Reset();
-			obj_ = std::move(other.obj_);
-			dev_ = std::move(other.dev_);
-			fn_ = other.fn_;
-			keepAlive_ = std::move(other.keepAlive_);
-			other.fn_ = nullptr;
-			other.obj_ = {};
-			other.dev_ = {};
+			dev_ = o.dev_;
+			obj_ = o.obj_;
+			destroy_ = o.destroy_;
+			keepAlive_ = std::move(o.keepAlive_);
+			o.destroy_ = nullptr;
+			o.obj_ = {};
+			o.dev_ = {};
 			return *this;
 		}
 
-		~ObjectPtr() noexcept { Reset(); }
+		TObject* operator->() noexcept { return &obj_; }
+		const TObject* operator->() const noexcept { return &obj_; }
+		explicit operator bool() const noexcept { return static_cast<bool>(obj_); }
+		TObject& Get() noexcept { return obj_; }
+		const TObject& Get() const noexcept { return obj_; }
 
 		void Reset() noexcept {
-			if (!fn_) {
-				keepAlive_.reset();
+			if (!destroy_) {
 				obj_ = {};
 				dev_ = {};
+				keepAlive_.reset();
 				return;
 			}
 
-			// Keep backend alive during destruction
+			// Keep backend alive while running the destroy callback.
 			auto keepAlive = std::move(keepAlive_);
-			auto fn = fn_;
+			auto dfn = destroy_;
 
-			// Take copies of the raw handles in case fn() touches *this*
+			// Copy out raw handles in case dfn() indirectly touches *this*.
 			Device dev = dev_;
-			T obj = obj_;
+			TObject obj = obj_;
 
-			// invalidate this handle first (so double-Reset is safe)
-			fn_ = nullptr;
+			// Poison first so double-Reset is safe.
+			destroy_ = nullptr;
 			obj_ = {};
 			dev_ = {};
 			keepAlive_.reset();
 
-			// Now destroy
-			fn(&dev, &obj);
-
+			if (dfn && static_cast<bool>(obj)) {
+				dfn(dev, obj);
+			}
 			// keepAlive drops here
+		}
+
+		TObject Release() noexcept {
+			destroy_ = nullptr;
+			keepAlive_.reset();
+			dev_ = {};
+			return std::exchange(obj_, {});
 		}
 
 		const std::shared_ptr<void>& KeepAliveRef() const noexcept { return keepAlive_; }
 		std::shared_ptr<void> KeepAlive() const noexcept { return keepAlive_; }
 
-		T* Get() noexcept { return &obj_; }
-		const T* Get() const noexcept { return &obj_; }
-
-		explicit operator bool() const noexcept {
-			// Use your own “is valid handle” test here
-			return fn_ != nullptr;
-		}
-
-	protected:
-		T obj_{};
-		Device dev_{};
-		DestroyFn fn_ = nullptr;
-		std::shared_ptr<void> keepAlive_;
+	private:
+		Device    dev_{};
+		TObject   obj_{};
+		DestroyFn destroy_{};
+		std::shared_ptr<void> keepAlive_{};
 	};
-
 
 
 	using CommandAllocatorPtr = ObjectPtr<CommandAllocator>;
@@ -1994,18 +1998,20 @@ namespace rhi {
 		Result QueryVideoMemoryInfo(uint32_t nodeIndex, MemorySegmentGroup segmentGroup, VideoMemoryInfo& out) const noexcept {
 			return vt->queryVideoMemoryInfo(this, nodeIndex, segmentGroup, out);
 		}
-		void Destroy() noexcept { 
-			vt->destroyDevice(this); 
-			impl = nullptr; 
-			vt = nullptr; }
+		void Destroy() noexcept { vt->destroyDevice(this); impl = nullptr; vt = nullptr; }
 	};
 
 	class DevicePtr : public ObjectPtr<Device> {
 	public:
-		using ObjectPtr<Device>::ObjectPtr;
+		DevicePtr() = default;
+
+		explicit DevicePtr(Device d, DestroyFn fn, std::shared_ptr<void> keepAlive) noexcept
+			: ObjectPtr<Device>(d, d, fn, std::move(keepAlive)) {}
+
 		using ObjectPtr<Device>::KeepAlive;
 		using ObjectPtr<Device>::KeepAliveRef;
 	};
+
 
 	inline Result Queue::Submit(Span<CommandList> lists, const SubmitDesc& s) noexcept { return vt->submit(this, lists, s); }
 	inline Result Queue::Signal(const TimelinePoint& p) noexcept { return vt->signal(this, p); }
@@ -2072,83 +2078,119 @@ namespace rhi {
 				 blob ? static_cast<uint32_t>(blob->GetBufferSize()) : 0u };
 	}
 
-	inline CommandAllocatorPtr MakeCommandAllocatorPtr(const Device* d, CommandAllocator ca) noexcept {
+	inline CommandAllocatorPtr MakeCommandAllocatorPtr(const Device* d, CommandAllocator ca, std::shared_ptr<void> keepAlive = {}) noexcept {
 		return CommandAllocatorPtr(
 			*d, ca,
 			// Destroy
-			[](Device& dev, CommandAllocator& p) noexcept { if (dev && p) dev.DestroyCommandAllocator(&p); }
-			// TODO: Name hook for allocator
+			[](Device& dev, CommandAllocator& p) noexcept { if (dev && p) dev.DestroyCommandAllocator(&p); },
+			std::move(keepAlive)
 		);
 	}
 
-	inline CommandListPtr MakeCommandListPtr(const Device* d, CommandList cl) noexcept {
+	inline CommandListPtr MakeCommandListPtr(const Device* d, CommandList cl, std::shared_ptr<void> keepAlive = {}) noexcept {
 		return CommandListPtr(
 			*d, cl,
-			[](Device& dev, CommandList& p) noexcept { if (dev && p) dev.DestroyCommandList(&p); }
+			[](Device& dev, CommandList& p) noexcept { if (dev && p) dev.DestroyCommandList(&p); },
+			std::move(keepAlive)
 		);
 	}
 
-	inline SwapchainPtr MakeSwapchainPtr(const Device* d, Swapchain sc) noexcept {
+	inline SwapchainPtr MakeSwapchainPtr(const Device* d, Swapchain sc, std::shared_ptr<void> keepAlive = {}) noexcept {
 		return SwapchainPtr(
 			*d, sc,
-			[](Device& dev, Swapchain& p) noexcept { if (dev && p) dev.DestroySwapchain(&p); }
+			[](Device& dev, Swapchain& p) noexcept { if (dev && p) dev.DestroySwapchain(&p); },
+			std::move(keepAlive)
 		);
 	}
 
-	DevicePtr MakeDevicePtr(Device d, ObjectPtr<Device>::DestroyFn fn, std::shared_ptr<void> backend) {
-		return DevicePtr{ d, d, fn, std::move(backend) };
+	inline DevicePtr MakeDevicePtr(const Device* d, std::shared_ptr<void> lifetimeHandle) noexcept {
+		return DevicePtr(
+			*d,
+			// DestroyFn for Device ignores the Device& parameter and calls destroy on the object itself.
+			[](Device& /*ignored*/, Device& self) noexcept {
+				if (self && self.IsValid()) self.Destroy();
+			},
+			std::move(lifetimeHandle)
+		);
 	}
 
-	inline ResourcePtr MakeTexturePtr(const Device* d, Resource r) noexcept {
+	inline ResourcePtr MakeTexturePtr(const Device* d, Resource r, std::shared_ptr<void> keepAlive = {}) noexcept {
 		return ResourcePtr(
 			*d, r,
 			[](Device& dev, Resource& p) noexcept { if (dev && p) dev.DestroyTexture(p.GetHandle()); },
+			std::move(keepAlive)
 		);
 	}
-	inline ResourcePtr MakeBufferPtr(const Device* d, Resource r) noexcept {
+
+	inline ResourcePtr MakeBufferPtr(const Device* d, Resource r, std::shared_ptr<void> keepAlive = {}) noexcept {
 		return ResourcePtr(
 			*d, r,
-			[](Device& dev, Resource& p) noexcept { if (dev && p) dev.DestroyBuffer(p.GetHandle()); }
+			[](Device& dev, Resource& p) noexcept { if (dev && p) dev.DestroyBuffer(p.GetHandle()); },
+			std::move(keepAlive)
 		);
 	}
-	inline QueryPoolPtr MakeQueryPoolPtr(const Device* d, QueryPool h) noexcept {
-		return QueryPoolPtr(*d, h,
-			[](Device& dev, QueryPool& hh) noexcept { if (dev) dev.DestroyQueryPool(hh.GetHandle()); }
+
+	inline QueryPoolPtr MakeQueryPoolPtr(const Device* d, QueryPool h, std::shared_ptr<void> keepAlive = {}) noexcept {
+		return QueryPoolPtr(
+			*d, h,
+			[](Device& dev, QueryPool& hh) noexcept { if (dev) dev.DestroyQueryPool(hh.GetHandle()); },
+			std::move(keepAlive)
 		);
 	}
-	inline PipelinePtr MakePipelinePtr(const Device* d, Pipeline h) noexcept {
-		return PipelinePtr(*d, h,
-			[](Device& dev, Pipeline& hh) noexcept { if (dev) dev.DestroyPipeline(hh.GetHandle()); }
+
+	inline PipelinePtr MakePipelinePtr(const Device* d, Pipeline h, std::shared_ptr<void> keepAlive = {}) noexcept {
+		return PipelinePtr(
+			*d, h,
+			[](Device& dev, Pipeline& hh) noexcept { if (dev) dev.DestroyPipeline(hh.GetHandle()); },
+			std::move(keepAlive)
 		);
 	}
-	inline PipelineLayoutPtr MakePipelineLayoutPtr(const Device* d, PipelineLayout h) noexcept {
-		return PipelineLayoutPtr(*d, h,
-			[](Device& dev, PipelineLayout& hh) noexcept { if (dev) dev.DestroyPipelineLayout(hh.GetHandle()); }
+
+	inline PipelineLayoutPtr MakePipelineLayoutPtr(const Device* d, PipelineLayout h, std::shared_ptr<void> keepAlive = {}) noexcept {
+		return PipelineLayoutPtr(
+			*d, h,
+			[](Device& dev, PipelineLayout& hh) noexcept { if (dev) dev.DestroyPipelineLayout(hh.GetHandle()); },
+			std::move(keepAlive)
 		);
 	}
-	inline CommandSignaturePtr MakeCommandSignaturePtr(const Device* d, CommandSignature h) noexcept {
-		return CommandSignaturePtr(*d, h,
-			[](Device& dev, CommandSignature& hh) noexcept { if (dev) dev.DestroyCommandSignature(hh.GetHandle()); }
+
+	inline CommandSignaturePtr MakeCommandSignaturePtr(const Device* d, CommandSignature h, std::shared_ptr<void> keepAlive = {}) noexcept {
+		return CommandSignaturePtr(
+			*d, h,
+			[](Device& dev, CommandSignature& hh) noexcept { if (dev) dev.DestroyCommandSignature(hh.GetHandle()); },
+			std::move(keepAlive)
 		);
 	}
-	inline DescriptorHeapPtr MakeDescriptorHeapPtr(const Device* d, DescriptorHeap h) noexcept {
-		return DescriptorHeapPtr(*d, h,
-			[](Device& dev, DescriptorHeap& hh) noexcept { if (dev) dev.DestroyDescriptorHeap(hh.GetHandle()); }
+
+	inline DescriptorHeapPtr MakeDescriptorHeapPtr(const Device* d, DescriptorHeap h, std::shared_ptr<void> keepAlive = {}) noexcept {
+		return DescriptorHeapPtr(
+			*d, h,
+			[](Device& dev, DescriptorHeap& hh) noexcept { if (dev) dev.DestroyDescriptorHeap(hh.GetHandle()); },
+			std::move(keepAlive)
 		);
 	}
-	inline SamplerPtr MakeSamplerPtr(const Device* d, Sampler h) noexcept {
-		return SamplerPtr(*d, h,
-			[](Device& dev, Sampler& hh) noexcept { if (dev) dev.DestroySampler(hh.GetHandle()); }
+
+	inline SamplerPtr MakeSamplerPtr(const Device* d, Sampler h, std::shared_ptr<void> keepAlive = {}) noexcept {
+		return SamplerPtr(
+			*d, h,
+			[](Device& dev, Sampler& hh) noexcept { if (dev) dev.DestroySampler(hh.GetHandle()); },
+			std::move(keepAlive)
 		);
 	}
-	inline TimelinePtr MakeTimelinePtr(const Device* d, Timeline h) noexcept {
-		return TimelinePtr(*d, h,
-			[](Device& dev, Timeline& hh) noexcept { if (dev) dev.DestroyTimeline(hh.GetHandle()); }
+
+	inline TimelinePtr MakeTimelinePtr(const Device* d, Timeline h, std::shared_ptr<void> keepAlive = {}) noexcept {
+		return TimelinePtr(
+			*d, h,
+			[](Device& dev, Timeline& hh) noexcept { if (dev) dev.DestroyTimeline(hh.GetHandle()); },
+			std::move(keepAlive)
 		);
 	}
-	inline HeapPtr MakeHeapPtr(const Device* d, Heap h) noexcept {
-		return HeapPtr(*d, h,
-			[](Device& dev, Heap& hh) noexcept { if (dev) dev.DestroyHeap(hh.GetHandle()); }
+
+	inline HeapPtr MakeHeapPtr(const Device* d, Heap h, std::shared_ptr<void> keepAlive = {}) noexcept {
+		return HeapPtr(
+			*d, h,
+			[](Device& dev, Heap& hh) noexcept { if (dev) dev.DestroyHeap(hh.GetHandle()); },
+			std::move(keepAlive)
 		);
 	}
 

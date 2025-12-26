@@ -119,10 +119,9 @@ void DeviceManager::Initialize() {
 }
 
 void DeviceManager::Cleanup() {
-    //if (m_device) {
-    //    m_device->WaitIdle();
-    //    m_device.Reset();
-    //}
+    if (m_device) {
+        m_device.Reset();
+    }
 }
 
 void DeviceManager::CheckGPUFeatures() {

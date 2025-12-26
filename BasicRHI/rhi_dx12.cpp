@@ -14,6 +14,52 @@
 
 namespace rhi {
 
+	// The backend (Dx12Device) owns cleanup. The RHI Device handle's Destroy()
+	// only detaches; actual D3D12 object release happens when the last keep-alive reference drops.
+	Dx12Device::~Dx12Device() noexcept {
+		Shutdown();
+	}
+
+	static void dx12_wait_queue_idle(Dx12QueueState& q) noexcept
+	{
+		if (!q.pNativeQueue || !q.fence) return;
+
+		const UINT64 v = ++q.value;
+		(void)q.pNativeQueue->Signal(q.fence.Get(), v);
+
+		if (q.fence->GetCompletedValue() < v) {
+			HANDLE e = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+			if (!e) return; // best-effort teardown
+			(void)q.fence->SetEventOnCompletion(v, e);
+			(void)WaitForSingleObject(e, INFINITE);
+			CloseHandle(e);
+		}
+	}
+
+	void Dx12Device::Shutdown() noexcept {
+		dx12_wait_queue_idle(gfx);
+		dx12_wait_queue_idle(comp);
+		dx12_wait_queue_idle(copy);
+
+		// Not strictly required
+		swapchains.clear();
+		queryPools.clear();
+		heaps.clear();
+		timelines.clear();
+		commandLists.clear();
+		allocators.clear();
+		descHeaps.clear();
+		commandSignatures.clear();
+		pipelines.clear();
+		pipelineLayouts.clear();
+		samplers.clear();
+		resources.clear();
+
+		gfx = {};
+		comp = {};
+		copy = {};
+	}
+
 	static Result d_createPipelineFromStream(Device* d,
 		const PipelineStreamItem* items,
 		uint32_t count,
@@ -159,12 +205,12 @@ namespace rhi {
 			RHI_FAIL(ToRHI(hr));
 		}
 
-		auto handle = dimpl->pipelines.alloc(Dx12Pipeline(pso, isCompute));
+		auto handle = dimpl->pipelines.alloc(Dx12Pipeline(pso, isCompute, dimpl));
 		Pipeline ret(handle);
 		ret.vt = &g_psovt;
 		ret.impl = dimpl;
 
-		out = MakePipelinePtr(d, ret);
+		out = MakePipelinePtr(d, ret, static_cast<Dx12Device*>(d->impl)->selfWeak.lock());
 		return Result::Ok;
 	}
 
@@ -199,25 +245,16 @@ namespace rhi {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
 		Queue out{ qk }; out.vt = &g_qvt;
 		Dx12QueueState* s = (qk == QueueKind::Graphics ? &impl->gfx : qk == QueueKind::Compute ? &impl->comp : &impl->copy);
+		s->dev = impl;
 		out.impl = impl;
 		return out;
 	}
 
 	static Result d_waitIdle(Device* d) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		auto waitQ = [](Dx12QueueState& q) {
-			if (!q.pNativeQueue || !q.fence) return;
-			q.pNativeQueue->Signal(q.fence.Get(), ++q.value);
-			if (q.fence->GetCompletedValue() < q.value) {
-				HANDLE e = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-				q.fence->SetEventOnCompletion(q.value, e);
-				WaitForSingleObject(e, INFINITE);
-				CloseHandle(e);
-			}
-			};
-		waitQ(impl->gfx);
-		waitQ(impl->comp);
-		waitQ(impl->copy);
+		dx12_wait_queue_idle(impl->gfx);
+		dx12_wait_queue_idle(impl->comp);
+		dx12_wait_queue_idle(impl->copy);
 		return Result::Ok;
 	}
 	static void   d_flushDeletionQueue(Device*) noexcept {}
@@ -259,14 +296,15 @@ namespace rhi {
 		for (UINT i = 0; i < bufferCount; i++) {
 			proxySc3->GetBuffer(i, IID_PPV_ARGS(&imgs[i]));
 			// Register as a TextureHandle
-			Dx12Resource t(imgs[i], desc.Format, w, h, 1, 1, D3D12_RESOURCE_DIMENSION_TEXTURE2D, 1);
+			Dx12Resource t(imgs[i], desc.Format, w, h, 1, 1, D3D12_RESOURCE_DIMENSION_TEXTURE2D, 1, impl);
 			imgHandles[i] = impl->resources.alloc(t);
 
 		}
 
 		auto scWrap = Dx12Swapchain(
 			nativeSc3, proxySc3, desc.Format, w, h, bufferCount,
-			imgs, imgHandles
+			imgs, imgHandles,
+			impl
 		);
 
 		auto scHandle = impl->swapchains.alloc(scWrap);
@@ -274,7 +312,7 @@ namespace rhi {
 		Swapchain ret{ scHandle };
 		ret.impl = impl;
 		ret.vt = &g_scvt;
-		out = MakeSwapchainPtr(d, ret);
+		out = MakeSwapchainPtr(d, ret, static_cast<Dx12Device*>(d->impl)->selfWeak.lock());
 		return Result::Ok;
 	}
 
@@ -283,67 +321,31 @@ namespace rhi {
 		if (!s) { sc->impl = nullptr; sc->vt = nullptr; return; }
 
 		// Ensure GPU is idle before ripping out backbuffers.
-		auto dev = dx12_detail::Dev(sc);
-		if (dev && dev->self.vt && dev->self.vt->deviceWaitIdle) {
-			(void)dev->self.vt->deviceWaitIdle(&dev->self);
+		if (s->dev && s->dev->self.vt && s->dev->self.vt->deviceWaitIdle) {
+			(void)s->dev->self.vt->deviceWaitIdle(&s->dev->self);
 		}
 
-		if (dev)
+		if (s->dev)
 		{
 			// Release references held by the resource registry and free the handles.
 			for (auto h : s->imageHandles)
 			{
 				if (h.generation != 0) // invalid guard
 				{
-					if (auto* r = dev->resources.get(h))
+					if (auto* r = s->dev->resources.get(h))
 						r->res.Reset(); // drop ID3D12Resource ref so DXGI can actually destroy
-					dev->resources.free(h);
+					s->dev->resources.free(h);
 				}
 			}
 		}
-		
-		dev->swapchains.free(sc->GetHandle());
+
+		s->dev->swapchains.free(sc->GetHandle());
 		sc->impl = nullptr;
 		sc->vt = nullptr;
 	}
 
 	static void d_destroyDevice(Device* d) noexcept {
-		// Wait for idle
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-
-		//impl->self.vt->deviceWaitIdle(&impl->self); // Fails
-		//d->WaitIdle(); // Also fails
-
-		// Clear all registries (drops ComPtrs inside the stored objects)
-		impl->swapchains.clear();
-		impl->queryPools.clear();
-		impl->timelines.clear();
-		impl->commandLists.clear();
-		impl->allocators.clear();
-		impl->descHeaps.clear();
-		impl->commandSignatures.clear();
-		impl->pipelines.clear();
-		impl->pipelineLayouts.clear();
-		impl->samplers.clear();
-		impl->resources.clear();
-		impl->heaps.clear();
-
-		// release queues/fences
-		impl->gfx = {};
-		impl->comp = {};
-		impl->copy = {};
-
-		// release device/factory
-		impl->pSLProxyDevice.Reset();
-		impl->pNativeDevice.Reset();
-		impl->pSLProxyFactory.Reset();
-		impl->pNativeFactory.Reset();
-		impl->adapter.Reset();
-
-		// invalidate the RHI handle
-		d->impl = nullptr;
-		d->vt = nullptr;
-
 		d->vt = nullptr;
 	}
 
@@ -428,7 +430,7 @@ namespace rhi {
 			RHI_FAIL(ToRHI(hr));
 		}
 
-		Dx12PipelineLayout L(ld);
+		Dx12PipelineLayout L(ld, impl);
 		if (ld.pushConstants.size && ld.pushConstants.data) {
 			L.pcs.assign(ld.pushConstants.data, ld.pushConstants.data + ld.pushConstants.size);
 			// Build rcParams in the same order as params:
@@ -448,7 +450,7 @@ namespace rhi {
 		PipelineLayout ret(handle);
 		ret.vt = &g_plvt;
 		ret.impl = impl;
-		out = MakePipelineLayoutPtr(d, ret);
+		out = MakePipelineLayoutPtr(d, ret, static_cast<Dx12Device*>(d->impl)->selfWeak.lock());
 		return Result::Ok;
 	}
 
@@ -835,12 +837,12 @@ namespace rhi {
 		if (const auto hr = impl->pNativeDevice->CreateCommandSignature(&desc, rs, IID_PPV_ARGS(&cs)); FAILED(hr)) {
 			RHI_FAIL(ToRHI(hr));
 		}
-		const Dx12CommandSignature s(cs, cd.byteStride);
+		const Dx12CommandSignature s(cs, cd.byteStride, impl);
 		const auto handle = impl->commandSignatures.alloc(s);
 		CommandSignature ret(handle);
 		ret.vt = &g_csvt;
 		ret.impl = impl;
-		out = MakeCommandSignaturePtr(d, ret);
+		out = MakeCommandSignaturePtr(d, ret, static_cast<Dx12Device*>(d->impl)->selfWeak.lock());
 		return Result::Ok;
 	}
 
@@ -862,13 +864,13 @@ namespace rhi {
 		}
 
 		const auto descriptorSize = impl->pNativeDevice->GetDescriptorHandleIncrementSize(desc.Type);
-		const Dx12DescriptorHeap H(heap, desc.Type, descriptorSize, (desc.Flags & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) != 0);
+		const Dx12DescriptorHeap H(heap, desc.Type, descriptorSize, (desc.Flags & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) != 0, impl);
 
 		const auto handle = impl->descHeaps.alloc(H);
 		DescriptorHeap ret(handle);
 		ret.vt = &g_dhvt;
 		ret.impl = impl;
-		out = MakeDescriptorHeapPtr(d, ret);
+		out = MakeDescriptorHeapPtr(d, ret, static_cast<Dx12Device*>(d->impl)->selfWeak.lock());
 		return Result::Ok;
 	}
 	static void d_destroyDescriptorHeap(DeviceDeletionContext* d, DescriptorHeapHandle h) noexcept {
@@ -1490,13 +1492,13 @@ namespace rhi {
 			return ToRHI(hr);
 		}
 
-		Dx12Allocator A(a, ToDX(q));
+		Dx12Allocator A(a, ToDX(q), impl);
 		const auto h = impl->allocators.alloc(A);
 
 		CommandAllocator ret{ h };
 		ret.impl = impl;
 		ret.vt = &g_calvt;
-		out = MakeCommandAllocatorPtr(d, ret);
+		out = MakeCommandAllocatorPtr(d, ret, static_cast<Dx12Device*>(d->impl)->selfWeak.lock());
 		return Result::Ok;
 	}
 
@@ -1515,13 +1517,13 @@ namespace rhi {
 		if (const auto hr = impl->pNativeDevice->CreateCommandList(0, A->type, A->alloc.Get(), nullptr, IID_PPV_ARGS(&cl)); FAILED(hr)) {
 			RHI_FAIL(ToRHI(hr));
 		}
-		const Dx12CommandList rec(cl, A->alloc, A->type);
+		const Dx12CommandList rec(cl, A->alloc, A->type, impl);
 		const auto h = impl->commandLists.alloc(rec);
 
 		CommandList ret{ h };
 		ret.impl = impl;
 		ret.vt = &g_clvt;
-		out = MakeCommandListPtr(d, ret);
+		out = MakeCommandListPtr(d, ret, static_cast<Dx12Device*>(d->impl)->selfWeak.lock());
 		return Result::Ok;
 	}
 
@@ -1568,13 +1570,13 @@ namespace rhi {
 			res->SetName(std::wstring(bd.debugName, bd.debugName + ::strlen(bd.debugName)).c_str());
 		}
 
-		Dx12Resource B(std::move(res), bd.buffer.sizeBytes);
+		Dx12Resource B(std::move(res), bd.buffer.sizeBytes, impl);
 		const auto handle = impl->resources.alloc(B);
 
 		Resource ret{ handle, false };
 		ret.impl = impl;
 		ret.vt = &g_buf_rvt;
-		out = MakeBufferPtr(d, ret);
+		out = MakeBufferPtr(d, ret, static_cast<Dx12Device*>(d->impl)->selfWeak.lock());
 		return Result::Ok;
 	}
 
@@ -1631,7 +1633,7 @@ namespace rhi {
 			td.texture.mipLevels, arraySize, (td.type == ResourceType::Texture3D)
 			? D3D12_RESOURCE_DIMENSION_TEXTURE3D
 			: (td.type == ResourceType::Texture2D ? D3D12_RESOURCE_DIMENSION_TEXTURE2D
-				: D3D12_RESOURCE_DIMENSION_TEXTURE1D), depth);
+				: D3D12_RESOURCE_DIMENSION_TEXTURE1D), depth, impl);
 
 		auto handle = impl->resources.alloc(T);
 
@@ -1639,7 +1641,7 @@ namespace rhi {
 		ret.impl = impl;
 		ret.vt = &g_tex_rvt;
 
-		out = MakeTexturePtr(d, ret);
+		out = MakeTexturePtr(d, ret, static_cast<Dx12Device*>(d->impl)->selfWeak.lock());
 		return Result::Ok;
 	}
 
@@ -1673,12 +1675,12 @@ namespace rhi {
 			RHI_FAIL(ToRHI(hr));
 		}
 		if (dbg) { std::wstring w(dbg, dbg + ::strlen(dbg)); f->SetName(w.c_str()); }
-		const Dx12Timeline T(f);
+		const Dx12Timeline T(f, impl);
 		const auto h = impl->timelines.alloc(T);
 		Timeline ret{ h };
 		ret.impl = impl;
 		ret.vt = &g_tlvt;
-		out = MakeTimelinePtr(d, ret);
+		out = MakeTimelinePtr(d, ret, static_cast<Dx12Device*>(d->impl)->selfWeak.lock());
 		return Result::Ok;
 	}
 
@@ -1714,12 +1716,12 @@ namespace rhi {
 		if (hd.debugName) { const std::wstring w(hd.debugName, hd.debugName + ::strlen(hd.debugName)); heap->SetName(w.c_str()); }
 #endif
 
-		const Dx12Heap H(heap, hd.sizeBytes);
+		const Dx12Heap H(heap, hd.sizeBytes, impl);
 		const auto h = impl->heaps.alloc(H);
 		Heap ret{ h };
 		ret.impl = impl;
 		ret.vt = &g_hevt;
-		out = MakeHeapPtr(d, ret);
+		out = MakeHeapPtr(d, ret, static_cast<Dx12Device*>(d->impl)->selfWeak.lock());
 		return Result::Ok;
 	}
 
@@ -1849,13 +1851,14 @@ namespace rhi {
 			(td.type == ResourceType::Texture3D) ? D3D12_RESOURCE_DIMENSION_TEXTURE3D
 			: (td.type == ResourceType::Texture2D ? D3D12_RESOURCE_DIMENSION_TEXTURE2D
 				: D3D12_RESOURCE_DIMENSION_TEXTURE1D),
-			(td.type == ResourceType::Texture3D) ? td.texture.depthOrLayers : 1);
+			(td.type == ResourceType::Texture3D) ? td.texture.depthOrLayers : 1,
+			impl);
 
 		const auto handle = impl->resources.alloc(T);
 		Resource ret(handle, true);
 		ret.impl = impl;
 		ret.vt = &g_tex_rvt;
-		out = MakeTexturePtr(d, ret);
+		out = MakeTexturePtr(d, ret, static_cast<Dx12Device*>(d->impl)->selfWeak.lock());
 		return Result::Ok;
 	}
 
@@ -1895,12 +1898,12 @@ namespace rhi {
 			//RHI_FAIL(ToRHI(hr));
 		}
 		if (bd.debugName) res->SetName(std::wstring(bd.debugName, bd.debugName + ::strlen(bd.debugName)).c_str());
-		const Dx12Resource B(std::move(res), bd.buffer.sizeBytes);
+		const Dx12Resource B(std::move(res), bd.buffer.sizeBytes, impl);
 		const auto handle = impl->resources.alloc(B);
 		Resource ret{ handle, false };
 		ret.impl = impl;
 		ret.vt = &g_buf_rvt;
-		out = MakeBufferPtr(d, ret);
+		out = MakeBufferPtr(d, ret, static_cast<Dx12Device*>(d->impl)->selfWeak.lock());
 		return Result::Ok;
 	}
 
@@ -1971,7 +1974,7 @@ namespace rhi {
 		if (const auto hr = dimpl->pNativeDevice->CreateQueryHeap(&desc, IID_PPV_ARGS(&heap)); FAILED(hr)) {
 			RHI_FAIL(ToRHI(hr));
 		}
-		Dx12QueryPool qp(heap, type, qd.count);
+		Dx12QueryPool qp(heap, type, qd.count, dimpl);
 		qp.usePSO1 = usePSO1;
 
 		const auto handle = dimpl->queryPools.alloc(qp);
@@ -1979,7 +1982,7 @@ namespace rhi {
 		ret.impl = dimpl;
 		ret.vt = &g_qpvt;
 
-		out = MakeQueryPoolPtr(d, ret);
+		out = MakeQueryPoolPtr(d, ret, static_cast<Dx12Device*>(d->impl)->selfWeak.lock());
 		return Result::Ok;
 	}
 
@@ -2206,7 +2209,7 @@ namespace rhi {
 	// ---------------- Queue vtable funcs ----------------
 	static Result q_submit(Queue* q, Span<CommandList> lists, const SubmitDesc& s) noexcept {
 		auto* qs = dx12_detail::QState(q);
-		auto* dev = dx12_detail::Dev(q);
+		auto* dev = qs->dev;
 		if (!dev) {
 			RHI_FAIL(Result::InvalidArgument);
 		}
@@ -2243,7 +2246,7 @@ namespace rhi {
 
 	static Result q_signal(Queue* q, const TimelinePoint& p) noexcept {
 		auto* qs = dx12_detail::QState(q);
-		auto* dev = dx12_detail::Dev(q);
+		auto* dev = qs->dev;
 		if (!dev) {
 			RHI_FAIL(Result::InvalidArgument);
 		}
@@ -2264,8 +2267,7 @@ namespace rhi {
 
 	static Result q_wait(Queue* q, const TimelinePoint& p) noexcept {
 		auto* qs = dx12_detail::QState(q);
-		auto* dev = dx12_detail::Dev(q);
-		if (!dev) {
+		auto* dev = qs->dev; if (!dev) {
 			RHI_FAIL(Result::InvalidArgument);
 		}
 		auto* TL = dev->timelines.get(p.t); if (!TL) {
@@ -2327,10 +2329,9 @@ namespace rhi {
 
 		std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> rtvs;
 		rtvs.reserve(p.colors.size);
-		auto dev = dx12_detail::Dev(cl);
 		for (uint32_t i = 0; i < p.colors.size; ++i) {
 			D3D12_CPU_DESCRIPTOR_HANDLE cpu{};
-			if (DxGetDstCpu(dev, p.colors.data[i].rtv, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_RTV)) {
+			if (DxGetDstCpu(l->dev, p.colors.data[i].rtv, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_RTV)) {
 				rtvs.push_back(cpu);
 				if (p.colors.data[i].loadOp == LoadOp::Clear) {
 					l->cl->ClearRenderTargetView(cpu, p.colors.data[i].clear.rgba, 0, nullptr);
@@ -2341,7 +2342,7 @@ namespace rhi {
 		D3D12_CPU_DESCRIPTOR_HANDLE dsv{};
 		const D3D12_CPU_DESCRIPTOR_HANDLE* pDsv = nullptr;
 		if (p.depth) {
-			if (DxGetDstCpu(dev, p.depth->dsv, dsv, D3D12_DESCRIPTOR_HEAP_TYPE_DSV)) {
+			if (DxGetDstCpu(l->dev, p.depth->dsv, dsv, D3D12_DESCRIPTOR_HEAP_TYPE_DSV)) {
 				pDsv = &dsv;
 				if (p.depth->depthLoad == LoadOp::Clear || p.depth->stencilLoad == LoadOp::Clear) {
 					const auto& c = p.depth->clear;
@@ -2364,7 +2365,7 @@ namespace rhi {
 	static void cl_endPass(CommandList* /*cl*/) noexcept {} // nothing to do in DX12
 	static void cl_bindLayout(CommandList* cl, PipelineLayoutHandle layoutH) noexcept {
 		auto* impl = dx12_detail::CL(cl);
-		auto* dev = dx12_detail::Dev(cl);
+		auto* dev = impl->dev;
 		auto* L = dev->pipelineLayouts.get(layoutH);
 		if (!L || !L->root) {
 			BreakIfDebugging();
@@ -2390,7 +2391,7 @@ namespace rhi {
 	}
 	static void cl_bindPipeline(CommandList* cl, PipelineHandle psoH) noexcept {
 		auto* l = dx12_detail::CL(cl);
-		auto* dev = dx12_detail::Dev(cl);
+		auto* dev = l->dev;
 		if (auto* P = dev->pipelines.get(psoH)) {
 			l->cl->SetPipelineState(P->pso.Get());
 		}
@@ -2398,7 +2399,7 @@ namespace rhi {
 	static void cl_setVB(CommandList* cl, uint32_t startSlot, uint32_t numViews, VertexBufferView* pBufferViews) noexcept {
 		auto* l = dx12_detail::CL(cl);
 		std::vector<D3D12_VERTEX_BUFFER_VIEW> views; views.resize(numViews);
-		auto* dev = dx12_detail::Dev(cl);
+		auto* dev = l->dev;
 		for (uint32_t i = 0; i < numViews; ++i) {
 			if (auto* B = dev->resources.get(pBufferViews[i].buffer)) {
 				views[i].BufferLocation = B->res->GetGPUVirtualAddress() + pBufferViews[i].offset;
@@ -2410,7 +2411,7 @@ namespace rhi {
 	}
 	static void cl_setIB(CommandList* cl, const IndexBufferView& view) noexcept {
 		auto* l = dx12_detail::CL(cl);
-		auto* dev = dx12_detail::Dev(cl);
+		auto* dev = l->dev;
 		if (auto* B = dev->resources.get(view.buffer)) {
 			D3D12_INDEX_BUFFER_VIEW ibv{};
 			ibv.BufferLocation = B->res->GetGPUVirtualAddress() + view.offset;
@@ -2439,7 +2440,7 @@ namespace rhi {
 			return;
 		}
 		D3D12_CPU_DESCRIPTOR_HANDLE cpu{};
-		if (!DxGetDstCpu(dx12_detail::Dev(c), s, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_RTV)) {
+		if (!DxGetDstCpu(impl->dev, s, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_RTV)) {
 			BreakIfDebugging();
 			return;
 		}
@@ -2458,7 +2459,7 @@ namespace rhi {
 			return;
 		}
 		D3D12_CPU_DESCRIPTOR_HANDLE cpu{};
-		if (!DxGetDstCpu(dx12_detail::Dev(c), s, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_DSV)) {
+		if (!DxGetDstCpu(impl->dev, s, cpu, D3D12_DESCRIPTOR_HEAP_TYPE_DSV)) {
 			BreakIfDebugging();
 			return;
 		}
@@ -2482,7 +2483,7 @@ namespace rhi {
 		}
 
 		auto* l = dx12_detail::CL(cl);
-		auto* dev = dx12_detail::Dev(cl);
+		auto* dev = l->dev;
 		if (!dev) {
 			BreakIfDebugging();
 			return;
@@ -2514,7 +2515,7 @@ namespace rhi {
 	}
 	static void cl_setDescriptorHeaps(CommandList* cl, DescriptorHeapHandle csu, std::optional<DescriptorHeapHandle> samp) noexcept {
 		auto* l = dx12_detail::CL(cl);
-		auto* dev = dx12_detail::Dev(cl);
+		auto* dev = l->dev;
 
 		ID3D12DescriptorHeap* heaps[2]{};
 		UINT n = 0;
@@ -2537,7 +2538,7 @@ namespace rhi {
 			return;
 		}
 		auto* l = dx12_detail::CL(cl);
-		auto* dev = dx12_detail::Dev(cl);
+		auto* dev = l->dev;
 		if (!dev) {
 			BreakIfDebugging();
 			return;
@@ -2632,7 +2633,7 @@ namespace rhi {
 		const UavClearUint& v) noexcept
 	{
 		auto* rec = dx12_detail::CL(cl);
-		auto* impl = rec ? dx12_detail::Dev(cl) : nullptr;
+		auto* impl = rec ? rec->dev : nullptr;
 		if (!rec || !impl) {
 			BreakIfDebugging();
 			return;
@@ -2673,7 +2674,7 @@ namespace rhi {
 		const UavClearFloat& v) noexcept
 	{
 		auto* rec = dx12_detail::CL(cl);
-		auto* impl = rec ? dx12_detail::Dev(cl) : nullptr;
+		auto* impl = rec ? rec->dev : nullptr;
 		if (!rec || !impl) {
 			BreakIfDebugging();
 			return;
@@ -2710,7 +2711,7 @@ namespace rhi {
 	// texture -> buffer
 	static void cl_copyTextureToBuffer(rhi::CommandList* cl, const rhi::BufferTextureCopyFootprint& r) noexcept {
 		auto* rec = dx12_detail::CL(cl);
-		auto* impl = rec ? dx12_detail::Dev(cl) : nullptr;
+		auto* impl = rec ? rec->dev : nullptr;
 		if (!rec || !impl) {
 			BreakIfDebugging();
 			return;
@@ -2746,7 +2747,7 @@ namespace rhi {
 	// buffer -> texture (symmetric)
 	static void cl_copyBufferToTexture(rhi::CommandList* cl, const rhi::BufferTextureCopyFootprint& r) noexcept {
 		auto* rec = dx12_detail::CL(cl);
-		auto* impl = rec ? dx12_detail::Dev(cl) : nullptr;
+		auto* impl = rec ? rec->dev : nullptr;
 		if (!rec || !impl) {
 			BreakIfDebugging();
 			return;
@@ -2784,7 +2785,7 @@ namespace rhi {
 		const TextureCopyRegion& src) noexcept
 	{
 		auto* rec = dx12_detail::CL(cl);
-		auto* impl = rec ? dx12_detail::Dev(cl) : nullptr;
+		auto* impl = rec ? rec->dev : nullptr;
 		if (!rec || !impl) {
 			BreakIfDebugging();
 			return;
@@ -2847,7 +2848,7 @@ namespace rhi {
 		}
 
 		auto* rec = dx12_detail::CL(cl);
-		auto* dev = dx12_detail::Dev(cl);
+		auto* dev = rec->dev;
 		if (!rec || !dev) {
 			BreakIfDebugging();
 			return;
@@ -2886,7 +2887,7 @@ namespace rhi {
 
 	static void cl_writeTimestamp(CommandList* cl, QueryPoolHandle pool, uint32_t index, Stage /*ignored*/) noexcept {
 		auto* rec = dx12_detail::CL(cl);
-		auto* impl = rec ? dx12_detail::Dev(cl) : nullptr;
+		auto* impl = rec ? rec->dev : nullptr;
 		if (!impl) {
 			BreakIfDebugging();
 			return;
@@ -2903,7 +2904,7 @@ namespace rhi {
 
 	static void cl_beginQuery(CommandList* cl, QueryPoolHandle pool, uint32_t index) noexcept {
 		auto* rec = dx12_detail::CL(cl);
-		auto* impl = rec ? dx12_detail::Dev(cl) : nullptr;
+		auto* impl = rec ? rec->dev : nullptr;
 		if (!impl) {
 			BreakIfDebugging();
 			return;
@@ -2928,7 +2929,7 @@ namespace rhi {
 
 	static void cl_endQuery(CommandList* cl, QueryPoolHandle pool, uint32_t index) noexcept {
 		auto* rec = dx12_detail::CL(cl);
-		auto* impl = rec ? dx12_detail::Dev(cl) : nullptr;
+		auto* impl = rec ? rec->dev : nullptr;
 		if (!impl) {
 			BreakIfDebugging();
 			return;
@@ -2960,7 +2961,7 @@ namespace rhi {
 		ResourceHandle dst, uint64_t dstOffset) noexcept
 	{
 		auto* rec = dx12_detail::CL(cl);
-		auto* impl = rec ? dx12_detail::Dev(cl) : nullptr;
+		auto* impl = rec ? rec->dev : nullptr;
 		if (!impl) {
 			BreakIfDebugging();
 			return;
@@ -3053,7 +3054,7 @@ namespace rhi {
 	// ---------------- Swapchain vtable funcs ----------------
 	static uint32_t sc_count(Swapchain* sc) noexcept { return dx12_detail::SC(sc)->count; }
 	static uint32_t sc_curr(Swapchain* sc) noexcept { return dx12_detail::SC(sc)->pSlProxySC->GetCurrentBackBufferIndex(); }
-	//static ViewHandle sc_rtv(Swapchain* sc, uint32_t i) noexcept { return static_cast<Dx12Swapchain*>(sc->impl)->rtvHandles[i]; }
+	//static ViewHandle sc_rtv(Swapchain* sc, uint32_t i) noexcept { return dx12_detail::SC(sc)->rtvHandles[i]; }
 	static ResourceHandle sc_img(Swapchain* sc, uint32_t i) noexcept { return dx12_detail::SC(sc)->imageHandles[i]; }
 	static Result sc_present(Swapchain* sc, bool vsync) noexcept {
 		auto* s = dx12_detail::SC(sc);
@@ -3068,10 +3069,10 @@ namespace rhi {
 		Format newFormat,
 		uint32_t flags) noexcept
 	{
-		auto* s = static_cast<Dx12Swapchain*>(sc->impl);
-		if (!s || !s->pSlProxySC) return Result::InvalidNativePointer;
+		auto* s = dx12_detail::SC(sc);
+		if (!s || !s->pSlProxySC || !s->dev) return Result::InvalidNativePointer;
 
-		auto* dev = dx12_detail::Dev(sc);
+		auto* dev = s->dev;
 
 		const uint32_t oldCount = s->count;
 		const uint32_t newCount = (numBuffers != 0) ? numBuffers : oldCount;
@@ -3142,7 +3143,7 @@ namespace rhi {
 
 			s->images[i] = img;
 
-			Dx12Resource t(img, newFmt, s->w, s->h, 1, 1, D3D12_RESOURCE_DIMENSION_TEXTURE2D, 1);
+			Dx12Resource t(img, newFmt, s->w, s->h, 1, 1, D3D12_RESOURCE_DIMENSION_TEXTURE2D, 1, s->dev);
 
 			// Preserve existing handle if possible, in case they're being stored externally
 			// otherwise allocate a new one.
@@ -3559,10 +3560,10 @@ namespace rhi {
 		&d_setNameTimeline,
 		&d_setNameHeap,
 		&d_destroyDevice,
-        2u
-    };
+		2u
+	};
 
-    const QueueVTable g_qvt = { 
+	const QueueVTable g_qvt = {
 		&q_submit,
 		&q_signal,
 		&q_wait,
@@ -3607,8 +3608,8 @@ namespace rhi {
 		&cl_dispatchMesh,
 		&cl_setName,
 		1u
-    };
-    const SwapchainVTable g_scvt = { 
+	};
+	const SwapchainVTable g_scvt = {
 		&sc_count,
 		&sc_curr,
 		//&sc_rtv,
@@ -3667,7 +3668,7 @@ namespace rhi {
 	};
 
 	// ---------------- Helpers ----------------
-	
+
 	void EnableShaderBasedValidation() {
 		CComPtr<ID3D12Debug> spDebugController0;
 		CComPtr<ID3D12Debug1> spDebugController1;
@@ -3765,7 +3766,8 @@ namespace rhi {
 		}
 
 		auto impl = std::make_shared<Dx12Device>();
-		//impl->selfWeak = impl;
+		impl->selfWeak = impl;
+		Dx12Device* pImpl = impl.get();
 
 		// Native factory/device
 		CreateDXGIFactory2(flags, IID_PPV_ARGS(&impl->pNativeFactory));
@@ -3845,7 +3847,7 @@ namespace rhi {
 				{
 					out.pNativeQueue.Attach(qNative); // qNative is returned with refcount
 				}
-				//out.dev = impl;
+				out.dev = impl.get();
 				impl->pNativeDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&out.fence));
 				out.value = 0;
 			};
@@ -3854,7 +3856,7 @@ namespace rhi {
 		makeQ(D3D12_COMMAND_LIST_TYPE_COMPUTE, impl->comp);
 		makeQ(D3D12_COMMAND_LIST_TYPE_COPY, impl->copy);
 
-		Device d{ impl.get(), &g_devvt };
+		Device d{ pImpl, &g_devvt };
 		outPtr = MakeDevicePtr(&d, impl);
 		return Result::Ok;
 	}
