@@ -349,6 +349,8 @@ namespace rhi {
 
 		Dx12QueueState gfx{}, comp{}, copy{};
 
+		bool steamlineInitialized = false;
+
 		// lifetime anchor
 		std::weak_ptr<Dx12Device> selfWeak;
 	};

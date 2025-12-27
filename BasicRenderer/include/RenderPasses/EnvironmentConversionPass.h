@@ -35,7 +35,7 @@ public:
         cl.BindPipeline(m_pso->GetHandle());
 
         EnvironmentManager& manager = *context.environmentManager;
-        auto environments = manager.GetAndClearEncironmentsToConvert();
+        auto environments = manager.GetAndClearEnvironmentsToConvert();
 
         for (auto& env : environments)
         {

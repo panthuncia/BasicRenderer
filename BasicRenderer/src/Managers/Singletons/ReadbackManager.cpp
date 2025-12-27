@@ -12,7 +12,7 @@
 std::unique_ptr<ReadbackManager> ReadbackManager::instance = nullptr;
 bool ReadbackManager::initialized = false;
 
-void ReadbackManager::SaveCubemapToDDS(rhi::Device& device, rhi::CommandList& commandList, PixelBuffer* cubemap, const std::wstring& outputFile, UINT64 fenceValue) {
+void ReadbackManager::SaveCubemapToDDS(rhi::Device& device, rhi::CommandList& commandList, std::shared_ptr<PixelBuffer> cubemap, const std::wstring& outputFile, UINT64 fenceValue) {
     // Get the number of mip levels and subresources
     uint32_t numMipLevels = cubemap->GetMipLevels();
     const uint32_t faces = 6;
@@ -38,9 +38,29 @@ void ReadbackManager::SaveCubemapToDDS(rhi::Device& device, rhi::CommandList& co
 	auto readbackBuffer = Buffer::CreateShared(rhi::HeapType::Readback, info.totalBytes);
     readbackBuffer->SetName("Readback");
 
-    //auto initialState = ResourceStateToD3D12(cubemap->GetState());
-    //CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(cubemap->GetTexture().Get(), initialState, D3D12_RESOURCE_STATE_COPY_SOURCE);
-    //commandList->ResourceBarrier(1, &barrier);
+    auto initialSourceState = cubemap->GetStateTracker()->GetSegments();
+
+    RangeSpec range = {};
+    ResourceState sourceState;
+    sourceState.access = rhi::ResourceAccessType::CopySource;
+    sourceState.layout = rhi::ResourceLayout::CopySource;
+    sourceState.sync = rhi::ResourceSyncState::Copy;
+
+
+    // Compute transitions to bring full resources into COPY_SOURCE and COPY_DEST
+    std::vector<ResourceTransition> transitions;
+    cubemap->GetStateTracker()->Apply(range, cubemap.get(), sourceState, transitions);
+
+    std::vector<D3D12_BARRIER_GROUP> barriers;
+    std::vector<rhi::BarrierBatch> sourceTransitions;
+    for (auto& transition : transitions) {
+        auto sourceTransition = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
+        sourceTransitions.push_back(sourceTransition);
+    }
+
+    auto batch = rhi::helpers::CombineBarrierBatches(sourceTransitions);
+
+    commandList.Barriers(batch.View());
 
     // Issue copy commands for each mip level of each face
     for (UINT mipLevel = 0; mipLevel < numMipLevels; ++mipLevel) {
@@ -63,14 +83,30 @@ void ReadbackManager::SaveCubemapToDDS(rhi::Device& device, rhi::CommandList& co
         }
     }
 
-    //barrier = CD3DX12_RESOURCE_BARRIER::Transition(cubemap->GetTexture().Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, initialState);
-    //commandList->ResourceBarrier(1, &barrier);
+    barriers.clear();
+    transitions.clear();
+
+    // Copy back the initial state of the resources
+    for (auto& segment : initialSourceState) {
+        cubemap->GetStateTracker()->Apply(segment.rangeSpec, cubemap.get(), segment.state, transitions);
+    }
+
+    sourceTransitions.clear();
+    batch.Clear();
+    for (auto& transition : transitions) {
+        auto sourceTransition = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
+        sourceTransitions.push_back(std::move(sourceTransition));
+    }
+
+    batch = rhi::helpers::CombineBarrierBatches(sourceTransitions);
+
+    commandList.Barriers(batch.View());
 
     auto width = cubemap->GetWidth();
     auto height = cubemap->GetHeight();
     auto format = rhi::ToDxgi(cubemap->GetFormat());
     ReadbackRequest readbackRequest;
-    readbackRequest.readbackBuffer = readbackBuffer->GetAPIResource().GetHandle();
+    readbackRequest.readbackBuffer = readbackBuffer;
     readbackRequest.layouts = fps;
     readbackRequest.totalSize = info.totalBytes;
     readbackRequest.outputFile = outputFile;
@@ -190,7 +226,7 @@ void ReadbackManager::SaveTextureToDDS(
 
     // Defer readback + DDS write (same pattern as your cubemap path)
     ReadbackRequest readbackRequest;
-    readbackRequest.readbackBuffer = readbackBuffer->GetAPIResource().GetHandle();
+    readbackRequest.readbackBuffer = readbackBuffer;
     readbackRequest.layouts = fps;
     readbackRequest.totalSize = info.totalBytes;
     readbackRequest.outputFile = outputFile;

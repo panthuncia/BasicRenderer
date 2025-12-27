@@ -17,6 +17,9 @@ namespace rhi {
 	// The backend (Dx12Device) owns cleanup. The RHI Device handle's Destroy()
 	// only detaches; actual D3D12 object release happens when the last keep-alive reference drops.
 	Dx12Device::~Dx12Device() noexcept {
+		if (steamlineInitialized) {
+			slShutdown();
+		}
 		Shutdown();
 	}
 
@@ -3775,6 +3778,7 @@ namespace rhi {
 		// Streamline manual hooking setup
 		if (l_enableStreamline)
 		{
+			impl->steamlineInitialized = true;
 			// IMPORTANT: slInit(pref.flags |= eUseManualHooking) must have been called
 			// before this.
 

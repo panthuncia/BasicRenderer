@@ -12,85 +12,103 @@ class Resource;
 using OnResourceChangedFn = std::function<void(ResourceIdentifier, std::shared_ptr<Resource>)>;
 
 class ResourceRegistry {
-    struct Node {
-        std::shared_ptr<Resource>  resource;      // if leaf
-        std::map<std::string, Node> children;     // sub-namespaces
-        std::vector<OnResourceChangedFn> listeners;
+
+    struct ResourceKey {
+        uint32_t idx = 0;
     };
 
-    Node _root;
+    struct Slot {
+        std::shared_ptr<Resource> resource;
+        uint32_t generation = 1;
+        ResourceIdentifier id; // for debug / access checks / reverse mapping
+        bool alive = false;
+    };
 
-    // walk segments; create intermediate nodes if create==true
-    Node* traverse(ResourceIdentifier const& id, bool create) {
-        Node* cur = &_root;
-        for (auto& seg : id.segments) {
-            auto it = cur->children.find(seg);
-            if (it == cur->children.end()) {
-                if (!create) return nullptr;
-                auto [nx, _] = cur->children.emplace(seg, Node{});
-                it = nx;
-            }
-            cur = &it->second;
-        }
-        return cur;
-    }
+    std::vector<Slot> slots;
+    std::vector<uint32_t> freeList;
+
+    // Interning map: ResourceIdentifier -> ResourceKey
+    std::unordered_map<ResourceIdentifier, ResourceKey, ResourceIdentifier::Hasher> intern;
 
 public:
-    void Register(ResourceIdentifier const& id,
-        std::shared_ptr<Resource> res)
-    {
-        auto* node = traverse(id, /*create=*/true);
-        if (node->resource)
-            throw std::runtime_error("Already registered: " + id.ToString());
-        node->resource = std::move(res);
+
+    struct ResourceHandle {
+        ResourceKey key{};
+        uint32_t generation = 0;   // for stale detection
+        uint64_t epoch = 0;
+    };
+
+    ResourceKey InternKey(ResourceIdentifier const& id) {
+        if (auto it = intern.find(id); it != intern.end()) return it->second;
+
+        uint32_t idx;
+        if (!freeList.empty()) { idx = freeList.back(); freeList.pop_back(); }
+        else { idx = (uint32_t)slots.size(); slots.emplace_back(); }
+
+        slots[idx].id = id;
+        slots[idx].alive = true;
+        ResourceKey key{ idx };
+        intern.emplace(id, key);
+        return key;
     }
 
-    std::shared_ptr<Resource> Request(ResourceIdentifier const& id) const {
-        auto* node = const_cast<ResourceRegistry*>(this)
-            ->traverse(id, /*create=*/false);
-        if (!node) return nullptr;//throw std::runtime_error("Unknown resource: " + id.ToString());
-        if (!node->resource)
-            throw std::runtime_error("'" + id.ToString() + "' is a namespace, not a leaf");
-        return node->resource;
+    ResourceHandle RegisterOrUpdate(ResourceIdentifier const& id, std::shared_ptr<Resource> res) {
+        ResourceKey key = InternKey(id);
+        Slot& s = slots[key.idx];
+
+        s.resource = res;
+        s.generation++; // bump on replacement
+        s.alive = true;
+
+        return ResourceHandle{ key, s.generation };
     }
 
-    void Update(ResourceIdentifier const& id,
-        std::shared_ptr<Resource> res)
-    {
-        auto* node = traverse(id, /*create=*/false);
-        if (!node || !node->resource)
-            throw std::runtime_error("Cannot update unregistered: " + id.ToString());
-        node->resource = res;
-        for (auto& cb : node->listeners)
-            cb(id, res);
+    ResourceHandle MakeHandle(ResourceIdentifier const& id) const {
+        auto it = intern.find(id);
+        if (it == intern.end()) return {}; // generation==0 means invalid
+
+        const ResourceKey key = it->second;
+        if (key.idx >= slots.size()) return {};
+
+        const Slot& s = slots[key.idx];
+        if (!s.alive || !s.resource) return {};
+
+        ResourceHandle h;
+        h.key = key;
+        h.generation = s.generation;
+        return h;
     }
 
-    void AddListener(ResourceIdentifier const& id,
-        OnResourceChangedFn cb)
-    {
-        auto* node = traverse(id, /*create=*/true);
-        node->listeners.push_back(std::move(cb));
+    Resource* Resolve(const ResourceHandle h) {
+        if (h.key.idx >= slots.size()) return nullptr;
+        Slot& s = slots[h.key.idx];
+        if (!s.alive || !s.resource) return nullptr;
+        if (s.generation != h.generation) return nullptr; // stale handle
+        return s.resource.get();
     }
 
-    // list all immediate children names under 'id'
-    std::vector<ResourceIdentifier> ListChildren(ResourceIdentifier const& id) const {
-        const Node* node = const_cast<ResourceRegistry*>(this)
-            ->traverse(id, /*create=*/false);
-        if (!node) throw std::runtime_error("Namespace not found: " + id.ToString());
-        std::vector<ResourceIdentifier> out;
-        for (auto& [name, _] : node->children) {
-            auto copy = id;
-            copy.segments.push_back(name);
-            out.push_back(std::move(copy));
-        }
-        return out;
+    Resource const* Resolve(ResourceHandle h) const {
+        return const_cast<ResourceRegistry*>(this)->Resolve(h);
+    }
+
+    // allow "floating" handles that follow replacements
+    Resource* Resolve(ResourceKey k) {
+        if (k.idx >= slots.size()) return nullptr;
+        Slot& s = slots[k.idx];
+        return (s.alive ? s.resource.get() : nullptr);
+    }
+
+    bool IsValid(ResourceHandle h) const noexcept {
+        if (h.key.idx >= slots.size()) return false;
+        const Slot& s = slots[h.key.idx];
+        return s.alive && s.resource && s.generation == h.generation;
     }
 };
 
 class ResourceRegistryView {
     ResourceRegistry& _global;
-    std::vector<ResourceIdentifier>                              _allowedPrefixes;
-
+    std::vector<ResourceIdentifier>  _allowedPrefixes;
+    uint64_t epoch = 0; // guard
 public:
     // allowed may contain BOTH leaf-ids *and* namespace-prefix ids
     template<class Iterable>
@@ -110,28 +128,46 @@ public:
         : _global(other._global), _allowedPrefixes(std::move(other._allowedPrefixes)) {
 	}
 
-    template<typename T = Resource>
-    std::shared_ptr<T> Request(ResourceIdentifier const& id) const {
-        // prefix check
+    template<class T>
+    T* Resolve(const ResourceRegistry::ResourceHandle h) const {
+        if (h.epoch != epoch) {
+            return nullptr;
+        }
+        Resource* r = _global.Resolve(h);
+        return dynamic_cast<T*>(r);
+    }
+
+    ResourceRegistry::ResourceHandle RequestHandle(ResourceIdentifier const& id) {
+        // prefix check (same as Request<T>)
         bool ok = false;
         for (auto const& prefix : _allowedPrefixes) {
-            if (id == prefix || id.hasPrefix(prefix)) {
-                ok = true; break;
-            }
+            if (id == prefix || id.hasPrefix(prefix)) { ok = true; break; }
         }
-        if (!ok)
+        if (!ok) {
             throw std::runtime_error(
-                "Access denied to “" + id.ToString() + "” (not declared)");
+                "Access denied to \"" + id.ToString() + "\" (not declared)");
+        }
 
-        // delegate to global
-        auto base = _global.Request(id);
+        // mint handle from registry (key+generation), then stamp view epoch
+        auto h = _global.MakeHandle(id);
+        if (h.generation == 0) {
+            throw std::runtime_error("Unknown resource: \"" + id.ToString() + "\"");
+        }
+        if (h.generation == 0) {
+            // Shouldn't happen if base != nullptr, but keeps behavior robust.
+            throw std::runtime_error("Failed to mint handle for: \"" + id.ToString() + "\"");
+        }
 
-        // cast
-        if (auto   casted = std::dynamic_pointer_cast<T>(base))
-            return casted;
+        h.epoch = epoch;
+        return h;
+    }
 
-        throw std::runtime_error(
-            "Resource “" + id.ToString() + "” exists but is not the requested type");
+    bool IsValid(ResourceRegistry::ResourceHandle h) const noexcept {
+        if (h.generation == 0) return false;
+        if (h.epoch != epoch)  return false;
+
+        // Delegate to registry for slot checks
+        return _global.IsValid(h);
     }
 
     // let the pass declare an entire namespace at once:

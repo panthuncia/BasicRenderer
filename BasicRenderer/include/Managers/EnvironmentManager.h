@@ -24,7 +24,7 @@ public:
 	void RemoveEnvironment(Environment* environment);
 	
 
-	std::vector<Environment*> GetAndClearEncironmentsToConvert() & {
+	std::vector<Environment*> GetAndClearEnvironmentsToConvert() & {
 		std::lock_guard<std::mutex> lock(m_environmentUpdateMutex);
 		auto environments = m_environmentsToConvert; // Copy the vector
 		m_environmentsToConvert.clear();

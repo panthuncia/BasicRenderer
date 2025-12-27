@@ -608,6 +608,35 @@ void RenderGraph::ProcessResourceRequirements(
 
 void RenderGraph::ResetForRecompile()
 {
+
+	//std::vector<IResourceProvider*> _providers;
+	//ResourceRegistry _registry;
+	//std::unordered_map<ResourceIdentifier, IResourceProvider*, ResourceIdentifier::Hasher> _providerMap;
+
+	//std::vector<IPassBuilder*> m_passBuilderOrder;
+	//std::unordered_map<std::string, std::unique_ptr<IPassBuilder>> m_passBuildersByName;
+	//std::unordered_set<std::string> m_passNamesSeenThisReset;
+
+	//std::vector<AnyPassAndResources> passes;
+	//std::unordered_map<std::string, std::shared_ptr<RenderPass>> renderPassesByName;
+	//std::unordered_map<std::string, std::shared_ptr<ComputePass>> computePassesByName;
+	//std::unordered_map<std::string, std::shared_ptr<Resource>> resourcesByName;
+	//std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
+	//std::unordered_map<uint64_t, uint64_t> independantlyManagedResourceToGroup;
+	//std::vector<std::shared_ptr<ResourceGroup>> resourceGroups;
+
+	//std::unordered_map<uint64_t, std::unordered_set<uint64_t>> aliasedResources; // Tracks resources that use the same memory
+	//std::unordered_map<uint64_t, size_t> resourceToAliasGroup;
+	//std::vector<std::vector<uint64_t>>   aliasGroups;
+	//std::vector<std::unordered_map<UINT, uint64_t>> lastActiveSubresourceInAliasGroup;
+
+	//// Sometimes, we have a resource group that has children that are also managed independently by this graph. If so, we need to handle their transitions separately
+	//std::unordered_map<uint64_t, std::vector<uint64_t>> resourcesFromGroupToManageIndependantly;
+
+	//std::unordered_map<uint64_t, ResourceTransition> initialTransitions; // Transitions needed to reach the initial state of the resources before executing the first batch. Executed on graph setup.
+	//std::vector<PassBatch> batches;
+	//std::unordered_map<uint64_t, SymbolicTracker*> trackers; // Tracks the state of resources in the graph.
+
 	// Clear any existing compile state
 	passes.clear();
 	batches.clear();
@@ -617,10 +646,12 @@ void RenderGraph::ResetForRecompile()
 	lastActiveSubresourceInAliasGroup.clear();
 	independantlyManagedResourceToGroup.clear();
 	resourcesFromGroupToManageIndependantly.clear();
+	trackers.clear();
 
 	// Clear resources
 	resourcesByID.clear();
 	resourceGroups.clear();
+	resourcesByName.clear();
 
 	// Clear providers
 	_providerMap.clear();
@@ -1341,7 +1372,7 @@ void RenderGraph::RegisterProvider(IResourceProvider* prov) {
 
 void RenderGraph::RegisterResource(ResourceIdentifier id, std::shared_ptr<Resource> resource,
 	IResourceProvider* provider) {
-	_registry.Register(id, resource);
+	_registry.RegisterOrUpdate(id, resource);
 	AddResource(resource);
 	if (provider) {
 		_providerMap[id] = provider;
@@ -1353,10 +1384,10 @@ void RenderGraph::RegisterResource(ResourceIdentifier id, std::shared_ptr<Resour
 	}
 }
 
-std::shared_ptr<Resource> RenderGraph::RequestResource(ResourceIdentifier const& rid, bool allowFailure) {
+ResourceRegistry::ResourceHandle RenderGraph::RequestResource(ResourceIdentifier const& rid, bool allowFailure) {
 	// If it's already in our registry, return it
-	auto cached = _registry.Request(rid);
-	if (cached) {
+	auto cached = _registry.MakeHandle(rid);
+	if (_registry.IsValid(cached)) {
 		return cached;
 	}
 
@@ -1369,9 +1400,9 @@ std::shared_ptr<Resource> RenderGraph::RequestResource(ResourceIdentifier const&
 			auto resource = provider->ProvideResource(rid);
 			if (resource) {
 				// Register the resource in our registry
-				_registry.Register(rid, resource);
+				_registry.RegisterOrUpdate(rid, resource);
 				AddResource(resource);
-				return resource;
+				return _registry.MakeHandle(rid);
 			}
 			else {
 				throw std::runtime_error("Provider returned null for key: " + rid.ToString());
@@ -1381,8 +1412,8 @@ std::shared_ptr<Resource> RenderGraph::RequestResource(ResourceIdentifier const&
 
 	// No provider registered for this key
 	if (allowFailure) {
-		// If we are allowed to fail, return nullptr
-		return nullptr;
+		// If we are allowed to fail, return empty handle
+		return {};
 	}
 	throw std::runtime_error("No resource provider registered for key: " + rid.ToString());
 }

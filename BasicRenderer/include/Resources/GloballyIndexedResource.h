@@ -71,45 +71,45 @@ public:
 	}
 
 
-	const ShaderVisibleIndexInfo& GetSRVInfo(unsigned int mip, unsigned int slice = 0) { 
+	const ShaderVisibleIndexInfo& GetSRVInfo(unsigned int mip, unsigned int slice = 0) const { 
 		auto& info = GetDefaultSRVInfo();
 		return info[slice][mip]; 
 	}
 
-	const ShaderVisibleIndexInfo& GetSRVInfo(SRVViewType type, unsigned int mip, unsigned int slice = 0) {
+	const ShaderVisibleIndexInfo& GetSRVInfo(SRVViewType type, unsigned int mip, unsigned int slice = 0) const {
 		return m_SRVViews[static_cast<unsigned int>(type)].infos[slice][mip];
 	}
 
-	unsigned int GetNumSRVMipLevels() {
+	unsigned int GetNumSRVMipLevels() const {
 		auto& info = GetDefaultSRVInfo();
 		return static_cast<unsigned int>(info[0].size());
 	}
 
-	unsigned int GetNumSRVSlices() { 
+	unsigned int GetNumSRVSlices() const {
 		auto& info = GetDefaultSRVInfo();
 		return static_cast<unsigned int>(info.size()); 
 	}
 
-	unsigned int GetNumSRVSlices(SRVViewType type) {
+	unsigned int GetNumSRVSlices(SRVViewType type) const {
 		return static_cast<unsigned int>(m_SRVViews[static_cast<unsigned int>(type)].infos.size());
 	}
 
-	unsigned int GetNumSRVMipLevels(SRVViewType type) {
+	unsigned int GetNumSRVMipLevels(SRVViewType type) const {
 		return static_cast<unsigned int>(m_SRVViews[static_cast<unsigned int>(type)].infos[0].size());
 	}
 
-	const ShaderVisibleIndexInfo& GetUAVShaderVisibleInfo(unsigned int mip, unsigned int slice = 0) { return m_UAVShaderVisibleInfos[slice][mip]; }
-	size_t GetUAVCounterOffset() { return m_counterOffset; }
-	unsigned int GetNumUAVMipLevels() { return static_cast<unsigned int>(m_UAVShaderVisibleInfos[0].size()); }
-	unsigned int GetNumUAVSlices() { return static_cast<unsigned int>(m_UAVShaderVisibleInfos.size()); }
-	const NonShaderVisibleIndexInfo& GetUAVNonShaderVisibleInfo(unsigned int mip, unsigned int slice = 0) { return m_UAVNonShaderVisibleInfos[slice][mip]; }
-	ShaderVisibleIndexInfo& GetCBVInfo() { return m_CBVInfo; }
-	NonShaderVisibleIndexInfo& GetRTVInfo(unsigned int mip, unsigned int slice = 0) { return m_RTVInfos[slice][mip]; }
-	unsigned int GetNumRTVMipLevels() { return static_cast<unsigned int>(m_RTVInfos[0].size()); }
-	unsigned int GetNumRTVSlices() { return static_cast<unsigned int>(m_RTVInfos.size()); }
-	NonShaderVisibleIndexInfo& GetDSVInfo(unsigned int mip, unsigned int slice = 0) { return m_DSVInfos[slice][mip]; }
-	unsigned int GetNumDSVMipLevels() { return static_cast<unsigned int>(m_DSVInfos[0].size()); }
-	unsigned int GetNumDSVSlices() { return static_cast<unsigned int>(m_DSVInfos.size()); }
+	const ShaderVisibleIndexInfo& GetUAVShaderVisibleInfo(unsigned int mip, unsigned int slice = 0) const { return m_UAVShaderVisibleInfos[slice][mip]; }
+	size_t GetUAVCounterOffset() const { return m_counterOffset; }
+	unsigned int GetNumUAVMipLevels() const { return static_cast<unsigned int>(m_UAVShaderVisibleInfos[0].size()); }
+	unsigned int GetNumUAVSlices() const { return static_cast<unsigned int>(m_UAVShaderVisibleInfos.size()); }
+	const NonShaderVisibleIndexInfo& GetUAVNonShaderVisibleInfo(unsigned int mip, unsigned int slice = 0) const { return m_UAVNonShaderVisibleInfos[slice][mip]; }
+	const ShaderVisibleIndexInfo& GetCBVInfo() const { return m_CBVInfo; }
+	const NonShaderVisibleIndexInfo& GetRTVInfo(unsigned int mip, unsigned int slice = 0) const { return m_RTVInfos[slice][mip]; }
+	unsigned int GetNumRTVMipLevels() const { return static_cast<unsigned int>(m_RTVInfos[0].size()); }
+	unsigned int GetNumRTVSlices() const { return static_cast<unsigned int>(m_RTVInfos.size()); }
+	const NonShaderVisibleIndexInfo& GetDSVInfo(unsigned int mip, unsigned int slice = 0) const { return m_DSVInfos[slice][mip]; }
+	unsigned int GetNumDSVMipLevels() const { return static_cast<unsigned int>(m_DSVInfos[0].size()); }
+	unsigned int GetNumDSVSlices() const { return static_cast<unsigned int>(m_DSVInfos.size()); }
 
 	const bool HasSRV() const { return m_pSRVHeap != nullptr; }
 	const bool HasUAVShaderVisible() const { return m_pUAVShaderVisibleHeap != nullptr; }
@@ -199,7 +199,7 @@ private:
 
 	SRVViewType m_primaryViewType = SRVViewType::Invalid;
 
-	const std::vector<std::vector<ShaderVisibleIndexInfo>>& GetDefaultSRVInfo() {
+	const std::vector<std::vector<ShaderVisibleIndexInfo>>& GetDefaultSRVInfo() const {
 		if (m_primaryViewType == SRVViewType::Invalid) {
 			spdlog::error("Primary SRV view type is not set. Please set it before accessing a default SRV info.");
 			throw std::runtime_error("Primary SRV view type is not set.");

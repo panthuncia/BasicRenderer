@@ -113,34 +113,34 @@ public:
 
 	void RegisterProvider(IResourceProvider* prov);
 	void RegisterResource(ResourceIdentifier id, std::shared_ptr<Resource> resource, IResourceProvider* provider = nullptr);
-	std::shared_ptr<Resource> RequestResource(ResourceIdentifier const& rid, bool allowFailure = false);
+	ResourceRegistry::ResourceHandle RequestResource(ResourceIdentifier const& rid, bool allowFailure = false);
 	void RegisterECSRenderPhaseEntities(const std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher>& phaseEntities);
 
-	template<DerivedResource T>
-	std::shared_ptr<T> RequestResource(ResourceIdentifier const& rid, bool allowFailure = false) {
-		auto basePtr = RequestResource(rid, allowFailure);
+	//template<DerivedResource T>
+	//std::shared_ptr<T> RequestResource(ResourceIdentifier const& rid, bool allowFailure = false) {
+	//	auto basePtr = RequestResource(rid, allowFailure);
 
-		if (!basePtr) {
-			if (allowFailure) {
-				return nullptr;
-			}
+	//	if () {
+	//		if (allowFailure) {
+	//			return nullptr;
+	//		}
 
-			throw std::runtime_error(
-				"RequestResource<" + std::string(typeid(T).name()) +
-				">: underlying Resource* is null (rid = " + rid.ToString() + ")"
-			);
-		}
+	//		throw std::runtime_error(
+	//			"RequestResource<" + std::string(typeid(T).name()) +
+	//			">: underlying Resource* is null (rid = " + rid.ToString() + ")"
+	//		);
+	//	}
 
-		auto derivedPtr = std::dynamic_pointer_cast<T>(basePtr);
-		if (!derivedPtr) {
-			throw std::runtime_error(
-				"Requested resource is not a " + std::string(typeid(T).name()) +
-				": " + rid.ToString()
-			);
-		}
+	//	auto derivedPtr = std::dynamic_pointer_cast<T>(basePtr);
+	//	if (!derivedPtr) {
+	//		throw std::runtime_error(
+	//			"Requested resource is not a " + std::string(typeid(T).name()) +
+	//			": " + rid.ToString()
+	//		);
+	//	}
 
-		return derivedPtr;
-	}
+	//	return derivedPtr;
+	//}
 
 	ComputePassBuilder& BuildComputePass(std::string const& name);
 	RenderPassBuilder& BuildRenderPass(std::string const& name);
