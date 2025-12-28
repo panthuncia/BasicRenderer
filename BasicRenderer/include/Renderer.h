@@ -104,7 +104,7 @@ private:
 
     std::shared_ptr<Scene> currentScene;
 
-    std::shared_ptr<RenderGraph> currentRenderGraph = nullptr;
+    std::unique_ptr<RenderGraph> currentRenderGraph = nullptr;
     bool rebuildRenderGraph = true;
 
     RenderContext m_context;

@@ -6,7 +6,6 @@
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Resource.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 
 void UploadManager::Initialize() {
@@ -89,63 +88,6 @@ bool UploadManager::TryCoalesceAppend(ResourceUpdate& last, const ResourceUpdate
 #endif
 	return true;
 }
-
-//bool UploadManager::TryPatchContainedUpdate(
-//	const void* src,
-//	size_t size,
-//	std::shared_ptr<Resource> resourceToUpdate,
-//	size_t dataBufferOffset
-//#ifdef _DEBUG
-//	, const char* file, int line
-//#endif
-//) noexcept
-//{
-//	if (!src || size == 0 || !resourceToUpdate) return false;
-//
-//	const size_t new0 = dataBufferOffset;
-//	const size_t new1 = dataBufferOffset + size;
-//
-//	// Scan from newest to oldest; patch the most recent containing update.
-//	for (int i = static_cast<int>(m_resourceUpdates.size()) - 1; i >= 0; --i) {
-//		auto& u = m_resourceUpdates[static_cast<size_t>(i)];
-//		if (!u.active) continue;
-//		if (u.resourceToUpdate != resourceToUpdate.get()) continue;
-//
-//		const size_t u0 = u.dataBufferOffset;
-//		const size_t u1 = u.dataBufferOffset + u.size;
-//		if (!RangeContains(u0, u1, new0, new1)) {
-//			continue;
-//		}
-//
-//		// Patch bytes into the existing upload region.
-//		const size_t patchOffsetInU = new0 - u0;
-//		const size_t patchUploadOffset = u.uploadBufferOffset + patchOffsetInU;
-//		const size_t mapSize = patchUploadOffset + size;
-//
-//		uint8_t* mapped = nullptr;
-//		MapUpload(u.uploadBuffer, mapSize, &mapped);
-//		if (mapped) {
-//			memcpy(mapped + patchUploadOffset, src, size);
-//		}
-//		UnmapUpload(u.uploadBuffer);
-//
-//#ifdef _DEBUG
-//		// Update provenance to the newest writer.
-//		u.file = file;
-//		u.line = line;
-//		u.threadID = std::this_thread::get_id();
-//#ifdef _WIN32
-//		void* frames[ResourceUpdate::MaxStack];
-//		USHORT captured = RtlCaptureStackBackTrace(1, ResourceUpdate::MaxStack, frames, nullptr);
-//		u.stackSize = static_cast<uint8_t>(captured);
-//		for (USHORT j = 0; j < captured; j++) u.stack[j] = frames[j];
-//#endif
-//#endif
-//		return true;
-//	}
-//
-//	return false;
-//}
 
 void UploadManager::ApplyLastWriteWins(ResourceUpdate& newUpdate) noexcept
 {

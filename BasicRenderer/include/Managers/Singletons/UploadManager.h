@@ -151,7 +151,7 @@ public:
 	void ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue);
 	void ResetAllocators(uint8_t frameIndex);
 	void ProcessDeferredReleases(uint8_t frameIndex);
-	void SetUploadResolveContext(UploadResolveContext ctx) { m_ctx = {}; }
+	void SetUploadResolveContext(UploadResolveContext ctx) { m_ctx = ctx; }
 	void Cleanup();
 private:
 	UploadManager() = default;
@@ -162,11 +162,6 @@ private:
 	static bool RangeContains(size_t outer0, size_t outer1, size_t inner0, size_t inner1) noexcept;
 
 	static bool TryCoalesceAppend(ResourceUpdate& last, const ResourceUpdate& next) noexcept;
-	//bool TryPatchContainedUpdate(const void* src, size_t size, std::shared_ptr<Resource> resourceToUpdate, size_t dataBufferOffset
-//#ifdef _DEBUG
-//		, const char* file, int line
-//#endif
-//	) noexcept;
 
 	// Mutates newUpdate (may expand into a union update); may mark old updates inactive; may deactivate newUpdate if patched into an older containing update.
 	void ApplyLastWriteWins(ResourceUpdate& newUpdate) noexcept;

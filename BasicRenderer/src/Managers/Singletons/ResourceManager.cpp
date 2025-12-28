@@ -313,4 +313,10 @@ void ResourceManager::AssignDescriptorSlots(
 void ResourceManager::Cleanup()
 {
 	m_perFrameBuffer.reset();
+	m_cbvSrvUavHeap.reset();
+	m_samplerHeap.reset();
+	m_rtvHeap.reset();
+	m_dsvHeap.reset();
+	m_nonShaderVisibleHeap.reset();
+	m_uavCounterReset.Reset();
 }

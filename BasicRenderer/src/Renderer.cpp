@@ -906,9 +906,11 @@ void Renderer::Cleanup() {
     Menu::GetInstance().Cleanup();
     UploadManager::GetInstance().Cleanup();
     ResourceManager::GetInstance().Cleanup();
+	FFXManager::GetInstance().Shutdown();
+	UpscalingManager::GetInstance().Shutdown();
     ECSManager::GetInstance().Cleanup();
-	DeviceManager::GetInstance().Cleanup();
     DeletionManager::GetInstance().Cleanup();
+    DeviceManager::GetInstance().Cleanup();
 }
 
 void Renderer::CheckDebugMessages() {
@@ -1043,11 +1045,11 @@ void Renderer::CreateRenderGraph() {
 
     if (!currentRenderGraph)
     {
-		currentRenderGraph = std::make_shared<RenderGraph>();
-        Menu::GetInstance().SetRenderGraph(currentRenderGraph);
+		currentRenderGraph = std::make_unique<RenderGraph>();
+        Menu::GetInstance().SetRenderGraph(currentRenderGraph.get());
     }
 
-    auto newGraph = currentRenderGraph;
+    auto& newGraph = currentRenderGraph;
 
     newGraph->ResetForRecompile();
 

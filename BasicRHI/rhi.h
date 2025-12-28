@@ -1827,7 +1827,6 @@ namespace rhi {
 	using PipelineLayoutPtr = ObjectPtr<PipelineLayout>;
 	using CommandSignaturePtr = ObjectPtr<CommandSignature>;
 	using DescriptorHeapPtr = ObjectPtr<DescriptorHeap>;
-	using SamplerPtr = ObjectPtr<Sampler>;
 	using TimelinePtr = ObjectPtr<Timeline>;
 	using HeapPtr = ObjectPtr<Heap>;
 	//using DevicePtr = ObjectPtr<Device>;
@@ -2166,14 +2165,6 @@ namespace rhi {
 		return DescriptorHeapPtr(
 			*d, h,
 			[](Device& dev, DescriptorHeap& hh) noexcept { if (dev) dev.DestroyDescriptorHeap(hh.GetHandle()); },
-			std::move(keepAlive)
-		);
-	}
-
-	inline SamplerPtr MakeSamplerPtr(const Device* d, Sampler h, std::shared_ptr<void> keepAlive = {}) noexcept {
-		return SamplerPtr(
-			*d, h,
-			[](Device& dev, Sampler& hh) noexcept { if (dev) dev.DestroySampler(hh.GetHandle()); },
 			std::move(keepAlive)
 		);
 	}

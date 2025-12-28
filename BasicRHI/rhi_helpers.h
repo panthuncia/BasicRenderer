@@ -41,7 +41,6 @@ namespace rhi {
             PipelineLayoutPtr,
             CommandSignaturePtr,
             DescriptorHeapPtr,
-            SamplerPtr,
             TimelinePtr,
             HeapPtr,
             DevicePtr
@@ -57,7 +56,6 @@ namespace rhi {
             PipelineLayoutPtr,
             CommandSignaturePtr,
             DescriptorHeapPtr,
-            SamplerPtr,
             TimelinePtr,
             HeapPtr,
             DevicePtr

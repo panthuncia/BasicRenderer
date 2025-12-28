@@ -17,6 +17,7 @@
 #include "Render/ResourceRegistry.h"
 #include "Render/CommandListPool.h"
 #include "Managers/CommandRecordingManager.h"
+#include "Interfaces/IPassBuilder.h"
 
 class Resource;
 class ResourceGroup;
@@ -96,6 +97,8 @@ public:
 		std::unordered_map<uint64_t, SymbolicTracker*> passBatchTrackers; // Trackers for the resources in this batch
 	};
 
+	RenderGraph();
+	~RenderGraph();
 	void AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassParameters& resources, std::string name = "");
 	void AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassParameters& resources, std::string name = "");
 	void Update();

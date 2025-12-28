@@ -606,6 +606,14 @@ void RenderGraph::ProcessResourceRequirements(
 	}
 }
 
+RenderGraph::RenderGraph() {
+	UploadManager::GetInstance().SetUploadResolveContext({ &_registry });
+}
+
+RenderGraph::~RenderGraph() {
+	m_pCommandRecordingManager->ShutdownThreadLocal(); // Clears thread-local storage
+}
+
 void RenderGraph::ResetForRecompile()
 {
 
@@ -661,9 +669,13 @@ void RenderGraph::ResetForRecompile()
 	// Register new registry with upload manager
 	UploadManager::GetInstance().SetUploadResolveContext({&_registry});
 
-	// Clear pass ordering
+	// reset pass builders and clear pass ordering
+	for (auto& [name, builder] : m_passBuildersByName) {
+		builder->Reset();
+	}
 	m_passBuilderOrder.clear();
 	m_passNamesSeenThisReset.clear();
+
 }
 
 void RenderGraph::Compile() {

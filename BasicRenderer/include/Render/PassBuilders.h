@@ -9,6 +9,7 @@
 #include "Resources/ResourceStateTracker.h"
 #include "Resources/ResourceIdentifier.h"
 #include "Interfaces/IResourceResolver.h"
+#include "Interfaces/IPassBuilder.h"
 #include "Resources/ECSResourceResolver.h"
 
 // Tag for a contiguous mip-range [first..first+count)
@@ -403,17 +404,6 @@ concept NotIResourceResolver = !std::derived_from<std::decay_t<T>, IResourceReso
 
 template<typename T>
 concept DerivedRenderPass = std::derived_from<T, RenderPass>;
-
-enum class PassBuilderKind { Render, Compute };
-
-struct IPassBuilder {
-    virtual ~IPassBuilder() = default;
-    virtual PassBuilderKind Kind() const noexcept = 0;
-
-	// What the graph needs from the pass builder
-    virtual IResourceProvider* ResourceProvider() noexcept = 0;
-    virtual void Finalize() = 0;
-};
 
 class RenderPassBuilder : public IPassBuilder {
 public:
@@ -817,6 +807,14 @@ private:
 
         graph->AddRenderPass(pass, params, passName);
     }
+
+    void Reset() {
+        built_ = false;
+        pass = nullptr;
+        params = {};
+        _declaredIds.clear();
+        m_isGeometryPass = false;
+	}
 
     // Shader Resource
 	template<typename T>
@@ -1401,6 +1399,13 @@ private:
         params.resourceRequirements = GatherResourceRequirements();
 
         graph->AddComputePass(pass, params, passName);
+    }
+
+    void Reset() {
+        built_ = false;
+        pass = nullptr;
+        params = {};
+        _declaredIds.clear();
     }
 
     // Shader resource

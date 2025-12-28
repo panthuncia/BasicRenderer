@@ -444,5 +444,6 @@ void UpscalingManager::Evaluate(RenderContext& context, PixelBuffer* pHDRTarget,
 }
 
 void UpscalingManager::Shutdown() {
-
+	ffx::DestroyContext(m_fsrUpscalingContext);
+	// RHI now handles streamline internally
 }

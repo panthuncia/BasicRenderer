@@ -679,12 +679,12 @@ namespace rhi::ma
         void BuildStatsString(char** outJson, bool detailedMap) const noexcept;
         void FreeStatsString(char* json) const noexcept;
         void BeginDefragmentation(const DefragmentationDesc* pDesc, DefragmentationContext** ppContext)noexcept;
-        // Don't call this
         AllocatorPimpl* m_Pimpl{};
+
+		void ReleaseThis(); // TODO: Make AllocatorPtr and make this private
     private:
         template<class> friend struct rhi::ma::detail::Releaser;
 
-    	void ReleaseThis();
         void SetCurrentFrameIndex(uint32_t frameIndex) noexcept;
         D3D12MA_CLASS_NO_COPY(Allocator)
     };

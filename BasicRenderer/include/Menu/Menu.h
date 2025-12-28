@@ -220,7 +220,7 @@ public:
     void Initialize(HWND hwnd, IDXGISwapChain3* swapChain);
     void Render(RenderContext& context);
     bool HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
-	void SetRenderGraph(std::shared_ptr<RenderGraph> renderGraph) { m_renderGraph = renderGraph; }
+	void SetRenderGraph(RenderGraph* renderGraph) { m_renderGraph = renderGraph; }
     void Cleanup() {
 		m_settingSubscriptions.clear();
         m_memQuery = {}; // Destruct query before ECS world dies
@@ -243,7 +243,7 @@ private:
 
 	flecs::entity selectedNode;
 
-	std::weak_ptr<RenderGraph> m_renderGraph;
+	RenderGraph* m_renderGraph;
 
     int FindFileIndex(const std::vector<std::string>& hdrFiles, const std::string& existingFile);
 
@@ -676,10 +676,8 @@ inline void Menu::Render(RenderContext& context) {
 		BuildIdToMemInfoIndex(s_idToMem, m_memQuery);    
 		ui::FrameGraphSnapshot fgSnap;
 
-        if (!m_renderGraph.expired()) {
-            const auto& batches = m_renderGraph.lock()->GetBatches();
-            BuildFrameGraphSnapshotFromBatches(fgSnap, batches, memIndex);
-        }
+        const auto& batches = m_renderGraph->GetBatches();
+        BuildFrameGraphSnapshotFromBatches(fgSnap, batches, memIndex);
 
 
         ImGui::Begin("Memory Introspection", nullptr);
@@ -704,12 +702,10 @@ inline void Menu::Render(RenderContext& context) {
     
     if (showRG) {
 		ImGui::Begin("Render Graph Inspector", nullptr);
-        if (!m_renderGraph.expired()) {
-            RGInspectorOptions opts;
-            RGInspector::Show(m_renderGraph.lock()->GetBatches(),
-                PassUsesResourceAdapter,
-                opts);
-        }
+        RGInspectorOptions opts;
+        RGInspector::Show(m_renderGraph->GetBatches(),
+            PassUsesResourceAdapter,
+            opts);
         ImGui::End();
 
     }
