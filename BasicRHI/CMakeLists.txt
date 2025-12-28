@@ -9,6 +9,8 @@ include(GNUInstallDirs)
 
 find_package(DirectX-Headers CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
+find_package(DirectX12-Agility CONFIG REQUIRED)
+
 
 # Build a static library for now.
 add_library(BasicRHI STATIC 
@@ -90,5 +92,6 @@ install(FILES
 target_link_libraries(BasicRHI
 PRIVATE 
     Microsoft::DirectX-Headers
+    Microsoft::DirectX12-Agility 
     spdlog::spdlog_header_only
 )

@@ -122,13 +122,6 @@ void DeviceManager::Cleanup() {
     if (m_device) {
         m_device.Reset();
     }
-    rhi::ma::TotalStatistics stats;
-    m_allocator->CalculateStatistics(&stats);
- //   std::vector<char> str(10000);
- //   auto ptr = str.data();
-	//m_allocator->BuildStatsString(&ptr, true);
- //   spdlog::info("Allocator Stats: {}", ptr);
-	m_allocator->ReleaseThis();
 }
 
 void DeviceManager::CheckGPUFeatures() {

@@ -14,7 +14,6 @@ find_package(directxtex CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(meshoptimizer REQUIRED)
 find_package(DirectX-Headers CONFIG REQUIRED)
-find_package(DirectX12-Agility CONFIG REQUIRED)
 find_package(flecs CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
@@ -577,14 +576,11 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 
 target_link_libraries(${PROJECT_NAME} 
 PRIVATE 
-    d3dcompiler.lib 
     dxgi.lib 
     spdlog::spdlog_header_only 
     Microsoft::DirectXTex 
     imgui::imgui 
     meshoptimizer::meshoptimizer 
-    Microsoft::DirectX-Headers 
-    Microsoft::DirectX12-Agility 
     assimp::assimp 
     flecs::flecs 
     flecs::flecs_static 

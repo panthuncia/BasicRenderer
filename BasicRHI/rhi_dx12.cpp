@@ -1,5 +1,9 @@
 #include "rhi_dx12.h"
 #include <atlbase.h>
+#include <d3d12sdklayers.h>   // ID3D12DebugDevice + D3D12_RLDO_*
+#include <initguid.h>   // defines INITGUID
+#include <dxgidebug.h>  // DXGI live object reporting
+#include <debugapi.h>   // OutputDebugStringA
 
 #include <sl.h>
 #include <sl_consts.h>
@@ -14,13 +18,8 @@
 
 namespace rhi {
 
-	// The backend (Dx12Device) owns cleanup. The RHI Device handle's Destroy()
-	// only detaches; actual D3D12 object release happens when the last keep-alive reference drops.
 	Dx12Device::~Dx12Device() noexcept {
-		if (steamlineInitialized) {
-			slShutdown();
-		}
-		Shutdown();
+	
 	}
 
 	static void dx12_wait_queue_idle(Dx12QueueState& q) noexcept
@@ -39,12 +38,49 @@ namespace rhi {
 		}
 	}
 
+	static void dx12_report_live_objects(ID3D12Device* device, const char* phase) noexcept
+	{
+		if (!device) return;
+
+		Microsoft::WRL::ComPtr<ID3D12DebugDevice> dbgDev;
+		if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&dbgDev))))
+		{
+			if (phase)
+			{
+				OutputDebugStringA("\n====================================================\n");
+				OutputDebugStringA(phase);
+				OutputDebugStringA("\n====================================================\n");
+			}
+
+			// IGNORE_INTERNAL reduces noise from runtime-owned objects.
+			dbgDev->ReportLiveDeviceObjects(
+				D3D12_RLDO_DETAIL | D3D12_RLDO_IGNORE_INTERNAL
+			);
+		}
+	}
+
+	static void dxgi_report_live_objects(const char* phase) noexcept
+	{
+		Microsoft::WRL::ComPtr<IDXGIDebug1> dxgiDebug;
+		if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug))))
+		{
+			if (phase)
+			{
+				OutputDebugStringA("\n================ DXGI LIVE OBJECTS ================\n");
+				OutputDebugStringA(phase);
+				OutputDebugStringA("\n===================================================\n");
+			}
+			dxgiDebug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_DETAIL);
+		}
+	}
+
+
 	void Dx12Device::Shutdown() noexcept {
+
 		dx12_wait_queue_idle(gfx);
 		dx12_wait_queue_idle(comp);
 		dx12_wait_queue_idle(copy);
 
-		// Not strictly required
 		swapchains.clear();
 		queryPools.clear();
 		heaps.clear();
@@ -61,6 +97,30 @@ namespace rhi {
 		gfx = {};
 		comp = {};
 		copy = {};
+
+#if BUILD_TYPE == BUILD_DEBUG
+		// Hold a temporary ref so we can report AFTER we drop our member refs.
+		Microsoft::WRL::ComPtr<ID3D12Device> devForReport = pNativeDevice;
+#endif
+
+		// Drop SL Proxy objects
+		pSLProxyDevice.Reset();
+		pSLProxyFactory.Reset();
+
+		if (steamlineInitialized) {
+			slShutdown();
+		}
+
+		// Drop DXGI objects
+		adapter.Reset();
+		pNativeFactory.Reset();
+
+		pNativeDevice.Reset();
+
+#if BUILD_TYPE == BUILD_DEBUG
+		dx12_report_live_objects(devForReport.Get(), "Dx12Device::Shutdown - D3D12 live objects (post-release)");
+		dxgi_report_live_objects("Dx12Device::Shutdown - DXGI live objects (post-release)");
+#endif
 	}
 
 	static Result d_createPipelineFromStream(Device* d,
@@ -340,15 +400,16 @@ namespace rhi {
 					s->dev->resources.free(h);
 				}
 			}
+			s->dev->swapchains.free(sc->GetHandle());
 		}
 
-		s->dev->swapchains.free(sc->GetHandle());
 		sc->impl = nullptr;
 		sc->vt = nullptr;
 	}
 
 	static void d_destroyDevice(Device* d) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
+		impl->Shutdown();
 		d->vt = nullptr;
 	}
 

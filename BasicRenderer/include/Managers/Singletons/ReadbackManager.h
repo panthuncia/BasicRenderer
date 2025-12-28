@@ -44,6 +44,11 @@ public:
 
     void ProcessReadbackRequests();
 
+    void Cleanup() {
+        m_queuedReadbacks.clear();
+        m_readbackPass.reset();
+    }
+
 private:
 
     class ReadbackPass : public RenderPass {

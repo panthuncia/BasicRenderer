@@ -902,12 +902,14 @@ void Renderer::Cleanup() {
     m_pEnvironmentManager.reset();
     m_hierarchySystem.destruct();
     m_settingsSubscriptions.clear();
+    m_readbackFence.Reset();
     Material::DestroyDefaultMaterial();
     Menu::GetInstance().Cleanup();
     UploadManager::GetInstance().Cleanup();
     ResourceManager::GetInstance().Cleanup();
 	FFXManager::GetInstance().Shutdown();
 	UpscalingManager::GetInstance().Shutdown();
+	ReadbackManager::GetInstance().Cleanup();
     ECSManager::GetInstance().Cleanup();
     DeletionManager::GetInstance().Cleanup();
     DeviceManager::GetInstance().Cleanup();
