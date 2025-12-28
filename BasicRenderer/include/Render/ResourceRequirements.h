@@ -3,7 +3,6 @@
 #include <memory>
 
 #include "Resources/ResourceStateTracker.h"
-#include "Render/ResourceRegistry.h"
 
 class Resource;
 

@@ -68,14 +68,14 @@ std::unique_ptr<BufferView> DynamicBuffer::AddData(const void* data, size_t size
 	std::unique_ptr<BufferView> view = Allocate(actualSize, elementSize);
     
 	if (data != nullptr) {
-        BUFFER_UPLOAD(data, size, shared_from_this(), view->GetOffset());
+        BUFFER_UPLOAD(data, size, UploadManager::UploadTarget::FromShared(shared_from_this()), view->GetOffset());
 	}
 
 	return std::move(view);
 }
 
 void DynamicBuffer::UpdateView(BufferView* view, const void* data) {
-    BUFFER_UPLOAD(data, view->GetSize(), shared_from_this(), view->GetOffset());
+    BUFFER_UPLOAD(data, view->GetSize(), UploadManager::UploadTarget::FromShared(shared_from_this()), view->GetOffset());
 }
 
 void DynamicBuffer::Deallocate(const BufferView* view) {

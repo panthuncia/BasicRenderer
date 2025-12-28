@@ -110,7 +110,7 @@ public:
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
 
-		m_meshletCullingCommandBuffers = m_resourceRegistryView->Request<ResourceGroup>(Builtin::IndirectCommandBuffers::MeshletCulling);
+		m_meshletCullingCommandBuffers = m_resourceRegistryView->RequestPtr<ResourceGroup>(Builtin::IndirectCommandBuffers::MeshletCulling);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -138,5 +138,5 @@ private:
 	flecs::query<Components::LightViewInfo> lightQuery;
 	ComPtr<ID3D12PipelineState> m_PSO;
 
-	std::shared_ptr<ResourceGroup> m_meshletCullingCommandBuffers;
+	ResourceGroup* m_meshletCullingCommandBuffers;
 };

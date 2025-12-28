@@ -94,16 +94,16 @@ public:
 
     void Setup() override {
 
-        m_pLinearDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
-        m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
-        m_pNormals = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::Normals);
-        m_pMotionVectors = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::MotionVectors);
-        m_pAlbedo = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::Albedo);
-        m_pMetallicRoughness = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::MetallicRoughness);
-        m_pEmissive = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::Emissive);
+        m_pLinearDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
+        m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+        m_pNormals = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GBuffer::Normals);
+        m_pMotionVectors = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GBuffer::MotionVectors);
+        m_pAlbedo = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GBuffer::Albedo);
+        m_pMetallicRoughness = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GBuffer::MetallicRoughness);
+        m_pEmissive = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GBuffer::Emissive);
 
         if (m_meshShaders) {
-            m_primaryCameraMeshletBitfield = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+            m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
         }
 
         if (m_meshShaders) {
@@ -383,17 +383,15 @@ private:
     bool m_indirect;
     bool m_clearGbuffer = true;
 
-    std::shared_ptr<PixelBuffer> m_pLinearDepthBuffer;
-    std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer;
-    std::shared_ptr<PixelBuffer> m_pNormals;
-    std::shared_ptr<PixelBuffer> m_pMotionVectors;
-    std::shared_ptr<PixelBuffer> m_pAlbedo;
-    std::shared_ptr<PixelBuffer> m_pMetallicRoughness;
-    std::shared_ptr<PixelBuffer> m_pEmissive;
+    PixelBuffer* m_pLinearDepthBuffer;
+    PixelBuffer* m_pPrimaryDepthBuffer;
+    PixelBuffer* m_pNormals;
+    PixelBuffer* m_pMotionVectors;
+    PixelBuffer* m_pAlbedo;
+    PixelBuffer* m_pMetallicRoughness;
+    PixelBuffer* m_pEmissive;
 
-    std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletBitfield = nullptr;
-    std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraOpaqueIndirectCommandBuffer;
-    std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraAlphaTestIndirectCommandBuffer;
+    DynamicGloballyIndexedResource* m_primaryCameraMeshletBitfield = nullptr;
 
 	RenderPhase m_GBufferRenderPhase = Engine::Primary::GBufferPass;
 	RenderPhase m_PrePassRenderPhase = Engine::Primary::ZPrepass;

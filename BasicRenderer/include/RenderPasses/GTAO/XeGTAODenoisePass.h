@@ -18,7 +18,7 @@ public:
 
     void Setup() override {
         RegisterCBV("Builtin::GTAO::ConstantsBuffer");
-        m_workingAOBufferIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::GTAO::WorkingAOTerm1)->GetSRVInfo(0).slot.index;
+        m_workingAOBufferIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingAOTerm1)->GetSRVInfo(0).slot.index;
     }
 
     PassReturn Execute(RenderContext& context) override {

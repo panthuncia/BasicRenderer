@@ -32,7 +32,7 @@ public:
     }
 
     void Setup() override {
-        m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
+        m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
         
         RegisterSRV(Builtin::Environment::InfoBuffer);
 
@@ -88,8 +88,7 @@ private:
 
     rhi::PipelinePtr m_pso;
 
-    std::shared_ptr<PixelBuffer> m_pHDRTarget;
-	std::shared_ptr<PixelBuffer> m_pScreenSpaceReflections;
+    PixelBuffer* m_pHDRTarget;
     PipelineResources m_resourceDescriptorBindings;
 
     bool m_gtaoEnabled = true;

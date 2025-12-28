@@ -61,7 +61,7 @@ public:
     }
 
     void Setup() override {
-		m_pLinearDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
+		m_pLinearDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
 
 		m_numDirectionalCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
         CreateDownsampleComputePSO();
@@ -176,7 +176,7 @@ private:
     unsigned int m_numDirectionalCascades = 0;
 
     std::shared_ptr<LazyDynamicStructuredBuffer<spdConstants>> m_pDownsampleConstants;
-    std::shared_ptr<PixelBuffer> m_pLinearDepthBuffer = nullptr;
+    PixelBuffer* m_pLinearDepthBuffer = nullptr;
 
     PipelineState downsamplePassPSO;
 	PipelineState downsampleArrayPSO;

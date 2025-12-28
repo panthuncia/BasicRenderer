@@ -29,10 +29,10 @@ public:
 
 	void Setup() override {
 	
-		m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+		m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 
-		m_cameraBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).slot.index;
-		m_objectBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).slot.index;
+		m_cameraBufferSRVIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).slot.index;
+		m_objectBufferSRVIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).slot.index;
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -183,7 +183,7 @@ private:
 	rhi::PipelinePtr m_pso;
 	bool m_wireframe;
 
-	std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer;
+	PixelBuffer* m_pPrimaryDepthBuffer;
 
 	int m_cameraBufferSRVIndex = -1;
 	int m_objectBufferSRVIndex = -1;

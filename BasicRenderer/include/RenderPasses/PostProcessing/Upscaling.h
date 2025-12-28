@@ -18,14 +18,14 @@ public:
     }
 
     void Setup() override {
-        m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
-        m_pMotionVectors = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::MotionVectors);
-		m_pDepthTexture = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
-		m_pUpscaledHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
+        m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
+        m_pMotionVectors = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GBuffer::MotionVectors);
+		m_pDepthTexture = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+		m_pUpscaledHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
     }
 
     PassReturn Execute(RenderContext& context) override {
-        UpscalingManager::GetInstance().Evaluate(context, m_pHDRTarget.get(), m_pUpscaledHDRTarget.get(), m_pDepthTexture.get(), m_pMotionVectors.get());
+        UpscalingManager::GetInstance().Evaluate(context, m_pHDRTarget, m_pUpscaledHDRTarget, m_pDepthTexture, m_pMotionVectors);
         return {};
     }
 
@@ -35,10 +35,10 @@ public:
 
 private:
 
-    std::shared_ptr<PixelBuffer> m_pHDRTarget;
-    std::shared_ptr<PixelBuffer> m_pMotionVectors;
-	std::shared_ptr<PixelBuffer> m_pDepthTexture;
-	std::shared_ptr<PixelBuffer> m_pUpscaledHDRTarget;
+    PixelBuffer* m_pHDRTarget;
+    PixelBuffer* m_pMotionVectors;
+	PixelBuffer* m_pDepthTexture;
+	PixelBuffer* m_pUpscaledHDRTarget;
 
     DirectX::XMUINT2 m_renderRes;
     DirectX::XMUINT2 m_outputRes;

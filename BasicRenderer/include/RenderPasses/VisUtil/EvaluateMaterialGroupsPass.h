@@ -54,7 +54,7 @@ public:
         RegisterUAV(Builtin::GBuffer::MetallicRoughness);
 		RegisterUAV(Builtin::GBuffer::MotionVectors);
 
-        m_materialEvalCmds = m_resourceRegistryView->Request<Resource>("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
+        m_materialEvalCmds = m_resourceRegistryView->RequestPtr<Resource>("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }
 
     PassReturn Execute(RenderContext& ctx) override {
@@ -108,5 +108,5 @@ public:
 
 private:
     std::unordered_map<MaterialCompileFlags, PipelineState> m_psoCache;
-    std::shared_ptr<Resource> m_materialEvalCmds;
+    Resource* m_materialEvalCmds;
 };

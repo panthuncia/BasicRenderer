@@ -25,7 +25,7 @@ public:
 
 	void Setup() override {
 
-		m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
+		m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
 
 		RegisterSRV(Builtin::PPLL::HeadPointerTexture);
 		RegisterSRV(Builtin::PPLL::DataBuffer);
@@ -75,7 +75,7 @@ public:
 private:
 	rhi::PipelinePtr m_pso;
 
-	std::shared_ptr<PixelBuffer> m_pHDRTarget;
+	PixelBuffer* m_pHDRTarget;
 
 	std::function<bool()> getImageBasedLightingEnabled;
 	std::function<bool()> getPunctualLightingEnabled;

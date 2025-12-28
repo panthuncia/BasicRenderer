@@ -658,6 +658,9 @@ void RenderGraph::ResetForRecompile()
 	_providers.clear();
 	_registry = ResourceRegistry();
 
+	// Register new registry with upload manager
+	UploadManager::GetInstance().SetUploadResolveContext({&_registry});
+
 	// Clear pass ordering
 	m_passBuilderOrder.clear();
 	m_passNamesSeenThisReset.clear();
@@ -1372,7 +1375,7 @@ void RenderGraph::RegisterProvider(IResourceProvider* prov) {
 
 void RenderGraph::RegisterResource(ResourceIdentifier id, std::shared_ptr<Resource> resource,
 	IResourceProvider* provider) {
-	_registry.RegisterOrUpdate(id, resource);
+	auto key = _registry.RegisterOrUpdate(id, resource);
 	AddResource(resource);
 	if (provider) {
 		_providerMap[id] = provider;
@@ -1384,10 +1387,10 @@ void RenderGraph::RegisterResource(ResourceIdentifier id, std::shared_ptr<Resour
 	}
 }
 
-ResourceRegistry::ResourceHandle RenderGraph::RequestResource(ResourceIdentifier const& rid, bool allowFailure) {
+std::shared_ptr<Resource> RenderGraph::RequestResource(ResourceIdentifier const& rid, bool allowFailure) {
 	// If it's already in our registry, return it
-	auto cached = _registry.MakeHandle(rid);
-	if (_registry.IsValid(cached)) {
+	auto cached = _registry.RequestShared(rid);
+	if (cached) {
 		return cached;
 	}
 
@@ -1402,7 +1405,7 @@ ResourceRegistry::ResourceHandle RenderGraph::RequestResource(ResourceIdentifier
 				// Register the resource in our registry
 				_registry.RegisterOrUpdate(rid, resource);
 				AddResource(resource);
-				return _registry.MakeHandle(rid);
+				return resource;
 			}
 			else {
 				throw std::runtime_error("Provider returned null for key: " + rid.ToString());
@@ -1412,8 +1415,8 @@ ResourceRegistry::ResourceHandle RenderGraph::RequestResource(ResourceIdentifier
 
 	// No provider registered for this key
 	if (allowFailure) {
-		// If we are allowed to fail, return empty handle
-		return {};
+		// If we are allowed to fail, return nullptr
+		return nullptr;
 	}
 	throw std::runtime_error("No resource provider registered for key: " + rid.ToString());
 }

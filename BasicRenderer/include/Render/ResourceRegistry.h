@@ -103,6 +103,29 @@ public:
         const Slot& s = slots[h.key.idx];
         return s.alive && s.resource && s.generation == h.generation;
     }
+
+    // Unchecked: no declared-prefix enforcement. For RenderGraph/internal use.
+    std::shared_ptr<Resource> RequestShared(ResourceIdentifier const& id) const {
+		auto it = intern.find(id);
+        if (it == intern.end()) {
+            return nullptr;
+        }
+		const ResourceKey key = it->second;
+        if (key.idx >= slots.size()) {
+            return nullptr;
+        }
+        const Slot& s = slots[key.idx];
+        if (!s.alive || !s.resource) {
+            return nullptr;
+        }
+		return s.resource;
+    }
+
+    template<class T>
+    std::shared_ptr<T> RequestSharedAs(ResourceIdentifier const& id) const {
+        auto base = RequestShared(id);
+        return std::dynamic_pointer_cast<T>(base);
+    }
 };
 
 class ResourceRegistryView {
@@ -134,10 +157,14 @@ public:
             return nullptr;
         }
         Resource* r = _global.Resolve(h);
-        return dynamic_cast<T*>(r);
+        auto casted = dynamic_cast<T*>(r);
+        if (!casted) {
+            throw std::runtime_error("Resource handle type mismatch");
+        }
+        return casted;
     }
 
-    ResourceRegistry::ResourceHandle RequestHandle(ResourceIdentifier const& id) {
+    ResourceRegistry::ResourceHandle RequestHandle(ResourceIdentifier const& id) const {
         // prefix check (same as Request<T>)
         bool ok = false;
         for (auto const& prefix : _allowedPrefixes) {
@@ -160,6 +187,13 @@ public:
 
         h.epoch = epoch;
         return h;
+    }
+    
+    template<class T>
+    T* RequestPtr(ResourceIdentifier const& id) const {
+        auto h = RequestHandle(id);
+        if (!IsValid(h)) return nullptr;
+        return Resolve<T>(h);
     }
 
     bool IsValid(ResourceRegistry::ResourceHandle h) const noexcept {

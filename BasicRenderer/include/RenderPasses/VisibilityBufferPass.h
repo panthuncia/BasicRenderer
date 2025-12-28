@@ -85,11 +85,11 @@ public:
 
     void Setup() override {
 
-        m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
-		m_pVisibilityBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::VisibilityTexture);
+        m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+		m_pVisibilityBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::VisibilityTexture);
 
         if (m_meshShaders) {
-            m_primaryCameraMeshletBitfield = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+            m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
         }
 
         if (m_meshShaders) {
@@ -285,12 +285,10 @@ private:
     bool m_indirect;
     bool m_clearGbuffer = true;
 
-    std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer;
-	std::shared_ptr<PixelBuffer> m_pVisibilityBuffer;
+    PixelBuffer* m_pPrimaryDepthBuffer;
+    PixelBuffer* m_pVisibilityBuffer;
 
-    std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletBitfield = nullptr;
-    std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraOpaqueIndirectCommandBuffer;
-    std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraAlphaTestIndirectCommandBuffer;
+    DynamicGloballyIndexedResource* m_primaryCameraMeshletBitfield = nullptr;
 
     RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
 };

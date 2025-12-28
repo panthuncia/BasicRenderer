@@ -441,7 +441,7 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
     gtaoInfo.g_srcWorkingEdgesDescriptorIndex = workingEdges->GetSRVInfo(0).slot.index;
     gtaoInfo.g_outFinalAOTermDescriptorIndex = outputAO->GetUAVShaderVisibleInfo(0).slot.index;
 
-    BUFFER_UPLOAD(&gtaoInfo, sizeof(GTAOInfo), GTAOConstantBuffer, 0);
+    BUFFER_UPLOAD(&gtaoInfo, sizeof(GTAOInfo), UploadManager::UploadTarget::FromShared(GTAOConstantBuffer), 0);
 
     graph->RegisterResource("Builtin::GTAO::ConstantsBuffer", GTAOConstantBuffer);
 

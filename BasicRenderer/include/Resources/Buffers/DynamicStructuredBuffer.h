@@ -32,7 +32,7 @@ public:
 
         unsigned int index = static_cast<uint32_t>(m_data.size()) - 1; // TODO: Fix buffer max sizes
 
-        BUFFER_UPLOAD(&element, sizeof(T), shared_from_this(), index * sizeof(T));
+        BUFFER_UPLOAD(&element, sizeof(T), UploadManager::UploadTarget::FromShared(shared_from_this()), index * sizeof(T));
 
         return index;
     }
@@ -61,7 +61,7 @@ public:
     }
 
     void UpdateAt(UINT index, const T& element) {
-        BUFFER_UPLOAD(&element, sizeof(T), shared_from_this(), index * sizeof(T));
+        BUFFER_UPLOAD(&element, sizeof(T), UploadManager::UploadTarget::FromShared(shared_from_this()), index * sizeof(T));
     }
 
     UINT Size() {

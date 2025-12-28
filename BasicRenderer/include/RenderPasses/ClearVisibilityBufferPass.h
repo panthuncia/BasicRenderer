@@ -19,12 +19,12 @@ public:
 	}
 
 	void Setup() override {
-		m_visibilityBuffer = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::PrimaryCamera::VisibilityTexture);
-		m_albedo = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::GBuffer::Albedo);
-		m_metallicRoughness = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::GBuffer::MetallicRoughness);
-		m_emissive = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::GBuffer::Emissive);
-		m_normals = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::GBuffer::Normals);
-		m_motionVectors = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::GBuffer::MotionVectors);
+		m_visibilityBuffer = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PrimaryCamera::VisibilityTexture);
+		m_albedo = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::Albedo);
+		m_metallicRoughness = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::MetallicRoughness);
+		m_emissive = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::Emissive);
+		m_normals = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::Normals);
+		m_motionVectors = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::MotionVectors);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -51,7 +51,7 @@ public:
 		clearValueFloat.v[0] = 0;
 		clearValueFloat.v[1] = 0;
 
-		auto clearResource = [&](std::shared_ptr<GloballyIndexedResource> resource) {
+		auto clearResource = [&](GloballyIndexedResource* resource) {
 			if (resource) {
 				rhi::UavClearInfo info{};
 				info.cpuVisible = resource->GetUAVNonShaderVisibleInfo(0).slot;
@@ -75,10 +75,10 @@ public:
 	}
 
 private:
-	std::shared_ptr<GloballyIndexedResource> m_visibilityBuffer;
-	std::shared_ptr<GloballyIndexedResource> m_albedo;
-	std::shared_ptr<GloballyIndexedResource> m_metallicRoughness;
-	std::shared_ptr<GloballyIndexedResource> m_emissive;
-	std::shared_ptr<GloballyIndexedResource> m_normals;
-	std::shared_ptr<GloballyIndexedResource> m_motionVectors;
+	GloballyIndexedResource* m_visibilityBuffer;
+	GloballyIndexedResource* m_albedo;
+	GloballyIndexedResource* m_metallicRoughness;
+	GloballyIndexedResource* m_emissive;
+	GloballyIndexedResource* m_normals;
+	GloballyIndexedResource* m_motionVectors;
 };

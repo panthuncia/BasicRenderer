@@ -93,7 +93,7 @@ void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, Dir
 	perFrameCBData.clusterZSplitDepth = 6.0f;
 	perFrameCBData.frameIndex = frameIndex % 64; // Wrap around every 64 frames
 
-	BUFFER_UPLOAD(&perFrameCBData, sizeof(PerFrameCB), m_perFrameBuffer, 0);
+	BUFFER_UPLOAD(&perFrameCBData, sizeof(PerFrameCB), UploadManager::UploadTarget::FromShared(m_perFrameBuffer), 0);
 }
 
 UINT ResourceManager::CreateIndexedSampler(const rhi::SamplerDesc& samplerDesc) {

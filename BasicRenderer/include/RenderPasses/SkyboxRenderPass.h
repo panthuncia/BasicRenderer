@@ -21,10 +21,10 @@ public:
     }
 
     void Setup() override {
-        m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
-        m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+        m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
+        m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 
-        m_environmentBufferDescriptorIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).slot.index;
+        m_environmentBufferDescriptorIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).slot.index;
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -78,8 +78,8 @@ private:
     rhi::PipelineLayoutPtr m_skyboxRootSignature;
     rhi::PipelinePtr m_skyboxPSO;
 
-    std::shared_ptr<PixelBuffer> m_pHDRTarget = nullptr;
-    std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer = nullptr;
+    PixelBuffer* m_pHDRTarget = nullptr;
+    PixelBuffer* m_pPrimaryDepthBuffer = nullptr;
 
     int m_environmentBufferDescriptorIndex = -1;
 
@@ -138,10 +138,10 @@ private:
         const UINT vertexBufferSize = static_cast<UINT>(36 * sizeof(SkyboxVertex));
 
         m_vertexBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, vertexBufferSize);
-        BUFFER_UPLOAD(skyboxVertices, vertexBufferSize, m_vertexBuffer, 0);
+        BUFFER_UPLOAD(skyboxVertices, vertexBufferSize, UploadManager::UploadTarget::FromShared(m_vertexBuffer), 0);
 		m_vertexBuffer->SetName("Skybox VB");
 
-        BUFFER_UPLOAD((void*)skyboxVertices, vertexBufferSize, m_vertexBuffer, 0);
+        BUFFER_UPLOAD((void*)skyboxVertices, vertexBufferSize, UploadManager::UploadTarget::FromShared(m_vertexBuffer), 0);
 
 		rhi::VertexBufferView vertexBufferView = {};
 		vertexBufferView.buffer = m_vertexBuffer->GetAPIResource().GetHandle();

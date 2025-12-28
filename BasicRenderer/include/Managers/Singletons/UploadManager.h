@@ -9,42 +9,10 @@
 #include "rhi_helpers.h"
 #include "Resources/ResourceStateTracker.h"
 #include "Resources/GPUBacking/GpuBufferBacking.h"
+#include "Render/ResourceRegistry.h"
 
 class Buffer;
 class Resource;
-
-class ResourceUpdate {
-public:
-	ResourceUpdate() = default;
-	size_t size{};
-	std::shared_ptr<Resource> resourceToUpdate{};
-	std::shared_ptr<Resource> uploadBuffer;
-	size_t uploadBufferOffset{};
-	size_t dataBufferOffset{};
-	bool active = true;
-#ifdef _DEBUG
-	uint64_t resourceID{};
-	const char* file{};
-	int line{};
-	uint8_t frameIndex{};
-	std::thread::id threadID;
-	static constexpr int MaxStack = 8;
-	void* stack[MaxStack]{};
-	uint8_t stackSize{};
-#endif
-};
-
-class TextureUpdate {
-public:
-	TextureUpdate() = default;
-	rhi::BufferTextureCopyFootprint copy{};
-	std::shared_ptr<Resource> uploadBuffer;
-#ifdef _DEBUG
-	const char* file{};
-	int line{};
-	std::thread::id threadID;
-#endif
-};
 
 #ifdef _DEBUG
 #define BUFFER_UPLOAD(data,size,res,offset) \
@@ -84,10 +52,71 @@ struct UploadPage {
 
 class UploadManager {
 public:
+
+	struct UploadResolveContext {
+		ResourceRegistry* registry = nullptr;
+		uint64_t epoch = 0; // optional
+	};
+
+	struct UploadTarget {
+		enum class Kind { RegistryHandle, PinnedShared };
+
+		Kind kind{};
+		ResourceRegistry::ResourceHandle h{};
+		std::shared_ptr<Resource> pinned{};   // keep-alive for non-registry targets
+
+		static UploadTarget FromHandle(ResourceRegistry::ResourceHandle handle) { // registry lookup
+			UploadTarget t; t.kind = Kind::RegistryHandle; t.h = handle; return t;
+		}
+		static UploadTarget FromShared(std::shared_ptr<Resource> p) { // keep-alive
+			UploadTarget t; t.kind = Kind::PinnedShared; t.pinned = std::move(p); return t;
+		}
+
+		bool operator ==(const UploadTarget& other) const {
+			if (kind != other.kind) return false;
+			if (kind == Kind::RegistryHandle) return h.key.idx == other.h.key.idx && h.generation == other.h.generation && h.epoch == other.h.epoch;
+			else return pinned == other.pinned;
+		}
+	};
+
+	class ResourceUpdate {
+	public:
+		ResourceUpdate() = default;
+		size_t size{};
+		UploadTarget resourceToUpdate{};
+		std::shared_ptr<Resource> uploadBuffer;
+		size_t uploadBufferOffset{};
+		size_t dataBufferOffset{};
+		bool active = true;
+#ifdef _DEBUG
+		uint64_t resourceIDOrRegistryIndex{};
+		UploadTarget::Kind targetKind{};
+		const char* file{};
+		int line{};
+		uint8_t frameIndex{};
+		std::thread::id threadID;
+		static constexpr int MaxStack = 8;
+		void* stack[MaxStack]{};
+		uint8_t stackSize{};
+#endif
+	};
+
+	class TextureUpdate {
+	public:
+		TextureUpdate() = default;
+		rhi::BufferTextureCopyFootprint copy{};
+		std::shared_ptr<Resource> uploadBuffer;
+#ifdef _DEBUG
+		const char* file{};
+		int line{};
+		std::thread::id threadID;
+#endif
+	};
+
 	static UploadManager& GetInstance();
 	void Initialize();
 #ifdef _DEBUG
-	void UploadData(const void* data, size_t size, std::shared_ptr<Resource> resourceToUpdate, size_t dataBufferOffset, const char* file, int line);
+	void UploadData(const void* data, size_t size, UploadTarget resourceToUpdate, size_t dataBufferOffset, const char* file, int line);
 	void UploadTextureSubresources(
 		rhi::Resource& dstTexture,
 		rhi::Format fmt,
@@ -101,7 +130,7 @@ public:
 		const char* file,
 		int line);
 #else
-	void UploadData(const void* data, size_t size, std::shared_ptr<Resource> resourceToUpdate, size_t dataBufferOffset);
+	void UploadData(const void* data, size_t size, UploadTarget resourceToUpdate, size_t dataBufferOffset);
 	void UploadTextureSubresources(
 		rhi::Resource& dstTexture,
 		rhi::Format fmt,
@@ -122,6 +151,7 @@ public:
 	void ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue);
 	void ResetAllocators(uint8_t frameIndex);
 	void ProcessDeferredReleases(uint8_t frameIndex);
+	void SetUploadResolveContext(UploadResolveContext ctx) { m_ctx = {}; }
 	void Cleanup();
 private:
 	UploadManager() = default;
@@ -132,17 +162,25 @@ private:
 	static bool RangeContains(size_t outer0, size_t outer1, size_t inner0, size_t inner1) noexcept;
 
 	static bool TryCoalesceAppend(ResourceUpdate& last, const ResourceUpdate& next) noexcept;
-	bool TryPatchContainedUpdate(const void* src, size_t size, std::shared_ptr<Resource> resourceToUpdate, size_t dataBufferOffset
-#ifdef _DEBUG
-		, const char* file, int line
-#endif
-	) noexcept;
+	//bool TryPatchContainedUpdate(const void* src, size_t size, std::shared_ptr<Resource> resourceToUpdate, size_t dataBufferOffset
+//#ifdef _DEBUG
+//		, const char* file, int line
+//#endif
+//	) noexcept;
 
 	// Mutates newUpdate (may expand into a union update); may mark old updates inactive; may deactivate newUpdate if patched into an older containing update.
 	void ApplyLastWriteWins(ResourceUpdate& newUpdate) noexcept;
 
 	static void MapUpload(const std::shared_ptr<Resource>& uploadBuffer, size_t mapSize, uint8_t** outMapped) noexcept;
 	static void UnmapUpload(const std::shared_ptr<Resource>& uploadBuffer) noexcept;
+
+	Resource* ResolveTarget(const UploadTarget& t) {
+		if (t.kind == UploadTarget::Kind::PinnedShared) return t.pinned.get();
+
+		// Registry handle
+		if (!m_ctx.registry) throw std::runtime_error("UploadManager has no registry context this frame");
+		return m_ctx.registry->Resolve(t.h); // or view->Resolve(h)
+	}
 
 	size_t                 m_currentCapacity = 0;
 	size_t                 m_headOffset = 0;   // oldest in flight allocation
@@ -165,6 +203,8 @@ private:
 
 	std::vector<ResourceCopy> queuedResourceCopies;
 	std::vector<DiscardBufferCopy> queuedDiscardCopies;
+
+	UploadResolveContext m_ctx{};
 };
 
 inline UploadManager& UploadManager::GetInstance() {

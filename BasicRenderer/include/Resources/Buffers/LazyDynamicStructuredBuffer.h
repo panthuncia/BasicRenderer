@@ -80,7 +80,7 @@ public:
     }
 
     void UpdateView(BufferView* view, const void* data) {
-        BUFFER_UPLOAD(data, sizeof(T), shared_from_this(), view->GetOffset());
+        BUFFER_UPLOAD(data, sizeof(T), UploadManager::UploadTarget::FromShared(shared_from_this()), view->GetOffset());
     }
 
     UINT Size() {

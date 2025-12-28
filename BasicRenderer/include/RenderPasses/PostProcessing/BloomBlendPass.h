@@ -20,7 +20,7 @@ public:
     }
 
     void Setup() override {
-        m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
+        m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -70,7 +70,7 @@ private:
 
     rhi::PipelinePtr m_pso;
 
-	std::shared_ptr<PixelBuffer> m_pHDRTarget;
+	PixelBuffer* m_pHDRTarget;
 
 	PipelineResources m_resourceDescriptorBindings;
 

@@ -106,16 +106,17 @@ public:
 
 	void Setup() override {
 		
-		m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
-		m_PPLLHeadPointerTexture = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PPLL::HeadPointerTexture);
+		m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+		m_PPLLHeadPointerTexture = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PPLL::HeadPointerTexture);
 		
 		RegisterUAV(Builtin::PPLL::HeadPointerTexture);
 
 		if (m_meshShaders) {
-			m_primaryCameraMeshletBitfield = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+			m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
 		}
 
-		m_PPLLCounter = m_resourceRegistryView->Request<Buffer>(Builtin::PPLL::Counter);
+		m_PPLLCounterHandle = m_resourceRegistryView->RequestHandle(Builtin::PPLL::Counter);
+		m_PPLLCounter = m_resourceRegistryView->Resolve<Buffer>(m_PPLLCounterHandle);
 		RegisterUAV(Builtin::PPLL::Counter);
 		
 		RegisterUAV(Builtin::PPLL::DataBuffer);
@@ -175,7 +176,7 @@ public:
 	virtual void Update() override {
 		// Reset UAV counter
 		uint32_t zero = 0;
-		BUFFER_UPLOAD(&zero, sizeof(uint32_t), m_PPLLCounter, 0);
+		BUFFER_UPLOAD(&zero, sizeof(uint32_t), UploadManager::UploadTarget::FromHandle(m_PPLLCounterHandle), 0);
 	}
 
 	void Cleanup(RenderContext& context) override {
@@ -347,12 +348,13 @@ private:
 
 	uint64_t m_numPPLLNodes;
 
-	std::shared_ptr<PixelBuffer> m_PPLLHeadPointerTexture;
-	std::shared_ptr<Buffer> m_PPLLCounter;
+	PixelBuffer* m_PPLLHeadPointerTexture;
+	ResourceRegistry::ResourceHandle m_PPLLCounterHandle;
+	Buffer* m_PPLLCounter;
 
-	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletBitfield = nullptr;
-	std::shared_ptr<DynamicGloballyIndexedResource> m_meshletCullingBitfieldBuffer;
-	std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer;
+	DynamicGloballyIndexedResource* m_primaryCameraMeshletBitfield = nullptr;
+	DynamicGloballyIndexedResource* m_meshletCullingBitfieldBuffer = nullptr;
+	PixelBuffer* m_pPrimaryDepthBuffer = nullptr;
 
 	RenderPhase m_renderPhase = Engine::Primary::OITAccumulationPass;
 

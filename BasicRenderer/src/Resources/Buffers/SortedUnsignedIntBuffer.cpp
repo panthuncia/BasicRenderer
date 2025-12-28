@@ -29,7 +29,7 @@ void SortedUnsignedIntBuffer::Insert(unsigned int element) {
     // Upload the entire suffix so GPU content matches the CPU vector after the insertion shift
     const unsigned int* src = m_data.data() + index;
     const uint32_t count = static_cast<uint32_t>(m_data.size() - index);
-    BUFFER_UPLOAD(src, sizeof(unsigned int) * count, shared_from_this(), index * sizeof(unsigned int));
+    BUFFER_UPLOAD(src, sizeof(unsigned int) * count, UploadManager::UploadTarget::FromShared(shared_from_this()), index * sizeof(unsigned int));
 }
 
 void SortedUnsignedIntBuffer::Remove(unsigned int element) {
@@ -51,14 +51,14 @@ void SortedUnsignedIntBuffer::Remove(unsigned int element) {
         if (!m_data.empty() && index < m_data.size()) {
             const unsigned int* src = m_data.data() + index;
             const uint32_t count = static_cast<uint32_t>(m_data.size() - index);
-            BUFFER_UPLOAD(src, sizeof(unsigned int) * count, shared_from_this(), index * sizeof(unsigned int));
+            BUFFER_UPLOAD(src, sizeof(unsigned int) * count, UploadManager::UploadTarget::FromShared(shared_from_this()), index * sizeof(unsigned int));
         }
 
         // Zero out the last stale slot (not strictly required if readers clamp to Size())
         if (m_data.size() < m_capacity) {
             const unsigned int zero = 0u;
             const uint32_t lastSlot = static_cast<uint32_t>(m_data.size());
-            BUFFER_UPLOAD(&zero, sizeof(unsigned int), shared_from_this(), lastSlot * sizeof(unsigned int));
+            BUFFER_UPLOAD(&zero, sizeof(unsigned int), UploadManager::UploadTarget::FromShared(shared_from_this()), lastSlot * sizeof(unsigned int));
         }
     }
 }

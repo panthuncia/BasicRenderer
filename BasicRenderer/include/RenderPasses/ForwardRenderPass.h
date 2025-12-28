@@ -106,8 +106,8 @@ public:
             .build();
 
         // Setup resources
-        m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
-        m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
+        m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+        m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
 
         RegisterSRV(Builtin::NormalMatrixBuffer);
         RegisterSRV(Builtin::PostSkinningVertices);
@@ -135,7 +135,7 @@ public:
         RegisterSRV(Builtin::Environment::InfoBuffer);
 
         if (m_meshShaders)
-            m_primaryCameraMeshletBitfield = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+            m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -298,10 +298,10 @@ private:
 
 	RenderPhase m_renderPhase = Engine::Primary::ForwardPass;
 
-    std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletBitfield = nullptr;
-    std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletCullingBitfieldBuffer = nullptr;
-    std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer = nullptr;
-    std::shared_ptr<PixelBuffer> m_pHDRTarget = nullptr;
+    DynamicGloballyIndexedResource* m_primaryCameraMeshletBitfield = nullptr;
+    DynamicGloballyIndexedResource* m_primaryCameraMeshletCullingBitfieldBuffer = nullptr;
+    PixelBuffer* m_pPrimaryDepthBuffer = nullptr;
+    PixelBuffer* m_pHDRTarget = nullptr;
 
     std::function<bool()> getImageBasedLightingEnabled;
     std::function<bool()> getPunctualLightingEnabled;

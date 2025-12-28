@@ -57,7 +57,7 @@ public:
 		RegisterUAV(Builtin::GBuffer::Emissive);
 		RegisterUAV(Builtin::GBuffer::MetallicRoughness);
 
-		m_table = m_resourceRegistryView->Request<Resource>(Builtin::PrimaryCamera::VisibleClusterTable);
+		m_table = m_resourceRegistryView->RequestPtr<Resource>(Builtin::PrimaryCamera::VisibleClusterTable);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -109,5 +109,5 @@ private:
 		);
 	}
 
-	std::shared_ptr<Resource> m_table;
+	Resource* m_table;
 };

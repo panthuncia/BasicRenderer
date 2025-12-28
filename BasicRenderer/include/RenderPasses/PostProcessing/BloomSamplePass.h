@@ -45,7 +45,7 @@ public:
     }
 
     void Setup() override {
-        m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
+        m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
 
         RegisterSRV(Builtin::PostProcessing::UpscaledHDR, m_mipIndex + (m_isUpsample ? 1 : 0));
     }
@@ -117,7 +117,7 @@ private:
     rhi::PipelinePtr m_downsamplePso;
     rhi::PipelinePtr m_upsamplePso;
 
-    std::shared_ptr<PixelBuffer> m_pHDRTarget;
+    PixelBuffer* m_pHDRTarget;
 
 	PipelineResources m_resourceDescriptorBindings;
 

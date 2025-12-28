@@ -70,7 +70,7 @@ void UploadManager::UnmapUpload(const std::shared_ptr<Resource>& uploadBuffer) n
 
 bool UploadManager::TryCoalesceAppend(ResourceUpdate& last, const ResourceUpdate& next) noexcept {
 	if (!last.active || !next.active) return false;
-	if (last.resourceToUpdate.get() != next.resourceToUpdate.get()) return false;
+	if (last.resourceToUpdate != next.resourceToUpdate) return false;
 	if (last.uploadBuffer.get() != next.uploadBuffer.get()) return false;
 
 	// Must be contiguous in both destination and upload regions.
@@ -90,66 +90,66 @@ bool UploadManager::TryCoalesceAppend(ResourceUpdate& last, const ResourceUpdate
 	return true;
 }
 
-bool UploadManager::TryPatchContainedUpdate(
-	const void* src,
-	size_t size,
-	std::shared_ptr<Resource> resourceToUpdate,
-	size_t dataBufferOffset
-#ifdef _DEBUG
-	, const char* file, int line
-#endif
-) noexcept
-{
-	if (!src || size == 0 || !resourceToUpdate) return false;
-
-	const size_t new0 = dataBufferOffset;
-	const size_t new1 = dataBufferOffset + size;
-
-	// Scan from newest to oldest; patch the most recent containing update.
-	for (int i = static_cast<int>(m_resourceUpdates.size()) - 1; i >= 0; --i) {
-		auto& u = m_resourceUpdates[static_cast<size_t>(i)];
-		if (!u.active) continue;
-		if (u.resourceToUpdate.get() != resourceToUpdate.get()) continue;
-
-		const size_t u0 = u.dataBufferOffset;
-		const size_t u1 = u.dataBufferOffset + u.size;
-		if (!RangeContains(u0, u1, new0, new1)) {
-			continue;
-		}
-
-		// Patch bytes into the existing upload region.
-		const size_t patchOffsetInU = new0 - u0;
-		const size_t patchUploadOffset = u.uploadBufferOffset + patchOffsetInU;
-		const size_t mapSize = patchUploadOffset + size;
-
-		uint8_t* mapped = nullptr;
-		MapUpload(u.uploadBuffer, mapSize, &mapped);
-		if (mapped) {
-			memcpy(mapped + patchUploadOffset, src, size);
-		}
-		UnmapUpload(u.uploadBuffer);
-
-#ifdef _DEBUG
-		// Update provenance to the newest writer.
-		u.file = file;
-		u.line = line;
-		u.threadID = std::this_thread::get_id();
-#ifdef _WIN32
-		void* frames[ResourceUpdate::MaxStack];
-		USHORT captured = RtlCaptureStackBackTrace(1, ResourceUpdate::MaxStack, frames, nullptr);
-		u.stackSize = static_cast<uint8_t>(captured);
-		for (USHORT j = 0; j < captured; j++) u.stack[j] = frames[j];
-#endif
-#endif
-		return true;
-	}
-
-	return false;
-}
+//bool UploadManager::TryPatchContainedUpdate(
+//	const void* src,
+//	size_t size,
+//	std::shared_ptr<Resource> resourceToUpdate,
+//	size_t dataBufferOffset
+//#ifdef _DEBUG
+//	, const char* file, int line
+//#endif
+//) noexcept
+//{
+//	if (!src || size == 0 || !resourceToUpdate) return false;
+//
+//	const size_t new0 = dataBufferOffset;
+//	const size_t new1 = dataBufferOffset + size;
+//
+//	// Scan from newest to oldest; patch the most recent containing update.
+//	for (int i = static_cast<int>(m_resourceUpdates.size()) - 1; i >= 0; --i) {
+//		auto& u = m_resourceUpdates[static_cast<size_t>(i)];
+//		if (!u.active) continue;
+//		if (u.resourceToUpdate != resourceToUpdate.get()) continue;
+//
+//		const size_t u0 = u.dataBufferOffset;
+//		const size_t u1 = u.dataBufferOffset + u.size;
+//		if (!RangeContains(u0, u1, new0, new1)) {
+//			continue;
+//		}
+//
+//		// Patch bytes into the existing upload region.
+//		const size_t patchOffsetInU = new0 - u0;
+//		const size_t patchUploadOffset = u.uploadBufferOffset + patchOffsetInU;
+//		const size_t mapSize = patchUploadOffset + size;
+//
+//		uint8_t* mapped = nullptr;
+//		MapUpload(u.uploadBuffer, mapSize, &mapped);
+//		if (mapped) {
+//			memcpy(mapped + patchUploadOffset, src, size);
+//		}
+//		UnmapUpload(u.uploadBuffer);
+//
+//#ifdef _DEBUG
+//		// Update provenance to the newest writer.
+//		u.file = file;
+//		u.line = line;
+//		u.threadID = std::this_thread::get_id();
+//#ifdef _WIN32
+//		void* frames[ResourceUpdate::MaxStack];
+//		USHORT captured = RtlCaptureStackBackTrace(1, ResourceUpdate::MaxStack, frames, nullptr);
+//		u.stackSize = static_cast<uint8_t>(captured);
+//		for (USHORT j = 0; j < captured; j++) u.stack[j] = frames[j];
+//#endif
+//#endif
+//		return true;
+//	}
+//
+//	return false;
+//}
 
 void UploadManager::ApplyLastWriteWins(ResourceUpdate& newUpdate) noexcept
 {
-	if (!newUpdate.active || !newUpdate.resourceToUpdate) return;
+	if (!newUpdate.active) return;
 
 	// We may expand newUpdate as we merge; track its current dst range.
 	size_t new0 = newUpdate.dataBufferOffset;
@@ -159,7 +159,7 @@ void UploadManager::ApplyLastWriteWins(ResourceUpdate& newUpdate) noexcept
 	for (int i = static_cast<int>(m_resourceUpdates.size()) - 1; i >= 0; --i) {
 		auto& u = m_resourceUpdates[static_cast<size_t>(i)];
 		if (!u.active) continue;
-		if (u.resourceToUpdate.get() != newUpdate.resourceToUpdate.get()) continue;
+		if (u.resourceToUpdate != newUpdate.resourceToUpdate) continue;
 
 		const size_t u0 = u.dataBufferOffset;
 		const size_t u1 = u.dataBufferOffset + u.size;
@@ -306,9 +306,9 @@ bool UploadManager::AllocateUploadRegion(size_t size, size_t alignment, std::sha
 
 
 #ifdef _DEBUG
-void UploadManager::UploadData(const void* data, size_t size, std::shared_ptr<Resource> resourceToUpdate, size_t dataBufferOffset, const char* file, int line)
+void UploadManager::UploadData(const void* data, size_t size, UploadTarget resourceToUpdate, size_t dataBufferOffset, const char* file, int line)
 #else
-void UploadManager::UploadData(const void* data, size_t size, std::shared_ptr<Resource> resourceToUpdate, size_t dataBufferOffset)
+void UploadManager::UploadData(const void* data, size_t size, UploadTarget resourceToUpdate, size_t dataBufferOffset)
 #endif 
 {
 	if (size > kPageSize) {
@@ -361,7 +361,20 @@ void UploadManager::UploadData(const void* data, size_t size, std::shared_ptr<Re
 	update.uploadBufferOffset = uploadOffset;
 	update.dataBufferOffset = dataBufferOffset;
 #ifdef _DEBUG
-	update.resourceID = resourceToUpdate ? resourceToUpdate->GetGlobalResourceID() : ~0ull;
+	unsigned int idOrRegistryIndex = 0;
+	switch (resourceToUpdate.kind) {
+		case UploadTarget::Kind::PinnedShared:
+			idOrRegistryIndex = static_cast<unsigned int>(resourceToUpdate.pinned ? resourceToUpdate.pinned->GetGlobalResourceID() : ~0ull);
+			break;
+		case UploadTarget::Kind::RegistryHandle:
+			idOrRegistryIndex = resourceToUpdate.h.key.idx;
+			break;
+		default:
+			break;
+		}
+
+	update.resourceIDOrRegistryIndex = idOrRegistryIndex;
+	update.targetKind = resourceToUpdate.kind;
 	update.file = file;
 	update.line = line;
 	update.frameIndex = (m_numFramesInFlight ? (GetInstance().getNumFramesInFlight()) : 0);
@@ -513,8 +526,8 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, rhi::Queue queue) {
 	rhi::debug::Begin(commandList.Get(), rhi::colors::Amber, "UploadManager::ProcessUploads");
 	// TODO: Should we do any barriers here?
 	for (auto& update : m_resourceUpdates) {
-		if (!update.active || !update.resourceToUpdate || !update.uploadBuffer || update.size == 0) continue;
-		Resource* buffer = update.resourceToUpdate.get();
+		if (!update.active || !update.uploadBuffer || update.size == 0) continue;
+		Resource* buffer = ResolveTarget(update.resourceToUpdate);
 		commandList->CopyBufferRegion(
 			buffer->GetAPIResource().GetHandle(),
 			update.dataBufferOffset,

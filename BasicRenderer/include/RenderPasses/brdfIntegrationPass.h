@@ -15,7 +15,7 @@ public:
     }
 
     void Setup() override {
-		m_lutTexture = m_resourceRegistryView->Request<PixelBuffer>(Builtin::BRDFLUT);
+		m_lutTexture = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::BRDFLUT);
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -51,7 +51,7 @@ public:
     }
 
 private:
-    std::shared_ptr<PixelBuffer> m_lutTexture = nullptr;
+    PixelBuffer* m_lutTexture = nullptr;
 
     rhi::PipelinePtr PSO;
 

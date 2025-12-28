@@ -57,7 +57,7 @@ public:
         
         // Rest will be filled in by the luminanceHistogramAverage shader
 
-        BUFFER_UPLOAD(&lpmConstants, sizeof(LPMConstants), m_pLPMConstants, 0);
+        BUFFER_UPLOAD(&lpmConstants, sizeof(LPMConstants), UploadManager::UploadTarget::FromShared(m_pLPMConstants), 0);
 
         RegisterSRV(Builtin::PostProcessing::UpscaledHDR);
 		RegisterSRV(Builtin::CameraBuffer);
