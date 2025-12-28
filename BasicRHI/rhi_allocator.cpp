@@ -1493,12 +1493,12 @@ namespace rhi::ma {
             EndString();
         }
 
-        // Assuming alloc.GetName() is UTF-8 already (std::string).
-        const std::string& nameStr = alloc.GetName();
-        if (!nameStr.empty())
+        // GetName returns char*
+        auto namePtr = alloc.GetName();
+        if (namePtr)
         {
             WriteString("Name");
-            WriteString(nameStr.c_str());
+            WriteString(namePtr);
         }
 
         WriteString("Layout");

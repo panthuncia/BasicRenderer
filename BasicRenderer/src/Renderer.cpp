@@ -906,6 +906,7 @@ void Renderer::Cleanup() {
     Material::DestroyDefaultMaterial();
     Menu::GetInstance().Cleanup();
     UploadManager::GetInstance().Cleanup();
+    PSOManager::GetInstance().Cleanup();
     ResourceManager::GetInstance().Cleanup();
 	FFXManager::GetInstance().Shutdown();
 	UpscalingManager::GetInstance().Shutdown();

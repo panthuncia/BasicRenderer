@@ -34,6 +34,29 @@ void PSOManager::initialize() {
     DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(pCompiler.GetAddressOf()));
 }
 
+void PSOManager::Cleanup() {
+    m_psoCache.clear();
+    m_PPLLPSOCache.clear();
+    m_meshPSOCache.clear();
+    m_meshPPLLPSOCache.clear();
+    m_prePassPSOCache.clear();
+    m_meshPrePassPSOCache.clear();
+    m_shadowPSOCache.clear();
+    m_shadowMeshPSOCache.clear();
+    m_visibilityBufferPSOCache.clear();
+    m_visibilityBufferMeshPSOCache.clear();
+    m_deferredPSOCache.clear();
+
+    debugPSO.Reset();
+    environmentConversionPSO.Reset();
+    m_rootSignature.Reset();
+    m_computeRootSignature.Reset();
+    m_debugRootSignature.Reset();
+    m_environmentConversionRootSignature.Reset();
+    pUtils.Reset();
+    pCompiler.Reset();
+}
+
 const PipelineState& PSOManager::GetPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
     PSOKey key(psoFlags, materialCompileFlags, wireframe);
     if (m_psoCache.find(key) == m_psoCache.end()) {

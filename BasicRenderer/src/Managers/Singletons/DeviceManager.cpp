@@ -119,6 +119,19 @@ void DeviceManager::Initialize() {
 }
 
 void DeviceManager::Cleanup() {
+
+    char* json = nullptr;
+    m_allocator->BuildStatsString(&json, TRUE);
+	spdlog::info("Allocator Stats: {}", json);
+    if (m_allocator) {
+        m_allocator->ReleaseThis();
+        m_allocator = nullptr;
+    }
+
+    m_graphicsQueue.Reset();
+    m_computeQueue.Reset();
+    m_copyQueue.Reset();
+    m_meshShadersSupported = false;
     if (m_device) {
         m_device.Reset();
     }
