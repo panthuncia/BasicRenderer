@@ -1,6 +1,7 @@
 #include "Managers/MaterialManager.h"
 #include "../generated/BuiltinResources.h"
 
+// TODO: Use LazyDynamicStructuredBuffer and active indices buffer like draw calls? Would reduce number of no-op indirect arguments
 MaterialManager::MaterialManager() {
 	auto& rm = ResourceManager::GetInstance();
 

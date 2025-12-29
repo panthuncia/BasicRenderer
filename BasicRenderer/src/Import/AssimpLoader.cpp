@@ -730,10 +730,6 @@ namespace AssimpLoader {
         auto animations = parseAiAnimations(pScene, nodes, nodeMap);
         auto skeletons = BuildSkeletons(pScene, nodeMap, animations);
 
-        for (auto& skeleton : skeletons) {
-            scene->AddSkeleton(skeleton);
-        }
-
         for (unsigned int i = 0; i < meshSkinIndices.size(); i++) {
             int skinIndex = meshSkinIndices[i];
             if (skinIndex != -1) {

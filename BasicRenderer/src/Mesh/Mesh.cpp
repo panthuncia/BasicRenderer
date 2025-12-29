@@ -286,12 +286,6 @@ void Mesh::SetBufferViews(std::unique_ptr<BufferView> preSkinningVertexBufferVie
 
 void Mesh::SetBaseSkin(std::shared_ptr<Skeleton> skeleton) {
 	m_baseSkeleton = skeleton;
-	//m_perMeshBufferData.boneTransformBufferIndex = skeleton->GetTransformsBufferIndex();
-	m_perMeshBufferData.inverseBindMatricesBufferIndex = skeleton->GetInverseBindMatricesBufferIndex();
-	if (m_pCurrentMeshManager != nullptr) {
-		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
-	}
-	//skeleton->userIDs.push_back(localID);
 }
 
 void Mesh::UpdateVertexCount(bool meshletReorderedVertices) {

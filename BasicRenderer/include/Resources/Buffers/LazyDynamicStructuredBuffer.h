@@ -83,6 +83,10 @@ public:
         BUFFER_UPLOAD(data, sizeof(T), UploadManager::UploadTarget::FromShared(shared_from_this()), view->GetOffset());
     }
 
+	void UpdateAt(uint64_t index, const T& data) {
+        BUFFER_UPLOAD(&data, sizeof(T), UploadManager::UploadTarget::FromShared(shared_from_this()), index * m_elementSize);
+    }
+
     UINT Size() {
         return m_usedCapacity;
     }

@@ -97,7 +97,12 @@ void GpuBufferBacking::RegisterLiveAlloc() {
 
 void GpuBufferBacking::UnregisterLiveAlloc() {
     std::scoped_lock lock(s_liveMutex);
-    s_liveAllocs.erase(this);
+	if (s_liveAllocs.find(this) == s_liveAllocs.end()) { // If an error occurs here, it means something is being destructed after this global was destroyed.
+        spdlog::warn("GpuBufferBacking being destroyed but not found in live allocations!");
+    }
+    else {
+        s_liveAllocs.erase(this);
+    }
 }
 
 void GpuBufferBacking::UpdateLiveAllocName(const char* name) {
@@ -115,4 +120,5 @@ unsigned int GpuBufferBacking::DumpLiveBuffers(size_t maxSizeBytes) {
             spdlog::warn("Live buffer still tracked: size={} bytes, name='{}'", info.size, info.name);
         }
     }
+	return static_cast<unsigned int>(s_liveAllocs.size());
 }

@@ -28,7 +28,6 @@ public:
             Resize(m_capacity * 2);
         }
         m_data.push_back(element);
-        m_needsUpdate = true;
 
         unsigned int index = static_cast<uint32_t>(m_data.size()) - 1; // TODO: Fix buffer max sizes
 
@@ -40,7 +39,18 @@ public:
     void RemoveAt(UINT index) {
         if (index < m_data.size()) {
             m_data.erase(m_data.begin() + index);
-            m_needsUpdate = true;
+
+			// If capacity is half or less, shrink the buffer
+            if (m_data.size() <= m_capacity / 2 && m_capacity > 64) {
+				auto newCapacity = m_capacity / 2;
+				Resize(newCapacity);
+			}
+
+			// batch upload data after the removed index
+			unsigned int countToUpload = static_cast<unsigned int>(m_data.size()) - index;
+            if (countToUpload > 0) {
+                BUFFER_UPLOAD(&m_data[index], sizeof(T) * countToUpload, UploadManager::UploadTarget::FromShared(shared_from_this()), index * sizeof(T));
+            }
         }
     }
 
@@ -156,7 +166,9 @@ private:
         auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, sizeof(T) * capacity, GetGlobalResourceID(), m_UAV);
 		newDataBuffer->SetName((m_name+ ": " + name).c_str());
         if (m_dataBuffer != nullptr) {
-            UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), *GetStateTracker(), previousCapacity);
+			// If shrinking, copy only up to new capacity. If growing, copy up to previous capacity.
+            auto sizeToCopy = capacity < previousCapacity ? capacity : previousCapacity;
+            UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), *GetStateTracker(), sizeToCopy);
         }
 		m_dataBuffer = std::move(newDataBuffer);
 

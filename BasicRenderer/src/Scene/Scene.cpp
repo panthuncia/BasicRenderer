@@ -15,6 +15,7 @@
 #include "Managers/MeshManager.h"
 #include "Managers/LightManager.h"
 #include "Managers/IndirectCommandBufferManager.h"
+#include "Managers/SkeletonManager.h"
 #include "Managers/MaterialManager.h"
 #include "Mesh/MeshInstance.h"
 #include "Animation/AnimationController.h"
@@ -166,6 +167,12 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 		//e.add<Components::OpaqueMeshInstances>(drawInfo.opaque.value());
 		for (auto& meshInstance : meshInstances->meshInstances) {
 
+			if (meshInstance->HasSkin()) {
+				auto skinInst = meshInstance->GetSkin();
+				m_managerInterface.GetSkeletonManager()->AcquireSkinningInstance(skinInst);
+				meshInstance->SetSkinningInstanceSlot(skinInst->GetSkinningInstanceSlot());
+			}
+
 			// Increment material usage count
 			m_managerInterface.GetMaterialManager()->IncrementMaterialUsageCount(*meshInstance->GetMesh()->material);
 			auto materialDataIndex = m_managerInterface.GetMaterialManager()->GetMaterialSlot(meshInstance->GetMesh()->material->GetMaterialID());
@@ -282,9 +289,8 @@ void Scene::ProcessEntitySkins(bool overrideExistingSkins) {
 			bool addSkin = false;
 			for (auto& meshInstance : oldMeshInstances->meshInstances) {
 				if (meshInstance->GetMesh()->HasBaseSkin() && (!meshInstance->HasSkin() || overrideExistingSkins)) {
-					auto skeleton = meshInstance->GetMesh()->GetBaseSkin()->CopySkeleton();
-					meshInstance->SetSkeleton(skeleton);
-					skeletonsToAdd.push_back(skeleton);
+					auto skinInst = meshInstance->GetMesh()->GetBaseSkin()->CopySkeleton();   // runtime instance
+					meshInstance->SetSkeleton(skinInst);
 					addSkin = true;
 				}
 			}
@@ -294,9 +300,6 @@ void Scene::ProcessEntitySkins(bool overrideExistingSkins) {
 		}
 		});
 	world.defer_end();
-	for (auto& skeleton : skeletonsToAdd) {
-		AddSkeleton(skeleton);
-	}
 }
 
 flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr<Mesh>>& meshes, std::wstring name) {
@@ -321,7 +324,6 @@ flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr
 		if (skinned) {
 			auto skeleton = mesh->GetBaseSkin()->CopySkeleton();
 			meshInstances.meshInstances.back()->SetSkeleton(skeleton);
-			AddSkeleton(skeleton);
 			entity.add<Components::Skinned>();
 		}
     }
@@ -380,9 +382,7 @@ void Scene::Update() {
 		entity.set<Components::Scale>(transform.scale);
 	}
 
-    for (auto& skeleton : animatedSkeletons) {
-        skeleton->UpdateTransforms();
-    }
+	m_managerInterface.GetSkeletonManager()->UpdateAllDirtyInstances();
 
 	for (auto& scene : m_childScenes) {
 		scene->Update();
@@ -458,18 +458,6 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 
 flecs::entity& Scene::GetPrimaryCamera() {
     return m_primaryCamera;
-}
-
-void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
-    skeletons.push_back(skeleton);
-    if (skeleton->animations.size() > 0 && !skeleton->IsBaseSkeleton()) {
-        skeleton->SetAnimation(0);
-        animatedSkeletons.push_back(skeleton);
-    }
-
-	for (auto& node : skeleton->m_bones) {
-		animatedEntitiesByID[node.id()] = node;
-	}
 }
 
 void Scene::PostUpdate() {

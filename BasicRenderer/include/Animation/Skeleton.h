@@ -9,9 +9,8 @@
 
 #include "Animation/Animation.h"
 
-class Buffer;
 
-class Skeleton {
+class Skeleton : public std::enable_shared_from_this<Skeleton> {
 public:
 	std::shared_ptr<Skeleton> CopySkeleton(bool retainIsBaseSkeleton = false);
     std::vector<flecs::entity> m_bones;
@@ -21,27 +20,33 @@ public:
     std::unordered_map<std::string, std::shared_ptr<Animation>> animationsByName;
 
     Skeleton(const std::vector<flecs::entity>& nodes, const std::vector<DirectX::XMMATRIX>& inverseBindMatrices);
-    Skeleton(const std::vector<flecs::entity>& nodes, std::shared_ptr<Buffer> inverseBindMatrices); // For copying, since bind matrices never change between instances
-    Skeleton(const Skeleton& other);
+    Skeleton(const std::vector<flecs::entity>& nodes);
+    Skeleton(Skeleton& other);
 
     ~Skeleton();
     void AddAnimation(const std::shared_ptr<Animation>& animation);
     void SetAnimation(size_t index);
 	void SetAnimationSpeed(float speed);
-    void UpdateTransforms();
-    uint32_t GetTransformsBufferIndex();
-    uint32_t GetInverseBindMatricesBufferIndex();
-    std::shared_ptr<Buffer>& GetInverseBindMatricesBuffer();
 
 	void DeleteAllAnimations();
 	void SetJoints(const std::vector<flecs::entity>& joints);
 	flecs::entity GetRoot() { return m_root; }
 	bool IsBaseSkeleton() { return m_isBaseSkeleton; }
 
+    std::shared_ptr<Skeleton> GetBaseSkeletonShared() const { return m_baseSkeleton; }
+    void SetBaseSkeletonShared(std::shared_ptr<Skeleton> base) { m_baseSkeleton = std::move(base); }
+
+    uint32_t GetSkinningInstanceSlot() const { return m_skinningInstanceSlot; }
+    void SetSkinningInstanceSlot(uint32_t slot) { m_skinningInstanceSlot = slot; }
+
+    // Provide a CPU buffer of matrices for uploads (float4x4 or XMMATRIX)
+    const void* GetCPUBoneMatrices() const { return m_boneTransforms.data(); }
+    void GatherBoneMatricesToCPUBuffer();
+
 private:
-    std::shared_ptr<Buffer> m_transformsBuffer;
-    std::shared_ptr<Buffer> m_inverseBindMatricesBuffer;
 	flecs::entity m_root;
 	bool m_isBaseSkeleton = false;
+    std::shared_ptr<Skeleton> m_baseSkeleton; // null for base skeleton
+    uint32_t m_skinningInstanceSlot = 0xFFFFFFFF;
     void FindRoot();
 };

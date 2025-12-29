@@ -164,8 +164,17 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	m_pLightManager->SetViewManager(m_pViewManager.get()); // Light manager needs access to view manager for shadow cameras
 	m_pViewManager->SetIndirectCommandBufferManager(m_pIndirectCommandBufferManager.get()); // View manager needs to make indirect command buffers
     m_pMeshManager->SetViewManager(m_pViewManager.get());
+	m_pSkeletonManager = SkeletonManager::CreateUnique();
 
-	m_managerInterface.SetManagers(m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pViewManager.get(), m_pLightManager.get(), m_pEnvironmentManager.get(), m_pMaterialManager.get());
+	m_managerInterface.SetManagers(
+        m_pMeshManager.get(), 
+        m_pObjectManager.get(), 
+        m_pIndirectCommandBufferManager.get(), 
+        m_pViewManager.get(), 
+        m_pLightManager.get(), 
+        m_pEnvironmentManager.get(), 
+        m_pMaterialManager.get(),
+        m_pSkeletonManager.get());
 
     auto& world = ECSManager::GetInstance().GetWorld();
     world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
@@ -887,9 +896,10 @@ void Renderer::StallPipeline() {
 void Renderer::Cleanup() {
     spdlog::info("In cleanup");
     // Wait for all GPU frames to complete
+	spdlog::info("Stalling pipeline for cleanup");
 	StallPipeline();
+	spdlog::info("Cleaning up resources");
     m_coreResourceProvider.Cleanup();
-    m_swapChain.Reset();
     currentRenderGraph.reset();
     m_currentEnvironment.reset();
 	currentScene.reset();
@@ -900,9 +910,11 @@ void Renderer::Cleanup() {
 	m_pObjectManager.reset();
     m_pMaterialManager.reset();
     m_pEnvironmentManager.reset();
+	m_pSkeletonManager.reset();
     m_hierarchySystem.destruct();
     m_settingsSubscriptions.clear();
     m_readbackFence.Reset();
+	spdlog::info("Cleaning up singletons");
     Material::DestroyDefaultMaterial();
     Menu::GetInstance().Cleanup();
     UploadManager::GetInstance().Cleanup();
@@ -913,7 +925,11 @@ void Renderer::Cleanup() {
 	ReadbackManager::GetInstance().Cleanup();
     ECSManager::GetInstance().Cleanup();
     DeletionManager::GetInstance().Cleanup();
+	spdlog::info("Cleaning up swap chain");
+    m_swapChain.Reset();
+	spdlog::info("Cleaning up device manager");
     DeviceManager::GetInstance().Cleanup();
+	spdlog::info("Cleanup complete");
 }
 
 void Renderer::CheckDebugMessages() {
@@ -1063,6 +1079,7 @@ void Renderer::CreateRenderGraph() {
     newGraph->RegisterProvider(m_pEnvironmentManager.get());
     newGraph->RegisterProvider(m_pIndirectCommandBufferManager.get());
 	newGraph->RegisterProvider(m_pMaterialManager.get());
+	newGraph->RegisterProvider(m_pSkeletonManager.get());
     newGraph->RegisterProvider(&m_coreResourceProvider);
 
 	auto& depth = currentScene->GetPrimaryCamera().get<Components::DepthMap>();

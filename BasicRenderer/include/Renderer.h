@@ -28,6 +28,7 @@
 #include "Managers/IndirectCommandBufferManager.h"
 #include "Managers/EnvironmentManager.h"
 #include "Managers/MaterialManager.h"
+#include "Managers/SkeletonManager.h"
 #include "Scene/MovementState.h"
 #include "../generated/BuiltinResources.h"
 #include "Utilities/Timer.h"
@@ -120,6 +121,7 @@ private:
     std::unique_ptr<ViewManager> m_pViewManager = nullptr;
 	std::unique_ptr<EnvironmentManager> m_pEnvironmentManager = nullptr;
 	std::unique_ptr<MaterialManager> m_pMaterialManager = nullptr;
+	std::unique_ptr<SkeletonManager> m_pSkeletonManager = nullptr;
 
 	ManagerInterface m_managerInterface;
     flecs::system m_hierarchySystem;

@@ -126,7 +126,7 @@ void DeviceManager::Cleanup() {
     auto numLiveBuffers = GpuBufferBacking::DumpLiveBuffers(64ull * 1024ull);
 	m_allocator->FreeStatsString(json);
 	if (numLiveBuffers != 0) { // If buffers are alive, allocator cannot be released. The kernel will have to clean up.
-		spdlog::error("DeviceManager Cleanup: {} live buffers were not destroyed before allocator release!", numLiveBuffers);
+		spdlog::error("DeviceManager Cleanup: {} live buffers were not destroyed before allocator cleanup! Allocator could not be freed.", numLiveBuffers);
     }
     else {
         m_allocator->ReleaseThis();

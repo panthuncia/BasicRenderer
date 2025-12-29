@@ -21,7 +21,15 @@ public:
 	}
 
 	void DeclareResourceUsages(ComputePassBuilder* builder) {
-		builder->WithShaderResource(Builtin::PerObjectBuffer, Builtin::PerMeshBuffer, Builtin::PerMeshInstanceBuffer, Builtin::PreSkinningVertices, Builtin::NormalMatrixBuffer)
+		builder->WithShaderResource(
+			Builtin::PerObjectBuffer, 
+			Builtin::PerMeshBuffer, 
+			Builtin::PerMeshInstanceBuffer, 
+			Builtin::PreSkinningVertices, 
+			Builtin::NormalMatrixBuffer, 
+			Builtin::SkeletonResources::InverseBindMatrices,
+			Builtin::SkeletonResources::BoneTransforms,
+			Builtin::SkeletonResources::SkinningInstanceInfo)
 			.WithUnorderedAccess(Builtin::PostSkinningVertices);
 	}
 
@@ -32,6 +40,9 @@ public:
 		RegisterSRV(Builtin::PerObjectBuffer);
 		RegisterSRV(Builtin::PerMeshInstanceBuffer);
 		RegisterSRV(Builtin::PerMeshBuffer);
+		RegisterSRV(Builtin::SkeletonResources::InverseBindMatrices);
+		RegisterSRV(Builtin::SkeletonResources::BoneTransforms);
+		RegisterSRV(Builtin::SkeletonResources::SkinningInstanceInfo);
 
 		RegisterUAV(Builtin::PostSkinningVertices);
 	}
@@ -78,7 +89,7 @@ private:
 	void CreatePSO() {
 		m_PSO = PSOManager::GetInstance().MakeComputePipeline(
 			PSOManager::GetInstance().GetComputeRootSignature(),
-			L"shaders/skinning.brsl",
+			L"shaders/skinning.hlsl",
 			L"CSMain",
 			{},
 			"Skinning CS");

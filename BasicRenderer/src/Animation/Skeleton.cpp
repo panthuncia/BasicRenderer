@@ -15,25 +15,18 @@ Skeleton::Skeleton(const std::vector<flecs::entity>& nodes, const std::vector<XM
     : m_bones(nodes), m_inverseBindMatrices(inverseBindMatrices) {
     m_boneTransforms.resize(nodes.size() * 16);
     auto& resourceManager = ResourceManager::GetInstance();
-    m_transformsBuffer = CreateIndexedStructuredBuffer(nodes.size(), sizeof(DirectX::XMMATRIX));
-    m_transformsBuffer->SetName("BoneTransforms");
-    m_inverseBindMatricesBuffer = CreateIndexedStructuredBuffer(nodes.size(), sizeof(DirectX::XMMATRIX));
-	m_inverseBindMatricesBuffer->SetName("InverseBindMatrices");
-    BUFFER_UPLOAD(m_inverseBindMatrices.data(), nodes.size() * sizeof(XMMATRIX), UploadManager::UploadTarget::FromShared(m_inverseBindMatricesBuffer), 0);
 	m_isBaseSkeleton = true;
     FindRoot();
 }
 
-Skeleton::Skeleton(const std::vector<flecs::entity>& nodes, std::shared_ptr<Buffer> inverseBindMatrices)
-    : m_bones(nodes), m_inverseBindMatricesBuffer(inverseBindMatrices) {
+Skeleton::Skeleton(const std::vector<flecs::entity>& nodes)
+    : m_bones(nodes) {
     m_boneTransforms.resize(nodes.size() * 16);
     auto& resourceManager = ResourceManager::GetInstance();
-    m_transformsBuffer = CreateIndexedStructuredBuffer(nodes.size(), sizeof(DirectX::XMMATRIX));
-    m_transformsBuffer->SetName("BoneTransforms");
     FindRoot();
 }
 
-Skeleton::Skeleton(const Skeleton& other) {
+Skeleton::Skeleton(Skeleton& other) {
 
     std::unordered_map<uint64_t, uint64_t> oldBonesToNewBonesIDMap;
 	std::unordered_map<uint64_t, flecs::entity> oldBoneIDToNewBonesMap;
@@ -86,12 +79,13 @@ Skeleton::Skeleton(const Skeleton& other) {
         AddAnimation(newAnim);
     }
 
-	// copy inverse bind matrices
-	m_inverseBindMatrices = other.m_inverseBindMatrices;
     m_boneTransforms.resize(m_bones.size() * 16);
-    auto& resourceManager = ResourceManager::GetInstance();
-    m_transformsBuffer = CreateIndexedStructuredBuffer(m_bones.size(), sizeof(DirectX::XMMATRIX));
-    m_transformsBuffer->SetName("BoneTransforms");
+	if (other.m_baseSkeleton) {
+        m_baseSkeleton = other.m_baseSkeleton;
+    }
+    else {
+		m_baseSkeleton = other.shared_from_this();
+    }
 }
 
 void Skeleton::FindRoot() {
@@ -155,24 +149,11 @@ void Skeleton::SetAnimation(size_t index) {
     }
 }
 
-void Skeleton::UpdateTransforms() {
+void Skeleton::GatherBoneMatricesToCPUBuffer() {
     for (size_t i = 0; i < m_bones.size(); ++i) {
 		const Components::Matrix transform = m_bones[i].get<Components::Matrix>();
         memcpy(&m_boneTransforms[i * 16], &transform.matrix, sizeof(XMMATRIX));
     }
-    BUFFER_UPLOAD(m_boneTransforms.data(), m_bones.size() * sizeof(XMMATRIX), UploadManager::UploadTarget::FromShared(m_transformsBuffer), 0);
-}
-
-uint32_t Skeleton::GetTransformsBufferIndex() {
-    return m_transformsBuffer->GetSRVInfo(0).slot.index;
-}
-
-uint32_t Skeleton::GetInverseBindMatricesBufferIndex() {
-    return m_inverseBindMatricesBuffer->GetSRVInfo(0).slot.index;
-}
-
-std::shared_ptr<Buffer>& Skeleton::GetInverseBindMatricesBuffer() {
-    return m_inverseBindMatricesBuffer;
 }
 
 void Skeleton::DeleteAllAnimations() {
