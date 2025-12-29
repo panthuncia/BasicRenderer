@@ -2,51 +2,119 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
-#include <flecs.h>
 #include <vector>
+#include <span>
+#include <cstdint>
+
+#include <flecs.h>
 #include <DirectXMath.h>
 
 #include "Animation/Animation.h"
+#include "Animation/AnimationController.h"
 
-
+// Skeleton has two modes:
+//  - Base skeleton (asset/template): immutable data shared across instances
+//  - Instance skeleton (runtime pose): owns AnimationControllers + pose buffer (bone matrices)
 class Skeleton : public std::enable_shared_from_this<Skeleton> {
 public:
-	std::shared_ptr<Skeleton> CopySkeleton(bool retainIsBaseSkeleton = false);
-    std::vector<flecs::entity> m_bones;
-    std::vector<DirectX::XMMATRIX> m_inverseBindMatrices;
-    std::vector<float> m_boneTransforms;
+    using Matrix = DirectX::XMMATRIX;
+
+    // Creates a BASE skeleton from imported bone entities + inverse bind matrices.
+    // This constructor extracts the CPU-only skeleton topology and rest pose and does NOT allocate GPU buffers.
+    Skeleton(const std::vector<flecs::entity>& nodes,
+        const std::vector<Matrix>& inverseBindMatrices);
+
+    // Creates an INSTANCE skeleton referencing an existing base skeleton.
+    explicit Skeleton(const std::shared_ptr<Skeleton>& baseSkeleton);
+
+    Skeleton(const Skeleton& other);
+    Skeleton& operator=(const Skeleton& other) = delete;
+
+    ~Skeleton() = default;
+
+    // Creates a runtime instance by default. If retainIsBaseSkeleton=true and this is a base,
+    // performs a deep copy of base data (You probably don't want this).
+    std::shared_ptr<Skeleton> CopySkeleton(bool retainIsBaseSkeleton = false);
+
+    bool IsBaseSkeleton() const noexcept { return m_isBaseSkeleton; }
+
+    // Returns the base skeleton (for instances); returns itself for base skeletons.
+    std::shared_ptr<Skeleton> GetBaseSkeletonShared() const;
+
+    // Animation library lives on the BASE skeleton
+    void AddAnimation(const std::shared_ptr<Animation>& animation);
+    void DeleteAllAnimations();
+
+    // Bind an animation onto this INSTANCE.
+    // If called on a BASE skeleton, it logs a warning and does nothing.
+    void SetAnimation(size_t index);
+    void SetAnimationSpeed(float speed);
+
+    // Tick/evaluate pose into the instance-owned pose buffer.
+    // Writes directly into m_boneMatrices.
+    // If called on a BASE skeleton, it logs a warning and does nothing.
+	// Force parameter can be used to force update even if animation is paused.
+    void UpdateTransforms(float elapsedSeconds, bool force = false);
+
+    // Marks pose dirty. SkeletonManager can use this to decide uploads.
+    bool IsPoseDirty() const noexcept { return m_poseDirty; }
+    void ClearPoseDirty() noexcept { m_poseDirty = false; }
+
+    // Pose buffer (INSTANCE): final bone matrices in skeleton space (global pose).
+    std::span<const Matrix> GetBoneMatrices() const noexcept { return m_boneMatrices; }
+    std::span<Matrix>       GetBoneMatricesMutable() noexcept { return m_boneMatrices; }
+
+    // Inverse bind matrices (BASE): shared across all instances of this base skeleton.
+    std::span<const Matrix> GetInverseBindMatrices() const;
+
+    // Skeleton topology (BASE):
+    uint32_t GetBoneCount() const noexcept;
+    std::span<const std::string> GetBoneNames() const;
+    std::span<const int32_t> GetParentIndices() const;
+
+    // Optional hook for SkeletonManager (or draw-data) to store an instance slot/index.
+    uint32_t GetSkinningInstanceSlot() const noexcept { return m_skinningInstanceSlot; }
+    void     SetSkinningInstanceSlot(uint32_t slot) noexcept { m_skinningInstanceSlot = slot; }
+
+private:
+    // Shared (BASE) data
+    // Valid only when m_isBaseSkeleton==true
+    std::vector<std::string> m_boneNames;          // bone i name
+    std::vector<int32_t>     m_parentIndices;      // bone i parent index, -1 if root
+    std::vector<Matrix>      m_restLocalMatrices;  // bone i rest local matrix
+    std::vector<uint32_t>    m_evalOrder;          // parent-before-children order
+    std::vector<Matrix>      m_inverseBindMatrices;
+
+    // Animation library (base)
+public:
     std::vector<std::shared_ptr<Animation>> animations;
     std::unordered_map<std::string, std::shared_ptr<Animation>> animationsByName;
 
-    Skeleton(const std::vector<flecs::entity>& nodes, const std::vector<DirectX::XMMATRIX>& inverseBindMatrices);
-    Skeleton(const std::vector<flecs::entity>& nodes);
-    Skeleton(Skeleton& other);
+private:
+    // --- Per-instance (INSTANCE) data ---
+    std::shared_ptr<Skeleton> m_baseSkeleton;          // null for base skeleton
+    std::vector<AnimationController> m_controllers;    // one per bone
+    std::vector<Matrix> m_boneMatrices;                // final global pose
+    bool m_poseDirty = true;
 
-    ~Skeleton();
-    void AddAnimation(const std::shared_ptr<Animation>& animation);
-    void SetAnimation(size_t index);
-	void SetAnimationSpeed(float speed);
+    float  m_animationSpeed = 1.0f;
+    size_t m_activeAnimationIndex = size_t(-1);
 
-	void DeleteAllAnimations();
-	void SetJoints(const std::vector<flecs::entity>& joints);
-	flecs::entity GetRoot() { return m_root; }
-	bool IsBaseSkeleton() { return m_isBaseSkeleton; }
+    uint32_t m_skinningInstanceSlot = 0xFFFFFFFF;
 
-    std::shared_ptr<Skeleton> GetBaseSkeletonShared() const { return m_baseSkeleton; }
-    void SetBaseSkeletonShared(std::shared_ptr<Skeleton> base) { m_baseSkeleton = std::move(base); }
-
-    uint32_t GetSkinningInstanceSlot() const { return m_skinningInstanceSlot; }
-    void SetSkinningInstanceSlot(uint32_t slot) { m_skinningInstanceSlot = slot; }
-
-    // Provide a CPU buffer of matrices for uploads (float4x4 or XMMATRIX)
-    const void* GetCPUBoneMatrices() const { return m_boneTransforms.data(); }
-    void GatherBoneMatricesToCPUBuffer();
+    bool m_isBaseSkeleton = false;
 
 private:
-	flecs::entity m_root;
-	bool m_isBaseSkeleton = false;
-    std::shared_ptr<Skeleton> m_baseSkeleton; // null for base skeleton
-    uint32_t m_skinningInstanceSlot = 0xFFFFFFFF;
-    void FindRoot();
+    // Helpers
+    void BuildBaseFromNodes_(const std::vector<flecs::entity>& nodes);
+    void BuildEvalOrder_();
+    void EnsureInstanceBuffersSized_();
+
+    static Matrix ComposeTRS_(const Components::Position& p,
+        const Components::Rotation& r,
+        const Components::Scale& s);
+
+    static Matrix ComposeTRS_(const Components::Transform& t);
 };

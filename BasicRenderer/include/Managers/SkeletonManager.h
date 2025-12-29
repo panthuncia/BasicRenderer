@@ -24,6 +24,9 @@ public:
     uint32_t AcquireSkinningInstance(const std::shared_ptr<Skeleton>& skinningInstance);
     void     ReleaseSkinningInstance(Skeleton* skinningInstance);
 
+    // Tick animations for all active skeletons
+    void TickAnimations(float elapsedSeconds);
+
     // Upload pose for a specific instance (or call UpdateAllDirtyInstances once per frame).
     void UpdateInstanceTransforms(Skeleton& skinningInstance);
     void UpdateAllDirtyInstances();

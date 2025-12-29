@@ -18,7 +18,7 @@ SkeletonManager::SkeletonManager() {
 
     m_instanceInfo = DynamicStructuredBuffer<SkinningInstanceGPUInfo>::CreateShared(64, "SkinningInstanceInfo");
 
-    // Expose via resource provider keys (replace with your Builtin identifiers)
+    // Expose via resource provider keys
     m_resources[Builtin::SkeletonResources::InverseBindMatrices] = m_inverseBindMatrices;
     m_resources[Builtin::SkeletonResources::BoneTransforms] = m_boneTransforms;
     m_resources[Builtin::SkeletonResources::SkinningInstanceInfo] = m_instanceInfo;
@@ -32,12 +32,12 @@ SkeletonManager::BaseRecord& SkeletonManager::AcquireBase(const std::shared_ptr<
     }
 
     BaseRecord rec;
-    rec.boneCount = static_cast<uint32_t>(baseSkeleton->m_bones.size());
+    rec.boneCount = baseSkeleton->GetBoneCount();
     rec.refCount = 1;
 
     // Allocate + upload inverse binds once
     const size_t bytes = rec.boneCount * sizeof(DirectX::XMMATRIX);
-    rec.invBindView = m_inverseBindMatrices->AddData(baseSkeleton->m_inverseBindMatrices.data(), bytes, sizeof(DirectX::XMMATRIX));
+    rec.invBindView = m_inverseBindMatrices->AddData(baseSkeleton->GetInverseBindMatrices().data(), bytes, sizeof(DirectX::XMMATRIX));
     rec.invBindOffsetMatrices = BytesToMatrixIndex(rec.invBindView->GetOffset());
 
     auto [insIt, _ok] = m_bases.emplace(baseSkeleton.get(), std::move(rec));
@@ -146,16 +146,20 @@ void SkeletonManager::UpdateInstanceTransforms(Skeleton& inst) {
     if (!rec.transformsView)
         return;
 
-    // Gather matrices like your old Skeleton::UpdateTransforms()
-    // (You can keep this CPU data inside Skeleton and just expose a pointer/span too.)
-    inst.GatherBoneMatricesToCPUBuffer(); // <--- or inline the gather here
-
     const size_t bytes = rec.boneCount * sizeof(DirectX::XMMATRIX);
-    BUFFER_UPLOAD(inst.GetCPUBoneMatrices(), bytes,
+    BUFFER_UPLOAD(inst.GetBoneMatrices().data(), bytes,
         UploadManager::UploadTarget::FromShared(m_boneTransforms),
         rec.transformsView->GetOffset());
 
     //rec.dirty = false;
+}
+
+void SkeletonManager::TickAnimations(float elapsedSeconds) {
+    for (auto& [ptr, rec] : m_instances) {
+        Skeleton* skel = const_cast<Skeleton*>(ptr);
+        skel->UpdateTransforms(elapsedSeconds);
+        rec.dirty = true;
+    }
 }
 
 void SkeletonManager::UpdateAllDirtyInstances() {

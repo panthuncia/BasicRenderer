@@ -382,6 +382,7 @@ void Scene::Update() {
 		entity.set<Components::Scale>(transform.scale);
 	}
 
+	m_managerInterface.GetSkeletonManager()->TickAnimations(elapsed_seconds.count());
 	m_managerInterface.GetSkeletonManager()->UpdateAllDirtyInstances();
 
 	for (auto& scene : m_childScenes) {
