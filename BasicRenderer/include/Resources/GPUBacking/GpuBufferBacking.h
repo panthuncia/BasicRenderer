@@ -2,7 +2,9 @@
 
 #include <stdint.h>
 #include <memory>
+#include <mutex>
 #include <stacktrace>
+#include <unordered_map>
 
 #include <rhi.h>
 #include <resource_states.h>
@@ -30,9 +32,7 @@ public:
 		return sp;
 	}
 
-	~GpuBufferBacking() {
-		DeletionManager::GetInstance().MarkForDelete(std::move(m_bufferAllocation));
-	}
+	~GpuBufferBacking();
 	rhi::HeapType m_accessType;
 	TrackedHandle m_bufferAllocation;
 	//rhi::ResourcePtr m_buffer;
@@ -41,6 +41,9 @@ public:
 
 	rhi::Resource GetAPIResource() { return m_bufferAllocation.GetResource(); }
 	void SetName(const char* name);
+	// Debug helper: dumps any live buffers that haven't been destroyed yet.
+	// If maxSizeBytes is provided, only buffers with size <= maxSizeBytes are reported.
+	static unsigned int DumpLiveBuffers(size_t maxSizeBytes = SIZE_MAX);
 
 	void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) {
 		m_bufferAllocation.ApplyComponentBundle(bundle);
@@ -59,4 +62,17 @@ private:
 		uint64_t owningResourceID,
 		bool unorderedAccess = false,
 		const char* name = nullptr);
+
+	void RegisterLiveAlloc();
+	void UnregisterLiveAlloc();
+	void UpdateLiveAllocName(const char* name);
+
+	struct LiveAllocInfo {
+		size_t size = 0;
+		std::string name;
+		//bool uav = false;
+	};
+
+	static std::mutex s_liveMutex;
+	static std::unordered_map<const GpuBufferBacking*, LiveAllocInfo> s_liveAllocs;
 };

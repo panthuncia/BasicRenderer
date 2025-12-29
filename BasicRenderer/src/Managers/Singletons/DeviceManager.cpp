@@ -9,7 +9,7 @@
 #include "Managers/Singletons/ECSManager.h"
 #include "Resources/ResourceIdentifier.h"
 #include "Utilities/Utilities.h"
-
+#include "Resources/GPUBacking/GpuBufferBacking.h"
 
 rhi::Result DeviceManager::CreateResourceTracked(
     const rhi::ma::AllocationDesc& allocDesc,
@@ -123,7 +123,12 @@ void DeviceManager::Cleanup() {
     char* json = nullptr;
     m_allocator->BuildStatsString(&json, TRUE);
 	spdlog::info("Allocator Stats: {}", json);
-    if (m_allocator) {
+    auto numLiveBuffers = GpuBufferBacking::DumpLiveBuffers(64ull * 1024ull);
+	m_allocator->FreeStatsString(json);
+	if (numLiveBuffers != 0) { // If buffers are alive, allocator cannot be released. The kernel will have to clean up.
+		spdlog::error("DeviceManager Cleanup: {} live buffers were not destroyed before allocator release!", numLiveBuffers);
+    }
+    else {
         m_allocator->ReleaseThis();
         m_allocator = nullptr;
     }
