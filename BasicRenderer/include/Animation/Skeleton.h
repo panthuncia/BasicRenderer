@@ -13,6 +13,7 @@
 
 #include "Animation/Animation.h"
 #include "Animation/AnimationController.h"
+#include "Scene/Components.h"
 
 // Skeleton has two modes:
 //  - Base skeleton (asset/template): immutable data shared across instances
@@ -83,7 +84,8 @@ private:
     // Valid only when m_isBaseSkeleton==true
     std::vector<std::string> m_boneNames;          // bone i name
     std::vector<int32_t>     m_parentIndices;      // bone i parent index, -1 if root
-    std::vector<Matrix>      m_restLocalMatrices;  // bone i rest local matrix
+    //std::vector<Matrix>      m_restLocalMatrices;  // bone i rest local matrix
+	std::vector<Components::Transform> m_restLocalTransforms; // Decomposed rest local transforms
     std::vector<uint32_t>    m_evalOrder;          // parent-before-children order
     std::vector<Matrix>      m_inverseBindMatrices;
     std::vector<Matrix>      m_rootParentGlobals; // Transforms to apply to root nodes based on external hierarchy

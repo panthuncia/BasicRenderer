@@ -80,7 +80,7 @@ Skeleton::Skeleton(const Skeleton& other)
         m_isBaseSkeleton = true;
         m_boneNames = other.m_boneNames;
         m_parentIndices = other.m_parentIndices;
-        m_restLocalMatrices = other.m_restLocalMatrices;
+        m_restLocalTransforms = other.m_restLocalTransforms;
         m_evalOrder = other.m_evalOrder;
         m_inverseBindMatrices = other.m_inverseBindMatrices;
 
@@ -139,7 +139,7 @@ void Skeleton::BuildBaseFromNodes_(const std::vector<flecs::entity>& nodes)
 
     m_boneNames.resize(n);
     m_parentIndices.assign(n, -1);
-    m_restLocalMatrices.resize(n);
+    m_restLocalTransforms.resize(n);
     m_rootParentGlobals.assign(n, XMMatrixIdentity());
     m_evalOrder.clear();
 
@@ -243,6 +243,28 @@ void Skeleton::BuildBaseFromNodes_(const std::vector<flecs::entity>& nodes)
             cur = nextExternalParent(cur);
         }
 
+        // Print chain names and transforms for debugging
+		for (size_t i = 0; i < chain.size(); ++i) {
+            const flecs::entity& e = chain[i];
+            const char* nm = e.name();
+            spdlog::info("  External parent[{}]: '{}' (id={})", i,
+                (nm && nm[0] != '\0') ? nm : "<unnamed>",
+                (uint64_t)e.id());
+			const Matrix local = composeEntityLocalTRS(e);
+			XMFLOAT4X4 matOut;
+			XMStoreFloat4x4(&matOut, local);
+			spdlog::info("    Local matrix:\n"
+				"      {:>8.4} {:>8.4} {:>8.4} {:>8.4}\n"
+				"      {:>8.4} {:>8.4} {:>8.4} {:>8.4}\n"
+				"      {:>8.4} {:>8.4} {:>8.4} {:>8.4}\n"
+				"      {:>8.4} {:>8.4} {:>8.4} {:>8.4}",
+				matOut._11, matOut._12, matOut._13, matOut._14,
+				matOut._21, matOut._22, matOut._23, matOut._24,
+				matOut._31, matOut._32, matOut._33, matOut._34,
+				matOut._41, matOut._42, matOut._43, matOut._44);
+
+        }
+
         // Compose from outermost -> innermost
         Matrix out = XMMatrixIdentity();
         for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
@@ -289,7 +311,7 @@ void Skeleton::BuildBaseFromNodes_(const std::vector<flecs::entity>& nodes)
         if (e.has<Components::Rotation>()) rot = e.get<Components::Rotation>();
         if (e.has<Components::Scale>())    sca = e.get<Components::Scale>();
 
-        m_restLocalMatrices[i] = ComposeTRS_(pos, rot, sca);
+        m_restLocalTransforms[i] = Components::Transform(pos, rot, sca);
     }
 
     BuildEvalOrder_();
@@ -492,14 +514,25 @@ void Skeleton::UpdateTransforms(float elapsedSeconds, bool force)
     for (uint32_t idx : base->m_evalOrder) {
         if (idx >= boneCount) continue;
 
-        Matrix local = base->m_restLocalMatrices[idx];
+        Components::Transform localTrs = (idx < base->m_restLocalTransforms.size()) ? base->m_restLocalTransforms[idx] : Components::Transform{};
 
-        // If a clip is bound, use animated local TRS
+        // If a clip is bound, use animated channels and preserve rest for missing ones
         auto& ctrl = m_controllers[idx];
         if (ctrl.animationClip) {
+            const auto& clip = ctrl.animationClip;
             const auto& trs = ctrl.GetUpdatedTransform(elapsedSeconds, force);
-            local = ComposeTRS_(trs);
+            if (!clip->positionKeyframes.empty()) {
+                localTrs.pos = trs.pos;
+            }
+            if (!clip->rotationKeyframes.empty()) {
+                localTrs.rot = trs.rot;
+            }
+            if (!clip->scaleKeyframes.empty()) {
+                localTrs.scale = trs.scale;
+            }
         }
+        Matrix local = ComposeTRS_(localTrs);
+
 
         const int32_t p = base->m_parentIndices[idx];
         if (p < 0) {
