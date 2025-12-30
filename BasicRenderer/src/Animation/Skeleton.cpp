@@ -18,7 +18,7 @@ Skeleton::Matrix Skeleton::ComposeTRS_(const Components::Position& p,
     XMMATRIX R = XMMatrixRotationQuaternion(r.rot);
     XMMATRIX T = XMMatrixTranslationFromVector(p.pos);
 
-    return XMMatrixMultiply(XMMatrixMultiply(S, R), T);
+    return S * R * T;
 }
 
 Skeleton::Matrix Skeleton::ComposeTRS_(const Components::Transform& t)
@@ -133,11 +133,14 @@ std::shared_ptr<Skeleton> Skeleton::GetBaseSkeletonShared() const
 
 void Skeleton::BuildBaseFromNodes_(const std::vector<flecs::entity>& nodes)
 {
+    using namespace DirectX;
+
     const size_t n = nodes.size();
 
     m_boneNames.resize(n);
     m_parentIndices.assign(n, -1);
     m_restLocalMatrices.resize(n);
+    m_rootParentGlobals.assign(n, XMMatrixIdentity());
     m_evalOrder.clear();
 
     // Map flecs entity id -> bone index
@@ -148,7 +151,108 @@ void Skeleton::BuildBaseFromNodes_(const std::vector<flecs::entity>& nodes)
         idToIndex[nodes[i].id()] = i;
     }
 
-    // Extract name, parent index, and rest local matrix
+    auto isBoneEntity = [&](const flecs::entity& ent) -> bool {
+        if (!ent.is_valid()) return false;
+        return idToIndex.find(ent.id()) != idToIndex.end();
+        };
+
+    auto composeEntityLocalTRS = [&](const flecs::entity& ent) -> Matrix {
+        Components::Position pos{};
+        Components::Rotation rot{};
+        Components::Scale    sca{};
+
+        if (ent.has<Components::Position>()) pos = ent.get<Components::Position>();
+        if (ent.has<Components::Rotation>()) rot = ent.get<Components::Rotation>();
+        if (ent.has<Components::Scale>())    sca = ent.get<Components::Scale>();
+
+        return ComposeTRS_(pos, rot, sca);
+        };
+
+    // Next link in the "external parent chain":
+    // - returns parent entity if valid and NOT a bone
+    // - returns invalid if parent is invalid OR parent is a bone (stop before entering skeleton)
+    auto nextExternalParent = [&](const flecs::entity& ent) -> flecs::entity {
+        if (!ent.is_valid()) return flecs::entity{};
+        flecs::entity p = ent.parent();
+        if (!p.is_valid()) return flecs::entity{};
+        if (isBoneEntity(p)) return flecs::entity{};
+        return p;
+        };
+
+    auto computeExternalParentGlobal = [&](flecs::entity parentEnt) -> Matrix {
+        if (!parentEnt.is_valid()) return XMMatrixIdentity();
+        if (isBoneEntity(parentEnt)) return XMMatrixIdentity();
+
+		// Cycle detection using Floyd's Tortoise and Hare algorithm- maybe overkill but robust
+        flecs::entity tort = parentEnt;
+        flecs::entity hare = parentEnt;
+        flecs::entity meet = flecs::entity{};
+
+        for (;;) {
+            tort = nextExternalParent(tort);
+            if (!tort.is_valid()) break;
+
+            hare = nextExternalParent(hare);
+            if (!hare.is_valid()) break;
+            hare = nextExternalParent(hare);
+            if (!hare.is_valid()) break;
+
+            if (tort.id() == hare.id()) {
+                meet = tort;
+                break;
+            }
+        }
+
+        // If a cycle exists, find the entry point and truncate before entering it
+        flecs::entity cycleEntry = flecs::entity{};
+        if (meet.is_valid()) {
+            flecs::entity a = parentEnt;
+            flecs::entity b = meet;
+            while (a.is_valid() && b.is_valid() && a.id() != b.id()) {
+                a = nextExternalParent(a);
+                b = nextExternalParent(b);
+            }
+            if (a.is_valid() && b.is_valid() && a.id() == b.id()) {
+                cycleEntry = a;
+                const char* nm = cycleEntry.name();
+                spdlog::warn(
+                    "Skeleton: cycle detected in external-parent chain at entity '{}' (id={}). "
+                    "Truncating chain before cycle.",
+                    (nm && nm[0] != '\0') ? nm : "<unnamed>",
+                    (uint64_t)cycleEntry.id());
+            }
+            else {
+                spdlog::warn("Skeleton: cycle detected in external-parent chain, but failed to locate cycle entry. Ignoring chain.");
+                return XMMatrixIdentity();
+            }
+        }
+
+        // Collect chain nodes from immediate parent upward, stopping at:
+        // - bone boundary (nextExternalParent returns invalid)
+        // - invalid
+        // - cycle entry (exclusive) if cycle detected
+        std::vector<flecs::entity> chain;
+        chain.reserve(8);
+
+        flecs::entity cur = parentEnt;
+        while (cur.is_valid() && !isBoneEntity(cur)) {
+            if (cycleEntry.is_valid() && cur.id() == cycleEntry.id()) {
+                break; // truncate before the cycle begins
+            }
+            chain.push_back(cur);
+            cur = nextExternalParent(cur);
+        }
+
+        // Compose from outermost -> innermost
+        Matrix out = XMMatrixIdentity();
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+            const Matrix local = composeEntityLocalTRS(*it);
+            out = XMMatrixMultiply(local, out);
+        }
+        return out;
+        };
+
+    // Extract name, parent index, rest local matrix, and root external-parent global
     for (uint32_t i = 0; i < (uint32_t)n; ++i) {
         const flecs::entity& e = nodes[i];
 
@@ -170,6 +274,10 @@ void Skeleton::BuildBaseFromNodes_(const std::vector<flecs::entity>& nodes)
             if (it != idToIndex.end()) {
                 m_parentIndices[i] = (int32_t)it->second;
             }
+            else {
+                // Bone root with external parent chain
+                m_rootParentGlobals[i] = computeExternalParentGlobal(p);
+            }
         }
 
         // Rest local TRS (fallback to identity if missing)
@@ -186,6 +294,7 @@ void Skeleton::BuildBaseFromNodes_(const std::vector<flecs::entity>& nodes)
 
     BuildEvalOrder_();
 }
+
 
 void Skeleton::BuildEvalOrder_()
 {
@@ -394,7 +503,11 @@ void Skeleton::UpdateTransforms(float elapsedSeconds, bool force)
 
         const int32_t p = base->m_parentIndices[idx];
         if (p < 0) {
-            m_boneMatrices[idx] = local;
+            Matrix rootParent = DirectX::XMMatrixIdentity();
+            if (idx < base->m_rootParentGlobals.size()) {
+                rootParent = base->m_rootParentGlobals[idx];
+            }
+            m_boneMatrices[idx] = DirectX::XMMatrixMultiply(local, rootParent);
         }
         else {
             m_boneMatrices[idx] = DirectX::XMMatrixMultiply(local, m_boneMatrices[(uint32_t)p]);

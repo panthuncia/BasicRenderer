@@ -294,13 +294,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
     renderer.GetCurrentScene()->AppendScene(carScene->Clone());
     renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
-    renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 	//renderer.GetCurrentScene()->AppendScene(shiba->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(bistro->Clone());
     //renderer.GetCurrentScene()->AppendScene(wine->Clone());
     
-	renderer.GetCurrentScene()->AppendScene(robot->Clone());
+	//renderer.GetCurrentScene()->AppendScene(robot->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
 

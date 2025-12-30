@@ -171,6 +171,7 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 				auto skinInst = meshInstance->GetSkin();
 				m_managerInterface.GetSkeletonManager()->AcquireSkinningInstance(skinInst);
 				meshInstance->SetSkinningInstanceSlot(skinInst->GetSkinningInstanceSlot());
+				skinInst->SetAnimation(0); // TODO: Animation selection
 			}
 
 			// Increment material usage count
@@ -385,9 +386,9 @@ void Scene::Update() {
 	m_managerInterface.GetSkeletonManager()->TickAnimations(elapsed_seconds.count());
 	m_managerInterface.GetSkeletonManager()->UpdateAllDirtyInstances();
 
-	for (auto& scene : m_childScenes) {
-		scene->Update();
-	}
+	//for (auto& scene : m_childScenes) {
+	//	scene->Update();
+	//}
     PostUpdate();
 }
 

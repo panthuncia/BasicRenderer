@@ -86,6 +86,7 @@ private:
     std::vector<Matrix>      m_restLocalMatrices;  // bone i rest local matrix
     std::vector<uint32_t>    m_evalOrder;          // parent-before-children order
     std::vector<Matrix>      m_inverseBindMatrices;
+    std::vector<Matrix>      m_rootParentGlobals; // Transforms to apply to root nodes based on external hierarchy
 
     // Animation library (base)
 public:
