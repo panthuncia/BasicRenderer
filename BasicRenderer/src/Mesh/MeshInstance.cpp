@@ -42,7 +42,7 @@ void MeshInstance::SetBufferViewUsingBaseMesh(std::unique_ptr<BufferView> perMes
 
 void MeshInstance::SetSkeleton(std::shared_ptr<Skeleton> skeleton) {
 	m_skeleton = skeleton;
-	m_perMeshInstanceBufferData.boneTransformBufferIndex = skeleton->GetTransformsBufferIndex();
+	m_perMeshInstanceBufferData.skinningInstanceSlot = skeleton->GetSkinningInstanceSlot();
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
 	}
@@ -76,6 +76,13 @@ void MeshInstance::SetPerObjectBufferIndex(uint32_t index) {
 }
 void MeshInstance::SetPerMeshBufferIndex(uint32_t index) {
 	m_perMeshInstanceBufferData.perMeshBufferIndex = index;
+	if (m_pCurrentMeshManager && m_perMeshInstanceBufferView) {
+		m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
+	}
+}
+
+void MeshInstance::SetSkinningInstanceSlot(uint32_t slot) {
+	m_perMeshInstanceBufferData.skinningInstanceSlot = slot;
 	if (m_pCurrentMeshManager && m_perMeshInstanceBufferView) {
 		m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
 	}

@@ -5,9 +5,7 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "Resources/Texture.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Resources/PixelBuffer.h"
@@ -28,7 +26,30 @@ ASU1 mips
 class DownsamplePass : public ComputePass {
 public:
 
-    DownsamplePass() {}
+    DownsamplePass()
+    {
+        m_pDownsampleConstants = LazyDynamicStructuredBuffer<spdConstants>::CreateShared(1, "Downsample constants");
+
+        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+        lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
+        depthQuery = ecsWorld.query_builder<Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
+        // For each existing depth map, allocate a downsample constant
+        depthQuery.each([&](flecs::entity e, Components::DepthMap shadowMap) {
+            AddMapInfo(e, shadowMap);
+            });
+
+        addObserver = ecsWorld.observer<Components::DepthMap>()
+            .event(flecs::OnSet)
+            .each([&](flecs::entity e, const Components::DepthMap& p) {
+            AddMapInfo(e, p);
+                });
+
+        removeObserver = ecsWorld.observer<Components::DepthMap>()
+            .event(flecs::OnRemove)
+            .each([&](flecs::entity e, const Components::DepthMap& p) {
+            RemoveMapInfo(e);
+                });
+    }
     ~DownsamplePass() {
 		addObserver.destruct(); // Needed for clean shutdown
 		removeObserver.destruct();
@@ -40,28 +61,7 @@ public:
     }
 
     void Setup() override {
-        m_pDownsampleConstants = ResourceManager::GetInstance().CreateIndexedLazyDynamicStructuredBuffer<spdConstants>(1, L"Downsample constants");
-		m_pLinearDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
-
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-        lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
-		depthQuery = ecsWorld.query_builder<Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
-        // For each existing depth map, allocate a downsample constant
-        depthQuery.each([&](flecs::entity e, Components::DepthMap shadowMap) {
-			AddMapInfo(e, shadowMap);
-            });
-
-        addObserver = ecsWorld.observer<Components::DepthMap>()
-            .event(flecs::OnSet)
-            .each([&](flecs::entity e, const Components::DepthMap& p) {
-			AddMapInfo(e, p);
-                });
-
-        removeObserver = ecsWorld.observer<Components::DepthMap>()
-            .event(flecs::OnRemove)
-            .each([&](flecs::entity e, const Components::DepthMap& p) {
-			RemoveMapInfo(e);
-                });
+		m_pLinearDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
 
 		m_numDirectionalCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
         CreateDownsampleComputePSO();
@@ -176,7 +176,7 @@ private:
     unsigned int m_numDirectionalCascades = 0;
 
     std::shared_ptr<LazyDynamicStructuredBuffer<spdConstants>> m_pDownsampleConstants;
-    std::shared_ptr<PixelBuffer> m_pLinearDepthBuffer = nullptr;
+    PixelBuffer* m_pLinearDepthBuffer = nullptr;
 
     PipelineState downsamplePassPSO;
 	PipelineState downsampleArrayPSO;
@@ -252,7 +252,7 @@ private:
         mapInfo.pConstantsBufferView = view;
         mapInfo.dispatchThreadGroupCountXY[0] = threadGroupCountXY[0];
         mapInfo.dispatchThreadGroupCountXY[1] = threadGroupCountXY[1];
-        mapInfo.pCounterResource = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(1, sizeof(unsigned int)*6*6, true); // 6 ints per slice, up to 6 slices
+        mapInfo.pCounterResource = CreateIndexedStructuredBuffer(1, sizeof(unsigned int)*6*6, true); // 6 ints per slice, up to 6 slices
         m_perViewMapInfo[e.id()] = mapInfo;
     }
 

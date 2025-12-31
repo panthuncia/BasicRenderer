@@ -13,22 +13,23 @@
 #include "../../generated/BuiltinResources.h"
 #include "Materials/Material.h"
 #include "Resources/components.h"
+#include "Resources/MemoryStatisticsComponents.h"
 
 ObjectManager::ObjectManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
-	m_perObjectBuffers = resourceManager.CreateIndexedDynamicBuffer(sizeof(PerObjectCB), 1, L"perObjectBuffers<PerObjectCB>");
-	m_masterIndirectCommandsBuffer = resourceManager.CreateIndexedDynamicBuffer(sizeof(DispatchMeshIndirectCommand), 1, L"masterIndirectCommandsBuffer<IndirectCommand>");
+	m_perObjectBuffers = DynamicBuffer::CreateShared(sizeof(PerObjectCB), 1, "perObjectBuffers<PerObjectCB>");
+	m_masterIndirectCommandsBuffer = DynamicBuffer::CreateShared(sizeof(DispatchMeshIndirectCommand), 1, "masterIndirectCommandsBuffer<IndirectCommand>");
 
-	m_normalMatrixBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>(1, L"preSkinningNormalMatrixBuffer");
+	m_normalMatrixBuffer = LazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>::CreateShared(1, "normalMatrixBuffer");
 
-	//m_activeDrawSetIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(1, L"activeOpaqueDrawSetIndices");
+	m_perObjectBuffers->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "PerMesh, PerMeshInstance, PerObject" }));
+	m_normalMatrixBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "PerMesh, PerMeshInstance, PerObject" }));
+
+	m_masterIndirectCommandsBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Indirect command buffers" }));
 
 	m_resources[Builtin::PerObjectBuffer] = m_perObjectBuffers;
 	m_resources[Builtin::NormalMatrixBuffer] = m_normalMatrixBuffer;
 	m_resources[Builtin::IndirectCommandBuffers::Master] = m_masterIndirectCommandsBuffer;
-	//m_resources[Builtin::ActiveDrawSetIndices::Opaque] = m_activeOpaqueDrawSetIndices;
-	//m_resources[Builtin::ActiveDrawSetIndices::AlphaTest] = m_activeAlphaTestDrawSetIndices;
-	//m_resources[Builtin::ActiveDrawSetIndices::Blend] = m_activeBlendDrawSetIndices;
 }
 Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObjectCB, const Components::MeshInstances* meshInstances) {
 
@@ -64,7 +65,8 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 			indices.push_back(index);
 			auto materialFlags = meshInstance->GetMesh()->material->Technique().compileFlags;
 			if (!m_activeDrawSetIndices.contains(materialFlags)) {
-				m_activeDrawSetIndices[materialFlags] = ResourceManager::GetInstance().CreateIndexedSortedUnsignedIntBuffer(1, L"activeDrawSetIndices(flags=" + std::to_wstring(static_cast<uint64_t>(materialFlags)) + L")");
+				m_activeDrawSetIndices[materialFlags] = SortedUnsignedIntBuffer::CreateShared(1, "activeDrawSetIndices(flags=" + std::to_string(static_cast<uint64_t>(materialFlags)) + ")");
+				m_activeDrawSetIndices[materialFlags]->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "PerMesh, PerMeshInstance, PerObject" }));
 				auto& buf = m_activeDrawSetIndices[materialFlags];
 				buf->GetECSEntity().add<Components::IsActiveDrawSetIndices>();
 				buf->GetECSEntity().set<Components::Resource>({ buf });
@@ -100,8 +102,6 @@ void ObjectManager::RemoveObject(const Components::ObjectDrawInfo* drawInfo) {
 #endif // _DEBUG
 
 	m_perObjectBuffers->Deallocate(drawInfo->perObjectCBView.get());
-
-	DeletionManager::GetInstance().MarkForDelete(drawInfo->perObjectCBView);
 
 	// Remove the object's draw set commands from the draw set buffers
 	auto& views = drawInfo;

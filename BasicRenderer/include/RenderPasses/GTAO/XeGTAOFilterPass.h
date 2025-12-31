@@ -3,21 +3,21 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "Resources/Texture.h"
-#include "Managers/Singletons/SettingsManager.h"
-#include "Managers/Singletons/UploadManager.h"
 
 class GTAOFilterPass : public ComputePass {
 public:
-    GTAOFilterPass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer) : m_pGTAOConstantBuffer(pGTAOConstantBuffer) {}
+    GTAOFilterPass() {
+        CreateXeGTAOComputePSO();
+    }
 
     void Setup() override {
-		CreateXeGTAOComputePSO();
+        RegisterCBV("Builtin::GTAO::ConstantsBuffer");
     }
 
     void DeclareResourceUsages(ComputePassBuilder* builder){
         builder->WithShaderResource(Builtin::GBuffer::Normals, Builtin::PrimaryCamera::DepthTexture)
-            .WithUnorderedAccess(Builtin::GTAO::WorkingDepths);
+            .WithUnorderedAccess(Builtin::GTAO::WorkingDepths)
+            .WithConstantBuffer("Builtin::GTAO::ConstantsBuffer");
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -30,11 +30,8 @@ public:
 		commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
 		commandList.BindPipeline(PrefilterDepths16x16PSO.GetAPIPipelineState().GetHandle());
 
-        unsigned int passConstants[NumMiscUintRootConstants] = {};
-        passConstants[0] = m_pGTAOConstantBuffer->GetCBVInfo().slot.index;
+        BindResourceDescriptorIndices(commandList, PrefilterDepths16x16PSO.GetResourceDescriptorSlots());
 
-		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, passConstants);
-        
         // Dispatch
         // note: in CSPrefilterDepths16x16 each is thread group handles a 16x16 block (with [numthreads(8, 8, 1)] and each logical thread handling a 2x2 block)
 		unsigned int x = (context.renderResolution.x + 16 - 1) / 16;
@@ -49,7 +46,6 @@ public:
     }
 
 private:
-    std::shared_ptr<GloballyIndexedResource> m_pGTAOConstantBuffer;
 
     PipelineState PrefilterDepths16x16PSO;
 

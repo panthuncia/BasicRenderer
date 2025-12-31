@@ -2,20 +2,18 @@
 
 #include <memory>
 
-#include <rhi.h>
 
 #include "Render/RenderContext.h"
 #include "Resources/GloballyIndexedResource.h"
+#include "Resources/GPUBacking/GpuBufferBacking.h"
 
-class Buffer;
 class BufferView;
-
-class Buffer;
 
 class DynamicBufferBase : public GloballyIndexedResource {
 public:
     DynamicBufferBase() {}
-    std::shared_ptr<Buffer> m_dataBuffer = nullptr;
+	// Engine representation of a GPU buffer- owns a handle to the actual GPU resource.
+    std::unique_ptr<GpuBufferBacking> m_dataBuffer = nullptr;
 
 protected:
 };

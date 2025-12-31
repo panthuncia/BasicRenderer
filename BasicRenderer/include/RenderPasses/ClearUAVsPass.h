@@ -1,21 +1,36 @@
 #pragma once
 
 #include "RenderPasses/Base/RenderPass.h"
-#include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "Utilities/Utilities.h"
-#include "Render/IndirectCommand.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Scene/Scene.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Scene/Components.h"
+#include "boost/container_hash/hash.hpp"
+
+struct ClearIndirectDrawCommandUAVPassInputs {
+	bool clearBlend;
+
+	friend bool operator==(const ClearIndirectDrawCommandUAVPassInputs&, const ClearIndirectDrawCommandUAVPassInputs&) = default;
+};
+
+inline rg::Hash64 HashValue(const ClearIndirectDrawCommandUAVPassInputs& i) {
+	std::size_t seed = 0;
+
+	boost::hash_combine(seed, i.clearBlend);
+	return seed;
+}
+
 
 class ClearIndirectDrawCommandUAVsPass : public RenderPass {
 public:
-	ClearIndirectDrawCommandUAVsPass(bool clearBlend) : m_clearBlend(clearBlend) {}
+	ClearIndirectDrawCommandUAVsPass() {}
 
 	void DeclareResourceUsages(RenderPassBuilder* builder) override {
+		auto inputs = Inputs<ClearIndirectDrawCommandUAVPassInputs>();
+		m_clearBlend = inputs.clearBlend;
+
 		auto ecsWorld = ECSManager::GetInstance().GetWorld();
 		auto blendEntity = ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::OITAccumulationPass);
 		m_nonBlendQuery = ECSResourceResolver(ecsWorld.query_builder<>()
@@ -33,6 +48,7 @@ public:
 	}
   
 	void Setup() override {
+
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
 
@@ -94,7 +110,7 @@ public:
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
 
-		m_meshletCullingCommandBuffers = m_resourceRegistryView->Request<ResourceGroup>(Builtin::IndirectCommandBuffers::MeshletCulling);
+		m_meshletCullingCommandBuffers = m_resourceRegistryView->RequestPtr<ResourceGroup>(Builtin::IndirectCommandBuffers::MeshletCulling);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -122,5 +138,5 @@ private:
 	flecs::query<Components::LightViewInfo> lightQuery;
 	ComPtr<ID3D12PipelineState> m_PSO;
 
-	std::shared_ptr<ResourceGroup> m_meshletCullingCommandBuffers;
+	ResourceGroup* m_meshletCullingCommandBuffers;
 };

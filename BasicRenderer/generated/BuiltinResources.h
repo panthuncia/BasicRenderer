@@ -96,5 +96,10 @@ struct Builtin {
     inline static constexpr std::string_view LinearShadowMaps = "Builtin::Shadows::LinearShadowMaps";
     inline static constexpr std::string_view ShadowMaps = "Builtin::Shadows::ShadowMaps";
   };
+  struct SkeletonResources {
+    inline static constexpr std::string_view BoneTransforms = "Builtin::SkeletonResources::BoneTransforms";
+    inline static constexpr std::string_view InverseBindMatrices = "Builtin::SkeletonResources::InverseBindMatrices";
+    inline static constexpr std::string_view SkinningInstanceInfo = "Builtin::SkeletonResources::SkinningInstanceInfo";
+  };
 };
 

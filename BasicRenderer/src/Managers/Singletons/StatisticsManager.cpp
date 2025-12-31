@@ -1,8 +1,11 @@
 #include "Managers/Singletons/StatisticsManager.h"
-#include "Managers/Singletons/DeviceManager.h"
-#include "Managers/Singletons/SettingsManager.h"
+
 #include <algorithm>
 #include <rhi_helpers.h>
+#include <spdlog/spdlog.h>
+
+#include "Managers/Singletons/DeviceManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 
 StatisticsManager& StatisticsManager::GetInstance() {
     static StatisticsManager inst;
@@ -60,27 +63,27 @@ void StatisticsManager::SetupQueryHeap() {
 	rhi::QueryPoolDesc tq;
     tq.type = rhi::QueryType::Timestamp;
     tq.count = m_numPasses * 2 * m_numFramesInFlight;
-    m_timestampPool = device.CreateQueryPool(tq);
+    auto result = device.CreateQueryPool(tq, m_timestampPool);
 
 	rhi::QueryPoolDesc sq;
 	sq.type = rhi::QueryType::PipelineStatistics;
 	sq.count = m_numPasses * m_numFramesInFlight;
 	sq.statsMask = rhi::PipelineStatBits::PS_MeshInvocations | rhi::PipelineStatBits::PS_MeshPrimitives;
-	m_pipelineStatsPool = device.CreateQueryPool(sq);
+	result = device.CreateQueryPool(sq, m_pipelineStatsPool);
 
 
     // Allocate readback buffers for each queue
     auto tsInfo = m_timestampPool->GetQueryResultInfo();
     auto psInfo = m_pipelineStatsPool->GetQueryResultInfo();
 
-    rhi::ResourceDesc tsRb = rhi::helpers::ResourceDesc::Buffer(uint64_t(tsInfo.elementSize) * tsInfo.count, rhi::Memory::Readback);
-    rhi::ResourceDesc psRb = rhi::helpers::ResourceDesc::Buffer(uint64_t(psInfo.elementSize) * psInfo.count, rhi::Memory::Readback);
+    rhi::ResourceDesc tsRb = rhi::helpers::ResourceDesc::Buffer(static_cast<uint64_t>(tsInfo.elementSize) * tsInfo.count, rhi::HeapType::Readback);
+    rhi::ResourceDesc psRb = rhi::helpers::ResourceDesc::Buffer(static_cast<uint64_t>(psInfo.elementSize) * psInfo.count, rhi::HeapType::Readback);
 
     for (auto& kv : m_timestampBuffers) {
         auto& buf = kv.second;
-        buf = device.CreateCommittedResource(tsRb);
+        result = device.CreateCommittedResource(tsRb, buf);
         auto& mb = m_meshStatsBuffers[kv.first];
-        mb = std::move(device.CreateCommittedResource(psRb));
+        result = std::move(device.CreateCommittedResource(psRb, mb));
 	}
 
     m_timestampQueryInfo = m_timestampPool->GetQueryResultInfo();

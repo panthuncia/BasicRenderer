@@ -108,3 +108,16 @@ rhi::Queue* CommandRecordingManager::Queue(QueueKind qk) const {
     qk = const_cast<CommandRecordingManager*>(this)->resolve(qk);
     return m_bind[static_cast<size_t>(qk)].queue;
 }
+
+void CommandRecordingManager::ShutdownThreadLocal() {
+    auto& tls = s_tls;
+
+    for (auto& ctx : tls.ctxs) {
+        // NOTE: this does NOT Flush(). It just releases refs owned by TLS.
+        // Only call this when you know there are no in-flight command lists
+        // for this thread (after device idle).
+        ctx.reset_soft();
+    }
+
+    tls.cachedEpoch = ~0u;
+}

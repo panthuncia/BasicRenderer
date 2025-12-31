@@ -3,7 +3,7 @@
 
 #include <directx/d3d12.h>
 #include <rhi.h>
-#include <rhi_interop.h>
+#include <rhi_interop_dx12.h>
 #include <memory>
 #include <imgui.h>
 #include <imgui_impl_win32.h>
@@ -16,6 +16,7 @@
 #include <flecs.h>
 #include <vector>
 #include <algorithm>
+#include <chrono>
 
 #include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"
@@ -26,21 +27,191 @@
 #include "Managers/Singletons/StatisticsManager.h"
 #include "Managers/Singletons/UpscalingManager.h"
 #include "Menu/RenderGraphInspector.h"
+#include "Menu/MemoryIntrospectionWidget.h"
+#include "Resources/MemoryStatisticsComponents.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-//struct FrameContext {
-//    ID3D12CommandAllocator* CommandAllocator;
-//    UINT64                  FenceValue;
-//};
+static inline const char* MajorCategory(rhi::ResourceType t) {
+    using RT = rhi::ResourceType;
+    switch (t) {
+    case RT::Buffer:                return "Buffers";
+    case RT::Texture1D:             return "Textures";
+    case RT::Texture2D:             return "Textures";
+    case RT::Texture3D:             return "Textures";
+    case RT::AccelerationStructure: return "AccelStructs";
+    default:                        return "Other";
+    }
+}
 
-//static UINT g_frameIndex = 0;
-static HANDLE g_hSwapChainWaitableObject = nullptr;
-//constexpr unsigned int NUM_FRAMES_IN_FLIGHT = 3;
-//static FrameContext g_frameContext[NUM_FRAMES_IN_FLIGHT] = {};
-//static ID3D12Fence* g_fence = nullptr;
-//static HANDLE g_fenceEvent = nullptr;
-//static UINT64 g_fenceLastSignaledValue = 0;
+struct PerResourceMemInfo {
+    uint64_t bytes = 0;
+    std::string category; // "Textures/Material", etc.
+    std::string name;     // optional
+};
+
+using PerResourceMemIndex = std::unordered_map<uint64_t, PerResourceMemInfo>;
+
+static void BuildMemorySnapshotFromFlecs(
+    ui::MemorySnapshot& out,
+    flecs::query<const MemoryStatisticsComponents::MemSizeBytes>& q,
+    PerResourceMemIndex* outIndex /*= nullptr*/)
+{
+    out.categories.clear();
+    out.resources.clear();
+    out.totalBytes = 0;
+
+    std::unordered_map<std::string, uint64_t> minorBuckets;
+    minorBuckets.reserve(256);
+
+    if (outIndex) { outIndex->clear(); outIndex->reserve(2048); }
+
+    q.each([&](flecs::entity e, const MemoryStatisticsComponents::MemSizeBytes& sz) {
+        auto rt = e.try_get<MemoryStatisticsComponents::ResourceType>();
+        auto rname = e.try_get<MemoryStatisticsComponents::ResourceName>();
+        auto rid = e.try_get<MemoryStatisticsComponents::ResourceID>();
+        auto use = e.try_get<MemoryStatisticsComponents::ResourceUsage>();
+
+        const uint64_t bytes = sz.size;
+        out.totalBytes += bytes;
+
+        const char* major = rt ? MajorCategory(rt->type)
+            : MajorCategory(rhi::ResourceType::Unknown);
+
+        const char* usage = (use && !use->usage.empty()) ? use->usage.c_str()
+            : "Unspecified";
+
+        const std::string cat = std::string(major) + "/" + usage;
+
+        minorBuckets[cat] += bytes;
+
+        // Per-resource row (unchanged)
+        ui::MemoryResourceRow row{};
+        row.bytes = bytes;
+        row.uid = rid ? rid->id : 0;
+
+        if (rname && !rname->name.empty()) row.name = rname->name;
+        else if (rid) row.name = "Resource " + std::to_string((unsigned long long)rid->id);
+        else row.name = "Unknown resource";
+
+        row.type = cat;
+        out.resources.push_back(row);
+
+        // NEW: per-resource index entry (this is what the frame-graph builder will use)
+        if (outIndex && rid) {
+            auto& info = (*outIndex)[rid->id];
+            info.bytes = bytes;
+            info.category = cat;
+            if (rname && !rname->name.empty()) info.name = rname->name;
+        }
+        });
+
+    out.categories.reserve(minorBuckets.size());
+    for (auto& [label, bytes] : minorBuckets) {
+        if (bytes) out.categories.push_back({ label, bytes });
+    }
+
+    std::sort(out.categories.begin(), out.categories.end(),
+        [](auto const& a, auto const& b) { return a.bytes > b.bytes; });
+}
+
+struct MemInfo {
+    uint64_t bytes = 0;
+    std::string name; // from ResourceIdentifier.name (string ID)
+};
+
+static void BuildIdToMemInfoIndex(
+    std::unordered_map<uint64_t, MemInfo>& out,
+    flecs::query<const MemoryStatisticsComponents::MemSizeBytes>& q)
+{
+    out.clear();
+    out.reserve(2048);
+
+    q.each([&](flecs::entity e, const MemoryStatisticsComponents::MemSizeBytes& sz) {
+        auto rid = e.try_get<MemoryStatisticsComponents::ResourceID>();
+        if (!rid) return; // can't join without numeric id
+
+        MemInfo info;
+        info.bytes = sz.size;
+
+        if (auto ident = e.try_get<ResourceIdentifier>()) {
+            // ident->name should already be "A::B::C"
+            info.name = ident->name;
+        }
+
+        out[rid->id] = std::move(info);
+        });
+}
+
+static void BuildFrameGraphSnapshotFromBatches(
+    ui::FrameGraphSnapshot& out,
+    const std::vector<RenderGraph::PassBatch>& batches,
+    const PerResourceMemIndex& memIndex)
+{
+    out.batches.clear();
+    out.batches.reserve(batches.size());
+
+    std::unordered_set<uint64_t> uniqueIds;
+    uniqueIds.reserve(2048);
+
+    std::unordered_map<std::string, uint64_t> catSum;
+    catSum.reserve(64);
+
+    for (int bi = 0; bi < (int)batches.size(); ++bi) {
+        const auto& b = batches[bi];
+
+        uniqueIds.clear();
+
+        auto scanTransitions = [&](const std::vector<ResourceTransition>& v) {
+            for (auto& t : v) {
+                if (!t.pResource) continue;
+                uniqueIds.insert(t.pResource->GetGlobalResourceID());
+            }
+            };
+
+        scanTransitions(b.renderTransitions);
+        scanTransitions(b.computeTransitions);
+        scanTransitions(b.batchEndTransitions);
+
+        for (auto id : b.allResources) uniqueIds.insert(id);
+        for (auto id : b.internallyTransitionedResources) uniqueIds.insert(id);
+
+        uint64_t footprint = 0;
+        catSum.clear();
+
+        uint64_t missingBytes = 0;
+
+        for (uint64_t id : uniqueIds) {
+            auto it = memIndex.find(id);
+            if (it == memIndex.end()) {
+                // ?
+                continue;
+            }
+
+            footprint += it->second.bytes;
+            catSum[it->second.category] += it->second.bytes;
+        }
+
+        ui::FrameGraphBatchRow row{};
+        row.label = "Batch " + std::to_string(bi);
+        row.footprintBytes = footprint;
+        row.hasEndTransitions = !b.batchEndTransitions.empty();
+
+        row.passNames.reserve(b.computePasses.size() + b.renderPasses.size());
+        for (auto const& p : b.computePasses) row.passNames.push_back(p.name);
+        for (auto const& p : b.renderPasses)  row.passNames.push_back(p.name);
+
+        row.categories.reserve(catSum.size());
+        for (auto& [label, bytes] : catSum) {
+            row.categories.push_back({ label, bytes });
+        }
+        std::sort(row.categories.begin(), row.categories.end(),
+            [](auto const& a, auto const& b) { return a.bytes > b.bytes; });
+
+        out.batches.push_back(std::move(row));
+    }
+}
+
 
 class Menu {
 public:
@@ -49,9 +220,11 @@ public:
     void Initialize(HWND hwnd, IDXGISwapChain3* swapChain);
     void Render(RenderContext& context);
     bool HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
-	void SetRenderGraph(std::shared_ptr<RenderGraph> renderGraph) { m_renderGraph = renderGraph; }
+	void SetRenderGraph(RenderGraph* renderGraph) { m_renderGraph = renderGraph; }
     void Cleanup() {
 		m_settingSubscriptions.clear();
+        m_memQuery = {}; // Destruct query before ECS world dies
+		m_sizeQuery = {};
     }
 
 private:
@@ -61,15 +234,16 @@ private:
 		ImPlot::CreateContext();
     };
 	IDXGISwapChain3* m_pSwapChain = nullptr;
-    //Microsoft::WRL::ComPtr<ID3D12Device> device = nullptr;
-    //Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue = nullptr;
-	//Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
+	
+    flecs::query<const MemoryStatisticsComponents::MemSizeBytes> m_memQuery;
+	flecs::query<const MemoryStatisticsComponents::MemSizeBytes,
+        const MemoryStatisticsComponents::ResourceID> m_sizeQuery =
+        ECSManager::GetInstance().GetWorld().query<const MemoryStatisticsComponents::MemSizeBytes,
+        const MemoryStatisticsComponents::ResourceID>();
 
-    flecs::entity selectedNode;
+	flecs::entity selectedNode;
 
-	std::weak_ptr<RenderGraph> m_renderGraph;
-
-    //FrameContext* WaitForNextFrameResources();
+	RenderGraph* m_renderGraph;
 
     int FindFileIndex(const std::vector<std::string>& hdrFiles, const std::string& existingFile);
 
@@ -84,6 +258,8 @@ private:
     void DisplaySceneGraph();
     void DisplaySelectedNode();
     void DrawPassTimingWindow();
+
+    std::chrono::steady_clock::time_point m_startTime = std::chrono::steady_clock::now();
 
 	bool m_meshShadersSupported = false;
     
@@ -202,7 +378,7 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     environmentsDir = std::filesystem::path(GetExePath()) / "textures" / "environment";
 
 	auto device = DeviceManager::GetInstance().GetDevice();
-	g_pd3dSrvDescHeap = device.CreateDescriptorHeap({ rhi::DescriptorHeapType::CbvSrvUav, 1, true });
+	auto result = device.CreateDescriptorHeap({ rhi::DescriptorHeapType::CbvSrvUav, 1, true }, g_pd3dSrvDescHeap);
 
     // Setup Platform/Renderer backends
     ImGui_ImplWin32_Init(hwnd);
@@ -230,7 +406,7 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     ImGui::StyleColorsDark();
     //ImGui::StyleColorsLight();
 
-    g_hSwapChainWaitableObject = m_pSwapChain->GetFrameLatencyWaitableObject();
+    m_memQuery = ECSManager::GetInstance().GetWorld().query_builder<const MemoryStatisticsComponents::MemSizeBytes>().build();
 
 	// Helper to set an observer on a setting which updates local copies of settings
     auto observerSetting = [&](auto& localCopy, const std::string& settingName) {
@@ -389,6 +565,7 @@ inline void Menu::Render(RenderContext& context) {
 
 	ImGui::NewFrame();
     static bool showRG = false;
+    static bool showMemoryIntrospection = false;
 
 	{
 		static float f = 0.0f;
@@ -464,8 +641,52 @@ inline void Menu::Render(RenderContext& context) {
 			setUseAsyncCompute(m_useAsyncCompute);
 		}
         ImGui::Checkbox("Render Graph Inspector", &showRG);
+        ImGui::Checkbox("Memory introspection", &showMemoryIntrospection);
+        rhi::ma::Budget localBudget;
+        std::string memoryString = "Memory usage: ";
+        DeviceManager::GetInstance().GetAllocator()->GetBudget(&localBudget, nullptr);
+        const double KiB = 1024.0;
+        const double MiB = KiB * 1024.0;
+        const double GiB = MiB * 1024.0;
+        const auto usage = static_cast<double>(localBudget.usageBytes);
+
+        const auto [div, suffix] =
+            (usage >= GiB) ? std::pair{ GiB, "GB" } :
+            (usage >= MiB) ? std::pair{ MiB, "MB" } :
+            (usage >= KiB) ? std::pair{ KiB, "KB" } :
+            std::pair{ 1.0, "B" };
+
+        memoryString += std::format("{:.2f} {} / {:.2f} GB",
+            usage / div, suffix,
+            static_cast<double>(localBudget.budgetBytes) / GiB);
+
+        ImGui::Text(memoryString.c_str());
+        ImGui::Text("Render Resolution: %d x %d | Output Resolution: %d x %d", context.renderResolution.x, context.renderResolution.y, context.outputResolution.x, context.outputResolution.y);
 		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
-		ImGui::Text("Render Resolution: %d x %d | Output Resolution: %d x %d" , context.renderResolution.x, context.renderResolution.y, context.outputResolution.x, context.outputResolution.y);
+		ImGui::End();
+	}
+	if (showMemoryIntrospection) {
+        static ui::MemoryIntrospectionWidget g_memWidget;
+
+        ui::MemorySnapshot snap;
+        PerResourceMemIndex memIndex;
+        BuildMemorySnapshotFromFlecs(snap, m_memQuery, &memIndex);
+
+        static std::unordered_map<uint64_t, MemInfo> s_idToMem;
+		BuildIdToMemInfoIndex(s_idToMem, m_memQuery);    
+		ui::FrameGraphSnapshot fgSnap;
+
+        const auto& batches = m_renderGraph->GetBatches();
+        BuildFrameGraphSnapshotFromBatches(fgSnap, batches, memIndex);
+
+
+        ImGui::Begin("Memory Introspection", nullptr);
+        auto now = std::chrono::steady_clock::now();
+        std::chrono::duration<double> elapsedSeconds = now - m_startTime;
+        uint64_t totalBytes = snap.totalBytes;
+        g_memWidget.PushFrameSample(elapsedSeconds.count(), totalBytes);
+        bool open = true;
+        g_memWidget.Draw(&open, &snap, &fgSnap);
 		ImGui::End();
 	}
 
@@ -481,12 +702,10 @@ inline void Menu::Render(RenderContext& context) {
     
     if (showRG) {
 		ImGui::Begin("Render Graph Inspector", nullptr);
-        if (!m_renderGraph.expired()) {
-            RGInspectorOptions opts; // tweak layout if you like
-            RGInspector::Show(m_renderGraph.lock()->GetBatches(),
-                PassUsesResourceAdapter,
-                opts);
-        }
+        RGInspectorOptions opts;
+        RGInspector::Show(m_renderGraph->GetBatches(),
+            PassUsesResourceAdapter,
+            opts);
         ImGui::End();
 
     }

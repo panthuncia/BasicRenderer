@@ -275,11 +275,12 @@ namespace rhi {
 	}
 
 
-	inline static D3D12_HEAP_TYPE ToDx(const Memory m) {
+	inline static D3D12_HEAP_TYPE ToDx(const HeapType m) {
 		switch (m) {
-		case Memory::Upload:   return D3D12_HEAP_TYPE_UPLOAD;
-		case Memory::Readback: return D3D12_HEAP_TYPE_READBACK;
-		default:               return D3D12_HEAP_TYPE_DEFAULT;
+		case HeapType::DeviceLocal:    return D3D12_HEAP_TYPE_DEFAULT;
+		case HeapType::HostVisibleCoherent: return D3D12_HEAP_TYPE_UPLOAD;
+		case HeapType::HostVisibleCached: return D3D12_HEAP_TYPE_READBACK;
+		default: return D3D12_HEAP_TYPE_CUSTOM;
 		}
 	}
 
@@ -352,8 +353,13 @@ namespace rhi {
 		if (test(HeapFlags::CreateNotResident))           out |= D3D12_HEAP_FLAG_CREATE_NOT_RESIDENT;
 		if (test(HeapFlags::CreateNotZeroed))             out |= D3D12_HEAP_FLAG_CREATE_NOT_ZEROED;
 		if (test(HeapFlags::AllowAllBuffersAndTextures))  out |= D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES;
+		if (test(HeapFlags::AllowDisplay))                out |= D3D12_HEAP_FLAG_ALLOW_DISPLAY;
+		if (test(HeapFlags::HardwareProtected))           out |= D3D12_HEAP_FLAG_HARDWARE_PROTECTED;
+		if (test(HeapFlags::AllowWriteWatch))				out |= D3D12_HEAP_FLAG_ALLOW_WRITE_WATCH;
+		if (test(HeapFlags::AllowCrossAdapterShaderAtomics))			out |= D3D12_HEAP_FLAG_ALLOW_SHADER_ATOMICS;
 		return out;
 	}
+
 	inline static D3D12_FILTER_TYPE ToDX(Filter f) noexcept {
 		return (f == Filter::Linear) ? D3D12_FILTER_TYPE_LINEAR : D3D12_FILTER_TYPE_POINT;
 	}
@@ -458,6 +464,178 @@ namespace rhi {
 		return q == QueueKind::Graphics ? D3D12_COMMAND_LIST_TYPE_DIRECT
 			: q == QueueKind::Compute ? D3D12_COMMAND_LIST_TYPE_COMPUTE
 			: D3D12_COMMAND_LIST_TYPE_COPY;
+	}
+
+	inline static D3D12_RESOURCE_DESC1 ToDX(const ResourceDesc& desc) {
+		switch (desc.type) {
+		case ResourceType::Buffer: {
+			D3D12_RESOURCE_DESC1 d{};
+			d.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+			d.Alignment = 0;
+			d.Width = desc.buffer.sizeBytes;
+			d.Height = 1;
+			d.DepthOrArraySize = 1;
+			d.MipLevels = 1;
+			d.Format = DXGI_FORMAT_UNKNOWN;
+			d.SampleDesc.Count = 1;
+			d.SampleDesc.Quality = 0;
+			d.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+			d.Flags = ToDX(desc.resourceFlags);
+			return d;
+		} break;
+		default: {
+			D3D12_RESOURCE_DESC1 d{};
+			d.Dimension = desc.type == ResourceType::Texture1D ? D3D12_RESOURCE_DIMENSION_TEXTURE1D
+				: desc.type == ResourceType::Texture2D ? D3D12_RESOURCE_DIMENSION_TEXTURE2D
+				: D3D12_RESOURCE_DIMENSION_TEXTURE3D;
+			d.Alignment = 0;
+			d.Width = desc.texture.width;
+			d.Height = desc.texture.height;
+			d.DepthOrArraySize = desc.texture.depthOrLayers;
+			d.MipLevels = desc.texture.mipLevels;
+			d.Format = ToDxgi(desc.texture.format);
+			d.SampleDesc.Count = desc.texture.sampleCount;
+			d.SampleDesc.Quality = 0;
+			d.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+			d.Flags = ToDX(desc.resourceFlags);
+			return d;
+		} break;
+		}
+	}
+	inline static ShaderModel ToRHI(D3D_SHADER_MODEL model)
+	{
+		switch (model)
+		{
+			case D3D_SHADER_MODEL_6_9: return ShaderModel::SM_6_9;
+			case D3D_SHADER_MODEL_6_8: return ShaderModel::SM_6_8;
+			case D3D_SHADER_MODEL_6_7: return ShaderModel::SM_6_7;
+			case D3D_SHADER_MODEL_6_6: return ShaderModel::SM_6_6;
+			case D3D_SHADER_MODEL_6_5: return ShaderModel::SM_6_5;
+			case D3D_SHADER_MODEL_6_4: return ShaderModel::SM_6_4;
+			case D3D_SHADER_MODEL_6_3: return ShaderModel::SM_6_3;
+			case D3D_SHADER_MODEL_6_2: return ShaderModel::SM_6_2;
+			case D3D_SHADER_MODEL_6_1: return ShaderModel::SM_6_1;
+			case D3D_SHADER_MODEL_6_0: return ShaderModel::SM_6_0;
+			default: return ShaderModel::Unknown;
+		}
+	}
+	inline static Result ToRHI(HRESULT hr)
+	{
+		if (hr == S_OK)
+			return Result::Ok;
+
+		switch (hr)
+		{
+		// -----------------------------------------------------------------
+		// Success-with-info (mostly Present-related)
+		// -----------------------------------------------------------------
+		case DXGI_STATUS_OCCLUDED:                      return Result::PresentOccluded;
+		case DXGI_STATUS_CLIPPED:                       return Result::PresentClipped;
+		case DXGI_STATUS_UNOCCLUDED:                    return Result::PresentUnoccluded;
+		case DXGI_STATUS_PRESENT_REQUIRED:              return Result::PresentRequired;
+		case DXGI_STATUS_NO_REDIRECTION:                return Result::NoRedirection;
+		case DXGI_STATUS_NO_DESKTOP_ACCESS:             return Result::NoDesktopAccess;
+		case DXGI_STATUS_GRAPHICS_VIDPN_SOURCE_IN_USE:  return Result::VidPnSourceInUse;
+		case DXGI_STATUS_MODE_CHANGED:                  return Result::ModeChanged;
+		case DXGI_STATUS_MODE_CHANGE_IN_PROGRESS:       return Result::ModeChangeInProgress;
+		case DXGI_STATUS_DDA_WAS_STILL_DRAWING:         return Result::DdaWasStillDrawing;
+
+		// -----------------------------------------------------------------
+		// Generic HRESULTs
+		// -----------------------------------------------------------------
+		case E_FAIL:            return Result::Failed;
+		case E_UNEXPECTED:      return Result::Unexpected;
+		case E_ABORT:           return Result::Aborted;
+		case E_ACCESSDENIED:    return Result::AccessDenied;
+		case E_INVALIDARG:      return Result::InvalidArgument;
+		case E_POINTER:         return Result::InvalidNativePointer;
+		case E_NOINTERFACE:     return Result::NoInterface;
+		case E_NOTIMPL:         return Result::NotImplemented;
+		case E_OUTOFMEMORY:     return Result::OutOfMemory;
+		case E_HANDLE:          return Result::InvalidNativeHandle;
+
+		// -----------------------------------------------------------------
+		// DXGI / D3D12 / Presentation errors
+		// -----------------------------------------------------------------
+		case DXGI_ERROR_INVALID_CALL:                   return Result::InvalidCall;
+		case DXGI_ERROR_UNSUPPORTED:                    return Result::Unsupported;
+		case DXGI_ERROR_SDK_COMPONENT_MISSING:          return Result::SdkComponentMissing;
+		case DXGI_ERROR_DYNAMIC_CODE_POLICY_VIOLATION:  return Result::DynamicCodePolicyViolation;
+
+		case DXGI_ERROR_NOT_FOUND:                      return Result::NotFound;
+		case DXGI_ERROR_MORE_DATA:                      return Result::MoreData;
+		case DXGI_ERROR_ALREADY_EXISTS:                 return Result::AlreadyExists;
+		case DXGI_ERROR_NAME_ALREADY_EXISTS:            return Result::NameAlreadyExists;
+
+		case DXGI_ERROR_DEVICE_REMOVED:                 return Result::DeviceRemoved;
+		case DXGI_ERROR_DEVICE_HUNG:                    return Result::DeviceHung;
+		case DXGI_ERROR_DEVICE_RESET:                   return Result::DeviceReset;
+		case DXGI_ERROR_DRIVER_INTERNAL_ERROR:          return Result::DriverInternalError;
+
+		case DXGI_ERROR_WAS_STILL_DRAWING:              return Result::StillDrawing;
+		case DXGI_ERROR_WAIT_TIMEOUT:                   return Result::WaitTimeout;
+
+		case DXGI_ERROR_NOT_CURRENT:                    return Result::NotCurrent;
+		case DXGI_ERROR_MODE_CHANGE_IN_PROGRESS:        return Result::ModeChangeBlocked;
+		case DXGI_ERROR_SESSION_DISCONNECTED:           return Result::SessionDisconnected;
+		case DXGI_ERROR_REMOTE_CLIENT_DISCONNECTED:     return Result::RemoteClientDisconnected;
+		case DXGI_ERROR_RESTRICT_TO_OUTPUT_STALE:       return Result::RestrictToOutputStale;
+		case DXGI_ERROR_NON_COMPOSITED_UI:              return Result::NonCompositedUi;
+		case DXGI_ERROR_SETDISPLAYMODE_REQUIRED:        return Result::SetDisplayModeRequired;
+		case DXGI_ERROR_FRAME_STATISTICS_DISJOINT:      return Result::FrameStatisticsDisjoint;
+
+		case DXGI_ERROR_ACCESS_LOST:                    return Result::AccessLost;
+		case DXGI_ERROR_NONEXCLUSIVE:                   return Result::NonExclusive;
+
+		case DXGI_ERROR_CANNOT_PROTECT_CONTENT:         return Result::CannotProtectContent;
+		case DXGI_ERROR_HW_PROTECTION_OUTOFMEMORY:      return Result::HwProtectionOutOfMemory;
+
+		case DXGI_ERROR_CACHE_CORRUPT:                  return Result::CacheCorrupt;
+		case DXGI_ERROR_CACHE_FULL:                     return Result::CacheFull;
+		case DXGI_ERROR_CACHE_HASH_COLLISION:           return Result::CacheHashCollision;
+
+		case D3D12_ERROR_ADAPTER_NOT_FOUND:             return Result::AdapterNotFound;
+		case D3D12_ERROR_DRIVER_VERSION_MISMATCH:       return Result::DriverVersionMismatch;
+		case D3D12_ERROR_INVALID_REDIST:                return Result::InvalidRedistributable;
+
+		case DXGI_ERROR_MPO_UNPINNED:                   return Result::MpoUnpinned;
+		case DXGI_ERROR_REMOTE_OUTOFMEMORY:             return Result::RemoteOutOfMemory;
+
+		case PRESENTATION_ERROR_LOST:                   return Result::PresentationLost;
+
+		// DXGI has a specific AccessDenied too (shared resources etc.)
+		case DXGI_ERROR_ACCESS_DENIED:                  return Result::AccessDenied;
+
+		// -----------------------------------------------------------------
+		// Non-DXGI Win32-derived HRESULTs (shader/file IO, waits, etc.)
+		// -----------------------------------------------------------------
+		//case HRESULT_FROM_WIN32(ERROR_INVALID_HANDLE):  return Result::InvalidNativeHandle;
+
+		case HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND):  return Result::FileNotFound;
+		case HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND):  return Result::PathNotFound;
+		case HRESULT_FROM_WIN32(ERROR_INVALID_DATA):    return Result::InvalidData;
+		case HRESULT_FROM_WIN32(ERROR_DISK_FULL):       return Result::DiskFull;
+		case HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION): return Result::SharingViolation;
+
+		// Win32 waits can also be surfaced as HRESULTs in some layers.
+		case HRESULT_FROM_WIN32(WAIT_TIMEOUT):          return Result::WaitTimeout;
+
+		default:
+			// If it's a success code we didn't explicitly model, treat as Ok.
+			// Otherwise use the caller's generic "unmapped HRESULT" bucket.
+			return SUCCEEDED(hr) ? Result::Ok : Result::Unknown;
+		}
+	}
+
+	inline static D3D12_RESIDENCY_PRIORITY ToDX(ResidencyPriority p) {
+		switch (p) {
+		case ResidencyPriority::ResidencyPriorityMinimum:      return D3D12_RESIDENCY_PRIORITY_MINIMUM;
+		case ResidencyPriority::ResidencyPriorityLow:          return D3D12_RESIDENCY_PRIORITY_LOW;
+		case ResidencyPriority::ResidencyPriorityNormal:       return D3D12_RESIDENCY_PRIORITY_NORMAL;
+		case ResidencyPriority::ResidencyPriorityHigh:         return D3D12_RESIDENCY_PRIORITY_HIGH;
+		case ResidencyPriority::ResidencyPriorityMaximum:      return D3D12_RESIDENCY_PRIORITY_MAXIMUM;
+		default: return D3D12_RESIDENCY_PRIORITY_NORMAL;
+		}
 	}
 
 }

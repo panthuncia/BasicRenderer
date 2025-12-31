@@ -1,12 +1,10 @@
 #include "Materials/Material.h"
 #include <string>
 #include "Render/PSOFlags.h"
-#include "Resources/Sampler.h"
 #include "Utilities/Utilities.h"
-#include "Resources/TextureDescription.h"
 #include "Materials/MaterialFlags.h"
-#include "Managers/Singletons/UploadManager.h"
-#include "Managers/Singletons/DeletionManager.h"
+#include "Resources/PixelBuffer.h"
+#include "Resources/MemoryStatisticsComponents.h"
 
 Material::Material(const std::string& name,
     MaterialFlags materialFlags, PSOFlags psoFlags)
@@ -17,14 +15,14 @@ Material::Material(const std::string& name,
 
 Material::Material(const std::string& name,
     MaterialFlags materialFlags, PSOFlags psoFlags,
-    std::shared_ptr<Texture> baseColorTexture,
-    std::shared_ptr<Texture> normalTexture,
-    std::shared_ptr<Texture> aoMap,
-    std::shared_ptr<Texture> heightMap,
-    std::shared_ptr<Texture> metallicTexture,
-    std::shared_ptr<Texture> roughnessTexture,
-    std::shared_ptr<Texture> emissiveTexture,
-    std::shared_ptr<Texture> opacityTexture,
+    std::shared_ptr<TextureAsset> baseColorTexture,
+    std::shared_ptr<TextureAsset> normalTexture,
+    std::shared_ptr<TextureAsset> aoMap,
+    std::shared_ptr<TextureAsset> heightMap,
+    std::shared_ptr<TextureAsset> metallicTexture,
+    std::shared_ptr<TextureAsset> roughnessTexture,
+    std::shared_ptr<TextureAsset> emissiveTexture,
+    std::shared_ptr<TextureAsset> opacityTexture,
     float metallicFactor,
     float roughnessFactor,
     DirectX::XMFLOAT4 baseColorFactor,
@@ -65,56 +63,64 @@ Material::Material(const std::string& name,
     m_materialData.roughnessFactor = roughnessFactor;
     m_materialData.alphaCutoff = alphaCutoff;
     if (baseColorTexture != nullptr) {
-        m_materialData.baseColorTextureIndex = baseColorTexture->GetBuffer()->GetSRVInfo(0).slot.index;
-        m_materialData.baseColorSamplerIndex = baseColorTexture->GetSamplerDescriptorIndex();
+        m_materialData.baseColorTextureIndex = baseColorTexture->Image().GetSRVInfo(0).slot.index;
+        m_materialData.baseColorSamplerIndex = baseColorTexture->SamplerDescriptorIndex();
 		m_materialData.baseColorChannels = { baseColorChannels[0], baseColorChannels[1], baseColorChannels[2], baseColorChannels[3] };
-        baseColorTexture->GetBuffer()->SetName(L"BaseColorTexture");
+        baseColorTexture->Image().ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Material textures" }));
+    	baseColorTexture->Image().SetName("BaseColorTexture");
     }
     if (normalTexture != nullptr) {
-        m_materialData.normalTextureIndex = normalTexture->GetBuffer()->GetSRVInfo(0).slot.index;
-        m_materialData.normalSamplerIndex = normalTexture->GetSamplerDescriptorIndex();
+        m_materialData.normalTextureIndex = normalTexture->Image().GetSRVInfo(0).slot.index;
+        m_materialData.normalSamplerIndex = normalTexture->SamplerDescriptorIndex();
 		m_materialData.normalChannels = { normalChannels[0], normalChannels[1], normalChannels[2] };
-        normalTexture->GetBuffer()->SetName(L"NormalTexture");
+		normalTexture->Image().ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Material textures" }));
+        normalTexture->Image().SetName("NormalTexture");
     }
     if (aoMap != nullptr) {
-        m_materialData.aoMapIndex = aoMap->GetBuffer()->GetSRVInfo(0).slot.index;
-        m_materialData.aoSamplerIndex = aoMap->GetSamplerDescriptorIndex();
+        m_materialData.aoMapIndex = aoMap->Image().GetSRVInfo(0).slot.index;
+        m_materialData.aoSamplerIndex = aoMap->SamplerDescriptorIndex();
 		m_materialData.aoChannel = aoChannel[0];
-        aoMap->GetBuffer()->SetName(L"AOMap");
+        aoMap->Image().ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Material textures" }));
+        aoMap->Image().SetName("AOMap");
     }
     if (heightMap != nullptr) {
-        m_materialData.heightMapIndex = heightMap->GetBuffer()->GetSRVInfo(0).slot.index;
-        m_materialData.heightSamplerIndex = heightMap->GetSamplerDescriptorIndex();
+        m_materialData.heightMapIndex = heightMap->Image().GetSRVInfo(0).slot.index;
+        m_materialData.heightSamplerIndex = heightMap->SamplerDescriptorIndex();
 		m_materialData.heightChannel = heightChannel[0];
-        heightMap->GetBuffer()->SetName(L"HeightMap");
+        heightMap->Image().ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Material textures" }));
+        heightMap->Image().SetName("HeightMap");
     }
     if (metallicTexture != nullptr) {
-        m_materialData.metallicTextureIndex = metallicTexture->GetBuffer()->GetSRVInfo(0).slot.index;
-        m_materialData.metallicSamplerIndex = metallicTexture->GetSamplerDescriptorIndex();
+        m_materialData.metallicTextureIndex = metallicTexture->Image().GetSRVInfo(0).slot.index;
+        m_materialData.metallicSamplerIndex = metallicTexture->SamplerDescriptorIndex();
 		m_materialData.metallicChannel = metallicChannel[0];
-        metallicTexture->GetBuffer()->SetName(L"MetallicTexture");
+		metallicTexture->Image().ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Material textures" }));
+        metallicTexture->Image().SetName("MetallicTexture");
     }
     if (roughnessTexture != nullptr) {
-        m_materialData.roughnessTextureIndex = roughnessTexture->GetBuffer()->GetSRVInfo(0).slot.index;
-        m_materialData.roughnessSamplerIndex = roughnessTexture->GetSamplerDescriptorIndex();
+        m_materialData.roughnessTextureIndex = roughnessTexture->Image().GetSRVInfo(0).slot.index;
+        m_materialData.roughnessSamplerIndex = roughnessTexture->SamplerDescriptorIndex();
 		m_materialData.roughnessChannel = roughnessChannel[0];
-        roughnessTexture->GetBuffer()->SetName(L"RoughnessTexture");
+        roughnessTexture->Image().ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Material textures" }));
+        roughnessTexture->Image().SetName("RoughnessTexture");
     }
     if (metallicTexture == roughnessTexture && metallicTexture != nullptr) {
-        roughnessTexture->GetBuffer()->SetName(L"MetallicRoughnessTexture");
+        roughnessTexture->Image().SetName("MetallicRoughnessTexture");
     }
 
     if (emissiveTexture != nullptr) {
-        m_materialData.emissiveTextureIndex = emissiveTexture->GetBuffer()->GetSRVInfo(0).slot.index;
-        m_materialData.emissiveSamplerIndex = emissiveTexture->GetSamplerDescriptorIndex();
+        m_materialData.emissiveTextureIndex = emissiveTexture->Image().GetSRVInfo(0).slot.index;
+        m_materialData.emissiveSamplerIndex = emissiveTexture->SamplerDescriptorIndex();
 		m_materialData.emissiveChannels = { emissiveChannels[0], emissiveChannels[1], emissiveChannels[2] };
-        emissiveTexture->GetBuffer()->SetName(L"EmissiveTexture");
+        emissiveTexture->Image().ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Material textures" }));
+        emissiveTexture->Image().SetName("EmissiveTexture");
     }
 
     if (opacityTexture != nullptr) {
-        m_materialData.opacityTextureIndex = opacityTexture->GetBuffer()->GetSRVInfo(0).slot.index;
-        m_materialData.opacitySamplerIndex = opacityTexture->GetSamplerDescriptorIndex();
-		opacityTexture->GetBuffer()->SetName(L"OpacityTexture");
+        m_materialData.opacityTextureIndex = opacityTexture->Image().GetSRVInfo(0).slot.index;
+        m_materialData.opacitySamplerIndex = opacityTexture->SamplerDescriptorIndex();
+        opacityTexture->Image().ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Material textures" }));
+		opacityTexture->Image().SetName("OpacityTexture");
     }
 
 }
@@ -122,12 +128,13 @@ Material::Material(const std::string& name,
 Material::~Material() {
 }
 
-void Material::SetHeightmap(std::shared_ptr<Texture> heightmap) {
+void Material::SetHeightmap(std::shared_ptr<TextureAsset> heightmap) {
     m_materialData.materialFlags |= MaterialFlags::MATERIAL_PARALLAX;
     m_heightMap = heightmap;
-    heightmap->GetBuffer()->SetName(L"HeightMap");
-    m_materialData.heightMapIndex = heightmap->GetBuffer()->GetSRVInfo(0).slot.index;
-    m_materialData.heightSamplerIndex = heightmap->GetSamplerDescriptorIndex();
+    heightmap->Image().SetName("HeightMap");
+	heightmap->Image().ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Material textures" }));
+    m_materialData.heightMapIndex = heightmap->Image().GetSRVInfo(0).slot.index;
+    m_materialData.heightSamplerIndex = heightmap->SamplerDescriptorIndex();
 }
 
 void Material::SetTextureScale(float scale) {

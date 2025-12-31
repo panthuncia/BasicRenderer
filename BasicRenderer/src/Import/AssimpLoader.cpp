@@ -9,7 +9,6 @@
 
 #include "Materials/Material.h"
 #include "Materials/MaterialFlags.h"
-#include "Render/PSOFlags.h"
 #include "Resources/Sampler.h"
 #include "Import/Filetypes.h"
 #include "Scene/Scene.h"
@@ -17,7 +16,7 @@
 #include "Animation/Skeleton.h"
 #include "Scene/Components.h"
 #include "Animation/AnimationController.h"
-
+#include "Resources/PixelBuffer.h"
 #include "Import/AssimpLoader.h"
 
 namespace AssimpLoader {
@@ -43,7 +42,7 @@ namespace AssimpLoader {
         }
     }
 
-    static std::shared_ptr<Texture> loadAiTexture(
+    static std::shared_ptr<TextureAsset> loadAiTexture(
         const aiScene* scene,
         const std::string& texPath,          // "*0" for embedded or file path
         const std::string& directory,        // base directory for external textures
@@ -101,8 +100,8 @@ namespace AssimpLoader {
                     }
                 }
 
-                auto pBuffer = PixelBuffer::Create(desc, { rawData.data() });
-                return std::make_shared<Texture>(pBuffer, sampler);
+                auto pBuffer = PixelBuffer::CreateShared(desc, { rawData.data() });
+                return std::make_shared<TextureAsset>(pBuffer, sampler, TextureFileMeta());
             }
         }
 
@@ -125,11 +124,11 @@ namespace AssimpLoader {
         const std::string& directory // folder containing the model
     )
     {
-        std::vector<std::shared_ptr<Texture>> textures;
+        std::vector<std::shared_ptr<TextureAsset>> textures;
         std::vector<std::shared_ptr<Material>> materials;
 
         // To avoid reloading the same texture multiple times:
-        std::unordered_map<std::string, std::shared_ptr<Texture>> loadedTextures;
+        std::unordered_map<std::string, std::shared_ptr<TextureAsset>> loadedTextures;
 
         // Iterate over every material, check each texture slot
         for (unsigned int mIndex = 0; mIndex < scene->mNumMaterials; ++mIndex)
@@ -152,7 +151,7 @@ namespace AssimpLoader {
                 aiTextureType_HEIGHT,
                 aiTextureType_DISPLACEMENT,
             };
-            std::unordered_map<aiTextureType, std::shared_ptr<Texture>> materialTextures;
+            std::unordered_map<aiTextureType, std::shared_ptr<TextureAsset>> materialTextures;
 
             for (aiTextureType tType : textureTypes)
             {
@@ -197,7 +196,7 @@ namespace AssimpLoader {
 
                             // Not loaded yet, load now
                             try {
-                                std::shared_ptr<Texture> newTex = loadAiTexture(
+                                std::shared_ptr<TextureAsset> newTex = loadAiTexture(
                                     scene,
                                     texPath,
                                     directory,
@@ -245,17 +244,17 @@ namespace AssimpLoader {
             float alphaCutoff = 0.5f;
             BlendState blendMode = BlendState::BLEND_STATE_OPAQUE;
 
-            std::shared_ptr<Texture> baseColorTexture = nullptr;
-            std::shared_ptr<Texture> normalTexture = nullptr;
-            std::shared_ptr<Texture> metallicTex = nullptr;
-            std::shared_ptr<Texture> roughnessTex = nullptr;
-            std::shared_ptr<Texture> aoMap = nullptr;
-            std::shared_ptr<Texture> emissiveTexture = nullptr;
-            std::shared_ptr<Texture> heightMap = nullptr;
+            std::shared_ptr<TextureAsset> baseColorTexture = nullptr;
+            std::shared_ptr<TextureAsset> normalTexture = nullptr;
+            std::shared_ptr<TextureAsset> metallicTex = nullptr;
+            std::shared_ptr<TextureAsset> roughnessTex = nullptr;
+            std::shared_ptr<TextureAsset> aoMap = nullptr;
+            std::shared_ptr<TextureAsset> emissiveTexture = nullptr;
+            std::shared_ptr<TextureAsset> heightMap = nullptr;
 
             if (materialTextures.find(aiTextureType_DIFFUSE) != materialTextures.end()) {
                 baseColorTexture = materialTextures[aiTextureType_DIFFUSE];
-                if (!baseColorTexture->AlphaIsAllOpaque()) {
+                if (!baseColorTexture->Meta().alphaIsAllOpaque) {
                     materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
                     blendMode = BlendState::BLEND_STATE_MASK;
                 }
@@ -267,7 +266,7 @@ namespace AssimpLoader {
                 }
                 baseColorTexture = materialTextures[aiTextureType_BASE_COLOR];
                 materialFlags |= MaterialFlags::MATERIAL_BASE_COLOR_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
-                if (!baseColorTexture->AlphaIsAllOpaque()) {
+                if (!baseColorTexture->Meta().alphaIsAllOpaque) {
                     materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
                     blendMode = BlendState::BLEND_STATE_MASK;
                 }
@@ -276,7 +275,7 @@ namespace AssimpLoader {
             if (materialTextures.find(aiTextureType_NORMALS) != materialTextures.end()) {
                 normalTexture = materialTextures[aiTextureType_NORMALS];
                 materialFlags |= MaterialFlags::MATERIAL_NORMAL_MAP | MaterialFlags::MATERIAL_TEXTURED;
-                if (normalTexture->GetFileType() == ImageFiletype::DDS) {
+                if (normalTexture->Meta().fileType == ImageFiletype::DDS) {
                     negateNormals = true;
                 }
             }
@@ -730,10 +729,6 @@ namespace AssimpLoader {
 
         auto animations = parseAiAnimations(pScene, nodes, nodeMap);
         auto skeletons = BuildSkeletons(pScene, nodeMap, animations);
-
-        for (auto& skeleton : skeletons) {
-            scene->AddSkeleton(skeleton);
-        }
 
         for (unsigned int i = 0; i < meshSkinIndices.size(); i++) {
             int skinIndex = meshSkinIndices[i];

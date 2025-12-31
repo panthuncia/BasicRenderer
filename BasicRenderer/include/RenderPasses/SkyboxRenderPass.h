@@ -4,12 +4,14 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Resources/Texture.h"
-#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/UploadManager.h"
 
 class SkyboxRenderPass : public RenderPass {
 public:
     SkyboxRenderPass() {
+        m_vertexBufferView = CreateSkyboxVertexBuffer();
+        CreateSkyboxRootSignature();
+        CreateSkyboxPSO();
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) {
@@ -19,14 +21,10 @@ public:
     }
 
     void Setup() override {
-        m_vertexBufferView = CreateSkyboxVertexBuffer();
-        CreateSkyboxRootSignature();
-        CreateSkyboxPSO();
+        m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
+        m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 
-        m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
-        m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
-
-        m_environmentBufferDescriptorIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).slot.index;
+        m_environmentBufferDescriptorIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).slot.index;
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -36,21 +34,6 @@ public:
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
         commandList.SetVertexBuffers(0, 1, &m_vertexBufferView);
-
-        //CD3DX12_VIEWPORT viewport(0.0f, 0.0f, static_cast<float>(context.renderResolution.x), static_cast<float>(context.renderResolution.y));
-        //CD3DX12_RECT scissorRect(0, 0, context.renderResolution.x, context.renderResolution.y);
-        //commandList->RSSetViewports(1, &viewport);
-        //commandList->RSSetScissorRects(1, &scissorRect);
-
-        ////CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
-        //auto rtvHandle = m_pHDRTarget->GetRTVInfo(0).cpuHandle;
-        //auto& dsvHandle = m_pPrimaryDepthBuffer->GetDSVInfo(0).cpuHandle;
-
-        //// Clear HDR target
-        //auto& clearColor = m_pHDRTarget->GetClearColor();
-        //commandList->ClearRenderTargetView(rtvHandle, &clearColor[0], 0, nullptr);
-
-        //commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
 
 		rhi::PassBeginInfo passInfo{};
 		passInfo.width = m_pHDRTarget->GetWidth();
@@ -64,7 +47,7 @@ public:
 		colorAttachment.loadOp = rhi::LoadOp::Load;
 		colorAttachment.storeOp = rhi::StoreOp::Store;
 		colorAttachment.clear = m_pHDRTarget->GetClearColor();
-		passInfo.colors = { &colorAttachment };
+		passInfo.colors = &colorAttachment;
 		passInfo.depth = &depthAttachment;
 		commandList.BeginPass(passInfo);
 
@@ -95,8 +78,8 @@ private:
     rhi::PipelineLayoutPtr m_skyboxRootSignature;
     rhi::PipelinePtr m_skyboxPSO;
 
-    std::shared_ptr<PixelBuffer> m_pHDRTarget = nullptr;
-    std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer = nullptr;
+    PixelBuffer* m_pHDRTarget = nullptr;
+    PixelBuffer* m_pPrimaryDepthBuffer = nullptr;
 
     int m_environmentBufferDescriptorIndex = -1;
 
@@ -154,10 +137,11 @@ private:
 
         const UINT vertexBufferSize = static_cast<UINT>(36 * sizeof(SkyboxVertex));
 
-        m_vertexBuffer = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, (void*)skyboxVertices);
-		m_vertexBuffer->SetName(L"Skybox VB");
+        m_vertexBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, vertexBufferSize);
+        BUFFER_UPLOAD(skyboxVertices, vertexBufferSize, UploadManager::UploadTarget::FromShared(m_vertexBuffer), 0);
+		m_vertexBuffer->SetName("Skybox VB");
 
-        QUEUE_UPLOAD((void*)skyboxVertices, vertexBufferSize, m_vertexBuffer.get(), 0);
+        BUFFER_UPLOAD((void*)skyboxVertices, vertexBufferSize, UploadManager::UploadTarget::FromShared(m_vertexBuffer), 0);
 
 		rhi::VertexBufferView vertexBufferView = {};
 		vertexBufferView.buffer = m_vertexBuffer->GetAPIResource().GetHandle();
@@ -208,7 +192,7 @@ private:
         ld.pushConstants = { pcs, (uint32_t)std::size(pcs) };
         ld.staticSamplers = { sms, (uint32_t)std::size(sms) };
 
-        m_skyboxRootSignature = dev.CreatePipelineLayout(ld);
+        auto result = dev.CreatePipelineLayout(ld, m_skyboxRootSignature);
         if (!m_skyboxRootSignature || !m_skyboxRootSignature->IsValid())
             throw std::runtime_error("Skybox: CreatePipelineLayout failed");
         m_skyboxRootSignature->SetName("Skybox.Layout");
@@ -294,9 +278,10 @@ private:
 			rhi::Make(soLayoutIL)
         };
 
-        m_skyboxPSO = dev.CreatePipeline(items, (uint32_t)std::size(items));
-        if (!m_skyboxPSO || !m_skyboxPSO->IsValid())
+        auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_skyboxPSO);
+        if (Failed(result)) {
             throw std::runtime_error("Skybox: CreatePipeline failed");
+        }
         m_skyboxPSO->SetName("Skybox.GraphicsPSO");
     }
 };

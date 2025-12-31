@@ -14,11 +14,7 @@
 #include <rhi.h>
 
 #include <sl.h>
-#include <sl_consts.h>
-#include <sl_dlss.h>
 
-#include "Mesh/Mesh.h"
-#include "ShaderBuffers.h"
 #include "Scene/Scene.h"
 #include "Managers/InputManager.h"
 #include "Render/RenderGraph.h"
@@ -32,8 +28,8 @@
 #include "Managers/IndirectCommandBufferManager.h"
 #include "Managers/EnvironmentManager.h"
 #include "Managers/MaterialManager.h"
+#include "Managers/SkeletonManager.h"
 #include "Scene/MovementState.h"
-#include "Scene/Components.h"
 #include "../generated/BuiltinResources.h"
 #include "Utilities/Timer.h"
 
@@ -67,6 +63,7 @@ public:
     void Initialize(HWND hwnd, UINT x_res, UINT y_res);
     void OnResize(UINT newWidth, UINT newHeight);
     void Update(float elapsedSeconds);
+	void PostUpdate();
     void Render();
     void Cleanup();
     std::shared_ptr<Scene>& GetCurrentScene();
@@ -98,7 +95,7 @@ private:
 	uint8_t m_numFramesInFlight = 3;
     rhi::TimelinePtr m_frameFence;
     std::vector<UINT64> m_frameFenceValues; // Store fence values per frame
-    UINT64 m_currentFrameFenceValue = 0;
+    UINT64 m_currentFrameFenceValue = 1; // Start at 1, waiting on 0 is meaningless
 
 	rhi::TimelinePtr m_readbackFence;
 
@@ -109,7 +106,7 @@ private:
 
     std::shared_ptr<Scene> currentScene;
 
-    std::shared_ptr<RenderGraph> currentRenderGraph = nullptr;
+    std::unique_ptr<RenderGraph> currentRenderGraph = nullptr;
     bool rebuildRenderGraph = true;
 
     RenderContext m_context;
@@ -125,6 +122,7 @@ private:
     std::unique_ptr<ViewManager> m_pViewManager = nullptr;
 	std::unique_ptr<EnvironmentManager> m_pEnvironmentManager = nullptr;
 	std::unique_ptr<MaterialManager> m_pMaterialManager = nullptr;
+	std::unique_ptr<SkeletonManager> m_pSkeletonManager = nullptr;
 
 	ManagerInterface m_managerInterface;
     flecs::system m_hierarchySystem;
@@ -240,7 +238,15 @@ private:
 				Builtin::PostProcessing::UpscaledHDR,
 			};
         }
-
+        void Cleanup() {
+            m_shadowMaps = nullptr;
+            m_linearShadowMaps = nullptr;
+            m_currentDebugTexture = nullptr;
+            m_primaryCameraMeshletBitfield = nullptr;
+			m_HDRColorTarget = nullptr;
+			m_upscaledHDRColorTarget = nullptr;
+			m_gbufferMotionVectors = nullptr;
+        }
     };
 	CoreResourceProvider m_coreResourceProvider;
 };

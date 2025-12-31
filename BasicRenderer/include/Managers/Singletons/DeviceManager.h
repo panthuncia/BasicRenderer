@@ -2,19 +2,18 @@
 
 #include <directx/d3d12.h>
 #include <memory>
-#include <spdlog/spdlog.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
+#include <optional>
 
 #include <rhi.h>
-#include <rhi_interop_dx12.h>
-
-#include "Managers/Singletons/SettingsManager.h"
+#include <rhi_allocator.h>
+#include "Resources/TrackedAllocation.h"
 
 class DeviceManager {
 public:
     static DeviceManager& GetInstance();
 
     void Initialize();
+	void Cleanup();
 	rhi::Device GetDevice() {
         return m_device.Get();
     }
@@ -31,9 +30,32 @@ public:
 		return m_copyQueue;
 	}
 
+	rhi::ma::Allocator* GetAllocator() {
+		return m_allocator;
+	}
+
 	bool GetMeshShadersSupported() {
 		return m_meshShadersSupported;
 	}
+
+	// Create a resource and track its allocation with an entity.
+	rhi::Result CreateResourceTracked(
+		const rhi::ma::AllocationDesc& allocDesc,
+		const rhi::ResourceDesc& resourceDesc,
+		UINT32 numCastableFormats,
+		const rhi::Format* pCastableFormats,
+		TrackedHandle& outAllocation,
+		std::optional<AllocationTrackDesc> trackDesc = std::nullopt
+	) const noexcept;
+
+	rhi::Result CreateAliasingResourceTracked(
+		rhi::ma::Allocation& allocation,
+		UINT64 allocationLocalOffset,
+		const rhi::ResourceDesc& resourceDesc,
+		UINT32 numCastableFormats,
+		const rhi::Format* pCastableFormats,
+		TrackedHandle& out,
+		std::optional<AllocationTrackDesc> trackDesc) const noexcept;
 
 private:
 
@@ -43,31 +65,13 @@ private:
 	rhi::Queue m_computeQueue;
 	rhi::Queue m_copyQueue;
 	bool m_meshShadersSupported = false;
+	rhi::ma::Allocator* m_allocator;
 
     void CheckGPUFeatures();
 
 };
 
 inline DeviceManager& DeviceManager::GetInstance() {
-    static DeviceManager instance;
-    return instance;
-}
-
-inline void DeviceManager::Initialize() {
-	auto numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
-	bool enableDebug = false;
-#if BUILD_TYPE == BUILD_DEBUG
-	enableDebug = true;
-#endif
-	m_device = rhi::CreateD3D12Device(rhi::DeviceCreateInfo{ .backend = rhi::Backend::D3D12, .framesInFlight = numFramesInFlight, .enableDebug = enableDebug });
-	m_graphicsQueue = m_device->GetQueue(rhi::QueueKind::Graphics);
-	m_computeQueue = m_device->GetQueue(rhi::QueueKind::Compute);
-	m_copyQueue = m_device->GetQueue(rhi::QueueKind::Copy);
-	CheckGPUFeatures();
-}
-
-inline void DeviceManager::CheckGPUFeatures() {
-	D3D12_FEATURE_DATA_D3D12_OPTIONS7 features = {}; // TODO: Query interface support in RHI
-	rhi::dx12::get_device(m_device.Get())->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &features, sizeof(features));
-	m_meshShadersSupported = features.MeshShaderTier != D3D12_MESH_SHADER_TIER_NOT_SUPPORTED;
+	static DeviceManager instance;
+	return instance;
 }

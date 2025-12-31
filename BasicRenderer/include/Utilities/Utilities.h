@@ -2,21 +2,17 @@
 
 #include <windows.h>
 #include <iostream>
-#include <wrl/client.h>
 #include <ThirdParty/stb/stb_image.h>
 #include <array>
 #include <memory>
 #include <DirectXMath.h>
 #include <unordered_map>
 #include <DirectXTex.h>
-#include <cstdint>
-#include <cstring>
 
 #include "Import/MeshData.h"
 #include "Render/DescriptorHeap.h"
 #include "Resources/HeapIndexInfo.h"
 #include "ShaderBuffers.h"
-#include "Import/Filetypes.h"
 #include "Scene/Components.h"
 #include "Resources/TextureDescription.h"
 
@@ -30,7 +26,8 @@
 class DescriptorHeap;
 class Mesh;
 class Sampler;
-class Texture;
+class TextureAsset;
+class Buffer;
 
 void ThrowIfFailed(HRESULT hr);
 
@@ -50,20 +47,20 @@ struct LoadFlags {
 	// HDR has no flags
 };
 
-std::shared_ptr<Texture> LoadTextureFromFile(
+std::shared_ptr<TextureAsset> LoadTextureFromFile(
 	const std::wstring& filePath,
 	std::shared_ptr<Sampler> sampler = nullptr,
 	bool preferSRGB = false,
 	const LoadFlags& flags = {}, bool allowRTV = false, bool allowUAV = false);
 
-std::shared_ptr<Texture> LoadTextureFromMemory(
+std::shared_ptr<TextureAsset> LoadTextureFromMemory(
 	const void* bytes,
 	size_t byteCount,
 	std::shared_ptr<Sampler> sampler = nullptr,
 	const LoadFlags& flags = {},
 	bool preferSRGB = false, bool allowRTV = false , bool allowUAV = false);
-std::shared_ptr<Texture> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath);
-std::shared_ptr<Texture> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV = false, bool allowUAV = false);
+std::shared_ptr<TextureAsset> LoadCubemapFromFile(const char* topPath, const char* bottomPath, const char* leftPath, const char* rightPath, const char* frontPath, const char* backPath);
+std::shared_ptr<TextureAsset> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV = false, bool allowUAV = false);
 
 #if __has_include(<bit>) && (__cpp_lib_bit_cast >= 201806L)
 #include <bit>
@@ -254,3 +251,13 @@ std::string GetDirectoryFromPath(const std::string& path);
 constexpr UINT CalcSubresource(UINT MipSlice, UINT ArraySlice, UINT PlaneSlice, UINT MipLevels, UINT ArraySize) noexcept {
 	return MipSlice + ArraySlice * MipLevels + PlaneSlice * MipLevels * ArraySize;
 }
+
+std::shared_ptr<Buffer> CreateIndexedStructuredBuffer(size_t numElements, unsigned int elementSize, bool UAV = false, bool UAVCounter = false);
+
+std::shared_ptr<Buffer> CreateIndexedTypedBuffer(
+	uint32_t        numElements,
+	rhi::Format   elementFormat,
+	bool          UAV = false);
+
+
+std::shared_ptr<Buffer> CreateIndexedConstantBuffer(size_t bufferSize, std::string name = "");

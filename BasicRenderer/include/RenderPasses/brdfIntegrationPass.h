@@ -7,6 +7,7 @@
 class BRDFIntegrationPass : public RenderPass {
 public:
     BRDFIntegrationPass() {
+        CreatePSO();
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override {
@@ -14,9 +15,7 @@ public:
     }
 
     void Setup() override {
-
-		m_lutTexture = m_resourceRegistryView->Request<PixelBuffer>(Builtin::BRDFLUT);
-        CreatePSO();
+		m_lutTexture = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::BRDFLUT);
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -52,7 +51,7 @@ public:
     }
 
 private:
-    std::shared_ptr<PixelBuffer> m_lutTexture = nullptr;
+    PixelBuffer* m_lutTexture = nullptr;
 
     rhi::PipelinePtr PSO;
 
@@ -109,8 +108,8 @@ private:
             rhi::Make(soSmp),
         };
 
-        PSO = dev.CreatePipeline(items, (uint32_t)std::size(items));
-        if (!PSO || !PSO->IsValid()) {
+        auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), PSO);
+        if (Failed(result)) {
             throw std::runtime_error("Failed to create BRDF integration PSO (RHI)");
         }
         PSO->SetName("BRDFIntegration.PSO");

@@ -1,66 +1,69 @@
 #pragma once
-#include <memory>
 #include <vector>
 #include "Managers/Singletons/SettingsManager.h"
+#include "rhi_helpers.h"
+#include "rhi_allocator.h"
+#include "Resources/TrackedAllocation.h"
 
 class DeletionManager {
 public:
     static DeletionManager& GetInstance();
 
 	void Initialize() {
-		uint8_t numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
-		m_deletionQueue.resize(numFramesInFlight);
+		m_numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
+		m_deletionQueue.resize(m_numFramesInFlight);
+		m_allocationDeletionQueue.resize(m_numFramesInFlight);
+		m_trackedAllocationDeletionQueue.resize(m_numFramesInFlight);
 	}
 
-    template <typename T>
-    void MarkForDelete(const std::shared_ptr<T>& ptr) {
-		m_deletionQueue[0].push_back(ptr);
+	// Move-only
+    void MarkForDelete(rhi::helpers::AnyObjectPtr ptr) {
+		m_deletionQueue[0].push_back(std::move(ptr));
     }
+
+	// Move-only
+	void MarkForDelete(rhi::ma::AllocationPtr ptr) {
+		m_allocationDeletionQueue[0].push_back(std::move(ptr));
+	}
+
+	void MarkForDelete(TrackedHandle&& alloc) {
+		m_trackedAllocationDeletionQueue[0].push_back(std::move(alloc));
+	}
 
 	void ProcessDeletions() {
 		m_deletionQueue.back().clear();
-		for (size_t i = m_deletionQueue.size() - 1; i >= 1; --i) {
+		for (int i = static_cast<int>(m_deletionQueue.size()) - 1; i >= 1; --i) {
 			m_deletionQueue[i].swap(m_deletionQueue[i-1]);
+		}
+		m_allocationDeletionQueue.back().clear();
+		for (int i = static_cast<int>(m_allocationDeletionQueue.size()) - 1; i >= 1; --i) {
+			m_allocationDeletionQueue[i].swap(m_allocationDeletionQueue[i-1]);
+		}
+		m_trackedAllocationDeletionQueue.back().clear();
+		for (int i = static_cast<int>(m_trackedAllocationDeletionQueue.size()) - 1; i >= 1; --i) {
+			m_trackedAllocationDeletionQueue[i].swap(m_trackedAllocationDeletionQueue[i-1]);
 		}
 	}
 
     void Cleanup() {
 		m_deletionQueue.clear();
-		m_deletionQueue.push_back(std::vector<std::shared_ptr<void>>());
+		m_deletionQueue.resize(m_numFramesInFlight);
+		m_allocationDeletionQueue.clear();
+		m_allocationDeletionQueue.resize(m_numFramesInFlight);
+		m_trackedAllocationDeletionQueue.clear();
+		m_trackedAllocationDeletionQueue.resize(m_numFramesInFlight);
     }
 
 private:
+	uint8_t m_numFramesInFlight;
     DeletionManager() = default;
 
-	std::vector<std::vector<std::shared_ptr<void>>> m_deletionQueue;
+	std::vector<std::vector<rhi::helpers::AnyObjectPtr>> m_deletionQueue;
+	std::vector<std::vector<rhi::ma::AllocationPtr>> m_allocationDeletionQueue;
+	std::vector<std::vector<TrackedHandle>> m_trackedAllocationDeletionQueue;
 };
 
 inline DeletionManager& DeletionManager::GetInstance() {
     static DeletionManager instance;
     return instance;
 }
-
-class DebugSharedPtrManager {
-public:
-	static DebugSharedPtrManager& GetInstance();
-
-	template <typename T>
-	void StorePermenantly(const std::shared_ptr<T>& ptr) {
-		m_deletionQueue.push_back(ptr);
-	}
-
-	void Cleanup() {
-		m_deletionQueue.clear();
-	}
-
-private:
-	DebugSharedPtrManager() = default;
-
-	std::vector<std::shared_ptr<void>> m_deletionQueue;
-};
-
-inline DebugSharedPtrManager& DebugSharedPtrManager::GetInstance() {
-	static DebugSharedPtrManager instance;
-	return instance;
-}
-

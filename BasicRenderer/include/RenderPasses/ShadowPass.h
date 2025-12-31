@@ -9,33 +9,52 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Mesh/Mesh.h"
-#include "Scene/Scene.h"
 #include "Materials/Material.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
-#include "Managers/MeshManager.h"
-#include "Managers/ObjectManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
 #include "../../shaders/PerPassRootConstants/amplificationShaderRootConstants.h"
 
+struct ShadowPassInputs {
+    bool wireframe, meshShaders, indirect, drawBlendShadows, clearDepths;
+
+    friend bool operator==(const ShadowPassInputs&, const ShadowPassInputs&) = default;
+};
+
+inline rg::Hash64 HashValue(const ShadowPassInputs& i) {
+    std::size_t seed = 0;
+
+    boost::hash_combine(seed, i.wireframe);
+    boost::hash_combine(seed, i.meshShaders);
+    boost::hash_combine(seed, i.indirect);
+    boost::hash_combine(seed, i.drawBlendShadows);
+    boost::hash_combine(seed, i.clearDepths);
+    return seed;
+}
+
+
 class ShadowPass : public RenderPass {
 public:
-    ShadowPass(bool wireframe, bool meshShaders, bool indirect, bool drawBlendShadows, bool clearDepths)
-        : m_wireframe(wireframe),
-        m_meshShaders(meshShaders),
-        m_indirect(indirect),
-        m_drawBlendShadows(drawBlendShadows),
-        m_clearDepths(clearDepths) {
+    ShadowPass() {
         getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
         getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
-    }
-
-    ~ShadowPass() {
+        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+        lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
+        m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
+            .with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ShadowMapsPass))
+            .cached().cache_kind(flecs::QueryCacheAll).build();
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) {
+		auto input = Inputs<ShadowPassInputs>();
+		m_wireframe = input.wireframe;
+		m_meshShaders = input.meshShaders;
+		m_indirect = input.indirect;
+		m_drawBlendShadows = input.drawBlendShadows;
+		m_clearDepths = input.clearDepths;
+
         builder->WithShaderResource(Builtin::PerObjectBuffer,
             Builtin::NormalMatrixBuffer,
             Builtin::PerMeshBuffer,
@@ -68,11 +87,6 @@ public:
     }
 
     void Setup() override {
-        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-        lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
-        m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
-			.with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ShadowMapsPass))
-            .cached().cache_kind(flecs::QueryCacheAll).build();
 
         RegisterSRV(Builtin::NormalMatrixBuffer);
         RegisterSRV(Builtin::PostSkinningVertices);

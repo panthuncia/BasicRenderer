@@ -4,9 +4,12 @@
 #include <vector>
 #include <string>
 #include <functional>
+#include <memory>
+
+#include "Resources/Resource.h"
 
 struct ReadbackRequest {
-    rhi::ResourceHandle readbackBuffer;
+    std::shared_ptr<Resource> readbackBuffer;
     std::vector<rhi::CopyableFootprint> layouts;
     UINT64 totalSize;
     std::wstring outputFile;

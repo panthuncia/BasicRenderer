@@ -1,72 +1,98 @@
 #pragma once
-#include <initguid.h> // Why is this needed? Without it I get a linker error for IID_ID3D12Device.
-
-#include <rhi.h>
 
 #include "ThirdParty/stb/stb_image.h"
-#include <array>
 
 #include "Resources/GloballyIndexedResource.h"
 #include "Resources/TextureDescription.h"
-#include "Utilities/Utilities.h"
-using Microsoft::WRL::ComPtr;
+#include "Resources/GPUBacking/GPUTextureBacking.h"
+#include "Managers/Singletons/ResourceManager.h"
 
 class PixelBuffer : public GloballyIndexedResource {
 public:
-    static std::shared_ptr<PixelBuffer>
-        Create(const TextureDescription& desc,
-            const std::vector<const stbi_uc*>& initialData = {},
-            PixelBuffer* aliasTarget = nullptr);
-
-	unsigned int GetWidth() const { return m_width; }
-	unsigned int GetHeight() const { return m_height; }
-	unsigned int GetChannels() const { return m_channels; }
-    rhi::Resource GetTexture() {
-		return m_texture.Get();
+    static std::shared_ptr<PixelBuffer> CreateShared(const TextureDescription& desc,
+        const std::vector<const stbi_uc*>& initialData = {})
+    {
+		return std::shared_ptr<PixelBuffer>(new PixelBuffer(desc, initialData));
     }
-    rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
 
-    virtual void SetName(const std::wstring& newName) { name = newName; m_texture->SetName(ws2s(newName).c_str()); }
+    rhi::Resource GetAPIResource() override { return m_backing->GetAPIResource(); }
+    rhi::BarrierBatch GetEnhancedBarrierGroup(
+        RangeSpec range, 
+        rhi::ResourceAccessType prevAccessType, 
+        rhi::ResourceAccessType newAccessType, 
+        rhi::ResourceLayout prevLayout, 
+        rhi::ResourceLayout newLayout, 
+        rhi::ResourceSyncState prevSyncState, 
+        rhi::ResourceSyncState newSyncState)
+    {
+	    return m_backing->GetEnhancedBarrierGroup(
+            range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState
+        );
+    }
 
-	rhi::Resource GetAPIResource() override { return m_texture.Get(); }
-
-	rhi::HeapHandle GetPlacedResourceHeap() const {
-		return m_placedResourceHeap;
+    rhi::Format GetFormat() const { return m_backing->GetFormat(); }
+    const rhi::ClearValue& GetClearColor() const {
+        return m_backing->GetClearColor();
+    }
+    unsigned int GetInternalWidth() const {
+        return m_backing->GetInternalWidth();
+    }
+    unsigned int GetInternalHeight() const {
+        return m_backing->GetInternalHeight();
+    }
+    unsigned int GetWidth() const {
+        return m_backing->GetWidth();
+    }
+    unsigned int GetHeight() const {
+        return m_backing->GetHeight();
+    }
+    void OnSetName() override {
+        m_backing->SetName(name.c_str());
 	}
 
-	const rhi::ClearValue& GetClearColor() const {
-		return m_clearColor;
-	}
-	rhi::Format GetFormat() const {
-		return m_format;
-	}
-
-	unsigned int GetInternalWidth() const {
-		return m_internalWidth;
-	}
-	unsigned int GetInternalHeight() const {
-		return m_internalHeight;
-	}
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) const {
+        m_backing->ApplyMetadataComponentBundle(bundle);
+    }
 
 private:
-    PixelBuffer() = default;
-    void initialize(const TextureDescription& desc,
-        const std::vector<const stbi_uc*>& initialData,
-        PixelBuffer* aliasTarget);
+    PixelBuffer(const TextureDescription& desc,
+        const std::vector<const stbi_uc*>& initialData = {})
+    {
+        m_backing = GpuTextureBacking::CreateUnique(desc, GetGlobalResourceID(), nullptr, initialData);
+		m_mipLevels = m_backing->GetMipLevels();
+		m_arraySize = m_backing->GetArraySize();
+        // Create and assign descriptors through ResourceManager.
+        {
+			auto& rm = ResourceManager::GetInstance();
+            ResourceManager::ViewRequirements views;
+            ResourceManager::ViewRequirements::TextureViews texViews;
+            texViews.mipLevels = m_mipLevels;
+            texViews.isCubemap = desc.isCubemap;
+            texViews.isArray = desc.isArray;
+            texViews.arraySize = desc.arraySize;
+            texViews.totalArraySlices = m_arraySize;
 
-    unsigned int m_width;
-    unsigned int m_height;
-	unsigned int m_channels;
-    rhi::ResourcePtr m_texture;
-    rhi::Format m_format;
-	TextureDescription m_desc;
-	rhi::ClearValue m_clearColor;
+            texViews.baseFormat = desc.format;
+            texViews.srvFormat = desc.srvFormat;
+            texViews.uavFormat = desc.uavFormat;
+            texViews.rtvFormat = desc.rtvFormat;
+            texViews.dsvFormat = desc.dsvFormat;
 
-    rhi::HeapHandle m_placedResourceHeap; // If this is a placed resource, this is the heap it was created in
+            texViews.createSRV = true;
+            texViews.createUAV = desc.hasUAV;
+            texViews.createNonShaderVisibleUAV = desc.hasNonShaderVisibleUAV;
+            texViews.createRTV = desc.hasRTV;
+            texViews.createDSV = desc.hasDSV;
 
-    // Enhanced barriers
-	rhi::TextureBarrier m_barrier = {};
+            // if cubemap, also create Texture2DArray SRV.
+            texViews.createCubemapAsArraySRV = desc.isCubemap;
 
-	unsigned int m_internalWidth = 0; // Internal width, used for padding textures to power of two
-	unsigned int m_internalHeight = 0; // Internal height, used for padding textures to power of two
+            texViews.uavFirstMip = 0;
+
+            views.views = texViews;
+			auto res = m_backing->GetAPIResource();
+            rm.AssignDescriptorSlots(*this, res, views);
+        }
+	}
+    std::unique_ptr<GpuTextureBacking> m_backing;
 };

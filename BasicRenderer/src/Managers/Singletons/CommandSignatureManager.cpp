@@ -14,9 +14,9 @@ void CommandSignatureManager::Initialize() {
         { .kind = rhi::IndirectArgKind::DispatchMesh }
     };
 	auto& graphicsLayout = PSOManager::GetInstance().GetRootSignature();
-    m_dispatchMeshCommandSignature = device.CreateCommandSignature(
+    auto result = device.CreateCommandSignature(
         rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(args, 3), sizeof(DispatchMeshIndirectCommand) },
-        graphicsLayout.GetHandle());
+        graphicsLayout.GetHandle(), m_dispatchMeshCommandSignature);
 
     rhi::IndirectArg args2[] = {
         { .kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { PerObjectRootSignatureIndex, 0, 1 } } },
@@ -24,15 +24,15 @@ void CommandSignatureManager::Initialize() {
         { .kind = rhi::IndirectArgKind::Dispatch }
 	};
 	auto& computeLayout = PSOManager::GetInstance().GetComputeRootSignature();
-    m_dispatchCommandSignature = device.CreateCommandSignature(
+    result = device.CreateCommandSignature(
         rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(args2, 3), sizeof(DispatchIndirectCommand) },
-        computeLayout.GetHandle());
+        computeLayout.GetHandle(), m_dispatchCommandSignature);
 
     rhi::IndirectArg materialEvaluationArgs[] = {
         { .kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { MiscUintRootSignatureIndex, 0, 4 } } },
         { .kind = rhi::IndirectArgKind::Dispatch }
 	};
-    m_materialEvaluationCommandSignature = device.CreateCommandSignature(
+    result = device.CreateCommandSignature(
         rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(materialEvaluationArgs, 2), sizeof(MaterialEvaluationIndirectCommand) },
-		computeLayout.GetHandle());
+		computeLayout.GetHandle(), m_materialEvaluationCommandSignature);
 }

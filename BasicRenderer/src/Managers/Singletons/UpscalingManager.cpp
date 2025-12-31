@@ -17,8 +17,7 @@
 #include <sl.h>
 #include <sl_consts.h>
 #include <sl_dlss.h>
-#include <sl_security.h>
-#include <slHooks.h>
+#include "rhi_interop_dx12.h"
 
 PFunCreateDXGIFactory slCreateDXGIFactory = nullptr;
 PFunCreateDXGIFactory1 slCreateDXGIFactory1 = nullptr;
@@ -91,28 +90,13 @@ inline void StoreFloat4x4(const DirectX::XMMATRIX& m, sl::float4x4& target, bool
 void UpscalingManager::InitializeAdapter()
 {
     auto dev = DeviceManager::GetInstance().GetDevice();
-	m_dlssSupported = CheckDLSSSupport(dev);
-
-
-    if (m_dlssSupported) {
-		// Provide the D3D device to Streamline
-        //rhi::dx12::set_streamline_d3d_device(dev, slSetD3DDevice);
-		// Install the interposer into the DX12 backend so swapchain creation goes through SL proxy
-		bool success = rhi::dx12::enable_streamline_interposer(dev, slUpgradeInterface, slSetD3DDevice); // TODO: Un-enable if switching to FSR3 at runtime
-        if (!success) {
-            spdlog::error("Failed to enable Streamline interposer.");
-			m_dlssSupported = false;
-		}
-    }
+	m_dlssSupported = CheckDLSSSupport(dev); // TODO: Query from RHI
 }
 
-void UpscalingManager::ProxyDevice() {
+void UpscalingManager::ProxyDevice() { // TODO: RHI now handles this internally
     switch (m_upscalingMode)
     {
     case UpscalingMode::DLSS: {
-        // Install the interposer into the DX12 backend so swapchain creation goes through SL proxy
-		auto dev = DeviceManager::GetInstance().GetDevice();
-        rhi::dx12::enable_streamline_interposer(dev, slUpgradeInterface, slSetD3DDevice);
         break;
     }
     case UpscalingMode::FSR3: {
@@ -194,57 +178,6 @@ DirectX::XMFLOAT2 UpscalingManager::GetJitter(uint64_t frameNumber) {
 }
 
 bool UpscalingManager::InitSL() {
-
-    // IMPORTANT: Always securely load SL library, see source/core/sl.security/secureLoadLibrary for more details
-// Always secure load SL modules
-    if (!sl::security::verifyEmbeddedSignature(L"sl.interposer.dll"))
-    {
-        // SL module not signed, disable SL
-    }
-    else
-    {
-        auto mod = LoadLibrary(L"sl.interposer.dll");
-
-        if (!mod) {
-            spdlog::error("Failed to load sl.interposer.dll, ensure it is in the correct directory.");
-            return false;
-        }
-
-        // Map functions from SL and use them instead of standard DXGI/D3D12 API
-        slCreateDXGIFactory = reinterpret_cast<PFunCreateDXGIFactory>(GetProcAddress(mod, "CreateDXGIFactory"));
-        slCreateDXGIFactory1 = reinterpret_cast<PFunCreateDXGIFactory1>(GetProcAddress(mod, "CreateDXGIFactory1"));
-        slCreateDXGIFactory2 = reinterpret_cast<PFunCreateDXGIFactory2>(GetProcAddress(mod, "CreateDXGIFactory2"));
-        slDXGIGetDebugInterface1 = reinterpret_cast<PFunDXGIGetDebugInterface1>(GetProcAddress(mod, "DXGIGetDebugInterface1"));
-        slD3D12CreateDevice = reinterpret_cast<PFunD3D12CreateDevice>(GetProcAddress(mod, "D3D12CreateDevice"));
-        slGetUpgradeInterface =
-            reinterpret_cast<decltype(&slUpgradeInterface)>(
-                GetProcAddress(mod, "slUpgradeInterface"));
-    }
-
-    sl::Preferences pref{};
-    pref.showConsole = false; // for debugging, set to false in production
-    pref.logLevel = sl::LogLevel::eDefault;
-    auto path = GetExePath() + L"\\NVSL";
-    const wchar_t* path_wchar = path.c_str();
-    pref.pathsToPlugins = { &path_wchar }; // change this if Streamline plugins are not located next to the executable
-    pref.numPathsToPlugins = 1; // change this if Streamline plugins are not located next to the executable
-    pref.pathToLogsAndData = {}; // change this to enable logging to a file
-    pref.logMessageCallback = SlLogMessageCallback; // highly recommended to track warning/error messages in your callback
-    pref.engine = sl::EngineType::eCustom; // If using UE or Unity
-    pref.engineVersion = "0.0.1"; // Optional version
-    pref.projectId = "72a89ee2-1139-4cc5-8daa-d27189bed781"; // Optional project id
-    sl::Feature myFeatures[] = { sl::kFeatureDLSS };
-    pref.featuresToLoad = myFeatures;
-    pref.numFeaturesToLoad = _countof(myFeatures);
-    pref.renderAPI = sl::RenderAPI::eD3D12;
-    pref.flags |= sl::PreferenceFlags::eUseManualHooking;
-    if (SL_FAILED(res, slInit(pref)))
-    {
-        // Handle error, check the logs
-        if (res == sl::Result::eErrorDriverOutOfDate) { /* inform user */ }
-        // and so on ...
-        return false;
-    }
 
     m_numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
     m_frameTokens.resize(m_numFramesInFlight);
@@ -383,9 +316,9 @@ void UpscalingManager::EvaluateDLSS(RenderContext& context, PixelBuffer* pHDRTar
         spdlog::error("Failed to set DLSS constants");
     }
 
-    sl::Resource colorIn = { sl::ResourceType::eTex2d, (void*)rhi::dx12::get_resource(pHDRTarget->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON};
+    sl::Resource colorIn = { sl::ResourceType::eTex2d, (void*)rhi::dx12::get_resource(pHDRTarget->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
     sl::Resource colorOut = { sl::ResourceType::eTex2d, rhi::dx12::get_resource(pUpscaledHDRTarget->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
-    sl::Resource depth = { sl::ResourceType::eTex2d, rhi::dx12::get_resource(pDepthTexture->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON};
+    sl::Resource depth = { sl::ResourceType::eTex2d, rhi::dx12::get_resource(pDepthTexture->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
     sl::Resource mvec = { sl::ResourceType::eTex2d, rhi::dx12::get_resource(pMotionVectors->GetAPIResource()), nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON };
     //sl::Resource exposure = { sl::ResourceType::Tex2d, myExposureBuffer, nullptr, nullptr, nullptr }; // TODO
 
@@ -511,8 +444,6 @@ void UpscalingManager::Evaluate(RenderContext& context, PixelBuffer* pHDRTarget,
 }
 
 void UpscalingManager::Shutdown() {
-	auto dev = DeviceManager::GetInstance().GetDevice();
-    if (m_dlssSupported) {
-        rhi::dx12::disable_streamline_interposer(dev);
-	}
+	ffx::DestroyContext(m_fsrUpscalingContext);
+	// RHI now handles streamline internally
 }

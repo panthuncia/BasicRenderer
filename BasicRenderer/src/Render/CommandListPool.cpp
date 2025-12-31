@@ -15,8 +15,8 @@ CommandListPair CommandListPool::Request() {
     }
 
     CommandListPair pair;
-	pair.allocator = m_device.CreateCommandAllocator(m_type);
-	pair.list = m_device.CreateCommandList(m_type, pair.allocator.Get());
+	auto result = m_device.CreateCommandAllocator(m_type, pair.allocator);
+	result = m_device.CreateCommandList(m_type, pair.allocator.Get(), pair.list);
     pair.list->End();
     pair.allocator->Recycle();
     pair.list->Recycle(pair.allocator.Get());

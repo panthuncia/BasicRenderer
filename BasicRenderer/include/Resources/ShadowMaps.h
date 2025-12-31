@@ -3,21 +3,20 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include <spdlog/spdlog.h>
 #include <limits>
 #include <rhi.h>
 
 #include "Managers/Singletons/SettingsManager.h"
 #include "Resources/ResourceGroup.h"
 #include "Resources/Texture.h"
-#include "Managers/Singletons/ResourceManager.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/Sampler.h"
 #include "Utilities/Utilities.h"
 #include "Resources/TextureDescription.h"
+#include "Resources/MemoryStatisticsComponents.h"
 class ShadowMaps : public ResourceGroup {
 public:
-    ShadowMaps(const std::wstring& name)
+    ShadowMaps(const std::string& name)
         : ResourceGroup(name) {
 		getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	}
@@ -43,29 +42,30 @@ public:
 		switch (light->type) {
 		case Components::LightType::Point: // Cubemap
 			desc.isCubemap = true;
-			shadowMap = PixelBuffer::Create(desc);
-			shadowMap->SetName(L"PointShadowMap");
+			shadowMap = PixelBuffer::CreateShared(desc);
+			shadowMap->SetName("PointShadowMap");
 			break;
 		case Components::LightType::Spot: // 2D texture
-			shadowMap = PixelBuffer::Create(desc);
-			shadowMap->SetName(L"SpotShadowMap");
+			shadowMap = PixelBuffer::CreateShared(desc);
+			shadowMap->SetName("SpotShadowMap");
 			break;
 		case Components::LightType::Directional: // Texture array
 			desc.isArray = true;
 			desc.arraySize = getNumCascades();
-			shadowMap = PixelBuffer::Create(desc);
-			shadowMap->SetName(L"DirectionalShadowMap");
+			shadowMap = PixelBuffer::CreateShared(desc);
+			shadowMap->SetName("DirectionalShadowMap");
 			break;
 
 		}
+		shadowMap->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Shadow maps" }));
 		//light->SetShadowMap(map);
         AddResource(shadowMap);
 		return shadowMap;
     }
 
-	void RemoveMap(std::shared_ptr<Texture> map) {
+	void RemoveMap(std::shared_ptr<TextureAsset> map) {
 		if (map != nullptr) {
-			RemoveResource(map.get());
+			RemoveResource(map->ImagePtr().get());
 		}
 
 	}
@@ -76,7 +76,7 @@ private:
 
 class LinearShadowMaps : public ResourceGroup {
 public:
-	LinearShadowMaps(const std::wstring& name)
+	LinearShadowMaps(const std::string& name)
 		: ResourceGroup(name) {
 		getNumCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	}
@@ -103,28 +103,29 @@ public:
 		switch (light->type) {
 		case Components::LightType::Point: // Cubemap
 			desc.isCubemap = true;
-			shadowMap = PixelBuffer::Create(desc);
-			shadowMap->SetName(L"linearShadowMap");
+			shadowMap = PixelBuffer::CreateShared(desc);
+			shadowMap->SetName("linearShadowMap");
 			break;
 		case Components::LightType::Spot: // 2D texture
-			shadowMap = PixelBuffer::Create(desc);
-			shadowMap->SetName(L"linearShadowMap");
+			shadowMap = PixelBuffer::CreateShared(desc);
+			shadowMap->SetName("linearShadowMap");
 			break;
 		case Components::LightType::Directional: // Texture array
 			desc.isArray = true;
 			desc.arraySize = getNumCascades();
-			shadowMap = PixelBuffer::Create(desc);
-			shadowMap->SetName(L"linearShadowMap");
+			shadowMap = PixelBuffer::CreateShared(desc);
+			shadowMap->SetName("linearShadowMap");
 			break;
 
 		}
+		shadowMap->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Shadow maps" }));
 		AddResource(shadowMap);
 		return shadowMap;
 	}
 
-	void RemoveMap(std::shared_ptr<Texture> map) {
+	void RemoveMap(std::shared_ptr<TextureAsset> map) {
 		if (map != nullptr) {
-			RemoveResource(map.get());
+			RemoveResource(map->ImagePtr().get());
 		}
 
 	}

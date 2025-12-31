@@ -7,12 +7,13 @@
 #include "Render/RenderContext.h"
 #include "Resources/Texture.h"
 #include "Utilities/Utilities.h"
-#include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/ReadbackManager.h"
 
 class EnvironmentFilterPass : public RenderPass {
 public:
-    EnvironmentFilterPass() = default;
+    EnvironmentFilterPass() {
+        CreatePrefilterPSO();
+    }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override {
         // source cubemap as SRV, destination prefiltered cubemap as UAV
@@ -20,7 +21,7 @@ public:
             .WithUnorderedAccess(Builtin::Environment::PrefilteredCubemapsGroup);
     }
 
-    void Setup() override { CreatePrefilterPSO(); }
+    void Setup() override { }
 
     PassReturn Execute(RenderContext& context) override {
         auto dev = DeviceManager::GetInstance().GetDevice();
@@ -40,11 +41,11 @@ public:
             auto& srcCube = env->GetEnvironmentCubemap();
             auto& dstCubePF = env->GetEnvironmentPrefilteredCubemap();
 
-            const uint32_t srcSrvIndex = srcCube->GetBuffer()->GetSRVInfo(0).slot.index;
+            const uint32_t srcSrvIndex = srcCube->Image().GetSRVInfo(0).slot.index;
 
             const uint32_t group = 8;
 
-            const uint32_t maxMipLevels = dstCubePF->GetBuffer()->GetNumUAVMipLevels();
+            const uint32_t maxMipLevels = dstCubePF->Image().GetNumUAVMipLevels();
             for (uint32_t mip = 0; mip < maxMipLevels; ++mip)
             {
                 const uint32_t size = std::max(1u, baseRes >> mip);
@@ -54,7 +55,7 @@ public:
                 float roughness = (maxMipLevels > 1) ? (float)mip / float(maxMipLevels - 1) : 0.0f;
 
                 const uint32_t dstUavIndex =
-                    dstCubePF->GetBuffer()->GetUAVShaderVisibleInfo(mip, 0).slot.index;
+                    dstCubePF->Image().GetUAVShaderVisibleInfo(mip, 0).slot.index;
                 for (uint32_t face = 0; face < 6; ++face)
                 {
                     // Push constants: [srcSrv, dstUav, face, size, roughnessBits]
@@ -110,7 +111,7 @@ private:
         ld.flags = rhi::PipelineLayoutFlags::PF_None;
         ld.pushConstants = { &pc, 1 };
         ld.staticSamplers = { &s, 1 };
-        m_layout = dev.CreatePipelineLayout(ld);
+        auto result = dev.CreatePipelineLayout(ld, m_layout);
         if (!m_layout || !m_layout->IsValid()) throw std::runtime_error("EnvFilter: layout failed");
         m_layout->SetName("EnvFilter.ComputeLayout");
 
@@ -127,8 +128,10 @@ private:
             rhi::Make(soLayout),
             rhi::Make(soCS),
         };
-        m_pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-        if (!m_pso || !m_pso->IsValid()) throw std::runtime_error("EnvFilter: PSO failed");
+        result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);
+        if (Failed(result)) {
+            throw std::runtime_error("EnvFilter: PSO failed");
+        }
         m_pso->SetName("EnvFilter.ComputePSO");
     }
 };

@@ -3,14 +3,13 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "Resources/Texture.h"
-#include "Managers/Singletons/SettingsManager.h"
-#include "Managers/Singletons/UploadManager.h"
 #include "../shaders/PerPassRootConstants/luminanceHistogramRootConstants.h"
 
 class LuminanceHistogramPass : public ComputePass {
 public:
-    LuminanceHistogramPass() {}
+    LuminanceHistogramPass() {
+        CreateComputePSO();
+    }
 
     void DeclareResourceUsages(ComputePassBuilder* builder) {
         builder->WithShaderResource(Builtin::Color::HDRColorTarget)
@@ -18,8 +17,6 @@ public:
     }
 
     void Setup() override {
-        CreateComputePSO();
-        
 		RegisterSRV(Builtin::Color::HDRColorTarget);
         RegisterUAV(Builtin::PostProcessing::LuminanceHistogram);
     }

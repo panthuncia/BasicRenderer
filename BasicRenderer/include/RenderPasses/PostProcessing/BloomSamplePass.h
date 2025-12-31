@@ -1,26 +1,39 @@
-
-#include <unordered_map>
-#include <functional>
+#pragma once
 
 #include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "Mesh/Mesh.h"
 #include "Scene/Scene.h"
-#include "Resources/TextureDescription.h"
-#include "Managers/Singletons/UploadManager.h"
 #include "../shaders/PerPassRootConstants/bloomSampleRootConstants.h"
+
+struct BloomSamplePassInputs {
+    unsigned int mipIndex;
+    bool isUpsample;
+    friend bool operator==(const BloomSamplePassInputs&, const BloomSamplePassInputs&) = default;
+};
+
+inline rg::Hash64 HashValue(const BloomSamplePassInputs& i) {
+    std::size_t seed = 0;
+
+    boost::hash_combine(seed, i.mipIndex);
+    boost::hash_combine(seed, i.isUpsample);
+    return seed;
+}
 
 class BloomSamplePass : public RenderPass {
 public:
     // mipIndex selects which mip is used as render target, and which is used as shader resource.
     // E.g. DownsamplePassIndex 0 will downsample from mip 0 to mip 1, and use mip 1 as the render target.
     // If isUpsample is true, it will upsample from mip 1 to mip 0.
-    BloomSamplePass(unsigned int mipIndex, bool isUpsample) : m_mipIndex(mipIndex), m_isUpsample(isUpsample) {
+    BloomSamplePass() {
         CreatePSO();
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override {
+		auto inputs = Inputs<BloomSamplePassInputs>();
+		m_mipIndex = inputs.mipIndex;
+		m_isUpsample = inputs.isUpsample;
+
         if (!m_isUpsample) {
             builder->WithShaderResource(Subresources(Builtin::PostProcessing::UpscaledHDR, Mip{ m_mipIndex, 1 }))
                 .WithRenderTarget(Subresources(Builtin::PostProcessing::UpscaledHDR, Mip{ m_mipIndex + 1, 1 }));
@@ -32,7 +45,7 @@ public:
     }
 
     void Setup() override {
-        m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
+        m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
 
         RegisterSRV(Builtin::PostProcessing::UpscaledHDR, m_mipIndex + (m_isUpsample ? 1 : 0));
     }
@@ -104,7 +117,7 @@ private:
     rhi::PipelinePtr m_downsamplePso;
     rhi::PipelinePtr m_upsamplePso;
 
-    std::shared_ptr<PixelBuffer> m_pHDRTarget;
+    PixelBuffer* m_pHDRTarget;
 
 	PipelineResources m_resourceDescriptorBindings;
 
@@ -163,8 +176,8 @@ private:
                 rhi::Make(soSample),
             };
 
-            m_downsamplePso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-            if (!m_downsamplePso || !m_downsamplePso->IsValid()) {
+            auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_downsamplePso);
+            if (Failed(result)) {
                 throw std::runtime_error("Failed to create bloom downsample PSO (RHI)");
             }
             m_downsamplePso->SetName("Bloom.Downsample");
@@ -207,8 +220,8 @@ private:
                 rhi::Make(soSample),
             };
 
-            m_upsamplePso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-            if (!m_upsamplePso || !m_upsamplePso->IsValid()) {
+            auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_upsamplePso);
+            if (Failed(result)) {
                 throw std::runtime_error("Failed to create bloom upsample PSO (RHI)");
             }
             m_upsamplePso->SetName("Bloom.Upsample");

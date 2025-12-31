@@ -3,7 +3,6 @@
 #include <unordered_map> 
 #include <string>
 #include <memory>
-#include <chrono>
 #include <ctime>  
 #include <functional>
 #include <flecs.h>
@@ -25,14 +24,12 @@ public:
 	flecs::entity CreateNodeECS(std::wstring name = L"");
 	flecs::entity CreateRenderableEntityECS(const std::vector<std::shared_ptr<Mesh>>& meshes, std::wstring name);
     flecs::entity GetRoot() const;
-    void Update();
+    void Update(float elapsedSeconds);
     void SetCamera(DirectX::XMFLOAT3 lookAt, DirectX::XMFLOAT3 up, float fov, float aspect, float zNear, float zFar);
     void SetDepthMap(Components::DepthMap depthMap);
     flecs::entity& GetPrimaryCamera();
-    void AddSkeleton(std::shared_ptr<Skeleton>);
     void PostUpdate();
     std::shared_ptr<Scene> AppendScene(std::shared_ptr<Scene> scene);
-    //LightManager& GetLightManager();
     void Activate(ManagerInterface managerInterface);
 
     void ProcessEntitySkins(bool overrideExistingSkins = false);
@@ -47,9 +44,6 @@ private:
 
 	std::unordered_map<uint64_t, flecs::entity> animatedEntitiesByID;
 	UINT numObjects = 0;
-    std::vector<std::shared_ptr<Skeleton>> skeletons;
-    std::vector<std::shared_ptr<Skeleton>> animatedSkeletons;
-    std::chrono::system_clock::time_point lastUpdateTime = std::chrono::system_clock::now();
 
     // ECS
     flecs::entity ECSSceneRoot;

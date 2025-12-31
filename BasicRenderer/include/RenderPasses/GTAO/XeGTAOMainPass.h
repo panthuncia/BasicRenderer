@@ -3,25 +3,24 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "Resources/Texture.h"
-#include "Managers/Singletons/SettingsManager.h"
-#include "Managers/Singletons/UploadManager.h"
 #include "ThirdParty/XeGTAO.h"
 
 class GTAOMainPass : public ComputePass {
 public:
-    GTAOMainPass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer) : m_pGTAOConstantBuffer(pGTAOConstantBuffer) {}
+    GTAOMainPass() {
+        CreateXeGTAOComputePSO();
+    }
 
     void DeclareResourceUsages(ComputePassBuilder* builder) {
         builder->WithShaderResource(Builtin::GBuffer::Normals, Builtin::GTAO::WorkingDepths, Builtin::CameraBuffer)
-            .WithUnorderedAccess(Builtin::GTAO::WorkingEdges, Builtin::GTAO::WorkingAOTerm1);
+            .WithUnorderedAccess(Builtin::GTAO::WorkingEdges, Builtin::GTAO::WorkingAOTerm1)
+            .WithConstantBuffer("Builtin::GTAO::ConstantsBuffer");
     }
 
     void Setup() override {
-		CreateXeGTAOComputePSO();
-
         RegisterSRV(Builtin::CameraBuffer);
         RegisterSRV(Builtin::GBuffer::Normals);
+        RegisterCBV("Builtin::GTAO::ConstantsBuffer");
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -37,8 +36,7 @@ public:
         BindResourceDescriptorIndices(commandList, GTAOHighPSO.GetResourceDescriptorSlots());
 
         unsigned int passConstants[NumMiscUintRootConstants] = {};
-        passConstants[0] = m_pGTAOConstantBuffer->GetCBVInfo().slot.index;
-		passConstants[1] = frameIndex % 64; // For spatiotemporal denoising
+		passConstants[0] = frameIndex % 64; // For spatiotemporal denoising
 
 		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, passConstants);
 
@@ -51,7 +49,6 @@ public:
     }
 
 private:
-    std::shared_ptr<GloballyIndexedResource> m_pGTAOConstantBuffer;
 
     PipelineState PrefilterDepths16x16PSO;
     PipelineState GTAOLowPSO;

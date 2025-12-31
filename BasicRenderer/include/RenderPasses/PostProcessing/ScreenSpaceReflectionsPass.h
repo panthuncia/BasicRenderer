@@ -1,17 +1,9 @@
 #pragma once
 
-#include <unordered_map>
-#include <functional>
-
 #include "RenderPasses/Base/RenderPass.h"
-#include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "Mesh/Mesh.h"
 #include "Scene/Scene.h"
-#include "Resources/TextureDescription.h"
-#include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/FFXManager.h"
-#include "Utilities/MathUtils.h"
 
 class ScreenSpaceReflectionsPass : public ComputePass {
 public:
@@ -33,15 +25,15 @@ public:
     }
 
     void Setup() override {
-        m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
-        m_pMotionVectors = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::MotionVectors);
-        m_pDepthTexture = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
-		m_pNormals = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::Normals);
-        m_pMetallicRoughness = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::MetallicRoughness);
-		m_pMotionVectors = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::MotionVectors);
-		m_pEnvironmentCubemap = m_resourceRegistryView->Request<Texture>(Builtin::Environment::CurrentPrefilteredCubemap);
-        m_pBRDFLUT = m_resourceRegistryView->Request<PixelBuffer>(Builtin::BRDFLUT);
-		m_pSSSROutput = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PostProcessing::ScreenSpaceReflections);
+        m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
+        m_pMotionVectors = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GBuffer::MotionVectors);
+        m_pDepthTexture = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+		m_pNormals = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GBuffer::Normals);
+        m_pMetallicRoughness = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GBuffer::MetallicRoughness);
+		m_pMotionVectors = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GBuffer::MotionVectors);
+		m_pEnvironmentCubemap = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Environment::CurrentPrefilteredCubemap);
+        m_pBRDFLUT = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::BRDFLUT);
+		m_pSSSROutput = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PostProcessing::ScreenSpaceReflections);
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -69,14 +61,14 @@ public:
 
         FFXManager::GetInstance().EvaluateSSSR(
             context,
-            m_pHDRTarget.get(),
-            m_pDepthTexture.get(),
-			m_pNormals.get(),
-			m_pMetallicRoughness.get(),
-			m_pMotionVectors.get(),
-            m_pEnvironmentCubemap->GetBuffer().get(),
-			m_pBRDFLUT.get(),
-            m_pSSSROutput.get()
+            m_pHDRTarget,
+            m_pDepthTexture,
+			m_pNormals,
+			m_pMetallicRoughness,
+			m_pMotionVectors,
+            m_pEnvironmentCubemap,
+			m_pBRDFLUT,
+            m_pSSSROutput
 		);
 
 		// All resources must exit in COMMON state for legacy interop
@@ -98,12 +90,12 @@ public:
 
 private:
 
-    std::shared_ptr<PixelBuffer> m_pHDRTarget;
-    std::shared_ptr<PixelBuffer> m_pMotionVectors;
-    std::shared_ptr<PixelBuffer> m_pDepthTexture;
-	std::shared_ptr<PixelBuffer> m_pNormals;
-	std::shared_ptr<PixelBuffer> m_pMetallicRoughness;
-	std::shared_ptr<Texture> m_pEnvironmentCubemap;
-	std::shared_ptr<PixelBuffer> m_pBRDFLUT;
-	std::shared_ptr<PixelBuffer> m_pSSSROutput;
+    PixelBuffer* m_pHDRTarget;
+    PixelBuffer* m_pMotionVectors;
+    PixelBuffer* m_pDepthTexture;
+	PixelBuffer* m_pNormals;
+	PixelBuffer* m_pMetallicRoughness;
+	PixelBuffer* m_pEnvironmentCubemap;
+	PixelBuffer* m_pBRDFLUT;
+	PixelBuffer* m_pSSSROutput;
 };

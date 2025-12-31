@@ -8,8 +8,6 @@
 #include "Render/RenderContext.h"
 #include "Mesh/Mesh.h"
 #include "Scene/Scene.h"
-#include "Materials/Material.h"
-#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/ECSManager.h"
 
 class DebugSpherePass : public RenderPass {
@@ -17,6 +15,8 @@ public:
 	DebugSpherePass() {
 		CreateDebugRootSignature();
 		CreateDebugMeshPSO();
+		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::MeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 	}
 	~DebugSpherePass() {
 	}
@@ -28,13 +28,11 @@ public:
 	}
 
 	void Setup() override {
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-		m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::MeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 	
-		m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+		m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 
-		m_cameraBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).slot.index;
-		m_objectBufferSRVIndex = m_resourceRegistryView->Request<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).slot.index;
+		m_cameraBufferSRVIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).slot.index;
+		m_objectBufferSRVIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).slot.index;
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -110,7 +108,7 @@ private:
 		desc.ranges = rhi::Span<rhi::LayoutBindingRange>{ &binding, 1 };
 		desc.pushConstants = rhi::Span<rhi::PushConstantRangeDesc>{ &pushConstant };
 		desc.staticSamplers = rhi::Span<rhi::StaticSamplerDesc>{};
-		m_debugLayout = device.CreatePipelineLayout(desc);
+		auto result = device.CreatePipelineLayout(desc, m_debugLayout);
 
 	}
 
@@ -172,8 +170,8 @@ private:
 			rhi::Make(soSmp),
 		};
 
-		m_pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-		if (!m_pso || !m_pso->IsValid()) {
+		auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);
+		if (Failed(result)) {
 			throw std::runtime_error("Failed to create Debug Mesh PSO (RHI)");
 		}
 		m_pso->SetName("Debug.Mesh.Wireframe");
@@ -185,7 +183,7 @@ private:
 	rhi::PipelinePtr m_pso;
 	bool m_wireframe;
 
-	std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer;
+	PixelBuffer* m_pPrimaryDepthBuffer;
 
 	int m_cameraBufferSRVIndex = -1;
 	int m_objectBufferSRVIndex = -1;

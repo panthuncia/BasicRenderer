@@ -1,54 +1,50 @@
 #pragma once
 
-#include <stdint.h>
 #include <string>
-#include <memory>
 #include <rhi.h>
+#include <memory>
 
-#include <resource_states.h>
+#include "Resources/GPUBacking/GpuBufferBacking.h"
+#include "Resources/Resource.h"
+#include "Resources/Buffers/DynamicBufferBase.h"
+#include "Managers/Singletons/UploadManager.h"
+#include "Interfaces/IHasMemoryMetadata.h"
 
-#include "Render/DescriptorHeap.h"
-#include "Resources/HeapIndexInfo.h"
-#include "Resources/GloballyIndexedResource.h"
-#include "Utilities/Utilities.h"
+using Microsoft::WRL::ComPtr;
 
-class RenderContext;
-
-class Buffer : public GloballyIndexedResource{
+class Buffer : public GloballyIndexedResource, public IHasMemoryMetadata {
 public:
-	static std::shared_ptr<Buffer> CreateShared(
-		rhi::Device& device,
-		rhi::Memory accessType, 
-		uint64_t bufferSize, 
-		bool unorderedAccess = false) {
-		return std::shared_ptr<Buffer>(new Buffer(device, accessType, bufferSize, unorderedAccess));
-	}
-	static std::unique_ptr<Buffer> CreateUnique(
-		rhi::Device& device, 
-		rhi::Memory accessType, 
-		uint64_t bufferSize,
-		bool unorderedAccess = false) {
-		return std::unique_ptr<Buffer>(new Buffer(device, accessType, bufferSize, unorderedAccess));
-	}
 
-	~Buffer() {
-		m_buffer.Reset();
-	}
-	rhi::Memory m_accessType;
-	rhi::ResourcePtr m_buffer;
-	rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
-	size_t GetSize() const { return m_size; }
+    static std::shared_ptr<Buffer> CreateShared(rhi::HeapType accessType, uint64_t bufferSize, bool unorderedAccess = false) {
+        return std::shared_ptr<Buffer>(new Buffer(accessType, bufferSize, unorderedAccess));
+    }
 
-	rhi::Resource GetAPIResource() override { return m_buffer.Get(); }
+    rhi::Resource GetAPIResource() override { return m_dataBuffer->GetAPIResource(); }
+    size_t GetSize() const { return m_bufferSize; }
+
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
+        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
+    }
 protected:
-	void OnSetName() override { m_buffer->SetName(ws2s(name).c_str()); }
+
+    rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
+        return m_dataBuffer->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
+    }
+
 private:
+    Buffer(rhi::HeapType accessType, uint64_t bufferSize, bool unorderedAccess = false)
+        : m_accessType(accessType), m_bufferSize(bufferSize), m_UAV(unorderedAccess) {
+        m_dataBuffer = GpuBufferBacking::CreateUnique(accessType, m_bufferSize, GetGlobalResourceID(), m_UAV);
+    }
 
-	size_t m_size = 0;
-	rhi::BufferBarrier m_barrier = {};
+    void OnSetName() override {
+    	m_dataBuffer->SetName(name.c_str());
+    }
 
-	Buffer(rhi::Device& device, 
-		rhi::Memory accessType, 
-		uint64_t bufferSize, 
-		bool unorderedAccess = false);
+	rhi::HeapType m_accessType;
+	std::unique_ptr<GpuBufferBacking> m_dataBuffer;
+
+    uint64_t m_bufferSize;
+
+    bool m_UAV = false;
 };

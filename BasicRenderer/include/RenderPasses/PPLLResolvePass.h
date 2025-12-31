@@ -1,27 +1,21 @@
 #pragma once
 
-#include <unordered_map>
 #include <functional>
 
 #include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "Mesh/Mesh.h"
 #include "Scene/Scene.h"
-#include "Materials/Material.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "Managers/Singletons/ResourceManager.h"
-#include "Resources/TextureDescription.h"
-#include "Managers/Singletons/UploadManager.h"
 
 class PPLLResolvePass : public RenderPass {
 public:
 	PPLLResolvePass() {
-
 		auto& settingsManager = SettingsManager::GetInstance();
 		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
 		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
+        CreatePSO();
 	}
 
 	void DeclareResourceUsages(RenderPassBuilder* builder) {
@@ -30,9 +24,8 @@ public:
 	}
 
 	void Setup() override {
-		CreatePSO();
 
-		m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
+		m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
 
 		RegisterSRV(Builtin::PPLL::HeadPointerTexture);
 		RegisterSRV(Builtin::PPLL::DataBuffer);
@@ -82,7 +75,7 @@ public:
 private:
 	rhi::PipelinePtr m_pso;
 
-	std::shared_ptr<PixelBuffer> m_pHDRTarget;
+	PixelBuffer* m_pHDRTarget;
 
 	std::function<bool()> getImageBasedLightingEnabled;
 	std::function<bool()> getPunctualLightingEnabled;
@@ -153,8 +146,8 @@ private:
             rhi::Make(soSmp),
         };
 
-        m_pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-        if (!m_pso || !m_pso->IsValid()) {
+        auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);
+        if (Failed(result)) {
             throw std::runtime_error("PPLL Resolve: failed to create PSO (RHI)");
         }
         m_pso->SetName("PPLL.Resolve.PSO");

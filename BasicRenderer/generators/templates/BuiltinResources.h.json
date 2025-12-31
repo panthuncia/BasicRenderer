@@ -27,6 +27,11 @@
       "MeshletBounds": {},
       "ClusterToVisibleClusterTableIndexBuffer": {}
     },
+    "SkeletonResources": {
+      "BoneTransforms": {},
+      "InverseBindMatrices": {},
+      "SkinningInstanceInfo": {}
+    },
     "MeshletCullingBitfieldGroup": {},
     "MeshInstanceMeshletCullingBitfieldGroup": {},
     "MeshInstanceOcclusionCullingBitfieldGroup": {},

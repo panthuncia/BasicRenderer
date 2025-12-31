@@ -5,16 +5,16 @@
 #include <rhi.h>
 
 #include "Resources/Resource.h"
-#include "Render/RenderContext.h"
 #include "Render/ResourceRequirements.h"
 #include "RenderPasses/Base/PassReturn.h"
 #include "Resources/ResourceStateTracker.h"
 #include "Resources/ResourceIdentifier.h"
 #include "Render/ResourceRegistry.h"
-#include "../../../generated/BuiltinResources.h"
 #include "ResourceDescriptorIndexHelper.h"
 #include "Render/PipelineState.h"
 #include "interfaces/IResourceProvider.h"
+#include "Render/PassInputs.h"
+#include "ShaderBuffers.h"
 
 struct ComputePassParameters {
 	std::vector<ResourceAndRange> shaderResources;
@@ -30,7 +30,7 @@ struct ComputePassParameters {
 
 class ComputePassBuilder;
 
-class ComputePass : public IResourceProvider {
+class ComputePass : public IResourceProvider, public RenderGraphPassBase {
 public:
 	virtual ~ComputePass() = default;
 
@@ -77,6 +77,9 @@ protected:
 	}
 	void RegisterUAV(ResourceIdentifier id, unsigned int mip = 0, unsigned int slice = 0) {
 		m_resourceDescriptorIndexHelper->RegisterUAV(id, mip, slice);
+	}
+	void RegisterCBV(ResourceIdentifier id) {
+		m_resourceDescriptorIndexHelper->RegisterCBV(id);
 	}
 
 	virtual std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) { return nullptr; }

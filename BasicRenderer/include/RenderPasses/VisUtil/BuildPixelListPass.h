@@ -5,6 +5,14 @@
 
 class BuildPixelListPass : public ComputePass {
 public:
+    BuildPixelListPass() {
+        m_pso = PSOManager::GetInstance().MakeComputePipeline(
+            PSOManager::GetInstance().GetComputeRootSignature(),
+            L"shaders/VisUtil.hlsl",
+            L"BuildPixelListCS",
+            {},
+            "BuildPixelListPSO");
+	}
     void DeclareResourceUsages(ComputePassBuilder* b) override {
         b->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
                               Builtin::PrimaryCamera::VisibilityTexture,
@@ -18,13 +26,6 @@ public:
     }
 
     void Setup() override {
-        m_pso = PSOManager::GetInstance().MakeComputePipeline(
-            PSOManager::GetInstance().GetComputeRootSignature(),
-            L"shaders/VisUtil.hlsl",
-            L"BuildPixelListCS",
-            {},
-            "BuildPixelListPSO");
-
         RegisterSRV(Builtin::PrimaryCamera::VisibilityTexture);
         RegisterSRV(Builtin::PrimaryCamera::VisibleClusterTable);
         RegisterSRV(Builtin::PerMeshInstanceBuffer);
@@ -40,18 +41,6 @@ public:
         auto& pm = PSOManager::GetInstance();
         auto& cl = ctx.commandList;
 
-        // Manual UAV barrier for the pixel list buffer for testing
-        rhi::BufferBarrier barrier{};
-        barrier.beforeAccess = rhi::ResourceAccessType::ShaderResource;
-        barrier.afterAccess = rhi::ResourceAccessType::ShaderResource;
-        barrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
-        barrier.afterSync = rhi::ResourceSyncState::ComputeShading;
-        barrier.buffer = m_resourceRegistryView->Request<Buffer>("Builtin::VisUtil::PixelListBuffer")->GetAPIResource().GetHandle();
-
-        rhi::BarrierBatch barrierBatch;
-        barrierBatch.buffers = rhi::Span<rhi::BufferBarrier>(&barrier, 1);
-        cl.Barriers(barrierBatch);
-
         cl.SetDescriptorHeaps(ctx.textureDescriptorHeap.GetHandle(), ctx.samplerDescriptorHeap.GetHandle());
         cl.BindLayout(pm.GetComputeRootSignature().GetHandle());
         cl.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
@@ -61,8 +50,6 @@ public:
         uint32_t x = (ctx.renderResolution.x + gsX - 1) / gsX;
         uint32_t y = (ctx.renderResolution.y + gsY - 1) / gsY;
         cl.Dispatch(x, y, 1);
-
-        cl.Barriers(barrierBatch);
 
         return {};
     }

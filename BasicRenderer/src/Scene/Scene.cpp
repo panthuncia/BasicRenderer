@@ -15,12 +15,14 @@
 #include "Managers/MeshManager.h"
 #include "Managers/LightManager.h"
 #include "Managers/IndirectCommandBufferManager.h"
+#include "Managers/SkeletonManager.h"
 #include "Managers/MaterialManager.h"
 #include "Mesh/MeshInstance.h"
 #include "Animation/AnimationController.h"
 #include "Utilities/MathUtils.h"
 #include "Resources/Sampler.h"
 #include "Resources/components.h"
+#include "Resources/PixelBuffer.h"
 
 std::atomic<uint64_t> Scene::globalSceneCount = 0;
 
@@ -165,6 +167,13 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 		//e.add<Components::OpaqueMeshInstances>(drawInfo.opaque.value());
 		for (auto& meshInstance : meshInstances->meshInstances) {
 
+			if (meshInstance->HasSkin()) {
+				auto skinInst = meshInstance->GetSkin();
+				m_managerInterface.GetSkeletonManager()->AcquireSkinningInstance(skinInst);
+				meshInstance->SetSkinningInstanceSlot(skinInst->GetSkinningInstanceSlot());
+				skinInst->SetAnimation(0); // TODO: Animation selection
+			}
+
 			// Increment material usage count
 			m_managerInterface.GetMaterialManager()->IncrementMaterialUsageCount(*meshInstance->GetMesh()->material);
 			auto materialDataIndex = m_managerInterface.GetMaterialManager()->GetMaterialSlot(meshInstance->GetMesh()->material->GetMaterialID());
@@ -281,9 +290,8 @@ void Scene::ProcessEntitySkins(bool overrideExistingSkins) {
 			bool addSkin = false;
 			for (auto& meshInstance : oldMeshInstances->meshInstances) {
 				if (meshInstance->GetMesh()->HasBaseSkin() && (!meshInstance->HasSkin() || overrideExistingSkins)) {
-					auto skeleton = meshInstance->GetMesh()->GetBaseSkin()->CopySkeleton();
-					meshInstance->SetSkeleton(skeleton);
-					skeletonsToAdd.push_back(skeleton);
+					auto skinInst = meshInstance->GetMesh()->GetBaseSkin()->CopySkeleton();   // runtime instance
+					meshInstance->SetSkeleton(skinInst);
 					addSkin = true;
 				}
 			}
@@ -293,9 +301,6 @@ void Scene::ProcessEntitySkins(bool overrideExistingSkins) {
 		}
 		});
 	world.defer_end();
-	for (auto& skeleton : skeletonsToAdd) {
-		AddSkeleton(skeleton);
-	}
 }
 
 flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr<Mesh>>& meshes, std::wstring name) {
@@ -320,7 +325,6 @@ flecs::entity Scene::CreateRenderableEntityECS(const std::vector<std::shared_ptr
 		if (skinned) {
 			auto skeleton = mesh->GetBaseSkin()->CopySkeleton();
 			meshInstances.meshInstances.back()->SetSkeleton(skeleton);
-			AddSkeleton(skeleton);
 			entity.add<Components::Skinned>();
 		}
     }
@@ -359,10 +363,7 @@ flecs::entity Scene::GetRoot() const {
     return ECSSceneRoot;
 }
 
-void Scene::Update() {
-    auto currentTime = std::chrono::system_clock::now();
-    std::chrono::duration<float> elapsed_seconds = currentTime - lastUpdateTime;
-    lastUpdateTime = currentTime;
+void Scene::Update(float elapsedSeconds) {
 
 	for (auto& node : animatedEntitiesByID) {
 		auto& entity = node.second;
@@ -373,20 +374,14 @@ void Scene::Update() {
 			return;
 		}
 #endif
-	    auto& transform = animationController->GetUpdatedTransform(elapsed_seconds.count());
+	    auto& transform = animationController->GetUpdatedTransform(elapsedSeconds);
 		entity.set<Components::Rotation>(transform.rot);
 		entity.set<Components::Position>(transform.pos);
 		entity.set<Components::Scale>(transform.scale);
 	}
-
-    for (auto& skeleton : animatedSkeletons) {
-        skeleton->UpdateTransforms();
-    }
-
-	for (auto& scene : m_childScenes) {
-		scene->Update();
+	for (auto& child : m_childScenes) {
+		child->Update(elapsedSeconds);
 	}
-    PostUpdate();
 }
 
 void Scene::SetDepthMap(Components::DepthMap depthMap) {
@@ -459,19 +454,10 @@ flecs::entity& Scene::GetPrimaryCamera() {
     return m_primaryCamera;
 }
 
-void Scene::AddSkeleton(std::shared_ptr<Skeleton> skeleton) {
-    skeletons.push_back(skeleton);
-    if (skeleton->animations.size() > 0 && !skeleton->IsBaseSkeleton()) {
-        skeleton->SetAnimation(0);
-        animatedSkeletons.push_back(skeleton);
-    }
-
-	for (auto& node : skeleton->m_bones) {
-		animatedEntitiesByID[node.id()] = node;
-	}
-}
-
 void Scene::PostUpdate() {
+	for (auto& child : m_childScenes) {
+		child->PostUpdate();
+	}
 }
 
 std::shared_ptr<Scene> Scene::AppendScene(std::shared_ptr<Scene> scene) {

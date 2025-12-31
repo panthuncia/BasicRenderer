@@ -14,6 +14,7 @@ class LightCullingPass : public ComputePass {
 public:
 	LightCullingPass() {
 		getClusterSize = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT3>("lightClusterSize");
+		CreatePSO();
 	}
 
 	~LightCullingPass() {
@@ -25,10 +26,10 @@ public:
 	}
 
 	void Setup() override {
-		CreatePSO();
 
-		m_pLightPagesCounter = m_resourceRegistryView->Request<Buffer>(Builtin::Light::PagesCounter);
-	
+		m_lightPagesCounterHandle = m_resourceRegistryView->RequestHandle(Builtin::Light::PagesCounter);
+		m_pLightPagesCounter = m_resourceRegistryView->Resolve<Buffer>(m_lightPagesCounterHandle);
+
 		RegisterSRV(Builtin::CameraBuffer);
 		RegisterSRV(Builtin::Light::ActiveLightIndices);
 		RegisterSRV(Builtin::Light::InfoBuffer);
@@ -66,12 +67,13 @@ public:
 	virtual void Update() override {
 		// Reset UAV counter
 		uint32_t zero = 0;
-		QUEUE_UPLOAD(&zero, sizeof(uint32_t), m_pLightPagesCounter.get(), 0);
+		BUFFER_UPLOAD(&zero, sizeof(uint32_t), UploadManager::UploadTarget::FromHandle(m_lightPagesCounterHandle), 0);
 	}
 
 private:
 
-	std::shared_ptr<Buffer> m_pLightPagesCounter = nullptr;
+	Buffer* m_pLightPagesCounter = nullptr;
+	ResourceRegistry::ResourceHandle m_lightPagesCounterHandle;
 
 	void CreatePSO() {
 		m_PSO = PSOManager::GetInstance().MakeComputePipeline(

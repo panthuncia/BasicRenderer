@@ -2,18 +2,18 @@
 
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/IndirectCommandBufferManager.h"
-#include "Managers/Singletons/DeletionManager.h"
 #include "Resources/ResourceGroup.h"
 #include "../../generated/BuiltinResources.h"
 #include "Resources/DynamicResource.h"
+#include "Resources/MemoryStatisticsComponents.h"
 
 ViewManager::ViewManager() {
     auto& resourceManager = ResourceManager::GetInstance();
-    m_cameraBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<CameraInfo>(1, L"cameraBuffer<ViewManager>");
+    m_cameraBuffer = LazyDynamicStructuredBuffer<CameraInfo>::CreateShared(1, "cameraBuffer<ViewManager>");
 
-    m_meshletBitfieldGroup = std::make_shared<ResourceGroup>(L"MeshletCullingBitfieldGroup");
-    m_meshInstanceMeshletCullingBitfieldGroup = std::make_shared<ResourceGroup>(L"MeshInstanceMeshletCullingBitfieldGroup");
-    m_meshInstanceOcclusionCullingBitfieldGroup = std::make_shared<ResourceGroup>(L"MeshInstanceOcclusionCullingBitfieldGroup");
+    m_meshletBitfieldGroup = std::make_shared<ResourceGroup>("MeshletCullingBitfieldGroup");
+    m_meshInstanceMeshletCullingBitfieldGroup = std::make_shared<ResourceGroup>("MeshInstanceMeshletCullingBitfieldGroup");
+    m_meshInstanceOcclusionCullingBitfieldGroup = std::make_shared<ResourceGroup>("MeshInstanceOcclusionCullingBitfieldGroup");
 
     // Register provided resources
     m_resources[Builtin::CameraBuffer] = m_cameraBuffer;
@@ -69,21 +69,24 @@ void ViewManager::AllocateBitfields(View& v) {
     // Meshlet bitfield (bits -> number of 32-bit words)
     auto meshletBits = m_currentMeshletBitfieldSizeBits;
     auto meshletWords = (meshletBits + 31) / 32;
-    auto meshletRes = rm.CreateIndexedStructuredBuffer(meshletWords, sizeof(unsigned int), true, false);
-    meshletRes->SetName(L"MeshletBitfieldBuffer(view=" + std::to_wstring(v.id) + L")");
+    auto meshletRes = CreateIndexedStructuredBuffer(meshletWords, sizeof(unsigned int), true, false);
+    meshletRes->SetName("MeshletBitfieldBuffer(view=" + std::to_string(v.id) + ")");
+    meshletRes->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Culling bitfields" }));
     v.gpu.meshletBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(meshletRes);
     m_meshletBitfieldGroup->AddResource(v.gpu.meshletBitfieldBuffer);
 
     // Instance bitfields (packed bits into bytes)
     auto instBits = m_currentMeshInstanceBitfieldSizeBits;
     auto instBytes = (instBits + 7) / 8;
-    auto instanceMeshletRes = rm.CreateIndexedStructuredBuffer(instBytes, sizeof(unsigned int), true, false);
-    instanceMeshletRes->SetName(L"MeshInstanceMeshletCullingBitfield(view=" + std::to_wstring(v.id) + L")");
+    auto instanceMeshletRes = CreateIndexedStructuredBuffer(instBytes, sizeof(unsigned int), true, false);
+    instanceMeshletRes->SetName("MeshInstanceMeshletCullingBitfield(view=" + std::to_string(v.id) + ")");
+    instanceMeshletRes->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Culling bitfields" }));
     v.gpu.meshInstanceMeshletCullingBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(instanceMeshletRes);
     m_meshInstanceMeshletCullingBitfieldGroup->AddResource(v.gpu.meshInstanceMeshletCullingBitfieldBuffer);
 
-    auto instanceOccRes = rm.CreateIndexedStructuredBuffer(instBytes, sizeof(unsigned int), true, false);
-    instanceOccRes->SetName(L"MeshInstanceOcclusionCullingBitfield(view=" + std::to_wstring(v.id) + L")");
+    auto instanceOccRes = CreateIndexedStructuredBuffer(instBytes, sizeof(unsigned int), true, false);
+    instanceOccRes->SetName("MeshInstanceOcclusionCullingBitfield(view=" + std::to_string(v.id) + ")");
+	instanceOccRes->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Culling bitfields" }));
     v.gpu.meshInstanceOcclusionCullingBitfieldBuffer = std::make_shared<DynamicGloballyIndexedResource>(instanceOccRes);
     m_meshInstanceOcclusionCullingBitfieldGroup->AddResource(v.gpu.meshInstanceOcclusionCullingBitfieldBuffer);
 }
@@ -105,15 +108,12 @@ void ViewManager::DestroyView(uint64_t viewID) {
     // Bitfields
     if (v.gpu.meshletBitfieldBuffer) {
         m_meshletBitfieldGroup->RemoveResource(v.gpu.meshletBitfieldBuffer.get());
-        DeletionManager::GetInstance().MarkForDelete(v.gpu.meshletBitfieldBuffer->GetResource());
     }
     if (v.gpu.meshInstanceMeshletCullingBitfieldBuffer) {
         m_meshInstanceMeshletCullingBitfieldGroup->RemoveResource(v.gpu.meshInstanceMeshletCullingBitfieldBuffer.get());
-        DeletionManager::GetInstance().MarkForDelete(v.gpu.meshInstanceMeshletCullingBitfieldBuffer->GetResource());
     }
     if (v.gpu.meshInstanceOcclusionCullingBitfieldBuffer) {
         m_meshInstanceOcclusionCullingBitfieldGroup->RemoveResource(v.gpu.meshInstanceOcclusionCullingBitfieldBuffer.get());
-        DeletionManager::GetInstance().MarkForDelete(v.gpu.meshInstanceOcclusionCullingBitfieldBuffer->GetResource());
     }
 
     m_views.erase(it);
@@ -141,31 +141,29 @@ void ViewManager::UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo) {
 
 void ViewManager::ResizeMeshletBitfields(uint64_t numMeshlets) {
     m_currentMeshletBitfieldSizeBits = numMeshlets;
-    auto& rm = ResourceManager::GetInstance();
     for (auto& [id, v] : m_views) {
-        DeletionManager::GetInstance().MarkForDelete(v.gpu.meshletBitfieldBuffer->GetResource());
         auto words = (numMeshlets + 31) / 32;
-        auto res = rm.CreateIndexedStructuredBuffer(words, sizeof(unsigned int), true, false);
-        res->SetName(L"MeshletBitfieldBuffer(view=" + std::to_wstring(id) + L")");
+        auto res = CreateIndexedStructuredBuffer(words, sizeof(unsigned int), true, false);
+        res->SetName("MeshletBitfieldBuffer(view=" + std::to_string(id) + ")");
+        res->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Culling bitfields" }));
         v.gpu.meshletBitfieldBuffer->SetResource(res);
     }
 }
 
 void ViewManager::ResizeInstanceBitfields(uint32_t numInstances) {
     m_currentMeshInstanceBitfieldSizeBits = numInstances;
-    auto& rm = ResourceManager::GetInstance();
     auto bytes = (numInstances + 7) / 8;
     for (auto& [id, v] : m_views) {
         // Meshlet culling
-        DeletionManager::GetInstance().MarkForDelete(v.gpu.meshInstanceMeshletCullingBitfieldBuffer->GetResource());
-        auto cullRes = rm.CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), true, false);
-        cullRes->SetName(L"MeshInstanceMeshletCullingBitfield(view=" + std::to_wstring(id) + L")");
+        auto cullRes = CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), true, false);
+        cullRes->SetName("MeshInstanceMeshletCullingBitfield(view=" + std::to_string(id) + ")");
+		cullRes->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Culling bitfields" }));
         v.gpu.meshInstanceMeshletCullingBitfieldBuffer->SetResource(cullRes);
 
         // Occlusion
-        DeletionManager::GetInstance().MarkForDelete(v.gpu.meshInstanceOcclusionCullingBitfieldBuffer->GetResource());
-        auto occRes = rm.CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), true, false);
-        occRes->SetName(L"MeshInstanceOcclusionCullingBitfield(view=" + std::to_wstring(id) + L")");
+        auto occRes = CreateIndexedStructuredBuffer(bytes, sizeof(unsigned int), true, false);
+        occRes->SetName("MeshInstanceOcclusionCullingBitfield(view=" + std::to_string(id) + ")");
+        occRes->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Culling bitfields" }));
         v.gpu.meshInstanceOcclusionCullingBitfieldBuffer->SetResource(occRes);
     }
 }

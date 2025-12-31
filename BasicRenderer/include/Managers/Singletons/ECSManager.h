@@ -9,6 +9,8 @@ public:
     static ECSManager& GetInstance();
 	void Initialize();
 	flecs::world& GetWorld() { return world; }
+    void Cleanup();
+    bool IsAlive() const { return m_isAlive; }
     flecs::entity GetRenderPhaseEntity(const RenderPhase& phase) {
         auto it = m_renderPhaseEntities.find(phase);
         if (it != m_renderPhaseEntities.end()) {
@@ -32,6 +34,7 @@ public:
 private:
     flecs::world world;
 	std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher> m_renderPhaseEntities;
+    bool m_isAlive = false;
     ECSManager() = default;
 };
 

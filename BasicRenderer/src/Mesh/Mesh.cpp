@@ -36,7 +36,8 @@ void Mesh::CreateVertexBuffer() {
     
     const UINT vertexBufferSize = static_cast<UINT>(m_vertices->size());
 
-	m_vertexBufferHandle = ResourceManager::GetInstance().CreateBuffer(vertexBufferSize, (void*)m_vertices->data());
+	m_vertexBufferHandle = Buffer::CreateShared(rhi::HeapType::DeviceLocal, vertexBufferSize);
+	BUFFER_UPLOAD(m_vertices->data(), vertexBufferSize, UploadManager::UploadTarget::FromShared(m_vertexBufferHandle), 0);
 
     m_vertexBufferView.buffer = m_vertexBufferHandle->GetAPIResource().GetHandle();
     m_vertexBufferView.stride = sizeof(m_perMeshBufferData.vertexByteSize);
@@ -188,7 +189,9 @@ void Mesh::CreateBuffers(const std::vector<UINT32>& indices) {
     const UINT indexBufferSize = static_cast<UINT>(indices.size() * sizeof(UINT32));
     m_indexCount = static_cast<uint32_t>(indices.size());
 
-	m_indexBufferHandle = ResourceManager::GetInstance().CreateBuffer(indexBufferSize, (void*)indices.data());
+	m_indexBufferHandle = Buffer::CreateShared(rhi::HeapType::DeviceLocal, indexBufferSize);
+
+	BUFFER_UPLOAD(indices.data(), indexBufferSize, UploadManager::UploadTarget::FromShared(m_indexBufferHandle), 0);
 
     m_indexBufferView.buffer = m_indexBufferHandle->GetAPIResource().GetHandle();
     m_indexBufferView.format = rhi::Format::R32_UInt;
@@ -283,12 +286,6 @@ void Mesh::SetBufferViews(std::unique_ptr<BufferView> preSkinningVertexBufferVie
 
 void Mesh::SetBaseSkin(std::shared_ptr<Skeleton> skeleton) {
 	m_baseSkeleton = skeleton;
-	//m_perMeshBufferData.boneTransformBufferIndex = skeleton->GetTransformsBufferIndex();
-	m_perMeshBufferData.inverseBindMatricesBufferIndex = skeleton->GetInverseBindMatricesBufferIndex();
-	if (m_pCurrentMeshManager != nullptr) {
-		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
-	}
-	//skeleton->userIDs.push_back(localID);
 }
 
 void Mesh::UpdateVertexCount(bool meshletReorderedVertices) {

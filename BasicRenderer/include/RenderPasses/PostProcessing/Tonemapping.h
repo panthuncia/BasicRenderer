@@ -6,9 +6,7 @@
 #include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "Mesh/Mesh.h"
 #include "Scene/Scene.h"
-#include "Resources/TextureDescription.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Materials/colorspaces.h"
 
@@ -29,7 +27,7 @@ public:
 	TonemappingPass() {
 		CreatePSO();
 		getTonemapType = SettingsManager::GetInstance().getSettingGetter<unsigned int>("tonemapType");
-        m_pLPMConstants = ResourceManager::GetInstance().CreateIndexedLazyDynamicStructuredBuffer<LPMConstants>(1, L"AMD LPM constants", 1, true);
+        m_pLPMConstants = LazyDynamicStructuredBuffer<LPMConstants>::CreateShared(1, "AMD LPM constants", 1, true);
 	}
 
     std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override {
@@ -59,7 +57,7 @@ public:
         
         // Rest will be filled in by the luminanceHistogramAverage shader
 
-        QUEUE_UPLOAD(&lpmConstants, sizeof(LPMConstants), m_pLPMConstants.get(), 0);
+        BUFFER_UPLOAD(&lpmConstants, sizeof(LPMConstants), UploadManager::UploadTarget::FromShared(m_pLPMConstants), 0);
 
         RegisterSRV(Builtin::PostProcessing::UpscaledHDR);
 		RegisterSRV(Builtin::CameraBuffer);
@@ -182,8 +180,8 @@ private:
             rhi::Make(soSmp),
         };
 
-        m_pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-        if (!m_pso || !m_pso->IsValid()) {
+        auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);
+        if (Failed(result)) {
             throw std::runtime_error("Failed to create tonemapping PSO (RHI)");
         }
         m_pso->SetName("Tonemapping.PSO");

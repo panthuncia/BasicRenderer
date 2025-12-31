@@ -47,6 +47,8 @@ public:
     // For aliasing mode: set at frame begin
     void SetComputeMode(ComputeMode mode) { m_computeMode = mode; }
 
+    void ShutdownThreadLocal();
+
 private:
     struct QueueBinding {
         rhi::Queue* queue = nullptr;

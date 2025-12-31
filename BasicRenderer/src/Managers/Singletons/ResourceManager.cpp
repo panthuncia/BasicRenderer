@@ -4,25 +4,47 @@
 
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "Resources/Buffers/DynamicBuffer.h"
-#include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "Managers/Singletons/UploadManager.h"
-void ResourceManager::Initialize(rhi::Queue commandQueue) {
-	//for (int i = 0; i < 3; i++) {
-	//    frameResourceCopies[i] = std::make_unique<FrameResource>();
-	//    frameResourceCopies[i]->Initialize();
-	//}
+void ResourceManager::Initialize() {
 
 	auto device = DeviceManager::GetInstance().GetDevice();
-	m_cbvSrvUavHeap = std::make_shared<DescriptorHeap>(device, rhi::DescriptorHeapType::CbvSrvUav, 1000000 /*D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1*/, true);
-	m_samplerHeap = std::make_shared<DescriptorHeap>(device, rhi::DescriptorHeapType::Sampler, 2048, true);
-	m_rtvHeap = std::make_shared<DescriptorHeap>(device, rhi::DescriptorHeapType::RTV, 10000, false);
-	m_dsvHeap = std::make_shared<DescriptorHeap>(device, rhi::DescriptorHeapType::DSV, 10000, false);
-	m_nonShaderVisibleHeap = std::make_shared<DescriptorHeap>(device, rhi::DescriptorHeapType::CbvSrvUav, 100000, false);
+	m_cbvSrvUavHeap = std::make_shared<DescriptorHeap>(
+        device, 
+        rhi::DescriptorHeapType::CbvSrvUav, 
+        1000000 /*D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1*/, 
+        true,
+        "cbvSrvUavHeap");
 
-	perFrameBufferHandle = CreateIndexedConstantBuffer<PerFrameCB>(L"PerFrameCB");
+	m_samplerHeap = std::make_shared<DescriptorHeap>(
+        device, 
+        rhi::DescriptorHeapType::Sampler, 
+        2048, 
+        true,
+        "samplerHeap");
+
+	m_rtvHeap = std::make_shared<DescriptorHeap>(
+        device, 
+        rhi::DescriptorHeapType::RTV, 
+        10000, 
+        false,
+        "rtvHeap");
+
+	m_dsvHeap = std::make_shared<DescriptorHeap>(
+        device, 
+        rhi::DescriptorHeapType::DSV,
+        10000, 
+        false,
+        "dsvHeap");
+
+	m_nonShaderVisibleHeap = std::make_shared<DescriptorHeap>(
+        device, 
+        rhi::DescriptorHeapType::CbvSrvUav, 
+        100000, 
+        false,
+        "nonShaderVisibleHeap");
+
+	m_perFrameBuffer = CreateIndexedConstantBuffer(sizeof(PerFrameCB), "PerFrameCB");
 
 	perFrameCBData.ambientLighting = DirectX::XMVectorSet(0.1f, 0.1f, 0.1f, 1.0f);
 	perFrameCBData.numShadowCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
@@ -41,12 +63,7 @@ void ResourceManager::Initialize(rhi::Queue commandQueue) {
 		perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(shadowCascadeSplits[0], shadowCascadeSplits[1], shadowCascadeSplits[2], shadowCascadeSplits[3]);
 	}
 
-	//InitializeUploadHeap();
-	InitializeCopyCommandQueue();
-	InitializeTransitionCommandList();
-	SetTransitionCommandQueue(commandQueue);
-
-	m_uavCounterReset = device.CreateCommittedResource(rhi::helpers::ResourceDesc::Buffer(sizeof(UINT), rhi::Memory::Upload));
+	auto result = device.CreateCommittedResource(rhi::helpers::ResourceDesc::Buffer(sizeof(UINT), rhi::HeapType::Upload), m_uavCounterReset);
 
 	void* pMappedCounterReset = nullptr;
 	
@@ -76,425 +93,230 @@ void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, Dir
 	perFrameCBData.clusterZSplitDepth = 6.0f;
 	perFrameCBData.frameIndex = frameIndex % 64; // Wrap around every 64 frames
 
-	QUEUE_UPLOAD(&perFrameCBData, sizeof(PerFrameCB), perFrameBufferHandle.get(), 0);
-}
-
-void ResourceManager::WaitForCopyQueue() {
-	auto device = DeviceManager::GetInstance().GetDevice();
-	copyCommandQueue.Signal({ copyFence->GetHandle(), ++copyFenceValue});
-	if (copyFence->GetCompletedValue() < copyFenceValue) {
-		copyFence->HostWait(copyFenceValue);
-	}
-}
-
-void ResourceManager::WaitForTransitionQueue() {
-	auto device = DeviceManager::GetInstance().GetDevice();
-	transitionCommandQueue.Signal({ transitionFence->GetHandle(), ++transitionFenceValue});
-	if (transitionFence->GetCompletedValue() < transitionFenceValue) {
-		transitionFence->HostWait(transitionFenceValue);
-	}
-}
-
-void ResourceManager::InitializeCopyCommandQueue() {
-	auto device = DeviceManager::GetInstance().GetDevice();
-
-	copyCommandQueue = device.GetQueue(rhi::QueueKind::Graphics); // TODO: async copy queue
-	copyCommandAllocator = device.CreateCommandAllocator(rhi::QueueKind::Graphics);
-	copyCommandList = device.CreateCommandList(rhi::QueueKind::Graphics, copyCommandAllocator.Get());
-
-	copyFence = device.CreateTimeline(copyFenceValue, "CopyFence");
-}
-
-void ResourceManager::InitializeTransitionCommandList() {
-	auto device = DeviceManager::GetInstance().GetDevice();
-
-	transitionCommandQueue = device.GetQueue(rhi::QueueKind::Graphics);
-	transitionCommandAllocator = device.CreateCommandAllocator(rhi::QueueKind::Graphics);
-	transitionCommandList = device.CreateCommandList(rhi::QueueKind::Graphics, transitionCommandAllocator.Get());
-
-	transitionFence = device.CreateTimeline(transitionFenceValue, "TransitionFence");
-}
-
-void ResourceManager::SetTransitionCommandQueue(rhi::Queue queue) {
-	transitionCommandQueue = queue;
+	BUFFER_UPLOAD(&perFrameCBData, sizeof(PerFrameCB), UploadManager::UploadTarget::FromShared(m_perFrameBuffer), 0);
 }
 
 UINT ResourceManager::CreateIndexedSampler(const rhi::SamplerDesc& samplerDesc) {
 	auto device = DeviceManager::GetInstance().GetDevice();
 
 	UINT index = m_samplerHeap->AllocateDescriptor();
-	//D3D12_CPU_DESCRIPTOR_HANDLE handle = m_samplerHeap->GetCPUHandle(index);
 
-	//device->CreateSampler(&samplerDesc, handle);
 	device.CreateSampler({ m_samplerHeap->GetHeap().GetHandle(), index}, samplerDesc);
 	return index;
 }
 
-void ResourceManager::GetCopyCommandList(rhi::CommandListPtr& commandList, rhi::CommandAllocatorPtr& commandAllocator) {
-	auto device = DeviceManager::GetInstance().GetDevice();
+void ResourceManager::AssignDescriptorSlots(
+    GloballyIndexedResource& target,
+    rhi::Resource& apiResource,
+    const ViewRequirements& req)
+{
+    auto device = DeviceManager::GetInstance().GetDevice();
 
-	// Create a new command allocator if none is available or reuse an existing one
-	if (!commandAllocator || !commandList) {
-		commandAllocator = device.CreateCommandAllocator(rhi::QueueKind::Graphics);
-		commandList = device.CreateCommandList(rhi::QueueKind::Graphics, commandAllocator.Get());
-	}
-	commandList->Recycle(commandAllocator.Get());
-	commandList->End();
-	commandAllocator->Recycle();
+    if (!m_cbvSrvUavHeap || !m_samplerHeap || !m_rtvHeap || !m_dsvHeap || !m_nonShaderVisibleHeap) {
+        spdlog::error("ResourceManager::AssignDescriptorSlots called before ResourceManager::Initialize");
+        throw std::runtime_error("ResourceManager::AssignDescriptorSlots called before ResourceManager::Initialize");
+    }
 
-}
-void ResourceManager::ExecuteAndWaitForCommandList(rhi::CommandListPtr& commandList, rhi::CommandAllocatorPtr& commandAllocator) {
-	auto device = DeviceManager::GetInstance().GetDevice();
-	static rhi::Queue copyCommandQueue;
-	static rhi::TimelinePtr copyFence;
-	static UINT64 copyFenceValue = 0;
-	static bool copyFenceEventCreated = false;
+    // Texture path
+    if (const auto* tex = std::get_if<ViewRequirements::TextureViews>(&req.views))
+    {
+        const auto& cbvSrvUavHeap = m_cbvSrvUavHeap;
+        const auto& nonShaderVisibleHeap = m_nonShaderVisibleHeap;
+        const auto& rtvHeap = m_rtvHeap;
+        const auto& dsvHeap = m_dsvHeap;
 
-	// Create the command queue if it hasn't been created yet
-	if (!copyCommandQueue) {
-		copyCommandQueue = device.GetQueue(rhi::QueueKind::Graphics);
-	}
+        // SRV
+        if (tex->createSRV)
+        {
+            auto srvInfos = CreateShaderResourceViewsPerMip(
+                device,
+                apiResource,
+                tex->srvFormat == rhi::Format::Unknown ? tex->baseFormat : tex->srvFormat,
+                cbvSrvUavHeap.get(),
+                tex->mipLevels,
+                tex->isCubemap,
+                tex->isArray,
+                tex->arraySize);
 
-	// Create a fence for synchronization if it hasn't been created yet
-	if (!copyFenceEventCreated) {
-		copyFence = device.CreateTimeline(copyFenceValue, "TempCopyFence");
-		copyFenceEventCreated = true;
-	}
+            SRVViewType srvViewType = SRVViewType::Invalid;
+            if (tex->isArray) {
+                srvViewType = tex->isCubemap ? SRVViewType::TextureCubeArray : SRVViewType::Texture2DArray;
+            }
+            else if (tex->isCubemap) {
+                srvViewType = SRVViewType::TextureCube;
+            }
+            else {
+                srvViewType = SRVViewType::Texture2D;
+            }
 
-	// Close the command list and execute it
-	commandList->End();
-	copyCommandQueue.Submit({ &commandList.Get(), 1}, {});
+            target.SetDefaultSRVViewType(srvViewType);
+            target.SetSRVView(srvViewType, cbvSrvUavHeap, srvInfos);
 
-	// Increment the fence value and signal the fence
-	++copyFenceValue;
-	copyCommandQueue.Signal({ copyFence->GetHandle(), copyFenceValue});
+            // View cubemap as Texture2DArray
+            if (tex->createCubemapAsArraySRV && tex->isCubemap)
+            {
+                auto secondarySrvInfos = CreateShaderResourceViewsPerMip(
+                    device,
+                    apiResource,
+                    tex->srvFormat == rhi::Format::Unknown ? tex->baseFormat : tex->srvFormat,
+                    cbvSrvUavHeap.get(),
+                    tex->mipLevels,
+                    /*isCubemap*/ false,
+                    /*isArray*/   tex->isArray,
+                    /*arraySize*/ 6u);
 
-	// Wait until the fence is completed
-	if (copyFence->GetCompletedValue() < copyFenceValue) {
-		copyFence->HostWait(copyFenceValue);
-	}
+                target.SetSRVView(SRVViewType::Texture2DArray, cbvSrvUavHeap, secondarySrvInfos);
+            }
+        }
 
-	commandAllocator->Recycle();
-	commandList->Recycle(commandAllocator.Get());
-}
+        // UAV (shader visible)
+        if (tex->createUAV)
+        {
+            auto uavInfos = CreateUnorderedAccessViewsPerMip(
+                device,
+                apiResource,
+                tex->uavFormat == rhi::Format::Unknown ? tex->baseFormat : tex->uavFormat,
+                cbvSrvUavHeap.get(),
+                tex->mipLevels,
+                tex->isArray,
+                tex->totalArraySlices,
+                tex->uavFirstMip,
+                tex->isCubemap);
 
-std::shared_ptr<Buffer> ResourceManager::CreateBuffer(size_t bufferSize, void* pInitialData, bool UAV) {
-	auto device = DeviceManager::GetInstance().GetDevice();
-	auto dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, bufferSize, UAV);
-	if (pInitialData) {
-		QUEUE_UPLOAD(pInitialData, bufferSize, dataBuffer.get(), 0);
-	}
+            target.SetUAVGPUDescriptors(cbvSrvUavHeap, uavInfos);
+        }
 
-//	ResourceTransition transition = { dataBuffer.get(), ResourceState::UNKNOWN,  usageType };
-//#if defined(_DEBUG)
-//		transition.name = L"Buffer";
-//#endif
-//	QueueResourceTransition(transition);
-	return dataBuffer;
-}
+        // UAV (non-shader visible)
+        if (tex->createNonShaderVisibleUAV)
+        {
+            auto nonShaderUavInfos = CreateNonShaderVisibleUnorderedAccessViewsPerMip(
+                device,
+                apiResource,
+                tex->uavFormat == rhi::Format::Unknown ? tex->baseFormat : tex->uavFormat,
+                nonShaderVisibleHeap.get(),
+                tex->mipLevels,
+                tex->isArray,
+                tex->arraySize,
+                tex->uavFirstMip);
 
+            target.SetUAVCPUDescriptors(nonShaderVisibleHeap, nonShaderUavInfos);
+        }
 
-std::shared_ptr<DynamicBuffer> ResourceManager::CreateIndexedDynamicBuffer(size_t elementSize, size_t numElements, std::wstring name, bool byteAddress, bool UAV) {
-#if defined(_DEBUG)
-	assert(numElements > 0 && byteAddress ? elementSize == 1 : (elementSize > 0 && elementSize % 4 == 0));
-	assert(byteAddress ? numElements % 4 == 0 : true);
-#endif
-	auto device = DeviceManager::GetInstance().GetDevice();
+        // RTV
+        if (tex->createRTV)
+        {
+            auto rtvInfos = CreateRenderTargetViews(
+                device,
+                apiResource,
+                tex->rtvFormat == rhi::Format::Unknown ? tex->baseFormat : tex->rtvFormat,
+                rtvHeap.get(),
+                tex->isCubemap,
+                tex->isArray,
+                tex->arraySize,
+                tex->mipLevels);
 
-	size_t bufferSize = elementSize * numElements;
-	{
-		const size_t align = 4;
-		const size_t rem = bufferSize % align;
-		if (rem) bufferSize += (align - rem); // Align up to 4 bytes
-	}
-	// Create the dynamic structured buffer instance
-	UINT bufferID = GetNextResizableBufferID();
-	std::shared_ptr<DynamicBuffer> pDynamicBuffer = DynamicBuffer::CreateShared(byteAddress, elementSize, bufferID, bufferSize, name, UAV);
-//	ResourceTransition transition;
-//	transition.resource = pDynamicBuffer.get();
-//	transition.beforeState = ResourceState::UNKNOWN;
-//	transition.afterState = usage;
-//#if defined(_DEBUG)
-//	transition.name = name;
-//#endif
-//	QueueResourceTransition(transition);
-	pDynamicBuffer->SetOnResized([this](UINT bufferID, size_t typeSize, size_t capacity, bool byteAddress, DynamicBufferBase* buffer, bool UAV) {
-		this->onDynamicBufferResized(bufferID, typeSize, capacity, byteAddress, buffer, UAV);
-		});
+            target.SetRTVDescriptors(rtvHeap, rtvInfos);
+        }
 
-	// Create an SRV for the buffer
+        // DSV
+        if (tex->createDSV)
+        {
+            auto dsvInfos = CreateDepthStencilViews(
+                device,
+                apiResource,
+                dsvHeap.get(),
+                tex->dsvFormat == rhi::Format::Unknown ? tex->baseFormat : tex->dsvFormat,
+                tex->isCubemap,
+                tex->isArray,
+                tex->arraySize,
+                tex->mipLevels);
 
-	UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
+            target.SetDSVDescriptors(dsvHeap, dsvInfos);
+        }
 
-	device.CreateShaderResourceView(
-		{ m_cbvSrvUavHeap->GetHeap().GetHandle(), index},
-		pDynamicBuffer->GetBuffer()->GetAPIResource().GetHandle(),
-		{
-			.dimension = rhi::SrvDim::Buffer,
-			.formatOverride = byteAddress ? rhi::Format::R32_Typeless : rhi::Format::Unknown,
-			.buffer = {
-				.kind = byteAddress ? rhi::BufferViewKind::Raw : rhi::BufferViewKind::Structured,
-				.firstElement = 0,
-				.numElements = static_cast<uint32_t>(byteAddress ? numElements / 4 : numElements),
-				.structureByteStride = static_cast<uint32_t>(byteAddress ? 0 : elementSize)
-			}
-		});
+        return;
+    }
 
-	ShaderVisibleIndexInfo srvInfo;
-	srvInfo.slot.index = index;
-	srvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
+    // Buffer path
+    if (const auto* buf = std::get_if<ViewRequirements::BufferViews>(&req.views))
+    {
+        // CBV
+        if (buf->createCBV)
+        {
+            const uint32_t index = m_cbvSrvUavHeap->AllocateDescriptor();
+            ShaderVisibleIndexInfo cbvInfo{};
+            cbvInfo.slot.index = index;
+            cbvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
 
-	pDynamicBuffer->SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, {{srvInfo}});
+            target.SetCBVDescriptor(m_cbvSrvUavHeap, cbvInfo);
+            device.CreateConstantBufferView(
+                { m_cbvSrvUavHeap->GetHeap().GetHandle(), index },
+                apiResource.GetHandle(),
+                buf->cbvDesc);
+        }
 
-	if (UAV) {
-		// Shader visible UAV
-		unsigned int uavShaderVisibleIndex = m_cbvSrvUavHeap->AllocateDescriptor();
-		device.CreateUnorderedAccessView(
-			{ m_cbvSrvUavHeap->GetHeap().GetHandle(), uavShaderVisibleIndex},
-			pDynamicBuffer->GetBuffer()->GetAPIResource().GetHandle(),
-			{
-				.dimension = rhi::UavDim::Buffer,
-				.buffer = {
-					.kind = byteAddress ? rhi::BufferViewKind::Raw : rhi::BufferViewKind::Structured,
-					.firstElement = 0,
-					.numElements = static_cast<uint32_t>(byteAddress ? numElements / 4 : numElements),
-					.structureByteStride = static_cast<uint32_t>(byteAddress ? 0 : elementSize)
-				}
-			});
+        // SRV
+        if (buf->createSRV)
+        {
+            const uint32_t index = m_cbvSrvUavHeap->AllocateDescriptor();
+            ShaderVisibleIndexInfo srvInfo{};
+            srvInfo.slot.index = index;
+            srvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
 
-		ShaderVisibleIndexInfo uavInfo;
-		uavInfo.slot.index = uavShaderVisibleIndex;
-		uavInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
-		pDynamicBuffer->SetUAVGPUDescriptors(m_cbvSrvUavHeap, {{uavInfo}}, 0);
-	}
+            device.CreateShaderResourceView(
+                { m_cbvSrvUavHeap->GetHeap().GetHandle(), index },
+                apiResource.GetHandle(),
+                buf->srvDesc);
 
-	return pDynamicBuffer;
-}
+            target.SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, { { srvInfo } });
+        }
 
-std::shared_ptr<SortedUnsignedIntBuffer> ResourceManager::CreateIndexedSortedUnsignedIntBuffer(uint64_t capacity, std::wstring name) {
-	auto device = DeviceManager::GetInstance().GetDevice();
+        // UAV (shader visible)
+        if (buf->createUAV)
+        {
+            const uint32_t index = m_cbvSrvUavHeap->AllocateDescriptor();
+            ShaderVisibleIndexInfo uavInfo{};
+            uavInfo.slot.index = index;
+            uavInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
 
-	UINT bufferID = GetInstance().GetNextResizableBufferID();
-	std::shared_ptr<SortedUnsignedIntBuffer> pBuffer = SortedUnsignedIntBuffer::CreateShared(bufferID, capacity, name);
-//	ResourceTransition transition;
-//	transition.resource = pBuffer.get();
-//	transition.beforeState = ResourceState::UNKNOWN;
-//	transition.afterState = usage;
-//#if defined(_DEBUG)
-//	transition.name = name;
-//#endif
-	//QueueResourceTransition(transition);
-	pBuffer->SetOnResized([this](UINT bufferID, UINT capacity, UINT numElements, DynamicBufferBase* buffer) {
-		this->onDynamicStructuredBufferResized(bufferID, capacity, numElements, buffer, false);
-		});
+            device.CreateUnorderedAccessView(
+                { m_cbvSrvUavHeap->GetHeap().GetHandle(), index },
+                apiResource.GetHandle(),
+                buf->uavDesc);
 
-	// Create an SRV for the buffer
-	UINT index = m_cbvSrvUavHeap->AllocateDescriptor();
-	device.CreateShaderResourceView(
-		{ m_cbvSrvUavHeap->GetHeap().GetHandle(), index},
-		pBuffer->GetBuffer()->GetAPIResource().GetHandle(),
-		{
-			.dimension = rhi::SrvDim::Buffer,
-			.formatOverride = rhi::Format::Unknown,
-			.buffer = {
-				.kind = rhi::BufferViewKind::Structured,
-				.firstElement = 0,
-				.numElements = static_cast<uint32_t>(capacity),
-				.structureByteStride = 4
-			}
-		});
+            target.SetUAVGPUDescriptors(m_cbvSrvUavHeap, { { uavInfo } }, buf->uavCounterOffset);
+        }
 
-	ShaderVisibleIndexInfo srvInfo;
-	srvInfo.slot.index = index;
-	srvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
+        // UAV (non-shader visible)
+        if (buf->createNonShaderVisibleUAV)
+        {
+            const uint32_t index = m_nonShaderVisibleHeap->AllocateDescriptor();
+            NonShaderVisibleIndexInfo uavInfo{};
+            uavInfo.slot.index = index;
+            uavInfo.slot.heap = m_nonShaderVisibleHeap->GetHeap().GetHandle();
 
-	pBuffer->SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, {{srvInfo}});
+            device.CreateUnorderedAccessView(
+                { m_nonShaderVisibleHeap->GetHeap().GetHandle(), index },
+                apiResource.GetHandle(),
+                buf->uavDesc);
 
-	return pBuffer;
-}
+            target.SetUAVCPUDescriptors(m_nonShaderVisibleHeap, { { uavInfo } });
+        }
 
-std::pair<rhi::ResourcePtr,rhi::HeapHandle> ResourceManager::CreateTextureResource(
-	const TextureDescription& desc,
-	rhi::HeapHandle placedResourceHeap) {
+        return;
+    }
 
-	auto device = DeviceManager::GetInstance().GetDevice();
-
-	// Determine the number of mip levels
-	uint16_t mipLevels = desc.generateMipMaps ? CalculateMipLevels(desc.imageDimensions[0].width, desc.imageDimensions[0].height) : 1;
-
-	// Determine the array size
-	uint32_t arraySize = desc.arraySize;
-	if (!desc.isArray && !desc.isCubemap) {
-		arraySize = 1;
-	}
-
-	// Create the texture resource description
-	auto width = desc.imageDimensions[0].width;
-	auto height = desc.imageDimensions[0].height;
-	if (desc.padInternalResolution) { // Pad the width and height to the next power of two
-		width = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(width)))));
-		height = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(height)))));
-	}
-
-	if (width > std::numeric_limits<uint32_t>().max() || height > std::numeric_limits<uint32_t>().max()) {
-		spdlog::error("Texture dimensions above uint32_max not implemented");
-	}
-
-	// Handle clear values for RTV and DSV
-	rhi::ClearValue* clearValue = nullptr;
-	rhi::ClearValue depthClearValue = {};
-	rhi::ClearValue colorClearValue = {};
-	if (desc.hasDSV) {
-		depthClearValue.type = rhi::ClearValueType::DepthStencil;
-		depthClearValue.format = desc.dsvFormat == rhi::Format::Unknown ? desc.format : desc.dsvFormat;
-		depthClearValue.depthStencil.depth = desc.depthClearValue;
-		depthClearValue.depthStencil.stencil = 0;
-		clearValue = &depthClearValue;
-	}
-	else if (desc.hasRTV) {
-		colorClearValue.type = rhi::ClearValueType::Color;
-		colorClearValue.format = desc.rtvFormat == rhi::Format::Unknown ? desc.format : desc.rtvFormat;
-		colorClearValue.rgba[0] = desc.clearColor[0];
-		colorClearValue.rgba[1] = desc.clearColor[1];
-		colorClearValue.rgba[2] = desc.clearColor[2];
-		colorClearValue.rgba[3] = desc.clearColor[3];
-		clearValue = &colorClearValue;
-	}
-
-	rhi::ResourceDesc textureDesc{
-		.type = rhi::ResourceType::Texture2D,
-		.texture = {
-			.format = desc.format,
-			.width = static_cast<uint32_t>(width),
-			.height = static_cast<uint32_t>(height),
-			.depthOrLayers = static_cast<uint16_t>(desc.isCubemap ? 6 * arraySize : arraySize),
-			.mipLevels = mipLevels,
-			.sampleCount = 1,
-			.initialLayout = rhi::ResourceLayout::Common,
-			.optimizedClear = clearValue
-		}
-	};
-	if (desc.hasRTV) {
-		textureDesc.flags |= rhi::ResourceFlags::RF_AllowRenderTarget;
-	}
-	if (desc.hasDSV) {
-		textureDesc.flags |= rhi::ResourceFlags::RF_AllowDepthStencil;
-	}
-	if (desc.hasUAV) {
-		textureDesc.flags |= rhi::ResourceFlags::RF_AllowUnorderedAccess;
-	}
-	// Create the texture resource
-
-	rhi::ResourcePtr textureResource;
-	if (desc.allowAlias) {
-		//textureResource = device.CreatePlacedResource(placedResourceHeap, 0, textureDesc); // TODO: handle offset
-		throw std::runtime_error("Aliasing resources not implemented yet");
-	}
-	else {
-		textureResource = device.CreateCommittedResource(textureDesc);
-	}
-
-	return std::make_pair(std::move(textureResource), placedResourceHeap);
+    spdlog::error("ResourceManager::AssignDescriptorSlots: invalid ViewRequirements variant");
+    throw std::runtime_error("ResourceManager::AssignDescriptorSlots: invalid ViewRequirements");
 }
 
-void ResourceManager::UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int mipLevels) {
-
-	if (initialData.empty()) return;
-
-	// effective array slices = arraySize * (isCubemap ? 6 : 1)
-	const uint32_t faces = desc.isCubemap ? 6u : 1u;
-	const uint32_t arraySlices = faces * static_cast<uint32_t>(desc.arraySize);
-	const uint32_t numSubres = arraySlices * static_cast<uint32_t>(mipLevels);
-
-	// Build a dense SubresourceData table (nullptr entries are allowed; they'll be skipped)
-	std::vector<rhi::helpers::SubresourceData> srd(numSubres);
-	std::vector<std::vector<stbi_uc>> expandedImages;   // keep storage alive during copy
-	expandedImages.reserve(numSubres);
-
-	// If caller passed fewer than numSubres pointers, pad with nullptrs.
-	std::vector<const stbi_uc*> fullInitial(numSubres, nullptr);
-	std::copy(initialData.begin(), initialData.end(), fullInitial.begin());
-
-	int i = -1;
-	for (uint32_t a = 0; a < arraySlices; ++a) {
-		for (uint32_t m = 0; m < mipLevels; ++m) {
-			++i;
-			const uint32_t subIdx = m + a * mipLevels;
-
-			const stbi_uc* imageData = fullInitial[subIdx];
-
-			uint32_t width = std::max(1u, static_cast<uint32_t>(desc.imageDimensions[i].width >> m));
-			uint32_t height = std::max(1u, static_cast<uint32_t>(desc.imageDimensions[i].height >> m));
-			uint32_t channels = desc.channels;
-
-			auto& out = srd[subIdx];
-
-			// If provided pitches don't match raw (width*channels), treat as "pre-padded or compressed"
-			if ((width * channels != desc.imageDimensions[i].rowPitch) ||
-				(width * channels * height != desc.imageDimensions[i].slicePitch))
-			{
-				out.pData = imageData;
-				out.rowPitch = static_cast<uint32_t>(desc.imageDimensions[i].rowPitch);
-				out.slicePitch = static_cast<uint32_t>(desc.imageDimensions[i].slicePitch);
-			}
-			else {
-				if (imageData) {
-					const stbi_uc* ptr = imageData;
-					if (channels == 3) {
-						// Expand to RGBA8
-						expandedImages.emplace_back(ExpandImageData(imageData, width, height));
-						ptr = expandedImages.back().data();
-						channels = 4;
-					}
-					out.pData = ptr;
-					out.rowPitch = width * channels; // tightly packed
-					out.slicePitch = out.rowPitch * height;
-				}
-				else {
-					out.pData = nullptr;
-					out.rowPitch = out.slicePitch = 0;
-				}
-			}
-		}
-	}
-
-	// Record the uploads (helper creates an upload buffer, maps & packs rows, then emits the copies).
-	// depthOrLayers = 1 for 2D/cube textures.
-	const uint32_t baseW = desc.imageDimensions[0].width;
-	const uint32_t baseH = desc.imageDimensions[0].height;
-
-	auto device = DeviceManager::GetInstance().GetDevice();
-
-	rhi::ResourcePtr upload = rhi::helpers::UpdateTextureSubresources(
-		device,
-		copyCommandList.Get(),
-		dstTexture,
-		desc.format,                               // rhi::Format
-		baseW,
-		baseH,
-		/*depthOrLayers*/ 1,
-		static_cast<uint32_t>(mipLevels),
-		arraySlices,
-		{ srd.data(), static_cast<uint32_t>(srd.size()) }
-	);
-
-	// Transition out of CopyDest
-	//rhi::TextureBarrier tb{};
-	//tb.texture = dstTexture.GetHandle();
-	//tb.range = { /*baseMip*/0, static_cast<uint32_t>(mipLevels),
-	//	/*baseLayer*/0, arraySlices };
-	//tb.beforeSync = rhi::ResourceSyncState::Copy;
-	//tb.afterSync = rhi::ResourceSyncState::All;
-	//tb.beforeAccess = rhi::ResourceAccessType::CopyDest;
-	//tb.afterAccess = rhi::ResourceAccessType::Common;
-	//tb.beforeLayout = rhi::ResourceLayout::CopyDest;
-	//tb.afterLayout = rhi::ResourceLayout::Common;
-
-	//rhi::BarrierBatch bb{};
-	//bb.textures = { &tb, 1 };
-	//copyCommandList->Barriers(bb);
-
-
-	ExecuteAndWaitForCommandList(copyCommandList, copyCommandAllocator); // TODO - Replace this by using UploadManager
-
+void ResourceManager::Cleanup()
+{
+	m_perFrameBuffer.reset();
+	m_cbvSrvUavHeap.reset();
+	m_samplerHeap.reset();
+	m_rtvHeap.reset();
+	m_dsvHeap.reset();
+	m_nonShaderVisibleHeap.reset();
+	m_uavCounterReset.Reset();
 }

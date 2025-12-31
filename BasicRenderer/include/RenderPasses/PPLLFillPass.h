@@ -11,28 +11,57 @@
 #include "Materials/Material.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/ResourceManager.h"
-#include "Resources/TextureDescription.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Mesh/MeshInstance.h"
 
+
+struct PPLLFillPassInputs {
+	bool wireframe;
+	size_t numPPLLNodes;
+	bool meshShaders;
+	bool indirect;
+
+	friend bool operator==(const PPLLFillPassInputs&, const PPLLFillPassInputs&) = default;
+};
+
+inline rg::Hash64 HashValue(const PPLLFillPassInputs& i) {
+	std::size_t seed = 0;
+
+	boost::hash_combine(seed, i.wireframe);
+	boost::hash_combine(seed, i.meshShaders);
+	boost::hash_combine(seed, i.indirect);
+	boost::hash_combine(seed, i.numPPLLNodes);
+	return seed;
+}
+
 class PPLLFillPass : public RenderPass {
 public:
-	PPLLFillPass(bool wireframe, size_t numPPLLNodes, bool meshShaders, bool indirect) : m_wireframe(wireframe), m_meshShaders(meshShaders), m_indirect(indirect) {
+	PPLLFillPass() {
 		auto& settingsManager = SettingsManager::GetInstance();
 		getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
 		getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
 		getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
 		m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
 
-		m_numPPLLNodes = numPPLLNodes;
 		m_clusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting")();
+		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
+			.with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::OITAccumulationPass))
+			.cached().cache_kind(flecs::QueryCacheAll)
+			.build();
 	}
 
 	~PPLLFillPass() {
 	}
 
 	void DeclareResourceUsages(RenderPassBuilder* builder) override {
+		auto input = Inputs<PPLLFillPassInputs>();
+		m_wireframe = input.wireframe;
+		m_meshShaders = input.meshShaders;
+		m_indirect = input.indirect;
+		m_numPPLLNodes = input.numPPLLNodes;
+
 		builder->WithUnorderedAccess(Builtin::PPLL::HeadPointerTexture, Builtin::PPLL::DataBuffer, Builtin::PPLL::Counter)
 			.WithShaderResource(Builtin::Light::BufferGroup,
 				Builtin::PostSkinningVertices,
@@ -76,22 +105,18 @@ public:
 	}
 
 	void Setup() override {
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
-			.with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::OITAccumulationPass))
-			.cached().cache_kind(flecs::QueryCacheAll)
-			.build();
 		
-		m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
-		m_PPLLHeadPointerTexture = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PPLL::HeadPointerTexture);
+		m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+		m_PPLLHeadPointerTexture = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PPLL::HeadPointerTexture);
 		
 		RegisterUAV(Builtin::PPLL::HeadPointerTexture);
 
 		if (m_meshShaders) {
-			m_primaryCameraMeshletBitfield = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+			m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
 		}
 
-		m_PPLLCounter = m_resourceRegistryView->Request<Buffer>(Builtin::PPLL::Counter);
+		m_PPLLCounterHandle = m_resourceRegistryView->RequestHandle(Builtin::PPLL::Counter);
+		m_PPLLCounter = m_resourceRegistryView->Resolve<Buffer>(m_PPLLCounterHandle);
 		RegisterUAV(Builtin::PPLL::Counter);
 		
 		RegisterUAV(Builtin::PPLL::DataBuffer);
@@ -151,7 +176,7 @@ public:
 	virtual void Update() override {
 		// Reset UAV counter
 		uint32_t zero = 0;
-		QUEUE_UPLOAD(&zero, sizeof(uint32_t), m_PPLLCounter.get(), 0);
+		BUFFER_UPLOAD(&zero, sizeof(uint32_t), UploadManager::UploadTarget::FromHandle(m_PPLLCounterHandle), 0);
 	}
 
 	void Cleanup(RenderContext& context) override {
@@ -323,12 +348,13 @@ private:
 
 	uint64_t m_numPPLLNodes;
 
-	std::shared_ptr<PixelBuffer> m_PPLLHeadPointerTexture;
-	std::shared_ptr<Buffer> m_PPLLCounter;
+	PixelBuffer* m_PPLLHeadPointerTexture;
+	ResourceRegistry::ResourceHandle m_PPLLCounterHandle;
+	Buffer* m_PPLLCounter;
 
-	std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletBitfield = nullptr;
-	std::shared_ptr<DynamicGloballyIndexedResource> m_meshletCullingBitfieldBuffer;
-	std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer;
+	DynamicGloballyIndexedResource* m_primaryCameraMeshletBitfield = nullptr;
+	DynamicGloballyIndexedResource* m_meshletCullingBitfieldBuffer = nullptr;
+	PixelBuffer* m_pPrimaryDepthBuffer = nullptr;
 
 	RenderPhase m_renderPhase = Engine::Primary::OITAccumulationPass;
 

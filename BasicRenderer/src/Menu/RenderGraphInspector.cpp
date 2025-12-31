@@ -117,7 +117,7 @@ static void CollectResourceIds(const std::vector<RenderGraph::PassBatch>& batche
         auto scan = [&](const std::vector<ResourceTransition>& v) {
             for (auto& t : v) {
                 if (!t.pResource) continue;
-                outIdToName.emplace(t.pResource->GetGlobalResourceID(), ws2s(t.pResource->GetName()));
+                outIdToName.emplace(t.pResource->GetGlobalResourceID(), t.pResource->GetName());
             }
             };
         scan(b.renderTransitions);
@@ -337,7 +337,7 @@ namespace RGInspector {
 
                         auto emit = [&](int i) {
                             const auto& t = v[i];
-                            std::string name = ws2s(t.pResource->GetName());
+                            std::string name = t.pResource->GetName();
                             ImGui::Text("%s (%llu)", name.c_str(),
                                 (unsigned long long)t.pResource->GetGlobalResourceID());
                             ImGui::BulletText("Subresource: mip[%u..%u], array[%u..%u]",

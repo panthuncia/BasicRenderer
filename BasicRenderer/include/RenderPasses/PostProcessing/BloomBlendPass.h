@@ -1,15 +1,9 @@
 #pragma once
 
-#include <unordered_map>
-#include <functional>
-
 #include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "Mesh/Mesh.h"
 #include "Scene/Scene.h"
-#include "Resources/TextureDescription.h"
-#include "Managers/Singletons/UploadManager.h"
 #include "../shaders/PerPassRootConstants/bloomBlendRootConstants.h"
 #include "Resources/PixelBuffer.h"
 
@@ -26,7 +20,7 @@ public:
     }
 
     void Setup() override {
-        m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
+        m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -76,7 +70,7 @@ private:
 
     rhi::PipelinePtr m_pso;
 
-	std::shared_ptr<PixelBuffer> m_pHDRTarget;
+	PixelBuffer* m_pHDRTarget;
 
 	PipelineResources m_resourceDescriptorBindings;
 
@@ -133,8 +127,8 @@ private:
         };
 
         // 3) Create PSO
-        m_pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-        if (!m_pso || !m_pso->IsValid()) {
+        auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);
+        if (Failed(result)) {
             throw std::runtime_error("Failed to create upsample PSO (RHI)");
         }
         m_pso->SetName("BloomBlend (RHI)");

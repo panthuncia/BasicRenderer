@@ -173,22 +173,22 @@ struct PerMeshBuffer {
     uint vertexByteSize;
     uint skinningVertexByteSize;
     
-    uint inverseBindMatricesBufferIndex;
     uint vertexBufferOffset;
     uint meshletBufferOffset;
     uint meshletVerticesBufferOffset;
-    
     uint meshletTrianglesBufferOffset;
+    
     BoundingSphere boundingSphere;
+    
     uint numVertices;
     uint numMeshlets;
-    uint pad[1];
+    uint pad[2];
 };
 
 struct PerMeshInstanceBuffer {
     uint perMeshBufferIndex;
     uint perObjectBufferIndex;
-    uint boneTransformBufferIndex;
+    uint skinningInstanceSlot;
     uint postSkinningVertexBufferOffset;
     uint meshletBoundsBufferStartIndex;
     uint meshletBitfieldStartIndex;
@@ -327,6 +327,14 @@ struct MaterialInputs
 struct VisibleClusterInfo {
     uint2 drawcallIndexAndMeshletIndex; // .x = drawcall index, .y = meshlet local index
     uint pad[2];
+};
+
+struct SkinningInstanceGPUInfo
+{
+    uint transformOffsetMatrices;
+    uint invBindOffsetMatrices;
+    uint boneCount;
+    uint pad[1];
 };
 
 #endif // __STRUCTS_HLSL__

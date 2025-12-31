@@ -12,34 +12,54 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/MeshManager.h"
-#include "Managers/ObjectManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
 
+struct GBufferPassInputs {
+    bool wireframe;
+    bool meshShaders;
+    bool indirect;
+    bool clearGbuffer;
+
+    friend bool operator==(const GBufferPassInputs&, const GBufferPassInputs&) = default;
+};
+
+inline rg::Hash64 HashValue(const GBufferPassInputs& i) {
+    std::size_t seed = 0;
+
+    boost::hash_combine(seed, i.wireframe);
+    boost::hash_combine(seed, i.meshShaders);
+    boost::hash_combine(seed, i.indirect);
+    boost::hash_combine(seed, i.clearGbuffer);
+    return seed;
+}
+
 // TODO: Prepass for forward-rendered geometry, requires better object and indirect workload queries
 class GBufferPass : public RenderPass {
 public:
-    GBufferPass(
-        bool wireframe,
-        bool meshShaders,
-        bool indirect,
-        bool clearGbuffer)
-        :
-        m_wireframe(wireframe),
-        m_meshShaders(meshShaders),
-        m_indirect(indirect),
-        m_clearGbuffer(clearGbuffer) {
+    GBufferPass(){
         auto& settingsManager = SettingsManager::GetInstance();
         getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
         getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
         getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
+
+        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+        m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
+            .with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::GBufferPass))
+            .cached().cache_kind(flecs::QueryCacheAll).build();
     }
 
     ~GBufferPass() {
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) {
+		auto input = Inputs<GBufferPassInputs>();
+        m_wireframe = input.wireframe;
+		m_meshShaders = input.meshShaders;
+		m_indirect = input.indirect;
+		m_clearGbuffer = input.clearGbuffer;
+
         builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
             Builtin::PerObjectBuffer,
             Builtin::NormalMatrixBuffer,
@@ -73,21 +93,17 @@ public:
     }
 
     void Setup() override {
-        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-        m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
-            .with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::GBufferPass))
-            .cached().cache_kind(flecs::QueryCacheAll).build();
 
-        m_pLinearDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
-        m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
-        m_pNormals = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::Normals);
-        m_pMotionVectors = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::MotionVectors);
-        m_pAlbedo = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::Albedo);
-        m_pMetallicRoughness = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::MetallicRoughness);
-        m_pEmissive = m_resourceRegistryView->Request<PixelBuffer>(Builtin::GBuffer::Emissive);
+        m_pLinearDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
+        m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+        m_pNormals = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GBuffer::Normals);
+        m_pMotionVectors = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GBuffer::MotionVectors);
+        m_pAlbedo = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GBuffer::Albedo);
+        m_pMetallicRoughness = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GBuffer::MetallicRoughness);
+        m_pEmissive = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GBuffer::Emissive);
 
         if (m_meshShaders) {
-            m_primaryCameraMeshletBitfield = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+            m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
         }
 
         if (m_meshShaders) {
@@ -367,17 +383,15 @@ private:
     bool m_indirect;
     bool m_clearGbuffer = true;
 
-    std::shared_ptr<PixelBuffer> m_pLinearDepthBuffer;
-    std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer;
-    std::shared_ptr<PixelBuffer> m_pNormals;
-    std::shared_ptr<PixelBuffer> m_pMotionVectors;
-    std::shared_ptr<PixelBuffer> m_pAlbedo;
-    std::shared_ptr<PixelBuffer> m_pMetallicRoughness;
-    std::shared_ptr<PixelBuffer> m_pEmissive;
+    PixelBuffer* m_pLinearDepthBuffer;
+    PixelBuffer* m_pPrimaryDepthBuffer;
+    PixelBuffer* m_pNormals;
+    PixelBuffer* m_pMotionVectors;
+    PixelBuffer* m_pAlbedo;
+    PixelBuffer* m_pMetallicRoughness;
+    PixelBuffer* m_pEmissive;
 
-    std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletBitfield = nullptr;
-    std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraOpaqueIndirectCommandBuffer;
-    std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraAlphaTestIndirectCommandBuffer;
+    DynamicGloballyIndexedResource* m_primaryCameraMeshletBitfield = nullptr;
 
 	RenderPhase m_GBufferRenderPhase = Engine::Primary::GBufferPass;
 	RenderPhase m_PrePassRenderPhase = Engine::Primary::ZPrepass;

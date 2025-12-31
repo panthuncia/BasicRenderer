@@ -14,7 +14,6 @@ find_package(directxtex CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(meshoptimizer REQUIRED)
 find_package(DirectX-Headers CONFIG REQUIRED)
-find_package(DirectX12-Agility CONFIG REQUIRED)
 find_package(flecs CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
@@ -22,6 +21,7 @@ find_package(unofficial-tree-sitter CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
 find_package(pxr CONFIG REQUIRED)
 find_package(implot CONFIG REQUIRED)
+find_package(Boost REQUIRED COMPONENTS container_hash)
 
 # Build tool for code generation
 add_executable(resource_codegen
@@ -576,14 +576,11 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 
 target_link_libraries(${PROJECT_NAME} 
 PRIVATE 
-    d3dcompiler.lib 
     dxgi.lib 
     spdlog::spdlog_header_only 
     Microsoft::DirectXTex 
     imgui::imgui 
     meshoptimizer::meshoptimizer 
-    Microsoft::DirectX-Headers 
-    Microsoft::DirectX12-Agility 
     assimp::assimp 
     flecs::flecs 
     flecs::flecs_static 
@@ -601,6 +598,7 @@ PRIVATE
     usdSkel
     implot::implot
     BasicRHI
+    Boost::container_hash
     "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" 
     "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib" 
     "${CMAKE_SOURCE_DIR}/BasicRenderer/sl.interposer.lib" 

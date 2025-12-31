@@ -9,7 +9,15 @@
 // Each entry encodes 4 root constants and a 2D dispatch sized to process all pixels of that material.
 class BuildMaterialIndirectCommandBufferPass : public ComputePass {
 public:
-    BuildMaterialIndirectCommandBufferPass() {}
+    BuildMaterialIndirectCommandBufferPass() {
+        // Build PSO for the args builder kernel
+        m_pso = PSOManager::GetInstance().MakeComputePipeline(
+            PSOManager::GetInstance().GetComputeRootSignature(),
+            L"shaders/VisUtil.hlsl",
+            L"BuildEvaluateIndirectArgsCS",
+            {},
+            "VisUtil_BuildEvaluateIndirectArgsPSO");
+    }
 
     void DeclareResourceUsages(ComputePassBuilder* b) override {
         b->WithShaderResource(
@@ -20,13 +28,6 @@ public:
     }
 
     void Setup() override {
-        // Build PSO for the args builder kernel
-        m_pso = PSOManager::GetInstance().MakeComputePipeline(
-            PSOManager::GetInstance().GetComputeRootSignature(),
-            L"shaders/VisUtil.hlsl",
-            L"BuildEvaluateIndirectArgsCS",
-            {},
-            "VisUtil_BuildEvaluateIndirectArgsPSO");
 
         // Register SRVs and UAVs
         RegisterSRV("Builtin::VisUtil::MaterialPixelCountBuffer");

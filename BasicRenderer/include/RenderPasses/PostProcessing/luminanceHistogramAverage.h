@@ -3,22 +3,19 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "Resources/Texture.h"
-#include "Managers/Singletons/SettingsManager.h"
-#include "Managers/Singletons/UploadManager.h"
 #include "../shaders/PerPassRootConstants/luminanceHistogramAverageRootConstants.h"
 
 class LuminanceHistogramAveragePass : public ComputePass {
 public:
-    LuminanceHistogramAveragePass() {}
+    LuminanceHistogramAveragePass() {
+        CreateComputePSO();
+    }
 
     void DeclareResourceUsages(ComputePassBuilder* builder) {
         builder->WithUnorderedAccess(Builtin::PostProcessing::LuminanceHistogram, Builtin::PostProcessing::AdaptedLuminance, "FFX::LPMConstants");
     }
 
     void Setup() override {
-        CreateComputePSO();
-        
 		RegisterUAV(Builtin::PostProcessing::AdaptedLuminance);
         RegisterUAV(Builtin::PostProcessing::LuminanceHistogram);
 		RegisterSRV("FFX::LPMConstants");

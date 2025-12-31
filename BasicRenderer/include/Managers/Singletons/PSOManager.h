@@ -87,6 +87,7 @@ public:
     static PSOManager& GetInstance();
 
     void initialize();
+    void Cleanup();
 
     const PipelineState& GetPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
     const PipelineState& GetPrePassPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);

@@ -17,11 +17,13 @@
 #include "Render/ResourceRegistry.h"
 #include "Render/CommandListPool.h"
 #include "Managers/CommandRecordingManager.h"
+#include "Interfaces/IPassBuilder.h"
 
 class Resource;
 class ResourceGroup;
 class RenderPassBuilder;
 class ComputePassBuilder;
+struct IPassBuilder;
 
 template<typename T>
 concept DerivedResource = std::derived_from<T, Resource>;
@@ -95,16 +97,19 @@ public:
 		std::unordered_map<uint64_t, SymbolicTracker*> passBatchTrackers; // Trackers for the resources in this batch
 	};
 
+	RenderGraph();
+	~RenderGraph();
 	void AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassParameters& resources, std::string name = "");
 	void AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassParameters& resources, std::string name = "");
 	void Update();
 	void Execute(RenderContext& context);
 	void Compile();
+	void ResetForRecompile();
 	void Setup();
 	const std::vector<PassBatch>& GetBatches() const { return batches; }
 	//void AllocateResources(RenderContext& context);
 	//void CreateResource(std::wstring name);
-	std::shared_ptr<Resource> GetResourceByName(const std::wstring& name);
+	std::shared_ptr<Resource> GetResourceByName(const std::string& name);
 	std::shared_ptr<Resource> GetResourceByID(const uint64_t id);
 	std::shared_ptr<RenderPass> GetRenderPassByName(const std::string& name);
 	std::shared_ptr<ComputePass> GetComputePassByName(const std::string& name);
@@ -140,8 +145,8 @@ public:
 		return derivedPtr;
 	}
 
-	ComputePassBuilder BuildComputePass(std::string const& name);
-	RenderPassBuilder BuildRenderPass(std::string const& name);
+	ComputePassBuilder& BuildComputePass(std::string const& name);
+	RenderPassBuilder& BuildRenderPass(std::string const& name);
 
 private:
 
@@ -168,13 +173,14 @@ private:
 	ResourceRegistry _registry;
 	std::unordered_map<ResourceIdentifier, IResourceProvider*, ResourceIdentifier::Hasher> _providerMap;
 
-	using BuilderVariant = std::variant<RenderPassBuilder, ComputePassBuilder>;
-	std::vector<BuilderVariant>   m_passBuilders;
+	std::vector<IPassBuilder*> m_passBuilderOrder;
+	std::unordered_map<std::string, std::unique_ptr<IPassBuilder>> m_passBuildersByName;
+	std::unordered_set<std::string> m_passNamesSeenThisReset;
 
 	std::vector<AnyPassAndResources> passes;
 	std::unordered_map<std::string, std::shared_ptr<RenderPass>> renderPassesByName;
 	std::unordered_map<std::string, std::shared_ptr<ComputePass>> computePassesByName;
-	std::unordered_map<std::wstring, std::shared_ptr<Resource>> resourcesByName;
+	std::unordered_map<std::string, std::shared_ptr<Resource>> resourcesByName;
 	std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
 	std::unordered_map<uint64_t, uint64_t> independantlyManagedResourceToGroup;
 	std::vector<std::shared_ptr<ResourceGroup>> resourceGroups;
@@ -364,8 +370,8 @@ private:
 		return out;
 	}
 
-	void RegisterPassBuilder(RenderPassBuilder&& builder);
-	void RegisterPassBuilder(ComputePassBuilder&& builder);
+	//void RegisterPassBuilder(RenderPassBuilder&& builder);
+	//void RegisterPassBuilder(ComputePassBuilder&& builder);
 
 	std::unordered_set<uint64_t> GetAllIndependantlyManagedResourcesFromGroup(
 		uint64_t groupGlobalResourceID) const
@@ -379,6 +385,78 @@ private:
 		}
 		return outResources;
 	}
+
+	std::vector<uint64_t> ExpandSchedulingIDs(uint64_t id) const;
+
+
+	enum class AccessKind : uint8_t { Read, Write };
+
+	static inline bool IsUAVState(const ResourceState& s) noexcept {
+		return ((s.access & rhi::ResourceAccessType::UnorderedAccess) != 0) ||
+			(s.layout == rhi::ResourceLayout::UnorderedAccess);
+	}
+
+	struct PassView {
+		bool isCompute = false;
+		std::vector<ResourceRequirement>* reqs = nullptr;
+		std::vector<std::pair<ResourceAndRange, ResourceState>>* internalTransitions = nullptr;
+	};
+
+	struct Node {
+		size_t   passIndex = 0;
+		bool     isCompute = false;
+		uint32_t originalOrder = 0;
+
+		// Expanded IDs (aliases + group/child fixpoint)
+		std::vector<uint64_t> touchedIDs;
+		std::vector<uint64_t> uavIDs;
+
+		// For dependency building: per expanded ID, strongest access in this pass.
+		// Write dominates read.
+		std::unordered_map<uint64_t, AccessKind> accessByID;
+
+		// DAG
+		std::vector<size_t> out;
+		std::vector<size_t> in;
+		uint32_t indegree = 0;
+
+		// Longest-path-to-sink (for tie-breaking)
+		uint32_t criticality = 0;
+	};
+
+	struct SeqState {
+		std::optional<size_t> lastWriter;
+		std::vector<size_t>   readsSinceWrite;
+	};
+
+	static PassView GetPassView(AnyPassAndResources& pr);
+	static bool BuildDependencyGraph(std::vector<Node>& nodes);
+	static std::vector<Node> BuildNodes(RenderGraph& rg, std::vector<AnyPassAndResources>& passes);
+	static bool AddEdgeDedup(
+		size_t from, size_t to,
+		std::vector<Node>& nodes,
+		std::unordered_set<uint64_t>& edgeSet);
+	static void CommitPassToBatch(
+		RenderGraph& rg,
+		AnyPassAndResources& pr,
+		const Node& node,
+
+		unsigned int currentBatchIndex,
+		PassBatch& currentBatch,
+
+		std::unordered_set<uint64_t>& computeUAVs,
+		std::unordered_set<uint64_t>& renderUAVs,
+
+		std::unordered_map<uint64_t, unsigned int>& batchOfLastRenderQueueTransition,
+		std::unordered_map<uint64_t, unsigned int>& batchOfLastComputeQueueTransition,
+		std::unordered_map<uint64_t, unsigned int>& batchOfLastRenderQueueProducer,
+		std::unordered_map<uint64_t, unsigned int>& batchOfLastComputeQueueProducer,
+		std::unordered_map<uint64_t, unsigned int>& batchOfLastRenderQueueUsage,
+		std::unordered_map<uint64_t, unsigned int>& batchOfLastComputeQueueUsage);
+	static void AutoScheduleAndBuildBatches(
+		RenderGraph& rg,
+		std::vector<AnyPassAndResources>& passes,
+		std::vector<Node>& nodes);
 
 	friend class RenderPassBuilder;
 	friend class ComputePassBuilder;

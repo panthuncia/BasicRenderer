@@ -16,7 +16,7 @@
 
 class MeshInstance;
 class DynamicGloballyIndexedResource;
-class Texture;
+class TextureAsset;
 class PixelBuffer;
 class Mesh;
 

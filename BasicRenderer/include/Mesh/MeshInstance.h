@@ -75,6 +75,7 @@ public:
 
     void SetPerObjectBufferIndex(uint32_t index);
     void SetPerMeshBufferIndex(uint32_t index);
+	void SetSkinningInstanceSlot(uint32_t slot);
 
 private:
     MeshInstance(std::shared_ptr<Mesh> mesh)

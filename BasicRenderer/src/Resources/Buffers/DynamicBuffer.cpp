@@ -3,7 +3,7 @@
 #include <spdlog/spdlog.h>
 
 #include "Resources/Buffers/BufferView.h"
-#include "Managers/Singletons/DeletionManager.h"
+#include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/UploadManager.h"
 
 std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementSize) {
@@ -25,9 +25,11 @@ std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementS
                 // Split the block
                 m_memoryBlocks.insert(it + 1, { offset + requiredSize, remainingSize, true });
             }
-
+            auto viewedWeak = std::weak_ptr(
+                std::dynamic_pointer_cast<DynamicBuffer>(Resource::weak_from_this().lock())
+            );
             // Return BufferView
-            return BufferView::CreateUnique(this, offset, requiredSize, elementSize);
+            return BufferView::CreateUnique(viewedWeak, offset, requiredSize, elementSize);
         }
     }
 
@@ -66,14 +68,14 @@ std::unique_ptr<BufferView> DynamicBuffer::AddData(const void* data, size_t size
 	std::unique_ptr<BufferView> view = Allocate(actualSize, elementSize);
     
 	if (data != nullptr) {
-        QUEUE_UPLOAD(data, size, this, view->GetOffset());
+        BUFFER_UPLOAD(data, size, UploadManager::UploadTarget::FromShared(shared_from_this()), view->GetOffset());
 	}
 
 	return std::move(view);
 }
 
 void DynamicBuffer::UpdateView(BufferView* view, const void* data) {
-    QUEUE_UPLOAD(data, view->GetSize(), this, view->GetOffset());
+    BUFFER_UPLOAD(data, view->GetSize(), UploadManager::UploadTarget::FromShared(shared_from_this()), view->GetOffset());
 }
 
 void DynamicBuffer::Deallocate(const BufferView* view) {
@@ -115,23 +117,76 @@ void DynamicBuffer::Deallocate(const BufferView* view) {
     }
 }
 
+void DynamicBuffer::AssignDescriptorSlots()
+{
+    auto& rm = ResourceManager::GetInstance();
+
+    ResourceManager::ViewRequirements req{};
+    ResourceManager::ViewRequirements::BufferViews b{};
+
+    const uint32_t viewElements =
+        static_cast<uint32_t>(m_byteAddress ? (m_capacity / 4) : m_capacity/m_elementSize);
+
+    b.createCBV = false;
+    b.createSRV = true;
+    b.createUAV = m_UAV;
+    b.createNonShaderVisibleUAV = false;
+    b.uavCounterOffset = 0;
+
+    // SRV
+    b.srvDesc = rhi::SrvDesc{
+        .dimension = rhi::SrvDim::Buffer,
+        .formatOverride = m_byteAddress ? rhi::Format::R32_Typeless : rhi::Format::Unknown,
+        .buffer = {
+            .kind = m_byteAddress ? rhi::BufferViewKind::Raw : rhi::BufferViewKind::Structured,
+            .firstElement = 0,
+            .numElements = viewElements,
+            .structureByteStride = static_cast<uint32_t>(m_byteAddress ? 0 : m_elementSize),
+        },
+    };
+
+    // UAV
+    b.uavDesc = rhi::UavDesc{
+        .dimension = rhi::UavDim::Buffer,
+        .buffer = {
+            .kind = m_byteAddress ? rhi::BufferViewKind::Raw : rhi::BufferViewKind::Structured,
+            .firstElement = 0,
+            .numElements = viewElements,
+            .structureByteStride = static_cast<uint32_t>(m_byteAddress ? 0 : m_elementSize),
+        },
+    };
+
+    req.views = b;
+    auto resource = m_dataBuffer->GetAPIResource();
+    rm.AssignDescriptorSlots(*this, resource, req);
+}
+
 void DynamicBuffer::CreateBuffer(size_t capacity) {
     auto device = DeviceManager::GetInstance().GetDevice();
     m_capacity = capacity;
-    m_dataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, capacity, m_UAV);
+    m_dataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, capacity, GetGlobalResourceID(), m_UAV);
     m_memoryBlocks.push_back({ 0, capacity, true });
+
+    for (const auto& bundle : m_metadataBundles) {
+        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
+    }
+
+	AssignDescriptorSlots();
 }
 
 void DynamicBuffer::GrowBuffer(size_t newSize) {
     auto device = DeviceManager::GetInstance().GetDevice();
-    if (m_dataBuffer != nullptr) {
-        DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
-    }
-    auto newDataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, newSize, m_UAV);
-	UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, m_capacity);
-	m_dataBuffer = newDataBuffer;
+    auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, newSize, GetGlobalResourceID(), m_UAV);
+	UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), *GetStateTracker(), m_capacity);
+	m_dataBuffer = std::move(newDataBuffer);
 
     m_capacity = newSize;
-    onResized(m_globalResizableBufferID, m_elementSize, m_capacity/m_elementSize, m_byteAddress, this, m_UAV);
+
+    for (const auto& bundle : m_metadataBundles) {
+        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
+    }
+
+    AssignDescriptorSlots();
+
 	SetName(m_name);
 }

@@ -3,21 +3,22 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "Resources/Texture.h"
-#include "Managers/Singletons/SettingsManager.h"
-#include "Managers/Singletons/UploadManager.h"
 
 class GTAODenoisePass : public ComputePass {
 public:
-    GTAODenoisePass(std::shared_ptr<GloballyIndexedResource> pGTAOConstantBuffer, int workingBufferIndex) : m_pGTAOConstantBuffer(pGTAOConstantBuffer), m_workingAOBufferIndex(workingBufferIndex) {}
-
-    void Setup() override {
-		CreateXeGTAOComputePSO();
+    GTAODenoisePass() {
+        CreateXeGTAOComputePSO();
     }
 
     void DeclareResourceUsages(ComputePassBuilder* builder) {
         builder->WithShaderResource(Builtin::GTAO::WorkingEdges, Builtin::GTAO::WorkingAOTerm1)
-            .WithUnorderedAccess(Builtin::GTAO::OutputAOTerm);
+            .WithUnorderedAccess(Builtin::GTAO::OutputAOTerm)
+            .WithConstantBuffer("Builtin::GTAO::ConstantsBuffer");
+    }
+
+    void Setup() override {
+        RegisterCBV("Builtin::GTAO::ConstantsBuffer");
+        m_workingAOBufferIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingAOTerm1)->GetSRVInfo(0).slot.index;
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -31,9 +32,10 @@ public:
 		commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
 		commandList.BindPipeline(DenoiseLastPassPSO.GetAPIPipelineState().GetHandle());
 
+		BindResourceDescriptorIndices(commandList, DenoiseLastPassPSO.GetResourceDescriptorSlots());
+
         unsigned int gtaoConstants[NumMiscUintRootConstants] = {};
-        gtaoConstants[UintRootConstant0] = m_pGTAOConstantBuffer->GetCBVInfo().slot.index;
-        gtaoConstants[UintRootConstant1] = m_workingAOBufferIndex;
+        gtaoConstants[UintRootConstant0] = m_workingAOBufferIndex;
             
 		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, gtaoConstants);
 

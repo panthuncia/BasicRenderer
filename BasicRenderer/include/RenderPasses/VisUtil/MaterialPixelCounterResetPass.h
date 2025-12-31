@@ -5,7 +5,14 @@
 
 class MaterialUAVResetPass : public ComputePass {
 public:
-    MaterialUAVResetPass() {}
+    MaterialUAVResetPass() {
+        m_pso = PSOManager::GetInstance().MakeComputePipeline(
+            PSOManager::GetInstance().GetComputeRootSignature(),
+            L"shaders/VisUtil.hlsl",
+            L"ClearMaterialCountersCS",
+            {},
+            "ClearMaterialCountersPSO");
+    }
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override {
         builder->WithUnorderedAccess("Builtin::VisUtil::MaterialPixelCountBuffer",
@@ -13,13 +20,6 @@ public:
     }
 
     void Setup() override {
-        m_pso = PSOManager::GetInstance().MakeComputePipeline(
-            PSOManager::GetInstance().GetComputeRootSignature(),
-            L"shaders/VisUtil.hlsl",
-            L"ClearMaterialCountersCS",
-            {},
-            "ClearMaterialCountersPSO");
-
         RegisterUAV("Builtin::VisUtil::MaterialPixelCountBuffer");
 		RegisterUAV("Builtin::VisUtil::MaterialWriteCursorBuffer");
     }

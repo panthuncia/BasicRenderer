@@ -1,7 +1,6 @@
 #pragma once
 
 #include <unordered_map>
-#include <functional>
 
 #include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/PSOManager.h"
@@ -9,32 +8,50 @@
 #include "Mesh/Mesh.h"
 #include "Scene/Scene.h"
 #include "Materials/Material.h"
-#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/MeshManager.h"
-#include "Managers/ObjectManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
 
+struct VisibilityBufferPassInputs {
+    bool wireframe;
+    bool meshShaders;
+    bool indirect;
+    bool clearGbuffer;
+
+    friend bool operator==(const VisibilityBufferPassInputs&, const VisibilityBufferPassInputs&) = default;
+};
+
+inline rg::Hash64 HashValue(const VisibilityBufferPassInputs& i) {
+    std::size_t seed = 0;
+
+    boost::hash_combine(seed, i.wireframe);
+    boost::hash_combine(seed, i.meshShaders);
+    boost::hash_combine(seed, i.indirect);
+    boost::hash_combine(seed, i.clearGbuffer);
+    return seed;
+}
+
 class VisibilityBufferPass : public RenderPass {
 public:
-    VisibilityBufferPass(
-        bool wireframe,
-        bool meshShaders,
-        bool indirect,
-        bool clearGbuffer)
-        :
-        m_wireframe(wireframe),
-        m_meshShaders(meshShaders),
-        m_indirect(indirect),
-        m_clearGbuffer(clearGbuffer) {
+    VisibilityBufferPass() {
+        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+        m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
+            .with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::GBufferPass))
+            .cached().cache_kind(flecs::QueryCacheAll).build();
     }
 
     ~VisibilityBufferPass() {
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) {
+		auto input = Inputs<VisibilityBufferPassInputs>();
+		m_wireframe = input.wireframe;
+		m_meshShaders = input.meshShaders;
+		m_indirect = input.indirect;
+		m_clearGbuffer = input.clearGbuffer;
+
         builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
             Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer,
             Builtin::PerObjectBuffer,
@@ -67,16 +84,12 @@ public:
     }
 
     void Setup() override {
-        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-        m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
-            .with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::GBufferPass))
-            .cached().cache_kind(flecs::QueryCacheAll).build();
 
-        m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
-		m_pVisibilityBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::VisibilityTexture);
+        m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+		m_pVisibilityBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::VisibilityTexture);
 
         if (m_meshShaders) {
-            m_primaryCameraMeshletBitfield = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+            m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
         }
 
         if (m_meshShaders) {
@@ -272,12 +285,10 @@ private:
     bool m_indirect;
     bool m_clearGbuffer = true;
 
-    std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer;
-	std::shared_ptr<PixelBuffer> m_pVisibilityBuffer;
+    PixelBuffer* m_pPrimaryDepthBuffer;
+    PixelBuffer* m_pVisibilityBuffer;
 
-    std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletBitfield = nullptr;
-    std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraOpaqueIndirectCommandBuffer;
-    std::shared_ptr<DynamicGloballyIndexedResource> m_pPrimaryCameraAlphaTestIndirectCommandBuffer;
+    DynamicGloballyIndexedResource* m_primaryCameraMeshletBitfield = nullptr;
 
     RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
 };

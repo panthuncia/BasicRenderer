@@ -86,22 +86,22 @@ struct PerMeshCB {
 	unsigned int vertexByteSize;
     unsigned int skinningVertexByteSize;
 
-    unsigned int inverseBindMatricesBufferIndex;
 	unsigned int vertexBufferOffset;
     unsigned int meshletBufferOffset;
     unsigned int meshletVerticesBufferOffset;
-
     unsigned int meshletTrianglesBufferOffset;
+
 	BoundingSphere boundingSphere;
+
 	unsigned int numVertices;
     unsigned int numMeshlets;
-    unsigned int pad[1];
+    unsigned int pad[2];
 };
 
 struct PerMeshInstanceCB {
     unsigned int perMeshBufferIndex;
     unsigned int perObjectBufferIndex;
-    unsigned int boneTransformBufferIndex;
+    unsigned int skinningInstanceSlot;
     unsigned int postSkinningVertexBufferOffset;
 	unsigned int meshletBoundsBufferStartIndex;
     unsigned int meshletBitfieldStartIndex;
@@ -277,6 +277,13 @@ struct LPMConstants {
 struct VisibleClusterInfo {
     DirectX::XMUINT2 drawcallIndexAndMeshletIndex; // .x = drawcall index, .y = meshlet local index
     unsigned int pad[2];
+};
+
+struct SkinningInstanceGPUInfo {
+    uint32_t transformOffsetMatrices = 0;
+    uint32_t invBindOffsetMatrices = 0;
+    uint32_t boneCount = 0;
+    uint32_t _pad = 0;
 };
 
 

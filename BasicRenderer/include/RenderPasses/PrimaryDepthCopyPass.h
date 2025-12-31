@@ -1,17 +1,15 @@
 #pragma once
 
 #include <unordered_map>
-#include <functional>
 
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
-#include "Managers/Singletons/SettingsManager.h"
-
 
 class PrimaryDepthCopyPass : public ComputePass {
 public:
 	PrimaryDepthCopyPass() {
+		CreatePSO();
 	}
 
 	void DeclareResourceUsages(ComputePassBuilder* builder) override {
@@ -24,8 +22,6 @@ public:
 		RegisterSRV(Builtin::PrimaryCamera::VisibilityTexture);
 
 		RegisterUAV(Builtin::PrimaryCamera::LinearDepthMap);
-
-		CreatePSO();
 	}
 
 	PassReturn Execute(RenderContext& context) override {

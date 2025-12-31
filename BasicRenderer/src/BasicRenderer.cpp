@@ -259,8 +259,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     auto baseScene = std::make_shared<Scene>();
 
     auto dragonScene = LoadModel("models/dragon.glb");
-    dragonScene->GetRoot().set<Components::Scale>({ 5, 5, 5 });
-    dragonScene->GetRoot().set<Components::Position>({ 0.0, 1, 0.0 });
+    dragonScene->GetRoot().set<Components::Scale>({ 1, 1, 1 });
+    dragonScene->GetRoot().set<Components::Position>({ 0.0, 1, 1.0 });
 
     auto carScene = LoadModel("models/porche.glb");
     carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });

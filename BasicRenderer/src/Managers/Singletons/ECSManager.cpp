@@ -18,5 +18,13 @@ void ECSManager::Initialize() {
 	world.set<flecs::Rest>({});
 
 	world.set_threads(8);
+
+	m_isAlive = true;
+}
+
+void ECSManager::Cleanup()
+{
+	m_isAlive = false;
+	world.release();
 }
 

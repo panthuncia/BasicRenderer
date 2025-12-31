@@ -44,6 +44,11 @@ public:
 
     void ProcessReadbackRequests();
 
+    void Cleanup() {
+        m_queuedReadbacks.clear();
+        m_readbackPass.reset();
+    }
+
 private:
 
     class ReadbackPass : public RenderPass {
@@ -65,7 +70,7 @@ private:
             m_fenceValue++;
 			for (auto& readback : readbacks) {
 				if (readback.cubemap) {
-                    readbackManager.SaveCubemapToDDS(context.device, commandList, readback.texture.get(), readback.outputFile, m_fenceValue);
+                    readbackManager.SaveCubemapToDDS(context.device, commandList, readback.texture, readback.outputFile, m_fenceValue);
 				}
 				else {
                     readbackManager.SaveTextureToDDS(context.device, commandList, readback.texture.get(), readback.outputFile, m_fenceValue);
@@ -95,7 +100,7 @@ private:
 		m_readbackPass = std::make_shared<ReadbackPass>();
     }
 
-    void SaveCubemapToDDS(rhi::Device& device, rhi::CommandList& commandList, PixelBuffer* cubemap, const std::wstring& outputFile, UINT64 fenceValue);
+    void SaveCubemapToDDS(rhi::Device& device, rhi::CommandList& commandList, std::shared_ptr<PixelBuffer> cubemap, const std::wstring& outputFile, UINT64 fenceValue);
     void SaveTextureToDDS(
         rhi::Device& device,
         rhi::CommandList& commandList,

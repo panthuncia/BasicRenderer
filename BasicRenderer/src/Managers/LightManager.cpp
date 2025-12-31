@@ -4,23 +4,23 @@
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Resources/ShadowMaps.h"
-#include "Resources/DynamicResource.h"
 #include "Managers/IndirectCommandBufferManager.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Managers/ViewManager.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "Utilities/MathUtils.h"
 #include "ShaderBuffers.h"
+#include "Resources/PixelBuffer.h"
 #include "../../generated/BuiltinResources.h"
 
 LightManager::LightManager() {
     auto& resourceManager = ResourceManager::GetInstance();
 
-	m_activeLightIndices = resourceManager.CreateIndexedSortedUnsignedIntBuffer(1, L"activeLightIndices");
-    m_lightBuffer = resourceManager.CreateIndexedLazyDynamicStructuredBuffer<LightInfo>(10, L"lightBuffer<LightInfo>");
-    m_spotViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(1, L"spotViewInfo<uint>");
-    m_pointViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(1, L"pointViewInfo<uint>");
-    m_directionalViewInfo = resourceManager.CreateIndexedDynamicStructuredBuffer<unsigned int>(1, L"direcitonalViewInfo<uint>");
+	m_activeLightIndices = SortedUnsignedIntBuffer::CreateShared(1, "activeLightIndices");
+    m_lightBuffer = LazyDynamicStructuredBuffer<LightInfo>::CreateShared(10, "lightBuffer<LightInfo>");
+    m_spotViewInfo = DynamicStructuredBuffer<unsigned int>::CreateShared(1, "spotViewInfo<uint>");
+    m_pointViewInfo = DynamicStructuredBuffer<unsigned int>::CreateShared(1, "pointViewInfo<uint>");
+    m_directionalViewInfo = DynamicStructuredBuffer<unsigned int>::CreateShared(1, "direcitonalViewInfo<uint>");
 
 	getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");
@@ -28,25 +28,25 @@ LightManager::LightManager() {
 	getCurrentShadowMapResourceGroup = SettingsManager::GetInstance().getSettingGetter<ShadowMaps*>("currentShadowMapsResourceGroup");
 	getCurrentLinearShadowMapResourceGroup = SettingsManager::GetInstance().getSettingGetter<LinearShadowMaps*>("currentLinearShadowMapsResourceGroup");
 
-	m_pLightViewInfoResourceGroup = std::make_shared<ResourceGroup>(L"LightViewInfo");
-	m_pLightViewInfoResourceGroup->AddResource(m_spotViewInfo->GetBuffer());
-	m_pLightViewInfoResourceGroup->AddResource(m_pointViewInfo->GetBuffer());
+	m_pLightViewInfoResourceGroup = std::make_shared<ResourceGroup>("LightViewInfo");
+	m_pLightViewInfoResourceGroup->AddResource(m_spotViewInfo);
+	m_pLightViewInfoResourceGroup->AddResource(m_pointViewInfo);
 
-	m_pLightBufferResourceGroup = std::make_shared<ResourceGroup>(L"LightBufferResourceGroup");
-	m_pLightBufferResourceGroup->AddResource(m_lightBuffer->GetBuffer());
-	m_pLightBufferResourceGroup->AddResource(m_activeLightIndices->GetBuffer());
+	m_pLightBufferResourceGroup = std::make_shared<ResourceGroup>("LightBufferResourceGroup");
+	m_pLightBufferResourceGroup->AddResource(m_lightBuffer);
+	m_pLightBufferResourceGroup->AddResource(m_activeLightIndices);
 
 	auto getClusterSize = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT3>("lightClusterSize");
 	auto lightClusterSize = getClusterSize();
 
 	auto numClusters = lightClusterSize.x * lightClusterSize.y * lightClusterSize.z;
-	m_pClusterBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(numClusters, sizeof(Cluster), true, false);
-	m_pClusterBuffer->SetName(L"lightingClusterBuffer");
+	m_pClusterBuffer = CreateIndexedStructuredBuffer(numClusters, sizeof(Cluster), true, false);
+	m_pClusterBuffer->SetName("lightingClusterBuffer");
 
 	static const size_t avgPagesPerCluster = 10;
 	m_lightPagePoolSize = numClusters * avgPagesPerCluster;
-	m_pLightPagesBuffer = ResourceManager::GetInstance().CreateIndexedStructuredBuffer(m_lightPagePoolSize, sizeof(LightPage), true, false);
-	m_pLightPagesBuffer->SetName(L"lightPagesBuffer");
+	m_pLightPagesBuffer = CreateIndexedStructuredBuffer(m_lightPagePoolSize, sizeof(LightPage), true, false);
+	m_pLightPagesBuffer->SetName("lightPagesBuffer");
 
 	m_resources[Builtin::Light::ViewResourceGroup] = m_pLightViewInfoResourceGroup;
 	m_resources[Builtin::Light::BufferGroup] = m_pLightBufferResourceGroup;
@@ -61,11 +61,6 @@ LightManager::LightManager() {
 
 LightManager::~LightManager() {
 	auto& deletionManager = DeletionManager::GetInstance();
-	deletionManager.MarkForDelete(m_lightBuffer);
-	deletionManager.MarkForDelete(m_spotViewInfo);
-	deletionManager.MarkForDelete(m_pointViewInfo);
-	deletionManager.MarkForDelete(m_directionalViewInfo);
-	deletionManager.MarkForDelete(m_activeLightIndices);
 }
 
 AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {

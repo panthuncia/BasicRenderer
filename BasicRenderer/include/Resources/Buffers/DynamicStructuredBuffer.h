@@ -2,38 +2,36 @@
 
 #include <vector>
 #include <functional>
-#include <typeinfo>
 #include <string>
 #include <rhi.h>
+#include <memory>
 
-#include "Managers/Singletons/DeviceManager.h"
-#include "Resources/Buffers/Buffer.h"
+#include "Managers/Singletons/ResourceManager.h"
+#include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
-#include "Managers/Singletons/DeletionManager.h"
 #include "Managers/Singletons/UploadManager.h"
+#include "Interfaces/IHasMemoryMetadata.h"
 
 using Microsoft::WRL::ComPtr;
 
 template<class T>
-class DynamicStructuredBuffer : public DynamicBufferBase {
+class DynamicStructuredBuffer : public DynamicBufferBase, public IHasMemoryMetadata {
 public:
 
-    static std::shared_ptr<DynamicStructuredBuffer<T>> CreateShared(UINT id = 0, UINT capacity = 64, std::wstring name = L"", bool UAV = false) {
-        return std::shared_ptr<DynamicStructuredBuffer<T>>(new DynamicStructuredBuffer<T>(id, capacity, name, UAV));
+    static std::shared_ptr<DynamicStructuredBuffer<T>> CreateShared(UINT capacity = 64, std::string name = "", bool UAV = false) {
+        return std::shared_ptr<DynamicStructuredBuffer<T>>(new DynamicStructuredBuffer<T>(capacity, name, UAV));
     }
 
     unsigned int Add(const T& element) {
         if (m_data.size() >= m_capacity) {
             Resize(m_capacity * 2);
-            onResized(m_globalResizableBufferID, sizeof(T), m_capacity, this);
         }
         m_data.push_back(element);
-        m_needsUpdate = true;
 
         unsigned int index = static_cast<uint32_t>(m_data.size()) - 1; // TODO: Fix buffer max sizes
 
-        QUEUE_UPLOAD(&element, sizeof(T), this, index * sizeof(T));
+        BUFFER_UPLOAD(&element, sizeof(T), UploadManager::UploadTarget::FromShared(shared_from_this()), index * sizeof(T));
 
         return index;
     }
@@ -41,7 +39,18 @@ public:
     void RemoveAt(UINT index) {
         if (index < m_data.size()) {
             m_data.erase(m_data.begin() + index);
-            m_needsUpdate = true;
+
+			// If capacity is half or less, shrink the buffer
+            if (m_data.size() <= m_capacity / 2 && m_capacity > 64) {
+				auto newCapacity = m_capacity / 2;
+				Resize(newCapacity);
+			}
+
+			// batch upload data after the removed index
+			unsigned int countToUpload = static_cast<unsigned int>(m_data.size()) - index;
+            if (countToUpload > 0) {
+                BUFFER_UPLOAD(&m_data[index], sizeof(T) * countToUpload, UploadManager::UploadTarget::FromShared(shared_from_this()), index * sizeof(T));
+            }
         }
     }
 
@@ -57,21 +66,12 @@ public:
         if (newCapacity > m_capacity) {
             CreateBuffer(newCapacity, m_capacity);
             m_capacity = newCapacity;
-            onResized(m_globalResizableBufferID, sizeof(T), m_capacity, this);
         }
 
     }
 
     void UpdateAt(UINT index, const T& element) {
-        QUEUE_UPLOAD(&element, sizeof(T), this, index * sizeof(T));
-    }
-
-    void SetOnResized(const std::function<void(UINT, UINT, UINT, DynamicBufferBase* buffer)>& callback) {
-        onResized = callback;
-    }
-
-    std::shared_ptr<Buffer>& GetBuffer() {
-        return m_dataBuffer;
+        BUFFER_UPLOAD(&element, sizeof(T), UploadManager::UploadTarget::FromShared(shared_from_this()), index * sizeof(T));
     }
 
     UINT Size() {
@@ -80,6 +80,11 @@ public:
 
 	rhi::Resource GetAPIResource() override { return m_dataBuffer->GetAPIResource(); }
 
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
+        m_metadataBundles.emplace_back(bundle);
+        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
+    }
+
 protected:
 
     rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
@@ -87,15 +92,15 @@ protected:
     }
 
 private:
-    DynamicStructuredBuffer(UINT id = 0, UINT capacity = 64, std::wstring bufName = L"", bool UAV = false)
-        : m_globalResizableBufferID(id), m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
+    DynamicStructuredBuffer(UINT capacity = 64, std::string bufName = "", bool UAV = false)
+        : m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
 		name = bufName;
         CreateBuffer(capacity);
     }
 
     void OnSetName() override {
-        if (name != L"") {
-            m_dataBuffer->SetName((m_name + L": " + name).c_str());
+        if (name != "") {
+            m_dataBuffer->SetName((m_name + ": " + name).c_str());
         }
         else {
             m_dataBuffer->SetName(m_name.c_str());
@@ -106,22 +111,71 @@ private:
     uint32_t m_capacity;
     bool m_needsUpdate;
 
-    UINT m_globalResizableBufferID;
-
-    std::function<void(UINT, uint32_t, uint32_t, DynamicBufferBase* buffer)> onResized;
-    inline static std::wstring m_name = L"DynamicStructuredBuffer";
+    inline static std::string m_name = "DynamicStructuredBuffer";
 
     bool m_UAV = false;
 
-    void CreateBuffer(size_t capacity, size_t previousCapacity = 0) {
-        auto device = DeviceManager::GetInstance().GetDevice();
+    std::vector<EntityComponentBundle> m_metadataBundles;
 
-        auto newDataBuffer = Buffer::CreateShared(device, rhi::Memory::DeviceLocal, sizeof(T) * capacity, m_UAV);
-		newDataBuffer->SetName((m_name+ L": " + name).c_str());
+    void AssignDescriptorSlots(uint32_t capacity)
+    {
+        auto& rm = ResourceManager::GetInstance();
+
+        ResourceManager::ViewRequirements req{};
+        ResourceManager::ViewRequirements::BufferViews b{};
+
+        b.createCBV = false;
+        b.createSRV = true;
+        b.createUAV = m_UAV;
+        b.createNonShaderVisibleUAV = false;
+        b.uavCounterOffset = 0;
+
+        // SRV (structured buffer)
+        b.srvDesc = rhi::SrvDesc{
+        	.dimension = rhi::SrvDim::Buffer,
+        	.formatOverride = rhi::Format::Unknown,
+            .buffer = {
+                .kind = rhi::BufferViewKind::Structured,
+                .firstElement = 0,
+                .numElements = capacity,
+                .structureByteStride = static_cast<uint32_t>(sizeof(T)),
+            },
+        };
+
+        // UAV (structured buffer), no counter
+        b.uavDesc = rhi::UavDesc{
+        	.dimension = rhi::UavDim::Buffer,
+        	.formatOverride = rhi::Format::Unknown,
+            .buffer = {
+                .kind = rhi::BufferViewKind::Structured,
+                .firstElement = 0,
+                .numElements = capacity,
+                .structureByteStride = static_cast<uint32_t>(sizeof(T)),
+                .counterOffsetInBytes = 0,
+            },
+        };
+
+
+        req.views = b;
+        auto resource = m_dataBuffer->GetAPIResource();
+        rm.AssignDescriptorSlots(*this, resource, req);
+    }
+
+
+    void CreateBuffer(size_t capacity, size_t previousCapacity = 0) {
+        auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, sizeof(T) * capacity, GetGlobalResourceID(), m_UAV);
+		newDataBuffer->SetName((m_name+ ": " + name).c_str());
         if (m_dataBuffer != nullptr) {
-            UploadManager::GetInstance().QueueResourceCopy(newDataBuffer, m_dataBuffer, previousCapacity);
-            DeletionManager::GetInstance().MarkForDelete(m_dataBuffer);
+			// If shrinking, copy only up to new capacity. If growing, copy up to previous capacity.
+            auto sizeToCopy = capacity < previousCapacity ? capacity : previousCapacity;
+            UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), *GetStateTracker(), sizeToCopy);
         }
-		m_dataBuffer = newDataBuffer;
+		m_dataBuffer = std::move(newDataBuffer);
+
+        for (const auto& bundle : m_metadataBundles) {
+            m_dataBuffer->ApplyMetadataComponentBundle(bundle);
+        }
+
+        AssignDescriptorSlots(static_cast<uint32_t>(capacity));
     }
 };

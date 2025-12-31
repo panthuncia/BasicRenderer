@@ -2,18 +2,16 @@
 
 #include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/PSOManager.h"
-#include "Render/RenderContext.h"
 #include "Resources/Texture.h"
-#include "Managers/Singletons/SettingsManager.h"
-#include "Managers/Singletons/UploadManager.h"
 
 class DebugRenderPass : public RenderPass {
 public:
-    DebugRenderPass() {}
+    DebugRenderPass() {
+        CreateDebugRootSignature();
+        CreateDebugPSO();
+    }
 
     void Setup() override {
-		CreateDebugRootSignature();
-		CreateDebugPSO();
     }
 
     PassReturn Execute(RenderContext& context) override {

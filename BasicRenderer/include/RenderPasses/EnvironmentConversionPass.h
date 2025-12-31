@@ -1,20 +1,16 @@
 #pragma once
 
-#include <filesystem>
-
 #include "RenderPasses/Base/RenderPass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Resources/Texture.h"
-#include "Utilities/Utilities.h"
-#include "Managers/Singletons/UploadManager.h"
-#include "Managers/Singletons/ReadbackManager.h"
 #include "Managers/EnvironmentManager.h"
 
 class EnvironmentConversionPass : public RenderPass {
 public:
     EnvironmentConversionPass() {
         getSkyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution");
+        CreateEnvironmentConversionPSO();
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override {
@@ -23,7 +19,6 @@ public:
     }
 
     void Setup() override {
-		CreateEnvironmentConversionPSO();
     }
 
 	// This pass was broken into multiple passes to avoid device timeout on slower GPUs
@@ -40,21 +35,21 @@ public:
         cl.BindPipeline(m_pso->GetHandle());
 
         EnvironmentManager& manager = *context.environmentManager;
-        auto environments = manager.GetAndClearEncironmentsToConvert();
+        auto environments = manager.GetAndClearEnvironmentsToConvert();
 
         for (auto& env : environments)
         {
             auto srcTex = env->GetHDRITexture(); // equirectangular HDRI
             auto dstCubemap = env->GetEnvironmentCubemap(); // cube resource (must support UAV)
 
-            const uint32_t srcSrvIndex = srcTex->GetBuffer()->GetSRVInfo(0).slot.index;
+            const uint32_t srcSrvIndex = srcTex->Image().GetSRVInfo(0).slot.index;
 
             const uint32_t groupSize = 8;
             const uint32_t gx = (skyboxRes + groupSize - 1) / groupSize;
             const uint32_t gy = (skyboxRes + groupSize - 1) / groupSize;
 
             const uint32_t dstCubeUavIndex =
-                dstCubemap->GetBuffer()->GetUAVShaderVisibleInfo(0).slot.index;
+                dstCubemap->Image().GetUAVShaderVisibleInfo(0).slot.index;
             for (uint32_t face = 0; face < 6; ++face)
             {
                 // Root constants payload: [srcSrv, dstFaceUav, face, size]
@@ -107,7 +102,7 @@ private:
         ld.flags = rhi::PipelineLayoutFlags::PF_None;
         ld.pushConstants = { &pc, 1 };
         ld.staticSamplers = { &s, 1 };
-        m_layout = dev.CreatePipelineLayout(ld);
+        auto result = dev.CreatePipelineLayout(ld, m_layout);
         if (!m_layout || !m_layout->IsValid()) throw std::runtime_error("EnvConvert: layout failed");
         m_layout->SetName("EnvConvert.ComputeLayout");
 
@@ -122,8 +117,10 @@ private:
             rhi::Make(soLayout),
             rhi::Make(soCS),
         };
-        m_pso = dev.CreatePipeline(items, (uint32_t)std::size(items));
-        if (!m_pso || !m_pso->IsValid()) throw std::runtime_error("EnvConvert: PSO failed");
+        result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);
+        if (Failed(result)) {
+            throw std::runtime_error("EnvConvert: PSO failed");
+        }
         m_pso->SetName("EnvConvert.ComputePSO");
     }
 };

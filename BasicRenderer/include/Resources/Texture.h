@@ -1,39 +1,49 @@
 #pragma once
 #include <memory>
 
-#include "Resources/Resource.h"
-#include "Import/Filetypes.h"
+#include <string>
 
-#include <rhi.h>
+#include "Import/Filetypes.h"
+#include "Resources/PixelBuffer.h"
+#include "Resources/Sampler.h"
+
 
 class PixelBuffer;
 class Sampler;
 class RenderContext;
 
-class Texture : public Resource { // Sometimes, a resource needs a unique sampler, so both Texture and PixelBuffer inherit from Resource
+struct TextureFileMeta {
+	std::string filePath;
+	ImageFiletype fileType = ImageFiletype::UNKNOWN;
+	ImageLoader loader{};
+	bool alphaIsAllOpaque = true;
+};
+
+class TextureAsset {
 public:
-	Texture(std::shared_ptr<PixelBuffer> image, std::shared_ptr<Sampler> sampler);
-	UINT GetSamplerDescriptorIndex();
-	std::shared_ptr<PixelBuffer> GetBuffer() {
-		return m_image;
-	}
-	void SetFilepath(const std::string& path);
-	rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
-	virtual void SetName(const std::wstring& name);
-	rhi::Resource GetAPIResource() override;
-	void SetFileType(ImageFiletype fileType) { m_fileType = fileType; }
-	ImageFiletype GetFileType() const { return m_fileType; }
-	std::string GetFilePath() const { return m_filePath; }
-	ImageLoader GetImageLoader() const { return m_imageLoader; }
-	bool AlphaIsAllOpaque() const { return m_alphaIsAllOpaque; }
-	void SetAlphaIsAllOpaque(bool value) { m_alphaIsAllOpaque = value; }
-	virtual uint64_t GetGlobalResourceID() const;
-	virtual SymbolicTracker* GetStateTracker() override;
+    TextureAsset(std::shared_ptr<PixelBuffer> image,
+        std::shared_ptr<Sampler> defaultSampler,
+        TextureFileMeta meta)
+        : m_image(std::move(image))
+        , m_sampler(defaultSampler ? std::move(defaultSampler) : Sampler::GetDefaultSampler())
+        , m_meta(std::move(meta)) {
+    }
+
+    PixelBuffer& Image() const { return *m_image; }
+    std::shared_ptr<PixelBuffer> ImagePtr() const { return m_image; }
+
+    Sampler& SamplerState() const { return *m_sampler; }
+    UINT SamplerDescriptorIndex() const { return m_sampler->GetDescriptorIndex(); }
+
+    const TextureFileMeta& Meta() const { return m_meta; }
+
+    void SetName(std::string name)
+    {
+		m_image->SetName(name);
+    }
+
 private:
-	std::shared_ptr<PixelBuffer> m_image;
-	std::shared_ptr<Sampler> m_sampler;
-	std::string m_filePath;
-	ImageFiletype m_fileType = ImageFiletype::UNKNOWN;
-	ImageLoader m_imageLoader;
-	bool m_alphaIsAllOpaque = true;
+    std::shared_ptr<PixelBuffer> m_image;
+    std::shared_ptr<Sampler> m_sampler;
+    TextureFileMeta m_meta;
 };

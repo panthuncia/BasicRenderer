@@ -9,6 +9,7 @@
 #include "Resources/ResourceStateTracker.h"
 #include "Resources/ResourceIdentifier.h"
 #include "Interfaces/IResourceResolver.h"
+#include "Interfaces/IPassBuilder.h"
 #include "Resources/ECSResourceResolver.h"
 
 // Tag for a contiguous mip-range [first..first+count)
@@ -404,8 +405,10 @@ concept NotIResourceResolver = !std::derived_from<std::decay_t<T>, IResourceReso
 template<typename T>
 concept DerivedRenderPass = std::derived_from<T, RenderPass>;
 
-class RenderPassBuilder {
+class RenderPassBuilder : public IPassBuilder {
 public:
+    PassBuilderKind Kind() const noexcept override { return PassBuilderKind::Render; }
+    IResourceProvider* ResourceProvider() noexcept override { return pass.get(); }
     // Variadic entry points
 
     //First set, callable on Lvalues
@@ -738,37 +741,43 @@ public:
 	}
 
 	RenderPassBuilder& IsGeometryPass()& {
-		params.isGeometryPass = true;
+		m_isGeometryPass = true;
 		return *this;
 	}
 
     RenderPassBuilder IsGeometryPass() && {
-        params.isGeometryPass = true;
+        m_isGeometryPass = true;
 		return std::move(*this);
     }
 
     // First build, callable on Lvalues
-    template<DerivedRenderPass PassT, typename... CtorArgs>
-    void Build(CtorArgs&&... args) & {
-        if (built_) return;
-
-        built_ = true;
-
-        pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-
-        graph->RegisterPassBuilder(std::move(*this));
+    template<DerivedRenderPass PassT, rg::PassInputs InputsT>
+    void Build(InputsT&& inputs) & {
+        if (!built_) {
+            built_ = true;
+            pass = std::make_shared<PassT>();
+        }
+        pass->SetInputs(std::forward<InputsT>(inputs));
     }
 
     // Second build, callable on temporaries
-    template<DerivedRenderPass PassT, typename... CtorArgs>
-    void Build(CtorArgs&&... args) && {
-        if (built_) return;
+    template<DerivedRenderPass PassT, rg::PassInputs InputsT>
+    void Build(InputsT&& inputs) && {
+        if (!built_) {
+            built_ = true;
+            pass = std::make_shared<PassT>();
+        }
+        pass->SetInputs(std::forward<InputsT>(inputs));
+    }
 
-        built_ = true;
+    template<DerivedRenderPass PassT, typename... StableCtorArgs>
+    void Build(StableCtorArgs&&... ctorArgs)& {
+        Build<PassT>(rg::NoInputs{}, std::forward<StableCtorArgs>(ctorArgs)...);
+    }
 
-        pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-
-        graph->RegisterPassBuilder(std::move(*this));
+    template<DerivedRenderPass PassT, typename... StableCtorArgs>
+    void Build(StableCtorArgs&&... ctorArgs)&& {
+        Build<PassT>(rg::NoInputs{}, std::forward<StableCtorArgs>(ctorArgs)...);
     }
 
     auto const& DeclaredResourceIds() const { return _declaredIds; }
@@ -777,16 +786,35 @@ private:
     RenderPassBuilder(RenderGraph* g, std::string name)
         : graph(g), passName(std::move(name)) {}
 
+	// Copy and move constructors are default, but private
+	RenderPassBuilder(const RenderPassBuilder&) = default;
+	RenderPassBuilder(RenderPassBuilder&&) = default;
+
+    // Same for assignment
+	RenderPassBuilder& operator=(const RenderPassBuilder&) = default;
+	RenderPassBuilder& operator=(RenderPassBuilder&&) = default;
+
     void Finalize() {
         if (!built_) return;
 
+        params = {}; // Reset params to clear any resources from previous build
+
         pass->DeclareResourceUsages(this);
 
+        params.isGeometryPass = m_isGeometryPass;
         params.identifierSet = _declaredIds;
         params.resourceRequirements = GatherResourceRequirements();
 
         graph->AddRenderPass(pass, params, passName);
     }
+
+    void Reset() {
+        built_ = false;
+        pass = nullptr;
+        params = {};
+        _declaredIds.clear();
+        m_isGeometryPass = false;
+	}
 
     // Shader Resource
 	template<typename T>
@@ -1124,6 +1152,7 @@ private:
     RenderPassParameters     params;
 	std::shared_ptr<RenderPass> pass;
     bool built_ = false;
+    bool m_isGeometryPass = false;
     std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher> _declaredIds;
 
     friend class RenderGraph; // Allow RenderGraph to create instances of this builder
@@ -1132,8 +1161,10 @@ private:
 template<typename T>
 concept DerivedComputePass = std::derived_from<T, ComputePass>;
 
-class ComputePassBuilder {
+class ComputePassBuilder : public IPassBuilder {
 public:
+    PassBuilderKind Kind() const noexcept override { return PassBuilderKind::Compute; }
+    IResourceProvider* ResourceProvider() noexcept override { return pass.get(); }
     // Variadic entry points
 
     //First set, callable on Lvalues
@@ -1314,27 +1345,33 @@ public:
     }
 
     // First build, callable on Lvalues
-    template<DerivedComputePass PassT, typename... CtorArgs>
-    void Build(CtorArgs&&... args) & {
-		if (built_) return;
-
-        built_ = true;
-
-        pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-
-        graph->RegisterPassBuilder(std::move(*this));
+    template<DerivedComputePass PassT, rg::PassInputs InputsT>
+    void Build(InputsT&& inputs) & {
+        if (!built_) {
+            built_ = true;
+            pass = std::make_shared<PassT>();
+        }
+        pass->SetInputs(std::forward<InputsT>(inputs));
     }
 
     // Second build, callable on temporaries
-    template<DerivedComputePass PassT, typename... CtorArgs>
-    void Build(CtorArgs&&... args) && {
-        if (built_) return;
+    template<DerivedComputePass PassT, rg::PassInputs InputsT>
+    void Build(InputsT&& inputs) && {
+        if (!built_) {
+            built_ = true;
+            pass = std::make_shared<PassT>();
+        }
+        pass->SetInputs(std::forward<InputsT>(inputs));
+    }
 
-        built_ = true;
+    template<DerivedComputePass PassT, typename... StableCtorArgs>
+    void Build(StableCtorArgs&&... ctorArgs)& {
+        Build<PassT>(rg::NoInputs{}, std::forward<StableCtorArgs>(ctorArgs)...);
+    }
 
-        pass = std::make_shared<PassT>(std::forward<CtorArgs>(args)...);
-
-        graph->RegisterPassBuilder(std::move(*this));
+    template<DerivedComputePass PassT, typename... StableCtorArgs>
+    void Build(StableCtorArgs&&... ctorArgs)&& {
+        Build<PassT>(rg::NoInputs{}, std::forward<StableCtorArgs>(ctorArgs)...);
     }
 
     auto const& DeclaredResourceIds() const { return _declaredIds; }
@@ -1343,8 +1380,18 @@ private:
     ComputePassBuilder(RenderGraph* g, std::string name)
         : graph(g), passName(std::move(name)) {}
 
+    // Copy and move constructors are default, but private
+    ComputePassBuilder(const ComputePassBuilder&) = default;
+    ComputePassBuilder(ComputePassBuilder&&) = default;
+
+    // Same for assignment
+    ComputePassBuilder& operator=(const ComputePassBuilder&) = default;
+    ComputePassBuilder& operator=(ComputePassBuilder&&) = default;
+
     void Finalize() {
         if (!built_) return;
+
+        params = {}; // Reset params to clear any resources from previous build
 
         pass->DeclareResourceUsages(this);
 
@@ -1352,6 +1399,13 @@ private:
         params.resourceRequirements = GatherResourceRequirements();
 
         graph->AddComputePass(pass, params, passName);
+    }
+
+    void Reset() {
+        built_ = false;
+        pass = nullptr;
+        params = {};
+        _declaredIds.clear();
     }
 
     // Shader resource

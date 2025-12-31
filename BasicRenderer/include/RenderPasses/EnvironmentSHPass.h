@@ -4,11 +4,6 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "Utilities/Utilities.h"
-#include "Managers/Singletons/SettingsManager.h"
-#include "Managers/MeshManager.h"
-#include "Managers/ObjectManager.h"
-#include "Managers/Singletons/ECSManager.h"
 #include "Managers/EnvironmentManager.h"
 #include "Managers/Singletons/ResourceManager.h"
 class EnvironmentSHPass : public ComputePass {
@@ -28,6 +23,8 @@ public:
 		shSamplerDesc.maxLod = (std::numeric_limits<float>::max)();
 
 		m_samplerIndex = ResourceManager::GetInstance().CreateIndexedSampler(shSamplerDesc);
+
+		CreatePSO();
 	}
 
 	~EnvironmentSHPass() {
@@ -39,8 +36,6 @@ public:
 	}
 
 	void Setup() override {
-		CreatePSO();
-		
 		RegisterUAV(Builtin::Environment::InfoBuffer, 0);
 	}
 

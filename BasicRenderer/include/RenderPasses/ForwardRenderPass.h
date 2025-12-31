@@ -12,23 +12,34 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/MeshManager.h"
-#include "Managers/ObjectManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
 #include "Resources/ECSResourceResolver.h"
 #include "../../shaders/PerPassRootConstants/amplificationShaderRootConstants.h"
+#include "boost/container_hash/hash.hpp"
+
+struct ForwardRenderPassInputs {
+    bool wireframe;
+    bool meshShaders;
+    bool indirect;
+
+    friend bool operator==(const ForwardRenderPassInputs&, const ForwardRenderPassInputs&) = default;
+};
+
+inline rg::Hash64 HashValue(const ForwardRenderPassInputs& i) {
+    std::size_t seed = 0;
+
+    boost::hash_combine(seed, i.wireframe);
+    boost::hash_combine(seed, i.meshShaders);
+    boost::hash_combine(seed, i.indirect);
+    return seed;
+}
+
 
 class ForwardRenderPass : public RenderPass {
 public:
-    ForwardRenderPass(bool wireframe,
-        bool meshShaders,
-        bool indirect,
-        int aoTextureDescriptorIndex)
-        : m_wireframe(wireframe),
-        m_meshShaders(meshShaders),
-        m_indirect(indirect),
-        m_aoTextureDescriptorIndex(aoTextureDescriptorIndex)
+    ForwardRenderPass()
     {
         auto& settingsManager = SettingsManager::GetInstance();
         getImageBasedLightingEnabled = settingsManager.getSettingGetter<bool>("enableImageBasedLighting");
@@ -42,6 +53,11 @@ public:
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override {
+		auto inputs = Inputs<ForwardRenderPassInputs>();
+		m_wireframe = inputs.wireframe;
+		m_meshShaders = inputs.meshShaders;
+		m_indirect = inputs.indirect;
+
         builder->WithShaderResource(Builtin::CameraBuffer,
             Builtin::Environment::PrefilteredCubemapsGroup,
             Builtin::Light::ActiveLightIndices,
@@ -90,8 +106,8 @@ public:
             .build();
 
         // Setup resources
-        m_pPrimaryDepthBuffer = m_resourceRegistryView->Request<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
-        m_pHDRTarget = m_resourceRegistryView->Request<PixelBuffer>(Builtin::Color::HDRColorTarget);
+        m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+        m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
 
         RegisterSRV(Builtin::NormalMatrixBuffer);
         RegisterSRV(Builtin::PostSkinningVertices);
@@ -119,7 +135,7 @@ public:
         RegisterSRV(Builtin::Environment::InfoBuffer);
 
         if (m_meshShaders)
-            m_primaryCameraMeshletBitfield = m_resourceRegistryView->Request<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+            m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -277,16 +293,15 @@ private:
     bool m_wireframe;
     bool m_meshShaders;
     bool m_indirect;
-    unsigned int m_aoTextureDescriptorIndex;
     bool m_gtaoEnabled = true;
     bool m_clusteredLightingEnabled = true;
 
 	RenderPhase m_renderPhase = Engine::Primary::ForwardPass;
 
-    std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletBitfield = nullptr;
-    std::shared_ptr<DynamicGloballyIndexedResource> m_primaryCameraMeshletCullingBitfieldBuffer = nullptr;
-    std::shared_ptr<PixelBuffer> m_pPrimaryDepthBuffer = nullptr;
-    std::shared_ptr<PixelBuffer> m_pHDRTarget = nullptr;
+    DynamicGloballyIndexedResource* m_primaryCameraMeshletBitfield = nullptr;
+    DynamicGloballyIndexedResource* m_primaryCameraMeshletCullingBitfieldBuffer = nullptr;
+    PixelBuffer* m_pPrimaryDepthBuffer = nullptr;
+    PixelBuffer* m_pHDRTarget = nullptr;
 
     std::function<bool()> getImageBasedLightingEnabled;
     std::function<bool()> getPunctualLightingEnabled;
