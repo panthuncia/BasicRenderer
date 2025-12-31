@@ -722,7 +722,10 @@ void Renderer::Update(float elapsedSeconds) {
     verticalAngle = 0;
     horizontalAngle = 0;
 
-    currentScene->Update();
+    currentScene->Update(elapsedSeconds);
+
+    m_pSkeletonManager->TickAnimations(elapsedSeconds);
+    m_pSkeletonManager->UpdateAllDirtyInstances();
 
     auto& world = ECSManager::GetInstance().GetWorld();
 	world.progress();
@@ -746,6 +749,10 @@ void Renderer::Update(float elapsedSeconds) {
 
     //resourceManager.ExecuteResourceTransitions();
     commandList->Recycle(commandAllocator.Get());
+}
+
+void Renderer::PostUpdate() {
+	currentScene->PostUpdate();
 }
 
 void Renderer::Render() {

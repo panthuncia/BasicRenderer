@@ -363,10 +363,7 @@ flecs::entity Scene::GetRoot() const {
     return ECSSceneRoot;
 }
 
-void Scene::Update() {
-    auto currentTime = std::chrono::system_clock::now();
-    std::chrono::duration<float> elapsed_seconds = currentTime - lastUpdateTime;
-    lastUpdateTime = currentTime;
+void Scene::Update(float elapsedSeconds) {
 
 	for (auto& node : animatedEntitiesByID) {
 		auto& entity = node.second;
@@ -377,19 +374,14 @@ void Scene::Update() {
 			return;
 		}
 #endif
-	    auto& transform = animationController->GetUpdatedTransform(elapsed_seconds.count());
+	    auto& transform = animationController->GetUpdatedTransform(elapsedSeconds);
 		entity.set<Components::Rotation>(transform.rot);
 		entity.set<Components::Position>(transform.pos);
 		entity.set<Components::Scale>(transform.scale);
 	}
-
-	m_managerInterface.GetSkeletonManager()->TickAnimations(elapsed_seconds.count());
-	m_managerInterface.GetSkeletonManager()->UpdateAllDirtyInstances();
-
-	//for (auto& scene : m_childScenes) {
-	//	scene->Update();
-	//}
-    PostUpdate();
+	for (auto& child : m_childScenes) {
+		child->Update(elapsedSeconds);
+	}
 }
 
 void Scene::SetDepthMap(Components::DepthMap depthMap) {
@@ -463,6 +455,9 @@ flecs::entity& Scene::GetPrimaryCamera() {
 }
 
 void Scene::PostUpdate() {
+	for (auto& child : m_childScenes) {
+		child->PostUpdate();
+	}
 }
 
 std::shared_ptr<Scene> Scene::AppendScene(std::shared_ptr<Scene> scene) {

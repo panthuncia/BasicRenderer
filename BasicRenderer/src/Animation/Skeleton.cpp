@@ -131,6 +131,9 @@ std::shared_ptr<Skeleton> Skeleton::GetBaseSkeletonShared() const
     return m_baseSkeleton;
 }
 
+// TODO: Inheritance from external parents currently disabled- is it correct to apply these if the renderable entity is already being scaled based on the same parent?
+// TODO: Currently bakes external parent transforms at construction time. Instead, we should pull this from flecs to support animated parents.
+// How to handle cases where external parent is deleted? Should entities store weak_ptr to child skeleton to notify it of changes?
 void Skeleton::BuildBaseFromNodes_(const std::vector<flecs::entity>& nodes)
 {
     using namespace DirectX;
@@ -241,28 +244,6 @@ void Skeleton::BuildBaseFromNodes_(const std::vector<flecs::entity>& nodes)
             }
             chain.push_back(cur);
             cur = nextExternalParent(cur);
-        }
-
-        // Print chain names and transforms for debugging
-		for (size_t i = 0; i < chain.size(); ++i) {
-            const flecs::entity& e = chain[i];
-            const char* nm = e.name();
-            spdlog::info("  External parent[{}]: '{}' (id={})", i,
-                (nm && nm[0] != '\0') ? nm : "<unnamed>",
-                (uint64_t)e.id());
-			const Matrix local = composeEntityLocalTRS(e);
-			XMFLOAT4X4 matOut;
-			XMStoreFloat4x4(&matOut, local);
-			spdlog::info("    Local matrix:\n"
-				"      {:>8.4} {:>8.4} {:>8.4} {:>8.4}\n"
-				"      {:>8.4} {:>8.4} {:>8.4} {:>8.4}\n"
-				"      {:>8.4} {:>8.4} {:>8.4} {:>8.4}\n"
-				"      {:>8.4} {:>8.4} {:>8.4} {:>8.4}",
-				matOut._11, matOut._12, matOut._13, matOut._14,
-				matOut._21, matOut._22, matOut._23, matOut._24,
-				matOut._31, matOut._32, matOut._33, matOut._34,
-				matOut._41, matOut._42, matOut._43, matOut._44);
-
         }
 
         // Compose from outermost -> innermost
@@ -514,9 +495,9 @@ void Skeleton::UpdateTransforms(float elapsedSeconds, bool force)
     for (uint32_t idx : base->m_evalOrder) {
         if (idx >= boneCount) continue;
 
-        Components::Transform localTrs = (idx < base->m_restLocalTransforms.size()) ? base->m_restLocalTransforms[idx] : Components::Transform{};
+        Components::Transform localTrs = {};// (idx < base->m_restLocalTransforms.size()) ? base->m_restLocalTransforms[idx] : Components::Transform{};
 
-        // If a clip is bound, use animated channels and preserve rest for missing ones
+        // If a clip is bound, use animated channels
         auto& ctrl = m_controllers[idx];
         if (ctrl.animationClip) {
             const auto& clip = ctrl.animationClip;
@@ -540,7 +521,7 @@ void Skeleton::UpdateTransforms(float elapsedSeconds, bool force)
             if (idx < base->m_rootParentGlobals.size()) {
                 rootParent = base->m_rootParentGlobals[idx];
             }
-            m_boneMatrices[idx] = DirectX::XMMatrixMultiply(local, rootParent);
+            m_boneMatrices[idx] = local;//DirectX::XMMatrixMultiply(local, rootParent);
         }
         else {
             m_boneMatrices[idx] = DirectX::XMMatrixMultiply(local, m_boneMatrices[(uint32_t)p]);

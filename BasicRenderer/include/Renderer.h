@@ -63,6 +63,7 @@ public:
     void Initialize(HWND hwnd, UINT x_res, UINT y_res);
     void OnResize(UINT newWidth, UINT newHeight);
     void Update(float elapsedSeconds);
+	void PostUpdate();
     void Render();
     void Cleanup();
     std::shared_ptr<Scene>& GetCurrentScene();
