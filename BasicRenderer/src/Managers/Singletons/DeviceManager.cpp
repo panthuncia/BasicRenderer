@@ -10,6 +10,7 @@
 #include "Resources/ResourceIdentifier.h"
 #include "Utilities/Utilities.h"
 #include "Resources/GPUBacking/GpuBufferBacking.h"
+#include "Resources/GPUBacking/GpuTextureBacking.h"
 
 rhi::Result DeviceManager::CreateResourceTracked(
     const rhi::ma::AllocationDesc& allocDesc,
@@ -123,12 +124,19 @@ void DeviceManager::Cleanup() {
     char* json = nullptr;
     m_allocator->BuildStatsString(&json, TRUE);
 	spdlog::info("Allocator Stats: {}", json);
-    auto numLiveBuffers = GpuBufferBacking::DumpLiveBuffers(64ull * 1024ull);
-	m_allocator->FreeStatsString(json);
-	if (numLiveBuffers != 0) { // If buffers are alive, allocator cannot be released. The kernel will have to clean up.
-		spdlog::error("DeviceManager Cleanup: {} live buffers were not destroyed before allocator cleanup! Allocator could not be freed.", numLiveBuffers);
+    auto numLiveBuffers = GpuBufferBacking::DumpLiveBuffers();
+    auto numLiveTextures = GpuTextureBacking::DumpLiveTextures();
+    m_allocator->FreeStatsString(json);
+    bool releaseAllocator = true;
+    if (numLiveBuffers != 0) { // If buffers are alive, allocator cannot be released. The kernel will have to clean up.
+        spdlog::error("DeviceManager Cleanup: {} live buffers were not destroyed before allocator cleanup! Allocator could not be freed.", numLiveBuffers);
+		releaseAllocator = false;
     }
-    else {
+    if (numLiveTextures != 0) {
+        spdlog::error("DeviceManager Cleanup: {} live textures were not destroyed before allocator cleanup! Allocator could not be freed.", numLiveTextures);
+		releaseAllocator = false;
+    }
+    if (releaseAllocator){
         m_allocator->ReleaseThis();
         m_allocator = nullptr;
     }

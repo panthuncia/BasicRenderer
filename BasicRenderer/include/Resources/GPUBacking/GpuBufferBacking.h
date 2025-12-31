@@ -42,8 +42,7 @@ public:
 	rhi::Resource GetAPIResource() { return m_bufferAllocation.GetResource(); }
 	void SetName(const char* name);
 	// Debug helper: dumps any live buffers that haven't been destroyed yet.
-	// If maxSizeBytes is provided, only buffers with size <= maxSizeBytes are reported.
-	static unsigned int DumpLiveBuffers(size_t maxSizeBytes = SIZE_MAX);
+	static unsigned int DumpLiveBuffers();
 
 	void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) {
 		m_bufferAllocation.ApplyComponentBundle(bundle);
@@ -70,9 +69,8 @@ private:
 	struct LiveAllocInfo {
 		size_t size = 0;
 		std::string name;
-		//bool uav = false;
 	};
 
-	static std::mutex s_liveMutex;
-	static std::unordered_map<const GpuBufferBacking*, LiveAllocInfo> s_liveAllocs;
+	inline static std::mutex s_liveMutex;
+	inline static std::unordered_map<const GpuBufferBacking*, LiveAllocInfo> s_liveAllocs;
 };

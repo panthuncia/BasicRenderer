@@ -93,6 +93,12 @@ GpuTextureBacking::GpuTextureBacking(CreateTag)
 	
 }
 
+GpuTextureBacking::~GpuTextureBacking()
+{
+	UnregisterLiveAlloc();
+	DeletionManager::GetInstance().MarkForDelete(std::move(m_textureHandle));
+}
+
 std::unique_ptr<GpuTextureBacking>
 GpuTextureBacking::CreateUnique(const TextureDescription& desc,
 	uint64_t owningResourceID,
@@ -253,12 +259,16 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 		}
 	}
 
+	RegisterLiveAlloc();
+	UpdateLiveAllocName(name);
+
 }
 
-void GpuTextureBacking::SetName(const std::string& newName)
+void GpuTextureBacking::SetName(const char* newName)
 {
 	m_textureHandle.ApplyComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceName>({ newName }));
-	m_textureHandle.GetResource().SetName(newName.c_str());
+	m_textureHandle.GetResource().SetName(newName);
+	UpdateLiveAllocName(newName);
 }
 
 rhi::BarrierBatch GpuTextureBacking::GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
@@ -280,4 +290,36 @@ rhi::BarrierBatch GpuTextureBacking::GetEnhancedBarrierGroup(RangeSpec range, rh
 	batch.textures = { &m_barrier };
 
     return batch;
+}
+
+void GpuTextureBacking::RegisterLiveAlloc() {
+	std::scoped_lock lock(s_liveMutex);
+	LiveAllocInfo info{};
+	s_liveAllocs[this] = info;
+}
+
+void GpuTextureBacking::UnregisterLiveAlloc() {
+	std::scoped_lock lock(s_liveMutex);
+	if (s_liveAllocs.find(this) == s_liveAllocs.end()) { // If an error occurs here, it means something is being destructed after this global was destroyed.
+		spdlog::warn("GpuBufferBacking being destroyed but not found in live allocations!");
+	}
+	else {
+		s_liveAllocs.erase(this);
+	}
+}
+
+void GpuTextureBacking::UpdateLiveAllocName(const char* name) {
+	std::scoped_lock lock(s_liveMutex);
+	auto it = s_liveAllocs.find(this);
+	if (it != s_liveAllocs.end()) {
+		it->second.name = name ? name : "";
+	}
+}
+
+unsigned int GpuTextureBacking::DumpLiveTextures() {
+	std::scoped_lock lock(s_liveMutex);
+	for (const auto& [ptr, info] : s_liveAllocs) {
+		spdlog::warn("Live texture still tracked: name='{}'", info.name);
+	}
+	return static_cast<unsigned int>(s_liveAllocs.size());
 }

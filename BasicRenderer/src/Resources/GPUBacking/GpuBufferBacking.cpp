@@ -8,9 +8,6 @@
 
 using namespace Microsoft::WRL;
 
-std::mutex GpuBufferBacking::s_liveMutex{};
-std::unordered_map<const GpuBufferBacking*, GpuBufferBacking::LiveAllocInfo> GpuBufferBacking::s_liveAllocs{};
-
 GpuBufferBacking::GpuBufferBacking(
 	const rhi::HeapType accessType,
 	const uint64_t bufferSize,
@@ -113,12 +110,10 @@ void GpuBufferBacking::UpdateLiveAllocName(const char* name) {
     }
 }
 
-unsigned int GpuBufferBacking::DumpLiveBuffers(size_t maxSizeBytes) {
+unsigned int GpuBufferBacking::DumpLiveBuffers() {
     std::scoped_lock lock(s_liveMutex);
     for (const auto& [ptr, info] : s_liveAllocs) {
-        if (info.size <= maxSizeBytes) {
-            spdlog::warn("Live buffer still tracked: size={} bytes, name='{}'", info.size, info.name);
-        }
+        spdlog::warn("Live buffer still tracked: size={} bytes, name='{}'", info.size, info.name);
     }
 	return static_cast<unsigned int>(s_liveAllocs.size());
 }

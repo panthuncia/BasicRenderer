@@ -260,7 +260,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     auto dragonScene = LoadModel("models/dragon.glb");
     dragonScene->GetRoot().set<Components::Scale>({ 1, 1, 1 });
-    dragonScene->GetRoot().set<Components::Position>({ 0.0, 1, 0.0 });
+    dragonScene->GetRoot().set<Components::Position>({ 0.0, 1, 1.0 });
 
     auto carScene = LoadModel("models/porche.glb");
     carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
@@ -294,13 +294,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
     renderer.GetCurrentScene()->AppendScene(carScene->Clone());
     renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
-    //renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 	//renderer.GetCurrentScene()->AppendScene(shiba->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(bistro->Clone());
     //renderer.GetCurrentScene()->AppendScene(wine->Clone());
     
-	//renderer.GetCurrentScene()->AppendScene(robot->Clone());
+	renderer.GetCurrentScene()->AppendScene(robot->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
 

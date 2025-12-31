@@ -1,6 +1,7 @@
 #pragma once
 #include <rhi.h>
 #include <stacktrace>
+#include <mutex>
 
 #include "ThirdParty/stb/stb_image.h"
 
@@ -21,10 +22,7 @@ public:
 			const std::vector<const stbi_uc*>& initialData = {});
 
 	explicit GpuTextureBacking(CreateTag);
-	~GpuTextureBacking()
-	{
-		DeletionManager::GetInstance().MarkForDelete(std::move(m_textureHandle));
-	}
+	~GpuTextureBacking();
 	unsigned int GetWidth() const { return m_width; }
 	unsigned int GetHeight() const { return m_height; }
 	unsigned int GetChannels() const { return m_channels; }
@@ -33,7 +31,9 @@ public:
     }
     rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
 
-	void SetName(const std::string& newName);
+	void SetName(const char* newName);
+	// Debug helper: dumps any live textures that haven't been destroyed yet.
+	static unsigned int DumpLiveTextures();
 
 	rhi::Resource GetAPIResource() { return m_textureHandle.GetResource(); }
 
@@ -75,6 +75,17 @@ private:
 		uint64_t owningResourceID,
 		const char* name,
         const std::vector<const stbi_uc*>& initialData);
+
+	void RegisterLiveAlloc();
+	void UnregisterLiveAlloc();
+	void UpdateLiveAllocName(const char* name);
+
+	struct LiveAllocInfo {
+		std::string name;
+	};
+
+	inline static std::mutex s_liveMutex;
+	inline static std::unordered_map<const GpuTextureBacking*, LiveAllocInfo> s_liveAllocs;
 
     unsigned int m_width;
     unsigned int m_height;
