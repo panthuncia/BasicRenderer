@@ -15,6 +15,7 @@
 #include "interfaces/IResourceProvider.h"
 #include "Render/PassInputs.h"
 #include "ShaderBuffers.h"
+#include "Render/RenderContext.h"
 
 struct RenderPassParameters {
     std::vector<ResourceAndRange> shaderResources;
@@ -49,7 +50,8 @@ public:
 	virtual void RegisterCommandLists(const std::vector<rhi::CommandList>& commandLists) {};
 
 	virtual void Update() {};
-    virtual PassReturn Execute(RenderContext& context) = 0;
+	virtual void ExecuteImmediate(ImmediateContext& context) {};
+	virtual PassReturn Execute(RenderContext& context) { return {}; };
     virtual void Cleanup(RenderContext& context) = 0;
 
 	void Invalidate() { invalidated = true; }

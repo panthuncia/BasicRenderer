@@ -103,7 +103,8 @@ public:
 	void AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassParameters& resources, std::string name = "");
 	void Update();
 	void Execute(RenderContext& context);
-	void Compile();
+	void CompileStructural();
+	void CompileFrame();
 	void ResetForRecompile();
 	void Setup();
 	const std::vector<PassBatch>& GetBatches() const { return batches; }

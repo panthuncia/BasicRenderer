@@ -1225,7 +1225,7 @@ void Renderer::CreateRenderGraph() {
 			.Build<DebugSpherePass>();
     }
 
-    newGraph->Compile();
+    newGraph->CompileStructural();
     newGraph->Setup();
 
 	rebuildRenderGraph = false;

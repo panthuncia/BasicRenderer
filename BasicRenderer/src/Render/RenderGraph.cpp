@@ -678,7 +678,7 @@ void RenderGraph::ResetForRecompile()
 
 }
 
-void RenderGraph::Compile() {
+void RenderGraph::CompileStructural() {
 	// Register resource providers from pass builders
 
 	std::vector<unsigned int> empty;
@@ -847,6 +847,12 @@ void RenderGraph::Compile() {
 			}
 		}
 	}
+
+}
+
+void RenderGraph::CompileFrame() {
+	batches.clear();
+
 
 }
 

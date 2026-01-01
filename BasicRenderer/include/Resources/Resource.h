@@ -11,7 +11,7 @@
 #include "Resources/ResourceStateTracker.h"
 #include "Managers/Singletons/ECSManager.h"
 
-class RenderContext;
+struct RenderContext;
 
 class Resource : public std::enable_shared_from_this<Resource> {
 public:

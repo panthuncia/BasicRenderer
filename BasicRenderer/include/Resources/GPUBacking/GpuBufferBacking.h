@@ -13,7 +13,7 @@
 #include "Managers/Singletons/DeletionManager.h"
 #include "Resources/TrackedAllocation.h"
 
-class RenderContext;
+struct RenderContext;
 
 // Represents the GPU-side backing storage for a buffer resource.
 // Should only be owned by logical resources (Resource or derived classes).

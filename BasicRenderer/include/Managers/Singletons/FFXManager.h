@@ -19,7 +19,7 @@
 
 
 class PixelBuffer;
-class RenderContext;
+struct RenderContext;
 class Buffer;
 
 class FFXManager {

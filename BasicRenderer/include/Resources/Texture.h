@@ -10,7 +10,7 @@
 
 class PixelBuffer;
 class Sampler;
-class RenderContext;
+struct RenderContext;
 
 struct TextureFileMeta {
 	std::string filePath;
