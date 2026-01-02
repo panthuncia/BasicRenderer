@@ -106,7 +106,10 @@ namespace rg::imm {
         ClearRTV = 2,
         ClearDSV = 3,
         ClearUavFloat = 4,
-        // TODO: ClearUavUint, CopyTextureRegion, etc.
+        ClearUavUint = 5,
+        CopyTextureRegion = 6,
+        CopyTextureToBuffer = 7,
+        CopyBufferToTexture = 8,
     };
 
     struct CopyBufferRegionCmd {
@@ -133,6 +136,24 @@ namespace rg::imm {
     struct ClearUavFloatCmd {
         rhi::UavClearInfo  info{};
         rhi::UavClearFloat value{};
+    };
+
+    struct ClearUavUintCmd {
+        rhi::UavClearInfo info{};
+        rhi::UavClearUint value{};
+    };
+
+    struct CopyTextureRegionCmd {
+        rhi::TextureCopyRegion dst{};
+        rhi::TextureCopyRegion src{};
+    };
+
+    struct CopyTextureToBufferCmd {
+        rhi::BufferTextureCopyFootprint region{};
+    };
+
+    struct CopyBufferToTextureCmd {
+        rhi::BufferTextureCopyFootprint region{};
     };
 
     // Simple aligned POD writer/reader for a bytecode stream.
@@ -169,14 +190,8 @@ namespace rg::imm {
     public:
         BytecodeReader(std::byte const* p, size_t n) : base(p), cur(p), end(p + n) {}
 
-        bool Empty() const noexcept { return cur >= end; }
-
-        Op ReadOp() {
-            Require(1);
-            Op op = static_cast<Op>(*cur);
-            cur += 1;
-            return op;
-        }
+        bool Empty() const noexcept;
+        Op ReadOp();
 
         template<class T>
         T ReadPOD() {
@@ -190,17 +205,8 @@ namespace rg::imm {
         }
 
     private:
-        void Require(size_t n) const {
-            if (cur + n > end) {
-                throw std::runtime_error("Immediate bytecode underflow");
-            }
-        }
-        void Align(size_t a) {
-            if (a == 0) return;
-            uintptr_t ip = reinterpret_cast<uintptr_t>(cur);
-            uintptr_t aligned = (ip + (a - 1)) & ~(uintptr_t(a - 1));
-            cur = reinterpret_cast<std::byte const*>(aligned);
-        }
+        void Require(size_t n) const;
+        void Align(size_t a);
 
         std::byte const* base = nullptr;
         std::byte const* cur = nullptr;
@@ -208,36 +214,7 @@ namespace rg::imm {
     };
 
     // Replay bytecode into a concrete RHI command list.
-    inline void Replay(std::vector<std::byte> const& bytecode, rhi::CommandList& cl) {
-        BytecodeReader r(bytecode.data(), bytecode.size());
-        while (!r.Empty()) {
-            Op op = r.ReadOp();
-            switch (op) {
-            case Op::CopyBufferRegion: {
-                auto cmd = r.ReadPOD<CopyBufferRegionCmd>();
-                cl.CopyBufferRegion(cmd.dst, cmd.dstOffset, cmd.src, cmd.srcOffset, cmd.numBytes);
-                break;
-            }
-            case Op::ClearRTV: {
-                auto cmd = r.ReadPOD<ClearRTVCmd>();
-                cl.ClearRenderTargetView(cmd.rtv, cmd.clear);
-                break;
-            }
-            case Op::ClearDSV: {
-                auto cmd = r.ReadPOD<ClearDSVCmd>();
-                cl.ClearDepthStencilView(cmd.dsv, cmd.clearDepth, cmd.depth, cmd.clearStencil, cmd.stencil);
-                break;
-            }
-            case Op::ClearUavFloat: {
-                auto cmd = r.ReadPOD<ClearUavFloatCmd>();
-                cl.ClearUavFloat(cmd.info, cmd.value);
-                break;
-            }
-            default:
-                throw std::runtime_error("Unknown immediate bytecode op");
-            }
-        }
-    }
+    void Replay(std::vector<std::byte> const& bytecode, rhi::CommandList& cl);
 
     struct FrameData {
         std::vector<std::byte> bytecode;                 // replay payload
@@ -259,11 +236,7 @@ namespace rg::imm {
         {
         }
 
-        void Reset() {
-            m_writer.Reset();
-            m_ptrs.clear();
-            m_trackers.clear();
-        }
+        void Reset();
 
         // API: resources can be ResourceIdentifier or Resource*
 
@@ -300,35 +273,72 @@ namespace rg::imm {
             ClearUavFloat(Resolve(target), x, y, z, w, range);
         }
 
+        // ---- UAV uint clear ----
+        void ClearUavUint(ResourceIdentifier const& target, uint32_t x, uint32_t y, uint32_t z, uint32_t w, RangeSpec range = {}) {
+            ClearUavUint(Resolve(target), x, y, z, w, range);
+        }
+        void ClearUavUint(Resource* target, uint32_t x, uint32_t y, uint32_t z, uint32_t w, RangeSpec range = {}) {
+            ClearUavUint(Resolve(target), x, y, z, w, range);
+        }
+
+        // ---- Texture region copy (texture -> texture) ----
+        void CopyTextureRegion(
+            ResourceIdentifier const& dstTex, uint32_t dstMip, uint32_t dstSlice, uint32_t dstX, uint32_t dstY, uint32_t dstZ,
+            ResourceIdentifier const& srcTex, uint32_t srcMip, uint32_t srcSlice, uint32_t srcX, uint32_t srcY, uint32_t srcZ,
+            uint32_t width, uint32_t height, uint32_t depth = 1)
+        {
+            CopyTextureRegion(Resolve(dstTex), dstMip, dstSlice, dstX, dstY, dstZ,
+                Resolve(srcTex), srcMip, srcSlice, srcX, srcY, srcZ,
+                width, height, depth);
+        }
+
+        void CopyTextureRegion(
+            Resource* dstTex, uint32_t dstMip, uint32_t dstSlice, uint32_t dstX, uint32_t dstY, uint32_t dstZ,
+            Resource* srcTex, uint32_t srcMip, uint32_t srcSlice, uint32_t srcX, uint32_t srcY, uint32_t srcZ,
+            uint32_t width, uint32_t height, uint32_t depth = 1)
+        {
+            CopyTextureRegion(Resolve(dstTex), dstMip, dstSlice, dstX, dstY, dstZ,
+                Resolve(srcTex), srcMip, srcSlice, srcX, srcY, srcZ,
+                width, height, depth);
+        }
+
+        // ---- Texture <-> buffer via footprint ----
+        void CopyTextureToBuffer(ResourceIdentifier const& texture, uint32_t mip, uint32_t slice,
+            ResourceIdentifier const& buffer,
+            rhi::CopyableFootprint const& footprint,
+            uint32_t x = 0, uint32_t y = 0, uint32_t z = 0)
+        {
+            CopyTextureToBuffer(Resolve(texture), mip, slice, Resolve(buffer), footprint, x, y, z);
+        }
+
+        void CopyTextureToBuffer(Resource* texture, uint32_t mip, uint32_t slice,
+            Resource* buffer,
+            rhi::CopyableFootprint const& footprint,
+            uint32_t x = 0, uint32_t y = 0, uint32_t z = 0)
+        {
+            CopyTextureToBuffer(Resolve(texture), mip, slice, Resolve(buffer), footprint, x, y, z);
+        }
+
+        void CopyBufferToTexture(ResourceIdentifier const& buffer,
+            ResourceIdentifier const& texture, uint32_t mip, uint32_t slice,
+            rhi::CopyableFootprint const& footprint,
+            uint32_t x = 0, uint32_t y = 0, uint32_t z = 0)
+        {
+            CopyBufferToTexture(Resolve(buffer), Resolve(texture), mip, slice, footprint, x, y, z);
+        }
+
+        void CopyBufferToTexture(Resource* buffer,
+            Resource* texture, uint32_t mip, uint32_t slice,
+            rhi::CopyableFootprint const& footprint,
+            uint32_t x = 0, uint32_t y = 0, uint32_t z = 0)
+        {
+            CopyBufferToTexture(Resolve(buffer), Resolve(texture), mip, slice, footprint, x, y, z);
+        }
+
+
         // Produce per-frame data (bytecode + requirements).
         // Call after the pass finishes recording.
-        FrameData Finalize() const {
-            FrameData out;
-            out.bytecode = m_writer.data;
-
-            // Convert trackers -> requirements (skip "Common/Common" regions).
-            out.requirements.reserve(64);
-            for (auto const& [rid, tracker] : m_trackers) {
-                auto it = m_ptrs.find(rid);
-                if (it == m_ptrs.end() || !it->second) continue;
-
-                // Initial "no-op" state:
-                ResourceState init{
-                    rhi::ResourceAccessType::Common,
-                    rhi::ResourceLayout::Common,
-                    rhi::ResourceSyncState::None
-                };
-
-                for (auto const& seg : tracker.GetSegments()) {
-                    if (seg.state == init) continue; // ignore untouched portions
-                    ResourceRequirement rr{ it->second };
-                    rr.resourceAndRange.range = seg.rangeSpec;
-                    rr.state = seg.state;
-                    out.requirements.push_back(std::move(rr));
-                }
-            }
-            return out;
-        }
+        FrameData Finalize() const;
 
     private:
         struct Resolved {
@@ -337,186 +347,48 @@ namespace rg::imm {
             uint64_t globalId = 0;
         };
 
-        Resolved Resolve(ResourceIdentifier const& id) {
-            if (!m_resolveFn) {
-                throw std::runtime_error("ImmediateCommandList has no ResolveByIdFn");
-            }
-            auto sp = m_resolveFn(m_resolveUser, id, /*allowFailure=*/false);
-            if (!sp) {
-                throw std::runtime_error("ImmediateCommandList failed to resolve id: " + id.ToString());
-            }
-            return Resolve(sp.get(), std::move(sp));
-        }
+        Resolved Resolve(ResourceIdentifier const& id);
 
-        Resolved Resolve(Resource* p) {
-            if (!p) throw std::runtime_error("ImmediateCommandList: null Resource*");
-            // TODO: fix this shared_ptr nonsense
-			std::shared_ptr<Resource> sp = p->shared_from_this();
-            return Resolve(p, std::move(sp));
-        }
+        Resolved Resolve(Resource* p);
 
-        Resolved Resolve(Resource* p, std::shared_ptr<Resource> keepAlive) {
-            Resolved out;
-            out.keepAlive = std::move(keepAlive);
-            out.raw = p;
-            out.globalId = p->GetGlobalResourceID();
+        Resolved Resolve(Resource* p, std::shared_ptr<Resource> keepAlive);
 
-            // Cache keepalive for requirement building
-            m_ptrs[out.globalId] = out.keepAlive;
+        ResourceState MakeState(rhi::ResourceAccessType access) const;
 
-            if (m_trackers.find(out.globalId) == m_trackers.end()) {
-                RangeSpec whole{};
-                ResourceState init{
-                    rhi::ResourceAccessType::Common,
-                    rhi::ResourceLayout::Common,
-                    rhi::ResourceSyncState::None
-                };
-                m_trackers.emplace(out.globalId, SymbolicTracker(whole, init));
-            }
-            return out;
-        }
-
-        ResourceState MakeState(rhi::ResourceAccessType access) const {
-            // Match what PassBuilders do (render vs compute sync selection).
-            return ResourceState{
-                access,
-                AccessToLayout(access, /*isRender=*/m_isRenderPass),
-                m_isRenderPass ? RenderSyncFromAccess(access) : ComputeSyncFromAccess(access)
-            };
-        }
-
-        void Track(Resource* pRes, uint64_t rid, RangeSpec range, rhi::ResourceAccessType access) {
-            ResourceState want = MakeState(access);
-
-            // if a previously-recorded command forced this same range into a different non-Common state, treat that as an error 
-			// TODO: Allow internal transitions in immediate passes
-            auto& tr = m_trackers.at(rid);
-            std::vector<ResourceTransition> tmp;
-            tr.Apply(range, pRes, want, tmp);
-
-            for (auto const& t : tmp) {
-                // If we're transitioning from something other than Common, we have a multi-state requirement.
-                // (v1: disallow, to keep scheduling model simple)
-                if (t.prevAccessType != rhi::ResourceAccessType::Common &&
-                    t.prevAccessType != t.newAccessType) {
-                    throw std::runtime_error("ImmediateCommandList: conflicting access states within one pass (needs internal barriers)");
-                }
-            }
-        }
+        void Track(Resource* pRes, uint64_t rid, RangeSpec range, rhi::ResourceAccessType access);
 
         void CopyBufferRegion(Resolved const& dst, uint64_t dstOffset,
             Resolved const& src, uint64_t srcOffset,
-            uint64_t numBytes) {
-            if (!m_dispatch.GetResourceHandle) {
-                throw std::runtime_error("ImmediateDispatch::GetResourceHandle not set");
-            }
+            uint64_t numBytes);
 
-            CopyBufferRegionCmd cmd;
-            cmd.dst = m_dispatch.GetResourceHandle(*dst.raw);
-            cmd.dstOffset = dstOffset;
-            cmd.src = m_dispatch.GetResourceHandle(*src.raw);
-            cmd.srcOffset = srcOffset;
-            cmd.numBytes = numBytes;
-
-            m_writer.WriteOp(Op::CopyBufferRegion);
-            m_writer.WritePOD(cmd);
-
-            RangeSpec whole{};
-            Track(dst.raw, dst.globalId, whole, rhi::ResourceAccessType::CopyDest);
-            Track(src.raw, src.globalId, whole, rhi::ResourceAccessType::CopySource);
-        }
-
-        void ClearRTV(Resolved const& target, float r, float g, float b, float a, RangeSpec range)
-        {
-            if (!m_dispatch.GetRTV)
-                throw std::runtime_error("ImmediateDispatch::GetRTV not set");
-
-            rhi::ClearValue cv{};
-            cv.type = rhi::ClearValueType::Color;
-            cv.rgba[0] = r;
-            cv.rgba[1] = g;
-            cv.rgba[2] = b;
-            cv.rgba[3] = a;
-
-            const bool any = ForEachMipSlice(*target.raw, range,
-                [&](uint32_t /*mip*/, uint32_t /*slice*/, RangeSpec exact)
-                {
-                    const rhi::DescriptorSlot rtv = m_dispatch.GetRTV(*target.raw, exact);
-                    RequireValidSlot(rtv, "RTV");
-
-                    ClearRTVCmd cmd{};
-                    cmd.rtv = rtv;
-                    cmd.clear = cv;
-
-                    m_writer.WriteOp(Op::ClearRTV);
-                    m_writer.WritePOD(cmd);
-                });
-
-            if (any)
-                Track(target.raw, target.globalId, range, rhi::ResourceAccessType::RenderTarget);
-        }
-
+        void ClearRTV(Resolved const& target, float r, float g, float b, float a, RangeSpec range);
 
         void ClearDSV(Resolved const& target,
             bool clearDepth, float depth,
             bool clearStencil, uint8_t stencil,
-            RangeSpec range)
-        {
-            if (!clearDepth && !clearStencil)
-                return;
-
-            if (!m_dispatch.GetDSV)
-                throw std::runtime_error("ImmediateDispatch::GetDSV not set");
-
-            const bool any = ForEachMipSlice(*target.raw, range,
-                [&](uint32_t /*mip*/, uint32_t /*slice*/, RangeSpec exact)
-                {
-                    const rhi::DescriptorSlot dsv = m_dispatch.GetDSV(*target.raw, exact);
-                    RequireValidSlot(dsv, "DSV");
-
-                    ClearDSVCmd cmd{};
-                    cmd.dsv = dsv;
-                    cmd.clearDepth = clearDepth;
-                    cmd.clearStencil = clearStencil;
-                    cmd.depth = depth;
-                    cmd.stencil = stencil;
-
-                    m_writer.WriteOp(Op::ClearDSV);
-                    m_writer.WritePOD(cmd);
-                });
-
-            if (any)
-                Track(target.raw, target.globalId, range, rhi::ResourceAccessType::DepthReadWrite);
-        }
+            RangeSpec range);
 
 
-        void ClearUavFloat(Resolved const& target, float x, float y, float z, float w, RangeSpec range)
-        {
-            if (!m_dispatch.GetUavClearInfo)
-                throw std::runtime_error("ImmediateDispatch::GetUavClearInfo not set");
+        void ClearUavFloat(Resolved const& target, float x, float y, float z, float w, RangeSpec range);
 
-            rhi::UavClearFloat value{};
-            value.v[0] = x; value.v[1] = y; value.v[2] = z; value.v[3] = w;
+        void ClearUavUint(Resolved const& target, uint32_t x, uint32_t y, uint32_t z, uint32_t w, RangeSpec range);
 
-            const bool any = ForEachMipSlice(*target.raw, range,
-                [&](uint32_t /*mip*/, uint32_t /*slice*/, RangeSpec exact)
-                {
-                    ClearUavFloatCmd cmd{};
-                    cmd.value = value;
+        void CopyTextureRegion(
+            Resolved const& dst, uint32_t dstMip, uint32_t dstSlice, uint32_t dstX, uint32_t dstY, uint32_t dstZ,
+            Resolved const& src, uint32_t srcMip, uint32_t srcSlice, uint32_t srcX, uint32_t srcY, uint32_t srcZ,
+            uint32_t width, uint32_t height, uint32_t depth);
 
-                    if (!m_dispatch.GetUavClearInfo(*target.raw, exact, cmd.info))
-                        throw std::runtime_error("Immediate clear: GetUavClearInfo failed");
+        void CopyTextureToBuffer(
+            Resolved const& texture, uint32_t mip, uint32_t slice,
+            Resolved const& buffer,
+            rhi::CopyableFootprint const& footprint,
+            uint32_t x, uint32_t y, uint32_t z);
 
-                    if (!cmd.info.shaderVisible.heap.valid() || !cmd.info.cpuVisible.heap.valid())
-                        throw std::runtime_error("Immediate clear: invalid UAV descriptor slots");
-
-                    m_writer.WriteOp(Op::ClearUavFloat);
-                    m_writer.WritePOD(cmd);
-                });
-
-            if (any)
-                Track(target.raw, target.globalId, range, rhi::ResourceAccessType::UnorderedAccess);
-        }
+        void CopyBufferToTexture(
+            Resolved const& buffer,
+            Resolved const& texture, uint32_t mip, uint32_t slice,
+            rhi::CopyableFootprint const& footprint,
+            uint32_t x, uint32_t y, uint32_t z);
 
 
         static RangeSpec MakeExactMipSlice(uint32_t mip, uint32_t slice) noexcept

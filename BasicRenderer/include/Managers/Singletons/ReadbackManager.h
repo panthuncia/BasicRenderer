@@ -60,26 +60,31 @@ private:
             
         }
 
+        void ExecuteImmediate(ImmediateContext& context) override {
+            auto& readbackManager = ReadbackManager::GetInstance();
+            auto& readbacks = readbackManager.m_queuedReadbacks;
+            if (readbacks.empty()) {
+                return;
+            }
+            auto& commandList = context.list;
+            for (auto& readback : readbacks) {
+                if (readback.cubemap) {
+                    readbackManager.SaveCubemapToDDS(context.device, commandList, readback.texture, readback.outputFile, m_fenceValue);
+                }
+                else {
+                    readbackManager.SaveTextureToDDS(context.device, commandList, readback.texture.get(), readback.outputFile, m_fenceValue);
+                }
+            }
+		}
+
         PassReturn Execute(RenderContext& context) override {
             auto& readbackManager = ReadbackManager::GetInstance();
             auto& readbacks = readbackManager.m_queuedReadbacks;
-			if (readbacks.empty()) {
-				return { {} };
-			}
-            auto& commandList = context.commandList;
-            m_fenceValue++;
-			for (auto& readback : readbacks) {
-				if (readback.cubemap) {
-                    readbackManager.SaveCubemapToDDS(context.device, commandList, readback.texture, readback.outputFile, m_fenceValue);
-				}
-				else {
-                    readbackManager.SaveTextureToDDS(context.device, commandList, readback.texture.get(), readback.outputFile, m_fenceValue);
-				}
+            if (readbacks.empty()) {
+                return { {} };
             }
-            
-			// Clear the readbacks after processing
-			readbackManager.ClearReadbacks();
-
+            m_fenceValue++;
+            readbackManager.ClearReadbacks();
             return { m_readbackFence, m_fenceValue };
         }
 
@@ -100,10 +105,10 @@ private:
 		m_readbackPass = std::make_shared<ReadbackPass>();
     }
 
-    void SaveCubemapToDDS(rhi::Device& device, rhi::CommandList& commandList, std::shared_ptr<PixelBuffer> cubemap, const std::wstring& outputFile, UINT64 fenceValue);
+    void SaveCubemapToDDS(rhi::Device& device, rg::imm::ImmediateCommandList& commandList, std::shared_ptr<PixelBuffer> cubemap, const std::wstring& outputFile, UINT64 fenceValue);
     void SaveTextureToDDS(
         rhi::Device& device,
-        rhi::CommandList& commandList,
+        rg::imm::ImmediateCommandList& commandList,
         PixelBuffer* texture,
         const std::wstring& outputFile,
         uint64_t fenceValue);

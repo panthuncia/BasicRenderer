@@ -757,6 +757,18 @@ void RenderGraph::CompileStructural() {
 			aliasGroups.push_back(std::move(group));
 		}
 	}
+
+	// Readback pass inserted at end
+	auto readbackPass = ReadbackManager::GetInstance().GetReadbackPass();
+	if (readbackPass) { // This pass uses the immediate-mode API to perform readbacks
+		auto readbackBatch = PassBatch();
+		RenderPassAndResources readbackPassAndResources;
+		readbackPassAndResources.pass = readbackPass;
+		AnyPassAndResources readbackAnyPassAndResources;
+		readbackAnyPassAndResources.type = PassType::Render;
+		readbackAnyPassAndResources.pass = readbackPassAndResources;
+		m_masterPassList.push_back(readbackAnyPassAndResources);
+	}
 }
 
 static std::shared_ptr<Resource> ResolveThunk(void* user, ResourceIdentifier const& id, bool allowFailure) {
@@ -799,7 +811,7 @@ static bool RequirementsConflict(
 }
 
 
-void RenderGraph::CompileFrame() {
+void RenderGraph::CompileFrame(rhi::Device device) {
 	batches.clear();
 	m_framePasses.clear(); // Combined retained + immediate-mode passes for this frame
 	// initialize frame requirements to the retained requirements
@@ -827,14 +839,14 @@ void RenderGraph::CompileFrame() {
 			p.immediateBytecode.clear();
 			p.resources.frameResourceRequirements = p.resources.resourceRequirements;
 
-			rg::imm::ImmediateCommandList icl(
-				/*isRenderPass=*/false,
+			ImmediateContext c{ device, 
+				{/*isRenderPass=*/false,
 				m_immediateDispatch,
 				&ResolveThunk,
-				this);
-			ImmediateContext c{ icl };
+				this} };
+
 			p.pass->ExecuteImmediate(c);
-			auto immediateFrameData = icl.Finalize();
+			auto immediateFrameData = c.list.Finalize();
 
 			// If there is a conflict between retained and immediate requirements, split the pass
 			bool conflict = RequirementsConflict(
@@ -871,15 +883,14 @@ void RenderGraph::CompileFrame() {
 			p.immediateBytecode.clear();
 			p.resources.frameResourceRequirements = p.resources.resourceRequirements;
 
-			rg::imm::ImmediateCommandList icl(
-				/*isRenderPass=*/true,
+			ImmediateContext c{ device, 
+				{/*isRenderPass=*/true,
 				m_immediateDispatch,
 				&ResolveThunk,
-				this);
-
-			ImmediateContext c{ icl };
+				this} 
+			};
 			p.pass->ExecuteImmediate(c);
-			auto immediateFrameData = icl.Finalize();
+			auto immediateFrameData = c.list.Finalize();
 
 			bool conflict = RequirementsConflict(
 				p.resources.resourceRequirements,
@@ -911,7 +922,6 @@ void RenderGraph::CompileFrame() {
 			}
 		}
 	}
-
 
 	lastActiveSubresourceInAliasGroup.clear();
 	lastActiveSubresourceInAliasGroup.resize(aliasGroups.size());
@@ -955,15 +965,15 @@ void RenderGraph::CompileFrame() {
 	// Insert transitions to loop resources back to their initial states
 	ComputeResourceLoops();
 
-	// Readback pass in its own batch
-	auto readbackPass = ReadbackManager::GetInstance().GetReadbackPass();
-	if (readbackPass) {
-		auto readbackBatch = PassBatch();
-		RenderPassAndResources readbackPassAndResources; // ReadbackPass is a special-case pass which transitions resources internally
-		readbackPassAndResources.pass = readbackPass;
-		readbackBatch.renderPasses.push_back(readbackPassAndResources);
-		batches.push_back(readbackBatch);
-	}
+	//// Readback pass in its own batch
+	//auto readbackPass = ReadbackManager::GetInstance().GetReadbackPass();
+	//if (readbackPass) {
+	//	auto readbackBatch = PassBatch();
+	//	RenderPassAndResources readbackPassAndResources; // ReadbackPass is a special-case pass which transitions resources internally
+	//	readbackPassAndResources.pass = readbackPass;
+	//	readbackBatch.renderPasses.push_back(readbackPassAndResources);
+	//	batches.push_back(readbackBatch);
+	//}
 
 	// Cut out repeat waits on the same fence
 	uint64_t lastRenderWaitFenceValue = 0;
@@ -1279,7 +1289,8 @@ namespace {
 				}
 
 				statisticsManager.BeginQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);
-				auto passReturn = pr.pass->Execute(context);
+				rg::imm::Replay(pr.immediateBytecode, commandList); // Replay immediate-mode commands
+				auto passReturn = pr.pass->Execute(context); // Execute retained-mode commands
 				statisticsManager.EndQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);
 				if (passReturn.fence) {
 					externalFences.push_back(passReturn);
@@ -1302,7 +1313,7 @@ namespace {
 
 void RenderGraph::Execute(RenderContext& context) {
 
-	CompileFrame();
+	CompileFrame(context.device);
 
 	bool useAsyncCompute = m_getUseAsyncCompute();
 	auto& manager = DeviceManager::GetInstance();

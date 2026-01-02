@@ -131,7 +131,6 @@ public:
 	void Update();
 	void Execute(RenderContext& context);
 	void CompileStructural();
-	void CompileFrame();
 	void ResetForRecompile();
 	void Setup();
 	const std::vector<PassBatch>& GetBatches() const { return batches; }
@@ -257,6 +256,8 @@ private:
 	std::function<bool()> m_getUseAsyncCompute;
 
 	void AddResource(std::shared_ptr<Resource> resource, bool transition = false);
+
+	void CompileFrame(rhi::Device device);
 
 	void ComputeResourceLoops();
 	bool IsNewBatchNeeded(

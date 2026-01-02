@@ -43,5 +43,6 @@ struct RenderContext {
 };
 
 struct ImmediateContext {
+	rhi::Device device;
 	rg::imm::ImmediateCommandList list;
 };
