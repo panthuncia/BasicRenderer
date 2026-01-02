@@ -26,7 +26,8 @@ struct ComputePassParameters {
 	std::vector<std::pair<ResourceAndRange, ResourceState>> internalTransitions;
 
 	std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher> identifierSet;
-	std::vector<ResourceRequirement> resourceRequirements;
+	std::vector<ResourceRequirement> resourceRequirements; // Static resource requirements for the pass
+	std::vector<ResourceRequirement> frameResourceRequirements; // Resource requirements that may change each frame + static ones
 };
 
 class ComputePassBuilder;

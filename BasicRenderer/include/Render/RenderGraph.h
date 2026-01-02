@@ -28,13 +28,37 @@ struct IPassBuilder;
 template<typename T>
 concept DerivedResource = std::derived_from<T, Resource>;
 
+enum class PassRunMask : uint8_t;
+[[nodiscard]] constexpr PassRunMask operator|(PassRunMask a, PassRunMask b) noexcept;
+
+enum class PassRunMask : uint8_t {
+	None = 0,
+	Immediate = 1u << 0,
+	Retained = 1u << 1,
+	Both = Immediate | Retained
+};
+
+[[nodiscard]] constexpr PassRunMask operator|(PassRunMask a, PassRunMask b) noexcept {
+	return static_cast<PassRunMask>(
+		static_cast<uint8_t>(a) | static_cast<uint8_t>(b)
+		);
+}
+
 class RenderGraph {
 public:
+
+	inline bool Has(PassRunMask m, PassRunMask f) {
+		return (uint8_t(m) & uint8_t(f)) != 0;
+	}
+
 	struct RenderPassAndResources {
 		std::shared_ptr<RenderPass> pass;
 		RenderPassParameters resources;
 		std::string name;
 		int statisticsIndex = -1;
+
+		PassRunMask run = PassRunMask::Both; // default behavior
+		std::vector<std::byte> immediateBytecode;
 	};
 
 	struct ComputePassAndResources {
@@ -42,6 +66,9 @@ public:
 		ComputePassParameters resources;
 		std::string name;
 		int statisticsIndex = -1;
+
+		PassRunMask run = PassRunMask::Both;
+		std::vector<std::byte> immediateBytecode;
 	};
 
 	enum class CommandQueueType {
@@ -178,7 +205,8 @@ private:
 	std::unordered_map<std::string, std::unique_ptr<IPassBuilder>> m_passBuildersByName;
 	std::unordered_set<std::string> m_passNamesSeenThisReset;
 
-	std::vector<AnyPassAndResources> passes;
+	std::vector<AnyPassAndResources> m_masterPassList;
+	std::vector<AnyPassAndResources> m_framePasses;
 	std::unordered_map<std::string, std::shared_ptr<RenderPass>> renderPassesByName;
 	std::unordered_map<std::string, std::shared_ptr<ComputePass>> computePassesByName;
 	std::unordered_map<std::string, std::shared_ptr<Resource>> resourcesByName;
@@ -214,6 +242,8 @@ private:
 	rhi::TimelinePtr m_copyQueueFence;
 
 	std::unique_ptr<CommandRecordingManager> m_pCommandRecordingManager;
+
+	rg::imm::ImmediateDispatch m_immediateDispatch{};
 
 	UINT64 m_graphicsQueueFenceValue = 0;
 	UINT64 GetNextGraphicsQueueFenceValue() {

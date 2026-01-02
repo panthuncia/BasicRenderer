@@ -310,6 +310,16 @@ bool SymbolicTracker::WouldModify(RangeSpec want, ResourceState newState) const 
     return false;
 }
 
+std::vector<Segment> SymbolicTracker::Flatten(ResourceState const& skipState, bool includeSkipState) const {
+    std::vector<Segment> out;
+    out.reserve(_segs.size());
+    for (auto const& s : _segs) {
+        if (!includeSkipState && s.state == skipState) continue;
+        out.push_back(s);
+    }
+    return out;
+}
+
 const std::vector<Segment>& SymbolicTracker::GetSegments() const noexcept {
 	return _segs;
 }

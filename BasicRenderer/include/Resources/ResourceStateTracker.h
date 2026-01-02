@@ -102,5 +102,7 @@ public:
 
     bool WouldModify(RangeSpec want, ResourceState newState) const;
 
+    std::vector<Segment> Flatten(ResourceState const& skipState, bool includeSkipState = false) const;
+
     const std::vector<Segment>& GetSegments() const noexcept;
 };
