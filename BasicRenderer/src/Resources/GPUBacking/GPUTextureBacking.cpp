@@ -10,7 +10,7 @@
 #include "Managers/Singletons/UploadManager.h"
 #include "Resources/MemoryStatisticsComponents.h"
 
-void UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int mipLevels) {
+void UploadTextureData(Resource* dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int mipLevels) {
 
 	if (initialData.empty()) return;
 

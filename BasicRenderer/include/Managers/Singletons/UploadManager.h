@@ -10,9 +10,11 @@
 #include "Resources/ResourceStateTracker.h"
 #include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Render/ResourceRegistry.h"
+#include "RenderPasses/Base/RenderPass.h"
 
 class Buffer;
 class Resource;
+class ExternalBackingResource;
 
 #ifdef _DEBUG
 #define BUFFER_UPLOAD(data,size,res,offset) \
@@ -33,7 +35,7 @@ struct ResourceCopy {
 };
 
 struct DiscardBufferCopy {
-	std::unique_ptr<GpuBufferBacking> sourceOwned; // keeps old backing alive until executed
+	std::shared_ptr<ExternalBackingResource> sourceOwned; // keeps old backing alive until executed
 	SymbolicTracker 			sourceBarrierState; // Needed to transition old resource before copy
 	std::shared_ptr<Resource>         destination; // new resource
 	size_t                            size = 0;
@@ -104,7 +106,13 @@ public:
 	class TextureUpdate {
 	public:
 		TextureUpdate() = default;
-		rhi::BufferTextureCopyFootprint copy{};
+		Resource* texture;
+		uint32_t mip;
+		uint32_t slice;
+		rhi::CopyableFootprint footprint;
+		uint32_t x;
+		uint32_t y;
+		uint32_t z;
 		std::shared_ptr<Resource> uploadBuffer;
 #ifdef _DEBUG
 		const char* file{};
@@ -132,7 +140,7 @@ public:
 #else
 	void UploadData(const void* data, size_t size, UploadTarget resourceToUpdate, size_t dataBufferOffset);
 	void UploadTextureSubresources(
-		rhi::Resource& dstTexture,
+		Resource* dstTexture,
 		rhi::Format fmt,
 		uint32_t baseWidth,
 		uint32_t baseHeight,
@@ -142,19 +150,46 @@ public:
 		const rhi::helpers::SubresourceData* srcSubresources,
 		uint32_t srcCount);
 #endif	
-	void ProcessUploads(uint8_t frameIndex, rhi::Queue queue);
 	void QueueResourceCopy(const std::shared_ptr<Resource>& destination, const std::shared_ptr<Resource>& source, size_t size);
 	void QueueCopyAndDiscard(const std::shared_ptr<Resource>& destination,
 		std::unique_ptr<GpuBufferBacking> sourceToDiscard,
 		SymbolicTracker sourceBarrierState,
 		size_t size);
-	void ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue);
-	void ResetAllocators(uint8_t frameIndex);
 	void ProcessDeferredReleases(uint8_t frameIndex);
 	void SetUploadResolveContext(UploadResolveContext ctx) { m_ctx = ctx; }
 	void Cleanup();
 private:
+
+	class UploadPass : public RenderPass {
+	public:
+		UploadPass() {
+		}
+
+		void Setup() override {
+
+		}
+
+		void ExecuteImmediate(ImmediateContext& context) override {
+			UploadManager::GetInstance().ExecuteResourceCopies(context.frameIndex, context.list);
+			UploadManager::GetInstance().ProcessUploads(context.frameIndex, context.list);
+		}
+
+		PassReturn Execute(RenderContext& context) override {
+			
+		}
+
+		void Cleanup(RenderContext& context) override {
+			// Cleanup if necessary
+		}
+
+	private:
+	};
+
 	UploadManager() = default;
+
+	void ExecuteResourceCopies(uint8_t frameIndex, rg::imm::ImmediateCommandList& commandList);
+	void ProcessUploads(uint8_t frameIndex, rg::imm::ImmediateCommandList& commandList);
+
 	bool AllocateUploadRegion(size_t size, size_t alignment, std::shared_ptr<Resource>& outUploadBuffer, size_t& outOffset);
 
 	// Coalescing / last-write-wins helpers
@@ -188,9 +223,6 @@ private:
 	std::vector<size_t>           m_frameStart;      // size = numFramesInFlight
 
 	uint8_t m_numFramesInFlight = 0;
-	rhi::Queue m_commandQueue;
-	std::vector<rhi::CommandAllocatorPtr> m_commandAllocators;
-	std::vector<rhi::CommandListPtr> m_commandLists;
 
 	std::function<uint8_t()> getNumFramesInFlight;
 	std::vector<ResourceUpdate> m_resourceUpdates;
@@ -200,6 +232,8 @@ private:
 	std::vector<DiscardBufferCopy> queuedDiscardCopies;
 
 	UploadResolveContext m_ctx{};
+
+	friend class UploadPass;
 };
 
 inline UploadManager& UploadManager::GetInstance() {

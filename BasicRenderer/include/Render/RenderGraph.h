@@ -212,6 +212,7 @@ private:
 	std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
 	std::unordered_map<uint64_t, uint64_t> independantlyManagedResourceToGroup;
 	std::vector<std::shared_ptr<ResourceGroup>> resourceGroups;
+	std::unordered_set<std::shared_ptr<Resource>> m_ephemeralExternalResources; // Resources that should be discarded after executing the graph
 
 	std::unordered_map<uint64_t, std::unordered_set<uint64_t>> aliasedResources; // Tracks resources that use the same memory
 	std::unordered_map<uint64_t, size_t> resourceToAliasGroup;
@@ -257,7 +258,7 @@ private:
 
 	void AddResource(std::shared_ptr<Resource> resource, bool transition = false);
 
-	void CompileFrame(rhi::Device device);
+	void CompileFrame(rhi::Device device, uint32_t frameIndex);
 
 	void ComputeResourceLoops();
 	bool IsNewBatchNeeded(

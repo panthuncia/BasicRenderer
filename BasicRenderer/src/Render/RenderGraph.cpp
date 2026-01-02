@@ -14,6 +14,7 @@
 #include "Managers/Singletons/StatisticsManager.h"
 #include "Managers/CommandRecordingManager.h"
 #include "Interfaces/IHasMemoryMetadata.h"
+#include "Resources/ExternalBackingResource.h"
 
 // BFS over alias and group/child relationships to get all relevant IDs
 std::vector<uint64_t> RenderGraph::ExpandSchedulingIDs(uint64_t id) const {
@@ -586,8 +587,17 @@ void RenderGraph::ProcessResourceRequirements(
 	for (auto& resourceRequirement : resourceRequirements) {
 
 		if (!resourcesByID.contains(resourceRequirement.resourceAndRange.resource->GetGlobalResourceID())) {
-			spdlog::error("Resource referenced by pass is not managed by this graph");
-			throw(std::runtime_error("Resource referenced is not managed by this graph"));
+			// If this is an ephemeral external resource, we can allow it
+			if (auto cast = std::dynamic_pointer_cast<ExternalBackingResource>(resourceRequirement.resourceAndRange.resource); cast) {
+				if (!m_ephemeralExternalResources.contains(cast)) {
+					AddResource(resourceRequirement.resourceAndRange.resource);
+					m_ephemeralExternalResources.insert(cast);
+				}
+			}
+			else {
+				spdlog::error("Resource referenced by pass is not managed by this graph");
+				throw(std::runtime_error("Resource referenced is not managed by this graph"));
+			}
 		}
 
 		const auto& id = resourceRequirement.resourceAndRange.resource->GetGlobalResourceID();
@@ -811,7 +821,7 @@ static bool RequirementsConflict(
 }
 
 
-void RenderGraph::CompileFrame(rhi::Device device) {
+void RenderGraph::CompileFrame(rhi::Device device, uint32_t frameIndex) {
 	batches.clear();
 	m_framePasses.clear(); // Combined retained + immediate-mode passes for this frame
 	// initialize frame requirements to the retained requirements
@@ -843,7 +853,9 @@ void RenderGraph::CompileFrame(rhi::Device device) {
 				{/*isRenderPass=*/false,
 				m_immediateDispatch,
 				&ResolveThunk,
-				this} };
+				this},
+				frameIndex
+			};
 
 			p.pass->ExecuteImmediate(c);
 			auto immediateFrameData = c.list.Finalize();
@@ -887,7 +899,8 @@ void RenderGraph::CompileFrame(rhi::Device device) {
 				{/*isRenderPass=*/true,
 				m_immediateDispatch,
 				&ResolveThunk,
-				this} 
+				this},
+				frameIndex
 			};
 			p.pass->ExecuteImmediate(c);
 			auto immediateFrameData = c.list.Finalize();
@@ -1313,7 +1326,7 @@ namespace {
 
 void RenderGraph::Execute(RenderContext& context) {
 
-	CompileFrame(context.device);
+	CompileFrame(context.device, context.frameIndex);
 
 	bool useAsyncCompute = m_getUseAsyncCompute();
 	auto& manager = DeviceManager::GetInstance();
@@ -1454,6 +1467,14 @@ void RenderGraph::Execute(RenderContext& context) {
 	crm->Flush(QueueKind::Graphics, { false, 0 });
 	crm->Flush(QueueKind::Compute, { false, 0 });
 	crm->EndFrame();
+
+	// After the frame, clean up ephemeral resources
+	// Remove from: ResourcesById, trackers
+	for (auto& res : m_ephemeralExternalResources) {
+		resourcesByID.erase(res->GetGlobalResourceID());
+		trackers.erase(res->GetGlobalResourceID());
+	}
+	m_ephemeralExternalResources.clear();
 }
 
 bool RenderGraph::IsNewBatchNeeded(

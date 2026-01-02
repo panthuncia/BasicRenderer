@@ -236,6 +236,10 @@ namespace rg::imm {
         {
         }
 
+		// No copy constructor
+		ImmediateCommandList(ImmediateCommandList const&) = delete;
+		ImmediateCommandList& operator=(ImmediateCommandList const&) = delete;
+
         void Reset();
 
         // API: resources can be ResourceIdentifier or Resource*
