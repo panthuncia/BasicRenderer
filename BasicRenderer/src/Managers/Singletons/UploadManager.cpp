@@ -328,12 +328,12 @@ void UploadManager::UploadData(const void* data, size_t size, UploadTarget resou
 	for (USHORT i = 0; i < captured; i++) update.stack[i] = frames[i];
 #endif
 #endif
-	m_resourceUpdates.push_back(update);
 	ApplyLastWriteWins(update);
 
 	if (!update.active) {
 		return;
 	}
+
 	// contiguous append coalescing against the most recent active update.
 	for (int i = static_cast<int>(m_resourceUpdates.size()) - 1; i >= 0; --i) {
 		auto& last = m_resourceUpdates[static_cast<size_t>(i)];
@@ -341,12 +341,12 @@ void UploadManager::UploadData(const void* data, size_t size, UploadTarget resou
 			continue;
 		}
 		if (TryCoalesceAppend(last, update)) {
-			return;
+			return; // merged into 'last'
 		}
 		break;
 	}
 
-	m_resourceUpdates.push_back(update);
+	m_resourceUpdates.push_back(std::move(update));
 }
 
 #ifdef _DEBUG

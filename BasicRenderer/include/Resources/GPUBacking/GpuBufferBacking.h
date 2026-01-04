@@ -48,12 +48,18 @@ public:
 		m_bufferAllocation.ApplyComponentBundle(bundle);
 	}
 
+	SymbolicTracker* GetStateTracker() {
+		return &m_stateTracker;
+	}
+
 private:
 #if BUILD_TYPE == BUILD_DEBUG
 	std::stacktrace m_creation;
 #endif
 	size_t m_size = 0;
 	rhi::BufferBarrier m_barrier = {};
+
+	SymbolicTracker m_stateTracker;
 
 	GpuBufferBacking(
 		rhi::HeapType accessType,

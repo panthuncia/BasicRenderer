@@ -53,6 +53,10 @@ public:
         return m_globalResourceID;
 	}
 
+    SymbolicTracker* GetStateTracker() override {
+        return resource->GetStateTracker();
+    }
+
 protected:
     void OnSetName() override {
         if (resource) {
@@ -102,7 +106,9 @@ public:
     bool HasResource() const {
         return m_resource != nullptr;
     }
-
+    SymbolicTracker* GetStateTracker() override {
+        return m_resource->GetStateTracker();
+    }
 protected:
     void OnSetName() override {
         if (m_resource) {

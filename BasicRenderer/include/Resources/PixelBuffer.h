@@ -54,6 +54,10 @@ public:
         m_backing->ApplyMetadataComponentBundle(bundle);
     }
 
+    SymbolicTracker* GetStateTracker() override {
+        return m_backing->GetStateTracker();
+    }
+
 private:
     PixelBuffer(const TextureDescription& desc,
         const std::vector<const stbi_uc*>& initialData = {})

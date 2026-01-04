@@ -85,6 +85,10 @@ public:
         m_dataBuffer->ApplyMetadataComponentBundle(bundle);
     }
 
+    SymbolicTracker* GetStateTracker() override {
+        return m_dataBuffer->GetStateTracker();
+    }
+
 protected:
 
     rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {

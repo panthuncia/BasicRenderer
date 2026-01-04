@@ -47,7 +47,9 @@ public:
 		spdlog::error("ResourceGroup::GetAPIResource() should never be called, as it is not a single resource.");
 		throw std::runtime_error("ResourceGroup::GetAPIResource() should never be called, as it is not a single resource.");
 	}
-
+	SymbolicTracker* GetStateTracker() override {
+		return &m_stateTracker;
+	}
 protected:
 
 	rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
@@ -114,6 +116,8 @@ protected:
 	std::vector<rhi::BarrierBatch>   m_childBatches;
 
 private:
+
+	SymbolicTracker m_stateTracker;
 
 	void InitializeForGraph() {
 		standardTransitionResources.clear();

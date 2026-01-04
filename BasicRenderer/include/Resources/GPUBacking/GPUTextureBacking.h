@@ -67,6 +67,9 @@ public:
 		return m_arraySize;
 	}
 
+	SymbolicTracker* GetStateTracker() {
+		return &m_stateTracker;
+	}
 private:
 #if BUILD_TYPE == BUILD_DEBUG
 	std::stacktrace m_creation;
@@ -101,6 +104,8 @@ private:
 
     // Enhanced barriers
 	rhi::TextureBarrier m_barrier = {};
+
+	SymbolicTracker m_stateTracker;
 
 	unsigned int m_internalWidth = 0; // Internal width, used for padding textures to power of two
 	unsigned int m_internalHeight = 0; // Internal height, used for padding textures to power of two

@@ -8,10 +8,11 @@
 #include <rhi.h>
 #include <flecs.h>
 
-#include "Resources/ResourceStateTracker.h"
 #include "Managers/Singletons/ECSManager.h"
+#include "Resources/ResourceStateTracker.h"
 
 struct RenderContext;
+class SymbolicTracker;
 
 class Resource : public std::enable_shared_from_this<Resource> {
 public:
@@ -52,9 +53,7 @@ public:
 		return std::make_pair(mip, slice);
 	}
 
-	virtual SymbolicTracker* GetStateTracker() {
-		return &m_stateTracker;
-	}
+	virtual SymbolicTracker* GetStateTracker() = 0;
 	flecs::entity& GetECSEntity() {
 		return m_ecsEntity;
 	}
@@ -73,7 +72,6 @@ private:
     bool m_uploadInProgress = false;
     inline static std::atomic<uint64_t> globalResourceCount;
     uint64_t m_globalResourceID;
-	SymbolicTracker m_stateTracker;
 	flecs::entity m_ecsEntity; // For access through ECS queries
 
     //friend class RenderGraph;
