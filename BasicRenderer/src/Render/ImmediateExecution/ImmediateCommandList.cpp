@@ -172,9 +172,9 @@ namespace rg::imm {
         }
 
         CopyBufferRegionCmd cmd;
-        cmd.dst = m_dispatch.GetResourceHandle(dst.handle);
+        cmd.dst = m_dispatch.GetResourceHandle(m_dispatch.user, dst.handle);
         cmd.dstOffset = dstOffset;
-        cmd.src = m_dispatch.GetResourceHandle(src.handle);
+        cmd.src = m_dispatch.GetResourceHandle(m_dispatch.user, src.handle);
         cmd.srcOffset = srcOffset;
         cmd.numBytes = numBytes;
 
@@ -202,7 +202,7 @@ namespace rg::imm {
         const bool any = ForEachMipSlice(target.handle, range,
             [&](uint32_t /*mip*/, uint32_t /*slice*/, RangeSpec exact)
             {
-                const rhi::DescriptorSlot rtv = m_dispatch.GetRTV(target.handle, exact);
+                const rhi::DescriptorSlot rtv = m_dispatch.GetRTV(m_dispatch.user, target.handle, exact);
                 RequireValidSlot(rtv, "RTV");
 
                 ClearRTVCmd cmd{};
@@ -234,7 +234,7 @@ namespace rg::imm {
         const bool any = ForEachMipSlice(target.handle, range,
             [&](uint32_t /*mip*/, uint32_t /*slice*/, RangeSpec exact)
             {
-                const rhi::DescriptorSlot dsv = m_dispatch.GetDSV(target.handle, exact);
+                const rhi::DescriptorSlot dsv = m_dispatch.GetDSV(m_dispatch.user, target.handle, exact);
                 RequireValidSlot(dsv, "DSV");
 
                 ClearDSVCmd cmd{};
@@ -268,7 +268,7 @@ namespace rg::imm {
                 ClearUavFloatCmd cmd{};
                 cmd.value = value;
 
-                if (!m_dispatch.GetUavClearInfo(target.handle, exact, cmd.info)) {
+                if (!m_dispatch.GetUavClearInfo(m_dispatch.user, target.handle, exact, cmd.info)) {
                     throw std::runtime_error("Immediate clear: GetUavClearInfo failed");
                 }
 
@@ -299,7 +299,7 @@ namespace rg::imm {
                 ClearUavUintCmd cmd{};
                 cmd.value = value;
 
-                if (!m_dispatch.GetUavClearInfo(target.handle, exact, cmd.info)) {
+                if (!m_dispatch.GetUavClearInfo(m_dispatch.user, target.handle, exact, cmd.info)) {
                     throw std::runtime_error("Immediate clear: GetUavClearInfo failed");
                 }
 
@@ -325,7 +325,7 @@ namespace rg::imm {
         }
 
         CopyTextureRegionCmd cmd{};
-        cmd.dst.texture = m_dispatch.GetResourceHandle(dst.handle);
+        cmd.dst.texture = m_dispatch.GetResourceHandle(m_dispatch.user, dst.handle);
         cmd.dst.mip = dstMip;
         cmd.dst.arraySlice = dstSlice;
         cmd.dst.x = dstX; cmd.dst.y = dstY; cmd.dst.z = dstZ;
@@ -333,7 +333,7 @@ namespace rg::imm {
         cmd.dst.height = height;
         cmd.dst.depth = depth;
 
-        cmd.src.texture = m_dispatch.GetResourceHandle(src.handle);
+        cmd.src.texture = m_dispatch.GetResourceHandle(m_dispatch.user, src.handle);
         cmd.src.mip = srcMip;
         cmd.src.arraySlice = srcSlice;
         cmd.src.x = srcX; cmd.src.y = srcY; cmd.src.z = srcZ;
@@ -359,8 +359,8 @@ namespace rg::imm {
         }
 
         CopyTextureToBufferCmd cmd{};
-        cmd.region.texture = m_dispatch.GetResourceHandle(texture.handle);
-        cmd.region.buffer = m_dispatch.GetResourceHandle(buffer.handle);
+        cmd.region.texture = m_dispatch.GetResourceHandle(m_dispatch.user, texture.handle);
+        cmd.region.buffer = m_dispatch.GetResourceHandle(m_dispatch.user, buffer.handle);
         cmd.region.mip = mip;
         cmd.region.arraySlice = slice;
         cmd.region.x = x; cmd.region.y = y; cmd.region.z = z;
@@ -385,8 +385,8 @@ namespace rg::imm {
         }
 
         CopyBufferToTextureCmd cmd{};
-        cmd.region.texture = m_dispatch.GetResourceHandle(texture.handle);
-        cmd.region.buffer = m_dispatch.GetResourceHandle(buffer.handle);
+        cmd.region.texture = m_dispatch.GetResourceHandle(m_dispatch.user, texture.handle);
+        cmd.region.buffer = m_dispatch.GetResourceHandle(m_dispatch.user, buffer.handle);
         cmd.region.mip = mip;
         cmd.region.arraySlice = slice;
         cmd.region.x = x; cmd.region.y = y; cmd.region.z = z;

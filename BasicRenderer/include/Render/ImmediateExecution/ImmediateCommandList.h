@@ -17,6 +17,8 @@
 #include "Resources/Resource.h"
 #include "Resources/GloballyIndexedResource.h"
 
+class RenderGraph;
+
 namespace rg::imm {
 
     // RenderGraph provides these thunks so the immediate list can resolve identifiers
@@ -29,78 +31,16 @@ namespace rg::imm {
     // Replay then needs only the RHI command list + bytecode stream.
 
     struct ImmediateDispatch {
-        rhi::ResourceHandle(*GetResourceHandle)(ResourceRegistry::RegistryHandle r) noexcept = nullptr;
+        RenderGraph* user = nullptr;
+        rhi::ResourceHandle(*GetResourceHandle)(RenderGraph* user, ResourceRegistry::RegistryHandle r) noexcept = nullptr;
 
         // These expect RangeSpec that resolves to (at least) one mip/slice.
-        rhi::DescriptorSlot(*GetRTV)(ResourceRegistry::RegistryHandle r, RangeSpec range) noexcept = nullptr;
-        rhi::DescriptorSlot(*GetDSV)(ResourceRegistry::RegistryHandle r, RangeSpec range) noexcept = nullptr;
+        rhi::DescriptorSlot(*GetRTV)(RenderGraph* user, ResourceRegistry::RegistryHandle r, RangeSpec range) noexcept = nullptr;
+        rhi::DescriptorSlot(*GetDSV)(RenderGraph* user, ResourceRegistry::RegistryHandle r, RangeSpec range) noexcept = nullptr;
 
         // Returns false if the resource can't provide the required UAV clear info.
-        bool (*GetUavClearInfo)(ResourceRegistry::RegistryHandle r, RangeSpec range, rhi::UavClearInfo& out) noexcept = nullptr;
+        bool (*GetUavClearInfo)(RenderGraph* user, ResourceRegistry::RegistryHandle r, RangeSpec range, rhi::UavClearInfo& out) noexcept = nullptr;
     };
-
-    inline bool ResolveFirstMipSlice(ResourceRegistry::RegistryHandle r, RangeSpec range, uint32_t& outMip, uint32_t& outSlice) noexcept
-    {
-        const uint32_t totalMips = r.GetNumMipLevels();
-        const uint32_t totalSlices = r.GetArraySize();
-        if (totalMips == 0 || totalSlices == 0) return false;
-
-        SubresourceRange sr = ResolveRangeSpec(range, totalMips, totalSlices);
-        if (sr.isEmpty()) return false;
-
-        outMip = sr.firstMip;
-        outSlice = sr.firstSlice;
-        return true;
-    }
-
-    inline ImmediateDispatch MakeDefaultImmediateDispatch() noexcept
-    {
-        ImmediateDispatch d{};
-
-        d.GetResourceHandle = +[](ResourceRegistry::RegistryHandle r) noexcept -> rhi::ResourceHandle {
-            return r.GetAPIResource().GetHandle();
-            };
-
-        d.GetRTV = +[](Resource& r, RangeSpec range) noexcept -> rhi::DescriptorSlot {
-            auto* gir = dynamic_cast<GloballyIndexedResource*>(&r);
-            if (!gir || !gir->HasRTV()) return {};
-
-            uint32_t mip = 0, slice = 0;
-            if (!ResolveFirstMipSlice(r, range, mip, slice)) return {};
-
-            return gir->GetRTVInfo(mip, slice).slot;
-            };
-
-        d.GetDSV = +[](Resource& r, RangeSpec range) noexcept -> rhi::DescriptorSlot {
-            auto* gir = dynamic_cast<GloballyIndexedResource*>(&r);
-            if (!gir || !gir->HasDSV()) return {};
-
-            uint32_t mip = 0, slice = 0;
-            if (!ResolveFirstMipSlice(r, range, mip, slice)) return {};
-
-            return gir->GetDSVInfo(mip, slice).slot;
-            };
-
-        d.GetUavClearInfo = +[](Resource& r, RangeSpec range, rhi::UavClearInfo& out) noexcept -> bool {
-            auto* gir = dynamic_cast<GloballyIndexedResource*>(&r);
-
-            // DX12 path requires both a shader-visible and CPU-visible UAV descriptor.
-            if (!gir || !gir->HasUAVShaderVisible() || !gir->HasUAVNonShaderVisible()) return false;
-
-            uint32_t mip = 0, slice = 0;
-            if (!ResolveFirstMipSlice(r, range, mip, slice)) return false;
-
-            out.shaderVisible = gir->GetUAVShaderVisibleInfo(mip, slice).slot;
-            out.cpuVisible = gir->GetUAVNonShaderVisibleInfo(mip, slice).slot;
-
-            out.resource = r.GetAPIResource();
-
-            return true;
-            };
-
-        return d;
-    }
-
 
     enum class Op : uint8_t {
         CopyBufferRegion = 1,

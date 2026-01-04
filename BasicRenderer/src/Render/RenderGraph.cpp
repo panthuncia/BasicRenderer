@@ -605,9 +605,74 @@ void RenderGraph::ProcessResourceRequirements(
 	}
 }
 
+bool ResolveFirstMipSlice(ResourceRegistry::RegistryHandle r, RangeSpec range, uint32_t& outMip, uint32_t& outSlice) noexcept
+{
+	const uint32_t totalMips = r.GetNumMipLevels();
+	const uint32_t totalSlices = r.GetArraySize();
+	if (totalMips == 0 || totalSlices == 0) return false;
+
+	SubresourceRange sr = ResolveRangeSpec(range, totalMips, totalSlices);
+	if (sr.isEmpty()) return false;
+
+	outMip = sr.firstMip;
+	outSlice = sr.firstSlice;
+	return true;
+}
+
 RenderGraph::RenderGraph() {
 	UploadManager::GetInstance().SetUploadResolveContext({ &_registry });
-	m_immediateDispatch = rg::imm::MakeDefaultImmediateDispatch();
+
+	auto MakeDefaultImmediateDispatch = [&]() noexcept -> rg::imm::ImmediateDispatch
+		{
+			rg::imm::ImmediateDispatch d{};
+			d.user = this;
+
+			d.GetResourceHandle = [](RenderGraph* user, ResourceRegistry::RegistryHandle r) noexcept -> rhi::ResourceHandle {
+				auto ptr = user->_registry.Resolve(r);
+				return ptr->GetAPIResource().GetHandle();
+				};
+
+			d.GetRTV = +[](RenderGraph* user, ResourceRegistry::RegistryHandle r, RangeSpec range) noexcept -> rhi::DescriptorSlot {
+				auto* gir = dynamic_cast<GloballyIndexedResource*>(user->_registry.Resolve(r));
+				if (!gir || !gir->HasRTV()) return {};
+
+				uint32_t mip = 0, slice = 0;
+				if (!ResolveFirstMipSlice(r, range, mip, slice)) return {};
+
+				return gir->GetRTVInfo(mip, slice).slot;
+				};
+
+			d.GetDSV = +[](RenderGraph* user, ResourceRegistry::RegistryHandle r, RangeSpec range) noexcept -> rhi::DescriptorSlot {
+				auto* gir = dynamic_cast<GloballyIndexedResource*>(user->_registry.Resolve(r));
+				if (!gir || !gir->HasDSV()) return {};
+
+				uint32_t mip = 0, slice = 0;
+				if (!ResolveFirstMipSlice(r, range, mip, slice)) return {};
+
+				return gir->GetDSVInfo(mip, slice).slot;
+				};
+
+			d.GetUavClearInfo = +[](RenderGraph* user, ResourceRegistry::RegistryHandle r, RangeSpec range, rhi::UavClearInfo& out) noexcept -> bool {
+				auto* gir = dynamic_cast<GloballyIndexedResource*>(user->_registry.Resolve(r));
+
+				// DX12 path requires both a shader-visible and CPU-visible UAV descriptor.
+				if (!gir || !gir->HasUAVShaderVisible() || !gir->HasUAVNonShaderVisible()) return false;
+
+				uint32_t mip = 0, slice = 0;
+				if (!ResolveFirstMipSlice(r, range, mip, slice)) return false;
+
+				out.shaderVisible = gir->GetUAVShaderVisibleInfo(mip, slice).slot;
+				out.cpuVisible = gir->GetUAVNonShaderVisibleInfo(mip, slice).slot;
+
+				out.resource = gir->GetAPIResource();
+
+				return true;
+				};
+
+			return d;
+		};
+
+	m_immediateDispatch = MakeDefaultImmediateDispatch();
 }
 
 RenderGraph::~RenderGraph() {
