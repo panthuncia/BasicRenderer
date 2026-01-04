@@ -62,10 +62,10 @@ public:
 		enum class Kind { RegistryHandle, PinnedShared };
 
 		Kind kind{};
-		ResourceRegistry::ResourceHandle h{};
+		ResourceRegistry::RegistryHandle h{};
 		std::shared_ptr<Resource> pinned{};   // keep-alive for non-registry targets
 
-		static UploadTarget FromHandle(ResourceRegistry::ResourceHandle handle) { // registry lookup
+		static UploadTarget FromHandle(ResourceRegistry::RegistryHandle handle) { // registry lookup
 			UploadTarget t; t.kind = Kind::RegistryHandle; t.h = handle; return t;
 		}
 		static UploadTarget FromShared(std::shared_ptr<Resource> p) { // keep-alive
@@ -74,8 +74,14 @@ public:
 
 		bool operator ==(const UploadTarget& other) const {
 			if (kind != other.kind) return false;
-			if (kind == Kind::RegistryHandle) return h.key.idx == other.h.key.idx && h.generation == other.h.generation && h.epoch == other.h.epoch;
-			else return pinned == other.pinned;
+			if (kind == Kind::RegistryHandle) {
+				return h.GetKey().idx == other.h.GetKey().idx && 
+					h.GetGeneration() == other.h.GetGeneration() && 
+					h.GetEpoch() == other.h.GetEpoch();
+			}
+			else {
+				return pinned == other.pinned;
+			}
 		}
 	};
 

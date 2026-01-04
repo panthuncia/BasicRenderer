@@ -156,7 +156,7 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
 		.Build<RewriteOccluderMeshletVisibilityPass>();
 
     // We need to draw occluder shadows early
-    auto drawShadows = graph->RequestResource(Builtin::Shadows::ShadowMaps) != nullptr && shadowsEnabled;
+    auto drawShadows = graph->RequestResourcePtr(Builtin::Shadows::ShadowMaps) != nullptr && shadowsEnabled;
     if (drawShadows) {
         graph->BuildRenderPass("OccluderShadowPrepass")
             .Build<ShadowPass>(ShadowPassInputs{ wireframeEnabled, meshShadersEnabled, true, false, true });
@@ -416,14 +416,14 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
     // Bindless indices
     gtaoInfo.g_samplerPointClampDescriptorIndex = samplerIndex;
 
-	auto workingDepths = graph->RequestResource<PixelBuffer>(Builtin::GTAO::WorkingDepths);
-	auto workingEdges = graph->RequestResource<PixelBuffer>(Builtin::GTAO::WorkingEdges);
-	auto workingAOTerm1 = graph->RequestResource<PixelBuffer>(Builtin::GTAO::WorkingAOTerm1);
-	auto outputAO = graph->RequestResource<PixelBuffer>(Builtin::GTAO::OutputAOTerm);
-	auto normalsWorldSpace = graph->RequestResource<PixelBuffer>(Builtin::GBuffer::Normals);
+	auto workingDepths = graph->RequestResourcePtr<PixelBuffer>(Builtin::GTAO::WorkingDepths);
+	auto workingEdges = graph->RequestResourcePtr<PixelBuffer>(Builtin::GTAO::WorkingEdges);
+	auto workingAOTerm1 = graph->RequestResourcePtr<PixelBuffer>(Builtin::GTAO::WorkingAOTerm1);
+	auto outputAO = graph->RequestResourcePtr<PixelBuffer>(Builtin::GTAO::OutputAOTerm);
+	auto normalsWorldSpace = graph->RequestResourcePtr<PixelBuffer>(Builtin::GBuffer::Normals);
 
     // Filter pass
-    gtaoInfo.g_srcRawDepthDescriptorIndex = graph->RequestResource<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture)->GetSRVInfo(0).slot.index;
+    gtaoInfo.g_srcRawDepthDescriptorIndex = graph->RequestResourcePtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture)->GetSRVInfo(0).slot.index;
     gtaoInfo.g_outWorkingDepthMIP0DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(0).slot.index;
     gtaoInfo.g_outWorkingDepthMIP1DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(1).slot.index;
     gtaoInfo.g_outWorkingDepthMIP2DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(2).slot.index;
@@ -432,7 +432,7 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
 
     // Main pass
     gtaoInfo.g_srcWorkingDepthDescriptorIndex = workingDepths->GetSRVInfo(0).slot.index;
-    gtaoInfo.g_srcNormalmapDescriptorIndex = graph->RequestResource<PixelBuffer>(Builtin::GBuffer::Normals)->GetSRVInfo(0).slot.index;
+    gtaoInfo.g_srcNormalmapDescriptorIndex = graph->RequestResourcePtr<PixelBuffer>(Builtin::GBuffer::Normals)->GetSRVInfo(0).slot.index;
     // TODO: Hilbert lookup table
     gtaoInfo.g_outWorkingAOTermDescriptorIndex = workingAOTerm1->GetUAVShaderVisibleInfo(0).slot.index;
     gtaoInfo.g_outWorkingEdgesDescriptorIndex = workingEdges->GetUAVShaderVisibleInfo(0).slot.index;

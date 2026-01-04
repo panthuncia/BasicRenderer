@@ -143,12 +143,15 @@ public:
 
 	void RegisterProvider(IResourceProvider* prov);
 	void RegisterResource(ResourceIdentifier id, std::shared_ptr<Resource> resource, IResourceProvider* provider = nullptr);
-	std::shared_ptr<Resource> RequestResource(ResourceIdentifier const& rid, bool allowFailure = false);
+	std::shared_ptr<Resource> RequestResourcePtr(ResourceIdentifier const& rid, bool allowFailure = false);
+	ResourceRegistry::RegistryHandle RequestResourceHandle(ResourceIdentifier const& rid, bool allowFailure = false);
+	ResourceRegistry::RegistryHandle RequestResourceHandle(Resource* const& pResource, bool allowFailure = false);
+
 	void RegisterECSRenderPhaseEntities(const std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher>& phaseEntities);
 
 	template<DerivedResource T>
-	std::shared_ptr<T> RequestResource(ResourceIdentifier const& rid, bool allowFailure = false) {
-		auto basePtr = RequestResource(rid, allowFailure);
+	std::shared_ptr<T> RequestResourcePtr(ResourceIdentifier const& rid, bool allowFailure = false) {
+		auto basePtr = RequestResourcePtr(rid, allowFailure);
 
 		if (!basePtr) {
 			if (allowFailure) {
@@ -210,6 +213,7 @@ private:
 	std::unordered_map<std::string, std::shared_ptr<ComputePass>> computePassesByName;
 	std::unordered_map<std::string, std::shared_ptr<Resource>> resourcesByName;
 	std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
+	std::unordered_set<uint64_t> resourceGroupIDs;
 	std::unordered_map<uint64_t, uint64_t> independantlyManagedResourceToGroup;
 	std::vector<std::shared_ptr<ResourceGroup>> resourceGroups;
 
@@ -262,7 +266,7 @@ private:
 	void ComputeResourceLoops();
 	bool IsNewBatchNeeded(
 		const std::vector<ResourceRequirement>& reqs,
-		const std::vector<std::pair<ResourceAndRange, ResourceState>> passInternalTransitions,
+		const std::vector<std::pair<ResourceHandleAndRange, ResourceState>> passInternalTransitions,
 		const std::unordered_map<uint64_t, SymbolicTracker*>& passBatchTrackers,
 		const std::unordered_set<uint64_t>& currentBatchInternallyTransitionedResources,
 		const std::unordered_set<uint64_t>& currentBatchAllResources,
@@ -431,7 +435,7 @@ private:
 	struct PassView {
 		bool isCompute = false;
 		std::vector<ResourceRequirement>* reqs = nullptr;
-		std::vector<std::pair<ResourceAndRange, ResourceState>>* internalTransitions = nullptr;
+		std::vector<std::pair<ResourceHandleAndRange, ResourceState>>* internalTransitions = nullptr;
 	};
 
 	struct Node {

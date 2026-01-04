@@ -73,7 +73,7 @@ public:
 private:
 
 	Buffer* m_pLightPagesCounter = nullptr;
-	ResourceRegistry::ResourceHandle m_lightPagesCounterHandle;
+	ResourceRegistry::RegistryHandle m_lightPagesCounterHandle;
 
 	void CreatePSO() {
 		m_PSO = PSOManager::GetInstance().MakeComputePipeline(

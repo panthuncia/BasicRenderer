@@ -349,7 +349,7 @@ private:
 	uint64_t m_numPPLLNodes;
 
 	PixelBuffer* m_PPLLHeadPointerTexture;
-	ResourceRegistry::ResourceHandle m_PPLLCounterHandle;
+	ResourceRegistry::RegistryHandle m_PPLLCounterHandle;
 	Buffer* m_PPLLCounter;
 
 	DynamicGloballyIndexedResource* m_primaryCameraMeshletBitfield = nullptr;

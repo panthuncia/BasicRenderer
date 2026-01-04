@@ -5,12 +5,16 @@
 #include <vector>
 #include <stdexcept>
 #include <functional>
+#include <unordered_map>
+#include <optional>
 
-#include "Interfaces/IResourceResolver.h"
+#include "Resources/Resource.h"
+#include "Resources/ResourceStateTracker.h"
 
 class Resource;
 using OnResourceChangedFn = std::function<void(ResourceIdentifier, std::shared_ptr<Resource>)>;
 
+// TODO: Actually use Epoch?
 class ResourceRegistry {
 
     struct ResourceKey {
@@ -32,10 +36,39 @@ class ResourceRegistry {
 
 public:
 
-    struct ResourceHandle {
-        ResourceKey key{};
+    class RegistryHandle {
+    public:
+		RegistryHandle(ResourceKey k, 
+            uint32_t gen, 
+            uint64_t ep, 
+            uint64_t globalIdx,
+            SymbolicTracker* tracker,
+            uint32_t numMips = 0, 
+            uint32_t arraySz = 0)
+            : key(k),
+    	generation(gen), 
+        tracker(tracker),
+    	epoch(ep), 
+    	globalResourceIndex(globalIdx),
+    	numMipLevels(numMips), 
+    	arraySize(arraySz) {}
+		RegistryHandle() = default;
+    	const ResourceKey& GetKey() const { return key; }
+        uint32_t GetGeneration() const { return generation; }
+        uint64_t GetEpoch() const { return epoch; }
+        uint64_t GetGlobalResourceID() const { return globalResourceIndex; }
+        uint32_t GetNumMipLevels() const { return numMipLevels; }
+        uint32_t GetArraySize() const { return arraySize; }
+		SymbolicTracker* GetStateTracker() const { return tracker; }
+    private:
+    	ResourceKey key{};
         uint32_t generation = 0;   // for stale detection
+        SymbolicTracker* tracker;
         uint64_t epoch = 0;
+        uint64_t globalResourceIndex; // For convenience
+
+        uint32_t numMipLevels;
+        uint32_t arraySize;
     };
 
     ResourceKey InternKey(ResourceIdentifier const& id) {
@@ -52,7 +85,7 @@ public:
         return key;
     }
 
-    ResourceHandle RegisterOrUpdate(ResourceIdentifier const& id, std::shared_ptr<Resource> res) {
+    RegistryHandle RegisterOrUpdate(ResourceIdentifier const& id, std::shared_ptr<Resource> res) {
         ResourceKey key = InternKey(id);
         Slot& s = slots[key.idx];
 
@@ -60,34 +93,71 @@ public:
         s.generation++; // bump on replacement
         s.alive = true;
 
-        return ResourceHandle{ key, s.generation };
-    }
+        RegistryHandle h(key,
+            s.generation,
+            m_epoch,
+            res->GetGlobalResourceID(),
+            res->GetStateTracker(),
+            res->GetMipLevels(), 
+            res->GetArraySize());
 
-    ResourceHandle MakeHandle(ResourceIdentifier const& id) const {
-        auto it = intern.find(id);
-        if (it == intern.end()) return {}; // generation==0 means invalid
+        resourceToHandle[s.resource.get()] = h;
 
-        const ResourceKey key = it->second;
-        if (key.idx >= slots.size()) return {};
-
-        const Slot& s = slots[key.idx];
-        if (!s.alive || !s.resource) return {};
-
-        ResourceHandle h;
-        h.key = key;
-        h.generation = s.generation;
         return h;
     }
 
-    Resource* Resolve(const ResourceHandle h) {
-        if (h.key.idx >= slots.size()) return nullptr;
-        Slot& s = slots[h.key.idx];
+    std::optional<RegistryHandle> GetHandleFor(Resource* res) const {
+		if (res == nullptr) return std::nullopt;
+        if (auto it = resourceToHandle.find(res); it != resourceToHandle.end()) {
+            return it->second;
+		}
+		return std::nullopt;
+    }
+
+    std::optional<RegistryHandle> GetHandleFor(ResourceIdentifier const& id) const {
+        auto it = intern.find(id);
+        if (it == intern.end()) {
+            return std::nullopt;
+        }
+        const ResourceKey key = it->second;
+        if (key.idx >= slots.size()) {
+            return std::nullopt;
+        }
+        const Slot& s = slots[key.idx];
+        return GetHandleFor(s.resource.get());
+    }
+
+    RegistryHandle MakeHandle(ResourceIdentifier const& id) const {
+        auto it = intern.find(id);
+        if (it == intern.end()) return RegistryHandle({}, 0, 0, 0, 0, 0); // generation==0 means invalid
+
+        const ResourceKey key = it->second;
+        if (key.idx >= slots.size()) return RegistryHandle({}, 0, 0, 0, 0, 0);
+
+        const Slot& s = slots[key.idx];
+        if (!s.alive || !s.resource) return RegistryHandle({}, 0, 0, 0, 0, 0);
+
+        RegistryHandle h(
+            key,
+            s.generation,
+            m_epoch,
+            s.resource->GetGlobalResourceID(),
+            s.resource->GetStateTracker(),
+                s.resource->GetMipLevels(), 
+                s.resource->GetArraySize());
+
+        return h;
+    }
+
+    Resource* Resolve(const RegistryHandle h) {
+        if (h.GetKey().idx >= slots.size()) return nullptr;
+        Slot& s = slots[h.GetKey().idx];
         if (!s.alive || !s.resource) return nullptr;
-        if (s.generation != h.generation) return nullptr; // stale handle
+        if (s.generation != h.GetGeneration()) return nullptr; // stale handle
         return s.resource.get();
     }
 
-    Resource const* Resolve(ResourceHandle h) const {
+    Resource const* Resolve(RegistryHandle h) const {
         return const_cast<ResourceRegistry*>(this)->Resolve(h);
     }
 
@@ -98,10 +168,10 @@ public:
         return (s.alive ? s.resource.get() : nullptr);
     }
 
-    bool IsValid(ResourceHandle h) const noexcept {
-        if (h.key.idx >= slots.size()) return false;
-        const Slot& s = slots[h.key.idx];
-        return s.alive && s.resource && s.generation == h.generation;
+    bool IsValid(RegistryHandle h) const noexcept {
+        if (h.GetKey().idx >= slots.size()) return false;
+        const Slot& s = slots[h.GetKey().idx];
+        return s.alive && s.resource && s.generation == h.GetGeneration();
     }
 
     // Unchecked: no declared-prefix enforcement. For RenderGraph/internal use.
@@ -126,6 +196,10 @@ public:
         auto base = RequestShared(id);
         return std::dynamic_pointer_cast<T>(base);
     }
+
+private:
+    uint64_t m_epoch = 0;
+    std::unordered_map<Resource*, RegistryHandle> resourceToHandle;
 };
 
 class ResourceRegistryView {
@@ -152,8 +226,8 @@ public:
 	}
 
     template<class T>
-    T* Resolve(const ResourceRegistry::ResourceHandle h) const {
-        if (h.epoch != epoch) {
+    T* Resolve(const ResourceRegistry::RegistryHandle h) const {
+        if (h.GetEpoch() != epoch) {
             return nullptr;
         }
         Resource* r = _global.Resolve(h);
@@ -164,7 +238,7 @@ public:
         return casted;
     }
 
-    ResourceRegistry::ResourceHandle RequestHandle(ResourceIdentifier const& id) const {
+    ResourceRegistry::RegistryHandle RequestHandle(ResourceIdentifier const& id) const {
         // prefix check (same as Request<T>)
         bool ok = false;
         for (auto const& prefix : _allowedPrefixes) {
@@ -177,15 +251,15 @@ public:
 
         // mint handle from registry (key+generation), then stamp view epoch
         auto h = _global.MakeHandle(id);
-        if (h.generation == 0) {
+        if (h.GetGeneration() == 0) {
             throw std::runtime_error("Unknown resource: \"" + id.ToString() + "\"");
         }
-        if (h.generation == 0) {
+        if (h.GetGeneration() == 0) {
             // Shouldn't happen if base != nullptr, but keeps behavior robust.
             throw std::runtime_error("Failed to mint handle for: \"" + id.ToString() + "\"");
         }
 
-        h.epoch = epoch;
+        //h.epoch = epoch;
         return h;
     }
     
@@ -196,9 +270,9 @@ public:
         return Resolve<T>(h);
     }
 
-    bool IsValid(ResourceRegistry::ResourceHandle h) const noexcept {
-        if (h.generation == 0) return false;
-        if (h.epoch != epoch)  return false;
+    bool IsValid(ResourceRegistry::RegistryHandle h) const noexcept {
+        if (h.GetGeneration() == 0) return false;
+        if (h.GetEpoch() != epoch)  return false;
 
         // Delegate to registry for slot checks
         return _global.IsValid(h);

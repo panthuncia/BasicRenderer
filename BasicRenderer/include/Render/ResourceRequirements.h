@@ -3,20 +3,28 @@
 #include <memory>
 
 #include "Resources/ResourceStateTracker.h"
+#include "Render/ResourceRegistry.h"
 
 class Resource;
 
-struct ResourceAndRange {
-    ResourceAndRange(const std::shared_ptr<Resource>& resource);
-	ResourceAndRange(const std::shared_ptr<Resource>& resource, const RangeSpec& range);
-    std::shared_ptr<Resource> resource;
+struct ResourceHandleAndRange {
+    ResourceHandleAndRange(ResourceRegistry::RegistryHandle resource) : resource(resource) {}
+	ResourceHandleAndRange(ResourceRegistry::RegistryHandle resource, const RangeSpec& range) : resource(resource), range(range) {}
+    ResourceRegistry::RegistryHandle resource;
     RangeSpec range;
 };
 
+struct ResourcePtrAndRange {
+	ResourcePtrAndRange(std::shared_ptr<Resource> resource) : resource(resource) {}
+	ResourcePtrAndRange(std::shared_ptr<Resource> resource, const RangeSpec& range) : resource(resource), range(range) {}
+	std::shared_ptr<Resource> resource;
+	RangeSpec range;
+};
+
 struct ResourceRequirement {
-	ResourceRequirement(const ResourceAndRange& resourceAndRange)
-		: resourceAndRange(resourceAndRange) {
+	ResourceRequirement(const ResourceHandleAndRange& resourceAndRange)
+		: resourceHandleAndRange(resourceAndRange) {
 	}
-	ResourceAndRange resourceAndRange;    // resource and range
+	ResourceHandleAndRange resourceHandleAndRange;    // resource and range
     ResourceState state;
 };

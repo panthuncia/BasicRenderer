@@ -1,13 +1,12 @@
 #include "Render/PassBuilders.h"
 
-std::vector<ResourceAndRange>
+std::vector<ResourceHandleAndRange>
 expandToRanges(ResourceIdentifierAndRange const & rir, RenderGraph* graph)
 {
-    auto resPtr = graph->RequestResource(rir.identifier);
-    if (!resPtr) return {};
+    auto resPtr = graph->RequestResourceHandle(rir.identifier);
 
     // Now wrap that actual resource + rir.range into a ResourceAndRange:
-    ResourceAndRange actualRAR(resPtr);
+    ResourceHandleAndRange actualRAR(resPtr);
     actualRAR.range    = rir.range;
     return { actualRAR };
 }

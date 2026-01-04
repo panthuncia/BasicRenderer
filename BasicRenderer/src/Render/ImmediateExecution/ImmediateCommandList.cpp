@@ -1,5 +1,7 @@
 #include "Render/ImmediateExecution/ImmediateCommandList.h"
 
+#include "Render/ResourceRegistry.h"
+
 namespace rg::imm {
 
 	// BytecodeReader functions
@@ -82,7 +84,7 @@ namespace rg::imm {
 
     void ImmediateCommandList::Reset() {
         m_writer.Reset();
-        m_ptrs.clear();
+        m_handles.clear();
         m_trackers.clear();
     }
 
@@ -93,8 +95,10 @@ namespace rg::imm {
         // Convert trackers -> requirements (skip "Common/Common" regions).
         out.requirements.reserve(64);
         for (auto const& [rid, tracker] : m_trackers) {
-            auto it = m_ptrs.find(rid);
-            if (it == m_ptrs.end() || !it->second) continue;
+            auto it = m_handles.find(rid);
+            if (it == m_handles.end()) {
+                continue;
+            }
 
             // Initial "no-op" state:
             ResourceState init{
@@ -106,7 +110,7 @@ namespace rg::imm {
             for (auto const& seg : tracker.GetSegments()) {
                 if (seg.state == init) continue; // ignore untouched portions
                 ResourceRequirement rr{ it->second };
-                rr.resourceAndRange.range = seg.rangeSpec;
+                rr.resourceHandleAndRange.range = seg.rangeSpec;
                 rr.state = seg.state;
                 out.requirements.push_back(std::move(rr));
             }
@@ -115,44 +119,21 @@ namespace rg::imm {
     }
 
     ImmediateCommandList::Resolved ImmediateCommandList::Resolve(ResourceIdentifier const& id) {
-        if (!m_resolveFn) {
+        if (!m_resolveByIdFn) {
             throw std::runtime_error("ImmediateCommandList has no ResolveByIdFn");
         }
-        auto sp = m_resolveFn(m_resolveUser, id, /*allowFailure=*/false);
-        if (!sp) {
-            throw std::runtime_error("ImmediateCommandList failed to resolve id: " + id.ToString());
-        }
-        return Resolve(sp.get(), sp);
+        const auto handle = m_resolveByIdFn(m_resolveUser, id, /*allowFailure=*/false);
+        
+		return {handle};
     }
 
     ImmediateCommandList::Resolved ImmediateCommandList::Resolve(Resource* p) {
         if (!p) { 
             throw std::runtime_error("ImmediateCommandList: null Resource*"); 
         }
-        // TODO: fix this shared_ptr nonsense
-        std::shared_ptr<Resource> sp = p->shared_from_this();
-        return Resolve(p, std::move(sp));
-    }
+        const auto handle = m_resolveByPtrFn(m_resolveUser, p, /*allowFailure=*/false);
 
-    ImmediateCommandList::Resolved ImmediateCommandList::Resolve(Resource* p, std::shared_ptr<Resource> keepAlive) {
-        Resolved out;
-        out.keepAlive = std::move(keepAlive);
-        out.raw = p;
-        out.globalId = p->GetGlobalResourceID();
-
-        // Cache keepalive for requirement building
-        m_ptrs[out.globalId] = out.keepAlive;
-
-        if (m_trackers.find(out.globalId) == m_trackers.end()) {
-            RangeSpec whole{};
-            ResourceState init{
-                rhi::ResourceAccessType::Common,
-                rhi::ResourceLayout::Common,
-                rhi::ResourceSyncState::None
-            };
-            m_trackers.emplace(out.globalId, SymbolicTracker(whole, init));
-        }
-        return out;
+        return { handle };
     }
 
     ResourceState ImmediateCommandList::MakeState(rhi::ResourceAccessType access) const {
@@ -164,14 +145,14 @@ namespace rg::imm {
         };
     }
 
-    void ImmediateCommandList::Track(Resource* pRes, uint64_t rid, RangeSpec range, rhi::ResourceAccessType access) {
+    void ImmediateCommandList::Track(ResourceRegistry::RegistryHandle handle, uint64_t rid, RangeSpec range, rhi::ResourceAccessType access) {
         ResourceState want = MakeState(access);
 
         // if a previously-recorded command forced this same range into a different non-Common state, treat that as an error 
         // TODO: Allow internal transitions in immediate passes
         auto& tr = m_trackers.at(rid);
         std::vector<ResourceTransition> tmp;
-        tr.Apply(range, pRes, want, tmp);
+        tr.Apply(range, nullptr, want, tmp);
 
         for (auto const& t : tmp) {
             // If we're transitioning from something other than Common, we have a multi-state requirement.
@@ -191,9 +172,9 @@ namespace rg::imm {
         }
 
         CopyBufferRegionCmd cmd;
-        cmd.dst = m_dispatch.GetResourceHandle(*dst.raw);
+        cmd.dst = m_dispatch.GetResourceHandle(dst.handle);
         cmd.dstOffset = dstOffset;
-        cmd.src = m_dispatch.GetResourceHandle(*src.raw);
+        cmd.src = m_dispatch.GetResourceHandle(src.handle);
         cmd.srcOffset = srcOffset;
         cmd.numBytes = numBytes;
 
@@ -201,8 +182,8 @@ namespace rg::imm {
         m_writer.WritePOD(cmd);
 
         RangeSpec whole{};
-        Track(dst.raw, dst.globalId, whole, rhi::ResourceAccessType::CopyDest);
-        Track(src.raw, src.globalId, whole, rhi::ResourceAccessType::CopySource);
+        Track(dst.handle, dst.handle.GetGlobalResourceID(), whole, rhi::ResourceAccessType::CopyDest);
+        Track(src.handle, src.handle.GetGlobalResourceID(), whole, rhi::ResourceAccessType::CopySource);
     }
 
     void ImmediateCommandList::ClearRTV(Resolved const& target, float r, float g, float b, float a, RangeSpec range)
@@ -218,10 +199,10 @@ namespace rg::imm {
         cv.rgba[2] = b;
         cv.rgba[3] = a;
 
-        const bool any = ForEachMipSlice(*target.raw, range,
+        const bool any = ForEachMipSlice(target.handle, range,
             [&](uint32_t /*mip*/, uint32_t /*slice*/, RangeSpec exact)
             {
-                const rhi::DescriptorSlot rtv = m_dispatch.GetRTV(*target.raw, exact);
+                const rhi::DescriptorSlot rtv = m_dispatch.GetRTV(target.handle, exact);
                 RequireValidSlot(rtv, "RTV");
 
                 ClearRTVCmd cmd{};
@@ -233,7 +214,7 @@ namespace rg::imm {
             });
 
         if (any) {
-            Track(target.raw, target.globalId, range, rhi::ResourceAccessType::RenderTarget);
+            Track(target.handle, target.handle.GetGlobalResourceID(), range, rhi::ResourceAccessType::RenderTarget);
         }
     }
 
@@ -250,10 +231,10 @@ namespace rg::imm {
             throw std::runtime_error("ImmediateDispatch::GetDSV not set");
         }
 
-        const bool any = ForEachMipSlice(*target.raw, range,
+        const bool any = ForEachMipSlice(target.handle, range,
             [&](uint32_t /*mip*/, uint32_t /*slice*/, RangeSpec exact)
             {
-                const rhi::DescriptorSlot dsv = m_dispatch.GetDSV(*target.raw, exact);
+                const rhi::DescriptorSlot dsv = m_dispatch.GetDSV(target.handle, exact);
                 RequireValidSlot(dsv, "DSV");
 
                 ClearDSVCmd cmd{};
@@ -268,7 +249,7 @@ namespace rg::imm {
             });
 
         if (any) {
-            Track(target.raw, target.globalId, range, rhi::ResourceAccessType::DepthReadWrite);
+            Track(target.handle, target.handle.GetGlobalResourceID(), range, rhi::ResourceAccessType::DepthReadWrite);
         }
     }
 
@@ -281,13 +262,13 @@ namespace rg::imm {
         rhi::UavClearFloat value{};
         value.v[0] = x; value.v[1] = y; value.v[2] = z; value.v[3] = w;
 
-        const bool any = ForEachMipSlice(*target.raw, range,
+        const bool any = ForEachMipSlice(target.handle, range,
             [&](uint32_t /*mip*/, uint32_t /*slice*/, RangeSpec exact)
             {
                 ClearUavFloatCmd cmd{};
                 cmd.value = value;
 
-                if (!m_dispatch.GetUavClearInfo(*target.raw, exact, cmd.info)) {
+                if (!m_dispatch.GetUavClearInfo(target.handle, exact, cmd.info)) {
                     throw std::runtime_error("Immediate clear: GetUavClearInfo failed");
                 }
 
@@ -300,7 +281,7 @@ namespace rg::imm {
             });
 
         if (any)
-            Track(target.raw, target.globalId, range, rhi::ResourceAccessType::UnorderedAccess);
+            Track(target.handle, target.handle.GetGlobalResourceID(), range, rhi::ResourceAccessType::UnorderedAccess);
     }
 
     void ImmediateCommandList::ClearUavUint(Resolved const& target, uint32_t x, uint32_t y, uint32_t z, uint32_t w, RangeSpec range)
@@ -312,13 +293,13 @@ namespace rg::imm {
         rhi::UavClearUint value{};
         value.v[0] = x; value.v[1] = y; value.v[2] = z; value.v[3] = w;
 
-        const bool any = ForEachMipSlice(*target.raw, range,
+        const bool any = ForEachMipSlice(target.handle, range,
             [&](uint32_t /*mip*/, uint32_t /*slice*/, RangeSpec exact)
             {
                 ClearUavUintCmd cmd{};
                 cmd.value = value;
 
-                if (!m_dispatch.GetUavClearInfo(*target.raw, exact, cmd.info)) {
+                if (!m_dispatch.GetUavClearInfo(target.handle, exact, cmd.info)) {
                     throw std::runtime_error("Immediate clear: GetUavClearInfo failed");
                 }
 
@@ -331,7 +312,7 @@ namespace rg::imm {
             });
 
         if (any)
-            Track(target.raw, target.globalId, range, rhi::ResourceAccessType::UnorderedAccess);
+            Track(target.handle, target.handle.GetGlobalResourceID(), range, rhi::ResourceAccessType::UnorderedAccess);
     }
 
     void ImmediateCommandList::CopyTextureRegion(
@@ -344,7 +325,7 @@ namespace rg::imm {
         }
 
         CopyTextureRegionCmd cmd{};
-        cmd.dst.texture = m_dispatch.GetResourceHandle(*dst.raw);
+        cmd.dst.texture = m_dispatch.GetResourceHandle(dst.handle);
         cmd.dst.mip = dstMip;
         cmd.dst.arraySlice = dstSlice;
         cmd.dst.x = dstX; cmd.dst.y = dstY; cmd.dst.z = dstZ;
@@ -352,7 +333,7 @@ namespace rg::imm {
         cmd.dst.height = height;
         cmd.dst.depth = depth;
 
-        cmd.src.texture = m_dispatch.GetResourceHandle(*src.raw);
+        cmd.src.texture = m_dispatch.GetResourceHandle(src.handle);
         cmd.src.mip = srcMip;
         cmd.src.arraySlice = srcSlice;
         cmd.src.x = srcX; cmd.src.y = srcY; cmd.src.z = srcZ;
@@ -363,8 +344,8 @@ namespace rg::imm {
         m_writer.WriteOp(Op::CopyTextureRegion);
         m_writer.WritePOD(cmd);
 
-        Track(dst.raw, dst.globalId, MakeExactMipSlice(dstMip, dstSlice), rhi::ResourceAccessType::CopyDest);
-        Track(src.raw, src.globalId, MakeExactMipSlice(srcMip, srcSlice), rhi::ResourceAccessType::CopySource);
+        Track(dst.handle, dst.handle.GetGlobalResourceID(), MakeExactMipSlice(dstMip, dstSlice), rhi::ResourceAccessType::CopyDest);
+        Track(src.handle, src.handle.GetGlobalResourceID(), MakeExactMipSlice(srcMip, srcSlice), rhi::ResourceAccessType::CopySource);
     }
 
     void ImmediateCommandList::CopyTextureToBuffer(
@@ -378,8 +359,8 @@ namespace rg::imm {
         }
 
         CopyTextureToBufferCmd cmd{};
-        cmd.region.texture = m_dispatch.GetResourceHandle(*texture.raw);
-        cmd.region.buffer = m_dispatch.GetResourceHandle(*buffer.raw);
+        cmd.region.texture = m_dispatch.GetResourceHandle(texture.handle);
+        cmd.region.buffer = m_dispatch.GetResourceHandle(buffer.handle);
         cmd.region.mip = mip;
         cmd.region.arraySlice = slice;
         cmd.region.x = x; cmd.region.y = y; cmd.region.z = z;
@@ -388,9 +369,9 @@ namespace rg::imm {
         m_writer.WriteOp(Op::CopyTextureToBuffer);
         m_writer.WritePOD(cmd);
 
-        Track(texture.raw, texture.globalId, MakeExactMipSlice(mip, slice), rhi::ResourceAccessType::CopySource);
+        Track(texture.handle, texture.handle.GetGlobalResourceID(), MakeExactMipSlice(mip, slice), rhi::ResourceAccessType::CopySource);
         RangeSpec whole{};
-        Track(buffer.raw, buffer.globalId, whole, rhi::ResourceAccessType::CopyDest);
+        Track(buffer.handle, buffer.handle.GetGlobalResourceID(), whole, rhi::ResourceAccessType::CopyDest);
     }
 
     void ImmediateCommandList::CopyBufferToTexture(
@@ -404,8 +385,8 @@ namespace rg::imm {
         }
 
         CopyBufferToTextureCmd cmd{};
-        cmd.region.texture = m_dispatch.GetResourceHandle(*texture.raw);
-        cmd.region.buffer = m_dispatch.GetResourceHandle(*buffer.raw);
+        cmd.region.texture = m_dispatch.GetResourceHandle(texture.handle);
+        cmd.region.buffer = m_dispatch.GetResourceHandle(buffer.handle);
         cmd.region.mip = mip;
         cmd.region.arraySlice = slice;
         cmd.region.x = x; cmd.region.y = y; cmd.region.z = z;
@@ -415,8 +396,8 @@ namespace rg::imm {
         m_writer.WritePOD(cmd);
 
         RangeSpec whole{};
-        Track(buffer.raw, buffer.globalId, whole, rhi::ResourceAccessType::CopySource);
-        Track(texture.raw, texture.globalId, MakeExactMipSlice(mip, slice), rhi::ResourceAccessType::CopyDest);
+        Track(buffer.handle, buffer.handle.GetGlobalResourceID(), whole, rhi::ResourceAccessType::CopySource);
+        Track(texture.handle, texture.handle.GetGlobalResourceID(), MakeExactMipSlice(mip, slice), rhi::ResourceAccessType::CopyDest);
     }
 
 

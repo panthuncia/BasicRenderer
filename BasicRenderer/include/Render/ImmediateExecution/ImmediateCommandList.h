@@ -19,28 +19,29 @@
 
 namespace rg::imm {
 
-    // RenderGraph provides this thunk so the immediate list can resolve identifiers
+    // RenderGraph provides these thunks so the immediate list can resolve identifiers
     // without going through the pass's restricted registry view.
-    using ResolveByIdFn = std::shared_ptr<Resource>(*)(void* user, ResourceIdentifier const& id, bool allowFailure);
-
-    // "Dispatch" that lives on RenderGraph so immediate recording can
-    // turn a Resource into low-level RHI handles/descriptor slots at record time.
+    using ResolveByIdFn = ResourceRegistry::RegistryHandle(*)(void* user, ResourceIdentifier const& id, bool allowFailure);
+	using ResolveByPtrFn = ResourceRegistry::RegistryHandle(*)(void* user, Resource* res, bool allowFailure);
+    
+	// "Dispatch" that lives on RenderGraph so immediate recording can
+    // turn a ResourceHandle into low-level RHI handles/descriptor slots at record time.
     // Replay then needs only the RHI command list + bytecode stream.
 
     struct ImmediateDispatch {
-        rhi::ResourceHandle(*GetResourceHandle)(Resource& r) noexcept = nullptr;
+        rhi::ResourceHandle(*GetResourceHandle)(ResourceRegistry::RegistryHandle r) noexcept = nullptr;
 
         // These expect RangeSpec that resolves to (at least) one mip/slice.
-        rhi::DescriptorSlot(*GetRTV)(Resource& r, RangeSpec range) noexcept = nullptr;
-        rhi::DescriptorSlot(*GetDSV)(Resource& r, RangeSpec range) noexcept = nullptr;
+        rhi::DescriptorSlot(*GetRTV)(ResourceRegistry::RegistryHandle r, RangeSpec range) noexcept = nullptr;
+        rhi::DescriptorSlot(*GetDSV)(ResourceRegistry::RegistryHandle r, RangeSpec range) noexcept = nullptr;
 
         // Returns false if the resource can't provide the required UAV clear info.
-        bool (*GetUavClearInfo)(Resource& r, RangeSpec range, rhi::UavClearInfo& out) noexcept = nullptr;
+        bool (*GetUavClearInfo)(ResourceRegistry::RegistryHandle r, RangeSpec range, rhi::UavClearInfo& out) noexcept = nullptr;
     };
 
-    inline bool ResolveFirstMipSlice(Resource& r, RangeSpec range, uint32_t& outMip, uint32_t& outSlice) noexcept
+    inline bool ResolveFirstMipSlice(ResourceRegistry::RegistryHandle r, RangeSpec range, uint32_t& outMip, uint32_t& outSlice) noexcept
     {
-        const uint32_t totalMips = r.GetMipLevels();
+        const uint32_t totalMips = r.GetNumMipLevels();
         const uint32_t totalSlices = r.GetArraySize();
         if (totalMips == 0 || totalSlices == 0) return false;
 
@@ -56,7 +57,7 @@ namespace rg::imm {
     {
         ImmediateDispatch d{};
 
-        d.GetResourceHandle = +[](Resource& r) noexcept -> rhi::ResourceHandle {
+        d.GetResourceHandle = +[](ResourceRegistry::RegistryHandle r) noexcept -> rhi::ResourceHandle {
             return r.GetAPIResource().GetHandle();
             };
 
@@ -227,11 +228,11 @@ namespace rg::imm {
     public:
         ImmediateCommandList(bool isRenderPass,
             ImmediateDispatch const& dispatch,
-            ResolveByIdFn resolveFn,
+            ResolveByIdFn resolveByIdFn,
             void* resolveUser)
             : m_isRenderPass(isRenderPass)
             , m_dispatch(dispatch)
-            , m_resolveFn(resolveFn)
+            , m_resolveByIdFn(resolveByIdFn)
             , m_resolveUser(resolveUser)
         {
         }
@@ -342,9 +343,7 @@ namespace rg::imm {
 
     private:
         struct Resolved {
-            std::shared_ptr<Resource> keepAlive;
-            Resource* raw = nullptr;
-            uint64_t globalId = 0;
+            ResourceRegistry::RegistryHandle handle;
         };
 
         Resolved Resolve(ResourceIdentifier const& id);
@@ -355,7 +354,7 @@ namespace rg::imm {
 
         ResourceState MakeState(rhi::ResourceAccessType access) const;
 
-        void Track(Resource* pRes, uint64_t rid, RangeSpec range, rhi::ResourceAccessType access);
+        void Track(ResourceRegistry::RegistryHandle handle, uint64_t rid, RangeSpec range, rhi::ResourceAccessType access);
 
         void CopyBufferRegion(Resolved const& dst, uint64_t dstOffset,
             Resolved const& src, uint64_t srcOffset,
@@ -402,9 +401,9 @@ namespace rg::imm {
         }
 
         template<class F>
-        static bool ForEachMipSlice(Resource& res, RangeSpec range, F&& fn)
+        static bool ForEachMipSlice(const ResourceRegistry::RegistryHandle& res, RangeSpec range, F&& fn)
         {
-            const uint32_t totalMips = res.GetMipLevels();
+            const uint32_t totalMips = res.GetNumMipLevels();
             const uint32_t totalSlices = res.GetArraySize();
 
             SubresourceRange sr = ResolveRangeSpec(range, totalMips, totalSlices);
@@ -435,14 +434,15 @@ namespace rg::imm {
         bool m_isRenderPass = true;
 
         ImmediateDispatch const& m_dispatch;
-        ResolveByIdFn m_resolveFn = nullptr;
+        ResolveByIdFn m_resolveByIdFn = nullptr;
+		ResolveByPtrFn m_resolveByPtrFn = nullptr;
+
         void* m_resolveUser = nullptr;
 
         BytecodeWriter m_writer;
 
-        // GlobalID -> ptr (so requirements contain shared_ptr<Resource>)
-		// TODO: shared_ptr is not good here. Fix requirement ownership model.
-        std::unordered_map<uint64_t, std::shared_ptr<Resource>> m_ptrs;
+        // GlobalID -> handle (for ResourceRequirements)
+        std::unordered_map<uint64_t, ResourceRegistry::RegistryHandle> m_handles;
 
         // GlobalID -> tracker of desired access for this pass's immediate section
         std::unordered_map<uint64_t, SymbolicTracker> m_trackers;

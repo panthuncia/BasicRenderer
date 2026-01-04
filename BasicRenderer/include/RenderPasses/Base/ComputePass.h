@@ -18,12 +18,12 @@
 #include "Render/RenderContext.h"
 
 struct ComputePassParameters {
-	std::vector<ResourceAndRange> shaderResources;
-	std::vector<ResourceAndRange> constantBuffers;
-	std::vector<ResourceAndRange> unorderedAccessViews;
-	std::vector<ResourceAndRange> indirectArgumentBuffers;
-	std::vector<ResourceAndRange> legacyInteropResources;
-	std::vector<std::pair<ResourceAndRange, ResourceState>> internalTransitions;
+	std::vector<ResourceHandleAndRange> shaderResources;
+	std::vector<ResourceHandleAndRange> constantBuffers;
+	std::vector<ResourceHandleAndRange> unorderedAccessViews;
+	std::vector<ResourceHandleAndRange> indirectArgumentBuffers;
+	std::vector<ResourceHandleAndRange> legacyInteropResources;
+	std::vector<std::pair<ResourceHandleAndRange, ResourceState>> internalTransitions;
 
 	std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher> identifierSet;
 	std::vector<ResourceRequirement> resourceRequirements; // Static resource requirements for the pass
