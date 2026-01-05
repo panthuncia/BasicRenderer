@@ -309,7 +309,7 @@ void UploadManager::UploadData(const void* data, size_t size, UploadTarget resou
 			idOrRegistryIndex = static_cast<unsigned int>(resourceToUpdate.pinned ? resourceToUpdate.pinned->GetGlobalResourceID() : ~0ull);
 			break;
 		case UploadTarget::Kind::RegistryHandle:
-			idOrRegistryIndex = resourceToUpdate.h.key.idx;
+			idOrRegistryIndex = resourceToUpdate.h.GetKey().idx;
 			break;
 		default:
 			break;

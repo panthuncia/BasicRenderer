@@ -106,6 +106,37 @@ public:
         return h;
     }
 
+    RegistryHandle RegisterAnonymous(std::shared_ptr<Resource> res) {
+        uint32_t idx;
+        if (!freeList.empty()) { idx = freeList.back(); freeList.pop_back(); }
+        else { idx = (uint32_t)slots.size(); slots.emplace_back(); }
+
+        Slot& s = slots[idx];
+
+        // If slot previously held a resource, remove reverse mapping.
+        if (s.resource) {
+            resourceToHandle.erase(s.resource.get());
+        }
+
+        s.resource = std::move(res);
+        s.generation++;
+        s.alive = true;
+        // s.id left default/empty (debug only)
+
+        RegistryHandle h(
+            ResourceKey{ idx },
+            s.generation,
+            m_epoch,
+            s.resource->GetGlobalResourceID(),
+            s.resource->GetStateTracker(),
+            s.resource->GetMipLevels(),
+            s.resource->GetArraySize()
+        );
+
+        resourceToHandle[s.resource.get()] = h;
+        return h;
+    }
+
     std::optional<RegistryHandle> GetHandleFor(Resource* res) const {
 		if (res == nullptr) return std::nullopt;
         if (auto it = resourceToHandle.find(res); it != resourceToHandle.end()) {

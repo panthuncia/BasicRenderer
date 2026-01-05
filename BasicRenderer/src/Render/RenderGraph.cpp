@@ -522,7 +522,8 @@ void RenderGraph::AddTransition(
 
 	auto& resource = r.resourceHandleAndRange.resource;
 	std::vector<ResourceTransition> transitions;
-	resource.GetStateTracker()->Apply(r.resourceHandleAndRange.range, nullptr, r.state, transitions);
+	auto pRes = _registry.Resolve(resource); // TODO: Can we get rid of pRes in transitions?
+	resource.GetStateTracker()->Apply(r.resourceHandleAndRange.range, pRes, r.state, transitions);
 
 	if (!transitions.empty()) {
 		outTransitionedResourceIDs.insert(resource.GetGlobalResourceID());
@@ -531,7 +532,7 @@ void RenderGraph::AddTransition(
 	currentBatch.passBatchTrackers[resource.GetGlobalResourceID()] = resource.GetStateTracker(); // We will need to chack subsequent passes against this
 
 	// Check if this is a resource group
-	//std::vector<ResourceTransition> independantlyManagedTransitions;
+	//std::vector<ResourceTransition> independentlyManagedTransitions;
 	auto group = resourceGroupIDs.contains(resource.GetGlobalResourceID()); //std::dynamic_pointer_cast<ResourceGroup>(resource);
 	if (group) {
 		for (auto& childID : resourcesFromGroupToManageIndependantly[resource.GetGlobalResourceID()]) {
@@ -540,7 +541,7 @@ void RenderGraph::AddTransition(
 				currentBatch.passBatchTrackers[childID] = child->GetStateTracker();
 				child->GetStateTracker()->Apply(r.resourceHandleAndRange.range, child.get(), r.state, transitions);
 			} else {
-				spdlog::error("Resource group {} has a child resource {} that is marked as independantly managed, but is not managed by this graph. This should not happen.", resource.GetGlobalResourceID(), childID);
+				spdlog::error("Resource group {} has a child resource {} that is marked as independently managed, but is not managed by this graph. This should not happen.", resource.GetGlobalResourceID(), childID);
 				throw(std::runtime_error("Resource group has a child resource that is not managed by this graph"));
 			}
 		}
@@ -554,8 +555,10 @@ void RenderGraph::AddTransition(
 	}
 	if (isComputePass && oldSyncHasNonComputeSyncState) { // We need to place transitions on render queue
 		for (auto& transition : transitions) {
-			unsigned int gfxBatch = batchOfLastRenderQueueUsage[transition.pResource->GetGlobalResourceID()];
-			batchOfLastRenderQueueUsage[transition.pResource->GetGlobalResourceID()] = gfxBatch; // Can this cause transition overlaps?
+			// Resource groups will pass through their child ptrs in the transition
+			const auto id = transition.pResource ? transition.pResource->GetGlobalResourceID() : resource.GetGlobalResourceID();
+			unsigned int gfxBatch = batchOfLastRenderQueueUsage[id];
+			batchOfLastRenderQueueUsage[id] = gfxBatch; // Can this cause transition overlaps?
 			batches[gfxBatch].batchEndTransitions.push_back(transition);
 		}
 	}
@@ -1713,13 +1716,10 @@ ResourceRegistry::RegistryHandle RenderGraph::RequestResourceHandle(Resource* co
 		return cached.value();
 	}
 
-	// Providers provide by identifier, not by ptr
+	// Register anonymous resource
+	const auto handle = _registry.RegisterAnonymous(pResource->shared_from_this());
 	 
-	if (allowFailure) {
-		// If we are allowed to fail, return nullptr
-		return {};
-	}
-	throw std::runtime_error("No resource provider registered for key: " + pResource->GetName());
+	return handle;
 }
 
 
