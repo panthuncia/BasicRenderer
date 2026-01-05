@@ -523,6 +523,7 @@ void RenderGraph::AddTransition(
 	auto& resource = r.resourceHandleAndRange.resource;
 	std::vector<ResourceTransition> transitions;
 	auto pRes = _registry.Resolve(resource); // TODO: Can we get rid of pRes in transitions?
+
 	resource.GetStateTracker()->Apply(r.resourceHandleAndRange.range, pRes, r.state, transitions);
 
 	if (!transitions.empty()) {
@@ -533,7 +534,8 @@ void RenderGraph::AddTransition(
 
 	// Check if this is a resource group
 	//std::vector<ResourceTransition> independentlyManagedTransitions;
-	auto group = resourceGroupIDs.contains(resource.GetGlobalResourceID()); //std::dynamic_pointer_cast<ResourceGroup>(resource);
+
+	auto group = dynamic_cast<ResourceGroup*>(pRes);
 	if (group) {
 		for (auto& childID : resourcesFromGroupToManageIndependantly[resource.GetGlobalResourceID()]) {
 			auto& child = resourcesByID[childID];

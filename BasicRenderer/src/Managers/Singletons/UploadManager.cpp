@@ -291,7 +291,7 @@ void UploadManager::UploadData(const void* data, size_t size, UploadTarget resou
 	update.uploadBufferOffset = uploadOffset;
 	update.dataBufferOffset = dataBufferOffset;
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
-	update.stackTrace = std::stacktrace::current();
+	//update.stackTrace = std::stacktrace::current();
 	unsigned int idOrRegistryIndex = 0;
 	switch (resourceToUpdate.kind) {
 		case UploadTarget::Kind::PinnedShared:
@@ -405,7 +405,7 @@ void UploadManager::UploadTextureSubresources(
 		update.z = fp.zSlice;
 		update.uploadBuffer = uploadBuffer;
 #ifdef _DEBUG
-		update.stackTrace = std::stacktrace::current();
+		//update.stackTrace = std::stacktrace::current();
 		update.file = file;
 		update.line = line;
 		update.threadID = std::this_thread::get_id();

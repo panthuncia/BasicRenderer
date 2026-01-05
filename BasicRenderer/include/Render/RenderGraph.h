@@ -213,7 +213,7 @@ private:
 	std::unordered_map<std::string, std::shared_ptr<ComputePass>> computePassesByName;
 	std::unordered_map<std::string, std::shared_ptr<Resource>> resourcesByName;
 	std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
-	std::unordered_set<uint64_t> resourceGroupIDs;
+	//std::unordered_set<uint64_t> resourceGroupIDs;
 	std::unordered_map<uint64_t, uint64_t> independantlyManagedResourceToGroup;
 	std::vector<std::shared_ptr<ResourceGroup>> resourceGroups;
 
