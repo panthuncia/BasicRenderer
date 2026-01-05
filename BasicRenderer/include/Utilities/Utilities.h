@@ -194,7 +194,7 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateDepthStencilViews(
 	int                arraySize = 1,
 	int                mipLevels = 1);
 
-void UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int arraySize, unsigned int mipLevels);
+//void UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int arraySize, unsigned int mipLevels);
 
 std::array<DirectX::XMMATRIX, 6> GetCubemapViewMatrices(DirectX::XMFLOAT3 pos);
 

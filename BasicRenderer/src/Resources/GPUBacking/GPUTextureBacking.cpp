@@ -10,7 +10,7 @@
 #include "Managers/Singletons/UploadManager.h"
 #include "Resources/MemoryStatisticsComponents.h"
 
-void UploadTextureData(Resource* dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int mipLevels) {
+static void UploadTextureData(const std::shared_ptr<Resource>& dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int mipLevels) {
 
 	if (initialData.empty()) return;
 
@@ -77,7 +77,7 @@ void UploadTextureData(Resource* dstTexture, const TextureDescription& desc, con
 	auto device = DeviceManager::GetInstance().GetDevice();
 
 	TEXTURE_UPLOAD_SUBRESOURCES(
-		dstTexture,
+		UploadManager::UploadTarget::FromShared(dstTexture),
 		desc.format,
 		baseW,
 		baseH,
@@ -106,7 +106,7 @@ GpuTextureBacking::CreateUnique(const TextureDescription& desc,
 	const std::vector<const stbi_uc*>& initialData)
 {
 	auto pb = std::make_unique<GpuTextureBacking>(CreateTag{});
-	pb->initialize(desc, owningResourceID, name, initialData);
+	pb->initialize(desc, owningResourceID, name);
 #if BUILD_TYPE == BUILD_DEBUG
 	pb->m_creation = std::stacktrace::current();
 #endif
@@ -115,9 +115,9 @@ GpuTextureBacking::CreateUnique(const TextureDescription& desc,
 
 void GpuTextureBacking::initialize(const TextureDescription& desc,
 	uint64_t owningResourceID,
-	const char* name,
-	const std::vector<const stbi_uc*>& initialData)
+	const char* name)
 {
+	m_desc = desc;
 	ResourceManager& rm = ResourceManager::GetInstance();
 
 	// Determine the number of mip levels
@@ -240,11 +240,6 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 		m_internalWidth = desc.imageDimensions[0].width;
 	}
 
-	// Upload initial data if any
-	if (!initialData.empty()) {
-		UploadTextureData(m_textureHandle.GetResource(), desc, initialData, m_mipLevels);
-	}
-
 	size_t subCount = m_mipLevels * m_arraySize;
 
 	m_clearColor.type = rhi::ClearValueType::Color;
@@ -264,6 +259,13 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 
 }
 
+void GpuTextureBacking::UploadInitialData(const std::shared_ptr<Resource>& owner, const std::vector<const stbi_uc*>& initialData) const
+{
+	// Upload initial data if any
+	if (!initialData.empty()) {
+		UploadTextureData(owner, m_desc, initialData, m_mipLevels);
+	}
+}
 void GpuTextureBacking::SetName(const char* newName)
 {
 	m_textureHandle.ApplyComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceName>({ newName }));

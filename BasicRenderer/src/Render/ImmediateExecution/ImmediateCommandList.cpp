@@ -14,16 +14,16 @@ namespace rg::imm {
         return op;
     }
 
-    void BytecodeReader::Require(size_t n) const {
+    void BytecodeReader::Require(const size_t n) const {
         if (cur + n > end) {
             throw std::runtime_error("Immediate bytecode underflow");
         }
     }
 
-    void BytecodeReader::Align(size_t a) {
+    void BytecodeReader::Align(const size_t a) {
         if (a == 0) return;
-        uintptr_t ip = reinterpret_cast<uintptr_t>(cur);
-        uintptr_t aligned = (ip + (a - 1)) & ~(uintptr_t(a - 1));
+        const uintptr_t ip = reinterpret_cast<uintptr_t>(cur);
+        const uintptr_t aligned = (ip + (a - 1)) & ~(a - 1);
         cur = reinterpret_cast<std::byte const*>(aligned);
     }
 
@@ -118,7 +118,7 @@ namespace rg::imm {
         return out;
     }
 
-    ImmediateCommandList::Resolved ImmediateCommandList::Resolve(ResourceIdentifier const& id) {
+    ImmediateCommandList::Resolved ImmediateCommandList::Resolve(ResourceIdentifier const& id) const {
         if (!m_resolveByIdFn) {
             throw std::runtime_error("ImmediateCommandList has no ResolveByIdFn");
         }
@@ -133,10 +133,46 @@ namespace rg::imm {
         }
         const auto handle = m_resolveByPtrFn(m_resolveUser, p, /*allowFailure=*/false);
 
+        if (!m_trackers.contains(handle.GetGlobalResourceID())) {
+            constexpr RangeSpec whole{};
+            constexpr ResourceState init{
+                rhi::ResourceAccessType::Common,
+                rhi::ResourceLayout::Common,
+                rhi::ResourceSyncState::None
+            };
+            m_trackers.emplace(handle.GetGlobalResourceID(), SymbolicTracker(whole, init));
+        }
+
         return { handle };
     }
 
-    ResourceState ImmediateCommandList::MakeState(rhi::ResourceAccessType access) const {
+    ImmediateCommandList::Resolved ImmediateCommandList::Resolve(Resource* p, const std::shared_ptr<Resource>& keepAlive) {
+        if (!p) {
+            throw std::runtime_error("ImmediateCommandList: null Resource*");
+        }
+
+        // Create ephemeral handle - doesn't register in global registry
+        auto handle = ResourceRegistry::RegistryHandle::MakeEphemeral(p);
+
+        // Pin to keep alive until frame completes
+        if (keepAlive) {
+            m_keepAlive.pinShared(keepAlive);
+        }
+
+        if (!m_trackers.contains(handle.GetGlobalResourceID())) {
+            constexpr RangeSpec whole{};
+            constexpr ResourceState init{
+                rhi::ResourceAccessType::Common,
+                rhi::ResourceLayout::Common,
+                rhi::ResourceSyncState::None
+            };
+            m_trackers.emplace(handle.GetGlobalResourceID(), SymbolicTracker(whole, init));
+        }
+
+        return { handle };
+    }
+
+    ResourceState ImmediateCommandList::MakeState(const rhi::ResourceAccessType access) const {
         // Match what PassBuilders do (render vs compute sync selection).
         return ResourceState{
             access,
@@ -145,8 +181,8 @@ namespace rg::imm {
         };
     }
 
-    void ImmediateCommandList::Track(ResourceRegistry::RegistryHandle handle, uint64_t rid, RangeSpec range, rhi::ResourceAccessType access) {
-        ResourceState want = MakeState(access);
+    void ImmediateCommandList::Track(ResourceRegistry::RegistryHandle handle, const uint64_t rid, const RangeSpec& range, const rhi::ResourceAccessType access) {
+        const ResourceState want = MakeState(access);
 
         // if a previously-recorded command forced this same range into a different non-Common state, treat that as an error 
         // TODO: Allow internal transitions in immediate passes
@@ -164,9 +200,9 @@ namespace rg::imm {
         }
     }
 
-    void ImmediateCommandList::CopyBufferRegion(Resolved const& dst, uint64_t dstOffset,
-        Resolved const& src, uint64_t srcOffset,
-        uint64_t numBytes) {
+    void ImmediateCommandList::CopyBufferRegion(Resolved const& dst, const uint64_t dstOffset,
+        Resolved const& src, const uint64_t srcOffset,
+        const uint64_t numBytes) {
         if (!m_dispatch.GetResourceHandle) {
             throw std::runtime_error("ImmediateDispatch::GetResourceHandle not set");
         }
@@ -186,7 +222,7 @@ namespace rg::imm {
         Track(src.handle, src.handle.GetGlobalResourceID(), whole, rhi::ResourceAccessType::CopySource);
     }
 
-    void ImmediateCommandList::ClearRTV(Resolved const& target, float r, float g, float b, float a, RangeSpec range)
+    void ImmediateCommandList::ClearRTV(Resolved const& target, const float r, const float g, const float b, const float a, const RangeSpec& range)
     {
         if (!m_dispatch.GetRTV) {
             throw std::runtime_error("ImmediateDispatch::GetRTV not set");
@@ -200,7 +236,7 @@ namespace rg::imm {
         cv.rgba[3] = a;
 
         const bool any = ForEachMipSlice(target.handle, range,
-            [&](uint32_t /*mip*/, uint32_t /*slice*/, RangeSpec exact)
+            [&](uint32_t /*mip*/, uint32_t /*slice*/, const RangeSpec& exact)
             {
                 const rhi::DescriptorSlot rtv = m_dispatch.GetRTV(m_dispatch.user, target.handle, exact);
                 RequireValidSlot(rtv, "RTV");
@@ -221,7 +257,7 @@ namespace rg::imm {
     void ImmediateCommandList::ClearDSV(Resolved const& target,
         bool clearDepth, float depth,
         bool clearStencil, uint8_t stencil,
-        RangeSpec range)
+        const RangeSpec& range)
     {
         if (!clearDepth && !clearStencil) {
             return;
@@ -232,7 +268,7 @@ namespace rg::imm {
         }
 
         const bool any = ForEachMipSlice(target.handle, range,
-            [&](uint32_t /*mip*/, uint32_t /*slice*/, RangeSpec exact)
+            [&](uint32_t /*mip*/, uint32_t /*slice*/, const RangeSpec& exact)
             {
                 const rhi::DescriptorSlot dsv = m_dispatch.GetDSV(m_dispatch.user, target.handle, exact);
                 RequireValidSlot(dsv, "DSV");
@@ -253,7 +289,7 @@ namespace rg::imm {
         }
     }
 
-    void ImmediateCommandList::ClearUavFloat(Resolved const& target, float x, float y, float z, float w, RangeSpec range)
+    void ImmediateCommandList::ClearUavFloat(Resolved const& target, const float x, const float y, const float z, const float w, const RangeSpec& range)
     {
         if (!m_dispatch.GetUavClearInfo) {
             throw std::runtime_error("ImmediateDispatch::GetUavClearInfo not set");
@@ -263,7 +299,7 @@ namespace rg::imm {
         value.v[0] = x; value.v[1] = y; value.v[2] = z; value.v[3] = w;
 
         const bool any = ForEachMipSlice(target.handle, range,
-            [&](uint32_t /*mip*/, uint32_t /*slice*/, RangeSpec exact)
+            [&](uint32_t /*mip*/, uint32_t /*slice*/, const RangeSpec& exact)
             {
                 ClearUavFloatCmd cmd{};
                 cmd.value = value;
@@ -284,7 +320,7 @@ namespace rg::imm {
             Track(target.handle, target.handle.GetGlobalResourceID(), range, rhi::ResourceAccessType::UnorderedAccess);
     }
 
-    void ImmediateCommandList::ClearUavUint(Resolved const& target, uint32_t x, uint32_t y, uint32_t z, uint32_t w, RangeSpec range)
+    void ImmediateCommandList::ClearUavUint(Resolved const& target, const uint32_t x, const uint32_t y, const uint32_t z, const uint32_t w, const RangeSpec& range)
     {
         if (!m_dispatch.GetUavClearInfo) {
             throw std::runtime_error("ImmediateDispatch::GetUavClearInfo not set");
@@ -294,7 +330,7 @@ namespace rg::imm {
         value.v[0] = x; value.v[1] = y; value.v[2] = z; value.v[3] = w;
 
         const bool any = ForEachMipSlice(target.handle, range,
-            [&](uint32_t /*mip*/, uint32_t /*slice*/, RangeSpec exact)
+            [&](uint32_t /*mip*/, uint32_t /*slice*/, const RangeSpec& exact)
             {
                 ClearUavUintCmd cmd{};
                 cmd.value = value;
@@ -316,9 +352,9 @@ namespace rg::imm {
     }
 
     void ImmediateCommandList::CopyTextureRegion(
-        Resolved const& dst, uint32_t dstMip, uint32_t dstSlice, uint32_t dstX, uint32_t dstY, uint32_t dstZ,
-        Resolved const& src, uint32_t srcMip, uint32_t srcSlice, uint32_t srcX, uint32_t srcY, uint32_t srcZ,
-        uint32_t width, uint32_t height, uint32_t depth)
+        Resolved const& dst, const uint32_t dstMip, const uint32_t dstSlice, const uint32_t dstX, const uint32_t dstY, const uint32_t dstZ,
+        Resolved const& src, const uint32_t srcMip, const uint32_t srcSlice, const uint32_t srcX, const uint32_t srcY, const uint32_t srcZ,
+        const uint32_t width, const uint32_t height, const uint32_t depth)
     {
         if (!m_dispatch.GetResourceHandle) {
             throw std::runtime_error("ImmediateDispatch::GetResourceHandle not set");
@@ -349,10 +385,10 @@ namespace rg::imm {
     }
 
     void ImmediateCommandList::CopyTextureToBuffer(
-        Resolved const& texture, uint32_t mip, uint32_t slice,
+        Resolved const& texture, const uint32_t mip, const uint32_t slice,
         Resolved const& buffer,
         rhi::CopyableFootprint const& footprint,
-        uint32_t x, uint32_t y, uint32_t z)
+        const uint32_t x, const uint32_t y, const uint32_t z)
     {
         if (!m_dispatch.GetResourceHandle) {
             throw std::runtime_error("ImmediateDispatch::GetResourceHandle not set");
@@ -376,9 +412,9 @@ namespace rg::imm {
 
     void ImmediateCommandList::CopyBufferToTexture(
         Resolved const& buffer,
-        Resolved const& texture, uint32_t mip, uint32_t slice,
+        Resolved const& texture, const uint32_t mip, const uint32_t slice,
         rhi::CopyableFootprint const& footprint,
-        uint32_t x, uint32_t y, uint32_t z)
+        const uint32_t x, const uint32_t y, const uint32_t z)
     {
         if (!m_dispatch.GetResourceHandle) {
             throw std::runtime_error("ImmediateDispatch::GetResourceHandle not set");
@@ -399,6 +435,4 @@ namespace rg::imm {
         Track(buffer.handle, buffer.handle.GetGlobalResourceID(), whole, rhi::ResourceAccessType::CopySource);
         Track(texture.handle, texture.handle.GetGlobalResourceID(), MakeExactMipSlice(mip, slice), rhi::ResourceAccessType::CopyDest);
     }
-
-
 } // namespace rg::imm

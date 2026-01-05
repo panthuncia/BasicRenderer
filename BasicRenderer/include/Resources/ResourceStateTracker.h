@@ -54,7 +54,7 @@ struct SubresourceRange {
 	}
 };
 
-SubresourceRange ResolveRangeSpec(RangeSpec spec,
+SubresourceRange ResolveRangeSpec(const RangeSpec& spec,
     uint32_t totalMips,
     uint32_t totalSlices);
 
@@ -90,17 +90,17 @@ public:
 		whole.sliceUpper = { BoundType::All, 0 };
 		_segs.push_back({ whole, ResourceState{ rhi::ResourceAccessType::Common, rhi::ResourceLayout::Common, rhi::ResourceSyncState::All } });
     }
-    SymbolicTracker(RangeSpec whole, ResourceState init) {
+    SymbolicTracker(const RangeSpec& whole, const ResourceState& init) {
         _segs.push_back({ whole, init });
     }
 
     // apply a new requirement and emit transitions
-    void Apply(RangeSpec want,
+    void Apply(const RangeSpec& want,
         Resource* pRes,
         ResourceState newState,
         std::vector<ResourceTransition>& out);
 
-    bool WouldModify(RangeSpec want, ResourceState newState) const;
+    bool WouldModify(const RangeSpec& want, const ResourceState& newState) const;
 
     std::vector<Segment> Flatten(ResourceState const& skipState, bool includeSkipState = false) const;
 

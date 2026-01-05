@@ -31,6 +31,12 @@ public:
 	}
 	rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
 
+	void UploadInitialData(const std::shared_ptr<Resource>& owner, const std::vector<const stbi_uc*>& initialData = {}) const;
+
+	SymbolicTracker* GetStateTracker() {
+		return &m_stateTracker;
+	}
+
 	void SetName(const char* newName);
 	// Debug helper: dumps any live textures that haven't been destroyed yet.
 	static unsigned int DumpLiveTextures();
@@ -73,8 +79,7 @@ private:
 #endif
 	void initialize(const TextureDescription& desc,
 		uint64_t owningResourceID,
-		const char* name,
-		const std::vector<const stbi_uc*>& initialData);
+		const char* name);
 
 	void RegisterLiveAlloc();
 	void UnregisterLiveAlloc();
@@ -104,4 +109,6 @@ private:
 
 	unsigned int m_internalWidth = 0; // Internal width, used for padding textures to power of two
 	unsigned int m_internalHeight = 0; // Internal height, used for padding textures to power of two
+
+	SymbolicTracker m_stateTracker;
 };

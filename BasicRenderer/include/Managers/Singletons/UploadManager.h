@@ -5,9 +5,9 @@
 #include <functional>
 #include <rhi.h>
 #include <thread>
+#include <stacktrace>
 
 #include "rhi_helpers.h"
-#include "Resources/ResourceStateTracker.h"
 #include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Render/ResourceRegistry.h"
 #include "RenderPasses/Base/RenderPass.h"
@@ -66,7 +66,7 @@ public:
 		ResourceRegistry::RegistryHandle h{};
 		std::shared_ptr<Resource> pinned{};   // keep-alive for non-registry targets
 
-		static UploadTarget FromHandle(ResourceRegistry::RegistryHandle handle) { // registry lookup
+		static UploadTarget FromHandle(const ResourceRegistry::RegistryHandle& handle) { // registry lookup
 			UploadTarget t; t.kind = Kind::RegistryHandle; t.h = handle; return t;
 		}
 		static UploadTarget FromShared(std::shared_ptr<Resource> p) { // keep-alive
@@ -96,6 +96,7 @@ public:
 		size_t dataBufferOffset{};
 		bool active = true;
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
+		std::stacktrace stackTrace;
 		uint64_t resourceIDOrRegistryIndex{};
 		UploadTarget::Kind targetKind{};
 		const char* file{};
@@ -111,7 +112,7 @@ public:
 	class TextureUpdate {
 	public:
 		TextureUpdate() = default;
-		Resource* texture;
+		UploadTarget texture;
 		uint32_t mip;
 		uint32_t slice;
 		rhi::CopyableFootprint footprint;
@@ -120,6 +121,7 @@ public:
 		uint32_t z;
 		std::shared_ptr<Resource> uploadBuffer;
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
+		std::stacktrace stackTrace;
 		const char* file{};
 		int line{};
 		std::thread::id threadID;
@@ -131,7 +133,7 @@ public:
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
 	void UploadData(const void* data, size_t size, UploadTarget resourceToUpdate, size_t dataBufferOffset, const char* file, int line);
 	void UploadTextureSubresources(
-		Resource*,
+		UploadTarget target,
 		rhi::Format fmt,
 		uint32_t baseWidth,
 		uint32_t baseHeight,
@@ -145,7 +147,7 @@ public:
 #else
 	void UploadData(const void* data, size_t size, UploadTarget resourceToUpdate, size_t dataBufferOffset);
 	void UploadTextureSubresources(
-		Resource* dstTexture,
+		UploadTarget target,
 		rhi::Format fmt,
 		uint32_t baseWidth,
 		uint32_t baseHeight,
@@ -177,7 +179,6 @@ private:
 		}
 
 		void ExecuteImmediate(ImmediateContext& context) override {
-
 			GetInstance().ExecuteResourceCopies(context.frameIndex, context.list);// copies come before uploads to avoid overwriting data
 			GetInstance().ProcessUploads(context.frameIndex, context.list);
 		}
@@ -216,13 +217,13 @@ private:
 	static void MapUpload(const std::shared_ptr<Resource>& uploadBuffer, size_t mapSize, uint8_t** outMapped) noexcept;
 	static void UnmapUpload(const std::shared_ptr<Resource>& uploadBuffer) noexcept;
 
-	Resource* ResolveTarget(const UploadTarget& t) {
-		if (t.kind == UploadTarget::Kind::PinnedShared) return t.pinned.get();
+	//Resource* ResolveTarget(const UploadTarget& t) {
+	//	if (t.kind == UploadTarget::Kind::PinnedShared) return t.pinned.get();
 
-		// Registry handle
-		if (!m_ctx.registry) throw std::runtime_error("UploadManager has no registry context this frame");
-		return m_ctx.registry->Resolve(t.h); // or view->Resolve(h)
-	}
+	//	// Registry handle
+	//	if (!m_ctx.registry) throw std::runtime_error("UploadManager has no registry context this frame");
+	//	return m_ctx.registry->Resolve(t.h); // or view->Resolve(h)
+	//}
 
 	size_t                 m_currentCapacity = 0;
 	size_t                 m_headOffset = 0;   // oldest in flight allocation

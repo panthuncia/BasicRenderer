@@ -631,8 +631,14 @@ RenderGraph::RenderGraph() {
 			d.user = this;
 
 			d.GetResourceHandle = [](RenderGraph* user, ResourceRegistry::RegistryHandle r) noexcept -> rhi::ResourceHandle {
-				auto ptr = user->_registry.Resolve(r);
-				return ptr->GetAPIResource().GetHandle();
+				Resource* ptr;
+				if (r.IsEphemeral()) {
+					ptr = r.GetEphemeralPtr();
+				}
+				else {
+					ptr = user->_registry.Resolve(r);
+				}
+				return ptr ? ptr->GetAPIResource().GetHandle() : rhi::ResourceHandle{};
 				};
 
 			d.GetRTV = +[](RenderGraph* user, ResourceRegistry::RegistryHandle r, RangeSpec range) noexcept -> rhi::DescriptorSlot {
@@ -849,8 +855,12 @@ void RenderGraph::CompileStructural() {
 	}
 }
 
-static ResourceRegistry::RegistryHandle ResolveThunk(void* user, ResourceIdentifier const& id, bool allowFailure) {
+static ResourceRegistry::RegistryHandle ResolveByIdThunk(void* user, ResourceIdentifier const& id, bool allowFailure) {
 	return static_cast<RenderGraph*>(user)->RequestResourceHandle(id, allowFailure);
+}
+
+static ResourceRegistry::RegistryHandle ResolveByPtrThunk(void* user, Resource* ptr, bool allowFailure) {
+	return static_cast<RenderGraph*>(user)->RequestResourceHandle(ptr, allowFailure);
 }
 
 static bool Overlap(SubresourceRange a, SubresourceRange b) {
@@ -920,7 +930,8 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 			ImmediateContext c{ device, 
 				{/*isRenderPass=*/false,
 				m_immediateDispatch,
-				&ResolveThunk,
+				&ResolveByIdThunk,
+				&ResolveByPtrThunk,
 				this},
 				frameIndex
 			};
@@ -966,7 +977,8 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 			ImmediateContext c{ device, 
 				{/*isRenderPass=*/true,
 				m_immediateDispatch,
-				&ResolveThunk,
+				&ResolveByIdThunk,
+				&ResolveByPtrThunk,
 				this},
 				frameIndex
 			};

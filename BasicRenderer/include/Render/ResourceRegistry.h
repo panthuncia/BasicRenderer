@@ -7,6 +7,7 @@
 #include <functional>
 #include <unordered_map>
 #include <optional>
+#include <spdlog/spdlog.h>
 
 #include "Resources/Resource.h"
 #include "Resources/ResourceStateTracker.h"
@@ -60,6 +61,21 @@ public:
         uint32_t GetNumMipLevels() const { return numMipLevels; }
         uint32_t GetArraySize() const { return arraySize; }
 		SymbolicTracker* GetStateTracker() const { return tracker; }
+        // For ephemeral handles that bypass registry storage
+        static RegistryHandle MakeEphemeral(Resource* raw) {
+            RegistryHandle h;
+            h.key = ResourceKey{ kEphemeralSlotIndex };
+            h.generation = 0;
+            h.epoch = 0;
+            h.globalResourceIndex = raw->GetGlobalResourceID();
+            h.tracker = raw->GetStateTracker();
+            h.numMipLevels = raw->GetMipLevels();
+            h.arraySize = raw->GetArraySize();
+            h.ephemeralPtr = raw;
+            return h;
+        }
+        Resource* GetEphemeralPtr() const { return ephemeralPtr; }
+        bool IsEphemeral() const { return key.idx == kEphemeralSlotIndex && generation == 0; }
     private:
     	ResourceKey key{};
         uint32_t generation = 0;   // for stale detection
@@ -69,6 +85,7 @@ public:
 
         uint32_t numMipLevels;
         uint32_t arraySize;
+        Resource* ephemeralPtr = nullptr;  // Only set for ephemeral handles
     };
 
     ResourceKey InternKey(ResourceIdentifier const& id) {
@@ -83,6 +100,31 @@ public:
         ResourceKey key{ idx };
         intern.emplace(id, key);
         return key;
+    }
+
+    RegistryHandle MakeEphemeralHandle(Resource* res) const {
+        if (!res) {
+            return RegistryHandle({}, 0, 0, 0, nullptr, 0, 0);
+        }
+
+		// If the resource is already registered, return a normal handle
+        // TODO: Is this fully valid? Or should we error? The user probably isn't doing this intentionally.
+        if (auto existingHandle = GetHandleFor(res); existingHandle.has_value()) {
+			spdlog::warn("Making ephemeral handle for already-registered resource '{}'. Returning normal handle instead.", res->GetName());
+            return existingHandle.value();
+		}
+
+        // Use a sentinel index that won't collide with real slots
+        // The handle is valid for dispatch purposes but won't resolve through the registry
+        return RegistryHandle(
+            ResourceKey{ kEphemeralSlotIndex },  // sentinel value
+            0,  // generation 0
+            m_epoch,
+            res->GetGlobalResourceID(),
+            res->GetStateTracker(),
+            res->GetMipLevels(),
+            res->GetArraySize()
+        );
     }
 
     RegistryHandle RegisterOrUpdate(ResourceIdentifier const& id, std::shared_ptr<Resource> res) {
@@ -231,6 +273,7 @@ public:
 private:
     uint64_t m_epoch = 0;
     std::unordered_map<Resource*, RegistryHandle> resourceToHandle;
+	static constexpr uint32_t kEphemeralSlotIndex = UINT32_MAX;
 };
 
 class ResourceRegistryView {

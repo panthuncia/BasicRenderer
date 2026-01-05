@@ -291,6 +291,7 @@ void UploadManager::UploadData(const void* data, size_t size, UploadTarget resou
 	update.uploadBufferOffset = uploadOffset;
 	update.dataBufferOffset = dataBufferOffset;
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
+	update.stackTrace = std::stacktrace::current();
 	unsigned int idOrRegistryIndex = 0;
 	switch (resourceToUpdate.kind) {
 		case UploadTarget::Kind::PinnedShared:
@@ -339,7 +340,7 @@ void UploadManager::UploadData(const void* data, size_t size, UploadTarget resou
 
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
 void UploadManager::UploadTextureSubresources(
-	Resource* dstTexture,
+	UploadTarget target,
 	rhi::Format fmt,
 	uint32_t baseWidth,
 	uint32_t baseHeight,
@@ -352,7 +353,7 @@ void UploadManager::UploadTextureSubresources(
 	int line)
 #else
 void UploadManager::UploadTextureSubresources(
-	Resource* dstTexture,
+	UploadTarget target,
 	rhi::Format fmt,
 	uint32_t baseWidth,
 	uint32_t baseHeight,
@@ -395,7 +396,7 @@ void UploadManager::UploadTextureSubresources(
 		copyFootprint.depth = fp.depth;
 
 		TextureUpdate update;
-		update.texture = dstTexture;
+		update.texture = target;
 		update.mip = fp.mip;
 		update.slice = fp.arraySlice;
 		update.footprint = copyFootprint;
@@ -404,6 +405,7 @@ void UploadManager::UploadTextureSubresources(
 		update.z = fp.zSlice;
 		update.uploadBuffer = uploadBuffer;
 #ifdef _DEBUG
+		update.stackTrace = std::stacktrace::current();
 		update.file = file;
 		update.line = line;
 		update.threadID = std::this_thread::get_id();
@@ -451,27 +453,54 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, rg::imm::ImmediateCommand
 
 	for (auto& update : m_resourceUpdates) {
 		if (!update.active || !update.uploadBuffer || update.size == 0) continue;
-		Resource* buffer = ResolveTarget(update.resourceToUpdate);
-		commandList.CopyBufferRegion(
-			buffer,
-			update.dataBufferOffset,
-			update.uploadBuffer.get(),
-			update.uploadBufferOffset,
-			update.size
-		);
+		switch(update.resourceToUpdate.kind) {
+		case UploadTarget::Kind::PinnedShared:
+			commandList.CopyBufferRegion(
+				update.resourceToUpdate.pinned,
+				update.dataBufferOffset,
+				update.uploadBuffer.get(),
+				update.uploadBufferOffset,
+				update.size
+			);
+			break;
+		case UploadTarget::Kind::RegistryHandle:
+			commandList.CopyBufferRegion(
+				m_ctx.registry->Resolve(update.resourceToUpdate.h),
+				update.dataBufferOffset,
+				update.uploadBuffer.get(),
+				update.uploadBufferOffset,
+				update.size
+			);
+			break;
+			
+		}
+
 	}
 
 	for (auto& texUpdate : m_textureUpdates) {
-		commandList.CopyBufferToTexture(
-			texUpdate.uploadBuffer.get(),
-			texUpdate.texture,
-			texUpdate.mip,
-			texUpdate.slice,
-			texUpdate.footprint,
-			texUpdate.x,
-			texUpdate.y,
-			texUpdate.z
-		);
+		if (texUpdate.texture.kind == UploadTarget::Kind::PinnedShared) {
+			commandList.CopyBufferToTexture(
+				texUpdate.uploadBuffer.get(),
+				texUpdate.texture.pinned,
+				texUpdate.mip,
+				texUpdate.slice,
+				texUpdate.footprint,
+				texUpdate.x,
+				texUpdate.y,
+				texUpdate.z
+			);
+		} else {
+			commandList.CopyBufferToTexture(
+				texUpdate.uploadBuffer.get(),
+				m_ctx.registry->Resolve(texUpdate.texture.h),
+				texUpdate.mip,
+				texUpdate.slice,
+				texUpdate.footprint,
+				texUpdate.x,
+				texUpdate.y,
+				texUpdate.z
+			);
+		}
 	}
 
 	m_resourceUpdates.clear();
@@ -516,7 +545,7 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, rg::imm::Immediate
 		commandList.CopyBufferRegion(
 			copy.destination.get(),
 			0,
-			copy.sourceOwned.get(),
+			copy.sourceOwned,
 			0,
 			copy.size);
 

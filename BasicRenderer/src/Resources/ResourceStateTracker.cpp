@@ -3,9 +3,9 @@
 #include <optional>
 #include <algorithm>
 
-SubresourceRange ResolveRangeSpec(RangeSpec spec,
-    uint32_t totalMips,
-    uint32_t totalSlices)
+SubresourceRange ResolveRangeSpec(const RangeSpec& spec,
+    const uint32_t totalMips,
+    const uint32_t totalSlices)
 {
     // determine firstMip
     uint32_t firstMip = 0;
@@ -261,7 +261,7 @@ static void mergeSymbolic(std::vector<Segment> &segs) {
 }
 
 
-void SymbolicTracker::Apply(RangeSpec want,
+void SymbolicTracker::Apply(const RangeSpec& want,
     Resource* pRes,
     ResourceState newState,
     std::vector<ResourceTransition>& out)
@@ -301,7 +301,7 @@ void SymbolicTracker::Apply(RangeSpec want,
     _segs.swap(next);
 }
 
-bool SymbolicTracker::WouldModify(RangeSpec want, ResourceState newState) const {
+bool SymbolicTracker::WouldModify(const RangeSpec& want, const ResourceState& newState) const {
     for (auto const &seg : _segs) {
         auto cut = intersect(seg.rangeSpec, want);
         if (!isEmpty(cut) && !(seg.state == newState))
