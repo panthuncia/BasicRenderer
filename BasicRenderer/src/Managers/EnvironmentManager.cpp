@@ -15,6 +15,7 @@
 #include "Managers/Singletons/ReadbackManager.h"
 #include "../../generated/BuiltinResources.h"
 #include "Resources/MemoryStatisticsComponents.h"
+#include "Resources/Resolvers/ResourceGroupResolver.h"
 
 EnvironmentManager::EnvironmentManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
@@ -28,9 +29,13 @@ EnvironmentManager::EnvironmentManager() {
 	m_environmentPrefilteredCubemapGroup = std::make_shared<ResourceGroup>("EnvironmentPrefilteredCubemapGroup");
 
 	m_resources[Builtin::Environment::InfoBuffer] = m_environmentInfoBuffer;
-	m_resources[Builtin::Environment::PrefilteredCubemapsGroup] = m_environmentPrefilteredCubemapGroup;
-	m_resources[Builtin::Environment::WorkingHDRIGroup] = m_workingHDRIGroup;
-	m_resources[Builtin::Environment::WorkingCubemapGroup] = m_workingEnvironmentCubemapGroup;
+
+	m_resolvers[Builtin::Environment::PrefilteredCubemapsGroup] =
+		std::make_shared<ResourceGroupResolver>(m_environmentPrefilteredCubemapGroup);
+	m_resolvers[Builtin::Environment::WorkingHDRIGroup] = 
+		std::make_shared<ResourceGroupResolver>(m_workingHDRIGroup);
+	m_resolvers[Builtin::Environment::WorkingCubemapGroup] = 
+		std::make_shared<ResourceGroupResolver>(m_workingEnvironmentCubemapGroup);
 }
 
 std::unique_ptr<Environment> EnvironmentManager::CreateEnvironment(std::wstring name) {
@@ -170,4 +175,17 @@ std::vector<ResourceIdentifier> EnvironmentManager::GetSupportedKeys() {
 		keys.push_back(key);
 
 	return keys;
+}
+
+std::vector<ResourceIdentifier> EnvironmentManager::GetSupportedResolverKeys() {
+	std::vector<ResourceIdentifier> keys;
+	keys.reserve(m_resolvers.size());
+	for (auto const& [k, _] : m_resolvers)
+		keys.push_back(k);
+	return keys;
+}
+std::shared_ptr<IResourceResolver> EnvironmentManager::ProvideResolver(ResourceIdentifier const& key) {
+	auto it = m_resolvers.find(key);
+	if (it == m_resolvers.end()) return nullptr;
+	return it->second;
 }

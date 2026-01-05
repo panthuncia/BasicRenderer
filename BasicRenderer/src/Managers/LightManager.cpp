@@ -25,8 +25,6 @@ LightManager::LightManager() {
 	getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");
 	getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
-	getCurrentShadowMapResourceGroup = SettingsManager::GetInstance().getSettingGetter<ShadowMaps*>("currentShadowMapsResourceGroup");
-	getCurrentLinearShadowMapResourceGroup = SettingsManager::GetInstance().getSettingGetter<LinearShadowMaps*>("currentLinearShadowMapsResourceGroup");
 
 	m_pLightViewInfoResourceGroup = std::make_shared<ResourceGroup>("LightViewInfo");
 	m_pLightViewInfoResourceGroup->AddResource(m_spotViewInfo);
@@ -48,8 +46,6 @@ LightManager::LightManager() {
 	m_pLightPagesBuffer = CreateIndexedStructuredBuffer(m_lightPagePoolSize, sizeof(LightPage), true, false);
 	m_pLightPagesBuffer->SetName("lightPagesBuffer");
 
-	m_resources[Builtin::Light::ViewResourceGroup] = m_pLightViewInfoResourceGroup;
-	m_resources[Builtin::Light::BufferGroup] = m_pLightBufferResourceGroup;
 	m_resources[Builtin::Light::ClusterBuffer] = m_pClusterBuffer;
 	m_resources[Builtin::Light::PagesBuffer] = m_pLightPagesBuffer;
 	m_resources[Builtin::Light::InfoBuffer] = m_lightBuffer;
@@ -57,6 +53,18 @@ LightManager::LightManager() {
 	m_resources[Builtin::Light::SpotLightMatrixBuffer] = m_spotViewInfo;
 	m_resources[Builtin::Light::DirectionalLightCascadeBuffer] = m_directionalViewInfo;
 	m_resources[Builtin::Light::ActiveLightIndices] = m_activeLightIndices;
+
+	m_pShadowMapResourceGroup = std::make_shared<ShadowMaps>("ShadowMaps");
+	m_pLinearShadowMapResourceGroup = std::make_shared<LinearShadowMaps>("linearShadowMaps");
+
+	m_resolvers[Builtin::Light::ViewResourceGroup] = 
+		std::make_shared<ResourceGroupResolver>(m_pLightViewInfoResourceGroup);
+	m_resolvers[Builtin::Light::BufferGroup] = 
+		std::make_shared<ResourceGroupResolver>(m_pLightBufferResourceGroup);
+	m_resolvers[Builtin::Shadows::ShadowMaps] =
+		std::make_shared<ResourceGroupResolver>(m_pShadowMapResourceGroup);
+	m_resolvers[Builtin::Shadows::LinearShadowMaps] =
+		std::make_shared<ResourceGroupResolver>(m_pLinearShadowMapResourceGroup);
 }
 
 LightManager::~LightManager() {
@@ -88,11 +96,9 @@ AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
                 break;
         }
 
-        auto shadowMaps = getCurrentShadowMapResourceGroup();
-		auto linearMaps = getCurrentLinearShadowMapResourceGroup();
-        if (shadowMaps != nullptr) {
-            auto map = shadowMaps->AddMap(lightInfo, getShadowResolution());
-			auto linearMap = linearMaps->AddMap(lightInfo, getShadowResolution());
+        if (m_pShadowMapResourceGroup != nullptr) {
+            auto map = m_pShadowMapResourceGroup->AddMap(lightInfo, getShadowResolution());
+			auto linearMap = m_pLinearShadowMapResourceGroup->AddMap(lightInfo, getShadowResolution());
             shadowMapComponent = Components::DepthMap(map, linearMap);
 			viewInfo.depthMap = map;
 			viewInfo.linearDepthMap = linearMap;
@@ -398,4 +404,17 @@ std::vector<ResourceIdentifier> LightManager::GetSupportedKeys() {
 		keys.push_back(key);
 
 	return keys;
+}
+
+std::vector<ResourceIdentifier> LightManager::GetSupportedResolverKeys() {
+	std::vector<ResourceIdentifier> keys;
+	keys.reserve(m_resolvers.size());
+	for (auto const& [k, _] : m_resolvers)
+		keys.push_back(k);
+	return keys;
+}
+std::shared_ptr<IResourceResolver> LightManager::ProvideResolver(ResourceIdentifier const& key) {
+	auto it = m_resolvers.find(key);
+	if (it == m_resolvers.end()) return nullptr;
+	return it->second;
 }

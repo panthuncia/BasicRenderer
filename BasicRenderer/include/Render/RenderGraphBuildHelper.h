@@ -156,7 +156,7 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
 		.Build<RewriteOccluderMeshletVisibilityPass>();
 
     // We need to draw occluder shadows early
-    auto drawShadows = graph->RequestResourcePtr(Builtin::Shadows::ShadowMaps) != nullptr && shadowsEnabled;
+    auto drawShadows = shadowsEnabled;
     if (drawShadows) {
         graph->BuildRenderPass("OccluderShadowPrepass")
             .Build<ShadowPass>(ShadowPassInputs{ wireframeEnabled, meshShadersEnabled, true, false, true });

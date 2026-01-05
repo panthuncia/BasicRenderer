@@ -3,6 +3,8 @@
 #include <vector>
 #include <memory>
 
+#include "Resources/ResourceStateTracker.h"
+
 class IResourceResolver {
 	public:
 	virtual ~IResourceResolver() = default;
@@ -26,4 +28,25 @@ class IResourceResolver {
         }
         return out;
     }
+
+    virtual std::unique_ptr<IResourceResolver> Clone() const = 0;
+};
+
+// Helper to avoid rewriting Clone in every derived type
+template<class Derived>
+struct ClonableResolver : IResourceResolver {
+    std::unique_ptr<IResourceResolver> Clone() const override {
+        return std::make_unique<Derived>(static_cast<const Derived&>(*this));
+    }
+};
+
+struct ResourceResolverAndRange {
+    ResourceResolverAndRange(const IResourceResolver& resolver) {
+        range = {}; // Full range
+        // Copy resolver into unique_ptr
+        pResolver = resolver.Clone();
+    }
+    ResourceResolverAndRange(const ResourceIdentifier& resource, const RangeSpec& range) : range(range) {}
+    std::unique_ptr<IResourceResolver> pResolver;
+    RangeSpec range;
 };

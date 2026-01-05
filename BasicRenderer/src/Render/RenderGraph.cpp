@@ -36,17 +36,6 @@ std::vector<uint64_t> RenderGraph::ExpandSchedulingIDs(uint64_t id) const {
 		for (uint64_t a : GetAllAliasIDs(cur)) {
 			if (visited.insert(a).second) {
 				out.push_back(a);
-
-				// group -> children closure (on the alias-expanded ID too)
-				for (uint64_t child : GetAllIndependantlyManagedResourcesFromGroup(a)) {
-					push(child);
-				}
-
-				// child -> group closure
-				if (auto it = independantlyManagedResourceToGroup.find(a);
-					it != independantlyManagedResourceToGroup.end()) {
-					push(it->second);
-				}
 			}
 		}
 	}
@@ -255,8 +244,6 @@ void RenderGraph::CommitPassToBatch(
 			uint64_t id = req.resourceHandleAndRange.resource.GetGlobalResourceID();
 			currentBatch.allResources.insert(id);
 			batchOfLastComputeQueueUsage[id] = currentBatchIndex;
-			for (auto child : rg.GetAllIndependantlyManagedResourcesFromGroup(id))
-				batchOfLastComputeQueueUsage[child] = currentBatchIndex;
 		}
 
 		// NEW: track UAV usage for cross-queue "same batch" rejection
@@ -298,8 +285,6 @@ void RenderGraph::CommitPassToBatch(
 			uint64_t id = req.resourceHandleAndRange.resource.GetGlobalResourceID();
 			currentBatch.allResources.insert(id);
 			batchOfLastRenderQueueUsage[id] = currentBatchIndex;
-			for (auto child : rg.GetAllIndependantlyManagedResourcesFromGroup(id))
-				batchOfLastRenderQueueUsage[child] = currentBatchIndex;
 		}
 
 		// NEW:
@@ -532,23 +517,6 @@ void RenderGraph::AddTransition(
 
 	currentBatch.passBatchTrackers[resource.GetGlobalResourceID()] = resource.GetStateTracker(); // We will need to chack subsequent passes against this
 
-	// Check if this is a resource group
-	//std::vector<ResourceTransition> independentlyManagedTransitions;
-
-	auto group = dynamic_cast<ResourceGroup*>(pRes);
-	if (group) {
-		for (auto& childID : resourcesFromGroupToManageIndependantly[resource.GetGlobalResourceID()]) {
-			auto& child = resourcesByID[childID];
-			if (child) {
-				currentBatch.passBatchTrackers[childID] = child->GetStateTracker();
-				child->GetStateTracker()->Apply(r.resourceHandleAndRange.range, child.get(), r.state, transitions);
-			} else {
-				spdlog::error("Resource group {} has a child resource {} that is marked as independently managed, but is not managed by this graph. This should not happen.", resource.GetGlobalResourceID(), childID);
-				throw(std::runtime_error("Resource group has a child resource that is not managed by this graph"));
-			}
-		}
-	}
-
 	bool oldSyncHasNonComputeSyncState = false;
 	for (auto& transition : transitions) {
 		if (ResourceSyncStateIsNotComputeSyncState(transition.prevSyncState)) {
@@ -600,11 +568,6 @@ void RenderGraph::ProcessResourceRequirements(
 		AddTransition(batchOfLastRenderQueueUsage, batchIndex, currentBatch, isCompute, resourceRequirement, outTransitionedResourceIDs);
 
 		if (AccessTypeIsWriteType(resourceRequirement.state.access)) {
-			if (resourcesFromGroupToManageIndependantly.contains(id)) { // This is a resource group, and we may be transitioning some children independantly
-				for (auto& childID : resourcesFromGroupToManageIndependantly[id]) {
-					producerHistory[childID] = batchIndex;
-				}
-			}
 			producerHistory[id] = batchIndex;
 		}
 	}
@@ -728,18 +691,16 @@ void RenderGraph::ResetForRecompile()
 	resourceToAliasGroup.clear();
 	aliasedResources.clear();
 	lastActiveSubresourceInAliasGroup.clear();
-	independantlyManagedResourceToGroup.clear();
-	resourcesFromGroupToManageIndependantly.clear();
 	trackers.clear();
 
 	// Clear resources
 	resourcesByID.clear();
-	resourceGroups.clear();
 	resourcesByName.clear();
 
 	// Clear providers
 	_providerMap.clear();
 	_providers.clear();
+	_resolverMap.clear();
 	_registry = ResourceRegistry();
 
 	// Register new registry with upload manager
@@ -779,21 +740,6 @@ void RenderGraph::CompileStructural() {
 	}
 
     batches.clear();
-
-	//Check if any of the resource groups we have have Nth children that we also manage directly
-	for (auto& resourceGroup : resourceGroups) {
-		auto children = resourceGroup->GetChildIDs();
-		for (auto& childID : children) {
-			if (resourcesByID.contains(childID)) {
-				resourceGroup->MarkResourceAsNonStandard(resourcesByID[childID]);
-				if (!resourcesFromGroupToManageIndependantly.contains(resourceGroup->GetGlobalResourceID())) {
-					resourcesFromGroupToManageIndependantly[resourceGroup->GetGlobalResourceID()] = {};
-				}
-				resourcesFromGroupToManageIndependantly[resourceGroup->GetGlobalResourceID()].push_back(childID);
-				independantlyManagedResourceToGroup[childID] = resourceGroup->GetGlobalResourceID();
-			}
-		}
-	}
 
 	// Manage aliased resources 
 
@@ -1288,12 +1234,6 @@ void RenderGraph::AddResource(std::shared_ptr<Resource> resource, bool transitio
 	//}
 #endif
 
-	auto resourceGroup = std::dynamic_pointer_cast<ResourceGroup>(resource);
-	if (resourceGroup) {
-		resourceGroup->InitializeForGraph();
-		resourceGroups.push_back(resourceGroup);
-	}
-
     resourcesByName[name] = resource;
 	resourcesByID[resource->GetGlobalResourceID()] = resource;
 	trackers[resource->GetGlobalResourceID()] = resource->GetStateTracker();
@@ -1566,10 +1506,6 @@ bool RenderGraph::IsNewBatchNeeded(
 		if (currentBatchAllResources.contains(id)) {
 			return true;
 		}
-		// If this resource is part of a resource group, and this batch uses that group, we need a new batch
-		if (independantlyManagedResourceToGroup.contains(id) && currentBatchAllResources.contains(independantlyManagedResourceToGroup[id])) {
-			return true;
-		}
 	}
 
 	// For each subresource requirement in this pass:
@@ -1643,15 +1579,41 @@ void RenderGraph::RegisterProvider(IResourceProvider* prov) {
 	}
 	_providers.push_back(prov);
 
-	// Register all resources provided by this provider
 	for (const auto& key : prov->GetSupportedKeys()) {
 		auto resource = prov->ProvideResource(key);
 		if (resource) {
 			RegisterResource(key, resource, prov);
-		} else {
+		}
+		else {
 			spdlog::warn("Provider returned null for advertised key: {}", key.ToString());
 		}
 	}
+
+	// Register resolvers from this provider
+	for (const auto& key : prov->GetSupportedResolverKeys()) {
+		if (const auto resolver = prov->ProvideResolver(key); resolver) {
+			RegisterResolver(key, resolver);
+		}
+		else {
+			spdlog::warn("Provider returned null resolver for advertised key: {}", key.ToString());
+		}
+	}
+}
+
+void RenderGraph::RegisterResolver(ResourceIdentifier id, std::shared_ptr<IResourceResolver> resolver) {
+	if (_resolverMap.contains(id)) {
+		throw std::runtime_error("Resolver already registered for key: " + id.ToString());
+	}
+	_resolverMap[id] = std::move(resolver);
+}
+
+std::shared_ptr<IResourceResolver> RenderGraph::RequestResolver(ResourceIdentifier const& rid, bool allowFailure) {
+	if (auto it = _resolverMap.find(rid); it != _resolverMap.end()) {
+		return it->second;
+	}
+
+	if (allowFailure) return nullptr;
+	throw std::runtime_error("No resolver registered for key: " + rid.ToString());
 }
 
 void RenderGraph::RegisterResource(ResourceIdentifier id, std::shared_ptr<Resource> resource,

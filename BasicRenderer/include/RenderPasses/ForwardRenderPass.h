@@ -15,7 +15,7 @@
 #include "Managers/Singletons/ECSManager.h"
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
-#include "Resources/ECSResourceResolver.h"
+#include "Resources/Resolvers/ECSResourceResolver.h"
 #include "../../shaders/PerPassRootConstants/amplificationShaderRootConstants.h"
 #include "boost/container_hash/hash.hpp"
 

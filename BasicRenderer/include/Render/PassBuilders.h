@@ -10,7 +10,7 @@
 #include "Resources/ResourceIdentifier.h"
 #include "Interfaces/IResourceResolver.h"
 #include "Interfaces/IPassBuilder.h"
-#include "Resources/ECSResourceResolver.h"
+#include "Resources/Resolvers/ECSResourceResolver.h"
 
 // Tag for a contiguous mip-range [first..first+count)
 struct Mip {
@@ -331,11 +331,44 @@ processResourceArguments(const std::shared_ptr<Resource>& r,
     );
 }
 
+// For a resource resolver + range spec, resolve it and process the result
+inline std::vector<ResourceHandleAndRange>
+processResourceArguments(const ResourceResolverAndRange& rrr,
+    RenderGraph* graph)
+{
+    std::vector<ResourceHandleAndRange> out;
+    auto resources = rrr.pResolver->Resolve();
+    for (auto const& res : resources) {
+        const auto rar = ResourcePtrAndRange(res, rrr.range);
+        auto vec = processResourceArguments(rar, graph);
+        out.insert(out.end(),
+            std::make_move_iterator(vec.begin()),
+            std::make_move_iterator(vec.end()));
+    }
+    return out;
+}
+
+// For a resource resolver, assume full range
+inline std::vector<ResourceHandleAndRange>
+processResourceArguments(const IResourceResolver& resolver,
+    RenderGraph* graph)
+{
+    return processResourceArguments(
+        ResourceResolverAndRange(resolver),
+        graph
+    );
+}
+
 // For a resource identifier + range spec, expand it to actual resource handles + ranges
 inline std::vector<ResourceHandleAndRange>
 processResourceArguments(const ResourceIdentifierAndRange& rir,
     RenderGraph* graph)
 {
+    // This could be a resolver- ask the graph.
+    if (auto resolver = graph->RequestResolver(rir.identifier, true)) {
+        return processResourceArguments(*resolver, graph);
+    }
+
     return expandToRanges(rir, graph);
 }
 

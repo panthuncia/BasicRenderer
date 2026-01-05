@@ -12,12 +12,13 @@
 #include "../../generated/BuiltinResources.h"
 #include "Resources/Components.h"
 #include "Resources/MemoryStatisticsComponents.h"
+#include "Resources/Resolvers/ResourceGroupResolver.h"
 
 IndirectCommandBufferManager::IndirectCommandBufferManager() {
     m_indirectCommandsResourceGroup = std::make_shared<ResourceGroup>("IndirectCommandBuffers");
     m_meshletCullingCommandResourceGroup = std::make_shared<ResourceGroup>("MeshletCullingCommandBuffers");
 
-    m_resources[Builtin::IndirectCommandBuffers::MeshletCulling] = m_meshletCullingCommandResourceGroup;
+    m_resolvers[Builtin::IndirectCommandBuffers::MeshletCulling] = std::make_shared<ResourceGroupResolver>(m_meshletCullingCommandResourceGroup);
 }
 
 IndirectCommandBufferManager::~IndirectCommandBufferManager() {
@@ -291,6 +292,18 @@ std::vector<ResourceIdentifier> IndirectCommandBufferManager::GetSupportedKeys()
     for (auto const& [key, _] : m_resources)
         keys.push_back(key);
     return keys;
+}
+std::vector<ResourceIdentifier> IndirectCommandBufferManager::GetSupportedResolverKeys() {
+    std::vector<ResourceIdentifier> keys;
+    keys.reserve(m_resolvers.size());
+    for (auto const& [k, _] : m_resolvers)
+        keys.push_back(k);
+    return keys;
+}
+std::shared_ptr<IResourceResolver> IndirectCommandBufferManager::ProvideResolver(ResourceIdentifier const& key) {
+    auto it = m_resolvers.find(key);
+    if (it == m_resolvers.end()) return nullptr;
+    return it->second;
 }
 
 // -------------------- helpers --------------------

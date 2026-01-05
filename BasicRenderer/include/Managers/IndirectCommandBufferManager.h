@@ -112,6 +112,8 @@ public:
     // ---- IResourceProvider ---------------------------------------------------
     std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
     std::vector<ResourceIdentifier> GetSupportedKeys() override;
+    std::vector<ResourceIdentifier> GetSupportedResolverKeys() override;
+    std::shared_ptr<IResourceResolver> ProvideResolver(ResourceIdentifier const& key) override;
 
 private:
     IndirectCommandBufferManager();
@@ -155,6 +157,8 @@ private:
 
     // Growth granularity
     unsigned int m_incrementSize = 1000;
+
+    std::unordered_map<ResourceIdentifier, std::shared_ptr<IResourceResolver>, ResourceIdentifier::Hasher> m_resolvers;
 
     // Helpers
     unsigned int RoundUp(unsigned int x) const {

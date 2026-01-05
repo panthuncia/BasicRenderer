@@ -20,7 +20,6 @@
 #include "Interfaces/IPassBuilder.h"
 
 class Resource;
-class ResourceGroup;
 class RenderPassBuilder;
 class ComputePassBuilder;
 struct IPassBuilder;
@@ -143,6 +142,12 @@ public:
 
 	void RegisterProvider(IResourceProvider* prov);
 	void RegisterResource(ResourceIdentifier id, std::shared_ptr<Resource> resource, IResourceProvider* provider = nullptr);
+
+	std::unordered_map<ResourceIdentifier, std::shared_ptr<IResourceResolver>, ResourceIdentifier::Hasher> _resolverMap;
+
+	void RegisterResolver(ResourceIdentifier id, std::shared_ptr<IResourceResolver> resolver);
+	std::shared_ptr<IResourceResolver> RequestResolver(ResourceIdentifier const& rid, bool allowFailure = false);
+
 	std::shared_ptr<Resource> RequestResourcePtr(ResourceIdentifier const& rid, bool allowFailure = false);
 	ResourceRegistry::RegistryHandle RequestResourceHandle(ResourceIdentifier const& rid, bool allowFailure = false);
 	ResourceRegistry::RegistryHandle RequestResourceHandle(Resource* const& pResource, bool allowFailure = false);
@@ -213,17 +218,11 @@ private:
 	std::unordered_map<std::string, std::shared_ptr<ComputePass>> computePassesByName;
 	std::unordered_map<std::string, std::shared_ptr<Resource>> resourcesByName;
 	std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
-	//std::unordered_set<uint64_t> resourceGroupIDs;
-	std::unordered_map<uint64_t, uint64_t> independantlyManagedResourceToGroup;
-	std::vector<std::shared_ptr<ResourceGroup>> resourceGroups;
 
 	std::unordered_map<uint64_t, std::unordered_set<uint64_t>> aliasedResources; // Tracks resources that use the same memory
 	std::unordered_map<uint64_t, size_t> resourceToAliasGroup;
 	std::vector<std::vector<uint64_t>>   aliasGroups;
 	std::vector<std::unordered_map<UINT,uint64_t>> lastActiveSubresourceInAliasGroup;
-
-	// Sometimes, we have a resource group that has children that are also managed independently by this graph. If so, we need to handle their transitions separately
-	std::unordered_map<uint64_t, std::vector<uint64_t>> resourcesFromGroupToManageIndependantly;
 
 	std::unordered_map<uint64_t, ResourceTransition> initialTransitions; // Transitions needed to reach the initial state of the resources before executing the first batch. Executed on graph setup.
 	std::vector<PassBatch> batches;
@@ -404,22 +403,6 @@ private:
 				out.push_back(p.first);
 		}
 		return out;
-	}
-
-	//void RegisterPassBuilder(RenderPassBuilder&& builder);
-	//void RegisterPassBuilder(ComputePassBuilder&& builder);
-
-	std::unordered_set<uint64_t> GetAllIndependantlyManagedResourcesFromGroup(
-		uint64_t groupGlobalResourceID) const
-	{
-		std::unordered_set<uint64_t> outResources;
-		auto it = resourcesFromGroupToManageIndependantly.find(groupGlobalResourceID);
-		if (it != resourcesFromGroupToManageIndependantly.end()) {
-			for (auto& resID : it->second) {
-				outResources.insert(resID);
-			}
-		}
-		return outResources;
 	}
 
 	std::vector<uint64_t> ExpandSchedulingIDs(uint64_t id) const;

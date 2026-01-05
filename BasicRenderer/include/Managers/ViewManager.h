@@ -14,6 +14,8 @@
 #include "Scene/Components.h"
 #include "ShaderBuffers.h"
 #include "Managers/IndirectCommandBufferManager.h"
+#include "Interfaces/IResourceResolver.h"
+#include "Resources/Resolvers/ResourceGroupResolver.h"
 
 class IndirectCommandBufferManager;
 class ResourceGroup;
@@ -166,7 +168,7 @@ public:
             });
     }
 
-    // Descriptor index baking (optional convenience)
+    // Descriptor index baking (optional, for convenience)
     void BakeDescriptorIndices();
 
     // Events
@@ -175,7 +177,8 @@ public:
     // IResourceProvider
     std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
     std::vector<ResourceIdentifier> GetSupportedKeys() override;
-
+    std::vector<ResourceIdentifier> GetSupportedResolverKeys() override;
+    std::shared_ptr<IResourceResolver> ProvideResolver(ResourceIdentifier const& key) override;
 private:
     ViewManager();
 
@@ -189,6 +192,7 @@ private:
     std::unordered_map<uint64_t, View> m_views;
     std::atomic<uint64_t> m_nextViewID{ 1 };
 
+
     // Core buffers/groups
     std::shared_ptr<LazyDynamicStructuredBuffer<CameraInfo>> m_cameraBuffer;
     std::shared_ptr<ResourceGroup> m_meshletBitfieldGroup;
@@ -196,6 +200,7 @@ private:
     std::shared_ptr<ResourceGroup> m_meshInstanceOcclusionCullingBitfieldGroup;
 
     std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
+    std::unordered_map<ResourceIdentifier, std::shared_ptr<IResourceResolver>, ResourceIdentifier::Hasher> m_resolvers;
 
     // Global sizing
     uint64_t m_currentMeshletBitfieldSizeBits = 1;

@@ -63,10 +63,14 @@ public:
 
 	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
 	std::vector<ResourceIdentifier> GetSupportedKeys() override;
+	std::vector<ResourceIdentifier> GetSupportedResolverKeys() override;
+	std::shared_ptr<IResourceResolver> ProvideResolver(ResourceIdentifier const& key) override;
 
 private:
 	EnvironmentManager();
 	std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
+	std::unordered_map<ResourceIdentifier, std::shared_ptr<IResourceResolver>, ResourceIdentifier::Hasher> m_resolvers;
+
 	std::shared_ptr<LazyDynamicStructuredBuffer<EnvironmentInfo>> m_environmentInfoBuffer;
 	std::mutex m_environmentInfoBufferMutex; // Mutex for thread safety
 

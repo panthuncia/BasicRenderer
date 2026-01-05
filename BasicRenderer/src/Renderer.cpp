@@ -285,13 +285,6 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 }
 
 void Renderer::CreateGlobalResources() {
-    m_coreResourceProvider.m_shadowMaps = std::make_shared<ShadowMaps>("ShadowMaps");
-    m_coreResourceProvider.m_linearShadowMaps = std::make_shared<LinearShadowMaps>("linearShadowMaps");
-    //m_shadowMaps->AddAliasedResource(m_downsampledShadowMaps.get());
-	//m_downsampledShadowMaps->AddAliasedResource(m_shadowMaps.get());
-
-    setShadowMaps(m_coreResourceProvider.m_shadowMaps.get()); // To allow light manager to acccess shadow maps. TODO: Is there a better way to structure this kind of access?
-	setLinearShadowMaps(m_coreResourceProvider.m_linearShadowMaps.get());
 }
 
 void Renderer::SetSettings() {
@@ -343,8 +336,6 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<UpscaleQualityMode>("upscalingQualityMode", UpscalingManager::GetInstance().GetCurrentUpscalingQualityMode());
 	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
     settingsManager.registerSetting<bool>("useAsyncCompute", true);
-	setShadowMaps = settingsManager.getSettingSetter<ShadowMaps*>("currentShadowMapsResourceGroup");
-    setLinearShadowMaps = settingsManager.getSettingSetter<LinearShadowMaps*>("currentLinearShadowMapsResourceGroup");
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
 	getCameraSpeed = settingsManager.getSettingGetter<float>("cameraSpeed");
@@ -1160,7 +1151,7 @@ void Renderer::CreateRenderGraph() {
 
     auto& debugPassBuilder = newGraph->BuildRenderPass("DebugPass");
 
-    auto drawShadows = m_coreResourceProvider.m_shadowMaps != nullptr && getShadowsEnabled();
+    auto drawShadows = getShadowsEnabled();
     if (drawShadows) {
         BuildMainShadowPass(newGraph.get());
         debugPassBuilder.WithShaderResource(Builtin::PrimaryCamera::LinearDepthMap);
