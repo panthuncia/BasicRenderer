@@ -110,7 +110,7 @@ public:
 		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
 
-		m_meshletCullingCommandBuffers = m_resourceRegistryView->RequestPtr<ResourceGroup>(Builtin::IndirectCommandBuffers::MeshletCulling);
+		m_meshletCullingCommandBuffersResolver = m_resourceRegistryView->RequestResolver(Builtin::IndirectCommandBuffers::MeshletCulling);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -119,9 +119,11 @@ public:
 		auto counterReset = ResourceManager::GetInstance().GetUAVCounterReset();
 
 		// Meshlet frustrum culling buffer
-		for (auto& child : m_meshletCullingCommandBuffers->GetChildren()) {
+		for (auto& child : m_meshletCullingCommandBuffersResolver->Resolve()) {
 			std::shared_ptr<DynamicGloballyIndexedResource> resource = std::dynamic_pointer_cast<DynamicGloballyIndexedResource>(child);
-			if (!resource) continue;
+			if (!resource) {
+				continue;
+			}
 			auto counterOffset = resource->GetResource()->GetUAVCounterOffset();
 			auto apiResource = resource->GetAPIResource();
 			commandList.CopyBufferRegion(apiResource.GetHandle(), counterOffset, counterReset.GetHandle(), 0, sizeof(UINT));
@@ -138,5 +140,6 @@ private:
 	flecs::query<Components::LightViewInfo> lightQuery;
 	ComPtr<ID3D12PipelineState> m_PSO;
 
-	ResourceGroup* m_meshletCullingCommandBuffers;
+	//ResourceGroup* m_meshletCullingCommandBuffers;
+	std::shared_ptr<IResourceResolver> m_meshletCullingCommandBuffersResolver;
 };

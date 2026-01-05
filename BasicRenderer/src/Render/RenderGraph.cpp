@@ -1600,11 +1600,20 @@ void RenderGraph::RegisterProvider(IResourceProvider* prov) {
 	}
 }
 
-void RenderGraph::RegisterResolver(ResourceIdentifier id, std::shared_ptr<IResourceResolver> resolver) {
+void RenderGraph::RegisterResolver(ResourceIdentifier id, const std::shared_ptr<IResourceResolver>& resolver) {
 	if (_resolverMap.contains(id)) {
 		throw std::runtime_error("Resolver already registered for key: " + id.ToString());
 	}
-	_resolverMap[id] = std::move(resolver);
+	// Resolve it and register its resources
+	for (const auto& resource : resolver->Resolve()) {
+		if (resource) {
+			resourcesByID[resource->GetGlobalResourceID()] = resource;
+			// Anonymous registration
+			_registry.RegisterAnonymous(resource);
+		}
+	}
+	_resolverMap[id] = resolver;
+	_registry.RegisterResolver(id, resolver);
 }
 
 std::shared_ptr<IResourceResolver> RenderGraph::RequestResolver(ResourceIdentifier const& rid, bool allowFailure) {

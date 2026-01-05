@@ -11,6 +11,7 @@
 
 #include "Resources/Resource.h"
 #include "Resources/ResourceStateTracker.h"
+#include "Interfaces/IResourceResolver.h"
 
 class Resource;
 using OnResourceChangedFn = std::function<void(ResourceIdentifier, std::shared_ptr<Resource>)>;
@@ -87,6 +88,21 @@ public:
         uint32_t arraySize;
         Resource* ephemeralPtr = nullptr;  // Only set for ephemeral handles
     };
+
+    void RegisterResolver(ResourceIdentifier const& id, std::shared_ptr<IResourceResolver> resolver) {
+        m_resolvers[id] = std::move(resolver);
+    }
+
+    std::shared_ptr<IResourceResolver> GetResolver(ResourceIdentifier const& id) const {
+        if (auto it = m_resolvers.find(id); it != m_resolvers.end()) {
+            return it->second;
+        }
+        return nullptr;
+    }
+
+    bool HasResolver(ResourceIdentifier const& id) const {
+        return m_resolvers.contains(id);
+    }
 
     ResourceKey InternKey(ResourceIdentifier const& id) {
         if (auto it = intern.find(id); it != intern.end()) return it->second;
@@ -274,6 +290,7 @@ private:
     uint64_t m_epoch = 0;
     std::unordered_map<Resource*, RegistryHandle> resourceToHandle;
 	static constexpr uint32_t kEphemeralSlotIndex = UINT32_MAX;
+    std::unordered_map<ResourceIdentifier, std::shared_ptr<IResourceResolver>, ResourceIdentifier::Hasher> m_resolvers;
 };
 
 class ResourceRegistryView {
@@ -342,6 +359,30 @@ public:
         auto h = RequestHandle(id);
         if (!IsValid(h)) return nullptr;
         return Resolve<T>(h);
+    }
+
+    std::shared_ptr<IResourceResolver> RequestResolver(ResourceIdentifier const& id) const {
+        // Prefix check (same as resources)
+        bool ok = false;
+        for (auto const& prefix : _allowedPrefixes) {
+            if (id == prefix || id.hasPrefix(prefix)) { ok = true; break; }
+        }
+        if (!ok) {
+            throw std::runtime_error(
+                "Access denied to resolver \"" + id.ToString() + "\" (not declared)");
+        }
+
+        auto resolver = _global.GetResolver(id);
+        if (!resolver) {
+            throw std::runtime_error("Unknown resolver: \"" + id.ToString() + "\"");
+        }
+        return resolver;
+    }
+
+    template<typename T>
+    std::vector<std::shared_ptr<T>> ResolveAs(ResourceIdentifier const& id) const {
+        auto resolver = RequestResolver(id);
+        return resolver->ResolveAs<T>();
     }
 
     bool IsValid(ResourceRegistry::RegistryHandle h) const noexcept {
