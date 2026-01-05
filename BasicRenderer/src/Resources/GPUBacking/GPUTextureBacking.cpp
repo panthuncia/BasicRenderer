@@ -10,7 +10,7 @@
 #include "Managers/Singletons/UploadManager.h"
 #include "Resources/MemoryStatisticsComponents.h"
 
-void UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int mipLevels) {
+void UploadTextureData(Resource* dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int mipLevels) {
 
 	if (initialData.empty()) return;
 
@@ -90,7 +90,7 @@ void UploadTextureData(rhi::Resource& dstTexture, const TextureDescription& desc
 
 GpuTextureBacking::GpuTextureBacking(CreateTag)
 {
-	
+
 }
 
 GpuTextureBacking::~GpuTextureBacking()
@@ -116,9 +116,9 @@ GpuTextureBacking::CreateUnique(const TextureDescription& desc,
 void GpuTextureBacking::initialize(const TextureDescription& desc,
 	uint64_t owningResourceID,
 	const char* name,
-    const std::vector<const stbi_uc*>& initialData)
+	const std::vector<const stbi_uc*>& initialData)
 {
-    ResourceManager& rm = ResourceManager::GetInstance();
+	ResourceManager& rm = ResourceManager::GetInstance();
 
 	// Determine the number of mip levels
 	uint16_t mipLevels = desc.generateMipMaps ? CalculateMipLevels(desc.imageDimensions[0].width, desc.imageDimensions[0].height) : 1;
@@ -200,7 +200,7 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 	allocationBundle
 		.Set<MemoryStatisticsComponents::MemSizeBytes>({ allocInfo.sizeInBytes })
 		.Set<MemoryStatisticsComponents::ResourceType>({ rhi::ResourceType::Texture2D });
-		//.Set<MemoryStatisticsComponents::ResourceID>({ owningResourceID });
+	//.Set<MemoryStatisticsComponents::ResourceID>({ owningResourceID });
 	trackDesc.attach = allocationBundle;
 
 	//rhi::ResourcePtr textureResource;
@@ -224,9 +224,9 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 		//auto result = device.CreateCommittedResource(textureDesc, textureResource);
 	}
 
-    //m_placedResourceHeap = aliasTarget ? aliasTarget->GetPlacedResourceHeap() : rhi::HeapHandle();
+	//m_placedResourceHeap = aliasTarget ? aliasTarget->GetPlacedResourceHeap() : rhi::HeapHandle();
 
-	m_width  = desc.imageDimensions[0].width;
+	m_width = desc.imageDimensions[0].width;
 	m_height = desc.imageDimensions[0].height;
 	m_mipLevels = desc.generateMipMaps ? CalculateMipLevels(static_cast<uint16_t>(m_width), static_cast<uint16_t>(m_height)) : 1;
 	m_arraySize = desc.isCubemap ? 6 * desc.arraySize : (desc.isArray ? desc.arraySize : 1);
@@ -240,12 +240,12 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 		m_internalWidth = desc.imageDimensions[0].width;
 	}
 
-    // Upload initial data if any
+	// Upload initial data if any
 	if (!initialData.empty()) {
 		UploadTextureData(m_textureHandle.GetResource(), desc, initialData, m_mipLevels);
 	}
 
-    size_t subCount = m_mipLevels * m_arraySize;
+	size_t subCount = m_mipLevels * m_arraySize;
 
 	m_clearColor.type = rhi::ClearValueType::Color;
 	m_clearColor.format = desc.format;
@@ -289,7 +289,7 @@ rhi::BarrierBatch GpuTextureBacking::GetEnhancedBarrierGroup(RangeSpec range, rh
 
 	batch.textures = { &m_barrier };
 
-    return batch;
+	return batch;
 }
 
 void GpuTextureBacking::RegisterLiveAlloc() {

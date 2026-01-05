@@ -10,11 +10,13 @@
 #include "Resources/ResourceStateTracker.h"
 #include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Render/ResourceRegistry.h"
+#include "RenderPasses/Base/RenderPass.h"
 
 class Buffer;
 class Resource;
+class ExternalBackingResource;
 
-#ifdef _DEBUG
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
 #define BUFFER_UPLOAD(data,size,res,offset) \
     UploadManager::GetInstance().UploadData((data),(size),(res),(offset),__FILE__,__LINE__)
 #define TEXTURE_UPLOAD_SUBRESOURCES(dstTexture,fmt,baseWidth,baseHeight,depthOrLayers,mipLevels,arraySize,srcSubresources,srcCount) \
@@ -33,8 +35,7 @@ struct ResourceCopy {
 };
 
 struct DiscardBufferCopy {
-	std::unique_ptr<GpuBufferBacking> sourceOwned; // keeps old backing alive until executed
-	SymbolicTracker 			sourceBarrierState; // Needed to transition old resource before copy
+	std::shared_ptr<ExternalBackingResource> sourceOwned; // keeps old backing alive until executed
 	std::shared_ptr<Resource>         destination; // new resource
 	size_t                            size = 0;
 };
@@ -94,7 +95,7 @@ public:
 		size_t uploadBufferOffset{};
 		size_t dataBufferOffset{};
 		bool active = true;
-#ifdef _DEBUG
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
 		uint64_t resourceIDOrRegistryIndex{};
 		UploadTarget::Kind targetKind{};
 		const char* file{};
@@ -110,9 +111,15 @@ public:
 	class TextureUpdate {
 	public:
 		TextureUpdate() = default;
-		rhi::BufferTextureCopyFootprint copy{};
+		Resource* texture;
+		uint32_t mip;
+		uint32_t slice;
+		rhi::CopyableFootprint footprint;
+		uint32_t x;
+		uint32_t y;
+		uint32_t z;
 		std::shared_ptr<Resource> uploadBuffer;
-#ifdef _DEBUG
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
 		const char* file{};
 		int line{};
 		std::thread::id threadID;
@@ -121,10 +128,10 @@ public:
 
 	static UploadManager& GetInstance();
 	void Initialize();
-#ifdef _DEBUG
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
 	void UploadData(const void* data, size_t size, UploadTarget resourceToUpdate, size_t dataBufferOffset, const char* file, int line);
 	void UploadTextureSubresources(
-		rhi::Resource& dstTexture,
+		Resource*,
 		rhi::Format fmt,
 		uint32_t baseWidth,
 		uint32_t baseHeight,
@@ -138,7 +145,7 @@ public:
 #else
 	void UploadData(const void* data, size_t size, UploadTarget resourceToUpdate, size_t dataBufferOffset);
 	void UploadTextureSubresources(
-		rhi::Resource& dstTexture,
+		Resource* dstTexture,
 		rhi::Format fmt,
 		uint32_t baseWidth,
 		uint32_t baseHeight,
@@ -148,19 +155,53 @@ public:
 		const rhi::helpers::SubresourceData* srcSubresources,
 		uint32_t srcCount);
 #endif	
-	void ProcessUploads(uint8_t frameIndex, rhi::Queue queue);
+	void ProcessUploads(uint8_t frameIndex, rg::imm::ImmediateCommandList& commandList);
 	void QueueResourceCopy(const std::shared_ptr<Resource>& destination, const std::shared_ptr<Resource>& source, size_t size);
 	void QueueCopyAndDiscard(const std::shared_ptr<Resource>& destination,
 		std::unique_ptr<GpuBufferBacking> sourceToDiscard,
-		SymbolicTracker sourceBarrierState,
 		size_t size);
-	void ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue);
-	void ResetAllocators(uint8_t frameIndex);
+	void ExecuteResourceCopies(uint8_t frameIndex, rg::imm::ImmediateCommandList& commandList);
 	void ProcessDeferredReleases(uint8_t frameIndex);
 	void SetUploadResolveContext(UploadResolveContext ctx) { m_ctx = ctx; }
+	std::shared_ptr<RenderPass> GetUploadPass() const { return m_uploadPass; }
 	void Cleanup();
 private:
-	UploadManager() = default;
+
+	class UploadPass : public RenderPass {
+	public:
+		UploadPass() {
+		}
+
+		void Setup() override {
+
+		}
+
+		void ExecuteImmediate(ImmediateContext& context) override {
+
+			GetInstance().ExecuteResourceCopies(context.frameIndex, context.list);// copies come before uploads to avoid overwriting data
+			GetInstance().ProcessUploads(context.frameIndex, context.list);
+		}
+
+		PassReturn Execute(RenderContext& context) override {
+			return {};
+		}
+
+		void Cleanup(RenderContext& context) override {
+			// Cleanup if necessary
+		}
+
+		void SetReadbackFence(rhi::Timeline fence) {
+			m_readbackFence = fence;
+		}
+
+	private:
+		rhi::Timeline m_readbackFence;
+		UINT64 m_fenceValue = 0;
+	};
+
+	UploadManager() {
+		m_uploadPass = std::make_shared<UploadPass>();
+	}
 	bool AllocateUploadRegion(size_t size, size_t alignment, std::shared_ptr<Resource>& outUploadBuffer, size_t& outOffset);
 
 	// Coalescing / last-write-wins helpers
@@ -194,9 +235,6 @@ private:
 	std::vector<size_t>           m_frameStart;      // size = numFramesInFlight
 
 	uint8_t m_numFramesInFlight = 0;
-	rhi::Queue m_commandQueue;
-	std::vector<rhi::CommandAllocatorPtr> m_commandAllocators;
-	std::vector<rhi::CommandListPtr> m_commandLists;
 
 	std::function<uint8_t()> getNumFramesInFlight;
 	std::vector<ResourceUpdate> m_resourceUpdates;
@@ -206,6 +244,8 @@ private:
 	std::vector<DiscardBufferCopy> queuedDiscardCopies;
 
 	UploadResolveContext m_ctx{};
+	std::shared_ptr<UploadPass> m_uploadPass;
+
 };
 
 inline UploadManager& UploadManager::GetInstance() {

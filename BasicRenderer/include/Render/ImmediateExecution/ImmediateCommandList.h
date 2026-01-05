@@ -157,9 +157,36 @@ namespace rg::imm {
     // Replay bytecode into a concrete RHI command list.
     void Replay(std::vector<std::byte> const& bytecode, rhi::CommandList& cl);
 
+    struct LifetimePin {
+        // type-erased owning payload
+        std::shared_ptr<void> shared;
+        std::unique_ptr<void, void(*)(void*)> unique;
+    };
+
+    struct KeepAliveBag {
+        std::vector<LifetimePin> pins;
+        template<class T>
+        uint32_t pinUnique(std::unique_ptr<T> v) {
+            pins.push_back(LifetimePin{
+                nullptr,
+                std::unique_ptr<void, void(*)(void*)>(v.release(), [](void* p) { delete static_cast<T*>(p); })
+                });
+            return static_cast<uint32_t>(pins.size() - 1);
+        }
+        template<class T>
+        uint32_t pinShared(std::shared_ptr<T> v) {
+            pins.push_back(LifetimePin{
+                std::static_pointer_cast<void>(v),
+                nullptr
+                });
+            return static_cast<uint32_t>(pins.size() - 1);
+		}
+    };
+
     struct FrameData {
         std::vector<std::byte> bytecode;                 // replay payload
         std::vector<ResourceRequirement> requirements;   // merged segments
+		KeepAliveBag keepAlive; // Keeps owned resource wrappers alive for the frame. Only used by UploadManager's CopyAndDiscard, currently
         void Reset() { bytecode.clear(); requirements.clear(); }
     };
 

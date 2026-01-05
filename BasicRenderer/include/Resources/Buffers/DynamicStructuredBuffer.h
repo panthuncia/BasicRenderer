@@ -172,7 +172,7 @@ private:
         if (m_dataBuffer != nullptr) {
 			// If shrinking, copy only up to new capacity. If growing, copy up to previous capacity.
             auto sizeToCopy = capacity < previousCapacity ? capacity : previousCapacity;
-            UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), *GetStateTracker(), sizeToCopy);
+            UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), sizeToCopy);
         }
 		m_dataBuffer = std::move(newDataBuffer);
 

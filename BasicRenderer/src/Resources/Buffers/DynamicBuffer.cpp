@@ -177,7 +177,7 @@ void DynamicBuffer::CreateBuffer(size_t capacity) {
 void DynamicBuffer::GrowBuffer(size_t newSize) {
     auto device = DeviceManager::GetInstance().GetDevice();
     auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, newSize, GetGlobalResourceID(), m_UAV);
-	UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), *GetStateTracker(), m_capacity);
+	UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), m_capacity);
 	m_dataBuffer = std::move(newDataBuffer);
 
     m_capacity = newSize;

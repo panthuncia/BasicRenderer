@@ -189,7 +189,7 @@ private:
     void CreateBuffer(uint64_t capacity, size_t previousCapacity = 0) {
         auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, m_elementSize * capacity, GetGlobalResourceID(), m_UAV);
         if (m_dataBuffer != nullptr) {
-            UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), *GetStateTracker(), previousCapacity*sizeof(T));
+            UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), previousCapacity*sizeof(T));
         }
         m_dataBuffer = std::move(newDataBuffer);
 

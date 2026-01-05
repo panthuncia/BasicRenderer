@@ -261,7 +261,7 @@ private:
 
 	void AddResource(std::shared_ptr<Resource> resource, bool transition = false);
 
-	void CompileFrame(rhi::Device device);
+	void CompileFrame(rhi::Device device, uint8_t frameIndex);
 
 	void ComputeResourceLoops();
 	bool IsNewBatchNeeded(

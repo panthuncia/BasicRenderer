@@ -743,10 +743,6 @@ void Renderer::Update(float elapsedSeconds) {
 
 	currentRenderGraph->Update();
 
-	updateManager.ResetAllocators(m_frameIndex); // Reset allocators to avoid leaking memory
-    updateManager.ExecuteResourceCopies(m_frameIndex, graphicsQueue);// copies come before uploads to avoid overwriting data
-	updateManager.ProcessUploads(m_frameIndex, graphicsQueue);
-
     //resourceManager.ExecuteResourceTransitions();
     commandList->Recycle(commandAllocator.Get());
 }

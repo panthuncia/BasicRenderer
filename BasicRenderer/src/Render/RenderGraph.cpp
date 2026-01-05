@@ -790,7 +790,7 @@ void RenderGraph::CompileStructural() {
 	// Manage aliased resources 
 
 	// Mark resources that use the same memory as each other, as they need aliasing barriers
-	for (auto& resource : resourcesByID) {
+	for (const auto& resource : resourcesByID) {
 		auto& r = resource.second;
 		for (auto& alias : r->GetAliasedResources()) {
 			if (!aliasedResources.contains(r->GetGlobalResourceID())) {
@@ -813,7 +813,7 @@ void RenderGraph::CompileStructural() {
 				uint64_t cur = queue.front(); queue.pop();
 				group.push_back(cur);
 				for (uint64_t other : aliasedResources[cur]) {
-					if (!visited.count(other)) {
+					if (!visited.contains(other)) {
 						visited.insert(other);
 						queue.push(other);
 					}
@@ -826,9 +826,19 @@ void RenderGraph::CompileStructural() {
 		}
 	}
 
+	// Upload pass inserted at front
+	if (const auto uploadPass = UploadManager::GetInstance().GetUploadPass(); uploadPass) {
+		auto uploadBatch = PassBatch();
+		RenderPassAndResources uploadPassAndResources;
+		uploadPassAndResources.pass = uploadPass;
+		AnyPassAndResources uploadAnyPassAndResources;
+		uploadAnyPassAndResources.type = PassType::Render;
+		uploadAnyPassAndResources.pass = uploadPassAndResources;
+		m_masterPassList.insert(m_masterPassList.begin(), uploadAnyPassAndResources);
+	}
+
 	// Readback pass inserted at end
-	auto readbackPass = ReadbackManager::GetInstance().GetReadbackPass();
-	if (readbackPass) { // This pass uses the immediate-mode API to perform readbacks
+	if (const auto readbackPass = ReadbackManager::GetInstance().GetReadbackPass(); readbackPass) { // This pass uses the immediate-mode API to perform readbacks
 		auto readbackBatch = PassBatch();
 		RenderPassAndResources readbackPassAndResources;
 		readbackPassAndResources.pass = readbackPass;
@@ -879,7 +889,7 @@ static bool RequirementsConflict(
 }
 
 
-void RenderGraph::CompileFrame(rhi::Device device) {
+void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 	batches.clear();
 	m_framePasses.clear(); // Combined retained + immediate-mode passes for this frame
 	// initialize frame requirements to the retained requirements
@@ -911,7 +921,9 @@ void RenderGraph::CompileFrame(rhi::Device device) {
 				{/*isRenderPass=*/false,
 				m_immediateDispatch,
 				&ResolveThunk,
-				this} };
+				this},
+				frameIndex
+			};
 
 			p.pass->ExecuteImmediate(c);
 			auto immediateFrameData = c.list.Finalize();
@@ -955,7 +967,8 @@ void RenderGraph::CompileFrame(rhi::Device device) {
 				{/*isRenderPass=*/true,
 				m_immediateDispatch,
 				&ResolveThunk,
-				this} 
+				this},
+				frameIndex
 			};
 			p.pass->ExecuteImmediate(c);
 			auto immediateFrameData = c.list.Finalize();
@@ -1381,7 +1394,7 @@ namespace {
 
 void RenderGraph::Execute(RenderContext& context) {
 
-	CompileFrame(context.device);
+	CompileFrame(context.device, context.frameIndex);
 
 	bool useAsyncCompute = m_getUseAsyncCompute();
 	auto& manager = DeviceManager::GetInstance();
