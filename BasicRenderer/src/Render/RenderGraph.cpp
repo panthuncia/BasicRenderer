@@ -224,7 +224,7 @@ void RenderGraph::CommitPassToBatch(
 
 		rg.ProcessResourceRequirements(
 			/*isCompute=*/true,
-			pass.resources.resourceRequirements,
+			pass.resources.frameResourceRequirements,
 			batchOfLastRenderQueueUsage,
 			batchOfLastComputeQueueTransition,
 			currentBatchIndex,
@@ -240,7 +240,7 @@ void RenderGraph::CommitPassToBatch(
 			currentBatch.internallyTransitionedResources.insert(exit.first.resource.GetGlobalResourceID());
 		}
 
-		for (auto& req : pass.resources.resourceRequirements) {
+		for (auto& req : pass.resources.frameResourceRequirements) {
 			uint64_t id = req.resourceHandleAndRange.resource.GetGlobalResourceID();
 			currentBatch.allResources.insert(id);
 			batchOfLastComputeQueueUsage[id] = currentBatchIndex;
@@ -265,7 +265,7 @@ void RenderGraph::CommitPassToBatch(
 
 		rg.ProcessResourceRequirements(
 			/*isCompute=*/false,
-			pass.resources.resourceRequirements,
+			pass.resources.frameResourceRequirements,
 			batchOfLastRenderQueueUsage,
 			batchOfLastRenderQueueTransition,
 			currentBatchIndex,
@@ -281,7 +281,7 @@ void RenderGraph::CommitPassToBatch(
 			currentBatch.internallyTransitionedResources.insert(exit.first.resource.GetGlobalResourceID());
 		}
 
-		for (auto& req : pass.resources.resourceRequirements) {
+		for (auto& req : pass.resources.frameResourceRequirements) {
 			uint64_t id = req.resourceHandleAndRange.resource.GetGlobalResourceID();
 			currentBatch.allResources.insert(id);
 			batchOfLastRenderQueueUsage[id] = currentBatchIndex;
@@ -558,10 +558,10 @@ void RenderGraph::ProcessResourceRequirements(
 
 	for (auto& resourceRequirement : resourceRequirements) {
 
-		if (!resourcesByID.contains(resourceRequirement.resourceHandleAndRange.resource.GetGlobalResourceID())) {
-			spdlog::error("Resource referenced by pass is not managed by this graph");
-			throw(std::runtime_error("Resource referenced is not managed by this graph"));
-		}
+		//if (!resourcesByID.contains(resourceRequirement.resourceHandleAndRange.resource.GetGlobalResourceID())) {
+		//	spdlog::error("Resource referenced by pass is not managed by this graph");
+		//	throw(std::runtime_error("Resource referenced is not managed by this graph"));
+		//}
 
 		const auto& id = resourceRequirement.resourceHandleAndRange.resource.GetGlobalResourceID();
 
@@ -854,26 +854,25 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 	for (auto& pr : m_masterPassList) {
 		if (pr.type == PassType::Compute) {
 			auto& p = std::get<ComputePassAndResources>(pr.pass);
-			p.resources.frameResourceRequirements = p.resources.resourceRequirements;
+			p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
 			p.immediateBytecode.clear();
 		}
 		else {
 			auto& p = std::get<RenderPassAndResources>(pr.pass);
-			p.resources.frameResourceRequirements = p.resources.resourceRequirements;
+			p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
 			p.immediateBytecode.clear();
 		}
 	}
 
 	// Record immediate-mode commands + access for each pass and fold into per-frame requirements
 	for (auto& pr : m_masterPassList) {
-		const bool isRender = (pr.type == PassType::Render);
 
 		if (pr.type == PassType::Compute) {
 			auto& p = std::get<ComputePassAndResources>(pr.pass);
 
 			// reset per-frame
 			p.immediateBytecode.clear();
-			p.resources.frameResourceRequirements = p.resources.resourceRequirements;
+			p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
 
 			ImmediateContext c{ device, 
 				{/*isRenderPass=*/false,
@@ -884,20 +883,22 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 				frameIndex
 			};
 
+			// Record immediate-mode commands
 			p.pass->ExecuteImmediate(c);
-			auto immediateFrameData = c.list.Finalize();
 
+			auto immediateFrameData = c.list.Finalize();
 			// If there is a conflict between retained and immediate requirements, split the pass
 			bool conflict = RequirementsConflict(
-				p.resources.resourceRequirements,
+				p.resources.staticResourceRequirements,
 				immediateFrameData.requirements);
 			if (conflict) {
 				// Create new PassAndResources for the immediate requirements
 				ComputePassAndResources immediatePassAndResources;
 				immediatePassAndResources.pass = p.pass;
-				immediatePassAndResources.resources.resourceRequirements = immediateFrameData.requirements;
+				immediatePassAndResources.resources.staticResourceRequirements = immediateFrameData.requirements;
 				immediatePassAndResources.resources.frameResourceRequirements = immediateFrameData.requirements;
 				immediatePassAndResources.immediateBytecode = std::move(immediateFrameData.bytecode);
+				immediatePassAndResources.immediateKeepAlive = std::move(p.immediateKeepAlive);
 				immediatePassAndResources.run = PassRunMask::Immediate;
 				AnyPassAndResources immediateAnyPassAndResources;
 				immediateAnyPassAndResources.type = PassType::Compute;
@@ -908,6 +909,7 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 			}
 			else {
 				p.immediateBytecode = std::move(immediateFrameData.bytecode);
+				p.immediateKeepAlive = std::move(immediateFrameData.keepAlive);
 				p.resources.frameResourceRequirements.insert(
 					p.resources.frameResourceRequirements.end(),
 					immediateFrameData.requirements.begin(),
@@ -920,7 +922,7 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 			auto& p = std::get<RenderPassAndResources>(pr.pass);
 
 			p.immediateBytecode.clear();
-			p.resources.frameResourceRequirements = p.resources.resourceRequirements;
+			p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
 
 			ImmediateContext c{ device, 
 				{/*isRenderPass=*/true,
@@ -934,16 +936,17 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 			auto immediateFrameData = c.list.Finalize();
 
 			bool conflict = RequirementsConflict(
-				p.resources.resourceRequirements,
+				p.resources.staticResourceRequirements,
 				immediateFrameData.requirements);
 
 			if (conflict) {
 				// Create new PassAndResources for the immediate requirements
 				RenderPassAndResources immediatePassAndResources;
 				immediatePassAndResources.pass = p.pass;
-				immediatePassAndResources.resources.resourceRequirements = immediateFrameData.requirements;
+				immediatePassAndResources.resources.staticResourceRequirements = immediateFrameData.requirements;
 				immediatePassAndResources.resources.frameResourceRequirements = immediateFrameData.requirements;
 				immediatePassAndResources.immediateBytecode = std::move(immediateFrameData.bytecode);
+				immediatePassAndResources.immediateKeepAlive = std::move(p.immediateKeepAlive);
 				immediatePassAndResources.run = PassRunMask::Immediate;
 				AnyPassAndResources immediateAnyPassAndResources;
 				immediateAnyPassAndResources.type = PassType::Render;
@@ -953,7 +956,14 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 				m_framePasses.push_back(pr); // Retained pass
 			}
 			else {
+				for (auto& req : immediateFrameData.requirements) {
+					auto res = _registry.Resolve(req.resourceHandleAndRange.resource);
+;					if (res->GetName() == "Skybox cubemap") {
+						__debugbreak();
+					}
+				}
 				p.immediateBytecode = std::move(immediateFrameData.bytecode);
+				p.immediateKeepAlive = std::move(immediateFrameData.keepAlive);
 				p.resources.frameResourceRequirements.insert(
 					p.resources.frameResourceRequirements.end(),
 					immediateFrameData.requirements.begin(),
@@ -1054,7 +1064,38 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 		}
 	}
 
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+	// Sanity checks:
+	// 1. No conflicting resource transitions in a batch
 
+	// Build one vector of transitions per batch
+	for (size_t bi = 0; bi < batches.size(); bi++) {
+		//std::vector<ResourceTransition> allTransitions;
+		//auto& batch = batches[bi];
+		//allTransitions.insert(
+		//	allTransitions.end(),
+		//	batch.renderTransitions.begin(),
+		//	batch.renderTransitions.end());
+		//allTransitions.insert(
+		//	allTransitions.end(),
+		//	batch.computeTransitions.begin(),
+		//	batch.computeTransitions.end());
+
+		//for (auto& trans : allTransitions) {
+		//	if (trans.pResource->GetName() == "Skybox cubemap") {
+		//		__debugbreak();
+		//	}
+		//}
+
+		// Validate
+		//TransitionConflict out;
+		//if (bool ok = ValidateNoConflictingTransitions(allTransitions, &out); !ok) {
+		//	spdlog::error("Render graph has conflicting resource transitions!");
+		//	throw std::runtime_error("Render graph has conflicting resource transitions!");
+		//}
+	}
+
+#endif
 }
 
 std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
@@ -1081,7 +1122,7 @@ std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 		}
 		};
 
-	for (auto const& req : pass.resources.resourceRequirements)
+	for (auto const& req : pass.resources.frameResourceRequirements)
 		processResource(req.resourceHandleAndRange.resource);
 
 	for (auto& transitionID : resourcesTransitionedThisPass) { // We only need to wait on the latest usage for resources that will be transitioned in this batch
@@ -1117,7 +1158,7 @@ std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 		}
 		};
 
-	for (auto const& req : pass.resources.resourceRequirements)
+	for (auto const& req : pass.resources.frameResourceRequirements)
 		processResource(req.resourceHandleAndRange.resource);
 
 	for (auto& transitionID : resourcesTransitionedThisPass) { // We only need to wait on the latest usage for resources that will be transitioned in this batch

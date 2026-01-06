@@ -181,9 +181,10 @@ namespace rg::imm {
     };
 
     struct FrameData {
+        FrameData() : keepAlive(std::make_unique<KeepAliveBag>()) {}
         std::vector<std::byte> bytecode;                 // replay payload
         std::vector<ResourceRequirement> requirements;   // merged segments
-		KeepAliveBag keepAlive; // Keeps owned resource wrappers alive for the frame. Only used by UploadManager's CopyAndDiscard, currently
+		std::unique_ptr<KeepAliveBag> keepAlive; // Keeps owned resource wrappers alive for the frame. Only used by UploadManager, currently
         void Reset() { bytecode.clear(); requirements.clear(); }
     };
 
@@ -200,6 +201,7 @@ namespace rg::imm {
             , m_resolveByIdFn(resolveByIdFn)
             , m_resolveByPtrFn(resolveByPtrFn)
             , m_resolveUser(resolveUser)
+			, m_keepAlive(std::make_unique<KeepAliveBag>())
         {
         }
 
@@ -337,14 +339,14 @@ namespace rg::imm {
 
         // Produce per-frame data (bytecode + requirements).
         // Call after the pass finishes recording.
-        FrameData Finalize() const;
+        FrameData Finalize();
 
     private:
         struct Resolved {
             ResourceRegistry::RegistryHandle handle;
         };
 
-        Resolved Resolve(ResourceIdentifier const& id) const;
+        Resolved Resolve(ResourceIdentifier const& id);
 
         Resolved Resolve(Resource* p);
 
@@ -447,7 +449,7 @@ namespace rg::imm {
 
 		// Keep-alive for ephemeral resources only valid during this command list's execution
         // For example, copy for resource resize- the old one is discarded.
-		KeepAliveBag m_keepAlive;
+		std::unique_ptr<KeepAliveBag> m_keepAlive;
     };
 
 } // namespace rendergraph::imm

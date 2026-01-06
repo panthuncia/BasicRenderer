@@ -540,7 +540,7 @@ static bool PassUsesResourceAdapter(const void* passAndRes, uint64_t resourceId,
     if (isCompute) {
         auto& pr = *reinterpret_cast<const RenderGraph::ComputePassAndResources*>(passAndRes);
 		bool found = false;
-        for (const auto& req : pr.resources.resourceRequirements) {
+        for (const auto& req : pr.resources.frameResourceRequirements) {
             if (req.resourceHandleAndRange.resource.GetGlobalResourceID() == resourceId) {
 				found = true;
             }
@@ -550,7 +550,7 @@ static bool PassUsesResourceAdapter(const void* passAndRes, uint64_t resourceId,
     else {
         auto& pr = *reinterpret_cast<const RenderGraph::RenderPassAndResources*>(passAndRes);
         bool found = false;
-        for (const auto& req : pr.resources.resourceRequirements) {
+        for (const auto& req : pr.resources.frameResourceRequirements) {
             if (req.resourceHandleAndRange.resource.GetGlobalResourceID() == resourceId) {
                 found = true;
             }

@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <resource_states.h>
+#include <span>
 
 class Resource;
 
@@ -106,3 +107,20 @@ public:
 
     const std::vector<Segment>& GetSegments() const noexcept;
 };
+
+struct TransitionConflict
+{
+    Resource* resource = nullptr;
+    uint32_t  mip = 0;
+    uint32_t  slice = 0;
+
+    // Indices into the input span/vector.
+    size_t    firstIdx = 0;
+    size_t    secondIdx = 0;
+};
+
+// Returns true if there are NO conflicts.
+// If false, optionally fills outFirstConflict with the first conflict found.
+bool ValidateNoConflictingTransitions(
+    std::span<const ResourceTransition> transitions,
+    TransitionConflict* outFirstConflict = nullptr);

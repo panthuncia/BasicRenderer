@@ -851,7 +851,7 @@ private:
 
         params.isGeometryPass = m_isGeometryPass;
         params.identifierSet = _declaredIds;
-        params.resourceRequirements = GatherResourceRequirements();
+        params.staticResourceRequirements = GatherResourceRequirements();
 
         graph->AddRenderPass(pass, params, passName);
     }
@@ -1444,7 +1444,7 @@ private:
         pass->DeclareResourceUsages(this);
 
         params.identifierSet = _declaredIds;
-        params.resourceRequirements = GatherResourceRequirements();
+        params.staticResourceRequirements = GatherResourceRequirements();
 
         graph->AddComputePass(pass, params, passName);
     }

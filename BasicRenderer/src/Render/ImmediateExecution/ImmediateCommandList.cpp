@@ -88,10 +88,10 @@ namespace rg::imm {
         m_trackers.clear();
     }
 
-    FrameData ImmediateCommandList::Finalize() const {
+    FrameData ImmediateCommandList::Finalize() {
         FrameData out;
         out.bytecode = m_writer.data;
-
+		out.keepAlive = std::move(m_keepAlive);
         // Convert trackers -> requirements (skip "Common/Common" regions).
         out.requirements.reserve(64);
         for (auto const& [rid, tracker] : m_trackers) {
@@ -118,29 +118,51 @@ namespace rg::imm {
         return out;
     }
 
-    ImmediateCommandList::Resolved ImmediateCommandList::Resolve(ResourceIdentifier const& id) const {
+    ImmediateCommandList::Resolved ImmediateCommandList::Resolve(ResourceIdentifier const& id) {
         if (!m_resolveByIdFn) {
             throw std::runtime_error("ImmediateCommandList has no ResolveByIdFn");
         }
         const auto handle = m_resolveByIdFn(m_resolveUser, id, /*allowFailure=*/false);
-        
-		return {handle};
-    }
 
-    ImmediateCommandList::Resolved ImmediateCommandList::Resolve(Resource* p) {
-        if (!p) { 
-            throw std::runtime_error("ImmediateCommandList: null Resource*"); 
-        }
-        const auto handle = m_resolveByPtrFn(m_resolveUser, p, /*allowFailure=*/false);
+        const uint64_t rid = handle.GetGlobalResourceID();
 
-        if (!m_trackers.contains(handle.GetGlobalResourceID())) {
+        // Store handle for Finalize()
+        m_handles[rid] = handle;
+
+        // Initialize tracker if first access
+        if (!m_trackers.contains(rid)) {
             constexpr RangeSpec whole{};
             constexpr ResourceState init{
                 rhi::ResourceAccessType::Common,
                 rhi::ResourceLayout::Common,
                 rhi::ResourceSyncState::None
             };
-            m_trackers.emplace(handle.GetGlobalResourceID(), SymbolicTracker(whole, init));
+            m_trackers.emplace(rid, SymbolicTracker(whole, init));
+        }
+
+        return { handle };
+    }
+
+
+    ImmediateCommandList::Resolved ImmediateCommandList::Resolve(Resource* p) {
+        if (!p) {
+            throw std::runtime_error("ImmediateCommandList: null Resource*");
+        }
+        const auto handle = m_resolveByPtrFn(m_resolveUser, p, /*allowFailure=*/false);
+
+        const uint64_t rid = handle.GetGlobalResourceID();
+
+        // Store handle for Finalize()
+        m_handles[rid] = handle;
+
+        if (!m_trackers.contains(rid)) {
+            constexpr RangeSpec whole{};
+            constexpr ResourceState init{
+                rhi::ResourceAccessType::Common,
+                rhi::ResourceLayout::Common,
+                rhi::ResourceSyncState::None
+            };
+            m_trackers.emplace(rid, SymbolicTracker(whole, init));
         }
 
         return { handle };
@@ -154,12 +176,15 @@ namespace rg::imm {
         // Create ephemeral handle - doesn't register in global registry
         auto handle = ResourceRegistry::RegistryHandle::MakeEphemeral(p);
 
+        const uint64_t rid = handle.GetGlobalResourceID();
+        m_handles[rid] = handle;
+
         // Pin to keep alive until frame completes
         if (keepAlive) {
-            m_keepAlive.pinShared(keepAlive);
+            m_keepAlive->pinShared(keepAlive);
         }
 
-        if (!m_trackers.contains(handle.GetGlobalResourceID())) {
+        if (!m_trackers.contains(rid)) {
             constexpr RangeSpec whole{};
             constexpr ResourceState init{
                 rhi::ResourceAccessType::Common,

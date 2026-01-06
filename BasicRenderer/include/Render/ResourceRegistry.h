@@ -239,10 +239,19 @@ public:
     }
 
     Resource* Resolve(const RegistryHandle h) {
-        if (h.GetKey().idx >= slots.size()) return nullptr;
+        if (h.IsEphemeral()) {
+            return h.GetEphemeralPtr();
+        }
+        if (h.GetKey().idx >= slots.size()) {
+            return nullptr;
+        }
         Slot& s = slots[h.GetKey().idx];
-        if (!s.alive || !s.resource) return nullptr;
-        if (s.generation != h.GetGeneration()) return nullptr; // stale handle
+        if (!s.alive || !s.resource) {
+            return nullptr;
+        }
+        if (s.generation != h.GetGeneration()) {
+            return nullptr; // stale handle
+        }
         return s.resource.get();
     }
 

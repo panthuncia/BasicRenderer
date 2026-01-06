@@ -50,24 +50,26 @@ public:
 		return (uint8_t(m) & uint8_t(f)) != 0;
 	}
 
-	struct RenderPassAndResources {
+	struct RenderPassAndResources { // TODO: I'm currently copying these a lot; maybe use pointers instead
 		std::shared_ptr<RenderPass> pass;
 		RenderPassParameters resources;
 		std::string name;
 		int statisticsIndex = -1;
 
 		PassRunMask run = PassRunMask::Both; // default behavior
-		std::vector<std::byte> immediateBytecode;
+		std::vector<std::byte> immediateBytecode; // Stores the immediate execution bytecode
+		std::shared_ptr<rg::imm::KeepAliveBag> immediateKeepAlive = nullptr; // Keeps alive resources used by immediate execution bytecode
 	};
 
-	struct ComputePassAndResources {
+	struct ComputePassAndResources { // TODO: Same as above
 		std::shared_ptr<ComputePass> pass;
 		ComputePassParameters resources;
 		std::string name;
 		int statisticsIndex = -1;
 
 		PassRunMask run = PassRunMask::Both;
-		std::vector<std::byte> immediateBytecode;
+		std::vector<std::byte> immediateBytecode; // Stores the immediate execution bytecode
+		std::shared_ptr<rg::imm::KeepAliveBag> immediateKeepAlive = nullptr; // Keeps alive resources used by immediate execution bytecode
 	};
 
 	enum class CommandQueueType {
