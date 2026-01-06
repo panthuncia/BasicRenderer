@@ -51,6 +51,14 @@ namespace rhi {
 				OutputDebugStringA(phase);
 				OutputDebugStringA("\n====================================================\n");
 			}
+			
+			// Disable break-on-severity
+			ComPtr<ID3D12InfoQueue> iq; if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&iq)))) {
+				D3D12_MESSAGE_ID blocked[] = { (D3D12_MESSAGE_ID)1356, (D3D12_MESSAGE_ID)1328, (D3D12_MESSAGE_ID)1008 };
+				D3D12_INFO_QUEUE_FILTER f{}; f.DenyList.NumIDs = (UINT)_countof(blocked); f.DenyList.pIDList = blocked; iq->AddStorageFilterEntries(&f);
+				iq->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, false);
+				iq->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, false);
+			}
 
 			// IGNORE_INTERNAL reduces noise from runtime-owned objects.
 			dbgDev->ReportLiveDeviceObjects(
