@@ -341,10 +341,50 @@ namespace rg::imm {
         // Call after the pass finishes recording.
         FrameData Finalize();
 
+        struct SliceInterval {
+            uint32_t lo = 0; // inclusive
+            uint32_t hi = 0; // inclusive
+        };
+
     private:
         struct Resolved {
             ResourceRegistry::RegistryHandle handle;
         };
+
+	    struct AccessAccumulator {
+	        bool hasState = false;
+	        ResourceState state{
+	            rhi::ResourceAccessType::Common,
+	            rhi::ResourceLayout::Common,
+	            rhi::ResourceSyncState::None
+	        };
+
+	        uint32_t totalMips = 0;
+	        uint32_t totalSlices = 0;
+
+	        // For each mip, a sorted, disjoint list of inclusive slice intervals touched by this immediate list.
+	        std::vector<std::vector<SliceInterval>> perMip;
+
+	        void EnsureDims(uint32_t mips, uint32_t slices) {
+	            if (mips == 0) mips = 1;
+	            if (slices == 0) slices = 1;
+
+	            if (totalMips == mips && totalSlices == slices && !perMip.empty())
+	                return;
+
+	            totalMips = mips;
+	            totalSlices = slices;
+	            perMip.clear();
+	            perMip.resize(totalMips);
+	        }
+	    };
+
+	    // GlobalID -> handle (for ResourceRequirements)
+	    std::unordered_map<uint64_t, ResourceRegistry::RegistryHandle> m_handles;
+
+	    // GlobalID -> accumulated (state + union of touched subresources)
+	    std::unordered_map<uint64_t, AccessAccumulator> m_access;
+
 
         Resolved Resolve(ResourceIdentifier const& id);
 
@@ -430,7 +470,6 @@ namespace rg::imm {
         }
 
 
-    private:
         bool m_isRenderPass = true;
 
         ImmediateDispatch const& m_dispatch;
@@ -441,11 +480,6 @@ namespace rg::imm {
 
         BytecodeWriter m_writer;
 
-        // GlobalID -> handle (for ResourceRequirements)
-        std::unordered_map<uint64_t, ResourceRegistry::RegistryHandle> m_handles;
-
-        // GlobalID -> tracker of desired access for this pass's immediate section
-        std::unordered_map<uint64_t, SymbolicTracker> m_trackers;
 
 		// Keep-alive for ephemeral resources only valid during this command list's execution
         // For example, copy for resource resize- the old one is discarded.

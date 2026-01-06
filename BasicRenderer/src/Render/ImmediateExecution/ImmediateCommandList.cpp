@@ -4,6 +4,137 @@
 
 namespace rg::imm {
 
+    namespace {
+
+        using Interval = rg::imm::ImmediateCommandList::SliceInterval;
+
+        static inline void InsertAndUnionInterval(std::vector<Interval>& v, uint32_t lo, uint32_t hi)
+        {
+            if (lo > hi) return;
+
+            // v is kept sorted and disjoint, inclusive.
+            auto it = std::lower_bound(v.begin(), v.end(), lo,
+                [](const Interval& a, uint32_t value) {
+                    // a is strictly before value if it ends before value-1
+                    return (a.hi + 1) < value;
+                });
+
+            uint32_t newLo = lo;
+            uint32_t newHi = hi;
+
+            while (it != v.end() && it->lo <= (newHi + 1)) {
+                newLo = std::min(newLo, it->lo);
+                newHi = std::max(newHi, it->hi);
+                it = v.erase(it);
+            }
+
+            v.insert(it, Interval{ newLo, newHi });
+        }
+
+        struct Rect {
+            uint32_t mip0 = 0, mip1 = 0;     // inclusive
+            uint32_t slice0 = 0, slice1 = 0; // inclusive
+        };
+
+        static inline bool TouchOrOverlap1D(uint32_t a0, uint32_t a1, uint32_t b0, uint32_t b1) {
+            // inclusive, touch counts
+            return (a1 + 1 >= b0) && (b1 + 1 >= a0);
+        }
+
+        static inline bool TryMergeRect(Rect& a, const Rect& b)
+        {
+            // Merge along mip axis (same slice span)
+            if (a.slice0 == b.slice0 && a.slice1 == b.slice1 &&
+                TouchOrOverlap1D(a.mip0, a.mip1, b.mip0, b.mip1))
+            {
+                a.mip0 = std::min(a.mip0, b.mip0);
+                a.mip1 = std::max(a.mip1, b.mip1);
+                return true;
+            }
+
+            // Merge along slice axis (same mip span)
+            if (a.mip0 == b.mip0 && a.mip1 == b.mip1 &&
+                TouchOrOverlap1D(a.slice0, a.slice1, b.slice0, b.slice1))
+            {
+                a.slice0 = std::min(a.slice0, b.slice0);
+                a.slice1 = std::max(a.slice1, b.slice1);
+                return true;
+            }
+
+            return false;
+        }
+
+        static inline void MergeRectsUntilStable(std::vector<Rect>& rects)
+        {
+            if (rects.size() <= 1) return;
+
+            bool changed = false;
+            do {
+                changed = false;
+
+                std::sort(rects.begin(), rects.end(),
+                    [](const Rect& L, const Rect& R) {
+                        // Sort by slice span, then mip span (keeps likely-merge neighbors adjacent)
+                        if (L.slice0 != R.slice0) return L.slice0 < R.slice0;
+                        if (L.slice1 != R.slice1) return L.slice1 < R.slice1;
+                        if (L.mip0 != R.mip0) return L.mip0 < R.mip0;
+                        return L.mip1 < R.mip1;
+                    });
+
+                std::vector<Rect> out;
+                out.reserve(rects.size());
+
+                for (const Rect& r : rects) {
+                    if (!out.empty() && TryMergeRect(out.back(), r)) {
+                        changed = true;
+                    }
+                    else {
+                        out.push_back(r);
+                    }
+                }
+
+                rects.swap(out);
+            } while (changed);
+        }
+
+        static inline RangeSpec RectToRangeSpec(const Rect& r, uint32_t totalMips, uint32_t totalSlices)
+        {
+            RangeSpec out{};
+
+            // mips
+            if (r.mip0 == 0 && r.mip1 == totalMips - 1) {
+                out.mipLower = { BoundType::All, 0 };
+                out.mipUpper = { BoundType::All, 0 };
+            }
+            else if (r.mip0 == r.mip1) {
+                out.mipLower = { BoundType::Exact, r.mip0 };
+                out.mipUpper = { BoundType::Exact, r.mip1 };
+            }
+            else {
+                out.mipLower = { BoundType::From, r.mip0 };
+                out.mipUpper = { BoundType::UpTo, r.mip1 };
+            }
+
+            // slices
+            if (r.slice0 == 0 && r.slice1 == totalSlices - 1) {
+                out.sliceLower = { BoundType::All, 0 };
+                out.sliceUpper = { BoundType::All, 0 };
+            }
+            else if (r.slice0 == r.slice1) {
+                out.sliceLower = { BoundType::Exact, r.slice0 };
+                out.sliceUpper = { BoundType::Exact, r.slice1 };
+            }
+            else {
+                out.sliceLower = { BoundType::From, r.slice0 };
+                out.sliceUpper = { BoundType::UpTo, r.slice1 };
+            }
+
+            return out;
+        }
+
+    } // anonymous namespace
+
+
 	// BytecodeReader functions
 	bool BytecodeReader::Empty() const noexcept { return cur >= end; }
 
@@ -85,113 +216,127 @@ namespace rg::imm {
     void ImmediateCommandList::Reset() {
         m_writer.Reset();
         m_handles.clear();
-        m_trackers.clear();
+        m_access.clear();
     }
 
     FrameData ImmediateCommandList::Finalize() {
         FrameData out;
         out.bytecode = m_writer.data;
-		out.keepAlive = std::move(m_keepAlive);
-        // Convert trackers -> requirements (skip "Common/Common" regions).
+        out.keepAlive = std::move(m_keepAlive);
+
         out.requirements.reserve(64);
-        for (auto const& [rid, tracker] : m_trackers) {
-            auto it = m_handles.find(rid);
-            if (it == m_handles.end()) {
+
+        for (auto& [rid, acc] : m_access)
+        {
+            if (!acc.hasState)
                 continue;
+
+            auto itH = m_handles.find(rid);
+            if (itH == m_handles.end())
+                continue;
+
+            // Build rectangles by extending identical slice-intervals across consecutive mips.
+            std::unordered_map<uint64_t, Rect> open; // key=(sl0,sl1)
+            open.reserve(64);
+
+            std::vector<Rect> rects;
+            rects.reserve(64);
+
+            auto keyOf = [](uint32_t lo, uint32_t hi) -> uint64_t {
+                return (uint64_t(lo) << 32) | uint64_t(hi);
+                };
+
+            // Track which keys were seen this mip so we can close the rest.
+            std::unordered_map<uint64_t, uint32_t> lastSeen;
+            lastSeen.reserve(64);
+
+            for (uint32_t mip = 0; mip < acc.totalMips; ++mip)
+            {
+                // mark seen this mip
+                for (const auto& in : acc.perMip[mip])
+                {
+                    const uint64_t k = keyOf(in.lo, in.hi);
+                    lastSeen[k] = mip;
+
+                    auto it = open.find(k);
+                    if (it == open.end()) {
+                        open.emplace(k, Rect{ mip, mip, in.lo, in.hi });
+                    }
+                    else {
+                        // if it was open, extend only if consecutive; otherwise close & restart
+                        if (it->second.mip1 + 1 == mip) {
+                            it->second.mip1 = mip;
+                        }
+                        else {
+                            rects.push_back(it->second);
+                            it->second = Rect{ mip, mip, in.lo, in.hi };
+                        }
+                    }
+                }
+
+                // close any open rects not seen on this mip
+                for (auto it = open.begin(); it != open.end(); )
+                {
+                    auto ls = lastSeen.find(it->first);
+                    if (ls == lastSeen.end() || ls->second != mip) {
+                        rects.push_back(it->second);
+                        it = open.erase(it);
+                    }
+                    else {
+                        ++it;
+                    }
+                }
             }
 
-            // Initial "no-op" state:
-            ResourceState init{
-                rhi::ResourceAccessType::Common,
-                rhi::ResourceLayout::Common,
-                rhi::ResourceSyncState::None
-            };
+            // close remaining
+            for (auto& [k, r] : open) {
+                (void)k;
+                rects.push_back(r);
+            }
 
-            for (auto const& seg : tracker.GetSegments()) {
-                if (seg.state == init) continue; // ignore untouched portions
-                ResourceRequirement rr{ it->second };
-                rr.resourceHandleAndRange.range = seg.rangeSpec;
-                rr.state = seg.state;
-                out.requirements.push_back(std::move(rr));
+            // Merge rectangles across axes where it does not introduce unused coverage.
+            MergeRectsUntilStable(rects);
+
+            // Emit requirements.
+            for (const Rect& r : rects)
+            {
+                ResourceRequirement rr{ itH->second };
+                rr.resourceHandleAndRange.range = RectToRangeSpec(r, acc.totalMips, acc.totalSlices);
+                rr.state = acc.state;
+                out.requirements.push_back(rr);
             }
         }
+
         return out;
     }
 
     ImmediateCommandList::Resolved ImmediateCommandList::Resolve(ResourceIdentifier const& id) {
-        if (!m_resolveByIdFn) {
-            throw std::runtime_error("ImmediateCommandList has no ResolveByIdFn");
-        }
+        if (!m_resolveByIdFn) throw std::runtime_error("ImmediateCommandList has no ResolveByIdFn");
         const auto handle = m_resolveByIdFn(m_resolveUser, id, /*allowFailure=*/false);
 
         const uint64_t rid = handle.GetGlobalResourceID();
-
-        // Store handle for Finalize()
-        m_handles[rid] = handle;
-
-        // Initialize tracker if first access
-        if (!m_trackers.contains(rid)) {
-            constexpr RangeSpec whole{};
-            constexpr ResourceState init{
-                rhi::ResourceAccessType::Common,
-                rhi::ResourceLayout::Common,
-                rhi::ResourceSyncState::None
-            };
-            m_trackers.emplace(rid, SymbolicTracker(whole, init));
-        }
-
+        m_handles[rid] = handle; // used in Finalize()
         return { handle };
     }
 
-
     ImmediateCommandList::Resolved ImmediateCommandList::Resolve(Resource* p) {
-        if (!p) {
-            throw std::runtime_error("ImmediateCommandList: null Resource*");
-        }
+        if (!p) throw std::runtime_error("ImmediateCommandList: null Resource*");
         const auto handle = m_resolveByPtrFn(m_resolveUser, p, /*allowFailure=*/false);
 
         const uint64_t rid = handle.GetGlobalResourceID();
-
-        // Store handle for Finalize()
         m_handles[rid] = handle;
-
-        if (!m_trackers.contains(rid)) {
-            constexpr RangeSpec whole{};
-            constexpr ResourceState init{
-                rhi::ResourceAccessType::Common,
-                rhi::ResourceLayout::Common,
-                rhi::ResourceSyncState::None
-            };
-            m_trackers.emplace(rid, SymbolicTracker(whole, init));
-        }
-
         return { handle };
     }
 
     ImmediateCommandList::Resolved ImmediateCommandList::Resolve(Resource* p, const std::shared_ptr<Resource>& keepAlive) {
-        if (!p) {
-            throw std::runtime_error("ImmediateCommandList: null Resource*");
-        }
+        if (!p) throw std::runtime_error("ImmediateCommandList: null Resource*");
 
-        // Create ephemeral handle - doesn't register in global registry
         auto handle = ResourceRegistry::RegistryHandle::MakeEphemeral(p);
-
         const uint64_t rid = handle.GetGlobalResourceID();
         m_handles[rid] = handle;
 
-        // Pin to keep alive until frame completes
         if (keepAlive) {
             m_keepAlive->pinShared(keepAlive);
-        }
-
-        if (!m_trackers.contains(rid)) {
-            constexpr RangeSpec whole{};
-            constexpr ResourceState init{
-                rhi::ResourceAccessType::Common,
-                rhi::ResourceLayout::Common,
-                rhi::ResourceSyncState::None
-            };
-            m_trackers.emplace(handle.GetGlobalResourceID(), SymbolicTracker(whole, init));
         }
 
         return { handle };
@@ -209,19 +354,40 @@ namespace rg::imm {
     void ImmediateCommandList::Track(ResourceRegistry::RegistryHandle handle, const uint64_t rid, const RangeSpec& range, const rhi::ResourceAccessType access) {
         const ResourceState want = MakeState(access);
 
-        // if a previously-recorded command forced this same range into a different non-Common state, treat that as an error 
-        // TODO: Allow internal transitions in immediate passes
-        auto& tr = m_trackers.at(rid);
-        std::vector<ResourceTransition> tmp;
-        tr.Apply(range, nullptr, want, tmp);
+        // Resolve dims now (needed for exact marking / compression).
+        uint32_t totalMips = handle.GetNumMipLevels();
+        uint32_t totalSlices = handle.GetArraySize();
+        if (totalMips == 0) totalMips = 1;
+        if (totalSlices == 0) totalSlices = 1;
 
-        for (auto const& t : tmp) {
-            // If we're transitioning from something other than Common, we have a multi-state requirement.
-            // (v1: disallow, to keep scheduling model simple)
-            if (t.prevAccessType != rhi::ResourceAccessType::Common &&
-                t.prevAccessType != t.newAccessType) {
-                throw std::runtime_error("ImmediateCommandList: conflicting access states within one pass (needs internal barriers)");
+        SubresourceRange sr = ResolveRangeSpec(range, totalMips, totalSlices);
+        if (sr.isEmpty())
+            return; // ignore empty regions
+
+        auto& acc = m_access[rid];
+        acc.EnsureDims(totalMips, totalSlices);
+
+        if (!acc.hasState) {
+            acc.hasState = true;
+            acc.state = want;
+        }
+        else {
+            // Disallow multi-state within the same immediate list
+			// TODO: Allow with internal barriers?
+            if (!(acc.state == want)) {
+                throw std::runtime_error(
+                    "ImmediateCommandList: conflicting access states within one pass (needs internal barriers)");
             }
+        }
+
+        // Mark union-of-touched (exact, no unused coverage).
+        const uint32_t mip0 = sr.firstMip;
+        const uint32_t mip1 = sr.firstMip + sr.mipCount - 1;
+        const uint32_t sl0 = sr.firstSlice;
+        const uint32_t sl1 = sr.firstSlice + sr.sliceCount - 1;
+
+        for (uint32_t mip = mip0; mip <= mip1; ++mip) {
+            InsertAndUnionInterval(acc.perMip[mip], sl0, sl1);
         }
     }
 

@@ -956,12 +956,6 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 				m_framePasses.push_back(pr); // Retained pass
 			}
 			else {
-				for (auto& req : immediateFrameData.requirements) {
-					auto res = _registry.Resolve(req.resourceHandleAndRange.resource);
-;					if (res->GetName() == "Skybox cubemap") {
-						__debugbreak();
-					}
-				}
 				p.immediateBytecode = std::move(immediateFrameData.bytecode);
 				p.immediateKeepAlive = std::move(immediateFrameData.keepAlive);
 				p.resources.frameResourceRequirements.insert(
@@ -1070,29 +1064,23 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 
 	// Build one vector of transitions per batch
 	for (size_t bi = 0; bi < batches.size(); bi++) {
-		//std::vector<ResourceTransition> allTransitions;
-		//auto& batch = batches[bi];
-		//allTransitions.insert(
-		//	allTransitions.end(),
-		//	batch.renderTransitions.begin(),
-		//	batch.renderTransitions.end());
-		//allTransitions.insert(
-		//	allTransitions.end(),
-		//	batch.computeTransitions.begin(),
-		//	batch.computeTransitions.end());
-
-		//for (auto& trans : allTransitions) {
-		//	if (trans.pResource->GetName() == "Skybox cubemap") {
-		//		__debugbreak();
-		//	}
-		//}
+		std::vector<ResourceTransition> allTransitions;
+		auto& batch = batches[bi];
+		allTransitions.insert(
+			allTransitions.end(),
+			batch.renderTransitions.begin(),
+			batch.renderTransitions.end());
+		allTransitions.insert(
+			allTransitions.end(),
+			batch.computeTransitions.begin(),
+			batch.computeTransitions.end());
 
 		// Validate
-		//TransitionConflict out;
-		//if (bool ok = ValidateNoConflictingTransitions(allTransitions, &out); !ok) {
-		//	spdlog::error("Render graph has conflicting resource transitions!");
-		//	throw std::runtime_error("Render graph has conflicting resource transitions!");
-		//}
+		TransitionConflict out;
+		if (bool ok = ValidateNoConflictingTransitions(allTransitions, &out); !ok) {
+			spdlog::error("Render graph has conflicting resource transitions!");
+			throw std::runtime_error("Render graph has conflicting resource transitions!");
+		}
 	}
 
 #endif
@@ -1366,6 +1354,10 @@ namespace {
 
 				statisticsManager.BeginQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);
 				rg::imm::Replay(pr.immediateBytecode, commandList); // Replay immediate-mode commands
+
+				// Drop immediate-mode keep-alive
+				pr.immediateKeepAlive.reset();
+
 				auto passReturn = pr.pass->Execute(context); // Execute retained-mode commands
 				statisticsManager.EndQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);
 				if (passReturn.fence) {
