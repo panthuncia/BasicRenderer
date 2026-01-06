@@ -26,10 +26,16 @@ public:
 	unsigned int GetWidth() const { return m_width; }
 	unsigned int GetHeight() const { return m_height; }
 	unsigned int GetChannels() const { return m_channels; }
-    rhi::Resource GetTexture() {
+	rhi::Resource GetTexture() {
 		return m_textureHandle.GetResource();
-    }
-    rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
+	}
+	rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
+
+	void UploadInitialData(const std::shared_ptr<Resource>& owner, const std::vector<const stbi_uc*>& initialData = {}) const;
+
+	SymbolicTracker* GetStateTracker() {
+		return &m_stateTracker;
+	}
 
 	void SetName(const char* newName);
 	// Debug helper: dumps any live textures that haven't been destroyed yet.
@@ -71,10 +77,9 @@ private:
 #if BUILD_TYPE == BUILD_DEBUG
 	std::stacktrace m_creation;
 #endif
-    void initialize(const TextureDescription& desc,
+	void initialize(const TextureDescription& desc,
 		uint64_t owningResourceID,
-		const char* name,
-        const std::vector<const stbi_uc*>& initialData);
+		const char* name);
 
 	void RegisterLiveAlloc();
 	void UnregisterLiveAlloc();
@@ -87,21 +92,23 @@ private:
 	inline static std::mutex s_liveMutex;
 	inline static std::unordered_map<const GpuTextureBacking*, LiveAllocInfo> s_liveAllocs;
 
-    unsigned int m_width;
-    unsigned int m_height;
+	unsigned int m_width;
+	unsigned int m_height;
 	unsigned int m_channels;
 	unsigned int m_mipLevels;
 	unsigned int m_arraySize;
-    TrackedHandle m_textureHandle;
-    rhi::Format m_format;
+	TrackedHandle m_textureHandle;
+	rhi::Format m_format;
 	TextureDescription m_desc;
 	rhi::ClearValue m_clearColor;
 
-    //rhi::HeapHandle m_placedResourceHeap; // If this is a placed resource, this is the heap it was created in
+	//rhi::HeapHandle m_placedResourceHeap; // If this is a placed resource, this is the heap it was created in
 
-    // Enhanced barriers
+	// Enhanced barriers
 	rhi::TextureBarrier m_barrier = {};
 
 	unsigned int m_internalWidth = 0; // Internal width, used for padding textures to power of two
 	unsigned int m_internalHeight = 0; // Internal height, used for padding textures to power of two
+
+	SymbolicTracker m_stateTracker;
 };

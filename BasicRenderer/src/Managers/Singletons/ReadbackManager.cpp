@@ -12,7 +12,7 @@
 std::unique_ptr<ReadbackManager> ReadbackManager::instance = nullptr;
 bool ReadbackManager::initialized = false;
 
-void ReadbackManager::SaveCubemapToDDS(rhi::Device& device, rhi::CommandList& commandList, std::shared_ptr<PixelBuffer> cubemap, const std::wstring& outputFile, UINT64 fenceValue) {
+void ReadbackManager::SaveCubemapToDDS(rhi::Device& device, rg::imm::ImmediateCommandList& commandList, std::shared_ptr<PixelBuffer> cubemap, const std::wstring& outputFile, UINT64 fenceValue) {
     // Get the number of mip levels and subresources
     uint32_t numMipLevels = cubemap->GetMipLevels();
     const uint32_t faces = 6;
@@ -46,61 +46,31 @@ void ReadbackManager::SaveCubemapToDDS(rhi::Device& device, rhi::CommandList& co
     sourceState.layout = rhi::ResourceLayout::CopySource;
     sourceState.sync = rhi::ResourceSyncState::Copy;
 
-
-    // Compute transitions to bring full resources into COPY_SOURCE and COPY_DEST
-    std::vector<ResourceTransition> transitions;
-    cubemap->GetStateTracker()->Apply(range, cubemap.get(), sourceState, transitions);
-
-    std::vector<D3D12_BARRIER_GROUP> barriers;
-    std::vector<rhi::BarrierBatch> sourceTransitions;
-    for (auto& transition : transitions) {
-        auto sourceTransition = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
-        sourceTransitions.push_back(sourceTransition);
-    }
-
-    auto batch = rhi::helpers::CombineBarrierBatches(sourceTransitions);
-
-    commandList.Barriers(batch.View());
+	// Immediate-mode API will handle barriers for us
 
     // Issue copy commands for each mip level of each face
     for (UINT mipLevel = 0; mipLevel < numMipLevels; ++mipLevel) {
         for (UINT faceIndex = 0; faceIndex < 6; ++faceIndex) {
             UINT subresourceIndex = CalcSubresource(mipLevel, faceIndex, 0, numMipLevels, 6);
 
-            rhi::BufferTextureCopyFootprint c{};
-            c.texture = cubemap->GetAPIResource().GetHandle();
-            c.buffer = readbackBuffer->GetAPIResource().GetHandle();
-            c.mip = mipLevel;
-            c.arraySlice = faceIndex;
-            c.x = c.y = c.z = 0;     // full subresource
-            c.footprint.offset = fps[subresourceIndex].offset;
-            c.footprint.rowPitch = fps[subresourceIndex].rowPitch;
-            c.footprint.width = fps[subresourceIndex].width;
-            c.footprint.height = fps[subresourceIndex].height;
-            c.footprint.depth = fps[subresourceIndex].depth;
+            rhi::CopyableFootprint footprint;
+			footprint.offset = fps[subresourceIndex].offset;
+			footprint.rowPitch = fps[subresourceIndex].rowPitch;
+			footprint.width = fps[subresourceIndex].width;
+			footprint.height = fps[subresourceIndex].height;
+			footprint.depth = fps[subresourceIndex].depth;
 
-            commandList.CopyTextureToBuffer(c);
+            commandList.CopyTextureToBuffer(
+                cubemap.get(),
+                mipLevel,
+                faceIndex,
+                readbackBuffer.get(),
+                footprint,
+                0, // Full subresources
+                0,
+                0);
         }
     }
-
-    barriers.clear();
-    transitions.clear();
-
-    // Copy back the initial state of the resources
-    for (auto& segment : initialSourceState) {
-        cubemap->GetStateTracker()->Apply(segment.rangeSpec, cubemap.get(), segment.state, transitions);
-    }
-
-    sourceTransitions.clear();
-    batch.Clear();
-    for (auto& transition : transitions) {
-        auto sourceTransition = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
-        sourceTransitions.push_back(std::move(sourceTransition));
-    }
-
-    batch = rhi::helpers::CombineBarrierBatches(sourceTransitions);
-
-    commandList.Barriers(batch.View());
 
     auto width = cubemap->GetWidth();
     auto height = cubemap->GetHeight();
@@ -172,7 +142,7 @@ void ReadbackManager::SaveCubemapToDDS(rhi::Device& device, rhi::CommandList& co
 
 void ReadbackManager::SaveTextureToDDS(
     rhi::Device& device,
-    rhi::CommandList& commandList,
+    rg::imm::ImmediateCommandList& commandList,
     PixelBuffer* texture,
     const std::wstring& outputFile,
     uint64_t fenceValue)
@@ -221,10 +191,25 @@ void ReadbackManager::SaveTextureToDDS(
         c.footprint.height = fps[subresourceIndex].height;
         c.footprint.depth = fps[subresourceIndex].depth;
 
-        commandList.CopyTextureToBuffer(c);
+		rhi::CopyableFootprint footprint;
+		footprint.offset = fps[subresourceIndex].offset;
+		footprint.rowPitch = fps[subresourceIndex].rowPitch;
+		footprint.width = fps[subresourceIndex].width;
+		footprint.height = fps[subresourceIndex].height;
+		footprint.depth = fps[subresourceIndex].depth;
+
+        commandList.CopyTextureToBuffer(
+            texture,
+            mipLevel,
+            0, // array slice
+            readbackBuffer.get(),
+            footprint,
+            0,
+            0,
+			0);
     }
 
-    // Defer readback + DDS write (same pattern as your cubemap path)
+    // Defer readback + DDS write (same pattern as cubemap path)
     ReadbackRequest readbackRequest;
     readbackRequest.readbackBuffer = readbackBuffer;
     readbackRequest.layouts = fps;

@@ -36,17 +36,6 @@ std::vector<uint64_t> RenderGraph::ExpandSchedulingIDs(uint64_t id) const {
 		for (uint64_t a : GetAllAliasIDs(cur)) {
 			if (visited.insert(a).second) {
 				out.push_back(a);
-
-				// group -> children closure (on the alias-expanded ID too)
-				for (uint64_t child : GetAllIndependantlyManagedResourcesFromGroup(a)) {
-					push(child);
-				}
-
-				// child -> group closure
-				if (auto it = independantlyManagedResourceToGroup.find(a);
-					it != independantlyManagedResourceToGroup.end()) {
-					push(it->second);
-				}
 			}
 		}
 	}
@@ -56,15 +45,14 @@ std::vector<uint64_t> RenderGraph::ExpandSchedulingIDs(uint64_t id) const {
 
 RenderGraph::PassView RenderGraph::GetPassView(AnyPassAndResources& pr) {
 	PassView v{};
-	v.isCompute = (pr.type == PassType::Compute);
-	if (v.isCompute) {
+	if (pr.type == PassType::Compute) {
 		auto& p = std::get<ComputePassAndResources>(pr.pass);
-		v.reqs = &p.resources.resourceRequirements;
+		v.reqs = &p.resources.frameResourceRequirements;
 		v.internalTransitions = &p.resources.internalTransitions;
 	}
 	else {
 		auto& p = std::get<RenderPassAndResources>(pr.pass);
-		v.reqs = &p.resources.resourceRequirements;
+		v.reqs = &p.resources.frameResourceRequirements;
 		v.internalTransitions = &p.resources.internalTransitions;
 	}
 	return v;
@@ -102,7 +90,7 @@ std::vector<RenderGraph::Node> RenderGraph::BuildNodes(RenderGraph& rg, std::vec
 
 		// resource requirements
 		for (auto& req : *view.reqs) {
-			uint64_t base = req.resourceAndRange.resource->GetGlobalResourceID();
+			uint64_t base = req.resourceHandleAndRange.resource.GetGlobalResourceID();
 			bool write = AccessTypeIsWriteType(req.state.access);
 			bool isUav = IsUAVState(req.state);
 
@@ -113,7 +101,7 @@ std::vector<RenderGraph::Node> RenderGraph::BuildNodes(RenderGraph& rg, std::vec
 
 		// internal transitions: treat as "write" for scheduling conservatism
 		for (auto& tr : *view.internalTransitions) {
-			uint64_t base = tr.first.resource->GetGlobalResourceID();
+			uint64_t base = tr.first.resource.GetGlobalResourceID();
 			for (uint64_t rid : rg.ExpandSchedulingIDs(base)) {
 				mark(rid, AccessKind::Write, /*isUav=*/false);
 			}
@@ -236,7 +224,7 @@ void RenderGraph::CommitPassToBatch(
 
 		rg.ProcessResourceRequirements(
 			/*isCompute=*/true,
-			pass.resources.resourceRequirements,
+			pass.resources.frameResourceRequirements,
 			batchOfLastRenderQueueUsage,
 			batchOfLastComputeQueueTransition,
 			currentBatchIndex,
@@ -247,17 +235,15 @@ void RenderGraph::CommitPassToBatch(
 
 		for (auto& exit : pass.resources.internalTransitions) {
 			std::vector<ResourceTransition> _;
-			exit.first.resource->GetStateTracker()->Apply(
-				exit.first.range, exit.first.resource.get(), exit.second, _);
-			currentBatch.internallyTransitionedResources.insert(exit.first.resource->GetGlobalResourceID());
+			exit.first.resource.GetStateTracker()->Apply(
+				exit.first.range, nullptr, exit.second, _); // TODO: Do we really need the ptr?
+			currentBatch.internallyTransitionedResources.insert(exit.first.resource.GetGlobalResourceID());
 		}
 
-		for (auto& req : pass.resources.resourceRequirements) {
-			uint64_t id = req.resourceAndRange.resource->GetGlobalResourceID();
+		for (auto& req : pass.resources.frameResourceRequirements) {
+			uint64_t id = req.resourceHandleAndRange.resource.GetGlobalResourceID();
 			currentBatch.allResources.insert(id);
 			batchOfLastComputeQueueUsage[id] = currentBatchIndex;
-			for (auto child : rg.GetAllIndependantlyManagedResourcesFromGroup(id))
-				batchOfLastComputeQueueUsage[child] = currentBatchIndex;
 		}
 
 		// NEW: track UAV usage for cross-queue "same batch" rejection
@@ -279,7 +265,7 @@ void RenderGraph::CommitPassToBatch(
 
 		rg.ProcessResourceRequirements(
 			/*isCompute=*/false,
-			pass.resources.resourceRequirements,
+			pass.resources.frameResourceRequirements,
 			batchOfLastRenderQueueUsage,
 			batchOfLastRenderQueueTransition,
 			currentBatchIndex,
@@ -290,17 +276,15 @@ void RenderGraph::CommitPassToBatch(
 
 		for (auto& exit : pass.resources.internalTransitions) {
 			std::vector<ResourceTransition> _;
-			exit.first.resource->GetStateTracker()->Apply(
-				exit.first.range, exit.first.resource.get(), exit.second, _);
-			currentBatch.internallyTransitionedResources.insert(exit.first.resource->GetGlobalResourceID());
+			exit.first.resource.GetStateTracker()->Apply(
+				exit.first.range, nullptr, exit.second, _);
+			currentBatch.internallyTransitionedResources.insert(exit.first.resource.GetGlobalResourceID());
 		}
 
-		for (auto& req : pass.resources.resourceRequirements) {
-			uint64_t id = req.resourceAndRange.resource->GetGlobalResourceID();
+		for (auto& req : pass.resources.frameResourceRequirements) {
+			uint64_t id = req.resourceHandleAndRange.resource.GetGlobalResourceID();
 			currentBatch.allResources.insert(id);
 			batchOfLastRenderQueueUsage[id] = currentBatchIndex;
-			for (auto child : rg.GetAllIndependantlyManagedResourcesFromGroup(id))
-				batchOfLastRenderQueueUsage[child] = currentBatchIndex;
 		}
 
 		// NEW:
@@ -521,31 +505,17 @@ void RenderGraph::AddTransition(
 	std::unordered_set<uint64_t>& outTransitionedResourceIDs)
 {
 
-	auto& resource = r.resourceAndRange.resource;
+	auto& resource = r.resourceHandleAndRange.resource;
 	std::vector<ResourceTransition> transitions;
-	resource->GetStateTracker()->Apply(r.resourceAndRange.range, resource.get(), r.state, transitions);
+	auto pRes = _registry.Resolve(resource); // TODO: Can we get rid of pRes in transitions?
+
+	resource.GetStateTracker()->Apply(r.resourceHandleAndRange.range, pRes, r.state, transitions);
 
 	if (!transitions.empty()) {
-		outTransitionedResourceIDs.insert(resource->GetGlobalResourceID());
+		outTransitionedResourceIDs.insert(resource.GetGlobalResourceID());
 	}
 
-	currentBatch.passBatchTrackers[resource->GetGlobalResourceID()] = resource->GetStateTracker(); // We will need to chack subsequent passes against this
-
-	// Check if this is a resource group
-	//std::vector<ResourceTransition> independantlyManagedTransitions;
-	auto group = std::dynamic_pointer_cast<ResourceGroup>(resource);
-	if (group) {
-		for (auto& childID : resourcesFromGroupToManageIndependantly[group->GetGlobalResourceID()]) {
-			auto& child = resourcesByID[childID];
-			if (child) {
-				currentBatch.passBatchTrackers[childID] = child->GetStateTracker();
-				child->GetStateTracker()->Apply(r.resourceAndRange.range, child.get(), r.state, transitions);
-			} else {
-				spdlog::error("Resource group {} has a child resource {} that is marked as independantly managed, but is not managed by this graph. This should not happen.", group->GetGlobalResourceID(), childID);
-				throw(std::runtime_error("Resource group has a child resource that is not managed by this graph"));
-			}
-		}
-	}
+	currentBatch.passBatchTrackers[resource.GetGlobalResourceID()] = resource.GetStateTracker(); // We will need to chack subsequent passes against this
 
 	bool oldSyncHasNonComputeSyncState = false;
 	for (auto& transition : transitions) {
@@ -555,8 +525,10 @@ void RenderGraph::AddTransition(
 	}
 	if (isComputePass && oldSyncHasNonComputeSyncState) { // We need to place transitions on render queue
 		for (auto& transition : transitions) {
-			unsigned int gfxBatch = batchOfLastRenderQueueUsage[transition.pResource->GetGlobalResourceID()];
-			batchOfLastRenderQueueUsage[transition.pResource->GetGlobalResourceID()] = gfxBatch; // Can this cause transition overlaps?
+			// Resource groups will pass through their child ptrs in the transition
+			const auto id = transition.pResource ? transition.pResource->GetGlobalResourceID() : resource.GetGlobalResourceID();
+			unsigned int gfxBatch = batchOfLastRenderQueueUsage[id];
+			batchOfLastRenderQueueUsage[id] = gfxBatch; // Can this cause transition overlaps?
 			batches[gfxBatch].batchEndTransitions.push_back(transition);
 		}
 	}
@@ -586,28 +558,95 @@ void RenderGraph::ProcessResourceRequirements(
 
 	for (auto& resourceRequirement : resourceRequirements) {
 
-		if (!resourcesByID.contains(resourceRequirement.resourceAndRange.resource->GetGlobalResourceID())) {
-			spdlog::error("Resource referenced by pass is not managed by this graph");
-			throw(std::runtime_error("Resource referenced is not managed by this graph"));
-		}
+		//if (!resourcesByID.contains(resourceRequirement.resourceHandleAndRange.resource.GetGlobalResourceID())) {
+		//	spdlog::error("Resource referenced by pass is not managed by this graph");
+		//	throw(std::runtime_error("Resource referenced is not managed by this graph"));
+		//}
 
-		const auto& id = resourceRequirement.resourceAndRange.resource->GetGlobalResourceID();
+		const auto& id = resourceRequirement.resourceHandleAndRange.resource.GetGlobalResourceID();
 
 		AddTransition(batchOfLastRenderQueueUsage, batchIndex, currentBatch, isCompute, resourceRequirement, outTransitionedResourceIDs);
 
 		if (AccessTypeIsWriteType(resourceRequirement.state.access)) {
-			if (resourcesFromGroupToManageIndependantly.contains(id)) { // This is a resource group, and we may be transitioning some children independantly
-				for (auto& childID : resourcesFromGroupToManageIndependantly[id]) {
-					producerHistory[childID] = batchIndex;
-				}
-			}
 			producerHistory[id] = batchIndex;
 		}
 	}
 }
 
+bool ResolveFirstMipSlice(ResourceRegistry::RegistryHandle r, RangeSpec range, uint32_t& outMip, uint32_t& outSlice) noexcept
+{
+	const uint32_t totalMips = r.GetNumMipLevels();
+	const uint32_t totalSlices = r.GetArraySize();
+	if (totalMips == 0 || totalSlices == 0) return false;
+
+	SubresourceRange sr = ResolveRangeSpec(range, totalMips, totalSlices);
+	if (sr.isEmpty()) return false;
+
+	outMip = sr.firstMip;
+	outSlice = sr.firstSlice;
+	return true;
+}
+
 RenderGraph::RenderGraph() {
 	UploadManager::GetInstance().SetUploadResolveContext({ &_registry });
+
+	auto MakeDefaultImmediateDispatch = [&]() noexcept -> rg::imm::ImmediateDispatch
+		{
+			rg::imm::ImmediateDispatch d{};
+			d.user = this;
+
+			d.GetResourceHandle = [](RenderGraph* user, ResourceRegistry::RegistryHandle r) noexcept -> rhi::ResourceHandle {
+				Resource* ptr;
+				if (r.IsEphemeral()) {
+					ptr = r.GetEphemeralPtr();
+				}
+				else {
+					ptr = user->_registry.Resolve(r);
+				}
+				return ptr ? ptr->GetAPIResource().GetHandle() : rhi::ResourceHandle{};
+				};
+
+			d.GetRTV = +[](RenderGraph* user, ResourceRegistry::RegistryHandle r, RangeSpec range) noexcept -> rhi::DescriptorSlot {
+				auto* gir = dynamic_cast<GloballyIndexedResource*>(user->_registry.Resolve(r));
+				if (!gir || !gir->HasRTV()) return {};
+
+				uint32_t mip = 0, slice = 0;
+				if (!ResolveFirstMipSlice(r, range, mip, slice)) return {};
+
+				return gir->GetRTVInfo(mip, slice).slot;
+				};
+
+			d.GetDSV = +[](RenderGraph* user, ResourceRegistry::RegistryHandle r, RangeSpec range) noexcept -> rhi::DescriptorSlot {
+				auto* gir = dynamic_cast<GloballyIndexedResource*>(user->_registry.Resolve(r));
+				if (!gir || !gir->HasDSV()) return {};
+
+				uint32_t mip = 0, slice = 0;
+				if (!ResolveFirstMipSlice(r, range, mip, slice)) return {};
+
+				return gir->GetDSVInfo(mip, slice).slot;
+				};
+
+			d.GetUavClearInfo = +[](RenderGraph* user, ResourceRegistry::RegistryHandle r, RangeSpec range, rhi::UavClearInfo& out) noexcept -> bool {
+				auto* gir = dynamic_cast<GloballyIndexedResource*>(user->_registry.Resolve(r));
+
+				// DX12 path requires both a shader-visible and CPU-visible UAV descriptor.
+				if (!gir || !gir->HasUAVShaderVisible() || !gir->HasUAVNonShaderVisible()) return false;
+
+				uint32_t mip = 0, slice = 0;
+				if (!ResolveFirstMipSlice(r, range, mip, slice)) return false;
+
+				out.shaderVisible = gir->GetUAVShaderVisibleInfo(mip, slice).slot;
+				out.cpuVisible = gir->GetUAVNonShaderVisibleInfo(mip, slice).slot;
+
+				out.resource = gir->GetAPIResource();
+
+				return true;
+				};
+
+			return d;
+		};
+
+	m_immediateDispatch = MakeDefaultImmediateDispatch();
 }
 
 RenderGraph::~RenderGraph() {
@@ -646,24 +685,22 @@ void RenderGraph::ResetForRecompile()
 	//std::unordered_map<uint64_t, SymbolicTracker*> trackers; // Tracks the state of resources in the graph.
 
 	// Clear any existing compile state
-	passes.clear();
+	m_masterPassList.clear();
 	batches.clear();
 	aliasGroups.clear();
 	resourceToAliasGroup.clear();
 	aliasedResources.clear();
 	lastActiveSubresourceInAliasGroup.clear();
-	independantlyManagedResourceToGroup.clear();
-	resourcesFromGroupToManageIndependantly.clear();
 	trackers.clear();
 
 	// Clear resources
 	resourcesByID.clear();
-	resourceGroups.clear();
 	resourcesByName.clear();
 
 	// Clear providers
 	_providerMap.clear();
 	_providers.clear();
+	_resolverMap.clear();
 	_registry = ResourceRegistry();
 
 	// Register new registry with upload manager
@@ -678,7 +715,7 @@ void RenderGraph::ResetForRecompile()
 
 }
 
-void RenderGraph::Compile() {
+void RenderGraph::CompileStructural() {
 	// Register resource providers from pass builders
 
 	std::vector<unsigned int> empty;
@@ -704,25 +741,10 @@ void RenderGraph::Compile() {
 
     batches.clear();
 
-	//Check if any of the resource groups we have have Nth children that we also manage directly
-	for (auto& resourceGroup : resourceGroups) {
-		auto children = resourceGroup->GetChildIDs();
-		for (auto& childID : children) {
-			if (resourcesByID.contains(childID)) {
-				resourceGroup->MarkResourceAsNonStandard(resourcesByID[childID]);
-				if (!resourcesFromGroupToManageIndependantly.contains(resourceGroup->GetGlobalResourceID())) {
-					resourcesFromGroupToManageIndependantly[resourceGroup->GetGlobalResourceID()] = {};
-				}
-				resourcesFromGroupToManageIndependantly[resourceGroup->GetGlobalResourceID()].push_back(childID);
-				independantlyManagedResourceToGroup[childID] = resourceGroup->GetGlobalResourceID();
-			}
-		}
-	}
-
 	// Manage aliased resources 
 
 	// Mark resources that use the same memory as each other, as they need aliasing barriers
-	for (auto& resource : resourcesByID) {
+	for (const auto& resource : resourcesByID) {
 		auto& r = resource.second;
 		for (auto& alias : r->GetAliasedResources()) {
 			if (!aliasedResources.contains(r->GetGlobalResourceID())) {
@@ -745,7 +767,7 @@ void RenderGraph::Compile() {
 				uint64_t cur = queue.front(); queue.pop();
 				group.push_back(cur);
 				for (uint64_t other : aliasedResources[cur]) {
-					if (!visited.count(other)) {
+					if (!visited.contains(other)) {
 						visited.insert(other);
 						queue.push(other);
 					}
@@ -758,15 +780,203 @@ void RenderGraph::Compile() {
 		}
 	}
 
+	// Upload pass inserted at front
+	if (const auto uploadPass = UploadManager::GetInstance().GetUploadPass(); uploadPass) {
+		auto uploadBatch = PassBatch();
+		RenderPassAndResources uploadPassAndResources;
+		uploadPassAndResources.pass = uploadPass;
+		AnyPassAndResources uploadAnyPassAndResources;
+		uploadAnyPassAndResources.type = PassType::Render;
+		uploadAnyPassAndResources.pass = uploadPassAndResources;
+		m_masterPassList.insert(m_masterPassList.begin(), uploadAnyPassAndResources);
+	}
+
+	// Readback pass inserted at end
+	if (const auto readbackPass = ReadbackManager::GetInstance().GetReadbackPass(); readbackPass) { // This pass uses the immediate-mode API to perform readbacks
+		auto readbackBatch = PassBatch();
+		RenderPassAndResources readbackPassAndResources;
+		readbackPassAndResources.pass = readbackPass;
+		AnyPassAndResources readbackAnyPassAndResources;
+		readbackAnyPassAndResources.type = PassType::Render;
+		readbackAnyPassAndResources.pass = readbackPassAndResources;
+		m_masterPassList.push_back(readbackAnyPassAndResources);
+	}
+}
+
+static ResourceRegistry::RegistryHandle ResolveByIdThunk(void* user, ResourceIdentifier const& id, bool allowFailure) {
+	return static_cast<RenderGraph*>(user)->RequestResourceHandle(id, allowFailure);
+}
+
+static ResourceRegistry::RegistryHandle ResolveByPtrThunk(void* user, Resource* ptr, bool allowFailure) {
+	return static_cast<RenderGraph*>(user)->RequestResourceHandle(ptr, allowFailure);
+}
+
+static bool Overlap(SubresourceRange a, SubresourceRange b) {
+	auto aMipEnd = a.firstMip + a.mipCount;
+	auto bMipEnd = b.firstMip + b.mipCount;
+	auto aSlEnd = a.firstSlice + a.sliceCount;
+	auto bSlEnd = b.firstSlice + b.sliceCount;
+	return (a.firstMip < bMipEnd && b.firstMip < aMipEnd) &&
+		(a.firstSlice < bSlEnd && b.firstSlice < aSlEnd);
+}
+
+static bool RequirementsConflict(
+	std::vector<ResourceRequirement> const& retained,
+	std::vector<ResourceRequirement> const& immediate)
+{
+	// group by resource ID for convenience
+	// TODO: This is O(N^2), could be optimized
+	for (auto const& ra : retained) {
+		auto res = ra.resourceHandleAndRange.resource;
+		uint64_t rid = res.GetGlobalResourceID();
+		auto a = ResolveRangeSpec(ra.resourceHandleAndRange.range, res.GetNumMipLevels(), res.GetArraySize());
+		if (a.isEmpty()) continue;
+
+		for (auto const& ib : immediate) {
+			if (ib.resourceHandleAndRange.resource.GetGlobalResourceID() != rid) continue;
+
+			auto b = ResolveRangeSpec(ib.resourceHandleAndRange.range, res.GetNumMipLevels(), res.GetArraySize());
+			if (b.isEmpty()) continue;
+
+			if (Overlap(a, b) && !(ra.state == ib.state)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+
+void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
+	batches.clear();
+	m_framePasses.clear(); // Combined retained + immediate-mode passes for this frame
+	// initialize frame requirements to the retained requirements
+	for (auto& pr : m_masterPassList) {
+		if (pr.type == PassType::Compute) {
+			auto& p = std::get<ComputePassAndResources>(pr.pass);
+			p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
+			p.immediateBytecode.clear();
+		}
+		else {
+			auto& p = std::get<RenderPassAndResources>(pr.pass);
+			p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
+			p.immediateBytecode.clear();
+		}
+	}
+
+	// Record immediate-mode commands + access for each pass and fold into per-frame requirements
+	for (auto& pr : m_masterPassList) {
+
+		if (pr.type == PassType::Compute) {
+			auto& p = std::get<ComputePassAndResources>(pr.pass);
+
+			// reset per-frame
+			p.immediateBytecode.clear();
+			p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
+
+			ImmediateContext c{ device, 
+				{/*isRenderPass=*/false,
+				m_immediateDispatch,
+				&ResolveByIdThunk,
+				&ResolveByPtrThunk,
+				this},
+				frameIndex
+			};
+
+			// Record immediate-mode commands
+			p.pass->ExecuteImmediate(c);
+
+			auto immediateFrameData = c.list.Finalize();
+			// If there is a conflict between retained and immediate requirements, split the pass
+			bool conflict = RequirementsConflict(
+				p.resources.staticResourceRequirements,
+				immediateFrameData.requirements);
+			if (conflict) {
+				// Create new PassAndResources for the immediate requirements
+				ComputePassAndResources immediatePassAndResources;
+				immediatePassAndResources.pass = p.pass;
+				immediatePassAndResources.resources.staticResourceRequirements = immediateFrameData.requirements;
+				immediatePassAndResources.resources.frameResourceRequirements = immediateFrameData.requirements;
+				immediatePassAndResources.immediateBytecode = std::move(immediateFrameData.bytecode);
+				immediatePassAndResources.immediateKeepAlive = std::move(p.immediateKeepAlive);
+				immediatePassAndResources.run = PassRunMask::Immediate;
+				AnyPassAndResources immediateAnyPassAndResources;
+				immediateAnyPassAndResources.type = PassType::Compute;
+				immediateAnyPassAndResources.pass = immediatePassAndResources;
+				m_framePasses.push_back(immediateAnyPassAndResources);
+				p.run = PassRunMask::Retained;
+				m_framePasses.push_back(pr); // Retained pass
+			}
+			else {
+				p.immediateBytecode = std::move(immediateFrameData.bytecode);
+				p.immediateKeepAlive = std::move(immediateFrameData.keepAlive);
+				p.resources.frameResourceRequirements.insert(
+					p.resources.frameResourceRequirements.end(),
+					immediateFrameData.requirements.begin(),
+					immediateFrameData.requirements.end());
+				p.run = p.immediateBytecode.empty() ? PassRunMask::Retained : PassRunMask::Both;
+				m_framePasses.push_back(pr);
+			}
+		}
+		else {
+			auto& p = std::get<RenderPassAndResources>(pr.pass);
+
+			p.immediateBytecode.clear();
+			p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
+
+			ImmediateContext c{ device, 
+				{/*isRenderPass=*/true,
+				m_immediateDispatch,
+				&ResolveByIdThunk,
+				&ResolveByPtrThunk,
+				this},
+				frameIndex
+			};
+			p.pass->ExecuteImmediate(c);
+			auto immediateFrameData = c.list.Finalize();
+
+			bool conflict = RequirementsConflict(
+				p.resources.staticResourceRequirements,
+				immediateFrameData.requirements);
+
+			if (conflict) {
+				// Create new PassAndResources for the immediate requirements
+				RenderPassAndResources immediatePassAndResources;
+				immediatePassAndResources.pass = p.pass;
+				immediatePassAndResources.resources.staticResourceRequirements = immediateFrameData.requirements;
+				immediatePassAndResources.resources.frameResourceRequirements = immediateFrameData.requirements;
+				immediatePassAndResources.immediateBytecode = std::move(immediateFrameData.bytecode);
+				immediatePassAndResources.immediateKeepAlive = std::move(p.immediateKeepAlive);
+				immediatePassAndResources.run = PassRunMask::Immediate;
+				AnyPassAndResources immediateAnyPassAndResources;
+				immediateAnyPassAndResources.type = PassType::Render;
+				immediateAnyPassAndResources.pass = immediatePassAndResources;
+				m_framePasses.push_back(immediateAnyPassAndResources);
+				p.run = PassRunMask::Retained;
+				m_framePasses.push_back(pr); // Retained pass
+			}
+			else {
+				p.immediateBytecode = std::move(immediateFrameData.bytecode);
+				p.immediateKeepAlive = std::move(immediateFrameData.keepAlive);
+				p.resources.frameResourceRequirements.insert(
+					p.resources.frameResourceRequirements.end(),
+					immediateFrameData.requirements.begin(),
+					immediateFrameData.requirements.end());
+				p.run = p.immediateBytecode.empty() ? PassRunMask::Retained : PassRunMask::Both;
+				m_framePasses.push_back(pr);
+			}
+		}
+	}
+
 	lastActiveSubresourceInAliasGroup.clear();
 	lastActiveSubresourceInAliasGroup.resize(aliasGroups.size());
 
-    auto currentBatch = PassBatch();
-    currentBatch.renderTransitionFenceValue = GetNextGraphicsQueueFenceValue();
-    currentBatch.renderCompletionFenceValue = GetNextGraphicsQueueFenceValue();
-    currentBatch.computeTransitionFenceValue = GetNextComputeQueueFenceValue();
-    currentBatch.computeCompletionFenceValue = GetNextComputeQueueFenceValue();
-    //std::unordered_map<std::wstring, ResourceState> previousBatchResourceStates;
+	auto currentBatch = PassBatch();
+	currentBatch.renderTransitionFenceValue = GetNextGraphicsQueueFenceValue();
+	currentBatch.renderCompletionFenceValue = GetNextGraphicsQueueFenceValue();
+	currentBatch.computeTransitionFenceValue = GetNextComputeQueueFenceValue();
+	currentBatch.computeCompletionFenceValue = GetNextComputeQueueFenceValue();
+	//std::unordered_map<std::wstring, ResourceState> previousBatchResourceStates;
  //   std::unordered_map<uint64_t, ResourceAccessType> finalResourceAccessTypes;
 	//std::unordered_map<uint64_t, ResourceLayout> finalResourceLayouts;
 	//std::unordered_map<uint64_t, ResourceSyncState> finalResourceSyncStates;
@@ -778,7 +988,7 @@ void RenderGraph::Compile() {
 	std::unordered_set<uint64_t> computeUAVs;
 	std::unordered_set<uint64_t> renderUAVs;
 
-    std::unordered_map<uint64_t, unsigned int>  batchOfLastRenderQueueTransition;
+	std::unordered_map<uint64_t, unsigned int>  batchOfLastRenderQueueTransition;
 	std::unordered_map<uint64_t, unsigned int>  batchOfLastComputeQueueTransition;
 
 	std::unordered_map<uint64_t, unsigned int>  batchOfLastRenderQueueProducer;
@@ -787,28 +997,28 @@ void RenderGraph::Compile() {
 	std::unordered_map<uint64_t, unsigned int>  batchOfLastRenderQueueUsage;
 	std::unordered_map<uint64_t, unsigned int>  batchOfLastComputeQueueUsage;
 
-	auto nodes = BuildNodes(*this, passes);
+	auto nodes = BuildNodes(*this, m_framePasses);
 	if (!BuildDependencyGraph(nodes)) {
 		// Cycle detected
 		spdlog::error("Render graph contains a dependency cycle! Render graph compilation failed.");
 		throw std::runtime_error("Render graph contains a dependency cycle");
 	}
 	else {
-		AutoScheduleAndBuildBatches(*this, passes, nodes);
+		AutoScheduleAndBuildBatches(*this, m_framePasses, nodes);
 	}
 
-    // Insert transitions to loop resources back to their initial states
+	// Insert transitions to loop resources back to their initial states
 	ComputeResourceLoops();
 
-	// Readback pass in its own batch
-	auto readbackPass = ReadbackManager::GetInstance().GetReadbackPass();
-	if (readbackPass) {
-		auto readbackBatch = PassBatch();
-		RenderPassAndResources readbackPassAndResources; // ReadbackPass is a special-case pass which transitions resources internally
-		readbackPassAndResources.pass = readbackPass;
-		readbackBatch.renderPasses.push_back(readbackPassAndResources);
-		batches.push_back(readbackBatch);
-	}
+	//// Readback pass in its own batch
+	//auto readbackPass = ReadbackManager::GetInstance().GetReadbackPass();
+	//if (readbackPass) {
+	//	auto readbackBatch = PassBatch();
+	//	RenderPassAndResources readbackPassAndResources; // ReadbackPass is a special-case pass which transitions resources internally
+	//	readbackPassAndResources.pass = readbackPass;
+	//	readbackBatch.renderPasses.push_back(readbackPassAndResources);
+	//	batches.push_back(readbackBatch);
+	//}
 
 	// Cut out repeat waits on the same fence
 	uint64_t lastRenderWaitFenceValue = 0;
@@ -848,6 +1058,32 @@ void RenderGraph::Compile() {
 		}
 	}
 
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+	// Sanity checks:
+	// 1. No conflicting resource transitions in a batch
+
+	// Build one vector of transitions per batch
+	for (size_t bi = 0; bi < batches.size(); bi++) {
+		std::vector<ResourceTransition> allTransitions;
+		auto& batch = batches[bi];
+		allTransitions.insert(
+			allTransitions.end(),
+			batch.renderTransitions.begin(),
+			batch.renderTransitions.end());
+		allTransitions.insert(
+			allTransitions.end(),
+			batch.computeTransitions.begin(),
+			batch.computeTransitions.end());
+
+		// Validate
+		TransitionConflict out;
+		if (bool ok = ValidateNoConflictingTransitions(allTransitions, &out); !ok) {
+			spdlog::error("Render graph has conflicting resource transitions!");
+			throw std::runtime_error("Render graph has conflicting resource transitions!");
+		}
+	}
+
+#endif
 }
 
 std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
@@ -859,8 +1095,8 @@ std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 {
 	int latestTransition = -1, latestProducer = -1, latestUsage = -1;
 
-	auto processResource = [&](Resource* const& res) {
-		uint64_t id = res->GetGlobalResourceID();
+	auto processResource = [&](ResourceRegistry::RegistryHandle const& res) {
+		uint64_t id = res.GetGlobalResourceID();
 		// get this ID plus any aliases
 		auto ids = GetAllAliasIDs(id);
 		for (auto rid : ids) {
@@ -874,8 +1110,8 @@ std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 		}
 		};
 
-	for (auto const& req : pass.resources.resourceRequirements)
-		processResource(req.resourceAndRange.resource.get());
+	for (auto const& req : pass.resources.frameResourceRequirements)
+		processResource(req.resourceHandleAndRange.resource);
 
 	for (auto& transitionID : resourcesTransitionedThisPass) { // We only need to wait on the latest usage for resources that will be transitioned in this batch
 		for (auto rid : GetAllAliasIDs(transitionID)) {
@@ -897,8 +1133,8 @@ std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 {
 	int latestTransition = -1, latestProducer = -1, latestUsage = -1;
 
-	auto processResource = [&](Resource* const& res) {
-		uint64_t id = res->GetGlobalResourceID();
+	auto processResource = [&](ResourceRegistry::RegistryHandle const& res) {
+		uint64_t id = res.GetGlobalResourceID();
 		for (auto rid : GetAllAliasIDs(id)) {
 			auto itT = transitionHistory.find(rid);
 			if (itT != transitionHistory.end())
@@ -910,8 +1146,8 @@ std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 		}
 		};
 
-	for (auto const& req : pass.resources.resourceRequirements)
-		processResource(req.resourceAndRange.resource.get());
+	for (auto const& req : pass.resources.frameResourceRequirements)
+		processResource(req.resourceHandleAndRange.resource);
 
 	for (auto& transitionID : resourcesTransitionedThisPass) { // We only need to wait on the latest usage for resources that will be transitioned in this batch
 		for (auto rid : GetAllAliasIDs(transitionID)) {
@@ -962,7 +1198,7 @@ void RenderGraph::Setup() {
 	m_getUseAsyncCompute = SettingsManager::GetInstance().getSettingGetter<bool>("useAsyncCompute");
 
 	std::vector<rhi::CommandList> emptyLists;
-	for (auto& pass : passes) {
+	for (auto& pass : m_masterPassList) {
 		switch (pass.type) {
 		case PassType::Render: {
 			auto& renderPass = std::get<RenderPassAndResources>(pass.pass);
@@ -991,7 +1227,7 @@ void RenderGraph::AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassPara
 	passAndResourcesAny.type = PassType::Render;
 	passAndResourcesAny.pass = passAndResources;
 	passAndResourcesAny.name = name;
-	passes.push_back(passAndResourcesAny);
+	m_masterPassList.push_back(passAndResourcesAny);
     if (name != "") {
         renderPassesByName[name] = pass;
     }
@@ -1006,7 +1242,7 @@ void RenderGraph::AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassP
 	passAndResourcesAny.type = PassType::Compute;
 	passAndResourcesAny.pass = passAndResources;
 	passAndResourcesAny.name = name;
-	passes.push_back(passAndResourcesAny);
+	m_masterPassList.push_back(passAndResourcesAny);
 	if (name != "") {
 		computePassesByName[name] = pass;
 	}
@@ -1026,12 +1262,6 @@ void RenderGraph::AddResource(std::shared_ptr<Resource> resource, bool transitio
 	//	throw std::runtime_error("Resource with name " + ws2s(name) + " already exists");
 	//}
 #endif
-
-	auto resourceGroup = std::dynamic_pointer_cast<ResourceGroup>(resource);
-	if (resourceGroup) {
-		resourceGroup->InitializeForGraph();
-		resourceGroups.push_back(resourceGroup);
-	}
 
     resourcesByName[name] = resource;
 	resourcesByID[resource->GetGlobalResourceID()] = resource;
@@ -1117,8 +1347,18 @@ namespace {
 		for (auto& pr : passes) {
 			if (pr.pass->IsInvalidated()) {
 				rhi::debug::Scope scope(commandList, rhi::colors::Mint, pr.name.c_str());
+
+				if (!pr.immediateBytecode.empty()) {
+					rg::imm::Replay(pr.immediateBytecode, commandList);
+				}
+
 				statisticsManager.BeginQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);
-				auto passReturn = pr.pass->Execute(context);
+				rg::imm::Replay(pr.immediateBytecode, commandList); // Replay immediate-mode commands
+
+				// Drop immediate-mode keep-alive
+				pr.immediateKeepAlive.reset();
+
+				auto passReturn = pr.pass->Execute(context); // Execute retained-mode commands
 				statisticsManager.EndQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);
 				if (passReturn.fence) {
 					externalFences.push_back(passReturn);
@@ -1140,6 +1380,8 @@ namespace {
 } // namespace
 
 void RenderGraph::Execute(RenderContext& context) {
+
+	CompileFrame(context.device, context.frameIndex);
 
 	bool useAsyncCompute = m_getUseAsyncCompute();
 	auto& manager = DeviceManager::GetInstance();
@@ -1171,11 +1413,6 @@ void RenderGraph::Execute(RenderContext& context) {
 
 	UINT64 currentGraphicsQueueFenceOffset = m_graphicsQueueFenceValue * context.frameFenceValue;
 	UINT64 currentComputeQueueFenceOffset = m_computeQueueFenceValue * context.frameFenceValue;
-
-	if (!alias) { // TODO: This is needed to sync with earlier UploadManager copies. We should really include UploadManager copies as part of the graph.
-		graphicsQueue->Signal({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
-		computeQueue->Wait({ m_frameStartSyncFence->GetHandle(), context.frameFenceValue });
-	}
 
 	auto& statisticsManager = StatisticsManager::GetInstance();
 
@@ -1284,7 +1521,7 @@ void RenderGraph::Execute(RenderContext& context) {
 
 bool RenderGraph::IsNewBatchNeeded(
 	const std::vector<ResourceRequirement>& reqs,
-	const std::vector<std::pair<ResourceAndRange, ResourceState>> passInternalTransitions,
+	const std::vector<std::pair<ResourceHandleAndRange, ResourceState>> passInternalTransitions,
 	const std::unordered_map<uint64_t, SymbolicTracker*>& passBatchTrackers,
 	const std::unordered_set<uint64_t>& currentBatchInternallyTransitionedResources,
 	const std::unordered_set<uint64_t>& currentBatchAllResources,
@@ -1292,13 +1529,9 @@ bool RenderGraph::IsNewBatchNeeded(
 {
 	// For each internally modified resource
 	for (auto const& r : passInternalTransitions) {
-		auto id = r.first.resource->GetGlobalResourceID();
+		auto id = r.first.resource.GetGlobalResourceID();
 		// If this resource is used in the current batch, we need a new one
 		if (currentBatchAllResources.contains(id)) {
-			return true;
-		}
-		// If this resource is part of a resource group, and this batch uses that group, we need a new batch
-		if (independantlyManagedResourceToGroup.contains(id) && currentBatchAllResources.contains(independantlyManagedResourceToGroup[id])) {
 			return true;
 		}
 	}
@@ -1306,10 +1539,10 @@ bool RenderGraph::IsNewBatchNeeded(
 	// For each subresource requirement in this pass:
 	for (auto const &r : reqs) {
 
-		uint64_t id = r.resourceAndRange.resource->GetGlobalResourceID();
+		uint64_t id = r.resourceHandleAndRange.resource.GetGlobalResourceID();
 
 		// If this resource is internally modified in the current batch, we need a new one
-		if (currentBatchInternallyTransitionedResources.count(id)) {
+		if (currentBatchInternallyTransitionedResources.contains(id)) {
 			return true;
 		}
 
@@ -1318,17 +1551,17 @@ bool RenderGraph::IsNewBatchNeeded(
 		// Changing state?
 		auto it = passBatchTrackers.find(id);
 		if (it != passBatchTrackers.end()) {
-			if (it->second->WouldModify(r.resourceAndRange.range, wantState))
+			if (it->second->WouldModify(r.resourceHandleAndRange.range, wantState))
 				return true;
 		}
 		// first-use in this batch never forces a split.
 
 		// Cross-queue UAV hazard?
 		if ((r.state.access & rhi::ResourceAccessType::UnorderedAccess)
-			&& otherQueueUAVs.count(id))
+			&& otherQueueUAVs.contains(id))
 			return true;
 		if (r.state.layout == rhi::ResourceLayout::UnorderedAccess
-			&& otherQueueUAVs.count(id))
+			&& otherQueueUAVs.contains(id))
 			return true;
 	}
 	return false;
@@ -1374,15 +1607,50 @@ void RenderGraph::RegisterProvider(IResourceProvider* prov) {
 	}
 	_providers.push_back(prov);
 
-	// Register all resources provided by this provider
 	for (const auto& key : prov->GetSupportedKeys()) {
 		auto resource = prov->ProvideResource(key);
 		if (resource) {
 			RegisterResource(key, resource, prov);
-		} else {
+		}
+		else {
 			spdlog::warn("Provider returned null for advertised key: {}", key.ToString());
 		}
 	}
+
+	// Register resolvers from this provider
+	for (const auto& key : prov->GetSupportedResolverKeys()) {
+		if (const auto resolver = prov->ProvideResolver(key); resolver) {
+			RegisterResolver(key, resolver);
+		}
+		else {
+			spdlog::warn("Provider returned null resolver for advertised key: {}", key.ToString());
+		}
+	}
+}
+
+void RenderGraph::RegisterResolver(ResourceIdentifier id, const std::shared_ptr<IResourceResolver>& resolver) {
+	if (_resolverMap.contains(id)) {
+		throw std::runtime_error("Resolver already registered for key: " + id.ToString());
+	}
+	// Resolve it and register its resources
+	for (const auto& resource : resolver->Resolve()) {
+		if (resource) {
+			resourcesByID[resource->GetGlobalResourceID()] = resource;
+			// Anonymous registration
+			_registry.RegisterAnonymous(resource);
+		}
+	}
+	_resolverMap[id] = resolver;
+	_registry.RegisterResolver(id, resolver);
+}
+
+std::shared_ptr<IResourceResolver> RenderGraph::RequestResolver(ResourceIdentifier const& rid, bool allowFailure) {
+	if (auto it = _resolverMap.find(rid); it != _resolverMap.end()) {
+		return it->second;
+	}
+
+	if (allowFailure) return nullptr;
+	throw std::runtime_error("No resolver registered for key: " + rid.ToString());
 }
 
 void RenderGraph::RegisterResource(ResourceIdentifier id, std::shared_ptr<Resource> resource,
@@ -1399,7 +1667,7 @@ void RenderGraph::RegisterResource(ResourceIdentifier id, std::shared_ptr<Resour
 	}
 }
 
-std::shared_ptr<Resource> RenderGraph::RequestResource(ResourceIdentifier const& rid, bool allowFailure) {
+std::shared_ptr<Resource> RenderGraph::RequestResourcePtr(ResourceIdentifier const& rid, bool allowFailure) {
 	// If it's already in our registry, return it
 	auto cached = _registry.RequestShared(rid);
 	if (cached) {
@@ -1432,6 +1700,54 @@ std::shared_ptr<Resource> RenderGraph::RequestResource(ResourceIdentifier const&
 	}
 	throw std::runtime_error("No resource provider registered for key: " + rid.ToString());
 }
+
+ResourceRegistry::RegistryHandle RenderGraph::RequestResourceHandle(ResourceIdentifier const& rid, bool allowFailure) {
+	// If it's already in our registry, return it
+	auto cached = _registry.GetHandleFor(rid);
+	if (cached.has_value()) {
+		return cached.value();
+	}
+
+	// We don't have it in our registry, check if we have a provider for it
+	auto providerIt = _providerMap.find(rid);
+	if (providerIt != _providerMap.end()) {
+		// If we have a provider for this key, use it to provide the resource
+		auto provider = providerIt->second;
+		if (provider) {
+			auto resource = provider->ProvideResource(rid);
+			if (resource) {
+				// Register the resource in our registry
+				_registry.RegisterOrUpdate(rid, resource);
+				AddResource(resource);
+				return _registry.GetHandleFor(rid).value();
+			}
+			else {
+				throw std::runtime_error("Provider returned null for key: " + rid.ToString());
+			}
+		}
+	}
+
+	// No provider registered for this key
+	if (allowFailure) {
+		// If we are allowed to fail, return nullptr
+		return {};
+	}
+	throw std::runtime_error("No resource provider registered for key: " + rid.ToString());
+}
+
+ResourceRegistry::RegistryHandle RenderGraph::RequestResourceHandle(Resource* const& pResource, bool allowFailure) {
+	// If it's already in our registry, return it
+	auto cached = _registry.GetHandleFor(pResource);
+	if (cached.has_value()) {
+		return cached.value();
+	}
+
+	// Register anonymous resource
+	const auto handle = _registry.RegisterAnonymous(pResource->shared_from_this());
+	 
+	return handle;
+}
+
 
 ComputePassBuilder& RenderGraph::BuildComputePass(std::string const& name) {
 	if (auto it = m_passBuildersByName.find(name); it != m_passBuildersByName.end()) {

@@ -15,17 +15,19 @@
 #include "interfaces/IResourceProvider.h"
 #include "Render/PassInputs.h"
 #include "ShaderBuffers.h"
+#include "Render/RenderContext.h"
 
 struct ComputePassParameters {
-	std::vector<ResourceAndRange> shaderResources;
-	std::vector<ResourceAndRange> constantBuffers;
-	std::vector<ResourceAndRange> unorderedAccessViews;
-	std::vector<ResourceAndRange> indirectArgumentBuffers;
-	std::vector<ResourceAndRange> legacyInteropResources;
-	std::vector<std::pair<ResourceAndRange, ResourceState>> internalTransitions;
+	std::vector<ResourceHandleAndRange> shaderResources;
+	std::vector<ResourceHandleAndRange> constantBuffers;
+	std::vector<ResourceHandleAndRange> unorderedAccessViews;
+	std::vector<ResourceHandleAndRange> indirectArgumentBuffers;
+	std::vector<ResourceHandleAndRange> legacyInteropResources;
+	std::vector<std::pair<ResourceHandleAndRange, ResourceState>> internalTransitions;
 
 	std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher> identifierSet;
-	std::vector<ResourceRequirement> resourceRequirements;
+	std::vector<ResourceRequirement> staticResourceRequirements; // Static resource requirements for the pass
+	std::vector<ResourceRequirement> frameResourceRequirements; // Resource requirements that may change each frame + static ones
 };
 
 class ComputePassBuilder;
@@ -43,7 +45,8 @@ public:
 	virtual void RegisterCommandLists(const std::vector<rhi::CommandList>& commandLists) {};
 
 	virtual void Update() {};
-	virtual PassReturn Execute(RenderContext& context) = 0;
+	virtual void ExecuteImmediate(ImmediateContext& context) {};
+	virtual PassReturn Execute(RenderContext& context) { return {}; };
 	virtual void Cleanup(RenderContext& context) = 0;
 
 	void Invalidate() { invalidated = true; }

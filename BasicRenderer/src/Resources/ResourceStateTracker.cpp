@@ -2,10 +2,13 @@
 
 #include <optional>
 #include <algorithm>
+#include <unordered_map>
 
-SubresourceRange ResolveRangeSpec(RangeSpec spec,
-    uint32_t totalMips,
-    uint32_t totalSlices)
+#include "Resources/Resource.h"
+
+SubresourceRange ResolveRangeSpec(const RangeSpec& spec,
+    const uint32_t totalMips,
+    const uint32_t totalSlices)
 {
     // determine firstMip
     uint32_t firstMip = 0;
@@ -261,7 +264,7 @@ static void mergeSymbolic(std::vector<Segment> &segs) {
 }
 
 
-void SymbolicTracker::Apply(RangeSpec want,
+void SymbolicTracker::Apply(const RangeSpec& want,
     Resource* pRes,
     ResourceState newState,
     std::vector<ResourceTransition>& out)
@@ -301,7 +304,7 @@ void SymbolicTracker::Apply(RangeSpec want,
     _segs.swap(next);
 }
 
-bool SymbolicTracker::WouldModify(RangeSpec want, ResourceState newState) const {
+bool SymbolicTracker::WouldModify(const RangeSpec& want, const ResourceState& newState) const {
     for (auto const &seg : _segs) {
         auto cut = intersect(seg.rangeSpec, want);
         if (!isEmpty(cut) && !(seg.state == newState))
@@ -310,6 +313,153 @@ bool SymbolicTracker::WouldModify(RangeSpec want, ResourceState newState) const 
     return false;
 }
 
+std::vector<Segment> SymbolicTracker::Flatten(ResourceState const& skipState, bool includeSkipState) const {
+    std::vector<Segment> out;
+    out.reserve(_segs.size());
+    for (auto const& s : _segs) {
+        if (!includeSkipState && s.state == skipState) continue;
+        out.push_back(s);
+    }
+    return out;
+}
+
 const std::vector<Segment>& SymbolicTracker::GetSegments() const noexcept {
 	return _segs;
+}
+
+bool ValidateNoConflictingTransitions(
+    std::span<const ResourceTransition> transitions,
+    TransitionConflict* outFirstConflict)
+{
+    // Group transition indices by resource pointer.
+    std::unordered_map<Resource*, std::vector<size_t>> perRes;
+    perRes.reserve(transitions.size());
+
+    for (size_t i = 0; i < transitions.size(); ++i) {
+        Resource* r = transitions[i].pResource;
+        if (!r) continue;
+        perRes[r].push_back(i);
+    }
+
+    auto emitConflict = [&](Resource* r, uint32_t mip, uint32_t slice, size_t a, size_t b) -> bool {
+        if (outFirstConflict) {
+            outFirstConflict->resource = r;
+            outFirstConflict->mip = mip;
+            outFirstConflict->slice = slice;
+            outFirstConflict->firstIdx = a;
+            outFirstConflict->secondIdx = b;
+        }
+        return false;
+        };
+
+    // Threshold: if totalMips * totalSlices is “reasonable”, do exact cell-marking.
+    // Otherwise fall back to per-mip interval sweeping (still exact, but without big O(mips*slices) memory).
+    constexpr size_t kMaxDenseCells = 1u << 20; // ~1,048,576
+
+    for (auto& [res, idxs] : perRes)
+    {
+        // You likely already have these; if not, adapt accordingly.
+        uint32_t totalMips = res->GetMipLevels();
+        uint32_t totalSlices = res->GetArraySize();
+
+        // Defensive: treat 0 as 1 (buffers, etc.)
+        totalMips = (totalMips == 0) ? 1u : totalMips;
+        totalSlices = (totalSlices == 0) ? 1u : totalSlices;
+
+        // Pre-resolve all rectangles once.
+        struct Rect { uint32_t mip0, mip1, slice0, slice1; size_t idx; };
+        std::vector<Rect> rects;
+        rects.reserve(idxs.size());
+
+        for (size_t ti : idxs)
+        {
+            const auto& t = transitions[ti];
+            auto sr = ResolveRangeSpec(t.range, totalMips, totalSlices);
+            if (sr.mipCount == 0 || sr.sliceCount == 0) continue;
+
+            Rect r{};
+            r.mip0 = sr.firstMip;
+            r.mip1 = sr.firstMip + sr.mipCount - 1;
+            r.slice0 = sr.firstSlice;
+            r.slice1 = sr.firstSlice + sr.sliceCount - 1;
+            r.idx = ti;
+            rects.push_back(r);
+        }
+
+        // Nothing to validate.
+        if (rects.size() <= 1) continue;
+
+        // Try dense marking if small enough.
+        const size_t cells = size_t(totalMips) * size_t(totalSlices);
+        if (cells != 0 && cells <= kMaxDenseCells)
+        {
+            constexpr size_t kInvalid = std::numeric_limits<size_t>::max();
+            std::vector<size_t> owner(cells, kInvalid);
+
+            for (const Rect& r : rects)
+            {
+                for (uint32_t mip = r.mip0; mip <= r.mip1; ++mip)
+                {
+                    const size_t base = size_t(mip) * size_t(totalSlices);
+                    for (uint32_t slice = r.slice0; slice <= r.slice1; ++slice)
+                    {
+                        const size_t cell = base + size_t(slice);
+                        size_t& o = owner[cell];
+                        if (o == kInvalid) {
+                            o = r.idx;
+                        }
+                        else if (o != r.idx) {
+                            return emitConflict(res, mip, slice, o, r.idx);
+                        }
+                    }
+                }
+            }
+
+            continue; // no conflicts for this resource
+        }
+
+        // Fallback: per-mip interval sweep (no big dense array).
+        struct Interval { uint32_t lo, hi; size_t idx; };
+        std::vector<Interval> intervals;
+        intervals.reserve(rects.size());
+
+        for (uint32_t mip = 0; mip < totalMips; ++mip)
+        {
+            intervals.clear();
+
+            for (const Rect& r : rects) {
+                if (mip < r.mip0 || mip > r.mip1) continue;
+                intervals.push_back({ r.slice0, r.slice1, r.idx });
+            }
+
+            if (intervals.size() <= 1) continue;
+
+            std::sort(intervals.begin(), intervals.end(),
+                [](const Interval& a, const Interval& b) {
+                    if (a.lo != b.lo) return a.lo < b.lo;
+                    if (a.hi != b.hi) return a.hi < b.hi;
+                    return a.idx < b.idx;
+                });
+
+            uint32_t curLo = intervals[0].lo;
+            uint32_t curHi = intervals[0].hi;
+            size_t   curIdx = intervals[0].idx;
+
+            for (size_t i = 1; i < intervals.size(); ++i)
+            {
+                const auto& in = intervals[i];
+                if (in.lo <= curHi) {
+                    // Overlap at mip; pick a concrete overlapping slice.
+                    uint32_t overlapSlice = std::max(curLo, in.lo);
+                    return emitConflict(res, mip, overlapSlice, curIdx, in.idx);
+                }
+
+                curLo = in.lo;
+                curHi = in.hi;
+                curIdx = in.idx;
+            }
+        }
+    }
+
+    return true;
 }

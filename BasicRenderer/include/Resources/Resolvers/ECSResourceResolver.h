@@ -9,7 +9,7 @@
 #include "Resources/components.h"
 
 // A resolver that captures any flecs::query<...> by value
-class ECSResourceResolver : public IResourceResolver {
+class ECSResourceResolver : public ClonableResolver<ECSResourceResolver> {
 public:
     ECSResourceResolver() = default;
 

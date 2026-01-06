@@ -10,12 +10,12 @@ class ResourceIndexOrDynamicResource {
 public:
 	bool isDynamic = false;
 	unsigned int index = 0;
-	ResourceRegistry::ResourceHandle handle{}; // for dynamic case
+	ResourceRegistry::RegistryHandle handle{}; // for dynamic case
 
 	static ResourceIndexOrDynamicResource Static(unsigned idx) {
 		ResourceIndexOrDynamicResource r; r.isDynamic = false; r.index = idx; return r;
 	}
-	static ResourceIndexOrDynamicResource Dynamic(ResourceRegistry::ResourceHandle h) {
+	static ResourceIndexOrDynamicResource Dynamic(ResourceRegistry::RegistryHandle h) {
 		ResourceIndexOrDynamicResource r; r.isDynamic = true; r.handle = h; return r;
 	}
 };
@@ -163,7 +163,7 @@ private:
 	static T* PtrFrom(const std::shared_ptr<T>& p) noexcept { return p.get(); }
 
 	unsigned int AccessDynamicGloballyIndexedResource(
-		const ResourceRegistry::ResourceHandle& h,
+		const ResourceRegistry::RegistryHandle& h,
 		const DescriptorAccessor& accessor) const
 	{
 		// Prefer a Resolve<T>() on the view; otherwise use Resolve() + dynamic_cast.
@@ -189,7 +189,7 @@ private:
 
 
 	ResourceIndexOrDynamicResource GetResourceIndexOrDynamicResource(
-		const ResourceRegistry::ResourceHandle& h,
+		const ResourceRegistry::RegistryHandle& h,
 		Resource* resource,
 		const DescriptorAccessor& accessor) const
 	{

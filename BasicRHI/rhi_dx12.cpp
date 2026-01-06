@@ -18,110 +18,73 @@
 
 namespace rhi {
 
-	Dx12Device::~Dx12Device() noexcept {
-	
-	}
-
-	static void dx12_wait_queue_idle(Dx12QueueState& q) noexcept
-	{
-		if (!q.pNativeQueue || !q.fence) return;
-
-		const UINT64 v = ++q.value;
-		(void)q.pNativeQueue->Signal(q.fence.Get(), v);
-
-		if (q.fence->GetCompletedValue() < v) {
-			HANDLE e = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-			if (!e) return; // best-effort teardown
-			(void)q.fence->SetEventOnCompletion(v, e);
-			(void)WaitForSingleObject(e, INFINITE);
-			CloseHandle(e);
-		}
-	}
-
-	static void dx12_report_live_objects(ID3D12Device* device, const char* phase) noexcept
-	{
-		if (!device) return;
-
-		Microsoft::WRL::ComPtr<ID3D12DebugDevice> dbgDev;
-		if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&dbgDev))))
+	namespace {
+		static void Dx12WaitQueueIdle(Dx12QueueState& q) noexcept
 		{
-			if (phase)
-			{
-				OutputDebugStringA("\n====================================================\n");
-				OutputDebugStringA(phase);
-				OutputDebugStringA("\n====================================================\n");
+			if (!q.pNativeQueue || !q.fence) return;
+
+			const UINT64 v = ++q.value;
+			(void)q.pNativeQueue->Signal(q.fence.Get(), v);
+
+			if (q.fence->GetCompletedValue() < v) {
+				const HANDLE e = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+				if (!e) return; // best-effort teardown
+				(void)q.fence->SetEventOnCompletion(v, e);
+				(void)WaitForSingleObject(e, INFINITE);
+				CloseHandle(e);
 			}
-
-			// IGNORE_INTERNAL reduces noise from runtime-owned objects.
-			dbgDev->ReportLiveDeviceObjects(
-				D3D12_RLDO_DETAIL | D3D12_RLDO_IGNORE_INTERNAL
-			);
 		}
-	}
 
-	static void dxgi_report_live_objects(const char* phase) noexcept
-	{
-		Microsoft::WRL::ComPtr<IDXGIDebug1> dxgiDebug;
-		if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug))))
+		static void Dx12ReportLiveObjects(ID3D12Device* device, const char* phase) noexcept
 		{
-			if (phase)
+			if (!device) return;
+
+			Microsoft::WRL::ComPtr<ID3D12DebugDevice> dbgDev;
+			if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&dbgDev))))
 			{
-				OutputDebugStringA("\n================ DXGI LIVE OBJECTS ================\n");
-				OutputDebugStringA(phase);
-				OutputDebugStringA("\n===================================================\n");
+				if (phase)
+				{
+					OutputDebugStringA("\n====================================================\n");
+					OutputDebugStringA(phase);
+					OutputDebugStringA("\n====================================================\n");
+				}
+
+				// Disable break-on-severity
+				ComPtr<ID3D12InfoQueue> iq; if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&iq)))) {
+					D3D12_MESSAGE_ID blocked[] = {
+						static_cast<D3D12_MESSAGE_ID>(1356),
+						static_cast<D3D12_MESSAGE_ID>(1328),
+						static_cast<D3D12_MESSAGE_ID>(1008)
+					};
+					D3D12_INFO_QUEUE_FILTER f{};
+					f.DenyList.NumIDs = static_cast<UINT>(_countof(blocked));
+					f.DenyList.pIDList = blocked;
+					iq->AddStorageFilterEntries(&f);
+					(void)iq->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, false);
+					(void)iq->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, false);
+				}
+
+				// IGNORE_INTERNAL reduces noise from runtime-owned objects.
+				(void)dbgDev->ReportLiveDeviceObjects(
+					D3D12_RLDO_DETAIL | D3D12_RLDO_IGNORE_INTERNAL
+				);
 			}
-			dxgiDebug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_DETAIL);
-		}
-	}
-
-
-	void Dx12Device::Shutdown() noexcept {
-
-		dx12_wait_queue_idle(gfx);
-		dx12_wait_queue_idle(comp);
-		dx12_wait_queue_idle(copy);
-
-		swapchains.clear();
-		queryPools.clear();
-		heaps.clear();
-		timelines.clear();
-		commandLists.clear();
-		allocators.clear();
-		descHeaps.clear();
-		commandSignatures.clear();
-		pipelines.clear();
-		pipelineLayouts.clear();
-		samplers.clear();
-		resources.clear();
-
-		gfx = {};
-		comp = {};
-		copy = {};
-
-#if BUILD_TYPE == BUILD_DEBUG
-		// Hold a temporary ref so we can report AFTER we drop our member refs.
-		Microsoft::WRL::ComPtr<ID3D12Device> devForReport = pNativeDevice;
-#endif
-
-		// Drop SL Proxy objects
-		pSLProxyDevice.Reset();
-		pSLProxyFactory.Reset();
-
-		if (steamlineInitialized) {
-			slShutdown();
 		}
 
-		// Drop DXGI objects
-		adapter.Reset();
-		pNativeFactory.Reset();
-
-		pNativeDevice.Reset();
-
-#if BUILD_TYPE == BUILD_DEBUG
-		dx12_report_live_objects(devForReport.Get(), "Dx12Device::Shutdown - D3D12 live objects (post-release)");
-		dxgi_report_live_objects("Dx12Device::Shutdown - DXGI live objects (post-release)");
-#endif
-	}
+		static void DxgiReportLiveObjects(const char* phase) noexcept
+		{
+			Microsoft::WRL::ComPtr<IDXGIDebug1> dxgiDebug;
+			if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug))))
+			{
+				if (phase)
+				{
+					OutputDebugStringA("\n================ DXGI LIVE OBJECTS ================\n");
+					OutputDebugStringA(phase);
+					OutputDebugStringA("\n===================================================\n");
+				}
+				(void)dxgiDebug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_DETAIL);
+			}
+		}
 
 	static Result d_createPipelineFromStream(Device* d,
 		const PipelineStreamItem* items,
@@ -135,10 +98,11 @@ namespace rhi {
 		D3D12_SHADER_BYTECODE cs{}, vs{}, ps{}, as{}, ms{};
 		bool hasCS = false, hasGfx = false;
 
-		CD3DX12_RASTERIZER_DESC rast = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-		CD3DX12_BLEND_DESC      blend = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-		CD3DX12_DEPTH_STENCIL_DESC depth = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-		D3D12_RT_FORMAT_ARRAY rtv{}; rtv.NumRenderTargets = 0;
+		auto rast = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+		auto blend = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+		auto depth = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+		D3D12_RT_FORMAT_ARRAY rtv{}; 
+		rtv.NumRenderTargets = 0;
 		DXGI_FORMAT dsv = DXGI_FORMAT_UNKNOWN;
 		DXGI_SAMPLE_DESC sample{ 1,0 };
 		std::vector<D3D12_INPUT_ELEMENT_DESC> inputLayout;
@@ -153,7 +117,7 @@ namespace rhi {
 				auto* pl = dimpl->pipelineLayouts.get(L.layout);
 				if (!pl || !pl->root) {
 					RHI_FAIL(Result::InvalidArgument);
-				};
+				}
 				root = pl->root.Get();
 			} break;
 			case PsoSubobj::Shader: {
@@ -165,7 +129,14 @@ namespace rhi {
 				case ShaderStage::Pixel: ps = bc; hasGfx = true; break;
 				case ShaderStage::Task: as = bc; hasGfx = true; break;
 				case ShaderStage::Mesh: ms = bc; hasGfx = true; break;
-				default: break;
+				case ShaderStage::AllGraphics: 
+					spdlog::error("DX12 pipeline creation: invalid shader stage 'AllGraphics'");
+					RHI_FAIL(Result::InvalidArgument);
+					break;
+				case ShaderStage::All:
+					spdlog::error("DX12 pipeline creation: invalid shader stage 'All'");
+					RHI_FAIL(Result::InvalidArgument);
+					break;
 				}
 			} break;
 			case PsoSubobj::Rasterizer: {
@@ -226,7 +197,9 @@ namespace rhi {
 				ToDx12InputLayout(static_cast<const SubobjInputLayout*>(items[i].data)->il, inputLayout);
 				inputLayoutDesc = { inputLayout.data(), static_cast<uint32_t>(inputLayout.size()) };
 			} break;
-			default: break;
+			case PsoSubobj::Flags: {
+				break;
+			}
 			}
 		}
 
@@ -263,8 +236,7 @@ namespace rhi {
 		auto sd = sb.desc();
 
 		ComPtr<ID3D12PipelineState> pso;
-		auto hr = dimpl->pNativeDevice->CreatePipelineState(&sd, IID_PPV_ARGS(&pso));
-		if (FAILED(hr)) {
+		if (const auto hr = dimpl->pNativeDevice->CreatePipelineState(&sd, IID_PPV_ARGS(&pso)); FAILED(hr)) {
 			RHI_FAIL(ToRHI(hr));
 		}
 
@@ -315,9 +287,9 @@ namespace rhi {
 
 	static Result d_waitIdle(Device* d) noexcept {
 		auto* impl = static_cast<Dx12Device*>(d->impl);
-		dx12_wait_queue_idle(impl->gfx);
-		dx12_wait_queue_idle(impl->comp);
-		dx12_wait_queue_idle(impl->copy);
+		Dx12WaitQueueIdle(impl->gfx);
+		Dx12WaitQueueIdle(impl->comp);
+		Dx12WaitQueueIdle(impl->copy);
 		return Result::Ok;
 	}
 	static void   d_flushDeletionQueue(Device*) noexcept {}
@@ -349,7 +321,7 @@ namespace rhi {
 		}
 
 		IDXGISwapChain3* nativeSc3Raw = nullptr;
-		slGetNativeInterface(proxySc3.Get(), (void**)&nativeSc3Raw);
+		slGetNativeInterface(proxySc3.Get(), reinterpret_cast<void**>(&nativeSc3Raw));
 		ComPtr<IDXGISwapChain3> nativeSc3;
 		nativeSc3.Attach(nativeSc3Raw);
 
@@ -469,9 +441,9 @@ namespace rhi {
 		// Root signature flags
 		D3D12_VERSIONED_ROOT_SIGNATURE_DESC rs{};
 		rs.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
-		rs.Desc_1_1.NumParameters = (UINT)params.size();
+		rs.Desc_1_1.NumParameters = static_cast<UINT>(params.size());
 		rs.Desc_1_1.pParameters = params.data();
-		rs.Desc_1_1.NumStaticSamplers = (UINT)ssmps.size();
+		rs.Desc_1_1.NumStaticSamplers = static_cast<UINT>(ssmps.size());
 		rs.Desc_1_1.pStaticSamplers = ssmps.data();
 		rs.Desc_1_1.Flags =
 			D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED |
@@ -866,8 +838,6 @@ namespace rhi {
 		}
 	}
 
-	static bool FillDx12Arg(const IndirectArg& a, D3D12_INDIRECT_ARGUMENT_DESC& out);
-
 	static Result d_createCommandSignature(Device* d,
 		const CommandSignatureDesc& cd,
 		const PipelineLayoutHandle layout, CommandSignaturePtr& out) noexcept
@@ -954,7 +924,7 @@ namespace rhi {
 		auto* H = impl->descHeaps.get(s.heap);
 		if (!H || H->type != expect || !H->shaderVisible) return false;
 		out = H->gpuStart;
-		out.ptr += UINT64(s.index) * H->inc;
+		out.ptr += static_cast<UINT64>(s.index) * H->inc;
 		return true;
 	}
 
@@ -984,21 +954,21 @@ namespace rhi {
 			switch (dv.buffer.kind) {
 			case BufferViewKind::Raw:
 				desc.Format = DXGI_FORMAT_R32_TYPELESS;
-				desc.Buffer.FirstElement = (UINT)dv.buffer.firstElement; // in 32-bit units
+				desc.Buffer.FirstElement = static_cast<UINT>(dv.buffer.firstElement); // in 32-bit units
 				desc.Buffer.NumElements = dv.buffer.numElements;
 				desc.Buffer.StructureByteStride = 0;
 				desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
 				break;
 			case BufferViewKind::Structured:
 				desc.Format = DXGI_FORMAT_UNKNOWN;
-				desc.Buffer.FirstElement = (UINT)dv.buffer.firstElement;
+				desc.Buffer.FirstElement = static_cast<UINT>(dv.buffer.firstElement);
 				desc.Buffer.NumElements = dv.buffer.numElements;
 				desc.Buffer.StructureByteStride = dv.buffer.structureByteStride;
 				desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
 				break;
 			case BufferViewKind::Typed:
 				desc.Format = ToDxgi(dv.formatOverride);
-				desc.Buffer.FirstElement = (UINT)dv.buffer.firstElement;
+				desc.Buffer.FirstElement = static_cast<UINT>(dv.buffer.firstElement);
 				desc.Buffer.NumElements = dv.buffer.numElements;
 				desc.Buffer.StructureByteStride = 0;
 				desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
@@ -3569,6 +3539,137 @@ namespace rhi {
 		H->heap->SetName(s2ws(n).c_str());
 	}
 
+	// ---------------- Helpers ----------------
+
+	void EnableShaderBasedValidation() {
+		CComPtr<ID3D12Debug> spDebugController0;
+		CComPtr<ID3D12Debug1> spDebugController1;
+		VERIFY(D3D12GetDebugInterface(IID_PPV_ARGS(&spDebugController0)));
+		VERIFY(spDebugController0->QueryInterface(IID_PPV_ARGS(&spDebugController1)));
+		spDebugController1->SetEnableGPUBasedValidation(true);
+	}
+
+	static void EnableDebug(ID3D12Device* device) {
+		ComPtr<ID3D12Debug> debugController;
+		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
+			debugController->EnableDebugLayer();
+		}
+		//EnableShaderBasedValidation();
+		ComPtr<ID3D12InfoQueue> iq; if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&iq)))) {
+			D3D12_MESSAGE_ID blocked[] = { (D3D12_MESSAGE_ID)1356, (D3D12_MESSAGE_ID)1328, (D3D12_MESSAGE_ID)1008 };
+			D3D12_INFO_QUEUE_FILTER f{}; f.DenyList.NumIDs = (UINT)_countof(blocked); f.DenyList.pIDList = blocked; iq->AddStorageFilterEntries(&f);
+			iq->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true);
+			iq->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, true);
+		}
+	}
+
+	void SlLogMessageCallback(sl::LogType level, const char* message) {
+		//spdlog::info("Streamline Log: {}", message);
+	}
+	std::wstring GetExePath() {
+		WCHAR buffer[MAX_PATH] = { 0 };
+		GetModuleFileNameW(NULL, buffer, MAX_PATH);
+		std::wstring::size_type pos = std::wstring(buffer).find_last_of(L"\\/");
+		return std::wstring(buffer).substr(0, pos);
+	}
+
+	bool InitSL() noexcept
+	{
+		// IMPORTANT: Always securely load SL library, see source/core/sl.security/secureLoadLibrary for more details
+// Always secure load SL modules
+		if (!sl::security::verifyEmbeddedSignature(L"sl.interposer.dll"))
+		{
+			// SL module not signed, disable SL
+		}
+		else
+		{
+			auto mod = LoadLibraryW(L"sl.interposer.dll");
+
+			if (!mod) {
+				spdlog::error("Failed to load sl.interposer.dll, ensure it is in the correct directory.");
+				return false;
+			}
+
+		}
+
+		sl::Preferences pref{};
+		pref.showConsole = false; // for debugging, set to false in production
+		pref.logLevel = sl::LogLevel::eDefault;
+		auto path = GetExePath() + L"\\NVSL";
+		const wchar_t* path_wchar = path.c_str();
+		pref.pathsToPlugins = { &path_wchar }; // change this if Streamline plugins are not located next to the executable
+		pref.numPathsToPlugins = 1; // change this if Streamline plugins are not located next to the executable
+		pref.pathToLogsAndData = {}; // change this to enable logging to a file
+		pref.logMessageCallback = SlLogMessageCallback; // highly recommended to track warning/error messages in your callback
+		pref.engine = sl::EngineType::eCustom; // If using UE or Unity
+		pref.engineVersion = "0.0.1"; // Optional version
+		pref.projectId = "72a89ee2-1139-4cc5-8daa-d27189bed781"; // Optional project id
+		sl::Feature myFeatures[] = { sl::kFeatureDLSS };
+		pref.featuresToLoad = myFeatures;
+		pref.numFeaturesToLoad = _countof(myFeatures);
+		pref.renderAPI = sl::RenderAPI::eD3D12;
+		pref.flags |= sl::PreferenceFlags::eUseManualHooking;
+		if (SL_FAILED(res, slInit(pref)))
+		{
+			// Handle error, check the logs
+			if (res == sl::Result::eErrorDriverOutOfDate) { /* inform user */ }
+			// and so on ...
+			return false;
+		}
+		return true;
+	}
+
+	}
+
+	void Dx12Device::Shutdown() noexcept {
+
+		Dx12WaitQueueIdle(gfx);
+		Dx12WaitQueueIdle(comp);
+		Dx12WaitQueueIdle(copy);
+
+		swapchains.clear();
+		queryPools.clear();
+		heaps.clear();
+		timelines.clear();
+		commandLists.clear();
+		allocators.clear();
+		descHeaps.clear();
+		commandSignatures.clear();
+		pipelines.clear();
+		pipelineLayouts.clear();
+		samplers.clear();
+		resources.clear();
+
+		gfx = {};
+		comp = {};
+		copy = {};
+
+#if BUILD_TYPE == BUILD_DEBUG
+		// Hold a temporary ref so we can report AFTER we drop our member refs.
+		const Microsoft::WRL::ComPtr<ID3D12Device> devForReport = pNativeDevice;
+#endif
+
+		// Drop SL Proxy objects
+		pSLProxyDevice.Reset();
+		pSLProxyFactory.Reset();
+
+		if (steamlineInitialized) {
+			slShutdown();
+		}
+
+		// Drop DXGI objects
+		adapter.Reset();
+		pNativeFactory.Reset();
+
+		pNativeDevice.Reset();
+
+#if BUILD_TYPE == BUILD_DEBUG
+		Dx12ReportLiveObjects(devForReport.Get(), "Dx12Device::Shutdown - D3D12 live objects (post-release)");
+		DxgiReportLiveObjects("Dx12Device::Shutdown - DXGI live objects (post-release)");
+#endif
+	}
+
+
 	const DeviceVTable g_devvt = {
 		&d_createPipelineFromStream,
 		&d_createPipelineLayout,
@@ -3730,84 +3831,6 @@ namespace rhi {
 		&h_setName,
 		1u
 	};
-
-	// ---------------- Helpers ----------------
-
-	void EnableShaderBasedValidation() {
-		CComPtr<ID3D12Debug> spDebugController0;
-		CComPtr<ID3D12Debug1> spDebugController1;
-		VERIFY(D3D12GetDebugInterface(IID_PPV_ARGS(&spDebugController0)));
-		VERIFY(spDebugController0->QueryInterface(IID_PPV_ARGS(&spDebugController1)));
-		spDebugController1->SetEnableGPUBasedValidation(true);
-	}
-
-	static void EnableDebug(ID3D12Device* device) {
-		ComPtr<ID3D12Debug> debugController;
-		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)))) {
-			debugController->EnableDebugLayer();
-		}
-		//EnableShaderBasedValidation();
-		ComPtr<ID3D12InfoQueue> iq; if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&iq)))) {
-			D3D12_MESSAGE_ID blocked[] = { (D3D12_MESSAGE_ID)1356, (D3D12_MESSAGE_ID)1328, (D3D12_MESSAGE_ID)1008 };
-			D3D12_INFO_QUEUE_FILTER f{}; f.DenyList.NumIDs = (UINT)_countof(blocked); f.DenyList.pIDList = blocked; iq->AddStorageFilterEntries(&f);
-		}
-	}
-
-	void SlLogMessageCallback(sl::LogType level, const char* message) {
-		//spdlog::info("Streamline Log: {}", message);
-	}
-	std::wstring GetExePath() {
-		WCHAR buffer[MAX_PATH] = { 0 };
-		GetModuleFileNameW(NULL, buffer, MAX_PATH);
-		std::wstring::size_type pos = std::wstring(buffer).find_last_of(L"\\/");
-		return std::wstring(buffer).substr(0, pos);
-	}
-
-	bool InitSL() noexcept
-	{
-		// IMPORTANT: Always securely load SL library, see source/core/sl.security/secureLoadLibrary for more details
-// Always secure load SL modules
-		if (!sl::security::verifyEmbeddedSignature(L"sl.interposer.dll"))
-		{
-			// SL module not signed, disable SL
-		}
-		else
-		{
-			auto mod = LoadLibraryW(L"sl.interposer.dll");
-
-			if (!mod) {
-				spdlog::error("Failed to load sl.interposer.dll, ensure it is in the correct directory.");
-				return false;
-			}
-
-		}
-
-		sl::Preferences pref{};
-		pref.showConsole = false; // for debugging, set to false in production
-		pref.logLevel = sl::LogLevel::eDefault;
-		auto path = GetExePath() + L"\\NVSL";
-		const wchar_t* path_wchar = path.c_str();
-		pref.pathsToPlugins = { &path_wchar }; // change this if Streamline plugins are not located next to the executable
-		pref.numPathsToPlugins = 1; // change this if Streamline plugins are not located next to the executable
-		pref.pathToLogsAndData = {}; // change this to enable logging to a file
-		pref.logMessageCallback = SlLogMessageCallback; // highly recommended to track warning/error messages in your callback
-		pref.engine = sl::EngineType::eCustom; // If using UE or Unity
-		pref.engineVersion = "0.0.1"; // Optional version
-		pref.projectId = "72a89ee2-1139-4cc5-8daa-d27189bed781"; // Optional project id
-		sl::Feature myFeatures[] = { sl::kFeatureDLSS };
-		pref.featuresToLoad = myFeatures;
-		pref.numFeaturesToLoad = _countof(myFeatures);
-		pref.renderAPI = sl::RenderAPI::eD3D12;
-		pref.flags |= sl::PreferenceFlags::eUseManualHooking;
-		if (SL_FAILED(res, slInit(pref)))
-		{
-			// Handle error, check the logs
-			if (res == sl::Result::eErrorDriverOutOfDate) { /* inform user */ }
-			// and so on ...
-			return false;
-		}
-		return true;
-	}
 
 	rhi::Result CreateD3D12Device(const DeviceCreateInfo& ci, DevicePtr& outPtr, bool enableStreamlineInterposer) noexcept
 	{

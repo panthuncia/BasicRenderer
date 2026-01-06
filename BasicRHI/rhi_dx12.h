@@ -324,7 +324,7 @@ namespace rhi {
 	};
 
 	struct Dx12Device {
-		~Dx12Device() noexcept;
+		~Dx12Device() = default;
 		void Shutdown() noexcept;
 
 		Device self{};

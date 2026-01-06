@@ -20,7 +20,6 @@
 #include "Interfaces/IPassBuilder.h"
 
 class Resource;
-class ResourceGroup;
 class RenderPassBuilder;
 class ComputePassBuilder;
 struct IPassBuilder;
@@ -28,20 +27,49 @@ struct IPassBuilder;
 template<typename T>
 concept DerivedResource = std::derived_from<T, Resource>;
 
+enum class PassRunMask : uint8_t;
+[[nodiscard]] constexpr PassRunMask operator|(PassRunMask a, PassRunMask b) noexcept;
+
+enum class PassRunMask : uint8_t {
+	None = 0,
+	Immediate = 1u << 0,
+	Retained = 1u << 1,
+	Both = Immediate | Retained
+};
+
+[[nodiscard]] constexpr PassRunMask operator|(PassRunMask a, PassRunMask b) noexcept {
+	return static_cast<PassRunMask>(
+		static_cast<uint8_t>(a) | static_cast<uint8_t>(b)
+		);
+}
+
 class RenderGraph {
 public:
-	struct RenderPassAndResources {
+
+	inline bool Has(PassRunMask m, PassRunMask f) {
+		return (uint8_t(m) & uint8_t(f)) != 0;
+	}
+
+	struct RenderPassAndResources { // TODO: I'm currently copying these a lot; maybe use pointers instead
 		std::shared_ptr<RenderPass> pass;
 		RenderPassParameters resources;
 		std::string name;
 		int statisticsIndex = -1;
+
+		PassRunMask run = PassRunMask::Both; // default behavior
+		std::vector<std::byte> immediateBytecode; // Stores the immediate execution bytecode
+		std::shared_ptr<rg::imm::KeepAliveBag> immediateKeepAlive = nullptr; // Keeps alive resources used by immediate execution bytecode
 	};
 
-	struct ComputePassAndResources {
+	struct ComputePassAndResources { // TODO: Same as above
 		std::shared_ptr<ComputePass> pass;
 		ComputePassParameters resources;
 		std::string name;
 		int statisticsIndex = -1;
+
+		PassRunMask run = PassRunMask::Both;
+		std::vector<std::byte> immediateBytecode; // Stores the immediate execution bytecode
+		std::shared_ptr<rg::imm::KeepAliveBag> immediateKeepAlive = nullptr; // Keeps alive resources used by immediate execution bytecode
 	};
 
 	enum class CommandQueueType {
@@ -103,7 +131,7 @@ public:
 	void AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassParameters& resources, std::string name = "");
 	void Update();
 	void Execute(RenderContext& context);
-	void Compile();
+	void CompileStructural();
 	void ResetForRecompile();
 	void Setup();
 	const std::vector<PassBatch>& GetBatches() const { return batches; }
@@ -116,12 +144,21 @@ public:
 
 	void RegisterProvider(IResourceProvider* prov);
 	void RegisterResource(ResourceIdentifier id, std::shared_ptr<Resource> resource, IResourceProvider* provider = nullptr);
-	std::shared_ptr<Resource> RequestResource(ResourceIdentifier const& rid, bool allowFailure = false);
+
+	std::unordered_map<ResourceIdentifier, std::shared_ptr<IResourceResolver>, ResourceIdentifier::Hasher> _resolverMap;
+
+	void RegisterResolver(ResourceIdentifier id, const std::shared_ptr<IResourceResolver>& resolver);
+	std::shared_ptr<IResourceResolver> RequestResolver(ResourceIdentifier const& rid, bool allowFailure = false);
+
+	std::shared_ptr<Resource> RequestResourcePtr(ResourceIdentifier const& rid, bool allowFailure = false);
+	ResourceRegistry::RegistryHandle RequestResourceHandle(ResourceIdentifier const& rid, bool allowFailure = false);
+	ResourceRegistry::RegistryHandle RequestResourceHandle(Resource* const& pResource, bool allowFailure = false);
+
 	void RegisterECSRenderPhaseEntities(const std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher>& phaseEntities);
 
 	template<DerivedResource T>
-	std::shared_ptr<T> RequestResource(ResourceIdentifier const& rid, bool allowFailure = false) {
-		auto basePtr = RequestResource(rid, allowFailure);
+	std::shared_ptr<T> RequestResourcePtr(ResourceIdentifier const& rid, bool allowFailure = false) {
+		auto basePtr = RequestResourcePtr(rid, allowFailure);
 
 		if (!basePtr) {
 			if (allowFailure) {
@@ -177,21 +214,17 @@ private:
 	std::unordered_map<std::string, std::unique_ptr<IPassBuilder>> m_passBuildersByName;
 	std::unordered_set<std::string> m_passNamesSeenThisReset;
 
-	std::vector<AnyPassAndResources> passes;
+	std::vector<AnyPassAndResources> m_masterPassList;
+	std::vector<AnyPassAndResources> m_framePasses;
 	std::unordered_map<std::string, std::shared_ptr<RenderPass>> renderPassesByName;
 	std::unordered_map<std::string, std::shared_ptr<ComputePass>> computePassesByName;
 	std::unordered_map<std::string, std::shared_ptr<Resource>> resourcesByName;
 	std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
-	std::unordered_map<uint64_t, uint64_t> independantlyManagedResourceToGroup;
-	std::vector<std::shared_ptr<ResourceGroup>> resourceGroups;
 
 	std::unordered_map<uint64_t, std::unordered_set<uint64_t>> aliasedResources; // Tracks resources that use the same memory
 	std::unordered_map<uint64_t, size_t> resourceToAliasGroup;
 	std::vector<std::vector<uint64_t>>   aliasGroups;
 	std::vector<std::unordered_map<UINT,uint64_t>> lastActiveSubresourceInAliasGroup;
-
-	// Sometimes, we have a resource group that has children that are also managed independently by this graph. If so, we need to handle their transitions separately
-	std::unordered_map<uint64_t, std::vector<uint64_t>> resourcesFromGroupToManageIndependantly;
 
 	std::unordered_map<uint64_t, ResourceTransition> initialTransitions; // Transitions needed to reach the initial state of the resources before executing the first batch. Executed on graph setup.
 	std::vector<PassBatch> batches;
@@ -214,6 +247,8 @@ private:
 
 	std::unique_ptr<CommandRecordingManager> m_pCommandRecordingManager;
 
+	rg::imm::ImmediateDispatch m_immediateDispatch{};
+
 	UINT64 m_graphicsQueueFenceValue = 0;
 	UINT64 GetNextGraphicsQueueFenceValue() {
 		return m_graphicsQueueFenceValue++;
@@ -227,10 +262,12 @@ private:
 
 	void AddResource(std::shared_ptr<Resource> resource, bool transition = false);
 
+	void CompileFrame(rhi::Device device, uint8_t frameIndex);
+
 	void ComputeResourceLoops();
 	bool IsNewBatchNeeded(
 		const std::vector<ResourceRequirement>& reqs,
-		const std::vector<std::pair<ResourceAndRange, ResourceState>> passInternalTransitions,
+		const std::vector<std::pair<ResourceHandleAndRange, ResourceState>> passInternalTransitions,
 		const std::unordered_map<uint64_t, SymbolicTracker*>& passBatchTrackers,
 		const std::unordered_set<uint64_t>& currentBatchInternallyTransitionedResources,
 		const std::unordered_set<uint64_t>& currentBatchAllResources,
@@ -370,22 +407,6 @@ private:
 		return out;
 	}
 
-	//void RegisterPassBuilder(RenderPassBuilder&& builder);
-	//void RegisterPassBuilder(ComputePassBuilder&& builder);
-
-	std::unordered_set<uint64_t> GetAllIndependantlyManagedResourcesFromGroup(
-		uint64_t groupGlobalResourceID) const
-	{
-		std::unordered_set<uint64_t> outResources;
-		auto it = resourcesFromGroupToManageIndependantly.find(groupGlobalResourceID);
-		if (it != resourcesFromGroupToManageIndependantly.end()) {
-			for (auto& resID : it->second) {
-				outResources.insert(resID);
-			}
-		}
-		return outResources;
-	}
-
 	std::vector<uint64_t> ExpandSchedulingIDs(uint64_t id) const;
 
 
@@ -399,7 +420,7 @@ private:
 	struct PassView {
 		bool isCompute = false;
 		std::vector<ResourceRequirement>* reqs = nullptr;
-		std::vector<std::pair<ResourceAndRange, ResourceState>>* internalTransitions = nullptr;
+		std::vector<std::pair<ResourceHandleAndRange, ResourceState>>* internalTransitions = nullptr;
 	};
 
 	struct Node {

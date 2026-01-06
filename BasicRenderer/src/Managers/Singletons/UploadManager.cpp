@@ -7,6 +7,7 @@
 #include "Resources/Resource.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/DeviceManager.h"
+#include "Resources/ExternalBackingResource.h"
 
 void UploadManager::Initialize() {
 	m_numFramesInFlight = SettingsManager::GetInstance()
@@ -20,19 +21,6 @@ void UploadManager::Initialize() {
 	m_headOffset = 0;
 	m_tailOffset = 0;
 	m_frameStart.assign(m_numFramesInFlight, 0);
-
-	auto device = DeviceManager::GetInstance().GetDevice();
-
-	// create one allocator+list per frame
-	for (int i = 0; i < m_numFramesInFlight; i++) {
-		rhi::CommandAllocatorPtr allocator;
-		auto result = device.CreateCommandAllocator(rhi::QueueKind::Graphics, allocator);
-		rhi::CommandListPtr list;
-		result = device.CreateCommandList(rhi::QueueKind::Graphics, allocator.Get(), list);
-		m_commandAllocators.push_back(std::move(allocator));
-		m_commandLists.push_back(std::move(list));
-		m_commandLists.back()->End();
-	}
 
 	getNumFramesInFlight =
 		SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight");
@@ -78,7 +66,7 @@ bool UploadManager::TryCoalesceAppend(ResourceUpdate& last, const ResourceUpdate
 
 	last.size += next.size;
 
-#ifdef _DEBUG
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
 	// Preserve newest debug provenance.
 	last.file = next.file;
 	last.line = next.line;
@@ -127,7 +115,7 @@ void UploadManager::ApplyLastWriteWins(ResourceUpdate& newUpdate) noexcept
 			UnmapUpload(newUpdate.uploadBuffer);
 			UnmapUpload(u.uploadBuffer);
 
-#ifdef _DEBUG
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
 			// Keep newest provenance.
 			u.file = newUpdate.file;
 			u.line = newUpdate.line;
@@ -247,7 +235,7 @@ bool UploadManager::AllocateUploadRegion(size_t size, size_t alignment, std::sha
 }
 
 
-#ifdef _DEBUG
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
 void UploadManager::UploadData(const void* data, size_t size, UploadTarget resourceToUpdate, size_t dataBufferOffset, const char* file, int line)
 #else
 void UploadManager::UploadData(const void* data, size_t size, UploadTarget resourceToUpdate, size_t dataBufferOffset)
@@ -302,14 +290,15 @@ void UploadManager::UploadData(const void* data, size_t size, UploadTarget resou
 	update.uploadBuffer = page->buffer;
 	update.uploadBufferOffset = uploadOffset;
 	update.dataBufferOffset = dataBufferOffset;
-#ifdef _DEBUG
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+	//update.stackTrace = std::stacktrace::current();
 	unsigned int idOrRegistryIndex = 0;
 	switch (resourceToUpdate.kind) {
 		case UploadTarget::Kind::PinnedShared:
 			idOrRegistryIndex = static_cast<unsigned int>(resourceToUpdate.pinned ? resourceToUpdate.pinned->GetGlobalResourceID() : ~0ull);
 			break;
 		case UploadTarget::Kind::RegistryHandle:
-			idOrRegistryIndex = resourceToUpdate.h.key.idx;
+			idOrRegistryIndex = resourceToUpdate.h.GetKey().idx;
 			break;
 		default:
 			break;
@@ -328,12 +317,12 @@ void UploadManager::UploadData(const void* data, size_t size, UploadTarget resou
 	for (USHORT i = 0; i < captured; i++) update.stack[i] = frames[i];
 #endif
 #endif
-	m_resourceUpdates.push_back(update);
 	ApplyLastWriteWins(update);
 
 	if (!update.active) {
 		return;
 	}
+
 	// contiguous append coalescing against the most recent active update.
 	for (int i = static_cast<int>(m_resourceUpdates.size()) - 1; i >= 0; --i) {
 		auto& last = m_resourceUpdates[static_cast<size_t>(i)];
@@ -341,17 +330,17 @@ void UploadManager::UploadData(const void* data, size_t size, UploadTarget resou
 			continue;
 		}
 		if (TryCoalesceAppend(last, update)) {
-			return;
+			return; // merged into 'last'
 		}
 		break;
 	}
 
-	m_resourceUpdates.push_back(update);
+	m_resourceUpdates.push_back(std::move(update));
 }
 
-#ifdef _DEBUG
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
 void UploadManager::UploadTextureSubresources(
-	rhi::Resource& dstTexture,
+	UploadTarget target,
 	rhi::Format fmt,
 	uint32_t baseWidth,
 	uint32_t baseHeight,
@@ -364,7 +353,7 @@ void UploadManager::UploadTextureSubresources(
 	int line)
 #else
 void UploadManager::UploadTextureSubresources(
-	rhi::Resource& dstTexture,
+	UploadTarget target,
 	rhi::Format fmt,
 	uint32_t baseWidth,
 	uint32_t baseHeight,
@@ -398,26 +387,25 @@ void UploadManager::UploadTextureSubresources(
 
 	// Queue up the GPU copies (one per subresource).
 	for (const auto& fp : plan.footprints) {
-		rhi::BufferTextureCopyFootprint f{};
-		f.buffer = uploadBuffer->GetAPIResource().GetHandle();
-		f.texture = dstTexture.GetHandle();
 
-		f.arraySlice = fp.arraySlice;
-		f.mip = fp.mip;
-		f.x = 0;
-		f.y = 0;
-		f.z = fp.zSlice;
-
-		f.footprint.offset = static_cast<uint64_t>(uploadBaseOffset) + fp.offset;
-		f.footprint.rowPitch = fp.rowPitch;
-		f.footprint.width = fp.width;
-		f.footprint.height = fp.height;
-		f.footprint.depth = fp.depth;
+		rhi::CopyableFootprint copyFootprint;
+		copyFootprint.offset = static_cast<uint64_t>(uploadBaseOffset) + fp.offset;
+		copyFootprint.rowPitch = fp.rowPitch;
+		copyFootprint.width = fp.width;
+		copyFootprint.height = fp.height;
+		copyFootprint.depth = fp.depth;
 
 		TextureUpdate update;
-		update.copy = f;
+		update.texture = target;
+		update.mip = fp.mip;
+		update.slice = fp.arraySlice;
+		update.footprint = copyFootprint;
+		update.x = 0;
+		update.y = 0;
+		update.z = fp.zSlice;
 		update.uploadBuffer = uploadBuffer;
 #ifdef _DEBUG
+		//update.stackTrace = std::stacktrace::current();
 		update.file = file;
 		update.line = line;
 		update.threadID = std::this_thread::get_id();
@@ -457,36 +445,63 @@ void UploadManager::ProcessDeferredReleases(uint8_t frameIndex)
 
 	// Now record "this frame's" new begin page for the next round:
 	m_frameStart[frameIndex] = m_activePage;
-
-	m_commandAllocators[frameIndex]->Recycle();
 }
 
-void UploadManager::ProcessUploads(uint8_t frameIndex, rhi::Queue queue) {
-	auto& commandAllocator = m_commandAllocators[frameIndex];
-	auto& commandList = m_commandLists[frameIndex];
-	commandList->Recycle(commandAllocator.Get());
-	rhi::debug::Begin(commandList.Get(), rhi::colors::Amber, "UploadManager::ProcessUploads");
-	// TODO: Should we do any barriers here?
+void UploadManager::ProcessUploads(uint8_t frameIndex, rg::imm::ImmediateCommandList& commandList) {
+
+	//rhi::debug::Begin(commandList.Get(), rhi::colors::Amber, "UploadManager::ProcessUploads");
+
 	for (auto& update : m_resourceUpdates) {
 		if (!update.active || !update.uploadBuffer || update.size == 0) continue;
-		Resource* buffer = ResolveTarget(update.resourceToUpdate);
-		commandList->CopyBufferRegion(
-			buffer->GetAPIResource().GetHandle(),
-			update.dataBufferOffset,
-			update.uploadBuffer->GetAPIResource().GetHandle(),
-			update.uploadBufferOffset,
-			update.size
-		);
+		switch(update.resourceToUpdate.kind) {
+		case UploadTarget::Kind::PinnedShared:
+			commandList.CopyBufferRegion(
+				update.resourceToUpdate.pinned,
+				update.dataBufferOffset,
+				update.uploadBuffer.get(),
+				update.uploadBufferOffset,
+				update.size
+			);
+			break;
+		case UploadTarget::Kind::RegistryHandle:
+			commandList.CopyBufferRegion(
+				m_ctx.registry->Resolve(update.resourceToUpdate.h),
+				update.dataBufferOffset,
+				update.uploadBuffer.get(),
+				update.uploadBufferOffset,
+				update.size
+			);
+			break;
+			
+		}
+
 	}
 
 	for (auto& texUpdate : m_textureUpdates) {
-		commandList->CopyBufferToTexture(texUpdate.copy);
+		if (texUpdate.texture.kind == UploadTarget::Kind::PinnedShared) {
+			commandList.CopyBufferToTexture(
+				texUpdate.uploadBuffer.get(),
+				texUpdate.texture.pinned,
+				texUpdate.mip,
+				texUpdate.slice,
+				texUpdate.footprint,
+				texUpdate.x,
+				texUpdate.y,
+				texUpdate.z
+			);
+		} else {
+			commandList.CopyBufferToTexture(
+				texUpdate.uploadBuffer.get(),
+				m_ctx.registry->Resolve(texUpdate.texture.h),
+				texUpdate.mip,
+				texUpdate.slice,
+				texUpdate.footprint,
+				texUpdate.x,
+				texUpdate.y,
+				texUpdate.z
+			);
+		}
 	}
-	rhi::debug::End(commandList.Get());
-
-	commandList->End();
-
-	queue.Submit({ &commandList.Get() });
 
 	m_resourceUpdates.clear();
 	m_textureUpdates.clear();
@@ -503,166 +518,41 @@ void UploadManager::QueueResourceCopy(const std::shared_ptr<Resource>& destinati
 void UploadManager::QueueCopyAndDiscard(
 	const std::shared_ptr<Resource>& destination,
 	std::unique_ptr<GpuBufferBacking> sourceToDiscard,
-	SymbolicTracker sourceBarrierState,
 	size_t size)
 {
 	DiscardBufferCopy copy;
-	copy.sourceOwned = std::move(sourceToDiscard);
-	copy.sourceBarrierState = std::move(sourceBarrierState);
+	copy.sourceOwned = ExternalBackingResource::CreateShared(std::move(sourceToDiscard));
 	copy.destination = destination;
 	copy.size = size;
 
 	queuedDiscardCopies.push_back(std::move(copy));
 }
 
-void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, rhi::Queue queue) {
-	auto& commandAllocator = m_commandAllocators[frameIndex];
-	auto& commandList = m_commandLists[frameIndex];
-	commandList->Recycle(commandAllocator.Get());
-	rhi::debug::Begin(commandList.Get(), rhi::colors::Amber, "Upload Manager - resource copies");
+void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, rg::imm::ImmediateCommandList& commandList) {
+	//rhi::debug::Begin(commandList.Get(), rhi::colors::Amber, "Upload Manager - resource copies");
 	for (auto& copy : queuedResourceCopies) {
-
-		// Copy initial state of the resources
-		auto initialSourceState = copy.source->GetStateTracker()->GetSegments();
-		auto initialDestinationState = copy.destination->GetStateTracker()->GetSegments();
-
-		RangeSpec range = {};
-		ResourceState sourceState;
-		sourceState.access = rhi::ResourceAccessType::CopySource;
-		sourceState.layout = rhi::ResourceLayout::CopySource;
-		sourceState.sync = rhi::ResourceSyncState::Copy;
-
-		ResourceState destinationState;
-		destinationState.access = rhi::ResourceAccessType::CopyDest;
-		destinationState.layout = rhi::ResourceLayout::CopyDest;
-		destinationState.sync = rhi::ResourceSyncState::Copy;
-
-		// Compute transitions to bring full resources into COPY_SOURCE and COPY_DEST
-		std::vector<ResourceTransition> transitions;
-		copy.source->GetStateTracker()->Apply(range, copy.source.get(), sourceState, transitions);
-		copy.destination->GetStateTracker()->Apply(range, copy.destination.get(), destinationState, transitions);
-
-		std::vector<D3D12_BARRIER_GROUP> barriers;
-		std::vector<rhi::BarrierBatch> sourceTransitions;
-		for (auto& transition : transitions) {
-			auto sourceTransition = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
-			sourceTransitions.push_back(sourceTransition);
-		}
-
-		auto batch = rhi::helpers::CombineBarrierBatches(sourceTransitions);
-
-		commandList->Barriers(batch.View());
-
 		// Perform the copy
-		commandList->CopyBufferRegion(
-			copy.destination->GetAPIResource().GetHandle(),
+		commandList.CopyBufferRegion(
+			copy.destination.get(),
 			0,
-			copy.source->GetAPIResource().GetHandle(),
+			copy.source.get(),
 			0,
 			copy.size);
-
-		barriers.clear();
-		transitions.clear();
-
-		// Copy back the initial state of the resources
-		for (auto& segment : initialSourceState) {
-			copy.source->GetStateTracker()->Apply(segment.rangeSpec, copy.source.get(), segment.state, transitions);
-		}
-		for (auto& segment : initialDestinationState) {
-			copy.destination->GetStateTracker()->Apply(segment.rangeSpec, copy.destination.get(), segment.state, transitions);
-		}
-
-		sourceTransitions.clear();
-		batch.Clear();
-		for (auto& transition : transitions) {
-			auto sourceTransition = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
-			sourceTransitions.push_back(std::move(sourceTransition));
-		}
-
-		batch = rhi::helpers::CombineBarrierBatches(sourceTransitions);
-
-		commandList->Barriers(batch.View());
 	}
 
 	for (auto& copy : queuedDiscardCopies) {
-
-		// Copy initial state of the resources
-		auto initialSourceState = copy.sourceBarrierState.GetSegments();
-		auto initialDestinationState = copy.destination->GetStateTracker()->GetSegments();
-
-		RangeSpec range = {};
-		ResourceState sourceState;
-		sourceState.access = rhi::ResourceAccessType::CopySource;
-		sourceState.layout = rhi::ResourceLayout::CopySource;
-		sourceState.sync = rhi::ResourceSyncState::Copy;
-
-		ResourceState destinationState;
-		destinationState.access = rhi::ResourceAccessType::CopyDest;
-		destinationState.layout = rhi::ResourceLayout::CopyDest;
-		destinationState.sync = rhi::ResourceSyncState::Copy;
-
-		// Compute transitions to bring full resources into COPY_SOURCE and COPY_DEST
-		std::vector<ResourceTransition> transitions;
-		copy.sourceBarrierState.Apply(range, nullptr, sourceState, transitions);
-		copy.destination->GetStateTracker()->Apply(range, copy.destination.get(), destinationState, transitions);
-
-		std::vector<D3D12_BARRIER_GROUP> barriers;
-		std::vector<rhi::BarrierBatch> sourceTransitions;
-
-		for (auto& transition : transitions) {
-			rhi::BarrierBatch batch;
-			if (transition.pResource == nullptr) {
-				batch = copy.sourceOwned->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);}
-			else {
-				batch = transition.pResource->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
-			}
-			sourceTransitions.push_back(batch);
-		}
-
-		auto batch = rhi::helpers::CombineBarrierBatches(sourceTransitions);
-
-		commandList->Barriers(batch.View());
-
 		// Perform the copy
-		commandList->CopyBufferRegion(
-			copy.destination->GetAPIResource().GetHandle(),
+		commandList.CopyBufferRegion(
+			copy.destination.get(),
 			0,
-			copy.sourceOwned->GetAPIResource().GetHandle(),
+			copy.sourceOwned,
 			0,
 			copy.size);
 
-		barriers.clear();
-		transitions.clear();
-
-		// Copy back the initial state of the resource (source is discarded)
-		for (auto& segment : initialDestinationState) {
-			copy.destination->GetStateTracker()->Apply(segment.rangeSpec, copy.destination.get(), segment.state, transitions);
-		}
-
-		sourceTransitions.clear();
-		batch.Clear();
-		for (auto& transition : transitions) {
-			auto dstTransition = copy.destination->GetEnhancedBarrierGroup(transition.range, transition.prevAccessType, transition.newAccessType, transition.prevLayout, transition.newLayout, transition.prevSyncState, transition.newSyncState);
-			sourceTransitions.push_back(std::move(dstTransition));
-		}
-
-		batch = rhi::helpers::CombineBarrierBatches(sourceTransitions);
-
-		commandList->Barriers(batch.View());
 	}
-
-	rhi::debug::End(commandList.Get());
-	commandList->End();
-
-	queue.Submit({ &commandList.Get() });
 
 	queuedResourceCopies.clear();
 	queuedDiscardCopies.clear(); // Discards owned resources
-}
-
-void UploadManager::ResetAllocators(uint8_t frameIndex) {
-	auto& commandAllocator = m_commandAllocators[frameIndex];
-	commandAllocator->Recycle();
 }
 
 void UploadManager::Cleanup() {

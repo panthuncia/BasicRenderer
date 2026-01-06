@@ -3,6 +3,7 @@
 #include <rhi.h>
 
 #include "Scene/Components.h"
+#include "Render/ImmediateExecution/ImmediateCommandList.h"
 
 class Scene;
 class ObjectManager;
@@ -14,8 +15,7 @@ class EnvironmentManager;
 class MaterialManager;
 class PixelBuffer;
 
-class RenderContext {
-public:
+struct RenderContext {
 	Components::DrawStats drawStats;
 	ObjectManager* objectManager;
 	MeshManager* meshManager;
@@ -40,4 +40,10 @@ public:
 	DirectX::XMUINT2 outputResolution;
     unsigned int globalPSOFlags;
 	float deltaTime;
+};
+
+struct ImmediateContext {
+	rhi::Device device;
+	rg::imm::ImmediateCommandList list;
+	uint8_t frameIndex;
 };

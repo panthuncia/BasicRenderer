@@ -17,9 +17,14 @@ ViewManager::ViewManager() {
 
     // Register provided resources
     m_resources[Builtin::CameraBuffer] = m_cameraBuffer;
-    m_resources[Builtin::MeshletCullingBitfieldGroup] = m_meshletBitfieldGroup;
-    m_resources[Builtin::MeshInstanceMeshletCullingBitfieldGroup] = m_meshInstanceMeshletCullingBitfieldGroup;
-    m_resources[Builtin::MeshInstanceOcclusionCullingBitfieldGroup] = m_meshInstanceOcclusionCullingBitfieldGroup;
+
+    // Register resolvers for resource groups
+    m_resolvers[Builtin::MeshletCullingBitfieldGroup] =
+        std::make_shared<ResourceGroupResolver>(m_meshletBitfieldGroup);
+    m_resolvers[Builtin::MeshInstanceMeshletCullingBitfieldGroup] =
+        std::make_shared<ResourceGroupResolver>(m_meshInstanceMeshletCullingBitfieldGroup);
+    m_resolvers[Builtin::MeshInstanceOcclusionCullingBitfieldGroup] =
+        std::make_shared<ResourceGroupResolver>(m_meshInstanceOcclusionCullingBitfieldGroup);
 }
 
 void ViewManager::SetIndirectCommandBufferManager(IndirectCommandBufferManager* manager) {
@@ -181,7 +186,7 @@ const View* ViewManager::Get(uint64_t viewID) const {
 }
 
 void ViewManager::BakeDescriptorIndices() {
-    // Optional optimization: cache descriptor indices after SRV/UAV registration is done.
+    // cache descriptor indices after SRV/UAV registration is done.
     for (auto& [id, v] : m_views) {
         if (v.gpu.meshletBitfieldBuffer)
             v.gpu.meshletBitfieldSRVIndex = v.gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
@@ -204,4 +209,17 @@ std::vector<ResourceIdentifier> ViewManager::GetSupportedKeys() {
     for (auto const& [k, _] : m_resources)
         keys.push_back(k);
     return keys;
+}
+
+std::vector<ResourceIdentifier> ViewManager::GetSupportedResolverKeys() {
+    std::vector<ResourceIdentifier> keys;
+    keys.reserve(m_resolvers.size());
+    for (auto const& [k, _] : m_resolvers)
+        keys.push_back(k);
+	return keys;
+}
+std::shared_ptr<IResourceResolver> ViewManager::ProvideResolver(ResourceIdentifier const& key) {
+	auto it = m_resolvers.find(key);
+	if (it == m_resolvers.end()) return nullptr;
+	return it->second;
 }

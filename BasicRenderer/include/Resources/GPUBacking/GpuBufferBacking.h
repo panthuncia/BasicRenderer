@@ -13,7 +13,7 @@
 #include "Managers/Singletons/DeletionManager.h"
 #include "Resources/TrackedAllocation.h"
 
-class RenderContext;
+struct RenderContext;
 
 // Represents the GPU-side backing storage for a buffer resource.
 // Should only be owned by logical resources (Resource or derived classes).
@@ -48,12 +48,18 @@ public:
 		m_bufferAllocation.ApplyComponentBundle(bundle);
 	}
 
+	SymbolicTracker* GetStateTracker() {
+		return &m_stateTracker;
+	}
+
 private:
 #if BUILD_TYPE == BUILD_DEBUG
 	std::stacktrace m_creation;
 #endif
 	size_t m_size = 0;
 	rhi::BufferBarrier m_barrier = {};
+
+	SymbolicTracker m_stateTracker;
 
 	GpuBufferBacking(
 		rhi::HeapType accessType,

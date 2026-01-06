@@ -10,7 +10,7 @@
 #include "Resources/ResourceIdentifier.h"
 #include "Interfaces/IResourceResolver.h"
 #include "Interfaces/IPassBuilder.h"
-#include "Resources/ECSResourceResolver.h"
+#include "Resources/Resolvers/ECSResourceResolver.h"
 
 // Tag for a contiguous mip-range [first..first+count)
 struct Mip {
@@ -44,73 +44,73 @@ struct UpToSlice {
     uint32_t last;
 };
 
-// shared_ptr
-inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r) {
-    // everything
-    return { r };
-}
-
-inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
-    Mip m)
-{
-    RangeSpec spec;
-    spec.mipLower   = { BoundType::Exact, m.first      };
-    spec.mipUpper   = { BoundType::Exact, m.first + m.count - 1 };
-    return { r, spec };
-}
-
-inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
-    FromMip fm)
-{
-    RangeSpec spec;
-    spec.mipLower   = { BoundType::From, fm.first };
-    return { r, spec };
-}
-
-inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
-    UpToMip um)
-{
-    RangeSpec spec;
-    spec.mipUpper   = { BoundType::UpTo, um.last };
-    return { r, spec };
-}
-
-inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
-    Slice s)
-{
-    RangeSpec spec;
-    spec.sliceLower = { BoundType::Exact, s.first       };
-    spec.sliceUpper = { BoundType::Exact, s.first + s.count - 1 };
-    return { r, spec };
-}
-
-inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
-    FromSlice fs)
-{
-    RangeSpec spec;
-    spec.sliceLower = { BoundType::From, fs.first };
-    return { r, spec };
-}
-
-inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
-    UpToSlice us)
-{
-    RangeSpec spec;
-    spec.sliceUpper = { BoundType::UpTo, us.last };
-    return { r, spec };
-}
-
-inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
-    Mip     m,
-    Slice   s)
-{
-    RangeSpec spec;
-    spec.mipLower   = { BoundType::Exact, m.first      };
-    spec.mipUpper   = { BoundType::Exact, m.first + m.count - 1 };
-    spec.sliceLower = { BoundType::Exact, s.first       };
-    spec.sliceUpper = { BoundType::Exact, s.first + s.count - 1 };
-    return { r, spec };
-}
+//// shared_ptr
+//inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r) {
+//    // everything
+//    return { r };
+//}
+//
+//inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
+//    Mip m)
+//{
+//    RangeSpec spec;
+//    spec.mipLower   = { BoundType::Exact, m.first      };
+//    spec.mipUpper   = { BoundType::Exact, m.first + m.count - 1 };
+//    return { r, spec };
+//}
+//
+//inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
+//    FromMip fm)
+//{
+//    RangeSpec spec;
+//    spec.mipLower   = { BoundType::From, fm.first };
+//    return { r, spec };
+//}
+//
+//inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
+//    UpToMip um)
+//{
+//    RangeSpec spec;
+//    spec.mipUpper   = { BoundType::UpTo, um.last };
+//    return { r, spec };
+//}
+//
+//inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
+//    Slice s)
+//{
+//    RangeSpec spec;
+//    spec.sliceLower = { BoundType::Exact, s.first       };
+//    spec.sliceUpper = { BoundType::Exact, s.first + s.count - 1 };
+//    return { r, spec };
+//}
+//
+//inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
+//    FromSlice fs)
+//{
+//    RangeSpec spec;
+//    spec.sliceLower = { BoundType::From, fs.first };
+//    return { r, spec };
+//}
+//
+//inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
+//    UpToSlice us)
+//{
+//    RangeSpec spec;
+//    spec.sliceUpper = { BoundType::UpTo, us.last };
+//    return { r, spec };
+//}
+//
+//inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
+//    Mip     m,
+//    Slice   s)
+//{
+//    RangeSpec spec;
+//    spec.mipLower   = { BoundType::Exact, m.first      };
+//    spec.mipUpper   = { BoundType::Exact, m.first + m.count - 1 };
+//    spec.sliceLower = { BoundType::Exact, s.first       };
+//    spec.sliceUpper = { BoundType::Exact, s.first + s.count - 1 };
+//    return { r, spec };
+//}
 
 
 // ResourceIdentifier
@@ -274,14 +274,14 @@ inline ResourceIdentifierAndRange Subresources(const char* r,
 //}
 
 // If we have a ResourceIdentifierAndRange, ask the builder to resolve it into an actual ResourceAndRange:
-std::vector<ResourceAndRange> expandToRanges(ResourceIdentifierAndRange const& rir, RenderGraph* graph);
+std::vector<ResourceHandleAndRange> expandToRanges(ResourceIdentifierAndRange const& rir, RenderGraph* graph);
 
 // If we have an initializer_list of ResourceIdentifierAndRange,
-inline std::vector<ResourceAndRange>
+inline std::vector<ResourceHandleAndRange>
 expandToRanges(std::initializer_list<ResourceIdentifierAndRange> list,
     RenderGraph* graph)
 {
-    std::vector<ResourceAndRange> out;
+    std::vector<ResourceHandleAndRange> out;
     out.reserve(list.size());
     for (auto const & rir : list) {
         if (auto vec = expandToRanges(rir, graph); !vec.empty()) {
@@ -298,36 +298,82 @@ constexpr bool is_shared_ptr_v = false;
 template<typename U> 
 constexpr bool is_shared_ptr_v<std::shared_ptr<U>> = true;
 
-inline std::vector<ResourceAndRange>
-processResourceArguments(const ResourceAndRange& rar,
+// processResourceArguments(...) is a set of overloads that take one of several 
+// ways to represent a resource and return a vector of ResourceHandleAndRange
+
+// For a ResourceHandleAndRange, just return it in a vector
+inline std::vector<ResourceHandleAndRange>
+processResourceArguments(const ResourceHandleAndRange& rar,
     RenderGraph* graph)
 {
-    if (!rar.resource) return {};
+    //if (!rar.resource) return {};
     return { rar };
 }
 
-//template<typename U>
-//inline std::enable_if_t<
-//    std::is_base_of_v<Resource, U>,
-//    std::vector<ResourceAndRange>
-//>
-//processResourceArguments(const std::shared_ptr<U>& childPtr,
-//    RenderGraph* graph)
-//{
-//    if (!childPtr) return {};
-//
-//    std::shared_ptr<Resource> basePtr = childPtr;
-//    return expandToRanges(basePtr, graph);
-//}
+// For a resource pointer + range spec, wrap it and expand it to actual resource handles + ranges
+inline std::vector<ResourceHandleAndRange>
+processResourceArguments(const ResourcePtrAndRange& rar,
+    RenderGraph* graph)
+{
+	auto range = rar.range;
+    auto handle = graph->RequestResourceHandle(rar.resource.get());
+    return { ResourceHandleAndRange{ handle, range } };
+}
 
-inline std::vector<ResourceAndRange>
+// For a resource pointer, assume full range
+inline std::vector<ResourceHandleAndRange>
+processResourceArguments(const std::shared_ptr<Resource>& r,
+    RenderGraph* graph)
+{
+    return processResourceArguments(
+        ResourcePtrAndRange{ r },
+        graph
+    );
+}
+
+// For a resource resolver + range spec, resolve it and process the result
+inline std::vector<ResourceHandleAndRange>
+processResourceArguments(const ResourceResolverAndRange& rrr,
+    RenderGraph* graph)
+{
+    std::vector<ResourceHandleAndRange> out;
+    auto resources = rrr.pResolver->Resolve();
+    for (auto const& res : resources) {
+        const auto rar = ResourcePtrAndRange(res, rrr.range);
+        auto vec = processResourceArguments(rar, graph);
+        out.insert(out.end(),
+            std::make_move_iterator(vec.begin()),
+            std::make_move_iterator(vec.end()));
+    }
+    return out;
+}
+
+// For a resource resolver, assume full range
+inline std::vector<ResourceHandleAndRange>
+processResourceArguments(const IResourceResolver& resolver,
+    RenderGraph* graph)
+{
+    return processResourceArguments(
+        ResourceResolverAndRange(resolver),
+        graph
+    );
+}
+
+// For a resource identifier + range spec, expand it to actual resource handles + ranges
+inline std::vector<ResourceHandleAndRange>
 processResourceArguments(const ResourceIdentifierAndRange& rir,
     RenderGraph* graph)
 {
+    // This could be a resolver- ask the graph.
+    if (auto resolver = graph->RequestResolver(rir.identifier, true)) {
+        return processResourceArguments(*resolver, graph);
+    }
+
     return expandToRanges(rir, graph);
 }
 
-inline std::vector<ResourceAndRange>
+// For a bare resource identifier, assume full range
+inline std::vector<ResourceHandleAndRange>
 processResourceArguments(const ResourceIdentifier& rid,
     RenderGraph* graph)
 {
@@ -337,7 +383,8 @@ processResourceArguments(const ResourceIdentifier& rid,
     );
 }
 
-inline std::vector<ResourceAndRange>
+// For a builtin resource name, assume full range
+inline std::vector<ResourceHandleAndRange>
 processResourceArguments(const char* br,
     RenderGraph* graph)
 {
@@ -347,14 +394,15 @@ processResourceArguments(const char* br,
     );
 }
 
+// For an initializer_list, process each element individually
 template<typename T>
 inline std::enable_if_t<
     std::is_same_v<std::decay_t<T>, std::initializer_list<typename std::decay_t<T>::value_type>>,
-    std::vector<ResourceAndRange>
+    std::vector<ResourceHandleAndRange>
 >
 processResourceArguments(T&& list, RenderGraph* graph)
 {
-    std::vector<ResourceAndRange> out;
+    std::vector<ResourceHandleAndRange> out;
     out.reserve(list.size());
 
     for (auto const & elem : list) {
@@ -370,7 +418,7 @@ namespace detail {
     inline void extractId(std::unordered_set<ResourceIdentifier, ResourceIdentifier::Hasher>& out, std::shared_ptr<U> const& resource) {
         out.insert(std::to_string(resource->GetGlobalResourceID()));
     }
-    inline void extractId(auto& out, const ResourceAndRange& rar) {
+    inline void extractId(auto& out, const ResourcePtrAndRange& rar) {
 		extractId(out, rar.resource); // empty identifier
     }
     inline void extractId(auto& out, ResourceIdentifierAndRange const& rir) {
@@ -393,7 +441,7 @@ template<class T>
 inline constexpr bool ResourceLike =
 std::is_same_v<std::decay_t<T>, std::shared_ptr<Resource>> ||
 std::is_same_v<std::decay_t<T>, ResourceIdentifier> ||
-std::is_same_v<std::decay_t<T>, ResourceAndRange> ||
+std::is_same_v<std::decay_t<T>, ResourcePtrAndRange> ||
 std::is_same_v<std::decay_t<T>, ResourceIdentifierAndRange> ||
 std::is_same_v<std::decay_t<T>, std::string_view> || // Can be cast to ResourceIdentifier
 std::is_same_v<std::decay_t<T>, const char*> || // Can be cast to ResourceIdentifier
@@ -803,7 +851,7 @@ private:
 
         params.isGeometryPass = m_isGeometryPass;
         params.identifierSet = _declaredIds;
-        params.resourceRequirements = GatherResourceRequirements();
+        params.staticResourceRequirements = GatherResourceRequirements();
 
         graph->AddRenderPass(pass, params, passName);
     }
@@ -823,7 +871,7 @@ private:
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
-			if (!r.resource) continue;
+			//if (!r.resource) continue;
 			params.shaderResources.push_back(r);
 		}
 		return *this;
@@ -845,7 +893,7 @@ private:
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
-			if (!r.resource) continue;
+			//if (!r.resource) continue;
 			params.renderTargets.push_back(r);
 		}
 		return *this;
@@ -867,7 +915,7 @@ private:
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
-			if (!r.resource) continue;
+			//if (!r.resource) continue;
 			params.depthReadWriteResources.push_back(r);
 		}
 		return *this;
@@ -888,7 +936,7 @@ private:
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
-			if (!r.resource) continue;
+			//if (!r.resource) continue;
 			params.depthReadResources.push_back(r);
 		}
 		return *this;
@@ -910,7 +958,7 @@ private:
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
-			if (!r.resource) continue;
+			//if (!r.resource) continue;
 			params.constantBuffers.push_back(r);
 		}
 		return *this;
@@ -932,7 +980,7 @@ private:
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
-			if (!r.resource) continue;
+			//if (!r.resource) continue;
 			params.unorderedAccessViews.push_back(r);
 		}
 		return *this;
@@ -954,7 +1002,7 @@ private:
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
-			if (!r.resource) continue;
+			//if (!r.resource) continue;
 			params.copyTargets.push_back(r);
 		}
 		return *this;
@@ -976,7 +1024,7 @@ private:
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
-			if (!r.resource) continue;
+			//if (!r.resource) continue;
 			params.copySources.push_back(r);
 		}
 		return *this;
@@ -998,7 +1046,7 @@ private:
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
-			if (!r.resource) continue;
+			//if (!r.resource) continue;
 			params.indirectArgumentBuffers.push_back(r);
 		}
 		return *this;
@@ -1020,7 +1068,7 @@ private:
         detail::extractId(_declaredIds, std::forward<T>(x));
         auto ranges = processResourceArguments(std::forward<T>(x), graph);
         for (auto& r : ranges) {
-            if (!r.resource) continue;
+            //if (!r.resource) continue;
             params.legacyInteropResources.push_back(r);
         }
         return *this;
@@ -1041,7 +1089,7 @@ private:
     {
         auto ranges = processResourceArguments(rar, graph);
         for (auto& r : ranges) {
-            if (!r.resource) continue;
+            //if (!r.resource) continue;
             params.internalTransitions.emplace_back(r, exitState);
         }
         return *this;
@@ -1058,7 +1106,7 @@ private:
 
     std::vector<ResourceRequirement> GatherResourceRequirements() const {
         // Collect every (ResourceAndRange,AccessFlag) pair from all the With* lists
-        std::vector<std::pair<ResourceAndRange, rhi::ResourceAccessType>> entries;
+        std::vector<std::pair<ResourceHandleAndRange, rhi::ResourceAccessType>> entries;
         entries.reserve(
             params.shaderResources.size()
             + params.constantBuffers.size()
@@ -1073,7 +1121,7 @@ private:
 
         auto accumulate = [&](auto const& list, rhi::ResourceAccessType flag){
             for(auto const& rr : list){
-                if(!rr.resource) continue;
+                //if(!rr.resource) continue;
                 entries.emplace_back(rr, flag);
             }
             };
@@ -1097,11 +1145,11 @@ private:
         };
 
         std::unordered_map<uint64_t,SymbolicTracker> trackers;
-        std::unordered_map<uint64_t,std::shared_ptr<Resource>> ptrMap;
+        std::unordered_map<uint64_t,ResourceRegistry::RegistryHandle> handleMap;
 
         for(auto& [rar, flag] : entries) {
-            uint64_t id = rar.resource->GetGlobalResourceID();
-            ptrMap[id] = rar.resource;
+            uint64_t id = rar.resource.GetGlobalResourceID();
+            handleMap[id] = rar.resource;
 
             // Create a tracker spanning "all" with initial NONE state
             auto [it, inserted] = trackers.try_emplace(
@@ -1120,7 +1168,7 @@ private:
 
             // Apply- use a dummy vector since we don't need per-pass transitions here
             std::vector<ResourceTransition> dummy;
-            tracker.Apply(rar.range, rar.resource.get(), want, dummy);
+            tracker.Apply(rar.range, nullptr, want, dummy);
         }
 
         // Flatten each tracker’s segments into a ResourceRequirement
@@ -1128,13 +1176,13 @@ private:
         out.reserve(trackers.size());  // rough
 
         for(auto& [id, tracker] : trackers) {
-            auto pRes = ptrMap[id];
+            auto pRes = handleMap[id];
             for(auto const& seg : tracker.GetSegments()) {
                 if (seg.state.access == rhi::ResourceAccessType::Common && seg.state.layout == rhi::ResourceLayout::Common) {
                     //continue; // TODO: Will we ever need explicit transitions to common for declared resources?
                 }
                 // build a ResourceAndRange for this segment
-                ResourceAndRange rr(pRes);
+                ResourceHandleAndRange rr(pRes);
                 rr.range = seg.rangeSpec;
 
                 ResourceRequirement req(rr);
@@ -1396,7 +1444,7 @@ private:
         pass->DeclareResourceUsages(this);
 
         params.identifierSet = _declaredIds;
-        params.resourceRequirements = GatherResourceRequirements();
+        params.staticResourceRequirements = GatherResourceRequirements();
 
         graph->AddComputePass(pass, params, passName);
     }
@@ -1415,7 +1463,7 @@ private:
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
-			if (!r.resource) continue;
+			//if (!r.resource) continue;
 			params.shaderResources.push_back(r);
 		}
 		return *this;
@@ -1437,7 +1485,7 @@ private:
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
-			if (!r.resource) continue;
+			//if (!r.resource) continue;
 			params.constantBuffers.push_back(r);
 		}
 		return *this;
@@ -1459,7 +1507,7 @@ private:
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
-			if (!r.resource) continue;
+			//if (!r.resource) continue;
 			params.unorderedAccessViews.push_back(r);
 		}
 		return *this;
@@ -1481,7 +1529,7 @@ private:
         detail::extractId(_declaredIds, std::forward<T>(x));
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
-			if (!r.resource) continue;
+			//if (!r.resource) continue;
 			params.indirectArgumentBuffers.push_back(r);
 		}
 		return *this;
@@ -1503,7 +1551,7 @@ private:
         detail::extractId(_declaredIds, std::forward<T>(x));
         auto ranges = processResourceArguments(std::forward<T>(x), graph);
         for (auto& r : ranges) {
-            if (!r.resource) continue;
+            //if (!r.resource) continue;
             params.legacyInteropResources.push_back(r);
         }
         return *this;
@@ -1524,7 +1572,7 @@ private:
     {
 		auto ranges = processResourceArguments(rar, graph);
         for (auto& r : ranges) {
-            if (!r.resource) continue;
+            //if (!r.resource) continue;
             params.internalTransitions.emplace_back(r, exitState);
 		}
         return *this;
@@ -1543,7 +1591,7 @@ private:
 
     std::vector<ResourceRequirement> GatherResourceRequirements() const {
         // Collect every (ResourceAndRange,AccessFlag) pair from all the With* lists
-        std::vector<std::pair<ResourceAndRange, rhi::ResourceAccessType>> entries;
+        std::vector<std::pair<ResourceHandleAndRange, rhi::ResourceAccessType>> entries;
         entries.reserve(
             params.shaderResources.size()
             + params.constantBuffers.size()
@@ -1553,7 +1601,7 @@ private:
 
         auto accumulate = [&](auto const& list, rhi::ResourceAccessType flag){
             for(auto const& rr : list){
-                if(!rr.resource) continue;
+                //if(!rr.resource) continue;
                 entries.emplace_back(rr, flag);
             }
             };
@@ -1572,11 +1620,11 @@ private:
         };
 
         std::unordered_map<uint64_t,SymbolicTracker> trackers;
-        std::unordered_map<uint64_t,std::shared_ptr<Resource>> ptrMap;
+        std::unordered_map<uint64_t,ResourceRegistry::RegistryHandle> handleMap;
 
         for(auto& [rar, flag] : entries) {
-            uint64_t id = rar.resource->GetGlobalResourceID();
-            ptrMap[id] = rar.resource;
+            uint64_t id = rar.resource.GetGlobalResourceID();
+            handleMap[id] = rar.resource;
 
             // Create a tracker spanning "all" with initial NONE state
             auto [it, inserted] = trackers.try_emplace(
@@ -1595,7 +1643,7 @@ private:
 
             // Apply- use a dummy vector since we don't need per-pass transitions here
             std::vector<ResourceTransition> dummy;
-            tracker.Apply(rar.range, rar.resource.get(), want, dummy);
+            tracker.Apply(rar.range, nullptr, want, dummy);
         }
 
         // Flatten each tracker’s segments into a ResourceRequirement
@@ -1603,13 +1651,13 @@ private:
         out.reserve(trackers.size());  // rough
 
         for(auto& [id, tracker] : trackers) {
-            auto pRes = ptrMap[id];
+            auto pRes = handleMap[id];
             for(auto const& seg : tracker.GetSegments()) {
                 if (seg.state.access == rhi::ResourceAccessType::Common && seg.state.layout == rhi::ResourceLayout::Common) {
                     //continue; // TODO: Will we ever need explicit transitions to common for declared resources?
                 }
                 // build a ResourceAndRange for this segment
-                ResourceAndRange rr(pRes);
+                ResourceHandleAndRange rr(pRes);
                 rr.range = seg.rangeSpec;
 
                 ResourceRequirement req(rr);

@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <resource_states.h>
+#include <span>
 
 class Resource;
 
@@ -54,7 +55,7 @@ struct SubresourceRange {
 	}
 };
 
-SubresourceRange ResolveRangeSpec(RangeSpec spec,
+SubresourceRange ResolveRangeSpec(const RangeSpec& spec,
     uint32_t totalMips,
     uint32_t totalSlices);
 
@@ -90,17 +91,36 @@ public:
 		whole.sliceUpper = { BoundType::All, 0 };
 		_segs.push_back({ whole, ResourceState{ rhi::ResourceAccessType::Common, rhi::ResourceLayout::Common, rhi::ResourceSyncState::All } });
     }
-    SymbolicTracker(RangeSpec whole, ResourceState init) {
+    SymbolicTracker(const RangeSpec& whole, const ResourceState& init) {
         _segs.push_back({ whole, init });
     }
 
     // apply a new requirement and emit transitions
-    void Apply(RangeSpec want,
+    void Apply(const RangeSpec& want,
         Resource* pRes,
         ResourceState newState,
         std::vector<ResourceTransition>& out);
 
-    bool WouldModify(RangeSpec want, ResourceState newState) const;
+    bool WouldModify(const RangeSpec& want, const ResourceState& newState) const;
+
+    std::vector<Segment> Flatten(ResourceState const& skipState, bool includeSkipState = false) const;
 
     const std::vector<Segment>& GetSegments() const noexcept;
 };
+
+struct TransitionConflict
+{
+    Resource* resource = nullptr;
+    uint32_t  mip = 0;
+    uint32_t  slice = 0;
+
+    // Indices into the input span/vector.
+    size_t    firstIdx = 0;
+    size_t    secondIdx = 0;
+};
+
+// Returns true if there are NO conflicts.
+// If false, optionally fills outFirstConflict with the first conflict found.
+bool ValidateNoConflictingTransitions(
+    std::span<const ResourceTransition> transitions,
+    TransitionConflict* outFirstConflict = nullptr);

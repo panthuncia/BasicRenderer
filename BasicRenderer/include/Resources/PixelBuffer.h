@@ -12,7 +12,9 @@ public:
     static std::shared_ptr<PixelBuffer> CreateShared(const TextureDescription& desc,
         const std::vector<const stbi_uc*>& initialData = {})
     {
-		return std::shared_ptr<PixelBuffer>(new PixelBuffer(desc, initialData));
+        auto pb = std::shared_ptr<PixelBuffer>(new PixelBuffer(desc, initialData));
+        pb->m_backing->UploadInitialData(pb->shared_from_this(), initialData);
+        return pb;
     }
 
     rhi::Resource GetAPIResource() override { return m_backing->GetAPIResource(); }
@@ -54,12 +56,17 @@ public:
         m_backing->ApplyMetadataComponentBundle(bundle);
     }
 
+    SymbolicTracker* GetStateTracker() override {
+        return m_backing->GetStateTracker();
+    }
+
 private:
     PixelBuffer(const TextureDescription& desc,
         const std::vector<const stbi_uc*>& initialData = {})
     {
         m_backing = GpuTextureBacking::CreateUnique(desc, GetGlobalResourceID(), nullptr, initialData);
-		m_mipLevels = m_backing->GetMipLevels();
+
+    	m_mipLevels = m_backing->GetMipLevels();
 		m_arraySize = m_backing->GetArraySize();
         // Create and assign descriptors through ResourceManager.
         {

@@ -43,10 +43,13 @@ public:
 	unsigned int GetLightPagePoolSize() { return m_lightPagePoolSize; }
 	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
 	std::vector<ResourceIdentifier> GetSupportedKeys() override;
+	std::vector<ResourceIdentifier> GetSupportedResolverKeys() override;
+	std::shared_ptr<IResourceResolver> ProvideResolver(ResourceIdentifier const& key) override;
 
 private:
     LightManager();
 	std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
+	std::unordered_map<ResourceIdentifier, std::shared_ptr<IResourceResolver>, ResourceIdentifier::Hasher> m_resolvers;
 	flecs::entity m_currentCamera;
     std::shared_ptr<LazyDynamicStructuredBuffer<LightInfo>> m_lightBuffer;
 	std::shared_ptr<SortedUnsignedIntBuffer> m_activeLightIndices; // Sorted list of active light indices
@@ -56,6 +59,8 @@ private:
 
 	std::shared_ptr<ResourceGroup> m_pLightViewInfoResourceGroup;
 	std::shared_ptr<ResourceGroup> m_pLightBufferResourceGroup;
+	std::shared_ptr<ShadowMaps> m_pShadowMapResourceGroup;
+	std::shared_ptr<LinearShadowMaps> m_pLinearShadowMapResourceGroup;
 
 	std::shared_ptr<Buffer> m_pClusterBuffer;
 	std::shared_ptr<Buffer> m_pLightPagesBuffer;
@@ -69,8 +74,6 @@ private:
 	std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<std::vector<float>()> getDirectionalLightCascadeSplits;
     std::function<uint16_t()> getShadowResolution;
-    std::function<ShadowMaps*()> getCurrentShadowMapResourceGroup;
-	std::function<LinearShadowMaps*()> getCurrentLinearShadowMapResourceGroup;
     std::function<void(std::shared_ptr<void>)> markForDelete;
 	ViewManager* m_pViewManager = nullptr;
 	unsigned int m_lightPagePoolSize = 0;

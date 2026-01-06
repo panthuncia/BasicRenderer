@@ -170,8 +170,6 @@ private:
 	bool m_screenSpaceReflections = true;
 	bool m_useMeshShaders = true;
 
-    std::function<void(ShadowMaps*)> setShadowMaps;
-    std::function<void(LinearShadowMaps*)> setLinearShadowMaps;
     std::function<uint16_t()> getShadowResolution;
 	std::function<void(float)> setCameraSpeed;
 	std::function<float()> getCameraSpeed;
@@ -199,8 +197,6 @@ private:
 
     class CoreResourceProvider : public IResourceProvider {
 	public:
-        std::shared_ptr<ShadowMaps> m_shadowMaps = nullptr;
-        std::shared_ptr<LinearShadowMaps> m_linearShadowMaps = nullptr;
         std::shared_ptr<PixelBuffer> m_currentDebugTexture = nullptr;
 		std::shared_ptr<Resource> m_primaryCameraMeshletBitfield = nullptr;
         std::shared_ptr<PixelBuffer> m_HDRColorTarget = nullptr;
@@ -212,10 +208,6 @@ private:
 				return m_gbufferMotionVectors;
             if (key.ToString() == Builtin::Color::HDRColorTarget)
 				return m_HDRColorTarget;
-            if (key.ToString() == Builtin::Shadows::ShadowMaps)
-				return m_shadowMaps;
-            if (key.ToString() == Builtin::Shadows::LinearShadowMaps)
-				return m_linearShadowMaps;
             if (key.ToString() == Builtin::DebugTexture)
 				return m_currentDebugTexture;
 			if (key.ToString() == Builtin::PrimaryCamera::MeshletBitfield)
@@ -227,20 +219,28 @@ private:
 			return nullptr;
         }
 
+        std::shared_ptr<IResourceResolver> ProvideResolver(ResourceIdentifier const& key) override {
+            return nullptr;
+		}
+
         std::vector<ResourceIdentifier> GetSupportedKeys() override {
 			return {
                 Builtin::GBuffer::MotionVectors,
                 Builtin::Color::HDRColorTarget,
-                Builtin::Shadows::ShadowMaps,
-                Builtin::Shadows::LinearShadowMaps,
                 Builtin::DebugTexture,
                 Builtin::PrimaryCamera::MeshletBitfield,
 				Builtin::PostProcessing::UpscaledHDR,
 			};
         }
+
+        std::vector<ResourceIdentifier> GetSupportedResolverKeys() override {
+            return {
+                Builtin::Shadows::ShadowMaps,
+                Builtin::Shadows::LinearShadowMaps,
+            };
+		}
+
         void Cleanup() {
-            m_shadowMaps = nullptr;
-            m_linearShadowMaps = nullptr;
             m_currentDebugTexture = nullptr;
             m_primaryCameraMeshletBitfield = nullptr;
 			m_HDRColorTarget = nullptr;
