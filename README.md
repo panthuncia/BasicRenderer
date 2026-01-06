@@ -20,13 +20,12 @@ Feature development is driven purely by what I'm interested in at the moment.
 - TAA/upscaling with DLSS/FSR
   
 ## Technical features
-
+- A powerful render graph for automatic resource transitions and queue synchronization. Supports both retained-mode and immediate-mode GPU command execution.
 - Low-level RHI (Only DX12 backend implemented, for now, but built to support Vulkan)
 - GPU-driven rendering with compute culling & ExecuteIndirect
 - Per-meshlet occlusion & frustrum culling
 - Visibility buffer (UE5-style), Deferred, and forward+ rendering
 - Clustered lighting with a paged linked-list
-- A render graph for automatic resource transitions and queue synchronization, supporting symbolic subresoruce ranges
 - Async-compute
 - Compute-based skinning
 - Meshlets & mesh shaders
