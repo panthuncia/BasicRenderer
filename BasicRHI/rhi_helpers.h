@@ -248,6 +248,118 @@ namespace rhi {
             }
         }
 
+        [[nodiscard]] constexpr uint32_t FormatChannelCount(Format fmt) noexcept
+        {
+            switch (fmt)
+            {
+                // Unknown / not a color "vector" format
+            case Format::Unknown:
+                return 0;
+
+                // 4-channel
+            case Format::R32G32B32A32_Typeless:
+            case Format::R32G32B32A32_Float:
+            case Format::R32G32B32A32_UInt:
+            case Format::R32G32B32A32_SInt:
+            case Format::R16G16B16A16_Typeless:
+            case Format::R16G16B16A16_Float:
+            case Format::R16G16B16A16_UNorm:
+            case Format::R16G16B16A16_UInt:
+            case Format::R16G16B16A16_SNorm:
+            case Format::R16G16B16A16_SInt:
+            case Format::R10G10B10A2_Typeless:
+            case Format::R10G10B10A2_UNorm:
+            case Format::R10G10B10A2_UInt:
+            case Format::R8G8B8A8_Typeless:
+            case Format::R8G8B8A8_UNorm:
+            case Format::R8G8B8A8_UNorm_sRGB:
+            case Format::R8G8B8A8_UInt:
+            case Format::R8G8B8A8_SNorm:
+            case Format::R8G8B8A8_SInt:
+            case Format::B8G8R8A8_Typeless:
+            case Format::B8G8R8A8_UNorm:
+            case Format::B8G8R8A8_UNorm_sRGB:
+                return 4;
+
+                // 3-channel
+            case Format::R32G32B32_Typeless:
+            case Format::R32G32B32_Float:
+            case Format::R32G32B32_UInt:
+            case Format::R32G32B32_SInt:
+            case Format::R11G11B10_Float:
+                return 3;
+
+                // 2-channel
+            case Format::R32G32_Typeless:
+            case Format::R32G32_Float:
+            case Format::R32G32_UInt:
+            case Format::R32G32_SInt:
+            case Format::R16G16_Typeless:
+            case Format::R16G16_Float:
+            case Format::R16G16_UNorm:
+            case Format::R16G16_UInt:
+            case Format::R16G16_SNorm:
+            case Format::R16G16_SInt:
+            case Format::R8G8_Typeless:
+            case Format::R8G8_UNorm:
+            case Format::R8G8_UInt:
+            case Format::R8G8_SNorm:
+            case Format::R8G8_SInt:
+                return 2;
+
+                // 1-channel
+            case Format::R32_Typeless:
+            case Format::D32_Float:
+            case Format::R32_Float:
+            case Format::R32_UInt:
+            case Format::R32_SInt:
+            case Format::R16_Typeless:
+            case Format::R16_Float:
+            case Format::R16_UNorm:
+            case Format::R16_UInt:
+            case Format::R16_SNorm:
+            case Format::R16_SInt:
+            case Format::R8_Typeless:
+            case Format::R8_UNorm:
+            case Format::R8_UInt:
+            case Format::R8_SNorm:
+            case Format::R8_SInt:
+                return 1;
+
+                // Block-compressed: report the decoded channel count (not bytes-per-block)
+            case Format::BC1_Typeless:
+            case Format::BC1_UNorm:
+            case Format::BC1_UNorm_sRGB:
+            case Format::BC2_Typeless:
+            case Format::BC2_UNorm:
+            case Format::BC2_UNorm_sRGB:
+            case Format::BC3_Typeless:
+            case Format::BC3_UNorm:
+            case Format::BC3_UNorm_sRGB:
+            case Format::BC7_Typeless:
+            case Format::BC7_UNorm:
+            case Format::BC7_UNorm_sRGB:
+                return 4;
+
+            case Format::BC4_Typeless:
+            case Format::BC4_UNorm:
+            case Format::BC4_SNorm:
+                return 1;
+
+            case Format::BC5_Typeless:
+            case Format::BC5_UNorm:
+            case Format::BC5_SNorm:
+                return 2;
+
+            case Format::BC6H_Typeless:
+            case Format::BC6H_UF16:
+            case Format::BC6H_SF16:
+                return 3;
+            }
+
+            return 0;
+        }
+
         inline bool IsTextureResourceType(ResourceType type) noexcept {
             return (type == ResourceType::Texture1D ||
                 type == ResourceType::Texture2D ||
@@ -455,6 +567,19 @@ namespace rhi {
                 return 16; // 128bpp
             default: return 0; // Unsupported / unknown
             }
+        }
+
+        static inline bool IsSRGB(Format f) {
+	        switch (f) {
+		        case Format::R8G8B8A8_UNorm_sRGB:
+		        case Format::B8G8R8A8_UNorm_sRGB:
+				case Format::BC1_UNorm_sRGB:
+				case Format::BC2_UNorm_sRGB:
+				case Format::BC3_UNorm_sRGB:
+				case Format::BC7_UNorm_sRGB:
+			        return true;
+		        default: return false;
+	        }
         }
 
         static inline uint32_t AlignUp(uint32_t v, uint32_t a) { return (v + (a - 1)) & ~(a - 1); }

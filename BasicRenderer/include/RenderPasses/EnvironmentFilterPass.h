@@ -39,13 +39,13 @@ public:
         {
             const uint32_t baseRes = env->GetReflectionCubemapResolution();
             auto& srcCube = env->GetEnvironmentCubemap();
-            auto& dstCubePF = env->GetEnvironmentPrefilteredCubemap();
+            auto dstCubePF = env->GetEnvironmentPrefilteredCubemap();
 
             const uint32_t srcSrvIndex = srcCube->Image().GetSRVInfo(0).slot.index;
 
             const uint32_t group = 8;
 
-            const uint32_t maxMipLevels = dstCubePF->Image().GetNumUAVMipLevels();
+            const uint32_t maxMipLevels = dstCubePF->GetNumUAVMipLevels();
             for (uint32_t mip = 0; mip < maxMipLevels; ++mip)
             {
                 const uint32_t size = std::max(1u, baseRes >> mip);
@@ -55,7 +55,7 @@ public:
                 float roughness = (maxMipLevels > 1) ? (float)mip / float(maxMipLevels - 1) : 0.0f;
 
                 const uint32_t dstUavIndex =
-                    dstCubePF->Image().GetUAVShaderVisibleInfo(mip, 0).slot.index;
+                    dstCubePF->GetUAVShaderVisibleInfo(mip, 0).slot.index;
                 for (uint32_t face = 0; face < 6; ++face)
                 {
                     // Push constants: [srcSrv, dstUav, face, size, roughnessBits]

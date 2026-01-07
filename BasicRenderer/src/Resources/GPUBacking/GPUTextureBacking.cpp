@@ -10,84 +10,6 @@
 #include "Managers/Singletons/UploadManager.h"
 #include "Resources/MemoryStatisticsComponents.h"
 
-static void UploadTextureData(const std::shared_ptr<Resource>& dstTexture, const TextureDescription& desc, const std::vector<const stbi_uc*>& initialData, unsigned int mipLevels) {
-
-	if (initialData.empty()) return;
-
-	// effective array slices = arraySize * (isCubemap ? 6 : 1)
-	const uint32_t faces = desc.isCubemap ? 6u : 1u;
-	const uint32_t arraySlices = faces * static_cast<uint32_t>(desc.arraySize);
-	const uint32_t numSubres = arraySlices * static_cast<uint32_t>(mipLevels);
-
-	// Build a dense SubresourceData table (nullptr entries are allowed; they'll be skipped)
-	std::vector<rhi::helpers::SubresourceData> srd(numSubres);
-	std::vector<std::vector<stbi_uc>> expandedImages;   // keep storage alive during copy
-	expandedImages.reserve(numSubres);
-
-	// If caller passed fewer than numSubres pointers, pad with nullptrs.
-	std::vector<const stbi_uc*> fullInitial(numSubres, nullptr);
-	std::copy(initialData.begin(), initialData.end(), fullInitial.begin());
-
-	int i = -1;
-	for (uint32_t a = 0; a < arraySlices; ++a) {
-		for (uint32_t m = 0; m < mipLevels; ++m) {
-			++i;
-			const uint32_t subIdx = m + a * mipLevels;
-
-			const stbi_uc* imageData = fullInitial[subIdx];
-
-			uint32_t width = std::max(1u, static_cast<uint32_t>(desc.imageDimensions[i].width >> m));
-			uint32_t height = std::max(1u, static_cast<uint32_t>(desc.imageDimensions[i].height >> m));
-			uint32_t channels = desc.channels;
-
-			auto& out = srd[subIdx];
-
-			// If provided pitches don't match raw (width*channels), treat as "pre-padded or compressed"
-			if ((width * channels != desc.imageDimensions[i].rowPitch) ||
-				(width * channels * height != desc.imageDimensions[i].slicePitch))
-			{
-				out.pData = imageData;
-				out.rowPitch = static_cast<uint32_t>(desc.imageDimensions[i].rowPitch);
-				out.slicePitch = static_cast<uint32_t>(desc.imageDimensions[i].slicePitch);
-			}
-			else {
-				if (imageData) {
-					const stbi_uc* ptr = imageData;
-					if (channels == 3) {
-						// Expand to RGBA8
-						expandedImages.emplace_back(ExpandImageData(imageData, width, height));
-						ptr = expandedImages.back().data();
-						channels = 4;
-					}
-					out.pData = ptr;
-					out.rowPitch = width * channels; // tightly packed
-					out.slicePitch = out.rowPitch * height;
-				}
-				else {
-					out.pData = nullptr;
-					out.rowPitch = out.slicePitch = 0;
-				}
-			}
-		}
-	}
-
-	const uint32_t baseW = desc.imageDimensions[0].width;
-	const uint32_t baseH = desc.imageDimensions[0].height;
-
-	auto device = DeviceManager::GetInstance().GetDevice();
-
-	TEXTURE_UPLOAD_SUBRESOURCES(
-		UploadManager::UploadTarget::FromShared(dstTexture),
-		desc.format,
-		baseW,
-		baseH,
-		/*depthOrLayers*/ 1,
-		static_cast<uint32_t>(mipLevels),
-		arraySlices,
-		srd.data(),
-		static_cast<uint32_t>(srd.size()));
-}
-
 GpuTextureBacking::GpuTextureBacking(CreateTag)
 {
 
@@ -102,8 +24,7 @@ GpuTextureBacking::~GpuTextureBacking()
 std::unique_ptr<GpuTextureBacking>
 GpuTextureBacking::CreateUnique(const TextureDescription& desc,
 	uint64_t owningResourceID,
-	const char* name,
-	const std::vector<const stbi_uc*>& initialData)
+	const char* name)
 {
 	auto pb = std::make_unique<GpuTextureBacking>(CreateTag{});
 	pb->initialize(desc, owningResourceID, name);
@@ -259,13 +180,6 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 
 }
 
-void GpuTextureBacking::UploadInitialData(const std::shared_ptr<Resource>& owner, const std::vector<const stbi_uc*>& initialData) const
-{
-	// Upload initial data if any
-	if (!initialData.empty()) {
-		UploadTextureData(owner, m_desc, initialData, m_mipLevels);
-	}
-}
 void GpuTextureBacking::SetName(const char* newName)
 {
 	m_textureHandle.ApplyComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceName>({ newName }));

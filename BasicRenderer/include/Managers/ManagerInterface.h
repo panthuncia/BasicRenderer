@@ -8,6 +8,7 @@ class LightManager;
 class EnvironmentManager;
 class MaterialManager;
 class SkeletonManager;
+class TextureFactory;
 
 class ManagerInterface {
 public:
@@ -20,7 +21,8 @@ public:
 		LightManager* lightManager,
 		EnvironmentManager*  environmentManager,
 		MaterialManager* materialManager,
-		SkeletonManager* skeletonManager
+		SkeletonManager* skeletonManager,
+		TextureFactory* textureFactory
 	) : m_pMeshManager(meshManager),
 		m_pObjectManager(objectManager),
 		m_pIndirectCommandBufferManager(indirectCommandBufferManager),
@@ -28,7 +30,8 @@ public:
 		m_pLightManager(lightManager), 
 		m_pEnvironmentManager(environmentManager),
 		m_pMaterialManager(materialManager),
-		m_pSkeletonManager(skeletonManager) {
+		m_pSkeletonManager(skeletonManager),
+		m_pTextureFactory(textureFactory) {
 	}
 
 	void SetManagers(MeshManager* meshManager,
@@ -38,7 +41,8 @@ public:
 		LightManager* lightManager,
 		EnvironmentManager* environmentManager,
 		MaterialManager* materialManager,
-		SkeletonManager* skeletonManager) {
+		SkeletonManager* skeletonManager,
+		TextureFactory* textureFactory) {
 		m_pMeshManager = meshManager;
 		m_pObjectManager = objectManager;
 		m_pIndirectCommandBufferManager = indirectCommandBufferManager;
@@ -47,16 +51,18 @@ public:
 		m_pEnvironmentManager = environmentManager;
 		m_pMaterialManager = materialManager;
 		m_pSkeletonManager = skeletonManager;
+		m_pTextureFactory = textureFactory;
 	}
 
-	MeshManager* GetMeshManager() { return m_pMeshManager; }
-	ObjectManager* GetObjectManager() { return m_pObjectManager; }
-	IndirectCommandBufferManager* GetIndirectCommandBufferManager() { return m_pIndirectCommandBufferManager; }
-	ViewManager* GetViewManager() { return m_pViewManager; }
-	LightManager* GetLightManager() { return m_pLightManager; }
-	EnvironmentManager* GetEnvironmentManager() { return m_pEnvironmentManager; }
-	MaterialManager* GetMaterialManager() { return m_pMaterialManager; }
-	SkeletonManager* GetSkeletonManager() { return m_pSkeletonManager; }
+	MeshManager* GetMeshManager() const { return m_pMeshManager; }
+	ObjectManager* GetObjectManager() const { return m_pObjectManager; }
+	IndirectCommandBufferManager* GetIndirectCommandBufferManager() const { return m_pIndirectCommandBufferManager; }
+	ViewManager* GetViewManager() const { return m_pViewManager; }
+	LightManager* GetLightManager() const { return m_pLightManager; }
+	EnvironmentManager* GetEnvironmentManager() const { return m_pEnvironmentManager; }
+	MaterialManager* GetMaterialManager() const { return m_pMaterialManager; }
+	SkeletonManager* GetSkeletonManager() const { return m_pSkeletonManager; }
+	TextureFactory* GetTextureFactory() const { return m_pTextureFactory; }
 private:
 	MeshManager* m_pMeshManager = nullptr;
 	ObjectManager* m_pObjectManager = nullptr;
@@ -66,4 +72,5 @@ private:
 	EnvironmentManager* m_pEnvironmentManager = nullptr;
 	MaterialManager* m_pMaterialManager = nullptr;
 	SkeletonManager* m_pSkeletonManager = nullptr;
+	TextureFactory* m_pTextureFactory = nullptr;
 };

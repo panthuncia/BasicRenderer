@@ -175,6 +175,7 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 			}
 
 			// Increment material usage count
+			meshInstance->GetMesh()->material->EnsureTexturesUploaded(*m_managerInterface.GetTextureFactory());
 			m_managerInterface.GetMaterialManager()->IncrementMaterialUsageCount(*meshInstance->GetMesh()->material);
 			auto materialDataIndex = m_managerInterface.GetMaterialManager()->GetMaterialSlot(meshInstance->GetMesh()->material->GetMaterialID());
 			meshInstance->GetMesh()->SetMaterialDataIndex(materialDataIndex);

@@ -9,11 +9,9 @@
 
 class PixelBuffer : public GloballyIndexedResource {
 public:
-    static std::shared_ptr<PixelBuffer> CreateShared(const TextureDescription& desc,
-        const std::vector<const stbi_uc*>& initialData = {})
+    static std::shared_ptr<PixelBuffer> CreateShared(const TextureDescription& desc)
     {
-        auto pb = std::shared_ptr<PixelBuffer>(new PixelBuffer(desc, initialData));
-        pb->m_backing->UploadInitialData(pb->shared_from_this(), initialData);
+        auto pb = std::shared_ptr<PixelBuffer>(new PixelBuffer(desc));
         return pb;
     }
 
@@ -61,10 +59,9 @@ public:
     }
 
 private:
-    PixelBuffer(const TextureDescription& desc,
-        const std::vector<const stbi_uc*>& initialData = {})
+    PixelBuffer(const TextureDescription& desc)
     {
-        m_backing = GpuTextureBacking::CreateUnique(desc, GetGlobalResourceID(), nullptr, initialData);
+        m_backing = GpuTextureBacking::CreateUnique(desc, GetGlobalResourceID(), nullptr);
 
     	m_mipLevels = m_backing->GetMipLevels();
 		m_arraySize = m_backing->GetArraySize();

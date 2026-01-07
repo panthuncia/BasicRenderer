@@ -165,6 +165,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	m_pViewManager->SetIndirectCommandBufferManager(m_pIndirectCommandBufferManager.get()); // View manager needs to make indirect command buffers
     m_pMeshManager->SetViewManager(m_pViewManager.get());
 	m_pSkeletonManager = SkeletonManager::CreateUnique();
+    m_pTextureFactory = TextureFactory::CreateUnique();
 
 	m_managerInterface.SetManagers(
         m_pMeshManager.get(), 
@@ -174,7 +175,8 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         m_pLightManager.get(), 
         m_pEnvironmentManager.get(), 
         m_pMaterialManager.get(),
-        m_pSkeletonManager.get());
+        m_pSkeletonManager.get(),
+        m_pTextureFactory.get());
 
     auto& world = ECSManager::GetInstance().GetWorld();
     world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
@@ -1159,7 +1161,7 @@ void Renderer::CreateRenderGraph() {
 	
     if (m_currentEnvironment != nullptr) {
         newGraph->RegisterResource(Builtin::Environment::CurrentCubemap, m_currentEnvironment->GetEnvironmentCubemap()->ImagePtr());
-        newGraph->RegisterResource(Builtin::Environment::CurrentPrefilteredCubemap, m_currentEnvironment->GetEnvironmentPrefilteredCubemap()->ImagePtr());
+        newGraph->RegisterResource(Builtin::Environment::CurrentPrefilteredCubemap, m_currentEnvironment->GetEnvironmentPrefilteredCubemap());
         newGraph->BuildRenderPass("SkyboxPass")
             .Build<SkyboxRenderPass>();
     }

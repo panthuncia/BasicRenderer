@@ -13,6 +13,7 @@
 #include "Materials/MaterialDescription.h"
 #include "../generated/BuiltinRenderPasses.h"
 #include "Materials/TechniqueDescriptor.h"
+#include "Factories/TextureFactory.h"
 
 struct TransparencyPick { bool isTransparent = false; bool masked = false; };
 
@@ -155,6 +156,7 @@ public:
     }
     uint32_t GetMaterialID() const { return m_materialID; }
 	PerMaterialCB const& GetData() const { return m_materialData; }
+    void EnsureTexturesUploaded(const TextureFactory& factory);
 private:
 	inline static std::atomic<uint32_t> globalMaterialCount;
 	const uint32_t m_materialID = globalMaterialCount.fetch_add(1, std::memory_order_relaxed);
@@ -168,6 +170,13 @@ private:
     std::shared_ptr<TextureAsset> m_metallicTexture;
     std::shared_ptr<TextureAsset> m_emissiveTexture;
     std::shared_ptr<TextureAsset> m_opacityTexture;
+    std::vector<uint32_t> m_baseColorChannels;
+    std::vector<uint32_t> m_normalChannels;
+    std::vector<uint32_t> m_aoChannel;
+    std::vector<uint32_t> m_heightChannel;
+    std::vector<uint32_t> m_metallicChannel;
+    std::vector<uint32_t> m_roughnessChannel;
+    std::vector<uint32_t> m_emissiveChannels;
     float m_metallicFactor;
     float m_roughnessFactor;
     DirectX::XMFLOAT4 m_baseColorFactor;
