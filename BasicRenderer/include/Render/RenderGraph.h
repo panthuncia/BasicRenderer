@@ -129,7 +129,7 @@ public:
 	~RenderGraph();
 	void AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassParameters& resources, std::string name = "");
 	void AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassParameters& resources, std::string name = "");
-	void Update();
+	void Update(const UpdateContext& context);
 	void Execute(RenderContext& context);
 	void CompileStructural();
 	void ResetForFrame();

@@ -299,8 +299,6 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<std::vector<float>>("directionalLightCascadeSplits", calculateCascadeSplits(numDirectionalCascades, 0.1f, 100, maxShadowDistance));
     settingsManager.registerSetting<uint16_t>("shadowResolution", 2048);
     settingsManager.registerSetting<float>("cameraSpeed", 10);
-	settingsManager.registerSetting<ShadowMaps*>("currentShadowMapsResourceGroup", nullptr);
-	settingsManager.registerSetting<LinearShadowMaps*>("currentLinearShadowMapsResourceGroup", nullptr);
 	settingsManager.registerSetting<bool>("enableWireframe", false);
 	settingsManager.registerSetting<bool>("enableShadows", true);
 	settingsManager.registerSetting<uint16_t>("skyboxResolution", 2048);
@@ -734,7 +732,25 @@ void Renderer::Update(float elapsedSeconds) {
     auto res = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
     resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), { res.x, res.y }, m_lightClusterSize, m_frameIndex);
 
-	currentRenderGraph->Update();
+    const Components::DrawStats& drawStats = world.get<Components::DrawStats>();
+    auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+    auto outputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
+    UpdateContext context(drawStats,
+        m_pObjectManager.get(),
+        m_pMeshManager.get(),
+        m_pIndirectCommandBufferManager.get(),
+        m_pViewManager.get(),
+        m_pLightManager.get(),
+        m_pEnvironmentManager.get(),
+        m_pMaterialManager.get(),
+        currentScene.get(), 
+        m_frameIndex,
+        m_currentFrameFenceValue, 
+        renderRes, 
+        outputRes, 
+        elapsedSeconds);
+
+	currentRenderGraph->Update(context);
 
     //resourceManager.ExecuteResourceTransitions();
     commandList->Recycle(commandAllocator.Get());

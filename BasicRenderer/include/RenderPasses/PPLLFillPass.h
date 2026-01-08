@@ -173,13 +173,13 @@ public:
 		return {};
 	}
 
-	virtual void Update() override {
+	virtual void Update(const UpdateContext& context) override {
 		// Reset UAV counter
 		uint32_t zero = 0;
 		BUFFER_UPLOAD(&zero, sizeof(uint32_t), UploadManager::UploadTarget::FromHandle(m_PPLLCounterHandle), 0);
 	}
 
-	void Cleanup(RenderContext& context) override {
+	void Cleanup() override {
 		// Cleanup the render pass
 	}
 

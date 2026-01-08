@@ -52,7 +52,7 @@ public:
         return {};
     }
 
-    void Cleanup(RenderContext&) override {}
+    void Cleanup() override {}
 
 private:
         PipelineState m_pso;

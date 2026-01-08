@@ -42,6 +42,52 @@ struct RenderContext {
 	float deltaTime;
 };
 
+struct UpdateContext {
+	explicit UpdateContext(
+		Components::DrawStats drawStats,
+		ObjectManager* objectManager,
+		MeshManager* meshManager,
+		IndirectCommandBufferManager* indirectCommandBufferManager,
+		ViewManager* viewManager,
+		LightManager* lightManager,
+		EnvironmentManager* environmentManager,
+		MaterialManager* materialManager,
+		Scene* currentScene,
+		UINT frameIndex,
+		UINT64 frameFenceValue,
+		DirectX::XMUINT2 renderResolution,
+		DirectX::XMUINT2 outputResolution,
+		float deltaTime) : drawStats(drawStats),
+		objectManager(objectManager),
+		meshManager(meshManager),
+		indirectCommandBufferManager(indirectCommandBufferManager),
+		viewManager(viewManager),
+		lightManager(lightManager),
+		environmentManager(environmentManager),
+		materialManager(materialManager),
+		currentScene(currentScene),
+		frameIndex(frameIndex),
+		frameFenceValue(frameFenceValue),
+		renderResolution(renderResolution),
+		outputResolution(outputResolution),
+		deltaTime(deltaTime) {}
+	Components::DrawStats drawStats;
+	ObjectManager* objectManager;
+	MeshManager* meshManager;
+	IndirectCommandBufferManager* indirectCommandBufferManager;
+	ViewManager* viewManager;
+	LightManager* lightManager;
+	EnvironmentManager* environmentManager;
+	MaterialManager* materialManager;
+
+	Scene* currentScene;
+	UINT frameIndex;
+	UINT64 frameFenceValue;
+	DirectX::XMUINT2 renderResolution;
+	DirectX::XMUINT2 outputResolution;
+	float deltaTime;
+};
+
 struct ImmediateContext {
 	rhi::Device device;
 	rg::imm::ImmediateCommandList list;

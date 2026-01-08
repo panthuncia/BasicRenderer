@@ -87,7 +87,7 @@ private:
             return { m_readbackFence, m_fenceValue };
         }
 
-        void Cleanup(RenderContext& context) override {
+        void Cleanup() override {
             // Cleanup if necessary
         }
 

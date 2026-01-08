@@ -31,6 +31,7 @@ public:
     }
 
     rhi::Format GetFormat() const { return m_backing->GetFormat(); }
+	bool IsBlockCompressed() const { return rhi::helpers::IsBlockCompressed(GetFormat()); }
     const rhi::ClearValue& GetClearColor() const {
         return m_backing->GetClearColor();
     }
@@ -46,6 +47,12 @@ public:
     unsigned int GetHeight() const {
         return m_backing->GetHeight();
     }
+    unsigned int GetChannelCount()const {
+	    return m_desc.channels;
+    }
+    bool IsCubemap() const {
+        return m_desc.isCubemap;
+	}
     void OnSetName() override {
         m_backing->SetName(name.c_str());
 	}
@@ -61,6 +68,7 @@ public:
 private:
     PixelBuffer(const TextureDescription& desc)
     {
+        m_desc = desc;
         m_backing = GpuTextureBacking::CreateUnique(desc, GetGlobalResourceID(), nullptr);
 
     	m_mipLevels = m_backing->GetMipLevels();
@@ -99,4 +107,5 @@ private:
         }
 	}
     std::unique_ptr<GpuTextureBacking> m_backing;
+	TextureDescription m_desc;
 };

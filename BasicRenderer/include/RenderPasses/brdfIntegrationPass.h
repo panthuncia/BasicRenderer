@@ -46,7 +46,7 @@ public:
         return { };
     }
 
-    void Cleanup(RenderContext& context) override {
+    void Cleanup() override {
         // Cleanup if necessary
     }
 

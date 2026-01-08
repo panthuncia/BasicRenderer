@@ -24,7 +24,7 @@ class VisibleClusterTableCounterResetPass : public RenderPass {
 		m_counter = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PrimaryCamera::VisibleClusterTableCounter);
 	}
 
-	void Cleanup(RenderContext& context) override {
+	void Cleanup() override {
 
 	}
 
@@ -251,7 +251,7 @@ public:
 		return {};
 	}
 
-	void Cleanup(RenderContext& context) override {
+	void Cleanup() override {
 
 	}
 
@@ -404,7 +404,7 @@ public:
 		return {};
 	}
 
-	void Cleanup(RenderContext& context) override {
+	void Cleanup() override {
 	}
 
 private:

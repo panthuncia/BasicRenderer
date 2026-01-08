@@ -8,6 +8,8 @@
 #include "Resources/TextureDescription.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "RenderPasses/Base/ComputePass.h"
+#include "Managers/Singletons/PSOManager.h"
+#include "Render/PassBuilders.h"
 
 class PixelBuffer;
 class Sampler;
@@ -42,21 +44,41 @@ private:
 
     class MipmappingPass : public ComputePass {
     public:
-        MipmappingPass();
+        MipmappingPass()
+        {
+            m_pMipConstants = LazyDynamicStructuredBuffer<MipmapSpdConstants>::CreateShared(
+                64, "Mipmap SPD constants");
 
-        void Enqueue(const std::shared_ptr<PixelBuffer>& tex, const TextureDescription& desc);
-
-        void Setup() override {}
-        void Update() override;
-        void Cleanup(RenderContext&) override {
-			// Destroy kept-alive resources
-			m_liveConstantsViews.clear();
-			m_liveTextures.clear();
-			m_liveCounters.clear();
-            m_pMipConstants.reset();
-            m_jobs.clear();
+            CreatePipelines();
         }
+
+        //bool WantsPerFrameResourceDeclarations() const noexcept override { return true; }
+
+        void Setup() override {
+	        
+        }
+
+        // Called by TextureFactory when you create a texture with only mip0 uploaded.
+        void EnqueueJob(const std::shared_ptr<PixelBuffer>& tex, bool isSrgb);
+
+        void DeclareResourceUsages(ComputePassBuilder* builder) override;
+
+        void Update(const UpdateContext& context) override
+        {
+            // retire resources from N frames ago
+            RetireOldJobs(context.frameIndex);
+
+            for (auto& j : m_pending) {
+                if (j.constantsDirty && j.constantsView) {
+                    m_pMipConstants->UpdateView(j.constantsView.get(), &j.cpuConstants);
+                    j.constantsDirty = false;
+                }
+            }
+        }
+
         PassReturn Execute(RenderContext& context) override;
+
+        void Cleanup() override {}
 
     private:
         struct MipmapSpdConstants
@@ -68,60 +90,100 @@ private:
             uint32_t workGroupOffset[2];
             float    invInputSize[2];
 
-            uint32_t srcMip;
+            uint32_t mipUavDescriptorIndices[12];
             uint32_t flags;
-
-            uint32_t mipUavDescriptorIndices[11];
-            uint32_t pad[3];
-        };
-
-        struct Chunk
-        {
-            uint32_t srcMip = 0; // source mip for this chunk
-            uint32_t generated = 0; // <= 11
-            uint32_t dispatchXY[2]{};
-
-            MipmapSpdConstants constantsCPU{};
-            std::shared_ptr<BufferView> constantsView;
-            uint32_t constantsIndex = 0;
-            bool constantsUploaded = false;
-
-            std::shared_ptr<GloballyIndexedResource> counter; // unique per dispatch
+            uint32_t srcMip;
+            uint32_t pad0;
+            uint32_t pad1;
         };
 
         struct Job
         {
-            std::shared_ptr<PixelBuffer> tex;
-            TextureDescription desc{};
+            std::shared_ptr<PixelBuffer> texture;
+            std::shared_ptr<BufferView>  constantsView;
+            std::shared_ptr<GloballyIndexedResource> counter;
 
-            uint32_t arraySlices = 1;
-            uint32_t textureSrvIndex = 0; // one SRV for whole texture
-            PipelineState* pso = nullptr;
+            MipmapSpdConstants cpuConstants{};
+            uint32_t constantsIndex = 0;
 
-            std::vector<Chunk> chunks;
+            uint32_t dispatchThreadGroupCountXY[2]{};
+            uint32_t sliceCount = 1;
+            uint32_t mipsToGenerate = 0;
+
+            bool isArray = false;
+            bool isScalar = false;
+            bool isSrgb = false;
+            bool constantsDirty = false;
         };
 
-        std::vector<Job> m_jobs;
+        std::vector<Job> m_pending;
 
-        // Keep alive
-        std::vector<std::shared_ptr<BufferView>> m_liveConstantsViews;
-        std::vector<std::shared_ptr<PixelBuffer>> m_liveTextures;
-        std::vector<std::shared_ptr<GloballyIndexedResource>> m_liveCounters;
+        // simple ring retire (adapt count to your frames-in-flight)
+        static constexpr uint32_t kFramesInFlight = 3;
+        std::vector<Job> m_retire[kFramesInFlight];
 
         std::shared_ptr<LazyDynamicStructuredBuffer<MipmapSpdConstants>> m_pMipConstants;
 
-        PipelineState m_mipRGBA2D;
-        PipelineState m_mipRGBAArray;
-        PipelineState m_mipScalar2D;
-        PipelineState m_mipScalarArray;
+        PipelineState m_psoVec2D;
+        PipelineState m_psoVecArray;
+        PipelineState m_psoScalar2D;
+        PipelineState m_psoScalarArray;
 
-    private:
-        void CreatePipelines();
-        void EmitTextureBarrier_UAVtoUAV(
-            rhi::CommandList& commandList,
-            rhi::ResourceHandle texHandle,
-            uint32_t baseMip, uint32_t mipCount,
-            uint32_t baseSlice, uint32_t sliceCount);
+        void CreatePipelines()
+        {
+            auto& psoManager = PSOManager::GetInstance();
+            auto& layout = psoManager.GetRootSignature();
+
+            m_psoVec2D = psoManager.MakeComputePipeline(
+                layout,
+                L"shaders/Utilities/mipmapping.hlsl",
+                L"MipmapCSMain",
+                { }, // no defines
+                "MipmapSPD[Vec2D]");
+
+            m_psoVecArray = psoManager.MakeComputePipeline(
+                layout,
+                L"shaders/Utilities/mipmapping.hlsl",
+                L"MipmapCSMain",
+                { DxcDefine{ L"MIPMAP_ARRAY", L"1" } },
+                "MipmapSPD[VecArray]");
+
+            m_psoScalar2D = psoManager.MakeComputePipeline(
+                layout,
+                L"shaders/Utilities/mipmapping.hlsl",
+                L"MipmapCSMain",
+                { DxcDefine{ L"MIPMAP_SCALAR", L"1" } },
+                "MipmapSPD[Scalar2D]");
+
+            m_psoScalarArray = psoManager.MakeComputePipeline(
+                layout,
+                L"shaders/Utilities/mipmapping.hlsl",
+                L"MipmapCSMain",
+                { DxcDefine{ L"MIPMAP_SCALAR", L"1" }, DxcDefine{ L"MIPMAP_ARRAY", L"1" } },
+                "MipmapSPD[ScalarArray]");
+        }
+
+        void StashCompletedJobs(uint8_t frameIndex)
+        {
+            auto& slot = m_retire[frameIndex % kFramesInFlight];
+            slot.insert(slot.end(),
+                std::make_move_iterator(m_pending.begin()),
+                std::make_move_iterator(m_pending.end()));
+            m_pending.clear();
+        }
+
+        void RetireOldJobs(uint8_t frameIndex)
+        {
+            auto& slot = m_retire[frameIndex % kFramesInFlight];
+
+            // Remove constants views now that GPU should be done with this frame slot.
+            for (auto& j : slot) {
+                if (j.constantsView) {
+                    m_pMipConstants->Remove(j.constantsView.get());
+                }
+            }
+            slot.clear();
+        }
     };
 
     TextureFactory() {

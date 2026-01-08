@@ -441,265 +441,197 @@ const {
     return pb;
 }
 
-TextureFactory::MipmappingPass::MipmappingPass()
-{
-    m_pMipConstants = LazyDynamicStructuredBuffer<MipmapSpdConstants>::CreateShared(1, "Mipmapping SPD constants");
-
-    CreatePipelines();
-}
-
-void TextureFactory::MipmappingPass::CreatePipelines()
-{
-    auto& psoManager = PSOManager::GetInstance();
-    auto& layout = psoManager.GetRootSignature();
-
-    m_mipRGBA2D = psoManager.MakeComputePipeline(
-        layout,
-        L"shaders/Utilities/mipmapping.hlsl",
-        L"MipmapCSMain",
-        {}, // no defines
-        "MipmappingCS[RGBA2D]"
-    );
-
-    m_mipRGBAArray = psoManager.MakeComputePipeline(
-        layout,
-        L"shaders/Utilities/mipmapping.hlsl",
-        L"MipmapCSMain",
-        {DxcDefine{ L"MIPMAP_ARRAY", L"1" }},
-        "MipmappingCS[RGBAArray]"
-    );
-
-    m_mipScalar2D = psoManager.MakeComputePipeline(
-        layout,
-        L"shaders/Utilities/mipmapping.hlsl",
-        L"MipmapCSMain",
-        {DxcDefine{ L"MIPMAP_SCALAR", L"1" }},
-        "MipmappingCS[Scalar2D]"
-    );
-
-    m_mipScalarArray = psoManager.MakeComputePipeline(
-        layout,
-        L"shaders/Utilities/mipmapping.hlsl",
-        L"MipmapCSMain",
-        { DxcDefine{L"MIPMAP_ARRAY", L"1"} , DxcDefine{L"MIPMAP_SCALAR", L"1"} },
-        "MipmappingCS[ScalarArray]"
-    );
-}
-
-void TextureFactory::MipmappingPass::Enqueue(const std::shared_ptr<PixelBuffer>& tex, const TextureDescription& desc)
-{
+void TextureFactory::MipmappingPass::EnqueueJob(const std::shared_ptr<PixelBuffer>& tex, bool isSrgb) {
     if (!tex) return;
 
-    const uint32_t totalMipLevels = tex->GetMipLevels();
-    if (totalMipLevels <= 1) return;
-    if (rhi::helpers::IsBlockCompressed(desc.format)) return;
-
-    const uint32_t faces = desc.isCubemap ? 6u : 1u;
-    const uint32_t arraySlices = faces * static_cast<uint32_t>(desc.arraySize);
-    if (arraySlices == 0) return;
-
-    Job job{};
-    job.tex = tex;
-    job.desc = desc;
-    job.arraySlices = arraySlices;
-
-    const bool isArrayLike = desc.isCubemap || desc.isArray || (desc.arraySize > 1);
-    const bool isScalar = (desc.channels == 1);
-
-    job.pso = isScalar
-        ? (isArrayLike ? &m_mipScalarArray : &m_mipScalar2D)
-        : (isArrayLike ? &m_mipRGBAArray : &m_mipRGBA2D);
-
-    // SRV must include the full mip chain so shader can Load() arbitrary mip.
-    job.textureSrvIndex =
-        isArrayLike
-        ? tex->GetSRVInfo(SRVViewType::Texture2DArray, 0).slot.index
-        : tex->GetSRVInfo(0).slot.index;
-
-    const uint32_t baseW = tex->GetInternalWidth();
-    const uint32_t baseH = tex->GetInternalHeight();
-
-    uint32_t remaining = totalMipLevels - 1; // number of mips to generate beyond mip0
-    uint32_t srcMip = 0;
-
-    while (remaining > 0)
-    {
-        Chunk chunk{};
-        chunk.srcMip = srcMip;
-
-        chunk.generated = (std::min)(remaining, 11u);
-
-        // source mip size
-        const uint32_t srcW = (std::max)(1u, baseW >> srcMip);
-        const uint32_t srcH = (std::max)(1u, baseH >> srcMip);
-
-        // SPD CPU setup for this source mip size
-        unsigned int workGroupOffset[2] = {};
-        unsigned int numWorkGroupsAndMips[2] = {};
-        unsigned int rectInfo[4] = { 0u, 0u, srcW, srcH };
-        unsigned int dispatchThreadGroupCountXY[2] = {};
-
-        SpdSetup(dispatchThreadGroupCountXY, workGroupOffset, numWorkGroupsAndMips, rectInfo);
-
-        chunk.dispatchXY[0] = dispatchThreadGroupCountXY[0];
-        chunk.dispatchXY[1] = dispatchThreadGroupCountXY[1];
-
-        // fill constants
-        auto& c = chunk.constantsCPU;
-        c.srcSize[0] = srcW;
-        c.srcSize[1] = srcH;
-        c.invInputSize[0] = (srcW > 0) ? (1.0f / float(srcW)) : 0.0f;
-        c.invInputSize[1] = (srcH > 0) ? (1.0f / float(srcH)) : 0.0f;
-
-        c.mips = chunk.generated;
-        c.numWorkGroups = numWorkGroupsAndMips[0];
-        c.workGroupOffset[0] = workGroupOffset[0];
-        c.workGroupOffset[1] = workGroupOffset[1];
-
-        c.srcMip = srcMip;
-        c.flags = rhi::helpers::IsSRGB(desc.format) ? 1u : 0u;
-
-        // Destination mips are absolute: srcMip+1 .. srcMip+generated
-        for (uint32_t i = 0; i < chunk.generated; ++i)
-        {
-            const uint32_t dstMip = srcMip + 1 + i;
-            c.mipUavDescriptorIndices[i] = tex->GetUAVShaderVisibleInfo(dstMip).slot.index;
-        }
-
-        // allocate constants slot now; upload later in Update()
-        chunk.constantsView = m_pMipConstants->Add();
-        chunk.constantsIndex = static_cast<uint32_t>(chunk.constantsView->GetOffset() / sizeof(MipmapSpdConstants));
-
-        // allocate a dedicated counter buffer
-        chunk.counter = CreateIndexedStructuredBuffer(1, sizeof(unsigned int) * 6u * 6u, true);
-
-        job.chunks.push_back(std::move(chunk));
-
-        // advance
-        remaining -= chunk.generated;
-        srcMip += chunk.generated;
+    if (tex->IsBlockCompressed()) {
+	    spdlog::warn("MipmappingPass: skipping block compressed texture");
     }
 
-    m_jobs.push_back(std::move(job));
+    const uint32_t mipLevels = tex->GetMipLevels();
+    if (mipLevels <= 1) return;
+
+    const uint32_t w = tex->GetInternalWidth();
+    const uint32_t h = tex->GetInternalHeight();
+
+    // SPD limit
+    if (w > 4096 || h > 4096) {
+        spdlog::warn("MipmappingPass: skipping >4K texture ({}x{}) for now", w, h);
+        return;
+    }
+
+    Job j{};
+    j.texture = tex;
+    j.isSrgb = isSrgb;
+
+    const uint32_t faces = tex->IsCubemap() ? 6u : 1u;
+    const uint32_t slices = faces * tex->GetArraySize();
+    j.sliceCount = (std::max)(1u, slices);
+    j.isArray = (j.sliceCount > 1);
+
+    // Decide scalar vs vector (keep it simple: 1-channel => scalar, else vector)
+    j.isScalar = (tex->GetChannelCount() == 1);
+
+    // SPD setup
+    unsigned int workGroupOffset[2]{};
+    unsigned int numWorkGroupsAndMips[2]{};
+    unsigned int rectInfo[4]{ 0, 0, w, h };
+    unsigned int tg[2]{};
+
+    SpdSetup(tg, workGroupOffset, numWorkGroupsAndMips, rectInfo);
+
+    const uint32_t maxGen = 12u;
+    j.mipsToGenerate = (std::min)(mipLevels - 1u, maxGen);
+
+    // Build constants (store CPU copy; upload happens in Update())
+    MipmapSpdConstants c{};
+    c.srcSize[0] = w;
+    c.srcSize[1] = h;
+    c.mips = j.mipsToGenerate;
+    c.numWorkGroups = numWorkGroupsAndMips[0];
+    c.workGroupOffset[0] = workGroupOffset[0];
+    c.workGroupOffset[1] = workGroupOffset[1];
+    c.invInputSize[0] = 1.0f / float((std::max)(1u, w));
+    c.invInputSize[1] = 1.0f / float((std::max)(1u, h));
+    c.flags = isSrgb ? 1u : 0u;
+    c.srcMip = 0;
+
+    for (uint32_t i = 0; i < 12u; ++i) {
+        c.mipUavDescriptorIndices[i] = 0;
+    }
+
+    // Fill mip1..mipN UAV indices
+    for (uint32_t i = 0; i < j.mipsToGenerate; ++i) {
+        c.mipUavDescriptorIndices[i] = tex->GetUAVShaderVisibleInfo(i + 1).slot.index;
+    }
+
+    j.dispatchThreadGroupCountXY[0] = tg[0];
+    j.dispatchThreadGroupCountXY[1] = tg[1];
+
+    // Allocate a constants view
+    j.constantsView = m_pMipConstants->Add();
+    j.constantsIndex = static_cast<uint32_t>(j.constantsView->GetOffset() / sizeof(MipmapSpdConstants));
+    j.cpuConstants = c;
+    j.constantsDirty = true;
+
+    // Per-job counter buffer: RWStructuredBuffer<uint> with elementCount = sliceCount
+    j.counter = CreateIndexedStructuredBuffer(
+        /*numElements=*/ j.sliceCount,
+        /*stride=*/ sizeof(uint32_t),
+        /*uav=*/ true);
+
+    m_pending.push_back(std::move(j));
 }
 
-void TextureFactory::MipmappingPass::Update()
+
+void TextureFactory::MipmappingPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
-    for (auto& job : m_jobs)
-    {
-        for (auto& chunk : job.chunks)
-        {
-            if (chunk.constantsUploaded) continue;
-            if (!chunk.constantsView) continue;
+    if (m_pending.empty()) return;
 
-            m_pMipConstants->UpdateView(chunk.constantsView.get(), &chunk.constantsCPU);
-            chunk.constantsUploaded = true;
+    builder->WithShaderResource(m_pMipConstants);
 
-            // keep alive (safe)
-            m_liveConstantsViews.push_back(chunk.constantsView);
-            m_liveCounters.push_back(chunk.counter);
+    // Exit state: shader-readable after we internally transition outputs back
+    const ResourceState exitSRV{
+        rhi::ResourceAccessType::ShaderResource,
+        AccessToLayout(rhi::ResourceAccessType::ShaderResource, /*isRender=*/false),
+        rhi::ResourceSyncState::ComputeShading
+    };
+
+    for (auto& j : m_pending) {
+        auto tex = j.texture;
+        if (!tex) continue;
+
+        // Read mip0, write mip1..N
+        builder->WithShaderResource(Subresources(tex, Mip{ 0, 1 }));
+        if (j.mipsToGenerate > 0) {
+            builder->WithUnorderedAccess(Subresources(tex, FromMip{ 1 }));
+
+            // We do the UAV->SRV transition inside Execute, so tell the graph.
+            builder->WithInternalTransition(Subresources(tex, FromMip{ 1 }), exitSRV);
         }
 
-        m_liveTextures.push_back(job.tex);
+        // Counter is UAV for the dispatch
+        builder->WithUnorderedAccess(j.counter);
     }
-}
-
-void TextureFactory::MipmappingPass::EmitTextureBarrier_UAVtoUAV(
-    rhi::CommandList& commandList,
-    rhi::ResourceHandle texHandle,
-    uint32_t baseMip, uint32_t mipCount,
-    uint32_t baseSlice, uint32_t sliceCount)
-{
-    rhi::TextureBarrier barrier{};
-    barrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-    barrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
-    barrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
-    barrier.afterSync = rhi::ResourceSyncState::ComputeShading;
-
-    barrier.beforeLayout = rhi::ResourceLayout::UnorderedAccess;
-    barrier.afterLayout = rhi::ResourceLayout::UnorderedAccess;
-
-    barrier.texture = texHandle;
-
-    rhi::TextureSubresourceRange range;
-    range.baseMip = baseMip;
-    range.mipCount = mipCount;
-    range.baseLayer = baseSlice;
-    range.layerCount = sliceCount;
-	barrier.range = range;
-
-    rhi::BarrierBatch batch{};
-    batch.textures = rhi::Span<rhi::TextureBarrier>(&barrier, 1);
-    commandList.Barriers(batch);
 }
 
 PassReturn TextureFactory::MipmappingPass::Execute(RenderContext& context)
 {
-    if (m_jobs.empty()) return {};
+    if (m_pending.empty()) return {};
 
     auto& psoManager = PSOManager::GetInstance();
     auto& commandList = context.commandList;
 
-    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(),
-        context.samplerDescriptorHeap.GetHandle());
+    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
     commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
 
     const uint32_t constantsSrvIndex = m_pMipConstants->GetSRVInfo(0).slot.index;
 
-    for (auto& job : m_jobs)
-    {
-        if (!job.tex || !job.pso) continue;
+    // Process all jobs queued for this frame
+    for (auto& j : m_pending) {
+        if (!j.texture) continue;
 
-        commandList.BindPipeline(job.pso->GetAPIPipelineState().GetHandle());
+        // Pick SRV (2D vs array)
+        const uint32_t srcSrvIndex =
+            j.isArray
+            ? j.texture->GetSRVInfo(SRVViewType::Texture2DArray, 0).slot.index
+            : j.texture->GetSRVInfo(0).slot.index;
 
-        const auto texHandle = job.tex->GetAPIResource().GetHandle();
+        // Pick pipeline
+        PipelineState* pso = nullptr;
+        if (j.isScalar) {
+            pso = j.isArray ? &m_psoScalarArray : &m_psoScalar2D;
+        }
+        else {
+            pso = j.isArray ? &m_psoVecArray : &m_psoVec2D;
+        }
 
-        for (size_t i = 0; i < job.chunks.size(); ++i)
-        {
-            auto& chunk = job.chunks[i];
-            if (!chunk.constantsUploaded) continue;
+        commandList.BindPipeline(pso->GetAPIPipelineState().GetHandle());
 
-            const uint32_t counterUavIndex = chunk.counter->GetUAVShaderVisibleInfo(0).slot.index;
+        unsigned int root[NumMiscUintRootConstants]{};
+        root[UintRootConstant0] = j.counter->GetUAVShaderVisibleInfo(0).slot.index;
+        root[UintRootConstant1] = srcSrvIndex;
+        root[UintRootConstant2] = constantsSrvIndex;
+        root[UintRootConstant3] = j.constantsIndex;
 
-            unsigned int root[NumMiscUintRootConstants] = {};
-            root[UintRootConstant0] = counterUavIndex;
-            root[UintRootConstant1] = job.textureSrvIndex;   // SRV for whole texture
-            root[UintRootConstant2] = constantsSrvIndex;
-            root[UintRootConstant3] = chunk.constantsIndex;
+        commandList.PushConstants(
+            rhi::ShaderStage::Compute,
+            0,
+            MiscUintRootSignatureIndex,
+            0,
+            NumMiscUintRootConstants,
+            root);
 
-            commandList.PushConstants(
-                rhi::ShaderStage::Compute,
-                0,
-                MiscUintRootSignatureIndex,
-                0,
-                NumMiscUintRootConstants,
-                root
-            );
+        commandList.Dispatch(
+            j.dispatchThreadGroupCountXY[0],
+            j.dispatchThreadGroupCountXY[1],
+            j.sliceCount);
 
-            commandList.Dispatch(chunk.dispatchXY[0], chunk.dispatchXY[1], job.arraySlices);
+        // Internal exit transition: mip1..N UAV -> SRV (so later passes can sample without the graph thinking it's still UAV)
+        if (j.mipsToGenerate > 0) {
+            rhi::TextureBarrier tb{};
+            tb.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+            tb.afterAccess = rhi::ResourceAccessType::ShaderResource;
+            tb.beforeSync = rhi::ResourceSyncState::ComputeShading;
+            tb.afterSync = rhi::ResourceSyncState::ComputeShading;
+            tb.beforeLayout = AccessToLayout(rhi::ResourceAccessType::UnorderedAccess, /*directQueue=*/false);
+            tb.afterLayout = AccessToLayout(rhi::ResourceAccessType::ShaderResource, /*directQueue=*/false);
+            tb.texture = j.texture->GetAPIResource().GetHandle();
 
-            // If there is another chunk, the next chunk reads from the last generated mip:
-            // nextSrcMip = srcMip + generated (that mip was just written as UAV).
-            if (i + 1 < job.chunks.size())
-            {
-                const uint32_t nextSrcMip = chunk.srcMip + chunk.generated;
+            tb.range.baseMip = 1;
+            tb.range.mipCount = j.mipsToGenerate;
+            tb.range.baseLayer = 0;
+            tb.range.layerCount = j.sliceCount;
 
-                // Make nextSrcMip readable for the next dispatch
-                EmitTextureBarrier_UAVtoUAV(commandList, texHandle,
-                    /*baseMip*/ nextSrcMip, /*mipCount*/ 1,
-                    /*baseSlice*/ 0, /*sliceCount*/ job.arraySlices);
-
-                // Also make sure the next chunk's destination range is synced
-                const uint32_t nextDstBase = nextSrcMip + 1;
-                const uint32_t nextDstCount = job.chunks[i + 1].generated;
-                EmitTextureBarrier_UAVtoUAV(commandList, texHandle,
-                    nextDstBase, nextDstCount,
-                    0, job.arraySlices);
-            }
+            rhi::BarrierBatch batch{};
+            batch.textures = rhi::Span<rhi::TextureBarrier>(&tb, 1);
+            commandList.Barriers(batch);
         }
     }
 
-    m_jobs.clear();
+    // Move jobs to retire-ring so resources/views aren’t freed before GPU completes
+    StashCompletedJobs(context.frameIndex);
+
     return {};
 }

@@ -49,10 +49,10 @@ public:
 
     virtual void Setup() = 0;
 
-	virtual void Update() {};
+	virtual void Update(const UpdateContext& context) {};
 	virtual void ExecuteImmediate(ImmediateContext& context) {};
 	virtual PassReturn Execute(RenderContext& context) { return {}; };
-    virtual void Cleanup(RenderContext& context) = 0;
+    virtual void Cleanup() = 0;
 
 	void Invalidate() { invalidated = true; }
 	bool IsInvalidated() const { return invalidated; }

@@ -3,18 +3,9 @@
 #define A_GPU
 #define A_HLSL
 
-// We use Load(), so no sampler is required.
-// (Keeping SPD_LINEAR_SAMPLER undefined is fine.)
-
-// Same style as your downsample pass.
-// NOTE: This limits per-dispatch slices to 6 (slice is used as counter index).
-struct SpdGlobalAtomicBuffer
-{
-    uint counter[6];
-};
-
 #include "FidelityFX/ffx_a.h"
 
+// Per-dispatch global counter buffer (one uint per slice)
 groupshared AU1 spdCounter;
 
 #ifndef SPD_PACKED_ONLY
@@ -23,47 +14,45 @@ groupshared AF1 spdIntermediateG[16][16];
 groupshared AF1 spdIntermediateB[16][16];
 groupshared AF1 spdIntermediateA[16][16];
 
-// UintRootConstant0 = atomic counter buffer descriptor index
-// UintRootConstant1 = source SRV descriptor index (mip source for this dispatch)
-// UintRootConstant2 = constants structured buffer SRV descriptor index
-// UintRootConstant3 = constants element index in structured buffer
+static const uint MIPMAP_FLAG_SRGB = 1u;
 
-// Max "extra mips" generated per dispatch = 11 (mip1..mip11 relative to the source mip).
-#define SPD_MAX_GENERATED_MIPS 11
-
-// flags: bit0 = sRGB encode on store (RGB only; alpha stays linear)
+// Must match CPU layout
 struct MipmapSpdConstants
 {
-    uint2 srcSize; // size of the *source mip*
-    uint mips; // how many mips to generate this dispatch (<= 11)
+    uint2 srcSize;
+    uint mips; // number of mips to generate (outputs), e.g. mipLevels-1
     uint numWorkGroups;
 
     uint2 workGroupOffset;
-    float2 invInputSize;
+    float2 invInputSize; // not strictly required for Load-based path
 
-    uint srcMip;
-    uint flags; // bit0: sRGB encode on store (RGB only)
-
-    uint mipUavDescriptorIndices[11]; // destinations: srcMip+1 ... srcMip+mips
-    uint pad[3];
+    uint mipUavDescriptorIndices[12]; // mip1..mip12
+    uint flags;
+    uint srcMip; // usually 0
+    uint pad0;
+    uint pad1;
 };
 
-
-static float LinearToSrgb1(float c)
+float3 LinearToSrgb(float3 c)
 {
     c = saturate(c);
-    if (c <= 0.0031308f)
-        return 12.92f * c;
-    return 1.055f * pow(c, 1.0f / 2.4f) - 0.055f;
+
+    float3 lo = c * 12.92f;
+    float3 hi = 1.055f * pow(c, 1.0f / 2.4f) - 0.055f;
+
+    float3 useHi = step(0.0031308f, c); // 0 when c < edge, 1 when c >= edge
+    return lerp(lo, hi, useHi);
 }
 
-static float3 LinearToSrgb3(float3 c)
+float4 EncodeForOutput(float4 v, uint flags)
 {
-    return float3(LinearToSrgb1(c.x), LinearToSrgb1(c.y), LinearToSrgb1(c.z));
+    if ((flags & MIPMAP_FLAG_SRGB) != 0u)
+    {
+        v.rgb = LinearToSrgb(v.rgb);
+    }
+    return v;
 }
 
-// SPD hook: source load
-// We clamp p to srcSize-1 to handle odd sizes.
 AF4 SpdLoadSourceImage(ASU2 p, AU1 slice)
 {
     StructuredBuffer<MipmapSpdConstants> constantsBuf = ResourceDescriptorHeap[UintRootConstant2];
@@ -77,22 +66,21 @@ AF4 SpdLoadSourceImage(ASU2 p, AU1 slice)
         float v = imgSrc.Load(int4(q, slice, (int)c.srcMip));
 #else
         Texture2D<float> imgSrc = ResourceDescriptorHeap[UintRootConstant1];
-		float v = imgSrc.Load(int3(q, (int) c.srcMip));
+        float v = imgSrc.Load(int3(q, (int)c.srcMip));
 #endif
     return AF4(v, v, v, v);
 #else
 #if defined(MIPMAP_ARRAY)
-    Texture2DArray<float4> imgSrc = ResourceDescriptorHeap[UintRootConstant1];
-    float4 v = imgSrc.Load(int4(q, slice, (int)c.srcMip)); // mip-select
+        Texture2DArray<float4> imgSrc = ResourceDescriptorHeap[UintRootConstant1];
+        float4 v = imgSrc.Load(int4(q, slice, (int)c.srcMip));
 #else
     Texture2D<float4> imgSrc = ResourceDescriptorHeap[UintRootConstant1];
-    float4 v = imgSrc.Load(int3(q, (int) c.srcMip)); // mip-select
+    float4 v = imgSrc.Load(int3(q, (int) c.srcMip));
 #endif
     return AF4(v.x, v.y, v.z, v.w);
 #endif
 }
 
-// SPD hook: load from mip 5 (relative) for cross-workgroup.
 AF4 SpdLoad(ASU2 tex, AU1 slice)
 {
     StructuredBuffer<MipmapSpdConstants> constantsBuf = ResourceDescriptorHeap[UintRootConstant2];
@@ -101,36 +89,24 @@ AF4 SpdLoad(ASU2 tex, AU1 slice)
 #if defined(MIPMAP_SCALAR)
 #if defined(MIPMAP_ARRAY)
         globallycoherent RWTexture2DArray<float> imgDst5 = ResourceDescriptorHeap[c.mipUavDescriptorIndices[5]];
-        float v = imgDst5[float3(tex, slice)];
+        return imgDst5[float3(tex, slice)].rrrr;
 #else
         globallycoherent RWTexture2D<float> imgDst5 = ResourceDescriptorHeap[c.mipUavDescriptorIndices[5]];
-        float v = imgDst5[tex];
+        return imgDst5[tex].rrrr;
 #endif
-    return AF4(v, v, v, v);
 #else
 #if defined(MIPMAP_ARRAY)
         globallycoherent RWTexture2DArray<float4> imgDst5 = ResourceDescriptorHeap[c.mipUavDescriptorIndices[5]];
-        return AF4(imgDst5[float3(tex, slice)]);
+        float4 v = imgDst5[float3(tex, slice)];
+        return AF4(v.x, v.y, v.z, v.w);
 #else
     globallycoherent RWTexture2D<float4> imgDst5 = ResourceDescriptorHeap[c.mipUavDescriptorIndices[5]];
-    return AF4(imgDst5[tex]);
+    float4 v = imgDst5[tex];
+    return AF4(v.x, v.y, v.z, v.w);
 #endif
 #endif
 }
 
-#ifndef MIPMAP_SCALAR
-static float4 ApplyStoreEncoding(MipmapSpdConstants c, float4 v)
-{
-    if ((c.flags & 1u) != 0u)
-    {
-        v.rgb = LinearToSrgb3(v.rgb);
-    }
-    return v;
-}
-#endif
-
-// SPD hook: store to mip index (0 => mip1 relative).
-// index==5 uses globallycoherent for the SPD cross-workgroup path.
 void SpdStore(ASU2 pix, AF4 outValue, AU1 index, AU1 slice)
 {
     StructuredBuffer<MipmapSpdConstants> constantsBuf = ResourceDescriptorHeap[UintRootConstant2];
@@ -138,7 +114,6 @@ void SpdStore(ASU2 pix, AF4 outValue, AU1 index, AU1 slice)
 
 #if defined(MIPMAP_SCALAR)
     float v = outValue.x;
-
     if (index == 5)
     {
 #if defined(MIPMAP_ARRAY)
@@ -160,8 +135,7 @@ void SpdStore(ASU2 pix, AF4 outValue, AU1 index, AU1 slice)
 #endif
 
 #else
-    float4 v = float4(outValue.x, outValue.y, outValue.z, outValue.w);
-    v = ApplyStoreEncoding(c, v);
+    float4 v = EncodeForOutput(float4(outValue.x, outValue.y, outValue.z, outValue.w), c.flags);
 
     if (index == 5)
     {
@@ -185,7 +159,6 @@ void SpdStore(ASU2 pix, AF4 outValue, AU1 index, AU1 slice)
 #endif
 }
 
-
 AF4 SpdReduce4(AF4 v0, AF4 v1, AF4 v2, AF4 v3)
 {
     return (v0 + v1 + v2 + v3) * 0.25f;
@@ -193,8 +166,8 @@ AF4 SpdReduce4(AF4 v0, AF4 v1, AF4 v2, AF4 v3)
 
 void SpdIncreaseAtomicCounter(AU1 slice)
 {
-    globallycoherent RWStructuredBuffer<SpdGlobalAtomicBuffer> spdGlobalAtomic = ResourceDescriptorHeap[UintRootConstant0];
-    InterlockedAdd(spdGlobalAtomic[0].counter[slice], 1, spdCounter);
+    globallycoherent RWStructuredBuffer<uint> spdGlobalAtomic = ResourceDescriptorHeap[UintRootConstant0];
+    InterlockedAdd(spdGlobalAtomic[slice], 1, spdCounter);
 }
 AU1 SpdGetAtomicCounter()
 {
@@ -202,8 +175,8 @@ AU1 SpdGetAtomicCounter()
 }
 void SpdResetAtomicCounter(AU1 slice)
 {
-    globallycoherent RWStructuredBuffer<SpdGlobalAtomicBuffer> spdGlobalAtomic = ResourceDescriptorHeap[UintRootConstant0];
-    spdGlobalAtomic[0].counter[slice] = 0;
+    globallycoherent RWStructuredBuffer<uint> spdGlobalAtomic = ResourceDescriptorHeap[UintRootConstant0];
+    spdGlobalAtomic[slice] = 0;
 }
 
 AF4 SpdLoadIntermediate(AU1 x, AU1 y)
@@ -214,6 +187,7 @@ AF4 SpdLoadIntermediate(AU1 x, AU1 y)
         spdIntermediateB[x][y],
         spdIntermediateA[x][y]);
 }
+
 void SpdStoreIntermediate(AU1 x, AU1 y, AF4 value)
 {
     spdIntermediateR[x][y] = value.x;

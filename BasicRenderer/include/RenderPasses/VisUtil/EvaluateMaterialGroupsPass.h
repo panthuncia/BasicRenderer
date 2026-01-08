@@ -104,7 +104,7 @@ public:
         return {};
     }
 
-    void Cleanup(RenderContext&) override {}
+    void Cleanup() override {}
 
 private:
     std::unordered_map<MaterialCompileFlags, PipelineState> m_psoCache;

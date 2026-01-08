@@ -78,7 +78,7 @@ public:
         return {};
     }
 
-    void Cleanup(RenderContext&) override {}
+    void Cleanup() override {}
 
 private:
     rhi::PipelineLayoutPtr m_layout;

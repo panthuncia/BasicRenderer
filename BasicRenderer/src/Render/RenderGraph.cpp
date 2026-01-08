@@ -1301,13 +1301,13 @@ std::shared_ptr<ComputePass> RenderGraph::GetComputePassByName(const std::string
 	}
 }
 
-void RenderGraph::Update() {
+void RenderGraph::Update(const UpdateContext& context) {
     for (auto& batch : batches) {
         for (auto& passAndResources : batch.renderPasses) {
-            passAndResources.pass->Update();
+            passAndResources.pass->Update(context);
         }
         for (auto& passAndResources : batch.computePasses) {
-            passAndResources.pass->Update();
+            passAndResources.pass->Update(context);
         }
     }
 }

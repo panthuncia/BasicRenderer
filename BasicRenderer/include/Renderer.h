@@ -236,10 +236,7 @@ private:
         }
 
         std::vector<ResourceIdentifier> GetSupportedResolverKeys() override {
-            return {
-                Builtin::Shadows::ShadowMaps,
-                Builtin::Shadows::LinearShadowMaps,
-            };
+            return {};
 		}
 
         void Cleanup() {

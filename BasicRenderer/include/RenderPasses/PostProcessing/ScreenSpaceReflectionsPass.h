@@ -21,7 +21,16 @@ public:
             Builtin::BRDFLUT,
             Builtin::PostProcessing::ScreenSpaceReflections);
 
-        builder->WithInternalTransition({ Builtin::PostProcessing::ScreenSpaceReflections, {} }, {rhi::ResourceAccessType::Common, rhi::ResourceLayout::Common, rhi::ResourceSyncState::All});
+        ResourceState outState{
+        .access = rhi::ResourceAccessType::Common, 
+        .layout = rhi::ResourceLayout::Common, 
+        .sync = rhi::ResourceSyncState::All};
+
+		ResourceIdentifierAndRange outResource(Builtin::PostProcessing::ScreenSpaceReflections, {});
+
+        builder->WithInternalTransition(
+            outResource,
+            outState);
     }
 
     void Setup() override {
@@ -84,7 +93,7 @@ public:
         return {};
     }
 
-    void Cleanup(RenderContext& context) override {
+    void Cleanup() override {
         // Cleanup the render pass
     }
 

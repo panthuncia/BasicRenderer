@@ -44,73 +44,56 @@ struct UpToSlice {
     uint32_t last;
 };
 
-//// shared_ptr
-//inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r) {
-//    // everything
-//    return { r };
-//}
-//
-//inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
-//    Mip m)
-//{
-//    RangeSpec spec;
-//    spec.mipLower   = { BoundType::Exact, m.first      };
-//    spec.mipUpper   = { BoundType::Exact, m.first + m.count - 1 };
-//    return { r, spec };
-//}
-//
-//inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
-//    FromMip fm)
-//{
-//    RangeSpec spec;
-//    spec.mipLower   = { BoundType::From, fm.first };
-//    return { r, spec };
-//}
-//
-//inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
-//    UpToMip um)
-//{
-//    RangeSpec spec;
-//    spec.mipUpper   = { BoundType::UpTo, um.last };
-//    return { r, spec };
-//}
-//
-//inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
-//    Slice s)
-//{
-//    RangeSpec spec;
-//    spec.sliceLower = { BoundType::Exact, s.first       };
-//    spec.sliceUpper = { BoundType::Exact, s.first + s.count - 1 };
-//    return { r, spec };
-//}
-//
-//inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
-//    FromSlice fs)
-//{
-//    RangeSpec spec;
-//    spec.sliceLower = { BoundType::From, fs.first };
-//    return { r, spec };
-//}
-//
-//inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
-//    UpToSlice us)
-//{
-//    RangeSpec spec;
-//    spec.sliceUpper = { BoundType::UpTo, us.last };
-//    return { r, spec };
-//}
-//
-//inline ResourceAndRange Subresources(const std::shared_ptr<Resource>& r,
-//    Mip     m,
-//    Slice   s)
-//{
-//    RangeSpec spec;
-//    spec.mipLower   = { BoundType::Exact, m.first      };
-//    spec.mipUpper   = { BoundType::Exact, m.first + m.count - 1 };
-//    spec.sliceLower = { BoundType::Exact, s.first       };
-//    spec.sliceUpper = { BoundType::Exact, s.first + s.count - 1 };
-//    return { r, spec };
-//}
+inline ResourcePtrAndRange Subresources(const std::shared_ptr<Resource>& r) {
+    return { r }; // full range
+}
+
+inline ResourcePtrAndRange Subresources(const std::shared_ptr<Resource>& r, Mip m) {
+    RangeSpec spec;
+    spec.mipLower = { BoundType::Exact, m.first };
+    spec.mipUpper = { BoundType::Exact, m.first + m.count - 1 };
+    return { r, spec };
+}
+
+inline ResourcePtrAndRange Subresources(const std::shared_ptr<Resource>& r, FromMip fm) {
+    RangeSpec spec;
+    spec.mipLower = { BoundType::From, fm.first };
+    return { r, spec };
+}
+
+inline ResourcePtrAndRange Subresources(const std::shared_ptr<Resource>& r, UpToMip um) {
+    RangeSpec spec;
+    spec.mipUpper = { BoundType::UpTo, um.last };
+    return { r, spec };
+}
+
+inline ResourcePtrAndRange Subresources(const std::shared_ptr<Resource>& r, Slice s) {
+    RangeSpec spec;
+    spec.sliceLower = { BoundType::Exact, s.first };
+    spec.sliceUpper = { BoundType::Exact, s.first + s.count - 1 };
+    return { r, spec };
+}
+
+inline ResourcePtrAndRange Subresources(const std::shared_ptr<Resource>& r, FromSlice fs) {
+    RangeSpec spec;
+    spec.sliceLower = { BoundType::From, fs.first };
+    return { r, spec };
+}
+
+inline ResourcePtrAndRange Subresources(const std::shared_ptr<Resource>& r, UpToSlice us) {
+    RangeSpec spec;
+    spec.sliceUpper = { BoundType::UpTo, us.last };
+    return { r, spec };
+}
+
+inline ResourcePtrAndRange Subresources(const std::shared_ptr<Resource>& r, Mip m, Slice s) {
+    RangeSpec spec;
+    spec.mipLower = { BoundType::Exact, m.first };
+    spec.mipUpper = { BoundType::Exact, m.first + m.count - 1 };
+    spec.sliceLower = { BoundType::Exact, s.first };
+    spec.sliceUpper = { BoundType::Exact, s.first + s.count - 1 };
+    return { r, spec };
+}
 
 
 // ResourceIdentifier
@@ -437,15 +420,50 @@ namespace detail {
     }
 }
 
+
+namespace detail
+{
+    template<class T>
+    struct shared_ptr_pointee { using type = void; };
+
+    template<class U>
+    struct shared_ptr_pointee<std::shared_ptr<U>> { using type = U; };
+
+    template<class T>
+    using shared_ptr_pointee_t = typename shared_ptr_pointee<std::remove_cvref_t<T>>::type;
+
+    template<class T>
+    inline constexpr bool SharedPtrToResource =
+        std::derived_from<shared_ptr_pointee_t<T>, Resource>; // false for void
+
+    template<class S>
+    concept StringLike =
+        std::convertible_to<S, std::string_view>;
+}
+
+template<class S>
+    requires (detail::StringLike<S> &&
+!std::is_same_v<std::remove_cvref_t<S>, std::string_view>)
+inline std::vector<ResourceHandleAndRange>
+processResourceArguments(S&& s, RenderGraph* graph)
+{
+    return processResourceArguments(std::string_view{ std::forward<S>(s) }, graph);
+}
+
+inline std::vector<ResourceHandleAndRange>
+processResourceArguments(std::string_view name, RenderGraph* graph)
+{
+    return processResourceArguments(ResourceIdentifier{ name }, graph);
+}
+
 template<class T>
 inline constexpr bool ResourceLike =
-std::is_same_v<std::decay_t<T>, std::shared_ptr<Resource>> ||
-std::is_same_v<std::decay_t<T>, ResourceIdentifier> ||
-std::is_same_v<std::decay_t<T>, ResourcePtrAndRange> ||
-std::is_same_v<std::decay_t<T>, ResourceIdentifierAndRange> ||
-std::is_same_v<std::decay_t<T>, std::string_view> || // Can be cast to ResourceIdentifier
-std::is_same_v<std::decay_t<T>, const char*> || // Can be cast to ResourceIdentifier
-std::is_same_v<std::decay_t<T>, IResourceResolver>; // can be cast to ECSResourceResolver 
+detail::SharedPtrToResource<T> ||
+detail::StringLike<T> || // <-- key change
+std::is_same_v<std::remove_cvref_t<T>, ResourceIdentifier> ||
+std::is_same_v<std::remove_cvref_t<T>, ResourcePtrAndRange> ||
+std::is_same_v<std::remove_cvref_t<T>, ResourceIdentifierAndRange> ||
+std::is_same_v<std::remove_cvref_t<T>, IResourceResolver>;
 
 template<typename T>
 concept NotIResourceResolver = !std::derived_from<std::decay_t<T>, IResourceResolver>; // annoying
@@ -530,11 +548,10 @@ public:
         return *this;
     }
 
-    RenderPassBuilder& WithInternalTransition(
-        ResourceIdentifierAndRange rar,
-        ResourceState exitState) &
-    {
-        addInternalTransition(rar, exitState);
+    template<typename T>
+        requires ResourceLike<T>
+    RenderPassBuilder& WithInternalTransition(T&& resource, ResourceState exitState)& {
+        addInternalTransition(std::forward<T>(resource), exitState);
         return *this;
     }
 
@@ -608,11 +625,10 @@ public:
         return std::move(*this);
     }
 
-    RenderPassBuilder WithInternalTransition(
-        ResourceIdentifierAndRange rar,
-        ResourceState exitState) &&
-    {
-        addInternalTransition(rar, exitState);
+    template<typename T>
+        requires ResourceLike<T>
+    RenderPassBuilder WithInternalTransition(T&& resource, ResourceState exitState)&& {
+        addInternalTransition(std::forward<T>(resource), exitState);
         return std::move(*this);
     }
 
@@ -1083,17 +1099,17 @@ private:
         return *this;
 	}
 
-    RenderPassBuilder& addInternalTransition(
-        ResourceIdentifierAndRange rar,
-        ResourceState exitState)&
-    {
-        auto ranges = processResourceArguments(rar, graph);
+    template<typename T>
+        requires ResourceLike<T>
+    RenderPassBuilder& addInternalTransition(T&& x, ResourceState exitState)& {
+        detail::extractId(_declaredIds, std::forward<T>(x));
+        auto ranges = processResourceArguments(std::forward<T>(x), graph);
         for (auto& r : ranges) {
-            //if (!r.resource) continue;
             params.internalTransitions.emplace_back(r, exitState);
         }
         return *this;
     }
+
 	template <class Range>
 		requires (std::ranges::range<Range>&&
     std::is_same_v<std::ranges::range_value_t<Range>, ResourceIdentifierAndRange>)
@@ -1251,11 +1267,10 @@ public:
         return *this;
     }
 
-    ComputePassBuilder& WithInternalTransition(
-        ResourceIdentifierAndRange rar,
-        ResourceState exitState) &
-    {
-        addInternalTransition(rar, exitState);
+    template<typename T>
+        requires ResourceLike<T>
+    ComputePassBuilder& WithInternalTransition(T&& resource, ResourceState exitState)& {
+        addInternalTransition(std::forward<T>(resource), exitState);
         return *this;
     }
 
@@ -1295,11 +1310,10 @@ public:
         return std::move(*this);
     }
 
-    ComputePassBuilder WithInternalTransition(
-        ResourceIdentifierAndRange rar,
-        ResourceState exitState) &&
-    {
-		addInternalTransition(rar, exitState);
+    template<typename T>
+        requires ResourceLike<T>
+    ComputePassBuilder WithInternalTransition(T&& resource, ResourceState exitState)&& {
+        addInternalTransition(std::forward<T>(resource), exitState);
         return std::move(*this);
     }
 
@@ -1577,17 +1591,16 @@ private:
 		}
         return *this;
 	}
-	template<class Range>
-		requires (std::ranges::range<Range>&&
-    ResourceLike<std::ranges::range_value_t<Range>>)
-        ComputePassBuilder& addInternalTransition(
-            Range&& xs,
-            ResourceState exitState) {
-        for (auto&& e : xs) {
-            addInternalTransition(std::forward<decltype(e)>(e), exitState);
+    template<typename T>
+        requires ResourceLike<T>
+    ComputePassBuilder& addInternalTransition(T&& x, ResourceState exitState)& {
+        detail::extractId(_declaredIds, std::forward<T>(x));
+        auto ranges = processResourceArguments(std::forward<T>(x), graph);
+        for (auto& r : ranges) {
+            params.internalTransitions.emplace_back(r, exitState);
         }
         return *this;
-	}
+    }
 
     std::vector<ResourceRequirement> GatherResourceRequirements() const {
         // Collect every (ResourceAndRange,AccessFlag) pair from all the With* lists
