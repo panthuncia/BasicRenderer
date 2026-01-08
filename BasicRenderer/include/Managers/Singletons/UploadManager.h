@@ -190,14 +190,6 @@ private:
 		void Cleanup(RenderContext& context) override {
 			// Cleanup if necessary
 		}
-
-		void SetReadbackFence(rhi::Timeline fence) {
-			m_readbackFence = fence;
-		}
-
-	private:
-		rhi::Timeline m_readbackFence;
-		UINT64 m_fenceValue = 0;
 	};
 
 	UploadManager() {

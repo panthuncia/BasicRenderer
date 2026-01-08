@@ -48,7 +48,6 @@ public:
 	}
 
     virtual void Setup() = 0;
-	virtual void RegisterCommandLists(const std::vector<rhi::CommandList>& commandLists) {};
 
 	virtual void Update() {};
 	virtual void ExecuteImmediate(ImmediateContext& context) {};

@@ -856,7 +856,7 @@ private:
         graph->AddRenderPass(pass, params, passName);
     }
 
-    void Reset() {
+    void Reset() override {
         built_ = false;
         pass = nullptr;
         params = {};
@@ -1449,7 +1449,7 @@ private:
         graph->AddComputePass(pass, params, passName);
     }
 
-    void Reset() {
+    void Reset() override {
         built_ = false;
         pass = nullptr;
         params = {};

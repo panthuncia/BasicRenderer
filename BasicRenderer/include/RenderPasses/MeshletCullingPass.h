@@ -328,16 +328,17 @@ private:
 
 class RewriteOccluderMeshletVisibilityPass : public ComputePass {
 public:
-	RewriteOccluderMeshletVisibilityPass() = default;
-	~RewriteOccluderMeshletVisibilityPass() override = default;
-
-	void Setup() override {
+	RewriteOccluderMeshletVisibilityPass() {
 		m_rewriteVisibilityPSO = PSOManager::GetInstance().MakeComputePipeline(
 			PSOManager::GetInstance().GetComputeRootSignature(),
 			L"shaders/meshletCulling.hlsl",
 			L"RewriteOccluderMeshletVisibilityCS",
 			{},
 			"Rewrite Occluder Meshlet Visibility Compute Pipeline");
+	};
+	~RewriteOccluderMeshletVisibilityPass() override = default;
+
+	void Setup() override {
 
 		RegisterSRV(Builtin::PerObjectBuffer);
 		RegisterSRV(Builtin::CameraBuffer);

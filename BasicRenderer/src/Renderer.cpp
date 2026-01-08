@@ -907,6 +907,7 @@ void Renderer::Cleanup() {
     m_pMaterialManager.reset();
     m_pEnvironmentManager.reset();
 	m_pSkeletonManager.reset();
+    m_pTextureFactory.reset();
     m_hierarchySystem.destruct();
     m_settingsSubscriptions.clear();
     m_readbackFence.Reset();
@@ -1066,7 +1067,7 @@ void Renderer::CreateRenderGraph() {
 
     auto& newGraph = currentRenderGraph;
 
-    newGraph->ResetForRecompile();
+    newGraph->ResetForRebuild();
 
     newGraph->RegisterProvider(m_pMeshManager.get());
     newGraph->RegisterProvider(m_pObjectManager.get());

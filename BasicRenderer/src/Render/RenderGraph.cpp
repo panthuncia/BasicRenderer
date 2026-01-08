@@ -653,7 +653,7 @@ RenderGraph::~RenderGraph() {
 	m_pCommandRecordingManager->ShutdownThreadLocal(); // Clears thread-local storage
 }
 
-void RenderGraph::ResetForRecompile()
+void RenderGraph::ResetForRebuild()
 {
 
 	//std::vector<IResourceProvider*> _providers;
@@ -706,13 +706,19 @@ void RenderGraph::ResetForRecompile()
 	// Register new registry with upload manager
 	UploadManager::GetInstance().SetUploadResolveContext({&_registry});
 
-	// reset pass builders and clear pass ordering
-	for (auto& [name, builder] : m_passBuildersByName) {
-		builder->Reset();
-	}
+	// clear pass ordering
 	m_passBuilderOrder.clear();
 	m_passNamesSeenThisReset.clear();
 
+}
+
+void RenderGraph::ResetForFrame() {
+	batches.clear();
+	lastActiveSubresourceInAliasGroup.clear();
+	// reset pass builders
+	for (auto& [name, builder] : m_passBuildersByName) {
+		builder->Reset();
+	}
 }
 
 void RenderGraph::CompileStructural() {
@@ -848,6 +854,7 @@ static bool RequirementsConflict(
 
 
 void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
+
 	batches.clear();
 	m_framePasses.clear(); // Combined retained + immediate-mode passes for this frame
 	// initialize frame requirements to the retained requirements
@@ -1197,21 +1204,19 @@ void RenderGraph::Setup() {
 
 	m_getUseAsyncCompute = SettingsManager::GetInstance().getSettingGetter<bool>("useAsyncCompute");
 
-	std::vector<rhi::CommandList> emptyLists;
+	// Run pass setup to collect static resource requirements
 	for (auto& pass : m_masterPassList) {
 		switch (pass.type) {
 		case PassType::Render: {
 			auto& renderPass = std::get<RenderPassAndResources>(pass.pass);
 			renderPass.pass->SetResourceRegistryView(std::make_unique<ResourceRegistryView>(_registry, renderPass.resources.identifierSet));
 			renderPass.pass->Setup();
-			renderPass.pass->RegisterCommandLists(emptyLists);
 			break;
 		}
 		case PassType::Compute: {
 			auto& computePass = std::get<ComputePassAndResources>(pass.pass);
 			computePass.pass->SetResourceRegistryView(std::make_unique<ResourceRegistryView>(_registry, computePass.resources.identifierSet));
 			computePass.pass->Setup();
-			computePass.pass->RegisterCommandLists(emptyLists);
 			break;
 		}
 		}
@@ -1381,6 +1386,7 @@ namespace {
 
 void RenderGraph::Execute(RenderContext& context) {
 
+	ResetForFrame();
 	CompileFrame(context.device, context.frameIndex);
 
 	bool useAsyncCompute = m_getUseAsyncCompute();

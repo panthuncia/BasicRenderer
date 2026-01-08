@@ -132,7 +132,8 @@ public:
 	void Update();
 	void Execute(RenderContext& context);
 	void CompileStructural();
-	void ResetForRecompile();
+	void ResetForFrame();
+	void ResetForRebuild();
 	void Setup();
 	const std::vector<PassBatch>& GetBatches() const { return batches; }
 	//void AllocateResources(RenderContext& context);
