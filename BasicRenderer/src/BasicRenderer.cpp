@@ -14,6 +14,7 @@
 #define USE_PIX 1
 #endif
 #include <pix3.h>
+#include <tracy/Tracy.hpp>
 
 #include "Mesh/Mesh.h"
 #include "Renderer.h"
@@ -215,6 +216,8 @@ float randomFloat(float min, float max) {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
+    tracy::SetThreadName("Main");
+
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     auto file_logger = spdlog::basic_logger_mt("file_logger", "logs/log.txt");
     spdlog::set_default_logger(file_logger);

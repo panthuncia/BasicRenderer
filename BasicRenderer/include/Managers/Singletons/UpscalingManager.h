@@ -122,6 +122,7 @@ private:
     uint8_t m_numFramesInFlight;
     std::function<DirectX::XMUINT2()> m_getRenderRes;
 	std::function<DirectX::XMUINT2()> m_getOutputRes;
+    bool m_fsrIntialized = false;
     ffx::Context m_fsrUpscalingContext;
 	bool m_dlssSupported = false;
 };

@@ -11,6 +11,7 @@
 #include <filesystem>
 
 #include <rhi_interop_dx12.h>
+#include <tracy/Tracy.hpp>
 
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
@@ -593,10 +594,10 @@ void Renderer::CreateTextures() {
     hdrDesc.channels = 4; // RGBA
     hdrDesc.isCubemap = false;
     hdrDesc.hasRTV = true;
-    hdrDesc.hasUAV = false;
+    hdrDesc.hasUAV = true;
+    hdrDesc.hasNonShaderVisibleUAV = true;
     hdrDesc.format = rhi::Format::R16G16B16A16_Float; // HDR format
     hdrDesc.generateMipMaps = false; // For bloom downsampling
-    hdrDesc.hasUAV = true;
     ImageDimensions dims;
     dims.height = resolution.y;
     dims.width = resolution.x;
@@ -689,6 +690,8 @@ void Renderer::WaitForFrame(uint8_t currentFrameIndex) {
 void Renderer::Update(float elapsedSeconds) {
     WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
 
+    ZoneScopedN("Renderer::Update");
+
 	auto& deviceManager = DeviceManager::GetInstance();
 	auto graphicsQueue = deviceManager.GetGraphicsQueue();
 	auto computeQueue = deviceManager.GetComputeQueue();
@@ -762,6 +765,9 @@ void Renderer::PostUpdate() {
 }
 
 void Renderer::Render() {
+
+	ZoneScopedN("Renderer::Render");
+
     auto deltaTime = m_frameTimer.tick();
     // Record all the commands we need to render the scene into the command list
     auto& commandAllocator = m_commandAllocators[m_frameIndex];

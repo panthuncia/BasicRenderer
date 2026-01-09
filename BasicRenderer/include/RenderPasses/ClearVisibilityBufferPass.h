@@ -15,7 +15,8 @@ public:
 			Builtin::GBuffer::Emissive,
 			Builtin::GBuffer::MetallicRoughness,
 			Builtin::GBuffer::Normals,
-			Builtin::GBuffer::MotionVectors);
+			Builtin::GBuffer::MotionVectors,
+			Builtin::Color::HDRColorTarget);
 	}
 
 	void Setup() override {
@@ -25,6 +26,7 @@ public:
 		m_emissive = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::Emissive);
 		m_normals = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::Normals);
 		m_motionVectors = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::MotionVectors);
+		m_HDRColorTarget = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::Color::HDRColorTarget);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -66,6 +68,7 @@ public:
 		clearResource(m_emissive);
 		clearResource(m_normals);
 		clearResource(m_motionVectors);
+		clearResource(m_HDRColorTarget); // TODO: Only needed because of non-zero initialized memory issue- make a clear manager instead?
 
 		return {};
 	}
@@ -81,4 +84,5 @@ private:
 	GloballyIndexedResource* m_emissive;
 	GloballyIndexedResource* m_normals;
 	GloballyIndexedResource* m_motionVectors;
+	GloballyIndexedResource* m_HDRColorTarget;
 };

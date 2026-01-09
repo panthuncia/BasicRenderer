@@ -1034,12 +1034,12 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 	for (auto& pr : m_masterPassList) {
 		if (pr.type == PassType::Compute) {
 			auto& p = std::get<ComputePassAndResources>(pr.pass);
-			p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
+			//p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
 			p.immediateBytecode.clear();
 		}
 		else {
 			auto& p = std::get<RenderPassAndResources>(pr.pass);
-			p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
+			//p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
 			p.immediateBytecode.clear();
 		}
 	}
@@ -1489,15 +1489,6 @@ void RenderGraph::Update(const UpdateContext& context, rhi::Device device) {
 			}
 			}, pr.pass);
 	}
-
-	//for (auto& batch : batches) {
-	//	for (auto& passAndResources : batch.renderPasses) {
-	//		passAndResources.pass->Update(context);
-	//	}
-	//	for (auto& passAndResources : batch.computePasses) {
-	//		passAndResources.pass->Update(context);
-	//	}
-	//}
 
 	CompileFrame(device, context.frameIndex);
 }
