@@ -424,8 +424,8 @@ void Renderer::SetSettings() {
 
         m_preFrameDeferredFunctions.defer([newValue, this]() { // Don't do this during a frame
             UpscalingManager::GetInstance().Shutdown();
+            UpscalingManager::GetInstance().InitFFX(); // Needs device
             UpscalingManager::GetInstance().SetUpscalingMode(newValue);
-
             UpscalingManager::GetInstance().Setup();
 
             FFXManager::GetInstance().Shutdown();
