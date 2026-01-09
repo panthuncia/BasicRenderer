@@ -40,6 +40,8 @@ public:
         TextureInitialData initialData,
         std::string_view debugName = {}) const;
 
+    std::shared_ptr<ComputePass> GetMipmappingPass() const { return m_mipmappingPass; }
+
 private:
 
     class MipmappingPass : public ComputePass {

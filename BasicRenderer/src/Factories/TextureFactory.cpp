@@ -403,33 +403,52 @@ const {
     const uint32_t baseW = desc.imageDimensions[0].width;
     const uint32_t baseH = desc.imageDimensions[0].height;
 
+	const bool doMipmapping = desc.generateMipMaps && !rhi::helpers::IsBlockCompressed(desc.format); // TODO: BC mip gen
+
     // if caller asked for mipmaps but only provided mip0 for a single-slice 2D texture, generate full chain on CPU.
-	if (desc.generateMipMaps && !rhi::helpers::IsBlockCompressed(desc.format)) { // TODO: BC mip gen
-        const bool singleSlice = (!desc.isArray && !desc.isCubemap && desc.arraySize == 1);
-        if (singleSlice && initialData.subresources.size() == 1) {
-            const uint32_t mipLevels = CalcMipCount(baseW, baseH);
-            initialData.subresources = BuildMipChain2D(initialData.subresources[0], baseW, baseH, desc.channels, mipLevels, rhi::helpers::IsSRGB(desc.format), false);
+	if (doMipmapping) {
+        // Build full imageDimensions for *all* subresources so UploadTextureData can compute pitches safely.
+        const uint32_t faces = desc.isCubemap ? 6u : 1u;
+        const uint32_t slices = faces * uint32_t(desc.arraySize);
+        const uint32_t mipLevels = CalcMipCount(baseW, baseH);
 
-            // Set dimensions for all mips
-            desc.imageDimensions.resize(mipLevels);
-            //if (desc.imageDimensions[0].rowPitch == 0) {
-            //    desc.imageDimensions[0].rowPitch = static_cast<uint64_t>(baseW) * desc.channels;
-            //}
-            //if (desc.imageDimensions[0].slicePitch == 0) {
-            //    desc.imageDimensions[0].slicePitch = desc.imageDimensions[0].rowPitch * baseH;
-            //}
-
+        desc.imageDimensions.resize(size_t(slices) * mipLevels);
+        for (uint32_t s = 0; s < slices; ++s) {
             for (uint32_t m = 0; m < mipLevels; ++m) {
-                const uint32_t w = std::max(1u, baseW >> m);
-                const uint32_t h = std::max(1u, baseH >> m);
-                desc.imageDimensions[m].width = w;
-                desc.imageDimensions[m].height = h;
-                desc.imageDimensions[m].rowPitch = static_cast<uint64_t>(w) * desc.channels;
-                desc.imageDimensions[m].slicePitch = desc.imageDimensions[m].rowPitch * h;
+                const uint32_t w = (std::max)(1u, baseW >> m);
+                const uint32_t h = (std::max)(1u, baseH >> m);
+                const uint32_t idx = m + s * mipLevels;
+
+                desc.imageDimensions[idx].width = w;
+                desc.imageDimensions[idx].height = h;
+                desc.imageDimensions[idx].rowPitch = uint64_t(w) * desc.channels;
+                desc.imageDimensions[idx].slicePitch = desc.imageDimensions[idx].rowPitch * h;
             }
         }
+
+        // Expand initialData to [slice0 mip0.., slice1 mip0..] with only mip0 filled.
+        TextureInitialData gpuInit;
+        gpuInit.subresources.assign(size_t(slices) * mipLevels, nullptr);
+
+        if (initialData.subresources.size() == 1) {
+            gpuInit.subresources[0] = initialData.subresources[0];
+        }
+        else {
+            // If caller provided mip0 for each slice, copy those
+            for (uint32_t s = 0; s < slices && s < initialData.subresources.size(); ++s) {
+                gpuInit.subresources[s * mipLevels + 0] = initialData.subresources[s];
+            }
+        }
+
+        initialData = std::move(gpuInit);
     }
 
+    if (doMipmapping) {
+	    desc.hasUAV = true; // need UAV mips for GPU mipgen
+        if (rhi::helpers::IsSRGB(desc.format)) {
+            desc.uavFormat = rhi::Format::Unknown;
+        }
+    }
     auto pb = PixelBuffer::CreateShared(desc);
 
     if (!debugName.empty()) {
@@ -437,6 +456,12 @@ const {
     }
 
     UploadTextureData(pb, desc, initialData.subresources, pb->GetMipLevels());
+
+    // Enqueue GPU mipgen (only if mipLevels > 1)
+    if (doMipmapping && pb->GetMipLevels() > 1) {
+        const bool isSrgb = rhi::helpers::IsSRGB(desc.format);
+        std::static_pointer_cast<MipmappingPass>(m_mipmappingPass)->EnqueueJob(pb, isSrgb);
+    }
 
     return pb;
 }
@@ -545,9 +570,6 @@ void TextureFactory::MipmappingPass::DeclareResourceUsages(ComputePassBuilder* b
         builder->WithShaderResource(Subresources(tex, Mip{ 0, 1 }));
         if (j.mipsToGenerate > 0) {
             builder->WithUnorderedAccess(Subresources(tex, FromMip{ 1 }));
-
-            // We do the UAV->SRV transition inside Execute, so tell the graph.
-            builder->WithInternalTransition(Subresources(tex, FromMip{ 1 }), exitSRV);
         }
 
         // Counter is UAV for the dispatch
@@ -607,27 +629,6 @@ PassReturn TextureFactory::MipmappingPass::Execute(RenderContext& context)
             j.dispatchThreadGroupCountXY[0],
             j.dispatchThreadGroupCountXY[1],
             j.sliceCount);
-
-        // Internal exit transition: mip1..N UAV -> SRV (so later passes can sample without the graph thinking it's still UAV)
-        if (j.mipsToGenerate > 0) {
-            rhi::TextureBarrier tb{};
-            tb.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-            tb.afterAccess = rhi::ResourceAccessType::ShaderResource;
-            tb.beforeSync = rhi::ResourceSyncState::ComputeShading;
-            tb.afterSync = rhi::ResourceSyncState::ComputeShading;
-            tb.beforeLayout = AccessToLayout(rhi::ResourceAccessType::UnorderedAccess, /*directQueue=*/false);
-            tb.afterLayout = AccessToLayout(rhi::ResourceAccessType::ShaderResource, /*directQueue=*/false);
-            tb.texture = j.texture->GetAPIResource().GetHandle();
-
-            tb.range.baseMip = 1;
-            tb.range.mipCount = j.mipsToGenerate;
-            tb.range.baseLayer = 0;
-            tb.range.layerCount = j.sliceCount;
-
-            rhi::BarrierBatch batch{};
-            batch.textures = rhi::Span<rhi::TextureBarrier>(&tb, 1);
-            commandList.Barriers(batch);
-        }
     }
 
     // Move jobs to retire-ring so resources/views aren’t freed before GPU completes

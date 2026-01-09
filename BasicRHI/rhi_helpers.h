@@ -582,6 +582,26 @@ namespace rhi {
 	        }
         }
 
+        static inline rhi::Format typlessFromSrgb(Format f) {
+	        switch (f) {
+	        case Format::B8G8R8A8_UNorm_sRGB:
+                				return Format::B8G8R8A8_Typeless;
+	        case Format::R8G8B8A8_UNorm_sRGB:
+				return Format::R8G8B8A8_Typeless;
+	        }
+            return f;
+        }
+
+        static inline rhi::Format stripSrgb(Format f) {
+	        switch (f) {
+	        case Format::B8G8R8A8_UNorm_sRGB:
+				return Format::B8G8R8A8_UNorm;
+	        case Format::R8G8B8A8_UNorm_sRGB:
+				return Format::R8G8B8A8_UNorm;
+	        }
+			return f;
+        }
+
         static inline uint32_t AlignUp(uint32_t v, uint32_t a) { return (v + (a - 1)) & ~(a - 1); }
         static inline uint64_t AlignUp64(uint64_t v, uint64_t a) { return (v + (a - 1)) & ~(a - 1); }
 

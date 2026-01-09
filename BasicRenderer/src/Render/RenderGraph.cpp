@@ -1,13 +1,13 @@
 #include "Render/RenderGraph.h"
 
 #include <span>
+#include <algorithm>
 #include <rhi_helpers.h>
 #include <rhi_debug.h>
 
 #include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "Managers/Singletons/ReadbackManager.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Render/PassBuilders.h"
 #include "Resources/ResourceGroup.h"
@@ -497,10 +497,10 @@ void RenderGraph::AutoScheduleAndBuildBatches(
 
 // Factory for the transition lambda
 void RenderGraph::AddTransition(
-	std::unordered_map<uint64_t, unsigned int>&  batchOfLastRenderQueueUsage,
+	std::unordered_map<uint64_t, unsigned int>& batchOfLastRenderQueueUsage,
 	unsigned int batchIndex,
 	PassBatch& currentBatch,
-	bool isComputePass, 
+	bool isComputePass,
 	const ResourceRequirement& r,
 	std::unordered_set<uint64_t>& outTransitionedResourceIDs)
 {
@@ -588,7 +588,6 @@ bool ResolveFirstMipSlice(ResourceRegistry::RegistryHandle r, RangeSpec range, u
 }
 
 RenderGraph::RenderGraph() {
-	UploadManager::GetInstance().SetUploadResolveContext({ &_registry });
 
 	auto MakeDefaultImmediateDispatch = [&]() noexcept -> rg::imm::ImmediateDispatch
 		{
@@ -653,6 +652,14 @@ RenderGraph::~RenderGraph() {
 	m_pCommandRecordingManager->ShutdownThreadLocal(); // Clears thread-local storage
 }
 
+
+void RenderGraph::RegisterExtension(std::unique_ptr<IRenderGraphExtension> ext) {
+	if (!ext) return;
+	// Let the extension see the current registry immediately.
+	ext->OnRegistryReset(&_registry);
+	m_extensions.push_back(std::move(ext));
+}
+
 void RenderGraph::ResetForRebuild()
 {
 
@@ -703,9 +710,10 @@ void RenderGraph::ResetForRebuild()
 	_resolverMap.clear();
 	_registry = ResourceRegistry();
 
-	// Register new registry with upload manager
-	UploadManager::GetInstance().SetUploadResolveContext({&_registry});
-
+	// Notify extensions that the registry was replaced
+	for (auto& ext : m_extensions) {
+		if (ext) ext->OnRegistryReset(&_registry);
+	}
 	// clear pass ordering
 	m_passBuilderOrder.clear();
 	m_passNamesSeenThisReset.clear();
@@ -745,7 +753,7 @@ void RenderGraph::CompileStructural() {
 		i++;
 	}
 
-    batches.clear();
+	batches.clear();
 
 	// Manage aliased resources 
 
@@ -786,28 +794,125 @@ void RenderGraph::CompileStructural() {
 		}
 	}
 
-	// Upload pass inserted at front
-	if (const auto uploadPass = UploadManager::GetInstance().GetUploadPass(); uploadPass) {
-		auto uploadBatch = PassBatch();
-		RenderPassAndResources uploadPassAndResources;
-		uploadPassAndResources.pass = uploadPass;
-		AnyPassAndResources uploadAnyPassAndResources;
-		uploadAnyPassAndResources.type = PassType::Render;
-		uploadAnyPassAndResources.pass = uploadPassAndResources;
-		m_masterPassList.insert(m_masterPassList.begin(), uploadAnyPassAndResources);
+	// --- Extension-provided structural passes (uploads/mips/readbacks/etc) ---
+	std::vector<ExternalPassDesc> external;
+	external.reserve(8);
+	for (auto& ext : m_extensions) {
+		if (ext) ext->GatherStructuralPasses(*this, external);
 	}
 
-	// Readback pass inserted at end
-	if (const auto readbackPass = ReadbackManager::GetInstance().GetReadbackPass(); readbackPass) { // This pass uses the immediate-mode API to perform readbacks
-		auto readbackBatch = PassBatch();
-		RenderPassAndResources readbackPassAndResources;
-		readbackPassAndResources.pass = readbackPass;
-		AnyPassAndResources readbackAnyPassAndResources;
-		readbackAnyPassAndResources.type = PassType::Render;
-		readbackAnyPassAndResources.pass = readbackPassAndResources;
-		m_masterPassList.push_back(readbackAnyPassAndResources);
+	struct Pending {
+		AnyPassAndResources pr;
+		int priority = 0;
+		size_t order = 0;
+	};
+
+	auto makeAny = [&](ExternalPassDesc const& d) -> AnyPassAndResources {
+		AnyPassAndResources any;
+		any.type = d.type;
+		any.name = d.name;
+
+		if (d.type == PassType::Render) {
+			auto rp = std::get<std::shared_ptr<RenderPass>>(d.pass);
+			RenderPassAndResources par;
+			par.pass = std::move(rp);
+			par.name = d.name;
+			any.pass = std::move(par);
+		}
+		else if (d.type == PassType::Compute) {
+			auto cp = std::get<std::shared_ptr<ComputePass>>(d.pass);
+			ComputePassAndResources par;
+			par.pass = std::move(cp);
+			par.name = d.name;
+			any.pass = std::move(par);
+		}
+		return any;
+		};
+
+	auto registerName = [&](ExternalPassDesc const& d, AnyPassAndResources& any) {
+		if (!d.registerName) return;
+		if (d.type == PassType::Render) {
+			auto& rp = std::get<RenderPassAndResources>(any.pass);
+			if (!d.name.empty()) renderPassesByName[d.name] = rp.pass;
+		}
+		else if (d.type == PassType::Compute) {
+			auto& cp = std::get<ComputePassAndResources>(any.pass);
+			if (!d.name.empty()) computePassesByName[d.name] = cp.pass;
+		}
+		};
+
+	std::vector<Pending> begin;
+	std::vector<Pending> end;
+	std::unordered_map<std::string, std::vector<Pending>> before;
+	std::unordered_map<std::string, std::vector<Pending>> after;
+
+	for (size_t idx = 0; idx < external.size(); ++idx) {
+		auto const& d = external[idx];
+		if (d.type == PassType::Unknown) continue;
+		if (std::holds_alternative<std::monostate>(d.pass)) continue;
+
+		Pending p;
+		p.pr = makeAny(d);
+		p.priority = d.where.priority;
+		p.order = idx;
+
+		registerName(d, p.pr);
+
+		switch (d.where.kind) {
+		case ExternalInsertKind::Begin: begin.push_back(std::move(p)); break;
+		case ExternalInsertKind::End: end.push_back(std::move(p)); break;
+		case ExternalInsertKind::Before: before[d.where.anchor].push_back(std::move(p)); break;
+		case ExternalInsertKind::After: after[d.where.anchor].push_back(std::move(p)); break;
+		}
 	}
+
+	auto sortPending = [&](std::vector<Pending>& v) {
+		std::stable_sort(v.begin(), v.end(), [](Pending const& a, Pending const& b) {
+			if (a.priority != b.priority) return a.priority < b.priority;
+			return a.order < b.order;
+			});
+		};
+
+	sortPending(begin);
+	sortPending(end);
+	for (auto& [k, v] : before) sortPending(v);
+	for (auto& [k, v] : after) sortPending(v);
+
+	// Merge into final pass list
+	auto base = std::move(m_masterPassList);
+	m_masterPassList.clear();
+	m_masterPassList.reserve(begin.size() + base.size() + end.size() + 8);
+
+	for (auto& p : begin) m_masterPassList.push_back(std::move(p.pr));
+
+	for (auto& basePass : base) {
+
+		if (auto it = before.find(basePass.name); it != before.end()) {
+			for (auto& p : it->second) m_masterPassList.push_back(std::move(p.pr));
+			before.erase(it);
+		}
+
+		m_masterPassList.push_back(std::move(basePass));
+
+		if (auto it = after.find(m_masterPassList.back().name); it != after.end()) {
+			for (auto& p : it->second) m_masterPassList.push_back(std::move(p.pr));
+			after.erase(it);
+		}
+	}
+
+	// Any unresolved before/after anchors: append to end (but keep their internal order)
+	for (auto& [anchor, v] : before) {
+		spdlog::warn("External pass requested Before('{}') but anchor was not found; appending at end.", anchor);
+		for (auto& p : v) m_masterPassList.push_back(std::move(p.pr));
+	}
+	for (auto& [anchor, v] : after) {
+		spdlog::warn("External pass requested After('{}') but anchor was not found; appending at end.", anchor);
+		for (auto& p : v) m_masterPassList.push_back(std::move(p.pr));
+	}
+
+	for (auto& p : end) m_masterPassList.push_back(std::move(p.pr));
 }
+
 
 static ResourceRegistry::RegistryHandle ResolveByIdThunk(void* user, ResourceIdentifier const& id, bool allowFailure) {
 	return static_cast<RenderGraph*>(user)->RequestResourceHandle(id, allowFailure);
@@ -853,7 +958,76 @@ static bool RequirementsConflict(
 }
 
 
+void RenderGraph::RefreshRetainedDeclarationsForFrame(RenderPassAndResources& p, uint8_t frameIndex)
+{
+	RenderPassBuilder b(this, p.name);
+
+	// Make it “look like” a normal builder enough for any pass code that queries ResourceProvider()
+	b.pass = p.pass;
+	b.built_ = true;
+
+	// Clear any previous declarations
+	b.params = {};
+	b._declaredIds.clear();
+
+	// Let the pass declare based on current per-frame state (queued mip jobs etc.)
+	p.pass->DeclareResourceUsages(&b);
+
+	// Update the *frame* view used by scheduling
+	p.resources.frameResourceRequirements = b.GatherResourceRequirements();
+
+	// Internal transitions also affect scheduling (you treat them as writes)
+	p.resources.internalTransitions = b.params.internalTransitions;
+
+	// If you rely on identifierSet to restrict registry access, this must be refreshed too
+	p.resources.identifierSet = b.DeclaredResourceIds();
+
+	// Ensure the pass’s view matches the refreshed identifier set
+	p.pass->SetResourceRegistryView(
+		std::make_unique<ResourceRegistryView>(_registry, p.resources.identifierSet)
+	);
+	p.pass->Setup();
+}
+
+void RenderGraph::RefreshRetainedDeclarationsForFrame(ComputePassAndResources& p, uint8_t frameIndex)
+{
+	ComputePassBuilder b(this, p.name);
+	b.pass = p.pass;
+	b.built_ = true;
+
+	b.params = {};
+	b._declaredIds.clear();
+
+	p.pass->DeclareResourceUsages(&b);
+
+	p.resources.frameResourceRequirements = b.GatherResourceRequirements();
+	p.resources.internalTransitions = b.params.internalTransitions;
+	p.resources.identifierSet = b.DeclaredResourceIds();
+
+	p.pass->SetResourceRegistryView(
+		std::make_unique<ResourceRegistryView>(_registry, p.resources.identifierSet)
+	);
+
+	p.pass->Setup();
+}
+
 void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
+
+	// First, refresh all retained declarations for this frame
+	for (auto& pr : m_masterPassList) {
+		if (pr.type == PassType::Compute) {
+			auto& p = std::get<ComputePassAndResources>(pr.pass);
+			p.immediateBytecode.clear();
+			p.resources.frameResourceRequirements = {};// p.resources.staticResourceRequirements;
+			RefreshRetainedDeclarationsForFrame(p, frameIndex);
+		}
+		else {
+			auto& p = std::get<RenderPassAndResources>(pr.pass);
+			p.immediateBytecode.clear();
+			p.resources.frameResourceRequirements = {};// p.resources.staticResourceRequirements;
+			RefreshRetainedDeclarationsForFrame(p, frameIndex);
+		}
+	}
 
 	batches.clear();
 	m_framePasses.clear(); // Combined retained + immediate-mode passes for this frame
@@ -881,7 +1055,7 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 			p.immediateBytecode.clear();
 			p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
 
-			ImmediateContext c{ device, 
+			ImmediateContext c{ device,
 				{/*isRenderPass=*/false,
 				m_immediateDispatch,
 				&ResolveByIdThunk,
@@ -896,7 +1070,7 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 			auto immediateFrameData = c.list.Finalize();
 			// If there is a conflict between retained and immediate requirements, split the pass
 			bool conflict = RequirementsConflict(
-				p.resources.staticResourceRequirements,
+				p.resources.frameResourceRequirements,   // baseline retained for this frame
 				immediateFrameData.requirements);
 			if (conflict) {
 				// Create new PassAndResources for the immediate requirements
@@ -931,7 +1105,7 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 			p.immediateBytecode.clear();
 			p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
 
-			ImmediateContext c{ device, 
+			ImmediateContext c{ device,
 				{/*isRenderPass=*/true,
 				m_immediateDispatch,
 				&ResolveByIdThunk,
@@ -943,7 +1117,7 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 			auto immediateFrameData = c.list.Finalize();
 
 			bool conflict = RequirementsConflict(
-				p.resources.staticResourceRequirements,
+				p.resources.frameResourceRequirements,   // baseline retained for this frame
 				immediateFrameData.requirements);
 
 			if (conflict) {
@@ -1224,18 +1398,18 @@ void RenderGraph::Setup() {
 }
 
 void RenderGraph::AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassParameters& resources, std::string name) {
-    RenderPassAndResources passAndResources;
-    passAndResources.pass = pass;
-    passAndResources.resources = resources;
+	RenderPassAndResources passAndResources;
+	passAndResources.pass = pass;
+	passAndResources.resources = resources;
 	passAndResources.name = name;
 	AnyPassAndResources passAndResourcesAny;
 	passAndResourcesAny.type = PassType::Render;
 	passAndResourcesAny.pass = passAndResources;
 	passAndResourcesAny.name = name;
 	m_masterPassList.push_back(passAndResourcesAny);
-    if (name != "") {
-        renderPassesByName[name] = pass;
-    }
+	if (name != "") {
+		renderPassesByName[name] = pass;
+	}
 }
 
 void RenderGraph::AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassParameters& resources, std::string name) {
@@ -1268,7 +1442,7 @@ void RenderGraph::AddResource(std::shared_ptr<Resource> resource, bool transitio
 	//}
 #endif
 
-    resourcesByName[name] = resource;
+	resourcesByName[name] = resource;
 	resourcesByID[resource->GetGlobalResourceID()] = resource;
 	trackers[resource->GetGlobalResourceID()] = resource->GetStateTracker();
 	/*if (transition) {
@@ -1284,12 +1458,12 @@ std::shared_ptr<Resource> RenderGraph::GetResourceByID(const uint64_t id) {
 	return resourcesByID[id];
 }
 std::shared_ptr<RenderPass> RenderGraph::GetRenderPassByName(const std::string& name) {
-    if (renderPassesByName.find(name)!= renderPassesByName.end()) {
-        return renderPassesByName[name];
-    }
-    else {
-        return nullptr;
-    }
+	if (renderPassesByName.find(name) != renderPassesByName.end()) {
+		return renderPassesByName[name];
+	}
+	else {
+		return nullptr;
+	}
 }
 
 std::shared_ptr<ComputePass> RenderGraph::GetComputePassByName(const std::string& name) {
@@ -1302,14 +1476,14 @@ std::shared_ptr<ComputePass> RenderGraph::GetComputePassByName(const std::string
 }
 
 void RenderGraph::Update(const UpdateContext& context) {
-    for (auto& batch : batches) {
-        for (auto& passAndResources : batch.renderPasses) {
-            passAndResources.pass->Update(context);
-        }
-        for (auto& passAndResources : batch.computePasses) {
-            passAndResources.pass->Update(context);
-        }
-    }
+	for (auto& batch : batches) {
+		for (auto& passAndResources : batch.renderPasses) {
+			passAndResources.pass->Update(context);
+		}
+		for (auto& passAndResources : batch.computePasses) {
+			passAndResources.pass->Update(context);
+		}
+	}
 }
 
 #define IFDEBUG(x) 
@@ -1358,16 +1532,20 @@ namespace {
 				}
 
 				statisticsManager.BeginQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);
-				rg::imm::Replay(pr.immediateBytecode, commandList); // Replay immediate-mode commands
+				if ((pr.run & PassRunMask::Immediate) != PassRunMask::None) {
+					rg::imm::Replay(pr.immediateBytecode, commandList); // Replay immediate-mode commands
+				}
 
 				// Drop immediate-mode keep-alive
 				pr.immediateKeepAlive.reset();
 
-				auto passReturn = pr.pass->Execute(context); // Execute retained-mode commands
-				statisticsManager.EndQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);
-				if (passReturn.fence) {
-					externalFences.push_back(passReturn);
+				if ((pr.run & PassRunMask::Retained) != PassRunMask::None) {
+					auto passReturn = pr.pass->Execute(context); // Execute retained-mode commands
+					if (passReturn.fence) {
+						externalFences.push_back(passReturn);
+					}
 				}
+				statisticsManager.EndQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);
 			}
 		}
 		statisticsManager.ResolveQueries(context.frameIndex, queue, commandList);
@@ -1414,7 +1592,7 @@ void RenderGraph::Execute(RenderContext& context) {
 
 	const bool alias = (computeQueue == graphicsQueue);
 	auto WaitIfDistinct = [&](rhi::Queue* dstQ, rhi::Timeline& fence, UINT64 val) {
-		if (!alias) dstQ->Wait({ fence.GetHandle(), val});
+		if (!alias) dstQ->Wait({ fence.GetHandle(), val });
 		};
 
 	UINT64 currentGraphicsQueueFenceOffset = m_graphicsQueueFenceValue * context.frameFenceValue;
@@ -1449,15 +1627,15 @@ void RenderGraph::Execute(RenderContext& context) {
 			crm->Flush(QueueKind::Compute, { true, signalValue });
 		}
 
-		ExecutePasses(batch.computePasses, 
+		ExecutePasses(batch.computePasses,
 			crm,
-			*computeQueue, 
+			*computeQueue,
 			QueueKind::Compute,
 			computeCommandList,
 			currentComputeQueueFenceOffset,
-			batch.computeCompletionSignal, 
+			batch.computeCompletionSignal,
 			batch.computeCompletionFenceValue,
-			context, 
+			context,
 			statisticsManager);
 
 		if (batch.computeCompletionSignal && !alias) {
@@ -1491,15 +1669,15 @@ void RenderGraph::Execute(RenderContext& context) {
 
 		bool signalNow = batch.batchEndTransitions.size() == 0 && batch.renderCompletionSignal ? true : false;
 
-		ExecutePasses(batch.renderPasses, 
+		ExecutePasses(batch.renderPasses,
 			crm,
-			*graphicsQueue, 
+			*graphicsQueue,
 			QueueKind::Graphics,
 			graphicsCommandList,
-			currentGraphicsQueueFenceOffset, 
+			currentGraphicsQueueFenceOffset,
 			signalNow,
 			batch.renderCompletionFenceValue,
-			context, 
+			context,
 			statisticsManager);
 
 		if (batch.renderCompletionSignal && signalNow && !alias) {
@@ -1508,7 +1686,7 @@ void RenderGraph::Execute(RenderContext& context) {
 		}
 
 		if (batch.batchEndTransitions.size() > 0) {
-			ExecuteTransitions(batch.batchEndTransitions, 
+			ExecuteTransitions(batch.batchEndTransitions,
 				crm,
 				QueueKind::Graphics,
 				graphicsCommandList);
@@ -1543,7 +1721,7 @@ bool RenderGraph::IsNewBatchNeeded(
 	}
 
 	// For each subresource requirement in this pass:
-	for (auto const &r : reqs) {
+	for (auto const& r : reqs) {
 
 		uint64_t id = r.resourceHandleAndRange.resource.GetGlobalResourceID();
 
@@ -1577,9 +1755,9 @@ bool RenderGraph::IsNewBatchNeeded(
 void RenderGraph::ComputeResourceLoops() {
 	PassBatch loopBatch;
 
-	RangeSpec whole{};  
+	RangeSpec whole{};
 
-	constexpr ResourceState flushState {
+	constexpr ResourceState flushState{
 		rhi::ResourceAccessType::Common,
 		rhi::ResourceLayout::Common,
 		rhi::ResourceSyncState::All
@@ -1750,7 +1928,7 @@ ResourceRegistry::RegistryHandle RenderGraph::RequestResourceHandle(Resource* co
 
 	// Register anonymous resource
 	const auto handle = _registry.RegisterAnonymous(pResource->shared_from_this());
-	 
+
 	return handle;
 }
 

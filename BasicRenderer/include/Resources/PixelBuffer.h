@@ -96,6 +96,15 @@ private:
             texViews.createRTV = desc.hasRTV;
             texViews.createDSV = desc.hasDSV;
 
+            if (desc.hasUAV && rhi::helpers::IsSRGB(desc.format)) {
+	            // This is not valid- set format to typless
+                if (texViews.srvFormat == rhi::Format::Unknown) {
+                    texViews.srvFormat = desc.format;
+                }
+                texViews.baseFormat = rhi::helpers::typlessFromSrgb(desc.format);
+                texViews.uavFormat = rhi::helpers::stripSrgb(desc.format);
+            }
+
             // if cubemap, also create Texture2DArray SRV.
             texViews.createCubemapAsArraySRV = desc.isCubemap;
 

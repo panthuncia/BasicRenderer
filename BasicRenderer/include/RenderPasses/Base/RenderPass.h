@@ -93,4 +93,5 @@ protected:
 	std::unique_ptr<ResourceDescriptorIndexHelper> m_resourceDescriptorIndexHelper;
 	std::shared_ptr<ResourceRegistryView> m_resourceRegistryView;
 	friend class RenderPassBuilder;
+	friend class RenderGraph;
 };
