@@ -537,7 +537,8 @@ void TextureFactory::MipmappingPass::EnqueueJob(const std::shared_ptr<PixelBuffe
     j.constantsView = m_pMipConstants->Add();
     j.constantsIndex = static_cast<uint32_t>(j.constantsView->GetOffset() / sizeof(MipmapSpdConstants));
     j.cpuConstants = c;
-    j.constantsDirty = true;
+
+    m_pMipConstants->UpdateView(j.constantsView.get(), &j.cpuConstants);
 
     // Per-job counter buffer: RWStructuredBuffer<uint> with elementCount = sliceCount
     j.counter = CreateIndexedStructuredBuffer(
@@ -631,8 +632,8 @@ PassReturn TextureFactory::MipmappingPass::Execute(RenderContext& context)
             j.sliceCount);
     }
 
-    // Move jobs to retire-ring so resources/views aren’t freed before GPU completes
-    StashCompletedJobs(context.frameIndex);
+    // Clear jobs
+	m_pending.clear();
 
     return {};
 }

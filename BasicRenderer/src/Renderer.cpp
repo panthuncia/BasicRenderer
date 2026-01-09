@@ -751,7 +751,7 @@ void Renderer::Update(float elapsedSeconds) {
         outputRes, 
         elapsedSeconds);
 
-	currentRenderGraph->Update(context);
+	currentRenderGraph->Update(context, deviceManager.GetDevice());
 
     //resourceManager.ExecuteResourceTransitions();
     commandList->Recycle(commandAllocator.Get());

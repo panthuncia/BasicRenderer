@@ -962,7 +962,7 @@ void RenderGraph::RefreshRetainedDeclarationsForFrame(RenderPassAndResources& p,
 {
 	RenderPassBuilder b(this, p.name);
 
-	// Make it “look like” a normal builder enough for any pass code that queries ResourceProvider()
+	// Make it look like a normal builder enough for any pass code that queries ResourceProvider()
 	b.pass = p.pass;
 	b.built_ = true;
 
@@ -973,16 +973,15 @@ void RenderGraph::RefreshRetainedDeclarationsForFrame(RenderPassAndResources& p,
 	// Let the pass declare based on current per-frame state (queued mip jobs etc.)
 	p.pass->DeclareResourceUsages(&b);
 
-	// Update the *frame* view used by scheduling
+	// Update the frame view used by scheduling
 	p.resources.frameResourceRequirements = b.GatherResourceRequirements();
 
-	// Internal transitions also affect scheduling (you treat them as writes)
+	// Internal transitions also affect scheduling
 	p.resources.internalTransitions = b.params.internalTransitions;
 
-	// If you rely on identifierSet to restrict registry access, this must be refreshed too
 	p.resources.identifierSet = b.DeclaredResourceIds();
 
-	// Ensure the pass’s view matches the refreshed identifier set
+	// Ensure the pass's view matches the refreshed identifier set
 	p.pass->SetResourceRegistryView(
 		std::make_unique<ResourceRegistryView>(_registry, p.resources.identifierSet)
 	);
@@ -1475,15 +1474,32 @@ std::shared_ptr<ComputePass> RenderGraph::GetComputePassByName(const std::string
 	}
 }
 
-void RenderGraph::Update(const UpdateContext& context) {
-	for (auto& batch : batches) {
-		for (auto& passAndResources : batch.renderPasses) {
-			passAndResources.pass->Update(context);
-		}
-		for (auto& passAndResources : batch.computePasses) {
-			passAndResources.pass->Update(context);
-		}
+void RenderGraph::Update(const UpdateContext& context, rhi::Device device) {
+	ResetForFrame();
+
+	for (auto& pr : m_masterPassList) {	
+		// Resolve into type and update
+		std::visit([&](auto& obj) {
+			using T = std::decay_t<decltype(obj)>;
+			if constexpr (std::is_same_v<T, std::monostate>) {
+				// no-op
+			}
+			else {
+				obj.pass->Update(context);
+			}
+			}, pr.pass);
 	}
+
+	//for (auto& batch : batches) {
+	//	for (auto& passAndResources : batch.renderPasses) {
+	//		passAndResources.pass->Update(context);
+	//	}
+	//	for (auto& passAndResources : batch.computePasses) {
+	//		passAndResources.pass->Update(context);
+	//	}
+	//}
+
+	CompileFrame(device, context.frameIndex);
 }
 
 #define IFDEBUG(x) 
@@ -1563,9 +1579,6 @@ namespace {
 } // namespace
 
 void RenderGraph::Execute(RenderContext& context) {
-
-	ResetForFrame();
-	CompileFrame(context.device, context.frameIndex);
 
 	bool useAsyncCompute = m_getUseAsyncCompute();
 	auto& manager = DeviceManager::GetInstance();
