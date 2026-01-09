@@ -190,6 +190,7 @@ private:
 		void Cleanup() override {
 			// Cleanup if necessary
 		}
+
 	};
 
 	UploadManager() {

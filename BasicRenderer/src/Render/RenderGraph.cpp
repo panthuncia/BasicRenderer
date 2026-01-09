@@ -14,6 +14,7 @@
 #include "Managers/Singletons/StatisticsManager.h"
 #include "Managers/CommandRecordingManager.h"
 #include "Interfaces/IHasMemoryMetadata.h"
+#include "Interfaces/IDynamicDeclaredResources.h"
 
 // BFS over alias and group/child relationships to get all relevant IDs
 std::vector<uint64_t> RenderGraph::ExpandSchedulingIDs(uint64_t id) const {
@@ -307,6 +308,8 @@ void RenderGraph::AutoScheduleAndBuildBatches(
 	std::vector<AnyPassAndResources>& passes,
 	std::vector<Node>& nodes)
 {
+	std::vector<int32_t> rejectedInBatch(nodes.size(), -1);
+
 	// Working indegrees
 	std::vector<uint32_t> indeg(nodes.size());
 	for (size_t i = 0; i < nodes.size(); ++i) indeg[i] = nodes[i].indegree;
@@ -366,6 +369,11 @@ void RenderGraph::AutoScheduleAndBuildBatches(
 
 		for (int ri = 0; ri < (int)ready.size(); ++ri) {
 			size_t ni = ready[ri];
+
+			if (rejectedInBatch[ni] == static_cast<int32_t>(currentBatchIndex)) {
+				continue;
+			}
+
 			auto& n = nodes[ni];
 
 			PassView view = GetPassView(passes[n.passIndex]);
@@ -392,6 +400,7 @@ void RenderGraph::AutoScheduleAndBuildBatches(
 				currentBatch.allResources,
 				otherUAVs))
 			{
+				rejectedInBatch[ni] = static_cast<int32_t>(currentBatchIndex);
 				continue;
 			}
 
@@ -408,7 +417,7 @@ void RenderGraph::AutoScheduleAndBuildBatches(
 			if (n.isCompute && !batchHasCompute) score += 2.0;
 			if (!n.isCompute && !batchHasRender) score += 2.0;
 
-			// Critical path tie-break
+			// Tie-break
 			score += 0.05 * double(n.criticality);
 
 			// Deterministic tie-break: prefer earlier original order slightly
@@ -422,7 +431,6 @@ void RenderGraph::AutoScheduleAndBuildBatches(
 
 		if (bestIdxInReady < 0) {
 			// Nothing ready fits: must end batch
-			// (Avoid pushing empty batches if that can happen)
 			if (!currentBatch.computePasses.empty() || !currentBatch.renderPasses.empty()) {
 				closeBatch();
 				continue;
@@ -1012,37 +1020,38 @@ void RenderGraph::RefreshRetainedDeclarationsForFrame(ComputePassAndResources& p
 
 void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 
+	auto needsRefresh = [&](auto& p) -> bool {
+		auto* iFace = dynamic_cast<IDynamicDeclaredResources*>(p.pass.get());
+		if (!iFace) {
+			// if pass doesn't opt-in, assume no change
+			return false;
+		}
+
+		return iFace->DeclaredResourcesChanged();
+		};
+
 	// First, refresh all retained declarations for this frame
 	for (auto& pr : m_masterPassList) {
 		if (pr.type == PassType::Compute) {
 			auto& p = std::get<ComputePassAndResources>(pr.pass);
 			p.immediateBytecode.clear();
 			p.resources.frameResourceRequirements = {};// p.resources.staticResourceRequirements;
-			RefreshRetainedDeclarationsForFrame(p, frameIndex);
+			if (needsRefresh(p)) {
+				RefreshRetainedDeclarationsForFrame(p, frameIndex);
+			}
 		}
 		else {
 			auto& p = std::get<RenderPassAndResources>(pr.pass);
 			p.immediateBytecode.clear();
 			p.resources.frameResourceRequirements = {};// p.resources.staticResourceRequirements;
-			RefreshRetainedDeclarationsForFrame(p, frameIndex);
+			if (needsRefresh(p)) {
+				RefreshRetainedDeclarationsForFrame(p, frameIndex);
+			}
 		}
 	}
 
 	batches.clear();
 	m_framePasses.clear(); // Combined retained + immediate-mode passes for this frame
-	// initialize frame requirements to the retained requirements
-	for (auto& pr : m_masterPassList) {
-		if (pr.type == PassType::Compute) {
-			auto& p = std::get<ComputePassAndResources>(pr.pass);
-			//p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
-			p.immediateBytecode.clear();
-		}
-		else {
-			auto& p = std::get<RenderPassAndResources>(pr.pass);
-			//p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
-			p.immediateBytecode.clear();
-		}
-	}
 
 	// Record immediate-mode commands + access for each pass and fold into per-frame requirements
 	for (auto& pr : m_masterPassList) {

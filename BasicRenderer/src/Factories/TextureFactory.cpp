@@ -546,6 +546,7 @@ void TextureFactory::MipmappingPass::EnqueueJob(const std::shared_ptr<PixelBuffe
         /*stride=*/ sizeof(uint32_t),
         /*uav=*/ true);
 
+    m_declaredResourcesChanged = true;
     m_pending.push_back(std::move(j));
 }
 
@@ -633,6 +634,7 @@ PassReturn TextureFactory::MipmappingPass::Execute(RenderContext& context)
     }
 
     // Clear jobs
+    m_declaredResourcesChanged = true;
 	m_pending.clear();
 
     return {};

@@ -10,6 +10,7 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/PassBuilders.h"
+#include "Interfaces/IDynamicDeclaredResources.h"
 
 class PixelBuffer;
 class Sampler;
@@ -44,7 +45,7 @@ public:
 
 private:
 
-    class MipmappingPass : public ComputePass {
+    class MipmappingPass : public ComputePass, public IDynamicDeclaredResources {
     public:
         MipmappingPass()
         {
@@ -53,8 +54,6 @@ private:
 
             CreatePipelines();
         }
-
-        //bool WantsPerFrameResourceDeclarations() const noexcept override { return true; }
 
         void Setup() override {
 	        
@@ -70,6 +69,10 @@ private:
         PassReturn Execute(RenderContext& context) override;
 
         void Cleanup() override {}
+
+        bool DeclaredResourcesChanged() override {
+            return m_declaredResourcesChanged;
+        }
 
     private:
         struct MipmapSpdConstants
@@ -151,6 +154,8 @@ private:
                 { DxcDefine{ L"MIPMAP_SCALAR", L"1" }, DxcDefine{ L"MIPMAP_ARRAY", L"1" } },
                 "MipmapSPD[ScalarArray]");
         }
+
+        bool m_declaredResourcesChanged = true;
     };
 
     TextureFactory() {
