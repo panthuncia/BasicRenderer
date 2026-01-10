@@ -469,7 +469,7 @@ void BuildLightClusteringPipeline(RenderGraph* graph) {
 }
 
 void BuildEnvironmentPipeline(RenderGraph* graph) {
-    graph->BuildRenderPass("Environment Conversion Pass")
+    graph->BuildComputePass("Environment Conversion Pass")
         .Build<EnvironmentConversionPass>();
 
     graph->BuildComputePass("Environment Spherical Harmonics Pass")

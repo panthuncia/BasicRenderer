@@ -323,7 +323,7 @@ private:
 	void RefreshRetainedDeclarationsForFrame(ComputePassAndResources& p, uint8_t frameIndex);
 	void CompileFrame(rhi::Device device, uint8_t frameIndex);
 
-	void ComputeResourceLoops();
+	//void ComputeResourceLoops();
 	bool IsNewBatchNeeded(
 		const std::vector<ResourceRequirement>& reqs,
 		const std::vector<std::pair<ResourceHandleAndRange, ResourceState>> passInternalTransitions,

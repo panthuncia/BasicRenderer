@@ -8,6 +8,7 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Resources/ExternalBackingResource.h"
+#include "Resources/MemoryStatisticsComponents.h"
 
 void UploadManager::Initialize() {
 	m_numFramesInFlight = SettingsManager::GetInstance()
@@ -198,6 +199,7 @@ bool UploadManager::AllocateUploadRegion(size_t size, size_t alignment, std::sha
 	if (alignment == 0) alignment = 1;
 	if (m_pages.empty()) {
 		m_pages.push_back({ Buffer::CreateShared(rhi::HeapType::Upload, kPageSize, false), 0 });
+		m_pages.back().buffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Upload buffer" }));
 		m_activePage = 0;
 	}
 
@@ -212,6 +214,7 @@ bool UploadManager::AllocateUploadRegion(size_t size, size_t alignment, std::sha
 			// allocate another fresh page sized to the request (at least kPageSize)
 			size_t allocSize = std::max(kPageSize, size);
 			m_pages.push_back({ Buffer::CreateShared(rhi::HeapType::Upload, allocSize, false), 0 });
+			m_pages.back().buffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Upload buffer" }));
 		}
 		page = &m_pages[m_activePage];
 		page->tailOffset = 0;
@@ -221,6 +224,7 @@ bool UploadManager::AllocateUploadRegion(size_t size, size_t alignment, std::sha
 		if (alignedTail + size > page->buffer->GetSize()) {
 			size_t allocSize = std::max(kPageSize, size);
 			m_pages.push_back({ Buffer::CreateShared(rhi::HeapType::Upload, allocSize, false), 0 });
+			m_pages.back().buffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Upload buffer" }));
 			m_activePage = m_pages.size() - 1;
 			page = &m_pages[m_activePage];
 			page->tailOffset = 0;

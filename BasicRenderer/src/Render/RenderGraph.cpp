@@ -333,7 +333,7 @@ void RenderGraph::AutoScheduleAndBuildBatches(
 		};
 
 	PassBatch currentBatch = openNewBatch();
-	unsigned int currentBatchIndex = 0;
+	unsigned int currentBatchIndex = 1; // Start at batch 1- batch 0 is reserved for inserting transitions before first batch
 
 	std::unordered_set<uint64_t> computeUAVs;
 	std::unordered_set<uint64_t> renderUAVs;
@@ -516,6 +516,10 @@ void RenderGraph::AddTransition(
 	auto& resource = r.resourceHandleAndRange.resource;
 	std::vector<ResourceTransition> transitions;
 	auto pRes = _registry.Resolve(resource); // TODO: Can we get rid of pRes in transitions?
+
+	if (pRes->GetName() == "Environment cubemap") {
+		//__debugbreak();
+	}
 
 	resource.GetStateTracker()->Apply(r.resourceHandleAndRange.range, pRes, r.state, transitions);
 
@@ -1051,6 +1055,7 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 	}
 
 	batches.clear();
+	batches.push_back({}); // Dummy batch 0 for pre-first-pass transitions
 	m_framePasses.clear(); // Combined retained + immediate-mode passes for this frame
 
 	// Record immediate-mode commands + access for each pass and fold into per-frame requirements
@@ -1165,14 +1170,6 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 	currentBatch.renderCompletionFenceValue = GetNextGraphicsQueueFenceValue();
 	currentBatch.computeTransitionFenceValue = GetNextComputeQueueFenceValue();
 	currentBatch.computeCompletionFenceValue = GetNextComputeQueueFenceValue();
-	//std::unordered_map<std::wstring, ResourceState> previousBatchResourceStates;
- //   std::unordered_map<uint64_t, ResourceAccessType> finalResourceAccessTypes;
-	//std::unordered_map<uint64_t, ResourceLayout> finalResourceLayouts;
-	//std::unordered_map<uint64_t, ResourceSyncState> finalResourceSyncStates;
-
-	//std::unordered_map<uint64_t, ResourceAccessType> firstResourceAccessTypes;
-	//std::unordered_map<uint64_t, ResourceLayout> firstResourceLayouts;
-	//std::unordered_map<uint64_t, ResourceSyncState> firstResourceSyncStates;
 
 	std::unordered_set<uint64_t> computeUAVs;
 	std::unordered_set<uint64_t> renderUAVs;
@@ -1192,22 +1189,11 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 		spdlog::error("Render graph contains a dependency cycle! Render graph compilation failed.");
 		throw std::runtime_error("Render graph contains a dependency cycle");
 	}
-	else {
-		AutoScheduleAndBuildBatches(*this, m_framePasses, nodes);
-	}
+
+	AutoScheduleAndBuildBatches(*this, m_framePasses, nodes);
 
 	// Insert transitions to loop resources back to their initial states
-	ComputeResourceLoops();
-
-	//// Readback pass in its own batch
-	//auto readbackPass = ReadbackManager::GetInstance().GetReadbackPass();
-	//if (readbackPass) {
-	//	auto readbackBatch = PassBatch();
-	//	RenderPassAndResources readbackPassAndResources; // ReadbackPass is a special-case pass which transitions resources internally
-	//	readbackPassAndResources.pass = readbackPass;
-	//	readbackBatch.renderPasses.push_back(readbackPassAndResources);
-	//	batches.push_back(readbackBatch);
-	//}
+	//ComputeResourceLoops();
 
 	// Cut out repeat waits on the same fence
 	uint64_t lastRenderWaitFenceValue = 0;
@@ -1764,34 +1750,33 @@ bool RenderGraph::IsNewBatchNeeded(
 	return false;
 }
 
-
-void RenderGraph::ComputeResourceLoops() {
-	PassBatch loopBatch;
-
-	RangeSpec whole{};
-
-	constexpr ResourceState flushState{
-		rhi::ResourceAccessType::Common,
-		rhi::ResourceLayout::Common,
-		rhi::ResourceSyncState::All
-	};
-
-	for (auto& [id, tracker] : trackers) {
-		auto itRes = resourcesByID.find(id);
-		if (itRes == resourcesByID.end())
-			continue;  // no pointer for this ID? skip
-
-		auto const& pRes = itRes->second;
-
-		tracker->Apply(
-			whole, // covers all mips & slices
-			pRes.get(),
-			flushState,    // the state were flushing to
-			loopBatch.renderTransitions            // collects all transitions
-		);
-	}
-	batches.push_back(std::move(loopBatch));
-}
+//void RenderGraph::ComputeResourceLoops() {
+//	PassBatch loopBatch;
+//
+//	RangeSpec whole{};
+//
+//	constexpr ResourceState flushState{
+//		rhi::ResourceAccessType::Common,
+//		rhi::ResourceLayout::Common,
+//		rhi::ResourceSyncState::All
+//	};
+//
+//	for (auto& [id, tracker] : trackers) {
+//		auto itRes = resourcesByID.find(id);
+//		if (itRes == resourcesByID.end())
+//			continue;  // no pointer for this ID? skip
+//
+//		auto const& pRes = itRes->second;
+//
+//		tracker->Apply(
+//			whole, // covers all mips & slices
+//			pRes.get(),
+//			flushState,    // the state were flushing to
+//			loopBatch.renderTransitions            // collects all transitions
+//		);
+//	}
+//	batches.push_back(std::move(loopBatch));
+//}
 
 void RenderGraph::RegisterProvider(IResourceProvider* prov) {
 	auto keys = prov->GetSupportedKeys();
@@ -1940,7 +1925,7 @@ ResourceRegistry::RegistryHandle RenderGraph::RequestResourceHandle(Resource* co
 	}
 
 	// Register anonymous resource
-	const auto handle = _registry.RegisterAnonymous(pResource->shared_from_this());
+	const auto handle = _registry.RegisterAnonymous(pResource->weak_from_this());
 
 	return handle;
 }

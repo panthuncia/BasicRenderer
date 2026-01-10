@@ -14,6 +14,70 @@
 #include "Interfaces/IResourceResolver.h"
 
 class Resource;
+
+#pragma once
+#include <cassert>
+#include <memory>
+#include <utility>
+#include <variant>
+
+template <class T>
+class SharedOrWeakPtr
+{
+public:
+    using Shared = std::shared_ptr<T>;
+    using Weak = std::weak_ptr<T>;
+    using Variant = std::variant<Shared, Weak>;
+
+    SharedOrWeakPtr() noexcept : m_ptr(Shared{}) {}
+    SharedOrWeakPtr(Shared sp) noexcept : m_ptr(std::move(sp)) {}
+    SharedOrWeakPtr(Weak wp) noexcept : m_ptr(std::move(wp)) {}
+
+    explicit operator bool() const noexcept
+    {
+        if (const auto* sp = std::get_if<Shared>(&m_ptr))
+            return static_cast<bool>(*sp);
+        return static_cast<bool>(std::get<Weak>(m_ptr).lock());
+    }
+
+    // NON-RETAINING for weak_ptr:
+    // Safe ONLY if something else is guaranteed to own the object while you use the returned pointer.
+    T* get() const noexcept
+    {
+        if (const auto* sp = std::get_if<Shared>(&m_ptr))
+            return sp->get();
+
+        auto sp = std::get<Weak>(m_ptr).lock();
+        return sp.get(); // may dangle immediately if sp was the last owner
+    }
+
+    struct ArrowProxy
+    {
+        Shared hold;
+        T* operator->() const noexcept { return hold.get(); }
+        explicit operator bool() const noexcept { return static_cast<bool>(hold); }
+    };
+
+    // Retains for the duration of the full "->" expression
+    ArrowProxy operator->() const noexcept
+    {
+        ArrowProxy p{ lock_shared() };
+        assert(p.hold && "SharedOrWeakPtr: operator-> on null/expired pointer");
+        return p;
+    }
+
+    Shared lock_shared() const noexcept
+    {
+        if (const auto* sp = std::get_if<Shared>(&m_ptr))
+            return *sp;
+        return std::get<Weak>(m_ptr).lock();
+    }
+
+private:
+    Variant m_ptr;
+};
+
+
 using OnResourceChangedFn = std::function<void(ResourceIdentifier, std::shared_ptr<Resource>)>;
 
 // TODO: Actually use Epoch?
@@ -24,7 +88,7 @@ class ResourceRegistry {
     };
 
     struct Slot {
-        std::shared_ptr<Resource> resource;
+        SharedOrWeakPtr<Resource> resource;
         uint32_t generation = 1;
         ResourceIdentifier id; // for debug / access checks / reverse mapping
         bool alive = false;
@@ -164,7 +228,7 @@ public:
         return h;
     }
 
-    RegistryHandle RegisterAnonymous(std::shared_ptr<Resource> res) {
+    RegistryHandle RegisterAnonymous(std::weak_ptr<Resource> res) {
         uint32_t idx;
         if (!freeList.empty()) { idx = freeList.back(); freeList.pop_back(); }
         else { idx = (uint32_t)slots.size(); slots.emplace_back(); }
@@ -286,7 +350,7 @@ public:
         if (!s.alive || !s.resource) {
             return nullptr;
         }
-		return s.resource;
+		return s.resource.lock_shared();
     }
 
     template<class T>

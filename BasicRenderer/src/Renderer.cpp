@@ -6,12 +6,12 @@
 
 #define _USE_MATH_DEFINES
 #include <math.h>
-#include <dxgi1_6.h>
 #include <atlbase.h>
 #include <filesystem>
 
 #include <rhi_interop_dx12.h>
 #include <tracy/Tracy.hpp>
+#include <spdlog/spdlog.h>
 
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
@@ -88,44 +88,6 @@ void D3D12DebugCallback(
         spdlog::debug("D3D12 MESSAGE: {}", message);
         break;
     }
-}
-
-ComPtr<IDXGIAdapter1> GetMostPowerfulAdapter(IDXGIFactory7* factory)
-{
-    ComPtr<IDXGIAdapter1> adapter;
-    ComPtr<IDXGIAdapter1> bestAdapter;
-    SIZE_T maxDedicatedVideoMemory = 0;
-
-    // Enumerate through all adapters
-    for (UINT adapterIndex = 0;
-        factory->EnumAdapters1(adapterIndex, &adapter) != DXGI_ERROR_NOT_FOUND;
-        ++adapterIndex)
-    {
-        DXGI_ADAPTER_DESC1 desc;
-        adapter->GetDesc1(&desc);
-
-        // Skip software adapters
-        if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
-        {
-            continue;
-        }
-
-		// Find adapter with most video memory
-        if (desc.DedicatedVideoMemory > maxDedicatedVideoMemory)
-        {
-            maxDedicatedVideoMemory = desc.DedicatedVideoMemory;
-            bestAdapter = adapter;
-        }
-    }
-
-    if (!bestAdapter)
-    {
-        throw std::runtime_error("No suitable GPU found.");
-    }
-    DXGI_ADAPTER_DESC1 desc = {};
-    bestAdapter->GetDesc1(&desc);
-	spdlog::info("Selected adapter: {}", ws2s(desc.Description));
-    return bestAdapter;
 }
 
 void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
@@ -690,7 +652,7 @@ void Renderer::WaitForFrame(uint8_t currentFrameIndex) {
 void Renderer::Update(float elapsedSeconds) {
     WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
 
-    ZoneScopedN("Renderer::Update");
+    //ZoneScopedN("Renderer::Update");
 
 	auto& deviceManager = DeviceManager::GetInstance();
 	auto graphicsQueue = deviceManager.GetGraphicsQueue();
@@ -766,7 +728,7 @@ void Renderer::PostUpdate() {
 
 void Renderer::Render() {
 
-	ZoneScopedN("Renderer::Render");
+	//ZoneScopedN("Renderer::Render");
 
     auto deltaTime = m_frameTimer.tick();
     // Record all the commands we need to render the scene into the command list
@@ -837,8 +799,22 @@ void Renderer::Render() {
     auto graphicsQueue = deviceManager.GetGraphicsQueue();
     graphicsQueue.Submit({ &commandList.Get() });
 
+
+    static int i = 0;
+    PIXCaptureParameters params = {};
+    std::wstring name = L"capture_gpu_" + std::to_wstring(i++) + L".wpix";
+	params.GpuCaptureParameters.FileName = name.c_str();
+	if (i == 0) {
+        PIXBeginCapture(PIX_CAPTURE_GPU, &params);
+    }
 	currentRenderGraph->Execute(m_context); // Main render graph execution
-    commandList->Recycle(commandAllocator.Get());
+    if (i == 0) {
+        PIXEndCapture(PIX_CAPTURE_GPU);
+	}
+    i++;
+    
+	
+	commandList->Recycle(commandAllocator.Get());
 
 	m_context.commandList = commandList.Get(); // Set the command list for the menu to use
 
@@ -1121,6 +1097,8 @@ void Renderer::CreateRenderGraph() {
 
     BuildBRDFIntegrationPass(newGraph.get());
 
+    BuildEnvironmentPipeline(newGraph.get());
+
     // Skinning comes before Z prepass
     newGraph->BuildComputePass("SkinningPass")
         .Build<SkinningPass>();
@@ -1174,8 +1152,6 @@ void Renderer::CreateRenderGraph() {
 	if (m_clusteredLighting) {  // TODO: active cluster determination using Z prepass
         BuildLightClusteringPipeline(newGraph.get());
     }
-
-    BuildEnvironmentPipeline(newGraph.get());
 
     auto& debugPassBuilder = newGraph->BuildRenderPass("DebugPass");
 

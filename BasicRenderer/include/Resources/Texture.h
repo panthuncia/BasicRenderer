@@ -94,6 +94,13 @@ public:
     void EnsureUploaded(const TextureFactory& factory) {
 	    if (!m_image) {
             m_image = factory.CreateAlwaysResidentPixelBuffer(m_desc, TextureFactory::TextureInitialData::FromBytes(ResolveToBytes()), m_name);
+			// If we're uploading from raw bytes, we can clear the initial storage to save memory. Revert to path storage if needed again.
+			if (m_initialDataString != "") {
+				m_initialStorage = m_initialDataString;
+            }
+            else {
+                m_initialStorage = std::monostate{};
+            }
 	    }
     }
 
@@ -119,10 +126,14 @@ private:
         if (std::holds_alternative<std::shared_ptr<PixelBuffer>>(m_initialStorage)) { // Already initialized
             m_image = std::get<std::shared_ptr<PixelBuffer>>(m_initialStorage);
         }
+		if (std::holds_alternative<std::string>(m_initialStorage)) { // Store path for potential re-use
+            m_initialDataString = std::get<std::string>(m_initialStorage);
+		}
     }
 	TextureDescription m_desc;
     std::shared_ptr<PixelBuffer> m_image;
     std::shared_ptr<Sampler> m_sampler;
     TextureFileMeta m_meta;
+    std::string m_initialDataString;
     std::string m_name;
 };

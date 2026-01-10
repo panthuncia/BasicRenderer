@@ -93,6 +93,8 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 	}
 	else {
 		auto skyHDR = LoadTextureFromFile(s2ws(hdriPath));
+		auto factory = TextureFactory::CreateUnique();
+		skyHDR->EnsureUploaded(*factory);
 
 		TextureDescription skyboxDesc;
 		ImageDimensions dims;
