@@ -44,7 +44,7 @@ private:
 };
 
 struct MeshletCullingPassInputs {
-	bool isOccludersPass, isRemaindersPass, doResets;
+	bool isRemaindersPass, doResets;
 
 	friend bool operator==(const MeshletCullingPassInputs&, const MeshletCullingPassInputs&) = default;
 };
@@ -52,7 +52,6 @@ struct MeshletCullingPassInputs {
 inline rg::Hash64 HashValue(const MeshletCullingPassInputs& i) {
 	std::size_t seed = 0;
 
-	boost::hash_combine(seed, i.isOccludersPass);
 	boost::hash_combine(seed, i.isRemaindersPass);
 	boost::hash_combine(seed, i.doResets);
 	return seed;
@@ -60,7 +59,10 @@ inline rg::Hash64 HashValue(const MeshletCullingPassInputs& i) {
 
 class MeshletCullingPass : public ComputePass {
 public:
-	MeshletCullingPass() {
+	MeshletCullingPass(MeshletCullingPassInputs inputs) {
+		m_isRemaindersPass = inputs.isRemaindersPass;
+		m_doResets = inputs.doResets;
+
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 		getShadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows");
 		m_occlusionCullingEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")();
@@ -75,11 +77,6 @@ public:
 	}
 
 	void Setup() override {
-		auto input = Inputs<MeshletCullingPassInputs>();
-		m_isOccludersPass = input.isOccludersPass;
-		m_isRemaindersPass = input.isRemaindersPass;
-		m_doResets = input.doResets;
-
 		RegisterSRV(Builtin::PerObjectBuffer);
 		RegisterSRV(Builtin::CameraBuffer);
 		RegisterSRV(Builtin::PerMeshBuffer);
@@ -258,13 +255,9 @@ public:
 private:
 
 	void CreatePSO() {
-		DxcDefine occludersDefine;
-		occludersDefine.Name = L"OCCLUDERS_PASS";
-		occludersDefine.Value = L"1";
+
 		std::vector<DxcDefine> defines;
-		if (m_isOccludersPass) {
-			defines.push_back(occludersDefine);
-		}
+
 		if (m_isRemaindersPass) {
 			DxcDefine remainderDefine;
 			remainderDefine.Name = L"REMAINDERS_PASS";
@@ -317,7 +310,6 @@ private:
 	PixelBuffer* m_primaryCameraLinearDepthMap = nullptr;
 	Buffer* m_counter;
 
-	bool m_isOccludersPass = false;
 	bool m_isRemaindersPass = false;
 	bool m_doResets = true;
 	bool m_occlusionCullingEnabled = false;

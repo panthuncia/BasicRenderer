@@ -471,6 +471,50 @@ concept NotIResourceResolver = !std::derived_from<std::decay_t<T>, IResourceReso
 template<typename T>
 concept DerivedRenderPass = std::derived_from<T, RenderPass>;
 
+
+namespace detail
+{
+    template<class...>
+    inline constexpr bool dependent_false_v = false;
+
+    // Prefer (Inputs, StableArgs...) if available, else (StableArgs...), else default ctor.
+    template<class PassT, class InputsT, class... StableArgs>
+    std::shared_ptr<PassT> MakePass(InputsT&& inputs, StableArgs&&... stableArgs)
+    {
+        using In = std::remove_cvref_t<InputsT>;
+
+        // Perfect-forwarded inputs (supports PassT(Inputs&&) etc.)
+        if constexpr (std::constructible_from<PassT, InputsT, StableArgs...>)
+        {
+            return std::make_shared<PassT>(
+                std::forward<InputsT>(inputs),
+                std::forward<StableArgs>(stableArgs)...);
+        }
+        // Common case: PassT(const Inputs&) (also binds rvalues)
+        else if constexpr (std::constructible_from<PassT, const In&, StableArgs...>)
+        {
+            return std::make_shared<PassT>(
+                static_cast<const In&>(inputs),
+                std::forward<StableArgs>(stableArgs)...);
+        }
+        // No inputs-ctor: try stable args only
+        else if constexpr (std::constructible_from<PassT, StableArgs...>)
+        {
+            return std::make_shared<PassT>(std::forward<StableArgs>(stableArgs)...);
+        }
+        // Finally, default ctor
+        else if constexpr (std::default_initializable<PassT>)
+        {
+            return std::make_shared<PassT>();
+        }
+        else
+        {
+            static_assert(dependent_false_v<PassT>,
+                "PassT is not constructible with (Inputs[, StableArgs...]), (StableArgs...), or default ctor.");
+        }
+    }
+}
+
 class RenderPassBuilder : public IPassBuilder {
 public:
     PassBuilderKind Kind() const noexcept override { return PassBuilderKind::Render; }
@@ -814,35 +858,50 @@ public:
 		return std::move(*this);
     }
 
-    // First build, callable on Lvalues
-    template<DerivedRenderPass PassT, rg::PassInputs InputsT>
-    void Build(InputsT&& inputs) & {
-        if (!built_) {
+	// LVALUE
+    template<DerivedRenderPass PassT, rg::PassInputs InputsT, typename... StableCtorArgs>
+    void Build(InputsT&& inputs, StableCtorArgs&&... ctorArgs)&
+    {
+        if (!built_)
+        {
             built_ = true;
-            pass = std::make_shared<PassT>();
+            pass = detail::MakePass<PassT>(
+                std::forward<InputsT>(inputs),
+                std::forward<StableCtorArgs>(ctorArgs)...);
         }
+
+		// rebuild just updates inputs
         pass->SetInputs(std::forward<InputsT>(inputs));
     }
 
-    // Second build, callable on temporaries
-    template<DerivedRenderPass PassT, rg::PassInputs InputsT>
-    void Build(InputsT&& inputs) && {
-        if (!built_) {
+    // RVALUE
+    template<DerivedRenderPass PassT, rg::PassInputs InputsT, typename... StableCtorArgs>
+    void Build(InputsT&& inputs, StableCtorArgs&&... ctorArgs)&&
+    {
+        if (!built_)
+        {
             built_ = true;
-            pass = std::make_shared<PassT>();
+            pass = detail::MakePass<PassT>(
+                std::forward<InputsT>(inputs),
+                std::forward<StableCtorArgs>(ctorArgs)...);
         }
+
         pass->SetInputs(std::forward<InputsT>(inputs));
     }
 
+    // Stable-args-only convenience
     template<DerivedRenderPass PassT, typename... StableCtorArgs>
-    void Build(StableCtorArgs&&... ctorArgs)& {
+    void Build(StableCtorArgs&&... ctorArgs)&
+    {
         Build<PassT>(rg::NoInputs{}, std::forward<StableCtorArgs>(ctorArgs)...);
     }
 
     template<DerivedRenderPass PassT, typename... StableCtorArgs>
-    void Build(StableCtorArgs&&... ctorArgs)&& {
+    void Build(StableCtorArgs&&... ctorArgs)&&
+    {
         Build<PassT>(rg::NoInputs{}, std::forward<StableCtorArgs>(ctorArgs)...);
     }
+
 
     auto const& DeclaredResourceIds() const { return _declaredIds; }
 
@@ -1406,33 +1465,47 @@ public:
         return std::move(*this);
     }
 
-    // First build, callable on Lvalues
-    template<DerivedComputePass PassT, rg::PassInputs InputsT>
-    void Build(InputsT&& inputs) & {
-        if (!built_) {
+    // LVALUE
+    template<DerivedComputePass PassT, rg::PassInputs InputsT, typename... StableCtorArgs>
+    void Build(InputsT&& inputs, StableCtorArgs&&... ctorArgs)&
+    {
+        if (!built_)
+        {
             built_ = true;
-            pass = std::make_shared<PassT>();
+            pass = detail::MakePass<PassT>(
+                std::forward<InputsT>(inputs),
+                std::forward<StableCtorArgs>(ctorArgs)...);
         }
+
+        // rebuild just updates inputs
         pass->SetInputs(std::forward<InputsT>(inputs));
     }
 
-    // Second build, callable on temporaries
-    template<DerivedComputePass PassT, rg::PassInputs InputsT>
-    void Build(InputsT&& inputs) && {
-        if (!built_) {
+    // RVALUE
+    template<DerivedComputePass PassT, rg::PassInputs InputsT, typename... StableCtorArgs>
+    void Build(InputsT&& inputs, StableCtorArgs&&... ctorArgs)&&
+    {
+        if (!built_)
+        {
             built_ = true;
-            pass = std::make_shared<PassT>();
+            pass = detail::MakePass<PassT>(
+                std::forward<InputsT>(inputs),
+                std::forward<StableCtorArgs>(ctorArgs)...);
         }
+
         pass->SetInputs(std::forward<InputsT>(inputs));
     }
 
+    // Stable-args-only convenience
     template<DerivedComputePass PassT, typename... StableCtorArgs>
-    void Build(StableCtorArgs&&... ctorArgs)& {
+    void Build(StableCtorArgs&&... ctorArgs)&
+    {
         Build<PassT>(rg::NoInputs{}, std::forward<StableCtorArgs>(ctorArgs)...);
     }
 
     template<DerivedComputePass PassT, typename... StableCtorArgs>
-    void Build(StableCtorArgs&&... ctorArgs)&& {
+    void Build(StableCtorArgs&&... ctorArgs)&&
+    {
         Build<PassT>(rg::NoInputs{}, std::forward<StableCtorArgs>(ctorArgs)...);
     }
 

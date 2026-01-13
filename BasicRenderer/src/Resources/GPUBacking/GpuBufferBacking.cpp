@@ -56,7 +56,9 @@ GpuBufferBacking::GpuBufferBacking(
 
 GpuBufferBacking::~GpuBufferBacking() {
     UnregisterLiveAlloc();
-    DeletionManager::GetInstance().MarkForDelete(std::move(m_bufferAllocation));
+    if (m_bufferAllocation) {
+        DeletionManager::GetInstance().MarkForDelete(std::move(m_bufferAllocation));
+    }
 }
 
 void GpuBufferBacking::SetName(const char* name)

@@ -191,7 +191,7 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
     // After downsample, we need to render the "remainders" of the occluders (meshlets that were culled last frame, but shouldn't be this frame)
     // Using occluder meshlet culling command buffer, cull meshlets, but invert the bitfield and use occlusion culling
     graph->BuildComputePass("OcclusionMeshletRemaindersCullingPass")
-        .Build<MeshletCullingPass>(MeshletCullingPassInputs{ false, true, true });
+        .Build<MeshletCullingPass>(MeshletCullingPassInputs{true, true });
 
     // Now, render the occluder remainders (prepass & shadows)
     if (drawShadows) {
@@ -240,7 +240,7 @@ void BuildGeneralCullingPipeline(RenderGraph* graph) {
 
     if (meshletCulling || occlusionCulling) {
         graph->BuildComputePass("MeshletCullingPass") // Any meshes that are partially culled are sent to the meshlet culling pass
-            .Build<MeshletCullingPass>(MeshletCullingPassInputs{ false, false, true });
+            .Build<MeshletCullingPass>(MeshletCullingPassInputs{false, true });
     }
 }
 
