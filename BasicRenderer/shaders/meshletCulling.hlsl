@@ -7,21 +7,45 @@
 #include "PerPassRootConstants/meshletCullingRootConstants.h"
 #include "include/indirectCommands.hlsli"
 
-void WriteMeshletVisibilityUnpackData(uint clusterToVisibleClusterTableStartIndex, uint meshletIndex)
+// Wave-aggregated append (1 atomic per wave)
+void WriteMeshletVisibilityUnpackData(
+    uint clusterToVisibleClusterTableStartIndex,
+    uint meshletIndex,
+    bool shouldWrite)
 {
-    // uint2, .x = mesh instance index, .y = meshlet local index
-    RWStructuredBuffer<VisibleClusterInfo> visibleClusterTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibleClusterTable)];
-    RWStructuredBuffer<uint> visibleClusterTableCounter = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibleClusterTableCounter)];
-    
-    // Allocate cluster index
-    uint newAddress;
-    InterlockedAdd(visibleClusterTableCounter[0], 1, newAddress);
-    
-    visibleClusterTable[newAddress].drawcallIndexAndMeshletIndex = uint2(perMeshInstanceBufferIndex, meshletIndex);
-    
-    // Update cluster index in mesh info
-    RWStructuredBuffer<uint> clusterToVisibleClusterIndexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer)];
-    clusterToVisibleClusterIndexBuffer[clusterToVisibleClusterTableStartIndex + meshletIndex] = newAddress;
+    RWStructuredBuffer<VisibleClusterInfo> visibleClusterTable =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibleClusterTable)];
+    RWStructuredBuffer<uint> visibleClusterTableCounter =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibleClusterTableCounter)];
+    RWStructuredBuffer<uint> clusterToVisibleClusterIndexBuffer =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer)];
+
+    // How many lanes in this wave want to write?
+    uint waveCount  = WaveActiveCountBits(shouldWrite);
+    uint wavePrefix = WavePrefixCountBits(shouldWrite);
+
+    uint base = 0;
+    if (waveCount != 0)
+    {
+        // One lane per wave reserves a contiguous block.
+        // WaveIsFirstLane() is true for the first *active* lane.
+        if (WaveIsFirstLane())
+        {
+            InterlockedAdd(visibleClusterTableCounter[0], waveCount, base);
+        }
+        base = WaveReadLaneFirst(base);
+
+        if (shouldWrite)
+        {
+            uint newAddress = base + wavePrefix;
+
+            visibleClusterTable[newAddress].drawcallIndexAndMeshletIndex =
+                uint2(perMeshInstanceBufferIndex, meshletIndex);
+
+            clusterToVisibleClusterIndexBuffer[clusterToVisibleClusterTableStartIndex + meshletIndex] =
+                newAddress;
+        }
+    }
 }
 
 // Meshlet culling, one thread per meshlet, one dispatch per mesh, similar to mesh shader
@@ -114,7 +138,10 @@ void MeshletCullingCSMain(const uint3 vDispatchThreadID : SV_DispatchThreadID)
     ClearBitAtomic(meshletBitfieldBuffer, meshletBitfieldIndex);
 
 #if defined (WRITE_VISIBILITY_UNPACK_DATA) // Only needed for primary camera view, when using visibility buffer. Used to allow visibility to pack into uint32.    
-    WriteMeshletVisibilityUnpackData(meshInstanceBuffer.clusterToVisibleClusterTableStartIndex, vDispatchThreadID.x);
+        WriteMeshletVisibilityUnpackData(
+        meshInstanceBuffer.clusterToVisibleClusterTableStartIndex,
+        vDispatchThreadID.x,
+        true);
 #endif
     
     //#endif
@@ -165,5 +192,5 @@ void RewriteOccluderMeshletVisibilityCS(const uint3 vDispatchThreadID : SV_Dispa
         return;
     }
     
-    WriteMeshletVisibilityUnpackData(meshInstanceBuffer.clusterToVisibleClusterTableStartIndex, vDispatchThreadID.x);
+    WriteMeshletVisibilityUnpackData(meshInstanceBuffer.clusterToVisibleClusterTableStartIndex, vDispatchThreadID.x, true);
 }
