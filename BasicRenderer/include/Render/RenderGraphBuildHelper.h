@@ -174,8 +174,6 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
         graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
             .Build<VisibilityBufferPass>(VisibilityBufferPassInputs{
                 wireframeEnabled,
-                meshShadersEnabled,
-                true,
                 true });
     
         // Copy depth to a separate resource for downsampling
@@ -211,8 +209,6 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
         graph->BuildRenderPass("VisibilityPass1") // Build visibility buffer
             .Build<VisibilityBufferPass>(VisibilityBufferPassInputs{
                 wireframeEnabled,
-                meshShadersEnabled,
-                true,
                 false });
     }
 
@@ -295,8 +291,6 @@ void BuildGBufferPipeline(RenderGraph* graph) {
         graph->BuildRenderPass("VisibilityPass2") // Build visibility buffer
             .Build<VisibilityBufferPass>(VisibilityBufferPassInputs{
                 enableWireframe,
-                useMeshShaders,
-                indirect,
                 clearRTVs });
 
         // Reset material counters

@@ -193,7 +193,7 @@ namespace AssimpLoader {
 							samplerDesc.addressV = aiTextureMapModeToRHI(mapmode[1]);
 							samplerDesc.addressW = rhi::AddressMode::Wrap; // 3D textures not supported
 							samplerDesc.mipLodBias = 0.0f;
-							samplerDesc.maxAnisotropy = 1;
+							samplerDesc.maxAnisotropy = 16;
 							samplerDesc.compareEnable = false;
 							samplerDesc.compareOp = rhi::CompareOp::Never;
 							samplerDesc.borderPreset = rhi::BorderPreset::OpaqueWhite;

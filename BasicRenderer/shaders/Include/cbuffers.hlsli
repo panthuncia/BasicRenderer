@@ -9,6 +9,9 @@ SamplerState g_pointClamp : register(s0);
 // linear-clamp at s1
 SamplerState g_linearClamp : register(s1);
 
+// linear-clamp-aniso16 at s2
+SamplerState g_linearClampAniso16 : register(s2);
+
 cbuffer PerObject : register(b0) {
     uint perObjectBufferIndex;
 };

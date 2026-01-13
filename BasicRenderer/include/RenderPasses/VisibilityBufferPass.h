@@ -16,8 +16,6 @@
 
 struct VisibilityBufferPassInputs {
     bool wireframe;
-    bool meshShaders;
-    bool indirect;
     bool clearGbuffer;
 
     friend bool operator==(const VisibilityBufferPassInputs&, const VisibilityBufferPassInputs&) = default;
@@ -27,8 +25,6 @@ inline rg::Hash64 HashValue(const VisibilityBufferPassInputs& i) {
     std::size_t seed = 0;
 
     boost::hash_combine(seed, i.wireframe);
-    boost::hash_combine(seed, i.meshShaders);
-    boost::hash_combine(seed, i.indirect);
     boost::hash_combine(seed, i.clearGbuffer);
     return seed;
 }
@@ -48,8 +44,6 @@ public:
     void DeclareResourceUsages(RenderPassBuilder* builder) {
 		auto input = Inputs<VisibilityBufferPassInputs>();
 		m_wireframe = input.wireframe;
-		m_meshShaders = input.meshShaders;
-		m_indirect = input.indirect;
 		m_clearGbuffer = input.clearGbuffer;
 
         builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
@@ -69,9 +63,7 @@ public:
             builder->WithRenderTarget(
                 Builtin::PrimaryCamera::VisibilityTexture);
 
-        if (m_meshShaders) {
             builder->WithShaderResource(Builtin::PerMeshBuffer, Builtin::PrimaryCamera::MeshletBitfield);
-            if (m_indirect) {
                 auto& ecsWorld = ECSManager::GetInstance().GetWorld();
                 flecs::query<> indirectQuery = ecsWorld.query_builder<>()
                     .with<Components::IsIndirectArguments>()
@@ -79,8 +71,6 @@ public:
                     //.cached().cache_kind(flecs::QueryCacheAll)
                     .build();
                 builder->WithIndirectArguments(ECSResourceResolver(indirectQuery));
-            }
-        }
     }
 
     void Setup() override {
@@ -88,15 +78,11 @@ public:
         m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 		m_pVisibilityBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::VisibilityTexture);
 
-        if (m_meshShaders) {
-            m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
-        }
+    	m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
 
-        if (m_meshShaders) {
-            RegisterSRV(Builtin::MeshResources::MeshletOffsets);
-            RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
-            RegisterSRV(Builtin::MeshResources::MeshletTriangles);
-        }
+        RegisterSRV(Builtin::MeshResources::MeshletOffsets);
+        RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
+        RegisterSRV(Builtin::MeshResources::MeshletTriangles);
 
         RegisterSRV(Builtin::NormalMatrixBuffer);
         RegisterSRV(Builtin::PostSkinningVertices);
@@ -116,21 +102,9 @@ public:
         SetupCommonState(context, commandList);
         SetCommonRootConstants(context, commandList);
 
+        // Indirect drawing
+        ExecuteMeshShaderIndirect(context, commandList);
 
-        if (m_meshShaders) {
-            if (m_indirect) {
-                // Indirect drawing
-                ExecuteMeshShaderIndirect(context, commandList);
-            }
-            else {
-                // Regular mesh shader drawing
-                ExecuteMeshShader(context, commandList);
-            }
-        }
-        else {
-            // Regular forward rendering
-            ExecuteRegular(context, commandList);
-        }
         return {};
     }
 
@@ -188,64 +162,9 @@ private:
     }
 
     void SetCommonRootConstants(RenderContext& context, rhi::CommandList& commandList) {
-        if (m_indirect || m_meshShaders) {
-            unsigned int misc[NumMiscUintRootConstants] = {};
-            misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
-            commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
-        }
-    }
-
-    void ExecuteRegular(RenderContext& context, rhi::CommandList& commandList) {
-        // Regular forward rendering using DrawIndexedInstanced
-        auto& psoManager = PSOManager::GetInstance();
-
-        // Opaque objects
-        m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes opaqueMeshes) {
-            auto& meshes = opaqueMeshes.meshesByPass[m_renderPhase.hash];
-
-            commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
-
-            for (auto& pMesh : meshes) {
-                auto& mesh = *pMesh->GetMesh();
-                auto& pso = psoManager.GetVisibilityBufferPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->Technique().compileFlags);
-                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-                commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-
-                unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-                perMeshIndices[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
-                perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-                commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
-
-                commandList.SetIndexBuffer(mesh.GetIndexBufferView());
-                commandList.DrawIndexed(mesh.GetIndexCount(), 1, 0, 0, 0);
-            }
-            });
-    }
-
-    void ExecuteMeshShader(RenderContext& context, rhi::CommandList& commandList) {
-        // Mesh shading path using DispatchMesh
-        auto& psoManager = PSOManager::GetInstance();
-
-        m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes perPassMeshes) {
-            auto& meshes = perPassMeshes.meshesByPass[m_renderPhase.hash];
-
-            commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
-
-            for (auto& pMesh : meshes) {
-                auto& mesh = *pMesh->GetMesh();
-                auto& pso = psoManager.GetVisibilityBufferMeshPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->Technique().compileFlags);
-                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-                commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
-
-                unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-                perMeshIndices[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
-                perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-                commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
-
-                // Mesh shaders use DispatchMesh
-                commandList.DispatchMesh(mesh.GetMeshletCount(), 1, 1);
-            }
-            });
+        unsigned int misc[NumMiscUintRootConstants] = {};
+        misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
+        commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
     }
 
     void ExecuteMeshShaderIndirect(RenderContext& context, rhi::CommandList& commandList) {
@@ -281,8 +200,6 @@ private:
 
     flecs::query<Components::ObjectDrawInfo, Components::PerPassMeshes> m_meshInstancesQuery;
     bool m_wireframe;
-    bool m_meshShaders;
-    bool m_indirect;
     bool m_clearGbuffer = true;
 
     PixelBuffer* m_pPrimaryDepthBuffer;

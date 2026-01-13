@@ -1954,10 +1954,21 @@ void PSOManager::createRootSignature() {
         .addressW = rhi::AddressMode::Clamp,
 	};
 
+    rhi::SamplerDesc linearClampAniso = {
+        .minFilter = rhi::Filter::Linear,
+        .magFilter = rhi::Filter::Linear,
+        .mipFilter = rhi::MipFilter::Linear,
+        .addressU = rhi::AddressMode::Clamp,
+        .addressV = rhi::AddressMode::Clamp,
+        .addressW = rhi::AddressMode::Clamp,
+        .maxAnisotropy = 16
+    };
+
 
     rhi::StaticSamplerDesc staticSamplers[] = {
     { .sampler = pointClamp, .visibility = rhi::ShaderStage::All, .set = 0, .binding = 0, .arrayCount = 1 },
-    {.sampler = linearClamp, .visibility = rhi::ShaderStage::All, .set = 0, .binding = 1, .arrayCount = 1 }, // fill filter to linear in DX12 map
+    { .sampler = linearClamp, .visibility = rhi::ShaderStage::All, .set = 0, .binding = 1, .arrayCount = 1 }, // fill filter to linear in DX12 map
+    { .sampler = linearClampAniso, .visibility = rhi::ShaderStage::All, .set = 0, .binding = 2, .arrayCount = 1 },
     };
 
     auto result = device.CreatePipelineLayout(

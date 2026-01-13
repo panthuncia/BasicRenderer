@@ -16,7 +16,7 @@ std::shared_ptr<Sampler> Sampler::GetDefaultSampler() {
 		samplerDesc.mipLodBias = 0.0f;
 		samplerDesc.minLod = 0.0f;
 		samplerDesc.maxLod = (std::numeric_limits<float>::max)();
-		samplerDesc.maxAnisotropy = 1;
+		samplerDesc.maxAnisotropy = 16;
 		samplerDesc.compareEnable = false;
 		samplerDesc.compareOp = rhi::CompareOp::Always;
 		samplerDesc.reduction = rhi::ReductionMode::Standard;
