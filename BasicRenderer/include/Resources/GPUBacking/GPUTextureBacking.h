@@ -18,8 +18,7 @@ public:
 	static std::unique_ptr<GpuTextureBacking>
 		CreateUnique(const TextureDescription& desc,
 			uint64_t owningResourceID,
-			const char* name = nullptr,
-			const std::vector<const stbi_uc*>& initialData = {});
+			const char* name = nullptr);
 
 	explicit GpuTextureBacking(CreateTag);
 	~GpuTextureBacking();
@@ -30,8 +29,6 @@ public:
 		return m_textureHandle.GetResource();
 	}
 	rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState);
-
-	void UploadInitialData(const std::shared_ptr<Resource>& owner, const std::vector<const stbi_uc*>& initialData = {}) const;
 
 	SymbolicTracker* GetStateTracker() {
 		return &m_stateTracker;

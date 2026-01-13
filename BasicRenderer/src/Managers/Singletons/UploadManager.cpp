@@ -8,6 +8,7 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Resources/ExternalBackingResource.h"
+#include "Resources/MemoryStatisticsComponents.h"
 
 void UploadManager::Initialize() {
 	m_numFramesInFlight = SettingsManager::GetInstance()
@@ -198,6 +199,7 @@ bool UploadManager::AllocateUploadRegion(size_t size, size_t alignment, std::sha
 	if (alignment == 0) alignment = 1;
 	if (m_pages.empty()) {
 		m_pages.push_back({ Buffer::CreateShared(rhi::HeapType::Upload, kPageSize, false), 0 });
+		m_pages.back().buffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Upload buffer" }));
 		m_activePage = 0;
 	}
 
@@ -212,6 +214,7 @@ bool UploadManager::AllocateUploadRegion(size_t size, size_t alignment, std::sha
 			// allocate another fresh page sized to the request (at least kPageSize)
 			size_t allocSize = std::max(kPageSize, size);
 			m_pages.push_back({ Buffer::CreateShared(rhi::HeapType::Upload, allocSize, false), 0 });
+			m_pages.back().buffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Upload buffer" }));
 		}
 		page = &m_pages[m_activePage];
 		page->tailOffset = 0;
@@ -221,6 +224,7 @@ bool UploadManager::AllocateUploadRegion(size_t size, size_t alignment, std::sha
 		if (alignedTail + size > page->buffer->GetSize()) {
 			size_t allocSize = std::max(kPageSize, size);
 			m_pages.push_back({ Buffer::CreateShared(rhi::HeapType::Upload, allocSize, false), 0 });
+			m_pages.back().buffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Upload buffer" }));
 			m_activePage = m_pages.size() - 1;
 			page = &m_pages[m_activePage];
 			page->tailOffset = 0;
@@ -317,11 +321,11 @@ void UploadManager::UploadData(const void* data, size_t size, UploadTarget resou
 	for (USHORT i = 0; i < captured; i++) update.stack[i] = frames[i];
 #endif
 #endif
-	ApplyLastWriteWins(update);
+	//ApplyLastWriteWins(update); // Too slow
 
-	if (!update.active) {
-		return;
-	}
+	//if (!update.active) {
+	//	return;
+	//}
 
 	// contiguous append coalescing against the most recent active update.
 	for (int i = static_cast<int>(m_resourceUpdates.size()) - 1; i >= 0; --i) {
@@ -458,7 +462,7 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, rg::imm::ImmediateCommand
 			commandList.CopyBufferRegion(
 				update.resourceToUpdate.pinned,
 				update.dataBufferOffset,
-				update.uploadBuffer.get(),
+				update.uploadBuffer,
 				update.uploadBufferOffset,
 				update.size
 			);
@@ -467,7 +471,7 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, rg::imm::ImmediateCommand
 			commandList.CopyBufferRegion(
 				m_ctx.registry->Resolve(update.resourceToUpdate.h),
 				update.dataBufferOffset,
-				update.uploadBuffer.get(),
+				update.uploadBuffer,
 				update.uploadBufferOffset,
 				update.size
 			);
@@ -480,7 +484,7 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, rg::imm::ImmediateCommand
 	for (auto& texUpdate : m_textureUpdates) {
 		if (texUpdate.texture.kind == UploadTarget::Kind::PinnedShared) {
 			commandList.CopyBufferToTexture(
-				texUpdate.uploadBuffer.get(),
+				texUpdate.uploadBuffer,
 				texUpdate.texture.pinned,
 				texUpdate.mip,
 				texUpdate.slice,
@@ -491,7 +495,7 @@ void UploadManager::ProcessUploads(uint8_t frameIndex, rg::imm::ImmediateCommand
 			);
 		} else {
 			commandList.CopyBufferToTexture(
-				texUpdate.uploadBuffer.get(),
+				texUpdate.uploadBuffer,
 				m_ctx.registry->Resolve(texUpdate.texture.h),
 				texUpdate.mip,
 				texUpdate.slice,
@@ -533,9 +537,9 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, rg::imm::Immediate
 	for (auto& copy : queuedResourceCopies) {
 		// Perform the copy
 		commandList.CopyBufferRegion(
-			copy.destination.get(),
+			copy.destination,
 			0,
-			copy.source.get(),
+			copy.source,
 			0,
 			copy.size);
 	}
@@ -543,7 +547,7 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, rg::imm::Immediate
 	for (auto& copy : queuedDiscardCopies) {
 		// Perform the copy
 		commandList.CopyBufferRegion(
-			copy.destination.get(),
+			copy.destination,
 			0,
 			copy.sourceOwned,
 			0,

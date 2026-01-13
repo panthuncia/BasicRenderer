@@ -28,6 +28,7 @@ public:
 
     DownsamplePass()
     {
+        CreateDownsampleComputePSO();
         m_pDownsampleConstants = LazyDynamicStructuredBuffer<spdConstants>::CreateShared(1, "Downsample constants");
 
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
@@ -64,7 +65,6 @@ public:
 		m_pLinearDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
 
 		m_numDirectionalCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
-        CreateDownsampleComputePSO();
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -141,7 +141,7 @@ public:
         return {};
     }
 
-    void Cleanup(RenderContext& context) override {
+    void Cleanup() override {
         // Cleanup if necessary
     }
 

@@ -13,6 +13,7 @@
 #ifndef USE_PIX
 #define USE_PIX 1
 #endif
+#define PIX_ENABLE_BLOCK_ARGUMENT_COPY 0
 #include <pix3.h>
 #ifndef RHI_ENABLE_PIX
 #define RHI_ENABLE_PIX 1

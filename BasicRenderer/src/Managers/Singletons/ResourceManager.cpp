@@ -175,7 +175,7 @@ void ResourceManager::AssignDescriptorSlots(
             auto uavInfos = CreateUnorderedAccessViewsPerMip(
                 device,
                 apiResource,
-                tex->uavFormat == rhi::Format::Unknown ? tex->baseFormat : tex->uavFormat,
+                tex->uavFormat == rhi::Format::Unknown && !rhi::helpers::IsSRGB(tex->baseFormat) ? tex->baseFormat : tex->uavFormat,
                 cbvSrvUavHeap.get(),
                 tex->mipLevels,
                 tex->isArray,

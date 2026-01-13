@@ -6,14 +6,14 @@
 #include "Resources/Texture.h"
 #include "Managers/EnvironmentManager.h"
 
-class EnvironmentConversionPass : public RenderPass {
+class EnvironmentConversionPass : public ComputePass {
 public:
     EnvironmentConversionPass() {
         getSkyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution");
         CreateEnvironmentConversionPSO();
     }
 
-    void DeclareResourceUsages(RenderPassBuilder* builder) override {
+    void DeclareResourceUsages(ComputePassBuilder* builder) override {
         builder->WithShaderResource(Builtin::Environment::WorkingHDRIGroup)
             .WithUnorderedAccess(Builtin::Environment::WorkingCubemapGroup);
     }
@@ -21,7 +21,6 @@ public:
     void Setup() override {
     }
 
-	// This pass was broken into multiple passes to avoid device timeout on slower GPUs
     PassReturn Execute(RenderContext& context) override {
         const uint16_t skyboxRes = getSkyboxResolution();
 
@@ -34,8 +33,11 @@ public:
         cl.BindLayout(m_layout->GetHandle());
         cl.BindPipeline(m_pso->GetHandle());
 
+        static int i = -1;
+
         EnvironmentManager& manager = *context.environmentManager;
         auto environments = manager.GetAndClearEnvironmentsToConvert();
+
 
         for (auto& env : environments)
         {
@@ -67,7 +69,7 @@ public:
         return {};
     }
 
-    void Cleanup(RenderContext& context) override {
+    void Cleanup() override {
         // Cleanup if necessary
     }
 

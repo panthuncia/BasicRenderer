@@ -60,11 +60,11 @@ public:
 		return {};
 	}
 
-	void Cleanup(RenderContext& context) override {
+	void Cleanup() override {
 
 	}
 
-	virtual void Update() override {
+	virtual void Update(const UpdateContext& context) override {
 		// Reset UAV counter
 		uint32_t zero = 0;
 		BUFFER_UPLOAD(&zero, sizeof(uint32_t), UploadManager::UploadTarget::FromHandle(m_lightPagesCounterHandle), 0);

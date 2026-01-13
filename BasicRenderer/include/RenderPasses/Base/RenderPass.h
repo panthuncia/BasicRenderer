@@ -48,12 +48,11 @@ public:
 	}
 
     virtual void Setup() = 0;
-	virtual void RegisterCommandLists(const std::vector<rhi::CommandList>& commandLists) {};
 
-	virtual void Update() {};
+	virtual void Update(const UpdateContext& context) {};
 	virtual void ExecuteImmediate(ImmediateContext& context) {};
 	virtual PassReturn Execute(RenderContext& context) { return {}; };
-    virtual void Cleanup(RenderContext& context) = 0;
+    virtual void Cleanup() = 0;
 
 	void Invalidate() { invalidated = true; }
 	bool IsInvalidated() const { return invalidated; }
@@ -94,4 +93,5 @@ protected:
 	std::unique_ptr<ResourceDescriptorIndexHelper> m_resourceDescriptorIndexHelper;
 	std::shared_ptr<ResourceRegistryView> m_resourceRegistryView;
 	friend class RenderPassBuilder;
+	friend class RenderGraph;
 };

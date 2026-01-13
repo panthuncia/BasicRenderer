@@ -31,3 +31,7 @@ void Environment::SetReflectionCubemapResolution(unsigned int resolution) {
 	m_environmentInfo.sphericalHarmonicsScale = (4.0f * DirectX::XM_PI / (resolution * resolution * 6));
 	m_currentManager->UpdateEnvironmentView(*this);
 }
+
+std::shared_ptr<PixelBuffer> Environment::GetEnvironmentPrefilteredCubemap() const {
+	return m_environmentPrefilteredCubemap->ImagePtr();
+}

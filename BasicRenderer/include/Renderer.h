@@ -29,6 +29,7 @@
 #include "Managers/EnvironmentManager.h"
 #include "Managers/MaterialManager.h"
 #include "Managers/SkeletonManager.h"
+#include "Factories/TextureFactory.h"
 #include "Scene/MovementState.h"
 #include "../generated/BuiltinResources.h"
 #include "Utilities/Timer.h"
@@ -123,6 +124,7 @@ private:
 	std::unique_ptr<EnvironmentManager> m_pEnvironmentManager = nullptr;
 	std::unique_ptr<MaterialManager> m_pMaterialManager = nullptr;
 	std::unique_ptr<SkeletonManager> m_pSkeletonManager = nullptr;
+    std::unique_ptr<TextureFactory> m_pTextureFactory = nullptr;
 
 	ManagerInterface m_managerInterface;
     flecs::system m_hierarchySystem;
@@ -234,10 +236,7 @@ private:
         }
 
         std::vector<ResourceIdentifier> GetSupportedResolverKeys() override {
-            return {
-                Builtin::Shadows::ShadowMaps,
-                Builtin::Shadows::LinearShadowMaps,
-            };
+            return {};
 		}
 
         void Cleanup() {

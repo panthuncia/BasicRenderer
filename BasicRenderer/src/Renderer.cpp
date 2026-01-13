@@ -6,11 +6,12 @@
 
 #define _USE_MATH_DEFINES
 #include <math.h>
-#include <dxgi1_6.h>
 #include <atlbase.h>
 #include <filesystem>
 
 #include <rhi_interop_dx12.h>
+#include <tracy/Tracy.hpp>
+#include <spdlog/spdlog.h>
 
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
@@ -59,6 +60,7 @@
 #include "Render/RenderGraphBuildHelper.h"
 #include "Managers/Singletons/UpscalingManager.h"
 #include "Managers/Singletons/FFXManager.h"
+#include "Render/RenderGraphExtension.h"
 
 void D3D12DebugCallback(
     D3D12_MESSAGE_CATEGORY Category,
@@ -86,44 +88,6 @@ void D3D12DebugCallback(
         spdlog::debug("D3D12 MESSAGE: {}", message);
         break;
     }
-}
-
-ComPtr<IDXGIAdapter1> GetMostPowerfulAdapter(IDXGIFactory7* factory)
-{
-    ComPtr<IDXGIAdapter1> adapter;
-    ComPtr<IDXGIAdapter1> bestAdapter;
-    SIZE_T maxDedicatedVideoMemory = 0;
-
-    // Enumerate through all adapters
-    for (UINT adapterIndex = 0;
-        factory->EnumAdapters1(adapterIndex, &adapter) != DXGI_ERROR_NOT_FOUND;
-        ++adapterIndex)
-    {
-        DXGI_ADAPTER_DESC1 desc;
-        adapter->GetDesc1(&desc);
-
-        // Skip software adapters
-        if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
-        {
-            continue;
-        }
-
-		// Find adapter with most video memory
-        if (desc.DedicatedVideoMemory > maxDedicatedVideoMemory)
-        {
-            maxDedicatedVideoMemory = desc.DedicatedVideoMemory;
-            bestAdapter = adapter;
-        }
-    }
-
-    if (!bestAdapter)
-    {
-        throw std::runtime_error("No suitable GPU found.");
-    }
-    DXGI_ADAPTER_DESC1 desc = {};
-    bestAdapter->GetDesc1(&desc);
-	spdlog::info("Selected adapter: {}", ws2s(desc.Description));
-    return bestAdapter;
 }
 
 void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
@@ -165,6 +129,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	m_pViewManager->SetIndirectCommandBufferManager(m_pIndirectCommandBufferManager.get()); // View manager needs to make indirect command buffers
     m_pMeshManager->SetViewManager(m_pViewManager.get());
 	m_pSkeletonManager = SkeletonManager::CreateUnique();
+    m_pTextureFactory = TextureFactory::CreateUnique();
 
 	m_managerInterface.SetManagers(
         m_pMeshManager.get(), 
@@ -174,7 +139,8 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         m_pLightManager.get(), 
         m_pEnvironmentManager.get(), 
         m_pMaterialManager.get(),
-        m_pSkeletonManager.get());
+        m_pSkeletonManager.get(),
+        m_pTextureFactory.get());
 
     auto& world = ECSManager::GetInstance().GetWorld();
     world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
@@ -297,8 +263,6 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<std::vector<float>>("directionalLightCascadeSplits", calculateCascadeSplits(numDirectionalCascades, 0.1f, 100, maxShadowDistance));
     settingsManager.registerSetting<uint16_t>("shadowResolution", 2048);
     settingsManager.registerSetting<float>("cameraSpeed", 10);
-	settingsManager.registerSetting<ShadowMaps*>("currentShadowMapsResourceGroup", nullptr);
-	settingsManager.registerSetting<LinearShadowMaps*>("currentLinearShadowMapsResourceGroup", nullptr);
 	settingsManager.registerSetting<bool>("enableWireframe", false);
 	settingsManager.registerSetting<bool>("enableShadows", true);
 	settingsManager.registerSetting<uint16_t>("skyboxResolution", 2048);
@@ -422,8 +386,8 @@ void Renderer::SetSettings() {
 
         m_preFrameDeferredFunctions.defer([newValue, this]() { // Don't do this during a frame
             UpscalingManager::GetInstance().Shutdown();
+            UpscalingManager::GetInstance().InitFFX(); // Needs device
             UpscalingManager::GetInstance().SetUpscalingMode(newValue);
-
             UpscalingManager::GetInstance().Setup();
 
             FFXManager::GetInstance().Shutdown();
@@ -592,10 +556,10 @@ void Renderer::CreateTextures() {
     hdrDesc.channels = 4; // RGBA
     hdrDesc.isCubemap = false;
     hdrDesc.hasRTV = true;
-    hdrDesc.hasUAV = false;
+    hdrDesc.hasUAV = true;
+    hdrDesc.hasNonShaderVisibleUAV = true;
     hdrDesc.format = rhi::Format::R16G16B16A16_Float; // HDR format
     hdrDesc.generateMipMaps = false; // For bloom downsampling
-    hdrDesc.hasUAV = true;
     ImageDimensions dims;
     dims.height = resolution.y;
     dims.width = resolution.x;
@@ -688,6 +652,8 @@ void Renderer::WaitForFrame(uint8_t currentFrameIndex) {
 void Renderer::Update(float elapsedSeconds) {
     WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
 
+    //ZoneScopedN("Renderer::Update");
+
 	auto& deviceManager = DeviceManager::GetInstance();
 	auto graphicsQueue = deviceManager.GetGraphicsQueue();
 	auto computeQueue = deviceManager.GetComputeQueue();
@@ -732,7 +698,25 @@ void Renderer::Update(float elapsedSeconds) {
     auto res = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
     resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), { res.x, res.y }, m_lightClusterSize, m_frameIndex);
 
-	currentRenderGraph->Update();
+    const Components::DrawStats& drawStats = world.get<Components::DrawStats>();
+    auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+    auto outputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
+    UpdateContext context(drawStats,
+        m_pObjectManager.get(),
+        m_pMeshManager.get(),
+        m_pIndirectCommandBufferManager.get(),
+        m_pViewManager.get(),
+        m_pLightManager.get(),
+        m_pEnvironmentManager.get(),
+        m_pMaterialManager.get(),
+        currentScene.get(), 
+        m_frameIndex,
+        m_currentFrameFenceValue, 
+        renderRes, 
+        outputRes, 
+        elapsedSeconds);
+
+	currentRenderGraph->Update(context, deviceManager.GetDevice());
 
     //resourceManager.ExecuteResourceTransitions();
     commandList->Recycle(commandAllocator.Get());
@@ -743,6 +727,9 @@ void Renderer::PostUpdate() {
 }
 
 void Renderer::Render() {
+
+	//ZoneScopedN("Renderer::Render");
+
     auto deltaTime = m_frameTimer.tick();
     // Record all the commands we need to render the scene into the command list
     auto& commandAllocator = m_commandAllocators[m_frameIndex];
@@ -813,7 +800,8 @@ void Renderer::Render() {
     graphicsQueue.Submit({ &commandList.Get() });
 
 	currentRenderGraph->Execute(m_context); // Main render graph execution
-    commandList->Recycle(commandAllocator.Get());
+	
+	commandList->Recycle(commandAllocator.Get());
 
 	m_context.commandList = commandList.Get(); // Set the command list for the menu to use
 
@@ -905,6 +893,7 @@ void Renderer::Cleanup() {
     m_pMaterialManager.reset();
     m_pEnvironmentManager.reset();
 	m_pSkeletonManager.reset();
+    m_pTextureFactory.reset();
     m_hierarchySystem.destruct();
     m_settingsSubscriptions.clear();
     m_readbackFence.Reset();
@@ -1064,7 +1053,7 @@ void Renderer::CreateRenderGraph() {
 
     auto& newGraph = currentRenderGraph;
 
-    newGraph->ResetForRecompile();
+    newGraph->ResetForRebuild();
 
     newGraph->RegisterProvider(m_pMeshManager.get());
     newGraph->RegisterProvider(m_pObjectManager.get());
@@ -1091,7 +1080,11 @@ void Renderer::CreateRenderGraph() {
         useMeshShaders = false;
     }
 
+    newGraph->RegisterExtension(std::make_unique<RenderGraphIOExtension>(m_managerInterface.GetTextureFactory()));
+
     BuildBRDFIntegrationPass(newGraph.get());
+
+    BuildEnvironmentPipeline(newGraph.get());
 
     // Skinning comes before Z prepass
     newGraph->BuildComputePass("SkinningPass")
@@ -1147,8 +1140,6 @@ void Renderer::CreateRenderGraph() {
         BuildLightClusteringPipeline(newGraph.get());
     }
 
-    BuildEnvironmentPipeline(newGraph.get());
-
     auto& debugPassBuilder = newGraph->BuildRenderPass("DebugPass");
 
     auto drawShadows = getShadowsEnabled();
@@ -1159,7 +1150,7 @@ void Renderer::CreateRenderGraph() {
 	
     if (m_currentEnvironment != nullptr) {
         newGraph->RegisterResource(Builtin::Environment::CurrentCubemap, m_currentEnvironment->GetEnvironmentCubemap()->ImagePtr());
-        newGraph->RegisterResource(Builtin::Environment::CurrentPrefilteredCubemap, m_currentEnvironment->GetEnvironmentPrefilteredCubemap()->ImagePtr());
+        newGraph->RegisterResource(Builtin::Environment::CurrentPrefilteredCubemap, m_currentEnvironment->GetEnvironmentPrefilteredCubemap());
         newGraph->BuildRenderPass("SkyboxPass")
             .Build<SkyboxRenderPass>();
     }

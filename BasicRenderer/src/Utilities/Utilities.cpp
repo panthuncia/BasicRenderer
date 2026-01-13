@@ -178,7 +178,7 @@ CreateTextureFromRaw(const RawImage& img, std::shared_ptr<Sampler> sampler, bool
 	desc.hasRTV = allowRTV;
 	desc.hasUAV = allowUAV;
 
-    auto buffer = PixelBuffer::CreateShared(desc, { img.pixels });
+    //auto buffer = PixelBuffer::CreateShared(desc, { img.pixels });
 
     if (!sampler) sampler = Sampler::GetDefaultSampler();
 
@@ -187,7 +187,11 @@ CreateTextureFromRaw(const RawImage& img, std::shared_ptr<Sampler> sampler, bool
 	meta.filePath = img.filepathUtf8;
 	meta.alphaIsAllOpaque = img.alphaAllOpaque;
 
-    auto texture = std::make_shared<TextureAsset>(buffer, sampler, meta);
+    std::vector dataPtr = { std::make_shared<std::vector<uint8_t>>() };
+	// Copy data, since RawImage may go out of scope
+	dataPtr[0]->assign(img.pixels, img.pixels + img.slicePitch);
+
+    auto texture = TextureAsset::CreateShared(desc, dataPtr, sampler, meta);
     return texture;
 }
 
@@ -250,7 +254,7 @@ static RawImage RawFromDXT(
     RawImage out{};
     out.width = static_cast<uint32_t>(meta.width);
     out.height = static_cast<uint32_t>(meta.height);
-    out.channels = 4; // treat as 4-channel upload path
+    out.channels = rhi::helpers::FormatChannelCount(rhi::helpers::ToRHI(img0->format));
     out.format = rhi::helpers::ToRHI((overrideFormat == DXGI_FORMAT_UNKNOWN) ? meta.format : overrideFormat);
     out.rowPitch = static_cast<uint32_t>(img0->rowPitch);
     out.slicePitch = static_cast<uint32_t>(img0->slicePitch);
@@ -348,10 +352,13 @@ namespace detail {
 }
 
 std::shared_ptr<TextureAsset>
-LoadTextureFromMemory(const void* bytes, size_t byteCount,
+LoadTextureFromMemory(const void* bytes,
+    size_t byteCount,
     std::shared_ptr<Sampler> sampler,
     const LoadFlags& flags,
-    bool preferSRGB, bool allowRTV, bool allowUAV)
+    bool preferSRGB, 
+    bool allowRTV, 
+    bool allowUAV)
 {
     if (!bytes || !byteCount)
         throw std::runtime_error("LoadTextureFromMemory: null/empty buffer");
@@ -402,7 +409,7 @@ LoadTextureFromMemory(const void* bytes, size_t byteCount,
 
         DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(wicMeta.format) : ToLinearIfSRGB(wicMeta.format);
 
-        auto raw = RawFromDXT(wicImg, wicMeta, "", std::nullopt, chosen);
+        auto raw = RawFromDXT(wicImg, wicMeta, "", ImageFiletype::WIC, chosen);
         return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
     }
     }
@@ -448,9 +455,18 @@ std::shared_ptr<TextureAsset> LoadCubemapFromFile(const char* topPath, const cha
 	desc.format = rhi::Format::R8G8B8A8_UNorm;
 	desc.isCubemap = true;
 
-    auto buffer = PixelBuffer::CreateShared(desc, {right.data, left.data, top.data, bottom.data, front.data, back.data });
-    auto sampler = Sampler::GetDefaultSampler();
-    return std::make_shared<TextureAsset>(buffer, sampler, TextureFileMeta());
+    //auto buffer = PixelBuffer::CreateShared(desc, {right.data, left.data, top.data, bottom.data, front.data, back.data });
+    
+    std::vector<std::shared_ptr<std::vector<uint8_t>>> dataPtrs;
+	dataPtrs.push_back(std::make_shared<std::vector<uint8_t>>(right.data, right.data + right.width*right.height*right.channels));
+	dataPtrs.push_back(std::make_shared<std::vector<uint8_t>>(left.data, left.data + left.width*left.height*left.channels));
+    dataPtrs.push_back(std::make_shared<std::vector<uint8_t>>(top.data, top.data + top.width*top.height*top.channels));
+    dataPtrs.push_back(std::make_shared<std::vector<uint8_t>>(bottom.data, bottom.data + bottom.width*bottom.height*bottom.channels));
+    dataPtrs.push_back(std::make_shared<std::vector<uint8_t>>(front.data, front.data + front.width*front.height*front.channels));
+    dataPtrs.push_back(std::make_shared<std::vector<uint8_t>>(back.data, back.data + back.width*back.height*back.channels));
+
+	auto sampler = Sampler::GetDefaultSampler();
+    return TextureAsset::CreateShared(desc, dataPtrs, sampler, TextureFileMeta());
 }
 
 std::shared_ptr<TextureAsset> LoadCubemapFromFile(std::wstring ddsFilePath, bool allowRTV, bool allowUAV) {
@@ -469,23 +485,40 @@ std::shared_ptr<TextureAsset> LoadCubemapFromFile(std::wstring ddsFilePath, bool
     // Extract cubemap faces and create a PixelBuffer from them
     TextureDescription desc;
 
-    std::vector<const stbi_uc*> faces = {};
+    std::vector<std::shared_ptr<std::vector<uint8_t>>> dataPtrs;
+    dataPtrs.reserve(6ull * metadata.mipLevels);
+
+    desc.imageDimensions.reserve(6ull * metadata.mipLevels);
+
     for (size_t face = 0; face < 6; ++face) {
         for (size_t mip = 0; mip < metadata.mipLevels; ++mip) {
-            const DirectX::Image* img = image.GetImage(mip, face, 0); // mip 0, face i, slice 0
+            const DirectX::Image* img = image.GetImage(mip, face, 0);
+
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
-            if (metadata.width > std::numeric_limits<uint32_t>().max() || metadata.height > std::numeric_limits<uint32_t>().max()) {
+            if (img->width > std::numeric_limits<uint32_t>::max() ||
+                img->height > std::numeric_limits<uint32_t>::max()) {
                 spdlog::error("Texture dimensions exceed maximum limit for file: {}", ws2s(ddsFilePath));
                 throw std::runtime_error("Texture dimensions exceed maximum limit");
             }
+            if (!img->pixels || img->slicePitch == 0) {
+                throw std::runtime_error("Unexpected null pixels / zero slicePitch.");
+            }
 #endif
-            faces.push_back(img->pixels);
-			ImageDimensions dim;
-			dim.width = static_cast<uint32_t>(img->width);
-			dim.height = static_cast<uint32_t>(img->height);
-			dim.rowPitch = img->rowPitch;
-			dim.slicePitch = img->slicePitch;
-			desc.imageDimensions.push_back(dim);
+
+            // Store dimensions (as you already do)
+            ImageDimensions dim{};
+            dim.width = static_cast<uint32_t>(img->width);
+            dim.height = static_cast<uint32_t>(img->height);
+            dim.rowPitch = img->rowPitch;
+            dim.slicePitch = img->slicePitch;
+            desc.imageDimensions.push_back(dim);
+
+            // Copy the image bytes into an owned buffer
+            const auto* src = reinterpret_cast<const uint8_t*>(img->pixels);
+            const size_t bytes = static_cast<size_t>(img->slicePitch);
+
+            auto owned = std::make_shared<std::vector<uint8_t>>(src, src + bytes);
+            dataPtrs.push_back(std::move(owned));
         }
     }
 	desc.channels = 4;
@@ -497,7 +530,7 @@ std::shared_ptr<TextureAsset> LoadCubemapFromFile(std::wstring ddsFilePath, bool
 		desc.generateMipMaps = true;
     }
 
-	auto buffer = PixelBuffer::CreateShared(desc, faces);
+	auto buffer = PixelBuffer::CreateShared(desc);
 
     auto sampler = Sampler::GetDefaultSampler();
 
@@ -506,7 +539,7 @@ std::shared_ptr<TextureAsset> LoadCubemapFromFile(std::wstring ddsFilePath, bool
 	meta.filePath = ws2s(ddsFilePath);
 	meta.alphaIsAllOpaque = image.IsAlphaAllOpaque();
 
-    return std::make_shared<TextureAsset>(buffer, sampler, meta);
+    return TextureAsset::CreateShared(desc, dataPtrs, sampler, meta);
 }
 
 DirectX::XMMATRIX createDirectionalLightViewMatrix(XMVECTOR lightDir, XMVECTOR center) {
@@ -1527,7 +1560,7 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
     downsampledDesc.clearColor[0] = std::numeric_limits<float>().max();
 	downsampledDesc.padInternalResolution = true;
 
-    std::shared_ptr<PixelBuffer> linearDepthBuffer = PixelBuffer::CreateShared(downsampledDesc, {});
+    std::shared_ptr<PixelBuffer> linearDepthBuffer = PixelBuffer::CreateShared(downsampledDesc);
     linearDepthBuffer->SetName("linear Depth Buffer");
 
 

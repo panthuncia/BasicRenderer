@@ -8,6 +8,7 @@
 class TextureAsset;
 class BufferView;
 class EnvironmentManager;
+class PixelBuffer;
 class Environment {
 public:
 	Environment(EnvironmentManager* manager, std::wstring name = L"") : m_currentManager(manager), m_name(name) {
@@ -17,9 +18,7 @@ public:
 		return m_environmentCubemap;
 	}
 
-	std::shared_ptr<TextureAsset>& GetEnvironmentPrefilteredCubemap() {
-		return m_environmentPrefilteredCubemap;
-	}
+	std::shared_ptr<PixelBuffer> GetEnvironmentPrefilteredCubemap() const;
 
 	BufferView* GetEnvironmentBufferView() const {
 		return m_environmentBufferView.get();

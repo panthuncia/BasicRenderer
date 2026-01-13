@@ -89,19 +89,28 @@ namespace AssimpLoader {
                 desc.format = preferSRGB ? rhi::Format::R8G8B8A8_UNorm_sRGB : rhi::Format::R8G8B8A8_UNorm;
 
                 // aiTex->pcData is BGRA
-                std::vector<uint8_t> rawData(width * height * channels);
-                for (unsigned int y = 0; y < height; ++y) {
-                    for (unsigned int x = 0; x < width; ++x) {
-                        unsigned int idx = (y * width + x);
-                        rawData[idx * 4 + 0] = aiTex->pcData[idx].b;
-                        rawData[idx * 4 + 1] = aiTex->pcData[idx].g;
-                        rawData[idx * 4 + 2] = aiTex->pcData[idx].r;
-                        rawData[idx * 4 + 3] = aiTex->pcData[idx].a;
-                    }
+                auto rawData = std::make_shared<std::vector<uint8_t>>(
+                    static_cast<size_t>(width) * static_cast<size_t>(height) * channels
+                );
+
+                const size_t pixelCount = static_cast<size_t>(width) * static_cast<size_t>(height);
+                for (size_t i = 0; i < pixelCount; ++i) {
+                    const auto& p = aiTex->pcData[i]; // aiTex->pcData is aiTexel*
+
+                    (*rawData)[i * 4 + 0] = p.b;
+                    (*rawData)[i * 4 + 1] = p.g;
+                    (*rawData)[i * 4 + 2] = p.r;
+                    (*rawData)[i * 4 + 3] = p.a;
                 }
 
-                auto pBuffer = PixelBuffer::CreateShared(desc, { rawData.data() });
-                return std::make_shared<TextureAsset>(pBuffer, sampler, TextureFileMeta());
+				std::vector vec = { rawData };
+
+				desc.generateMipMaps = true;
+            	
+            	TextureFileMeta meta;
+                meta.filePath = aiTex->mFilename.C_Str();
+
+                return TextureAsset::CreateShared(desc, vec, sampler, meta);
             }
         }
 

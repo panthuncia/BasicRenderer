@@ -37,14 +37,72 @@ enum class PassRunMask : uint8_t {
 	Both = Immediate | Retained
 };
 
-[[nodiscard]] constexpr PassRunMask operator|(PassRunMask a, PassRunMask b) noexcept {
-	return static_cast<PassRunMask>(
-		static_cast<uint8_t>(a) | static_cast<uint8_t>(b)
-		);
+constexpr uint8_t to_u8(PassRunMask v) noexcept {
+	return static_cast<uint8_t>(v);
 }
+
+[[nodiscard]] constexpr PassRunMask operator&(PassRunMask a, PassRunMask b) noexcept {
+	return static_cast<PassRunMask>(to_u8(a) & to_u8(b));
+}
+
+[[nodiscard]] constexpr PassRunMask operator|(PassRunMask a, PassRunMask b) noexcept {
+	return static_cast<PassRunMask>(to_u8(a) | to_u8(b));
+}
+
+[[nodiscard]] constexpr PassRunMask operator^(PassRunMask a, PassRunMask b) noexcept {
+	return static_cast<PassRunMask>(to_u8(a) ^ to_u8(b));
+}
+
+[[nodiscard]] constexpr PassRunMask operator~(PassRunMask a) noexcept {
+	return static_cast<PassRunMask>(~to_u8(a));
+}
+
+constexpr PassRunMask& operator&=(PassRunMask& a, PassRunMask b) noexcept { return a = (a & b); }
+constexpr PassRunMask& operator|=(PassRunMask& a, PassRunMask b) noexcept { return a = (a | b); }
+constexpr PassRunMask& operator^=(PassRunMask& a, PassRunMask b) noexcept { return a = (a ^ b); }
 
 class RenderGraph {
 public:
+
+	enum class ExternalInsertKind : uint8_t { Begin, End, Before, After };
+
+	struct ExternalInsertPoint {
+		ExternalInsertKind kind = ExternalInsertKind::End;
+		std::string anchor; // for Before/After
+		int priority = 0;
+
+		static ExternalInsertPoint Begin(int prio = 0) { return { ExternalInsertKind::Begin, {}, prio }; }
+		static ExternalInsertPoint End(int prio = 0) { return { ExternalInsertKind::End, {}, prio }; }
+		static ExternalInsertPoint Before(std::string anchorPass, int prio = 0) { return { ExternalInsertKind::Before, std::move(anchorPass), prio }; }
+		static ExternalInsertPoint After(std::string anchorPass, int prio = 0) { return { ExternalInsertKind::After, std::move(anchorPass), prio }; }
+	};
+
+	enum class PassType {
+		Unknown,
+		Render,
+		Compute
+	};
+
+	struct ExternalPassDesc {
+		PassType type = PassType::Unknown;
+		std::string name;
+		ExternalInsertPoint where = ExternalInsertPoint::End();
+		std::variant<std::monostate, std::shared_ptr<RenderPass>, std::shared_ptr<ComputePass>> pass;
+
+		// Optional: if true, the pass will be registered in Get*PassByName().
+		bool registerName = true;
+	};
+
+	// Interface OR std::function callback
+	struct IRenderGraphExtension {
+		virtual ~IRenderGraphExtension() = default;
+
+		// optional: lets systems react to registry recreation without RenderGraph including them
+		virtual void OnRegistryReset(ResourceRegistry* registry) {}
+
+		// main hook: inject passes
+		virtual void GatherStructuralPasses(RenderGraph& rg, std::vector<ExternalPassDesc>& out) = 0;
+	};
 
 	inline bool Has(PassRunMask m, PassRunMask f) {
 		return (uint8_t(m) & uint8_t(f)) != 0;
@@ -77,11 +135,6 @@ public:
 		Compute
 	};
 
-	enum class PassType {
-		Unknown,
-		Render,
-		Compute
-	};
 
 	struct PassBatch {
 		std::vector<RenderPassAndResources> renderPasses;
@@ -129,11 +182,13 @@ public:
 	~RenderGraph();
 	void AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassParameters& resources, std::string name = "");
 	void AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassParameters& resources, std::string name = "");
-	void Update();
+	void Update(const UpdateContext& context, rhi::Device device);
 	void Execute(RenderContext& context);
 	void CompileStructural();
-	void ResetForRecompile();
+	void ResetForFrame();
+	void ResetForRebuild();
 	void Setup();
+	void RegisterExtension(std::unique_ptr<IRenderGraphExtension> ext);
 	const std::vector<PassBatch>& GetBatches() const { return batches; }
 	//void AllocateResources(RenderContext& context);
 	//void CreateResource(std::wstring name);
@@ -249,6 +304,8 @@ private:
 
 	rg::imm::ImmediateDispatch m_immediateDispatch{};
 
+	std::vector<std::unique_ptr<IRenderGraphExtension>> m_extensions;
+
 	UINT64 m_graphicsQueueFenceValue = 0;
 	UINT64 GetNextGraphicsQueueFenceValue() {
 		return m_graphicsQueueFenceValue++;
@@ -262,9 +319,11 @@ private:
 
 	void AddResource(std::shared_ptr<Resource> resource, bool transition = false);
 
+	void RefreshRetainedDeclarationsForFrame(RenderPassAndResources& p, uint8_t frameIndex);
+	void RefreshRetainedDeclarationsForFrame(ComputePassAndResources& p, uint8_t frameIndex);
 	void CompileFrame(rhi::Device device, uint8_t frameIndex);
 
-	void ComputeResourceLoops();
+	//void ComputeResourceLoops();
 	bool IsNewBatchNeeded(
 		const std::vector<ResourceRequirement>& reqs,
 		const std::vector<std::pair<ResourceHandleAndRange, ResourceState>> passInternalTransitions,

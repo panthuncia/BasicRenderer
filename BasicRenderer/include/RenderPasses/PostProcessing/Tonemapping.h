@@ -98,8 +98,8 @@ public:
 		return {};
 	}
 
-	void Cleanup(RenderContext& context) override {
-		// Cleanup the render pass
+    void Cleanup() override {
+        // Cleanup the render pass
 	}
 
 private:

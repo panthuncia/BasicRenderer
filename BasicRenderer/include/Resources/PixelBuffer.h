@@ -9,11 +9,9 @@
 
 class PixelBuffer : public GloballyIndexedResource {
 public:
-    static std::shared_ptr<PixelBuffer> CreateShared(const TextureDescription& desc,
-        const std::vector<const stbi_uc*>& initialData = {})
+    static std::shared_ptr<PixelBuffer> CreateShared(const TextureDescription& desc)
     {
-        auto pb = std::shared_ptr<PixelBuffer>(new PixelBuffer(desc, initialData));
-        pb->m_backing->UploadInitialData(pb->shared_from_this(), initialData);
+        auto pb = std::shared_ptr<PixelBuffer>(new PixelBuffer(desc));
         return pb;
     }
 
@@ -33,6 +31,7 @@ public:
     }
 
     rhi::Format GetFormat() const { return m_backing->GetFormat(); }
+	bool IsBlockCompressed() const { return rhi::helpers::IsBlockCompressed(GetFormat()); }
     const rhi::ClearValue& GetClearColor() const {
         return m_backing->GetClearColor();
     }
@@ -48,6 +47,12 @@ public:
     unsigned int GetHeight() const {
         return m_backing->GetHeight();
     }
+    unsigned int GetChannelCount()const {
+	    return m_desc.channels;
+    }
+    bool IsCubemap() const {
+        return m_desc.isCubemap;
+	}
     void OnSetName() override {
         m_backing->SetName(name.c_str());
 	}
@@ -61,10 +66,10 @@ public:
     }
 
 private:
-    PixelBuffer(const TextureDescription& desc,
-        const std::vector<const stbi_uc*>& initialData = {})
+    PixelBuffer(const TextureDescription& desc)
     {
-        m_backing = GpuTextureBacking::CreateUnique(desc, GetGlobalResourceID(), nullptr, initialData);
+        m_desc = desc;
+        m_backing = GpuTextureBacking::CreateUnique(desc, GetGlobalResourceID(), nullptr);
 
     	m_mipLevels = m_backing->GetMipLevels();
 		m_arraySize = m_backing->GetArraySize();
@@ -91,6 +96,15 @@ private:
             texViews.createRTV = desc.hasRTV;
             texViews.createDSV = desc.hasDSV;
 
+            if (desc.hasUAV && rhi::helpers::IsSRGB(desc.format)) {
+	            // This is not valid- set format to typless
+                if (texViews.srvFormat == rhi::Format::Unknown) {
+                    texViews.srvFormat = desc.format;
+                }
+                texViews.baseFormat = rhi::helpers::typlessFromSrgb(desc.format);
+                texViews.uavFormat = rhi::helpers::stripSrgb(desc.format);
+            }
+
             // if cubemap, also create Texture2DArray SRV.
             texViews.createCubemapAsArraySRV = desc.isCubemap;
 
@@ -102,4 +116,5 @@ private:
         }
 	}
     std::unique_ptr<GpuTextureBacking> m_backing;
+	TextureDescription m_desc;
 };

@@ -236,6 +236,8 @@ namespace USDLoader {
 						{},              // default flags; loader will force WIC sRGB/linear as needed
 						preferSRGB);
 
+					tex->SetGenerateMipmaps(true); // TODO: There will be textures where we don't want this
+
 					loadingCache.textureCache[logicalPath] = tex;
 
 				}

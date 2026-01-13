@@ -125,6 +125,7 @@ bool UpscalingManager::InitFFX() {
         createUpscaling.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE | FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE;
 
         ffx::CreateContext(m_fsrUpscalingContext, nullptr, createUpscaling, backendDesc);
+		m_fsrIntialized = true;
 
 		return true;
     }
@@ -444,6 +445,9 @@ void UpscalingManager::Evaluate(RenderContext& context, PixelBuffer* pHDRTarget,
 }
 
 void UpscalingManager::Shutdown() {
-	ffx::DestroyContext(m_fsrUpscalingContext);
+    if (m_fsrIntialized) {
+        ffx::DestroyContext(m_fsrUpscalingContext);
+        m_fsrIntialized = false;
+    }
 	// RHI now handles streamline internally
 }

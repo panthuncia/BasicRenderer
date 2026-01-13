@@ -222,8 +222,7 @@ namespace rg::imm {
         }
 
         // For copying from ephemeral resources that the caller is discarding ownership of
-		// TODO: Consider making a separate API for "do something and discard" semantics?
-		// TODO: If not, add other overloads for ephemeral resources
+		// TODO: Consider making a separate API for "do something and discard" semantics? I have a lot of these overloads
         void CopyBufferRegion(Resource* dst, const uint64_t dstOffset,
             const std::shared_ptr<Resource>& srcOwned, const uint64_t srcOffset,
 			const uint64_t numBytes) {
@@ -240,6 +239,15 @@ namespace rg::imm {
             const auto srcHandle = Resolve(src);
             CopyBufferRegion(dstHandle, dstOffset, srcHandle, srcOffset, numBytes);
 		}
+
+		// Owning overload
+        void CopyBufferRegion(const std::shared_ptr<Resource>& dstOwned, const uint64_t dstOffset,
+            const std::shared_ptr<Resource>& srcOwned, const uint64_t srcOffset,
+            const uint64_t numBytes) {
+            const auto dstHandle = Resolve(dstOwned.get(), dstOwned); // Pin the ephemeral resource
+            const auto srcHandle = Resolve(srcOwned.get(), srcOwned); // Pin the ephemeral resource
+            CopyBufferRegion(dstHandle, dstOffset, srcHandle, srcOffset, numBytes);
+        }
 
         void ClearRTV(ResourceIdentifier const& target, const float r, const float g, const float b, const float a, const RangeSpec& range = {}) {
             ClearRTV(Resolve(target), r, g, b, a, range);
@@ -335,6 +343,27 @@ namespace rg::imm {
             CopyBufferToTexture(bufferHandle, textureHandle, mip, slice, footprint, x, y, z);
         }
 
+		// Buffer and texture owning override of CopyBufferToTexture
+        void CopyBufferToTexture(const std::shared_ptr<Resource>& buffer,
+            const std::shared_ptr<Resource>& texture, const uint32_t mip, const uint32_t slice,
+            rhi::CopyableFootprint const& footprint,
+            const uint32_t x = 0, const uint32_t y = 0, const uint32_t z = 0)
+        {
+            const auto bufferHandle = Resolve(buffer.get(), buffer); // Pin the ephemeral resource
+            const auto textureHandle = Resolve(texture.get(), texture); // Pin the ephemeral resource
+            CopyBufferToTexture(bufferHandle, textureHandle, mip, slice, footprint, x, y, z);
+		}
+
+		// Owned buffer and handle texture override of CopyBufferToTexture
+        void CopyBufferToTexture(const std::shared_ptr<Resource>& buffer,
+            Resource* texture, const uint32_t mip, const uint32_t slice,
+            rhi::CopyableFootprint const& footprint,
+            const uint32_t x = 0, const uint32_t y = 0, const uint32_t z = 0)
+        {
+            const auto bufferHandle = Resolve(buffer.get(), buffer); // Pin the ephemeral resource
+            const auto textureHandle = Resolve(texture);
+            CopyBufferToTexture(bufferHandle, textureHandle, mip, slice, footprint, x, y, z);
+        }
 
 
         // Produce per-frame data (bytecode + requirements).
