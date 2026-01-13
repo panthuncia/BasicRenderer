@@ -300,8 +300,8 @@ void SampleMaterialCorePrecompiled(
 
     float3 viewDir = normalize(mainCamera.positionWorldSpace.xyz - posWS.xyz);
 
-    Texture2D<float> parallaxTexture = ResourceDescriptorHeap[materialInfo.heightMapIndex];
-    SamplerState parallaxSamplerState = SamplerDescriptorHeap[materialInfo.heightSamplerIndex];
+    Texture2D<float> parallaxTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.heightMapIndex)];
+    SamplerState parallaxSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.heightSamplerIndex)];
 
     // IMPORTANT: inside getContactRefinementParallaxCoordsAndHeight, use SampleGrad too.
     float3 uvh = getContactRefinementParallaxCoordsAndHeight(
@@ -325,15 +325,15 @@ void SampleMaterialCorePrecompiled(
     float4 baseColor = materialInfo.baseColorFactor;
 
 #if defined(PSO_BASE_COLOR_TEXTURE)
-    Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[materialInfo.baseColorTextureIndex];
-    SamplerState baseColorSamplerState = SamplerDescriptorHeap[materialInfo.baseColorSamplerIndex];
+    Texture2D<float4> baseColorTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.baseColorTextureIndex)];
+    SamplerState baseColorSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.baseColorSamplerIndex)];
     float4 sampledColor = Sample2DGrad(baseColorTexture, baseColorSamplerState, localUV, localDUdx, localDUdy);
     baseColor *= sampledColor;
 #endif
 
 #if defined(PSO_OPACITY_TEXTURE)
-    Texture2D<float4> opacityTexture = ResourceDescriptorHeap[materialInfo.opacityTextureIndex];
-    SamplerState opacitySamplerState = SamplerDescriptorHeap[materialInfo.opacitySamplerIndex];
+    Texture2D<float4> opacityTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.opacityTextureIndex)];
+    SamplerState opacitySamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.opacitySamplerIndex)];
     float4 opacitySample = Sample2DGrad(opacityTexture, opacitySamplerState, localUV, localDUdx, localDUdy);
     baseColor.a *= opacitySample.a;
 #endif
@@ -343,10 +343,10 @@ void SampleMaterialCorePrecompiled(
     float roughness = 0.0;
 
 #if defined(PSO_PBR_MAPS)
-    Texture2D<float4> metallicTexture = ResourceDescriptorHeap[materialInfo.metallicTextureIndex];
-    SamplerState metallicSamplerState = SamplerDescriptorHeap[materialInfo.metallicSamplerIndex];
-    Texture2D<float4> roughnessTexture = ResourceDescriptorHeap[materialInfo.roughnessTextureIndex];
-    SamplerState roughnessSamplerState = SamplerDescriptorHeap[materialInfo.roughnessSamplerIndex];
+    Texture2D<float4> metallicTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.metallicTextureIndex)];
+    SamplerState metallicSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.metallicSamplerIndex)];
+    Texture2D<float4> roughnessTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.roughnessTextureIndex)];
+    SamplerState roughnessSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.roughnessSamplerIndex)];
 
     float4 metallicSample  = Sample2DGrad(metallicTexture,  metallicSamplerState,  localUV, localDUdx, localDUdy);
     float4 roughnessSample = Sample2DGrad(roughnessTexture, roughnessSamplerState, localUV, localDUdx, localDUdy);
@@ -362,8 +362,8 @@ void SampleMaterialCorePrecompiled(
     float3 normalWS = normalWSBase;
 
 #if defined(PSO_NORMAL_MAP)
-    Texture2D<float4> normalTexture = ResourceDescriptorHeap[materialInfo.normalTextureIndex];
-    SamplerState normalSamplerState = SamplerDescriptorHeap[materialInfo.normalSamplerIndex];
+    Texture2D<float4> normalTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.normalTextureIndex)];
+    SamplerState normalSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.normalSamplerIndex)];
 
     float3 textureNormal = Sample2DGrad(normalTexture, normalSamplerState, localUV, localDUdx, localDUdy).rgb;
     float3 tangentSpaceNormal = normalize(textureNormal * 2.0 - 1.0);
@@ -377,16 +377,16 @@ void SampleMaterialCorePrecompiled(
     // AO
     float ao = 1.0;
 #if defined(PSO_AO_TEXTURE)
-    Texture2D<float4> aoTexture = ResourceDescriptorHeap[materialInfo.aoMapIndex];
-    SamplerState aoSamplerState = SamplerDescriptorHeap[materialInfo.aoSamplerIndex];
+    Texture2D<float4> aoTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.aoMapIndex)];
+    SamplerState aoSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.aoSamplerIndex)];
     ao = Sample2DGrad(aoTexture, aoSamplerState, localUV, localDUdx, localDUdy).r;
 #endif
 
     // Emissive
     float3 emissive = materialInfo.emissiveFactor.rgb;
 #if defined(PSO_EMISSIVE_TEXTURE)
-    Texture2D<float4> emissiveTexture = ResourceDescriptorHeap[materialInfo.emissiveTextureIndex];
-    SamplerState emissiveSamplerState = SamplerDescriptorHeap[materialInfo.emissiveSamplerIndex];
+    Texture2D<float4> emissiveTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.emissiveTextureIndex)];
+    SamplerState emissiveSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.emissiveSamplerIndex)];
     emissive = Sample2DGrad(emissiveTexture, emissiveSamplerState, localUV, localDUdx, localDUdy).rgb * materialInfo.emissiveFactor.rgb;
 #endif
 

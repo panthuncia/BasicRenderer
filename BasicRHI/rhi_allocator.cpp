@@ -7008,12 +7008,16 @@ Synchronized internally with a mutex.
         }
 
         const size_t length = sb.GetLength();
-        char* result = AllocateArray<char>(GetAllocs(), length + 2);
+        constexpr size_t kBomBytes = 3;
+
+        char* result = AllocateArray<char>(GetAllocs(), length + kBomBytes + 1);
+
         result[0] = static_cast<char>(0xEF);
         result[1] = static_cast<char>(0xBB);
         result[2] = static_cast<char>(0xBF);
-        memcpy(result + 3, sb.GetData(), length);
-        result[length + 3] = '\0';
+
+        memcpy(result + kBomBytes, sb.GetData(), length);
+        result[kBomBytes + length] = '\0';
 
         *ppStatsString = result;
     }

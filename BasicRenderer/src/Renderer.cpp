@@ -799,20 +799,7 @@ void Renderer::Render() {
     auto graphicsQueue = deviceManager.GetGraphicsQueue();
     graphicsQueue.Submit({ &commandList.Get() });
 
-
-    static int i = 0;
-    PIXCaptureParameters params = {};
-    std::wstring name = L"capture_gpu_" + std::to_wstring(i++) + L".wpix";
-	params.GpuCaptureParameters.FileName = name.c_str();
-	if (i == 0) {
-        PIXBeginCapture(PIX_CAPTURE_GPU, &params);
-    }
 	currentRenderGraph->Execute(m_context); // Main render graph execution
-    if (i == 0) {
-        PIXEndCapture(PIX_CAPTURE_GPU);
-	}
-    i++;
-    
 	
 	commandList->Recycle(commandAllocator.Get());
 

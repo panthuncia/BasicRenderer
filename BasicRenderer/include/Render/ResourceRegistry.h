@@ -228,36 +228,13 @@ public:
         return h;
     }
 
-    RegistryHandle RegisterAnonymous(std::weak_ptr<Resource> res) {
-        uint32_t idx;
-        if (!freeList.empty()) { idx = freeList.back(); freeList.pop_back(); }
-        else { idx = (uint32_t)slots.size(); slots.emplace_back(); }
-
-        Slot& s = slots[idx];
-
-        // If slot previously held a resource, remove reverse mapping.
-        if (s.resource) {
-            resourceToHandle.erase(s.resource.get());
-        }
-
-        s.resource = std::move(res);
-        s.generation++;
-        s.alive = true;
-        // s.id left default/empty (debug only)
-
-        RegistryHandle h(
-            ResourceKey{ idx },
-            s.generation,
-            m_epoch,
-            s.resource->GetGlobalResourceID(),
-            s.resource->GetStateTracker(),
-            s.resource->GetMipLevels(),
-            s.resource->GetArraySize()
-        );
-
-        resourceToHandle[s.resource.get()] = h;
-        return h;
+    RegistryHandle RegisterAnonymous(const std::shared_ptr<Resource>& res) {
+        return RegisterAnonymousBase(res);
     }
+
+    RegistryHandle RegisterAnonymousWeak(const std::weak_ptr<Resource>& res) {
+        return RegisterAnonymousBase(res);
+	}
 
     std::optional<RegistryHandle> GetHandleFor(Resource* res) const {
 		if (res == nullptr) return std::nullopt;
@@ -364,6 +341,37 @@ private:
     std::unordered_map<Resource*, RegistryHandle> resourceToHandle;
 	static constexpr uint32_t kEphemeralSlotIndex = UINT32_MAX;
     std::unordered_map<ResourceIdentifier, std::shared_ptr<IResourceResolver>, ResourceIdentifier::Hasher> m_resolvers;
+
+    RegistryHandle RegisterAnonymousBase(SharedOrWeakPtr<Resource> res) {
+        uint32_t idx;
+        if (!freeList.empty()) { idx = freeList.back(); freeList.pop_back(); }
+        else { idx = (uint32_t)slots.size(); slots.emplace_back(); }
+
+        Slot& s = slots[idx];
+
+        // If slot previously held a resource, remove reverse mapping.
+        if (s.resource) {
+            resourceToHandle.erase(s.resource.get());
+        }
+
+        s.resource = std::move(res);
+        s.generation++;
+        s.alive = true;
+        // s.id left default/empty (debug only)
+
+        RegistryHandle h(
+            ResourceKey{ idx },
+            s.generation,
+            m_epoch,
+            s.resource->GetGlobalResourceID(),
+            s.resource->GetStateTracker(),
+            s.resource->GetMipLevels(),
+            s.resource->GetArraySize()
+        );
+
+        resourceToHandle[s.resource.get()] = h;
+        return h;
+    }
 };
 
 class ResourceRegistryView {

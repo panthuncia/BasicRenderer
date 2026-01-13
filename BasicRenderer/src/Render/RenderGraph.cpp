@@ -141,7 +141,7 @@ bool RenderGraph::BuildDependencyGraph(
 	std::unordered_set<uint64_t> edgeSet;
 	edgeSet.reserve(nodes.size() * 8);
 
-	// IMPORTANT: build deps in ORIGINAL order
+	// build deps in ORIGINAL order
 	for (size_t i = 0; i < nodes.size(); ++i) {
 		auto& node = nodes[i];
 
@@ -288,7 +288,6 @@ void RenderGraph::CommitPassToBatch(
 			batchOfLastRenderQueueUsage[id] = currentBatchIndex;
 		}
 
-		// NEW:
 		renderUAVs.insert(node.uavIDs.begin(), node.uavIDs.end());
 
 		rg.applySynchronization(
@@ -514,12 +513,14 @@ void RenderGraph::AddTransition(
 {
 
 	auto& resource = r.resourceHandleAndRange.resource;
+
+	// If this triggers, you're probably queueing an operation on an external/ephemeral resource, and then discarding it before the graph can use it.
+	if (!resource.IsEphemeral() && !_registry.IsValid(resource)) {
+		spdlog::error("Invalid resource handle");
+		throw (std::runtime_error("Invalid resource handle in RenderGraph::AddTransition"));
+	}
 	std::vector<ResourceTransition> transitions;
 	auto pRes = _registry.Resolve(resource); // TODO: Can we get rid of pRes in transitions?
-
-	if (pRes->GetName() == "Environment cubemap") {
-		//__debugbreak();
-	}
 
 	resource.GetStateTracker()->Apply(r.resourceHandleAndRange.range, pRes, r.state, transitions);
 
@@ -1925,7 +1926,7 @@ ResourceRegistry::RegistryHandle RenderGraph::RequestResourceHandle(Resource* co
 	}
 
 	// Register anonymous resource
-	const auto handle = _registry.RegisterAnonymous(pResource->weak_from_this());
+	const auto handle = _registry.RegisterAnonymousWeak(pResource->weak_from_this());
 
 	return handle;
 }

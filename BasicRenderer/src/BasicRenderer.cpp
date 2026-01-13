@@ -14,7 +14,7 @@
 #define USE_PIX 1
 #endif
 #include <pix3.h>
-#include <tracy/Tracy.hpp>
+//#include <tracy/Tracy.hpp>
 
 #include "Mesh/Mesh.h"
 #include "Renderer.h"
@@ -216,7 +216,7 @@ float randomFloat(float min, float max) {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nShowCmd) {
-    tracy::SetThreadName("Main");
+    //tracy::SetThreadName("Main");
 
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     auto file_logger = spdlog::basic_logger_mt("file_logger", "logs/log.txt");
@@ -269,9 +269,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
     //carScene->GetRoot().set<Components::Position>({ 1.0, 0.0, 1.0 });
 
-    //auto mountainScene = LoadModel("models/terrain.glb");
-    //mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
-    //mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
+    auto mountainScene = LoadModel("models/terrain.glb");
+    mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
+    mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
 
     //auto tigerScene = LoadModel("models/tiger.glb");
     //tigerScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
@@ -280,7 +280,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //auto usdScene = LoadModel("models/sponza.usdz");
     
-    auto bistro = LoadModel("models/bistroExterior.usdz");
+    //auto bistro = LoadModel("models/bistroExterior.usdz");
     //auto wine = LoadModel("models/bistroInterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
@@ -296,11 +296,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(carScene->Clone());
-    //renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 	//renderer.GetCurrentScene()->AppendScene(shiba->Clone());
 
-    renderer.GetCurrentScene()->AppendScene(bistro->Clone());
+    //renderer.GetCurrentScene()->AppendScene(bistro->Clone());
     //renderer.GetCurrentScene()->AppendScene(wine->Clone());
     
 	//renderer.GetCurrentScene()->AppendScene(robot->Clone());

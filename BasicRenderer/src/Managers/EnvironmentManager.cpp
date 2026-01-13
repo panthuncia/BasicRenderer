@@ -121,6 +121,7 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 		e->SetReflectionCubemapResolution(m_skyboxResolution); // For HDRI environments, use the same resolution as the skybox
 
 		m_environmentsToConvert.push_back(e);
+		m_workingHDRIGroup->AddResource(skyHDR->ImagePtr());
 		auto path = GetCacheFilePath(name+L"_environment.dds", L"environments");
 		ReadbackManager::GetInstance().RequestReadback(envCubemap, path, nullptr, true);
 
