@@ -337,4 +337,17 @@ struct SkinningInstanceGPUInfo
     uint pad[1];
 };
 
+// TODO: packing?
+struct ClusterCandidateNode
+{
+    uint viewIndex;
+
+    uint perMeshBufferIndex;
+    uint perMeshInstanceBufferIndex;
+    uint perObjectBufferIndex;
+
+    uint rootGroupGlobal; // absolute group index in your global groups buffer
+    uint flags; // bits: fullyInside, skipFrustum, wasVisibleLastFrame, etc.
+};
+
 #endif // __STRUCTS_HLSL__

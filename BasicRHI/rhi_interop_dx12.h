@@ -83,4 +83,9 @@ namespace rhi::dx12 {
         if (!QueryNativeTimeline(t, RHI_IID_D3D12_TIMELINE, &info, sizeof(info))) return nullptr;
         return static_cast<ID3D12Fence*>(info.timeline);
 	}
+    inline ID3D12StateObject* get_work_graph(rhi::WorkGraph wg) {
+        D3D12WorkGraphInfo info{};
+        if (!QueryNativeWorkGraph(wg, RHI_IID_D3D12_WORK_GRAPH, &info, sizeof(info))) return nullptr;
+        return static_cast<ID3D12StateObject*>(info.workGraph);
+    }
 } // namespace rhi::dx12

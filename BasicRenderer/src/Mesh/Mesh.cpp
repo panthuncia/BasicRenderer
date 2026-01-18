@@ -1,7 +1,5 @@
 #include "Mesh/Mesh.h"
 
-#include <meshoptimizer.h>
-
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Render/PSOFlags.h"
@@ -43,6 +41,152 @@ void Mesh::CreateVertexBuffer() {
     m_vertexBufferView.stride = sizeof(m_perMeshBufferData.vertexByteSize);
     m_vertexBufferView.sizeBytes = vertexBufferSize;
 }
+
+void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
+{
+	// Clear any previous data
+	m_clodGroups.clear();
+	m_clodMeshlets.clear();
+	m_clodMeshletVertices.clear();
+	m_clodMeshletTriangles.clear();
+	m_clodMeshletBounds.clear();
+	m_clodMeshletRefinedGroup.clear();
+	m_clodRootGroup = 0;
+
+	// Meshoptimizer clusterlod expects unsigned int indices
+	static_assert(sizeof(UINT32) == sizeof(unsigned int), "UINT32 must be 32-bit");
+	const unsigned int* idx = reinterpret_cast<const unsigned int*>(indices.data());
+
+	const size_t vertexStrideBytes = m_perMeshBufferData.vertexByteSize;
+	const size_t globalVertexCount = m_vertices->size() / vertexStrideBytes;
+
+	// -------- clod input --------
+	clodMesh mesh{};
+	mesh.indices = idx;
+	mesh.index_count = indices.size();
+	mesh.vertex_count = globalVertexCount;
+
+	// Assumes position is first float3 in your packed vertex (matches your current meshlet path)
+	mesh.vertex_positions = reinterpret_cast<const float*>(m_vertices->data());
+	mesh.vertex_positions_stride = vertexStrideBytes;
+
+	// Prototype: positions-only simplification (no attributes)
+	mesh.vertex_attributes = nullptr;
+	mesh.vertex_attributes_stride = 0;
+	mesh.vertex_lock = nullptr;
+	mesh.attribute_weights = nullptr;
+	mesh.attribute_count = 0;
+	mesh.attribute_protect_mask = 0;
+
+	// clod config 
+	clodConfig config = clodDefaultConfig(/*max_triangles=*/MS_MESHLET_SIZE);
+
+	config.max_vertices = MS_MESHLET_SIZE;
+	config.max_triangles = MS_MESHLET_SIZE;
+	config.min_triangles = MS_MESHLET_MIN_SIZE;
+
+	// Keep behavior close to current meshopt_buildMeshletsSpatial usage
+	config.cluster_spatial = true;
+	config.cluster_fill_weight = 0.5f; // TODO: ?
+	config.partition_spatial = true;
+	config.optimize_clusters = true;
+
+	// Compute per-cluster bounds from actual triangles for refined clusters
+	// (nice for culling, slightly more CPU time)
+	config.optimize_bounds = true;
+
+	// We'll treat every produced cluster as a "meshlet" and keep group ranges separately.
+	int32_t lastGroupId = -1;
+
+	clodBuild(config, mesh,
+		[&](clodGroup group, const clodCluster* clusters, size_t cluster_count) -> int
+		{
+			const uint32_t firstMeshlet = static_cast<uint32_t>(m_clodMeshlets.size());
+			const uint32_t meshletCount = static_cast<uint32_t>(cluster_count);
+
+			const int32_t groupId = static_cast<int32_t>(m_clodGroups.size());
+
+			ClusterLODGroup outGroup{};
+			outGroup.bounds = group.simplified;
+			outGroup.firstMeshlet = firstMeshlet;
+			outGroup.meshletCount = meshletCount;
+			outGroup.depth = group.depth;
+			m_clodGroups.push_back(outGroup);
+
+			// Convert each cluster to meshlet-local representation:
+			//  - m_clodMeshletVertices: global vertex indices (size = vertex_count)
+			//  - m_clodMeshletTriangles: local indices into that vertex table (3 bytes per triangle index)
+			for (size_t i = 0; i < cluster_count; ++i)
+			{
+				const clodCluster& c = clusters[i];
+
+				// clodCluster::indices are global vertex indices (triangle list)
+				const size_t triCount = c.index_count / 3;
+
+				// Produce local verts table + local triangle bytes
+				std::vector<unsigned int> localVerts;
+				std::vector<unsigned char> localTris;
+				localVerts.resize(c.vertex_count);
+				localTris.resize(c.index_count);
+
+				const size_t unique = clodLocalIndices(
+					localVerts.data(),
+					localTris.data(),
+					c.indices,
+					c.index_count);
+
+				// Should match c.vertex_count per clusterlod contract
+				// (unique <= 256 by design)
+				assert(unique == c.vertex_count);
+
+				meshopt_Meshlet ml{};
+				ml.vertex_offset = static_cast<unsigned int>(m_clodMeshletVertices.size());
+				ml.triangle_offset = static_cast<unsigned int>(m_clodMeshletTriangles.size());
+				ml.vertex_count = static_cast<unsigned int>(unique);
+				ml.triangle_count = static_cast<unsigned int>(triCount);
+
+				// Append flat buffers
+				m_clodMeshletVertices.insert(
+					m_clodMeshletVertices.end(),
+					localVerts.begin(),
+					localVerts.end());
+
+				m_clodMeshletTriangles.insert(
+					m_clodMeshletTriangles.end(),
+					localTris.begin(),
+					localTris.end());
+
+				// Compute bounds for this cluster
+				const unsigned int* vertsPtr = reinterpret_cast<const unsigned int*>(
+					m_clodMeshletVertices.data() + ml.vertex_offset);
+
+				const unsigned char* trisPtr = reinterpret_cast<const unsigned char*>(
+					m_clodMeshletTriangles.data() + ml.triangle_offset);
+
+				meshopt_Bounds b = meshopt_computeMeshletBounds(
+					vertsPtr,
+					trisPtr,
+					ml.triangle_count,
+					reinterpret_cast<const float*>(m_vertices->data()),
+					globalVertexCount,
+					vertexStrideBytes);
+
+				BoundingSphere sphere{};
+				sphere.sphere = DirectX::XMFLOAT4(b.center[0], b.center[1], b.center[2], b.radius);
+
+				m_clodMeshlets.push_back(ml);
+				m_clodMeshletBounds.push_back(sphere);
+				m_clodMeshletRefinedGroup.push_back(static_cast<int32_t>(c.refined));
+			}
+
+			lastGroupId = groupId;
+			return groupId; // becomes clodCluster::refined in later outputs
+		});
+
+	// Root/coarsest group is the last one emitted for this build
+	m_clodRootGroup = (lastGroupId >= 0) ? static_cast<uint32_t>(lastGroupId) : 0;
+}
+
 
 void Mesh::CreateMeshlets(const std::vector<UINT32>& indices) {
 	unsigned int maxVertices = MS_MESHLET_SIZE; // TODO: Separate config for max vertices and max primitives per meshlet
@@ -181,6 +325,7 @@ void Mesh::CreateMeshletReorderedVertices() {
 
 void Mesh::CreateBuffers(const std::vector<UINT32>& indices) {
 
+	BuildClusterLOD(indices);
 	CreateMeshlets(indices);
 	CreateMeshletReorderedVertices();
     CreateVertexBuffer();

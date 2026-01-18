@@ -12,7 +12,7 @@ add_definitions(-D_UNICODE -DUNICODE)
 find_package(spdlog CONFIG REQUIRED)
 find_package(directxtex CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
-find_package(meshoptimizer REQUIRED)
+#find_package(meshoptimizer REQUIRED)
 find_package(DirectX-Headers CONFIG REQUIRED)
 find_package(flecs CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
@@ -581,7 +581,7 @@ PRIVATE
     spdlog::spdlog_header_only 
     Microsoft::DirectXTex 
     imgui::imgui 
-    meshoptimizer::meshoptimizer 
+    meshoptimizer
     assimp::assimp 
     flecs::flecs 
     flecs::flecs_static 

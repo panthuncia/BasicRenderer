@@ -33,6 +33,7 @@ namespace rhi {
 	inline constexpr uint32_t RHI_HEAP_ABI_MIN = 1;
 	inline constexpr uint32_t RHI_QUERYPOOL_ABI_MIN = 1;
 	inline constexpr uint32_t RHI_PIPELINE_ABI_MIN = 1;
+	inline constexpr uint32_t RHI_WORKGRAPH_ABI_MIN = 1;
 	inline constexpr uint32_t RHI_PIPELINELAYOUT_ABI_MIN = 1;
 	inline constexpr uint32_t RHI_COMMANDSIGNATURE_ABI_MIN = 1;
 	inline constexpr uint32_t RHI_SAMPLER_ABI_MIN = 1;
@@ -47,6 +48,7 @@ namespace rhi {
 		struct HView {};
 		struct HSampler {};
 		struct HPipeline {};
+		struct HWorkGraph {};
 		struct HCmdSig {};
 		struct HPipelineLayout {};
 		struct HDescHeap {};
@@ -96,6 +98,7 @@ namespace rhi {
 	using ViewHandle = Handle<detail::HView>;
 	using SamplerHandle = Handle<detail::HSampler>;
 	using PipelineHandle = Handle<detail::HPipeline>;
+	using WorkGraphHandle = Handle<detail::HWorkGraph>;
 	using CommandSignatureHandle = Handle<detail::HCmdSig>;
 	using PipelineLayoutHandle = Handle<detail::HPipelineLayout>;
 	using DescriptorHeapHandle = Handle<detail::HDescHeap>;
@@ -730,6 +733,122 @@ namespace rhi {
 	enum ColorWriteEnable : uint8_t { R = 1, G = 2, B = 4, A = 8, All = 0x0F };
 
 	struct ShaderBinary { const void* data{}; uint32_t size{}; };
+
+	// ---------------- Work Graphs (DX12 Work Graphs spec) ----------------
+	// Note: Work graphs are currently a DX12-only feature in this RHI.
+
+	// Mirrors D3D12_EXPORT_DESC usage for DXIL library subobjects.
+	struct ShaderExportDesc {
+		const char* name{};                 // Exported symbol name
+		const char* exportToRename{ nullptr }; // Optional rename target (D3D12_EXPORT_DESC::ExportToRename)
+	};
+
+	// Mirrors D3D12_DXIL_LIBRARY_DESC.
+	struct ShaderLibraryDesc {
+		ShaderBinary dxil{};               // DXIL container
+		Span<ShaderExportDesc> exports{};  // Optional explicit export list
+	};
+
+	// Mirrors D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION for a local root signature.
+	struct LocalRootAssociation {
+		PipelineLayoutHandle localRootSignature{}; // Must be created with the "local" root signature flag on DX12
+		Span<const char*> exports{};               // Export names to associate with this local root signature
+	};
+
+	// Mirrors D3D12_NODE_ID.
+	struct NodeIDDesc {
+		const char* name{};
+		uint32_t arrayIndex{ 0 };
+	};
+
+	// Mirrors D3D12_NODE_OUTPUT_OVERRIDES.
+	struct NodeOutputOverrideDesc {
+		uint32_t outputIndex{ 0 };
+		std::optional<NodeIDDesc> newName{};
+		std::optional<bool> allowSparseNodes{};
+		std::optional<uint32_t> maxRecords{};
+		std::optional<uint32_t> maxRecordsSharedWithOutputIndex{};
+	};
+
+	// Common to compute launch modes: thread/coalescing/broadcasting.
+	struct CommonComputeNodeOverridesDesc {
+		std::optional<int32_t> localRootArgumentsTableIndex{}; // -1 = auto-assign
+		std::optional<bool> isProgramEntry{};
+		std::optional<NodeIDDesc> newName{};
+		std::optional<NodeIDDesc> shareInputOf{};
+		Span<NodeOutputOverrideDesc> outputOverrides{};
+	};
+
+	struct DispatchGrid3 { uint32_t x{}, y{}, z{}; };
+
+	// Mirrors D3D12_BROADCASTING_LAUNCH_OVERRIDES.
+	struct BroadcastingLaunchOverridesDesc : CommonComputeNodeOverridesDesc {
+		std::optional<DispatchGrid3> dispatchGrid{};
+		std::optional<DispatchGrid3> maxDispatchGrid{};
+	};
+
+	// Mirrors D3D12_COALESCING_LAUNCH_OVERRIDES.
+	struct CoalescingLaunchOverridesDesc : CommonComputeNodeOverridesDesc {};
+
+	// Mirrors D3D12_THREAD_LAUNCH_OVERRIDES.
+	struct ThreadLaunchOverridesDesc : CommonComputeNodeOverridesDesc {};
+
+	// Mirrors D3D12_COMMON_COMPUTE_NODE_OVERRIDES.
+	struct CommonComputeOverridesOnlyDesc : CommonComputeNodeOverridesDesc {};
+
+	// Mirrors D3D12_NODE_OVERRIDES_TYPE.
+	enum class NodeOverridesType : uint32_t {
+		None = 0,
+		BroadcastingLaunch = 1,
+		CoalescingLaunch = 2,
+		ThreadLaunch = 3,
+		CommonCompute = 4,
+	};
+
+	// Explicit node definition/override (mirrors D3D12_SHADER_NODE inside D3D12_NODE).
+	struct NodeOverrideDesc {
+		const char* shaderExport{};             // D3D12_SHADER_NODE::Shader
+		NodeOverridesType overridesType{ NodeOverridesType::None };
+		BroadcastingLaunchOverridesDesc broadcasting{};
+		CoalescingLaunchOverridesDesc  coalescing{};
+		ThreadLaunchOverridesDesc      thread{};
+		CommonComputeOverridesOnlyDesc common{};
+	};
+
+	// Mirrors D3D12_WORK_GRAPH_FLAGS.
+	enum class WorkGraphFlags : uint32_t {
+		None = 0,
+		IncludeAllAvailableNodes = 0x1,
+		EntrypointGraphicsNodesRasterizeInOrder = 0x2,
+	};
+	inline constexpr WorkGraphFlags operator|(WorkGraphFlags a, WorkGraphFlags b) noexcept {
+		return static_cast<WorkGraphFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+	}
+	inline constexpr WorkGraphFlags& operator|=(WorkGraphFlags& a, WorkGraphFlags b) noexcept {
+		a = a | b;
+		return a;
+	}
+	inline constexpr WorkGraphFlags operator&(WorkGraphFlags a, WorkGraphFlags b) noexcept {
+		return static_cast<WorkGraphFlags>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
+	}
+	inline constexpr bool operator==(WorkGraphFlags a, WorkGraphFlags b) noexcept {
+		return (static_cast<uint32_t>(a) & static_cast<uint32_t>(b)) == static_cast<uint32_t>(b);
+	}
+	inline constexpr bool operator!=(WorkGraphFlags a, WorkGraphFlags b) noexcept {
+		return (static_cast<uint32_t>(a) & static_cast<uint32_t>(b)) != static_cast<uint32_t>(b);
+	}
+
+	struct WorkGraphDesc {
+		const char* programName{};              // D3D12_WORK_GRAPH_DESC::ProgramName
+		WorkGraphFlags flags{ WorkGraphFlags::None };
+		PipelineLayoutHandle globalRootSignature{}; // GLOBAL_ROOT_SIGNATURE subobject
+		Span<ShaderLibraryDesc> libraries{};
+		Span<LocalRootAssociation> localRootAssociations{};
+		Span<NodeOverrideDesc> explicitNodes{}; // D3D12_WORK_GRAPH_DESC::pExplicitlyDefinedNodes
+		Span<NodeIDDesc> entrypoints{};         // D3D12_WORK_GRAPH_DESC::pEntrypoints
+		bool allowStateObjectAdditions{ false }; // Adds D3D12_STATE_OBJECT_CONFIG_ALLOW_STATE_OBJECT_ADDITIONS
+		const char* debugName{ nullptr };
+	};
 	struct RasterState {
 		FillMode fill = FillMode::Solid;
 		CullMode cull = CullMode::Back;
@@ -1300,6 +1419,7 @@ namespace rhi {
 	class Resource;      struct ResourceVTable;
 	class QueryPool;    struct QueryPoolVTable;
 	class Pipeline;     struct PipelineVTable;
+	class WorkGraph;    struct WorkGraphVTable;
 	class PipelineLayout; struct PipelineLayoutVTable;
 	class CommandSignature; struct CommandSignatureVTable;
 	class DescriptorHeap; struct DescriptorHeapVTable;
@@ -1353,6 +1473,27 @@ namespace rhi {
 		void SetName(const char* n) noexcept { vt->setName(this, n); }
 	private:
 		PipelineHandle handle;
+	};
+
+	struct WorkGraphVTable {
+		void (*setName)(WorkGraph*, const char*) noexcept;
+		uint32_t abi_version = 1;
+	};
+	class WorkGraph {
+	public:
+		WorkGraph() = default;
+		explicit WorkGraph(WorkGraphHandle h) : handle(h) {}
+		void* impl{};
+		const WorkGraphVTable* vt{};
+		explicit constexpr operator bool() const noexcept {
+			return impl != nullptr && vt != nullptr && vt->abi_version >= RHI_WORKGRAPH_ABI_MIN;
+		}
+		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
+		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
+		const WorkGraphHandle& GetHandle() const noexcept { return handle; }
+		void SetName(const char* n) noexcept { vt->setName(this, n); }
+	private:
+		WorkGraphHandle handle;
 	};
 
 	struct PipelineLayoutVTable {
@@ -1824,6 +1965,7 @@ namespace rhi {
 	using ResourcePtr = ObjectPtr<Resource>;
 	using QueryPoolPtr = ObjectPtr<QueryPool>;
 	using PipelinePtr = ObjectPtr<Pipeline>;
+	using WorkGraphPtr = ObjectPtr<WorkGraph>;
 	using PipelineLayoutPtr = ObjectPtr<PipelineLayout>;
 	using CommandSignaturePtr = ObjectPtr<CommandSignature>;
 	using DescriptorHeapPtr = ObjectPtr<DescriptorHeap>;
@@ -1835,6 +1977,7 @@ namespace rhi {
 
 	struct DeviceVTable {
 		Result(*createPipelineFromStream)(Device*, const PipelineStreamItem*, uint32_t, PipelinePtr&) noexcept;
+		Result(*createWorkGraph)(Device*, const WorkGraphDesc&, WorkGraphPtr&) noexcept;
 		Result(*createPipelineLayout)(Device*, const PipelineLayoutDesc&, PipelineLayoutPtr&) noexcept;
 		Result(*createCommandSignature)(Device*, const CommandSignatureDesc&, PipelineLayoutHandle /*layoutOrNull*/, CommandSignaturePtr&) noexcept;
 		Result(*createCommandAllocator)(Device*, QueueKind, CommandAllocatorPtr&) noexcept;
@@ -1857,6 +2000,7 @@ namespace rhi {
 		void (*destroySampler)(DeviceDeletionContext*, SamplerHandle) noexcept;
 		void (*destroyPipelineLayout)(DeviceDeletionContext*, PipelineLayoutHandle) noexcept;
 		void (*destroyPipeline)(DeviceDeletionContext*, PipelineHandle) noexcept;
+		void (*destroyWorkGraph)(DeviceDeletionContext*, WorkGraphHandle) noexcept;
 		void (*destroyCommandSignature)(DeviceDeletionContext*, CommandSignatureHandle) noexcept;
 		void (*destroyCommandAllocator)(DeviceDeletionContext*, CommandAllocator*) noexcept;
 		void (*destroyCommandList)(DeviceDeletionContext*, CommandList*) noexcept;
@@ -1908,6 +2052,7 @@ namespace rhi {
 		inline void DestroyCommandAllocator(CommandAllocator* a) noexcept { vt->destroyCommandAllocator(this, a); }
 		inline void DestroySampler(SamplerHandle h) noexcept { vt->destroySampler(this, h); }
 		inline void DestroyPipeline(PipelineHandle h) noexcept { vt->destroyPipeline(this, h); }
+		inline void DestroyWorkGraph(WorkGraphHandle h) noexcept { vt->destroyWorkGraph(this, h); }
 		inline void DestroyBuffer(ResourceHandle h) noexcept { vt->destroyBuffer(this, h); }
 		inline void DestroyTexture(ResourceHandle h) noexcept { vt->destroyTexture(this, h); }
 		inline void DestroyTimeline(TimelineHandle t) noexcept { vt->destroyTimeline(this, t); }
@@ -1951,6 +2096,9 @@ namespace rhi {
 		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
 		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
 		Result CreatePipeline(const PipelineStreamItem* items, uint32_t count, PipelinePtr& out) noexcept { return vt->createPipelineFromStream(this, items, count, out); }
+		Result CreateWorkGraph(const WorkGraphDesc& d, WorkGraphPtr& out) noexcept {
+			return vt->createWorkGraph ? vt->createWorkGraph(this, d, out) : Result::Unsupported;
+		}
 		Result CreateCommandList(QueueKind q, CommandAllocator alloc, CommandListPtr& out) noexcept { return vt->createCommandList(this, q, alloc, out); }
 		void DestroyCommandList(CommandList* cl) noexcept { deletionContext.DestroyCommandList(cl); }
 		Queue GetQueue(QueueKind q) noexcept { return vt->getQueue(this, q); }
@@ -1975,6 +2123,7 @@ namespace rhi {
 		Result CreateCommittedResource(const ResourceDesc& d, ResourcePtr& out) noexcept { return vt->createCommittedResource(this, d, out); }
 		void DestroySampler(SamplerHandle h) noexcept { deletionContext.DestroySampler(h); }
 		void DestroyPipeline(PipelineHandle h) noexcept { deletionContext.DestroyPipeline(h); }
+		void DestroyWorkGraph(WorkGraphHandle h) noexcept { deletionContext.DestroyWorkGraph(h); }
 		void DestroyBuffer(ResourceHandle h) noexcept { deletionContext.DestroyBuffer(h); }
 		void DestroyTexture(ResourceHandle h) noexcept { deletionContext.DestroyTexture(h); }
 		uint32_t GetDescriptorHandleIncrementSize(DescriptorHeapType t) noexcept { return vt->getDescriptorHandleIncrementSize(this, t); }
@@ -2141,6 +2290,14 @@ namespace rhi {
 		return PipelinePtr(
 			*d, h,
 			[](Device& dev, Pipeline& hh) noexcept { if (dev) dev.DestroyPipeline(hh.GetHandle()); },
+			std::move(keepAlive)
+		);
+	}
+
+	inline WorkGraphPtr MakeWorkGraphPtr(const Device* d, WorkGraph h, std::shared_ptr<void> keepAlive = {}) noexcept {
+		return WorkGraphPtr(
+			*d, h,
+			[](Device& dev, WorkGraph& hh) noexcept { if (dev) dev.DestroyWorkGraph(hh.GetHandle()); },
 			std::move(keepAlive)
 		);
 	}

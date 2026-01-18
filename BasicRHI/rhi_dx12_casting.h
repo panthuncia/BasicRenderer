@@ -107,4 +107,10 @@ namespace rhi::dx12_detail
 		Dx12Device* dev = Dev(sc);
 		return (dev && sc) ? dev->swapchains.get(sc->GetHandle()) : nullptr;
 	}
+
+	[[nodiscard]] inline Dx12WorkGraph* WG(const WorkGraph* wg) noexcept
+	{
+		Dx12Device* dev = Dev(wg);
+		return (dev && wg) ? dev->workGraphs.get(wg->GetHandle()) : nullptr;
+	}
 }

@@ -6,11 +6,13 @@
 #include <atomic>
 #include <optional>
 #include <rhi.h>
+#include <meshoptimizer.h>
+#include <ThirdParty/meshoptimizer/clusterlod.h>
+
 
 #include "Mesh/VertexFlags.h"
 #include "Import/MeshData.h"
 #include "ShaderBuffers.h"
-#include "meshoptimizer.h"
 #include "Resources/Buffers/BufferView.h"
 #include "Managers/Singletons/DeletionManager.h"
 
@@ -119,6 +121,7 @@ private:
     void CreateBuffers(const std::vector<UINT32>& indices);
 	void ComputeBoundingSphere(const std::vector<UINT32>& indices);
 	void ComputeAABB(DirectX::XMFLOAT3& min, DirectX::XMFLOAT3& max);
+	void BuildClusterLOD(const std::vector<UINT32>& indices);
     static int GetNextGlobalIndex();
 
     static std::atomic<uint32_t> globalMeshCount;
@@ -132,6 +135,23 @@ private:
 	std::vector<BoundingSphere> m_meshletBounds;
 	std::vector<std::byte> m_meshletReorderedVertices;
 	std::vector<std::byte> m_meshletReorderedSkinningVertices;
+
+	// Cluster LOD data
+	struct ClusterLODGroup
+	{
+		clodBounds bounds;         // group.simplified (center/radius/error)
+		uint32_t firstMeshlet;     // start index into m_clodMeshlets
+		uint32_t meshletCount;     // count of meshlets/clusters in this group
+		int32_t depth;             // group.depth
+	};
+
+	std::vector<ClusterLODGroup> m_clodGroups;
+	std::vector<meshopt_Meshlet> m_clodMeshlets;
+	std::vector<uint32_t>        m_clodMeshletVertices;
+	std::vector<uint8_t>         m_clodMeshletTriangles;
+	std::vector<BoundingSphere>  m_clodMeshletBounds;
+	std::vector<int32_t>         m_clodMeshletRefinedGroup;
+	uint32_t                     m_clodRootGroup = 0;
 
     std::unique_ptr<BufferView> m_postSkinningVertexBufferView = nullptr;
 	std::unique_ptr<BufferView> m_preSkinningVertexBufferView = nullptr;

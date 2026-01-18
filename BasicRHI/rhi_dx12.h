@@ -87,6 +87,33 @@ namespace rhi {
 		bool isCompute;
 		Dx12Device* dev = nullptr;
 	};
+
+	struct Dx12WorkGraph {
+		Dx12WorkGraph() {}
+		explicit Dx12WorkGraph(Microsoft::WRL::ComPtr<ID3D12StateObject> so,
+			Microsoft::WRL::ComPtr<ID3D12StateObjectProperties1> props1,
+			Microsoft::WRL::ComPtr<ID3D12WorkGraphProperties> wgProps,
+			D3D12_PROGRAM_IDENTIFIER programId,
+			UINT wgIndex,
+			D3D12_WORK_GRAPH_MEMORY_REQUIREMENTS mem,
+			Dx12Device* device)
+			: stateObject(std::move(so))
+			, stateObjectProps1(std::move(props1))
+			, workGraphProps(std::move(wgProps))
+			, programIdentifier(programId)
+			, workGraphIndex(wgIndex)
+			, memoryRequirements(mem)
+			, dev(device)
+		{
+		}
+		Microsoft::WRL::ComPtr<ID3D12StateObject> stateObject;
+		Microsoft::WRL::ComPtr<ID3D12StateObjectProperties1> stateObjectProps1;
+		Microsoft::WRL::ComPtr<ID3D12WorkGraphProperties> workGraphProps;
+		D3D12_PROGRAM_IDENTIFIER programIdentifier{};
+		UINT workGraphIndex{};
+		D3D12_WORK_GRAPH_MEMORY_REQUIREMENTS memoryRequirements{};
+		Dx12Device* dev = nullptr;
+	};
 	struct Dx12PipelineLayout {
 		Dx12PipelineLayout() {}
 		explicit Dx12PipelineLayout(const PipelineLayoutDesc& d, Dx12Device* device)
@@ -268,6 +295,7 @@ namespace rhi {
 	template<> struct HandleFor<Dx12Sampler> { using type = SamplerHandle; };
 	template<> struct HandleFor<Dx12PipelineLayout> { using type = PipelineLayoutHandle; };
 	template<> struct HandleFor<Dx12Pipeline> { using type = PipelineHandle; };
+	template<> struct HandleFor<Dx12WorkGraph> { using type = WorkGraphHandle; };
 	template<> struct HandleFor<Dx12CommandSignature> { using type = CommandSignatureHandle; };
 	template<> struct HandleFor<Dx12DescriptorHeap> { using type = DescriptorHeapHandle; };
 	template<> struct HandleFor<Dx12Timeline> { using type = TimelineHandle; };
@@ -338,6 +366,7 @@ namespace rhi {
 		Registry<Dx12Sampler> samplers;
 		Registry<Dx12PipelineLayout> pipelineLayouts;
 		Registry<Dx12Pipeline> pipelines;
+		Registry<Dx12WorkGraph> workGraphs;
 		Registry<Dx12CommandSignature> commandSignatures;
 		Registry<Dx12DescriptorHeap> descHeaps;
 		Registry<Dx12Allocator> allocators;
@@ -365,6 +394,7 @@ namespace rhi {
 	extern const ResourceVTable g_tex_rvt;
 	extern const QueryPoolVTable g_qpvt;
 	extern const PipelineVTable g_psovt;
+	extern const WorkGraphVTable g_wgvt;
 	extern const PipelineLayoutVTable g_plvt;
 	extern const CommandSignatureVTable g_csvt;
 	extern const DescriptorHeapVTable g_dhvt;

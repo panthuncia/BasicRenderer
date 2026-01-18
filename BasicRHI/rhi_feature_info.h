@@ -10,6 +10,7 @@ enum class FeatureInfoStructType : uint64_t {
     ShadingRate = 6,
     EnhancedBarriers = 7,
 	ResourceAllocation = 8,
+	WorkGraphs = 9,
 };
 
 struct FeatureInfoHeader {
@@ -30,6 +31,7 @@ enum class ShaderModel : uint16_t {
 enum class MeshShaderLevel : uint8_t { None, Mesh, MeshPlusTask };
 enum class RayTracingLevel : uint8_t { None, Pipeline, PipelinePlusQuery };
 enum class ShadingRateLevel : uint8_t { None, PerDraw, Attachment };
+enum class WorkGraphLevel : uint8_t { None, ComputeNodes, MeshNodes };
 
 // ---------------- Caps structs ----------------
 
@@ -110,7 +112,7 @@ struct ShadingRateFeatureInfo {
 
     uint32_t tileSize = 0;             // only meaningful if attachmentRate == true
 
-    constexpr ShadingRateLevel Level() const noexcept {
+    [[nodiscard]] constexpr ShadingRateLevel Level() const noexcept {
         if (attachmentRate) return ShadingRateLevel::Attachment;
         if (perDrawRate)    return ShadingRateLevel::PerDraw;
         return ShadingRateLevel::None;
@@ -131,4 +133,16 @@ struct ResourceAllocationFeatureInfo {
     bool tightAlignmentSupported = false;    // D3D12_TIGHT_ALIGNMENT tier >= 1
 
     bool createNotZeroedHeapSupported = false; // "heap flag create_not_zeroed" proxy (D3D12MA-style)
+};
+
+struct WorkGraphFeatureInfo {
+    FeatureInfoHeader header{ FeatureInfoStructType::WorkGraphs, nullptr, sizeof(WorkGraphFeatureInfo), 1 };
+    bool computeNodes = false;   // support for compute work graph nodes
+    bool meshNodes = false;      // support for mesh work graph nodes, implies computeNodes
+	
+    [[nodiscard]] constexpr WorkGraphLevel Level() const noexcept {
+        if (meshNodes) return WorkGraphLevel::MeshNodes;
+		if (computeNodes) return WorkGraphLevel::ComputeNodes;
+        return WorkGraphLevel::None;
+    }
 };

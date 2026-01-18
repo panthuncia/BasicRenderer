@@ -248,7 +248,7 @@ namespace rhi {
 		}
 	}
 
-	static inline D3D12_BLEND ToDx(BlendFactor f) {
+	static inline D3D12_BLEND ToDX(BlendFactor f) {
 		using B = D3D12_BLEND;
 		switch (f) {
 		case BlendFactor::Zero:return B::D3D12_BLEND_ZERO; case BlendFactor::One:return B::D3D12_BLEND_ONE;
@@ -259,7 +259,7 @@ namespace rhi {
 		}
 		return B::D3D12_BLEND_ONE;
 	}
-	static inline D3D12_BLEND_OP ToDx(const BlendOp o) {
+	static inline D3D12_BLEND_OP ToDX(const BlendOp o) {
 		switch (o) {
 		case BlendOp::Add:
 			return D3D12_BLEND_OP::D3D12_BLEND_OP_ADD;
@@ -275,7 +275,7 @@ namespace rhi {
 	}
 
 
-	inline static D3D12_HEAP_TYPE ToDx(const HeapType m) {
+	inline static D3D12_HEAP_TYPE ToDX(const HeapType m) {
 		switch (m) {
 		case HeapType::DeviceLocal:    return D3D12_HEAP_TYPE_DEFAULT;
 		case HeapType::HostVisibleCoherent: return D3D12_HEAP_TYPE_UPLOAD;
@@ -635,6 +635,29 @@ namespace rhi {
 		case ResidencyPriority::ResidencyPriorityHigh:         return D3D12_RESIDENCY_PRIORITY_HIGH;
 		case ResidencyPriority::ResidencyPriorityMaximum:      return D3D12_RESIDENCY_PRIORITY_MAXIMUM;
 		default: return D3D12_RESIDENCY_PRIORITY_NORMAL;
+		}
+	}
+
+	inline static D3D12_WORK_GRAPH_FLAGS ToDX(WorkGraphFlags f) noexcept {
+		D3D12_WORK_GRAPH_FLAGS out = D3D12_WORK_GRAPH_FLAG_NONE;
+		if ((f & WorkGraphFlags::IncludeAllAvailableNodes) != WorkGraphFlags::None) {
+			out |= D3D12_WORK_GRAPH_FLAG_INCLUDE_ALL_AVAILABLE_NODES;
+		}
+		if ((f & WorkGraphFlags::EntrypointGraphicsNodesRasterizeInOrder) != WorkGraphFlags::None) {
+			// Not yet supported in d3d12.h
+			//out |= D3D12_WORK_GRAPH_FLAG_ENTRYPOINT_GRAPHICS_NODES_RASTERIZE_IN_ORDER;
+		}
+		return out;
+	}
+
+	inline static D3D12_NODE_OVERRIDES_TYPE ToDX(NodeOverridesType t) noexcept {
+		switch (t) {
+		case NodeOverridesType::None: return D3D12_NODE_OVERRIDES_TYPE_NONE;
+		case NodeOverridesType::BroadcastingLaunch: return D3D12_NODE_OVERRIDES_TYPE_BROADCASTING_LAUNCH;
+		case NodeOverridesType::CoalescingLaunch: return D3D12_NODE_OVERRIDES_TYPE_COALESCING_LAUNCH;
+		case NodeOverridesType::ThreadLaunch: return D3D12_NODE_OVERRIDES_TYPE_THREAD_LAUNCH;
+		case NodeOverridesType::CommonCompute: return D3D12_NODE_OVERRIDES_TYPE_COMMON_COMPUTE;
+		default: return D3D12_NODE_OVERRIDES_TYPE_NONE;
 		}
 	}
 
