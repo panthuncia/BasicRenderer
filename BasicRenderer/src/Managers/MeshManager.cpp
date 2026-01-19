@@ -91,6 +91,9 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 
 	mesh->SetBufferViews(std::move(preSkinningView), std::move(postSkinningView), std::move(meshletOffsetsView), std::move(meshletVertexIndicesView), std::move(meshletTrianglesView), std::move(meshletBoundsView));
 	mesh->UpdateVertexCount(useMeshletReorderedVertices);
+
+	// cluster LOD data
+	//mesh->BuildClusterLOD
 }
 
 void MeshManager::RemoveMesh(Mesh* mesh) {

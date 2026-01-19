@@ -7,10 +7,9 @@
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Materials/TechniqueDescriptor.h"
+#include "brslHelpers.h"
 
 #pragma comment(lib, "dxcompiler.lib")
-
-extern "C" const TSLanguage* tree_sitter_hlsl();
 
 void PSOManager::initialize() {
     createRootSignature();
@@ -155,7 +154,7 @@ PipelineState PSOManager::CreatePSO(UINT psoFlags, MaterialCompileFlags material
     shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"PSMain", L"ps_6_6" };
     shaderInfoBundle.defines = defines;
 
-    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    auto compiledBundle = PSOManager::GetInstance().CompileShaders(shaderInfoBundle);
     vsBlob = compiledBundle.vertexShader;
     psBlob = compiledBundle.pixelShader;
 
@@ -998,510 +997,6 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags, MaterialCompi
     return defines;
 }
 
-struct Replacement {
-    uint32_t startByte;
-    uint32_t endByte;
-    std::string replacement;
-};
-
-void BuildFunctionDefs(std::unordered_map<std::string, std::vector<TSNode>>& functionDefs, const char* preprocessedSource, const TSNode& root) {
-    // Search through all children of root to find function_definition nodes
-    uint32_t childCount = ts_node_child_count(root);
-    for (uint32_t i = 0; i < childCount; ++i) {
-        TSNode node = ts_node_child(root, i);
-        if (std::string(ts_node_type(node)) == "function_definition") {
-            // In tree-sitter-hlsl grammar, child #1 is the identifier
-            TSNode topDecl = ts_node_child_by_field_name(node, "declarator", static_cast<uint32_t>(strlen("declarator")));
-            if (ts_node_is_null(topDecl)) continue;
-
-            // From that, get the inner declarator
-            TSNode innerDecl = ts_node_child_by_field_name(topDecl, "declarator", static_cast<uint32_t>(strlen("declarator")));
-            if (ts_node_is_null(innerDecl)) continue;
-
-            // Now, find the actual identifier inside `innerDecl`
-            TSNode nameNode = {};
-            // If this declarator *is* a bare identifier, use it directly:
-            if (std::string(ts_node_type(innerDecl)) == "identifier") {
-                nameNode = innerDecl;
-            }
-            // Otherwise, it’s some sort of qualified or templated thing:
-            else {
-                nameNode = ts_node_child_by_field_name(
-                    innerDecl,
-                    "name",
-                    static_cast<uint32_t>(strlen("name"))
-                );
-            }
-
-            if (ts_node_is_null(nameNode)) {
-                continue;
-            }
-
-            // Extract the text out of the source buffer:
-            uint32_t start = ts_node_start_byte(nameNode);
-            uint32_t end = ts_node_end_byte(nameNode);
-            std::string fnName(preprocessedSource + start, end - start);
-
-            TSNode bodyNode = ts_node_child_by_field_name(node, "body", 4);
-            if (!functionDefs.contains(fnName)) {
-                functionDefs[fnName] = std::vector<TSNode>();
-            }
-            functionDefs[fnName].push_back(bodyNode);
-        }
-    }
-}
-
-void ParseBRSLResourceIdentifiers(std::unordered_set<std::string>& outMandatoryIdentifiers, std::unordered_set<std::string>& outOptionalIdentifiers, const DxcBuffer* pBuffer, const std::string& entryPointName) {
-    const char* preprocessedSource = static_cast<const char*>(pBuffer->Ptr);
-    size_t sourceSize = pBuffer->Size;
-
-    TSParser* parser = ts_parser_new();
-    ts_parser_set_language(parser, tree_sitter_hlsl());
-
-    TSTree* tree = ts_parser_parse_string(parser, nullptr, preprocessedSource, static_cast<uint32_t>(sourceSize));
-    TSNode root = ts_tree_root_node(tree);
-
-    std::unordered_map<std::string, std::vector<TSNode>> functionDefs;
-
-	BuildFunctionDefs(functionDefs, preprocessedSource, root);
-
-    // Prepare for call-graph walk
-    std::unordered_set<std::string> visited;
-    std::vector<std::string> worklist;
-    worklist.push_back(entryPointName);
-
-    // Wherever we discover ResourceDescriptorIndex, we record replacements
-    std::vector<Replacement> replacements;
-    std::unordered_map<std::string, std::string> indexMap;
-
-    // Helper to process one function body
-    auto processBody = [&](const TSNode& bodyNode, auto&& processBodyRef) -> void {
-        // Walk the subtree of this body looking for:
-        //  a) ResourceDescriptorIndex calls -> record replacements
-        //  b) Other function calls -> enqueue them if unvisited
-        std::function<void(TSNode)> walk = [&](TSNode node) {
-            const char* type = ts_node_type(node);
-
-            if (strcmp(type, "call_expression") == 0) {
-                // Check for ResourceDescriptorIndex(...)
-                TSNode functionNode =
-                    ts_node_child_by_field_name(node, "function", static_cast<uint32_t>(strlen("function")));
-
-                if (ts_node_is_null(functionNode)) return;
-
-                // Pull out function name from source
-                uint32_t start = ts_node_start_byte(functionNode);
-                uint32_t end = ts_node_end_byte(functionNode);
-
-                // Slice out the raw text
-                std::string funcName(preprocessedSource + start, end - start);
-
-                // trim whitespace:
-                auto l = funcName.find_first_not_of(" \t\n\r");
-                auto r = funcName.find_last_not_of(" \t\n\r");
-                if (l != std::string::npos && r != std::string::npos)
-                    funcName = funcName.substr(l, r - l + 1);
-
-                auto parseBuiltin = [&]() -> std::string {
-                    TSNode argList = ts_node_child_by_field_name(node, "arguments", 9);
-                    if (ts_node_named_child_count(argList) == 1) {
-                        TSNode argNode = ts_node_named_child(argList, 0);
-
-                        uint32_t start = ts_node_start_byte(argNode);
-                        uint32_t end = ts_node_end_byte(argNode);
-
-                        std::string rawText(preprocessedSource + start, end - start);
-
-                        // if it's a quoted string literal, strip the quotes
-                        if (rawText.size() >= 2 && rawText.front() == '"' && rawText.back() == '"') {
-                            rawText = rawText.substr(1, rawText.size() - 2);
-                        }
-
-                        return std::move(rawText);
-                    }
-                    else {
-						throw std::runtime_error("ResourceDescriptorIndex requires exactly one argument");
-                    }
-					};
-
-                if (funcName == "ResourceDescriptorIndex") {
-                    outMandatoryIdentifiers.insert(parseBuiltin());
-                }
-                else if (funcName == "OptionalResourceDescriptorIndex") {
-                    outOptionalIdentifiers.insert(parseBuiltin());
-                }
-                else {
-                    // Otherwise, a normal function call:
-                    // Enqueue it for later processing if we know its definition
-                    if (functionDefs.count(funcName) && !visited.count(funcName)) {
-                        visited.insert(funcName);
-                        worklist.push_back(funcName);
-                    }
-                }
-            }
-
-            // recurse
-            uint32_t n = ts_node_child_count(node);
-            for (uint32_t i = 0; i < n; ++i) {
-                walk(ts_node_child(node, i));
-            }
-            };
-
-        walk(bodyNode);
-        };
-
-    // Traverse the call graph
-    while (!worklist.empty()) {
-        std::string fn = worklist.back();
-        worklist.pop_back();
-
-        auto it = functionDefs.find(fn);
-        if (it == functionDefs.end())
-            continue;   // no definition in this file
-
-        for (const auto& bodyNode : it->second) {
-            processBody(bodyNode, processBody);
-		}
-    }
-
-    std::string sourceText(preprocessedSource, sourceSize);
-    // Emit transformed code
-    std::string output;
-    size_t cursor = 0;
-    for (const auto& r : replacements) {
-        output += sourceText.substr(cursor, r.startByte - cursor);
-        output += r.replacement;
-        cursor = r.endByte;
-    }
-    output += sourceText.substr(cursor);
-
-    ts_tree_delete(tree);
-    ts_parser_delete(parser);
-}
-
-std::string
-rewriteResourceDescriptorCalls(const char* preprocessedSource,
-    size_t       sourceSize,
-    const std::string& entryPointName,
-    const std::unordered_map<std::string, std::string>& replacementMap)
-{
-    TSParser* parser = ts_parser_new();
-    ts_parser_set_language(parser, tree_sitter_hlsl());
-    TSTree* tree = ts_parser_parse_string(
-        parser, nullptr, preprocessedSource, static_cast<uint32_t>(sourceSize));
-    TSNode root = ts_tree_root_node(tree);
-
-    std::unordered_map<std::string, std::vector<TSNode>> functionDefs;
-
-	BuildFunctionDefs(functionDefs, preprocessedSource, root);
-   
-    // Then do the same call-graph walk, but instead of collecting into a set,
-    // build a vector<Replacement> by looking up replacementMap[id].
-    // Finally, apply the text splice just as you already have:
-
-    // [parse & build functionDefs, then BFS same as collect]
-
-    std::vector<Replacement> replacements;
-    std::unordered_set<std::string> visited;
-    std::vector<std::string> worklist;
-    worklist.push_back(entryPointName);
-
-    auto processBody = [&](const TSNode& bodyNode, auto&& processBodyRef) -> void {
-        // Walk the subtree of this body looking for:
-        //  a) ResourceDescriptorIndex calls -> record replacements
-        //  b) Other function calls -> enqueue them if unvisited
-        std::function<void(TSNode)> walk = [&](TSNode node) {
-            const char* type = ts_node_type(node);
-
-            if (strcmp(type, "call_expression") == 0) {
-                // Check for ResourceDescriptorIndex(...)
-                TSNode functionNode =
-                    ts_node_child_by_field_name(node, "function", static_cast<uint32_t>(strlen("function")));
-
-                if (ts_node_is_null(functionNode)) return;
-
-                // Pull out function name from source
-                uint32_t start = ts_node_start_byte(functionNode);
-                uint32_t end = ts_node_end_byte(functionNode);
-
-                // Slice out the raw text
-                std::string funcName(preprocessedSource + start, end - start);
-
-                // trim whitespace:
-                auto l = funcName.find_first_not_of(" \t\n\r");
-                auto r = funcName.find_last_not_of(" \t\n\r");
-                if (l != std::string::npos && r != std::string::npos)
-                    funcName = funcName.substr(l, r - l + 1);
-
-
-                if (funcName == "ResourceDescriptorIndex" || funcName == "OptionalResourceDescriptorIndex") {
-                    TSNode argList = ts_node_child_by_field_name(node, "arguments", 9);
-                    if (ts_node_named_child_count(argList) == 1) {
-                        TSNode argNode = ts_node_named_child(argList, 0);
-
-                        uint32_t start = ts_node_start_byte(argNode);
-                        uint32_t end = ts_node_end_byte(argNode);
-
-                        std::string rawText(preprocessedSource + start, end - start);
-
-                        // if it's a quoted string literal, strip the quotes
-                        if (rawText.size() >= 2 && rawText.front() == '"' && rawText.back() == '"') {
-                            rawText = rawText.substr(1, rawText.size() - 2);
-                        }
-
-                        std::string identifier = std::move(rawText);
-                        if (replacementMap.count(identifier)) {
-                            replacements.push_back({
-                            ts_node_start_byte(node),
-                            ts_node_end_byte(node),
-                            replacementMap.at(identifier)
-                            });
-                        }
-                        else {
-                            throw std::runtime_error(
-								"ResourceDescriptorIndex identifier does not have mapped replacement: " + identifier);
-                        }
-                    }
-                }
-                else {
-                    // Otherwise, a normal function call:
-                    // Enqueue it for later processing if we know its definition
-                    if (functionDefs.count(funcName) && !visited.count(funcName)) {
-                        visited.insert(funcName);
-                        worklist.push_back(funcName);
-                    }
-                }
-            }
-
-            // recurse
-            uint32_t n = ts_node_child_count(node);
-            for (uint32_t i = 0; i < n; ++i) {
-                walk(ts_node_child(node, i));
-            }
-            };
-
-        walk(bodyNode);
-        };
-
-    // Traverse the call graph
-    while (!worklist.empty()) {
-        std::string fn = worklist.back();
-        worklist.pop_back();
-
-        auto it = functionDefs.find(fn);
-        if (it == functionDefs.end())
-            continue;   // no definition in this file
-
-        for (const auto& bodyNode : it->second) {
-            processBody(bodyNode, processBody);
-		}
-    }
-
-	// Sort replacements by startByte
-    std::sort(replacements.begin(), replacements.end(),
-        [](const Replacement& a, const Replacement& b) {
-            return a.startByte < b.startByte;
-		});
-
-    std::string source(preprocessedSource, sourceSize);
-    std::string out;
-    size_t cursor = 0;
-    for (auto& r : replacements) {
-        out.append(source, cursor, r.startByte - cursor);
-        out += r.replacement;
-        cursor = r.endByte;
-    }
-    out.append(source, cursor);
-
-    ts_tree_delete(tree);
-    ts_parser_delete(parser);
-
-    return out;
-}
-
-static uint32_t
-shrinkToIncludeDecorators(const char* src, uint32_t origStart)
-{
-    uint32_t newStart = origStart;
-    while (newStart > 0) {
-        // find the '\n' that ends the *previous* line
-        auto prevNL = std::string_view(src, newStart).rfind('\n');
-        if (prevNL == std::string::npos) break;
-        // prevNL points at the '\n' before the declaration line,
-        // so the line we care about runs from (prevNL_of_that + 1) .. prevNL-1
-        size_t lineEnd = prevNL;
-        size_t lineBegin = std::string_view(src, prevNL).rfind('\n');
-        if (lineBegin == std::string_view::npos) lineBegin = 0;
-        else                                    lineBegin += 1;
-
-        // extract that line and trim it
-        auto   len = lineEnd - lineBegin;
-        auto   sv = std::string_view(src + lineBegin, len);
-        auto   first = sv.find_first_not_of(" \t\r\n");
-        if (first == std::string_view::npos) {
-            // blank line: skip it, but keep going up
-            newStart = (uint32_t)lineBegin;
-            continue;
-        }
-        if (sv[first] == '[') {
-            // decorator: include this line too
-            newStart = (uint32_t)lineBegin;
-            continue;
-        }
-        // otherwise: stop looking
-        break;
-    }
-    return newStart;
-}
-
-struct Range { uint32_t start, end; };
-std::string
-pruneUnusedCode(const char* preprocessedSource,
-    size_t       sourceSize,
-    const std::string& entryPointName,
-    const std::unordered_map<std::string, std::string>& replacementMap)
-{
-    TSParser* parser = ts_parser_new();
-    ts_parser_set_language(parser, tree_sitter_hlsl());
-    TSTree* tree = ts_parser_parse_string(parser, nullptr, preprocessedSource, static_cast<uint32_t>(sourceSize));
-    TSNode root = ts_tree_root_node(tree);
-
-    std::unordered_map<std::string, std::vector<TSNode>> bodyMap, defMap;
-    uint32_t topCount = ts_node_child_count(root);
-    for (uint32_t i = 0; i < topCount; ++i) {
-        TSNode node = ts_node_child(root, i);
-        if (std::string(ts_node_type(node)) != "function_definition") continue;
-
-        // extract the function name
-        TSNode decl1 = ts_node_child_by_field_name(node, "declarator", static_cast<uint32_t>(strlen("declarator")));
-        TSNode decl2 = !ts_node_is_null(decl1)
-            ? ts_node_child_by_field_name(decl1, "declarator", static_cast<uint32_t>(strlen("declarator")))
-            : TSNode{};
-        TSNode nameNode = {};
-        if (!ts_node_is_null(decl2) && std::string(ts_node_type(decl2)) == "identifier") {
-            nameNode = decl2;
-        }
-        else if (!ts_node_is_null(decl2)) {
-            nameNode = ts_node_child_by_field_name(decl2, "name", static_cast<uint32_t>(strlen("name")));
-        }
-        if (ts_node_is_null(nameNode)) continue;
-
-        auto s = ts_node_start_byte(nameNode);
-        auto e = ts_node_end_byte(nameNode);
-        std::string fnName(preprocessedSource + s, e - s);
-
-        // store the full def node and its body
-
-        if (!defMap.contains(fnName)) {
-            defMap[fnName] = {};
-        }
-
-        if (!bodyMap.contains(fnName)) {
-            bodyMap[fnName] = {};
-		}
-
-        defMap[fnName].push_back(node);
-        bodyMap[fnName].push_back(ts_node_child_by_field_name(node, "body", static_cast<uint32_t>(strlen("body"))));
-    }
-
-    // BFS from entryPointName to find reachable functions
-    std::unordered_set<std::string> visited{ entryPointName };
-    std::vector<std::string> work{ entryPointName };
-
-    auto enqueueCalls = [&](TSNode body) {
-        std::function<void(TSNode)> walk = [&](TSNode n) {
-            if (ts_node_is_null(n)) return;
-            if (std::string(ts_node_type(n)) == "call_expression") {
-                TSNode fn = ts_node_child_by_field_name(n, "function", static_cast<uint32_t>(strlen("function")));
-                if (!ts_node_is_null(fn)) {
-
-                    TSNode args = ts_node_child_by_field_name(n, "arguments", static_cast<uint32_t>(strlen("arguments")));
-
-                    uint32_t start = ts_node_start_byte(fn);
-                    uint32_t end = ts_node_end_byte(args);    // include closing ')'
-
-                    std::string callSig(
-                        preprocessedSource + start,
-                        end - start
-                    );
-
-                    uint32_t ss = ts_node_start_byte(fn), ee = ts_node_end_byte(fn);
-                    std::string called(preprocessedSource + ss, ee - ss);
-                    auto l = called.find_first_not_of(" \t\r\n"),
-                        r = called.find_last_not_of(" \t\r\n");
-                    if (l != std::string::npos && r != std::string::npos)
-                        called = called.substr(l, r - l + 1);
-                    if (bodyMap.count(called) && !visited.count(called)) {
-                        visited.insert(called);
-                        work.push_back(called);
-                    }
-                }
-            }
-            uint32_t c = ts_node_child_count(n);
-            for (uint32_t i = 0; i < c; ++i) walk(ts_node_child(n, i));
-            };
-        walk(body);
-        };
-
-    while (!work.empty()) {
-        auto fn = work.back(); work.pop_back();
-        auto it = bodyMap.find(fn);
-        if (it != bodyMap.end())
-            for (auto& body : it->second) {
-                enqueueCalls(body);
-            }
-    }
-
-    std::vector<Range> removeRanges;
-    for (auto const& kv : defMap) {
-        if (!visited.count(kv.first)) {
-            for (auto& defNode : kv.second) {
-                uint32_t origStart = ts_node_start_byte(defNode);
-                uint32_t origEnd = ts_node_end_byte(defNode);
-                uint32_t adjStart = shrinkToIncludeDecorators(
-                    preprocessedSource, origStart);
-                removeRanges.push_back({ adjStart, origEnd });
-            }
-        }
-    }
-
-    // merge overlapping removeRanges
-    std::sort(removeRanges.begin(), removeRanges.end(),
-        [](auto& a, auto& b) { return a.start < b.start; });
-    std::vector<Range> merged;
-    for (auto& r : removeRanges) {
-        if (merged.empty() || r.start > merged.back().end) {
-            merged.push_back(r);
-        }
-        else {
-            merged.back().end = std::max(merged.back().end, r.end);
-        }
-    }
-
-    // keepRanges as complement of merged removeRanges
-    std::vector<Range> keep;
-    uint32_t lastEnd = 0;
-    for (auto& r : merged) {
-        if (lastEnd < r.start)
-            keep.push_back({ lastEnd, r.start });
-        lastEnd = std::max(lastEnd, r.end);
-    }
-    if (lastEnd < sourceSize)
-        keep.push_back({ lastEnd, (uint32_t)sourceSize });
-
-    // splice keepRanges together
-    std::string out;
-    out.reserve(sourceSize);
-    for (auto& r : keep)
-        out.append(preprocessedSource + r.start, r.end - r.start);
-
-    // cleanup
-    ts_tree_delete(tree);
-    ts_parser_delete(parser);
-
-    return out;
-}
-
 void PSOManager::GetPreprocessedBlob(
     const std::wstring& filename,
     const std::wstring& entryPoint,
@@ -1603,24 +1098,47 @@ void PSOManager::CompileShaderForSlot(
     );
 }
 
-uint64_t hash_list(const std::vector<std::string>& list) {
-    const uint64_t FNV_offset = 146527ULL;
-    const uint64_t FNV_prime = 1099511628211ULL;
-    uint64_t h = FNV_offset;
-    for (auto& s : list) {
-        uint32_t L = uint32_t(s.size());
-        // mix in the length
-        for (int i = 0; i < 4; ++i) {
-            h ^= (uint8_t)(L >> (i * 8));
-            h *= FNV_prime;
-        }
-        // mix in each character
-        for (unsigned char c : s) {
-            h ^= c;
-            h *= FNV_prime;
-        }
+ShaderLibraryBundle PSOManager::CompileShaderLibrary(const ShaderLibraryInfo& libraryInfo, const std::vector<DxcDefine>& defines) {
+    Microsoft::WRL::ComPtr<ID3DBlob> outBlob;
+    DxcBuffer dxcPreprocessBuff;
+
+	// Preprocess
+    GetPreprocessedBlob(
+        libraryInfo.filename,
+        L"",
+        libraryInfo.target,
+        defines,
+        outBlob
+	);
+    dxcPreprocessBuff.Ptr = outBlob->GetBufferPointer();
+    dxcPreprocessBuff.Size = outBlob->GetBufferSize();
+    dxcPreprocessBuff.Encoding = 0;
+
+    // Compile BRSL info
+    PreprocessedLibraryResult libPP = PreprocessShaderLibrary(dxcPreprocessBuff);
+
+    DxcBuffer finalBuf = dxcPreprocessBuff;
+    finalBuf.Ptr = libPP.finalSource.data();
+    finalBuf.Size = libPP.finalSource.size();
+
+    // compile as a library target (lib_6_8) without entry point
+    CompileShader(libraryInfo.filename, /*entryPoint*/ L"", libraryInfo.target, finalBuf, defines, outBlob);
+
+	std::vector<ResourceIdentifier> mandatoryResourceDescriptors;
+    for (const auto& idStr : libPP.mandatoryIDs) {
+		mandatoryResourceDescriptors.push_back(ResourceIdentifier{ idStr });
     }
-    return h;
+	std::vector<ResourceIdentifier> optionalResourceDescriptors;
+    for (const auto& idStr : libPP.optionalIDs) {
+        optionalResourceDescriptors.push_back(ResourceIdentifier{ idStr });
+	}
+
+    ShaderLibraryBundle bundle;
+	bundle.libraryBlob = outBlob;
+    bundle.resourceDescriptorSlots = {mandatoryResourceDescriptors, optionalResourceDescriptors};
+	bundle.resourceIDsHash = libPP.resourceIDsHash;
+	return bundle;
+
 }
 
 ShaderBundle PSOManager::CompileShaders(const ShaderInfoBundle& info) {
@@ -1803,7 +1321,9 @@ std::vector<LPCWSTR> PSOManager::BuildArguments(
 {
     std::vector<LPCWSTR> args;
 
-    args.push_back(L"-E"); args.push_back(opts.entryPoint.c_str());
+	if (opts.entryPoint != L"") { // SM 6.8 libraries don't have entry points
+        args.push_back(L"-E"); args.push_back(opts.entryPoint.c_str());
+    }
     args.push_back(L"-T"); args.push_back(opts.target.c_str());
 
     if (opts.warningsAsErrors)

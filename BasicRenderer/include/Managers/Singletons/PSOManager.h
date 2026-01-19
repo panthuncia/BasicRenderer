@@ -56,6 +56,13 @@ struct ShaderInfo {
     ShaderInfo(const std::wstring& file, const std::wstring& entry, const std::wstring& tgt)
         : filename(file), entryPoint(entry), target(tgt) {}
 };
+
+struct ShaderLibraryInfo {
+    std::wstring filename;
+	std::wstring target;
+    ShaderLibraryInfo(const std::wstring& file, const std::wstring& tgt) : filename(file), target(tgt) {}
+};
+
 struct ShaderInfoBundle {
     ShaderInfoBundle(const std::vector<DxcDefine>& defs, bool debug = false, bool warnings = true) : 
         defines(defs), enableDebugInfo(debug), warningsAsErrors(warnings) {}
@@ -79,6 +86,12 @@ struct ShaderBundle {
     Microsoft::WRL::ComPtr<ID3DBlob> computeShader;
 	PipelineResources resourceDescriptorSlots;
 	uint64_t resourceIDsHash = 0;
+};
+
+struct ShaderLibraryBundle {
+    Microsoft::WRL::ComPtr<ID3DBlob> libraryBlob;
+    PipelineResources resourceDescriptorSlots;
+    uint64_t resourceIDsHash = 0;
 };
 
 class PSOManager {
@@ -117,6 +130,8 @@ public:
     void ReloadShaders();
     std::vector<DxcDefine> GetShaderDefines(UINT psoFlags, MaterialCompileFlags materialFlags);
 	ShaderBundle CompileShaders(const ShaderInfoBundle& shaderInfoBundle);
+	ShaderLibraryBundle CompileShaderLibrary(const ShaderLibraryInfo& libraryInfo, const std::vector<DxcDefine>& defines = {});
+
     void GetPreprocessedBlob(
         const std::wstring& filename,
         const std::wstring& entryPoint,

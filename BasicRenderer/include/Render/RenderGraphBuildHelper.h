@@ -29,7 +29,7 @@
 #include "RenderPasses/PPLLResolvePass.h"
 #include "RenderPasses/PostProcessing/ScreenSpaceReflectionsPass.h"
 #include "RenderPasses/PostProcessing/SpecularIBLPass.h"
-
+#include "RenderPasses/HierarchialCullingPass.h"
 
 void CreateGBufferResources(RenderGraph* graph) {
     // GBuffer resources
