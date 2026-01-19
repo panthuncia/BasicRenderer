@@ -142,6 +142,9 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
 	bool wireframeEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 	bool visibilityRenderingEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableVisibilityRendering")();
 
+    graph->BuildComputePass("hierarchialCullingPass")
+		.Build<HierarchialCullingPass>(HierarchialCullingPassInputs{ true });
+
     graph->BuildRenderPass("ClearLastFrameIndirectDrawUAVsPass") // Clears indirect draws from last frame
         .Build<ClearIndirectDrawCommandUAVsPass>(ClearIndirectDrawCommandUAVPassInputs{ false });
 

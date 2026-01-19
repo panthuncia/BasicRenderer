@@ -26,7 +26,7 @@ inline rg::Hash64 HashValue(const HierarchialCullingPassInputs& i) {
 
 class HierarchialCullingPass : public ComputePass {
 public:
-    HierarchialCullingPass() {
+    HierarchialCullingPass(HierarchialCullingPassInputs inputs) {
         CreateWorkGraph(
             DeviceManager::GetInstance().GetDevice(),
             PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -70,7 +70,7 @@ private:
         rhi::WorkGraphPtr& outGraph)
     {
         // Compile the work-graph library
-		ShaderLibraryInfo libInfo(L"shaders/workgraph_culling.hlsl", L"lib_6_8");
+		ShaderLibraryInfo libInfo(L"shaders/workGraphCulling.hlsl", L"lib_6_8");
         auto compiled = PSOManager::GetInstance().CompileShaderLibrary(libInfo);
 		m_pipelineResources = compiled.resourceDescriptorSlots;
 

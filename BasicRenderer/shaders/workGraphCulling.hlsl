@@ -35,7 +35,7 @@ void WG_ObjectCull(
     uint3 gtid : SV_GroupThreadID,
     [ MaxRecords(64)] NodeOutput<TraverseRecord> Traverse)
 {
-    uint count = inRecs.GetCount();
+    uint count = inRecs.Count();
     uint i = gtid.x;
 
     bool active = (i < count);
@@ -70,11 +70,16 @@ void WG_Traverse(
     [ MaxRecords(256)] NodeOutput<TraverseRecord> Traverse,
     [MaxRecordsSharedWith(Traverse)] NodeOutput<ClusterRecord> ClusterCull)
 {
-    uint count = inRecs.GetCount();
+    uint count = inRecs.Count();
     uint i = gtid.x;
 
     bool active = (i < count);
-    TraverseRecord r = active ? inRecs[i] : (TraverseRecord) 0;
+    TraverseRecord r;
+    if (active) {
+        r = inRecs[i];
+    } else {
+        r = (TraverseRecord) 0;
+    }
 
     // Stub policy:
     // - expand 2 children until depth == 2
@@ -119,11 +124,16 @@ void WG_ClusterCull(
     [ MaxRecords(256)] NodeOutput<RasterRecord> Rasterize,
     [MaxRecordsSharedWith(Rasterize)] NodeOutput<ClusterRecord> OcclusionCull)
 {
-    uint count = inRecs.GetCount();
+    uint count = inRecs.Count();
     uint i = gtid.x;
 
     bool active = (i < count);
-    ClusterRecord r = active ? inRecs[i] : (ClusterRecord) 0;
+    ClusterRecord r;
+    if (active) {
+        r = inRecs[i];
+    } else {
+        r = (ClusterRecord) 0;
+    }
 
         // Stub classification: even clusters -> visible, odd -> need second pass
     bool needsSecondPass = active && ((r.clusterIndex & 1u) != 0u);
@@ -158,11 +168,16 @@ void WG_OcclusionCull(
     uint3 gtid : SV_GroupThreadID,
     [MaxRecords(256)] NodeOutput<RasterRecord> Rasterize)
 {
-    uint count = inRecs.GetCount();
+    uint count = inRecs.Count();
     uint i = gtid.x;
 
     bool active = (i < count);
-    ClusterRecord r = active ? inRecs[i] : (ClusterRecord) 0;
+    ClusterRecord r;
+    if (active) {
+        r = inRecs[i];
+    } else {
+        r = (ClusterRecord) 0;
+    }
 
         // Stub: everything passes on second pass
     uint outCount = active ? 1u : 0u;
@@ -175,7 +190,7 @@ void WG_OcclusionCull(
         outRecord[0].clusterIndex    = r.clusterIndex;
     }
 
-    out.OutputComplete();
+    outRecord.OutputComplete();
 }
 
 // Node: Rasterize (leaf)
@@ -187,7 +202,7 @@ void WG_Rasterize(
     [MaxRecords(256)] GroupNodeInputRecords<RasterRecord> inRecs,
     uint3 gtid : SV_GroupThreadID)
 {
-    uint count = inRecs.GetCount();
+    uint count = inRecs.Count();
     uint i = gtid.x;
 
     if (i >= count) return;
@@ -196,6 +211,6 @@ void WG_Rasterize(
 
     // Append to a visible list buffer (stub)
     uint dst;
-    InterlockedAdd(gVisibleCount[0], 1, dst);
-    gVisibleList[dst] = uint2(r.activeDrawIndex, r.clusterIndex);
+    //InterlockedAdd(gVisibleCount[0], 1, dst);
+    //gVisibleList[dst] = uint2(r.activeDrawIndex, r.clusterIndex);
 }

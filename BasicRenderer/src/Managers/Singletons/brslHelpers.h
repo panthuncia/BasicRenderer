@@ -463,7 +463,7 @@ pruneUnusedCode(const char* preprocessedSource,
             for (auto& defNode : kv.second) {
                 uint32_t origStart = ts_node_start_byte(defNode);
                 uint32_t origEnd = ts_node_end_byte(defNode);
-                uint32_t adjStart = shrinkToIncludeDecorators(
+                uint32_t adjStart = shrinkToIncludeDecorators( //TODO: Probably not needed with new grammar
                     preprocessedSource, origStart);
                 removeRanges.push_back({ adjStart, origEnd });
             }
@@ -512,7 +512,6 @@ struct ShaderEntryPointDesc
 {
     std::string functionName;     // e.g. "MyNode"
     std::string shaderAttribute;  // e.g. "node", "compute", "pixel", etc. (value inside Shader("..."))
-    uint32_t    decoratorStartByte = 0; // start of decorator block (line-based)
     uint32_t    functionStartByte = 0; // ts_node_start_byte(function_definition)
     uint32_t    functionEndByte = 0; // ts_node_end_byte(function_definition)
 };
@@ -680,19 +679,20 @@ static std::vector<ShaderEntryPointDesc> ExtractShaderLibraryEntryPoints(
     for (uint32_t i = 0; i < topCount; ++i)
     {
         TSNode node = ts_node_child(root, i);
-        if (std::string(ts_node_type(node)) != "function_definition")
+        if (std::string(ts_node_type(node)) != "function_definition") {
             continue;
+        }
 
         auto nameOpt = ExtractFunctionName(preprocessedSource, node);
-        if (!nameOpt.has_value())
+        if (!nameOpt.has_value()) {
             continue;
+        }
 
         uint32_t fnStart = ts_node_start_byte(node);
         uint32_t fnEnd = ts_node_end_byte(node);
 
         // decorator expansion:
-        uint32_t decorStart = shrinkToIncludeDecorators(preprocessedSource, fnStart);
-        std::string_view decorBlock(preprocessedSource + decorStart, fnStart - decorStart);
+        std::string_view decorBlock(preprocessedSource + fnStart, fnEnd - fnStart);
 
         auto shaderAttr = TryParseShaderDecorator(decorBlock);
         if (!shaderAttr.has_value())
@@ -701,7 +701,6 @@ static std::vector<ShaderEntryPointDesc> ExtractShaderLibraryEntryPoints(
         ShaderEntryPointDesc ep;
         ep.functionName = std::move(*nameOpt);
         ep.shaderAttribute = std::move(*shaderAttr);
-        ep.decoratorStartByte = decorStart;
         ep.functionStartByte = fnStart;
         ep.functionEndByte = fnEnd;
         out.push_back(std::move(ep));
@@ -1172,7 +1171,7 @@ std::string pruneUnusedCodeMultiRoots(
             uint32_t origStart = ts_node_start_byte(defNode);
             uint32_t origEnd = ts_node_end_byte(defNode);
 
-            uint32_t adjStart = shrinkToIncludeDecorators(preprocessedSource, origStart);
+			uint32_t adjStart = shrinkToIncludeDecorators(preprocessedSource, origStart); // TODO: Probably not needed with new grammar
             removeRanges.push_back({ adjStart, origEnd });
         }
     }
