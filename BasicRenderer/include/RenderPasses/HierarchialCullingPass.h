@@ -11,6 +11,16 @@
 #include "Managers/ViewManager.h"
 #include <boost/container_hash/hash.hpp>
 
+struct ObjectCullRecord
+{
+    uint viewDataIndex; // One record per view *...
+    uint activeDrawSetIndicesSRVIndex; // One record per draw set
+    uint activeDrawCount;
+    uint dispatchGridX; // Drives dispatch size
+	uint dispatchGridY;
+	uint dispatchGridZ;
+};
+
 struct HierarchialCullingPassInputs {
 	bool isFirstPass;
 
@@ -52,7 +62,33 @@ public:
 
 		commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
 
-		
+		BindResourceDescriptorIndices(commandList, m_pipelineResources);
+
+		std::vector<ObjectCullRecord> cullRecords;
+
+		// Build cull records for all indirect buffers
+        context.indirectCommandBufferManager->ForEachIndirectBuffer([&](uint64_t view,
+            MaterialCompileFlags flags,
+            const IndirectWorkload& wl)
+            {
+                if (wl.count == 0) {
+                    return;
+                }
+                auto viewInfo = context.viewManager->Get(view);
+                auto cameraBufferIndex = viewInfo->gpu.cameraBufferIndex;
+				ObjectCullRecord record{};
+				record.viewDataIndex = cameraBufferIndex;
+				record.activeDrawSetIndicesSRVIndex = context.objectManager->GetActiveDrawSetIndices(flags)->GetSRVInfo(0).slot.index;
+				record.activeDrawCount = wl.count;
+				// Calculate dispatch grid size (assuming 64 threads per group)
+				record.dispatchGridX = static_cast<uint>((wl.count + 63) / 64);
+				record.dispatchGridY = 1;
+				record.dispatchGridZ = 1;
+				cullRecords.push_back(record);
+			});
+
+		rhi::WorkGraphDispatchDesc dispatchDesc{};
+
 		return {};
 	}
 

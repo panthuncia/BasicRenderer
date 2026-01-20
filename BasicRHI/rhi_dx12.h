@@ -160,10 +160,10 @@ namespace rhi {
 	};
 	struct Dx12CommandList {
 		Dx12CommandList() {}
-		explicit Dx12CommandList(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> c, Microsoft::WRL::ComPtr<ID3D12CommandAllocator> a, D3D12_COMMAND_LIST_TYPE t, Dx12Device* d)
+		explicit Dx12CommandList(Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList10> c, Microsoft::WRL::ComPtr<ID3D12CommandAllocator> a, D3D12_COMMAND_LIST_TYPE t, Dx12Device* d)
 			: cl(c), alloc(a), type(t), dev(d) {
 		}
-		Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> cl;
+		Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList10> cl;
 		Microsoft::WRL::ComPtr<ID3D12CommandAllocator> alloc;
 		D3D12_COMMAND_LIST_TYPE type{};
 		PipelineLayoutHandle boundLayout{};

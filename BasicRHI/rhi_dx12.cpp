@@ -143,8 +143,8 @@ namespace rhi {
 				case PsoSubobj::Rasterizer: {
 					hasRast = true;
 					auto& R = *static_cast<const SubobjRaster*>(items[i].data);
-					rast.FillMode = ToDx(R.rs.fill);
-					rast.CullMode = ToDx(R.rs.cull);
+					rast.FillMode = ToDX(R.rs.fill);
+					rast.CullMode = ToDX(R.rs.cull);
 					rast.FrontCounterClockwise = R.rs.frontCCW;
 					rast.DepthBias = R.rs.depthBias;
 					rast.DepthBiasClamp = R.rs.depthBiasClamp;
@@ -175,7 +175,7 @@ namespace rhi {
 					depth = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
 					depth.DepthEnable = D.ds.depthEnable;
 					depth.DepthWriteMask = D.ds.depthWrite ? D3D12_DEPTH_WRITE_MASK_ALL : D3D12_DEPTH_WRITE_MASK_ZERO;
-					depth.DepthFunc = ToDx(D.ds.depthFunc);
+					depth.DepthFunc = ToDX(D.ds.depthFunc);
 				} break;
 				case PsoSubobj::RTVFormats: {
 					hasRTV = true;
@@ -914,7 +914,9 @@ namespace rhi {
 			D3D12_FEATURE_DATA_D3D12_OPTIONS9  opt9{};
 			D3D12_FEATURE_DATA_D3D12_OPTIONS11 opt11{};
 			D3D12_FEATURE_DATA_D3D12_OPTIONS12 opt12{};
+			D3D12_FEATURE_DATA_D3D12_OPTIONS14 opt14{};
 			D3D12_FEATURE_DATA_D3D12_OPTIONS16 opt16{};
+			D3D12_FEATURE_DATA_D3D12_OPTIONS21 opt21{};
 			D3D12_FEATURE_DATA_TIGHT_ALIGNMENT ta{};
 
 			// Note: if a CheckFeatureSupport fails, the struct stays zeroed => "unsupported".
@@ -927,7 +929,9 @@ namespace rhi {
 			auto hasOptions9 = SUCCEEDED(dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS9, &opt9, sizeof(opt9)));
 			auto hasOptions11 = SUCCEEDED(dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS11, &opt11, sizeof(opt11)));
 			auto hasOptions12 = SUCCEEDED(dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS12, &opt12, sizeof(opt12)));
+			auto hasOptions14 = SUCCEEDED(dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS14, &opt14, sizeof(opt14)));
 			auto hasOptions16 = SUCCEEDED(dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS16, &opt16, sizeof(opt16)));
+			auto hasOptions21 = SUCCEEDED(dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS21, &opt21, sizeof(opt21)));
 			auto hasTightAlignment = SUCCEEDED(dev->CheckFeatureSupport(D3D12_FEATURE_D3D12_TIGHT_ALIGNMENT, &ta, sizeof(ta)));
 
 			D3D12_FEATURE_DATA_SHADER_MODEL sm{};
@@ -1116,6 +1120,19 @@ namespace rhi {
 					out->gpuUploadHeapSupported = gpuUploadHeapSupported;
 					out->tightAlignmentSupported = tightAlignmentSupported;
 					out->createNotZeroedHeapSupported = createNotZeroedSupported;
+				} break;
+				case FeatureInfoStructType::WorkGraphs: {
+					if (h->structSize < sizeof(WorkGraphFeatureInfo)) return Result::InvalidArgument;
+					auto* out = reinterpret_cast<WorkGraphFeatureInfo*>(h);
+					if (hasOptions21) {
+						out->computeNodes = (opt21.WorkGraphsTier != D3D12_WORK_GRAPHS_TIER_NOT_SUPPORTED);
+						out->meshNodes = false; // DX12 does not expose mesh node support yet
+					}
+					else {
+						out->computeNodes = false;
+						out->meshNodes = false;
+					}
+					
 				} break;
 				default:
 					// Unknown sType: ignore
@@ -1905,10 +1922,11 @@ namespace rhi {
 				RHI_FAIL(Result::InvalidArgument);
 			}
 
-			ComPtr<ID3D12GraphicsCommandList7> cl;
+			ComPtr<ID3D12GraphicsCommandList10> cl; // Needs at least version 10 for work graphs
 			if (const auto hr = impl->pNativeDevice->CreateCommandList(0, A->type, A->alloc.Get(), nullptr, IID_PPV_ARGS(&cl)); FAILED(hr)) {
 				RHI_FAIL(ToRHI(hr));
 			}
+			
 			const Dx12CommandList rec(cl, A->alloc, A->type, impl);
 			const auto h = impl->commandLists.alloc(rec);
 
@@ -3443,6 +3461,76 @@ namespace rhi {
 			l->cl->DispatchMesh(x, y, z);
 		}
 
+		static void cl_setWorkGraph(CommandList* cl, const WorkGraphHandle& h, const ResourceHandle& backingMemory, bool resetBackingMemory) noexcept {
+			auto* l = dx12_detail::CL(cl);
+			if (!l) {
+				BreakIfDebugging();
+				return;
+			}
+			auto wg = l->dev->workGraphs.get(h);
+			auto backingMem = l->dev->resources.get(backingMemory);
+			D3D12_SET_PROGRAM_DESC desc{};
+			desc.Type = D3D12_PROGRAM_TYPE_WORK_GRAPH;
+			desc.WorkGraph.Flags = resetBackingMemory ? static_cast<D3D12_SET_WORK_GRAPH_FLAGS>(D3D12_SET_WORK_GRAPH_FLAG_INITIALIZE) : static_cast<D3D12_SET_WORK_GRAPH_FLAGS>(D3D12_WORK_GRAPH_FLAG_NONE);
+			desc.WorkGraph.NodeLocalRootArgumentsTable = D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE(0); // TODO?
+			desc.WorkGraph.ProgramIdentifier = wg->programIdentifier;
+			D3D12_GPU_VIRTUAL_ADDRESS_RANGE bgMemRange{};
+			bgMemRange.StartAddress = backingMem->res->GetGPUVirtualAddress();
+			bgMemRange.SizeInBytes = wg->memoryRequirements.MaxSizeInBytes;
+			desc.WorkGraph.BackingMemory = bgMemRange;
+		}
+
+		static void cl_dispatchWorkGraph(CommandList* cl, const WorkGraphDispatchDesc& desc) noexcept {
+			auto* l = dx12_detail::CL(cl);
+			if (!l) {
+				BreakIfDebugging();
+				return;
+			}
+
+			D3D12_DISPATCH_GRAPH_DESC d{};
+			d.Mode = ToDX(desc.dispatchMode);
+			switch (desc.dispatchMode) {
+			case WorkGraphDispatchMode::NodeCpuInput: {
+				d.NodeCPUInput = ToDX(desc.nodeCpuInput);
+				l->cl->DispatchGraph(&d);
+				return;
+			} break;
+			case WorkGraphDispatchMode::NodeGpuInput: { // TODO: Validate
+				D3D12_NODE_GPU_INPUT ngi{};
+				ngi.EntrypointIndex = desc.nodeGpuInput.entryPointIndex;
+				ngi.NumRecords = desc.nodeGpuInput.numRecords;
+				D3D12_GPU_VIRTUAL_ADDRESS_AND_STRIDE vas{};
+				vas.StartAddress = l->dev->resources.get(desc.nodeGpuInput.inputBuffer)->res->GetGPUVirtualAddress();
+				vas.StrideInBytes = desc.nodeGpuInput.recordByteStride; // TODO: Why is this specified here as well? Will this ever be different?
+				ngi.Records = vas;
+				l->cl->DispatchGraph(&d);
+				return;
+			} break;
+			case WorkGraphDispatchMode::MultiNodeCpuInput: {
+				D3D12_MULTI_NODE_CPU_INPUT mni{};
+				std::vector<D3D12_NODE_CPU_INPUT> mxNodes;
+				mni = ToDX(desc.multiNodeCpuInput, mxNodes);
+				d.MultiNodeCPUInput = mni;
+				l->cl->DispatchGraph(&d);
+				return;
+			} break;
+			case WorkGraphDispatchMode::MultiNodeGpuInput: { // TODO: Microsoft's headers have a mistake here- D3D12_DISPATCH_GRAPH_DESC.MultiNodeGPUInput is of the wrong type?
+				D3D12_MULTI_NODE_GPU_INPUT mng{};
+				D3D12_GPU_VIRTUAL_ADDRESS_AND_STRIDE vas{};
+				vas.StartAddress = l->dev->resources.get(desc.multiNodeGpuInput.inputBuffer)->res->GetGPUVirtualAddress();
+				vas.StrideInBytes = desc.multiNodeGpuInput.recordByteStride;
+				mng.NodeInputs = vas;
+				mng.NumNodeInputs = desc.multiNodeGpuInput.numNodeInputs;
+				BreakIfDebugging();
+				//d.MultiNodeGPUInput = mng;
+				//l->cl->DispatchGraph(&d);
+			} break;
+			default:
+				BreakIfDebugging();
+				break;
+			}
+		}
+
 		// ---------------- Swapchain vtable funcs ----------------
 		static uint32_t sc_count(Swapchain* sc) noexcept { return dx12_detail::SC(sc)->count; }
 		static uint32_t sc_curr(Swapchain* sc) noexcept { return dx12_detail::SC(sc)->pSlProxySC->GetCurrentBackBufferIndex(); }
@@ -4149,6 +4237,8 @@ namespace rhi {
 		&cl_pushConstants,
 		&cl_setPrimitiveTopology,
 		&cl_dispatchMesh,
+		&cl_setWorkGraph,
+		&cl_dispatchWorkGraph,
 		&cl_setName,
 		1u
 	};

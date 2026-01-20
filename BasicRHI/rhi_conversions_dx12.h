@@ -140,25 +140,12 @@ namespace rhi {
 		return D3D12_BARRIER_SYNC_ALL;
 	}
 
-	static inline D3D12_FILL_MODE ToDx(const FillMode f) { return f == FillMode::Wireframe ? D3D12_FILL_MODE_WIREFRAME : D3D12_FILL_MODE_SOLID; }
-	static inline D3D12_CULL_MODE  ToDx(const CullMode c) {
+	static inline D3D12_FILL_MODE ToDX(const FillMode f) { return f == FillMode::Wireframe ? D3D12_FILL_MODE_WIREFRAME : D3D12_FILL_MODE_SOLID; }
+	static inline D3D12_CULL_MODE  ToDX(const CullMode c) {
 		switch (c) {
 		case CullMode::None:return D3D12_CULL_MODE_NONE;
 		case CullMode::Front:return D3D12_CULL_MODE_FRONT;
 		default:return D3D12_CULL_MODE_BACK;
-		}
-	}
-	static inline D3D12_COMPARISON_FUNC ToDx(const CompareOp c) {
-		using C = D3D12_COMPARISON_FUNC;
-		switch (c) {
-		case CompareOp::Never:return C::D3D12_COMPARISON_FUNC_NEVER;
-		case CompareOp::Less:return C::D3D12_COMPARISON_FUNC_LESS;
-		case CompareOp::Equal:return C::D3D12_COMPARISON_FUNC_EQUAL;
-		case CompareOp::LessEqual:return C::D3D12_COMPARISON_FUNC_LESS_EQUAL;
-		case CompareOp::Greater:return C::D3D12_COMPARISON_FUNC_GREATER;
-		case CompareOp::NotEqual:return C::D3D12_COMPARISON_FUNC_NOT_EQUAL;
-		case CompareOp::GreaterEqual:return C::D3D12_COMPARISON_FUNC_GREATER_EQUAL;
-		default:return C::D3D12_COMPARISON_FUNC_ALWAYS;
 		}
 	}
 	static inline DXGI_FORMAT ToDxgi(const Format f) {
@@ -661,4 +648,32 @@ namespace rhi {
 		}
 	}
 
+	inline static D3D12_DISPATCH_MODE ToDX(WorkGraphDispatchMode m) noexcept {
+		switch (m) {
+		case WorkGraphDispatchMode::NodeCpuInput: return D3D12_DISPATCH_MODE_NODE_CPU_INPUT;
+		case WorkGraphDispatchMode::NodeGpuInput: return D3D12_DISPATCH_MODE_NODE_GPU_INPUT;
+		case WorkGraphDispatchMode::MultiNodeCpuInput: return D3D12_DISPATCH_MODE_MULTI_NODE_CPU_INPUT;
+		case WorkGraphDispatchMode::MultiNodeGpuInput: return D3D12_DISPATCH_MODE_MULTI_NODE_GPU_INPUT;
+		default: return D3D12_DISPATCH_MODE_NODE_CPU_INPUT;
+		}
+	}
+
+	inline static D3D12_NODE_CPU_INPUT ToDX(const WorkGraphNodeCpuInput& input) noexcept {
+		D3D12_NODE_CPU_INPUT d{};
+		d.EntrypointIndex = input.entryPointIndex;
+		d.NumRecords = input.numRecords;
+		d.pRecords = input.pRecords;
+		d.RecordStrideInBytes = input.recordByteStride;
+		return d;
+	}
+
+	inline static D3D12_MULTI_NODE_CPU_INPUT ToDX(const WorkGraphMultiNodeCpuInput& input, std::vector<D3D12_NODE_CPU_INPUT>& outNodeInputs) noexcept {
+		D3D12_MULTI_NODE_CPU_INPUT d{};
+		d.NodeInputStrideInBytes = input.nodeInputByteStride;
+		d.NumNodeInputs = input.numNodeInputs;
+		for (uint32_t i = 0; i < input.numNodeInputs; ++i) {
+			outNodeInputs.push_back(ToDX(input.nodeInputs[i]));
+		}
+		return d;
+	}
 }

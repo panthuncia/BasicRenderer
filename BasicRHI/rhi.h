@@ -838,6 +838,7 @@ namespace rhi {
 		return (static_cast<uint32_t>(a) & static_cast<uint32_t>(b)) != static_cast<uint32_t>(b);
 	}
 
+	// Mirrors D3D12_WORK_GRAPH_DESC.
 	struct WorkGraphDesc {
 		const char* programName{};              // D3D12_WORK_GRAPH_DESC::ProgramName
 		WorkGraphFlags flags{ WorkGraphFlags::None };
@@ -849,6 +850,51 @@ namespace rhi {
 		bool allowStateObjectAdditions{ false }; // Adds D3D12_STATE_OBJECT_CONFIG_ALLOW_STATE_OBJECT_ADDITIONS
 		const char* debugName{ nullptr };
 	};
+
+	struct WorkGraphNodeCpuInput {
+		uint32_t entryPointIndex{};
+		uint32_t numRecords{};
+		const void* pRecords{};
+		uint64_t recordByteStride{};
+	};
+
+	struct WorkGraphNodeGpuInput {
+		uint32_t entryPointIndex{};
+		ResourceHandle inputBuffer{};
+		uint64_t bufferOffset{};
+		uint32_t numRecords{};
+		uint64_t recordByteStride{};
+	};
+
+	struct WorkGraphMultiNodeCpuInput {
+		uint32_t numNodeInputs{};
+		const WorkGraphNodeCpuInput* nodeInputs{};
+		uint64_t nodeInputByteStride{};
+	};
+
+	struct WorkGraphMultiNodeGpuInput {
+		uint32_t numNodeInputs{};
+		ResourceHandle inputBuffer{};
+		uint64_t recordByteStride{};
+	};
+
+	enum class WorkGraphDispatchMode : uint32_t {
+		NodeCpuInput,
+		NodeGpuInput,
+		MultiNodeCpuInput,
+		MultiNodeGpuInput
+	};
+
+	struct WorkGraphDispatchDesc {
+		WorkGraphDispatchMode dispatchMode{};
+		union {
+			WorkGraphNodeCpuInput nodeCpuInput;
+			WorkGraphNodeGpuInput nodeGpuInput;
+			WorkGraphMultiNodeCpuInput multiNodeCpuInput;
+			WorkGraphMultiNodeGpuInput multiNodeGpuInput;
+		};
+	};
+
 	struct RasterState {
 		FillMode fill = FillMode::Solid;
 		CullMode cull = CullMode::Back;
@@ -1776,6 +1822,8 @@ namespace rhi {
 			const void* data) noexcept;
 		void (*setPrimitiveTopology)(CommandList*, PrimitiveTopology) noexcept;
 		void (*dispatchMesh)(CommandList*, uint32_t x, uint32_t y, uint32_t z) noexcept; // if supported by the backend
+		void (*setWorkGraph)(CommandList*, const WorkGraphHandle& wg, const ResourceHandle& backingMemory, bool resetBackingMemory) noexcept; // if supported by the backend
+		void (*dispatchWorkGraph)(CommandList*, const WorkGraphDispatchDesc& desc) noexcept; // if supported by the backend
 		void (*setName)(CommandList*, const char*) noexcept;
 		uint32_t abi_version = 1;
 	};
@@ -1831,6 +1879,8 @@ namespace rhi {
 			const void* data) noexcept;
 		void SetPrimitiveTopology(PrimitiveTopology t) noexcept;
 		void DispatchMesh(uint32_t x, uint32_t y, uint32_t z) noexcept;
+		void SetWorkGraph(const WorkGraphHandle& wg, const ResourceHandle& backingMemory, bool resetBackingMemory) noexcept;
+		void DispatchWorkGraph(const WorkGraphDispatchDesc& desc) noexcept;
 
 	private:
 		CommandListHandle handle;
@@ -2217,6 +2267,12 @@ namespace rhi {
 	inline void CommandList::SetName(const char* n) noexcept { vt->setName(this, n); }
 	inline void CommandList::DispatchMesh(uint32_t x, uint32_t y, uint32_t z) noexcept {
 		vt->dispatchMesh(this, x, y, z);
+	}
+	inline void CommandList::SetWorkGraph(const WorkGraphHandle& wg, const ResourceHandle& backingMemory, bool resetBackingMemory) noexcept {
+		vt->setWorkGraph(this, wg, backingMemory, resetBackingMemory);
+	}
+	inline void CommandList::DispatchWorkGraph( const WorkGraphDispatchDesc& desc) noexcept {
+		vt->dispatchWorkGraph(this, desc);
 	}
 
 	struct DeviceCreateInfo { Backend backend = Backend::D3D12; uint32_t framesInFlight = 3; bool enableDebug = true; };
