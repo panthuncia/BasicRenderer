@@ -401,6 +401,7 @@ namespace rhi {
 	extern const SamplerVTable g_svt;
 	extern const TimelineVTable g_tlvt;
 	extern const HeapVTable g_hevt;
+	extern const WorkGraphVTable g_wgvt;
 
 	// ---------------- Device vtable funcs ----------------
 

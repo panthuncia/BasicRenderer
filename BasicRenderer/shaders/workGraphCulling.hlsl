@@ -33,13 +33,13 @@ struct RasterRecord
 // Node: ObjectCull (entry)
 [Shader("node")]
 [NodeID("ObjectCull")]
-[NodeLaunch("broadcast")]
+[NodeLaunch("broadcasting")]
 [NumThreads(64, 1, 1)]
 [NodeMaxDispatchGrid(10000,1,1)] // TODO: 2D linearize
 void WG_ObjectCull(
     DispatchNodeInputRecord<ObjectCullRecord> inRec,
     const uint3 vGroupThreadID : SV_GroupThreadID,
-    const uint3 vDispatchThreadID : SV_DispatchThreadID
+    const uint3 vDispatchThreadID : SV_DispatchThreadID,
     [MaxRecords(64)] NodeOutput<TraverseRecord> Traverse)
 {
     if (vDispatchThreadID.x >= inRec.Get().activeDrawCount){
@@ -58,13 +58,9 @@ void WG_ObjectCull(
     uint outIndex = vGroupThreadID.x;
     ThreadNodeOutputRecords<TraverseRecord> outRecord = Traverse.GetThreadNodeOutputRecords(outIndex);
 
-    if (active)
-    {
-        ObjectCullRecord r = inRecs[i];
-        outRecord[0].perMeshInstanceIndex = perMeshInstanceBufferIndex;
-        outRecord[0].nodeIndex = 0;
-        outRecord[0].depth = 0;
-    }
+    outRecord[0].perMeshInstanceIndex = perMeshInstanceBufferIndex;
+    outRecord[0].nodeIndex = 0;
+    outRecord[0].depth = 0;
 
     outRecord.OutputComplete();
 }
@@ -158,7 +154,7 @@ void WG_ClusterCull(
 
     if (rasterCount)
     {
-        rasterOut[0].perMeshInstanceBufferIndex = r.perMeshInstanceBufferIndex;
+        rasterOut[0].perMeshInstanceIndex = r.perMeshInstanceIndex;
         rasterOut[0].clusterIndex    = r.clusterIndex;
     }
     if (occCount)
@@ -198,7 +194,7 @@ void WG_OcclusionCull(
 
     if (active)
     {
-        outRecord[0].perMeshInstanceBufferIndex = r.perMeshInstanceBufferIndex;
+        outRecord[0].perMeshInstanceIndex = r.perMeshInstanceIndex;
         outRecord[0].clusterIndex    = r.clusterIndex;
     }
 

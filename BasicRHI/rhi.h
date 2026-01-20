@@ -1523,6 +1523,7 @@ namespace rhi {
 
 	struct WorkGraphVTable {
 		void (*setName)(WorkGraph*, const char*) noexcept;
+		uint64_t(*getRequiredScratchMemorySize)(WorkGraph*) noexcept;
 		uint32_t abi_version = 1;
 	};
 	class WorkGraph {
@@ -1537,6 +1538,7 @@ namespace rhi {
 		constexpr bool IsValid() const noexcept { return static_cast<bool>(*this); }
 		constexpr void Reset() noexcept { impl = nullptr; vt = nullptr; }
 		const WorkGraphHandle& GetHandle() const noexcept { return handle; }
+		uint64_t GetRequiredScratchMemorySize() noexcept { return vt->getRequiredScratchMemorySize(this); }
 		void SetName(const char* n) noexcept { vt->setName(this, n); }
 	private:
 		WorkGraphHandle handle;

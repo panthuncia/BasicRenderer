@@ -283,7 +283,6 @@ namespace rhi {
 			}
 
 			// Feature gate, should have already checked through RHI, but just in case
-#if defined(D3D12_FEATURE_D3D12_OPTIONS21)
 			{
 				D3D12_FEATURE_DATA_D3D12_OPTIONS21 opt{};
 				if (FAILED(dimpl->pNativeDevice->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS21, &opt, sizeof(opt)))) {
@@ -293,9 +292,6 @@ namespace rhi {
 					return Result::Unsupported;
 				}
 			}
-#else
-			return Result::Unsupported;
-#endif
 
 			struct BuildStorage {
 				std::deque<std::wstring> ws;
@@ -3889,6 +3885,14 @@ namespace rhi {
 		}
 
 		// ------------------ WorkGraph vtable funcs ----------------
+		static uint64_t wg_getRequiredScratchMemorySize(WorkGraph* wg) noexcept {
+			auto* W = dx12_detail::WG(wg);
+			if (!W) {
+				BreakIfDebugging();
+				return 0;
+			}
+			return W->memoryRequirements.MaxSizeInBytes;
+		}
 		static void wg_setName(WorkGraph* wg, const char* n) noexcept {
 			if (!n) {
 				BreakIfDebugging();
@@ -4275,6 +4279,7 @@ namespace rhi {
 	};
 	const WorkGraphVTable g_wgvt = {
 		&wg_setName,
+		&wg_getRequiredScratchMemorySize,
 		1u
 	};
 	const PipelineLayoutVTable g_plvt = {

@@ -41,13 +41,20 @@ public:
             DeviceManager::GetInstance().GetDevice(),
             PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
 			m_workGraph);
+        auto memSize = m_workGraph->GetRequiredScratchMemorySize();
+        m_scratchBuffer = Buffer::CreateShared( // TODO: Make a way for the graph to provide things like this, to allow for aliasing
+            rhi::HeapType::DeviceLocal,
+            memSize,
+			true);
+		m_scratchBuffer->ApplyMetadataComponentBundle(
+            EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Work graph scratch buffer" }));
 	}
 
 	~HierarchialCullingPass() {
 	}
 
 	void DeclareResourceUsages(ComputePassBuilder* builder) {
-		
+        builder->WithUnorderedAccess(m_scratchBuffer);
 	}
 
 	void Setup() override {
@@ -87,6 +94,8 @@ public:
 				cullRecords.push_back(record);
 			});
 
+		commandList.SetWorkGraph(m_workGraph->GetHandle(), m_scratchBuffer->GetAPIResource().GetHandle(), true); // Reset every time for now
+
 		rhi::WorkGraphDispatchDesc dispatchDesc{};
 
 		return {};
@@ -99,6 +108,7 @@ public:
 private:
 	PipelineResources m_pipelineResources;
 	rhi::WorkGraphPtr m_workGraph;
+	std::shared_ptr<Buffer> m_scratchBuffer;
 
     rhi::Result CreateWorkGraph(
         rhi::Device device,
