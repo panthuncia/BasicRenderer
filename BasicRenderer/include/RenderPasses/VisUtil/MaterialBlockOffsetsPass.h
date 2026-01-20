@@ -9,7 +9,7 @@ class MaterialBlockOffsetsPass : public ComputePass {
 public:
     MaterialBlockOffsetsPass() {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
-            PSOManager::GetInstance().GetComputeRootSignature(),
+            PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
             L"shaders/materialPrefixSum.hlsl",
             L"BlockOffsetsCS",
             {},

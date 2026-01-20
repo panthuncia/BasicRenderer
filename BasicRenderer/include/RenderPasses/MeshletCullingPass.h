@@ -272,7 +272,7 @@ private:
 		}
 
 		m_cullingPSO = PSOManager::GetInstance().MakeComputePipeline(
-			PSOManager::GetInstance().GetComputeRootSignature(),
+			PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
 			L"shaders/meshletCulling.hlsl",
 			L"MeshletCullingCSMain",
 			defines,
@@ -284,14 +284,14 @@ private:
 		defines.push_back(visibilityDefine);
 
 		m_cullingWithVisibilityDataPSO = PSOManager::GetInstance().MakeComputePipeline(
-			PSOManager::GetInstance().GetComputeRootSignature(),
+			PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
 			L"shaders/meshletCulling.hlsl",
 			L"MeshletCullingCSMain",
 			defines,
 			"Meshlet Culling with Visibility Data Compute Pipeline");
 
 		m_clearPSO = PSOManager::GetInstance().MakeComputePipeline(
-			PSOManager::GetInstance().GetComputeRootSignature(),
+			PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
 			L"shaders/meshletCulling.hlsl",
 			L"ClearMeshletCullingCSMain",
 			{},
@@ -322,7 +322,7 @@ class RewriteOccluderMeshletVisibilityPass : public ComputePass {
 public:
 	RewriteOccluderMeshletVisibilityPass() {
 		m_rewriteVisibilityPSO = PSOManager::GetInstance().MakeComputePipeline(
-			PSOManager::GetInstance().GetComputeRootSignature(),
+			PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
 			L"shaders/meshletCulling.hlsl",
 			L"RewriteOccluderMeshletVisibilityCS",
 			{},

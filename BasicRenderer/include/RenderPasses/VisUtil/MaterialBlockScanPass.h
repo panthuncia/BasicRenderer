@@ -9,7 +9,7 @@ class MaterialBlockScanPass : public ComputePass {
 public:
     explicit MaterialBlockScanPass() {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
-            PSOManager::GetInstance().GetComputeRootSignature(),
+            PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
             L"shaders/materialPrefixSum.hlsl",
             L"BlockScanCS",
             {},

@@ -119,7 +119,7 @@ public:
 
     const PipelineState& GetDeferredPSO(UINT psoFlags);
 
-    PipelineState MakeComputePipeline(rhi::PipelineLayout layout,
+    PipelineState MakeComputePipeline(rhi::PipelineLayoutHandle layout,
         const wchar_t* shaderPath,
         const wchar_t* entryPoint,
         std::vector<DxcDefine> defines = {},

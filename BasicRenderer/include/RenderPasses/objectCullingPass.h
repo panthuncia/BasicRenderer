@@ -151,7 +151,7 @@ private:
 		}
 
 		m_PSO = PSOManager::GetInstance().MakeComputePipeline(
-			PSOManager::GetInstance().GetComputeRootSignature(),
+			PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
 			L"shaders/objectCulling.hlsl",
 			L"ObjectCullingCSMain",
 			defines,
@@ -160,7 +160,7 @@ private:
 		defines.push_back({ L"BLEND_OBJECTS", L"1" });
 
 		m_blendPSO = PSOManager::GetInstance().MakeComputePipeline(
-			PSOManager::GetInstance().GetComputeRootSignature(),
+			PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
 			L"shaders/objectCulling.hlsl",
 			L"ObjectCullingCSMain",
 			defines,

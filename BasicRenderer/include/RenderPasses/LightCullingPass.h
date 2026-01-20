@@ -77,7 +77,7 @@ private:
 
 	void CreatePSO() {
 		m_PSO = PSOManager::GetInstance().MakeComputePipeline(
-			PSOManager::GetInstance().GetComputeRootSignature(),
+			PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
 			L"shaders/lightCulling.hlsl",
 			L"CSMain",
 			{},

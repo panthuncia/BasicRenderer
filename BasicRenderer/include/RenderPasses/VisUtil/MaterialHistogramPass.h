@@ -7,7 +7,7 @@ class MaterialHistogramPass : public ComputePass {
 public:
     MaterialHistogramPass() {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
-            PSOManager::GetInstance().GetComputeRootSignature(),
+            PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
             L"shaders/VisUtil.hlsl",
             L"MaterialHistogramCS",
             {},

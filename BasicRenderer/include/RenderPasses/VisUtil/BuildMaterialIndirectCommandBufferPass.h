@@ -12,7 +12,7 @@ public:
     BuildMaterialIndirectCommandBufferPass() {
         // Build PSO for the args builder kernel
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
-            PSOManager::GetInstance().GetComputeRootSignature(),
+            PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
             L"shaders/VisUtil.hlsl",
             L"BuildEvaluateIndirectArgsCS",
             {},

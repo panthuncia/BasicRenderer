@@ -79,7 +79,7 @@ public:
                 auto [newIter, _] = m_psoCache.emplace(
                     flags,
                     psoMgr.MakeComputePipeline(
-                        psoMgr.GetComputeRootSignature(),
+                        psoMgr.GetComputeRootSignature().GetHandle(),
                         L"shaders/VisUtil.hlsl",
                         L"EvaluateMaterialGroupCS",
                         psoMgr.GetShaderDefines(0, flags),

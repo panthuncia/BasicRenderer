@@ -53,7 +53,7 @@ private:
     {
         auto& psoManager = PSOManager::GetInstance();
         PrefilterDepths16x16PSO = psoManager.MakeComputePipeline(
-            psoManager.GetRootSignature(),
+            psoManager.GetRootSignature().GetHandle(),
             L"shaders/GTAO.hlsl",
             L"CSPrefilterDepths16x16"
 		);

@@ -856,7 +856,7 @@ PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags)
     auto defines = GetShaderDefines(psoFlags, MaterialCompileFlags::MaterialCompileNone);
 
     PipelineState pso = MakeComputePipeline(
-        GetComputeRootSignature(),
+        GetComputeRootSignature().GetHandle(),
         L"shaders/deferred.hlsl",
         L"DeferredCSMain",
         defines,
@@ -865,7 +865,7 @@ PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags)
     return pso;
 }
 
-PipelineState PSOManager::MakeComputePipeline(rhi::PipelineLayout layout,
+PipelineState PSOManager::MakeComputePipeline(rhi::PipelineLayoutHandle layout,
     const wchar_t* shaderPath,
     const wchar_t* entryPoint,
     std::vector<DxcDefine> defines,
@@ -876,7 +876,7 @@ PipelineState PSOManager::MakeComputePipeline(rhi::PipelineLayout layout,
     sib.defines = std::vector<DxcDefine>(defines.begin(), defines.end());
     auto compiled = CompileShaders(sib);
 
-    rhi::SubobjLayout soLayout{ layout.GetHandle() };
+    rhi::SubobjLayout soLayout{ layout };
     rhi::SubobjShader soCS{ rhi::ShaderStage::Compute, rhi::DXIL(compiled.computeShader.Get()) };
 
     const rhi::PipelineStreamItem items[] = {

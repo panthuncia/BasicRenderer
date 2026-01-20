@@ -127,28 +127,28 @@ private:
             auto& layout = psoManager.GetRootSignature();
 
             m_psoVec2D = psoManager.MakeComputePipeline(
-                layout,
+                layout.GetHandle(),
                 L"shaders/Utilities/mipmapping.hlsl",
                 L"MipmapCSMain",
                 { }, // no defines
                 "MipmapSPD[Vec2D]");
 
             m_psoVecArray = psoManager.MakeComputePipeline(
-                layout,
+                layout.GetHandle(),
                 L"shaders/Utilities/mipmapping.hlsl",
                 L"MipmapCSMain",
                 { DxcDefine{ L"MIPMAP_ARRAY", L"1" } },
                 "MipmapSPD[VecArray]");
 
             m_psoScalar2D = psoManager.MakeComputePipeline(
-                layout,
+                layout.GetHandle(),
                 L"shaders/Utilities/mipmapping.hlsl",
                 L"MipmapCSMain",
                 { DxcDefine{ L"MIPMAP_SCALAR", L"1" } },
                 "MipmapSPD[Scalar2D]");
 
             m_psoScalarArray = psoManager.MakeComputePipeline(
-                layout,
+                layout.GetHandle(),
                 L"shaders/Utilities/mipmapping.hlsl",
                 L"MipmapCSMain",
                 { DxcDefine{ L"MIPMAP_SCALAR", L"1" }, DxcDefine{ L"MIPMAP_ARRAY", L"1" } },

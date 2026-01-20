@@ -62,14 +62,14 @@ private:
 
 		auto& psoManager = PSOManager::GetInstance();
         DenoisePassPSO = psoManager.MakeComputePipeline(
-            psoManager.GetRootSignature(),
+            psoManager.GetRootSignature().GetHandle(),
             L"shaders/GTAO.hlsl",
             L"CSDenoisePass",
             {},
 			"GTAO Denoise Pass");
 
 		DenoiseLastPassPSO = psoManager.MakeComputePipeline(
-			psoManager.GetRootSignature(),
+			psoManager.GetRootSignature().GetHandle(),
 			L"shaders/GTAO.hlsl",
 			L"CSDenoiseLastPass",
 			{},

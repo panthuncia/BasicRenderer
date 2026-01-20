@@ -85,7 +85,7 @@ private:
 
 	void CreatePSO() {
 		m_PSO = PSOManager::GetInstance().MakeComputePipeline(
-			PSOManager::GetInstance().GetComputeRootSignature(),
+			PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
 			L"shaders/SphericalHarmonics.hlsl",
 			L"CSMain",
 			{},

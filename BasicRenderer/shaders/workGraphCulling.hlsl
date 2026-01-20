@@ -8,6 +8,7 @@ struct ObjectCullRecord
     uint viewDataIndex; // One record per view *...
     uint activeDrawSetIndicesSRVIndex; // One record per draw set
     uint activeDrawCount;
+    uint pad0;
     uint3 dispatchGrid : SV_DispatchGrid; // Drives dispatch size
 };
 
@@ -36,6 +37,7 @@ struct RasterRecord
 [NodeLaunch("broadcasting")]
 [NumThreads(64, 1, 1)]
 [NodeMaxDispatchGrid(10000,1,1)] // TODO: 2D linearize
+[NodeIsProgramEntry]
 void WG_ObjectCull(
     DispatchNodeInputRecord<ObjectCullRecord> inRec,
     const uint3 vGroupThreadID : SV_GroupThreadID,
@@ -52,11 +54,10 @@ void WG_ObjectCull(
     uint drawcallIndex = activeDrawSetIndicesBuffer[vDispatchThreadID.x];
     uint perMeshInstanceBufferIndex = indirectCommandBuffer[drawcallIndex].perMeshInstanceBufferIndex;
     //StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
-
-
+    
     // call must be uniform; outCount may be non-uniform.
     uint outIndex = vGroupThreadID.x;
-    ThreadNodeOutputRecords<TraverseRecord> outRecord = Traverse.GetThreadNodeOutputRecords(outIndex);
+    ThreadNodeOutputRecords<TraverseRecord> outRecord = Traverse.GetThreadNodeOutputRecords(1); // TODO: Is this right?
 
     outRecord[0].perMeshInstanceIndex = perMeshInstanceBufferIndex;
     outRecord[0].nodeIndex = 0;

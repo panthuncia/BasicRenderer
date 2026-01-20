@@ -191,7 +191,7 @@ private:
 
         // Plain downsample
         downsamplePassPSO = psoManager.MakeComputePipeline(
-            layout,
+            layout.GetHandle(),
             L"shaders/downsample.hlsl",
             L"DownsampleCSMain",
             {},                         // no defines
@@ -200,7 +200,7 @@ private:
 
         // Array variant (DOWNSAMPLE_ARRAY=1)
         downsampleArrayPSO = psoManager.MakeComputePipeline(
-            layout,
+            layout.GetHandle(),
             L"shaders/downsample.hlsl",
             L"DownsampleCSMain",
             { DxcDefine{ L"DOWNSAMPLE_ARRAY", L"1" } },

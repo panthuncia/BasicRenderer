@@ -276,7 +276,7 @@ namespace rhi {
 			if (!desc.programName || desc.programName[0] == '\0') return Result::InvalidArgument;
 			if (desc.libraries.size == 0) return Result::InvalidArgument;
 
-			if ((desc.flags & WorkGraphFlags::EntrypointGraphicsNodesRasterizeInOrder) != WorkGraphFlags::None) {
+			if (desc.flags & WorkGraphFlags::WorkGraphFlagsEntrypointGraphicsNodesRasterizeInOrder) {
 				// Not yet supported in d3d12.h
 				spdlog::error("DX12 work graph creation: EntrypointGraphicsNodesRasterizeInOrder flag is not supported yet");
 				return Result::InvalidArgument;
@@ -294,7 +294,7 @@ namespace rhi {
 			}
 
 			struct BuildStorage {
-				std::deque<std::wstring> ws;
+				std::vector<std::wstring> ws;
 				std::vector<D3D12_STATE_SUBOBJECT> subobjects;
 				std::vector<D3D12_DXIL_LIBRARY_DESC> dxilLibDescs;
 				std::vector<std::vector<D3D12_EXPORT_DESC>> dxilExports;
@@ -307,9 +307,9 @@ namespace rhi {
 				std::vector<D3D12_NODE> nodes;
 				std::vector<D3D12_SHADER_NODE> shaderNodes;
 				// Override storage
-				std::deque<UINT> uints;
-				std::deque<BOOL> bools;
-				std::deque<D3D12_NODE_ID> nodeIds;
+				std::vector<UINT> uints;
+				std::vector<BOOL> bools;
+				std::vector<D3D12_NODE_ID> nodeIds;
 				std::vector<std::vector<D3D12_NODE_OUTPUT_OVERRIDES>> outputOverrides;
 				std::vector<D3D12_COMMON_COMPUTE_NODE_OVERRIDES> commonComputeOverrides;
 				std::vector<D3D12_BROADCASTING_LAUNCH_OVERRIDES> broadcastingOverrides;
@@ -604,6 +604,11 @@ namespace rhi {
 			const LPCWSTR programNameW = b.wgDescs.back().ProgramName;
 			const D3D12_PROGRAM_IDENTIFIER programId = props1->GetProgramIdentifier(programNameW);
 			const UINT wgIndex = wgProps->GetWorkGraphIndex(programNameW);
+			auto numEntries = wgProps->GetNumEntrypoints(wgIndex);
+			if (numEntries == 0) {
+				spdlog::error("DX12 work graph creation: no entrypoints found for program '{}'", desc.programName);
+				RHI_FAIL(Result::InvalidArgument);
+			}
 			D3D12_WORK_GRAPH_MEMORY_REQUIREMENTS mem = {};
 			wgProps->GetWorkGraphMemoryRequirements(wgIndex, &mem);
 
@@ -1918,8 +1923,14 @@ namespace rhi {
 				RHI_FAIL(Result::InvalidArgument);
 			}
 
-			ComPtr<ID3D12GraphicsCommandList10> cl; // Needs at least version 10 for work graphs
-			if (const auto hr = impl->pNativeDevice->CreateCommandList(0, A->type, A->alloc.Get(), nullptr, IID_PPV_ARGS(&cl)); FAILED(hr)) {
+			ComPtr<ID3D12GraphicsCommandList> cl0; // Needs at least version 10 for work graphs
+			if (const auto hr = impl->pNativeDevice->CreateCommandList(0, A->type, A->alloc.Get(), nullptr, IID_PPV_ARGS(&cl0)); FAILED(hr)) {
+				RHI_FAIL(ToRHI(hr));
+			}
+
+			// Attempt upcast to ID3D12GraphicsCommandList10
+			Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList10> cl;
+			if (const auto hr = cl0.As(&cl); FAILED(hr)) {
 				RHI_FAIL(ToRHI(hr));
 			}
 			
@@ -3474,6 +3485,7 @@ namespace rhi {
 			bgMemRange.StartAddress = backingMem->res->GetGPUVirtualAddress();
 			bgMemRange.SizeInBytes = wg->memoryRequirements.MaxSizeInBytes;
 			desc.WorkGraph.BackingMemory = bgMemRange;
+			l->cl->SetProgram(&desc);
 		}
 
 		static void cl_dispatchWorkGraph(CommandList* cl, const WorkGraphDispatchDesc& desc) noexcept {
@@ -3492,13 +3504,7 @@ namespace rhi {
 				return;
 			} break;
 			case WorkGraphDispatchMode::NodeGpuInput: { // TODO: Validate
-				D3D12_NODE_GPU_INPUT ngi{};
-				ngi.EntrypointIndex = desc.nodeGpuInput.entryPointIndex;
-				ngi.NumRecords = desc.nodeGpuInput.numRecords;
-				D3D12_GPU_VIRTUAL_ADDRESS_AND_STRIDE vas{};
-				vas.StartAddress = l->dev->resources.get(desc.nodeGpuInput.inputBuffer)->res->GetGPUVirtualAddress();
-				vas.StrideInBytes = desc.nodeGpuInput.recordByteStride; // TODO: Why is this specified here as well? Will this ever be different?
-				ngi.Records = vas;
+				d.NodeGPUInput = l->dev->resources.get(desc.nodeGpuInput.inputBuffer)->res->GetGPUVirtualAddress();
 				l->cl->DispatchGraph(&d);
 				return;
 			} break;
@@ -3510,16 +3516,9 @@ namespace rhi {
 				l->cl->DispatchGraph(&d);
 				return;
 			} break;
-			case WorkGraphDispatchMode::MultiNodeGpuInput: { // TODO: Microsoft's headers have a mistake here- D3D12_DISPATCH_GRAPH_DESC.MultiNodeGPUInput is of the wrong type?
-				D3D12_MULTI_NODE_GPU_INPUT mng{};
-				D3D12_GPU_VIRTUAL_ADDRESS_AND_STRIDE vas{};
-				vas.StartAddress = l->dev->resources.get(desc.multiNodeGpuInput.inputBuffer)->res->GetGPUVirtualAddress();
-				vas.StrideInBytes = desc.multiNodeGpuInput.recordByteStride;
-				mng.NodeInputs = vas;
-				mng.NumNodeInputs = desc.multiNodeGpuInput.numNodeInputs;
-				BreakIfDebugging();
-				//d.MultiNodeGPUInput = mng;
-				//l->cl->DispatchGraph(&d);
+			case WorkGraphDispatchMode::MultiNodeGpuInput: {
+				d.MultiNodeGPUInput = l->dev->resources.get(desc.multiNodeGpuInput.inputBuffer)->res->GetGPUVirtualAddress();
+				l->cl->DispatchGraph(&d);
 			} break;
 			default:
 				BreakIfDebugging();

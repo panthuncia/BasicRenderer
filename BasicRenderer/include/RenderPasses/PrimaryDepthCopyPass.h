@@ -58,7 +58,7 @@ private:
 
 	void CreatePSO() {
 		m_pso = PSOManager::GetInstance().MakeComputePipeline(
-			PSOManager::GetInstance().GetComputeRootSignature(),
+			PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
 			L"shaders/gbuffer.hlsl",
 			L"PrimaryDepthCopyCS",
 			{},

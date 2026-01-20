@@ -16,9 +16,11 @@ struct ObjectCullRecord
     uint viewDataIndex; // One record per view *...
     uint activeDrawSetIndicesSRVIndex; // One record per draw set
     uint activeDrawCount;
+	uint pad0; // Padding for 16-byte alignment
     uint dispatchGridX; // Drives dispatch size
 	uint dispatchGridY;
 	uint dispatchGridZ;
+	uint pad1; // Padding for 16-byte alignment
 };
 
 struct HierarchialCullingPassInputs {
@@ -54,11 +56,18 @@ public:
 	}
 
 	void DeclareResourceUsages(ComputePassBuilder* builder) {
-        builder->WithUnorderedAccess(m_scratchBuffer);
+        auto ecsWorld = ECSManager::GetInstance().GetWorld();
+        flecs::query<> drawSetIndicesQuery = ecsWorld.query_builder<>()
+            .with<Components::IsActiveDrawSetIndices>()
+            .with<Components::ParticipatesInPass>(flecs::Wildcard)
+            .build();
+        builder->WithUnorderedAccess(m_scratchBuffer)
+            .WithShaderResource(Builtin::IndirectCommandBuffers::Master)
+            .WithShaderResource(ECSResourceResolver(drawSetIndicesQuery));
 	}
 
 	void Setup() override {
-
+        RegisterSRV(Builtin::IndirectCommandBuffers::Master);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -68,8 +77,6 @@ public:
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
 		commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-
-		BindResourceDescriptorIndices(commandList, m_pipelineResources);
 
 		std::vector<ObjectCullRecord> cullRecords;
 
@@ -96,7 +103,16 @@ public:
 
 		commandList.SetWorkGraph(m_workGraph->GetHandle(), m_scratchBuffer->GetAPIResource().GetHandle(), true); // Reset every time for now
 
+        BindResourceDescriptorIndices(commandList, m_pipelineResources);
+
 		rhi::WorkGraphDispatchDesc dispatchDesc{};
+        dispatchDesc.dispatchMode = rhi::WorkGraphDispatchMode::NodeCpuInput;
+		dispatchDesc.nodeCpuInput.entryPointIndex = 0; // ObjectCull node
+        dispatchDesc.nodeCpuInput.pRecords = cullRecords.data();
+		dispatchDesc.nodeCpuInput.numRecords = static_cast<uint32_t>(cullRecords.size());
+		dispatchDesc.nodeCpuInput.recordByteStride = sizeof(ObjectCullRecord);
+
+		commandList.DispatchWorkGraph(dispatchDesc);
 
 		return {};
 	}
@@ -121,7 +137,7 @@ private:
 		m_pipelineResources = compiled.resourceDescriptorSlots;
 
         rhi::ShaderBinary libDxil{
-            compiled.libraryBlob.Get(),
+            compiled.libraryBlob->GetBufferPointer(),
             static_cast<uint32_t>(compiled.libraryBlob->GetBufferSize())
         };
 
@@ -149,7 +165,7 @@ private:
         // Build the work graph desc
         rhi::WorkGraphDesc wg{};
         wg.programName = "HierarchialCulling";
-        wg.flags = rhi::WorkGraphFlags::IncludeAllAvailableNodes; // quick iteration
+        wg.flags = rhi::WorkGraphFlags::WorkGraphFlagsIncludeAllAvailableNodes;
         wg.globalRootSignature = globalRootSignature;
         wg.libraries = rhi::Span<rhi::ShaderLibraryDesc>(libraries.data(), static_cast<uint32_t>(libraries.size()));
         wg.entrypoints = rhi::Span<rhi::NodeIDDesc>(entrypoints.data(), static_cast<uint32_t>(entrypoints.size()));

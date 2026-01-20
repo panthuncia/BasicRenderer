@@ -627,10 +627,10 @@ namespace rhi {
 
 	inline static D3D12_WORK_GRAPH_FLAGS ToDX(WorkGraphFlags f) noexcept {
 		D3D12_WORK_GRAPH_FLAGS out = D3D12_WORK_GRAPH_FLAG_NONE;
-		if ((f & WorkGraphFlags::IncludeAllAvailableNodes) != WorkGraphFlags::None) {
+		if (f & WorkGraphFlags::WorkGraphFlagsIncludeAllAvailableNodes) {
 			out |= D3D12_WORK_GRAPH_FLAG_INCLUDE_ALL_AVAILABLE_NODES;
 		}
-		if ((f & WorkGraphFlags::EntrypointGraphicsNodesRasterizeInOrder) != WorkGraphFlags::None) {
+		if (f & WorkGraphFlags::WorkGraphFlagsEntrypointGraphicsNodesRasterizeInOrder) {
 			// Not yet supported in d3d12.h
 			//out |= D3D12_WORK_GRAPH_FLAG_ENTRYPOINT_GRAPHICS_NODES_RASTERIZE_IN_ORDER;
 		}

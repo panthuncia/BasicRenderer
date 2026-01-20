@@ -816,32 +816,16 @@ namespace rhi {
 	};
 
 	// Mirrors D3D12_WORK_GRAPH_FLAGS.
-	enum class WorkGraphFlags : uint32_t {
-		None = 0,
-		IncludeAllAvailableNodes = 0x1,
-		EntrypointGraphicsNodesRasterizeInOrder = 0x2,
+	enum WorkGraphFlags : uint32_t {
+		WorkGraphFlagsNone = 0,
+		WorkGraphFlagsIncludeAllAvailableNodes = 0x1,
+		WorkGraphFlagsEntrypointGraphicsNodesRasterizeInOrder = 0x2,
 	};
-	inline constexpr WorkGraphFlags operator|(WorkGraphFlags a, WorkGraphFlags b) noexcept {
-		return static_cast<WorkGraphFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
-	}
-	inline constexpr WorkGraphFlags& operator|=(WorkGraphFlags& a, WorkGraphFlags b) noexcept {
-		a = a | b;
-		return a;
-	}
-	inline constexpr WorkGraphFlags operator&(WorkGraphFlags a, WorkGraphFlags b) noexcept {
-		return static_cast<WorkGraphFlags>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
-	}
-	inline constexpr bool operator==(WorkGraphFlags a, WorkGraphFlags b) noexcept {
-		return (static_cast<uint32_t>(a) & static_cast<uint32_t>(b)) == static_cast<uint32_t>(b);
-	}
-	inline constexpr bool operator!=(WorkGraphFlags a, WorkGraphFlags b) noexcept {
-		return (static_cast<uint32_t>(a) & static_cast<uint32_t>(b)) != static_cast<uint32_t>(b);
-	}
 
 	// Mirrors D3D12_WORK_GRAPH_DESC.
 	struct WorkGraphDesc {
 		const char* programName{};              // D3D12_WORK_GRAPH_DESC::ProgramName
-		WorkGraphFlags flags{ WorkGraphFlags::None };
+		WorkGraphFlags flags{ WorkGraphFlags::WorkGraphFlagsNone };
 		PipelineLayoutHandle globalRootSignature{}; // GLOBAL_ROOT_SIGNATURE subobject
 		Span<ShaderLibraryDesc> libraries{};
 		Span<LocalRootAssociation> localRootAssociations{};

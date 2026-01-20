@@ -64,28 +64,28 @@ private:
     void CreateXeGTAOComputePSO() {
 
 		GTAOUltraPSO = PSOManager::GetInstance().MakeComputePipeline(
-			PSOManager::GetInstance().GetRootSignature(),
+			PSOManager::GetInstance().GetRootSignature().GetHandle(),
 			L"shaders/GTAO.hlsl",
 			L"CSGTAOUltra",
 			{},
 			"GTAO Ultra Quality");
 
 		GTAOHighPSO = PSOManager::GetInstance().MakeComputePipeline(
-			PSOManager::GetInstance().GetRootSignature(),
+			PSOManager::GetInstance().GetRootSignature().GetHandle(),
 			L"shaders/GTAO.hlsl",
 			L"CSGTAOHigh",
 			{},
 			"GTAO High Quality");
 
 		GTAOMediumPSO = PSOManager::GetInstance().MakeComputePipeline(
-			PSOManager::GetInstance().GetRootSignature(),
+			PSOManager::GetInstance().GetRootSignature().GetHandle(),
 			L"shaders/GTAO.hlsl",
 			L"CSGTAOMedium",
 			{},
 			"GTAO Medium Quality");
 
 		GTAOLowPSO = PSOManager::GetInstance().MakeComputePipeline(
-			PSOManager::GetInstance().GetRootSignature(),
+			PSOManager::GetInstance().GetRootSignature().GetHandle(),
 			L"shaders/GTAO.hlsl",
 			L"CSGTAOLow",
 			{},
