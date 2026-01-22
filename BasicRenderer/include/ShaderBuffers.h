@@ -321,6 +321,7 @@ struct ClusterLODChild
 struct ClusterLODGroup
 {
     clodBounds bounds; // 5 floats
+	float pad0[3]; // pad to 32 bytes
     uint32_t firstMeshlet = 0;
     uint32_t meshletCount = 0;
     int32_t depth = 0;

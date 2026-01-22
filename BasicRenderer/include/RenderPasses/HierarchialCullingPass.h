@@ -62,12 +62,26 @@ public:
             .with<Components::ParticipatesInPass>(flecs::Wildcard)
             .build();
         builder->WithUnorderedAccess(m_scratchBuffer)
-            .WithShaderResource(Builtin::IndirectCommandBuffers::Master)
+            .WithShaderResource(Builtin::IndirectCommandBuffers::Master,
+                Builtin::CLod::Offsets,
+                Builtin::CLod::Groups,
+                Builtin::CLod::Children,
+                Builtin::CLod::ChildLocalMeshletIndices,
+                Builtin::CullingCameraBuffer,
+                Builtin::PerMeshInstanceBuffer,
+                Builtin::PerObjectBuffer)
             .WithShaderResource(ECSResourceResolver(drawSetIndicesQuery));
 	}
 
 	void Setup() override {
         RegisterSRV(Builtin::IndirectCommandBuffers::Master);
+		RegisterSRV(Builtin::CLod::Offsets);
+		RegisterSRV(Builtin::CLod::Groups);
+		RegisterSRV(Builtin::CLod::Children);
+		RegisterSRV(Builtin::CLod::ChildLocalMeshletIndices);
+		RegisterSRV(Builtin::CullingCameraBuffer);
+		RegisterSRV(Builtin::PerMeshInstanceBuffer);
+		RegisterSRV(Builtin::PerObjectBuffer);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -146,9 +160,8 @@ private:
         std::array<rhi::ShaderExportDesc, 5> exports = { {
             { "WG_ObjectCull",   nullptr },
             { "WG_Traverse",     nullptr },
-            { "WG_ClusterCull",  nullptr },
-            { "WG_OcclusionCull",nullptr },
-            { "WG_Rasterize",    nullptr },
+            { "WG_ClusterCullBuckets",  nullptr },
+            { "WG_Output", nullptr }
         } };
 
         rhi::ShaderLibraryDesc library{};

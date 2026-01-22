@@ -97,8 +97,14 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 	// (nice for culling, slightly more CPU time)
 	config.optimize_bounds = true;
 
+	uint32_t MaxChildren = 32; // TODO: Configurability
+	config.partition_size = std::max<size_t>(1, (MaxChildren * 3) / 4);
+	config.partition_sort = true; // optional, tends to help spatial coherence
+
 	// We'll treat every produced cluster as a "meshlet" and keep group ranges separately.
 	int32_t lastGroupId = -1;
+
+	unsigned int maxChildren = 0;
 
 	clodBuild(config, mesh,
 		[&](clodGroup group, const clodCluster* clusters, size_t cluster_count) -> int
@@ -203,6 +209,10 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 			grp.firstChild = static_cast<uint32_t>(m_clodChildren.size());
 			grp.childCount = static_cast<uint32_t>(buckets.size());
 
+			if (grp.childCount > maxChildren) {
+				maxChildren = grp.childCount;
+			}
+
 			for (const auto& b : buckets)
 			{
 				ClusterLODChild child{};
@@ -222,7 +232,9 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 			return groupId;
 		});
 
-
+	if (maxChildren > MaxChildren) { // TODO: Is this possible?
+		throw std::runtime_error("Exceeded maximum allowed Cluster LOD children per group");
+	}
 	// Root/coarsest group is the last one emitted for this build
 	m_clodRootGroup = (lastGroupId >= 0) ? static_cast<uint32_t>(lastGroupId) : 0;
 }
