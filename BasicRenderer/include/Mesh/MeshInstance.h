@@ -77,6 +77,17 @@ public:
     void SetPerMeshBufferIndex(uint32_t index);
 	void SetSkinningInstanceSlot(uint32_t slot);
 
+    void SetCLodBufferViews(
+        std::unique_ptr<BufferView> perMeshInstanceClodOffsetsView
+    ) {
+        m_perMeshInstanceClodOffsetsView = std::move(perMeshInstanceClodOffsetsView);
+    }
+
+
+    const BufferView* GetCLodOffsetsView() const {
+        return m_perMeshInstanceClodOffsetsView.get();
+    }
+
 private:
     MeshInstance(std::shared_ptr<Mesh> mesh)
         : m_mesh(mesh) {
@@ -93,5 +104,8 @@ private:
 	std::unique_ptr<BufferView> m_meshletBitfieldBufferView = nullptr;
     std::unique_ptr<BufferView> m_meshletBoundsBufferView = nullptr;
 	std::unique_ptr<BufferView> m_clusterToVisibleClusterIndicesBufferView = nullptr;
+
+    std::unique_ptr<BufferView> m_perMeshInstanceClodOffsetsView = nullptr;
+
 	float m_animationSpeed = 1.0f;
 };

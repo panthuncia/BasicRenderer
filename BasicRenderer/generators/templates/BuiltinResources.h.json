@@ -14,6 +14,14 @@
         "MeshletCullingReset": {}
       }
     },
+    "CLod": {
+      "Offsets": {},
+      "Groups": {},
+      "Children": {},
+      "ChildLocalMeshletIndices": {},
+      "Meshlets": {},
+      "MeshletBounds": {}
+    },
     "PerObjectBuffer": {},
     "PerMeshBuffer": {},
     "PerMeshInstanceBuffer": {},
@@ -36,6 +44,7 @@
     "MeshInstanceMeshletCullingBitfieldGroup": {},
     "MeshInstanceOcclusionCullingBitfieldGroup": {},
     "CameraBuffer": {},
+    "CullingCameraBuffer": {},
     "Light": {
       "ViewResourceGroup": {},
       "BufferGroup": {},

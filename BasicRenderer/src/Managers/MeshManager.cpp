@@ -25,6 +25,14 @@ MeshManager::MeshManager() {
 	m_perMeshBuffers = DynamicBuffer::CreateShared(sizeof(PerMeshCB), 1, "PerMeshBuffers");
 	m_perMeshInstanceBuffers = DynamicBuffer::CreateShared(sizeof(PerMeshCB), 1, "perMeshInstanceBuffers");
 
+	// Cluster LOD data
+	m_perMeshInstanceClodOffsets = DynamicBuffer::CreateShared(sizeof(MeshInstanceClodOffsets), 1, "perMeshInstanceClodOffsets");
+	m_clusterLODGroups = DynamicBuffer::CreateShared(sizeof(ClusterLODGroup), 1, "clusterLODGroups");
+	m_clusterLODChildren = DynamicBuffer::CreateShared(sizeof(ClusterLODChild), 1, "clusterLODChildren");
+	m_clusterLODMeshlets = DynamicBuffer::CreateShared(sizeof(meshopt_Meshlet), 1, "clusterLODMeshlets");
+	m_clusterLODMeshletBounds = DynamicBuffer::CreateShared(sizeof(BoundingSphere), 1, "clusterLODMeshletBounds", false, true);
+	m_childLocalMeshletIndices = DynamicBuffer::CreateShared(sizeof(unsigned int), 1, "clodChildLocalMeshletIndices");
+
 	// Tag resources for memory statistics
 	m_preSkinningVertices->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
 	m_postSkinningVertices->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
@@ -49,6 +57,14 @@ MeshManager::MeshManager() {
 	m_resources[Builtin::MeshResources::MeshletVertexIndices] = m_meshletVertexIndices;
 	m_resources[Builtin::MeshResources::MeshletTriangles] = m_meshletTriangles;
 	m_resources[Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer] = m_clusterToVisibleClusterTableIndexBuffer;
+
+	m_resources[Builtin::CLod::Offsets] = m_perMeshInstanceClodOffsets;
+	m_resources[Builtin::CLod::Groups] = m_clusterLODGroups;
+	m_resources[Builtin::CLod::Children] = m_clusterLODChildren;
+	m_resources[Builtin::CLod::Meshlets] = m_clusterLODMeshlets;
+	m_resources[Builtin::CLod::MeshletBounds] = m_clusterLODMeshletBounds;
+	m_resources[Builtin::CLod::ChildLocalMeshletIndices] = m_childLocalMeshletIndices;
+
 }
 
 void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedVertices) {
@@ -93,7 +109,19 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	mesh->UpdateVertexCount(useMeshletReorderedVertices);
 
 	// cluster LOD data
-	//mesh->BuildClusterLOD
+	// TODO: Some of this should be in instances, vertex data should go in main vertex buffers
+	auto clusterLODGroupsView = m_clusterLODGroups->AddData(mesh->GetCLodGroups().data(), mesh->GetCLodGroups().size() * sizeof(ClusterLODGroup), sizeof(ClusterLODGroup));
+	auto clusterLODChildrenView = m_clusterLODChildren->AddData(mesh->GetCLodChildren().data(), mesh->GetCLodChildren().size() * sizeof(ClusterLODChild), sizeof(ClusterLODChild));
+	auto clusterLODMeshletsView = m_clusterLODMeshlets->AddData(mesh->GetCLodMeshlets().data(), mesh->GetCLodMeshlets().size() * sizeof(meshopt_Meshlet), sizeof(meshopt_Meshlet));
+	auto clusterLODMeshletBoundsView = m_clusterLODMeshletBounds->AddData(mesh->GetCLodBounds().data(), mesh->GetCLodBounds().size() * sizeof(BoundingSphere), sizeof(BoundingSphere));
+	auto childLocalMeshletIndicesView = m_childLocalMeshletIndices->AddData(mesh->GetCLodChildLocalMeshletIndices().data(), mesh->GetCLodChildLocalMeshletIndices().size() * sizeof(uint32_t), sizeof(uint32_t));
+
+	mesh->SetCLodBufferViews( // TODO: cleanup on remove
+		std::move(clusterLODGroupsView), 
+		std::move(clusterLODChildrenView), 
+		std::move(clusterLODMeshletsView), 
+		std::move(clusterLODMeshletBoundsView),
+		std::move(childLocalMeshletIndicesView));
 }
 
 void MeshManager::RemoveMesh(Mesh* mesh) {
@@ -182,6 +210,25 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	// This buffer is used for draw call indexing in the visibility buffer, to unpack uint25 visibility data
 	auto clusterIndicesView = m_clusterToVisibleClusterTableIndexBuffer->Allocate(mesh->GetMesh()->GetMeshletCount() * sizeof(unsigned int), sizeof(unsigned int));
 	mesh->SetClusterToVisibleClusterIndicesBufferView(std::move(clusterIndicesView));
+
+
+	auto clusterLODGroupsView = mesh->GetMesh()->GetCLodGroupsView();
+	auto clusterLODChildrenView = mesh->GetMesh()->GetCLodChildrenView();
+	auto clusterLODMeshletsView = mesh->GetMesh()->GetCLodMeshletsView();
+	auto clusterLODMeshletBoundsView = mesh->GetMesh()->GetCLodMeshletBoundsView();
+
+	MeshInstanceClodOffsets clodOffsets = {};
+	clodOffsets.groupsBase = static_cast<uint32_t>(clusterLODGroupsView->GetOffset() / sizeof(ClusterLODGroup));
+	clodOffsets.childrenBase = static_cast<uint32_t>(clusterLODChildrenView->GetOffset() / sizeof(ClusterLODChild));
+	clodOffsets.childLocalMeshletIndicesBase = 0; // TODO
+	clodOffsets.meshletsBase = static_cast<uint32_t>(clusterLODMeshletsView->GetOffset() / sizeof(meshopt_Meshlet));
+	clodOffsets.meshletBoundsBase = static_cast<uint32_t>(clusterLODMeshletBoundsView->GetOffset() / sizeof(BoundingSphere));
+	clodOffsets.rootGroup = mesh->GetMesh()->GetCLodRootGroup();
+	auto clodOffsetsView = m_perMeshInstanceClodOffsets->AddData(&clodOffsets, sizeof(MeshInstanceClodOffsets), sizeof(MeshInstanceClodOffsets)); // Indexable by mesh instance
+
+	mesh->SetCLodBufferViews(
+		std::move(clodOffsetsView)
+	);
 }
 
 void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
@@ -190,6 +237,7 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 	// - Post-skinning vertices
 	// - Per-mesh instance buffer
 	// - Meshlet bounds
+
 	auto postSkinningView = mesh->GetPostSkinningVertexBufferView();
 	if (postSkinningView != nullptr) {
 		m_postSkinningVertices->Deallocate(postSkinningView);
@@ -203,6 +251,12 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 		m_meshletBoundsBuffer->Deallocate(meshletBoundsView);
 	}
 	mesh->SetBufferViews(nullptr, nullptr, nullptr);
+
+	auto clodBuffersView = mesh->GetCLodOffsetsView();
+	if (clodBuffersView != nullptr) {
+		m_perMeshInstanceClodOffsets->Deallocate(clodBuffersView);
+	}
+	mesh->SetCLodBufferViews(nullptr);
 }
 
 void MeshManager::UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data) {

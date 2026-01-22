@@ -48,8 +48,16 @@ private:
 	// Base meshes
 	std::shared_ptr<DynamicBuffer> m_perMeshBuffers;
 
-	// Skinned mesh instances
+	// mesh instances
 	std::shared_ptr<DynamicBuffer> m_perMeshInstanceBuffers;
+
+	std::shared_ptr<DynamicBuffer> m_perMeshInstanceClodOffsets;
+	std::shared_ptr<DynamicBuffer> m_clusterLODGroups;
+	std::shared_ptr<DynamicBuffer> m_clusterLODChildren;
+
+	std::shared_ptr<DynamicBuffer> m_clusterLODMeshlets;
+	std::shared_ptr<DynamicBuffer> m_clusterLODMeshletBounds;
+	std::shared_ptr<DynamicBuffer> m_childLocalMeshletIndices;
 
 	ViewManager* m_pViewManager;
 };

@@ -52,6 +52,8 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 	m_clodMeshletBounds.clear();
 	m_clodMeshletRefinedGroup.clear();
 	m_clodRootGroup = 0;
+	m_clodChildren.clear();
+	m_clodChildLocalMeshletIndices.clear();
 
 	// Meshoptimizer clusterlod expects unsigned int indices
 	static_assert(sizeof(UINT32) == sizeof(unsigned int), "UINT32 must be 32-bit");
@@ -66,7 +68,7 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 	mesh.index_count = indices.size();
 	mesh.vertex_count = globalVertexCount;
 
-	// Assumes position is first float3 in your packed vertex (matches your current meshlet path)
+	// Assumes position is first float3 in packed vertex structure
 	mesh.vertex_positions = reinterpret_cast<const float*>(m_vertices->data());
 	mesh.vertex_positions_stride = vertexStrideBytes;
 
@@ -111,19 +113,48 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 			outGroup.firstMeshlet = firstMeshlet;
 			outGroup.meshletCount = meshletCount;
 			outGroup.depth = group.depth;
+
+			// We'll fill these after we build child buckets
+			outGroup.firstChild = 0;
+			outGroup.childCount = 0;
+
 			m_clodGroups.push_back(outGroup);
 
-			// Convert each cluster to meshlet-local representation:
-			//  - m_clodMeshletVertices: global vertex indices (size = vertex_count)
-			//  - m_clodMeshletTriangles: local indices into that vertex table (3 bytes per triangle index)
+			// build per-group child buckets
+			struct ChildBucket
+			{
+				int32_t refinedGroup = -1;
+				std::vector<uint16_t> locals; // meshlet local indices within this group
+			};
+
+			std::vector<ChildBucket> buckets;
+			buckets.reserve(cluster_count);
+
+			auto add_to_bucket = [&](int32_t refined, uint16_t localIndex)
+				{
+					for (auto& b : buckets)
+					{
+						if (b.refinedGroup == refined)
+						{
+							b.locals.push_back(localIndex);
+							return;
+						}
+					}
+					ChildBucket nb;
+					nb.refinedGroup = refined;
+					nb.locals.reserve(8);
+					nb.locals.push_back(localIndex);
+					buckets.push_back(std::move(nb));
+				};
+
 			for (size_t i = 0; i < cluster_count; ++i)
 			{
 				const clodCluster& c = clusters[i];
-
-				// clodCluster::indices are global vertex indices (triangle list)
 				const size_t triCount = c.index_count / 3;
 
-				// Produce local verts table + local triangle bytes
+				// bucket this meshlet by refined group id (can be -1)
+				add_to_bucket(static_cast<int32_t>(c.refined), static_cast<uint16_t>(i));
+
 				std::vector<unsigned int> localVerts;
 				std::vector<unsigned char> localTris;
 				localVerts.resize(c.vertex_count);
@@ -135,8 +166,6 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 					c.indices,
 					c.index_count);
 
-				// Should match c.vertex_count per clusterlod contract
-				// (unique <= 256 by design)
 				assert(unique == c.vertex_count);
 
 				meshopt_Meshlet ml{};
@@ -145,21 +174,11 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 				ml.vertex_count = static_cast<unsigned int>(unique);
 				ml.triangle_count = static_cast<unsigned int>(triCount);
 
-				// Append flat buffers
-				m_clodMeshletVertices.insert(
-					m_clodMeshletVertices.end(),
-					localVerts.begin(),
-					localVerts.end());
+				m_clodMeshletVertices.insert(m_clodMeshletVertices.end(), localVerts.begin(), localVerts.end());
+				m_clodMeshletTriangles.insert(m_clodMeshletTriangles.end(), localTris.begin(), localTris.end());
 
-				m_clodMeshletTriangles.insert(
-					m_clodMeshletTriangles.end(),
-					localTris.begin(),
-					localTris.end());
-
-				// Compute bounds for this cluster
 				const unsigned int* vertsPtr = reinterpret_cast<const unsigned int*>(
 					m_clodMeshletVertices.data() + ml.vertex_offset);
-
 				const unsigned char* trisPtr = reinterpret_cast<const unsigned char*>(
 					m_clodMeshletTriangles.data() + ml.triangle_offset);
 
@@ -179,9 +198,30 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 				m_clodMeshletRefinedGroup.push_back(static_cast<int32_t>(c.refined));
 			}
 
+			// finalize child table for this group
+			ClusterLODGroup& grp = m_clodGroups.back();
+			grp.firstChild = static_cast<uint32_t>(m_clodChildren.size());
+			grp.childCount = static_cast<uint32_t>(buckets.size());
+
+			for (const auto& b : buckets)
+			{
+				ClusterLODChild child{};
+				child.refinedGroup = b.refinedGroup;
+				child.firstLocalMeshletIndex = static_cast<uint32_t>(m_clodChildLocalMeshletIndices.size());
+				child.localMeshletCount = static_cast<uint16_t>(b.locals.size());
+
+				m_clodChildren.push_back(child);
+
+				m_clodChildLocalMeshletIndices.insert(
+					m_clodChildLocalMeshletIndices.end(),
+					b.locals.begin(),
+					b.locals.end());
+			}
+
 			lastGroupId = groupId;
-			return groupId; // becomes clodCluster::refined in later outputs
+			return groupId;
 		});
+
 
 	// Root/coarsest group is the last one emitted for this build
 	m_clodRootGroup = (lastGroupId >= 0) ? static_cast<uint32_t>(lastGroupId) : 0;
@@ -427,6 +467,20 @@ void Mesh::SetBufferViews(std::unique_ptr<BufferView> preSkinningVertexBufferVie
 	if (m_pCurrentMeshManager != nullptr && m_perMeshBufferView != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}
+}
+
+void Mesh::SetCLodBufferViews(
+	std::unique_ptr<BufferView> clusterLODGroupsView,
+	std::unique_ptr<BufferView> clusterLODChildrenView,
+	std::unique_ptr<BufferView> clusterLODMeshletsView,
+	std::unique_ptr<BufferView> clusterLODMeshletBoundsView,
+	std::unique_ptr<BufferView> childLocalMeshletIndicesView
+) {
+	m_clusterLODGroupsView = std::move(clusterLODGroupsView);
+	m_clusterLODChildrenView = std::move(clusterLODChildrenView);
+	m_clusterLODMeshletsView = std::move(clusterLODMeshletsView);
+	m_clusterLODMeshletBoundsView = std::move(clusterLODMeshletBoundsView);
+	m_childLocalMeshletIndicesView = std::move(childLocalMeshletIndicesView);
 }
 
 void Mesh::SetBaseSkin(std::shared_ptr<Skeleton> skeleton) {

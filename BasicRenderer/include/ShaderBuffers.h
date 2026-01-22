@@ -1,5 +1,6 @@
 #pragma once
 #include <DirectXMath.h>
+#include "ThirdParty/meshoptimizer/clusterlod.h"
 
 struct ClippingPlane {
 	DirectX::XMFLOAT4 plane;
@@ -33,6 +34,14 @@ struct CameraInfo {
     unsigned int isOrtho = 0; // bool
 	DirectX::XMFLOAT2 uvScaleToNextPowerOfTwo = { 1.0f, 1.0f }; // Scale to next power of two, for linear depth buffer
     unsigned int pad[1];
+};
+
+struct CullingCameraInfo {
+    DirectX::XMFLOAT4 positionWorldSpace;
+    float projY = 0.0f;
+	float zNear = 0.0f;
+	float errorPixels = 0.0f; // Target error in pixels for LOD calculations
+	float pad[1];
 };
 
 struct PerFrameCB {
@@ -284,6 +293,41 @@ struct SkinningInstanceGPUInfo {
     uint32_t invBindOffsetMatrices = 0;
     uint32_t boneCount = 0;
     uint32_t _pad = 0;
+};
+
+struct MeshInstanceClodOffsets
+{
+    uint groupsBase;
+    uint childrenBase;
+    uint childLocalMeshletIndicesBase;
+    uint meshletsBase;
+
+    uint meshletBoundsBase;
+    uint rootGroup;     // group id relative to groupsBase 
+    uint pad[2];
+};
+
+// Cluster LOD data
+// One entry per (group -> refinedGroup) edge.
+// refinedGroup == -1 means "terminal meshlets" (original geometry)
+struct ClusterLODChild
+{
+    int32_t  refinedGroup;              // group id to refine into, or -1
+    uint32_t firstLocalMeshletIndex;     // offset into m_clodChildLocalMeshletIndices
+    uint32_t localMeshletCount;          // number of local meshlets in this child bucket
+    uint32_t pad = 0;
+};
+
+struct ClusterLODGroup
+{
+    clodBounds bounds; // 5 floats
+    uint32_t firstMeshlet = 0;
+    uint32_t meshletCount = 0;
+    int32_t depth = 0;
+
+    uint32_t firstChild = 0;    // offset into m_clodChildren
+    uint32_t childCount = 0;    // number of ClusterLODChild entries for this group
+    uint32_t pad[2] = { 0, 0 };
 };
 
 

@@ -52,6 +52,7 @@ struct ViewCreationParams {
 
 struct ViewResources {
     std::shared_ptr<BufferView> cameraBufferView;
+	std::shared_ptr<BufferView> cullingCameraBufferView;
     uint32_t cameraBufferIndex = 0;
 
     Components::IndirectCommandBuffers indirectCommandBuffers;
@@ -195,6 +196,7 @@ private:
 
     // Core buffers/groups
     std::shared_ptr<LazyDynamicStructuredBuffer<CameraInfo>> m_cameraBuffer;
+	std::shared_ptr<LazyDynamicStructuredBuffer<CullingCameraInfo>> m_cullingCameraBuffer;
     std::shared_ptr<ResourceGroup> m_meshletBitfieldGroup;
     std::shared_ptr<ResourceGroup> m_meshInstanceMeshletCullingBitfieldGroup;
     std::shared_ptr<ResourceGroup> m_meshInstanceOcclusionCullingBitfieldGroup;

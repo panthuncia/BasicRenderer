@@ -58,6 +58,15 @@ struct Camera {
     uint pad[1];
 };
 
+struct CullingCameraInfo
+{
+    float4 positionWorldSpace;
+    float projY;
+    float zNear;
+    float errorPixels; // Target error in pixels for LOD calculations
+    float pad;
+};
+
 struct PerFrameBuffer {
     float4 ambientLighting;
     float4 shadowCascadeSplits;

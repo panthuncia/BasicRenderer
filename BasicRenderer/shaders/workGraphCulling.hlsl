@@ -3,32 +3,92 @@
 #include "include/structs.hlsli"
 #include "include/indirectCommands.hlsli"
 // -------------------- Record types --------------------
+struct ClodBounds
+{
+    float4 centerAndRadius; // xyz = center, w = radius
+    float  error;   // simplification error in mesh space
+    float pad[3];
+};
+
+struct ClusterLODChild
+{
+    int    refinedGroup;              // -1 => terminal meshlets bucket
+    uint   firstLocalMeshletIndex;     // into ChildLocalMeshletIndices
+    uint   localMeshletCount;
+    uint   pad0;
+};
+
+struct ClusterLODGroup
+{
+    ClodBounds bounds;  // center/radius/error
+    uint   firstMeshlet;
+    uint   meshletCount;
+    int    depth;
+
+    uint   firstChild;
+    uint   childCount;
+    uint2  pad1;
+};
+
+// meshopt_Meshlet layout on GPU
+struct Meshlet
+{
+    uint vertex_offset;
+    uint triangle_offset;
+    uint vertex_count;
+    uint triangle_count;
+};
+
+struct MeshInstanceClodOffsets
+{
+    uint groupsBase;
+    uint childrenBase;
+    uint childLocalMeshletIndicesBase;
+    uint meshletsBase;
+
+    uint meshletBoundsBase;
+    uint rootGroup;     // group id relative to groupsBase
+    uint2 pad;
+};
+
+// ----- records -----
 struct ObjectCullRecord
 {
-    uint viewDataIndex; // One record per view *...
+    uint viewDataIndex; // One record per view, times...
     uint activeDrawSetIndicesSRVIndex; // One record per draw set
     uint activeDrawCount;
-    uint pad0;
+	uint pad0; // Padding for 16-byte alignment
     uint3 dispatchGrid : SV_DispatchGrid; // Drives dispatch size
 };
 
 struct TraverseRecord
 {
-    uint perMeshInstanceIndex;
-    uint nodeIndex;
-    uint depth;
+    uint instanceIndex;
+    uint groupId;    // relative id within this mesh's group array
+    uint viewId;
+    uint pad;
+};
+
+struct MeshletWorkRecord
+{
+    uint instanceIndex;
+    uint meshletId;  // absolute meshlet index into the meshlet buffer (after base)
+    uint viewId;
+    uint pad;
 };
 
 struct ClusterRecord
 {
+    uint viewDataIndex;
     uint perMeshInstanceIndex;
-    uint clusterIndex;
+    uint meshletGlobalIndex;
+    uint pad0;
 };
 
 struct RasterRecord
 {
     uint perMeshInstanceIndex;
-    uint clusterIndex;
+    uint meshletGlobalIndex;
 };
 
 // Node: ObjectCull (entry)
@@ -36,7 +96,7 @@ struct RasterRecord
 [NodeID("ObjectCull")]
 [NodeLaunch("broadcasting")]
 [NumThreads(64, 1, 1)]
-[NodeMaxDispatchGrid(10000,1,1)] // TODO: 2D linearize
+[NodeMaxDispatchGrid(10000,1,1)]
 [NodeIsProgramEntry]
 void WG_ObjectCull(
     DispatchNodeInputRecord<ObjectCullRecord> inRec,
@@ -53,74 +113,163 @@ void WG_ObjectCull(
     // Determine which drawcall this thread is processing
     uint drawcallIndex = activeDrawSetIndicesBuffer[vDispatchThreadID.x];
     uint perMeshInstanceBufferIndex = indirectCommandBuffer[drawcallIndex].perMeshInstanceBufferIndex;
+    StructuredBuffer<MeshInstanceClodOffsets> meshInstanceClodOffsets = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
     //StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     
     // call must be uniform; outCount may be non-uniform.
     uint outIndex = vGroupThreadID.x;
     ThreadNodeOutputRecords<TraverseRecord> outRecord = Traverse.GetThreadNodeOutputRecords(1); // TODO: Is this right?
 
-    outRecord[0].perMeshInstanceIndex = perMeshInstanceBufferIndex;
-    outRecord[0].nodeIndex = 0;
-    outRecord[0].depth = 0;
+    outRecord[0].viewId = inRec.Get().viewDataIndex;
+    outRecord[0].instanceIndex = perMeshInstanceBufferIndex;
+    outRecord[0].groupId = meshInstanceClodOffsets[perMeshInstanceBufferIndex].rootGroup;
 
     outRecord.OutputComplete();
 }
 
+// Conservative max-axis scale from a row-vector local->world
+float MaxAxisScale_RowVector(float4x4 M)
+{
+    float3 ax = float3(M[0][0], M[0][1], M[0][2]);
+    float3 ay = float3(M[1][0], M[1][1], M[1][2]);
+    float3 az = float3(M[2][0], M[2][1], M[2][2]);
+    return max(length(ax), max(length(ay), length(az)));
+}
+
+// clusterlod.h comment formula, converted to pixels:
+// projectedErrorPx = (error / max(dist - radius, znear)) * (projY * 0.5) * viewportHeight
+float ProjectedErrorPixels(float3 worldCenter, float worldRadius, float errorMeshSpace, float3 cameraPos, float projY, float screenHeight, float zNear)
+{
+    // Conservative "distance to sphere surface"
+    float dist = length(worldCenter - cameraPos);
+    float denom = max(dist - worldRadius, zNear);
+
+    // bounds.error / denom * (projY * 0.5) * screenHeight
+    float frac = (errorMeshSpace / denom) * (projY * 0.5f);
+    return frac * screenHeight;
+}
+
 // Node: Traverse (recursive)
 [Shader("node")]
-[NodeID("Traverse")]
-[NodeLaunch("coalescing")]
-[NodeMaxRecursionDepth(25)] // Max depth is 32 for whole graph
-[NumThreads(64, 1, 1)]
+[NodeLaunch("thread")]
+[NodeMaxRecursionDepth(25)] // Max depth of 32 for the whole graph
 void WG_Traverse(
-    [MaxRecords(256)] GroupNodeInputRecords<TraverseRecord> inRecs,
-    uint3 gtid : SV_GroupThreadID,
-    // output param name defaults the target NodeID if you don't use [NodeID(...)] on it.
-    [ MaxRecords(256)] NodeOutput<TraverseRecord> Traverse,
-    [MaxRecordsSharedWith(Traverse)] NodeOutput<ClusterRecord> ClusterCull)
+    ThreadNodeInputRecord<TraverseRecord> inRec,
+
+    // Refine jobs (send back to WG_Traverse)
+    NodeOutput<TraverseRecord> refineOut,
+
+    // Selected meshlets (send to meshlet cull / raster node)
+    NodeOutput<MeshletWorkRecord> meshletOut
+)
 {
-    // uint count = inRecs.Count();
-    // uint i = gtid.x;
+    // TODO: packing
+    StructuredBuffer<MeshInstanceClodOffsets> clodOffsets = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+    StructuredBuffer<ClusterLODGroup>         groups = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+    StructuredBuffer<ClusterLODChild>         children = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Children)];
+    StructuredBuffer<uint32_t>                childLocalMeshletIndices = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::ChildLocalMeshletIndices)];
+    StructuredBuffer<CullingCameraInfo>       cameraInfos = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
+    StructuredBuffer<PerFrameBuffer>          perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)]; // TODO: Does loading one field from this load the whole struct?
 
-    // bool active = (i < count);
-    // TraverseRecord r;
-    // if (active) {
-    //     r = inRecs[i];
-    // } else {
-    //     r = (TraverseRecord) 0;
-    // }
+    //StructuredBuffer<Meshlet>                 meshlets = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Meshlets)];
+    //StructuredBuffer<float4>                  meshletBounds = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshletBounds)];
+    TraverseRecord rec = inRec.Get();
 
-    // // Stub policy:
-    // // - expand 2 children until depth == 2
-    // // - then emit 1 leaf cluster
-    // bool shouldExpand = active && (r.depth < 2);
+    MeshInstanceClodOffsets off = clodOffsets[rec.instanceIndex];
 
-    // uint childCount = shouldExpand ? 2u : 0u;
-    // uint clusterCount = (!shouldExpand && active) ? 1u : 0u;
+    // Load group
+    uint groupIndex = off.groupsBase + rec.groupId;
+    ClusterLODGroup grp = groups[groupIndex];
+    // group-level visibility cull here?
+    // If group sphere is outside frustum / HZB occluded, just return without emitting anything.
 
-    // ThreadNodeOutputRecords<TraverseRecord> childOut = Traverse.GetThreadNodeOutputRecords(childCount);
-    // ThreadNodeOutputRecords<ClusterRecord>  leafOut  = ClusterCull.GetThreadNodeOutputRecords(clusterCount);
+    // Iterate child buckets (each bucket is one (group->refinedGroup) edge, plus the -1 terminal bucket)
+    uint childBase = off.childrenBase + grp.firstChild;
 
-    // if (shouldExpand)
-    // {
-    //     // Stub: pretend each node has 2 children at indices (node*2+1, node*2+2)
-    //     childOut[0].perMeshInstanceBufferIndex = r.perMeshInstanceBufferIndex;
-    //     childOut[0].nodeIndex       = r.nodeIndex * 2 + 1;
-    //     childOut[0].depth           = r.depth + 1;
+    // TODO: This load chain is probably unnecessary- restructure.
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+    uint objectBufferIndex = perMeshInstanceBuffer[rec.instanceIndex].perObjectBufferIndex;
+    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
+    row_major matrix objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
 
-    //     childOut[1].perMeshInstanceBufferIndex = r.perMeshInstanceBufferIndex;
-    //     childOut[1].nodeIndex       = r.nodeIndex * 2 + 2;
-    //     childOut[1].depth           = r.depth + 1;
-    // }
-    // else if (active)
-    // {
-    //     leafOut[0].perMeshInstanceBufferIndex = r.perMeshInstanceBufferIndex;
-    //     leafOut[0].clusterIndex    = r.nodeIndex; // stub mapping
-    // }
+    [loop]
+    for (uint ci = 0; ci < grp.childCount; ++ci)
+    {
+        ClusterLODChild child = children[childBase + ci];
 
-    // childOut.OutputComplete();
-    // leafOut.OutputComplete();
+        bool wantsRefine = false;
+
+        if (child.refinedGroup >= 0)
+        {
+            // Use the *refined group's* error as the metric for whether the parent's representation is acceptable.
+            ClusterLODGroup refinedGrp = groups[off.groupsBase + (uint)child.refinedGroup];
+
+            // Transform refined group bounds center/radius to world.
+            float4 objectSpaceCenter = float4(refinedGrp.bounds.centerAndRadius.xyz, 1.0); // TODO: Can we omit rotation here?
+            float3 worldSpaceCenter = mul(objectSpaceCenter, objectModelMatrix).xyz;
+            
+            float3 scaleFactors = float3(
+            length(objectModelMatrix[0].xyz),
+            length(objectModelMatrix[1].xyz),
+            length(objectModelMatrix[2].xyz));
+            float maxScale = max(max(scaleFactors.x, scaleFactors.y), scaleFactors.z);
+            float  worldRadius = refinedGrp.bounds.centerAndRadius.w * maxScale;
+
+            CullingCameraInfo cam = cameraInfos[rec.viewId];
+
+            float px = ProjectedErrorPixels(worldSpaceCenter, worldRadius, refinedGrp.bounds.error, cam.positionWorldSpace.xyz, cam.projY, perFrameBuffer[0].screenResY, cam.zNear);
+
+            // If error exceeds threshold, we need the finer representation => traverse into refinedGroup.
+            wantsRefine = (px > cam.errorPixels);
+        }
+
+        // emit refine record (0 or 1)
+        // Allocation must not be branched around; use the bool-gated allocator pattern.
+        {
+            bool alloc = wantsRefine;
+            ThreadNodeOutputRecords<TraverseRecord> o =
+                refineOut.GetThreadNodeOutputRecords(alloc);
+
+            if (alloc)
+            {
+                o.Get().instanceIndex = rec.instanceIndex;
+                o.Get().groupId       = (uint)child.refinedGroup;
+                o.Get().viewId        = rec.viewId;
+                o.Get().pad           = 0;
+            }
+
+            o.OutputComplete();
+        }
+
+        // if NOT refining this bucket, emit meshlets belonging to it
+        if (!wantsRefine)
+        {
+            uint idxBase = off.childLocalMeshletIndicesBase + child.firstLocalMeshletIndex;
+
+            [loop]
+            for (uint mi = 0; mi < child.localMeshletCount; ++mi)
+            {
+                uint localMeshlet = (uint)childLocalMeshletIndices[idxBase + mi];
+                uint meshletId    = off.meshletsBase + grp.firstMeshlet + localMeshlet;
+
+                // Next node will cull meshlet
+
+                bool alloc = true;
+                ThreadNodeOutputRecords<MeshletWorkRecord> mo =
+                    meshletOut.GetThreadNodeOutputRecords(alloc);
+
+                // Fill
+                mo.Get().instanceIndex = rec.instanceIndex;
+                mo.Get().meshletId     = meshletId;
+                mo.Get().viewId        = rec.viewId;
+                mo.Get().pad           = 0;
+
+                mo.OutputComplete();
+            }
+        }
+    }
 }
+
 
 // Node: ClusterCull (bin to rasterize vs 2nd pass)
 [Shader("node")]
@@ -133,38 +282,7 @@ void WG_ClusterCull(
     [ MaxRecords(256)] NodeOutput<RasterRecord> Rasterize,
     [MaxRecordsSharedWith(Rasterize)] NodeOutput<ClusterRecord> OcclusionCull)
 {
-    uint count = inRecs.Count();
-    uint i = gtid.x;
-
-    bool active = (i < count);
-    ClusterRecord r;
-    if (active) {
-        r = inRecs[i];
-    } else {
-        r = (ClusterRecord) 0;
-    }
-
-        // Stub classification: even clusters -> visible, odd -> need second pass
-    bool needsSecondPass = active && ((r.clusterIndex & 1u) != 0u);
-
-    uint rasterCount = (active && !needsSecondPass) ? 1u : 0u;
-    uint occCount = needsSecondPass ? 1u : 0u;
-
-    ThreadNodeOutputRecords<RasterRecord> rasterOut = Rasterize.GetThreadNodeOutputRecords(rasterCount);
-    ThreadNodeOutputRecords<ClusterRecord> occOut   = OcclusionCull.GetThreadNodeOutputRecords(occCount);
-
-    if (rasterCount)
-    {
-        rasterOut[0].perMeshInstanceIndex = r.perMeshInstanceIndex;
-        rasterOut[0].clusterIndex    = r.clusterIndex;
-    }
-    if (occCount)
-    {
-        occOut[0] = r;
-    }
-
-    rasterOut.OutputComplete();
-    occOut.OutputComplete();
+    
 }
 
 // Node: OcclusionCull (2nd pass)
@@ -177,29 +295,7 @@ void WG_OcclusionCull(
     uint3 gtid : SV_GroupThreadID,
     [MaxRecords(256)] NodeOutput<RasterRecord> Rasterize)
 {
-    uint count = inRecs.Count();
-    uint i = gtid.x;
-
-    bool active = (i < count);
-    ClusterRecord r;
-    if (active) {
-        r = inRecs[i];
-    } else {
-        r = (ClusterRecord) 0;
-    }
-
-        // Stub: everything passes on second pass
-    uint outCount = active ? 1u : 0u;
-
-    ThreadNodeOutputRecords<RasterRecord> outRecord = Rasterize.GetThreadNodeOutputRecords(outCount);
-
-    if (active)
-    {
-        outRecord[0].perMeshInstanceIndex = r.perMeshInstanceIndex;
-        outRecord[0].clusterIndex    = r.clusterIndex;
-    }
-
-    outRecord.OutputComplete();
+    
 }
 
 // Node: Rasterize (leaf)

@@ -10,6 +10,7 @@
 ViewManager::ViewManager() {
     auto& resourceManager = ResourceManager::GetInstance();
     m_cameraBuffer = LazyDynamicStructuredBuffer<CameraInfo>::CreateShared(1, "cameraBuffer<ViewManager>");
+	m_cullingCameraBuffer = LazyDynamicStructuredBuffer<CullingCameraInfo>::CreateShared(1, "cullingCameraBuffer<ViewManager>");
 
     m_meshletBitfieldGroup = std::make_shared<ResourceGroup>("MeshletCullingBitfieldGroup");
     m_meshInstanceMeshletCullingBitfieldGroup = std::make_shared<ResourceGroup>("MeshInstanceMeshletCullingBitfieldGroup");
@@ -17,6 +18,7 @@ ViewManager::ViewManager() {
 
     // Register provided resources
     m_resources[Builtin::CameraBuffer] = m_cameraBuffer;
+	m_resources[Builtin::CullingCameraBuffer] = m_cullingCameraBuffer;
 
     // Register resolvers for resource groups
     m_resolvers[Builtin::MeshletCullingBitfieldGroup] =
@@ -54,6 +56,16 @@ uint64_t ViewManager::CreateView(const CameraInfo& cameraInfo,
     v.gpu.cameraBufferView = m_cameraBuffer->Add();
     v.gpu.cameraBufferIndex = static_cast<uint32_t>(v.gpu.cameraBufferView->GetOffset() / sizeof(CameraInfo));
     m_cameraBuffer->UpdateView(v.gpu.cameraBufferView.get(), &cameraInfo);
+
+    CullingCameraInfo cullCam{
+        .positionWorldSpace = cameraInfo.positionWorldSpace,
+        .projY = cameraInfo.jitteredProjection.r[1].m128_f32[1], // [1][1]
+        .zNear = cameraInfo.zNear,
+        .errorPixels = 1.0f // TODO: make configurable
+    };
+
+	v.gpu.cullingCameraBufferView = m_cullingCameraBuffer->Add();
+	m_cullingCameraBuffer->UpdateView(v.gpu.cullingCameraBufferView.get(), &cullCam);
 
     // Bitfields
     AllocateBitfields(v);
@@ -109,6 +121,7 @@ void ViewManager::DestroyView(uint64_t viewID) {
 
     // Camera buffer view
     m_cameraBuffer->Remove(v.gpu.cameraBufferView.get());
+	m_cullingCameraBuffer->Remove(v.gpu.cullingCameraBufferView.get());
 
     // Bitfields
     if (v.gpu.meshletBitfieldBuffer) {
@@ -141,6 +154,13 @@ void ViewManager::UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo) {
     std::lock_guard<std::mutex> lock(m_cameraUpdateMutex);
     v->cameraInfo = cameraInfo;
     m_cameraBuffer->UpdateView(v->gpu.cameraBufferView.get(), &cameraInfo);
+	CullingCameraInfo cullInfo;
+	cullInfo.positionWorldSpace = cameraInfo.positionWorldSpace;
+	cullInfo.projY = cameraInfo.jitteredProjection.r[1].m128_f32[1]; // [1][1]
+	cullInfo.zNear = cameraInfo.zNear;
+	cullInfo.errorPixels = 1.0f; // TODO: make configurable
+	m_cullingCameraBuffer->UpdateView(v->gpu.cullingCameraBufferView.get(), &cullInfo);
+    
     if (m_events.onCameraUpdated) m_events.onCameraUpdated(*v);
 }
 
