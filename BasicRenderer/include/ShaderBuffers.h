@@ -303,8 +303,9 @@ struct MeshInstanceClodOffsets
     uint meshletsBase;
 
     uint meshletBoundsBase;
-    uint rootGroup;     // group id relative to groupsBase 
-    uint pad[2];
+    uint lodNodesBase;
+    uint rootNode; // node index (relative to lodNodesBase) to start traversal from
+    uint pad[1];
 };
 
 // Cluster LOD data
@@ -329,6 +330,13 @@ struct ClusterLODGroup
     uint32_t firstChild = 0;    // offset into m_clodChildren
     uint32_t childCount = 0;    // number of ClusterLODChild entries for this group
     uint32_t pad[2] = { 0, 0 };
+};
+
+struct VisibleCluster {
+    unsigned int viewID;
+    unsigned int instanceID;
+    unsigned int meshletID;
+	unsigned int pad;
 };
 
 

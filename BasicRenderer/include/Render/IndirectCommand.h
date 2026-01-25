@@ -24,3 +24,10 @@ struct MaterialEvaluationIndirectCommand {
 	unsigned int dispatchXDimension; // UintRootConstant3
 	D3D12_DISPATCH_ARGUMENTS dispatchArguments;
 };
+
+struct RasterizeClustersCommand
+{
+	unsigned int clusterCount;
+	unsigned int dispatchXDimension;
+	unsigned int dispatchX, dispatchY, dispatchZ;
+};

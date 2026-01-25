@@ -142,6 +142,13 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
 	bool wireframeEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 	bool visibilityRenderingEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableVisibilityRendering")();
 
+    auto visibleMeshletsBuffer = CreateIndexedStructuredBuffer(100000000, sizeof(VisibleCluster), true, false);
+	auto visibleMeshletsCounterBuffer = CreateIndexedStructuredBuffer(1, sizeof(unsigned int), true, false);
+	auto rasterizeClustersCommand = CreateIndexedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
+	graph->RegisterResource(Builtin::VisibleClusterBuffer, visibleMeshletsBuffer);
+	graph->RegisterResource(Builtin::VisibleClusterCounter, visibleMeshletsCounterBuffer);
+	graph->RegisterResource(Builtin::RasterizeClustersIndirectCommand, rasterizeClustersCommand);
+
     graph->BuildComputePass("hierarchialCullingPass")
 		.Build<HierarchialCullingPass>(HierarchialCullingPassInputs{ true });
 

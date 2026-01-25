@@ -216,11 +216,11 @@ void BuildEvaluateIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
     const uint kMaxDim = 65535u;
     // Start from sqrt(groupsNeeded) for near-square tiling
     uint dispatchX = (uint) ceil(sqrt((float) groupsNeeded));
-    if (dispatchX > kMaxDim)
+    if (dispatchX > kMaxDim) {
         dispatchX = kMaxDim;
+    }
     uint dispatchY = (groupsNeeded + dispatchX - 1u) / dispatchX;
-    if (dispatchY > kMaxDim)
-    {
+    if (dispatchY > kMaxDim) {
         dispatchY = kMaxDim; // With screen sizes in practice, this won't clamp
     }
     

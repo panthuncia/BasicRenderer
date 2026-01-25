@@ -1,6 +1,9 @@
 {
   "Builtin": {
     "PerMaterialDataBuffer": {},
+    "VisibleClusterBuffer": {},
+    "VisibleClusterCounter": {},
+    "RasterizeClustersIndirectCommand": {},
     "PrimaryCamera": {
       "LinearDepthMap": {},
       "DepthTexture": {},
@@ -20,7 +23,8 @@
       "Children": {},
       "ChildLocalMeshletIndices": {},
       "Meshlets": {},
-      "MeshletBounds": {}
+      "MeshletBounds": {},
+      "Nodes": {}
     },
     "PerObjectBuffer": {},
     "PerMeshBuffer": {},

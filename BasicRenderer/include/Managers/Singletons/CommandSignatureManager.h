@@ -18,11 +18,15 @@ public:
 	const rhi::CommandSignature& GetMaterialEvaluationCommandSignature() {
 		return m_materialEvaluationCommandSignature.Get();
 	}
+	const rhi::CommandSignature& GetRasterizeClustersCommandSignature() {
+		return m_rasterizeClustersCommandSignature.Get();
+	}
 
 private:
 	rhi::CommandSignaturePtr m_dispatchMeshCommandSignature;
 	rhi::CommandSignaturePtr m_dispatchCommandSignature;
 	rhi::CommandSignaturePtr m_materialEvaluationCommandSignature;
+	rhi::CommandSignaturePtr m_rasterizeClustersCommandSignature;
 };
 
 inline CommandSignatureManager& CommandSignatureManager::GetInstance() {

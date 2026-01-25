@@ -21,6 +21,41 @@ class MeshManager;
 class Skeleton;
 class Buffer;
 
+struct ClusterLODTraversalMetric
+{
+	// Keep XYZ contiguous so meshopt_spatialClusterPoints can read float3 at &boundingSphereX
+	float boundingSphereX = 0;
+	float boundingSphereY = 0;
+	float boundingSphereZ = 0;
+	float boundingSphereRadius = 0;
+
+	// Mirrors clodBounds::error / max quadric error
+	float maxQuadricError = 0;
+	float padding[3] = { 0,0,0 }; // Padding to make size multiple of 16 bytes
+};
+
+struct ClusterLODNodeRange
+{
+	// If isGroup=1: indexOrOffset = groupIndex, countMinusOne = groupMeshletCount-1
+	// If isGroup=0: indexOrOffset = childOffset into m_clodNodes, countMinusOne = childCount-1
+	uint32_t isGroup = 0;
+	uint32_t indexOrOffset = 0;
+	uint32_t countMinusOne = 0;
+	uint32_t padding = 0;
+};
+
+struct ClusterLODNode
+{
+	ClusterLODNodeRange        range{};
+	ClusterLODTraversalMetric  traversalMetric{};
+};
+
+struct ClusterLODNodeRangeAlloc
+{
+	uint32_t offset = 0;
+	uint32_t count = 0;
+};
+
 class Mesh {
 public:
 	~Mesh()
@@ -118,7 +153,8 @@ public:
 		std::unique_ptr<BufferView> clusterLODChildrenView,
 		std::unique_ptr<BufferView> clusterLODMeshletsView,
 		std::unique_ptr<BufferView> clusterLODMeshletBoundsView,
-		std::unique_ptr<BufferView> childLocalMeshletIndicesView
+		std::unique_ptr<BufferView> childLocalMeshletIndicesView,
+		std::unique_ptr<BufferView> clodNodesView
 	);
 
 	const std::vector<ClusterLODGroup>& GetCLodGroups() const {
@@ -149,6 +185,10 @@ public:
 		return m_clodChildLocalMeshletIndices;
 	}
 
+	const std::vector<ClusterLODNode>& GetCLodNodes() const {
+		return m_clodNodes;
+	}
+
 	const BufferView* GetCLodGroupsView() const {
 		return m_clusterLODGroupsView.get();
 	}
@@ -169,8 +209,12 @@ public:
 		return m_childLocalMeshletIndicesView.get();
 	}
 
-	uint32_t GetCLodRootGroup() const {
-		return m_clodRootGroup;
+	const BufferView* GetCLodNodesView() const {
+		return m_clusterLODNodesView.get();
+	}
+
+	uint32_t GetCLodRootNodeIndex() const {
+		return m_clodTopRootNode;
 	}
 
 private:
@@ -182,6 +226,8 @@ private:
 	void ComputeBoundingSphere(const std::vector<UINT32>& indices);
 	void ComputeAABB(DirectX::XMFLOAT3& min, DirectX::XMFLOAT3& max);
 	void BuildClusterLOD(const std::vector<UINT32>& indices);
+	void BuildClusterLODTraversalHierarchy(uint32_t preferredNodeWidth);
+	void LogClusterLODHierarchyStats() const;
     static int GetNextGlobalIndex();
 
     static std::atomic<uint32_t> globalMeshCount;
@@ -209,15 +255,22 @@ private:
 	std::vector<uint8_t>         m_clodMeshletTriangles;
 	std::vector<BoundingSphere>  m_clodMeshletBounds;
 	std::vector<int32_t>         m_clodMeshletRefinedGroup;
-	uint32_t                     m_clodRootGroup = 0;
+	//uint32_t                     m_clodRootGroup = 0;
 	std::vector<ClusterLODChild> m_clodChildren;
 	std::vector<uint32_t>        m_clodChildLocalMeshletIndices; // local indices within the group
+
+	std::vector<ClusterLODNode>      m_clodNodes;
+	std::vector<ClusterLODNodeRangeAlloc> m_clodLodNodeRanges;  // per depth
+	std::vector<uint32_t>            m_clodLodLevelRoots;        // node index per depth (== 1+depth)
+	uint32_t                         m_clodTopRootNode = 0;      // always 0
+	uint32_t                         m_clodMaxDepth = 0;
 
 	std::unique_ptr<BufferView> m_clusterLODGroupsView = nullptr;
 	std::unique_ptr<BufferView> m_clusterLODChildrenView = nullptr;
 	std::unique_ptr<BufferView> m_clusterLODMeshletsView = nullptr;
 	std::unique_ptr<BufferView> m_clusterLODMeshletBoundsView = nullptr;
 	std::unique_ptr<BufferView> m_childLocalMeshletIndicesView = nullptr;
+	std::unique_ptr<BufferView> m_clusterLODNodesView = nullptr;
 
 	UINT m_indexCount = 0;
     std::shared_ptr<Buffer> m_vertexBufferHandle;

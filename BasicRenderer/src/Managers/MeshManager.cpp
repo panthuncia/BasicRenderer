@@ -32,6 +32,7 @@ MeshManager::MeshManager() {
 	m_clusterLODMeshlets = DynamicBuffer::CreateShared(sizeof(meshopt_Meshlet), 1, "clusterLODMeshlets");
 	m_clusterLODMeshletBounds = DynamicBuffer::CreateShared(sizeof(BoundingSphere), 1, "clusterLODMeshletBounds", false, true);
 	m_childLocalMeshletIndices = DynamicBuffer::CreateShared(sizeof(unsigned int), 1, "clodChildLocalMeshletIndices");
+	m_clusterLODNodes = DynamicBuffer::CreateShared(sizeof(ClusterLODNode), 1, "clusterLODNodes");
 
 	// Tag resources for memory statistics
 	m_preSkinningVertices->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
@@ -64,6 +65,7 @@ MeshManager::MeshManager() {
 	m_resources[Builtin::CLod::Meshlets] = m_clusterLODMeshlets;
 	m_resources[Builtin::CLod::MeshletBounds] = m_clusterLODMeshletBounds;
 	m_resources[Builtin::CLod::ChildLocalMeshletIndices] = m_childLocalMeshletIndices;
+	m_resources[Builtin::CLod::Nodes] = m_clusterLODNodes;
 
 }
 
@@ -115,13 +117,15 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	auto clusterLODMeshletsView = m_clusterLODMeshlets->AddData(mesh->GetCLodMeshlets().data(), mesh->GetCLodMeshlets().size() * sizeof(meshopt_Meshlet), sizeof(meshopt_Meshlet));
 	auto clusterLODMeshletBoundsView = m_clusterLODMeshletBounds->AddData(mesh->GetCLodBounds().data(), mesh->GetCLodBounds().size() * sizeof(BoundingSphere), sizeof(BoundingSphere));
 	auto childLocalMeshletIndicesView = m_childLocalMeshletIndices->AddData(mesh->GetCLodChildLocalMeshletIndices().data(), mesh->GetCLodChildLocalMeshletIndices().size() * sizeof(uint32_t), sizeof(uint32_t));
+	auto clusterLODNodesView = m_clusterLODNodes->AddData(mesh->GetCLodNodes().data(), mesh->GetCLodNodes().size() * sizeof(ClusterLODNode), sizeof(ClusterLODNode));
 
 	mesh->SetCLodBufferViews( // TODO: cleanup on remove
 		std::move(clusterLODGroupsView), 
 		std::move(clusterLODChildrenView), 
 		std::move(clusterLODMeshletsView), 
 		std::move(clusterLODMeshletBoundsView),
-		std::move(childLocalMeshletIndicesView));
+		std::move(childLocalMeshletIndicesView),
+		std::move(clusterLODNodesView));
 }
 
 void MeshManager::RemoveMesh(Mesh* mesh) {
@@ -216,6 +220,7 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	auto clusterLODChildrenView = mesh->GetMesh()->GetCLodChildrenView();
 	auto clusterLODMeshletsView = mesh->GetMesh()->GetCLodMeshletsView();
 	auto clusterLODMeshletBoundsView = mesh->GetMesh()->GetCLodMeshletBoundsView();
+	auto clusterLODNodesView = mesh->GetMesh()->GetCLodNodesView();
 
 	MeshInstanceClodOffsets clodOffsets = {};
 	clodOffsets.groupsBase = static_cast<uint32_t>(clusterLODGroupsView->GetOffset() / sizeof(ClusterLODGroup));
@@ -223,7 +228,9 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	clodOffsets.childLocalMeshletIndicesBase = 0; // TODO
 	clodOffsets.meshletsBase = static_cast<uint32_t>(clusterLODMeshletsView->GetOffset() / sizeof(meshopt_Meshlet));
 	clodOffsets.meshletBoundsBase = static_cast<uint32_t>(clusterLODMeshletBoundsView->GetOffset() / sizeof(BoundingSphere));
-	clodOffsets.rootGroup = mesh->GetMesh()->GetCLodRootGroup();
+	clodOffsets.lodNodesBase = static_cast<uint32_t>(clusterLODNodesView->GetOffset() / sizeof(ClusterLODNode));
+	clodOffsets.rootNode = mesh->GetMesh()->GetCLodRootNodeIndex();
+	//clodOffsets.rootGroup = mesh->GetMesh()->GetCLodRootGroup();
 	auto clodOffsetsView = m_perMeshInstanceClodOffsets->AddData(&clodOffsets, sizeof(MeshInstanceClodOffsets), sizeof(MeshInstanceClodOffsets)); // Indexable by mesh instance
 
 	mesh->SetCLodBufferViews(

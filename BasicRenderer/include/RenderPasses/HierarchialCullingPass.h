@@ -39,10 +39,11 @@ inline rg::Hash64 HashValue(const HierarchialCullingPassInputs& i) {
 class HierarchialCullingPass : public ComputePass {
 public:
     HierarchialCullingPass(HierarchialCullingPassInputs inputs) {
-        CreateWorkGraph(
+        CreatePipelines(
             DeviceManager::GetInstance().GetDevice(),
             PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
-			m_workGraph);
+			m_workGraph,
+            m_createCommandPipelineState);
         auto memSize = m_workGraph->GetRequiredScratchMemorySize();
         m_scratchBuffer = Buffer::CreateShared( // TODO: Make a way for the graph to provide things like this, to allow for aliasing
             rhi::HeapType::DeviceLocal,
@@ -61,12 +62,16 @@ public:
             .with<Components::IsActiveDrawSetIndices>()
             .with<Components::ParticipatesInPass>(flecs::Wildcard)
             .build();
-        builder->WithUnorderedAccess(m_scratchBuffer)
+        builder->WithUnorderedAccess(m_scratchBuffer,
+            Builtin::VisibleClusterBuffer,
+            Builtin::VisibleClusterCounter,
+            Builtin::RasterizeClustersIndirectCommand)
             .WithShaderResource(Builtin::IndirectCommandBuffers::Master,
                 Builtin::CLod::Offsets,
                 Builtin::CLod::Groups,
                 Builtin::CLod::Children,
                 Builtin::CLod::ChildLocalMeshletIndices,
+                Builtin::CLod::Nodes,
                 Builtin::CullingCameraBuffer,
                 Builtin::PerMeshInstanceBuffer,
                 Builtin::PerObjectBuffer)
@@ -82,6 +87,13 @@ public:
 		RegisterSRV(Builtin::CullingCameraBuffer);
 		RegisterSRV(Builtin::PerMeshInstanceBuffer);
 		RegisterSRV(Builtin::PerObjectBuffer);
+        RegisterSRV(Builtin::CLod::Nodes);
+
+		RegisterUAV(Builtin::VisibleClusterBuffer);
+		RegisterUAV(Builtin::VisibleClusterCounter);
+		RegisterUAV(Builtin::RasterizeClustersIndirectCommand);
+
+		m_visibleClusterCounter = m_resourceRegistryView->RequestHandle(Builtin::VisibleClusterCounter);
 	}
 
 	PassReturn Execute(RenderContext& context) override {
@@ -126,10 +138,32 @@ public:
 		dispatchDesc.nodeCpuInput.numRecords = static_cast<uint32_t>(cullRecords.size());
 		dispatchDesc.nodeCpuInput.recordByteStride = sizeof(ObjectCullRecord);
 
+        // Builds list of visible clusters
 		commandList.DispatchWorkGraph(dispatchDesc);
+
+        // UAV barrier on the visible cluster counter
+		rhi::BufferBarrier barrier{};
+        barrier.buffer = m_resourceRegistryView->Resolve<Resource>(m_visibleClusterCounter)->GetAPIResource().GetHandle();
+        barrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+        barrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+        barrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
+		barrier.afterSync = rhi::ResourceSyncState::ComputeShading;
+		rhi::BarrierBatch bufferBarriers{};
+		bufferBarriers.buffers = rhi::Span<rhi::BufferBarrier>(&barrier, 1);
+		commandList.Barriers(bufferBarriers);
+
+		// Create indirect command buffer for LOD rasterization
+		BindResourceDescriptorIndices(commandList, m_createCommandPipelineState.GetResourceDescriptorSlots());
+        commandList.BindPipeline(m_createCommandPipelineState.GetAPIPipelineState().GetHandle());
+		commandList.Dispatch(1, 1, 1); // Single thread group, one thread
 
 		return {};
 	}
+
+	void Update(const UpdateContext& context) override {
+        uint32_t zero = 0u;
+		BUFFER_UPLOAD(&zero, sizeof(uint32_t), UploadManager::UploadTarget::FromHandle(m_visibleClusterCounter), 0);
+    }
 
 	void Cleanup() override {
 
@@ -138,12 +172,15 @@ public:
 private:
 	PipelineResources m_pipelineResources;
 	rhi::WorkGraphPtr m_workGraph;
+	PipelineState m_createCommandPipelineState;
 	std::shared_ptr<Buffer> m_scratchBuffer;
+    ResourceRegistry::RegistryHandle m_visibleClusterCounter;
 
-    rhi::Result CreateWorkGraph(
+    rhi::Result CreatePipelines(
         rhi::Device device,
         rhi::PipelineLayoutHandle globalRootSignature,
-        rhi::WorkGraphPtr& outGraph)
+        rhi::WorkGraphPtr& outGraph,
+        PipelineState& outCreateCommandPipeline)
     {
         // Compile the work-graph library
 		ShaderLibraryInfo libInfo(L"shaders/workGraphCulling.hlsl", L"lib_6_8");
@@ -161,7 +198,7 @@ private:
             { "WG_ObjectCull",   nullptr },
             { "WG_Traverse",     nullptr },
             { "WG_ClusterCullBuckets",  nullptr },
-            { "WG_Output", nullptr }
+            //{ "WG_Output", nullptr }
         } };
 
         rhi::ShaderLibraryDesc library{};
@@ -187,5 +224,13 @@ private:
 
         // Create
         return device.CreateWorkGraph(wg, outGraph);
+
+		// Pipeline to create indirect command
+        outCreateCommandPipeline = PSOManager::GetInstance().MakeComputePipeline(
+            globalRootSignature,
+            L"shaders/createRasterizeClustersCommand.hlsl",
+            L"CreateRasterizeClustersCommand",
+            {},
+			"HierarchialLODRasterizeCommandCreation");
     }
 };
