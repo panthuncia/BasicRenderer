@@ -102,7 +102,6 @@ struct Builtin {
     inline static constexpr std::string_view VisibleClusterTable = "Builtin::PrimaryCamera::VisibleClusterTable";
     inline static constexpr std::string_view VisibleClusterTableCounter = "Builtin::PrimaryCamera::VisibleClusterTableCounter";
   };
-  inline static constexpr std::string_view RasterizeClustersIndirectCommand = "Builtin::RasterizeClustersIndirectCommand";
   struct Shadows {
     inline static constexpr std::string_view LinearShadowMaps = "Builtin::Shadows::LinearShadowMaps";
     inline static constexpr std::string_view ShadowMaps = "Builtin::Shadows::ShadowMaps";

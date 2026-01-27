@@ -127,7 +127,7 @@ uint clusterToVisibleClusterTableStartIndex)
     
     VisBufferPSInput result;
     result.position = mul(viewPosition, mainCamera.projection);
-    result.visibleClusterTableIndex = clusterIndex;
+    result.visibleClusterIndex = clusterIndex;
     result.linearDepth = -viewPosition.z;
     
 #if defined(PSO_ALPHA_TEST)
@@ -188,6 +188,7 @@ void EmitMeshletVisBuffer(uint uGroupThreadID, MeshletSetup setup, out vertices 
 struct VisibilityPerPrimitive
 {
     uint triangleIndex : SV_PrimitiveID;
+    uint viewID;
 };
 
 void EmitPrimitiveIDs(uint uGroupThreadID, MeshletSetup setup, out primitives VisibilityPerPrimitive primitiveInfo[MS_MESHLET_SIZE])
@@ -195,9 +196,11 @@ void EmitPrimitiveIDs(uint uGroupThreadID, MeshletSetup setup, out primitives Vi
     for (uint t = uGroupThreadID; t < setup.triCount; t += MS_THREAD_GROUP_SIZE)
     {
         primitiveInfo[t].triangleIndex = t;
+        primitiveInfo[t].viewID = setup.viewID;
     }
 }
 
+// Old AS+MS entries
 [outputtopology("triangle")]
 [numthreads(MS_THREAD_GROUP_SIZE, 1, 1)]
 void MSMain(
@@ -232,6 +235,29 @@ void VisibilityBufferMSMain(
     uint meshletIndex = payload.MeshletIndices[vGroupID];
     MeshletSetup setup;
     bool draw = InitializeMeshlet(meshletIndex, setup);
+    SetMeshOutputCounts(setup.vertCount, setup.triCount);
+    if (!draw)
+    {
+        return;
+    }
+    EmitMeshletVisBuffer(uGroupThreadID, setup, outputVertices, outputTriangles);
+    EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
+}
+
+// New pure-MS entry for Cluster LOD rendering
+[outputtopology("triangle")]
+[numthreads(MS_THREAD_GROUP_SIZE, 1, 1)]
+void ClusterLODMSMain(
+    const uint uGroupThreadID : SV_GroupThreadID,
+    const uint vGroupID : SV_GroupID,
+    out vertices VisBufferPSInput outputVertices[MS_MESHLET_SIZE],
+    out indices uint3 outputTriangles[MS_MESHLET_SIZE],
+    out primitives VisibilityPerPrimitive primitiveInfo[MS_MESHLET_SIZE])
+{
+    uint visibleMeshletIndex = vGroupID;
+
+    MeshletSetup setup;
+    bool draw = InitializeMeshletInternalCLod(visibleMeshletIndex, setup);
     SetMeshOutputCounts(setup.vertCount, setup.triCount);
     if (!draw)
     {

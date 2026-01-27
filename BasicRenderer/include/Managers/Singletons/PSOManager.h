@@ -117,6 +117,9 @@ public:
 	const PipelineState& GetVisibilityBufferPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
 	const PipelineState& GetVisibilityBufferMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
 
+    const PipelineState& GetClusterLODRasterPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
+
+
     const PipelineState& GetDeferredPSO(UINT psoFlags);
 
     PipelineState MakeComputePipeline(rhi::PipelineLayoutHandle layout,
@@ -174,6 +177,8 @@ private:
     std::unordered_map<PSOKey, PipelineState> m_visibilityBufferPSOCache;
     std::unordered_map<PSOKey, PipelineState> m_visibilityBufferMeshPSOCache;
 
+    std::unordered_map<PSOKey, PipelineState> m_clusterLODRasterPSOCache;
+
 	std::unordered_map<unsigned int, PipelineState> m_deferredPSOCache;
 
     ComPtr<IDxcUtils> pUtils;
@@ -194,6 +199,8 @@ private:
 
 	PipelineState CreateVisibilityBufferPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
 	PipelineState CreateVisibilityBufferMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
+
+    PipelineState CreateClusterLODRasterPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
 
     PipelineState CreateDeferredPSO(UINT psoFlags);
 

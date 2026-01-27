@@ -17,7 +17,7 @@ struct PSInput {
 struct VisBufferPSInput
 {
     float4 position : SV_POSITION; // Screen-space position, required for rasterization
-    nointerpolation uint visibleClusterTableIndex : TEXCOORD0;
+    nointerpolation uint visibleClusterIndex : TEXCOORD0;
     float linearDepth : TEXCOORD1;
 #if defined (PSO_ALPHA_TEST)
     float2 texcoord : TEXCOORD2;

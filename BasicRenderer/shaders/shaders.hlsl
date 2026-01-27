@@ -170,7 +170,7 @@ PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) 
 
 struct VisBufferOutput
 {
-    uint2 visibility; // first element packed drawcall id and meshlet-local vertex index, second component per-drawcall meshlet index
+    uint2 visibility; // first element 7 bits for meshlet-local triangle index, 25 bits for visible cluster index, second element: sign bit for isFrontFace, 31 bits for linear depth
 };
 
 VisBufferOutput VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFrontFace, uint primID : SV_PrimitiveID) : SV_TARGET

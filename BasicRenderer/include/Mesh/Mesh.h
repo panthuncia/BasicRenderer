@@ -152,6 +152,8 @@ public:
 		std::unique_ptr<BufferView> clusterLODGroupsView,
 		std::unique_ptr<BufferView> clusterLODChildrenView,
 		std::unique_ptr<BufferView> clusterLODMeshletsView,
+		std::unique_ptr<BufferView> clusterLODMeshletVerticesView,
+		std::unique_ptr<BufferView> clusterLODMeshletTrianglesView,
 		std::unique_ptr<BufferView> clusterLODMeshletBoundsView,
 		std::unique_ptr<BufferView> childLocalMeshletIndicesView,
 		std::unique_ptr<BufferView> clodNodesView
@@ -201,6 +203,14 @@ public:
 		return m_clusterLODMeshletsView.get();
 	}
 
+	const BufferView* GetCLodMeshletVerticesView() const {
+		return m_clusterLODMeshletVerticesView.get();
+	}
+
+	const BufferView* GetCLodMeshletTrianglesView() const {
+		return m_clusterLODMeshletTrianglesView.get();
+	}
+
 	const BufferView* GetCLodMeshletBoundsView() const {
 		return m_clusterLODMeshletBoundsView.get();
 	}
@@ -236,8 +246,8 @@ private:
 	std::unique_ptr<std::vector<std::byte>> m_vertices;
 	std::unique_ptr<std::vector<std::byte>> m_skinningVertices;
 	std::vector<meshopt_Meshlet> m_meshlets;
-	std::vector<unsigned int> m_meshletVertices;
-    std::vector<unsigned char> m_meshletTriangles;
+	std::vector<uint32_t> m_meshletVertices;
+    std::vector<uint8_t> m_meshletTriangles;
 	std::vector<BoundingSphere> m_meshletBounds;
 	std::vector<std::byte> m_meshletReorderedVertices;
 	std::vector<std::byte> m_meshletReorderedSkinningVertices;
@@ -268,6 +278,8 @@ private:
 	std::unique_ptr<BufferView> m_clusterLODGroupsView = nullptr;
 	std::unique_ptr<BufferView> m_clusterLODChildrenView = nullptr;
 	std::unique_ptr<BufferView> m_clusterLODMeshletsView = nullptr;
+	std::unique_ptr<BufferView> m_clusterLODMeshletVerticesView = nullptr;
+	std::unique_ptr<BufferView> m_clusterLODMeshletTrianglesView = nullptr;
 	std::unique_ptr<BufferView> m_clusterLODMeshletBoundsView = nullptr;
 	std::unique_ptr<BufferView> m_childLocalMeshletIndicesView = nullptr;
 	std::unique_ptr<BufferView> m_clusterLODNodesView = nullptr;

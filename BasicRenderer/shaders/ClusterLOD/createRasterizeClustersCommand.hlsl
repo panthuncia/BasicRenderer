@@ -2,7 +2,7 @@
 #include "include/structs.hlsli"
 #include "Common/defines.h"
 
-struct RasterizeClustersCommand
+struct RasterBucketsHistogramIndirectCommand
 {
     uint clusterCount;
     uint xDim;
@@ -13,7 +13,7 @@ struct RasterizeClustersCommand
 [numthreads(1, 1, 1)]
 void CreateRasterizeClustersCommand()
 {
-    StructuredBuffer<RasterizeClustersCommand> outCommand = ResourceDescriptorHeap(ResourceDescriptorIndex(Builtin::RasterizeClustersIndirectCommand));
+    StructuredBuffer<RasterBucketsHistogramIndirectCommand> outCommand = ResourceDescriptorHeap(ResourceDescriptorIndex(Builtin::CLod::RasterBucketsHistogramIndirectCommand));
     StructuredBuffer<uint> clusterCountBuffer = ResourceDescriptorHeap(ResourceDescriptorIndex(Builtin::VisibleClusterCounter));
 
     // Given the cluster count, find dispatch dimensions that minimizes wasted threads

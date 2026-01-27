@@ -136,6 +136,14 @@ const PipelineState& PSOManager::GetVisibilityBufferMeshPSO(UINT psoFlags, Mater
     return m_visibilityBufferMeshPSOCache[key];
 }
 
+const PipelineState& PSOManager::GetClusterLODRasterPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
+    PSOKey key(psoFlags, materialCompileFlags, wireframe);
+    if (m_clusterLODRasterPSOCache.find(key) == m_clusterLODRasterPSOCache.end()) {
+        m_clusterLODRasterPSOCache[key] = CreateClusterLODRasterPSO(psoFlags, materialCompileFlags, wireframe);
+    }
+    return m_clusterLODRasterPSOCache[key];
+}
+
 const PipelineState& PSOManager::GetDeferredPSO(UINT psoFlags) {
     if (m_deferredPSOCache.find(psoFlags) == m_deferredPSOCache.end()) {
         m_deferredPSOCache[psoFlags] = CreateDeferredPSO(psoFlags);
@@ -474,6 +482,64 @@ PipelineState PSOManager::CreateVisibilityBufferMeshPSO(
         rhi::Make(soRTV),
         rhi::Make(soDSV),
         rhi::Make(soSmp),
+    };
+
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso;
+    auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
+        throw std::runtime_error("Failed to create Mesh PrePass PSO");
+    }
+
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+}
+
+PipelineState PSOManager::CreateClusterLODRasterPSO(
+    UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
+    auto defines = GetShaderDefines(psoFlags, materialCompileFlags);
+
+    Microsoft::WRL::ComPtr<ID3DBlob> asBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl",          L"ClusterLODMSMain", L"ms_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl",       L"ClusterLODPSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    asBlob = compiledBundle.amplificationShader;
+    msBlob = compiledBundle.meshShader;
+    psBlob = compiledBundle.pixelShader;
+
+    auto& layout = GetRootSignature();
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()) };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()) };
+
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (materialCompileFlags & MaterialCompileFlags::MaterialCompileDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
+
+    rhi::BlendState rhiBlend = GetBlendDesc(materialCompileFlags);
+    rhi::SubobjBlend soBlend{ rhiBlend };
+
+    rhi::DepthStencilState ds{};
+    rhi::SubobjDepth soDepth{ ds };
+
+    rhi::RenderTargets rts{};
+
+    rts.count = 0;
+
+    rhi::SubobjRTVs soRTV{ rts };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soMesh),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
     };
 
     auto dev = DeviceManager::GetInstance().GetDevice();

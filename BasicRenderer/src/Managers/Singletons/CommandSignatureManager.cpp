@@ -37,14 +37,4 @@ void CommandSignatureManager::Initialize() {
         rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(materialEvaluationArgs, 2), sizeof(MaterialEvaluationIndirectCommand) },
         computeLayout.GetHandle(), m_materialEvaluationCommandSignature);
 
-    // Used by the cluster rasterization pass
-    rhi::IndirectArg rasterizeClustersArgs[] = {
-        {.kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { MiscUintRootSignatureIndex, 0, 2 } } },
-        {.kind = rhi::IndirectArgKind::DispatchMesh }
-    };
-
-    result = device.CreateCommandSignature(
-        rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(rasterizeClustersArgs, 2), sizeof(RasterizeClustersCommand) },
-        graphicsLayout.GetHandle(), m_rasterizeClustersCommandSignature);
-
 }

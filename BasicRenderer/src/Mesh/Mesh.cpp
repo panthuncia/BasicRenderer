@@ -871,6 +871,8 @@ void Mesh::SetCLodBufferViews(
 	std::unique_ptr<BufferView> clusterLODGroupsView,
 	std::unique_ptr<BufferView> clusterLODChildrenView,
 	std::unique_ptr<BufferView> clusterLODMeshletsView,
+	std::unique_ptr<BufferView> clusterLODMeshletVerticesView,
+	std::unique_ptr<BufferView> clusterLODMeshletTrianglesView,
 	std::unique_ptr<BufferView> clusterLODMeshletBoundsView,
 	std::unique_ptr<BufferView> childLocalMeshletIndicesView,
 	std::unique_ptr<BufferView> clusterLODNodesView
@@ -878,6 +880,8 @@ void Mesh::SetCLodBufferViews(
 	m_clusterLODGroupsView = std::move(clusterLODGroupsView);
 	m_clusterLODChildrenView = std::move(clusterLODChildrenView);
 	m_clusterLODMeshletsView = std::move(clusterLODMeshletsView);
+	m_clusterLODMeshletVerticesView = std::move(clusterLODMeshletVerticesView);
+	m_clusterLODMeshletTrianglesView = std::move(clusterLODMeshletTrianglesView);
 	m_clusterLODMeshletBoundsView = std::move(clusterLODMeshletBoundsView);
 	m_childLocalMeshletIndicesView = std::move(childLocalMeshletIndicesView);
 	m_clusterLODNodesView = std::move(clusterLODNodesView);
