@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "Render/RenderPhase.h"
+#include "Render/RasterBucketFlags.h"
 
 enum MaterialCompileFlags : uint64_t {
 	MaterialCompileNone = 0,
@@ -25,9 +26,10 @@ inline MaterialCompileFlags operator|=(MaterialCompileFlags& a, MaterialCompileF
 
 struct TechniqueDescriptor {
 	std::unordered_set<RenderPhase> passes; // Which render passes (that do per-object work) this technique participates in
-	MaterialCompileFlags compileFlags = static_cast<MaterialCompileFlags>(0); // Any difference here requires a separate PSO
+	MaterialCompileFlags compileFlags = static_cast<MaterialCompileFlags>(0); // Any difference here requires a separate material eval PSO
 	// metadata: alphaMode, domain (Deferred/Forward), feature bits (aniso, parallax)?
 	// TechniqueDescriptor::Hasher- just use the compileFlags as the hash, the passes are calculated from that
+	MaterialRasterFlags rasterFlags = MaterialRasterFlagsNone; // Any difference here requires a separate raster PSO
 	struct Hasher {
 		size_t operator()(TechniqueDescriptor const& td) const noexcept {
 			return std::hash<uint64_t>()(static_cast<uint64_t>(td.compileFlags));

@@ -162,7 +162,7 @@ struct PerMaterialCB {
     unsigned int roughnessChannel;
     
     DirectX::XMUINT3 emissiveChannels;
-	float pad0;
+	unsigned int rasterBuckedIndex;
 };
 
 struct LightInfo {

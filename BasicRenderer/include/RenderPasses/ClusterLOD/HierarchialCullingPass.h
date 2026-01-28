@@ -65,7 +65,7 @@ public:
         builder->WithUnorderedAccess(m_scratchBuffer,
             Builtin::VisibleClusterBuffer,
             Builtin::VisibleClusterCounter,
-            Builtin::RasterizeClustersIndirectCommand)
+            "Builtin::CLod::RasterBucketsHistogramIndirectCommand")
             .WithShaderResource(Builtin::IndirectCommandBuffers::Master,
                 Builtin::CLod::Offsets,
                 Builtin::CLod::Groups,
@@ -91,7 +91,7 @@ public:
 
 		RegisterUAV(Builtin::VisibleClusterBuffer);
 		RegisterUAV(Builtin::VisibleClusterCounter);
-		RegisterUAV(Builtin::RasterizeClustersIndirectCommand);
+		RegisterUAV("Builtin::CLod::RasterBucketsHistogramIndirectCommand");
 
 		m_visibleClusterCounter = m_resourceRegistryView->RequestHandle(Builtin::VisibleClusterCounter);
 	}

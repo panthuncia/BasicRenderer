@@ -29,7 +29,7 @@ public:
 		auto device = DeviceManager::GetInstance().GetDevice();
 
         auto result = device.CreateCommandSignature(
-            rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(rasterizeClustersArgs, 2), sizeof(RasterBucketHistogramIndirectCommand) },
+            rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(rasterizeClustersArgs, 2), sizeof(RasterBucketsHistogramIndirectCommand) },
             PSOManager::GetInstance().GetComputeRootSignature().GetHandle(), m_histogramCommandSignature);
     }
 
@@ -40,13 +40,15 @@ public:
         builder->WithShaderResource(
             Builtin::VisibleClusterBuffer,
             Builtin::VisibleClusterCounter)
-            .WithIndirectArguments("Builtin::CLod::RasterBucketsHistogramIndirectCommand");
+            .WithIndirectArguments("Builtin::CLod::RasterBucketsHistogramIndirectCommand")
+            .WithUnorderedAccess("Builtin::CLod::RasterBucketsClusterCountBuffer");
     }
 
     void Setup() override {
 
         RegisterSRV(Builtin::VisibleClusterBuffer);
         RegisterSRV(Builtin::VisibleClusterCounter);
+		RegisterUAV("Builtin::CLod::RasterBucketsClusterCountBuffer");
 
         m_rasterBucketHistogramIndirectCommandsResource = m_resourceRegistryView->RequestPtr<Resource>("Builtin::CLod::RasterBucketsHistogramIndirectCommand");
     }

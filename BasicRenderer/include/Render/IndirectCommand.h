@@ -25,7 +25,7 @@ struct MaterialEvaluationIndirectCommand {
 	D3D12_DISPATCH_ARGUMENTS dispatchArguments;
 };
 
-struct RasterizeClustersCommand
+struct RasterBucketsHistogramIndirectCommand
 {
 	unsigned int clusterCount;
 	unsigned int dispatchXDimension;

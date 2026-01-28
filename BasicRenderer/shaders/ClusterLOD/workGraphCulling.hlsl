@@ -80,7 +80,7 @@ struct ObjectCullRecord
     uint viewDataIndex; // One record per view, times...
     uint activeDrawSetIndicesSRVIndex; // One record per draw set
     uint activeDrawCount;
-	uint pad0; // Padding for 16-byte alignment
+	uint fixedRasterBucketOffset; // Optional offset into fixed raster buckets (depth-only, etc.)
     uint3 dispatchGrid : SV_DispatchGrid; // Drives dispatch size
 };
 
@@ -90,6 +90,7 @@ struct TraverseRecord
     uint id;      // nodeId OR groupId depending on kind
     uint viewId;
     uint kind;    // 0 = BVH node, 1 = Group
+    uint fixedRasterBucketOffset;
 };
 
 struct MeshletBucketRecord
@@ -104,16 +105,18 @@ struct MeshletBucketRecord
     // Absolute base for final meshlet IDs (added to each local meshlet):
     uint meshletsBase;
 
+    uint fixedRasterBucketOffset;
+
     uint3 dispatchGrid : SV_DispatchGrid; // drives broadcasting node launch
 };
 
-struct MeshletWorkRecord
-{
-    uint instanceIndex;
-    uint meshletId;  // absolute meshlet index into the meshlet buffer (after base)
-    uint viewId;
-    uint pad;
-};
+// struct MeshletWorkRecord
+// {
+//     uint instanceIndex;
+//     uint meshletId;  // absolute meshlet index into the meshlet buffer (after base)
+//     uint viewId;
+//     uint fixedRasterBucketOffset;
+// };
 
 // Node: ObjectCull (entry)
 [Shader("node")]
@@ -156,6 +159,7 @@ void WG_ObjectCull(
         r.instanceIndex = perMeshInstanceBufferIndex;
         r.id            = off.rootNode;   // BVH root node for this mesh
         r.kind          = 0;              // Node
+        r.fixedRasterBucketOffset = hdr.fixedRasterBucketOffset;
         outRecs.Get()   = r;
 
         outRecs.Get() = r;
@@ -236,6 +240,7 @@ void WG_Traverse(
                 r.viewId        = rec.viewId;
                 r.kind          = 0; // Node
                 r.id            = node.range.indexOrOffset + ci; // child node id (relative to lodNodesBase)
+                r.fixedRasterBucketOffset = rec.fixedRasterBucketOffset;
                 o.Get() = r;
             }
             o.OutputComplete();
@@ -254,6 +259,7 @@ void WG_Traverse(
             r.viewId        = rec.viewId;
             r.kind          = 1; // Group
             r.id            = node.range.indexOrOffset; // groupId (relative to groupsBase)
+            r.fixedRasterBucketOffset = rec.fixedRasterBucketOffset;
             o.Get() = r;
             o.OutputComplete();
         }
@@ -346,6 +352,7 @@ void WG_Traverse(
                 r.viewId        = rec.viewId;
                 r.kind          = 1; // Group
                 r.id            = (uint)child.refinedGroup;
+                r.fixedRasterBucketOffset = rec.fixedRasterBucketOffset;
                 o.Get() = r;
             }
             o.OutputComplete();
@@ -369,6 +376,7 @@ void WG_Traverse(
                 b.childLocalMeshletIndexBase = idxBase;
                 b.localMeshletCount          = child.localMeshletCount;
                 b.meshletsBase               = off.meshletsBase + grp.firstMeshlet;
+                b.fixedRasterBucketOffset    = rec.fixedRasterBucketOffset;
 
                 const uint groupsX = (b.localMeshletCount + 64 - 1) / 64;
                 b.dispatchGrid = uint3(groupsX, 1, 1);

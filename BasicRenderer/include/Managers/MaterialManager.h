@@ -6,6 +6,7 @@
 #include "Interfaces/IResourceProvider.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "Render/IndirectCommand.h"
+#include "Render/RasterBucketFlags.h"
 
 // Manages buffers for per-material-compile-flag work (e.g., visibility buffer per-material)
 class MaterialManager : public IResourceProvider {
@@ -15,6 +16,7 @@ public:
 	}
 	unsigned int GetCompileFlagsSlot(MaterialCompileFlags flags);
 	unsigned int GetMaterialSlot(unsigned int materialID, std::optional<PerMaterialCB> data = std::nullopt);
+	unsigned int GetRasterFlagsSlot(MaterialRasterFlags rasterFlags);
 
 	void IncrementMaterialUsageCount(Material& material);
 	void DecrementMaterialUsageCount(const Material& material);
@@ -51,11 +53,22 @@ private:
 
 	static constexpr unsigned int kScanBlockSize = 1024;
 
+	// Material raster flags to raster bin mapping
+	std::unordered_map<uint32_t, unsigned int> m_rasterFlagToBucketMapping;
+	unsigned int m_rasterBucketsUsed = 0;
+	std::vector<unsigned int> m_freeRasterBuckets;
+	const unsigned int m_numFixedRasterCombinations;
+
+	// CLod execution
+	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_rasterBucketsClusterCountBuffer;
+
+	// Visibility buffer
 	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_materialPixelCountBuffer;
 	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_materialOffsetBuffer;
 	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_materialWriteCursorBuffer;
 	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_blockSumsBuffer;
 	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_scannedBlockSumsBuffer;
 	std::shared_ptr<DynamicStructuredBuffer<MaterialEvaluationIndirectCommand>> m_materialEvaluationCommandBuffer;
+
 	std::shared_ptr<DynamicStructuredBuffer<PerMaterialCB>> m_perMaterialDataBuffer;
 };

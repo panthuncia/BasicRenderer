@@ -1,12 +1,19 @@
 #include "Managers/MaterialManager.h"
 #include "../generated/BuiltinResources.h"
+#include "Render/RasterBucketFlags.h"
+
+unsigned int GetNumFixedRasterCombinations() { // TODO: Is there a better way to do this? We won't always need all combinations
+	return static_cast<unsigned int>(pow(2, g_allFixedRasterFlags.size()));
+}
 
 // TODO: Use LazyDynamicStructuredBuffer and active indices buffer like draw calls? Would reduce number of no-op indirect arguments
-MaterialManager::MaterialManager() {
+MaterialManager::MaterialManager() : m_numFixedRasterCombinations(GetNumFixedRasterCombinations()) {
 	auto& rm = ResourceManager::GetInstance();
 
 	// Primary material data buffer
 	m_perMaterialDataBuffer = DynamicStructuredBuffer<PerMaterialCB>::CreateShared(m_compileFlagsSlotsUsed, "Builtin::PerMaterialDataBuffer", true);
+
+	m_rasterBucketsClusterCountBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(64, "CLod::RasterBucketsClusterCountBuffer", true);
 
 	// Visibility buffer resources
     m_materialPixelCountBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(m_compileFlagsSlotsUsed, "VisUtil::MaterialPixelCountBuffer", true);
@@ -20,6 +27,8 @@ MaterialManager::MaterialManager() {
 
 	// Indirect command buffer for material evaluation
 	m_materialEvaluationCommandBuffer = DynamicStructuredBuffer<MaterialEvaluationIndirectCommand>::CreateShared(m_compileFlagsSlotsUsed, "IndirectCommandBuffers::MaterialEvaluationCommandBuffer", true);
+
+	m_resources["Builtin::CLod::RasterBucketsClusterCountBuffer"] = m_rasterBucketsClusterCountBuffer;
 
 	m_resources["Builtin::VisUtil::MaterialPixelCountBuffer"] = m_materialPixelCountBuffer;
 	m_resources["Builtin::VisUtil::MaterialOffsetBuffer"] = m_materialOffsetBuffer;
@@ -38,6 +47,10 @@ void MaterialManager::IncrementMaterialUsageCount(Material& material) {
 	uint32_t materialID = material.GetMaterialID();
 	material.SetCompileFlagsID(flagsSlot);
 	unsigned int materialSlot = GetMaterialSlot(materialID, material.GetData());
+
+	unsigned int rasterSlot = GetRasterFlagsSlot(material.Technique().rasterFlags);
+	material.SetRasterBucketIndex(rasterSlot); // Base index, before fixed flags offsetting
+
 	m_materialUsageCounts[materialSlot]++;
 }
 
@@ -124,6 +137,31 @@ unsigned int MaterialManager::GetCompileFlagsSlot(MaterialCompileFlags flags) {
 		m_activeCompileFlags.push_back(flags);
 	}
 	return slot;
+}
+
+unsigned int MaterialManager::GetRasterFlagsSlot(MaterialRasterFlags rasterFlags) {
+	unsigned int slot; // Each material raster bucket is followed by m_numFixedRasterCombinations slots for fixed flags
+	auto it = m_rasterFlagToBucketMapping.find(static_cast<uint32_t>(rasterFlags));
+	if (it != m_rasterFlagToBucketMapping.end()) {
+		slot = it->second; // Base slot for this raster flags combination
+		return slot + slot * (m_numFixedRasterCombinations + 1);
+	}
+	if (m_rasterBucketsUsed >= std::numeric_limits<unsigned int>::max() / (m_numFixedRasterCombinations + 1)) {
+		throw std::runtime_error("Exceeded maximum number of raster buckets");
+	}
+	if (!m_freeRasterBuckets.empty()) {
+		slot = m_freeRasterBuckets.back();
+		m_freeRasterBuckets.pop_back();
+	}
+	else {
+		slot = m_rasterBucketsUsed++;
+
+		// Resize resources to accommodate new raster bucket
+		m_rasterBucketsClusterCountBuffer->Resize(m_rasterBucketsUsed * (m_numFixedRasterCombinations + 1));
+	}
+
+	m_rasterFlagToBucketMapping[static_cast<uint32_t>(rasterFlags)] = slot;
+	return slot + slot * (m_numFixedRasterCombinations + 1);
 }
 
 std::shared_ptr<Resource> MaterialManager::ProvideResource(ResourceIdentifier const& key) {

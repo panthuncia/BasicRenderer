@@ -95,6 +95,10 @@ void Material::SetCompileFlagsID(uint32_t id) {
     m_materialData.compileFlagsID = id;
 }
 
+void Material::SetRasterBucketIndex(uint32_t index) {
+    m_materialData.rasterBuckedIndex = index;
+}
+
 std::shared_ptr<Material> Material::GetDefaultMaterial() {
     if (defaultMaterial) {
         return defaultMaterial;

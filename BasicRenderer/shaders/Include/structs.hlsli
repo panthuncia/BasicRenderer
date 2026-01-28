@@ -162,7 +162,7 @@ struct MaterialInfo {
     uint roughnessChannel;
 
     uint3 emissiveChannels;
-    float pad0;
+    uint rasterBuckedIndex;
 };
 
 struct SingleMatrix {
@@ -365,7 +365,7 @@ struct VisibleCluster
     unsigned int viewID;
     unsigned int instanceID;
     unsigned int meshletID;
-    unsigned int pad;
+    unsigned int fixedRasterBucketOffset;
 };
 
 #endif // __STRUCTS_HLSL__
