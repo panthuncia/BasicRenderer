@@ -57,10 +57,6 @@ private:
 	std::unordered_map<uint32_t, unsigned int> m_rasterFlagToBucketMapping;
 	unsigned int m_rasterBucketsUsed = 0;
 	std::vector<unsigned int> m_freeRasterBuckets;
-	const unsigned int m_numFixedRasterCombinations;
-
-	// CLod execution
-	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_rasterBucketsClusterCountBuffer;
 
 	// Visibility buffer
 	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_materialPixelCountBuffer;

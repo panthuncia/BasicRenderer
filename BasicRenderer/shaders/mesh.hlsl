@@ -188,7 +188,7 @@ void EmitMeshletVisBuffer(uint uGroupThreadID, MeshletSetup setup, out vertices 
 struct VisibilityPerPrimitive
 {
     uint triangleIndex : SV_PrimitiveID;
-    uint viewID;
+    uint viewID : TEXCOORD0;
 };
 
 void EmitPrimitiveIDs(uint uGroupThreadID, MeshletSetup setup, out primitives VisibilityPerPrimitive primitiveInfo[MS_MESHLET_SIZE])

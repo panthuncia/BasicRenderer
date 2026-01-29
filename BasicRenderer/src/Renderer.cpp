@@ -60,7 +60,8 @@
 #include "Render/RenderGraphBuildHelper.h"
 #include "Managers/Singletons/UpscalingManager.h"
 #include "Managers/Singletons/FFXManager.h"
-#include "Render/RenderGraphExtension.h"
+#include "Render/GraphExtensions/IOExtension.h"
+#include "Render/GraphExtensions/CLodExtension.h"
 
 void D3D12DebugCallback(
     D3D12_MESSAGE_CATEGORY Category,

@@ -29,9 +29,6 @@
 #include "RenderPasses/PPLLResolvePass.h"
 #include "RenderPasses/PostProcessing/ScreenSpaceReflectionsPass.h"
 #include "RenderPasses/PostProcessing/SpecularIBLPass.h"
-#include "RenderPasses/ClusterLOD/HierarchialCullingPass.h"
-#include "RenderPasses/ClusterLOD/ClusterRasterizationPass.h"
-#include "RenderPasses/ClusterLOD/RasterBucketHistogramPass.h"
 
 void CreateGBufferResources(RenderGraph* graph) {
     // GBuffer resources
@@ -146,13 +143,10 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
 
     auto visibleMeshletsBuffer = CreateIndexedStructuredBuffer(100000000, sizeof(VisibleCluster), true, false);
 	auto visibleMeshletsCounterBuffer = CreateIndexedStructuredBuffer(1, sizeof(unsigned int), true, false);
-	auto rasterBucketsHistogramIndirectCommand = CreateIndexedStructuredBuffer(1, sizeof(RasterBucketHistogramIndirectCommand), true, false);
+	auto rasterBucketsHistogramIndirectCommand = CreateIndexedStructuredBuffer(1, sizeof(RasterBucketsHistogramIndirectCommand), true, false);
 	graph->RegisterResource(Builtin::VisibleClusterBuffer, visibleMeshletsBuffer);
 	graph->RegisterResource(Builtin::VisibleClusterCounter, visibleMeshletsCounterBuffer);
 	graph->RegisterResource("Builtin::CLod::RasterBucketsHistogramIndirectCommand", rasterBucketsHistogramIndirectCommand);
-
-    graph->BuildComputePass("hierarchialCullingPass")
-		.Build<HierarchialCullingPass>(HierarchialCullingPassInputs{ true });
 
     graph->BuildRenderPass("ClearLastFrameIndirectDrawUAVsPass") // Clears indirect draws from last frame
         .Build<ClearIndirectDrawCommandUAVsPass>(ClearIndirectDrawCommandUAVPassInputs{ false });
