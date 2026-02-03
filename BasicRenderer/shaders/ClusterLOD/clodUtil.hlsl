@@ -8,7 +8,7 @@ struct RasterBucketsHistogramIndirectCommand
     uint dispatchX, dispatchY, dispatchZ;
 };
 
-#define CLUSTER_HISTOGRAM_GROUP_SIZE 64
+#define CLUSTER_HISTOGRAM_GROUP_SIZE 8
 
 // Single-thread shader to create a command for histogram eval
 [numthreads(1, 1, 1)]

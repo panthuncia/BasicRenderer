@@ -3,6 +3,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
+#include "../shaders/PerPassRootConstants/visUtilRootConstants.h"
 
 class MaterialHistogramPass : public ComputePass {
 public:
@@ -21,12 +22,13 @@ public:
         auto visBufferTag = ecsWorld.component<CLodExtensionVisibilityBufferTag>();
 
         // Query for entities with the visibility buffer tag
-        auto visibilityBufferQuery =
-            ecsWorld.query_builder<>()
+        m_visibleClustersQuery =
+            ecsWorld.query_builder<flecs::entity>()
             .with<CLodExtensionTypeTag>(visBufferTag)
+            .with<VisibleClustersBufferTag>()
             .build();
 
-        b->WithShaderResource(ECSResourceResolver(visibilityBufferQuery));
+        b->WithShaderResource(ECSResourceResolver(m_visibleClustersQuery));
         b->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
                               Builtin::PrimaryCamera::VisibilityTexture,
                               //Builtin::PrimaryCamera::VisibleClusterTable,
@@ -44,6 +46,21 @@ public:
         RegisterSRV(Builtin::PerMeshBuffer);
         RegisterSRV(Builtin::PerMaterialDataBuffer);
         RegisterUAV("Builtin::VisUtil::MaterialPixelCountBuffer");
+
+        std::vector<GloballyIndexedResource*> visibleClusterResources;
+        m_visibleClustersQuery.each([&](flecs::entity e) {
+            auto& res = e.get<Components::Resource>();
+            auto test = std::static_pointer_cast<GloballyIndexedResource>(res.resource.lock());
+            if (test) {
+                visibleClusterResources.push_back(test.get());
+            }
+            });
+
+        if (visibleClusterResources.size() != 1) {
+            throw std::runtime_error("BuildPixelListPass: Expected exactly one visible cluster buffer resource.");
+        }
+
+        m_visibleClusterBufferSRVIndex = visibleClusterResources[0]->GetSRVInfo(0).slot.index;
     }
 
     PassReturn Execute(RenderContext& ctx) override {
@@ -54,6 +71,11 @@ public:
         cl.BindLayout(pm.GetComputeRootSignature().GetHandle());
         cl.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
         BindResourceDescriptorIndices(cl, m_pso.GetResourceDescriptorSlots());
+
+        // Set per-pass root constants
+        unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
+        miscRootConstants[VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterBufferSRVIndex;
+        cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &miscRootConstants);
 
         const uint32_t groupSizeX = 8, groupSizeY = 8;
         uint32_t x = (ctx.renderResolution.x + groupSizeX - 1) / groupSizeX;
@@ -66,4 +88,6 @@ public:
 
 private:
     PipelineState m_pso;
+	flecs::query<flecs::entity> m_visibleClustersQuery;
+    uint32_t m_visibleClusterBufferSRVIndex = 0;
 };

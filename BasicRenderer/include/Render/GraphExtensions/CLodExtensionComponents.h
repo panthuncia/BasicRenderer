@@ -10,3 +10,6 @@ struct CLodExtensionShadowTag {};
 
 struct CLodExtensionTypeTag {
 };
+
+struct VisibleClustersBufferTag {};
+struct VisibleClustersCounterTag {};

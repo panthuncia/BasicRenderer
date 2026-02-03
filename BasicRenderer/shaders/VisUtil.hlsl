@@ -3,6 +3,7 @@
 #include "include/utilities.hlsli"
 #include "include/meshletCommon.hlsli"
 #include "include/waveIntrinsicsHelpers.hlsli"
+#include "PerPassRootConstants/visUtilRootConstants.h"
 
 struct PixelRef
 {
@@ -19,12 +20,12 @@ uint DecodePrimID(uint packed)
 }
 
 uint GetMaterialIdFromCluster(uint clusterIndex,
-                              StructuredBuffer<VisibleClusterInfo> visibleClusterTable,
+                              StructuredBuffer<VisibleCluster> visibleClusterBuffer,
                               StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance,
                               StructuredBuffer<PerMeshBuffer> perMeshBuffer)
 {
-    VisibleClusterInfo clusterData = visibleClusterTable[clusterIndex];
-    uint perMeshInstanceBufferIndex = clusterData.drawcallIndexAndMeshletIndex.x;
+    VisibleCluster clusterData = visibleClusterBuffer[clusterIndex];
+    uint perMeshInstanceBufferIndex = clusterData.instanceID;
     PerMeshInstanceBuffer instanceData = perMeshInstance[perMeshInstanceBufferIndex];
     PerMeshBuffer meshBuffer = perMeshBuffer[instanceData.perMeshBufferIndex];
 
@@ -34,7 +35,7 @@ uint GetMaterialIdFromCluster(uint clusterIndex,
     return materialInfo.compileFlagsID;
 }
 
-// 2) Clear counters – can be ClearUAV or compute. Compute version:
+// 2) Clear counters ï¿½ can be ClearUAV or compute. Compute version:
 // UintRootConstant0 = NumMaterials
 [numthreads(64, 1, 1)]
 void ClearMaterialCountersCS(uint3 tid : SV_DispatchThreadID)
@@ -62,7 +63,7 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
         return;
 
     Texture2D<uint2> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
-    StructuredBuffer<VisibleClusterInfo> visibleClusterTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibleClusterTable)];
+    StructuredBuffer<VisibleCluster> visibleClusterBuffer = ResourceDescriptorHeap[VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
 
@@ -79,7 +80,7 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
     uint primId = DecodePrimID(packed);
 
     // Derive material ID
-    uint matId = GetMaterialIdFromCluster(clusterIndex, visibleClusterTable, perMeshInstance, perMeshBuffer);
+    uint matId = GetMaterialIdFromCluster(clusterIndex, visibleClusterBuffer, perMeshInstance, perMeshBuffer);
     
     // Group threads in the wave by matId
     uint4 mask = WaveMatch(matId);
@@ -106,7 +107,7 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
     }
 
     Texture2D<uint2> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
-    StructuredBuffer<VisibleClusterInfo> visibleClusterTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibleClusterTable)];
+    StructuredBuffer<VisibleCluster> visibleClusterBuffer = ResourceDescriptorHeap[VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
 
@@ -126,7 +127,7 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
 
     uint clusterIndex = DecodeClusterIndex(packed);
     uint primId = DecodePrimID(packed);
-    uint matId = GetMaterialIdFromCluster(clusterIndex, visibleClusterTable, perMeshInstance, perMeshBuffer);
+    uint matId = GetMaterialIdFromCluster(clusterIndex, visibleClusterBuffer, perMeshInstance, perMeshBuffer);
 
     // Group threads in this wave by matId
     uint4 groupMask = WaveMatch(matId);
@@ -176,7 +177,7 @@ struct MaterialEvaluationIndirectArgs {
 // Build per-material indirect compute args.
 // Inputs:
 //  - counts[m] = number of pixels for material m
-//  - offsets[m] = base offset into PixelListBuffer where this material’s pixels start
+//  - offsets[m] = base offset into PixelListBuffer where this materialï¿½s pixels start
 // Root constants:
 //  - UintRootConstant0 = NumMaterials
 //  - UintRootConstant1 = PixelList SRV descriptor index

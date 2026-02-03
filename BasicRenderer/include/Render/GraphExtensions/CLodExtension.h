@@ -46,10 +46,12 @@ public:
 		// This tags the buffer with the extension type so passes can query for it with ECSResourceResolver
         m_visibleClustersBuffer->GetECSEntity()
            .set<Components::Resource>({ m_visibleClustersBuffer })
+           .add<VisibleClustersBufferTag>()
            .add<CLodExtensionTypeTag>(typeEntity);
         m_visibleClustersCounterBuffer = CreateIndexedStructuredBuffer(1, sizeof(unsigned int), true, false);
 		m_visibleClustersCounterBuffer->GetECSEntity()
             .set<Components::Resource>({ m_visibleClustersCounterBuffer })
+			.add<VisibleClustersCounterTag>()
 			.add<CLodExtensionTypeTag>(typeEntity);
 		m_type = type;
 	}

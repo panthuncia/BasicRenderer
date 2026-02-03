@@ -21,12 +21,13 @@ public:
         auto visBufferTag = ecsWorld.component<CLodExtensionVisibilityBufferTag>();
 
         // Query for entities with the visibility buffer tag
-        auto visibilityBufferQuery =
-            ecsWorld.query_builder<>()
+        m_visibleClustersQuery =
+            ecsWorld.query_builder<flecs::entity>()
             .with<CLodExtensionTypeTag>(visBufferTag)
+            .with<VisibleClustersBufferTag>()
             .build();
 
-        b->WithShaderResource(ECSResourceResolver(visibilityBufferQuery));
+        b->WithShaderResource(ECSResourceResolver(m_visibleClustersQuery));
 
         b->WithShaderResource("Builtin::VisUtil::PixelListBuffer",
             MESH_RESOURCE_IDFENTIFIERS,
@@ -68,6 +69,21 @@ public:
         RegisterUAV(Builtin::GBuffer::MetallicRoughness);
 		RegisterUAV(Builtin::GBuffer::MotionVectors);
 
+        std::vector<GloballyIndexedResource*> visibleClusterResources;
+        m_visibleClustersQuery.each([&](flecs::entity e) {
+            auto& res = e.get<Components::Resource>();
+            auto test = std::static_pointer_cast<GloballyIndexedResource>(res.resource.lock());
+            if (test) {
+                visibleClusterResources.push_back(test.get());
+            }
+            });
+
+        if (visibleClusterResources.size() != 1) {
+            throw std::runtime_error("BuildPixelListPass: Expected exactly one visible cluster buffer resource.");
+        }
+
+        m_visibleClusterBufferSRVIndex = visibleClusterResources[0]->GetSRVInfo(0).slot.index;
+
         m_materialEvalCmds = m_resourceRegistryView->RequestPtr<Resource>("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }
 
@@ -85,7 +101,7 @@ public:
         const uint64_t stride = sizeof(MaterialEvaluationIndirectCommand);
         auto argBuf = m_materialEvalCmds->GetAPIResource();
 
-        for (MaterialCompileFlags flags : active) {
+		for (MaterialCompileFlags flags : active) { // TODO: cache on material flag changes, avoid in-frame compile
 			unsigned int slot = ctx.materialManager->GetCompileFlagsSlot(flags);
 			// Bind pipeline for this material compile flag set
             auto psoIter = m_psoCache.find(flags);
@@ -106,6 +122,11 @@ public:
             cl.BindPipeline(pso.GetAPIPipelineState().GetHandle());
             BindResourceDescriptorIndices(cl, pso.GetResourceDescriptorSlots());
 
+            // Set per-pass root constants
+            unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
+            miscRootConstants[VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterBufferSRVIndex;
+            cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &miscRootConstants);
+
             const uint64_t argOffset = static_cast<uint64_t>(slot) * stride;
             cl.ExecuteIndirect(
                 sig.GetHandle(),
@@ -123,4 +144,6 @@ public:
 private:
     std::unordered_map<MaterialCompileFlags, PipelineState> m_psoCache;
     Resource* m_materialEvalCmds;
+    flecs::query<flecs::entity> m_visibleClustersQuery;
+    uint32_t m_visibleClusterBufferSRVIndex = 0;
 };

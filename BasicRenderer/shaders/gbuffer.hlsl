@@ -159,8 +159,8 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
     {
         ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
 
-        StructuredBuffer<VisibleClusterInfo> visibleClusterTable =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibleClusterTable)];
+        StructuredBuffer<VisibleCluster> visibleClusterBuffer =
+            ResourceDescriptorHeap[VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
         StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
         StructuredBuffer<PerMeshBuffer> perMeshBuffer =
@@ -168,8 +168,9 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
         StructuredBuffer<Meshlet> meshletBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletOffsets)];
 
-        VisibleClusterInfo clusterData = visibleClusterTable[clusterIndex];
-        d.drawcallAndMeshlet = clusterData.drawcallIndexAndMeshletIndex;
+        VisibleCluster clusterData = visibleClusterBuffer[clusterIndex];
+        d.drawcallAndMeshlet.x = clusterData.instanceID;
+        d.drawcallAndMeshlet.y = clusterData.meshletID;
 
         PerMeshInstanceBuffer inst = perMeshInstanceBuffer[d.drawcallAndMeshlet.x];
         d.objAndMesh = uint2(inst.perObjectBufferIndex, inst.perMeshBufferIndex);
