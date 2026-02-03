@@ -2,6 +2,7 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
+#include "Render/GraphExtensions/CLodExtensionComponents.h"
 
 class MaterialHistogramPass : public ComputePass {
 public:
@@ -14,6 +15,18 @@ public:
             "MaterialHistogramPSO");
     }
     void DeclareResourceUsages(ComputePassBuilder* b) override {
+        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+
+        // Global LOD extension visibility buffer tag
+        auto visBufferTag = ecsWorld.component<CLodExtensionVisibilityBufferTag>();
+
+        // Query for entities with the visibility buffer tag
+        auto visibilityBufferQuery =
+            ecsWorld.query_builder<>()
+            .with<CLodExtensionTypeTag>(visBufferTag)
+            .build();
+
+        b->WithShaderResource(ECSResourceResolver(visibilityBufferQuery));
         b->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
                               Builtin::PrimaryCamera::VisibilityTexture,
                               //Builtin::PrimaryCamera::VisibleClusterTable,

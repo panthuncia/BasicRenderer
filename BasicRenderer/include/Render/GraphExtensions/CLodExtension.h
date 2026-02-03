@@ -3,12 +3,55 @@
 #include <rhi.h>
 
 #include "Render/RenderGraph.h"
+#include "Render/GraphExtensions/CLodExtensionComponents.h"
 
 class CLodExtension final : public RenderGraph::IRenderGraphExtension {
 public:
-	explicit CLodExtension() {
-        m_visibleClustersBuffer = CreateIndexedStructuredBuffer(100000000, sizeof(VisibleCluster), true, false);
+	explicit CLodExtension(CLodExtensionType type, uint64_t maxVisibleClusters) {
+
+		// Initialize global entity for extension type
+		auto ecsWorld = ECSManager::GetInstance().GetWorld();
+		// TODO: Better way to do this? Weird global initialization
+		switch (type) {
+            case CLodExtensionType::VisiblityBuffer:
+				if (ecsWorld.component<CLodExtensionVisibilityBufferTag>().is_valid()) {
+                    // Already initialized
+                    break;
+                }
+                ecsWorld.component<CLodExtensionVisibilityBufferTag>().add(flecs::Exclusive);
+				ecsWorld.add<CLodExtensionVisibilityBufferTag>();
+				break;
+                case CLodExtensionType::Shadow:
+                    if (ecsWorld.component<CLodExtensionShadowTag>().is_valid()) {
+                    // Already initialized
+                    break;
+					}
+				ecsWorld.component<CLodExtensionShadowTag>().add(flecs::Exclusive);
+				ecsWorld.add<CLodExtensionShadowTag>();
+				break;
+		}
+
+        m_visibleClustersBuffer = CreateIndexedStructuredBuffer(maxVisibleClusters, sizeof(VisibleCluster), true, false);
+
+        flecs::entity typeEntity;
+		switch (type) {
+            case CLodExtensionType::VisiblityBuffer:
+				typeEntity = ecsWorld.entity<CLodExtensionVisibilityBufferTag>();
+                break;
+			case CLodExtensionType::Shadow:
+				typeEntity = ecsWorld.entity<CLodExtensionShadowTag>();
+				break;
+		}
+
+		// This tags the buffer with the extension type so passes can query for it with ECSResourceResolver
+        m_visibleClustersBuffer->GetECSEntity()
+           .set<Components::Resource>({ m_visibleClustersBuffer })
+           .add<CLodExtensionTypeTag>(typeEntity);
         m_visibleClustersCounterBuffer = CreateIndexedStructuredBuffer(1, sizeof(unsigned int), true, false);
+		m_visibleClustersCounterBuffer->GetECSEntity()
+            .set<Components::Resource>({ m_visibleClustersCounterBuffer })
+			.add<CLodExtensionTypeTag>(typeEntity);
+		m_type = type;
 	}
 
 	void OnRegistryReset(ResourceRegistry* reg) override {
@@ -33,6 +76,8 @@ public:
 	}
 
 private:
+
+	CLodExtensionType m_type;
 
 	// Buffers used across CLod passes
     std::shared_ptr<Buffer> m_visibleClustersBuffer;

@@ -8,12 +8,26 @@
 #include "Managers/MaterialManager.h"
 #include "Render/RenderContext.h"
 #include "Render/IndirectCommand.h"
+#include "Render/GraphExtensions/CLodExtensionComponents.h"
 
 class EvaluateMaterialGroupsPass : public ComputePass {
 public:
     EvaluateMaterialGroupsPass() {}
 
     void DeclareResourceUsages(ComputePassBuilder* b) override {
+		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+
+        // Global LOD extension visibility buffer tag
+        auto visBufferTag = ecsWorld.component<CLodExtensionVisibilityBufferTag>();
+
+        // Query for entities with the visibility buffer tag
+        auto visibilityBufferQuery =
+            ecsWorld.query_builder<>()
+            .with<CLodExtensionTypeTag>(visBufferTag)
+            .build();
+
+        b->WithShaderResource(ECSResourceResolver(visibilityBufferQuery));
+
         b->WithShaderResource("Builtin::VisUtil::PixelListBuffer",
             MESH_RESOURCE_IDFENTIFIERS,
             Builtin::PrimaryCamera::VisibilityTexture,

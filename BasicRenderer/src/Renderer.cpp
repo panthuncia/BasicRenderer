@@ -1090,8 +1090,9 @@ void Renderer::CreateRenderGraph() {
     // Skinning comes before Z prepass
     newGraph->BuildComputePass("SkinningPass")
         .Build<SkinningPass>();
-
-    newGraph->RegisterExtension(std::make_unique<CLodExtension>());
+    
+	// Cluster LOD, allocate for 100 million clusters
+    newGraph->RegisterExtension(std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, 100000000));
 
     bool indirect = getIndirectDrawsEnabled();
     if (!useMeshShaders) { // Indirect draws only supported with mesh shaders
