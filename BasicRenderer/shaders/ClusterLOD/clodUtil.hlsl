@@ -10,11 +10,11 @@ struct RasterBucketsHistogramIndirectCommand
 
 #define CLUSTER_HISTOGRAM_GROUP_SIZE 64
 
-// Single-thread shader to create a command for rasterizing clusters
+// Single-thread shader to create a command for histogram eval
 [numthreads(1, 1, 1)]
-void CreateRasterizeClustersCommandCSMain()
+void CreateRasterBucketsHistogramCommandCSMain()
 {
-    StructuredBuffer<RasterBucketsHistogramIndirectCommand> outCommand = ResourceDescriptorHeap(ResourceDescriptorIndex(Builtin::CLod::RasterBucketsHistogramIndirectCommand));
+    RWStructuredBuffer<RasterBucketsHistogramIndirectCommand> outCommand = ResourceDescriptorHeap(ResourceDescriptorIndex(Builtin::CLod::RasterBucketsHistogramIndirectCommand));
     StructuredBuffer<uint> clusterCountBuffer = ResourceDescriptorHeap(ResourceDescriptorIndex(Builtin::VisibleClusterCounter));
 
     // Given the cluster count, find dispatch dimensions that minimizes wasted threads
@@ -57,6 +57,6 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
     StructuredBuffer<VisibleCluster> visibleClusters = ResourceDescriptorHeap(ResourceDescriptorIndex(Builtin::VisibleClustersBuffer));
     StructuredBuffer<uint> clusterCountBuffer = ResourceDescriptorHeap(ResourceDescriptorIndex(Builtin::VisibleClusterCounter));
     uint clusterCount = clusterCountBuffer.Load(0);
-    uint index = DTid.x;
+    uint index = ;
     histogramBuffer[index] = 0;
 }

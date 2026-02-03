@@ -15,8 +15,8 @@ public:
 	}
     void DeclareResourceUsages(ComputePassBuilder* b) override {
         b->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
-                              Builtin::PrimaryCamera::VisibilityTexture,
-                              Builtin::PrimaryCamera::VisibleClusterTable,
+                              //Builtin::PrimaryCamera::VisibilityTexture,
+                              //Builtin::PrimaryCamera::VisibleClusterTable,
                               Builtin::PerMeshInstanceBuffer,
                               Builtin::PerMeshBuffer,
                               Builtin::PerMaterialDataBuffer,
@@ -26,8 +26,8 @@ public:
     }
 
     void Setup() override {
-        RegisterSRV(Builtin::PrimaryCamera::VisibilityTexture);
-        RegisterSRV(Builtin::PrimaryCamera::VisibleClusterTable);
+        //RegisterSRV(Builtin::PrimaryCamera::VisibilityTexture);
+        //RegisterSRV(Builtin::PrimaryCamera::VisibleClusterTable);
         RegisterSRV(Builtin::PerMeshInstanceBuffer);
         RegisterSRV(Builtin::PerMeshBuffer);
         RegisterSRV(Builtin::PerMaterialDataBuffer);

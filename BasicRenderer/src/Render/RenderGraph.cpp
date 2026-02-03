@@ -807,7 +807,7 @@ void RenderGraph::CompileStructural() {
 		}
 	}
 
-	// --- Extension-provided structural passes (uploads/mips/readbacks/etc) ---
+	// Extension-provided structural passes (uploads/mips/readbacks/etc)
 	std::vector<ExternalPassDesc> external;
 	external.reserve(8);
 	for (auto& ext : m_extensions) {
@@ -816,8 +816,13 @@ void RenderGraph::CompileStructural() {
 
 	struct Pending {
 		AnyPassAndResources pr;
+
+		ExternalInsertPoint where; // concrete (post-synthesis)
+		bool chained = false;      // true if where was synthesized from "natural ordering"
+		int chainOrder = 0;        // preserves extension-local order among chained followers
+
 		int priority = 0;
-		size_t order = 0;
+		size_t order = 0;          // global stable order across all gathered externals
 	};
 
 	auto makeAny = [&](ExternalPassDesc const& d) -> AnyPassAndResources {
@@ -859,28 +864,76 @@ void RenderGraph::CompileStructural() {
 	std::unordered_map<std::string, std::vector<Pending>> before;
 	std::unordered_map<std::string, std::vector<Pending>> after;
 
-	for (size_t idx = 0; idx < external.size(); ++idx) {
-		auto const& d = external[idx];
-		if (d.type == PassType::Unknown) continue;
-		if (std::holds_alternative<std::monostate>(d.pass)) continue;
+	size_t globalOrder = 0;
 
-		Pending p;
-		p.pr = makeAny(d);
-		p.priority = d.where.priority;
-		p.order = idx;
+	for (auto& ext : m_extensions) {
+		if (!ext) continue;
 
-		registerName(d, p.pr);
+		std::vector<ExternalPassDesc> local;
+		local.reserve(8);
+		ext->GatherStructuralPasses(*this, local);
 
-		switch (d.where.kind) {
-		case ExternalInsertKind::Begin: begin.push_back(std::move(p)); break;
-		case ExternalInsertKind::End: end.push_back(std::move(p)); break;
-		case ExternalInsertKind::Before: before[d.where.anchor].push_back(std::move(p)); break;
-		case ExternalInsertKind::After: after[d.where.anchor].push_back(std::move(p)); break;
+		std::optional<std::string> prevName; // per-extension
+		int chainCounter = 0;
+
+		for (size_t i = 0; i < local.size(); ++i) {
+			auto& d = local[i];
+			if (d.type == PassType::Unknown) continue;
+			if (std::holds_alternative<std::monostate>(d.pass)) continue;
+
+			Pending p;
+			p.pr = makeAny(d);
+			registerName(d, p.pr);
+
+			p.order = globalOrder++;
+
+			// Synthesize insert point if missing => natural ordering
+			if (d.where.has_value()) {
+				p.where = *d.where;
+				p.chained = false;
+				p.chainOrder = 0;
+			}
+			else {
+				// Natural ordering:
+				// - if we have a previous named pass, chain After(prev)
+				// - else default End()
+				if (prevName.has_value() && !prevName->empty() && !d.name.empty()) {
+					p.where = ExternalInsertPoint::After(*prevName);
+					p.chained = true;
+					p.chainOrder = chainCounter++;
+				}
+				else {
+					p.where = ExternalInsertPoint::End();
+					p.chained = false;
+					p.chainOrder = 0;
+
+#if defined(_DEBUG)
+					if (prevName.has_value() && (prevName->empty() || d.name.empty())) {
+						spdlog::warn("External pass '{}' could not chain (missing name); defaulting to End().", d.name);
+					}
+#endif
+				}
+			}
+
+			p.priority = p.where.priority;
+
+			switch (p.where.kind) {
+			case ExternalInsertKind::Begin:  begin.push_back(std::move(p)); break;
+			case ExternalInsertKind::End:    end.push_back(std::move(p)); break;
+			case ExternalInsertKind::Before: before[p.where.anchor].push_back(std::move(p)); break;
+			case ExternalInsertKind::After:  after[p.where.anchor].push_back(std::move(p)); break;
+			}
+
+			// advance prevName if this pass is nameable (needed for chaining)
+			if (!d.name.empty()) prevName = d.name;
+			else prevName.reset();
 		}
 	}
 
 	auto sortPending = [&](std::vector<Pending>& v) {
 		std::stable_sort(v.begin(), v.end(), [](Pending const& a, Pending const& b) {
+			if (a.chained != b.chained) return a.chained > b.chained; // chained first
+			if (a.chained && b.chained) return a.chainOrder < b.chainOrder; // extension order
 			if (a.priority != b.priority) return a.priority < b.priority;
 			return a.order < b.order;
 			});
@@ -889,41 +942,93 @@ void RenderGraph::CompileStructural() {
 	sortPending(begin);
 	sortPending(end);
 	for (auto& [k, v] : before) sortPending(v);
-	for (auto& [k, v] : after) sortPending(v);
+	for (auto& [k, v] : after)  sortPending(v);
+
 
 	// Merge into final pass list
 	auto base = std::move(m_masterPassList);
 	m_masterPassList.clear();
 	m_masterPassList.reserve(begin.size() + base.size() + end.size() + 8);
 
-	for (auto& p : begin) m_masterPassList.push_back(std::move(p.pr));
+	std::unordered_set<std::string> emittedNames;
 
-	for (auto& basePass : base) {
+	// helper: consume vectors from maps
+	auto takeVec = [&](auto& map, std::string const& key) -> std::vector<Pending> {
+		auto it = map.find(key);
+		if (it == map.end()) return {};
+		auto v = std::move(it->second);
+		map.erase(it);
+		return v;
+		};
 
-		if (auto it = before.find(basePass.name); it != before.end()) {
-			for (auto& p : it->second) m_masterPassList.push_back(std::move(p.pr));
-			before.erase(it);
+	auto emitPending = [&](auto&& self, Pending&& p) -> void {
+		const std::string& nm = p.pr.name;
+
+		// de-dupe / cycle guard (names are the only anchor key currently)
+		if (!nm.empty()) {
+			if (!emittedNames.insert(nm).second) {
+				return;
+			}
+
+			// emit "before nm"
+			auto b = takeVec(before, nm);
+			for (auto& x : b) self(self, std::move(x));
 		}
 
-		m_masterPassList.push_back(std::move(basePass));
+		m_masterPassList.push_back(std::move(p.pr));
 
-		if (auto it = after.find(m_masterPassList.back().name); it != after.end()) {
-			for (auto& p : it->second) m_masterPassList.push_back(std::move(p.pr));
-			after.erase(it);
+		if (!nm.empty()) {
+			// emit "after nm"
+			auto a = takeVec(after, nm);
+			for (auto& x : a) self(self, std::move(x));
 		}
-	}
+		};
 
-	// Any unresolved before/after anchors: append to end (but keep their internal order)
-	for (auto& [anchor, v] : before) {
-		spdlog::warn("External pass requested Before('{}') but anchor was not found; appending at end.", anchor);
-		for (auto& p : v) m_masterPassList.push_back(std::move(p.pr));
-	}
-	for (auto& [anchor, v] : after) {
-		spdlog::warn("External pass requested After('{}') but anchor was not found; appending at end.", anchor);
-		for (auto& p : v) m_masterPassList.push_back(std::move(p.pr));
-	}
+	auto emitBasePass = [&](auto&& self, AnyPassAndResources&& bp) -> void {
+		const std::string& nm = bp.name;
 
-	for (auto& p : end) m_masterPassList.push_back(std::move(p.pr));
+		if (!nm.empty()) {
+			// base-pass names can also be anchors; guard duplicates
+			emittedNames.insert(nm);
+
+			auto b = takeVec(before, nm);
+			for (auto& x : b) emitPending(emitPending, std::move(x));
+		}
+
+		m_masterPassList.push_back(std::move(bp));
+
+		if (!nm.empty()) {
+			auto a = takeVec(after, nm);
+			for (auto& x : a) emitPending(emitPending, std::move(x));
+		}
+		};
+
+	// begin
+	for (auto& p : begin) emitPending(emitPending, std::move(p));
+
+	// base passes (with before/after hooks)
+	for (auto& bp : base) emitBasePass(emitBasePass, std::move(bp));
+
+	// end
+	for (auto& p : end) emitPending(emitPending, std::move(p));
+
+	// unresolved anchors: warn + append (honors chains among themselves)
+	auto flushUnresolved = [&](auto& map, bool isBefore) {
+		while (!map.empty()) {
+			auto it = map.begin();
+			std::string anchor = it->first;
+			auto vec = std::move(it->second);
+			map.erase(it);
+
+			spdlog::warn("External pass requested {}('{}') but anchor was not found; appending at end.",
+				isBefore ? "Before" : "After", anchor);
+
+			for (auto& p : vec) emitPending(emitPending, std::move(p));
+		}
+		};
+
+	flushUnresolved(before, true);
+	flushUnresolved(after, false);
 }
 
 

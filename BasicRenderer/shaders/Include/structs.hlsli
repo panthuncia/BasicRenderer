@@ -333,11 +333,6 @@ struct MaterialInputs
     float ambientOcclusion;
 };
 
-struct VisibleClusterInfo {
-    uint2 drawcallIndexAndMeshletIndex; // .x = drawcall index, .y = meshlet local index
-    uint pad[2];
-};
-
 struct SkinningInstanceGPUInfo
 {
     uint transformOffsetMatrices;
@@ -365,7 +360,6 @@ struct VisibleCluster
     unsigned int viewID;
     unsigned int instanceID;
     unsigned int meshletID;
-    unsigned int fixedRasterBucketOffset;
 };
 
 #endif // __STRUCTS_HLSL__

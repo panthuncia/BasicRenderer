@@ -141,113 +141,12 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
 	bool wireframeEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 	bool visibilityRenderingEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableVisibilityRendering")();
 
-    auto visibleMeshletsBuffer = CreateIndexedStructuredBuffer(100000000, sizeof(VisibleCluster), true, false);
-	auto visibleMeshletsCounterBuffer = CreateIndexedStructuredBuffer(1, sizeof(unsigned int), true, false);
 	auto rasterBucketsHistogramIndirectCommand = CreateIndexedStructuredBuffer(1, sizeof(RasterBucketsHistogramIndirectCommand), true, false);
-	graph->RegisterResource(Builtin::VisibleClusterBuffer, visibleMeshletsBuffer);
-	graph->RegisterResource(Builtin::VisibleClusterCounter, visibleMeshletsCounterBuffer);
 	graph->RegisterResource("Builtin::CLod::RasterBucketsHistogramIndirectCommand", rasterBucketsHistogramIndirectCommand);
-
-    graph->BuildRenderPass("ClearLastFrameIndirectDrawUAVsPass") // Clears indirect draws from last frame
-        .Build<ClearIndirectDrawCommandUAVsPass>(ClearIndirectDrawCommandUAVPassInputs{ false });
-
-    graph->BuildRenderPass("ClearMeshletCullingCommandUAVsPass0") // Clear meshlet culling reset command buffers from last frame
-        .Build<ClearMeshletCullingCommandUAVsPass>();
-
-    graph->BuildComputePass("BuildOccluderDrawCommandsPass") // Builds draw command list for last frame's occluders
-        .Build<ObjectCullingPass>(ObjectCullingPassInputs{ true, false });
-
-    // Rebuild visible clusters table for occluders
-    graph->BuildComputePass("RewriteOccluderMeshletVisibilityPass")
-		.Build<RewriteOccluderMeshletVisibilityPass>();
-
-    // We need to draw occluder shadows early
-    auto drawShadows = shadowsEnabled;
-    if (drawShadows) {
-        graph->BuildRenderPass("OccluderShadowPrepass")
-            .Build<ShadowPass>(ShadowPassInputs{ wireframeEnabled, meshShadersEnabled, true, false, true });
-    }
-
-
-    if (!visibilityRenderingEnabled) {
-        graph->BuildRenderPass("OccludersPrepass") // Draws prepass for last frame's occluders
-            .Build<GBufferPass>(GBufferPassInputs{
-                wireframeEnabled,
-                meshShadersEnabled,
-                true,
-                true });
-    } else {
-        graph->BuildRenderPass("VisibilityPass") // Build visibility buffer
-            .Build<VisibilityBufferPass>(VisibilityBufferPassInputs{
-                wireframeEnabled,
-                meshShadersEnabled,
-                true,
-                true });
-    
-        // Copy depth to a separate resource for downsampling
-        graph->BuildComputePass("PrimaryDepthCopyPass")
-            .Build<PrimaryDepthCopyPass>();
-    }
-
-    // Single-pass downsample on all occluder-only depth maps
-    // TODO: Case where HZB is not conservative when downsampling mips with non-even resolutions (bottom/side pixels get dropped), handled sub-optimally
-    graph->BuildComputePass("DownsamplePass")
-        .Build<DownsamplePass>();
-
-    // After downsample, we need to render the "remainders" of the occluders (meshlets that were culled last frame, but shouldn't be this frame)
-    // Using occluder meshlet culling command buffer, cull meshlets, but invert the bitfield and use occlusion culling
-    graph->BuildComputePass("OcclusionMeshletRemaindersCullingPass")
-        .Build<MeshletCullingPass>(MeshletCullingPassInputs{true, true });
-
-    // Now, render the occluder remainders (prepass & shadows)
-    if (drawShadows) {
-
-        graph->BuildRenderPass("OccluderRemaindersShadowPass")
-            .Build<ShadowPass>(ShadowPassInputs{ wireframeEnabled, meshShadersEnabled, true, false, false });
-    }
-
-    if (!visibilityRenderingEnabled) {
-        graph->BuildRenderPass("OccluderRemaindersPrepass") // Draws prepass for last frame's occluders
-            .Build<GBufferPass>(GBufferPassInputs{
-                wireframeEnabled,
-                meshShadersEnabled,
-                true,
-                false });
-    } else {
-        graph->BuildRenderPass("VisibilityPass1") // Build visibility buffer
-            .Build<VisibilityBufferPass>(VisibilityBufferPassInputs{
-                wireframeEnabled,
-                meshShadersEnabled,
-                true,
-                false });
-    }
-
-    // After the remainders are rendered, we need to cull all meshlets that weren't marked as an occluder remainder. TODO: This duplicates culling work on non-visible meshlets
-    //newGraph->BuildComputePass("OccludersMeshletCullingPass")
-    //    .WithShaderResource(perObjectBuffer, perMeshBuffer, cameraBuffer)
-    //    .WithUnorderedAccess(meshletCullingBitfieldBufferGroup)
-    //    .WithIndirectArguments(meshletCullingCommandBufferResourceGroup)
-    //    .Build<MeshletCullingPass>(true, false, false);
 }
 
 void BuildGeneralCullingPipeline(RenderGraph* graph) {
 
-	bool occlusionCulling = SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")();
-	bool meshletCulling = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshletCulling")();
-
-    graph->BuildRenderPass("ClearOccludersIndirectDrawUAVsPass") // Clear command lists after occluders are drawn
-        .Build<ClearIndirectDrawCommandUAVsPass>(ClearIndirectDrawCommandUAVPassInputs{ true });
-
-    graph->BuildRenderPass("ClearMeshletCullingCommandUAVsPass1") // Clear meshlet culling reset command buffers from prepass
-        .Build<ClearMeshletCullingCommandUAVsPass>();
-
-    graph->BuildComputePass("ObjectCullingPass") // Performs frustrum and occlusion culling
-        .Build<ObjectCullingPass>(ObjectCullingPassInputs{ false, occlusionCulling });
-
-    if (meshletCulling || occlusionCulling) {
-        graph->BuildComputePass("MeshletCullingPass") // Any meshes that are partially culled are sent to the meshlet culling pass
-            .Build<MeshletCullingPass>(MeshletCullingPassInputs{false, true });
-    }
 }
 
 inline void RegisterVisUtilResources(RenderGraph* graph)

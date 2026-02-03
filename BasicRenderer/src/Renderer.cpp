@@ -265,7 +265,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<uint16_t>("shadowResolution", 2048);
     settingsManager.registerSetting<float>("cameraSpeed", 10);
 	settingsManager.registerSetting<bool>("enableWireframe", false);
-	settingsManager.registerSetting<bool>("enableShadows", true);
+	settingsManager.registerSetting<bool>("enableShadows", false);
 	settingsManager.registerSetting<uint16_t>("skyboxResolution", 2048);
     settingsManager.registerSetting<uint16_t>("reflectionCubemapResolution", 512);
 	settingsManager.registerSetting<bool>("enableImageBasedLighting", true);
@@ -1091,6 +1091,7 @@ void Renderer::CreateRenderGraph() {
     newGraph->BuildComputePass("SkinningPass")
         .Build<SkinningPass>();
 
+    newGraph->RegisterExtension(std::make_unique<CLodExtension>());
 
     bool indirect = getIndirectDrawsEnabled();
     if (!useMeshShaders) { // Indirect draws only supported with mesh shaders
@@ -1105,28 +1106,28 @@ void Renderer::CreateRenderGraph() {
     }
 
     // Reset visible cluster table counter
-    if (m_meshletCulling) {
-        // Create mesh cluster id buffer, two UINTs per cluster, used by visibility buffer and occlusion culling
-        // 2^25 visible clusters allowed due to index precision
-        auto clusterIDBuffer = CreateIndexedStructuredBuffer(static_cast<size_t>(pow(2, 25)), sizeof(VisibleClusterInfo), true, false);
-        clusterIDBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
-    	clusterIDBuffer->SetName("Visible Cluster Table");
-        newGraph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTable, clusterIDBuffer);
-        auto clusterIDBufferCounter = CreateIndexedStructuredBuffer(1, sizeof(UINT), true, false);
-        clusterIDBufferCounter->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
-    	clusterIDBufferCounter->SetName("Visible Cluster Table Counter");
-        newGraph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTableCounter, clusterIDBufferCounter);
+    //if (m_meshletCulling) {
+    //    // Create mesh cluster id buffer, two UINTs per cluster, used by visibility buffer and occlusion culling
+    //    // 2^25 visible clusters allowed due to index precision
+    //    auto clusterIDBuffer = CreateIndexedStructuredBuffer(static_cast<size_t>(pow(2, 25)), sizeof(VisibleClusterInfo), true, false);
+    //    clusterIDBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
+    //	clusterIDBuffer->SetName("Visible Cluster Table");
+    //    newGraph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTable, clusterIDBuffer);
+    //    auto clusterIDBufferCounter = CreateIndexedStructuredBuffer(1, sizeof(UINT), true, false);
+    //    clusterIDBufferCounter->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
+    //	clusterIDBufferCounter->SetName("Visible Cluster Table Counter");
+    //    newGraph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTableCounter, clusterIDBufferCounter);
 
-        newGraph->BuildRenderPass("VisibleClusterTableCounterResetPass")
-            .Build<VisibleClusterTableCounterResetPass>();
-    }
+    //    newGraph->BuildRenderPass("VisibleClusterTableCounterResetPass")
+    //        .Build<VisibleClusterTableCounterResetPass>();
+    //}
 
-    if (indirect) {
-        if (m_occlusionCulling) {
-            BuildOcclusionCullingPipeline(newGraph.get());
-        }
-        BuildGeneralCullingPipeline(newGraph.get());
-    }
+    //if (indirect) {
+    //    if (m_occlusionCulling) {
+    //        BuildOcclusionCullingPipeline(newGraph.get());
+    //    }
+    //    BuildGeneralCullingPipeline(newGraph.get());
+    //}
 
 	// Either visibility or standard GBuffer pass
     BuildGBufferPipeline(newGraph.get());

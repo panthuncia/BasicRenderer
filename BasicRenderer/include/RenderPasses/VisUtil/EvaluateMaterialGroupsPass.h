@@ -17,7 +17,7 @@ public:
         b->WithShaderResource("Builtin::VisUtil::PixelListBuffer",
             MESH_RESOURCE_IDFENTIFIERS,
             Builtin::PrimaryCamera::VisibilityTexture,
-            Builtin::PrimaryCamera::VisibleClusterTable,
+            //Builtin::PrimaryCamera::VisibleClusterTable,
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerObjectBuffer,
             Builtin::PerMeshBuffer,
@@ -43,7 +43,7 @@ public:
         RegisterSRV(Builtin::PerMeshBuffer);
         RegisterSRV(Builtin::PerMaterialDataBuffer);
         RegisterSRV(Builtin::PrimaryCamera::VisibilityTexture);
-        RegisterSRV(Builtin::PrimaryCamera::VisibleClusterTable);
+        //RegisterSRV(Builtin::PrimaryCamera::VisibleClusterTable);
         RegisterSRV(Builtin::CameraBuffer);
         RegisterSRV(Builtin::PostSkinningVertices);
         RegisterSRV(Builtin::NormalMatrixBuffer);

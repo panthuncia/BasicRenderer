@@ -17,11 +17,11 @@ class VisibleClusterTableCounterResetPass : public RenderPass {
 	}
 
 	void DeclareResourceUsages(RenderPassBuilder* builder) override {
-		builder->WithCopyDest(Builtin::PrimaryCamera::VisibleClusterTableCounter);
+		//builder->WithCopyDest(Builtin::PrimaryCamera::VisibleClusterTableCounter);
 	}
 
 	void Setup() override {
-		m_counter = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PrimaryCamera::VisibleClusterTableCounter);
+		//m_counter = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PrimaryCamera::VisibleClusterTableCounter);
 	}
 
 	void Cleanup() override {
@@ -83,8 +83,8 @@ public:
 		RegisterSRV(Builtin::PerMeshInstanceBuffer);
 		RegisterSRV(Builtin::MeshResources::MeshletBounds);
 
-		RegisterUAV(Builtin::PrimaryCamera::VisibleClusterTable);
-		RegisterUAV(Builtin::PrimaryCamera::VisibleClusterTableCounter);
+		//RegisterUAV(Builtin::PrimaryCamera::VisibleClusterTable);
+		//RegisterUAV(Builtin::PrimaryCamera::VisibleClusterTableCounter);
 		RegisterUAV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
 
 		m_primaryCameraMeshletCullingBitfieldBuffer = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
@@ -93,7 +93,7 @@ public:
 
 		m_primaryCameraLinearDepthMap = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::LinearDepthMap);
 
-		m_counter = m_resourceRegistryView->RequestPtr<Buffer>(Builtin::PrimaryCamera::VisibleClusterTableCounter);
+		//m_counter = m_resourceRegistryView->RequestPtr<Buffer>(Builtin::PrimaryCamera::VisibleClusterTableCounter);
 
 	}
 
@@ -107,8 +107,8 @@ public:
 			Builtin::Shadows::LinearShadowMaps)
 			.WithUnorderedAccess(Builtin::MeshletCullingBitfieldGroup, 
 				Builtin::PrimaryCamera::MeshletBitfield,
-				Builtin::PrimaryCamera::VisibleClusterTable,
-				Builtin::PrimaryCamera::VisibleClusterTableCounter,
+				//Builtin::PrimaryCamera::VisibleClusterTable,
+				//Builtin::PrimaryCamera::VisibleClusterTableCounter,
 				Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer)
 			.WithIndirectArguments(
 				Builtin::IndirectCommandBuffers::MeshletCulling, 
@@ -338,8 +338,8 @@ public:
 		RegisterSRV(Builtin::PerMeshInstanceBuffer);
 		RegisterSRV(Builtin::MeshResources::MeshletBounds);
 
-		RegisterUAV(Builtin::PrimaryCamera::VisibleClusterTable);
-		RegisterUAV(Builtin::PrimaryCamera::VisibleClusterTableCounter);
+		//RegisterUAV(Builtin::PrimaryCamera::VisibleClusterTable);
+		//RegisterUAV(Builtin::PrimaryCamera::VisibleClusterTableCounter);
 		RegisterUAV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
 
 		m_primaryCameraMeshletBitfieldBuffer = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
@@ -354,8 +354,8 @@ public:
 			Builtin::CameraBuffer)
 			.WithUnorderedAccess(Builtin::MeshletCullingBitfieldGroup,
 				Builtin::PrimaryCamera::MeshletBitfield,
-				Builtin::PrimaryCamera::VisibleClusterTable,
-				Builtin::PrimaryCamera::VisibleClusterTableCounter,
+				//Builtin::PrimaryCamera::VisibleClusterTable,
+				//Builtin::PrimaryCamera::VisibleClusterTableCounter,
 				Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer)
 			.WithIndirectArguments(
 				Builtin::IndirectCommandBuffers::MeshletCulling,

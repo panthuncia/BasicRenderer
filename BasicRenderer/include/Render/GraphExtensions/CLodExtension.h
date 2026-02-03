@@ -7,6 +7,8 @@
 class CLodExtension final : public RenderGraph::IRenderGraphExtension {
 public:
 	explicit CLodExtension() {
+        m_visibleClustersBuffer = CreateIndexedStructuredBuffer(100000000, sizeof(VisibleCluster), true, false);
+        m_visibleClustersCounterBuffer = CreateIndexedStructuredBuffer(1, sizeof(unsigned int), true, false);
 	}
 
 	void OnRegistryReset(ResourceRegistry* reg) override {
@@ -20,12 +22,21 @@ public:
 		cullPassDesc.name = "CLod::HierarchialCullingPass";
 		HierarchialCullingPassInputs cullPassInputs;
 		cullPassInputs.isFirstPass = true; // For now, always true
-		cullPassDesc.pass = std::make_shared<HierarchialCullingPass>(cullPassInputs);
+		cullPassDesc.pass = std::make_shared<HierarchialCullingPass>(cullPassInputs, m_visibleClustersBuffer, m_visibleClustersCounterBuffer);
 		cullPassDesc.where = RenderGraph::ExternalInsertPoint::After("SkinningPass");
 		outPasses.push_back(std::move(cullPassDesc));
+
+		RenderGraph::ExternalPassDesc histogramPassDesc;
+		histogramPassDesc.type = RenderGraph::PassType::Compute;
+		histogramPassDesc.name = "CLod::RasterBucketsHistogramPass";
+        histogramPassDesc.pass = std::make_shared<RasterBucketHistogramPass>(m_visibleClustersBuffer, m_visibleClustersCounterBuffer);
 	}
 
 private:
+
+	// Buffers used across CLod passes
+    std::shared_ptr<Buffer> m_visibleClustersBuffer;
+    std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
 
 	// ---------------------------------------------------------------
 	// Hierarchial Culling Pass
@@ -36,11 +47,9 @@ private:
         uint viewDataIndex; // One record per view *...
         uint activeDrawSetIndicesSRVIndex; // One record per draw set
         uint activeDrawCount;
-        uint pad0; // Padding for 16-byte alignment
         uint dispatchGridX; // Drives dispatch size
         uint dispatchGridY;
         uint dispatchGridZ;
-        uint pad1; // Padding for 16-byte alignment
     };
 
     struct HierarchialCullingPassInputs {
@@ -58,7 +67,7 @@ private:
 
     class HierarchialCullingPass : public ComputePass {
     public:
-        HierarchialCullingPass(HierarchialCullingPassInputs inputs) {
+        HierarchialCullingPass(HierarchialCullingPassInputs inputs, std::shared_ptr<Buffer> visibleClustersBuffer, std::shared_ptr<Buffer> visibleClustersCounterBuffer) {
             CreatePipelines(
                 DeviceManager::GetInstance().GetDevice(),
                 PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -71,6 +80,8 @@ private:
                 true);
             m_scratchBuffer->ApplyMetadataComponentBundle(
                 EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Work graph scratch buffer" }));
+			m_visibleClustersBuffer = visibleClustersBuffer;
+			m_visibleClustersCounterBuffer = visibleClustersCounterBuffer;
         }
 
         ~HierarchialCullingPass() {
@@ -83,8 +94,8 @@ private:
                 .with<Components::ParticipatesInPass>(flecs::Wildcard)
                 .build();
             builder->WithUnorderedAccess(m_scratchBuffer,
-                Builtin::VisibleClusterBuffer,
-                Builtin::VisibleClusterCounter,
+                m_visibleClustersBuffer,
+                m_visibleClustersCounterBuffer,
                 "Builtin::CLod::RasterBucketsHistogramIndirectCommand")
                 .WithShaderResource(Builtin::IndirectCommandBuffers::Master,
                     Builtin::CLod::Offsets,
@@ -109,11 +120,11 @@ private:
             RegisterSRV(Builtin::PerObjectBuffer);
             RegisterSRV(Builtin::CLod::Nodes);
 
-            RegisterUAV(Builtin::VisibleClusterBuffer);
-            RegisterUAV(Builtin::VisibleClusterCounter);
+            //RegisterUAV(Builtin::VisibleClusterBuffer);
+            //RegisterUAV(Builtin::VisibleClusterCounter);
             RegisterUAV("Builtin::CLod::RasterBucketsHistogramIndirectCommand");
 
-            m_visibleClusterCounter = m_resourceRegistryView->RequestHandle(Builtin::VisibleClusterCounter);
+            //m_visibleClusterCounter = m_resourceRegistryView->RequestHandle(Builtin::VisibleClusterCounter);
         }
 
         PassReturn Execute(RenderContext& context) override {
@@ -127,24 +138,28 @@ private:
             std::vector<ObjectCullRecord> cullRecords;
 
             // Build cull records for all indirect buffers
-            context.indirectCommandBufferManager->ForEachIndirectBuffer([&](uint64_t view,
-                MaterialCompileFlags flags,
-                const IndirectWorkload& wl)
-                {
-                    if (wl.count == 0) {
-                        return;
-                    }
-                    auto viewInfo = context.viewManager->Get(view);
-                    auto cameraBufferIndex = viewInfo->gpu.cameraBufferIndex;
+			// TODO: Non-opaque objects, and non-primary cameras
+            ViewFilter filter = ViewFilter::PrimaryCameras();
+            context.viewManager->ForEachFiltered(filter, [&](uint64_t view) {
+                auto viewInfo = context.viewManager->Get(view);
+                auto cameraBufferIndex = viewInfo->gpu.cameraBufferIndex;
+                auto workloads = context.indirectCommandBufferManager->GetViewIndirectBuffersForRenderPhase(view, m_renderPhase);
+                for (auto& wl : workloads) {
+                    auto count = wl.workload.count;
+                    if (count == 0) {
+                        continue;
+					}
                     ObjectCullRecord record{};
                     record.viewDataIndex = cameraBufferIndex;
-                    record.activeDrawSetIndicesSRVIndex = context.objectManager->GetActiveDrawSetIndices(flags)->GetSRVInfo(0).slot.index;
-                    record.activeDrawCount = wl.count;
+                    record.activeDrawSetIndicesSRVIndex = context.objectManager->GetActiveDrawSetIndices(wl.flags)->GetSRVInfo(0).slot.index;
+                    record.activeDrawCount = count;
                     // Calculate dispatch grid size (assuming 64 threads per group)
-                    record.dispatchGridX = static_cast<uint>((wl.count + 63) / 64);
+                    record.dispatchGridX = static_cast<uint>((count + 63) / 64);
                     record.dispatchGridY = 1;
                     record.dispatchGridZ = 1;
-                    cullRecords.push_back(record);
+					cullRecords.push_back(record);
+                }
+                
                 });
 
             commandList.SetWorkGraph(m_workGraph->GetHandle(), m_scratchBuffer->GetAPIResource().GetHandle(), true); // Reset every time for now
@@ -163,7 +178,7 @@ private:
 
             // UAV barrier on the visible cluster counter
             rhi::BufferBarrier barrier{};
-            barrier.buffer = m_resourceRegistryView->Resolve<Resource>(m_visibleClusterCounter)->GetAPIResource().GetHandle();
+            barrier.buffer = m_visibleClustersCounterBuffer->GetAPIResource().GetHandle();
             barrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
             barrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
             barrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
@@ -172,7 +187,7 @@ private:
             bufferBarriers.buffers = rhi::Span<rhi::BufferBarrier>(&barrier, 1);
             commandList.Barriers(bufferBarriers);
 
-            // Create indirect command buffer for LOD rasterization
+			// Create indirect command buffer for cluster histogram
             BindResourceDescriptorIndices(commandList, m_createCommandPipelineState.GetResourceDescriptorSlots());
             commandList.BindPipeline(m_createCommandPipelineState.GetAPIPipelineState().GetHandle());
             commandList.Dispatch(1, 1, 1); // Single thread group, one thread
@@ -182,7 +197,7 @@ private:
 
         void Update(const UpdateContext& context) override {
             uint32_t zero = 0u;
-            BUFFER_UPLOAD(&zero, sizeof(uint32_t), UploadManager::UploadTarget::FromHandle(m_visibleClusterCounter), 0);
+            BUFFER_UPLOAD(&zero, sizeof(uint32_t), UploadManager::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
         }
 
         void Cleanup() override {
@@ -193,8 +208,10 @@ private:
         PipelineResources m_pipelineResources;
         rhi::WorkGraphPtr m_workGraph;
         PipelineState m_createCommandPipelineState;
+		std::shared_ptr<Buffer> m_visibleClustersBuffer;
+		std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
         std::shared_ptr<Buffer> m_scratchBuffer;
-        ResourceRegistry::RegistryHandle m_visibleClusterCounter;
+		RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
 
         rhi::Result CreatePipelines(
             rhi::Device device,
@@ -203,7 +220,7 @@ private:
             PipelineState& outCreateCommandPipeline)
         {
             // Compile the work-graph library
-            ShaderLibraryInfo libInfo(L"shaders/workGraphCulling.hlsl", L"lib_6_8");
+            ShaderLibraryInfo libInfo(L"shaders/ClusterLOD/workGraphCulling.hlsl", L"lib_6_8");
             auto compiled = PSOManager::GetInstance().CompileShaderLibrary(libInfo);
             m_pipelineResources = compiled.resourceDescriptorSlots;
 
@@ -248,10 +265,10 @@ private:
             // Pipeline to create indirect command
             outCreateCommandPipeline = PSOManager::GetInstance().MakeComputePipeline(
                 globalRootSignature,
-                L"shaders/createRasterizeClustersCommand.hlsl",
-                L"CreateRasterizeClustersCommand",
+                L"shaders/ClusterLOD/clodUtil.hlsl",
+                L"CreateRasterBucketsHistogramCommandCSMain",
                 {},
-                "HierarchialLODRasterizeCommandCreation");
+                "HierarchialLODommandCreation");
         }
     };
 
@@ -261,7 +278,7 @@ private:
 
     class RasterBucketHistogramPass : public ComputePass {
     public:
-        RasterBucketHistogramPass() {
+        RasterBucketHistogramPass(std::shared_ptr<Buffer> visibleClustersBuffer, std::shared_ptr<Buffer> visibleClustersCounterBuffer) {
             CreatePipelines(
                 DeviceManager::GetInstance().GetDevice(),
                 PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -278,6 +295,9 @@ private:
             auto result = device.CreateCommandSignature(
                 rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(rasterizeClustersArgs, 2), sizeof(RasterBucketsHistogramIndirectCommand) },
                 PSOManager::GetInstance().GetComputeRootSignature().GetHandle(), m_histogramCommandSignature);
+
+			m_visibleClustersBuffer = visibleClustersBuffer;
+			m_visibleClustersCounterBuffer = visibleClustersCounterBuffer;
         }
 
         ~RasterBucketHistogramPass() {
@@ -285,16 +305,16 @@ private:
 
         void DeclareResourceUsages(ComputePassBuilder* builder) {
             builder->WithShaderResource(
-                Builtin::VisibleClusterBuffer,
-                Builtin::VisibleClusterCounter)
+                m_visibleClustersBuffer,
+                m_visibleClustersCounterBuffer)
                 .WithIndirectArguments("Builtin::CLod::RasterBucketsHistogramIndirectCommand")
                 .WithUnorderedAccess("Builtin::CLod::RasterBucketsClusterCountBuffer");
         }
 
         void Setup() override {
 
-            RegisterSRV(Builtin::VisibleClusterBuffer);
-            RegisterSRV(Builtin::VisibleClusterCounter);
+            //RegisterSRV(Builtin::VisibleClusterBuffer);
+            //RegisterSRV(Builtin::VisibleClusterCounter);
             RegisterUAV("Builtin::CLod::RasterBucketsClusterCountBuffer");
 
             m_rasterBucketHistogramIndirectCommandsResource = m_resourceRegistryView->RequestPtr<Resource>("Builtin::CLod::RasterBucketsHistogramIndirectCommand");
@@ -328,16 +348,18 @@ private:
         PipelineState m_histogramPipeline;
         rhi::CommandSignaturePtr m_histogramCommandSignature;
         Resource* m_rasterBucketHistogramIndirectCommandsResource = nullptr;
+		std::shared_ptr<Buffer> m_visibleClustersBuffer;
+		std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
 
-        rhi::Result CreatePipelines(
+        void CreatePipelines(
             rhi::Device device,
             rhi::PipelineLayoutHandle globalRootSignature,
             PipelineState& outHistogramPipeline)
         {
             outHistogramPipeline = PSOManager::GetInstance().MakeComputePipeline(
                 globalRootSignature,
-                L"Shaders/ClusterLOD/RasterBucketHistogramCS.hlsl",
-                L"RasterBucketHistogramCSMain");
+                L"Shaders/ClusterLOD/clodUtil.hlsl",
+                L"ClusterRasterBucketsHistogramCSMain");
         }
     };
 

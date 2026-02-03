@@ -99,8 +99,6 @@ struct Builtin {
     inline static constexpr std::string_view LinearDepthMap = "Builtin::PrimaryCamera::LinearDepthMap";
     inline static constexpr std::string_view MeshletBitfield = "Builtin::PrimaryCamera::MeshletBitfield";
     inline static constexpr std::string_view VisibilityTexture = "Builtin::PrimaryCamera::VisibilityTexture";
-    inline static constexpr std::string_view VisibleClusterTable = "Builtin::PrimaryCamera::VisibleClusterTable";
-    inline static constexpr std::string_view VisibleClusterTableCounter = "Builtin::PrimaryCamera::VisibleClusterTableCounter";
   };
   struct Shadows {
     inline static constexpr std::string_view LinearShadowMaps = "Builtin::Shadows::LinearShadowMaps";
@@ -111,7 +109,5 @@ struct Builtin {
     inline static constexpr std::string_view InverseBindMatrices = "Builtin::SkeletonResources::InverseBindMatrices";
     inline static constexpr std::string_view SkinningInstanceInfo = "Builtin::SkeletonResources::SkinningInstanceInfo";
   };
-  inline static constexpr std::string_view VisibleClusterBuffer = "Builtin::VisibleClusterBuffer";
-  inline static constexpr std::string_view VisibleClusterCounter = "Builtin::VisibleClusterCounter";
 };
 

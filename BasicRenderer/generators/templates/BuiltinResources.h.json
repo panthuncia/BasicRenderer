@@ -1,15 +1,11 @@
 {
   "Builtin": {
     "PerMaterialDataBuffer": {},
-    "VisibleClusterBuffer": {},
-    "VisibleClusterCounter": {},
     "PrimaryCamera": {
       "LinearDepthMap": {},
       "DepthTexture": {},
       "VisibilityTexture": {},
       "MeshletBitfield": {},
-      "VisibleClusterTable": {},
-      "VisibleClusterTableCounter": {},
       "IndirectCommandBuffers": {
         "Primary": {},
         "MeshletCulling": {},

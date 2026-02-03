@@ -86,7 +86,7 @@ public:
 	struct ExternalPassDesc {
 		PassType type = PassType::Unknown;
 		std::string name;
-		ExternalInsertPoint where = ExternalInsertPoint::End();
+		std::optional<ExternalInsertPoint> where;
 		std::variant<std::monostate, std::shared_ptr<RenderPass>, std::shared_ptr<ComputePass>> pass;
 
 		// Optional: if true, the pass will be registered in Get*PassByName().

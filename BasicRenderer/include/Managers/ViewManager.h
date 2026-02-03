@@ -90,6 +90,18 @@ struct ViewFilter {
     bool requireLightType = false;
     Components::LightType lightType;
 
+    static ViewFilter PrimaryCameras() {
+        ViewFilter filter;
+        filter.requirePrimary = true;
+        return filter;
+	}
+
+    static ViewFilter Shadows() {
+        ViewFilter filter;
+        filter.requireShadow = true;
+        return filter;
+	}
+
     bool Match(const View& v) const {
         if (requirePrimary && !v.flags.primaryCamera) return false;
         if (requireShadow && !v.flags.shadow) return false;
@@ -147,14 +159,14 @@ public:
     template<class F>
     void ForEachView(F&& f) {
         for (auto& [_, v] : m_views)
-            std::forward<F>(f)(v);
+            std::forward<F>(f)(v.id);
     }
 
     template<class F>
     void ForEachFiltered(const ViewFilter& filter, F&& f) {
         for (auto& [_, v] : m_views)
             if (filter.Match(v))
-                std::forward<F>(f)(v);
+                std::forward<F>(f)(v.id);
     }
 
     // Indirect workloads + full view data
