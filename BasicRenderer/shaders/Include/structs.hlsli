@@ -162,7 +162,7 @@ struct MaterialInfo {
     uint roughnessChannel;
 
     uint3 emissiveChannels;
-    uint rasterBuckedIndex;
+    uint rasterBucketIndex;
 };
 
 struct SingleMatrix {

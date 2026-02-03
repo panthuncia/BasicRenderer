@@ -1,6 +1,6 @@
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
-
+#include "include/waveIntrinsicsHelpers.hlsli"
 struct RasterBucketsHistogramIndirectCommand
 {
     uint clusterCount;
@@ -14,8 +14,8 @@ struct RasterBucketsHistogramIndirectCommand
 [numthreads(1, 1, 1)]
 void CreateRasterBucketsHistogramCommandCSMain()
 {
-    RWStructuredBuffer<RasterBucketsHistogramIndirectCommand> outCommand = ResourceDescriptorHeap(ResourceDescriptorIndex(Builtin::CLod::RasterBucketsHistogramIndirectCommand));
-    StructuredBuffer<uint> clusterCountBuffer = ResourceDescriptorHeap(ResourceDescriptorIndex(Builtin::VisibleClusterCounter));
+    RWStructuredBuffer<RasterBucketsHistogramIndirectCommand> outCommand = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::RasterBucketsHistogramIndirectCommand)];
+    StructuredBuffer<uint> clusterCountBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisibleClusterCounter)];
 
     // Given the cluster count, find dispatch dimensions that minimizes wasted threads
     uint clusterCount = clusterCountBuffer.Load(0);
@@ -48,15 +48,31 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
 {
     // Linearize the 2D dispatch thread ID
     uint linearizedID = DTid.x + DTid.y * CLUSTER_HISTOGRAM_GROUP_SIZE;
-
-    if (linearizedID >= UintRootConstant0) { // cluster count
+    StructuredBuffer<uint> clusterCountBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisibleClusterCounter)];
+    uint clusterCount = clusterCountBuffer.Load(0);
+    
+    if (linearizedID >= clusterCount) {
         return;
     }
+    
+    StructuredBuffer<VisibleCluster> visibleClusters = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisibleClustersBuffer)];
 
-    RWStructuredBuffer<uint> histogramBuffer = ResourceDescriptorHeap(ResourceDescriptorIndex(Builtin::CLod::RasterBucketsHistogramBuffer));
-    StructuredBuffer<VisibleCluster> visibleClusters = ResourceDescriptorHeap(ResourceDescriptorIndex(Builtin::VisibleClustersBuffer));
-    StructuredBuffer<uint> clusterCountBuffer = ResourceDescriptorHeap(ResourceDescriptorIndex(Builtin::VisibleClusterCounter));
-    uint clusterCount = clusterCountBuffer.Load(0);
-    uint index = ;
-    histogramBuffer[index] = 0;
+    // TODO: Remove load chain
+    uint instanceIndex = visibleClusters[linearizedID].instanceID;
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+    uint perMeshIndex = perMeshInstance[instanceIndex].perMeshBufferIndex;
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+    uint materialDataIndex = perMeshBuffer[perMeshIndex].materialDataIndex;
+    StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MaterialDataBuffer)];
+    uint rasterBucketIndex = materialDataBuffer[materialDataIndex].rasterBucketIndex;
+
+    // Group threads in the wave by matId
+    uint4 mask = WaveMatch(rasterBucketIndex);
+
+    if (IsWaveGroupLeader(mask))
+    {
+        uint groupSize = CountBits128(mask);
+        RWStructuredBuffer<uint> histogramBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::RasterBucketsHistogramBuffer)];
+        InterlockedAdd(histogramBuffer[rasterBucketIndex], groupSize);
+    }
 }
