@@ -808,11 +808,13 @@ void RenderGraph::CompileStructural() {
 	}
 
 	// Extension-provided structural passes (uploads/mips/readbacks/etc)
-	std::vector<ExternalPassDesc> external;
-	external.reserve(8);
-	for (auto& ext : m_extensions) {
-		if (ext) ext->GatherStructuralPasses(*this, external);
-	}
+	//std::vector<ExternalPassDesc> external;
+	//external.reserve(8);
+	//for (auto& ext : m_extensions) {
+	//	if (ext) {
+	//		ext->GatherStructuralPasses(*this, external);
+	//	}
+	//}
 
 	struct Pending {
 		AnyPassAndResources pr;
@@ -867,7 +869,9 @@ void RenderGraph::CompileStructural() {
 	size_t globalOrder = 0;
 
 	for (auto& ext : m_extensions) {
-		if (!ext) continue;
+		if (!ext) {
+			continue;
+		}
 
 		std::vector<ExternalPassDesc> local;
 		local.reserve(8);
@@ -972,7 +976,9 @@ void RenderGraph::CompileStructural() {
 
 			// emit "before nm"
 			auto b = takeVec(before, nm);
-			for (auto& x : b) self(self, std::move(x));
+			for (auto& x : b) {
+				self(self, std::move(x));
+			}
 		}
 
 		m_masterPassList.push_back(std::move(p.pr));
@@ -980,7 +986,9 @@ void RenderGraph::CompileStructural() {
 		if (!nm.empty()) {
 			// emit "after nm"
 			auto a = takeVec(after, nm);
-			for (auto& x : a) self(self, std::move(x));
+			for (auto& x : a) {
+				self(self, std::move(x));
+			}
 		}
 		};
 
@@ -992,25 +1000,35 @@ void RenderGraph::CompileStructural() {
 			emittedNames.insert(nm);
 
 			auto b = takeVec(before, nm);
-			for (auto& x : b) emitPending(emitPending, std::move(x));
+			for (auto& x : b) {
+				emitPending(emitPending, std::move(x));
+			}
 		}
 
 		m_masterPassList.push_back(std::move(bp));
 
 		if (!nm.empty()) {
 			auto a = takeVec(after, nm);
-			for (auto& x : a) emitPending(emitPending, std::move(x));
+			for (auto& x : a) {
+				emitPending(emitPending, std::move(x));
+			}
 		}
 		};
 
 	// begin
-	for (auto& p : begin) emitPending(emitPending, std::move(p));
+	for (auto& p : begin) {
+		emitPending(emitPending, std::move(p));
+	}
 
 	// base passes (with before/after hooks)
-	for (auto& bp : base) emitBasePass(emitBasePass, std::move(bp));
+	for (auto& bp : base) {
+		emitBasePass(emitBasePass, std::move(bp));
+	}
 
 	// end
-	for (auto& p : end) emitPending(emitPending, std::move(p));
+	for (auto& p : end) {
+		emitPending(emitPending, std::move(p));
+	}
 
 	// unresolved anchors: warn + append (honors chains among themselves)
 	auto flushUnresolved = [&](auto& map, bool isBefore) {
