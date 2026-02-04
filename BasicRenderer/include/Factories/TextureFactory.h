@@ -111,9 +111,6 @@ private:
 
         std::vector<Job> m_pending;
 
-        // simple ring retire (adapt count to your frames-in-flight)
-        static constexpr uint32_t kFramesInFlight = 3;
-
         std::shared_ptr<LazyDynamicStructuredBuffer<MipmapSpdConstants>> m_pMipConstants;
 
         PipelineState m_psoVec2D;

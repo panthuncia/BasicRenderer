@@ -1117,7 +1117,7 @@ void RenderGraph::RefreshRetainedDeclarationsForFrame(RenderPassAndResources& p,
 	p.pass->DeclareResourceUsages(&b);
 
 	// Update the frame view used by scheduling
-	p.resources.frameResourceRequirements = b.GatherResourceRequirements();
+	p.resources.staticResourceRequirements = b.GatherResourceRequirements();
 
 	// Internal transitions also affect scheduling
 	p.resources.internalTransitions = b.params.internalTransitions;
@@ -1142,7 +1142,7 @@ void RenderGraph::RefreshRetainedDeclarationsForFrame(ComputePassAndResources& p
 
 	p.pass->DeclareResourceUsages(&b);
 
-	p.resources.frameResourceRequirements = b.GatherResourceRequirements();
+	p.resources.staticResourceRequirements = b.GatherResourceRequirements();
 	p.resources.internalTransitions = b.params.internalTransitions;
 	p.resources.identifierSet = b.DeclaredResourceIds();
 
@@ -1968,6 +1968,7 @@ std::shared_ptr<IResourceResolver> RenderGraph::RequestResolver(ResourceIdentifi
 
 void RenderGraph::RegisterResource(ResourceIdentifier id, std::shared_ptr<Resource> resource,
 	IResourceProvider* provider) {
+
 	auto key = _registry.RegisterOrUpdate(id, resource);
 	AddResource(resource);
 	if (provider) {

@@ -12,21 +12,21 @@
 
 class EvaluateMaterialGroupsPass : public ComputePass {
 public:
-    EvaluateMaterialGroupsPass() {}
-
-    void DeclareResourceUsages(ComputePassBuilder* b) override {
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+    EvaluateMaterialGroupsPass() {
+        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 
         // Global LOD extension visibility buffer tag
         auto visBufferTag = ecsWorld.component<CLodExtensionVisibilityBufferTag>();
 
         // Query for entities with the visibility buffer tag
         m_visibleClustersQuery =
-            ecsWorld.query_builder<flecs::entity>()
+            ecsWorld.query_builder<>()
             .with<CLodExtensionTypeTag>(visBufferTag)
             .with<VisibleClustersBufferTag>()
             .build();
+    }
 
+    void DeclareResourceUsages(ComputePassBuilder* b) override {
         b->WithShaderResource(ECSResourceResolver(m_visibleClustersQuery));
 
         b->WithShaderResource("Builtin::VisUtil::PixelListBuffer",
@@ -144,6 +144,6 @@ public:
 private:
     std::unordered_map<MaterialCompileFlags, PipelineState> m_psoCache;
     Resource* m_materialEvalCmds;
-    flecs::query<flecs::entity> m_visibleClustersQuery;
+    flecs::query<> m_visibleClustersQuery;
     uint32_t m_visibleClusterBufferSRVIndex = 0;
 };

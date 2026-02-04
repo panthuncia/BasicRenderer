@@ -557,13 +557,6 @@ void TextureFactory::MipmappingPass::DeclareResourceUsages(ComputePassBuilder* b
 
     builder->WithShaderResource(m_pMipConstants);
 
-    // Exit state: shader-readable after we internally transition outputs back
-    const ResourceState exitSRV{
-        rhi::ResourceAccessType::ShaderResource,
-        AccessToLayout(rhi::ResourceAccessType::ShaderResource, /*isRender=*/false),
-        rhi::ResourceSyncState::ComputeShading
-    };
-
     for (auto& j : m_pending) {
         auto tex = j.texture;
         if (!tex) continue;

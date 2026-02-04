@@ -14,19 +14,20 @@ public:
             L"BuildPixelListCS",
             {},
             "BuildPixelListPSO");
-	}
-    void DeclareResourceUsages(ComputePassBuilder* b) override {
+
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 
-		// Global LOD extension visibility buffer tag
+        // Global LOD extension visibility buffer tag
         auto visBufferTag = ecsWorld.component<CLodExtensionVisibilityBufferTag>();
 
-		// Query for entities with the visibility buffer tag
+        // Query for entities with the visibility buffer tag
         m_visibleClustersQuery =
-            ecsWorld.query_builder<flecs::entity>()
+            ecsWorld.query_builder<>()
             .with<CLodExtensionTypeTag>(visBufferTag)
-			.with<VisibleClustersBufferTag>()
+            .with<VisibleClustersBufferTag>()
             .build();
+	}
+    void DeclareResourceUsages(ComputePassBuilder* b) override {
 
         b->WithShaderResource(ECSResourceResolver(m_visibleClustersQuery));
 
@@ -94,6 +95,6 @@ public:
 
 private:
     PipelineState m_pso;
-	flecs::query<flecs::entity> m_visibleClustersQuery;
+	flecs::query<> m_visibleClustersQuery;
     uint32_t m_visibleClusterBufferSRVIndex = 0;
 };

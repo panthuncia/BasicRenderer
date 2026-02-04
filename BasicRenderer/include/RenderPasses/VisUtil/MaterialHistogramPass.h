@@ -14,8 +14,7 @@ public:
             L"MaterialHistogramCS",
             {},
             "MaterialHistogramPSO");
-    }
-    void DeclareResourceUsages(ComputePassBuilder* b) override {
+
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 
         // Global LOD extension visibility buffer tag
@@ -23,10 +22,12 @@ public:
 
         // Query for entities with the visibility buffer tag
         m_visibleClustersQuery =
-            ecsWorld.query_builder<flecs::entity>()
+            ecsWorld.query_builder<>()
             .with<CLodExtensionTypeTag>(visBufferTag)
             .with<VisibleClustersBufferTag>()
             .build();
+    }
+    void DeclareResourceUsages(ComputePassBuilder* b) override {
 
         b->WithShaderResource(ECSResourceResolver(m_visibleClustersQuery));
         b->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
@@ -88,6 +89,6 @@ public:
 
 private:
     PipelineState m_pso;
-	flecs::query<flecs::entity> m_visibleClustersQuery;
+	flecs::query<> m_visibleClustersQuery;
     uint32_t m_visibleClusterBufferSRVIndex = 0;
 };

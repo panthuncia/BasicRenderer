@@ -6038,11 +6038,11 @@ Synchronized internally with a mutex.
     };
 #ifndef _D3D12MA_ALLOCATOR_PIMPL_FUNCTINOS
     AllocatorPimpl::AllocatorPimpl(const AllocationCallbacks& allocationCallbacks, const AllocatorDesc& desc)
-        : m_UseMutex((desc.flags& AllocatorFlags::SingleThreaded) == AllocatorFlags::None),
-        m_AlwaysCommitted((desc.flags& AllocatorFlags::AlwaysCommitted) != AllocatorFlags::None),
-        m_MsaaAlwaysCommitted((desc.flags& AllocatorFlags::MsaaTexturesAlwaysCommitted) != AllocatorFlags::None),
-        m_PreferSmallBuffersCommitted((desc.flags& AllocatorFlags::DontPreferSmallBuffersCommitted) == AllocatorFlags::None),
-        m_UseTightAlignment((desc.flags& AllocatorFlags::DontUseTightAlignment) == AllocatorFlags::None),
+        : m_UseMutex((desc.flags& AllocatorFlags::AllocatorFlagsSingleThreaded) == AllocatorFlags::AllocatorFlagsNone),
+        m_AlwaysCommitted((desc.flags& AllocatorFlags::AllocatorFlagsAlwaysCommitted) != AllocatorFlags::AllocatorFlagsNone),
+        m_MsaaAlwaysCommitted((desc.flags& AllocatorFlags::AllocatorFlagsMsaaTexturesAlwaysCommitted) != AllocatorFlags::AllocatorFlagsNone),
+        m_PreferSmallBuffersCommitted((desc.flags& AllocatorFlags::AllocatorFlagsDontPreferSmallBuffersCommitted) == AllocatorFlags::AllocatorFlagsNone),
+        m_UseTightAlignment((desc.flags& AllocatorFlags::AllocatorFlagsDontUseTightAlignment) == AllocatorFlags::AllocatorFlagsNone),
         m_Device(desc.device),
         //m_Adapter(desc.nativeAdapter),
         m_PreferredBlockSize(desc.preferredBlockSize != 0 ? desc.preferredBlockSize : D3D12MA_DEFAULT_BLOCK_SIZE),
@@ -6137,7 +6137,7 @@ Synchronized internally with a mutex.
         // Default pools not zeroed
         // Upstream: only enabled if user flag set AND the capability exists.
         m_DefaultPoolsNotZeroed = false;
-        if ((desc.flags & AllocatorFlags::DefaultPoolsNotZeroed) != AllocatorFlags::None) {
+        if ((desc.flags & AllocatorFlags::AllocatorFlagsDefaultPoolsNotZeroed) != AllocatorFlags::AllocatorFlagsNone) {
             if (allocCaps.createNotZeroedHeapSupported) {
                 m_DefaultPoolsNotZeroed = true;
             }
@@ -6156,11 +6156,11 @@ Synchronized internally with a mutex.
 			HeapProperties heapProps{};
 			heapProps.type = heapType;
 
-#if D3D12MA_CREATE_NOT_ZEROED_AVAILABLE
+//#if D3D12MA_CREATE_NOT_ZEROED_AVAILABLE
             if (m_DefaultPoolsNotZeroed) {
                 heapFlags |= rhi::HeapFlags::CreateNotZeroed;
             }
-#endif
+//#endif
 
             m_BlockVectors[i] = D3D12MA_NEW(GetAllocs(), BlockVector)(
                 this,

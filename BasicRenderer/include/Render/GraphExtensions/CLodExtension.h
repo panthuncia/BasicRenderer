@@ -22,7 +22,7 @@ public:
 		// TODO: Better way to do this? Weird global initialization
 		switch (type) {
             case CLodExtensionType::VisiblityBuffer:
-				if (ecsWorld.component<CLodExtensionVisibilityBufferTag>().is_valid()) {
+				if (ecsWorld.component<CLodExtensionVisibilityBufferTag>().has(flecs::Exclusive)) {
                     // Already initialized
                     break;
                 }
@@ -30,7 +30,7 @@ public:
 				ecsWorld.add<CLodExtensionVisibilityBufferTag>();
 				break;
                 case CLodExtensionType::Shadow:
-                    if (ecsWorld.component<CLodExtensionShadowTag>().is_valid()) {
+                    if (ecsWorld.component<CLodExtensionShadowTag>().has(flecs::Exclusive)) {
                     // Already initialized
                     break;
 					}

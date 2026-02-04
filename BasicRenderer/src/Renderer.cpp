@@ -1102,7 +1102,7 @@ void Renderer::CreateRenderGraph() {
     CreateGBufferResources(newGraph.get());
 
     if (m_visibilityRendering) {
-        newGraph->BuildComputePass("ClearVisibilityBufferPass")
+        newGraph->BuildRenderPass("ClearVisibilityBufferPass")
             .Build<ClearVisibilityBufferPass>();
     }
 

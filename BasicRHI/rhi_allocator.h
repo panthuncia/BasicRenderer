@@ -195,9 +195,9 @@ namespace rhi::ma
     enum PoolFlags : uint32_t
     {
         PoolFlagsNone = 0,
-        PoolFlagsAlgorithmLinear = 0x1,
-        PoolFlagsMsaaTexturesAlwaysCommitted = 0x2,
-        PoolFlagsAlwaysCommitted = 0x4,
+        PoolFlagsAlgorithmLinear = 1 << 0,
+        PoolFlagsMsaaTexturesAlwaysCommitted = 1 << 1,
+        PoolFlagsAlwaysCommitted = 1 << 2,
 
         PoolFlagsAlgorithmMask = PoolFlagsAlgorithmLinear
     };
@@ -212,15 +212,15 @@ namespace rhi::ma
         return static_cast<PoolFlags>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
     }
 
-    enum class AllocatorFlags : uint32_t
+    enum AllocatorFlags : uint32_t
     {
-        None = 0,
-        SingleThreaded = 0x1,
-        AlwaysCommitted = 0x2,
-        DefaultPoolsNotZeroed = 0x4,
-        MsaaTexturesAlwaysCommitted = 0x8,
-        DontPreferSmallBuffersCommitted = 0x10,
-        DontUseTightAlignment = 0x20
+        AllocatorFlagsNone = 0,
+        AllocatorFlagsSingleThreaded = 1 << 0,
+        AllocatorFlagsAlwaysCommitted = 1 << 1,
+        AllocatorFlagsDefaultPoolsNotZeroed = 1 << 2,
+        AllocatorFlagsMsaaTexturesAlwaysCommitted = 1 << 3,
+        AllocatorFlagsDontPreferSmallBuffersCommitted = 1 << 4,
+        AllocatorFlagsDontUseTightAlignment = 1 << 5
     };
     inline AllocatorFlags operator|(AllocatorFlags a, AllocatorFlags b) noexcept
     {
@@ -232,6 +232,8 @@ namespace rhi::ma
     {
         return static_cast<AllocatorFlags>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
     }
+
+	inline AllocatorFlags operator&=(AllocatorFlags& a, AllocatorFlags b) noexcept { a = a & b; return a; }
 
     // ---------------- Descriptors ----------------
 
@@ -270,7 +272,7 @@ namespace rhi::ma
 
     struct AllocatorDesc
     {
-        AllocatorFlags flags = AllocatorFlags::None;
+        AllocatorFlags flags = AllocatorFlags::AllocatorFlagsNone;
 
         // Device that allocator uses to create heaps/resources.
         // Lifetime must outlive the allocator.
@@ -390,8 +392,8 @@ namespace rhi::ma
     // ---------------- Recommended constants ----------------
 
     inline AllocatorFlags RecommendedAllocatorFlags =
-        AllocatorFlags::DefaultPoolsNotZeroed |
-        AllocatorFlags::MsaaTexturesAlwaysCommitted;
+        AllocatorFlags::AllocatorFlagsDefaultPoolsNotZeroed |
+        AllocatorFlags::AllocatorFlagsMsaaTexturesAlwaysCommitted;
 
     inline rhi::HeapFlags RecommendedHeapFlags =
         rhi::HeapFlags::CreateNotZeroed;
