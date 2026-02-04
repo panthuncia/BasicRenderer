@@ -67,8 +67,8 @@ private:
         // Subobjects
         auto& layout = PSOManager::GetInstance().GetRootSignature(); // rhi::PipelineLayout&
         rhi::SubobjLayout soLayout{ layout.GetHandle() };
-        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()) };
-        rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()) };
+        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()), "FullscreenVSMain" };
+        rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()), "PSMain" };
 
         rhi::RasterState rs{};
         rs.fill = rhi::FillMode::Solid;
@@ -96,16 +96,18 @@ private:
         rhi::SubobjRTVs soRTVs{ rts };
 
         rhi::SubobjSample soSmp{ rhi::SampleDesc{1, 0} };
+		rhi::SubobjPrimitiveTopology soTopo{ rhi::PrimitiveTopology::TriangleStrip };
 
         const rhi::PipelineStreamItem items[] = {
-            rhi::Make(soLayout),
             rhi::Make(soVS),
             rhi::Make(soPS),
-            rhi::Make(soRaster),
-            rhi::Make(soBlend),
-            rhi::Make(soDepth),
-            rhi::Make(soRTVs),
-            rhi::Make(soSmp),
+            rhi::Make(soLayout),
+			rhi::Make(soTopo),
+            //rhi::Make(soRaster),
+            //rhi::Make(soBlend),
+            //rhi::Make(soDepth),
+            //rhi::Make(soRTVs),
+            //rhi::Make(soSmp),
         };
 
         auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), PSO);

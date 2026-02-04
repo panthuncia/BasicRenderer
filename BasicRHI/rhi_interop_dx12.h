@@ -58,10 +58,10 @@ namespace rhi::dx12 {
 		if (!QueryNativeQueryPool(qp, RHI_IID_D3D12_HEAP, &info, sizeof(info))) return nullptr;
 		return static_cast<ID3D12QueryHeap*>(info.queryPool);
 	}
-    inline ID3D12PipelineState* get_pipeline(rhi::Pipeline p) {
+    inline ID3D12StateObject* get_pipeline(rhi::Pipeline p) {
         D3D12PipelineInfo info{};
         if (!QueryNativePipeline(p, RHI_IID_D3D12_PIPELINE, &info, sizeof(info))) return nullptr;
-        return static_cast<ID3D12PipelineState*>(info.pipeline);
+        return static_cast<ID3D12StateObject*>(info.pipeline);
 	}
     inline ID3D12RootSignature* get_pipeline_layout(rhi::PipelineLayout pl) {
         D3D12PipelineLayoutInfo info{};

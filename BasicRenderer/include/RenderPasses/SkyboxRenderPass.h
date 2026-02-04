@@ -209,8 +209,8 @@ private:
 
         // Subobjects
         rhi::SubobjLayout  soLayout{ m_skyboxRootSignature->GetHandle() };
-        rhi::SubobjShader  soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()) };
-        rhi::SubobjShader  soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()) };
+        rhi::SubobjShader  soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()), "VSMain" };
+        rhi::SubobjShader  soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()), "PSMain" };
 
         rhi::SubobjRaster  soRaster{};
         soRaster.rs.fill = rhi::FillMode::Solid;

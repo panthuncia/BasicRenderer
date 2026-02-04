@@ -423,6 +423,17 @@ namespace rhi {
 		default: return D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
 		}
 	}
+	inline static D3D12_PRIMITIVE_TOPOLOGY_TYPE ToDXTopologyType(const PrimitiveTopology t) noexcept {
+		switch (t) {
+		case PrimitiveTopology::PointList:        return D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT;
+		case PrimitiveTopology::LineList:         
+		case PrimitiveTopology::LineStrip:        return D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
+		case PrimitiveTopology::TriangleList:     
+		case PrimitiveTopology::TriangleStrip:    
+		case PrimitiveTopology::TriangleFan:      return D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+		default: return D3D12_PRIMITIVE_TOPOLOGY_TYPE_UNDEFINED;
+		}
+	}
 	inline void ToDx12InputLayout(
 		const rhi::FinalizedInputLayout& il,
 		std::vector<D3D12_INPUT_ELEMENT_DESC>& out)

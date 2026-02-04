@@ -125,8 +125,8 @@ private:
 		// Subobjects
 		rhi::SubobjLayout soLayout{ m_debugLayout->GetHandle() };
 
-		rhi::SubobjShader soMS{ rhi::ShaderStage::Mesh,  rhi::DXIL(compiled.meshShader.Get()) };
-		rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(compiled.pixelShader.Get()) };
+		rhi::SubobjShader soMS{ rhi::ShaderStage::Mesh,  rhi::DXIL(compiled.meshShader.Get()), "MSMain" };
+		rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(compiled.pixelShader.Get()), "SpherePSMain" };
 
 		rhi::RasterState rs{};
 		rs.fill = rhi::FillMode::Wireframe;

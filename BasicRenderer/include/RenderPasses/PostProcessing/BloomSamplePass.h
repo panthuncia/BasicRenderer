@@ -133,7 +133,7 @@ private:
 
         auto& layout = PSOManager::GetInstance().GetRootSignature(); // rhi::PipelineLayout&
         rhi::SubobjLayout soLayout{ layout.GetHandle() };
-        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()) };
+        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()), "FullscreenVSNoViewRayMain" };
 
         rhi::RasterState rs{};
         rs.fill = rhi::FillMode::Solid;
@@ -154,7 +154,7 @@ private:
         rhi::SubobjDSV soDSV{ rhi::Format::D32_Float };   // matches DX psoDesc.DSVFormat
         rhi::SubobjSample soSample{ rhi::SampleDesc{1, 0} };
 
-        rhi::SubobjShader soPS_down{ rhi::ShaderStage::Pixel, rhi::DXIL(compiled.pixelShader.Get()) };
+        rhi::SubobjShader soPS_down{ rhi::ShaderStage::Pixel, rhi::DXIL(compiled.pixelShader.Get()), "downsample" };
 
         rhi::BlendState bsDown{};
         bsDown.alphaToCoverage = false;

@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <memory>
 #include <utility> // C++23: std::to_underlying
+#include <string>
 
 #include "resource_states.h"
 #include "rhi_feature_Info.h"
@@ -883,7 +884,7 @@ namespace rhi {
 		FillMode fill = FillMode::Solid;
 		CullMode cull = CullMode::Back;
 		bool frontCCW = false;
-		int32_t depthBias = 0;
+		float depthBias = 0;
 		float   depthBiasClamp = 0;
 		float   slopeScaledDepthBias = 0;
 		bool    conservative = false;
@@ -1015,11 +1016,12 @@ namespace rhi {
 		DSVFormat,
 		Sample,
 		Flags,             // optional backend-specific flags bitset
-		InputLayout    // optional, graphics only
+		InputLayout,    // optional, graphics only
+		PrimitiveTopology // required, graphics only
 	};
 
 	struct SubobjLayout { PipelineLayoutHandle layout{}; };
-	struct SubobjShader { ShaderStage stage{}; ShaderBinary bytecode{}; };
+	struct SubobjShader { ShaderStage stage{}; ShaderBinary bytecode{}; std::string entryPoint{}; };
 	struct SubobjRaster { RasterState rs{}; };
 	struct SubobjBlend { BlendState bs{}; };
 	struct SubobjDepth { DepthStencilState ds{}; };
@@ -1027,6 +1029,7 @@ namespace rhi {
 	struct SubobjDSV { Format dsv = Format::Unknown; };
 	struct SubobjSample { SampleDesc sd{}; };
 	struct SubobjInputLayout { FinalizedInputLayout il{}; }; // optional, for graphics
+	struct SubobjPrimitiveTopology { PrimitiveTopology pt{}; }; // required for graphics
 	// struct SubobjFlags { uint64_t mask = 0; }; // optional
 
 	struct PipelineStreamItem {
@@ -1045,7 +1048,7 @@ namespace rhi {
 	inline PipelineStreamItem Make(const SubobjDSV& x) { return { PsoSubobj::DSVFormat, &x, sizeof(x) }; }
 	inline PipelineStreamItem Make(const SubobjSample& x) { return { PsoSubobj::Sample, &x,  sizeof(x) }; }
 	inline PipelineStreamItem Make(const SubobjInputLayout& x) { return { PsoSubobj::InputLayout, &x, sizeof(x) }; }
-
+	inline PipelineStreamItem Make(const SubobjPrimitiveTopology& x) { return { PsoSubobj::PrimitiveTopology, &x, sizeof(x) }; }
 
 	// ---------------- Pass & barriers (minimal) ----------------
 

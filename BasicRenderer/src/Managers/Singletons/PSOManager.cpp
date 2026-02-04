@@ -169,8 +169,8 @@ PipelineState PSOManager::CreatePSO(UINT psoFlags, MaterialCompileFlags material
     auto& layout = GetRootSignature();
     rhi::SubobjLayout soLayout{ layout.GetHandle()};
 
-    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()) };
-    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()) };
+    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()), "VSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()), "PSMain" };
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
@@ -242,8 +242,8 @@ PipelineState PSOManager::CreateShadowPSO(UINT psoFlags, MaterialCompileFlags ma
     auto& layout = GetRootSignature();
     rhi::SubobjLayout soLayout{ layout.GetHandle()};
 
-    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()) };
-    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()) };
+    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()), "VSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()), "PSMain" };
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
@@ -307,8 +307,8 @@ PipelineState PSOManager::CreatePrePassPSO(UINT psoFlags, MaterialCompileFlags m
     auto& layout = GetRootSignature(); // PipelineLayoutHandle
     rhi::SubobjLayout soLayout{ layout.GetHandle()};
 
-    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()) };
-    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()) };
+    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()), "VSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()), "PrepassPSMain" };
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
@@ -366,7 +366,7 @@ PipelineState PSOManager::CreateVisibilityBufferPSO(UINT psoFlags, MaterialCompi
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
 
     ShaderInfoBundle shaderInfoBundle;
-    shaderInfoBundle.vertexShader = { L"shaders/shaders.hlsl", L"VisibilityBufferVSMain",        L"vs_6_6" };
+    shaderInfoBundle.vertexShader = { L"shaders/shaders.hlsl", L"VisibilityBufferVSMain", L"vs_6_6" };
     shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"VisibilityBufferPSMain", L"ps_6_6" };
     shaderInfoBundle.defines = defines;
 
@@ -377,8 +377,8 @@ PipelineState PSOManager::CreateVisibilityBufferPSO(UINT psoFlags, MaterialCompi
     auto& layout = GetRootSignature(); // PipelineLayoutHandle
     rhi::SubobjLayout soLayout{ layout.GetHandle() };
 
-    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()) };
-    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()) };
+    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()), "VisibilityBufferVSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()), "VisibilityBufferPSMain" };
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
@@ -445,9 +445,9 @@ PipelineState PSOManager::CreateVisibilityBufferMeshPSO(
 
     auto& layout = GetRootSignature();
     rhi::SubobjLayout soLayout{ layout.GetHandle() };
-    rhi::SubobjShader soTask{ rhi::ShaderStage::Task, rhi::DXIL(asBlob.Get()) };
-    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()) };
-    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()) };
+    rhi::SubobjShader soTask{ rhi::ShaderStage::Task, rhi::DXIL(asBlob.Get()), "ASMain" };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()), "VisibilityBufferMSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "VisibilityBufferPSMain" };
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
@@ -503,8 +503,8 @@ PipelineState PSOManager::CreateClusterLODRasterPSO(
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
 
     ShaderInfoBundle shaderInfoBundle;
-    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl",          L"ClusterLODMSMain", L"ms_6_6" };
-    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl",       L"ClusterLODPSMain", L"ps_6_6" };
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"ClusterLODMSMain", L"ms_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"ClusterLODPSMain", L"ps_6_6" };
     shaderInfoBundle.defines = defines;
 
     auto compiledBundle = CompileShaders(shaderInfoBundle);
@@ -514,8 +514,8 @@ PipelineState PSOManager::CreateClusterLODRasterPSO(
 
     auto& layout = GetRootSignature();
     rhi::SubobjLayout soLayout{ layout.GetHandle() };
-    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()) };
-    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()) };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()), "ClusterLODMSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "ClusterLODPSMain" };
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
@@ -571,8 +571,8 @@ PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, MaterialCompileFlags mate
     auto& layout = GetRootSignature(); // PipelineLayoutHandle
     rhi::SubobjLayout soLayout{ layout.GetHandle() };
 
-    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()) };
-    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()) };
+    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(vsBlob.Get()), "VSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(psBlob.Get()), "PPLLFillPS" };
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
@@ -643,9 +643,9 @@ PipelineState PSOManager::CreateMeshPSO(
     auto& layout = GetRootSignature(); // your PipelineLayoutHandle
     rhi::SubobjLayout soLayout{ layout.GetHandle() };
 
-    rhi::SubobjShader soTask{ rhi::ShaderStage::Task,  rhi::DXIL(asBlob.Get()) };
-    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh,  rhi::DXIL(msBlob.Get()) };
-    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()) };
+    rhi::SubobjShader soTask{ rhi::ShaderStage::Task,  rhi::DXIL(asBlob.Get()), "ASMain" };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh,  rhi::DXIL(msBlob.Get()), "MSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "PSMain" };
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
@@ -721,9 +721,9 @@ PipelineState PSOManager::CreateShadowMeshPSO(
     auto& layout = GetRootSignature();
     rhi::SubobjLayout soLayout{ layout.GetHandle() };
 
-    rhi::SubobjShader soTask{ rhi::ShaderStage::Task,  rhi::DXIL(asBlob.Get()) };
-    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh,  rhi::DXIL(msBlob.Get()) };
-    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()) };
+    rhi::SubobjShader soTask{ rhi::ShaderStage::Task,  rhi::DXIL(asBlob.Get()), "ASMain" };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh,  rhi::DXIL(msBlob.Get()), "MSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "PSMain" };
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
@@ -791,9 +791,9 @@ PipelineState PSOManager::CreateMeshPrePassPSO(
 
 	auto& layout = GetRootSignature();
     rhi::SubobjLayout soLayout{ layout.GetHandle() };
-    rhi::SubobjShader soTask{ rhi::ShaderStage::Task, rhi::DXIL(asBlob.Get()) };
-    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()) };
-    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()) };
+    rhi::SubobjShader soTask{ rhi::ShaderStage::Task, rhi::DXIL(asBlob.Get()), "ASMain" };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()), "MSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "PrepassPSMain" };
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
@@ -867,9 +867,9 @@ PipelineState PSOManager::CreateMeshPPLLPSO(
     auto& layout = GetRootSignature();
     rhi::SubobjLayout    soLayout{ layout.GetHandle() };
 
-    rhi::SubobjShader    soAS{ rhi::ShaderStage::Task, { amplificationShader->GetBufferPointer(), (uint32_t)amplificationShader->GetBufferSize() } };
-    rhi::SubobjShader    soMS{ rhi::ShaderStage::Mesh, { meshShader->GetBufferPointer(),          (uint32_t)meshShader->GetBufferSize() } };
-    rhi::SubobjShader    soPS{ rhi::ShaderStage::Pixel, { pixelShader->GetBufferPointer(),         (uint32_t)pixelShader->GetBufferSize() } };
+    rhi::SubobjShader    soAS{ rhi::ShaderStage::Task, { amplificationShader->GetBufferPointer(), (uint32_t)amplificationShader->GetBufferSize() }, "ASMain" };
+    rhi::SubobjShader    soMS{ rhi::ShaderStage::Mesh, { meshShader->GetBufferPointer(),          (uint32_t)meshShader->GetBufferSize() }, "MSMain" };
+    rhi::SubobjShader    soPS{ rhi::ShaderStage::Pixel, { pixelShader->GetBufferPointer(),         (uint32_t)pixelShader->GetBufferSize() }, "PPLLFillPS" };
 
     rhi::RasterState     rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
@@ -943,7 +943,7 @@ PipelineState PSOManager::MakeComputePipeline(rhi::PipelineLayoutHandle layout,
     auto compiled = CompileShaders(sib);
 
     rhi::SubobjLayout soLayout{ layout };
-    rhi::SubobjShader soCS{ rhi::ShaderStage::Compute, rhi::DXIL(compiled.computeShader.Get()) };
+    rhi::SubobjShader soCS{ rhi::ShaderStage::Compute, rhi::DXIL(compiled.computeShader.Get()), ws2s(entryPoint) };
 
     const rhi::PipelineStreamItem items[] = {
         rhi::Make(soLayout),

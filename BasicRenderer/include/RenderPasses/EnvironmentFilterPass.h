@@ -122,7 +122,7 @@ private:
 
         // Create compute PSO
         rhi::SubobjLayout soLayout{ m_layout->GetHandle() };
-        rhi::SubobjShader soCS{ rhi::ShaderStage::Compute, rhi::DXIL(compiled.computeShader.Get()) };
+        rhi::SubobjShader soCS{ rhi::ShaderStage::Compute, rhi::DXIL(compiled.computeShader.Get()), "CSMain" };
 
         const rhi::PipelineStreamItem items[] = {
             rhi::Make(soLayout),

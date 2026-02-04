@@ -97,8 +97,8 @@ private:
         auto& layout = PSOManager::GetInstance().GetRootSignature(); // rhi::PipelineLayoutPtr
         rhi::SubobjLayout soLayout{ layout.GetHandle() };
 
-        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()) };
-        rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()) };
+        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()), "FullscreenVSMain" };
+        rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()), "PSMain" };
 
         rhi::RasterState rs{};
         rs.fill = rhi::FillMode::Solid;

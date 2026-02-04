@@ -65,7 +65,7 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
     uint perMeshIndex = perMeshInstance[instanceIndex].perMeshBufferIndex;
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     uint materialDataIndex = perMeshBuffer[perMeshIndex].materialDataIndex;
-    StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MaterialDataBuffer)];
+    StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
     uint rasterBucketIndex = materialDataBuffer[materialDataIndex].rasterBucketIndex;
 
     // Group threads in the wave by matId
@@ -74,7 +74,7 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
     if (IsWaveGroupLeader(mask))
     {
         uint groupSize = CountBits128(mask);
-        RWStructuredBuffer<uint> histogramBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::RasterBucketsHistogramBuffer)];
+        RWStructuredBuffer<uint> histogramBuffer = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
         InterlockedAdd(histogramBuffer[rasterBucketIndex], groupSize);
     }
 }

@@ -126,9 +126,9 @@ namespace rhi {
         if (iid != RHI_IID_D3D12_PIPELINE) return false;
         if (outSize < sizeof(D3D12PipelineInfo)) return false;
         auto* rec = dx12_detail::Pso(&p);
-        if (!rec || !rec->pso) return false;
+        if (!rec || !rec->stateObject) return false;
         auto* out = reinterpret_cast<D3D12PipelineInfo*>(outStruct);
-        out->pipeline = rec->pso.Get(); // ID3D12PipelineState*
+        out->pipeline = rec->stateObject.Get(); // ID3D12StateObject*
         out->version = 1;
         return true;
 	}

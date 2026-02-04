@@ -31,6 +31,8 @@ public:
 	const std::vector<unsigned int>& GetActiveCompileFlagsSlots() const { return m_activeCompileFlagsSlots; }
 	const std::vector<MaterialCompileFlags>& GetActiveCompileFlags() const { return m_activeCompileFlags; }
 	unsigned int GetCompileFlagsSlotsUsed() const { return m_compileFlagsSlotsUsed; }
+
+	unsigned int GetRasterBucketCount() const { return m_rasterBucketsUsed; }
 private:
 	MaterialManager();
 

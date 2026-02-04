@@ -99,7 +99,7 @@ namespace rhi {
 			D3D12_SHADER_BYTECODE cs{}, vs{}, ps{}, as{}, ms{};
 			bool hasCS = false, hasGfx = false;
 
-			auto rast = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+			auto rast = CD3DX12_RASTERIZER_DESC2(D3D12_DEFAULT);
 			auto blend = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
 			auto depth = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
 			D3D12_RT_FORMAT_ARRAY rtv{};
@@ -108,8 +108,16 @@ namespace rhi {
 			DXGI_SAMPLE_DESC sample{ 1,0 };
 			std::vector<D3D12_INPUT_ELEMENT_DESC> inputLayout;
 			D3D12_INPUT_LAYOUT_DESC inputLayoutDesc{ nullptr, 0 };
+			D3D12_PRIMITIVE_TOPOLOGY_DESC primTopoDesc{};
 
-			bool hasRast = false, hasBlend = false, hasDepth = false, hasRTV = false, hasDSV = false, hasSample = false, hasInputLayout = false;
+			bool hasRast = false, 
+				hasBlend = false, 
+				hasDepth = false, 
+				hasRTV = false, 
+				hasDSV = false, 
+				hasSample = false, 
+				hasInputLayout = false,
+				hasPrimTopo = false;
 
 			for (uint32_t i = 0; i < count; i++) {
 				switch (items[i].type) {
@@ -126,10 +134,10 @@ namespace rhi {
 					D3D12_SHADER_BYTECODE bc{ S.bytecode.data, S.bytecode.size };
 					switch (S.stage) {
 					case ShaderStage::Compute: cs = bc; hasCS = true; break;
-					case ShaderStage::Vertex: vs = bc; hasGfx = true; break;
-					case ShaderStage::Pixel: ps = bc; hasGfx = true; break;
-					case ShaderStage::Task: as = bc; hasGfx = true; break;
-					case ShaderStage::Mesh: ms = bc; hasGfx = true; break;
+					case ShaderStage::Vertex:  vs = bc; hasGfx = true; break;
+					case ShaderStage::Pixel:   ps = bc; hasGfx = true; break;
+					case ShaderStage::Task:    as = bc; hasGfx = true; break;
+					case ShaderStage::Mesh:    ms = bc; hasGfx = true; break;
 					case ShaderStage::AllGraphics:
 						spdlog::error("DX12 pipeline creation: invalid shader stage 'AllGraphics'");
 						RHI_FAIL(Result::InvalidArgument);
@@ -198,6 +206,12 @@ namespace rhi {
 					ToDx12InputLayout(static_cast<const SubobjInputLayout*>(items[i].data)->il, inputLayout);
 					inputLayoutDesc = { inputLayout.data(), static_cast<uint32_t>(inputLayout.size()) };
 				} break;
+				case PsoSubobj::PrimitiveTopology: {
+					hasPrimTopo = true;
+					auto type = static_cast<const SubobjPrimitiveTopology*>(items[i].data)->pt;
+					primTopoDesc.PrimitiveTopology = ToDXTopologyType(type);
+					break;
+				}
 				case PsoSubobj::Flags: {
 					break;
 				}
@@ -215,33 +229,133 @@ namespace rhi {
 			}
 			const bool isCompute = hasCS;
 
-			PsoStreamBuilder sb;
-			sb.push(SO_RootSignature{ .Value = root });
+			struct BuildStorage {
+				std::deque<std::wstring> ws;
+				std::vector<D3D12_STATE_SUBOBJECT> subobjects;
+				std::deque<D3D12_DXIL_LIBRARY_DESC> dxilLibDescs;
+				std::vector<std::vector<D3D12_EXPORT_DESC>> dxilExports;
+				std::vector<LPCWSTR> programExports;
+				std::deque<D3D12_GLOBAL_ROOT_SIGNATURE> globalRS;
+				std::deque<D3D12_GENERIC_PROGRAM_DESC> programs;
 
-			if (hasCS)    sb.push(SO_CS{ .Value = cs });
-			if (hasGfx) {
-				if (as.pShaderBytecode) sb.push(SO_AS{ .Value = as });
-				if (ms.pShaderBytecode) sb.push(SO_MS{ .Value = ms });
-				if (vs.pShaderBytecode) sb.push(SO_VS{ .Value = vs });
-				if (ps.pShaderBytecode) sb.push(SO_PS{ .Value = ps });
+				LPCWSTR W(const char* s) {
+					ws.emplace_back(s2ws(std::string(s ? s : "")));
+					return ws.back().c_str();
+				}
+			};
 
-				if (hasRast)   sb.push(SO_Rasterizer{ .Value = rast });
-				if (hasBlend)  sb.push(SO_Blend{ .Value = blend });
-				if (hasDepth)  sb.push(SO_DepthStencil{ .Value = depth });
-				if (hasRTV)    sb.push(SO_RtvFormats{ .Value = rtv });
-				if (hasDSV)    sb.push(SO_DsvFormat{ .Value = dsv });
-				if (hasSample) sb.push(SO_SampleDesc{ .Value = sample });
-				if (hasInputLayout) sb.push(SO_InputLayout{ .Value = inputLayoutDesc });
-				// sb.push(SO_PrimTopology{ .Value = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE });
+			BuildStorage b;
+
+			auto addDxilExport = [&](const char* exportName, const D3D12_SHADER_BYTECODE& bc) {
+				if (!bc.pShaderBytecode || bc.BytecodeLength == 0 || !exportName || exportName[0] == '\0') return;
+
+				b.dxilExports.emplace_back();
+				auto& exVec = b.dxilExports.back();
+				D3D12_EXPORT_DESC ed{};
+				ed.Name = b.W(exportName);
+				ed.ExportToRename = nullptr;
+				ed.Flags = D3D12_EXPORT_FLAG_NONE;
+				exVec.push_back(ed);
+
+				D3D12_DXIL_LIBRARY_DESC ld{};
+				ld.DXILLibrary = { bc.pShaderBytecode, bc.BytecodeLength };
+				ld.NumExports = static_cast<UINT>(exVec.size());
+				ld.pExports = exVec.data();
+				b.dxilLibDescs.push_back(ld);
+
+				b.subobjects.push_back(D3D12_STATE_SUBOBJECT{ D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &b.dxilLibDescs.back() });
+				b.programExports.push_back(exVec.back().Name);
+				};
+
+			auto getExportName = [&](const SubobjShader& s) -> const char* {
+				return s.entryPoint.c_str();
+				};
+
+			for (uint32_t i = 0; i < count; ++i) {
+				if (items[i].type != PsoSubobj::Shader) continue;
+				auto& S = *static_cast<const SubobjShader*>(items[i].data);
+				const char* exportName = getExportName(S);
+
+				switch (S.stage) {
+				case ShaderStage::Compute: addDxilExport(exportName, cs); break;
+				case ShaderStage::Vertex:  addDxilExport(exportName, vs); break;
+				case ShaderStage::Pixel:   addDxilExport(exportName, ps); break;
+				case ShaderStage::Task:    addDxilExport(exportName, as); break;
+				case ShaderStage::Mesh:    addDxilExport(exportName, ms); break;
+				default: break;
+				}
 			}
-			auto sd = sb.desc();
 
-			ComPtr<ID3D12PipelineState> pso;
-			if (const auto hr = dimpl->pNativeDevice->CreatePipelineState(&sd, IID_PPV_ARGS(&pso)); FAILED(hr)) {
+			// Global root signature (applies to all exports)
+			if (root) {
+				b.globalRS.push_back(D3D12_GLOBAL_ROOT_SIGNATURE{ root });
+				b.subobjects.push_back(D3D12_STATE_SUBOBJECT{ D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE, &b.globalRS.back() });
+			}
+
+			// Program subobjects (fixed-function state only)
+			GenericProgramSubobjectStream progStream;
+			if (hasRast)   progStream.push(D3D12_STATE_SUBOBJECT_TYPE_RASTERIZER, &rast);
+			if (hasBlend)  progStream.push(D3D12_STATE_SUBOBJECT_TYPE_BLEND, &blend);
+			if (hasDepth)  progStream.push(D3D12_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL, &depth);
+			if (hasRTV)    progStream.push(D3D12_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS, &rtv);
+			if (hasDSV)    progStream.push(D3D12_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT, &dsv);
+			if (hasSample) progStream.push(D3D12_STATE_SUBOBJECT_TYPE_SAMPLE_DESC, &sample);
+			if (hasInputLayout) progStream.push(D3D12_STATE_SUBOBJECT_TYPE_INPUT_LAYOUT, &inputLayoutDesc);
+			if (hasPrimTopo)   progStream.push(D3D12_STATE_SUBOBJECT_TYPE_PRIMITIVE_TOPOLOGY, &primTopoDesc);
+
+			CD3DX12_STATE_OBJECT_DESC soDesc(D3D12_STATE_OBJECT_TYPE_EXECUTABLE);
+			if (hasRast) {
+				soDesc.CreateSubobject<CD3DX12_RASTERIZER_SUBOBJECT>(rast);
+			}
+			if (hasBlend) {
+				soDesc.CreateSubobject<CD3DX12_BLEND_DESC>(blend);
+			}
+			if (hasDepth) {
+				soDesc.CreateSubobject<CD3DX12_DEPTH_STENCIL_DESC>(depth);
+			}
+			if (hasRTV) {
+				soDesc.CreateSubobject<CD3DX12_RT_FORMAT_ARRAY>(rtv);
+			}
+			if (hasDSV) {
+				soDesc.CreateSubobject<CD3DX12_DEPTH_STENCIL_FORMAT>(dsv);
+			}
+
+			// Create an array of pointers to subobjects
+			std::vector<const D3D12_STATE_SUBOBJECT*> progPtrs;
+			progPtrs.reserve(progStream.subobjects.size());
+			for (auto& so : progStream.subobjects) {
+				progPtrs.push_back(&so);
+			}
+
+			// Generic program desc
+			D3D12_GENERIC_PROGRAM_DESC gp{};
+			gp.ProgramName = b.W("Pipeline");
+			gp.NumExports = (UINT)b.programExports.size();
+			gp.pExports = b.programExports.empty() ? nullptr : b.programExports.data();
+			gp.NumSubobjects = (UINT)progPtrs.size();
+			gp.ppSubobjects = progPtrs.empty() ? nullptr : progPtrs.data();
+
+			b.programs.push_back(gp);
+			b.subobjects.push_back(D3D12_STATE_SUBOBJECT{ D3D12_STATE_SUBOBJECT_TYPE_GENERIC_PROGRAM, &b.programs.back() });
+
+			D3D12_STATE_OBJECT_DESC soDesc{};
+			soDesc.Type = D3D12_STATE_OBJECT_TYPE_EXECUTABLE;
+			soDesc.NumSubobjects = static_cast<UINT>(b.subobjects.size());
+			soDesc.pSubobjects = b.subobjects.data();
+
+			ComPtr<ID3D12StateObject> stateObject;
+			if (const auto hr = dimpl->pNativeDevice->CreateStateObject(&soDesc, IID_PPV_ARGS(&stateObject)); FAILED(hr)) {
 				RHI_FAIL(ToRHI(hr));
 			}
 
-			auto handle = dimpl->pipelines.alloc(Dx12Pipeline(pso, isCompute, dimpl));
+			ComPtr<ID3D12StateObjectProperties1> props1;
+			if (const auto hr = stateObject.As(&props1); FAILED(hr) || !props1) {
+				RHI_FAIL(Result::Failed);
+			}
+
+			const D3D12_PROGRAM_IDENTIFIER programId = props1->GetProgramIdentifier(b.programs.back().ProgramName);
+
+			auto handle = dimpl->pipelines.alloc(Dx12Pipeline(stateObject, props1, programId, isCompute, dimpl));
 			Pipeline ret(handle);
 			ret.vt = &g_psovt;
 			ret.impl = dimpl;
@@ -294,9 +408,9 @@ namespace rhi {
 			}
 
 			struct BuildStorage {
-				std::vector<std::wstring> ws;
-				std::vector<D3D12_STATE_SUBOBJECT> subobjects;
-				std::vector<D3D12_DXIL_LIBRARY_DESC> dxilLibDescs;
+				std::deque<std::wstring> ws;
+				std::deque<D3D12_STATE_SUBOBJECT> subobjects;
+				std::deque<D3D12_DXIL_LIBRARY_DESC> dxilLibDescs;
 				std::vector<std::vector<D3D12_EXPORT_DESC>> dxilExports;
 				std::vector<D3D12_GLOBAL_ROOT_SIGNATURE> globalRS;
 				std::vector<D3D12_LOCAL_ROOT_SIGNATURE> localRS;
@@ -307,14 +421,14 @@ namespace rhi {
 				std::vector<D3D12_NODE> nodes;
 				std::vector<D3D12_SHADER_NODE> shaderNodes;
 				// Override storage
-				std::vector<UINT> uints;
-				std::vector<BOOL> bools;
-				std::vector<D3D12_NODE_ID> nodeIds;
-				std::vector<std::vector<D3D12_NODE_OUTPUT_OVERRIDES>> outputOverrides;
-				std::vector<D3D12_COMMON_COMPUTE_NODE_OVERRIDES> commonComputeOverrides;
-				std::vector<D3D12_BROADCASTING_LAUNCH_OVERRIDES> broadcastingOverrides;
-				std::vector<D3D12_COALESCING_LAUNCH_OVERRIDES> coalescingOverrides;
-				std::vector<D3D12_THREAD_LAUNCH_OVERRIDES> threadOverrides;
+				std::deque<UINT> uints;
+				std::deque<BOOL> bools;
+				std::deque<D3D12_NODE_ID> nodeIds;
+				std::deque<std::vector<D3D12_NODE_OUTPUT_OVERRIDES>> outputOverrides;
+				std::deque<D3D12_COMMON_COMPUTE_NODE_OVERRIDES> commonComputeOverrides;
+				std::deque<D3D12_BROADCASTING_LAUNCH_OVERRIDES> broadcastingOverrides;
+				std::deque<D3D12_COALESCING_LAUNCH_OVERRIDES> coalescingOverrides;
+				std::deque<D3D12_THREAD_LAUNCH_OVERRIDES> threadOverrides;
 				std::vector<D3D12_NODE_ID> entrypoints;
 
 				LPCWSTR W(const char* s) {
@@ -339,8 +453,8 @@ namespace rhi {
 			};
 
 			BuildStorage b;
-			b.subobjects.reserve(desc.libraries.size + desc.localRootAssociations.size * 2 + 4);
-			b.dxilLibDescs.reserve(desc.libraries.size);
+			//b.subobjects.reserve(desc.libraries.size + desc.localRootAssociations.size * 2 + 4);
+			//b.dxilLibDescs.reserve(desc.libraries.size);
 			b.dxilExports.reserve(desc.libraries.size);
 
 			// Optional state object config
@@ -585,7 +699,14 @@ namespace rhi {
 			D3D12_STATE_OBJECT_DESC soDesc{};
 			soDesc.Type = D3D12_STATE_OBJECT_TYPE_EXECUTABLE;
 			soDesc.NumSubobjects = static_cast<UINT>(b.subobjects.size());
-			soDesc.pSubobjects = b.subobjects.data();
+
+			// Copy to contiguous storage
+			std::vector<D3D12_STATE_SUBOBJECT> subobjectsContiguous;
+			subobjectsContiguous.reserve(b.subobjects.size());
+			for (const auto& so : b.subobjects) {
+				subobjectsContiguous.push_back(so);
+			}
+			soDesc.pSubobjects = subobjectsContiguous.data();
 
 			ComPtr<ID3D12StateObject> stateObject;
 			if (const auto hr = dimpl->pNativeDevice->CreateStateObject(&soDesc, IID_PPV_ARGS(&stateObject)); FAILED(hr)) {
@@ -2183,7 +2304,9 @@ namespace rhi {
 			auto* impl = static_cast<Dx12Device*>(d->impl);
 			if (auto* P = impl->pipelines.get(p)) {
 				std::wstring w(n, n + ::strlen(n));
-				P->pso->SetName(w.c_str());
+				if (P->stateObject) {
+					P->stateObject->SetName(w.c_str());
+				}
 			}
 		}
 
@@ -2596,10 +2719,10 @@ namespace rhi {
 				case PageableKind::Pipeline:
 				{
 					auto* P = impl->pipelines.get(o.pipeline);
-					if (!P || !P->pso) {
+					if (!P || !P->stateObject) {
 						RHI_FAIL(Result::InvalidArgument);
 					}
-					native = P->pso.Get(); // ID3D12PipelineState* -> ID3D12Pageable*
+					native = P->stateObject.Get();
 				} break;
 
 				default:
@@ -2810,7 +2933,10 @@ namespace rhi {
 			auto* l = dx12_detail::CL(cl);
 			auto* dev = l->dev;
 			if (auto* P = dev->pipelines.get(psoH)) {
-				l->cl->SetPipelineState(P->pso.Get());
+				D3D12_SET_PROGRAM_DESC desc{};
+				desc.Type = D3D12_PROGRAM_TYPE_GENERIC_PIPELINE;
+				desc.GenericPipeline.ProgramIdentifier = P->programIdentifier;
+				l->cl->SetProgram(&desc);
 			}
 		}
 		static void cl_setVB(CommandList* cl, uint32_t startSlot, uint32_t numViews, VertexBufferView* pBufferViews) noexcept {
@@ -3876,11 +4002,11 @@ namespace rhi {
 				return;
 			}
 			auto* P = dx12_detail::Pso(p);
-			if (!P || !P->pso) {
+			if (!P || !P->stateObject) {
 				BreakIfDebugging();
 				return;
 			}
-			P->pso->SetName(s2ws(n).c_str());
+			P->stateObject->SetName(s2ws(n).c_str());
 		}
 
 		// ------------------ WorkGraph vtable funcs ----------------

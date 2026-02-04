@@ -80,12 +80,55 @@ namespace rhi {
 		SamplerDesc desc;
 		Dx12Device* dev = nullptr;
 	};
+
 	struct Dx12Pipeline {
 		Dx12Pipeline() {}
-		explicit Dx12Pipeline(Microsoft::WRL::ComPtr<ID3D12PipelineState> p, bool isComp, Dx12Device* device) : pso(p), isCompute(isComp), dev(device) {}
-		Microsoft::WRL::ComPtr<ID3D12PipelineState> pso;
-		bool isCompute;
+		explicit Dx12Pipeline(
+			Microsoft::WRL::ComPtr<ID3D12StateObject> so,
+			Microsoft::WRL::ComPtr<ID3D12StateObjectProperties1> props,
+			D3D12_PROGRAM_IDENTIFIER progId,
+			bool isComp,
+			Dx12Device* device)
+			: stateObject(std::move(so))
+			, stateObjectProps1(std::move(props))
+			, programIdentifier(progId)
+			, isCompute(isComp)
+			, dev(device) {
+		}
+		Microsoft::WRL::ComPtr<ID3D12StateObject> stateObject;
+		Microsoft::WRL::ComPtr<ID3D12StateObjectProperties1> stateObjectProps1;
+		D3D12_PROGRAM_IDENTIFIER programIdentifier{};
+		bool isCompute = false;
 		Dx12Device* dev = nullptr;
+	};
+
+	struct GenericProgramSubobjectStream
+	{
+		std::vector<D3D12_STATE_SUBOBJECT> subobjects;
+
+		void push(D3D12_STATE_SUBOBJECT_TYPE type, const void* desc)
+		{
+			subobjects.push_back(D3D12_STATE_SUBOBJECT{ type, desc });
+		}
+	};
+
+	struct StateObjectSubobjectStream
+	{
+		std::vector<D3D12_STATE_SUBOBJECT> subobjects;
+
+		void push(D3D12_STATE_SUBOBJECT_TYPE type, const void* desc)
+		{
+			subobjects.push_back(D3D12_STATE_SUBOBJECT{ type, desc });
+		}
+
+		D3D12_STATE_OBJECT_DESC desc(D3D12_STATE_OBJECT_TYPE type = D3D12_STATE_OBJECT_TYPE_EXECUTABLE) const
+		{
+			D3D12_STATE_OBJECT_DESC d{};
+			d.Type = type;
+			d.NumSubobjects = static_cast<UINT>(subobjects.size());
+			d.pSubobjects = subobjects.data();
+			return d;
+		}
 	};
 
 	struct Dx12WorkGraph {
