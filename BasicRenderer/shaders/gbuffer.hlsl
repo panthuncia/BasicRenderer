@@ -160,7 +160,7 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
         ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
 
         StructuredBuffer<VisibleCluster> visibleClusterBuffer =
-            ResourceDescriptorHeap[VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+            ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
         StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
         StructuredBuffer<PerMeshBuffer> perMeshBuffer =

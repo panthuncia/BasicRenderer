@@ -807,25 +807,22 @@ void RenderGraph::CompileStructural() {
 		}
 	}
 
-	// Extension-provided structural passes (uploads/mips/readbacks/etc)
-	//std::vector<ExternalPassDesc> external;
-	//external.reserve(8);
-	//for (auto& ext : m_extensions) {
-	//	if (ext) {
-	//		ext->GatherStructuralPasses(*this, external);
-	//	}
-	//}
-
 	struct Pending {
 		AnyPassAndResources pr;
 
-		ExternalInsertPoint where; // concrete (post-synthesis)
+		std::string anchorKey;     // internal unique key used for anchoring/emission
+
+		ExternalInsertPoint where; // concrete
 		bool chained = false;      // true if where was synthesized from "natural ordering"
 		int chainOrder = 0;        // preserves extension-local order among chained followers
 
 		int priority = 0;
 		size_t order = 0;          // global stable order across all gathered externals
 	};
+
+	auto makeSyntheticKey = [](size_t n) -> std::string {
+		return "__rg_ext_" + std::to_string(n); // should never collide with normal names
+		};
 
 	auto makeAny = [&](ExternalPassDesc const& d) -> AnyPassAndResources {
 		AnyPassAndResources any;
@@ -837,17 +834,42 @@ void RenderGraph::CompileStructural() {
 			RenderPassAndResources par;
 			par.pass = std::move(rp);
 			par.name = d.name;
-			any.pass = std::move(par);
-		}
-		else if (d.type == PassType::Compute) {
-			auto cp = std::get<std::shared_ptr<ComputePass>>(d.pass);
-			ComputePassAndResources par;
-			par.pass = std::move(cp);
-			par.name = d.name;
-			any.pass = std::move(par);
-		}
-		return any;
-		};
+			{
+				RenderPassBuilder b(this, d.name);
+				b.pass = par.pass;
+				b.built_ = true;
+				b.params = {};
+				b._declaredIds.clear();
+				par.pass->DeclareResourceUsages(&b);
+				par.resources.staticResourceRequirements = b.GatherResourceRequirements();
+				par.resources.frameResourceRequirements = par.resources.staticResourceRequirements;
+				par.resources.internalTransitions = b.params.internalTransitions;
+				par.resources.identifierSet = b.DeclaredResourceIds();
+				par.resources.isGeometryPass = b.params.isGeometryPass;
+			}
+ 			any.pass = std::move(par);
+ 		}
+ 		else if (d.type == PassType::Compute) {
+ 			auto cp = std::get<std::shared_ptr<ComputePass>>(d.pass);
+ 			ComputePassAndResources par;
+ 			par.pass = std::move(cp);
+ 			par.name = d.name;
+			{
+				ComputePassBuilder b(this, d.name);
+				b.pass = par.pass;
+				b.built_ = true;
+				b.params = {};
+				b._declaredIds.clear();
+				par.pass->DeclareResourceUsages(&b);
+				par.resources.staticResourceRequirements = b.GatherResourceRequirements();
+				par.resources.frameResourceRequirements = par.resources.staticResourceRequirements;
+				par.resources.internalTransitions = b.params.internalTransitions;
+				par.resources.identifierSet = b.DeclaredResourceIds();
+			}
+ 			any.pass = std::move(par);
+ 		}
+ 		return any;
+ 		};
 
 	auto registerName = [&](ExternalPassDesc const& d, AnyPassAndResources& any) {
 		if (!d.registerName) return;
@@ -877,7 +899,7 @@ void RenderGraph::CompileStructural() {
 		local.reserve(8);
 		ext->GatherStructuralPasses(*this, local);
 
-		std::optional<std::string> prevName; // per-extension
+		std::optional<std::string> prevAnchorKey; // per-extension, always set even for unnamed passes
 		int chainCounter = 0;
 
 		for (size_t i = 0; i < local.size(); ++i) {
@@ -889,7 +911,11 @@ void RenderGraph::CompileStructural() {
 			p.pr = makeAny(d);
 			registerName(d, p.pr);
 
-			p.order = globalOrder++;
+			size_t thisOrder = globalOrder++;
+			p.order = thisOrder;
+
+			// stable internal key (name if present, otherwise synthetic)
+			p.anchorKey = !d.name.empty() ? d.name : makeSyntheticKey(thisOrder);
 
 			// Synthesize insert point if missing => natural ordering
 			if (d.where.has_value()) {
@@ -898,11 +924,9 @@ void RenderGraph::CompileStructural() {
 				p.chainOrder = 0;
 			}
 			else {
-				// Natural ordering:
-				// - if we have a previous named pass, chain After(prev)
-				// - else default End()
-				if (prevName.has_value() && !prevName->empty() && !d.name.empty()) {
-					p.where = ExternalInsertPoint::After(*prevName);
+				// Natural ordering: always chain to the immediately previous emitted pass in this extension.
+				if (prevAnchorKey.has_value()) {
+					p.where = ExternalInsertPoint::After(*prevAnchorKey);
 					p.chained = true;
 					p.chainOrder = chainCounter++;
 				}
@@ -910,12 +934,6 @@ void RenderGraph::CompileStructural() {
 					p.where = ExternalInsertPoint::End();
 					p.chained = false;
 					p.chainOrder = 0;
-
-#if defined(_DEBUG)
-					if (prevName.has_value() && (prevName->empty() || d.name.empty())) {
-						spdlog::warn("External pass '{}' could not chain (missing name); defaulting to End().", d.name);
-					}
-#endif
 				}
 			}
 
@@ -928,9 +946,7 @@ void RenderGraph::CompileStructural() {
 			case ExternalInsertKind::After:  after[p.where.anchor].push_back(std::move(p)); break;
 			}
 
-			// advance prevName if this pass is nameable (needed for chaining)
-			if (!d.name.empty()) prevName = d.name;
-			else prevName.reset();
+			prevAnchorKey = p.anchorKey;
 		}
 	}
 
@@ -945,8 +961,12 @@ void RenderGraph::CompileStructural() {
 
 	sortPending(begin);
 	sortPending(end);
-	for (auto& [k, v] : before) sortPending(v);
-	for (auto& [k, v] : after)  sortPending(v);
+	for (auto& [k, v] : before) {
+		sortPending(v);
+	}
+	for (auto& [k, v] : after) {
+		sortPending(v);
+	}
 
 
 	// Merge into final pass list
@@ -954,7 +974,7 @@ void RenderGraph::CompileStructural() {
 	m_masterPassList.clear();
 	m_masterPassList.reserve(begin.size() + base.size() + end.size() + 8);
 
-	std::unordered_set<std::string> emittedNames;
+	std::unordered_set<std::string> emittedKeys;
 
 	// helper: consume vectors from maps
 	auto takeVec = [&](auto& map, std::string const& key) -> std::vector<Pending> {
@@ -966,52 +986,39 @@ void RenderGraph::CompileStructural() {
 		};
 
 	auto emitPending = [&](auto&& self, Pending&& p) -> void {
-		const std::string& nm = p.pr.name;
+		const std::string& key = p.anchorKey;
 
-		// de-dupe / cycle guard (names are the only anchor key currently)
-		if (!nm.empty()) {
-			if (!emittedNames.insert(nm).second) {
-				return;
-			}
-
-			// emit "before nm"
-			auto b = takeVec(before, nm);
-			for (auto& x : b) {
-				self(self, std::move(x));
-			}
+		// de-dupe / cycle guard
+		if (!emittedKeys.insert(key).second) {
+			return;
 		}
+
+		// emit "before key"
+		auto b = takeVec(before, key);
+		for (auto& x : b) self(self, std::move(x));
 
 		m_masterPassList.push_back(std::move(p.pr));
 
-		if (!nm.empty()) {
-			// emit "after nm"
-			auto a = takeVec(after, nm);
-			for (auto& x : a) {
-				self(self, std::move(x));
-			}
-		}
+		// emit "after key"
+		auto a = takeVec(after, key);
+		for (auto& x : a) self(self, std::move(x));
 		};
 
 	auto emitBasePass = [&](auto&& self, AnyPassAndResources&& bp) -> void {
-		const std::string& nm = bp.name;
+		const std::string nm = bp.name;
 
 		if (!nm.empty()) {
-			// base-pass names can also be anchors; guard duplicates
-			emittedNames.insert(nm);
+			emittedKeys.insert(nm);
 
 			auto b = takeVec(before, nm);
-			for (auto& x : b) {
-				emitPending(emitPending, std::move(x));
-			}
+			for (auto& x : b) emitPending(emitPending, std::move(x));
 		}
 
 		m_masterPassList.push_back(std::move(bp));
 
 		if (!nm.empty()) {
 			auto a = takeVec(after, nm);
-			for (auto& x : a) {
-				emitPending(emitPending, std::move(x));
-			}
+			for (auto& x : a) emitPending(emitPending, std::move(x));
 		}
 		};
 

@@ -1,6 +1,8 @@
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
 #include "include/waveIntrinsicsHelpers.hlsli"
+#include "PerPassRootConstants/clodRootConstants.h"
+
 struct RasterBucketsHistogramIndirectCommand
 {
     uint clusterCount;
@@ -14,8 +16,8 @@ struct RasterBucketsHistogramIndirectCommand
 [numthreads(1, 1, 1)]
 void CreateRasterBucketsHistogramCommandCSMain()
 {
-    RWStructuredBuffer<RasterBucketsHistogramIndirectCommand> outCommand = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::RasterBucketsHistogramIndirectCommand)];
-    StructuredBuffer<uint> clusterCountBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisibleClusterCounter)];
+    RWStructuredBuffer<RasterBucketsHistogramIndirectCommand> outCommand = ResourceDescriptorHeap[CLOD_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> clusterCountBuffer = ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
 
     // Given the cluster count, find dispatch dimensions that minimizes wasted threads
     uint clusterCount = clusterCountBuffer.Load(0);
@@ -48,14 +50,14 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
 {
     // Linearize the 2D dispatch thread ID
     uint linearizedID = DTid.x + DTid.y * CLUSTER_HISTOGRAM_GROUP_SIZE;
-    StructuredBuffer<uint> clusterCountBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisibleClusterCounter)];
+    StructuredBuffer<uint> clusterCountBuffer = ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
     uint clusterCount = clusterCountBuffer.Load(0);
     
     if (linearizedID >= clusterCount) {
         return;
     }
     
-    StructuredBuffer<VisibleCluster> visibleClusters = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisibleClustersBuffer)];
+    StructuredBuffer<VisibleCluster> visibleClusters = ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
 
     // TODO: Remove load chain
     uint instanceIndex = visibleClusters[linearizedID].instanceID;

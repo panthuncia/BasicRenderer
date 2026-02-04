@@ -2,6 +2,7 @@
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
 #include "include/indirectCommands.hlsli"
+#include "PerPassRootConstants/clodRootConstants.h"
 
 struct MeshInstanceClodOffsets
 {
@@ -419,9 +420,9 @@ void WG_ClusterCullBuckets(
 
     if (n == 1){
         RWStructuredBuffer<VisibleCluster> visibleClusters =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisibleClusterBuffer)];
+            ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
         RWStructuredBuffer<uint> visibleClusterCounter = 
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisibleClusterCounter)];
+            ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
         
         // Atomically get an index to write to
         uint index = 0;

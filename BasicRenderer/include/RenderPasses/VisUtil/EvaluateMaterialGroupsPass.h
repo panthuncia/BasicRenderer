@@ -124,7 +124,7 @@ public:
 
             // Set per-pass root constants
             unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
-            miscRootConstants[VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterBufferSRVIndex;
+            miscRootConstants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterBufferSRVIndex;
             cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &miscRootConstants);
 
             const uint64_t argOffset = static_cast<uint64_t>(slot) * stride;

@@ -141,8 +141,6 @@ void BuildOcclusionCullingPipeline(RenderGraph* graph) {
 	bool wireframeEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 	bool visibilityRenderingEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableVisibilityRendering")();
 
-	auto rasterBucketsHistogramIndirectCommand = CreateIndexedStructuredBuffer(1, sizeof(RasterBucketsHistogramIndirectCommand), true, false);
-	graph->RegisterResource("Builtin::CLod::RasterBucketsHistogramIndirectCommand", rasterBucketsHistogramIndirectCommand);
 }
 
 void BuildGeneralCullingPipeline(RenderGraph* graph) {

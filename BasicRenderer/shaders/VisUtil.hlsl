@@ -63,7 +63,7 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
         return;
 
     Texture2D<uint2> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
-    StructuredBuffer<VisibleCluster> visibleClusterBuffer = ResourceDescriptorHeap[VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+    StructuredBuffer<VisibleCluster> visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
 
@@ -107,7 +107,7 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
     }
 
     Texture2D<uint2> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
-    StructuredBuffer<VisibleCluster> visibleClusterBuffer = ResourceDescriptorHeap[VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+    StructuredBuffer<VisibleCluster> visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
 
