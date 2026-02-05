@@ -98,7 +98,7 @@ private:
         rhi::SubobjLayout soLayout{ layout.GetHandle() };
 
         rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()), "FullscreenVSMain" };
-        rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()), "PSMain" };
+        rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()), "PPLLResolvePS" };
 
         rhi::RasterState rs{};
         rs.fill = rhi::FillMode::Solid;
@@ -135,6 +135,8 @@ private:
 
         rhi::SubobjSample soSmp{ rhi::SampleDesc{ 1, 0 } };
 
+        rhi::SubobjPrimitiveTopology soTopo{ rhi::PrimitiveTopology::TriangleStrip };
+
         const rhi::PipelineStreamItem items[] = {
             rhi::Make(soLayout),
             rhi::Make(soVS),
@@ -144,6 +146,7 @@ private:
             rhi::Make(soDepth),
             rhi::Make(soRTV),
             rhi::Make(soSmp),
+			rhi::Make(soTopo)
         };
 
         auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);

@@ -167,6 +167,7 @@ private:
 
         rhi::SubobjDSV    soDSV{ rhi::Format::D32_Float };
         rhi::SubobjSample soSmp{ rhi::SampleDesc{1, 0} };
+        rhi::SubobjPrimitiveTopology soTopo{ rhi::PrimitiveTopology::TriangleStrip };
 
         const rhi::PipelineStreamItem items[] = {
             rhi::Make(soLayout),
@@ -178,6 +179,7 @@ private:
             rhi::Make(soRTVs),
             rhi::Make(soDSV),
             rhi::Make(soSmp),
+			rhi::Make(soTopo)
         };
 
         auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);

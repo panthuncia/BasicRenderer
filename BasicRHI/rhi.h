@@ -1006,6 +1006,8 @@ namespace rhi {
 		return out;
 	}
 
+	enum class PrimitiveTopology : uint32_t { Unknown, PointList, LineList, LineStrip, TriangleList, TriangleStrip, TriangleFan };
+
 	enum class PsoSubobj : uint32_t {
 		Layout,
 		Shader,           // AS/MS/VS/PS -> stage inside payload
@@ -1399,8 +1401,6 @@ namespace rhi {
 	struct TimestampCalibration {
 		uint64_t ticksPerSecond = 0; // DX12: queue->GetTimestampFrequency(); Vulkan: round(1e9 / timestampPeriod)
 	};
-
-	enum class PrimitiveTopology : uint32_t { PointList, LineList, LineStrip, TriangleList, TriangleStrip, TriangleFan };
 
 	struct ResourceAllocationInfo { uint64_t offset; uint64_t alignment; uint64_t sizeInBytes; };
 	struct HeapProperties { HeapType type; };

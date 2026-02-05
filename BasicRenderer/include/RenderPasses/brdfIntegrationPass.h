@@ -103,11 +103,11 @@ private:
             rhi::Make(soPS),
             rhi::Make(soLayout),
 			rhi::Make(soTopo),
-            //rhi::Make(soRaster),
-            //rhi::Make(soBlend),
-            //rhi::Make(soDepth),
-            //rhi::Make(soRTVs),
-            //rhi::Make(soSmp),
+            rhi::Make(soRaster),
+            rhi::Make(soBlend),
+            rhi::Make(soDepth),
+            rhi::Make(soRTVs),
+            rhi::Make(soSmp),
         };
 
         auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), PSO);

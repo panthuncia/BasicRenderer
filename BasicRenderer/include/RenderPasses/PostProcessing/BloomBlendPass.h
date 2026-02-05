@@ -102,17 +102,13 @@ private:
         bs.numAttachments = 0;
         rhi::SubobjBlend soBlend{ bs };
 
-        rhi::DepthStencilState ds{};
-        ds.depthEnable = false;
-        ds.depthWrite = false;
-        rhi::SubobjDepth soDepth{ ds };
-
         rhi::RenderTargets rts{};
         rts.count = 0;
         rhi::SubobjRTVs soRTVs{ rts };
 
-        rhi::SubobjDSV soDSV{ rhi::Format::Unknown }; // no DSV
         rhi::SubobjSample soSample{ rhi::SampleDesc{1, 0} };
+
+        rhi::SubobjPrimitiveTopology soTopo{ rhi::PrimitiveTopology::TriangleStrip };
 
         const rhi::PipelineStreamItem items[] = {
             rhi::Make(soLayout),
@@ -120,10 +116,9 @@ private:
             rhi::Make(soPS),
             rhi::Make(soRaster),
             rhi::Make(soBlend),
-            rhi::Make(soDepth),
             rhi::Make(soRTVs),
-            rhi::Make(soDSV),
             rhi::Make(soSample),
+			rhi::Make(soTopo)
         };
 
         // 3) Create PSO

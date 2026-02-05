@@ -162,6 +162,7 @@ private:
         bsDown.numAttachments = 1;
         bsDown.attachments[0].enable = false; // disabled
         rhi::SubobjBlend soBlendDown{ bsDown };
+        rhi::SubobjPrimitiveTopology soTopo{ rhi::PrimitiveTopology::TriangleStrip };
 
         {
             const rhi::PipelineStreamItem items[] = {
@@ -174,6 +175,7 @@ private:
                 rhi::Make(soRTVs),
                 rhi::Make(soDSV),
                 rhi::Make(soSample),
+				rhi::Make(soTopo),
             };
 
             auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_downsamplePso);
@@ -218,6 +220,7 @@ private:
                 rhi::Make(soRTVs),
                 rhi::Make(soDSV),
                 rhi::Make(soSample),
+				rhi::Make(soTopo),
             };
 
             auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_upsamplePso);

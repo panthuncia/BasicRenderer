@@ -265,6 +265,8 @@ private:
         rhi::FinalizedInputLayout fil = Finalize(il);
 		rhi::SubobjInputLayout soLayoutIL{ fil };
 
+        rhi::SubobjPrimitiveTopology soTopo{ rhi::PrimitiveTopology::TriangleStrip };
+
         const rhi::PipelineStreamItem items[] = {
             rhi::Make(soLayout),
             rhi::Make(soVS),
@@ -275,7 +277,8 @@ private:
             rhi::Make(soRTVs),
             rhi::Make(soDSV),
             rhi::Make(soSample),
-			rhi::Make(soLayoutIL)
+			rhi::Make(soLayoutIL),
+			rhi::Make(soTopo)
         };
 
         auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_skyboxPSO);
