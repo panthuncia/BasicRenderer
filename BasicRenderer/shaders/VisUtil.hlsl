@@ -35,8 +35,8 @@ uint GetMaterialIdFromCluster(uint clusterIndex,
     return materialInfo.compileFlagsID;
 }
 
-// 2) Clear counters � can be ClearUAV or compute. Compute version:
 // UintRootConstant0 = NumMaterials
+[shader("compute")]
 [numthreads(64, 1, 1)]
 void ClearMaterialCountersCS(uint3 tid : SV_DispatchThreadID)
 {
@@ -52,7 +52,8 @@ void ClearMaterialCountersCS(uint3 tid : SV_DispatchThreadID)
     }
 }
 
-// 3) Histogram: one thread per pixel, atomic into count[m].
+// Histogram: one thread per pixel, atomic into count[m].
+[shader("compute")]
 [numthreads(8, 8, 1)]
 void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
 {
@@ -94,7 +95,8 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
     }
 }
 
-// 5) Build grouped pixel list: use offsets[] as base and a per-material write cursor (atomic++).
+// Build grouped pixel list: use offsets[] as base and a per-material write cursor
+[shader("compute")]
 [numthreads(8, 8, 1)]
 void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
 {
@@ -158,7 +160,6 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
 }
 
 // Indirect command record layout: 4 root constants + 3 dispatch args.
-// This must match the command signature (Constant, Constant, Constant, Constant, Dispatch).
 struct MaterialEvaluationIndirectArgs {
     // Root constants (all uints):
     uint materialId; // UintRootConstant0
@@ -177,12 +178,13 @@ struct MaterialEvaluationIndirectArgs {
 // Build per-material indirect compute args.
 // Inputs:
 //  - counts[m] = number of pixels for material m
-//  - offsets[m] = base offset into PixelListBuffer where this material�s pixels start
+//  - offsets[m] = base offset into PixelListBuffer where this material's pixels start
 // Root constants:
 //  - UintRootConstant0 = NumMaterials
 //  - UintRootConstant1 = PixelList SRV descriptor index
 // Output:
 //  - one ComputeIndirectArgs per material, written at index=materialId
+[shader("compute")]
 [numthreads(64, 1, 1)]
 void BuildEvaluateIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
 {
@@ -245,8 +247,8 @@ void BuildEvaluateIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
 //   UintRootConstant1 = baseOffset into PixelListBuffer
 //   UintRootConstant2 = count (number of pixels for this material)
 //
-// Thread layout must match what the command builder assumed (64 here).
-[numthreads(64, 1, 1)]
+[shader("compute")]
+[numthreads(MATERIAL_EXECUTION_GROUP_SIZE, 1, 1)]
 void EvaluateMaterialGroupCS(
     uint3 dispatchThreadId : SV_DispatchThreadID,
     uint groupIndex : SV_GroupIndex

@@ -417,7 +417,7 @@ enum MiscFloatRootConstants { // Used for pass-specific one-off constants
 	NumMiscFloatRootConstants
 };
 
-enum ResourceDescriptorIndicesRootConstants {
+enum ResourceDescriptorIndicesRootConstants { // Auto-assigned, do not set manually
     ResourceDescriptorIndex0,
     ResourceDescriptorIndex1,
 	ResourceDescriptorIndex2,
