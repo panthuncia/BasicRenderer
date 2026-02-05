@@ -301,7 +301,7 @@ private:
 		std::shared_ptr<Buffer> m_histogramIndirectCommand;
 		RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
 
-        rhi::Result CreatePipelines(
+        void CreatePipelines(
             rhi::Device device,
             rhi::PipelineLayoutHandle globalRootSignature,
             rhi::WorkGraphPtr& outGraph,
@@ -348,7 +348,7 @@ private:
             wg.debugName = "HierarchialCullingWG";
 
             // Create
-            return device.CreateWorkGraph(wg, outGraph);
+            device.CreateWorkGraph(wg, outGraph);
 
             // Pipeline to create indirect command
             outCreateCommandPipeline = PSOManager::GetInstance().MakeComputePipeline(
@@ -356,7 +356,7 @@ private:
                 L"shaders/ClusterLOD/clodUtil.hlsl",
                 L"CreateRasterBucketsHistogramCommandCSMain",
                 {},
-                "HierarchialLODommandCreation");
+                "HierarchialLODCommandCreation");
         }
     };
 

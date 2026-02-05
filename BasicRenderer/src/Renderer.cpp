@@ -1091,9 +1091,12 @@ void Renderer::CreateRenderGraph() {
     newGraph->BuildComputePass("SkinningPass")
         .Build<SkinningPass>();
     
-	// Cluster LOD, allocate for 100 million clusters
-    newGraph->RegisterExtension(std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, 100000000));
+	// Cluster LOD
+    // 2^25 visible clusters allowed due to index precision
+    
+    newGraph->RegisterExtension(std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint64_t>(pow(2, 25))));
 
+    
     bool indirect = getIndirectDrawsEnabled();
     if (!useMeshShaders) { // Indirect draws only supported with mesh shaders
         indirect = false;
@@ -1105,30 +1108,6 @@ void Renderer::CreateRenderGraph() {
         newGraph->BuildRenderPass("ClearVisibilityBufferPass")
             .Build<ClearVisibilityBufferPass>();
     }
-
-    // Reset visible cluster table counter
-    //if (m_meshletCulling) {
-    //    // Create mesh cluster id buffer, two UINTs per cluster, used by visibility buffer and occlusion culling
-    //    // 2^25 visible clusters allowed due to index precision
-    //    auto clusterIDBuffer = CreateIndexedStructuredBuffer(static_cast<size_t>(pow(2, 25)), sizeof(VisibleClusterInfo), true, false);
-    //    clusterIDBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
-    //	clusterIDBuffer->SetName("Visible Cluster Table");
-    //    newGraph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTable, clusterIDBuffer);
-    //    auto clusterIDBufferCounter = CreateIndexedStructuredBuffer(1, sizeof(UINT), true, false);
-    //    clusterIDBufferCounter->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
-    //	clusterIDBufferCounter->SetName("Visible Cluster Table Counter");
-    //    newGraph->RegisterResource(Builtin::PrimaryCamera::VisibleClusterTableCounter, clusterIDBufferCounter);
-
-    //    newGraph->BuildRenderPass("VisibleClusterTableCounterResetPass")
-    //        .Build<VisibleClusterTableCounterResetPass>();
-    //}
-
-    //if (indirect) {
-    //    if (m_occlusionCulling) {
-    //        BuildOcclusionCullingPipeline(newGraph.get());
-    //    }
-    //    BuildGeneralCullingPipeline(newGraph.get());
-    //}
 
 	// Either visibility or standard GBuffer pass
     BuildGBufferPipeline(newGraph.get());

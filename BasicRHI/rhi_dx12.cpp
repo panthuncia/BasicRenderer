@@ -94,36 +94,24 @@ namespace rhi {
 		{
 			auto* dimpl = static_cast<Dx12Device*>(d->impl);
 
-			struct StringStore {
-				std::deque<std::wstring> ws;
-				LPCWSTR W(const char* s) {
-					ws.emplace_back(s2ws(std::string(s ? s : "")));
-					return ws.back().c_str();
-				}
-			};
+			// Collect RHI subobjects
+			ID3D12RootSignature* root = nullptr;
+			D3D12_SHADER_BYTECODE cs{}, vs{}, ps{}, as{}, ms{};
+			bool hasCS = false, hasGfx = false;
 
-			StringStore strings;
+			auto rast = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+			auto blend = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+			auto depth = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+			D3D12_RT_FORMAT_ARRAY rtv{};
+			rtv.NumRenderTargets = 0;
+			DXGI_FORMAT dsv = DXGI_FORMAT_UNKNOWN;
+			DXGI_SAMPLE_DESC sample{ 1,0 };
+			std::vector<D3D12_INPUT_ELEMENT_DESC> inputLayout;
+			D3D12_INPUT_LAYOUT_DESC inputLayoutDesc{ nullptr, 0 };
 
-			CD3DX12_STATE_OBJECT_DESC soDesc(D3D12_STATE_OBJECT_TYPE_EXECUTABLE);
+			bool hasRast = false, hasBlend = false, hasDepth = false, hasRTV = false, hasDSV = false, hasSample = false, hasInputLayout = false;
 
-			auto* program = soDesc.CreateSubobject<CD3DX12_GENERIC_PROGRAM_SUBOBJECT>();
-			program->SetProgramName(L"Pipeline");
-
-			CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT* globalRS = nullptr;
-			CD3DX12_RASTERIZER_SUBOBJECT* rastSub = nullptr;
-			CD3DX12_BLEND_SUBOBJECT* blendSub = nullptr;
-			CD3DX12_DEPTH_STENCIL2_SUBOBJECT* depthSub = nullptr;
-			CD3DX12_RENDER_TARGET_FORMATS_SUBOBJECT* rtvSub = nullptr;
-			CD3DX12_DEPTH_STENCIL_FORMAT_SUBOBJECT* dsvSub = nullptr;
-			CD3DX12_SAMPLE_DESC_SUBOBJECT* sampleSub = nullptr;
-			CD3DX12_INPUT_LAYOUT_SUBOBJECT* inputLayoutSub = nullptr;
-			CD3DX12_PRIMITIVE_TOPOLOGY_SUBOBJECT* primTopoSub = nullptr;
-
-			bool hasCS = false;
-			bool hasGfx = false;
-			bool hasAnyShader = false;
-
-			for (uint32_t i = 0; i < count; ++i) {
+			for (uint32_t i = 0; i < count; i++) {
 				switch (items[i].type) {
 				case PsoSubobj::Layout: {
 					auto& L = *static_cast<const SubobjLayout*>(items[i].data);
@@ -131,22 +119,17 @@ namespace rhi {
 					if (!pl || !pl->root) {
 						RHI_FAIL(Result::InvalidArgument);
 					}
-					if (!globalRS) {
-						globalRS = soDesc.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
-					}
-					globalRS->SetRootSignature(pl->root.Get());
+					root = pl->root.Get();
 				} break;
-
 				case PsoSubobj::Shader: {
 					auto& S = *static_cast<const SubobjShader*>(items[i].data);
 					D3D12_SHADER_BYTECODE bc{ S.bytecode.data, S.bytecode.size };
-
 					switch (S.stage) {
-					case ShaderStage::Compute: hasCS = true; break;
-					case ShaderStage::Vertex:
-					case ShaderStage::Pixel:
-					case ShaderStage::Task:
-					case ShaderStage::Mesh: hasGfx = true; break;
+					case ShaderStage::Compute: cs = bc; hasCS = true; break;
+					case ShaderStage::Vertex: vs = bc; hasGfx = true; break;
+					case ShaderStage::Pixel: ps = bc; hasGfx = true; break;
+					case ShaderStage::Task: as = bc; hasGfx = true; break;
+					case ShaderStage::Mesh: ms = bc; hasGfx = true; break;
 					case ShaderStage::AllGraphics:
 						spdlog::error("DX12 pipeline creation: invalid shader stage 'AllGraphics'");
 						RHI_FAIL(Result::InvalidArgument);
@@ -156,43 +139,26 @@ namespace rhi {
 						RHI_FAIL(Result::InvalidArgument);
 						break;
 					}
-
-					auto* lib = soDesc.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
-					lib->SetDXILLibrary(&bc);
-
-					const char* exportName = S.entryPoint.c_str();
-					if (exportName && exportName[0] != '\0') {
-						LPCWSTR exportW = strings.W(exportName);
-						lib->DefineExport(exportW);
-						program->AddExport(exportW);
-					}
-
-					hasAnyShader = true;
 				} break;
-
 				case PsoSubobj::Rasterizer: {
+					hasRast = true;
 					auto& R = *static_cast<const SubobjRaster*>(items[i].data);
-					if (!rastSub) {
-						rastSub = soDesc.CreateSubobject<CD3DX12_RASTERIZER_SUBOBJECT>();
-					}
-					rastSub->SetFillMode(ToDX(R.rs.fill));
-					rastSub->SetCullMode(ToDX(R.rs.cull));
-					rastSub->SetFrontCounterClockwise(R.rs.frontCCW);
-					rastSub->SetDepthBias(R.rs.depthBias);
-					rastSub->SetDepthBiasClamp(R.rs.depthBiasClamp);
-					rastSub->SetSlopeScaledDepthBias(R.rs.slopeScaledDepthBias);
+					rast.FillMode = ToDX(R.rs.fill);
+					rast.CullMode = ToDX(R.rs.cull);
+					rast.FrontCounterClockwise = R.rs.frontCCW;
+					rast.DepthBias = static_cast<int>(R.rs.depthBias);
+					rast.DepthBiasClamp = R.rs.depthBiasClamp;
+					rast.SlopeScaledDepthBias = R.rs.slopeScaledDepthBias;
 				} break;
-
 				case PsoSubobj::Blend: {
+					hasBlend = true;
 					auto& B = *static_cast<const SubobjBlend*>(items[i].data);
-					if (!blendSub) {
-						blendSub = soDesc.CreateSubobject<CD3DX12_BLEND_SUBOBJECT>();
-					}
-					blendSub->SetAlphaToCoverageEnable(B.bs.alphaToCoverage);
-					blendSub->SetIndependentBlendEnable(B.bs.independentBlend);
-					for (uint32_t a = 0; a < B.bs.numAttachments && a < 8; ++a) {
+					blend = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+					blend.AlphaToCoverageEnable = B.bs.alphaToCoverage;
+					blend.IndependentBlendEnable = B.bs.independentBlend;
+					for (uint32_t a = 0; a < B.bs.numAttachments && a < 8; a++) {
 						const auto& src = B.bs.attachments[a];
-						D3D12_RENDER_TARGET_BLEND_DESC dst{};
+						auto& dst = blend.RenderTarget[a];
 						dst.BlendEnable = src.enable;
 						dst.RenderTargetWriteMask = src.writeMask;
 						dst.BlendOp = ToDX(src.colorOp);
@@ -201,105 +167,81 @@ namespace rhi {
 						dst.BlendOpAlpha = ToDX(src.alphaOp);
 						dst.SrcBlendAlpha = ToDX(src.srcAlpha);
 						dst.DestBlendAlpha = ToDX(src.dstAlpha);
-						blendSub->SetRenderTarget(a, dst);
 					}
 				} break;
-
 				case PsoSubobj::DepthStencil: {
+					hasDepth = true;
 					auto& D = *static_cast<const SubobjDepth*>(items[i].data);
-					if (!depthSub) {
-						depthSub = soDesc.CreateSubobject<CD3DX12_DEPTH_STENCIL2_SUBOBJECT>();
-					}
-					depthSub->SetDepthEnable(D.ds.depthEnable);
-					depthSub->SetDepthWriteMask(D.ds.depthWrite ? D3D12_DEPTH_WRITE_MASK_ALL : D3D12_DEPTH_WRITE_MASK_ZERO);
-					depthSub->SetDepthFunc(ToDX(D.ds.depthFunc));
+					depth = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+					depth.DepthEnable = D.ds.depthEnable;
+					depth.DepthWriteMask = D.ds.depthWrite ? D3D12_DEPTH_WRITE_MASK_ALL : D3D12_DEPTH_WRITE_MASK_ZERO;
+					depth.DepthFunc = ToDX(D.ds.depthFunc);
 				} break;
-
 				case PsoSubobj::RTVFormats: {
+					hasRTV = true;
 					auto& R = *static_cast<const SubobjRTVs*>(items[i].data);
-					if (!rtvSub) {
-						rtvSub = soDesc.CreateSubobject<CD3DX12_RENDER_TARGET_FORMATS_SUBOBJECT>();
-					}
-					rtvSub->SetNumRenderTargets(R.rt.count);
-					for (uint32_t k = 0; k < R.rt.count && k < 8; ++k) {
-						rtvSub->SetRenderTargetFormat(k, ToDxgi(R.rt.formats[k]));
-					}
+					rtv.NumRenderTargets = R.rt.count;
+					for (uint32_t k = 0; k < R.rt.count && k < 8; k++) rtv.RTFormats[k] = ToDxgi(R.rt.formats[k]);
 				} break;
-
 				case PsoSubobj::DSVFormat: {
+					hasDSV = true;
 					auto& Z = *static_cast<const SubobjDSV*>(items[i].data);
-					if (!dsvSub) {
-						dsvSub = soDesc.CreateSubobject<CD3DX12_DEPTH_STENCIL_FORMAT_SUBOBJECT>();
-					}
-					dsvSub->SetDepthStencilFormat(ToDxgi(Z.dsv));
+					dsv = ToDxgi(Z.dsv);
 				} break;
-
 				case PsoSubobj::Sample: {
+					hasSample = true;
 					auto& S = *static_cast<const SubobjSample*>(items[i].data);
-					if (!sampleSub) {
-						sampleSub = soDesc.CreateSubobject<CD3DX12_SAMPLE_DESC_SUBOBJECT>();
-					}
-					sampleSub->SetCount(S.sd.count);
-					sampleSub->SetQuality(S.sd.quality);
+					sample = { S.sd.count, S.sd.quality };
 				} break;
-
 				case PsoSubobj::InputLayout: {
-					const auto& il = static_cast<const SubobjInputLayout*>(items[i].data)->il;
-					inputLayoutSub = soDesc.CreateSubobject<CD3DX12_INPUT_LAYOUT_SUBOBJECT>();
-
-					std::vector<D3D12_INPUT_ELEMENT_DESC> elems;
-					ToDx12InputLayout(il, elems);
-					for (const auto& e : elems) {
-						inputLayoutSub->AddInputLayoutElementDesc(e);
-					}
+					hasInputLayout = true;
+					ToDx12InputLayout(static_cast<const SubobjInputLayout*>(items[i].data)->il, inputLayout);
+					inputLayoutDesc = { inputLayout.data(), static_cast<uint32_t>(inputLayout.size()) };
 				} break;
-
-				case PsoSubobj::PrimitiveTopology: {
-					auto type = static_cast<const SubobjPrimitiveTopology*>(items[i].data)->pt;
-					if (!primTopoSub) {
-						primTopoSub = soDesc.CreateSubobject<CD3DX12_PRIMITIVE_TOPOLOGY_SUBOBJECT>();
-					}
-					primTopoSub->SetPrimitiveTopologyType(ToDXTopologyType(type));
-				} break;
-
-				case PsoSubobj::Flags:
-				default:
+				case PsoSubobj::Flags: {
 					break;
+				}
 				}
 			}
 
+			// Validate & decide kind
 			if (hasCS && hasGfx) {
 				spdlog::error("DX12 pipeline creation: cannot mix compute and graphics shaders in one PSO");
 				RHI_FAIL(Result::InvalidArgument);
 			}
-			if (!hasAnyShader) {
+			if (!hasCS && !hasGfx) {
 				spdlog::error("DX12 pipeline creation: no shaders specified");
 				RHI_FAIL(Result::InvalidArgument);
 			}
 			const bool isCompute = hasCS;
 
-			if (rastSub)      program->AddSubobject(*rastSub);
-			if (blendSub)     program->AddSubobject(*blendSub);
-			if (depthSub)     program->AddSubobject(*depthSub);
-			if (rtvSub)       program->AddSubobject(*rtvSub);
-			if (dsvSub)       program->AddSubobject(*dsvSub);
-			if (sampleSub)    program->AddSubobject(*sampleSub);
-			if (inputLayoutSub) program->AddSubobject(*inputLayoutSub);
-			if (primTopoSub)  program->AddSubobject(*primTopoSub);
+			PsoStreamBuilder sb;
+			sb.push(SO_RootSignature{ .Value = root });
 
-			ComPtr<ID3D12StateObject> stateObject;
-			if (const auto hr = dimpl->pNativeDevice->CreateStateObject(soDesc, IID_PPV_ARGS(&stateObject)); FAILED(hr)) {
+			if (hasCS)    sb.push(SO_CS{ .Value = cs });
+			if (hasGfx) {
+				if (as.pShaderBytecode) sb.push(SO_AS{ .Value = as });
+				if (ms.pShaderBytecode) sb.push(SO_MS{ .Value = ms });
+				if (vs.pShaderBytecode) sb.push(SO_VS{ .Value = vs });
+				if (ps.pShaderBytecode) sb.push(SO_PS{ .Value = ps });
+
+				if (hasRast)   sb.push(SO_Rasterizer{ .Value = rast });
+				if (hasBlend)  sb.push(SO_Blend{ .Value = blend });
+				if (hasDepth)  sb.push(SO_DepthStencil{ .Value = depth });
+				if (hasRTV)    sb.push(SO_RtvFormats{ .Value = rtv });
+				if (hasDSV)    sb.push(SO_DsvFormat{ .Value = dsv });
+				if (hasSample) sb.push(SO_SampleDesc{ .Value = sample });
+				if (hasInputLayout) sb.push(SO_InputLayout{ .Value = inputLayoutDesc });
+				// sb.push(SO_PrimTopology{ .Value = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE });
+			}
+			auto sd = sb.desc();
+
+			ComPtr<ID3D12PipelineState> pso;
+			if (const auto hr = dimpl->pNativeDevice->CreatePipelineState(&sd, IID_PPV_ARGS(&pso)); FAILED(hr)) {
 				RHI_FAIL(ToRHI(hr));
 			}
 
-			ComPtr<ID3D12StateObjectProperties1> props1;
-			if (const auto hr = stateObject.As(&props1); FAILED(hr) || !props1) {
-				RHI_FAIL(Result::Failed);
-			}
-
-			const D3D12_PROGRAM_IDENTIFIER programId = props1->GetProgramIdentifier(L"Pipeline");
-
-			auto handle = dimpl->pipelines.alloc(Dx12Pipeline(stateObject, props1, programId, isCompute, dimpl));
+			auto handle = dimpl->pipelines.alloc(Dx12Pipeline(pso, isCompute, dimpl));
 			Pipeline ret(handle);
 			ret.vt = &g_psovt;
 			ret.impl = dimpl;
@@ -326,7 +268,6 @@ namespace rhi {
 		}
 
 		// TOOD: Abstract out a bunch of this for use with DXR pipelines as well
-				// TOOD: Abstract out a bunch of this for use with DXR pipelines as well
 		static Result d_createWorkGraph(Device* d, const WorkGraphDesc& desc, WorkGraphPtr& out) noexcept
 		{
 			if (!d) return Result::InvalidArgument;
@@ -2092,9 +2033,7 @@ namespace rhi {
 			auto* impl = static_cast<Dx12Device*>(d->impl);
 			if (auto* P = impl->pipelines.get(p)) {
 				std::wstring w(n, n + ::strlen(n));
-				if (P->stateObject) {
-					P->stateObject->SetName(w.c_str());
-				}
+				P->pso->SetName(w.c_str());
 			}
 		}
 
@@ -2507,10 +2446,10 @@ namespace rhi {
 				case PageableKind::Pipeline:
 				{
 					auto* P = impl->pipelines.get(o.pipeline);
-					if (!P || !P->stateObject) {
+					if (!P || !P->pso) {
 						RHI_FAIL(Result::InvalidArgument);
 					}
-					native = P->stateObject.Get();
+					native = P->pso.Get(); // ID3D12PipelineState* -> ID3D12Pageable*
 				} break;
 
 				default:
@@ -2721,10 +2660,7 @@ namespace rhi {
 			auto* l = dx12_detail::CL(cl);
 			auto* dev = l->dev;
 			if (auto* P = dev->pipelines.get(psoH)) {
-				D3D12_SET_PROGRAM_DESC desc{};
-				desc.Type = D3D12_PROGRAM_TYPE_GENERIC_PIPELINE;
-				desc.GenericPipeline.ProgramIdentifier = P->programIdentifier;
-				l->cl->SetProgram(&desc);
+				l->cl->SetPipelineState(P->pso.Get());
 			}
 		}
 		static void cl_setVB(CommandList* cl, uint32_t startSlot, uint32_t numViews, VertexBufferView* pBufferViews) noexcept {
@@ -3790,11 +3726,11 @@ namespace rhi {
 				return;
 			}
 			auto* P = dx12_detail::Pso(p);
-			if (!P || !P->stateObject) {
+			if (!P || !P->pso) {
 				BreakIfDebugging();
 				return;
 			}
-			P->stateObject->SetName(s2ws(n).c_str());
+			P->pso->SetName(s2ws(n).c_str());
 		}
 
 		// ------------------ WorkGraph vtable funcs ----------------
