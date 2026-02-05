@@ -326,6 +326,7 @@ namespace rhi {
 		}
 
 		// TOOD: Abstract out a bunch of this for use with DXR pipelines as well
+				// TOOD: Abstract out a bunch of this for use with DXR pipelines as well
 		static Result d_createWorkGraph(Device* d, const WorkGraphDesc& desc, WorkGraphPtr& out) noexcept
 		{
 			if (!d) return Result::InvalidArgument;
@@ -351,309 +352,153 @@ namespace rhi {
 				}
 			}
 
-			struct BuildStorage {
+			struct StringStore {
 				std::deque<std::wstring> ws;
-				std::deque<D3D12_STATE_SUBOBJECT> subobjects;
-				std::deque<D3D12_DXIL_LIBRARY_DESC> dxilLibDescs;
-				std::vector<std::vector<D3D12_EXPORT_DESC>> dxilExports;
-				std::vector<D3D12_GLOBAL_ROOT_SIGNATURE> globalRS;
-				std::vector<D3D12_LOCAL_ROOT_SIGNATURE> localRS;
-				std::vector<D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION> localAssoc;
-				std::vector<std::vector<LPCWSTR>> localAssocExports;
-				std::vector<D3D12_STATE_OBJECT_CONFIG> soConfigs;
-				std::vector<D3D12_WORK_GRAPH_DESC> wgDescs;
-				std::vector<D3D12_NODE> nodes;
-				std::vector<D3D12_SHADER_NODE> shaderNodes;
-				// Override storage
-				std::deque<UINT> uints;
-				std::deque<BOOL> bools;
-				std::deque<D3D12_NODE_ID> nodeIds;
-				std::deque<std::vector<D3D12_NODE_OUTPUT_OVERRIDES>> outputOverrides;
-				std::deque<D3D12_COMMON_COMPUTE_NODE_OVERRIDES> commonComputeOverrides;
-				std::deque<D3D12_BROADCASTING_LAUNCH_OVERRIDES> broadcastingOverrides;
-				std::deque<D3D12_COALESCING_LAUNCH_OVERRIDES> coalescingOverrides;
-				std::deque<D3D12_THREAD_LAUNCH_OVERRIDES> threadOverrides;
-				std::vector<D3D12_NODE_ID> entrypoints;
-
 				LPCWSTR W(const char* s) {
 					ws.emplace_back(s2ws(std::string(s ? s : "")));
 					return ws.back().c_str();
 				}
-				UINT* U(const std::optional<uint32_t>& v) {
-					if (!v.has_value()) return nullptr;
-					uints.emplace_back(static_cast<UINT>(*v));
-					return &uints.back();
-				}
-				BOOL* B(const std::optional<bool>& v) {
-					if (!v.has_value()) return nullptr;
-					bools.emplace_back(*v ? TRUE : FALSE);
-					return &bools.back();
-				}
-				D3D12_NODE_ID* N(const std::optional<NodeIDDesc>& v) {
-					if (!v.has_value()) return nullptr;
-					nodeIds.emplace_back(D3D12_NODE_ID{ W(v->name), v->arrayIndex });
-					return &nodeIds.back();
-				}
 			};
 
-			BuildStorage b;
-			//b.subobjects.reserve(desc.libraries.size + desc.localRootAssociations.size * 2 + 4);
-			//b.dxilLibDescs.reserve(desc.libraries.size);
-			b.dxilExports.reserve(desc.libraries.size);
+			StringStore strings;
 
-			// Optional state object config
+			CD3DX12_STATE_OBJECT_DESC soDesc(D3D12_STATE_OBJECT_TYPE_EXECUTABLE);
+
 			if (desc.allowStateObjectAdditions) {
-				b.soConfigs.push_back(D3D12_STATE_OBJECT_CONFIG{ D3D12_STATE_OBJECT_FLAG_ALLOW_STATE_OBJECT_ADDITIONS });
-				// push STATE_OBJECT_CONFIG sub-object
-				D3D12_STATE_SUBOBJECT so{};
-				so.Type = D3D12_STATE_SUBOBJECT_TYPE_STATE_OBJECT_CONFIG;
-				so.pDesc = &b.soConfigs.back();
-				b.subobjects.push_back(so);
+				auto* cfg = soDesc.CreateSubobject<CD3DX12_STATE_OBJECT_CONFIG_SUBOBJECT>();
+				cfg->SetFlags(D3D12_STATE_OBJECT_FLAG_ALLOW_STATE_OBJECT_ADDITIONS);
 			}
 
 			// DXIL libraries
 			for (const ShaderLibraryDesc& lib : desc.libraries) {
-				b.dxilExports.emplace_back();
-				auto& exVec = b.dxilExports.back();
-				exVec.reserve(lib.exports.size);
+				auto* libSub = soDesc.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
+				D3D12_SHADER_BYTECODE bc{ lib.dxil.data, lib.dxil.size };
+				libSub->SetDXILLibrary(&bc);
+
 				for (const ShaderExportDesc& ex : lib.exports) {
 					if (!ex.name) continue;
-					D3D12_EXPORT_DESC ed{};
-					ed.Name = b.W(ex.name);
-					ed.ExportToRename = ex.exportToRename ? b.W(ex.exportToRename) : nullptr;
-					ed.Flags = D3D12_EXPORT_FLAG_NONE;
-					exVec.push_back(ed);
+					libSub->DefineExport(strings.W(ex.name), ex.exportToRename ? strings.W(ex.exportToRename) : nullptr);
 				}
-				D3D12_DXIL_LIBRARY_DESC ld{};
-				ld.DXILLibrary = { lib.dxil.data, lib.dxil.size };
-				ld.NumExports = static_cast<UINT>(exVec.size());
-				ld.pExports = exVec.empty() ? nullptr : exVec.data();
-				b.dxilLibDescs.push_back(ld);
-				D3D12_STATE_SUBOBJECT so{};
-				so.Type = D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY;
-				so.pDesc = &b.dxilLibDescs.back();
-				b.subobjects.push_back(so);
 			}
 
 			// Global root signature
 			if (desc.globalRootSignature.valid()) {
 				const auto* pl = dimpl->pipelineLayouts.get(desc.globalRootSignature);
 				if (!pl || !pl->root) return Result::InvalidArgument;
-				b.globalRS.push_back(D3D12_GLOBAL_ROOT_SIGNATURE{ pl->root.Get() });
-				D3D12_STATE_SUBOBJECT so{};
-				so.Type = D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE;
-				so.pDesc = &b.globalRS.back();
-				b.subobjects.push_back(so);
+				auto* grs = soDesc.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
+				grs->SetRootSignature(pl->root.Get());
 			}
 
 			// Local root signature associations
-			b.localRS.reserve(desc.localRootAssociations.size);
-			b.localAssoc.reserve(desc.localRootAssociations.size);
-			b.localAssocExports.reserve(desc.localRootAssociations.size);
 			for (const LocalRootAssociation& assoc : desc.localRootAssociations) {
 				const auto* pl = dimpl->pipelineLayouts.get(assoc.localRootSignature);
 				if (!pl || !pl->root) return Result::InvalidArgument;
-				b.localRS.push_back(D3D12_LOCAL_ROOT_SIGNATURE{ pl->root.Get() });
-				D3D12_STATE_SUBOBJECT localSo{};
-				localSo.Type = D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE;
-				localSo.pDesc = &b.localRS.back();
-				b.subobjects.push_back(localSo);
 
-				b.localAssocExports.emplace_back();
-				auto& exp = b.localAssocExports.back();
-				exp.reserve(assoc.exports.size);
+				auto* lrs = soDesc.CreateSubobject<CD3DX12_LOCAL_ROOT_SIGNATURE_SUBOBJECT>();
+				lrs->SetRootSignature(pl->root.Get());
+
+				auto* assocSub = soDesc.CreateSubobject<CD3DX12_SUBOBJECT_TO_EXPORTS_ASSOCIATION_SUBOBJECT>();
+				assocSub->SetSubobjectToAssociate(*lrs);
 				for (const char* s : assoc.exports) {
 					if (!s) continue;
-					exp.push_back(b.W(s));
+					assocSub->AddExport(strings.W(s));
 				}
-
-				D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION a{};
-				a.pSubobjectToAssociate = &b.subobjects.back(); // localSo is last pushed
-				a.NumExports = static_cast<UINT>(exp.size());
-				a.pExports = exp.empty() ? nullptr : exp.data();
-				b.localAssoc.push_back(a);
-				D3D12_STATE_SUBOBJECT assocSo{};
-				assocSo.Type = D3D12_STATE_SUBOBJECT_TYPE_SUBOBJECT_TO_EXPORTS_ASSOCIATION;
-				assocSo.pDesc = &b.localAssoc.back();
-				b.subobjects.push_back(assocSo);
 			}
 
-			// Explicitly-defined nodes
+			// Work graph
+			auto* wg = soDesc.CreateSubobject<CD3DX12_WORK_GRAPH_SUBOBJECT>();
+			LPCWSTR programNameW = strings.W(desc.programName);
+			wg->SetProgramName(programNameW);
+			if (desc.flags & WorkGraphFlags::WorkGraphFlagsIncludeAllAvailableNodes) {
+				wg->IncludeAllAvailableNodes();
+			}
+
+			auto toNodeId = [&](const NodeIDDesc& id) {
+				return D3D12_NODE_ID{ strings.W(id.name), id.arrayIndex };
+				};
+
+			auto applyOutputOverrides = [&](CD3DX12_NODE_OUTPUT_OVERRIDES& ooHelper, const Span<NodeOutputOverrideDesc>& overrides) {
+				for (const NodeOutputOverrideDesc& oo : overrides) {
+					ooHelper.NewOutputOverride();
+					ooHelper.OutputIndex(oo.outputIndex);
+					if (oo.newName.has_value()) {
+						ooHelper.NewName(strings.W(oo.newName->name), oo.newName->arrayIndex);
+					}
+					if (oo.allowSparseNodes.has_value()) {
+						ooHelper.AllowSparseNodes(*oo.allowSparseNodes ? TRUE : FALSE);
+					}
+					if (oo.maxRecords.has_value()) {
+						ooHelper.MaxOutputRecords(*oo.maxRecords);
+					}
+					if (oo.maxRecordsSharedWithOutputIndex.has_value()) {
+						ooHelper.MaxOutputRecordsSharedWith(*oo.maxRecordsSharedWithOutputIndex);
+					}
+				}
+				};
+
+			auto applyCommonOverrides = [&](auto* node, const CommonComputeNodeOverridesDesc& c) {
+				if (c.localRootArgumentsTableIndex.has_value()) {
+					node->LocalRootArgumentsTableIndex(static_cast<UINT>(*c.localRootArgumentsTableIndex));
+				}
+				if (c.isProgramEntry.has_value()) {
+					node->ProgramEntry(*c.isProgramEntry ? TRUE : FALSE);
+				}
+				if (c.newName.has_value()) {
+					node->NewName(toNodeId(*c.newName));
+				}
+				if (c.shareInputOf.has_value()) {
+					node->ShareInputOf(toNodeId(*c.shareInputOf));
+				}
+				applyOutputOverrides(node->NodeOutputOverrides(), c.outputOverrides);
+				};
+
+			// Explicit nodes
 			for (const NodeOverrideDesc& n : desc.explicitNodes) {
 				if (!n.shaderExport || n.shaderExport[0] == '\0') continue;
 
-				D3D12_SHADER_NODE sn{};
-				sn.Shader = b.W(n.shaderExport);
-				sn.OverridesType = ToDX(n.overridesType);
-
 				switch (n.overridesType) {
-				case NodeOverridesType::CommonCompute: {
-					D3D12_COMMON_COMPUTE_NODE_OVERRIDES c{};
-					c.pLocalRootArgumentsTableIndex = b.U(n.common.localRootArgumentsTableIndex);
-					c.pProgramEntry = b.B(n.common.isProgramEntry);
-					c.pNewName = b.N(n.common.newName);
-					c.pShareInputOf = b.N(n.common.shareInputOf);
-
-					b.outputOverrides.emplace_back();
-					auto& ovec = b.outputOverrides.back();
-					ovec.reserve(n.common.outputOverrides.size);
-					for (const NodeOutputOverrideDesc& oo : n.common.outputOverrides) {
-						D3D12_NODE_OUTPUT_OVERRIDES o{};
-						o.OutputIndex = oo.outputIndex;
-						o.pNewName = b.N(oo.newName);
-						o.pMaxRecords = b.U(oo.maxRecords);
-						o.pMaxRecordsSharedWithOutputIndex = b.U(oo.maxRecordsSharedWithOutputIndex);
-						o.pAllowSparseNodes = b.B(oo.allowSparseNodes); // (no allowUnboundedSparseNodes)
-						ovec.push_back(o);
-					}
-					c.NumOutputOverrides = static_cast<UINT>(ovec.size());
-					c.pOutputOverrides = ovec.empty() ? nullptr : ovec.data();
-
-					b.commonComputeOverrides.push_back(c);
-					sn.pCommonComputeNodeOverrides = &b.commonComputeOverrides.back();
-				} break;
-
 				case NodeOverridesType::BroadcastingLaunch: {
-					D3D12_BROADCASTING_LAUNCH_OVERRIDES br{};
-					br.pLocalRootArgumentsTableIndex = b.U(n.broadcasting.localRootArgumentsTableIndex);
-					br.pProgramEntry = b.B(n.broadcasting.isProgramEntry);
-					br.pNewName = b.N(n.broadcasting.newName);
-					br.pShareInputOf = b.N(n.broadcasting.shareInputOf);
-
+					auto* node = wg->CreateBroadcastingLaunchNodeOverrides(strings.W(n.shaderExport));
+					applyCommonOverrides(node, n.broadcasting);
 					if (n.broadcasting.dispatchGrid.has_value()) {
-						b.uints.emplace_back(n.broadcasting.dispatchGrid->x);
-						b.uints.emplace_back(n.broadcasting.dispatchGrid->y);
-						b.uints.emplace_back(n.broadcasting.dispatchGrid->z);
-						br.pDispatchGrid = &b.uints[b.uints.size() - 3];
+						const auto& g = *n.broadcasting.dispatchGrid;
+						node->DispatchGrid(g.x, g.y, g.z);
 					}
 					if (n.broadcasting.maxDispatchGrid.has_value()) {
-						b.uints.emplace_back(n.broadcasting.maxDispatchGrid->x);
-						b.uints.emplace_back(n.broadcasting.maxDispatchGrid->y);
-						b.uints.emplace_back(n.broadcasting.maxDispatchGrid->z);
-						br.pMaxDispatchGrid = &b.uints[b.uints.size() - 3];
+						const auto& g = *n.broadcasting.maxDispatchGrid;
+						node->MaxDispatchGrid(g.x, g.y, g.z);
 					}
-
-					b.outputOverrides.emplace_back();
-					auto& ovec = b.outputOverrides.back();
-					ovec.reserve(n.broadcasting.outputOverrides.size);
-					for (const NodeOutputOverrideDesc& oo : n.broadcasting.outputOverrides) {
-						D3D12_NODE_OUTPUT_OVERRIDES o{};
-						o.OutputIndex = oo.outputIndex;
-						o.pNewName = b.N(oo.newName);
-						o.pMaxRecords = b.U(oo.maxRecords);
-						o.pMaxRecordsSharedWithOutputIndex = b.U(oo.maxRecordsSharedWithOutputIndex);
-						o.pAllowSparseNodes = b.B(oo.allowSparseNodes);
-						ovec.push_back(o);
-					}
-					br.NumOutputOverrides = static_cast<UINT>(ovec.size());
-					br.pOutputOverrides = ovec.empty() ? nullptr : ovec.data();
-
-					b.broadcastingOverrides.push_back(br);
-					sn.pBroadcastingLaunchOverrides = &b.broadcastingOverrides.back();
 				} break;
 
 				case NodeOverridesType::CoalescingLaunch: {
-					D3D12_COALESCING_LAUNCH_OVERRIDES cr{};
-					cr.pLocalRootArgumentsTableIndex = b.U(n.coalescing.localRootArgumentsTableIndex);
-					cr.pProgramEntry = b.B(n.coalescing.isProgramEntry);
-					cr.pNewName = b.N(n.coalescing.newName);
-					cr.pShareInputOf = b.N(n.coalescing.shareInputOf);
-
-					b.outputOverrides.emplace_back();
-					auto& ovec = b.outputOverrides.back();
-					ovec.reserve(n.coalescing.outputOverrides.size);
-					for (const NodeOutputOverrideDesc& oo : n.coalescing.outputOverrides) {
-						D3D12_NODE_OUTPUT_OVERRIDES o{};
-						o.OutputIndex = oo.outputIndex;
-						o.pNewName = b.N(oo.newName);
-						o.pMaxRecords = b.U(oo.maxRecords);
-						o.pMaxRecordsSharedWithOutputIndex = b.U(oo.maxRecordsSharedWithOutputIndex);
-						o.pAllowSparseNodes = b.B(oo.allowSparseNodes);
-						ovec.push_back(o);
-					}
-					cr.NumOutputOverrides = static_cast<UINT>(ovec.size());
-					cr.pOutputOverrides = ovec.empty() ? nullptr : ovec.data();
-
-					b.coalescingOverrides.push_back(cr);
-					sn.pCoalescingLaunchOverrides = &b.coalescingOverrides.back();
+					auto* node = wg->CreateCoalescingLaunchNodeOverrides(strings.W(n.shaderExport));
+					applyCommonOverrides(node, n.coalescing);
 				} break;
 
 				case NodeOverridesType::ThreadLaunch: {
-					D3D12_THREAD_LAUNCH_OVERRIDES tr{};
-					tr.pLocalRootArgumentsTableIndex = b.U(n.thread.localRootArgumentsTableIndex);
-					tr.pProgramEntry = b.B(n.thread.isProgramEntry);
-					tr.pNewName = b.N(n.thread.newName);
-					tr.pShareInputOf = b.N(n.thread.shareInputOf);
+					auto* node = wg->CreateThreadLaunchNodeOverrides(strings.W(n.shaderExport));
+					applyCommonOverrides(node, n.thread);
+				} break;
 
-					b.outputOverrides.emplace_back();
-					auto& ovec = b.outputOverrides.back();
-					ovec.reserve(n.thread.outputOverrides.size);
-					for (const NodeOutputOverrideDesc& oo : n.thread.outputOverrides) {
-						D3D12_NODE_OUTPUT_OVERRIDES o{};
-						o.OutputIndex = oo.outputIndex;
-						o.pNewName = b.N(oo.newName);
-						o.pMaxRecords = b.U(oo.maxRecords);
-						o.pMaxRecordsSharedWithOutputIndex = b.U(oo.maxRecordsSharedWithOutputIndex);
-						o.pAllowSparseNodes = b.B(oo.allowSparseNodes);
-						ovec.push_back(o);
-					}
-					tr.NumOutputOverrides = static_cast<UINT>(ovec.size());
-					tr.pOutputOverrides = ovec.empty() ? nullptr : ovec.data();
-
-					b.threadOverrides.push_back(tr);
-					sn.pThreadLaunchOverrides = &b.threadOverrides.back();
+				case NodeOverridesType::CommonCompute: {
+					auto* node = wg->CreateCommonComputeNodeOverrides(strings.W(n.shaderExport));
+					applyCommonOverrides(node, n.common);
 				} break;
 
 				case NodeOverridesType::None:
 				default:
-					// OverridesType==NONE means union ptr stays null.
+					wg->CreateShaderNode(strings.W(n.shaderExport));
 					break;
 				}
-
-				b.shaderNodes.push_back(sn);
-
-				D3D12_NODE node{};
-				node.NodeType = D3D12_NODE_TYPE_SHADER;
-				node.Shader = b.shaderNodes.back();
-				b.nodes.push_back(node);
 			}
 
 			// Entry points
-			if (!desc.entrypoints.size == 0) {
-				b.entrypoints.reserve(desc.entrypoints.size);
-				for (const NodeIDDesc& e : desc.entrypoints) {
-					b.entrypoints.emplace_back(D3D12_NODE_ID{ b.W(e.name), e.arrayIndex });
-				}
+			for (const NodeIDDesc& e : desc.entrypoints) {
+				wg->AddEntrypoint(toNodeId(e));
 			}
-
-			// Work graph desc
-			D3D12_WORK_GRAPH_DESC wg{};
-			wg.ProgramName = b.W(desc.programName);
-			wg.Flags = ToDX(desc.flags);
-			wg.NumExplicitlyDefinedNodes = static_cast<UINT>(b.nodes.size());
-			wg.pExplicitlyDefinedNodes = b.nodes.empty() ? nullptr : b.nodes.data();
-			wg.NumEntrypoints = static_cast<UINT>(b.entrypoints.size());
-			wg.pEntrypoints = b.entrypoints.empty() ? nullptr : b.entrypoints.data();
-			b.wgDescs.push_back(wg);
-			D3D12_STATE_SUBOBJECT wgSo{};
-			wgSo.Type = D3D12_STATE_SUBOBJECT_TYPE_WORK_GRAPH;
-			wgSo.pDesc = &b.wgDescs.back();
-			b.subobjects.push_back(wgSo);
-
-			D3D12_STATE_OBJECT_DESC soDesc{};
-			soDesc.Type = D3D12_STATE_OBJECT_TYPE_EXECUTABLE;
-			soDesc.NumSubobjects = static_cast<UINT>(b.subobjects.size());
-
-			// Copy to contiguous storage
-			std::vector<D3D12_STATE_SUBOBJECT> subobjectsContiguous;
-			subobjectsContiguous.reserve(b.subobjects.size());
-			for (const auto& so : b.subobjects) {
-				subobjectsContiguous.push_back(so);
-			}
-			soDesc.pSubobjects = subobjectsContiguous.data();
 
 			ComPtr<ID3D12StateObject> stateObject;
-			if (const auto hr = dimpl->pNativeDevice->CreateStateObject(&soDesc, IID_PPV_ARGS(&stateObject)); FAILED(hr)) {
+			if (const auto hr = dimpl->pNativeDevice->CreateStateObject(soDesc, IID_PPV_ARGS(&stateObject)); FAILED(hr)) {
 				RHI_FAIL(ToRHI(hr));
 			}
 
@@ -666,15 +511,14 @@ namespace rhi {
 				RHI_FAIL(Result::Failed);
 			}
 
-			const LPCWSTR programNameW = b.wgDescs.back().ProgramName;
 			const D3D12_PROGRAM_IDENTIFIER programId = props1->GetProgramIdentifier(programNameW);
 			const UINT wgIndex = wgProps->GetWorkGraphIndex(programNameW);
-			auto numEntries = wgProps->GetNumEntrypoints(wgIndex);
+			const UINT numEntries = wgProps->GetNumEntrypoints(wgIndex);
 			if (numEntries == 0) {
 				spdlog::error("DX12 work graph creation: no entrypoints found for program '{}'", desc.programName);
 				RHI_FAIL(Result::InvalidArgument);
 			}
-			D3D12_WORK_GRAPH_MEMORY_REQUIREMENTS mem = {};
+			D3D12_WORK_GRAPH_MEMORY_REQUIREMENTS mem{};
 			wgProps->GetWorkGraphMemoryRequirements(wgIndex, &mem);
 
 			auto handle = dimpl->workGraphs.alloc(Dx12WorkGraph(stateObject, props1, wgProps, programId, wgIndex, mem, dimpl));

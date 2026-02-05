@@ -31,7 +31,7 @@ inline std::wstring s2ws(const std::string& s) {
 	std::wstring ws(buffSize, 0);
 	MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), ws.data(), buffSize);
 	return ws;
-}
+} 
 
 namespace rhi {
 	using Microsoft::WRL::ComPtr;
