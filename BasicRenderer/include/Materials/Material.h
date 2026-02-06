@@ -33,7 +33,7 @@ inline TransparencyPick PickTransparency(const MaterialDescription& d) {
     return t;
 }
 
-inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) {
+inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) { // TODO: The alpha-test/double-sided logic is wrong here
     TechniqueDescriptor tech{};
     const auto transparency = PickTransparency(d);
 	tech.passes.insert(Engine::Primary::ShadowMapsPass); // All materials cast shadows
@@ -47,6 +47,7 @@ inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) {
 			tech.compileFlags |= MaterialCompileFlags::MaterialCompileAlphaTest;
 			tech.compileFlags |= MaterialCompileFlags::MaterialCompileDoubleSided;
 			tech.rasterFlags |= MaterialRasterFlags::MaterialRasterFlagsAlphaTest;
+			tech.rasterFlags |= MaterialRasterFlags::MaterialRasterFlagsDoubleSided;
         }
 		tech.passes.insert(Engine::Primary::GBufferPass);
     }

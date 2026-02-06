@@ -101,39 +101,40 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     return result;
 }
 
-VisBufferPSInput GetVisBufferVertexAttributes(
-ByteAddressBuffer buffer, 
-uint blockByteOffset, 
-uint index, 
-uint flags, 
-uint vertexSize, 
-uint3 vGroupID, 
-PerObjectBuffer objectBuffer, 
-uint clusterToVisibleClusterTableStartIndex)
+VisBufferPSInput GetVisBufferVertexAttributesForView(
+    ByteAddressBuffer buffer,
+    uint blockByteOffset,
+    uint index,
+    uint flags,
+    uint vertexSize,
+    uint3 vGroupID,
+    PerObjectBuffer objectBuffer,
+    uint clusterToVisibleClusterTableStartIndex,
+    uint viewID)
 {
     uint byteOffset = blockByteOffset + index * vertexSize;
     Vertex vertex = LoadVertex(byteOffset, buffer, flags);
-    
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
-    Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
-    
+    Camera viewCamera = cameras[viewID];
+
     float4 pos = float4(vertex.position.xyz, 1.0f);
     float4 worldPosition = mul(pos, objectBuffer.model);
-    float4 viewPosition = mul(worldPosition, mainCamera.view);
-    
+    float4 viewPosition = mul(worldPosition, viewCamera.view);
+
     StructuredBuffer<uint> clusterToVisibleClusterTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer)];
     uint clusterIndex = clusterToVisibleClusterTable[clusterToVisibleClusterTableStartIndex + vGroupID.x];
-    
+
     VisBufferPSInput result;
-    result.position = mul(viewPosition, mainCamera.projection);
+    result.position = mul(viewPosition, viewCamera.projection);
     result.visibleClusterIndex = clusterIndex;
     result.linearDepth = -viewPosition.z;
-    
+    result.viewID = viewID;
+
 #if defined(PSO_ALPHA_TEST)
     result.texcoord = vertex.texcoord;
 #endif
-    
+
     return result;
 }
 
@@ -165,12 +166,16 @@ void EmitMeshletGBuffer(uint uGroupThreadID, MeshletSetup setup, out vertices PS
 }
 
 // Emit for Visibility Buffer path
-void EmitMeshletVisBuffer(uint uGroupThreadID, MeshletSetup setup, out vertices VisBufferPSInput outputVertices[MS_MESHLET_SIZE], out indices uint3 outputTriangles[MS_MESHLET_SIZE])
+void EmitMeshletVisBufferForView(
+    uint uGroupThreadID,
+    MeshletSetup setup,
+    uint viewID,
+    out vertices VisBufferPSInput outputVertices[MS_MESHLET_SIZE],
+    out indices uint3 outputTriangles[MS_MESHLET_SIZE])
 {
     for (uint i = uGroupThreadID; i < setup.vertCount; i += MS_THREAD_GROUP_SIZE)
     {
-        // Which meshlet-local triangle ID is this?
-        outputVertices[i] = GetVisBufferVertexAttributes(
+        outputVertices[i] = GetVisBufferVertexAttributesForView(
             setup.vertexBuffer,
             setup.postSkinningBufferOffset,
             setup.vertOffset + i,
@@ -178,7 +183,8 @@ void EmitMeshletVisBuffer(uint uGroupThreadID, MeshletSetup setup, out vertices 
             setup.meshBuffer.vertexByteSize,
             setup.meshletIndex,
             setup.objectBuffer,
-            setup.meshInstanceBuffer.clusterToVisibleClusterTableStartIndex
+            setup.meshInstanceBuffer.clusterToVisibleClusterTableStartIndex,
+            viewID
         );
     }
 
@@ -222,47 +228,114 @@ void MSMain(
     EmitMeshletGBuffer(uGroupThreadID, setup, outputVertices, outputTriangles);
 }
 
-[outputtopology("triangle")]
-[numthreads(MS_THREAD_GROUP_SIZE, 1, 1)]
-void VisibilityBufferMSMain(
-    const uint uGroupThreadID : SV_GroupThreadID,
-    const uint vGroupID : SV_GroupID,
-    in payload Payload payload,
-    out vertices VisBufferPSInput outputVertices[MS_MESHLET_SIZE],
-    out indices uint3 outputTriangles[MS_MESHLET_SIZE],
-    out primitives VisibilityPerPrimitive primitiveInfo[MS_MESHLET_SIZE])
+// [outputtopology("triangle")]
+// [numthreads(MS_THREAD_GROUP_SIZE, 1, 1)]
+// void VisibilityBufferMSMain(
+//     const uint uGroupThreadID : SV_GroupThreadID,
+//     const uint vGroupID : SV_GroupID,
+//     in payload Payload payload,
+//     out vertices VisBufferPSInput outputVertices[MS_MESHLET_SIZE],
+//     out indices uint3 outputTriangles[MS_MESHLET_SIZE],
+//     out primitives VisibilityPerPrimitive primitiveInfo[MS_MESHLET_SIZE])
+// {
+//     uint meshletIndex = payload.MeshletIndices[vGroupID];
+//     MeshletSetup setup;
+//     bool draw = InitializeMeshlet(meshletIndex, setup);
+//     SetMeshOutputCounts(setup.vertCount, setup.triCount);
+//     if (!draw)
+//     {
+//         return;
+//     }
+//     EmitMeshletVisBuffer(uGroupThreadID, setup, outputVertices, outputTriangles);
+//     EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
+// }
+
+#include "PerPassRootConstants/clodRootConstants.h"
+
+bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSetup setup)
 {
-    uint meshletIndex = payload.MeshletIndices[vGroupID];
-    MeshletSetup setup;
-    bool draw = InitializeMeshlet(meshletIndex, setup);
-    SetMeshOutputCounts(setup.vertCount, setup.triCount);
-    if (!draw)
+    StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+
+    setup.meshletIndex = cluster.meshletID;
+    setup.meshInstanceBuffer = meshInstanceBuffer[cluster.instanceID];
+    setup.viewID = cluster.viewID;
+
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
+    StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Meshlets)];
+    StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletVertexIndices)];
+    ByteAddressBuffer meshletTrianglesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletTriangles)];
+    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostSkinningVertices)];
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+
+    setup.meshBuffer = perMeshBuffer[setup.meshInstanceBuffer.perMeshBufferIndex];
+    setup.objectBuffer = perObjectBuffer[setup.meshInstanceBuffer.perObjectBufferIndex];
+
+    uint meshletOffset = setup.meshBuffer.clodMeshletBufferOffset;
+    setup.meshlet = meshletBuffer[meshletOffset + setup.meshletIndex];
+
+    setup.vertCount = setup.meshlet.VertCount;
+    setup.triCount = setup.meshlet.TriCount;
+    setup.vertOffset = setup.meshlet.VertOffset;
+
+    setup.vertexBuffer = vertexBuffer;
+    setup.meshletTrianglesBuffer = meshletTrianglesBuffer;
+    setup.meshletVerticesBuffer = meshletVerticesBuffer;
+
+    uint postSkinningBase = setup.meshInstanceBuffer.postSkinningVertexBufferOffset;
+    setup.postSkinningBufferOffset = postSkinningBase;
+    setup.prevPostSkinningBufferOffset = postSkinningBase;
+
+    if (setup.meshBuffer.vertexFlags & VERTEX_SKINNED)
     {
-        return;
+        uint stride = setup.meshBuffer.vertexByteSize * setup.meshBuffer.numVertices;
+        setup.postSkinningBufferOffset += stride * (perFrameBuffer.frameIndex % 2);
+        setup.prevPostSkinningBufferOffset += stride * ((perFrameBuffer.frameIndex + 1) % 2);
     }
-    EmitMeshletVisBuffer(uGroupThreadID, setup, outputVertices, outputTriangles);
-    EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
+
+    if (setup.meshletIndex >= setup.meshBuffer.numMeshlets)
+    {
+        return false;
+    }
+
+    return true;
 }
 
 // New pure-MS entry for Cluster LOD rendering
+[shader("mesh")]
 [outputtopology("triangle")]
 [numthreads(MS_THREAD_GROUP_SIZE, 1, 1)]
-void ClusterLODMSMain(
+void ClusterLODBucketMSMain(
     const uint uGroupThreadID : SV_GroupThreadID,
-    const uint vGroupID : SV_GroupID,
+    const uint3 vGroupID : SV_GroupID,
     out vertices VisBufferPSInput outputVertices[MS_MESHLET_SIZE],
     out indices uint3 outputTriangles[MS_MESHLET_SIZE],
     out primitives VisibilityPerPrimitive primitiveInfo[MS_MESHLET_SIZE])
 {
-    uint visibleMeshletIndex = vGroupID;
+    uint baseOffset = perObjectBufferIndex;
+    uint dispatchX = perMeshBufferIndex;
+    uint bucketIndex = perMeshInstanceBufferIndex;
+
+    uint linearizedID = vGroupID.x + vGroupID.y * dispatchX;
+
+    StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
+    uint count = histogram[bucketIndex];
+    if (linearizedID >= count)
+    {
+        return;
+    }
+
+    StructuredBuffer<VisibleCluster> compactedClusters = ResourceDescriptorHeap[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
+    VisibleCluster cluster = compactedClusters[baseOffset + linearizedID];
 
     MeshletSetup setup;
-    bool draw = InitializeMeshletInternalCLod(visibleMeshletIndex, setup);
+    bool draw = InitializeMeshletFromCompactedCluster(cluster, setup);
     SetMeshOutputCounts(setup.vertCount, setup.triCount);
     if (!draw)
     {
         return;
     }
-    EmitMeshletVisBuffer(uGroupThreadID, setup, outputVertices, outputTriangles);
+
+    EmitMeshletVisBufferForView(uGroupThreadID, setup, setup.viewID, outputVertices, outputTriangles);
     EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
 }

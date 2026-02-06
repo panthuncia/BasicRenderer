@@ -136,10 +136,10 @@ const PipelineState& PSOManager::GetVisibilityBufferMeshPSO(UINT psoFlags, Mater
     return m_visibilityBufferMeshPSOCache[key];
 }
 
-const PipelineState& PSOManager::GetClusterLODRasterPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
-    PSOKey key(psoFlags, materialCompileFlags, wireframe);
+const PipelineState& PSOManager::GetClusterLODRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    RasterPSOKey key(materialRasterFlags, wireframe);
     if (m_clusterLODRasterPSOCache.find(key) == m_clusterLODRasterPSOCache.end()) {
-        m_clusterLODRasterPSOCache[key] = CreateClusterLODRasterPSO(psoFlags, materialCompileFlags, wireframe);
+        m_clusterLODRasterPSOCache[key] = CreateClusterLODRasterPSO(materialRasterFlags, wireframe);
     }
     return m_clusterLODRasterPSOCache[key];
 }
@@ -495,15 +495,15 @@ PipelineState PSOManager::CreateVisibilityBufferMeshPSO(
 }
 
 PipelineState PSOManager::CreateClusterLODRasterPSO(
-    UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe) {
-    auto defines = GetShaderDefines(psoFlags, materialCompileFlags);
+    MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    auto defines = GetRasterShaderDefines(materialRasterFlags);
 
     Microsoft::WRL::ComPtr<ID3DBlob> asBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
 
     ShaderInfoBundle shaderInfoBundle;
-    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"ClusterLODMSMain", L"ms_6_6" };
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"ClusterLODBucketMSMain", L"ms_6_6" };
     shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"ClusterLODPSMain", L"ps_6_6" };
     shaderInfoBundle.defines = defines;
 
@@ -519,12 +519,9 @@ PipelineState PSOManager::CreateClusterLODRasterPSO(
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
-    rs.cull = (materialCompileFlags & MaterialCompileFlags::MaterialCompileDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.cull = (materialRasterFlags & MaterialRasterFlags::MaterialRasterFlagsDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
     rs.frontCCW = true;
     rhi::SubobjRaster soRaster{ rs };
-
-    rhi::BlendState rhiBlend = GetBlendDesc(materialCompileFlags);
-    rhi::SubobjBlend soBlend{ rhiBlend };
 
     rhi::DepthStencilState ds{};
     rhi::SubobjDepth soDepth{ ds };
@@ -964,6 +961,23 @@ PipelineState PSOManager::MakeComputePipeline(rhi::PipelineLayoutHandle layout,
         compiled.resourceDescriptorSlots
     };
     return out;
+}
+
+std::vector<DxcDefine> PSOManager::GetRasterShaderDefines(MaterialRasterFlags rasterFlags) {
+    std::vector<DxcDefine> defines = {};
+    if (rasterFlags & MaterialRasterFlags::MaterialRasterFlagsAlphaTest) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_ALPHA_TEST";
+        defines.insert(defines.begin(), macro);
+	}
+    if (rasterFlags & MaterialRasterFlags::MaterialRasterFlagsDoubleSided) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_DOUBLE_SIDED";
+		defines.insert(defines.begin(), macro);
+    }
+    return defines;
 }
 
 std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags, MaterialCompileFlags materialFlags) {

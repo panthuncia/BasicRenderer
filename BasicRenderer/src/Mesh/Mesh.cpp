@@ -885,6 +885,11 @@ void Mesh::SetCLodBufferViews(
 	m_clusterLODMeshletBoundsView = std::move(clusterLODMeshletBoundsView);
 	m_childLocalMeshletIndicesView = std::move(childLocalMeshletIndicesView);
 	m_clusterLODNodesView = std::move(clusterLODNodesView);
+
+	m_perMeshBufferData.clodMeshletBufferOffset = static_cast<uint32_t>(m_clusterLODMeshletsView->GetOffset() / sizeof(meshopt_Meshlet));
+	if (m_pCurrentMeshManager != nullptr && m_perMeshBufferView != nullptr) {
+		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
+	}
 }
 
 void Mesh::SetBaseSkin(std::shared_ptr<Skeleton> skeleton) {

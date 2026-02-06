@@ -304,18 +304,28 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
 
         uint count = histogram[linearizedID];
 
-        DispatchMeshIndirectCommand cmd = (DispatchMeshIndirectCommand)0;
+        RasterizeClustersCommand cmd = (RasterizeClustersCommand)0;
         if (count > 0)
         {
-            cmd.perObjectBufferIndex = offsets[linearizedID];
-            cmd.perMeshBufferIndex = 0;
-            cmd.perMeshInstanceBufferIndex = 0;
+            const uint kMaxDim = 65535u;
+            uint dispatchX = (uint) ceil(sqrt((float) count));
+            if (dispatchX > kMaxDim)
+            {
+                dispatchX = kMaxDim;
+            }
+            uint dispatchY = (count + dispatchX - 1u) / dispatchX;
+            if (dispatchY > kMaxDim)
+            {
+                dispatchY = kMaxDim;
+            }
 
-            cmd.dispatchMeshX = count;
-            cmd.dispatchMeshY = 1;
-            cmd.dispatchMeshZ = 1;
+            cmd.baseClusterOffset = offsets[linearizedID]; // base offset
+            cmd.xDim = dispatchX;              // xDim for 2D linearization
+            cmd.rasterBucketID = linearizedID;   // bucket index
+
+            cmd.dispatchX = dispatchX;
+            cmd.dispatchY = dispatchY;
+            cmd.dispatchZ = 1;
         }
-
-        outArgs[linearizedID] = cmd;
     }
 }

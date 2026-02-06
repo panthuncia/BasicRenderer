@@ -6,12 +6,19 @@
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "../shaders/PerPassRootConstants/clodRootConstants.h"
-#include "Render/IndirectCommand.h"
 
 struct RasterBucketsHistogramIndirectCommand
 {
     unsigned int clusterCount;
     unsigned int dispatchXDimension;
+    unsigned int dispatchX, dispatchY, dispatchZ;
+};
+
+struct RasterizeClustersCommand
+{
+    unsigned int baseClusterOffset;
+    unsigned int xDim;
+    unsigned int rasterBucketID;
     unsigned int dispatchX, dispatchY, dispatchZ;
 };
 
@@ -79,7 +86,7 @@ public:
 		m_compactedVisibleClustersBuffer->SetName("CLod Compacted Visible Clusters Buffer");
 
 		m_rasterBucketsWriteCursorBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(1, "CLod Raster bucket write cursor", true);
-		m_rasterBucketsIndirectArgsBuffer = DynamicStructuredBuffer<DispatchMeshIndirectCommand>::CreateShared(1, "CLod Raster bucket indirect args", true);
+		m_rasterBucketsIndirectArgsBuffer = DynamicStructuredBuffer<RasterizeClustersCommand>::CreateShared(1, "CLod Raster bucket indirect args", true);
 
 		m_type = type;
 	}
@@ -146,6 +153,19 @@ public:
             m_rasterBucketsIndirectArgsBuffer,
             m_maxVisibleClusters);
         outPasses.push_back(std::move(compactPassDesc));
+
+		RenderGraph::ExternalPassDesc rasterizePassDesc;
+		rasterizePassDesc.type = RenderGraph::PassType::Render;
+        rasterizePassDesc.name = "CLod::RasterizeClustersPass";
+		ClusterRasterizationPassInputs rasterizePassInputs;
+        rasterizePassInputs.clearGbuffer = true;
+        rasterizePassInputs.wireframe = false;
+        rasterizePassDesc.pass = std::make_shared<ClusterRasterizationPass>(
+			rasterizePassInputs,
+            m_compactedVisibleClustersBuffer,
+			m_rasterBucketsHistogramBuffer,
+			m_rasterBucketsIndirectArgsBuffer);
+		outPasses.push_back(std::move(rasterizePassDesc));
 	}
 
 private:
@@ -170,7 +190,7 @@ private:
 	// Compaction Pass Buffers
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
     std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_rasterBucketsWriteCursorBuffer;
-    std::shared_ptr<DynamicStructuredBuffer<DispatchMeshIndirectCommand>> m_rasterBucketsIndirectArgsBuffer;
+    std::shared_ptr<DynamicStructuredBuffer<RasterizeClustersCommand>> m_rasterBucketsIndirectArgsBuffer;
 
 	// ---------------------------------------------------------------
 	// Hierarchial Culling Pass
@@ -723,7 +743,7 @@ private:
             std::shared_ptr<DynamicStructuredBuffer<uint32_t>> offsetsBuffer,
             std::shared_ptr<DynamicStructuredBuffer<uint32_t>> writeCursorBuffer,
             std::shared_ptr<Buffer> compactedClustersBuffer,
-            std::shared_ptr<DynamicStructuredBuffer<DispatchMeshIndirectCommand>> indirectArgsBuffer,
+            std::shared_ptr<DynamicStructuredBuffer<RasterizeClustersCommand>> indirectArgsBuffer,
             uint64_t maxVisibleClusters)
             : m_visibleClustersBuffer(std::move(visibleClustersBuffer)),
             m_visibleClustersCounterBuffer(std::move(visibleClustersCounterBuffer)),
@@ -847,7 +867,7 @@ private:
         std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_offsetsBuffer;
         std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_writeCursorBuffer;
         std::shared_ptr<Buffer> m_compactedClustersBuffer;
-        std::shared_ptr<DynamicStructuredBuffer<DispatchMeshIndirectCommand>> m_indirectArgsBuffer;
+        std::shared_ptr<DynamicStructuredBuffer<RasterizeClustersCommand>> m_indirectArgsBuffer;
 
         uint64_t m_maxVisibleClusters = 0;
     };
@@ -858,7 +878,6 @@ private:
 
     struct ClusterRasterizationPassInputs {
         bool wireframe;
-        bool meshShaders;
         bool clearGbuffer;
 
         friend bool operator==(const ClusterRasterizationPassInputs&, const ClusterRasterizationPassInputs&) = default;
@@ -868,28 +887,28 @@ private:
         std::size_t seed = 0;
 
         boost::hash_combine(seed, i.wireframe);
-        boost::hash_combine(seed, i.meshShaders);
         boost::hash_combine(seed, i.clearGbuffer);
         return seed;
     }
 
     class ClusterRasterizationPass : public RenderPass {
     public:
-        ClusterRasterizationPass() {
-            auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-            m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
-                .with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::GBufferPass))
-                .cached().cache_kind(flecs::QueryCacheAll).build();
+        ClusterRasterizationPass(
+			ClusterRasterizationPassInputs inputs,
+            std::shared_ptr<Buffer> compactedVisibleClustersBuffer,
+            std::shared_ptr<DynamicStructuredBuffer<uint32_t>> rasterBucketsHistogramBuffer,
+            std::shared_ptr<DynamicStructuredBuffer<RasterizeClustersCommand>> rasterBucketsIndirectArgsBuffer)
+            : m_compactedVisibleClustersBuffer(std::move(compactedVisibleClustersBuffer)),
+            m_rasterBucketsHistogramBuffer(std::move(rasterBucketsHistogramBuffer)),
+            m_rasterBucketsIndirectArgsBuffer(std::move(rasterBucketsIndirectArgsBuffer)) {
+            m_wireframe = inputs.wireframe;
+            m_clearGbuffer = inputs.clearGbuffer;
         }
 
         ~ClusterRasterizationPass() {
         }
 
         void DeclareResourceUsages(RenderPassBuilder* builder) {
-            auto input = Inputs<ClusterRasterizationPassInputs>();
-            m_wireframe = input.wireframe;
-            m_meshShaders = input.meshShaders;
-            m_clearGbuffer = input.clearGbuffer;
 
             builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
                 Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer,
@@ -899,25 +918,18 @@ private:
                 Builtin::PerMeshInstanceBuffer,
                 Builtin::PerMaterialDataBuffer,
                 Builtin::PostSkinningVertices,
-                Builtin::CameraBuffer)
+                Builtin::CameraBuffer,
+                m_compactedVisibleClustersBuffer, 
+                m_rasterBucketsHistogramBuffer)
                 .WithRenderTarget(
                     Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 })
                 )
                 .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
+                .WithRenderTarget(
+                Builtin::PrimaryCamera::VisibilityTexture)
+                .WithIndirectArguments(m_rasterBucketsIndirectArgsBuffer)
                 .IsGeometryPass();
-            builder->WithRenderTarget(
-                Builtin::PrimaryCamera::VisibilityTexture);
 
-            if (m_meshShaders) {
-                builder->WithShaderResource(Builtin::PerMeshBuffer, Builtin::PrimaryCamera::MeshletBitfield);
-                auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-                flecs::query<> indirectQuery = ecsWorld.query_builder<>()
-                    .with<Components::IsIndirectArguments>()
-                    .with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::GBufferPass)) // Query for command lists that participate in this pass
-                    //.cached().cache_kind(flecs::QueryCacheAll)
-                    .build();
-                builder->WithIndirectArguments(ECSResourceResolver(indirectQuery));
-            }
         }
 
         void Setup() override {
@@ -1012,24 +1024,54 @@ private:
         }
 
         void ExecuteMeshShaderIndirect(RenderContext& context, rhi::CommandList& commandList) {
-            // Mesh shading with ExecuteIndirect
             auto& psoManager = PSOManager::GetInstance();
-
             auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
 
-            // Opaque clusters
+            uint32_t misc[NumMiscUintRootConstants] = {};
+            misc[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
+            misc[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
+            commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
+            auto numBuckets = context.materialManager->GetRasterBucketCount();
+            if (numBuckets == 0) {
+                return;
+            }
+
+            auto apiResource = m_rasterBucketsIndirectArgsBuffer->GetAPIResource();
+			// For each raster bucket, we have one ExecuteIndirect into a DispatchMesh command
+			auto stride = sizeof(RasterizeClustersCommand);
+			for (uint32_t i = 0; i < numBuckets; ++i) { // TODO: Compaction for zero-count buckets?
+
+				auto flags = context.materialManager->GetRasterFlagsForBucket(i);
+                auto& pso = psoManager.GetClusterLODRasterPSO(
+                    flags,
+                    m_wireframe);
+
+                BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
+                commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
+
+                const uint64_t argOffset = static_cast<uint64_t>(i) * stride;
+                commandList.ExecuteIndirect(
+                    commandSignature.GetHandle(),
+                    apiResource.GetHandle(),
+                    argOffset,
+                    {},
+                    0,
+                    1);
+            }
         }
 
     private:
 
-        flecs::query<Components::ObjectDrawInfo, Components::PerPassMeshes> m_meshInstancesQuery;
         bool m_wireframe;
         bool m_meshShaders;
         bool m_clearGbuffer = true;
 
         PixelBuffer* m_pPrimaryDepthBuffer;
         PixelBuffer* m_pVisibilityBuffer;
+        std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
+        std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_rasterBucketsHistogramBuffer;
+        std::shared_ptr<DynamicStructuredBuffer<RasterizeClustersCommand>> m_rasterBucketsIndirectArgsBuffer;
 
         RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
     };

@@ -141,9 +141,11 @@ unsigned int MaterialManager::GetRasterFlagsSlot(MaterialRasterFlags rasterFlags
 	if (!m_freeRasterBuckets.empty()) {
 		slot = m_freeRasterBuckets.back();
 		m_freeRasterBuckets.pop_back();
+		m_bucketToRasterFlagMapping[slot] = rasterFlags;
 	}
 	else {
 		slot = m_rasterBucketsUsed++;
+		m_bucketToRasterFlagMapping.push_back(rasterFlags);
 	}
 
 	m_rasterFlagToBucketMapping[static_cast<uint32_t>(rasterFlags)] = slot;

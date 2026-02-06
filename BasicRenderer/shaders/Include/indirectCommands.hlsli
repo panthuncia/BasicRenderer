@@ -23,9 +23,9 @@ struct DispatchIndirectCommand
 
 struct RasterizeClustersCommand
 {
-    uint clusterCount;
+    uint baseClusterOffset;
     uint xDim;
-    uint yDim;
+    uint rasterBucketID;
     uint dispatchX, dispatchY, dispatchZ;
 };
 
