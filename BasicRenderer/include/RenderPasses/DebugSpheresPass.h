@@ -66,7 +66,7 @@ public:
 		constants.cameraBufferIndex = m_cameraBufferSRVIndex;
 		constants.objectBufferIndex = m_objectBufferSRVIndex;
 
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, 0, 0, 8, &constants);
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, 0, 0, 8, (uint32_t*)&constants);
 
 		m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::MeshInstances meshInstances) {
 			auto& meshes = meshInstances.meshInstances;
@@ -78,7 +78,7 @@ public:
 				constants.center[2] = meshData.boundingSphere.sphere.z;
 				constants.radius = meshData.boundingSphere.sphere.w;
 				constants.perObjectIndex = drawInfo.perObjectCBIndex;
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, 0, 0, 6, &constants);
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, 0, 0, 6, (uint32_t*)&constants);
 				commandList.DispatchMesh(1, 1, 1);
 			}
 			});

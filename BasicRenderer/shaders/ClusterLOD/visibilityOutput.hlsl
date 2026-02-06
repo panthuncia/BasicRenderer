@@ -1,4 +1,7 @@
+#include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
+#include "include/utilities.hlsli"
+#include "PerPassRootConstants/clodRootConstants.h"
 
 static const uint META_BITS   = 33;
 static const uint DEPTH_BITS  = 31;
@@ -40,20 +43,15 @@ void VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFron
 {
     // Need to check alpha for alpha-tested materials
 #if defined(PSO_ALPHA_TEST)
-    TestAlpha(input.texcoord);
+    TestAlpha(input.texcoord, input.materialDataIndex);
 #endif
     
     // High 32 bits = depth
-    uint64_t output;
-    // 7 bits for meshlet-local triangle index, 25 bits for visible cluster index
-    output.visibility.x = (primID << 25) | input.visibleClusterIndex;
-    
-    uint uintDepth = asuint(input.linearDepth);
-    // Pack isFrontFace into sign bit of depth, since depth is always positive
-    // if (isFrontFace)
-    // {
-    //     uintDepth |= 0x80000000;
-    // }
+    uint64_t output = PackVisKey(input.linearDepth, input.visibleClusterIndex, primID, !isFrontFace);
 
-    output.visibility.y = uintDepth;   
+    // Fetch view-specific output buffer
+    StructuredBuffer<uint> viewVisbufferUAVIndexBuffer = ResourceDescriptorHeap[CLOD_VIEW_UAV_INDICES_BUFFER_DESCRIPTOR_INDEX];
+    uint visBufferUAVIndex = viewVisbufferUAVIndexBuffer[input.viewID];
+    RWTexture2D<uint64_t> visBuffer = ResourceDescriptorHeap[visBufferUAVIndex];
+    InterlockedMin(visBuffer[uint2(input.position.xy)], output);
 }

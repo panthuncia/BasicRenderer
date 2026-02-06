@@ -145,7 +145,18 @@ void ViewManager::AttachDepth(uint64_t viewID,
     if (!v) return;
     v->gpu.depthMap = depth;
     v->gpu.linearDepthMap = linearDepth;
-    if (m_events.onDepthAttached) m_events.onDepthAttached(*v);
+    if (m_events.onDepthAttached) {
+        m_events.onDepthAttached(*v);
+    }
+}
+
+void ViewManager::AttachVisibilityBuffer(uint64_t viewID, std::shared_ptr<PixelBuffer> visibilityBuffer) {
+    auto* v = Get(viewID);
+    if (!v) return;
+    v->gpu.visibilityBuffer = visibilityBuffer;
+    if (m_events.onVisibilityBufferAttached) {
+        m_events.onVisibilityBufferAttached(*v);
+    }
 }
 
 void ViewManager::UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo) {
@@ -161,7 +172,9 @@ void ViewManager::UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo) {
 	cullInfo.errorPixels = 1.0f; // TODO: make configurable
 	m_cullingCameraBuffer->UpdateView(v->gpu.cullingCameraBufferView.get(), &cullInfo);
     
-    if (m_events.onCameraUpdated) m_events.onCameraUpdated(*v);
+    if (m_events.onCameraUpdated) {
+        m_events.onCameraUpdated(*v);
+    }
 }
 
 void ViewManager::ResizeMeshletBitfields(uint64_t numMeshlets) {

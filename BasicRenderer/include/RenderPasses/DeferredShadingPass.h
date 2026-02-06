@@ -93,7 +93,7 @@ public:
 		settings[EnableGTAO] = m_gtaoEnabled;
 		commandList.PushConstants(rhi::ShaderStage::Compute, 0,
 			SettingsRootSignatureIndex, 0,
-			NumSettingsRootConstants, &settings);
+			NumSettingsRootConstants, settings);
 
 		uint32_t w = context.renderResolution.x;
 		uint32_t h = context.renderResolution.y;

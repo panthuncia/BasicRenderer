@@ -108,12 +108,11 @@ public:
             uint32_t gen, 
             uint64_t ep, 
             uint64_t globalIdx,
-            SymbolicTracker* tracker,
             uint32_t numMips = 0, 
             uint32_t arraySz = 0)
             : key(k),
     	generation(gen), 
-        tracker(tracker),
+        //tracker(tracker),
     	epoch(ep), 
     	globalResourceIndex(globalIdx),
     	numMipLevels(numMips), 
@@ -125,7 +124,7 @@ public:
         uint64_t GetGlobalResourceID() const { return globalResourceIndex; }
         uint32_t GetNumMipLevels() const { return numMipLevels; }
         uint32_t GetArraySize() const { return arraySize; }
-		SymbolicTracker* GetStateTracker() const { return tracker; }
+		//SymbolicTracker* GetStateTracker() const { return tracker; }
         // For ephemeral handles that bypass registry storage
         static RegistryHandle MakeEphemeral(Resource* raw) {
             RegistryHandle h;
@@ -133,7 +132,7 @@ public:
             h.generation = 0;
             h.epoch = 0;
             h.globalResourceIndex = raw->GetGlobalResourceID();
-            h.tracker = raw->GetStateTracker();
+            //h.tracker = raw->GetStateTracker();
             h.numMipLevels = raw->GetMipLevels();
             h.arraySize = raw->GetArraySize();
             h.ephemeralPtr = raw;
@@ -144,7 +143,7 @@ public:
     private:
     	ResourceKey key{};
         uint32_t generation = 0;   // for stale detection
-        SymbolicTracker* tracker;
+        //SymbolicTracker* tracker;
         uint64_t epoch = 0;
         uint64_t globalResourceIndex; // For convenience
 
@@ -184,7 +183,7 @@ public:
 
     RegistryHandle MakeEphemeralHandle(Resource* res) const {
         if (!res) {
-            return RegistryHandle({}, 0, 0, 0, nullptr, 0, 0);
+            return RegistryHandle({}, 0, 0, 0, 0, 0);
         }
 
 		// If the resource is already registered, return a normal handle
@@ -201,7 +200,6 @@ public:
             0,  // generation 0
             m_epoch,
             res->GetGlobalResourceID(),
-            res->GetStateTracker(),
             res->GetMipLevels(),
             res->GetArraySize()
         );
@@ -219,7 +217,6 @@ public:
             s.generation,
             m_epoch,
             res->GetGlobalResourceID(),
-            res->GetStateTracker(),
             res->GetMipLevels(), 
             res->GetArraySize());
 
@@ -272,7 +269,6 @@ public:
             s.generation,
             m_epoch,
             s.resource->GetGlobalResourceID(),
-            s.resource->GetStateTracker(),
                 s.resource->GetMipLevels(), 
                 s.resource->GetArraySize());
 
@@ -364,7 +360,6 @@ private:
             s.generation,
             m_epoch,
             s.resource->GetGlobalResourceID(),
-            s.resource->GetStateTracker(),
             s.resource->GetMipLevels(),
             s.resource->GetArraySize()
         );

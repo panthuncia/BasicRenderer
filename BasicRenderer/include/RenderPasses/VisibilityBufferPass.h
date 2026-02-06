@@ -53,7 +53,7 @@ public:
 		m_clearGbuffer = input.clearGbuffer;
 
         builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
-            Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer,
+            //Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer,
             Builtin::PerObjectBuffer,
             Builtin::NormalMatrixBuffer,
             Builtin::PerMeshBuffer,
@@ -105,7 +105,7 @@ public:
         RegisterSRV(Builtin::PerMeshInstanceBuffer);
         RegisterSRV(Builtin::PerMeshBuffer);
         RegisterSRV(Builtin::PerMaterialDataBuffer);
-        RegisterSRV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
+        //RegisterSRV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -191,7 +191,7 @@ private:
         if (m_indirect || m_meshShaders) {
             unsigned int misc[NumMiscUintRootConstants] = {};
             misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
-            commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
+            commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
         }
     }
 

@@ -64,7 +64,6 @@ struct Builtin {
   inline static constexpr std::string_view MeshInstanceMeshletCullingBitfieldGroup = "Builtin::MeshInstanceMeshletCullingBitfieldGroup";
   inline static constexpr std::string_view MeshInstanceOcclusionCullingBitfieldGroup = "Builtin::MeshInstanceOcclusionCullingBitfieldGroup";
   struct MeshResources {
-    inline static constexpr std::string_view ClusterToVisibleClusterTableIndexBuffer = "Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer";
     inline static constexpr std::string_view MeshletBounds = "Builtin::MeshResources::MeshletBounds";
     inline static constexpr std::string_view MeshletOffsets = "Builtin::MeshResources::MeshletOffsets";
     inline static constexpr std::string_view MeshletTriangles = "Builtin::MeshResources::MeshletTriangles";

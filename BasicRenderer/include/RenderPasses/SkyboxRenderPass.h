@@ -57,9 +57,10 @@ public:
         auto viewMatrix = context.currentScene->GetPrimaryCamera().get<Components::Camera>().info.view;
         viewMatrix.r[3] = XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f); // Skybox has no translation
         auto viewProjectionMatrix = XMMatrixMultiply(viewMatrix, context.currentScene->GetPrimaryCamera().get<Components::Camera>().info.jitteredProjection);
-        
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, 0, 0, 16, &viewProjectionMatrix);
-		commandList.PushConstants(rhi::ShaderStage::Pixel, 0, 1, 0, 1, &m_environmentBufferDescriptorIndex);
+
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, 0, 0, 16, reinterpret_cast<const uint32_t*>(&viewProjectionMatrix));
+        uint32_t environmentIndex = m_environmentBufferDescriptorIndex;
+    	commandList.PushConstants(rhi::ShaderStage::Pixel, 0, 1, 0, 1, &environmentIndex);
         commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList);
         commandList.Draw(36, 1, 0, 0); // Skybox cube
 

@@ -1035,8 +1035,8 @@ void Renderer::CreateRenderGraph() {
 
     // TODO: Find a better way to handle resources like this
     // TODO: this access pattern is stupid
-    auto primaryCamera = m_pViewManager->Get(
-        currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID);
+    auto primaryViewID = currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID;
+    auto primaryCamera = m_pViewManager->Get(primaryViewID);
     m_coreResourceProvider.m_primaryCameraMeshletBitfield = primaryCamera->gpu.meshletBitfieldBuffer;
 
     // TODO: Primary camera and current environment will change, and I'd rather not recompile the graph every time that happens.
@@ -1101,6 +1101,22 @@ void Renderer::CreateRenderGraph() {
     if (!useMeshShaders) { // Indirect draws only supported with mesh shaders
         indirect = false;
     }
+
+    auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+    TextureDescription visibilityDesc;
+    visibilityDesc.channels = 2;
+    visibilityDesc.format = rhi::Format::R32G32_UInt;
+    visibilityDesc.hasRTV = true;
+    visibilityDesc.hasSRV = true;
+    visibilityDesc.hasUAV = true; // For clearing
+    visibilityDesc.hasNonShaderVisibleUAV = true; // For clearing with ClearUnorderedAccessViewUint
+    visibilityDesc.imageDimensions.emplace_back(resolution.x, resolution.y, 0, 0);
+    auto visibilityBuffer = PixelBuffer::CreateShared(visibilityDesc);
+    visibilityBuffer->SetName("Visibility Buffer");
+    visibilityBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GBuffer" }));
+    newGraph->RegisterResource(Builtin::PrimaryCamera::VisibilityTexture, visibilityBuffer);
+
+	m_pViewManager->AttachVisibilityBuffer(primaryViewID, visibilityBuffer);
 
     CreateGBufferResources(newGraph.get());
 

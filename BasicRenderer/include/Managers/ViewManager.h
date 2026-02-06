@@ -61,8 +61,9 @@ struct ViewResources {
     std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceMeshletCullingBitfieldBuffer;
     std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceOcclusionCullingBitfieldBuffer;
 
-    std::shared_ptr<PixelBuffer> depthMap;
-    std::shared_ptr<PixelBuffer> linearDepthMap;
+	std::shared_ptr<PixelBuffer> depthMap = nullptr;
+    std::shared_ptr<PixelBuffer> linearDepthMap = nullptr;
+    std::shared_ptr<PixelBuffer> visibilityBuffer = nullptr;
 
     // Cached descriptor indices (filled after descriptor registration, optional)
     uint32_t meshletBitfieldSRVIndex = 0;
@@ -117,6 +118,7 @@ struct ViewEvents {
     std::function<void(uint64_t)>    onDestroyed;
     std::function<void(const View&)> onCameraUpdated;
     std::function<void(const View&)> onDepthAttached;
+	std::function<void(const View&)> onVisibilityBufferAttached;
 };
 
 class ViewManager : public IResourceProvider {
@@ -144,12 +146,16 @@ public:
         std::shared_ptr<PixelBuffer> depth,
         std::shared_ptr<PixelBuffer> linearDepth);
 
+	void AttachVisibilityBuffer(uint64_t viewID, std::shared_ptr<PixelBuffer> visibilityBuffer);
+
     // Update camera matrices/params
     void UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo);
 
     // Resize resources when global counts change
     void ResizeMeshletBitfields(uint64_t numMeshlets);
     void ResizeInstanceBitfields(uint32_t numInstances);
+
+	uint32_t GetNumViews() const { return static_cast<uint32_t>(m_views.size()); }
 
     // Access
     View* Get(uint64_t viewID);

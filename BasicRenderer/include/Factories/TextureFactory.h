@@ -70,7 +70,7 @@ private:
 
         void Cleanup() override {}
 
-        bool DeclaredResourcesChanged() override {
+        bool DeclaredResourcesChanged() const override {
             return m_declaredResourcesChanged;
         }
 

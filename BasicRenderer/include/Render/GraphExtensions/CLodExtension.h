@@ -786,7 +786,8 @@ private:
                 .WithUnorderedAccess(
                     m_writeCursorBuffer,
                     m_compactedClustersBuffer,
-                    m_indirectArgsBuffer);
+                    m_indirectArgsBuffer)
+        	.WithIndirectArguments(m_indirectCommand);
         }
 
         void Setup() override {
@@ -809,7 +810,7 @@ private:
             commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
             BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
 
-            uint32_t rc[NumMiscUintRootConstants] = {};
+            unsigned int rc[NumMiscUintRootConstants] = {};
             rc[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
             rc[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
             rc[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetSRVInfo(0).slot.index;
@@ -891,7 +892,7 @@ private:
         return seed;
     }
 
-    class ClusterRasterizationPass : public RenderPass {
+    class ClusterRasterizationPass : public RenderPass, public IDynamicDeclaredResources {
     public:
         ClusterRasterizationPass(
 			ClusterRasterizationPassInputs inputs,
@@ -903,6 +904,19 @@ private:
             m_rasterBucketsIndirectArgsBuffer(std::move(rasterBucketsIndirectArgsBuffer)) {
             m_wireframe = inputs.wireframe;
             m_clearGbuffer = inputs.clearGbuffer;
+
+            m_viewVisbufferUAVIndicesBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(1, "ViewVisbufferUAVIndicesBuffer", false);
+            
+            // Create rasterization indirect command signature
+            rhi::IndirectArg args[] = {
+                {.kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { MiscUintRootSignatureIndex, 0, 3 } } },
+                {.kind = rhi::IndirectArgKind::DispatchMesh }
+			};
+            auto device = DeviceManager::GetInstance().GetDevice();
+            device.CreateCommandSignature(
+                rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(args, 2), sizeof(RasterizeClustersCommand) },
+                PSOManager::GetInstance().GetRootSignature().GetHandle(),
+				m_rasterizationCommandSignature);
         }
 
         ~ClusterRasterizationPass() {
@@ -910,8 +924,8 @@ private:
 
         void DeclareResourceUsages(RenderPassBuilder* builder) {
 
-            builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
-                Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer,
+            builder->WithShaderResource(
+                //Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer,
                 Builtin::PerObjectBuffer,
                 Builtin::NormalMatrixBuffer,
                 Builtin::PerMeshBuffer,
@@ -919,8 +933,12 @@ private:
                 Builtin::PerMaterialDataBuffer,
                 Builtin::PostSkinningVertices,
                 Builtin::CameraBuffer,
+                Builtin::MeshResources::MeshletTriangles,
+                Builtin::MeshResources::MeshletVertexIndices,
+                Builtin::CLod::Meshlets,
                 m_compactedVisibleClustersBuffer, 
-                m_rasterBucketsHistogramBuffer)
+                m_rasterBucketsHistogramBuffer,
+                m_viewVisbufferUAVIndicesBuffer)
                 .WithRenderTarget(
                     Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 })
                 )
@@ -930,6 +948,9 @@ private:
                 .WithIndirectArguments(m_rasterBucketsIndirectArgsBuffer)
                 .IsGeometryPass();
 
+            for (auto& vb : m_visibilityBuffers) { // Dynamic per-frame
+                builder->WithUnorderedAccess(vb);
+			}
         }
 
         void Setup() override {
@@ -937,11 +958,9 @@ private:
             m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
             m_pVisibilityBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::VisibilityTexture);
 
-            if (m_meshShaders) {
-                RegisterSRV(Builtin::MeshResources::MeshletOffsets);
-                RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
-                RegisterSRV(Builtin::MeshResources::MeshletTriangles);
-            }
+        	//RegisterSRV(Builtin::MeshResources::MeshletOffsets);
+        	RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
+        	RegisterSRV(Builtin::MeshResources::MeshletTriangles);
 
             RegisterSRV(Builtin::NormalMatrixBuffer);
             RegisterSRV(Builtin::PostSkinningVertices);
@@ -950,8 +969,46 @@ private:
             RegisterSRV(Builtin::PerMeshInstanceBuffer);
             RegisterSRV(Builtin::PerMeshBuffer);
             RegisterSRV(Builtin::PerMaterialDataBuffer);
-            RegisterSRV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
+			RegisterSRV(Builtin::CLod::Meshlets);
+
+            //RegisterSRV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
         }
+
+		// Note: relies on Update() running before DeclareResourceUsages(). If this ever changes, we may need a new approach.
+		void Update(const UpdateContext& context) override {
+			// Update view visbuffer UAV indices
+            auto numViews = context.viewManager->GetNumViews();
+
+            m_visibilityBuffers.clear();
+			std::vector<uint32_t> uavIndices(numViews);
+			context.viewManager->ForEachView([&](uint64_t v) {
+				auto viewInfo = context.viewManager->Get(v);
+                if (viewInfo->gpu.visibilityBuffer != nullptr) {
+                    uavIndices[v] = viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+					m_visibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
+                }
+			});
+
+			// Check if new uav indices are different
+            if (m_visibilityBufferUAVIndices != uavIndices) {
+                m_visibilityBufferUAVIndices = uavIndices;
+                // Update the buffer
+                m_viewVisbufferUAVIndicesBuffer->Resize(static_cast<uint32_t>(m_visibilityBufferUAVIndices.size()));
+                BUFFER_UPLOAD(
+                    m_visibilityBufferUAVIndices.data(),
+                    static_cast<uint32_t>(m_visibilityBufferUAVIndices.size() * sizeof(uint32_t)),
+                    UploadManager::UploadTarget::FromShared(m_viewVisbufferUAVIndicesBuffer),
+                    0);
+				m_declaredResourcesChanged = true;
+            }
+            else {
+                m_declaredResourcesChanged = false;
+            }
+		}
+
+        bool DeclaredResourcesChanged() const override {
+            return m_declaredResourcesChanged;
+		}
 
         PassReturn Execute(RenderContext& context) override {
             auto& commandList = context.commandList;
@@ -1025,11 +1082,11 @@ private:
 
         void ExecuteMeshShaderIndirect(RenderContext& context, rhi::CommandList& commandList) {
             auto& psoManager = PSOManager::GetInstance();
-            auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
 
             uint32_t misc[NumMiscUintRootConstants] = {};
             misc[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
             misc[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
+			misc[CLOD_VIEW_UAV_INDICES_BUFFER_DESCRIPTOR_INDEX] = m_viewVisbufferUAVIndicesBuffer->GetSRVInfo(0).slot.index;
             commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
             auto numBuckets = context.materialManager->GetRasterBucketCount();
@@ -1052,7 +1109,7 @@ private:
 
                 const uint64_t argOffset = static_cast<uint64_t>(i) * stride;
                 commandList.ExecuteIndirect(
-                    commandSignature.GetHandle(),
+                    m_rasterizationCommandSignature->GetHandle(),
                     apiResource.GetHandle(),
                     argOffset,
                     {},
@@ -1067,11 +1124,19 @@ private:
         bool m_meshShaders;
         bool m_clearGbuffer = true;
 
+		std::vector<uint32_t> m_visibilityBufferUAVIndices;
+		std::vector<std::shared_ptr<PixelBuffer>> m_visibilityBuffers;
+
         PixelBuffer* m_pPrimaryDepthBuffer;
         PixelBuffer* m_pVisibilityBuffer;
         std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
         std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_rasterBucketsHistogramBuffer;
         std::shared_ptr<DynamicStructuredBuffer<RasterizeClustersCommand>> m_rasterBucketsIndirectArgsBuffer;
+
+		rhi::CommandSignaturePtr m_rasterizationCommandSignature;
+
+		std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_viewVisbufferUAVIndicesBuffer;
+		bool m_declaredResourcesChanged = true;
 
         RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
     };

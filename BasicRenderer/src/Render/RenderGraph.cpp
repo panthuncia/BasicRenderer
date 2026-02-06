@@ -236,7 +236,8 @@ void RenderGraph::CommitPassToBatch(
 
 		for (auto& exit : pass.resources.internalTransitions) {
 			std::vector<ResourceTransition> _;
-			exit.first.resource.GetStateTracker()->Apply(
+			auto pRes = _registry.Resolve(exit.first.resource);
+			pRes->GetStateTracker()->Apply(
 				exit.first.range, nullptr, exit.second, _); // TODO: Do we really need the ptr?
 			currentBatch.internallyTransitionedResources.insert(exit.first.resource.GetGlobalResourceID());
 		}
@@ -277,7 +278,8 @@ void RenderGraph::CommitPassToBatch(
 
 		for (auto& exit : pass.resources.internalTransitions) {
 			std::vector<ResourceTransition> _;
-			exit.first.resource.GetStateTracker()->Apply(
+			auto pRes = _registry.Resolve(exit.first.resource);
+			pRes->GetStateTracker()->Apply(
 				exit.first.range, nullptr, exit.second, _);
 			currentBatch.internallyTransitionedResources.insert(exit.first.resource.GetGlobalResourceID());
 		}
@@ -522,13 +524,13 @@ void RenderGraph::AddTransition(
 	std::vector<ResourceTransition> transitions;
 	auto pRes = _registry.Resolve(resource); // TODO: Can we get rid of pRes in transitions?
 
-	resource.GetStateTracker()->Apply(r.resourceHandleAndRange.range, pRes, r.state, transitions);
+	pRes->GetStateTracker()->Apply(r.resourceHandleAndRange.range, pRes, r.state, transitions);
 
 	if (!transitions.empty()) {
 		outTransitionedResourceIDs.insert(resource.GetGlobalResourceID());
 	}
 
-	currentBatch.passBatchTrackers[resource.GetGlobalResourceID()] = resource.GetStateTracker(); // We will need to chack subsequent passes against this
+	currentBatch.passBatchTrackers[resource.GetGlobalResourceID()] = pRes->GetStateTracker(); // We will need to chack subsequent passes against this
 
 	bool oldSyncHasNonComputeSyncState = false;
 	for (auto& transition : transitions) {

@@ -50,7 +50,7 @@ public:
 	}
 
     void SetMeshletBitfieldBufferView(std::unique_ptr<BufferView> meshletBitfieldBufferView);
-    void SetClusterToVisibleClusterIndicesBufferView(std::unique_ptr<BufferView> clusterIndicesBufferView);
+    //void SetClusterToVisibleClusterIndicesBufferView(std::unique_ptr<BufferView> clusterIndicesBufferView);
 
 	void SetAnimationSpeed(float speed) {
 		m_animationSpeed = speed;

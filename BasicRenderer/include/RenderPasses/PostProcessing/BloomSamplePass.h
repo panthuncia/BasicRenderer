@@ -87,7 +87,7 @@ public:
         misc[MIP_INDEX] = m_mipIndex;
         misc[MIP_WIDTH] = m_pHDRTarget->GetWidth() >> m_mipIndex;
         misc[MIP_HEIGHT] = m_pHDRTarget->GetHeight() >> m_mipIndex;
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
         float miscFloats[NumMiscFloatRootConstants] = {};
         if (m_isUpsample) {
@@ -99,7 +99,7 @@ public:
             miscFloats[SRC_TEXEL_SIZE_Y] = 1.0f / misc[MIP_HEIGHT]; // Texel size Y
         }
         //commandList->SetGraphicsRoot32BitConstants(MiscFloatRootSignatureIndex, NumMiscFloatRootConstants, &miscFloats, 0);
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscFloatRootSignatureIndex, 0, NumMiscFloatRootConstants, &miscFloats);
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscFloatRootSignatureIndex, 0, NumMiscFloatRootConstants, miscFloats);
 
         commandList.Draw(3, 1, 0, 0); // Fullscreen triangle
         return {};

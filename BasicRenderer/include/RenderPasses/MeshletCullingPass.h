@@ -85,7 +85,7 @@ public:
 
 		//RegisterUAV(Builtin::PrimaryCamera::VisibleClusterTable);
 		//RegisterUAV(Builtin::PrimaryCamera::VisibleClusterTableCounter);
-		RegisterUAV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
+		//RegisterUAV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
 
 		m_primaryCameraMeshletCullingBitfieldBuffer = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
 		m_primaryCameraMeshletCullingIndirectCommandBuffer = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling);
@@ -106,10 +106,11 @@ public:
 			Builtin::PrimaryCamera::LinearDepthMap,
 			Builtin::Shadows::LinearShadowMaps)
 			.WithUnorderedAccess(Builtin::MeshletCullingBitfieldGroup, 
-				Builtin::PrimaryCamera::MeshletBitfield,
+				Builtin::PrimaryCamera::MeshletBitfield
 				//Builtin::PrimaryCamera::VisibleClusterTable,
 				//Builtin::PrimaryCamera::VisibleClusterTableCounter,
-				Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer)
+				//Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer
+				)
 			.WithIndirectArguments(
 				Builtin::IndirectCommandBuffers::MeshletCulling, 
 				Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling, 
@@ -141,7 +142,7 @@ public:
 		miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 		miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = m_primaryCameraLinearDepthMap->GetSRVInfo(0).slot.index;
 
-		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &miscRootConstants);
+		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
 
 		unsigned int cameraIndex = context.viewManager->Get(context.currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID)->gpu.cameraBufferIndex;
 		commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &cameraIndex);
@@ -180,7 +181,7 @@ public:
 
 					miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view->gpu.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 					miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = light.type == Components::LightType::Point ? lightDepth.linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).slot.index : lightDepth.linearDepthMap->GetSRVInfo(0).slot.index;
-					commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &miscRootConstants);
+					commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
 					meshletCullingBuffer = view->gpu.indirectCommandBuffers.meshletCullingIndirectCommandBuffer.get();
 
 					commandList.ExecuteIndirect(
@@ -209,7 +210,7 @@ public:
 						commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &cameraIndex);
 
 						miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = view->gpu.meshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
-						commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &miscRootConstants);
+						commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
 						auto meshletCullingClearBuffer = view->gpu.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer;
 
 						commandList.ExecuteIndirect(
@@ -340,7 +341,7 @@ public:
 
 		//RegisterUAV(Builtin::PrimaryCamera::VisibleClusterTable);
 		//RegisterUAV(Builtin::PrimaryCamera::VisibleClusterTableCounter);
-		RegisterUAV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
+		//RegisterUAV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
 
 		m_primaryCameraMeshletBitfieldBuffer = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
 		m_primaryCameraMeshletCullingIndirectCommandBuffer = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling);
@@ -353,10 +354,11 @@ public:
 			Builtin::MeshResources::MeshletBounds,
 			Builtin::CameraBuffer)
 			.WithUnorderedAccess(Builtin::MeshletCullingBitfieldGroup,
-				Builtin::PrimaryCamera::MeshletBitfield,
+				Builtin::PrimaryCamera::MeshletBitfield
 				//Builtin::PrimaryCamera::VisibleClusterTable,
 				//Builtin::PrimaryCamera::VisibleClusterTableCounter,
-				Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer)
+				//Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer
+			)
 			.WithIndirectArguments(
 				Builtin::IndirectCommandBuffers::MeshletCulling,
 				Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling);
@@ -376,7 +378,7 @@ public:
 
 		unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
 		miscRootConstants[MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
-		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &miscRootConstants);
+		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
 
 		auto primaryCameraView = context.viewManager->Get(context.currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID);
 		unsigned int cameraIndex = primaryCameraView->gpu.cameraBufferIndex;

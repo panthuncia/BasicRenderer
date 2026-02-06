@@ -177,7 +177,7 @@ VisBufferOutput VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace 
 {
     // Need to check alpha for alpha-tested materials
 #if defined(PSO_ALPHA_TEST)
-    TestAlpha(input.texcoord);
+    //TestAlpha(input.texcoord);
 #endif
     
     VisBufferOutput output;

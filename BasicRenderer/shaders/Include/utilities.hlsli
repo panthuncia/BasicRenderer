@@ -98,13 +98,10 @@ float3x3 cotangent_frame_from_derivs(
     return float3x3(T * invmax, B * invmax, N);
 }
 
-void TestAlpha(in float2 texcoords)
+void TestAlpha(in float2 texcoords, in uint materialDataIndex)
 {
-    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
-    uint meshBufferIndex = perMeshBufferIndex;
-    PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndex];
     StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
-    MaterialInfo materialInfo = materialDataBuffer[meshBuffer.materialDataIndex];
+    MaterialInfo materialInfo = materialDataBuffer[materialDataIndex];
     uint materialFlags = materialInfo.materialFlags;
         
     float4 baseColor = materialInfo.baseColorFactor;
@@ -317,8 +314,8 @@ void SampleMaterialCorePrecompiled(
 
     localUV = uvh.xy;
 
-    // If you *don’t* implement derivative correction for parallax, keeping the original gradients
-    // is the common approximation (it’s usually fine).
+    // If you *donï¿½t* implement derivative correction for parallax, keeping the original gradients
+    // is the common approximation (itï¿½s usually fine).
 #endif
 
     // Base color

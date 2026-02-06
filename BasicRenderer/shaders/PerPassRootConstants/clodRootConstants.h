@@ -23,4 +23,7 @@
 #define CLOD_NUM_RASTER_BUCKETS UintRootConstant9 // aliased
 #define CLOD_RASTER_BUCKETS_INDIRECT_ARGS_DESCRIPTOR_INDEX UintRootConstant10
 
+// Raster pass
+#define CLOD_VIEW_UAV_INDICES_BUFFER_DESCRIPTOR_INDEX UintRootConstant10 // aliased
+
 #endif // CLOD_ROOT_CONSTANTS_H

@@ -1865,7 +1865,11 @@ namespace rhi {
 		void PushConstants(ShaderStage stages,
 			uint32_t set, uint32_t binding,
 			uint32_t dstOffset32, uint32_t num32,
-			const void* data) noexcept;
+			const uint32_t* data) noexcept;
+		void PushConstants(ShaderStage stages,
+			uint32_t set, uint32_t binding,
+			uint32_t dstOffset32, uint32_t num32,
+			const float* data) noexcept;
 		void SetPrimitiveTopology(PrimitiveTopology t) noexcept;
 		void DispatchMesh(uint32_t x, uint32_t y, uint32_t z) noexcept;
 		void SetWorkGraph(const WorkGraphHandle& wg, const ResourceHandle& backingMemory, bool resetBackingMemory) noexcept;
@@ -2249,7 +2253,13 @@ namespace rhi {
 	inline void CommandList::PushConstants(ShaderStage stages,
 		uint32_t set, uint32_t binding,
 		uint32_t dstOffset32, uint32_t num32,
-		const void* data) noexcept {
+		const uint32_t* data) noexcept {
+		vt->pushConstants(this, stages, set, binding, dstOffset32, num32, data);
+	}
+	inline void CommandList::PushConstants(ShaderStage stages,
+		uint32_t set, uint32_t binding,
+		uint32_t dstOffset32, uint32_t num32,
+		const float* data) noexcept {
 		vt->pushConstants(this, stages, set, binding, dstOffset32, num32, data);
 	}
 	inline void CommandList::SetPrimitiveTopology(PrimitiveTopology t) noexcept { vt->setPrimitiveTopology(this, t); }

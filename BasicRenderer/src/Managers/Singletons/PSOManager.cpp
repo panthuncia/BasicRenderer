@@ -498,17 +498,15 @@ PipelineState PSOManager::CreateClusterLODRasterPSO(
     MaterialRasterFlags materialRasterFlags, bool wireframe) {
     auto defines = GetRasterShaderDefines(materialRasterFlags);
 
-    Microsoft::WRL::ComPtr<ID3DBlob> asBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
 
     ShaderInfoBundle shaderInfoBundle;
     shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"ClusterLODBucketMSMain", L"ms_6_6" };
-    shaderInfoBundle.pixelShader = { L"shaders/shaders.hlsl", L"ClusterLODPSMain", L"ps_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/ClusterLOD/visibilityOutput.hlsl", L"VisibilityBufferPSMain", L"ps_6_6" };
     shaderInfoBundle.defines = defines;
 
     auto compiledBundle = CompileShaders(shaderInfoBundle);
-    asBlob = compiledBundle.amplificationShader;
     msBlob = compiledBundle.meshShader;
     psBlob = compiledBundle.pixelShader;
 

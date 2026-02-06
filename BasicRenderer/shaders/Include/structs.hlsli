@@ -17,12 +17,13 @@ struct PSInput {
 struct VisBufferPSInput
 {
     float4 position : SV_POSITION; // Screen-space position, required for rasterization
-    float linearDepth : TEXCOORD1;
+    float linearDepth : TEXCOORD0;
 #if defined (PSO_ALPHA_TEST)
-    float2 texcoord : TEXCOORD2;
+    float2 texcoord : TEXCOORD1;
+    nointerpolation uint materialDataIndex : TEXCOORD2; // convenience for alpha test
 #endif
-    nointerpolation uint visibleClusterIndex : TEXCOORD0;
-    nointerpolation uint viewID : TEXCOORD3;
+    nointerpolation uint visibleClusterIndex : TEXCOORD3;
+    nointerpolation uint viewID : TEXCOORD4;
 };
 
 struct ClippingPlane {
@@ -203,8 +204,7 @@ struct PerMeshInstanceBuffer {
     uint postSkinningVertexBufferOffset;
     uint meshletBoundsBufferStartIndex;
     uint meshletBitfieldStartIndex;
-    uint clusterToVisibleClusterTableStartIndex;
-    uint pad[1];
+    uint pad[2];
 };
 
 #define LIGHTS_PER_PAGE 12

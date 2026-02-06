@@ -52,19 +52,6 @@ void CreateGBufferResources(RenderGraph* graph) {
 
     graph->RegisterResource(Builtin::GBuffer::Normals, normalsWorldSpace);
 
-    TextureDescription visibilityDesc;
-    visibilityDesc.channels = 2;
-    visibilityDesc.format = rhi::Format::R32G32_UInt;
-    visibilityDesc.hasRTV = true;
-    visibilityDesc.hasSRV = true;
-	visibilityDesc.hasUAV = true; // For clearing
-	visibilityDesc.hasNonShaderVisibleUAV = true; // For clearing with ClearUnorderedAccessViewUint
-    visibilityDesc.imageDimensions.emplace_back(resolution.x, resolution.y, 0, 0);
-    auto visibilityBuffer = PixelBuffer::CreateShared(visibilityDesc);
-	visibilityBuffer->SetName("Visibility Buffer");
-    visibilityBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GBuffer" }));
-    graph->RegisterResource(Builtin::PrimaryCamera::VisibilityTexture, visibilityBuffer);
-
     std::shared_ptr<PixelBuffer> albedo;
     std::shared_ptr<PixelBuffer> metallicRoughness;
     std::shared_ptr<PixelBuffer> emissive;

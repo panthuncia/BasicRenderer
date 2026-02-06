@@ -516,7 +516,7 @@ private:
 		size_t from, size_t to,
 		std::vector<Node>& nodes,
 		std::unordered_set<uint64_t>& edgeSet);
-	static void CommitPassToBatch(
+	void CommitPassToBatch(
 		RenderGraph& rg,
 		AnyPassAndResources& pr,
 		const Node& node,
@@ -533,7 +533,7 @@ private:
 		std::unordered_map<uint64_t, unsigned int>& batchOfLastComputeQueueProducer,
 		std::unordered_map<uint64_t, unsigned int>& batchOfLastRenderQueueUsage,
 		std::unordered_map<uint64_t, unsigned int>& batchOfLastComputeQueueUsage);
-	static void AutoScheduleAndBuildBatches(
+	void AutoScheduleAndBuildBatches(
 		RenderGraph& rg,
 		std::vector<AnyPassAndResources>& passes,
 		std::vector<Node>& nodes);
