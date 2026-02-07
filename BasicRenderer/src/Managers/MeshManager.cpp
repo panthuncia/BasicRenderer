@@ -71,8 +71,11 @@ MeshManager::MeshManager() {
 
 void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedVertices) {
 	mesh->SetCurrentMeshManager(this);
-	auto& vertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedVertices() : mesh->GetVertices();
-	auto& skinningVertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedSkinningVertices() : mesh->GetSkinningVertices();
+	//auto& vertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedVertices() : mesh->GetVertices();
+	//auto& skinningVertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedSkinningVertices() : mesh->GetSkinningVertices();
+	auto& vertices = mesh->GetVertices();
+	auto& skinningVertices = mesh->GetSkinningVertices();
+	
 	auto numVertices = mesh->GetNumVertices(useMeshletReorderedVertices);
 	if (vertices.empty()) {
 		// Handle empty vertices case
@@ -179,7 +182,8 @@ void MeshManager::RemoveMesh(Mesh* mesh) {
 
 void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVertices) {
 	mesh->SetCurrentMeshManager(this);
-	auto& vertices = useMeshletReorderedVertices ? mesh->GetMesh()->GetMeshletReorderedVertices() : mesh->GetMesh()->GetVertices();
+	//auto& vertices = useMeshletReorderedVertices ? mesh->GetMesh()->GetMeshletReorderedVertices() : mesh->GetMesh()->GetVertices();
+	auto vertices = mesh->GetMesh()->GetVertices();
 	auto numVertices = mesh->GetMesh()->GetNumVertices(useMeshletReorderedVertices);
 
 	auto vertexSize = mesh->GetMesh()->GetPerMeshCBData().vertexByteSize;

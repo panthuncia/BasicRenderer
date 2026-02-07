@@ -52,6 +52,15 @@ Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertex
 	m_perMeshBufferData.numVertices = static_cast<uint32_t>(m_vertices->size() / vertexSize);
 	m_perMeshBufferData.skinningVertexByteSize = skinningVertexSize;
 
+	m_perMeshBufferData.vertexFlags = flags;
+	m_perMeshBufferData.vertexByteSize = vertexSize;
+	m_perMeshBufferData.numVertices = static_cast<uint32_t>(m_vertices->size() / vertexSize);
+	m_perMeshBufferData.skinningVertexByteSize = skinningVertexSize;
+	m_perMeshBufferData.clodMeshletBufferOffset = 0;
+	m_perMeshBufferData.clodMeshletVerticesBufferOffset = 0;
+	m_perMeshBufferData.clodMeshletTrianglesBufferOffset = 0;
+	m_perMeshBufferData.clodNumMeshlets = 0;
+
 	m_skinningVertexSize = skinningVertexSize;
 	CreateBuffers(indices);
     this->material = material;
@@ -719,53 +728,53 @@ void Mesh::ComputeBoundingSphere(const std::vector<UINT32>& indices) {
 	m_perMeshBufferData.boundingSphere = sphere;
 }
 
-void Mesh::CreateMeshletReorderedVertices() {
-	const size_t vertexByteSize  = m_perMeshBufferData.vertexByteSize;
-
-	size_t totalVerts = 0;
-	for (auto& ml : m_meshlets) {
-		totalVerts += ml.vertex_count;
-	}
-
-	m_meshletReorderedVertices.resize(totalVerts * vertexByteSize);
-	m_meshletReorderedSkinningVertices.resize(totalVerts * m_skinningVertexSize);
-
-	// Post-skinning vertices
-	std::byte* dst = m_meshletReorderedVertices.data();
-	for (const auto& ml : m_meshlets) {
-		for (unsigned int i = 0; i < ml.vertex_count; ++i) {
-			unsigned int globalIndex = 
-				m_meshletVertices[ml.vertex_offset + i];
-
-			std::byte* src = m_vertices->data()
-				+ globalIndex * vertexByteSize;
-
-			std::copy_n(src, vertexByteSize, dst);
-			dst += vertexByteSize;
-		}
-	}
-
-	// Skinning vertices, if we have them
-	std::byte* dstSkinning = m_meshletReorderedSkinningVertices.data();
-	if (m_skinningVertices) {
-		for (const auto& ml : m_meshlets) {
-			for (unsigned int i = 0; i < ml.vertex_count; ++i) {
-				unsigned int globalIndex =
-					m_meshletVertices[ml.vertex_offset + i];
-				std::byte* src = m_skinningVertices->data()
-					+ globalIndex * m_skinningVertexSize;
-				std::copy_n(src, m_skinningVertexSize, dstSkinning);
-				dstSkinning += m_skinningVertexSize;
-			}
-		}
-	}
-}
+//void Mesh::CreateMeshletReorderedVertices() {
+//	const size_t vertexByteSize  = m_perMeshBufferData.vertexByteSize;
+//
+//	size_t totalVerts = 0;
+//	for (auto& ml : m_meshlets) {
+//		totalVerts += ml.vertex_count;
+//	}
+//
+//	m_meshletReorderedVertices.resize(totalVerts * vertexByteSize);
+//	m_meshletReorderedSkinningVertices.resize(totalVerts * m_skinningVertexSize);
+//
+//	// Post-skinning vertices
+//	std::byte* dst = m_meshletReorderedVertices.data();
+//	for (const auto& ml : m_meshlets) {
+//		for (unsigned int i = 0; i < ml.vertex_count; ++i) {
+//			unsigned int globalIndex = 
+//				m_meshletVertices[ml.vertex_offset + i];
+//
+//			std::byte* src = m_vertices->data()
+//				+ globalIndex * vertexByteSize;
+//
+//			std::copy_n(src, vertexByteSize, dst);
+//			dst += vertexByteSize;
+//		}
+//	}
+//
+//	// Skinning vertices, if we have them
+//	std::byte* dstSkinning = m_meshletReorderedSkinningVertices.data();
+//	if (m_skinningVertices) {
+//		for (const auto& ml : m_meshlets) {
+//			for (unsigned int i = 0; i < ml.vertex_count; ++i) {
+//				unsigned int globalIndex =
+//					m_meshletVertices[ml.vertex_offset + i];
+//				std::byte* src = m_skinningVertices->data()
+//					+ globalIndex * m_skinningVertexSize;
+//				std::copy_n(src, m_skinningVertexSize, dstSkinning);
+//				dstSkinning += m_skinningVertexSize;
+//			}
+//		}
+//	}
+//}
 
 void Mesh::CreateBuffers(const std::vector<UINT32>& indices) {
 
 	BuildClusterLOD(indices);
 	CreateMeshlets(indices);
-	CreateMeshletReorderedVertices();
+	//CreateMeshletReorderedVertices();
     CreateVertexBuffer();
 	ComputeBoundingSphere(indices);
 
@@ -887,6 +896,9 @@ void Mesh::SetCLodBufferViews(
 	m_clusterLODNodesView = std::move(clusterLODNodesView);
 
 	m_perMeshBufferData.clodMeshletBufferOffset = static_cast<uint32_t>(m_clusterLODMeshletsView->GetOffset() / sizeof(meshopt_Meshlet));
+	m_perMeshBufferData.clodMeshletVerticesBufferOffset = static_cast<uint32_t>(m_clusterLODMeshletVerticesView->GetOffset() / sizeof(uint32_t));
+	m_perMeshBufferData.clodMeshletTrianglesBufferOffset = static_cast<uint32_t>(m_clusterLODMeshletTrianglesView->GetOffset());
+	m_perMeshBufferData.clodNumMeshlets = static_cast<uint32_t>(m_clodMeshlets.size());
 	if (m_pCurrentMeshManager != nullptr && m_perMeshBufferView != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}
@@ -897,7 +909,8 @@ void Mesh::SetBaseSkin(std::shared_ptr<Skeleton> skeleton) {
 }
 
 void Mesh::UpdateVertexCount(bool meshletReorderedVertices) {
-	m_perMeshBufferData.numVertices = static_cast<uint32_t>(meshletReorderedVertices ? m_meshletReorderedVertices.size() / m_perMeshBufferData.vertexByteSize : m_vertices->size() / m_perMeshBufferData.vertexByteSize);
+	//m_perMeshBufferData.numVertices = static_cast<uint32_t>(meshletReorderedVertices ? m_meshletReorderedVertices.size() / m_perMeshBufferData.vertexByteSize : m_vertices->size() / m_perMeshBufferData.vertexByteSize);
+	m_perMeshBufferData.numVertices = static_cast<uint32_t>(m_vertices->size() / m_perMeshBufferData.vertexByteSize);
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}

@@ -66,7 +66,8 @@ public:
 		return std::shared_ptr<Mesh>(new Mesh(std::move(vertices), vertexSize, std::move(skinningVertices), skinningVertexSize, indices, material, flags));
     }
 	uint64_t GetNumVertices(bool meshletReorderedVertices) const {
-		uint64_t size = meshletReorderedVertices ? m_meshletReorderedVertices.size() / m_perMeshBufferData.vertexByteSize : m_vertices->size() / m_perMeshBufferData.vertexByteSize;
+		//uint64_t size = meshletReorderedVertices ? m_meshletReorderedVertices.size() / m_perMeshBufferData.vertexByteSize : m_vertices->size() / m_perMeshBufferData.vertexByteSize;
+		auto size = m_vertices->size() / m_perMeshBufferData.vertexByteSize;
 		return size;
 	}
     rhi::VertexBufferView GetVertexBufferView() const;
@@ -75,9 +76,9 @@ public:
     UINT GetIndexCount() const;
 	uint64_t GetGlobalID() const;
 	std::vector<std::byte>& GetVertices() { return *m_vertices; }
-	std::vector<std::byte>& GetMeshletReorderedVertices() { return m_meshletReorderedVertices; }
+	//std::vector<std::byte>& GetMeshletReorderedVertices() { return m_meshletReorderedVertices; }
 	std::vector<std::byte>& GetSkinningVertices() { return *m_skinningVertices; }
-	std::vector<std::byte>& GetMeshletReorderedSkinningVertices() { return m_meshletReorderedSkinningVertices; }
+	//std::vector<std::byte>& GetMeshletReorderedSkinningVertices() { return m_meshletReorderedSkinningVertices; }
 	std::vector<meshopt_Meshlet>& GetMeshlets() { return m_meshlets; }
 	std::vector<unsigned int>& GetMeshletVertices() { return m_meshletVertices; }
 	std::vector<unsigned char>& GetMeshletTriangles() { return m_meshletTriangles; }
@@ -231,7 +232,7 @@ private:
     Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags);
     void CreateVertexBuffer();
     void CreateMeshlets(const std::vector<UINT32>& indices);
-	void CreateMeshletReorderedVertices();
+	//void CreateMeshletReorderedVertices();
     void CreateBuffers(const std::vector<UINT32>& indices);
 	void ComputeBoundingSphere(const std::vector<UINT32>& indices);
 	void ComputeAABB(DirectX::XMFLOAT3& min, DirectX::XMFLOAT3& max);
@@ -249,8 +250,8 @@ private:
 	std::vector<uint32_t> m_meshletVertices;
     std::vector<uint8_t> m_meshletTriangles;
 	std::vector<BoundingSphere> m_meshletBounds;
-	std::vector<std::byte> m_meshletReorderedVertices;
-	std::vector<std::byte> m_meshletReorderedSkinningVertices;
+	//std::vector<std::byte> m_meshletReorderedVertices;
+	//std::vector<std::byte> m_meshletReorderedSkinningVertices;
 
 	std::unique_ptr<BufferView> m_postSkinningVertexBufferView = nullptr;
 	std::unique_ptr<BufferView> m_preSkinningVertexBufferView = nullptr;

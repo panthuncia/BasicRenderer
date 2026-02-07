@@ -192,9 +192,13 @@ struct PerMeshBuffer {
     BoundingSphere boundingSphere;
     
     uint clodMeshletBufferOffset;
+    uint clodMeshletVerticesBufferOffset;
+    uint clodMeshletTrianglesBufferOffset;
+    uint clodNumMeshlets;
+    
     uint numVertices;
     uint numMeshlets;
-    uint pad[1];
+    uint pad[2];
 };
 
 struct PerMeshInstanceBuffer {

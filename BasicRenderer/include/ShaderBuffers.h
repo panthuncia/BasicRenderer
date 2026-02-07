@@ -102,10 +102,14 @@ struct PerMeshCB {
 
 	BoundingSphere boundingSphere;
 
-	unsigned int clodMeshletBufferOffset;
-	unsigned int numVertices;
+    unsigned int clodMeshletBufferOffset;
+    unsigned int clodMeshletVerticesBufferOffset;
+    unsigned int clodMeshletTrianglesBufferOffset;
+    unsigned int clodNumMeshlets;
+
+    unsigned int numVertices;
     unsigned int numMeshlets;
-    unsigned int pad[1];
+    unsigned int pad[2];
 };
 
 struct PerMeshInstanceCB {
