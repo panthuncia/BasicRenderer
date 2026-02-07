@@ -87,7 +87,7 @@ public:
         BUFFER_UPLOAD(&data, sizeof(T), UploadManager::UploadTarget::FromShared(shared_from_this()), index * m_elementSize);
     }
 
-    UINT Size() {
+    uint64_t Size() {
         return m_usedCapacity;
     }
 

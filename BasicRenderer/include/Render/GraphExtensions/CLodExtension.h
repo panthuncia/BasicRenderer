@@ -472,7 +472,7 @@ private:
 
             // Used by the cluster rasterization pass
             rhi::IndirectArg rasterizeClustersArgs[] = {
-                {.kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { MiscUintRootSignatureIndex, 0, 2 } } },
+                {.kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { IndirectCommandSignatureRootSignatureIndex, 0, 2 } } },
                 {.kind = rhi::IndirectArgKind::Dispatch }
             };
 
@@ -763,7 +763,7 @@ private:
                 "CLod_RasterBucketsCompactAndArgsPSO");
 
             rhi::IndirectArg args[] = {
-                {.kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { MiscUintRootSignatureIndex, 0, 2 } } },
+                {.kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { IndirectCommandSignatureRootSignatureIndex, 0, 2 } } },
                 {.kind = rhi::IndirectArgKind::Dispatch }
             };
 
@@ -909,7 +909,7 @@ private:
             
             // Create rasterization indirect command signature
             rhi::IndirectArg args[] = {
-                {.kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { MiscUintRootSignatureIndex, 0, 3 } } },
+                {.kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { IndirectCommandSignatureRootSignatureIndex, 0, 3 } } },
                 {.kind = rhi::IndirectArgKind::DispatchMesh }
 			};
             auto device = DeviceManager::GetInstance().GetDevice();
@@ -977,14 +977,14 @@ private:
 		// Note: relies on Update() running before DeclareResourceUsages(). If this ever changes, we may need a new approach.
 		void Update(const UpdateContext& context) override {
 			// Update view visbuffer UAV indices
-            auto numViews = context.viewManager->GetNumViews();
+            auto numViews = context.viewManager->GetCameraBufferSize();
 
             m_visibilityBuffers.clear();
 			std::vector<uint32_t> uavIndices(numViews);
 			context.viewManager->ForEachView([&](uint64_t v) {
 				auto viewInfo = context.viewManager->Get(v);
                 if (viewInfo->gpu.visibilityBuffer != nullptr) {
-                    uavIndices[v] = viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+                    uavIndices[viewInfo->gpu.cameraBufferIndex] = viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 					m_visibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
                 }
 			});

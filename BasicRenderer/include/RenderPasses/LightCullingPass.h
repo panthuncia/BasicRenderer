@@ -4,11 +4,8 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "Managers/MeshManager.h"
-#include "Managers/ObjectManager.h"
-#include "Managers/Singletons/ECSManager.h"
+#include "../shaders/PerPassRootConstants/lightCullingRootConstants.h"
 
 class LightCullingPass : public ComputePass {
 public:
@@ -50,9 +47,9 @@ public:
 
 		BindResourceDescriptorIndices(commandList, m_PSO.GetResourceDescriptorSlots());
 
-		unsigned int lightClusterConstants[NumLightClusterRootConstants] = {};
-		lightClusterConstants[LightPagesPoolSize] = context.lightManager->GetLightPagePoolSize();
-		commandList.PushConstants(rhi::ShaderStage::Compute, 0, LightClusterRootSignatureIndex, 0, NumLightClusterRootConstants, lightClusterConstants);
+		unsigned int miscUintRootConstants[NumMiscUintRootConstants] = {};
+		miscUintRootConstants[LIGHT_PAGES_POOL_SIZE] = context.lightManager->GetLightPagePoolSize();
+		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscUintRootConstants);
 
 		auto clusterSize = getClusterSize();
 		unsigned int numThreadGroups = static_cast<unsigned int>(std::ceil(((float)(clusterSize.x * clusterSize.y * clusterSize.z)) / 128));

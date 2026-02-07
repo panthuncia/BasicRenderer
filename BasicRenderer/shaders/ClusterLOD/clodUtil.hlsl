@@ -48,14 +48,14 @@ void CreateRasterBucketsHistogramCommandCSMain()
     outCommand[0].dispatchZ = 1;
 }
 
-// UintRootConstant0 = cluster count
-// UintRootConstant1 = xDim
+// IndirectCommandSignatureRootConstant0 = cluster count
+// IndirectCommandSignatureRootConstant1 = xDim
 [shader("compute")]
 [numthreads(CLUSTER_HISTOGRAM_GROUP_SIZE, 1, 1)]
 void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
 {
     // Linearize the 2D dispatch thread ID
-    uint linearizedID = DTid.x + DTid.y * UintRootConstant1;
+    uint linearizedID = DTid.x + DTid.y * IndirectCommandSignatureRootConstant1;
     StructuredBuffer<uint> clusterCountBuffer = ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
     uint clusterCount = clusterCountBuffer.Load(0);
     
@@ -272,10 +272,10 @@ static const uint CLOD_COMPACTION_GROUP_SIZE = CLUSTER_HISTOGRAM_GROUP_SIZE;
 [numthreads(CLOD_COMPACTION_GROUP_SIZE, 1, 1)]
 void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
 {
-    uint xDimThreads = UintRootConstant1 * CLOD_COMPACTION_GROUP_SIZE;
+    uint xDimThreads = IndirectCommandSignatureRootConstant1 * CLOD_COMPACTION_GROUP_SIZE;
     uint linearizedID = dtid.x + dtid.y * xDimThreads;
 
-    uint clusterCount = UintRootConstant0;
+    uint clusterCount = IndirectCommandSignatureRootConstant0;
 
     StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
     uint numBuckets = CLOD_NUM_RASTER_BUCKETS;
@@ -300,7 +300,7 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
     if (linearizedID < numBuckets)
     {
         StructuredBuffer<uint> offsets = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX];
-        RWStructuredBuffer<DispatchMeshIndirectCommand> outArgs = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_INDIRECT_ARGS_DESCRIPTOR_INDEX];
+        RWStructuredBuffer<RasterizeClustersCommand> outArgs = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_INDIRECT_ARGS_DESCRIPTOR_INDEX];
 
         uint count = histogram[linearizedID];
 
@@ -327,5 +327,6 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
             cmd.dispatchY = dispatchY;
             cmd.dispatchZ = 1;
         }
+        outArgs[linearizedID] = cmd;
     }
 }

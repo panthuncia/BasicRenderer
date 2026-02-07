@@ -14,7 +14,7 @@
 #include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Mesh/MeshInstance.h"
-
+#include "../shaders/PerPassRootConstants/ppllFillRootConstants.h"
 
 struct PPLLFillPassInputs {
 	bool wireframe;
@@ -252,15 +252,15 @@ private:
 		settings[EnableGTAO] = m_gtaoEnabled;
 		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, SettingsRootSignatureIndex, 0, NumSettingsRootConstants, settings);
 
-		unsigned int transparencyInfo[NumTransparencyInfoRootConstants] = {};
-		transparencyInfo[PPLLNodePoolSize] = static_cast<uint32_t>(m_numPPLLNodes); // TODO: This needs to be 64-bit, or we will run out of nodes. PPLL in general may not be ideal for higher resolutions.
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, TransparencyInfoRootSignatureIndex, 0, NumTransparencyInfoRootConstants, transparencyInfo);
+		unsigned int transparencyInfo[NumMiscUintRootConstants] = {};
+		transparencyInfo[PPLL_NODE_POOL_SIZE] = static_cast<uint32_t>(m_numPPLLNodes); // TODO: This needs to be 64-bit, or we will run out of nodes. PPLL in general may not be ideal for higher resolutions.
 
 		if (m_meshShaders) {
-			unsigned int misc[NumMiscUintRootConstants] = {};
-			misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
-			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
+			transparencyInfo[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
 		}
+
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, transparencyInfo);
+
 	}
 
 	void ExecuteRegular(RenderContext& context, rhi::CommandList& commandList) {

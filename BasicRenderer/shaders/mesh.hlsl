@@ -314,9 +314,9 @@ void ClusterLODBucketMSMain(
     out primitives VisibilityPerPrimitive primitiveInfo[MS_MESHLET_SIZE])
 {
     // From command signature
-    uint baseOffset = UintRootConstant0;
-    uint dispatchX = UintRootConstant1;
-    uint bucketIndex = UintRootConstant2;
+    uint baseOffset = IndirectCommandSignatureRootConstant0;
+    uint dispatchX = IndirectCommandSignatureRootConstant1;
+    uint bucketIndex = IndirectCommandSignatureRootConstant2;
 
     uint linearizedID = vGroupID.x + vGroupID.y * dispatchX;
 

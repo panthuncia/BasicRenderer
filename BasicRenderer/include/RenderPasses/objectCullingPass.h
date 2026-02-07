@@ -79,11 +79,7 @@ public:
 
 		commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
 
-		unsigned int drawRootConstants[NumDrawInfoRootConstants] = {};
-
 		unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
-
-		//auto& primaryDepth = context.currentScene->GetPrimaryCamera().get<Components::DepthMap>();
 
 		bool shadows = getShadowsEnabled();
 		
@@ -110,8 +106,6 @@ public:
 				commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &viewInfo->gpu.cameraBufferIndex);
 
 				// How many draws are we processing?
-				drawRootConstants[MaxDrawIndex] = wl.count - 1;
-				commandList.PushConstants(rhi::ShaderStage::Compute, 0, DrawInfoRootSignatureIndex, 0, NumDrawInfoRootConstants, drawRootConstants);
 
 				miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = viewInfo->gpu.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 				miscRootConstants[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX] = viewInfo->gpu.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
@@ -125,6 +119,7 @@ public:
 				miscRootConstants[MESHLET_CULLING_INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = viewInfo->gpu.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 				miscRootConstants[INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = wl.buffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 				miscRootConstants[ACTIVE_DRAW_SET_INDICES_BUFFER_SRV_DESCRIPTOR_INDEX] = context.objectManager->GetActiveDrawSetIndices(flags)->GetSRVInfo(0).slot.index;
+				miscRootConstants[MAX_DRAW_INDEX] = wl.count - 1;
 				commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
 
 				commandList.Dispatch(numThreadGroups, 1, 1);

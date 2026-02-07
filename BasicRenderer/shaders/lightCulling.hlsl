@@ -1,5 +1,6 @@
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
+#include "PerPassRootConstants/lightCullingRootConstants.h"
 
 // Returns true if a sphere (with a given center and radius) intersects an AABB
 // defined by aabbMin and aabbMax
@@ -22,7 +23,7 @@ unsigned int AllocatePage(RWStructuredBuffer<uint> LinkedListCounter) {
     // Allocate a new page for the light.
     uint index;
     InterlockedAdd(LinkedListCounter[0], 1, index);
-    if (index > lightPagesPoolSize)
+    if (index > LIGHT_PAGES_POOL_SIZE)
         index = LIGHT_PAGE_ADDRESS_NULL;
     
     return index;

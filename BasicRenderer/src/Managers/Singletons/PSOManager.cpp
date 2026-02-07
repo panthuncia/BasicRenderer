@@ -1526,12 +1526,10 @@ void PSOManager::createRootSignature() {
     { rhi::ShaderStage::All, NumPerMeshRootConstants,   0, 1 },
     { rhi::ShaderStage::All, NumViewRootConstants,      0, 2 },
     { rhi::ShaderStage::All, NumSettingsRootConstants,  0, 3 },
-    { rhi::ShaderStage::All, NumDrawInfoRootConstants,  0, 4 },
-    { rhi::ShaderStage::All, NumTransparencyInfoRootConstants, 0, 5 },
-    { rhi::ShaderStage::All, NumLightClusterRootConstants,      0, 6 },
-    { rhi::ShaderStage::All, NumMiscUintRootConstants,          0, 7 },
-    { rhi::ShaderStage::All, NumMiscFloatRootConstants,         0, 8 },
-    { rhi::ShaderStage::All, NumResourceDescriptorIndicesRootConstants, 0, 9 },
+    { rhi::ShaderStage::All, NumMiscUintRootConstants,          0, 4 },
+    { rhi::ShaderStage::All, NumMiscFloatRootConstants,         0, 5 },
+    { rhi::ShaderStage::All, NumResourceDescriptorIndicesRootConstants, 0, 6 },
+    { rhi::ShaderStage::All, NumIndirectCommandSignatureRootConstants, 0, 7 },
     };
 
     rhi::SamplerDesc pointClamp = {

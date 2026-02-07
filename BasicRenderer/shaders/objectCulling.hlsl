@@ -10,7 +10,7 @@
 [numthreads(64, 1, 1)]
 void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
 {
-    if (dispatchID > maxDrawIndex)
+    if (dispatchID > MAX_DRAW_INDEX)
     {
         return;
     }

@@ -155,7 +155,7 @@ public:
     void ResizeMeshletBitfields(uint64_t numMeshlets);
     void ResizeInstanceBitfields(uint32_t numInstances);
 
-	uint32_t GetNumViews() const { return static_cast<uint32_t>(m_views.size()); }
+	uint32_t GetCameraBufferSize() const { return static_cast<uint32_t>(m_cameraBuffer->Size()); }
 
     // Access
     View* Get(uint64_t viewID);

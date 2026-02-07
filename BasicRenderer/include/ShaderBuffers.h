@@ -344,12 +344,10 @@ enum RootSignatureLayout {
     PerMeshRootSignatureIndex,
 	ViewRootSignatureIndex,
 	SettingsRootSignatureIndex,
-	DrawInfoRootSignatureIndex,
-	TransparencyInfoRootSignatureIndex,
-	LightClusterRootSignatureIndex,
 	MiscUintRootSignatureIndex,
 	MiscFloatRootSignatureIndex,
 	ResourceDescriptorIndicesRootSignatureIndex,
+	IndirectCommandSignatureRootSignatureIndex,
 	NumRootSignatureParameters
 };
 
@@ -375,21 +373,6 @@ enum SettingsRootConstants {
 	EnablePunctualLights,
     EnableGTAO,
 	NumSettingsRootConstants
-};
-
-enum DrawInfoRootConstants {
-    MaxDrawIndex,
-	NumDrawInfoRootConstants
-};
-
-enum TransparencyInfoRootConstants {
-    PPLLNodePoolSize,
-	NumTransparencyInfoRootConstants
-};
-
-enum LightClusterRootConstants {
-    LightPagesPoolSize,
-	NumLightClusterRootConstants
 };
 
 enum MiscUintRootConstants { // Used for pass-specific one-off constants
@@ -454,4 +437,14 @@ enum ResourceDescriptorIndicesRootConstants { // Auto-assigned, do not set manua
 	ResourceDescriptorIndex33,
 	ResourceDescriptorIndex34,
     NumResourceDescriptorIndicesRootConstants
+};
+
+// Used for root constants in indirect command signatures.
+// You can technically use these as regular root constants as well
+enum IndirectCommandSignatureRootConstants {
+    IndirectCommandSignatureRootConstant0,
+    IndirectCommandSignatureRootConstant1,
+    IndirectCommandSignatureRootConstant2,
+    IndirectCommandSignatureRootConstant3,
+    NumIndirectCommandSignatureRootConstants
 };
