@@ -939,12 +939,6 @@ private:
                 m_compactedVisibleClustersBuffer, 
                 m_rasterBucketsHistogramBuffer,
                 m_viewVisbufferUAVIndicesBuffer)
-                .WithRenderTarget(
-                    Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 })
-                )
-                .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
-                .WithRenderTarget(
-                Builtin::PrimaryCamera::VisibilityTexture)
                 .WithIndirectArguments(m_rasterBucketsIndirectArgsBuffer)
                 .IsGeometryPass();
 
@@ -954,9 +948,6 @@ private:
         }
 
         void Setup() override {
-
-            m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
-            m_pVisibilityBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::VisibilityTexture);
 
         	//RegisterSRV(Builtin::MeshResources::MeshletOffsets);
         	RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
@@ -1028,40 +1019,10 @@ private:
 
     private:
         void BeginPass(RenderContext& context) {
-            // Build attachments
             rhi::PassBeginInfo p{};
-            p.width = context.renderResolution.x;
-            p.height = context.renderResolution.y;
-            p.debugName = "GBuffer Pass";
-
-            rhi::DepthAttachment da{};
-            da.dsv = m_pPrimaryDepthBuffer->GetDSVInfo(0).slot;
-            da.depthStore = rhi::StoreOp::Store;
-
-            if (m_clearGbuffer) {
-                da.depthLoad = rhi::LoadOp::Clear;
-                da.clear.type = rhi::ClearValueType::DepthStencil;
-                da.clear.format = rhi::Format::D32_Float;
-                da.clear.depthStencil.depth = 1.0f;
-                da.clear.depthStencil.stencil = 0;
-            }
-            else {
-                da.depthLoad = rhi::LoadOp::Load;
-            }
-            p.depth = &da;
-
-            std::vector<rhi::ColorAttachment> colors;
-
-            // visibility buffer
-            {
-                rhi::ColorAttachment ca{};
-                ca.rtv = m_pVisibilityBuffer->GetRTVInfo(0).slot;
-                ca.storeOp = rhi::StoreOp::Store;
-                ca.loadOp = rhi::LoadOp::Load; // Clearing is handled in a separate pass
-                colors.push_back(ca);
-            }
-
-            p.colors = { colors.data(), (uint32_t)colors.size() };
+            p.width = 4096; // TODO: Max of all render views
+            p.height = 4096;
+            p.debugName = "CLod raster pass";
 
             context.commandList.BeginPass(p);
         }
@@ -1127,8 +1088,6 @@ private:
 		std::vector<uint32_t> m_visibilityBufferUAVIndices;
 		std::vector<std::shared_ptr<PixelBuffer>> m_visibilityBuffers;
 
-        PixelBuffer* m_pPrimaryDepthBuffer;
-        PixelBuffer* m_pVisibilityBuffer;
         std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
         std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_rasterBucketsHistogramBuffer;
         std::shared_ptr<DynamicStructuredBuffer<RasterizeClustersCommand>> m_rasterBucketsIndirectArgsBuffer;

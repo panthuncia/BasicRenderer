@@ -194,7 +194,7 @@ void EmitMeshletVisBufferForView(
 struct VisibilityPerPrimitive
 {
     uint triangleIndex : SV_PrimitiveID;
-    uint viewID : TEXCOORD0;
+    //uint viewID : TEXCOORD0;
 };
 
 void EmitPrimitiveIDs(uint uGroupThreadID, MeshletSetup setup, out primitives VisibilityPerPrimitive primitiveInfo[MS_MESHLET_SIZE])
@@ -202,7 +202,7 @@ void EmitPrimitiveIDs(uint uGroupThreadID, MeshletSetup setup, out primitives Vi
     for (uint t = uGroupThreadID; t < setup.triCount; t += MS_THREAD_GROUP_SIZE)
     {
         primitiveInfo[t].triangleIndex = t;
-        primitiveInfo[t].viewID = setup.viewID;
+		//primitiveInfo[t].viewID = setup.viewID;
     }
 }
 

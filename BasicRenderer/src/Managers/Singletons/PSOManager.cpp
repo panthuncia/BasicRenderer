@@ -521,15 +521,6 @@ PipelineState PSOManager::CreateClusterLODRasterPSO(
     rs.frontCCW = true;
     rhi::SubobjRaster soRaster{ rs };
 
-    rhi::DepthStencilState ds{};
-    rhi::SubobjDepth soDepth{ ds };
-
-    rhi::RenderTargets rts{};
-
-    rts.count = 0;
-
-    rhi::SubobjRTVs soRTV{ rts };
-
     const rhi::PipelineStreamItem items[] = {
         rhi::Make(soLayout),
         rhi::Make(soMesh),

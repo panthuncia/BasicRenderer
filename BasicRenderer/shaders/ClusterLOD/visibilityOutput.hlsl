@@ -52,6 +52,6 @@ void VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFron
     // Fetch view-specific output buffer
     StructuredBuffer<uint> viewVisbufferUAVIndexBuffer = ResourceDescriptorHeap[CLOD_VIEW_UAV_INDICES_BUFFER_DESCRIPTOR_INDEX];
     uint visBufferUAVIndex = viewVisbufferUAVIndexBuffer[input.viewID];
-    RWTexture2D<uint64_t> visBuffer = ResourceDescriptorHeap[visBufferUAVIndex];
+    RWTexture2D<uint64_t> visBuffer = ResourceDescriptorHeap[NonUniformResourceIndex(visBufferUAVIndex)];
     InterlockedMin(visBuffer[uint2(input.position.xy)], output);
 }
