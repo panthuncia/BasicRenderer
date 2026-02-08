@@ -379,7 +379,7 @@ void WG_Traverse(
                 b.viewId        = rec.viewId;
                 b.childLocalMeshletIndexBase = idxBase;
                 b.localMeshletCount          = child.localMeshletCount;
-                b.meshletsBase               = off.meshletsBase + grp.firstMeshlet;
+                b.meshletsBase               = grp.firstMeshlet;
 
                 const uint groupsX = (b.localMeshletCount + 64 - 1) / 64;
                 b.dispatchGrid = uint3(groupsX, 1, 1);
@@ -421,7 +421,7 @@ void WG_ClusterCullBuckets(
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::ChildLocalMeshletIndices)];
 
         const uint localMeshlet = childLocalMeshletIndices[b.childLocalMeshletIndexBase + i];
-        meshletId = localMeshlet;
+        meshletId = b.meshletsBase + localMeshlet;
 
         // TODO: culling here (frustum/occlusion/etc)
         survives = true;

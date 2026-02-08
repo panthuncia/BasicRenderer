@@ -229,11 +229,13 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	auto clusterLODMeshletsView = mesh->GetMesh()->GetCLodMeshletsView();
 	auto clusterLODMeshletBoundsView = mesh->GetMesh()->GetCLodMeshletBoundsView();
 	auto clusterLODNodesView = mesh->GetMesh()->GetCLodNodesView();
+	auto childLocalMeshletIndicesView = mesh->GetMesh()->GetCLodChildLocalMeshletIndicesView();
 
 	MeshInstanceClodOffsets clodOffsets = {};
 	clodOffsets.groupsBase = static_cast<uint32_t>(clusterLODGroupsView->GetOffset() / sizeof(ClusterLODGroup));
 	clodOffsets.childrenBase = static_cast<uint32_t>(clusterLODChildrenView->GetOffset() / sizeof(ClusterLODChild));
-	clodOffsets.childLocalMeshletIndicesBase = 0; // TODO
+	clodOffsets.childLocalMeshletIndicesBase =
+		static_cast<uint32_t>(childLocalMeshletIndicesView->GetOffset() / sizeof(uint32_t));
 	clodOffsets.meshletsBase = static_cast<uint32_t>(clusterLODMeshletsView->GetOffset() / sizeof(meshopt_Meshlet));
 	clodOffsets.meshletBoundsBase = static_cast<uint32_t>(clusterLODMeshletBoundsView->GetOffset() / sizeof(BoundingSphere));
 	clodOffsets.lodNodesBase = static_cast<uint32_t>(clusterLODNodesView->GetOffset() / sizeof(ClusterLODNode));
