@@ -67,14 +67,29 @@ public:
 	enum class ExternalInsertKind : uint8_t { Begin, End, Before, After };
 
 	struct ExternalInsertPoint {
-		ExternalInsertKind kind = ExternalInsertKind::End;
-		std::string anchor; // for Before/After
 		int priority = 0;
 
-		static ExternalInsertPoint Begin(int prio = 0) { return { ExternalInsertKind::Begin, {}, prio }; }
-		static ExternalInsertPoint End(int prio = 0) { return { ExternalInsertKind::End, {}, prio }; }
-		static ExternalInsertPoint Before(std::string anchorPass, int prio = 0) { return { ExternalInsertKind::Before, std::move(anchorPass), prio }; }
-		static ExternalInsertPoint After(std::string anchorPass, int prio = 0) { return { ExternalInsertKind::After, std::move(anchorPass), prio }; }
+		// default: preserve extension-local emission order
+		bool keepExtensionOrder = true;
+
+		std::vector<std::string> after;   // anchor keys that must precede this pass
+		std::vector<std::string> before;  // anchor keys that must follow this pass
+
+		static ExternalInsertPoint Begin(int prio = 0) { ExternalInsertPoint p; p.priority = prio; p.before.push_back("__rg_begin__"); return p; }
+		static ExternalInsertPoint End(int prio = 0) { ExternalInsertPoint p; p.priority = prio; p.after.push_back("__rg_end__");   return p; }
+
+		static ExternalInsertPoint After(std::string a, int prio = 0) { ExternalInsertPoint p; p.priority = prio; p.after.push_back(std::move(a)); return p; }
+		static ExternalInsertPoint Before(std::string a, int prio = 0) { ExternalInsertPoint p; p.priority = prio; p.before.push_back(std::move(a)); return p; }
+
+		static ExternalInsertPoint Between(std::string a, std::string b, int prio = 0) {
+			ExternalInsertPoint p; p.priority = prio;
+			p.after.push_back(std::move(a));
+			p.before.push_back(std::move(b));
+			return p;
+		}
+
+		ExternalInsertPoint& AlsoAfter(std::string a) { after.push_back(std::move(a)); return *this; }
+		ExternalInsertPoint& AlsoBefore(std::string a) { before.push_back(std::move(a)); return *this; }
 	};
 
 	enum class PassType {
@@ -93,11 +108,10 @@ public:
 		bool registerName = true;
 	};
 
-	// Interface OR std::function callback
 	struct IRenderGraphExtension {
 		virtual ~IRenderGraphExtension() = default;
 
-		// optional: lets systems react to registry recreation without RenderGraph including them
+		// lets systems react to registry recreation without RenderGraph including them
 		virtual void OnRegistryReset(ResourceRegistry* registry) {}
 
 		// main hook: inject passes

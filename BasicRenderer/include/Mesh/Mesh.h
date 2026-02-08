@@ -228,6 +228,10 @@ public:
 		return m_clodTopRootNode;
 	}
 
+	uint32_t GetCoarsestLODRootNodeIndex() const {
+		return m_clodLodLevelRoots.back();
+	}
+
 private:
     Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags);
     void CreateVertexBuffer();

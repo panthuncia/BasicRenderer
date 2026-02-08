@@ -157,6 +157,7 @@ public:
 		RenderGraph::ExternalPassDesc rasterizePassDesc;
 		rasterizePassDesc.type = RenderGraph::PassType::Render;
         rasterizePassDesc.name = "CLod::RasterizeClustersPass";
+		rasterizePassDesc.where = RenderGraph::ExternalInsertPoint::Before("MaterialHistogramPass");
 		ClusterRasterizationPassInputs rasterizePassInputs;
         rasterizePassInputs.clearGbuffer = true;
         rasterizePassInputs.wireframe = false;

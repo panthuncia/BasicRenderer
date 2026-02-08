@@ -822,10 +822,6 @@ void RenderGraph::CompileStructural() {
 		size_t order = 0;          // global stable order across all gathered externals
 	};
 
-	auto makeSyntheticKey = [](size_t n) -> std::string {
-		return "__rg_ext_" + std::to_string(n); // should never collide with normal names
-		};
-
 	auto makeAny = [&](ExternalPassDesc const& d) -> AnyPassAndResources {
 		AnyPassAndResources any;
 		any.type = d.type;
@@ -885,177 +881,290 @@ void RenderGraph::CompileStructural() {
 		}
 		};
 
-	std::vector<Pending> begin;
-	std::vector<Pending> end;
-	std::unordered_map<std::string, std::vector<Pending>> before;
-	std::unordered_map<std::string, std::vector<Pending>> after;
+	// Sentinels (must not collide with real pass names)
+	static constexpr const char* kBeginKey = "__rg_begin__";
+	static constexpr const char* kAfterBaseKey = "__rg_after_base__";
+	static constexpr const char* kFirstBaseKey = "__rg_first_base__"; // optional helper token
+
+	struct ExtItem {
+		AnyPassAndResources pr;
+		std::string key;                 // unique key for anchoring
+		ExternalInsertPoint where;        // constraints
+		int priority = 0;
+		size_t order = 0;                // global stable order
+		int extIndex = 0;                // which extension emitted it
+		int extLocalOrder = 0;           // order within that extension
+	};
+
+	struct MergeNode {
+		std::string key;
+		bool hasPass = false;            // sentinel nodes have no pass payload
+		AnyPassAndResources pass{};      // valid iff hasPass
+		int priority = 0;
+		size_t order = 0;
+		std::vector<size_t> out;
+		uint32_t indeg = 0;
+	};
+
+	// Keep base passes
+	auto base = std::move(m_masterPassList);
+	m_masterPassList.clear();
+
+	// Gather extension passes into ExtItem list
+	std::vector<ExtItem> extItems;
+	extItems.reserve(64);
 
 	size_t globalOrder = 0;
 
-	for (auto& ext : m_extensions) {
-		if (!ext) {
-			continue;
-		}
+	// helper: stable synthetic key for unnamed passes
+	auto makeSyntheticKey = [](size_t n) -> std::string {
+		return "__rg_ext_" + std::to_string(n);
+		};
+
+	for (int ei = 0; ei < (int)m_extensions.size(); ++ei) {
+		auto& ext = m_extensions[ei];
+		if (!ext) continue;
 
 		std::vector<ExternalPassDesc> local;
-		local.reserve(8);
+		local.reserve(16);
 		ext->GatherStructuralPasses(*this, local);
 
-		std::optional<std::string> prevAnchorKey; // per-extension, always set even for unnamed passes
-		int chainCounter = 0;
+		std::optional<std::string> prevKey; // for extension-local chaining
+		int localOrder = 0;
 
-		for (size_t i = 0; i < local.size(); ++i) {
-			auto& d = local[i];
+		for (auto& d : local) {
 			if (d.type == PassType::Unknown) continue;
 			if (std::holds_alternative<std::monostate>(d.pass)) continue;
 
-			Pending p;
-			p.pr = makeAny(d);
-			registerName(d, p.pr);
+			ExtItem it;
+			it.pr = makeAny(d);
+			registerName(d, it.pr);
 
-			size_t thisOrder = globalOrder++;
-			p.order = thisOrder;
+			it.order = globalOrder++;
+			it.key = !d.name.empty() ? d.name : makeSyntheticKey(it.order);
 
-			// stable internal key (name if present, otherwise synthetic)
-			p.anchorKey = !d.name.empty() ? d.name : makeSyntheticKey(thisOrder);
-
-			// Synthesize insert point if missing => natural ordering
 			if (d.where.has_value()) {
-				p.where = *d.where;
-				p.chained = false;
-				p.chainOrder = 0;
+				it.where = *d.where;
 			}
 			else {
-				// Natural ordering: always chain to the immediately previous emitted pass in this extension.
-				if (prevAnchorKey.has_value()) {
-					p.where = ExternalInsertPoint::After(*prevAnchorKey);
-					p.chained = true;
-					p.chainOrder = chainCounter++;
-				}
-				else {
-					p.where = ExternalInsertPoint::End();
-					p.chained = false;
-					p.chainOrder = 0;
+				it.where = ExternalInsertPoint{};
+				it.where.keepExtensionOrder = true;
+
+				// Only the *first* unconstrained pass gets anchored after base.
+				// Followers will be ordered by chain edges.
+				if (!prevKey.has_value()) {
+					it.where.after.push_back(kAfterBaseKey);
 				}
 			}
 
-			p.priority = p.where.priority;
+			it.priority = it.where.priority;
+			it.extIndex = ei;
+			it.extLocalOrder = localOrder++;
 
-			switch (p.where.kind) {
-			case ExternalInsertKind::Begin:  begin.push_back(std::move(p)); break;
-			case ExternalInsertKind::End:    end.push_back(std::move(p)); break;
-			case ExternalInsertKind::Before: before[p.where.anchor].push_back(std::move(p)); break;
-			case ExternalInsertKind::After:  after[p.where.anchor].push_back(std::move(p)); break;
-			}
-
-			prevAnchorKey = p.anchorKey;
+			// Store prevKey for later chaining edges (we apply chaining even if explicit where)
+			// (We don’t add edges here because we haven’t built node indices yet.)
+			// We'll reconstruct chaining using extIndex/extLocalOrder + keepExtensionOrder below.
+			extItems.push_back(std::move(it));
+			prevKey = extItems.back().key;
 		}
 	}
 
-	auto sortPending = [&](std::vector<Pending>& v) {
-		std::stable_sort(v.begin(), v.end(), [](Pending const& a, Pending const& b) {
-			if (a.chained != b.chained) return a.chained > b.chained; // chained first
-			if (a.chained && b.chained) return a.chainOrder < b.chainOrder; // extension order
-			if (a.priority != b.priority) return a.priority < b.priority;
-			return a.order < b.order;
-			});
+	// Build nodes list: sentinels + base + externals
+	std::vector<MergeNode> nodes;
+	nodes.reserve(2 + base.size() + extItems.size());
+
+	auto addNode = [&](std::string key, bool hasPass, AnyPassAndResources&& pass, int prio, size_t ord) -> size_t {
+		MergeNode n;
+		n.key = std::move(key);
+		n.hasPass = hasPass;
+		if (hasPass) n.pass = std::move(pass);
+		n.priority = prio;
+		n.order = ord;
+		nodes.push_back(std::move(n));
+		return nodes.size() - 1;
 		};
 
-	sortPending(begin);
-	sortPending(end);
-	for (auto& [k, v] : before) {
-		sortPending(v);
-	}
-	for (auto& [k, v] : after) {
-		sortPending(v);
+	const size_t beginIdx = addNode(std::string(kBeginKey), false, AnyPassAndResources{}, INT_MIN, 0);
+	const size_t afterBaseIdx = addNode(std::string(kAfterBaseKey), false, AnyPassAndResources{}, INT_MAX, 1);
+
+	// Map key->node index (detect collisions early)
+	std::unordered_map<std::string, size_t> keyToIdx;
+	keyToIdx.reserve(2 + base.size() + extItems.size());
+	keyToIdx.emplace(nodes[beginIdx].key, beginIdx);
+	keyToIdx.emplace(nodes[afterBaseIdx].key, afterBaseIdx);
+
+	// Add base pass nodes (preserve current base order deterministically)
+	std::vector<size_t> baseIdx;
+	baseIdx.reserve(base.size());
+
+	for (size_t bi = 0; bi < base.size(); ++bi) {
+		AnyPassAndResources bp = std::move(base[bi]);
+
+		// Anchor keys for base: use name if present, else synthetic (not anchorable by user)
+		std::string key = !bp.name.empty() ? bp.name : ("__rg_base_" + std::to_string(bi));
+
+		if (keyToIdx.contains(key)) {
+			throw std::runtime_error("Pass name/key collision during structural merge: " + key);
+		}
+
+		size_t idx = addNode(key, true, std::move(bp), /*prio=*/0, /*ord=*/1000 + bi);
+		keyToIdx.emplace(nodes[idx].key, idx);
+		baseIdx.push_back(idx);
 	}
 
+	// Add external pass nodes
+	std::vector<size_t> extIdx;
+	extIdx.reserve(extItems.size());
 
-	// Merge into final pass list
-	auto base = std::move(m_masterPassList);
+	for (size_t i = 0; i < extItems.size(); ++i) {
+		auto& e = extItems[i];
+
+		if (keyToIdx.contains(e.key)) {
+			throw std::runtime_error("External pass name/key collision during structural merge: " + e.key);
+		}
+
+		size_t idx = addNode(e.key, true, std::move(e.pr), e.priority, /*ord=*/2000 + e.order);
+		keyToIdx.emplace(nodes[idx].key, idx);
+		extIdx.push_back(idx);
+	}
+
+	// Edge helper (dedup)
+	std::unordered_set<uint64_t> edgeSet;
+	edgeSet.reserve(nodes.size() * 8);
+
+	auto addEdge = [&](size_t from, size_t to) {
+		if (from == to) return;
+		uint64_t k = (uint64_t(from) << 32) | uint64_t(to);
+		if (!edgeSet.insert(k).second) return;
+		nodes[from].out.push_back(to);
+		nodes[to].indeg++;
+		};
+
+	// Base order edges: BEGIN -> base0 -> base1 -> ... -> lastBase -> AFTER_BASE
+	if (!baseIdx.empty()) {
+		addEdge(beginIdx, baseIdx.front());
+		for (size_t i = 0; i + 1 < baseIdx.size(); ++i) addEdge(baseIdx[i], baseIdx[i + 1]);
+		addEdge(baseIdx.back(), afterBaseIdx);
+	}
+	else {
+		addEdge(beginIdx, afterBaseIdx);
+	}
+
+	// Apply external constraints + extension chaining
+	// Build per-extension ordering list (by extLocalOrder)
+	std::unordered_map<int, std::vector<std::pair<int, size_t>>> extOrder; // extIndex -> [(localOrder, nodeIdx)]
+	extOrder.reserve(m_extensions.size());
+
+	for (size_t i = 0; i < extItems.size(); ++i) {
+		extOrder[extItems[i].extIndex].push_back({ extItems[i].extLocalOrder, extIdx[i] });
+	}
+
+	for (auto& [ei, v] : extOrder) {
+		std::sort(v.begin(), v.end(), [](auto& a, auto& b) { return a.first < b.first; });
+	}
+
+	// Now attach constraints and chain edges
+	for (size_t i = 0; i < extItems.size(); ++i) {
+		auto& e = extItems[i];
+		const size_t passNode = extIdx[i];
+
+		// Helper: resolve special token for "first base"
+		auto resolveAnchor = [&](std::string const& anchor) -> std::optional<size_t> {
+			if (anchor == kFirstBaseKey) {
+				if (!baseIdx.empty()) return baseIdx.front();
+				return afterBaseIdx;
+			}
+			auto it = keyToIdx.find(anchor);
+			if (it == keyToIdx.end()) return std::nullopt;
+			return it->second;
+			};
+
+		bool anyConstraint = false;
+
+		// after[] : anchor -> pass
+		for (auto const& a : e.where.after) {
+			auto idxOpt = resolveAnchor(a);
+			if (!idxOpt) {
+				spdlog::warn("External pass '{}' requested After('{}') but anchor not found; ignoring.", e.key, a);
+				continue;
+			}
+			addEdge(*idxOpt, passNode);
+			anyConstraint = true;
+		}
+
+		// before[] : pass -> anchor
+		for (auto const& b : e.where.before) {
+			auto idxOpt = resolveAnchor(b);
+			if (!idxOpt) {
+				spdlog::warn("External pass '{}' requested Before('{}') but anchor not found; ignoring.", e.key, b);
+				continue;
+			}
+			addEdge(passNode, *idxOpt);
+			anyConstraint = true;
+		}
+	}
+
+	// Extension chaining edges: prev -> next (if keepExtensionOrder on the *next* pass)
+	for (auto& [ei, v] : extOrder) {
+		for (size_t j = 1; j < v.size(); ++j) {
+			// Find the extItems entry for this node to check keepExtensionOrder
+			// (We can check by key because keys are unique.)
+			const size_t prevNode = v[j - 1].second;
+			const size_t nextNode = v[j].second;
+
+			const std::string& nextKey = nodes[nextNode].key;
+
+			// locate corresponding ext item (small N; linear is fine)
+			bool keep = true;
+			for (auto& e : extItems) {
+				if (e.key == nextKey) { keep = e.where.keepExtensionOrder; break; }
+			}
+			if (keep) addEdge(prevNode, nextNode);
+		}
+	}
+
+	// Topological sort (stable by priority then order)
+	std::vector<uint32_t> indeg(nodes.size());
+	for (size_t n = 0; n < nodes.size(); ++n) indeg[n] = nodes[n].indeg;
+
+	std::vector<size_t> ready;
+	ready.reserve(nodes.size());
+	for (size_t n = 0; n < nodes.size(); ++n) if (indeg[n] == 0) ready.push_back(n);
+
+	auto better = [&](size_t a, size_t b) {
+		if (nodes[a].priority != nodes[b].priority) return nodes[a].priority < nodes[b].priority;
+		return nodes[a].order < nodes[b].order;
+		};
+
+	std::vector<size_t> topo;
+	topo.reserve(nodes.size());
+
+	while (!ready.empty()) {
+		auto it = std::min_element(ready.begin(), ready.end(), [&](size_t a, size_t b) { return better(a, b); });
+		size_t u = *it;
+		ready.erase(it);
+
+		topo.push_back(u);
+		for (size_t vtx : nodes[u].out) {
+			if (--indeg[vtx] == 0) ready.push_back(vtx);
+		}
+	}
+
+	if (topo.size() != nodes.size()) {
+		spdlog::error("Structural merge has a cycle (extension anchors/chains impossible).");
+		throw std::runtime_error("RenderGraph structural merge cycle");
+	}
+
+	// Emit final m_masterPassList in topo order (skip sentinels)
 	m_masterPassList.clear();
-	m_masterPassList.reserve(begin.size() + base.size() + end.size() + 8);
+	m_masterPassList.reserve(baseIdx.size() + extIdx.size());
 
-	std::unordered_set<std::string> emittedKeys;
-
-	// helper: consume vectors from maps
-	auto takeVec = [&](auto& map, std::string const& key) -> std::vector<Pending> {
-		auto it = map.find(key);
-		if (it == map.end()) return {};
-		auto v = std::move(it->second);
-		map.erase(it);
-		return v;
-		};
-
-	auto emitPending = [&](auto&& self, Pending&& p) -> void {
-		const std::string& key = p.anchorKey;
-
-		// de-dupe / cycle guard
-		if (!emittedKeys.insert(key).second) {
-			return;
+	for (size_t u : topo) {
+		if (!nodes[u].hasPass) {
+			continue;
 		}
-
-		// emit "before key"
-		auto b = takeVec(before, key);
-		for (auto& x : b) self(self, std::move(x));
-
-		m_masterPassList.push_back(std::move(p.pr));
-
-		// emit "after key"
-		auto a = takeVec(after, key);
-		for (auto& x : a) self(self, std::move(x));
-		};
-
-	auto emitBasePass = [&](auto&& self, AnyPassAndResources&& bp) -> void {
-		const std::string nm = bp.name;
-
-		if (!nm.empty()) {
-			emittedKeys.insert(nm);
-
-			auto b = takeVec(before, nm);
-			for (auto& x : b) emitPending(emitPending, std::move(x));
-		}
-
-		m_masterPassList.push_back(std::move(bp));
-
-		if (!nm.empty()) {
-			auto a = takeVec(after, nm);
-			for (auto& x : a) emitPending(emitPending, std::move(x));
-		}
-		};
-
-	// begin
-	for (auto& p : begin) {
-		emitPending(emitPending, std::move(p));
+		m_masterPassList.push_back(std::move(nodes[u].pass));
 	}
-
-	// base passes (with before/after hooks)
-	for (auto& bp : base) {
-		emitBasePass(emitBasePass, std::move(bp));
-	}
-
-	// end
-	for (auto& p : end) {
-		emitPending(emitPending, std::move(p));
-	}
-
-	// unresolved anchors: warn + append (honors chains among themselves)
-	auto flushUnresolved = [&](auto& map, bool isBefore) {
-		while (!map.empty()) {
-			auto it = map.begin();
-			std::string anchor = it->first;
-			auto vec = std::move(it->second);
-			map.erase(it);
-
-			spdlog::warn("External pass requested {}('{}') but anchor was not found; appending at end.",
-				isBefore ? "Before" : "After", anchor);
-
-			for (auto& p : vec) emitPending(emitPending, std::move(p));
-		}
-		};
-
-	flushUnresolved(before, true);
-	flushUnresolved(after, false);
 }
 
 

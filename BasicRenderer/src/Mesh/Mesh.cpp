@@ -273,8 +273,9 @@ void Mesh::BuildClusterLODTraversalHierarchy(uint32_t preferredNodeWidth)
 	// [rest] per-depth interior nodes + leaves (except per-depth root)
 	m_clodLodNodeRanges.assign(lodLevelCount, {});
 	m_clodLodLevelRoots.resize(lodLevelCount);
-	for (uint32_t d = 0; d < lodLevelCount; ++d)
+	for (uint32_t d = 0; d < lodLevelCount; ++d) {
 		m_clodLodLevelRoots[d] = 1 + d;
+	}
 
 	uint32_t nodeOffset = 1 + lodLevelCount;
 

@@ -2584,6 +2584,7 @@ namespace rhi {
 				BreakIfDebugging();
 				spdlog::error("cl_reset: invalid command allocator");
 			}
+			l->boundPipeline = nullptr;
 #endif
 			l->cl->Reset(a->alloc.Get(), nullptr);
 		}
@@ -2660,8 +2661,17 @@ namespace rhi {
 			auto* l = dx12_detail::CL(cl);
 			auto* dev = l->dev;
 			if (auto* P = dev->pipelines.get(psoH)) {
+#if BUILD_MODE == BUILD_DEBUG
+				l->boundPipeline = P;
+#endif
 				l->cl->SetPipelineState(P->pso.Get());
+				return;
 			}
+#if BUILD_TYPE == BUILD_DEBUG
+			l->boundPipeline = nullptr;
+			BreakIfDebugging();
+			spdlog::error("cl_bindPipeline: invalid pipeline handle");
+#endif
 		}
 		static void cl_setVB(CommandList* cl, uint32_t startSlot, uint32_t numViews, VertexBufferView* pBufferViews) noexcept {
 			auto* l = dx12_detail::CL(cl);
@@ -2773,6 +2783,12 @@ namespace rhi {
 				auto* c = dev->resources.get(cntBufH);
 				if (c && c->res) cntRes = c->res.Get();
 			}
+
+#if BUILD_MODE == BUILD_DEBUG
+			if (l->boundPipeline == nullptr) {
+				BreakIfDebugging();
+			}
+#endif
 
 			l->cl->ExecuteIndirect(
 				S->sig.Get(),

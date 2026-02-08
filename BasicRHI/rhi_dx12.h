@@ -169,6 +169,7 @@ namespace rhi {
 		PipelineLayoutHandle boundLayout{};
 		Dx12PipelineLayout* boundLayoutPtr = nullptr;
 		Dx12Device* dev = nullptr;
+		Dx12Pipeline* boundPipeline = nullptr; // For debug validation
 	};
 
 	// Build D3D12_RESOURCE_DESC1 for buffers

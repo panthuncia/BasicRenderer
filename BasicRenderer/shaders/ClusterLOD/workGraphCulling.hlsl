@@ -157,8 +157,6 @@ void WG_ObjectCull(
         r.id            = off.rootNode;   // BVH root node for this mesh
         r.kind          = 0;              // Node
         outRecs.Get()   = r;
-
-        outRecs.Get() = r;
     }
 
     // Must be uniform even when some threads requested 0 records.
@@ -188,7 +186,7 @@ float ProjectedErrorPixels(float3 worldCenter, float worldRadius, float errorMes
     return frac * screenHeight;
 }
 
-// Node: Traverse (recursive)
+// Node: Traverse (recursive)3
 [Shader("node")]
 [NodeID("Traverse")]
 [NodeLaunch("coalescing")]
@@ -294,11 +292,12 @@ void WG_Traverse(
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
         const row_major matrix objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
 
-        const uint ci = gtid.x;
+                const uint ci = gtid.x;
         const bool activeChild = (ci < grp.childCount);
 
         ClusterLODChild child = (ClusterLODChild)0;
-        bool wantsRefine = false;
+        bool wantsRefineChild = false;
+        bool canRefineChild = false;
 
         if (activeChild)
         {
@@ -306,6 +305,8 @@ void WG_Traverse(
 
             if (child.refinedGroup >= 0)
             {
+                canRefineChild = true;
+
                 const ClusterLODGroup refinedGrp = groups[off.groupsBase + (uint)child.refinedGroup];
 
                 float4 objectSpaceCenter = float4(refinedGrp.bounds.centerAndRadius.xyz, 1.0);
@@ -329,13 +330,16 @@ void WG_Traverse(
                     perFrameBuffer[0].screenResY,
                     cam.zNear);
 
-                wantsRefine = (px > cam.errorPixels);
+                wantsRefineChild = (px > cam.errorPixels);
             }
         }
 
+        // If any child wants refinement, suppress the coarse (-1) bucket.
+        const bool groupRefines = WaveActiveAnyTrue(activeChild && canRefineChild && wantsRefineChild);
+
         // Emit refine record(s): emit kind=Group
         {
-            const uint n = (activeChild && wantsRefine) ? 1 : 0;
+            const uint n = (activeChild && canRefineChild && wantsRefineChild) ? 1 : 0;
             ThreadNodeOutputRecords<TraverseRecord> o =
                 Traverse.GetThreadNodeOutputRecords(n);
 
@@ -353,7 +357,14 @@ void WG_Traverse(
 
         // Emit terminal bucket(s)
         {
-            const bool emitBucket = activeChild && !wantsRefine && (child.localMeshletCount != 0);
+            bool emitBucket = activeChild && !wantsRefineChild && (child.localMeshletCount != 0);
+
+            // If the group is refining, suppress the coarse fallback bucket.
+            if (child.refinedGroup < 0)
+            {
+                emitBucket = emitBucket && !groupRefines;
+            }
+
             const uint n = emitBucket ? 1 : 0;
 
             ThreadNodeOutputRecords<MeshletBucketRecord> o =
@@ -434,31 +445,4 @@ void WG_ClusterCullBuckets(
         vc.viewID = b.viewId;
         visibleClusters[index] = vc;
     }
-
-    // ThreadNodeOutputRecords<MeshletWorkRecord> o =
-    //     Output.GetThreadNodeOutputRecords(n);
-
-    // if (n == 1)
-    // {
-    //     MeshletWorkRecord r;
-    //     r.instanceIndex = b.instanceIndex;
-    //     r.meshletId     = meshletId;
-    //     r.viewId        = b.viewId;
-    //     r.pad           = 0;
-    //     o.Get() = r;
-    // }
-
-    // o.OutputComplete();
 }
-
-// Node: Output (stub)
-// [Shader("node")]
-// [NodeID("Output")]
-// [NodeLaunch("coalescing")]
-// [NumThreads(64, 1, 1)]
-// void WG_Output(
-//     [MaxRecords(256)] GroupNodeInputRecords<MeshletWorkRecord> inRecs,
-//     uint3 gtid : SV_GroupThreadID)
-// {
-
-// }
