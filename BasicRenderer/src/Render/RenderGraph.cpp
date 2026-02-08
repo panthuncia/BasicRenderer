@@ -962,7 +962,7 @@ void RenderGraph::CompileStructural() {
 			it.extLocalOrder = localOrder++;
 
 			// Store prevKey for later chaining edges (we apply chaining even if explicit where)
-			// (We don’t add edges here because we haven’t built node indices yet.)
+			// (We don't add edges here because we haven't built node indices yet.)
 			// We'll reconstruct chaining using extIndex/extLocalOrder + keepExtensionOrder below.
 			extItems.push_back(std::move(it));
 			prevKey = extItems.back().key;

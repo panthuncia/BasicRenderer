@@ -29,7 +29,7 @@ MeshManager::MeshManager() {
 	m_perMeshInstanceClodOffsets = DynamicBuffer::CreateShared(sizeof(MeshInstanceClodOffsets), 1, "perMeshInstanceClodOffsets");
 	m_clusterLODGroups = DynamicBuffer::CreateShared(sizeof(ClusterLODGroup), 1, "clusterLODGroups");
 	m_clusterLODChildren = DynamicBuffer::CreateShared(sizeof(ClusterLODChild), 1, "clusterLODChildren");
-	m_clusterLODMeshlets = DynamicBuffer::CreateShared(sizeof(meshopt_Meshlet), 1, "clusterLODMeshlets");
+	//m_clusterLODMeshlets = DynamicBuffer::CreateShared(sizeof(meshopt_Meshlet), 1, "clusterLODMeshlets");
 	m_clusterLODMeshletBounds = DynamicBuffer::CreateShared(sizeof(BoundingSphere), 1, "clusterLODMeshletBounds", false, true);
 	m_childLocalMeshletIndices = DynamicBuffer::CreateShared(sizeof(unsigned int), 1, "clodChildLocalMeshletIndices");
 	m_clusterLODNodes = DynamicBuffer::CreateShared(sizeof(ClusterLODNode), 1, "clusterLODNodes");
@@ -62,7 +62,7 @@ MeshManager::MeshManager() {
 	m_resources[Builtin::CLod::Offsets] = m_perMeshInstanceClodOffsets;
 	m_resources[Builtin::CLod::Groups] = m_clusterLODGroups;
 	m_resources[Builtin::CLod::Children] = m_clusterLODChildren;
-	m_resources[Builtin::CLod::Meshlets] = m_clusterLODMeshlets;
+	//m_resources[Builtin::CLod::Meshlets] = m_clusterLODMeshlets;
 	m_resources[Builtin::CLod::MeshletBounds] = m_clusterLODMeshletBounds;
 	m_resources[Builtin::CLod::ChildLocalMeshletIndices] = m_childLocalMeshletIndices;
 	m_resources[Builtin::CLod::Nodes] = m_clusterLODNodes;
@@ -117,7 +117,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	// TODO: Some of this should be in instances, vertex data should go in main vertex buffers
 	auto clusterLODGroupsView = m_clusterLODGroups->AddData(mesh->GetCLodGroups().data(), mesh->GetCLodGroups().size() * sizeof(ClusterLODGroup), sizeof(ClusterLODGroup));
 	auto clusterLODChildrenView = m_clusterLODChildren->AddData(mesh->GetCLodChildren().data(), mesh->GetCLodChildren().size() * sizeof(ClusterLODChild), sizeof(ClusterLODChild));
-	auto clusterLODMeshletsView = m_clusterLODMeshlets->AddData(mesh->GetCLodMeshlets().data(), mesh->GetCLodMeshlets().size() * sizeof(meshopt_Meshlet), sizeof(meshopt_Meshlet));
+	auto clusterLODMeshletsView = m_meshletOffsets->AddData(mesh->GetCLodMeshlets().data(), mesh->GetCLodMeshlets().size() * sizeof(meshopt_Meshlet), sizeof(meshopt_Meshlet));
 	auto clusterLODMeshletVerticesView = m_meshletVertexIndices->AddData(mesh->GetCLodMeshletVertices().data(), mesh->GetCLodMeshletVertices().size() * sizeof(uint32_t), sizeof(uint32_t));
 	auto clusterLODMeshletTrianglesView = m_meshletTriangles->AddData(mesh->GetCLodMeshletTriangles().data(), mesh->GetCLodMeshletTriangles().size() * sizeof(uint8_t), sizeof(uint8_t));
 	auto clusterLODMeshletBoundsView = m_clusterLODMeshletBounds->AddData(mesh->GetCLodBounds().data(), mesh->GetCLodBounds().size() * sizeof(BoundingSphere), sizeof(BoundingSphere));

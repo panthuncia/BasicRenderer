@@ -4,6 +4,7 @@
 #include "include/vertex.hlsli"
 #include "include/utilities.hlsli"
 #include "include/waveIntrinsicsHelpers.hlsli"
+#include "include/visibilityPacking.hlsli"
 
 // http://filmicworlds.com/blog/visibility-buffer-rendering-with-material-graphs/
 struct BarycentricDeriv
@@ -255,17 +256,18 @@ void ComputeTriVertexByteOffsetsCompact(MeshletResolveData d, uint3 triIdx, out 
 // Note: relies on gs_* groupshared values being initialized.
 void EvaluateGBufferOptimized(uint2 pixel)
 {
-    Texture2D<uint2> visibilityTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
-    uint2 vis = visibilityTexture[pixel];
+    Texture2D<uint64_t> visibilityTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
+    uint64_t vis = visibilityTexture[pixel];
 
-    uint depthBitsRaw = vis.y;
-    bool isFrontFace = ((depthBitsRaw & 0x80000000u) != 0);
-
-    uint clusterIndex = vis.x & 0x1FFFFFFu;
-    if (clusterIndex == 0x1FFFFFFu)
+   
+    if (vis == 0xFFFFFFFFFFFFFFFF) // no visible geometry
         return;
 
-    uint meshletTriangleIndex = vis.x >> 25;
+    float depth;
+    uint clusterIndex;
+    uint meshletTriangleIndex;
+    bool isBackface = false; // TODO
+    UnpackVisKey(vis, depth, clusterIndex, meshletTriangleIndex);
 
     // Meshlet-level wave dedup (key = clusterIndex)
     // This optimization did not help much in testing; keeping because it didn't hurt.
@@ -368,7 +370,7 @@ void EvaluateGBufferOptimized(uint2 pixel)
 
     float3 worldNormal = normalize(mul(normalOS, normalMatrix));
 
-    if (!isFrontFace) {
+    if (isBackface) {
         worldNormal = -worldNormal;
     }
 
@@ -449,15 +451,19 @@ void PrimaryDepthCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint2 pixel = dispatchThreadId.xy;
     // .x = 7 bits for meshlet triangle index, 25 bits for visible cluster index
     // .y = 32-bit depth
-    Texture2D<uint2> visibilityTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
+    Texture2D<uint64_t> visibilityTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
     
-    uint visibilityDataY = visibilityTexture[pixel].y;
-    float depth = asfloat(0x7F7FFFFF); // FLT_MAX
-    if (!(visibilityDataY == 0xFFFFFFFFu))
+    uint64_t vis = visibilityTexture[pixel];
+    float depth;
+    if (vis == 0xFFFFFFFFFFFFFFFF) // no visible geometry
     {
-        depth = asfloat(visibilityDataY);
-        // Sign bit was stolen for face orientation; clear it
-        depth = asfloat(asuint(depth) & 0x7FFFFFFF);
+        depth = asfloat(0x7F7FFFFF); // FLT_MAX
+    }
+    else
+    {
+        uint clusterIndex;
+        uint meshletTriangleIndex;
+        UnpackVisKey(vis, depth, clusterIndex, meshletTriangleIndex);
     }
 
     RWTexture2D<float> linearDepthTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::LinearDepthMap)];

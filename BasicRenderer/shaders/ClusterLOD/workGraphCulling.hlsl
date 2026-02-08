@@ -421,7 +421,7 @@ void WG_ClusterCullBuckets(
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::ChildLocalMeshletIndices)];
 
         const uint localMeshlet = childLocalMeshletIndices[b.childLocalMeshletIndexBase + i];
-        meshletId = b.meshletsBase + localMeshlet;
+        meshletId = localMeshlet;
 
         // TODO: culling here (frustum/occlusion/etc)
         survives = true;

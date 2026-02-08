@@ -936,7 +936,7 @@ private:
                 Builtin::CameraBuffer,
                 Builtin::MeshResources::MeshletTriangles,
                 Builtin::MeshResources::MeshletVertexIndices,
-                Builtin::CLod::Meshlets,
+                Builtin::MeshResources::MeshletOffsets,
                 m_compactedVisibleClustersBuffer, 
                 m_rasterBucketsHistogramBuffer,
                 m_viewVisbufferUAVIndicesBuffer)
@@ -961,7 +961,7 @@ private:
             RegisterSRV(Builtin::PerMeshInstanceBuffer);
             RegisterSRV(Builtin::PerMeshBuffer);
             RegisterSRV(Builtin::PerMaterialDataBuffer);
-			RegisterSRV(Builtin::CLod::Meshlets);
+			RegisterSRV(Builtin::MeshResources::MeshletOffsets);
 
             //RegisterSRV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
         }

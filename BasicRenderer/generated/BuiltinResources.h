@@ -11,7 +11,6 @@ struct Builtin {
     inline static constexpr std::string_view Children = "Builtin::CLod::Children";
     inline static constexpr std::string_view Groups = "Builtin::CLod::Groups";
     inline static constexpr std::string_view MeshletBounds = "Builtin::CLod::MeshletBounds";
-    inline static constexpr std::string_view Meshlets = "Builtin::CLod::Meshlets";
     inline static constexpr std::string_view Nodes = "Builtin::CLod::Nodes";
     inline static constexpr std::string_view Offsets = "Builtin::CLod::Offsets";
   };

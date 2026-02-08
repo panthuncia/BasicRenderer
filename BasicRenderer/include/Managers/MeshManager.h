@@ -55,7 +55,7 @@ private:
 	std::shared_ptr<DynamicBuffer> m_clusterLODGroups;
 	std::shared_ptr<DynamicBuffer> m_clusterLODChildren;
 
-	std::shared_ptr<DynamicBuffer> m_clusterLODMeshlets;
+	//std::shared_ptr<DynamicBuffer> m_clusterLODMeshlets;
 	std::shared_ptr<DynamicBuffer> m_clusterLODMeshletBounds;
 	std::shared_ptr<DynamicBuffer> m_childLocalMeshletIndices;
 	std::shared_ptr<DynamicBuffer> m_clusterLODNodes;

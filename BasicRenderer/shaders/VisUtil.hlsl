@@ -4,20 +4,12 @@
 #include "include/meshletCommon.hlsli"
 #include "include/waveIntrinsicsHelpers.hlsli"
 #include "PerPassRootConstants/visUtilRootConstants.h"
+#include "include/visibilityPacking.hlsli"
 
 struct PixelRef
 {
     uint pixelXY;
 };
-
-uint DecodeClusterIndex(uint packed)
-{
-    return packed & 0x1FFFFFFu; /* 25 bits */
-}
-uint DecodePrimID(uint packed)
-{
-    return packed >> 25;
-}
 
 uint GetMaterialIdFromCluster(uint clusterIndex,
                               StructuredBuffer<VisibleCluster> visibleClusterBuffer,
@@ -63,7 +55,7 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
     if (dtid.x >= screenW || dtid.y >= screenH)
         return;
 
-    Texture2D<uint2> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
+    Texture2D<uint64_t> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
     StructuredBuffer<VisibleCluster> visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
@@ -71,14 +63,16 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
     RWStructuredBuffer<uint> materialPixelCount = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisUtil::MaterialPixelCountBuffer)];
 
     uint2 pixel = dtid.xy;
-    uint2 vis = visibility[pixel];
-    uint packed = vis.x;
-    if (packed == 0xFFFFFFFF) {
-        return; // no visible geometry
+    uint64_t vis = visibility[pixel];
+    if (vis == 0xFFFFFFFFFFFFFFFF) { // No cluster visible
+        return;
     }
+    
+    float depth;
+    uint clusterIndex;
+    uint primID;
 
-    uint clusterIndex = DecodeClusterIndex(packed);
-    uint primId = DecodePrimID(packed);
+    UnpackVisKey(vis, depth, clusterIndex, primID);
 
     // Derive material ID
     uint matId = GetMaterialIdFromCluster(clusterIndex, visibleClusterBuffer, perMeshInstance, perMeshBuffer);
@@ -108,7 +102,7 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
         return;
     }
 
-    Texture2D<uint2> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
+    Texture2D<uint64_t> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
     StructuredBuffer<VisibleCluster> visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
@@ -120,15 +114,17 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
 
     
     uint2 pixel = dtid.xy;
-    uint2 vis = visibility[pixel];
-    uint packed = vis.x;
-    if (packed == 0xFFFFFFFF)
-    {
+    uint64_t vis = visibility[pixel];
+
+    if (vis == 0xFFFFFFFFFFFFFFFF) { // No cluster visible
         return;
     }
 
-    uint clusterIndex = DecodeClusterIndex(packed);
-    uint primId = DecodePrimID(packed);
+    float depth;
+    uint clusterIndex;
+    uint primID;
+    UnpackVisKey(vis, depth, clusterIndex, primID);
+    
     uint matId = GetMaterialIdFromCluster(clusterIndex, visibleClusterBuffer, perMeshInstance, perMeshBuffer);
 
     // Group threads in this wave by matId
