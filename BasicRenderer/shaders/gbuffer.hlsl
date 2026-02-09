@@ -146,6 +146,8 @@ struct MeshletResolveData {
 
     // Post-skinning ping-pong byte offsets
     uint2 postBases; // x = postSkinningBase, y = prevPostSkinningBase
+
+    uint meshletVerticesBufferOffset;
 };
 
 MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
@@ -178,13 +180,18 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
 
         PerMeshBuffer mesh = perMeshBuffer[d.objAndMesh.y];
 
-        d.meshInfo = uint4(mesh.vertexByteSize, mesh.vertexFlags, mesh.numVertices, mesh.meshletTrianglesBufferOffset);
+//#if defined(VISBUF_USE_CLOD_MESHLETS)
+        d.meshInfo = uint4(mesh.vertexByteSize, mesh.vertexFlags, mesh.numVertices, mesh.clodMeshletTrianglesBufferOffset);
+        d.meshletVerticesBufferOffset = mesh.clodMeshletVerticesBufferOffset;
+        Meshlet m = meshletBuffer[mesh.clodMeshletBufferOffset + d.drawcallAndMeshlet.y];
+// #else
+//         d.meshInfo = uint4(mesh.vertexByteSize, mesh.vertexFlags, mesh.numVertices, mesh.meshletTrianglesBufferOffset);
+//         d.meshletVerticesBufferOffset = mesh.meshletVerticesBufferOffset;
+//         Meshlet m = meshletBuffer[mesh.meshletBufferOffset + d.drawcallAndMeshlet.y];
+// #endif
         d.materialDataIndex = mesh.materialDataIndex;
-
-        Meshlet m = meshletBuffer[mesh.meshletBufferOffset + d.drawcallAndMeshlet.y];
         d.meshletInfo = uint4(m.VertOffset, m.TriOffset, m.VertCount, m.TriCount);
 
-        // ping-pong base offsets
         uint postBase = inst.postSkinningVertexBufferOffset;
         uint prevBase = postBase;
 
@@ -198,15 +205,35 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
         d.postBases = uint2(postBase, prevBase);
     }
 
-    // Broadcast
     d.drawcallAndMeshlet = WaveReadLaneAt(d.drawcallAndMeshlet, leader);
     d.objAndMesh = WaveReadLaneAt(d.objAndMesh, leader);
     d.meshInfo = WaveReadLaneAt(d.meshInfo, leader);
     d.materialDataIndex = WaveReadLaneAt(d.materialDataIndex, leader);
     d.meshletInfo = WaveReadLaneAt(d.meshletInfo, leader);
     d.postBases = WaveReadLaneAt(d.postBases, leader);
+    d.meshletVerticesBufferOffset = WaveReadLaneAt(d.meshletVerticesBufferOffset, leader);
 
     return d;
+}
+
+void ComputeTriVertexByteOffsetsCompact(
+    MeshletResolveData d,
+    StructuredBuffer<uint> meshletVerticesBuffer,
+    uint3 triIdx,
+    out uint o0,
+    out uint o1,
+    out uint o2)
+{
+    uint stride = d.meshInfo.x;
+    uint base = d.meshletVerticesBufferOffset + d.meshletInfo.x;
+
+    uint v0 = meshletVerticesBuffer[base + triIdx.x];
+    uint v1 = meshletVerticesBuffer[base + triIdx.y];
+    uint v2 = meshletVerticesBuffer[base + triIdx.z];
+
+    o0 = d.postBases.x + v0 * stride;
+    o1 = d.postBases.x + v1 * stride;
+    o2 = d.postBases.x + v2 * stride;
 }
 
 uint3 DecodeTriangleCompact(uint triLocalIndex, MeshletResolveData d, ByteAddressBuffer meshletTrianglesBuffer)
@@ -242,15 +269,15 @@ uint3 DecodeTriangleCompact(uint triLocalIndex, MeshletResolveData d, ByteAddres
     return uint3(b0, b1, b2);
 }
 
-void ComputeTriVertexByteOffsetsCompact(MeshletResolveData d, uint3 triIdx, out uint o0, out uint o1, out uint o2)
-{
-    uint stride = d.meshInfo.x; // vertexByteSize
-    uint base = d.postBases.x + d.meshletInfo.x * stride; // postBase + vertOffset * stride
+// void ComputeTriVertexByteOffsetsCompact(MeshletResolveData d, uint3 triIdx, out uint o0, out uint o1, out uint o2)
+// {
+//     uint stride = d.meshInfo.x; // vertexByteSize
+//     uint base = d.postBases.x + d.meshletInfo.x * stride; // postBase + vertOffset * stride
 
-    o0 = base + triIdx.x * stride;
-    o1 = base + triIdx.y * stride;
-    o2 = base + triIdx.z * stride;
-}
+//     o0 = base + triIdx.x * stride;
+//     o1 = base + triIdx.y * stride;
+//     o2 = base + triIdx.z * stride;
+// }
 
 
 // Note: relies on gs_* groupshared values being initialized.
@@ -292,13 +319,14 @@ void EvaluateGBufferOptimized(uint2 pixel)
     uint3 triIdx = 0;
     float3 p0 = 0, p1 = 0, p2 = 0;
 
+    triIdx = DecodeTriangleCompact(meshletTriangleIndex, md, meshletTrianglesBuffer);
+
+    StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletVertexIndices)];
+
+    uint o0, o1, o2;
+    ComputeTriVertexByteOffsetsCompact(md, meshletVerticesBuffer, triIdx, o0, o1, o2);
     if (triIsLeader)
     {
-        triIdx = DecodeTriangleCompact(meshletTriangleIndex, md, meshletTrianglesBuffer);
-
-        uint o0, o1, o2;
-        ComputeTriVertexByteOffsetsCompact(md, triIdx, o0, o1, o2);
-
         p0 = LoadPositionOnly(o0, vertexBuffer);
         p1 = LoadPositionOnly(o1, vertexBuffer);
         p2 = LoadPositionOnly(o2, vertexBuffer);
@@ -309,8 +337,8 @@ void EvaluateGBufferOptimized(uint2 pixel)
     p1 = WaveReadLaneAt(p1, triLeader);
     p2 = WaveReadLaneAt(p2, triLeader);
 
-    uint o0, o1, o2;
-    ComputeTriVertexByteOffsetsCompact(md, triIdx, o0, o1, o2);
+    // uint o0, o1, o2;
+    // ComputeTriVertexByteOffsetsCompact(md, triIdx, o0, o1, o2);
 
     // Object buffer (per-lane; is it worth broadcasting?)
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
@@ -394,13 +422,16 @@ void EvaluateGBufferOptimized(uint2 pixel)
     if (vertexFlags & VERTEX_SKINNED)
     {
         uint stride = md.meshInfo.x;
-        uint vertOffset = md.meshletInfo.x;
         uint prevBase = md.postBases.y;
-        // For skinned meshes, reconstruct prev position from prev post-skinning buffer
+        uint base = md.meshletVerticesBufferOffset + md.meshletInfo.x;
 
-        uint o0Prev = prevBase + triIdx.x * stride;
-        uint o1Prev = prevBase + triIdx.y * stride;
-        uint o2Prev = prevBase + triIdx.z * stride;
+        uint v0 = meshletVerticesBuffer[base + triIdx.x];
+        uint v1 = meshletVerticesBuffer[base + triIdx.y];
+        uint v2 = meshletVerticesBuffer[base + triIdx.z];
+
+        uint o0Prev = prevBase + v0 * stride;
+        uint o1Prev = prevBase + v1 * stride;
+        uint o2Prev = prevBase + v2 * stride;
 
         float3 p0Prev = LoadPositionOnly(o0Prev, vertexBuffer);
         float3 p1Prev = LoadPositionOnly(o1Prev, vertexBuffer);

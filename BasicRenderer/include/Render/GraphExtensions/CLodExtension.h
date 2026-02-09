@@ -49,7 +49,7 @@ public:
 		}
 
         m_visibleClustersBuffer = CreateIndexedStructuredBuffer(maxVisibleClusters, sizeof(VisibleCluster), true, false);
-		m_visibleClustersBuffer->SetName("CLod Visible Clusters Buffer");
+		m_visibleClustersBuffer->SetName("CLod Visible Clusters Buffer (uncompacted)");
 		m_histogramIndirectCommand = CreateIndexedStructuredBuffer(1, sizeof(RasterBucketsHistogramIndirectCommand), true, false);
 		m_histogramIndirectCommand->SetName("CLod Raster Buckets Histogram Indirect Command Buffer");
 		m_rasterBucketsHistogramBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(1, "Raster bucket histogram", true);
@@ -64,11 +64,6 @@ public:
 				break;
 		}
 
-		// This tags the buffer with the extension type so passes can query for it with ECSResourceResolver
-        m_visibleClustersBuffer->GetECSEntity()
-           .set<Components::Resource>({ m_visibleClustersBuffer })
-           .add<VisibleClustersBufferTag>()
-           .add<CLodExtensionTypeTag>(typeEntity);
         m_visibleClustersCounterBuffer = CreateIndexedStructuredBuffer(1, sizeof(unsigned int), true, false);
 		m_visibleClustersCounterBuffer->SetName("CLod Visible Clusters Counter Buffer");
 		m_visibleClustersCounterBuffer->GetECSEntity()
@@ -84,6 +79,11 @@ public:
 
 		m_compactedVisibleClustersBuffer = CreateIndexedStructuredBuffer(maxVisibleClusters, sizeof(VisibleCluster), true, false);
 		m_compactedVisibleClustersBuffer->SetName("CLod Compacted Visible Clusters Buffer");
+        // This tags the buffer with the extension type so passes can query for it with ECSResourceResolver
+        m_compactedVisibleClustersBuffer->GetECSEntity()
+            .set<Components::Resource>({ m_compactedVisibleClustersBuffer })
+            .add<VisibleClustersBufferTag>()
+            .add<CLodExtensionTypeTag>(typeEntity);
 
 		m_rasterBucketsWriteCursorBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(1, "CLod Raster bucket write cursor", true);
 		m_rasterBucketsIndirectArgsBuffer = DynamicStructuredBuffer<RasterizeClustersCommand>::CreateShared(1, "CLod Raster bucket indirect args", true);
