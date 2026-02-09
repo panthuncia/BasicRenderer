@@ -325,17 +325,20 @@ void EvaluateGBufferOptimized(uint2 pixel)
 
     uint o0, o1, o2;
     ComputeTriVertexByteOffsetsCompact(md, meshletVerticesBuffer, triIdx, o0, o1, o2);
-    if (triIsLeader)
-    {
-        p0 = LoadPositionOnly(o0, vertexBuffer);
-        p1 = LoadPositionOnly(o1, vertexBuffer);
-        p2 = LoadPositionOnly(o2, vertexBuffer);
-    }
+    p0 = LoadPositionOnly(o0, vertexBuffer);
+    p1 = LoadPositionOnly(o1, vertexBuffer);
+    p2 = LoadPositionOnly(o2, vertexBuffer);
+    // if (triIsLeader)
+    // {
+    //     p0 = LoadPositionOnly(o0, vertexBuffer);
+    //     p1 = LoadPositionOnly(o1, vertexBuffer);
+    //     p2 = LoadPositionOnly(o2, vertexBuffer);
+    // }
 
-    triIdx = WaveReadLaneAt(triIdx, triLeader);
-    p0 = WaveReadLaneAt(p0, triLeader);
-    p1 = WaveReadLaneAt(p1, triLeader);
-    p2 = WaveReadLaneAt(p2, triLeader);
+    // triIdx = WaveReadLaneAt(triIdx, triLeader);
+    // p0 = WaveReadLaneAt(p0, triLeader);
+    // p1 = WaveReadLaneAt(p1, triLeader);
+    // p2 = WaveReadLaneAt(p2, triLeader);
 
     // uint o0, o1, o2;
     // ComputeTriVertexByteOffsetsCompact(md, triIdx, o0, o1, o2);
@@ -459,8 +462,13 @@ void EvaluateGBufferOptimized(uint2 pixel)
     RWTexture2D<float2> metallicRoughnessTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::MetallicRoughness)];
     RWTexture2D<float2> motionVectorTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::MotionVectors)];
 
+    //Debug meshlets
+    float3 viewDir = normalize(gs_camPos - worldPosition);
+    float4 debugColor = lightUints(md.drawcallAndMeshlet.y, worldNormal, viewDir);
+
     normalsTexture[pixel].xyz = materialInputs.normalWS;
-    albedoTexture[pixel] = float4(materialInputs.albedo, materialInputs.ambientOcclusion);
+    //albedoTexture[pixel] = float4(materialInputs.albedo, materialInputs.ambientOcclusion);
+    albedoTexture[pixel] = float4(debugColor.xyz, materialInputs.ambientOcclusion);
     emissiveTexture[pixel].xyz = materialInputs.emissive;
     metallicRoughnessTexture[pixel] = float2(materialInputs.metallic, materialInputs.roughness);
     motionVectorTexture[pixel] = motionVector;

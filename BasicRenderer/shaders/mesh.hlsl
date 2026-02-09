@@ -383,13 +383,16 @@ void ClusterLODBucketMSMain(
 
     StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
     uint count = histogram[bucketIndex];
-    if (linearizedID >= count)
+    if (linearizedID >= 1)
     {
         return;
     }
 
     StructuredBuffer<VisibleCluster> compactedClusters = ResourceDescriptorHeap[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
     uint visibleClusterIndex = baseOffset + linearizedID;
+    if (visibleClusterIndex > 100){
+        return;
+    }
     VisibleCluster cluster = compactedClusters[visibleClusterIndex];
 
     MeshletSetup setup;

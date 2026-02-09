@@ -28,15 +28,16 @@ void DeferredCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
     
-    Texture2D<float> depthTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::DepthTexture)];
+    Texture2D<float> depthTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::LinearDepthMap)];
     float depth = depthTexture[pixel];
-    if (depth == 1.0f) // TODO: When we need more material paths, we will move to prefix sum and indirect dispatch
+    if (depth == 0x7F7FFFFF) // TODO: When we need more shading paths, we will move to prefix sum and indirect dispatch
     {
         // No geometry here
         return;
     }
     
-    float linearZ = unprojectDepth(depth, mainCamera.zNear, mainCamera.zFar);
+    //float linearZ = unprojectDepth(depth, mainCamera.zNear, mainCamera.zFar);
+    float linearZ = depth;
 
     float2 ndc = uv * 2.0f - 1.0f;
     float4 clipPos = float4(ndc, 1.0f, 1.0f);

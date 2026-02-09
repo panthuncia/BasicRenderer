@@ -168,32 +168,6 @@ PrePassPSOutput PrepassPSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) 
     return output;
 }
 
-struct VisBufferOutput
-{
-    uint2 visibility; // first element 7 bits for meshlet-local triangle index, 25 bits for visible cluster index, second element: sign bit for isFrontFace, 31 bits for linear depth
-};
-
-VisBufferOutput VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFrontFace, uint primID : SV_PrimitiveID) : SV_TARGET
-{
-    // Need to check alpha for alpha-tested materials
-#if defined(PSO_ALPHA_TEST)
-    //TestAlpha(input.texcoord);
-#endif
-    
-    VisBufferOutput output;
-    // 7 bits for meshlet-local triangle index, 25 bits for visible cluster index
-    output.visibility.x = (primID << 25) | input.visibleClusterIndex;
-    
-    uint uintDepth = asuint(input.linearDepth);
-    // Pack isFrontFace into sign bit of depth, since depth is always positive
-    if (isFrontFace) {
-        uintDepth |= 0x80000000;
-    }
-
-    output.visibility.y = uintDepth;
-    return output;
-}
-
 #if defined(PSO_SHADOW)
 float
 #else

@@ -14,6 +14,8 @@
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
 
+// Old pass, ignore
+//TODO: remove
 struct VisibilityBufferPassInputs {
     bool wireframe;
     bool meshShaders;

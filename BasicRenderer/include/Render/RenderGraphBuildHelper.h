@@ -182,12 +182,6 @@ void BuildGBufferPipeline(RenderGraph* graph) {
                 clearRTVs });
     }
     else {
-        graph->BuildRenderPass("VisibilityPass2") // Build visibility buffer
-            .Build<VisibilityBufferPass>(VisibilityBufferPassInputs{
-                enableWireframe,
-                useMeshShaders,
-                indirect,
-                clearRTVs });
 
         // Reset material counters
         graph->BuildComputePass("MaterialPixelCounterResetPass")

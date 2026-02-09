@@ -32,7 +32,7 @@ public:
 			Builtin::GBuffer::Albedo,
 			Builtin::GBuffer::Emissive,
 			Builtin::GBuffer::MetallicRoughness,
-			Builtin::PrimaryCamera::DepthTexture,
+			Builtin::PrimaryCamera::LinearDepthMap,
 			Builtin::Environment::CurrentCubemap,
 			Builtin::Shadows::ShadowMaps)
 			.WithUnorderedAccess(Builtin::Color::HDRColorTarget);
@@ -68,7 +68,7 @@ public:
 		RegisterSRV(Builtin::GBuffer::Albedo);
 		RegisterSRV(Builtin::GBuffer::Emissive);
 		RegisterSRV(Builtin::GBuffer::MetallicRoughness);
-		RegisterSRV(Builtin::PrimaryCamera::DepthTexture);
+		RegisterSRV(Builtin::PrimaryCamera::LinearDepthMap);
 
 		RegisterUAV(Builtin::Color::HDRColorTarget);
 	}

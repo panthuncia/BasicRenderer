@@ -1074,8 +1074,7 @@ void Renderer::CreateRenderGraph() {
 
 	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling, primaryCamera->gpu.indirectCommandBuffers.meshletCullingIndirectCommandBuffer);
 	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset, primaryCamera->gpu.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer);
-    //newGraph->AddResource(depthTexture, false);
-    //newGraph->AddResource(depth->linearDepthMap);
+
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
         useMeshShaders = false;
