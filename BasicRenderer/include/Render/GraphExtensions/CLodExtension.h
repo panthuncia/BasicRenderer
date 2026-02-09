@@ -946,6 +946,10 @@ private:
             for (auto& vb : m_visibilityBuffers) { // Dynamic per-frame
                 builder->WithUnorderedAccess(vb);
 			}
+
+            for (auto& db : m_debugBuffers) { // Dynamic per-frame
+				builder->WithRenderTarget(db);
+            }
         }
 
         void Setup() override {
@@ -972,6 +976,7 @@ private:
             auto numViews = context.viewManager->GetCameraBufferSize();
 
             m_visibilityBuffers.clear();
+            m_debugBuffers.clear();
 			std::vector<uint32_t> uavIndices(numViews);
 			context.viewManager->ForEachView([&](uint64_t v) {
 				auto viewInfo = context.viewManager->Get(v);
@@ -979,6 +984,9 @@ private:
                     uavIndices[viewInfo->gpu.cameraBufferIndex] = viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 					m_visibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
                 }
+                if (viewInfo->gpu.debugBuffer != nullptr) {
+                    m_debugBuffers.push_back(viewInfo->gpu.debugBuffer);
+				}
 			});
 
 			// Check if new uav indices are different
@@ -1024,6 +1032,15 @@ private:
             p.width = 4096; // TODO: Max of all render views
             p.height = 4096;
             p.debugName = "CLod raster pass";
+
+            if (!m_debugBuffers.empty()) {
+                rhi::ColorAttachment debugAttachment;
+                debugAttachment.loadOp = rhi::LoadOp::Clear;
+                debugAttachment.storeOp = rhi::StoreOp::Store;
+                debugAttachment.rtv = m_debugBuffers[0]->GetRTVInfo(0).slot;
+				debugAttachment.clear = m_debugBuffers[0]->GetClearColor();
+				p.colors = rhi::Span<rhi::ColorAttachment>(&debugAttachment, 1);
+            }
 
             context.commandList.BeginPass(p);
         }
@@ -1088,6 +1105,7 @@ private:
 
 		std::vector<uint32_t> m_visibilityBufferUAVIndices;
 		std::vector<std::shared_ptr<PixelBuffer>> m_visibilityBuffers;
+        std::vector<std::shared_ptr<PixelBuffer>> m_debugBuffers;
 
         std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
         std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_rasterBucketsHistogramBuffer;

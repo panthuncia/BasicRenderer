@@ -159,6 +159,15 @@ void ViewManager::AttachVisibilityBuffer(uint64_t viewID, std::shared_ptr<PixelB
     }
 }
 
+void ViewManager::AttachDebugBuffer(uint64_t viewID, std::shared_ptr<PixelBuffer> debugBuffer) {
+    auto* v = Get(viewID);
+    if (!v) return;
+    v->gpu.debugBuffer = debugBuffer;
+    if (m_events.onDebugBufferAttached) {
+        m_events.onVisibilityBufferAttached(*v);
+    }
+}
+
 void ViewManager::UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo) {
     auto* v = Get(viewID);
     if (!v) return;

@@ -1117,6 +1117,18 @@ void Renderer::CreateRenderGraph() {
 
 	m_pViewManager->AttachVisibilityBuffer(primaryViewID, visibilityBuffer);
 
+    TextureDescription visDebugDesc;
+	visDebugDesc.channels = 4;
+    visDebugDesc.format = rhi::Format::R32G32B32A32_UInt;
+	visDebugDesc.hasRTV = true;
+	visDebugDesc.hasSRV = true;
+	visDebugDesc.imageDimensions.emplace_back(resolution.x, resolution.y, 0, 0);
+	auto visibilityDebugTexture = PixelBuffer::CreateShared(visDebugDesc);
+	visibilityDebugTexture->SetName("Visibility Debug Texture");
+	visibilityDebugTexture->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GBuffer" }));
+
+    m_pViewManager->AttachDebugBuffer(primaryViewID, visibilityDebugTexture);
+
     CreateGBufferResources(newGraph.get());
 
     if (m_visibilityRendering) {
