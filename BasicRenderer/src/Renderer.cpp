@@ -62,6 +62,7 @@
 #include "Managers/Singletons/FFXManager.h"
 #include "Render/GraphExtensions/IOExtension.h"
 #include "Render/GraphExtensions/CLodExtension.h"
+#include "RenderPasses/DebugGridPass.h"
 
 void D3D12DebugCallback(
     D3D12_MESSAGE_CATEGORY Category,
@@ -1194,6 +1195,21 @@ void Renderer::CreateRenderGraph() {
     if (m_bloom) {
         BuildBloomPipeline(newGraph.get());
     }
+
+    DebugGridPass::Params params;
+    params.planeY = 0.0f;
+    params.minorCellSize = 1.0;
+    params.majorCellSize = 10;
+    params.axisHalfWidthWorld = 0.5f * 0.04f * params.minorCellSize;
+    params.minorLineWidth = 0.01f;
+    params.majorLineWidth = 0.02f;
+    params.minorOpacity = 0.3f;
+	params.majorOpacity = 0.55f;
+	params.axisOpacity = 0.85f;
+    params.overallOpacity = 1.0f;
+
+	newGraph->BuildComputePass("DebugGridPass")
+		.Build<DebugGridPass>(params);
 
     newGraph->BuildRenderPass("TonemappingPass")
         .Build<TonemappingPass>();

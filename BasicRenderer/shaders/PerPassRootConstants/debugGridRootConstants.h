@@ -1,0 +1,15 @@
+#ifndef DEBUG_GRID_ROOT_CONSTANTS_H
+#define DEBUG_GRID_ROOT_CONSTANTS_H
+
+#define RC_PlaneY UintRootConstant0
+#define RC_MinorCellSize UintRootConstant1
+#define RC_MajorCellSize UintRootConstant2
+#define RC_MinorLineWidth UintRootConstant3
+#define RC_MajorLineWidth UintRootConstant4
+#define RC_AxisHalfWidthWorld UintRootConstant5
+#define RC_MinorOpacity UintRootConstant6
+#define RC_MajorOpacity UintRootConstant7
+#define RC_AxisOpacity UintRootConstant8
+#define RC_OverallOpacity UintRootConstant9
+
+#endif // DEBUG_GRID_ROOT_CONSTANTS_H
