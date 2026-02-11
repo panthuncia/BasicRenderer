@@ -4190,8 +4190,9 @@ namespace rhi {
 		if (ci.enableDebug)
 		{
 			ComPtr<ID3D12Debug> dbg;
-			if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dbg))))
+			if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dbg)))) {
 				dbg->EnableDebugLayer(), flags |= DXGI_CREATE_FACTORY_DEBUG;
+			}
 		}
 
 		auto impl = std::make_shared<Dx12Device>();
@@ -4226,7 +4227,13 @@ namespace rhi {
 		impl->pNativeFactory->EnumAdapters1(0, &adapter);
 		adapter.As(&impl->adapter);
 
-		D3D12CreateDevice(impl->adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&impl->pNativeDevice));
+		ComPtr<ID3D12Device> base;
+		D3D12CreateDevice(impl->adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&base));
+
+		auto hasDevice10 = base.As(&impl->pNativeDevice);
+		if (FAILED(hasDevice10)) {
+			RHI_FAIL(ToRHI(hasDevice10));
+		}
 
 		// Streamline manual hooking setup
 		if (l_enableStreamline)

@@ -86,32 +86,16 @@ public:
     std::shared_ptr<Material> material;
 
 	void SetPreSkinningVertexBufferView(std::unique_ptr<BufferView> view);
+	void SetPostSkinningVertexBufferView(std::unique_ptr<BufferView> view);
 	BufferView* GetPreSkinningVertexBufferView();
 	BufferView* GetPostSkinningVertexBufferView();
 	void SetMeshletOffsetsBufferView(std::unique_ptr<BufferView> view);
 	void SetMeshletVerticesBufferView(std::unique_ptr<BufferView> view);
 	void SetMeshletTrianglesBufferView(std::unique_ptr<BufferView> view);
 
-	BufferView* GetMeshletOffsetsBufferView() { return m_meshletBufferView.get(); }
-	BufferView* GetMeshletVerticesBufferView() { return m_meshletVerticesBufferView.get(); }
-	BufferView* GetMeshletTrianglesBufferView() { return m_meshletTrianglesBufferView.get(); }
-
-	void SetBufferViews(std::unique_ptr<BufferView> preSkinningVertexBufferView, std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView, std::unique_ptr<BufferView> meshletBoundsBufferView);
 	void SetBaseSkin(std::shared_ptr<Skeleton> skeleton);
 	bool HasBaseSkin() const { return m_baseSkeleton != nullptr; }
 	std::shared_ptr<Skeleton> GetBaseSkin() const { return m_baseSkeleton; }
-
-	uint64_t GetMeshletBufferOffset() const {
-		return m_meshletBufferView->GetOffset();
-	}
-
-	uint64_t GetMeshletVerticesBufferOffset() const {
-		return m_meshletVerticesBufferView->GetOffset();
-	}
-
-	uint64_t GetMeshletTrianglesBufferOffset() const {
-		return m_meshletTrianglesBufferView->GetOffset();
-	}
 
 	uint32_t GetMeshletCount() {
 		return static_cast<uint32_t>(m_meshlets.size()); // TODO: support meshes with >32 bit int meshlets?
@@ -137,14 +121,6 @@ public:
 
 	std::vector<BoundingSphere>& GetMeshletBounds() {
 		return m_meshletBounds;
-	}
-
-	void SetMeshletBoundsBufferView(std::unique_ptr<BufferView> view) {
-		m_meshletBoundsBufferView = std::move(view);
-	}
-
-	const BufferView* GetMeshletBoundsBufferView() {
-		return m_meshletBoundsBufferView.get();
 	}
 
 	void SetMaterialDataIndex(unsigned int index);
@@ -254,14 +230,9 @@ private:
 	std::vector<uint32_t> m_meshletVertices;
     std::vector<uint8_t> m_meshletTriangles;
 	std::vector<BoundingSphere> m_meshletBounds;
-	//std::vector<std::byte> m_meshletReorderedVertices;
-	//std::vector<std::byte> m_meshletReorderedSkinningVertices;
 
 	std::unique_ptr<BufferView> m_postSkinningVertexBufferView = nullptr;
 	std::unique_ptr<BufferView> m_preSkinningVertexBufferView = nullptr;
-	std::unique_ptr<BufferView> m_meshletBufferView = nullptr;
-	std::unique_ptr<BufferView> m_meshletVerticesBufferView = nullptr;
-	std::unique_ptr<BufferView> m_meshletTrianglesBufferView = nullptr;
 
 	// TODO: packing
 	std::vector<ClusterLODGroup> m_clodGroups;
@@ -298,7 +269,6 @@ private:
     PerMeshCB m_perMeshBufferData = { 0 };
 	unsigned int m_skinningVertexSize = 0;
 	std::unique_ptr<BufferView> m_perMeshBufferView;
-	std::unique_ptr<BufferView> m_meshletBoundsBufferView;
 	MeshManager* m_pCurrentMeshManager = nullptr;
 
 	std::shared_ptr<Skeleton> m_baseSkeleton = nullptr;

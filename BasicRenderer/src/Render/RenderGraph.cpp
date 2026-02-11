@@ -1020,6 +1020,7 @@ void RenderGraph::CompileStructural() {
 		auto& e = extItems[i];
 
 		if (keyToIdx.contains(e.key)) {
+			spdlog::error("External pass name/key collision during structural merge: {}", e.key);
 			throw std::runtime_error("External pass name/key collision during structural merge: " + e.key);
 		}
 

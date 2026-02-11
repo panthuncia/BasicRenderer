@@ -84,7 +84,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 
 	std::unique_ptr<BufferView> postSkinningView = nullptr;
 	std::unique_ptr<BufferView> preSkinningView = nullptr;
-	std::unique_ptr<BufferView> meshletBoundsView = nullptr;
+	//std::unique_ptr<BufferView> meshletBoundsView = nullptr;
 	size_t vertexByteSize = mesh->GetPerMeshCBData().vertexByteSize;
 	if (mesh->GetPerMeshCBData().vertexFlags & VertexFlags::VERTEX_SKINNED) {
 		unsigned int skinningVertexByteSize = mesh->GetSkinningVertexSize();
@@ -92,34 +92,34 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	}
 	else {
 		postSkinningView = m_postSkinningVertices->AddData(vertices.data(), numVertices * vertexByteSize, vertexByteSize);
-		meshletBoundsView = m_meshletBoundsBuffer->AddData(mesh->GetMeshletBounds().data(), mesh->GetMeshletCount() * sizeof(BoundingSphere), sizeof(BoundingSphere));
+		//meshletBoundsView = m_meshletBoundsBuffer->AddData(mesh->GetMeshletBounds().data(), mesh->GetMeshletCount() * sizeof(BoundingSphere), sizeof(BoundingSphere));
 	}
-
-	auto& meshlets = mesh->GetMeshlets();
-	//auto test = vertices[0];
-	spdlog::info("Adding {} meshlets, allocating {} bytes", meshlets.size(), meshlets.size() * sizeof(meshopt_Meshlet));
-	auto meshletOffsetsView = m_meshletOffsets->AddData(meshlets.data(), meshlets.size() * sizeof(meshopt_Meshlet), sizeof(meshopt_Meshlet));
-
-	auto& meshletVertices = mesh->GetMeshletVertices();
-	auto meshletVertexIndicesView = m_meshletVertexIndices->AddData(meshletVertices.data(), meshletVertices.size() * sizeof(unsigned int), sizeof(unsigned int));
-
-	auto& meshletTriangles = mesh->GetMeshletTriangles();
-	auto meshletTrianglesView = m_meshletTriangles->AddData(meshletTriangles.data(), meshletTriangles.size() * sizeof(unsigned char), sizeof(unsigned char));
 
 	// Per mesh buffer
 	auto perMeshBufferView = m_perMeshBuffers->AddData(&mesh->GetPerMeshCBData(), sizeof(PerMeshCB), sizeof(PerMeshCB));
 	mesh->SetPerMeshBufferView(std::move(perMeshBufferView));
 
-	mesh->SetBufferViews(std::move(preSkinningView), std::move(postSkinningView), std::move(meshletOffsetsView), std::move(meshletVertexIndicesView), std::move(meshletTrianglesView), std::move(meshletBoundsView));
-	mesh->UpdateVertexCount(useMeshletReorderedVertices);
+	// Vertex data
+	if (preSkinningView) {
+		mesh->SetPreSkinningVertexBufferView(std::move(preSkinningView));
+	}
+	mesh->SetPostSkinningVertexBufferView(std::move(postSkinningView));
+	//mesh->SetMeshletBoundsBufferView(std::move(meshletBoundsView));
 
 	// cluster LOD data
 	// TODO: Some of this should be in instances, vertex data should go in main vertex buffers
 	auto clusterLODGroupsView = m_clusterLODGroups->AddData(mesh->GetCLodGroups().data(), mesh->GetCLodGroups().size() * sizeof(ClusterLODGroup), sizeof(ClusterLODGroup));
 	auto clusterLODChildrenView = m_clusterLODChildren->AddData(mesh->GetCLodChildren().data(), mesh->GetCLodChildren().size() * sizeof(ClusterLODChild), sizeof(ClusterLODChild));
+	
+	// Meshlet offsets
 	auto clusterLODMeshletsView = m_meshletOffsets->AddData(mesh->GetCLodMeshlets().data(), mesh->GetCLodMeshlets().size() * sizeof(meshopt_Meshlet), sizeof(meshopt_Meshlet));
+	
+	// Mesh-local indices into the vertex/index buffer
 	auto clusterLODMeshletVerticesView = m_meshletVertexIndices->AddData(mesh->GetCLodMeshletVertices().data(), mesh->GetCLodMeshletVertices().size() * sizeof(uint32_t), sizeof(uint32_t));
+	
+	// uint8 indices into the vertex index list
 	auto clusterLODMeshletTrianglesView = m_meshletTriangles->AddData(mesh->GetCLodMeshletTriangles().data(), mesh->GetCLodMeshletTriangles().size() * sizeof(uint8_t), sizeof(uint8_t));
+	
 	auto clusterLODMeshletBoundsView = m_clusterLODMeshletBounds->AddData(mesh->GetCLodBounds().data(), mesh->GetCLodBounds().size() * sizeof(BoundingSphere), sizeof(BoundingSphere));
 	auto childLocalMeshletIndicesView = m_childLocalMeshletIndices->AddData(mesh->GetCLodChildLocalMeshletIndices().data(), mesh->GetCLodChildLocalMeshletIndices().size() * sizeof(uint32_t), sizeof(uint32_t));
 	auto clusterLODNodesView = m_clusterLODNodes->AddData(mesh->GetCLodNodes().data(), mesh->GetCLodNodes().size() * sizeof(ClusterLODNode), sizeof(ClusterLODNode));
@@ -138,25 +138,10 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 void MeshManager::RemoveMesh(Mesh* mesh) {
 
 	// Things to remove:
-	// - Meshlet offsets
-	// - Meshlet vertices
-	// - Meshlet triangles
 	// - Pre-skinning vertices, if any
 	// - Post-skinning vertices
 	// - Meshlet bounds
 
-	auto meshletOffsetsView = mesh->GetMeshletOffsetsBufferView();
-	if (meshletOffsetsView != nullptr) {
-		m_meshletOffsets->Deallocate(meshletOffsetsView);
-	}
-	auto meshletVerticesView = mesh->GetMeshletVerticesBufferView();
-	if (meshletVerticesView != nullptr) { // TODO: I think this is a mistake
-		m_meshletVertexIndices->Deallocate(meshletVerticesView);
-	}
-	auto meshletTrianglesView = mesh->GetMeshletTrianglesBufferView();
-	if (meshletTrianglesView != nullptr) {
-		m_meshletTriangles->Deallocate(meshletTrianglesView);
-	}
 	auto preSkinningView = mesh->GetPreSkinningVertexBufferView();
 	if (preSkinningView != nullptr) {
 		m_preSkinningVertices->Deallocate(preSkinningView);
@@ -170,13 +155,8 @@ void MeshManager::RemoveMesh(Mesh* mesh) {
 	if (perMeshBufferView != nullptr) {
 		m_perMeshBuffers->Deallocate(perMeshBufferView.get());
 	}
-	auto meshletBoundsView = mesh->GetMeshletBoundsBufferView();
-	if (meshletBoundsView != nullptr) {
-		m_meshletBoundsBuffer->Deallocate(meshletBoundsView);
-	}
 
 	mesh->SetPerMeshBufferView(nullptr);
-	mesh->SetBufferViews(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
 	mesh->SetCurrentMeshManager(nullptr);
 }
 

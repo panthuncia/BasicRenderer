@@ -233,7 +233,7 @@ void EmitMeshletVisBufferForViewIndexed(
         outputVertices[i] = GetVisBufferVertexAttributesForViewIndexed(
             setup.vertexBuffer,
             setup.meshletVerticesBuffer,
-            setup.meshBuffer.meshletVerticesBufferOffset,
+            setup.meshBuffer.clodMeshletVerticesBufferOffset,
             meshletVertexIndex,
             setup.postSkinningBufferOffset,
             setup.meshBuffer.vertexFlags,
@@ -310,8 +310,15 @@ void VisibilityBufferMSMain(
 
 #include "PerPassRootConstants/clodRootConstants.h"
 
-bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSetup setup)
+bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSetup setup, in uint bucketMeshletIndex, in uint bucketCount)
 {
+	if (bucketMeshletIndex >= bucketCount)
+    {
+        setup.vertCount = 0;
+        setup.triCount = 0;
+        //return false;
+    }	
+
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
 
     setup.meshletIndex = cluster.meshletID;
@@ -329,9 +336,6 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
 
     setup.meshBuffer = perMeshBuffer[setup.meshInstanceBuffer.perMeshBufferIndex];
     setup.objectBuffer = perObjectBuffer[setup.meshInstanceBuffer.perObjectBufferIndex];
-
-    setup.meshBuffer.meshletVerticesBufferOffset = setup.meshBuffer.clodMeshletVerticesBufferOffset;
-    setup.meshBuffer.meshletTrianglesBufferOffset = setup.meshBuffer.clodMeshletTrianglesBufferOffset;
 
     uint meshletOffset = setup.meshBuffer.clodMeshletBufferOffset;
     setup.meshlet = meshletBuffer[meshletOffset + setup.meshletIndex];
@@ -389,19 +393,12 @@ void ClusterLODBucketMSMain(
     VisibleCluster cluster = compactedClusters[visibleClusterIndex];
 
     MeshletSetup setup;
-    bool draw = InitializeMeshletFromCompactedCluster(cluster, setup);
-//    if (visibleClusterIndex >= 1)
-//    {
-//        draw = false;
-//        setup.vertCount = 0;
-//        setup.triCount = 0;
-//    }
-    SetMeshOutputCounts(setup.vertCount, setup.triCount);
-    if (!draw)
-    {
-        return;
-    }
+    bool draw = InitializeMeshletFromCompactedCluster(cluster, setup, linearizedID, count);
 
-    EmitMeshletVisBufferForViewIndexed(uGroupThreadID, setup, setup.viewID, visibleClusterIndex, outputVertices, outputTriangles);
-    EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
+    SetMeshOutputCounts(setup.vertCount, setup.triCount);
+    if (draw)
+    {
+        EmitMeshletVisBufferForViewIndexed(uGroupThreadID, setup, setup.viewID, visibleClusterIndex, outputVertices, outputTriangles);
+        EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
+    }
 }

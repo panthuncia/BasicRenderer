@@ -820,61 +820,21 @@ void Mesh::SetPreSkinningVertexBufferView(std::unique_ptr<BufferView> view) {
 	}
 }
 
+void Mesh::SetPostSkinningVertexBufferView(std::unique_ptr<BufferView> view) {
+	m_postSkinningVertexBufferView = std::move(view);
+	m_perMeshBufferData.vertexBufferOffset = static_cast<uint32_t>(m_postSkinningVertexBufferView->GetOffset()); // TODO: Vertex buffer pool instead of one buffer limited to uint32 max
+
+	if (m_pCurrentMeshManager != nullptr) {
+		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
+	}
+}
+
 BufferView* Mesh::GetPreSkinningVertexBufferView() {
 	return m_preSkinningVertexBufferView.get();
 }
 
 BufferView* Mesh::GetPostSkinningVertexBufferView() {
 	return m_postSkinningVertexBufferView.get();
-}
-
-void Mesh::SetMeshletOffsetsBufferView(std::unique_ptr<BufferView> view) {
-	m_meshletBufferView = std::move(view);
-	m_perMeshBufferData.meshletBufferOffset = static_cast<uint32_t>(m_meshletBufferView->GetOffset());
-
-	if (m_pCurrentMeshManager != nullptr) {
-		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
-	}
-}
-void Mesh::SetMeshletVerticesBufferView(std::unique_ptr<BufferView> view) {
-	m_meshletVerticesBufferView = std::move(view);
-	m_perMeshBufferData.meshletVerticesBufferOffset = static_cast<uint32_t>(m_meshletVerticesBufferView->GetOffset());
-
-	if (m_pCurrentMeshManager != nullptr) {
-		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
-	}
-}
-void Mesh::SetMeshletTrianglesBufferView(std::unique_ptr<BufferView> view) {
-	m_meshletTrianglesBufferView = std::move(view);
-	m_perMeshBufferData.meshletTrianglesBufferOffset = static_cast<uint32_t>(m_meshletTrianglesBufferView->GetOffset());
-
-	if (m_pCurrentMeshManager != nullptr) {
-		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
-	}
-}
-
-void Mesh::SetBufferViews(std::unique_ptr<BufferView> preSkinningVertexBufferView, std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> meshletBufferView, std::unique_ptr<BufferView> meshletVerticesBufferView, std::unique_ptr<BufferView> meshletTrianglesBufferView, std::unique_ptr<BufferView> meshletBoundsBufferView) {
-	m_postSkinningVertexBufferView = std::move(postSkinningVertexBufferView);
-	m_preSkinningVertexBufferView = std::move(preSkinningVertexBufferView);
-	m_meshletBufferView = std::move(meshletBufferView);
-	m_meshletVerticesBufferView = std::move(meshletVerticesBufferView);
-	m_meshletTrianglesBufferView = std::move(meshletTrianglesBufferView);
-	m_meshletBoundsBufferView = std::move(meshletBoundsBufferView);
-	if (m_meshletBufferView == nullptr || m_meshletVerticesBufferView == nullptr || m_meshletTrianglesBufferView == nullptr) {
-		return; // We're probably deleting the mesh
-	}
-	if (m_preSkinningVertexBufferView != nullptr) { // If the mesh is skinned
-		m_perMeshBufferData.vertexBufferOffset = static_cast<uint32_t>(m_preSkinningVertexBufferView->GetOffset()); // TODO: Vertex buffer pool instead of one buffer limited to uint32 max
-	}
-	else { // If the mesh is not skinned
-		m_perMeshBufferData.vertexBufferOffset = static_cast<uint32_t>(m_postSkinningVertexBufferView->GetOffset()); // same
-	}
-	m_perMeshBufferData.meshletBufferOffset = static_cast<uint32_t>(m_meshletBufferView->GetOffset() / sizeof(meshopt_Meshlet));
-	m_perMeshBufferData.meshletVerticesBufferOffset = static_cast<uint32_t>(m_meshletVerticesBufferView->GetOffset() / 4);
-	m_perMeshBufferData.meshletTrianglesBufferOffset = static_cast<uint32_t>(m_meshletTrianglesBufferView->GetOffset());
-	if (m_pCurrentMeshManager != nullptr && m_perMeshBufferView != nullptr) {
-		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
-	}
 }
 
 void Mesh::SetCLodBufferViews(
@@ -898,7 +858,7 @@ void Mesh::SetCLodBufferViews(
 
 	m_perMeshBufferData.clodMeshletBufferOffset = static_cast<uint32_t>(m_clusterLODMeshletsView->GetOffset() / sizeof(meshopt_Meshlet));
 	m_perMeshBufferData.clodMeshletVerticesBufferOffset = static_cast<uint32_t>(m_clusterLODMeshletVerticesView->GetOffset() / sizeof(uint32_t));
-	m_perMeshBufferData.clodMeshletTrianglesBufferOffset = static_cast<uint32_t>(m_clusterLODMeshletTrianglesView->GetOffset());
+	m_perMeshBufferData.clodMeshletTrianglesBufferOffset = static_cast<uint32_t>(m_clusterLODMeshletTrianglesView->GetOffset()); // Intentionally in bytes to index byteaddressbuffer
 	m_perMeshBufferData.clodNumMeshlets = static_cast<uint32_t>(m_clodMeshlets.size());
 	if (m_pCurrentMeshManager != nullptr && m_perMeshBufferView != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);

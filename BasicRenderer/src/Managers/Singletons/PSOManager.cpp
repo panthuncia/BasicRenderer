@@ -1593,6 +1593,7 @@ void PSOManager::ReloadShaders() {
 	m_prePassPSOCache.clear();
 	m_shadowMeshPSOCache.clear();
     m_prePassPSOCache.clear();
+    m_clusterLODRasterPSOCache.clear();
 }
 
 rhi::BlendState PSOManager::GetBlendDesc(MaterialCompileFlags materialCompileFlags) {

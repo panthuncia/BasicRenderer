@@ -64,7 +64,7 @@ bool InitializeMeshletInternal(
     setup.meshBuffer = perMeshBuffer[meshInstance.perMeshBufferIndex];
     setup.objectBuffer = perObjectBuffer[meshInstance.perObjectBufferIndex];
 
-    uint meshletOffset = setup.meshBuffer.meshletBufferOffset;
+    uint meshletOffset = setup.meshBuffer.clodMeshletBufferOffset;
     setup.meshlet = meshletBuffer[meshletOffset + setup.meshletIndex];
 
     setup.vertCount = setup.meshlet.VertCount;
@@ -119,7 +119,7 @@ bool InitializeMeshletInternalCLod(
     setup.meshBuffer = perMeshBuffer[setup.meshInstanceBuffer.perMeshBufferIndex];
     setup.objectBuffer = perObjectBuffer[setup.meshInstanceBuffer.perObjectBufferIndex];
 
-    uint meshletOffset = setup.meshBuffer.cLODMeshletBufferOffset;
+    uint meshletOffset = setup.meshBuffer.clodMeshletBufferOffset;
     setup.meshlet = meshletBuffer[meshletOffset + setup.meshletIndex];
 
     setup.vertCount = setup.meshlet.VertCount;
@@ -180,7 +180,7 @@ bool InitializeMeshletFromVisibleCluster(uint visibleClusterIndex, out MeshletSe
 
 uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
 {
-    uint triOffset = setup.meshBuffer.meshletTrianglesBufferOffset + setup.meshlet.TriOffset + triLocalIndex * 3;
+    uint triOffset = setup.meshBuffer.clodMeshletTrianglesBufferOffset + setup.meshlet.TriOffset + triLocalIndex * 3;
     uint alignedOffset = (triOffset / 4) * 4;
     uint firstWord = setup.meshletTrianglesBuffer.Load(alignedOffset);
     uint byteOffset = triOffset % 4;

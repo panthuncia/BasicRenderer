@@ -95,11 +95,6 @@ struct PerMeshCB {
 	unsigned int vertexByteSize;
     unsigned int skinningVertexByteSize;
 
-	unsigned int vertexBufferOffset;
-    unsigned int meshletBufferOffset;
-    unsigned int meshletVerticesBufferOffset;
-    unsigned int meshletTrianglesBufferOffset;
-
 	BoundingSphere boundingSphere;
 
     unsigned int clodMeshletBufferOffset;
@@ -107,9 +102,10 @@ struct PerMeshCB {
     unsigned int clodMeshletTrianglesBufferOffset;
     unsigned int clodNumMeshlets;
 
+    unsigned int vertexBufferOffset;
     unsigned int numVertices;
     unsigned int numMeshlets;
-    unsigned int pad[2];
+    unsigned int pad[1];
 };
 
 struct PerMeshInstanceCB {

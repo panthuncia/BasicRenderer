@@ -103,7 +103,7 @@ void DeviceManager::Initialize() {
     auto numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
     bool enableDebug = false;
 #if BUILD_TYPE == BUILD_DEBUG
-    enableDebug = true;
+    enableDebug = false;
 #endif
 	rhi::CreateD3D12Device(
         rhi::DeviceCreateInfo{ .backend = rhi::Backend::D3D12, .framesInFlight = numFramesInFlight, .enableDebug = enableDebug },

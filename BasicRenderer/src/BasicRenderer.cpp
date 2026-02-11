@@ -14,6 +14,8 @@
 #define USE_PIX 1
 #endif
 #include <pix3.h>
+#include <stacktrace>
+#include <sstream>      // ostringstream for formatting
 //#include <tracy/Tracy.hpp>
 
 #include "Mesh/Mesh.h"
@@ -39,6 +41,68 @@ extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 614;}
 extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D\\"; }
 
 #pragma comment(lib, "WinPixEventRuntime.lib")
+
+namespace crashlog {
+
+    inline std::terminate_handler g_prev = nullptr;
+
+    static std::string StacktraceString() {
+#if defined(__cpp_lib_stacktrace) && (__cpp_lib_stacktrace >= 202011L)
+        try {
+            std::ostringstream oss;
+            oss << std::stacktrace::current();
+            return oss.str();
+        }
+        catch (...) {
+            return "(stacktrace capture failed)";
+        }
+#else
+        return "(no <stacktrace> support in this build)";
+#endif
+    }
+
+    [[noreturn]] void TerminateHandler() noexcept
+    {
+        // Best-effort logging; never let this handler throw.
+        try {
+            if (auto eptr = std::current_exception()) {
+                try {
+                    std::rethrow_exception(eptr);
+                }
+                catch (const std::exception& e) {
+                    spdlog::critical("FATAL: uncaught exception: {}\nwhat(): {}",
+                        typeid(e).name(), e.what());
+                }
+                catch (...) {
+                    spdlog::critical("FATAL: uncaught non-std exception");
+                }
+            }
+            else {
+                spdlog::critical("FATAL: std::terminate called (no active exception)");
+            }
+
+            spdlog::critical("Stacktrace:\n{}", StacktraceString());
+
+            // Force logs out
+            spdlog::apply_all([](const std::shared_ptr<spdlog::logger>& lg) { lg->flush(); });
+            spdlog::shutdown();
+        }
+        catch (...) {
+            // ?
+            __debugbreak();
+        }
+
+        std::abort();
+    }
+
+    inline void InstallTerminateHandler()
+    {
+        spdlog::flush_on(spdlog::level::critical);
+
+        g_prev = std::set_terminate(&TerminateHandler);
+    }
+
+}
 
 Renderer renderer;
 UINT default_x_res = 1920;
@@ -223,6 +287,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     spdlog::set_default_logger(file_logger);
     file_logger->flush_on(spdlog::level::info);
 
+    crashlog::InstallTerminateHandler();
+
     static spdlog_streambuf sci{ file_logger };
     std::cout.rdbuf(&sci);
     std::cerr.rdbuf(&sci);
@@ -269,9 +335,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
     //carScene->GetRoot().set<Components::Position>({ 1.0, 0.0, 1.0 });
 
-	auto mountainScene = LoadModel("models/terrain.glb");
-	mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
-	mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
+	auto mountainScene = LoadModel("models/quad.usdz");
+	//mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
+	//mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
 
     //auto tigerScene = LoadModel("models/tiger.glb");
     //tigerScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });

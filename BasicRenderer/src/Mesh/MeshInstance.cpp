@@ -29,10 +29,10 @@ void MeshInstance::SetBufferViewUsingBaseMesh(std::unique_ptr<BufferView> perMes
 		return; // no need to update
 	}
 	//Meshlet bounds
-	auto meshletBoundsView = m_mesh->GetMeshletBoundsBufferView();
-	if (meshletBoundsView != nullptr) {
-		m_perMeshInstanceBufferData.meshletBoundsBufferStartIndex = static_cast<uint32_t>(meshletBoundsView->GetOffset() / sizeof(BoundingSphere));
-	}
+	//auto meshletBoundsView = m_mesh->GetMeshletBoundsBufferView();
+	//if (meshletBoundsView != nullptr) {
+	//	m_perMeshInstanceBufferData.meshletBoundsBufferStartIndex = static_cast<uint32_t>(meshletBoundsView->GetOffset() / sizeof(BoundingSphere));
+	//}
 
 	m_perMeshInstanceBufferData.postSkinningVertexBufferOffset = static_cast<uint32_t>(postSkinningView->GetOffset());
 	if (m_pCurrentMeshManager != nullptr) {

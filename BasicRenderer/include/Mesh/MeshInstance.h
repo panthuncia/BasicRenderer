@@ -63,11 +63,11 @@ public:
         m_meshletBoundsBufferView = std::move(view);
     }
 
-    void SetMeshletBoundsFromBaseMesh() {
-		if (m_mesh->GetMeshletBoundsBufferView() != nullptr) {
-			
-		}
-    }
+  //  void SetMeshletBoundsFromBaseMesh() {
+		//if (m_mesh->GetMeshletBoundsBufferView() != nullptr) {
+		//	
+		//}
+  //  }
 
     BufferView* GetMeshletBoundsBufferView() {
         return m_meshletBoundsBufferView.get();
