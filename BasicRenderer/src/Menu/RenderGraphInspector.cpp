@@ -114,7 +114,9 @@ static SignalIndex BuildSignalIndex(const std::vector<RenderGraph::PassBatch>& b
 // ---- Helpers to fetch all resource IDs present (for the side list) ----
 static void CollectResourceIds(const std::vector<RenderGraph::PassBatch>& batches,
     std::unordered_map<uint64_t, std::string>& outIdToName,
-    std::unordered_map<uint64_t, Resource*>& outIdToPtr)
+    std::unordered_map<uint64_t, Resource*>& outIdToPtr,
+    RGResourceNameByIdFn resourceNameById,
+    RGResourcePtrByIdFn resourcePtrById)
 {
     auto upsertNamedResource = [&](Resource* resource) {
         if (!resource) return;
@@ -149,6 +151,29 @@ static void CollectResourceIds(const std::vector<RenderGraph::PassBatch>& batche
         // Also add anything the batch knows about:
         for (auto id : b.allResources) outIdToName.emplace(id, std::string{});
         for (auto id : b.internallyTransitionedResources) outIdToName.emplace(id, std::string{});
+    }
+
+    if (resourceNameById) {
+        for (auto& [id, collectedName] : outIdToName) {
+            if (!collectedName.empty()) continue;
+            const std::string resolvedName = resourceNameById(id);
+            if (!resolvedName.empty()) {
+                collectedName = resolvedName;
+            }
+        }
+    }
+
+    if (resourcePtrById) {
+        for (auto const& [id, _] : outIdToName) {
+            auto ptrIt = outIdToPtr.find(id);
+            if (ptrIt != outIdToPtr.end() && ptrIt->second != nullptr) {
+                continue;
+            }
+            Resource* resolvedPtr = resourcePtrById(id);
+            if (resolvedPtr) {
+                outIdToPtr[id] = resolvedPtr;
+            }
+        }
     }
 }
 
@@ -268,6 +293,8 @@ namespace RGInspector {
 
     void Show(const std::vector<RenderGraph::PassBatch>& batches,
         RGPassUsesResourceFn passUses,
+        RGResourceNameByIdFn resourceNameById,
+        RGResourcePtrByIdFn resourcePtrById,
         const RGInspectorOptions& opts)
     {
         if (!ImGui::Begin("Render Graph Inspector")) { ImGui::End(); return; }
@@ -287,7 +314,7 @@ namespace RGInspector {
         static char filterBuf[128] = {};
         std::unordered_map<uint64_t, std::string> idToName;
         std::unordered_map<uint64_t, Resource*> idToPtr;
-        CollectResourceIds(batches, idToName, idToPtr);
+        CollectResourceIds(batches, idToName, idToPtr, resourceNameById, resourcePtrById);
 
         if (s_filterBatchResources >= (int)batches.size())
             s_filterBatchResources = -1;
@@ -332,6 +359,9 @@ namespace RGInspector {
                 s_selectedRes = id;
                 auto it = idToPtr.find(id);
                 s_selectedResPtr = (it != idToPtr.end()) ? it->second : nullptr;
+                if (!s_selectedResPtr && resourcePtrById) {
+                    s_selectedResPtr = resourcePtrById(id);
+                }
             }
             if (ImGui::IsItemHovered() && !kv.second.empty())
                 ImGui::SetTooltip("%s", kv.second.c_str());

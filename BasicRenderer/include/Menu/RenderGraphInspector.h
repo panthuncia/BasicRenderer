@@ -10,6 +10,8 @@
 
 // Return true if the pass uses 'resourceId'.
 using RGPassUsesResourceFn = std::function<bool(const void* passAndResources, uint64_t resourceId, bool isCompute)>;
+using RGResourceNameByIdFn = std::function<std::string(uint64_t resourceId)>;
+using RGResourcePtrByIdFn = std::function<Resource*(uint64_t resourceId)>;
 
 struct RGInspectorOptions {
     // Horizontal placement within a batch (x spans [batch, batch+1])
@@ -25,5 +27,7 @@ struct RGInspectorOptions {
 namespace RGInspector {
     void Show(const std::vector<RenderGraph::PassBatch>& batches,
         RGPassUsesResourceFn passUses = nullptr,
+    RGResourceNameByIdFn resourceNameById = nullptr,
+    RGResourcePtrByIdFn resourcePtrById = nullptr,
         const RGInspectorOptions& opts = {});
 }

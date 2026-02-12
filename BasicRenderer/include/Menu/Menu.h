@@ -705,6 +705,17 @@ inline void Menu::Render(RenderContext& context) {
         RGInspectorOptions opts;
         RGInspector::Show(m_renderGraph->GetBatches(),
             PassUsesResourceAdapter,
+            [this](uint64_t resourceId) -> std::string {
+                if (!m_renderGraph) return {};
+                auto resource = m_renderGraph->GetResourceByID(resourceId);
+                if (!resource) return {};
+                return resource->GetName();
+            },
+            [this](uint64_t resourceId) -> Resource* {
+                if (!m_renderGraph) return nullptr;
+                auto resource = m_renderGraph->GetResourceByID(resourceId);
+                return resource ? resource.get() : nullptr;
+            },
             opts);
         ImGui::End();
 
