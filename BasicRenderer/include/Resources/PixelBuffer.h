@@ -68,6 +68,7 @@ public:
 private:
     PixelBuffer(const TextureDescription& desc)
     {
+		m_hasLayout = true; // This is a texture, so it has a layout by default
         m_desc = desc;
         m_backing = GpuTextureBacking::CreateUnique(desc, GetGlobalResourceID(), nullptr);
 

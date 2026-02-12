@@ -736,7 +736,9 @@ namespace RGInspector {
                     if (!enabled) {
                         return {};
                     }
-                    std::ostringstream o; o << "#" << val; return o.str();
+                    std::ostringstream o; 
+                	//o << "#" << val; // TODO: Visual overlap. Better way of indicating the fence value in the UI?
+                	return o.str();
                     };
 
                 auto siteToX = [&](const SignalSite& s)->double {
