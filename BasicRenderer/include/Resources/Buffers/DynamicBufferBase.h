@@ -15,6 +15,12 @@ public:
 	// Engine representation of a GPU buffer- owns a handle to the actual GPU resource.
     std::unique_ptr<GpuBufferBacking> m_dataBuffer = nullptr;
 
+    bool TryGetBufferByteSize(uint64_t& outByteSize) const override {
+        if (!m_dataBuffer) return false;
+        outByteSize = static_cast<uint64_t>(m_dataBuffer->GetSize());
+        return true;
+    }
+
 protected:
 };
 

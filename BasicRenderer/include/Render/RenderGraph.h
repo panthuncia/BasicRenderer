@@ -7,6 +7,7 @@
 #include <memory>
 #include <variant>
 #include <span>
+#include <utility>
 #include <spdlog/spdlog.h>
 #include <rhi.h>
 
@@ -116,6 +117,10 @@ public:
 
 		// main hook: inject passes
 		virtual void GatherStructuralPasses(RenderGraph& rg, std::vector<ExternalPassDesc>& out) = 0;
+
+		// per-frame hook: inject ephemeral passes (e.g. readback captures)
+		// Default: no per-frame passes.
+		virtual void GatherFramePasses(RenderGraph& rg, std::vector<ExternalPassDesc>& out) { (void)rg; (void)out; }
 	};
 
 	inline bool Has(PassRunMask m, PassRunMask f) {
@@ -525,6 +530,7 @@ private:
 
 	static PassView GetPassView(AnyPassAndResources& pr);
 	static bool BuildDependencyGraph(std::vector<Node>& nodes);
+	static bool BuildDependencyGraph(std::vector<Node>& nodes, std::span<const std::pair<size_t, size_t>> explicitEdges);
 	static std::vector<Node> BuildNodes(RenderGraph& rg, std::vector<AnyPassAndResources>& passes);
 	static bool AddEdgeDedup(
 		size_t from, size_t to,

@@ -1,6 +1,8 @@
 #pragma once
 #include <memory>
 #include <vector>
+#include <unordered_map>
+#include <atomic>
 #include <rhi.h>
 #include "Managers/Singletons/SettingsManager.h"
 
@@ -19,6 +21,17 @@ struct ReadbackInfo {
 	std::function<void()> callback;
 };
 
+struct ReadbackCaptureInfo {
+    std::string passName;
+    Resource* resource = nullptr;
+    RangeSpec range{};
+    ReadbackCaptureCallback callback;
+};
+
+struct ReadbackCaptureToken {
+    uint64_t id = 0;
+};
+
 class ReadbackManager {
 public:
 	static ReadbackManager& GetInstance();
@@ -33,6 +46,20 @@ public:
 		m_queuedReadbacks.push_back({cubemap, texture, outputFile, callback });
 	}
 
+    void RequestReadbackCapture(
+        const std::string& passName,
+        Resource* resource,
+        const RangeSpec& range,
+        ReadbackCaptureCallback callback);
+
+    std::vector<ReadbackCaptureInfo> ConsumeCaptureRequests();
+
+    ReadbackCaptureToken EnqueueCapture(ReadbackCaptureRequest&& request);
+    void FinalizeCapture(ReadbackCaptureToken token, uint64_t fenceValue);
+
+    uint64_t GetNextReadbackFenceValue();
+    rhi::Timeline GetReadbackFence() const { return m_readbackFence; }
+
 	std::shared_ptr<RenderPass> GetReadbackPass() {
 		return m_readbackPass;
 	}
@@ -46,6 +73,8 @@ public:
     void Cleanup() {
         m_queuedReadbacks.clear();
         m_readbackPass.reset();
+        m_queuedCaptures.clear();
+        m_readbackCaptureRequests.clear();
     }
 
 private:
@@ -116,6 +145,12 @@ private:
     rhi::Timeline m_readbackFence;
     std::mutex readbackRequestsMutex;
     std::vector<ReadbackRequest> m_readbackRequests;
+    std::vector<ReadbackCaptureRequest> m_readbackCaptureRequests;
+
+    std::mutex m_captureQueueMutex;
+    std::vector<ReadbackCaptureInfo> m_queuedCaptures;
+    std::atomic<uint64_t> m_captureTokenCounter = 0;
+    uint64_t m_captureFenceValue = 0;
 
     // Static pointer to hold the instance
     static std::unique_ptr<ReadbackManager> instance;

@@ -8,6 +8,7 @@
 class Resource;
 
 struct ResourceHandleAndRange {
+	ResourceHandleAndRange() : resource({}) {}
     ResourceHandleAndRange(ResourceRegistry::RegistryHandle resource) : resource(resource) {}
 	ResourceHandleAndRange(ResourceRegistry::RegistryHandle resource, const RangeSpec& range) : resource(resource), range(range) {}
     ResourceRegistry::RegistryHandle resource;

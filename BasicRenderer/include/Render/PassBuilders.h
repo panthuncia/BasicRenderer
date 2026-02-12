@@ -413,6 +413,9 @@ namespace detail {
     inline void extractId(auto& out, char* br) {
         out.insert(ResourceIdentifier{ br });
     }
+    inline void extractId(auto& out, const ResourceHandleAndRange& rar) {
+        out.insert(std::to_string(rar.resource.GetGlobalResourceID()));
+    }
 
     template<typename T>
     inline void extractId(auto& out, std::initializer_list<T> list) {
@@ -463,6 +466,7 @@ detail::StringLike<T> || // <-- key change
 std::is_same_v<std::remove_cvref_t<T>, ResourceIdentifier> ||
 std::is_same_v<std::remove_cvref_t<T>, ResourcePtrAndRange> ||
 std::is_same_v<std::remove_cvref_t<T>, ResourceIdentifierAndRange> ||
+std::is_same_v<std::remove_cvref_t<T>, ResourceHandleAndRange> ||
 std::is_same_v<std::remove_cvref_t<T>, IResourceResolver>;
 
 template<typename T>
@@ -1034,7 +1038,7 @@ private:
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
 			//if (!r.resource) continue;
-			params.constantBuffers.push_back(r);
+		 params.constantBuffers.push_back(r);
 		}
 		return *this;
 	}
@@ -1551,7 +1555,7 @@ private:
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
 			//if (!r.resource) continue;
-			params.shaderResources.push_back(r);
+		 params.shaderResources.push_back(r);
 		}
 		return *this;
 	}
@@ -1617,7 +1621,7 @@ private:
 		auto ranges = processResourceArguments(std::forward<T>(x), graph);
 		for (auto& r : ranges) {
 			//if (!r.resource) continue;
-			params.indirectArgumentBuffers.push_back(r);
+		 params.indirectArgumentBuffers.push_back(r);
 		}
 		return *this;
 	}

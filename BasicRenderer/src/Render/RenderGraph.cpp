@@ -135,6 +135,13 @@ bool RenderGraph::AddEdgeDedup(
 bool RenderGraph::BuildDependencyGraph(
 	std::vector<Node>& nodes)
 {
+	return BuildDependencyGraph(nodes, {});
+}
+
+bool RenderGraph::BuildDependencyGraph(
+	std::vector<Node>& nodes,
+	std::span<const std::pair<size_t, size_t>> explicitEdges)
+{
 	std::unordered_map<uint64_t, SeqState> seq;
 	seq.reserve(4096);
 
@@ -160,6 +167,12 @@ bool RenderGraph::BuildDependencyGraph(
 				s.lastWriter = i;
 			}
 		}
+	}
+
+	// Apply explicit edges (e.g. "After(passName)")
+	for (auto const& e : explicitEdges) {
+		if (e.first >= nodes.size() || e.second >= nodes.size()) continue;
+		AddEdgeDedup(e.first, e.second, nodes, edgeSet);
 	}
 
 	// topo + criticality (longest path)
@@ -1405,6 +1418,175 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 		}
 	}
 
+	// --- Per-frame extension passes (ephemeral) ---
+	// These are injected into the per-frame pass list (not m_masterPassList) so they do not accumulate.
+	std::vector<ExternalPassDesc> frameExt;
+	frameExt.reserve(16);
+	for (auto& ext : m_extensions) {
+		if (!ext) continue;
+		ext->GatherFramePasses(*this, frameExt);
+	}
+
+	// explicit After(anchor) edges (anchorName -> injectedName)
+	std::vector<std::pair<std::string, std::string>> explicitAfterByName;
+	explicitAfterByName.reserve(frameExt.size());
+
+	if (!frameExt.empty()) {
+		auto makeAny = [&](ExternalPassDesc const& d) -> AnyPassAndResources {
+			AnyPassAndResources any;
+			any.type = d.type;
+			any.name = d.name;
+
+			if (d.type == PassType::Render) {
+				auto rp = std::get<std::shared_ptr<RenderPass>>(d.pass);
+				RenderPassAndResources par;
+				par.pass = std::move(rp);
+				par.name = d.name;
+				{
+					RenderPassBuilder b(this, d.name);
+					b.pass = par.pass;
+					b.built_ = true;
+					b.params = {};
+					b._declaredIds.clear();
+					par.pass->DeclareResourceUsages(&b);
+					par.resources.staticResourceRequirements = b.GatherResourceRequirements();
+					par.resources.frameResourceRequirements = par.resources.staticResourceRequirements;
+					par.resources.internalTransitions = b.params.internalTransitions;
+					par.resources.identifierSet = b.DeclaredResourceIds();
+					par.resources.isGeometryPass = b.params.isGeometryPass;
+				}
+
+				par.pass->SetResourceRegistryView(
+					std::make_unique<ResourceRegistryView>(_registry, par.resources.identifierSet)
+				);
+				par.pass->Setup();
+				any.pass = std::move(par);
+			}
+			else if (d.type == PassType::Compute) {
+				auto cp = std::get<std::shared_ptr<ComputePass>>(d.pass);
+				ComputePassAndResources par;
+				par.pass = std::move(cp);
+				par.name = d.name;
+				{
+					ComputePassBuilder b(this, d.name);
+					b.pass = par.pass;
+					b.built_ = true;
+					b.params = {};
+					b._declaredIds.clear();
+					par.pass->DeclareResourceUsages(&b);
+					par.resources.staticResourceRequirements = b.GatherResourceRequirements();
+					par.resources.frameResourceRequirements = par.resources.staticResourceRequirements;
+					par.resources.internalTransitions = b.params.internalTransitions;
+					par.resources.identifierSet = b.DeclaredResourceIds();
+				}
+
+				par.pass->SetResourceRegistryView(
+					std::make_unique<ResourceRegistryView>(_registry, par.resources.identifierSet)
+				);
+				par.pass->Setup();
+				any.pass = std::move(par);
+			}
+
+			return any;
+		};
+
+		auto recordImmediate = [&](AnyPassAndResources& pr) {
+			if (pr.type == PassType::Compute) {
+				auto& p = std::get<ComputePassAndResources>(pr.pass);
+				p.immediateBytecode.clear();
+				p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
+
+				ImmediateContext c{ device,
+					{/*isRenderPass=*/false,
+					m_immediateDispatch,
+					&ResolveByIdThunk,
+					&ResolveByPtrThunk,
+					this},
+					frameIndex
+				};
+
+				p.pass->ExecuteImmediate(c);
+				auto immediateFrameData = c.list.Finalize();
+				p.immediateBytecode = std::move(immediateFrameData.bytecode);
+				p.immediateKeepAlive = std::move(immediateFrameData.keepAlive);
+				p.resources.frameResourceRequirements.insert(
+					p.resources.frameResourceRequirements.end(),
+					immediateFrameData.requirements.begin(),
+					immediateFrameData.requirements.end());
+				p.run = p.immediateBytecode.empty() ? PassRunMask::Retained : PassRunMask::Both;
+			}
+			else {
+				auto& p = std::get<RenderPassAndResources>(pr.pass);
+				p.immediateBytecode.clear();
+				p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
+
+				ImmediateContext c{ device,
+					{/*isRenderPass=*/true,
+					m_immediateDispatch,
+					&ResolveByIdThunk,
+					&ResolveByPtrThunk,
+					this},
+					frameIndex
+				};
+
+				p.pass->ExecuteImmediate(c);
+				auto immediateFrameData = c.list.Finalize();
+				p.immediateBytecode = std::move(immediateFrameData.bytecode);
+				p.immediateKeepAlive = std::move(immediateFrameData.keepAlive);
+				p.resources.frameResourceRequirements.insert(
+					p.resources.frameResourceRequirements.end(),
+					immediateFrameData.requirements.begin(),
+					immediateFrameData.requirements.end());
+				p.run = p.immediateBytecode.empty() ? PassRunMask::Retained : PassRunMask::Both;
+			}
+		};
+
+		auto findPassIndexByName = [&](const std::string& name) -> std::optional<size_t> {
+			if (name.empty()) return std::nullopt;
+			for (size_t i = 0; i < m_framePasses.size(); ++i) {
+				if (m_framePasses[i].name == name) return i;
+			}
+			return std::nullopt;
+		};
+
+		std::unordered_map<std::string, uint32_t> insertedAfterCount;
+		insertedAfterCount.reserve(frameExt.size());
+
+		for (auto& d : frameExt) {
+			if (d.type == PassType::Unknown) continue;
+			if (std::holds_alternative<std::monostate>(d.pass)) continue;
+			if (d.name.empty()) {
+				spdlog::warn("Frame extension emitted a pass with empty name; skipping.");
+				continue;
+			}
+
+			AnyPassAndResources any = makeAny(d);
+			recordImmediate(any);
+
+			// Default insertion: append
+			size_t insertPos = m_framePasses.size();
+			std::string anchorName;
+
+			if (d.where.has_value()) {
+				for (auto const& a : d.where->after) {
+					auto idxOpt = findPassIndexByName(a);
+					if (idxOpt.has_value()) {
+						anchorName = a;
+						uint32_t offset = insertedAfterCount[anchorName]++;
+						insertPos = std::min(*idxOpt + 1 + (size_t)offset, m_framePasses.size());
+						break;
+					}
+				}
+			}
+
+			if (!anchorName.empty()) {
+				explicitAfterByName.push_back({ anchorName, any.name });
+			}
+
+			m_framePasses.insert(m_framePasses.begin() + insertPos, std::move(any));
+		}
+	}
+
 	lastActiveSubresourceInAliasGroup.clear();
 	lastActiveSubresourceInAliasGroup.resize(aliasGroups.size());
 
@@ -1426,8 +1608,30 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 	std::unordered_map<uint64_t, unsigned int>  batchOfLastRenderQueueUsage;
 	std::unordered_map<uint64_t, unsigned int>  batchOfLastComputeQueueUsage;
 
+	// Convert explicit After(anchorName)->(passName) constraints into node-index edges.
+	std::vector<std::pair<size_t, size_t>> explicitEdges;
+	explicitEdges.reserve(explicitAfterByName.size());
+	if (!explicitAfterByName.empty()) {
+		std::unordered_map<std::string, size_t> nameToIndex;
+		nameToIndex.reserve(m_framePasses.size());
+		for (size_t i = 0; i < m_framePasses.size(); ++i) {
+			if (!m_framePasses[i].name.empty()) {
+				nameToIndex[m_framePasses[i].name] = i;
+			}
+		}
+		for (auto const& e : explicitAfterByName) {
+			auto itA = nameToIndex.find(e.first);
+			auto itB = nameToIndex.find(e.second);
+			if (itA == nameToIndex.end() || itB == nameToIndex.end()) {
+				spdlog::warn("Explicit After edge dropped (anchor='{}', pass='{}'): name not found in frame pass list.", e.first, e.second);
+				continue;
+			}
+			explicitEdges.push_back({ itA->second, itB->second });
+		}
+	}
+
 	auto nodes = BuildNodes(*this, m_framePasses);
-	if (!BuildDependencyGraph(nodes)) {
+	if (!BuildDependencyGraph(nodes, explicitEdges)) {
 		// Cycle detected
 		spdlog::error("Render graph contains a dependency cycle! Render graph compilation failed.");
 		throw std::runtime_error("Render graph contains a dependency cycle");

@@ -32,6 +32,12 @@ public:
         return m_backing->GetStateTracker();
 	}
 
+    bool TryGetBufferByteSize(uint64_t& outByteSize) const override {
+        if (!m_backing) return false;
+        outByteSize = static_cast<uint64_t>(m_backing->GetSize());
+        return true;
+    }
+
 protected:
 
 private:

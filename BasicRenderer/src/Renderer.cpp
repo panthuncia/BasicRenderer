@@ -63,6 +63,7 @@
 #include "Render/GraphExtensions/IOExtension.h"
 #include "Render/GraphExtensions/CLodExtension.h"
 #include "RenderPasses/DebugGridPass.h"
+#include "Render/GraphExtensions/ReadbackCaptureExtension.h"
 
 void D3D12DebugCallback(
     D3D12_MESSAGE_CATEGORY Category,
@@ -1082,6 +1083,7 @@ void Renderer::CreateRenderGraph() {
     }
 
     newGraph->RegisterExtension(std::make_unique<RenderGraphIOExtension>(m_managerInterface.GetTextureFactory()));
+    newGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>());
 
     BuildBRDFIntegrationPass(newGraph.get());
 

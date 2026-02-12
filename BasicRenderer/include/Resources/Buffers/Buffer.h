@@ -22,6 +22,11 @@ public:
     rhi::Resource GetAPIResource() override { return m_dataBuffer->GetAPIResource(); }
     size_t GetSize() const { return m_bufferSize; }
 
+    bool TryGetBufferByteSize(uint64_t& outByteSize) const override {
+        outByteSize = m_bufferSize;
+        return true;
+    }
+
     void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
         m_dataBuffer->ApplyMetadataComponentBundle(bundle);
     }

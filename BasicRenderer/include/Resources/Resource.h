@@ -54,6 +54,10 @@ public:
 	}
 
 	virtual SymbolicTracker* GetStateTracker() = 0;
+
+	// Optional capability: buffer-like resources can expose a byte size for generic readback/copy operations.
+	// This avoids relying on a specific concrete C++ type (e.g. Buffer vs DynamicBuffer).
+	virtual bool TryGetBufferByteSize(uint64_t& outByteSize) const { (void)outByteSize; return false; }
 	flecs::entity& GetECSEntity() {
 		return m_ecsEntity;
 	}

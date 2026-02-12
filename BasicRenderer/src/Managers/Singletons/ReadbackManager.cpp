@@ -4,6 +4,7 @@
 #include <rhi.h>
 #include <rhi_helpers.h>
 #include <rhi_conversions_dx12.h>
+#include <cstring>
 
 #include "Resources/Texture.h"
 #include "Resources/PixelBuffer.h"
@@ -136,7 +137,7 @@ void ReadbackManager::SaveCubemapToDDS(rhi::Device& device, rg::imm::ImmediateCo
             //std::async(std::launch::async, AsyncSaveToDDS, std::move(scratchImage), outputFile);
             }).detach();
         };
-    std::lock_guard<std::mutex> lock(readbackRequestsMutex);
+    std::scoped_lock lock(readbackRequestsMutex);
     m_readbackRequests.push_back(std::move(readbackRequest));
 }
 
@@ -149,7 +150,7 @@ void ReadbackManager::SaveTextureToDDS(
 {
     // Mips / subresources (single 2D texture, no array)
     const uint32_t numMipLevels = texture->GetMipLevels();
-    const uint32_t faces = 1;
+    constexpr uint32_t faces = 1;
     const uint32_t numSubresources = numMipLevels * faces;
 
     // Ask RHI for copyable footprints
@@ -165,7 +166,7 @@ void ReadbackManager::SaveTextureToDDS(
     fr.planeCount = 1;
     fr.baseOffset = 0;
 
-    auto info = device.GetCopyableFootprints(fr, fps.data(), (uint32_t)fps.size());
+    auto info = device.GetCopyableFootprints(fr, fps.data(), static_cast<uint32_t>(fps.size()));
     assert(info.count == numSubresources);
 
     // Create a readback buffer sized to hold all subresources
@@ -263,7 +264,7 @@ void ReadbackManager::SaveTextureToDDS(
 
             readbackBuffer->GetAPIResource().Unmap(0, 0);
 
-            auto hr = DirectX::SaveToDDSFile(
+            const auto hr = DirectX::SaveToDDSFile(
                 scratchImage.GetImages(),
                 scratchImage.GetImageCount(),
                 scratchImage.GetMetadata(),
@@ -276,10 +277,52 @@ void ReadbackManager::SaveTextureToDDS(
             }).detach();
         };
 
-    std::lock_guard<std::mutex> lock(readbackRequestsMutex);
+    std::scoped_lock lock(readbackRequestsMutex);
     m_readbackRequests.push_back(std::move(readbackRequest));
 }
 
+void ReadbackManager::RequestReadbackCapture(
+    const std::string& passName,
+    Resource* resource,
+    const RangeSpec& range,
+    ReadbackCaptureCallback callback)
+{
+    std::scoped_lock lock(m_captureQueueMutex);
+    m_queuedCaptures.push_back(ReadbackCaptureInfo{
+        passName,
+        resource,
+        range,
+        std::move(callback)
+        });
+}
+
+std::vector<ReadbackCaptureInfo> ReadbackManager::ConsumeCaptureRequests() {
+    std::lock_guard<std::mutex> lock(m_captureQueueMutex);
+    auto out = std::move(m_queuedCaptures);
+    m_queuedCaptures.clear();
+    return out;
+}
+
+ReadbackCaptureToken ReadbackManager::EnqueueCapture(ReadbackCaptureRequest&& request) {
+    request.token = ++m_captureTokenCounter;
+    std::lock_guard<std::mutex> lock(readbackRequestsMutex);
+    m_readbackCaptureRequests.push_back(std::move(request));
+    return { request.token };
+}
+
+void ReadbackManager::FinalizeCapture(ReadbackCaptureToken token, uint64_t fenceValue) {
+    std::lock_guard<std::mutex> lock(readbackRequestsMutex);
+    for (auto& request : m_readbackCaptureRequests) {
+        if (request.token == token.id) {
+            request.fenceValue = fenceValue;
+            return;
+        }
+    }
+}
+
+uint64_t ReadbackManager::GetNextReadbackFenceValue() {
+    return ++m_captureFenceValue;
+}
 
 void ReadbackManager::ProcessReadbackRequests() {
     std::lock_guard<std::mutex> lock(readbackRequestsMutex);
@@ -296,6 +339,34 @@ void ReadbackManager::ProcessReadbackRequests() {
         }
     }
 
-    // Update the queue with remaining requests
     m_readbackRequests = std::move(remainingRequests);
+
+    std::vector<ReadbackCaptureRequest> remainingCaptures;
+    for (auto& request : m_readbackCaptureRequests) {
+        if (request.fenceValue != 0 && m_readbackFence.GetCompletedValue() >= request.fenceValue) {
+            void* mappedData = nullptr;
+            request.readbackBuffer->GetAPIResource().Map(&mappedData);
+
+            ReadbackCaptureResult result{};
+            result.desc = request.desc;
+            result.layouts = request.layouts;
+            result.format = request.format;
+            result.width = request.width;
+            result.height = request.height;
+            result.depth = request.depth;
+            result.data.resize(request.totalSize);
+
+            std::memcpy(result.data.data(), mappedData, request.totalSize);
+            request.readbackBuffer->GetAPIResource().Unmap(0, 0);
+
+            if (request.callback) {
+                request.callback(std::move(result));
+            }
+        }
+        else {
+            remainingCaptures.push_back(std::move(request));
+        }
+    }
+
+    m_readbackCaptureRequests = std::move(remainingCaptures);
 }

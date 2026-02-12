@@ -1,4 +1,5 @@
 #include "Menu/RenderGraphInspector.h"
+#include "Menu/MemoryViewWidget.h"
 #include "imgui.h"
 #include "implot.h"
 #include <algorithm>
@@ -7,6 +8,7 @@
 #include <rhi_helpers.h>
 
 #include "Render/QueueKind.h"
+#include "Managers/Singletons/ReadbackManager.h"
 
 struct BatchLayout {
     // Absolute X (plot coords) for this batch
@@ -111,13 +113,15 @@ static SignalIndex BuildSignalIndex(const std::vector<RenderGraph::PassBatch>& b
 
 // ---- Helpers to fetch all resource IDs present (for the side list) ----
 static void CollectResourceIds(const std::vector<RenderGraph::PassBatch>& batches,
-    std::unordered_map<uint64_t, std::string>& outIdToName)
+    std::unordered_map<uint64_t, std::string>& outIdToName,
+    std::unordered_map<uint64_t, Resource*>& outIdToPtr)
 {
     for (const auto& b : batches) {
         auto scan = [&](const std::vector<ResourceTransition>& v) {
             for (auto& t : v) {
                 if (!t.pResource) continue;
                 outIdToName.emplace(t.pResource->GetGlobalResourceID(), t.pResource->GetName());
+                outIdToPtr.emplace(t.pResource->GetGlobalResourceID(), t.pResource);
             }
             };
         scan(b.renderTransitions);
@@ -127,6 +131,33 @@ static void CollectResourceIds(const std::vector<RenderGraph::PassBatch>& batche
         for (auto id : b.allResources) outIdToName.emplace(id, std::string{});
         for (auto id : b.internallyTransitionedResources) outIdToName.emplace(id, std::string{});
     }
+}
+
+static std::string GetBatchAnchorPassName(const RenderGraph::PassBatch& batch) {
+    if (!batch.renderPasses.empty()) {
+        return batch.renderPasses.back().name;
+    }
+    if (!batch.computePasses.empty()) {
+        return batch.computePasses.back().name;
+    }
+    return {};
+}
+
+static void CollectBatchResourceIds(const RenderGraph::PassBatch& batch, std::unordered_set<uint64_t>& out)
+{
+    out.clear();
+    out.insert(batch.allResources.begin(), batch.allResources.end());
+    out.insert(batch.internallyTransitionedResources.begin(), batch.internallyTransitionedResources.end());
+
+    auto scan = [&](const std::vector<ResourceTransition>& v) {
+        for (auto const& t : v) {
+            if (!t.pResource) continue;
+            out.insert(t.pResource->GetGlobalResourceID());
+        }
+    };
+    scan(batch.renderTransitions);
+    scan(batch.computeTransitions);
+    scan(batch.batchEndTransitions);
 }
 
 // Colors
@@ -228,12 +259,34 @@ namespace RGInspector {
 
         // --- Left panel: resource picker ---
         static uint64_t s_selectedRes = 0;
+        static Resource* s_selectedResPtr = nullptr;
+        static int s_selectedBatch = 0;
+        static int s_filterBatchResources = -1; // -1 = show all resources
+        static std::string s_selectedPassName;
+        static bool s_openMemoryView = false;
+        static ui::MemoryViewWidget s_memoryView;
         static char filterBuf[128] = {};
         std::unordered_map<uint64_t, std::string> idToName;
-        CollectResourceIds(batches, idToName);
+        std::unordered_map<uint64_t, Resource*> idToPtr;
+        CollectResourceIds(batches, idToName, idToPtr);
+
+        if (s_filterBatchResources >= (int)batches.size())
+            s_filterBatchResources = -1;
+
+        std::unordered_set<uint64_t> allowedResourceIds;
+        if (s_filterBatchResources >= 0 && s_filterBatchResources < (int)batches.size())
+            CollectBatchResourceIds(batches[s_filterBatchResources], allowedResourceIds);
 
         ImGui::BeginChild("LeftPanel", ImVec2(320, 0), true);
         ImGui::TextUnformatted("Resources");
+        if (s_filterBatchResources >= 0) {
+            ImGui::Text("Batch Filter: %d", s_filterBatchResources);
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Clear Batch Filter")) {
+                s_filterBatchResources = -1;
+                allowedResourceIds.clear();
+            }
+        }
         ImGui::InputTextWithHint("##resfilter", "filter...", filterBuf, IM_ARRAYSIZE(filterBuf));
 
         std::string f = filterBuf;
@@ -241,16 +294,114 @@ namespace RGInspector {
 
         for (auto& kv : idToName) {
             const uint64_t id = kv.first;
+
+            if (s_filterBatchResources >= 0) {
+                if (allowedResourceIds.find(id) == allowedResourceIds.end())
+                    continue;
+            }
+
             std::string label = kv.second.empty() ? ("#" + std::to_string(id)) : kv.second + " [" + std::to_string(id) + "]";
             std::string lcl = label; std::transform(lcl.begin(), lcl.end(), lcl.begin(), ::tolower);
             if (!f.empty() && lcl.find(f) == std::string::npos) continue;
 
             bool sel = (s_selectedRes == id);
-            if (ImGui::Selectable(label.c_str(), sel)) s_selectedRes = id;
+            if (ImGui::Selectable(label.c_str(), sel)) {
+                s_selectedRes = id;
+                auto it = idToPtr.find(id);
+                s_selectedResPtr = (it != idToPtr.end()) ? it->second : nullptr;
+            }
             if (ImGui::IsItemHovered() && !kv.second.empty())
                 ImGui::SetTooltip("%s", kv.second.c_str());
         }
-        if (ImGui::Button("Clear Selection")) s_selectedRes = 0;
+        if (ImGui::Button("Clear Selection")) {
+            s_selectedRes = 0;
+            s_selectedResPtr = nullptr;
+            // Also clear the batch filter so the UI obviously resets.
+            s_filterBatchResources = -1;
+            allowedResourceIds.clear();
+        }
+
+        if (!batches.empty()) {
+            s_selectedBatch = std::clamp(s_selectedBatch, 0, (int)batches.size() - 1);
+            ImGui::Separator();
+            ImGui::TextUnformatted("Capture");
+            if (ImGui::SliderInt("Batch", &s_selectedBatch, 0, (int)batches.size() - 1)) {
+                // Keep the batch resource filter in sync with the slider.
+                s_filterBatchResources = s_selectedBatch;
+
+                if (s_selectedRes != 0) {
+                    std::unordered_set<uint64_t> sliderAllowed;
+                    CollectBatchResourceIds(batches[s_selectedBatch], sliderAllowed);
+                    if (sliderAllowed.find(s_selectedRes) == sliderAllowed.end()) {
+                        s_selectedRes = 0;
+                        s_selectedResPtr = nullptr;
+                    }
+                }
+            }
+
+            // Pass selector (used for memory capture insertion point)
+            {
+                std::vector<std::string> passNames;
+                passNames.reserve(batches[s_selectedBatch].computePasses.size() + batches[s_selectedBatch].renderPasses.size());
+                for (auto const& p : batches[s_selectedBatch].computePasses) passNames.push_back(p.name);
+                for (auto const& p : batches[s_selectedBatch].renderPasses)  passNames.push_back(p.name);
+
+                const std::string anchor = GetBatchAnchorPassName(batches[s_selectedBatch]);
+                auto findIndex = [&](const std::string& name) -> int {
+                    for (int i = 0; i < (int)passNames.size(); ++i) {
+                        if (passNames[i] == name) return i;
+                    }
+                    return -1;
+                };
+
+                if (s_selectedPassName.empty() || (!s_selectedPassName.empty() && findIndex(s_selectedPassName) < 0)) {
+                    s_selectedPassName = anchor;
+                    if (s_selectedPassName.empty() && !passNames.empty()) {
+                        s_selectedPassName = passNames[0];
+                    }
+                }
+
+                int passIndex = findIndex(s_selectedPassName);
+                if (passIndex < 0) passIndex = findIndex(anchor);
+                if (passIndex < 0) passIndex = 0;
+
+                const char* preview = passNames.empty() ? "(no passes)" : passNames[passIndex].c_str();
+                if (ImGui::BeginCombo("Pass", preview, ImGuiComboFlags_HeightLarge)) {
+                    for (int i = 0; i < (int)passNames.size(); ++i) {
+                        bool isSel = (i == passIndex);
+                        if (ImGui::Selectable(passNames[i].c_str(), isSel)) {
+                            s_selectedPassName = passNames[i];
+                        }
+                        if (isSel) ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::EndCombo();
+                }
+            }
+
+            const std::string anchor = (s_selectedResPtr != nullptr) ? s_selectedPassName : std::string{};
+            const bool canCapture = (s_selectedResPtr != nullptr) && !anchor.empty();
+
+            if (!canCapture) ImGui::BeginDisabled();
+            if (ImGui::Button("Capture After Pass")) {
+                ReadbackManager::GetInstance().RequestReadbackCapture(
+                    anchor,
+                    s_selectedResPtr,
+                    RangeSpec{},
+                    [](ReadbackCaptureResult&&) {
+                        spdlog::info("Readback capture completed.");
+                    });
+            }
+            if (!canCapture) ImGui::EndDisabled();
+
+            ImGui::SameLine();
+            if (!canCapture) ImGui::BeginDisabled();
+            if (ImGui::Button("Open Memory View")) {
+                s_openMemoryView = true;
+                s_memoryView.Open(anchor, s_selectedResPtr, RangeSpec{});
+            }
+            if (!canCapture) ImGui::EndDisabled();
+        }
+
         ImGui::EndChild();
 
         ImGui::SameLine();
@@ -413,6 +564,31 @@ namespace RGInspector {
                 const auto& b = batches[bi];
                 const auto& L = layouts[bi];
 
+                // Batch hitbox for selection (click anywhere in the batch slot)
+                {
+                    const float yMin = LaneY(QueueKind::Copy, H, S);
+                    const float yMax = LaneY(QueueKind::Graphics, H, S) + H;
+                    ImPlotPoint hbMin(L.baseX, yMin);
+                    ImPlotPoint hbMax(L.baseX + L.width, yMax);
+                    if (IsMouseOver(hbMin, hbMax) && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                        s_filterBatchResources = bi;
+                        s_selectedBatch = bi;
+
+                        if (s_selectedRes != 0) {
+                            std::unordered_set<uint64_t> clickedAllowed;
+                            CollectBatchResourceIds(b, clickedAllowed);
+                            if (clickedAllowed.find(s_selectedRes) == clickedAllowed.end()) {
+                                s_selectedRes = 0;
+                                s_selectedResPtr = nullptr;
+                            }
+                        }
+                    }
+
+                    if (s_filterBatchResources == bi) {
+                        DrawBlock(dl, hbMin, hbMax, IM_COL32(0, 0, 0, 0), ColHighlight(), 0.0f);
+                    }
+                }
+
                 if (b.computePasses.size() > 0 && b.computePasses[0].name == "Screen-Space Reflections Pass") {
                     spdlog::info("Here");
                 }
@@ -520,6 +696,11 @@ namespace RGInspector {
             ImPlot::EndPlot();
         }
         ImGui::EndGroup();
+
+        // Separate window for memory view (driven by the inspector selection)
+        if (s_openMemoryView) {
+            s_memoryView.Draw(&s_openMemoryView);
+        }
 
         ImGui::End();
     }
