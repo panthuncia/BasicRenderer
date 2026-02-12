@@ -471,9 +471,11 @@ namespace ui {
                 static_cast<unsigned long long>(count));
 
                 ImGui::SetNextItemWidth(140.0f);
-                ImGui::InputInt("Go To Index", &goToElementInput_);
+                ImGui::InputInt("Go To Index", &goToElementInput_, 0, 0);
+                const bool enterPressed = ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
+                const bool goIndexOnEnter = (ImGui::IsItemFocused() && enterPressed) || ImGui::IsItemDeactivatedAfterEdit();
                 ImGui::SameLine();
-                if (ImGui::Button("Go")) {
+                if (goIndexOnEnter || ImGui::Button("Go")) {
                     if (count > 0) {
                         goToElementInput_ = std::clamp(goToElementInput_, 0, static_cast<int>(count) - 1);
                         scrollToElement_ = goToElementInput_;
@@ -490,21 +492,38 @@ namespace ui {
                 else {
                     ImGui::BeginChild("##TypedElements", ImVec2(0, ImGui::GetContentRegionAvail().y), true);
 
-                    // Note: Tree rows are variable height when expanded; ListClipper assumes fixed-height rows
-                    // and can skip/hide items. Iterate directly to keep scrolling behavior correct.
-                    for (int idx = 0; idx < static_cast<int>(count); ++idx) {
+                    if (scrollToElement_ >= 0) {
+                        const float rowHeight = ImGui::GetTextLineHeightWithSpacing();
+                        const float targetY = static_cast<float>(scrollToElement_) * rowHeight;
+                        const float viewH = ImGui::GetWindowHeight();
+                        const float scrollY = std::max(0.0f, targetY - viewH * 0.25f);
+                        ImGui::SetScrollY(scrollY);
+                        scrollToElement_ = -1;
+                    }
+
+                    const float rowHeight = ImGui::GetTextLineHeightWithSpacing();
+                    const float scrollY = ImGui::GetScrollY();
+                    const float viewH = ImGui::GetWindowHeight();
+
+                    const int overscanRows = 6;
+                    int firstVisible = static_cast<int>(scrollY / std::max(1.0f, rowHeight)) - overscanRows;
+                    int visibleCount = static_cast<int>(viewH / std::max(1.0f, rowHeight)) + overscanRows * 2;
+
+                    firstVisible = std::clamp(firstVisible, 0, static_cast<int>(count));
+                    const int endVisible = std::clamp(firstVisible + std::max(1, visibleCount), 0, static_cast<int>(count));
+
+                    if (firstVisible > 0) {
+                        ImGui::Dummy(ImVec2(0.0f, rowHeight * static_cast<float>(firstVisible)));
+                    }
+
+                    for (int idx = firstVisible; idx < endVisible; ++idx) {
                         ImGui::PushID(idx);
 
                         const size_t elementBase = static_cast<size_t>(idx) * stride;
-                        std::ostringstream hdr;
-                        hdr << "Element " << idx << " (base=0x" << std::hex << elementBase << std::dec << ")";
+                        char hdr[96];
+                        std::snprintf(hdr, sizeof(hdr), "Element %d (base=0x%llX)", idx, static_cast<unsigned long long>(elementBase));
 
-                        bool open = ImGui::TreeNodeEx(hdr.str().c_str(), ImGuiTreeNodeFlags_SpanAvailWidth);
-
-                        if (scrollToElement_ == idx) {
-                            ImGui::SetScrollHereY(0.1f);
-                            scrollToElement_ = -1;
-                        }
+                        bool open = ImGui::TreeNodeEx(hdr, ImGuiTreeNodeFlags_SpanAvailWidth);
 
                         if (open) {
                             if (reflectedRoot_->children.empty()) {
@@ -523,6 +542,11 @@ namespace ui {
                         ImGui::PopID();
                     }
 
+                    if (endVisible < static_cast<int>(count)) {
+                        const int trailingRows = static_cast<int>(count) - endVisible;
+                        ImGui::Dummy(ImVec2(0.0f, rowHeight * static_cast<float>(trailingRows)));
+                    }
+
                     ImGui::EndChild();
                 }
             }
@@ -539,6 +563,26 @@ namespace ui {
                 bytesPerRow_ = bpr;
             }
 
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(170.0f);
+            ImGui::InputScalar("Go To Byte", ImGuiDataType_U64, &goToByteOffsetInput_);
+            const bool enterPressed = ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
+            const bool goByteOnEnter = (ImGui::IsItemFocused() && enterPressed) || ImGui::IsItemDeactivatedAfterEdit();
+            ImGui::SameLine();
+            if (goByteOnEnter || ImGui::Button("Go##RawHex")) {
+                if (sizeBytes == 0) {
+                    goToByteOffsetInput_ = 0;
+                    scrollToByteOffset_ = UINT64_MAX;
+                    highlightedByteOffset_ = UINT64_MAX;
+                }
+                else {
+                    const uint64_t maxOffset = static_cast<uint64_t>(sizeBytes - 1);
+                    goToByteOffsetInput_ = std::min(goToByteOffsetInput_, maxOffset);
+                    scrollToByteOffset_ = goToByteOffsetInput_;
+                    highlightedByteOffset_ = goToByteOffsetInput_;
+                }
+            }
+
             if (sizeBytes == 0) {
                 ImGui::TextUnformatted("(empty)");
                 return;
@@ -547,7 +591,23 @@ namespace ui {
             const int bytesPerRow = std::clamp(bytesPerRow_, 4, 64);
             const int rowCount = static_cast<int>((sizeBytes + static_cast<size_t>(bytesPerRow) - 1) / static_cast<size_t>(bytesPerRow));
 
+            if (highlightedByteOffset_ != UINT64_MAX && highlightedByteOffset_ >= static_cast<uint64_t>(sizeBytes)) {
+                highlightedByteOffset_ = UINT64_MAX;
+            }
+
             ImGui::BeginChild("##HexView", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
+
+            if (scrollToByteOffset_ != UINT64_MAX) {
+                const uint64_t targetRow = scrollToByteOffset_ / static_cast<uint64_t>(bytesPerRow);
+                const float rowHeight = ImGui::GetTextLineHeightWithSpacing();
+                const float targetY = static_cast<float>(targetRow) * rowHeight;
+                const float viewH = ImGui::GetWindowHeight();
+                const float scrollY = std::max(0.0f, targetY - viewH * 0.25f);
+                ImGui::SetScrollY(scrollY);
+                scrollToByteOffset_ = UINT64_MAX;
+            }
+
+            const ImVec4 highlightedByteColor = ImVec4(0.60f, 0.80f, 1.00f, 1.00f); // light blue
 
             ImGuiListClipper clip;
             clip.Begin(rowCount);
@@ -555,38 +615,48 @@ namespace ui {
                 for (int row = clip.DisplayStart; row < clip.DisplayEnd; ++row) {
                     const size_t base = static_cast<size_t>(row) * static_cast<size_t>(bytesPerRow);
 
-                    char line[512];
-                    int n = 0;
+                    char prefix[32];
+                    std::snprintf(prefix, sizeof(prefix), "%08llX  ", static_cast<unsigned long long>(base));
+                    ImGui::TextUnformatted(prefix);
+                    ImGui::SameLine(0.0f, 0.0f);
 
-                    n += std::snprintf(line + n, sizeof(line) - n, "%08llX  ", static_cast<unsigned long long>(base));
-
-                    // Hex bytes
+                    // Hex bytes with per-byte highlight
                     for (int i = 0; i < bytesPerRow; ++i) {
                         const size_t idx = base + static_cast<size_t>(i);
+                        char token[8];
                         if (idx < sizeBytes) {
                             const unsigned v = static_cast<unsigned>(std::to_integer<unsigned char>(r.data[idx]));
-                            n += std::snprintf(line + n, sizeof(line) - n, "%02X ", v);
+                            std::snprintf(token, sizeof(token), "%02X ", v);
+                            if (highlightedByteOffset_ != UINT64_MAX && idx == static_cast<size_t>(highlightedByteOffset_)) {
+                                ImGui::TextColored(highlightedByteColor, "%s", token);
+                            } else {
+                                ImGui::TextUnformatted(token);
+                            }
                         }
                         else {
-                            n += std::snprintf(line + n, sizeof(line) - n, "   ");
+                            std::snprintf(token, sizeof(token), "   ");
+                            ImGui::TextUnformatted(token);
                         }
+                        ImGui::SameLine(0.0f, 0.0f);
                     }
 
                     // ASCII
-                    n += std::snprintf(line + n, sizeof(line) - n, " |");
+                    char ascii[96];
+                    int n = 0;
+                    n += std::snprintf(ascii + n, sizeof(ascii) - n, " |");
                     for (int i = 0; i < bytesPerRow; ++i) {
                         const size_t idx = base + static_cast<size_t>(i);
                         if (idx < sizeBytes) {
-                            line[n++] = ToPrintableAscii(r.data[idx]);
+                            ascii[n++] = ToPrintableAscii(r.data[idx]);
                         }
                         else {
-                            line[n++] = ' ';
+                            ascii[n++] = ' ';
                         }
                     }
-                    line[n++] = '|';
-                    line[n++] = 0;
+                    ascii[n++] = '|';
+                    ascii[n++] = 0;
 
-                    ImGui::TextUnformatted(line);
+                    ImGui::TextUnformatted(ascii);
                 }
             }
 

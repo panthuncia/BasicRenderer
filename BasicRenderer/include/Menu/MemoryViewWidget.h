@@ -60,6 +60,10 @@ namespace ui {
         int goToElementInput_ = 0;
         int scrollToElement_ = -1;
 
+        uint64_t goToByteOffsetInput_ = 0;
+        uint64_t scrollToByteOffset_ = UINT64_MAX;
+        uint64_t highlightedByteOffset_ = UINT64_MAX;
+
         uint64_t currentResourceId_ = 0;
 
         struct ResourceLayoutState {

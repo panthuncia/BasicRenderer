@@ -316,7 +316,7 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
     {
         setup.vertCount = 0;
         setup.triCount = 0;
-        //return false;
+        return false;
     }	
 
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
