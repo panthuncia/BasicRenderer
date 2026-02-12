@@ -21,9 +21,13 @@ namespace ui {
 
         static bool HasNonWhitespace(const char* s)
         {
-            if (!s) return false;
+            if (!s) {
+                return false;
+            }
             while (*s) {
-                if (!std::isspace(static_cast<unsigned char>(*s))) return true;
+                if (!std::isspace(static_cast<unsigned char>(*s))) {
+                    return true;
+                }
                 ++s;
             }
             return false;
@@ -122,7 +126,7 @@ namespace ui {
                 return "<non-numeric>";
             }
 
-            const size_t laneOffset = absoluteOffset + size_t(lane) * elemBytes;
+            const size_t laneOffset = absoluteOffset + static_cast<size_t>(lane) * elemBytes;
             if (laneOffset >= data.size()) {
                 return "<oob>";
             }
@@ -145,7 +149,9 @@ namespace ui {
                     std::ostringstream row;
                     row << "[";
                     for (uint32_t c = 0; c < cols; ++c) {
-                        if (c > 0) row << ", ";
+                        if (c > 0) {
+                            row << ", ";
+                        }
                         const uint32_t lane = r * cols + c;
                         row << FormatLaneValue(node, data, absoluteOffset, lane);
                     }
@@ -160,7 +166,9 @@ namespace ui {
             std::ostringstream os;
             os << "[";
             for (uint32_t lane = 0; lane < lanes; ++lane) {
-                if (lane > 0) os << ", ";
+                if (lane > 0) {
+                    os << ", ";
+                }
                 os << FormatLaneValue(node, data, absoluteOffset, lane);
             }
             os << "]";
@@ -213,13 +221,17 @@ namespace ui {
     } // namespace
 
     static inline char ToPrintableAscii(std::byte b) {
-        unsigned char c = (unsigned char)b;
-        if (c >= 32 && c <= 126) return (char)c;
+        unsigned char c = static_cast<unsigned char>(b);
+        if (c >= 32 && c <= 126) {
+            return static_cast<char>(c);
+        }
         return '.';
     }
 
     void MemoryViewWidget::SaveCurrentResourceLayoutState() {
-        if (currentResourceId_ == 0) return;
+        if (currentResourceId_ == 0) {
+            return;
+        }
 
         ResourceLayoutState s{};
         s.structInput = std::string(structInputBuf_.data());
@@ -305,7 +317,9 @@ namespace ui {
     }
 
     void MemoryViewWidget::Draw(bool* pOpen) {
-        if (!pOpen || !*pOpen) return;
+        if (!pOpen || !*pOpen) {
+            return;
+        }
 
         if (!ImGui::Begin("Memory View", pOpen)) {
             ImGui::End();
@@ -332,15 +346,19 @@ namespace ui {
         if (havePending) {
             ImGui::Text("Pass: %s", pendingCopy.passName.c_str());
             ImGui::Text("Resource: %s [%llu]", pendingCopy.resourceName.empty() ? "(unnamed)" : pendingCopy.resourceName.c_str(),
-                (unsigned long long)pendingCopy.resourceId);
+                static_cast<unsigned long long>(pendingCopy.resourceId));
         }
         else {
             ImGui::TextUnformatted("No capture requested.");
         }
 
         if (!status.empty()) {
-            if (waiting) ImGui::TextDisabled("%s", status.c_str());
-            else ImGui::TextUnformatted(status.c_str());
+            if (waiting) {
+                ImGui::TextDisabled("%s", status.c_str());
+            }
+            else {
+                ImGui::TextUnformatted(status.c_str());
+            }
         }
 
         ImGui::Separator();
@@ -383,15 +401,15 @@ namespace ui {
     void MemoryViewWidget::DrawTextureViewStub(const ReadbackCaptureResult& r) {
         ImGui::TextUnformatted("Texture view is stubbed out for now.");
         ImGui::Separator();
-        ImGui::Text("Format: %d", (int)r.format);
+        ImGui::Text("Format: %d", static_cast<int>(r.format));
         ImGui::Text("Dimensions: %ux%u (depth %u)", r.width, r.height, r.depth);
-        ImGui::Text("Footprints: %d", (int)r.layouts.size());
-        ImGui::Text("Data size: %llu bytes", (unsigned long long)r.data.size());
+        ImGui::Text("Footprints: %d", static_cast<int>(r.layouts.size()));
+        ImGui::Text("Data size: %llu bytes", static_cast<unsigned long long>(r.data.size()));
     }
 
     void MemoryViewWidget::DrawBufferView(const ReadbackCaptureResult& r) {
         const size_t sizeBytes = r.data.size();
-        ImGui::Text("Size: %llu bytes", (unsigned long long)sizeBytes);
+        ImGui::Text("Size: %llu bytes", static_cast<unsigned long long>(sizeBytes));
 
         ImGui::Separator();
         ImGui::TextUnformatted("Struct Layout (Slang)");
@@ -449,15 +467,15 @@ namespace ui {
             const size_t count = sizeBytes / stride;
 
                 ImGui::Text("Reflected stride: %llu bytes, element count: %llu",
-                (unsigned long long)stride,
-                (unsigned long long)count);
+                static_cast<unsigned long long>(stride),
+                static_cast<unsigned long long>(count));
 
                 ImGui::SetNextItemWidth(140.0f);
                 ImGui::InputInt("Go To Index", &goToElementInput_);
                 ImGui::SameLine();
                 if (ImGui::Button("Go")) {
                     if (count > 0) {
-                        goToElementInput_ = std::clamp(goToElementInput_, 0, (int)count - 1);
+                        goToElementInput_ = std::clamp(goToElementInput_, 0, static_cast<int>(count) - 1);
                         scrollToElement_ = goToElementInput_;
                     }
                     else {
@@ -474,10 +492,10 @@ namespace ui {
 
                     // Note: Tree rows are variable height when expanded; ListClipper assumes fixed-height rows
                     // and can skip/hide items. Iterate directly to keep scrolling behavior correct.
-                    for (int idx = 0; idx < (int)count; ++idx) {
+                    for (int idx = 0; idx < static_cast<int>(count); ++idx) {
                         ImGui::PushID(idx);
 
-                        const size_t elementBase = size_t(idx) * stride;
+                        const size_t elementBase = static_cast<size_t>(idx) * stride;
                         std::ostringstream hdr;
                         hdr << "Element " << idx << " (base=0x" << std::hex << elementBase << std::dec << ")";
 
@@ -527,7 +545,7 @@ namespace ui {
             }
 
             const int bytesPerRow = std::clamp(bytesPerRow_, 4, 64);
-            const int rowCount = (int)((sizeBytes + (size_t)bytesPerRow - 1) / (size_t)bytesPerRow);
+            const int rowCount = static_cast<int>((sizeBytes + static_cast<size_t>(bytesPerRow) - 1) / static_cast<size_t>(bytesPerRow));
 
             ImGui::BeginChild("##HexView", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
 
@@ -535,18 +553,18 @@ namespace ui {
             clip.Begin(rowCount);
             while (clip.Step()) {
                 for (int row = clip.DisplayStart; row < clip.DisplayEnd; ++row) {
-                    const size_t base = (size_t)row * (size_t)bytesPerRow;
+                    const size_t base = static_cast<size_t>(row) * static_cast<size_t>(bytesPerRow);
 
                     char line[512];
                     int n = 0;
 
-                    n += std::snprintf(line + n, sizeof(line) - n, "%08llX  ", (unsigned long long)base);
+                    n += std::snprintf(line + n, sizeof(line) - n, "%08llX  ", static_cast<unsigned long long>(base));
 
                     // Hex bytes
                     for (int i = 0; i < bytesPerRow; ++i) {
-                        const size_t idx = base + (size_t)i;
+                        const size_t idx = base + static_cast<size_t>(i);
                         if (idx < sizeBytes) {
-                            const unsigned v = (unsigned)std::to_integer<unsigned char>(r.data[idx]);
+                            const unsigned v = static_cast<unsigned>(std::to_integer<unsigned char>(r.data[idx]));
                             n += std::snprintf(line + n, sizeof(line) - n, "%02X ", v);
                         }
                         else {
@@ -557,7 +575,7 @@ namespace ui {
                     // ASCII
                     n += std::snprintf(line + n, sizeof(line) - n, " |");
                     for (int i = 0; i < bytesPerRow; ++i) {
-                        const size_t idx = base + (size_t)i;
+                        const size_t idx = base + static_cast<size_t>(i);
                         if (idx < sizeBytes) {
                             line[n++] = ToPrintableAscii(r.data[idx]);
                         }

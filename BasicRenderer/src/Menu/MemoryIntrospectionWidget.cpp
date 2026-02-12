@@ -11,14 +11,14 @@ namespace ui {
     }
 
     void MemoryIntrospectionWidget::PushFrameSample(double timeSeconds, uint64_t totalBytes) {
-        const double y = (double)totalBytes;
+        const double y = static_cast<double>(totalBytes);
 
         const size_t N = rtSeries_.x.size();
 
         // Target spacing so N samples can cover maxSeconds.
         double minDt = 0.0;
         if (rt_.maxSeconds > 0) {
-            minDt = (double)rt_.maxSeconds / (double)std::max<size_t>(1, N - 1);
+            minDt = static_cast<double>(rt_.maxSeconds) / static_cast<double>(std::max<size_t>(1, N - 1));
         }
 
         // First sample
@@ -46,7 +46,9 @@ namespace ui {
     void MemoryIntrospectionWidget::Draw(bool* pOpen,
         const MemorySnapshot* snapshot,
         const FrameGraphSnapshot* frameGraph) {
-        if (pOpen && !*pOpen) return;
+        if (pOpen && !*pOpen) {
+            return;
+        }
 
         if (!ImGui::Begin("Memory Introspection", pOpen)) {
             ImGui::End();
@@ -63,7 +65,9 @@ namespace ui {
             ms = &dummyMem;
         }
         MemorySnapshot localMem = *ms;
-        if (localMem.totalBytes == 0) localMem.totalBytes = ComputeTotalBytes(localMem);
+        if (localMem.totalBytes == 0) {
+            localMem.totalBytes = ComputeTotalBytes(localMem);
+        }
 
         FrameGraphSnapshot dummyFG;
         const FrameGraphSnapshot* fg = frameGraph;
@@ -76,21 +80,20 @@ namespace ui {
         case ViewMode::Pie:      DrawPieView(localMem); break;
         case ViewMode::List:     DrawListView(localMem); break;
         case ViewMode::Timeline: DrawTimelineView(*fg, localMem);  break;
-        default: break;
         }
 
         ImGui::End();
     }
 
     void MemoryIntrospectionWidget::DrawToolbar() {
-        int v = (int)view_;
+        int v = static_cast<int>(view_);
 
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted("View:");
-        RadioButtonView("Pie", &v, (int)ViewMode::Pie);
-        RadioButtonView("List", &v, (int)ViewMode::List);
-        RadioButtonView("Timeline", &v, (int)ViewMode::Timeline);
-        view_ = (ViewMode)v;
+        RadioButtonView("Pie", &v, static_cast<int>(ViewMode::Pie));
+        RadioButtonView("List", &v, static_cast<int>(ViewMode::List));
+        RadioButtonView("Timeline", &v, static_cast<int>(ViewMode::Timeline));
+        view_ = static_cast<ViewMode>(v);
 
         ImGui::SameLine();
         ImGui::TextUnformatted("   ");
@@ -110,12 +113,16 @@ namespace ui {
     uint64_t MemoryIntrospectionWidget::ComputeTotalBytes(const MemorySnapshot& s) {
         if (!s.categories.empty()) {
             uint64_t sum = 0;
-            for (auto& c : s.categories) sum += c.bytes;
+            for (auto& c : s.categories) {
+                sum += c.bytes;
+            }
             return sum;
         }
         if (!s.resources.empty()) {
             uint64_t sum = 0;
-            for (auto& r : s.resources) sum += r.bytes;
+            for (auto& r : s.resources) {
+                sum += r.bytes;
+            }
             return sum;
         }
         return 0;
@@ -160,15 +167,21 @@ namespace ui {
 
         static inline void TrimInPlace(std::string& s) {
             auto is_ws = [](unsigned char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
-            while (!s.empty() && is_ws((unsigned char)s.front())) s.erase(s.begin());
-            while (!s.empty() && is_ws((unsigned char)s.back()))  s.pop_back();
+            while (!s.empty() && is_ws(static_cast<unsigned char>(s.front()))) {
+                s.erase(s.begin());
+            }
+            while (!s.empty() && is_ws(static_cast<unsigned char>(s.back()))) {
+                s.pop_back();
+            }
         }
 
         static inline void SplitMajorSub(std::string label, std::string& outMajor, std::string& outSub) {
             // Accept "Major/Sub" or "Major:Sub". If no delimiter -> Major=label, Sub=""
             TrimInPlace(label);
             size_t pos = label.find('/');
-            if (pos == std::string::npos) pos = label.find(':');
+            if (pos == std::string::npos) {
+                pos = label.find(':');
+            }
 
             if (pos == std::string::npos) {
                 outMajor = label;
@@ -183,30 +196,46 @@ namespace ui {
 
         static inline double WrapAngle(double a) {
             const double twoPi = 6.2831853071795864769;
-            while (a < 0.0) a += twoPi;
-            while (a >= twoPi) a -= twoPi;
+            while (a < 0.0) {
+                a += twoPi;
+            }
+            while (a >= twoPi) {
+                a -= twoPi;
+            }
             return a;
         }
 
         static inline bool AngleInRange(double a, double a0, double a1) {
             // a, a0, a1 in [0,2pi). Handles wrap.
-            if (a0 <= a1) return a >= a0 && a <= a1;
+            if (a0 <= a1) {
+                return a >= a0 && a <= a1;
+            }
             // wrapped
             return a >= a0 || a <= a1;
         }
 
         static void DrawDonutSlice(ImDrawList* dl, ImVec2 c, float r0, float r1,
             float a0, float a1, ImU32 fill, ImU32 border, float borderThickness) {
-            if (a1 <= a0 || r1 <= 0.0f) return;
-            if (r0 < 0.0f) r0 = 0.0f;
-            if (r0 > r1) std::swap(r0, r1);
+            if (a1 <= a0 || r1 <= 0.0f) {
+                return;
+            }
+            if (r0 < 0.0f) {
+                r0 = 0.0f;
+            }
+            if (r0 > r1) {
+                std::swap(r0, r1);
+            }
 
             const float arc = a1 - a0;
 
             // Segment count heuristic: more segments for larger radius/arc.
-            int seg = (int)std::ceil((double)arc * (double)r1 / 10.0);
-            if (seg < 8) seg = 8;
-            if (seg > 160) seg = 160;
+            int seg = static_cast<int>(std::ceil(static_cast<double>(arc) * static_cast<double>(r1) / 10.0));
+            if (seg < 8) {
+                seg = 8;
+            }
+            if (seg > 160) {
+                seg = 160;
+            }
 
             const int vtxCount = (seg + 1) * 2;
             const int idxCount = seg * 6;
@@ -216,7 +245,7 @@ namespace ui {
 
             // Write vertices (outer, inner) pairs.
             for (int i = 0; i <= seg; ++i) {
-                const float t = (float)i / (float)seg;
+                const float t = static_cast<float>(i) / static_cast<float>(seg);
                 const float a = a0 + arc * t;
                 const float cs = std::cos(a);
                 const float sn = std::sin(a);
@@ -229,10 +258,10 @@ namespace ui {
 
             // Indices: two triangles per segment (quad strip), sharing vertices.
             for (int i = 0; i < seg; ++i) {
-                const ImDrawIdx o0 = (ImDrawIdx)(baseVtx + i * 2 + 0);
-                const ImDrawIdx i0 = (ImDrawIdx)(baseVtx + i * 2 + 1);
-                const ImDrawIdx o1 = (ImDrawIdx)(baseVtx + (i + 1) * 2 + 0);
-                const ImDrawIdx i1 = (ImDrawIdx)(baseVtx + (i + 1) * 2 + 1);
+                const ImDrawIdx o0 = static_cast<ImDrawIdx>(baseVtx + i * 2 + 0);
+                const ImDrawIdx i0 = static_cast<ImDrawIdx>(baseVtx + i * 2 + 1);
+                const ImDrawIdx o1 = static_cast<ImDrawIdx>(baseVtx + (i + 1) * 2 + 0);
+                const ImDrawIdx i1 = static_cast<ImDrawIdx>(baseVtx + (i + 1) * 2 + 1);
 
                 dl->PrimWriteIdx(o0); dl->PrimWriteIdx(o1); dl->PrimWriteIdx(i1);
                 dl->PrimWriteIdx(o0); dl->PrimWriteIdx(i1); dl->PrimWriteIdx(i0);
@@ -266,9 +295,9 @@ namespace ui {
             ImU32 r = (c >> IM_COL32_R_SHIFT) & 0xFF;
             ImU32 g = (c >> IM_COL32_G_SHIFT) & 0xFF;
             ImU32 b = (c >> IM_COL32_B_SHIFT) & 0xFF;
-            r = (ImU32)(r * factor);
-            g = (ImU32)(g * factor);
-            b = (ImU32)(b * factor);
+            r = static_cast<ImU32>(r * factor);
+            g = static_cast<ImU32>(g * factor);
+            b = static_cast<ImU32>(b * factor);
             return IM_COL32(r, g, b, a);
         }
         struct CatColorLUT {
@@ -292,7 +321,7 @@ namespace ui {
                 IM_COL32(140, 220, 220, 230),
                 IM_COL32(200, 200, 200, 230),
             };
-            const int paletteN = (int)(sizeof(majorCols) / sizeof(majorCols[0]));
+            const int paletteN = static_cast<int>(sizeof(majorCols) / sizeof(majorCols[0]));
 
             struct SubAgg { std::string sub; uint64_t bytes = 0; };
             struct MajorAgg {
@@ -304,17 +333,27 @@ namespace ui {
             std::vector<MajorAgg> majors;
 
             auto findMajor = [&](const std::string& m) -> MajorAgg* {
-                for (auto& x : majors) if (x.maj == m) return &x;
+                for (auto& x : majors) {
+                    if (x.maj == m) {
+                        return &x;
+                    }
+                }
                 majors.push_back(MajorAgg{ m });
                 return &majors.back();
                 };
 
             for (auto& c : s.categories) {
-                if (c.bytes == 0) continue;
+                if (c.bytes == 0) {
+                    continue;
+                }
                 std::string maj, sub;
                 SplitMajorSub(c.label, maj, sub);
-                if (maj.empty()) maj = "Other";
-                if (sub.empty()) sub = maj;
+                if (maj.empty()) {
+                    maj = "Other";
+                }
+                if (sub.empty()) {
+                    sub = maj;
+                }
 
                 auto* M = findMajor(maj);
                 M->bytes += c.bytes;
@@ -327,17 +366,19 @@ namespace ui {
             CatColorLUT lut;
             lut.byLabel.reserve(s.categories.size() + 16);
 
-            for (int mi = 0; mi < (int)majors.size(); ++mi) {
+            for (int mi = 0; mi < static_cast<int>(majors.size()); ++mi) {
                 const ImU32 majorColor = majorCols[mi % paletteN];
 
                 std::vector<std::pair<std::string, uint64_t>> subs;
                 subs.reserve(majors[mi].subBytes.size());
-                for (auto& kv : majors[mi].subBytes) subs.push_back(kv);
+                for (auto& kv : majors[mi].subBytes) {
+                    subs.push_back(kv);
+                }
                 std::sort(subs.begin(), subs.end(),
                     [](auto& a, auto& b) { return a.second > b.second; });
 
-                for (int si = 0; si < (int)subs.size(); ++si) {
-                    const float shade = 0.95f - 0.08f * (float)si;
+                for (int si = 0; si < static_cast<int>(subs.size()); ++si) {
+                    const float shade = 0.95f - 0.08f * static_cast<float>(si);
                     const ImU32 subCol = Shade(majorColor, std::max(0.45f, shade));
                     lut.byLabel[majors[mi].maj + "/" + subs[si].first] = subCol;
                 }
@@ -380,17 +421,25 @@ namespace ui {
         majors.reserve(8);
 
         auto findMajor = [&](const std::string& m) -> Major* {
-            for (auto& x : majors) if (x.label == m) return &x;
+            for (auto& x : majors) {
+                if (x.label == m) {
+                    return &x;
+                }
+            }
             majors.push_back(Major{ m });
             return &majors.back();
             };
 
         for (auto& c : s.categories) {
-            if (c.bytes == 0) continue;
+            if (c.bytes == 0) {
+                continue;
+            }
 
             std::string maj, sub;
             SplitMajorSub(c.label, maj, sub);
-            if (maj.empty()) maj = "Other";
+            if (maj.empty()) {
+                maj = "Other";
+            }
 
             Major* M = findMajor(maj);
             if (sub.empty()) {
@@ -441,7 +490,7 @@ namespace ui {
             IM_COL32(140, 220, 220, 230),
             IM_COL32(200, 200, 200, 230),
         };
-        const int paletteN = (int)(sizeof(majorCols) / sizeof(majorCols[0]));
+        const int paletteN = static_cast<int>(sizeof(majorCols) / sizeof(majorCols[0]));
 
         // Hover tracking
         int hoveredMajor = -1;
@@ -452,7 +501,7 @@ namespace ui {
         const float dx = mp.x - center.x;
         const float dy = mp.y - center.y;
         const float mr = std::sqrt(dx * dx + dy * dy);
-        double ma = WrapAngle(std::atan2((double)dy, (double)dx)); // [0,2pi)
+        double ma = WrapAngle(std::atan2(static_cast<double>(dy), static_cast<double>(dx))); // [0,2pi)
 
         // Start angle at 12 o'clock (top), going clockwise
         double aCursor = -1.5707963267948966; // -pi/2
@@ -462,21 +511,23 @@ namespace ui {
         const ImU32 border = IM_COL32(0, 0, 0, 255);
         const ImU32 sepCol = IM_COL32(0, 0, 0, 255);
 
-        for (int mi = 0; mi < (int)majors.size(); ++mi) {
+        for (int mi = 0; mi < static_cast<int>(majors.size()); ++mi) {
             Major& M = majors[mi];
-            const double majFrac = (totalBytes == 0) ? 0.0 : (double)M.bytes / (double)totalBytes;
+            const double majFrac = (totalBytes == 0) ? 0.0 : static_cast<double>(M.bytes) / static_cast<double>(totalBytes);
             const double a0 = aCursor;
             const double a1 = aCursor + majFrac * twoPi;
             const ImU32 majorColor = majorCols[mi % paletteN];
 
             // Inner ring: major slice
-            DrawDonutSlice(dl, center, 0.0f, innerR, (float)a0, (float)a1,
+            DrawDonutSlice(dl, center, 0.0f, innerR, static_cast<float>(a0), static_cast<float>(a1),
                 majorColor, border, 1.0f);
 
             // Hover test for major (inner ring)
             if (mr <= innerR) {
                 const double wa0 = WrapAngle(a0), wa1 = WrapAngle(a1);
-                if (AngleInRange(ma, wa0, wa1)) hoveredMajor = mi;
+                if (AngleInRange(ma, wa0, wa1)) {
+                    hoveredMajor = mi;
+                }
             }
 
             // Outer ring: subs inside major
@@ -488,30 +539,39 @@ namespace ui {
             uint64_t other = 0;
 
             for (auto& ss : M.subs) {
-                const double pctOfTotal = (totalBytes == 0) ? 0.0 : (100.0 * (double)ss.bytes / (double)totalBytes);
-                if (pctOfTotal < (double)pie_.minSlicePct) other += ss.bytes;
-                else subs.push_back(ss);
+                const double pctOfTotal = (totalBytes == 0) ? 0.0 : (100.0 * static_cast<double>(ss.bytes) / static_cast<double>(totalBytes));
+                if (pctOfTotal < static_cast<double>(pie_.minSlicePct)) {
+                    other += ss.bytes;
+                }
+                else {
+                    subs.push_back(ss);
+                }
             }
-            if (other > 0) subs.push_back(Sub{ "Other", other });
+            if (other > 0) {
+                subs.push_back(Sub{ "Other", other });
+            }
 
             double subCursor = a0;
-            for (int si = 0; si < (int)subs.size(); ++si) {
+            for (int si = 0; si < static_cast<int>(subs.size()); ++si) {
                 const Sub& S = subs[si];
-                const double subFrac = (M.bytes == 0) ? 0.0 : (double)S.bytes / (double)M.bytes;
+                const double subFrac = (M.bytes == 0) ? 0.0 : static_cast<double>(S.bytes) / static_cast<double>(M.bytes);
                 const double sa0 = subCursor;
                 const double sa1 = subCursor + subFrac * (a1 - a0);
 
                 // shade subs progressively so they're distinguishable inside the major
-                const float shade = 0.95f - 0.08f * (float)si;
+                const float shade = 0.95f - 0.08f * static_cast<float>(si);
                 const ImU32 subCol = Shade(majorColor, std::max(0.45f, shade));
 
-                DrawDonutSlice(dl, center, innerR, outerR, (float)sa0, (float)sa1,
+                DrawDonutSlice(dl, center, innerR, outerR, static_cast<float>(sa0), static_cast<float>(sa1),
                     subCol, border, 1.0f);
 
                 // Hover test for subs (outer ring)
                 if (mr >= innerR && mr <= outerR) {
                     const double wsa0 = WrapAngle(sa0), wsa1 = WrapAngle(sa1);
-                    if (AngleInRange(ma, wsa0, wsa1)) { hoveredMajor = mi; hoveredSub = si; }
+                    if (AngleInRange(ma, wsa0, wsa1)) {
+                        hoveredMajor = mi;
+                        hoveredSub = si;
+                    }
                 }
 
                 subCursor = sa1;
@@ -520,8 +580,8 @@ namespace ui {
             // Major separators: radial line at start angle
             if (pie_.showMajorSeparators) {
                 const float t = pie_.majorSeparatorThickness;
-                const float ca = std::cos((float)a0);
-                const float sa = std::sin((float)a0);
+                const float ca = std::cos(static_cast<float>(a0));
+                const float sa = std::sin(static_cast<float>(a0));
                 ImVec2 p0 = center;
                 ImVec2 p1 = ImVec2(center.x + outerR * ca, center.y + outerR * sa);
                 dl->AddLine(p0, p1, sepCol, t);
@@ -533,8 +593,8 @@ namespace ui {
         // draw final separator at end
         if (pie_.showMajorSeparators) {
             const float t = pie_.majorSeparatorThickness;
-            const float ca = std::cos((float)aCursor);
-            const float sa = std::sin((float)aCursor);
+            const float ca = std::cos(static_cast<float>(aCursor));
+            const float sa = std::sin(static_cast<float>(aCursor));
             dl->AddLine(center, ImVec2(center.x + outerR * ca, center.y + outerR * sa), sepCol, t);
         }
 
@@ -553,13 +613,19 @@ namespace ui {
                 std::vector<Sub> grouped;
                 uint64_t other = 0;
                 for (auto& ss : subs) {
-                    const double pctOfTotal = (totalBytes == 0) ? 0.0 : (100.0 * (double)ss.bytes / (double)totalBytes);
-                    if (pctOfTotal < (double)pie_.minSlicePct) other += ss.bytes;
-                    else grouped.push_back(ss);
+                    const double pctOfTotal = (totalBytes == 0) ? 0.0 : (100.0 * static_cast<double>(ss.bytes) / static_cast<double>(totalBytes));
+                    if (pctOfTotal < static_cast<double>(pie_.minSlicePct)) {
+                        other += ss.bytes;
+                    }
+                    else {
+                        grouped.push_back(ss);
+                    }
                 }
-                if (other > 0) grouped.push_back(Sub{ "Other", other });
+                if (other > 0) {
+                    grouped.push_back(Sub{ "Other", other });
+                }
 
-                if (hoveredSub < (int)grouped.size()) {
+                if (hoveredSub < static_cast<int>(grouped.size())) {
                     subLabel = grouped[hoveredSub].label;
                     subBytes = grouped[hoveredSub].bytes;
                 }
@@ -573,11 +639,11 @@ namespace ui {
                 ImGui::Text("Sub: %s", subLabel.c_str());
                 ImGui::Text("Sub: %s", FormatBytes(subBytes).c_str());
                 if (totalBytes != 0) {
-                    ImGui::Text("Sub %% of total: %.2f%%", 100.0 * (double)subBytes / (double)totalBytes);
+                    ImGui::Text("Sub %% of total: %.2f%%", 100.0 * static_cast<double>(subBytes) / static_cast<double>(totalBytes));
                 }
             }
             else if (totalBytes != 0) {
-                ImGui::Text("Major %% of total: %.2f%%", 100.0 * (double)M.bytes / (double)totalBytes);
+                ImGui::Text("Major %% of total: %.2f%%", 100.0 * static_cast<double>(M.bytes) / static_cast<double>(totalBytes));
             }
             ImGui::EndTooltip();
         }
@@ -586,9 +652,9 @@ namespace ui {
 
         // Legend
         ImGui::Separator();
-        for (int mi = 0; mi < (int)majors.size(); ++mi) {
+        for (int mi = 0; mi < static_cast<int>(majors.size()); ++mi) {
             const auto& M = majors[mi];
-            const double pct = (totalBytes == 0) ? 0.0 : (100.0 * (double)M.bytes / (double)totalBytes);
+            const double pct = (totalBytes == 0) ? 0.0 : (100.0 * static_cast<double>(M.bytes) / static_cast<double>(totalBytes));
             ImGui::BulletText("%s: %s%s",
                 M.label.c_str(),
                 FormatBytes(M.bytes).c_str(),
@@ -605,14 +671,18 @@ namespace ui {
             list_.filter.Draw("Filter (name/type)");
         }
 
-        if (s.resources.empty()) { ImGui::TextUnformatted("No per-resource data."); return; }
+        if (s.resources.empty()) {
+            ImGui::TextUnformatted("No per-resource data.");
+            return;
+        }
 
         std::vector<const MemoryResourceRow*> rows;
         rows.reserve(s.resources.size());
         for (auto& r : s.resources) {
             if (list_.filter.IsActive()) {
-                if (!list_.filter.PassFilter(r.name.c_str()) && !list_.filter.PassFilter(r.type.c_str()))
+                if (!list_.filter.PassFilter(r.name.c_str()) && !list_.filter.PassFilter(r.type.c_str())) {
                     continue;
+                }
             }
             rows.push_back(&r);
         }
@@ -627,10 +697,12 @@ namespace ui {
         case 2: std::sort(rows.begin(), rows.end(), cmpType); break;
         default: break;
         }
-        if (list_.descending) std::reverse(rows.begin(), rows.end());
+        if (list_.descending) {
+            std::reverse(rows.begin(), rows.end());
+        }
 
         const uint64_t total = (s.totalBytes != 0) ? s.totalBytes : ComputeTotalBytes(s);
-        ImGui::Text("Resources: %d   Total: %s", (int)rows.size(), FormatBytes(total).c_str());
+        ImGui::Text("Resources: %d   Total: %s", static_cast<int>(rows.size()), FormatBytes(total).c_str());
 
         ImGuiTableFlags flags =
             ImGuiTableFlags_BordersV | ImGuiTableFlags_BordersOuterH |
@@ -646,17 +718,19 @@ namespace ui {
             ImGui::TableHeadersRow();
 
             const int pageSize = std::max(1, list_.pageSize);
-            const int count = (int)rows.size();
+            const int count = static_cast<int>(rows.size());
             int shown = 0;
 
             ImGuiListClipper clipper;
             clipper.Begin(count);
             while (clipper.Step()) {
                 for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
-                    if (shown++ > pageSize) break;
+                    if (shown++ > pageSize) {
+                        break;
+                    }
 
                     const MemoryResourceRow& r = *rows[i];
-                    const double pct = (total == 0) ? 0.0 : (100.0 * (double)r.bytes / (double)total);
+                    const double pct = (total == 0) ? 0.0 : (100.0 * static_cast<double>(r.bytes) / static_cast<double>(total));
 
                     ImGui::TableNextRow();
 
@@ -664,7 +738,7 @@ namespace ui {
                     ImGui::TableSetColumnIndex(1); ImGui::TextUnformatted(r.type.c_str());
                     ImGui::TableSetColumnIndex(2); ImGui::TextUnformatted(FormatBytes(r.bytes).c_str());
                     ImGui::TableSetColumnIndex(3); ImGui::Text("%.2f", pct);
-                    ImGui::TableSetColumnIndex(4); ImGui::Text("%llu", (unsigned long long)r.uid);
+                    ImGui::TableSetColumnIndex(4); ImGui::Text("%llu", static_cast<unsigned long long>(r.uid));
                 }
             }
 
@@ -682,11 +756,11 @@ namespace ui {
 
     void MemoryIntrospectionWidget::DrawTimelineView(const FrameGraphSnapshot& fg, const MemorySnapshot& ms) {
         if (ImGui::CollapsingHeader("Timeline Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
-            int m = (int)timelineMode_;
+            int m = static_cast<int>(timelineMode_);
             ImGui::TextUnformatted("Mode:");
-            ImGui::SameLine(); ImGui::RadioButton("Real-time", &m, (int)TimelineMode::RealTime);
-            ImGui::SameLine(); ImGui::RadioButton("Frame-graph", &m, (int)TimelineMode::FrameGraph);
-            timelineMode_ = (TimelineMode)m;
+            ImGui::SameLine(); ImGui::RadioButton("Real-time", &m, static_cast<int>(TimelineMode::RealTime));
+            ImGui::SameLine(); ImGui::RadioButton("Frame-graph", &m, static_cast<int>(TimelineMode::FrameGraph));
+            timelineMode_ = static_cast<TimelineMode>(m);
 
             ImGui::Separator();
 
@@ -724,8 +798,12 @@ namespace ui {
             }
         }
 
-        if (timelineMode_ == TimelineMode::RealTime) DrawRealTimeTimeline();
-        else DrawFrameGraphTimeline(fg, ms);
+        if (timelineMode_ == TimelineMode::RealTime) {
+            DrawRealTimeTimeline();
+        }
+        else {
+            DrawFrameGraphTimeline(fg, ms);
+        }
     }
 
     enum class ByteUnit { B, KiB, MiB, GiB };
@@ -754,9 +832,15 @@ namespace ui {
         const double KiB = 1024.0;
         const double MiB = 1024.0 * 1024.0;
         const double GiB = 1024.0 * 1024.0 * 1024.0;
-        if (maxBytes >= GiB) return ByteUnit::GiB;
-        if (maxBytes >= MiB) return ByteUnit::MiB;
-        if (maxBytes >= KiB) return ByteUnit::KiB;
+        if (maxBytes >= GiB) {
+            return ByteUnit::GiB;
+        }
+        if (maxBytes >= MiB) {
+            return ByteUnit::MiB;
+        }
+        if (maxBytes >= KiB) {
+            return ByteUnit::KiB;
+        }
         return ByteUnit::B;
     }
 
@@ -771,11 +855,11 @@ namespace ui {
         double tMax = tmpX_.back();
         double tMin = tmpX_.front();
         if (rt_.maxSeconds > 0) {
-            tMin = tMax - (double)rt_.maxSeconds;
+            tMin = tMax - static_cast<double>(rt_.maxSeconds);
         }
 
         auto it = std::lower_bound(tmpX_.begin(), tmpX_.end(), tMin);
-        size_t start = (it == tmpX_.begin()) ? 0 : (size_t)(it - tmpX_.begin() - 1);
+        size_t start = (it == tmpX_.begin()) ? 0 : static_cast<size_t>(it - tmpX_.begin() - 1);
         const size_t n = tmpX_.size() - start;
 
         const double* xPtr = tmpX_.data() + start;
@@ -788,15 +872,18 @@ namespace ui {
             minBytes = std::min(minBytes, yPtrBytes[i]);
             maxBytes = std::max(maxBytes, yPtrBytes[i]);
         }
-        if (maxBytes <= 0.0) maxBytes = 1.0;
+        if (maxBytes <= 0.0) {
+            maxBytes = 1.0;
+        }
 
         const ByteUnit unit = ChooseUnitForRange(maxBytes);
         const double div = UnitDiv(unit);
 
         // Scale visible Y into chosen unit
         tmpYScaled_.resize(n);
-        for (size_t i = 0; i < n; ++i)
+        for (size_t i = 0; i < n; ++i) {
             tmpYScaled_[i] = yPtrBytes[i] / div;
+        }
 
         // Y limits with padding (prevents line clipping when flat at extremes)
         double yMin = minBytes / div;
@@ -815,7 +902,9 @@ namespace ui {
             yMin -= pad;
             yMax += pad;
         }
-        if (yMin < 0.0) yMin = 0.0; // memory can't be negative
+        if (yMin < 0.0) {
+            yMin = 0.0; // memory can't be negative
+        }
 
         char yLabel[32];
         std::snprintf(yLabel, sizeof(yLabel), "Total (%s)", UnitLabel(unit));
@@ -832,7 +921,7 @@ namespace ui {
             // Y auto-scale with padding
         	ImPlot::SetupAxisLimits(ImAxis_Y1, yMin, yMax, ImGuiCond_Always);
 
-            ImPlot::PlotLine("Total", xPtr, tmpYScaled_.data(), (int)n);
+            ImPlot::PlotLine("Total", xPtr, tmpYScaled_.data(), static_cast<int>(n));
 
             ImPlot::EndPlot();
         }
@@ -856,7 +945,7 @@ namespace ui {
         out.resize(fg.batches.size());
 
         double cursor = 0.0;
-        for (int i = 0; i < (int)fg.batches.size(); ++i) {
+        for (int i = 0; i < static_cast<int>(fg.batches.size()); ++i) {
             const auto& b = fg.batches[i];
             BatchLayout bl{};
             bl.baseX = cursor;
@@ -881,7 +970,9 @@ namespace ui {
             cursor += bl.width;
         }
 
-        if (outTotalW) *outTotalW = out.empty() ? 1.0 : (out.back().baseX + out.back().width);
+        if (outTotalW) {
+            *outTotalW = out.empty() ? 1.0 : (out.back().baseX + out.back().width);
+        }
         return out;
     }
 
@@ -890,8 +981,12 @@ namespace ui {
         ImU32 fill, ImU32 border, float rad) {
         ImVec2 a = ImPlot::PlotToPixels(minP);
         ImVec2 b = ImPlot::PlotToPixels(maxP);
-        if (a.x > b.x) std::swap(a.x, b.x);
-        if (a.y > b.y) std::swap(a.y, b.y);
+        if (a.x > b.x) {
+            std::swap(a.x, b.x);
+        }
+        if (a.y > b.y) {
+            std::swap(a.y, b.y);
+        }
         dl->AddRectFilled(a, b, fill, rad);
         dl->AddRect(a, b, border, rad);
     }
@@ -900,8 +995,12 @@ namespace ui {
         ImVec2 mp = ImGui::GetMousePos();
         ImVec2 a = ImPlot::PlotToPixels(minP);
         ImVec2 b = ImPlot::PlotToPixels(maxP);
-        if (a.x > b.x) std::swap(a.x, b.x);
-        if (a.y > b.y) std::swap(a.y, b.y);
+        if (a.x > b.x) {
+            std::swap(a.x, b.x);
+        }
+        if (a.y > b.y) {
+            std::swap(a.y, b.y);
+        }
         return mp.x >= a.x && mp.x <= b.x && mp.y >= a.y && mp.y <= b.y;
     }
 
@@ -921,7 +1020,9 @@ namespace ui {
 
         // Precompute max footprint for axis limits
         uint64_t maxBytes = 0;
-        for (auto& b : fg.batches) maxBytes = std::max(maxBytes, b.footprintBytes);
+        for (auto& b : fg.batches) {
+            maxBytes = std::max(maxBytes, b.footprintBytes);
+        }
         const double maxY = BytesToMiB(maxBytes);
         const double yPad = (maxY > 0.0) ? (maxY * 0.15) : 1.0;
 
@@ -938,8 +1039,8 @@ namespace ui {
             ImDrawList* dl = ImPlot::GetPlotDrawList();
 
             // Vertical separators at batch boundaries (helps alignment with timeline below)
-            for (int i = 0; i <= (int)layouts.size(); ++i) {
-                double x = (i == (int)layouts.size()) ? totalW : layouts[i].baseX;
+            for (int i = 0; i <= static_cast<int>(layouts.size()); ++i) {
+                double x = (i == static_cast<int>(layouts.size())) ? totalW : layouts[i].baseX;
                 ImVec2 p0 = ImPlot::PlotToPixels(ImPlotPoint(x, 0.0));
                 ImVec2 p1 = ImPlot::PlotToPixels(ImPlotPoint(x, maxY + yPad));
                 dl->AddLine(p0, p1, IM_COL32(180, 180, 180, 64), (i % 5 == 0) ? 2.0f : 1.0f);
@@ -952,15 +1053,16 @@ namespace ui {
             std::string hoveredCat;
             uint64_t hoveredCatBytes = 0;
 
-            for (int i = 0; i < (int)fg.batches.size(); ++i) {
+            for (int i = 0; i < static_cast<int>(fg.batches.size()); ++i) {
                 const auto& b = fg.batches[i];
                 const auto& L = layouts[i];
 
                 // Hover/click region = whole column
                 const bool overColumn = IsMouseOver(ImPlotPoint(L.baseX, 0.0),
                     ImPlotPoint(L.baseX + L.width, maxY + yPad));
-                if (overColumn && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+                if (overColumn && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                     selectedBatch_ = i;
+                }
 
                 // Stack segments bottom-up
                 double y0 = 0.0;
@@ -971,7 +1073,9 @@ namespace ui {
                     [](const auto& a, const auto& b) { return a.bytes > b.bytes; });
 
                 for (const auto& s : slices) {
-                    if (s.bytes == 0) continue;
+                    if (s.bytes == 0) {
+                        continue;
+                    }
 
                     const double segH = BytesToMiB(s.bytes);
                     const double y1 = y0 + segH;
@@ -989,7 +1093,9 @@ namespace ui {
                     // Slight highlight on hover or selection
                     const bool highlight = (selectedBatch_ == i) || overSeg;
                     ImU32 fill = colors.get(s.label);
-                    if (highlight) fill = IM_COL32((fill >> 0) & 0xFF, (fill >> 8) & 0xFF, (fill >> 16) & 0xFF, 255);
+                    if (highlight) {
+                        fill = IM_COL32((fill >> 0) & 0xFF, (fill >> 8) & 0xFF, (fill >> 16) & 0xFF, 255);
+                    }
 
                     DrawBlock(dl, segMin, segMax, fill, IM_COL32(0, 0, 0, 255), 0.0f);
                     y0 = y1;
@@ -1027,8 +1133,13 @@ namespace ui {
                 // show top N to avoid massive tooltip spam
                 int shown = 0;
                 for (auto& s : b.categories) {
-                    if (s.bytes == 0) continue;
-                    if (shown++ >= 12) { ImGui::TextDisabled("..."); break; }
+                    if (s.bytes == 0) {
+                        continue;
+                    }
+                    if (shown++ >= 12) {
+                        ImGui::TextDisabled("...");
+                        break;
+                    }
                     ImGui::BulletText("%s: %s", s.label.c_str(), FormatBytes(s.bytes).c_str());
                 }
                 ImGui::EndTooltip();
@@ -1048,7 +1159,7 @@ namespace ui {
             ImPlot::SetupAxisLimits(ImAxis_X1, -0.1, totalW + 0.1, ImGuiCond_Always);
 
             const double y0 = 0.0;
-            const double y1 = (double)fg_.lanePad + (double)fg_.laneHeight + (double)fg_.lanePad;
+            const double y1 = static_cast<double>(fg_.lanePad) + static_cast<double>(fg_.laneHeight) + static_cast<double>(fg_.lanePad);
             ImPlot::SetupAxisLimits(ImAxis_Y1, y0, y1, ImGuiCond_Always);
 
             ImDrawList* dl = ImPlot::GetPlotDrawList();
@@ -1062,8 +1173,8 @@ namespace ui {
                 0.0f);
 
             // Batch boundary lines
-            for (int i = 0; i <= (int)layouts.size(); ++i) {
-                double x = (i == (int)layouts.size()) ? totalW : layouts[i].baseX;
+            for (int i = 0; i <= static_cast<int>(layouts.size()); ++i) {
+                double x = (i == static_cast<int>(layouts.size())) ? totalW : layouts[i].baseX;
                 ImVec2 p0 = ImPlot::PlotToPixels(ImPlotPoint(x, y0));
                 ImVec2 p1 = ImPlot::PlotToPixels(ImPlotPoint(x, y1));
                 dl->AddLine(p0, p1, IM_COL32(180, 180, 180, 64), (i % 5 == 0) ? 2.0f : 1.0f);
@@ -1081,7 +1192,7 @@ namespace ui {
                     4.0f);
                 };
 
-            for (int bi = 0; bi < (int)fg.batches.size(); ++bi) {
+            for (int bi = 0; bi < static_cast<int>(fg.batches.size()); ++bi) {
                 const auto& b = fg.batches[bi];
                 const auto& L = layouts[bi];
                 const bool sel = (selectedBatch_ == bi);
@@ -1092,7 +1203,9 @@ namespace ui {
                 ImPlotPoint slotMin(L.baseX, laneY);
                 ImPlotPoint slotMax(L.baseX + L.width, laneY + H);
                 if (IsMouseOver(slotMin, slotMax)) {
-                    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) selectedBatch_ = bi;
+                    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                        selectedBatch_ = bi;
+                    }
 
                     ImGui::BeginTooltip();
                     ImGui::Text("Batch %d: %s", bi, b.label.c_str());
@@ -1101,13 +1214,15 @@ namespace ui {
 
                     if (fg_.showPassListInTooltip && !b.passNames.empty() && fg_.maxTooltipPasses != 0) {
                         ImGui::Separator();
-                        ImGui::Text("Passes (%d):", (int)b.passNames.size());
-                        const int maxShow = (fg_.maxTooltipPasses < 0) ? (int)b.passNames.size()
-                            : std::min((int)b.passNames.size(), fg_.maxTooltipPasses);
-                        for (int i = 0; i < maxShow; ++i)
+                        ImGui::Text("Passes (%d):", static_cast<int>(b.passNames.size()));
+                        const int maxShow = (fg_.maxTooltipPasses < 0) ? static_cast<int>(b.passNames.size())
+                            : std::min(static_cast<int>(b.passNames.size()), fg_.maxTooltipPasses);
+                        for (int i = 0; i < maxShow; ++i) {
                             ImGui::BulletText("%s", b.passNames[i].c_str());
-                        if ((int)b.passNames.size() > maxShow)
-                            ImGui::TextDisabled("...and %d more", (int)b.passNames.size() - maxShow);
+                        }
+                        if (static_cast<int>(b.passNames.size()) > maxShow) {
+                            ImGui::TextDisabled("...and %d more", static_cast<int>(b.passNames.size()) - maxShow);
+                        }
                     }
                     ImGui::EndTooltip();
                 }

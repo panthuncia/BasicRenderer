@@ -37,7 +37,7 @@ BuildBatchLayouts(const std::vector<RenderGraph::PassBatch>& batches, const RGIn
     out.resize(batches.size());
 
     double cursor = 0.0;
-    for (int i = 0; i < (int)batches.size(); ++i) {
+    for (int i = 0; i < static_cast<int>(batches.size()); ++i) {
         const auto& b = batches[i];
         BatchLayout bl;
         bl.baseX = cursor;
@@ -77,14 +77,14 @@ struct SignalSite {
 using SignalIndexKey = std::pair<QueueKind, uint64_t>;
 struct SignalIndexKeyHash {
     size_t operator()(const SignalIndexKey& k) const noexcept {
-        return (size_t)k.first ^ (size_t)(k.second * 1469598103934665603ull);
+        return static_cast<size_t>(k.first) ^ static_cast<size_t>(k.second * 1469598103934665603ull);
     }
 };
 using SignalIndex = std::unordered_map<SignalIndexKey, SignalSite, SignalIndexKeyHash>;
 
 static SignalIndex BuildSignalIndex(const std::vector<RenderGraph::PassBatch>& batches) {
     SignalIndex idx;
-    for (int i = 0; i < (int)batches.size(); ++i) {
+    for (int i = 0; i < static_cast<int>(batches.size()); ++i) {
         const auto& b = batches[i];
 
         if (b.renderTransitionSignal) {
@@ -119,7 +119,9 @@ static void CollectResourceIds(const std::vector<RenderGraph::PassBatch>& batche
     RGResourcePtrByIdFn resourcePtrById)
 {
     auto upsertNamedResource = [&](Resource* resource) {
-        if (!resource) return;
+        if (!resource) {
+            return;
+        }
 
         const uint64_t id = resource->GetGlobalResourceID();
         const std::string currentName = resource->GetName();
@@ -155,7 +157,9 @@ static void CollectResourceIds(const std::vector<RenderGraph::PassBatch>& batche
 
     if (resourceNameById) {
         for (auto& [id, collectedName] : outIdToName) {
-            if (!collectedName.empty()) continue;
+            if (!collectedName.empty()) {
+                continue;
+            }
             const std::string resolvedName = resourceNameById(id);
             if (!resolvedName.empty()) {
                 collectedName = resolvedName;
@@ -195,7 +199,9 @@ static void CollectBatchResourceIds(const RenderGraph::PassBatch& batch, std::un
 
     auto scan = [&](const std::vector<ResourceTransition>& v) {
         for (auto const& t : v) {
-            if (!t.pResource) continue;
+            if (!t.pResource) {
+                continue;
+            }
             out.insert(t.pResource->GetGlobalResourceID());
         }
     };
@@ -216,7 +222,7 @@ static ImU32 ColBorder() { return IM_COL32(0, 0, 0, 255); }
 static float LaneY(QueueKind qk, float rowHeight, float laneSpacing) {
     // y from top: Graphics (2), Compute (1), Copy(0) to show graphics on top
     int laneIndex = (qk == QueueKind::Graphics) ? 2 : (qk == QueueKind::Compute ? 1 : 0);
-    return laneIndex * (rowHeight + laneSpacing);
+    return static_cast<float>(laneIndex) * (rowHeight + laneSpacing);
 }
 
 static void DrawBlock(ImDrawList* dl, const ImPlotPoint& minP, const ImPlotPoint& maxP,
@@ -226,8 +232,12 @@ static void DrawBlock(ImDrawList* dl, const ImPlotPoint& minP, const ImPlotPoint
     ImVec2 a = ImPlot::PlotToPixels(minP);
     ImVec2 b = ImPlot::PlotToPixels(maxP);
     // Clamp (just in case)
-    if (a.x > b.x) std::swap(a.x, b.x);
-    if (a.y > b.y) std::swap(a.y, b.y);
+    if (a.x > b.x) {
+        std::swap(a.x, b.x);
+    }
+    if (a.y > b.y) {
+        std::swap(a.y, b.y);
+    }
     dl->AddRectFilled(a, b, fill, rad);
     dl->AddRect(a, b, border, rad);
 }
@@ -236,8 +246,12 @@ static bool IsMouseOver(const ImPlotPoint& minP, const ImPlotPoint& maxP) {
     ImVec2 mp = ImGui::GetMousePos();
     ImVec2 a = ImPlot::PlotToPixels(minP);
     ImVec2 b = ImPlot::PlotToPixels(maxP);
-    if (a.x > b.x) std::swap(a.x, b.x);
-    if (a.y > b.y) std::swap(a.y, b.y);
+    if (a.x > b.x) {
+        std::swap(a.x, b.x);
+    }
+    if (a.y > b.y) {
+        std::swap(a.y, b.y);
+    }
     return mp.x >= a.x && mp.x <= b.x && mp.y >= a.y && mp.y <= b.y;
 }
 
@@ -297,7 +311,10 @@ namespace RGInspector {
         RGResourcePtrByIdFn resourcePtrById,
         const RGInspectorOptions& opts)
     {
-        if (!ImGui::Begin("Render Graph Inspector")) { ImGui::End(); return; }
+        if (!ImGui::Begin("Render Graph Inspector")) {
+            ImGui::End();
+            return;
+        }
 
         SignalIndex sigIdx = BuildSignalIndex(batches);
         auto layouts = BuildBatchLayouts(batches, opts);
@@ -316,12 +333,14 @@ namespace RGInspector {
         std::unordered_map<uint64_t, Resource*> idToPtr;
         CollectResourceIds(batches, idToName, idToPtr, resourceNameById, resourcePtrById);
 
-        if (s_filterBatchResources >= (int)batches.size())
+        if (s_filterBatchResources >= static_cast<int>(batches.size())) {
             s_filterBatchResources = -1;
+        }
 
         std::unordered_set<uint64_t> allowedResourceIds;
-        if (s_filterBatchResources >= 0 && s_filterBatchResources < (int)batches.size())
+        if (s_filterBatchResources >= 0 && s_filterBatchResources < static_cast<int>(batches.size())) {
             CollectBatchResourceIds(batches[s_filterBatchResources], allowedResourceIds);
+        }
 
         ImGui::BeginChild("LeftPanel", ImVec2(320, 0), true);
 
@@ -346,13 +365,16 @@ namespace RGInspector {
             const uint64_t id = kv.first;
 
             if (s_filterBatchResources >= 0) {
-                if (allowedResourceIds.find(id) == allowedResourceIds.end())
+                if (allowedResourceIds.find(id) == allowedResourceIds.end()) {
                     continue;
+                }
             }
 
             std::string label = kv.second.empty() ? ("#" + std::to_string(id)) : kv.second + " [" + std::to_string(id) + "]";
             std::string lcl = label; std::transform(lcl.begin(), lcl.end(), lcl.begin(), ::tolower);
-            if (!f.empty() && lcl.find(f) == std::string::npos) continue;
+            if (!f.empty() && lcl.find(f) == std::string::npos) {
+                continue;
+            }
 
             bool sel = (s_selectedRes == id);
             if (ImGui::Selectable(label.c_str(), sel)) {
@@ -363,8 +385,9 @@ namespace RGInspector {
                     s_selectedResPtr = resourcePtrById(id);
                 }
             }
-            if (ImGui::IsItemHovered() && !kv.second.empty())
+            if (ImGui::IsItemHovered() && !kv.second.empty()) {
                 ImGui::SetTooltip("%s", kv.second.c_str());
+            }
         }
         if (ImGui::Button("Clear Selection")) {
             s_selectedRes = 0;
@@ -381,8 +404,8 @@ namespace RGInspector {
         ImGui::TextUnformatted("Capture");
 
         if (!batches.empty()) {
-            s_selectedBatch = std::clamp(s_selectedBatch, 0, (int)batches.size() - 1);
-            if (ImGui::SliderInt("Batch", &s_selectedBatch, 0, (int)batches.size() - 1)) {
+            s_selectedBatch = std::clamp(s_selectedBatch, 0, static_cast<int>(batches.size()) - 1);
+            if (ImGui::SliderInt("Batch", &s_selectedBatch, 0, static_cast<int>(batches.size()) - 1)) {
                 // Keep the batch resource filter in sync with the slider.
                 s_filterBatchResources = s_selectedBatch;
 
@@ -405,8 +428,10 @@ namespace RGInspector {
 
                 const std::string anchor = GetBatchAnchorPassName(batches[s_selectedBatch]);
                 auto findIndex = [&](const std::string& name) -> int {
-                    for (int i = 0; i < (int)passNames.size(); ++i) {
-                        if (passNames[i] == name) return i;
+                    for (int i = 0; i < static_cast<int>(passNames.size()); ++i) {
+                        if (passNames[i] == name) {
+                            return i;
+                        }
                     }
                     return -1;
                 };
@@ -419,17 +444,23 @@ namespace RGInspector {
                 }
 
                 int passIndex = findIndex(s_selectedPassName);
-                if (passIndex < 0) passIndex = findIndex(anchor);
-                if (passIndex < 0) passIndex = 0;
+                if (passIndex < 0) {
+                    passIndex = findIndex(anchor);
+                }
+                if (passIndex < 0) {
+                    passIndex = 0;
+                }
 
                 const char* preview = passNames.empty() ? "(no passes)" : passNames[passIndex].c_str();
                 if (ImGui::BeginCombo("Pass", preview, ImGuiComboFlags_HeightLarge)) {
-                    for (int i = 0; i < (int)passNames.size(); ++i) {
+                    for (int i = 0; i < static_cast<int>(passNames.size()); ++i) {
                         bool isSel = (i == passIndex);
                         if (ImGui::Selectable(passNames[i].c_str(), isSel)) {
                             s_selectedPassName = passNames[i];
                         }
-                        if (isSel) ImGui::SetItemDefaultFocus();
+                        if (isSel) {
+                            ImGui::SetItemDefaultFocus();
+                        }
                     }
                     ImGui::EndCombo();
                 }
@@ -438,7 +469,9 @@ namespace RGInspector {
             const std::string anchor = (s_selectedResPtr != nullptr) ? s_selectedPassName : std::string{};
             const bool canCapture = (s_selectedResPtr != nullptr) && !anchor.empty();
 
-            if (!canCapture) ImGui::BeginDisabled();
+            if (!canCapture) {
+                ImGui::BeginDisabled();
+            }
             if (ImGui::Button("Capture After Pass")) {
                 ReadbackManager::GetInstance().RequestReadbackCapture(
                     anchor,
@@ -448,15 +481,21 @@ namespace RGInspector {
                         spdlog::info("Readback capture completed.");
                     });
             }
-            if (!canCapture) ImGui::EndDisabled();
+            if (!canCapture) {
+                ImGui::EndDisabled();
+            }
 
             ImGui::SameLine();
-            if (!canCapture) ImGui::BeginDisabled();
+            if (!canCapture) {
+                ImGui::BeginDisabled();
+            }
             if (ImGui::Button("Open Memory View")) {
                 s_openMemoryView = true;
                 s_memoryView.Open(anchor, s_selectedResPtr, RangeSpec{});
             }
-            if (!canCapture) ImGui::EndDisabled();
+            if (!canCapture) {
+                ImGui::EndDisabled();
+            }
         }
         else {
             ImGui::TextDisabled("No pass batches available.");
@@ -485,7 +524,7 @@ namespace RGInspector {
             auto draw_lane_bg = [&](QueueKind qk, const char* name) {
                 float y = LaneY(qk, H, S);
                 ImPlotPoint a(-0.25, y - 0.05);
-                ImPlotPoint b((double)batches.size() + 0.25, y + H + 0.05);
+                ImPlotPoint b(static_cast<double>(batches.size()) + 0.25, y + H + 0.05);
                 DrawBlock(dl, a, b, IM_COL32(245, 245, 245, 32), IM_COL32(0, 0, 0, 32), 0.0f);
                 // label on the left
                 ImVec2 lp = ImPlot::PlotToPixels(ImPlotPoint(-0.2, y + 0.1));
@@ -496,8 +535,8 @@ namespace RGInspector {
             draw_lane_bg(QueueKind::Graphics, "Graphics");
 
             // X grid lines per batch
-            for (int i = 0; i <= (int)layouts.size(); ++i) {
-                double x = (i == (int)layouts.size()) ? totalW : layouts[i].baseX;
+            for (int i = 0; i <= static_cast<int>(layouts.size()); ++i) {
+                double x = (i == static_cast<int>(layouts.size())) ? totalW : layouts[i].baseX;
                 ImVec2 p0 = ImPlot::PlotToPixels(ImPlotPoint(x, -S));
                 ImVec2 p1 = ImPlot::PlotToPixels(ImPlotPoint(x, LaneY(QueueKind::Graphics, H, S) + H + S));
                 dl->AddLine(p0, p1, IM_COL32(180, 180, 180, 64), (i % 5 == 0) ? 2.0f : 1.0f);
@@ -509,7 +548,9 @@ namespace RGInspector {
             auto draw_transitions = [&](const std::vector<ResourceTransition>& v,
                 QueueKind qk, int batchIndex,
                 double absX0, double absX1) {
-                if (v.empty()) return;
+                if (v.empty()) {
+                    return;
+                }
 
                 const bool haveSelection = (s_selectedRes != 0);
                 float y = LaneY(qk, H, S);
@@ -519,11 +560,14 @@ namespace RGInspector {
                 // Find which transitions in this block touch the selected resource
                 std::vector<int> matchIdx;
                 matchIdx.reserve(v.size());
-                for (int i = 0; i < (int)v.size(); ++i) {
+                for (int i = 0; i < static_cast<int>(v.size()); ++i) {
                     const auto& t = v[i];
-                    if (!t.pResource) continue;
-                    if (haveSelection &&t.pResource->GetGlobalResourceID() == s_selectedRes)
+                    if (!t.pResource) {
+                        continue;
+                    }
+                    if (haveSelection && t.pResource->GetGlobalResourceID() == s_selectedRes) {
                         matchIdx.push_back(i);
+                    }
                 }
 
                 const bool touchesSelected = !matchIdx.empty();
@@ -531,9 +575,9 @@ namespace RGInspector {
 
                 // Draw thin inner bars for each *matching* transition
                 if (!matchIdx.empty()) {
-                    int n = (int)v.size();
+                    int n = static_cast<int>(v.size());
                     for (int i = 0; i < n; ++i) {
-                        double xi = absX0 + (absX1 - absX0) * ((i + 0.5) / (double)n);
+                        double xi = absX0 + (absX1 - absX0) * ((i + 0.5) / static_cast<double>(n));
                         ImPlotPoint p0(xi - 0.012, y + 0.15 * H);
                         ImPlotPoint p1(xi + 0.012, y + 0.85 * H);
                         DrawBlock(dl, p0, p1, IM_COL32(20, 20, 20, 220), IM_COL32(255, 255, 255, 200), 3.0f);
@@ -552,7 +596,7 @@ namespace RGInspector {
                             const auto& t = v[i];
                             std::string name = t.pResource->GetName();
                             ImGui::Text("%s (%llu)", name.c_str(),
-                                (unsigned long long)t.pResource->GetGlobalResourceID());
+                                static_cast<unsigned long long>(t.pResource->GetGlobalResourceID()));
                             ImGui::BulletText("Subresource: mip[%u..%u], array[%u..%u]",
                                 t.range.mipLower, t.range.mipUpper,
                                 t.range.sliceLower, t.range.sliceUpper);
@@ -565,15 +609,20 @@ namespace RGInspector {
                             };
 
                         if (haveSelection) {
-                            for (int i : matchIdx) emit(i);
+                            for (int i : matchIdx) {
+                                emit(i);
+                            }
                         }
                         else {
                             // nothing selected: show a compact view of all transitions in this block
                             const int maxShow = 12; // avoid huge tooltips
                             int shown = 0;
-                            for (int i = 0; i < (int)v.size() && shown < maxShow; ++i, ++shown) emit(i);
-                            if ((int)v.size() > maxShow)
-                                ImGui::TextDisabled("...and %d more", (int)v.size() - maxShow);
+                            for (int i = 0; i < static_cast<int>(v.size()) && shown < maxShow; ++i, ++shown) {
+                                emit(i);
+                            }
+                            if (static_cast<int>(v.size()) > maxShow) {
+                                ImGui::TextDisabled("...and %d more", static_cast<int>(v.size()) - maxShow);
+                            }
                         }
                         ImGui::EndTooltip();
                     }
@@ -581,7 +630,9 @@ namespace RGInspector {
                 };
 
             auto draw_passes = [&](auto const& passesVec, QueueKind qk, int bi, bool isCompute) {
-                if (passesVec.empty()) return;
+                if (passesVec.empty()) {
+                    return;
+                }
                 const auto& L = layouts[bi];
                 float y = LaneY(qk, H, S);
                 ImPlotPoint minP(L.p0, y);
@@ -590,8 +641,12 @@ namespace RGInspector {
                 // Does any pass use the selected resource?
                 bool touchesSelected = false;
                 if (s_selectedRes != 0 && passUses) {
-                    for (auto const& pr : passesVec)
-                        if (passUses((const void*)&pr, s_selectedRes, isCompute)) { touchesSelected = true; break; }
+                    for (auto const& pr : passesVec) {
+                        if (passUses(static_cast<const void*>(&pr), s_selectedRes, isCompute)) {
+                            touchesSelected = true;
+                            break;
+                        }
+                    }
                 }
 
                 DrawBlock(dl, minP, maxP,
@@ -601,9 +656,9 @@ namespace RGInspector {
                     ColBorder());
 
                 // Pass labels (stacked vertically)
-                int n = (int)passesVec.size();
+                int n = static_cast<int>(passesVec.size());
                 ImVec2 tp = ImPlot::PlotToPixels(ImPlotPoint((L.p0 + L.p1) * 0.5, y + 0.1 + 0.5f * (H - 0.2f)));
-                dl->AddText(tp, IM_COL32_BLACK, std::to_string((int)passesVec.size()).c_str());
+                dl->AddText(tp, IM_COL32_BLACK, std::to_string(static_cast<int>(passesVec.size())).c_str());
                 //for (int i = 0; i < n; ++i) {
                 //    double u = (i + 0.5) / std::max(1, n);
                 //    ImVec2 tp = ImPlot::PlotToPixels(ImPlotPoint(batchIndex + (xP0 + xP1) * 0.5, y + 0.1 + u * (H - 0.2)));
@@ -614,14 +669,16 @@ namespace RGInspector {
                 // Tooltip for whole pass block
                 if (IsMouseOver(minP, maxP)) {
                     ImGui::BeginTooltip();
-                    ImGui::Text("%s Passes (%d)", qk == QueueKind::Graphics ? "Graphics" : (qk == QueueKind::Compute ? "Compute" : "Copy"), (int)passesVec.size());
-                    for (auto const& pr : passesVec) ImGui::BulletText("%s", pr.name.c_str());
+                    ImGui::Text("%s Passes (%d)", qk == QueueKind::Graphics ? "Graphics" : (qk == QueueKind::Compute ? "Compute" : "Copy"), static_cast<int>(passesVec.size()));
+                    for (auto const& pr : passesVec) {
+                        ImGui::BulletText("%s", pr.name.c_str());
+                    }
                     ImGui::EndTooltip();
                 }
                 };
 
             // Draw all batches
-            for (int bi = 0; bi < (int)batches.size(); ++bi) {
+            for (int bi = 0; bi < static_cast<int>(batches.size()); ++bi) {
 
                 const auto& b = batches[bi];
                 const auto& L = layouts[bi];
@@ -651,7 +708,7 @@ namespace RGInspector {
                     }
                 }
 
-                if (b.computePasses.size() > 0 && b.computePasses[0].name == "Screen-Space Reflections Pass") {
+                if (!b.computePasses.empty() && b.computePasses[0].name == "Screen-Space Reflections Pass") {
                     spdlog::info("Here");
                 }
 
@@ -676,7 +733,9 @@ namespace RGInspector {
                 auto laneYC = LaneY(QueueKind::Compute, H, S) + H * 0.5f;
 
                 auto labelFence = [](bool enabled, uint64_t val)->std::string {
-                    if (!enabled) return {};
+                    if (!enabled) {
+                        return {};
+                    }
                     std::ostringstream o; o << "#" << val; return o.str();
                     };
 
@@ -703,8 +762,8 @@ namespace RGInspector {
                     if (it != sigIdx.end()) {
                         const auto& src = it->second;
                         DrawArrowBetweenLanes(dl,
-                            (float)siteToX(src), (float)yG,
-                            (float)waitX_Transitions(bi), (float)yC,
+                            static_cast<float>(siteToX(src)), static_cast<float>(yG),
+                            static_cast<float>(waitX_Transitions(bi)), static_cast<float>(yC),
                             ColArrowWait(), labelFence(true, fv).c_str());
                     }
                 }
@@ -716,10 +775,10 @@ namespace RGInspector {
                     if (it != sigIdx.end()) {
                         const auto& src = it->second;
                         DrawArrowBetweenLanes(dl,
-                            (float)siteToX(src), 
-                            (float)yG,
-                            (float)waitX_Passes(bi), 
-                            (float)yC,
+                            static_cast<float>(siteToX(src)), 
+                            static_cast<float>(yG),
+                            static_cast<float>(waitX_Passes(bi)), 
+                            static_cast<float>(yC),
                             ColArrowWait(), 
                             labelFence(true, fv).c_str());
                     }
@@ -732,10 +791,10 @@ namespace RGInspector {
                     if (it != sigIdx.end()) {
                         const auto& src = it->second;
                         DrawArrowBetweenLanes(dl,
-                            (float)siteToX(src), 
-                            (float)yC,
-                            (float)waitX_Transitions(bi), 
-                            (float)yG,
+                            static_cast<float>(siteToX(src)), 
+                            static_cast<float>(yC),
+                            static_cast<float>(waitX_Transitions(bi)), 
+                            static_cast<float>(yG),
                             ColArrowWait(), labelFence(true, fv).c_str());
                     }
                 }
@@ -747,8 +806,8 @@ namespace RGInspector {
                     if (it != sigIdx.end()) {
                         const auto& src = it->second;
                         DrawArrowBetweenLanes(dl,
-                            (float)siteToX(src), (float)yC,
-                            (float)waitX_Passes(bi), (float)yG,
+                            static_cast<float>(siteToX(src)), static_cast<float>(yC),
+                            static_cast<float>(waitX_Passes(bi)), static_cast<float>(yG),
                             ColArrowWait(),
                             labelFence(true, fv).c_str());
                     }
