@@ -4,16 +4,262 @@
 #include <cctype>
 #include <cstdio>
 #include <cstddef>
+#include <cmath>
+#include <cstring>
+#include <limits>
+#include <sstream>
+#include <iomanip>
+#include <string>
 
 #include "Managers/Singletons/ReadbackManager.h"
 #include "Resources/Resource.h"
+#include "structFormatHelper.h"
 
 namespace ui {
+
+    namespace {
+
+        static bool HasNonWhitespace(const char* s)
+        {
+            if (!s) return false;
+            while (*s) {
+                if (!std::isspace(static_cast<unsigned char>(*s))) return true;
+                ++s;
+            }
+            return false;
+        }
+
+        static float HalfToFloat(uint16_t h)
+        {
+            const uint16_t sign = (h >> 15) & 0x1;
+            const uint16_t exp = (h >> 10) & 0x1F;
+            const uint16_t mant = h & 0x3FF;
+
+            if (exp == 0) {
+                if (mant == 0) {
+                    return sign ? -0.0f : 0.0f;
+                }
+                const float m = static_cast<float>(mant) / 1024.0f;
+                const float v = std::ldexp(m, -14);
+                return sign ? -v : v;
+            }
+
+            if (exp == 31) {
+                if (mant == 0) {
+                    return sign ? -std::numeric_limits<float>::infinity() : std::numeric_limits<float>::infinity();
+                }
+                return std::numeric_limits<float>::quiet_NaN();
+            }
+
+            const float m = 1.0f + (static_cast<float>(mant) / 1024.0f);
+            const float v = std::ldexp(m, static_cast<int>(exp) - 15);
+            return sign ? -v : v;
+        }
+
+        static std::string FormatScalar(
+            NumericKind kind,
+            uint32_t bits,
+            const std::byte* ptr,
+            size_t remaining)
+        {
+            auto need = [&](size_t n) { return remaining >= n; };
+
+            switch (kind) {
+            case NumericKind::SInt:
+                if (bits == 8 && need(1)) { int8_t v; std::memcpy(&v, ptr, 1); return std::to_string(v); }
+                if (bits == 16 && need(2)) { int16_t v; std::memcpy(&v, ptr, 2); return std::to_string(v); }
+                if (bits == 32 && need(4)) { int32_t v; std::memcpy(&v, ptr, 4); return std::to_string(v); }
+                if (bits == 64 && need(8)) { int64_t v; std::memcpy(&v, ptr, 8); return std::to_string(v); }
+                break;
+            case NumericKind::UInt:
+                if (bits == 8 && need(1)) { uint8_t v; std::memcpy(&v, ptr, 1); return std::to_string(v); }
+                if (bits == 16 && need(2)) { uint16_t v; std::memcpy(&v, ptr, 2); return std::to_string(v); }
+                if (bits == 32 && need(4)) { uint32_t v; std::memcpy(&v, ptr, 4); return std::to_string(v); }
+                if (bits == 64 && need(8)) { uint64_t v; std::memcpy(&v, ptr, 8); return std::to_string(v); }
+                break;
+            case NumericKind::Float:
+                if (bits == 16 && need(2)) {
+                    uint16_t h; std::memcpy(&h, ptr, 2);
+                    std::ostringstream os; os << HalfToFloat(h);
+                    return os.str();
+                }
+                if (bits == 32 && need(4)) { float v; std::memcpy(&v, ptr, 4); std::ostringstream os; os << v; return os.str(); }
+                if (bits == 64 && need(8)) { double v; std::memcpy(&v, ptr, 8); std::ostringstream os; os << v; return os.str(); }
+                break;
+            case NumericKind::Bool:
+                if (need(4)) { uint32_t v; std::memcpy(&v, ptr, 4); return v ? "true" : "false"; }
+                if (need(1)) { uint8_t v; std::memcpy(&v, ptr, 1); return v ? "true" : "false"; }
+                break;
+            default:
+                break;
+            }
+
+            return "<unsupported>";
+        }
+
+        static std::string FormatLaneValue(
+            const LayoutNode& node,
+            const std::vector<std::byte>& data,
+            size_t absoluteOffset,
+            uint32_t lane)
+        {
+            if (absoluteOffset >= data.size()) {
+                return "<out-of-bounds>";
+            }
+
+            const uint32_t bits = node.numeric.bits;
+            const uint32_t lanes = std::max(1u, node.numeric.lanes);
+
+            // Use reflected byte size first (important for bool, which often reports bits=1 but occupies 4 bytes in HLSL layouts).
+            size_t elemBytes = 0;
+            if (node.sizeBytes > 0 && lanes > 0 && (node.sizeBytes % lanes) == 0) {
+                elemBytes = node.sizeBytes / lanes;
+            }
+            if (elemBytes == 0 && bits > 0) {
+                elemBytes = (bits + 7) / 8; // round up
+            }
+            if (node.numeric.kind == NumericKind::None || elemBytes == 0) {
+                return "<non-numeric>";
+            }
+
+            const size_t laneOffset = absoluteOffset + size_t(lane) * elemBytes;
+            if (laneOffset >= data.size()) {
+                return "<oob>";
+            }
+
+            const size_t remaining = data.size() - laneOffset;
+            return FormatScalar(node.numeric.kind, bits, data.data() + laneOffset, remaining);
+        }
+
+        static void DrawLeafValue(const LayoutNode& node, const std::vector<std::byte>& data, size_t absoluteOffset)
+        {
+            const uint32_t rows = std::max(1u, node.numeric.rows);
+            const uint32_t cols = std::max(1u, node.numeric.cols);
+            const uint32_t lanes = std::max(1u, node.numeric.lanes);
+
+            if (rows > 1 && cols > 1) {
+                // Matrix layout
+                ImGui::Indent();
+                ImGui::Indent();
+                for (uint32_t r = 0; r < rows; ++r) {
+                    std::ostringstream row;
+                    row << "[";
+                    for (uint32_t c = 0; c < cols; ++c) {
+                        if (c > 0) row << ", ";
+                        const uint32_t lane = r * cols + c;
+                        row << FormatLaneValue(node, data, absoluteOffset, lane);
+                    }
+                    row << "]";
+                    ImGui::TextUnformatted(row.str().c_str());
+                }
+                ImGui::Unindent();
+                ImGui::Unindent();
+                return;
+            }
+
+            std::ostringstream os;
+            os << "[";
+            for (uint32_t lane = 0; lane < lanes; ++lane) {
+                if (lane > 0) os << ", ";
+                os << FormatLaneValue(node, data, absoluteOffset, lane);
+            }
+            os << "]";
+            ImGui::TextUnformatted(os.str().c_str());
+        }
+
+        static void DrawLayoutNode(const LayoutNode& node, const std::vector<std::byte>& data, size_t elementBaseOffset)
+        {
+            const size_t abs = elementBaseOffset + node.offsetBytes;
+            const bool hasChildren = !node.children.empty();
+            const bool isMatrix = (std::max(1u, node.numeric.rows) > 1 && std::max(1u, node.numeric.cols) > 1);
+
+            std::ostringstream label;
+            label << node.name;
+            if (!node.typeName.empty()) {
+                label << " : " << node.typeName;
+            }
+
+            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth;
+            if (!hasChildren) {
+                flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+            }
+
+            const bool open = ImGui::TreeNodeEx(label.str().c_str(), flags);
+
+            if (!hasChildren) {
+                if (node.numeric.kind != NumericKind::None) {
+                    if (!isMatrix) {
+                        ImGui::SameLine();
+                    }
+                    DrawLeafValue(node, data, abs);
+                }
+                else {
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("<non-numeric>");
+                }
+                return;
+            }
+
+            if (open) {
+                for (auto const& c : node.children) {
+                    ImGui::PushID(c.path.c_str());
+                    DrawLayoutNode(c, data, elementBaseOffset);
+                    ImGui::PopID();
+                }
+                ImGui::TreePop();
+            }
+        }
+
+    } // namespace
 
     static inline char ToPrintableAscii(std::byte b) {
         unsigned char c = (unsigned char)b;
         if (c >= 32 && c <= 126) return (char)c;
         return '.';
+    }
+
+    void MemoryViewWidget::SaveCurrentResourceLayoutState() {
+        if (currentResourceId_ == 0) return;
+
+        ResourceLayoutState s{};
+        s.structInput = std::string(structInputBuf_.data());
+        s.diagnostics = reflectionDiagnostics_;
+        s.rootSizeBytes = reflectedRootSizeBytes_;
+        s.rootStrideBytes = reflectedRootStrideBytes_;
+        s.reflectionValid = reflectionValid_;
+        s.reflectedRoot = reflectedRoot_;
+        s.goToElementInput = goToElementInput_;
+
+        perResourceLayoutState_[currentResourceId_] = std::move(s);
+    }
+
+    void MemoryViewWidget::LoadResourceLayoutState(uint64_t resourceId) {
+        std::fill(structInputBuf_.begin(), structInputBuf_.end(), 0);
+        reflectionDiagnostics_.clear();
+        reflectedRootSizeBytes_ = 0;
+        reflectedRootStrideBytes_ = 0;
+        reflectionValid_ = false;
+        reflectedRoot_.reset();
+        goToElementInput_ = 0;
+        scrollToElement_ = -1;
+
+        auto it = perResourceLayoutState_.find(resourceId);
+        if (it == perResourceLayoutState_.end()) {
+            return;
+        }
+
+        auto const& s = it->second;
+        if (!s.structInput.empty()) {
+			strncpy_s(structInputBuf_.data(), structInputBuf_.size(), s.structInput.c_str(), s.structInput.size());
+        	structInputBuf_.back() = 0;
+        }
+
+        reflectionDiagnostics_ = s.diagnostics;
+        reflectedRootSizeBytes_ = s.rootSizeBytes;
+        reflectedRootStrideBytes_ = s.rootStrideBytes;
+        reflectionValid_ = s.reflectionValid;
+        reflectedRoot_ = s.reflectedRoot;
+        goToElementInput_ = s.goToElementInput;
     }
 
     void MemoryViewWidget::Open(const std::string& passName, Resource* resource, const RangeSpec& range) {
@@ -35,6 +281,12 @@ namespace ui {
         req.resourceId = resource->GetGlobalResourceID();
         req.resourceName = resource->GetName();
         pending_ = req;
+
+        if (currentResourceId_ != 0 && currentResourceId_ != req.resourceId) {
+            SaveCurrentResourceLayoutState();
+        }
+        currentResourceId_ = req.resourceId;
+        LoadResourceLayoutState(currentResourceId_);
 
         waiting_ = true;
         status_ = "Scheduling readback...";
@@ -141,65 +393,187 @@ namespace ui {
         const size_t sizeBytes = r.data.size();
         ImGui::Text("Size: %llu bytes", (unsigned long long)sizeBytes);
 
-        int bpr = bytesPerRow_;
-        ImGui::SetNextItemWidth(120.0f);
-        if (ImGui::InputInt("Bytes/row", &bpr)) {
-            bpr = std::clamp(bpr, 4, 64);
-            bytesPerRow_ = bpr;
+        ImGui::Separator();
+        ImGui::TextUnformatted("Struct Layout (Slang)");
+        ImGui::InputTextMultiline("##StructInput", structInputBuf_.data(), structInputBuf_.size(), ImVec2(-1.0f, 150.0f));
+
+        const bool hasStructInput = HasNonWhitespace(structInputBuf_.data());
+
+        if (ImGui::Button("Reflect Struct")) {
+            reflectionDiagnostics_.clear();
+            reflectionValid_ = false;
+            reflectedRoot_.reset();
+            reflectedRootSizeBytes_ = 0;
+            reflectedRootStrideBytes_ = 0;
+            goToElementInput_ = 0;
+            scrollToElement_ = -1;
+
+            if (!hasStructInput) {
+                reflectionDiagnostics_ = "Struct input is empty.";
+            }
+            else {
+                LayoutNode root{};
+                std::string diagnostics;
+                auto result = ReflectStructLayoutWithSlang(root, std::string(structInputBuf_.data()), &diagnostics);
+
+                reflectionDiagnostics_ = diagnostics;
+
+                if (SLANG_SUCCEEDED(result)) {
+                    reflectedRootSizeBytes_ = root.sizeBytes;
+                    reflectedRootStrideBytes_ = (root.strideBytes != 0) ? root.strideBytes : root.sizeBytes;
+                    reflectedRoot_ = std::make_shared<LayoutNode>(std::move(root));
+                    reflectionValid_ = (reflectedRoot_ != nullptr) && reflectedRootStrideBytes_ != 0;
+
+                    if (!reflectionValid_ && reflectionDiagnostics_.empty()) {
+                        reflectionDiagnostics_ = "Reflection succeeded but no usable root layout was produced.";
+                    }
+                }
+                else if (reflectionDiagnostics_.empty()) {
+                    reflectionDiagnostics_ = "Reflection failed.";
+                }
+            }
+
+            SaveCurrentResourceLayoutState();
         }
 
-        if (sizeBytes == 0) {
-            ImGui::TextUnformatted("(empty)");
-            return;
+        if (!reflectionDiagnostics_.empty()) {
+            ImGui::TextWrapped("%s", reflectionDiagnostics_.c_str());
         }
 
-        const int bytesPerRow = std::clamp(bytesPerRow_, 4, 64);
-        const int rowCount = (int)((sizeBytes + (size_t)bytesPerRow - 1) / (size_t)bytesPerRow);
+        if (hasStructInput) {
+            if (!reflectionValid_) {
+                ImGui::TextDisabled("Reflect a valid struct to view typed values.");
+            }
+            else {
+            const size_t stride = std::max<size_t>(1, reflectedRootStrideBytes_);
+            const size_t count = sizeBytes / stride;
 
-        ImGui::BeginChild("##HexView", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
+                ImGui::Text("Reflected stride: %llu bytes, element count: %llu",
+                (unsigned long long)stride,
+                (unsigned long long)count);
 
-        ImGuiListClipper clip;
-        clip.Begin(rowCount);
-        while (clip.Step()) {
-            for (int row = clip.DisplayStart; row < clip.DisplayEnd; ++row) {
-                const size_t base = (size_t)row * (size_t)bytesPerRow;
-
-                char line[512];
-                int n = 0;
-
-                n += std::snprintf(line + n, sizeof(line) - n, "%08llX  ", (unsigned long long)base);
-
-                // Hex bytes
-                for (int i = 0; i < bytesPerRow; ++i) {
-                    const size_t idx = base + (size_t)i;
-                    if (idx < sizeBytes) {
-                        const unsigned v = (unsigned)std::to_integer<unsigned char>(r.data[idx]);
-                        n += std::snprintf(line + n, sizeof(line) - n, "%02X ", v);
+                ImGui::SetNextItemWidth(140.0f);
+                ImGui::InputInt("Go To Index", &goToElementInput_);
+                ImGui::SameLine();
+                if (ImGui::Button("Go")) {
+                    if (count > 0) {
+                        goToElementInput_ = std::clamp(goToElementInput_, 0, (int)count - 1);
+                        scrollToElement_ = goToElementInput_;
                     }
                     else {
-                        n += std::snprintf(line + n, sizeof(line) - n, "   ");
+                        goToElementInput_ = 0;
+                        scrollToElement_ = -1;
                     }
                 }
 
-                // ASCII
-                n += std::snprintf(line + n, sizeof(line) - n, " |");
-                for (int i = 0; i < bytesPerRow; ++i) {
-                    const size_t idx = base + (size_t)i;
-                    if (idx < sizeBytes) {
-                        line[n++] = ToPrintableAscii(r.data[idx]);
-                    }
-                    else {
-                        line[n++] = ' ';
-                    }
+                if (count == 0) {
+                    ImGui::TextDisabled("No complete elements in current buffer for reflected stride.");
                 }
-                line[n++] = '|';
-                line[n++] = 0;
+                else {
+                    ImGui::BeginChild("##TypedElements", ImVec2(0, ImGui::GetContentRegionAvail().y), true);
 
-                ImGui::TextUnformatted(line);
+                    // Note: Tree rows are variable height when expanded; ListClipper assumes fixed-height rows
+                    // and can skip/hide items. Iterate directly to keep scrolling behavior correct.
+                    for (int idx = 0; idx < (int)count; ++idx) {
+                        ImGui::PushID(idx);
+
+                        const size_t elementBase = size_t(idx) * stride;
+                        std::ostringstream hdr;
+                        hdr << "Element " << idx << " (base=0x" << std::hex << elementBase << std::dec << ")";
+
+                        bool open = ImGui::TreeNodeEx(hdr.str().c_str(), ImGuiTreeNodeFlags_SpanAvailWidth);
+
+                        if (scrollToElement_ == idx) {
+                            ImGui::SetScrollHereY(0.1f);
+                            scrollToElement_ = -1;
+                        }
+
+                        if (open) {
+                            if (reflectedRoot_->children.empty()) {
+                                DrawLayoutNode(*reflectedRoot_, r.data, elementBase);
+                            }
+                            else {
+                                for (auto const& c : reflectedRoot_->children) {
+                                    ImGui::PushID(c.path.c_str());
+                                    DrawLayoutNode(c, r.data, elementBase);
+                                    ImGui::PopID();
+                                }
+                            }
+                            ImGui::TreePop();
+                        }
+
+                        ImGui::PopID();
+                    }
+
+                    ImGui::EndChild();
+                }
             }
         }
 
-        ImGui::EndChild();
+        if (!hasStructInput) {
+            ImGui::Separator();
+            ImGui::TextUnformatted("Raw Hex");
+
+            int bpr = bytesPerRow_;
+            ImGui::SetNextItemWidth(120.0f);
+            if (ImGui::InputInt("Bytes/row", &bpr)) {
+                bpr = std::clamp(bpr, 4, 64);
+                bytesPerRow_ = bpr;
+            }
+
+            if (sizeBytes == 0) {
+                ImGui::TextUnformatted("(empty)");
+                return;
+            }
+
+            const int bytesPerRow = std::clamp(bytesPerRow_, 4, 64);
+            const int rowCount = (int)((sizeBytes + (size_t)bytesPerRow - 1) / (size_t)bytesPerRow);
+
+            ImGui::BeginChild("##HexView", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
+
+            ImGuiListClipper clip;
+            clip.Begin(rowCount);
+            while (clip.Step()) {
+                for (int row = clip.DisplayStart; row < clip.DisplayEnd; ++row) {
+                    const size_t base = (size_t)row * (size_t)bytesPerRow;
+
+                    char line[512];
+                    int n = 0;
+
+                    n += std::snprintf(line + n, sizeof(line) - n, "%08llX  ", (unsigned long long)base);
+
+                    // Hex bytes
+                    for (int i = 0; i < bytesPerRow; ++i) {
+                        const size_t idx = base + (size_t)i;
+                        if (idx < sizeBytes) {
+                            const unsigned v = (unsigned)std::to_integer<unsigned char>(r.data[idx]);
+                            n += std::snprintf(line + n, sizeof(line) - n, "%02X ", v);
+                        }
+                        else {
+                            n += std::snprintf(line + n, sizeof(line) - n, "   ");
+                        }
+                    }
+
+                    // ASCII
+                    n += std::snprintf(line + n, sizeof(line) - n, " |");
+                    for (int i = 0; i < bytesPerRow; ++i) {
+                        const size_t idx = base + (size_t)i;
+                        if (idx < sizeBytes) {
+                            line[n++] = ToPrintableAscii(r.data[idx]);
+                        }
+                        else {
+                            line[n++] = ' ';
+                        }
+                    }
+                    line[n++] = '|';
+                    line[n++] = 0;
+
+                    ImGui::TextUnformatted(line);
+                }
+            }
+
+            ImGui::EndChild();
+        }
     }
 
 } // namespace ui

@@ -2,9 +2,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <array>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <imgui.h>
@@ -13,6 +16,7 @@
 #include "Resources/ResourceStateTracker.h"
 
 class Resource;
+struct LayoutNode;
 
 namespace ui {
 
@@ -27,8 +31,9 @@ namespace ui {
     private:
         void DrawBufferView(const ReadbackCaptureResult& r);
         void DrawTextureViewStub(const ReadbackCaptureResult& r);
+        void SaveCurrentResourceLayoutState();
+        void LoadResourceLayoutState(uint64_t resourceId);
 
-    private:
         struct PendingRequest {
             std::string passName;
             Resource* resource = nullptr;
@@ -45,6 +50,29 @@ namespace ui {
 
         // UI state
         int bytesPerRow_ = 16;
+        std::array<char, 16 * 1024> structInputBuf_{};
+        std::string reflectionDiagnostics_;
+        size_t reflectedRootSizeBytes_ = 0;
+        size_t reflectedRootStrideBytes_ = 0;
+        bool reflectionValid_ = false;
+        std::shared_ptr<LayoutNode> reflectedRoot_;
+
+        int goToElementInput_ = 0;
+        int scrollToElement_ = -1;
+
+        uint64_t currentResourceId_ = 0;
+
+        struct ResourceLayoutState {
+            std::string structInput;
+            std::string diagnostics;
+            size_t rootSizeBytes = 0;
+            size_t rootStrideBytes = 0;
+            bool reflectionValid = false;
+            std::shared_ptr<LayoutNode> reflectedRoot;
+            int goToElementInput = 0;
+        };
+
+        std::unordered_map<uint64_t, ResourceLayoutState> perResourceLayoutState_;
     };
 
 } // namespace ui

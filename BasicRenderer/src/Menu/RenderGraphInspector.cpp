@@ -116,16 +116,35 @@ static void CollectResourceIds(const std::vector<RenderGraph::PassBatch>& batche
     std::unordered_map<uint64_t, std::string>& outIdToName,
     std::unordered_map<uint64_t, Resource*>& outIdToPtr)
 {
+    auto upsertNamedResource = [&](Resource* resource) {
+        if (!resource) return;
+
+        const uint64_t id = resource->GetGlobalResourceID();
+        const std::string currentName = resource->GetName();
+
+        auto nameIt = outIdToName.find(id);
+        if (nameIt == outIdToName.end()) {
+            outIdToName.emplace(id, currentName);
+        }
+        else if (nameIt->second.empty() && !currentName.empty()) {
+            nameIt->second = currentName;
+        }
+
+        auto ptrIt = outIdToPtr.find(id);
+        if (ptrIt == outIdToPtr.end() || ptrIt->second == nullptr) {
+            outIdToPtr[id] = resource;
+        }
+    };
+
     for (const auto& b : batches) {
         auto scan = [&](const std::vector<ResourceTransition>& v) {
             for (auto& t : v) {
-                if (!t.pResource) continue;
-                outIdToName.emplace(t.pResource->GetGlobalResourceID(), t.pResource->GetName());
-                outIdToPtr.emplace(t.pResource->GetGlobalResourceID(), t.pResource);
+                upsertNamedResource(t.pResource);
             }
             };
         scan(b.renderTransitions);
         scan(b.computeTransitions);
+        scan(b.batchEndTransitions);
 
         // Also add anything the batch knows about:
         for (auto id : b.allResources) outIdToName.emplace(id, std::string{});
@@ -278,6 +297,10 @@ namespace RGInspector {
             CollectBatchResourceIds(batches[s_filterBatchResources], allowedResourceIds);
 
         ImGui::BeginChild("LeftPanel", ImVec2(320, 0), true);
+
+        const float capturePanelHeight = 190.0f;
+        ImGui::BeginChild("LeftPanelResources", ImVec2(0, -capturePanelHeight), false);
+
         ImGui::TextUnformatted("Resources");
         if (s_filterBatchResources >= 0) {
             ImGui::Text("Batch Filter: %d", s_filterBatchResources);
@@ -321,10 +344,14 @@ namespace RGInspector {
             allowedResourceIds.clear();
         }
 
+        ImGui::EndChild();
+
+        ImGui::BeginChild("LeftPanelCapture", ImVec2(0, 0), true);
+
+        ImGui::TextUnformatted("Capture");
+
         if (!batches.empty()) {
             s_selectedBatch = std::clamp(s_selectedBatch, 0, (int)batches.size() - 1);
-            ImGui::Separator();
-            ImGui::TextUnformatted("Capture");
             if (ImGui::SliderInt("Batch", &s_selectedBatch, 0, (int)batches.size() - 1)) {
                 // Keep the batch resource filter in sync with the slider.
                 s_filterBatchResources = s_selectedBatch;
@@ -401,6 +428,11 @@ namespace RGInspector {
             }
             if (!canCapture) ImGui::EndDisabled();
         }
+        else {
+            ImGui::TextDisabled("No pass batches available.");
+        }
+
+        ImGui::EndChild();
 
         ImGui::EndChild();
 
