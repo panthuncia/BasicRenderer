@@ -22,6 +22,20 @@ struct RasterizeClustersCommand
     unsigned int dispatchX, dispatchY, dispatchZ;
 };
 
+struct CLodViewRasterInfo
+{
+    uint32_t visibilityUAVDescriptorIndex;
+    uint32_t scissorMinX;
+    uint32_t scissorMinY;
+    uint32_t scissorMaxX;
+    uint32_t scissorMaxY;
+    float viewportScaleX;
+    float viewportScaleY;
+    uint32_t pad0;
+
+    friend bool operator==(const CLodViewRasterInfo&, const CLodViewRasterInfo&) = default;
+};
+
 class CLodExtension final : public RenderGraph::IRenderGraphExtension {
 public:
 	explicit CLodExtension(CLodExtensionType type, uint64_t maxVisibleClusters) : m_maxVisibleClusters(maxVisibleClusters) {
@@ -906,7 +920,7 @@ private:
             m_wireframe = inputs.wireframe;
             m_clearGbuffer = inputs.clearGbuffer;
 
-            m_viewVisbufferUAVIndicesBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(1, "ViewVisbufferUAVIndicesBuffer", false);
+            m_viewRasterInfoBuffer = DynamicStructuredBuffer<CLodViewRasterInfo>::CreateShared(1, "CLodViewRasterInfoBuffer", false);
             
             // Create rasterization indirect command signature
             rhi::IndirectArg args[] = {
@@ -939,7 +953,7 @@ private:
                 Builtin::MeshResources::MeshletOffsets,
                 m_compactedVisibleClustersBuffer, 
                 m_rasterBucketsHistogramBuffer,
-                m_viewVisbufferUAVIndicesBuffer)
+                m_viewRasterInfoBuffer)
                 .WithIndirectArguments(m_rasterBucketsIndirectArgsBuffer)
                 .IsGeometryPass();
 
@@ -972,16 +986,39 @@ private:
 
 		// Note: relies on Update() running before DeclareResourceUsages(). If this ever changes, we may need a new approach.
 		void Update(const UpdateContext& context) override {
-			// Update view visbuffer UAV indices
+			// Build per-view raster metadata used by CLod mesh/pixel shaders.
             auto numViews = context.viewManager->GetCameraBufferSize();
 
             m_visibilityBuffers.clear();
             m_debugBuffers.clear();
-			std::vector<uint32_t> uavIndices(numViews);
+
+            uint32_t maxViewWidth = 1;
+            uint32_t maxViewHeight = 1;
+
+            context.viewManager->ForEachView([&](uint64_t v) {
+                auto viewInfo = context.viewManager->Get(v);
+                if (viewInfo->gpu.visibilityBuffer != nullptr) {
+                    maxViewWidth = std::max(maxViewWidth, viewInfo->gpu.visibilityBuffer->GetWidth());
+                    maxViewHeight = std::max(maxViewHeight, viewInfo->gpu.visibilityBuffer->GetHeight());
+                }
+            });
+
+			std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
 			context.viewManager->ForEachView([&](uint64_t v) {
 				auto viewInfo = context.viewManager->Get(v);
                 if (viewInfo->gpu.visibilityBuffer != nullptr) {
-                    uavIndices[viewInfo->gpu.cameraBufferIndex] = viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+					auto cameraIndex = viewInfo->gpu.cameraBufferIndex;
+
+					CLodViewRasterInfo info{};
+					info.visibilityUAVDescriptorIndex = viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+					info.scissorMinX = 0;
+					info.scissorMinY = 0;
+					info.scissorMaxX = viewInfo->gpu.visibilityBuffer->GetWidth();
+					info.scissorMaxY = viewInfo->gpu.visibilityBuffer->GetHeight();
+					info.viewportScaleX = static_cast<float>(info.scissorMaxX) / static_cast<float>(maxViewWidth);
+					info.viewportScaleY = static_cast<float>(info.scissorMaxY) / static_cast<float>(maxViewHeight);
+					viewRasterInfo[cameraIndex] = info;
+
 					m_visibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
                 }
                 if (viewInfo->gpu.debugBuffer != nullptr) {
@@ -989,15 +1026,18 @@ private:
 				}
 			});
 
-			// Check if new uav indices are different
-            if (m_visibilityBufferUAVIndices != uavIndices) {
-                m_visibilityBufferUAVIndices = uavIndices;
+			m_passWidth = maxViewWidth;
+			m_passHeight = maxViewHeight;
+
+			// Check if per-view raster metadata changed
+            if (m_viewRasterInfos != viewRasterInfo) {
+                m_viewRasterInfos = viewRasterInfo;
                 // Update the buffer
-                m_viewVisbufferUAVIndicesBuffer->Resize(static_cast<uint32_t>(m_visibilityBufferUAVIndices.size()));
+                m_viewRasterInfoBuffer->Resize(static_cast<uint32_t>(m_viewRasterInfos.size()));
                 BUFFER_UPLOAD(
-                    m_visibilityBufferUAVIndices.data(),
-                    static_cast<uint32_t>(m_visibilityBufferUAVIndices.size() * sizeof(uint32_t)),
-                    UploadManager::UploadTarget::FromShared(m_viewVisbufferUAVIndicesBuffer),
+                    m_viewRasterInfos.data(),
+                    static_cast<uint32_t>(m_viewRasterInfos.size() * sizeof(CLodViewRasterInfo)),
+                    UploadManager::UploadTarget::FromShared(m_viewRasterInfoBuffer),
                     0);
 				m_declaredResourcesChanged = true;
             }
@@ -1029,8 +1069,8 @@ private:
     private:
         void BeginPass(RenderContext& context) {
             rhi::PassBeginInfo p{};
-            p.width = 4096; // TODO: Max of all render views
-            p.height = 4096;
+            p.width = m_passWidth;
+            p.height = m_passHeight;
             p.debugName = "CLod raster pass";
 
             if (!m_debugBuffers.empty()) {
@@ -1065,7 +1105,7 @@ private:
             uint32_t misc[NumMiscUintRootConstants] = {};
             misc[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
             misc[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
-			misc[CLOD_VIEW_UAV_INDICES_BUFFER_DESCRIPTOR_INDEX] = m_viewVisbufferUAVIndicesBuffer->GetSRVInfo(0).slot.index;
+			misc[CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
             commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
             auto numBuckets = context.materialManager->GetRasterBucketCount();
@@ -1103,7 +1143,7 @@ private:
         bool m_meshShaders;
         bool m_clearGbuffer = true;
 
-		std::vector<uint32_t> m_visibilityBufferUAVIndices;
+        std::vector<CLodViewRasterInfo> m_viewRasterInfos;
 		std::vector<std::shared_ptr<PixelBuffer>> m_visibilityBuffers;
         std::vector<std::shared_ptr<PixelBuffer>> m_debugBuffers;
 
@@ -1113,7 +1153,9 @@ private:
 
 		rhi::CommandSignaturePtr m_rasterizationCommandSignature;
 
-		std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_viewVisbufferUAVIndicesBuffer;
+        std::shared_ptr<DynamicStructuredBuffer<CLodViewRasterInfo>> m_viewRasterInfoBuffer;
+        uint32_t m_passWidth = 1;
+        uint32_t m_passHeight = 1;
 		bool m_declaredResourcesChanged = true;
 
         RenderPhase m_renderPhase = Engine::Primary::GBufferPass;

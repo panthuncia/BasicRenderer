@@ -21,10 +21,19 @@ VisibilityOutput VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace
     // High 32 bits = depth
     uint64_t output = PackVisKey(input.linearDepth, input.visibleClusterIndex, primID);
 
-    // Fetch view-specific output buffer
-    StructuredBuffer<uint> viewVisbufferUAVIndexBuffer = ResourceDescriptorHeap[CLOD_VIEW_UAV_INDICES_BUFFER_DESCRIPTOR_INDEX];
-    uint visBufferUAVIndex = viewVisbufferUAVIndexBuffer[input.viewID];
+    // Fetch view-specific output buffer + manual scissor rect
+    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
+    ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[input.viewID];
+    uint visBufferUAVIndex = viewRasterInfo.visibilityUAVDescriptorIndex;
     RWTexture2D<uint64_t> visBuffer = ResourceDescriptorHeap[NonUniformResourceIndex(visBufferUAVIndex)];
+
+    if (pixel.x < viewRasterInfo.scissorMinX ||
+        pixel.y < viewRasterInfo.scissorMinY ||
+        pixel.x >= viewRasterInfo.scissorMaxX ||
+        pixel.y >= viewRasterInfo.scissorMaxY)
+    {
+        return (VisibilityOutput)0;
+    }
 
     uint2 dims;
     visBuffer.GetDimensions(dims.x, dims.y);

@@ -111,7 +111,8 @@ VisBufferPSInput GetVisBufferVertexAttributesForView(
     PerObjectBuffer objectBuffer,
     uint viewID,
     uint clusterIndex,
-    uint materialDataIndex)
+    uint materialDataIndex,
+    ClodViewRasterInfo rasterInfo)
 {
     ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostSkinningVertices)];
     uint byteOffset = blockByteOffset + index * vertexSize;
@@ -126,6 +127,8 @@ VisBufferPSInput GetVisBufferVertexAttributesForView(
 
     VisBufferPSInput result;
     result.position = mul(viewPosition, viewCamera.projection);
+    result.position.x = result.position.x * rasterInfo.viewportScaleX + result.position.w * (rasterInfo.viewportScaleX - 1.0f);
+    result.position.y = result.position.y * rasterInfo.viewportScaleY + result.position.w * (1.0f - rasterInfo.viewportScaleY);
     result.visibleClusterIndex = clusterIndex;
     result.linearDepth = -viewPosition.z;
     result.viewID = viewID;
@@ -169,6 +172,7 @@ void EmitMeshletVisBufferForView(
     MeshletSetup setup,
     uint viewID,
     uint clusterIndex,
+    ClodViewRasterInfo rasterInfo,
     out vertices VisBufferPSInput outputVertices[MS_MESHLET_SIZE],
     out indices uint3 outputTriangles[MS_MESHLET_SIZE])
 {
@@ -183,7 +187,8 @@ void EmitMeshletVisBufferForView(
             setup.objectBuffer,
             viewID,
             clusterIndex,
-            setup.meshBuffer.materialDataIndex
+            setup.meshBuffer.materialDataIndex,
+            rasterInfo
         );
     }
 
@@ -200,7 +205,8 @@ VisBufferPSInput GetVisBufferVertexAttributesForViewIndexed(
     PerObjectBuffer objectBuffer,
     uint viewID,
     uint clusterIndex,
-    uint materialDataIndex)
+    uint materialDataIndex,
+    ClodViewRasterInfo rasterInfo)
 {
     StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletVertexIndices)];
     uint vertexIndex = meshletVerticesBuffer[meshletVerticesBaseOffset + meshletVertexIndex];
@@ -213,7 +219,8 @@ VisBufferPSInput GetVisBufferVertexAttributesForViewIndexed(
         objectBuffer,
         viewID,
         clusterIndex,
-        materialDataIndex);
+        materialDataIndex,
+        rasterInfo);
 }
 
 void EmitMeshletVisBufferForViewIndexed(
@@ -221,6 +228,7 @@ void EmitMeshletVisBufferForViewIndexed(
     MeshletSetup setup,
     uint viewID,
     uint clusterIndex,
+    ClodViewRasterInfo rasterInfo,
     out vertices VisBufferPSInput outputVertices[MS_MESHLET_SIZE],
     out indices uint3 outputTriangles[MS_MESHLET_SIZE])
 {
@@ -237,7 +245,8 @@ void EmitMeshletVisBufferForViewIndexed(
             setup.objectBuffer,
             viewID,
             clusterIndex,
-            setup.meshBuffer.materialDataIndex
+            setup.meshBuffer.materialDataIndex,
+            rasterInfo
         );
     }
 
@@ -299,7 +308,9 @@ void VisibilityBufferMSMain(
     {
         return;
     }
-    EmitMeshletVisBufferForView(uGroupThreadID, setup, setup.viewID, 0, outputVertices, outputTriangles); // TODO: broken
+    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
+    ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[setup.viewID];
+    EmitMeshletVisBufferForView(uGroupThreadID, setup, setup.viewID, 0, viewRasterInfo, outputVertices, outputTriangles);
     EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
 }
 
@@ -379,6 +390,7 @@ void ClusterLODBucketMSMain(
     uint linearizedID = vGroupID.x + vGroupID.y * dispatchX;
 
     StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
+    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
     uint count = histogram[bucketIndex];
 
     bool draw = linearizedID < count;
@@ -397,7 +409,8 @@ void ClusterLODBucketMSMain(
     SetMeshOutputCounts(setup.vertCount, setup.triCount); // DXC won't accept non-uniform SetMeshOutputCounts
     if (draw)
     {
-        EmitMeshletVisBufferForViewIndexed(uGroupThreadID, setup, setup.viewID, visibleClusterIndex, outputVertices, outputTriangles);
+        ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[setup.viewID];
+        EmitMeshletVisBufferForViewIndexed(uGroupThreadID, setup, setup.viewID, visibleClusterIndex, viewRasterInfo, outputVertices, outputTriangles);
         EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
     }
 }

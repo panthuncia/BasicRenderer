@@ -26,6 +26,18 @@ struct VisBufferPSInput
     nointerpolation uint viewID : TEXCOORD4;
 };
 
+struct ClodViewRasterInfo
+{
+    uint visibilityUAVDescriptorIndex;
+    uint scissorMinX;
+    uint scissorMinY;
+    uint scissorMaxX;
+    uint scissorMaxY;
+    float viewportScaleX;
+    float viewportScaleY;
+    uint pad0;
+};
+
 struct ClippingPlane {
     float4 plane;
 };
