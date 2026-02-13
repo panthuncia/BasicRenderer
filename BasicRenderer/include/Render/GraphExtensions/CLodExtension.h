@@ -180,6 +180,7 @@ public:
             m_compactedVisibleClustersBuffer,
 			m_rasterBucketsHistogramBuffer,
 			m_rasterBucketsIndirectArgsBuffer);
+        rasterizePassDesc.isGeometryPass = true;
 		outPasses.push_back(std::move(rasterizePassDesc));
 	}
 
@@ -277,9 +278,12 @@ private:
                     Builtin::CLod::Children,
                     Builtin::CLod::ChildLocalMeshletIndices,
                     Builtin::CLod::Nodes,
+                    Builtin::CLod::MeshletBounds,
                     Builtin::CullingCameraBuffer,
                     Builtin::PerMeshInstanceBuffer,
-                    Builtin::PerObjectBuffer)
+                    Builtin::PerObjectBuffer,
+                    Builtin::CameraBuffer,
+                    Builtin::PerMeshBuffer)
                 .WithShaderResource(ECSResourceResolver(drawSetIndicesQuery));
         }
 
@@ -293,6 +297,9 @@ private:
             RegisterSRV(Builtin::PerMeshInstanceBuffer);
             RegisterSRV(Builtin::PerObjectBuffer);
             RegisterSRV(Builtin::CLod::Nodes);
+			RegisterSRV(Builtin::CLod::MeshletBounds);
+            RegisterSRV(Builtin::CameraBuffer);
+			RegisterSRV(Builtin::PerMeshBuffer);
 
             //RegisterUAV(Builtin::VisibleClusterBuffer);
             //RegisterUAV(Builtin::VisibleClusterCounter);
@@ -1056,7 +1063,6 @@ private:
             BeginPass(context);
 
             SetupCommonState(context, commandList);
-            SetCommonRootConstants(context, commandList);
 
             ExecuteMeshShaderIndirect(context, commandList);
 
@@ -1084,8 +1090,8 @@ private:
 
             context.commandList.BeginPass(p);
         }
-        // Common setup code that doesn't change between techniques
-        void SetupCommonState(RenderContext& context, rhi::CommandList& commandList) {
+
+    	void SetupCommonState(RenderContext& context, rhi::CommandList& commandList) {
 
             commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -1093,10 +1099,6 @@ private:
 
             // Root signature
             commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
-        }
-
-        void SetCommonRootConstants(RenderContext& context, rhi::CommandList& commandList) {
-
         }
 
         void ExecuteMeshShaderIndirect(RenderContext& context, rhi::CommandList& commandList) {

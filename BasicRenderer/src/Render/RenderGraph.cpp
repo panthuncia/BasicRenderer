@@ -850,6 +850,7 @@ void RenderGraph::CompileStructural() {
 				b.pass = par.pass;
 				b.built_ = true;
 				b.params = {};
+				b.params.isGeometryPass = d.isGeometryPass;
 				b._declaredIds.clear();
 				par.pass->DeclareResourceUsages(&b);
 				par.resources.staticResourceRequirements = b.GatherResourceRequirements();

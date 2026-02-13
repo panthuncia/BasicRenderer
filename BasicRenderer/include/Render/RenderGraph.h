@@ -107,6 +107,7 @@ public:
 
 		// Optional: if true, the pass will be registered in Get*PassByName().
 		bool registerName = true;
+		bool isGeometryPass = false; // Optional: opts pass into statistics tracking for rasterization
 	};
 
 	struct IRenderGraphExtension {
