@@ -58,7 +58,9 @@ public:
 		m_meshShaders = inputs.meshShaders;
 		m_indirect = inputs.indirect;
 
-        builder->WithShaderResource(Builtin::CameraBuffer,
+        builder->WithShaderResource(
+            MESH_RESOURCE_IDFENTIFIERS,
+            Builtin::CameraBuffer,
             Builtin::Environment::PrefilteredCubemapsGroup,
             Builtin::Light::ActiveLightIndices,
             Builtin::Light::InfoBuffer,
@@ -84,7 +86,7 @@ public:
             builder->WithShaderResource(Builtin::GTAO::OutputAOTerm);
         }
         if (m_meshShaders) {
-            builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::PrimaryCamera::MeshletBitfield);
+            //builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::PrimaryCamera::MeshletBitfield);
             if (m_indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
                 auto& ecsWorld = ECSManager::GetInstance().GetWorld();
                 auto forwardPassEntity = ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ForwardPass);
@@ -134,8 +136,8 @@ public:
         RegisterSRV(Builtin::Light::DirectionalLightCascadeBuffer);
         RegisterSRV(Builtin::Environment::InfoBuffer);
 
-        if (m_meshShaders)
-            m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+        //if (m_meshShaders)
+            //m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
     }
 
     PassReturn Execute(RenderContext& context) override {
@@ -201,7 +203,7 @@ private:
 
         if (m_meshShaders) {
             unsigned int misc[NumMiscUintRootConstants] = {};
-            misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
+            //misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
 			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
         }
     }

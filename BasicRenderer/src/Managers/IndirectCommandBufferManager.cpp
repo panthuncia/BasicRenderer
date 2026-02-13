@@ -16,9 +16,6 @@
 
 IndirectCommandBufferManager::IndirectCommandBufferManager() {
     m_indirectCommandsResourceGroup = std::make_shared<ResourceGroup>("IndirectCommandBuffers");
-    m_meshletCullingCommandResourceGroup = std::make_shared<ResourceGroup>("MeshletCullingCommandBuffers");
-
-    m_resolvers[Builtin::IndirectCommandBuffers::MeshletCulling] = std::make_shared<ResourceGroupResolver>(m_meshletCullingCommandResourceGroup);
 }
 
 IndirectCommandBufferManager::~IndirectCommandBufferManager() {
@@ -96,8 +93,6 @@ IndirectCommandBufferManager::CreateBuffersForView(uint64_t viewID) {
         return dyn;    };
     perView.meshletCullingIndirectCommandBuffer = makeMeshlet("MeshletCullingIndirectCommandBuffer");
     perView.meshletCullingResetIndirectCommandBuffer = makeMeshlet("MeshletCullingResetIndirectCommandBuffer");
-    m_meshletCullingCommandResourceGroup->AddResource(perView.meshletCullingIndirectCommandBuffer);
-    m_meshletCullingCommandResourceGroup->AddResource(perView.meshletCullingResetIndirectCommandBuffer);
 
     // Store
     m_viewIDToBuffers[viewID] = perView;
@@ -118,12 +113,6 @@ void IndirectCommandBufferManager::UnregisterBuffers(uint64_t viewID) {
 
     for (auto& [flags, dyn] : perView.buffersByFlags) {
         m_indirectCommandsResourceGroup->RemoveResource(dyn.buffer->GetResource().get());
-    }
-    if (perView.meshletCullingIndirectCommandBuffer) {
-        m_meshletCullingCommandResourceGroup->RemoveResource(perView.meshletCullingIndirectCommandBuffer->GetResource().get());
-    }
-    if (perView.meshletCullingResetIndirectCommandBuffer) {
-        m_meshletCullingCommandResourceGroup->RemoveResource(perView.meshletCullingResetIndirectCommandBuffer->GetResource().get());
     }
 
     m_viewIDToBuffers.erase(it);
@@ -333,7 +322,6 @@ void IndirectCommandBufferManager::RecreateMeshletBuffersForAllViews() {
             r->SetName(std::string(label) + " (view=" + std::to_string(viewID) + ")");
             r->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Indirect command buffers" }));
             auto dyn = std::make_shared<DynamicGloballyIndexedResource>(r);
-            m_meshletCullingCommandResourceGroup->AddResource(dyn);
             return dyn;
             };
 

@@ -113,9 +113,6 @@ struct PerMeshInstanceCB {
     unsigned int perObjectBufferIndex;
     unsigned int skinningInstanceSlot;
     unsigned int postSkinningVertexBufferOffset;
-	unsigned int meshletBoundsBufferStartIndex;
-    unsigned int meshletBitfieldStartIndex;
-	unsigned int pad[2];
 };
 
 struct PerMaterialCB {
@@ -305,7 +302,6 @@ struct MeshInstanceClodOffsets
     uint meshletBoundsBase;
     uint lodNodesBase;
     uint rootNode; // node index (relative to lodNodesBase) to start traversal from
-    uint pad[1];
 };
 
 // Cluster LOD data

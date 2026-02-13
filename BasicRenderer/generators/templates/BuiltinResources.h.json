@@ -5,11 +5,8 @@
       "LinearDepthMap": {},
       "DepthTexture": {},
       "VisibilityTexture": {},
-      "MeshletBitfield": {},
       "IndirectCommandBuffers": {
-        "Primary": {},
-        "MeshletCulling": {},
-        "MeshletCullingReset": {}
+        "Primary": {}
       }
     },
     "CLod": {
@@ -37,9 +34,6 @@
       "InverseBindMatrices": {},
       "SkinningInstanceInfo": {}
     },
-    "MeshletCullingBitfieldGroup": {},
-    "MeshInstanceMeshletCullingBitfieldGroup": {},
-    "MeshInstanceOcclusionCullingBitfieldGroup": {},
     "CameraBuffer": {},
     "CullingCameraBuffer": {},
     "Light": {
@@ -64,7 +58,6 @@
     },
     "IndirectCommandBuffers": {
       "Primary": {},
-      "MeshletCulling": {},
       "Master": {}
     },
     "GBuffer": {

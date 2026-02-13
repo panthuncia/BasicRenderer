@@ -14,7 +14,7 @@ class BufferView;
 class ViewManager;
 
 // TODO: Find better way of batching these with namespaces
-#define MESH_RESOURCE_IDFENTIFIERS Builtin::MeshResources::MeshletBounds, Builtin::MeshResources::MeshletOffsets, Builtin::MeshResources::MeshletVertexIndices, Builtin::MeshResources::MeshletTriangles
+#define MESH_RESOURCE_IDFENTIFIERS Builtin::MeshResources::MeshletOffsets, Builtin::MeshResources::MeshletVertexIndices, Builtin::MeshResources::MeshletTriangles
 
 class MeshManager : public IResourceProvider {
 public:
@@ -29,6 +29,7 @@ public:
 	void UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data);
 	void UpdatePerMeshInstanceBuffer(std::unique_ptr<BufferView>& view, PerMeshInstanceCB& data);
 	void SetViewManager(ViewManager* viewManager) { m_pViewManager = viewManager; }
+	uint64_t GetActiveMeshletCount() const { return m_activeMeshletCount; }
 
 	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
 	std::vector<ResourceIdentifier> GetSupportedKeys() override;
@@ -41,8 +42,8 @@ private:
 	std::shared_ptr<DynamicBuffer> m_meshletOffsets; // meshopt_Meshlet
 	std::shared_ptr<DynamicBuffer> m_meshletVertexIndices; // 
 	std::shared_ptr<DynamicBuffer> m_meshletTriangles;
-	std::shared_ptr<DynamicBuffer> m_meshletBoundsBuffer;
-	std::shared_ptr<DynamicBuffer> m_meshletBitfieldBuffer;
+	//std::shared_ptr<DynamicBuffer> m_meshletBoundsBuffer;
+	//std::shared_ptr<DynamicBuffer> m_meshletBitfieldBuffer;
 	//std::shared_ptr<DynamicBuffer> m_clusterToVisibleClusterTableIndexBuffer; // Used by visibility buffer, for drawcall indexing
 
 	// Base meshes
@@ -59,6 +60,7 @@ private:
 	std::shared_ptr<DynamicBuffer> m_clusterLODMeshletBounds;
 	std::shared_ptr<DynamicBuffer> m_childLocalMeshletIndices;
 	std::shared_ptr<DynamicBuffer> m_clusterLODNodes;
+	uint64_t m_activeMeshletCount = 0;
 
 	ViewManager* m_pViewManager;
 };

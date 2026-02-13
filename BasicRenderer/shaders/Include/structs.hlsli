@@ -214,9 +214,6 @@ struct PerMeshInstanceBuffer {
     uint perObjectBufferIndex;
     uint skinningInstanceSlot;
     uint postSkinningVertexBufferOffset;
-    uint meshletBoundsBufferStartIndex;
-    uint meshletBitfieldStartIndex;
-    uint pad[2];
 };
 
 #define LIGHTS_PER_PAGE 12

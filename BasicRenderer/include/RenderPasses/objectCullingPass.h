@@ -58,9 +58,9 @@ public:
 				Builtin::CameraBuffer,
 				Builtin::IndirectCommandBuffers::Master)
 			.WithShaderResource(ECSResourceResolver(drawSetIndicesQuery))
-			.WithUnorderedAccess(Builtin::IndirectCommandBuffers::MeshletCulling,
-				Builtin::MeshInstanceMeshletCullingBitfieldGroup,
-				Builtin::MeshInstanceOcclusionCullingBitfieldGroup)
+			//.WithUnorderedAccess(Builtin::IndirectCommandBuffers::MeshletCulling,
+			//	Builtin::MeshInstanceMeshletCullingBitfieldGroup,
+			//	Builtin::MeshInstanceOcclusionCullingBitfieldGroup)
 			.WithUnorderedAccess(ECSResourceResolver(indirectCommandBuffersQuery));
 	}
 
@@ -107,7 +107,7 @@ public:
 
 				// How many draws are we processing?
 
-				miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = viewInfo->gpu.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+				//miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = viewInfo->gpu.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 				miscRootConstants[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX] = viewInfo->gpu.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 				// What type of light are we processing for?
 				auto lightType = viewInfo->lightType;
@@ -115,7 +115,7 @@ public:
 				auto srvIndex = lightType == Components::LightType::Point ? linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).slot.index : linearDepthMap->GetSRVInfo(0).slot.index;
 				
 				miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = srvIndex;
-				miscRootConstants[MESH_INSTANCE_OCCLUSION_CULLING_BUFFER_UAV_DESCRIPTOR_INDEX] = viewInfo->gpu.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+				//miscRootConstants[MESH_INSTANCE_OCCLUSION_CULLING_BUFFER_UAV_DESCRIPTOR_INDEX] = viewInfo->gpu.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 				miscRootConstants[MESHLET_CULLING_INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = viewInfo->gpu.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 				miscRootConstants[INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = wl.buffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 				miscRootConstants[ACTIVE_DRAW_SET_INDICES_BUFFER_SRV_DESCRIPTOR_INDEX] = context.objectManager->GetActiveDrawSetIndices(flags)->GetSRVInfo(0).slot.index;

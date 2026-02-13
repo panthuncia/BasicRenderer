@@ -72,7 +72,7 @@ public:
                 Builtin::PrimaryCamera::VisibilityTexture);
 
         if (m_meshShaders) {
-            builder->WithShaderResource(Builtin::PerMeshBuffer, Builtin::PrimaryCamera::MeshletBitfield);
+            //builder->WithShaderResource(Builtin::PerMeshBuffer, Builtin::PrimaryCamera::MeshletBitfield);
             if (m_indirect) {
                 auto& ecsWorld = ECSManager::GetInstance().GetWorld();
                 flecs::query<> indirectQuery = ecsWorld.query_builder<>()
@@ -91,7 +91,7 @@ public:
 		m_pVisibilityBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::VisibilityTexture);
 
         if (m_meshShaders) {
-            m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+            //m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
         }
 
         if (m_meshShaders) {

@@ -1039,7 +1039,6 @@ void Renderer::CreateRenderGraph() {
     // TODO: this access pattern is stupid
     auto primaryViewID = currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID;
     auto primaryCamera = m_pViewManager->Get(primaryViewID);
-    m_coreResourceProvider.m_primaryCameraMeshletBitfield = primaryCamera->gpu.meshletBitfieldBuffer;
 
     // TODO: Primary camera and current environment will change, and I'd rather not recompile the graph every time that happens.
     // How should we manage swapping out their resources? DynamicResource could work, but the ResourceGroup/independantly managed resource
@@ -1074,8 +1073,8 @@ void Renderer::CreateRenderGraph() {
     newGraph->RegisterResource(Builtin::PrimaryCamera::DepthTexture, depthTexture);
     newGraph->RegisterResource(Builtin::PrimaryCamera::LinearDepthMap, depth.linearDepthMap);
 
-	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling, primaryCamera->gpu.indirectCommandBuffers.meshletCullingIndirectCommandBuffer);
-	newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset, primaryCamera->gpu.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer);
+	//newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling, primaryCamera->gpu.indirectCommandBuffers.meshletCullingIndirectCommandBuffer);
+	//newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset, primaryCamera->gpu.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer);
 
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {

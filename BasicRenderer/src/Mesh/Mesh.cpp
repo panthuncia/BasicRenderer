@@ -408,7 +408,7 @@ void Mesh::BuildClusterLODTraversalHierarchy(uint32_t preferredNodeWidth)
 			writeOffset += iterCount;
 		}
 
-		// Match NVIDIA’s bookkeeping: writeOffset ends one past, then they -- and assert
+		// Match NVIDIAï¿½s bookkeeping: writeOffset ends one past, then they -- and assert
 		writeOffset--;
 		if (range.offset + range.count != writeOffset)
 			throw std::runtime_error("Cluster LOD: traversal node allocation mismatch (range/count).");
@@ -628,6 +628,41 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 
 	if (maxChildrenObserved > MaxChildren)
 		throw std::runtime_error("Exceeded maximum allowed Cluster LOD children per group");
+
+	{
+		std::vector<uint32_t> refinedGroupParentCounts(m_clodGroups.size(), 0);
+		for (const ClusterLODChild& child : m_clodChildren)
+		{
+			if (child.refinedGroup >= 0)
+			{
+				const uint32_t refinedGroup = static_cast<uint32_t>(child.refinedGroup);
+				if (refinedGroup < refinedGroupParentCounts.size())
+				{
+					refinedGroupParentCounts[refinedGroup]++;
+				}
+			}
+		}
+
+		uint32_t groupsWithMultipleParents = 0;
+		uint32_t maxParentCount = 0;
+		for (uint32_t parentCount : refinedGroupParentCounts)
+		{
+			if (parentCount > 1)
+			{
+				groupsWithMultipleParents++;
+				maxParentCount = std::max(maxParentCount, parentCount);
+			}
+		}
+
+		if (groupsWithMultipleParents > 0)
+		{
+			spdlog::warn(
+				"ClusterLOD: {} refined groups have multiple parents (max={} parents). "
+				"Work-graph traversal can emit duplicate meshlets unless refined-group traversal is deduplicated.",
+				groupsWithMultipleParents,
+				maxParentCount);
+		}
+	}
 
 	// build the acceleration hierarchy (BVH/K-ary trees per depth + top root)
 	// Choose preferredNodeWidth independently; 8/16/32 are typical.

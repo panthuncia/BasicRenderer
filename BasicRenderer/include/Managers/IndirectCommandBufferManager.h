@@ -143,9 +143,6 @@ private:
     // Single group that owns all indirect command buffers (regardless of flags)
     std::shared_ptr<ResourceGroup> m_indirectCommandsResourceGroup;
 
-    // Meshlet culling command buffers group (unchanged)
-    std::shared_ptr<ResourceGroup> m_meshletCullingCommandResourceGroup;
-
     // Provider plumbing
     std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
 

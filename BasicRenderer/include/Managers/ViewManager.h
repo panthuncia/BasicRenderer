@@ -57,19 +57,10 @@ struct ViewResources {
 
     Components::IndirectCommandBuffers indirectCommandBuffers;
 
-    std::shared_ptr<DynamicGloballyIndexedResource> meshletBitfieldBuffer;
-    std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceMeshletCullingBitfieldBuffer;
-    std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceOcclusionCullingBitfieldBuffer;
-
 	std::shared_ptr<PixelBuffer> depthMap = nullptr;
     std::shared_ptr<PixelBuffer> linearDepthMap = nullptr;
     std::shared_ptr<PixelBuffer> visibilityBuffer = nullptr;
     std::shared_ptr<PixelBuffer> debugBuffer = nullptr;
-
-    // Cached descriptor indices (filled after descriptor registration, optional)
-    uint32_t meshletBitfieldSRVIndex = 0;
-    uint32_t meshInstanceMeshletCullingBitfieldSRVIndex = 0;
-    uint32_t meshInstanceOcclusionCullingBitfieldSRVIndex = 0;
 };
 
 struct View {
@@ -154,10 +145,6 @@ public:
     // Update camera matrices/params
     void UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo);
 
-    // Resize resources when global counts change
-    void ResizeMeshletBitfields(uint64_t numMeshlets);
-    void ResizeInstanceBitfields(uint32_t numInstances);
-
 	uint32_t GetCameraBufferSize() const { return static_cast<uint32_t>(m_cameraBuffer->Size()); }
 
     // Access
@@ -204,13 +191,6 @@ public:
 private:
     ViewManager();
 
-    // Helpers
-    void AllocateBitfields(View& v);
-    void ReplaceBitfield(std::shared_ptr<DynamicGloballyIndexedResource>& holder,
-        uint64_t newElementCountBits,
-        const wchar_t* labelFormat,
-        uint64_t viewID);
-
     std::unordered_map<uint64_t, View> m_views;
     std::atomic<uint64_t> m_nextViewID{ 1 };
 
@@ -218,16 +198,9 @@ private:
     // Core buffers/groups
     std::shared_ptr<LazyDynamicStructuredBuffer<CameraInfo>> m_cameraBuffer;
 	std::shared_ptr<LazyDynamicStructuredBuffer<CullingCameraInfo>> m_cullingCameraBuffer;
-    std::shared_ptr<ResourceGroup> m_meshletBitfieldGroup;
-    std::shared_ptr<ResourceGroup> m_meshInstanceMeshletCullingBitfieldGroup;
-    std::shared_ptr<ResourceGroup> m_meshInstanceOcclusionCullingBitfieldGroup;
 
     std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
     std::unordered_map<ResourceIdentifier, std::shared_ptr<IResourceResolver>, ResourceIdentifier::Hasher> m_resolvers;
-
-    // Global sizing
-    uint64_t m_currentMeshletBitfieldSizeBits = 1;
-    uint32_t m_currentMeshInstanceBitfieldSizeBits = 1;
 
     IndirectCommandBufferManager* m_indirectManager = nullptr;
 

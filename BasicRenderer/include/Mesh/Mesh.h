@@ -101,6 +101,10 @@ public:
 		return static_cast<uint32_t>(m_meshlets.size()); // TODO: support meshes with >32 bit int meshlets?
 	}
 
+	uint32_t GetCLodMeshletCount() {
+		return static_cast<uint32_t>(m_clodMeshlets.size());
+	}
+
 	void SetPerMeshBufferView(std::unique_ptr<BufferView> view) {
 		m_perMeshBufferView = std::move(view);
 	}
@@ -200,11 +204,11 @@ public:
 		return m_clusterLODNodesView.get();
 	}
 
-	uint32_t GetCLodRootNodeIndex() const {
+	uint32_t GetCLodRootNodeIndex() const { // For hierarchy cut
 		return m_clodTopRootNode;
 	}
 
-	uint32_t GetCoarsestLODRootNodeIndex() const {
+	uint32_t GetCoarsestLODRootNodeIndex() const { // For DAG traversal
 		return m_clodLodLevelRoots.back();
 	}
 

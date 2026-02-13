@@ -91,7 +91,7 @@ public:
 		}
 		if (m_meshShaders) {
 			builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS);
-			builder->WithShaderResource(Builtin::PrimaryCamera::MeshletBitfield);
+			//builder->WithShaderResource(Builtin::PrimaryCamera::MeshletBitfield);
 			if (m_indirect) {
 				auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 				auto oitFillPassEntity = ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::OITAccumulationPass);
@@ -112,7 +112,7 @@ public:
 		RegisterUAV(Builtin::PPLL::HeadPointerTexture);
 
 		if (m_meshShaders) {
-			m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+			//m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
 		}
 
 		m_PPLLCounterHandle = m_resourceRegistryView->RequestHandle(Builtin::PPLL::Counter);
@@ -256,7 +256,7 @@ private:
 		transparencyInfo[PPLL_NODE_POOL_SIZE] = static_cast<uint32_t>(m_numPPLLNodes); // TODO: This needs to be 64-bit, or we will run out of nodes. PPLL in general may not be ideal for higher resolutions.
 
 		if (m_meshShaders) {
-			transparencyInfo[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
+			//transparencyInfo[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
 		}
 
 		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, transparencyInfo);

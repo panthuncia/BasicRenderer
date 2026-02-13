@@ -235,7 +235,7 @@ private:
         return seed;
     }
 
-    class HierarchialCullingPass : public ComputePass {
+    class HierarchialCullingPass : public ComputePass, public IDynamicDeclaredResources {
     public:
         HierarchialCullingPass(
             HierarchialCullingPassInputs inputs, 
@@ -285,6 +285,7 @@ private:
                     Builtin::CameraBuffer,
                     Builtin::PerMeshBuffer)
                 .WithShaderResource(ECSResourceResolver(drawSetIndicesQuery));
+
         }
 
         void Setup() override {
@@ -399,8 +400,14 @@ private:
         }
 
         void Update(const UpdateContext& context) override {
+            m_declaredResourcesChanged = false;
+
             uint32_t zero = 0u;
             BUFFER_UPLOAD(&zero, sizeof(uint32_t), UploadManager::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
+        }
+
+        bool DeclaredResourcesChanged() const override {
+            return m_declaredResourcesChanged;
         }
 
         void Cleanup() override {
@@ -415,6 +422,7 @@ private:
 		std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
         std::shared_ptr<Buffer> m_scratchBuffer;
 		std::shared_ptr<Buffer> m_histogramIndirectCommand;
+        bool m_declaredResourcesChanged = true;
 		RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
 
         void CreatePipelines(
@@ -1060,20 +1068,6 @@ private:
         PassReturn Execute(RenderContext& context) override {
             auto& commandList = context.commandList;
 
-            BeginPass(context);
-
-            SetupCommonState(context, commandList);
-
-            ExecuteMeshShaderIndirect(context, commandList);
-
-            return {};
-        }
-
-        void Cleanup() override {
-        }
-
-    private:
-        void BeginPass(RenderContext& context) {
             rhi::PassBeginInfo p{};
             p.width = m_passWidth;
             p.height = m_passHeight;
@@ -1084,14 +1078,11 @@ private:
                 debugAttachment.loadOp = rhi::LoadOp::Clear;
                 debugAttachment.storeOp = rhi::StoreOp::Store;
                 debugAttachment.rtv = m_debugBuffers[0]->GetRTVInfo(0).slot;
-				debugAttachment.clear = m_debugBuffers[0]->GetClearColor();
-				p.colors = rhi::Span<rhi::ColorAttachment>(&debugAttachment, 1);
+                debugAttachment.clear = m_debugBuffers[0]->GetClearColor();
+                p.colors = rhi::Span<rhi::ColorAttachment>(&debugAttachment, 1);
             }
 
             context.commandList.BeginPass(p);
-        }
-
-    	void SetupCommonState(RenderContext& context, rhi::CommandList& commandList) {
 
             commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -1099,28 +1090,26 @@ private:
 
             // Root signature
             commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
-        }
 
-        void ExecuteMeshShaderIndirect(RenderContext& context, rhi::CommandList& commandList) {
             auto& psoManager = PSOManager::GetInstance();
 
             uint32_t misc[NumMiscUintRootConstants] = {};
             misc[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
             misc[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
-			misc[CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
+            misc[CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
             commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
             auto numBuckets = context.materialManager->GetRasterBucketCount();
             if (numBuckets == 0) {
-                return;
+                return {};
             }
 
             auto apiResource = m_rasterBucketsIndirectArgsBuffer->GetAPIResource();
-			// For each raster bucket, we have one ExecuteIndirect into a DispatchMesh command
-			auto stride = sizeof(RasterizeClustersCommand);
-			for (uint32_t i = 0; i < numBuckets; ++i) { // TODO: Compaction for zero-count buckets?
+            // For each raster bucket, we have one ExecuteIndirect into a DispatchMesh command
+            auto stride = sizeof(RasterizeClustersCommand);
+            for (uint32_t i = 0; i < numBuckets; ++i) { // TODO: Compaction for zero-count buckets?
 
-				auto flags = context.materialManager->GetRasterFlagsForBucket(i);
+                auto flags = context.materialManager->GetRasterFlagsForBucket(i);
                 auto& pso = psoManager.GetClusterLODRasterPSO(
                     flags,
                     m_wireframe);
@@ -1137,6 +1126,11 @@ private:
                     0,
                     1);
             }
+
+            return {};
+        }
+
+        void Cleanup() override {
         }
 
     private:

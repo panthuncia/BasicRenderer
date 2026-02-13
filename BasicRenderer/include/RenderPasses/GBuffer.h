@@ -79,7 +79,7 @@ public:
             .IsGeometryPass();
 
         if (m_meshShaders) {
-            builder->WithShaderResource(Builtin::PerMeshBuffer, Builtin::PrimaryCamera::MeshletBitfield);
+            //builder->WithShaderResource(Builtin::PerMeshBuffer, Builtin::PrimaryCamera::MeshletBitfield);
             if (m_indirect) {
 				auto& ecsWorld = ECSManager::GetInstance().GetWorld();
                 flecs::query<> indirectQuery = ecsWorld.query_builder<>()
@@ -103,7 +103,7 @@ public:
         m_pEmissive = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GBuffer::Emissive);
 
         if (m_meshShaders) {
-            m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+            //m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
         }
 
         if (m_meshShaders) {
@@ -289,7 +289,7 @@ private:
 
         if (m_indirect || m_meshShaders) {
             unsigned int misc[NumMiscUintRootConstants] = {};
-            misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
+            //misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
 			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
         }
     }
@@ -391,7 +391,7 @@ private:
     PixelBuffer* m_pMetallicRoughness;
     PixelBuffer* m_pEmissive;
 
-    DynamicGloballyIndexedResource* m_primaryCameraMeshletBitfield = nullptr;
+    //DynamicGloballyIndexedResource* m_primaryCameraMeshletBitfield = nullptr;
 
 	RenderPhase m_GBufferRenderPhase = Engine::Primary::GBufferPass;
 	RenderPhase m_PrePassRenderPhase = Engine::Primary::ZPrepass;

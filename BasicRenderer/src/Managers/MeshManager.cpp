@@ -17,8 +17,7 @@ MeshManager::MeshManager() {
 	m_meshletOffsets = DynamicBuffer::CreateShared(sizeof(meshopt_Meshlet), 1, "meshletOffsets");
 	m_meshletVertexIndices = DynamicBuffer::CreateShared(sizeof(unsigned int), 1, "meshletVertexIndices");
 	m_meshletTriangles = DynamicBuffer::CreateShared(1, 4, "meshletTriangles", true);
-	m_meshletBoundsBuffer = DynamicBuffer::CreateShared(sizeof(BoundingSphere), 1, "meshletBoundsBuffer", false, true);
-	m_meshletBitfieldBuffer = DynamicBuffer::CreateShared(1, 4, "meshletBitfieldBuffer", true, true);
+	//m_meshletBoundsBuffer = DynamicBuffer::CreateShared(sizeof(BoundingSphere), 1, "meshletBoundsBuffer", false, true);
 
 	//m_clusterToVisibleClusterTableIndexBuffer = DynamicBuffer::CreateShared(sizeof(unsigned int), 1, "clusterIndicesBuffer", false, true);
 
@@ -40,8 +39,7 @@ MeshManager::MeshManager() {
 	m_meshletOffsets->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
 	m_meshletVertexIndices->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
 	m_meshletTriangles->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
-	m_meshletBoundsBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
-	m_meshletBitfieldBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
+	//m_meshletBoundsBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
 
 	//m_clusterToVisibleClusterTableIndexBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
 
@@ -53,7 +51,7 @@ MeshManager::MeshManager() {
 	m_resources[Builtin::PostSkinningVertices] = m_postSkinningVertices;
 	m_resources[Builtin::PerMeshBuffer] = m_perMeshBuffers;
 	m_resources[Builtin::PerMeshInstanceBuffer] = m_perMeshInstanceBuffers;
-	m_resources[Builtin::MeshResources::MeshletBounds] = m_meshletBoundsBuffer;
+	//m_resources[Builtin::MeshResources::MeshletBounds] = m_meshletBoundsBuffer;
 	m_resources[Builtin::MeshResources::MeshletOffsets] = m_meshletOffsets;
 	m_resources[Builtin::MeshResources::MeshletVertexIndices] = m_meshletVertexIndices;
 	m_resources[Builtin::MeshResources::MeshletTriangles] = m_meshletTriangles;
@@ -172,28 +170,16 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 		auto postSkinningView = m_postSkinningVertices->AddData(vertices.data(), numVertices * vertexSize, vertexSize, numVertices * vertexSize * 2); // Allocate twice the size, since we need to ping-pong for motion vectors
 		BUFFER_UPLOAD(vertices.data(), numVertices * vertexSize, UploadManager::UploadTarget::FromShared(postSkinningView->GetBuffer()), postSkinningView->GetOffset() + numVertices * vertexSize);
 		auto perMeshInstanceBufferView = m_perMeshInstanceBuffers->AddData(&mesh->GetPerMeshInstanceBufferData(), sizeof(PerMeshInstanceCB), sizeof(PerMeshInstanceCB));
-		auto meshletBoundsBufferView = m_meshletBoundsBuffer->AddData(mesh->GetMesh()->GetMeshletBounds().data(), mesh->GetMesh()->GetMeshletCount() * sizeof(BoundingSphere), sizeof(BoundingSphere));
-		mesh->SetBufferViews(std::move(postSkinningView), std::move(perMeshInstanceBufferView), std::move(meshletBoundsBufferView));
+		//auto meshletBoundsBufferView = m_meshletBoundsBuffer->AddData(mesh->GetMesh()->GetMeshletBounds().data(), mesh->GetMesh()->GetMeshletCount() * sizeof(BoundingSphere), sizeof(BoundingSphere));
+		mesh->SetBufferViews(std::move(postSkinningView), std::move(perMeshInstanceBufferView));
 	}
 	else { // Non-skinned meshes can share post-skinning vertex buffers
 		auto perMeshInstanceBufferView = m_perMeshInstanceBuffers->AddData(&mesh->GetPerMeshInstanceBufferData(), sizeof(PerMeshInstanceCB), sizeof(PerMeshInstanceCB));
 		mesh->SetBufferViewUsingBaseMesh(std::move(perMeshInstanceBufferView));
 	}
 
-	if (meshInstanceBufferSize != m_perMeshInstanceBuffers->Size()) {
-		m_pViewManager->ResizeInstanceBitfields(static_cast<uint32_t>(m_perMeshInstanceBuffers->Size())); // All render views must be updated
-	}
-
-	size_t meshletBitfieldSize = m_meshletBitfieldBuffer->Size();
-
-	uint32_t bitsToAllocate = mesh->GetMesh()->GetMeshletCount();
-	uint32_t bytesToAllocate = (bitsToAllocate + 7) / 8; // Round up to the nearest byte
-
-	auto meshletBitfieldView = m_meshletBitfieldBuffer->Allocate(bytesToAllocate, 1); // 1 bit per meshlet
-	if (meshletBitfieldSize != m_meshletBitfieldBuffer->Size()) {
-		m_pViewManager->ResizeMeshletBitfields(m_meshletBitfieldBuffer->Size() * 8); // All render views must be updated
-	}
-	mesh->SetMeshletBitfieldBufferView(std::move(meshletBitfieldView));
+	uint32_t bitsToAllocate = mesh->GetMesh()->GetCLodMeshletCount();
+	m_activeMeshletCount += bitsToAllocate;
 
 	uint32_t perMeshIndex = static_cast<uint32_t>(
 		mesh->GetMesh()->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
@@ -219,7 +205,7 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	clodOffsets.meshletsBase = static_cast<uint32_t>(clusterLODMeshletsView->GetOffset() / sizeof(meshopt_Meshlet));
 	clodOffsets.meshletBoundsBase = static_cast<uint32_t>(clusterLODMeshletBoundsView->GetOffset() / sizeof(BoundingSphere));
 	clodOffsets.lodNodesBase = static_cast<uint32_t>(clusterLODNodesView->GetOffset() / sizeof(ClusterLODNode));
-	clodOffsets.rootNode = mesh->GetMesh()->GetCoarsestLODRootNodeIndex();
+	clodOffsets.rootNode = mesh->GetMesh()->GetCLodRootNodeIndex();
 	//clodOffsets.rootGroup = mesh->GetMesh()->GetCLodRootGroup();
 	auto clodOffsetsView = m_perMeshInstanceClodOffsets->AddData(&clodOffsets, sizeof(MeshInstanceClodOffsets), sizeof(MeshInstanceClodOffsets)); // Indexable by mesh instance
 
@@ -243,11 +229,12 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 	if (perMeshInstanceBufferView != nullptr) {
 		m_perMeshInstanceBuffers->Deallocate(perMeshInstanceBufferView);
 	}
-	auto meshletBoundsView = mesh->GetMeshletBoundsBufferView();
-	if (meshletBoundsView != nullptr) {
-		m_meshletBoundsBuffer->Deallocate(meshletBoundsView);
-	}
-	mesh->SetBufferViews(nullptr, nullptr, nullptr);
+	//auto meshletBoundsView = mesh->GetMeshletBoundsBufferView();
+	//if (meshletBoundsView != nullptr) {
+	//	m_meshletBoundsBuffer->Deallocate(meshletBoundsView);
+	//}
+	mesh->SetBufferViews(nullptr, nullptr);
+	m_activeMeshletCount -= mesh->GetMesh()->GetCLodMeshletCount();
 
 	auto clodBuffersView = mesh->GetCLodOffsetsView();
 	if (clodBuffersView != nullptr) {

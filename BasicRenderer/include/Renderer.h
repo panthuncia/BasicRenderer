@@ -200,7 +200,6 @@ private:
     class CoreResourceProvider : public IResourceProvider {
 	public:
         std::shared_ptr<PixelBuffer> m_currentDebugTexture = nullptr;
-		std::shared_ptr<Resource> m_primaryCameraMeshletBitfield = nullptr;
         std::shared_ptr<PixelBuffer> m_HDRColorTarget = nullptr;
 		std::shared_ptr<PixelBuffer> m_upscaledHDRColorTarget = nullptr;
 		std::shared_ptr<PixelBuffer> m_gbufferMotionVectors = nullptr;
@@ -212,8 +211,6 @@ private:
 				return m_HDRColorTarget;
             if (key.ToString() == Builtin::DebugTexture)
 				return m_currentDebugTexture;
-			if (key.ToString() == Builtin::PrimaryCamera::MeshletBitfield)
-				return m_primaryCameraMeshletBitfield;
             if (key.ToString() == Builtin::PostProcessing::UpscaledHDR)
 				return m_upscaledHDRColorTarget;
 		
@@ -230,7 +227,6 @@ private:
                 Builtin::GBuffer::MotionVectors,
                 Builtin::Color::HDRColorTarget,
                 Builtin::DebugTexture,
-                Builtin::PrimaryCamera::MeshletBitfield,
 				Builtin::PostProcessing::UpscaledHDR,
 			};
         }
@@ -241,7 +237,6 @@ private:
 
         void Cleanup() {
             m_currentDebugTexture = nullptr;
-            m_primaryCameraMeshletBitfield = nullptr;
 			m_HDRColorTarget = nullptr;
 			m_upscaledHDRColorTarget = nullptr;
 			m_gbufferMotionVectors = nullptr;
