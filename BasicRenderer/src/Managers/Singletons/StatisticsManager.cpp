@@ -1,6 +1,7 @@
 #include "Managers/Singletons/StatisticsManager.h"
 
 #include <algorithm>
+#include <cstring>
 #include <rhi_helpers.h>
 #include <spdlog/spdlog.h>
 
@@ -24,18 +25,75 @@ void StatisticsManager::Initialize() {
 void StatisticsManager::RegisterPasses(const std::vector<std::string>& passNames) {
     m_passNames = passNames;
     m_numPasses = static_cast<unsigned>(passNames.size());
-    m_stats.assign( m_numPasses, {} );
+    m_stats.assign(m_numPasses, {});
     m_isGeometryPass.assign(m_numPasses, false);
     m_meshStatsEma.assign(m_numPasses, {});
+    m_passLastSeenFrame.assign(m_numPasses, m_frameSerial);
+    m_passNameToIndex.clear();
+    for (unsigned i = 0; i < m_numPasses; ++i) {
+        if (!m_passNames[i].empty()) {
+            m_passNameToIndex.emplace(m_passNames[i], i);
+        }
+    }
+    m_visiblePassCacheDirty = true;
 }
 
-unsigned StatisticsManager::RegisterPass(const std::string& passName) {
-    m_passNames.push_back(passName);
+unsigned StatisticsManager::RegisterPass(const std::string& passName, bool isGeometryPass) {
+    if (!passName.empty()) {
+        auto it = m_passNameToIndex.find(passName);
+        if (it != m_passNameToIndex.end()) {
+            m_passLastSeenFrame[it->second] = m_frameSerial;
+            if (isGeometryPass) {
+                m_isGeometryPass[it->second] = true;
+            }
+            m_visiblePassCacheDirty = true;
+            return it->second;
+        }
+    }
+
+    std::string resolvedName = passName;
+    if (resolvedName.empty()) {
+        resolvedName = "UnnamedPass#" + std::to_string(m_unnamedPassCounter++);
+    }
+
+    const unsigned index = static_cast<unsigned>(m_passNames.size());
+    m_passNames.push_back(resolvedName);
+    m_passNameToIndex[resolvedName] = index;
+
     m_numPasses = static_cast<unsigned>(m_passNames.size());
     m_stats.emplace_back();
-    m_isGeometryPass.push_back(false);
+    m_isGeometryPass.push_back(isGeometryPass);
     m_meshStatsEma.emplace_back();
-    return m_numPasses - 1;
+    m_passLastSeenFrame.push_back(m_frameSerial);
+    m_visiblePassCacheDirty = true;
+    return index;
+}
+
+void StatisticsManager::BeginFrame() {
+    ++m_frameSerial;
+    m_visiblePassCacheDirty = true;
+}
+
+void StatisticsManager::RebuildVisiblePassIndices() const {
+    m_visiblePassIndices.clear();
+    m_visiblePassIndices.reserve(m_passNames.size());
+
+    for (unsigned i = 0; i < m_passNames.size(); ++i) {
+        const uint64_t lastSeen = (i < m_passLastSeenFrame.size()) ? m_passLastSeenFrame[i] : 0;
+        const uint64_t missing = (m_frameSerial >= lastSeen) ? (m_frameSerial - lastSeen) : 0;
+        if (missing <= m_hideAfterMissingFrames) {
+            m_visiblePassIndices.push_back(i);
+        }
+    }
+
+    m_visiblePassCacheDirty = false;
+}
+
+const std::vector<unsigned>& StatisticsManager::GetVisiblePassIndices() const {
+    if (m_visiblePassCacheDirty) {
+        RebuildVisiblePassIndices();
+    }
+    return m_visiblePassIndices;
 }
 
 void StatisticsManager::MarkGeometryPass(const std::string& passName) {
@@ -50,24 +108,57 @@ void StatisticsManager::RegisterQueue(rhi::QueueKind queueKind) {
     m_meshStatsBuffers[queueKind];
     m_recordedQueries[queueKind];
     m_pendingResolves[queueKind];
+    if (m_timestampPool && m_pipelineStatsPool) {
+        EnsureQueueBuffers(queueKind);
+    }
+}
+
+void StatisticsManager::EnsureQueueBuffers(rhi::QueueKind queueKind) {
+    if (!m_timestampPool || !m_pipelineStatsPool) {
+        return;
+    }
+
+    auto device = DeviceManager::GetInstance().GetDevice();
+
+    rhi::ResourceDesc tsRb = rhi::helpers::ResourceDesc::Buffer(
+        static_cast<uint64_t>(m_timestampQueryInfo.elementSize) * m_timestampQueryInfo.count,
+        rhi::HeapType::Readback);
+    rhi::ResourceDesc psRb = rhi::helpers::ResourceDesc::Buffer(
+        static_cast<uint64_t>(m_pipelineStatsQueryInfo.elementSize) * m_pipelineStatsQueryInfo.count,
+        rhi::HeapType::Readback);
+
+    auto& tsBuf = m_timestampBuffers[queueKind];
+    auto& psBuf = m_meshStatsBuffers[queueKind];
+    auto result = device.CreateCommittedResource(tsRb, tsBuf);
+    result = device.CreateCommittedResource(psRb, psBuf);
 }
 
 void StatisticsManager::SetupQueryHeap() {
     auto device = DeviceManager::GetInstance().GetDevice();
-    if (m_numPasses == 0) {
-		spdlog::warn("No passes registered for StatisticsManager, skipping query heap setup.");
-		return;
+    if (m_getCollectPipelineStatistics) {
+        m_collectPipelineStatistics = m_getCollectPipelineStatistics();
     }
+
+    if (m_numPasses == 0) {
+        return;
+    }
+
+    if (m_queryPoolPassCapacity >= m_numPasses && m_timestampPool && m_pipelineStatsPool) {
+        return;
+    }
+
+    m_queryPoolPassCapacity = m_numPasses;
+
     // Timestamp heap: 2 queries/pass/frame
 
 	rhi::QueryPoolDesc tq;
     tq.type = rhi::QueryType::Timestamp;
-    tq.count = m_numPasses * 2 * m_numFramesInFlight;
+    tq.count = m_queryPoolPassCapacity * 2 * m_numFramesInFlight;
     auto result = device.CreateQueryPool(tq, m_timestampPool);
 
 	rhi::QueryPoolDesc sq;
 	sq.type = rhi::QueryType::PipelineStatistics;
-	sq.count = m_numPasses * m_numFramesInFlight;
+	sq.count = m_queryPoolPassCapacity * m_numFramesInFlight;
 	sq.statsMask = rhi::PipelineStatBits::PS_MeshInvocations | rhi::PipelineStatBits::PS_MeshPrimitives;
 	result = device.CreateQueryPool(sq, m_pipelineStatsPool);
 
@@ -92,6 +183,14 @@ void StatisticsManager::SetupQueryHeap() {
     m_pipelineStatsFields[0].field = rhi::PipelineStatTypes::MeshInvocations;
     m_pipelineStatsFields[1].field = rhi::PipelineStatTypes::MeshPrimitives;
     m_pipelineStatsLayout = m_pipelineStatsPool->GetPipelineStatsLayout(m_pipelineStatsFields.data(), static_cast<uint32_t>(m_pipelineStatsFields.size()));
+
+    m_recordedQueries.clear();
+    m_pendingResolves.clear();
+    for (auto& kv : m_timestampBuffers) {
+        const auto qk = kv.first;
+        m_recordedQueries[qk];
+        m_pendingResolves[qk];
+    }
 }
 
 void StatisticsManager::BeginQuery(
@@ -100,7 +199,11 @@ void StatisticsManager::BeginQuery(
     rhi::Queue& queue,
     rhi::CommandList& cmd)
 {
-    if (passIndex >= m_numPasses) return;
+    if (!m_timestampPool || passIndex >= m_numPasses || passIndex >= m_queryPoolPassCapacity) return;
+
+    auto queueKind = queue.GetKind();
+    auto tsIt = m_timestampBuffers.find(queueKind);
+    if (tsIt == m_timestampBuffers.end() || !tsIt->second) return;
 
     // Timestamp "begin" marker = write a timestamp at index 2*N
     const uint32_t tsIdx = (frameIndex * m_numPasses + passIndex) * 2u;
@@ -111,7 +214,6 @@ void StatisticsManager::BeginQuery(
         const uint32_t psIdx = frameIndex * m_numPasses + passIndex;
         cmd.BeginQuery(m_pipelineStatsPool->GetHandle(), psIdx);
     }
-	auto queueKind = queue.GetKind();
     m_recordedQueries[queueKind][frameIndex].push_back(tsIdx);
 }
 
@@ -121,7 +223,11 @@ void StatisticsManager::EndQuery(
     rhi::Queue& queue,
     rhi::CommandList& cmd)
 {
-    if (passIndex >= m_numPasses) return;
+    if (!m_timestampPool || passIndex >= m_numPasses || passIndex >= m_queryPoolPassCapacity) return;
+
+    auto queueKind = queue.GetKind();
+    auto tsIt = m_timestampBuffers.find(queueKind);
+    if (tsIt == m_timestampBuffers.end() || !tsIt->second) return;
 
     // Timestamp "end" marker = write a timestamp at index 2*N + 1
     const uint32_t tsIdx = (frameIndex * m_numPasses + passIndex) * 2u + 1u;
@@ -132,7 +238,6 @@ void StatisticsManager::EndQuery(
         const uint32_t psIdx = frameIndex * m_numPasses + passIndex;
         cmd.EndQuery(m_pipelineStatsPool->GetHandle(), psIdx);
     }
-	auto queueKind = queue.GetKind();
     m_recordedQueries[queueKind][frameIndex].push_back(tsIdx);
 }
 
@@ -141,7 +246,14 @@ void StatisticsManager::ResolveQueries(
     rhi::Queue& queue,
     rhi::CommandList& cmd)
 {
+    if (!m_timestampPool || m_timestampQueryInfo.elementSize == 0) return;
+
     auto queueKind = queue.GetKind();
+    auto tsIt = m_timestampBuffers.find(queueKind);
+    if (tsIt == m_timestampBuffers.end() || !tsIt->second) return;
+    auto psIt = m_meshStatsBuffers.find(queueKind);
+    if (psIt == m_meshStatsBuffers.end() || !psIt->second) return;
+
     auto& rec = m_recordedQueries[queueKind][frameIndex];
     if (rec.empty()) return;
 
@@ -164,8 +276,8 @@ void StatisticsManager::ResolveQueries(
     const uint64_t tsStride = m_timestampQueryInfo.elementSize; // usually 8
     const uint64_t psStride = m_pipelineStatsQueryInfo.elementSize; // backend-dependent
 
-    auto& tsBuf = m_timestampBuffers[queueKind];   // rhi::ResourcePtr
-    auto& psBuf = m_meshStatsBuffers[queueKind];   // rhi::ResourcePtr
+    auto& tsBuf = tsIt->second;   // rhi::ResourcePtr
+    auto& psBuf = psIt->second;   // rhi::ResourcePtr
 
     // Resolve timestamp data and remember what to read on frame complete
     for (auto& r : ranges) {
@@ -205,10 +317,19 @@ void StatisticsManager::OnFrameComplete(
     unsigned frameIndex,
     rhi::Queue& queue)
 {
-    m_collectPipelineStatistics = m_getCollectPipelineStatistics();
+	if (!m_timestampPool || m_timestampQueryInfo.elementSize == 0) return;
+
+    if (m_getCollectPipelineStatistics) {
+        m_collectPipelineStatistics = m_getCollectPipelineStatistics();
+    }
 	auto queueKind = queue.GetKind();
-    auto& tsBuf = m_timestampBuffers[queueKind];
-    auto& psBuf = m_meshStatsBuffers[queueKind];
+	auto tsIt = m_timestampBuffers.find(queueKind);
+	auto psIt = m_meshStatsBuffers.find(queueKind);
+	if (tsIt == m_timestampBuffers.end() || !tsIt->second) return;
+	if (psIt == m_meshStatsBuffers.end() || !psIt->second) return;
+
+    auto& tsBuf = tsIt->second;
+    auto& psBuf = psIt->second;
     auto& pending = m_pendingResolves[queueKind][frameIndex];
     if (pending.empty()) return;
 
@@ -249,7 +370,6 @@ void StatisticsManager::OnFrameComplete(
             const double   ms = double(t1 - t0) * toMs;
 
             const uint32_t base = idx / 2;
-            const uint32_t fi = base / m_numPasses;
             const uint32_t pi = base % m_numPasses;
 
             m_stats[pi].ema = m_stats[pi].ema * (1.0 - PassStats::alpha) + ms * PassStats::alpha;
@@ -298,7 +418,14 @@ void StatisticsManager::ClearAll() {
     m_stats.clear();
     m_isGeometryPass.clear();
     m_meshStatsEma.clear();
+    m_passNameToIndex.clear();
+    m_passLastSeenFrame.clear();
+    m_visiblePassIndices.clear();
+    m_visiblePassCacheDirty = true;
     m_recordedQueries.clear();
     m_pendingResolves.clear();
     m_numPasses=0;
+    m_queryPoolPassCapacity = 0;
+    m_unnamedPassCounter = 0;
+    m_frameSerial = 0;
 }

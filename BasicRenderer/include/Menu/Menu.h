@@ -996,32 +996,44 @@ inline void Menu::DisplaySelectedNode() {
 }
 
 inline void Menu::DrawPassTimingWindow() {
-    auto& names     = StatisticsManager::GetInstance().GetPassNames();
-    auto& stats     = StatisticsManager::GetInstance().GetPassStats();
-    auto& meshStats = StatisticsManager::GetInstance().GetMeshStats();
-    // you’ll need an accessor or public m_isGeometryPass here:
-    auto& isGeom    = StatisticsManager::GetInstance().GetIsGeometryPassVector(); 
+    auto& statisticsManager = StatisticsManager::GetInstance();
+    auto& names     = statisticsManager.GetPassNames();
+    auto& stats     = statisticsManager.GetPassStats();
+    auto& meshStats = statisticsManager.GetMeshStats();
+    auto& isGeom    = statisticsManager.GetIsGeometryPassVector();
+    auto& visible   = statisticsManager.GetVisiblePassIndices();
 
-    if (names.empty()) return;
+    if (names.empty() || visible.empty()) {
+        return;
+    }
 
     static std::vector<bool> pinned;
     static bool sortEnabled = true;
-    if (pinned.size() != names.size()) 
+    if (pinned.size() != names.size()) {
         pinned.assign(names.size(), false);
+    }
 
     // split pinned vs unpinned
     std::vector<int> pins;
     std::vector<std::pair<int,double>> unsorted;
-    for (int i = 0; i < (int)names.size(); ++i) {
-        if (pinned[i]) pins.push_back(i);
-        else           unsorted.emplace_back(i, stats[i].ema);
+    for (unsigned rawIdx : visible) {
+        const int i = static_cast<int>(rawIdx);
+        if (pinned[i]) {
+            pins.push_back(i);
+        }
+        else {
+            unsorted.emplace_back(i, stats[i].ema);
+        }
     }
-    if (sortEnabled)
-        std::sort(unsorted.begin(), unsorted.end(), [](auto &a, auto &b){ return a.second > b.second; });
+    if (sortEnabled) {
+        std::sort(unsorted.begin(), unsorted.end(), [](auto& a, auto& b) { return a.second > b.second; });
+    }
 
     std::vector<int> order;
     order.insert(order.end(), pins.begin(), pins.end());
-    for (auto &p : unsorted) order.push_back(p.first);
+    for (auto& p : unsorted) {
+        order.push_back(p.first);
+    }
 
     // measure column widths
     ImGuiStyle& style = ImGui::GetStyle();
@@ -1045,7 +1057,9 @@ inline void Menu::DrawPassTimingWindow() {
     // header
     ImGui::TextUnformatted("Pass"); ImGui::NextColumn();
     ImGui::TextUnformatted("Avg (ms)"); ImGui::SameLine();
-    if (ImGui::SmallButton(sortEnabled ? "v" : ">")) sortEnabled = !sortEnabled;
+    if (ImGui::SmallButton(sortEnabled ? "v" : ">")) {
+        sortEnabled = !sortEnabled;
+    }
     ImGui::NextColumn();
     ImGui::Separator();
 

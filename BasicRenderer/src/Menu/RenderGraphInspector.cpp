@@ -708,10 +708,6 @@ namespace RGInspector {
                     }
                 }
 
-                if (!b.computePasses.empty() && b.computePasses[0].name == "Screen-Space Reflections Pass") {
-                    spdlog::info("Here");
-                }
-
                 // Compute lane
                 draw_transitions(b.computeTransitions, QueueKind::Compute, bi, L.t0, L.t1);
                 draw_passes(b.computePasses, QueueKind::Compute, bi, /*isCompute*/true);

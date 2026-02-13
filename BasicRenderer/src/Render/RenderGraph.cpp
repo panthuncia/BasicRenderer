@@ -1279,6 +1279,7 @@ void RenderGraph::RefreshRetainedDeclarationsForFrame(ComputePassAndResources& p
 }
 
 void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
+	StatisticsManager::GetInstance().BeginFrame();
 
 	auto needsRefresh = [&](auto& p) -> bool {
 		auto* iFace = dynamic_cast<IDynamicDeclaredResources*>(p.pass.get());
@@ -1587,6 +1588,33 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 		}
 	}
 
+	// Register/refresh pass statistics indices for this frame's concrete pass list.
+	// This supports transient passes and per-frame retained/immediate splits.
+	{
+		auto& statisticsManager = StatisticsManager::GetInstance();
+		for (size_t i = 0; i < m_framePasses.size(); ++i) {
+			auto& any = m_framePasses[i];
+			if (any.type == PassType::Render) {
+				auto& p = std::get<RenderPassAndResources>(any.pass);
+				if (p.name.empty()) {
+					p.name = "RenderPass#" + std::to_string(i);
+				}
+				any.name = p.name;
+				p.statisticsIndex = static_cast<int>(statisticsManager.RegisterPass(p.name, p.resources.isGeometryPass));
+			}
+			else if (any.type == PassType::Compute) {
+				auto& p = std::get<ComputePassAndResources>(any.pass);
+				if (p.name.empty()) {
+					p.name = "ComputePass#" + std::to_string(i);
+				}
+				any.name = p.name;
+				p.statisticsIndex = static_cast<int>(statisticsManager.RegisterPass(p.name, false));
+			}
+		}
+
+		statisticsManager.SetupQueryHeap();
+	}
+
 	lastActiveSubresourceInAliasGroup.clear();
 	lastActiveSubresourceInAliasGroup.resize(aliasGroups.size());
 
@@ -1787,21 +1815,6 @@ void RenderGraph::Setup() {
 	auto& statisticsManager = StatisticsManager::GetInstance();
 	statisticsManager.ClearAll();
 	auto& manager = DeviceManager::GetInstance();
-	for (auto& batch : batches) {
-		for (auto& pass : batch.renderPasses) {
-			if (pass.statisticsIndex == -1) {
-				pass.statisticsIndex = statisticsManager.RegisterPass(pass.name);
-				if (pass.resources.isGeometryPass) {
-					statisticsManager.MarkGeometryPass(pass.name);
-				}
-			}
-		}
-		for (auto& pass : batch.computePasses) {
-			if (pass.statisticsIndex == -1) {
-				pass.statisticsIndex = statisticsManager.RegisterPass(pass.name);
-			}
-		}
-	}
 	statisticsManager.RegisterQueue(manager.GetGraphicsQueue().GetKind());
 	statisticsManager.RegisterQueue(manager.GetComputeQueue().GetKind());
 	statisticsManager.SetupQueryHeap();

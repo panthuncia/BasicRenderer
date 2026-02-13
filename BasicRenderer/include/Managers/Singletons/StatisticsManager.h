@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <cstdint>
 #include <utility>
 #include <functional>
 #include <rhi.h>
@@ -27,7 +28,9 @@ public:
 
     void RegisterPasses(const std::vector<std::string>& passNames);
     
-    unsigned RegisterPass(const std::string& passName);
+    unsigned RegisterPass(const std::string& passName, bool isGeometryPass = false);
+
+    void BeginFrame();
 
     void MarkGeometryPass(const std::string& passName);
 
@@ -57,6 +60,7 @@ public:
     void ClearAll();
 
 	const std::vector<bool>& GetIsGeometryPassVector() const { return m_isGeometryPass; }
+    const std::vector<unsigned>& GetVisiblePassIndices() const;
 
     const std::vector<std::string>&        GetPassNames() const { return m_passNames; }
     const std::vector<PassStats>&          GetPassStats() const { return m_stats; }
@@ -65,6 +69,8 @@ public:
 private:
     StatisticsManager() = default;
     ~StatisticsManager() = default;
+
+    void EnsureQueueBuffers(rhi::QueueKind queueKind);
 
 	bool m_collectPipelineStatistics = false;
 	std::function<bool()> m_getCollectPipelineStatistics;
@@ -82,6 +88,16 @@ private:
     UINT64    m_gpuTimestampFreq = 0;
     unsigned  m_numPasses = 0;
     unsigned  m_numFramesInFlight = 0;
+    unsigned  m_queryPoolPassCapacity = 0;
+    uint64_t  m_unnamedPassCounter = 0;
+    std::unordered_map<std::string, unsigned> m_passNameToIndex;
+    uint64_t  m_frameSerial = 0;
+    uint64_t  m_hideAfterMissingFrames = 240;
+    std::vector<uint64_t> m_passLastSeenFrame;
+    mutable std::vector<unsigned> m_visiblePassIndices;
+    mutable bool m_visiblePassCacheDirty = true;
+
+    void RebuildVisiblePassIndices() const;
 
     // Per-pass data
     std::vector<std::string>        m_passNames;
