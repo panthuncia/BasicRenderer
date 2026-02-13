@@ -512,8 +512,8 @@ PipelineState PSOManager::CreateClusterLODRasterPSO(
 
     auto& layout = GetRootSignature();
     rhi::SubobjLayout soLayout{ layout.GetHandle() };
-    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()), "ClusterLODMSMain" };
-    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "ClusterLODPSMain" };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()), "ClusterLODBucketMSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "VisibilityBufferPSMain" };
 
     rhi::RasterState rs{};
     rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;

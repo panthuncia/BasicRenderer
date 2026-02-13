@@ -38,9 +38,9 @@ struct MeshletSetup
     uint vertOffset;
     uint postSkinningBufferOffset;
     uint prevPostSkinningBufferOffset;
-    ByteAddressBuffer vertexBuffer;
-    ByteAddressBuffer meshletTrianglesBuffer;
-    StructuredBuffer<uint> meshletVerticesBuffer;
+    // ByteAddressBuffer vertexBuffer;
+    // ByteAddressBuffer meshletTrianglesBuffer;
+    // StructuredBuffer<uint> meshletVerticesBuffer;
 };
 
 // Internal common initialization (indices already chosen)
@@ -71,9 +71,9 @@ bool InitializeMeshletInternal(
     setup.triCount = setup.meshlet.TriCount;
     setup.vertOffset = setup.meshlet.VertOffset;
 
-    setup.vertexBuffer = vertexBuffer;
-    setup.meshletTrianglesBuffer = meshletTrianglesBuffer;
-    setup.meshletVerticesBuffer = meshletVerticesBuffer;
+    // setup.vertexBuffer = vertexBuffer;
+    // setup.meshletTrianglesBuffer = meshletTrianglesBuffer;
+    // setup.meshletVerticesBuffer = meshletVerticesBuffer;
 
     uint postSkinningBase = meshInstance.postSkinningVertexBufferOffset;
     setup.postSkinningBufferOffset = postSkinningBase;
@@ -111,9 +111,6 @@ bool InitializeMeshletInternalCLod(
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
     StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Meshlets)];
-    StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletVertexIndices)];
-    ByteAddressBuffer meshletTrianglesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletTriangles)];
-    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostSkinningVertices)];
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
 
     setup.meshBuffer = perMeshBuffer[setup.meshInstanceBuffer.perMeshBufferIndex];
@@ -126,9 +123,9 @@ bool InitializeMeshletInternalCLod(
     setup.triCount = setup.meshlet.TriCount;
     setup.vertOffset = setup.meshlet.VertOffset;
 
-    setup.vertexBuffer = vertexBuffer;
-    setup.meshletTrianglesBuffer = meshletTrianglesBuffer;
-    setup.meshletVerticesBuffer = meshletVerticesBuffer;
+    // setup.vertexBuffer = vertexBuffer;
+    // setup.meshletTrianglesBuffer = meshletTrianglesBuffer;
+    // setup.meshletVerticesBuffer = meshletVerticesBuffer;
 
     uint postSkinningBase = setup.meshInstanceBuffer.postSkinningVertexBufferOffset;
     setup.postSkinningBufferOffset = postSkinningBase;
@@ -180,9 +177,10 @@ bool InitializeMeshletFromVisibleCluster(uint visibleClusterIndex, out MeshletSe
 
 uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
 {
+    ByteAddressBuffer meshletTrianglesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletTriangles)];
     uint triOffset = setup.meshBuffer.clodMeshletTrianglesBufferOffset + setup.meshlet.TriOffset + triLocalIndex * 3;
     uint alignedOffset = (triOffset / 4) * 4;
-    uint firstWord = setup.meshletTrianglesBuffer.Load(alignedOffset);
+    uint firstWord = meshletTrianglesBuffer.Load(alignedOffset);
     uint byteOffset = triOffset % 4;
 
     // Load first byte
@@ -199,14 +197,14 @@ uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
     {
         // The second byte is in this word, but the third byte spills into the next word
         b1 = (firstWord >> ((byteOffset + 1) * 8)) & 0xFF;
-        uint secondWord = setup.meshletTrianglesBuffer.Load(alignedOffset + 4);
+        uint secondWord = meshletTrianglesBuffer.Load(alignedOffset + 4);
         b2 = secondWord & 0xFF;
     }
     else
     { // byteOffset == 3
         // The first byte is at the last position in firstWord,
         // The next two bytes must come from the next word.
-        uint secondWord = setup.meshletTrianglesBuffer.Load(alignedOffset + 4);
+        uint secondWord = meshletTrianglesBuffer.Load(alignedOffset + 4);
         b1 = secondWord & 0xFF;
         b2 = (secondWord >> 8) & 0xFF;
     }

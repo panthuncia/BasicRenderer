@@ -7,9 +7,10 @@
 #include "include/meshletPayload.hlsli"
 #include "Include/meshletCommon.hlsli"
 
-PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint prevBlockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID, PerObjectBuffer objectBuffer) {
+PSInput GetVertexAttributes(uint blockByteOffset, uint prevBlockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID, PerObjectBuffer objectBuffer) {
     uint byteOffset = blockByteOffset + index * vertexSize;
-    Vertex vertex = LoadVertex(byteOffset, buffer, flags);
+    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostSkinningVertices)];
+    Vertex vertex = LoadVertex(byteOffset, vertexBuffer, flags);
     
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     float4 pos = float4(vertex.position.xyz, 1.0f);
@@ -17,7 +18,7 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
     if (flags & VERTEX_SKINNED)
     {
         uint prevByteOffset = prevBlockByteOffset + index * vertexSize;
-        prevPos = float4(LoadFloat3(prevByteOffset, buffer), 1.0);
+        prevPos = float4(LoadFloat3(prevByteOffset, vertexBuffer), 1.0);
     }
     else
     {
@@ -102,7 +103,6 @@ PSInput GetVertexAttributes(ByteAddressBuffer buffer, uint blockByteOffset, uint
 }
 
 VisBufferPSInput GetVisBufferVertexAttributesForView(
-    ByteAddressBuffer buffer,
     uint blockByteOffset,
     uint index,
     uint flags,
@@ -113,8 +113,9 @@ VisBufferPSInput GetVisBufferVertexAttributesForView(
     uint clusterIndex,
     uint materialDataIndex)
 {
+    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostSkinningVertices)];
     uint byteOffset = blockByteOffset + index * vertexSize;
-    Vertex vertex = LoadVertex(byteOffset, buffer, flags);
+    Vertex vertex = LoadVertex(byteOffset, vertexBuffer, flags);
 
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     Camera viewCamera = cameras[viewID];
@@ -150,7 +151,6 @@ void EmitMeshletGBuffer(uint uGroupThreadID, MeshletSetup setup, out vertices PS
     for (uint i = uGroupThreadID; i < setup.vertCount; i += MS_THREAD_GROUP_SIZE)
     {
         outputVertices[i] = GetVertexAttributes(
-            setup.vertexBuffer,
             setup.postSkinningBufferOffset,
             setup.prevPostSkinningBufferOffset,
             setup.vertOffset + i,
@@ -175,7 +175,6 @@ void EmitMeshletVisBufferForView(
     for (uint i = uGroupThreadID; i < setup.vertCount; i += MS_THREAD_GROUP_SIZE)
     {
         outputVertices[i] = GetVisBufferVertexAttributesForView(
-            setup.vertexBuffer,
             setup.postSkinningBufferOffset,
             setup.vertOffset + i,
             setup.meshBuffer.vertexFlags,
@@ -192,8 +191,6 @@ void EmitMeshletVisBufferForView(
 }
 
 VisBufferPSInput GetVisBufferVertexAttributesForViewIndexed(
-    ByteAddressBuffer buffer,
-    StructuredBuffer<uint> meshletVerticesBuffer,
     uint meshletVerticesBaseOffset,
     uint meshletVertexIndex,
     uint blockByteOffset,
@@ -205,9 +202,9 @@ VisBufferPSInput GetVisBufferVertexAttributesForViewIndexed(
     uint clusterIndex,
     uint materialDataIndex)
 {
+    StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletVertexIndices)];
     uint vertexIndex = meshletVerticesBuffer[meshletVerticesBaseOffset + meshletVertexIndex];
     return GetVisBufferVertexAttributesForView(
-        buffer,
         blockByteOffset,
         vertexIndex,
         flags,
@@ -231,8 +228,6 @@ void EmitMeshletVisBufferForViewIndexed(
     {
         uint meshletVertexIndex = setup.vertOffset + i;
         outputVertices[i] = GetVisBufferVertexAttributesForViewIndexed(
-            setup.vertexBuffer,
-            setup.meshletVerticesBuffer,
             setup.meshBuffer.clodMeshletVerticesBufferOffset,
             meshletVertexIndex,
             setup.postSkinningBufferOffset,
@@ -312,12 +307,12 @@ void VisibilityBufferMSMain(
 
 bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSetup setup, in uint bucketMeshletIndex, in uint bucketCount)
 {
-	if (bucketMeshletIndex >= bucketCount)
-    {
-        setup.vertCount = 0;
-        setup.triCount = 0;
-        return false;
-    }	
+	// if (bucketMeshletIndex >= bucketCount)
+    // {
+    //     setup.vertCount = 0;
+    //     setup.triCount = 0;
+    //     return false;
+    // }	
 
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
 
@@ -329,24 +324,27 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
     StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletOffsets)];
-    StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletVertexIndices)];
-    ByteAddressBuffer meshletTrianglesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletTriangles)];
-    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostSkinningVertices)];
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
 
     setup.meshBuffer = perMeshBuffer[setup.meshInstanceBuffer.perMeshBufferIndex];
     setup.objectBuffer = perObjectBuffer[setup.meshInstanceBuffer.perObjectBufferIndex];
 
     uint meshletOffset = setup.meshBuffer.clodMeshletBufferOffset;
-    setup.meshlet = meshletBuffer[meshletOffset + setup.meshletIndex];
+
+    // ClusterLOD culling writes an absolute meshlet index (already includes meshletOffset).
+    // Validate against this mesh's meshlet span before dereferencing.
+    uint meshletStart = meshletOffset;
+    uint meshletEnd = meshletOffset + setup.meshBuffer.clodNumMeshlets;
+    if (setup.meshletIndex < meshletStart || setup.meshletIndex >= meshletEnd)
+    {
+        return false;
+    }
+
+    setup.meshlet = meshletBuffer[setup.meshletIndex];
 
     setup.vertCount = setup.meshlet.VertCount;
     setup.triCount = setup.meshlet.TriCount;
     setup.vertOffset = setup.meshlet.VertOffset;
-
-    setup.vertexBuffer = vertexBuffer;
-    setup.meshletTrianglesBuffer = meshletTrianglesBuffer;
-    setup.meshletVerticesBuffer = meshletVerticesBuffer;
 
     uint postSkinningBase = setup.meshInstanceBuffer.postSkinningVertexBufferOffset;
     setup.postSkinningBufferOffset = postSkinningBase;
@@ -357,11 +355,6 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
         uint stride = setup.meshBuffer.vertexByteSize * setup.meshBuffer.numVertices;
         setup.postSkinningBufferOffset += stride * (perFrameBuffer.frameIndex % 2);
         setup.prevPostSkinningBufferOffset += stride * ((perFrameBuffer.frameIndex + 1) % 2);
-    }
-
-    if (setup.meshletIndex >= setup.meshBuffer.clodNumMeshlets)
-    {
-        return false;
     }
 
     return true;
@@ -388,14 +381,20 @@ void ClusterLODBucketMSMain(
     StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
     uint count = histogram[bucketIndex];
 
-    StructuredBuffer<VisibleCluster> compactedClusters = ResourceDescriptorHeap[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
-    uint visibleClusterIndex = baseOffset + linearizedID;
-    VisibleCluster cluster = compactedClusters[visibleClusterIndex];
-
+    bool draw = linearizedID < count;
+    VisibleCluster cluster = (VisibleCluster)0;
     MeshletSetup setup;
-    bool draw = InitializeMeshletFromCompactedCluster(cluster, setup, linearizedID, count);
+    uint visibleClusterIndex = baseOffset + linearizedID;
 
-    SetMeshOutputCounts(setup.vertCount, setup.triCount);
+    if (draw) {   
+        StructuredBuffer<VisibleCluster> compactedClusters = ResourceDescriptorHeap[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
+        cluster = compactedClusters[visibleClusterIndex];
+        draw = InitializeMeshletFromCompactedCluster(cluster, setup, linearizedID, count);
+    } else {
+        setup.vertCount = 0;
+        setup.triCount = 0;
+    }
+    SetMeshOutputCounts(setup.vertCount, setup.triCount); // DXC won't accept non-uniform SetMeshOutputCounts
     if (draw)
     {
         EmitMeshletVisBufferForViewIndexed(uGroupThreadID, setup, setup.viewID, visibleClusterIndex, outputVertices, outputTriangles);

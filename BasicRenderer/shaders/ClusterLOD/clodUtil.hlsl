@@ -55,7 +55,9 @@ void CreateRasterBucketsHistogramCommandCSMain()
 void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
 {
     // Linearize the 2D dispatch thread ID
-    uint linearizedID = DTid.x + DTid.y * IndirectCommandSignatureRootConstant1;
+    // Root constant is dispatchX in groups, convert to thread width.
+    uint xDimThreads = IndirectCommandSignatureRootConstant1 * CLUSTER_HISTOGRAM_GROUP_SIZE;
+    uint linearizedID = DTid.x + DTid.y * xDimThreads;
     StructuredBuffer<uint> clusterCountBuffer = ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
     uint clusterCount = clusterCountBuffer.Load(0);
     

@@ -97,8 +97,6 @@ namespace crashlog {
 
     inline void InstallTerminateHandler()
     {
-        spdlog::flush_on(spdlog::level::critical);
-
         g_prev = std::set_terminate(&TerminateHandler);
     }
 
