@@ -152,14 +152,13 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     world.component<Components::ActiveScene>().add(flecs::OnInstantiate, flecs::Inherit);
     world.set<Components::DrawStats>({ 0, {} });
 
-	auto res = settingsManager.getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 	//RegisterAllSystems(world, m_pLightManager.get(), m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get());
     m_hierarchySystem =
         world.system<const Components::Position, const Components::Rotation, const Components::Scale, const Components::Matrix*, Components::Matrix>()
         .with<Components::Active>()
         .term_at(3).parent().cascade()
         .cached().cache_kind(flecs::QueryCacheAll)
-        .each([&, res](flecs::entity entity, const Components::Position& position, const Components::Rotation& rotation, const Components::Scale& scale, const Components::Matrix* matrix, Components::Matrix& mOut) {
+        .each([&](flecs::entity entity, const Components::Position& position, const Components::Rotation& rotation, const Components::Scale& scale, const Components::Matrix* matrix, Components::Matrix& mOut) {
         XMMATRIX matRotation = XMMatrixRotationQuaternion(rotation.rot);
         XMMATRIX matTranslation = XMMatrixTranslationFromVector(position.pos);
         XMMATRIX matScale = XMMatrixScalingFromVector(scale.scale);
@@ -199,9 +198,10 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
                 // Apply jitter
                 auto jitterPixelSpace = UpscalingManager::GetInstance().GetJitter(m_totalFramesRendered);
                 camera.jitterPixelSpace = jitterPixelSpace;
+                auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
                 DirectX::XMFLOAT2 jitterNDC = {
-                    (jitterPixelSpace.x / res.x),
-                    (jitterPixelSpace.y / res.y)
+                    (jitterPixelSpace.x / renderRes.x),
+                    (jitterPixelSpace.y / renderRes.y)
                 };
 				camera.jitterNDC = jitterNDC;
 				auto jitterMatrix = DirectX::XMMatrixTranslation(jitterNDC.x, jitterNDC.y, 0.0f);

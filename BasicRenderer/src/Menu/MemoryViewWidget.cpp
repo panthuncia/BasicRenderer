@@ -492,31 +492,10 @@ namespace ui {
                 else {
                     ImGui::BeginChild("##TypedElements", ImVec2(0, ImGui::GetContentRegionAvail().y), true);
 
-                    if (scrollToElement_ >= 0) {
-                        const float rowHeight = ImGui::GetTextLineHeightWithSpacing();
-                        const float targetY = static_cast<float>(scrollToElement_) * rowHeight;
-                        const float viewH = ImGui::GetWindowHeight();
-                        const float scrollY = std::max(0.0f, targetY - viewH * 0.25f);
-                        ImGui::SetScrollY(scrollY);
-                        scrollToElement_ = -1;
-                    }
+                    int pendingScrollToElement = scrollToElement_;
+                    bool scrollApplied = false;
 
-                    const float rowHeight = ImGui::GetTextLineHeightWithSpacing();
-                    const float scrollY = ImGui::GetScrollY();
-                    const float viewH = ImGui::GetWindowHeight();
-
-                    const int overscanRows = 6;
-                    int firstVisible = static_cast<int>(scrollY / std::max(1.0f, rowHeight)) - overscanRows;
-                    int visibleCount = static_cast<int>(viewH / std::max(1.0f, rowHeight)) + overscanRows * 2;
-
-                    firstVisible = std::clamp(firstVisible, 0, static_cast<int>(count));
-                    const int endVisible = std::clamp(firstVisible + std::max(1, visibleCount), 0, static_cast<int>(count));
-
-                    if (firstVisible > 0) {
-                        ImGui::Dummy(ImVec2(0.0f, rowHeight * static_cast<float>(firstVisible)));
-                    }
-
-                    for (int idx = firstVisible; idx < endVisible; ++idx) {
+                    auto drawElementRow = [&](int idx) {
                         ImGui::PushID(idx);
 
                         const size_t elementBase = static_cast<size_t>(idx) * stride;
@@ -524,6 +503,11 @@ namespace ui {
                         std::snprintf(hdr, sizeof(hdr), "Element %d (base=0x%llX)", idx, static_cast<unsigned long long>(elementBase));
 
                         bool open = ImGui::TreeNodeEx(hdr, ImGuiTreeNodeFlags_SpanAvailWidth);
+
+                        if (pendingScrollToElement == idx && !scrollApplied) {
+                            ImGui::SetScrollHereY(0.25f);
+                            scrollApplied = true;
+                        }
 
                         if (open) {
                             if (reflectedRoot_->children.empty()) {
@@ -540,11 +524,43 @@ namespace ui {
                         }
 
                         ImGui::PopID();
+                    };
+
+                    bool hasExpandedTopLevelElement = false;
+                    if (pendingScrollToElement < 0) {
+                        ImGuiStorage* storage = ImGui::GetStateStorage();
+                        for (int idx = 0; idx < static_cast<int>(count); ++idx) {
+                            ImGui::PushID(idx);
+                            char hdr[96];
+                            const size_t elementBase = static_cast<size_t>(idx) * stride;
+                            std::snprintf(hdr, sizeof(hdr), "Element %d (base=0x%llX)", idx, static_cast<unsigned long long>(elementBase));
+                            const ImGuiID id = ImGui::GetID(hdr);
+                            ImGui::PopID();
+
+                            if (storage && storage->GetBool(id, false)) {
+                                hasExpandedTopLevelElement = true;
+                                break;
+                            }
+                        }
                     }
 
-                    if (endVisible < static_cast<int>(count)) {
-                        const int trailingRows = static_cast<int>(count) - endVisible;
-                        ImGui::Dummy(ImVec2(0.0f, rowHeight * static_cast<float>(trailingRows)));
+                    if (hasExpandedTopLevelElement || pendingScrollToElement >= 0) {
+                        for (int idx = 0; idx < static_cast<int>(count); ++idx) {
+                            drawElementRow(idx);
+                        }
+                    }
+                    else {
+                        ImGuiListClipper clipper;
+                        clipper.Begin(static_cast<int>(count));
+                        while (clipper.Step()) {
+                            for (int idx = clipper.DisplayStart; idx < clipper.DisplayEnd; ++idx) {
+                                drawElementRow(idx);
+                            }
+                        }
+                    }
+
+                    if (pendingScrollToElement >= 0 && scrollApplied) {
+                        scrollToElement_ = -1;
                     }
 
                     ImGui::EndChild();
