@@ -205,7 +205,7 @@ public:
 	}
 
 	uint32_t GetCoarsestLODRootNodeIndex() const {
-		return m_clodLodLevelRoots.front();
+		return m_clodLodLevelRoots.back();
 	}
 
 private:

@@ -209,7 +209,7 @@ void WG_Traverse(
     // ----------------------------
     // Case A: BVH node expansion
     // ----------------------------
-    if (rec.kind == 0)
+    if (rec.kind == 0) // Node
     {
         StructuredBuffer<ClusterLODNode> lodNodes =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Nodes)];
@@ -277,7 +277,7 @@ void WG_Traverse(
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Children)];
         StructuredBuffer<CullingCameraInfo> cameraInfos =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
-        StructuredBuffer<PerFrameBuffer> perFrameBuffer =
+        ConstantBuffer<PerFrameBuffer> perFrameBuffer =
             ResourceDescriptorHeap[0]; // TODO: fix
 
         const uint groupIndex = off.groupsBase + groupId;
@@ -327,7 +327,7 @@ void WG_Traverse(
                     refinedGrp.bounds.error,
                     cam.positionWorldSpace.xyz,
                     cam.projY,
-                    perFrameBuffer[0].screenResY,
+                    perFrameBuffer.screenResY,
                     cam.zNear);
 
                 wantsRefineChild = (px > cam.errorPixels);
