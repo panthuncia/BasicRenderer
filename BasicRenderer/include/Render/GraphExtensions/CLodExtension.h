@@ -443,11 +443,11 @@ private:
 
             // Export the node shader symbols from the library
             // These are the *export names* (function symbols), not NodeID strings.
-            std::array<rhi::ShaderExportDesc, 5> exports = { {
+            std::array<rhi::ShaderExportDesc, 4> exports = { {
                 { "WG_ObjectCull",   nullptr },
-                { "WG_Traverse",     nullptr },
+                { "WG_TraverseNodes",     nullptr },
+                { "WG_GroupEvaluate",     nullptr },
                 { "WG_ClusterCullBuckets",  nullptr },
-                //{ "WG_Output", nullptr }
             } };
 
             rhi::ShaderLibraryDesc library{};

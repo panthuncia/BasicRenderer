@@ -83,12 +83,20 @@ struct ObjectCullRecord
     uint3 dispatchGrid : SV_DispatchGrid; // Drives dispatch size
 };
 
-struct TraverseRecord
+struct TraverseNodeRecord
 {
     uint instanceIndex;
-    uint id; // nodeId OR groupId depending on kind
+    uint nodeId;
     uint viewId;
-    uint kind; // 0 = BVH node, 1 = Group
+    uint pad0;
+};
+
+struct GroupEvalRecord
+{
+    uint instanceIndex;
+    uint groupId;
+    uint viewId;
+    uint pad0;
 };
 
 struct MeshletBucketRecord
@@ -96,15 +104,15 @@ struct MeshletBucketRecord
     uint instanceIndex;
     uint viewId;
 
-    // Absolute base into childLocalMeshletIndices for this bucket:
-    uint childLocalMeshletIndexBase;
-    uint localMeshletCount;
-
-    // Absolute base for final meshlet IDs (added to each local meshlet):
-    uint meshletsBase;
+    uint groupId;
+    uint terminalChildMask; // bit i => child i in this group contributes terminal meshlets
+    uint totalLocalMeshletCount;
 
     uint3 dispatchGrid : SV_DispatchGrid; // drives broadcasting node launch
 };
+
+groupshared uint g_terminalChildMask;
+groupshared uint g_terminalMeshletCount;
 
 // struct MeshletWorkRecord
 // {
@@ -156,12 +164,12 @@ void WG_ObjectCull(
     DispatchNodeInputRecord< ObjectCullRecord> inRec,
     const uint3 vGroupThreadID : SV_GroupThreadID,
     const uint3 vDispatchThreadID : SV_DispatchThreadID,
-    [MaxRecords(64)] NodeOutput<TraverseRecord> Traverse) {
+    [MaxRecords(64)] NodeOutput<TraverseNodeRecord> TraverseNodes) {
     const ObjectCullRecord hdr = inRec.Get();
     const bool inRange = (vDispatchThreadID.x < hdr.activeDrawCount);
 
     uint outCount = 0;
-    TraverseRecord outRecord = (TraverseRecord) 0;
+    TraverseNodeRecord outRecord = (TraverseNodeRecord) 0;
 
     if (inRange) {
         StructuredBuffer<uint> activeDrawSetIndicesBuffer =
@@ -202,15 +210,14 @@ void WG_ObjectCull(
 
             outRecord.viewId = hdr.viewDataIndex;
             outRecord.instanceIndex =perMeshInstanceBufferIndex;
-            outRecord.id = off.rootNode;   // BVH root node for this mesh
-            outRecord.kind = 0;              // Node
+            outRecord.nodeId = off.rootNode;   // BVH root node for this mesh
             outCount = 1;
         }
     }
 
     // Uniform call; per-thread count may be 0/1.
-    ThreadNodeOutputRecords<TraverseRecord> outRecs =
-        Traverse.GetThreadNodeOutputRecords(outCount);
+    ThreadNodeOutputRecords<TraverseNodeRecord> outRecs =
+        TraverseNodes.GetThreadNodeOutputRecords(outCount);
 
     if (outCount == 1) {
         outRecs.Get() = outRecord;
@@ -232,18 +239,18 @@ float ProjectedErrorPixels(float3 worldCenter, float worldRadius, float errorMes
     return frac * screenHeight;
 }
 
-// Node: Traverse (recursive)
+// Node: TraverseNodes (recursive, BVH-only)
 [Shader("node")]
-[NodeID("Traverse")]
+[NodeID("TraverseNodes")]
 [NodeLaunch("coalescing")]
 [NumThreads(32, 1, 1)]
 [NodeMaxRecursionDepth(25)]
-void WG_Traverse(
-    [MaxRecords(1)] GroupNodeInputRecords<TraverseRecord> inRecs,
+void WG_TraverseNodes(
+    [MaxRecords(1)] GroupNodeInputRecords<TraverseNodeRecord> inRecs,
 uint3 gtid : SV_GroupThreadID,
-    [ MaxRecords(32)] NodeOutput<TraverseRecord> Traverse,
-    [MaxRecords(32)] NodeOutput<MeshletBucketRecord> ClusterCullBuckets) {
-    const TraverseRecord rec = inRecs[0];
+    [MaxRecords(32)] NodeOutput<TraverseNodeRecord> TraverseNodes,
+    [MaxRecords(1)] NodeOutput<GroupEvalRecord> GroupEvaluate) {
+    const TraverseNodeRecord rec = inRecs[0];
     StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
     const MeshInstanceClodOffsets off = clodOffsets[rec.instanceIndex];
@@ -261,219 +268,237 @@ uint3 gtid : SV_GroupThreadID,
     const CullingCameraInfo cam = cameraInfos[rec.viewId];
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
 
-    // ----------------------------
-    // Case A: BVH node expansion
-    // ----------------------------
-    if (rec.kind == 0) { // Node
-        StructuredBuffer<ClusterLODNode> lodNodes =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Nodes)];
+    StructuredBuffer<ClusterLODNode> lodNodes =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Nodes)];
 
-        const ClusterLODNode node = lodNodes[off.lodNodesBase + rec.id];
+    const ClusterLODNode node = lodNodes[off.lodNodesBase + rec.nodeId];
 
-        const float3 nodeCenterObjectSpace = node.metric.centerAndRadius.xyz;
-        const float3 nodeCenterViewSpace = ToViewSpace(nodeCenterObjectSpace, objectModelMatrix, camera.view);
-        const float nodeRadiusWorld = node.metric.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
-        const bool nodeCulled = SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, camera);
+    const float3 nodeCenterObjectSpace = node.metric.centerAndRadius.xyz;
+    const float3 nodeCenterViewSpace = ToViewSpace(nodeCenterObjectSpace, objectModelMatrix, camera.view);
+    const float nodeRadiusWorld = node.metric.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
+    const bool nodeCulled = SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, camera);
 
-        if (nodeCulled) {
-            ThreadNodeOutputRecords<TraverseRecord> o =
-                Traverse.GetThreadNodeOutputRecords(0);
-            o.OutputComplete();
-            return;
-        }
+    if (nodeCulled) {
+        ThreadNodeOutputRecords<TraverseNodeRecord> noNodes =
+            TraverseNodes.GetThreadNodeOutputRecords(0);
+        noNodes.OutputComplete();
 
-        float4 nodeCenterObjectSpace4 = float4(nodeCenterObjectSpace, 1.0f);
-        float3 nodeCenterWorldSpace = mul(nodeCenterObjectSpace4, objectModelMatrix).xyz;
-        float nodeProjectedError = ProjectedErrorPixels(
-            nodeCenterWorldSpace,
-            nodeRadiusWorld,
-            node.metric.maxQuadricError,
-            cam.positionWorldSpace.xyz,
-            cam.projY,
-            perFrameBuffer.screenResY,
-            cam.zNear);
-
-        const bool nodeWantsTraversal = nodeProjectedError > cam.errorPixels;
-        if (!nodeWantsTraversal) {
-            ThreadNodeOutputRecords<TraverseRecord> o =
-                Traverse.GetThreadNodeOutputRecords(0);
-            o.OutputComplete();
-            return;
-        }
-
-        // Internal BVH node: emit up to 32 children as new node records
-        if (node.range.isGroup == 0) {
-            const uint ci = gtid.x;
-            const uint childCount = node.range.countMinusOne + 1;
-
-            const bool activeChild = (ci < childCount);
-
-            ThreadNodeOutputRecords<TraverseRecord> o =
-                Traverse.GetThreadNodeOutputRecords(activeChild ? 1 : 0);
-
-            if (activeChild) {
-                TraverseRecord r;
-                r.instanceIndex = rec.instanceIndex;
-                r.viewId = rec.viewId;
-                r.kind = 0; // Node
-                r.id = node.range.indexOrOffset + ci; // child node id (relative to lodNodesBase)
-                o.Get() = r;
-            }
-            o.OutputComplete();
-            return;
-        }
-
-        // Leaf BVH node that references a group:
-        // emit exactly 1 group record so the *group* code path can run with 32 threads
-        if (gtid.x == 0) {
-            ThreadNodeOutputRecords<TraverseRecord> o =
-                Traverse.GetThreadNodeOutputRecords(1);
-
-            TraverseRecord r;
-            r.instanceIndex = rec.instanceIndex;
-            r.viewId = rec.viewId;
-            r.kind = 1; // Group
-            r.id = node.range.indexOrOffset; // groupId (relative to groupsBase)
-            o.Get() = r;
-            o.OutputComplete();
-        }
-        else {
-            // Must still call uniformly
-            ThreadNodeOutputRecords<TraverseRecord> o =
-                Traverse.GetThreadNodeOutputRecords(0);
-            o.OutputComplete();
-        }
+        ThreadNodeOutputRecords<GroupEvalRecord> noGroups =
+            GroupEvaluate.GetThreadNodeOutputRecords(0);
+        noGroups.OutputComplete();
         return;
     }
 
-    // ----------------------------
-    // Case B: Group evaluation
-    // ----------------------------
-    {
-        const uint groupId = rec.id;
+    float4 nodeCenterObjectSpace4 = float4(nodeCenterObjectSpace, 1.0f);
+    float3 nodeCenterWorldSpace = mul(nodeCenterObjectSpace4, objectModelMatrix).xyz;
+    float nodeProjectedError = ProjectedErrorPixels(
+        nodeCenterWorldSpace,
+        nodeRadiusWorld,
+        node.metric.maxQuadricError,
+        cam.positionWorldSpace.xyz,
+        cam.projY,
+        perFrameBuffer.screenResY,
+        cam.zNear);
 
-        StructuredBuffer<ClusterLODGroup> groups =
-                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
-        StructuredBuffer<ClusterLODChild> children =
-                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Children)];
+    const bool nodeWantsTraversal = nodeProjectedError > cam.errorPixels;
+    if (!nodeWantsTraversal) {
+        ThreadNodeOutputRecords<TraverseNodeRecord> noNodes =
+            TraverseNodes.GetThreadNodeOutputRecords(0);
+        noNodes.OutputComplete();
 
-        const uint groupIndex = off.groupsBase + groupId;
-        const ClusterLODGroup grp = groups[groupIndex];
-        const uint childBase = off.childrenBase + grp.firstChild;
+        ThreadNodeOutputRecords<GroupEvalRecord> noGroups =
+            GroupEvaluate.GetThreadNodeOutputRecords(0);
+        noGroups.OutputComplete();
+        return;
+    }
 
-        const float3 groupCenterObjectSpace = grp.bounds.centerAndRadius.xyz;
-        const float3 groupCenterViewSpace = ToViewSpace(groupCenterObjectSpace, objectModelMatrix, camera.view);
-        const float groupRadiusWorld = grp.bounds.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
-        const bool groupCulled = SphereOutsideFrustumViewSpace(groupCenterViewSpace, groupRadiusWorld, camera);
-
-        if (groupCulled) {
-            ThreadNodeOutputRecords<TraverseRecord> noTraverse =
-                Traverse.GetThreadNodeOutputRecords(0);
-            noTraverse.OutputComplete();
-
-            ThreadNodeOutputRecords<MeshletBucketRecord> noBuckets =
-                ClusterCullBuckets.GetThreadNodeOutputRecords(0);
-            noBuckets.OutputComplete();
-            return;
-        }
-
-        float4 groupCenterObjectSpace4 = float4(groupCenterObjectSpace, 1.0f);
-        float3 groupCenterWorldSpace = mul(groupCenterObjectSpace4, objectModelMatrix).xyz;
-        float groupProjectedError = ProjectedErrorPixels(
-            groupCenterWorldSpace,
-            groupRadiusWorld,
-            grp.bounds.error,
-            cam.positionWorldSpace.xyz,
-            cam.projY,
-            perFrameBuffer.screenResY,
-            cam.zNear);
-
-        const bool groupWantsTraversal = groupProjectedError > cam.errorPixels;
-        if (!groupWantsTraversal) {
-            ThreadNodeOutputRecords<TraverseRecord> noTraverse =
-                Traverse.GetThreadNodeOutputRecords(0);
-            noTraverse.OutputComplete();
-
-            ThreadNodeOutputRecords<MeshletBucketRecord> noBuckets =
-                ClusterCullBuckets.GetThreadNodeOutputRecords(0);
-            noBuckets.OutputComplete();
-            return;
-        }
-
+    // Internal BVH node: emit up to 32 children as new node records
+    if (node.range.isGroup == 0) {
         const uint ci = gtid.x;
-        const bool activeChild = (ci < grp.childCount);
+        const uint childCount = node.range.countMinusOne + 1;
 
-        ClusterLODChild child = (ClusterLODChild) 0;
-        bool generatingGroupWantsTraversal = false;
-        bool hasGeneratingGroup = false;
+        const bool activeChild = (ci < childCount);
+
+        ThreadNodeOutputRecords<TraverseNodeRecord> o =
+            TraverseNodes.GetThreadNodeOutputRecords(activeChild ? 1 : 0);
+
+        ThreadNodeOutputRecords<GroupEvalRecord> noGroups =
+            GroupEvaluate.GetThreadNodeOutputRecords(0);
 
         if (activeChild) {
-            child = children[childBase + ci];
-
-            if (child.refinedGroup >= 0) {
-                hasGeneratingGroup = true;
-
-                const ClusterLODGroup refinedGrp = groups[off.groupsBase + (uint) child.refinedGroup];
-
-                float4 objectSpaceCenter = float4(refinedGrp.bounds.centerAndRadius.xyz, 1.0);
-                float3 worldSpaceCenter = mul(objectSpaceCenter, objectModelMatrix).xyz;
-
-                float worldRadius = refinedGrp.bounds.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
-                float3 refinedViewSpaceCenter = mul(float4(worldSpaceCenter, 1.0f), camera.view).xyz;
-                const bool refinedCulled = SphereOutsideFrustumViewSpace(refinedViewSpaceCenter, worldRadius, camera);
-
-                float px = ProjectedErrorPixels(
-                    worldSpaceCenter,
-                    worldRadius,
-                    refinedGrp.bounds.error,
-                    cam.positionWorldSpace.xyz,
-                    cam.projY,
-                    perFrameBuffer.screenResY,
-                    cam.zNear);
-
-                generatingGroupWantsTraversal = !refinedCulled && (px > cam.errorPixels);
-            }
+            TraverseNodeRecord r;
+            r.instanceIndex = rec.instanceIndex;
+            r.viewId = rec.viewId;
+            r.nodeId = node.range.indexOrOffset + ci; // child node id (relative to lodNodesBase)
+            o.Get() = r;
         }
+        o.OutputComplete();
+        noGroups.OutputComplete();
+        return;
+    }
 
-        // NVIDIA-style cut selection:
-        // emit current group's bucket if this group's metric passed and generating group's metric did NOT pass.
-        // Buckets with refinedGroup < 0 are highest detail and are forced.
-        {
-            ThreadNodeOutputRecords<TraverseRecord> noTraverse =
-                Traverse.GetThreadNodeOutputRecords(0);
-            noTraverse.OutputComplete();
-        }
+    // Leaf BVH node that references a group:
+    // emit exactly 1 group record so the group code path can run with 32 threads
+    ThreadNodeOutputRecords<TraverseNodeRecord> noNodes =
+        TraverseNodes.GetThreadNodeOutputRecords(0);
+    ThreadNodeOutputRecords<GroupEvalRecord> groupsOut =
+        GroupEvaluate.GetThreadNodeOutputRecords(gtid.x == 0 ? 1 : 0);
 
-        // Emit terminal bucket(s)
-        {
-            const bool forceBucket = !hasGeneratingGroup;
-            bool emitBucket = activeChild && (child.localMeshletCount != 0)
-                && (forceBucket || !generatingGroupWantsTraversal);
+    if (gtid.x == 0) {
+        GroupEvalRecord r;
+        r.instanceIndex = rec.instanceIndex;
+        r.viewId = rec.viewId;
+        r.groupId = node.range.indexOrOffset; // groupId (relative to groupsBase)
+        groupsOut.Get() = r;
+    }
+    noNodes.OutputComplete();
+    groupsOut.OutputComplete();
+}
 
-            const uint n = emitBucket ? 1 : 0;
+// Node: GroupEvaluate
+[Shader("node")]
+[NodeID("GroupEvaluate")]
+[NodeLaunch("coalescing")]
+[NumThreads(32, 1, 1)]
+void WG_GroupEvaluate(
+    [MaxRecords(1)] GroupNodeInputRecords<GroupEvalRecord> inRecs,
+    uint3 gtid : SV_GroupThreadID,
+    [MaxRecords(32)] NodeOutput<MeshletBucketRecord> ClusterCullBuckets) {
+    const GroupEvalRecord rec = inRecs[0];
+    const uint groupId = rec.groupId;
 
-            ThreadNodeOutputRecords<MeshletBucketRecord> o =
-                ClusterCullBuckets.GetThreadNodeOutputRecords(n);
+    StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+    const MeshInstanceClodOffsets off = clodOffsets[rec.instanceIndex];
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+    const uint objectBufferIndex = perMeshInstanceBuffer[rec.instanceIndex].perObjectBufferIndex;
+    StructuredBuffer<PerObjectBuffer> perObjectBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
+    const row_major matrix objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
+    StructuredBuffer<Camera> cameras =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+    const Camera camera = cameras[rec.viewId];
+    StructuredBuffer<CullingCameraInfo> cameraInfos =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
+    const CullingCameraInfo cam = cameraInfos[rec.viewId];
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
 
-            if (n == 1) {
-                const uint idxBase = off.childLocalMeshletIndicesBase + child.firstLocalMeshletIndex;
+    StructuredBuffer<ClusterLODGroup> groups =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+    StructuredBuffer<ClusterLODChild> children =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Children)];
 
-                MeshletBucketRecord b;
-                b.instanceIndex = rec.instanceIndex;
-                b.viewId = rec. viewId;
-                b.childLocalMeshletIndexBase = idxBase;
-                b.localMeshletCount = child.localMeshletCount;
-                b.meshletsBase = grp.firstMeshlet;
+    const uint groupIndex = off.groupsBase + groupId;
+    const ClusterLODGroup grp = groups[groupIndex];
+    const uint childBase = off.childrenBase + grp.firstChild;
 
-                const uint groupsX = (b.localMeshletCount + 64 - 1) / 64;
-                b.dispatchGrid = uint3(groupsX, 1, 1);
+    const float3 groupCenterObjectSpace = grp.bounds.centerAndRadius.xyz;
+    const float3 groupCenterViewSpace = ToViewSpace(groupCenterObjectSpace, objectModelMatrix, camera.view);
+    const float groupRadiusWorld = grp.bounds.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
+    const bool groupCulled = SphereOutsideFrustumViewSpace(groupCenterViewSpace, groupRadiusWorld, camera);
 
-                o.Get() = b;
-            }
+    if (groupCulled) {
+        ThreadNodeOutputRecords<MeshletBucketRecord> noBuckets =
+            ClusterCullBuckets.GetThreadNodeOutputRecords(0);
+        noBuckets.OutputComplete();
+        return;
+    }
 
-            o.OutputComplete();
+    float4 groupCenterObjectSpace4 = float4(groupCenterObjectSpace, 1.0f);
+    float3 groupCenterWorldSpace = mul(groupCenterObjectSpace4, objectModelMatrix).xyz;
+    float groupProjectedError = ProjectedErrorPixels(
+        groupCenterWorldSpace,
+        groupRadiusWorld,
+        grp.bounds.error,
+        cam.positionWorldSpace.xyz,
+        cam.projY,
+        perFrameBuffer.screenResY,
+        cam.zNear);
+
+    const bool groupWantsTraversal = groupProjectedError > cam.errorPixels;
+    if (!groupWantsTraversal) {
+        ThreadNodeOutputRecords<MeshletBucketRecord> noBuckets =
+            ClusterCullBuckets.GetThreadNodeOutputRecords(0);
+        noBuckets.OutputComplete();
+        return;
+    }
+
+    const uint ci = gtid.x;
+    const bool activeChild = (ci < grp.childCount);
+
+    ClusterLODChild child = (ClusterLODChild) 0;
+    bool generatingGroupWantsTraversal = false;
+    bool hasGeneratingGroup = false;
+
+    if (activeChild) {
+        child = children[childBase + ci];
+
+        if (child.refinedGroup >= 0) {
+            hasGeneratingGroup = true;
+
+            const ClusterLODGroup refinedGrp = groups[off.groupsBase + (uint) child.refinedGroup];
+
+            float4 objectSpaceCenter = float4(refinedGrp.bounds.centerAndRadius.xyz, 1.0);
+            float3 worldSpaceCenter = mul(objectSpaceCenter, objectModelMatrix).xyz;
+
+            float worldRadius = refinedGrp.bounds.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
+            float3 refinedViewSpaceCenter = mul(float4(worldSpaceCenter, 1.0f), camera.view).xyz;
+            const bool refinedCulled = SphereOutsideFrustumViewSpace(refinedViewSpaceCenter, worldRadius, camera);
+
+            float px = ProjectedErrorPixels(
+                worldSpaceCenter,
+                worldRadius,
+                refinedGrp.bounds.error,
+                cam.positionWorldSpace.xyz,
+                cam.projY,
+                perFrameBuffer.screenResY,
+                cam.zNear);
+
+            generatingGroupWantsTraversal = !refinedCulled && (px > cam.errorPixels);
         }
     }
+
+    // NVIDIA-style cut selection:
+    // emit current group's bucket if this group's metric passed and generating group's metric did NOT pass.
+    // Buckets with refinedGroup < 0 are highest detail and are forced.
+
+    if (gtid.x == 0) {
+        g_terminalChildMask = 0;
+        g_terminalMeshletCount = 0;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    const bool forceBucket = !hasGeneratingGroup;
+    const bool emitBucket = activeChild && (child.localMeshletCount != 0)
+        && (forceBucket || !generatingGroupWantsTraversal);
+
+    if (emitBucket) {
+        const uint bit = (1u << gtid.x);
+        InterlockedOr(g_terminalChildMask, bit);
+        InterlockedAdd(g_terminalMeshletCount, child.localMeshletCount);
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    const uint outCount = (g_terminalMeshletCount != 0) ? 1u : 0u;
+    GroupNodeOutputRecords<MeshletBucketRecord> outBuckets =
+        ClusterCullBuckets.GetGroupNodeOutputRecords(outCount);
+
+    if ((outCount == 1) && (gtid.x == 0)) {
+        MeshletBucketRecord b;
+        b.instanceIndex = rec.instanceIndex;
+        b.viewId = rec.viewId;
+        b.groupId = groupId;
+        b.terminalChildMask = g_terminalChildMask;
+        b.totalLocalMeshletCount = g_terminalMeshletCount;
+
+        const uint groupsX = (b.totalLocalMeshletCount + 64 - 1) / 64;
+        b.dispatchGrid = uint3(groupsX, 1, 1);
+
+        outBuckets.Get() = b;
+    }
+
+    outBuckets.OutputComplete();
 }
 
 
@@ -492,18 +517,22 @@ void WG_ClusterCullBuckets(
     const MeshletBucketRecord b = inRec.Get();
     const uint i = DTid.x;
 
-    const bool inRange = (i < b.localMeshletCount);
+    const bool inRange = (i < b.totalLocalMeshletCount);
 
     uint meshletId = 0;
     bool survives = false;
 
     if (inRange) {
-        StructuredBuffer<uint> childLocalMeshletIndices =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::ChildLocalMeshletIndices)];
-
         StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
         const MeshInstanceClodOffsets off = clodOffsets[b.instanceIndex];
+
+        StructuredBuffer<ClusterLODGroup> groups =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+        StructuredBuffer<ClusterLODChild> children =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Children)];
+        StructuredBuffer<uint> childLocalMeshletIndices =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::ChildLocalMeshletIndices)];
 
         StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
@@ -520,14 +549,43 @@ void WG_ClusterCullBuckets(
         StructuredBuffer<BoundingSphere> meshletBoundsBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshletBounds)];
 
-        const uint localMeshlet = childLocalMeshletIndices[b.childLocalMeshletIndexBase + i];
-        meshletId = b.meshletsBase + localMeshlet;
+        const ClusterLODGroup grp = groups[off.groupsBase + b.groupId];
+        const uint childBase = off.childrenBase + grp.firstChild;
 
-        const BoundingSphere meshletBounds = meshletBoundsBuffer[meshletId]; // NOTE: This depends on the bounds buffer being indexed the same way as meshlets; would there ever be a reason for it not to be?
-        const float3 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, camera.view);
-        const float meshletRadiusWorld = meshletBounds.sphere.w * MaxAxisScale_RowVector(objectModelMatrix);
+        uint remaining = i;
+        uint localMeshletIndex = 0;
+        bool found = false;
+        const uint childCount = min(grp.childCount, 32u);
 
-        survives = !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, camera);
+        [loop]
+        for (uint ci = 0; ci < childCount; ++ci) {
+            const uint bit = 1u << ci;
+            if ((b.terminalChildMask & bit) == 0) {
+                continue;
+            }
+
+            const ClusterLODChild child = children[childBase + ci];
+            if (remaining < child.localMeshletCount) {
+                localMeshletIndex = child.firstLocalMeshletIndex + remaining;
+                found = true;
+                break;
+            }
+            remaining -= child.localMeshletCount;
+        }
+
+        if (!found) {
+            survives = false;
+        }
+        else {
+            const uint localMeshlet = childLocalMeshletIndices[off.childLocalMeshletIndicesBase + localMeshletIndex];
+            meshletId = grp.firstMeshlet + localMeshlet;
+
+            const BoundingSphere meshletBounds = meshletBoundsBuffer[meshletId]; // NOTE: This depends on the bounds buffer being indexed the same way as meshlets; would there ever be a reason for it not to be?
+            const float3 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, camera.view);
+            const float meshletRadiusWorld = meshletBounds.sphere.w * MaxAxisScale_RowVector(objectModelMatrix);
+
+            survives = !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, camera);
+        }
     }
 
     const uint n = (inRange && survives) ? 1 : 0;
