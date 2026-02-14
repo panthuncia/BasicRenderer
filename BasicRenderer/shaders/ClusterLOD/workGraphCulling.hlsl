@@ -156,60 +156,54 @@ void WG_ObjectCull(
     DispatchNodeInputRecord< ObjectCullRecord> inRec,
     const uint3 vGroupThreadID : SV_GroupThreadID,
     const uint3 vDispatchThreadID : SV_DispatchThreadID,
-    [MaxRecords(64)] NodeOutput<TraverseRecord> Traverse)
-{
-const ObjectCullRecord hdr = inRec.Get();
-const bool inRange = (vDispatchThreadID.x < hdr.activeDrawCount);
+    [MaxRecords(64)] NodeOutput<TraverseRecord> Traverse) {
+    const ObjectCullRecord hdr = inRec.Get();
+    const bool inRange = (vDispatchThreadID.x < hdr.activeDrawCount);
 
-uint outCount = 0;
-TraverseRecord outRecord = (TraverseRecord) 0;
+    uint outCount = 0;
+    TraverseRecord outRecord = (TraverseRecord) 0;
 
-    if (inRange)
-    {
-StructuredBuffer<uint> activeDrawSetIndicesBuffer =
-            ResourceDescriptorHeap[hdr.activeDrawSetIndicesSRVIndex];
+    if (inRange) {
+        StructuredBuffer<uint> activeDrawSetIndicesBuffer =
+                    ResourceDescriptorHeap[hdr.activeDrawSetIndicesSRVIndex];
 
-StructuredBuffer<DispatchMeshIndirectCommand> indirectCommandBuffer =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::IndirectCommandBuffers::Master)];
+        StructuredBuffer<DispatchMeshIndirectCommand> indirectCommandBuffer =
+                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::IndirectCommandBuffers::Master)];
 
-const uint drawcallIndex = activeDrawSetIndicesBuffer[vDispatchThreadID.x];
-const uint perMeshInstanceBufferIndex = indirectCommandBuffer[drawcallIndex].perMeshInstanceBufferIndex;
+        const uint drawcallIndex = activeDrawSetIndicesBuffer[vDispatchThreadID.x];
+        const uint perMeshInstanceBufferIndex = indirectCommandBuffer[drawcallIndex].perMeshInstanceBufferIndex;
 
-StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-const PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
+        StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
+                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+        const PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[perMeshInstanceBufferIndex];
 
-StructuredBuffer<PerMeshBuffer> perMeshBuffer =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
-const PerMeshBuffer perMesh = perMeshBuffer[instanceData.perMeshBufferIndex];
+        StructuredBuffer<PerMeshBuffer> perMeshBuffer =
+                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+        const PerMeshBuffer perMesh = perMeshBuffer[instanceData.perMeshBufferIndex];
 
-StructuredBuffer<PerObjectBuffer> perObjectBuffer =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
-const row_major matrix objectModelMatrix = perObjectBuffer[instanceData.perObjectBufferIndex].model;
+        StructuredBuffer<PerObjectBuffer> perObjectBuffer =
+                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
+        const row_major matrix objectModelMatrix = perObjectBuffer[instanceData.perObjectBufferIndex].model;
 
-StructuredBuffer<Camera> cameras =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
-const Camera camera = cameras[hdr.viewDataIndex];
+        StructuredBuffer<Camera> cameras =
+                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+        const Camera camera = cameras[hdr.viewDataIndex];
 
-const float3 objectSpaceCenter = perMesh.boundingSphere.sphere.xyz;
-const float3 viewSpaceCenter = ToViewSpace(objectSpaceCenter, objectModelMatrix, camera.view);
-const float worldRadius = perMesh.boundingSphere.sphere.w * MaxAxisScale_RowVector(objectModelMatrix);
+        const float3 objectSpaceCenter = perMesh.boundingSphere.sphere.xyz;
+        const float3 viewSpaceCenter = ToViewSpace(objectSpaceCenter, objectModelMatrix, camera.view);
+        const float worldRadius = perMesh.boundingSphere.sphere.w * MaxAxisScale_RowVector(objectModelMatrix);
 
-const bool culled = SphereOutsideFrustumViewSpace(viewSpaceCenter, worldRadius, camera);
-        if (!culled)
-        {
-StructuredBuffer<MeshInstanceClodOffsets> meshInstanceClodOffsets =
-                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+        const bool culled = SphereOutsideFrustumViewSpace(viewSpaceCenter, worldRadius, camera);
+        if (!culled) {
+            StructuredBuffer<MeshInstanceClodOffsets> meshInstanceClodOffsets =
+                            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
 
-const MeshInstanceClodOffsets off = meshInstanceClodOffsets[perMeshInstanceBufferIndex];
+            const MeshInstanceClodOffsets off = meshInstanceClodOffsets[perMeshInstanceBufferIndex];
 
-            outRecord.viewId        = hdr.
-viewDataIndex;
-            outRecord.instanceIndex =
-perMeshInstanceBufferIndex;
-            outRecord.id            = off.
-rootNode;   // BVH root node for this mesh
-            outRecord.kind          = 0;              // Node
+            outRecord.viewId = hdr.viewDataIndex;
+            outRecord.instanceIndex =perMeshInstanceBufferIndex;
+            outRecord.id = off.rootNode;   // BVH root node for this mesh
+            outRecord.kind = 0;              // Node
             outCount = 1;
         }
     }
@@ -218,10 +212,8 @@ rootNode;   // BVH root node for this mesh
     ThreadNodeOutputRecords<TraverseRecord> outRecs =
         Traverse.GetThreadNodeOutputRecords(outCount);
 
-    if (outCount == 1)
-    {
-        outRecs.Get() =
-outRecord;
+    if (outCount == 1) {
+        outRecs.Get() = outRecord;
     }
 
     // Must be uniform even when some threads requested 0 records.
@@ -230,8 +222,7 @@ outRecord;
 
 // clusterlod.h comment formula, converted to pixels:
 // projectedErrorPx = (error / max(dist - radius, znear)) * (projY * 0.5) * viewportHeight
-float ProjectedErrorPixels(float3 worldCenter, float worldRadius, float errorMeshSpace, float3 cameraPos, float projY, float screenHeight, float zNear)
-{
+float ProjectedErrorPixels(float3 worldCenter, float worldRadius, float errorMeshSpace, float3 cameraPos, float projY, float screenHeight, float zNear) {
     // Conservative "distance to sphere surface"
     float dist = length(worldCenter - cameraPos);
     float denom = max(dist - worldRadius, zNear);
@@ -251,59 +242,49 @@ void WG_Traverse(
     [MaxRecords(1)] GroupNodeInputRecords<TraverseRecord> inRecs,
 uint3 gtid : SV_GroupThreadID,
     [ MaxRecords(32)] NodeOutput<TraverseRecord> Traverse,
-    [MaxRecords(32)] NodeOutput<MeshletBucketRecord> ClusterCullBuckets
-)
-{
-const TraverseRecord rec = inRecs[0];
-
-StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
-        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
-
-const MeshInstanceClodOffsets off = clodOffsets[rec.instanceIndex];
-
-StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
-        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-const uint objectBufferIndex = perMeshInstanceBuffer[rec.instanceIndex].perObjectBufferIndex;
-StructuredBuffer<PerObjectBuffer> perObjectBuffer =
-        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
-const row_major matrix objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
-
-StructuredBuffer<Camera> cameras =
-        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
-const Camera camera = cameras[rec.viewId];
-
-StructuredBuffer<CullingCameraInfo> cameraInfos =
-        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
-const CullingCameraInfo cam = cameraInfos[rec.viewId];
-ConstantBuffer<PerFrameBuffer> perFrameBuffer =
-        ResourceDescriptorHeap[0]; // TODO: fix
+    [MaxRecords(32)] NodeOutput<MeshletBucketRecord> ClusterCullBuckets) {
+    const TraverseRecord rec = inRecs[0];
+    StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+    const MeshInstanceClodOffsets off = clodOffsets[rec.instanceIndex];
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+    const uint objectBufferIndex = perMeshInstanceBuffer[rec.instanceIndex].perObjectBufferIndex;
+    StructuredBuffer<PerObjectBuffer> perObjectBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
+    const row_major matrix objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
+    StructuredBuffer<Camera> cameras =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+    const Camera camera = cameras[rec.viewId];
+    StructuredBuffer<CullingCameraInfo> cameraInfos =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
+    const CullingCameraInfo cam = cameraInfos[rec.viewId];
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
 
     // ----------------------------
     // Case A: BVH node expansion
     // ----------------------------
-    if (rec.kind == 0) // Node
-    {
-StructuredBuffer<ClusterLODNode> lodNodes =
+    if (rec.kind == 0) { // Node
+        StructuredBuffer<ClusterLODNode> lodNodes =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Nodes)];
 
-const ClusterLODNode node = lodNodes[off.lodNodesBase + rec.id];
+        const ClusterLODNode node = lodNodes[off.lodNodesBase + rec.id];
 
-const float3 nodeCenterObjectSpace = node.metric.centerAndRadius.xyz;
-const float3 nodeCenterViewSpace = ToViewSpace(nodeCenterObjectSpace, objectModelMatrix, camera.view);
-const float nodeRadiusWorld = node.metric.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
-const bool nodeCulled = SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, camera);
+        const float3 nodeCenterObjectSpace = node.metric.centerAndRadius.xyz;
+        const float3 nodeCenterViewSpace = ToViewSpace(nodeCenterObjectSpace, objectModelMatrix, camera.view);
+        const float nodeRadiusWorld = node.metric.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
+        const bool nodeCulled = SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, camera);
 
-        if (nodeCulled)
-        {
+        if (nodeCulled) {
             ThreadNodeOutputRecords<TraverseRecord> o =
                 Traverse.GetThreadNodeOutputRecords(0);
             o.OutputComplete();
             return;
         }
 
-float4 nodeCenterObjectSpace4 = float4(nodeCenterObjectSpace, 1.0f);
-float3 nodeCenterWorldSpace = mul(nodeCenterObjectSpace4, objectModelMatrix).xyz;
-float nodeProjectedError = ProjectedErrorPixels(
+        float4 nodeCenterObjectSpace4 = float4(nodeCenterObjectSpace, 1.0f);
+        float3 nodeCenterWorldSpace = mul(nodeCenterObjectSpace4, objectModelMatrix).xyz;
+        float nodeProjectedError = ProjectedErrorPixels(
             nodeCenterWorldSpace,
             nodeRadiusWorld,
             node.metric.maxQuadricError,
@@ -312,9 +293,8 @@ float nodeProjectedError = ProjectedErrorPixels(
             perFrameBuffer.screenResY,
             cam.zNear);
 
-const bool nodeWantsTraversal = nodeProjectedError > cam.errorPixels;
-        if (!nodeWantsTraversal)
-        {
+        const bool nodeWantsTraversal = nodeProjectedError > cam.errorPixels;
+        if (!nodeWantsTraversal) {
             ThreadNodeOutputRecords<TraverseRecord> o =
                 Traverse.GetThreadNodeOutputRecords(0);
             o.OutputComplete();
@@ -322,28 +302,22 @@ const bool nodeWantsTraversal = nodeProjectedError > cam.errorPixels;
         }
 
         // Internal BVH node: emit up to 32 children as new node records
-        if (node.range.isGroup == 0)
-        {
-const uint ci = gtid.x;
-const uint childCount = node.range.countMinusOne + 1;
+        if (node.range.isGroup == 0) {
+            const uint ci = gtid.x;
+            const uint childCount = node.range.countMinusOne + 1;
 
-const bool activeChild = (ci < childCount);
+            const bool activeChild = (ci < childCount);
 
             ThreadNodeOutputRecords<TraverseRecord> o =
                 Traverse.GetThreadNodeOutputRecords(activeChild ? 1 : 0);
 
-            if (activeChild)
-            {
-TraverseRecord r;
-                r.instanceIndex = rec.
-instanceIndex;
-                r.viewId        = rec.
-viewId;
-                r.kind          = 0; // Node
-                r.id            = node.range.indexOrOffset +
-ci; // child node id (relative to lodNodesBase)
-                o.Get() =
-r;
+            if (activeChild) {
+                TraverseRecord r;
+                r.instanceIndex = rec.instanceIndex;
+                r.viewId = rec.viewId;
+                r.kind = 0; // Node
+                r.id = node.range.indexOrOffset + ci; // child node id (relative to lodNodesBase)
+                o.Get() = r;
             }
             o.OutputComplete();
             return;
@@ -351,25 +325,19 @@ r;
 
         // Leaf BVH node that references a group:
         // emit exactly 1 group record so the *group* code path can run with 32 threads
-        if (gtid.x == 0)
-        {
+        if (gtid.x == 0) {
             ThreadNodeOutputRecords<TraverseRecord> o =
                 Traverse.GetThreadNodeOutputRecords(1);
 
-TraverseRecord r;
-            r.instanceIndex = rec.
-instanceIndex;
-            r.viewId        = rec.
-viewId;
-            r.kind          = 1; // Group
-            r.id            = node.range.
-indexOrOffset; // groupId (relative to groupsBase)
-            o.Get() =
-r;
+            TraverseRecord r;
+            r.instanceIndex = rec.instanceIndex;
+            r.viewId = rec.viewId;
+            r.kind = 1; // Group
+            r.id = node.range.indexOrOffset; // groupId (relative to groupsBase)
+            o.Get() = r;
             o.OutputComplete();
         }
-        else
-        {
+        else {
             // Must still call uniformly
             ThreadNodeOutputRecords<TraverseRecord> o =
                 Traverse.GetThreadNodeOutputRecords(0);
@@ -382,24 +350,23 @@ r;
     // Case B: Group evaluation
     // ----------------------------
     {
-const uint groupId = rec.id;
+        const uint groupId = rec.id;
 
-StructuredBuffer<ClusterLODGroup> groups =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
-StructuredBuffer<ClusterLODChild> children =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Children)];
+        StructuredBuffer<ClusterLODGroup> groups =
+                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+        StructuredBuffer<ClusterLODChild> children =
+                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Children)];
 
-const uint groupIndex = off.groupsBase + groupId;
-const ClusterLODGroup grp = groups[groupIndex];
-const uint childBase = off.childrenBase + grp.firstChild;
+        const uint groupIndex = off.groupsBase + groupId;
+        const ClusterLODGroup grp = groups[groupIndex];
+        const uint childBase = off.childrenBase + grp.firstChild;
 
-const float3 groupCenterObjectSpace = grp.bounds.centerAndRadius.xyz;
-const float3 groupCenterViewSpace = ToViewSpace(groupCenterObjectSpace, objectModelMatrix, camera.view);
-const float groupRadiusWorld = grp.bounds.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
-const bool groupCulled = SphereOutsideFrustumViewSpace(groupCenterViewSpace, groupRadiusWorld, camera);
+        const float3 groupCenterObjectSpace = grp.bounds.centerAndRadius.xyz;
+        const float3 groupCenterViewSpace = ToViewSpace(groupCenterObjectSpace, objectModelMatrix, camera.view);
+        const float groupRadiusWorld = grp.bounds.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
+        const bool groupCulled = SphereOutsideFrustumViewSpace(groupCenterViewSpace, groupRadiusWorld, camera);
 
-        if (groupCulled)
-        {
+        if (groupCulled) {
             ThreadNodeOutputRecords<TraverseRecord> noTraverse =
                 Traverse.GetThreadNodeOutputRecords(0);
             noTraverse.OutputComplete();
@@ -410,9 +377,9 @@ const bool groupCulled = SphereOutsideFrustumViewSpace(groupCenterViewSpace, gro
             return;
         }
 
-float4 groupCenterObjectSpace4 = float4(groupCenterObjectSpace, 1.0f);
-float3 groupCenterWorldSpace = mul(groupCenterObjectSpace4, objectModelMatrix).xyz;
-float groupProjectedError = ProjectedErrorPixels(
+        float4 groupCenterObjectSpace4 = float4(groupCenterObjectSpace, 1.0f);
+        float3 groupCenterWorldSpace = mul(groupCenterObjectSpace4, objectModelMatrix).xyz;
+        float groupProjectedError = ProjectedErrorPixels(
             groupCenterWorldSpace,
             groupRadiusWorld,
             grp.bounds.error,
@@ -421,9 +388,8 @@ float groupProjectedError = ProjectedErrorPixels(
             perFrameBuffer.screenResY,
             cam.zNear);
 
-const bool groupWantsTraversal = groupProjectedError > cam.errorPixels;
-        if (!groupWantsTraversal)
-        {
+        const bool groupWantsTraversal = groupProjectedError > cam.errorPixels;
+        if (!groupWantsTraversal) {
             ThreadNodeOutputRecords<TraverseRecord> noTraverse =
                 Traverse.GetThreadNodeOutputRecords(0);
             noTraverse.OutputComplete();
@@ -434,31 +400,29 @@ const bool groupWantsTraversal = groupProjectedError > cam.errorPixels;
             return;
         }
 
-const uint ci = gtid.x;
-const bool activeChild = (ci < grp.childCount);
+        const uint ci = gtid.x;
+        const bool activeChild = (ci < grp.childCount);
 
-ClusterLODChild child = (ClusterLODChild) 0;
-bool generatingGroupWantsTraversal = false;
-bool hasGeneratingGroup = false;
+        ClusterLODChild child = (ClusterLODChild) 0;
+        bool generatingGroupWantsTraversal = false;
+        bool hasGeneratingGroup = false;
 
-        if (activeChild)
-        {
+        if (activeChild) {
             child = children[childBase + ci];
 
-            if (child.refinedGroup >= 0)
-            {
+            if (child.refinedGroup >= 0) {
                 hasGeneratingGroup = true;
 
-const ClusterLODGroup refinedGrp = groups[off.groupsBase + (uint) child.refinedGroup];
+                const ClusterLODGroup refinedGrp = groups[off.groupsBase + (uint) child.refinedGroup];
 
-float4 objectSpaceCenter = float4(refinedGrp.bounds.centerAndRadius.xyz, 1.0);
-float3 worldSpaceCenter = mul(objectSpaceCenter, objectModelMatrix).xyz;
+                float4 objectSpaceCenter = float4(refinedGrp.bounds.centerAndRadius.xyz, 1.0);
+                float3 worldSpaceCenter = mul(objectSpaceCenter, objectModelMatrix).xyz;
 
-float worldRadius = refinedGrp.bounds.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
-float3 refinedViewSpaceCenter = mul(float4(worldSpaceCenter, 1.0f), camera.view).xyz;
-const bool refinedCulled = SphereOutsideFrustumViewSpace(refinedViewSpaceCenter, worldRadius, camera);
+                float worldRadius = refinedGrp.bounds.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
+                float3 refinedViewSpaceCenter = mul(float4(worldSpaceCenter, 1.0f), camera.view).xyz;
+                const bool refinedCulled = SphereOutsideFrustumViewSpace(refinedViewSpaceCenter, worldRadius, camera);
 
-float px = ProjectedErrorPixels(
+                float px = ProjectedErrorPixels(
                     worldSpaceCenter,
                     worldRadius,
                     refinedGrp.bounds.error,
@@ -482,36 +446,29 @@ float px = ProjectedErrorPixels(
 
         // Emit terminal bucket(s)
         {
-const bool forceBucket = !hasGeneratingGroup;
-bool emitBucket = activeChild && (child.localMeshletCount != 0)
-                           && (forceBucket || !generatingGroupWantsTraversal);
+            const bool forceBucket = !hasGeneratingGroup;
+            bool emitBucket = activeChild && (child.localMeshletCount != 0)
+                && (forceBucket || !generatingGroupWantsTraversal);
 
-const uint n = emitBucket ? 1 : 0;
+            const uint n = emitBucket ? 1 : 0;
 
             ThreadNodeOutputRecords<MeshletBucketRecord> o =
                 ClusterCullBuckets.GetThreadNodeOutputRecords(n);
 
-            if (n == 1)
-            {
-const uint idxBase = off.childLocalMeshletIndicesBase + child.firstLocalMeshletIndex;
+            if (n == 1) {
+                const uint idxBase = off.childLocalMeshletIndicesBase + child.firstLocalMeshletIndex;
 
-MeshletBucketRecord b;
-                b.instanceIndex = rec.
-instanceIndex;
-                b.viewId        = rec.
-viewId;
-                b.childLocalMeshletIndexBase =
-idxBase;
-                b.localMeshletCount          = child.
-localMeshletCount;
-                b.meshletsBase               = grp.
-firstMeshlet;
+                MeshletBucketRecord b;
+                b.instanceIndex = rec.instanceIndex;
+                b.viewId = rec. viewId;
+                b.childLocalMeshletIndexBase = idxBase;
+                b.localMeshletCount = child.localMeshletCount;
+                b.meshletsBase = grp.firstMeshlet;
 
-const uint groupsX = (b.localMeshletCount + 64 - 1) / 64;
+                const uint groupsX = (b.localMeshletCount + 64 - 1) / 64;
                 b.dispatchGrid = uint3(groupsX, 1, 1);
 
-                o.Get() =
-b;
+                o.Get() = b;
             }
 
             o.OutputComplete();
@@ -530,10 +487,8 @@ b;
 void WG_ClusterCullBuckets(
     DispatchNodeInputRecord< MeshletBucketRecord> inRec,
     uint3 DTid : SV_DispatchThreadID,
-    uint3 GTid : SV_GroupThreadID
-    //[MaxRecords(64)] NodeOutput<MeshletWorkRecord> Output // raster buckets, 2nd pass, etc.
-)
-{
+    uint3 GTid : SV_GroupThreadID){
+
     const MeshletBucketRecord b = inRec.Get();
     const uint i = DTid.x;
 
@@ -542,8 +497,7 @@ void WG_ClusterCullBuckets(
     uint meshletId = 0;
     bool survives = false;
 
-    if (inRange)
-    {
+    if (inRange) {
         StructuredBuffer<uint> childLocalMeshletIndices =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::ChildLocalMeshletIndices)];
 
@@ -578,8 +532,7 @@ void WG_ClusterCullBuckets(
 
     const uint n = (inRange && survives) ? 1 : 0;
 
-    if (n == 1)
-    {
+    if (n == 1) {
         RWStructuredBuffer<VisibleCluster> visibleClusters =
             ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
         RWStructuredBuffer<uint> visibleClusterCounter =

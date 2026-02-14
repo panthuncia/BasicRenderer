@@ -112,7 +112,7 @@ public:
 	void GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override {
 		// Add the hierarchical culling pass
 		RenderGraph::ExternalPassDesc cullPassDesc;
-		cullPassDesc.type = RenderGraph::PassType::Compute;
+		cullPassDesc.type = RenderGraph::PassType::Render;
 		cullPassDesc.name = "CLod::HierarchialCullingPass";
 		HierarchialCullingPassInputs cullPassInputs;
 		cullPassInputs.isFirstPass = true; // For now, always true
@@ -235,7 +235,7 @@ private:
         return seed;
     }
 
-    class HierarchialCullingPass : public ComputePass, public IDynamicDeclaredResources {
+    class HierarchialCullingPass : public RenderPass, public IDynamicDeclaredResources {
     public:
         HierarchialCullingPass(
             HierarchialCullingPassInputs inputs, 
@@ -262,7 +262,7 @@ private:
         ~HierarchialCullingPass() {
         }
 
-        void DeclareResourceUsages(ComputePassBuilder* builder) {
+        void DeclareResourceUsages(RenderPassBuilder* builder) override {
             auto ecsWorld = ECSManager::GetInstance().GetWorld();
             flecs::query<> drawSetIndicesQuery = ecsWorld.query_builder<>()
                 .with<Components::IsActiveDrawSetIndices>()
@@ -521,7 +521,7 @@ private:
         ~RasterBucketHistogramPass() {
         }
 
-        void DeclareResourceUsages(ComputePassBuilder* builder) {
+        void DeclareResourceUsages(ComputePassBuilder* builder) override {
             builder->WithShaderResource(
                 m_visibleClustersBuffer,
                 m_visibleClustersCounterBuffer,
