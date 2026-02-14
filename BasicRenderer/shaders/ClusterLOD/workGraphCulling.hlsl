@@ -2,6 +2,7 @@
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
 #include "include/indirectCommands.hlsli"
+#include "include/waveIntrinsicsHelpers.hlsli"
 #include "PerPassRootConstants/clodRootConstants.h"
 
 struct MeshInstanceClodOffsets
@@ -110,9 +111,6 @@ struct MeshletBucketRecord
 
     uint3 dispatchGrid : SV_DispatchGrid; // drives broadcasting node launch
 };
-
-groupshared uint g_terminalChildMask;
-groupshared uint g_terminalMeshletCount;
 
 // struct MeshletWorkRecord
 // {
@@ -463,39 +461,34 @@ void WG_GroupEvaluate(
     // emit current group's bucket if this group's metric passed and generating group's metric did NOT pass.
     // Buckets with refinedGroup < 0 are highest detail and are forced.
 
-    if (gtid.x == 0) {
-        g_terminalChildMask = 0;
-        g_terminalMeshletCount = 0;
-    }
-    GroupMemoryBarrierWithGroupSync();
-
     const bool forceBucket = !hasGeneratingGroup;
     const bool emitBucket = activeChild && (child.localMeshletCount != 0)
         && (forceBucket || !generatingGroupWantsTraversal);
 
-    if (emitBucket) {
-        const uint bit = (1u << gtid.x);
-        InterlockedOr(g_terminalChildMask, bit);
-        InterlockedAdd(g_terminalMeshletCount, child.localMeshletCount);
-    }
-    GroupMemoryBarrierWithGroupSync();
+    const uint4 terminalMaskBallot = WaveActiveBallot(emitBucket);
+    const uint terminalChildMask = terminalMaskBallot.x;
+    const uint terminalMeshletCount = WaveActiveSum(emitBucket ? child.localMeshletCount : 0u);
 
-    const uint outCount = (g_terminalMeshletCount != 0) ? 1u : 0u;
+    const uint outCount = (terminalMeshletCount != 0) ? 1u : 0u;
     GroupNodeOutputRecords<MeshletBucketRecord> outBuckets =
         ClusterCullBuckets.GetGroupNodeOutputRecords(outCount);
 
-    if ((outCount == 1) && (gtid.x == 0)) {
+    if (outCount == 1) {
+        const uint leaderLane = WaveFirstLaneFromMask(terminalMaskBallot);
+
+        if (WaveGetLaneIndex() == leaderLane) {
         MeshletBucketRecord b;
         b.instanceIndex = rec.instanceIndex;
         b.viewId = rec.viewId;
         b.groupId = groupId;
-        b.terminalChildMask = g_terminalChildMask;
-        b.totalLocalMeshletCount = g_terminalMeshletCount;
+            b.terminalChildMask = terminalChildMask;
+            b.totalLocalMeshletCount = terminalMeshletCount;
 
-        const uint groupsX = (b.totalLocalMeshletCount + 64 - 1) / 64;
-        b.dispatchGrid = uint3(groupsX, 1, 1);
+            const uint groupsX = (b.totalLocalMeshletCount + 64 - 1) / 64;
+            b.dispatchGrid = uint3(groupsX, 1, 1);
 
-        outBuckets.Get() = b;
+            outBuckets.Get() = b;
+        }
     }
 
     outBuckets.OutputComplete();
@@ -588,22 +581,34 @@ void WG_ClusterCullBuckets(
         }
     }
 
-    const uint n = (inRange && survives) ? 1 : 0;
+    const bool contributes = inRange && survives;
+    const uint4 survivingMask = WaveActiveBallot(contributes);
+    const uint survivingCount = CountBits128(survivingMask);
 
-    if (n == 1) {
+    if (survivingCount > 0) {
         RWStructuredBuffer<VisibleCluster> visibleClusters =
             ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
         RWStructuredBuffer<uint> visibleClusterCounter =
             ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
-        
-        // Atomically get an index to write to
-        uint index = 0;
-        InterlockedAdd(visibleClusterCounter[0], 1, index);
 
-        VisibleCluster vc = (VisibleCluster) 0;
-        vc.instanceID = b.instanceIndex;
-        vc.meshletID = meshletId;
-        vc.viewID = b.viewId;
-        visibleClusters[index] = vc;
+        const uint leaderLane = WaveFirstLaneFromMask(survivingMask);
+        const uint laneRank = GetLaneRankInGroup(survivingMask, WaveGetLaneIndex());
+
+        uint baseIndex = 0;
+        if (WaveGetLaneIndex() == leaderLane) {
+            InterlockedAdd(visibleClusterCounter[0], survivingCount, baseIndex);
+        }
+
+        baseIndex = WaveReadLaneAt(baseIndex, leaderLane);
+
+        if (contributes) {
+            const uint index = baseIndex + laneRank;
+
+            VisibleCluster vc = (VisibleCluster) 0;
+            vc.instanceID = b.instanceIndex;
+            vc.meshletID = meshletId;
+            vc.viewID = b.viewId;
+            visibleClusters[index] = vc;
+        }
     }
 }
