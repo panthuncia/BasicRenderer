@@ -898,6 +898,7 @@ void RenderGraph::CompileStructural() {
 	// Sentinels (must not collide with real pass names)
 	static constexpr const char* kBeginKey = "__rg_begin__";
 	static constexpr const char* kAfterBaseKey = "__rg_after_base__";
+	static constexpr const char* kEndKey = "__rg_end__"; // legacy alias for end-of-base anchor
 	static constexpr const char* kFirstBaseKey = "__rg_first_base__"; // optional helper token
 
 	struct ExtItem {
@@ -1006,6 +1007,7 @@ void RenderGraph::CompileStructural() {
 	keyToIdx.reserve(2 + base.size() + extItems.size());
 	keyToIdx.emplace(nodes[beginIdx].key, beginIdx);
 	keyToIdx.emplace(nodes[afterBaseIdx].key, afterBaseIdx);
+	keyToIdx.emplace(kEndKey, afterBaseIdx);
 
 	// Add base pass nodes (preserve current base order deterministically)
 	std::vector<size_t> baseIdx;

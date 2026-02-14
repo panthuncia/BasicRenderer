@@ -1150,7 +1150,7 @@ void Renderer::CreateRenderGraph() {
     if (m_currentEnvironment != nullptr) {
         newGraph->RegisterResource(Builtin::Environment::CurrentCubemap, m_currentEnvironment->GetEnvironmentCubemap()->ImagePtr());
         newGraph->RegisterResource(Builtin::Environment::CurrentPrefilteredCubemap, m_currentEnvironment->GetEnvironmentPrefilteredCubemap());
-        newGraph->BuildRenderPass("SkyboxPass")
+        newGraph->BuildComputePass("SkyboxPass")
             .Build<SkyboxRenderPass>();
     }
 

@@ -30,7 +30,7 @@ void DeferredCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     
     Texture2D<float> depthTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::LinearDepthMap)];
     float depth = depthTexture[pixel];
-    if (depth == 0x7F7FFFFF) // TODO: When we need more shading paths, we will move to prefix sum and indirect dispatch
+    if (asuint(depth) == 0x7F7FFFFF) // TODO: When we need more shading paths, we will move to prefix sum and indirect dispatch
     {
         // No geometry here
         return;

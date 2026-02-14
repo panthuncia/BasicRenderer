@@ -1,45 +1,53 @@
+#include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
 
-// point-clamp at s0
-SamplerState g_pointClamp : register(s0);
-
-// linear-clamp at s1
-SamplerState g_linearClamp : register(s1);
-
-cbuffer RootConstants1 : register(b0)
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void SkyboxCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    matrix viewProjectionMatrix;
-};
+    const uint linearDepthMapSRVIndex = UintRootConstant0;
+    const uint cameraBufferSRVIndex = UintRootConstant1;
+    const uint environmentInfoSRVIndex = UintRootConstant2;
+    const uint hdrTargetUAVIndex = UintRootConstant3;
 
-cbuffer RootConstants2 : register(b1)
-{
-    uint environmentBufferDescriptorIndex;
-};
-
-// Vertex Shader
-struct VS_OUTPUT
-{
-    float4 position : SV_POSITION;
-    float3 direction : TEXCOORD1;
-};
-
-VS_OUTPUT VSMain(float3 pos : POSITION)
-{
-    VS_OUTPUT output;
-    output.direction = normalize(pos);
-    output.position = mul(viewProjectionMatrix, float4(pos, 1.0f));
-    output.position.z = output.position.w - 0.00001;
-    return output;
-}
-
-// Pixel Shader
-
-float4 PSMain(VS_OUTPUT input) : SV_TARGET {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    StructuredBuffer<EnvironmentInfo> environmentInfo = ResourceDescriptorHeap[environmentBufferDescriptorIndex];
-    EnvironmentInfo envInfo = environmentInfo[perFrameBuffer.activeEnvironmentIndex];
+
+    const uint screenW = perFrameBuffer.screenResX;
+    const uint screenH = perFrameBuffer.screenResY;
+
+    if (dispatchThreadId.x >= screenW || dispatchThreadId.y >= screenH)
+    {
+        return;
+    }
+
+    const uint2 pixel = dispatchThreadId.xy;
+
+    Texture2D<float> linearDepthTexture = ResourceDescriptorHeap[linearDepthMapSRVIndex];
+    const float linearDepth = linearDepthTexture[pixel];
+    const float noGeometryDepth = asfloat(0x7F7FFFFF);
+
+    if (linearDepth != noGeometryDepth)
+    {
+        return;
+    }
+
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[cameraBufferSRVIndex];
+    const Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
+
+    StructuredBuffer<EnvironmentInfo> environmentInfo = ResourceDescriptorHeap[environmentInfoSRVIndex];
+    const EnvironmentInfo envInfo = environmentInfo[perFrameBuffer.activeEnvironmentIndex];
+
+    float2 uv = (float2(pixel) + 0.5f) / float2(screenW, screenH);
+    uv.y = 1.0f - uv.y;
+    const float2 ndc = uv * 2.0f - 1.0f;
+
+    const float4 viewDirH = mul(float4(ndc, 1.0f, 1.0f), mainCamera.projectionInverse);
+    const float3 viewDir = normalize(viewDirH.xyz / max(abs(viewDirH.w), 1e-6f));
+    const float3 worldDir = normalize(mul(float4(viewDir, 0.0f), mainCamera.viewInverse).xyz);
+
     TextureCube<float4> skyboxTexture = ResourceDescriptorHeap[envInfo.cubeMapDescriptorIndex];
-    float3 color = skyboxTexture.Sample(g_linearClamp, input.direction.xyz).xyz;
-    
-    return float4(color, 1.0);
+    const float3 color = skyboxTexture.SampleLevel(g_linearClamp, worldDir, 0.0f).xyz;
+
+    RWTexture2D<float4> hdrTarget = ResourceDescriptorHeap[hdrTargetUAVIndex];
+    hdrTarget[pixel] = float4(color, 1.0f);
 }

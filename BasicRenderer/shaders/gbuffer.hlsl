@@ -463,12 +463,12 @@ void EvaluateGBufferOptimized(uint2 pixel)
     RWTexture2D<float2> motionVectorTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::MotionVectors)];
 
     //Debug meshlets
-    //float3 viewDir = normalize(gs_camPos - worldPosition);
-    //float4 debugColor = lightUints(md.drawcallAndMeshlet.y, worldNormal, viewDir);
+    float3 viewDir = normalize(gs_camPos - worldPosition);
+    float4 debugColor = lightUints(md.drawcallAndMeshlet.y, worldNormal, viewDir);
 
     normalsTexture[pixel].xyz = materialInputs.normalWS;
-    albedoTexture[pixel] = float4(materialInputs.albedo, materialInputs.ambientOcclusion);
-    //albedoTexture[pixel] = float4(debugColor.xyz, materialInputs.ambientOcclusion);
+    //albedoTexture[pixel] = float4(materialInputs.albedo, materialInputs.ambientOcclusion);
+    albedoTexture[pixel] = float4(debugColor.xyz, materialInputs.ambientOcclusion);
     emissiveTexture[pixel].xyz = materialInputs.emissive;
     metallicRoughnessTexture[pixel] = float2(materialInputs.metallic, materialInputs.roughness);
     motionVectorTexture[pixel] = motionVector;
