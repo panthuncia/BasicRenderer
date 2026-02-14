@@ -115,7 +115,7 @@ void ViewManager::UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo) {
 	cullInfo.positionWorldSpace = cameraInfo.positionWorldSpace;
 	cullInfo.projY = cameraInfo.jitteredProjection.r[1].m128_f32[1]; // [1][1]
 	cullInfo.zNear = cameraInfo.zNear;
-	cullInfo.errorPixels = 1.0f; // TODO: make configurable
+	cullInfo.errorPixels = 0.02f; // TODO: make configurable
 	m_cullingCameraBuffer->UpdateView(v->gpu.cullingCameraBufferView.get(), &cullInfo);
     
     if (m_events.onCameraUpdated) {
