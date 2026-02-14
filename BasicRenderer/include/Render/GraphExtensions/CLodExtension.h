@@ -975,10 +975,6 @@ private:
             for (auto& vb : m_visibilityBuffers) { // Dynamic per-frame
                 builder->WithUnorderedAccess(vb);
 			}
-
-            for (auto& db : m_debugBuffers) { // Dynamic per-frame
-				builder->WithRenderTarget(db);
-            }
         }
 
         void Setup() override {
@@ -1005,7 +1001,6 @@ private:
             auto numViews = context.viewManager->GetCameraBufferSize();
 
             m_visibilityBuffers.clear();
-            m_debugBuffers.clear();
 
             uint32_t maxViewWidth = 1;
             uint32_t maxViewHeight = 1;
@@ -1036,9 +1031,6 @@ private:
 
 					m_visibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
                 }
-                if (viewInfo->gpu.debugBuffer != nullptr) {
-                    m_debugBuffers.push_back(viewInfo->gpu.debugBuffer);
-				}
 			});
 
 			m_passWidth = maxViewWidth;
@@ -1072,15 +1064,6 @@ private:
             p.width = m_passWidth;
             p.height = m_passHeight;
             p.debugName = "CLod raster pass";
-
-            if (!m_debugBuffers.empty()) {
-                rhi::ColorAttachment debugAttachment;
-                debugAttachment.loadOp = rhi::LoadOp::Clear;
-                debugAttachment.storeOp = rhi::StoreOp::Store;
-                debugAttachment.rtv = m_debugBuffers[0]->GetRTVInfo(0).slot;
-                debugAttachment.clear = m_debugBuffers[0]->GetClearColor();
-                p.colors = rhi::Span<rhi::ColorAttachment>(&debugAttachment, 1);
-            }
 
             context.commandList.BeginPass(p);
 
@@ -1141,7 +1124,6 @@ private:
 
         std::vector<CLodViewRasterInfo> m_viewRasterInfos;
 		std::vector<std::shared_ptr<PixelBuffer>> m_visibilityBuffers;
-        std::vector<std::shared_ptr<PixelBuffer>> m_debugBuffers;
 
         std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
         std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_rasterBucketsHistogramBuffer;

@@ -60,7 +60,6 @@ struct ViewResources {
 	std::shared_ptr<PixelBuffer> depthMap = nullptr;
     std::shared_ptr<PixelBuffer> linearDepthMap = nullptr;
     std::shared_ptr<PixelBuffer> visibilityBuffer = nullptr;
-    std::shared_ptr<PixelBuffer> debugBuffer = nullptr;
 };
 
 struct View {
@@ -111,7 +110,6 @@ struct ViewEvents {
     std::function<void(const View&)> onCameraUpdated;
     std::function<void(const View&)> onDepthAttached;
 	std::function<void(const View&)> onVisibilityBufferAttached;
-	std::function<void(const View&)> onDebugBufferAttached;
 };
 
 class ViewManager : public IResourceProvider {
@@ -140,7 +138,6 @@ public:
         std::shared_ptr<PixelBuffer> linearDepth);
 
 	void AttachVisibilityBuffer(uint64_t viewID, std::shared_ptr<PixelBuffer> visibilityBuffer);
-	void AttachDebugBuffer(uint64_t viewID, std::shared_ptr<PixelBuffer> debugBuffer);
 
     // Update camera matrices/params
     void UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo);

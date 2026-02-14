@@ -4,12 +4,8 @@
 #include "PerPassRootConstants/clodRootConstants.h"
 #include "include/visibilityPacking.hlsli"
 
-struct VisibilityOutput {
-    uint4 debug;
-};
-
 [shader("pixel")]
-VisibilityOutput VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFrontFace, uint primID : SV_PrimitiveID) : SV_TARGET
+void VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFrontFace, uint primID : SV_PrimitiveID) : SV_TARGET
 {
     // Fetch view-specific output buffer + manual scissor rect
     StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
@@ -22,7 +18,7 @@ VisibilityOutput VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace
         pixel.x >= viewRasterInfo.scissorMaxX ||
         pixel.y >= viewRasterInfo.scissorMaxY)
     {
-        return (VisibilityOutput)0;
+        return;
     }
 
     uint visBufferUAVIndex = viewRasterInfo.visibilityUAVDescriptorIndex;
@@ -33,7 +29,7 @@ VisibilityOutput VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace
     if (pixel.x >= dims.x || pixel.y >= dims.y)
     {
         // Pixel outside of bounds
-        return (VisibilityOutput)0;
+        return;
     }
 
     // Need to check alpha for alpha-tested materials
@@ -45,8 +41,4 @@ VisibilityOutput VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace
     uint64_t output = PackVisKey(input.linearDepth, input.visibleClusterIndex, primID);
 
     InterlockedMin(visBuffer[pixel], output);
-
-    VisibilityOutput result;
-    result.debug = uint4(input.visibleClusterIndex, primID, 0, 0);
-    return result;
 }

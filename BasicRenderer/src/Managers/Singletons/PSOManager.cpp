@@ -521,20 +521,11 @@ PipelineState PSOManager::CreateClusterLODRasterPSO(
     rs.frontCCW = true;
     rhi::SubobjRaster soRaster{ rs };
 
-    // Debug RTV
-    rhi::RenderTargets rts{};
-
-    rts.count = 1;
-    rts.formats[0] = rhi::Format::R32G32B32A32_UInt; // packed visibility
-
-    rhi::SubobjRTVs soRTV{ rts };
-
     const rhi::PipelineStreamItem items[] = {
         rhi::Make(soLayout),
         rhi::Make(soMesh),
         rhi::Make(soPS),
         rhi::Make(soRaster),
-		rhi::Make(soRTV),
     };
 
     auto dev = DeviceManager::GetInstance().GetDevice();
