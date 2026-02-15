@@ -155,6 +155,15 @@ void DebugGridCSMain(uint3 dtid : SV_DispatchThreadID)
 
     float3 hit = camPos + rayDir * t;
 
+    // Depth-aware occlusion against scene linear depth (-viewSpaceZ)
+    Texture2D<float> linearDepthTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::LinearDepthMap)];
+    float sceneLinearDepth = linearDepthTexture[clampedPix];
+    const float noGeometryDepth = asfloat(0x7F7FFFFF);
+
+    float gridLinearDepth = -mul(float4(hit, 1.0), cam.view).z;
+    const float depthEpsilon = 1e-3;
+    bool occludedByScene = (sceneLinearDepth != noGeometryDepth) && (sceneLinearDepth + depthEpsilon < gridLinearDepth);
+
     // Camera-relative snapping to reduce far-from-origin precision issues
     float2 camXZ = camPos.xz;
 
@@ -179,7 +188,7 @@ void DebugGridCSMain(uint3 dtid : SV_DispatchThreadID)
     float aAxisZ = axisZ * axisOp * overallOp;
 
     // Mask out invalid hits
-    float valid = hitValid ? 1.0 : 0.0;
+    float valid = (hitValid && !occludedByScene) ? 1.0 : 0.0;
     aMinor *= valid;
     aMajor *= valid;
     aAxisX *= valid;

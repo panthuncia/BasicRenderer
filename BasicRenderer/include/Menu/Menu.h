@@ -1348,8 +1348,17 @@ inline void Menu::DrawCLodTelemetryWindow() {
         };
 
         ImGui::TextUnformatted("Traverse coalesced input histogram (records per launch):");
-        for (uint32_t i = 0; i < traverseInputHistogram.size(); ++i) {
-            ImGui::Text("  %u: %u", i + 1, traverseInputHistogram[i]);
+        float histogramValues[8] = {};
+        for (size_t i = 0; i < traverseInputHistogram.size(); ++i) {
+            histogramValues[i] = static_cast<float>(traverseInputHistogram[i]);
+        }
+
+        static const char* kHistogramLabels[8] = { "1", "2", "3", "4", "5", "6", "7", "8" };
+        if (ImPlot::BeginPlot("##TraverseCoalescedInputHistogram", ImVec2(-1.0f, 150.0f), ImPlotFlags_NoLegend)) {
+            ImPlot::SetupAxes("Records", "Launches", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+            ImPlot::SetupAxisTicks(ImAxis_X1, 0.0, 7.0, 8, kHistogramLabels);
+            ImPlot::PlotBars("Launches", histogramValues, 8, 0.6f, 0.0f);
+            ImPlot::EndPlot();
         }
 
         ImGui::Text("GroupEvaluate outcomes: groups=%u culled=%u rejectedByError=%u emitBucket=%u refinedTraversal=%u",
