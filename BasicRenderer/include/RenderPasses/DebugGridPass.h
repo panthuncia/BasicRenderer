@@ -51,7 +51,8 @@ public:
     void DeclareResourceUsages(ComputePassBuilder* builder) override
     {
         builder
-            ->WithShaderResource(Builtin::CameraBuffer)
+            ->WithShaderResource(Builtin::CameraBuffer,
+                Builtin::PrimaryCamera::LinearDepthMap)
             // Needs UAV, since compute will read-modify-write (manual blend)
             .WithUnorderedAccess(Builtin::PostProcessing::UpscaledHDR);
     }
@@ -59,6 +60,7 @@ public:
     void Setup() override
     {
         RegisterSRV(Builtin::CameraBuffer);
+        RegisterSRV(Builtin::PrimaryCamera::LinearDepthMap);
         RegisterUAV(Builtin::PostProcessing::UpscaledHDR);
     }
 
