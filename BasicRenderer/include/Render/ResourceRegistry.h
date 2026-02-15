@@ -209,6 +209,13 @@ public:
         ResourceKey key = InternKey(id);
         Slot& s = slots[key.idx];
 
+        // If this slot previously pointed at a different resource pointer,
+        // remove its reverse-map entry so stale pointer->handle lookups
+        // do not survive replacement.
+        if (s.resource) {
+            resourceToHandle.erase(s.resource.get());
+        }
+
         s.resource = res;
         s.generation++; // bump on replacement
         s.alive = true;

@@ -17,11 +17,12 @@ public:
         uint32_t localIndex = 0;
 
         for (auto& capture : captures) {
-            if (!capture.resource) {
+            auto resource = capture.resource.lock();
+            if (!resource) {
                 continue;
             }
 
-            auto handle = rg.RequestResourceHandle(capture.resource, /*allowFailure=*/true);
+            auto handle = rg.RequestResourceHandle(resource.get(), /*allowFailure=*/true);
             if (handle.GetGeneration() == 0) {
                 continue;
             }

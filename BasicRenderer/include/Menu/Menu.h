@@ -255,7 +255,7 @@ private:
 
 	RenderGraph* m_renderGraph;
 
-    struct CLodDeepCaptureStats {
+    struct CLodCaptureStats {
         uint32_t visibleClusterCount = 0;
         uint32_t uniqueViews = 0;
         uint32_t uniqueInstances = 0;
@@ -273,15 +273,14 @@ private:
     bool m_clodTelemetryCapturePending = false;
     uint64_t m_clodTelemetryCaptureCount = 0;
     std::string m_clodTelemetryStatus = "No captures yet.";
-    bool m_clodTelemetryDeepCaptureEnabled = false;
-    bool m_clodDeepCapturePending = false;
-    uint64_t m_clodDeepCaptureId = 0;
-    bool m_clodDeepHasPendingCounter = false;
-    bool m_clodDeepHasPendingClusters = false;
-    uint32_t m_clodDeepPendingVisibleCount = 0;
-    std::vector<VisibleCluster> m_clodDeepPendingClusters;
-    bool m_clodDeepStatsAvailable = false;
-    CLodDeepCaptureStats m_clodDeepStats{};
+    bool m_clodCaptureStatsPending = false;
+    uint64_t m_clodCaptureStatsId = 0;
+    bool m_clodCaptureHasPendingCounter = false;
+    bool m_clodCaptureHasPendingClusters = false;
+    uint32_t m_clodCapturePendingVisibleCount = 0;
+    std::vector<VisibleCluster> m_clodCapturePendingClusters;
+    bool m_clodCaptureStatsAvailable = false;
+    CLodCaptureStats m_clodCaptureStats{};
 
     flecs::query<const Components::Resource> m_telemetryQuery;
 	flecs::query<const Components::Resource> m_visibleClustersQuery;
@@ -289,7 +288,7 @@ private:
 
     int FindFileIndex(const std::vector<std::string>& hdrFiles, const std::string& existingFile);
     void DrawCLodTelemetryWindow();
-    void TryFinalizeCLodDeepCapture(uint64_t captureId);
+    void TryFinalizeCLodCaptureStats(uint64_t captureId);
 
     void DrawEnvironmentsDropdown();
 	void DrawOutputTypeDropdown();
@@ -1059,17 +1058,17 @@ inline void Menu::DisplaySelectedNode() {
     }
 }
 
-inline void Menu::TryFinalizeCLodDeepCapture(uint64_t captureId) {
-    if (!m_clodDeepCapturePending || m_clodDeepCaptureId != captureId) {
+inline void Menu::TryFinalizeCLodCaptureStats(uint64_t captureId) {
+    if (!m_clodCaptureStatsPending || m_clodCaptureStatsId != captureId) {
         return;
     }
 
-    if (!m_clodDeepHasPendingCounter || !m_clodDeepHasPendingClusters) {
+    if (!m_clodCaptureHasPendingCounter || !m_clodCaptureHasPendingClusters) {
         return;
     }
 
-    const uint32_t requestedCount = m_clodDeepPendingVisibleCount;
-    const uint32_t availableCount = static_cast<uint32_t>(m_clodDeepPendingClusters.size());
+    const uint32_t requestedCount = m_clodCapturePendingVisibleCount;
+    const uint32_t availableCount = static_cast<uint32_t>(m_clodCapturePendingClusters.size());
     const uint32_t decodeCount = (std::min)(requestedCount, availableCount);
 
     std::unordered_map<uint32_t, uint32_t> viewHistogram;
@@ -1081,14 +1080,14 @@ inline void Menu::TryFinalizeCLodDeepCapture(uint64_t captureId) {
     uniqueMeshlets.reserve(decodeCount > 0 ? decodeCount : 1);
 
     for (uint32_t i = 0; i < decodeCount; ++i) {
-        const VisibleCluster& cluster = m_clodDeepPendingClusters[i];
+        const VisibleCluster& cluster = m_clodCapturePendingClusters[i];
         viewHistogram[cluster.viewID]++;
         instanceHistogram[cluster.instanceID]++;
         const uint64_t key = (static_cast<uint64_t>(cluster.instanceID) << 32ull) | static_cast<uint64_t>(cluster.meshletID);
         uniqueMeshlets.insert(key);
     }
 
-    CLodDeepCaptureStats stats{};
+    CLodCaptureStats stats{};
     stats.visibleClusterCount = decodeCount;
     stats.uniqueViews = static_cast<uint32_t>(viewHistogram.size());
     stats.uniqueInstances = static_cast<uint32_t>(instanceHistogram.size());
@@ -1112,12 +1111,12 @@ inline void Menu::TryFinalizeCLodDeepCapture(uint64_t captureId) {
         stats.dominantInstancePercent = 100.0f * static_cast<float>(stats.maxClustersPerInstance) / static_cast<float>(decodeCount);
     }
 
-    m_clodDeepStats = stats;
-    m_clodDeepStatsAvailable = true;
-    m_clodDeepCapturePending = false;
+    m_clodCaptureStats = stats;
+    m_clodCaptureStatsAvailable = true;
+    m_clodCaptureStatsPending = false;
 
     spdlog::info(
-        "CLod WG deep capture: visible={}, views={}, instances={}, uniqueMeshlets={}, maxPerView={}, maxPerInstance={}",
+        "CLod WG stats capture: visible={}, views={}, instances={}, uniqueMeshlets={}, maxPerView={}, maxPerInstance={}",
         stats.visibleClusterCount,
         stats.uniqueViews,
         stats.uniqueInstances,
@@ -1158,12 +1157,11 @@ inline void Menu::DrawCLodTelemetryWindow() {
             });
     }
 
-    const bool deepCaptureResourcesReady = (clodVisibleClustersResource != nullptr) && (clodVisibleCounterResource != nullptr);
-    const bool canCapture = (clodTelemetryResource != nullptr) && (!m_clodTelemetryCapturePending);
+    const bool captureStatsResourcesReady = (clodVisibleClustersResource != nullptr) && (clodVisibleCounterResource != nullptr);
+    const bool canCapture = (clodTelemetryResource != nullptr) && (!m_clodTelemetryCapturePending) && (!m_clodCaptureStatsPending);
 
-    ImGui::Checkbox("Enable deep capture", &m_clodTelemetryDeepCaptureEnabled);
-    if (!deepCaptureResourcesReady && m_clodTelemetryDeepCaptureEnabled) {
-        ImGui::TextDisabled("Deep capture unavailable: visible cluster resources not found.");
+    if (!captureStatsResourcesReady) {
+        ImGui::TextDisabled("Extended stats unavailable: visible cluster resources not found.");
     }
 
     if (!canCapture) {
@@ -1173,14 +1171,14 @@ inline void Menu::DrawCLodTelemetryWindow() {
         m_clodTelemetryCapturePending = true;
         m_clodTelemetryStatus = "Capture requested.";
 
-        const bool requestDeepCapture = m_clodTelemetryDeepCaptureEnabled && deepCaptureResourcesReady;
-        if (requestDeepCapture) {
-            m_clodDeepCapturePending = true;
-            m_clodDeepCaptureId++;
-            m_clodDeepHasPendingCounter = false;
-            m_clodDeepHasPendingClusters = false;
-            m_clodDeepPendingVisibleCount = 0;
-            m_clodDeepPendingClusters.clear();
+        const bool requestCaptureStats = captureStatsResourcesReady;
+        if (requestCaptureStats) {
+            m_clodCaptureStatsPending = true;
+            m_clodCaptureStatsId++;
+            m_clodCaptureHasPendingCounter = false;
+            m_clodCaptureHasPendingClusters = false;
+            m_clodCapturePendingVisibleCount = 0;
+            m_clodCapturePendingClusters.clear();
         }
 
         ReadbackManager::GetInstance().RequestReadbackCapture(
@@ -1232,27 +1230,27 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     visibleWrites);
             });
 
-        if (requestDeepCapture) {
-            const uint64_t captureId = m_clodDeepCaptureId;
+        if (requestCaptureStats) {
+            const uint64_t captureId = m_clodCaptureStatsId;
 
             ReadbackManager::GetInstance().RequestReadbackCapture(
                 "CLod::HierarchialCullingPass",
                 clodVisibleCounterResource,
                 RangeSpec{},
                 [this, captureId](ReadbackCaptureResult&& result) {
-                    if (!m_clodDeepCapturePending || m_clodDeepCaptureId != captureId) {
+                    if (!m_clodCaptureStatsPending || m_clodCaptureStatsId != captureId) {
                         return;
                     }
 
                     if (result.data.size() < sizeof(uint32_t)) {
-                        m_clodTelemetryStatus = "Deep capture failed: counter payload too small.";
-                        m_clodDeepCapturePending = false;
+                        m_clodTelemetryStatus = "Capture failed: visible counter payload too small.";
+                        m_clodCaptureStatsPending = false;
                         return;
                     }
 
-                    std::memcpy(&m_clodDeepPendingVisibleCount, result.data.data(), sizeof(uint32_t));
-                    m_clodDeepHasPendingCounter = true;
-                    TryFinalizeCLodDeepCapture(captureId);
+                    std::memcpy(&m_clodCapturePendingVisibleCount, result.data.data(), sizeof(uint32_t));
+                    m_clodCaptureHasPendingCounter = true;
+                    TryFinalizeCLodCaptureStats(captureId);
                 });
 
             ReadbackManager::GetInstance().RequestReadbackCapture(
@@ -1260,22 +1258,22 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 clodVisibleClustersResource,
                 RangeSpec{},
                 [this, captureId](ReadbackCaptureResult&& result) {
-                    if (!m_clodDeepCapturePending || m_clodDeepCaptureId != captureId) {
+                    if (!m_clodCaptureStatsPending || m_clodCaptureStatsId != captureId) {
                         return;
                     }
 
                     const size_t clusterBytes = sizeof(VisibleCluster);
                     const size_t count = result.data.size() / clusterBytes;
-                    m_clodDeepPendingClusters.resize(count);
+                    m_clodCapturePendingClusters.resize(count);
                     if (count > 0) {
-                        std::memcpy(m_clodDeepPendingClusters.data(), result.data.data(), count * clusterBytes);
+                        std::memcpy(m_clodCapturePendingClusters.data(), result.data.data(), count * clusterBytes);
                     }
 
-                    m_clodDeepHasPendingClusters = true;
-                    TryFinalizeCLodDeepCapture(captureId);
+                    m_clodCaptureHasPendingClusters = true;
+                    TryFinalizeCLodCaptureStats(captureId);
                 });
 
-            m_clodTelemetryStatus = "Capture requested (deep mode).";
+            m_clodTelemetryStatus = "Capture requested (extended stats).";
         }
     }
     if (!canCapture) {
@@ -1343,28 +1341,28 @@ inline void Menu::DrawCLodTelemetryWindow() {
     }
 
     ImGui::Separator();
-    ImGui::TextUnformatted("Deep capture statistics");
-    if (m_clodDeepCapturePending) {
-        ImGui::Text("Deep capture status: pending...");
+    ImGui::TextUnformatted("Extended capture statistics");
+    if (m_clodCaptureStatsPending) {
+        ImGui::Text("Capture stats status: pending...");
     }
-    else if (!m_clodDeepStatsAvailable) {
-        ImGui::TextDisabled("No deep capture results yet.");
+    else if (!m_clodCaptureStatsAvailable) {
+        ImGui::TextDisabled("No extended capture results yet.");
     }
     else {
-        ImGui::Text("Visible clusters: %u", m_clodDeepStats.visibleClusterCount);
+        ImGui::Text("Visible clusters: %u", m_clodCaptureStats.visibleClusterCount);
         ImGui::Text("Unique views: %u | Unique instances: %u | Unique meshlets: %u",
-            m_clodDeepStats.uniqueViews,
-            m_clodDeepStats.uniqueInstances,
-            m_clodDeepStats.uniqueMeshlets);
+            m_clodCaptureStats.uniqueViews,
+            m_clodCaptureStats.uniqueInstances,
+            m_clodCaptureStats.uniqueMeshlets);
         ImGui::Text("Avg clusters/view: %.2f | Avg clusters/instance: %.2f",
-            m_clodDeepStats.avgClustersPerView,
-            m_clodDeepStats.avgClustersPerInstance);
+            m_clodCaptureStats.avgClustersPerView,
+            m_clodCaptureStats.avgClustersPerInstance);
         ImGui::Text("Max clusters/view: %u (%.1f%% of total)",
-            m_clodDeepStats.maxClustersPerView,
-            m_clodDeepStats.dominantViewPercent);
+            m_clodCaptureStats.maxClustersPerView,
+            m_clodCaptureStats.dominantViewPercent);
         ImGui::Text("Max clusters/instance: %u (%.1f%% of total)",
-            m_clodDeepStats.maxClustersPerInstance,
-            m_clodDeepStats.dominantInstancePercent);
+            m_clodCaptureStats.maxClustersPerInstance,
+            m_clodCaptureStats.dominantInstancePercent);
     }
 
     ImGui::End();

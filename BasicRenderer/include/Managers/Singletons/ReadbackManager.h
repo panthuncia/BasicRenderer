@@ -23,7 +23,7 @@ struct ReadbackInfo {
 
 struct ReadbackCaptureInfo {
     std::string passName;
-    Resource* resource = nullptr;
+    std::weak_ptr<Resource> resource;
     RangeSpec range{};
     ReadbackCaptureCallback callback;
 };

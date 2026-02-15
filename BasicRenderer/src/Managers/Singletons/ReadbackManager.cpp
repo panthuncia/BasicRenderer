@@ -287,10 +287,15 @@ void ReadbackManager::RequestReadbackCapture(
     const RangeSpec& range,
     ReadbackCaptureCallback callback)
 {
+    std::weak_ptr<Resource> weakResource;
+    if (resource) {
+        weakResource = resource->weak_from_this();
+    }
+
     std::scoped_lock lock(m_captureQueueMutex);
     m_queuedCaptures.push_back(ReadbackCaptureInfo{
         passName,
-        resource,
+        weakResource,
         range,
         std::move(callback)
         });
