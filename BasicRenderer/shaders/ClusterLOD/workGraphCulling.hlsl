@@ -478,7 +478,7 @@ void WG_TraverseNodes(
     outGroups.OutputComplete();
 }
 
-#define CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP 32
+#define CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP 64
 // Node: GroupEvaluate
 [Shader("node")]
 [NodeID("GroupEvaluate")]

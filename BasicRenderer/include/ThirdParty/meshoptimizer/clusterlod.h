@@ -25,6 +25,10 @@ struct clodConfig
 	bool partition_sort;
 	size_t partition_size;
 
+	// optional cap on number of distinct clodCluster::refined ids per output partition
+	// 0 disables the cap; useful for downstream pipelines that require bounded child fanout
+	size_t partition_max_refined_groups;
+
 	// clusterization setup; maps to meshopt_buildMeshletsSpatial / meshopt_buildMeshletsFlex
 	bool cluster_spatial;
 	float cluster_fill_weight;
@@ -279,7 +283,36 @@ static std::vector<Cluster> clusterize(const clodConfig& config, const clodMesh&
 static std::vector<std::vector<int> > partition(const clodConfig& config, const clodMesh& mesh, const std::vector<Cluster>& clusters, const std::vector<int>& pending, const std::vector<unsigned int>& remap)
 {
 	if (pending.size() <= config.partition_size)
-		return {pending};
+	{
+		if (config.partition_max_refined_groups == 0)
+			return {pending};
+
+		std::vector<int> refinedSet;
+		refinedSet.reserve(pending.size());
+		for (size_t i = 0; i < pending.size(); ++i)
+		{
+			const int refined = clusters[pending[i]].refined;
+			bool seen = false;
+			for (size_t j = 0; j < refinedSet.size(); ++j)
+			{
+				if (refinedSet[j] == refined)
+				{
+					seen = true;
+					break;
+				}
+			}
+
+			if (!seen)
+			{
+				refinedSet.push_back(refined);
+				if (refinedSet.size() > config.partition_max_refined_groups)
+					break;
+			}
+		}
+
+		if (refinedSet.size() <= config.partition_max_refined_groups)
+			return {pending};
+	}
 
 	std::vector<unsigned int> cluster_indices;
 	std::vector<unsigned int> cluster_counts(pending.size());
@@ -328,6 +361,80 @@ static std::vector<std::vector<int> > partition(const clodConfig& config, const 
 	// distribute clusters into partitions, applying spatial order if requested
 	for (size_t i = 0; i < pending.size(); ++i)
 		partitions[partition_remap.empty() ? cluster_part[i] : partition_remap[cluster_part[i]]].push_back(pending[i]);
+
+	if (config.partition_max_refined_groups > 0)
+	{
+		std::vector<std::vector<int> > limited;
+		limited.reserve(partitions.size());
+
+		for (size_t i = 0; i < partitions.size(); ++i)
+		{
+			const std::vector<int>& part = partitions[i];
+			if (part.empty())
+				continue;
+
+			std::vector<int> refinedKeys;
+			refinedKeys.reserve(part.size());
+			std::vector<std::vector<int> > refinedBuckets;
+			refinedBuckets.reserve(part.size());
+
+			for (size_t j = 0; j < part.size(); ++j)
+			{
+				const int clusterIndex = part[j];
+				const int refined = clusters[clusterIndex].refined;
+
+				size_t keyIndex = refinedKeys.size();
+				for (size_t k = 0; k < refinedKeys.size(); ++k)
+				{
+					if (refinedKeys[k] == refined)
+					{
+						keyIndex = k;
+						break;
+					}
+				}
+
+				if (keyIndex == refinedKeys.size())
+				{
+					refinedKeys.push_back(refined);
+					refinedBuckets.push_back(std::vector<int>());
+					refinedBuckets.back().reserve(8);
+				}
+
+				refinedBuckets[keyIndex].push_back(clusterIndex);
+			}
+
+			if (refinedBuckets.size() <= config.partition_max_refined_groups)
+			{
+				limited.push_back(part);
+				continue;
+			}
+
+			std::vector<int> current;
+			current.reserve(part.size());
+			size_t currentRefinedCount = 0;
+
+			for (size_t bucketIndex = 0; bucketIndex < refinedBuckets.size(); ++bucketIndex)
+			{
+				const std::vector<int>& bucket = refinedBuckets[bucketIndex];
+
+				if (!current.empty() && currentRefinedCount >= config.partition_max_refined_groups)
+				{
+					limited.push_back(std::move(current));
+					current = std::vector<int>();
+					current.reserve(part.size());
+					currentRefinedCount = 0;
+				}
+
+				current.insert(current.end(), bucket.begin(), bucket.end());
+				currentRefinedCount++;
+			}
+
+			if (!current.empty())
+				limited.push_back(std::move(current));
+		}
+
+		partitions = std::move(limited);
+	}
 
 	return partitions;
 }
@@ -517,6 +624,7 @@ clodConfig clodDefaultConfig(size_t max_triangles)
 
 	config.partition_spatial = true;
 	config.partition_size = 16;
+	config.partition_max_refined_groups = 0;
 
 	config.cluster_spatial = false;
 	config.cluster_split_factor = 2.0f;
