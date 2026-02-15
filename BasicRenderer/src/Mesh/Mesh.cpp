@@ -526,7 +526,7 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 			struct ChildBucket
 			{
 				int32_t refinedGroup = -1;
-				std::vector<uint32_t> locals; // meshlet indices local to this group
+				std::vector<uint32_t> clusterIndices; // indices into clusters[] belonging to this bucket
 			};
 
 			std::vector<ChildBucket> buckets;
@@ -540,22 +540,50 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 					auto it = bucketLookup.find(refined);
 					if (it != bucketLookup.end())
 					{
-						buckets[it->second].locals.push_back(localIndex);
+						buckets[it->second].clusterIndices.push_back(localIndex);
 						return;
 					}
 					const uint32_t newIdx = uint32_t(buckets.size());
 					bucketLookup[refined] = newIdx;
 					buckets.push_back(ChildBucket{ refined, {} });
-					buckets.back().locals.reserve(8);
-					buckets.back().locals.push_back(localIndex);
+					buckets.back().clusterIndices.reserve(8);
+					buckets.back().clusterIndices.push_back(localIndex);
 				};
 
+			// Gather cluster -> child-bucket membership first.
 			for (size_t i = 0; i < cluster_count; ++i)
 			{
 				const clodCluster& c = clusters[i];
-				const uint32_t triCount = uint32_t(c.index_count / 3);
-
 				add_to_bucket(int32_t(c.refined), uint32_t(i));
+			}
+
+			// Reorder child buckets so larger buckets are traversed first by the shader's flattened index mapping.
+			std::sort(
+				buckets.begin(),
+				buckets.end(),
+				[](const ChildBucket& a, const ChildBucket& b)
+				{
+					const bool aTerminal = (a.refinedGroup < 0);
+					const bool bTerminal = (b.refinedGroup < 0);
+					if (aTerminal != bTerminal)
+						return aTerminal > bTerminal;
+
+					if (a.clusterIndices.size() != b.clusterIndices.size())
+						return a.clusterIndices.size() > b.clusterIndices.size();
+					return a.refinedGroup < b.refinedGroup;
+				});
+
+			uint32_t localMeshletCursor = 0;
+
+			// Emit meshlets bucket-major so each child bucket maps to one contiguous local meshlet range.
+			for (const ChildBucket& bucket : buckets)
+			{
+				const uint32_t bucketLocalStart = localMeshletCursor;
+
+				for (uint32_t clusterIndex : bucket.clusterIndices)
+				{
+					const clodCluster& c = clusters[clusterIndex];
+					const uint32_t triCount = uint32_t(c.index_count / 3);
 
 				// Convert to meshlet-local indices
 				std::vector<unsigned int> localVerts(c.vertex_count);
@@ -599,29 +627,42 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 				m_clodMeshlets.push_back(ml);
 				m_clodMeshletBounds.push_back(sphere);
 				m_clodMeshletRefinedGroup.push_back(int32_t(c.refined));
-			}
 
-			// finalize child table for this group
-			ClusterLODGroup& grp = m_clodGroups.back();
-			grp.firstChild = uint32_t(m_clodChildren.size());
-			grp.childCount = uint32_t(buckets.size());
+				++localMeshletCursor;
+				}
 
-			maxChildrenObserved = std::max(maxChildrenObserved, grp.childCount);
-
-			for (const auto& b : buckets)
-			{
 				ClusterLODChild child{};
-				child.refinedGroup = b.refinedGroup;
-				child.firstLocalMeshletIndex = uint32_t(m_clodChildLocalMeshletIndices.size());
-				child.localMeshletCount = uint32_t(b.locals.size());
+				child.refinedGroup = bucket.refinedGroup;
+				child.firstLocalMeshletIndex = bucketLocalStart; // group-local contiguous start
+				child.localMeshletCount = uint32_t(bucket.clusterIndices.size());
 
 				m_clodChildren.push_back(child);
 
-				m_clodChildLocalMeshletIndices.insert(
-					m_clodChildLocalMeshletIndices.end(),
-					b.locals.begin(),
-					b.locals.end());
+				// Preserve compatibility buffer (identity mapping for contiguous local ranges).
+				for (uint32_t local = 0; local < child.localMeshletCount; ++local)
+				{
+					m_clodChildLocalMeshletIndices.push_back(child.firstLocalMeshletIndex + local);
+				}
 			}
+
+			assert(localMeshletCursor == meshletCount);
+
+			// finalize child table for this group
+			ClusterLODGroup& grp = m_clodGroups.back();
+			grp.childCount = uint32_t(buckets.size());
+			grp.terminalChildCount = 0;
+			for (const ChildBucket& bucket : buckets)
+			{
+				if (bucket.refinedGroup < 0)
+					grp.terminalChildCount++;
+				else
+					break;
+			}
+
+			maxChildrenObserved = std::max(maxChildrenObserved, grp.childCount);
+
+			// firstChild points to start of this group's child records that were just appended.
+			grp.firstChild = uint32_t(m_clodChildren.size()) - grp.childCount;
 
 			return groupId;
 		});

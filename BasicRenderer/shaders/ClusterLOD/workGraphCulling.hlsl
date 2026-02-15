@@ -26,7 +26,7 @@ struct ClodBounds
 struct ClusterLODChild
 {
     int refinedGroup; // -1 => terminal meshlets bucket
-    uint firstLocalMeshletIndex; // into ChildLocalMeshletIndices
+    uint firstLocalMeshletIndex; // group-local contiguous start meshlet index
     uint localMeshletCount;
     uint pad0;
 };
@@ -40,7 +40,8 @@ struct ClusterLODGroup
 
     uint firstChild;
     uint childCount;
-    uint2 pad1;
+    uint terminalChildCount;
+    uint pad1;
 };
 
 // meshopt_Meshlet layout on GPU
@@ -106,8 +107,8 @@ struct MeshletBucketRecord
     uint viewId;
 
     uint groupId;
-    uint terminalChildMask; // bit i => child i in this group contributes terminal meshlets
-    uint totalLocalMeshletCount;
+    uint childFirstLocalMeshletIndex;
+    uint childLocalMeshletCount;
 
     uint3 dispatchGrid : SV_DispatchGrid; // drives broadcasting node launch
 };
@@ -423,18 +424,18 @@ void WG_GroupEvaluate(
     }
 
     const uint ci = gtid.x;
-    const bool activeChild = (ci < grp.childCount);
+    const uint clampedChildCount = min(grp.childCount, 32u);
+    const bool activeChild = (ci < clampedChildCount);
 
     ClusterLODChild child = (ClusterLODChild) 0;
     bool generatingGroupWantsTraversal = false;
-    bool hasGeneratingGroup = false;
+    bool forceBucket = false;
 
     if (activeChild) {
         child = children[childBase + ci];
+        forceBucket = (ci < grp.terminalChildCount) || (child.refinedGroup < 0);
 
-        if (child.refinedGroup >= 0) {
-            hasGeneratingGroup = true;
-
+        if (!forceBucket && child.refinedGroup >= 0) {
             const ClusterLODGroup refinedGrp = groups[off.groupsBase + (uint) child.refinedGroup];
 
             float4 objectSpaceCenter = float4(refinedGrp.bounds.centerAndRadius.xyz, 1.0);
@@ -457,38 +458,25 @@ void WG_GroupEvaluate(
         }
     }
 
-    // NVIDIA-style cut selection:
-    // emit current group's bucket if this group's metric passed and generating group's metric did NOT pass.
-    // Buckets with refinedGroup < 0 are highest detail and are forced.
-
-    const bool forceBucket = !hasGeneratingGroup;
+    // Emit one record per terminal child bucket.
     const bool emitBucket = activeChild && (child.localMeshletCount != 0)
         && (forceBucket || !generatingGroupWantsTraversal);
 
-    const uint4 terminalMaskBallot = WaveActiveBallot(emitBucket);
-    const uint terminalChildMask = terminalMaskBallot.x;
-    const uint terminalMeshletCount = WaveActiveSum(emitBucket ? child.localMeshletCount : 0u);
+    ThreadNodeOutputRecords<MeshletBucketRecord> outBuckets =
+        ClusterCullBuckets.GetThreadNodeOutputRecords(emitBucket ? 1 : 0);
 
-    const uint outCount = (terminalMeshletCount != 0) ? 1u : 0u;
-    GroupNodeOutputRecords<MeshletBucketRecord> outBuckets =
-        ClusterCullBuckets.GetGroupNodeOutputRecords(outCount);
-
-    if (outCount == 1) {
-        const uint leaderLane = WaveFirstLaneFromMask(terminalMaskBallot);
-
-        if (WaveGetLaneIndex() == leaderLane) {
+    if (emitBucket) {
         MeshletBucketRecord b;
         b.instanceIndex = rec.instanceIndex;
         b.viewId = rec.viewId;
         b.groupId = groupId;
-            b.terminalChildMask = terminalChildMask;
-            b.totalLocalMeshletCount = terminalMeshletCount;
+        b.childFirstLocalMeshletIndex = child.firstLocalMeshletIndex;
+        b.childLocalMeshletCount = child.localMeshletCount;
 
-            const uint groupsX = (b.totalLocalMeshletCount + 64 - 1) / 64;
-            b.dispatchGrid = uint3(groupsX, 1, 1);
+        const uint groupsX = (b.childLocalMeshletCount + 64 - 1) / 64;
+        b.dispatchGrid = uint3(groupsX, 1, 1);
 
-            outBuckets.Get() = b;
-        }
+        outBuckets.Get() = b;
     }
 
     outBuckets.OutputComplete();
@@ -510,7 +498,7 @@ void WG_ClusterCullBuckets(
     const MeshletBucketRecord b = inRec.Get();
     const uint i = DTid.x;
 
-    const bool inRange = (i < b.totalLocalMeshletCount);
+    const bool inRange = (i < b.childLocalMeshletCount);
 
     uint meshletId = 0;
     bool survives = false;
@@ -522,10 +510,6 @@ void WG_ClusterCullBuckets(
 
         StructuredBuffer<ClusterLODGroup> groups =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
-        StructuredBuffer<ClusterLODChild> children =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Children)];
-        StructuredBuffer<uint> childLocalMeshletIndices =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::ChildLocalMeshletIndices)];
 
         StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
@@ -543,42 +527,14 @@ void WG_ClusterCullBuckets(
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshletBounds)];
 
         const ClusterLODGroup grp = groups[off.groupsBase + b.groupId];
-        const uint childBase = off.childrenBase + grp.firstChild;
+        const uint localMeshlet = b.childFirstLocalMeshletIndex + i;
+        meshletId = grp.firstMeshlet + localMeshlet;
 
-        uint remaining = i;
-        uint localMeshletIndex = 0;
-        bool found = false;
-        const uint childCount = min(grp.childCount, 32u);
+        const BoundingSphere meshletBounds = meshletBoundsBuffer[meshletId];
+        const float3 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, camera.view);
+        const float meshletRadiusWorld = meshletBounds.sphere.w * MaxAxisScale_RowVector(objectModelMatrix);
 
-        [loop]
-        for (uint ci = 0; ci < childCount; ++ci) {
-            const uint bit = 1u << ci;
-            if ((b.terminalChildMask & bit) == 0) {
-                continue;
-            }
-
-            const ClusterLODChild child = children[childBase + ci];
-            if (remaining < child.localMeshletCount) {
-                localMeshletIndex = child.firstLocalMeshletIndex + remaining;
-                found = true;
-                break;
-            }
-            remaining -= child.localMeshletCount;
-        }
-
-        if (!found) {
-            survives = false;
-        }
-        else {
-            const uint localMeshlet = childLocalMeshletIndices[off.childLocalMeshletIndicesBase + localMeshletIndex];
-            meshletId = grp.firstMeshlet + localMeshlet;
-
-            const BoundingSphere meshletBounds = meshletBoundsBuffer[meshletId]; // NOTE: This depends on the bounds buffer being indexed the same way as meshlets; would there ever be a reason for it not to be?
-            const float3 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, camera.view);
-            const float meshletRadiusWorld = meshletBounds.sphere.w * MaxAxisScale_RowVector(objectModelMatrix);
-
-            survives = !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, camera);
-        }
+        survives = !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, camera);
     }
 
     const bool contributes = inRange && survives;

@@ -310,8 +310,8 @@ struct MeshInstanceClodOffsets
 struct ClusterLODChild
 {
     int32_t  refinedGroup;              // group id to refine into, or -1
-    uint32_t firstLocalMeshletIndex;     // offset into m_clodChildLocalMeshletIndices
-    uint32_t localMeshletCount;          // number of local meshlets in this child bucket
+    uint32_t firstLocalMeshletIndex;     // group-local start meshlet index for this child bucket
+    uint32_t localMeshletCount;          // number of local meshlets in this contiguous child range
     uint32_t pad = 0;
 };
 
@@ -325,7 +325,8 @@ struct ClusterLODGroup
 
     uint32_t firstChild = 0;    // offset into m_clodChildren
     uint32_t childCount = 0;    // number of ClusterLODChild entries for this group
-    uint32_t pad[2] = { 0, 0 };
+    uint32_t terminalChildCount = 0;
+    uint32_t pad = 0;
 };
 
 struct VisibleCluster {
