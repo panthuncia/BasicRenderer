@@ -176,7 +176,7 @@ void DebugGridCSMain(uint3 dtid : SV_DispatchThreadID)
     float axisX = (axisHalfW > 0.0) ? PhoneWireSingleLine(hit.z, axisHalfW) : 0.0;
     float axisZ = (axisHalfW > 0.0) ? PhoneWireSingleLine(hit.x, axisHalfW) : 0.0;
 
-    // Linear colors (HDR target assumed linear)
+    // Linear colors
     float3 minorCol = float3(0.65, 0.65, 0.70);
     float3 majorCol = float3(0.85, 0.85, 0.92);
     float3 axisXCol = float3(0.95, 0.25, 0.25);
@@ -223,6 +223,6 @@ void DebugGridCSMain(uint3 dtid : SV_DispatchThreadID)
     {
         float4 dst = hdr[pix];
         float3 outRGB = PremulOver(dst.rgb, a, premul);
-        hdr[pix] = float4(outRGB, dst.a); // keep dst alpha if HDR alpha is used for something else
+        hdr[pix] = float4(outRGB, dst.a); // keep dst alpha
     }
 }
