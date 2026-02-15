@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 
 enum class CLodWorkGraphCounterIndex : uint32_t {
@@ -65,3 +66,13 @@ inline constexpr uint32_t CLodWorkGraphCounterCount =
 struct CLodWorkGraphTelemetryCounters {
     std::array<uint32_t, CLodWorkGraphCounterCount> counters{};
 };
+
+inline std::atomic<uint32_t> g_clodWorkGraphTelemetryEnabled = 0u;
+
+inline void SetCLodWorkGraphTelemetryEnabled(bool enabled) {
+    g_clodWorkGraphTelemetryEnabled.store(enabled ? 1u : 0u, std::memory_order_relaxed);
+}
+
+inline bool IsCLodWorkGraphTelemetryEnabled() {
+    return g_clodWorkGraphTelemetryEnabled.load(std::memory_order_relaxed) != 0u;
+}

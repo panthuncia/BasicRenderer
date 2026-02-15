@@ -365,6 +365,7 @@ private:
             uintRootConstants[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 			uintRootConstants[CLOD_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
             uintRootConstants[CLOD_WORKGRAPH_TELEMETRY_DESCRIPTOR_INDEX] = m_workGraphTelemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+            uintRootConstants[CLOD_WORKGRAPH_TELEMETRY_ENABLED] = IsCLodWorkGraphTelemetryEnabled() ? 1u : 0u;
 
             commandList.PushConstants(
                 rhi::ShaderStage::Compute,
@@ -419,12 +420,14 @@ private:
             uint32_t zero = 0u;
             BUFFER_UPLOAD(&zero, sizeof(uint32_t), UploadManager::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
 
-            std::vector<uint32_t> zeroTelemetry(CLodWorkGraphCounterCount, 0u);
-            BUFFER_UPLOAD(
-                zeroTelemetry.data(),
-                static_cast<uint32_t>(zeroTelemetry.size() * sizeof(uint32_t)),
-                UploadManager::UploadTarget::FromShared(m_workGraphTelemetryBuffer),
-                0);
+            if (IsCLodWorkGraphTelemetryEnabled()) {
+                std::vector<uint32_t> zeroTelemetry(CLodWorkGraphCounterCount, 0u);
+                BUFFER_UPLOAD(
+                    zeroTelemetry.data(),
+                    static_cast<uint32_t>(zeroTelemetry.size() * sizeof(uint32_t)),
+                    UploadManager::UploadTarget::FromShared(m_workGraphTelemetryBuffer),
+                    0);
+            }
         }
 
         bool DeclaredResourcesChanged() const override {

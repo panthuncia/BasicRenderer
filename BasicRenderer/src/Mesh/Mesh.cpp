@@ -559,9 +559,8 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 	config.optimize_clusters = true;
 	config.optimize_bounds = true;
 
-	// Keep group child fanout capped for the 4-lane GroupEvaluate path.
-	// Decouple partition target from fanout so child buckets can hold more meshlets,
-	// while adaptively reducing partition target if the resulting group fanout exceeds the cap.
+	// Keep group child fanout capped for the 4-lane Traverse and GroupEvaluate paths
+	// Decouple partition target from fanout so child buckets can hold more meshlets
 	constexpr uint32_t MaxGroupChildren = 4;
 	constexpr uint32_t TraversalNodeFanout = 4;
 	constexpr uint32_t TargetBucketClusters = 32;
@@ -588,6 +587,8 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 		m_clodMaxDepth = 0;
 
 		config.partition_size = std::max<size_t>(1, (selectedTargetBucketClusters * 3) / 4);
+		size_t refinedCapSplitPartitionCount = 0;
+		config.partition_refined_split_count = &refinedCapSplitPartitionCount;
 		maxChildrenObserved = 0;
 
 		clodBuild(config, mesh,
@@ -753,6 +754,14 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 
 			return groupId;
 		});
+
+		if (refinedCapSplitPartitionCount > 0)
+		{
+			spdlog::info(
+				"ClusterLOD: refined-group cap split {} partitions at bucket target {}",
+				refinedCapSplitPartitionCount,
+				selectedTargetBucketClusters);
+		}
 
 		if (maxChildrenObserved <= MaxGroupChildren)
 		{

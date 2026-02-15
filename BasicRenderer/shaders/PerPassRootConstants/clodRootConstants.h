@@ -28,5 +28,6 @@
 
 // Work graph telemetry
 #define CLOD_WORKGRAPH_TELEMETRY_DESCRIPTOR_INDEX UintRootConstant10 // aliased
+#define CLOD_WORKGRAPH_TELEMETRY_ENABLED UintRootConstant9 // aliased
 
 #endif // CLOD_ROOT_CONSTANTS_H

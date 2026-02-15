@@ -137,6 +137,11 @@ static const uint GROUP_EVALUATE_RECORDS_PER_GROUP = GROUP_EVALUATE_THREADS_PER_
 
 void WGTelemetryAdd(uint counterIndex, uint value)
 {
+    if (CLOD_WORKGRAPH_TELEMETRY_ENABLED == 0)
+    {
+        return;
+    }
+
     RWStructuredBuffer<uint> telemetryCounters = ResourceDescriptorHeap[CLOD_WORKGRAPH_TELEMETRY_DESCRIPTOR_INDEX];
     InterlockedAdd(telemetryCounters[counterIndex], value);
 }
@@ -478,7 +483,7 @@ void WG_TraverseNodes(
     outGroups.OutputComplete();
 }
 
-#define CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP 64
+#define CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP 32
 // Node: GroupEvaluate
 [Shader("node")]
 [NodeID("GroupEvaluate")]

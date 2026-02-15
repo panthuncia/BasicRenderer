@@ -29,6 +29,10 @@ struct clodConfig
 	// 0 disables the cap; useful for downstream pipelines that require bounded child fanout
 	size_t partition_max_refined_groups;
 
+	// optional instrumentation counter: incremented for each partition split caused by partition_max_refined_groups
+	// when null, instrumentation is disabled
+	size_t* partition_refined_split_count;
+
 	// clusterization setup; maps to meshopt_buildMeshletsSpatial / meshopt_buildMeshletsFlex
 	bool cluster_spatial;
 	float cluster_fill_weight;
@@ -409,6 +413,9 @@ static std::vector<std::vector<int> > partition(const clodConfig& config, const 
 				continue;
 			}
 
+			if (config.partition_refined_split_count)
+				(*config.partition_refined_split_count)++;
+
 			std::vector<int> current;
 			current.reserve(part.size());
 			size_t currentRefinedCount = 0;
@@ -625,6 +632,7 @@ clodConfig clodDefaultConfig(size_t max_triangles)
 	config.partition_spatial = true;
 	config.partition_size = 16;
 	config.partition_max_refined_groups = 0;
+	config.partition_refined_split_count = NULL;
 
 	config.cluster_spatial = false;
 	config.cluster_split_factor = 2.0f;

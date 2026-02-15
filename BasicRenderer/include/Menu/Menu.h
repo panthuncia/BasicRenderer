@@ -625,6 +625,8 @@ inline void Menu::Render(RenderContext& context) {
     static bool showMemoryIntrospection = false;
     static bool showCLodTelemetry = false;
 
+    SetCLodWorkGraphTelemetryEnabled(showCLodTelemetry || m_clodTelemetryCapturePending || m_clodCaptureStatsPending);
+
 	{
 		static float f = 0.0f;
 		static int counter = 0;
