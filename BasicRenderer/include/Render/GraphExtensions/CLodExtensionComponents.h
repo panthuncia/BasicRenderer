@@ -13,3 +13,4 @@ struct CLodExtensionTypeTag {
 
 struct VisibleClustersBufferTag {};
 struct VisibleClustersCounterTag {};
+struct CLodWorkGraphTelemetryBufferTag {};

@@ -17,6 +17,7 @@
 #include <vector>
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 
 #include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"
@@ -28,7 +29,13 @@
 #include "Managers/Singletons/UpscalingManager.h"
 #include "Menu/RenderGraphInspector.h"
 #include "Menu/MemoryIntrospectionWidget.h"
+#include "Managers/Singletons/ReadbackManager.h"
+#include "Resources/ReadbackRequest.h"
+#include "Resources/components.h"
 #include "Resources/MemoryStatisticsComponents.h"
+#include "ShaderBuffers.h"
+#include "Render/GraphExtensions/CLodExtensionComponents.h"
+#include "Render/GraphExtensions/CLodTelemetry.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -225,6 +232,9 @@ public:
 		m_settingSubscriptions.clear();
         m_memQuery = {}; // Destruct query before ECS world dies
 		m_sizeQuery = {};
+		m_telemetryQuery = {};
+		m_visibleClustersQuery = {};
+		m_visibleCounterQuery = {};
     }
 
 private:
@@ -245,7 +255,41 @@ private:
 
 	RenderGraph* m_renderGraph;
 
+    struct CLodDeepCaptureStats {
+        uint32_t visibleClusterCount = 0;
+        uint32_t uniqueViews = 0;
+        uint32_t uniqueInstances = 0;
+        uint32_t uniqueMeshlets = 0;
+        uint32_t maxClustersPerView = 0;
+        uint32_t maxClustersPerInstance = 0;
+        float avgClustersPerView = 0.0f;
+        float avgClustersPerInstance = 0.0f;
+        float dominantViewPercent = 0.0f;
+        float dominantInstancePercent = 0.0f;
+    };
+
+    CLodWorkGraphTelemetryCounters m_clodTelemetryCounters{};
+    bool m_clodTelemetryHasData = false;
+    bool m_clodTelemetryCapturePending = false;
+    uint64_t m_clodTelemetryCaptureCount = 0;
+    std::string m_clodTelemetryStatus = "No captures yet.";
+    bool m_clodTelemetryDeepCaptureEnabled = false;
+    bool m_clodDeepCapturePending = false;
+    uint64_t m_clodDeepCaptureId = 0;
+    bool m_clodDeepHasPendingCounter = false;
+    bool m_clodDeepHasPendingClusters = false;
+    uint32_t m_clodDeepPendingVisibleCount = 0;
+    std::vector<VisibleCluster> m_clodDeepPendingClusters;
+    bool m_clodDeepStatsAvailable = false;
+    CLodDeepCaptureStats m_clodDeepStats{};
+
+    flecs::query<const Components::Resource> m_telemetryQuery;
+	flecs::query<const Components::Resource> m_visibleClustersQuery;
+	flecs::query<const Components::Resource> m_visibleCounterQuery;
+
     int FindFileIndex(const std::vector<std::string>& hdrFiles, const std::string& existingFile);
+    void DrawCLodTelemetryWindow();
+    void TryFinalizeCLodDeepCapture(uint64_t captureId);
 
     void DrawEnvironmentsDropdown();
 	void DrawOutputTypeDropdown();
@@ -534,6 +578,20 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
 	appendScene = settingsManager.getSettingGetter<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene")();
 
     m_meshShadersSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
+
+    // CLod queries
+    m_telemetryQuery = ECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<CLodWorkGraphTelemetryBufferTag>()
+        .build();
+    m_visibleClustersQuery = ECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<VisibleClustersBufferTag>()
+        .build();
+    m_visibleCounterQuery = ECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<VisibleClustersCounterTag>()
+        .build();
 }
 
 static bool PassUsesResourceAdapter(const void* passAndRes, uint64_t resourceId, bool isCompute) {
@@ -566,6 +624,7 @@ inline void Menu::Render(RenderContext& context) {
 	ImGui::NewFrame();
     static bool showRG = false;
     static bool showMemoryIntrospection = false;
+    static bool showCLodTelemetry = false;
 
 	{
 		static float f = 0.0f;
@@ -642,6 +701,7 @@ inline void Menu::Render(RenderContext& context) {
 		}
         ImGui::Checkbox("Render Graph Inspector", &showRG);
         ImGui::Checkbox("Memory introspection", &showMemoryIntrospection);
+        ImGui::Checkbox("CLod telemetry", &showCLodTelemetry);
         rhi::ma::Budget localBudget;
         std::string memoryString = "Memory usage: ";
         DeviceManager::GetInstance().GetAllocator()->GetBudget(&localBudget, nullptr);
@@ -719,6 +779,10 @@ inline void Menu::Render(RenderContext& context) {
             opts);
         ImGui::End();
 
+    }
+
+    if (showCLodTelemetry) {
+        DrawCLodTelemetryWindow();
     }
 
 	// Rendering
@@ -995,6 +1059,317 @@ inline void Menu::DisplaySelectedNode() {
     }
 }
 
+inline void Menu::TryFinalizeCLodDeepCapture(uint64_t captureId) {
+    if (!m_clodDeepCapturePending || m_clodDeepCaptureId != captureId) {
+        return;
+    }
+
+    if (!m_clodDeepHasPendingCounter || !m_clodDeepHasPendingClusters) {
+        return;
+    }
+
+    const uint32_t requestedCount = m_clodDeepPendingVisibleCount;
+    const uint32_t availableCount = static_cast<uint32_t>(m_clodDeepPendingClusters.size());
+    const uint32_t decodeCount = (std::min)(requestedCount, availableCount);
+
+    std::unordered_map<uint32_t, uint32_t> viewHistogram;
+    std::unordered_map<uint32_t, uint32_t> instanceHistogram;
+    std::unordered_set<uint64_t> uniqueMeshlets;
+
+    viewHistogram.reserve(16);
+    instanceHistogram.reserve(512);
+    uniqueMeshlets.reserve(decodeCount > 0 ? decodeCount : 1);
+
+    for (uint32_t i = 0; i < decodeCount; ++i) {
+        const VisibleCluster& cluster = m_clodDeepPendingClusters[i];
+        viewHistogram[cluster.viewID]++;
+        instanceHistogram[cluster.instanceID]++;
+        const uint64_t key = (static_cast<uint64_t>(cluster.instanceID) << 32ull) | static_cast<uint64_t>(cluster.meshletID);
+        uniqueMeshlets.insert(key);
+    }
+
+    CLodDeepCaptureStats stats{};
+    stats.visibleClusterCount = decodeCount;
+    stats.uniqueViews = static_cast<uint32_t>(viewHistogram.size());
+    stats.uniqueInstances = static_cast<uint32_t>(instanceHistogram.size());
+    stats.uniqueMeshlets = static_cast<uint32_t>(uniqueMeshlets.size());
+
+    for (const auto& [_, count] : viewHistogram) {
+        stats.maxClustersPerView = (std::max)(stats.maxClustersPerView, count);
+    }
+    for (const auto& [_, count] : instanceHistogram) {
+        stats.maxClustersPerInstance = (std::max)(stats.maxClustersPerInstance, count);
+    }
+
+    if (stats.uniqueViews > 0) {
+        stats.avgClustersPerView = static_cast<float>(decodeCount) / static_cast<float>(stats.uniqueViews);
+    }
+    if (stats.uniqueInstances > 0) {
+        stats.avgClustersPerInstance = static_cast<float>(decodeCount) / static_cast<float>(stats.uniqueInstances);
+    }
+    if (decodeCount > 0) {
+        stats.dominantViewPercent = 100.0f * static_cast<float>(stats.maxClustersPerView) / static_cast<float>(decodeCount);
+        stats.dominantInstancePercent = 100.0f * static_cast<float>(stats.maxClustersPerInstance) / static_cast<float>(decodeCount);
+    }
+
+    m_clodDeepStats = stats;
+    m_clodDeepStatsAvailable = true;
+    m_clodDeepCapturePending = false;
+
+    spdlog::info(
+        "CLod WG deep capture: visible={}, views={}, instances={}, uniqueMeshlets={}, maxPerView={}, maxPerInstance={}",
+        stats.visibleClusterCount,
+        stats.uniqueViews,
+        stats.uniqueInstances,
+        stats.uniqueMeshlets,
+        stats.maxClustersPerView,
+        stats.maxClustersPerInstance);
+}
+
+inline void Menu::DrawCLodTelemetryWindow() {
+    ImGui::Begin("CLod Work Graph Telemetry", nullptr);
+
+    Resource* clodTelemetryResource = nullptr;
+    Resource* clodVisibleClustersResource = nullptr;
+    Resource* clodVisibleCounterResource = nullptr;
+    {
+        m_telemetryQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (clodTelemetryResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    clodTelemetryResource = resource.get();
+                }
+            }
+            });
+
+        m_visibleClustersQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (clodVisibleClustersResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    clodVisibleClustersResource = resource.get();
+                }
+            }
+            });
+
+        m_visibleCounterQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (clodVisibleCounterResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    clodVisibleCounterResource = resource.get();
+                }
+            }
+            });
+    }
+
+    const bool deepCaptureResourcesReady = (clodVisibleClustersResource != nullptr) && (clodVisibleCounterResource != nullptr);
+    const bool canCapture = (clodTelemetryResource != nullptr) && (!m_clodTelemetryCapturePending);
+
+    ImGui::Checkbox("Enable deep capture", &m_clodTelemetryDeepCaptureEnabled);
+    if (!deepCaptureResourcesReady && m_clodTelemetryDeepCaptureEnabled) {
+        ImGui::TextDisabled("Deep capture unavailable: visible cluster resources not found.");
+    }
+
+    if (!canCapture) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Capture CLod WG Metrics")) {
+        m_clodTelemetryCapturePending = true;
+        m_clodTelemetryStatus = "Capture requested.";
+
+        const bool requestDeepCapture = m_clodTelemetryDeepCaptureEnabled && deepCaptureResourcesReady;
+        if (requestDeepCapture) {
+            m_clodDeepCapturePending = true;
+            m_clodDeepCaptureId++;
+            m_clodDeepHasPendingCounter = false;
+            m_clodDeepHasPendingClusters = false;
+            m_clodDeepPendingVisibleCount = 0;
+            m_clodDeepPendingClusters.clear();
+        }
+
+        ReadbackManager::GetInstance().RequestReadbackCapture(
+            "CLod::HierarchialCullingPass",
+            clodTelemetryResource,
+            RangeSpec{},
+            [this](ReadbackCaptureResult&& result) {
+                m_clodTelemetryCapturePending = false;
+
+                constexpr size_t telemetryBytes = sizeof(uint32_t) * static_cast<size_t>(CLodWorkGraphCounterCount);
+                if (result.data.size() < telemetryBytes) {
+                    m_clodTelemetryStatus = "Capture failed: telemetry payload too small.";
+                    spdlog::warn("CLod telemetry capture payload too small ({} bytes).", result.data.size());
+                    return;
+                }
+
+                CLodWorkGraphTelemetryCounters decoded{};
+                std::memcpy(decoded.counters.data(), result.data.data(), telemetryBytes);
+
+                m_clodTelemetryCounters = decoded;
+                m_clodTelemetryHasData = true;
+                m_clodTelemetryCaptureCount++;
+                m_clodTelemetryStatus = "Capture completed.";
+
+                auto counter = [&](CLodWorkGraphCounterIndex idx) -> uint32_t {
+                    return decoded.counters[static_cast<size_t>(idx)];
+                    };
+
+                const uint32_t objectThreads = counter(CLodWorkGraphCounterIndex::ObjectCullThreads);
+                const uint32_t objectActive = counter(CLodWorkGraphCounterIndex::ObjectCullInRangeThreads);
+                const uint32_t traverseThreads = counter(CLodWorkGraphCounterIndex::TraverseNodesThreads);
+                const uint32_t traverseActive = counter(CLodWorkGraphCounterIndex::TraverseNodesActiveChildThreads);
+                const uint32_t groupThreads = counter(CLodWorkGraphCounterIndex::GroupEvaluateThreads);
+                const uint32_t groupActive = counter(CLodWorkGraphCounterIndex::GroupEvaluateActiveChildThreads);
+                const uint32_t clusterThreads = counter(CLodWorkGraphCounterIndex::ClusterCullThreads);
+                const uint32_t clusterActive = counter(CLodWorkGraphCounterIndex::ClusterCullInRangeThreads);
+                const uint32_t visibleWrites = counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites);
+
+                spdlog::info(
+                    "CLod WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, GroupEval {}/{} active-child, ClusterCull {}/{} in-range, visible writes {}",
+                    objectActive,
+                    objectThreads,
+                    traverseActive,
+                    traverseThreads,
+                    groupActive,
+                    groupThreads,
+                    clusterActive,
+                    clusterThreads,
+                    visibleWrites);
+            });
+
+        if (requestDeepCapture) {
+            const uint64_t captureId = m_clodDeepCaptureId;
+
+            ReadbackManager::GetInstance().RequestReadbackCapture(
+                "CLod::HierarchialCullingPass",
+                clodVisibleCounterResource,
+                RangeSpec{},
+                [this, captureId](ReadbackCaptureResult&& result) {
+                    if (!m_clodDeepCapturePending || m_clodDeepCaptureId != captureId) {
+                        return;
+                    }
+
+                    if (result.data.size() < sizeof(uint32_t)) {
+                        m_clodTelemetryStatus = "Deep capture failed: counter payload too small.";
+                        m_clodDeepCapturePending = false;
+                        return;
+                    }
+
+                    std::memcpy(&m_clodDeepPendingVisibleCount, result.data.data(), sizeof(uint32_t));
+                    m_clodDeepHasPendingCounter = true;
+                    TryFinalizeCLodDeepCapture(captureId);
+                });
+
+            ReadbackManager::GetInstance().RequestReadbackCapture(
+                "CLod::HierarchialCullingPass",
+                clodVisibleClustersResource,
+                RangeSpec{},
+                [this, captureId](ReadbackCaptureResult&& result) {
+                    if (!m_clodDeepCapturePending || m_clodDeepCaptureId != captureId) {
+                        return;
+                    }
+
+                    const size_t clusterBytes = sizeof(VisibleCluster);
+                    const size_t count = result.data.size() / clusterBytes;
+                    m_clodDeepPendingClusters.resize(count);
+                    if (count > 0) {
+                        std::memcpy(m_clodDeepPendingClusters.data(), result.data.data(), count * clusterBytes);
+                    }
+
+                    m_clodDeepHasPendingClusters = true;
+                    TryFinalizeCLodDeepCapture(captureId);
+                });
+
+            m_clodTelemetryStatus = "Capture requested (deep mode).";
+        }
+    }
+    if (!canCapture) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine();
+    ImGui::Text("Status: %s", m_clodTelemetryStatus.c_str());
+
+    if (m_clodTelemetryHasData) {
+        auto counter = [&](CLodWorkGraphCounterIndex idx) -> uint32_t {
+            return m_clodTelemetryCounters.counters[static_cast<size_t>(idx)];
+            };
+
+        auto drawUtilizationRow = [&](const char* label, uint32_t active, uint32_t total) {
+            const float efficiency = (total > 0)
+                ? (100.0f * static_cast<float>(active) / static_cast<float>(total))
+                : 0.0f;
+            ImGui::Text("%s: %u / %u (%.1f%%)", label, active, total, efficiency);
+            };
+
+        ImGui::Text("Telemetry captures: %llu", static_cast<unsigned long long>(m_clodTelemetryCaptureCount));
+        drawUtilizationRow(
+            "ObjectCull active draw threads",
+            counter(CLodWorkGraphCounterIndex::ObjectCullInRangeThreads),
+            counter(CLodWorkGraphCounterIndex::ObjectCullThreads));
+        drawUtilizationRow(
+            "TraverseNodes active child threads",
+            counter(CLodWorkGraphCounterIndex::TraverseNodesActiveChildThreads),
+            counter(CLodWorkGraphCounterIndex::TraverseNodesThreads));
+        drawUtilizationRow(
+            "GroupEvaluate active child threads",
+            counter(CLodWorkGraphCounterIndex::GroupEvaluateActiveChildThreads),
+            counter(CLodWorkGraphCounterIndex::GroupEvaluateThreads));
+        drawUtilizationRow(
+            "ClusterCull in-range threads",
+            counter(CLodWorkGraphCounterIndex::ClusterCullInRangeThreads),
+            counter(CLodWorkGraphCounterIndex::ClusterCullThreads));
+
+        const uint32_t clusterActiveLanes = counter(CLodWorkGraphCounterIndex::ClusterCullActiveLanes);
+        const uint32_t clusterSurvivingLanes = counter(CLodWorkGraphCounterIndex::ClusterCullSurvivingLanes);
+        drawUtilizationRow("ClusterCull surviving lanes", clusterSurvivingLanes, clusterActiveLanes);
+
+        ImGui::Text("Traverse node records: internal=%u leaf=%u culled=%u rejectedByError=%u",
+            counter(CLodWorkGraphCounterIndex::TraverseNodesInternalNodeRecords),
+            counter(CLodWorkGraphCounterIndex::TraverseNodesLeafNodeRecords),
+            counter(CLodWorkGraphCounterIndex::TraverseNodesCulledNodeRecords),
+            counter(CLodWorkGraphCounterIndex::TraverseNodesRejectedByErrorRecords));
+
+        ImGui::Text("GroupEvaluate outcomes: groups=%u culled=%u rejectedByError=%u emitBucket=%u refinedTraversal=%u",
+            counter(CLodWorkGraphCounterIndex::GroupEvaluateGroupRecords),
+            counter(CLodWorkGraphCounterIndex::GroupEvaluateCulledGroupRecords),
+            counter(CLodWorkGraphCounterIndex::GroupEvaluateRejectedByErrorRecords),
+            counter(CLodWorkGraphCounterIndex::GroupEvaluateEmitBucketThreads),
+            counter(CLodWorkGraphCounterIndex::GroupEvaluateRefinedTraversalThreads));
+
+        const uint32_t clusterWaves = counter(CLodWorkGraphCounterIndex::ClusterCullWaves);
+        const uint32_t zeroSurvivorWaves = counter(CLodWorkGraphCounterIndex::ClusterCullZeroSurvivorWaves);
+        const uint32_t survivingWaves = (clusterWaves > zeroSurvivorWaves)
+            ? (clusterWaves - zeroSurvivorWaves)
+            : 0u;
+        drawUtilizationRow("ClusterCull waves with survivors", survivingWaves, clusterWaves);
+
+        ImGui::Text("Visible cluster writes: %u", counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites));
+    }
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Deep capture statistics");
+    if (m_clodDeepCapturePending) {
+        ImGui::Text("Deep capture status: pending...");
+    }
+    else if (!m_clodDeepStatsAvailable) {
+        ImGui::TextDisabled("No deep capture results yet.");
+    }
+    else {
+        ImGui::Text("Visible clusters: %u", m_clodDeepStats.visibleClusterCount);
+        ImGui::Text("Unique views: %u | Unique instances: %u | Unique meshlets: %u",
+            m_clodDeepStats.uniqueViews,
+            m_clodDeepStats.uniqueInstances,
+            m_clodDeepStats.uniqueMeshlets);
+        ImGui::Text("Avg clusters/view: %.2f | Avg clusters/instance: %.2f",
+            m_clodDeepStats.avgClustersPerView,
+            m_clodDeepStats.avgClustersPerInstance);
+        ImGui::Text("Max clusters/view: %u (%.1f%% of total)",
+            m_clodDeepStats.maxClustersPerView,
+            m_clodDeepStats.dominantViewPercent);
+        ImGui::Text("Max clusters/instance: %u (%.1f%% of total)",
+            m_clodDeepStats.maxClustersPerInstance,
+            m_clodDeepStats.dominantInstancePercent);
+    }
+
+    ImGui::End();
+}
+
 inline void Menu::DrawPassTimingWindow() {
     auto& statisticsManager = StatisticsManager::GetInstance();
     auto& names     = statisticsManager.GetPassNames();
@@ -1093,5 +1468,6 @@ inline void Menu::DrawPassTimingWindow() {
     }
 
     ImGui::Columns(1);
+
     ImGui::End();
 }

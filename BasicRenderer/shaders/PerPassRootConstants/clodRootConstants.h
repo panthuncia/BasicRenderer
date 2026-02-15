@@ -26,4 +26,7 @@
 // Raster pass
 #define CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX UintRootConstant10 // aliased
 
+// Work graph telemetry
+#define CLOD_WORKGRAPH_TELEMETRY_DESCRIPTOR_INDEX UintRootConstant10 // aliased
+
 #endif // CLOD_ROOT_CONSTANTS_H

@@ -4,6 +4,7 @@
 
 #include "Render/RenderGraph.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
+#include "Render/GraphExtensions/CLodTelemetry.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "../shaders/PerPassRootConstants/clodRootConstants.h"
 
@@ -85,6 +86,13 @@ public:
 			.add<VisibleClustersCounterTag>()
 			.add<CLodExtensionTypeTag>(typeEntity);
 
+        m_workGraphTelemetryBuffer = CreateIndexedStructuredBuffer(CLodWorkGraphCounterCount, sizeof(uint32_t), true, false);
+        m_workGraphTelemetryBuffer->SetName("CLod Work Graph Telemetry Buffer");
+        m_workGraphTelemetryBuffer->GetECSEntity()
+            .set<Components::Resource>({ m_workGraphTelemetryBuffer })
+            .add<CLodWorkGraphTelemetryBufferTag>()
+            .add<CLodExtensionTypeTag>(typeEntity);
+
         m_rasterBucketsOffsetsBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(1, "CLod Raster bucket offsets", true);
         m_rasterBucketsBlockSumsBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(1, "CLod Raster bucket block sums", true);
         m_rasterBucketsScannedBlockSumsBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(1, "CLod Raster bucket scanned block sums", true);
@@ -120,7 +128,8 @@ public:
             cullPassInputs, 
             m_visibleClustersBuffer, 
             m_visibleClustersCounterBuffer,
-            m_histogramIndirectCommand);
+        m_histogramIndirectCommand,
+        m_workGraphTelemetryBuffer);
 		cullPassDesc.where = RenderGraph::ExternalInsertPoint::After("SkinningPass");
 		outPasses.push_back(std::move(cullPassDesc));
 
@@ -192,6 +201,7 @@ private:
 	// Buffers used across CLod passes
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
+    std::shared_ptr<Buffer> m_workGraphTelemetryBuffer;
 
     // Histogram Pass Buffers
     std::shared_ptr<Buffer> m_histogramIndirectCommand;
@@ -241,7 +251,8 @@ private:
             HierarchialCullingPassInputs inputs, 
             std::shared_ptr<Buffer> visibleClustersBuffer, 
             std::shared_ptr<Buffer> visibleClustersCounterBuffer,
-            std::shared_ptr<Buffer> histogramIndirectCommand) {
+            std::shared_ptr<Buffer> histogramIndirectCommand,
+            std::shared_ptr<Buffer> workGraphTelemetryBuffer) {
             CreatePipelines(
                 DeviceManager::GetInstance().GetDevice(),
                 PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -257,6 +268,7 @@ private:
 			m_visibleClustersBuffer = visibleClustersBuffer;
 			m_visibleClustersCounterBuffer = visibleClustersCounterBuffer;
             m_histogramIndirectCommand = histogramIndirectCommand;
+            m_workGraphTelemetryBuffer = workGraphTelemetryBuffer;
         }
 
         ~HierarchialCullingPass() {
@@ -271,7 +283,8 @@ private:
             builder->WithUnorderedAccess(m_scratchBuffer,
                 m_visibleClustersBuffer,
                 m_visibleClustersCounterBuffer,
-                m_histogramIndirectCommand)
+                m_histogramIndirectCommand,
+                m_workGraphTelemetryBuffer)
                 .WithShaderResource(Builtin::IndirectCommandBuffers::Master,
                     Builtin::CLod::Offsets,
                     Builtin::CLod::Groups,
@@ -351,6 +364,7 @@ private:
             uintRootConstants[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
             uintRootConstants[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 			uintRootConstants[CLOD_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
+            uintRootConstants[CLOD_WORKGRAPH_TELEMETRY_DESCRIPTOR_INDEX] = m_workGraphTelemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 
             commandList.PushConstants(
                 rhi::ShaderStage::Compute,
@@ -404,6 +418,13 @@ private:
 
             uint32_t zero = 0u;
             BUFFER_UPLOAD(&zero, sizeof(uint32_t), UploadManager::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
+
+            std::vector<uint32_t> zeroTelemetry(CLodWorkGraphCounterCount, 0u);
+            BUFFER_UPLOAD(
+                zeroTelemetry.data(),
+                static_cast<uint32_t>(zeroTelemetry.size() * sizeof(uint32_t)),
+                UploadManager::UploadTarget::FromShared(m_workGraphTelemetryBuffer),
+                0);
         }
 
         bool DeclaredResourcesChanged() const override {
@@ -422,6 +443,7 @@ private:
 		std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
         std::shared_ptr<Buffer> m_scratchBuffer;
 		std::shared_ptr<Buffer> m_histogramIndirectCommand;
+        std::shared_ptr<Buffer> m_workGraphTelemetryBuffer;
         bool m_declaredResourcesChanged = true;
 		RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
 

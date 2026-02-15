@@ -498,7 +498,7 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 	config.optimize_bounds = true;
 
 	// If you want <= MaxChildren refined groups per parent, account for meshopt partition overshoot (~+1/3).
-	const uint32_t MaxChildren = 32;
+	const uint32_t MaxChildren = 64;
 	config.partition_size = std::max<size_t>(1, (MaxChildren * 3) / 4);
 
 	uint32_t maxChildrenObserved = 0;

@@ -76,6 +76,42 @@ struct ClusterLODNode
     ClusterLODTraversalMetric metric;
 };
 
+static const uint WG_COUNTER_OBJECT_CULL_THREADS = 0;
+static const uint WG_COUNTER_OBJECT_CULL_IN_RANGE_THREADS = 1;
+static const uint WG_COUNTER_OBJECT_CULL_VISIBLE_THREADS = 2;
+static const uint WG_COUNTER_OBJECT_CULL_TRAVERSE_RECORDS = 3;
+
+static const uint WG_COUNTER_TRAVERSE_THREADS = 4;
+static const uint WG_COUNTER_TRAVERSE_INTERNAL_NODE_RECORDS = 5;
+static const uint WG_COUNTER_TRAVERSE_LEAF_NODE_RECORDS = 6;
+static const uint WG_COUNTER_TRAVERSE_CULLED_NODE_RECORDS = 7;
+static const uint WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS = 8;
+static const uint WG_COUNTER_TRAVERSE_ACTIVE_CHILD_THREADS = 9;
+static const uint WG_COUNTER_TRAVERSE_TRAVERSE_RECORDS = 10;
+static const uint WG_COUNTER_TRAVERSE_GROUP_RECORDS = 11;
+
+static const uint WG_COUNTER_GROUP_EVALUATE_THREADS = 12;
+static const uint WG_COUNTER_GROUP_EVALUATE_GROUP_RECORDS = 13;
+static const uint WG_COUNTER_GROUP_EVALUATE_CULLED_GROUP_RECORDS = 14;
+static const uint WG_COUNTER_GROUP_EVALUATE_REJECTED_BY_ERROR_RECORDS = 15;
+static const uint WG_COUNTER_GROUP_EVALUATE_ACTIVE_CHILD_THREADS = 16;
+static const uint WG_COUNTER_GROUP_EVALUATE_EMIT_BUCKET_THREADS = 17;
+static const uint WG_COUNTER_GROUP_EVALUATE_REFINED_TRAVERSAL_THREADS = 18;
+
+static const uint WG_COUNTER_CLUSTER_CULL_THREADS = 19;
+static const uint WG_COUNTER_CLUSTER_CULL_IN_RANGE_THREADS = 20;
+static const uint WG_COUNTER_CLUSTER_CULL_WAVES = 21;
+static const uint WG_COUNTER_CLUSTER_CULL_ACTIVE_LANES = 22;
+static const uint WG_COUNTER_CLUSTER_CULL_SURVIVING_LANES = 23;
+static const uint WG_COUNTER_CLUSTER_CULL_ZERO_SURVIVOR_WAVES = 24;
+static const uint WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES = 25;
+
+void WGTelemetryAdd(uint counterIndex, uint value)
+{
+    RWStructuredBuffer<uint> telemetryCounters = ResourceDescriptorHeap[CLOD_WORKGRAPH_TELEMETRY_DESCRIPTOR_INDEX];
+    InterlockedAdd(telemetryCounters[counterIndex], value);
+}
+
 // ----- records -----
 struct ObjectCullRecord
 {
@@ -167,6 +203,11 @@ void WG_ObjectCull(
     const ObjectCullRecord hdr = inRec.Get();
     const bool inRange = (vDispatchThreadID.x < hdr.activeDrawCount);
 
+    WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_THREADS, 1);
+    if (inRange) {
+        WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_IN_RANGE_THREADS, 1);
+    }
+
     uint outCount = 0;
     TraverseNodeRecord outRecord = (TraverseNodeRecord) 0;
 
@@ -211,6 +252,9 @@ void WG_ObjectCull(
             outRecord.instanceIndex =perMeshInstanceBufferIndex;
             outRecord.nodeId = off.rootNode;   // BVH root node for this mesh
             outCount = 1;
+
+            WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_VISIBLE_THREADS, 1);
+            WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_TRAVERSE_RECORDS, 1);
         }
     }
 
@@ -250,6 +294,7 @@ uint3 gtid : SV_GroupThreadID,
     [MaxRecords(32)] NodeOutput<TraverseNodeRecord> TraverseNodes,
     [MaxRecords(1)] NodeOutput<GroupEvalRecord> GroupEvaluate) {
     const TraverseNodeRecord rec = inRecs[0];
+    WGTelemetryAdd(WG_COUNTER_TRAVERSE_THREADS, 1);
     StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
     const MeshInstanceClodOffsets off = clodOffsets[rec.instanceIndex];
@@ -272,12 +317,24 @@ uint3 gtid : SV_GroupThreadID,
 
     const ClusterLODNode node = lodNodes[off.lodNodesBase + rec.nodeId];
 
+    if (gtid.x == 0) {
+        if (node.range.isGroup == 0) {
+            WGTelemetryAdd(WG_COUNTER_TRAVERSE_INTERNAL_NODE_RECORDS, 1);
+        }
+        else {
+            WGTelemetryAdd(WG_COUNTER_TRAVERSE_LEAF_NODE_RECORDS, 1);
+        }
+    }
+
     const float3 nodeCenterObjectSpace = node.metric.centerAndRadius.xyz;
     const float3 nodeCenterViewSpace = ToViewSpace(nodeCenterObjectSpace, objectModelMatrix, camera.view);
     const float nodeRadiusWorld = node.metric.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
     const bool nodeCulled = SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, camera);
 
     if (nodeCulled) {
+        if (gtid.x == 0) {
+            WGTelemetryAdd(WG_COUNTER_TRAVERSE_CULLED_NODE_RECORDS, 1);
+        }
         ThreadNodeOutputRecords<TraverseNodeRecord> noNodes =
             TraverseNodes.GetThreadNodeOutputRecords(0);
         noNodes.OutputComplete();
@@ -301,6 +358,9 @@ uint3 gtid : SV_GroupThreadID,
 
     const bool nodeWantsTraversal = nodeProjectedError > cam.errorPixels;
     if (!nodeWantsTraversal) {
+        if (gtid.x == 0) {
+            WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
+        }
         ThreadNodeOutputRecords<TraverseNodeRecord> noNodes =
             TraverseNodes.GetThreadNodeOutputRecords(0);
         noNodes.OutputComplete();
@@ -317,6 +377,9 @@ uint3 gtid : SV_GroupThreadID,
         const uint childCount = node.range.countMinusOne + 1;
 
         const bool activeChild = (ci < childCount);
+        if (activeChild) {
+            WGTelemetryAdd(WG_COUNTER_TRAVERSE_ACTIVE_CHILD_THREADS, 1);
+        }
 
         ThreadNodeOutputRecords<TraverseNodeRecord> o =
             TraverseNodes.GetThreadNodeOutputRecords(activeChild ? 1 : 0);
@@ -330,6 +393,8 @@ uint3 gtid : SV_GroupThreadID,
             r.viewId = rec.viewId;
             r.nodeId = node.range.indexOrOffset + ci; // child node id (relative to lodNodesBase)
             o.Get() = r;
+
+            WGTelemetryAdd(WG_COUNTER_TRAVERSE_TRAVERSE_RECORDS, 1);
         }
         o.OutputComplete();
         noGroups.OutputComplete();
@@ -349,6 +414,8 @@ uint3 gtid : SV_GroupThreadID,
         r.viewId = rec.viewId;
         r.groupId = node.range.indexOrOffset; // groupId (relative to groupsBase)
         groupsOut.Get() = r;
+
+        WGTelemetryAdd(WG_COUNTER_TRAVERSE_GROUP_RECORDS, 1);
     }
     noNodes.OutputComplete();
     groupsOut.OutputComplete();
@@ -364,6 +431,10 @@ void WG_GroupEvaluate(
     uint3 gtid : SV_GroupThreadID,
     [MaxRecords(32)] NodeOutput<MeshletBucketRecord> ClusterCullBuckets) {
     const GroupEvalRecord rec = inRecs[0];
+    WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_THREADS, 1);
+    if (gtid.x == 0) {
+        WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_GROUP_RECORDS, 1);
+    }
     const uint groupId = rec.groupId;
 
     StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
@@ -398,6 +469,9 @@ void WG_GroupEvaluate(
     const bool groupCulled = SphereOutsideFrustumViewSpace(groupCenterViewSpace, groupRadiusWorld, camera);
 
     if (groupCulled) {
+        if (gtid.x == 0) {
+            WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_CULLED_GROUP_RECORDS, 1);
+        }
         ThreadNodeOutputRecords<MeshletBucketRecord> noBuckets =
             ClusterCullBuckets.GetThreadNodeOutputRecords(0);
         noBuckets.OutputComplete();
@@ -417,6 +491,9 @@ void WG_GroupEvaluate(
 
     const bool groupWantsTraversal = groupProjectedError > cam.errorPixels;
     if (!groupWantsTraversal) {
+        if (gtid.x == 0) {
+            WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_REJECTED_BY_ERROR_RECORDS, 1);
+        }
         ThreadNodeOutputRecords<MeshletBucketRecord> noBuckets =
             ClusterCullBuckets.GetThreadNodeOutputRecords(0);
         noBuckets.OutputComplete();
@@ -426,6 +503,9 @@ void WG_GroupEvaluate(
     const uint ci = gtid.x;
     const uint clampedChildCount = min(grp.childCount, 32u);
     const bool activeChild = (ci < clampedChildCount);
+    if (activeChild) {
+        WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_ACTIVE_CHILD_THREADS, 1);
+    }
 
     ClusterLODChild child = (ClusterLODChild) 0;
     bool generatingGroupWantsTraversal = false;
@@ -455,12 +535,18 @@ void WG_GroupEvaluate(
                 cam.zNear);
 
             generatingGroupWantsTraversal = !refinedCulled && (px > cam.errorPixels);
+            if (generatingGroupWantsTraversal) {
+                WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_REFINED_TRAVERSAL_THREADS, 1);
+            }
         }
     }
 
     // Emit one record per terminal child bucket.
     const bool emitBucket = activeChild && (child.localMeshletCount != 0)
         && (forceBucket || !generatingGroupWantsTraversal);
+    if (emitBucket) {
+        WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_EMIT_BUCKET_THREADS, 1);
+    }
 
     ThreadNodeOutputRecords<MeshletBucketRecord> outBuckets =
         ClusterCullBuckets.GetThreadNodeOutputRecords(emitBucket ? 1 : 0);
@@ -499,6 +585,19 @@ void WG_ClusterCullBuckets(
     const uint i = DTid.x;
 
     const bool inRange = (i < b.childLocalMeshletCount);
+    WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_THREADS, 1);
+    if (inRange) {
+        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_IN_RANGE_THREADS, 1);
+    }
+
+    const uint4 allLaneMask = WaveActiveBallot(true);
+    const uint allLeaderLane = WaveFirstLaneFromMask(allLaneMask);
+    const bool isWaveLeader = (WaveGetLaneIndex() == allLeaderLane);
+    const uint inRangeLaneCount = CountBits128(WaveActiveBallot(inRange));
+    if (isWaveLeader) {
+        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_WAVES, 1);
+        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_ACTIVE_LANES, inRangeLaneCount);
+    }
 
     uint meshletId = 0;
     bool survives = false;
@@ -540,6 +639,12 @@ void WG_ClusterCullBuckets(
     const bool contributes = inRange && survives;
     const uint4 survivingMask = WaveActiveBallot(contributes);
     const uint survivingCount = CountBits128(survivingMask);
+    if (isWaveLeader) {
+        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_SURVIVING_LANES, survivingCount);
+        if (survivingCount == 0) {
+            WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_ZERO_SURVIVOR_WAVES, 1);
+        }
+    }
 
     if (survivingCount > 0) {
         RWStructuredBuffer<VisibleCluster> visibleClusters =
@@ -556,6 +661,10 @@ void WG_ClusterCullBuckets(
         }
 
         baseIndex = WaveReadLaneAt(baseIndex, leaderLane);
+
+        if (isWaveLeader) {
+            WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES, survivingCount);
+        }
 
         if (contributes) {
             const uint index = baseIndex + laneRank;

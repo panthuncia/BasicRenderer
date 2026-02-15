@@ -15,5 +15,5 @@ out/
 vcpkg_installed/
 models/
 textures/
-ThirdParty/
+/ThirdParty/
 cmake-build-*
