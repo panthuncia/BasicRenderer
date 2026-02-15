@@ -34,6 +34,17 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     ClusterCullZeroSurvivorWaves,
     ClusterCullVisibleClusterWrites,
 
+    TraverseNodesCoalescedLaunches,
+    TraverseNodesCoalescedInputRecords,
+    TraverseNodesCoalescedInputCount1,
+    TraverseNodesCoalescedInputCount2,
+    TraverseNodesCoalescedInputCount3,
+    TraverseNodesCoalescedInputCount4,
+    TraverseNodesCoalescedInputCount5,
+    TraverseNodesCoalescedInputCount6,
+    TraverseNodesCoalescedInputCount7,
+    TraverseNodesCoalescedInputCount8,
+
     Count
 };
 

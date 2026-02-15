@@ -1323,6 +1323,35 @@ inline void Menu::DrawCLodTelemetryWindow() {
             counter(CLodWorkGraphCounterIndex::TraverseNodesCulledNodeRecords),
             counter(CLodWorkGraphCounterIndex::TraverseNodesRejectedByErrorRecords));
 
+        const uint32_t traverseCoalescedLaunches = counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedLaunches);
+        const uint32_t traverseCoalescedInputRecords = counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputRecords);
+        const float avgRecordsPerLaunch = (traverseCoalescedLaunches > 0)
+            ? (static_cast<float>(traverseCoalescedInputRecords) / static_cast<float>(traverseCoalescedLaunches))
+            : 0.0f;
+        const float packingPercent = 100.0f * avgRecordsPerLaunch / 8.0f;
+
+        ImGui::Text("Traverse coalesced launches: %u | input records: %u | avg records/launch: %.2f (%.1f%% of 8)",
+            traverseCoalescedLaunches,
+            traverseCoalescedInputRecords,
+            avgRecordsPerLaunch,
+            packingPercent);
+
+        std::array<uint32_t, 8> traverseInputHistogram = {
+            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount1),
+            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount2),
+            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount3),
+            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount4),
+            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount5),
+            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount6),
+            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount7),
+            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount8)
+        };
+
+        ImGui::TextUnformatted("Traverse coalesced input histogram (records per launch):");
+        for (uint32_t i = 0; i < traverseInputHistogram.size(); ++i) {
+            ImGui::Text("  %u: %u", i + 1, traverseInputHistogram[i]);
+        }
+
         ImGui::Text("GroupEvaluate outcomes: groups=%u culled=%u rejectedByError=%u emitBucket=%u refinedTraversal=%u",
             counter(CLodWorkGraphCounterIndex::GroupEvaluateGroupRecords),
             counter(CLodWorkGraphCounterIndex::GroupEvaluateCulledGroupRecords),

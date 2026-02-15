@@ -106,6 +106,21 @@ static const uint WG_COUNTER_CLUSTER_CULL_SURVIVING_LANES = 23;
 static const uint WG_COUNTER_CLUSTER_CULL_ZERO_SURVIVOR_WAVES = 24;
 static const uint WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES = 25;
 
+static const uint WG_COUNTER_TRAVERSE_COALESCED_LAUNCHES = 26;
+static const uint WG_COUNTER_TRAVERSE_COALESCED_INPUT_RECORDS = 27;
+static const uint WG_COUNTER_TRAVERSE_COALESCED_INPUT_COUNT_1 = 28;
+static const uint WG_COUNTER_TRAVERSE_COALESCED_INPUT_COUNT_2 = 29;
+static const uint WG_COUNTER_TRAVERSE_COALESCED_INPUT_COUNT_3 = 30;
+static const uint WG_COUNTER_TRAVERSE_COALESCED_INPUT_COUNT_4 = 31;
+static const uint WG_COUNTER_TRAVERSE_COALESCED_INPUT_COUNT_5 = 32;
+static const uint WG_COUNTER_TRAVERSE_COALESCED_INPUT_COUNT_6 = 33;
+static const uint WG_COUNTER_TRAVERSE_COALESCED_INPUT_COUNT_7 = 34;
+static const uint WG_COUNTER_TRAVERSE_COALESCED_INPUT_COUNT_8 = 35;
+
+static const uint TRAVERSE_THREADS_PER_GROUP = 32;
+static const uint TRAVERSE_CHILD_LANES = 4;
+static const uint TRAVERSE_RECORDS_PER_GROUP = TRAVERSE_THREADS_PER_GROUP / TRAVERSE_CHILD_LANES;
+
 void WGTelemetryAdd(uint counterIndex, uint value)
 {
     RWStructuredBuffer<uint> telemetryCounters = ResourceDescriptorHeap[CLOD_WORKGRAPH_TELEMETRY_DESCRIPTOR_INDEX];
@@ -282,143 +297,158 @@ float ProjectedErrorPixels(float3 worldCenter, float worldRadius, float errorMes
     return frac * screenHeight;
 }
 
+struct TraverseSlotState
+{
+    uint emitChildren;
+    uint emitGroup;
+    uint childCount;
+    uint childBase;
+    uint instanceIndex;
+    uint viewId;
+    uint groupId;
+};
+
+groupshared TraverseSlotState g_slotState[TRAVERSE_RECORDS_PER_GROUP];
+
 // Node: TraverseNodes (recursive, BVH-only)
 [Shader("node")]
 [NodeID("TraverseNodes")]
 [NodeLaunch("coalescing")]
-[NumThreads(32, 1, 1)]
+[NumThreads(TRAVERSE_THREADS_PER_GROUP, 1, 1)]
 [NodeMaxRecursionDepth(25)]
 void WG_TraverseNodes(
-    [MaxRecords(1)] GroupNodeInputRecords<TraverseNodeRecord> inRecs,
-uint3 gtid : SV_GroupThreadID,
+    [MaxRecords(TRAVERSE_RECORDS_PER_GROUP)] GroupNodeInputRecords<TraverseNodeRecord> inRecs,
+    uint3 gtid : SV_GroupThreadID,
     [MaxRecords(32)] NodeOutput<TraverseNodeRecord> TraverseNodes,
-    [MaxRecords(1)] NodeOutput<GroupEvalRecord> GroupEvaluate) {
-    const TraverseNodeRecord rec = inRecs[0];
+    [MaxRecords(TRAVERSE_RECORDS_PER_GROUP)] NodeOutput<GroupEvalRecord> GroupEvaluate) {
+    const uint lane = gtid.x % TRAVERSE_CHILD_LANES;
+    const uint slot = gtid.x / TRAVERSE_CHILD_LANES;
+    const uint inputCount = inRecs.Count();
+    const bool slotActive = slot < inputCount;
+
     WGTelemetryAdd(WG_COUNTER_TRAVERSE_THREADS, 1);
-    StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
-    const MeshInstanceClodOffsets off = clodOffsets[rec.instanceIndex];
-    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-    const uint objectBufferIndex = perMeshInstanceBuffer[rec.instanceIndex].perObjectBufferIndex;
-    StructuredBuffer<PerObjectBuffer> perObjectBuffer =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
-    const row_major matrix objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
-    StructuredBuffer<Camera> cameras =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
-    const Camera camera = cameras[rec.viewId];
-    StructuredBuffer<CullingCameraInfo> cameraInfos =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
-    const CullingCameraInfo cam = cameraInfos[rec.viewId];
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-
-    StructuredBuffer<ClusterLODNode> lodNodes =
-        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Nodes)];
-
-    const ClusterLODNode node = lodNodes[off.lodNodesBase + rec.nodeId];
-
-    if (gtid.x == 0) {
-        if (node.range.isGroup == 0) {
-            WGTelemetryAdd(WG_COUNTER_TRAVERSE_INTERNAL_NODE_RECORDS, 1);
+    if (lane == 0) {
+        WGTelemetryAdd(WG_COUNTER_TRAVERSE_COALESCED_LAUNCHES, 1);
+        WGTelemetryAdd(WG_COUNTER_TRAVERSE_COALESCED_INPUT_RECORDS, inputCount);
+        if (inputCount > 0 && inputCount <= TRAVERSE_RECORDS_PER_GROUP) {
+            WGTelemetryAdd(WG_COUNTER_TRAVERSE_COALESCED_INPUT_COUNT_1 + (inputCount - 1), 1);
         }
-        else {
-            WGTelemetryAdd(WG_COUNTER_TRAVERSE_LEAF_NODE_RECORDS, 1);
+
+        TraverseSlotState s = (TraverseSlotState) 0;
+
+        if (slotActive) {
+            const TraverseNodeRecord rec = inRecs[slot];
+
+            StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+            const MeshInstanceClodOffsets off = clodOffsets[rec.instanceIndex];
+            StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+            const uint objectBufferIndex = perMeshInstanceBuffer[rec.instanceIndex].perObjectBufferIndex;
+            StructuredBuffer<PerObjectBuffer> perObjectBuffer =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
+            const row_major matrix objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
+            StructuredBuffer<Camera> cameras =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+            const Camera camera = cameras[rec.viewId];
+            StructuredBuffer<CullingCameraInfo> cameraInfos =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
+            const CullingCameraInfo cam = cameraInfos[rec.viewId];
+            ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+
+            StructuredBuffer<ClusterLODNode> lodNodes =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Nodes)];
+
+            const ClusterLODNode node = lodNodes[off.lodNodesBase + rec.nodeId];
+
+            if (node.range.isGroup == 0) {
+                WGTelemetryAdd(WG_COUNTER_TRAVERSE_INTERNAL_NODE_RECORDS, 1);
+            }
+            else {
+                WGTelemetryAdd(WG_COUNTER_TRAVERSE_LEAF_NODE_RECORDS, 1);
+            }
+
+            const float3 nodeCenterObjectSpace = node.metric.centerAndRadius.xyz;
+            const float3 nodeCenterViewSpace = ToViewSpace(nodeCenterObjectSpace, objectModelMatrix, camera.view);
+            const float nodeRadiusWorld = node.metric.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
+            const bool nodeCulled = SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, camera);
+
+            if (nodeCulled) {
+                WGTelemetryAdd(WG_COUNTER_TRAVERSE_CULLED_NODE_RECORDS, 1);
+            }
+            else {
+                float4 nodeCenterObjectSpace4 = float4(nodeCenterObjectSpace, 1.0f);
+                float3 nodeCenterWorldSpace = mul(nodeCenterObjectSpace4, objectModelMatrix).xyz;
+                float nodeProjectedError = ProjectedErrorPixels(
+                    nodeCenterWorldSpace,
+                    nodeRadiusWorld,
+                    node.metric.maxQuadricError,
+                    cam.positionWorldSpace.xyz,
+                    cam.projY,
+                    perFrameBuffer.screenResY,
+                    cam.zNear);
+
+                const bool nodeWantsTraversal = nodeProjectedError > cam.errorPixels;
+                if (!nodeWantsTraversal) {
+                    WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
+                }
+                else if (node.range.isGroup == 0) {
+                    s.emitChildren = 1;
+                    s.childCount = min(node.range.countMinusOne + 1, TRAVERSE_CHILD_LANES);
+                    s.childBase = node.range.indexOrOffset;
+                    s.instanceIndex = rec.instanceIndex;
+                    s.viewId = rec.viewId;
+                }
+                else {
+                    s.emitGroup = 1;
+                    s.instanceIndex = rec.instanceIndex;
+                    s.viewId = rec.viewId;
+                    s.groupId = node.range.indexOrOffset;
+                }
+            }
         }
+
+        g_slotState[slot] = s;
     }
 
-    const float3 nodeCenterObjectSpace = node.metric.centerAndRadius.xyz;
-    const float3 nodeCenterViewSpace = ToViewSpace(nodeCenterObjectSpace, objectModelMatrix, camera.view);
-    const float nodeRadiusWorld = node.metric.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
-    const bool nodeCulled = SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, camera);
+    GroupMemoryBarrierWithGroupSync();
 
-    if (nodeCulled) {
-        if (gtid.x == 0) {
-            WGTelemetryAdd(WG_COUNTER_TRAVERSE_CULLED_NODE_RECORDS, 1);
-        }
-        ThreadNodeOutputRecords<TraverseNodeRecord> noNodes =
-            TraverseNodes.GetThreadNodeOutputRecords(0);
-        noNodes.OutputComplete();
+    const TraverseSlotState s = g_slotState[slot];
 
-        ThreadNodeOutputRecords<GroupEvalRecord> noGroups =
-            GroupEvaluate.GetThreadNodeOutputRecords(0);
-        noGroups.OutputComplete();
-        return;
+    const bool emitTraverse = slotActive && (s.emitChildren != 0) && (lane < s.childCount);
+    if (emitTraverse) {
+        WGTelemetryAdd(WG_COUNTER_TRAVERSE_ACTIVE_CHILD_THREADS, 1);
     }
 
-    float4 nodeCenterObjectSpace4 = float4(nodeCenterObjectSpace, 1.0f);
-    float3 nodeCenterWorldSpace = mul(nodeCenterObjectSpace4, objectModelMatrix).xyz;
-    float nodeProjectedError = ProjectedErrorPixels(
-        nodeCenterWorldSpace,
-        nodeRadiusWorld,
-        node.metric.maxQuadricError,
-        cam.positionWorldSpace.xyz,
-        cam.projY,
-        perFrameBuffer.screenResY,
-        cam.zNear);
+    const bool emitGroup = slotActive && (lane == 0) && (s.emitGroup != 0);
 
-    const bool nodeWantsTraversal = nodeProjectedError > cam.errorPixels;
-    if (!nodeWantsTraversal) {
-        if (gtid.x == 0) {
-            WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
-        }
-        ThreadNodeOutputRecords<TraverseNodeRecord> noNodes =
-            TraverseNodes.GetThreadNodeOutputRecords(0);
-        noNodes.OutputComplete();
+    ThreadNodeOutputRecords<TraverseNodeRecord> outNodes =
+        TraverseNodes.GetThreadNodeOutputRecords(emitTraverse ? 1 : 0);
+    ThreadNodeOutputRecords<GroupEvalRecord> outGroups =
+        GroupEvaluate.GetThreadNodeOutputRecords(emitGroup ? 1 : 0);
 
-        ThreadNodeOutputRecords<GroupEvalRecord> noGroups =
-            GroupEvaluate.GetThreadNodeOutputRecords(0);
-        noGroups.OutputComplete();
-        return;
+    if (emitTraverse) {
+        TraverseNodeRecord r;
+        r.instanceIndex = s.instanceIndex;
+        r.viewId = s.viewId;
+        r.nodeId = s.childBase + lane;
+        outNodes.Get() = r;
+
+        WGTelemetryAdd(WG_COUNTER_TRAVERSE_TRAVERSE_RECORDS, 1);
     }
 
-    // Internal BVH node: emit up to 32 children as new node records
-    if (node.range.isGroup == 0) {
-        const uint ci = gtid.x;
-        const uint childCount = node.range.countMinusOne + 1;
-
-        const bool activeChild = (ci < childCount);
-        if (activeChild) {
-            WGTelemetryAdd(WG_COUNTER_TRAVERSE_ACTIVE_CHILD_THREADS, 1);
-        }
-
-        ThreadNodeOutputRecords<TraverseNodeRecord> o =
-            TraverseNodes.GetThreadNodeOutputRecords(activeChild ? 1 : 0);
-
-        ThreadNodeOutputRecords<GroupEvalRecord> noGroups =
-            GroupEvaluate.GetThreadNodeOutputRecords(0);
-
-        if (activeChild) {
-            TraverseNodeRecord r;
-            r.instanceIndex = rec.instanceIndex;
-            r.viewId = rec.viewId;
-            r.nodeId = node.range.indexOrOffset + ci; // child node id (relative to lodNodesBase)
-            o.Get() = r;
-
-            WGTelemetryAdd(WG_COUNTER_TRAVERSE_TRAVERSE_RECORDS, 1);
-        }
-        o.OutputComplete();
-        noGroups.OutputComplete();
-        return;
-    }
-
-    // Leaf BVH node that references a group:
-    // emit exactly 1 group record so the group code path can run with 32 threads
-    ThreadNodeOutputRecords<TraverseNodeRecord> noNodes =
-        TraverseNodes.GetThreadNodeOutputRecords(0);
-    ThreadNodeOutputRecords<GroupEvalRecord> groupsOut =
-        GroupEvaluate.GetThreadNodeOutputRecords(gtid.x == 0 ? 1 : 0);
-
-    if (gtid.x == 0) {
+    if (emitGroup) {
         GroupEvalRecord r;
-        r.instanceIndex = rec.instanceIndex;
-        r.viewId = rec.viewId;
-        r.groupId = node.range.indexOrOffset; // groupId (relative to groupsBase)
-        groupsOut.Get() = r;
+        r.instanceIndex = s.instanceIndex;
+        r.viewId = s.viewId;
+        r.groupId = s.groupId;
+        outGroups.Get() = r;
 
         WGTelemetryAdd(WG_COUNTER_TRAVERSE_GROUP_RECORDS, 1);
     }
-    noNodes.OutputComplete();
-    groupsOut.OutputComplete();
+
+    outNodes.OutputComplete();
+    outGroups.OutputComplete();
 }
 
 // Node: GroupEvaluate

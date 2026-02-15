@@ -137,6 +137,7 @@ void Mesh::LogClusterLODHierarchyStats() const
 	uint32_t leafGroupNodes = 0;
 	uint32_t interiorNodes = 0;
 	U32Stats interior_childCount;
+	uint32_t maxInteriorChildCount = 0;
 
 	for (uint32_t i = 0; i < nodeCount; ++i)
 	{
@@ -151,6 +152,7 @@ void Mesh::LogClusterLODHierarchyStats() const
 			interiorNodes++;
 			const uint32_t childCount = uint32_t(n.range.countMinusOne) + 1u;
 			interior_childCount.add(childCount);
+			maxInteriorChildCount = std::max(maxInteriorChildCount, childCount);
 		}
 	}
 
@@ -200,6 +202,8 @@ void Mesh::LogClusterLODHierarchyStats() const
 		spdlog::info("  interior node child count: min={} | avg={:.2f} | max={}",
 			interior_childCount.minv, interior_childCount.avg(), interior_childCount.maxv);
 	}
+
+	spdlog::info("  BVH max interior fanout observed={}", maxInteriorChildCount);
 
 	// -------------------------
 	// Per-depth summary
@@ -408,36 +412,94 @@ void Mesh::BuildClusterLODTraversalHierarchy(uint32_t preferredNodeWidth)
 			writeOffset += iterCount;
 		}
 
-		// Match NVIDIA�s bookkeeping: writeOffset ends one past, then they -- and assert
+		// Match NVIDIA's bookkeeping: writeOffset ends one past, then they -- and assert
 		writeOffset--;
-		if (range.offset + range.count != writeOffset)
+		if (range.offset + range.count != writeOffset) {
 			throw std::runtime_error("Cluster LOD: traversal node allocation mismatch (range/count).");
+		}
 	}
 
-	// Top root over per-depth roots [1..lodLevelCount]
+	// Top hierarchy over per-depth roots [1..lodLevelCount], constrained to preferredNodeWidth fanout.
 	{
-		meshopt_Bounds merged = meshopt_computeSphereBounds(
-			&m_clodNodes[1].traversalMetric.boundingSphereX,
-			lodLevelCount,
-			sizeof(ClusterLODNode),
-			&m_clodNodes[1].traversalMetric.boundingSphereRadius,
-			sizeof(ClusterLODNode));
+		auto BuildInternalNode = [&](uint32_t childOffset, uint32_t childCount) -> ClusterLODNode {
+			if (childCount == 0)
+				throw std::runtime_error("Cluster LOD: internal node with zero children");
+
+			ClusterLODNode node{};
+			node.range.isGroup = 0;
+			node.range.indexOrOffset = childOffset;
+			node.range.countMinusOne = childCount - 1;
+
+			const ClusterLODNode* children = &m_clodNodes[childOffset];
+
+			float maxErr = 0.f;
+			for (uint32_t c = 0; c < childCount; ++c)
+				maxErr = std::max(maxErr, children[c].traversalMetric.maxQuadricError);
+			node.traversalMetric.maxQuadricError = maxErr;
+
+			meshopt_Bounds merged = meshopt_computeSphereBounds(
+				&children[0].traversalMetric.boundingSphereX,
+				childCount,
+				sizeof(ClusterLODNode),
+				&children[0].traversalMetric.boundingSphereRadius,
+				sizeof(ClusterLODNode));
+
+			node.traversalMetric.boundingSphereX = merged.center[0];
+			node.traversalMetric.boundingSphereY = merged.center[1];
+			node.traversalMetric.boundingSphereZ = merged.center[2];
+			node.traversalMetric.boundingSphereRadius = merged.radius;
+
+			return node;
+		};
+
+		std::vector<uint32_t> currentLayer;
+		currentLayer.reserve(lodLevelCount);
+		for (uint32_t depth = 0; depth < lodLevelCount; ++depth)
+			currentLayer.push_back(m_clodLodLevelRoots[depth]);
+
+		while (currentLayer.size() > preferredNodeWidth)
+		{
+			std::vector<uint32_t> nextLayer;
+			nextLayer.reserve((currentLayer.size() + preferredNodeWidth - 1) / preferredNodeWidth);
+
+			for (uint32_t begin = 0; begin < currentLayer.size(); begin += preferredNodeWidth)
+			{
+				const uint32_t childCount = std::min<uint32_t>(preferredNodeWidth, uint32_t(currentLayer.size()) - begin);
+				const uint32_t childOffset = currentLayer[begin];
+
+				for (uint32_t c = 1; c < childCount; ++c)
+				{
+					if (currentLayer[begin + c] != childOffset + c)
+					{
+						throw std::runtime_error("Cluster LOD: expected contiguous node ids while building top hierarchy");
+					}
+				}
+
+				ClusterLODNode parent = BuildInternalNode(childOffset, childCount);
+				const uint32_t parentId = uint32_t(m_clodNodes.size());
+				m_clodNodes.push_back(parent);
+				nextLayer.push_back(parentId);
+			}
+
+			currentLayer = std::move(nextLayer);
+		}
+
+		if (currentLayer.empty())
+			throw std::runtime_error("Cluster LOD: top hierarchy has no roots");
+
+		const uint32_t rootChildOffset = currentLayer.front();
+		const uint32_t rootChildCount = uint32_t(currentLayer.size());
+
+		for (uint32_t c = 1; c < rootChildCount; ++c)
+		{
+			if (currentLayer[c] != rootChildOffset + c)
+			{
+				throw std::runtime_error("Cluster LOD: expected contiguous root children in top hierarchy");
+			}
+		}
 
 		ClusterLODNode& root = m_clodNodes[0];
-		root = {};
-		root.range.isGroup = 0;
-		root.range.indexOrOffset = 1;                 // childOffset
-		root.range.countMinusOne = lodLevelCount - 1; // childCountMinusOne
-
-		root.traversalMetric.boundingSphereX = merged.center[0];
-		root.traversalMetric.boundingSphereY = merged.center[1];
-		root.traversalMetric.boundingSphereZ = merged.center[2];
-		root.traversalMetric.boundingSphereRadius = merged.radius;
-
-		float maxErr = 0.f;
-		for (uint32_t c = 0; c < lodLevelCount; ++c)
-			maxErr = std::max(maxErr, m_clodNodes[1 + c].traversalMetric.maxQuadricError);
-		root.traversalMetric.maxQuadricError = maxErr;
+		root = BuildInternalNode(rootChildOffset, rootChildCount);
 
 		m_clodTopRootNode = 0;
 	}
@@ -497,9 +559,11 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 	config.optimize_clusters = true;
 	config.optimize_bounds = true;
 
-	// If you want <= MaxChildren refined groups per parent, account for meshopt partition overshoot (~+1/3).
-	const uint32_t MaxChildren = 64;
-	config.partition_size = std::max<size_t>(1, (MaxChildren * 3) / 4);
+	// Keep high group child fanout for cluster culling throughput, but build a narrower BVH for traversal occupancy.
+	// If you want <= MaxGroupChildren refined groups per parent, account for meshopt partition overshoot (~+1/3).
+	constexpr uint32_t MaxGroupChildren = 64;
+	constexpr uint32_t TraversalNodeFanout = 4;
+	config.partition_size = std::max<size_t>(1, (MaxGroupChildren * 3) / 4);
 
 	uint32_t maxChildrenObserved = 0;
 
@@ -667,7 +731,7 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 			return groupId;
 		});
 
-	if (maxChildrenObserved > MaxChildren)
+	if (maxChildrenObserved > MaxGroupChildren)
 		throw std::runtime_error("Exceeded maximum allowed Cluster LOD children per group");
 
 	{
@@ -705,9 +769,21 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 		}
 	}
 
-	// build the acceleration hierarchy (BVH/K-ary trees per depth + top root)
-	// Choose preferredNodeWidth independently; 8/16/32 are typical.
-	BuildClusterLODTraversalHierarchy(/*preferredNodeWidth=*/MaxChildren);
+	// Build the acceleration hierarchy (BVH/K-ary trees per depth + top root).
+	// Keep this independent from group child fanout so traversal occupancy can be tuned separately.
+	BuildClusterLODTraversalHierarchy(/*preferredNodeWidth=*/TraversalNodeFanout);
+
+	for (const ClusterLODNode& node : m_clodNodes)
+	{
+		if (node.range.isGroup != 0)
+			continue;
+
+		const uint32_t childCount = uint32_t(node.range.countMinusOne) + 1u;
+		if (childCount > TraversalNodeFanout)
+		{
+			throw std::runtime_error("Cluster LOD: traversal node fanout exceeded configured maximum");
+		}
+	}
 	LogClusterLODHierarchyStats();
 }
 
