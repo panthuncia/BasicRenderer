@@ -1368,6 +1368,44 @@ inline void Menu::DrawCLodTelemetryWindow() {
             counter(CLodWorkGraphCounterIndex::GroupEvaluateEmitBucketThreads),
             counter(CLodWorkGraphCounterIndex::GroupEvaluateRefinedTraversalThreads));
 
+        const uint32_t groupCoalescedLaunches = counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedLaunches);
+        const uint32_t groupCoalescedInputRecords = counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputRecords);
+        const float groupAvgRecordsPerLaunch = (groupCoalescedLaunches > 0)
+            ? (static_cast<float>(groupCoalescedInputRecords) / static_cast<float>(groupCoalescedLaunches))
+            : 0.0f;
+        const float groupPackingPercent = 100.0f * groupAvgRecordsPerLaunch / 8.0f;
+
+        ImGui::Text("GroupEvaluate coalesced launches: %u | input records: %u | avg records/launch: %.2f (%.1f%% of 8)",
+            groupCoalescedLaunches,
+            groupCoalescedInputRecords,
+            groupAvgRecordsPerLaunch,
+            groupPackingPercent);
+
+        std::array<uint32_t, 8> groupInputHistogram = {
+            counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputCount1),
+            counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputCount2),
+            counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputCount3),
+            counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputCount4),
+            counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputCount5),
+            counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputCount6),
+            counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputCount7),
+            counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputCount8)
+        };
+
+        ImGui::TextUnformatted("GroupEvaluate coalesced input histogram (records per launch):");
+        float groupHistogramValues[8] = {};
+        for (size_t i = 0; i < groupInputHistogram.size(); ++i) {
+            groupHistogramValues[i] = static_cast<float>(groupInputHistogram[i]);
+        }
+
+        static const char* kGroupHistogramLabels[8] = { "1", "2", "3", "4", "5", "6", "7", "8" };
+        if (ImPlot::BeginPlot("##GroupEvaluateCoalescedInputHistogram", ImVec2(-1.0f, 150.0f), ImPlotFlags_NoLegend)) {
+            ImPlot::SetupAxes("Records", "Launches", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+            ImPlot::SetupAxisTicks(ImAxis_X1, 0.0, 7.0, 8, kGroupHistogramLabels);
+            ImPlot::PlotBars("Launches", groupHistogramValues, 8, 0.6f, 0.0f);
+            ImPlot::EndPlot();
+        }
+
         const uint32_t clusterWaves = counter(CLodWorkGraphCounterIndex::ClusterCullWaves);
         const uint32_t zeroSurvivorWaves = counter(CLodWorkGraphCounterIndex::ClusterCullZeroSurvivorWaves);
         const uint32_t survivingWaves = (clusterWaves > zeroSurvivorWaves)

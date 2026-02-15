@@ -559,11 +559,13 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 	config.optimize_clusters = true;
 	config.optimize_bounds = true;
 
-	// Keep high group child fanout for cluster culling throughput, but build a narrower BVH for traversal occupancy.
-	// If you want <= MaxGroupChildren refined groups per parent, account for meshopt partition overshoot (~+1/3).
-	constexpr uint32_t MaxGroupChildren = 64;
+	// Keep group child fanout capped for the 4-lane GroupEvaluate path.
+	// Decouple partition target from fanout so child buckets can hold more meshlets.
+	// meshoptimizer partitioning may overshoot target by ~+1/3.
+	constexpr uint32_t MaxGroupChildren = 4;
 	constexpr uint32_t TraversalNodeFanout = 4;
-	config.partition_size = std::max<size_t>(1, (MaxGroupChildren * 3) / 4);
+	constexpr uint32_t TargetBucketClusters = 32;
+	config.partition_size = std::max<size_t>(1, (TargetBucketClusters * 3) / 4);
 
 	uint32_t maxChildrenObserved = 0;
 
@@ -636,6 +638,50 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 						return a.clusterIndices.size() > b.clusterIndices.size();
 					return a.refinedGroup < b.refinedGroup;
 				});
+
+			if (buckets.size() > MaxGroupChildren)
+			{
+				std::vector<ChildBucket> merged;
+				merged.reserve(MaxGroupChildren);
+
+				const uint32_t keepCount = MaxGroupChildren - 1;
+				for (uint32_t i = 0; i < keepCount; ++i)
+				{
+					merged.push_back(std::move(buckets[i]));
+				}
+
+				ChildBucket overflow{};
+				overflow.refinedGroup = -1;
+				for (uint32_t i = keepCount; i < buckets.size(); ++i)
+				{
+					overflow.clusterIndices.insert(
+						overflow.clusterIndices.end(),
+						buckets[i].clusterIndices.begin(),
+						buckets[i].clusterIndices.end());
+				}
+
+				if (!overflow.clusterIndices.empty())
+				{
+					merged.push_back(std::move(overflow));
+				}
+
+				buckets = std::move(merged);
+
+				std::sort(
+					buckets.begin(),
+					buckets.end(),
+					[](const ChildBucket& a, const ChildBucket& b)
+					{
+						const bool aTerminal = (a.refinedGroup < 0);
+						const bool bTerminal = (b.refinedGroup < 0);
+						if (aTerminal != bTerminal)
+							return aTerminal > bTerminal;
+
+						if (a.clusterIndices.size() != b.clusterIndices.size())
+							return a.clusterIndices.size() > b.clusterIndices.size();
+						return a.refinedGroup < b.refinedGroup;
+					});
+			}
 
 			uint32_t localMeshletCursor = 0;
 

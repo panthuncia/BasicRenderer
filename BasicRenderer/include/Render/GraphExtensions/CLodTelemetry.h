@@ -45,6 +45,17 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     TraverseNodesCoalescedInputCount7,
     TraverseNodesCoalescedInputCount8,
 
+    GroupEvaluateCoalescedLaunches,
+    GroupEvaluateCoalescedInputRecords,
+    GroupEvaluateCoalescedInputCount1,
+    GroupEvaluateCoalescedInputCount2,
+    GroupEvaluateCoalescedInputCount3,
+    GroupEvaluateCoalescedInputCount4,
+    GroupEvaluateCoalescedInputCount5,
+    GroupEvaluateCoalescedInputCount6,
+    GroupEvaluateCoalescedInputCount7,
+    GroupEvaluateCoalescedInputCount8,
+
     Count
 };
 
