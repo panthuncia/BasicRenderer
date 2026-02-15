@@ -683,6 +683,15 @@ RenderGraph::~RenderGraph() {
 
 void RenderGraph::RegisterExtension(std::unique_ptr<IRenderGraphExtension> ext) {
 	if (!ext) return;
+
+	const auto& incomingType = typeid(*ext);
+	for (const auto& existing : m_extensions) {
+		if (existing && typeid(*existing) == incomingType) {
+			spdlog::error("Duplicate RenderGraph extension registration: {}", incomingType.name());
+			throw std::runtime_error("Duplicate RenderGraph extension registration");
+		}
+	}
+
 	// Let the extension see the current registry immediately.
 	ext->OnRegistryReset(&_registry);
 	m_extensions.push_back(std::move(ext));

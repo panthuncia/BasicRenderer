@@ -1051,6 +1051,10 @@ void Renderer::CreateRenderGraph() {
     {
 		currentRenderGraph = std::make_unique<RenderGraph>();
         Menu::GetInstance().SetRenderGraph(currentRenderGraph.get());
+
+        currentRenderGraph->RegisterExtension(std::make_unique<RenderGraphIOExtension>(m_managerInterface.GetTextureFactory()));
+        currentRenderGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>());
+        currentRenderGraph->RegisterExtension(std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint64_t>(pow(2, 25))));
     }
 
     auto& newGraph = currentRenderGraph;
@@ -1081,9 +1085,6 @@ void Renderer::CreateRenderGraph() {
         useMeshShaders = false;
     }
 
-    newGraph->RegisterExtension(std::make_unique<RenderGraphIOExtension>(m_managerInterface.GetTextureFactory()));
-    newGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>());
-
     BuildBRDFIntegrationPass(newGraph.get());
 
     BuildEnvironmentPipeline(newGraph.get());
@@ -1092,10 +1093,8 @@ void Renderer::CreateRenderGraph() {
     newGraph->BuildComputePass("SkinningPass")
         .Build<SkinningPass>();
     
-	// Cluster LOD
+    // Cluster LOD
     // 2^25 visible clusters allowed due to index precision
-    
-    newGraph->RegisterExtension(std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint64_t>(pow(2, 25))));
 
     
     bool indirect = getIndirectDrawsEnabled();
