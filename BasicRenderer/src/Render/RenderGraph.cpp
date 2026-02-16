@@ -544,15 +544,22 @@ void RenderGraph::AddTransition(
 	auto& compileTracker = GetOrCreateCompileTracker(pRes, resource.GetGlobalResourceID());
 
 	if (aliasActivationPending.find(resource.GetGlobalResourceID()) != aliasActivationPending.end()) {
-		transitions.emplace_back(
-			pRes,
-			r.resourceHandleAndRange.range,
-			rhi::ResourceAccessType::None,
-			r.state.access,
-			rhi::ResourceLayout::Undefined,
-			r.state.layout,
-			rhi::ResourceSyncState::None,
-			r.state.sync);
+		const bool firstUseIsWrite = AccessTypeIsWriteType(r.state.access);
+		if (firstUseIsWrite) {
+			transitions.emplace_back(
+				pRes,
+				r.resourceHandleAndRange.range,
+				rhi::ResourceAccessType::None,
+				r.state.access,
+				rhi::ResourceLayout::Undefined,
+				r.state.layout,
+				rhi::ResourceSyncState::None,
+				r.state.sync,
+				true);
+		}
+		else {
+			throw std::runtime_error("Alias activation requires first use to be a write when explicit initialization is disabled");
+		}
 		std::vector<ResourceTransition> ignored;
 		compileTracker.Apply(r.resourceHandleAndRange.range, pRes, r.state, ignored);
 		aliasActivationPending.erase(resource.GetGlobalResourceID());
@@ -2526,7 +2533,13 @@ namespace {
 				transition.range, transition.prevAccessType, transition.newAccessType,
 				transition.prevLayout, transition.newLayout,
 				transition.prevSyncState, transition.newSyncState);
+			const size_t textureStart = batch.textures.size();
 			batch.Append(bg);
+			if (transition.discard) {
+				for (size_t i = textureStart; i < batch.textures.size(); ++i) {
+					batch.textures[i].discard = true;
+				}
+			}
 		}
 		if (!batch.Empty()) {
 			commandList.Barriers(batch.View());
