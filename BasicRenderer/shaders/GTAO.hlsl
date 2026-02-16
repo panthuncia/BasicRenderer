@@ -18,6 +18,8 @@
 #include "Intel/XeGTAO.h"
 #endif
 
+#define XE_GTAO_SOURCE_DEPTH_IS_LINEAR_VIEW_DEPTH 1
+
 #include "Intel/XeGTAO.hlsli"
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"

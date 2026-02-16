@@ -247,6 +247,7 @@ struct GTAOConstants {
     float EffectFalloffRange;
 
     float RadiusMultiplier;
+    float2 SourceDepthUVScale;
     float Padding0;
     float FinalValuePower;
     float DenoiseBlurBeta;

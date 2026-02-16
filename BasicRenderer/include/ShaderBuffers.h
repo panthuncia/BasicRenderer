@@ -210,7 +210,7 @@ namespace XeGTAO {
         DirectX::XMUINT2 ViewportSize;
         DirectX::XMFLOAT2 ViewportPixelSize; // .zw == 1.0 / ViewportSize.xy
 
-        DirectX::XMFLOAT2 DepthUnpackConsts;
+        DirectX::XMFLOAT2 DepthUnpackConsts; // UNUSED if source depth is linear view depth.
         DirectX::XMFLOAT2 CameraTanHalfFOV;
 
         DirectX::XMFLOAT2 NDCToViewMul;
@@ -221,6 +221,7 @@ namespace XeGTAO {
         float EffectFalloffRange;
 
         float RadiusMultiplier;
+        DirectX::XMFLOAT2 SourceDepthUVScale; // Scale UVs when sampling source depth if texture is padded (e.g. to next power-of-two).
         float Padding0;
         float FinalValuePower;
         float DenoiseBlurBeta;

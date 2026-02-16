@@ -192,6 +192,7 @@ inline void GTAOUpdateConstants( XeGTAO::GTAOConstants& consts, uint32_t viewpor
     consts.DenoiseBlurBeta              = (settings.DenoisePasses==0)?(1e4f):(1.2f);    // high value disables denoise - more elegant & correct way would be do set all edges to 0
 
     consts.RadiusMultiplier             = settings.RadiusMultiplier;
+    consts.SourceDepthUVScale           = cam.info.uvScaleToNextPowerOfTwo;
     consts.SampleDistributionPower      = settings.SampleDistributionPower;
     consts.ThinOccluderCompensation     = settings.ThinOccluderCompensation;
     consts.FinalValuePower              = settings.FinalValuePower;

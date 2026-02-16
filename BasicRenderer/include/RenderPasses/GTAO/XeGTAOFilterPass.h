@@ -18,7 +18,7 @@ public:
     }
 
     void DeclareResourceUsages(ComputePassBuilder* builder){
-        builder->WithShaderResource(Builtin::GBuffer::Normals, Builtin::PrimaryCamera::DepthTexture)
+        builder->WithShaderResource(Builtin::GBuffer::Normals, Builtin::PrimaryCamera::LinearDepthMap)
             .WithUnorderedAccess(Builtin::GTAO::WorkingDepths)
             .WithConstantBuffer("Builtin::GTAO::ConstantsBuffer");
     }
@@ -26,7 +26,7 @@ public:
     PassReturn Execute(RenderContext& context) override {
         auto& psoManager = PSOManager::GetInstance();
         auto& commandList = context.commandList;
-        auto depthTexture = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PrimaryCamera::DepthTexture);
+        auto depthTexture = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PrimaryCamera::LinearDepthMap);
         auto workingDepths = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GTAO::WorkingDepths);
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
