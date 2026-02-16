@@ -113,7 +113,7 @@ void BuildBRDFIntegrationPass(RenderGraph* graph) {
 	brdfDesc.uavFormat = rhi::Format::R16G16_Float;
     ImageDimensions dims = { 512, 512, 0, 0 };
     brdfDesc.imageDimensions.push_back(dims);
-    auto brdfIntegrationTexture = PixelBuffer::CreateSharedUnmaterialized(brdfDesc);
+    auto brdfIntegrationTexture = PixelBuffer::CreateShared(brdfDesc);
     brdfIntegrationTexture->SetName("BRDF Integration Texture");
 	graph->RegisterResource(Builtin::BRDFLUT, brdfIntegrationTexture);
 
