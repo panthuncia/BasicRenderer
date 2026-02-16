@@ -126,6 +126,28 @@ public:
 		m_primaryViewType = type;
 	}
 
+	bool HasAnyDescriptorSlots() const {
+		if (m_CBVInfo.slot.heap.valid()) {
+			return true;
+		}
+
+		for (const auto& view : m_SRVViews) {
+			if (!view.infos.empty()) {
+				return true;
+			}
+		}
+
+		if (!m_UAVShaderVisibleInfos.empty() || !m_UAVNonShaderVisibleInfos.empty()) {
+			return true;
+		}
+
+		if (!m_RTVInfos.empty() || !m_DSVInfos.empty()) {
+			return true;
+		}
+
+		return false;
+	}
+
 	virtual ~GloballyIndexedResource() {
 		ReleaseDescriptorSlots();
 	};

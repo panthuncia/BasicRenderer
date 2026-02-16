@@ -2535,6 +2535,10 @@ void RenderGraph::AddResource(std::shared_ptr<Resource> resource, bool transitio
 
 	resourcesByName[name] = resource;
 	resourcesByID[resource->GetGlobalResourceID()] = resource;
+
+	if (auto texture = std::dynamic_pointer_cast<PixelBuffer>(resource)) {
+		texture->EnsureVirtualDescriptorSlotsAllocated();
+	}
 	/*if (transition) {
 		initialResourceStates[resource->GetGlobalResourceID()] = initialState;
 	}*/

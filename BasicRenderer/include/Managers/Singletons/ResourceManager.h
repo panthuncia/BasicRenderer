@@ -72,6 +72,15 @@ public:
         rhi::Resource& apiResource,
         const ViewRequirements& req);
 
+    void ReserveDescriptorSlots(
+        GloballyIndexedResource& target,
+        const ViewRequirements& req);
+
+    void UpdateDescriptorContents(
+        GloballyIndexedResource& target,
+        rhi::Resource& apiResource,
+        const ViewRequirements& req);
+
     static ResourceManager& GetInstance() {
         static ResourceManager instance;
         return instance;

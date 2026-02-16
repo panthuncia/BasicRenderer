@@ -139,6 +139,8 @@ public:
             return;
         }
 
+        EnsureVirtualDescriptorSlotsAllocated();
+
         auto newDesc = m_desc;
         if (m_desc.padInternalResolution) {
             // Pad each mip to the nearest power of 2, if requested
@@ -161,39 +163,9 @@ public:
 
         auto& rm = ResourceManager::GetInstance();
         ResourceManager::ViewRequirements views;
-        ResourceManager::ViewRequirements::TextureViews texViews;
-        texViews.mipLevels = m_mipLevels;
-        texViews.isCubemap = m_desc.isCubemap;
-        texViews.isArray = m_desc.isArray;
-        texViews.arraySize = m_desc.arraySize;
-        texViews.totalArraySlices = m_arraySize;
-
-        texViews.baseFormat = m_desc.format;
-        texViews.srvFormat = m_desc.srvFormat;
-        texViews.uavFormat = m_desc.uavFormat;
-        texViews.rtvFormat = m_desc.rtvFormat;
-        texViews.dsvFormat = m_desc.dsvFormat;
-
-        texViews.createSRV = true;
-        texViews.createUAV = m_desc.hasUAV;
-        texViews.createNonShaderVisibleUAV = m_desc.hasNonShaderVisibleUAV;
-        texViews.createRTV = m_desc.hasRTV;
-        texViews.createDSV = m_desc.hasDSV;
-
-        if (m_desc.hasUAV && rhi::helpers::IsSRGB(m_desc.format)) {
-            if (texViews.srvFormat == rhi::Format::Unknown) {
-                texViews.srvFormat = m_desc.format;
-            }
-            texViews.baseFormat = rhi::helpers::typlessFromSrgb(m_desc.format);
-            texViews.uavFormat = rhi::helpers::stripSrgb(m_desc.format);
-        }
-
-        texViews.createCubemapAsArraySRV = m_desc.isCubemap;
-        texViews.uavFirstMip = 0;
-
-        views.views = texViews;
+        views.views = BuildTextureViewRequirements(m_desc, m_mipLevels, m_arraySize);
         auto res = m_backing->GetAPIResource();
-        rm.AssignDescriptorSlots(*this, res, views);
+        rm.UpdateDescriptorContents(*this, res, views);
 
         if (m_desc.aliasingPoolID.has_value()) {
             m_backing->ApplyMetadataComponentBundle(
@@ -209,12 +181,66 @@ public:
             return;
         }
 
-        ReleaseDescriptorSlots();
         m_backing.reset();
         ++m_backingGeneration;
     }
 
+    void EnsureVirtualDescriptorSlotsAllocated() {
+        if (HasAnyDescriptorSlots()) {
+            return;
+        }
+
+        auto& rm = ResourceManager::GetInstance();
+        const uint16_t mipLevels = m_desc.generateMipMaps
+            ? CalculateMipLevels(m_desc.imageDimensions[0].width, m_desc.imageDimensions[0].height)
+            : 1;
+        const uint32_t arraySize = m_desc.isCubemap
+            ? 6u * m_desc.arraySize
+            : (m_desc.isArray ? m_desc.arraySize : 1u);
+
+        ResourceManager::ViewRequirements views;
+        views.views = BuildTextureViewRequirements(m_desc, mipLevels, arraySize);
+        rm.ReserveDescriptorSlots(*this, views);
+    }
+
 private:
+    static ResourceManager::ViewRequirements::TextureViews BuildTextureViewRequirements(
+        const TextureDescription& desc,
+        uint32_t mipLevels,
+        uint32_t totalArraySlices)
+    {
+        ResourceManager::ViewRequirements::TextureViews texViews;
+        texViews.mipLevels = mipLevels;
+        texViews.isCubemap = desc.isCubemap;
+        texViews.isArray = desc.isArray;
+        texViews.arraySize = desc.arraySize;
+        texViews.totalArraySlices = totalArraySlices;
+
+        texViews.baseFormat = desc.format;
+        texViews.srvFormat = desc.srvFormat;
+        texViews.uavFormat = desc.uavFormat;
+        texViews.rtvFormat = desc.rtvFormat;
+        texViews.dsvFormat = desc.dsvFormat;
+
+        texViews.createSRV = true;
+        texViews.createUAV = desc.hasUAV;
+        texViews.createNonShaderVisibleUAV = desc.hasNonShaderVisibleUAV;
+        texViews.createRTV = desc.hasRTV;
+        texViews.createDSV = desc.hasDSV;
+
+        if (desc.hasUAV && rhi::helpers::IsSRGB(desc.format)) {
+            if (texViews.srvFormat == rhi::Format::Unknown) {
+                texViews.srvFormat = desc.format;
+            }
+            texViews.baseFormat = rhi::helpers::typlessFromSrgb(desc.format);
+            texViews.uavFormat = rhi::helpers::stripSrgb(desc.format);
+        }
+
+        texViews.createCubemapAsArraySRV = desc.isCubemap;
+        texViews.uavFirstMip = 0;
+        return texViews;
+    }
+
     PixelBuffer(const TextureDescription& desc, bool materialize)
     {
 		m_hasLayout = true; // This is a texture, so it has a layout by default
