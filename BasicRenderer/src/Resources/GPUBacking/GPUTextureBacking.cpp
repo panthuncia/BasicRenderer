@@ -121,6 +121,9 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 	allocationBundle
 		.Set<MemoryStatisticsComponents::MemSizeBytes>({ allocInfo.sizeInBytes })
 		.Set<MemoryStatisticsComponents::ResourceType>({ rhi::ResourceType::Texture2D });
+	if (desc.aliasingPoolID.has_value()) {
+		allocationBundle.Set<MemoryStatisticsComponents::AliasingPool>({ desc.aliasingPoolID });
+	}
 	//.Set<MemoryStatisticsComponents::ResourceID>({ owningResourceID });
 	trackDesc.attach = allocationBundle;
 

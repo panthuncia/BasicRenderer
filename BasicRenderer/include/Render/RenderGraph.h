@@ -295,6 +295,9 @@ private:
 	std::unordered_map<std::string, std::shared_ptr<ComputePass>> computePassesByName;
 	std::unordered_map<std::string, std::shared_ptr<Resource>> resourcesByName;
 	std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
+	std::unordered_map<uint64_t, uint64_t> resourceBackingGenerationByID;
+	std::unordered_map<uint64_t, uint32_t> resourceIdleFrameCounts;
+	std::unordered_map<uint64_t, uint64_t> compiledResourceGenerationByID;
 
 	std::unordered_map<uint64_t, std::unordered_set<uint64_t>> aliasedResources; // Tracks resources that use the same memory
 	std::unordered_map<uint64_t, size_t> resourceToAliasGroup;
@@ -304,6 +307,7 @@ private:
 	std::unordered_map<uint64_t, ResourceTransition> initialTransitions; // Transitions needed to reach the initial state of the resources before executing the first batch. Executed on graph setup.
 	std::vector<PassBatch> batches;
 	std::unordered_map<uint64_t, SymbolicTracker*> trackers; // Tracks the state of resources in the graph.
+	std::unordered_map<uint64_t, SymbolicTracker> compileTrackers; // Compile-only symbolic state, decoupled from backing lifetime.
 
 	std::unique_ptr<CommandListPool> m_graphicsCommandListPool;
 	std::unique_ptr<CommandListPool> m_computeCommandListPool;
@@ -338,7 +342,15 @@ private:
 	std::function<bool()> m_getUseAsyncCompute;
 
 	void AddResource(std::shared_ptr<Resource> resource, bool transition = false);
-	void MaterializeUnmaterializedResources();
+	void MaterializeUnmaterializedResources(const std::unordered_set<uint64_t>* onlyResourceIDs = nullptr);
+	SymbolicTracker& GetOrCreateCompileTracker(Resource* resource, uint64_t resourceID);
+	void MaterializeReferencedResources(
+		const std::vector<ResourceRequirement>& resourceRequirements,
+		const std::vector<std::pair<ResourceHandleAndRange, ResourceState>>& internalTransitions);
+	std::unordered_set<uint64_t> CollectFrameResourceIDs() const;
+	void ApplyIdleDematerializationPolicy(const std::unordered_set<uint64_t>& usedResourceIDs);
+	void SnapshotCompiledResourceGenerations(const std::unordered_set<uint64_t>& usedResourceIDs);
+	void ValidateCompiledResourceGenerations() const;
 
 	void RefreshRetainedDeclarationsForFrame(RenderPassAndResources& p, uint8_t frameIndex);
 	void RefreshRetainedDeclarationsForFrame(ComputePassAndResources& p, uint8_t frameIndex);

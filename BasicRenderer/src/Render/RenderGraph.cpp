@@ -251,7 +251,8 @@ void RenderGraph::CommitPassToBatch(
 		for (auto& exit : pass.resources.internalTransitions) {
 			std::vector<ResourceTransition> _;
 			auto pRes = _registry.Resolve(exit.first.resource);
-			pRes->GetStateTracker()->Apply(
+			auto& compileTracker = GetOrCreateCompileTracker(pRes, exit.first.resource.GetGlobalResourceID());
+			compileTracker.Apply(
 				exit.first.range, nullptr, exit.second, _); // TODO: Do we really need the ptr?
 			currentBatch.internallyTransitionedResources.insert(exit.first.resource.GetGlobalResourceID());
 		}
@@ -293,7 +294,8 @@ void RenderGraph::CommitPassToBatch(
 		for (auto& exit : pass.resources.internalTransitions) {
 			std::vector<ResourceTransition> _;
 			auto pRes = _registry.Resolve(exit.first.resource);
-			pRes->GetStateTracker()->Apply(
+			auto& compileTracker = GetOrCreateCompileTracker(pRes, exit.first.resource.GetGlobalResourceID());
+			compileTracker.Apply(
 				exit.first.range, nullptr, exit.second, _);
 			currentBatch.internallyTransitionedResources.insert(exit.first.resource.GetGlobalResourceID());
 		}
@@ -537,14 +539,15 @@ void RenderGraph::AddTransition(
 	}
 	std::vector<ResourceTransition> transitions;
 	auto pRes = _registry.Resolve(resource); // TODO: Can we get rid of pRes in transitions?
+	auto& compileTracker = GetOrCreateCompileTracker(pRes, resource.GetGlobalResourceID());
 
-	pRes->GetStateTracker()->Apply(r.resourceHandleAndRange.range, pRes, r.state, transitions);
+	compileTracker.Apply(r.resourceHandleAndRange.range, pRes, r.state, transitions);
 
 	if (!transitions.empty()) {
 		outTransitionedResourceIDs.insert(resource.GetGlobalResourceID());
 	}
 
-	currentBatch.passBatchTrackers[resource.GetGlobalResourceID()] = pRes->GetStateTracker(); // We will need to chack subsequent passes against this
+	currentBatch.passBatchTrackers[resource.GetGlobalResourceID()] = &compileTracker; // We will need to check subsequent passes against this
 
 	bool oldSyncHasNonComputeSyncState = false;
 	for (auto& transition : transitions) {
@@ -681,6 +684,152 @@ RenderGraph::~RenderGraph() {
 	m_pCommandRecordingManager->ShutdownThreadLocal(); // Clears thread-local storage
 }
 
+SymbolicTracker& RenderGraph::GetOrCreateCompileTracker(Resource* resource, uint64_t resourceID) {
+	auto it = compileTrackers.find(resourceID);
+	if (it != compileTrackers.end()) {
+		return it->second;
+	}
+
+	SymbolicTracker seed;
+	if (resource) {
+		bool hasLiveBacking = true;
+		if (auto* texture = dynamic_cast<PixelBuffer*>(resource)) {
+			hasLiveBacking = texture->IsMaterialized();
+		}
+
+		if (hasLiveBacking) {
+			seed = *resource->GetStateTracker();
+		}
+	}
+
+	auto [insertedIt, _] = compileTrackers.emplace(resourceID, std::move(seed));
+	return insertedIt->second;
+}
+
+void RenderGraph::MaterializeReferencedResources(
+	const std::vector<ResourceRequirement>& resourceRequirements,
+	const std::vector<std::pair<ResourceHandleAndRange, ResourceState>>& internalTransitions)
+{
+	auto materializeIfNeeded = [&](const ResourceRegistry::RegistryHandle& handle) {
+		if (handle.IsEphemeral()) {
+			return;
+		}
+
+		auto resource = _registry.Resolve(handle);
+		if (!resource) {
+			return;
+		}
+
+		auto texture = dynamic_cast<PixelBuffer*>(resource);
+		if (!texture || texture->IsMaterialized()) {
+			return;
+		}
+
+		texture->Materialize();
+		resourceBackingGenerationByID[handle.GetGlobalResourceID()] = texture->GetBackingGeneration();
+	};
+
+	for (auto const& req : resourceRequirements) {
+		materializeIfNeeded(req.resourceHandleAndRange.resource);
+	}
+
+	for (auto const& transition : internalTransitions) {
+		materializeIfNeeded(transition.first.resource);
+	}
+}
+
+std::unordered_set<uint64_t> RenderGraph::CollectFrameResourceIDs() const {
+	std::unordered_set<uint64_t> used;
+	used.reserve(m_framePasses.size() * 4);
+
+	for (auto const& pr : m_framePasses) {
+		if (pr.type == PassType::Compute) {
+			auto const& p = std::get<ComputePassAndResources>(pr.pass);
+			for (auto const& req : p.resources.frameResourceRequirements) {
+				used.insert(req.resourceHandleAndRange.resource.GetGlobalResourceID());
+			}
+			for (auto const& t : p.resources.internalTransitions) {
+				used.insert(t.first.resource.GetGlobalResourceID());
+			}
+		}
+		else if (pr.type == PassType::Render) {
+			auto const& p = std::get<RenderPassAndResources>(pr.pass);
+			for (auto const& req : p.resources.frameResourceRequirements) {
+				used.insert(req.resourceHandleAndRange.resource.GetGlobalResourceID());
+			}
+			for (auto const& t : p.resources.internalTransitions) {
+				used.insert(t.first.resource.GetGlobalResourceID());
+			}
+		}
+	}
+
+	return used;
+}
+
+void RenderGraph::ApplyIdleDematerializationPolicy(const std::unordered_set<uint64_t>& usedResourceIDs) {
+	for (auto& [id, resource] : resourcesByID) {
+		if (!resource) {
+			continue;
+		}
+
+		auto texture = std::dynamic_pointer_cast<PixelBuffer>(resource);
+		if (!texture || !texture->IsIdleDematerializationEnabled()) {
+			continue;
+		}
+
+		if (usedResourceIDs.find(id) != usedResourceIDs.end()) {
+			resourceIdleFrameCounts[id] = 0;
+			continue;
+		}
+
+		auto& idleFrames = resourceIdleFrameCounts[id];
+		idleFrames++;
+
+		if (texture->IsMaterialized() && idleFrames >= texture->GetIdleDematerializationThreshold()) {
+			texture->Dematerialize();
+			resourceBackingGenerationByID[id] = texture->GetBackingGeneration();
+		}
+	}
+}
+
+void RenderGraph::SnapshotCompiledResourceGenerations(const std::unordered_set<uint64_t>& usedResourceIDs) {
+	compiledResourceGenerationByID.clear();
+	compiledResourceGenerationByID.reserve(usedResourceIDs.size());
+
+	for (uint64_t id : usedResourceIDs) {
+		auto it = resourcesByID.find(id);
+		if (it == resourcesByID.end() || !it->second) {
+			continue;
+		}
+
+		auto texture = std::dynamic_pointer_cast<PixelBuffer>(it->second);
+		if (!texture) {
+			continue;
+		}
+
+		compiledResourceGenerationByID[id] = texture->GetBackingGeneration();
+	}
+}
+
+void RenderGraph::ValidateCompiledResourceGenerations() const {
+	for (auto const& [id, compiledGeneration] : compiledResourceGenerationByID) {
+		auto it = resourcesByID.find(id);
+		if (it == resourcesByID.end() || !it->second) {
+			continue;
+		}
+
+		auto texture = std::dynamic_pointer_cast<PixelBuffer>(it->second);
+		if (!texture) {
+			continue;
+		}
+
+		const uint64_t currentGeneration = texture->GetBackingGeneration();
+		if (currentGeneration != compiledGeneration) {
+			throw std::runtime_error("Resource backing generation changed after compile and before execute. Resource ID: " + std::to_string(id));
+		}
+	}
+}
+
 
 void RenderGraph::RegisterExtension(std::unique_ptr<IRenderGraphExtension> ext) {
 	if (!ext) return;
@@ -741,6 +890,10 @@ void RenderGraph::ResetForRebuild()
 	// Clear resources
 	resourcesByID.clear();
 	resourcesByName.clear();
+	resourceBackingGenerationByID.clear();
+	resourceIdleFrameCounts.clear();
+	compiledResourceGenerationByID.clear();
+	compileTrackers.clear();
 
 	// Clear providers
 	_providerMap.clear();
@@ -761,6 +914,8 @@ void RenderGraph::ResetForRebuild()
 void RenderGraph::ResetForFrame() {
 	batches.clear();
 	lastActiveSubresourceInAliasGroup.clear();
+	compiledResourceGenerationByID.clear();
+	compileTrackers.clear();
 	// reset pass builders
 	for (auto& [name, builder] : m_passBuildersByName) {
 		builder->Reset();
@@ -868,6 +1023,7 @@ void RenderGraph::CompileStructural() {
 				par.resources.internalTransitions = b.params.internalTransitions;
 				par.resources.identifierSet = b.DeclaredResourceIds();
 				par.resources.isGeometryPass = b.params.isGeometryPass;
+				MaterializeReferencedResources(par.resources.staticResourceRequirements, par.resources.internalTransitions);
 			}
  			any.pass = std::move(par);
  		}
@@ -887,6 +1043,7 @@ void RenderGraph::CompileStructural() {
 				par.resources.frameResourceRequirements = par.resources.staticResourceRequirements;
 				par.resources.internalTransitions = b.params.internalTransitions;
 				par.resources.identifierSet = b.DeclaredResourceIds();
+				MaterializeReferencedResources(par.resources.staticResourceRequirements, par.resources.internalTransitions);
 			}
  			any.pass = std::move(par);
  		}
@@ -1261,6 +1418,7 @@ void RenderGraph::RefreshRetainedDeclarationsForFrame(RenderPassAndResources& p,
 	p.resources.internalTransitions = b.params.internalTransitions;
 
 	p.resources.identifierSet = b.DeclaredResourceIds();
+	MaterializeReferencedResources(p.resources.staticResourceRequirements, p.resources.internalTransitions);
 
 	// Ensure the pass's view matches the refreshed identifier set
 	p.pass->SetResourceRegistryView(
@@ -1283,6 +1441,7 @@ void RenderGraph::RefreshRetainedDeclarationsForFrame(ComputePassAndResources& p
 	p.resources.staticResourceRequirements = b.GatherResourceRequirements();
 	p.resources.internalTransitions = b.params.internalTransitions;
 	p.resources.identifierSet = b.DeclaredResourceIds();
+	MaterializeReferencedResources(p.resources.staticResourceRequirements, p.resources.internalTransitions);
 
 	p.pass->SetResourceRegistryView(
 		std::make_unique<ResourceRegistryView>(_registry, p.resources.identifierSet)
@@ -1293,7 +1452,7 @@ void RenderGraph::RefreshRetainedDeclarationsForFrame(ComputePassAndResources& p
 
 void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 	StatisticsManager::GetInstance().BeginFrame();
-	MaterializeUnmaterializedResources();
+	compileTrackers.clear();
 
 	auto needsRefresh = [&](auto& p) -> bool {
 		auto* iFace = dynamic_cast<IDynamicDeclaredResources*>(p.pass.get());
@@ -1629,6 +1788,11 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 		statisticsManager.SetupQueryHeap();
 	}
 
+	auto usedResourceIDs = CollectFrameResourceIDs();
+	ApplyIdleDematerializationPolicy(usedResourceIDs);
+	MaterializeUnmaterializedResources(&usedResourceIDs);
+	SnapshotCompiledResourceGenerations(usedResourceIDs);
+
 	lastActiveSubresourceInAliasGroup.clear();
 	lastActiveSubresourceInAliasGroup.resize(aliasGroups.size());
 
@@ -1824,9 +1988,11 @@ std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 	return { latestTransition, latestProducer, latestUsage };
 }
 
-void RenderGraph::MaterializeUnmaterializedResources() {
+void RenderGraph::MaterializeUnmaterializedResources(const std::unordered_set<uint64_t>* onlyResourceIDs) {
 	for (auto& [id, resource] : resourcesByID) {
-		(void)id;
+		if (onlyResourceIDs && onlyResourceIDs->find(id) == onlyResourceIDs->end()) {
+			continue;
+		}
 		if (!resource) {
 			continue;
 		}
@@ -1839,6 +2005,8 @@ void RenderGraph::MaterializeUnmaterializedResources() {
 		if (!texture->IsMaterialized()) {
 			texture->Materialize();
 		}
+
+		resourceBackingGenerationByID[id] = texture->GetBackingGeneration();
 	}
 }
 
@@ -1931,7 +2099,6 @@ void RenderGraph::AddResource(std::shared_ptr<Resource> resource, bool transitio
 
 	resourcesByName[name] = resource;
 	resourcesByID[resource->GetGlobalResourceID()] = resource;
-	trackers[resource->GetGlobalResourceID()] = resource->GetStateTracker();
 	/*if (transition) {
 		initialResourceStates[resource->GetGlobalResourceID()] = initialState;
 	}*/
@@ -2058,6 +2225,7 @@ namespace {
 } // namespace
 
 void RenderGraph::Execute(RenderContext& context) {
+	ValidateCompiledResourceGenerations();
 
 	bool useAsyncCompute = m_getUseAsyncCompute();
 	auto& manager = DeviceManager::GetInstance();
