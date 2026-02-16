@@ -303,6 +303,12 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<UpscaleQualityMode>("upscalingQualityMode", UpscalingManager::GetInstance().GetCurrentUpscalingQualityMode());
 	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
     settingsManager.registerSetting<bool>("useAsyncCompute", true);
+	settingsManager.registerSetting<AutoAliasMode>("autoAliasMode", AutoAliasMode::Balanced);
+    settingsManager.registerSetting<uint32_t>("autoAliasMaxMixedQueueAssignments", 8u);
+    settingsManager.registerSetting<float>("autoAliasMaxMixedQueueBytesMB", 256.0f);
+    settingsManager.registerSetting<bool>("autoAliasLogExclusionReasons", false);
+	settingsManager.registerSetting<uint32_t>("autoAliasPoolRetireIdleFrames", 120u);
+	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
 	getCameraSpeed = settingsManager.getSettingGetter<float>("cameraSpeed");

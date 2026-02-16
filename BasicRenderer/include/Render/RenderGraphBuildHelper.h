@@ -44,9 +44,10 @@ void CreateGBufferResources(RenderGraph* graph) {
     normalsWorldSpaceDesc.hasUAV = true;
 	normalsWorldSpaceDesc.hasNonShaderVisibleUAV = true;
 	normalsWorldSpaceDesc.uavFormat = rhi::Format::R32G32B32A32_Float;
+    normalsWorldSpaceDesc.allowAlias = true;
     ImageDimensions dims = { resolution.x, resolution.y, 0, 0 };
     normalsWorldSpaceDesc.imageDimensions.push_back(dims);
-    auto normalsWorldSpace = PixelBuffer::CreateShared(normalsWorldSpaceDesc);
+    auto normalsWorldSpace = PixelBuffer::CreateSharedUnmaterialized(normalsWorldSpaceDesc);
     normalsWorldSpace->SetName("Normals World Space");
     normalsWorldSpace->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
 
@@ -65,7 +66,8 @@ void CreateGBufferResources(RenderGraph* graph) {
     albedoDesc.hasNonShaderVisibleUAV = true;
     ImageDimensions albedoDims = { resolution.x, resolution.y, 0, 0 };
     albedoDesc.imageDimensions.push_back(albedoDims);
-    albedo = PixelBuffer::CreateShared(albedoDesc);
+    albedoDesc.allowAlias = true;
+    albedo = PixelBuffer::CreateSharedUnmaterialized(albedoDesc);
     albedo->SetName("Albedo");
     albedo->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GBuffer" }));
     graph->RegisterResource(Builtin::GBuffer::Albedo, albedo);
@@ -77,9 +79,10 @@ void CreateGBufferResources(RenderGraph* graph) {
     metallicRoughnessDesc.hasSRV = true;
 	metallicRoughnessDesc.hasUAV = true;
 	metallicRoughnessDesc.hasNonShaderVisibleUAV = true;
+	metallicRoughnessDesc.allowAlias = true;
     ImageDimensions metallicRoughnessDims = { resolution.x, resolution.y, 0, 0 };
     metallicRoughnessDesc.imageDimensions.push_back(metallicRoughnessDims);
-    metallicRoughness = PixelBuffer::CreateShared(metallicRoughnessDesc);
+    metallicRoughness = PixelBuffer::CreateSharedUnmaterialized(metallicRoughnessDesc);
     metallicRoughness->SetName("Metallic Roughness");
     metallicRoughness->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GBuffer" }));
     graph->RegisterResource(Builtin::GBuffer::MetallicRoughness, metallicRoughness);
@@ -91,9 +94,10 @@ void CreateGBufferResources(RenderGraph* graph) {
     emissiveDesc.hasSRV = true;
 	emissiveDesc.hasUAV = true;
 	emissiveDesc.hasNonShaderVisibleUAV = true;
+	emissiveDesc.allowAlias = true;
     ImageDimensions emissiveDims = { resolution.x, resolution.y, 0, 0 };
     emissiveDesc.imageDimensions.push_back(emissiveDims);
-    emissive = PixelBuffer::CreateShared(emissiveDesc);
+    emissive = PixelBuffer::CreateSharedUnmaterialized(emissiveDesc);
     emissive->SetName("Emissive");
     emissive->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GBuffer" }));
     graph->RegisterResource(Builtin::GBuffer::Emissive, emissive);
@@ -229,10 +233,11 @@ void RegisterGTAOResources(RenderGraph* graph) {
 	workingDepthsDesc.hasSRV = true;
     workingDepthsDesc.format = rhi::Format::R32_Float;
     workingDepthsDesc.generateMipMaps = true;
+    workingDepthsDesc.allowAlias = true;
     ImageDimensions dims1 = { resolution.x, resolution.y, 0, 0 };
     workingDepthsDesc.imageDimensions.push_back(dims1);
     auto workingDepths = PixelBuffer::CreateSharedUnmaterialized(workingDepthsDesc);
-    workingDepths->SetAliasingPool(gtaoAliasPoolID);
+    //workingDepths->SetAliasingPool(gtaoAliasPoolID);
     workingDepths->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GTAO resources" }));
     workingDepths->SetName("GTAO Working Depths");
 
@@ -245,7 +250,8 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingEdgesDesc.format = rhi::Format::R8_UNorm;
     workingEdgesDesc.generateMipMaps = false;
     workingEdgesDesc.imageDimensions.push_back(dims1);
-    auto workingEdges = PixelBuffer::CreateShared(workingEdgesDesc);
+	workingEdgesDesc.allowAlias = true;
+    auto workingEdges = PixelBuffer::CreateSharedUnmaterialized(workingEdgesDesc);
     workingDepths->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GTAO resources" }));
     workingEdges->SetName("GTAO Working Edges");
 
@@ -258,14 +264,15 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingAOTermDesc.format = rhi::Format::R8_UInt;
     workingAOTermDesc.generateMipMaps = false;
     workingAOTermDesc.imageDimensions.push_back(dims1);
-    auto workingAOTerm1 = PixelBuffer::CreateShared(workingAOTermDesc);
+    workingAOTermDesc.allowAlias = true;
+    auto workingAOTerm1 = PixelBuffer::CreateSharedUnmaterialized(workingAOTermDesc);
     workingAOTerm1->SetName("GTAO Working AO Term 1");
     workingAOTerm1->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GTAO resources" }));
-    auto workingAOTerm2 = PixelBuffer::CreateShared(workingAOTermDesc);
+    auto workingAOTerm2 = PixelBuffer::CreateSharedUnmaterialized(workingAOTermDesc);
     workingAOTerm2->SetName("GTAO Working AO Term 2");
     workingAOTerm2->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GTAO resources" }));
     std::shared_ptr<PixelBuffer> outputAO = PixelBuffer::CreateSharedUnmaterialized(workingAOTermDesc);
-    outputAO->SetAliasingPool(gtaoAliasPoolID);
+    //outputAO->SetAliasingPool(gtaoAliasPoolID);
     outputAO->SetName("GTAO Output AO Term");
     outputAO->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GTAO resources" }));
 
@@ -381,7 +388,8 @@ void BuildPPLLPipeline(RenderGraph* graph) {
     desc.hasRTV = false;
     desc.hasUAV = true;
     desc.hasNonShaderVisibleUAV = true;
-    auto PPLLHeadPointerTexture = PixelBuffer::CreateShared(desc);
+    desc.allowAlias = true;
+    auto PPLLHeadPointerTexture = PixelBuffer::CreateSharedUnmaterialized(desc);
     PPLLHeadPointerTexture->SetName("PPLLHeadPointerTexture");
     PPLLHeadPointerTexture->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "OIT resources" }));
     auto PPLLBuffer = CreateIndexedStructuredBuffer(numPPLLNodes, PPLLNodeSize, true, false);
@@ -450,7 +458,8 @@ void BuildSSRPasses(RenderGraph* graph) {
 	ssrDesc.hasNonShaderVisibleUAV = true; // For ClearUnorderedAccessView
     ImageDimensions dims = { resolution.x, resolution.y, 0, 0 };
     ssrDesc.imageDimensions.push_back(dims);
-    auto ssrTexture = PixelBuffer::CreateShared(ssrDesc);
+    ssrDesc.allowAlias = true;
+    auto ssrTexture = PixelBuffer::CreateSharedUnmaterialized(ssrDesc);
     ssrTexture->SetName("SSR Texture");
 	ssrTexture->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Post-Processing resources" }));
 	graph->RegisterResource(Builtin::PostProcessing::ScreenSpaceReflections, ssrTexture);

@@ -64,6 +64,13 @@ constexpr PassRunMask& operator&=(PassRunMask& a, PassRunMask b) noexcept { retu
 constexpr PassRunMask& operator|=(PassRunMask& a, PassRunMask b) noexcept { return a = (a | b); }
 constexpr PassRunMask& operator^=(PassRunMask& a, PassRunMask b) noexcept { return a = (a ^ b); }
 
+enum class AutoAliasMode : uint8_t {
+	Off = 0,
+	Conservative = 1,
+	Balanced = 2,
+	Aggressive = 3
+};
+
 class RenderGraph {
 public:
 
@@ -202,6 +209,26 @@ public:
 
 	RenderGraph();
 	~RenderGraph();
+	struct AutoAliasReasonCount {
+		std::string reason;
+		size_t count = 0;
+	};
+	struct AutoAliasDebugSnapshot {
+		AutoAliasMode mode = AutoAliasMode::Off;
+		size_t candidatesSeen = 0;
+		size_t manuallyAssigned = 0;
+		size_t autoAssigned = 0;
+		size_t excluded = 0;
+		size_t rolledBackMixedQueue = 0;
+		uint64_t candidateBytes = 0;
+		uint64_t autoAssignedBytes = 0;
+		uint64_t rolledBackMixedQueueBytes = 0;
+		uint64_t pooledIndependentBytes = 0;
+		uint64_t pooledActualBytes = 0;
+		uint64_t pooledSavedBytes = 0;
+		std::vector<AutoAliasReasonCount> exclusionReasons;
+	};
+	AutoAliasDebugSnapshot GetAutoAliasDebugSnapshot() const;
 	void AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassParameters& resources, std::string name = "");
 	void AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassParameters& resources, std::string name = "");
 	void Update(const UpdateContext& context, rhi::Device device);
@@ -326,8 +353,21 @@ private:
 	std::unordered_map<uint64_t, uint64_t> compiledResourceGenerationByID;
 	std::unordered_map<uint64_t, PixelBuffer::MaterializeOptions> aliasMaterializeOptionsByID;
 	std::unordered_map<uint64_t, uint64_t> aliasPlacementSignatureByID;
+	std::unordered_map<uint64_t, uint64_t> aliasPlacementPoolByID;
 	std::unordered_set<uint64_t> aliasActivationPending;
-	std::vector<TrackedHandle> aliasPools;
+
+	struct PersistentAliasPoolState {
+		TrackedHandle allocation;
+		uint64_t capacityBytes = 0;
+		uint64_t alignment = 1;
+		uint64_t generation = 0;
+		uint64_t lastUsedFrame = 0;
+		bool usedThisFrame = false;
+	};
+	std::unordered_map<uint64_t, PersistentAliasPoolState> persistentAliasPools;
+	uint64_t aliasPoolPlanFrameIndex = 0;
+	uint32_t aliasPoolRetireIdleFrames = 120;
+	float aliasPoolGrowthHeadroom = 1.5f;
 
 	std::unordered_map<uint64_t, std::unordered_set<uint64_t>> aliasedResources; // Tracks resources that use the same memory
 	std::unordered_map<uint64_t, size_t> resourceToAliasGroup;
@@ -549,6 +589,20 @@ private:
 		std::vector<size_t>   readsSinceWrite;
 	};
 
+	struct AutoAliasPlannerStats {
+		size_t candidatesSeen = 0;
+		size_t manuallyAssigned = 0;
+		size_t autoAssigned = 0;
+		size_t excluded = 0;
+		size_t rolledBackMixedQueue = 0;
+		uint64_t candidateBytes = 0;
+		uint64_t autoAssignedBytes = 0;
+		uint64_t rolledBackMixedQueueBytes = 0;
+		uint64_t pooledIndependentBytes = 0;
+		uint64_t pooledActualBytes = 0;
+		uint64_t pooledSavedBytes = 0;
+	};
+
 	static PassView GetPassView(AnyPassAndResources& pr);
 	static bool BuildDependencyGraph(std::vector<Node>& nodes);
 	static bool BuildDependencyGraph(std::vector<Node>& nodes, std::span<const std::pair<size_t, size_t>> explicitEdges);
@@ -557,6 +611,7 @@ private:
 		size_t from, size_t to,
 		std::vector<Node>& nodes,
 		std::unordered_set<uint64_t>& edgeSet);
+	void AutoAssignAliasingPools(const std::vector<Node>& nodes);
 	void CommitPassToBatch(
 		RenderGraph& rg,
 		AnyPassAndResources& pr,
@@ -578,6 +633,18 @@ private:
 		RenderGraph& rg,
 		std::vector<AnyPassAndResources>& passes,
 		std::vector<Node>& nodes);
+
+	std::unordered_map<uint64_t, uint64_t> autoAliasPoolByID;
+	std::unordered_map<uint64_t, std::string> autoAliasExclusionReasonByID;
+	std::vector<AutoAliasReasonCount> autoAliasExclusionReasonSummary;
+	AutoAliasPlannerStats autoAliasPlannerStats;
+	AutoAliasMode autoAliasModeLastFrame = AutoAliasMode::Off;
+	std::function<AutoAliasMode()> m_getAutoAliasMode;
+	std::function<uint32_t()> m_getAutoAliasMaxMixedQueueAssignments;
+	std::function<float()> m_getAutoAliasMaxMixedQueueBytesMB;
+	std::function<bool()> m_getAutoAliasLogExclusionReasons;
+	std::function<uint32_t()> m_getAutoAliasPoolRetireIdleFrames;
+	std::function<float()> m_getAutoAliasPoolGrowthHeadroom;
 
 	friend class RenderPassBuilder;
 	friend class ComputePassBuilder;

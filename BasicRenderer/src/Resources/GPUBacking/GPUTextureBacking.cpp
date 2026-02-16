@@ -167,9 +167,6 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 			throw std::runtime_error("Failed to create aliased texture resource backing");
 		}
 	}
-	else if (desc.allowAlias) {
-		throw std::runtime_error("Aliasing requested without placement in GpuTextureBacking::initialize");
-	}
 	else {
 
 		rhi::ma::AllocationDesc allocationDesc;

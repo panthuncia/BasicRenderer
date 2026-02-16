@@ -288,6 +288,7 @@ private:
 
     int FindFileIndex(const std::vector<std::string>& hdrFiles, const std::string& existingFile);
     void DrawCLodTelemetryWindow();
+    void DrawAutoAliasPlannerWindow();
     void TryFinalizeCLodCaptureStats(uint64_t captureId);
 
     void DrawEnvironmentsDropdown();
@@ -400,6 +401,30 @@ private:
 	bool m_useAsyncCompute = true;
 	std::function<bool()> getUseAsyncCompute;
     std::function<void(bool)> setUseAsyncCompute;
+
+    AutoAliasMode m_autoAliasMode = AutoAliasMode::Balanced;
+    std::function<AutoAliasMode()> getAutoAliasMode;
+    std::function<void(AutoAliasMode)> setAutoAliasMode;
+
+    uint32_t m_autoAliasMaxMixedQueueAssignments = 8;
+    std::function<uint32_t()> getAutoAliasMaxMixedQueueAssignments;
+    std::function<void(uint32_t)> setAutoAliasMaxMixedQueueAssignments;
+
+    float m_autoAliasMaxMixedQueueBytesMB = 256.0f;
+    std::function<float()> getAutoAliasMaxMixedQueueBytesMB;
+    std::function<void(float)> setAutoAliasMaxMixedQueueBytesMB;
+
+    bool m_autoAliasLogExclusionReasons = false;
+    std::function<bool()> getAutoAliasLogExclusionReasons;
+    std::function<void(bool)> setAutoAliasLogExclusionReasons;
+
+    uint32_t m_autoAliasPoolRetireIdleFrames = 120;
+    std::function<uint32_t()> getAutoAliasPoolRetireIdleFrames;
+    std::function<void(uint32_t)> setAutoAliasPoolRetireIdleFrames;
+
+    float m_autoAliasPoolGrowthHeadroom = 1.5f;
+    std::function<float()> getAutoAliasPoolGrowthHeadroom;
+    std::function<void(float)> setAutoAliasPoolGrowthHeadroom;
 
 	std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)> appendScene;
 	std::vector<SettingsManager::Subscription> m_settingSubscriptions;
@@ -574,6 +599,36 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_useAsyncCompute = getUseAsyncCompute();
 	observerSetting(m_useAsyncCompute, "useAsyncCompute");
 
+    getAutoAliasMode = settingsManager.getSettingGetter<AutoAliasMode>("autoAliasMode");
+    setAutoAliasMode = settingsManager.getSettingSetter<AutoAliasMode>("autoAliasMode");
+    m_autoAliasMode = getAutoAliasMode();
+    observerSetting(m_autoAliasMode, "autoAliasMode");
+
+    getAutoAliasMaxMixedQueueAssignments = settingsManager.getSettingGetter<uint32_t>("autoAliasMaxMixedQueueAssignments");
+    setAutoAliasMaxMixedQueueAssignments = settingsManager.getSettingSetter<uint32_t>("autoAliasMaxMixedQueueAssignments");
+    m_autoAliasMaxMixedQueueAssignments = getAutoAliasMaxMixedQueueAssignments();
+    observerSetting(m_autoAliasMaxMixedQueueAssignments, "autoAliasMaxMixedQueueAssignments");
+
+    getAutoAliasMaxMixedQueueBytesMB = settingsManager.getSettingGetter<float>("autoAliasMaxMixedQueueBytesMB");
+    setAutoAliasMaxMixedQueueBytesMB = settingsManager.getSettingSetter<float>("autoAliasMaxMixedQueueBytesMB");
+    m_autoAliasMaxMixedQueueBytesMB = getAutoAliasMaxMixedQueueBytesMB();
+    observerSetting(m_autoAliasMaxMixedQueueBytesMB, "autoAliasMaxMixedQueueBytesMB");
+
+    getAutoAliasLogExclusionReasons = settingsManager.getSettingGetter<bool>("autoAliasLogExclusionReasons");
+    setAutoAliasLogExclusionReasons = settingsManager.getSettingSetter<bool>("autoAliasLogExclusionReasons");
+    m_autoAliasLogExclusionReasons = getAutoAliasLogExclusionReasons();
+    observerSetting(m_autoAliasLogExclusionReasons, "autoAliasLogExclusionReasons");
+
+    getAutoAliasPoolRetireIdleFrames = settingsManager.getSettingGetter<uint32_t>("autoAliasPoolRetireIdleFrames");
+    setAutoAliasPoolRetireIdleFrames = settingsManager.getSettingSetter<uint32_t>("autoAliasPoolRetireIdleFrames");
+    m_autoAliasPoolRetireIdleFrames = getAutoAliasPoolRetireIdleFrames();
+    observerSetting(m_autoAliasPoolRetireIdleFrames, "autoAliasPoolRetireIdleFrames");
+
+    getAutoAliasPoolGrowthHeadroom = settingsManager.getSettingGetter<float>("autoAliasPoolGrowthHeadroom");
+    setAutoAliasPoolGrowthHeadroom = settingsManager.getSettingSetter<float>("autoAliasPoolGrowthHeadroom");
+    m_autoAliasPoolGrowthHeadroom = getAutoAliasPoolGrowthHeadroom();
+    observerSetting(m_autoAliasPoolGrowthHeadroom, "autoAliasPoolGrowthHeadroom");
+
 	appendScene = settingsManager.getSettingGetter<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene")();
 
     m_meshShadersSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
@@ -624,6 +679,7 @@ inline void Menu::Render(RenderContext& context) {
     static bool showRG = false;
     static bool showMemoryIntrospection = false;
     static bool showCLodTelemetry = false;
+    static bool showAutoAliasPlanner = false;
 
     SetCLodWorkGraphTelemetryEnabled(showCLodTelemetry || m_clodTelemetryCapturePending || m_clodCaptureStatsPending);
 
@@ -703,6 +759,7 @@ inline void Menu::Render(RenderContext& context) {
         ImGui::Checkbox("Render Graph Inspector", &showRG);
         ImGui::Checkbox("Memory introspection", &showMemoryIntrospection);
         ImGui::Checkbox("CLod telemetry", &showCLodTelemetry);
+        ImGui::Checkbox("Auto Alias Planner", &showAutoAliasPlanner);
         rhi::ma::Budget localBudget;
         std::string memoryString = "Memory usage: ";
         DeviceManager::GetInstance().GetAllocator()->GetBudget(&localBudget, nullptr);
@@ -784,6 +841,10 @@ inline void Menu::Render(RenderContext& context) {
 
     if (showCLodTelemetry) {
         DrawCLodTelemetryWindow();
+    }
+
+    if (showAutoAliasPlanner) {
+        DrawAutoAliasPlannerWindow();
     }
 
 	// Rendering
@@ -1544,6 +1605,106 @@ inline void Menu::DrawPassTimingWindow() {
     }
 
     ImGui::Columns(1);
+
+    ImGui::End();
+}
+
+inline void Menu::DrawAutoAliasPlannerWindow() {
+    if (!ImGui::Begin("Auto Alias Planner", nullptr)) {
+        ImGui::End();
+        return;
+    }
+
+    constexpr const char* kAutoAliasModeNames[] = {
+        "Off",
+        "Conservative",
+        "Balanced",
+        "Aggressive"
+    };
+
+    int autoAliasModeIndex = static_cast<int>(m_autoAliasMode);
+    if (ImGui::Combo("Mode", &autoAliasModeIndex, kAutoAliasModeNames, IM_ARRAYSIZE(kAutoAliasModeNames))) {
+        autoAliasModeIndex = std::clamp(autoAliasModeIndex, 0, static_cast<int>(IM_ARRAYSIZE(kAutoAliasModeNames) - 1));
+        m_autoAliasMode = static_cast<AutoAliasMode>(autoAliasModeIndex);
+        setAutoAliasMode(m_autoAliasMode);
+    }
+
+    int maxMixedAssignments = static_cast<int>(m_autoAliasMaxMixedQueueAssignments);
+    if (ImGui::SliderInt("Max Mixed Assignments", &maxMixedAssignments, 0, 128)) {
+        maxMixedAssignments = std::max(maxMixedAssignments, 0);
+        m_autoAliasMaxMixedQueueAssignments = static_cast<uint32_t>(maxMixedAssignments);
+        setAutoAliasMaxMixedQueueAssignments(m_autoAliasMaxMixedQueueAssignments);
+    }
+
+    if (ImGui::SliderFloat("Max Mixed Bytes (MB)", &m_autoAliasMaxMixedQueueBytesMB, 0.0f, 2048.0f, "%.1f")) {
+        m_autoAliasMaxMixedQueueBytesMB = std::max(0.0f, m_autoAliasMaxMixedQueueBytesMB);
+        setAutoAliasMaxMixedQueueBytesMB(m_autoAliasMaxMixedQueueBytesMB);
+    }
+
+    if (ImGui::Checkbox("Log Exclusions", &m_autoAliasLogExclusionReasons)) {
+        setAutoAliasLogExclusionReasons(m_autoAliasLogExclusionReasons);
+    }
+
+    int retireIdleFrames = static_cast<int>(m_autoAliasPoolRetireIdleFrames);
+    if (ImGui::SliderInt("Pool Retire Idle Frames", &retireIdleFrames, 0, 2000)) {
+        retireIdleFrames = std::max(retireIdleFrames, 0);
+        m_autoAliasPoolRetireIdleFrames = static_cast<uint32_t>(retireIdleFrames);
+        setAutoAliasPoolRetireIdleFrames(m_autoAliasPoolRetireIdleFrames);
+    }
+
+    if (ImGui::SliderFloat("Pool Growth Headroom", &m_autoAliasPoolGrowthHeadroom, 1.0f, 3.0f, "%.2fx")) {
+        m_autoAliasPoolGrowthHeadroom = std::max(1.0f, m_autoAliasPoolGrowthHeadroom);
+        setAutoAliasPoolGrowthHeadroom(m_autoAliasPoolGrowthHeadroom);
+    }
+
+    if (m_renderGraph) {
+        ImGui::Separator();
+        const auto snapshot = m_renderGraph->GetAutoAliasDebugSnapshot();
+        constexpr const char* kModeNames[] = { "Off", "Conservative", "Balanced", "Aggressive" };
+        const int modeIdx = std::clamp(static_cast<int>(snapshot.mode), 0, static_cast<int>(IM_ARRAYSIZE(kModeNames) - 1));
+        ImGui::Text("Active mode: %s", kModeNames[modeIdx]);
+
+        ImGui::Text("Candidates: %llu | Manual: %llu | Auto: %llu | Excluded: %llu",
+            static_cast<unsigned long long>(snapshot.candidatesSeen),
+            static_cast<unsigned long long>(snapshot.manuallyAssigned),
+            static_cast<unsigned long long>(snapshot.autoAssigned),
+            static_cast<unsigned long long>(snapshot.excluded));
+
+        ImGui::Text("Candidate MB: %.2f | Auto MB: %.2f | Rollback MB: %.2f",
+            static_cast<double>(snapshot.candidateBytes) / (1024.0 * 1024.0),
+            static_cast<double>(snapshot.autoAssignedBytes) / (1024.0 * 1024.0),
+            static_cast<double>(snapshot.rolledBackMixedQueueBytes) / (1024.0 * 1024.0));
+
+        ImGui::Text("Mixed-Queue Rollbacks: %llu",
+            static_cast<unsigned long long>(snapshot.rolledBackMixedQueue));
+
+        const double independentMB = static_cast<double>(snapshot.pooledIndependentBytes) / (1024.0 * 1024.0);
+        const double pooledMB = static_cast<double>(snapshot.pooledActualBytes) / (1024.0 * 1024.0);
+        const double savedMB = static_cast<double>(snapshot.pooledSavedBytes) / (1024.0 * 1024.0);
+        const double savedPct = (snapshot.pooledIndependentBytes > 0)
+            ? (100.0 * static_cast<double>(snapshot.pooledSavedBytes) / static_cast<double>(snapshot.pooledIndependentBytes))
+            : 0.0;
+
+        ImGui::Text("Pooling memory (alias candidates)");
+        ImGui::BulletText("Independent: %.2f MB", independentMB);
+        ImGui::BulletText("Pooled: %.2f MB", pooledMB);
+        ImGui::BulletText("Saved: %.2f MB (%.1f%%)", savedMB, savedPct);
+
+        if (!snapshot.exclusionReasons.empty()) {
+            ImGui::Separator();
+            ImGui::TextUnformatted("Top exclusion reasons:");
+            const size_t maxReasons = std::min<size_t>(snapshot.exclusionReasons.size(), 8);
+            for (size_t i = 0; i < maxReasons; ++i) {
+                ImGui::BulletText("%s (%llu)",
+                    snapshot.exclusionReasons[i].reason.c_str(),
+                    static_cast<unsigned long long>(snapshot.exclusionReasons[i].count));
+            }
+        }
+    }
+    else {
+        ImGui::Separator();
+        ImGui::TextDisabled("Render graph not available.");
+    }
 
     ImGui::End();
 }
