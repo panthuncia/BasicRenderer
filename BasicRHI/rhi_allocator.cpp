@@ -9075,6 +9075,14 @@ Synchronized internally with a mutex.
         m_PackedData.SetTextureLayout(ResourceLayout::Undefined);
     }
 
+    Allocation::~Allocation()
+    {
+        if (m_PackedData.GetType() == TYPE_HEAP)
+        {
+            m_Heap.heap.~HeapPtr();
+        }
+    }
+
     void Allocation::InitCommitted(CommittedAllocationList* list)
     {
         m_PackedData.SetType(TYPE_COMMITTED);
@@ -9096,7 +9104,7 @@ Synchronized internally with a mutex.
         m_Heap.list = list;
         m_Committed.prev = nullptr;
         m_Committed.next = nullptr;
-        m_Heap.heap = std::move(heap);
+        new (&m_Heap.heap) HeapPtr(std::move(heap));
     }
 
     void Allocation::SwapBlockAllocation(Allocation* allocation)

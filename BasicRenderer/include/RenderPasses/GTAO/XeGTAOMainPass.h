@@ -21,6 +21,7 @@ public:
     }
 
     void Setup() override {
+        RegisterSRV(Builtin::CameraBuffer);
         RegisterCBV("Builtin::GTAO::ConstantsBuffer");
     }
 

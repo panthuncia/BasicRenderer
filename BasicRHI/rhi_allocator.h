@@ -509,7 +509,7 @@ namespace rhi::ma
         void* m_privateData;
 
         Allocation(AllocatorPimpl* allocator, UINT64 size, UINT64 alignment);
-        virtual ~Allocation() {};
+        virtual ~Allocation();
         void InitCommitted(CommittedAllocationList* list);
         void InitPlaced(AllocHandle allocHandle, NormalBlock* block);
         void InitHeap(CommittedAllocationList* list, HeapPtr heap);
