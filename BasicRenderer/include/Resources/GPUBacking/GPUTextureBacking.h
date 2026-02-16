@@ -48,20 +48,6 @@ public:
 		m_textureHandle.ApplyComponentBundle(bundle);
 	}
 
-	const rhi::ClearValue& GetClearColor() const {
-		return m_clearColor;
-	}
-	rhi::Format GetFormat() const {
-		return m_format;
-	}
-
-	unsigned int GetInternalWidth() const {
-		return m_internalWidth;
-	}
-	unsigned int GetInternalHeight() const {
-		return m_internalHeight;
-	}
-
 	unsigned int GetMipLevels() const {
 		return m_mipLevels;
 	}
@@ -97,15 +83,11 @@ private:
 	TrackedHandle m_textureHandle;
 	rhi::Format m_format;
 	TextureDescription m_desc;
-	rhi::ClearValue m_clearColor;
 
 	//rhi::HeapHandle m_placedResourceHeap; // If this is a placed resource, this is the heap it was created in
 
 	// Enhanced barriers
 	rhi::TextureBarrier m_barrier = {};
-
-	unsigned int m_internalWidth = 0; // Internal width, used for padding textures to power of two
-	unsigned int m_internalHeight = 0; // Internal height, used for padding textures to power of two
 
 	SymbolicTracker m_stateTracker;
 };

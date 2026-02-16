@@ -15,6 +15,7 @@
 #include "Managers/CommandRecordingManager.h"
 #include "Interfaces/IHasMemoryMetadata.h"
 #include "Interfaces/IDynamicDeclaredResources.h"
+#include "Resources/PixelBuffer.h"
 
 // BFS over alias and group/child relationships to get all relevant IDs
 std::vector<uint64_t> RenderGraph::ExpandSchedulingIDs(uint64_t id) const {
@@ -1292,6 +1293,7 @@ void RenderGraph::RefreshRetainedDeclarationsForFrame(ComputePassAndResources& p
 
 void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 	StatisticsManager::GetInstance().BeginFrame();
+	MaterializeUnmaterializedResources();
 
 	auto needsRefresh = [&](auto& p) -> bool {
 		auto* iFace = dynamic_cast<IDynamicDeclaredResources*>(p.pass.get());
@@ -1822,6 +1824,24 @@ std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 	return { latestTransition, latestProducer, latestUsage };
 }
 
+void RenderGraph::MaterializeUnmaterializedResources() {
+	for (auto& [id, resource] : resourcesByID) {
+		(void)id;
+		if (!resource) {
+			continue;
+		}
+
+		auto texture = std::dynamic_pointer_cast<PixelBuffer>(resource);
+		if (!texture) {
+			continue;
+		}
+
+		if (!texture->IsMaterialized()) {
+			texture->Materialize();
+		}
+	}
+}
+
 void RenderGraph::Setup() {
 	// Setup the statistics manager
 	auto& statisticsManager = StatisticsManager::GetInstance();
@@ -1843,6 +1863,7 @@ void RenderGraph::Setup() {
 	result = device.CreateTimeline(m_frameStartSyncFence);
 
 	m_getUseAsyncCompute = SettingsManager::GetInstance().getSettingGetter<bool>("useAsyncCompute");
+	MaterializeUnmaterializedResources();
 
 	// Run pass setup to collect static resource requirements
 	for (auto& pass : m_masterPassList) {

@@ -338,6 +338,7 @@ private:
 	std::function<bool()> m_getUseAsyncCompute;
 
 	void AddResource(std::shared_ptr<Resource> resource, bool transition = false);
+	void MaterializeUnmaterializedResources();
 
 	void RefreshRetainedDeclarationsForFrame(RenderPassAndResources& p, uint8_t frameIndex);
 	void RefreshRetainedDeclarationsForFrame(ComputePassAndResources& p, uint8_t frameIndex);

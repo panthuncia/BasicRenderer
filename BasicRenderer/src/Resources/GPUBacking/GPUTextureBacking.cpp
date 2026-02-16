@@ -152,28 +152,8 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 	m_mipLevels = desc.generateMipMaps ? CalculateMipLevels(static_cast<uint16_t>(m_width), static_cast<uint16_t>(m_height)) : 1;
 	m_arraySize = desc.isCubemap ? 6 * desc.arraySize : (desc.isArray ? desc.arraySize : 1);
 	m_format = desc.format;
-	if (desc.padInternalResolution) {
-		m_internalWidth = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(desc.imageDimensions[0].width)))));
-		m_internalHeight = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(desc.imageDimensions[0].height)))));
-	}
-	else {
-		m_internalHeight = desc.imageDimensions[0].height;
-		m_internalWidth = desc.imageDimensions[0].width;
-	}
 
 	size_t subCount = m_mipLevels * m_arraySize;
-
-	m_clearColor.type = rhi::ClearValueType::Color;
-	m_clearColor.format = desc.format;
-	m_clearColor.depthStencil.depth = desc.depthClearValue;
-	if (desc.hasDSV) {
-		m_clearColor.type = rhi::ClearValueType::DepthStencil; // TODO: Will we ever need both on one texture?
-	}
-	else {
-		for (int i = 0; i < 4; i++) {
-			m_clearColor.rgba[i] = desc.clearColor[i];
-		}
-	}
 
 	RegisterLiveAlloc();
 	UpdateLiveAllocName(name);
