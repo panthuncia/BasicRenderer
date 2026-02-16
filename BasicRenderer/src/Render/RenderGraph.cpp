@@ -546,6 +546,16 @@ void RenderGraph::AddTransition(
 	if (aliasActivationPending.find(resource.GetGlobalResourceID()) != aliasActivationPending.end()) {
 		const bool firstUseIsWrite = AccessTypeIsWriteType(r.state.access);
 		if (firstUseIsWrite) {
+			const uint64_t id = resource.GetGlobalResourceID();
+			auto itSig = aliasPlacementSignatureByID.find(id);
+			spdlog::info(
+				"RG alias activate: id={} name='{}' signature={} accessAfter={} layoutAfter={} syncAfter={} discard=1",
+				id,
+				pRes ? pRes->GetName() : std::string("<null>"),
+				itSig != aliasPlacementSignatureByID.end() ? itSig->second : 0ull,
+				static_cast<uint32_t>(r.state.access),
+				static_cast<uint32_t>(r.state.layout),
+				static_cast<uint32_t>(r.state.sync));
 			transitions.emplace_back(
 				pRes,
 				r.resourceHandleAndRange.range,
@@ -750,6 +760,13 @@ void RenderGraph::MaterializeReferencedResources(
 			return;
 		}
 
+		if (texture->GetDescription().allowAlias) {
+			// Alias placement is frame-dependent and produced later in CompileFrame.
+			// Defer materialization until RenderGraph::MaterializeUnmaterializedResources,
+			// after BuildAliasPlanAfterDag has produced placement options.
+			return;
+		}
+
 		texture->Materialize();
 		resourceBackingGenerationByID[handle.GetGlobalResourceID()] = texture->GetBackingGeneration();
 	};
@@ -895,6 +912,15 @@ void RenderGraph::BuildAliasPlanAfterDag(const std::vector<Node>& nodes) {
 		byPool[c.poolID].push_back(c);
 	}
 
+	if (!byPool.empty()) {
+		size_t totalCandidates = 0;
+		for (const auto& [poolID, poolCandidates] : byPool) {
+			(void)poolID;
+			totalCandidates += poolCandidates.size();
+		}
+		spdlog::info("RG alias plan: pools={} candidates={}", byPool.size(), totalCandidates);
+	}
+
 	for (auto& [poolID, poolCandidates] : byPool) {
 		std::sort(poolCandidates.begin(), poolCandidates.end(), [](const Candidate& a, const Candidate& b) {
 			if (a.sizeBytes != b.sizeBytes) {
@@ -966,7 +992,16 @@ void RenderGraph::BuildAliasPlanAfterDag(const std::vector<Node>& nodes) {
 			.Set<MemoryStatisticsComponents::ResourceType>({ rhi::ResourceType::Unknown })
 			.Set<MemoryStatisticsComponents::AliasingPool>({ poolID });
 
-		DeviceManager::GetInstance().AllocateMemoryTracked(allocDesc, allocInfo, aliasPool, trackDesc);
+		const auto allocResult = DeviceManager::GetInstance().AllocateMemoryTracked(allocDesc, allocInfo, aliasPool, trackDesc);
+		if (!rhi::IsOk(allocResult)) {
+			throw std::runtime_error("Failed to allocate alias pool memory");
+		}
+		spdlog::info(
+			"RG alias pool allocated: pool={} size={} alignment={} slots={}",
+			poolID,
+			heapSize,
+			poolAlignment,
+			slots.size());
 		aliasPools.push_back(std::move(aliasPool));
 		auto* allocation = aliasPools.back().GetAllocation();
 		if (!allocation) {
@@ -983,6 +1018,21 @@ void RenderGraph::BuildAliasPlanAfterDag(const std::vector<Node>& nodes) {
 				.poolID = poolID,
 			};
 			aliasMaterializeOptionsByID[c.resourceID] = options;
+
+			auto itResName = resourcesByID.find(c.resourceID);
+			const std::string resourceName = (itResName != resourcesByID.end() && itResName->second)
+				? itResName->second->GetName()
+				: std::string("<unknown>");
+			spdlog::info(
+				"RG alias bind: pool={} resourceId={} name='{}' slot={} offset={} size={} firstUse={} lastUse={}",
+				poolID,
+				c.resourceID,
+				resourceName,
+				slotIndex,
+				slot.offset,
+				c.sizeBytes,
+				c.firstUse,
+				c.lastUse);
 
 			const uint64_t newSignature = (poolID << 32) ^ static_cast<uint64_t>(slotIndex);
 			auto itRes = resourcesByID.find(c.resourceID);
@@ -2149,8 +2199,6 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 
 	auto usedResourceIDs = CollectFrameResourceIDs();
 	ApplyIdleDematerializationPolicy(usedResourceIDs);
-	MaterializeUnmaterializedResources(&usedResourceIDs);
-	SnapshotCompiledResourceGenerations(usedResourceIDs);
 
 	lastActiveSubresourceInAliasGroup.clear();
 	lastActiveSubresourceInAliasGroup.resize(aliasGroups.size());
@@ -2203,6 +2251,8 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 	}
 
 	BuildAliasPlanAfterDag(nodes);
+	MaterializeUnmaterializedResources(&usedResourceIDs);
+	SnapshotCompiledResourceGenerations(usedResourceIDs);
 
 	AutoScheduleAndBuildBatches(*this, m_framePasses, nodes);
 	ApplyAliasQueueSynchronization();
@@ -2367,9 +2417,27 @@ void RenderGraph::MaterializeUnmaterializedResources(const std::unordered_set<ui
 		if (!texture->IsMaterialized()) {
 			auto itAlias = aliasMaterializeOptionsByID.find(id);
 			if (itAlias != aliasMaterializeOptionsByID.end()) {
+				if (itAlias->second.aliasPlacement.has_value()) {
+					const auto& ap = itAlias->second.aliasPlacement.value();
+					spdlog::info(
+						"RG alias materialize: id={} name='{}' pool={} offset={}",
+						id,
+						resource->GetName(),
+						ap.poolID.has_value() ? ap.poolID.value() : 0ull,
+						ap.offset);
+				}
 				texture->Materialize(&itAlias->second);
 			}
 			else {
+				if (texture->GetDescription().allowAlias) {
+					if (onlyResourceIDs) {
+						throw std::runtime_error(
+							"Aliasing placement missing for used aliased resource during frame materialization. Resource ID: " + std::to_string(id));
+					}
+					// Setup-time eager materialization happens before alias planning.
+					// Defer aliased resources until compile-time placement is available.
+					continue;
+				}
 				texture->Materialize();
 			}
 		}

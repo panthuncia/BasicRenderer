@@ -219,6 +219,7 @@ void BuildGBufferPipeline(RenderGraph* graph) {
 
 void RegisterGTAOResources(RenderGraph* graph) {
     auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+    constexpr uint64_t gtaoAliasPoolID = 1;
 
     TextureDescription workingDepthsDesc;
     workingDepthsDesc.arraySize = 1;
@@ -230,7 +231,8 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingDepthsDesc.generateMipMaps = true;
     ImageDimensions dims1 = { resolution.x, resolution.y, 0, 0 };
     workingDepthsDesc.imageDimensions.push_back(dims1);
-    auto workingDepths = PixelBuffer::CreateShared(workingDepthsDesc);
+    auto workingDepths = PixelBuffer::CreateSharedUnmaterialized(workingDepthsDesc);
+    workingDepths->SetAliasingPool(gtaoAliasPoolID);
     workingDepths->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GTAO resources" }));
     workingDepths->SetName("GTAO Working Depths");
 
@@ -262,7 +264,8 @@ void RegisterGTAOResources(RenderGraph* graph) {
     auto workingAOTerm2 = PixelBuffer::CreateShared(workingAOTermDesc);
     workingAOTerm2->SetName("GTAO Working AO Term 2");
     workingAOTerm2->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GTAO resources" }));
-    std::shared_ptr<PixelBuffer> outputAO = PixelBuffer::CreateShared(workingAOTermDesc);
+    std::shared_ptr<PixelBuffer> outputAO = PixelBuffer::CreateSharedUnmaterialized(workingAOTermDesc);
+    outputAO->SetAliasingPool(gtaoAliasPoolID);
     outputAO->SetName("GTAO Output AO Term");
     outputAO->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GTAO resources" }));
 
@@ -277,54 +280,10 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
     auto GTAOConstantBuffer = CreateIndexedConstantBuffer(sizeof(GTAOInfo),"GTAO constants");
     auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
 
-    // Point-clamp sampler
-	rhi::SamplerDesc samplerDesc;
-	samplerDesc.minFilter = rhi::Filter::Nearest;
-	samplerDesc.magFilter = rhi::Filter::Nearest;
-	samplerDesc.mipFilter = rhi::MipFilter::Nearest;
-	samplerDesc.addressU = rhi::AddressMode::Clamp;
-	samplerDesc.addressV = rhi::AddressMode::Clamp;
-	samplerDesc.addressW = rhi::AddressMode::Clamp;
-	samplerDesc.mipLodBias = 0.0f;
-	samplerDesc.maxAnisotropy = 1;
-	samplerDesc.compareEnable = false;
-	samplerDesc.borderPreset = rhi::BorderPreset::TransparentBlack;
-	samplerDesc.minLod = 0.0f;
-    samplerDesc.maxLod = 0.0f;
-
-    auto samplerIndex = ResourceManager::GetInstance().CreateIndexedSampler(samplerDesc);
-
     GTAOInfo gtaoInfo;
     XeGTAO::GTAOSettings gtaoSettings;
     XeGTAO::GTAOConstants& gtaoConstants = gtaoInfo.g_GTAOConstants; // Intel's GTAO constants
     XeGTAO::GTAOUpdateConstants(gtaoConstants, resolution.x, resolution.y, gtaoSettings, false, 0, *currentCamera);
-    // Bindless indices
-    gtaoInfo.g_samplerPointClampDescriptorIndex = samplerIndex;
-
-	auto workingDepths = graph->RequestResourcePtr<PixelBuffer>(Builtin::GTAO::WorkingDepths);
-	auto workingEdges = graph->RequestResourcePtr<PixelBuffer>(Builtin::GTAO::WorkingEdges);
-	auto workingAOTerm1 = graph->RequestResourcePtr<PixelBuffer>(Builtin::GTAO::WorkingAOTerm1);
-	auto outputAO = graph->RequestResourcePtr<PixelBuffer>(Builtin::GTAO::OutputAOTerm);
-	auto normalsWorldSpace = graph->RequestResourcePtr<PixelBuffer>(Builtin::GBuffer::Normals);
-
-    // Filter pass
-    gtaoInfo.g_srcRawDepthDescriptorIndex = graph->RequestResourcePtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture)->GetSRVInfo(0).slot.index;
-    gtaoInfo.g_outWorkingDepthMIP0DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(0).slot.index;
-    gtaoInfo.g_outWorkingDepthMIP1DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(1).slot.index;
-    gtaoInfo.g_outWorkingDepthMIP2DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(2).slot.index;
-    gtaoInfo.g_outWorkingDepthMIP3DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(3).slot.index;
-    gtaoInfo.g_outWorkingDepthMIP4DescriptorIndex = workingDepths->GetUAVShaderVisibleInfo(4).slot.index;
-
-    // Main pass
-    gtaoInfo.g_srcWorkingDepthDescriptorIndex = workingDepths->GetSRVInfo(0).slot.index;
-    gtaoInfo.g_srcNormalmapDescriptorIndex = graph->RequestResourcePtr<PixelBuffer>(Builtin::GBuffer::Normals)->GetSRVInfo(0).slot.index;
-    // TODO: Hilbert lookup table
-    gtaoInfo.g_outWorkingAOTermDescriptorIndex = workingAOTerm1->GetUAVShaderVisibleInfo(0).slot.index;
-    gtaoInfo.g_outWorkingEdgesDescriptorIndex = workingEdges->GetUAVShaderVisibleInfo(0).slot.index;
-
-    // Denoise pass
-    gtaoInfo.g_srcWorkingEdgesDescriptorIndex = workingEdges->GetSRVInfo(0).slot.index;
-    gtaoInfo.g_outFinalAOTermDescriptorIndex = outputAO->GetUAVShaderVisibleInfo(0).slot.index;
 
     BUFFER_UPLOAD(&gtaoInfo, sizeof(GTAOInfo), UploadManager::UploadTarget::FromShared(GTAOConstantBuffer), 0);
 

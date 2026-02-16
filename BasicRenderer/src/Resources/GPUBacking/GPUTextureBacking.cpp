@@ -155,7 +155,7 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 		}
 		trackDesc.attach = allocationBundle;
 
-		DeviceManager::GetInstance().CreateAliasingResourceTracked(
+		const auto result = DeviceManager::GetInstance().CreateAliasingResourceTracked(
 			*placement->allocation,
 			placement->offset,
 			textureDesc,
@@ -163,6 +163,9 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 			nullptr,
 			m_textureHandle,
 			trackDesc);
+		if (!rhi::IsOk(result)) {
+			throw std::runtime_error("Failed to create aliased texture resource backing");
+		}
 	}
 	else if (desc.allowAlias) {
 		throw std::runtime_error("Aliasing requested without placement in GpuTextureBacking::initialize");
@@ -172,13 +175,16 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 		rhi::ma::AllocationDesc allocationDesc;
 		allocationDesc.heapType = rhi::HeapType::DeviceLocal;
 
-		DeviceManager::GetInstance().CreateResourceTracked(
+		const auto result = DeviceManager::GetInstance().CreateResourceTracked(
 			allocationDesc,
 			textureDesc,
 			0,
 			nullptr,
 			m_textureHandle,
 			trackDesc);
+		if (!rhi::IsOk(result)) {
+			throw std::runtime_error("Failed to create committed texture resource backing");
+		}
 
 		//auto result = device.CreateCommittedResource(textureDesc, textureResource);
 	}
