@@ -9316,15 +9316,16 @@ Synchronized internally with a mutex.
     Result Allocator::AllocateMemory(
         const AllocationDesc& pAllocDesc,
         const ResourceAllocationInfo& pAllocInfo,
-        Allocation* ppAllocation) noexcept
+        AllocationPtr& outAllocation) noexcept
     {
-        if (!ValidateAllocateMemoryParameters(&pAllocDesc, &pAllocInfo, &ppAllocation))
+        auto* ppAllocation = outAllocation.Put();
+        if (!ValidateAllocateMemoryParameters(&pAllocDesc, &pAllocInfo, ppAllocation))
         {
             D3D12MA_ASSERT(0 && "Invalid arguments passed to Allocator::AllocateMemory.");
             return Result::InvalidArgument;
         }
         D3D12MA_DEBUG_GLOBAL_MUTEX_LOCK
-            return m_Pimpl->AllocateMemory(&pAllocDesc, &pAllocInfo, &ppAllocation);
+            return m_Pimpl->AllocateMemory(&pAllocDesc, &pAllocInfo, ppAllocation);
     }
 
     Result Allocator::CreateAliasingResource(

@@ -14,6 +14,10 @@
 
 class PixelBuffer : public GloballyIndexedResource {
 public:
+    struct MaterializeOptions {
+        std::optional<TextureAliasPlacement> aliasPlacement;
+    };
+
     static std::shared_ptr<PixelBuffer> CreateShared(const TextureDescription& desc)
     {
         auto pb = std::shared_ptr<PixelBuffer>(new PixelBuffer(desc, true));
@@ -109,6 +113,10 @@ public:
         return m_desc.aliasingPoolID;
     }
 
+	const TextureDescription& GetDescription() const {
+		return m_desc;
+	}
+
     void EnableIdleDematerialization(uint32_t idleFrameThreshold = 1) {
         m_allowIdleDematerialization = true;
         m_idleDematerializationThreshold = std::max(1u, idleFrameThreshold);
@@ -126,7 +134,7 @@ public:
         return m_idleDematerializationThreshold;
     }
 
-    void Materialize() {
+    void Materialize(const MaterializeOptions* options = nullptr) {
         if (m_backing) {
             return;
         }
@@ -141,7 +149,12 @@ public:
             }
         }
 
-        m_backing = GpuTextureBacking::CreateUnique(newDesc, GetGlobalResourceID(), name.empty() ? nullptr : name.c_str());
+        if (options && options->aliasPlacement.has_value()) {
+            m_backing = GpuTextureBacking::CreateUnique(newDesc, GetGlobalResourceID(), options->aliasPlacement.value(), name.empty() ? nullptr : name.c_str());
+        }
+        else {
+        	m_backing = GpuTextureBacking::CreateUnique(newDesc, GetGlobalResourceID(), name.empty() ? nullptr : name.c_str());
+        }
 
 		m_mipLevels = m_backing->GetMipLevels();
 		m_arraySize = m_backing->GetArraySize();

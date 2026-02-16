@@ -27,7 +27,21 @@ GpuTextureBacking::CreateUnique(const TextureDescription& desc,
 	const char* name)
 {
 	auto pb = std::make_unique<GpuTextureBacking>(CreateTag{});
-	pb->initialize(desc, owningResourceID, name);
+	pb->initialize(desc, owningResourceID, nullptr, name);
+#if BUILD_TYPE == BUILD_DEBUG
+	pb->m_creation = std::stacktrace::current();
+#endif
+	return std::move(pb);
+}
+
+std::unique_ptr<GpuTextureBacking>
+GpuTextureBacking::CreateUnique(const TextureDescription& desc,
+	uint64_t owningResourceID,
+	const TextureAliasPlacement& placement,
+	const char* name)
+{
+	auto pb = std::make_unique<GpuTextureBacking>(CreateTag{});
+	pb->initialize(desc, owningResourceID, &placement, name);
 #if BUILD_TYPE == BUILD_DEBUG
 	pb->m_creation = std::stacktrace::current();
 #endif
@@ -36,6 +50,14 @@ GpuTextureBacking::CreateUnique(const TextureDescription& desc,
 
 void GpuTextureBacking::initialize(const TextureDescription& desc,
 	uint64_t owningResourceID,
+	const char* name)
+{
+	initialize(desc, owningResourceID, nullptr, name);
+}
+
+void GpuTextureBacking::initialize(const TextureDescription& desc,
+	uint64_t owningResourceID,
+	const TextureAliasPlacement* placement,
 	const char* name)
 {
 	m_desc = desc;
@@ -127,10 +149,23 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 	//.Set<MemoryStatisticsComponents::ResourceID>({ owningResourceID });
 	trackDesc.attach = allocationBundle;
 
-	//rhi::ResourcePtr textureResource;
-	if (desc.allowAlias) {
-		//textureResource = device.CreatePlacedResource(placedResourceHeap, 0, textureDesc); // TODO: handle offset
-		throw std::runtime_error("Aliasing resources not implemented yet");
+	if (placement && placement->allocation) {
+		if (placement->poolID.has_value()) {
+			allocationBundle.Set<MemoryStatisticsComponents::AliasingPool>({ placement->poolID });
+		}
+		trackDesc.attach = allocationBundle;
+
+		DeviceManager::GetInstance().CreateAliasingResourceTracked(
+			*placement->allocation,
+			placement->offset,
+			textureDesc,
+			0,
+			nullptr,
+			m_textureHandle,
+			trackDesc);
+	}
+	else if (desc.allowAlias) {
+		throw std::runtime_error("Aliasing requested without placement in GpuTextureBacking::initialize");
 	}
 	else {
 

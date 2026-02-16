@@ -662,7 +662,7 @@ namespace rhi::ma
             const Format* pCastableFormats,
             AllocationPtr& outAllocation) noexcept;
 
-        rhi::Result AllocateMemory(const AllocationDesc& a, const rhi::ResourceAllocationInfo& info, Allocation* outAlloc) noexcept;
+        rhi::Result AllocateMemory(const AllocationDesc& a, const rhi::ResourceAllocationInfo& info, AllocationPtr& outAlloc) noexcept;
 
         Result CreateAliasingResource(
             Allocation* pAllocation,

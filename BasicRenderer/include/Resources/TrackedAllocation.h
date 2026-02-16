@@ -150,6 +150,13 @@ public:
         return {};
     }
 
+    rhi::ma::Allocation* GetAllocation() noexcept {
+        if (auto* p = std::get_if<rhi::ma::AllocationPtr>(&h_)) {
+            return p->Get();
+        }
+        return nullptr;
+    }
+
 private:
     std::variant<std::monostate, rhi::ma::AllocationPtr, rhi::ResourcePtr> h_;
     TrackedEntityToken tok_;

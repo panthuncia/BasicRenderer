@@ -99,6 +99,37 @@ rhi::Result DeviceManager::CreateAliasingResourceTracked(
     return result;
 }
 
+rhi::Result DeviceManager::AllocateMemoryTracked(
+    const rhi::ma::AllocationDesc& allocDesc,
+    const rhi::ResourceAllocationInfo& allocationInfo,
+    TrackedHandle& outAllocation,
+    std::optional<AllocationTrackDesc> trackDesc) const noexcept
+{
+    rhi::ma::AllocationPtr alloc;
+    const auto result = m_allocator->AllocateMemory(allocDesc, allocationInfo, alloc);
+
+    flecs::entity e;
+    AllocationTrackDesc track(-1);
+    if (trackDesc.has_value()) {
+        track = trackDesc.value();
+        e = track.existing;
+    }
+    if (!e.is_alive()) {
+        e = ECSManager::GetInstance().GetWorld().entity();
+    }
+
+    e.set<MemoryStatisticsComponents::ResourceID>({ track.globalResourceID });
+    e.set<MemoryStatisticsComponents::MemSizeBytes>({ allocationInfo.sizeInBytes });
+    if (track.id) {
+        e.set<ResourceIdentifier>(track.id.value());
+    }
+
+    track.attach.ApplyTo(e);
+    TrackedEntityToken tok(ECSManager::GetInstance().GetWorld(), e);
+    outAllocation = TrackedHandle::FromAllocation(std::move(alloc), std::move(tok));
+    return result;
+}
+
 void DeviceManager::Initialize() {
     auto numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
     bool enableDebug = false;

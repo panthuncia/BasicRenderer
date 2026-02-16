@@ -2,6 +2,7 @@
 
 #include <span>
 #include <algorithm>
+#include <limits>
 #include <rhi_helpers.h>
 #include <rhi_debug.h>
 
@@ -16,6 +17,7 @@
 #include "Interfaces/IHasMemoryMetadata.h"
 #include "Interfaces/IDynamicDeclaredResources.h"
 #include "Resources/PixelBuffer.h"
+#include "Resources/MemoryStatisticsComponents.h"
 
 // BFS over alias and group/child relationships to get all relevant IDs
 std::vector<uint64_t> RenderGraph::ExpandSchedulingIDs(uint64_t id) const {
@@ -541,7 +543,23 @@ void RenderGraph::AddTransition(
 	auto pRes = _registry.Resolve(resource); // TODO: Can we get rid of pRes in transitions?
 	auto& compileTracker = GetOrCreateCompileTracker(pRes, resource.GetGlobalResourceID());
 
-	compileTracker.Apply(r.resourceHandleAndRange.range, pRes, r.state, transitions);
+	if (aliasActivationPending.find(resource.GetGlobalResourceID()) != aliasActivationPending.end()) {
+		transitions.emplace_back(
+			pRes,
+			r.resourceHandleAndRange.range,
+			rhi::ResourceAccessType::None,
+			r.state.access,
+			rhi::ResourceLayout::Undefined,
+			r.state.layout,
+			rhi::ResourceSyncState::None,
+			r.state.sync);
+		std::vector<ResourceTransition> ignored;
+		compileTracker.Apply(r.resourceHandleAndRange.range, pRes, r.state, ignored);
+		aliasActivationPending.erase(resource.GetGlobalResourceID());
+	}
+	else {
+		compileTracker.Apply(r.resourceHandleAndRange.range, pRes, r.state, transitions);
+	}
 
 	if (!transitions.empty()) {
 		outTransitionedResourceIDs.insert(resource.GetGlobalResourceID());
@@ -738,6 +756,330 @@ void RenderGraph::MaterializeReferencedResources(
 	}
 }
 
+namespace {
+	rhi::ResourceDesc BuildAliasTextureResourceDesc(const TextureDescription& desc) {
+		const uint16_t mipLevels = desc.generateMipMaps
+			? CalculateMipLevels(desc.imageDimensions[0].width, desc.imageDimensions[0].height)
+			: 1;
+
+		uint32_t arraySize = desc.arraySize;
+		if (!desc.isArray && !desc.isCubemap) {
+			arraySize = 1;
+		}
+
+		auto width = desc.imageDimensions[0].width;
+		auto height = desc.imageDimensions[0].height;
+		if (desc.padInternalResolution) {
+			width = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(width)))));
+			height = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(height)))));
+		}
+
+		rhi::ResourceDesc textureDesc{
+			.type = rhi::ResourceType::Texture2D,
+			.texture = {
+				.format = desc.format,
+				.width = static_cast<uint32_t>(width),
+				.height = static_cast<uint32_t>(height),
+				.depthOrLayers = static_cast<uint16_t>(desc.isCubemap ? 6 * arraySize : arraySize),
+				.mipLevels = mipLevels,
+				.sampleCount = 1,
+				.initialLayout = rhi::ResourceLayout::Common,
+				.optimizedClear = nullptr
+			}
+		};
+
+		if (desc.hasRTV) {
+			textureDesc.resourceFlags |= rhi::ResourceFlags::RF_AllowRenderTarget;
+		}
+		if (desc.hasDSV) {
+			textureDesc.resourceFlags |= rhi::ResourceFlags::RF_AllowDepthStencil;
+		}
+		if (desc.hasUAV) {
+			textureDesc.resourceFlags |= rhi::ResourceFlags::RF_AllowUnorderedAccess;
+		}
+
+		return textureDesc;
+	}
+
+	uint64_t AlignUpU64(uint64_t value, uint64_t alignment) {
+		if (alignment == 0) {
+			return value;
+		}
+		return (value + alignment - 1ull) / alignment * alignment;
+	}
+}
+
+void RenderGraph::BuildAliasPlanAfterDag(const std::vector<Node>& nodes) {
+	(void)nodes;
+	aliasMaterializeOptionsByID.clear();
+	aliasPools.clear();
+	aliasActivationPending.clear();
+
+	struct Candidate {
+		uint64_t resourceID = 0;
+		uint64_t poolID = 0;
+		uint64_t sizeBytes = 0;
+		uint64_t alignment = 1;
+		size_t firstUse = std::numeric_limits<size_t>::max();
+		size_t lastUse = 0;
+	};
+
+	std::unordered_map<uint64_t, Candidate> candidates;
+	auto device = DeviceManager::GetInstance().GetDevice();
+
+	for (size_t passIdx = 0; passIdx < m_framePasses.size(); ++passIdx) {
+		auto collectHandle = [&](const ResourceRegistry::RegistryHandle& handle) {
+			if (handle.IsEphemeral()) {
+				return;
+			}
+			auto* resource = _registry.Resolve(handle);
+			auto* texture = dynamic_cast<PixelBuffer*>(resource);
+			if (!texture) {
+				return;
+			}
+			auto const& desc = texture->GetDescription();
+			if (!desc.allowAlias || !desc.aliasingPoolID.has_value()) {
+				return;
+			}
+
+			auto [it, inserted] = candidates.try_emplace(handle.GetGlobalResourceID());
+			auto& c = it->second;
+			c.resourceID = handle.GetGlobalResourceID();
+			c.poolID = desc.aliasingPoolID.value();
+			c.firstUse = std::min(c.firstUse, passIdx);
+			c.lastUse = std::max(c.lastUse, passIdx);
+
+			if (inserted || c.sizeBytes == 0) {
+				auto resourceDesc = BuildAliasTextureResourceDesc(desc);
+				rhi::ResourceAllocationInfo info{};
+				device.GetResourceAllocationInfo(&resourceDesc, 1, &info);
+				c.sizeBytes = info.sizeInBytes;
+				c.alignment = std::max<uint64_t>(1, info.alignment);
+			}
+		};
+
+		auto const& any = m_framePasses[passIdx];
+		if (any.type == PassType::Render) {
+			auto const& p = std::get<RenderPassAndResources>(any.pass);
+			for (auto const& req : p.resources.frameResourceRequirements) {
+				collectHandle(req.resourceHandleAndRange.resource);
+			}
+			for (auto const& t : p.resources.internalTransitions) {
+				collectHandle(t.first.resource);
+			}
+		}
+		else if (any.type == PassType::Compute) {
+			auto const& p = std::get<ComputePassAndResources>(any.pass);
+			for (auto const& req : p.resources.frameResourceRequirements) {
+				collectHandle(req.resourceHandleAndRange.resource);
+			}
+			for (auto const& t : p.resources.internalTransitions) {
+				collectHandle(t.first.resource);
+			}
+		}
+	}
+
+	std::unordered_map<uint64_t, std::vector<Candidate>> byPool;
+	for (auto const& [id, c] : candidates) {
+		(void)id;
+		if (c.firstUse == std::numeric_limits<size_t>::max()) {
+			continue;
+		}
+		byPool[c.poolID].push_back(c);
+	}
+
+	for (auto& [poolID, poolCandidates] : byPool) {
+		std::sort(poolCandidates.begin(), poolCandidates.end(), [](const Candidate& a, const Candidate& b) {
+			if (a.sizeBytes != b.sizeBytes) {
+				return a.sizeBytes > b.sizeBytes;
+			}
+			return a.resourceID < b.resourceID;
+		});
+
+		struct Slot {
+			size_t lastUse = 0;
+			uint64_t maxSize = 0;
+			uint64_t alignment = 1;
+			uint64_t offset = 0;
+		};
+
+		std::vector<Slot> slots;
+		std::unordered_map<uint64_t, size_t> resourceToSlot;
+
+		for (auto const& c : poolCandidates) {
+			size_t chosenSlot = std::numeric_limits<size_t>::max();
+			for (size_t slotIndex = 0; slotIndex < slots.size(); ++slotIndex) {
+				if (c.firstUse > slots[slotIndex].lastUse) {
+					chosenSlot = slotIndex;
+					break;
+				}
+			}
+
+			if (chosenSlot == std::numeric_limits<size_t>::max()) {
+				chosenSlot = slots.size();
+				slots.push_back({});
+			}
+
+			auto& slot = slots[chosenSlot];
+			slot.lastUse = std::max(slot.lastUse, c.lastUse);
+			slot.maxSize = std::max(slot.maxSize, c.sizeBytes);
+			slot.alignment = std::max(slot.alignment, c.alignment);
+			resourceToSlot[c.resourceID] = chosenSlot;
+		}
+
+		uint64_t heapSize = 0;
+		for (auto& slot : slots) {
+			heapSize = AlignUpU64(heapSize, slot.alignment);
+			slot.offset = heapSize;
+			heapSize += slot.maxSize;
+		}
+
+		if (heapSize == 0) {
+			continue;
+		}
+
+		rhi::ma::AllocationDesc allocDesc{};
+		allocDesc.heapType = rhi::HeapType::DeviceLocal;
+		allocDesc.flags = rhi::ma::AllocationFlagCanAlias;
+
+		uint64_t poolAlignment = 1;
+		for (const auto& slot : slots) {
+			poolAlignment = std::max(poolAlignment, slot.alignment);
+		}
+
+		rhi::ResourceAllocationInfo allocInfo{};
+		allocInfo.offset = 0;
+		allocInfo.alignment = poolAlignment;
+		allocInfo.sizeInBytes = heapSize;
+
+		TrackedHandle aliasPool;
+		AllocationTrackDesc trackDesc(0);
+		trackDesc.attach
+			.Set<MemoryStatisticsComponents::ResourceName>({ "RenderGraph Alias Pool" })
+			.Set<MemoryStatisticsComponents::ResourceType>({ rhi::ResourceType::Unknown })
+			.Set<MemoryStatisticsComponents::AliasingPool>({ poolID });
+
+		DeviceManager::GetInstance().AllocateMemoryTracked(allocDesc, allocInfo, aliasPool, trackDesc);
+		aliasPools.push_back(std::move(aliasPool));
+		auto* allocation = aliasPools.back().GetAllocation();
+		if (!allocation) {
+			throw std::runtime_error("Failed to allocate alias pool memory");
+		}
+
+		for (auto const& c : poolCandidates) {
+			auto slotIndex = resourceToSlot[c.resourceID];
+			const auto& slot = slots[slotIndex];
+			PixelBuffer::MaterializeOptions options{};
+			options.aliasPlacement = TextureAliasPlacement{
+				.allocation = allocation,
+				.offset = slot.offset,
+				.poolID = poolID,
+			};
+			aliasMaterializeOptionsByID[c.resourceID] = options;
+
+			const uint64_t newSignature = (poolID << 32) ^ static_cast<uint64_t>(slotIndex);
+			auto itRes = resourcesByID.find(c.resourceID);
+			if (itRes != resourcesByID.end()) {
+				auto texture = std::dynamic_pointer_cast<PixelBuffer>(itRes->second);
+				if (texture && texture->IsMaterialized()) {
+					auto itSig = aliasPlacementSignatureByID.find(c.resourceID);
+					if (itSig == aliasPlacementSignatureByID.end() || itSig->second != newSignature) {
+						texture->Dematerialize();
+						aliasActivationPending.insert(c.resourceID);
+					}
+				}
+			}
+			else {
+				auto itSig = aliasPlacementSignatureByID.find(c.resourceID);
+				if (itSig == aliasPlacementSignatureByID.end() || itSig->second != newSignature) {
+					aliasActivationPending.insert(c.resourceID);
+				}
+			}
+			aliasPlacementSignatureByID[c.resourceID] = newSignature;
+		}
+	}
+}
+
+void RenderGraph::ApplyAliasQueueSynchronization() {
+	struct QueueUsage {
+		bool usesRender = false;
+		bool usesCompute = false;
+	};
+
+	struct SlotOwner {
+		uint64_t resourceID = 0;
+		size_t batchIndex = 0;
+		QueueUsage usage;
+	};
+
+	std::unordered_map<uint64_t, SlotOwner> lastOwnerBySignature;
+
+	auto markUsage = [](QueueUsage& usage, bool render, bool compute) {
+		usage.usesRender = usage.usesRender || render;
+		usage.usesCompute = usage.usesCompute || compute;
+	};
+
+	for (size_t batchIndex = 0; batchIndex < batches.size(); ++batchIndex) {
+		auto& batch = batches[batchIndex];
+		std::unordered_map<uint64_t, std::pair<uint64_t, QueueUsage>> currentBySignature;
+
+		auto accumulateFromReqs = [&](const std::vector<ResourceRequirement>& reqs, bool render, bool compute) {
+			for (auto const& req : reqs) {
+				const uint64_t resourceID = req.resourceHandleAndRange.resource.GetGlobalResourceID();
+				auto itSig = aliasPlacementSignatureByID.find(resourceID);
+				if (itSig == aliasPlacementSignatureByID.end()) {
+					continue;
+				}
+
+				auto& entry = currentBySignature[itSig->second];
+				if (entry.first == 0) {
+					entry.first = resourceID;
+				}
+				markUsage(entry.second, render, compute);
+			}
+		};
+
+		for (auto const& rp : batch.renderPasses) {
+			accumulateFromReqs(rp.resources.frameResourceRequirements, true, false);
+		}
+		for (auto const& cp : batch.computePasses) {
+			accumulateFromReqs(cp.resources.frameResourceRequirements, false, true);
+		}
+
+		for (auto const& [signature, current] : currentBySignature) {
+			const uint64_t currentResourceID = current.first;
+			const QueueUsage& currentUsage = current.second;
+
+			auto prevIt = lastOwnerBySignature.find(signature);
+			if (prevIt != lastOwnerBySignature.end() && prevIt->second.resourceID != currentResourceID) {
+				auto& prevBatch = batches[prevIt->second.batchIndex];
+
+				if (prevIt->second.usage.usesRender && currentUsage.usesCompute) {
+					prevBatch.renderCompletionSignal = true;
+					batch.computeQueueWaitOnRenderQueueBeforeTransition = true;
+					batch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue =
+						std::max(batch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue,
+							prevBatch.renderCompletionFenceValue);
+				}
+
+				if (prevIt->second.usage.usesCompute && currentUsage.usesRender) {
+					prevBatch.computeCompletionSignal = true;
+					batch.renderQueueWaitOnComputeQueueBeforeTransition = true;
+					batch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue =
+						std::max(batch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue,
+							prevBatch.computeCompletionFenceValue);
+				}
+			}
+
+			lastOwnerBySignature[signature] = SlotOwner{
+				.resourceID = currentResourceID,
+				.batchIndex = batchIndex,
+				.usage = currentUsage,
+			};
+		}
+	}
+}
+
 std::unordered_set<uint64_t> RenderGraph::CollectFrameResourceIDs() const {
 	std::unordered_set<uint64_t> used;
 	used.reserve(m_framePasses.size() * 4);
@@ -893,6 +1235,10 @@ void RenderGraph::ResetForRebuild()
 	resourceBackingGenerationByID.clear();
 	resourceIdleFrameCounts.clear();
 	compiledResourceGenerationByID.clear();
+	aliasMaterializeOptionsByID.clear();
+	aliasPlacementSignatureByID.clear();
+	aliasActivationPending.clear();
+	aliasPools.clear();
 	compileTrackers.clear();
 
 	// Clear providers
@@ -915,6 +1261,9 @@ void RenderGraph::ResetForFrame() {
 	batches.clear();
 	lastActiveSubresourceInAliasGroup.clear();
 	compiledResourceGenerationByID.clear();
+	aliasMaterializeOptionsByID.clear();
+	aliasActivationPending.clear();
+	aliasPools.clear();
 	compileTrackers.clear();
 	// reset pass builders
 	for (auto& [name, builder] : m_passBuildersByName) {
@@ -1453,6 +1802,9 @@ void RenderGraph::RefreshRetainedDeclarationsForFrame(ComputePassAndResources& p
 void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 	StatisticsManager::GetInstance().BeginFrame();
 	compileTrackers.clear();
+	aliasMaterializeOptionsByID.clear();
+	aliasActivationPending.clear();
+	aliasPools.clear();
 
 	auto needsRefresh = [&](auto& p) -> bool {
 		auto* iFace = dynamic_cast<IDynamicDeclaredResources*>(p.pass.get());
@@ -1843,7 +2195,10 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 		throw std::runtime_error("Render graph contains a dependency cycle");
 	}
 
+	BuildAliasPlanAfterDag(nodes);
+
 	AutoScheduleAndBuildBatches(*this, m_framePasses, nodes);
+	ApplyAliasQueueSynchronization();
 
 	// Insert transitions to loop resources back to their initial states
 	//ComputeResourceLoops();
@@ -2003,7 +2358,13 @@ void RenderGraph::MaterializeUnmaterializedResources(const std::unordered_set<ui
 		}
 
 		if (!texture->IsMaterialized()) {
-			texture->Materialize();
+			auto itAlias = aliasMaterializeOptionsByID.find(id);
+			if (itAlias != aliasMaterializeOptionsByID.end()) {
+				texture->Materialize(&itAlias->second);
+			}
+			else {
+				texture->Materialize();
+			}
 		}
 
 		resourceBackingGenerationByID[id] = texture->GetBackingGeneration();

@@ -19,6 +19,8 @@
 #include "Render/CommandListPool.h"
 #include "Managers/CommandRecordingManager.h"
 #include "Interfaces/IPassBuilder.h"
+#include "Resources/PixelBuffer.h"
+#include "Resources/TrackedAllocation.h"
 
 class Resource;
 class RenderPassBuilder;
@@ -280,6 +282,30 @@ private:
 		std::unordered_map<uint64_t, unsigned int> usageHistCompute;
 		std::unordered_map<uint64_t, unsigned int> usageHistRender;
 	};
+	
+	enum class AccessKind : uint8_t { Read, Write };
+
+	struct Node {
+		size_t   passIndex = 0;
+		bool     isCompute = false;
+		uint32_t originalOrder = 0;
+
+		// Expanded IDs (aliases + group/child fixpoint)
+		std::vector<uint64_t> touchedIDs;
+		std::vector<uint64_t> uavIDs;
+
+		// For dependency building: per expanded ID, strongest access in this pass.
+		// Write dominates read.
+		std::unordered_map<uint64_t, AccessKind> accessByID;
+
+		// DAG
+		std::vector<size_t> out;
+		std::vector<size_t> in;
+		uint32_t indegree = 0;
+
+		// Longest-path-to-sink (for tie-breaking)
+		uint32_t criticality = 0;
+	};
 
 	std::vector<IResourceProvider*> _providers;
 	ResourceRegistry _registry;
@@ -298,6 +324,10 @@ private:
 	std::unordered_map<uint64_t, uint64_t> resourceBackingGenerationByID;
 	std::unordered_map<uint64_t, uint32_t> resourceIdleFrameCounts;
 	std::unordered_map<uint64_t, uint64_t> compiledResourceGenerationByID;
+	std::unordered_map<uint64_t, PixelBuffer::MaterializeOptions> aliasMaterializeOptionsByID;
+	std::unordered_map<uint64_t, uint64_t> aliasPlacementSignatureByID;
+	std::unordered_set<uint64_t> aliasActivationPending;
+	std::vector<TrackedHandle> aliasPools;
 
 	std::unordered_map<uint64_t, std::unordered_set<uint64_t>> aliasedResources; // Tracks resources that use the same memory
 	std::unordered_map<uint64_t, size_t> resourceToAliasGroup;
@@ -347,6 +377,8 @@ private:
 	void MaterializeReferencedResources(
 		const std::vector<ResourceRequirement>& resourceRequirements,
 		const std::vector<std::pair<ResourceHandleAndRange, ResourceState>>& internalTransitions);
+	void BuildAliasPlanAfterDag(const std::vector<Node>& nodes);
+	void ApplyAliasQueueSynchronization();
 	std::unordered_set<uint64_t> CollectFrameResourceIDs() const;
 	void ApplyIdleDematerializationPolicy(const std::unordered_set<uint64_t>& usedResourceIDs);
 	void SnapshotCompiledResourceGenerations(const std::unordered_set<uint64_t>& usedResourceIDs);
@@ -501,9 +533,6 @@ private:
 
 	std::vector<uint64_t> ExpandSchedulingIDs(uint64_t id) const;
 
-
-	enum class AccessKind : uint8_t { Read, Write };
-
 	static inline bool IsUAVState(const ResourceState& s) noexcept {
 		return ((s.access & rhi::ResourceAccessType::UnorderedAccess) != 0) ||
 			(s.layout == rhi::ResourceLayout::UnorderedAccess);
@@ -513,28 +542,6 @@ private:
 		bool isCompute = false;
 		std::vector<ResourceRequirement>* reqs = nullptr;
 		std::vector<std::pair<ResourceHandleAndRange, ResourceState>>* internalTransitions = nullptr;
-	};
-
-	struct Node {
-		size_t   passIndex = 0;
-		bool     isCompute = false;
-		uint32_t originalOrder = 0;
-
-		// Expanded IDs (aliases + group/child fixpoint)
-		std::vector<uint64_t> touchedIDs;
-		std::vector<uint64_t> uavIDs;
-
-		// For dependency building: per expanded ID, strongest access in this pass.
-		// Write dominates read.
-		std::unordered_map<uint64_t, AccessKind> accessByID;
-
-		// DAG
-		std::vector<size_t> out;
-		std::vector<size_t> in;
-		uint32_t indegree = 0;
-
-		// Longest-path-to-sink (for tie-breaking)
-		uint32_t criticality = 0;
 	};
 
 	struct SeqState {

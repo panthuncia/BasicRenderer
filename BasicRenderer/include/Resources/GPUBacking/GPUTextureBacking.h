@@ -10,6 +10,12 @@
 #include "Managers/Singletons/DeletionManager.h"
 using Microsoft::WRL::ComPtr;
 
+struct TextureAliasPlacement {
+	rhi::ma::Allocation* allocation = nullptr;
+	uint64_t offset = 0;
+	std::optional<uint64_t> poolID;
+};
+
 class GpuTextureBacking {
 public:
 	// Don't use this.
@@ -18,6 +24,12 @@ public:
 	static std::unique_ptr<GpuTextureBacking>
 		CreateUnique(const TextureDescription& desc,
 			uint64_t owningResourceID,
+			const char* name = nullptr);
+
+	static std::unique_ptr<GpuTextureBacking>
+		CreateUnique(const TextureDescription& desc,
+			uint64_t owningResourceID,
+			const TextureAliasPlacement& placement,
 			const char* name = nullptr);
 
 	explicit GpuTextureBacking(CreateTag);
@@ -62,6 +74,11 @@ private:
 #endif
 	void initialize(const TextureDescription& desc,
 		uint64_t owningResourceID,
+		const char* name);
+
+	void initialize(const TextureDescription& desc,
+		uint64_t owningResourceID,
+		const TextureAliasPlacement* placement,
 		const char* name);
 
 	void RegisterLiveAlloc();

@@ -57,6 +57,12 @@ public:
 		TrackedHandle& out,
 		std::optional<AllocationTrackDesc> trackDesc) const noexcept;
 
+	rhi::Result AllocateMemoryTracked(
+		const rhi::ma::AllocationDesc& allocDesc,
+		const rhi::ResourceAllocationInfo& allocationInfo,
+		TrackedHandle& outAllocation,
+		std::optional<AllocationTrackDesc> trackDesc = std::nullopt) const noexcept;
+
 private:
 
     DeviceManager() = default;
