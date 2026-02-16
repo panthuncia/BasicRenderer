@@ -95,11 +95,13 @@ public:
         }
 
         auto newDesc = m_desc;
-        // Pad each mip to the nearest power of 2, if requested
-        for (auto& dim : m_desc.imageDimensions) {
-            dim.width = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(dim.width)))));
-            dim.height = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(dim.height)))));
-            // TODO: Row and slice pitch?
+        if (m_desc.padInternalResolution) {
+            // Pad each mip to the nearest power of 2, if requested
+            for (auto& dim : m_desc.imageDimensions) {
+                dim.width = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(dim.width)))));
+                dim.height = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(dim.height)))));
+                // TODO: Row and slice pitch?
+            }
         }
 
         m_backing = GpuTextureBacking::CreateUnique(newDesc, GetGlobalResourceID(), name.empty() ? nullptr : name.c_str());
