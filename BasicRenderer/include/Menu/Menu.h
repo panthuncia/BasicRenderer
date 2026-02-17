@@ -1629,6 +1629,24 @@ inline void Menu::DrawAutoAliasPlannerWindow() {
 
     if (m_renderGraph) {
         ImGui::Separator();
+        auto formatBytes = [](uint64_t bytes) {
+            constexpr double kKB = 1024.0;
+            constexpr double kMB = 1024.0 * 1024.0;
+            constexpr double kGB = 1024.0 * 1024.0 * 1024.0;
+
+            const double value = static_cast<double>(bytes);
+            if (value >= kGB) {
+                return std::format("{:.2f} GB", value / kGB);
+            }
+            if (value >= kMB) {
+                return std::format("{:.2f} MB", value / kMB);
+            }
+            if (value >= kKB) {
+                return std::format("{:.2f} KB", value / kKB);
+            }
+            return std::format("{:.2f} B", value);
+        };
+
         const auto snapshot = m_renderGraph->GetAutoAliasDebugSnapshot();
         constexpr const char* kModeNames[] = { "Off", "Conservative", "Balanced", "Aggressive" };
         const int modeIdx = std::clamp(static_cast<int>(snapshot.mode), 0, static_cast<int>(IM_ARRAYSIZE(kModeNames) - 1));
@@ -1777,13 +1795,9 @@ inline void Menu::DrawAutoAliasPlannerWindow() {
                         }
 
                         const std::string label = std::format(
-                            "{} [{}..{}] B u{}-{}{}",
+                            "{} ({})",
                             r.resourceName,
-                            static_cast<unsigned long long>(r.startByte),
-                            static_cast<unsigned long long>(r.endByte),
-                            static_cast<unsigned long long>(r.firstUse),
-                            static_cast<unsigned long long>(r.lastUse),
-                            r.overlapsByteRange ? " overlap" : "");
+                            formatBytes(r.sizeBytes));
                         draw->AddText(ImVec2(left + 6.0f, y0), IM_COL32(230, 230, 230, 230), label.c_str());
                     }
 

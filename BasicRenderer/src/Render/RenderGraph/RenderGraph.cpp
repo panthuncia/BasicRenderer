@@ -2095,7 +2095,7 @@ void RenderGraph::MaterializeUnmaterializedResources(const std::unordered_set<ui
 			else {
 				if (buffer->IsAliasingAllowed()) {
 					const bool hasManualAliasPool = buffer->GetAliasingPoolHint().has_value();
-					const bool hasAutoAliasPool = false;
+					const bool hasAutoAliasPool = autoAliasPoolByID.find(id) != autoAliasPoolByID.end();
 					const bool aliasPlacementRequiredThisFrame = hasManualAliasPool || hasAutoAliasPool;
 
 					if (onlyResourceIDs && aliasPlacementRequiredThisFrame) {

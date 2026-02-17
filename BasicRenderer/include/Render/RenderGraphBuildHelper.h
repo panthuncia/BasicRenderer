@@ -373,7 +373,7 @@ void BuildPPLLPipeline(RenderGraph* graph) {
         indirect = false; // Mesh shader pipelines are required for indirect draws
 	}
 
-    static const size_t aveFragsPerPixel = 12;
+    static const size_t aveFragsPerPixel = 5;
     auto numPPLLNodes = resolution.x * resolution.y * aveFragsPerPixel;
     static const size_t PPLLNodeSize = 24; // two uints, four floats
     TextureDescription desc;
@@ -392,10 +392,17 @@ void BuildPPLLPipeline(RenderGraph* graph) {
     auto PPLLHeadPointerTexture = PixelBuffer::CreateSharedUnmaterialized(desc);
     PPLLHeadPointerTexture->SetName("PPLLHeadPointerTexture");
     PPLLHeadPointerTexture->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "OIT resources" }));
-    auto PPLLBuffer = CreateIndexedStructuredBuffer(numPPLLNodes, PPLLNodeSize, true, false);
+    auto PPLLBuffer = Buffer::CreateUnmaterializedStructuredBuffer(
+        static_cast<uint32_t>(numPPLLNodes),
+        static_cast<uint32_t>(PPLLNodeSize),
+        true,
+        false,
+        false,
+        rhi::HeapType::DeviceLocal);
+    PPLLBuffer->SetAllowAlias(true);
     PPLLBuffer->SetName("PPLLBuffer");
 	PPLLBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "OIT resources" }));
-	auto PPLLCounter = CreateIndexedTypedBuffer(1, rhi::Format::R32_UInt, true);
+    auto PPLLCounter = CreateIndexedTypedBuffer(1, rhi::Format::R32_UInt, true);
     PPLLCounter->SetName("PPLLCounter");
 	PPLLCounter->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "OIT resources" }));
 

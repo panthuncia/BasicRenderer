@@ -1585,68 +1585,14 @@ std::string GetDirectoryFromPath(const std::string& path) {
 }
 
 std::shared_ptr<Buffer> CreateIndexedStructuredBuffer(size_t numElements, unsigned int elementSize, bool UAV, bool UAVCounter) {
-    auto device = DeviceManager::GetInstance().GetDevice();
-    size_t bufferSize = numElements * elementSize;
-    size_t counterOffset = 0;
-    if (UAVCounter) {
-        size_t requiredSize = (numElements * elementSize) + sizeof(UINT); // Add space for the counter
-        unsigned int alignment = elementSize; // Buffer should be a multiple of sizeof(T)
-
-        // Ensure bufferSize is a multiple of typeSize and meets requiredSize
-        bufferSize = ((requiredSize + alignment - 1) / alignment) * alignment;
-
-        // Find the next 4096-aligned address after requiredSize
-        size_t potentialCounterOffset = (requiredSize + 4095) & ~4095;
-
-        // If the 4096-aligned address is within the buffer, we can use it
-        if (potentialCounterOffset + sizeof(unsigned int) <= bufferSize) {
-            counterOffset = potentialCounterOffset;
-        }
-        else {
-            // Otherwise, expand the buffer to fit the 4096-aligned counter offset
-            bufferSize = ((potentialCounterOffset + sizeof(unsigned int) + alignment - 1) / alignment) * alignment;
-            counterOffset = potentialCounterOffset;
-        }
-
-        assert(counterOffset % 4096 == 0);
-    }
-
-    auto dataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, bufferSize, UAV);
-
-    BufferBase::DescriptorRequirements descReq{};
-    const uint64_t effectiveCounterOffset = (UAV && UAVCounter) ? counterOffset : 0;
-    descReq.uavCounterOffset = effectiveCounterOffset;
-
-	descReq.createSRV = true;
-	descReq.createUAV = UAV;
-
-    // SRV (structured)
-    descReq.srvDesc = rhi::SrvDesc{
-        .dimension = rhi::SrvDim::Buffer,
-        .formatOverride = rhi::Format::Unknown,
-        .buffer = {
-            .kind = rhi::BufferViewKind::Structured,
-            .firstElement = 0,
-            .numElements = static_cast<uint32_t>(numElements),
-            .structureByteStride = elementSize,
-        },
-    };
-
-    // UAV (structured), with optional counter offset
-    descReq.uavDesc = rhi::UavDesc{
-        .dimension = rhi::UavDim::Buffer,
-        .formatOverride = rhi::Format::Unknown,
-        .buffer = {
-            .kind = rhi::BufferViewKind::Structured,
-            .firstElement = 0,
-            .numElements = static_cast<uint32_t>(numElements),
-            .structureByteStride = elementSize,
-            .counterOffsetInBytes = static_cast<uint32_t>(effectiveCounterOffset),
-        },
-    };
-
-    dataBuffer->SetDescriptorRequirements(descReq);
-    dataBuffer->RefreshDescriptorContents();
+    auto dataBuffer = Buffer::CreateUnmaterializedStructuredBuffer(
+        static_cast<uint32_t>(numElements),
+        static_cast<uint32_t>(elementSize),
+        UAV,
+        UAVCounter,
+        false,
+        rhi::HeapType::DeviceLocal);
+    dataBuffer->Materialize();
 
     return dataBuffer;
 }

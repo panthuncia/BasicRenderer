@@ -68,6 +68,15 @@ namespace {
 		return textureDesc;
 	}
 
+	rhi::ResourceDesc BuildAliasBufferResourceDesc(uint64_t sizeBytes, bool unorderedAccess, rhi::HeapType heapType) {
+		auto desc = rhi::helpers::ResourceDesc::Buffer(sizeBytes);
+		desc.heapType = heapType;
+		if (unorderedAccess) {
+			desc.resourceFlags |= rhi::ResourceFlags::RF_AllowUnorderedAccess;
+		}
+		return desc;
+	}
+
 	uint64_t AlignUpU64(uint64_t value, uint64_t alignment) {
 		if (alignment == 0) {
 			return value;
@@ -179,16 +188,46 @@ void rg::alias::RenderGraphAliasingSubsystem::AutoAssignAliasingPools(RenderGrap
 		}
 
 		auto* resource = _registry.Resolve(handle);
+		const uint64_t resourceID = handle.GetGlobalResourceID();
 		auto* texture = dynamic_cast<PixelBuffer*>(resource);
 		if (!texture) {
 			auto* buffer = dynamic_cast<Buffer*>(resource);
-			if (buffer && buffer->IsAliasingAllowed()) {
-				autoAliasExclusionReasonByID.try_emplace(handle.GetGlobalResourceID(), "buffer aliasing not implemented yet");
+			if (!buffer) {
+				return;
+			}
+
+			if (!buffer->IsAliasingAllowed()) {
+				autoAliasExclusionReasonByID.try_emplace(resourceID, "allowAlias is disabled");
+				return;
+			}
+
+			if (buffer->GetAccessType() != rhi::HeapType::DeviceLocal) {
+				autoAliasExclusionReasonByID.try_emplace(resourceID, "buffer heap is not DeviceLocal");
+				return;
+			}
+
+			auto [it, inserted] = candidates.try_emplace(resourceID);
+			auto& candidate = it->second;
+			candidate.resourceID = resourceID;
+			candidate.firstUse = std::min(candidate.firstUse, topoRank);
+			candidate.lastUse = std::max(candidate.lastUse, topoRank);
+			candidate.maxNodeCriticality = std::max(candidate.maxNodeCriticality, passCrit);
+			candidate.isMaterializedAtCompile = candidate.isMaterializedAtCompile || buffer->IsMaterialized();
+			candidate.manualPool = buffer->GetAliasingPoolHint();
+
+			if (inserted || candidate.sizeBytes == 0) {
+				auto resourceDesc = BuildAliasBufferResourceDesc(
+					buffer->GetBufferSize(),
+					buffer->IsUnorderedAccessEnabled(),
+					buffer->GetAccessType());
+				rhi::ResourceAllocationInfo info{};
+				device.GetResourceAllocationInfo(&resourceDesc, 1, &info);
+				candidate.sizeBytes = info.sizeInBytes;
+				candidate.alignment = std::max<uint64_t>(1, info.alignment);
 			}
 			return;
 		}
 
-		const uint64_t resourceID = handle.GetGlobalResourceID();
 		auto const& desc = texture->GetDescription();
 		if (!desc.allowAlias) {
 			autoAliasExclusionReasonByID.try_emplace(resourceID, "allowAlias is disabled");
@@ -449,6 +488,11 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 	}
 
 	struct Candidate {
+		enum class Kind : uint8_t {
+			Texture,
+			Buffer
+		};
+
 		uint64_t resourceID = 0;
 		uint64_t poolID = 0;
 		uint64_t sizeBytes = 0;
@@ -457,6 +501,7 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 		size_t lastUse = 0;
 		bool firstUseIsWrite = false;
 		bool manualPoolAssigned = false;
+		Kind kind = Kind::Texture;
 	};
 
 	std::unordered_map<uint64_t, Candidate> candidates;
@@ -469,14 +514,54 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 				return;
 			}
 			auto* resource = _registry.Resolve(handle);
+			const uint64_t resourceID = handle.GetGlobalResourceID();
 			auto* texture = dynamic_cast<PixelBuffer*>(resource);
 			if (!texture) {
 				auto* buffer = dynamic_cast<Buffer*>(resource);
-				if (buffer && buffer->IsAliasingAllowed()) {
-					spdlog::debug(
-						"RG alias candidate skipped (buffer path not enabled): id={} name='{}'",
-						handle.GetGlobalResourceID(),
-						resource ? resource->GetName() : std::string("<unknown>"));
+				if (!buffer || !buffer->IsAliasingAllowed()) {
+					return;
+				}
+
+				if (buffer->GetAccessType() != rhi::HeapType::DeviceLocal) {
+					return;
+				}
+
+				std::optional<uint64_t> poolID = buffer->GetAliasingPoolHint();
+				if (!poolID.has_value()) {
+					auto itAuto = autoAliasPoolByID.find(resourceID);
+					if (itAuto != autoAliasPoolByID.end()) {
+						poolID = itAuto->second;
+					}
+				}
+
+				if (!poolID.has_value()) {
+					return;
+				}
+
+				auto [it, inserted] = candidates.try_emplace(resourceID);
+				auto& c = it->second;
+				c.kind = Candidate::Kind::Buffer;
+				c.resourceID = resourceID;
+				c.poolID = poolID.value();
+				if (usageOrder < c.firstUse) {
+					c.firstUse = usageOrder;
+					c.firstUseIsWrite = isWrite;
+				}
+				else if (usageOrder == c.firstUse) {
+					c.firstUseIsWrite = c.firstUseIsWrite || isWrite;
+				}
+				c.lastUse = std::max(c.lastUse, usageOrder);
+				c.manualPoolAssigned = c.manualPoolAssigned || buffer->GetAliasingPoolHint().has_value();
+
+				if (inserted || c.sizeBytes == 0) {
+					auto resourceDesc = BuildAliasBufferResourceDesc(
+						buffer->GetBufferSize(),
+						buffer->IsUnorderedAccessEnabled(),
+						buffer->GetAccessType());
+					rhi::ResourceAllocationInfo info{};
+					device.GetResourceAllocationInfo(&resourceDesc, 1, &info);
+					c.sizeBytes = info.sizeInBytes;
+					c.alignment = std::max<uint64_t>(1, info.alignment);
 				}
 				return;
 			}
@@ -497,8 +582,9 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 				return;
 			}
 
-			auto [it, inserted] = candidates.try_emplace(handle.GetGlobalResourceID());
+			auto [it, inserted] = candidates.try_emplace(resourceID);
 			auto& c = it->second;
+			c.kind = Candidate::Kind::Texture;
 			c.resourceID = handle.GetGlobalResourceID();
 			c.poolID = poolID.value();
 			if (usageOrder < c.firstUse) {
@@ -745,13 +831,24 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 				.overlapsByteRange = false
 				});
 
-			PixelBuffer::MaterializeOptions options{};
-			options.aliasPlacement = TextureAliasPlacement{
-				.allocation = allocation,
-				.offset = slot.offset,
-				.poolID = poolID,
-			};
-			aliasMaterializeOptionsByID[c.resourceID] = RenderGraph::ResourceMaterializeOptions(options);
+			if (c.kind == Candidate::Kind::Texture) {
+				PixelBuffer::MaterializeOptions options{};
+				options.aliasPlacement = TextureAliasPlacement{
+					.allocation = allocation,
+					.offset = slot.offset,
+					.poolID = poolID,
+				};
+				aliasMaterializeOptionsByID[c.resourceID] = RenderGraph::ResourceMaterializeOptions(options);
+			}
+			else {
+				BufferBase::MaterializeOptions options{};
+				options.aliasPlacement = BufferAliasPlacement{
+					.allocation = allocation,
+					.offset = slot.offset,
+					.poolID = poolID,
+				};
+				aliasMaterializeOptionsByID[c.resourceID] = RenderGraph::ResourceMaterializeOptions(options);
+			}
 			aliasPlacementPoolByID[c.resourceID] = poolID;
 
 			auto itResName = resourcesByID.find(c.resourceID);
@@ -759,10 +856,11 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 				? itResName->second->GetName()
 				: std::string("<unknown>");
 			spdlog::info(
-				"RG alias bind: pool={} resourceId={} name='{}' slot={} offset={} size={} firstUse={} lastUse={}",
+				"RG alias bind: pool={} resourceId={} name='{}' kind={} slot={} offset={} size={} firstUse={} lastUse={}",
 				poolID,
 				c.resourceID,
 				resourceName,
+				c.kind == Candidate::Kind::Texture ? "texture" : "buffer",
 				slotIndex,
 				slot.offset,
 				c.sizeBytes,
@@ -777,6 +875,14 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 					auto itSig = aliasPlacementSignatureByID.find(c.resourceID);
 					if (itSig == aliasPlacementSignatureByID.end() || itSig->second != newSignature) {
 						texture->Dematerialize();
+						aliasActivationPending.insert(c.resourceID);
+					}
+				}
+				auto buffer = std::dynamic_pointer_cast<Buffer>(itRes->second);
+				if (buffer && buffer->IsMaterialized()) {
+					auto itSig = aliasPlacementSignatureByID.find(c.resourceID);
+					if (itSig == aliasPlacementSignatureByID.end() || itSig->second != newSignature) {
+						buffer->Dematerialize();
 						aliasActivationPending.insert(c.resourceID);
 					}
 				}
@@ -841,6 +947,11 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 					auto texture = std::dynamic_pointer_cast<PixelBuffer>(itRes->second);
 					if (texture && texture->IsMaterialized()) {
 						texture->Dematerialize();
+					}
+
+					auto buffer = std::dynamic_pointer_cast<Buffer>(itRes->second);
+					if (buffer && buffer->IsMaterialized()) {
+						buffer->Dematerialize();
 					}
 				}
 			}

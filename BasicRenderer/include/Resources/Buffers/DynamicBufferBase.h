@@ -103,6 +103,18 @@ public:
         return m_dataBuffer != nullptr;
     }
 
+    uint64_t GetBufferSize() const {
+        return m_bufferSize;
+    }
+
+    rhi::HeapType GetAccessType() const {
+        return m_accessType;
+    }
+
+    bool IsUnorderedAccessEnabled() const {
+        return m_unorderedAccess;
+    }
+
     uint64_t GetBackingGeneration() const {
         return m_backingGeneration;
     }
