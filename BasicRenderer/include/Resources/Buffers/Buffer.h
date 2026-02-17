@@ -12,7 +12,7 @@
 
 using Microsoft::WRL::ComPtr;
 
-class Buffer : public DynamicBufferBase, public IHasMemoryMetadata {
+class Buffer : public BufferBase, public IHasMemoryMetadata {
 public:
 
     static std::shared_ptr<Buffer> CreateShared(rhi::HeapType accessType, uint64_t bufferSize, bool unorderedAccess = false) {
@@ -27,7 +27,7 @@ public:
 
 private:
     Buffer(rhi::HeapType accessType, uint64_t bufferSize, bool unorderedAccess = false)
-        : DynamicBufferBase(accessType, bufferSize, unorderedAccess) {
+        : BufferBase(accessType, bufferSize, unorderedAccess) {
     }
 
     void OnSetName() override {

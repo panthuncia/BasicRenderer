@@ -13,7 +13,7 @@
 
 using Microsoft::WRL::ComPtr;
 
-class SortedUnsignedIntBuffer : public DynamicBufferBase, public IHasMemoryMetadata {
+class SortedUnsignedIntBuffer : public BufferBase, public IHasMemoryMetadata {
 public:
     static std::shared_ptr<SortedUnsignedIntBuffer> CreateShared(uint64_t capacity = 64, std::string name = "", bool UAV = false) {
         return std::shared_ptr<SortedUnsignedIntBuffer>(new SortedUnsignedIntBuffer(capacity, name, UAV));

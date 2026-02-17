@@ -17,7 +17,7 @@
 using Microsoft::WRL::ComPtr;
 
 template<class T>
-class DynamicStructuredBuffer : public DynamicBufferBase, public IHasMemoryMetadata {
+class DynamicStructuredBuffer : public BufferBase, public IHasMemoryMetadata {
 public:
 
     static std::shared_ptr<DynamicStructuredBuffer<T>> CreateShared(UINT capacity = 64, std::string name = "", bool UAV = false) {

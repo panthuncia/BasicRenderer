@@ -11,15 +11,15 @@
 
 class BufferView;
 
-class DynamicBufferBase : public GloballyIndexedResource {
+class BufferBase : public GloballyIndexedResource {
 public:
     struct MaterializeOptions {
         std::optional<BufferAliasPlacement> aliasPlacement;
     };
 
-    DynamicBufferBase() {}
+    BufferBase() {}
 
-    DynamicBufferBase(
+    BufferBase(
         rhi::HeapType accessType,
         uint64_t bufferSize,
         bool unorderedAccess = false)
@@ -156,7 +156,7 @@ private:
     uint64_t m_backingGeneration = 0;
 };
 
-class ViewedDynamicBufferBase : public DynamicBufferBase {
+class ViewedDynamicBufferBase : public BufferBase {
 public:
     ViewedDynamicBufferBase() {}
 
