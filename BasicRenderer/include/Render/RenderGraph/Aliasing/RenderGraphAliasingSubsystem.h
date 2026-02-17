@@ -72,6 +72,12 @@ struct PersistentAliasPoolState {
 	bool usedThisFrame = false;
 };
 
+struct AliasPlacementRange {
+	uint64_t poolID = 0;
+	uint64_t startByte = 0;
+	uint64_t endByte = 0;
+};
+
 struct AliasSchedulingNode {
 	size_t passIndex = 0;
 	uint32_t originalOrder = 0;
@@ -90,7 +96,7 @@ public:
 
 	std::vector<uint64_t> GetSchedulingEquivalentIDs(
 		uint64_t resourceID,
-		const std::unordered_map<uint64_t, uint64_t>& aliasPlacementSignatureByID) const;
+		const std::unordered_map<uint64_t, AliasPlacementRange>& aliasPlacementRangesByID) const;
 
 	void ResetPerFrameState(RenderGraph& rg) const;
 	void ResetPersistentState(RenderGraph& rg) const;

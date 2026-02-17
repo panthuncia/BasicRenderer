@@ -73,7 +73,7 @@ std::vector<RenderGraph::Node> RenderGraph::BuildNodes(RenderGraph& rg, std::vec
 			bool write = AccessTypeIsWriteType(req.state.access);
 			bool isUav = IsUAVState(req.state);
 
-			for (uint64_t rid : rg.m_aliasingSubsystem.GetSchedulingEquivalentIDs(base, rg.aliasPlacementSignatureByID)) {
+			for (uint64_t rid : rg.m_aliasingSubsystem.GetSchedulingEquivalentIDs(base, rg.aliasPlacementRangesByID)) {
 				mark(rid, write ? AccessKind::Write : AccessKind::Read, isUav);
 			}
 		}
@@ -81,7 +81,7 @@ std::vector<RenderGraph::Node> RenderGraph::BuildNodes(RenderGraph& rg, std::vec
 		// internal transitions: treat as "write" for scheduling conservatism
 		for (auto& tr : *view.internalTransitions) {
 			uint64_t base = tr.first.resource.GetGlobalResourceID();
-			for (uint64_t rid : rg.m_aliasingSubsystem.GetSchedulingEquivalentIDs(base, rg.aliasPlacementSignatureByID)) {
+			for (uint64_t rid : rg.m_aliasingSubsystem.GetSchedulingEquivalentIDs(base, rg.aliasPlacementRangesByID)) {
 				mark(rid, AccessKind::Write, /*isUav=*/false);
 			}
 		}
@@ -1948,7 +1948,7 @@ std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 
 	auto processResource = [&](ResourceRegistry::RegistryHandle const& res) {
 		uint64_t id = res.GetGlobalResourceID();
-		auto ids = m_aliasingSubsystem.GetSchedulingEquivalentIDs(id, aliasPlacementSignatureByID);
+		auto ids = m_aliasingSubsystem.GetSchedulingEquivalentIDs(id, aliasPlacementRangesByID);
 		for (auto rid : ids) {
 			auto itT = transitionHistory.find(rid);
 			if (itT != transitionHistory.end())
@@ -1964,7 +1964,7 @@ std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 		processResource(req.resourceHandleAndRange.resource);
 
 	for (auto& transitionID : resourcesTransitionedThisPass) { // We only need to wait on the latest usage for resources that will be transitioned in this batch
-		for (auto rid : m_aliasingSubsystem.GetSchedulingEquivalentIDs(transitionID, aliasPlacementSignatureByID)) {
+		for (auto rid : m_aliasingSubsystem.GetSchedulingEquivalentIDs(transitionID, aliasPlacementRangesByID)) {
 			if (usageHistory.contains(rid)) {
 				latestUsage = std::max(latestUsage, (int)usageHistory.at(rid));
 			}
@@ -1985,7 +1985,7 @@ std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 
 	auto processResource = [&](ResourceRegistry::RegistryHandle const& res) {
 		uint64_t id = res.GetGlobalResourceID();
-		for (auto rid : m_aliasingSubsystem.GetSchedulingEquivalentIDs(id, aliasPlacementSignatureByID)) {
+		for (auto rid : m_aliasingSubsystem.GetSchedulingEquivalentIDs(id, aliasPlacementRangesByID)) {
 			auto itT = transitionHistory.find(rid);
 			if (itT != transitionHistory.end())
 				latestTransition = std::max(latestTransition, (int)itT->second);
@@ -2000,7 +2000,7 @@ std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 		processResource(req.resourceHandleAndRange.resource);
 
 	for (auto& transitionID : resourcesTransitionedThisPass) { // We only need to wait on the latest usage for resources that will be transitioned in this batch
-		for (auto rid : m_aliasingSubsystem.GetSchedulingEquivalentIDs(transitionID, aliasPlacementSignatureByID)) {
+		for (auto rid : m_aliasingSubsystem.GetSchedulingEquivalentIDs(transitionID, aliasPlacementRangesByID)) {
 			if (usageHistory.contains(rid)) {
 				latestUsage = std::max(latestUsage, (int)usageHistory.at(rid));
 			}

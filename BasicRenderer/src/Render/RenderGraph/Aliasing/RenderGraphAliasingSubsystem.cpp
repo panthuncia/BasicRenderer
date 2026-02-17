@@ -1,17 +1,17 @@
 #include "Render/RenderGraph/Aliasing/RenderGraphAliasingSubsystem.h"
 
+#include <algorithm>
+
 #include "Render/RenderGraph/RenderGraph.h"
 #include "Managers/Singletons/DeletionManager.h"
 
-namespace rg::alias {
-
-AutoAliasDebugSnapshot RenderGraphAliasingSubsystem::BuildDebugSnapshot(
+rg::alias::AutoAliasDebugSnapshot rg::alias::RenderGraphAliasingSubsystem::BuildDebugSnapshot(
 	AutoAliasMode mode,
-	const AutoAliasPlannerStats& plannerStats,
-	const std::vector<AutoAliasReasonCount>& exclusionReasons,
-	const std::vector<AutoAliasPoolDebug>& poolDebug) const
+	const rg::alias::AutoAliasPlannerStats& plannerStats,
+	const std::vector<rg::alias::AutoAliasReasonCount>& exclusionReasons,
+	const std::vector<rg::alias::AutoAliasPoolDebug>& poolDebug) const
 {
-	AutoAliasDebugSnapshot out{};
+	rg::alias::AutoAliasDebugSnapshot out{};
 	out.mode = mode;
 	out.candidatesSeen = plannerStats.candidatesSeen;
 	out.manuallyAssigned = plannerStats.manuallyAssigned;
@@ -27,21 +27,27 @@ AutoAliasDebugSnapshot RenderGraphAliasingSubsystem::BuildDebugSnapshot(
 	return out;
 }
 
-std::vector<uint64_t> RenderGraphAliasingSubsystem::GetSchedulingEquivalentIDs(
+std::vector<uint64_t> rg::alias::RenderGraphAliasingSubsystem::GetSchedulingEquivalentIDs(
 	uint64_t resourceID,
-	const std::unordered_map<uint64_t, uint64_t>& aliasPlacementSignatureByID) const
+	const std::unordered_map<uint64_t, rg::alias::AliasPlacementRange>& aliasPlacementRangesByID) const
 {
-	auto it = aliasPlacementSignatureByID.find(resourceID);
-	if (it == aliasPlacementSignatureByID.end()) {
+	auto it = aliasPlacementRangesByID.find(resourceID);
+	if (it == aliasPlacementRangesByID.end()) {
 		return { resourceID };
 	}
 
-	const uint64_t signature = it->second;
+	const rg::alias::AliasPlacementRange& placement = it->second;
 	std::vector<uint64_t> out;
 	out.reserve(8);
 
-	for (const auto& [id, sig] : aliasPlacementSignatureByID) {
-		if (sig == signature) {
+	for (const auto& [id, otherPlacement] : aliasPlacementRangesByID) {
+		if (otherPlacement.poolID != placement.poolID) {
+			continue;
+		}
+
+		const uint64_t overlapStart = std::max(placement.startByte, otherPlacement.startByte);
+		const uint64_t overlapEnd = std::min(placement.endByte, otherPlacement.endByte);
+		if (overlapStart < overlapEnd) {
 			out.push_back(id);
 		}
 	}
@@ -53,29 +59,28 @@ std::vector<uint64_t> RenderGraphAliasingSubsystem::GetSchedulingEquivalentIDs(
 	return out;
 }
 
-void RenderGraphAliasingSubsystem::ResetPerFrameState(RenderGraph& rg) const {
-	rg.aliasMaterializeOptionsByID.clear();
-	rg.aliasActivationPending.clear();
-	rg.autoAliasPoolByID.clear();
-	rg.autoAliasExclusionReasonByID.clear();
-	rg.autoAliasExclusionReasonSummary.clear();
-	rg.autoAliasPlannerStats = {};
-	rg.autoAliasModeLastFrame = AutoAliasMode::Off;
+void rg::alias::RenderGraphAliasingSubsystem::ResetPerFrameState(RenderGraph& renderGraph) const {
+	renderGraph.aliasMaterializeOptionsByID.clear();
+	renderGraph.aliasActivationPending.clear();
+	renderGraph.autoAliasPoolByID.clear();
+	renderGraph.autoAliasExclusionReasonByID.clear();
+	renderGraph.autoAliasExclusionReasonSummary.clear();
+	renderGraph.autoAliasPlannerStats = {};
+	renderGraph.autoAliasModeLastFrame = AutoAliasMode::Off;
 }
 
-void RenderGraphAliasingSubsystem::ResetPersistentState(RenderGraph& rg) const {
-	ResetPerFrameState(rg);
-	rg.aliasPlacementSignatureByID.clear();
-	rg.aliasPlacementPoolByID.clear();
+void rg::alias::RenderGraphAliasingSubsystem::ResetPersistentState(RenderGraph& renderGraph) const {
+	ResetPerFrameState(renderGraph);
+	renderGraph.aliasPlacementSignatureByID.clear();
+	renderGraph.aliasPlacementRangesByID.clear();
+	renderGraph.aliasPlacementPoolByID.clear();
 
-	for (auto& [poolID, poolState] : rg.persistentAliasPools) {
+	for (auto& [poolID, poolState] : renderGraph.persistentAliasPools) {
 		(void)poolID;
 		if (poolState.allocation) {
 			DeletionManager::GetInstance().MarkForDelete(std::move(poolState.allocation));
 		}
 	}
-	rg.persistentAliasPools.clear();
-	rg.aliasPoolPlanFrameIndex = 0;
+	renderGraph.persistentAliasPools.clear();
+	renderGraph.aliasPoolPlanFrameIndex = 0;
 }
-
-} // namespace rg::alias

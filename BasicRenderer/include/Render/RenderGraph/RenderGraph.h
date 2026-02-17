@@ -341,6 +341,7 @@ private:
 	using ResourceMaterializeOptions = std::variant<PixelBuffer::MaterializeOptions, BufferBase::MaterializeOptions>;
 	std::unordered_map<uint64_t, ResourceMaterializeOptions> aliasMaterializeOptionsByID;
 	std::unordered_map<uint64_t, uint64_t> aliasPlacementSignatureByID;
+	std::unordered_map<uint64_t, rg::alias::AliasPlacementRange> aliasPlacementRangesByID;
 	std::unordered_map<uint64_t, uint64_t> aliasPlacementPoolByID;
 	std::unordered_set<uint64_t> aliasActivationPending;
 
