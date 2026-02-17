@@ -29,6 +29,7 @@
 #include "RenderPasses/PPLLResolvePass.h"
 #include "RenderPasses/PostProcessing/ScreenSpaceReflectionsPass.h"
 #include "RenderPasses/PostProcessing/SpecularIBLPass.h"
+#include "Resources/Buffers/Buffer.h"
 
 void CreateGBufferResources(RenderGraph* graph) {
     // GBuffer resources
@@ -147,14 +148,28 @@ inline void RegisterVisUtilResources(RenderGraph* graph)
     auto& rm = ResourceManager::GetInstance();
 
     // Total pixel count buffer (uint[1])
-    auto totalPixelCountBuffer = CreateIndexedStructuredBuffer(1, sizeof(uint32_t), true, false);
+    auto totalPixelCountBuffer = Buffer::CreateUnmaterializedStructuredBuffer(
+        1,
+        sizeof(uint32_t),
+        true,
+        false,
+        false,
+        rhi::HeapType::DeviceLocal);
+    totalPixelCountBuffer->SetAllowAlias(true);
     totalPixelCountBuffer->SetName("VisUtil::TotalPixelCountBuffer");
     totalPixelCountBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
     graph->RegisterResource("Builtin::VisUtil::TotalPixelCountBuffer", totalPixelCountBuffer);
 
 	// PixelRef: uint pixelXY; (packed)
     struct PixelRefPOD { uint32_t pixelXY; };
-    auto pixelListBuffer = CreateIndexedStructuredBuffer(maxPixels, sizeof(PixelRefPOD), true, false);
+    auto pixelListBuffer = Buffer::CreateUnmaterializedStructuredBuffer(
+        maxPixels,
+        sizeof(PixelRefPOD),
+        true,
+        false,
+        false,
+        rhi::HeapType::DeviceLocal);
+	pixelListBuffer->SetAllowAlias(true);
     pixelListBuffer->SetName("VisUtil::PixelListBuffer");
     pixelListBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
     graph->RegisterResource("Builtin::VisUtil::PixelListBuffer", pixelListBuffer);
@@ -308,7 +323,13 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
 
 void BuildLightClusteringPipeline(RenderGraph* graph) {
     // light pages counter
-    auto lightPagesCounter = CreateIndexedStructuredBuffer(1, sizeof(unsigned int), true, false);
+    auto lightPagesCounter = Buffer::CreateUnmaterializedStructuredBuffer(
+        1,
+        sizeof(unsigned int),
+        true,
+        false,
+        false,
+        rhi::HeapType::DeviceLocal);
     lightPagesCounter->SetName("Light Pages Counter");
     graph->RegisterResource(Builtin::Light::PagesCounter, lightPagesCounter);
 
@@ -402,7 +423,40 @@ void BuildPPLLPipeline(RenderGraph* graph) {
     PPLLBuffer->SetAllowAlias(true);
     PPLLBuffer->SetName("PPLLBuffer");
 	PPLLBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "OIT resources" }));
-    auto PPLLCounter = CreateIndexedTypedBuffer(1, rhi::Format::R32_UInt, true);
+    auto PPLLCounter = Buffer::CreateSharedUnmaterialized(rhi::HeapType::DeviceLocal, sizeof(uint32_t), true);
+    {
+        BufferBase::DescriptorRequirements descReq{};
+        descReq.createCBV = false;
+        descReq.createSRV = true;
+        descReq.createUAV = true;
+        descReq.createNonShaderVisibleUAV = true;
+        descReq.uavCounterOffset = 0;
+
+        descReq.srvDesc = rhi::SrvDesc{
+            .dimension = rhi::SrvDim::Buffer,
+            .formatOverride = rhi::Format::R32_UInt,
+            .buffer = {
+                .kind = rhi::BufferViewKind::Typed,
+                .firstElement = 0,
+                .numElements = 1,
+                .structureByteStride = 0,
+            },
+        };
+
+        descReq.uavDesc = rhi::UavDesc{
+            .dimension = rhi::UavDim::Buffer,
+            .formatOverride = rhi::Format::R32_UInt,
+            .buffer = {
+                .kind = rhi::BufferViewKind::Typed,
+                .firstElement = 0,
+                .numElements = 1,
+                .structureByteStride = 0,
+                .counterOffsetInBytes = 0,
+            },
+        };
+
+        PPLLCounter->SetDescriptorRequirements(descReq);
+    }
     PPLLCounter->SetName("PPLLCounter");
 	PPLLCounter->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "OIT resources" }));
 

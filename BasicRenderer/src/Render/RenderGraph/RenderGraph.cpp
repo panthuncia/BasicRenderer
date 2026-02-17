@@ -2709,10 +2709,29 @@ ResourceRegistry::RegistryHandle RenderGraph::RequestResourceHandle(ResourceIden
 }
 
 ResourceRegistry::RegistryHandle RenderGraph::RequestResourceHandle(Resource* const& pResource, bool allowFailure) {
+	if (!pResource) {
+		if (allowFailure) {
+			return {};
+		}
+		throw std::runtime_error("Null resource pointer passed to RequestResourceHandle(Resource*)");
+	}
+
+	auto ensureTrackedInGraph = [&]() {
+		if (resourcesByID.contains(pResource->GetGlobalResourceID())) {
+			return;
+		}
+
+		auto shared = pResource->weak_from_this().lock();
+		if (shared) {
+			AddResource(std::move(shared));
+		}
+	};
+
 	// If it's already in our registry, return it
 	auto cached = _registry.GetHandleFor(pResource);
 	if (cached.has_value()) {
 		if (_registry.IsValid(cached.value())) {
+			ensureTrackedInGraph();
 			return cached.value();
 		}
 
@@ -2724,6 +2743,7 @@ ResourceRegistry::RegistryHandle RenderGraph::RequestResourceHandle(Resource* co
 		// Fall through and remint a fresh handle for this live resource pointer.
 		// This can happen if a resource was replaced but an old reverse-map entry remained.
 		const auto reminted = _registry.RegisterAnonymousWeak(pResource->weak_from_this());
+		ensureTrackedInGraph();
 		return reminted;
 	}
 
@@ -2733,6 +2753,7 @@ ResourceRegistry::RegistryHandle RenderGraph::RequestResourceHandle(Resource* co
 
 	// Register anonymous resource
 	const auto handle = _registry.RegisterAnonymousWeak(pResource->weak_from_this());
+	ensureTrackedInGraph();
 
 	return handle;
 }

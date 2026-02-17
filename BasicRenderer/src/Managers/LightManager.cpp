@@ -43,7 +43,14 @@ LightManager::LightManager() {
 
 	static const size_t avgPagesPerCluster = 10;
 	m_lightPagePoolSize = numClusters * avgPagesPerCluster;
-	m_pLightPagesBuffer = CreateIndexedStructuredBuffer(m_lightPagePoolSize, sizeof(LightPage), true, false);
+	m_pLightPagesBuffer = Buffer::CreateUnmaterializedStructuredBuffer(
+		static_cast<uint32_t>(m_lightPagePoolSize),
+		sizeof(LightPage),
+		true,
+		false,
+		false,
+		rhi::HeapType::DeviceLocal);
+	m_pLightPagesBuffer->SetAllowAlias(true);
 	m_pLightPagesBuffer->SetName("lightPagesBuffer");
 
 	m_resources[Builtin::Light::ClusterBuffer] = m_pClusterBuffer;

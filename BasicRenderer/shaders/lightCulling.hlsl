@@ -20,12 +20,12 @@ bool testSphereAABB(matrix viewMatrix, float3 position, float radius, Cluster cl
 }
 
 unsigned int AllocatePage(RWStructuredBuffer<uint> LinkedListCounter) {
-    // Allocate a new page for the light.
     uint index;
     InterlockedAdd(LinkedListCounter[0], 1, index);
-    if (index > LIGHT_PAGES_POOL_SIZE)
-        index = LIGHT_PAGE_ADDRESS_NULL;
-    
+
+    if (index >= LIGHT_PAGES_POOL_SIZE)
+        return LIGHT_PAGE_ADDRESS_NULL;
+
     return index;
 }
 
@@ -47,6 +47,13 @@ void CSMain(uint3 groupID : SV_GroupID,
     StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::InfoBuffer)];
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     uint lightCount = perFrameBuffer.numLights;
+
+    uint totalClusters =
+        perFrameBuffer.lightClusterGridSizeX *
+        perFrameBuffer.lightClusterGridSizeY *
+        perFrameBuffer.lightClusterGridSizeZ;
+    if (index >= totalClusters)
+        return;
     
     RWStructuredBuffer<Cluster> clusters = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::ClusterBuffer)];
     Cluster cluster = clusters[index];
@@ -56,7 +63,7 @@ void CSMain(uint3 groupID : SV_GroupID,
 
     // Light pages, clusters index into linked list
     RWStructuredBuffer<LightPage> lightPages = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::PagesBuffer)];
-    RWStructuredBuffer<uint> LinkedListCounter = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::PagesCounter];
+    RWStructuredBuffer<uint> LinkedListCounter = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::PagesCounter)];
 
     // Process every point light.
     
@@ -71,7 +78,7 @@ void CSMain(uint3 groupID : SV_GroupID,
         return;
     }
     
-    lightPages[pageIndex].ptrNextPage = LIGHT_PAGE_ADDRESS_NULL; // Initialize the next page pointer to null.]
+    lightPages[pageIndex].ptrNextPage = LIGHT_PAGE_ADDRESS_NULL; // Initialize the next page pointer to null.
     
     uint numLightsInPage = 0;
     for (uint i = 0; i < lightCount; ++i) {
@@ -81,6 +88,9 @@ void CSMain(uint3 groupID : SV_GroupID,
             lightPages[pageIndex].numLightsInPage = LIGHTS_PER_PAGE; // Store the number of lights in the current page.
             uint oldPageIndex = pageIndex; // Store the current page index.
             pageIndex = AllocatePage(LinkedListCounter); // Allocate a new page.
+            if (pageIndex == LIGHT_PAGE_ADDRESS_NULL) {
+                break;
+            }
             lightPages[pageIndex].ptrNextPage = oldPageIndex; // Link the new page to the old page.
             cluster.ptrFirstPage = pageIndex; // Update the cluster with the new page index.
             numLightsInPage = 0;
@@ -107,7 +117,9 @@ void CSMain(uint3 groupID : SV_GroupID,
     }
     
     // Update last page count
-    lightPages[pageIndex].numLightsInPage = numLightsInPage;
+    if (pageIndex != LIGHT_PAGE_ADDRESS_NULL) {
+        lightPages[pageIndex].numLightsInPage = numLightsInPage;
+    }
     
     // Write back the updated cluster.
     clusters[index] = cluster;
