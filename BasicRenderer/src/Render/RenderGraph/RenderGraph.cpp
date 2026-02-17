@@ -2144,6 +2144,7 @@ void RenderGraph::Setup() {
 
 	m_getUseAsyncCompute = SettingsManager::GetInstance().getSettingGetter<bool>("useAsyncCompute");
 	m_getAutoAliasMode = SettingsManager::GetInstance().getSettingGetter<AutoAliasMode>("autoAliasMode");
+	m_getAutoAliasPackingStrategy = SettingsManager::GetInstance().getSettingGetter<AutoAliasPackingStrategy>("autoAliasPackingStrategy");
 	m_getAutoAliasLogExclusionReasons = SettingsManager::GetInstance().getSettingGetter<bool>("autoAliasLogExclusionReasons");
 	m_getAutoAliasPoolRetireIdleFrames = SettingsManager::GetInstance().getSettingGetter<uint32_t>("autoAliasPoolRetireIdleFrames");
 	m_getAutoAliasPoolGrowthHeadroom = SettingsManager::GetInstance().getSettingGetter<float>("autoAliasPoolGrowthHeadroom");

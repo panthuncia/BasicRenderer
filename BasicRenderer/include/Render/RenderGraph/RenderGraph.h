@@ -73,6 +73,11 @@ enum class AutoAliasMode : uint8_t {
 	Aggressive = 3
 };
 
+enum class AutoAliasPackingStrategy : uint8_t {
+	GreedySweepLine = 0,
+	BranchAndBound = 1,
+};
+
 class RenderGraph {
 public:
 
@@ -584,7 +589,9 @@ private:
 	std::vector<AutoAliasPoolDebug> autoAliasPoolDebug;
 	AutoAliasPlannerStats autoAliasPlannerStats;
 	AutoAliasMode autoAliasModeLastFrame = AutoAliasMode::Off;
+	AutoAliasPackingStrategy autoAliasPackingStrategyLastFrame = AutoAliasPackingStrategy::GreedySweepLine;
 	std::function<AutoAliasMode()> m_getAutoAliasMode;
+	std::function<AutoAliasPackingStrategy()> m_getAutoAliasPackingStrategy;
 	std::function<bool()> m_getAutoAliasLogExclusionReasons;
 	std::function<uint32_t()> m_getAutoAliasPoolRetireIdleFrames;
 	std::function<float()> m_getAutoAliasPoolGrowthHeadroom;

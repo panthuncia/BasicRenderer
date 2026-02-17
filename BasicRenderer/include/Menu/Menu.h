@@ -406,6 +406,10 @@ private:
     std::function<AutoAliasMode()> getAutoAliasMode;
     std::function<void(AutoAliasMode)> setAutoAliasMode;
 
+    AutoAliasPackingStrategy m_autoAliasPackingStrategy = AutoAliasPackingStrategy::GreedySweepLine;
+    std::function<AutoAliasPackingStrategy()> getAutoAliasPackingStrategy;
+    std::function<void(AutoAliasPackingStrategy)> setAutoAliasPackingStrategy;
+
     bool m_autoAliasLogExclusionReasons = false;
     std::function<bool()> getAutoAliasLogExclusionReasons;
     std::function<void(bool)> setAutoAliasLogExclusionReasons;
@@ -595,6 +599,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     setAutoAliasMode = settingsManager.getSettingSetter<AutoAliasMode>("autoAliasMode");
     m_autoAliasMode = getAutoAliasMode();
     observerSetting(m_autoAliasMode, "autoAliasMode");
+
+    getAutoAliasPackingStrategy = settingsManager.getSettingGetter<AutoAliasPackingStrategy>("autoAliasPackingStrategy");
+    setAutoAliasPackingStrategy = settingsManager.getSettingSetter<AutoAliasPackingStrategy>("autoAliasPackingStrategy");
+    m_autoAliasPackingStrategy = getAutoAliasPackingStrategy();
+    observerSetting(m_autoAliasPackingStrategy, "autoAliasPackingStrategy");
 
     getAutoAliasLogExclusionReasons = settingsManager.getSettingGetter<bool>("autoAliasLogExclusionReasons");
     setAutoAliasLogExclusionReasons = settingsManager.getSettingSetter<bool>("autoAliasLogExclusionReasons");
@@ -1611,6 +1620,18 @@ inline void Menu::DrawAutoAliasPlannerWindow() {
         setAutoAliasMode(m_autoAliasMode);
     }
 
+    constexpr const char* kPackingStrategyNames[] = {
+        "Greedy Sweep-Line",
+        "Branch & Bound",
+    };
+
+    int packingStrategyIndex = static_cast<int>(m_autoAliasPackingStrategy);
+    if (ImGui::Combo("Packing Strategy", &packingStrategyIndex, kPackingStrategyNames, IM_ARRAYSIZE(kPackingStrategyNames))) {
+        packingStrategyIndex = std::clamp(packingStrategyIndex, 0, static_cast<int>(IM_ARRAYSIZE(kPackingStrategyNames) - 1));
+        m_autoAliasPackingStrategy = static_cast<AutoAliasPackingStrategy>(packingStrategyIndex);
+        setAutoAliasPackingStrategy(m_autoAliasPackingStrategy);
+    }
+
     if (ImGui::Checkbox("Log Exclusions", &m_autoAliasLogExclusionReasons)) {
         setAutoAliasLogExclusionReasons(m_autoAliasLogExclusionReasons);
     }
@@ -1649,8 +1670,11 @@ inline void Menu::DrawAutoAliasPlannerWindow() {
 
         const auto snapshot = m_renderGraph->GetAutoAliasDebugSnapshot();
         constexpr const char* kModeNames[] = { "Off", "Conservative", "Balanced", "Aggressive" };
+        constexpr const char* kStrategyNames[] = { "Greedy Sweep-Line", "Near-Optimal (Branch & Bound)" };
         const int modeIdx = std::clamp(static_cast<int>(snapshot.mode), 0, static_cast<int>(IM_ARRAYSIZE(kModeNames) - 1));
+        const int strategyIdx = std::clamp(static_cast<int>(snapshot.packingStrategy), 0, static_cast<int>(IM_ARRAYSIZE(kStrategyNames) - 1));
         ImGui::Text("Active mode: %s", kModeNames[modeIdx]);
+        ImGui::Text("Active strategy: %s", kStrategyNames[strategyIdx]);
 
         ImGui::Text("Candidates: %llu | Manual: %llu | Auto: %llu | Excluded: %llu",
             static_cast<unsigned long long>(snapshot.candidatesSeen),

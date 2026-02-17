@@ -9,6 +9,7 @@
 #include "Resources/TrackedAllocation.h"
 
 enum class AutoAliasMode : uint8_t;
+enum class AutoAliasPackingStrategy : uint8_t;
 class RenderGraph;
 
 namespace rg::alias {
@@ -50,6 +51,7 @@ struct AutoAliasPlannerStats {
 
 struct AutoAliasDebugSnapshot {
 	AutoAliasMode mode{};
+	AutoAliasPackingStrategy packingStrategy{};
 	size_t candidatesSeen = 0;
 	size_t manuallyAssigned = 0;
 	size_t autoAssigned = 0;
@@ -90,6 +92,7 @@ class RenderGraphAliasingSubsystem {
 public:
 	AutoAliasDebugSnapshot BuildDebugSnapshot(
 		AutoAliasMode mode,
+		AutoAliasPackingStrategy packingStrategy,
 		const AutoAliasPlannerStats& plannerStats,
 		const std::vector<AutoAliasReasonCount>& exclusionReasons,
 		const std::vector<AutoAliasPoolDebug>& poolDebug) const;

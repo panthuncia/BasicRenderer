@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <boost/functional/hash.hpp>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <sstream>
 #include <tuple>
@@ -19,6 +20,7 @@
 RenderGraph::AutoAliasDebugSnapshot RenderGraph::GetAutoAliasDebugSnapshot() const {
 	return m_aliasingSubsystem.BuildDebugSnapshot(
 		autoAliasModeLastFrame,
+		autoAliasPackingStrategyLastFrame,
 		autoAliasPlannerStats,
 		autoAliasExclusionReasonSummary,
 		autoAliasPoolDebug);
@@ -417,6 +419,8 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 	auto& m_getAutoAliasPoolRetireIdleFrames = rg.m_getAutoAliasPoolRetireIdleFrames;
 	auto& aliasPoolGrowthHeadroom = rg.aliasPoolGrowthHeadroom;
 	auto& m_getAutoAliasPoolGrowthHeadroom = rg.m_getAutoAliasPoolGrowthHeadroom;
+	auto& autoAliasPackingStrategyLastFrame = rg.autoAliasPackingStrategyLastFrame;
+	auto& m_getAutoAliasPackingStrategy = rg.m_getAutoAliasPackingStrategy;
 	auto& persistentAliasPools = rg.persistentAliasPools;
 	auto& m_framePasses = rg.m_framePasses;
 	auto& _registry = rg._registry;
@@ -440,6 +444,11 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 	aliasPoolGrowthHeadroom = m_getAutoAliasPoolGrowthHeadroom
 		? std::max(1.0f, m_getAutoAliasPoolGrowthHeadroom())
 		: std::max(1.0f, aliasPoolGrowthHeadroom);
+	const AutoAliasPackingStrategy previousPackingStrategy = autoAliasPackingStrategyLastFrame;
+	const AutoAliasPackingStrategy packingStrategy = m_getAutoAliasPackingStrategy
+		? m_getAutoAliasPackingStrategy()
+		: AutoAliasPackingStrategy::GreedySweepLine;
+	const bool packingStrategyChanged = previousPackingStrategy != packingStrategy;
 
 	for (auto& [poolID, poolState] : persistentAliasPools) {
 		(void)poolID;
@@ -706,12 +715,6 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 			size_t lastUse = 0;
 		};
 
-		enum class AliasPackingStrategy : uint8_t {
-			GreedySweepLine,
-		};
-
-		constexpr AliasPackingStrategy packingStrategy = AliasPackingStrategy::GreedySweepLine;
-
 		auto mergeFreeRanges = [](std::vector<FreeRange>& freeRanges) {
 			if (freeRanges.empty()) {
 				return;
@@ -839,15 +842,224 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 			return std::make_tuple(std::move(resourcePlacements), heapEnd, poolAlignment);
 		};
 
+		auto planWithBranchAndBound = [&]() {
+			struct PlannedRange {
+				size_t candidateIndex = 0;
+				uint64_t startByte = 0;
+				uint64_t endByte = 0;
+			};
+
+			std::unordered_map<uint64_t, Placement> bestPlacements;
+			uint64_t bestHeapSize = std::numeric_limits<uint64_t>::max();
+			uint64_t poolAlignment = 1;
+			for (const auto& c : poolCandidates) {
+				poolAlignment = std::max(poolAlignment, c.alignment);
+			}
+
+			std::vector<size_t> candidateOrder;
+			candidateOrder.reserve(poolCandidates.size());
+			for (size_t i = 0; i < poolCandidates.size(); ++i) {
+				candidateOrder.push_back(i);
+			}
+
+			std::sort(candidateOrder.begin(), candidateOrder.end(), [&](size_t aIdx, size_t bIdx) {
+				const auto& a = poolCandidates[aIdx];
+				const auto& b = poolCandidates[bIdx];
+				const uint64_t aSpan = static_cast<uint64_t>(a.lastUse - a.firstUse + 1ull);
+				const uint64_t bSpan = static_cast<uint64_t>(b.lastUse - b.firstUse + 1ull);
+				const uint64_t aWeight = a.sizeBytes * aSpan;
+				const uint64_t bWeight = b.sizeBytes * bSpan;
+				if (aWeight != bWeight) {
+					return aWeight > bWeight;
+				}
+				if (a.sizeBytes != b.sizeBytes) {
+					return a.sizeBytes > b.sizeBytes;
+				}
+				if (a.firstUse != b.firstUse) {
+					return a.firstUse < b.firstUse;
+				}
+				return a.resourceID < b.resourceID;
+			});
+
+			auto lifetimesOverlap = [&](const Candidate& lhs, const Candidate& rhs) {
+				return !(lhs.lastUse < rhs.firstUse || rhs.lastUse < lhs.firstUse);
+			};
+
+			auto intervalOverlaps = [](uint64_t aStart, uint64_t aEnd, uint64_t bStart, uint64_t bEnd) {
+				const uint64_t overlapStart = std::max(aStart, bStart);
+				const uint64_t overlapEnd = std::min(aEnd, bEnd);
+				return overlapStart < overlapEnd;
+			};
+
+			auto buildPlacementMap = [&](const std::vector<PlannedRange>& placedRanges) {
+				std::unordered_map<uint64_t, Placement> out;
+				out.reserve(placedRanges.size());
+				for (const auto& placed : placedRanges) {
+					const auto& c = poolCandidates[placed.candidateIndex];
+					out[c.resourceID] = Placement{
+						.offset = placed.startByte,
+						.sizeBytes = c.sizeBytes,
+						.alignment = c.alignment,
+						.firstUse = c.firstUse,
+						.lastUse = c.lastUse,
+					};
+				}
+				return out;
+			};
+
+			uint64_t visitedNodeCount = 0;
+			bool aborted = false;
+			constexpr uint64_t kMaxVisitedNodes = 250000;
+			constexpr size_t kCandidateStartsPerNode = 12;
+
+			std::vector<PlannedRange> placedRanges;
+			placedRanges.reserve(poolCandidates.size());
+			std::vector<uint8_t> placedMask(poolCandidates.size(), 0);
+
+			std::function<void(uint64_t)> dfs = [&](uint64_t currentHeapSize) {
+				if (aborted) {
+					return;
+				}
+
+				if (++visitedNodeCount > kMaxVisitedNodes) {
+					aborted = true;
+					return;
+				}
+
+				if (currentHeapSize >= bestHeapSize) {
+					return;
+				}
+
+				if (placedRanges.size() == poolCandidates.size()) {
+					bestHeapSize = currentHeapSize;
+					bestPlacements = buildPlacementMap(placedRanges);
+					return;
+				}
+
+				size_t nextCandidateIndex = std::numeric_limits<size_t>::max();
+				for (size_t orderedIndex : candidateOrder) {
+					if (!placedMask[orderedIndex]) {
+						nextCandidateIndex = orderedIndex;
+						break;
+					}
+				}
+				if (nextCandidateIndex == std::numeric_limits<size_t>::max()) {
+					return;
+				}
+
+				const auto& nextCandidate = poolCandidates[nextCandidateIndex];
+				std::vector<uint64_t> candidateStarts;
+				candidateStarts.reserve(1 + placedRanges.size());
+				candidateStarts.push_back(0ull);
+
+				for (const auto& placed : placedRanges) {
+					const auto& placedCandidate = poolCandidates[placed.candidateIndex];
+					if (lifetimesOverlap(nextCandidate, placedCandidate)) {
+						candidateStarts.push_back(placed.endByte);
+					}
+				}
+
+				std::vector<std::pair<uint64_t, uint64_t>> feasibleStarts;
+				feasibleStarts.reserve(candidateStarts.size());
+				std::unordered_set<uint64_t> dedupStarts;
+				dedupStarts.reserve(candidateStarts.size() * 2 + 1);
+
+				for (uint64_t rawStart : candidateStarts) {
+					const uint64_t alignedStart = AlignUpU64(rawStart, nextCandidate.alignment);
+					if (!dedupStarts.insert(alignedStart).second) {
+						continue;
+					}
+
+					const uint64_t alignedEnd = alignedStart + nextCandidate.sizeBytes;
+					bool conflicts = false;
+					for (const auto& placed : placedRanges) {
+						const auto& placedCandidate = poolCandidates[placed.candidateIndex];
+						if (!lifetimesOverlap(nextCandidate, placedCandidate)) {
+							continue;
+						}
+						if (intervalOverlaps(alignedStart, alignedEnd, placed.startByte, placed.endByte)) {
+							conflicts = true;
+							break;
+						}
+					}
+
+					if (!conflicts) {
+						const uint64_t resultingHeap = std::max(currentHeapSize, alignedEnd);
+						feasibleStarts.emplace_back(alignedStart, resultingHeap);
+					}
+				}
+
+				if (feasibleStarts.empty()) {
+					const uint64_t appendStart = AlignUpU64(currentHeapSize, nextCandidate.alignment);
+					const uint64_t appendEnd = appendStart + nextCandidate.sizeBytes;
+					feasibleStarts.emplace_back(appendStart, appendEnd);
+				}
+
+				std::sort(feasibleStarts.begin(), feasibleStarts.end(), [](const auto& a, const auto& b) {
+					if (a.second != b.second) {
+						return a.second < b.second;
+					}
+					return a.first < b.first;
+				});
+
+				if (feasibleStarts.size() > kCandidateStartsPerNode) {
+					feasibleStarts.resize(kCandidateStartsPerNode);
+				}
+
+				placedMask[nextCandidateIndex] = 1;
+				for (const auto& [startByte, resultingHeap] : feasibleStarts) {
+					if (resultingHeap >= bestHeapSize) {
+						continue;
+					}
+					placedRanges.push_back(PlannedRange{
+						.candidateIndex = nextCandidateIndex,
+						.startByte = startByte,
+						.endByte = startByte + nextCandidate.sizeBytes,
+					});
+					dfs(resultingHeap);
+					placedRanges.pop_back();
+					if (aborted) {
+						break;
+					}
+				}
+				placedMask[nextCandidateIndex] = 0;
+			};
+
+			dfs(0ull);
+
+			if (bestPlacements.empty()) {
+				auto [fallbackPlacements, fallbackHeapSize, fallbackAlignment] = planWithGreedySweepLine();
+				bestPlacements = std::move(fallbackPlacements);
+				bestHeapSize = fallbackHeapSize;
+				poolAlignment = std::max(poolAlignment, fallbackAlignment);
+			}
+
+			return std::make_tuple(std::move(bestPlacements), bestHeapSize, poolAlignment, aborted);
+		};
+
 		std::unordered_map<uint64_t, Placement> placements;
 		uint64_t heapSize = 0;
 		uint64_t poolAlignment = 1;
 		switch (packingStrategy) {
-		case AliasPackingStrategy::GreedySweepLine: {
+		case AutoAliasPackingStrategy::GreedySweepLine: {
 			auto [plannedPlacements, plannedHeapSize, plannedPoolAlignment] = planWithGreedySweepLine();
 			placements = std::move(plannedPlacements);
 			heapSize = plannedHeapSize;
 			poolAlignment = plannedPoolAlignment;
+			break;
+		}
+		case AutoAliasPackingStrategy::BranchAndBound: {
+			auto [plannedPlacements, plannedHeapSize, plannedPoolAlignment, searchAborted] = planWithBranchAndBound();
+			placements = std::move(plannedPlacements);
+			heapSize = plannedHeapSize;
+			poolAlignment = plannedPoolAlignment;
+			if (searchAborted) {
+				spdlog::info(
+					"RG alias search truncated: pool={} candidates={} visitedLimitReached=1 resultingRequiredBytes={}",
+					poolID,
+					poolCandidates.size(),
+					heapSize);
+			}
 			break;
 		}
 		default:
@@ -865,8 +1077,12 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 		const bool needsInitialAllocation = !static_cast<bool>(poolState.allocation);
 		const bool needsLargerHeap = heapSize > poolState.capacityBytes;
 		const bool needsHigherAlignment = poolAlignment > poolState.alignment;
+		const bool shouldShrinkForStrategyChange =
+			packingStrategyChanged &&
+			!needsInitialAllocation &&
+			poolState.capacityBytes > heapSize;
 
-		if (needsInitialAllocation || needsLargerHeap || needsHigherAlignment) {
+		if (needsInitialAllocation || needsLargerHeap || needsHigherAlignment || shouldShrinkForStrategyChange) {
 			uint64_t newCapacity = heapSize;
 			if (!needsInitialAllocation && needsLargerHeap && poolState.capacityBytes > 0) {
 				const double grownTarget = static_cast<double>(poolState.capacityBytes) * static_cast<double>(aliasPoolGrowthHeadroom);
@@ -908,7 +1124,9 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 
 			spdlog::info(
 				"RG alias pool {}: pool={} capacity={} required={} alignment={} placements={} generation={}",
-				needsInitialAllocation ? "allocated" : "grew",
+				needsInitialAllocation
+					? "allocated"
+					: (shouldShrinkForStrategyChange ? "resized" : "grew"),
 				poolID,
 				newCapacity,
 				heapSize,
@@ -1127,6 +1345,8 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 			savedMB,
 			savedPct);
 	}
+
+	autoAliasPackingStrategyLastFrame = packingStrategy;
 }
 
 void rg::alias::RenderGraphAliasingSubsystem::ApplyAliasQueueSynchronization(RenderGraph& rg) const {

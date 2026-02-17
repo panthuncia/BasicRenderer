@@ -7,12 +7,14 @@
 
 rg::alias::AutoAliasDebugSnapshot rg::alias::RenderGraphAliasingSubsystem::BuildDebugSnapshot(
 	AutoAliasMode mode,
+	AutoAliasPackingStrategy packingStrategy,
 	const rg::alias::AutoAliasPlannerStats& plannerStats,
 	const std::vector<rg::alias::AutoAliasReasonCount>& exclusionReasons,
 	const std::vector<rg::alias::AutoAliasPoolDebug>& poolDebug) const
 {
 	rg::alias::AutoAliasDebugSnapshot out{};
 	out.mode = mode;
+	out.packingStrategy = packingStrategy;
 	out.candidatesSeen = plannerStats.candidatesSeen;
 	out.manuallyAssigned = plannerStats.manuallyAssigned;
 	out.autoAssigned = plannerStats.autoAssigned;
