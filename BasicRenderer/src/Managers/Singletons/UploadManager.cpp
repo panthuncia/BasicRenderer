@@ -7,7 +7,6 @@
 #include "Resources/Resource.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "Resources/ExternalBackingResource.h"
 #include "Resources/MemoryStatisticsComponents.h"
 
 void UploadManager::Initialize() {
@@ -519,19 +518,6 @@ void UploadManager::QueueResourceCopy(const std::shared_ptr<Resource>& destinati
 	queuedResourceCopies.push_back(copy);
 }
 
-void UploadManager::QueueCopyAndDiscard(
-	const std::shared_ptr<Resource>& destination,
-	std::unique_ptr<GpuBufferBacking> sourceToDiscard,
-	size_t size)
-{
-	DiscardBufferCopy copy;
-	copy.sourceOwned = ExternalBackingResource::CreateShared(std::move(sourceToDiscard));
-	copy.destination = destination;
-	copy.size = size;
-
-	queuedDiscardCopies.push_back(std::move(copy));
-}
-
 void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, rg::imm::ImmediateCommandList& commandList) {
 	//rhi::debug::Begin(commandList.Get(), rhi::colors::Amber, "Upload Manager - resource copies");
 	for (auto& copy : queuedResourceCopies) {
@@ -544,19 +530,7 @@ void UploadManager::ExecuteResourceCopies(uint8_t frameIndex, rg::imm::Immediate
 			copy.size);
 	}
 
-	for (auto& copy : queuedDiscardCopies) {
-		// Perform the copy
-		commandList.CopyBufferRegion(
-			copy.destination,
-			0,
-			copy.sourceOwned,
-			0,
-			copy.size);
-
-	}
-
 	queuedResourceCopies.clear();
-	queuedDiscardCopies.clear(); // Discards owned resources
 }
 
 void UploadManager::Cleanup() {

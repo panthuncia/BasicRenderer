@@ -12,47 +12,28 @@
 
 using Microsoft::WRL::ComPtr;
 
-class Buffer : public GloballyIndexedResource, public IHasMemoryMetadata {
+class Buffer : public DynamicBufferBase, public IHasMemoryMetadata {
 public:
 
     static std::shared_ptr<Buffer> CreateShared(rhi::HeapType accessType, uint64_t bufferSize, bool unorderedAccess = false) {
         return std::shared_ptr<Buffer>(new Buffer(accessType, bufferSize, unorderedAccess));
     }
 
-    rhi::Resource GetAPIResource() override { return m_dataBuffer->GetAPIResource(); }
     size_t GetSize() const { return m_bufferSize; }
 
-    bool TryGetBufferByteSize(uint64_t& outByteSize) const override {
-        outByteSize = m_bufferSize;
-        return true;
-    }
-
     void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
-        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
-    }
-    SymbolicTracker* GetStateTracker() override {
-        return m_dataBuffer->GetStateTracker();
-    }
-protected:
-
-    rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
-        return m_dataBuffer->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
+        ApplyMetadataToBacking(bundle);
     }
 
 private:
     Buffer(rhi::HeapType accessType, uint64_t bufferSize, bool unorderedAccess = false)
-        : m_accessType(accessType), m_bufferSize(bufferSize), m_UAV(unorderedAccess) {
-        m_dataBuffer = GpuBufferBacking::CreateUnique(accessType, m_bufferSize, GetGlobalResourceID(), m_UAV);
+        : DynamicBufferBase(accessType, bufferSize, unorderedAccess) {
     }
 
     void OnSetName() override {
+        if (!m_dataBuffer) {
+            return;
+        }
     	m_dataBuffer->SetName(name.c_str());
     }
-
-	rhi::HeapType m_accessType;
-	std::unique_ptr<GpuBufferBacking> m_dataBuffer;
-
-    uint64_t m_bufferSize;
-
-    bool m_UAV = false;
 };

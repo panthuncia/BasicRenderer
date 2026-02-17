@@ -5,6 +5,7 @@
 #include "Resources/Buffers/BufferView.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/UploadManager.h"
+#include "Resources/ExternalBackingResource.h"
 
 std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementSize) {
     size_t requiredSize = size;
@@ -164,11 +165,12 @@ void DynamicBuffer::AssignDescriptorSlots()
 void DynamicBuffer::CreateBuffer(size_t capacity) {
     auto device = DeviceManager::GetInstance().GetDevice();
     m_capacity = capacity;
-    m_dataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, capacity, GetGlobalResourceID(), m_UAV);
+    auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, capacity, GetGlobalResourceID(), m_UAV);
+    SetBacking(std::move(newDataBuffer), capacity);
     m_memoryBlocks.push_back({ 0, capacity, true });
 
     for (const auto& bundle : m_metadataBundles) {
-        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
+        ApplyMetadataToBacking(bundle);
     }
 
 	AssignDescriptorSlots();
@@ -177,13 +179,16 @@ void DynamicBuffer::CreateBuffer(size_t capacity) {
 void DynamicBuffer::GrowBuffer(size_t newSize) {
     auto device = DeviceManager::GetInstance().GetDevice();
     auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, newSize, GetGlobalResourceID(), m_UAV);
-	UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), m_capacity);
-	m_dataBuffer = std::move(newDataBuffer);
+    if (m_dataBuffer) {
+        auto oldBackingResource = ExternalBackingResource::CreateShared(std::move(m_dataBuffer));
+        UploadManager::GetInstance().QueueResourceCopy(shared_from_this(), oldBackingResource, m_capacity);
+    }
+	SetBacking(std::move(newDataBuffer), newSize);
 
     m_capacity = newSize;
 
     for (const auto& bundle : m_metadataBundles) {
-        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
+        ApplyMetadataToBacking(bundle);
     }
 
     AssignDescriptorSlots();

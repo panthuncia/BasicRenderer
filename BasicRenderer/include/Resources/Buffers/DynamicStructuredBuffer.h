@@ -9,6 +9,7 @@
 #include "Managers/Singletons/ResourceManager.h"
 #include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Resources/Resource.h"
+#include "Resources/ExternalBackingResource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Interfaces/IHasMemoryMetadata.h"
@@ -78,21 +79,9 @@ public:
         return static_cast<uint32_t>(m_data.size());
     }
 
-	rhi::Resource GetAPIResource() override { return m_dataBuffer->GetAPIResource(); }
-
     void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
         m_metadataBundles.emplace_back(bundle);
-        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
-    }
-
-    SymbolicTracker* GetStateTracker() override {
-        return m_dataBuffer->GetStateTracker();
-    }
-
-protected:
-
-    rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
-        return m_dataBuffer->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
+        ApplyMetadataToBacking(bundle);
     }
 
 private:
@@ -103,6 +92,9 @@ private:
     }
 
     void OnSetName() override {
+        if (!m_dataBuffer) {
+            return;
+        }
         if (name != "") {
             m_dataBuffer->SetName((m_name + ": " + name).c_str());
         }
@@ -172,12 +164,13 @@ private:
         if (m_dataBuffer != nullptr) {
 			// If shrinking, copy only up to new capacity. If growing, copy up to previous capacity.
             auto sizeToCopy = capacity < previousCapacity ? capacity : previousCapacity;
-            UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), sizeToCopy);
+            auto oldBackingResource = ExternalBackingResource::CreateShared(std::move(m_dataBuffer));
+            UploadManager::GetInstance().QueueResourceCopy(shared_from_this(), oldBackingResource, sizeToCopy * sizeof(T));
         }
-		m_dataBuffer = std::move(newDataBuffer);
+		SetBacking(std::move(newDataBuffer), sizeof(T) * capacity);
 
         for (const auto& bundle : m_metadataBundles) {
-            m_dataBuffer->ApplyMetadataComponentBundle(bundle);
+            ApplyMetadataToBacking(bundle);
         }
 
         AssignDescriptorSlots(static_cast<uint32_t>(capacity));

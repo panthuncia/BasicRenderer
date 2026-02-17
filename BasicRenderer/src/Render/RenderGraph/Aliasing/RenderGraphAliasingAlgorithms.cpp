@@ -357,6 +357,10 @@ void rg::alias::RenderGraphAliasingSubsystem::AutoAssignAliasingPools(RenderGrap
 	}
 }
 
+bool AccessTypeIsWriteOrCommon(rhi::ResourceAccessType t) {
+	return AccessTypeIsWriteType(t) || t == rhi::ResourceAccessType::Common;
+}
+
 void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph& rg, const std::vector<AliasSchedulingNode>& nodes) const {
 	auto& aliasMaterializeOptionsByID = rg.aliasMaterializeOptionsByID;
 	auto& aliasActivationPending = rg.aliasActivationPending;
@@ -508,7 +512,7 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 		if (any.type == RenderGraph::PassType::Render) {
 			auto const& p = std::get<RenderGraph::RenderPassAndResources>(any.pass);
 			for (auto const& req : p.resources.frameResourceRequirements) {
-				collectHandle(req.resourceHandleAndRange.resource, AccessTypeIsWriteType(req.state.access));
+				collectHandle(req.resourceHandleAndRange.resource, AccessTypeIsWriteOrCommon(req.state.access));
 			}
 			for (auto const& t : p.resources.internalTransitions) {
 				collectHandle(t.first.resource, true);
@@ -517,7 +521,7 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 		else if (any.type == RenderGraph::PassType::Compute) {
 			auto const& p = std::get<RenderGraph::ComputePassAndResources>(any.pass);
 			for (auto const& req : p.resources.frameResourceRequirements) {
-				collectHandle(req.resourceHandleAndRange.resource, AccessTypeIsWriteType(req.state.access));
+				collectHandle(req.resourceHandleAndRange.resource, AccessTypeIsWriteOrCommon(req.state.access));
 			}
 			for (auto const& t : p.resources.internalTransitions) {
 				collectHandle(t.first.resource, true);

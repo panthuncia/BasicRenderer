@@ -8,7 +8,6 @@
 #include <stacktrace>
 
 #include "rhi_helpers.h"
-#include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Render/ResourceRegistry.h"
 #include "RenderPasses/Base/RenderPass.h"
 
@@ -32,12 +31,6 @@ struct ResourceCopy {
 	std::shared_ptr<Resource> source;
 	std::shared_ptr<Resource> destination;
 	size_t size;
-};
-
-struct DiscardBufferCopy {
-	std::shared_ptr<ExternalBackingResource> sourceOwned; // keeps old backing alive until executed
-	std::shared_ptr<Resource>         destination; // new resource
-	size_t                            size = 0;
 };
 
 struct ReleaseRequest {
@@ -159,9 +152,6 @@ public:
 #endif	
 	void ProcessUploads(uint8_t frameIndex, rg::imm::ImmediateCommandList& commandList);
 	void QueueResourceCopy(const std::shared_ptr<Resource>& destination, const std::shared_ptr<Resource>& source, size_t size);
-	void QueueCopyAndDiscard(const std::shared_ptr<Resource>& destination,
-		std::unique_ptr<GpuBufferBacking> sourceToDiscard,
-		size_t size);
 	void ExecuteResourceCopies(uint8_t frameIndex, rg::imm::ImmediateCommandList& commandList);
 	void ProcessDeferredReleases(uint8_t frameIndex);
 	void SetUploadResolveContext(UploadResolveContext ctx) { m_ctx = ctx; }
@@ -235,7 +225,6 @@ private:
 	std::vector<TextureUpdate> m_textureUpdates;
 
 	std::vector<ResourceCopy> queuedResourceCopies;
-	std::vector<DiscardBufferCopy> queuedDiscardCopies;
 
 	UploadResolveContext m_ctx{};
 	std::shared_ptr<UploadPass> m_uploadPass;
