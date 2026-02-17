@@ -20,6 +20,7 @@
 #include "Managers/CommandRecordingManager.h"
 #include "Interfaces/IPassBuilder.h"
 #include "Resources/PixelBuffer.h"
+#include "Resources/Buffers/Buffer.h"
 #include "Resources/TrackedAllocation.h"
 #include "Render/RenderGraph/Aliasing/RenderGraphAliasingSubsystem.h"
 
@@ -337,7 +338,8 @@ private:
 	std::unordered_map<uint64_t, uint64_t> resourceBackingGenerationByID;
 	std::unordered_map<uint64_t, uint32_t> resourceIdleFrameCounts;
 	std::unordered_map<uint64_t, uint64_t> compiledResourceGenerationByID;
-	std::unordered_map<uint64_t, PixelBuffer::MaterializeOptions> aliasMaterializeOptionsByID;
+	using ResourceMaterializeOptions = std::variant<PixelBuffer::MaterializeOptions, BufferBase::MaterializeOptions>;
+	std::unordered_map<uint64_t, ResourceMaterializeOptions> aliasMaterializeOptionsByID;
 	std::unordered_map<uint64_t, uint64_t> aliasPlacementSignatureByID;
 	std::unordered_map<uint64_t, uint64_t> aliasPlacementPoolByID;
 	std::unordered_set<uint64_t> aliasActivationPending;

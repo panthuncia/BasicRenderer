@@ -10,6 +10,7 @@
 #include "rhi_helpers.h"
 #include "Render/ResourceRegistry.h"
 #include "RenderPasses/Base/RenderPass.h"
+#include "Resources/Buffers/Buffer.h"
 
 class Buffer;
 class Resource;

@@ -709,6 +709,9 @@ SymbolicTracker& RenderGraph::GetOrCreateCompileTracker(Resource* resource, uint
 		if (auto* texture = dynamic_cast<PixelBuffer*>(resource)) {
 			hasLiveBacking = texture->IsMaterialized();
 		}
+		else if (auto* buffer = dynamic_cast<Buffer*>(resource)) {
+			hasLiveBacking = buffer->IsMaterialized();
+		}
 
 		if (hasLiveBacking) {
 			seed = *resource->GetStateTracker();
@@ -734,19 +737,36 @@ void RenderGraph::MaterializeReferencedResources(
 		}
 
 		auto texture = dynamic_cast<PixelBuffer*>(resource);
-		if (!texture || texture->IsMaterialized()) {
+		if (texture) {
+			if (texture->IsMaterialized()) {
+				return;
+			}
+
+			if (texture->GetDescription().allowAlias) {
+				// Alias placement is frame-dependent and produced later in CompileFrame.
+				// Defer materialization until RenderGraph::MaterializeUnmaterializedResources,
+				// after BuildAliasPlanAfterDag has produced placement options.
+				return;
+			}
+
+			texture->Materialize();
+			resourceBackingGenerationByID[handle.GetGlobalResourceID()] = texture->GetBackingGeneration();
 			return;
 		}
 
-		if (texture->GetDescription().allowAlias) {
-			// Alias placement is frame-dependent and produced later in CompileFrame.
-			// Defer materialization until RenderGraph::MaterializeUnmaterializedResources,
-			// after BuildAliasPlanAfterDag has produced placement options.
-			return;
-		}
+		auto buffer = dynamic_cast<Buffer*>(resource);
+		if (buffer) {
+			if (buffer->IsMaterialized()) {
+				return;
+			}
 
-		texture->Materialize();
-		resourceBackingGenerationByID[handle.GetGlobalResourceID()] = texture->GetBackingGeneration();
+			if (buffer->IsAliasingAllowed()) {
+				return;
+			}
+
+			buffer->Materialize();
+			resourceBackingGenerationByID[handle.GetGlobalResourceID()] = buffer->GetBackingGeneration();
+		}
 	};
 
 	for (auto const& req : resourceRequirements) {
@@ -823,11 +843,15 @@ void RenderGraph::SnapshotCompiledResourceGenerations(const std::unordered_set<u
 		}
 
 		auto texture = std::dynamic_pointer_cast<PixelBuffer>(it->second);
-		if (!texture) {
+		if (texture) {
+			compiledResourceGenerationByID[id] = texture->GetBackingGeneration();
 			continue;
 		}
 
-		compiledResourceGenerationByID[id] = texture->GetBackingGeneration();
+		auto buffer = std::dynamic_pointer_cast<Buffer>(it->second);
+		if (buffer) {
+			compiledResourceGenerationByID[id] = buffer->GetBackingGeneration();
+		}
 	}
 }
 
@@ -839,13 +863,20 @@ void RenderGraph::ValidateCompiledResourceGenerations() const {
 		}
 
 		auto texture = std::dynamic_pointer_cast<PixelBuffer>(it->second);
-		if (!texture) {
+		if (texture) {
+			const uint64_t currentGeneration = texture->GetBackingGeneration();
+			if (currentGeneration != compiledGeneration) {
+				throw std::runtime_error("Resource backing generation changed after compile and before execute. Resource ID: " + std::to_string(id));
+			}
 			continue;
 		}
 
-		const uint64_t currentGeneration = texture->GetBackingGeneration();
-		if (currentGeneration != compiledGeneration) {
-			throw std::runtime_error("Resource backing generation changed after compile and before execute. Resource ID: " + std::to_string(id));
+		auto buffer = std::dynamic_pointer_cast<Buffer>(it->second);
+		if (buffer) {
+			const uint64_t currentGeneration = buffer->GetBackingGeneration();
+			if (currentGeneration != compiledGeneration) {
+				throw std::runtime_error("Resource backing generation changed after compile and before execute. Resource ID: " + std::to_string(id));
+			}
 		}
 	}
 }
@@ -1989,53 +2020,105 @@ void RenderGraph::MaterializeUnmaterializedResources(const std::unordered_set<ui
 		}
 
 		auto texture = std::dynamic_pointer_cast<PixelBuffer>(resource);
-		if (!texture) {
+		if (texture) {
+			if (!texture->IsMaterialized()) {
+				auto itAlias = aliasMaterializeOptionsByID.find(id);
+				if (itAlias != aliasMaterializeOptionsByID.end()) {
+					if (std::holds_alternative<PixelBuffer::MaterializeOptions>(itAlias->second)) {
+						auto& options = std::get<PixelBuffer::MaterializeOptions>(itAlias->second);
+						if (options.aliasPlacement.has_value()) {
+							const auto& ap = options.aliasPlacement.value();
+							spdlog::info(
+								"RG alias materialize: id={} name='{}' pool={} offset={}",
+								id,
+								resource->GetName(),
+								ap.poolID.has_value() ? ap.poolID.value() : 0ull,
+								ap.offset);
+						}
+						texture->Materialize(&options);
+					}
+				}
+				else {
+					if (texture->GetDescription().allowAlias) {
+						const bool hasManualAliasPool = texture->GetDescription().aliasingPoolID.has_value();
+						const bool hasAutoAliasPool = autoAliasPoolByID.find(id) != autoAliasPoolByID.end();
+						const bool aliasPlacementRequiredThisFrame = hasManualAliasPool || hasAutoAliasPool;
+
+						if (onlyResourceIDs && aliasPlacementRequiredThisFrame) {
+							throw std::runtime_error(
+								"Aliasing placement missing for used aliased resource during frame materialization. Resource ID: " + std::to_string(id));
+						}
+
+						if (onlyResourceIDs && !aliasPlacementRequiredThisFrame) {
+							spdlog::debug(
+								"RG alias fallback materialize: id={} name='{}' allowAlias=1 but no pool assignment this frame; materializing standalone",
+								id,
+								resource->GetName());
+						}
+
+						// Setup-time eager materialization happens before alias planning.
+						// Defer aliased resources until compile-time placement is available.
+						if (!onlyResourceIDs) {
+							continue;
+						}
+					}
+					texture->Materialize();
+				}
+			}
+
+			resourceBackingGenerationByID[id] = texture->GetBackingGeneration();
 			continue;
 		}
 
-		if (!texture->IsMaterialized()) {
+		auto buffer = std::dynamic_pointer_cast<Buffer>(resource);
+		if (!buffer) {
+			continue;
+		}
+
+		if (!buffer->IsMaterialized()) {
 			auto itAlias = aliasMaterializeOptionsByID.find(id);
 			if (itAlias != aliasMaterializeOptionsByID.end()) {
-				if (itAlias->second.aliasPlacement.has_value()) {
-					const auto& ap = itAlias->second.aliasPlacement.value();
-					spdlog::info(
-						"RG alias materialize: id={} name='{}' pool={} offset={}",
-						id,
-						resource->GetName(),
-						ap.poolID.has_value() ? ap.poolID.value() : 0ull,
-						ap.offset);
+				if (std::holds_alternative<BufferBase::MaterializeOptions>(itAlias->second)) {
+					auto& options = std::get<BufferBase::MaterializeOptions>(itAlias->second);
+					if (options.aliasPlacement.has_value()) {
+						const auto& ap = options.aliasPlacement.value();
+						spdlog::info(
+							"RG alias materialize (buffer): id={} name='{}' pool={} offset={}",
+							id,
+							resource->GetName(),
+							ap.poolID.has_value() ? ap.poolID.value() : 0ull,
+							ap.offset);
+					}
+					buffer->Materialize(&options);
 				}
-				texture->Materialize(&itAlias->second);
 			}
 			else {
-				if (texture->GetDescription().allowAlias) {
-					const bool hasManualAliasPool = texture->GetDescription().aliasingPoolID.has_value();
-					const bool hasAutoAliasPool = autoAliasPoolByID.find(id) != autoAliasPoolByID.end();
+				if (buffer->IsAliasingAllowed()) {
+					const bool hasManualAliasPool = buffer->GetAliasingPoolHint().has_value();
+					const bool hasAutoAliasPool = false;
 					const bool aliasPlacementRequiredThisFrame = hasManualAliasPool || hasAutoAliasPool;
 
 					if (onlyResourceIDs && aliasPlacementRequiredThisFrame) {
 						throw std::runtime_error(
-							"Aliasing placement missing for used aliased resource during frame materialization. Resource ID: " + std::to_string(id));
+							"Aliasing placement missing for used aliased buffer during frame materialization. Resource ID: " + std::to_string(id));
 					}
 
 					if (onlyResourceIDs && !aliasPlacementRequiredThisFrame) {
 						spdlog::debug(
-							"RG alias fallback materialize: id={} name='{}' allowAlias=1 but no pool assignment this frame; materializing standalone",
+							"RG alias fallback materialize (buffer): id={} name='{}' allowAlias=1 but no pool assignment this frame; materializing standalone",
 							id,
 							resource->GetName());
 					}
 
-					// Setup-time eager materialization happens before alias planning.
-					// Defer aliased resources until compile-time placement is available.
 					if (!onlyResourceIDs) {
 						continue;
 					}
 				}
-				texture->Materialize();
+				buffer->Materialize();
 			}
 		}
 
-		resourceBackingGenerationByID[id] = texture->GetBackingGeneration();
+		resourceBackingGenerationByID[id] = buffer->GetBackingGeneration();
 	}
 }
 
@@ -2135,6 +2218,9 @@ void RenderGraph::AddResource(std::shared_ptr<Resource> resource, bool transitio
 
 	if (auto texture = std::dynamic_pointer_cast<PixelBuffer>(resource)) {
 		texture->EnsureVirtualDescriptorSlotsAllocated();
+	}
+	if (auto buffer = std::dynamic_pointer_cast<Buffer>(resource)) {
+		buffer->EnsureVirtualDescriptorSlotsAllocated();
 	}
 	/*if (transition) {
 		initialResourceStates[resource->GetGlobalResourceID()] = initialState;

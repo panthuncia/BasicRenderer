@@ -16,7 +16,11 @@ class Buffer : public BufferBase, public IHasMemoryMetadata {
 public:
 
     static std::shared_ptr<Buffer> CreateShared(rhi::HeapType accessType, uint64_t bufferSize, bool unorderedAccess = false) {
-        return std::shared_ptr<Buffer>(new Buffer(accessType, bufferSize, unorderedAccess));
+        return std::shared_ptr<Buffer>(new Buffer(accessType, bufferSize, unorderedAccess, true));
+    }
+
+    static std::shared_ptr<Buffer> CreateSharedUnmaterialized(rhi::HeapType accessType, uint64_t bufferSize, bool unorderedAccess = false) {
+        return std::shared_ptr<Buffer>(new Buffer(accessType, bufferSize, unorderedAccess, false));
     }
 
     size_t GetSize() const { return m_bufferSize; }
@@ -26,8 +30,8 @@ public:
     }
 
 private:
-    Buffer(rhi::HeapType accessType, uint64_t bufferSize, bool unorderedAccess = false)
-        : BufferBase(accessType, bufferSize, unorderedAccess) {
+    Buffer(rhi::HeapType accessType, uint64_t bufferSize, bool unorderedAccess, bool materialize)
+        : BufferBase(accessType, bufferSize, unorderedAccess, materialize) {
     }
 
     void OnSetName() override {
@@ -35,5 +39,9 @@ private:
             return;
         }
     	m_dataBuffer->SetName(name.c_str());
+    }
+
+    void OnBackingMaterialized() override {
+        OnSetName();
     }
 };

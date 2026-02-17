@@ -6,6 +6,7 @@
 
 
 #include "Render/RenderContext.h"
+#include "Managers/Singletons/ResourceManager.h"
 #include "Resources/GloballyIndexedResource.h"
 #include "Resources/GPUBacking/GpuBufferBacking.h"
 
@@ -17,17 +18,31 @@ public:
         std::optional<BufferAliasPlacement> aliasPlacement;
     };
 
+    struct DescriptorRequirements {
+        bool createCBV = false;
+        bool createSRV = false;
+        bool createUAV = false;
+        bool createNonShaderVisibleUAV = false;
+
+        rhi::CbvDesc cbvDesc{};
+        rhi::SrvDesc srvDesc{};
+        rhi::UavDesc uavDesc{};
+
+        uint64_t uavCounterOffset = 0;
+    };
+
     BufferBase() {}
 
     BufferBase(
         rhi::HeapType accessType,
         uint64_t bufferSize,
-        bool unorderedAccess = false)
+        bool unorderedAccess = false,
+        bool materialize = true)
         : m_accessType(accessType)
         , m_bufferSize(bufferSize)
         , m_unorderedAccess(unorderedAccess)
     {
-        if (bufferSize > 0) {
+        if (materialize && bufferSize > 0) {
             Materialize();
         }
     }
@@ -116,6 +131,7 @@ public:
                 m_unorderedAccess);
         }
 
+        RefreshDescriptorContents();
         ++m_backingGeneration;
         OnBackingMaterialized();
     }
@@ -128,10 +144,90 @@ public:
         ++m_backingGeneration;
     }
 
+    void SetDescriptorRequirements(const DescriptorRequirements& requirements) {
+        m_descriptorRequirements = requirements;
+
+        EnsureVirtualDescriptorSlotsAllocated();
+        if (m_dataBuffer) {
+            RefreshDescriptorContents();
+        }
+    }
+
+    bool HasDescriptorRequirements() const {
+        return m_descriptorRequirements.has_value();
+    }
+
+    void EnsureVirtualDescriptorSlotsAllocated() {
+        if (!m_descriptorRequirements.has_value() || HasAnyDescriptorSlots()) {
+            return;
+        }
+
+        ResourceManager::ViewRequirements req{};
+        ResourceManager::ViewRequirements::BufferViews views{};
+
+        views.createCBV = m_descriptorRequirements->createCBV;
+        views.createSRV = m_descriptorRequirements->createSRV;
+        views.createUAV = m_descriptorRequirements->createUAV;
+        views.createNonShaderVisibleUAV = m_descriptorRequirements->createNonShaderVisibleUAV;
+        views.cbvDesc = m_descriptorRequirements->cbvDesc;
+        views.srvDesc = m_descriptorRequirements->srvDesc;
+        views.uavDesc = m_descriptorRequirements->uavDesc;
+        views.uavCounterOffset = m_descriptorRequirements->uavCounterOffset;
+
+        req.views = views;
+        ResourceManager::GetInstance().ReserveDescriptorSlots(*this, req);
+    }
+
+    void RefreshDescriptorContents() {
+        if (!m_descriptorRequirements.has_value() || !m_dataBuffer) {
+            return;
+        }
+
+        EnsureVirtualDescriptorSlotsAllocated();
+
+        ResourceManager::ViewRequirements req{};
+        ResourceManager::ViewRequirements::BufferViews views{};
+
+        views.createCBV = m_descriptorRequirements->createCBV;
+        views.createSRV = m_descriptorRequirements->createSRV;
+        views.createUAV = m_descriptorRequirements->createUAV;
+        views.createNonShaderVisibleUAV = m_descriptorRequirements->createNonShaderVisibleUAV;
+        views.cbvDesc = m_descriptorRequirements->cbvDesc;
+        views.srvDesc = m_descriptorRequirements->srvDesc;
+        views.uavDesc = m_descriptorRequirements->uavDesc;
+        views.uavCounterOffset = m_descriptorRequirements->uavCounterOffset;
+
+        req.views = views;
+        auto resource = m_dataBuffer->GetAPIResource();
+        ResourceManager::GetInstance().UpdateDescriptorContents(*this, resource, req);
+    }
+
+    void SetAliasingPool(uint64_t poolID) {
+        m_aliasingPoolID = poolID;
+        m_allowAlias = true;
+    }
+
+    void ClearAliasingPoolHint() {
+        m_aliasingPoolID.reset();
+    }
+
+    std::optional<uint64_t> GetAliasingPoolHint() const {
+        return m_aliasingPoolID;
+    }
+
+    void SetAllowAlias(bool allowAlias) {
+        m_allowAlias = allowAlias;
+    }
+
+    bool IsAliasingAllowed() const {
+        return m_allowAlias;
+    }
+
 protected:
     void SetBacking(std::unique_ptr<GpuBufferBacking> backing, uint64_t bufferSize) {
         m_dataBuffer = std::move(backing);
         m_bufferSize = bufferSize;
+        RefreshDescriptorContents();
         ++m_backingGeneration;
         if (m_dataBuffer) {
             OnBackingMaterialized();
@@ -151,6 +247,9 @@ protected:
     rhi::HeapType m_accessType = rhi::HeapType::DeviceLocal;
     uint64_t m_bufferSize = 0;
     bool m_unorderedAccess = false;
+    std::optional<DescriptorRequirements> m_descriptorRequirements;
+    bool m_allowAlias = false;
+    std::optional<uint64_t> m_aliasingPoolID;
 
 private:
     uint64_t m_backingGeneration = 0;

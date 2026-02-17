@@ -1165,7 +1165,7 @@ std::vector<std::vector<NonShaderVisibleIndexInfo>> CreateRenderTargetViews(
     int                mipLevels)
 {
     // Determine how many 2D slices we need:
-    //   - for a cubemap: 6 faces × arraySize cubes
+    //   - for a cubemap: 6 faces ï¿½ arraySize cubes
     //   - otherwise: arraySize slices (arraySize should be 1 if not an array)
     int sliceCount = isCubemap ? (6 * arraySize) : arraySize;
 
@@ -1613,16 +1613,15 @@ std::shared_ptr<Buffer> CreateIndexedStructuredBuffer(size_t numElements, unsign
 
     auto dataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, bufferSize, UAV);
 
-    ResourceManager::ViewRequirements req{};
-    ResourceManager::ViewRequirements::BufferViews b{};
+    BufferBase::DescriptorRequirements descReq{};
     const uint64_t effectiveCounterOffset = (UAV && UAVCounter) ? counterOffset : 0;
-    b.uavCounterOffset = effectiveCounterOffset;
+    descReq.uavCounterOffset = effectiveCounterOffset;
 
-	b.createSRV = true;
-	b.createUAV = UAV;
+	descReq.createSRV = true;
+	descReq.createUAV = UAV;
 
     // SRV (structured)
-    b.srvDesc = rhi::SrvDesc{
+    descReq.srvDesc = rhi::SrvDesc{
         .dimension = rhi::SrvDim::Buffer,
         .formatOverride = rhi::Format::Unknown,
         .buffer = {
@@ -1634,7 +1633,7 @@ std::shared_ptr<Buffer> CreateIndexedStructuredBuffer(size_t numElements, unsign
     };
 
     // UAV (structured), with optional counter offset
-    b.uavDesc = rhi::UavDesc{
+    descReq.uavDesc = rhi::UavDesc{
         .dimension = rhi::UavDim::Buffer,
         .formatOverride = rhi::Format::Unknown,
         .buffer = {
@@ -1646,10 +1645,8 @@ std::shared_ptr<Buffer> CreateIndexedStructuredBuffer(size_t numElements, unsign
         },
     };
 
-    req.views = b;
-
-    auto res = dataBuffer->GetAPIResource();
-    ResourceManager::GetInstance().AssignDescriptorSlots(*dataBuffer, res, req);
+    dataBuffer->SetDescriptorRequirements(descReq);
+    dataBuffer->RefreshDescriptorContents();
 
     return dataBuffer;
 }
@@ -1670,17 +1667,16 @@ std::shared_ptr<Buffer> CreateIndexedTypedBuffer(
 
     auto dataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, bufferSize, UAV);
 
-    ResourceManager::ViewRequirements req{};
-    ResourceManager::ViewRequirements::BufferViews b{};
+    BufferBase::DescriptorRequirements descReq{};
 
-    b.createCBV = false;
-    b.createSRV = true;
-    b.createUAV = UAV;
-    b.createNonShaderVisibleUAV = UAV;
-    b.uavCounterOffset = 0;                  // typed UAVs cannot have counters
+    descReq.createCBV = false;
+    descReq.createSRV = true;
+    descReq.createUAV = UAV;
+    descReq.createNonShaderVisibleUAV = UAV;
+    descReq.uavCounterOffset = 0;                  // typed UAVs cannot have counters
 
     // SRV (typed)
-    b.srvDesc = rhi::SrvDesc{
+    descReq.srvDesc = rhi::SrvDesc{
         .dimension = rhi::SrvDim::Buffer,
         .formatOverride = elementFormat, // required for typed SRV
         .buffer = {
@@ -1692,7 +1688,7 @@ std::shared_ptr<Buffer> CreateIndexedTypedBuffer(
     };
 
     // UAV (typed)
-    b.uavDesc = rhi::UavDesc{
+    descReq.uavDesc = rhi::UavDesc{
         .dimension = rhi::UavDim::Buffer,
         .formatOverride = elementFormat, // required for typed UAV
         .buffer = {
@@ -1704,10 +1700,8 @@ std::shared_ptr<Buffer> CreateIndexedTypedBuffer(
         },
     };
 
-    req.views = b;
-
-    auto res = dataBuffer->GetAPIResource();
-    ResourceManager::GetInstance().AssignDescriptorSlots(*dataBuffer, res, req);
+    dataBuffer->SetDescriptorRequirements(descReq);
+    dataBuffer->RefreshDescriptorContents();
 
     return dataBuffer;
 }
@@ -1721,20 +1715,17 @@ std::shared_ptr<Buffer> CreateIndexedConstantBuffer(size_t bufferSize, std::stri
     auto dataBuffer = Buffer::CreateShared(rhi::HeapType::DeviceLocal, paddedSize, false);
     dataBuffer->SetName(name);
 
-    ResourceManager::ViewRequirements req{};
-    ResourceManager::ViewRequirements::BufferViews b{};
+    BufferBase::DescriptorRequirements descReq{};
 
-    b.createCBV = true;
+    descReq.createCBV = true;
 
-    b.cbvDesc = {
+    descReq.cbvDesc = {
         .byteOffset = 0,
         .byteSize = paddedSize,
     };
 
-	req.views = b;
-
-    auto res = dataBuffer->GetAPIResource();
-    ResourceManager::GetInstance().AssignDescriptorSlots(*dataBuffer, res, req);
+    dataBuffer->SetDescriptorRequirements(descReq);
+    dataBuffer->RefreshDescriptorContents();
 
     return dataBuffer;
 }

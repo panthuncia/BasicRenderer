@@ -12,6 +12,7 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Resources/PixelBuffer.h"
+#include "Resources/Buffers/Buffer.h"
 #include "Resources/MemoryStatisticsComponents.h"
 
 RenderGraph::AutoAliasDebugSnapshot RenderGraph::GetAutoAliasDebugSnapshot() const {
@@ -180,6 +181,10 @@ void rg::alias::RenderGraphAliasingSubsystem::AutoAssignAliasingPools(RenderGrap
 		auto* resource = _registry.Resolve(handle);
 		auto* texture = dynamic_cast<PixelBuffer*>(resource);
 		if (!texture) {
+			auto* buffer = dynamic_cast<Buffer*>(resource);
+			if (buffer && buffer->IsAliasingAllowed()) {
+				autoAliasExclusionReasonByID.try_emplace(handle.GetGlobalResourceID(), "buffer aliasing not implemented yet");
+			}
 			return;
 		}
 
@@ -466,6 +471,13 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 			auto* resource = _registry.Resolve(handle);
 			auto* texture = dynamic_cast<PixelBuffer*>(resource);
 			if (!texture) {
+				auto* buffer = dynamic_cast<Buffer*>(resource);
+				if (buffer && buffer->IsAliasingAllowed()) {
+					spdlog::debug(
+						"RG alias candidate skipped (buffer path not enabled): id={} name='{}'",
+						handle.GetGlobalResourceID(),
+						resource ? resource->GetName() : std::string("<unknown>"));
+				}
 				return;
 			}
 			auto const& desc = texture->GetDescription();
@@ -739,7 +751,7 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 				.offset = slot.offset,
 				.poolID = poolID,
 			};
-			aliasMaterializeOptionsByID[c.resourceID] = options;
+			aliasMaterializeOptionsByID[c.resourceID] = RenderGraph::ResourceMaterializeOptions(options);
 			aliasPlacementPoolByID[c.resourceID] = poolID;
 
 			auto itResName = resourcesByID.find(c.resourceID);
