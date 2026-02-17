@@ -27,7 +27,21 @@ GpuTextureBacking::CreateUnique(const TextureDescription& desc,
 	const char* name)
 {
 	auto pb = std::make_unique<GpuTextureBacking>(CreateTag{});
-	pb->initialize(desc, owningResourceID, name);
+	pb->initialize(desc, owningResourceID, nullptr, name);
+#if BUILD_TYPE == BUILD_DEBUG
+	pb->m_creation = std::stacktrace::current();
+#endif
+	return std::move(pb);
+}
+
+std::unique_ptr<GpuTextureBacking>
+GpuTextureBacking::CreateUnique(const TextureDescription& desc,
+	uint64_t owningResourceID,
+	const TextureAliasPlacement& placement,
+	const char* name)
+{
+	auto pb = std::make_unique<GpuTextureBacking>(CreateTag{});
+	pb->initialize(desc, owningResourceID, &placement, name);
 #if BUILD_TYPE == BUILD_DEBUG
 	pb->m_creation = std::stacktrace::current();
 #endif
@@ -36,6 +50,14 @@ GpuTextureBacking::CreateUnique(const TextureDescription& desc,
 
 void GpuTextureBacking::initialize(const TextureDescription& desc,
 	uint64_t owningResourceID,
+	const char* name)
+{
+	initialize(desc, owningResourceID, nullptr, name);
+}
+
+void GpuTextureBacking::initialize(const TextureDescription& desc,
+	uint64_t owningResourceID,
+	const TextureAliasPlacement* placement,
 	const char* name)
 {
 	m_desc = desc;
@@ -121,26 +143,45 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 	allocationBundle
 		.Set<MemoryStatisticsComponents::MemSizeBytes>({ allocInfo.sizeInBytes })
 		.Set<MemoryStatisticsComponents::ResourceType>({ rhi::ResourceType::Texture2D });
+	if (desc.aliasingPoolID.has_value()) {
+		allocationBundle.Set<MemoryStatisticsComponents::AliasingPool>({ desc.aliasingPoolID });
+	}
 	//.Set<MemoryStatisticsComponents::ResourceID>({ owningResourceID });
 	trackDesc.attach = allocationBundle;
 
-	//rhi::ResourcePtr textureResource;
-	if (desc.allowAlias) {
-		//textureResource = device.CreatePlacedResource(placedResourceHeap, 0, textureDesc); // TODO: handle offset
-		throw std::runtime_error("Aliasing resources not implemented yet");
+	if (placement && placement->allocation) {
+		if (placement->poolID.has_value()) {
+			allocationBundle.Set<MemoryStatisticsComponents::AliasingPool>({ placement->poolID });
+		}
+		trackDesc.attach = allocationBundle;
+
+		const auto result = DeviceManager::GetInstance().CreateAliasingResourceTracked(
+			*placement->allocation,
+			placement->offset,
+			textureDesc,
+			0,
+			nullptr,
+			m_textureHandle,
+			trackDesc);
+		if (!rhi::IsOk(result)) {
+			throw std::runtime_error("Failed to create aliased texture resource backing");
+		}
 	}
 	else {
 
 		rhi::ma::AllocationDesc allocationDesc;
 		allocationDesc.heapType = rhi::HeapType::DeviceLocal;
 
-		DeviceManager::GetInstance().CreateResourceTracked(
+		const auto result = DeviceManager::GetInstance().CreateResourceTracked(
 			allocationDesc,
 			textureDesc,
 			0,
 			nullptr,
 			m_textureHandle,
 			trackDesc);
+		if (!rhi::IsOk(result)) {
+			throw std::runtime_error("Failed to create committed texture resource backing");
+		}
 
 		//auto result = device.CreateCommittedResource(textureDesc, textureResource);
 	}
@@ -152,28 +193,8 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 	m_mipLevels = desc.generateMipMaps ? CalculateMipLevels(static_cast<uint16_t>(m_width), static_cast<uint16_t>(m_height)) : 1;
 	m_arraySize = desc.isCubemap ? 6 * desc.arraySize : (desc.isArray ? desc.arraySize : 1);
 	m_format = desc.format;
-	if (desc.padInternalResolution) {
-		m_internalWidth = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(desc.imageDimensions[0].width)))));
-		m_internalHeight = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(desc.imageDimensions[0].height)))));
-	}
-	else {
-		m_internalHeight = desc.imageDimensions[0].height;
-		m_internalWidth = desc.imageDimensions[0].width;
-	}
 
 	size_t subCount = m_mipLevels * m_arraySize;
-
-	m_clearColor.type = rhi::ClearValueType::Color;
-	m_clearColor.format = desc.format;
-	m_clearColor.depthStencil.depth = desc.depthClearValue;
-	if (desc.hasDSV) {
-		m_clearColor.type = rhi::ClearValueType::DepthStencil; // TODO: Will we ever need both on one texture?
-	}
-	else {
-		for (int i = 0; i < 4; i++) {
-			m_clearColor.rgba[i] = desc.clearColor[i];
-		}
-	}
 
 	RegisterLiveAlloc();
 	UpdateLiveAllocName(name);

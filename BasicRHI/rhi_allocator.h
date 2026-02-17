@@ -509,7 +509,7 @@ namespace rhi::ma
         void* m_privateData;
 
         Allocation(AllocatorPimpl* allocator, UINT64 size, UINT64 alignment);
-        virtual ~Allocation() {};
+        virtual ~Allocation();
         void InitCommitted(CommittedAllocationList* list);
         void InitPlaced(AllocHandle allocHandle, NormalBlock* block);
         void InitHeap(CommittedAllocationList* list, HeapPtr heap);
@@ -662,7 +662,7 @@ namespace rhi::ma
             const Format* pCastableFormats,
             AllocationPtr& outAllocation) noexcept;
 
-        rhi::Result AllocateMemory(const AllocationDesc& a, const rhi::ResourceAllocationInfo& info, Allocation* outAlloc) noexcept;
+        rhi::Result AllocateMemory(const AllocationDesc& a, const rhi::ResourceAllocationInfo& info, AllocationPtr& outAlloc) noexcept;
 
         Result CreateAliasingResource(
             Allocation* pAllocation,

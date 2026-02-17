@@ -126,20 +126,49 @@ public:
 		m_primaryViewType = type;
 	}
 
-	virtual ~GloballyIndexedResource() {
-		// Release SRV, UAV, and CBV
-		if (m_pSRVHeap) {
-			for (unsigned int i = 0; i < m_SRVViews.size(); i++) {
-				if (m_SRVViews[i].heap == nullptr) {
-					continue;
-				}
-				for (auto& srvInfos : m_SRVViews[i].infos) {
-					for (auto& srvInfo : srvInfos) {
-						m_pSRVHeap->ReleaseDescriptor(srvInfo.slot.index);
-					}
-				}
+	bool HasAnyDescriptorSlots() const {
+		if (m_CBVInfo.slot.heap.valid()) {
+			return true;
+		}
+
+		for (const auto& view : m_SRVViews) {
+			if (!view.infos.empty()) {
+				return true;
 			}
 		}
+
+		if (!m_UAVShaderVisibleInfos.empty() || !m_UAVNonShaderVisibleInfos.empty()) {
+			return true;
+		}
+
+		if (!m_RTVInfos.empty() || !m_DSVInfos.empty()) {
+			return true;
+		}
+
+		return false;
+	}
+
+	virtual ~GloballyIndexedResource() {
+		ReleaseDescriptorSlots();
+	};
+protected:
+	virtual void OnSetName() override {}
+
+	void ReleaseDescriptorSlots() {
+		// Release SRV, UAV, and CBV
+		for (auto& view : m_SRVViews) {
+			if (view.heap == nullptr) {
+				continue;
+			}
+			for (auto& srvInfos : view.infos) {
+				for (auto& srvInfo : srvInfos) {
+					view.heap->ReleaseDescriptor(srvInfo.slot.index);
+				}
+			}
+			view.heap.reset();
+			view.infos.clear();
+		}
+
 		if (m_pUAVShaderVisibleHeap) {
 			for (auto& uavInfos : m_UAVShaderVisibleInfos) {
 				for (auto& uavInfo : uavInfos) {
@@ -175,9 +204,21 @@ public:
 				}
 			}
 		}
-	};
-protected:
-	virtual void OnSetName() override {}
+
+		m_pSRVHeap.reset();
+		m_UAVShaderVisibleInfos.clear();
+		m_UAVNonShaderVisibleInfos.clear();
+		m_pUAVShaderVisibleHeap.reset();
+		m_pUAVNonShaderVisibleHeap.reset();
+		m_CBVInfo = {};
+		m_pCBVHeap.reset();
+		m_RTVInfos.clear();
+		m_pRTVHeap.reset();
+		m_DSVInfos.clear();
+		m_pDSVHeap.reset();
+		m_counterOffset = 0;
+		m_primaryViewType = SRVViewType::Invalid;
+	}
 private:
 	struct SRVView {
 		std::shared_ptr<DescriptorHeap> heap = nullptr;

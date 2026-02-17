@@ -13,7 +13,7 @@
 
 using Microsoft::WRL::ComPtr;
 
-class SortedUnsignedIntBuffer : public DynamicBufferBase, public IHasMemoryMetadata {
+class SortedUnsignedIntBuffer : public BufferBase, public IHasMemoryMetadata {
 public:
     static std::shared_ptr<SortedUnsignedIntBuffer> CreateShared(uint64_t capacity = 64, std::string name = "", bool UAV = false) {
         return std::shared_ptr<SortedUnsignedIntBuffer>(new SortedUnsignedIntBuffer(capacity, name, UAV));
@@ -38,21 +38,9 @@ public:
         return static_cast<UINT>(m_data.size());
     }
 
-    rhi::Resource GetAPIResource() override {
-        return m_dataBuffer->GetAPIResource();
-    }
-
     void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
         m_metadataBundles.emplace_back(bundle);
-        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
-    }
-
-    SymbolicTracker* GetStateTracker() override {
-        return m_dataBuffer->GetStateTracker();
-    }
-protected:
-    rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
-        return m_dataBuffer->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
+        ApplyMetadataToBacking(bundle);
     }
 
 private:
@@ -63,6 +51,9 @@ private:
     }
 
     void OnSetName() override {
+        if (!m_dataBuffer) {
+            return;
+        }
         if (name != "") {
             m_dataBuffer->SetName((m_name + ": " + name).c_str());
         }

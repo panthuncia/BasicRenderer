@@ -17,7 +17,7 @@
 
 #include "Scene/Scene.h"
 #include "Managers/InputManager.h"
-#include "Render/RenderGraph.h"
+#include "Render/RenderGraph/RenderGraph.h"
 #include "Resources/ShadowMaps.h"
 #include "RenderPasses/DebugRenderPass.h"
 #include "NsightAftermathGpuCrashTracker.h"

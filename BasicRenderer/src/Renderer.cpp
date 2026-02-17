@@ -18,7 +18,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Render/RenderContext.h"
-#include "Render/RenderGraph.h"
+#include "Render/RenderGraph/RenderGraph.h"
 #include "Render/PassBuilders.h"
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "RenderPasses/Base/RenderPass.h"
@@ -303,6 +303,10 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<UpscaleQualityMode>("upscalingQualityMode", UpscalingManager::GetInstance().GetCurrentUpscalingQualityMode());
 	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
     settingsManager.registerSetting<bool>("useAsyncCompute", true);
+	settingsManager.registerSetting<AutoAliasMode>("autoAliasMode", AutoAliasMode::Balanced);
+    settingsManager.registerSetting<bool>("autoAliasLogExclusionReasons", false);
+	settingsManager.registerSetting<uint32_t>("autoAliasPoolRetireIdleFrames", 120u);
+	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
 	getCameraSpeed = settingsManager.getSettingGetter<float>("cameraSpeed");
@@ -567,7 +571,8 @@ void Renderer::CreateTextures() {
     dims.height = resolution.y;
     dims.width = resolution.x;
     hdrDesc.imageDimensions.push_back(dims);
-    auto hdrColorTarget = PixelBuffer::CreateShared(hdrDesc);
+    hdrDesc.allowAlias = true;
+    auto hdrColorTarget = PixelBuffer::CreateSharedUnmaterialized(hdrDesc);
     hdrColorTarget->SetName("Primary Camera HDR Color Target");
     hdrColorTarget->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Primary color buffers" }));
 	m_coreResourceProvider.m_HDRColorTarget = hdrColorTarget;
@@ -576,7 +581,8 @@ void Renderer::CreateTextures() {
     hdrDesc.imageDimensions[0].width = outputResolution.x;
     hdrDesc.imageDimensions[0].height = outputResolution.y;
     hdrDesc.generateMipMaps = true;
-	auto upscaledHDRColorTarget = PixelBuffer::CreateShared(hdrDesc);
+    hdrDesc.allowAlias = true;
+	auto upscaledHDRColorTarget = PixelBuffer::CreateSharedUnmaterialized(hdrDesc);
 	upscaledHDRColorTarget->SetName("Upscaled HDR Color Target");
 	upscaledHDRColorTarget->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Upscaled color buffers" }));
 	m_coreResourceProvider.m_upscaledHDRColorTarget = upscaledHDRColorTarget;
@@ -594,7 +600,8 @@ void Renderer::CreateTextures() {
     motionVectors.srvFormat = rhi::Format::R16G16_Float;
     ImageDimensions motionVectorsDims = { resolution.x, resolution.y, 0, 0 };
     motionVectors.imageDimensions.push_back(motionVectorsDims);
-    auto motionVectorsBuffer = PixelBuffer::CreateShared(motionVectors);
+	motionVectors.allowAlias = true;
+    auto motionVectorsBuffer = PixelBuffer::CreateSharedUnmaterialized(motionVectors);
     motionVectorsBuffer->SetName("Motion Vectors");
     motionVectorsBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GBuffer" }));
 	m_coreResourceProvider.m_gbufferMotionVectors = motionVectorsBuffer;
@@ -1111,7 +1118,8 @@ void Renderer::CreateRenderGraph() {
     visibilityDesc.hasUAV = true; // For clearing
     visibilityDesc.hasNonShaderVisibleUAV = true; // For clearing with ClearUnorderedAccessViewUint
     visibilityDesc.imageDimensions.emplace_back(resolution.x, resolution.y, 0, 0);
-    auto visibilityBuffer = PixelBuffer::CreateShared(visibilityDesc);
+	visibilityDesc.allowAlias = true;
+    auto visibilityBuffer = PixelBuffer::CreateSharedUnmaterialized(visibilityDesc);
     visibilityBuffer->SetName("Visibility Buffer");
     visibilityBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GBuffer" }));
     newGraph->RegisterResource(Builtin::PrimaryCamera::VisibilityTexture, visibilityBuffer);

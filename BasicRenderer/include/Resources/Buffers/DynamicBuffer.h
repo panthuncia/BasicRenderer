@@ -35,20 +35,9 @@ public:
 		return m_mappedData;
 	}
 
-	rhi::Resource GetAPIResource() override { return m_dataBuffer->GetAPIResource(); }
-
     void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
         m_metadataBundles.emplace_back(bundle);
-        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
-    }
-
-    SymbolicTracker* GetStateTracker() override {
-		return m_dataBuffer->GetStateTracker();
-    }
-
-protected:
-    rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
-        return m_dataBuffer->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
+        ApplyMetadataToBacking(bundle);
     }
 
 private:
@@ -67,6 +56,9 @@ private:
     }
 
     void OnSetName() override {
+        if (!m_dataBuffer) {
+            return;
+        }
         if (name != "") {
 			m_name = name;
 			std::string newname = m_baseName + ": " + m_name;

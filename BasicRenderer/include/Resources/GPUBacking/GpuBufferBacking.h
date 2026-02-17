@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stacktrace>
 #include <unordered_map>
 
@@ -15,6 +16,12 @@
 
 struct RenderContext;
 
+struct BufferAliasPlacement {
+	rhi::ma::Allocation* allocation = nullptr;
+	uint64_t offset = 0;
+	std::optional<uint64_t> poolID;
+};
+
 // Represents the GPU-side backing storage for a buffer resource.
 // Should only be owned by logical resources (Resource or derived classes).
 class GpuBufferBacking {
@@ -26,6 +33,20 @@ public:
 		bool unorderedAccess = false,
 		const char* name = nullptr) {
 		auto sp = std::unique_ptr<GpuBufferBacking>(new GpuBufferBacking(accessType, bufferSize, owningResourceID, unorderedAccess, name));
+#if BUILD_TYPE == BUILD_DEBUG
+		sp->m_creation = std::stacktrace::current();
+#endif
+		return sp;
+	}
+
+	static std::unique_ptr<GpuBufferBacking> CreateUnique(
+		rhi::HeapType accessType,
+		uint64_t bufferSize,
+		uint64_t owningResourceID,
+		const BufferAliasPlacement& placement,
+		bool unorderedAccess = false,
+		const char* name = nullptr) {
+		auto sp = std::unique_ptr<GpuBufferBacking>(new GpuBufferBacking(accessType, bufferSize, owningResourceID, unorderedAccess, name, &placement));
 #if BUILD_TYPE == BUILD_DEBUG
 		sp->m_creation = std::stacktrace::current();
 #endif
@@ -66,7 +87,8 @@ private:
 		uint64_t bufferSize,
 		uint64_t owningResourceID,
 		bool unorderedAccess = false,
-		const char* name = nullptr);
+		const char* name = nullptr,
+		const BufferAliasPlacement* aliasPlacement = nullptr);
 
 	void RegisterLiveAlloc();
 	void UnregisterLiveAlloc();

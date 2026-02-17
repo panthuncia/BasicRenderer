@@ -2,6 +2,7 @@
 
 #include <rhi_helpers.h>
 #include <spdlog/spdlog.h>
+#include <stdexcept>
 
 #include "Managers/Singletons/DeviceManager.h"
 #include "Resources/MemoryStatisticsComponents.h"
@@ -13,7 +14,8 @@ GpuBufferBacking::GpuBufferBacking(
 	const uint64_t bufferSize,
 	uint64_t owningResourceID,
 	const bool unorderedAccess,
-	const char* name) {
+    const char* name,
+    const BufferAliasPlacement* aliasPlacement) {
     m_accessType = accessType;
 
     rhi::ResourceDesc desc = rhi::helpers::ResourceDesc::Buffer(bufferSize);
@@ -36,17 +38,38 @@ GpuBufferBacking::GpuBufferBacking(
         .Set<MemoryStatisticsComponents::MemSizeBytes>({ allocInfo.sizeInBytes })
         .Set<MemoryStatisticsComponents::ResourceType>({ rhi::ResourceType::Buffer })
         .Set<MemoryStatisticsComponents::ResourceID>({ owningResourceID });
+    if (aliasPlacement && aliasPlacement->poolID.has_value()) {
+        allocationBundle.Set<MemoryStatisticsComponents::AliasingPool>({ aliasPlacement->poolID });
+    }
     trackDesc.attach = allocationBundle;
 
-    rhi::ma::AllocationDesc allocationDesc;
-    allocationDesc.heapType = accessType;
-    DeviceManager::GetInstance().CreateResourceTracked(
-        allocationDesc,
-        desc,
-        0,
-        nullptr,
-        m_bufferAllocation,
-        trackDesc);
+    if (aliasPlacement && aliasPlacement->allocation) {
+        const auto result = DeviceManager::GetInstance().CreateAliasingResourceTracked(
+            *aliasPlacement->allocation,
+            aliasPlacement->offset,
+            desc,
+            0,
+            nullptr,
+            m_bufferAllocation,
+            trackDesc);
+        if (!rhi::IsOk(result)) {
+            throw std::runtime_error("Failed to create aliased buffer resource backing");
+        }
+    }
+    else {
+        rhi::ma::AllocationDesc allocationDesc;
+        allocationDesc.heapType = accessType;
+        const auto result = DeviceManager::GetInstance().CreateResourceTracked(
+            allocationDesc,
+            desc,
+            0,
+            nullptr,
+            m_bufferAllocation,
+            trackDesc);
+        if (!rhi::IsOk(result)) {
+            throw std::runtime_error("Failed to create committed buffer resource backing");
+        }
+    }
 
     m_size = bufferSize;
 

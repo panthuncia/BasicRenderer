@@ -4,6 +4,7 @@
 
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/UploadManager.h"
+#include "Resources/ExternalBackingResource.h"
 
 void SortedUnsignedIntBuffer::Insert(unsigned int element) {
     // Resize the buffer if necessary
@@ -66,10 +67,11 @@ void SortedUnsignedIntBuffer::Remove(unsigned int element) {
 void SortedUnsignedIntBuffer::CreateBuffer(uint64_t capacity) {
     auto device = DeviceManager::GetInstance().GetDevice();
     m_capacity = capacity;
-    m_dataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, capacity * sizeof(unsigned int), GetGlobalResourceID(), m_UAV);
+    auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, capacity * sizeof(unsigned int), GetGlobalResourceID(), m_UAV);
+    SetBacking(std::move(newDataBuffer), capacity * sizeof(unsigned int));
     
     for (const auto& bundle : m_metadataBundles) {
-        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
+		ApplyMetadataToBacking(bundle);
 	}
 
 	AssignDescriptorSlots();
@@ -79,8 +81,11 @@ void SortedUnsignedIntBuffer::GrowBuffer(uint64_t newSize) {
     auto device = DeviceManager::GetInstance().GetDevice();
     auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, newSize * sizeof(unsigned int), GetGlobalResourceID(), m_UAV);
 	// Copy existing data to new buffer and discard old buffer after copy
-    UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), m_capacity * sizeof(unsigned int));
-    m_dataBuffer = std::move(newDataBuffer);
+    if (m_dataBuffer) {
+        auto oldBackingResource = ExternalBackingResource::CreateShared(std::move(m_dataBuffer));
+        UploadManager::GetInstance().QueueResourceCopy(shared_from_this(), oldBackingResource, m_capacity * sizeof(unsigned int));
+    }
+    SetBacking(std::move(newDataBuffer), newSize * sizeof(unsigned int));
 
     m_capacity = newSize;
     AssignDescriptorSlots();

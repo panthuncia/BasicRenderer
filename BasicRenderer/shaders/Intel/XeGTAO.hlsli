@@ -32,6 +32,10 @@ RWTexture2D<float4>         g_outputDbgImage    : register( u2 );
 #define XE_GTAO_USE_HALF_FLOAT_PRECISION 1
 #endif
 
+#ifndef XE_GTAO_SOURCE_DEPTH_IS_LINEAR_VIEW_DEPTH
+#define XE_GTAO_SOURCE_DEPTH_IS_LINEAR_VIEW_DEPTH 0
+#endif
+
 #if defined(XE_GTAO_FP32_DEPTHS) && XE_GTAO_USE_HALF_FLOAT_PRECISION
 #error Using XE_GTAO_USE_HALF_FLOAT_PRECISION with 32bit depths is not supported yet unfortunately (it is possible to apply fp16 on parts not related to depth but this has not been done yet)
 #endif 
@@ -96,6 +100,15 @@ float XeGTAO_ScreenSpaceToViewSpaceDepth( const float screenDepth, const GTAOCon
     float depthLinearizeAdd = consts.DepthUnpackConsts.y;
     // Optimised version of "-cameraClipNear / (cameraClipFar - projDepth * (cameraClipFar - cameraClipNear)) * cameraClipFar"
     return depthLinearizeMul / (depthLinearizeAdd - screenDepth);
+}
+
+float XeGTAO_SourceDepthToViewSpaceDepth( const float sourceDepth, const GTAOConstants consts )
+{
+#if XE_GTAO_SOURCE_DEPTH_IS_LINEAR_VIEW_DEPTH
+    return sourceDepth;
+#else
+    return XeGTAO_ScreenSpaceToViewSpaceDepth( sourceDepth, consts );
+#endif
 }
 
 float4 XeGTAO_CalculateEdges( const float centerZ, const float leftZ, const float rightZ, const float topZ, const float bottomZ )
@@ -600,11 +613,12 @@ void XeGTAO_PrefilterDepths16x16( uint2 dispatchThreadID /*: SV_DispatchThreadID
     // MIP 0
     const uint2 baseCoord = dispatchThreadID;
     const uint2 pixCoord = baseCoord * 2;
-    float4 depths4 = sourceNDCDepth.GatherRed( depthSampler, float2( pixCoord * consts.ViewportPixelSize ), int2(1,1) );
-    float depth0 = XeGTAO_ClampDepth( XeGTAO_ScreenSpaceToViewSpaceDepth( depths4.w, consts ) );
-    float depth1 = XeGTAO_ClampDepth( XeGTAO_ScreenSpaceToViewSpaceDepth( depths4.z, consts ) );
-    float depth2 = XeGTAO_ClampDepth( XeGTAO_ScreenSpaceToViewSpaceDepth( depths4.x, consts ) );
-    float depth3 = XeGTAO_ClampDepth( XeGTAO_ScreenSpaceToViewSpaceDepth( depths4.y, consts ) );
+    float2 sourceUV = float2( pixCoord * consts.ViewportPixelSize ) * consts.SourceDepthUVScale;
+    float4 depths4 = sourceNDCDepth.GatherRed( depthSampler, sourceUV, int2(1,1) );
+    float depth0 = XeGTAO_ClampDepth( XeGTAO_SourceDepthToViewSpaceDepth( depths4.w, consts ) );
+    float depth1 = XeGTAO_ClampDepth( XeGTAO_SourceDepthToViewSpaceDepth( depths4.z, consts ) );
+    float depth2 = XeGTAO_ClampDepth( XeGTAO_SourceDepthToViewSpaceDepth( depths4.x, consts ) );
+    float depth3 = XeGTAO_ClampDepth( XeGTAO_SourceDepthToViewSpaceDepth( depths4.y, consts ) );
     outDepth0[ pixCoord + uint2(0, 0) ] = (float)depth0;
     outDepth0[ pixCoord + uint2(1, 0) ] = (float)depth1;
     outDepth0[ pixCoord + uint2(0, 1) ] = (float)depth2;
@@ -811,18 +825,19 @@ void XeGTAO_Denoise( const uint2 pixCoordBase, const GTAOConstants consts, Textu
 float3 XeGTAO_ComputeViewspaceNormal( const uint2 pixCoord, const GTAOConstants consts, Texture2D<float> sourceNDCDepth, SamplerState depthSampler )
 {
     float2 normalizedScreenPos = (pixCoord + 0.5.xx) * consts.ViewportPixelSize;
+    float2 sourceDepthUV = float2( pixCoord * consts.ViewportPixelSize ) * consts.SourceDepthUVScale;
 
-    float4 valuesUL   = sourceNDCDepth.GatherRed( depthSampler, float2( pixCoord * consts.ViewportPixelSize )               );
-    float4 valuesBR   = sourceNDCDepth.GatherRed( depthSampler, float2( pixCoord * consts.ViewportPixelSize ), int2( 1, 1 ) );
+    float4 valuesUL   = sourceNDCDepth.GatherRed( depthSampler, sourceDepthUV               );
+    float4 valuesBR   = sourceNDCDepth.GatherRed( depthSampler, sourceDepthUV, int2( 1, 1 ) );
 
     // viewspace Z at the center
-    float viewspaceZ  = XeGTAO_ScreenSpaceToViewSpaceDepth( valuesUL.y, consts ); //sourceViewspaceDepth.SampleLevel( depthSampler, normalizedScreenPos, 0 ).x; 
+    float viewspaceZ  = XeGTAO_SourceDepthToViewSpaceDepth( valuesUL.y, consts ); //sourceViewspaceDepth.SampleLevel( depthSampler, normalizedScreenPos, 0 ).x; 
 
     // viewspace Zs left top right bottom
-    const float pixLZ = XeGTAO_ScreenSpaceToViewSpaceDepth( valuesUL.x, consts );
-    const float pixTZ = XeGTAO_ScreenSpaceToViewSpaceDepth( valuesUL.z, consts );
-    const float pixRZ = XeGTAO_ScreenSpaceToViewSpaceDepth( valuesBR.z, consts );
-    const float pixBZ = XeGTAO_ScreenSpaceToViewSpaceDepth( valuesBR.x, consts );
+    const float pixLZ = XeGTAO_SourceDepthToViewSpaceDepth( valuesUL.x, consts );
+    const float pixTZ = XeGTAO_SourceDepthToViewSpaceDepth( valuesUL.z, consts );
+    const float pixRZ = XeGTAO_SourceDepthToViewSpaceDepth( valuesBR.z, consts );
+    const float pixBZ = XeGTAO_SourceDepthToViewSpaceDepth( valuesBR.x, consts );
 
     float4 edgesLRTB  = XeGTAO_CalculateEdges( (float)viewspaceZ, (float)pixLZ, (float)pixRZ, (float)pixTZ, (float)pixBZ );
 

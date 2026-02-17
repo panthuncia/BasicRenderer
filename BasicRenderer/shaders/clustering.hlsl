@@ -33,10 +33,24 @@ void CSMain(uint3 groupID : SV_GroupID) {
 	
     ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
     float2 screenDimensions = float2(perFrame.screenResX, perFrame.screenResY);
+
+    if (groupID.x >= perFrame.lightClusterGridSizeX ||
+        groupID.y >= perFrame.lightClusterGridSizeY ||
+        groupID.z >= perFrame.lightClusterGridSizeZ) {
+        return;
+    }
 	
     uint tileIndex = groupID.x +
                      (groupID.y * perFrame.lightClusterGridSizeX) +
                      (groupID.z * perFrame.lightClusterGridSizeX * perFrame.lightClusterGridSizeY);
+
+    uint totalClusters =
+        perFrame.lightClusterGridSizeX *
+        perFrame.lightClusterGridSizeY *
+        perFrame.lightClusterGridSizeZ;
+    if (tileIndex >= totalClusters) {
+        return;
+    }
 	
     float2 tileSize = screenDimensions / float2(perFrame.lightClusterGridSizeX, perFrame.lightClusterGridSizeY);
 	

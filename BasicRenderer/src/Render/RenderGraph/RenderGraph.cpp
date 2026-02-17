@@ -1,7 +1,10 @@
-#include "Render/RenderGraph.h"
+#include "Render/RenderGraph/RenderGraph.h"
 
 #include <span>
 #include <algorithm>
+#include <limits>
+#include <numeric>
+#include <sstream>
 #include <rhi_helpers.h>
 #include <rhi_debug.h>
 
@@ -9,40 +12,15 @@
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/DeviceManager.h"
+#include "Managers/Singletons/DeletionManager.h"
 #include "Render/PassBuilders.h"
 #include "Resources/ResourceGroup.h"
 #include "Managers/Singletons/StatisticsManager.h"
 #include "Managers/CommandRecordingManager.h"
 #include "Interfaces/IHasMemoryMetadata.h"
 #include "Interfaces/IDynamicDeclaredResources.h"
-
-// BFS over alias and group/child relationships to get all relevant IDs
-std::vector<uint64_t> RenderGraph::ExpandSchedulingIDs(uint64_t id) const {
-	std::vector<uint64_t> out;
-	out.reserve(8);
-
-	std::unordered_set<uint64_t> visited;
-	std::vector<uint64_t> stack;
-	stack.push_back(id);
-
-	auto push = [&](uint64_t x) {
-		if (visited.insert(x).second) stack.push_back(x);
-		};
-
-	while (!stack.empty()) {
-		uint64_t cur = stack.back();
-		stack.pop_back();
-
-		// alias closure
-		for (uint64_t a : GetAllAliasIDs(cur)) {
-			if (visited.insert(a).second) {
-				out.push_back(a);
-			}
-		}
-	}
-
-	return out;
-}
+#include "Resources/PixelBuffer.h"
+#include "Resources/MemoryStatisticsComponents.h"
 
 RenderGraph::PassView RenderGraph::GetPassView(AnyPassAndResources& pr) {
 	PassView v{};
@@ -95,7 +73,7 @@ std::vector<RenderGraph::Node> RenderGraph::BuildNodes(RenderGraph& rg, std::vec
 			bool write = AccessTypeIsWriteType(req.state.access);
 			bool isUav = IsUAVState(req.state);
 
-			for (uint64_t rid : rg.ExpandSchedulingIDs(base)) {
+			for (uint64_t rid : rg.m_aliasingSubsystem.GetSchedulingEquivalentIDs(base, rg.aliasPlacementSignatureByID)) {
 				mark(rid, write ? AccessKind::Write : AccessKind::Read, isUav);
 			}
 		}
@@ -103,7 +81,7 @@ std::vector<RenderGraph::Node> RenderGraph::BuildNodes(RenderGraph& rg, std::vec
 		// internal transitions: treat as "write" for scheduling conservatism
 		for (auto& tr : *view.internalTransitions) {
 			uint64_t base = tr.first.resource.GetGlobalResourceID();
-			for (uint64_t rid : rg.ExpandSchedulingIDs(base)) {
+			for (uint64_t rid : rg.m_aliasingSubsystem.GetSchedulingEquivalentIDs(base, rg.aliasPlacementSignatureByID)) {
 				mark(rid, AccessKind::Write, /*isUav=*/false);
 			}
 		}
@@ -250,7 +228,8 @@ void RenderGraph::CommitPassToBatch(
 		for (auto& exit : pass.resources.internalTransitions) {
 			std::vector<ResourceTransition> _;
 			auto pRes = _registry.Resolve(exit.first.resource);
-			pRes->GetStateTracker()->Apply(
+			auto& compileTracker = GetOrCreateCompileTracker(pRes, exit.first.resource.GetGlobalResourceID());
+			compileTracker.Apply(
 				exit.first.range, nullptr, exit.second, _); // TODO: Do we really need the ptr?
 			currentBatch.internallyTransitionedResources.insert(exit.first.resource.GetGlobalResourceID());
 		}
@@ -292,7 +271,8 @@ void RenderGraph::CommitPassToBatch(
 		for (auto& exit : pass.resources.internalTransitions) {
 			std::vector<ResourceTransition> _;
 			auto pRes = _registry.Resolve(exit.first.resource);
-			pRes->GetStateTracker()->Apply(
+			auto& compileTracker = GetOrCreateCompileTracker(pRes, exit.first.resource.GetGlobalResourceID());
+			compileTracker.Apply(
 				exit.first.range, nullptr, exit.second, _);
 			currentBatch.internallyTransitionedResources.insert(exit.first.resource.GetGlobalResourceID());
 		}
@@ -536,14 +516,51 @@ void RenderGraph::AddTransition(
 	}
 	std::vector<ResourceTransition> transitions;
 	auto pRes = _registry.Resolve(resource); // TODO: Can we get rid of pRes in transitions?
+	auto& compileTracker = GetOrCreateCompileTracker(pRes, resource.GetGlobalResourceID());
 
-	pRes->GetStateTracker()->Apply(r.resourceHandleAndRange.range, pRes, r.state, transitions);
+	if (aliasActivationPending.find(resource.GetGlobalResourceID()) != aliasActivationPending.end()) {
+		const bool firstUseIsWrite = AccessTypeIsWriteType(r.state.access);
+		const bool firstUseIsCommon = r.state.access == rhi::ResourceAccessType::Common;
+		// Common counts as write for alias activation, as this is generally used to indicate that the resource will be
+		// transitioned internally by an external system that still uses legacy barriers. Don't abuse this.
+		if (firstUseIsWrite || firstUseIsCommon) { 
+			const uint64_t id = resource.GetGlobalResourceID();
+			auto itSig = aliasPlacementSignatureByID.find(id);
+			spdlog::info(
+				"RG alias activate: id={} name='{}' signature={} accessAfter={} layoutAfter={} syncAfter={} discard=1",
+				id,
+				pRes ? pRes->GetName() : std::string("<null>"),
+				itSig != aliasPlacementSignatureByID.end() ? itSig->second : 0ull,
+				static_cast<uint32_t>(r.state.access),
+				static_cast<uint32_t>(r.state.layout),
+				static_cast<uint32_t>(r.state.sync));
+			transitions.emplace_back(
+				pRes,
+				r.resourceHandleAndRange.range,
+				rhi::ResourceAccessType::None,
+				r.state.access,
+				rhi::ResourceLayout::Undefined,
+				r.state.layout,
+				rhi::ResourceSyncState::None,
+				r.state.sync,
+				true);
+		}
+		else {
+			throw std::runtime_error("Alias activation requires first use to be a write when explicit initialization is disabled");
+		}
+		std::vector<ResourceTransition> ignored;
+		compileTracker.Apply(r.resourceHandleAndRange.range, pRes, r.state, ignored);
+		aliasActivationPending.erase(resource.GetGlobalResourceID());
+	}
+	else {
+		compileTracker.Apply(r.resourceHandleAndRange.range, pRes, r.state, transitions);
+	}
 
 	if (!transitions.empty()) {
 		outTransitionedResourceIDs.insert(resource.GetGlobalResourceID());
 	}
 
-	currentBatch.passBatchTrackers[resource.GetGlobalResourceID()] = pRes->GetStateTracker(); // We will need to chack subsequent passes against this
+	currentBatch.passBatchTrackers[resource.GetGlobalResourceID()] = &compileTracker; // We will need to check subsequent passes against this
 
 	bool oldSyncHasNonComputeSyncState = false;
 	for (auto& transition : transitions) {
@@ -680,6 +697,190 @@ RenderGraph::~RenderGraph() {
 	m_pCommandRecordingManager->ShutdownThreadLocal(); // Clears thread-local storage
 }
 
+SymbolicTracker& RenderGraph::GetOrCreateCompileTracker(Resource* resource, uint64_t resourceID) {
+	auto it = compileTrackers.find(resourceID);
+	if (it != compileTrackers.end()) {
+		return it->second;
+	}
+
+	SymbolicTracker seed;
+	if (resource) {
+		bool hasLiveBacking = true;
+		if (auto* texture = dynamic_cast<PixelBuffer*>(resource)) {
+			hasLiveBacking = texture->IsMaterialized();
+		}
+		else if (auto* buffer = dynamic_cast<Buffer*>(resource)) {
+			hasLiveBacking = buffer->IsMaterialized();
+		}
+
+		if (hasLiveBacking) {
+			seed = *resource->GetStateTracker();
+		}
+	}
+
+	auto [insertedIt, _] = compileTrackers.emplace(resourceID, std::move(seed));
+	return insertedIt->second;
+}
+
+void RenderGraph::MaterializeReferencedResources(
+	const std::vector<ResourceRequirement>& resourceRequirements,
+	const std::vector<std::pair<ResourceHandleAndRange, ResourceState>>& internalTransitions)
+{
+	auto materializeIfNeeded = [&](const ResourceRegistry::RegistryHandle& handle) {
+		if (handle.IsEphemeral()) {
+			return;
+		}
+
+		auto resource = _registry.Resolve(handle);
+		if (!resource) {
+			return;
+		}
+
+		auto texture = dynamic_cast<PixelBuffer*>(resource);
+		if (texture) {
+			if (texture->IsMaterialized()) {
+				return;
+			}
+
+			if (texture->GetDescription().allowAlias) {
+				// Alias placement is frame-dependent and produced later in CompileFrame.
+				// Defer materialization until RenderGraph::MaterializeUnmaterializedResources,
+				// after BuildAliasPlanAfterDag has produced placement options.
+				return;
+			}
+
+			texture->Materialize();
+			resourceBackingGenerationByID[handle.GetGlobalResourceID()] = texture->GetBackingGeneration();
+			return;
+		}
+
+		auto buffer = dynamic_cast<Buffer*>(resource);
+		if (buffer) {
+			if (buffer->IsMaterialized()) {
+				return;
+			}
+
+			if (buffer->IsAliasingAllowed()) {
+				return;
+			}
+
+			buffer->Materialize();
+			resourceBackingGenerationByID[handle.GetGlobalResourceID()] = buffer->GetBackingGeneration();
+		}
+	};
+
+	for (auto const& req : resourceRequirements) {
+		materializeIfNeeded(req.resourceHandleAndRange.resource);
+	}
+
+	for (auto const& transition : internalTransitions) {
+		materializeIfNeeded(transition.first.resource);
+	}
+}
+
+std::unordered_set<uint64_t> RenderGraph::CollectFrameResourceIDs() const {
+	std::unordered_set<uint64_t> used;
+	used.reserve(m_framePasses.size() * 4);
+
+	for (auto const& pr : m_framePasses) {
+		if (pr.type == PassType::Compute) {
+			auto const& p = std::get<ComputePassAndResources>(pr.pass);
+			for (auto const& req : p.resources.frameResourceRequirements) {
+				used.insert(req.resourceHandleAndRange.resource.GetGlobalResourceID());
+			}
+			for (auto const& t : p.resources.internalTransitions) {
+				used.insert(t.first.resource.GetGlobalResourceID());
+			}
+		}
+		else if (pr.type == PassType::Render) {
+			auto const& p = std::get<RenderPassAndResources>(pr.pass);
+			for (auto const& req : p.resources.frameResourceRequirements) {
+				used.insert(req.resourceHandleAndRange.resource.GetGlobalResourceID());
+			}
+			for (auto const& t : p.resources.internalTransitions) {
+				used.insert(t.first.resource.GetGlobalResourceID());
+			}
+		}
+	}
+
+	return used;
+}
+
+void RenderGraph::ApplyIdleDematerializationPolicy(const std::unordered_set<uint64_t>& usedResourceIDs) {
+	for (auto& [id, resource] : resourcesByID) {
+		if (!resource) {
+			continue;
+		}
+
+		auto texture = std::dynamic_pointer_cast<PixelBuffer>(resource);
+		if (!texture || !texture->IsIdleDematerializationEnabled()) {
+			continue;
+		}
+
+		if (usedResourceIDs.find(id) != usedResourceIDs.end()) {
+			resourceIdleFrameCounts[id] = 0;
+			continue;
+		}
+
+		auto& idleFrames = resourceIdleFrameCounts[id];
+		idleFrames++;
+
+		if (texture->IsMaterialized() && idleFrames >= texture->GetIdleDematerializationThreshold()) {
+			texture->Dematerialize();
+			resourceBackingGenerationByID[id] = texture->GetBackingGeneration();
+		}
+	}
+}
+
+void RenderGraph::SnapshotCompiledResourceGenerations(const std::unordered_set<uint64_t>& usedResourceIDs) {
+	compiledResourceGenerationByID.clear();
+	compiledResourceGenerationByID.reserve(usedResourceIDs.size());
+
+	for (uint64_t id : usedResourceIDs) {
+		auto it = resourcesByID.find(id);
+		if (it == resourcesByID.end() || !it->second) {
+			continue;
+		}
+
+		auto texture = std::dynamic_pointer_cast<PixelBuffer>(it->second);
+		if (texture) {
+			compiledResourceGenerationByID[id] = texture->GetBackingGeneration();
+			continue;
+		}
+
+		auto buffer = std::dynamic_pointer_cast<Buffer>(it->second);
+		if (buffer) {
+			compiledResourceGenerationByID[id] = buffer->GetBackingGeneration();
+		}
+	}
+}
+
+void RenderGraph::ValidateCompiledResourceGenerations() const {
+	for (auto const& [id, compiledGeneration] : compiledResourceGenerationByID) {
+		auto it = resourcesByID.find(id);
+		if (it == resourcesByID.end() || !it->second) {
+			continue;
+		}
+
+		auto texture = std::dynamic_pointer_cast<PixelBuffer>(it->second);
+		if (texture) {
+			const uint64_t currentGeneration = texture->GetBackingGeneration();
+			if (currentGeneration != compiledGeneration) {
+				throw std::runtime_error("Resource backing generation changed after compile and before execute. Resource ID: " + std::to_string(id));
+			}
+			continue;
+		}
+
+		auto buffer = std::dynamic_pointer_cast<Buffer>(it->second);
+		if (buffer) {
+			const uint64_t currentGeneration = buffer->GetBackingGeneration();
+			if (currentGeneration != compiledGeneration) {
+				throw std::runtime_error("Resource backing generation changed after compile and before execute. Resource ID: " + std::to_string(id));
+			}
+		}
+	}
+}
+
 
 void RenderGraph::RegisterExtension(std::unique_ptr<IRenderGraphExtension> ext) {
 	if (!ext) return;
@@ -731,15 +932,16 @@ void RenderGraph::ResetForRebuild()
 	// Clear any existing compile state
 	m_masterPassList.clear();
 	batches.clear();
-	aliasGroups.clear();
-	resourceToAliasGroup.clear();
-	aliasedResources.clear();
-	lastActiveSubresourceInAliasGroup.clear();
 	trackers.clear();
 
 	// Clear resources
 	resourcesByID.clear();
 	resourcesByName.clear();
+	resourceBackingGenerationByID.clear();
+	resourceIdleFrameCounts.clear();
+	compiledResourceGenerationByID.clear();
+	m_aliasingSubsystem.ResetPersistentState(*this);
+	compileTrackers.clear();
 
 	// Clear providers
 	_providerMap.clear();
@@ -759,7 +961,9 @@ void RenderGraph::ResetForRebuild()
 
 void RenderGraph::ResetForFrame() {
 	batches.clear();
-	lastActiveSubresourceInAliasGroup.clear();
+	compiledResourceGenerationByID.clear();
+	m_aliasingSubsystem.ResetPerFrameState(*this);
+	compileTrackers.clear();
 	// reset pass builders
 	for (auto& [name, builder] : m_passBuildersByName) {
 		builder->Reset();
@@ -791,45 +995,6 @@ void RenderGraph::CompileStructural() {
 	}
 
 	batches.clear();
-
-	// Manage aliased resources 
-
-	// Mark resources that use the same memory as each other, as they need aliasing barriers
-	for (const auto& resource : resourcesByID) {
-		auto& r = resource.second;
-		for (auto& alias : r->GetAliasedResources()) {
-			if (!aliasedResources.contains(r->GetGlobalResourceID())) {
-				aliasedResources[r->GetGlobalResourceID()] = {};
-			}
-			aliasedResources[r->GetGlobalResourceID()].insert(alias->GetGlobalResourceID());
-		}
-	}
-	// Assemble alias groups
-	{
-		std::unordered_set<uint64_t> visited;
-		for (auto& [rID, aliases] : aliasedResources) {
-			if (visited.count(rID)) continue;
-			// BFS-connected component
-			std::vector<uint64_t> group;
-			std::queue<uint64_t>  queue;
-			queue.push(rID);
-			visited.insert(rID);
-			while (!queue.empty()) {
-				uint64_t cur = queue.front(); queue.pop();
-				group.push_back(cur);
-				for (uint64_t other : aliasedResources[cur]) {
-					if (!visited.contains(other)) {
-						visited.insert(other);
-						queue.push(other);
-					}
-				}
-			}
-			size_t idx = aliasGroups.size();
-			for (uint64_t member : group)
-				resourceToAliasGroup[member] = idx;
-			aliasGroups.push_back(std::move(group));
-		}
-	}
 
 	struct Pending {
 		AnyPassAndResources pr;
@@ -867,6 +1032,7 @@ void RenderGraph::CompileStructural() {
 				par.resources.internalTransitions = b.params.internalTransitions;
 				par.resources.identifierSet = b.DeclaredResourceIds();
 				par.resources.isGeometryPass = b.params.isGeometryPass;
+				MaterializeReferencedResources(par.resources.staticResourceRequirements, par.resources.internalTransitions);
 			}
  			any.pass = std::move(par);
  		}
@@ -886,6 +1052,7 @@ void RenderGraph::CompileStructural() {
 				par.resources.frameResourceRequirements = par.resources.staticResourceRequirements;
 				par.resources.internalTransitions = b.params.internalTransitions;
 				par.resources.identifierSet = b.DeclaredResourceIds();
+				MaterializeReferencedResources(par.resources.staticResourceRequirements, par.resources.internalTransitions);
 			}
  			any.pass = std::move(par);
  		}
@@ -1260,6 +1427,7 @@ void RenderGraph::RefreshRetainedDeclarationsForFrame(RenderPassAndResources& p,
 	p.resources.internalTransitions = b.params.internalTransitions;
 
 	p.resources.identifierSet = b.DeclaredResourceIds();
+	MaterializeReferencedResources(p.resources.staticResourceRequirements, p.resources.internalTransitions);
 
 	// Ensure the pass's view matches the refreshed identifier set
 	p.pass->SetResourceRegistryView(
@@ -1282,6 +1450,7 @@ void RenderGraph::RefreshRetainedDeclarationsForFrame(ComputePassAndResources& p
 	p.resources.staticResourceRequirements = b.GatherResourceRequirements();
 	p.resources.internalTransitions = b.params.internalTransitions;
 	p.resources.identifierSet = b.DeclaredResourceIds();
+	MaterializeReferencedResources(p.resources.staticResourceRequirements, p.resources.internalTransitions);
 
 	p.pass->SetResourceRegistryView(
 		std::make_unique<ResourceRegistryView>(_registry, p.resources.identifierSet)
@@ -1292,6 +1461,8 @@ void RenderGraph::RefreshRetainedDeclarationsForFrame(ComputePassAndResources& p
 
 void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 	StatisticsManager::GetInstance().BeginFrame();
+	compileTrackers.clear();
+	m_aliasingSubsystem.ResetPerFrameState(*this);
 
 	auto needsRefresh = [&](auto& p) -> bool {
 		auto* iFace = dynamic_cast<IDynamicDeclaredResources*>(p.pass.get());
@@ -1627,8 +1798,8 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 		statisticsManager.SetupQueryHeap();
 	}
 
-	lastActiveSubresourceInAliasGroup.clear();
-	lastActiveSubresourceInAliasGroup.resize(aliasGroups.size());
+	auto usedResourceIDs = CollectFrameResourceIDs();
+	ApplyIdleDematerializationPolicy(usedResourceIDs);
 
 	auto currentBatch = PassBatch();
 	currentBatch.renderTransitionFenceValue = GetNextGraphicsQueueFenceValue();
@@ -1677,7 +1848,25 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 		throw std::runtime_error("Render graph contains a dependency cycle");
 	}
 
+	std::vector<rg::alias::AliasSchedulingNode> aliasNodes;
+	aliasNodes.reserve(nodes.size());
+	for (const auto& node : nodes) {
+		aliasNodes.push_back(rg::alias::AliasSchedulingNode{
+			.passIndex = node.passIndex,
+			.originalOrder = node.originalOrder,
+			.indegree = node.indegree,
+			.criticality = node.criticality,
+			.out = node.out,
+		});
+	}
+
+	m_aliasingSubsystem.AutoAssignAliasingPools(*this, aliasNodes);
+	m_aliasingSubsystem.BuildAliasPlanAfterDag(*this, aliasNodes);
+	MaterializeUnmaterializedResources(&usedResourceIDs);
+	SnapshotCompiledResourceGenerations(usedResourceIDs);
+
 	AutoScheduleAndBuildBatches(*this, m_framePasses, nodes);
+	m_aliasingSubsystem.ApplyAliasQueueSynchronization(*this);
 
 	// Insert transitions to loop resources back to their initial states
 	//ComputeResourceLoops();
@@ -1759,8 +1948,7 @@ std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 
 	auto processResource = [&](ResourceRegistry::RegistryHandle const& res) {
 		uint64_t id = res.GetGlobalResourceID();
-		// get this ID plus any aliases
-		auto ids = GetAllAliasIDs(id);
+		auto ids = m_aliasingSubsystem.GetSchedulingEquivalentIDs(id, aliasPlacementSignatureByID);
 		for (auto rid : ids) {
 			auto itT = transitionHistory.find(rid);
 			if (itT != transitionHistory.end())
@@ -1776,7 +1964,7 @@ std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 		processResource(req.resourceHandleAndRange.resource);
 
 	for (auto& transitionID : resourcesTransitionedThisPass) { // We only need to wait on the latest usage for resources that will be transitioned in this batch
-		for (auto rid : GetAllAliasIDs(transitionID)) {
+		for (auto rid : m_aliasingSubsystem.GetSchedulingEquivalentIDs(transitionID, aliasPlacementSignatureByID)) {
 			if (usageHistory.contains(rid)) {
 				latestUsage = std::max(latestUsage, (int)usageHistory.at(rid));
 			}
@@ -1797,7 +1985,7 @@ std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 
 	auto processResource = [&](ResourceRegistry::RegistryHandle const& res) {
 		uint64_t id = res.GetGlobalResourceID();
-		for (auto rid : GetAllAliasIDs(id)) {
+		for (auto rid : m_aliasingSubsystem.GetSchedulingEquivalentIDs(id, aliasPlacementSignatureByID)) {
 			auto itT = transitionHistory.find(rid);
 			if (itT != transitionHistory.end())
 				latestTransition = std::max(latestTransition, (int)itT->second);
@@ -1812,7 +2000,7 @@ std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 		processResource(req.resourceHandleAndRange.resource);
 
 	for (auto& transitionID : resourcesTransitionedThisPass) { // We only need to wait on the latest usage for resources that will be transitioned in this batch
-		for (auto rid : GetAllAliasIDs(transitionID)) {
+		for (auto rid : m_aliasingSubsystem.GetSchedulingEquivalentIDs(transitionID, aliasPlacementSignatureByID)) {
 			if (usageHistory.contains(rid)) {
 				latestUsage = std::max(latestUsage, (int)usageHistory.at(rid));
 			}
@@ -1820,6 +2008,118 @@ std::tuple<int, int, int> RenderGraph::GetBatchesToWaitOn(
 	}
 
 	return { latestTransition, latestProducer, latestUsage };
+}
+
+void RenderGraph::MaterializeUnmaterializedResources(const std::unordered_set<uint64_t>* onlyResourceIDs) {
+	for (auto& [id, resource] : resourcesByID) {
+		if (onlyResourceIDs && onlyResourceIDs->find(id) == onlyResourceIDs->end()) {
+			continue;
+		}
+		if (!resource) {
+			continue;
+		}
+
+		auto texture = std::dynamic_pointer_cast<PixelBuffer>(resource);
+		if (texture) {
+			if (!texture->IsMaterialized()) {
+				auto itAlias = aliasMaterializeOptionsByID.find(id);
+				if (itAlias != aliasMaterializeOptionsByID.end()) {
+					if (std::holds_alternative<PixelBuffer::MaterializeOptions>(itAlias->second)) {
+						auto& options = std::get<PixelBuffer::MaterializeOptions>(itAlias->second);
+						if (options.aliasPlacement.has_value()) {
+							const auto& ap = options.aliasPlacement.value();
+							spdlog::info(
+								"RG alias materialize: id={} name='{}' pool={} offset={}",
+								id,
+								resource->GetName(),
+								ap.poolID.has_value() ? ap.poolID.value() : 0ull,
+								ap.offset);
+						}
+						texture->Materialize(&options);
+					}
+				}
+				else {
+					if (texture->GetDescription().allowAlias) {
+						const bool hasManualAliasPool = texture->GetDescription().aliasingPoolID.has_value();
+						const bool hasAutoAliasPool = autoAliasPoolByID.find(id) != autoAliasPoolByID.end();
+						const bool aliasPlacementRequiredThisFrame = hasManualAliasPool || hasAutoAliasPool;
+
+						if (onlyResourceIDs && aliasPlacementRequiredThisFrame) {
+							throw std::runtime_error(
+								"Aliasing placement missing for used aliased resource during frame materialization. Resource ID: " + std::to_string(id));
+						}
+
+						if (onlyResourceIDs && !aliasPlacementRequiredThisFrame) {
+							spdlog::debug(
+								"RG alias fallback materialize: id={} name='{}' allowAlias=1 but no pool assignment this frame; materializing standalone",
+								id,
+								resource->GetName());
+						}
+
+						// Setup-time eager materialization happens before alias planning.
+						// Defer aliased resources until compile-time placement is available.
+						if (!onlyResourceIDs) {
+							continue;
+						}
+					}
+					texture->Materialize();
+				}
+			}
+
+			resourceBackingGenerationByID[id] = texture->GetBackingGeneration();
+			continue;
+		}
+
+		auto buffer = std::dynamic_pointer_cast<Buffer>(resource);
+		if (!buffer) {
+			continue;
+		}
+
+		if (!buffer->IsMaterialized()) {
+			auto itAlias = aliasMaterializeOptionsByID.find(id);
+			if (itAlias != aliasMaterializeOptionsByID.end()) {
+				if (std::holds_alternative<BufferBase::MaterializeOptions>(itAlias->second)) {
+					auto& options = std::get<BufferBase::MaterializeOptions>(itAlias->second);
+					if (options.aliasPlacement.has_value()) {
+						const auto& ap = options.aliasPlacement.value();
+						spdlog::info(
+							"RG alias materialize (buffer): id={} name='{}' pool={} offset={}",
+							id,
+							resource->GetName(),
+							ap.poolID.has_value() ? ap.poolID.value() : 0ull,
+							ap.offset);
+					}
+					buffer->Materialize(&options);
+				}
+			}
+			else {
+				if (buffer->IsAliasingAllowed()) {
+					const bool hasManualAliasPool = buffer->GetAliasingPoolHint().has_value();
+					const bool hasAutoAliasPool = autoAliasPoolByID.find(id) != autoAliasPoolByID.end();
+					const bool aliasPlacementRequiredThisFrame = hasManualAliasPool || hasAutoAliasPool;
+
+					if (onlyResourceIDs && aliasPlacementRequiredThisFrame) {
+						throw std::runtime_error(
+							"Aliasing placement missing for used aliased buffer during frame materialization. Resource ID: " + std::to_string(id));
+					}
+
+					if (onlyResourceIDs && !aliasPlacementRequiredThisFrame) {
+						spdlog::debug(
+							"RG alias fallback materialize (buffer): id={} name='{}' allowAlias=1 but no pool assignment this frame; materializing standalone",
+							id,
+							resource->GetName());
+					}
+
+					if (!onlyResourceIDs) {
+						continue;
+					}
+				}
+				buffer->Materialize();
+			}
+		}
+
+		resourceBackingGenerationByID[id] = buffer->GetBackingGeneration();
+	}
 }
 
 void RenderGraph::Setup() {
@@ -1843,6 +2143,11 @@ void RenderGraph::Setup() {
 	result = device.CreateTimeline(m_frameStartSyncFence);
 
 	m_getUseAsyncCompute = SettingsManager::GetInstance().getSettingGetter<bool>("useAsyncCompute");
+	m_getAutoAliasMode = SettingsManager::GetInstance().getSettingGetter<AutoAliasMode>("autoAliasMode");
+	m_getAutoAliasLogExclusionReasons = SettingsManager::GetInstance().getSettingGetter<bool>("autoAliasLogExclusionReasons");
+	m_getAutoAliasPoolRetireIdleFrames = SettingsManager::GetInstance().getSettingGetter<uint32_t>("autoAliasPoolRetireIdleFrames");
+	m_getAutoAliasPoolGrowthHeadroom = SettingsManager::GetInstance().getSettingGetter<float>("autoAliasPoolGrowthHeadroom");
+	MaterializeUnmaterializedResources();
 
 	// Run pass setup to collect static resource requirements
 	for (auto& pass : m_masterPassList) {
@@ -1910,7 +2215,13 @@ void RenderGraph::AddResource(std::shared_ptr<Resource> resource, bool transitio
 
 	resourcesByName[name] = resource;
 	resourcesByID[resource->GetGlobalResourceID()] = resource;
-	trackers[resource->GetGlobalResourceID()] = resource->GetStateTracker();
+
+	if (auto texture = std::dynamic_pointer_cast<PixelBuffer>(resource)) {
+		texture->EnsureVirtualDescriptorSlotsAllocated();
+	}
+	if (auto buffer = std::dynamic_pointer_cast<Buffer>(resource)) {
+		buffer->EnsureVirtualDescriptorSlotsAllocated();
+	}
 	/*if (transition) {
 		initialResourceStates[resource->GetGlobalResourceID()] = initialState;
 	}*/
@@ -1977,7 +2288,13 @@ namespace {
 				transition.range, transition.prevAccessType, transition.newAccessType,
 				transition.prevLayout, transition.newLayout,
 				transition.prevSyncState, transition.newSyncState);
+			const size_t textureStart = batch.textures.size();
 			batch.Append(bg);
+			if (transition.discard) {
+				for (size_t i = textureStart; i < batch.textures.size(); ++i) {
+					batch.textures[i].discard = true;
+				}
+			}
 		}
 		if (!batch.Empty()) {
 			commandList.Barriers(batch.View());
@@ -2037,6 +2354,7 @@ namespace {
 } // namespace
 
 void RenderGraph::Execute(RenderContext& context) {
+	ValidateCompiledResourceGenerations();
 
 	bool useAsyncCompute = m_getUseAsyncCompute();
 	auto& manager = DeviceManager::GetInstance();
@@ -2391,10 +2709,29 @@ ResourceRegistry::RegistryHandle RenderGraph::RequestResourceHandle(ResourceIden
 }
 
 ResourceRegistry::RegistryHandle RenderGraph::RequestResourceHandle(Resource* const& pResource, bool allowFailure) {
+	if (!pResource) {
+		if (allowFailure) {
+			return {};
+		}
+		throw std::runtime_error("Null resource pointer passed to RequestResourceHandle(Resource*)");
+	}
+
+	auto ensureTrackedInGraph = [&]() {
+		if (resourcesByID.contains(pResource->GetGlobalResourceID())) {
+			return;
+		}
+
+		auto shared = pResource->weak_from_this().lock();
+		if (shared) {
+			AddResource(std::move(shared));
+		}
+	};
+
 	// If it's already in our registry, return it
 	auto cached = _registry.GetHandleFor(pResource);
 	if (cached.has_value()) {
 		if (_registry.IsValid(cached.value())) {
+			ensureTrackedInGraph();
 			return cached.value();
 		}
 
@@ -2406,6 +2743,7 @@ ResourceRegistry::RegistryHandle RenderGraph::RequestResourceHandle(Resource* co
 		// Fall through and remint a fresh handle for this live resource pointer.
 		// This can happen if a resource was replaced but an old reverse-map entry remained.
 		const auto reminted = _registry.RegisterAnonymousWeak(pResource->weak_from_this());
+		ensureTrackedInGraph();
 		return reminted;
 	}
 
@@ -2415,6 +2753,7 @@ ResourceRegistry::RegistryHandle RenderGraph::RequestResourceHandle(Resource* co
 
 	// Register anonymous resource
 	const auto handle = _registry.RegisterAnonymousWeak(pResource->weak_from_this());
+	ensureTrackedInGraph();
 
 	return handle;
 }

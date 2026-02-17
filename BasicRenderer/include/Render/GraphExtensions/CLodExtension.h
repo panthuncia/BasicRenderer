@@ -2,10 +2,10 @@
 
 #include <rhi.h>
 
-#include "Render/RenderGraph.h"
+#include "Render/RenderGraph/RenderGraph.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
-#include "Resources/Buffers/DynamicStructuredBuffer.h"
+#include "Resources/Buffers/Buffer.h"
 #include "../shaders/PerPassRootConstants/clodRootConstants.h"
 
 struct RasterBucketsHistogramIndirectCommand
@@ -37,6 +37,25 @@ struct CLodViewRasterInfo
     friend bool operator==(const CLodViewRasterInfo&, const CLodViewRasterInfo&) = default;
 };
 
+inline std::shared_ptr<Buffer> CreateAliasedUnmaterializedStructuredBuffer(
+    uint32_t numElements,
+    uint32_t elementSize,
+    bool unorderedAccess = true,
+    bool unorderedAccessCounter = false,
+    bool createNonShaderVisibleUAV = false,
+    bool allowAlias = true)
+{
+    auto buffer = Buffer::CreateUnmaterializedStructuredBuffer(
+        numElements,
+        elementSize,
+        unorderedAccess,
+        unorderedAccessCounter,
+        createNonShaderVisibleUAV,
+        rhi::HeapType::DeviceLocal);
+    buffer->SetAllowAlias(allowAlias);
+    return buffer;
+}
+
 class CLodExtension final : public RenderGraph::IRenderGraphExtension {
 public:
 	explicit CLodExtension(CLodExtensionType type, uint64_t maxVisibleClusters) : m_maxVisibleClusters(maxVisibleClusters) {
@@ -63,11 +82,12 @@ public:
 				break;
 		}
 
-        m_visibleClustersBuffer = CreateIndexedStructuredBuffer(maxVisibleClusters, sizeof(VisibleCluster), true, false);
+        m_visibleClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(static_cast<uint32_t>(maxVisibleClusters), sizeof(VisibleCluster), true, false);
 		m_visibleClustersBuffer->SetName("CLod Visible Clusters Buffer (uncompacted)");
-		m_histogramIndirectCommand = CreateIndexedStructuredBuffer(1, sizeof(RasterBucketsHistogramIndirectCommand), true, false);
+        m_histogramIndirectCommand = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterBucketsHistogramIndirectCommand), true, false);
 		m_histogramIndirectCommand->SetName("CLod Raster Buckets Histogram Indirect Command Buffer");
-		m_rasterBucketsHistogramBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(1, "Raster bucket histogram", true);
+        m_rasterBucketsHistogramBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+        m_rasterBucketsHistogramBuffer->SetName("Raster bucket histogram");
 
         flecs::entity typeEntity;
 		switch (type) {
@@ -79,27 +99,30 @@ public:
 				break;
 		}
 
-        m_visibleClustersCounterBuffer = CreateIndexedStructuredBuffer(1, sizeof(unsigned int), true, false);
+        m_visibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
 		m_visibleClustersCounterBuffer->SetName("CLod Visible Clusters Counter Buffer");
 		m_visibleClustersCounterBuffer->GetECSEntity()
             .set<Components::Resource>({ m_visibleClustersCounterBuffer })
 			.add<VisibleClustersCounterTag>()
 			.add<CLodExtensionTypeTag>(typeEntity);
 
-        m_workGraphTelemetryBuffer = CreateIndexedStructuredBuffer(CLodWorkGraphCounterCount, sizeof(uint32_t), true, false);
+        m_workGraphTelemetryBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodWorkGraphCounterCount, sizeof(uint32_t), true, false, false, false);
         m_workGraphTelemetryBuffer->SetName("CLod Work Graph Telemetry Buffer");
         m_workGraphTelemetryBuffer->GetECSEntity()
             .set<Components::Resource>({ m_workGraphTelemetryBuffer })
             .add<CLodWorkGraphTelemetryBufferTag>()
             .add<CLodExtensionTypeTag>(typeEntity);
 
-        m_rasterBucketsOffsetsBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(1, "CLod Raster bucket offsets", true);
-        m_rasterBucketsBlockSumsBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(1, "CLod Raster bucket block sums", true);
-        m_rasterBucketsScannedBlockSumsBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(1, "CLod Raster bucket scanned block sums", true);
-        m_rasterBucketsTotalCountBuffer = CreateIndexedStructuredBuffer(1, sizeof(uint32_t), true, false);
+        m_rasterBucketsOffsetsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
+        m_rasterBucketsOffsetsBuffer->SetName("CLod Raster bucket offsets");
+        m_rasterBucketsBlockSumsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
+        m_rasterBucketsBlockSumsBuffer->SetName("CLod Raster bucket block sums");
+        m_rasterBucketsScannedBlockSumsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
+        m_rasterBucketsScannedBlockSumsBuffer->SetName("CLod Raster bucket scanned block sums");
+        m_rasterBucketsTotalCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
         m_rasterBucketsTotalCountBuffer->SetName("CLod Raster bucket total count");
 
-		m_compactedVisibleClustersBuffer = CreateIndexedStructuredBuffer(maxVisibleClusters, sizeof(VisibleCluster), true, false);
+		m_compactedVisibleClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(static_cast<uint32_t>(maxVisibleClusters), sizeof(VisibleCluster), true, false);
 		m_compactedVisibleClustersBuffer->SetName("CLod Compacted Visible Clusters Buffer");
         // This tags the buffer with the extension type so passes can query for it with ECSResourceResolver
         m_compactedVisibleClustersBuffer->GetECSEntity()
@@ -107,8 +130,10 @@ public:
             .add<VisibleClustersBufferTag>()
             .add<CLodExtensionTypeTag>(typeEntity);
 
-		m_rasterBucketsWriteCursorBuffer = DynamicStructuredBuffer<uint32_t>::CreateShared(1, "CLod Raster bucket write cursor", true);
-		m_rasterBucketsIndirectArgsBuffer = DynamicStructuredBuffer<RasterizeClustersCommand>::CreateShared(1, "CLod Raster bucket indirect args", true);
+        m_rasterBucketsWriteCursorBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+        m_rasterBucketsWriteCursorBuffer->SetName("CLod Raster bucket write cursor");
+        m_rasterBucketsIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
+        m_rasterBucketsIndirectArgsBuffer->SetName("CLod Raster bucket indirect args");
 
 		m_type = type;
 	}
@@ -205,18 +230,18 @@ private:
 
     // Histogram Pass Buffers
     std::shared_ptr<Buffer> m_histogramIndirectCommand;
-    std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_rasterBucketsHistogramBuffer;
+    std::shared_ptr<Buffer> m_rasterBucketsHistogramBuffer;
 
 	// prefix scan buffers
-    std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_rasterBucketsOffsetsBuffer;
-    std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_rasterBucketsBlockSumsBuffer;
-    std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_rasterBucketsScannedBlockSumsBuffer;
+    std::shared_ptr<Buffer> m_rasterBucketsOffsetsBuffer;
+    std::shared_ptr<Buffer> m_rasterBucketsBlockSumsBuffer;
+    std::shared_ptr<Buffer> m_rasterBucketsScannedBlockSumsBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsTotalCountBuffer;
 
 	// Compaction Pass Buffers
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
-    std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_rasterBucketsWriteCursorBuffer;
-    std::shared_ptr<DynamicStructuredBuffer<RasterizeClustersCommand>> m_rasterBucketsIndirectArgsBuffer;
+    std::shared_ptr<Buffer> m_rasterBucketsWriteCursorBuffer;
+    std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBuffer;
 
 	// ---------------------------------------------------------------
 	// Hierarchial Culling Pass
@@ -519,7 +544,7 @@ private:
             std::shared_ptr<Buffer> visibleClustersBuffer, 
             std::shared_ptr<Buffer> visibleClustersCounterBuffer,
             std::shared_ptr<Buffer> histogramIndirectCommand,
-            std::shared_ptr<DynamicStructuredBuffer<uint32_t>> histogramBuffer) {
+            std::shared_ptr<Buffer> histogramBuffer) {
             CreatePipelines(
                 DeviceManager::GetInstance().GetDevice(),
                 PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -597,8 +622,8 @@ private:
 			auto numRasterBuckets = context.materialManager->GetRasterBucketCount();
 
 			// Resize histogram buffer if needed
-            if (m_histogramBuffer->Size() < numRasterBuckets) {
-                m_histogramBuffer->Resize(numRasterBuckets);
+            if (m_histogramBuffer->GetSize() < static_cast<size_t>(numRasterBuckets) * sizeof(uint32_t)) {
+                m_histogramBuffer->ResizeStructured(numRasterBuckets);
             }
 
             // Clear the histogram buffer
@@ -616,7 +641,7 @@ private:
 		std::shared_ptr<Buffer> m_visibleClustersBuffer;
 		std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
 		std::shared_ptr<Buffer> m_histogramIndirectCommand;
-		std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_histogramBuffer;
+        std::shared_ptr<Buffer> m_histogramBuffer;
 
         void CreatePipelines(
             rhi::Device device,
@@ -637,9 +662,9 @@ private:
     class RasterBucketBlockScanPass : public ComputePass {
     public:
         RasterBucketBlockScanPass(
-            std::shared_ptr<DynamicStructuredBuffer<uint32_t>> histogramBuffer,
-            std::shared_ptr<DynamicStructuredBuffer<uint32_t>> offsetsBuffer,
-            std::shared_ptr<DynamicStructuredBuffer<uint32_t>> blockSumsBuffer)
+            std::shared_ptr<Buffer> histogramBuffer,
+            std::shared_ptr<Buffer> offsetsBuffer,
+            std::shared_ptr<Buffer> blockSumsBuffer)
             : m_histogramBuffer(std::move(histogramBuffer)),
             m_offsetsBuffer(std::move(offsetsBuffer)),
             m_blockSumsBuffer(std::move(blockSumsBuffer)) {
@@ -692,11 +717,11 @@ private:
             auto numBuckets = context.materialManager->GetRasterBucketCount();
             const uint32_t numBlocks = (numBuckets + m_blockSize - 1) / m_blockSize;
 
-            if (m_offsetsBuffer->Size() < numBuckets) {
-                m_offsetsBuffer->Resize(numBuckets);
+            if (m_offsetsBuffer->GetSize() < static_cast<size_t>(numBuckets) * sizeof(uint32_t)) {
+                m_offsetsBuffer->ResizeStructured(numBuckets);
             }
-            if (m_blockSumsBuffer->Size() < numBlocks) {
-                m_blockSumsBuffer->Resize(numBlocks);
+            if (m_blockSumsBuffer->GetSize() < static_cast<size_t>(numBlocks) * sizeof(uint32_t)) {
+                m_blockSumsBuffer->ResizeStructured(numBlocks);
             }
         }
 
@@ -705,17 +730,17 @@ private:
     private:
         PipelineState m_pso;
         uint32_t m_blockSize = 1024;
-        std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_histogramBuffer;
-        std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_offsetsBuffer;
-        std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_blockSumsBuffer;
+        std::shared_ptr<Buffer> m_histogramBuffer;
+        std::shared_ptr<Buffer> m_offsetsBuffer;
+        std::shared_ptr<Buffer> m_blockSumsBuffer;
     };
 
     class RasterBucketBlockOffsetsPass : public ComputePass {
     public:
         RasterBucketBlockOffsetsPass(
-            std::shared_ptr<DynamicStructuredBuffer<uint32_t>> offsetsBuffer,
-            std::shared_ptr<DynamicStructuredBuffer<uint32_t>> blockSumsBuffer,
-            std::shared_ptr<DynamicStructuredBuffer<uint32_t>> scannedBlockSumsBuffer,
+            std::shared_ptr<Buffer> offsetsBuffer,
+            std::shared_ptr<Buffer> blockSumsBuffer,
+            std::shared_ptr<Buffer> scannedBlockSumsBuffer,
             std::shared_ptr<Buffer> totalCountBuffer)
             : m_offsetsBuffer(std::move(offsetsBuffer)),
             m_blockSumsBuffer(std::move(blockSumsBuffer)),
@@ -772,8 +797,8 @@ private:
             auto numBuckets = context.materialManager->GetRasterBucketCount();
             const uint32_t numBlocks = (numBuckets + m_blockSize - 1) / m_blockSize;
 
-            if (m_scannedBlockSumsBuffer->Size() < numBlocks) {
-                m_scannedBlockSumsBuffer->Resize(numBlocks);
+            if (m_scannedBlockSumsBuffer->GetSize() < static_cast<size_t>(numBlocks) * sizeof(uint32_t)) {
+                m_scannedBlockSumsBuffer->ResizeStructured(numBlocks);
             }
         }
 
@@ -782,9 +807,9 @@ private:
     private:
         PipelineState m_pso;
         uint32_t m_blockSize = 1024;
-        std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_offsetsBuffer;
-        std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_blockSumsBuffer;
-        std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_scannedBlockSumsBuffer;
+        std::shared_ptr<Buffer> m_offsetsBuffer;
+        std::shared_ptr<Buffer> m_blockSumsBuffer;
+        std::shared_ptr<Buffer> m_scannedBlockSumsBuffer;
         std::shared_ptr<Buffer> m_totalCountBuffer;
     };
 
@@ -794,11 +819,11 @@ private:
             std::shared_ptr<Buffer> visibleClustersBuffer,
             std::shared_ptr<Buffer> visibleClustersCounterBuffer,
             std::shared_ptr<Buffer> indirectCommand,
-            std::shared_ptr<DynamicStructuredBuffer<uint32_t>> histogramBuffer,
-            std::shared_ptr<DynamicStructuredBuffer<uint32_t>> offsetsBuffer,
-            std::shared_ptr<DynamicStructuredBuffer<uint32_t>> writeCursorBuffer,
+            std::shared_ptr<Buffer> histogramBuffer,
+            std::shared_ptr<Buffer> offsetsBuffer,
+            std::shared_ptr<Buffer> writeCursorBuffer,
             std::shared_ptr<Buffer> compactedClustersBuffer,
-            std::shared_ptr<DynamicStructuredBuffer<RasterizeClustersCommand>> indirectArgsBuffer,
+            std::shared_ptr<Buffer> indirectArgsBuffer,
             uint64_t maxVisibleClusters)
             : m_visibleClustersBuffer(std::move(visibleClustersBuffer)),
             m_visibleClustersCounterBuffer(std::move(visibleClustersCounterBuffer)),
@@ -896,11 +921,11 @@ private:
         void Update(const UpdateContext& context) override {
             auto numBuckets = context.materialManager->GetRasterBucketCount();
 
-            if (m_writeCursorBuffer->Size() < numBuckets) {
-                m_writeCursorBuffer->Resize(numBuckets);
+            if (m_writeCursorBuffer->GetSize() < static_cast<size_t>(numBuckets) * sizeof(uint32_t)) {
+                m_writeCursorBuffer->ResizeStructured(numBuckets);
             }
-            if (m_indirectArgsBuffer->Size() < numBuckets) {
-                m_indirectArgsBuffer->Resize(numBuckets);
+            if (m_indirectArgsBuffer->GetSize() < static_cast<size_t>(numBuckets) * sizeof(RasterizeClustersCommand)) {
+                m_indirectArgsBuffer->ResizeStructured(numBuckets);
             }
 
             std::vector<uint32_t> zeroData(numBuckets, 0u);
@@ -919,11 +944,11 @@ private:
         std::shared_ptr<Buffer> m_visibleClustersBuffer;
         std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
 		std::shared_ptr<Buffer> m_indirectCommand;
-        std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_histogramBuffer;
-        std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_offsetsBuffer;
-        std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_writeCursorBuffer;
+        std::shared_ptr<Buffer> m_histogramBuffer;
+        std::shared_ptr<Buffer> m_offsetsBuffer;
+        std::shared_ptr<Buffer> m_writeCursorBuffer;
         std::shared_ptr<Buffer> m_compactedClustersBuffer;
-        std::shared_ptr<DynamicStructuredBuffer<RasterizeClustersCommand>> m_indirectArgsBuffer;
+        std::shared_ptr<Buffer> m_indirectArgsBuffer;
 
         uint64_t m_maxVisibleClusters = 0;
     };
@@ -952,15 +977,16 @@ private:
         ClusterRasterizationPass(
 			ClusterRasterizationPassInputs inputs,
             std::shared_ptr<Buffer> compactedVisibleClustersBuffer,
-            std::shared_ptr<DynamicStructuredBuffer<uint32_t>> rasterBucketsHistogramBuffer,
-            std::shared_ptr<DynamicStructuredBuffer<RasterizeClustersCommand>> rasterBucketsIndirectArgsBuffer)
+            std::shared_ptr<Buffer> rasterBucketsHistogramBuffer,
+            std::shared_ptr<Buffer> rasterBucketsIndirectArgsBuffer)
             : m_compactedVisibleClustersBuffer(std::move(compactedVisibleClustersBuffer)),
             m_rasterBucketsHistogramBuffer(std::move(rasterBucketsHistogramBuffer)),
             m_rasterBucketsIndirectArgsBuffer(std::move(rasterBucketsIndirectArgsBuffer)) {
             m_wireframe = inputs.wireframe;
             m_clearGbuffer = inputs.clearGbuffer;
 
-            m_viewRasterInfoBuffer = DynamicStructuredBuffer<CLodViewRasterInfo>::CreateShared(1, "CLodViewRasterInfoBuffer", false);
+            m_viewRasterInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodViewRasterInfo), false, false, false, false);
+            m_viewRasterInfoBuffer->SetName("CLodViewRasterInfoBuffer");
             
             // Create rasterization indirect command signature
             rhi::IndirectArg args[] = {
@@ -1065,7 +1091,7 @@ private:
             if (m_viewRasterInfos != viewRasterInfo) {
                 m_viewRasterInfos = viewRasterInfo;
                 // Update the buffer
-                m_viewRasterInfoBuffer->Resize(static_cast<uint32_t>(m_viewRasterInfos.size()));
+                m_viewRasterInfoBuffer->ResizeStructured(static_cast<uint32_t>(m_viewRasterInfos.size()));
                 BUFFER_UPLOAD(
                     m_viewRasterInfos.data(),
                     static_cast<uint32_t>(m_viewRasterInfos.size() * sizeof(CLodViewRasterInfo)),
@@ -1151,12 +1177,12 @@ private:
 		std::vector<std::shared_ptr<PixelBuffer>> m_visibilityBuffers;
 
         std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
-        std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_rasterBucketsHistogramBuffer;
-        std::shared_ptr<DynamicStructuredBuffer<RasterizeClustersCommand>> m_rasterBucketsIndirectArgsBuffer;
+        std::shared_ptr<Buffer> m_rasterBucketsHistogramBuffer;
+        std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBuffer;
 
 		rhi::CommandSignaturePtr m_rasterizationCommandSignature;
 
-        std::shared_ptr<DynamicStructuredBuffer<CLodViewRasterInfo>> m_viewRasterInfoBuffer;
+        std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
         uint32_t m_passWidth = 1;
         uint32_t m_passHeight = 1;
 		bool m_declaredResourcesChanged = true;

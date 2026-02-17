@@ -13,6 +13,7 @@
 #include "Resources/Components.h"
 #include "Resources/MemoryStatisticsComponents.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
+#include "Resources/Buffers/Buffer.h"
 
 IndirectCommandBufferManager::IndirectCommandBufferManager() {
     m_indirectCommandsResourceGroup = std::make_shared<ResourceGroup>("IndirectCommandBuffers");

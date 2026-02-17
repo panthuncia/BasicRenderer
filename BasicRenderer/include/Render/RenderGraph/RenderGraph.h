@@ -19,6 +19,10 @@
 #include "Render/CommandListPool.h"
 #include "Managers/CommandRecordingManager.h"
 #include "Interfaces/IPassBuilder.h"
+#include "Resources/PixelBuffer.h"
+#include "Resources/Buffers/Buffer.h"
+#include "Resources/TrackedAllocation.h"
+#include "Render/RenderGraph/Aliasing/RenderGraphAliasingSubsystem.h"
 
 class Resource;
 class RenderPassBuilder;
@@ -61,6 +65,13 @@ constexpr uint8_t to_u8(PassRunMask v) noexcept {
 constexpr PassRunMask& operator&=(PassRunMask& a, PassRunMask b) noexcept { return a = (a & b); }
 constexpr PassRunMask& operator|=(PassRunMask& a, PassRunMask b) noexcept { return a = (a | b); }
 constexpr PassRunMask& operator^=(PassRunMask& a, PassRunMask b) noexcept { return a = (a ^ b); }
+
+enum class AutoAliasMode : uint8_t {
+	Off = 0,
+	Conservative = 1,
+	Balanced = 2,
+	Aggressive = 3
+};
 
 class RenderGraph {
 public:
@@ -200,6 +211,11 @@ public:
 
 	RenderGraph();
 	~RenderGraph();
+	using AutoAliasReasonCount = rg::alias::AutoAliasReasonCount;
+	using AutoAliasPoolRangeDebug = rg::alias::AutoAliasPoolRangeDebug;
+	using AutoAliasPoolDebug = rg::alias::AutoAliasPoolDebug;
+	using AutoAliasDebugSnapshot = rg::alias::AutoAliasDebugSnapshot;
+	AutoAliasDebugSnapshot GetAutoAliasDebugSnapshot() const;
 	void AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassParameters& resources, std::string name = "");
 	void AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassParameters& resources, std::string name = "");
 	void Update(const UpdateContext& context, rhi::Device device);
@@ -280,6 +296,30 @@ private:
 		std::unordered_map<uint64_t, unsigned int> usageHistCompute;
 		std::unordered_map<uint64_t, unsigned int> usageHistRender;
 	};
+	
+	enum class AccessKind : uint8_t { Read, Write };
+
+	struct Node {
+		size_t   passIndex = 0;
+		bool     isCompute = false;
+		uint32_t originalOrder = 0;
+
+		// Expanded IDs (aliases + group/child fixpoint)
+		std::vector<uint64_t> touchedIDs;
+		std::vector<uint64_t> uavIDs;
+
+		// For dependency building: per expanded ID, strongest access in this pass.
+		// Write dominates read.
+		std::unordered_map<uint64_t, AccessKind> accessByID;
+
+		// DAG
+		std::vector<size_t> out;
+		std::vector<size_t> in;
+		uint32_t indegree = 0;
+
+		// Longest-path-to-sink (for tie-breaking)
+		uint32_t criticality = 0;
+	};
 
 	std::vector<IResourceProvider*> _providers;
 	ResourceRegistry _registry;
@@ -295,15 +335,25 @@ private:
 	std::unordered_map<std::string, std::shared_ptr<ComputePass>> computePassesByName;
 	std::unordered_map<std::string, std::shared_ptr<Resource>> resourcesByName;
 	std::unordered_map<uint64_t, std::shared_ptr<Resource>> resourcesByID;
+	std::unordered_map<uint64_t, uint64_t> resourceBackingGenerationByID;
+	std::unordered_map<uint64_t, uint32_t> resourceIdleFrameCounts;
+	std::unordered_map<uint64_t, uint64_t> compiledResourceGenerationByID;
+	using ResourceMaterializeOptions = std::variant<PixelBuffer::MaterializeOptions, BufferBase::MaterializeOptions>;
+	std::unordered_map<uint64_t, ResourceMaterializeOptions> aliasMaterializeOptionsByID;
+	std::unordered_map<uint64_t, uint64_t> aliasPlacementSignatureByID;
+	std::unordered_map<uint64_t, uint64_t> aliasPlacementPoolByID;
+	std::unordered_set<uint64_t> aliasActivationPending;
 
-	std::unordered_map<uint64_t, std::unordered_set<uint64_t>> aliasedResources; // Tracks resources that use the same memory
-	std::unordered_map<uint64_t, size_t> resourceToAliasGroup;
-	std::vector<std::vector<uint64_t>>   aliasGroups;
-	std::vector<std::unordered_map<UINT,uint64_t>> lastActiveSubresourceInAliasGroup;
+	using PersistentAliasPoolState = rg::alias::PersistentAliasPoolState;
+	std::unordered_map<uint64_t, PersistentAliasPoolState> persistentAliasPools;
+	uint64_t aliasPoolPlanFrameIndex = 0;
+	uint32_t aliasPoolRetireIdleFrames = 120;
+	float aliasPoolGrowthHeadroom = 1.5f;
 
 	std::unordered_map<uint64_t, ResourceTransition> initialTransitions; // Transitions needed to reach the initial state of the resources before executing the first batch. Executed on graph setup.
 	std::vector<PassBatch> batches;
 	std::unordered_map<uint64_t, SymbolicTracker*> trackers; // Tracks the state of resources in the graph.
+	std::unordered_map<uint64_t, SymbolicTracker> compileTrackers; // Compile-only symbolic state, decoupled from backing lifetime.
 
 	std::unique_ptr<CommandListPool> m_graphicsCommandListPool;
 	std::unique_ptr<CommandListPool> m_computeCommandListPool;
@@ -338,6 +388,15 @@ private:
 	std::function<bool()> m_getUseAsyncCompute;
 
 	void AddResource(std::shared_ptr<Resource> resource, bool transition = false);
+	void MaterializeUnmaterializedResources(const std::unordered_set<uint64_t>* onlyResourceIDs = nullptr);
+	SymbolicTracker& GetOrCreateCompileTracker(Resource* resource, uint64_t resourceID);
+	void MaterializeReferencedResources(
+		const std::vector<ResourceRequirement>& resourceRequirements,
+		const std::vector<std::pair<ResourceHandleAndRange, ResourceState>>& internalTransitions);
+	std::unordered_set<uint64_t> CollectFrameResourceIDs() const;
+	void ApplyIdleDematerializationPolicy(const std::unordered_set<uint64_t>& usedResourceIDs);
+	void SnapshotCompiledResourceGenerations(const std::unordered_set<uint64_t>& usedResourceIDs);
+	void ValidateCompiledResourceGenerations() const;
 
 	void RefreshRetainedDeclarationsForFrame(RenderPassAndResources& p, uint8_t frameIndex);
 	void RefreshRetainedDeclarationsForFrame(ComputePassAndResources& p, uint8_t frameIndex);
@@ -470,27 +529,6 @@ private:
 		const ResourceRequirement& r,
 		std::unordered_set<uint64_t>& outTransitionedResourceIDs);
 
-	std::vector<uint64_t> GetAllAliasIDs(uint64_t id) const {
-		auto it = resourceToAliasGroup.find(id);
-		if (it == resourceToAliasGroup.end()) {
-			// not aliased
-			return { id };
-		}
-		uint64_t group = it->second;
-		std::vector<uint64_t> out;
-		// scan for any resource mapped to the same group
-		for (auto const& p : resourceToAliasGroup) {
-			if (p.second == group)
-				out.push_back(p.first);
-		}
-		return out;
-	}
-
-	std::vector<uint64_t> ExpandSchedulingIDs(uint64_t id) const;
-
-
-	enum class AccessKind : uint8_t { Read, Write };
-
 	static inline bool IsUAVState(const ResourceState& s) noexcept {
 		return ((s.access & rhi::ResourceAccessType::UnorderedAccess) != 0) ||
 			(s.layout == rhi::ResourceLayout::UnorderedAccess);
@@ -502,32 +540,12 @@ private:
 		std::vector<std::pair<ResourceHandleAndRange, ResourceState>>* internalTransitions = nullptr;
 	};
 
-	struct Node {
-		size_t   passIndex = 0;
-		bool     isCompute = false;
-		uint32_t originalOrder = 0;
-
-		// Expanded IDs (aliases + group/child fixpoint)
-		std::vector<uint64_t> touchedIDs;
-		std::vector<uint64_t> uavIDs;
-
-		// For dependency building: per expanded ID, strongest access in this pass.
-		// Write dominates read.
-		std::unordered_map<uint64_t, AccessKind> accessByID;
-
-		// DAG
-		std::vector<size_t> out;
-		std::vector<size_t> in;
-		uint32_t indegree = 0;
-
-		// Longest-path-to-sink (for tie-breaking)
-		uint32_t criticality = 0;
-	};
-
 	struct SeqState {
 		std::optional<size_t> lastWriter;
 		std::vector<size_t>   readsSinceWrite;
 	};
+
+	using AutoAliasPlannerStats = rg::alias::AutoAliasPlannerStats;
 
 	static PassView GetPassView(AnyPassAndResources& pr);
 	static bool BuildDependencyGraph(std::vector<Node>& nodes);
@@ -559,6 +577,19 @@ private:
 		std::vector<AnyPassAndResources>& passes,
 		std::vector<Node>& nodes);
 
+	std::unordered_map<uint64_t, uint64_t> autoAliasPoolByID;
+	std::unordered_map<uint64_t, std::string> autoAliasExclusionReasonByID;
+	std::vector<AutoAliasReasonCount> autoAliasExclusionReasonSummary;
+	std::vector<AutoAliasPoolDebug> autoAliasPoolDebug;
+	AutoAliasPlannerStats autoAliasPlannerStats;
+	AutoAliasMode autoAliasModeLastFrame = AutoAliasMode::Off;
+	std::function<AutoAliasMode()> m_getAutoAliasMode;
+	std::function<bool()> m_getAutoAliasLogExclusionReasons;
+	std::function<uint32_t()> m_getAutoAliasPoolRetireIdleFrames;
+	std::function<float()> m_getAutoAliasPoolGrowthHeadroom;
+	rg::alias::RenderGraphAliasingSubsystem m_aliasingSubsystem;
+
 	friend class RenderPassBuilder;
 	friend class ComputePassBuilder;
+	friend class rg::alias::RenderGraphAliasingSubsystem;
 };

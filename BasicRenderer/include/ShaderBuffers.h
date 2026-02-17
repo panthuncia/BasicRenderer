@@ -210,7 +210,7 @@ namespace XeGTAO {
         DirectX::XMUINT2 ViewportSize;
         DirectX::XMFLOAT2 ViewportPixelSize; // .zw == 1.0 / ViewportSize.xy
 
-        DirectX::XMFLOAT2 DepthUnpackConsts;
+        DirectX::XMFLOAT2 DepthUnpackConsts; // UNUSED if source depth is linear view depth.
         DirectX::XMFLOAT2 CameraTanHalfFOV;
 
         DirectX::XMFLOAT2 NDCToViewMul;
@@ -221,6 +221,7 @@ namespace XeGTAO {
         float EffectFalloffRange;
 
         float RadiusMultiplier;
+        DirectX::XMFLOAT2 SourceDepthUVScale; // Scale UVs when sampling source depth if texture is padded (e.g. to next power-of-two).
         float Padding0;
         float FinalValuePower;
         float DenoiseBlurBeta;
@@ -234,29 +235,6 @@ namespace XeGTAO {
 
 struct GTAOInfo {
     XeGTAO::GTAOConstants g_GTAOConstants;
-
-    uint g_samplerPointClampDescriptorIndex;
-    uint g_srcRawDepthDescriptorIndex; // source depth buffer data (in NDC space in DirectX)
-    uint g_outWorkingDepthMIP0DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
-    uint g_outWorkingDepthMIP1DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
-    
-    uint g_outWorkingDepthMIP2DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
-    uint g_outWorkingDepthMIP3DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
-    uint g_outWorkingDepthMIP4DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
-    // input output textures for the second pass (XeGTAO_MainPass)
-    uint g_srcWorkingDepthDescriptorIndex; // viewspace depth with MIPs, output by XeGTAO_PrefilterDepths16x16 and consumed by XeGTAO_MainPass
-    
-    uint g_srcNormalmapDescriptorIndex; // source normal map
-    uint g_srcHilbertLUTDescriptorIndex; // hilbert lookup table  (if any) (unused)
-    uint g_outWorkingAOTermDescriptorIndex; // output AO term (includes bent normals if enabled - packed as R11G11B10 scaled by AO)// // Moved to root constant
-    uint g_outWorkingEdgesDescriptorIndex; // output depth-based edges used by the denoiser
-    
-    uint g_outNormalmapDescriptorIndex; // output viewspace normals if generating from depth (unused)
-    // input output textures for the third pass (XeGTAO_Denoise)
-    //uint g_srcWorkingAOTermDescriptorIndex; // coming from previous pass // Moved to root constant
-    uint g_srcWorkingEdgesDescriptorIndex; // coming from previous pass
-    uint g_outFinalAOTermDescriptorIndex; // final AO term - just 'visibility' or 'visibility + bent normals'
-    uint pad[1];
 };
 
 struct EnvironmentInfo {

@@ -8,15 +8,16 @@
 
 #include "ShaderBuffers.h"
 #include "spdlog/spdlog.h"
-#include "Resources/Buffers/Buffer.h"
 #include "Render/DescriptorHeap.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
+#include "Resources/GloballyIndexedResource.h"
 
 using namespace Microsoft::WRL;
 
 class BufferView;
 class SortedUnsignedIntBuffer;
+class Buffer;
 
 class ResourceManager {
 public:
@@ -68,6 +69,15 @@ public:
     };
 
     void AssignDescriptorSlots(
+        GloballyIndexedResource& target,
+        rhi::Resource& apiResource,
+        const ViewRequirements& req);
+
+    void ReserveDescriptorSlots(
+        GloballyIndexedResource& target,
+        const ViewRequirements& req);
+
+    void UpdateDescriptorContents(
         GloballyIndexedResource& target,
         rhi::Resource& apiResource,
         const ViewRequirements& req);
