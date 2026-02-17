@@ -842,11 +842,18 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 			return std::make_tuple(std::move(resourcePlacements), heapEnd, poolAlignment);
 		};
 
-		auto planWithBranchAndBound = [&]() {
+		auto planWithBeamSearch = [&]() {
 			struct PlannedRange {
 				size_t candidateIndex = 0;
 				uint64_t startByte = 0;
 				uint64_t endByte = 0;
+			};
+
+			struct BeamState {
+				std::vector<PlannedRange> placedRanges;
+				std::vector<uint8_t> placedMask;
+				uint64_t heapSize = 0;
+				double score = 0.0;
 			};
 
 			std::unordered_map<uint64_t, Placement> bestPlacements;
@@ -855,6 +862,11 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 			for (const auto& c : poolCandidates) {
 				poolAlignment = std::max(poolAlignment, c.alignment);
 			}
+
+			auto [greedyPlacements, greedyHeapSize, greedyAlignment] = planWithGreedySweepLine();
+			bestPlacements = std::move(greedyPlacements);
+			bestHeapSize = greedyHeapSize;
+			poolAlignment = std::max(poolAlignment, greedyAlignment);
 
 			std::vector<size_t> candidateOrder;
 			candidateOrder.reserve(poolCandidates.size());
@@ -907,134 +919,160 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 				return out;
 			};
 
-			uint64_t visitedNodeCount = 0;
-			bool aborted = false;
-			constexpr uint64_t kMaxVisitedNodes = 250000;
-			constexpr size_t kCandidateStartsPerNode = 12;
+			constexpr size_t kBeamWidth = 24;
+			constexpr size_t kCandidateStartsPerState = 8;
+			bool truncated = false;
 
-			std::vector<PlannedRange> placedRanges;
-			placedRanges.reserve(poolCandidates.size());
-			std::vector<uint8_t> placedMask(poolCandidates.size(), 0);
-
-			std::function<void(uint64_t)> dfs = [&](uint64_t currentHeapSize) {
-				if (aborted) {
-					return;
+			auto scoreState = [](const BeamState& state) {
+				double wastePenalty = 0.0;
+				for (const auto& placed : state.placedRanges) {
+					wastePenalty += static_cast<double>(placed.endByte - placed.startByte);
 				}
+				return static_cast<double>(state.heapSize) + (0.000001 * wastePenalty);
+			};
 
-				if (++visitedNodeCount > kMaxVisitedNodes) {
-					aborted = true;
-					return;
-				}
+			BeamState initialState{};
+			initialState.heapSize = 0;
+			initialState.placedMask.assign(poolCandidates.size(), 0);
+			initialState.placedRanges.reserve(poolCandidates.size());
+			initialState.score = 0.0;
 
-				if (currentHeapSize >= bestHeapSize) {
-					return;
-				}
+			std::vector<BeamState> beam;
+			beam.push_back(std::move(initialState));
 
-				if (placedRanges.size() == poolCandidates.size()) {
-					bestHeapSize = currentHeapSize;
-					bestPlacements = buildPlacementMap(placedRanges);
-					return;
-				}
+			for (size_t depth = 0; depth < poolCandidates.size() && !beam.empty(); ++depth) {
+				std::vector<BeamState> nextBeam;
+				nextBeam.reserve(beam.size() * kCandidateStartsPerState);
 
-				size_t nextCandidateIndex = std::numeric_limits<size_t>::max();
-				for (size_t orderedIndex : candidateOrder) {
-					if (!placedMask[orderedIndex]) {
-						nextCandidateIndex = orderedIndex;
-						break;
-					}
-				}
-				if (nextCandidateIndex == std::numeric_limits<size_t>::max()) {
-					return;
-				}
-
-				const auto& nextCandidate = poolCandidates[nextCandidateIndex];
-				std::vector<uint64_t> candidateStarts;
-				candidateStarts.reserve(1 + placedRanges.size());
-				candidateStarts.push_back(0ull);
-
-				for (const auto& placed : placedRanges) {
-					const auto& placedCandidate = poolCandidates[placed.candidateIndex];
-					if (lifetimesOverlap(nextCandidate, placedCandidate)) {
-						candidateStarts.push_back(placed.endByte);
-					}
-				}
-
-				std::vector<std::pair<uint64_t, uint64_t>> feasibleStarts;
-				feasibleStarts.reserve(candidateStarts.size());
-				std::unordered_set<uint64_t> dedupStarts;
-				dedupStarts.reserve(candidateStarts.size() * 2 + 1);
-
-				for (uint64_t rawStart : candidateStarts) {
-					const uint64_t alignedStart = AlignUpU64(rawStart, nextCandidate.alignment);
-					if (!dedupStarts.insert(alignedStart).second) {
-						continue;
-					}
-
-					const uint64_t alignedEnd = alignedStart + nextCandidate.sizeBytes;
-					bool conflicts = false;
-					for (const auto& placed : placedRanges) {
-						const auto& placedCandidate = poolCandidates[placed.candidateIndex];
-						if (!lifetimesOverlap(nextCandidate, placedCandidate)) {
-							continue;
-						}
-						if (intervalOverlaps(alignedStart, alignedEnd, placed.startByte, placed.endByte)) {
-							conflicts = true;
+				for (const auto& state : beam) {
+					size_t nextCandidateIndex = std::numeric_limits<size_t>::max();
+					for (size_t orderedIndex : candidateOrder) {
+						if (!state.placedMask[orderedIndex]) {
+							nextCandidateIndex = orderedIndex;
 							break;
 						}
 					}
-
-					if (!conflicts) {
-						const uint64_t resultingHeap = std::max(currentHeapSize, alignedEnd);
-						feasibleStarts.emplace_back(alignedStart, resultingHeap);
-					}
-				}
-
-				if (feasibleStarts.empty()) {
-					const uint64_t appendStart = AlignUpU64(currentHeapSize, nextCandidate.alignment);
-					const uint64_t appendEnd = appendStart + nextCandidate.sizeBytes;
-					feasibleStarts.emplace_back(appendStart, appendEnd);
-				}
-
-				std::sort(feasibleStarts.begin(), feasibleStarts.end(), [](const auto& a, const auto& b) {
-					if (a.second != b.second) {
-						return a.second < b.second;
-					}
-					return a.first < b.first;
-				});
-
-				if (feasibleStarts.size() > kCandidateStartsPerNode) {
-					feasibleStarts.resize(kCandidateStartsPerNode);
-				}
-
-				placedMask[nextCandidateIndex] = 1;
-				for (const auto& [startByte, resultingHeap] : feasibleStarts) {
-					if (resultingHeap >= bestHeapSize) {
+					if (nextCandidateIndex == std::numeric_limits<size_t>::max()) {
+						if (state.heapSize < bestHeapSize) {
+							bestHeapSize = state.heapSize;
+							bestPlacements = buildPlacementMap(state.placedRanges);
+						}
 						continue;
 					}
-					placedRanges.push_back(PlannedRange{
-						.candidateIndex = nextCandidateIndex,
-						.startByte = startByte,
-						.endByte = startByte + nextCandidate.sizeBytes,
+
+					const auto& nextCandidate = poolCandidates[nextCandidateIndex];
+					std::vector<uint64_t> candidateStarts;
+					candidateStarts.reserve(1 + state.placedRanges.size());
+					candidateStarts.push_back(0ull);
+
+					for (const auto& placed : state.placedRanges) {
+						const auto& placedCandidate = poolCandidates[placed.candidateIndex];
+						if (lifetimesOverlap(nextCandidate, placedCandidate)) {
+							candidateStarts.push_back(placed.endByte);
+						}
+					}
+
+					std::vector<std::pair<uint64_t, uint64_t>> feasibleStarts;
+					feasibleStarts.reserve(candidateStarts.size());
+					std::unordered_set<uint64_t> dedupStarts;
+					dedupStarts.reserve(candidateStarts.size() * 2 + 1);
+
+					for (uint64_t rawStart : candidateStarts) {
+						const uint64_t alignedStart = AlignUpU64(rawStart, nextCandidate.alignment);
+						if (!dedupStarts.insert(alignedStart).second) {
+							continue;
+						}
+
+						const uint64_t alignedEnd = alignedStart + nextCandidate.sizeBytes;
+						bool conflicts = false;
+						for (const auto& placed : state.placedRanges) {
+							const auto& placedCandidate = poolCandidates[placed.candidateIndex];
+							if (!lifetimesOverlap(nextCandidate, placedCandidate)) {
+								continue;
+							}
+							if (intervalOverlaps(alignedStart, alignedEnd, placed.startByte, placed.endByte)) {
+								conflicts = true;
+								break;
+							}
+						}
+
+						if (!conflicts) {
+							const uint64_t resultingHeap = std::max(state.heapSize, alignedEnd);
+							if (resultingHeap < bestHeapSize) {
+								feasibleStarts.emplace_back(alignedStart, resultingHeap);
+							}
+						}
+					}
+
+					if (feasibleStarts.empty()) {
+						const uint64_t appendStart = AlignUpU64(state.heapSize, nextCandidate.alignment);
+						const uint64_t appendEnd = appendStart + nextCandidate.sizeBytes;
+						if (appendEnd < bestHeapSize) {
+							feasibleStarts.emplace_back(appendStart, appendEnd);
+						}
+					}
+
+					std::sort(feasibleStarts.begin(), feasibleStarts.end(), [](const auto& a, const auto& b) {
+						if (a.second != b.second) {
+							return a.second < b.second;
+						}
+						return a.first < b.first;
 					});
-					dfs(resultingHeap);
-					placedRanges.pop_back();
-					if (aborted) {
-						break;
+
+					if (feasibleStarts.size() > kCandidateStartsPerState) {
+						feasibleStarts.resize(kCandidateStartsPerState);
+						truncated = true;
+					}
+
+					for (const auto& [startByte, resultingHeap] : feasibleStarts) {
+						BeamState newState = state;
+						newState.placedMask[nextCandidateIndex] = 1;
+						newState.heapSize = resultingHeap;
+						newState.placedRanges.push_back(PlannedRange{
+							.candidateIndex = nextCandidateIndex,
+							.startByte = startByte,
+							.endByte = startByte + nextCandidate.sizeBytes,
+						});
+						newState.score = scoreState(newState);
+						nextBeam.push_back(std::move(newState));
 					}
 				}
-				placedMask[nextCandidateIndex] = 0;
-			};
 
-			dfs(0ull);
+				if (nextBeam.empty()) {
+					break;
+				}
+
+				std::sort(nextBeam.begin(), nextBeam.end(), [](const BeamState& a, const BeamState& b) {
+					if (a.score != b.score) {
+						return a.score < b.score;
+					}
+					return a.heapSize < b.heapSize;
+				});
+
+				if (nextBeam.size() > kBeamWidth) {
+					nextBeam.resize(kBeamWidth);
+					truncated = true;
+				}
+
+				beam = std::move(nextBeam);
+			}
+
+			for (const auto& state : beam) {
+				if (state.placedRanges.size() == poolCandidates.size() && state.heapSize < bestHeapSize) {
+					bestHeapSize = state.heapSize;
+					bestPlacements = buildPlacementMap(state.placedRanges);
+				}
+			}
 
 			if (bestPlacements.empty()) {
 				auto [fallbackPlacements, fallbackHeapSize, fallbackAlignment] = planWithGreedySweepLine();
 				bestPlacements = std::move(fallbackPlacements);
 				bestHeapSize = fallbackHeapSize;
 				poolAlignment = std::max(poolAlignment, fallbackAlignment);
+				truncated = true;
 			}
 
-			return std::make_tuple(std::move(bestPlacements), bestHeapSize, poolAlignment, aborted);
+			return std::make_tuple(std::move(bestPlacements), bestHeapSize, poolAlignment, truncated);
 		};
 
 		std::unordered_map<uint64_t, Placement> placements;
@@ -1049,13 +1087,13 @@ void rg::alias::RenderGraphAliasingSubsystem::BuildAliasPlanAfterDag(RenderGraph
 			break;
 		}
 		case AutoAliasPackingStrategy::BranchAndBound: {
-			auto [plannedPlacements, plannedHeapSize, plannedPoolAlignment, searchAborted] = planWithBranchAndBound();
+			auto [plannedPlacements, plannedHeapSize, plannedPoolAlignment, searchTruncated] = planWithBeamSearch();
 			placements = std::move(plannedPlacements);
 			heapSize = plannedHeapSize;
 			poolAlignment = plannedPoolAlignment;
-			if (searchAborted) {
+			if (searchTruncated) {
 				spdlog::info(
-					"RG alias search truncated: pool={} candidates={} visitedLimitReached=1 resultingRequiredBytes={}",
+					"RG alias beam search truncated: pool={} candidates={} resultingRequiredBytes={}",
 					poolID,
 					poolCandidates.size(),
 					heapSize);

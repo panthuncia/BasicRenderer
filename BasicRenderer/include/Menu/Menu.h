@@ -1622,7 +1622,7 @@ inline void Menu::DrawAutoAliasPlannerWindow() {
 
     constexpr const char* kPackingStrategyNames[] = {
         "Greedy Sweep-Line",
-        "Branch & Bound",
+        "Beam Search (Near-Optimal)",
     };
 
     int packingStrategyIndex = static_cast<int>(m_autoAliasPackingStrategy);
@@ -1670,7 +1670,7 @@ inline void Menu::DrawAutoAliasPlannerWindow() {
 
         const auto snapshot = m_renderGraph->GetAutoAliasDebugSnapshot();
         constexpr const char* kModeNames[] = { "Off", "Conservative", "Balanced", "Aggressive" };
-        constexpr const char* kStrategyNames[] = { "Greedy Sweep-Line", "Near-Optimal (Branch & Bound)" };
+        constexpr const char* kStrategyNames[] = { "Greedy Sweep-Line", "Beam Search (Near-Optimal)" };
         const int modeIdx = std::clamp(static_cast<int>(snapshot.mode), 0, static_cast<int>(IM_ARRAYSIZE(kModeNames) - 1));
         const int strategyIdx = std::clamp(static_cast<int>(snapshot.packingStrategy), 0, static_cast<int>(IM_ARRAYSIZE(kStrategyNames) - 1));
         ImGui::Text("Active mode: %s", kModeNames[modeIdx]);
