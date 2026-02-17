@@ -1690,6 +1690,144 @@ inline void Menu::DrawAutoAliasPlannerWindow() {
         ImGui::BulletText("Pooled: %.2f MB", pooledMB);
         ImGui::BulletText("Saved: %.2f MB (%.1f%%)", savedMB, savedPct);
 
+        if (!snapshot.poolDebug.empty()) {
+            ImGui::Separator();
+            ImGui::TextUnformatted("Pool byte overlap view");
+
+            for (const auto& pool : snapshot.poolDebug) {
+                ImGui::PushID(static_cast<int>(pool.poolID & 0x7fffffff));
+
+                const double requiredMB = static_cast<double>(pool.requiredBytes) / (1024.0 * 1024.0);
+                const double reservedMB = static_cast<double>(pool.reservedBytes) / (1024.0 * 1024.0);
+                const std::string header = std::format(
+                    "Pool {} (resources={}, required={:.2f} MB, reserved={:.2f} MB)",
+                    static_cast<unsigned long long>(pool.poolID),
+                    pool.ranges.size(),
+                    requiredMB,
+                    reservedMB);
+
+                if (ImGui::TreeNode(header.c_str())) {
+                    if (pool.ranges.empty()) {
+                        ImGui::TextDisabled("No ranges");
+                        ImGui::TreePop();
+                        ImGui::PopID();
+                        continue;
+                    }
+
+                    std::vector<RenderGraph::AutoAliasPoolRangeDebug> ranges = pool.ranges;
+                    std::sort(ranges.begin(), ranges.end(), [](const auto& a, const auto& b) {
+                        if (a.startByte != b.startByte) {
+                            return a.startByte < b.startByte;
+                        }
+                        return a.resourceID < b.resourceID;
+                        });
+
+                    uint64_t maxByte = std::max<uint64_t>(1ull, std::max(pool.requiredBytes, pool.reservedBytes));
+                    for (const auto& r : ranges) {
+                        maxByte = std::max(maxByte, r.endByte);
+                    }
+
+                    const float rowHeight = 18.0f;
+                    const float plotHeight = std::max(80.0f, rowHeight * static_cast<float>(ranges.size()) + 28.0f);
+                    const float labelWidth = 260.0f;
+                    ImVec2 canvasSize(ImGui::GetContentRegionAvail().x, plotHeight);
+                    if (canvasSize.x < 320.0f) {
+                        canvasSize.x = 320.0f;
+                    }
+
+                    const ImVec2 canvasPos = ImGui::GetCursorScreenPos();
+                    ImGui::InvisibleButton("##AliasPoolOverlapPlot", canvasSize);
+                    ImDrawList* draw = ImGui::GetWindowDrawList();
+
+                    const float left = canvasPos.x;
+                    const float top = canvasPos.y;
+                    const float right = canvasPos.x + canvasSize.x;
+                    const float bottom = canvasPos.y + canvasSize.y;
+
+                    const float plotLeft = left + labelWidth;
+                    const float plotRight = right - 10.0f;
+                    const float plotWidth = std::max(1.0f, plotRight - plotLeft);
+                    const float plotTop = top + 6.0f;
+
+                    draw->AddRectFilled(ImVec2(left, top), ImVec2(right, bottom), IM_COL32(20, 20, 20, 100));
+                    draw->AddRect(ImVec2(left, top), ImVec2(right, bottom), IM_COL32(255, 255, 255, 40));
+
+                    auto toX = [&](uint64_t byteOffset) {
+                        const double t = static_cast<double>(byteOffset) / static_cast<double>(maxByte);
+                        return plotLeft + static_cast<float>(t) * plotWidth;
+                        };
+
+                    draw->AddLine(ImVec2(plotLeft, bottom - 14.0f), ImVec2(plotRight, bottom - 14.0f), IM_COL32(220, 220, 220, 140), 1.0f);
+                    draw->AddText(ImVec2(plotLeft, bottom - 13.0f), IM_COL32(220, 220, 220, 200), "0");
+                    const std::string maxLabel = std::format("{} B", static_cast<unsigned long long>(maxByte));
+                    draw->AddText(ImVec2(plotRight - ImGui::CalcTextSize(maxLabel.c_str()).x, bottom - 13.0f), IM_COL32(220, 220, 220, 200), maxLabel.c_str());
+
+                    if (pool.reservedBytes > 0 && pool.reservedBytes != maxByte) {
+                        const float reservedX = toX(pool.reservedBytes);
+                        draw->AddLine(ImVec2(reservedX, plotTop), ImVec2(reservedX, bottom - 16.0f), IM_COL32(255, 230, 120, 120), 1.0f);
+                    }
+
+                    for (size_t i = 0; i < ranges.size(); ++i) {
+                        const auto& r = ranges[i];
+                        const float y0 = plotTop + static_cast<float>(i) * rowHeight;
+                        const float y1 = y0 + rowHeight - 4.0f;
+                        const float x0 = toX(r.startByte);
+                        const float x1 = toX(r.endByte);
+
+                        draw->AddRectFilled(ImVec2(x0, y0), ImVec2(std::max(x0 + 1.0f, x1), y1), IM_COL32(90, 170, 250, 180));
+                        draw->AddRect(ImVec2(x0, y0), ImVec2(std::max(x0 + 1.0f, x1), y1), IM_COL32(15, 30, 45, 220));
+
+                        std::vector<std::pair<uint64_t, uint64_t>> overlapSegments;
+                        overlapSegments.reserve(ranges.size());
+                        for (size_t j = 0; j < ranges.size(); ++j) {
+                            if (i == j) {
+                                continue;
+                            }
+                            const auto& other = ranges[j];
+                            const uint64_t overlapStart = std::max(r.startByte, other.startByte);
+                            const uint64_t overlapEnd = std::min(r.endByte, other.endByte);
+                            if (overlapStart < overlapEnd) {
+                                overlapSegments.emplace_back(overlapStart, overlapEnd);
+                            }
+                        }
+
+                        if (!overlapSegments.empty()) {
+                            std::sort(overlapSegments.begin(), overlapSegments.end());
+                            std::vector<std::pair<uint64_t, uint64_t>> merged;
+                            for (const auto& seg : overlapSegments) {
+                                if (merged.empty() || seg.first > merged.back().second) {
+                                    merged.push_back(seg);
+                                }
+                                else {
+                                    merged.back().second = std::max(merged.back().second, seg.second);
+                                }
+                            }
+
+                            for (const auto& seg : merged) {
+                                const float ox0 = toX(seg.first);
+                                const float ox1 = toX(seg.second);
+                                draw->AddRectFilled(ImVec2(ox0, y0), ImVec2(std::max(ox0 + 1.0f, ox1), y1), IM_COL32(255, 80, 80, 210));
+                            }
+                        }
+
+                        const std::string label = std::format(
+                            "{} [{}..{}] B u{}-{}{}",
+                            r.resourceName,
+                            static_cast<unsigned long long>(r.startByte),
+                            static_cast<unsigned long long>(r.endByte),
+                            static_cast<unsigned long long>(r.firstUse),
+                            static_cast<unsigned long long>(r.lastUse),
+                            r.overlapsByteRange ? " overlap" : "");
+                        draw->AddText(ImVec2(left + 6.0f, y0), IM_COL32(230, 230, 230, 230), label.c_str());
+                    }
+
+                    ImGui::TreePop();
+                }
+
+                ImGui::PopID();
+            }
+        }
+
         if (!snapshot.exclusionReasons.empty()) {
             ImGui::Separator();
             ImGui::TextUnformatted("Top exclusion reasons:");

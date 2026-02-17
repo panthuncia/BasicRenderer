@@ -6,7 +6,7 @@
 #include <functional>
 #include <cstdint>
 
-#include "Render/RenderGraph.h"
+#include "Render/RenderGraph/RenderGraph.h"
 
 // Return true if the pass uses 'resourceId'.
 using RGPassUsesResourceFn = std::function<bool(const void* passAndResources, uint64_t resourceId, bool isCompute)>;

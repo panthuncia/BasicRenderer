@@ -21,6 +21,7 @@
 #include "Interfaces/IPassBuilder.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/TrackedAllocation.h"
+#include "Render/RenderGraph/Aliasing/RenderGraphAliasingSubsystem.h"
 
 class Resource;
 class RenderPassBuilder;
@@ -209,25 +210,10 @@ public:
 
 	RenderGraph();
 	~RenderGraph();
-	struct AutoAliasReasonCount {
-		std::string reason;
-		size_t count = 0;
-	};
-	struct AutoAliasDebugSnapshot {
-		AutoAliasMode mode = AutoAliasMode::Off;
-		size_t candidatesSeen = 0;
-		size_t manuallyAssigned = 0;
-		size_t autoAssigned = 0;
-		size_t excluded = 0;
-		size_t rolledBackMixedQueue = 0;
-		uint64_t candidateBytes = 0;
-		uint64_t autoAssignedBytes = 0;
-		uint64_t rolledBackMixedQueueBytes = 0;
-		uint64_t pooledIndependentBytes = 0;
-		uint64_t pooledActualBytes = 0;
-		uint64_t pooledSavedBytes = 0;
-		std::vector<AutoAliasReasonCount> exclusionReasons;
-	};
+	using AutoAliasReasonCount = rg::alias::AutoAliasReasonCount;
+	using AutoAliasPoolRangeDebug = rg::alias::AutoAliasPoolRangeDebug;
+	using AutoAliasPoolDebug = rg::alias::AutoAliasPoolDebug;
+	using AutoAliasDebugSnapshot = rg::alias::AutoAliasDebugSnapshot;
 	AutoAliasDebugSnapshot GetAutoAliasDebugSnapshot() const;
 	void AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassParameters& resources, std::string name = "");
 	void AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassParameters& resources, std::string name = "");
@@ -356,23 +342,11 @@ private:
 	std::unordered_map<uint64_t, uint64_t> aliasPlacementPoolByID;
 	std::unordered_set<uint64_t> aliasActivationPending;
 
-	struct PersistentAliasPoolState {
-		TrackedHandle allocation;
-		uint64_t capacityBytes = 0;
-		uint64_t alignment = 1;
-		uint64_t generation = 0;
-		uint64_t lastUsedFrame = 0;
-		bool usedThisFrame = false;
-	};
+	using PersistentAliasPoolState = rg::alias::PersistentAliasPoolState;
 	std::unordered_map<uint64_t, PersistentAliasPoolState> persistentAliasPools;
 	uint64_t aliasPoolPlanFrameIndex = 0;
 	uint32_t aliasPoolRetireIdleFrames = 120;
 	float aliasPoolGrowthHeadroom = 1.5f;
-
-	std::unordered_map<uint64_t, std::unordered_set<uint64_t>> aliasedResources; // Tracks resources that use the same memory
-	std::unordered_map<uint64_t, size_t> resourceToAliasGroup;
-	std::vector<std::vector<uint64_t>>   aliasGroups;
-	std::vector<std::unordered_map<UINT,uint64_t>> lastActiveSubresourceInAliasGroup;
 
 	std::unordered_map<uint64_t, ResourceTransition> initialTransitions; // Transitions needed to reach the initial state of the resources before executing the first batch. Executed on graph setup.
 	std::vector<PassBatch> batches;
@@ -417,8 +391,6 @@ private:
 	void MaterializeReferencedResources(
 		const std::vector<ResourceRequirement>& resourceRequirements,
 		const std::vector<std::pair<ResourceHandleAndRange, ResourceState>>& internalTransitions);
-	void BuildAliasPlanAfterDag(const std::vector<Node>& nodes);
-	void ApplyAliasQueueSynchronization();
 	std::unordered_set<uint64_t> CollectFrameResourceIDs() const;
 	void ApplyIdleDematerializationPolicy(const std::unordered_set<uint64_t>& usedResourceIDs);
 	void SnapshotCompiledResourceGenerations(const std::unordered_set<uint64_t>& usedResourceIDs);
@@ -555,24 +527,6 @@ private:
 		const ResourceRequirement& r,
 		std::unordered_set<uint64_t>& outTransitionedResourceIDs);
 
-	std::vector<uint64_t> GetAllAliasIDs(uint64_t id) const {
-		auto it = resourceToAliasGroup.find(id);
-		if (it == resourceToAliasGroup.end()) {
-			// not aliased
-			return { id };
-		}
-		uint64_t group = it->second;
-		std::vector<uint64_t> out;
-		// scan for any resource mapped to the same group
-		for (auto const& p : resourceToAliasGroup) {
-			if (p.second == group)
-				out.push_back(p.first);
-		}
-		return out;
-	}
-
-	std::vector<uint64_t> ExpandSchedulingIDs(uint64_t id) const;
-
 	static inline bool IsUAVState(const ResourceState& s) noexcept {
 		return ((s.access & rhi::ResourceAccessType::UnorderedAccess) != 0) ||
 			(s.layout == rhi::ResourceLayout::UnorderedAccess);
@@ -589,19 +543,7 @@ private:
 		std::vector<size_t>   readsSinceWrite;
 	};
 
-	struct AutoAliasPlannerStats {
-		size_t candidatesSeen = 0;
-		size_t manuallyAssigned = 0;
-		size_t autoAssigned = 0;
-		size_t excluded = 0;
-		size_t rolledBackMixedQueue = 0;
-		uint64_t candidateBytes = 0;
-		uint64_t autoAssignedBytes = 0;
-		uint64_t rolledBackMixedQueueBytes = 0;
-		uint64_t pooledIndependentBytes = 0;
-		uint64_t pooledActualBytes = 0;
-		uint64_t pooledSavedBytes = 0;
-	};
+	using AutoAliasPlannerStats = rg::alias::AutoAliasPlannerStats;
 
 	static PassView GetPassView(AnyPassAndResources& pr);
 	static bool BuildDependencyGraph(std::vector<Node>& nodes);
@@ -611,7 +553,6 @@ private:
 		size_t from, size_t to,
 		std::vector<Node>& nodes,
 		std::unordered_set<uint64_t>& edgeSet);
-	void AutoAssignAliasingPools(const std::vector<Node>& nodes);
 	void CommitPassToBatch(
 		RenderGraph& rg,
 		AnyPassAndResources& pr,
@@ -637,6 +578,7 @@ private:
 	std::unordered_map<uint64_t, uint64_t> autoAliasPoolByID;
 	std::unordered_map<uint64_t, std::string> autoAliasExclusionReasonByID;
 	std::vector<AutoAliasReasonCount> autoAliasExclusionReasonSummary;
+	std::vector<AutoAliasPoolDebug> autoAliasPoolDebug;
 	AutoAliasPlannerStats autoAliasPlannerStats;
 	AutoAliasMode autoAliasModeLastFrame = AutoAliasMode::Off;
 	std::function<AutoAliasMode()> m_getAutoAliasMode;
@@ -645,7 +587,9 @@ private:
 	std::function<bool()> m_getAutoAliasLogExclusionReasons;
 	std::function<uint32_t()> m_getAutoAliasPoolRetireIdleFrames;
 	std::function<float()> m_getAutoAliasPoolGrowthHeadroom;
+	rg::alias::RenderGraphAliasingSubsystem m_aliasingSubsystem;
 
 	friend class RenderPassBuilder;
 	friend class ComputePassBuilder;
+	friend class rg::alias::RenderGraphAliasingSubsystem;
 };

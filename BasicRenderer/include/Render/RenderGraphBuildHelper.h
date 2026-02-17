@@ -1,6 +1,6 @@
 #pragma once
 #include "Scene/Components.h"
-#include "Render/RenderGraph.h"
+#include "Render/RenderGraph/RenderGraph.h"
 #include "../../generated/BuiltinResources.h"
 #include "RenderPasses/PostProcessing/BloomSamplePass.h"
 #include "RenderPasses/PostProcessing/BloomBlendPass.h"

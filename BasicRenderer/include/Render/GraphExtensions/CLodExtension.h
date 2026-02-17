@@ -2,7 +2,7 @@
 
 #include <rhi.h>
 
-#include "Render/RenderGraph.h"
+#include "Render/RenderGraph/RenderGraph.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"

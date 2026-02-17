@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Render/RenderGraph.h"
+#include "Render/RenderGraph/RenderGraph.h"
 #include "RenderPasses/ReadbackCapturePass.h"
 #include "Managers/Singletons/ReadbackManager.h"
 
