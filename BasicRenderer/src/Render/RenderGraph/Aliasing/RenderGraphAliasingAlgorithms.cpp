@@ -1,6 +1,7 @@
 #include "Render/RenderGraph/RenderGraph.h"
 
 #include <algorithm>
+#include <boost/functional/hash.hpp>
 #include <cmath>
 #include <limits>
 #include <sstream>
@@ -73,17 +74,12 @@ namespace {
 		return (value + alignment - 1ull) / alignment * alignment;
 	}
 
-	uint64_t HashCombineU64(uint64_t seed, uint64_t value) {
-		seed ^= value + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2);
-		return seed;
-	}
-
 	uint64_t BuildAliasPlacementSignatureValue(uint64_t poolID, size_t slotIndex, uint64_t poolGeneration) {
-		uint64_t signature = 0xcbf29ce484222325ull;
-		signature = HashCombineU64(signature, poolID);
-		signature = HashCombineU64(signature, static_cast<uint64_t>(slotIndex));
-		signature = HashCombineU64(signature, poolGeneration);
-		return signature;
+		size_t signature = static_cast<size_t>(0xcbf29ce484222325ull);
+		boost::hash_combine(signature, poolID);
+		boost::hash_combine(signature, static_cast<uint64_t>(slotIndex));
+		boost::hash_combine(signature, poolGeneration);
+		return static_cast<uint64_t>(signature);
 	}
 }
 
@@ -97,8 +93,6 @@ void rg::alias::RenderGraphAliasingSubsystem::AutoAssignAliasingPools(RenderGrap
 	auto& m_framePasses = rg.m_framePasses;
 	auto& _registry = rg._registry;
 	auto& resourcesByID = rg.resourcesByID;
-	auto& m_getAutoAliasMaxMixedQueueAssignments = rg.m_getAutoAliasMaxMixedQueueAssignments;
-	auto& m_getAutoAliasMaxMixedQueueBytesMB = rg.m_getAutoAliasMaxMixedQueueBytesMB;
 	auto& m_getAutoAliasLogExclusionReasons = rg.m_getAutoAliasLogExclusionReasons;
 
 	autoAliasPoolByID.clear();
@@ -170,18 +164,15 @@ void rg::alias::RenderGraphAliasingSubsystem::AutoAssignAliasingPools(RenderGrap
 		uint64_t alignment = 1;
 		size_t firstUse = std::numeric_limits<size_t>::max();
 		size_t lastUse = 0;
-		bool usesRender = false;
-		bool usesCompute = false;
 		bool isMaterializedAtCompile = false;
 		uint32_t maxNodeCriticality = 0;
-		rhi::Format format = rhi::Format::Unknown;
 		std::optional<uint64_t> manualPool;
 	};
 
 	std::unordered_map<uint64_t, AutoCandidate> candidates;
 	auto device = DeviceManager::GetInstance().GetDevice();
 
-	auto collectHandle = [&](const ResourceRegistry::RegistryHandle& handle, size_t topoRank, bool isComputePass, uint32_t passCrit) {
+	auto collectHandle = [&](const ResourceRegistry::RegistryHandle& handle, size_t topoRank, uint32_t passCrit) {
 		if (handle.IsEphemeral()) {
 			return;
 		}
@@ -205,11 +196,8 @@ void rg::alias::RenderGraphAliasingSubsystem::AutoAssignAliasingPools(RenderGrap
 		candidate.firstUse = std::min(candidate.firstUse, topoRank);
 		candidate.lastUse = std::max(candidate.lastUse, topoRank);
 		candidate.maxNodeCriticality = std::max(candidate.maxNodeCriticality, passCrit);
-		candidate.usesCompute = candidate.usesCompute || isComputePass;
-		candidate.usesRender = candidate.usesRender || !isComputePass;
 		candidate.isMaterializedAtCompile = candidate.isMaterializedAtCompile || texture->IsMaterialized();
 		candidate.manualPool = desc.aliasingPoolID;
-		candidate.format = desc.format;
 
 		if (inserted || candidate.sizeBytes == 0) {
 			auto resourceDesc = BuildAliasTextureResourceDesc(desc);
@@ -228,19 +216,19 @@ void rg::alias::RenderGraphAliasingSubsystem::AutoAssignAliasingPools(RenderGrap
 		if (any.type == RenderGraph::PassType::Render) {
 			auto const& p = std::get<RenderGraph::RenderPassAndResources>(any.pass);
 			for (auto const& req : p.resources.frameResourceRequirements) {
-				collectHandle(req.resourceHandleAndRange.resource, topoRank, false, passCrit);
+				collectHandle(req.resourceHandleAndRange.resource, topoRank, passCrit);
 			}
 			for (auto const& t : p.resources.internalTransitions) {
-				collectHandle(t.first.resource, topoRank, false, passCrit);
+				collectHandle(t.first.resource, topoRank, passCrit);
 			}
 		}
 		else if (any.type == RenderGraph::PassType::Compute) {
 			auto const& p = std::get<RenderGraph::ComputePassAndResources>(any.pass);
 			for (auto const& req : p.resources.frameResourceRequirements) {
-				collectHandle(req.resourceHandleAndRange.resource, topoRank, true, passCrit);
+				collectHandle(req.resourceHandleAndRange.resource, topoRank, passCrit);
 			}
 			for (auto const& t : p.resources.internalTransitions) {
-				collectHandle(t.first.resource, topoRank, true, passCrit);
+				collectHandle(t.first.resource, topoRank, passCrit);
 			}
 		}
 	}
@@ -248,16 +236,15 @@ void rg::alias::RenderGraphAliasingSubsystem::AutoAssignAliasingPools(RenderGrap
 	auto scoreCandidate = [&](const AutoCandidate& c) {
 		const float benefitMB = static_cast<float>(c.sizeBytes) / (1024.0f * 1024.0f);
 		const float critNorm = static_cast<float>(c.maxNodeCriticality) / static_cast<float>(maxCriticality);
-		const float queuePenalty = (c.usesRender && c.usesCompute) ? 1.0f : 0.0f;
 		const float materializedPenalty = c.isMaterializedAtCompile ? 1.0f : 0.0f;
 
 		switch (mode) {
 		case AutoAliasMode::Conservative:
-			return benefitMB - (3.0f * queuePenalty) - (2.0f * critNorm) - (1.0f * materializedPenalty);
+			return benefitMB - (2.0f * critNorm) - (1.0f * materializedPenalty);
 		case AutoAliasMode::Balanced:
-			return benefitMB - (2.0f * queuePenalty) - (1.25f * critNorm) - (0.5f * materializedPenalty);
+			return benefitMB - (1.25f * critNorm) - (0.5f * materializedPenalty);
 		case AutoAliasMode::Aggressive:
-			return benefitMB - (1.0f * queuePenalty) - (0.5f * critNorm) - (0.25f * materializedPenalty);
+			return benefitMB - (0.5f * critNorm) - (0.25f * materializedPenalty);
 		case AutoAliasMode::Off:
 		default:
 			return -std::numeric_limits<float>::infinity();
@@ -274,15 +261,7 @@ void rg::alias::RenderGraphAliasingSubsystem::AutoAssignAliasingPools(RenderGrap
 		}
 	}();
 
-	constexpr uint64_t kAutoPoolBase = 0xA171000000000000ull;
-
-	struct MixedAssignment {
-		uint64_t resourceID = 0;
-		float score = 0.0f;
-		uint64_t sizeBytes = 0;
-	};
-	std::vector<MixedAssignment> mixedAssignments;
-	mixedAssignments.reserve(candidates.size());
+	constexpr uint64_t kAutoPoolGlobal = 0xA171000000000000ull;
 
 	for (auto const& [resourceID, c] : candidates) {
 		(void)resourceID;
@@ -301,75 +280,9 @@ void rg::alias::RenderGraphAliasingSubsystem::AutoAssignAliasingPools(RenderGrap
 			continue;
 		}
 
-		uint64_t queueClass = 1;
-		if (c.usesRender && c.usesCompute) {
-			queueClass = 3;
-		}
-		else if (c.usesCompute) {
-			queueClass = 2;
-		}
-
-		const uint64_t formatClass = static_cast<uint64_t>(c.format) & 0xFFFFull;
-		const uint64_t poolID = kAutoPoolBase | (queueClass << 48) | (formatClass << 16);
-		autoAliasPoolByID[c.resourceID] = poolID;
+		autoAliasPoolByID[c.resourceID] = kAutoPoolGlobal;
 		autoAliasPlannerStats.autoAssigned++;
 		autoAliasPlannerStats.autoAssignedBytes += c.sizeBytes;
-
-		if (c.usesRender && c.usesCompute) {
-			mixedAssignments.push_back(MixedAssignment{
-				.resourceID = c.resourceID,
-				.score = score,
-				.sizeBytes = c.sizeBytes
-				});
-		}
-	}
-
-	const uint32_t mixedAssignCap = m_getAutoAliasMaxMixedQueueAssignments
-		? m_getAutoAliasMaxMixedQueueAssignments()
-		: 0u;
-	const float mixedBytesCapMB = m_getAutoAliasMaxMixedQueueBytesMB
-		? m_getAutoAliasMaxMixedQueueBytesMB()
-		: 0.0f;
-	const uint64_t mixedBytesCap = mixedBytesCapMB <= 0.0f
-		? 0ull
-		: static_cast<uint64_t>(mixedBytesCapMB * 1024.0f * 1024.0f);
-
-	if (!mixedAssignments.empty() && (mixedAssignCap > 0 || mixedBytesCap > 0)) {
-		uint64_t currentMixedBytes = 0;
-		for (const auto& entry : mixedAssignments) {
-			currentMixedBytes += entry.sizeBytes;
-		}
-
-		std::sort(mixedAssignments.begin(), mixedAssignments.end(), [](const MixedAssignment& a, const MixedAssignment& b) {
-			if (a.score != b.score) {
-				return a.score < b.score;
-			}
-			return a.resourceID < b.resourceID;
-			});
-
-		size_t currentMixedCount = mixedAssignments.size();
-		for (const auto& entry : mixedAssignments) {
-			const bool countOver = (mixedAssignCap > 0) && (currentMixedCount > mixedAssignCap);
-			const bool bytesOver = (mixedBytesCap > 0) && (currentMixedBytes > mixedBytesCap);
-			if (!countOver && !bytesOver) {
-				break;
-			}
-
-			auto erased = autoAliasPoolByID.erase(entry.resourceID);
-			if (erased == 0) {
-				continue;
-			}
-
-			autoAliasExclusionReasonByID[entry.resourceID] = "rolled back by mixed-queue concurrency guard";
-			autoAliasPlannerStats.rolledBackMixedQueue++;
-			autoAliasPlannerStats.rolledBackMixedQueueBytes += entry.sizeBytes;
-			autoAliasPlannerStats.autoAssigned--;
-			autoAliasPlannerStats.autoAssignedBytes -= entry.sizeBytes;
-			autoAliasPlannerStats.excluded++;
-
-			currentMixedCount--;
-			currentMixedBytes -= entry.sizeBytes;
-		}
 	}
 
 	std::unordered_map<std::string, size_t> exclusionReasonCounts;
@@ -392,16 +305,14 @@ void rg::alias::RenderGraphAliasingSubsystem::AutoAssignAliasingPools(RenderGrap
 
 	if (autoAliasPlannerStats.candidatesSeen > 0) {
 		spdlog::info(
-			"RG auto alias: mode={} candidates={} manual={} auto={} excluded={} rolledBackMixed={} candidateMB={:.2f} autoMB={:.2f} rollbackMB={:.2f}",
+			"RG auto alias: mode={} candidates={} manual={} auto={} excluded={} candidateMB={:.2f} autoMB={:.2f}",
 			static_cast<uint32_t>(mode),
 			autoAliasPlannerStats.candidatesSeen,
 			autoAliasPlannerStats.manuallyAssigned,
 			autoAliasPlannerStats.autoAssigned,
 			autoAliasPlannerStats.excluded,
-			autoAliasPlannerStats.rolledBackMixedQueue,
 			static_cast<double>(autoAliasPlannerStats.candidateBytes) / (1024.0 * 1024.0),
-			static_cast<double>(autoAliasPlannerStats.autoAssignedBytes) / (1024.0 * 1024.0),
-			static_cast<double>(autoAliasPlannerStats.rolledBackMixedQueueBytes) / (1024.0 * 1024.0));
+			static_cast<double>(autoAliasPlannerStats.autoAssignedBytes) / (1024.0 * 1024.0));
 
 		if (!exclusionReasonCounts.empty()) {
 			std::vector<std::pair<std::string, size_t>> reasonList;

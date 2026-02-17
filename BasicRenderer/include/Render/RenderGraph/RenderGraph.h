@@ -582,8 +582,6 @@ private:
 	AutoAliasPlannerStats autoAliasPlannerStats;
 	AutoAliasMode autoAliasModeLastFrame = AutoAliasMode::Off;
 	std::function<AutoAliasMode()> m_getAutoAliasMode;
-	std::function<uint32_t()> m_getAutoAliasMaxMixedQueueAssignments;
-	std::function<float()> m_getAutoAliasMaxMixedQueueBytesMB;
 	std::function<bool()> m_getAutoAliasLogExclusionReasons;
 	std::function<uint32_t()> m_getAutoAliasPoolRetireIdleFrames;
 	std::function<float()> m_getAutoAliasPoolGrowthHeadroom;

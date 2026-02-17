@@ -17,10 +17,8 @@ AutoAliasDebugSnapshot RenderGraphAliasingSubsystem::BuildDebugSnapshot(
 	out.manuallyAssigned = plannerStats.manuallyAssigned;
 	out.autoAssigned = plannerStats.autoAssigned;
 	out.excluded = plannerStats.excluded;
-	out.rolledBackMixedQueue = plannerStats.rolledBackMixedQueue;
 	out.candidateBytes = plannerStats.candidateBytes;
 	out.autoAssignedBytes = plannerStats.autoAssignedBytes;
-	out.rolledBackMixedQueueBytes = plannerStats.rolledBackMixedQueueBytes;
 	out.pooledIndependentBytes = plannerStats.pooledIndependentBytes;
 	out.pooledActualBytes = plannerStats.pooledActualBytes;
 	out.pooledSavedBytes = plannerStats.pooledSavedBytes;

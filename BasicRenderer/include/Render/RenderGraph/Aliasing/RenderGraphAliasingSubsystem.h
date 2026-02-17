@@ -41,10 +41,8 @@ struct AutoAliasPlannerStats {
 	size_t manuallyAssigned = 0;
 	size_t autoAssigned = 0;
 	size_t excluded = 0;
-	size_t rolledBackMixedQueue = 0;
 	uint64_t candidateBytes = 0;
 	uint64_t autoAssignedBytes = 0;
-	uint64_t rolledBackMixedQueueBytes = 0;
 	uint64_t pooledIndependentBytes = 0;
 	uint64_t pooledActualBytes = 0;
 	uint64_t pooledSavedBytes = 0;
@@ -56,10 +54,8 @@ struct AutoAliasDebugSnapshot {
 	size_t manuallyAssigned = 0;
 	size_t autoAssigned = 0;
 	size_t excluded = 0;
-	size_t rolledBackMixedQueue = 0;
 	uint64_t candidateBytes = 0;
 	uint64_t autoAssignedBytes = 0;
-	uint64_t rolledBackMixedQueueBytes = 0;
 	uint64_t pooledIndependentBytes = 0;
 	uint64_t pooledActualBytes = 0;
 	uint64_t pooledSavedBytes = 0;

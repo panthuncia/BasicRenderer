@@ -406,14 +406,6 @@ private:
     std::function<AutoAliasMode()> getAutoAliasMode;
     std::function<void(AutoAliasMode)> setAutoAliasMode;
 
-    uint32_t m_autoAliasMaxMixedQueueAssignments = 8;
-    std::function<uint32_t()> getAutoAliasMaxMixedQueueAssignments;
-    std::function<void(uint32_t)> setAutoAliasMaxMixedQueueAssignments;
-
-    float m_autoAliasMaxMixedQueueBytesMB = 256.0f;
-    std::function<float()> getAutoAliasMaxMixedQueueBytesMB;
-    std::function<void(float)> setAutoAliasMaxMixedQueueBytesMB;
-
     bool m_autoAliasLogExclusionReasons = false;
     std::function<bool()> getAutoAliasLogExclusionReasons;
     std::function<void(bool)> setAutoAliasLogExclusionReasons;
@@ -603,16 +595,6 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     setAutoAliasMode = settingsManager.getSettingSetter<AutoAliasMode>("autoAliasMode");
     m_autoAliasMode = getAutoAliasMode();
     observerSetting(m_autoAliasMode, "autoAliasMode");
-
-    getAutoAliasMaxMixedQueueAssignments = settingsManager.getSettingGetter<uint32_t>("autoAliasMaxMixedQueueAssignments");
-    setAutoAliasMaxMixedQueueAssignments = settingsManager.getSettingSetter<uint32_t>("autoAliasMaxMixedQueueAssignments");
-    m_autoAliasMaxMixedQueueAssignments = getAutoAliasMaxMixedQueueAssignments();
-    observerSetting(m_autoAliasMaxMixedQueueAssignments, "autoAliasMaxMixedQueueAssignments");
-
-    getAutoAliasMaxMixedQueueBytesMB = settingsManager.getSettingGetter<float>("autoAliasMaxMixedQueueBytesMB");
-    setAutoAliasMaxMixedQueueBytesMB = settingsManager.getSettingSetter<float>("autoAliasMaxMixedQueueBytesMB");
-    m_autoAliasMaxMixedQueueBytesMB = getAutoAliasMaxMixedQueueBytesMB();
-    observerSetting(m_autoAliasMaxMixedQueueBytesMB, "autoAliasMaxMixedQueueBytesMB");
 
     getAutoAliasLogExclusionReasons = settingsManager.getSettingGetter<bool>("autoAliasLogExclusionReasons");
     setAutoAliasLogExclusionReasons = settingsManager.getSettingSetter<bool>("autoAliasLogExclusionReasons");
@@ -1629,18 +1611,6 @@ inline void Menu::DrawAutoAliasPlannerWindow() {
         setAutoAliasMode(m_autoAliasMode);
     }
 
-    int maxMixedAssignments = static_cast<int>(m_autoAliasMaxMixedQueueAssignments);
-    if (ImGui::SliderInt("Max Mixed Assignments", &maxMixedAssignments, 0, 128)) {
-        maxMixedAssignments = std::max(maxMixedAssignments, 0);
-        m_autoAliasMaxMixedQueueAssignments = static_cast<uint32_t>(maxMixedAssignments);
-        setAutoAliasMaxMixedQueueAssignments(m_autoAliasMaxMixedQueueAssignments);
-    }
-
-    if (ImGui::SliderFloat("Max Mixed Bytes (MB)", &m_autoAliasMaxMixedQueueBytesMB, 0.0f, 2048.0f, "%.1f")) {
-        m_autoAliasMaxMixedQueueBytesMB = std::max(0.0f, m_autoAliasMaxMixedQueueBytesMB);
-        setAutoAliasMaxMixedQueueBytesMB(m_autoAliasMaxMixedQueueBytesMB);
-    }
-
     if (ImGui::Checkbox("Log Exclusions", &m_autoAliasLogExclusionReasons)) {
         setAutoAliasLogExclusionReasons(m_autoAliasLogExclusionReasons);
     }
@@ -1670,13 +1640,9 @@ inline void Menu::DrawAutoAliasPlannerWindow() {
             static_cast<unsigned long long>(snapshot.autoAssigned),
             static_cast<unsigned long long>(snapshot.excluded));
 
-        ImGui::Text("Candidate MB: %.2f | Auto MB: %.2f | Rollback MB: %.2f",
+        ImGui::Text("Candidate MB: %.2f | Auto MB: %.2f",
             static_cast<double>(snapshot.candidateBytes) / (1024.0 * 1024.0),
-            static_cast<double>(snapshot.autoAssignedBytes) / (1024.0 * 1024.0),
-            static_cast<double>(snapshot.rolledBackMixedQueueBytes) / (1024.0 * 1024.0));
-
-        ImGui::Text("Mixed-Queue Rollbacks: %llu",
-            static_cast<unsigned long long>(snapshot.rolledBackMixedQueue));
+            static_cast<double>(snapshot.autoAssignedBytes) / (1024.0 * 1024.0));
 
         const double independentMB = static_cast<double>(snapshot.pooledIndependentBytes) / (1024.0 * 1024.0);
         const double pooledMB = static_cast<double>(snapshot.pooledActualBytes) / (1024.0 * 1024.0);
