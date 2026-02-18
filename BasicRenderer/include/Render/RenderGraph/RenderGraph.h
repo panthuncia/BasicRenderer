@@ -301,6 +301,20 @@ private:
 		std::unordered_map<uint64_t, unsigned int> usageHistCompute;
 		std::unordered_map<uint64_t, unsigned int> usageHistRender;
 	};
+
+	struct LastProducerAcrossFrames {
+		CommandQueueType queue = CommandQueueType::Graphics;
+		uint64_t fenceValue = 0;
+	};
+
+	struct LastAliasPlacementProducerAcrossFrames {
+		uint64_t resourceID = 0;
+		uint64_t poolID = 0;
+		uint64_t poolGeneration = 0;
+		uint64_t startByte = 0;
+		uint64_t endByte = 0;
+		LastProducerAcrossFrames producer{};
+	};
 	
 	enum class AccessKind : uint8_t { Read, Write };
 
@@ -360,6 +374,14 @@ private:
 	std::vector<PassBatch> batches;
 	std::unordered_map<uint64_t, SymbolicTracker*> trackers; // Tracks the state of resources in the graph.
 	std::unordered_map<uint64_t, SymbolicTracker> compileTrackers; // Compile-only symbolic state, decoupled from backing lifetime.
+	std::unordered_map<uint64_t, LastProducerAcrossFrames> m_lastProducerByResourceAcrossFrames;
+	std::unordered_map<uint64_t, std::vector<LastAliasPlacementProducerAcrossFrames>> m_lastAliasPlacementProducersByPoolAcrossFrames;
+	std::unordered_map<uint64_t, unsigned int> m_compiledLastRenderProducerBatchByResource;
+	std::unordered_map<uint64_t, unsigned int> m_compiledLastComputeProducerBatchByResource;
+	bool m_hasPendingFrameStartComputeWaitOnRender = false;
+	UINT64 m_pendingFrameStartComputeWaitOnRenderFenceValue = 0;
+	bool m_hasPendingFrameStartRenderWaitOnCompute = false;
+	UINT64 m_pendingFrameStartRenderWaitOnComputeFenceValue = 0;
 
 	std::unique_ptr<CommandListPool> m_graphicsCommandListPool;
 	std::unique_ptr<CommandListPool> m_computeCommandListPool;

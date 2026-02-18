@@ -494,6 +494,9 @@ void RenderGraph::AutoScheduleAndBuildBatches(
 	if (!currentBatch.computePasses.empty() || !currentBatch.renderPasses.empty()) {
 		rg.batches.push_back(std::move(currentBatch));
 	}
+
+	rg.m_compiledLastRenderProducerBatchByResource = std::move(batchOfLastRenderQueueProducer);
+	rg.m_compiledLastComputeProducerBatchByResource = std::move(batchOfLastComputeQueueProducer);
 }
 
 
@@ -942,6 +945,14 @@ void RenderGraph::ResetForRebuild()
 	compiledResourceGenerationByID.clear();
 	m_aliasingSubsystem.ResetPersistentState(*this);
 	compileTrackers.clear();
+	m_lastProducerByResourceAcrossFrames.clear();
+	m_lastAliasPlacementProducersByPoolAcrossFrames.clear();
+	m_compiledLastRenderProducerBatchByResource.clear();
+	m_compiledLastComputeProducerBatchByResource.clear();
+	m_hasPendingFrameStartComputeWaitOnRender = false;
+	m_pendingFrameStartComputeWaitOnRenderFenceValue = 0;
+	m_hasPendingFrameStartRenderWaitOnCompute = false;
+	m_pendingFrameStartRenderWaitOnComputeFenceValue = 0;
 
 	// Clear providers
 	_providerMap.clear();
@@ -964,6 +975,12 @@ void RenderGraph::ResetForFrame() {
 	compiledResourceGenerationByID.clear();
 	m_aliasingSubsystem.ResetPerFrameState(*this);
 	compileTrackers.clear();
+	m_compiledLastRenderProducerBatchByResource.clear();
+	m_compiledLastComputeProducerBatchByResource.clear();
+	m_hasPendingFrameStartComputeWaitOnRender = false;
+	m_pendingFrameStartComputeWaitOnRenderFenceValue = 0;
+	m_hasPendingFrameStartRenderWaitOnCompute = false;
+	m_pendingFrameStartRenderWaitOnComputeFenceValue = 0;
 	// reset pass builders
 	for (auto& [name, builder] : m_passBuildersByName) {
 		builder->Reset();
@@ -1868,6 +1885,138 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 	AutoScheduleAndBuildBatches(*this, m_framePasses, nodes);
 	m_aliasingSubsystem.ApplyAliasQueueSynchronization(*this);
 
+	m_hasPendingFrameStartComputeWaitOnRender = false;
+	m_pendingFrameStartComputeWaitOnRenderFenceValue = 0;
+	m_hasPendingFrameStartRenderWaitOnCompute = false;
+	m_pendingFrameStartRenderWaitOnComputeFenceValue = 0;
+	uint32_t overlapTriggeredComputeWaitCount = 0;
+	uint32_t overlapTriggeredRenderWaitCount = 0;
+	uint64_t overlapSampleCurrentForComputeWait = 0;
+	uint64_t overlapSamplePreviousForComputeWait = 0;
+	uint64_t overlapSampleCurrentForRenderWait = 0;
+	uint64_t overlapSamplePreviousForRenderWait = 0;
+
+	auto accumulateCrossFrameWaitForHandle = [&](bool passIsCompute, const ResourceRegistry::RegistryHandle& handle) {
+		if (handle.IsEphemeral()) {
+			return;
+		}
+
+		const uint64_t id = handle.GetGlobalResourceID();
+		for (uint64_t rid : m_aliasingSubsystem.GetSchedulingEquivalentIDs(id, aliasPlacementRangesByID)) {
+			auto it = m_lastProducerByResourceAcrossFrames.find(rid);
+			if (it == m_lastProducerByResourceAcrossFrames.end()) {
+				// no-op
+			}
+			else {
+				if (passIsCompute && it->second.queue == CommandQueueType::Graphics) {
+					m_hasPendingFrameStartComputeWaitOnRender = true;
+					m_pendingFrameStartComputeWaitOnRenderFenceValue =
+						std::max(m_pendingFrameStartComputeWaitOnRenderFenceValue, it->second.fenceValue);
+				}
+				else if (!passIsCompute && it->second.queue == CommandQueueType::Compute) {
+					m_hasPendingFrameStartRenderWaitOnCompute = true;
+					m_pendingFrameStartRenderWaitOnComputeFenceValue =
+						std::max(m_pendingFrameStartRenderWaitOnComputeFenceValue, it->second.fenceValue);
+				}
+			}
+
+			auto itCurPlacement = aliasPlacementRangesByID.find(rid);
+			if (itCurPlacement == aliasPlacementRangesByID.end()) {
+				continue;
+			}
+
+			auto itPoolState = persistentAliasPools.find(itCurPlacement->second.poolID);
+			if (itPoolState == persistentAliasPools.end()) {
+				continue;
+			}
+
+			auto itPrevPool = m_lastAliasPlacementProducersByPoolAcrossFrames.find(itCurPlacement->second.poolID);
+			if (itPrevPool == m_lastAliasPlacementProducersByPoolAcrossFrames.end()) {
+				continue;
+			}
+
+			const uint64_t curStart = itCurPlacement->second.startByte;
+			const uint64_t curEnd = itCurPlacement->second.endByte;
+			const uint64_t curPoolGeneration = itPoolState->second.generation;
+
+			for (const auto& prevPlacementProducer : itPrevPool->second) {
+				if (prevPlacementProducer.poolGeneration != curPoolGeneration) {
+					continue;
+				}
+
+				const uint64_t overlapStart = std::max(curStart, prevPlacementProducer.startByte);
+				const uint64_t overlapEnd = std::min(curEnd, prevPlacementProducer.endByte);
+				if (overlapStart >= overlapEnd) {
+					continue;
+				}
+
+				if (passIsCompute && prevPlacementProducer.producer.queue == CommandQueueType::Graphics) {
+					m_hasPendingFrameStartComputeWaitOnRender = true;
+					m_pendingFrameStartComputeWaitOnRenderFenceValue =
+						std::max(
+							m_pendingFrameStartComputeWaitOnRenderFenceValue,
+							prevPlacementProducer.producer.fenceValue);
+					overlapTriggeredComputeWaitCount++;
+					if (overlapSampleCurrentForComputeWait == 0) {
+						overlapSampleCurrentForComputeWait = rid;
+						overlapSamplePreviousForComputeWait = prevPlacementProducer.resourceID;
+					}
+				}
+				else if (!passIsCompute && prevPlacementProducer.producer.queue == CommandQueueType::Compute) {
+					m_hasPendingFrameStartRenderWaitOnCompute = true;
+					m_pendingFrameStartRenderWaitOnComputeFenceValue =
+						std::max(
+							m_pendingFrameStartRenderWaitOnComputeFenceValue,
+							prevPlacementProducer.producer.fenceValue);
+					overlapTriggeredRenderWaitCount++;
+					if (overlapSampleCurrentForRenderWait == 0) {
+						overlapSampleCurrentForRenderWait = rid;
+						overlapSamplePreviousForRenderWait = prevPlacementProducer.resourceID;
+					}
+				}
+			}
+		}
+	};
+
+	for (const auto& pr : m_framePasses) {
+		if (pr.type == PassType::Compute) {
+			auto const& pass = std::get<ComputePassAndResources>(pr.pass);
+			for (auto const& req : pass.resources.frameResourceRequirements) {
+				accumulateCrossFrameWaitForHandle(true, req.resourceHandleAndRange.resource);
+			}
+			for (auto const& tr : pass.resources.internalTransitions) {
+				accumulateCrossFrameWaitForHandle(true, tr.first.resource);
+			}
+		}
+		else if (pr.type == PassType::Render) {
+			auto const& pass = std::get<RenderPassAndResources>(pr.pass);
+			for (auto const& req : pass.resources.frameResourceRequirements) {
+				accumulateCrossFrameWaitForHandle(false, req.resourceHandleAndRange.resource);
+			}
+			for (auto const& tr : pass.resources.internalTransitions) {
+				accumulateCrossFrameWaitForHandle(false, tr.first.resource);
+			}
+		}
+	}
+
+	if (overlapTriggeredComputeWaitCount > 0) {
+		spdlog::info(
+			"RG cross-frame overlap wait: compute waits on graphics; hits={} waitFence={} sampleCurrentResourceId={} samplePreviousResourceId={}",
+			overlapTriggeredComputeWaitCount,
+			m_pendingFrameStartComputeWaitOnRenderFenceValue,
+			overlapSampleCurrentForComputeWait,
+			overlapSamplePreviousForComputeWait);
+	}
+
+	if (overlapTriggeredRenderWaitCount > 0) {
+		spdlog::info(
+			"RG cross-frame overlap wait: graphics waits on compute; hits={} waitFence={} sampleCurrentResourceId={} samplePreviousResourceId={}",
+			overlapTriggeredRenderWaitCount,
+			m_pendingFrameStartRenderWaitOnComputeFenceValue,
+			overlapSampleCurrentForRenderWait,
+			overlapSamplePreviousForRenderWait);
+	}
+
 	// Insert transitions to loop resources back to their initial states
 	//ComputeResourceLoops();
 
@@ -2385,8 +2534,80 @@ void RenderGraph::Execute(RenderContext& context) {
 		if (!alias) dstQ->Wait({ fence.GetHandle(), val });
 		};
 
+	if (m_hasPendingFrameStartComputeWaitOnRender) {
+		WaitIfDistinct(computeQueue, m_graphicsQueueFence.Get(), m_pendingFrameStartComputeWaitOnRenderFenceValue);
+	}
+	if (m_hasPendingFrameStartRenderWaitOnCompute) {
+		WaitIfDistinct(graphicsQueue, m_computeQueueFence.Get(), m_pendingFrameStartRenderWaitOnComputeFenceValue);
+	}
+
 	UINT64 currentGraphicsQueueFenceOffset = m_graphicsQueueFenceValue * context.frameFenceValue;
 	UINT64 currentComputeQueueFenceOffset = m_computeQueueFenceValue * context.frameFenceValue;
+
+	for (const auto& [resourceID, producerBatch] : m_compiledLastRenderProducerBatchByResource) {
+		(void)resourceID;
+		if (producerBatch < batches.size()) {
+			batches[producerBatch].renderCompletionSignal = true;
+		}
+	}
+
+	if (alias) {
+		for (const auto& [resourceID, producerBatch] : m_compiledLastComputeProducerBatchByResource) {
+			(void)resourceID;
+			if (producerBatch < batches.size()) {
+				batches[producerBatch].renderCompletionSignal = true;
+			}
+		}
+	}
+	else {
+		for (const auto& [resourceID, producerBatch] : m_compiledLastComputeProducerBatchByResource) {
+			(void)resourceID;
+			if (producerBatch < batches.size()) {
+				batches[producerBatch].computeCompletionSignal = true;
+			}
+		}
+	}
+
+	auto nextLastProducerByResourceAcrossFrames = m_lastProducerByResourceAcrossFrames;
+	auto nextLastAliasPlacementProducersByPoolAcrossFrames = m_lastAliasPlacementProducersByPoolAcrossFrames;
+
+	auto removeResourceFromLastAliasPlacementCache = [&](uint64_t resourceID) {
+		for (auto& [poolID, producers] : nextLastAliasPlacementProducersByPoolAcrossFrames) {
+			(void)poolID;
+			producers.erase(
+				std::remove_if(
+					producers.begin(),
+					producers.end(),
+					[&](const LastAliasPlacementProducerAcrossFrames& p) {
+						return p.resourceID == resourceID;
+					}),
+				producers.end());
+		}
+	};
+
+	auto publishAliasPlacementProducer = [&](uint64_t resourceID, LastProducerAcrossFrames producer) {
+		removeResourceFromLastAliasPlacementCache(resourceID);
+
+		auto itPlacement = aliasPlacementRangesByID.find(resourceID);
+		if (itPlacement == aliasPlacementRangesByID.end()) {
+			return;
+		}
+
+		auto itPoolState = persistentAliasPools.find(itPlacement->second.poolID);
+		if (itPoolState == persistentAliasPools.end()) {
+			return;
+		}
+
+		nextLastAliasPlacementProducersByPoolAcrossFrames[itPlacement->second.poolID].push_back(
+			LastAliasPlacementProducerAcrossFrames{
+				.resourceID = resourceID,
+				.poolID = itPlacement->second.poolID,
+				.poolGeneration = itPoolState->second.generation,
+				.startByte = itPlacement->second.startByte,
+				.endByte = itPlacement->second.endByte,
+				.producer = producer,
+			});
+	};
 
 	auto& statisticsManager = StatisticsManager::GetInstance();
 
@@ -2470,7 +2691,7 @@ void RenderGraph::Execute(RenderContext& context) {
 			context,
 			statisticsManager);
 
-		if (batch.renderCompletionSignal && signalNow && !alias) {
+		if (batch.renderCompletionSignal && signalNow) {
 			UINT64 signalValue = currentGraphicsQueueFenceOffset + batch.renderCompletionFenceValue;
 			crm->Flush(QueueKind::Graphics, { true, signalValue });
 		}
@@ -2481,13 +2702,61 @@ void RenderGraph::Execute(RenderContext& context) {
 				QueueKind::Graphics,
 				graphicsCommandList);
 
-			if (!alias) {
+			if (batch.renderCompletionSignal) {
 				UINT64 signalValue = currentGraphicsQueueFenceOffset + batch.renderCompletionFenceValue;
 				crm->Flush(QueueKind::Graphics, { true, signalValue });
 			}
 		}
 		++batchIndex;
 	}
+
+	for (const auto& [resourceID, producerBatch] : m_compiledLastRenderProducerBatchByResource) {
+		if (producerBatch >= batches.size()) {
+			continue;
+		}
+
+		const uint64_t fenceValue = currentGraphicsQueueFenceOffset + batches[producerBatch].renderCompletionFenceValue;
+		LastProducerAcrossFrames producer{
+			.queue = CommandQueueType::Graphics,
+			.fenceValue = fenceValue,
+		};
+		nextLastProducerByResourceAcrossFrames[resourceID] = producer;
+		publishAliasPlacementProducer(resourceID, producer);
+	}
+
+	if (alias) {
+		for (const auto& [resourceID, producerBatch] : m_compiledLastComputeProducerBatchByResource) {
+			if (producerBatch >= batches.size()) {
+				continue;
+			}
+
+			const uint64_t fenceValue = currentGraphicsQueueFenceOffset + batches[producerBatch].renderCompletionFenceValue;
+			LastProducerAcrossFrames producer{
+				.queue = CommandQueueType::Graphics,
+				.fenceValue = fenceValue,
+			};
+			nextLastProducerByResourceAcrossFrames[resourceID] = producer;
+			publishAliasPlacementProducer(resourceID, producer);
+		}
+	}
+	else {
+		for (const auto& [resourceID, producerBatch] : m_compiledLastComputeProducerBatchByResource) {
+			if (producerBatch >= batches.size()) {
+				continue;
+			}
+
+			const uint64_t fenceValue = currentComputeQueueFenceOffset + batches[producerBatch].computeCompletionFenceValue;
+			LastProducerAcrossFrames producer{
+				.queue = CommandQueueType::Compute,
+				.fenceValue = fenceValue,
+			};
+			nextLastProducerByResourceAcrossFrames[resourceID] = producer;
+			publishAliasPlacementProducer(resourceID, producer);
+		}
+	}
+
+	m_lastProducerByResourceAcrossFrames = std::move(nextLastProducerByResourceAcrossFrames);
+	m_lastAliasPlacementProducersByPoolAcrossFrames = std::move(nextLastAliasPlacementProducersByPoolAcrossFrames);
 	crm->Flush(QueueKind::Graphics, { false, 0 });
 	crm->Flush(QueueKind::Compute, { false, 0 });
 	crm->EndFrame();
