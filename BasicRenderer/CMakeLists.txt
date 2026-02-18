@@ -37,6 +37,12 @@ target_link_libraries(resource_codegen
 )
 
 file(GLOB_RECURSE SOURCES "src/*.cpp")
+list(REMOVE_ITEM SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/DescriptorHeap.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/CommandListPool.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/ImmediateExecution/ImmediateCommandList.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Managers/CommandRecordingManager.cpp"
+)
 add_executable (${PROJECT_NAME} WIN32  ${SOURCES})
 
 if (CMAKE_VERSION VERSION_GREATER 3.14)
@@ -599,6 +605,7 @@ PRIVATE
     usdShade
     usdSkel
     implot::implot
+    OpenRenderGraph
     BasicRHI
     Boost::container_hash
     Tracy::TracyClient

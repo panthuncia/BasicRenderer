@@ -1,9 +1,5 @@
 #include "Render/DescriptorHeap.h"
 
-#include <spdlog/spdlog.h>
-
-#include "Utilities/Utilities.h"
-
 DescriptorHeap::DescriptorHeap(rhi::Device& device, rhi::DescriptorHeapType type, uint32_t numDescriptors, bool shaderVisible, std::string name)
     : m_type(type), m_shaderVisible(shaderVisible), m_numDescriptorsAllocated(0) {
 

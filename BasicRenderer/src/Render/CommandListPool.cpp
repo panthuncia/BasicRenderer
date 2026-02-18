@@ -1,7 +1,5 @@
 #include "Render/CommandListPool.h"
 
-using Microsoft::WRL::ComPtr;
-
 CommandListPool::CommandListPool(rhi::Device& device, rhi::QueueKind type)
     : m_device(device), m_type(type) {
 }

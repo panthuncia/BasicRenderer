@@ -2,8 +2,6 @@
 
 #include <cassert>
 
-using Microsoft::WRL::ComPtr;
-
 thread_local CommandRecordingManager::ThreadState CommandRecordingManager::s_tls{};
 
 CommandRecordingManager::CommandRecordingManager(const Init& init) {

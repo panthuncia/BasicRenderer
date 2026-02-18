@@ -23,8 +23,8 @@ namespace rg::imm {
             uint32_t newHi = hi;
 
             while (it != v.end() && it->lo <= (newHi + 1)) {
-                newLo = std::min(newLo, it->lo);
-                newHi = std::max(newHi, it->hi);
+                newLo = (std::min)(newLo, it->lo);
+                newHi = (std::max)(newHi, it->hi);
                 it = v.erase(it);
             }
 
@@ -47,8 +47,8 @@ namespace rg::imm {
             if (a.slice0 == b.slice0 && a.slice1 == b.slice1 &&
                 TouchOrOverlap1D(a.mip0, a.mip1, b.mip0, b.mip1))
             {
-                a.mip0 = std::min(a.mip0, b.mip0);
-                a.mip1 = std::max(a.mip1, b.mip1);
+                a.mip0 = (std::min)(a.mip0, b.mip0);
+                a.mip1 = (std::max)(a.mip1, b.mip1);
                 return true;
             }
 
@@ -56,8 +56,8 @@ namespace rg::imm {
             if (a.mip0 == b.mip0 && a.mip1 == b.mip1 &&
                 TouchOrOverlap1D(a.slice0, a.slice1, b.slice0, b.slice1))
             {
-                a.slice0 = std::min(a.slice0, b.slice0);
-                a.slice1 = std::max(a.slice1, b.slice1);
+                a.slice0 = (std::min)(a.slice0, b.slice0);
+                a.slice1 = (std::max)(a.slice1, b.slice1);
                 return true;
             }
 

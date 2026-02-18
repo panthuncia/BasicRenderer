@@ -90,8 +90,9 @@ install(FILES
 )
 
 target_link_libraries(BasicRHI
-PRIVATE 
+PUBLIC
     Microsoft::DirectX-Headers
+PRIVATE 
     Microsoft::DirectX12-Agility 
     spdlog::spdlog_header_only
 )

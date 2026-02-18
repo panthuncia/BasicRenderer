@@ -5,8 +5,6 @@
 #include <cstdint>
 #include <rhi.h>
 
-#include "Utilities/Utilities.h"
-
 struct CommandListPair {
     rhi::CommandAllocatorPtr allocator;
     rhi::CommandListPtr list;
