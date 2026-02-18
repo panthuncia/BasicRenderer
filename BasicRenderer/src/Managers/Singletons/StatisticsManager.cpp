@@ -28,25 +28,22 @@ void StatisticsManager::RegisterPasses(const std::vector<std::string>& passNames
     m_stats.assign(m_numPasses, {});
     m_isGeometryPass.assign(m_numPasses, false);
     m_meshStatsEma.assign(m_numPasses, {});
-    m_passLastSeenFrame.assign(m_numPasses, m_frameSerial);
+    m_passLastDataFrame.assign(m_numPasses, kNeverSeenFrame);
     m_passNameToIndex.clear();
     for (unsigned i = 0; i < m_numPasses; ++i) {
         if (!m_passNames[i].empty()) {
             m_passNameToIndex.emplace(m_passNames[i], i);
         }
     }
-    m_visiblePassCacheDirty = true;
 }
 
 unsigned StatisticsManager::RegisterPass(const std::string& passName, bool isGeometryPass) {
     if (!passName.empty()) {
         auto it = m_passNameToIndex.find(passName);
         if (it != m_passNameToIndex.end()) {
-            m_passLastSeenFrame[it->second] = m_frameSerial;
             if (isGeometryPass) {
                 m_isGeometryPass[it->second] = true;
             }
-            m_visiblePassCacheDirty = true;
             return it->second;
         }
     }
@@ -64,35 +61,43 @@ unsigned StatisticsManager::RegisterPass(const std::string& passName, bool isGeo
     m_stats.emplace_back();
     m_isGeometryPass.push_back(isGeometryPass);
     m_meshStatsEma.emplace_back();
-    m_passLastSeenFrame.push_back(m_frameSerial);
-    m_visiblePassCacheDirty = true;
+    m_passLastDataFrame.push_back(kNeverSeenFrame);
     return index;
 }
 
 void StatisticsManager::BeginFrame() {
     ++m_frameSerial;
-    m_visiblePassCacheDirty = true;
 }
 
-void StatisticsManager::RebuildVisiblePassIndices() const {
-    m_visiblePassIndices.clear();
-    m_visiblePassIndices.reserve(m_passNames.size());
+void StatisticsManager::RebuildVisiblePassIndices(uint64_t maxStaleFrames, std::vector<unsigned>& out) const {
+    out.clear();
+    out.reserve(m_passNames.size());
+
+    const bool includeNeverSeen = (maxStaleFrames == std::numeric_limits<uint64_t>::max());
 
     for (unsigned i = 0; i < m_passNames.size(); ++i) {
-        const uint64_t lastSeen = (i < m_passLastSeenFrame.size()) ? m_passLastSeenFrame[i] : 0;
-        const uint64_t missing = (m_frameSerial >= lastSeen) ? (m_frameSerial - lastSeen) : 0;
-        if (missing <= m_hideAfterMissingFrames) {
-            m_visiblePassIndices.push_back(i);
+        const uint64_t lastData = (i < m_passLastDataFrame.size()) ? m_passLastDataFrame[i] : kNeverSeenFrame;
+        if (lastData == kNeverSeenFrame) {
+            if (includeNeverSeen) {
+                out.push_back(i);
+            }
+            continue;
+        }
+
+        const uint64_t missingFrames = (m_frameSerial >= lastData) ? (m_frameSerial - lastData) : 0;
+        if (missingFrames <= maxStaleFrames) {
+            out.push_back(i);
         }
     }
-
-    m_visiblePassCacheDirty = false;
 }
 
 const std::vector<unsigned>& StatisticsManager::GetVisiblePassIndices() const {
-    if (m_visiblePassCacheDirty) {
-        RebuildVisiblePassIndices();
-    }
+    RebuildVisiblePassIndices(m_defaultMaxStaleFrames, m_visiblePassIndices);
+    return m_visiblePassIndices;
+}
+
+const std::vector<unsigned>& StatisticsManager::GetVisiblePassIndices(uint64_t maxStaleFrames) const {
+    RebuildVisiblePassIndices(maxStaleFrames, m_visiblePassIndices);
     return m_visiblePassIndices;
 }
 
@@ -205,13 +210,15 @@ void StatisticsManager::BeginQuery(
     auto tsIt = m_timestampBuffers.find(queueKind);
     if (tsIt == m_timestampBuffers.end() || !tsIt->second) return;
 
+    const uint32_t frameBase = frameIndex * m_queryPoolPassCapacity;
+
     // Timestamp "begin" marker = write a timestamp at index 2*N
-    const uint32_t tsIdx = (frameIndex * m_numPasses + passIndex) * 2u;
+    const uint32_t tsIdx = (frameBase + passIndex) * 2u;
     cmd.WriteTimestamp(m_timestampPool->GetHandle(), tsIdx, rhi::Stage::Top); // RHI: EndQuery on a Timestamp pool writes a timestamp
 
     // Begin pipeline stats for geometry passes
     if (m_collectPipelineStatistics && m_isGeometryPass[passIndex]) {
-        const uint32_t psIdx = frameIndex * m_numPasses + passIndex;
+        const uint32_t psIdx = frameBase + passIndex;
         cmd.BeginQuery(m_pipelineStatsPool->GetHandle(), psIdx);
     }
     m_recordedQueries[queueKind][frameIndex].push_back(tsIdx);
@@ -229,13 +236,15 @@ void StatisticsManager::EndQuery(
     auto tsIt = m_timestampBuffers.find(queueKind);
     if (tsIt == m_timestampBuffers.end() || !tsIt->second) return;
 
+    const uint32_t frameBase = frameIndex * m_queryPoolPassCapacity;
+
     // Timestamp "end" marker = write a timestamp at index 2*N + 1
-    const uint32_t tsIdx = (frameIndex * m_numPasses + passIndex) * 2u + 1u;
+    const uint32_t tsIdx = (frameBase + passIndex) * 2u + 1u;
 	cmd.WriteTimestamp(m_timestampPool->GetHandle(), tsIdx, rhi::Stage::Bottom); // RHI: EndQuery on a Timestamp pool writes a timestamp
 
     // End pipeline stats for geometry passes
     if (m_collectPipelineStatistics && m_isGeometryPass[passIndex]) {
-        const uint32_t psIdx = frameIndex * m_numPasses + passIndex;
+        const uint32_t psIdx = frameBase + passIndex;
         cmd.EndQuery(m_pipelineStatsPool->GetHandle(), psIdx);
     }
     m_recordedQueries[queueKind][frameIndex].push_back(tsIdx);
@@ -273,6 +282,7 @@ void StatisticsManager::ResolveQueries(
     }
     ranges.emplace_back(start, prev - start + 1);
 
+    const uint32_t frameBase = frameIndex * m_queryPoolPassCapacity;
     const uint64_t tsStride = m_timestampQueryInfo.elementSize; // usually 8
     const uint64_t psStride = m_pipelineStatsQueryInfo.elementSize; // backend-dependent
 
@@ -295,11 +305,17 @@ void StatisticsManager::ResolveQueries(
 
         // For each stamped pass in this range, resolve pipeline stats if it's a geometry pass
         for (uint32_t idx = r.first; idx < r.first + r.second; idx += 2) {
-            const uint32_t base = idx / 2;                 // pass instance index
-            const uint32_t pi = base % m_numPasses;      // pass id within frame
+            const uint32_t encoded = idx / 2; // frameBase + passIndex
+            if (encoded < frameBase) {
+                continue;
+            }
+            const uint32_t pi = encoded - frameBase;
+            if (pi >= m_numPasses) {
+                continue;
+            }
             if (!m_isGeometryPass[pi]) continue;
 
-            const uint32_t psIdx = frameIndex * m_numPasses + pi;
+            const uint32_t psIdx = frameBase + pi;
 
             cmd.ResolveQueryData(
                 m_pipelineStatsPool->GetHandle(),
@@ -335,6 +351,7 @@ void StatisticsManager::OnFrameComplete(
 
     const uint64_t tsStride = m_timestampQueryInfo.elementSize; // usually 8
     const uint64_t psStride = m_pipelineStatsQueryInfo.elementSize; // backend-specific
+    const uint32_t frameBase = frameIndex * m_queryPoolPassCapacity;
     const double   toMs = 1000.0 / double(m_gpuTimestampFreq);
 
     auto readU64At = [](const uint8_t* base, uint64_t byteOffset) -> uint64_t {
@@ -369,15 +386,24 @@ void StatisticsManager::OnFrameComplete(
             const uint64_t t1 = readU64At(tsBase, uint64_t(local1) * tsStride);
             const double   ms = double(t1 - t0) * toMs;
 
-            const uint32_t base = idx / 2;
-            const uint32_t pi = base % m_numPasses;
+            const uint32_t encoded = idx / 2; // frameBase + passIndex
+            if (encoded < frameBase) {
+                continue;
+            }
+            const uint32_t pi = encoded - frameBase;
+            if (pi >= m_numPasses) {
+                continue;
+            }
 
             m_stats[pi].ema = m_stats[pi].ema * (1.0 - PassStats::alpha) + ms * PassStats::alpha;
+            if (pi < m_passLastDataFrame.size()) {
+                m_passLastDataFrame[pi] = m_frameSerial;
+            }
 
             if (!m_collectPipelineStatistics || !m_isGeometryPass[pi]) continue;
 
             // Map just this pass's pipeline stat element
-            const uint32_t psIdx = frameIndex * m_numPasses + pi;
+            const uint32_t psIdx = frameBase + pi;
             const uint64_t psOffset = psStride * uint64_t(psIdx);
             void* psPtrVoid = nullptr;
             psBuf->Map(&psPtrVoid, psOffset, psStride);
@@ -419,9 +445,8 @@ void StatisticsManager::ClearAll() {
     m_isGeometryPass.clear();
     m_meshStatsEma.clear();
     m_passNameToIndex.clear();
-    m_passLastSeenFrame.clear();
+    m_passLastDataFrame.clear();
     m_visiblePassIndices.clear();
-    m_visiblePassCacheDirty = true;
     m_recordedQueries.clear();
     m_pendingResolves.clear();
     m_numPasses=0;

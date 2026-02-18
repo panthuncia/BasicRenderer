@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <utility>
 #include <functional>
+#include <limits>
 #include <rhi.h>
 
 // per-pass exponential moving average data
@@ -61,6 +62,7 @@ public:
 
 	const std::vector<bool>& GetIsGeometryPassVector() const { return m_isGeometryPass; }
     const std::vector<unsigned>& GetVisiblePassIndices() const;
+    const std::vector<unsigned>& GetVisiblePassIndices(uint64_t maxStaleFrames) const;
 
     const std::vector<std::string>&        GetPassNames() const { return m_passNames; }
     const std::vector<PassStats>&          GetPassStats() const { return m_stats; }
@@ -92,12 +94,12 @@ private:
     uint64_t  m_unnamedPassCounter = 0;
     std::unordered_map<std::string, unsigned> m_passNameToIndex;
     uint64_t  m_frameSerial = 0;
-    uint64_t  m_hideAfterMissingFrames = 240;
-    std::vector<uint64_t> m_passLastSeenFrame;
+    static constexpr uint64_t kNeverSeenFrame = std::numeric_limits<uint64_t>::max();
+    uint64_t  m_defaultMaxStaleFrames = 240;
+    std::vector<uint64_t> m_passLastDataFrame;
     mutable std::vector<unsigned> m_visiblePassIndices;
-    mutable bool m_visiblePassCacheDirty = true;
 
-    void RebuildVisiblePassIndices() const;
+    void RebuildVisiblePassIndices(uint64_t maxStaleFrames, std::vector<unsigned>& out) const;
 
     // Per-pass data
     std::vector<std::string>        m_passNames;

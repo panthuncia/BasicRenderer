@@ -1504,9 +1504,19 @@ inline void Menu::DrawPassTimingWindow() {
     auto& stats     = statisticsManager.GetPassStats();
     auto& meshStats = statisticsManager.GetMeshStats();
     auto& isGeom    = statisticsManager.GetIsGeometryPassVector();
-    auto& visible   = statisticsManager.GetVisiblePassIndices();
+    static int maxStaleFrames = 240;
 
-    if (names.empty() || visible.empty()) {
+    if (names.empty()) {
+        return;
+    }
+
+    ImGui::Begin("Pass Timings");
+    ImGui::SliderInt("Max Stale Frames", &maxStaleFrames, 0, 2000);
+
+    const auto& visible = statisticsManager.GetVisiblePassIndices(static_cast<uint64_t>(maxStaleFrames));
+    if (visible.empty()) {
+        ImGui::TextUnformatted("No pass timings within selected staleness window.");
+        ImGui::End();
         return;
     }
 
@@ -1552,7 +1562,6 @@ inline void Menu::DrawPassTimingWindow() {
     wName += style.CellPadding.x*2;
     wNum  += style.CellPadding.x*2 + style.ItemSpacing.x + ImGui::CalcTextSize(sortEnabled?"v":">").x + style.FramePadding.x*2;
 
-    ImGui::Begin("Pass Timings");
     ImGui::Columns(2, nullptr, false);
     ImGui::SetColumnWidth(0, wName);
     ImGui::SetColumnWidth(1, wNum);
