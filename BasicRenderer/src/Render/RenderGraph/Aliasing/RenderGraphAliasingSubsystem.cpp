@@ -47,8 +47,8 @@ std::vector<uint64_t> rg::alias::RenderGraphAliasingSubsystem::GetSchedulingEqui
 			continue;
 		}
 
-		const uint64_t overlapStart = std::max(placement.startByte, otherPlacement.startByte);
-		const uint64_t overlapEnd = std::min(placement.endByte, otherPlacement.endByte);
+		const uint64_t overlapStart = (std::max)(placement.startByte, otherPlacement.startByte);
+		const uint64_t overlapEnd = (std::min)(placement.endByte, otherPlacement.endByte);
 		if (overlapStart < overlapEnd) {
 			out.push_back(id);
 		}

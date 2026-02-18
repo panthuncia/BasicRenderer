@@ -10,7 +10,6 @@
 
 #include <rhi_helpers.h>
 
-#include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Resources/PixelBuffer.h"
@@ -27,6 +26,10 @@ RenderGraph::AutoAliasDebugSnapshot RenderGraph::GetAutoAliasDebugSnapshot() con
 }
 
 namespace {
+	uint16_t CalculateMipLevels(uint16_t width, uint16_t height) {
+		return static_cast<uint16_t>(std::floor(std::log2((std::max)(width, height)))) + 1;
+	}
+
 	rhi::ResourceDesc BuildAliasTextureResourceDesc(const TextureDescription& desc) {
 		const uint16_t mipLevels = desc.generateMipMaps
 			? CalculateMipLevels(desc.imageDimensions[0].width, desc.imageDimensions[0].height)

@@ -3,12 +3,12 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <functional>
 
 #include <resource_states.h>
 #include <rhi.h>
 #include <flecs.h>
 
-#include "Managers/Singletons/ECSManager.h"
 #include "Resources/ResourceStateTracker.h"
 
 struct RenderContext;
@@ -16,14 +16,40 @@ class SymbolicTracker;
 
 class Resource : public std::enable_shared_from_this<Resource> {
 public:
+    struct ECSEntityHooks {
+        std::function<flecs::entity()> createEntity;
+        std::function<void(flecs::entity&)> destroyEntity;
+        std::function<bool()> isRuntimeAlive;
+    };
+
+    static void SetEntityHooks(ECSEntityHooks hooks) {
+        s_ecsEntityHooks = std::move(hooks);
+    }
+
+    static void ResetEntityHooks() {
+        s_ecsEntityHooks = {};
+    }
+
     Resource() {
         m_globalResourceID = globalResourceCount.fetch_add(1, std::memory_order_relaxed);
-		m_ecsEntity = ECSManager::GetInstance().GetWorld().entity();
+		if (s_ecsEntityHooks.createEntity) {
+			m_ecsEntity = s_ecsEntityHooks.createEntity();
+		}
     }
 	virtual ~Resource() {
-		if (!ECSManager::GetInstance().GetWorld()) { // TODO: Hacky way to avoid issues with desctruction order. Is there a better way?
+		if (!m_ecsEntity) {
 			return;
 		}
+
+		if (s_ecsEntityHooks.isRuntimeAlive && !s_ecsEntityHooks.isRuntimeAlive()) {
+			return;
+		}
+
+		if (s_ecsEntityHooks.destroyEntity) {
+			s_ecsEntityHooks.destroyEntity(m_ecsEntity);
+			return;
+		}
+
 		if (m_ecsEntity.is_alive()) {
 			m_ecsEntity.destruct();
 		}
@@ -75,6 +101,7 @@ protected:
 private:
     bool m_uploadInProgress = false;
     inline static std::atomic<uint64_t> globalResourceCount;
+	inline static ECSEntityHooks s_ecsEntityHooks{};
     uint64_t m_globalResourceID;
 	flecs::entity m_ecsEntity; // For access through ECS queries
 

@@ -170,7 +170,7 @@ private:
     }
 
     static uint32_t ClampToUint32(uint64_t value, const char* what) {
-        if (value > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) {
+        if (value > static_cast<uint64_t>((std::numeric_limits<uint32_t>::max)())) {
             throw std::runtime_error(std::string("Buffer resize exceeds uint32 range for ") + what);
         }
         return static_cast<uint32_t>(value);

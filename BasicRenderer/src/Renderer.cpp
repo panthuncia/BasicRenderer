@@ -64,6 +64,7 @@
 #include "Render/GraphExtensions/CLodExtension.h"
 #include "RenderPasses/DebugGridPass.h"
 #include "Render/GraphExtensions/ReadbackCaptureExtension.h"
+#include "Resources/Resource.h"
 
 void D3D12DebugCallback(
     D3D12_MESSAGE_CATEGORY Category,
@@ -104,6 +105,20 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     UpscalingManager::GetInstance().InitFFX(); // Needs device
     FFXManager::GetInstance().InitFFX();
     SetSettings();
+    ECSManager::GetInstance().Initialize();
+    Resource::SetEntityHooks({
+        .createEntity = []() -> flecs::entity {
+            return ECSManager::GetInstance().GetWorld().entity();
+        },
+        .destroyEntity = [](flecs::entity& entity) {
+            if (entity && entity.is_alive()) {
+                entity.destruct();
+            }
+        },
+        .isRuntimeAlive = []() {
+            return ECSManager::GetInstance().IsAlive();
+        }
+        });
     ResourceManager::GetInstance().Initialize();
     PSOManager::GetInstance().initialize();
     UploadManager::GetInstance().Initialize();
@@ -111,7 +126,6 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	CommandSignatureManager::GetInstance().Initialize();
     Menu::GetInstance().Initialize(hwnd, rhi::dx12::get_swapchain(m_swapChain.Get())); // TODO: VK imgui
 	ReadbackManager::GetInstance().Initialize(m_readbackFence.Get());
-	ECSManager::GetInstance().Initialize();
 	StatisticsManager::GetInstance().Initialize();
 
     UpscalingManager::GetInstance().Setup();
@@ -917,6 +931,7 @@ void Renderer::Cleanup() {
 	FFXManager::GetInstance().Shutdown();
 	UpscalingManager::GetInstance().Shutdown();
 	ReadbackManager::GetInstance().Cleanup();
+    Resource::ResetEntityHooks();
     ECSManager::GetInstance().Cleanup();
     DeletionManager::GetInstance().Cleanup();
 	spdlog::info("Cleaning up swap chain");

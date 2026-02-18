@@ -29,8 +29,8 @@ SubresourceRange ResolveRangeSpec(const RangeSpec& spec,
     }
 
     // clamp to [0..totalMips-1]
-    firstMip = std::min(firstMip,  totalMips - 1);
-    lastMip  = std::min(lastMip,   totalMips - 1);
+    firstMip = (std::min)(firstMip,  totalMips - 1);
+    lastMip  = (std::min)(lastMip,   totalMips - 1);
 
     uint32_t numMips = (lastMip >= firstMip)
         ? (lastMip - firstMip + 1)
@@ -55,8 +55,8 @@ SubresourceRange ResolveRangeSpec(const RangeSpec& spec,
     }
 
     // clamp to [0..totalSlices-1]
-    firstSlice = std::min(firstSlice, totalSlices - 1);
-    lastSlice  = std::min(lastSlice,  totalSlices - 1);
+    firstSlice = (std::min)(firstSlice, totalSlices - 1);
+    lastSlice  = (std::min)(lastSlice,  totalSlices - 1);
 
     uint32_t numSlices = (lastSlice >= firstSlice)
         ? (lastSlice - firstSlice + 1)
@@ -82,9 +82,9 @@ static uint32_t boundUpper(const Bound &b) {
     case BoundType::Exact: return b.value;
     case BoundType::UpTo:  return b.value;
     case BoundType::From:  // “>= value” means no finite upper -> inf
-    case BoundType::All:   return std::numeric_limits<uint32_t>::max();
+    case BoundType::All:   return (std::numeric_limits<uint32_t>::max)();
     }
-    return std::numeric_limits<uint32_t>::max();
+    return (std::numeric_limits<uint32_t>::max)();
 }
 
 // pick the tighter (greater) lower bound
@@ -393,7 +393,7 @@ bool ValidateNoConflictingTransitions(
         const size_t cells = size_t(totalMips) * size_t(totalSlices);
         if (cells != 0 && cells <= kMaxDenseCells)
         {
-            constexpr size_t kInvalid = std::numeric_limits<size_t>::max();
+            constexpr size_t kInvalid = (std::numeric_limits<size_t>::max)();
             std::vector<size_t> owner(cells, kInvalid);
 
             for (const Rect& r : rects)
@@ -450,7 +450,7 @@ bool ValidateNoConflictingTransitions(
                 const auto& in = intervals[i];
                 if (in.lo <= curHi) {
                     // Overlap at mip; pick a concrete overlapping slice.
-                    uint32_t overlapSlice = std::max(curLo, in.lo);
+                    uint32_t overlapSlice = (std::max)(curLo, in.lo);
                     return emitConflict(res, mip, overlapSlice, curIdx, in.idx);
                 }
 

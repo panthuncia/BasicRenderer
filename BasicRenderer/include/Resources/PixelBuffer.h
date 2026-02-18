@@ -119,7 +119,7 @@ public:
 
     void EnableIdleDematerialization(uint32_t idleFrameThreshold = 1) {
         m_allowIdleDematerialization = true;
-        m_idleDematerializationThreshold = std::max(1u, idleFrameThreshold);
+        m_idleDematerializationThreshold = (std::max)(1u, idleFrameThreshold);
     }
 
     void DisableIdleDematerialization() {
@@ -145,8 +145,8 @@ public:
         if (m_desc.padInternalResolution) {
             // Pad each mip to the nearest power of 2, if requested
             for (auto& dim : m_desc.imageDimensions) {
-                dim.width = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(dim.width)))));
-                dim.height = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(dim.height)))));
+                dim.width = (std::max)(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(dim.width)))));
+                dim.height = (std::max)(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(dim.height)))));
                 // TODO: Row and slice pitch?
             }
         }
@@ -249,8 +249,8 @@ private:
             Materialize();
         }
         if (desc.padInternalResolution) {
-            m_internalWidth = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(desc.imageDimensions[0].width)))));
-            m_internalHeight = std::max(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(desc.imageDimensions[0].height)))));
+            m_internalWidth = (std::max)(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(desc.imageDimensions[0].width)))));
+            m_internalHeight = (std::max)(1u, static_cast<unsigned int>(std::pow(2, std::ceil(std::log2(desc.imageDimensions[0].height)))));
         }
         else {
             m_internalHeight = desc.imageDimensions[0].height;

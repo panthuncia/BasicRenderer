@@ -656,7 +656,7 @@ namespace rhi {
             constexpr uint32_t RowPitchAlign = 256;  // D3D12_TEXTURE_DATA_PITCH_ALIGNMENT
             constexpr uint64_t PlacementAlign = 512; // D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT
 
-            const uint32_t depthSlices = (arraySize > 1) ? 1u : std::max(1u, depthOrLayers);
+            const uint32_t depthSlices = (arraySize > 1) ? 1u : (std::max)(1u, depthOrLayers);
 
             auto idxOf = [&](uint32_t a, uint32_t m, uint32_t z) -> uint32_t {
                 return (a * mipLevels + m) * depthSlices + z;
@@ -667,8 +667,8 @@ namespace rhi {
 
             for (uint32_t a = 0; a < arraySize; ++a) {
                 for (uint32_t m = 0; m < mipLevels; ++m) {
-                    const uint32_t mipW = std::max(1u, baseWidth >> m);
-                    const uint32_t mipH = std::max(1u, baseHeight >> m);
+                    const uint32_t mipW = (std::max)(1u, baseWidth >> m);
+                    const uint32_t mipH = (std::max)(1u, baseHeight >> m);
 
                     const uint32_t bw = (mipW + (blockW - 1)) / blockW; // in blocks
                     const uint32_t bh = (mipH + (blockH - 1)) / blockH; // in blocks

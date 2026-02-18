@@ -496,13 +496,13 @@ private:
 					batches[lastTransBatch].renderCompletionSignal = true;
 					currentBatch.computeQueueWaitOnRenderQueueBeforeTransition = true;
 					currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue =
-						std::max(currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue,
+						(std::max)(currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue,
 							batches[lastTransBatch].renderCompletionFenceValue);
 				} else {
 					batches[lastTransBatch].computeCompletionSignal = true;
 					currentBatch.renderQueueWaitOnComputeQueueBeforeTransition = true;
 					currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue =
-						std::max(currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue,
+						(std::max)(currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue,
 							batches[lastTransBatch].computeCompletionFenceValue);
 				}
 			}
@@ -520,13 +520,13 @@ private:
 				batches[lastProdBatch].renderCompletionSignal = true;
 				currentBatch.computeQueueWaitOnRenderQueueBeforeTransition = true;
 				currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue =
-					std::max(currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue,
+					(std::max)(currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue,
 						batches[lastProdBatch].renderCompletionFenceValue);
 			} else {
 				batches[lastProdBatch].computeCompletionSignal = true;
 				currentBatch.renderQueueWaitOnComputeQueueBeforeTransition = true;
 				currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue =
-					std::max(currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue,
+					(std::max)(currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue,
 						batches[lastProdBatch].computeCompletionFenceValue);
 			}
 		}
@@ -537,13 +537,13 @@ private:
 				batches[lastUsageBatch].renderCompletionSignal = true;
 				currentBatch.computeQueueWaitOnRenderQueueBeforeTransition = true;
 				currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue =
-					std::max(currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue,
+					(std::max)(currentBatch.computeQueueWaitOnRenderQueueBeforeTransitionFenceValue,
 						batches[lastUsageBatch].renderCompletionFenceValue);
 			} else {
 				batches[lastUsageBatch].computeCompletionSignal = true;
 				currentBatch.renderQueueWaitOnComputeQueueBeforeTransition = true;
 				currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue =
-					std::max(currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue,
+					(std::max)(currentBatch.renderQueueWaitOnComputeQueueBeforeTransitionFenceValue,
 						batches[lastUsageBatch].computeCompletionFenceValue);
 			}
 		}
