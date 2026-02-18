@@ -11,8 +11,9 @@
 #include "Resources/GPUBacking/GPUTextureBacking.h"
 #include "Resources/MemoryStatisticsComponents.h"
 #include "Managers/Singletons/ResourceManager.h"
+#include "Interfaces/IHasMemoryMetadata.h"
 
-class PixelBuffer : public GloballyIndexedResource {
+class PixelBuffer : public GloballyIndexedResource, public IHasMemoryMetadata {
 public:
     struct MaterializeOptions {
         std::optional<TextureAliasPlacement> aliasPlacement;
@@ -276,6 +277,12 @@ private:
         }
         throw std::runtime_error(std::string("PixelBuffer '") + name + "' is unmaterialized during " + operation);
     }
+
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
+        if (m_backing) {
+            m_backing->ApplyMetadataComponentBundle(bundle);
+        }
+	}
 
     std::unique_ptr<GpuTextureBacking> m_backing;
 	TextureDescription m_desc;

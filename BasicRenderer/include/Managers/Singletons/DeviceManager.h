@@ -3,6 +3,7 @@
 #include <directx/d3d12.h>
 #include <memory>
 #include <optional>
+#include <functional>
 
 #include <rhi.h>
 #include <rhi_allocator.h>
@@ -10,7 +11,19 @@
 
 class DeviceManager {
 public:
+	struct TrackingHooks {
+		std::function<TrackedEntityToken(flecs::entity existing)> createTrackingToken;
+	};
+
     static DeviceManager& GetInstance();
+
+	static void SetTrackingHooks(TrackingHooks hooks) {
+		s_trackingHooks = std::move(hooks);
+	}
+
+	static void ResetTrackingHooks() {
+		s_trackingHooks = {};
+	}
 
     void Initialize();
 	void Cleanup();
@@ -72,6 +85,7 @@ private:
 	rhi::Queue m_copyQueue;
 	bool m_meshShadersSupported = false;
 	rhi::ma::Allocator* m_allocator;
+	inline static TrackingHooks s_trackingHooks{};
 
     void CheckGPUFeatures();
 

@@ -7,7 +7,6 @@
 #include <rhi_allocator.h>
 
 #include "resources/ResourceIdentifier.h"
-#include "Managers/Singletons/ECSManager.h"
 
 struct EntityComponentBundle {
     std::vector<std::function<void(flecs::entity)>> ops;
@@ -37,6 +36,19 @@ struct EntityComponentBundle {
 };
 
 struct TrackedEntityToken {
+    struct Hooks {
+        std::function<bool()> isRuntimeAlive;
+        std::function<void(flecs::world&, flecs::entity_t)> destroyEntity;
+    };
+
+    static void SetHooks(Hooks hooks) {
+        s_hooks = std::move(hooks);
+    }
+
+    static void ResetHooks() {
+        s_hooks = {};
+    }
+
     flecs::world* world = nullptr;
     flecs::entity_t id = 0;
 
@@ -72,12 +84,25 @@ struct TrackedEntityToken {
     void Disarm() noexcept { world = nullptr; id = 0; }
 
     void Reset() noexcept {
-        if (world && id && ECSManager::GetInstance().IsAlive()) {
-            flecs::entity e{ *world, id };
-            if (e.is_alive()) e.destruct();
+        if (world && id) {
+            if (s_hooks.isRuntimeAlive && !s_hooks.isRuntimeAlive()) {
+                Disarm();
+                return;
+            }
+
+            if (s_hooks.destroyEntity) {
+                s_hooks.destroyEntity(*world, id);
+            }
+            else {
+                flecs::entity e{ *world, id };
+                if (e.is_alive()) e.destruct();
+            }
         }
         Disarm();
     }
+
+private:
+    inline static Hooks s_hooks{};
 };
 
 class TrackedHandle {

@@ -154,11 +154,6 @@ public:
         return true;
     }
 
-    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
-        m_metadataBundles.emplace_back(bundle);
-        ApplyMetadataToBacking(bundle);
-    }
-
 private:
     struct StructuredLayout {
         uint64_t bufferSize = 0;
@@ -310,6 +305,11 @@ private:
             ApplyMetadataToBacking(bundle);
         }
         OnSetName();
+    }
+
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
+        m_metadataBundles.emplace_back(bundle);
+        ApplyMetadataToBacking(bundle);
     }
 
     std::optional<StructuredBufferParams> m_structuredParams;

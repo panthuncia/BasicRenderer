@@ -9,6 +9,7 @@
 #include "Managers/ViewManager.h"
 #include "../../generated/BuiltinResources.h"
 #include "Resources/MemoryStatisticsComponents.h"
+#include "Render/MemoryIntrospectionAPI.h"
 
 MeshManager::MeshManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
@@ -34,17 +35,17 @@ MeshManager::MeshManager() {
 	m_clusterLODNodes = DynamicBuffer::CreateShared(sizeof(ClusterLODNode), 1, "clusterLODNodes");
 
 	// Tag resources for memory statistics
-	m_preSkinningVertices->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
-	m_postSkinningVertices->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
-	m_meshletOffsets->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
-	m_meshletVertexIndices->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
-	m_meshletTriangles->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
+	rg::memory::SetResourceUsageHint(*m_preSkinningVertices, "Mesh Data");
+	rg::memory::SetResourceUsageHint(*m_postSkinningVertices, "Mesh Data");
+	rg::memory::SetResourceUsageHint(*m_meshletOffsets, "Mesh Data");
+	rg::memory::SetResourceUsageHint(*m_meshletVertexIndices, "Mesh Data");
+	rg::memory::SetResourceUsageHint(*m_meshletTriangles, "Mesh Data");
 	//m_meshletBoundsBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
 
 	//m_clusterToVisibleClusterTableIndexBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
 
-	m_perMeshBuffers->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "PerMesh, PerMeshInstance, PerObject" }));
-	m_perMeshInstanceBuffers->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "PerMesh, PerMeshInstance, PerObject" }));
+	rg::memory::SetResourceUsageHint(*m_perMeshBuffers, "PerMesh, PerMeshInstance, PerObject");
+	rg::memory::SetResourceUsageHint(*m_perMeshInstanceBuffers, "PerMesh, PerMeshInstance, PerObject");
 
 
 	m_resources[Builtin::PreSkinningVertices] = m_preSkinningVertices;

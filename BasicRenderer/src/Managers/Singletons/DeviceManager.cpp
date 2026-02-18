@@ -6,7 +6,6 @@
 
 #include "Resources/MemoryStatisticsComponents.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "Managers/Singletons/ECSManager.h"
 #include "Resources/ResourceIdentifier.h"
 #include "Utilities/Utilities.h"
 #include "Resources/GPUBacking/GpuBufferBacking.h"
@@ -29,28 +28,27 @@ rhi::Result DeviceManager::CreateResourceTracked(
         alloc);
 
     // Create or reuse entity
-    flecs::entity e;
     AllocationTrackDesc track(-1);
     if (trackDesc.has_value()) {
         track = trackDesc.value();
-        e = track.existing;
-    }
-    if (!e.is_alive()) {
-        e = ECSManager::GetInstance().GetWorld().entity();
     }
 
-    // Attach base info (size, kind, etc.)
-    e.set<MemoryStatisticsComponents::ResourceID>({ track.globalResourceID });
-	const uint64_t sizeBytes = 0; // TODO
-    e.set<MemoryStatisticsComponents::MemSizeBytes>({ sizeBytes });
+    TrackedEntityToken tok;
+    if (s_trackingHooks.createTrackingToken) {
+        tok = s_trackingHooks.createTrackingToken(track.existing);
+    }
+
+    EntityComponentBundle baseBundle;
+    baseBundle.Set<MemoryStatisticsComponents::ResourceID>({ track.globalResourceID });
+	const uint64_t sizeBytes = 0;
+    baseBundle.Set<MemoryStatisticsComponents::MemSizeBytes>({ sizeBytes });
     if (track.id) {
-        e.set<ResourceIdentifier>(track.id.value());
+        baseBundle.Set<ResourceIdentifier>(track.id.value());
     }
+    tok.ApplyAttachBundle(baseBundle);
 
-    // Apply caller-provided bundle
-    track.attach.ApplyTo(e);
-    TrackedEntityToken tok(ECSManager::GetInstance().GetWorld(), e);
-    // Return wrapper that will delete entity when allocation is destroyed
+    tok.ApplyAttachBundle(track.attach);
+
     outAllocation = TrackedHandle::FromAllocation(std::move(alloc), std::move(tok));
     return result;
 }
@@ -73,28 +71,26 @@ rhi::Result DeviceManager::CreateAliasingResourceTracked(
         pCastableFormats,
         res);
 
-    // Create or reuse entity
-    flecs::entity e;
     AllocationTrackDesc track(-1);
     if (trackDesc.has_value()) {
         track = trackDesc.value();
-        e = track.existing;
-    }
-    if (!e.is_alive()) {
-        e = ECSManager::GetInstance().GetWorld().entity();
     }
 
-    // Attach base info (size, kind, etc.)
-    const uint64_t sizeBytes = 0; // TODO
-    e.set<MemoryStatisticsComponents::MemSizeBytes>({ sizeBytes });
+    TrackedEntityToken tok;
+    if (s_trackingHooks.createTrackingToken) {
+        tok = s_trackingHooks.createTrackingToken(track.existing);
+    }
+
+    EntityComponentBundle baseBundle;
+	const uint64_t sizeBytes = 0;
+    baseBundle.Set<MemoryStatisticsComponents::MemSizeBytes>({ sizeBytes });
     if (track.id) {
-        e.set<ResourceIdentifier>(track.id.value());
+        baseBundle.Set<ResourceIdentifier>(track.id.value());
     }
+    tok.ApplyAttachBundle(baseBundle);
 
-    // Apply caller-provided bundle
-    track.attach.ApplyTo(e);
-    TrackedEntityToken tok(ECSManager::GetInstance().GetWorld(), e);
-    // Return wrapper that will delete entity when allocation is destroyed
+    tok.ApplyAttachBundle(track.attach);
+
     outResource = TrackedHandle::FromResource(std::move(res), std::move(tok));
     return result;
 }
@@ -108,24 +104,25 @@ rhi::Result DeviceManager::AllocateMemoryTracked(
     rhi::ma::AllocationPtr alloc;
     const auto result = m_allocator->AllocateMemory(allocDesc, allocationInfo, alloc);
 
-    flecs::entity e;
     AllocationTrackDesc track(-1);
     if (trackDesc.has_value()) {
         track = trackDesc.value();
-        e = track.existing;
-    }
-    if (!e.is_alive()) {
-        e = ECSManager::GetInstance().GetWorld().entity();
     }
 
-    e.set<MemoryStatisticsComponents::ResourceID>({ track.globalResourceID });
-    e.set<MemoryStatisticsComponents::MemSizeBytes>({ allocationInfo.sizeInBytes });
+    TrackedEntityToken tok;
+    if (s_trackingHooks.createTrackingToken) {
+        tok = s_trackingHooks.createTrackingToken(track.existing);
+    }
+
+    EntityComponentBundle baseBundle;
+    baseBundle.Set<MemoryStatisticsComponents::ResourceID>({ track.globalResourceID });
+    baseBundle.Set<MemoryStatisticsComponents::MemSizeBytes>({ allocationInfo.sizeInBytes });
     if (track.id) {
-        e.set<ResourceIdentifier>(track.id.value());
+        baseBundle.Set<ResourceIdentifier>(track.id.value());
     }
+    tok.ApplyAttachBundle(baseBundle);
 
-    track.attach.ApplyTo(e);
-    TrackedEntityToken tok(ECSManager::GetInstance().GetWorld(), e);
+    tok.ApplyAttachBundle(track.attach);
     outAllocation = TrackedHandle::FromAllocation(std::move(alloc), std::move(tok));
     return result;
 }

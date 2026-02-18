@@ -5,6 +5,7 @@
 #include "Materials/MaterialFlags.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/MemoryStatisticsComponents.h"
+#include "Render/MemoryIntrospectionAPI.h"
 
 Material::Material(const std::string& name,
     MaterialFlags materialFlags, PSOFlags psoFlags)
@@ -78,7 +79,7 @@ void Material::SetHeightmap(std::shared_ptr<TextureAsset> heightmap) {
     m_materialData.materialFlags |= MaterialFlags::MATERIAL_PARALLAX;
     m_heightMap = heightmap;
     heightmap->Image().SetName("HeightMap");
-	heightmap->Image().ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Material textures" }));
+    rg::memory::SetResourceUsageHint(heightmap->Image(), "Material textures");
     m_materialData.heightMapIndex = heightmap->Image().GetSRVInfo(0).slot.index;
     m_materialData.heightSamplerIndex = heightmap->SamplerDescriptorIndex();
 }
@@ -161,42 +162,42 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
         m_materialData.baseColorTextureIndex = m_baseColorTexture->Image().GetSRVInfo(0).slot.index;
         m_materialData.baseColorSamplerIndex = m_baseColorTexture->SamplerDescriptorIndex();
         m_materialData.baseColorChannels = { m_baseColorChannels[0], m_baseColorChannels[1], m_baseColorChannels[2], m_baseColorChannels[3] };
-        m_baseColorTexture->Image().ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Material textures" }));
+        rg::memory::SetResourceUsageHint(m_baseColorTexture->Image(), "Material textures");
         m_baseColorTexture->Image().SetName("BaseColorTexture");
     }
     if (m_normalTexture != nullptr) {
         m_materialData.normalTextureIndex = m_normalTexture->Image().GetSRVInfo(0).slot.index;
         m_materialData.normalSamplerIndex = m_normalTexture->SamplerDescriptorIndex();
         m_materialData.normalChannels = { m_normalChannels[0], m_normalChannels[1], m_normalChannels[2] };
-        m_normalTexture->Image().ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Material textures" }));
+        rg::memory::SetResourceUsageHint(m_normalTexture->Image(), "Material textures");
         m_normalTexture->Image().SetName("NormalTexture");
     }
     if (m_aoMap != nullptr) {
         m_materialData.aoMapIndex = m_aoMap->Image().GetSRVInfo(0).slot.index;
         m_materialData.aoSamplerIndex = m_aoMap->SamplerDescriptorIndex();
         m_materialData.aoChannel = m_aoChannel[0];
-        m_aoMap->Image().ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Material textures" }));
+        rg::memory::SetResourceUsageHint(m_aoMap->Image(), "Material textures");
         m_aoMap->Image().SetName("AOMap");
     }
     if (m_heightMap != nullptr) {
         m_materialData.heightMapIndex = m_heightMap->Image().GetSRVInfo(0).slot.index;
         m_materialData.heightSamplerIndex = m_heightMap->SamplerDescriptorIndex();
         m_materialData.heightChannel = m_heightChannel[0];
-        m_heightMap->Image().ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Material textures" }));
+        rg::memory::SetResourceUsageHint(m_heightMap->Image(), "Material textures");
         m_heightMap->Image().SetName("HeightMap");
     }
     if (m_metallicTexture != nullptr) {
         m_materialData.metallicTextureIndex = m_metallicTexture->Image().GetSRVInfo(0).slot.index;
         m_materialData.metallicSamplerIndex = m_metallicTexture->SamplerDescriptorIndex();
         m_materialData.metallicChannel = m_metallicChannel[0];
-        m_metallicTexture->Image().ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Material textures" }));
+        rg::memory::SetResourceUsageHint(m_metallicTexture->Image(), "Material textures");
         m_metallicTexture->Image().SetName("MetallicTexture");
     }
     if (m_roughnessTexture != nullptr) {
         m_materialData.roughnessTextureIndex = m_roughnessTexture->Image().GetSRVInfo(0).slot.index;
         m_materialData.roughnessSamplerIndex = m_roughnessTexture->SamplerDescriptorIndex();
         m_materialData.roughnessChannel = m_roughnessChannel[0];
-        m_roughnessTexture->Image().ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Material textures" }));
+        rg::memory::SetResourceUsageHint(m_roughnessTexture->Image(), "Material textures");
         m_roughnessTexture->Image().SetName("RoughnessTexture");
     }
     if (m_metallicTexture == m_roughnessTexture && m_metallicTexture != nullptr) {
@@ -207,14 +208,14 @@ void Material::EnsureTexturesUploaded(const TextureFactory& factory) {
         m_materialData.emissiveTextureIndex = m_emissiveTexture->Image().GetSRVInfo(0).slot.index;
         m_materialData.emissiveSamplerIndex = m_emissiveTexture->SamplerDescriptorIndex();
         m_materialData.emissiveChannels = { m_emissiveChannels[0], m_emissiveChannels[1], m_emissiveChannels[2] };
-        m_emissiveTexture->Image().ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Material textures" }));
+        rg::memory::SetResourceUsageHint(m_emissiveTexture->Image(), "Material textures");
         m_emissiveTexture->Image().SetName("EmissiveTexture");
     }
 
     if (m_opacityTexture != nullptr) {
         m_materialData.opacityTextureIndex = m_opacityTexture->Image().GetSRVInfo(0).slot.index;
         m_materialData.opacitySamplerIndex = m_opacityTexture->SamplerDescriptorIndex();
-        m_opacityTexture->Image().ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Material textures" }));
+        rg::memory::SetResourceUsageHint(m_opacityTexture->Image(), "Material textures");
         m_opacityTexture->Image().SetName("OpacityTexture");
     }
 }

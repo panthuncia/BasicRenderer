@@ -57,6 +57,7 @@
 #include "Managers/Singletons/StatisticsManager.h"
 #include "../generated/BuiltinResources.h"
 #include "Resources/ResourceIdentifier.h"
+#include "Resources/MemoryStatisticsComponents.h"
 #include "Render/RenderGraphBuildHelper.h"
 #include "Managers/Singletons/UpscalingManager.h"
 #include "Managers/Singletons/FFXManager.h"
@@ -65,6 +66,7 @@
 #include "RenderPasses/DebugGridPass.h"
 #include "Render/GraphExtensions/ReadbackCaptureExtension.h"
 #include "Resources/Resource.h"
+#include "Render/MemoryIntrospectionAPI.h"
 
 void D3D12DebugCallback(
     D3D12_MESSAGE_CATEGORY Category,
@@ -106,6 +108,29 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     FFXManager::GetInstance().InitFFX();
     SetSettings();
     ECSManager::GetInstance().Initialize();
+    TrackedEntityToken::SetHooks({
+        .isRuntimeAlive = []() {
+            return ECSManager::GetInstance().IsAlive();
+        },
+        .destroyEntity = [](flecs::world& world, flecs::entity_t id) {
+            flecs::entity entity{ world, id };
+            if (entity.is_alive()) {
+                entity.destruct();
+            }
+        }
+        });
+
+    DeviceManager::SetTrackingHooks({
+        .createTrackingToken = [](flecs::entity existing) {
+            auto& world = ECSManager::GetInstance().GetWorld();
+            flecs::entity entity = existing;
+            if (!entity.is_alive()) {
+                entity = world.entity();
+            }
+            return TrackedEntityToken(world, entity);
+        }
+        });
+
     Resource::SetEntityHooks({
         .createEntity = []() -> flecs::entity {
             return ECSManager::GetInstance().GetWorld().entity();
@@ -119,6 +144,37 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
             return ECSManager::GetInstance().IsAlive();
         }
         });
+
+    auto memoryQuery = ECSManager::GetInstance().GetWorld().query_builder<const MemoryStatisticsComponents::MemSizeBytes>().build();
+    rg::memory::SnapshotProvider::SetBuildSnapshotFn(
+        [memoryQuery](std::vector<rg::memory::ResourceMemoryRecord>& out) mutable {
+            out.clear();
+            out.reserve(2048);
+
+            memoryQuery.each([&](flecs::entity e, const MemoryStatisticsComponents::MemSizeBytes& sz) {
+                rg::memory::ResourceMemoryRecord row;
+                row.bytes = sz.size;
+
+                if (auto rid = e.try_get<MemoryStatisticsComponents::ResourceID>()) {
+                    row.resourceID = rid->id;
+                }
+                if (auto rt = e.try_get<MemoryStatisticsComponents::ResourceType>()) {
+                    row.resourceType = rt->type;
+                }
+                if (auto rn = e.try_get<MemoryStatisticsComponents::ResourceName>()) {
+                    row.resourceName = rn->name;
+                }
+                if (auto usage = e.try_get<MemoryStatisticsComponents::ResourceUsage>()) {
+                    row.usage = usage->usage;
+                }
+                if (auto ident = e.try_get<ResourceIdentifier>()) {
+                    row.identifier = ident->name;
+                }
+
+                out.push_back(std::move(row));
+                });
+        });
+
     ResourceManager::GetInstance().Initialize();
     PSOManager::GetInstance().initialize();
     UploadManager::GetInstance().Initialize();
@@ -589,7 +645,7 @@ void Renderer::CreateTextures() {
     hdrDesc.allowAlias = true;
     auto hdrColorTarget = PixelBuffer::CreateSharedUnmaterialized(hdrDesc);
     hdrColorTarget->SetName("Primary Camera HDR Color Target");
-    hdrColorTarget->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Primary color buffers" }));
+    rg::memory::SetResourceUsageHint(*hdrColorTarget, "Primary color buffers");
 	m_coreResourceProvider.m_HDRColorTarget = hdrColorTarget;
 
     auto outputResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
@@ -599,7 +655,7 @@ void Renderer::CreateTextures() {
     hdrDesc.allowAlias = true;
 	auto upscaledHDRColorTarget = PixelBuffer::CreateSharedUnmaterialized(hdrDesc);
 	upscaledHDRColorTarget->SetName("Upscaled HDR Color Target");
-	upscaledHDRColorTarget->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Upscaled color buffers" }));
+    rg::memory::SetResourceUsageHint(*upscaledHDRColorTarget, "Upscaled color buffers");
 	m_coreResourceProvider.m_upscaledHDRColorTarget = upscaledHDRColorTarget;
 
     TextureDescription motionVectors;
@@ -618,7 +674,7 @@ void Renderer::CreateTextures() {
 	motionVectors.allowAlias = true;
     auto motionVectorsBuffer = PixelBuffer::CreateSharedUnmaterialized(motionVectors);
     motionVectorsBuffer->SetName("Motion Vectors");
-    motionVectorsBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GBuffer" }));
+    rg::memory::SetResourceUsageHint(*motionVectorsBuffer, "GBuffer");
 	m_coreResourceProvider.m_gbufferMotionVectors = motionVectorsBuffer;
 }
 
@@ -931,6 +987,9 @@ void Renderer::Cleanup() {
 	FFXManager::GetInstance().Shutdown();
 	UpscalingManager::GetInstance().Shutdown();
 	ReadbackManager::GetInstance().Cleanup();
+    rg::memory::SnapshotProvider::ResetBuildSnapshotFn();
+    DeviceManager::ResetTrackingHooks();
+    TrackedEntityToken::ResetHooks();
     Resource::ResetEntityHooks();
     ECSManager::GetInstance().Cleanup();
     DeletionManager::GetInstance().Cleanup();
@@ -1137,7 +1196,7 @@ void Renderer::CreateRenderGraph() {
 	visibilityDesc.allowAlias = true;
     auto visibilityBuffer = PixelBuffer::CreateSharedUnmaterialized(visibilityDesc);
     visibilityBuffer->SetName("Visibility Buffer");
-    visibilityBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GBuffer" }));
+    rg::memory::SetResourceUsageHint(*visibilityBuffer, "GBuffer");
     newGraph->RegisterResource(Builtin::PrimaryCamera::VisibilityTexture, visibilityBuffer);
 
 	m_pViewManager->AttachVisibilityBuffer(primaryViewID, visibilityBuffer);
@@ -1189,11 +1248,11 @@ void Renderer::CreateRenderGraph() {
 
 	auto adaptedLuminanceBuffer = CreateIndexedStructuredBuffer(1, sizeof(float), true, false);
     adaptedLuminanceBuffer->SetName("Adapted Luminance");
-    adaptedLuminanceBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Post-Processing resources" }));
+    rg::memory::SetResourceUsageHint(*adaptedLuminanceBuffer, "Post-Processing resources");
 	newGraph->RegisterResource(Builtin::PostProcessing::AdaptedLuminance, adaptedLuminanceBuffer);
 	auto histogramBuffer = CreateIndexedStructuredBuffer(255, sizeof(uint32_t), true, false);
 	histogramBuffer->SetName("Luminance Histogram Buffer");
-	histogramBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Post-Processing resources" }));
+    rg::memory::SetResourceUsageHint(*histogramBuffer, "Post-Processing resources");
 	newGraph->RegisterResource(Builtin::PostProcessing::LuminanceHistogram, histogramBuffer);
 
     newGraph->BuildComputePass("luminanceHistogramPass")

@@ -7,7 +7,6 @@
 #include "Managers/Singletons/SettingsManager.h"
 
 #include "RenderPasses/Base/RenderPass.h"
-#include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Resources/Texture.h"
 #include "Resources/ReadbackRequest.h"

@@ -288,9 +288,8 @@ private:
                 rhi::HeapType::DeviceLocal,
                 memSize,
                 true);
-            m_scratchBuffer->ApplyMetadataComponentBundle(
-                EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Work graph scratch buffer" }));
-			m_visibleClustersBuffer = visibleClustersBuffer;
+			m_scratchBuffer->SetMemoryUsageHint("Work graph scratch buffer");
+            m_visibleClustersBuffer = visibleClustersBuffer;
 			m_visibleClustersCounterBuffer = visibleClustersCounterBuffer;
             m_histogramIndirectCommand = histogramIndirectCommand;
             m_workGraphTelemetryBuffer = workGraphTelemetryBuffer;

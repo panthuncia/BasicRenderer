@@ -18,6 +18,10 @@ endif()
 
 project ("BasicRenderer")
 
+if (WIN32)
+  add_compile_definitions(NOMINMAX)
+endif()
+
 #set(CMAKE_VS_JUST_MY_CODE_DEBUGGING ON) # Skip external code in the debugger.
 
 # Gather precompiled dependencies

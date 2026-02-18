@@ -96,11 +96,6 @@ public:
 		return m_elementSize;
 	}
 
-    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
-        m_metadataBundles.emplace_back(bundle);
-        ApplyMetadataToBacking(bundle);
-    }
-
 private:
     LazyDynamicStructuredBuffer(UINT capacity = 64, std::string name = "", uint64_t alignment = 1, bool UAV = false)
         : m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
@@ -194,5 +189,10 @@ private:
 
         SetName(name);
 
+    }
+
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
+        m_metadataBundles.emplace_back(bundle);
+        ApplyMetadataToBacking(bundle);
     }
 };

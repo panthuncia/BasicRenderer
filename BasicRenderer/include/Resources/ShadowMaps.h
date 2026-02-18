@@ -14,6 +14,7 @@
 #include "Utilities/Utilities.h"
 #include "Resources/TextureDescription.h"
 #include "Resources/MemoryStatisticsComponents.h"
+#include "Render/MemoryIntrospectionAPI.h"
 class ShadowMaps : public ResourceGroup {
 public:
     ShadowMaps(const std::string& name)
@@ -57,7 +58,7 @@ public:
 			break;
 
 		}
-		shadowMap->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Shadow maps" }));
+		rg::memory::SetResourceUsageHint(*shadowMap, "Shadow maps");
 		//light->SetShadowMap(map);
         AddResource(shadowMap);
 		return shadowMap;
@@ -118,7 +119,7 @@ public:
 			break;
 
 		}
-		shadowMap->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Shadow maps" }));
+		rg::memory::SetResourceUsageHint(*shadowMap, "Shadow maps");
 		AddResource(shadowMap);
 		return shadowMap;
 	}

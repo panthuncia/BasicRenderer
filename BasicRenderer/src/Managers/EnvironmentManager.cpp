@@ -16,13 +16,14 @@
 #include "../../generated/BuiltinResources.h"
 #include "Resources/MemoryStatisticsComponents.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
+#include "Render/MemoryIntrospectionAPI.h"
 
 EnvironmentManager::EnvironmentManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
 	m_skyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution")();
 	m_reflectionCubemapResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("reflectionCubemapResolution")();
 	m_environmentInfoBuffer = LazyDynamicStructuredBuffer<EnvironmentInfo>::CreateShared(1, "environmentsBuffer", 0, true);
-	m_environmentInfoBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Environment Info" }));
+	rg::memory::SetResourceUsageHint(*m_environmentInfoBuffer, "Environment Info");
 
 	m_workingEnvironmentCubemapGroup = std::make_shared<ResourceGroup>("EnvironmentCubemapGroup");
 	m_workingHDRIGroup = std::make_shared<ResourceGroup>("WorkingHDRIGroup");

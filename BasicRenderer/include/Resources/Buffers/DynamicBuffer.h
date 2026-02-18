@@ -35,11 +35,6 @@ public:
 		return m_mappedData;
 	}
 
-    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
-        m_metadataBundles.emplace_back(bundle);
-        ApplyMetadataToBacking(bundle);
-    }
-
 private:
     DynamicBuffer(bool byteAddress, size_t elementSize, size_t capacity, std::string name = "", bool UAV = false)
         : m_byteAddress(byteAddress), m_elementSize(elementSize), m_UAV(UAV), m_needsUpdate(false) {
@@ -90,4 +85,9 @@ private:
 
     void CreateBuffer(size_t capacity);
     void GrowBuffer(size_t newSize);
+
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
+        m_metadataBundles.emplace_back(bundle);
+        ApplyMetadataToBacking(bundle);
+    }
 };

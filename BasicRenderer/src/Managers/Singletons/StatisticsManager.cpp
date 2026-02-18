@@ -73,7 +73,7 @@ void StatisticsManager::RebuildVisiblePassIndices(uint64_t maxStaleFrames, std::
     out.clear();
     out.reserve(m_passNames.size());
 
-    const bool includeNeverSeen = (maxStaleFrames == std::numeric_limits<uint64_t>::max());
+    const bool includeNeverSeen = (maxStaleFrames == (std::numeric_limits<uint64_t>::max)());
 
     for (unsigned i = 0; i < m_passNames.size(); ++i) {
         const uint64_t lastData = (i < m_passLastDataFrame.size()) ? m_passLastDataFrame[i] : kNeverSeenFrame;

@@ -5,16 +5,23 @@ project(OpenRenderGraph LANGUAGES CXX)
 find_package(spdlog CONFIG REQUIRED)
 find_package(flecs CONFIG REQUIRED)
 find_package(Boost REQUIRED COMPONENTS container_hash)
+find_package(directxtex CONFIG REQUIRED)
 
 add_library(OpenRenderGraph STATIC
     "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/DescriptorHeap.cpp"
     "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/CommandListPool.cpp"
     "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/ImmediateExecution/ImmediateCommandList.cpp"
+    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/MemoryIntrospectionAPI.cpp"
     "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/PassBuilders.cpp"
     "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/RenderGraph/RenderGraph.cpp"
     "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/RenderGraph/Aliasing/RenderGraphAliasingSubsystem.cpp"
     "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/RenderGraph/Aliasing/RenderGraphAliasingAlgorithms.cpp"
     "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Managers/CommandRecordingManager.cpp"
+    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Managers/Singletons/DeviceManager.cpp"
+    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Managers/Singletons/ResourceManager.cpp"
+    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Managers/Singletons/UploadManager.cpp"
+    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Managers/Singletons/ReadbackManager.cpp"
+    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Managers/Singletons/StatisticsManager.cpp"
     "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Resources/ResourceStateTracker.cpp"
 )
 
@@ -35,6 +42,7 @@ target_link_libraries(OpenRenderGraph
         Boost::container_hash
     PRIVATE
         spdlog::spdlog_header_only
+        Microsoft::DirectXTex
 )
 
 if (MSVC)

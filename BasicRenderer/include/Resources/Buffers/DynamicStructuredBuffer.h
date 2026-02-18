@@ -79,11 +79,6 @@ public:
         return static_cast<uint32_t>(m_data.size());
     }
 
-    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
-        m_metadataBundles.emplace_back(bundle);
-        ApplyMetadataToBacking(bundle);
-    }
-
 private:
     DynamicStructuredBuffer(UINT capacity = 64, std::string bufName = "", bool UAV = false)
         : m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
@@ -174,5 +169,10 @@ private:
         }
 
         AssignDescriptorSlots(static_cast<uint32_t>(capacity));
+    }
+
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
+        m_metadataBundles.emplace_back(bundle);
+        ApplyMetadataToBacking(bundle);
     }
 };

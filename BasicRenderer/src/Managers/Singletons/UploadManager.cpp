@@ -8,6 +8,7 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Resources/MemoryStatisticsComponents.h"
+#include "Render/MemoryIntrospectionAPI.h"
 
 void UploadManager::Initialize() {
 	m_numFramesInFlight = SettingsManager::GetInstance()
@@ -135,8 +136,8 @@ void UploadManager::ApplyLastWriteWins(ResourceUpdate& newUpdate) noexcept
 		}
 
 		// Partial overlap: create a union update that contains both ranges, with last-write-wins ordering.
-		const size_t union0 = std::min(u0, new0);
-		const size_t union1 = std::max(u1, new1);
+		const size_t union0 = (std::min)(u0, new0);
+		const size_t union1 = (std::max)(u1, new1);
 		const size_t unionSize = union1 - union0;
 
 		std::shared_ptr<Resource> unionUpload;
@@ -198,7 +199,7 @@ bool UploadManager::AllocateUploadRegion(size_t size, size_t alignment, std::sha
 	if (alignment == 0) alignment = 1;
 	if (m_pages.empty()) {
 		m_pages.push_back({ Buffer::CreateShared(rhi::HeapType::Upload, kPageSize, false), 0 });
-		m_pages.back().buffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Upload buffer" }));
+		rg::memory::SetResourceUsageHint(*m_pages.back().buffer, "Upload buffer");
 		m_activePage = 0;
 	}
 
@@ -211,9 +212,9 @@ bool UploadManager::AllocateUploadRegion(size_t size, size_t alignment, std::sha
 		++m_activePage;
 		if (m_activePage >= m_pages.size()) {
 			// allocate another fresh page sized to the request (at least kPageSize)
-			size_t allocSize = std::max(kPageSize, size);
+			size_t allocSize = (std::max)(kPageSize, size);
 			m_pages.push_back({ Buffer::CreateShared(rhi::HeapType::Upload, allocSize, false), 0 });
-			m_pages.back().buffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Upload buffer" }));
+			rg::memory::SetResourceUsageHint(*m_pages.back().buffer, "Upload buffer");
 		}
 		page = &m_pages[m_activePage];
 		page->tailOffset = 0;
@@ -221,9 +222,9 @@ bool UploadManager::AllocateUploadRegion(size_t size, size_t alignment, std::sha
 
 		// If it still doesn't fit (should only happen if GetSize() < size), allocate a dedicated page.
 		if (alignedTail + size > page->buffer->GetSize()) {
-			size_t allocSize = std::max(kPageSize, size);
+			size_t allocSize = (std::max)(kPageSize, size);
 			m_pages.push_back({ Buffer::CreateShared(rhi::HeapType::Upload, allocSize, false), 0 });
-			m_pages.back().buffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Upload buffer" }));
+			rg::memory::SetResourceUsageHint(*m_pages.back().buffer, "Upload buffer");
 			m_activePage = m_pages.size() - 1;
 			page = &m_pages[m_activePage];
 			page->tailOffset = 0;
@@ -269,7 +270,7 @@ void UploadManager::UploadData(const void* data, size_t size, UploadTarget resou
 		++m_activePage;
 		if (m_activePage >= m_pages.size()) {
 			// allocate another fresh page
-			size_t allocSize = std::max(kPageSize, size);
+			size_t allocSize = (std::max)(kPageSize, size);
 			auto device = DeviceManager::GetInstance().GetDevice();
 			m_pages.push_back({ Buffer::CreateShared(rhi::HeapType::Upload, allocSize, false), 0 });
 		}
@@ -427,14 +428,14 @@ void UploadManager::ProcessDeferredReleases(uint8_t frameIndex)
 	size_t minStart = retiringStart;
 	for (uint8_t f = 0; f < m_numFramesInFlight; ++f) {
 		if (f == frameIndex) continue;
-		minStart = std::min(minStart, m_frameStart[f]);
+		minStart = (std::min)(minStart, m_frameStart[f]);
 	}
 
 	// Any page with index < minStart is no longer needed by anybody.
 	// But leave at least one page alive
 	if (minStart > 0) {
 		// clamp so we don't delete our last page
-		size_t eraseCount = std::min(minStart, m_pages.size() - 1);
+		size_t eraseCount = (std::min)(minStart, m_pages.size() - 1);
 		if (eraseCount > 0) {
 			m_pages.erase(m_pages.begin(), m_pages.begin() + eraseCount);
 

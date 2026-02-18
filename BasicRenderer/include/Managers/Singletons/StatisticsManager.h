@@ -94,7 +94,7 @@ private:
     uint64_t  m_unnamedPassCounter = 0;
     std::unordered_map<std::string, unsigned> m_passNameToIndex;
     uint64_t  m_frameSerial = 0;
-    static constexpr uint64_t kNeverSeenFrame = std::numeric_limits<uint64_t>::max();
+    static constexpr uint64_t kNeverSeenFrame = (std::numeric_limits<uint64_t>::max)();
     uint64_t  m_defaultMaxStaleFrames = 240;
     std::vector<uint64_t> m_passLastDataFrame;
     mutable std::vector<unsigned> m_visiblePassIndices;

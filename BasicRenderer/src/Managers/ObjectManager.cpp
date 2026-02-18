@@ -14,6 +14,8 @@
 #include "Materials/Material.h"
 #include "Resources/components.h"
 #include "Resources/MemoryStatisticsComponents.h"
+#include "Managers/Singletons/ECSManager.h"
+#include "Render/MemoryIntrospectionAPI.h"
 
 ObjectManager::ObjectManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
@@ -22,10 +24,10 @@ ObjectManager::ObjectManager() {
 
 	m_normalMatrixBuffer = LazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>::CreateShared(1, "normalMatrixBuffer");
 
-	m_perObjectBuffers->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "PerMesh, PerMeshInstance, PerObject" }));
-	m_normalMatrixBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "PerMesh, PerMeshInstance, PerObject" }));
+	rg::memory::SetResourceUsageHint(*m_perObjectBuffers, "PerMesh, PerMeshInstance, PerObject");
+	rg::memory::SetResourceUsageHint(*m_normalMatrixBuffer, "PerMesh, PerMeshInstance, PerObject");
 
-	m_masterIndirectCommandsBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Indirect command buffers" }));
+	rg::memory::SetResourceUsageHint(*m_masterIndirectCommandsBuffer, "Indirect command buffers");
 
 	m_resources[Builtin::PerObjectBuffer] = m_perObjectBuffers;
 	m_resources[Builtin::NormalMatrixBuffer] = m_normalMatrixBuffer;
@@ -66,7 +68,7 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 			auto materialFlags = meshInstance->GetMesh()->material->Technique().compileFlags;
 			if (!m_activeDrawSetIndices.contains(materialFlags)) {
 				m_activeDrawSetIndices[materialFlags] = SortedUnsignedIntBuffer::CreateShared(1, "activeDrawSetIndices(flags=" + std::to_string(static_cast<uint64_t>(materialFlags)) + ")");
-				m_activeDrawSetIndices[materialFlags]->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "PerMesh, PerMeshInstance, PerObject" }));
+				rg::memory::SetResourceUsageHint(*m_activeDrawSetIndices[materialFlags], "PerMesh, PerMeshInstance, PerObject");
 				auto& buf = m_activeDrawSetIndices[materialFlags];
 				buf->GetECSEntity().add<Components::IsActiveDrawSetIndices>();
 				buf->GetECSEntity().set<Components::Resource>({ buf });

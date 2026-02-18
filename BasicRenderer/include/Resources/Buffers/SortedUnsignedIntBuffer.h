@@ -38,11 +38,6 @@ public:
         return static_cast<UINT>(m_data.size());
     }
 
-    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
-        m_metadataBundles.emplace_back(bundle);
-        ApplyMetadataToBacking(bundle);
-    }
-
 private:
     SortedUnsignedIntBuffer(uint64_t capacity = 64, std::string name = "", bool UAV = false)
         : m_capacity(capacity), m_UAV(UAV), m_earliestModifiedIndex(0) {
@@ -79,4 +74,9 @@ private:
     void CreateBuffer(uint64_t capacity);
 
     void GrowBuffer(uint64_t newSize);
+
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
+        m_metadataBundles.emplace_back(bundle);
+        ApplyMetadataToBacking(bundle);
+    }
 };

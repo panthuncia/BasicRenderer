@@ -32,10 +32,11 @@
 #include "Managers/Singletons/ReadbackManager.h"
 #include "Resources/ReadbackRequest.h"
 #include "Resources/components.h"
-#include "Resources/MemoryStatisticsComponents.h"
+#include "Render/MemoryIntrospectionAPI.h"
 #include "ShaderBuffers.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
+#include "Managers/Singletons/ECSManager.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -59,9 +60,9 @@ struct PerResourceMemInfo {
 
 using PerResourceMemIndex = std::unordered_map<uint64_t, PerResourceMemInfo>;
 
-static void BuildMemorySnapshotFromFlecs(
+static void BuildMemorySnapshotFromRecords(
     ui::MemorySnapshot& out,
-    flecs::query<const MemoryStatisticsComponents::MemSizeBytes>& q,
+    const std::vector<rg::memory::ResourceMemoryRecord>& records,
     PerResourceMemIndex* outIndex /*= nullptr*/)
 {
     out.categories.clear();
@@ -73,19 +74,13 @@ static void BuildMemorySnapshotFromFlecs(
 
     if (outIndex) { outIndex->clear(); outIndex->reserve(2048); }
 
-    q.each([&](flecs::entity e, const MemoryStatisticsComponents::MemSizeBytes& sz) {
-        auto rt = e.try_get<MemoryStatisticsComponents::ResourceType>();
-        auto rname = e.try_get<MemoryStatisticsComponents::ResourceName>();
-        auto rid = e.try_get<MemoryStatisticsComponents::ResourceID>();
-        auto use = e.try_get<MemoryStatisticsComponents::ResourceUsage>();
-
-        const uint64_t bytes = sz.size;
+    for (const auto& record : records) {
+        const uint64_t bytes = record.bytes;
         out.totalBytes += bytes;
 
-        const char* major = rt ? MajorCategory(rt->type)
-            : MajorCategory(rhi::ResourceType::Unknown);
+        const char* major = MajorCategory(record.resourceType);
 
-        const char* usage = (use && !use->usage.empty()) ? use->usage.c_str()
+        const char* usage = !record.usage.empty() ? record.usage.c_str()
             : "Unspecified";
 
         const std::string cat = std::string(major) + "/" + usage;
@@ -95,23 +90,23 @@ static void BuildMemorySnapshotFromFlecs(
         // Per-resource row (unchanged)
         ui::MemoryResourceRow row{};
         row.bytes = bytes;
-        row.uid = rid ? rid->id : 0;
+        row.uid = record.resourceID;
 
-        if (rname && !rname->name.empty()) row.name = rname->name;
-        else if (rid) row.name = "Resource " + std::to_string((unsigned long long)rid->id);
+        if (!record.resourceName.empty()) row.name = record.resourceName;
+        else if (record.resourceID != 0) row.name = "Resource " + std::to_string((unsigned long long)record.resourceID);
         else row.name = "Unknown resource";
 
         row.type = cat;
         out.resources.push_back(row);
 
         // NEW: per-resource index entry (this is what the frame-graph builder will use)
-        if (outIndex && rid) {
-            auto& info = (*outIndex)[rid->id];
+        if (outIndex && record.resourceID != 0) {
+            auto& info = (*outIndex)[record.resourceID];
             info.bytes = bytes;
             info.category = cat;
-            if (rname && !rname->name.empty()) info.name = rname->name;
+            if (!record.resourceName.empty()) info.name = record.resourceName;
         }
-        });
+    }
 
     out.categories.reserve(minorBuckets.size());
     for (auto& [label, bytes] : minorBuckets) {
@@ -129,25 +124,25 @@ struct MemInfo {
 
 static void BuildIdToMemInfoIndex(
     std::unordered_map<uint64_t, MemInfo>& out,
-    flecs::query<const MemoryStatisticsComponents::MemSizeBytes>& q)
+    const std::vector<rg::memory::ResourceMemoryRecord>& records)
 {
     out.clear();
     out.reserve(2048);
 
-    q.each([&](flecs::entity e, const MemoryStatisticsComponents::MemSizeBytes& sz) {
-        auto rid = e.try_get<MemoryStatisticsComponents::ResourceID>();
-        if (!rid) return; // can't join without numeric id
-
-        MemInfo info;
-        info.bytes = sz.size;
-
-        if (auto ident = e.try_get<ResourceIdentifier>()) {
-            // ident->name should already be "A::B::C"
-            info.name = ident->name;
+    for (const auto& record : records) {
+        if (record.resourceID == 0) {
+            continue;
         }
 
-        out[rid->id] = std::move(info);
-        });
+        MemInfo info;
+        info.bytes = record.bytes;
+
+        if (!record.identifier.empty()) {
+            info.name = record.identifier;
+        }
+
+        out[record.resourceID] = std::move(info);
+    }
 }
 
 static void BuildFrameGraphSnapshotFromBatches(
@@ -230,8 +225,6 @@ public:
 	void SetRenderGraph(RenderGraph* renderGraph) { m_renderGraph = renderGraph; }
     void Cleanup() {
 		m_settingSubscriptions.clear();
-        m_memQuery = {}; // Destruct query before ECS world dies
-		m_sizeQuery = {};
 		m_telemetryQuery = {};
 		m_visibleClustersQuery = {};
 		m_visibleCounterQuery = {};
@@ -245,12 +238,6 @@ private:
     };
 	IDXGISwapChain3* m_pSwapChain = nullptr;
 	
-    flecs::query<const MemoryStatisticsComponents::MemSizeBytes> m_memQuery;
-	flecs::query<const MemoryStatisticsComponents::MemSizeBytes,
-        const MemoryStatisticsComponents::ResourceID> m_sizeQuery =
-        ECSManager::GetInstance().GetWorld().query<const MemoryStatisticsComponents::MemSizeBytes,
-        const MemoryStatisticsComponents::ResourceID>();
-
 	flecs::entity selectedNode;
 
 	RenderGraph* m_renderGraph;
@@ -469,8 +456,6 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
 
     ImGui::StyleColorsDark();
     //ImGui::StyleColorsLight();
-
-    m_memQuery = ECSManager::GetInstance().GetWorld().query_builder<const MemoryStatisticsComponents::MemSizeBytes>().build();
 
 	// Helper to set an observer on a setting which updates local copies of settings
     auto observerSetting = [&](auto& localCopy, const std::string& settingName) {
@@ -777,12 +762,15 @@ inline void Menu::Render(RenderContext& context) {
 	if (showMemoryIntrospection) {
         static ui::MemoryIntrospectionWidget g_memWidget;
 
+        std::vector<rg::memory::ResourceMemoryRecord> memoryRecords;
+        rg::memory::SnapshotProvider::BuildSnapshot(memoryRecords);
+
         ui::MemorySnapshot snap;
         PerResourceMemIndex memIndex;
-        BuildMemorySnapshotFromFlecs(snap, m_memQuery, &memIndex);
+        BuildMemorySnapshotFromRecords(snap, memoryRecords, &memIndex);
 
         static std::unordered_map<uint64_t, MemInfo> s_idToMem;
-		BuildIdToMemInfoIndex(s_idToMem, m_memQuery);    
+		BuildIdToMemInfoIndex(s_idToMem, memoryRecords);
 		ui::FrameGraphSnapshot fgSnap;
 
         const auto& batches = m_renderGraph->GetBatches();
