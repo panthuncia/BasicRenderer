@@ -45,6 +45,16 @@ target_link_libraries(OpenRenderGraph
         Microsoft::DirectXTex
 )
 
+target_compile_definitions(OpenRenderGraph
+    PUBLIC
+        BUILD_TYPE_DEBUG=0
+        BUILD_TYPE_RELEASE=1
+        BUILD_TYPE_RELEASE_DEBUG=2
+        $<$<CONFIG:Debug>:BUILD_TYPE=BUILD_TYPE_DEBUG>
+        $<$<CONFIG:Release>:BUILD_TYPE=BUILD_TYPE_RELEASE>
+        $<$<CONFIG:RelWithDebInfo>:BUILD_TYPE=BUILD_TYPE_RELEASE_DEBUG>
+)
+
 if (MSVC)
     target_compile_options(OpenRenderGraph PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 endif()

@@ -5,8 +5,11 @@
 #include "Render/RenderContext.h"
 #include "Resources/Texture.h"
 #include "Managers/EnvironmentManager.h"
+#include "Interfaces/IDynamicDeclaredResources.h"
 
-class EnvironmentConversionPass : public ComputePass {
+#include <vector>
+
+class EnvironmentConversionPass : public ComputePass, public IDynamicDeclaredResources {
 public:
     EnvironmentConversionPass() {
         getSkyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution");
@@ -14,14 +17,59 @@ public:
     }
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override {
-        builder->WithShaderResource(Builtin::Environment::WorkingHDRIGroup)
-            .WithUnorderedAccess(Builtin::Environment::WorkingCubemapGroup);
+        for (const auto& j : m_pending) {
+            if (!j.srcTexture || !j.dstCubemap) continue;
+
+            builder->WithShaderResource(j.srcTexture);
+            builder->WithUnorderedAccess(j.dstCubemap);
+        }
+
+        m_declaredResourcesChanged = false;
     }
 
     void Setup() override {
     }
 
+    void Update(const UpdateContext& context) override {
+        std::vector<Job> newPending;
+
+        if (context.environmentManager) {
+            auto environments = context.environmentManager->GetAndClearEnvironmentsToConvert();
+            newPending.reserve(environments.size());
+
+            for (auto* env : environments) {
+                if (!env) continue;
+
+                auto srcTex = env->GetHDRITexture();
+                auto dstCubemap = env->GetEnvironmentCubemap();
+                if (!srcTex || !dstCubemap) continue;
+
+                auto srcImage = srcTex->ImagePtr();
+                auto dstImage = dstCubemap->ImagePtr();
+                if (!srcImage || !dstImage) continue;
+
+                newPending.push_back(Job{ srcImage, dstImage });
+            }
+        }
+
+        auto sameJobs = [](const std::vector<Job>& a, const std::vector<Job>& b) {
+            if (a.size() != b.size()) return false;
+            for (size_t i = 0; i < a.size(); ++i) {
+                if (a[i].srcTexture.get() != b[i].srcTexture.get()) return false;
+                if (a[i].dstCubemap.get() != b[i].dstCubemap.get()) return false;
+            }
+            return true;
+        };
+
+        if (!sameJobs(m_pending, newPending)) {
+            m_declaredResourcesChanged = true;
+            m_pending = std::move(newPending);
+        }
+    }
+
     PassReturn Execute(RenderContext& context) override {
+        if (m_pending.empty()) return {};
+
         const uint16_t skyboxRes = getSkyboxResolution();
 
         auto dev = DeviceManager::GetInstance().GetDevice();
@@ -33,29 +81,23 @@ public:
         cl.BindLayout(m_layout->GetHandle());
         cl.BindPipeline(m_pso->GetHandle());
 
-        static int i = -1;
-
-        EnvironmentManager& manager = *context.environmentManager;
-        auto environments = manager.GetAndClearEnvironmentsToConvert();
-
-
-        for (auto& env : environments)
+        for (const auto& j : m_pending)
         {
-            auto srcTex = env->GetHDRITexture(); // equirectangular HDRI
-            auto dstCubemap = env->GetEnvironmentCubemap(); // cube resource (must support UAV)
+            if (!j.srcTexture || !j.dstCubemap) continue;
 
-            const uint32_t srcSrvIndex = srcTex->Image().GetSRVInfo(0).slot.index;
+            const uint32_t srcSrvIndex = j.srcTexture->GetSRVInfo(0).slot.index;
 
             const uint32_t groupSize = 8;
             const uint32_t gx = (skyboxRes + groupSize - 1) / groupSize;
             const uint32_t gy = (skyboxRes + groupSize - 1) / groupSize;
 
-            const uint32_t dstCubeUavIndex =
-                dstCubemap->Image().GetUAVShaderVisibleInfo(0).slot.index;
             for (uint32_t face = 0; face < 6; ++face)
             {
+                const uint32_t dstFaceUavIndex =
+                    j.dstCubemap->GetUAVShaderVisibleInfo(0, face).slot.index;
+
                 // Root constants payload: [srcSrv, dstFaceUav, face, size]
-                uint32_t pc[4] = { srcSrvIndex, dstCubeUavIndex, face, (uint32_t)skyboxRes };
+                uint32_t pc[4] = { srcSrvIndex, dstFaceUavIndex, face, (uint32_t)skyboxRes };
 
                 // Push constants to CS: (set=0, binding=0) matches b0, space0 in HLSL
                 cl.PushConstants(rhi::ShaderStage::Compute,
@@ -66,7 +108,14 @@ public:
             }
         }
 
+        m_declaredResourcesChanged = true;
+        m_pending.clear();
+
         return {};
+    }
+
+    bool DeclaredResourcesChanged() const override {
+        return m_declaredResourcesChanged;
     }
 
     void Cleanup() override {
@@ -74,7 +123,14 @@ public:
     }
 
 private:
+    struct Job {
+        std::shared_ptr<PixelBuffer> srcTexture;
+        std::shared_ptr<PixelBuffer> dstCubemap;
+    };
+
     std::function<uint16_t()> getSkyboxResolution;
+    std::vector<Job> m_pending;
+    bool m_declaredResourcesChanged = true;
 
     rhi::PipelineLayoutPtr m_layout;
     rhi::PipelinePtr        m_pso;

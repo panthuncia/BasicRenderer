@@ -6,7 +6,11 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/EnvironmentManager.h"
 #include "Managers/Singletons/ResourceManager.h"
-class EnvironmentSHPass : public ComputePass {
+#include "Interfaces/IDynamicDeclaredResources.h"
+
+#include <vector>
+
+class EnvironmentSHPass : public ComputePass, public IDynamicDeclaredResources {
 public:
 	EnvironmentSHPass() {
 		rhi::SamplerDesc shSamplerDesc = {};
@@ -31,15 +35,63 @@ public:
 	}
 
 	void DeclareResourceUsages(ComputePassBuilder* builder) override {
-		builder->WithShaderResource(Builtin::Environment::WorkingCubemapGroup)
-			.WithUnorderedAccess(Builtin::Environment::InfoBuffer);
+		for (const auto& j : m_pending) {
+			if (!j.srcCubemap) continue;
+			builder->WithShaderResource(j.srcCubemap);
+		}
+
+		builder->WithUnorderedAccess(Builtin::Environment::InfoBuffer);
+
+		m_declaredResourcesChanged = false;
 	}
 
 	void Setup() override {
 		RegisterUAV(Builtin::Environment::InfoBuffer, 0);
 	}
 
+	void Update(const UpdateContext& context) override {
+		std::vector<Job> newPending;
+
+		if (context.environmentManager) {
+			auto environments = context.environmentManager->GetAndClearEnvironmentsToComputeSH();
+			newPending.reserve(environments.size());
+
+			for (auto* env : environments) {
+				if (!env) continue;
+
+				auto srcCubeAsset = env->GetEnvironmentCubemap();
+				if (!srcCubeAsset) continue;
+
+				auto srcCube = srcCubeAsset->ImagePtr();
+				if (!srcCube) continue;
+
+				Job j{};
+				j.srcCubemap = srcCube;
+				j.environmentIndex = env->GetEnvironmentIndex();
+				j.cubemapResolution = env->GetReflectionCubemapResolution();
+				newPending.push_back(std::move(j));
+			}
+		}
+
+		auto sameJobs = [](const std::vector<Job>& a, const std::vector<Job>& b) {
+			if (a.size() != b.size()) return false;
+			for (size_t i = 0; i < a.size(); ++i) {
+				if (a[i].srcCubemap.get() != b[i].srcCubemap.get()) return false;
+				if (a[i].environmentIndex != b[i].environmentIndex) return false;
+				if (a[i].cubemapResolution != b[i].cubemapResolution) return false;
+			}
+			return true;
+		};
+
+		if (!sameJobs(m_pending, newPending)) {
+			m_declaredResourcesChanged = true;
+			m_pending = std::move(newPending);
+		}
+	}
+
 	PassReturn Execute(RenderContext& context) override {
+		if (m_pending.empty()) return {};
+
 		auto& commandList = context.commandList;
 
 		// Set the descriptor heaps
@@ -56,25 +108,33 @@ public:
 
 		float miscFloatParams[NumMiscFloatRootConstants] = { };
 
-		auto environments = context.environmentManager->GetAndClearEnvironmentsToComputeSH();
-		
-		for (auto& env : environments) {
-			auto cubemapRes = env->GetReflectionCubemapResolution();
+		for (const auto& j : m_pending) {
+			if (!j.srcCubemap) continue;
+
+			auto cubemapRes = j.cubemapResolution;
 			miscParams[UintRootConstant0] = cubemapRes; // Resolution
-			miscParams[UintRootConstant2] = env->GetEnvironmentIndex(); // Environment index
+			miscParams[UintRootConstant2] = j.environmentIndex; // Environment index
 
 			//miscFloatParams[FloatRootConstant0] =  (4.0f * XM_PI / (cubemapRes * cubemapRes * 6)); // Weight
 
 			commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscParams);
 			commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscFloatRootSignatureIndex, 0, NumMiscFloatRootConstants, miscFloatParams);
 
-			// dispatch over X×Y tiles, Z=6 faces
+			// dispatch over Xï¿½Y tiles, Z=6 faces
 			unsigned int groupsX = (cubemapRes + 15) / 16;
 			unsigned int groupsY = (cubemapRes + 15) / 16;
 			unsigned int groupsZ = 6;
 			commandList.Dispatch(groupsX, groupsY, groupsZ);
 		}
+
+		m_declaredResourcesChanged = true;
+		m_pending.clear();
+
 		return {};
+	}
+
+	bool DeclaredResourcesChanged() const override {
+		return m_declaredResourcesChanged;
 	}
 
 	void Cleanup() override {
@@ -82,6 +142,14 @@ public:
 	}
 
 private:
+	struct Job {
+		std::shared_ptr<PixelBuffer> srcCubemap;
+		uint32_t environmentIndex = 0;
+		uint32_t cubemapResolution = 0;
+	};
+
+	std::vector<Job> m_pending;
+	bool m_declaredResourcesChanged = true;
 
 	void CreatePSO() {
 		m_PSO = PSOManager::GetInstance().MakeComputePipeline(
