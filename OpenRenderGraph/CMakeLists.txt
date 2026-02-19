@@ -8,27 +8,27 @@ find_package(Boost REQUIRED COMPONENTS container_hash)
 find_package(directxtex CONFIG REQUIRED)
 
 add_library(OpenRenderGraph STATIC
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/DescriptorHeap.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/CommandListPool.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/ImmediateExecution/ImmediateCommandList.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/MemoryMetadataAdapter.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/MemoryIntrospectionAPI.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/MemoryIntrospectionBackend.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/Runtime/DefaultStatisticsService.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/Runtime/DefaultUploadService.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/Runtime/DefaultReadbackService.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/Runtime/DefaultRenderGraphSettingsService.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/PassBuilders.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/RenderGraph/RenderGraph.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/RenderGraph/Aliasing/RenderGraphAliasingSubsystem.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/RenderGraph/Aliasing/RenderGraphAliasingAlgorithms.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Managers/CommandRecordingManager.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Managers/Singletons/DeviceManager.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Managers/Singletons/ResourceManager.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Managers/Singletons/UploadManager.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Managers/Singletons/ReadbackManager.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Managers/Singletons/StatisticsManager.cpp"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Resources/ResourceStateTracker.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/DescriptorHeap.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/CommandListPool.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/ImmediateExecution/ImmediateCommandList.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/MemoryMetadataAdapter.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/MemoryIntrospectionAPI.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/MemoryIntrospectionBackend.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/Runtime/DefaultStatisticsService.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/Runtime/DefaultUploadService.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/Runtime/DefaultReadbackService.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/Runtime/DefaultRenderGraphSettingsService.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/PassBuilders.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/RenderGraph/RenderGraph.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/RenderGraph/Aliasing/RenderGraphAliasingSubsystem.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/RenderGraph/Aliasing/RenderGraphAliasingAlgorithms.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Managers/CommandRecordingManager.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Managers/Singletons/DeviceManager.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Managers/Singletons/ResourceManager.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Managers/Singletons/UploadManager.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Managers/Singletons/ReadbackManager.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Managers/Singletons/StatisticsManager.cpp"
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Resources/ResourceStateTracker.cpp"
 )
 
 set_target_properties(OpenRenderGraph PROPERTIES
@@ -38,6 +38,7 @@ set_target_properties(OpenRenderGraph PROPERTIES
 
 target_include_directories(OpenRenderGraph
     PUBLIC
+    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/include"
         "${CMAKE_SOURCE_DIR}/BasicRenderer/include"
 )
 
