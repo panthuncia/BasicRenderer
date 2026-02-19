@@ -1,7 +1,8 @@
 #pragma once
 
 #include <cstdint>
-#include <functional>
+#include <mutex>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -18,13 +19,21 @@ struct ResourceMemoryRecord {
     std::string identifier;
 };
 
+class IMemorySnapshotProvider {
+public:
+    virtual ~IMemorySnapshotProvider() = default;
+    virtual void BuildSnapshot(std::vector<ResourceMemoryRecord>& out) = 0;
+};
+
 class SnapshotProvider {
 public:
-    using BuildSnapshotFn = std::function<void(std::vector<ResourceMemoryRecord>& out)>;
+    void SetProvider(std::shared_ptr<IMemorySnapshotProvider> provider);
+    void ResetProvider();
+    void BuildSnapshot(std::vector<ResourceMemoryRecord>& out) const;
 
-    static void SetBuildSnapshotFn(BuildSnapshotFn fn);
-    static void ResetBuildSnapshotFn();
-    static void BuildSnapshot(std::vector<ResourceMemoryRecord>& out);
+private:
+    mutable std::mutex m_providerMutex;
+    std::shared_ptr<IMemorySnapshotProvider> m_provider;
 };
 
 inline void SetResourceUsageHint(IHasMemoryMetadata& resource, std::string usage) {

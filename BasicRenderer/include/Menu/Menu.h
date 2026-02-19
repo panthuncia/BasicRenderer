@@ -763,7 +763,9 @@ inline void Menu::Render(RenderContext& context) {
         static ui::MemoryIntrospectionWidget g_memWidget;
 
         std::vector<rg::memory::ResourceMemoryRecord> memoryRecords;
-        rg::memory::SnapshotProvider::BuildSnapshot(memoryRecords);
+    if (m_renderGraph) {
+        m_renderGraph->GetMemorySnapshotProvider().BuildSnapshot(memoryRecords);
+    }
 
         ui::MemorySnapshot snap;
         PerResourceMemIndex memIndex;

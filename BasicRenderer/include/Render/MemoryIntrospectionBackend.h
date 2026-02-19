@@ -1,8 +1,11 @@
 #pragma once
 
+#include <memory>
+
+#include "Render/MemoryIntrospectionAPI.h"
+
 namespace rg::memory {
 
-void AttachSnapshotProviderFromECS();
-void DetachSnapshotProvider();
+std::shared_ptr<IMemorySnapshotProvider> CreateECSMemorySnapshotProvider();
 
 }

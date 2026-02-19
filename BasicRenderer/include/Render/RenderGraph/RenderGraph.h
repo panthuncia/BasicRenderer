@@ -19,6 +19,7 @@
 #include "Render/CommandListPool.h"
 #include "Managers/CommandRecordingManager.h"
 #include "Interfaces/IPassBuilder.h"
+#include "Render/MemoryIntrospectionAPI.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/TrackedAllocation.h"
@@ -231,6 +232,8 @@ public:
 	void Setup();
 	void RegisterExtension(std::unique_ptr<IRenderGraphExtension> ext);
 	const std::vector<PassBatch>& GetBatches() const { return batches; }
+	rg::memory::SnapshotProvider& GetMemorySnapshotProvider() { return m_memorySnapshotProvider; }
+	const rg::memory::SnapshotProvider& GetMemorySnapshotProvider() const { return m_memorySnapshotProvider; }
 	//void AllocateResources(RenderContext& context);
 	//void CreateResource(std::wstring name);
 	std::shared_ptr<Resource> GetResourceByName(const std::string& name);
@@ -372,6 +375,7 @@ private:
 
 	std::unordered_map<uint64_t, ResourceTransition> initialTransitions; // Transitions needed to reach the initial state of the resources before executing the first batch. Executed on graph setup.
 	std::vector<PassBatch> batches;
+	rg::memory::SnapshotProvider m_memorySnapshotProvider;
 	std::unordered_map<uint64_t, SymbolicTracker*> trackers; // Tracks the state of resources in the graph.
 	std::unordered_map<uint64_t, SymbolicTracker> compileTrackers; // Compile-only symbolic state, decoupled from backing lifetime.
 	std::unordered_map<uint64_t, LastProducerAcrossFrames> m_lastProducerByResourceAcrossFrames;

@@ -144,8 +144,6 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         }
         });
 
-    rg::memory::AttachSnapshotProviderFromECS();
-
     ResourceManager::GetInstance().Initialize();
     PSOManager::GetInstance().initialize();
     UploadManager::GetInstance().Initialize();
@@ -958,7 +956,6 @@ void Renderer::Cleanup() {
 	FFXManager::GetInstance().Shutdown();
 	UpscalingManager::GetInstance().Shutdown();
 	ReadbackManager::GetInstance().Cleanup();
-    rg::memory::DetachSnapshotProvider();
     DeviceManager::ResetTrackingHooks();
     TrackedEntityToken::ResetHooks();
     Resource::ResetEntityHooks();
@@ -1103,6 +1100,8 @@ void Renderer::CreateRenderGraph() {
     if (!currentRenderGraph)
     {
 		currentRenderGraph = std::make_unique<RenderGraph>();
+        currentRenderGraph->GetMemorySnapshotProvider().SetProvider(
+            rg::memory::CreateECSMemorySnapshotProvider());
         Menu::GetInstance().SetRenderGraph(currentRenderGraph.get());
 
         currentRenderGraph->RegisterExtension(std::make_unique<RenderGraphIOExtension>(m_managerInterface.GetTextureFactory()));

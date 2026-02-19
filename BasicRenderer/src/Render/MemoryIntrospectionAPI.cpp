@@ -1,37 +1,30 @@
 #include "Render/MemoryIntrospectionAPI.h"
 
-#include <mutex>
-
 namespace rg::memory {
 
-namespace {
-    std::mutex g_snapshotProviderMutex;
-    SnapshotProvider::BuildSnapshotFn g_snapshotBuilder;
+void SnapshotProvider::SetProvider(std::shared_ptr<IMemorySnapshotProvider> provider) {
+    std::scoped_lock lock(m_providerMutex);
+    m_provider = std::move(provider);
 }
 
-void SnapshotProvider::SetBuildSnapshotFn(BuildSnapshotFn fn) {
-    std::scoped_lock lock(g_snapshotProviderMutex);
-    g_snapshotBuilder = std::move(fn);
+void SnapshotProvider::ResetProvider() {
+    std::scoped_lock lock(m_providerMutex);
+    m_provider.reset();
 }
 
-void SnapshotProvider::ResetBuildSnapshotFn() {
-    std::scoped_lock lock(g_snapshotProviderMutex);
-    g_snapshotBuilder = {};
-}
-
-void SnapshotProvider::BuildSnapshot(std::vector<ResourceMemoryRecord>& out) {
-    BuildSnapshotFn localBuilder;
+void SnapshotProvider::BuildSnapshot(std::vector<ResourceMemoryRecord>& out) const {
+    std::shared_ptr<IMemorySnapshotProvider> localProvider;
     {
-        std::scoped_lock lock(g_snapshotProviderMutex);
-        localBuilder = g_snapshotBuilder;
+        std::scoped_lock lock(m_providerMutex);
+        localProvider = m_provider;
     }
 
-    if (!localBuilder) {
+    if (!localProvider) {
         out.clear();
         return;
     }
 
-    localBuilder(out);
+    localProvider->BuildSnapshot(out);
 }
 
 }
