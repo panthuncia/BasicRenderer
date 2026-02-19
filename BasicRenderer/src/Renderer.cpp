@@ -42,7 +42,6 @@
 #include "Resources/TextureDescription.h"
 #include "Menu/Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
-#include "Managers/Singletons/UploadManager.h"
 #include "NsightAftermathGpuCrashTracker.h"
 #include "Aftermath/GFSDK_Aftermath.h"
 #include "NsightAftermathHelpers.h"
@@ -54,7 +53,6 @@
 #include "ThirdParty/XeGTAO.h"
 #include "Managers/EnvironmentManager.h"
 #include "Render/TonemapTypes.h"
-#include "Managers/Singletons/StatisticsManager.h"
 #include "../generated/BuiltinResources.h"
 #include "Resources/ResourceIdentifier.h"
 #include "Render/RenderGraphBuildHelper.h"
@@ -145,13 +143,23 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         });
 
     ResourceManager::GetInstance().Initialize();
+
+    if (!currentRenderGraph) {
+		currentRenderGraph = std::make_unique<RenderGraph>();
+    }
     PSOManager::GetInstance().initialize();
-    UploadManager::GetInstance().Initialize();
+        if (auto* uploadService = currentRenderGraph->GetUploadService()) {
+                uploadService->Initialize();
+        }
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();
     Menu::GetInstance().Initialize(hwnd, rhi::dx12::get_swapchain(m_swapChain.Get())); // TODO: VK imgui
-	ReadbackManager::GetInstance().Initialize(m_readbackFence.Get());
-	StatisticsManager::GetInstance().Initialize();
+        if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
+		readbackService->Initialize(m_readbackFence.Get());
+        }
+        if (auto* statisticsService = currentRenderGraph->GetStatisticsService()) {
+		statisticsService->Initialize();
+        }
 
     UpscalingManager::GetInstance().Setup();
 
@@ -371,9 +379,9 @@ void Renderer::SetSettings() {
 		SetEnvironmentInternal(s2ws(newValue));
 		rebuildRenderGraph = true;
 		}));
-    m_settingsSubscriptions.push_back(settingsManager.addObserver<unsigned int>("outputType", [](const unsigned int& newValue) {
-		ResourceManager::GetInstance().SetOutputType(newValue);
-		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<unsigned int>("outputType", [this](const unsigned int& newValue) {
+        ResourceManager::GetInstance().SetOutputType(newValue);
+        }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableMeshShader", [this](const bool& newValue) {
 		ToggleMeshShaders(newValue);
 		rebuildRenderGraph = true;
@@ -426,9 +434,9 @@ void Renderer::SetSettings() {
 		auto maxShadowDistance = settingsManager.getSettingGetter<float>("maxShadowDistance")();
         settingsManager.getSettingSetter<std::vector<float>>("directionalLightCascadeSplits")(calculateCascadeSplits(numDirectionalCascades, 0.1f, 100, maxShadowDistance));
         }));
-    m_settingsSubscriptions.push_back(settingsManager.addObserver<std::vector<float>>("directionalLightCascadeSplits", [](const std::vector<float>& newValue) {
-		ResourceManager::GetInstance().SetDirectionalCascadeSplits(newValue);
-		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<std::vector<float>>("directionalLightCascadeSplits", [this](const std::vector<float>& newValue) {
+        ResourceManager::GetInstance().SetDirectionalCascadeSplits(newValue);
+        }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<UpscalingMode>("upscalingMode", [this](const UpscalingMode& newValue) {
 
         m_preFrameDeferredFunctions.defer([newValue, this]() { // Don't do this during a frame
@@ -707,13 +715,20 @@ void Renderer::Update(float elapsedSeconds) {
 	auto& deviceManager = DeviceManager::GetInstance();
 	auto graphicsQueue = deviceManager.GetGraphicsQueue();
 	auto computeQueue = deviceManager.GetComputeQueue();
-	StatisticsManager::GetInstance().OnFrameComplete(m_frameIndex, computeQueue); // Gather statistics for the last iteration of the frame
-    StatisticsManager::GetInstance().OnFrameComplete(m_frameIndex, graphicsQueue); // Gather statistics for the last iteration of the frame
+    if (currentRenderGraph) {
+        if (auto* statisticsService = currentRenderGraph->GetStatisticsService()) {
+            statisticsService->OnFrameComplete(m_frameIndex, computeQueue); // Gather statistics for the last iteration of the frame
+            statisticsService->OnFrameComplete(m_frameIndex, graphicsQueue); // Gather statistics for the last iteration of the frame
+        }
+    }
 
 	m_preFrameDeferredFunctions.flush(); // Execute anything we deferred until now
 
-    auto& updateManager = UploadManager::GetInstance();
-    updateManager.ProcessDeferredReleases(m_frameIndex);
+    if (currentRenderGraph) {
+        if (auto* uploadService = currentRenderGraph->GetUploadService()) {
+            uploadService->ProcessDeferredReleases(m_frameIndex);
+        }
+    }
 
     if (rebuildRenderGraph) {
 		CreateRenderGraph();
@@ -881,7 +896,11 @@ void Renderer::Render() {
 
     SignalFence(graphicsQueue, m_frameIndex);
 
-	ReadbackManager::GetInstance().ProcessReadbackRequests(); // Save images to disk if requested
+    if (currentRenderGraph) {
+        if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
+            readbackService->ProcessReadbackRequests(); // Save images to disk if requested
+        }
+    }
 
     DeletionManager::GetInstance().ProcessDeletions();
 }
@@ -931,8 +950,18 @@ void Renderer::Cleanup() {
 	spdlog::info("Stalling pipeline for cleanup");
 	StallPipeline();
 	spdlog::info("Cleaning up resources");
+    if (currentRenderGraph) {
+        if (auto* uploadService = currentRenderGraph->GetUploadService()) {
+            uploadService->Cleanup();
+        }
+        if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
+            readbackService->Cleanup();
+        }
+    }
+    ResourceManager::GetInstance().Cleanup();
     m_coreResourceProvider.Cleanup();
     currentRenderGraph.reset();
+    m_renderGraphRuntimeInitialized = false;
     m_currentEnvironment.reset();
 	currentScene.reset();
 	m_pIndirectCommandBufferManager.reset();
@@ -950,12 +979,9 @@ void Renderer::Cleanup() {
 	spdlog::info("Cleaning up singletons");
     Material::DestroyDefaultMaterial();
     Menu::GetInstance().Cleanup();
-    UploadManager::GetInstance().Cleanup();
     PSOManager::GetInstance().Cleanup();
-    ResourceManager::GetInstance().Cleanup();
 	FFXManager::GetInstance().Shutdown();
 	UpscalingManager::GetInstance().Shutdown();
-	ReadbackManager::GetInstance().Cleanup();
     DeviceManager::ResetTrackingHooks();
     TrackedEntityToken::ResetHooks();
     Resource::ResetEntityHooks();
@@ -1097,16 +1123,24 @@ void Renderer::CreateRenderGraph() {
     // TODO: Some of these resources don't really need to be recreated (GTAO, etc.)
     // Instead, just create them externally and register them
 
-    if (!currentRenderGraph)
-    {
+        if (!currentRenderGraph)
+        {
 		currentRenderGraph = std::make_unique<RenderGraph>();
+        }
+
+        if (!m_renderGraphRuntimeInitialized) {
         currentRenderGraph->GetMemorySnapshotProvider().SetProvider(
             rg::memory::CreateECSMemorySnapshotProvider());
         Menu::GetInstance().SetRenderGraph(currentRenderGraph.get());
 
-        currentRenderGraph->RegisterExtension(std::make_unique<RenderGraphIOExtension>(m_managerInterface.GetTextureFactory()));
-        currentRenderGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>());
+        currentRenderGraph->RegisterExtension(std::make_unique<RenderGraphIOExtension>(
+            m_managerInterface.GetTextureFactory(),
+            currentRenderGraph->GetUploadService(),
+            currentRenderGraph->GetReadbackService()));
+        currentRenderGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>(
+            currentRenderGraph->GetReadbackService()));
         currentRenderGraph->RegisterExtension(std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint64_t>(pow(2, 25))));
+		m_renderGraphRuntimeInitialized = true;
     }
 
     auto& newGraph = currentRenderGraph;
@@ -1283,7 +1317,7 @@ void Renderer::SetEnvironmentInternal(std::wstring name) {
 		m_preFrameDeferredFunctions.defer([envpath, name, this]() { // Don't change this during rendering
             m_currentEnvironment = m_pEnvironmentManager->CreateEnvironment(name);
             m_pEnvironmentManager->SetFromHDRI(m_currentEnvironment.get(), envpath.string());
-            ResourceManager::GetInstance().SetActiveEnvironmentIndex(m_currentEnvironment->GetEnvironmentIndex());
+			ResourceManager::GetInstance().SetActiveEnvironmentIndex(m_currentEnvironment->GetEnvironmentIndex());
 			});
     }
     else {

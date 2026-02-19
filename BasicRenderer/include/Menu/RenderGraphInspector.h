@@ -7,11 +7,13 @@
 #include <cstdint>
 
 #include "Render/RenderGraph/RenderGraph.h"
+#include "Resources/ReadbackRequest.h"
 
 // Return true if the pass uses 'resourceId'.
 using RGPassUsesResourceFn = std::function<bool(const void* passAndResources, uint64_t resourceId, bool isCompute)>;
 using RGResourceNameByIdFn = std::function<std::string(uint64_t resourceId)>;
 using RGResourcePtrByIdFn = std::function<Resource*(uint64_t resourceId)>;
+using RGRequestReadbackCaptureFn = std::function<void(const std::string&, Resource*, const RangeSpec&, ReadbackCaptureCallback)>;
 
 struct RGInspectorOptions {
     // Horizontal placement within a batch (x spans [batch, batch+1])
@@ -29,5 +31,6 @@ namespace RGInspector {
         RGPassUsesResourceFn passUses = nullptr,
     RGResourceNameByIdFn resourceNameById = nullptr,
     RGResourcePtrByIdFn resourcePtrById = nullptr,
+        RGRequestReadbackCaptureFn requestReadbackCapture = nullptr,
         const RGInspectorOptions& opts = {});
 }

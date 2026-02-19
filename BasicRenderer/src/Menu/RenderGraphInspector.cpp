@@ -8,7 +8,6 @@
 #include <rhi_helpers.h>
 
 #include "Render/QueueKind.h"
-#include "Managers/Singletons/ReadbackManager.h"
 
 struct BatchLayout {
     // Absolute X (plot coords) for this batch
@@ -309,6 +308,7 @@ namespace RGInspector {
         RGPassUsesResourceFn passUses,
         RGResourceNameByIdFn resourceNameById,
         RGResourcePtrByIdFn resourcePtrById,
+        RGRequestReadbackCaptureFn requestReadbackCapture,
         const RGInspectorOptions& opts)
     {
         if (!ImGui::Begin("Render Graph Inspector")) {
@@ -467,13 +467,13 @@ namespace RGInspector {
             }
 
             const std::string anchor = (s_selectedResPtr != nullptr) ? s_selectedPassName : std::string{};
-            const bool canCapture = (s_selectedResPtr != nullptr) && !anchor.empty();
+            const bool canCapture = (s_selectedResPtr != nullptr) && !anchor.empty() && static_cast<bool>(requestReadbackCapture);
 
             if (!canCapture) {
                 ImGui::BeginDisabled();
             }
             if (ImGui::Button("Capture After Pass")) {
-                ReadbackManager::GetInstance().RequestReadbackCapture(
+                requestReadbackCapture(
                     anchor,
                     s_selectedResPtr,
                     RangeSpec{},
@@ -491,7 +491,7 @@ namespace RGInspector {
             }
             if (ImGui::Button("Open Memory View")) {
                 s_openMemoryView = true;
-                s_memoryView.Open(anchor, s_selectedResPtr, RangeSpec{});
+                s_memoryView.Open(anchor, s_selectedResPtr, RangeSpec{}, requestReadbackCapture);
             }
             if (!canCapture) {
                 ImGui::EndDisabled();

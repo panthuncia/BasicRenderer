@@ -20,10 +20,12 @@ struct LayoutNode;
 
 namespace ui {
 
+    using MemoryViewRequestCaptureFn = std::function<void(const std::string&, Resource*, const RangeSpec&, ReadbackCaptureCallback)>;
+
     class MemoryViewWidget {
     public:
         // Schedules a readback capture and opens the window.
-        void Open(const std::string& passName, Resource* resource, const RangeSpec& range = {});
+        void Open(const std::string& passName, Resource* resource, const RangeSpec& range, MemoryViewRequestCaptureFn requestCapture);
 
         // Draws the window if open.
         void Draw(bool* pOpen);

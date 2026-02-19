@@ -3,7 +3,7 @@
 #include <boost/container_hash/hash.hpp>
 
 #include "RenderPasses/Base/RenderPass.h"
-#include "Managers/Singletons/ReadbackManager.h"
+#include "Render/Runtime/IReadbackService.h"
 #include "Render/ResourceRequirements.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/PixelBuffer.h"
@@ -39,8 +39,12 @@ inline bool operator==(const ReadbackCaptureInputs& a, const ReadbackCaptureInpu
 
 class ReadbackCapturePass final : public RenderPass {
 public:
-    ReadbackCapturePass(ReadbackCaptureInputs inputs, ReadbackCaptureCallback callback)
-        : m_callback(std::move(callback)) {
+    ReadbackCapturePass(
+        ReadbackCaptureInputs inputs,
+        ReadbackCaptureCallback callback,
+        rg::runtime::IReadbackService* readbackService)
+        : m_callback(std::move(callback)),
+        m_readbackService(readbackService) {
         SetInputs(inputs);
     }
 
@@ -133,8 +137,11 @@ public:
         }
 
         request.callback = m_callback;
-        auto& manager = ReadbackManager::GetInstance();
-        m_pendingToken = manager.EnqueueCapture(std::move(request));
+        if (!m_readbackService) {
+            return;
+        }
+
+        m_pendingToken = m_readbackService->EnqueueCapture(std::move(request));
         m_hasPendingToken = true;
     }
 
@@ -143,11 +150,15 @@ public:
             return {};
         }
 
-        auto& manager = ReadbackManager::GetInstance();
-        const uint64_t fenceValue = manager.GetNextReadbackFenceValue();
-        manager.FinalizeCapture(m_pendingToken, fenceValue);
+        if (!m_readbackService) {
+            m_hasPendingToken = false;
+            return {};
+        }
+
+        const uint64_t fenceValue = m_readbackService->GetNextReadbackFenceValue();
+        m_readbackService->FinalizeCapture(m_pendingToken, fenceValue);
         m_hasPendingToken = false;
-        return { manager.GetReadbackFence(), fenceValue };
+        return { m_readbackService->GetReadbackFence(), fenceValue };
     }
 
     void Cleanup() override {
@@ -155,6 +166,7 @@ public:
 
 private:
     ReadbackCaptureCallback m_callback;
-    ReadbackCaptureToken m_pendingToken{};
+    rg::runtime::ReadbackCaptureToken m_pendingToken{};
+    rg::runtime::IReadbackService* m_readbackService = nullptr; // non-owning
     bool m_hasPendingToken = false;
 };

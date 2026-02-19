@@ -20,6 +20,9 @@
 #include "Managers/CommandRecordingManager.h"
 #include "Interfaces/IPassBuilder.h"
 #include "Render/MemoryIntrospectionAPI.h"
+#include "Render/Runtime/IStatisticsService.h"
+#include "Render/Runtime/IUploadService.h"
+#include "Render/Runtime/IReadbackService.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/TrackedAllocation.h"
@@ -234,6 +237,15 @@ public:
 	const std::vector<PassBatch>& GetBatches() const { return batches; }
 	rg::memory::SnapshotProvider& GetMemorySnapshotProvider() { return m_memorySnapshotProvider; }
 	const rg::memory::SnapshotProvider& GetMemorySnapshotProvider() const { return m_memorySnapshotProvider; }
+	void SetStatisticsService(std::shared_ptr<rg::runtime::IStatisticsService> service) { m_statisticsService = std::move(service); }
+	rg::runtime::IStatisticsService* GetStatisticsService() { return m_statisticsService.get(); }
+	const rg::runtime::IStatisticsService* GetStatisticsService() const { return m_statisticsService.get(); }
+	void SetUploadService(std::shared_ptr<rg::runtime::IUploadService> service) { m_uploadService = std::move(service); }
+	rg::runtime::IUploadService* GetUploadService() { return m_uploadService.get(); }
+	const rg::runtime::IUploadService* GetUploadService() const { return m_uploadService.get(); }
+	void SetReadbackService(std::shared_ptr<rg::runtime::IReadbackService> service) { m_readbackService = std::move(service); }
+	rg::runtime::IReadbackService* GetReadbackService() { return m_readbackService.get(); }
+	const rg::runtime::IReadbackService* GetReadbackService() const { return m_readbackService.get(); }
 	//void AllocateResources(RenderContext& context);
 	//void CreateResource(std::wstring name);
 	std::shared_ptr<Resource> GetResourceByName(const std::string& name);
@@ -376,6 +388,9 @@ private:
 	std::unordered_map<uint64_t, ResourceTransition> initialTransitions; // Transitions needed to reach the initial state of the resources before executing the first batch. Executed on graph setup.
 	std::vector<PassBatch> batches;
 	rg::memory::SnapshotProvider m_memorySnapshotProvider;
+	std::shared_ptr<rg::runtime::IStatisticsService> m_statisticsService;
+	std::shared_ptr<rg::runtime::IUploadService> m_uploadService;
+	std::shared_ptr<rg::runtime::IReadbackService> m_readbackService;
 	std::unordered_map<uint64_t, SymbolicTracker*> trackers; // Tracks the state of resources in the graph.
 	std::unordered_map<uint64_t, SymbolicTracker> compileTrackers; // Compile-only symbolic state, decoupled from backing lifetime.
 	std::unordered_map<uint64_t, LastProducerAcrossFrames> m_lastProducerByResourceAcrossFrames;

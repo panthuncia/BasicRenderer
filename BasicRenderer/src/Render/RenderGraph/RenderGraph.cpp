@@ -15,7 +15,6 @@
 #include "Managers/Singletons/DeletionManager.h"
 #include "Render/PassBuilders.h"
 #include "Resources/ResourceGroup.h"
-#include "Managers/Singletons/StatisticsManager.h"
 #include "Managers/CommandRecordingManager.h"
 #include "Interfaces/IHasMemoryMetadata.h"
 #include "Interfaces/IDynamicDeclaredResources.h"
@@ -694,6 +693,15 @@ RenderGraph::RenderGraph() {
 		};
 
 	m_immediateDispatch = MakeDefaultImmediateDispatch();
+	if (!m_statisticsService) {
+		m_statisticsService = rg::runtime::CreateDefaultStatisticsService();
+	}
+	if (!m_uploadService) {
+		m_uploadService = rg::runtime::CreateDefaultUploadService();
+	}
+	if (!m_readbackService) {
+		m_readbackService = rg::runtime::CreateDefaultReadbackService();
+	}
 }
 
 RenderGraph::~RenderGraph() {
@@ -1477,7 +1485,9 @@ void RenderGraph::RefreshRetainedDeclarationsForFrame(ComputePassAndResources& p
 }
 
 void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
-	StatisticsManager::GetInstance().BeginFrame();
+	if (m_statisticsService) {
+		m_statisticsService->BeginFrame();
+	}
 	compileTrackers.clear();
 	m_aliasingSubsystem.ResetPerFrameState(*this);
 
@@ -1790,8 +1800,7 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 
 	// Register/refresh pass statistics indices for this frame's concrete pass list.
 	// This supports transient passes and per-frame retained/immediate splits.
-	{
-		auto& statisticsManager = StatisticsManager::GetInstance();
+	if (m_statisticsService) {
 		for (size_t i = 0; i < m_framePasses.size(); ++i) {
 			auto& any = m_framePasses[i];
 			if (any.type == PassType::Render) {
@@ -1800,7 +1809,7 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 					p.name = "RenderPass#" + std::to_string(i);
 				}
 				any.name = p.name;
-				p.statisticsIndex = static_cast<int>(statisticsManager.RegisterPass(p.name, p.resources.isGeometryPass));
+				p.statisticsIndex = static_cast<int>(m_statisticsService->RegisterPass(p.name, p.resources.isGeometryPass));
 			}
 			else if (any.type == PassType::Compute) {
 				auto& p = std::get<ComputePassAndResources>(any.pass);
@@ -1808,11 +1817,11 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 					p.name = "ComputePass#" + std::to_string(i);
 				}
 				any.name = p.name;
-				p.statisticsIndex = static_cast<int>(statisticsManager.RegisterPass(p.name, false));
+				p.statisticsIndex = static_cast<int>(m_statisticsService->RegisterPass(p.name, false));
 			}
 		}
 
-		statisticsManager.SetupQueryHeap();
+		m_statisticsService->SetupQueryHeap();
 	}
 
 	auto usedResourceIDs = CollectFrameResourceIDs();
@@ -2273,12 +2282,15 @@ void RenderGraph::MaterializeUnmaterializedResources(const std::unordered_set<ui
 
 void RenderGraph::Setup() {
 	// Setup the statistics manager
-	auto& statisticsManager = StatisticsManager::GetInstance();
-	statisticsManager.ClearAll();
+	if (m_statisticsService) {
+		m_statisticsService->ClearAll();
+	}
 	auto& manager = DeviceManager::GetInstance();
-	statisticsManager.RegisterQueue(manager.GetGraphicsQueue().GetKind());
-	statisticsManager.RegisterQueue(manager.GetComputeQueue().GetKind());
-	statisticsManager.SetupQueryHeap();
+	if (m_statisticsService) {
+		m_statisticsService->RegisterQueue(manager.GetGraphicsQueue().GetKind());
+		m_statisticsService->RegisterQueue(manager.GetComputeQueue().GetKind());
+		m_statisticsService->SetupQueryHeap();
+	}
 
 	auto device = DeviceManager::GetInstance().GetDevice();
 
@@ -2461,7 +2473,7 @@ namespace {
 		bool fenceSignal,
 		UINT64 fenceValue,
 		RenderContext& context,
-		StatisticsManager& statisticsManager) {
+		rg::runtime::IStatisticsService* statisticsService) {
 		std::vector<PassReturn> externalFences;
 		context.commandList = commandList;
 		for (auto& pr : passes) {
@@ -2472,7 +2484,9 @@ namespace {
 					rg::imm::Replay(pr.immediateBytecode, commandList);
 				}
 
-				statisticsManager.BeginQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);
+				if (statisticsService) {
+					statisticsService->BeginQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);
+				}
 				if ((pr.run & PassRunMask::Immediate) != PassRunMask::None) {
 					rg::imm::Replay(pr.immediateBytecode, commandList); // Replay immediate-mode commands
 				}
@@ -2486,10 +2500,14 @@ namespace {
 						externalFences.push_back(passReturn);
 					}
 				}
-				statisticsManager.EndQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);
+				if (statisticsService) {
+					statisticsService->EndQuery(pr.statisticsIndex, context.frameIndex, queue, commandList);
+				}
 			}
 		}
-		statisticsManager.ResolveQueries(context.frameIndex, queue, commandList);
+		if (statisticsService) {
+			statisticsService->ResolveQueries(context.frameIndex, queue, commandList);
+		}
 		if (externalFences.size() > 0) {
 			for (auto& fr : externalFences) {
 				if (!fr.fence.has_value()) {
@@ -2609,7 +2627,7 @@ void RenderGraph::Execute(RenderContext& context) {
 			});
 	};
 
-	auto& statisticsManager = StatisticsManager::GetInstance();
+	auto* statisticsService = m_statisticsService.get();
 
 	unsigned int batchIndex = 0;
 	for (auto& batch : batches) {
@@ -2647,7 +2665,7 @@ void RenderGraph::Execute(RenderContext& context) {
 			batch.computeCompletionSignal,
 			batch.computeCompletionFenceValue,
 			context,
-			statisticsManager);
+			statisticsService);
 
 		if (batch.computeCompletionSignal && !alias) {
 			UINT64 signalValue = currentComputeQueueFenceOffset + batch.computeCompletionFenceValue;
@@ -2689,7 +2707,7 @@ void RenderGraph::Execute(RenderContext& context) {
 			signalNow,
 			batch.renderCompletionFenceValue,
 			context,
-			statisticsManager);
+			statisticsService);
 
 		if (batch.renderCompletionSignal && signalNow) {
 			UINT64 signalValue = currentGraphicsQueueFenceOffset + batch.renderCompletionFenceValue;

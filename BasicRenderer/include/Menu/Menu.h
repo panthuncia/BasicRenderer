@@ -25,11 +25,9 @@
 #include "Import/ModelLoader.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Render/TonemapTypes.h"
-#include "Managers/Singletons/StatisticsManager.h"
 #include "Managers/Singletons/UpscalingManager.h"
 #include "Menu/RenderGraphInspector.h"
 #include "Menu/MemoryIntrospectionWidget.h"
-#include "Managers/Singletons/ReadbackManager.h"
 #include "Resources/ReadbackRequest.h"
 #include "Resources/components.h"
 #include "Render/MemoryIntrospectionAPI.h"
@@ -815,6 +813,14 @@ inline void Menu::Render(RenderContext& context) {
                 auto resource = m_renderGraph->GetResourceByID(resourceId);
                 return resource ? resource.get() : nullptr;
             },
+            [this](const std::string& passName, Resource* resource, const RangeSpec& range, ReadbackCaptureCallback callback) {
+                if (!m_renderGraph) {
+                    return;
+                }
+                if (auto* readbackService = m_renderGraph->GetReadbackService()) {
+                    readbackService->RequestReadbackCapture(passName, resource, range, std::move(callback));
+                }
+            },
             opts);
         ImGui::End();
 
@@ -1202,7 +1208,8 @@ inline void Menu::DrawCLodTelemetryWindow() {
     }
 
     const bool captureStatsResourcesReady = (clodVisibleClustersResource != nullptr) && (clodVisibleCounterResource != nullptr);
-    const bool canCapture = (clodTelemetryResource != nullptr) && (!m_clodTelemetryCapturePending) && (!m_clodCaptureStatsPending);
+    auto* readbackService = m_renderGraph ? m_renderGraph->GetReadbackService() : nullptr;
+    const bool canCapture = (clodTelemetryResource != nullptr) && (readbackService != nullptr) && (!m_clodTelemetryCapturePending) && (!m_clodCaptureStatsPending);
 
     if (!captureStatsResourcesReady) {
         ImGui::TextDisabled("Extended stats unavailable: visible cluster resources not found.");
@@ -1225,11 +1232,12 @@ inline void Menu::DrawCLodTelemetryWindow() {
             m_clodCapturePendingClusters.clear();
         }
 
-        ReadbackManager::GetInstance().RequestReadbackCapture(
-            "CLod::HierarchialCullingPass",
-            clodTelemetryResource,
-            RangeSpec{},
-            [this](ReadbackCaptureResult&& result) {
+        if (readbackService) {
+            readbackService->RequestReadbackCapture(
+                "CLod::HierarchialCullingPass",
+                clodTelemetryResource,
+                RangeSpec{},
+                [this](ReadbackCaptureResult&& result) {
                 m_clodTelemetryCapturePending = false;
 
                 constexpr size_t telemetryBytes = sizeof(uint32_t) * static_cast<size_t>(CLodWorkGraphCounterCount);
@@ -1272,16 +1280,18 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     clusterActive,
                     clusterThreads,
                     visibleWrites);
-            });
+                });
+        }
 
         if (requestCaptureStats) {
             const uint64_t captureId = m_clodCaptureStatsId;
 
-            ReadbackManager::GetInstance().RequestReadbackCapture(
-                "CLod::HierarchialCullingPass",
-                clodVisibleCounterResource,
-                RangeSpec{},
-                [this, captureId](ReadbackCaptureResult&& result) {
+            if (readbackService) {
+                readbackService->RequestReadbackCapture(
+                    "CLod::HierarchialCullingPass",
+                    clodVisibleCounterResource,
+                    RangeSpec{},
+                    [this, captureId](ReadbackCaptureResult&& result) {
                     if (!m_clodCaptureStatsPending || m_clodCaptureStatsId != captureId) {
                         return;
                     }
@@ -1295,13 +1305,13 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     std::memcpy(&m_clodCapturePendingVisibleCount, result.data.data(), sizeof(uint32_t));
                     m_clodCaptureHasPendingCounter = true;
                     TryFinalizeCLodCaptureStats(captureId);
-                });
+                    });
 
-            ReadbackManager::GetInstance().RequestReadbackCapture(
-                "CLod::HierarchialCullingPass",
-                clodVisibleClustersResource,
-                RangeSpec{},
-                [this, captureId](ReadbackCaptureResult&& result) {
+                readbackService->RequestReadbackCapture(
+                    "CLod::HierarchialCullingPass",
+                    clodVisibleClustersResource,
+                    RangeSpec{},
+                    [this, captureId](ReadbackCaptureResult&& result) {
                     if (!m_clodCaptureStatsPending || m_clodCaptureStatsId != captureId) {
                         return;
                     }
@@ -1315,7 +1325,8 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
                     m_clodCaptureHasPendingClusters = true;
                     TryFinalizeCLodCaptureStats(captureId);
-                });
+                    });
+            }
 
             m_clodTelemetryStatus = "Capture requested (extended stats).";
         }
@@ -1489,11 +1500,19 @@ inline void Menu::DrawCLodTelemetryWindow() {
 }
 
 inline void Menu::DrawPassTimingWindow() {
-    auto& statisticsManager = StatisticsManager::GetInstance();
-    auto& names     = statisticsManager.GetPassNames();
-    auto& stats     = statisticsManager.GetPassStats();
-    auto& meshStats = statisticsManager.GetMeshStats();
-    auto& isGeom    = statisticsManager.GetIsGeometryPassVector();
+    if (!m_renderGraph) {
+        return;
+    }
+
+    auto* statisticsService = m_renderGraph->GetStatisticsService();
+    if (!statisticsService) {
+        return;
+    }
+
+    auto& names     = statisticsService->GetPassNames();
+    auto& stats     = statisticsService->GetPassStats();
+    auto& meshStats = statisticsService->GetMeshStats();
+    auto& isGeom    = statisticsService->GetIsGeometryPassVector();
     static int maxStaleFrames = 240;
 
     if (names.empty()) {
@@ -1503,7 +1522,7 @@ inline void Menu::DrawPassTimingWindow() {
     ImGui::Begin("Pass Timings");
     ImGui::SliderInt("Max Stale Frames", &maxStaleFrames, 0, 2000);
 
-    const auto& visible = statisticsManager.GetVisiblePassIndices(static_cast<uint64_t>(maxStaleFrames));
+    const auto& visible = statisticsService->GetVisiblePassIndices(static_cast<uint64_t>(maxStaleFrames));
     if (visible.empty()) {
         ImGui::TextUnformatted("No pass timings within selected staleness window.");
         ImGui::End();

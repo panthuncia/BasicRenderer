@@ -8,18 +8,10 @@
 #include <functional>
 #include <limits>
 #include <rhi.h>
+#include "Render/Runtime/StatisticsTypes.h"
 
-// per-pass exponential moving average data
-struct PassStats {
-    double ema = 0.0;
-    static constexpr double alpha = 0.1;  // smoothing factor
-};
-
-// per-pass mesh shader stats EMA
-struct MeshPipelineStats {
-    double invocationsEma = 0.0;
-    double primitivesEma  = 0.0;
-};
+using PassStats = rg::runtime::PassStats;
+using MeshPipelineStats = rg::runtime::MeshPipelineStats;
 
 class StatisticsManager {
 public:

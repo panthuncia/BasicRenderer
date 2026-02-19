@@ -11,7 +11,6 @@
 #include <iomanip>
 #include <string>
 
-#include "Managers/Singletons/ReadbackManager.h"
 #include "Resources/Resource.h"
 #include "structFormatHelper.h"
 
@@ -274,7 +273,7 @@ namespace ui {
         goToElementInput_ = s.goToElementInput;
     }
 
-    void MemoryViewWidget::Open(const std::string& passName, Resource* resource, const RangeSpec& range) {
+    void MemoryViewWidget::Open(const std::string& passName, Resource* resource, const RangeSpec& range, MemoryViewRequestCaptureFn requestCapture) {
         std::scoped_lock lock(mutex_);
 
         result_.reset();
@@ -303,8 +302,14 @@ namespace ui {
         waiting_ = true;
         status_ = "Scheduling readback...";
 
+        if (!requestCapture) {
+            waiting_ = false;
+            status_ = "Readback service unavailable.";
+            return;
+        }
+
         // Schedule capture. Callback may run later when GPU completes + ProcessReadbackRequests() copies data.
-        ReadbackManager::GetInstance().RequestReadbackCapture(
+        requestCapture(
             passName,
             resource,
             range,
