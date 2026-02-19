@@ -4,7 +4,6 @@
 #include "Utilities/Utilities.h"
 #include "Materials/MaterialFlags.h"
 #include "Resources/PixelBuffer.h"
-#include "Resources/MemoryStatisticsComponents.h"
 #include "Render/MemoryIntrospectionAPI.h"
 
 Material::Material(const std::string& name,

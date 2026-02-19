@@ -7,7 +7,6 @@
 #include "Resources/Resource.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "Resources/MemoryStatisticsComponents.h"
 #include "Render/MemoryIntrospectionAPI.h"
 
 void UploadManager::Initialize() {

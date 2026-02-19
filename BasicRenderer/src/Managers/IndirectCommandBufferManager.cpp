@@ -11,7 +11,6 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "../../generated/BuiltinResources.h"
 #include "Resources/Components.h"
-#include "Resources/MemoryStatisticsComponents.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Managers/Singletons/ECSManager.h"

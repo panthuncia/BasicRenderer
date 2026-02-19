@@ -13,7 +13,6 @@
 #include "Resources/Sampler.h"
 #include "Utilities/Utilities.h"
 #include "Resources/TextureDescription.h"
-#include "Resources/MemoryStatisticsComponents.h"
 #include "Render/MemoryIntrospectionAPI.h"
 class ShadowMaps : public ResourceGroup {
 public:

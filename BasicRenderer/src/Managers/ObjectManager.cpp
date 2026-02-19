@@ -13,7 +13,6 @@
 #include "../../generated/BuiltinResources.h"
 #include "Materials/Material.h"
 #include "Resources/components.h"
-#include "Resources/MemoryStatisticsComponents.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Render/MemoryIntrospectionAPI.h"
 

@@ -14,7 +14,6 @@
 #include "Resources/Texture.h"
 #include "Managers/Singletons/ReadbackManager.h"
 #include "../../generated/BuiltinResources.h"
-#include "Resources/MemoryStatisticsComponents.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "Render/MemoryIntrospectionAPI.h"
 

@@ -6,7 +6,6 @@
 #include <vector>
 
 #include "Interfaces/IHasMemoryMetadata.h"
-#include "Resources/MemoryStatisticsComponents.h"
 
 namespace rg::memory {
 

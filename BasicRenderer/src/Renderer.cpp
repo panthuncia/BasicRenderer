@@ -57,7 +57,6 @@
 #include "Managers/Singletons/StatisticsManager.h"
 #include "../generated/BuiltinResources.h"
 #include "Resources/ResourceIdentifier.h"
-#include "Resources/MemoryStatisticsComponents.h"
 #include "Render/RenderGraphBuildHelper.h"
 #include "Managers/Singletons/UpscalingManager.h"
 #include "Managers/Singletons/FFXManager.h"
@@ -66,7 +65,7 @@
 #include "RenderPasses/DebugGridPass.h"
 #include "Render/GraphExtensions/ReadbackCaptureExtension.h"
 #include "Resources/Resource.h"
-#include "Render/MemoryIntrospectionAPI.h"
+#include "Render/MemoryIntrospectionBackend.h"
 
 void D3D12DebugCallback(
     D3D12_MESSAGE_CATEGORY Category,
@@ -145,35 +144,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         }
         });
 
-    auto memoryQuery = ECSManager::GetInstance().GetWorld().query_builder<const MemoryStatisticsComponents::MemSizeBytes>().build();
-    rg::memory::SnapshotProvider::SetBuildSnapshotFn(
-        [memoryQuery](std::vector<rg::memory::ResourceMemoryRecord>& out) mutable {
-            out.clear();
-            out.reserve(2048);
-
-            memoryQuery.each([&](flecs::entity e, const MemoryStatisticsComponents::MemSizeBytes& sz) {
-                rg::memory::ResourceMemoryRecord row;
-                row.bytes = sz.size;
-
-                if (auto rid = e.try_get<MemoryStatisticsComponents::ResourceID>()) {
-                    row.resourceID = rid->id;
-                }
-                if (auto rt = e.try_get<MemoryStatisticsComponents::ResourceType>()) {
-                    row.resourceType = rt->type;
-                }
-                if (auto rn = e.try_get<MemoryStatisticsComponents::ResourceName>()) {
-                    row.resourceName = rn->name;
-                }
-                if (auto usage = e.try_get<MemoryStatisticsComponents::ResourceUsage>()) {
-                    row.usage = usage->usage;
-                }
-                if (auto ident = e.try_get<ResourceIdentifier>()) {
-                    row.identifier = ident->name;
-                }
-
-                out.push_back(std::move(row));
-                });
-        });
+    rg::memory::AttachSnapshotProviderFromECS();
 
     ResourceManager::GetInstance().Initialize();
     PSOManager::GetInstance().initialize();
@@ -987,7 +958,7 @@ void Renderer::Cleanup() {
 	FFXManager::GetInstance().Shutdown();
 	UpscalingManager::GetInstance().Shutdown();
 	ReadbackManager::GetInstance().Cleanup();
-    rg::memory::SnapshotProvider::ResetBuildSnapshotFn();
+    rg::memory::DetachSnapshotProvider();
     DeviceManager::ResetTrackingHooks();
     TrackedEntityToken::ResetHooks();
     Resource::ResetEntityHooks();

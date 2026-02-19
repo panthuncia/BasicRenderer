@@ -8,7 +8,6 @@
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "Managers/ViewManager.h"
 #include "../../generated/BuiltinResources.h"
-#include "Resources/MemoryStatisticsComponents.h"
 #include "Render/MemoryIntrospectionAPI.h"
 
 MeshManager::MeshManager() {
