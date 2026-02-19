@@ -16,18 +16,6 @@ class Buffer;
 class Resource;
 class ExternalBackingResource;
 
-#if BUILD_TYPE == BUILD_TYPE_DEBUG
-#define BUFFER_UPLOAD(data,size,res,offset) \
-    UploadManager::GetInstance().UploadData((data),(size),(res),(offset),__FILE__,__LINE__)
-#define TEXTURE_UPLOAD_SUBRESOURCES(dstTexture,fmt,baseWidth,baseHeight,depthOrLayers,mipLevels,arraySize,srcSubresources,srcCount) \
-	UploadManager::GetInstance().UploadTextureSubresources((dstTexture),(fmt),(baseWidth),(baseHeight),(depthOrLayers),(mipLevels),(arraySize),(srcSubresources),(srcCount),__FILE__,__LINE__)
-#else
-#define BUFFER_UPLOAD(data,size,res,offset) \
-    UploadManager::GetInstance().UploadData((data),(size),(res),(offset))
-#define TEXTURE_UPLOAD_SUBRESOURCES(dstTexture,fmt,baseWidth,baseHeight,depthOrLayers,mipLevels,arraySize,srcSubresources,srcCount) \
-	UploadManager::GetInstance().UploadTextureSubresources((dstTexture),(fmt),(baseWidth),(baseHeight),(depthOrLayers),(mipLevels),(arraySize),(srcSubresources),(srcCount))
-#endif
-
 struct ResourceCopy {
 	std::shared_ptr<Resource> source;
 	std::shared_ptr<Resource> destination;
@@ -236,3 +224,5 @@ inline UploadManager& UploadManager::GetInstance() {
 	static UploadManager instance;
 	return instance;
 }
+
+#include "Render/Runtime/UploadServiceAccess.h"

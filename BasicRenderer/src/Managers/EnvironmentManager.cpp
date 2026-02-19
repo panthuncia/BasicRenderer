@@ -12,7 +12,6 @@
 #include "Resources/Sampler.h"
 #include "Resources/ResourceGroup.h"
 #include "Resources/Texture.h"
-#include "Managers/Singletons/ReadbackManager.h"
 #include "../../generated/BuiltinResources.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "Render/MemoryIntrospectionAPI.h"
@@ -123,10 +122,20 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 		m_environmentsToConvert.push_back(e);
 		m_workingHDRIGroup->AddResource(skyHDR->ImagePtr());
 		auto path = GetCacheFilePath(name+L"_environment.dds", L"environments");
-		ReadbackManager::GetInstance().RequestReadback(envCubemap, path, nullptr, true);
+		if (m_requestReadback) {
+			m_requestReadback(envCubemap, path, nullptr, true);
+		}
+		else {
+			spdlog::warn("EnvironmentManager: readback request callback is not configured.");
+		}
 
 		path = GetCacheFilePath(name + L"_prefiltered.dds", L"environments");
-		ReadbackManager::GetInstance().RequestReadback(e->GetEnvironmentPrefilteredCubemap(), path, nullptr, true);
+		if (m_requestReadback) {
+			m_requestReadback(e->GetEnvironmentPrefilteredCubemap(), path, nullptr, true);
+		}
+		else {
+			spdlog::warn("EnvironmentManager: readback request callback is not configured.");
+		}
 	}
 
 	//Re-create environment cubemap at full res

@@ -10,7 +10,6 @@
 
 #include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"
-#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Render/PassBuilders.h"
@@ -701,6 +700,9 @@ RenderGraph::RenderGraph() {
 	}
 	if (!m_readbackService) {
 		m_readbackService = rg::runtime::CreateDefaultReadbackService();
+	}
+	if (!m_renderGraphSettingsService) {
+		m_renderGraphSettingsService = rg::runtime::CreateDefaultRenderGraphSettingsService();
 	}
 }
 
@@ -2303,12 +2305,30 @@ void RenderGraph::Setup() {
 	result = device.CreateTimeline(m_copyQueueFence);
 	result = device.CreateTimeline(m_frameStartSyncFence);
 
-	m_getUseAsyncCompute = SettingsManager::GetInstance().getSettingGetter<bool>("useAsyncCompute");
-	m_getAutoAliasMode = SettingsManager::GetInstance().getSettingGetter<AutoAliasMode>("autoAliasMode");
-	m_getAutoAliasPackingStrategy = SettingsManager::GetInstance().getSettingGetter<AutoAliasPackingStrategy>("autoAliasPackingStrategy");
-	m_getAutoAliasLogExclusionReasons = SettingsManager::GetInstance().getSettingGetter<bool>("autoAliasLogExclusionReasons");
-	m_getAutoAliasPoolRetireIdleFrames = SettingsManager::GetInstance().getSettingGetter<uint32_t>("autoAliasPoolRetireIdleFrames");
-	m_getAutoAliasPoolGrowthHeadroom = SettingsManager::GetInstance().getSettingGetter<float>("autoAliasPoolGrowthHeadroom");
+	m_getUseAsyncCompute = [this]() {
+		return m_renderGraphSettingsService ? m_renderGraphSettingsService->GetUseAsyncCompute() : false;
+	};
+	m_getAutoAliasMode = [this]() {
+		const auto mode = m_renderGraphSettingsService
+			? m_renderGraphSettingsService->GetAutoAliasMode()
+			: static_cast<uint8_t>(AutoAliasMode::Off);
+		return static_cast<AutoAliasMode>(mode);
+	};
+	m_getAutoAliasPackingStrategy = [this]() {
+		const auto strategy = m_renderGraphSettingsService
+			? m_renderGraphSettingsService->GetAutoAliasPackingStrategy()
+			: static_cast<uint8_t>(AutoAliasPackingStrategy::GreedySweepLine);
+		return static_cast<AutoAliasPackingStrategy>(strategy);
+	};
+	m_getAutoAliasLogExclusionReasons = [this]() {
+		return m_renderGraphSettingsService ? m_renderGraphSettingsService->GetAutoAliasLogExclusionReasons() : false;
+	};
+	m_getAutoAliasPoolRetireIdleFrames = [this]() {
+		return m_renderGraphSettingsService ? m_renderGraphSettingsService->GetAutoAliasPoolRetireIdleFrames() : 120u;
+	};
+	m_getAutoAliasPoolGrowthHeadroom = [this]() {
+		return m_renderGraphSettingsService ? m_renderGraphSettingsService->GetAutoAliasPoolGrowthHeadroom() : 1.5f;
+	};
 	MaterializeUnmaterializedResources();
 
 	// Run pass setup to collect static resource requirements

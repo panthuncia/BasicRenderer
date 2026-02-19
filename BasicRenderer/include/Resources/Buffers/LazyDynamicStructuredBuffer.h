@@ -15,6 +15,7 @@
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Interfaces/IHasMemoryMetadata.h"
+#include "Render/Runtime/UploadServiceAccess.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -177,7 +178,9 @@ private:
         auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, m_elementSize * capacity, GetGlobalResourceID(), m_UAV);
         if (m_dataBuffer != nullptr) {
 			auto oldBackingResource = ExternalBackingResource::CreateShared(std::move(m_dataBuffer));
-			UploadManager::GetInstance().QueueResourceCopy(shared_from_this(), oldBackingResource, previousCapacity * sizeof(T));
+            if (auto* uploadService = rg::runtime::GetActiveUploadService()) {
+                uploadService->QueueResourceCopy(shared_from_this(), oldBackingResource, previousCapacity * sizeof(T));
+            }
         }
 		SetBacking(std::move(newDataBuffer), m_elementSize * capacity);
 

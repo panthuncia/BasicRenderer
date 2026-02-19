@@ -6,6 +6,7 @@
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Resources/ExternalBackingResource.h"
+#include "Render/Runtime/UploadServiceAccess.h"
 
 std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementSize) {
     size_t requiredSize = size;
@@ -181,7 +182,9 @@ void DynamicBuffer::GrowBuffer(size_t newSize) {
     auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, newSize, GetGlobalResourceID(), m_UAV);
     if (m_dataBuffer) {
         auto oldBackingResource = ExternalBackingResource::CreateShared(std::move(m_dataBuffer));
-        UploadManager::GetInstance().QueueResourceCopy(shared_from_this(), oldBackingResource, m_capacity);
+        if (auto* uploadService = rg::runtime::GetActiveUploadService()) {
+            uploadService->QueueResourceCopy(shared_from_this(), oldBackingResource, m_capacity);
+        }
     }
 	SetBacking(std::move(newDataBuffer), newSize);
 

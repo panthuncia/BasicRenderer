@@ -4,6 +4,8 @@
 #include <optional>
 #include <mutex>
 #include <vector>
+#include <functional>
+#include <string>
 
 #include "Scene/Environment.h"
 #include "ShaderBuffers.h"
@@ -13,11 +15,18 @@
 
 class BufferView;
 class DynamicBuffer;
+class PixelBuffer;
 
 class EnvironmentManager : public IResourceProvider {
 public:
+	using RequestReadbackFn = std::function<void(std::shared_ptr<PixelBuffer>, std::wstring, std::function<void()>, bool)>;
+
 	static std::unique_ptr<EnvironmentManager> CreateUnique() {
 		return std::unique_ptr<EnvironmentManager>(new EnvironmentManager());
+	}
+
+	void SetRequestReadbackFn(RequestReadbackFn fn) {
+		m_requestReadback = std::move(fn);
 	}
 
 	std::unique_ptr<Environment> CreateEnvironment(std::wstring name = L"");
@@ -86,6 +95,7 @@ private:
 	std::shared_ptr<ResourceGroup> m_workingHDRIGroup; // Temporary group for prefiltered cubemap generation
 
 	std::shared_ptr<ResourceGroup> m_environmentPrefilteredCubemapGroup;
+	RequestReadbackFn m_requestReadback;
 
 	friend class Environment;
 };

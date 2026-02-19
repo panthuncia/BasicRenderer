@@ -64,6 +64,7 @@
 #include "Render/GraphExtensions/ReadbackCaptureExtension.h"
 #include "Resources/Resource.h"
 #include "Render/MemoryIntrospectionBackend.h"
+#include "Render/Runtime/UploadServiceAccess.h"
 
 void D3D12DebugCallback(
     D3D12_MESSAGE_CATEGORY Category,
@@ -150,6 +151,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     PSOManager::GetInstance().initialize();
         if (auto* uploadService = currentRenderGraph->GetUploadService()) {
                 uploadService->Initialize();
+            rg::runtime::SetActiveUploadService(uploadService);
         }
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();
@@ -173,6 +175,15 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	m_pIndirectCommandBufferManager = IndirectCommandBufferManager::CreateUnique();
 	m_pViewManager = ViewManager::CreateUnique();
 	m_pEnvironmentManager = EnvironmentManager::CreateUnique();
+    m_pEnvironmentManager->SetRequestReadbackFn([this](std::shared_ptr<PixelBuffer> texture, std::wstring outputFile, std::function<void()> callback, bool cubemap) {
+        if (!currentRenderGraph) {
+            return;
+        }
+
+        if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
+            readbackService->RequestReadback(std::move(texture), std::move(outputFile), std::move(callback), cubemap);
+        }
+    });
 	m_pMaterialManager = MaterialManager::CreateUnique();
 	//ResourceManager::GetInstance().SetEnvironmentBufferDescriptorIndex(m_pEnvironmentManager->GetEnvironmentBufferSRVDescriptorIndex());
 	m_pLightManager->SetViewManager(m_pViewManager.get()); // Light manager needs access to view manager for shadow cameras
@@ -961,6 +972,7 @@ void Renderer::Cleanup() {
     ResourceManager::GetInstance().Cleanup();
     m_coreResourceProvider.Cleanup();
     currentRenderGraph.reset();
+    rg::runtime::SetActiveUploadService(nullptr);
     m_renderGraphRuntimeInitialized = false;
     m_currentEnvironment.reset();
 	currentScene.reset();

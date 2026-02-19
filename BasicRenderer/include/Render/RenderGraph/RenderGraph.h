@@ -23,6 +23,7 @@
 #include "Render/Runtime/IStatisticsService.h"
 #include "Render/Runtime/IUploadService.h"
 #include "Render/Runtime/IReadbackService.h"
+#include "Render/Runtime/IRenderGraphSettingsService.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/TrackedAllocation.h"
@@ -246,6 +247,9 @@ public:
 	void SetReadbackService(std::shared_ptr<rg::runtime::IReadbackService> service) { m_readbackService = std::move(service); }
 	rg::runtime::IReadbackService* GetReadbackService() { return m_readbackService.get(); }
 	const rg::runtime::IReadbackService* GetReadbackService() const { return m_readbackService.get(); }
+	void SetRenderGraphSettingsService(std::shared_ptr<rg::runtime::IRenderGraphSettingsService> service) { m_renderGraphSettingsService = std::move(service); }
+	rg::runtime::IRenderGraphSettingsService* GetRenderGraphSettingsService() { return m_renderGraphSettingsService.get(); }
+	const rg::runtime::IRenderGraphSettingsService* GetRenderGraphSettingsService() const { return m_renderGraphSettingsService.get(); }
 	//void AllocateResources(RenderContext& context);
 	//void CreateResource(std::wstring name);
 	std::shared_ptr<Resource> GetResourceByName(const std::string& name);
@@ -391,6 +395,7 @@ private:
 	std::shared_ptr<rg::runtime::IStatisticsService> m_statisticsService;
 	std::shared_ptr<rg::runtime::IUploadService> m_uploadService;
 	std::shared_ptr<rg::runtime::IReadbackService> m_readbackService;
+	std::shared_ptr<rg::runtime::IRenderGraphSettingsService> m_renderGraphSettingsService;
 	std::unordered_map<uint64_t, SymbolicTracker*> trackers; // Tracks the state of resources in the graph.
 	std::unordered_map<uint64_t, SymbolicTracker> compileTrackers; // Compile-only symbolic state, decoupled from backing lifetime.
 	std::unordered_map<uint64_t, LastProducerAcrossFrames> m_lastProducerByResourceAcrossFrames;

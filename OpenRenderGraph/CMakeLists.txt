@@ -17,6 +17,7 @@ add_library(OpenRenderGraph STATIC
     "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/Runtime/DefaultStatisticsService.cpp"
     "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/Runtime/DefaultUploadService.cpp"
     "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/Runtime/DefaultReadbackService.cpp"
+    "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/Runtime/DefaultRenderGraphSettingsService.cpp"
     "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/PassBuilders.cpp"
     "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/RenderGraph/RenderGraph.cpp"
     "${CMAKE_SOURCE_DIR}/BasicRenderer/src/Render/RenderGraph/Aliasing/RenderGraphAliasingSubsystem.cpp"

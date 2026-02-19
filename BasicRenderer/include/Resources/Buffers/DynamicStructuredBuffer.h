@@ -12,6 +12,7 @@
 #include "Resources/ExternalBackingResource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Managers/Singletons/UploadManager.h"
+#include "Render/Runtime/UploadServiceAccess.h"
 #include "Interfaces/IHasMemoryMetadata.h"
 
 using Microsoft::WRL::ComPtr;
@@ -160,7 +161,9 @@ private:
 			// If shrinking, copy only up to new capacity. If growing, copy up to previous capacity.
             auto sizeToCopy = capacity < previousCapacity ? capacity : previousCapacity;
             auto oldBackingResource = ExternalBackingResource::CreateShared(std::move(m_dataBuffer));
-            UploadManager::GetInstance().QueueResourceCopy(shared_from_this(), oldBackingResource, sizeToCopy * sizeof(T));
+            if (auto* uploadService = rg::runtime::GetActiveUploadService()) {
+                uploadService->QueueResourceCopy(shared_from_this(), oldBackingResource, sizeToCopy * sizeof(T));
+            }
         }
 		SetBacking(std::move(newDataBuffer), sizeof(T) * capacity);
 

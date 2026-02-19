@@ -5,6 +5,7 @@
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Resources/ExternalBackingResource.h"
+#include "Render/Runtime/UploadServiceAccess.h"
 
 void SortedUnsignedIntBuffer::Insert(unsigned int element) {
     // Resize the buffer if necessary
@@ -83,7 +84,9 @@ void SortedUnsignedIntBuffer::GrowBuffer(uint64_t newSize) {
 	// Copy existing data to new buffer and discard old buffer after copy
     if (m_dataBuffer) {
         auto oldBackingResource = ExternalBackingResource::CreateShared(std::move(m_dataBuffer));
-        UploadManager::GetInstance().QueueResourceCopy(shared_from_this(), oldBackingResource, m_capacity * sizeof(unsigned int));
+        if (auto* uploadService = rg::runtime::GetActiveUploadService()) {
+            uploadService->QueueResourceCopy(shared_from_this(), oldBackingResource, m_capacity * sizeof(unsigned int));
+        }
     }
     SetBacking(std::move(newDataBuffer), newSize * sizeof(unsigned int));
 
