@@ -8,7 +8,7 @@
 #include <rhi_helpers.h>
 #include <rhi_debug.h>
 
-#include "Render/RenderContext.h"
+#include "Render/PassExecutionContext.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -703,6 +703,9 @@ RenderGraph::RenderGraph() {
 	}
 	if (!m_renderGraphSettingsService) {
 		m_renderGraphSettingsService = rg::runtime::CreateDefaultRenderGraphSettingsService();
+	}
+	if (!m_shaderService) {
+		m_shaderService = rg::runtime::CreateDefaultShaderService();
 	}
 }
 
@@ -2492,7 +2495,7 @@ namespace {
 		UINT64 fenceOffset,
 		bool fenceSignal,
 		UINT64 fenceValue,
-		RenderContext& context,
+		PassExecutionContext& context,
 		rg::runtime::IStatisticsService* statisticsService) {
 		std::vector<PassReturn> externalFences;
 		context.commandList = commandList;
@@ -2541,7 +2544,7 @@ namespace {
 	}
 } // namespace
 
-void RenderGraph::Execute(RenderContext& context) {
+void RenderGraph::Execute(PassExecutionContext& context) {
 	ValidateCompiledResourceGenerations();
 
 	bool useAsyncCompute = m_getUseAsyncCompute();

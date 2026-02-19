@@ -3,10 +3,7 @@
 #include <stacktrace>
 #include <mutex>
 
-#include "ThirdParty/stb/stb_image.h"
-
 #include "Resources/TextureDescription.h"
-#include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeletionManager.h"
 using Microsoft::WRL::ComPtr;
 

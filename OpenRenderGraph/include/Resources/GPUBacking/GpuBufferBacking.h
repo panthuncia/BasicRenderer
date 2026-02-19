@@ -10,7 +10,6 @@
 #include <rhi.h>
 #include <resource_states.h>
 
-#include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Resources/TrackedAllocation.h"
 

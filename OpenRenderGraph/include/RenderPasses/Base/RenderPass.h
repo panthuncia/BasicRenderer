@@ -14,8 +14,12 @@
 #include "Render/PipelineState.h"
 #include "interfaces/IResourceProvider.h"
 #include "Render/PassInputs.h"
-#include "ShaderBuffers.h"
-#include "Render/RenderContext.h"
+#include "Render/PassExecutionContext.h"
+#include "Render/ShaderABI.h"
+
+struct UpdateContext;
+struct ImmediateContext;
+struct RenderContext;
 
 struct RenderPassParameters {
 	std::vector<ResourceHandleAndRange> shaderResources;
@@ -51,6 +55,12 @@ public:
 
 	virtual void Update(const UpdateContext& context) {};
 	virtual void ExecuteImmediate(ImmediateContext& context) {};
+	virtual PassReturn Execute(PassExecutionContext& context) {
+		if (context.hostFrameData && context.hostFrameData->userFrameData) {
+			return Execute(*static_cast<RenderContext*>(context.hostFrameData->userFrameData));
+		}
+		return {};
+	};
 	virtual PassReturn Execute(RenderContext& context) { return {}; };
     virtual void Cleanup() = 0;
 
@@ -62,7 +72,7 @@ protected:
 	virtual void DeclareResourceUsages(RenderPassBuilder* builder) {};
 
 	void BindResourceDescriptorIndices(rhi::CommandList& commandList, const PipelineResources& resources) {
-		unsigned int indices[NumResourceDescriptorIndicesRootConstants] = {};
+		unsigned int indices[rg::shaderabi::kNumResourceDescriptorIndicesRootConstants] = {};
 		int i = 0;
 		for (auto& binding : resources.mandatoryResourceDescriptorSlots) {
 			indices[i] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(binding.hash, false, &binding.name);
@@ -73,7 +83,7 @@ protected:
 			i++;
 		}
 		if (i > 0) {
-			commandList.PushConstants(rhi::ShaderStage::All, 0, ResourceDescriptorIndicesRootSignatureIndex, 0, i, indices);
+			commandList.PushConstants(rhi::ShaderStage::All, 0, rg::shaderabi::kResourceDescriptorIndicesRootParameter, 0, i, indices);
 		}
 	}
 

@@ -6,7 +6,6 @@
 #include <string>
 
 #include "Resources/ResourceIdentifier.h"
-#include <Utilities/HashMix.h>
 
 struct PipelineResources {
 	std::vector<ResourceIdentifier> mandatoryResourceDescriptorSlots;

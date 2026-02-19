@@ -8,6 +8,7 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "Materials/TechniqueDescriptor.h"
 #include "brslHelpers.h"
+#include "Render/ShaderABI.h"
 
 #pragma comment(lib, "dxcompiler.lib")
 
@@ -1519,8 +1520,8 @@ void PSOManager::createRootSignature() {
     { rhi::ShaderStage::All, NumSettingsRootConstants,  0, 3 },
     { rhi::ShaderStage::All, NumMiscUintRootConstants,          0, 4 },
     { rhi::ShaderStage::All, NumMiscFloatRootConstants,         0, 5 },
-    { rhi::ShaderStage::All, NumResourceDescriptorIndicesRootConstants, 0, 6 },
-    { rhi::ShaderStage::All, NumIndirectCommandSignatureRootConstants, 0, 7 },
+    { rhi::ShaderStage::All, rg::shaderabi::kNumResourceDescriptorIndicesRootConstants, 0, rg::shaderabi::kResourceDescriptorIndicesRootParameter },
+    { rhi::ShaderStage::All, rg::shaderabi::kNumIndirectCommandSignatureRootConstants, 0, rg::shaderabi::kIndirectCommandSignatureRootParameter },
     };
 
     rhi::SamplerDesc pointClamp = {

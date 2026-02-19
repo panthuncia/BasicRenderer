@@ -4,8 +4,6 @@
 #include <cmath>
 #include <stdexcept>
 
-#include "ThirdParty/stb/stb_image.h"
-
 #include "Resources/GloballyIndexedResource.h"
 #include "Resources/TextureDescription.h"
 #include "Resources/GPUBacking/GPUTextureBacking.h"

@@ -65,6 +65,8 @@
 #include "Resources/Resource.h"
 #include "Render/MemoryIntrospectionBackend.h"
 #include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/ShaderServiceAccess.h"
+#include "Render/Runtime/PSOShaderService.h"
 
 void D3D12DebugCallback(
     D3D12_MESSAGE_CATEGORY Category,
@@ -148,7 +150,12 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     if (!currentRenderGraph) {
 		currentRenderGraph = std::make_unique<RenderGraph>();
     }
+    currentRenderGraph->SetShaderService(std::make_shared<rg::runtime::PsoShaderService>());
     PSOManager::GetInstance().initialize();
+        if (auto* shaderService = currentRenderGraph->GetShaderService()) {
+            shaderService->Initialize();
+            rg::runtime::SetActiveShaderService(shaderService);
+        }
         if (auto* uploadService = currentRenderGraph->GetUploadService()) {
                 uploadService->Initialize();
             rg::runtime::SetActiveUploadService(uploadService);
@@ -853,6 +860,21 @@ void Renderer::Render() {
     }
 	m_context.globalPSOFlags = globalPSOFlags;
 
+    HostFrameData hostFrameData{};
+    hostFrameData.textureDescriptorHeap = m_context.textureDescriptorHeap;
+    hostFrameData.samplerDescriptorHeap = m_context.samplerDescriptorHeap;
+    hostFrameData.renderResolution = m_context.renderResolution;
+    hostFrameData.outputResolution = m_context.outputResolution;
+    hostFrameData.userFrameData = &m_context;
+
+    PassExecutionContext passExecutionContext{};
+    passExecutionContext.device = m_context.device;
+    passExecutionContext.commandQueue = m_context.commandQueue;
+    passExecutionContext.frameIndex = m_context.frameIndex;
+    passExecutionContext.frameFenceValue = m_context.frameFenceValue;
+    passExecutionContext.deltaTime = m_context.deltaTime;
+    passExecutionContext.hostFrameData = &hostFrameData;
+
     // TODO: Incorporate this into the render graph
     // Indicate that the back buffer will be used as a render target
 	rhi::TextureBarrier rtvBarrier = {};
@@ -875,7 +897,7 @@ void Renderer::Render() {
     auto graphicsQueue = deviceManager.GetGraphicsQueue();
     graphicsQueue.Submit({ &commandList.Get() });
 
-	currentRenderGraph->Execute(m_context); // Main render graph execution
+    currentRenderGraph->Execute(passExecutionContext); // Main render graph execution
 	
 	commandList->Recycle(commandAllocator.Get());
 
@@ -962,6 +984,9 @@ void Renderer::Cleanup() {
 	StallPipeline();
 	spdlog::info("Cleaning up resources");
     if (currentRenderGraph) {
+        if (auto* shaderService = currentRenderGraph->GetShaderService()) {
+            shaderService->Cleanup();
+        }
         if (auto* uploadService = currentRenderGraph->GetUploadService()) {
             uploadService->Cleanup();
         }
@@ -972,6 +997,7 @@ void Renderer::Cleanup() {
     ResourceManager::GetInstance().Cleanup();
     m_coreResourceProvider.Cleanup();
     currentRenderGraph.reset();
+    rg::runtime::SetActiveShaderService(nullptr);
     rg::runtime::SetActiveUploadService(nullptr);
     m_renderGraphRuntimeInitialized = false;
     m_currentEnvironment.reset();
