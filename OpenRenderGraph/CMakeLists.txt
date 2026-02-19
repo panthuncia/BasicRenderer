@@ -2,33 +2,35 @@ cmake_minimum_required(VERSION 3.16)
 
 project(OpenRenderGraph LANGUAGES CXX)
 
+option(ORG_STRICT_HEADERS "Disallow OpenRenderGraph from including BasicRenderer headers" ON)
+
 find_package(spdlog CONFIG REQUIRED)
 find_package(flecs CONFIG REQUIRED)
 find_package(Boost REQUIRED COMPONENTS container_hash)
 find_package(directxtex CONFIG REQUIRED)
 
 add_library(OpenRenderGraph STATIC
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/DescriptorHeap.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/CommandListPool.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/ImmediateExecution/ImmediateCommandList.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/MemoryMetadataAdapter.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/MemoryIntrospectionAPI.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/MemoryIntrospectionBackend.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/Runtime/DefaultStatisticsService.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/Runtime/DefaultUploadService.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/Runtime/DefaultReadbackService.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/Runtime/DefaultRenderGraphSettingsService.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/PassBuilders.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/RenderGraph/RenderGraph.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/RenderGraph/Aliasing/RenderGraphAliasingSubsystem.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Render/RenderGraph/Aliasing/RenderGraphAliasingAlgorithms.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Managers/CommandRecordingManager.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Managers/Singletons/DeviceManager.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Managers/Singletons/ResourceManager.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Managers/Singletons/UploadManager.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Managers/Singletons/ReadbackManager.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Managers/Singletons/StatisticsManager.cpp"
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/src/Resources/ResourceStateTracker.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/DescriptorHeap.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/CommandListPool.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/ImmediateExecution/ImmediateCommandList.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/MemoryMetadataAdapter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/MemoryIntrospectionAPI.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/MemoryIntrospectionBackend.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/Runtime/DefaultStatisticsService.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/Runtime/DefaultUploadService.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/Runtime/DefaultReadbackService.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/Runtime/DefaultRenderGraphSettingsService.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/PassBuilders.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/RenderGraph/RenderGraph.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/RenderGraph/Aliasing/RenderGraphAliasingSubsystem.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/RenderGraph/Aliasing/RenderGraphAliasingAlgorithms.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Managers/CommandRecordingManager.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Managers/Singletons/DeviceManager.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Managers/Singletons/ResourceManager.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Managers/Singletons/UploadManager.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Managers/Singletons/ReadbackManager.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Managers/Singletons/StatisticsManager.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Resources/ResourceStateTracker.cpp"
 )
 
 set_target_properties(OpenRenderGraph PROPERTIES
@@ -38,9 +40,16 @@ set_target_properties(OpenRenderGraph PROPERTIES
 
 target_include_directories(OpenRenderGraph
     PUBLIC
-    "${CMAKE_SOURCE_DIR}/OpenRenderGraph/include"
-        "${CMAKE_SOURCE_DIR}/BasicRenderer/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
+
+if (NOT ORG_STRICT_HEADERS)
+    target_include_directories(OpenRenderGraph
+        PUBLIC
+            "${CMAKE_SOURCE_DIR}/BasicRenderer/include"
+    )
+    message(WARNING "OpenRenderGraph: ORG_STRICT_HEADERS=OFF enables temporary BasicRenderer header access.")
+endif()
 
 target_link_libraries(OpenRenderGraph
     PUBLIC
