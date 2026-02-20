@@ -8,6 +8,7 @@
 #include <math.h>
 #include <atlbase.h>
 #include <filesystem>
+#include <typeindex>
 
 #include <rhi_interop_dx12.h>
 #include <tracy/Tracy.hpp>
@@ -166,6 +167,8 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
 		readbackService->Initialize(m_readbackFence.Get());
         }
+    m_pReadbackManager = std::make_unique<br::ReadbackManager>();
+    m_pReadbackManager->Initialize(m_readbackFence.Get());
         if (auto* statisticsService = currentRenderGraph->GetStatisticsService()) {
 		statisticsService->Initialize();
         }
@@ -183,13 +186,11 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	m_pViewManager = ViewManager::CreateUnique();
 	m_pEnvironmentManager = EnvironmentManager::CreateUnique();
     m_pEnvironmentManager->SetRequestReadbackFn([this](std::shared_ptr<PixelBuffer> texture, std::wstring outputFile, std::function<void()> callback, bool cubemap) {
-        if (!currentRenderGraph) {
+        if (!m_pReadbackManager) {
             return;
         }
 
-        if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
-            readbackService->RequestReadback(std::move(texture), std::move(outputFile), std::move(callback), cubemap);
-        }
+        m_pReadbackManager->RequestReadback(std::move(texture), std::move(outputFile), std::move(callback), cubemap);
     });
 	m_pMaterialManager = MaterialManager::CreateUnique();
 	//ResourceManager::GetInstance().SetEnvironmentBufferDescriptorIndex(m_pEnvironmentManager->GetEnvironmentBufferSRVDescriptorIndex());
@@ -784,20 +785,38 @@ void Renderer::Update(float elapsedSeconds) {
     const Components::DrawStats& drawStats = world.get<Components::DrawStats>();
     auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
     auto outputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
-    UpdateContext context(drawStats,
-        m_pObjectManager.get(),
-        m_pMeshManager.get(),
-        m_pIndirectCommandBufferManager.get(),
-        m_pViewManager.get(),
-        m_pLightManager.get(),
-        m_pEnvironmentManager.get(),
-        m_pMaterialManager.get(),
-        currentScene.get(), 
-        m_frameIndex,
-        m_currentFrameFenceValue, 
-        renderRes, 
-        outputRes, 
-        elapsedSeconds);
+    RendererUpdateData updateData{};
+    updateData.drawStats = drawStats;
+    updateData.objectManager = m_pObjectManager.get();
+    updateData.meshManager = m_pMeshManager.get();
+    updateData.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
+    updateData.viewManager = m_pViewManager.get();
+    updateData.lightManager = m_pLightManager.get();
+    updateData.environmentManager = m_pEnvironmentManager.get();
+    updateData.materialManager = m_pMaterialManager.get();
+    updateData.currentScene = currentScene.get();
+    updateData.frameIndex = m_frameIndex;
+    updateData.frameFenceValue = m_currentFrameFenceValue;
+    updateData.renderResolution = renderRes;
+    updateData.outputResolution = outputRes;
+    updateData.deltaTime = elapsedSeconds;
+
+    struct RendererUpdateHostData : IHostExecutionData {
+        const RendererUpdateData* data = nullptr;
+
+        const void* TryGet(std::type_index t) const noexcept override {
+            if (t == std::type_index(typeid(RendererUpdateData))) {
+                return data;
+            }
+            return nullptr;
+        }
+    } updateHostData{ &updateData };
+
+    UpdateExecutionContext context{};
+    context.frameIndex = m_frameIndex;
+    context.frameFenceValue = m_currentFrameFenceValue;
+    context.deltaTime = elapsedSeconds;
+    context.hostData = &updateHostData;
 
 	currentRenderGraph->Update(context, deviceManager.GetDevice());
 
@@ -860,12 +879,30 @@ void Renderer::Render() {
     }
 	m_context.globalPSOFlags = globalPSOFlags;
 
-    HostFrameData hostFrameData{};
+    struct RendererHostFrameData : IHostExecutionData {
+        rhi::DescriptorHeap textureDescriptorHeap;
+        rhi::DescriptorHeap samplerDescriptorHeap;
+        DirectX::XMUINT2 renderResolution{};
+        DirectX::XMUINT2 outputResolution{};
+        const RenderContext* renderContext = nullptr;
+
+        const void* TryGet(std::type_index t) const noexcept override {
+            if (t == std::type_index(typeid(RenderContext))) {
+                return renderContext;
+            }
+            if (t == std::type_index(typeid(RendererHostFrameData))) {
+                return this;
+            }
+            return nullptr;
+        }
+    };
+
+    RendererHostFrameData hostFrameData{};
     hostFrameData.textureDescriptorHeap = m_context.textureDescriptorHeap;
     hostFrameData.samplerDescriptorHeap = m_context.samplerDescriptorHeap;
     hostFrameData.renderResolution = m_context.renderResolution;
     hostFrameData.outputResolution = m_context.outputResolution;
-    hostFrameData.userFrameData = &m_context;
+    hostFrameData.renderContext = &m_context;
 
     PassExecutionContext passExecutionContext{};
     passExecutionContext.device = m_context.device;
@@ -873,7 +910,7 @@ void Renderer::Render() {
     passExecutionContext.frameIndex = m_context.frameIndex;
     passExecutionContext.frameFenceValue = m_context.frameFenceValue;
     passExecutionContext.deltaTime = m_context.deltaTime;
-    passExecutionContext.hostFrameData = &hostFrameData;
+    passExecutionContext.hostData = &hostFrameData;
 
     // TODO: Incorporate this into the render graph
     // Indicate that the back buffer will be used as a render target
@@ -931,8 +968,11 @@ void Renderer::Render() {
 
     if (currentRenderGraph) {
         if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
-            readbackService->ProcessReadbackRequests(); // Save images to disk if requested
+            readbackService->ProcessReadbackRequests(); // Process readback captures
         }
+    }
+    if (m_pReadbackManager) {
+        m_pReadbackManager->ProcessReadbackRequests(); // Save images to disk if requested
     }
 
     DeletionManager::GetInstance().ProcessDeletions();
@@ -994,6 +1034,9 @@ void Renderer::Cleanup() {
             readbackService->Cleanup();
         }
     }
+    if (m_pReadbackManager) {
+        m_pReadbackManager->Cleanup();
+    }
     ResourceManager::GetInstance().Cleanup();
     m_coreResourceProvider.Cleanup();
     currentRenderGraph.reset();
@@ -1010,6 +1053,7 @@ void Renderer::Cleanup() {
     m_pMaterialManager.reset();
     m_pEnvironmentManager.reset();
 	m_pSkeletonManager.reset();
+    m_pReadbackManager.reset();
     m_pTextureFactory.reset();
     m_hierarchySystem.destruct();
     m_settingsSubscriptions.clear();
@@ -1174,7 +1218,7 @@ void Renderer::CreateRenderGraph() {
         currentRenderGraph->RegisterExtension(std::make_unique<RenderGraphIOExtension>(
             m_managerInterface.GetTextureFactory(),
             currentRenderGraph->GetUploadService(),
-            currentRenderGraph->GetReadbackService()));
+            m_pReadbackManager.get()));
         currentRenderGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>(
             currentRenderGraph->GetReadbackService()));
         currentRenderGraph->RegisterExtension(std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint64_t>(pow(2, 25))));

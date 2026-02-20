@@ -3,8 +3,8 @@
 #include "Render/RenderGraph/RenderGraph.h"
 
 #include "Factories/TextureFactory.h"
+#include "Managers/ReadbackManager.h"
 #include "Render/Runtime/IUploadService.h"
-#include "Render/Runtime/IReadbackService.h"
 
 // Registers "system" passes that live outside the RenderGraph, while keeping the graph
 // unaware of the managers/factories that own them.
@@ -18,10 +18,10 @@ class RenderGraphIOExtension final : public RenderGraph::IRenderGraphExtension {
 public:
 	RenderGraphIOExtension(TextureFactory* textureFactory,
 		rg::runtime::IUploadService* uploadService,
-		rg::runtime::IReadbackService* readbackService)
+		br::ReadbackManager* readbackManager)
 		: m_textureFactory(textureFactory),
 		m_uploadService(uploadService),
-		m_readbackService(readbackService) {
+		m_readbackManager(readbackManager) {
 	}
 
 	void OnRegistryReset(ResourceRegistry* reg) override {
@@ -58,8 +58,8 @@ public:
 		}
 
 		// Readback pass: last
-		if (m_readbackService) {
-			if (auto rb = m_readbackService->GetReadbackPass()) {
+		if (m_readbackManager) {
+			if (auto rb = m_readbackManager->GetReadbackPass()) {
 				RenderGraph::ExternalPassDesc d;
 				d.type = RenderGraph::PassType::Render;
 				d.name = "Builtin::Readbacks";
@@ -73,5 +73,5 @@ public:
 private:
 	TextureFactory* m_textureFactory = nullptr; // non-owning
 	rg::runtime::IUploadService* m_uploadService = nullptr; // non-owning
-	rg::runtime::IReadbackService* m_readbackService = nullptr; // non-owning
+	br::ReadbackManager* m_readbackManager = nullptr; // non-owning
 };

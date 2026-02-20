@@ -5,7 +5,6 @@
 
 #include "Resources/TextureDescription.h"
 #include "Managers/Singletons/DeletionManager.h"
-using Microsoft::WRL::ComPtr;
 
 struct TextureAliasPlacement {
 	rhi::ma::Allocation* allocation = nullptr;

@@ -7,7 +7,6 @@ option(ORG_STRICT_HEADERS "Disallow OpenRenderGraph from including BasicRenderer
 find_package(spdlog CONFIG REQUIRED)
 find_package(flecs CONFIG REQUIRED)
 find_package(Boost REQUIRED COMPONENTS container_hash)
-find_package(directxtex CONFIG REQUIRED)
 
 add_library(OpenRenderGraph STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/DescriptorHeap.cpp"
@@ -27,7 +26,7 @@ add_library(OpenRenderGraph STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/RenderGraph/Aliasing/RenderGraphAliasingAlgorithms.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Managers/CommandRecordingManager.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Managers/Singletons/DeviceManager.cpp"
-    "../BasicRenderer/src/Managers/Singletons/ResourceManager.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Managers/Singletons/DescriptorHeapManager.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Managers/Singletons/UploadManager.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Managers/Singletons/ReadbackManager.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Managers/Singletons/StatisticsManager.cpp"
@@ -59,7 +58,6 @@ target_link_libraries(OpenRenderGraph
         Boost::container_hash
     PRIVATE
         spdlog::spdlog_header_only
-        Microsoft::DirectXTex
 )
 
 target_compile_definitions(OpenRenderGraph

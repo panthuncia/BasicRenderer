@@ -10,7 +10,7 @@
 #include "Resources/ResourceIdentifier.h"
 #include "Interfaces/IResourceResolver.h"
 #include "Interfaces/IPassBuilder.h"
-#include "Resources/Resolvers/ECSResourceResolver.h"
+#include "Interfaces/IResourceResolver.h"
 
 // Tag for a contiguous mip-range [first..first+count)
 struct Mip {

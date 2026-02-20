@@ -29,6 +29,7 @@
 #include "Managers/EnvironmentManager.h"
 #include "Managers/MaterialManager.h"
 #include "Managers/SkeletonManager.h"
+#include "Managers/ReadbackManager.h"
 #include "Factories/TextureFactory.h"
 #include "Scene/MovementState.h"
 #include "../generated/BuiltinResources.h"
@@ -125,6 +126,7 @@ private:
 	std::unique_ptr<EnvironmentManager> m_pEnvironmentManager = nullptr;
 	std::unique_ptr<MaterialManager> m_pMaterialManager = nullptr;
 	std::unique_ptr<SkeletonManager> m_pSkeletonManager = nullptr;
+    std::unique_ptr<br::ReadbackManager> m_pReadbackManager = nullptr;
     std::unique_ptr<TextureFactory> m_pTextureFactory = nullptr;
 
 	ManagerInterface m_managerInterface;

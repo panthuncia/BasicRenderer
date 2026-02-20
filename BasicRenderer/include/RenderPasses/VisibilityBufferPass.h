@@ -1,296 +1,603 @@
 #pragma once
 
+
+
 #include <unordered_map>
 
+
+
 #include "RenderPasses/Base/RenderPass.h"
+
 #include "Managers/Singletons/PSOManager.h"
+
 #include "Render/RenderContext.h"
+
 #include "Mesh/Mesh.h"
+
 #include "Scene/Scene.h"
+
 #include "Materials/Material.h"
+
 #include "Managers/Singletons/CommandSignatureManager.h"
+
 #include "Managers/MeshManager.h"
+
 #include "Managers/Singletons/ECSManager.h"
+
 #include "Mesh/MeshInstance.h"
+
 #include "Managers/LightManager.h"
 
+
+
 // Old pass, ignore
+
 //TODO: remove
+
 struct VisibilityBufferPassInputs {
+
     bool wireframe;
+
     bool meshShaders;
+
     bool indirect;
+
     bool clearGbuffer;
 
+
+
     friend bool operator==(const VisibilityBufferPassInputs&, const VisibilityBufferPassInputs&) = default;
+
 };
 
+
+
 inline rg::Hash64 HashValue(const VisibilityBufferPassInputs& i) {
+
     std::size_t seed = 0;
 
+
+
     boost::hash_combine(seed, i.wireframe);
+
     boost::hash_combine(seed, i.meshShaders);
+
     boost::hash_combine(seed, i.indirect);
+
     boost::hash_combine(seed, i.clearGbuffer);
+
     return seed;
+
 }
 
+
+
 class VisibilityBufferPass : public RenderPass {
+
 public:
+
     VisibilityBufferPass() {
+
         auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+
         m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
+
             .with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::GBufferPass))
+
             .cached().cache_kind(flecs::QueryCacheAll).build();
+
     }
+
+
 
     ~VisibilityBufferPass() {
+
     }
+
+
 
     void DeclareResourceUsages(RenderPassBuilder* builder) {
+
 		auto input = Inputs<VisibilityBufferPassInputs>();
+
 		m_wireframe = input.wireframe;
+
 		m_meshShaders = input.meshShaders;
+
 		m_indirect = input.indirect;
+
 		m_clearGbuffer = input.clearGbuffer;
 
+
+
         builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
+
             //Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer,
+
             Builtin::PerObjectBuffer,
+
             Builtin::NormalMatrixBuffer,
+
             Builtin::PerMeshBuffer,
+
             Builtin::PerMeshInstanceBuffer,
+
             Builtin::PerMaterialDataBuffer,
+
             Builtin::PostSkinningVertices,
+
             Builtin::CameraBuffer)
+
             .WithRenderTarget(
+
                 Subresources(Builtin::PrimaryCamera::LinearDepthMap, Mip{ 0, 1 })
+
             )
+
             .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
+
             .IsGeometryPass();
+
             builder->WithRenderTarget(
+
                 Builtin::PrimaryCamera::VisibilityTexture);
 
+
+
         if (m_meshShaders) {
+
             //builder->WithShaderResource(Builtin::PerMeshBuffer, Builtin::PrimaryCamera::MeshletBitfield);
+
             if (m_indirect) {
+
                 auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+
                 flecs::query<> indirectQuery = ecsWorld.query_builder<>()
+
                     .with<Components::IsIndirectArguments>()
+
                     .with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::GBufferPass)) // Query for command lists that participate in this pass
+
                     //.cached().cache_kind(flecs::QueryCacheAll)
+
                     .build();
+
                 builder->WithIndirectArguments(ECSResourceResolver(indirectQuery));
+
             }
+
         }
+
     }
+
+
 
     void Setup() override {
 
+
+
         m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
+
 		m_pVisibilityBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::VisibilityTexture);
 
-        if (m_meshShaders) {
-            //m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
-        }
+
 
         if (m_meshShaders) {
-            RegisterSRV(Builtin::MeshResources::MeshletOffsets);
-            RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
-            RegisterSRV(Builtin::MeshResources::MeshletTriangles);
+
+            //m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+
         }
+
+
+
+        if (m_meshShaders) {
+
+            RegisterSRV(Builtin::MeshResources::MeshletOffsets);
+
+            RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
+
+            RegisterSRV(Builtin::MeshResources::MeshletTriangles);
+
+        }
+
+
 
         RegisterSRV(Builtin::NormalMatrixBuffer);
+
         RegisterSRV(Builtin::PostSkinningVertices);
+
         RegisterSRV(Builtin::PerObjectBuffer);
+
         RegisterSRV(Builtin::CameraBuffer);
+
         RegisterSRV(Builtin::PerMeshInstanceBuffer);
+
         RegisterSRV(Builtin::PerMeshBuffer);
+
         RegisterSRV(Builtin::PerMaterialDataBuffer);
+
         //RegisterSRV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
+
     }
 
-    PassReturn Execute(RenderContext& context) override {
-        auto& commandList = context.commandList;
+
+
+    PassReturn Execute(PassExecutionContext& context) override {
+
+        auto* renderContext = context.hostData ? const_cast<RenderContext*>(context.hostData->Get<RenderContext>()) : nullptr;
+
+
+
+        if (!renderContext) { return {}; }
+
+
+
+        auto& contextRef = *renderContext;
+
+
+
+        auto& commandList = contextRef.commandList;
+
+
 
         BeginPass(context);
 
+
+
         SetupCommonState(context, commandList);
+
         SetCommonRootConstants(context, commandList);
 
 
+
+
+
         if (m_meshShaders) {
+
             if (m_indirect) {
+
                 // Indirect drawing
+
                 ExecuteMeshShaderIndirect(context, commandList);
+
             }
+
             else {
+
                 // Regular mesh shader drawing
+
                 ExecuteMeshShader(context, commandList);
+
             }
+
         }
+
         else {
+
             // Regular forward rendering
+
             ExecuteRegular(context, commandList);
+
         }
+
         return {};
+
     }
+
+
 
     void Cleanup() override {
+
     }
 
+
+
 private:
+
     void BeginPass(RenderContext& context) {
+
         // Build attachments
+
         rhi::PassBeginInfo p{};
+
         p.width = context.renderResolution.x;
+
         p.height = context.renderResolution.y;
+
         p.debugName = "GBuffer Pass";
 
+
+
         rhi::DepthAttachment da{};
+
         da.dsv = m_pPrimaryDepthBuffer->GetDSVInfo(0).slot;
+
         da.depthStore = rhi::StoreOp::Store;
 
+
+
         if (m_clearGbuffer) {
+
             da.depthLoad = rhi::LoadOp::Clear;
+
             da.clear.type = rhi::ClearValueType::DepthStencil;
+
             da.clear.format = rhi::Format::D32_Float;
+
             da.clear.depthStencil.depth = 1.0f;
+
             da.clear.depthStencil.stencil = 0;
+
         }
+
         else {
+
             da.depthLoad = rhi::LoadOp::Load;
+
         }
+
         p.depth = &da;
+
+
 
         std::vector<rhi::ColorAttachment> colors;
 
+
+
 		// visibility buffer
+
         {
+
             rhi::ColorAttachment ca{};
+
             ca.rtv = m_pVisibilityBuffer->GetRTVInfo(0).slot;
+
             ca.storeOp = rhi::StoreOp::Store;
+
 			ca.loadOp = rhi::LoadOp::Load; // Clearing is handled in a separate pass
+
             colors.push_back(ca);
+
         }
+
+
 
         p.colors = { colors.data(), (uint32_t)colors.size() };
 
+
+
         context.commandList.BeginPass(p);
+
     }
+
     // Common setup code that doesn't change between techniques
+
     void SetupCommonState(RenderContext& context, rhi::CommandList& commandList) {
+
+
 
         commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
+
+
         commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleList);
 
+
+
         // Root signature
+
         commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
+
     }
+
+
 
     void SetCommonRootConstants(RenderContext& context, rhi::CommandList& commandList) {
+
         if (m_indirect || m_meshShaders) {
+
             unsigned int misc[NumMiscUintRootConstants] = {};
+
             misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
+
             commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
+
         }
+
     }
+
+
 
     void ExecuteRegular(RenderContext& context, rhi::CommandList& commandList) {
+
         // Regular forward rendering using DrawIndexedInstanced
+
         auto& psoManager = PSOManager::GetInstance();
+
+
 
         // Opaque objects
+
         m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes opaqueMeshes) {
+
             auto& meshes = opaqueMeshes.meshesByPass[m_renderPhase.hash];
 
+
+
             commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
+
+
             for (auto& pMesh : meshes) {
+
                 auto& mesh = *pMesh->GetMesh();
+
                 auto& pso = psoManager.GetVisibilityBufferPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->Technique().compileFlags);
+
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
+
                 commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
+
+
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
+
                 perMeshIndices[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
+
                 perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
+
                 commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
+
+
 
                 commandList.SetIndexBuffer(mesh.GetIndexBufferView());
+
                 commandList.DrawIndexed(mesh.GetIndexCount(), 1, 0, 0, 0);
+
             }
+
             });
+
     }
 
+
+
     void ExecuteMeshShader(RenderContext& context, rhi::CommandList& commandList) {
+
         // Mesh shading path using DispatchMesh
+
         auto& psoManager = PSOManager::GetInstance();
 
+
+
         m_meshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes perPassMeshes) {
+
             auto& meshes = perPassMeshes.meshesByPass[m_renderPhase.hash];
+
+
 
             commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
+
+
             for (auto& pMesh : meshes) {
+
                 auto& mesh = *pMesh->GetMesh();
+
                 auto& pso = psoManager.GetVisibilityBufferMeshPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->Technique().compileFlags);
+
                 BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
+
                 commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
+
+
                 unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
+
                 perMeshIndices[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
+
                 perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
+
                 commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
 
+
+
                 // Mesh shaders use DispatchMesh
+
                 commandList.DispatchMesh(mesh.GetMeshletCount(), 1, 1);
+
             }
+
             });
+
     }
 
+
+
     void ExecuteMeshShaderIndirect(RenderContext& context, rhi::CommandList& commandList) {
+
         // Mesh shading with ExecuteIndirect
+
         auto& psoManager = PSOManager::GetInstance();
+
+
 
         auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
 
+
+
         // Opaque indirect draws
+
         auto workloads = context.indirectCommandBufferManager->GetBuffersForRenderPhase(
+
             context.currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID,
+
             m_renderPhase);
+
         for (auto& workload : workloads) {
 
+
+
             auto& pso = psoManager.GetVisibilityBufferMeshPSO(context.globalPSOFlags, workload.first, m_wireframe);
+
             BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
+
             commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
+
+
             auto apiResource = workload.second.buffer->GetAPIResource();
+
             commandList.ExecuteIndirect(
+
                 commandSignature.GetHandle(),
+
                 apiResource.GetHandle(),
+
                 0,
+
                 apiResource.GetHandle(),
+
                 workload.second.buffer->GetResource()->GetUAVCounterOffset(),
+
                 workload.second.count
+
             );
+
         }
+
+
 
     }
 
+
+
 private:
 
+
+
     flecs::query<Components::ObjectDrawInfo, Components::PerPassMeshes> m_meshInstancesQuery;
+
     bool m_wireframe;
+
     bool m_meshShaders;
+
     bool m_indirect;
+
     bool m_clearGbuffer = true;
 
+
+
     PixelBuffer* m_pPrimaryDepthBuffer;
+
     PixelBuffer* m_pVisibilityBuffer;
+
+
 
     DynamicGloballyIndexedResource* m_primaryCameraMeshletBitfield = nullptr;
 
+
+
     RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
+
 };

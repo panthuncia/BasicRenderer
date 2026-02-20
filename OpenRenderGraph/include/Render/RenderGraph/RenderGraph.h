@@ -229,7 +229,7 @@ public:
 	AutoAliasDebugSnapshot GetAutoAliasDebugSnapshot() const;
 	void AddRenderPass(std::shared_ptr<RenderPass> pass, RenderPassParameters& resources, std::string name = "");
 	void AddComputePass(std::shared_ptr<ComputePass> pass, ComputePassParameters& resources, std::string name = "");
-	void Update(const UpdateContext& context, rhi::Device device);
+	void Update(const UpdateExecutionContext& context, rhi::Device device);
 	void Execute(PassExecutionContext& context);
 	void CompileStructural();
 	void ResetForFrame();
@@ -254,7 +254,7 @@ public:
 	const rg::runtime::IShaderService* GetShaderService() const { return m_shaderService.get(); }
 	rg::runtime::IRenderGraphSettingsService* GetRenderGraphSettingsService() { return m_renderGraphSettingsService.get(); }
 	const rg::runtime::IRenderGraphSettingsService* GetRenderGraphSettingsService() const { return m_renderGraphSettingsService.get(); }
-	//void AllocateResources(RenderContext& context);
+	//void AllocateResources(PassExecutionContext& context);
 	//void CreateResource(std::wstring name);
 	std::shared_ptr<Resource> GetResourceByName(const std::string& name);
 	std::shared_ptr<Resource> GetResourceByID(const uint64_t id);
@@ -273,7 +273,7 @@ public:
 	ResourceRegistry::RegistryHandle RequestResourceHandle(ResourceIdentifier const& rid, bool allowFailure = false);
 	ResourceRegistry::RegistryHandle RequestResourceHandle(Resource* const& pResource, bool allowFailure = false);
 
-	void RegisterECSRenderPhaseEntities(const std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher>& phaseEntities);
+	//void RegisterECSRenderPhaseEntities(const std::unordered_map<RenderPhase, flecs::entity, RenderPhase::Hasher>& phaseEntities);
 
 	template<DerivedResource T>
 	std::shared_ptr<T> RequestResourcePtr(ResourceIdentifier const& rid, bool allowFailure = false) {

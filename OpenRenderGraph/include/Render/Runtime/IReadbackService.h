@@ -12,7 +12,6 @@
 
 class RenderPass;
 class Resource;
-class PixelBuffer;
 
 namespace rg::runtime {
 
@@ -32,9 +31,7 @@ public:
     virtual ~IReadbackService() = default;
 
     virtual void Initialize(rhi::Timeline readbackFence) = 0;
-    virtual void RequestReadback(std::shared_ptr<PixelBuffer> texture, std::wstring outputFile, std::function<void()> callback, bool cubemap) = 0;
     virtual void RequestReadbackCapture(const std::string& passName, Resource* resource, const RangeSpec& range, ReadbackCaptureCallback callback) = 0;
-    virtual std::shared_ptr<RenderPass> GetReadbackPass() const = 0;
     virtual std::vector<ReadbackCaptureInfo> ConsumeCaptureRequests() = 0;
     virtual ReadbackCaptureToken EnqueueCapture(ReadbackCaptureRequest&& request) = 0;
     virtual void FinalizeCapture(ReadbackCaptureToken token, uint64_t fenceValue) = 0;

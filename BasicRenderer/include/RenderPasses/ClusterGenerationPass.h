@@ -26,11 +26,15 @@ public:
 		RegisterUAV(Builtin::Light::ClusterBuffer);
 	}
 
-	PassReturn Execute(RenderContext& context) override {
-		auto& commandList = context.commandList;
+	PassReturn Execute(PassExecutionContext& context) override {
+		auto* renderContext = context.hostData ? const_cast<RenderContext*>(context.hostData->Get<RenderContext>()) : nullptr;
+		if (!renderContext) { return {}; }
+		auto& contextRef = *renderContext;
+
+		auto& commandList = contextRef.commandList;
 
 		// Set the descriptor heaps
-		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
+		commandList.SetDescriptorHeaps(contextRef.textureDescriptorHeap.GetHandle(), contextRef.samplerDescriptorHeap.GetHandle());
 
 		commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
 		commandList.BindPipeline(m_PSO.GetAPIPipelineState().GetHandle());

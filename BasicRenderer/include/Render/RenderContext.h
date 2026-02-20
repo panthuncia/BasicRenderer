@@ -42,54 +42,23 @@ struct RenderContext {
 	float deltaTime;
 };
 
-struct UpdateContext {
-	explicit UpdateContext(
-		Components::DrawStats drawStats,
-		ObjectManager* objectManager,
-		MeshManager* meshManager,
-		IndirectCommandBufferManager* indirectCommandBufferManager,
-		ViewManager* viewManager,
-		LightManager* lightManager,
-		EnvironmentManager* environmentManager,
-		MaterialManager* materialManager,
-		Scene* currentScene,
-		UINT frameIndex,
-		UINT64 frameFenceValue,
-		DirectX::XMUINT2 renderResolution,
-		DirectX::XMUINT2 outputResolution,
-		float deltaTime) : drawStats(drawStats),
-		objectManager(objectManager),
-		meshManager(meshManager),
-		indirectCommandBufferManager(indirectCommandBufferManager),
-		viewManager(viewManager),
-		lightManager(lightManager),
-		environmentManager(environmentManager),
-		materialManager(materialManager),
-		currentScene(currentScene),
-		frameIndex(frameIndex),
-		frameFenceValue(frameFenceValue),
-		renderResolution(renderResolution),
-		outputResolution(outputResolution),
-		deltaTime(deltaTime) {}
+struct RendererUpdateData {
 	Components::DrawStats drawStats;
-	ObjectManager* objectManager;
-	MeshManager* meshManager;
-	IndirectCommandBufferManager* indirectCommandBufferManager;
-	ViewManager* viewManager;
-	LightManager* lightManager;
-	EnvironmentManager* environmentManager;
-	MaterialManager* materialManager;
+	ObjectManager* objectManager = nullptr;
+	MeshManager* meshManager = nullptr;
+	IndirectCommandBufferManager* indirectCommandBufferManager = nullptr;
+	ViewManager* viewManager = nullptr;
+	LightManager* lightManager = nullptr;
+	EnvironmentManager* environmentManager = nullptr;
+	MaterialManager* materialManager = nullptr;
 
-	Scene* currentScene;
-	UINT frameIndex;
-	UINT64 frameFenceValue;
-	DirectX::XMUINT2 renderResolution;
-	DirectX::XMUINT2 outputResolution;
-	float deltaTime;
+	Scene* currentScene = nullptr;
+	UINT frameIndex = 0;
+	UINT64 frameFenceValue = 0;
+	DirectX::XMUINT2 renderResolution{};
+	DirectX::XMUINT2 outputResolution{};
+	float deltaTime = 0.0f;
 };
 
-struct ImmediateContext {
-	rhi::Device device;
-	rg::imm::ImmediateCommandList list;
-	uint8_t frameIndex;
-};
+using UpdateContext = UpdateExecutionContext;
+using ImmediateContext = ImmediateExecutionContext;

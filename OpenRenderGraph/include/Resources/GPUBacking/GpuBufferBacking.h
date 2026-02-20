@@ -13,8 +13,6 @@
 #include "Managers/Singletons/DeletionManager.h"
 #include "Resources/TrackedAllocation.h"
 
-struct RenderContext;
-
 struct BufferAliasPlacement {
 	rhi::ma::Allocation* allocation = nullptr;
 	uint64_t offset = 0;

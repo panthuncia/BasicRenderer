@@ -13,6 +13,14 @@ class PixelBuffer;
 class Sampler;
 struct RenderContext;
 
+enum class ImageFiletype {
+	UNKNOWN,
+	HDR,
+	DDS,
+	TGA,
+	WIC
+};
+
 struct TextureFileMeta {
 	std::string filePath;
 	ImageFiletype fileType = ImageFiletype::UNKNOWN;

@@ -11,16 +11,8 @@ public:
         ReadbackManager::GetInstance().Initialize(readbackFence);
     }
 
-    void RequestReadback(std::shared_ptr<PixelBuffer> texture, std::wstring outputFile, std::function<void()> callback, bool cubemap) override {
-        ReadbackManager::GetInstance().RequestReadback(std::move(texture), std::move(outputFile), std::move(callback), cubemap);
-    }
-
     void RequestReadbackCapture(const std::string& passName, Resource* resource, const RangeSpec& range, ReadbackCaptureCallback callback) override {
         ReadbackManager::GetInstance().RequestReadbackCapture(passName, resource, range, std::move(callback));
-    }
-
-    std::shared_ptr<RenderPass> GetReadbackPass() const override {
-        return ReadbackManager::GetInstance().GetReadbackPass();
     }
 
     std::vector<rg::runtime::ReadbackCaptureInfo> ConsumeCaptureRequests() override {

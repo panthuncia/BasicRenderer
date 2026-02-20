@@ -11,6 +11,7 @@
 #include "Render/ResourceRegistry.h"
 #include "RenderPasses/Base/RenderPass.h"
 #include "Resources/Buffers/Buffer.h"
+#include "Render/ImmediateExecution/ImmediateCommandList.h"
 
 class Buffer;
 class Resource;
@@ -157,12 +158,12 @@ private:
 
 		}
 
-		void ExecuteImmediate(ImmediateContext& context) override {
+		void ExecuteImmediate(ImmediateExecutionContext& context) override {
 			GetInstance().ExecuteResourceCopies(context.frameIndex, context.list);// copies come before uploads to avoid overwriting data
 			GetInstance().ProcessUploads(context.frameIndex, context.list);
 		}
 
-		PassReturn Execute(RenderContext& context) override {
+		PassReturn Execute(PassExecutionContext& context) override {
 			return {};
 		}
 

@@ -11,7 +11,6 @@
 
 #include "Resources/ResourceStateTracker.h"
 
-struct RenderContext;
 class SymbolicTracker;
 
 class Resource : public std::enable_shared_from_this<Resource> {

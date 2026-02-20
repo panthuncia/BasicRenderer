@@ -1,6 +1,6 @@
 #pragma once
 #include <memory>
-#include "Managers/Singletons/ResourceManager.h"
+#include "Managers/Singletons/DescriptorHeapManager.h"
 
 namespace rhi {
 
@@ -156,7 +156,7 @@ private:
     rhi::SamplerDesc m_samplerDesc; // Descriptor of the sampler
     Sampler(rhi::SamplerDesc samplerDesc)
         : m_index(0), m_samplerDesc(samplerDesc) {
-        m_index = ResourceManager::GetInstance().CreateIndexedSampler(m_samplerDesc);
+        m_index = DescriptorHeapManager::GetInstance().CreateIndexedSampler(m_samplerDesc);
     }
 
     static std::shared_ptr<Sampler> m_defaultSampler;

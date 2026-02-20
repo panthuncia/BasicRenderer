@@ -6,7 +6,7 @@
 #include <spdlog/spdlog.h>
 
 #include "Managers/Singletons/DeviceManager.h"
-#include "Managers/Singletons/SettingsManager.h"
+#include "Render/Runtime/OpenRenderGraphSettings.h"
 
 StatisticsManager& StatisticsManager::GetInstance() {
     static StatisticsManager inst;
@@ -14,12 +14,12 @@ StatisticsManager& StatisticsManager::GetInstance() {
 }
 
 void StatisticsManager::Initialize() {
-    m_numFramesInFlight = SettingsManager::GetInstance()
-        .getSettingGetter<uint8_t>("numFramesInFlight")();
+    m_numFramesInFlight = rg::runtime::GetOpenRenderGraphSettings().numFramesInFlight;
 	auto device = DeviceManager::GetInstance().GetDevice();
 	m_gpuTimestampFreq = device.GetTimestampCalibration(rhi::QueueKind::Graphics).ticksPerSecond;
-	m_getCollectPipelineStatistics =
-		SettingsManager::GetInstance().getSettingGetter<bool>("collectPipelineStatistics");
+    m_getCollectPipelineStatistics = []() {
+        return rg::runtime::GetOpenRenderGraphSettings().collectPipelineStatistics;
+    };
 }
 
 void StatisticsManager::RegisterPasses(const std::vector<std::string>& passNames) {

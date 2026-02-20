@@ -1,96 +1,204 @@
 #pragma once
 
+
+
 #include "RenderPasses/Base/ComputePass.h"
+
 #include "Managers/Singletons/ResourceManager.h"
+
 #include "Managers/Singletons/PSOManager.h"
+
 #include "Render/RenderContext.h"
+
 #include "Resources/PixelBuffer.h"
 
+
+
 class GTAOFilterPass : public ComputePass {
+
 public:
+
     GTAOFilterPass() {
+
         CreatePointClampSampler();
+
         CreateXeGTAOComputePSO();
+
     }
+
+
 
     void Setup() override {
+
         RegisterCBV("Builtin::GTAO::ConstantsBuffer");
+
     }
+
+
 
     void DeclareResourceUsages(ComputePassBuilder* builder){
+
         builder->WithShaderResource(Builtin::GBuffer::Normals, Builtin::PrimaryCamera::LinearDepthMap)
+
             .WithUnorderedAccess(Builtin::GTAO::WorkingDepths)
+
             .WithConstantBuffer("Builtin::GTAO::ConstantsBuffer");
+
     }
 
-    PassReturn Execute(RenderContext& context) override {
+
+
+    PassReturn Execute(PassExecutionContext& context) override {
+
+        auto* renderContext = context.hostData ? const_cast<RenderContext*>(context.hostData->Get<RenderContext>()) : nullptr;
+
+
+
+        if (!renderContext) { return {}; }
+
+
+
+        auto& contextRef = *renderContext;
+
+
+
         auto& psoManager = PSOManager::GetInstance();
-        auto& commandList = context.commandList;
+
+        auto& commandList = contextRef.commandList;
+
         auto depthTexture = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PrimaryCamera::LinearDepthMap);
+
         auto workingDepths = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GTAO::WorkingDepths);
 
-		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
+
+
+		commandList.SetDescriptorHeaps(contextRef.textureDescriptorHeap.GetHandle(), contextRef.samplerDescriptorHeap.GetHandle());
+
+
 
 		// Set the compute pipeline state
+
 		commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
+
 		commandList.BindPipeline(PrefilterDepths16x16PSO.GetAPIPipelineState().GetHandle());
+
+
 
         BindResourceDescriptorIndices(commandList, PrefilterDepths16x16PSO.GetResourceDescriptorSlots());
 
+
+
         unsigned int passConstants[NumMiscUintRootConstants] = {};
+
         passConstants[UintRootConstant0] = m_samplerIndex;
+
         passConstants[UintRootConstant1] = depthTexture->GetSRVInfo(0).slot.index;
+
         passConstants[UintRootConstant2] = workingDepths->GetUAVShaderVisibleInfo(0).slot.index;
+
         passConstants[UintRootConstant3] = workingDepths->GetUAVShaderVisibleInfo(1).slot.index;
+
         passConstants[UintRootConstant4] = workingDepths->GetUAVShaderVisibleInfo(2).slot.index;
+
         passConstants[UintRootConstant5] = workingDepths->GetUAVShaderVisibleInfo(3).slot.index;
+
         passConstants[UintRootConstant6] = workingDepths->GetUAVShaderVisibleInfo(4).slot.index;
+
+
 
         commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, passConstants);
 
+
+
         // Dispatch
+
         // note: in CSPrefilterDepths16x16 each is thread group handles a 16x16 block (with [numthreads(8, 8, 1)] and each logical thread handling a 2x2 block)
-		unsigned int x = (context.renderResolution.x + 16 - 1) / 16;
-		unsigned int y = (context.renderResolution.y + 16 - 1) / 16;
+
+		unsigned int x = (contextRef.renderResolution.x + 16 - 1) / 16;
+
+		unsigned int y = (contextRef.renderResolution.y + 16 - 1) / 16;
+
 		commandList.Dispatch(x, y, 1);
 
+
+
         return {};
+
     }
 
+
+
     void Cleanup() override {
+
         // Cleanup if necessary
+
     }
+
+
 
 private:
 
+
+
     PipelineState PrefilterDepths16x16PSO;
+
     uint32_t m_samplerIndex = 0;
 
+
+
     void CreatePointClampSampler()
+
     {
+
         rhi::SamplerDesc samplerDesc;
+
         samplerDesc.minFilter = rhi::Filter::Nearest;
+
         samplerDesc.magFilter = rhi::Filter::Nearest;
+
         samplerDesc.mipFilter = rhi::MipFilter::Nearest;
+
         samplerDesc.addressU = rhi::AddressMode::Clamp;
+
         samplerDesc.addressV = rhi::AddressMode::Clamp;
+
         samplerDesc.addressW = rhi::AddressMode::Clamp;
+
         samplerDesc.mipLodBias = 0.0f;
+
         samplerDesc.maxAnisotropy = 1;
+
         samplerDesc.compareEnable = false;
+
         samplerDesc.borderPreset = rhi::BorderPreset::TransparentBlack;
+
         samplerDesc.minLod = 0.0f;
+
         samplerDesc.maxLod = 0.0f;
+
         m_samplerIndex = ResourceManager::GetInstance().CreateIndexedSampler(samplerDesc);
+
     }
 
+
+
     void CreateXeGTAOComputePSO()
+
     {
+
         auto& psoManager = PSOManager::GetInstance();
+
         PrefilterDepths16x16PSO = psoManager.MakeComputePipeline(
+
             psoManager.GetRootSignature().GetHandle(),
+
             L"shaders/GTAO.hlsl",
+
             L"CSPrefilterDepths16x16"
+
 		);
+
     }
+
 };
+

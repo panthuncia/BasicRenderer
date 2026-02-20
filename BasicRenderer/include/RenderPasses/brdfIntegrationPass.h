@@ -18,10 +18,14 @@ public:
 		m_lutTexture = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::BRDFLUT);
     }
 
-    PassReturn Execute(RenderContext& context) override {
-        auto& commandList = context.commandList;
+    PassReturn Execute(PassExecutionContext& context) override {
+        auto* renderContext = context.hostData ? const_cast<RenderContext*>(context.hostData->Get<RenderContext>()) : nullptr;
+        if (!renderContext) { return {}; }
+        auto& contextRef = *renderContext;
+
+        auto& commandList = contextRef.commandList;
         
-		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
+		commandList.SetDescriptorHeaps(contextRef.textureDescriptorHeap.GetHandle(), contextRef.samplerDescriptorHeap.GetHandle());
 
 		rhi::PassBeginInfo passInfo{};
 		rhi::ColorAttachment colorAttachment{};

@@ -8,8 +8,9 @@
 #include "Resources/TextureDescription.h"
 #include "Resources/GPUBacking/GPUTextureBacking.h"
 #include "Resources/MemoryStatisticsComponents.h"
-#include "Managers/Singletons/ResourceManager.h"
+#include "Managers/Singletons/DescriptorHeapManager.h"
 #include "Interfaces/IHasMemoryMetadata.h"
+#include "Utilities/Utilities.h"
 
 class PixelBuffer : public GloballyIndexedResource, public IHasMemoryMetadata {
 public:
@@ -160,8 +161,8 @@ public:
 		m_mipLevels = m_backing->GetMipLevels();
 		m_arraySize = m_backing->GetArraySize();
 
-        auto& rm = ResourceManager::GetInstance();
-        ResourceManager::ViewRequirements views;
+        auto& rm = DescriptorHeapManager::GetInstance();
+        DescriptorHeapManager::ViewRequirements views;
         views.views = BuildTextureViewRequirements(m_desc, m_mipLevels, m_arraySize);
         auto res = m_backing->GetAPIResource();
         rm.UpdateDescriptorContents(*this, res, views);
@@ -189,7 +190,7 @@ public:
             return;
         }
 
-        auto& rm = ResourceManager::GetInstance();
+        auto& rm = DescriptorHeapManager::GetInstance();
         const uint16_t mipLevels = m_desc.generateMipMaps
             ? CalculateMipLevels(m_desc.imageDimensions[0].width, m_desc.imageDimensions[0].height)
             : 1;
@@ -197,18 +198,18 @@ public:
             ? 6u * m_desc.arraySize
             : (m_desc.isArray ? m_desc.arraySize : 1u);
 
-        ResourceManager::ViewRequirements views;
+        DescriptorHeapManager::ViewRequirements views;
         views.views = BuildTextureViewRequirements(m_desc, mipLevels, arraySize);
         rm.ReserveDescriptorSlots(*this, views);
     }
 
 private:
-    static ResourceManager::ViewRequirements::TextureViews BuildTextureViewRequirements(
+    static DescriptorHeapManager::ViewRequirements::TextureViews BuildTextureViewRequirements(
         const TextureDescription& desc,
         uint32_t mipLevels,
         uint32_t totalArraySlices)
     {
-        ResourceManager::ViewRequirements::TextureViews texViews;
+        DescriptorHeapManager::ViewRequirements::TextureViews texViews;
         texViews.mipLevels = mipLevels;
         texViews.isCubemap = desc.isCubemap;
         texViews.isArray = desc.isArray;

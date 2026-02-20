@@ -31,12 +31,16 @@ public:
 		m_depthTexture = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PrimaryCamera::DepthTexture);
 	}
 
-	PassReturn Execute(RenderContext& context) override {
-		auto& psoManager = PSOManager::GetInstance();
-		auto& commandList = context.commandList;
+	PassReturn Execute(PassExecutionContext& context) override {
+		auto* renderContext = context.hostData ? const_cast<RenderContext*>(context.hostData->Get<RenderContext>()) : nullptr;
+		if (!renderContext) { return {}; }
+		auto& contextRef = *renderContext;
 
-		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(),
-			context.samplerDescriptorHeap.GetHandle());
+		auto& psoManager = PSOManager::GetInstance();
+		auto& commandList = contextRef.commandList;
+
+		commandList.SetDescriptorHeaps(contextRef.textureDescriptorHeap.GetHandle(),
+			contextRef.samplerDescriptorHeap.GetHandle());
 
 		rhi::UavClearInfo clearInfo{};
 		clearInfo.cpuVisible = m_visibilityBuffer->GetUAVNonShaderVisibleInfo(0).slot;

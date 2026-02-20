@@ -5,8 +5,7 @@
 #include <stdexcept>
 
 
-#include "Render/RenderContext.h"
-#include "Managers/Singletons/ResourceManager.h"
+#include "Managers/Singletons/DescriptorHeapManager.h"
 #include "Resources/GloballyIndexedResource.h"
 #include "Resources/GPUBacking/GpuBufferBacking.h"
 
@@ -174,8 +173,8 @@ public:
             return;
         }
 
-        ResourceManager::ViewRequirements req{};
-        ResourceManager::ViewRequirements::BufferViews views{};
+        DescriptorHeapManager::ViewRequirements req{};
+        DescriptorHeapManager::ViewRequirements::BufferViews views{};
 
         views.createCBV = m_descriptorRequirements->createCBV;
         views.createSRV = m_descriptorRequirements->createSRV;
@@ -187,7 +186,7 @@ public:
         views.uavCounterOffset = m_descriptorRequirements->uavCounterOffset;
 
         req.views = views;
-        ResourceManager::GetInstance().ReserveDescriptorSlots(*this, req);
+        DescriptorHeapManager::GetInstance().ReserveDescriptorSlots(*this, req);
     }
 
     void RefreshDescriptorContents() {
@@ -197,8 +196,8 @@ public:
 
         EnsureVirtualDescriptorSlotsAllocated();
 
-        ResourceManager::ViewRequirements req{};
-        ResourceManager::ViewRequirements::BufferViews views{};
+        DescriptorHeapManager::ViewRequirements req{};
+        DescriptorHeapManager::ViewRequirements::BufferViews views{};
 
         views.createCBV = m_descriptorRequirements->createCBV;
         views.createSRV = m_descriptorRequirements->createSRV;
@@ -211,7 +210,7 @@ public:
 
         req.views = views;
         auto resource = m_dataBuffer->GetAPIResource();
-        ResourceManager::GetInstance().UpdateDescriptorContents(*this, resource, req);
+        DescriptorHeapManager::GetInstance().UpdateDescriptorContents(*this, resource, req);
     }
 
     void SetAliasingPool(uint64_t poolID) {

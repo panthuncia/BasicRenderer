@@ -711,6 +711,7 @@ RenderGraph::RenderGraph() {
 
 RenderGraph::~RenderGraph() {
 	m_pCommandRecordingManager->ShutdownThreadLocal(); // Clears thread-local storage
+	DeletionManager::GetInstance().Cleanup();
 }
 
 SymbolicTracker& RenderGraph::GetOrCreateCompileTracker(Resource* resource, uint64_t resourceID) {
@@ -1540,13 +1541,14 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 			p.immediateBytecode.clear();
 			p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
 
-			ImmediateContext c{ device,
+			ImmediateExecutionContext c{ device,
 				{/*isRenderPass=*/false,
 				m_immediateDispatch,
 				&ResolveByIdThunk,
 				&ResolveByPtrThunk,
 				this},
-				frameIndex
+				frameIndex,
+				nullptr
 			};
 
 			// Record immediate-mode commands
@@ -1590,13 +1592,14 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 			p.immediateBytecode.clear();
 			p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
 
-			ImmediateContext c{ device,
+			ImmediateExecutionContext c{ device,
 				{/*isRenderPass=*/true,
 				m_immediateDispatch,
 				&ResolveByIdThunk,
 				&ResolveByPtrThunk,
 				this},
-				frameIndex
+				frameIndex,
+				nullptr
 			};
 			p.pass->ExecuteImmediate(c);
 			auto immediateFrameData = c.list.Finalize();
@@ -1712,13 +1715,14 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 				p.immediateBytecode.clear();
 				p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
 
-				ImmediateContext c{ device,
+				ImmediateExecutionContext c{ device,
 					{/*isRenderPass=*/false,
 					m_immediateDispatch,
 					&ResolveByIdThunk,
 					&ResolveByPtrThunk,
 					this},
-					frameIndex
+					frameIndex,
+					nullptr
 				};
 
 				p.pass->ExecuteImmediate(c);
@@ -1736,13 +1740,14 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 				p.immediateBytecode.clear();
 				p.resources.frameResourceRequirements = p.resources.staticResourceRequirements;
 
-				ImmediateContext c{ device,
+				ImmediateExecutionContext c{ device,
 					{/*isRenderPass=*/true,
 					m_immediateDispatch,
 					&ResolveByIdThunk,
 					&ResolveByPtrThunk,
 					this},
-					frameIndex
+					frameIndex,
+					nullptr
 				};
 
 				p.pass->ExecuteImmediate(c);
@@ -2286,6 +2291,8 @@ void RenderGraph::MaterializeUnmaterializedResources(const std::unordered_set<ui
 }
 
 void RenderGraph::Setup() {
+	DeletionManager::GetInstance().Initialize();
+
 	// Setup the statistics manager
 	if (m_statisticsService) {
 		m_statisticsService->ClearAll();
@@ -2437,7 +2444,7 @@ std::shared_ptr<ComputePass> RenderGraph::GetComputePassByName(const std::string
 	}
 }
 
-void RenderGraph::Update(const UpdateContext& context, rhi::Device device) {
+void RenderGraph::Update(const UpdateExecutionContext& context, rhi::Device device) {
 	ResetForFrame();
 
 	for (auto& pr : m_masterPassList) {	
@@ -2798,6 +2805,7 @@ void RenderGraph::Execute(PassExecutionContext& context) {
 
 	m_lastProducerByResourceAcrossFrames = std::move(nextLastProducerByResourceAcrossFrames);
 	m_lastAliasPlacementProducersByPoolAcrossFrames = std::move(nextLastAliasPlacementProducersByPoolAcrossFrames);
+	DeletionManager::GetInstance().ProcessDeletions();
 	crm->Flush(QueueKind::Graphics, { false, 0 });
 	crm->Flush(QueueKind::Compute, { false, 0 });
 	crm->EndFrame();

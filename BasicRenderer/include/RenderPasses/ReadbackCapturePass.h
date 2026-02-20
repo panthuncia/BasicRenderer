@@ -56,7 +56,7 @@ public:
     void Setup() override {
     }
 
-    void ExecuteImmediate(ImmediateContext& context) override {
+    void ExecuteImmediate(ImmediateExecutionContext& context) override {
         const auto& inputs = Inputs<ReadbackCaptureInputs>();
         auto* resource = m_resourceRegistryView->Resolve<Resource>(inputs.target.resource);
         if (!resource) {
@@ -145,7 +145,11 @@ public:
         m_hasPendingToken = true;
     }
 
-    PassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(PassExecutionContext& context) override {
+        auto* renderContext = context.hostData ? const_cast<RenderContext*>(context.hostData->Get<RenderContext>()) : nullptr;
+        if (!renderContext) { return {}; }
+        auto& contextRef = *renderContext;
+
         if (!m_hasPendingToken) {
             return {};
         }

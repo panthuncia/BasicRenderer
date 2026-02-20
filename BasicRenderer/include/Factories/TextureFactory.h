@@ -66,9 +66,10 @@ private:
 
         void Update(const UpdateContext& context) override {}
 
-        PassReturn Execute(RenderContext& context) override;
+        PassReturn Execute(PassExecutionContext& context) override;
 
-        void Cleanup() override {}
+        void Cleanup() override {
+        }
 
         bool DeclaredResourcesChanged() const override {
             return m_declaredResourcesChanged;

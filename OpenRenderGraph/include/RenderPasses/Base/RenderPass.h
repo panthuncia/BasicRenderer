@@ -17,10 +17,6 @@
 #include "Render/PassExecutionContext.h"
 #include "Render/ShaderABI.h"
 
-struct UpdateContext;
-struct ImmediateContext;
-struct RenderContext;
-
 struct RenderPassParameters {
 	std::vector<ResourceHandleAndRange> shaderResources;
     std::vector<ResourceHandleAndRange> renderTargets;
@@ -53,15 +49,9 @@ public:
 
     virtual void Setup() = 0;
 
-	virtual void Update(const UpdateContext& context) {};
-	virtual void ExecuteImmediate(ImmediateContext& context) {};
-	virtual PassReturn Execute(PassExecutionContext& context) {
-		if (context.hostFrameData && context.hostFrameData->userFrameData) {
-			return Execute(*static_cast<RenderContext*>(context.hostFrameData->userFrameData));
-		}
-		return {};
-	};
-	virtual PassReturn Execute(RenderContext& context) { return {}; };
+	virtual void Update(const UpdateExecutionContext& context) {};
+	virtual void ExecuteImmediate(ImmediateExecutionContext& context) {};
+	virtual PassReturn Execute(PassExecutionContext& context) { return {}; };
     virtual void Cleanup() = 0;
 
 	void Invalidate() { invalidated = true; }

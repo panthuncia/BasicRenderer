@@ -5,11 +5,12 @@
 #include <rhi_interop_dx12.h>
 
 #include "Resources/MemoryStatisticsComponents.h"
-#include "Managers/Singletons/SettingsManager.h"
+#include "Managers/Singletons/ECSManager.h"
 #include "Resources/ResourceIdentifier.h"
 #include "Utilities/Utilities.h"
 #include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Resources/GPUBacking/GpuTextureBacking.h"
+#include "Render/Runtime/OpenRenderGraphSettings.h"
 
 rhi::Result DeviceManager::CreateResourceTracked(
     const rhi::ma::AllocationDesc& allocDesc,
@@ -128,7 +129,19 @@ rhi::Result DeviceManager::AllocateMemoryTracked(
 }
 
 void DeviceManager::Initialize() {
-    auto numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
+    auto numFramesInFlight = rg::runtime::GetOpenRenderGraphSettings().numFramesInFlight;
+
+    if (!s_trackingHooks.createTrackingToken) {
+        s_trackingHooks.createTrackingToken = [](flecs::entity existing) {
+            auto& world = ECSManager::GetInstance().GetWorld();
+            flecs::entity entity = existing;
+            if (!entity.is_alive()) {
+                entity = world.entity();
+            }
+            return TrackedEntityToken(world, entity);
+        };
+    }
+
     bool enableDebug = false;
 #if BUILD_TYPE == BUILD_DEBUG
     enableDebug = false;

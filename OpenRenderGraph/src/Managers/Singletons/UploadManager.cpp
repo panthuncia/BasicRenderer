@@ -5,13 +5,12 @@
 
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Resource.h"
-#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Render/MemoryIntrospectionAPI.h"
+#include "Render/Runtime/OpenRenderGraphSettings.h"
 
 void UploadManager::Initialize() {
-	m_numFramesInFlight = SettingsManager::GetInstance()
-		.getSettingGetter<uint8_t>("numFramesInFlight")();
+	m_numFramesInFlight = rg::runtime::GetOpenRenderGraphSettings().numFramesInFlight;
 
 	m_currentCapacity = 1024 * 1024 * 4; // 4MB
 
@@ -22,8 +21,9 @@ void UploadManager::Initialize() {
 	m_tailOffset = 0;
 	m_frameStart.assign(m_numFramesInFlight, 0);
 
-	getNumFramesInFlight =
-		SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight");
+	getNumFramesInFlight = []() {
+		return rg::runtime::GetOpenRenderGraphSettings().numFramesInFlight;
+	};
 
 	m_activePage = 0;
 	m_frameStart.resize(m_numFramesInFlight, 0);
