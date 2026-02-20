@@ -28,7 +28,7 @@ public:
         auto& context = *renderContext;
 
         auto& psoManager = PSOManager::GetInstance();
-        auto& commandList = context.commandList;
+        auto& commandList = executionContext.commandList;
         auto workingAOTerm = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingAOTerm1);
         auto workingEdges = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingEdges);
         auto outputAO = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::OutputAOTerm);

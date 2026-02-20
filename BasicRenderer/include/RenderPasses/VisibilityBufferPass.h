@@ -114,9 +114,9 @@ public:
         auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
         if (!renderContext) return {};
         auto& context = *renderContext;
-        auto& commandList = context.commandList;
+        auto& commandList = executionContext.commandList;
 
-        BeginPass(context);
+        BeginPass(context, commandList);
 
         SetupCommonState(context, commandList);
         SetCommonRootConstants(context, commandList);
@@ -143,7 +143,7 @@ public:
     }
 
 private:
-    void BeginPass(RenderContext& context) {
+    void BeginPass(RenderContext& context, rhi::CommandList& commandList) {
         // Build attachments
         rhi::PassBeginInfo p{};
         p.width = context.renderResolution.x;
@@ -179,7 +179,7 @@ private:
 
         p.colors = { colors.data(), (uint32_t)colors.size() };
 
-        context.commandList.BeginPass(p);
+        commandList.BeginPass(p);
     }
     // Common setup code that doesn't change between techniques
     void SetupCommonState(RenderContext& context, rhi::CommandList& commandList) {

@@ -69,7 +69,7 @@ public:
         if (!renderContext) return {};
         auto& context = *renderContext;
         auto& psoManager = PSOManager::GetInstance();
-        auto& cmd = context.commandList;
+        auto& cmd = executionContext.commandList;
 
         cmd.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(),
             context.samplerDescriptorHeap.GetHandle());

@@ -63,7 +63,7 @@ public:
 	    if (!renderContext) return {};
 	    auto& context = *renderContext;
 		// Reset and get the appropriate command list
-		auto& commandList = context.commandList;
+		auto& commandList = executionContext.commandList;
 
 		auto counterReset = ResourceManager::GetInstance().GetUAVCounterReset();
 

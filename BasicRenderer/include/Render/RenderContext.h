@@ -27,9 +27,6 @@ struct RenderContext {
 	MaterialManager* materialManager;
 
     Scene* currentScene;
-    rhi::Device device;
-    rhi::CommandList commandList;
-	rhi::Queue commandQueue;
     rhi::DescriptorHeap textureDescriptorHeap;
 	rhi::DescriptorHeap samplerDescriptorHeap;
 	rhi::DescriptorHeap rtvHeap;
@@ -43,7 +40,7 @@ struct RenderContext {
 	float deltaTime;
 };
 
-struct RendererUpdateData {
+struct UpdateContext {
 	Components::DrawStats drawStats;
 	ObjectManager* objectManager = nullptr;
 	MeshManager* meshManager = nullptr;
@@ -60,6 +57,3 @@ struct RendererUpdateData {
 	DirectX::XMUINT2 outputResolution{};
 	float deltaTime = 0.0f;
 };
-
-using UpdateContext = UpdateExecutionContext;
-using ImmediateContext = ImmediateExecutionContext;

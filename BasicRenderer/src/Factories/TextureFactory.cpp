@@ -581,7 +581,7 @@ PassReturn TextureFactory::MipmappingPass::Execute(PassExecutionContext& executi
     auto renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
     if (!renderContext) return {};
     auto& context = *renderContext;
-    auto& commandList = context.commandList;
+    auto& commandList = executionContext.commandList;
 
     commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 

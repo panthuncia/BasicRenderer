@@ -38,7 +38,7 @@ public:
         if (!renderContext) return {};
         auto& ctx = *renderContext;
         auto& pm = PSOManager::GetInstance();
-        auto& cl = ctx.commandList;
+        auto& cl = executionContext.commandList;
 
 		auto numMaterials = ctx.materialManager->GetCompileFlagsSlotsUsed();
         // numBlocks must match prior pass

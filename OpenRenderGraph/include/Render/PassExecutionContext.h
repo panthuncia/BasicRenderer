@@ -34,7 +34,6 @@ struct ImmediateExecutionContext {
 struct PassExecutionContext {
 	rhi::Device device;
 	rhi::CommandList commandList;
-	rhi::Queue commandQueue;
 	UINT frameIndex = 0;
 	UINT64 frameFenceValue = 0;
 	float deltaTime = 0.0f;

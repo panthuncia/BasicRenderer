@@ -91,7 +91,7 @@ public:
         auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
         if (!renderContext) return {};
         auto& ctx = *renderContext;
-        auto& cl = ctx.commandList;
+        auto& cl = executionContext.commandList;
         auto& psoMgr = PSOManager::GetInstance();
 
         cl.SetDescriptorHeaps(ctx.textureDescriptorHeap.GetHandle(), ctx.samplerDescriptorHeap.GetHandle());

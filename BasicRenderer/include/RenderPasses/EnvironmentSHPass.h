@@ -51,7 +51,7 @@ public:
 
 	void Update(const UpdateExecutionContext& context) override {
 		std::vector<Job> newPending;
-		auto* updateData = context.hostData ? const_cast<RendererUpdateData*>(context.hostData->Get<RendererUpdateData>()) : nullptr;
+		auto* updateData = context.hostData ? const_cast<UpdateContext*>(context.hostData->Get<UpdateContext>()) : nullptr;
 
 		if (updateData && updateData->environmentManager) {
 			auto environments = updateData->environmentManager->GetAndClearEnvironmentsToComputeSH();
@@ -96,7 +96,7 @@ public:
 		auto& context = *renderContext;
 		if (m_pending.empty()) return {};
 
-		auto& commandList = context.commandList;
+		auto& commandList = executionContext.commandList;
 
 		// Set the descriptor heaps
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());

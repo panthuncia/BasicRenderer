@@ -53,7 +53,7 @@ public:
 		// Clear the render target of the SSSR output
         //context.commandList.ClearRenderTargetView( m_pSSSROutput->GetRTVInfo(0).slot, m_pSSSROutput->GetClearColor());
 
-		context.commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
+        executionContext.commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
 		// Transition SSSR output to UAV state
   //      CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -71,8 +71,12 @@ public:
 		//	m_pSSSROutput->GetClearColor().rgba
 		//);
 
+
+        auto& camera = context.currentScene->GetPrimaryCamera().get<Components::Camera>();
+
         FFXManager::GetInstance().EvaluateSSSR(
-            context,
+            executionContext.commandList,
+            &camera,
             m_pHDRTarget,
             m_pDepthTexture,
 			m_pNormals,

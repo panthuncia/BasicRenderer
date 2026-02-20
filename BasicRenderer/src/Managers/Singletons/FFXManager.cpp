@@ -60,7 +60,8 @@ void FFXManager::Shutdown() {
     }
 }
 
-void FFXManager::EvaluateSSSR(const RenderContext& context,
+void FFXManager::EvaluateSSSR(rhi::CommandList& commandList,
+    const Components::Camera* currentCamera,
     PixelBuffer* pHDRTarget,
     PixelBuffer* pDepthTexture,
     PixelBuffer* pNormals,
@@ -81,17 +82,16 @@ void FFXManager::EvaluateSSSR(const RenderContext& context,
 	sssrDesc.brdfTexture = getFFXResource(pBRDFLUT, L"BRDFLUT", FFX_RESOURCE_STATE_COMMON);
 	sssrDesc.output = getFFXResource(pReflectionsTarget, L"Reflections", FFX_RESOURCE_STATE_COMMON);
 
-    auto& camera = context.currentScene->GetPrimaryCamera().get<Components::Camera>();
-    auto invViewProjection = DirectX::XMMatrixInverse(nullptr, camera.info.viewProjection);
-    auto prevViewProjection = DirectX::XMMatrixMultiply(camera.info.prevView, camera.info.prevJitteredProjection);
+    auto invViewProjection = DirectX::XMMatrixInverse(nullptr, currentCamera->info.viewProjection);
+    auto prevViewProjection = DirectX::XMMatrixMultiply(currentCamera->info.prevView, currentCamera->info.prevJitteredProjection);
 
     DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.invViewProjection), invViewProjection);
-    DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.projection), camera.info.jitteredProjection);
-	DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.invProjection), camera.info.projectionInverse);
-	DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.view), camera.info.view);
-	DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.invView), camera.info.viewInverse);
+    DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.projection), currentCamera->info.jitteredProjection);
+	DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.invProjection), currentCamera->info.projectionInverse);
+	DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.view), currentCamera->info.view);
+	DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.invView), currentCamera->info.viewInverse);
     DirectX::XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(sssrDesc.prevViewProjection), prevViewProjection);
-    sssrDesc.commandList = rhi::dx12::get_cmd_list(context.commandList);
+    sssrDesc.commandList = rhi::dx12::get_cmd_list(commandList);
     auto renderSize = m_getRenderRes();
     sssrDesc.renderSize = { renderSize.x, renderSize.y };
 	sssrDesc.motionVectorScale = { -1.f, 1.f }; // TODO: I think these should be -.5f, .5f, but that produces black fringing in motion

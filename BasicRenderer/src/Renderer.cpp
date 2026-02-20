@@ -785,7 +785,7 @@ void Renderer::Update(float elapsedSeconds) {
     const Components::DrawStats& drawStats = world.get<Components::DrawStats>();
     auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
     auto outputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
-    RendererUpdateData updateData{};
+    UpdateContext updateData{};
     updateData.drawStats = drawStats;
     updateData.objectManager = m_pObjectManager.get();
     updateData.meshManager = m_pMeshManager.get();
@@ -802,10 +802,10 @@ void Renderer::Update(float elapsedSeconds) {
     updateData.deltaTime = elapsedSeconds;
 
     struct RendererUpdateHostData : IHostExecutionData {
-        const RendererUpdateData* data = nullptr;
+        const UpdateContext* data = nullptr;
 
         const void* TryGet(std::type_index t) const noexcept override {
-            if (t == std::type_index(typeid(RendererUpdateData))) {
+            if (t == std::type_index(typeid(UpdateContext))) {
                 return data;
             }
             return nullptr;
@@ -848,9 +848,6 @@ void Renderer::Render() {
 	auto& deviceManager = DeviceManager::GetInstance();
 
     m_context.currentScene = currentScene.get();
-	m_context.device = deviceManager.GetDevice();
-    //m_context.commandList = commandList.Get();
-	m_context.commandQueue = deviceManager.GetGraphicsQueue();
     m_context.textureDescriptorHeap = ResourceManager::GetInstance().GetSRVDescriptorHeap();
     m_context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap();
     m_context.rtvHeap = rtvHeap.Get();
@@ -908,8 +905,7 @@ void Renderer::Render() {
     hostFrameData.renderContext = &m_context;
 
     PassExecutionContext passExecutionContext{};
-    passExecutionContext.device = m_context.device;
-    passExecutionContext.commandQueue = m_context.commandQueue;
+    passExecutionContext.device = deviceManager.GetDevice();
     passExecutionContext.frameIndex = m_context.frameIndex;
     passExecutionContext.frameFenceValue = m_context.frameFenceValue;
     passExecutionContext.deltaTime = m_context.deltaTime;
@@ -941,9 +937,7 @@ void Renderer::Render() {
 	
 	commandList->Recycle(commandAllocator.Get());
 
-	m_context.commandList = commandList.Get(); // Set the command list for the menu to use
-
-    Menu::GetInstance().Render(m_context); // Render menu
+    Menu::GetInstance().Render(m_context, commandList.Get()); // Render menu
 
 
     // Indicate that the back buffer will now be used to present

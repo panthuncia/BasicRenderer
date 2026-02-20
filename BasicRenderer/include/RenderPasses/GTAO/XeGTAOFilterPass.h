@@ -28,7 +28,7 @@ public:
         if (!renderContext) return {};
         auto& context = *renderContext;
         auto& psoManager = PSOManager::GetInstance();
-        auto& commandList = context.commandList;
+        auto& commandList = executionContext.commandList;
         auto depthTexture = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PrimaryCamera::LinearDepthMap);
         auto workingDepths = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::GTAO::WorkingDepths);
 

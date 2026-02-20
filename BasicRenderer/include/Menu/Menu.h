@@ -218,7 +218,7 @@ public:
     static Menu& GetInstance();
 
     void Initialize(HWND hwnd, IDXGISwapChain3* swapChain);
-    void Render(RenderContext& context);
+    void Render(RenderContext& context, rhi::CommandList commandList);
     bool HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 	void SetRenderGraph(RenderGraph* renderGraph) { m_renderGraph = renderGraph; }
     void Cleanup() {
@@ -645,7 +645,7 @@ static bool PassUsesResourceAdapter(const void* passAndRes, uint64_t resourceId,
     }
 }
 
-inline void Menu::Render(RenderContext& context) {
+inline void Menu::Render(RenderContext& context, rhi::CommandList commandList) {
 	ImGui_ImplDX12_NewFrame();
 	ImGui_ImplWin32_NewFrame();
 
@@ -837,7 +837,7 @@ inline void Menu::Render(RenderContext& context) {
 	// Rendering
 	ImGui::Render();
 
-    context.commandList.SetDescriptorHeaps(g_pd3dSrvDescHeap->GetHandle(), std::nullopt);
+    commandList.SetDescriptorHeaps(g_pd3dSrvDescHeap->GetHandle(), std::nullopt);
 
 	rhi::PassBeginInfo beginInfo{};
 	rhi::ColorAttachment attchment{};
@@ -847,9 +847,9 @@ inline void Menu::Render(RenderContext& context) {
 	beginInfo.height = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.y);
 	beginInfo.width = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.x);
 
-	context.commandList.BeginPass(beginInfo);
+	commandList.BeginPass(beginInfo);
 
-	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), rhi::dx12::get_cmd_list(context.commandList));
+	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), rhi::dx12::get_cmd_list(commandList));
 
 }
 

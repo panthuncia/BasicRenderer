@@ -154,7 +154,7 @@ public:
 		if (!renderContext) return {};
 		auto& context = *renderContext;
 
-		auto& commandList = context.commandList;
+		auto& commandList = executionContext.commandList;
 
 		SetupCommonState(context, commandList);
 		SetCommonRootConstants(context, commandList);

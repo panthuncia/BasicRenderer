@@ -32,7 +32,7 @@ public:
 
     void Update(const UpdateExecutionContext& context) override {
         std::vector<Job> newPending;
-        auto* updateData = context.hostData ? const_cast<RendererUpdateData*>(context.hostData->Get<RendererUpdateData>()) : nullptr;
+        auto* updateData = context.hostData ? const_cast<UpdateContext*>(context.hostData->Get<UpdateContext>()) : nullptr;
 
         if (updateData && updateData->environmentManager) {
             auto environments = updateData->environmentManager->GetAndClearEnvironmentsToConvert();
@@ -78,7 +78,7 @@ public:
 
         auto dev = DeviceManager::GetInstance().GetDevice();
 
-		auto& cl = context.commandList;
+		auto& cl = executionContext.commandList;
         cl.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
         // Bind layout + pipeline
