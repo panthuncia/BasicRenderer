@@ -51,9 +51,9 @@ public:
 
 	void Update(const UpdateExecutionContext& context) override {
 		std::vector<Job> newPending;
-		auto* updateData = context.hostData ? const_cast<UpdateContext*>(context.hostData->Get<UpdateContext>()) : nullptr;
+		auto* updateData = context.hostData->Get<UpdateContext>();
 
-		if (updateData && updateData->environmentManager) {
+		if (updateData->environmentManager) {
 			auto environments = updateData->environmentManager->GetAndClearEnvironmentsToComputeSH();
 			newPending.reserve(environments.size());
 
@@ -91,8 +91,7 @@ public:
 	}
 
 	PassReturn Execute(PassExecutionContext& executionContext) override {
-		auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
-		if (!renderContext) return {};
+		auto* renderContext = executionContext.hostData->Get<RenderContext>();
 		auto& context = *renderContext;
 		if (m_pending.empty()) return {};
 

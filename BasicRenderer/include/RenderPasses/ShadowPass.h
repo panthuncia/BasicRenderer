@@ -109,15 +109,12 @@ public:
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
-        if (!renderContext) return {};
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
         auto& context = *renderContext;
 
         auto& commandList = executionContext.commandList;
 
         SetupCommonState(context, commandList);
-        SetCommonRootConstants(context, commandList);
-
 
         if (m_meshShaders) {
             if (m_indirect) {
@@ -141,7 +138,7 @@ public:
 
 private:
     // Common setup code that doesn't change between techniques
-    void SetupCommonState(RenderContext& context, rhi::CommandList& commandList) {
+    void SetupCommonState(const RenderContext& context, rhi::CommandList& commandList) {
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -158,11 +155,7 @@ private:
 		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
     }
 
-    void SetCommonRootConstants(RenderContext& context, rhi::CommandList& commandList) {
-
-    }
-
-    void ExecuteRegular(RenderContext& context, rhi::CommandList& commandList) {
+    void ExecuteRegular(const RenderContext& context, rhi::CommandList& commandList) {
         auto& psoManager = PSOManager::GetInstance();
         auto drawObjects = [&]() {
 
@@ -285,7 +278,7 @@ private:
             });
     }
 
-    void ExecuteMeshShader(RenderContext& context, rhi::CommandList& commandList) {
+    void ExecuteMeshShader(const RenderContext& context, rhi::CommandList& commandList) {
         auto& psoManager = PSOManager::GetInstance();
         auto drawObjects = [&]() {
             // Opaque objects
@@ -417,7 +410,7 @@ private:
             });
     }
 
-    void ExecuteMeshShaderIndirect(RenderContext& context, rhi::CommandList& commandList) {
+    void ExecuteMeshShaderIndirect(const RenderContext& context, rhi::CommandList& commandList) {
         auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
         auto& psoManager = PSOManager::GetInstance();
 

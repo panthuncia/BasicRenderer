@@ -346,8 +346,7 @@ private:
         }
 
         PassReturn Execute(PassExecutionContext& executionContext) override {
-            auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
-            if (!renderContext) return {};
+            auto* renderContext = executionContext.hostData->Get<RenderContext>();
             auto& context = *renderContext;
             auto& commandList = executionContext.commandList;
 
@@ -594,8 +593,7 @@ private:
         }
 
         PassReturn Execute(PassExecutionContext& executionContext) override {
-            auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
-            if (!renderContext) return {};
+            auto* renderContext = executionContext.hostData->Get<RenderContext>();
             auto& context = *renderContext;
             auto& commandList = executionContext.commandList;
 
@@ -627,8 +625,7 @@ private:
         }
 
         void Update(const UpdateExecutionContext& executionContext) override {
-			auto* updateContext = executionContext.hostData ? const_cast<UpdateContext*>(executionContext.hostData->Get<UpdateContext>()) : nullptr;
-			if (!updateContext) return;
+            auto* updateContext = executionContext.hostData->Get<UpdateContext>();
 			auto& context = *updateContext;
 
             auto numRasterBuckets = context.materialManager->GetRasterBucketCount();
@@ -696,8 +693,7 @@ private:
         void Setup() override {}
 
         PassReturn Execute(PassExecutionContext& executionContext) override {
-			auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
-			if (!renderContext) return {};
+            auto* renderContext = executionContext.hostData->Get<RenderContext>();
 			auto& context = *renderContext;
             auto& commandList = executionContext.commandList;
             auto& pm = PSOManager::GetInstance();
@@ -729,8 +725,7 @@ private:
         }
 
         void Update(const UpdateExecutionContext& executionContext) override {
-			auto* updateContext = executionContext.hostData ? const_cast<UpdateContext*>(executionContext.hostData->Get<UpdateContext>()) : nullptr;
-			if (!updateContext) return;
+            auto* updateContext = executionContext.hostData->Get<UpdateContext>();
 			auto& context = *updateContext;
             auto numBuckets = context.materialManager->GetRasterBucketCount();
             const uint32_t numBlocks = (numBuckets + m_blockSize - 1) / m_blockSize;
@@ -780,8 +775,7 @@ private:
         void Setup() override {}
 
         PassReturn Execute(PassExecutionContext& executionContext) override {
-			auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
-			if (!renderContext) return {};
+            auto* renderContext = executionContext.hostData->Get<RenderContext>();
 			auto& context = *renderContext;
 
             auto& commandList = executionContext.commandList;
@@ -816,8 +810,7 @@ private:
         }
 
         void Update(const UpdateExecutionContext& executionContext) override {
-			auto* updateContext = executionContext.hostData ? const_cast<UpdateContext*>(executionContext.hostData->Get<UpdateContext>()) : nullptr;
-			if (!updateContext) return;
+            auto* updateContext = executionContext.hostData->Get<UpdateContext>();
 			auto& context = *updateContext;
             auto numBuckets = context.materialManager->GetRasterBucketCount();
             const uint32_t numBlocks = (numBuckets + m_blockSize - 1) / m_blockSize;
@@ -902,8 +895,7 @@ private:
         }
 
         PassReturn Execute(PassExecutionContext& executionContext) override {
-			auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
-			if (!renderContext) return {};
+            auto* renderContext = executionContext.hostData->Get<RenderContext>();
 			auto& context = *renderContext;
             auto& commandList = executionContext.commandList;
             auto& pm = PSOManager::GetInstance();
@@ -947,8 +939,7 @@ private:
         }
 
         void Update(const UpdateExecutionContext& executionContext) override {
-			auto* updateContext = executionContext.hostData ? const_cast<UpdateContext*>(executionContext.hostData->Get<UpdateContext>()) : nullptr;
-			if (!updateContext) return;
+            auto* updateContext = executionContext.hostData->Get<UpdateContext>();
 			auto& context = *updateContext;
             auto numBuckets = context.materialManager->GetRasterBucketCount();
 
@@ -1079,8 +1070,7 @@ private:
 
         // Note: relies on Update() running before DeclareResourceUsages(). If this ever changes, we may need a new approach.
         void Update(const UpdateExecutionContext& executionContext) override {
-            auto* updateContext = executionContext.hostData ? const_cast<UpdateContext*>(executionContext.hostData->Get<UpdateContext>()) : nullptr;
-            if (!updateContext) return;
+            auto* updateContext = executionContext.hostData->Get<UpdateContext>();
             auto& context = *updateContext;
 
             // Build per-view raster metadata used by CLod mesh/pixel shaders.
@@ -1144,8 +1134,7 @@ private:
         }
 
         PassReturn Execute(PassExecutionContext& executionContext) override {
-			auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
-			if (!renderContext) return {};
+            auto* renderContext = executionContext.hostData->Get<RenderContext>();
 			auto& context = *renderContext;
             auto& commandList = executionContext.commandList;
 

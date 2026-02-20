@@ -68,8 +68,7 @@ public:
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override {
-        auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
-        if (!renderContext) return {};
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
         auto& context = *renderContext;
 
         auto& psoManager = PSOManager::GetInstance();

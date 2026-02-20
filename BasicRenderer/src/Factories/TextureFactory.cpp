@@ -578,8 +578,7 @@ PassReturn TextureFactory::MipmappingPass::Execute(PassExecutionContext& executi
     if (m_pending.empty()) return {};
 
     auto& psoManager = PSOManager::GetInstance();
-    auto renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
-    if (!renderContext) return {};
+    auto* renderContext = executionContext.hostData->Get<RenderContext>();
     auto& context = *renderContext;
     auto& commandList = executionContext.commandList;
 

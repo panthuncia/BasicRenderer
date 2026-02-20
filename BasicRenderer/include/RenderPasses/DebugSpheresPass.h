@@ -36,8 +36,7 @@ public:
 	}
 
 	PassReturn Execute(PassExecutionContext& executionContext) override {
-	    auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
-	    if (!renderContext) return {};
+	    auto* renderContext = executionContext.hostData->Get<RenderContext>();
 	    auto& context = *renderContext;
 		auto& commandList = executionContext.commandList;
 
@@ -156,7 +155,7 @@ private:
 		rts.formats[0] = rhi::Format::R8G8B8A8_UNorm;
 		rhi::SubobjRTVs soRTVs{ rts };
 
-		// Your original used D24_UNORM_S8_UINT. If your RHI format enum doesn’t carry D24,
+		// Your original used D24_UNORM_S8_UINT. If your RHI format enum doesnï¿½t carry D24,
 		// you can either set Unknown (let backend infer) or use D32_Float consistently.
 		rhi::SubobjDSV    soDSV{ rhi::Format::D32_Float };
 		rhi::SubobjSample soSmp{ rhi::SampleDesc{1, 0} };
