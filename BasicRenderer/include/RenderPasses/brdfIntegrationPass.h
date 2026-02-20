@@ -18,7 +18,10 @@ public:
 		m_lutTexture = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::BRDFLUT);
     }
 
-    PassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
+        if (!renderContext) return {};
+        auto& context = *renderContext;
         auto& commandList = context.commandList;
         
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());

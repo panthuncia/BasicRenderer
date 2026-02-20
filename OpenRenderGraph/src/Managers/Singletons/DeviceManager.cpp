@@ -7,7 +7,7 @@
 #include "Resources/MemoryStatisticsComponents.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Resources/ResourceIdentifier.h"
-#include "Utilities/Utilities.h"
+#include "Utilities/ORGUtilities.h"
 #include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Resources/GPUBacking/GpuTextureBacking.h"
 #include "Render/Runtime/OpenRenderGraphSettings.h"
@@ -275,8 +275,8 @@ void LogBreadcrumbs(const D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT& breadcrumbs) {
         std::wstring commandQueueName = pNode->pCommandQueueDebugNameW ? pNode->pCommandQueueDebugNameW : L"<unnamed>";
 
         spdlog::info("--- AutoBreadcrumb Node ---");
-        spdlog::info("Command List: {}", ws2s(commandListName));
-        spdlog::info("Command Queue: {}", ws2s(commandQueueName));
+        spdlog::info("Command List: {}", rg::util::ws2s(commandListName));
+        spdlog::info("Command Queue: {}", rg::util::ws2s(commandQueueName));
         spdlog::info("Breadcrumb Count: {}", pNode->BreadcrumbCount);
         spdlog::info("Operations:");
 
@@ -310,7 +310,7 @@ void LogPageFaults(const D3D12_DRED_PAGE_FAULT_OUTPUT& pageFault) {
             const char* allocTypeStr = DredAllocationTypeToString(current->AllocationType);
             spdlog::info("[{}] ObjectName: {}, AllocationType: {}",
                 nodeType,
-                ws2s(objName),
+                rg::util::ws2s(objName),
                 allocTypeStr
             );
             current = current->pNext;

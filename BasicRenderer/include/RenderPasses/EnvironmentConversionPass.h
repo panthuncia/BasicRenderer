@@ -30,11 +30,12 @@ public:
     void Setup() override {
     }
 
-    void Update(const UpdateContext& context) override {
+    void Update(const UpdateExecutionContext& context) override {
         std::vector<Job> newPending;
+        auto* updateData = context.hostData ? const_cast<RendererUpdateData*>(context.hostData->Get<RendererUpdateData>()) : nullptr;
 
-        if (context.environmentManager) {
-            auto environments = context.environmentManager->GetAndClearEnvironmentsToConvert();
+        if (updateData && updateData->environmentManager) {
+            auto environments = updateData->environmentManager->GetAndClearEnvironmentsToConvert();
             newPending.reserve(environments.size());
 
             for (auto* env : environments) {
@@ -67,7 +68,10 @@ public:
         }
     }
 
-    PassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
+        if (!renderContext) return {};
+        auto& context = *renderContext;
         if (m_pending.empty()) return {};
 
         const uint16_t skyboxRes = getSkyboxResolution();

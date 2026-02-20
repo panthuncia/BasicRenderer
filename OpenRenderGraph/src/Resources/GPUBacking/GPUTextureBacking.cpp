@@ -3,7 +3,7 @@
 #include <stdexcept>
 
 #include "Managers/Singletons/DeviceManager.h"
-#include "Utilities/Utilities.h"
+#include "Utilities/ORGUtilities.h"
 #include "Managers/Singletons/DescriptorHeapManager.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Resources/MemoryStatisticsComponents.h"
@@ -62,7 +62,7 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 	DescriptorHeapManager& rm = DescriptorHeapManager::GetInstance();
 
 	// Determine the number of mip levels
-	uint16_t mipLevels = desc.generateMipMaps ? CalculateMipLevels(desc.imageDimensions[0].width, desc.imageDimensions[0].height) : 1;
+	uint16_t mipLevels = desc.generateMipMaps ? rg::util::CalculateMipLevels(desc.imageDimensions[0].width, desc.imageDimensions[0].height) : 1;
 
 	// Determine the array size
 	uint32_t arraySize = desc.arraySize;
@@ -188,7 +188,7 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 
 	m_width = desc.imageDimensions[0].width;
 	m_height = desc.imageDimensions[0].height;
-	m_mipLevels = desc.generateMipMaps ? CalculateMipLevels(static_cast<uint16_t>(m_width), static_cast<uint16_t>(m_height)) : 1;
+	m_mipLevels = desc.generateMipMaps ? rg::util::CalculateMipLevels(static_cast<uint16_t>(m_width), static_cast<uint16_t>(m_height)) : 1;
 	m_arraySize = desc.isCubemap ? 6 * desc.arraySize : (desc.isArray ? desc.arraySize : 1);
 	m_format = desc.format;
 

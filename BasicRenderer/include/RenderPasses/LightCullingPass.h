@@ -36,7 +36,10 @@ public:
 		RegisterUAV(Builtin::Light::PagesBuffer);
 	}
 
-	PassReturn Execute(RenderContext& context) override {
+	PassReturn Execute(PassExecutionContext& executionContext) override {
+		auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
+		if (!renderContext) return {};
+		auto& context = *renderContext;
 		auto& commandList = context.commandList;
 
 		// Set the descriptor heaps
@@ -61,7 +64,7 @@ public:
 
 	}
 
-	virtual void Update(const UpdateContext& context) override {
+	virtual void Update(const UpdateExecutionContext& context) override {
 		// Reset UAV counter
 		uint32_t zero = 0;
 		BUFFER_UPLOAD(&zero, sizeof(uint32_t), UploadManager::UploadTarget::FromHandle(m_lightPagesCounterHandle), 0);

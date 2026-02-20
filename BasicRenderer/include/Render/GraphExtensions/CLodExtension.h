@@ -890,7 +890,7 @@ private:
 
 
 
-        void Update(const UpdateContext& ctx) override {
+        void Update(const UpdateExecutionContext& ctx) override {
             auto* updateData = ctx.hostData ? const_cast<RendererUpdateData*>(ctx.hostData->Get<RendererUpdateData>()) : nullptr;
             if (!updateData) { return; }
             auto& context = *updateData;
@@ -1263,7 +1263,7 @@ private:
 
 
 
-        void Update(const UpdateContext& ctx) override {
+        void Update(const UpdateExecutionContext& ctx) override {
             auto* updateData = ctx.hostData ? const_cast<RendererUpdateData*>(ctx.hostData->Get<RendererUpdateData>()) : nullptr;
             if (!updateData) { return; }
             auto& context = *updateData;
@@ -1468,7 +1468,7 @@ private:
 
 
 
-        void Update(const UpdateContext& ctx) override {
+        void Update(const UpdateExecutionContext& ctx) override {
             auto* updateData = ctx.hostData ? const_cast<RendererUpdateData*>(ctx.hostData->Get<RendererUpdateData>()) : nullptr;
             if (!updateData) { return; }
             auto& context = *updateData;
@@ -1643,7 +1643,7 @@ private:
 
 
 
-        void Update(const UpdateContext& ctx) override {
+        void Update(const UpdateExecutionContext& ctx) override {
             auto* updateData = ctx.hostData ? const_cast<RendererUpdateData*>(ctx.hostData->Get<RendererUpdateData>()) : nullptr;
             if (!updateData) { return; }
             auto& context = *updateData;
@@ -1908,7 +1908,7 @@ private:
 
 
 
-        void Update(const UpdateContext& ctx) override {
+        void Update(const UpdateExecutionContext& ctx) override {
             auto* updateData = ctx.hostData ? const_cast<RendererUpdateData*>(ctx.hostData->Get<RendererUpdateData>()) : nullptr;
             if (!updateData) { return; }
             auto& context = *updateData;
@@ -2169,7 +2169,7 @@ private:
 
 		// Note: relies on Update() running before DeclareResourceUsages(). If this ever changes, we may need a new approach.
 
-        void Update(const UpdateContext& ctx) override {
+        void Update(const UpdateExecutionContext& ctx) override {
             auto* updateData = ctx.hostData ? const_cast<RendererUpdateData*>(ctx.hostData->Get<RendererUpdateData>()) : nullptr;
             if (!updateData) { return; }
             auto& context = *updateData;

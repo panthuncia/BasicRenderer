@@ -121,7 +121,10 @@ public:
 		RegisterSRV(Builtin::PerMaterialDataBuffer);
     }
 
-    PassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
+        if (!renderContext) return {};
+        auto& context = *renderContext;
         auto& commandList = context.commandList;
 
         BeginPass(context);

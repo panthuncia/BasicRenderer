@@ -457,7 +457,7 @@ private:
 
 	void RefreshRetainedDeclarationsForFrame(RenderPassAndResources& p, uint8_t frameIndex);
 	void RefreshRetainedDeclarationsForFrame(ComputePassAndResources& p, uint8_t frameIndex);
-	void CompileFrame(rhi::Device device, uint8_t frameIndex);
+	void CompileFrame(rhi::Device device, uint8_t frameIndex, const IHostExecutionData* hostData);
 
 	//void ComputeResourceLoops();
 	bool IsNewBatchNeeded(

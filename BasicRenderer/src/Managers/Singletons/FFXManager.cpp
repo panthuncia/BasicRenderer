@@ -8,6 +8,7 @@
 #include "Managers/Singletons/ResourceManager.h"
 #include "Scene/Scene.h"
 #include "rhi_interop_dx12.h"
+#include "Render/RenderContext.h"
 
 extern ffxFunctions ffxModule;
 

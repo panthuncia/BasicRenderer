@@ -64,7 +64,7 @@ private:
 
         void DeclareResourceUsages(ComputePassBuilder* builder) override;
 
-        void Update(const UpdateContext& context) override {}
+        void Update(const UpdateExecutionContext& context) override {}
 
         PassReturn Execute(PassExecutionContext& context) override;
 

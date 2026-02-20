@@ -10,7 +10,7 @@
 #include "Resources/MemoryStatisticsComponents.h"
 #include "Managers/Singletons/DescriptorHeapManager.h"
 #include "Interfaces/IHasMemoryMetadata.h"
-#include "Utilities/Utilities.h"
+#include "Utilities/ORGUtilities.h"
 
 class PixelBuffer : public GloballyIndexedResource, public IHasMemoryMetadata {
 public:
@@ -192,7 +192,7 @@ public:
 
         auto& rm = DescriptorHeapManager::GetInstance();
         const uint16_t mipLevels = m_desc.generateMipMaps
-            ? CalculateMipLevels(m_desc.imageDimensions[0].width, m_desc.imageDimensions[0].height)
+            ? rg::util::CalculateMipLevels(m_desc.imageDimensions[0].width, m_desc.imageDimensions[0].height)
             : 1;
         const uint32_t arraySize = m_desc.isCubemap
             ? 6u * m_desc.arraySize

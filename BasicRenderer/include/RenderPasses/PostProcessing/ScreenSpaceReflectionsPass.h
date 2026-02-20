@@ -45,7 +45,10 @@ public:
 		m_pSSSROutput = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PostProcessing::ScreenSpaceReflections);
     }
 
-    PassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
+        if (!renderContext) return {};
+        auto& context = *renderContext;
 
 		// Clear the render target of the SSSR output
         //context.commandList.ClearRenderTargetView( m_pSSSROutput->GetRTVInfo(0).slot, m_pSSSROutput->GetClearColor());

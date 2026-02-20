@@ -34,6 +34,7 @@
 #include "Scene/MovementState.h"
 #include "../generated/BuiltinResources.h"
 #include "Utilities/Timer.h"
+#include "Render/RenderContext.h"
 
 using namespace Microsoft::WRL;
 

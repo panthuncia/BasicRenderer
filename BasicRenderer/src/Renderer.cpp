@@ -810,7 +810,10 @@ void Renderer::Update(float elapsedSeconds) {
             }
             return nullptr;
         }
-    } updateHostData{ &updateData };
+    };
+
+    RendererUpdateHostData updateHostData;
+    updateHostData.data = &updateData;
 
     UpdateExecutionContext context{};
     context.frameIndex = m_frameIndex;

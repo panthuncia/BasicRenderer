@@ -23,7 +23,10 @@ public:
             .WithConstantBuffer("Builtin::GTAO::ConstantsBuffer");
     }
 
-    PassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
+        if (!renderContext) return {};
+        auto& context = *renderContext;
         auto& psoManager = PSOManager::GetInstance();
         auto& commandList = context.commandList;
         auto depthTexture = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PrimaryCamera::LinearDepthMap);

@@ -9,7 +9,7 @@
 #include <rhi_debug.h>
 
 #include "Render/PassExecutionContext.h"
-#include "Utilities/Utilities.h"
+#include "Utilities/ORGUtilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Render/PassBuilders.h"
@@ -1490,7 +1490,7 @@ void RenderGraph::RefreshRetainedDeclarationsForFrame(ComputePassAndResources& p
 	p.pass->Setup();
 }
 
-void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
+void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex, const IHostExecutionData* hostData) {
 	if (m_statisticsService) {
 		m_statisticsService->BeginFrame();
 	}
@@ -1548,7 +1548,7 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 				&ResolveByPtrThunk,
 				this},
 				frameIndex,
-				nullptr
+				hostData
 			};
 
 			// Record immediate-mode commands
@@ -1599,7 +1599,7 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 				&ResolveByPtrThunk,
 				this},
 				frameIndex,
-				nullptr
+				hostData
 			};
 			p.pass->ExecuteImmediate(c);
 			auto immediateFrameData = c.list.Finalize();
@@ -1722,7 +1722,7 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 					&ResolveByPtrThunk,
 					this},
 					frameIndex,
-					nullptr
+					hostData
 				};
 
 				p.pass->ExecuteImmediate(c);
@@ -1747,7 +1747,7 @@ void RenderGraph::CompileFrame(rhi::Device device, uint8_t frameIndex) {
 					&ResolveByPtrThunk,
 					this},
 					frameIndex,
-					nullptr
+					hostData
 				};
 
 				p.pass->ExecuteImmediate(c);
@@ -2460,7 +2460,7 @@ void RenderGraph::Update(const UpdateExecutionContext& context, rhi::Device devi
 			}, pr.pass);
 	}
 
-	CompileFrame(device, context.frameIndex);
+	CompileFrame(device, context.frameIndex, context.hostData);
 }
 
 #define IFDEBUG(x) 

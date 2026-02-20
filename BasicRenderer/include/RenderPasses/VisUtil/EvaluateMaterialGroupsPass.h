@@ -87,7 +87,10 @@ public:
         m_materialEvalCmds = m_resourceRegistryView->RequestPtr<Resource>("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }
 
-    PassReturn Execute(RenderContext& ctx) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
+        if (!renderContext) return {};
+        auto& ctx = *renderContext;
         auto& cl = ctx.commandList;
         auto& psoMgr = PSOManager::GetInstance();
 

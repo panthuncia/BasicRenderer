@@ -3,6 +3,7 @@
 #include <rhi.h>
 
 #include "Scene/Components.h"
+#include "Render/PassExecutionContext.h"
 #include "Render/ImmediateExecution/ImmediateCommandList.h"
 
 class Scene;

@@ -69,7 +69,10 @@ public:
 		m_visibleClusterBufferSRVIndex = visibleClusterResources[0]->GetSRVInfo(0).slot.index;
     }
 
-    PassReturn Execute(RenderContext& ctx) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData ? const_cast<RenderContext*>(executionContext.hostData->Get<RenderContext>()) : nullptr;
+        if (!renderContext) return {};
+        auto& ctx = *renderContext;
         auto& pm = PSOManager::GetInstance();
         auto& cl = ctx.commandList;
 
