@@ -64,17 +64,13 @@ public:
         RegisterUAV(Builtin::PostProcessing::UpscaledHDR);
     }
 
-    PassReturn Execute(PassExecutionContext& context) override
+    PassReturn Execute(RenderContext& context) override
     {
-        auto* renderContext = context.hostData ? const_cast<RenderContext*>(context.hostData->Get<RenderContext>()) : nullptr;
-        if (!renderContext) { return {}; }
-        auto& contextRef = *renderContext;
-
         auto& psoManager = PSOManager::GetInstance();
-        auto& cmd = contextRef.commandList;
+        auto& cmd = context.commandList;
 
-        cmd.SetDescriptorHeaps(contextRef.textureDescriptorHeap.GetHandle(),
-            contextRef.samplerDescriptorHeap.GetHandle());
+        cmd.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(),
+            context.samplerDescriptorHeap.GetHandle());
 
         cmd.BindLayout(psoManager.GetComputeRootSignature().GetHandle());
         cmd.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
@@ -96,8 +92,8 @@ public:
 
         cmd.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, rc);
 
-        uint32_t w = contextRef.outputResolution.x;
-        uint32_t h = contextRef.outputResolution.y;
+        uint32_t w = context.outputResolution.x;
+        uint32_t h = context.outputResolution.y;
 
         constexpr uint32_t groupSizeX = 8;
         constexpr uint32_t groupSizeY = 8;

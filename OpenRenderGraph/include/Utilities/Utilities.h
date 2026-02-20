@@ -1,6 +1,5 @@
 #pragma once
 
-
 std::wstring s2ws(const std::string_view& utf8)
 {
     if (utf8.empty()) return {};

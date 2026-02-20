@@ -7,8 +7,6 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "Resources/MemoryStatisticsComponents.h"
 
-using namespace Microsoft::WRL;
-
 GpuBufferBacking::GpuBufferBacking(
 	const rhi::HeapType accessType,
 	const uint64_t bufferSize,

@@ -58,13 +58,9 @@ public:
 		}
 	}
 
-	PassReturn Execute(PassExecutionContext& context) override {
-		auto* renderContext = context.hostData ? const_cast<RenderContext*>(context.hostData->Get<RenderContext>()) : nullptr;
-		if (!renderContext) { return {}; }
-		auto& contextRef = *renderContext;
-
+	PassReturn Execute(RenderContext& context) override {
 		// Reset and get the appropriate command list
-		auto& commandList = contextRef.commandList;
+		auto& commandList = context.commandList;
 
 		auto counterReset = ResourceManager::GetInstance().GetUAVCounterReset();
 

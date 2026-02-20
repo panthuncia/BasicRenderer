@@ -4,9 +4,7 @@
 
 #include "Managers/Singletons/DeviceManager.h"
 #include "Utilities/Utilities.h"
-#define STB_IMAGE_IMPLEMENTATION
-#include "ThirdParty/stb/stb_image.h"
-#include "Managers/Singletons/ResourceManager.h"
+#include "Managers/Singletons/DescriptorHeapManager.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Resources/MemoryStatisticsComponents.h"
 
@@ -61,7 +59,7 @@ void GpuTextureBacking::initialize(const TextureDescription& desc,
 	const char* name)
 {
 	m_desc = desc;
-	ResourceManager& rm = ResourceManager::GetInstance();
+	DescriptorHeapManager& rm = DescriptorHeapManager::GetInstance();
 
 	// Determine the number of mip levels
 	uint16_t mipLevels = desc.generateMipMaps ? CalculateMipLevels(desc.imageDimensions[0].width, desc.imageDimensions[0].height) : 1;

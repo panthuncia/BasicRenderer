@@ -14,26 +14,22 @@ public:
     void Setup() override {
     }
 
-    PassReturn Execute(PassExecutionContext& context) override {
-        auto* renderContext = context.hostData ? const_cast<RenderContext*>(context.hostData->Get<RenderContext>()) : nullptr;
-        if (!renderContext) { return {}; }
-        auto& contextRef = *renderContext;
-
+    PassReturn Execute(RenderContext& context) override {
         //if (m_texture == nullptr) {
         //    return {};
         //}
-        //auto& commandList = contextRef.commandList;
+        //auto& commandList = context.commandList;
 
-        //commandList.SetDescriptorHeaps(contextRef.textureDescriptorHeap, contextRef.samplerDescriptorHeap);
+        //commandList.SetDescriptorHeaps(context.textureDescriptorHeap, context.samplerDescriptorHeap);
 
         //commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 
-        //CD3DX12_VIEWPORT viewport(0.0f, 0.0f, static_cast<float>(contextRef.outputResolution.x), static_cast<float>(contextRef.outputResolution.y));
-        //CD3DX12_RECT scissorRect(0, 0, contextRef.outputResolution.x, contextRef.outputResolution.y);
+        //CD3DX12_VIEWPORT viewport(0.0f, 0.0f, static_cast<float>(context.outputResolution.x), static_cast<float>(context.outputResolution.y));
+        //CD3DX12_RECT scissorRect(0, 0, context.outputResolution.x, context.outputResolution.y);
         //commandList->RSSetViewports(1, &viewport);
         //commandList->RSSetScissorRects(1, &scissorRect);
 
-        //CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(contextRef.rtvHeap->GetCPUDescriptorHandleForHeapStart(), contextRef.frameIndex, contextRef.rtvDescriptorSize);
+        //CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(context.rtvHeap->GetCPUDescriptorHandleForHeapStart(), context.frameIndex, context.rtvDescriptorSize);
         //commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
         //commandList->SetPipelineState(debugPSO.Get());
