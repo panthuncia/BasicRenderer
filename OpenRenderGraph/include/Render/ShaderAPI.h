@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace rg::shaderabi {
+namespace rg::shaderapi {
 	inline constexpr uint32_t kResourceDescriptorIndicesRootParameter = 6;
 	inline constexpr uint32_t kNumResourceDescriptorIndicesRootConstants = 35;
 

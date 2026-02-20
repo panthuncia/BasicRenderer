@@ -704,9 +704,6 @@ RenderGraph::RenderGraph() {
 	if (!m_renderGraphSettingsService) {
 		m_renderGraphSettingsService = rg::runtime::CreateDefaultRenderGraphSettingsService();
 	}
-	if (!m_shaderService) {
-		m_shaderService = rg::runtime::CreateDefaultShaderService();
-	}
 }
 
 RenderGraph::~RenderGraph() {

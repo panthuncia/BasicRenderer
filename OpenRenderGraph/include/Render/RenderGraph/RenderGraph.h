@@ -24,7 +24,6 @@
 #include "Render/Runtime/IUploadService.h"
 #include "Render/Runtime/IReadbackService.h"
 #include "Render/Runtime/IRenderGraphSettingsService.h"
-#include "Render/Runtime/IShaderService.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/TrackedAllocation.h"
@@ -249,9 +248,6 @@ public:
 	rg::runtime::IReadbackService* GetReadbackService() { return m_readbackService.get(); }
 	const rg::runtime::IReadbackService* GetReadbackService() const { return m_readbackService.get(); }
 	void SetRenderGraphSettingsService(std::shared_ptr<rg::runtime::IRenderGraphSettingsService> service) { m_renderGraphSettingsService = std::move(service); }
-	void SetShaderService(std::shared_ptr<rg::runtime::IShaderService> service) { m_shaderService = std::move(service); }
-	rg::runtime::IShaderService* GetShaderService() { return m_shaderService.get(); }
-	const rg::runtime::IShaderService* GetShaderService() const { return m_shaderService.get(); }
 	rg::runtime::IRenderGraphSettingsService* GetRenderGraphSettingsService() { return m_renderGraphSettingsService.get(); }
 	const rg::runtime::IRenderGraphSettingsService* GetRenderGraphSettingsService() const { return m_renderGraphSettingsService.get(); }
 	//void AllocateResources(PassExecutionContext& context);
@@ -400,7 +396,6 @@ private:
 	std::shared_ptr<rg::runtime::IUploadService> m_uploadService;
 	std::shared_ptr<rg::runtime::IReadbackService> m_readbackService;
 	std::shared_ptr<rg::runtime::IRenderGraphSettingsService> m_renderGraphSettingsService;
-	std::shared_ptr<rg::runtime::IShaderService> m_shaderService;
 	std::unordered_map<uint64_t, SymbolicTracker*> trackers; // Tracks the state of resources in the graph.
 	std::unordered_map<uint64_t, SymbolicTracker> compileTrackers; // Compile-only symbolic state, decoupled from backing lifetime.
 	std::unordered_map<uint64_t, LastProducerAcrossFrames> m_lastProducerByResourceAcrossFrames;
@@ -416,7 +411,6 @@ private:
 	std::unique_ptr<CommandListPool> m_computeCommandListPool;
 	std::unique_ptr<CommandListPool> m_copyCommandListPool;
 
-	//Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList7> initialTransitionCommandList;
 	rhi::CommandAllocatorPtr initialTransitionCommandAllocator;
 	rhi::TimelinePtr m_initialTransitionFence;
 	UINT64 m_initialTransitionFenceValue = 0;

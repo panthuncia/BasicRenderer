@@ -15,7 +15,7 @@
 #include "interfaces/IResourceProvider.h"
 #include "Render/PassInputs.h"
 #include "Render/PassExecutionContext.h"
-#include "Render/ShaderABI.h"
+#include "Render/ShaderAPI.h"
 
 struct ComputePassParameters {
 	std::vector<ResourceHandleAndRange> shaderResources;
@@ -56,7 +56,7 @@ protected:
 	virtual void DeclareResourceUsages(ComputePassBuilder* builder) {};
 
 	void BindResourceDescriptorIndices(rhi::CommandList& commandList, const PipelineResources& resources) {
-		unsigned int indices[rg::shaderabi::kNumResourceDescriptorIndicesRootConstants] = {};
+		unsigned int indices[rg::shaderapi::kNumResourceDescriptorIndicesRootConstants] = {};
 		int i = 0;
 		for (auto& binding : resources.mandatoryResourceDescriptorSlots) {
 			indices[i] = m_resourceDescriptorIndexHelper->GetResourceDescriptorIndex(binding.hash, false, &binding.name);
@@ -67,7 +67,7 @@ protected:
 			i++;
 		}
 		if (i > 0) {
-			commandList.PushConstants(rhi::ShaderStage::Compute, 0, rg::shaderabi::kResourceDescriptorIndicesRootParameter, 0, i, indices);
+			commandList.PushConstants(rhi::ShaderStage::Compute, 0, rg::shaderapi::kResourceDescriptorIndicesRootParameter, 0, i, indices);
 		}
 	}
 

@@ -66,8 +66,6 @@
 #include "Resources/Resource.h"
 #include "Render/MemoryIntrospectionBackend.h"
 #include "Render/Runtime/UploadServiceAccess.h"
-#include "Render/Runtime/ShaderServiceAccess.h"
-#include "Render/Runtime/PSOShaderService.h"
 
 void D3D12DebugCallback(
     D3D12_MESSAGE_CATEGORY Category,
@@ -151,12 +149,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     if (!currentRenderGraph) {
 		currentRenderGraph = std::make_unique<RenderGraph>();
     }
-    currentRenderGraph->SetShaderService(std::make_shared<rg::runtime::PsoShaderService>());
     PSOManager::GetInstance().initialize();
-        if (auto* shaderService = currentRenderGraph->GetShaderService()) {
-            shaderService->Initialize();
-            rg::runtime::SetActiveShaderService(shaderService);
-        }
         if (auto* uploadService = currentRenderGraph->GetUploadService()) {
                 uploadService->Initialize();
             rg::runtime::SetActiveUploadService(uploadService);
@@ -1021,9 +1014,6 @@ void Renderer::Cleanup() {
 	StallPipeline();
 	spdlog::info("Cleaning up resources");
     if (currentRenderGraph) {
-        if (auto* shaderService = currentRenderGraph->GetShaderService()) {
-            shaderService->Cleanup();
-        }
         if (auto* uploadService = currentRenderGraph->GetUploadService()) {
             uploadService->Cleanup();
         }
@@ -1037,7 +1027,6 @@ void Renderer::Cleanup() {
     ResourceManager::GetInstance().Cleanup();
     m_coreResourceProvider.Cleanup();
     currentRenderGraph.reset();
-    rg::runtime::SetActiveShaderService(nullptr);
     rg::runtime::SetActiveUploadService(nullptr);
     m_renderGraphRuntimeInitialized = false;
     m_currentEnvironment.reset();
