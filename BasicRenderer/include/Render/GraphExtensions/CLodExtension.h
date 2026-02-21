@@ -441,9 +441,9 @@ private:
         }
 
         void Update(const UpdateExecutionContext& executionContext) override {
-			auto* UpdateContext = executionContext.hostData ? executionContext.hostData->Get<RenderContext>() : nullptr;
-			if (!UpdateContext) return;
-			auto& context = *UpdateContext;
+			auto* updateContext = executionContext.hostData ? executionContext.hostData->Get<UpdateContext>() : nullptr;
+			if (!updateContext) return;
+			auto& context = *updateContext;
             m_declaredResourcesChanged = false;
 
             uint32_t zero = 0u;
