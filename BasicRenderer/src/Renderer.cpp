@@ -19,7 +19,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Render/RenderContext.h"
-#include "Render/RenderGraph/RenderGraph.h"
+#include "OpenRenderGraph/OpenRenderGraph.h"
 #include "Render/PassBuilders.h"
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "RenderPasses/Base/RenderPass.h"

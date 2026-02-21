@@ -2,13 +2,18 @@ cmake_minimum_required(VERSION 3.16)
 
 project(OpenRenderGraph LANGUAGES CXX)
 
-option(ORG_STRICT_HEADERS "Disallow OpenRenderGraph from including BasicRenderer headers" ON)
-
 find_package(spdlog CONFIG REQUIRED)
 find_package(flecs CONFIG REQUIRED)
 find_package(Boost REQUIRED COMPONENTS container_hash)
+find_package(imgui CONFIG REQUIRED)
+find_package(implot CONFIG REQUIRED)
+find_package(slang CONFIG REQUIRED)
 
 add_library(OpenRenderGraph STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/DebugUI/MemoryIntrospectionWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/DebugUI/MemoryViewWidget.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/DebugUI/RenderGraphInspector.cpp"
+
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/DescriptorHeap.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/CommandListPool.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/ImmediateExecution/ImmediateCommandList.cpp"
@@ -30,6 +35,10 @@ add_library(OpenRenderGraph STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Managers/Singletons/UploadManager.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Managers/Singletons/ReadbackManager.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Managers/Singletons/StatisticsManager.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Resources/ExternalBackingResource.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Resources/PixelBuffer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Resources/Buffers/Buffer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Resources/Buffers/DynamicBufferBase.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Resources/ResourceStateTracker.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Resources/GPUBacking/GPUBufferBacking.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Resources/GPUBacking/GPUTextureBacking.cpp"
@@ -43,21 +52,18 @@ set_target_properties(OpenRenderGraph PROPERTIES
 target_include_directories(OpenRenderGraph
     PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
-
-if (NOT ORG_STRICT_HEADERS)
-    target_include_directories(OpenRenderGraph
-        PUBLIC
-            "${CMAKE_SOURCE_DIR}/BasicRenderer/include"
-    )
-    message(WARNING "OpenRenderGraph: ORG_STRICT_HEADERS=OFF enables temporary BasicRenderer header access.")
-endif()
 
 target_link_libraries(OpenRenderGraph
     PUBLIC
         BasicRHI
         flecs::flecs
         Boost::container_hash
+        imgui::imgui
+        implot::implot
+        slang::slang
     PRIVATE
         spdlog::spdlog_header_only
 )

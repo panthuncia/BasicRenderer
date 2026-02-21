@@ -1,6 +1,6 @@
 #include "Render/Runtime/IUploadService.h"
 
-#include "Managers/Singletons/UploadManager.h"
+#include "OpenRenderGraph/Internal/Managers/Singletons/UploadManager.h"
 
 namespace rg::runtime {
 

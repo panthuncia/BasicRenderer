@@ -7,12 +7,9 @@
 #include <memory>
 
 #include "Managers/Singletons/ResourceManager.h"
-#include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Resources/Resource.h"
-#include "Resources/ExternalBackingResource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Managers/Singletons/UploadManager.h"
-#include "Render/Runtime/UploadServiceAccess.h"
 #include "Interfaces/IHasMemoryMetadata.h"
 
 using Microsoft::WRL::ComPtr;
@@ -88,15 +85,7 @@ private:
     }
 
     void OnSetName() override {
-        if (!m_dataBuffer) {
-            return;
-        }
-        if (name != "") {
-            m_dataBuffer->SetName((m_name + ": " + name).c_str());
-        }
-        else {
-            m_dataBuffer->SetName(m_name.c_str());
-        }
+        SetBackingName(m_name, name);
     }
 
     std::vector<T> m_data;
@@ -149,23 +138,19 @@ private:
 
 
         req.views = b;
-        auto resource = m_dataBuffer->GetAPIResource();
+        auto resource = GetAPIResource();
         rm.AssignDescriptorSlots(*this, resource, req);
     }
 
 
     void CreateBuffer(size_t capacity, size_t previousCapacity = 0) {
-        auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, sizeof(T) * capacity, GetGlobalResourceID(), m_UAV);
-		newDataBuffer->SetName((m_name+ ": " + name).c_str());
         if (m_dataBuffer != nullptr) {
 			// If shrinking, copy only up to new capacity. If growing, copy up to previous capacity.
             auto sizeToCopy = capacity < previousCapacity ? capacity : previousCapacity;
-            auto oldBackingResource = ExternalBackingResource::CreateShared(std::move(m_dataBuffer));
-            if (auto* uploadService = rg::runtime::GetActiveUploadService()) {
-                uploadService->QueueResourceCopy(shared_from_this(), oldBackingResource, sizeToCopy * sizeof(T));
-            }
+            QueueResourceCopyFromOldBacking(sizeToCopy * sizeof(T));
         }
-		SetBacking(std::move(newDataBuffer), sizeof(T) * capacity);
+		CreateAndSetBacking(rhi::HeapType::DeviceLocal, sizeof(T) * capacity, m_UAV);
+        SetName(name);
 
         for (const auto& bundle : m_metadataBundles) {
             ApplyMetadataToBacking(bundle);

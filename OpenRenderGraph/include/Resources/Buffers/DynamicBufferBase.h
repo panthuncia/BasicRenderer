@@ -2,12 +2,16 @@
 
 #include <memory>
 #include <optional>
-#include <stdexcept>
+#include <string>
+#include <vector>
 
+#include <rhi.h>
 
-#include "Managers/Singletons/DescriptorHeapManager.h"
+#include "Resources/AliasingPlacement.h"
 #include "Resources/GloballyIndexedResource.h"
-#include "Resources/GPUBacking/GpuBufferBacking.h"
+#include "Resources/TrackedAllocation.h"
+
+class GpuBufferBacking;
 
 class BufferView;
 
@@ -30,35 +34,17 @@ public:
         uint64_t uavCounterOffset = 0;
     };
 
-    BufferBase() {}
+    BufferBase();
 
     BufferBase(
         rhi::HeapType accessType,
         uint64_t bufferSize,
         bool unorderedAccess = false,
-        bool materialize = true)
-        : m_accessType(accessType)
-        , m_bufferSize(bufferSize)
-        , m_unorderedAccess(unorderedAccess)
-    {
-        if (materialize && bufferSize > 0) {
-            Materialize();
-        }
-    }
+        bool materialize = true);
 
-    rhi::Resource GetAPIResource() override {
-        if (!m_dataBuffer) {
-            throw std::runtime_error("Buffer resource is not materialized");
-        }
-        return m_dataBuffer->GetAPIResource();
-    }
+    rhi::Resource GetAPIResource() override;
 
-    SymbolicTracker* GetStateTracker() override {
-        if (!m_dataBuffer) {
-            throw std::runtime_error("Buffer resource is not materialized");
-        }
-        return m_dataBuffer->GetStateTracker();
-    }
+    SymbolicTracker* GetStateTracker() override;
 
     rhi::BarrierBatch GetEnhancedBarrierGroup(
         RangeSpec range,
@@ -67,189 +53,57 @@ public:
         rhi::ResourceLayout prevLayout,
         rhi::ResourceLayout newLayout,
         rhi::ResourceSyncState prevSyncState,
-        rhi::ResourceSyncState newSyncState) override
-    {
-        if (!m_dataBuffer) {
-            throw std::runtime_error("Buffer resource is not materialized");
-        }
-        return m_dataBuffer->GetEnhancedBarrierGroup(
-            range,
-            prevAccessType,
-            newAccessType,
-            prevLayout,
-            newLayout,
-            prevSyncState,
-            newSyncState);
-    }
+        rhi::ResourceSyncState newSyncState) override;
 
-    bool TryGetBufferByteSize(uint64_t& outByteSize) const override {
-        if (!m_dataBuffer) return false;
-        outByteSize = static_cast<uint64_t>(m_dataBuffer->GetSize());
-        return true;
-    }
+    bool TryGetBufferByteSize(uint64_t& outByteSize) const override;
 
     void ConfigureBacking(
         rhi::HeapType accessType,
         uint64_t bufferSize,
         bool unorderedAccess = false)
-    {
-        m_accessType = accessType;
-        m_bufferSize = bufferSize;
-        m_unorderedAccess = unorderedAccess;
-    }
+    ;
 
-    bool IsMaterialized() const {
-        return m_dataBuffer != nullptr;
-    }
+    bool IsMaterialized() const;
 
-    uint64_t GetBufferSize() const {
-        return m_bufferSize;
-    }
+    uint64_t GetBufferSize() const;
 
-    rhi::HeapType GetAccessType() const {
-        return m_accessType;
-    }
+    rhi::HeapType GetAccessType() const;
 
-    bool IsUnorderedAccessEnabled() const {
-        return m_unorderedAccess;
-    }
+    bool IsUnorderedAccessEnabled() const;
 
-    uint64_t GetBackingGeneration() const {
-        return m_backingGeneration;
-    }
+    uint64_t GetBackingGeneration() const;
 
-    void Materialize(const MaterializeOptions* options = nullptr) {
-        if (m_dataBuffer) {
-            return;
-        }
-        if (m_bufferSize == 0) {
-            throw std::runtime_error("Cannot materialize a zero-sized buffer");
-        }
+    void Materialize(const MaterializeOptions* options = nullptr);
 
-        if (options && options->aliasPlacement.has_value()) {
-            m_dataBuffer = GpuBufferBacking::CreateUnique(
-                m_accessType,
-                m_bufferSize,
-                GetGlobalResourceID(),
-                options->aliasPlacement.value(),
-                m_unorderedAccess);
-        }
-        else {
-            m_dataBuffer = GpuBufferBacking::CreateUnique(
-                m_accessType,
-                m_bufferSize,
-                GetGlobalResourceID(),
-                m_unorderedAccess);
-        }
+    void Dematerialize();
 
-        RefreshDescriptorContents();
-        ++m_backingGeneration;
-        OnBackingMaterialized();
-    }
+    void SetDescriptorRequirements(const DescriptorRequirements& requirements);
 
-    void Dematerialize() {
-        if (!m_dataBuffer) {
-            return;
-        }
-        m_dataBuffer.reset();
-        ++m_backingGeneration;
-    }
+    bool HasDescriptorRequirements() const;
 
-    void SetDescriptorRequirements(const DescriptorRequirements& requirements) {
-        m_descriptorRequirements = requirements;
+    void EnsureVirtualDescriptorSlotsAllocated();
 
-        EnsureVirtualDescriptorSlotsAllocated();
-        if (m_dataBuffer) {
-            RefreshDescriptorContents();
-        }
-    }
+    void RefreshDescriptorContents();
 
-    bool HasDescriptorRequirements() const {
-        return m_descriptorRequirements.has_value();
-    }
+    void SetAliasingPool(uint64_t poolID);
 
-    void EnsureVirtualDescriptorSlotsAllocated() {
-        if (!m_descriptorRequirements.has_value() || HasAnyDescriptorSlots()) {
-            return;
-        }
+    void ClearAliasingPoolHint();
 
-        DescriptorHeapManager::ViewRequirements req{};
-        DescriptorHeapManager::ViewRequirements::BufferViews views{};
+    std::optional<uint64_t> GetAliasingPoolHint() const;
 
-        views.createCBV = m_descriptorRequirements->createCBV;
-        views.createSRV = m_descriptorRequirements->createSRV;
-        views.createUAV = m_descriptorRequirements->createUAV;
-        views.createNonShaderVisibleUAV = m_descriptorRequirements->createNonShaderVisibleUAV;
-        views.cbvDesc = m_descriptorRequirements->cbvDesc;
-        views.srvDesc = m_descriptorRequirements->srvDesc;
-        views.uavDesc = m_descriptorRequirements->uavDesc;
-        views.uavCounterOffset = m_descriptorRequirements->uavCounterOffset;
+    void SetAllowAlias(bool allowAlias);
 
-        req.views = views;
-        DescriptorHeapManager::GetInstance().ReserveDescriptorSlots(*this, req);
-    }
+    bool IsAliasingAllowed() const;
 
-    void RefreshDescriptorContents() {
-        if (!m_descriptorRequirements.has_value() || !m_dataBuffer) {
-            return;
-        }
-
-        EnsureVirtualDescriptorSlotsAllocated();
-
-        DescriptorHeapManager::ViewRequirements req{};
-        DescriptorHeapManager::ViewRequirements::BufferViews views{};
-
-        views.createCBV = m_descriptorRequirements->createCBV;
-        views.createSRV = m_descriptorRequirements->createSRV;
-        views.createUAV = m_descriptorRequirements->createUAV;
-        views.createNonShaderVisibleUAV = m_descriptorRequirements->createNonShaderVisibleUAV;
-        views.cbvDesc = m_descriptorRequirements->cbvDesc;
-        views.srvDesc = m_descriptorRequirements->srvDesc;
-        views.uavDesc = m_descriptorRequirements->uavDesc;
-        views.uavCounterOffset = m_descriptorRequirements->uavCounterOffset;
-
-        req.views = views;
-        auto resource = m_dataBuffer->GetAPIResource();
-        DescriptorHeapManager::GetInstance().UpdateDescriptorContents(*this, resource, req);
-    }
-
-    void SetAliasingPool(uint64_t poolID) {
-        m_aliasingPoolID = poolID;
-        m_allowAlias = true;
-    }
-
-    void ClearAliasingPoolHint() {
-        m_aliasingPoolID.reset();
-    }
-
-    std::optional<uint64_t> GetAliasingPoolHint() const {
-        return m_aliasingPoolID;
-    }
-
-    void SetAllowAlias(bool allowAlias) {
-        m_allowAlias = allowAlias;
-    }
-
-    bool IsAliasingAllowed() const {
-        return m_allowAlias;
-    }
+    virtual ~BufferBase();
 
 protected:
-    void SetBacking(std::unique_ptr<GpuBufferBacking> backing, uint64_t bufferSize) {
-        m_dataBuffer = std::move(backing);
-        m_bufferSize = bufferSize;
-        RefreshDescriptorContents();
-        ++m_backingGeneration;
-        if (m_dataBuffer) {
-            OnBackingMaterialized();
-        }
-    }
+    void SetBacking(std::unique_ptr<GpuBufferBacking> backing, uint64_t bufferSize);
+    void CreateAndSetBacking(rhi::HeapType accessType, uint64_t bufferSize, bool unorderedAccess);
+    void SetBackingName(const std::string& baseName, const std::string& suffix);
+    void QueueResourceCopyFromOldBacking(uint64_t bytesToCopy);
 
-    void ApplyMetadataToBacking(const EntityComponentBundle& bundle) {
-        if (m_dataBuffer) {
-            m_dataBuffer->ApplyMetadataComponentBundle(bundle);
-        }
-    }
+    void ApplyMetadataToBacking(const EntityComponentBundle& bundle);
 
     virtual void OnBackingMaterialized() {}
 

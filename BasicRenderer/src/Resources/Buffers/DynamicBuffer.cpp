@@ -3,9 +3,11 @@
 #include <spdlog/spdlog.h>
 
 #include "Resources/Buffers/BufferView.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Resources/ExternalBackingResource.h"
+#include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 
 std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementSize) {

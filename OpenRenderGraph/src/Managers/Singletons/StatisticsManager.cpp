@@ -1,11 +1,11 @@
-#include "Managers/Singletons/StatisticsManager.h"
+#include "OpenRenderGraph/Internal/Managers/Singletons/StatisticsManager.h"
 
 #include <algorithm>
 #include <cstring>
 #include <rhi_helpers.h>
 #include <spdlog/spdlog.h>
 
-#include "Managers/Singletons/DeviceManager.h"
+#include "OpenRenderGraph/Internal/Managers/Singletons/DeviceManager.h"
 #include "Render/Runtime/OpenRenderGraphSettings.h"
 
 StatisticsManager& StatisticsManager::GetInstance() {

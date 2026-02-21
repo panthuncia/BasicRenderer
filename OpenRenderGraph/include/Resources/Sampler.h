@@ -1,6 +1,8 @@
 #pragma once
 #include <memory>
-#include "Managers/Singletons/DescriptorHeapManager.h"
+#include <cstring>
+#include <unordered_map>
+#include <rhi.h>
 
 namespace rhi {
 
@@ -129,13 +131,7 @@ namespace rhi {
 
 class Sampler {
 public:
-    static std::shared_ptr<Sampler> CreateSampler(rhi::SamplerDesc samplerDesc) {
-		auto it = m_samplerCache.find(samplerDesc);
-		if (it != m_samplerCache.end()) {
-			return it->second;
-		}
-		return std::shared_ptr<Sampler>(new Sampler(samplerDesc));
-    }
+        static std::shared_ptr<Sampler> CreateSampler(rhi::SamplerDesc samplerDesc);
     ~Sampler() {
     }
 
@@ -154,10 +150,7 @@ public:
 private:
     UINT m_index; // Index of the sampler in the descriptor heap
     rhi::SamplerDesc m_samplerDesc; // Descriptor of the sampler
-    Sampler(rhi::SamplerDesc samplerDesc)
-        : m_index(0), m_samplerDesc(samplerDesc) {
-        m_index = DescriptorHeapManager::GetInstance().CreateIndexedSampler(m_samplerDesc);
-    }
+    Sampler(rhi::SamplerDesc samplerDesc);
 
     static std::shared_ptr<Sampler> m_defaultSampler;
 	static std::shared_ptr<Sampler> m_defaultShadowSampler;

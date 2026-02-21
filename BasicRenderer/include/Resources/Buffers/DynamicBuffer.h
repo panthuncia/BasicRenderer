@@ -7,7 +7,6 @@
 #include <typeinfo>
 #include <string>
 
-#include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Resources/Buffers/MemoryBlock.h"
@@ -51,16 +50,12 @@ private:
     }
 
     void OnSetName() override {
-        if (!m_dataBuffer) {
-            return;
-        }
         if (name != "") {
 			m_name = name;
-			std::string newname = m_baseName + ": " + m_name;
-            m_dataBuffer->SetName(newname.c_str());
+            SetBackingName(m_baseName, m_name);
         }
         else {
-            m_dataBuffer->SetName(m_baseName.c_str());
+            SetBackingName(m_baseName, "");
         }
     }
 

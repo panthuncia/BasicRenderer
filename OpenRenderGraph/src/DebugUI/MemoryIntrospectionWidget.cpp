@@ -1,4 +1,4 @@
-#include "Menu/MemoryIntrospectionWidget.h"
+#include "DebugUI/MemoryIntrospectionWidget.h"
 
 #include <cmath>
 #include <unordered_map>

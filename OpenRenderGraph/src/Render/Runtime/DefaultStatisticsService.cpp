@@ -1,6 +1,6 @@
 #include "Render/Runtime/IStatisticsService.h"
 
-#include "Managers/Singletons/StatisticsManager.h"
+#include "OpenRenderGraph/Internal/Managers/Singletons/StatisticsManager.h"
 
 namespace rg::runtime {
 

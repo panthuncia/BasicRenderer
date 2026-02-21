@@ -1,4 +1,4 @@
-#include "Menu/MemoryViewWidget.h"
+#include "DebugUI/MemoryViewWidget.h"
 
 #include <algorithm>
 #include <cctype>

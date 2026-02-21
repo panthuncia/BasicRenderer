@@ -1,11 +1,11 @@
-#include "Managers/Singletons/DescriptorHeapManager.h"
+#include "OpenRenderGraph/Internal/Managers/Singletons/DescriptorHeapManager.h"
 
 #include <stdexcept>
 
 #include <spdlog/spdlog.h>
 #include <rhi_helpers.h>
 
-#include "Managers/Singletons/DeviceManager.h"
+#include "OpenRenderGraph/Internal/Managers/Singletons/DeviceManager.h"
 #include "Resources/GloballyIndexedResource.h"
 
 void DescriptorHeapManager::Initialize() {

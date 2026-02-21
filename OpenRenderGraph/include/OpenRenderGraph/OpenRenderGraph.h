@@ -1,0 +1,28 @@
+#pragma once
+
+// Core user-facing API surface for OpenRenderGraph.
+// Include this first for typical pass authoring and graph composition.
+
+#include "Render/RenderGraph/RenderGraph.h"
+#include "Render/PassBuilders.h"
+#include "Render/PassInputs.h"
+#include "Render/PassExecutionContext.h"
+#include "Render/QueueKind.h"
+
+#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/ComputePass.h"
+#include "RenderPasses/Base/PassReturn.h"
+
+#include "Interfaces/IResourceProvider.h"
+#include "Interfaces/IResourceResolver.h"
+
+#include "Resources/ResourceIdentifier.h"
+#include "Resources/Resource.h"
+#include "Resources/TextureDescription.h"
+#include "Resources/Buffers/Buffer.h"
+#include "Resources/PixelBuffer.h"
+
+#include "Render/Runtime/IStatisticsService.h"
+#include "Render/Runtime/IUploadService.h"
+#include "Render/Runtime/IReadbackService.h"
+#include "Render/Runtime/IRenderGraphSettingsService.h"

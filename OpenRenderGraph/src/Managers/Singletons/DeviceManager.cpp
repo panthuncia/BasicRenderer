@@ -1,15 +1,15 @@
-#include "Managers/Singletons/DeviceManager.h"
+#include "OpenRenderGraph/Internal/Managers/Singletons/DeviceManager.h"
 
 #include <spdlog/spdlog.h>
 #include <flecs.h>
 #include <rhi_interop_dx12.h>
 
 #include "Resources/MemoryStatisticsComponents.h"
-#include "Managers/Singletons/ECSManager.h"
+#include "OpenRenderGraph/Internal/Managers/Singletons/ECSManager.h"
 #include "Resources/ResourceIdentifier.h"
 #include "Utilities/ORGUtilities.h"
-#include "Resources/GPUBacking/GpuBufferBacking.h"
-#include "Resources/GPUBacking/GpuTextureBacking.h"
+#include "OpenRenderGraph/Internal/Resources/GPUBacking/GpuBufferBacking.h"
+#include "OpenRenderGraph/Internal/Resources/GPUBacking/GPUTextureBacking.h"
 #include "Render/Runtime/OpenRenderGraphSettings.h"
 
 rhi::Result DeviceManager::CreateResourceTracked(

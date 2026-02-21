@@ -1,10 +1,11 @@
-#include "Resources/GPUBacking/GpuBufferBacking.h"
+#include "OpenRenderGraph/Internal/Resources/GPUBacking/GpuBufferBacking.h"
 
 #include <rhi_helpers.h>
 #include <spdlog/spdlog.h>
 #include <stdexcept>
 
-#include "Managers/Singletons/DeviceManager.h"
+#include "OpenRenderGraph/Internal/Managers/Singletons/DeviceManager.h"
+#include "OpenRenderGraph/Internal/Managers/Singletons/DeletionManager.h"
 #include "Resources/MemoryStatisticsComponents.h"
 
 GpuBufferBacking::GpuBufferBacking(

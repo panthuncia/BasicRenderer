@@ -3,11 +3,11 @@
 #include <filesystem>
 
 #include "RenderPasses/Base/RenderPass.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Resources/Texture.h"
 #include "Utilities/Utilities.h"
-#include "Managers/Singletons/ReadbackManager.h"
 #include "Interfaces/IDynamicDeclaredResources.h"
 
 #include <vector>

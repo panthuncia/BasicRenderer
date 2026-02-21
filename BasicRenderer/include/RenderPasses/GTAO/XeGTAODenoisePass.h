@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RenderPasses/Base/ComputePass.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"

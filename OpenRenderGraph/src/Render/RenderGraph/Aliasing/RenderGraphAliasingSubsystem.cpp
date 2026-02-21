@@ -3,7 +3,7 @@
 #include <algorithm>
 
 #include "Render/RenderGraph/RenderGraph.h"
-#include "Managers/Singletons/DeletionManager.h"
+#include "OpenRenderGraph/Internal/Managers/Singletons/DeletionManager.h"
 
 rg::alias::AutoAliasDebugSnapshot rg::alias::RenderGraphAliasingSubsystem::BuildDebugSnapshot(
 	AutoAliasMode mode,

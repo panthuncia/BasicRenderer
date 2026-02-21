@@ -3,6 +3,7 @@
 #include <rhi.h>
 
 #include "Render/RenderGraph/RenderGraph.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "Resources/Buffers/Buffer.h"

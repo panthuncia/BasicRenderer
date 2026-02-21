@@ -6,16 +6,12 @@
 #include <deque>
 #include <rhi.h>
 
-#include "Managers/Singletons/DeviceManager.h"
-#include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Resources/Resource.h"
-#include "Resources/ExternalBackingResource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Resources/Buffers/BufferView.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Interfaces/IHasMemoryMetadata.h"
-#include "Render/Runtime/UploadServiceAccess.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -108,15 +104,7 @@ private:
 		SetName(name);
     }
     void OnSetName() override {
-        if (!m_dataBuffer) {
-            return;
-        }
-        if (name != "") {
-            m_dataBuffer->SetName((m_name + ": " + name).c_str());
-        }
-        else {
-            m_dataBuffer->SetName(m_name.c_str());
-        }
+        SetBackingName(m_name, name);
     }
 
     uint32_t m_capacity;
@@ -170,19 +158,15 @@ private:
         };
 
         req.views = b;
-        auto resource = m_dataBuffer->GetAPIResource();
+        auto resource = GetAPIResource();
         rm.AssignDescriptorSlots(*this, resource, req);
     }
 
     void CreateBuffer(uint64_t capacity, size_t previousCapacity = 0) {
-        auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, m_elementSize * capacity, GetGlobalResourceID(), m_UAV);
         if (m_dataBuffer != nullptr) {
-			auto oldBackingResource = ExternalBackingResource::CreateShared(std::move(m_dataBuffer));
-            if (auto* uploadService = rg::runtime::GetActiveUploadService()) {
-                uploadService->QueueResourceCopy(shared_from_this(), oldBackingResource, previousCapacity * sizeof(T));
-            }
+            QueueResourceCopyFromOldBacking(previousCapacity * sizeof(T));
         }
-		SetBacking(std::move(newDataBuffer), m_elementSize * capacity);
+		CreateAndSetBacking(rhi::HeapType::DeviceLocal, m_elementSize * capacity, m_UAV);
 
         for (const auto& bundle : m_metadataBundles) {
             ApplyMetadataToBacking(bundle);

@@ -1,11 +1,11 @@
-#include "Managers/Singletons/UploadManager.h"
+#include "OpenRenderGraph/Internal/Managers/Singletons/UploadManager.h"
 
 #include <rhi_helpers.h>
 #include <rhi_debug.h>
 
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Resource.h"
-#include "Managers/Singletons/DeviceManager.h"
+#include "OpenRenderGraph/Internal/Managers/Singletons/DeviceManager.h"
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Render/Runtime/OpenRenderGraphSettings.h"
 

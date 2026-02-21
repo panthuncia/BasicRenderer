@@ -17,7 +17,6 @@
 #include "Interfaces/IResourceProvider.h"
 #include "Render/ResourceRegistry.h"
 #include "Render/CommandListPool.h"
-#include "Managers/CommandRecordingManager.h"
 #include "Interfaces/IPassBuilder.h"
 #include "Render/MemoryIntrospectionAPI.h"
 #include "Render/Runtime/IStatisticsService.h"
@@ -32,6 +31,7 @@
 class Resource;
 class RenderPassBuilder;
 class ComputePassBuilder;
+class CommandRecordingManager;
 struct IPassBuilder;
 
 template<typename T>

@@ -1,5 +1,5 @@
-#include "Menu/RenderGraphInspector.h"
-#include "Menu/MemoryViewWidget.h"
+#include "DebugUI/RenderGraphInspector.h"
+#include "DebugUI/MemoryViewWidget.h"
 #include "imgui.h"
 #include "implot.h"
 #include <algorithm>

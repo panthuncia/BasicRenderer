@@ -7,10 +7,8 @@
 #include <limits>
 #include <vector>
 
-#include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
-#include "Managers/Singletons/UploadManager.h"
 #include "Interfaces/IHasMemoryMetadata.h"
 
 using Microsoft::WRL::ComPtr;
@@ -293,12 +291,7 @@ private:
         m_descriptorRequirements = requirements;
     }
 
-    void OnSetName() override {
-        if (!m_dataBuffer) {
-            return;
-        }
-    	m_dataBuffer->SetName(name.c_str());
-    }
+    void OnSetName() override;
 
     void OnBackingMaterialized() override {
         for (const auto& bundle : m_metadataBundles) {

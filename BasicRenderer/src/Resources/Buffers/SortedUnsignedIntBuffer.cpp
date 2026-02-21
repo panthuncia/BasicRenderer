@@ -5,7 +5,21 @@
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/UploadManager.h"
 #include "Resources/ExternalBackingResource.h"
+#include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Render/Runtime/UploadServiceAccess.h"
+
+void SortedUnsignedIntBuffer::OnSetName() {
+    if (!m_dataBuffer) {
+        return;
+    }
+
+    if (name != "") {
+        m_dataBuffer->SetName((m_name + ": " + name).c_str());
+    }
+    else {
+        m_dataBuffer->SetName(m_name.c_str());
+    }
+}
 
 void SortedUnsignedIntBuffer::Insert(unsigned int element) {
     // Resize the buffer if necessary

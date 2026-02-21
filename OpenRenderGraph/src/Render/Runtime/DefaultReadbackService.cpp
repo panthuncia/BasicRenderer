@@ -1,6 +1,6 @@
 #include "Render/Runtime/IReadbackService.h"
 
-#include "Managers/Singletons/ReadbackManager.h"
+#include "OpenRenderGraph/Internal/Managers/Singletons/ReadbackManager.h"
 
 namespace rg::runtime {
 

@@ -5,7 +5,6 @@
 #include <algorithm> // For std::lower_bound, std::upper_bound
 #include <rhi.h>
 
-#include "Managers/Singletons/DeviceManager.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
@@ -45,17 +44,7 @@ private:
         SetName(name);
     }
 
-    void OnSetName() override {
-        if (!m_dataBuffer) {
-            return;
-        }
-        if (name != "") {
-            m_dataBuffer->SetName((m_name + ": " + name).c_str());
-        }
-        else {
-            m_dataBuffer->SetName(m_name.c_str());
-        }
-    }
+    void OnSetName() override;
 
     void AssignDescriptorSlots();
 
