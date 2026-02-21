@@ -8,6 +8,12 @@
 #include "Render/PassInputs.h"
 #include "Render/PassExecutionContext.h"
 #include "Render/QueueKind.h"
+#include "Render/DescriptorHeap.h"
+#include "Render/ImmediateExecution/ImmediateCommandList.h"
+#include "Render/CommandListPool.h"
+#include "Render/MemoryIntrospectionAPI.h"
+#include "Render/MemoryIntrospectionBackend.h"
+#include "Render/RenderGraph/Aliasing/RenderGraphAliasingSubsystem.h"
 
 #include "RenderPasses/Base/RenderPass.h"
 #include "RenderPasses/Base/ComputePass.h"
