@@ -90,7 +90,7 @@ Use materialized when:
 - the resource lifetime is long-lived and always resident,
 - external code requires the backing allocation right away.
 
-In short: default to unmaterialized for graph-managed/transient resources; choose materialized for always-on or externally-immediate resources.
+Practically: default to unmaterialized for resources that the GPU will be managing, and to materialized for resources that you will be uploading data to from the CPU.
 
 ### 3) Providers: what they are and why they exist
 
