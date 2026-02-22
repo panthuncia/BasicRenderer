@@ -5,9 +5,9 @@
 #include <memory>
 #include <span>
 #include <spdlog/spdlog.h>
+#include <OpenRenderGraph/OpenRenderGraph.h>
 
 #include "Scene/Components.h"
-#include "Interfaces/IResourceProvider.h"
 #include "Materials/TechniqueDescriptor.h"
 
 class DynamicGloballyIndexedResource;

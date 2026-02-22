@@ -1,9 +1,10 @@
 #pragma once
 #include <vector>
+#include <OpenRenderGraph/OpenRenderGraph.h>
+
 #include "Managers/Singletons/SettingsManager.h"
 #include "rhi_helpers.h"
 #include "rhi_allocator.h"
-#include "Resources/TrackedAllocation.h"
 
 class DeletionManager {
 public:

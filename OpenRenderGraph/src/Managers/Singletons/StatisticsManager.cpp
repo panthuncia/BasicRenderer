@@ -1,11 +1,11 @@
-#include "OpenRenderGraph/Internal/Managers/Singletons/StatisticsManager.h"
+#include "Managers/Singletons/StatisticsManager.h"
 
 #include <algorithm>
 #include <cstring>
 #include <rhi_helpers.h>
 #include <spdlog/spdlog.h>
 
-#include "OpenRenderGraph/Internal/Managers/Singletons/DeviceManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Render/Runtime/OpenRenderGraphSettings.h"
 
 StatisticsManager& StatisticsManager::GetInstance() {
@@ -67,6 +67,17 @@ unsigned StatisticsManager::RegisterPass(const std::string& passName, bool isGeo
 
 void StatisticsManager::BeginFrame() {
     ++m_frameSerial;
+
+    rg::runtime::MemoryBudgetStats memoryBudgetStats{};
+    memoryBudgetStats.sampleFrameSerial = m_frameSerial;
+    if (auto* allocator = DeviceManager::GetInstance().GetAllocator()) {
+        rhi::ma::Budget localBudget{};
+        allocator->GetBudget(&localBudget, nullptr);
+        memoryBudgetStats.usageBytes = localBudget.usageBytes;
+        memoryBudgetStats.budgetBytes = localBudget.budgetBytes;
+        memoryBudgetStats.valid = true;
+    }
+    m_memoryBudgetStats = memoryBudgetStats;
 }
 
 void StatisticsManager::RebuildVisiblePassIndices(uint64_t maxStaleFrames, std::vector<unsigned>& out) const {
@@ -453,4 +464,5 @@ void StatisticsManager::ClearAll() {
     m_queryPoolPassCapacity = 0;
     m_unnamedPassCounter = 0;
     m_frameSerial = 0;
+    m_memoryBudgetStats = {};
 }

@@ -6,11 +6,10 @@
 #include <rhi.h>
 #include <memory>
 
-#include "Managers/Singletons/ResourceManager.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
-#include "Managers/Singletons/UploadManager.h"
 #include "Interfaces/IHasMemoryMetadata.h"
+#include "Render/Runtime/UploadServiceAccess.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -30,7 +29,7 @@ public:
 
         unsigned int index = static_cast<uint32_t>(m_data.size()) - 1; // TODO: Fix buffer max sizes
 
-        BUFFER_UPLOAD(&element, sizeof(T), UploadManager::UploadTarget::FromShared(shared_from_this()), index * sizeof(T));
+        BUFFER_UPLOAD(&element, sizeof(T), rg::runtime::UploadTarget::FromShared(shared_from_this()), index * sizeof(T));
 
         return index;
     }
@@ -48,7 +47,7 @@ public:
 			// batch upload data after the removed index
 			unsigned int countToUpload = static_cast<unsigned int>(m_data.size()) - index;
             if (countToUpload > 0) {
-                BUFFER_UPLOAD(&m_data[index], sizeof(T) * countToUpload, UploadManager::UploadTarget::FromShared(shared_from_this()), index * sizeof(T));
+                BUFFER_UPLOAD(&m_data[index], sizeof(T) * countToUpload, rg::runtime::UploadTarget::FromShared(shared_from_this()), index * sizeof(T));
             }
         }
     }
@@ -70,7 +69,7 @@ public:
     }
 
     void UpdateAt(UINT index, const T& element) {
-        BUFFER_UPLOAD(&element, sizeof(T), UploadManager::UploadTarget::FromShared(shared_from_this()), index * sizeof(T));
+        BUFFER_UPLOAD(&element, sizeof(T), rg::runtime::UploadTarget::FromShared(shared_from_this()), index * sizeof(T));
     }
 
     UINT Size() {
@@ -100,19 +99,16 @@ private:
 
     void AssignDescriptorSlots(uint32_t capacity)
     {
-        auto& rm = ResourceManager::GetInstance();
+        BufferBase::DescriptorRequirements requirements{};
 
-        ResourceManager::ViewRequirements req{};
-        ResourceManager::ViewRequirements::BufferViews b{};
-
-        b.createCBV = false;
-        b.createSRV = true;
-        b.createUAV = m_UAV;
-        b.createNonShaderVisibleUAV = false;
-        b.uavCounterOffset = 0;
+        requirements.createCBV = false;
+        requirements.createSRV = true;
+        requirements.createUAV = m_UAV;
+        requirements.createNonShaderVisibleUAV = false;
+        requirements.uavCounterOffset = 0;
 
         // SRV (structured buffer)
-        b.srvDesc = rhi::SrvDesc{
+        requirements.srvDesc = rhi::SrvDesc{
         	.dimension = rhi::SrvDim::Buffer,
         	.formatOverride = rhi::Format::Unknown,
             .buffer = {
@@ -124,7 +120,7 @@ private:
         };
 
         // UAV (structured buffer), no counter
-        b.uavDesc = rhi::UavDesc{
+        requirements.uavDesc = rhi::UavDesc{
         	.dimension = rhi::UavDim::Buffer,
         	.formatOverride = rhi::Format::Unknown,
             .buffer = {
@@ -136,10 +132,7 @@ private:
             },
         };
 
-
-        req.views = b;
-        auto resource = GetAPIResource();
-        rm.AssignDescriptorSlots(*this, resource, req);
+        SetDescriptorRequirements(requirements);
     }
 
 

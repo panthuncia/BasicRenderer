@@ -5,12 +5,9 @@
 #include <vector>
 #include <string_view>
 
-#include "Resources/TextureDescription.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
-#include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
-#include "Render/PassBuilders.h"
-#include "Interfaces/IDynamicDeclaredResources.h"
+#include "OpenRenderGraph/OpenRenderGraph.h"
 
 class PixelBuffer;
 class Sampler;

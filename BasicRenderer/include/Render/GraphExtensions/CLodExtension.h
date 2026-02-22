@@ -448,14 +448,14 @@ private:
             m_declaredResourcesChanged = false;
 
             uint32_t zero = 0u;
-            BUFFER_UPLOAD(&zero, sizeof(uint32_t), UploadManager::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
+            BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
 
             if (IsCLodWorkGraphTelemetryEnabled()) {
                 std::vector<uint32_t> zeroTelemetry(CLodWorkGraphCounterCount, 0u);
                 BUFFER_UPLOAD(
                     zeroTelemetry.data(),
                     static_cast<uint32_t>(zeroTelemetry.size() * sizeof(uint32_t)),
-                    UploadManager::UploadTarget::FromShared(m_workGraphTelemetryBuffer),
+                    rg::runtime::UploadTarget::FromShared(m_workGraphTelemetryBuffer),
                     0);
             }
         }
@@ -638,7 +638,7 @@ private:
 
             // Clear the histogram buffer
             std::vector<uint32_t> zeroData(numRasterBuckets, 0);
-            BUFFER_UPLOAD(zeroData.data(), static_cast<uint32_t>(zeroData.size() * sizeof(uint32_t)), UploadManager::UploadTarget::FromShared(m_histogramBuffer), 0);
+            BUFFER_UPLOAD(zeroData.data(), static_cast<uint32_t>(zeroData.size() * sizeof(uint32_t)), rg::runtime::UploadTarget::FromShared(m_histogramBuffer), 0);
         }
 
         void Cleanup() override {
@@ -954,7 +954,7 @@ private:
             std::vector<uint32_t> zeroData(numBuckets, 0u);
             BUFFER_UPLOAD(zeroData.data(),
                 static_cast<uint32_t>(zeroData.size() * sizeof(uint32_t)),
-                UploadManager::UploadTarget::FromShared(m_writeCursorBuffer),
+                rg::runtime::UploadTarget::FromShared(m_writeCursorBuffer),
                 0);
         }
 
@@ -1121,7 +1121,7 @@ private:
                 BUFFER_UPLOAD(
                     m_viewRasterInfos.data(),
                     static_cast<uint32_t>(m_viewRasterInfos.size() * sizeof(CLodViewRasterInfo)),
-                    UploadManager::UploadTarget::FromShared(m_viewRasterInfoBuffer),
+                    rg::runtime::UploadTarget::FromShared(m_viewRasterInfoBuffer),
                     0);
                 m_declaredResourcesChanged = true;
             }

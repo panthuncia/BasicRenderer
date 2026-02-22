@@ -2,7 +2,7 @@
 
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "Resources/PixelBuffer.h"
+#include "OpenRenderGraph/OpenRenderGraph.h"
 #include "ThirdParty/FFX/host/ffx_sssr.h"
 #include "ThirdParty/FFX/host/backends/dx12/ffx_dx12.h"
 #include "Managers/Singletons/ResourceManager.h"

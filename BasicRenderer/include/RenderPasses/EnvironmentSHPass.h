@@ -5,8 +5,8 @@
 #include "Render/RenderContext.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/EnvironmentManager.h"
-#include "Managers/Singletons/ResourceManager.h"
 #include "Interfaces/IDynamicDeclaredResources.h"
+#include "Render/Runtime/DescriptorServiceAccess.h"
 
 #include <vector>
 
@@ -26,7 +26,7 @@ public:
 		shSamplerDesc.minLod = 0.0f;
 		shSamplerDesc.maxLod = (std::numeric_limits<float>::max)();
 
-		m_samplerIndex = ResourceManager::GetInstance().CreateIndexedSampler(shSamplerDesc);
+		m_samplerIndex = rg::runtime::CreateIndexedSamplerFromActiveDescriptorService(shSamplerDesc);
 
 		CreatePSO();
 	}

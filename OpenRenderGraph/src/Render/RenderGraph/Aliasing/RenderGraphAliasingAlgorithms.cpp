@@ -10,8 +10,8 @@
 
 #include <rhi_helpers.h>
 
-#include "OpenRenderGraph/Internal/Managers/Singletons/DeviceManager.h"
-#include "OpenRenderGraph/Internal/Managers/Singletons/DeletionManager.h"
+#include "Managers/Singletons/DeviceManager.h"
+#include "Managers/Singletons/DeletionManager.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/MemoryStatisticsComponents.h"

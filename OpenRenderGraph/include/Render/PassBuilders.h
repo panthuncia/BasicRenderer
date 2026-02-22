@@ -893,7 +893,7 @@ public:
         pass->SetInputs(std::forward<InputsT>(inputs));
     }
 
-    // Stable-args-only convenience
+	// stable-args-only overloads, for convenience
     template<DerivedRenderPass PassT, typename... StableCtorArgs>
     void Build(StableCtorArgs&&... ctorArgs)&
     {
@@ -1719,8 +1719,8 @@ private:
             // Create a tracker spanning "all" with initial NONE state
             auto [it, inserted] = trackers.try_emplace(
                 id,
-                /*whole=*/ RangeSpec{},
-                /*init=*/  initialState
+				/*whole=*/RangeSpec{},
+                /*init=*/ initialState
             );
             auto& tracker = it->second;
 

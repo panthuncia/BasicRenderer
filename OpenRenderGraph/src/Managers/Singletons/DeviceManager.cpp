@@ -1,15 +1,15 @@
-#include "OpenRenderGraph/Internal/Managers/Singletons/DeviceManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 
 #include <spdlog/spdlog.h>
 #include <flecs.h>
 #include <rhi_interop_dx12.h>
 
 #include "Resources/MemoryStatisticsComponents.h"
-#include "OpenRenderGraph/Internal/Managers/Singletons/ECSManager.h"
+#include "Managers/Singletons/ECSManager.h"
 #include "Resources/ResourceIdentifier.h"
 #include "Utilities/ORGUtilities.h"
-#include "OpenRenderGraph/Internal/Resources/GPUBacking/GpuBufferBacking.h"
-#include "OpenRenderGraph/Internal/Resources/GPUBacking/GPUTextureBacking.h"
+#include "Resources/GPUBacking/GpuBufferBacking.h"
+#include "Resources/GPUBacking/GPUTextureBacking.h"
 #include "Render/Runtime/OpenRenderGraphSettings.h"
 
 rhi::Result DeviceManager::CreateResourceTracked(
@@ -128,9 +128,7 @@ rhi::Result DeviceManager::AllocateMemoryTracked(
     return result;
 }
 
-void DeviceManager::Initialize() {
-    auto numFramesInFlight = rg::runtime::GetOpenRenderGraphSettings().numFramesInFlight;
-
+void DeviceManager::Initialize(rhi::Device device) {
     if (!s_trackingHooks.createTrackingToken) {
         s_trackingHooks.createTrackingToken = [](flecs::entity existing) {
             auto& world = ECSManager::GetInstance().GetWorld();
@@ -142,18 +140,10 @@ void DeviceManager::Initialize() {
         };
     }
 
-    bool enableDebug = false;
-#if BUILD_TYPE == BUILD_DEBUG
-    enableDebug = false;
-#endif
-	rhi::CreateD3D12Device(
-        rhi::DeviceCreateInfo{ .backend = rhi::Backend::D3D12, .framesInFlight = numFramesInFlight, .enableDebug = enableDebug },
-    m_device,
-        true);
+    m_device = rhi::DevicePtr(device, nullptr, nullptr);
     m_graphicsQueue = m_device->GetQueue(rhi::QueueKind::Graphics);
     m_computeQueue = m_device->GetQueue(rhi::QueueKind::Compute);
     m_copyQueue = m_device->GetQueue(rhi::QueueKind::Copy);
-    CheckGPUFeatures();
 
     rhi::ma::AllocatorDesc desc;
     desc.device = m_device.Get();
@@ -185,16 +175,9 @@ void DeviceManager::Cleanup() {
     m_graphicsQueue.Reset();
     m_computeQueue.Reset();
     m_copyQueue.Reset();
-    m_meshShadersSupported = false;
     if (m_device) {
         m_device.Reset();
     }
-}
-
-void DeviceManager::CheckGPUFeatures() {
-    D3D12_FEATURE_DATA_D3D12_OPTIONS7 features = {}; // TODO: Use query interface in RHI
-    rhi::dx12::get_device(m_device.Get())->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &features, sizeof(features));
-    m_meshShadersSupported = features.MeshShaderTier != D3D12_MESH_SHADER_TIER_NOT_SUPPORTED;
 }
 
 static std::string AutoBreadcrumbOpToString(D3D12_AUTO_BREADCRUMB_OP op) {

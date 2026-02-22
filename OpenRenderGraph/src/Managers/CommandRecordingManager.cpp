@@ -1,4 +1,4 @@
-#include "Internal/Managers/CommandRecordingManager.h"
+#include "Managers/CommandRecordingManager.h"
 
 #include <cassert>
 

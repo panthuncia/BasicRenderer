@@ -4,8 +4,8 @@
 #include <cmath>
 #include <stdexcept>
 
-#include "OpenRenderGraph/Internal/Managers/Singletons/DescriptorHeapManager.h"
-#include "OpenRenderGraph/Internal/Resources/GPUBacking/GPUTextureBacking.h"
+#include "Managers/Singletons/DescriptorHeapManager.h"
+#include "Resources/GPUBacking/GPUTextureBacking.h"
 #include "Utilities/ORGUtilities.h"
 
 namespace {

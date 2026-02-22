@@ -25,7 +25,7 @@ public:
 		s_trackingHooks = {};
 	}
 
-    void Initialize();
+	void Initialize(rhi::Device device);
 	void Cleanup();
 	rhi::Device GetDevice() {
         return m_device.Get();
@@ -45,10 +45,6 @@ public:
 
 	rhi::ma::Allocator* GetAllocator() {
 		return m_allocator;
-	}
-
-	bool GetMeshShadersSupported() {
-		return m_meshShadersSupported;
 	}
 
 	// Create a resource and track its allocation with an entity.
@@ -83,11 +79,8 @@ private:
 	rhi::Queue m_graphicsQueue;
 	rhi::Queue m_computeQueue;
 	rhi::Queue m_copyQueue;
-	bool m_meshShadersSupported = false;
-	rhi::ma::Allocator* m_allocator;
+	rhi::ma::Allocator* m_allocator = nullptr;
 	inline static TrackingHooks s_trackingHooks{};
-
-    void CheckGPUFeatures();
 
 };
 

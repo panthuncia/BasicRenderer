@@ -12,6 +12,7 @@
 #include "RenderPasses/Base/RenderPass.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Render/ImmediateExecution/ImmediateCommandList.h"
+#include "Render/Runtime/UploadTypes.h"
 
 class Buffer;
 class Resource;
@@ -36,38 +37,8 @@ struct UploadPage {
 
 class UploadManager {
 public:
-
-	struct UploadResolveContext {
-		ResourceRegistry* registry = nullptr;
-		uint64_t epoch = 0; // optional
-	};
-
-	struct UploadTarget {
-		enum class Kind { RegistryHandle, PinnedShared };
-
-		Kind kind{};
-		ResourceRegistry::RegistryHandle h{};
-		std::shared_ptr<Resource> pinned{};   // keep-alive for non-registry targets
-
-		static UploadTarget FromHandle(const ResourceRegistry::RegistryHandle& handle) { // registry lookup
-			UploadTarget t; t.kind = Kind::RegistryHandle; t.h = handle; return t;
-		}
-		static UploadTarget FromShared(std::shared_ptr<Resource> p) { // keep-alive
-			UploadTarget t; t.kind = Kind::PinnedShared; t.pinned = std::move(p); return t;
-		}
-
-		bool operator ==(const UploadTarget& other) const {
-			if (kind != other.kind) return false;
-			if (kind == Kind::RegistryHandle) {
-				return h.GetKey().idx == other.h.GetKey().idx && 
-					h.GetGeneration() == other.h.GetGeneration() && 
-					h.GetEpoch() == other.h.GetEpoch();
-			}
-			else {
-				return pinned == other.pinned;
-			}
-		}
-	};
+	using UploadResolveContext = rg::runtime::UploadResolveContext;
+	using UploadTarget = rg::runtime::UploadTarget;
 
 	class ResourceUpdate {
 	public:

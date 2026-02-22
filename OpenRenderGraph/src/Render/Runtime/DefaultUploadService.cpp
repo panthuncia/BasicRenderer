@@ -1,6 +1,6 @@
 #include "Render/Runtime/IUploadService.h"
 
-#include "OpenRenderGraph/Internal/Managers/Singletons/UploadManager.h"
+#include "Managers/Singletons/UploadManager.h"
 
 namespace rg::runtime {
 
@@ -11,10 +11,7 @@ public:
         UploadManager::GetInstance().Initialize();
     }
 
-    void SetUploadResolveContext(ResourceRegistry* registry, uint64_t epoch) override {
-        UploadManager::UploadResolveContext context{};
-        context.registry = registry;
-        context.epoch = epoch;
+    void SetUploadResolveContext(UploadResolveContext context) override {
         UploadManager::GetInstance().SetUploadResolveContext(context);
     }
 
@@ -22,28 +19,13 @@ public:
         return UploadManager::GetInstance().GetUploadPass();
     }
 
-    void UploadDataToShared(const void* data, size_t size, std::shared_ptr<Resource> resourceToUpdate, size_t dataBufferOffset, const char* file, int line) override {
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
-        UploadManager::GetInstance().UploadData(data, size, UploadManager::UploadTarget::FromShared(std::move(resourceToUpdate)), dataBufferOffset, file, line);
-#else
-        (void)file;
-        (void)line;
-        UploadManager::GetInstance().UploadData(data, size, UploadManager::UploadTarget::FromShared(std::move(resourceToUpdate)), dataBufferOffset);
-#endif
+    void UploadData(const void* data, size_t size, UploadTarget resourceToUpdate, size_t dataBufferOffset, const char* file, int line) override {
+        UploadManager::GetInstance().UploadData(data, size, std::move(resourceToUpdate), dataBufferOffset, file, line);
     }
 
-    void UploadDataToHandle(const void* data, size_t size, const ResourceRegistry::RegistryHandle& resourceToUpdate, size_t dataBufferOffset, const char* file, int line) override {
-#if BUILD_TYPE == BUILD_TYPE_DEBUG
-        UploadManager::GetInstance().UploadData(data, size, UploadManager::UploadTarget::FromHandle(resourceToUpdate), dataBufferOffset, file, line);
-#else
-        (void)file;
-        (void)line;
-        UploadManager::GetInstance().UploadData(data, size, UploadManager::UploadTarget::FromHandle(resourceToUpdate), dataBufferOffset);
-#endif
-    }
-
-    void UploadTextureSubresourcesToShared(
-        std::shared_ptr<Resource> target,
+    void UploadTextureSubresources(
+        UploadTarget target,
         rhi::Format fmt,
         uint32_t baseWidth,
         uint32_t baseHeight,
@@ -54,9 +36,8 @@ public:
         uint32_t srcCount,
         const char* file,
         int line) override {
-#if BUILD_TYPE == BUILD_TYPE_DEBUG
         UploadManager::GetInstance().UploadTextureSubresources(
-            UploadManager::UploadTarget::FromShared(std::move(target)),
+            std::move(target),
             fmt,
             baseWidth,
             baseHeight,
@@ -67,24 +48,14 @@ public:
             srcCount,
             file,
             line);
+    }
 #else
-        (void)file;
-        (void)line;
-        UploadManager::GetInstance().UploadTextureSubresources(
-            UploadManager::UploadTarget::FromShared(std::move(target)),
-            fmt,
-            baseWidth,
-            baseHeight,
-            depthOrLayers,
-            mipLevels,
-            arraySize,
-            srcSubresources,
-            srcCount);
-#endif
+    void UploadData(const void* data, size_t size, UploadTarget resourceToUpdate, size_t dataBufferOffset) override {
+        UploadManager::GetInstance().UploadData(data, size, std::move(resourceToUpdate), dataBufferOffset);
     }
 
-    void UploadTextureSubresourcesToHandle(
-        const ResourceRegistry::RegistryHandle& target,
+    void UploadTextureSubresources(
+        UploadTarget target,
         rhi::Format fmt,
         uint32_t baseWidth,
         uint32_t baseHeight,
@@ -92,27 +63,9 @@ public:
         uint32_t mipLevels,
         uint32_t arraySize,
         const rhi::helpers::SubresourceData* srcSubresources,
-        uint32_t srcCount,
-        const char* file,
-        int line) override {
-#if BUILD_TYPE == BUILD_TYPE_DEBUG
+        uint32_t srcCount) override {
         UploadManager::GetInstance().UploadTextureSubresources(
-            UploadManager::UploadTarget::FromHandle(target),
-            fmt,
-            baseWidth,
-            baseHeight,
-            depthOrLayers,
-            mipLevels,
-            arraySize,
-            srcSubresources,
-            srcCount,
-            file,
-            line);
-#else
-        (void)file;
-        (void)line;
-        UploadManager::GetInstance().UploadTextureSubresources(
-            UploadManager::UploadTarget::FromHandle(target),
+            std::move(target),
             fmt,
             baseWidth,
             baseHeight,
@@ -121,8 +74,8 @@ public:
             arraySize,
             srcSubresources,
             srcCount);
-#endif
     }
+#endif
 
     void QueueResourceCopy(const std::shared_ptr<Resource>& destination, const std::shared_ptr<Resource>& source, size_t size) override {
         UploadManager::GetInstance().QueueResourceCopy(destination, source, size);

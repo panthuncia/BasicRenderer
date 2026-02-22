@@ -1,10 +1,9 @@
 #pragma once
 
 #include <rhi.h>
+#include <OpenRenderGraph/OpenRenderGraph.h>
 
 #include "Scene/Components.h"
-#include "Render/PassExecutionContext.h"
-#include "Render/ImmediateExecution/ImmediateCommandList.h"
 
 class Scene;
 class ObjectManager;

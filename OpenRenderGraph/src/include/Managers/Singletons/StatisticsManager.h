@@ -59,6 +59,7 @@ public:
 	const std::vector<std::string>&        GetPassNames() const { return m_passNames; }
 	const std::vector<PassStats>&          GetPassStats() const { return m_stats; }
 	const std::vector<MeshPipelineStats>&  GetMeshStats() const { return m_meshStatsEma; }
+	rg::runtime::MemoryBudgetStats GetMemoryBudgetStats() const { return m_memoryBudgetStats; }
 
 private:
 	StatisticsManager() = default;
@@ -98,6 +99,7 @@ private:
 	std::vector<PassStats>          m_stats;
 	std::vector<bool>               m_isGeometryPass;
 	std::vector<MeshPipelineStats>  m_meshStatsEma;
+	rg::runtime::MemoryBudgetStats m_memoryBudgetStats{};
 
 	// Recording helpers per queue/frame
 	std::unordered_map<rhi::QueueKind,

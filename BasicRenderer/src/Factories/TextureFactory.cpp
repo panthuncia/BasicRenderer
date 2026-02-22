@@ -7,6 +7,8 @@
 #include <memory>
 #include <vector>
 
+#include <OpenRenderGraph/OpenRenderGraph.h>
+
 #include "Resources/PixelBuffer.h"
 #include "Resources/Sampler.h"
 #include "ThirdParty/stb/stb_image.h"
@@ -14,6 +16,8 @@
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
+#include "Managers/Singletons/DeviceManager.h"
+#include "Utilities/Utilities.h"
 
 #define A_CPU
 #include "../shaders/FidelityFX/ffx_a.h"
@@ -140,7 +144,7 @@ namespace {
         auto device = DeviceManager::GetInstance().GetDevice();
 
         TEXTURE_UPLOAD_SUBRESOURCES(
-            UploadManager::UploadTarget::FromShared(dstTexture),
+            rg::runtime::UploadTarget::FromShared(dstTexture),
             desc.format,
             baseW,
             baseH,

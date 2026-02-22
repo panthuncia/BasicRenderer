@@ -8,7 +8,6 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Scene/Scene.h"
-#include "Managers/Singletons/UploadManager.h"
 #include "Materials/colorspaces.h"
 
 #include "../shaders/FidelityFX/ffx_a.h"
@@ -58,7 +57,7 @@ public:
         
         // Rest will be filled in by the luminanceHistogramAverage shader
 
-        BUFFER_UPLOAD(&lpmConstants, sizeof(LPMConstants), UploadManager::UploadTarget::FromShared(m_pLPMConstants), 0);
+        BUFFER_UPLOAD(&lpmConstants, sizeof(LPMConstants), rg::runtime::UploadTarget::FromShared(m_pLPMConstants), 0);
 
         RegisterSRV(Builtin::PostProcessing::UpscaledHDR);
 		RegisterSRV(Builtin::CameraBuffer);

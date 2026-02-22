@@ -11,7 +11,6 @@
 #include "Materials/Material.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/ResourceManager.h"
-#include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Mesh/MeshInstance.h"
 #include "../shaders/PerPassRootConstants/ppllFillRootConstants.h"
@@ -178,7 +177,7 @@ public:
 	virtual void Update(const UpdateExecutionContext& context) override {
 		// Reset UAV counter
 		uint32_t zero = 0;
-		BUFFER_UPLOAD(&zero, sizeof(uint32_t), UploadManager::UploadTarget::FromHandle(m_PPLLCounterHandle), 0);
+		BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromHandle(m_PPLLCounterHandle), 0);
 	}
 
 	void Cleanup() override {

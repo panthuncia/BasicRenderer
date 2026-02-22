@@ -2,9 +2,9 @@
 
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
+#include "Render/Runtime/DescriptorServiceAccess.h"
 
 class GTAODenoisePass : public ComputePass {
 public:
@@ -78,7 +78,7 @@ private:
         samplerDesc.borderPreset = rhi::BorderPreset::TransparentBlack;
         samplerDesc.minLod = 0.0f;
         samplerDesc.maxLod = 0.0f;
-        m_samplerIndex = ResourceManager::GetInstance().CreateIndexedSampler(samplerDesc);
+        m_samplerIndex = rg::runtime::CreateIndexedSamplerFromActiveDescriptorService(samplerDesc);
     }
 
     void CreateXeGTAOComputePSO()

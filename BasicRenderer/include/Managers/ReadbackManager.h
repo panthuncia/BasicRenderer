@@ -8,10 +8,7 @@
 
 #include <rhi.h>
 
-#include "RenderPasses/Base/RenderPass.h"
-#include "Resources/Buffers/Buffer.h"
-#include "Resources/PixelBuffer.h"
-#include "Render/ImmediateExecution/ImmediateCommandList.h"
+#include "OpenRenderGraph/OpenRenderGraph.h"
 
 namespace br {
 

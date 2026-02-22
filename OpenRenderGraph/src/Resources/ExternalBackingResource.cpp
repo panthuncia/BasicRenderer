@@ -1,6 +1,6 @@
 #include "Resources/ExternalBackingResource.h"
 
-#include "OpenRenderGraph/Internal/Resources/GPUBacking/GpuBufferBacking.h"
+#include "Resources/GPUBacking/GpuBufferBacking.h"
 
 struct ExternalBackingResource::Impl {
     explicit Impl(std::unique_ptr<GpuBufferBacking> inBacking)

@@ -10,11 +10,11 @@
 
 #include "Render/PassExecutionContext.h"
 #include "Utilities/ORGUtilities.h"
-#include "OpenRenderGraph/Internal/Managers/Singletons/DeviceManager.h"
-#include "OpenRenderGraph/Internal/Managers/Singletons/DeletionManager.h"
+#include "Managers/Singletons/DeviceManager.h"
+#include "Managers/Singletons/DeletionManager.h"
 #include "Render/PassBuilders.h"
 #include "Resources/ResourceGroup.h"
-#include "Internal/Managers/CommandRecordingManager.h"
+#include "Managers/CommandRecordingManager.h"
 #include "Interfaces/IHasMemoryMetadata.h"
 #include "Interfaces/IDynamicDeclaredResources.h"
 #include "Resources/PixelBuffer.h"
@@ -633,7 +633,8 @@ bool ResolveFirstMipSlice(ResourceRegistry::RegistryHandle r, RangeSpec range, u
 	return true;
 }
 
-RenderGraph::RenderGraph() {
+RenderGraph::RenderGraph(rhi::Device device) {
+	DeviceManager::GetInstance().Initialize(device);
 
 	auto MakeDefaultImmediateDispatch = [&]() noexcept -> rg::imm::ImmediateDispatch
 		{
@@ -701,6 +702,9 @@ RenderGraph::RenderGraph() {
 	if (!m_readbackService) {
 		m_readbackService = rg::runtime::CreateDefaultReadbackService();
 	}
+	if (!m_descriptorService) {
+		m_descriptorService = rg::runtime::CreateDefaultDescriptorService();
+	}
 	if (!m_renderGraphSettingsService) {
 		m_renderGraphSettingsService = rg::runtime::CreateDefaultRenderGraphSettingsService();
 	}
@@ -709,6 +713,7 @@ RenderGraph::RenderGraph() {
 RenderGraph::~RenderGraph() {
 	m_pCommandRecordingManager->ShutdownThreadLocal(); // Clears thread-local storage
 	DeletionManager::GetInstance().Cleanup();
+	DeviceManager::GetInstance().Cleanup();
 }
 
 SymbolicTracker& RenderGraph::GetOrCreateCompileTracker(Resource* resource, uint64_t resourceID) {

@@ -14,4 +14,11 @@ struct MeshPipelineStats {
     double primitivesEma = 0.0;
 };
 
+struct MemoryBudgetStats {
+    uint64_t usageBytes = 0;
+    uint64_t budgetBytes = 0;
+    uint64_t sampleFrameSerial = 0;
+    bool valid = false;
+};
+
 }

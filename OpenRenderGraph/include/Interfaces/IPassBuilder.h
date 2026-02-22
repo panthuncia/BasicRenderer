@@ -1,5 +1,7 @@
 #pragma once
 
+class IResourceProvider;
+
 enum class PassBuilderKind { Render, Compute };
 
 struct IPassBuilder {

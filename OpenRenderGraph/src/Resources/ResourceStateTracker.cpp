@@ -1,5 +1,4 @@
 #include "Resources/ResourceStateTracker.h"
-
 #include <optional>
 #include <algorithm>
 #include <unordered_map>

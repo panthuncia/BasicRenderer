@@ -2,16 +2,12 @@
 
 #include <wrl.h>
 #include <vector>
-#include <variant>
 
 #include <rhi.h>
 
 #include "spdlog/spdlog.h"
-#include "Render/DescriptorHeap.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "Managers/Singletons/DescriptorHeapManager.h"
-#include "Resources/GloballyIndexedResource.h"
 
 using namespace Microsoft::WRL;
 
@@ -22,22 +18,6 @@ class Buffer;
 class ResourceManager {
 public:
 
-    using ViewRequirements = DescriptorHeapManager::ViewRequirements;
-
-    void AssignDescriptorSlots(
-        GloballyIndexedResource& target,
-        rhi::Resource& apiResource,
-        const ViewRequirements& req);
-
-    void ReserveDescriptorSlots(
-        GloballyIndexedResource& target,
-        const ViewRequirements& req);
-
-    void UpdateDescriptorContents(
-        GloballyIndexedResource& target,
-        rhi::Resource& apiResource,
-        const ViewRequirements& req);
-
     static ResourceManager& GetInstance() {
         static ResourceManager instance;
         return instance;
@@ -46,8 +26,6 @@ public:
     void Initialize();
     void Cleanup();
 
-    rhi::DescriptorHeap GetSRVDescriptorHeap();
-    rhi::DescriptorHeap GetSamplerDescriptorHeap();
     void UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, DirectX::XMUINT2 screenRes, DirectX::XMUINT3 clusterSizes, unsigned int frameIndex);
     
     std::shared_ptr<Buffer>& GetPerFrameBuffer() {
@@ -70,18 +48,10 @@ public:
         }
 	}
 
-    UINT CreateIndexedSampler(const rhi::SamplerDesc& samplerDesc);
-
 	void SetActiveEnvironmentIndex(unsigned int index) { perFrameCBData.activeEnvironmentIndex = index; }
 	void SetOutputType(unsigned int type) { perFrameCBData.outputType = type; }
 
 	rhi::Resource GetUAVCounterReset() { return m_uavCounterReset.Get(); }
-
-    const std::shared_ptr<DescriptorHeap>& GetCBVSRVUAVHeap() const { return DescriptorHeapManager::GetInstance().GetCBVSRVUAVHeap(); }
-    const std::shared_ptr<DescriptorHeap>& GetSamplerHeap() const { return DescriptorHeapManager::GetInstance().GetSamplerHeap(); }
-    const std::shared_ptr<DescriptorHeap>& GetRTVHeap() const { return DescriptorHeapManager::GetInstance().GetRTVHeap(); }
-    const std::shared_ptr<DescriptorHeap>& GetDSVHeap() const { return DescriptorHeapManager::GetInstance().GetDSVHeap(); }
-    const std::shared_ptr<DescriptorHeap>& GetNonShaderVisibleHeap() const { return DescriptorHeapManager::GetInstance().GetNonShaderVisibleHeap(); }
     
 private:
     ResourceManager(){};

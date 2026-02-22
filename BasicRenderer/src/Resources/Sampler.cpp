@@ -1,5 +1,5 @@
 #include "Resources/Sampler.h"
-#include "OpenRenderGraph/Internal/Managers/Singletons/DescriptorHeapManager.h"
+#include "Render/Runtime/DescriptorServiceAccess.h"
 
 std::shared_ptr<Sampler> Sampler::m_defaultSampler = nullptr;
 std::shared_ptr<Sampler> Sampler::m_defaultShadowSampler = nullptr;
@@ -7,7 +7,7 @@ std::unordered_map<rhi::SamplerDesc, std::shared_ptr<Sampler>, rhi::SamplerDescH
 
 Sampler::Sampler(rhi::SamplerDesc samplerDesc)
     : m_index(0), m_samplerDesc(samplerDesc) {
-    m_index = DescriptorHeapManager::GetInstance().CreateIndexedSampler(m_samplerDesc);
+	m_index = rg::runtime::CreateIndexedSamplerFromActiveDescriptorService(m_samplerDesc);
 }
 
 std::shared_ptr<Sampler> Sampler::CreateSampler(rhi::SamplerDesc samplerDesc) {

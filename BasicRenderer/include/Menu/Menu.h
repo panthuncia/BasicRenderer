@@ -735,23 +735,28 @@ inline void Menu::Render(RenderContext& context, rhi::CommandList commandList) {
         ImGui::Checkbox("Memory introspection", &showMemoryIntrospection);
         ImGui::Checkbox("CLod telemetry", &showCLodTelemetry);
         ImGui::Checkbox("Auto Alias Planner", &showAutoAliasPlanner);
-        rhi::ma::Budget localBudget;
-        std::string memoryString = "Memory usage: ";
-        DeviceManager::GetInstance().GetAllocator()->GetBudget(&localBudget, nullptr);
+        std::string memoryString = "Memory usage: unavailable";
         const double KiB = 1024.0;
         const double MiB = KiB * 1024.0;
         const double GiB = MiB * 1024.0;
-        const auto usage = static_cast<double>(localBudget.usageBytes);
+        if (m_renderGraph) {
+            if (auto* statisticsService = m_renderGraph->GetStatisticsService()) {
+                const auto memoryBudgetStats = statisticsService->GetMemoryBudgetStats();
+                if (memoryBudgetStats.valid) {
+                    const auto usage = static_cast<double>(memoryBudgetStats.usageBytes);
 
-        const auto [div, suffix] =
-            (usage >= GiB) ? std::pair{ GiB, "GB" } :
-            (usage >= MiB) ? std::pair{ MiB, "MB" } :
-            (usage >= KiB) ? std::pair{ KiB, "KB" } :
-            std::pair{ 1.0, "B" };
+                    const auto [div, suffix] =
+                        (usage >= GiB) ? std::pair{ GiB, "GB" } :
+                        (usage >= MiB) ? std::pair{ MiB, "MB" } :
+                        (usage >= KiB) ? std::pair{ KiB, "KB" } :
+                        std::pair{ 1.0, "B" };
 
-        memoryString += std::format("{:.2f} {} / {:.2f} GB",
-            usage / div, suffix,
-            static_cast<double>(localBudget.budgetBytes) / GiB);
+                    memoryString = std::format("Memory usage: {:.2f} {} / {:.2f} GB",
+                        usage / div, suffix,
+                        static_cast<double>(memoryBudgetStats.budgetBytes) / GiB);
+                }
+            }
+        }
 
         ImGui::Text(memoryString.c_str());
         ImGui::Text("Render Resolution: %d x %d | Output Resolution: %d x %d", context.renderResolution.x, context.renderResolution.y, context.outputResolution.x, context.outputResolution.y);

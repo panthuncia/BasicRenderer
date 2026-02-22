@@ -5,12 +5,10 @@
 #include <variant>
 
 #include "Import/Filetypes.h"
-#include "Resources/PixelBuffer.h"
-#include "Resources/Sampler.h"
+#include "OpenRenderGraph/OpenRenderGraph.h"
 #include "Factories/TextureFactory.h"
+#include "Resources/Sampler.h"
 
-class PixelBuffer;
-class Sampler;
 struct RenderContext;
 
 //enum class ImageFiletype {

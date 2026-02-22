@@ -22,6 +22,7 @@
 #include "Render/Runtime/IStatisticsService.h"
 #include "Render/Runtime/IUploadService.h"
 #include "Render/Runtime/IReadbackService.h"
+#include "Render/Runtime/IDescriptorService.h"
 #include "Render/Runtime/IRenderGraphSettingsService.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/Buffers/Buffer.h"
@@ -219,7 +220,7 @@ public:
 		std::unordered_map<uint64_t, SymbolicTracker*> passBatchTrackers; // Trackers for the resources in this batch
 	};
 
-	RenderGraph();
+	RenderGraph(rhi::Device device);
 	~RenderGraph();
 	using AutoAliasReasonCount = rg::alias::AutoAliasReasonCount;
 	using AutoAliasPoolRangeDebug = rg::alias::AutoAliasPoolRangeDebug;
@@ -247,6 +248,9 @@ public:
 	void SetReadbackService(std::shared_ptr<rg::runtime::IReadbackService> service) { m_readbackService = std::move(service); }
 	rg::runtime::IReadbackService* GetReadbackService() { return m_readbackService.get(); }
 	const rg::runtime::IReadbackService* GetReadbackService() const { return m_readbackService.get(); }
+	void SetDescriptorService(std::shared_ptr<rg::runtime::IDescriptorService> service) { m_descriptorService = std::move(service); }
+	rg::runtime::IDescriptorService* GetDescriptorService() { return m_descriptorService.get(); }
+	const rg::runtime::IDescriptorService* GetDescriptorService() const { return m_descriptorService.get(); }
 	void SetRenderGraphSettingsService(std::shared_ptr<rg::runtime::IRenderGraphSettingsService> service) { m_renderGraphSettingsService = std::move(service); }
 	rg::runtime::IRenderGraphSettingsService* GetRenderGraphSettingsService() { return m_renderGraphSettingsService.get(); }
 	const rg::runtime::IRenderGraphSettingsService* GetRenderGraphSettingsService() const { return m_renderGraphSettingsService.get(); }
@@ -395,6 +399,7 @@ private:
 	std::shared_ptr<rg::runtime::IStatisticsService> m_statisticsService;
 	std::shared_ptr<rg::runtime::IUploadService> m_uploadService;
 	std::shared_ptr<rg::runtime::IReadbackService> m_readbackService;
+	std::shared_ptr<rg::runtime::IDescriptorService> m_descriptorService;
 	std::shared_ptr<rg::runtime::IRenderGraphSettingsService> m_renderGraphSettingsService;
 	std::unordered_map<uint64_t, SymbolicTracker*> trackers; // Tracks the state of resources in the graph.
 	std::unordered_map<uint64_t, SymbolicTracker> compileTrackers; // Compile-only symbolic state, decoupled from backing lifetime.

@@ -1,12 +1,12 @@
-#include "OpenRenderGraph/Internal/Resources/GPUBacking/GPUTextureBacking.h"
+#include "Resources/GPUBacking/GPUTextureBacking.h"
 #include <string>
 #include <stdexcept>
 
-#include "OpenRenderGraph/Internal/Managers/Singletons/DeviceManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Utilities/ORGUtilities.h"
-#include "OpenRenderGraph/Internal/Managers/Singletons/DescriptorHeapManager.h"
-#include "OpenRenderGraph/Internal/Managers/Singletons/UploadManager.h"
-#include "OpenRenderGraph/Internal/Managers/Singletons/DeletionManager.h"
+#include "Managers/Singletons/DescriptorHeapManager.h"
+#include "Managers/Singletons/UploadManager.h"
+#include "Managers/Singletons/DeletionManager.h"
 #include "Resources/MemoryStatisticsComponents.h"
 
 GpuTextureBacking::GpuTextureBacking(CreateTag)

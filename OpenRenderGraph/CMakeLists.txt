@@ -23,6 +23,7 @@ add_library(OpenRenderGraph STATIC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/Runtime/DefaultStatisticsService.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/Runtime/DefaultUploadService.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/Runtime/DefaultReadbackService.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/Runtime/DefaultDescriptorService.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/Runtime/DefaultRenderGraphSettingsService.cpp"
     
     "${CMAKE_CURRENT_SOURCE_DIR}/src/Render/PassBuilders.cpp"
@@ -53,7 +54,8 @@ target_include_directories(OpenRenderGraph
     PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
     PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/include"
+
 )
 
 target_link_libraries(OpenRenderGraph

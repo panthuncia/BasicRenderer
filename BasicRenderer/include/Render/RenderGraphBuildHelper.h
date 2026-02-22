@@ -308,7 +308,7 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
     XeGTAO::GTAOConstants& gtaoConstants = gtaoInfo.g_GTAOConstants; // Intel's GTAO constants
     XeGTAO::GTAOUpdateConstants(gtaoConstants, resolution.x, resolution.y, gtaoSettings, false, 0, *currentCamera);
 
-    BUFFER_UPLOAD(&gtaoInfo, sizeof(GTAOInfo), UploadManager::UploadTarget::FromShared(GTAOConstantBuffer), 0);
+    BUFFER_UPLOAD(&gtaoInfo, sizeof(GTAOInfo), rg::runtime::UploadTarget::FromShared(GTAOConstantBuffer), 0);
 
     graph->RegisterResource("Builtin::GTAO::ConstantsBuffer", GTAOConstantBuffer);
 

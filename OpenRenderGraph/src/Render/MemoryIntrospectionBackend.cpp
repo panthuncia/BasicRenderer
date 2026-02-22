@@ -1,7 +1,7 @@
 #include "Render/MemoryIntrospectionBackend.h"
 
 #include "Render/MemoryIntrospectionAPI.h"
-#include "OpenRenderGraph/Internal/Managers/Singletons/ECSManager.h"
+#include "Managers/Singletons/ECSManager.h"
 #include "Resources/MemoryStatisticsComponents.h"
 #include "Resources/ResourceIdentifier.h"
 

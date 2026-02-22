@@ -1,11 +1,11 @@
 #pragma once
 
 #include "RenderPasses/Base/ComputePass.h"
-#include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Resources/PixelBuffer.h"
 #include "ThirdParty/XeGTAO.h"
+#include "Render/Runtime/DescriptorServiceAccess.h"
 
 class GTAOMainPass : public ComputePass {
 public:
@@ -90,7 +90,7 @@ private:
         samplerDesc.borderPreset = rhi::BorderPreset::TransparentBlack;
         samplerDesc.minLod = 0.0f;
         samplerDesc.maxLod = 0.0f;
-        m_samplerIndex = ResourceManager::GetInstance().CreateIndexedSampler(samplerDesc);
+        m_samplerIndex = rg::runtime::CreateIndexedSamplerFromActiveDescriptorService(samplerDesc);
     }
 
     void CreateXeGTAOComputePSO() {

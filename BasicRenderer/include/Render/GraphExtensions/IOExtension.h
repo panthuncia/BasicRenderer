@@ -25,8 +25,11 @@ public:
 	}
 
 	void OnRegistryReset(ResourceRegistry* reg) override {
+		rg::runtime::UploadResolveContext ctx;
+		ctx.registry = reg;
+		ctx.epoch = 0; // TODO: Will this be useful?
 		if (m_uploadService) {
-			m_uploadService->SetUploadResolveContext(reg, 0);
+			m_uploadService->SetUploadResolveContext(ctx);
 		}
 	}
 

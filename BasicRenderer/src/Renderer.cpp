@@ -66,6 +66,7 @@
 #include "Resources/Resource.h"
 #include "Render/MemoryIntrospectionBackend.h"
 #include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/DescriptorServiceAccess.h"
 
 void D3D12DebugCallback(
     D3D12_MESSAGE_CATEGORY Category,
@@ -119,17 +120,6 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         }
         });
 
-    DeviceManager::SetTrackingHooks({
-        .createTrackingToken = [](flecs::entity existing) {
-            auto& world = ECSManager::GetInstance().GetWorld();
-            flecs::entity entity = existing;
-            if (!entity.is_alive()) {
-                entity = world.entity();
-            }
-            return TrackedEntityToken(world, entity);
-        }
-        });
-
     Resource::SetEntityHooks({
         .createEntity = []() -> flecs::entity {
             return ECSManager::GetInstance().GetWorld().entity();
@@ -144,16 +134,20 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         }
         });
 
-    ResourceManager::GetInstance().Initialize();
-
     if (!currentRenderGraph) {
-		currentRenderGraph = std::make_unique<RenderGraph>();
+		currentRenderGraph = std::make_unique<RenderGraph>(DeviceManager::GetInstance().GetDevice());
     }
+
+    if (auto* uploadService = currentRenderGraph->GetUploadService()) {
+            uploadService->Initialize();
+        rg::runtime::SetActiveUploadService(uploadService);
+    }
+    if (auto* descriptorService = currentRenderGraph->GetDescriptorService()) {
+        descriptorService->Initialize();
+        rg::runtime::SetActiveDescriptorService(descriptorService);
+    }
+    ResourceManager::GetInstance().Initialize();
     PSOManager::GetInstance().initialize();
-        if (auto* uploadService = currentRenderGraph->GetUploadService()) {
-                uploadService->Initialize();
-            rg::runtime::SetActiveUploadService(uploadService);
-        }
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();
     Menu::GetInstance().Initialize(hwnd, rhi::dx12::get_swapchain(m_swapChain.Get())); // TODO: VK imgui
@@ -841,8 +835,8 @@ void Renderer::Render() {
 	auto& deviceManager = DeviceManager::GetInstance();
 
     m_context.currentScene = currentScene.get();
-    m_context.textureDescriptorHeap = ResourceManager::GetInstance().GetSRVDescriptorHeap();
-    m_context.samplerDescriptorHeap = ResourceManager::GetInstance().GetSamplerDescriptorHeap();
+    m_context.textureDescriptorHeap = rg::runtime::GetActiveSRVDescriptorHeap();
+    m_context.samplerDescriptorHeap = rg::runtime::GetActiveSamplerDescriptorHeap();
     m_context.rtvHeap = rtvHeap.Get();
     m_context.rtvDescriptorSize = rtvDescriptorSize;
     m_context.dsvDescriptorSize = dsvDescriptorSize;
@@ -1020,6 +1014,9 @@ void Renderer::Cleanup() {
         if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
             readbackService->Cleanup();
         }
+        if (auto* descriptorService = currentRenderGraph->GetDescriptorService()) {
+            descriptorService->Cleanup();
+        }
     }
     if (m_pReadbackManager) {
         m_pReadbackManager->Cleanup();
@@ -1028,6 +1025,7 @@ void Renderer::Cleanup() {
     m_coreResourceProvider.Cleanup();
     currentRenderGraph.reset();
     rg::runtime::SetActiveUploadService(nullptr);
+    rg::runtime::SetActiveDescriptorService(nullptr);
     m_renderGraphRuntimeInitialized = false;
     m_currentEnvironment.reset();
 	currentScene.reset();
@@ -1050,7 +1048,6 @@ void Renderer::Cleanup() {
     PSOManager::GetInstance().Cleanup();
 	FFXManager::GetInstance().Shutdown();
 	UpscalingManager::GetInstance().Shutdown();
-    DeviceManager::ResetTrackingHooks();
     TrackedEntityToken::ResetHooks();
     Resource::ResetEntityHooks();
     ECSManager::GetInstance().Cleanup();
@@ -1193,7 +1190,15 @@ void Renderer::CreateRenderGraph() {
 
         if (!currentRenderGraph)
         {
-		currentRenderGraph = std::make_unique<RenderGraph>();
+		currentRenderGraph = std::make_unique<RenderGraph>(DeviceManager::GetInstance().GetDevice());
+        if (auto* uploadService = currentRenderGraph->GetUploadService()) {
+            uploadService->Initialize();
+            rg::runtime::SetActiveUploadService(uploadService);
+        }
+        if (auto* descriptorService = currentRenderGraph->GetDescriptorService()) {
+            descriptorService->Initialize();
+            rg::runtime::SetActiveDescriptorService(descriptorService);
+        }
         }
 
         if (!m_renderGraphRuntimeInitialized) {

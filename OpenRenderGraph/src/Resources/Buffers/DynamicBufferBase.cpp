@@ -2,8 +2,8 @@
 
 #include <stdexcept>
 
-#include "OpenRenderGraph/Internal/Managers/Singletons/DescriptorHeapManager.h"
-#include "OpenRenderGraph/Internal/Resources/GPUBacking/GpuBufferBacking.h"
+#include "Managers/Singletons/DescriptorHeapManager.h"
+#include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Resources/ExternalBackingResource.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 

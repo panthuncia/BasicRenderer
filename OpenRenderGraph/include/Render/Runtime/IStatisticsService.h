@@ -31,6 +31,7 @@ public:
     virtual const std::vector<std::string>& GetPassNames() const = 0;
     virtual const std::vector<PassStats>& GetPassStats() const = 0;
     virtual const std::vector<MeshPipelineStats>& GetMeshStats() const = 0;
+    virtual MemoryBudgetStats GetMemoryBudgetStats() const = 0;
     virtual const std::vector<bool>& GetIsGeometryPassVector() const = 0;
     virtual const std::vector<unsigned>& GetVisiblePassIndices(uint64_t maxStaleFrames) const = 0;
 };

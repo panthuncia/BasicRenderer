@@ -6,12 +6,9 @@
 #include <deque>
 #include <rhi.h>
 
-#include "Resources/Resource.h"
-#include "Resources/Buffers/DynamicBufferBase.h"
+#include "OpenRenderGraph/OpenRenderGraph.h"
 #include "Resources/Buffers/BufferView.h"
-#include "Managers/Singletons/ResourceManager.h"
-#include "Managers/Singletons/UploadManager.h"
-#include "Interfaces/IHasMemoryMetadata.h"
+
 
 using Microsoft::WRL::ComPtr;
 
@@ -78,11 +75,11 @@ public:
     }
 
     void UpdateView(BufferView* view, const void* data) {
-        BUFFER_UPLOAD(data, sizeof(T), UploadManager::UploadTarget::FromShared(shared_from_this()), view->GetOffset());
+        BUFFER_UPLOAD(data, sizeof(T), rg::runtime::UploadTarget::FromShared(shared_from_this()), view->GetOffset());
     }
 
 	void UpdateAt(uint64_t index, const T& data) {
-        BUFFER_UPLOAD(&data, sizeof(T), UploadManager::UploadTarget::FromShared(shared_from_this()), index * m_elementSize);
+        BUFFER_UPLOAD(&data, sizeof(T), rg::runtime::UploadTarget::FromShared(shared_from_this()), index * m_elementSize);
     }
 
     uint64_t Size() {
@@ -121,19 +118,16 @@ private:
 
     void AssignDescriptorSlots(uint32_t newCapacity)
     {
-        auto& rm = ResourceManager::GetInstance();
+        BufferBase::DescriptorRequirements requirements{};
 
-        ResourceManager::ViewRequirements req{};
-        ResourceManager::ViewRequirements::BufferViews b{};
-
-        b.createCBV = false;
-        b.createSRV = true;
-        b.createUAV = m_UAV;
-        b.createNonShaderVisibleUAV = false;
-        b.uavCounterOffset = 0;
+        requirements.createCBV = false;
+        requirements.createSRV = true;
+        requirements.createUAV = m_UAV;
+        requirements.createNonShaderVisibleUAV = false;
+        requirements.uavCounterOffset = 0;
 
         // SRV (structured)
-        b.srvDesc = rhi::SrvDesc{
+        requirements.srvDesc = rhi::SrvDesc{
             .dimension = rhi::SrvDim::Buffer,
             .formatOverride = rhi::Format::Unknown,
             .buffer = {
@@ -145,7 +139,7 @@ private:
         };
 
         // UAV (structured), no counter
-        b.uavDesc = rhi::UavDesc{
+        requirements.uavDesc = rhi::UavDesc{
             .dimension = rhi::UavDim::Buffer,
             .formatOverride = rhi::Format::Unknown,
             .buffer = {
@@ -157,9 +151,7 @@ private:
             },
         };
 
-        req.views = b;
-        auto resource = GetAPIResource();
-        rm.AssignDescriptorSlots(*this, resource, req);
+        SetDescriptorRequirements(requirements);
     }
 
     void CreateBuffer(uint64_t capacity, size_t previousCapacity = 0) {

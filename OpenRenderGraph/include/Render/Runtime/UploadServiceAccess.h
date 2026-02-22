@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <stdexcept>
+#include <utility>
 
 #include "Render/Runtime/IUploadService.h"
 
@@ -20,30 +21,27 @@ inline IUploadService* GetActiveUploadService() {
     return UploadServiceSlot();
 }
 
-template<typename UploadTargetT>
 inline void UploadBufferDataDispatch(
     const void* data,
     size_t size,
-    UploadTargetT resourceToUpdate,
+    UploadTarget resourceToUpdate,
     size_t dataBufferOffset,
     const char* file,
     int line) {
     if (auto* service = GetActiveUploadService()) {
-        if (resourceToUpdate.kind == UploadTargetT::Kind::PinnedShared) {
-            service->UploadDataToShared(data, size, std::move(resourceToUpdate.pinned), dataBufferOffset, file, line);
-        }
-        else {
-            service->UploadDataToHandle(data, size, resourceToUpdate.h, dataBufferOffset, file, line);
-        }
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+        service->UploadData(data, size, std::move(resourceToUpdate), dataBufferOffset, file, line);
+#else
+        service->UploadData(data, size, std::move(resourceToUpdate), dataBufferOffset);
+#endif
         return;
     }
 
     throw std::runtime_error("Upload service is not active for BUFFER_UPLOAD");
 }
 
-template<typename UploadTargetT>
 inline void UploadTextureSubresourcesDispatch(
-    UploadTargetT target,
+    UploadTarget target,
     rhi::Format fmt,
     uint32_t baseWidth,
     uint32_t baseHeight,
@@ -55,34 +53,31 @@ inline void UploadTextureSubresourcesDispatch(
     const char* file,
     int line) {
     if (auto* service = GetActiveUploadService()) {
-        if (target.kind == UploadTargetT::Kind::PinnedShared) {
-            service->UploadTextureSubresourcesToShared(
-                std::move(target.pinned),
-                fmt,
-                baseWidth,
-                baseHeight,
-                depthOrLayers,
-                mipLevels,
-                arraySize,
-                srcSubresources,
-                srcCount,
-                file,
-                line);
-        }
-        else {
-            service->UploadTextureSubresourcesToHandle(
-                target.h,
-                fmt,
-                baseWidth,
-                baseHeight,
-                depthOrLayers,
-                mipLevels,
-                arraySize,
-                srcSubresources,
-                srcCount,
-                file,
-                line);
-        }
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+        service->UploadTextureSubresources(
+            std::move(target),
+            fmt,
+            baseWidth,
+            baseHeight,
+            depthOrLayers,
+            mipLevels,
+            arraySize,
+            srcSubresources,
+            srcCount,
+            file,
+            line);
+#else
+        service->UploadTextureSubresources(
+            std::move(target),
+            fmt,
+            baseWidth,
+            baseHeight,
+            depthOrLayers,
+            mipLevels,
+            arraySize,
+            srcSubresources,
+            srcCount);
+#endif
         return;
     }
 

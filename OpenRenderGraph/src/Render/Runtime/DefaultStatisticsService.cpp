@@ -1,6 +1,6 @@
 #include "Render/Runtime/IStatisticsService.h"
 
-#include "OpenRenderGraph/Internal/Managers/Singletons/StatisticsManager.h"
+#include "Managers/Singletons/StatisticsManager.h"
 
 namespace rg::runtime {
 
@@ -57,6 +57,10 @@ public:
 
     const std::vector<MeshPipelineStats>& GetMeshStats() const override {
         return StatisticsManager::GetInstance().GetMeshStats();
+    }
+
+    MemoryBudgetStats GetMemoryBudgetStats() const override {
+        return StatisticsManager::GetInstance().GetMemoryBudgetStats();
     }
 
     const std::vector<bool>& GetIsGeometryPassVector() const override {

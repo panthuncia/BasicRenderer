@@ -1,6 +1,6 @@
 #include "Resources/Buffers/Buffer.h"
 
-#include "OpenRenderGraph/Internal/Resources/GPUBacking/GpuBufferBacking.h"
+#include "Resources/GPUBacking/GpuBufferBacking.h"
 
 void Buffer::OnSetName() {
     if (!m_dataBuffer) {
