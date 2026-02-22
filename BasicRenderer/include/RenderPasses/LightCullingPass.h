@@ -36,8 +36,10 @@ public:
 		RegisterUAV(Builtin::Light::PagesBuffer);
 	}
 
-	PassReturn Execute(RenderContext& context) override {
-		auto& commandList = context.commandList;
+	PassReturn Execute(PassExecutionContext& executionContext) override {
+		auto* renderContext = executionContext.hostData->Get<RenderContext>();
+		auto& context = *renderContext;
+		auto& commandList = executionContext.commandList;
 
 		// Set the descriptor heaps
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
@@ -61,10 +63,10 @@ public:
 
 	}
 
-	virtual void Update(const UpdateContext& context) override {
+	virtual void Update(const UpdateExecutionContext& context) override {
 		// Reset UAV counter
 		uint32_t zero = 0;
-		BUFFER_UPLOAD(&zero, sizeof(uint32_t), UploadManager::UploadTarget::FromHandle(m_lightPagesCounterHandle), 0);
+		BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromHandle(m_lightPagesCounterHandle), 0);
 	}
 
 private:

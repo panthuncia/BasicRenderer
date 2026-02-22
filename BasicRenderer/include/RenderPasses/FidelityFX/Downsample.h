@@ -67,10 +67,12 @@ public:
 		m_numDirectionalCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
     }
 
-    PassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
 
         auto& psoManager = PSOManager::GetInstance();
-        auto& commandList = context.commandList;
+        auto& commandList = executionContext.commandList;
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 

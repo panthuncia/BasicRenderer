@@ -6,15 +6,9 @@
 #include <deque>
 #include <rhi.h>
 
-#include "Managers/Singletons/DeviceManager.h"
-#include "Resources/GPUBacking/GpuBufferBacking.h"
-#include "Resources/Resource.h"
-#include "Resources/ExternalBackingResource.h"
-#include "Resources/Buffers/DynamicBufferBase.h"
+#include "OpenRenderGraph/OpenRenderGraph.h"
 #include "Resources/Buffers/BufferView.h"
-#include "Managers/Singletons/ResourceManager.h"
-#include "Managers/Singletons/UploadManager.h"
-#include "Interfaces/IHasMemoryMetadata.h"
+
 
 using Microsoft::WRL::ComPtr;
 
@@ -81,11 +75,11 @@ public:
     }
 
     void UpdateView(BufferView* view, const void* data) {
-        BUFFER_UPLOAD(data, sizeof(T), UploadManager::UploadTarget::FromShared(shared_from_this()), view->GetOffset());
+        BUFFER_UPLOAD(data, sizeof(T), rg::runtime::UploadTarget::FromShared(shared_from_this()), view->GetOffset());
     }
 
 	void UpdateAt(uint64_t index, const T& data) {
-        BUFFER_UPLOAD(&data, sizeof(T), UploadManager::UploadTarget::FromShared(shared_from_this()), index * m_elementSize);
+        BUFFER_UPLOAD(&data, sizeof(T), rg::runtime::UploadTarget::FromShared(shared_from_this()), index * m_elementSize);
     }
 
     uint64_t Size() {
@@ -95,11 +89,6 @@ public:
 	size_t GetElementSize() const {
 		return m_elementSize;
 	}
-
-    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
-        m_metadataBundles.emplace_back(bundle);
-        ApplyMetadataToBacking(bundle);
-    }
 
 private:
     LazyDynamicStructuredBuffer(UINT capacity = 64, std::string name = "", uint64_t alignment = 1, bool UAV = false)
@@ -112,15 +101,7 @@ private:
 		SetName(name);
     }
     void OnSetName() override {
-        if (!m_dataBuffer) {
-            return;
-        }
-        if (name != "") {
-            m_dataBuffer->SetName((m_name + ": " + name).c_str());
-        }
-        else {
-            m_dataBuffer->SetName(m_name.c_str());
-        }
+        SetBackingName(m_name, name);
     }
 
     uint32_t m_capacity;
@@ -137,19 +118,16 @@ private:
 
     void AssignDescriptorSlots(uint32_t newCapacity)
     {
-        auto& rm = ResourceManager::GetInstance();
+        BufferBase::DescriptorRequirements requirements{};
 
-        ResourceManager::ViewRequirements req{};
-        ResourceManager::ViewRequirements::BufferViews b{};
-
-        b.createCBV = false;
-        b.createSRV = true;
-        b.createUAV = m_UAV;
-        b.createNonShaderVisibleUAV = false;
-        b.uavCounterOffset = 0;
+        requirements.createCBV = false;
+        requirements.createSRV = true;
+        requirements.createUAV = m_UAV;
+        requirements.createNonShaderVisibleUAV = false;
+        requirements.uavCounterOffset = 0;
 
         // SRV (structured)
-        b.srvDesc = rhi::SrvDesc{
+        requirements.srvDesc = rhi::SrvDesc{
             .dimension = rhi::SrvDim::Buffer,
             .formatOverride = rhi::Format::Unknown,
             .buffer = {
@@ -161,7 +139,7 @@ private:
         };
 
         // UAV (structured), no counter
-        b.uavDesc = rhi::UavDesc{
+        requirements.uavDesc = rhi::UavDesc{
             .dimension = rhi::UavDim::Buffer,
             .formatOverride = rhi::Format::Unknown,
             .buffer = {
@@ -173,18 +151,14 @@ private:
             },
         };
 
-        req.views = b;
-        auto resource = m_dataBuffer->GetAPIResource();
-        rm.AssignDescriptorSlots(*this, resource, req);
+        SetDescriptorRequirements(requirements);
     }
 
     void CreateBuffer(uint64_t capacity, size_t previousCapacity = 0) {
-        auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, m_elementSize * capacity, GetGlobalResourceID(), m_UAV);
         if (m_dataBuffer != nullptr) {
-			auto oldBackingResource = ExternalBackingResource::CreateShared(std::move(m_dataBuffer));
-			UploadManager::GetInstance().QueueResourceCopy(shared_from_this(), oldBackingResource, previousCapacity * sizeof(T));
+            QueueResourceCopyFromOldBacking(previousCapacity * sizeof(T));
         }
-		SetBacking(std::move(newDataBuffer), m_elementSize * capacity);
+		CreateAndSetBacking(rhi::HeapType::DeviceLocal, m_elementSize * capacity, m_UAV);
 
         for (const auto& bundle : m_metadataBundles) {
             ApplyMetadataToBacking(bundle);
@@ -194,5 +168,10 @@ private:
 
         SetName(name);
 
+    }
+
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
+        m_metadataBundles.emplace_back(bundle);
+        ApplyMetadataToBacking(bundle);
     }
 };

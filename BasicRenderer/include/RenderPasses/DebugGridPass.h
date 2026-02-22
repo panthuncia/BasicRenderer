@@ -64,10 +64,11 @@ public:
         RegisterUAV(Builtin::PostProcessing::UpscaledHDR);
     }
 
-    PassReturn Execute(RenderContext& context) override
-    {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
         auto& psoManager = PSOManager::GetInstance();
-        auto& cmd = context.commandList;
+        auto& cmd = executionContext.commandList;
 
         cmd.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(),
             context.samplerDescriptorHeap.GetHandle());

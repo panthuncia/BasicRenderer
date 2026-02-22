@@ -47,8 +47,10 @@ public:
 		RegisterUAV(Builtin::PostSkinningVertices);
 	}
 
-	PassReturn Execute(RenderContext& context) override {
-		auto& commandList = context.commandList;
+	PassReturn Execute(PassExecutionContext& executionContext) override {
+	    auto* renderContext = executionContext.hostData->Get<RenderContext>();
+	    auto& context = *renderContext;
+		auto& commandList = executionContext.commandList;
 
 		// Set the descriptor heaps
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());

@@ -5,12 +5,9 @@
 #include <vector>
 #include <string_view>
 
-#include "Resources/TextureDescription.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
-#include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
-#include "Render/PassBuilders.h"
-#include "Interfaces/IDynamicDeclaredResources.h"
+#include "OpenRenderGraph/OpenRenderGraph.h"
 
 class PixelBuffer;
 class Sampler;
@@ -64,11 +61,12 @@ private:
 
         void DeclareResourceUsages(ComputePassBuilder* builder) override;
 
-        void Update(const UpdateContext& context) override {}
+        void Update(const UpdateExecutionContext& context) override {}
 
-        PassReturn Execute(RenderContext& context) override;
+        PassReturn Execute(PassExecutionContext& context) override;
 
-        void Cleanup() override {}
+        void Cleanup() override {
+        }
 
         bool DeclaredResourcesChanged() const override {
             return m_declaredResourcesChanged;

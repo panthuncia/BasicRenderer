@@ -3,49 +3,100 @@
 #include <filesystem>
 
 #include "RenderPasses/Base/RenderPass.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Resources/Texture.h"
 #include "Utilities/Utilities.h"
-#include "Managers/Singletons/ReadbackManager.h"
+#include "Interfaces/IDynamicDeclaredResources.h"
 
-class EnvironmentFilterPass : public RenderPass {
+#include <vector>
+
+class EnvironmentFilterPass : public RenderPass, public IDynamicDeclaredResources {
 public:
     EnvironmentFilterPass() {
         CreatePrefilterPSO();
     }
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override {
-        // source cubemap as SRV, destination prefiltered cubemap as UAV
-        builder->WithShaderResource(Builtin::Environment::WorkingCubemapGroup)
-            .WithUnorderedAccess(Builtin::Environment::PrefilteredCubemapsGroup);
+        for (const auto& j : m_pending) {
+            if (!j.srcCubemap || !j.dstPrefilteredCubemap) continue;
+
+            builder->WithShaderResource(j.srcCubemap);
+            builder->WithUnorderedAccess(j.dstPrefilteredCubemap);
+        }
+
+        m_declaredResourcesChanged = false;
     }
 
     void Setup() override { }
 
-    PassReturn Execute(RenderContext& context) override {
+    void Update(const UpdateExecutionContext& context) override {
+        std::vector<Job> newPending;
+        auto* updateData = context.hostData->Get<UpdateContext>();
+
+        if (updateData->environmentManager) {
+            auto environments = updateData->environmentManager->GetAndClearEnvironmentsToPrefilter();
+            newPending.reserve(environments.size());
+
+            for (auto* env : environments) {
+                if (!env) continue;
+
+                auto srcCubeAsset = env->GetEnvironmentCubemap();
+                auto dstPrefilteredCube = env->GetEnvironmentPrefilteredCubemap();
+                if (!srcCubeAsset || !dstPrefilteredCube) continue;
+
+                auto srcCube = srcCubeAsset->ImagePtr();
+                if (!srcCube) continue;
+
+                Job j{};
+                j.srcCubemap = srcCube;
+                j.dstPrefilteredCubemap = dstPrefilteredCube;
+                j.baseResolution = env->GetReflectionCubemapResolution();
+                newPending.push_back(std::move(j));
+            }
+        }
+
+        auto sameJobs = [](const std::vector<Job>& a, const std::vector<Job>& b) {
+            if (a.size() != b.size()) return false;
+            for (size_t i = 0; i < a.size(); ++i) {
+                if (a[i].srcCubemap.get() != b[i].srcCubemap.get()) return false;
+                if (a[i].dstPrefilteredCubemap.get() != b[i].dstPrefilteredCubemap.get()) return false;
+                if (a[i].baseResolution != b[i].baseResolution) return false;
+            }
+            return true;
+        };
+
+        if (!sameJobs(m_pending, newPending)) {
+            m_declaredResourcesChanged = true;
+            m_pending = std::move(newPending);
+        }
+    }
+
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
+        if (m_pending.empty()) return {};
+
         auto dev = DeviceManager::GetInstance().GetDevice();
 
-		auto& cl = context.commandList;
+		auto& cl = executionContext.commandList;
 
         cl.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
         cl.BindLayout(m_layout->GetHandle());
         cl.BindPipeline(m_pso->GetHandle());
 
-        auto environments = context.environmentManager->GetAndClearEnvironmentsToPrefilter();
-
-        for (auto& env : environments)
+        for (const auto& j : m_pending)
         {
-            const uint32_t baseRes = env->GetReflectionCubemapResolution();
-            auto& srcCube = env->GetEnvironmentCubemap();
-            auto dstCubePF = env->GetEnvironmentPrefilteredCubemap();
+            if (!j.srcCubemap || !j.dstPrefilteredCubemap) continue;
 
-            const uint32_t srcSrvIndex = srcCube->Image().GetSRVInfo(0).slot.index;
+            const uint32_t baseRes = j.baseResolution;
+            const uint32_t srcSrvIndex = j.srcCubemap->GetSRVInfo(0).slot.index;
 
             const uint32_t group = 8;
 
-            const uint32_t maxMipLevels = dstCubePF->GetNumUAVMipLevels();
+            const uint32_t maxMipLevels = j.dstPrefilteredCubemap->GetNumUAVMipLevels();
             for (uint32_t mip = 0; mip < maxMipLevels; ++mip)
             {
                 const uint32_t size = std::max(1u, baseRes >> mip);
@@ -55,7 +106,7 @@ public:
                 float roughness = (maxMipLevels > 1) ? (float)mip / float(maxMipLevels - 1) : 0.0f;
 
                 const uint32_t dstUavIndex =
-                    dstCubePF->GetUAVShaderVisibleInfo(mip, 0).slot.index;
+                    j.dstPrefilteredCubemap->GetUAVShaderVisibleInfo(mip, 0).slot.index;
                 for (uint32_t face = 0; face < 6; ++face)
                 {
                     // Push constants: [srcSrv, dstUav, face, size, roughnessBits]
@@ -75,12 +126,28 @@ public:
             }
         }
 
+        m_declaredResourcesChanged = true;
+        m_pending.clear();
+
         return {};
+    }
+
+    bool DeclaredResourcesChanged() const override {
+        return m_declaredResourcesChanged;
     }
 
     void Cleanup() override {}
 
 private:
+    struct Job {
+        std::shared_ptr<PixelBuffer> srcCubemap;
+        std::shared_ptr<PixelBuffer> dstPrefilteredCubemap;
+        uint32_t baseResolution = 0;
+    };
+
+    std::vector<Job> m_pending;
+    bool m_declaredResourcesChanged = true;
+
     rhi::PipelineLayoutPtr m_layout;
     rhi::PipelinePtr       m_pso;
 

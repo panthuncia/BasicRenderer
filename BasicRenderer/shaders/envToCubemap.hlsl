@@ -53,6 +53,6 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     Texture2D<float4> srcTex = ResourceDescriptorHeap[SrcEnvSrvIndex];
     float3 col = srcTex.Sample(gLinearClamp, equirect).xyz;
     
-    RWTexture2DArray<float4> dstTex = ResourceDescriptorHeap[dstCubeIndex];
-    dstTex[uint3(tid.x, tid.y, Face)] = float4(col, 1.0);
+    RWTexture2D<float4> dstTex = ResourceDescriptorHeap[dstCubeIndex];
+    dstTex[tid.xy] = float4(col, 1.0);
 }

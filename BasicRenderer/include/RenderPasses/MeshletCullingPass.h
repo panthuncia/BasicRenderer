@@ -28,8 +28,10 @@ class VisibleClusterTableCounterResetPass : public RenderPass {
 
 	}
 
-	PassReturn Execute(RenderContext& context) override {
-		auto& commandList = context.commandList;
+	PassReturn Execute(PassExecutionContext& executionContext) override {
+	    auto* renderContext = executionContext.hostData->Get<RenderContext>();
+	    auto& context = *renderContext;
+		auto& commandList = executionContext.commandList;
 		// Copy zero to the counter buffer
 		auto counterReset = ResourceManager::GetInstance().GetUAVCounterReset();
 
@@ -107,7 +109,9 @@ public:
 			Builtin::Shadows::LinearShadowMaps);
 	}
 
-	PassReturn Execute(RenderContext& context) override {
+	PassReturn Execute(PassExecutionContext& executionContext) override {
+	    auto* renderContext = executionContext.hostData->Get<RenderContext>();
+	    auto& context = *renderContext;
 
 		unsigned int numDraws = context.drawStats.numDrawsInScene;
 
@@ -115,7 +119,7 @@ public:
 			return {};
 		}
 
-		auto& commandList = context.commandList;
+		auto& commandList = executionContext.commandList;
 
 		// Set the descriptor heaps
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());

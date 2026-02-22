@@ -23,19 +23,19 @@
 #include "Utilities/Utilities.h"
 #include "Render/OutputTypes.h"
 #include "Import/ModelLoader.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Render/TonemapTypes.h"
-#include "Managers/Singletons/StatisticsManager.h"
 #include "Managers/Singletons/UpscalingManager.h"
-#include "Menu/RenderGraphInspector.h"
-#include "Menu/MemoryIntrospectionWidget.h"
-#include "Managers/Singletons/ReadbackManager.h"
+#include "DebugUI/RenderGraphInspector.h"
+#include "DebugUI/MemoryIntrospectionWidget.h"
 #include "Resources/ReadbackRequest.h"
 #include "Resources/components.h"
-#include "Resources/MemoryStatisticsComponents.h"
+#include "Render/MemoryIntrospectionAPI.h"
 #include "ShaderBuffers.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
+#include "Managers/Singletons/ECSManager.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -59,9 +59,9 @@ struct PerResourceMemInfo {
 
 using PerResourceMemIndex = std::unordered_map<uint64_t, PerResourceMemInfo>;
 
-static void BuildMemorySnapshotFromFlecs(
+static void BuildMemorySnapshotFromRecords(
     ui::MemorySnapshot& out,
-    flecs::query<const MemoryStatisticsComponents::MemSizeBytes>& q,
+    const std::vector<rg::memory::ResourceMemoryRecord>& records,
     PerResourceMemIndex* outIndex /*= nullptr*/)
 {
     out.categories.clear();
@@ -73,19 +73,13 @@ static void BuildMemorySnapshotFromFlecs(
 
     if (outIndex) { outIndex->clear(); outIndex->reserve(2048); }
 
-    q.each([&](flecs::entity e, const MemoryStatisticsComponents::MemSizeBytes& sz) {
-        auto rt = e.try_get<MemoryStatisticsComponents::ResourceType>();
-        auto rname = e.try_get<MemoryStatisticsComponents::ResourceName>();
-        auto rid = e.try_get<MemoryStatisticsComponents::ResourceID>();
-        auto use = e.try_get<MemoryStatisticsComponents::ResourceUsage>();
-
-        const uint64_t bytes = sz.size;
+    for (const auto& record : records) {
+        const uint64_t bytes = record.bytes;
         out.totalBytes += bytes;
 
-        const char* major = rt ? MajorCategory(rt->type)
-            : MajorCategory(rhi::ResourceType::Unknown);
+        const char* major = MajorCategory(record.resourceType);
 
-        const char* usage = (use && !use->usage.empty()) ? use->usage.c_str()
+        const char* usage = !record.usage.empty() ? record.usage.c_str()
             : "Unspecified";
 
         const std::string cat = std::string(major) + "/" + usage;
@@ -95,23 +89,23 @@ static void BuildMemorySnapshotFromFlecs(
         // Per-resource row (unchanged)
         ui::MemoryResourceRow row{};
         row.bytes = bytes;
-        row.uid = rid ? rid->id : 0;
+        row.uid = record.resourceID;
 
-        if (rname && !rname->name.empty()) row.name = rname->name;
-        else if (rid) row.name = "Resource " + std::to_string((unsigned long long)rid->id);
+        if (!record.resourceName.empty()) row.name = record.resourceName;
+        else if (record.resourceID != 0) row.name = "Resource " + std::to_string((unsigned long long)record.resourceID);
         else row.name = "Unknown resource";
 
         row.type = cat;
         out.resources.push_back(row);
 
         // NEW: per-resource index entry (this is what the frame-graph builder will use)
-        if (outIndex && rid) {
-            auto& info = (*outIndex)[rid->id];
+        if (outIndex && record.resourceID != 0) {
+            auto& info = (*outIndex)[record.resourceID];
             info.bytes = bytes;
             info.category = cat;
-            if (rname && !rname->name.empty()) info.name = rname->name;
+            if (!record.resourceName.empty()) info.name = record.resourceName;
         }
-        });
+    }
 
     out.categories.reserve(minorBuckets.size());
     for (auto& [label, bytes] : minorBuckets) {
@@ -129,25 +123,25 @@ struct MemInfo {
 
 static void BuildIdToMemInfoIndex(
     std::unordered_map<uint64_t, MemInfo>& out,
-    flecs::query<const MemoryStatisticsComponents::MemSizeBytes>& q)
+    const std::vector<rg::memory::ResourceMemoryRecord>& records)
 {
     out.clear();
     out.reserve(2048);
 
-    q.each([&](flecs::entity e, const MemoryStatisticsComponents::MemSizeBytes& sz) {
-        auto rid = e.try_get<MemoryStatisticsComponents::ResourceID>();
-        if (!rid) return; // can't join without numeric id
-
-        MemInfo info;
-        info.bytes = sz.size;
-
-        if (auto ident = e.try_get<ResourceIdentifier>()) {
-            // ident->name should already be "A::B::C"
-            info.name = ident->name;
+    for (const auto& record : records) {
+        if (record.resourceID == 0) {
+            continue;
         }
 
-        out[rid->id] = std::move(info);
-        });
+        MemInfo info;
+        info.bytes = record.bytes;
+
+        if (!record.identifier.empty()) {
+            info.name = record.identifier;
+        }
+
+        out[record.resourceID] = std::move(info);
+    }
 }
 
 static void BuildFrameGraphSnapshotFromBatches(
@@ -225,13 +219,11 @@ public:
     static Menu& GetInstance();
 
     void Initialize(HWND hwnd, IDXGISwapChain3* swapChain);
-    void Render(RenderContext& context);
+    void Render(RenderContext& context, rhi::CommandList commandList);
     bool HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 	void SetRenderGraph(RenderGraph* renderGraph) { m_renderGraph = renderGraph; }
     void Cleanup() {
 		m_settingSubscriptions.clear();
-        m_memQuery = {}; // Destruct query before ECS world dies
-		m_sizeQuery = {};
 		m_telemetryQuery = {};
 		m_visibleClustersQuery = {};
 		m_visibleCounterQuery = {};
@@ -245,12 +237,6 @@ private:
     };
 	IDXGISwapChain3* m_pSwapChain = nullptr;
 	
-    flecs::query<const MemoryStatisticsComponents::MemSizeBytes> m_memQuery;
-	flecs::query<const MemoryStatisticsComponents::MemSizeBytes,
-        const MemoryStatisticsComponents::ResourceID> m_sizeQuery =
-        ECSManager::GetInstance().GetWorld().query<const MemoryStatisticsComponents::MemSizeBytes,
-        const MemoryStatisticsComponents::ResourceID>();
-
 	flecs::entity selectedNode;
 
 	RenderGraph* m_renderGraph;
@@ -470,8 +456,6 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     ImGui::StyleColorsDark();
     //ImGui::StyleColorsLight();
 
-    m_memQuery = ECSManager::GetInstance().GetWorld().query_builder<const MemoryStatisticsComponents::MemSizeBytes>().build();
-
 	// Helper to set an observer on a setting which updates local copies of settings
     auto observerSetting = [&](auto& localCopy, const std::string& settingName) {
         m_settingSubscriptions.push_back(SettingsManager::GetInstance().addObserver<std::decay_t<decltype(localCopy)>>(settingName,
@@ -662,7 +646,7 @@ static bool PassUsesResourceAdapter(const void* passAndRes, uint64_t resourceId,
     }
 }
 
-inline void Menu::Render(RenderContext& context) {
+inline void Menu::Render(RenderContext& context, rhi::CommandList commandList) {
 	ImGui_ImplDX12_NewFrame();
 	ImGui_ImplWin32_NewFrame();
 
@@ -751,23 +735,28 @@ inline void Menu::Render(RenderContext& context) {
         ImGui::Checkbox("Memory introspection", &showMemoryIntrospection);
         ImGui::Checkbox("CLod telemetry", &showCLodTelemetry);
         ImGui::Checkbox("Auto Alias Planner", &showAutoAliasPlanner);
-        rhi::ma::Budget localBudget;
-        std::string memoryString = "Memory usage: ";
-        DeviceManager::GetInstance().GetAllocator()->GetBudget(&localBudget, nullptr);
+        std::string memoryString = "Memory usage: unavailable";
         const double KiB = 1024.0;
         const double MiB = KiB * 1024.0;
         const double GiB = MiB * 1024.0;
-        const auto usage = static_cast<double>(localBudget.usageBytes);
+        if (m_renderGraph) {
+            if (auto* statisticsService = m_renderGraph->GetStatisticsService()) {
+                const auto memoryBudgetStats = statisticsService->GetMemoryBudgetStats();
+                if (memoryBudgetStats.valid) {
+                    const auto usage = static_cast<double>(memoryBudgetStats.usageBytes);
 
-        const auto [div, suffix] =
-            (usage >= GiB) ? std::pair{ GiB, "GB" } :
-            (usage >= MiB) ? std::pair{ MiB, "MB" } :
-            (usage >= KiB) ? std::pair{ KiB, "KB" } :
-            std::pair{ 1.0, "B" };
+                    const auto [div, suffix] =
+                        (usage >= GiB) ? std::pair{ GiB, "GB" } :
+                        (usage >= MiB) ? std::pair{ MiB, "MB" } :
+                        (usage >= KiB) ? std::pair{ KiB, "KB" } :
+                        std::pair{ 1.0, "B" };
 
-        memoryString += std::format("{:.2f} {} / {:.2f} GB",
-            usage / div, suffix,
-            static_cast<double>(localBudget.budgetBytes) / GiB);
+                    memoryString = std::format("Memory usage: {:.2f} {} / {:.2f} GB",
+                        usage / div, suffix,
+                        static_cast<double>(memoryBudgetStats.budgetBytes) / GiB);
+                }
+            }
+        }
 
         ImGui::Text(memoryString.c_str());
         ImGui::Text("Render Resolution: %d x %d | Output Resolution: %d x %d", context.renderResolution.x, context.renderResolution.y, context.outputResolution.x, context.outputResolution.y);
@@ -777,12 +766,17 @@ inline void Menu::Render(RenderContext& context) {
 	if (showMemoryIntrospection) {
         static ui::MemoryIntrospectionWidget g_memWidget;
 
+        std::vector<rg::memory::ResourceMemoryRecord> memoryRecords;
+    if (m_renderGraph) {
+        m_renderGraph->GetMemorySnapshotProvider().BuildSnapshot(memoryRecords);
+    }
+
         ui::MemorySnapshot snap;
         PerResourceMemIndex memIndex;
-        BuildMemorySnapshotFromFlecs(snap, m_memQuery, &memIndex);
+        BuildMemorySnapshotFromRecords(snap, memoryRecords, &memIndex);
 
         static std::unordered_map<uint64_t, MemInfo> s_idToMem;
-		BuildIdToMemInfoIndex(s_idToMem, m_memQuery);    
+		BuildIdToMemInfoIndex(s_idToMem, memoryRecords);
 		ui::FrameGraphSnapshot fgSnap;
 
         const auto& batches = m_renderGraph->GetBatches();
@@ -825,6 +819,14 @@ inline void Menu::Render(RenderContext& context) {
                 auto resource = m_renderGraph->GetResourceByID(resourceId);
                 return resource ? resource.get() : nullptr;
             },
+            [this](const std::string& passName, Resource* resource, const RangeSpec& range, ReadbackCaptureCallback callback) {
+                if (!m_renderGraph) {
+                    return;
+                }
+                if (auto* readbackService = m_renderGraph->GetReadbackService()) {
+                    readbackService->RequestReadbackCapture(passName, resource, range, std::move(callback));
+                }
+            },
             opts);
         ImGui::End();
 
@@ -841,7 +843,7 @@ inline void Menu::Render(RenderContext& context) {
 	// Rendering
 	ImGui::Render();
 
-    context.commandList.SetDescriptorHeaps(g_pd3dSrvDescHeap->GetHandle(), std::nullopt);
+    commandList.SetDescriptorHeaps(g_pd3dSrvDescHeap->GetHandle(), std::nullopt);
 
 	rhi::PassBeginInfo beginInfo{};
 	rhi::ColorAttachment attchment{};
@@ -851,9 +853,9 @@ inline void Menu::Render(RenderContext& context) {
 	beginInfo.height = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.y);
 	beginInfo.width = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.x);
 
-	context.commandList.BeginPass(beginInfo);
+	commandList.BeginPass(beginInfo);
 
-	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), rhi::dx12::get_cmd_list(context.commandList));
+	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), rhi::dx12::get_cmd_list(commandList));
 
 }
 
@@ -1212,7 +1214,8 @@ inline void Menu::DrawCLodTelemetryWindow() {
     }
 
     const bool captureStatsResourcesReady = (clodVisibleClustersResource != nullptr) && (clodVisibleCounterResource != nullptr);
-    const bool canCapture = (clodTelemetryResource != nullptr) && (!m_clodTelemetryCapturePending) && (!m_clodCaptureStatsPending);
+    auto* readbackService = m_renderGraph ? m_renderGraph->GetReadbackService() : nullptr;
+    const bool canCapture = (clodTelemetryResource != nullptr) && (readbackService != nullptr) && (!m_clodTelemetryCapturePending) && (!m_clodCaptureStatsPending);
 
     if (!captureStatsResourcesReady) {
         ImGui::TextDisabled("Extended stats unavailable: visible cluster resources not found.");
@@ -1235,11 +1238,12 @@ inline void Menu::DrawCLodTelemetryWindow() {
             m_clodCapturePendingClusters.clear();
         }
 
-        ReadbackManager::GetInstance().RequestReadbackCapture(
-            "CLod::HierarchialCullingPass",
-            clodTelemetryResource,
-            RangeSpec{},
-            [this](ReadbackCaptureResult&& result) {
+        if (readbackService) {
+            readbackService->RequestReadbackCapture(
+                "CLod::HierarchialCullingPass",
+                clodTelemetryResource,
+                RangeSpec{},
+                [this](ReadbackCaptureResult&& result) {
                 m_clodTelemetryCapturePending = false;
 
                 constexpr size_t telemetryBytes = sizeof(uint32_t) * static_cast<size_t>(CLodWorkGraphCounterCount);
@@ -1282,16 +1286,18 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     clusterActive,
                     clusterThreads,
                     visibleWrites);
-            });
+                });
+        }
 
         if (requestCaptureStats) {
             const uint64_t captureId = m_clodCaptureStatsId;
 
-            ReadbackManager::GetInstance().RequestReadbackCapture(
-                "CLod::HierarchialCullingPass",
-                clodVisibleCounterResource,
-                RangeSpec{},
-                [this, captureId](ReadbackCaptureResult&& result) {
+            if (readbackService) {
+                readbackService->RequestReadbackCapture(
+                    "CLod::HierarchialCullingPass",
+                    clodVisibleCounterResource,
+                    RangeSpec{},
+                    [this, captureId](ReadbackCaptureResult&& result) {
                     if (!m_clodCaptureStatsPending || m_clodCaptureStatsId != captureId) {
                         return;
                     }
@@ -1305,13 +1311,13 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     std::memcpy(&m_clodCapturePendingVisibleCount, result.data.data(), sizeof(uint32_t));
                     m_clodCaptureHasPendingCounter = true;
                     TryFinalizeCLodCaptureStats(captureId);
-                });
+                    });
 
-            ReadbackManager::GetInstance().RequestReadbackCapture(
-                "CLod::HierarchialCullingPass",
-                clodVisibleClustersResource,
-                RangeSpec{},
-                [this, captureId](ReadbackCaptureResult&& result) {
+                readbackService->RequestReadbackCapture(
+                    "CLod::HierarchialCullingPass",
+                    clodVisibleClustersResource,
+                    RangeSpec{},
+                    [this, captureId](ReadbackCaptureResult&& result) {
                     if (!m_clodCaptureStatsPending || m_clodCaptureStatsId != captureId) {
                         return;
                     }
@@ -1325,7 +1331,8 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
                     m_clodCaptureHasPendingClusters = true;
                     TryFinalizeCLodCaptureStats(captureId);
-                });
+                    });
+            }
 
             m_clodTelemetryStatus = "Capture requested (extended stats).";
         }
@@ -1499,11 +1506,19 @@ inline void Menu::DrawCLodTelemetryWindow() {
 }
 
 inline void Menu::DrawPassTimingWindow() {
-    auto& statisticsManager = StatisticsManager::GetInstance();
-    auto& names     = statisticsManager.GetPassNames();
-    auto& stats     = statisticsManager.GetPassStats();
-    auto& meshStats = statisticsManager.GetMeshStats();
-    auto& isGeom    = statisticsManager.GetIsGeometryPassVector();
+    if (!m_renderGraph) {
+        return;
+    }
+
+    auto* statisticsService = m_renderGraph->GetStatisticsService();
+    if (!statisticsService) {
+        return;
+    }
+
+    auto& names     = statisticsService->GetPassNames();
+    auto& stats     = statisticsService->GetPassStats();
+    auto& meshStats = statisticsService->GetMeshStats();
+    auto& isGeom    = statisticsService->GetIsGeometryPassVector();
     static int maxStaleFrames = 240;
 
     if (names.empty()) {
@@ -1513,7 +1528,7 @@ inline void Menu::DrawPassTimingWindow() {
     ImGui::Begin("Pass Timings");
     ImGui::SliderInt("Max Stale Frames", &maxStaleFrames, 0, 2000);
 
-    const auto& visible = statisticsManager.GetVisiblePassIndices(static_cast<uint64_t>(maxStaleFrames));
+    const auto& visible = statisticsService->GetVisiblePassIndices(static_cast<uint64_t>(maxStaleFrames));
     if (visible.empty()) {
         ImGui::TextUnformatted("No pass timings within selected staleness window.");
         ImGui::End();

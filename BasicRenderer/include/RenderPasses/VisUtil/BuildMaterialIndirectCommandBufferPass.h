@@ -35,9 +35,11 @@ public:
         RegisterUAV("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }
 
-    PassReturn Execute(RenderContext& ctx) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& ctx = *renderContext;
         auto& pm = PSOManager::GetInstance();
-        auto& cl = ctx.commandList;
+        auto& cl = executionContext.commandList;
 
         cl.SetDescriptorHeaps(ctx.textureDescriptorHeap.GetHandle(), ctx.samplerDescriptorHeap.GetHandle());
         cl.BindLayout(pm.GetComputeRootSignature().GetHandle());

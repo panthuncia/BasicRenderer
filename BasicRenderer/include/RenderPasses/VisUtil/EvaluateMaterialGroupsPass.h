@@ -87,8 +87,10 @@ public:
         m_materialEvalCmds = m_resourceRegistryView->RequestPtr<Resource>("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }
 
-    PassReturn Execute(RenderContext& ctx) override {
-        auto& cl = ctx.commandList;
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& ctx = *renderContext;
+        auto& cl = executionContext.commandList;
         auto& psoMgr = PSOManager::GetInstance();
 
         cl.SetDescriptorHeaps(ctx.textureDescriptorHeap.GetHandle(), ctx.samplerDescriptorHeap.GetHandle());

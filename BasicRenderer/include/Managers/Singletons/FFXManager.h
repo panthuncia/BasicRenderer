@@ -9,6 +9,7 @@
 #include <vector>
 #include <DirectXMath.h>
 #include <functional>
+#include <rhi.h>
 
 #include <bit> // FFX headers need this, not sure why it's not included by default
 
@@ -16,6 +17,8 @@
 #include "ThirdParty/FFX/ffx_api_loader.h"
 #include "ThirdParty/FFX/ffx_api.hpp"
 #include "ThirdParty/FFX/host/ffx_sssr.h"
+
+#include "Scene/Components.h"
 
 
 class PixelBuffer;
@@ -25,7 +28,8 @@ class Buffer;
 class FFXManager {
 public:
     static FFXManager& GetInstance();
-    void EvaluateSSSR(const RenderContext& context, 
+    void EvaluateSSSR(rhi::CommandList& commandList, 
+        const Components::Camera* currentCamera,
         PixelBuffer* pHDRTarget, 
         PixelBuffer* pDepthTexture, 
         PixelBuffer* pNormals, 

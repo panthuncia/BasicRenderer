@@ -24,9 +24,11 @@ public:
         m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
     }
 
-    PassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
 
-        auto& commandList = context.commandList;
+        auto& commandList = executionContext.commandList;
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 

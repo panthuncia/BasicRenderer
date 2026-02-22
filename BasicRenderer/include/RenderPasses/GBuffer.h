@@ -121,10 +121,12 @@ public:
 		RegisterSRV(Builtin::PerMaterialDataBuffer);
     }
 
-    PassReturn Execute(RenderContext& context) override {
-        auto& commandList = context.commandList;
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
+        auto& commandList = executionContext.commandList;
 
-        BeginPass(context);
+        BeginPass(context, executionContext.commandList);
 
         SetupCommonState(context, commandList);
         SetCommonRootConstants(context, commandList);
@@ -151,7 +153,7 @@ public:
     }
 
 private:
-    void BeginPass(RenderContext& context) {
+    void BeginPass(const RenderContext& context, rhi::CommandList commandList) {
         // Build attachments
         rhi::PassBeginInfo p{};
         p.width = context.renderResolution.x;
@@ -270,10 +272,10 @@ private:
 
         p.colors = { colors.data(), (uint32_t)colors.size() };
 
-        context.commandList.BeginPass(p);
+        commandList.BeginPass(p);
     }
     // Common setup code that doesn't change between techniques
-    void SetupCommonState(RenderContext& context, rhi::CommandList& commandList) {
+    void SetupCommonState(const RenderContext& context, rhi::CommandList& commandList) {
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -283,7 +285,7 @@ private:
 		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
     }
 
-    void SetCommonRootConstants(RenderContext& context, rhi::CommandList& commandList) {
+    void SetCommonRootConstants(const RenderContext& context, rhi::CommandList& commandList) {
         unsigned int settings[NumSettingsRootConstants] = { getShadowsEnabled(), getPunctualLightingEnabled() };
 		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, SettingsRootSignatureIndex, 0, NumSettingsRootConstants, settings);
 
@@ -294,7 +296,7 @@ private:
         }
     }
 
-    void ExecuteRegular(RenderContext& context, rhi::CommandList& commandList) {
+    void ExecuteRegular(const RenderContext& context, rhi::CommandList& commandList) {
         // Regular forward rendering using DrawIndexedInstanced
         auto& psoManager = PSOManager::GetInstance();
 
@@ -321,7 +323,7 @@ private:
             });
     }
 
-    void ExecuteMeshShader(RenderContext& context, rhi::CommandList& commandList) {
+    void ExecuteMeshShader(const RenderContext& context, rhi::CommandList& commandList) {
         // Mesh shading path using DispatchMesh
         auto& psoManager = PSOManager::GetInstance();
 
@@ -347,7 +349,7 @@ private:
             });
     }
 
-    void ExecuteMeshShaderIndirect(RenderContext& context, rhi::CommandList& commandList) {
+    void ExecuteMeshShaderIndirect(const RenderContext& context, rhi::CommandList& commandList) {
         // Mesh shading with ExecuteIndirect
         auto& psoManager = PSOManager::GetInstance();
 

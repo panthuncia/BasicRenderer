@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RenderPasses/Base/RenderPass.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Scene/Scene.h"
@@ -50,9 +51,11 @@ public:
         RegisterSRV(Builtin::PostProcessing::UpscaledHDR, m_mipIndex + (m_isUpsample ? 1 : 0));
     }
 
-    PassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
         auto& psoManager = PSOManager::GetInstance();
-        auto& commandList = context.commandList;
+        auto& commandList = executionContext.commandList;
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 

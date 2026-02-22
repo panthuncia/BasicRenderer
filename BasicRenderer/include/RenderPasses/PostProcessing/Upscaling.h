@@ -24,8 +24,11 @@ public:
 		m_pUpscaledHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
     }
 
-    PassReturn Execute(RenderContext& context) override {
-        UpscalingManager::GetInstance().Evaluate(context, m_pHDRTarget, m_pUpscaledHDRTarget, m_pDepthTexture, m_pMotionVectors);
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
+        auto& camera = context.currentScene->GetPrimaryCamera().get<Components::Camera>();
+        UpscalingManager::GetInstance().Evaluate(executionContext.commandList, &camera, context.frameIndex, context.deltaTime, m_pHDRTarget, m_pUpscaledHDRTarget, m_pDepthTexture, m_pMotionVectors);
         return {};
     }
 

@@ -11,7 +11,6 @@
 #include "Materials/Material.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/ResourceManager.h"
-#include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Mesh/MeshInstance.h"
 #include "../shaders/PerPassRootConstants/ppllFillRootConstants.h"
@@ -149,9 +148,11 @@ public:
 	
 	}
 
-	PassReturn Execute(RenderContext& context) override {
+	PassReturn Execute(PassExecutionContext& executionContext) override {
+		auto* renderContext = executionContext.hostData->Get<RenderContext>();
+		auto& context = *renderContext;
 
-		auto& commandList = context.commandList;
+		auto& commandList = executionContext.commandList;
 
 		SetupCommonState(context, commandList);
 		SetCommonRootConstants(context, commandList);
@@ -173,10 +174,10 @@ public:
 		return {};
 	}
 
-	virtual void Update(const UpdateContext& context) override {
+	virtual void Update(const UpdateExecutionContext& context) override {
 		// Reset UAV counter
 		uint32_t zero = 0;
-		BUFFER_UPLOAD(&zero, sizeof(uint32_t), UploadManager::UploadTarget::FromHandle(m_PPLLCounterHandle), 0);
+		BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromHandle(m_PPLLCounterHandle), 0);
 	}
 
 	void Cleanup() override {
@@ -185,7 +186,7 @@ public:
 
 private:
 
-	void SetupCommonState(RenderContext& context, rhi::CommandList& commandList) {
+	void SetupCommonState(const RenderContext& context, rhi::CommandList& commandList) {
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -244,7 +245,7 @@ private:
 		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
 	}
 
-	void SetCommonRootConstants(RenderContext& context, rhi::CommandList& commandList) {
+	void SetCommonRootConstants(const RenderContext& context, rhi::CommandList& commandList) {
 
 		unsigned int settings[NumSettingsRootConstants] = {}; // HLSL bools are 32 bits
 		settings[EnableShadows] = getShadowsEnabled();
@@ -263,7 +264,7 @@ private:
 
 	}
 
-	void ExecuteRegular(RenderContext& context, rhi::CommandList& commandList) {
+	void ExecuteRegular(const RenderContext& context, rhi::CommandList& commandList) {
 		// Regular forward rendering using DrawIndexedInstanced
 		auto& psoManager = PSOManager::GetInstance();
 		m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes blendMeshes) {
@@ -289,7 +290,7 @@ private:
 			});
 	}
 
-	void ExecuteMeshShader(RenderContext& context, rhi::CommandList& commandList) {
+	void ExecuteMeshShader(const RenderContext& context, rhi::CommandList& commandList) {
 		// Mesh shading path using DispatchMesh
 		auto& psoManager = PSOManager::GetInstance();
 		m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes blendMeshes) {
@@ -313,7 +314,7 @@ private:
 			});
 	}
 
-	void ExecuteMeshShaderIndirect(RenderContext& context, rhi::CommandList& commandList) {
+	void ExecuteMeshShaderIndirect(const RenderContext& context, rhi::CommandList& commandList) {
 		auto& psoManager = PSOManager::GetInstance();
 
 		auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();

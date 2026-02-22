@@ -12,17 +12,16 @@
 #include "Resources/Sampler.h"
 #include "Resources/ResourceGroup.h"
 #include "Resources/Texture.h"
-#include "Managers/Singletons/ReadbackManager.h"
 #include "../../generated/BuiltinResources.h"
-#include "Resources/MemoryStatisticsComponents.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
+#include "Render/MemoryIntrospectionAPI.h"
 
 EnvironmentManager::EnvironmentManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
 	m_skyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution")();
 	m_reflectionCubemapResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("reflectionCubemapResolution")();
 	m_environmentInfoBuffer = LazyDynamicStructuredBuffer<EnvironmentInfo>::CreateShared(1, "environmentsBuffer", 0, true);
-	m_environmentInfoBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Environment Info" }));
+	rg::memory::SetResourceUsageHint(*m_environmentInfoBuffer, "Environment Info");
 
 	m_workingEnvironmentCubemapGroup = std::make_shared<ResourceGroup>("EnvironmentCubemapGroup");
 	m_workingHDRIGroup = std::make_shared<ResourceGroup>("WorkingHDRIGroup");
@@ -123,10 +122,20 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 		m_environmentsToConvert.push_back(e);
 		m_workingHDRIGroup->AddResource(skyHDR->ImagePtr());
 		auto path = GetCacheFilePath(name+L"_environment.dds", L"environments");
-		ReadbackManager::GetInstance().RequestReadback(envCubemap, path, nullptr, true);
+		if (m_requestReadback) {
+			m_requestReadback(envCubemap, path, nullptr, true);
+		}
+		else {
+			spdlog::warn("EnvironmentManager: readback request callback is not configured.");
+		}
 
 		path = GetCacheFilePath(name + L"_prefiltered.dds", L"environments");
-		ReadbackManager::GetInstance().RequestReadback(e->GetEnvironmentPrefilteredCubemap(), path, nullptr, true);
+		if (m_requestReadback) {
+			m_requestReadback(e->GetEnvironmentPrefilteredCubemap(), path, nullptr, true);
+		}
+		else {
+			spdlog::warn("EnvironmentManager: readback request callback is not configured.");
+		}
 	}
 
 	//Re-create environment cubemap at full res

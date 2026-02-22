@@ -9,11 +9,10 @@
 #include <optional>
 
 #include "ShaderBuffers.h"
-#include "Resources/DynamicResource.h"
+#include "OpenRenderGraph/OpenRenderGraph.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "Scene/Components.h"
-#include "Interfaces/IResourceProvider.h"
 
 class ShadowMaps;
 class LinearShadowMaps;

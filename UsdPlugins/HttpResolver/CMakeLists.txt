@@ -2,6 +2,10 @@
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(USDPLUGINS_HOST_TARGET "BasicRenderer" CACHE STRING "Target to depend on for plugin staging hooks")
+get_filename_component(USDPLUGINS_SOURCE_ROOT "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
+set(USDPLUGINS_OUTPUT_ROOT "${CMAKE_BINARY_DIR}/BasicRenderer")
+
 # Find OpenUSD (must provide USD_INCLUDE_DIRS and USD_LIBRARIES)
 find_package(pxr REQUIRED)
 find_package(spdlog REQUIRED)
@@ -31,13 +35,13 @@ set_target_properties(usd_httpResolver PROPERTIES
 )
 
 install(TARGETS usd_httpResolver
-    LIBRARY DESTINATION ${CMAKE_BINARY_DIR}
+        LIBRARY DESTINATION ${USDPLUGINS_OUTPUT_ROOT}
 )
 
 set_target_properties(usd_httpResolver PROPERTIES
-  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/BasicRenderer"
-  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/BasicRenderer"
-  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/BasicRenderer"
+    RUNTIME_OUTPUT_DIRECTORY "${USDPLUGINS_OUTPUT_ROOT}"
+    LIBRARY_OUTPUT_DIRECTORY "${USDPLUGINS_OUTPUT_ROOT}"
+    ARCHIVE_OUTPUT_DIRECTORY "${USDPLUGINS_OUTPUT_ROOT}"
 )
 
 install(FILES plugInfo.json
@@ -52,53 +56,35 @@ function(add_symlink_or_copy_per_config source destination IS_DIRECTORY target_n
         get_filename_component(target_name "${destination}" NAME)
     endif()
 
-    if (CMAKE_BUILD_TYPE STREQUAL "Release")
-            if (IS_DIRECTORY)
-            add_custom_target(
-                "${target_name}_sync" ALL
-                COMMENT "Release: Copying directory ${destination} ← ${source}"
-                VERBATIM
-                COMMAND   ${CMAKE_COMMAND} -E remove_directory   "${destination}"
-                COMMAND   ${CMAKE_COMMAND} -E copy_directory     "${source}" "${destination}"
-            )
-        else()
-            add_custom_target(
-                "${target_name}_sync" ALL
-                COMMENT "Release: Copying file ${destination} ← ${source}"
-                VERBATIM
-                COMMAND   ${CMAKE_COMMAND} -E remove            "${destination}"
-                COMMAND   ${CMAKE_COMMAND} -E copy              "${source}" "${destination}"
-            )
-        endif()
-    else()
-        if (IS_DIRECTORY)
+    if (IS_DIRECTORY)
         add_custom_target(
             "${target_name}_sync" ALL
-            COMMENT "Debug: Symlinking directory ${destination} ← ${source}"
+            COMMENT "Syncing directory ${destination} ← ${source}"
             VERBATIM
-            COMMAND   ${CMAKE_COMMAND} -E remove_directory   "${destination}"
-            COMMAND   ${CMAKE_COMMAND} -E create_symlink     "${source}" "${destination}"
+            COMMAND ${CMAKE_COMMAND} -E remove_directory "${destination}"
+            COMMAND ${CMAKE_COMMAND} -E $<IF:$<CONFIG:Release>,copy_directory,create_symlink> "${source}" "${destination}"
         )
-        else()
-            add_custom_target(
-                "${target_name}_sync" ALL
-                COMMENT "Debug: Symlinking file ${destination} ← ${source}"
-                VERBATIM
-                COMMAND   ${CMAKE_COMMAND} -E remove            "${destination}"
-                COMMAND   ${CMAKE_COMMAND} -E create_symlink    "${source}" "${destination}"
-            )
-        endif()
+    else()
+        add_custom_target(
+            "${target_name}_sync" ALL
+            COMMENT "Syncing file ${destination} ← ${source}"
+            VERBATIM
+            COMMAND ${CMAKE_COMMAND} -E remove "${destination}"
+            COMMAND ${CMAKE_COMMAND} -E $<IF:$<CONFIG:Release>,copy,create_symlink> "${source}" "${destination}"
+        )
     endif()
 
-    add_dependencies(BasicRenderer "${target_name}_sync")
+    if(TARGET "${USDPLUGINS_HOST_TARGET}")
+        add_dependencies("${USDPLUGINS_HOST_TARGET}" "${target_name}_sync")
+    endif()
 endfunction()
 
 # Endure folder exists
-file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/BasicRenderer/thirdPartyUSDPlugins")
+file(MAKE_DIRECTORY "${USDPLUGINS_OUTPUT_ROOT}/thirdPartyUSDPlugins")
 
 add_symlink_or_copy_per_config(
-    "${CMAKE_SOURCE_DIR}/UsdPlugins/HttpResolver/httpResolver"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/thirdPartyUSDPlugins/httpResolver"
+    "${USDPLUGINS_SOURCE_ROOT}/httpResolver"
+    "${USDPLUGINS_OUTPUT_ROOT}/thirdPartyUSDPlugins/httpResolver"
     TRUE  # IS_DIRECTORY
     "httpResolver"
 )

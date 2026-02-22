@@ -30,6 +30,9 @@
 #include "Import/ModelLoader.h"
 #include "spdlogStreambuf.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "ThirdParty/stb/stb_image.h"
+
 // Activate dedicated GPU on NVIDIA laptops with both integrated and dedicated GPUs
 extern "C" {
     _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;

@@ -1,11 +1,11 @@
 #pragma once
 
 #include "RenderPasses/Base/ComputePass.h"
-#include "Managers/Singletons/ResourceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Resources/PixelBuffer.h"
 #include "ThirdParty/XeGTAO.h"
+#include "Render/Runtime/DescriptorServiceAccess.h"
 
 class GTAOMainPass : public ComputePass {
 public:
@@ -25,10 +25,12 @@ public:
         RegisterCBV("Builtin::GTAO::ConstantsBuffer");
     }
 
-    PassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
         frameIndex++;
         auto& psoManager = PSOManager::GetInstance();
-        auto& commandList = context.commandList;
+        auto& commandList = executionContext.commandList;
         auto workingDepths = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingDepths);
         auto workingAOTerm = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingAOTerm1);
         auto workingEdges = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingEdges);
@@ -88,7 +90,7 @@ private:
         samplerDesc.borderPreset = rhi::BorderPreset::TransparentBlack;
         samplerDesc.minLod = 0.0f;
         samplerDesc.maxLod = 0.0f;
-        m_samplerIndex = ResourceManager::GetInstance().CreateIndexedSampler(samplerDesc);
+        m_samplerIndex = rg::runtime::CreateIndexedSamplerFromActiveDescriptorService(samplerDesc);
     }
 
     void CreateXeGTAOComputePSO() {

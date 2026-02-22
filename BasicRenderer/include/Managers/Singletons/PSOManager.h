@@ -9,13 +9,12 @@
 #include <boost/container_hash/hash.hpp>
 
 #include <rhi.h>
+#include <OpenRenderGraph/OpenRenderGraph.h>
 
 #pragma warning(push, 0)   // Disable all warnings for dxc header
 #include "ThirdParty/DirectX/dxcapi.h"
 #pragma warning(pop)
 #include "Render/PSOFlags.h"
-#include "Render/PipelineState.h"
-#include "Resources/ResourceIdentifier.h"
 #include "Materials/TechniqueDescriptor.h"
 
 using Microsoft::WRL::ComPtr;

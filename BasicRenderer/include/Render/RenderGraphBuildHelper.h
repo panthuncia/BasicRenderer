@@ -30,6 +30,7 @@
 #include "RenderPasses/PostProcessing/ScreenSpaceReflectionsPass.h"
 #include "RenderPasses/PostProcessing/SpecularIBLPass.h"
 #include "Resources/Buffers/Buffer.h"
+#include "Render/MemoryIntrospectionAPI.h"
 
 void CreateGBufferResources(RenderGraph* graph) {
     // GBuffer resources
@@ -50,7 +51,7 @@ void CreateGBufferResources(RenderGraph* graph) {
     normalsWorldSpaceDesc.imageDimensions.push_back(dims);
     auto normalsWorldSpace = PixelBuffer::CreateSharedUnmaterialized(normalsWorldSpaceDesc);
     normalsWorldSpace->SetName("Normals World Space");
-    normalsWorldSpace->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
+    rg::memory::SetResourceUsageHint(*normalsWorldSpace, "Visibility Buffer Resources");
 
     graph->RegisterResource(Builtin::GBuffer::Normals, normalsWorldSpace);
 
@@ -70,7 +71,7 @@ void CreateGBufferResources(RenderGraph* graph) {
     albedoDesc.allowAlias = true;
     albedo = PixelBuffer::CreateSharedUnmaterialized(albedoDesc);
     albedo->SetName("Albedo");
-    albedo->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GBuffer" }));
+    rg::memory::SetResourceUsageHint(*albedo, "GBuffer");
     graph->RegisterResource(Builtin::GBuffer::Albedo, albedo);
 
     TextureDescription metallicRoughnessDesc;
@@ -85,7 +86,7 @@ void CreateGBufferResources(RenderGraph* graph) {
     metallicRoughnessDesc.imageDimensions.push_back(metallicRoughnessDims);
     metallicRoughness = PixelBuffer::CreateSharedUnmaterialized(metallicRoughnessDesc);
     metallicRoughness->SetName("Metallic Roughness");
-    metallicRoughness->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GBuffer" }));
+    rg::memory::SetResourceUsageHint(*metallicRoughness, "GBuffer");
     graph->RegisterResource(Builtin::GBuffer::MetallicRoughness, metallicRoughness);
 
     TextureDescription emissiveDesc;
@@ -100,7 +101,7 @@ void CreateGBufferResources(RenderGraph* graph) {
     emissiveDesc.imageDimensions.push_back(emissiveDims);
     emissive = PixelBuffer::CreateSharedUnmaterialized(emissiveDesc);
     emissive->SetName("Emissive");
-    emissive->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GBuffer" }));
+    rg::memory::SetResourceUsageHint(*emissive, "GBuffer");
     graph->RegisterResource(Builtin::GBuffer::Emissive, emissive);
 }
 
@@ -157,7 +158,7 @@ inline void RegisterVisUtilResources(RenderGraph* graph)
         rhi::HeapType::DeviceLocal);
     totalPixelCountBuffer->SetAllowAlias(true);
     totalPixelCountBuffer->SetName("VisUtil::TotalPixelCountBuffer");
-    totalPixelCountBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
+    rg::memory::SetResourceUsageHint(*totalPixelCountBuffer, "Visibility Buffer Resources");
     graph->RegisterResource("Builtin::VisUtil::TotalPixelCountBuffer", totalPixelCountBuffer);
 
 	// PixelRef: uint pixelXY; (packed)
@@ -171,7 +172,7 @@ inline void RegisterVisUtilResources(RenderGraph* graph)
         rhi::HeapType::DeviceLocal);
 	pixelListBuffer->SetAllowAlias(true);
     pixelListBuffer->SetName("VisUtil::PixelListBuffer");
-    pixelListBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
+    rg::memory::SetResourceUsageHint(*pixelListBuffer, "Visibility Buffer Resources");
     graph->RegisterResource("Builtin::VisUtil::PixelListBuffer", pixelListBuffer);
 }
 
@@ -253,7 +254,7 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingDepthsDesc.imageDimensions.push_back(dims1);
     auto workingDepths = PixelBuffer::CreateSharedUnmaterialized(workingDepthsDesc);
     //workingDepths->SetAliasingPool(gtaoAliasPoolID);
-    workingDepths->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GTAO resources" }));
+    rg::memory::SetResourceUsageHint(*workingDepths, "GTAO resources");
     workingDepths->SetName("GTAO Working Depths");
 
     TextureDescription workingEdgesDesc;
@@ -267,7 +268,7 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingEdgesDesc.imageDimensions.push_back(dims1);
 	workingEdgesDesc.allowAlias = true;
     auto workingEdges = PixelBuffer::CreateSharedUnmaterialized(workingEdgesDesc);
-    workingDepths->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GTAO resources" }));
+    rg::memory::SetResourceUsageHint(*workingDepths, "GTAO resources");
     workingEdges->SetName("GTAO Working Edges");
 
     TextureDescription workingAOTermDesc;
@@ -282,14 +283,14 @@ void RegisterGTAOResources(RenderGraph* graph) {
     workingAOTermDesc.allowAlias = true;
     auto workingAOTerm1 = PixelBuffer::CreateSharedUnmaterialized(workingAOTermDesc);
     workingAOTerm1->SetName("GTAO Working AO Term 1");
-    workingAOTerm1->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GTAO resources" }));
+    rg::memory::SetResourceUsageHint(*workingAOTerm1, "GTAO resources");
     auto workingAOTerm2 = PixelBuffer::CreateSharedUnmaterialized(workingAOTermDesc);
     workingAOTerm2->SetName("GTAO Working AO Term 2");
-    workingAOTerm2->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GTAO resources" }));
+    rg::memory::SetResourceUsageHint(*workingAOTerm2, "GTAO resources");
     std::shared_ptr<PixelBuffer> outputAO = PixelBuffer::CreateSharedUnmaterialized(workingAOTermDesc);
     //outputAO->SetAliasingPool(gtaoAliasPoolID);
     outputAO->SetName("GTAO Output AO Term");
-    outputAO->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "GTAO resources" }));
+    rg::memory::SetResourceUsageHint(*outputAO, "GTAO resources");
 
     graph->RegisterResource(Builtin::GTAO::WorkingAOTerm1, workingAOTerm1);
     graph->RegisterResource(Builtin::GTAO::WorkingAOTerm2, workingAOTerm2);
@@ -307,7 +308,7 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
     XeGTAO::GTAOConstants& gtaoConstants = gtaoInfo.g_GTAOConstants; // Intel's GTAO constants
     XeGTAO::GTAOUpdateConstants(gtaoConstants, resolution.x, resolution.y, gtaoSettings, false, 0, *currentCamera);
 
-    BUFFER_UPLOAD(&gtaoInfo, sizeof(GTAOInfo), UploadManager::UploadTarget::FromShared(GTAOConstantBuffer), 0);
+    BUFFER_UPLOAD(&gtaoInfo, sizeof(GTAOInfo), rg::runtime::UploadTarget::FromShared(GTAOConstantBuffer), 0);
 
     graph->RegisterResource("Builtin::GTAO::ConstantsBuffer", GTAOConstantBuffer);
 
@@ -412,7 +413,7 @@ void BuildPPLLPipeline(RenderGraph* graph) {
     desc.allowAlias = true;
     auto PPLLHeadPointerTexture = PixelBuffer::CreateSharedUnmaterialized(desc);
     PPLLHeadPointerTexture->SetName("PPLLHeadPointerTexture");
-    PPLLHeadPointerTexture->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "OIT resources" }));
+    rg::memory::SetResourceUsageHint(*PPLLHeadPointerTexture, "OIT resources");
     auto PPLLBuffer = Buffer::CreateUnmaterializedStructuredBuffer(
         static_cast<uint32_t>(numPPLLNodes),
         static_cast<uint32_t>(PPLLNodeSize),
@@ -422,7 +423,7 @@ void BuildPPLLPipeline(RenderGraph* graph) {
         rhi::HeapType::DeviceLocal);
     PPLLBuffer->SetAllowAlias(true);
     PPLLBuffer->SetName("PPLLBuffer");
-	PPLLBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "OIT resources" }));
+    rg::memory::SetResourceUsageHint(*PPLLBuffer, "OIT resources");
     auto PPLLCounter = Buffer::CreateSharedUnmaterialized(rhi::HeapType::DeviceLocal, sizeof(uint32_t), true);
     {
         BufferBase::DescriptorRequirements descReq{};
@@ -458,7 +459,7 @@ void BuildPPLLPipeline(RenderGraph* graph) {
         PPLLCounter->SetDescriptorRequirements(descReq);
     }
     PPLLCounter->SetName("PPLLCounter");
-	PPLLCounter->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "OIT resources" }));
+    rg::memory::SetResourceUsageHint(*PPLLCounter, "OIT resources");
 
     graph->RegisterResource(Builtin::PPLL::HeadPointerTexture, PPLLHeadPointerTexture);
     graph->RegisterResource(Builtin::PPLL::DataBuffer, PPLLBuffer);
@@ -522,7 +523,7 @@ void BuildSSRPasses(RenderGraph* graph) {
     ssrDesc.allowAlias = true;
     auto ssrTexture = PixelBuffer::CreateSharedUnmaterialized(ssrDesc);
     ssrTexture->SetName("SSR Texture");
-	ssrTexture->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Post-Processing resources" }));
+    rg::memory::SetResourceUsageHint(*ssrTexture, "Post-Processing resources");
 	graph->RegisterResource(Builtin::PostProcessing::ScreenSpaceReflections, ssrTexture);
 
     graph->BuildComputePass("Screen-Space Reflections Pass")

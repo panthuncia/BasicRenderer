@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RenderPasses/Base/RenderPass.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 
@@ -18,8 +19,10 @@ public:
 		m_lutTexture = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::BRDFLUT);
     }
 
-    PassReturn Execute(RenderContext& context) override {
-        auto& commandList = context.commandList;
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
+        auto& commandList = executionContext.commandList;
         
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 

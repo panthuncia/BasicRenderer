@@ -3,9 +3,10 @@
 #include <spdlog/spdlog.h>
 
 #include "Resources/Buffers/BufferView.h"
-#include "Managers/Singletons/ResourceManager.h"
-#include "Managers/Singletons/UploadManager.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Resources/ExternalBackingResource.h"
+#include "Resources/GPUBacking/GpuBufferBacking.h"
+#include "Render/Runtime/UploadServiceAccess.h"
 
 std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementSize) {
     size_t requiredSize = size;
@@ -69,14 +70,14 @@ std::unique_ptr<BufferView> DynamicBuffer::AddData(const void* data, size_t size
 	std::unique_ptr<BufferView> view = Allocate(actualSize, elementSize);
     
 	if (data != nullptr) {
-        BUFFER_UPLOAD(data, size, UploadManager::UploadTarget::FromShared(shared_from_this()), view->GetOffset());
+        BUFFER_UPLOAD(data, size, rg::runtime::UploadTarget::FromShared(shared_from_this()), view->GetOffset());
 	}
 
 	return std::move(view);
 }
 
 void DynamicBuffer::UpdateView(BufferView* view, const void* data) {
-    BUFFER_UPLOAD(data, view->GetSize(), UploadManager::UploadTarget::FromShared(shared_from_this()), view->GetOffset());
+    BUFFER_UPLOAD(data, view->GetSize(), rg::runtime::UploadTarget::FromShared(shared_from_this()), view->GetOffset());
 }
 
 void DynamicBuffer::Deallocate(const BufferView* view) {
@@ -120,22 +121,19 @@ void DynamicBuffer::Deallocate(const BufferView* view) {
 
 void DynamicBuffer::AssignDescriptorSlots()
 {
-    auto& rm = ResourceManager::GetInstance();
-
-    ResourceManager::ViewRequirements req{};
-    ResourceManager::ViewRequirements::BufferViews b{};
+    BufferBase::DescriptorRequirements requirements{};
 
     const uint32_t viewElements =
         static_cast<uint32_t>(m_byteAddress ? (m_capacity / 4) : m_capacity/m_elementSize);
 
-    b.createCBV = false;
-    b.createSRV = true;
-    b.createUAV = m_UAV;
-    b.createNonShaderVisibleUAV = false;
-    b.uavCounterOffset = 0;
+    requirements.createCBV = false;
+    requirements.createSRV = true;
+    requirements.createUAV = m_UAV;
+    requirements.createNonShaderVisibleUAV = false;
+    requirements.uavCounterOffset = 0;
 
     // SRV
-    b.srvDesc = rhi::SrvDesc{
+    requirements.srvDesc = rhi::SrvDesc{
         .dimension = rhi::SrvDim::Buffer,
         .formatOverride = m_byteAddress ? rhi::Format::R32_Typeless : rhi::Format::Unknown,
         .buffer = {
@@ -147,7 +145,7 @@ void DynamicBuffer::AssignDescriptorSlots()
     };
 
     // UAV
-    b.uavDesc = rhi::UavDesc{
+    requirements.uavDesc = rhi::UavDesc{
         .dimension = rhi::UavDim::Buffer,
         .buffer = {
             .kind = m_byteAddress ? rhi::BufferViewKind::Raw : rhi::BufferViewKind::Structured,
@@ -157,9 +155,7 @@ void DynamicBuffer::AssignDescriptorSlots()
         },
     };
 
-    req.views = b;
-    auto resource = m_dataBuffer->GetAPIResource();
-    rm.AssignDescriptorSlots(*this, resource, req);
+    SetDescriptorRequirements(requirements);
 }
 
 void DynamicBuffer::CreateBuffer(size_t capacity) {
@@ -181,7 +177,9 @@ void DynamicBuffer::GrowBuffer(size_t newSize) {
     auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, newSize, GetGlobalResourceID(), m_UAV);
     if (m_dataBuffer) {
         auto oldBackingResource = ExternalBackingResource::CreateShared(std::move(m_dataBuffer));
-        UploadManager::GetInstance().QueueResourceCopy(shared_from_this(), oldBackingResource, m_capacity);
+        if (auto* uploadService = rg::runtime::GetActiveUploadService()) {
+            uploadService->QueueResourceCopy(shared_from_this(), oldBackingResource, m_capacity);
+        }
     }
 	SetBacking(std::move(newDataBuffer), newSize);
 

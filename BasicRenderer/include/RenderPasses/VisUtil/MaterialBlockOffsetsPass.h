@@ -33,9 +33,11 @@ public:
         RegisterUAV("Builtin::VisUtil::TotalPixelCountBuffer");
     }
 
-    PassReturn Execute(RenderContext& ctx) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& ctx = *renderContext;
         auto& pm = PSOManager::GetInstance();
-        auto& cl = ctx.commandList;
+        auto& cl = executionContext.commandList;
 
 		auto numMaterials = ctx.materialManager->GetCompileFlagsSlotsUsed();
         // numBlocks must match prior pass

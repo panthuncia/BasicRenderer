@@ -58,9 +58,11 @@ public:
 		}
 	}
 
-	PassReturn Execute(RenderContext& context) override {
+	PassReturn Execute(PassExecutionContext& executionContext) override {
+	    auto* renderContext = executionContext.hostData->Get<RenderContext>();
+	    auto& context = *renderContext;
 		// Reset and get the appropriate command list
-		auto& commandList = context.commandList;
+		auto& commandList = executionContext.commandList;
 
 		auto counterReset = ResourceManager::GetInstance().GetUAVCounterReset();
 

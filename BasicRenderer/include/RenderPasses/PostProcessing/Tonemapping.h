@@ -4,10 +4,10 @@
 #include <functional>
 
 #include "RenderPasses/Base/RenderPass.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Scene/Scene.h"
-#include "Managers/Singletons/UploadManager.h"
 #include "Materials/colorspaces.h"
 
 #include "../shaders/FidelityFX/ffx_a.h"
@@ -57,16 +57,18 @@ public:
         
         // Rest will be filled in by the luminanceHistogramAverage shader
 
-        BUFFER_UPLOAD(&lpmConstants, sizeof(LPMConstants), UploadManager::UploadTarget::FromShared(m_pLPMConstants), 0);
+        BUFFER_UPLOAD(&lpmConstants, sizeof(LPMConstants), rg::runtime::UploadTarget::FromShared(m_pLPMConstants), 0);
 
         RegisterSRV(Builtin::PostProcessing::UpscaledHDR);
 		RegisterSRV(Builtin::CameraBuffer);
 		RegisterSRV("FFX::LPMConstants");
     }
 
-	PassReturn Execute(RenderContext& context) override {
+	PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+	    auto& context = *renderContext;
 		auto& psoManager = PSOManager::GetInstance();
-		auto& commandList = context.commandList;
+		auto& commandList = executionContext.commandList;
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 

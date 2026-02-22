@@ -3,6 +3,7 @@
 #include <rhi.h>
 
 #include "Render/RenderGraph/RenderGraph.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "Resources/Buffers/Buffer.h"
@@ -58,53 +59,53 @@ inline std::shared_ptr<Buffer> CreateAliasedUnmaterializedStructuredBuffer(
 
 class CLodExtension final : public RenderGraph::IRenderGraphExtension {
 public:
-	explicit CLodExtension(CLodExtensionType type, uint64_t maxVisibleClusters) : m_maxVisibleClusters(maxVisibleClusters) {
+    explicit CLodExtension(CLodExtensionType type, uint64_t maxVisibleClusters) : m_maxVisibleClusters(maxVisibleClusters) {
 
-		// Initialize global entity for extension type
-		auto ecsWorld = ECSManager::GetInstance().GetWorld();
-		// TODO: Better way to do this? Weird global initialization
-		switch (type) {
-            case CLodExtensionType::VisiblityBuffer:
-				if (ecsWorld.component<CLodExtensionVisibilityBufferTag>().has(flecs::Exclusive)) {
-                    // Already initialized
-                    break;
-                }
-                ecsWorld.component<CLodExtensionVisibilityBufferTag>().add(flecs::Exclusive);
-				ecsWorld.add<CLodExtensionVisibilityBufferTag>();
-				break;
-                case CLodExtensionType::Shadow:
-                    if (ecsWorld.component<CLodExtensionShadowTag>().has(flecs::Exclusive)) {
-                    // Already initialized
-                    break;
-					}
-				ecsWorld.component<CLodExtensionShadowTag>().add(flecs::Exclusive);
-				ecsWorld.add<CLodExtensionShadowTag>();
-				break;
-		}
+        // Initialize global entity for extension type
+        auto ecsWorld = ECSManager::GetInstance().GetWorld();
+        // TODO: Better way to do this? Weird global initialization
+        switch (type) {
+        case CLodExtensionType::VisiblityBuffer:
+            if (ecsWorld.component<CLodExtensionVisibilityBufferTag>().has(flecs::Exclusive)) {
+                // Already initialized
+                break;
+            }
+            ecsWorld.component<CLodExtensionVisibilityBufferTag>().add(flecs::Exclusive);
+            ecsWorld.add<CLodExtensionVisibilityBufferTag>();
+            break;
+        case CLodExtensionType::Shadow:
+            if (ecsWorld.component<CLodExtensionShadowTag>().has(flecs::Exclusive)) {
+                // Already initialized
+                break;
+            }
+            ecsWorld.component<CLodExtensionShadowTag>().add(flecs::Exclusive);
+            ecsWorld.add<CLodExtensionShadowTag>();
+            break;
+        }
 
         m_visibleClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(static_cast<uint32_t>(maxVisibleClusters), sizeof(VisibleCluster), true, false);
-		m_visibleClustersBuffer->SetName("CLod Visible Clusters Buffer (uncompacted)");
+        m_visibleClustersBuffer->SetName("CLod Visible Clusters Buffer (uncompacted)");
         m_histogramIndirectCommand = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterBucketsHistogramIndirectCommand), true, false);
-		m_histogramIndirectCommand->SetName("CLod Raster Buckets Histogram Indirect Command Buffer");
+        m_histogramIndirectCommand->SetName("CLod Raster Buckets Histogram Indirect Command Buffer");
         m_rasterBucketsHistogramBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
         m_rasterBucketsHistogramBuffer->SetName("Raster bucket histogram");
 
         flecs::entity typeEntity;
-		switch (type) {
-            case CLodExtensionType::VisiblityBuffer:
-				typeEntity = ecsWorld.entity<CLodExtensionVisibilityBufferTag>();
-                break;
-			case CLodExtensionType::Shadow:
-				typeEntity = ecsWorld.entity<CLodExtensionShadowTag>();
-				break;
-		}
+        switch (type) {
+        case CLodExtensionType::VisiblityBuffer:
+            typeEntity = ecsWorld.entity<CLodExtensionVisibilityBufferTag>();
+            break;
+        case CLodExtensionType::Shadow:
+            typeEntity = ecsWorld.entity<CLodExtensionShadowTag>();
+            break;
+        }
 
         m_visibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
-		m_visibleClustersCounterBuffer->SetName("CLod Visible Clusters Counter Buffer");
-		m_visibleClustersCounterBuffer->GetECSEntity()
+        m_visibleClustersCounterBuffer->SetName("CLod Visible Clusters Counter Buffer");
+        m_visibleClustersCounterBuffer->GetECSEntity()
             .set<Components::Resource>({ m_visibleClustersCounterBuffer })
-			.add<VisibleClustersCounterTag>()
-			.add<CLodExtensionTypeTag>(typeEntity);
+            .add<VisibleClustersCounterTag>()
+            .add<CLodExtensionTypeTag>(typeEntity);
 
         m_workGraphTelemetryBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodWorkGraphCounterCount, sizeof(uint32_t), true, false, false, false);
         m_workGraphTelemetryBuffer->SetName("CLod Work Graph Telemetry Buffer");
@@ -122,8 +123,8 @@ public:
         m_rasterBucketsTotalCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
         m_rasterBucketsTotalCountBuffer->SetName("CLod Raster bucket total count");
 
-		m_compactedVisibleClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(static_cast<uint32_t>(maxVisibleClusters), sizeof(VisibleCluster), true, false);
-		m_compactedVisibleClustersBuffer->SetName("CLod Compacted Visible Clusters Buffer");
+        m_compactedVisibleClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(static_cast<uint32_t>(maxVisibleClusters), sizeof(VisibleCluster), true, false);
+        m_compactedVisibleClustersBuffer->SetName("CLod Compacted Visible Clusters Buffer");
         // This tags the buffer with the extension type so passes can query for it with ECSResourceResolver
         m_compactedVisibleClustersBuffer->GetECSEntity()
             .set<Components::Resource>({ m_compactedVisibleClustersBuffer })
@@ -135,38 +136,38 @@ public:
         m_rasterBucketsIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
         m_rasterBucketsIndirectArgsBuffer->SetName("CLod Raster bucket indirect args");
 
-		m_type = type;
-	}
+        m_type = type;
+    }
 
-	void OnRegistryReset(ResourceRegistry* reg) override {
+    void OnRegistryReset(ResourceRegistry* reg) override {
 
-	}
+    }
 
-	void GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override {
-		// Add the hierarchical culling pass
-		RenderGraph::ExternalPassDesc cullPassDesc;
-		cullPassDesc.type = RenderGraph::PassType::Render;
-		cullPassDesc.name = "CLod::HierarchialCullingPass";
-		HierarchialCullingPassInputs cullPassInputs;
-		cullPassInputs.isFirstPass = true; // For now, always true
-		cullPassDesc.pass = std::make_shared<HierarchialCullingPass>(
-            cullPassInputs, 
-            m_visibleClustersBuffer, 
+    void GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override {
+        // Add the hierarchical culling pass
+        RenderGraph::ExternalPassDesc cullPassDesc;
+        cullPassDesc.type = RenderGraph::PassType::Render;
+        cullPassDesc.name = "CLod::HierarchialCullingPass";
+        HierarchialCullingPassInputs cullPassInputs;
+        cullPassInputs.isFirstPass = true; // For now, always true
+        cullPassDesc.pass = std::make_shared<HierarchialCullingPass>(
+            cullPassInputs,
+            m_visibleClustersBuffer,
             m_visibleClustersCounterBuffer,
-        m_histogramIndirectCommand,
-        m_workGraphTelemetryBuffer);
-		cullPassDesc.where = RenderGraph::ExternalInsertPoint::After("SkinningPass");
-		outPasses.push_back(std::move(cullPassDesc));
+            m_histogramIndirectCommand,
+            m_workGraphTelemetryBuffer);
+        cullPassDesc.where = RenderGraph::ExternalInsertPoint::After("SkinningPass");
+        outPasses.push_back(std::move(cullPassDesc));
 
-		RenderGraph::ExternalPassDesc histogramPassDesc;
-		histogramPassDesc.type = RenderGraph::PassType::Compute;
-		histogramPassDesc.name = "CLod::RasterBucketsHistogramPass";
+        RenderGraph::ExternalPassDesc histogramPassDesc;
+        histogramPassDesc.type = RenderGraph::PassType::Compute;
+        histogramPassDesc.name = "CLod::RasterBucketsHistogramPass";
         histogramPassDesc.pass = std::make_shared<RasterBucketHistogramPass>(
-            m_visibleClustersBuffer, 
+            m_visibleClustersBuffer,
             m_visibleClustersCounterBuffer,
             m_histogramIndirectCommand,
             m_rasterBucketsHistogramBuffer);
-		outPasses.push_back(std::move(histogramPassDesc));
+        outPasses.push_back(std::move(histogramPassDesc));
 
         RenderGraph::ExternalPassDesc prefixScanPassDesc;
         prefixScanPassDesc.type = RenderGraph::PassType::Compute;
@@ -193,7 +194,7 @@ public:
         compactPassDesc.pass = std::make_shared<RasterBucketCompactAndArgsPass>(
             m_visibleClustersBuffer,
             m_visibleClustersCounterBuffer,
-			m_histogramIndirectCommand, // Reused for cluster compaction
+            m_histogramIndirectCommand, // Reused for cluster compaction
             m_rasterBucketsHistogramBuffer,
             m_rasterBucketsOffsetsBuffer,
             m_rasterBucketsWriteCursorBuffer,
@@ -202,28 +203,28 @@ public:
             m_maxVisibleClusters);
         outPasses.push_back(std::move(compactPassDesc));
 
-		RenderGraph::ExternalPassDesc rasterizePassDesc;
-		rasterizePassDesc.type = RenderGraph::PassType::Render;
+        RenderGraph::ExternalPassDesc rasterizePassDesc;
+        rasterizePassDesc.type = RenderGraph::PassType::Render;
         rasterizePassDesc.name = "CLod::RasterizeClustersPass";
-		rasterizePassDesc.where = RenderGraph::ExternalInsertPoint::Before("MaterialHistogramPass");
-		ClusterRasterizationPassInputs rasterizePassInputs;
+        rasterizePassDesc.where = RenderGraph::ExternalInsertPoint::Before("MaterialHistogramPass");
+        ClusterRasterizationPassInputs rasterizePassInputs;
         rasterizePassInputs.clearGbuffer = true;
         rasterizePassInputs.wireframe = false;
         rasterizePassDesc.pass = std::make_shared<ClusterRasterizationPass>(
-			rasterizePassInputs,
+            rasterizePassInputs,
             m_compactedVisibleClustersBuffer,
-			m_rasterBucketsHistogramBuffer,
-			m_rasterBucketsIndirectArgsBuffer);
+            m_rasterBucketsHistogramBuffer,
+            m_rasterBucketsIndirectArgsBuffer);
         rasterizePassDesc.isGeometryPass = true;
-		outPasses.push_back(std::move(rasterizePassDesc));
-	}
+        outPasses.push_back(std::move(rasterizePassDesc));
+    }
 
 private:
 
-	CLodExtensionType m_type;
-	uint64_t m_maxVisibleClusters;
+    CLodExtensionType m_type;
+    uint64_t m_maxVisibleClusters;
 
-	// Buffers used across CLod passes
+    // Buffers used across CLod passes
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
     std::shared_ptr<Buffer> m_workGraphTelemetryBuffer;
@@ -232,20 +233,20 @@ private:
     std::shared_ptr<Buffer> m_histogramIndirectCommand;
     std::shared_ptr<Buffer> m_rasterBucketsHistogramBuffer;
 
-	// prefix scan buffers
+    // prefix scan buffers
     std::shared_ptr<Buffer> m_rasterBucketsOffsetsBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsBlockSumsBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsScannedBlockSumsBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsTotalCountBuffer;
 
-	// Compaction Pass Buffers
+    // Compaction Pass Buffers
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsWriteCursorBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBuffer;
 
-	// ---------------------------------------------------------------
-	// Hierarchial Culling Pass
-	// ---------------------------------------------------------------
+    // ---------------------------------------------------------------
+    // Hierarchial Culling Pass
+    // ---------------------------------------------------------------
 
     struct ObjectCullRecord
     {
@@ -273,8 +274,8 @@ private:
     class HierarchialCullingPass : public RenderPass, public IDynamicDeclaredResources {
     public:
         HierarchialCullingPass(
-            HierarchialCullingPassInputs inputs, 
-            std::shared_ptr<Buffer> visibleClustersBuffer, 
+            HierarchialCullingPassInputs inputs,
+            std::shared_ptr<Buffer> visibleClustersBuffer,
             std::shared_ptr<Buffer> visibleClustersCounterBuffer,
             std::shared_ptr<Buffer> histogramIndirectCommand,
             std::shared_ptr<Buffer> workGraphTelemetryBuffer) {
@@ -288,10 +289,9 @@ private:
                 rhi::HeapType::DeviceLocal,
                 memSize,
                 true);
-            m_scratchBuffer->ApplyMetadataComponentBundle(
-                EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Work graph scratch buffer" }));
-			m_visibleClustersBuffer = visibleClustersBuffer;
-			m_visibleClustersCounterBuffer = visibleClustersCounterBuffer;
+            m_scratchBuffer->SetMemoryUsageHint("Work graph scratch buffer");
+            m_visibleClustersBuffer = visibleClustersBuffer;
+            m_visibleClustersCounterBuffer = visibleClustersCounterBuffer;
             m_histogramIndirectCommand = histogramIndirectCommand;
             m_workGraphTelemetryBuffer = workGraphTelemetryBuffer;
         }
@@ -336,9 +336,9 @@ private:
             RegisterSRV(Builtin::PerMeshInstanceBuffer);
             RegisterSRV(Builtin::PerObjectBuffer);
             RegisterSRV(Builtin::CLod::Nodes);
-			RegisterSRV(Builtin::CLod::MeshletBounds);
+            RegisterSRV(Builtin::CLod::MeshletBounds);
             RegisterSRV(Builtin::CameraBuffer);
-			RegisterSRV(Builtin::PerMeshBuffer);
+            RegisterSRV(Builtin::PerMeshBuffer);
 
             //RegisterUAV(Builtin::VisibleClusterBuffer);
             //RegisterUAV(Builtin::VisibleClusterCounter);
@@ -346,8 +346,10 @@ private:
             //m_visibleClusterCounter = m_resourceRegistryView->RequestHandle(Builtin::VisibleClusterCounter);
         }
 
-        PassReturn Execute(RenderContext& context) override {
-            auto& commandList = context.commandList;
+        PassReturn Execute(PassExecutionContext& executionContext) override {
+            auto* renderContext = executionContext.hostData->Get<RenderContext>();
+            auto& context = *renderContext;
+            auto& commandList = executionContext.commandList;
 
             // Set the descriptor heaps
             commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
@@ -357,7 +359,7 @@ private:
             std::vector<ObjectCullRecord> cullRecords;
 
             // Build cull records for all indirect buffers
-			// TODO: Non-opaque objects, and non-primary cameras
+            // TODO: Non-opaque objects, and non-primary cameras
             ViewFilter filter = ViewFilter::PrimaryCameras();
             context.viewManager->ForEachFiltered(filter, [&](uint64_t view) {
                 auto viewInfo = context.viewManager->Get(view);
@@ -367,7 +369,7 @@ private:
                     auto count = wl.workload.count;
                     if (count == 0) {
                         continue;
-					}
+                    }
                     ObjectCullRecord record{};
                     record.viewDataIndex = cameraBufferIndex;
                     record.activeDrawSetIndicesSRVIndex = context.objectManager->GetActiveDrawSetIndices(wl.flags)->GetSRVInfo(0).slot.index;
@@ -376,9 +378,9 @@ private:
                     record.dispatchGridX = static_cast<uint>((count + 63) / 64);
                     record.dispatchGridY = 1;
                     record.dispatchGridZ = 1;
-					cullRecords.push_back(record);
+                    cullRecords.push_back(record);
                 }
-                
+
                 });
 
             commandList.SetWorkGraph(m_workGraph->GetHandle(), m_scratchBuffer->GetAPIResource().GetHandle(), true); // Reset every time for now
@@ -388,7 +390,7 @@ private:
             uint32_t uintRootConstants[NumMiscUintRootConstants] = {};
             uintRootConstants[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
             uintRootConstants[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-			uintRootConstants[CLOD_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
+            uintRootConstants[CLOD_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
             uintRootConstants[CLOD_WORKGRAPH_TELEMETRY_DESCRIPTOR_INDEX] = m_workGraphTelemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
             uintRootConstants[CLOD_WORKGRAPH_TELEMETRY_ENABLED] = IsCLodWorkGraphTelemetryEnabled() ? 1u : 0u;
 
@@ -421,7 +423,7 @@ private:
             bufferBarriers.buffers = rhi::Span<rhi::BufferBarrier>(&barrier, 1);
             commandList.Barriers(bufferBarriers);
 
-			// Create indirect command buffer for cluster histogram
+            // Create indirect command buffer for cluster histogram
             BindResourceDescriptorIndices(commandList, m_createCommandPipelineState.GetResourceDescriptorSlots());
 
             uintRootConstants[CLOD_NUM_RASTER_BUCKETS] = context.materialManager->GetRasterBucketCount();
@@ -431,7 +433,7 @@ private:
                 MiscUintRootSignatureIndex,
                 0,
                 NumMiscUintRootConstants,
-				uintRootConstants);
+                uintRootConstants);
 
             commandList.BindPipeline(m_createCommandPipelineState.GetAPIPipelineState().GetHandle());
             commandList.Dispatch(1, 1, 1); // Single thread group, one thread
@@ -439,18 +441,21 @@ private:
             return {};
         }
 
-        void Update(const UpdateContext& context) override {
+        void Update(const UpdateExecutionContext& executionContext) override {
+			auto* updateContext = executionContext.hostData ? executionContext.hostData->Get<UpdateContext>() : nullptr;
+			if (!updateContext) return;
+			auto& context = *updateContext;
             m_declaredResourcesChanged = false;
 
             uint32_t zero = 0u;
-            BUFFER_UPLOAD(&zero, sizeof(uint32_t), UploadManager::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
+            BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
 
             if (IsCLodWorkGraphTelemetryEnabled()) {
                 std::vector<uint32_t> zeroTelemetry(CLodWorkGraphCounterCount, 0u);
                 BUFFER_UPLOAD(
                     zeroTelemetry.data(),
                     static_cast<uint32_t>(zeroTelemetry.size() * sizeof(uint32_t)),
-                    UploadManager::UploadTarget::FromShared(m_workGraphTelemetryBuffer),
+                    rg::runtime::UploadTarget::FromShared(m_workGraphTelemetryBuffer),
                     0);
             }
         }
@@ -467,13 +472,13 @@ private:
         PipelineResources m_pipelineResources;
         rhi::WorkGraphPtr m_workGraph;
         PipelineState m_createCommandPipelineState;
-		std::shared_ptr<Buffer> m_visibleClustersBuffer;
-		std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
+        std::shared_ptr<Buffer> m_visibleClustersBuffer;
+        std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
         std::shared_ptr<Buffer> m_scratchBuffer;
-		std::shared_ptr<Buffer> m_histogramIndirectCommand;
+        std::shared_ptr<Buffer> m_histogramIndirectCommand;
         std::shared_ptr<Buffer> m_workGraphTelemetryBuffer;
         bool m_declaredResourcesChanged = true;
-		RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
+        RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
 
         void CreatePipelines(
             rhi::Device device,
@@ -534,14 +539,14 @@ private:
         }
     };
 
-	// --------------------------------------------------------------
-	// Raster Bucket Histogram Pass
-	// --------------------------------------------------------------
+    // --------------------------------------------------------------
+    // Raster Bucket Histogram Pass
+    // --------------------------------------------------------------
 
     class RasterBucketHistogramPass : public ComputePass {
     public:
         RasterBucketHistogramPass(
-            std::shared_ptr<Buffer> visibleClustersBuffer, 
+            std::shared_ptr<Buffer> visibleClustersBuffer,
             std::shared_ptr<Buffer> visibleClustersCounterBuffer,
             std::shared_ptr<Buffer> histogramIndirectCommand,
             std::shared_ptr<Buffer> histogramBuffer) {
@@ -562,10 +567,10 @@ private:
                 rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(rasterizeClustersArgs, 2), sizeof(RasterBucketsHistogramIndirectCommand) },
                 PSOManager::GetInstance().GetComputeRootSignature().GetHandle(), m_histogramCommandSignature);
 
-			m_visibleClustersBuffer = visibleClustersBuffer;
-			m_visibleClustersCounterBuffer = visibleClustersCounterBuffer;
-			m_histogramIndirectCommand = histogramIndirectCommand;
-			m_histogramBuffer = histogramBuffer;
+            m_visibleClustersBuffer = visibleClustersBuffer;
+            m_visibleClustersCounterBuffer = visibleClustersCounterBuffer;
+            m_histogramIndirectCommand = histogramIndirectCommand;
+            m_histogramBuffer = histogramBuffer;
         }
 
         ~RasterBucketHistogramPass() {
@@ -579,17 +584,19 @@ private:
                 Builtin::PerMeshInstanceBuffer,
                 Builtin::PerMaterialDataBuffer)
                 .WithIndirectArguments(m_histogramIndirectCommand)
-				.WithUnorderedAccess(m_histogramBuffer);
+                .WithUnorderedAccess(m_histogramBuffer);
         }
 
         void Setup() override {
-			RegisterSRV(Builtin::PerMeshBuffer);
-			RegisterSRV(Builtin::PerMeshInstanceBuffer);
-			RegisterSRV(Builtin::PerMaterialDataBuffer);
+            RegisterSRV(Builtin::PerMeshBuffer);
+            RegisterSRV(Builtin::PerMeshInstanceBuffer);
+            RegisterSRV(Builtin::PerMaterialDataBuffer);
         }
 
-        PassReturn Execute(RenderContext& context) override {
-            auto& commandList = context.commandList;
+        PassReturn Execute(PassExecutionContext& executionContext) override {
+            auto* renderContext = executionContext.hostData->Get<RenderContext>();
+            auto& context = *renderContext;
+            auto& commandList = executionContext.commandList;
 
             // Set the descriptor heaps
             commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
@@ -599,10 +606,10 @@ private:
             commandList.BindPipeline(m_histogramPipeline.GetAPIPipelineState().GetHandle());
             BindResourceDescriptorIndices(commandList, m_histogramPipeline.GetResourceDescriptorSlots());
 
-			uint32_t uintRootConstants[NumMiscUintRootConstants] = {};
-			uintRootConstants[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
-			uintRootConstants[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
-			uintRootConstants[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+            uint32_t uintRootConstants[NumMiscUintRootConstants] = {};
+            uintRootConstants[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
+            uintRootConstants[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
+            uintRootConstants[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 
             commandList.PushConstants(
                 rhi::ShaderStage::Compute,
@@ -618,17 +625,20 @@ private:
             return {};
         }
 
-        void Update(const UpdateContext& context) override {
-			auto numRasterBuckets = context.materialManager->GetRasterBucketCount();
+        void Update(const UpdateExecutionContext& executionContext) override {
+            auto* updateContext = executionContext.hostData->Get<UpdateContext>();
+			auto& context = *updateContext;
 
-			// Resize histogram buffer if needed
+            auto numRasterBuckets = context.materialManager->GetRasterBucketCount();
+
+            // Resize histogram buffer if needed
             if (m_histogramBuffer->GetSize() < static_cast<size_t>(numRasterBuckets) * sizeof(uint32_t)) {
                 m_histogramBuffer->ResizeStructured(numRasterBuckets);
             }
 
             // Clear the histogram buffer
-			std::vector<uint32_t> zeroData(numRasterBuckets, 0);
-			BUFFER_UPLOAD(zeroData.data(), static_cast<uint32_t>(zeroData.size() * sizeof(uint32_t)), UploadManager::UploadTarget::FromShared(m_histogramBuffer), 0);
+            std::vector<uint32_t> zeroData(numRasterBuckets, 0);
+            BUFFER_UPLOAD(zeroData.data(), static_cast<uint32_t>(zeroData.size() * sizeof(uint32_t)), rg::runtime::UploadTarget::FromShared(m_histogramBuffer), 0);
         }
 
         void Cleanup() override {
@@ -638,9 +648,9 @@ private:
     private:
         PipelineState m_histogramPipeline;
         rhi::CommandSignaturePtr m_histogramCommandSignature;
-		std::shared_ptr<Buffer> m_visibleClustersBuffer;
-		std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
-		std::shared_ptr<Buffer> m_histogramIndirectCommand;
+        std::shared_ptr<Buffer> m_visibleClustersBuffer;
+        std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
+        std::shared_ptr<Buffer> m_histogramIndirectCommand;
         std::shared_ptr<Buffer> m_histogramBuffer;
 
         void CreatePipelines(
@@ -683,8 +693,10 @@ private:
 
         void Setup() override {}
 
-        PassReturn Execute(RenderContext& context) override {
-            auto& commandList = context.commandList;
+        PassReturn Execute(PassExecutionContext& executionContext) override {
+            auto* renderContext = executionContext.hostData->Get<RenderContext>();
+			auto& context = *renderContext;
+            auto& commandList = executionContext.commandList;
             auto& pm = PSOManager::GetInstance();
 
             auto numBuckets = context.materialManager->GetRasterBucketCount();
@@ -713,7 +725,9 @@ private:
             return {};
         }
 
-        void Update(const UpdateContext& context) override {
+        void Update(const UpdateExecutionContext& executionContext) override {
+            auto* updateContext = executionContext.hostData->Get<UpdateContext>();
+			auto& context = *updateContext;
             auto numBuckets = context.materialManager->GetRasterBucketCount();
             const uint32_t numBlocks = (numBuckets + m_blockSize - 1) / m_blockSize;
 
@@ -761,8 +775,11 @@ private:
 
         void Setup() override {}
 
-        PassReturn Execute(RenderContext& context) override {
-            auto& commandList = context.commandList;
+        PassReturn Execute(PassExecutionContext& executionContext) override {
+            auto* renderContext = executionContext.hostData->Get<RenderContext>();
+			auto& context = *renderContext;
+
+            auto& commandList = executionContext.commandList;
             auto& pm = PSOManager::GetInstance();
 
             auto numBuckets = context.materialManager->GetRasterBucketCount();
@@ -793,7 +810,9 @@ private:
             return {};
         }
 
-        void Update(const UpdateContext& context) override {
+        void Update(const UpdateExecutionContext& executionContext) override {
+            auto* updateContext = executionContext.hostData->Get<UpdateContext>();
+			auto& context = *updateContext;
             auto numBuckets = context.materialManager->GetRasterBucketCount();
             const uint32_t numBlocks = (numBuckets + m_blockSize - 1) / m_blockSize;
 
@@ -827,7 +846,7 @@ private:
             uint64_t maxVisibleClusters)
             : m_visibleClustersBuffer(std::move(visibleClustersBuffer)),
             m_visibleClustersCounterBuffer(std::move(visibleClustersCounterBuffer)),
-			m_indirectCommand(std::move(indirectCommand)),
+            m_indirectCommand(std::move(indirectCommand)),
             m_histogramBuffer(std::move(histogramBuffer)),
             m_offsetsBuffer(std::move(offsetsBuffer)),
             m_writeCursorBuffer(std::move(writeCursorBuffer)),
@@ -867,7 +886,7 @@ private:
                     m_writeCursorBuffer,
                     m_compactedClustersBuffer,
                     m_indirectArgsBuffer)
-        	.WithIndirectArguments(m_indirectCommand);
+                .WithIndirectArguments(m_indirectCommand);
         }
 
         void Setup() override {
@@ -876,8 +895,10 @@ private:
             RegisterSRV(Builtin::PerMaterialDataBuffer);
         }
 
-        PassReturn Execute(RenderContext& context) override {
-            auto& commandList = context.commandList;
+        PassReturn Execute(PassExecutionContext& executionContext) override {
+            auto* renderContext = executionContext.hostData->Get<RenderContext>();
+			auto& context = *renderContext;
+            auto& commandList = executionContext.commandList;
             auto& pm = PSOManager::GetInstance();
 
             auto numBuckets = context.materialManager->GetRasterBucketCount();
@@ -918,7 +939,9 @@ private:
             return {};
         }
 
-        void Update(const UpdateContext& context) override {
+        void Update(const UpdateExecutionContext& executionContext) override {
+            auto* updateContext = executionContext.hostData->Get<UpdateContext>();
+			auto& context = *updateContext;
             auto numBuckets = context.materialManager->GetRasterBucketCount();
 
             if (m_writeCursorBuffer->GetSize() < static_cast<size_t>(numBuckets) * sizeof(uint32_t)) {
@@ -931,7 +954,7 @@ private:
             std::vector<uint32_t> zeroData(numBuckets, 0u);
             BUFFER_UPLOAD(zeroData.data(),
                 static_cast<uint32_t>(zeroData.size() * sizeof(uint32_t)),
-                UploadManager::UploadTarget::FromShared(m_writeCursorBuffer),
+                rg::runtime::UploadTarget::FromShared(m_writeCursorBuffer),
                 0);
         }
 
@@ -943,7 +966,7 @@ private:
 
         std::shared_ptr<Buffer> m_visibleClustersBuffer;
         std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
-		std::shared_ptr<Buffer> m_indirectCommand;
+        std::shared_ptr<Buffer> m_indirectCommand;
         std::shared_ptr<Buffer> m_histogramBuffer;
         std::shared_ptr<Buffer> m_offsetsBuffer;
         std::shared_ptr<Buffer> m_writeCursorBuffer;
@@ -953,9 +976,9 @@ private:
         uint64_t m_maxVisibleClusters = 0;
     };
 
-	// --------------------------------------------------------------
-	// Cluster Rasterization Pass
-	// --------------------------------------------------------------
+    // --------------------------------------------------------------
+    // Cluster Rasterization Pass
+    // --------------------------------------------------------------
 
     struct ClusterRasterizationPassInputs {
         bool wireframe;
@@ -975,7 +998,7 @@ private:
     class ClusterRasterizationPass : public RenderPass, public IDynamicDeclaredResources {
     public:
         ClusterRasterizationPass(
-			ClusterRasterizationPassInputs inputs,
+            ClusterRasterizationPassInputs inputs,
             std::shared_ptr<Buffer> compactedVisibleClustersBuffer,
             std::shared_ptr<Buffer> rasterBucketsHistogramBuffer,
             std::shared_ptr<Buffer> rasterBucketsIndirectArgsBuffer)
@@ -987,17 +1010,17 @@ private:
 
             m_viewRasterInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodViewRasterInfo), false, false, false, false);
             m_viewRasterInfoBuffer->SetName("CLodViewRasterInfoBuffer");
-            
+
             // Create rasterization indirect command signature
             rhi::IndirectArg args[] = {
                 {.kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { IndirectCommandSignatureRootSignatureIndex, 0, 3 } } },
                 {.kind = rhi::IndirectArgKind::DispatchMesh }
-			};
+            };
             auto device = DeviceManager::GetInstance().GetDevice();
             device.CreateCommandSignature(
                 rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(args, 2), sizeof(RasterizeClustersCommand) },
                 PSOManager::GetInstance().GetRootSignature().GetHandle(),
-				m_rasterizationCommandSignature);
+                m_rasterizationCommandSignature);
         }
 
         ~ClusterRasterizationPass() {
@@ -1017,7 +1040,7 @@ private:
                 Builtin::MeshResources::MeshletTriangles,
                 Builtin::MeshResources::MeshletVertexIndices,
                 Builtin::MeshResources::MeshletOffsets,
-                m_compactedVisibleClustersBuffer, 
+                m_compactedVisibleClustersBuffer,
                 m_rasterBucketsHistogramBuffer,
                 m_viewRasterInfoBuffer)
                 .WithIndirectArguments(m_rasterBucketsIndirectArgsBuffer)
@@ -1025,14 +1048,14 @@ private:
 
             for (auto& vb : m_visibilityBuffers) { // Dynamic per-frame
                 builder->WithUnorderedAccess(vb);
-			}
+            }
         }
 
         void Setup() override {
 
-        	//RegisterSRV(Builtin::MeshResources::MeshletOffsets);
-        	RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
-        	RegisterSRV(Builtin::MeshResources::MeshletTriangles);
+            //RegisterSRV(Builtin::MeshResources::MeshletOffsets);
+            RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
+            RegisterSRV(Builtin::MeshResources::MeshletTriangles);
 
             RegisterSRV(Builtin::NormalMatrixBuffer);
             RegisterSRV(Builtin::PostSkinningVertices);
@@ -1041,14 +1064,17 @@ private:
             RegisterSRV(Builtin::PerMeshInstanceBuffer);
             RegisterSRV(Builtin::PerMeshBuffer);
             RegisterSRV(Builtin::PerMaterialDataBuffer);
-			RegisterSRV(Builtin::MeshResources::MeshletOffsets);
+            RegisterSRV(Builtin::MeshResources::MeshletOffsets);
 
             //RegisterSRV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
         }
 
-		// Note: relies on Update() running before DeclareResourceUsages(). If this ever changes, we may need a new approach.
-		void Update(const UpdateContext& context) override {
-			// Build per-view raster metadata used by CLod mesh/pixel shaders.
+        // Note: relies on Update() running before DeclareResourceUsages(). If this ever changes, we may need a new approach.
+        void Update(const UpdateExecutionContext& executionContext) override {
+            auto* updateContext = executionContext.hostData->Get<UpdateContext>();
+            auto& context = *updateContext;
+
+            // Build per-view raster metadata used by CLod mesh/pixel shaders.
             auto numViews = context.viewManager->GetCameraBufferSize();
 
             m_visibilityBuffers.clear();
@@ -1062,32 +1088,32 @@ private:
                     maxViewWidth = std::max(maxViewWidth, viewInfo->gpu.visibilityBuffer->GetWidth());
                     maxViewHeight = std::max(maxViewHeight, viewInfo->gpu.visibilityBuffer->GetHeight());
                 }
-            });
+                });
 
-			std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
-			context.viewManager->ForEachView([&](uint64_t v) {
-				auto viewInfo = context.viewManager->Get(v);
+            std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
+            context.viewManager->ForEachView([&](uint64_t v) {
+                auto viewInfo = context.viewManager->Get(v);
                 if (viewInfo->gpu.visibilityBuffer != nullptr) {
-					auto cameraIndex = viewInfo->gpu.cameraBufferIndex;
+                    auto cameraIndex = viewInfo->gpu.cameraBufferIndex;
 
-					CLodViewRasterInfo info{};
-					info.visibilityUAVDescriptorIndex = viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-					info.scissorMinX = 0;
-					info.scissorMinY = 0;
-					info.scissorMaxX = viewInfo->gpu.visibilityBuffer->GetWidth();
-					info.scissorMaxY = viewInfo->gpu.visibilityBuffer->GetHeight();
-					info.viewportScaleX = static_cast<float>(info.scissorMaxX) / static_cast<float>(maxViewWidth);
-					info.viewportScaleY = static_cast<float>(info.scissorMaxY) / static_cast<float>(maxViewHeight);
-					viewRasterInfo[cameraIndex] = info;
+                    CLodViewRasterInfo info{};
+                    info.visibilityUAVDescriptorIndex = viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+                    info.scissorMinX = 0;
+                    info.scissorMinY = 0;
+                    info.scissorMaxX = viewInfo->gpu.visibilityBuffer->GetWidth();
+                    info.scissorMaxY = viewInfo->gpu.visibilityBuffer->GetHeight();
+                    info.viewportScaleX = static_cast<float>(info.scissorMaxX) / static_cast<float>(maxViewWidth);
+                    info.viewportScaleY = static_cast<float>(info.scissorMaxY) / static_cast<float>(maxViewHeight);
+                    viewRasterInfo[cameraIndex] = info;
 
-					m_visibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
+                    m_visibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
                 }
-			});
+                });
 
-			m_passWidth = maxViewWidth;
-			m_passHeight = maxViewHeight;
+            m_passWidth = maxViewWidth;
+            m_passHeight = maxViewHeight;
 
-			// Check if per-view raster metadata changed
+            // Check if per-view raster metadata changed
             if (m_viewRasterInfos != viewRasterInfo) {
                 m_viewRasterInfos = viewRasterInfo;
                 // Update the buffer
@@ -1095,28 +1121,30 @@ private:
                 BUFFER_UPLOAD(
                     m_viewRasterInfos.data(),
                     static_cast<uint32_t>(m_viewRasterInfos.size() * sizeof(CLodViewRasterInfo)),
-                    UploadManager::UploadTarget::FromShared(m_viewRasterInfoBuffer),
+                    rg::runtime::UploadTarget::FromShared(m_viewRasterInfoBuffer),
                     0);
-				m_declaredResourcesChanged = true;
+                m_declaredResourcesChanged = true;
             }
             else {
                 m_declaredResourcesChanged = false;
             }
-		}
+        }
 
         bool DeclaredResourcesChanged() const override {
             return m_declaredResourcesChanged;
-		}
+        }
 
-        PassReturn Execute(RenderContext& context) override {
-            auto& commandList = context.commandList;
+        PassReturn Execute(PassExecutionContext& executionContext) override {
+            auto* renderContext = executionContext.hostData->Get<RenderContext>();
+			auto& context = *renderContext;
+            auto& commandList = executionContext.commandList;
 
             rhi::PassBeginInfo p{};
             p.width = m_passWidth;
             p.height = m_passHeight;
             p.debugName = "CLod raster pass";
 
-            context.commandList.BeginPass(p);
+            executionContext.commandList.BeginPass(p);
 
             commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -1174,18 +1202,18 @@ private:
         bool m_clearGbuffer = true;
 
         std::vector<CLodViewRasterInfo> m_viewRasterInfos;
-		std::vector<std::shared_ptr<PixelBuffer>> m_visibilityBuffers;
+        std::vector<std::shared_ptr<PixelBuffer>> m_visibilityBuffers;
 
         std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
         std::shared_ptr<Buffer> m_rasterBucketsHistogramBuffer;
         std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBuffer;
 
-		rhi::CommandSignaturePtr m_rasterizationCommandSignature;
+        rhi::CommandSignaturePtr m_rasterizationCommandSignature;
 
         std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
         uint32_t m_passWidth = 1;
         uint32_t m_passHeight = 1;
-		bool m_declaredResourcesChanged = true;
+        bool m_declaredResourcesChanged = true;
 
         RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
     };

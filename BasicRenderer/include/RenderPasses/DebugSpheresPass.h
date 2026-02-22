@@ -4,6 +4,7 @@
 #include <functional>
 
 #include "RenderPasses/Base/RenderPass.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Mesh/Mesh.h"
@@ -35,8 +36,10 @@ public:
 		m_objectBufferSRVIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PerObjectBuffer)->GetSRVInfo(0).slot.index;
 	}
 
-	PassReturn Execute(RenderContext& context) override {
-		auto& commandList = context.commandList;
+	PassReturn Execute(PassExecutionContext& executionContext) override {
+	    auto* renderContext = executionContext.hostData->Get<RenderContext>();
+	    auto& context = *renderContext;
+		auto& commandList = executionContext.commandList;
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -153,7 +156,7 @@ private:
 		rts.formats[0] = rhi::Format::R8G8B8A8_UNorm;
 		rhi::SubobjRTVs soRTVs{ rts };
 
-		// Your original used D24_UNORM_S8_UINT. If your RHI format enum doesn’t carry D24,
+		// Your original used D24_UNORM_S8_UINT. If your RHI format enum doesnï¿½t carry D24,
 		// you can either set Unknown (let backend infer) or use D32_Float consistently.
 		rhi::SubobjDSV    soDSV{ rhi::Format::D32_Float };
 		rhi::SubobjSample soSmp{ rhi::SampleDesc{1, 0} };

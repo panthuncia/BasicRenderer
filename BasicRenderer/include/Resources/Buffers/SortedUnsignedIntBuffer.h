@@ -5,7 +5,6 @@
 #include <algorithm> // For std::lower_bound, std::upper_bound
 #include <rhi.h>
 
-#include "Managers/Singletons/DeviceManager.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
@@ -38,11 +37,6 @@ public:
         return static_cast<UINT>(m_data.size());
     }
 
-    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
-        m_metadataBundles.emplace_back(bundle);
-        ApplyMetadataToBacking(bundle);
-    }
-
 private:
     SortedUnsignedIntBuffer(uint64_t capacity = 64, std::string name = "", bool UAV = false)
         : m_capacity(capacity), m_UAV(UAV), m_earliestModifiedIndex(0) {
@@ -50,17 +44,7 @@ private:
         SetName(name);
     }
 
-    void OnSetName() override {
-        if (!m_dataBuffer) {
-            return;
-        }
-        if (name != "") {
-            m_dataBuffer->SetName((m_name + ": " + name).c_str());
-        }
-        else {
-            m_dataBuffer->SetName(m_name.c_str());
-        }
-    }
+    void OnSetName() override;
 
     void AssignDescriptorSlots();
 
@@ -79,4 +63,9 @@ private:
     void CreateBuffer(uint64_t capacity);
 
     void GrowBuffer(uint64_t newSize);
+
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
+        m_metadataBundles.emplace_back(bundle);
+        ApplyMetadataToBacking(bundle);
+    }
 };

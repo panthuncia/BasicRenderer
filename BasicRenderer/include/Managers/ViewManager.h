@@ -8,13 +8,11 @@
 #include <functional>
 #include <flecs.h>
 
-#include "Interfaces/IResourceProvider.h"
-#include "Resources/ResourceIdentifier.h"
+#include "OpenRenderGraph/OpenRenderGraph.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Scene/Components.h"
 #include "ShaderBuffers.h"
 #include "Managers/IndirectCommandBufferManager.h"
-#include "Interfaces/IResourceResolver.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 
 class IndirectCommandBufferManager;

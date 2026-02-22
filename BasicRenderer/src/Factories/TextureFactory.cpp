@@ -7,12 +7,17 @@
 #include <memory>
 #include <vector>
 
+#include <OpenRenderGraph/OpenRenderGraph.h>
+
 #include "Resources/PixelBuffer.h"
 #include "Resources/Sampler.h"
 #include "ThirdParty/stb/stb_image.h"
 #include "rhi_helpers.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Managers/Singletons/PSOManager.h"
+#include "Render/RenderContext.h"
+#include "Managers/Singletons/DeviceManager.h"
+#include "Utilities/Utilities.h"
 
 #define A_CPU
 #include "../shaders/FidelityFX/ffx_a.h"
@@ -139,7 +144,7 @@ namespace {
         auto device = DeviceManager::GetInstance().GetDevice();
 
         TEXTURE_UPLOAD_SUBRESOURCES(
-            UploadManager::UploadTarget::FromShared(dstTexture),
+            rg::runtime::UploadTarget::FromShared(dstTexture),
             desc.format,
             baseW,
             baseH,
@@ -242,7 +247,7 @@ namespace {
         uint32_t prevH = baseH;
 
         auto decodeColor = [&](uint8_t v) noexcept -> float {
-            // Interpret “color” channels as sRGB if isSRGB, otherwise treat as linear UNORM.
+            // Interpret Â“colorÂ” channels as sRGB if isSRGB, otherwise treat as linear UNORM.
             return isSRGB ? detail::Srgb8ToLinear(v) : detail::Unorm8ToFloat(v);
             };
         auto encodeColor = [&](float linear) noexcept -> uint8_t {
@@ -389,7 +394,7 @@ std::shared_ptr<PixelBuffer> TextureFactory::CreateAlwaysResidentPixelBuffer(
     TextureDescription desc,
     TextureInitialData initialData,
     std::string_view debugName)
-const {
+    const {
     if (initialData.Empty()) {
         throw std::runtime_error("CreateAlwaysResidentPixelBuffer: initialData is empty. Use PixelBuffer::CreateShared for data-less textures.");
     }
@@ -403,10 +408,10 @@ const {
     const uint32_t baseW = desc.imageDimensions[0].width;
     const uint32_t baseH = desc.imageDimensions[0].height;
 
-	const bool doMipmapping = desc.generateMipMaps && !rhi::helpers::IsBlockCompressed(desc.format); // TODO: BC mip gen
+    const bool doMipmapping = desc.generateMipMaps && !rhi::helpers::IsBlockCompressed(desc.format); // TODO: BC mip gen
 
     // if caller asked for mipmaps but only provided mip0 for a single-slice 2D texture, generate full chain on CPU.
-	if (doMipmapping) {
+    if (doMipmapping) {
         // Build full imageDimensions for *all* subresources so UploadTextureData can compute pitches safely.
         const uint32_t faces = desc.isCubemap ? 6u : 1u;
         const uint32_t slices = faces * uint32_t(desc.arraySize);
@@ -444,7 +449,7 @@ const {
     }
 
     if (doMipmapping) {
-	    desc.hasUAV = true; // need UAV mips for GPU mipgen
+        desc.hasUAV = true; // need UAV mips for GPU mipgen
         if (rhi::helpers::IsSRGB(desc.format)) {
             desc.uavFormat = rhi::Format::Unknown;
         }
@@ -470,7 +475,7 @@ void TextureFactory::MipmappingPass::EnqueueJob(const std::shared_ptr<PixelBuffe
     if (!tex) return;
 
     if (tex->IsBlockCompressed()) {
-	    spdlog::warn("MipmappingPass: skipping block compressed texture");
+        spdlog::warn("MipmappingPass: skipping block compressed texture");
     }
 
     const uint32_t mipLevels = tex->GetMipLevels();
@@ -572,12 +577,14 @@ void TextureFactory::MipmappingPass::DeclareResourceUsages(ComputePassBuilder* b
     }
 }
 
-PassReturn TextureFactory::MipmappingPass::Execute(RenderContext& context)
+PassReturn TextureFactory::MipmappingPass::Execute(PassExecutionContext& executionContext)
 {
     if (m_pending.empty()) return {};
 
     auto& psoManager = PSOManager::GetInstance();
-    auto& commandList = context.commandList;
+    auto* renderContext = executionContext.hostData->Get<RenderContext>();
+    auto& context = *renderContext;
+    auto& commandList = executionContext.commandList;
 
     commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -628,7 +635,7 @@ PassReturn TextureFactory::MipmappingPass::Execute(RenderContext& context)
 
     // Clear jobs
     m_declaredResourcesChanged = true;
-	m_pending.clear();
+    m_pending.clear();
 
     return {};
 }

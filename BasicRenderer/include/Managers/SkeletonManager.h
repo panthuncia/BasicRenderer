@@ -4,8 +4,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "Interfaces/IResourceProvider.h"
-#include "Resources/ResourceIdentifier.h"
+#include "OpenRenderGraph/OpenRenderGraph.h"
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "ShaderBuffers.h"

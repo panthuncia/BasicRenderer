@@ -2,12 +2,66 @@
 # project specific logic here.
 #
 
+if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
+    cmake_minimum_required(VERSION 3.16)
+    project(BasicRenderer LANGUAGES CXX)
+endif()
+
+get_filename_component(BASICRENDERER_SOURCE_ROOT "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
+get_filename_component(BASICRENDERER_REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+set(BASICRENDERER_OUTPUT_ROOT "${CMAKE_BINARY_DIR}/BasicRenderer")
+
+set(BASICRENDERER_ASSETS_ROOT "${BASICRENDERER_REPO_ROOT}" CACHE PATH "Root containing shared models/textures assets")
+set(BASICRENDERER_USD_ROOT "${BASICRENDERER_REPO_ROOT}/ThirdParty" CACHE PATH "Root containing usd_dbg/usd_rel folders")
+
 # Ensure project include paths take precedence over system paths.
 set(CMAKE_INCLUDE_DIRECTORIES_BEFORE ON)
 
 
 # Add source to this project's executable.
 add_definitions(-D_UNICODE -DUNICODE)
+
+option(BASICRENDERER_USE_PACKAGE_DEPS "Prefer preinstalled BasicRHI/OpenRenderGraph packages" ON)
+option(BASICRENDERER_ENABLE_SUBMODULE_FALLBACK "Allow fallback to in-tree BasicRHI/OpenRenderGraph" ON)
+
+if(BASICRENDERER_USE_PACKAGE_DEPS)
+    find_package(BasicRHI CONFIG QUIET)
+    find_package(OpenRenderGraph CONFIG QUIET)
+endif()
+
+if(TARGET BasicRHI AND NOT TARGET BasicRHI::BasicRHI)
+    add_library(BasicRHI::BasicRHI ALIAS BasicRHI)
+endif()
+
+if(TARGET OpenRenderGraph AND NOT TARGET OpenRenderGraph::OpenRenderGraph)
+    add_library(OpenRenderGraph::OpenRenderGraph ALIAS OpenRenderGraph)
+endif()
+
+if(BASICRENDERER_ENABLE_SUBMODULE_FALLBACK)
+    if(NOT TARGET BasicRHI::BasicRHI AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/../BasicRHI/CMakeLists.txt")
+        add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../BasicRHI" "${CMAKE_CURRENT_BINARY_DIR}/_deps/BasicRHI")
+    endif()
+
+    if(TARGET BasicRHI AND NOT TARGET BasicRHI::BasicRHI)
+        add_library(BasicRHI::BasicRHI ALIAS BasicRHI)
+    endif()
+
+    if(NOT TARGET OpenRenderGraph::OpenRenderGraph AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/../OpenRenderGraph/CMakeLists.txt")
+        add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../OpenRenderGraph" "${CMAKE_CURRENT_BINARY_DIR}/_deps/OpenRenderGraph")
+    endif()
+
+    if(TARGET OpenRenderGraph AND NOT TARGET OpenRenderGraph::OpenRenderGraph)
+        add_library(OpenRenderGraph::OpenRenderGraph ALIAS OpenRenderGraph)
+    endif()
+endif()
+
+if(NOT TARGET BasicRHI::BasicRHI)
+    message(FATAL_ERROR "BasicRenderer requires BasicRHI::BasicRHI. Install BasicRHI package or provide BasicRHI as submodule.")
+endif()
+
+if(NOT TARGET OpenRenderGraph::OpenRenderGraph)
+    message(FATAL_ERROR "BasicRenderer requires OpenRenderGraph::OpenRenderGraph. Install OpenRenderGraph package or provide OpenRenderGraph as submodule.")
+endif()
 
 find_package(spdlog CONFIG REQUIRED)
 find_package(directxtex CONFIG REQUIRED)
@@ -36,7 +90,7 @@ target_link_libraries(resource_codegen
     fmt::fmt
 )
 
-file(GLOB_RECURSE SOURCES "src/*.cpp")
+file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp")
 add_executable (${PROJECT_NAME} WIN32  ${SOURCES})
 
 if (CMAKE_VERSION VERSION_GREATER 3.14)
@@ -72,10 +126,10 @@ function(br_generate_header)
 
   # Defaults (match your existing layout)
   if(NOT BRG_OUT_DIR)
-    set(BRG_OUT_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/generated")
+        set(BRG_OUT_DIR "${BASICRENDERER_SOURCE_ROOT}/generated")
   endif()
   if(NOT BRG_SHADER_OUT_DIR)
-    set(BRG_SHADER_OUT_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/shaders/Generated")
+        set(BRG_SHADER_OUT_DIR "${BASICRENDERER_SOURCE_ROOT}/shaders/Generated")
   endif()
   if(NOT BRG_CODEGEN_TARGET)
     set(BRG_CODEGEN_TARGET resource_codegen)
@@ -125,18 +179,18 @@ endfunction()
 br_generate_header(
   TARGET ${PROJECT_NAME}
   NAME   BuiltinResources
-  JSON   "${CMAKE_SOURCE_DIR}/BasicRenderer/Generators/Templates/BuiltinResources.h.json"
-  OUT_DIR        "${CMAKE_SOURCE_DIR}/BasicRenderer/generated"
-  SHADER_OUT_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/shaders/Generated"
+    JSON   "${BASICRENDERER_SOURCE_ROOT}/Generators/Templates/BuiltinResources.h.json"
+    OUT_DIR        "${BASICRENDERER_SOURCE_ROOT}/generated"
+    SHADER_OUT_DIR "${BASICRENDERER_SOURCE_ROOT}/shaders/Generated"
   NO_HLSL
 )
 
 br_generate_header(
   TARGET ${PROJECT_NAME}
   NAME   BuiltinRenderPasses
-  JSON   "${CMAKE_SOURCE_DIR}/BasicRenderer/Generators/Templates/BuiltinRenderPasses.h.json"
-  OUT_DIR        "${CMAKE_SOURCE_DIR}/BasicRenderer/generated"
-  SHADER_OUT_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/shaders/Generated"
+    JSON   "${BASICRENDERER_SOURCE_ROOT}/Generators/Templates/BuiltinRenderPasses.h.json"
+    OUT_DIR        "${BASICRENDERER_SOURCE_ROOT}/generated"
+    SHADER_OUT_DIR "${BASICRENDERER_SOURCE_ROOT}/shaders/Generated"
   NO_HLSL
 )
 
@@ -150,49 +204,29 @@ function(add_symlink_or_copy_per_config source destination IS_DIRECTORY target_n
         get_filename_component(target_name "${destination}" NAME)
     endif()
 
-    if (CMAKE_BUILD_TYPE STREQUAL "Release")
-            if (IS_DIRECTORY)
-            add_custom_target(
-                "${target_name}_sync" ALL
-                COMMENT "Release: Copying directory ${destination} ← ${source}"
-                VERBATIM
-                COMMAND   ${CMAKE_COMMAND} -E remove_directory   "${destination}"
-                COMMAND   ${CMAKE_COMMAND} -E copy_directory     "${source}" "${destination}"
-            )
-        else()
-            add_custom_target(
-                "${target_name}_sync" ALL
-                COMMENT "Release: Copying file ${destination} ← ${source}"
-                VERBATIM
-                COMMAND   ${CMAKE_COMMAND} -E remove            "${destination}"
-                COMMAND   ${CMAKE_COMMAND} -E copy              "${source}" "${destination}"
-            )
-        endif()
-    else()
-        if (IS_DIRECTORY)
+    if (IS_DIRECTORY)
         add_custom_target(
             "${target_name}_sync" ALL
-            COMMENT "Debug: Symlinking directory ${destination} ← ${source}"
+            COMMENT "Syncing directory ${destination} ← ${source}"
             VERBATIM
-            COMMAND   ${CMAKE_COMMAND} -E remove_directory   "${destination}"
-            COMMAND   ${CMAKE_COMMAND} -E create_symlink     "${source}" "${destination}"
+            COMMAND ${CMAKE_COMMAND} -E remove_directory "${destination}"
+            COMMAND ${CMAKE_COMMAND} -E $<IF:$<CONFIG:Release>,copy_directory,create_symlink> "${source}" "${destination}"
         )
-        else()
-            add_custom_target(
-                "${target_name}_sync" ALL
-                COMMENT "Debug: Symlinking file ${destination} ← ${source}"
-                VERBATIM
-                COMMAND   ${CMAKE_COMMAND} -E remove            "${destination}"
-                COMMAND   ${CMAKE_COMMAND} -E create_symlink    "${source}" "${destination}"
-            )
-        endif()
+    else()
+        add_custom_target(
+            "${target_name}_sync" ALL
+            COMMENT "Syncing file ${destination} ← ${source}"
+            VERBATIM
+            COMMAND ${CMAKE_COMMAND} -E remove "${destination}"
+            COMMAND ${CMAKE_COMMAND} -E $<IF:$<CONFIG:Release>,copy,create_symlink> "${source}" "${destination}"
+        )
     endif()
 
     add_dependencies(BasicRenderer "${target_name}_sync")
 endfunction()
 
-set(SHADERS_SOURCE_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/shaders")
-set(SHADERS_DEST_DIR "${CMAKE_BINARY_DIR}/BasicRenderer/shaders")
+set(SHADERS_SOURCE_DIR "${BASICRENDERER_SOURCE_ROOT}/shaders")
+set(SHADERS_DEST_DIR "${BASICRENDERER_OUTPUT_ROOT}/shaders")
 
 add_symlink_or_copy_per_config(
     "${SHADERS_SOURCE_DIR}"
@@ -201,8 +235,8 @@ add_symlink_or_copy_per_config(
     "shaders"
 )
 
-set(MODELS_SRC_DIR "${CMAKE_SOURCE_DIR}/models")
-set(MODELS_DEST_PATH "${CMAKE_BINARY_DIR}/BasicRenderer/models")
+set(MODELS_SRC_DIR "${BASICRENDERER_ASSETS_ROOT}/models")
+set(MODELS_DEST_PATH "${BASICRENDERER_OUTPUT_ROOT}/models")
 
 add_symlink_or_copy_per_config(
     "${MODELS_SRC_DIR}"
@@ -211,8 +245,8 @@ add_symlink_or_copy_per_config(
     "models"
 )
 
-set(TEXTURES_SRC_DIR "${CMAKE_SOURCE_DIR}/textures")
-set(TEXTURES_DEST_PATH "${CMAKE_BINARY_DIR}/BasicRenderer/textures")
+set(TEXTURES_SRC_DIR "${BASICRENDERER_ASSETS_ROOT}/textures")
+set(TEXTURES_DEST_PATH "${BASICRENDERER_OUTPUT_ROOT}/textures")
 
 add_symlink_or_copy_per_config(
     "${TEXTURES_SRC_DIR}"
@@ -222,8 +256,8 @@ add_symlink_or_copy_per_config(
 )
 
 
-set(tex_dir "${CMAKE_BINARY_DIR}/BasicRenderer/Textures")
-set(tex_link "${CMAKE_BINARY_DIR}/BasicRenderer/textures")
+set(tex_dir "${BASICRENDERER_OUTPUT_ROOT}/Textures")
+set(tex_link "${BASICRENDERER_OUTPUT_ROOT}/textures")
 
 INSTALL(CODE "execute_process( \
     COMMAND ${CMAKE_COMMAND} -E create_symlink \
@@ -232,8 +266,8 @@ INSTALL(CODE "execute_process( \
     )"
 )
 
-set(COMPILER_BINARY_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/dxcompiler.dll")
-set(COMPILER_DEST_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/dxcompiler.dll")
+set(COMPILER_BINARY_DIR "${BASICRENDERER_SOURCE_ROOT}/dxcompiler.dll")
+set(COMPILER_DEST_FILE "${BASICRENDERER_OUTPUT_ROOT}/dxcompiler.dll")
 
 add_symlink_or_copy_per_config(
     "${COMPILER_BINARY_DIR}"
@@ -242,8 +276,8 @@ add_symlink_or_copy_per_config(
     "dxcompiler_dll"
 )
 
-set(SIGNING_BINARY_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/dxil.dll")
-set(SIGNING_DEST_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/dxil.dll")
+set(SIGNING_BINARY_DIR "${BASICRENDERER_SOURCE_ROOT}/dxil.dll")
+set(SIGNING_DEST_FILE "${BASICRENDERER_OUTPUT_ROOT}/dxil.dll")
 
 add_symlink_or_copy_per_config(
     "${SIGNING_BINARY_DIR}"
@@ -252,8 +286,8 @@ add_symlink_or_copy_per_config(
     "dxil_dll"
 )
 
-set(PIX_BINARY_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.dll")
-set(PIX_DEST_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/WinPixEventRuntime.dll")
+set(PIX_BINARY_DIR "${BASICRENDERER_SOURCE_ROOT}/WinPixEventRuntime.dll")
+set(PIX_DEST_FILE "${BASICRENDERER_OUTPUT_ROOT}/WinPixEventRuntime.dll")
 
 add_symlink_or_copy_per_config(
     "${PIX_BINARY_DIR}"
@@ -262,8 +296,8 @@ add_symlink_or_copy_per_config(
     "winpix_dll"
 )
 
-set(D3D_SRC_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/D3D")
-set(D3D_DEST_PATH "${CMAKE_BINARY_DIR}/BasicRenderer/D3D")
+set(D3D_SRC_DIR "${BASICRENDERER_SOURCE_ROOT}/D3D")
+set(D3D_DEST_PATH "${BASICRENDERER_OUTPUT_ROOT}/D3D")
 
 add_symlink_or_copy_per_config(
     "${D3D_SRC_DIR}"
@@ -272,8 +306,8 @@ add_symlink_or_copy_per_config(
     "d3d"
 )
 
-set(AFTERMATH_BINARY_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/GFSDK_Aftermath_Lib.x64.dll")
-set(AFTERMATH_DEST_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/GFSDK_Aftermath_Lib.x64.dll")
+set(AFTERMATH_BINARY_DIR "${BASICRENDERER_SOURCE_ROOT}/GFSDK_Aftermath_Lib.x64.dll")
+set(AFTERMATH_DEST_FILE "${BASICRENDERER_OUTPUT_ROOT}/GFSDK_Aftermath_Lib.x64.dll")
 
 add_symlink_or_copy_per_config(
     "${AFTERMATH_BINARY_DIR}"
@@ -282,8 +316,8 @@ add_symlink_or_copy_per_config(
     "aftermath_dll"
 )
 
-set(SL_BINARY_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/sl.interposer.dll")
-set(SL_DEST_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/sl.interposer.dll")
+set(SL_BINARY_DIR "${BASICRENDERER_SOURCE_ROOT}/sl.interposer.dll")
+set(SL_DEST_FILE "${BASICRENDERER_OUTPUT_ROOT}/sl.interposer.dll")
 
 add_symlink_or_copy_per_config(
     "${SL_BINARY_DIR}"
@@ -292,8 +326,8 @@ add_symlink_or_copy_per_config(
     "sl_interposer_dll"
 )
 
-set(NVSL_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/NVSL")
-set(NVSL_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/NVSL")
+set(NVSL_DIR "${BASICRENDERER_SOURCE_ROOT}/NVSL")
+set(NVSL_FILE "${BASICRENDERER_OUTPUT_ROOT}/NVSL")
 
 add_symlink_or_copy_per_config(
     "${NVSL_DIR}"
@@ -302,8 +336,8 @@ add_symlink_or_copy_per_config(
     "NVSL_DIR"
 )
 
-set(FFX_BIN_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/FFX/amd_fidelityfx_dx12.dll")
-set(FFX_BIN_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/amd_fidelityfx_dx12.dll")
+set(FFX_BIN_DIR "${BASICRENDERER_SOURCE_ROOT}/FFX/amd_fidelityfx_dx12.dll")
+set(FFX_BIN_FILE "${BASICRENDERER_OUTPUT_ROOT}/amd_fidelityfx_dx12.dll")
 
 add_symlink_or_copy_per_config(
     "${FFX_BIN_DIR}"
@@ -312,8 +346,8 @@ add_symlink_or_copy_per_config(
     "FFX_dx12"
 )
 
-set(FFX_BACKEND_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/FFX/ffx_backend_dx12_x64drel.dll")
-set(FFX_BACKEND_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/ffx_backend_dx12_x64drel.dll")
+set(FFX_BACKEND_DIR "${BASICRENDERER_SOURCE_ROOT}/FFX/ffx_backend_dx12_x64drel.dll")
+set(FFX_BACKEND_FILE "${BASICRENDERER_OUTPUT_ROOT}/ffx_backend_dx12_x64drel.dll")
 
 add_symlink_or_copy_per_config(
     "${FFX_BACKEND_DIR}"
@@ -322,8 +356,8 @@ add_symlink_or_copy_per_config(
     "FFX_backend_dx12"
 )
 
-set(FFX_SSSR_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/FFX/ffx_sssr_x64drel.dll")
-set(FFX_SSSR_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/ffx_sssr_x64drel.dll")
+set(FFX_SSSR_DIR "${BASICRENDERER_SOURCE_ROOT}/FFX/ffx_sssr_x64drel.dll")
+set(FFX_SSSR_FILE "${BASICRENDERER_OUTPUT_ROOT}/ffx_sssr_x64drel.dll")
 
 add_symlink_or_copy_per_config(
     "${FFX_SSSR_DIR}"
@@ -332,8 +366,8 @@ add_symlink_or_copy_per_config(
     "FFX_sssr_dx12"
 )
 
-set(FFX_DENOISER_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/FFX/ffx_denoiser_x64drel.dll")
-set(FFX_DENOISER_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/ffx_denoiser_x64drel.dll")
+set(FFX_DENOISER_DIR "${BASICRENDERER_SOURCE_ROOT}/FFX/ffx_denoiser_x64drel.dll")
+set(FFX_DENOISER_FILE "${BASICRENDERER_OUTPUT_ROOT}/ffx_denoiser_x64drel.dll")
 
 add_symlink_or_copy_per_config(
     "${FFX_DENOISER_DIR}"
@@ -342,8 +376,8 @@ add_symlink_or_copy_per_config(
     "FFX_denoiser_dx12"
 )
 
-set(HLSL_PARSER_DIR "${CMAKE_SOURCE_DIR}/BasicRenderer/hlsl.dll")
-set(HLSL_PARSER_FILE "${CMAKE_BINARY_DIR}/BasicRenderer/hlsl.dll")
+set(HLSL_PARSER_DIR "${BASICRENDERER_SOURCE_ROOT}/hlsl.dll")
+set(HLSL_PARSER_FILE "${BASICRENDERER_OUTPUT_ROOT}/hlsl.dll")
 
 add_symlink_or_copy_per_config(
     "${HLSL_PARSER_DIR}"
@@ -352,158 +386,144 @@ add_symlink_or_copy_per_config(
     "HLSL_Parser"
 )
 
-#if in debug mode, copy the debug version of the USD libraries
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(USD_DIR "${CMAKE_SOURCE_DIR}/ThirdParty/usd_dbg")
-else()
-    set(USD_DIR "${CMAKE_SOURCE_DIR}/ThirdParty/usd_rel")
-endif()
+set(USD_DIR "${BASICRENDERER_USD_ROOT}/usd_$<IF:$<CONFIG:Debug>,dbg,rel>")
  
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_usd.dll"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_usd.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd_usd.dll"
     FALSE  # IS_DIRECTORY
     "USD_USD"
 )
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_sdf.dll"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_sdf.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd_sdf.dll"
     FALSE  # IS_DIRECTORY
     "USD_SDF"
 )
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_tf.dll"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_tf.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd_tf.dll"
     FALSE  # IS_DIRECTORY
     "USD_TF"
 )
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_kind.dll"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_kind.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd_kind.dll"
     FALSE  # IS_DIRECTORY
     "USD_KIND"
 )
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_pcp.dll"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_pcp.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd_pcp.dll"
     FALSE  # IS_DIRECTORY
     "USD_PCP"
 )
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_ar.dll"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_ar.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd_ar.dll"
     FALSE  # IS_DIRECTORY
     "USD_AR"
 )
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_plug.dll"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_plug.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd_plug.dll"
     FALSE  # IS_DIRECTORY
     "USD_PLUG"
 )
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_vt.dll"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_vt.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd_vt.dll"
     FALSE  # IS_DIRECTORY
     "USD_VT"
 )
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_ts.dll"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_ts.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd_ts.dll"
     FALSE  # IS_DIRECTORY
     "USD_TS"
 )
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_work.dll"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_work.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd_work.dll"
     FALSE  # IS_DIRECTORY
     "USD_WORK"
 )
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_gf.dll"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_gf.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd_gf.dll"
     FALSE  # IS_DIRECTORY
     "USD_GF"
 )
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_trace.dll"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_trace.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd_trace.dll"
     FALSE  # IS_DIRECTORY
     "USD_TRACE"
 )
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_arch.dll"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_arch.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd_arch.dll"
     FALSE  # IS_DIRECTORY
     "USD_ARCH"
 )
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_js.dll"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_js.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd_js.dll"
     FALSE  # IS_DIRECTORY
     "USD_JS"
 )
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_usdShade.dll"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_usdShade.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd_usdShade.dll"
     FALSE  # IS_DIRECTORY
     "USD_USDSHADE"
 )
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_usdGeom.dll"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_usdGeom.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd_usdGeom.dll"
     FALSE  # IS_DIRECTORY
     "USD_USDGEOM"
 )
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_usdSkel.dll"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_usdSkel.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd_usdSkel.dll"
     FALSE  # IS_DIRECTORY
     "USD_USDSKEL"
 )
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd_sdr.dll"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd_sdr.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd_sdr.dll"
     FALSE  # IS_DIRECTORY
     "USD_SDR"
 )
 
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    add_symlink_or_copy_per_config(
-        "${CMAKE_SOURCE_DIR}/ThirdParty/usd_dbg/bin/tbb_debug.dll"
-        "${CMAKE_BINARY_DIR}/BasicRenderer/tbb_debug.dll"
-        FALSE  # IS_DIRECTORY
-        "tbb_debug"
-    )
-else()
-    add_symlink_or_copy_per_config(
-        "${CMAKE_SOURCE_DIR}/ThirdParty/usd_rel/bin/tbb.dll"
-        "${CMAKE_BINARY_DIR}/BasicRenderer/tbb.dll"
-        FALSE  # IS_DIRECTORY
-        "tbb"
-    )
-endif()
+add_symlink_or_copy_per_config(
+    "${BASICRENDERER_USD_ROOT}/usd_$<IF:$<CONFIG:Debug>,dbg,rel>/bin/tbb$<$<CONFIG:Debug>:_debug>.dll"
+    "${BASICRENDERER_OUTPUT_ROOT}/tbb$<$<CONFIG:Debug>:_debug>.dll"
+    FALSE  # IS_DIRECTORY
+    "tbb"
+)
 
 add_symlink_or_copy_per_config(
     "${USD_DIR}/lib/usd"
-    "${CMAKE_BINARY_DIR}/BasicRenderer/usd"
+    "${BASICRENDERER_OUTPUT_ROOT}/usd"
     TRUE  # IS_DIRECTORY
     "USD_PLUGINS"
 )
@@ -540,7 +560,7 @@ endif()
 
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC Microsoft.GSL::GSL)
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
-target_include_directories(${PROJECT_NAME} BEFORE PUBLIC "${CMAKE_SOURCE_DIR}/ThirdParty/usd/include/")
+target_include_directories(${PROJECT_NAME} BEFORE PUBLIC "${BASICRENDERER_USD_ROOT}/usd/include/")
 # Heck off Microsoft
 add_compile_definitions(NOMINMAX)
 
@@ -599,15 +619,16 @@ PRIVATE
     usdShade
     usdSkel
     implot::implot
-    BasicRHI
+    OpenRenderGraph::OpenRenderGraph
+    BasicRHI::BasicRHI
     Boost::container_hash
     Tracy::TracyClient
     slang::slang
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/WinPixEventRuntime.lib" 
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib" 
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/sl.interposer.lib" 
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/amd_fidelityfx_dx12.lib" 
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/ffx_backend_dx12_x64drel.lib"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/ffx_sssr_x64drel.lib"
-    "${CMAKE_SOURCE_DIR}/BasicRenderer/hlsl_parser.lib"
+    "${BASICRENDERER_SOURCE_ROOT}/WinPixEventRuntime.lib" 
+    "${BASICRENDERER_SOURCE_ROOT}/include/Aftermath/lib/x64/GFSDK_Aftermath_Lib.x64.lib" 
+    "${BASICRENDERER_SOURCE_ROOT}/sl.interposer.lib" 
+    "${BASICRENDERER_SOURCE_ROOT}/amd_fidelityfx_dx12.lib" 
+    "${BASICRENDERER_SOURCE_ROOT}/ffx_backend_dx12_x64drel.lib"
+    "${BASICRENDERER_SOURCE_ROOT}/ffx_sssr_x64drel.lib"
+    "${BASICRENDERER_SOURCE_ROOT}/hlsl_parser.lib"
 )

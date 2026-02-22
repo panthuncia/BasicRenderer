@@ -8,7 +8,7 @@
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "Managers/ViewManager.h"
 #include "../../generated/BuiltinResources.h"
-#include "Resources/MemoryStatisticsComponents.h"
+#include "Render/MemoryIntrospectionAPI.h"
 
 MeshManager::MeshManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
@@ -34,17 +34,17 @@ MeshManager::MeshManager() {
 	m_clusterLODNodes = DynamicBuffer::CreateShared(sizeof(ClusterLODNode), 1, "clusterLODNodes");
 
 	// Tag resources for memory statistics
-	m_preSkinningVertices->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
-	m_postSkinningVertices->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
-	m_meshletOffsets->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
-	m_meshletVertexIndices->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
-	m_meshletTriangles->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
+	rg::memory::SetResourceUsageHint(*m_preSkinningVertices, "Mesh Data");
+	rg::memory::SetResourceUsageHint(*m_postSkinningVertices, "Mesh Data");
+	rg::memory::SetResourceUsageHint(*m_meshletOffsets, "Mesh Data");
+	rg::memory::SetResourceUsageHint(*m_meshletVertexIndices, "Mesh Data");
+	rg::memory::SetResourceUsageHint(*m_meshletTriangles, "Mesh Data");
 	//m_meshletBoundsBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
 
 	//m_clusterToVisibleClusterTableIndexBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
 
-	m_perMeshBuffers->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "PerMesh, PerMeshInstance, PerObject" }));
-	m_perMeshInstanceBuffers->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "PerMesh, PerMeshInstance, PerObject" }));
+	rg::memory::SetResourceUsageHint(*m_perMeshBuffers, "PerMesh, PerMeshInstance, PerObject");
+	rg::memory::SetResourceUsageHint(*m_perMeshInstanceBuffers, "PerMesh, PerMeshInstance, PerObject");
 
 
 	m_resources[Builtin::PreSkinningVertices] = m_preSkinningVertices;
@@ -168,7 +168,7 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	unsigned int meshInstanceBufferSize = static_cast<uint32_t>(m_perMeshInstanceBuffers->Size());
 	if (mesh->HasSkin()) { // Skinned meshes need unique post-skinning vertex buffers
 		auto postSkinningView = m_postSkinningVertices->AddData(vertices.data(), numVertices * vertexSize, vertexSize, numVertices * vertexSize * 2); // Allocate twice the size, since we need to ping-pong for motion vectors
-		BUFFER_UPLOAD(vertices.data(), numVertices * vertexSize, UploadManager::UploadTarget::FromShared(postSkinningView->GetBuffer()), postSkinningView->GetOffset() + numVertices * vertexSize);
+		BUFFER_UPLOAD(vertices.data(), numVertices * vertexSize, rg::runtime::UploadTarget::FromShared(postSkinningView->GetBuffer()), postSkinningView->GetOffset() + numVertices * vertexSize);
 		auto perMeshInstanceBufferView = m_perMeshInstanceBuffers->AddData(&mesh->GetPerMeshInstanceBufferData(), sizeof(PerMeshInstanceCB), sizeof(PerMeshInstanceCB));
 		//auto meshletBoundsBufferView = m_meshletBoundsBuffer->AddData(mesh->GetMesh()->GetMeshletBounds().data(), mesh->GetMesh()->GetMeshletCount() * sizeof(BoundingSphere), sizeof(BoundingSphere));
 		mesh->SetBufferViews(std::move(postSkinningView), std::move(perMeshInstanceBufferView));
