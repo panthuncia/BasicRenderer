@@ -29,19 +29,7 @@ cbuffer Settings : register(b3) {
     bool enableGTAO;
 }
 
-cbuffer DrawInfo : register(b4) {
-    uint maxDrawIndex;
-}
-
-cbuffer transparencyInfo : register(b5) {
-    uint PPLLNodePoolSize;
-}
-
-cbuffer LightClusterInfo : register(b6) {
-    uint lightPagesPoolSize;
-}
-
-cbuffer MiscUintRootConstants : register(b7) { // Used for pass-specific one-off constants
+cbuffer MiscUintRootConstants : register(b4) { // Used for pass-specific one-off constants
     uint UintRootConstant0;
     uint UintRootConstant1;
     uint UintRootConstant2;
@@ -53,9 +41,10 @@ cbuffer MiscUintRootConstants : register(b7) { // Used for pass-specific one-off
     uint UintRootConstant8;
     uint UintRootConstant9;
     uint UintRootConstant10;
+    uint UintRootConstant11;
 }
 
-cbuffer MiscFloatRootConstants : register(b8) { // Used for pass-specific one-off constants
+cbuffer MiscFloatRootConstants : register(b5) { // Used for pass-specific one-off constants
     float FloatRootConstant0;
     float FloatRootConstant1;
     float FloatRootConstant2;
@@ -64,7 +53,7 @@ cbuffer MiscFloatRootConstants : register(b8) { // Used for pass-specific one-of
     float FloatRootConstant5;
 }
 
-cbuffer ResourceDescriptorIndices : register(b9) {
+cbuffer ResourceDescriptorIndices : register(b6) {
     uint ResourceDescriptorIndex0;
     uint ResourceDescriptorIndex1;
     uint ResourceDescriptorIndex2;
@@ -102,6 +91,13 @@ cbuffer ResourceDescriptorIndices : register(b9) {
     uint ResourceDescriptorIndex34;
 };
 
+cbuffer IndirectCommandSignatureRootConstants : register(b7)
+{
+    uint IndirectCommandSignatureRootConstant0;
+    uint IndirectCommandSignatureRootConstant1;
+    uint IndirectCommandSignatureRootConstant2;
+    uint IndirectCommandSignatureRootConstant3;
+};
 
 
 #endif // __CBUFFERS_HLSL__

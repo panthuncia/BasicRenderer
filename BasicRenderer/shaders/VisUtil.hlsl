@@ -3,28 +3,21 @@
 #include "include/utilities.hlsli"
 #include "include/meshletCommon.hlsli"
 #include "include/waveIntrinsicsHelpers.hlsli"
+#include "PerPassRootConstants/visUtilRootConstants.h"
+#include "include/visibilityPacking.hlsli"
 
 struct PixelRef
 {
     uint pixelXY;
 };
 
-uint DecodeClusterIndex(uint packed)
-{
-    return packed & 0x1FFFFFFu; /* 25 bits */
-}
-uint DecodePrimID(uint packed)
-{
-    return packed >> 25;
-}
-
 uint GetMaterialIdFromCluster(uint clusterIndex,
-                              StructuredBuffer<VisibleClusterInfo> visibleClusterTable,
+                              StructuredBuffer<VisibleCluster> visibleClusterBuffer,
                               StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance,
                               StructuredBuffer<PerMeshBuffer> perMeshBuffer)
 {
-    VisibleClusterInfo clusterData = visibleClusterTable[clusterIndex];
-    uint perMeshInstanceBufferIndex = clusterData.drawcallIndexAndMeshletIndex.x;
+    VisibleCluster clusterData = visibleClusterBuffer[clusterIndex];
+    uint perMeshInstanceBufferIndex = clusterData.instanceID;
     PerMeshInstanceBuffer instanceData = perMeshInstance[perMeshInstanceBufferIndex];
     PerMeshBuffer meshBuffer = perMeshBuffer[instanceData.perMeshBufferIndex];
 
@@ -34,8 +27,8 @@ uint GetMaterialIdFromCluster(uint clusterIndex,
     return materialInfo.compileFlagsID;
 }
 
-// 2) Clear counters – can be ClearUAV or compute. Compute version:
 // UintRootConstant0 = NumMaterials
+[shader("compute")]
 [numthreads(64, 1, 1)]
 void ClearMaterialCountersCS(uint3 tid : SV_DispatchThreadID)
 {
@@ -51,7 +44,8 @@ void ClearMaterialCountersCS(uint3 tid : SV_DispatchThreadID)
     }
 }
 
-// 3) Histogram: one thread per pixel, atomic into count[m].
+// Histogram: one thread per pixel, atomic into count[m].
+[shader("compute")]
 [numthreads(8, 8, 1)]
 void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
 {
@@ -61,25 +55,27 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
     if (dtid.x >= screenW || dtid.y >= screenH)
         return;
 
-    Texture2D<uint2> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
-    StructuredBuffer<VisibleClusterInfo> visibleClusterTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibleClusterTable)];
+    Texture2D<uint64_t> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
+    StructuredBuffer<VisibleCluster> visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
 
     RWStructuredBuffer<uint> materialPixelCount = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisUtil::MaterialPixelCountBuffer)];
 
     uint2 pixel = dtid.xy;
-    uint2 vis = visibility[pixel];
-    uint packed = vis.x;
-    if (packed == 0xFFFFFFFF) {
-        return; // no visible geometry
+    uint64_t vis = visibility[pixel];
+    if (vis == 0xFFFFFFFFFFFFFFFF) { // No cluster visible
+        return;
     }
+    
+    float depth;
+    uint clusterIndex;
+    uint primID;
 
-    uint clusterIndex = DecodeClusterIndex(packed);
-    uint primId = DecodePrimID(packed);
+    UnpackVisKey(vis, depth, clusterIndex, primID);
 
     // Derive material ID
-    uint matId = GetMaterialIdFromCluster(clusterIndex, visibleClusterTable, perMeshInstance, perMeshBuffer);
+    uint matId = GetMaterialIdFromCluster(clusterIndex, visibleClusterBuffer, perMeshInstance, perMeshBuffer);
     
     // Group threads in the wave by matId
     uint4 mask = WaveMatch(matId);
@@ -93,7 +89,8 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
     }
 }
 
-// 5) Build grouped pixel list: use offsets[] as base and a per-material write cursor (atomic++).
+// Build grouped pixel list: use offsets[] as base and a per-material write cursor
+[shader("compute")]
 [numthreads(8, 8, 1)]
 void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
 {
@@ -105,8 +102,8 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
         return;
     }
 
-    Texture2D<uint2> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
-    StructuredBuffer<VisibleClusterInfo> visibleClusterTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibleClusterTable)];
+    Texture2D<uint64_t> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
+    StructuredBuffer<VisibleCluster> visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
 
@@ -117,16 +114,18 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
 
     
     uint2 pixel = dtid.xy;
-    uint2 vis = visibility[pixel];
-    uint packed = vis.x;
-    if (packed == 0xFFFFFFFF)
-    {
+    uint64_t vis = visibility[pixel];
+
+    if (vis == 0xFFFFFFFFFFFFFFFF) { // No cluster visible
         return;
     }
 
-    uint clusterIndex = DecodeClusterIndex(packed);
-    uint primId = DecodePrimID(packed);
-    uint matId = GetMaterialIdFromCluster(clusterIndex, visibleClusterTable, perMeshInstance, perMeshBuffer);
+    float depth;
+    uint clusterIndex;
+    uint primID;
+    UnpackVisKey(vis, depth, clusterIndex, primID);
+    
+    uint matId = GetMaterialIdFromCluster(clusterIndex, visibleClusterBuffer, perMeshInstance, perMeshBuffer);
 
     // Group threads in this wave by matId
     uint4 groupMask = WaveMatch(matId);
@@ -157,7 +156,6 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
 }
 
 // Indirect command record layout: 4 root constants + 3 dispatch args.
-// This must match the command signature (Constant, Constant, Constant, Constant, Dispatch).
 struct MaterialEvaluationIndirectArgs {
     // Root constants (all uints):
     uint materialId; // UintRootConstant0
@@ -176,12 +174,13 @@ struct MaterialEvaluationIndirectArgs {
 // Build per-material indirect compute args.
 // Inputs:
 //  - counts[m] = number of pixels for material m
-//  - offsets[m] = base offset into PixelListBuffer where this material’s pixels start
+//  - offsets[m] = base offset into PixelListBuffer where this material's pixels start
 // Root constants:
 //  - UintRootConstant0 = NumMaterials
 //  - UintRootConstant1 = PixelList SRV descriptor index
 // Output:
 //  - one ComputeIndirectArgs per material, written at index=materialId
+[shader("compute")]
 [numthreads(64, 1, 1)]
 void BuildEvaluateIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
 {
@@ -216,11 +215,11 @@ void BuildEvaluateIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
     const uint kMaxDim = 65535u;
     // Start from sqrt(groupsNeeded) for near-square tiling
     uint dispatchX = (uint) ceil(sqrt((float) groupsNeeded));
-    if (dispatchX > kMaxDim)
+    if (dispatchX > kMaxDim) {
         dispatchX = kMaxDim;
+    }
     uint dispatchY = (groupsNeeded + dispatchX - 1u) / dispatchX;
-    if (dispatchY > kMaxDim)
-    {
+    if (dispatchY > kMaxDim) {
         dispatchY = kMaxDim; // With screen sizes in practice, this won't clamp
     }
     
@@ -244,8 +243,8 @@ void BuildEvaluateIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
 //   UintRootConstant1 = baseOffset into PixelListBuffer
 //   UintRootConstant2 = count (number of pixels for this material)
 //
-// Thread layout must match what the command builder assumed (64 here).
-[numthreads(64, 1, 1)]
+[shader("compute")]
+[numthreads(MATERIAL_EXECUTION_GROUP_SIZE, 1, 1)]
 void EvaluateMaterialGroupCS(
     uint3 dispatchThreadId : SV_DispatchThreadID,
     uint groupIndex : SV_GroupIndex

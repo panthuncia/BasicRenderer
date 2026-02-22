@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RenderPasses/Base/RenderPass.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 
@@ -18,8 +19,10 @@ public:
 		m_lutTexture = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::BRDFLUT);
     }
 
-    PassReturn Execute(RenderContext& context) override {
-        auto& commandList = context.commandList;
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
+        auto& commandList = executionContext.commandList;
         
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -67,8 +70,8 @@ private:
         // Subobjects
         auto& layout = PSOManager::GetInstance().GetRootSignature(); // rhi::PipelineLayout&
         rhi::SubobjLayout soLayout{ layout.GetHandle() };
-        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()) };
-        rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()) };
+        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()), "FullscreenVSMain" };
+        rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()), "PSMain" };
 
         rhi::RasterState rs{};
         rs.fill = rhi::FillMode::Solid;
@@ -96,11 +99,13 @@ private:
         rhi::SubobjRTVs soRTVs{ rts };
 
         rhi::SubobjSample soSmp{ rhi::SampleDesc{1, 0} };
+		rhi::SubobjPrimitiveTopology soTopo{ rhi::PrimitiveTopology::TriangleStrip };
 
         const rhi::PipelineStreamItem items[] = {
-            rhi::Make(soLayout),
             rhi::Make(soVS),
             rhi::Make(soPS),
+            rhi::Make(soLayout),
+			rhi::Make(soTopo),
             rhi::Make(soRaster),
             rhi::Make(soBlend),
             rhi::Make(soDepth),

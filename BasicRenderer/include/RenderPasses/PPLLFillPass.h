@@ -11,10 +11,9 @@
 #include "Materials/Material.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/ResourceManager.h"
-#include "Managers/Singletons/UploadManager.h"
 #include "Managers/Singletons/ECSManager.h"
 #include "Mesh/MeshInstance.h"
-
+#include "../shaders/PerPassRootConstants/ppllFillRootConstants.h"
 
 struct PPLLFillPassInputs {
 	bool wireframe;
@@ -91,7 +90,7 @@ public:
 		}
 		if (m_meshShaders) {
 			builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS);
-			builder->WithShaderResource(Builtin::PrimaryCamera::MeshletBitfield);
+			//builder->WithShaderResource(Builtin::PrimaryCamera::MeshletBitfield);
 			if (m_indirect) {
 				auto& ecsWorld = ECSManager::GetInstance().GetWorld();
 				auto oitFillPassEntity = ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::OITAccumulationPass);
@@ -112,7 +111,7 @@ public:
 		RegisterUAV(Builtin::PPLL::HeadPointerTexture);
 
 		if (m_meshShaders) {
-			m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+			//m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
 		}
 
 		m_PPLLCounterHandle = m_resourceRegistryView->RequestHandle(Builtin::PPLL::Counter);
@@ -149,9 +148,11 @@ public:
 	
 	}
 
-	PassReturn Execute(RenderContext& context) override {
+	PassReturn Execute(PassExecutionContext& executionContext) override {
+		auto* renderContext = executionContext.hostData->Get<RenderContext>();
+		auto& context = *renderContext;
 
-		auto& commandList = context.commandList;
+		auto& commandList = executionContext.commandList;
 
 		SetupCommonState(context, commandList);
 		SetCommonRootConstants(context, commandList);
@@ -173,10 +174,10 @@ public:
 		return {};
 	}
 
-	virtual void Update(const UpdateContext& context) override {
+	virtual void Update(const UpdateExecutionContext& context) override {
 		// Reset UAV counter
 		uint32_t zero = 0;
-		BUFFER_UPLOAD(&zero, sizeof(uint32_t), UploadManager::UploadTarget::FromHandle(m_PPLLCounterHandle), 0);
+		BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromHandle(m_PPLLCounterHandle), 0);
 	}
 
 	void Cleanup() override {
@@ -185,7 +186,7 @@ public:
 
 private:
 
-	void SetupCommonState(RenderContext& context, rhi::CommandList& commandList) {
+	void SetupCommonState(const RenderContext& context, rhi::CommandList& commandList) {
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -244,26 +245,26 @@ private:
 		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
 	}
 
-	void SetCommonRootConstants(RenderContext& context, rhi::CommandList& commandList) {
+	void SetCommonRootConstants(const RenderContext& context, rhi::CommandList& commandList) {
 
 		unsigned int settings[NumSettingsRootConstants] = {}; // HLSL bools are 32 bits
 		settings[EnableShadows] = getShadowsEnabled();
 		settings[EnablePunctualLights] = getPunctualLightingEnabled();
 		settings[EnableGTAO] = m_gtaoEnabled;
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, SettingsRootSignatureIndex, 0, NumSettingsRootConstants, &settings);
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, SettingsRootSignatureIndex, 0, NumSettingsRootConstants, settings);
 
-		unsigned int transparencyInfo[NumTransparencyInfoRootConstants] = {};
-		transparencyInfo[PPLLNodePoolSize] = static_cast<uint32_t>(m_numPPLLNodes); // TODO: This needs to be 64-bit, or we will run out of nodes. PPLL in general may not be ideal for higher resolutions.
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, TransparencyInfoRootSignatureIndex, 0, NumTransparencyInfoRootConstants, &transparencyInfo);
+		unsigned int transparencyInfo[NumMiscUintRootConstants] = {};
+		transparencyInfo[PPLL_NODE_POOL_SIZE] = static_cast<uint32_t>(m_numPPLLNodes); // TODO: This needs to be 64-bit, or we will run out of nodes. PPLL in general may not be ideal for higher resolutions.
 
 		if (m_meshShaders) {
-			unsigned int misc[NumMiscUintRootConstants] = {};
-			misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
-			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
+			//transparencyInfo[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
 		}
+
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, transparencyInfo);
+
 	}
 
-	void ExecuteRegular(RenderContext& context, rhi::CommandList& commandList) {
+	void ExecuteRegular(const RenderContext& context, rhi::CommandList& commandList) {
 		// Regular forward rendering using DrawIndexedInstanced
 		auto& psoManager = PSOManager::GetInstance();
 		m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes blendMeshes) {
@@ -289,7 +290,7 @@ private:
 			});
 	}
 
-	void ExecuteMeshShader(RenderContext& context, rhi::CommandList& commandList) {
+	void ExecuteMeshShader(const RenderContext& context, rhi::CommandList& commandList) {
 		// Mesh shading path using DispatchMesh
 		auto& psoManager = PSOManager::GetInstance();
 		m_blendMeshInstancesQuery.each([&](flecs::entity e, Components::ObjectDrawInfo drawInfo, Components::PerPassMeshes blendMeshes) {
@@ -313,7 +314,7 @@ private:
 			});
 	}
 
-	void ExecuteMeshShaderIndirect(RenderContext& context, rhi::CommandList& commandList) {
+	void ExecuteMeshShaderIndirect(const RenderContext& context, rhi::CommandList& commandList) {
 		auto& psoManager = PSOManager::GetInstance();
 
 		auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();

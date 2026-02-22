@@ -7,7 +7,7 @@ class MaterialUAVResetPass : public ComputePass {
 public:
     MaterialUAVResetPass() {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
-            PSOManager::GetInstance().GetComputeRootSignature(),
+            PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
             L"shaders/VisUtil.hlsl",
             L"ClearMaterialCountersCS",
             {},
@@ -24,9 +24,11 @@ public:
 		RegisterUAV("Builtin::VisUtil::MaterialWriteCursorBuffer");
     }
 
-    PassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
         auto& psoManager = PSOManager::GetInstance();
-        auto& cl = context.commandList;
+        auto& cl = executionContext.commandList;
 
         cl.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(),
                               context.samplerDescriptorHeap.GetHandle());

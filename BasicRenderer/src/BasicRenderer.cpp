@@ -14,6 +14,8 @@
 #define USE_PIX 1
 #endif
 #include <pix3.h>
+#include <stacktrace>
+#include <sstream>      // ostringstream for formatting
 //#include <tracy/Tracy.hpp>
 
 #include "Mesh/Mesh.h"
@@ -28,6 +30,9 @@
 #include "Import/ModelLoader.h"
 #include "spdlogStreambuf.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "ThirdParty/stb/stb_image.h"
+
 // Activate dedicated GPU on NVIDIA laptops with both integrated and dedicated GPUs
 extern "C" {
     _declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
@@ -39,6 +44,66 @@ extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 614;}
 extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D\\"; }
 
 #pragma comment(lib, "WinPixEventRuntime.lib")
+
+namespace crashlog {
+
+    inline std::terminate_handler g_prev = nullptr;
+
+    static std::string StacktraceString() {
+#if defined(__cpp_lib_stacktrace) && (__cpp_lib_stacktrace >= 202011L)
+        try {
+            std::ostringstream oss;
+            oss << std::stacktrace::current();
+            return oss.str();
+        }
+        catch (...) {
+            return "(stacktrace capture failed)";
+        }
+#else
+        return "(no <stacktrace> support in this build)";
+#endif
+    }
+
+    [[noreturn]] void TerminateHandler() noexcept
+    {
+        // Best-effort logging; never let this handler throw.
+        try {
+            if (auto eptr = std::current_exception()) {
+                try {
+                    std::rethrow_exception(eptr);
+                }
+                catch (const std::exception& e) {
+                    spdlog::critical("FATAL: uncaught exception: {}\nwhat(): {}",
+                        typeid(e).name(), e.what());
+                }
+                catch (...) {
+                    spdlog::critical("FATAL: uncaught non-std exception");
+                }
+            }
+            else {
+                spdlog::critical("FATAL: std::terminate called (no active exception)");
+            }
+
+            spdlog::critical("Stacktrace:\n{}", StacktraceString());
+
+            // Force logs out
+            spdlog::apply_all([](const std::shared_ptr<spdlog::logger>& lg) { lg->flush(); });
+            spdlog::shutdown();
+        }
+        catch (...) {
+            // ?
+            __debugbreak();
+        }
+
+        std::abort();
+    }
+
+    inline void InstallTerminateHandler()
+    {
+        g_prev = std::set_terminate(&TerminateHandler);
+    }
+
+}
 
 Renderer renderer;
 UINT default_x_res = 1920;
@@ -223,6 +288,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     spdlog::set_default_logger(file_logger);
     file_logger->flush_on(spdlog::level::info);
 
+    crashlog::InstallTerminateHandler();
+
     static spdlog_streambuf sci{ file_logger };
     std::cout.rdbuf(&sci);
     std::cerr.rdbuf(&sci);
@@ -269,9 +336,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
     //carScene->GetRoot().set<Components::Position>({ 1.0, 0.0, 1.0 });
 
-    //auto mountainScene = LoadModel("models/terrain.glb");
-    //mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
-    //mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
+	auto mountainScene = LoadModel("models/terrain.glb");
+	mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
+	mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
 
     //auto tigerScene = LoadModel("models/tiger.glb");
     //tigerScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
@@ -280,13 +347,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //auto usdScene = LoadModel("models/sponza.usdz");
     
-    auto bistro = LoadModel("models/bistroExterior.usdz");
+    //auto bistro = LoadModel("models/bistroExterior.usdz");
     //auto wine = LoadModel("models/bistroInterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
     //auto robot = LoadModel("models/robot.usdz");
 
-	//auto sphereScene = LoadModel("models/sphere.glb");
+	auto sphereScene = LoadModel("models/sphere.glb");
 
 
     renderer.SetCurrentScene(baseScene);
@@ -296,22 +363,22 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(carScene->Clone());
-    //renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 	//renderer.GetCurrentScene()->AppendScene(shiba->Clone());
 
-    renderer.GetCurrentScene()->AppendScene(bistro->Clone());
+    //renderer.GetCurrentScene()->AppendScene(bistro->Clone());
     //renderer.GetCurrentScene()->AppendScene(wine->Clone());
     
 	//renderer.GetCurrentScene()->AppendScene(robot->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
 
-    //for (int i = 0; i < 1; i++) {
-    //    auto sphereInstance = renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
-    //    auto point = getRandomPointInVolume(-20, 20, -2, 2, -20, 20);
-    //    sphereInstance->GetRoot().set<Components::Position>({ point.x, point.y, point.z });
-    //}
+    for (int i = 0; i < 000; i++) {
+        auto sphereInstance = renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
+        auto point = getRandomPointInVolume(-20, 20, -20, 20, -20, 20);
+        sphereInstance->GetRoot().set<Components::Position>({ point.x, point.y, point.z });
+    }
 
 
     renderer.SetEnvironment("sky");
@@ -321,7 +388,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     float fov = 80.0f * (XM_PI / 180.0f); // Converting degrees to radians
     float aspectRatio;
     float zNear = 0.1f;
-    float zFar = 100.0f;
+    float zFar = 1000.0f;
 
 
     int clientWidth = x_res; // TODO

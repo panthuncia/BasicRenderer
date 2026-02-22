@@ -7,7 +7,6 @@
 #include <typeinfo>
 #include <string>
 
-#include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Resources/Buffers/MemoryBlock.h"
@@ -35,22 +34,6 @@ public:
 		return m_mappedData;
 	}
 
-	rhi::Resource GetAPIResource() override { return m_dataBuffer->GetAPIResource(); }
-
-    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
-        m_metadataBundles.emplace_back(bundle);
-        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
-    }
-
-    SymbolicTracker* GetStateTracker() override {
-		return m_dataBuffer->GetStateTracker();
-    }
-
-protected:
-    rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
-        return m_dataBuffer->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
-    }
-
 private:
     DynamicBuffer(bool byteAddress, size_t elementSize, size_t capacity, std::string name = "", bool UAV = false)
         : m_byteAddress(byteAddress), m_elementSize(elementSize), m_UAV(UAV), m_needsUpdate(false) {
@@ -69,11 +52,10 @@ private:
     void OnSetName() override {
         if (name != "") {
 			m_name = name;
-			std::string newname = m_baseName + ": " + m_name;
-            m_dataBuffer->SetName(newname.c_str());
+            SetBackingName(m_baseName, m_name);
         }
         else {
-            m_dataBuffer->SetName(m_baseName.c_str());
+            SetBackingName(m_baseName, "");
         }
     }
 
@@ -98,4 +80,9 @@ private:
 
     void CreateBuffer(size_t capacity);
     void GrowBuffer(size_t newSize);
+
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
+        m_metadataBundles.emplace_back(bundle);
+        ApplyMetadataToBacking(bundle);
+    }
 };

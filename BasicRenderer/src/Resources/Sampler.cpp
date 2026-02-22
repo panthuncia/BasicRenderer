@@ -1,8 +1,22 @@
 #include "Resources/Sampler.h"
+#include "Render/Runtime/DescriptorServiceAccess.h"
 
 std::shared_ptr<Sampler> Sampler::m_defaultSampler = nullptr;
 std::shared_ptr<Sampler> Sampler::m_defaultShadowSampler = nullptr;
 std::unordered_map<rhi::SamplerDesc, std::shared_ptr<Sampler>, rhi::SamplerDescHash, rhi::SamplerDescEq> Sampler::m_samplerCache;
+
+Sampler::Sampler(rhi::SamplerDesc samplerDesc)
+    : m_index(0), m_samplerDesc(samplerDesc) {
+	m_index = rg::runtime::CreateIndexedSamplerFromActiveDescriptorService(m_samplerDesc);
+}
+
+std::shared_ptr<Sampler> Sampler::CreateSampler(rhi::SamplerDesc samplerDesc) {
+	auto it = m_samplerCache.find(samplerDesc);
+	if (it != m_samplerCache.end()) {
+		return it->second;
+	}
+	return std::shared_ptr<Sampler>(new Sampler(samplerDesc));
+}
 
 std::shared_ptr<Sampler> Sampler::GetDefaultSampler() {
 	if (m_defaultSampler == nullptr) {

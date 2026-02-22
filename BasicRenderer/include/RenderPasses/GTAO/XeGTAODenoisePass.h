@@ -1,12 +1,15 @@
 #pragma once
 
 #include "RenderPasses/Base/ComputePass.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
+#include "Render/Runtime/DescriptorServiceAccess.h"
 
 class GTAODenoisePass : public ComputePass {
 public:
     GTAODenoisePass() {
+        CreatePointClampSampler();
         CreateXeGTAOComputePSO();
     }
 
@@ -18,13 +21,17 @@ public:
 
     void Setup() override {
         RegisterCBV("Builtin::GTAO::ConstantsBuffer");
-        m_workingAOBufferIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingAOTerm1)->GetSRVInfo(0).slot.index;
     }
 
-    PassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
 
         auto& psoManager = PSOManager::GetInstance();
-        auto& commandList = context.commandList;
+        auto& commandList = executionContext.commandList;
+        auto workingAOTerm = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingAOTerm1);
+        auto workingEdges = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::WorkingEdges);
+        auto outputAO = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GTAO::OutputAOTerm);
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -35,7 +42,10 @@ public:
 		BindResourceDescriptorIndices(commandList, DenoiseLastPassPSO.GetResourceDescriptorSlots());
 
         unsigned int gtaoConstants[NumMiscUintRootConstants] = {};
-        gtaoConstants[UintRootConstant0] = m_workingAOBufferIndex;
+        gtaoConstants[UintRootConstant0] = workingAOTerm->GetSRVInfo(0).slot.index;
+        gtaoConstants[UintRootConstant1] = workingEdges->GetSRVInfo(0).slot.index;
+        gtaoConstants[UintRootConstant2] = m_samplerIndex;
+        gtaoConstants[UintRootConstant3] = outputAO->GetUAVShaderVisibleInfo(0).slot.index;
             
 		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, gtaoConstants);
 
@@ -49,12 +59,27 @@ public:
     }
 
 private:
-    std::shared_ptr<GloballyIndexedResource> m_pGTAOConstantBuffer;
-
     PipelineState DenoisePassPSO;
     PipelineState DenoiseLastPassPSO;
+    uint32_t m_samplerIndex = 0;
 
-	unsigned int m_workingAOBufferIndex = 0;
+    void CreatePointClampSampler()
+    {
+        rhi::SamplerDesc samplerDesc;
+        samplerDesc.minFilter = rhi::Filter::Nearest;
+        samplerDesc.magFilter = rhi::Filter::Nearest;
+        samplerDesc.mipFilter = rhi::MipFilter::Nearest;
+        samplerDesc.addressU = rhi::AddressMode::Clamp;
+        samplerDesc.addressV = rhi::AddressMode::Clamp;
+        samplerDesc.addressW = rhi::AddressMode::Clamp;
+        samplerDesc.mipLodBias = 0.0f;
+        samplerDesc.maxAnisotropy = 1;
+        samplerDesc.compareEnable = false;
+        samplerDesc.borderPreset = rhi::BorderPreset::TransparentBlack;
+        samplerDesc.minLod = 0.0f;
+        samplerDesc.maxLod = 0.0f;
+        m_samplerIndex = rg::runtime::CreateIndexedSamplerFromActiveDescriptorService(samplerDesc);
+    }
 
     void CreateXeGTAOComputePSO()
     {
@@ -62,14 +87,14 @@ private:
 
 		auto& psoManager = PSOManager::GetInstance();
         DenoisePassPSO = psoManager.MakeComputePipeline(
-            psoManager.GetRootSignature(),
+            psoManager.GetRootSignature().GetHandle(),
             L"shaders/GTAO.hlsl",
             L"CSDenoisePass",
             {},
 			"GTAO Denoise Pass");
 
 		DenoiseLastPassPSO = psoManager.MakeComputePipeline(
-			psoManager.GetRootSignature(),
+			psoManager.GetRootSignature().GetHandle(),
 			L"shaders/GTAO.hlsl",
 			L"CSDenoiseLastPass",
 			{},

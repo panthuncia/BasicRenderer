@@ -75,4 +75,55 @@ Feature development is driven purely by what I'm interested in at the moment.
 
 [Medium article on occlusion culling](https://medium.com/@mil_kru/two-pass-occlusion-culling-4100edcad501)
 
+## Repository split and dependency model
+
+The build is being structured so the main components can live as independent repositories:
+
+- `BasicRHI` (low-level GPU abstraction)
+- `OpenRenderGraph` (render graph framework, depends on `BasicRHI`)
+- `BasicRenderer` (application, depends on both)
+
+Current dependency strategy is **package-first with submodule fallback**:
+
+- `BasicRenderer` tries `find_package(BasicRHI CONFIG)` and `find_package(OpenRenderGraph CONFIG)` first.
+- If packages are not available and fallback is enabled, it uses in-tree `add_subdirectory(...)`.
+
+Relevant options:
+
+- `BASICRENDERER_USE_PACKAGE_DEPS` (default `ON`)
+- `BASICRENDERER_ENABLE_SUBMODULE_FALLBACK` (default `ON`)
+
+## Standalone consumption quick start
+
+### 1) Build/install `BasicRHI`
+
+```powershell
+cmake -S BasicRHI -B out/build/rhi -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build out/build/rhi
+cmake --install out/build/rhi --prefix out/install/rhi
+```
+
+### 2) Build/install `OpenRenderGraph` against installed `BasicRHI`
+
+```powershell
+cmake -S OpenRenderGraph -B out/build/org -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH="out/install/rhi"
+cmake --build out/build/org
+cmake --install out/build/org --prefix out/install/org
+```
+
+### 3) Build `BasicRenderer` against installed packages
+
+```powershell
+cmake -S . -B out/build/renderer -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBASICRENDERER_USE_PACKAGE_DEPS=ON -DBASICRENDERER_ENABLE_SUBMODULE_FALLBACK=OFF -DCMAKE_PREFIX_PATH="out/install/rhi;out/install/org"
+cmake --build out/build/renderer
+```
+
+## USD selection notes
+
+Top-level CMake now supports explicit USD package selection:
+
+- `BASICRENDERER_USD_VARIANT=dbg|rel`
+
+When unset, it auto-selects `rel` for multi-config generators and `dbg` only for single-config Debug builds.
+
 

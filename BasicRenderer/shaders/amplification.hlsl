@@ -6,6 +6,7 @@
 #include "Common/defines.h"
 
 groupshared Payload s_Payload;
+[shader("amplification")]
 [NumThreads(AS_GROUP_SIZE, 1, 1)]
 void ASMain(uint uGroupThreadID : SV_GroupThreadID, uint uDispatchThreadID : SV_DispatchThreadID, uint uGroupID : SV_GroupID)
 {

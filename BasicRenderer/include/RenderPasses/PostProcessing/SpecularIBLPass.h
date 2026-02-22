@@ -3,6 +3,7 @@
 #include <functional>
 
 #include "RenderPasses/Base/RenderPass.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Scene/Scene.h"
@@ -48,9 +49,11 @@ public:
 		RegisterSRV(Builtin::PostProcessing::ScreenSpaceReflections);
     }
 
-    PassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
         auto& psoManager = PSOManager::GetInstance();
-        auto& commandList = context.commandList;
+        auto& commandList = executionContext.commandList;
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -106,8 +109,8 @@ private:
         // Subobjects
         auto& layout = PSOManager::GetInstance().GetRootSignature(); // rhi::PipelineLayout&
         rhi::SubobjLayout soLayout{ layout.GetHandle() };
-        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()) };
-        rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()) };
+        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()), "FullscreenVSMain" };
+        rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()), "PSMain" };
 
         rhi::RasterState rs{};
         rs.fill = rhi::FillMode::Solid;
@@ -134,19 +137,20 @@ private:
         }
         rhi::SubobjBlend soBlend{ bs };
 
-        rhi::DepthStencilState ds{};
-        ds.depthEnable = false;
-        ds.depthWrite = false;
-        ds.depthFunc = rhi::CompareOp::Greater; // kept for parity; ignored when depth off
-        rhi::SubobjDepth soDepth{ ds };
+        //rhi::DepthStencilState ds{};
+        //ds.depthEnable = false;
+        //ds.depthWrite = false;
+        //ds.depthFunc = rhi::CompareOp::Greater; // kept for parity; ignored when depth off
+        //rhi::SubobjDepth soDepth{ ds };
 
         rhi::RenderTargets rts{};
         rts.count = 1;
         rts.formats[0] = rhi::Format::R16G16B16A16_Float;
         rhi::SubobjRTVs soRTVs{ rts };
 
-        rhi::SubobjDSV    soDSV{ rhi::Format::Unknown }; // no DSV
+        //rhi::SubobjDSV    soDSV{ rhi::Format::Unknown }; // no DSV
         rhi::SubobjSample soSmp{ rhi::SampleDesc{1, 0} };
+        rhi::SubobjPrimitiveTopology soTopo{ rhi::PrimitiveTopology::TriangleStrip };
 
         const rhi::PipelineStreamItem items[] = {
             rhi::Make(soLayout),
@@ -154,10 +158,11 @@ private:
             rhi::Make(soPS),
             rhi::Make(soRaster),
             rhi::Make(soBlend),
-            rhi::Make(soDepth),
+            //rhi::Make(soDepth),
             rhi::Make(soRTVs),
-            rhi::Make(soDSV),
+            //rhi::Make(soDSV),
             rhi::Make(soSmp),
+			rhi::Make(soTopo)
         };
 
         auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);

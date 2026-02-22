@@ -27,6 +27,7 @@ Meshlet LoadMeshlet(uint4 raw)
 
 struct MeshletSetup
 {
+    uint viewID; // Which view this meshlet is being rendered for (for CLod path)
     uint meshletIndex;
     Meshlet meshlet;
     PerMeshBuffer meshBuffer;
@@ -37,9 +38,9 @@ struct MeshletSetup
     uint vertOffset;
     uint postSkinningBufferOffset;
     uint prevPostSkinningBufferOffset;
-    ByteAddressBuffer vertexBuffer;
-    ByteAddressBuffer meshletTrianglesBuffer;
-    StructuredBuffer<uint> meshletVerticesBuffer;
+    // ByteAddressBuffer vertexBuffer;
+    // ByteAddressBuffer meshletTrianglesBuffer;
+    // StructuredBuffer<uint> meshletVerticesBuffer;
 };
 
 // Internal common initialization (indices already chosen)
@@ -50,6 +51,7 @@ bool InitializeMeshletInternal(
 {
     setup.meshletIndex = meshletLocalIndex;
     setup.meshInstanceBuffer = meshInstance;
+    setup.viewID = 0; // Unused
 
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
@@ -62,18 +64,70 @@ bool InitializeMeshletInternal(
     setup.meshBuffer = perMeshBuffer[meshInstance.perMeshBufferIndex];
     setup.objectBuffer = perObjectBuffer[meshInstance.perObjectBufferIndex];
 
-    uint meshletOffset = setup.meshBuffer.meshletBufferOffset;
+    uint meshletOffset = setup.meshBuffer.clodMeshletBufferOffset;
     setup.meshlet = meshletBuffer[meshletOffset + setup.meshletIndex];
 
     setup.vertCount = setup.meshlet.VertCount;
     setup.triCount = setup.meshlet.TriCount;
     setup.vertOffset = setup.meshlet.VertOffset;
 
-    setup.vertexBuffer = vertexBuffer;
-    setup.meshletTrianglesBuffer = meshletTrianglesBuffer;
-    setup.meshletVerticesBuffer = meshletVerticesBuffer;
+    // setup.vertexBuffer = vertexBuffer;
+    // setup.meshletTrianglesBuffer = meshletTrianglesBuffer;
+    // setup.meshletVerticesBuffer = meshletVerticesBuffer;
 
     uint postSkinningBase = meshInstance.postSkinningVertexBufferOffset;
+    setup.postSkinningBufferOffset = postSkinningBase;
+    setup.prevPostSkinningBufferOffset = postSkinningBase;
+
+    if (setup.meshBuffer.vertexFlags & VERTEX_SKINNED)
+    {
+        uint stride = setup.meshBuffer.vertexByteSize * setup.meshBuffer.numVertices;
+        setup.postSkinningBufferOffset += stride * (perFrameBuffer.frameIndex % 2);
+        setup.prevPostSkinningBufferOffset += stride * ((perFrameBuffer.frameIndex + 1) % 2);
+    }
+
+    if (setup.meshletIndex >= setup.meshBuffer.numMeshlets)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool InitializeMeshletInternalCLod(
+    uint visibleMeshletIndex,
+    out MeshletSetup setup)
+{
+
+    StructuredBuffer<VisibleCluster> visibleClusters =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisibleClusterBuffer)];
+    VisibleCluster cluster = visibleClusters[visibleMeshletIndex];
+    StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+
+    setup.meshletIndex = cluster.meshletID;
+    setup.meshInstanceBuffer =  meshInstanceBuffer[cluster.instanceID];
+    setup.viewID = cluster.viewID;
+
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
+    StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Meshlets)];
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+
+    setup.meshBuffer = perMeshBuffer[setup.meshInstanceBuffer.perMeshBufferIndex];
+    setup.objectBuffer = perObjectBuffer[setup.meshInstanceBuffer.perObjectBufferIndex];
+
+    uint meshletOffset = setup.meshBuffer.clodMeshletBufferOffset;
+    setup.meshlet = meshletBuffer[meshletOffset + setup.meshletIndex];
+
+    setup.vertCount = setup.meshlet.VertCount;
+    setup.triCount = setup.meshlet.TriCount;
+    setup.vertOffset = setup.meshlet.VertOffset;
+
+    // setup.vertexBuffer = vertexBuffer;
+    // setup.meshletTrianglesBuffer = meshletTrianglesBuffer;
+    // setup.meshletVerticesBuffer = meshletVerticesBuffer;
+
+    uint postSkinningBase = setup.meshInstanceBuffer.postSkinningVertexBufferOffset;
     setup.postSkinningBufferOffset = postSkinningBase;
     setup.prevPostSkinningBufferOffset = postSkinningBase;
 
@@ -109,11 +163,24 @@ bool InitializeMeshletFromDrawCall(uint drawCallID, uint meshletLocalIndex, out 
     return InitializeMeshletInternal(meshletLocalIndex, meshInstance, setup);
 }
 
+// Cluster LOD path:
+bool InitializeMeshletFromVisibleCluster(uint visibleClusterIndex, out MeshletSetup setup)
+{
+    RWStructuredBuffer<VisibleCluster> visibleClusters =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisibleClusterBuffer)];
+    VisibleCluster cluster = visibleClusters[visibleClusterIndex];
+
+    StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+    PerMeshInstanceBuffer meshInstance = meshInstanceBuffer[cluster.instanceID];
+    return InitializeMeshletInternal(cluster.meshletID, meshInstance, setup);
+}
+
 uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
 {
-    uint triOffset = setup.meshBuffer.meshletTrianglesBufferOffset + setup.meshlet.TriOffset + triLocalIndex * 3;
+    ByteAddressBuffer meshletTrianglesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletTriangles)];
+    uint triOffset = setup.meshBuffer.clodMeshletTrianglesBufferOffset + setup.meshlet.TriOffset + triLocalIndex * 3;
     uint alignedOffset = (triOffset / 4) * 4;
-    uint firstWord = setup.meshletTrianglesBuffer.Load(alignedOffset);
+    uint firstWord = meshletTrianglesBuffer.Load(alignedOffset);
     uint byteOffset = triOffset % 4;
 
     // Load first byte
@@ -130,14 +197,14 @@ uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
     {
         // The second byte is in this word, but the third byte spills into the next word
         b1 = (firstWord >> ((byteOffset + 1) * 8)) & 0xFF;
-        uint secondWord = setup.meshletTrianglesBuffer.Load(alignedOffset + 4);
+        uint secondWord = meshletTrianglesBuffer.Load(alignedOffset + 4);
         b2 = secondWord & 0xFF;
     }
     else
     { // byteOffset == 3
         // The first byte is at the last position in firstWord,
         // The next two bytes must come from the next word.
-        uint secondWord = setup.meshletTrianglesBuffer.Load(alignedOffset + 4);
+        uint secondWord = meshletTrianglesBuffer.Load(alignedOffset + 4);
         b1 = secondWord & 0xFF;
         b2 = (secondWord >> 8) & 0xFF;
     }

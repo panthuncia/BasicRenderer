@@ -18,7 +18,7 @@ public:
     BufferView* GetPostSkinningVertexBufferView();
 	BufferView* GetPerMeshInstanceBufferView() { return m_perMeshInstanceBufferView.get(); }
 
-	void SetBufferViews(std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> perMeshInstanceBufferView, std::unique_ptr<BufferView> meshletBoundsBufferView);
+	void SetBufferViews(std::unique_ptr<BufferView> postSkinningVertexBufferView, std::unique_ptr<BufferView> perMeshInstanceBufferView);
     void SetBufferViewUsingBaseMesh(std::unique_ptr<BufferView> perMeshInstanceBufferView);
 
     void SetSkeleton(std::shared_ptr<Skeleton> skeleton);
@@ -49,9 +49,6 @@ public:
 		return m_perMeshInstanceBufferData;
 	}
 
-    void SetMeshletBitfieldBufferView(std::unique_ptr<BufferView> meshletBitfieldBufferView);
-    void SetClusterToVisibleClusterIndicesBufferView(std::unique_ptr<BufferView> clusterIndicesBufferView);
-
 	void SetAnimationSpeed(float speed) {
 		m_animationSpeed = speed;
 		if (m_skeleton != nullptr) {
@@ -63,11 +60,11 @@ public:
         m_meshletBoundsBufferView = std::move(view);
     }
 
-    void SetMeshletBoundsFromBaseMesh() {
-		if (m_mesh->GetMeshletBoundsBufferView() != nullptr) {
-			
-		}
-    }
+  //  void SetMeshletBoundsFromBaseMesh() {
+		//if (m_mesh->GetMeshletBoundsBufferView() != nullptr) {
+		//	
+		//}
+  //  }
 
     BufferView* GetMeshletBoundsBufferView() {
         return m_meshletBoundsBufferView.get();
@@ -76,6 +73,17 @@ public:
     void SetPerObjectBufferIndex(uint32_t index);
     void SetPerMeshBufferIndex(uint32_t index);
 	void SetSkinningInstanceSlot(uint32_t slot);
+
+    void SetCLodBufferViews(
+        std::unique_ptr<BufferView> perMeshInstanceClodOffsetsView
+    ) {
+        m_perMeshInstanceClodOffsetsView = std::move(perMeshInstanceClodOffsetsView);
+    }
+
+
+    const BufferView* GetCLodOffsetsView() const {
+        return m_perMeshInstanceClodOffsetsView.get();
+    }
 
 private:
     MeshInstance(std::shared_ptr<Mesh> mesh)
@@ -90,8 +98,11 @@ private:
     MeshManager* m_pCurrentMeshManager = nullptr;
     std::unique_ptr<BufferView> m_postSkinningVertexBufferView = nullptr;
     std::unique_ptr<BufferView> m_perMeshInstanceBufferView;
-	std::unique_ptr<BufferView> m_meshletBitfieldBufferView = nullptr;
+	//std::unique_ptr<BufferView> m_meshletBitfieldBufferView = nullptr;
     std::unique_ptr<BufferView> m_meshletBoundsBufferView = nullptr;
 	std::unique_ptr<BufferView> m_clusterToVisibleClusterIndicesBufferView = nullptr;
+
+    std::unique_ptr<BufferView> m_perMeshInstanceClodOffsetsView = nullptr;
+
 	float m_animationSpeed = 1.0f;
 };

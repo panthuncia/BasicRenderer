@@ -5,9 +5,9 @@
 #include <memory>
 #include <span>
 #include <spdlog/spdlog.h>
+#include <OpenRenderGraph/OpenRenderGraph.h>
 
 #include "Scene/Components.h"
-#include "Interfaces/IResourceProvider.h"
 #include "Materials/TechniqueDescriptor.h"
 
 class DynamicGloballyIndexedResource;
@@ -142,9 +142,6 @@ private:
 
     // Single group that owns all indirect command buffers (regardless of flags)
     std::shared_ptr<ResourceGroup> m_indirectCommandsResourceGroup;
-
-    // Meshlet culling command buffers group (unchanged)
-    std::shared_ptr<ResourceGroup> m_meshletCullingCommandResourceGroup;
 
     // Provider plumbing
     std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;

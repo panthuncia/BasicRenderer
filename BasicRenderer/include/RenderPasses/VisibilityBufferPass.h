@@ -14,6 +14,8 @@
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
 
+// Old pass, ignore
+//TODO: remove
 struct VisibilityBufferPassInputs {
     bool wireframe;
     bool meshShaders;
@@ -53,7 +55,7 @@ public:
 		m_clearGbuffer = input.clearGbuffer;
 
         builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
-            Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer,
+            //Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer,
             Builtin::PerObjectBuffer,
             Builtin::NormalMatrixBuffer,
             Builtin::PerMeshBuffer,
@@ -70,7 +72,7 @@ public:
                 Builtin::PrimaryCamera::VisibilityTexture);
 
         if (m_meshShaders) {
-            builder->WithShaderResource(Builtin::PerMeshBuffer, Builtin::PrimaryCamera::MeshletBitfield);
+            //builder->WithShaderResource(Builtin::PerMeshBuffer, Builtin::PrimaryCamera::MeshletBitfield);
             if (m_indirect) {
                 auto& ecsWorld = ECSManager::GetInstance().GetWorld();
                 flecs::query<> indirectQuery = ecsWorld.query_builder<>()
@@ -89,7 +91,7 @@ public:
 		m_pVisibilityBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::VisibilityTexture);
 
         if (m_meshShaders) {
-            m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+            //m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
         }
 
         if (m_meshShaders) {
@@ -105,13 +107,15 @@ public:
         RegisterSRV(Builtin::PerMeshInstanceBuffer);
         RegisterSRV(Builtin::PerMeshBuffer);
         RegisterSRV(Builtin::PerMaterialDataBuffer);
-        RegisterSRV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
+        //RegisterSRV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
     }
 
-    PassReturn Execute(RenderContext& context) override {
-        auto& commandList = context.commandList;
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
+        auto& commandList = executionContext.commandList;
 
-        BeginPass(context);
+        BeginPass(context, commandList);
 
         SetupCommonState(context, commandList);
         SetCommonRootConstants(context, commandList);
@@ -138,7 +142,7 @@ public:
     }
 
 private:
-    void BeginPass(RenderContext& context) {
+    void BeginPass(const RenderContext& context, rhi::CommandList& commandList) {
         // Build attachments
         rhi::PassBeginInfo p{};
         p.width = context.renderResolution.x;
@@ -174,10 +178,10 @@ private:
 
         p.colors = { colors.data(), (uint32_t)colors.size() };
 
-        context.commandList.BeginPass(p);
+        commandList.BeginPass(p);
     }
     // Common setup code that doesn't change between techniques
-    void SetupCommonState(RenderContext& context, rhi::CommandList& commandList) {
+    void SetupCommonState(const RenderContext& context, rhi::CommandList& commandList) {
 
         commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -187,15 +191,15 @@ private:
         commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
     }
 
-    void SetCommonRootConstants(RenderContext& context, rhi::CommandList& commandList) {
+    void SetCommonRootConstants(const RenderContext& context, rhi::CommandList& commandList) {
         if (m_indirect || m_meshShaders) {
             unsigned int misc[NumMiscUintRootConstants] = {};
             misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
-            commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
+            commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
         }
     }
 
-    void ExecuteRegular(RenderContext& context, rhi::CommandList& commandList) {
+    void ExecuteRegular(const RenderContext& context, rhi::CommandList& commandList) {
         // Regular forward rendering using DrawIndexedInstanced
         auto& psoManager = PSOManager::GetInstance();
 
@@ -222,7 +226,7 @@ private:
             });
     }
 
-    void ExecuteMeshShader(RenderContext& context, rhi::CommandList& commandList) {
+    void ExecuteMeshShader(const RenderContext& context, rhi::CommandList& commandList) {
         // Mesh shading path using DispatchMesh
         auto& psoManager = PSOManager::GetInstance();
 
@@ -248,7 +252,7 @@ private:
             });
     }
 
-    void ExecuteMeshShaderIndirect(RenderContext& context, rhi::CommandList& commandList) {
+    void ExecuteMeshShaderIndirect(const RenderContext& context, rhi::CommandList& commandList) {
         // Mesh shading with ExecuteIndirect
         auto& psoManager = PSOManager::GetInstance();
 

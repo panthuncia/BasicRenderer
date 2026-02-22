@@ -6,6 +6,7 @@
 #include "Interfaces/IResourceProvider.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "Render/IndirectCommand.h"
+#include "Render/RasterBucketFlags.h"
 
 // Manages buffers for per-material-compile-flag work (e.g., visibility buffer per-material)
 class MaterialManager : public IResourceProvider {
@@ -15,6 +16,7 @@ public:
 	}
 	unsigned int GetCompileFlagsSlot(MaterialCompileFlags flags);
 	unsigned int GetMaterialSlot(unsigned int materialID, std::optional<PerMaterialCB> data = std::nullopt);
+	unsigned int GetRasterFlagsSlot(MaterialRasterFlags rasterFlags);
 
 	void IncrementMaterialUsageCount(Material& material);
 	void DecrementMaterialUsageCount(const Material& material);
@@ -29,6 +31,23 @@ public:
 	const std::vector<unsigned int>& GetActiveCompileFlagsSlots() const { return m_activeCompileFlagsSlots; }
 	const std::vector<MaterialCompileFlags>& GetActiveCompileFlags() const { return m_activeCompileFlags; }
 	unsigned int GetCompileFlagsSlotsUsed() const { return m_compileFlagsSlotsUsed; }
+
+	unsigned int GetRasterBucketCount() const { return m_rasterBucketsUsed; }
+	unsigned int GetRasterBucketForFlags(MaterialRasterFlags rasterFlags) const {
+		auto it = m_rasterFlagToBucketMapping.find(static_cast<uint32_t>(rasterFlags));
+		if (it != m_rasterFlagToBucketMapping.end()) {
+			return it->second;
+		}
+		spdlog::error("Raster flags not found in mapping!");
+		return 0;
+	}
+	MaterialRasterFlags GetRasterFlagsForBucket(unsigned int bucketIndex) const {
+		if (bucketIndex < m_bucketToRasterFlagMapping.size()) {
+			return m_bucketToRasterFlagMapping[bucketIndex];
+		}
+		spdlog::error("Bucket index out of range!");
+		return MaterialRasterFlags::MaterialRasterFlagsNone;
+	}
 private:
 	MaterialManager();
 
@@ -51,11 +70,19 @@ private:
 
 	static constexpr unsigned int kScanBlockSize = 1024;
 
+	// Material raster flags to raster bin mapping
+	std::unordered_map<uint32_t, unsigned int> m_rasterFlagToBucketMapping;
+	std::vector<MaterialRasterFlags> m_bucketToRasterFlagMapping;
+	unsigned int m_rasterBucketsUsed = 0;
+	std::vector<unsigned int> m_freeRasterBuckets;
+
+	// Visibility buffer
 	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_materialPixelCountBuffer;
 	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_materialOffsetBuffer;
 	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_materialWriteCursorBuffer;
 	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_blockSumsBuffer;
 	std::shared_ptr<DynamicStructuredBuffer<uint32_t>> m_scannedBlockSumsBuffer;
 	std::shared_ptr<DynamicStructuredBuffer<MaterialEvaluationIndirectCommand>> m_materialEvaluationCommandBuffer;
+
 	std::shared_ptr<DynamicStructuredBuffer<PerMaterialCB>> m_perMaterialDataBuffer;
 };

@@ -4,6 +4,7 @@
 #include "include/vertex.hlsli"
 #include "include/utilities.hlsli"
 #include "include/waveIntrinsicsHelpers.hlsli"
+#include "include/visibilityPacking.hlsli"
 
 // http://filmicworlds.com/blog/visibility-buffer-rendering-with-material-graphs/
 struct BarycentricDeriv
@@ -145,6 +146,8 @@ struct MeshletResolveData {
 
     // Post-skinning ping-pong byte offsets
     uint2 postBases; // x = postSkinningBase, y = prevPostSkinningBase
+
+    uint meshletVerticesBufferOffset;
 };
 
 MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
@@ -159,8 +162,8 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
     {
         ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
 
-        StructuredBuffer<VisibleClusterInfo> visibleClusterTable =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibleClusterTable)];
+        StructuredBuffer<VisibleCluster> visibleClusterBuffer =
+            ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
         StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
         StructuredBuffer<PerMeshBuffer> perMeshBuffer =
@@ -168,21 +171,27 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
         StructuredBuffer<Meshlet> meshletBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletOffsets)];
 
-        VisibleClusterInfo clusterData = visibleClusterTable[clusterIndex];
-        d.drawcallAndMeshlet = clusterData.drawcallIndexAndMeshletIndex;
+        VisibleCluster clusterData = visibleClusterBuffer[clusterIndex];
+        d.drawcallAndMeshlet.x = clusterData.instanceID;
+        d.drawcallAndMeshlet.y = clusterData.meshletID;
 
         PerMeshInstanceBuffer inst = perMeshInstanceBuffer[d.drawcallAndMeshlet.x];
         d.objAndMesh = uint2(inst.perObjectBufferIndex, inst.perMeshBufferIndex);
 
         PerMeshBuffer mesh = perMeshBuffer[d.objAndMesh.y];
 
-        d.meshInfo = uint4(mesh.vertexByteSize, mesh.vertexFlags, mesh.numVertices, mesh.meshletTrianglesBufferOffset);
+//#if defined(VISBUF_USE_CLOD_MESHLETS)
+        d.meshInfo = uint4(mesh.vertexByteSize, mesh.vertexFlags, mesh.numVertices, mesh.clodMeshletTrianglesBufferOffset);
+        d.meshletVerticesBufferOffset = mesh.clodMeshletVerticesBufferOffset;
+        Meshlet m = meshletBuffer[mesh.clodMeshletBufferOffset + d.drawcallAndMeshlet.y];
+// #else
+//         d.meshInfo = uint4(mesh.vertexByteSize, mesh.vertexFlags, mesh.numVertices, mesh.meshletTrianglesBufferOffset);
+//         d.meshletVerticesBufferOffset = mesh.meshletVerticesBufferOffset;
+//         Meshlet m = meshletBuffer[mesh.meshletBufferOffset + d.drawcallAndMeshlet.y];
+// #endif
         d.materialDataIndex = mesh.materialDataIndex;
-
-        Meshlet m = meshletBuffer[mesh.meshletBufferOffset + d.drawcallAndMeshlet.y];
         d.meshletInfo = uint4(m.VertOffset, m.TriOffset, m.VertCount, m.TriCount);
 
-        // ping-pong base offsets
         uint postBase = inst.postSkinningVertexBufferOffset;
         uint prevBase = postBase;
 
@@ -196,15 +205,35 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
         d.postBases = uint2(postBase, prevBase);
     }
 
-    // Broadcast
     d.drawcallAndMeshlet = WaveReadLaneAt(d.drawcallAndMeshlet, leader);
     d.objAndMesh = WaveReadLaneAt(d.objAndMesh, leader);
     d.meshInfo = WaveReadLaneAt(d.meshInfo, leader);
     d.materialDataIndex = WaveReadLaneAt(d.materialDataIndex, leader);
     d.meshletInfo = WaveReadLaneAt(d.meshletInfo, leader);
     d.postBases = WaveReadLaneAt(d.postBases, leader);
+    d.meshletVerticesBufferOffset = WaveReadLaneAt(d.meshletVerticesBufferOffset, leader);
 
     return d;
+}
+
+void ComputeTriVertexByteOffsetsCompact(
+    MeshletResolveData d,
+    StructuredBuffer<uint> meshletVerticesBuffer,
+    uint3 triIdx,
+    out uint o0,
+    out uint o1,
+    out uint o2)
+{
+    uint stride = d.meshInfo.x;
+    uint base = d.meshletVerticesBufferOffset + d.meshletInfo.x;
+
+    uint v0 = meshletVerticesBuffer[base + triIdx.x];
+    uint v1 = meshletVerticesBuffer[base + triIdx.y];
+    uint v2 = meshletVerticesBuffer[base + triIdx.z];
+
+    o0 = d.postBases.x + v0 * stride;
+    o1 = d.postBases.x + v1 * stride;
+    o2 = d.postBases.x + v2 * stride;
 }
 
 uint3 DecodeTriangleCompact(uint triLocalIndex, MeshletResolveData d, ByteAddressBuffer meshletTrianglesBuffer)
@@ -240,31 +269,32 @@ uint3 DecodeTriangleCompact(uint triLocalIndex, MeshletResolveData d, ByteAddres
     return uint3(b0, b1, b2);
 }
 
-void ComputeTriVertexByteOffsetsCompact(MeshletResolveData d, uint3 triIdx, out uint o0, out uint o1, out uint o2)
-{
-    uint stride = d.meshInfo.x; // vertexByteSize
-    uint base = d.postBases.x + d.meshletInfo.x * stride; // postBase + vertOffset * stride
+// void ComputeTriVertexByteOffsetsCompact(MeshletResolveData d, uint3 triIdx, out uint o0, out uint o1, out uint o2)
+// {
+//     uint stride = d.meshInfo.x; // vertexByteSize
+//     uint base = d.postBases.x + d.meshletInfo.x * stride; // postBase + vertOffset * stride
 
-    o0 = base + triIdx.x * stride;
-    o1 = base + triIdx.y * stride;
-    o2 = base + triIdx.z * stride;
-}
+//     o0 = base + triIdx.x * stride;
+//     o1 = base + triIdx.y * stride;
+//     o2 = base + triIdx.z * stride;
+// }
 
 
 // Note: relies on gs_* groupshared values being initialized.
 void EvaluateGBufferOptimized(uint2 pixel)
 {
-    Texture2D<uint2> visibilityTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
-    uint2 vis = visibilityTexture[pixel];
+    Texture2D<uint64_t> visibilityTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
+    uint64_t vis = visibilityTexture[pixel];
 
-    uint depthBitsRaw = vis.y;
-    bool isFrontFace = ((depthBitsRaw & 0x80000000u) != 0);
-
-    uint clusterIndex = vis.x & 0x1FFFFFFu;
-    if (clusterIndex == 0x1FFFFFFu)
+   
+    if (vis == 0xFFFFFFFFFFFFFFFF) // no visible geometry
         return;
 
-    uint meshletTriangleIndex = vis.x >> 25;
+    float depth;
+    uint clusterIndex;
+    uint meshletTriangleIndex;
+    bool isBackface = false; // TODO
+    UnpackVisKey(vis, depth, clusterIndex, meshletTriangleIndex);
 
     // Meshlet-level wave dedup (key = clusterIndex)
     // This optimization did not help much in testing; keeping because it didn't hurt.
@@ -289,25 +319,29 @@ void EvaluateGBufferOptimized(uint2 pixel)
     uint3 triIdx = 0;
     float3 p0 = 0, p1 = 0, p2 = 0;
 
-    if (triIsLeader)
-    {
-        triIdx = DecodeTriangleCompact(meshletTriangleIndex, md, meshletTrianglesBuffer);
+    triIdx = DecodeTriangleCompact(meshletTriangleIndex, md, meshletTrianglesBuffer);
 
-        uint o0, o1, o2;
-        ComputeTriVertexByteOffsetsCompact(md, triIdx, o0, o1, o2);
-
-        p0 = LoadPositionOnly(o0, vertexBuffer);
-        p1 = LoadPositionOnly(o1, vertexBuffer);
-        p2 = LoadPositionOnly(o2, vertexBuffer);
-    }
-
-    triIdx = WaveReadLaneAt(triIdx, triLeader);
-    p0 = WaveReadLaneAt(p0, triLeader);
-    p1 = WaveReadLaneAt(p1, triLeader);
-    p2 = WaveReadLaneAt(p2, triLeader);
+    StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletVertexIndices)];
 
     uint o0, o1, o2;
-    ComputeTriVertexByteOffsetsCompact(md, triIdx, o0, o1, o2);
+    ComputeTriVertexByteOffsetsCompact(md, meshletVerticesBuffer, triIdx, o0, o1, o2);
+    p0 = LoadPositionOnly(o0, vertexBuffer);
+    p1 = LoadPositionOnly(o1, vertexBuffer);
+    p2 = LoadPositionOnly(o2, vertexBuffer);
+    // if (triIsLeader)
+    // {
+    //     p0 = LoadPositionOnly(o0, vertexBuffer);
+    //     p1 = LoadPositionOnly(o1, vertexBuffer);
+    //     p2 = LoadPositionOnly(o2, vertexBuffer);
+    // }
+
+    // triIdx = WaveReadLaneAt(triIdx, triLeader);
+    // p0 = WaveReadLaneAt(p0, triLeader);
+    // p1 = WaveReadLaneAt(p1, triLeader);
+    // p2 = WaveReadLaneAt(p2, triLeader);
+
+    // uint o0, o1, o2;
+    // ComputeTriVertexByteOffsetsCompact(md, triIdx, o0, o1, o2);
 
     // Object buffer (per-lane; is it worth broadcasting?)
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
@@ -367,7 +401,7 @@ void EvaluateGBufferOptimized(uint2 pixel)
 
     float3 worldNormal = normalize(mul(normalOS, normalMatrix));
 
-    if (!isFrontFace) {
+    if (isBackface) {
         worldNormal = -worldNormal;
     }
 
@@ -391,13 +425,16 @@ void EvaluateGBufferOptimized(uint2 pixel)
     if (vertexFlags & VERTEX_SKINNED)
     {
         uint stride = md.meshInfo.x;
-        uint vertOffset = md.meshletInfo.x;
         uint prevBase = md.postBases.y;
-        // For skinned meshes, reconstruct prev position from prev post-skinning buffer
+        uint base = md.meshletVerticesBufferOffset + md.meshletInfo.x;
 
-        uint o0Prev = prevBase + triIdx.x * stride;
-        uint o1Prev = prevBase + triIdx.y * stride;
-        uint o2Prev = prevBase + triIdx.z * stride;
+        uint v0 = meshletVerticesBuffer[base + triIdx.x];
+        uint v1 = meshletVerticesBuffer[base + triIdx.y];
+        uint v2 = meshletVerticesBuffer[base + triIdx.z];
+
+        uint o0Prev = prevBase + v0 * stride;
+        uint o1Prev = prevBase + v1 * stride;
+        uint o2Prev = prevBase + v2 * stride;
 
         float3 p0Prev = LoadPositionOnly(o0Prev, vertexBuffer);
         float3 p1Prev = LoadPositionOnly(o1Prev, vertexBuffer);
@@ -425,8 +462,13 @@ void EvaluateGBufferOptimized(uint2 pixel)
     RWTexture2D<float2> metallicRoughnessTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::MetallicRoughness)];
     RWTexture2D<float2> motionVectorTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::MotionVectors)];
 
+    //Debug meshlets
+    float3 viewDir = normalize(gs_camPos - worldPosition);
+    float4 debugColor = lightUints(md.drawcallAndMeshlet.y, worldNormal, viewDir);
+
     normalsTexture[pixel].xyz = materialInputs.normalWS;
-    albedoTexture[pixel] = float4(materialInputs.albedo, materialInputs.ambientOcclusion);
+    //albedoTexture[pixel] = float4(materialInputs.albedo, materialInputs.ambientOcclusion);
+    albedoTexture[pixel] = float4(debugColor.xyz, materialInputs.ambientOcclusion);
     emissiveTexture[pixel].xyz = materialInputs.emissive;
     metallicRoughnessTexture[pixel] = float2(materialInputs.metallic, materialInputs.roughness);
     motionVectorTexture[pixel] = motionVector;
@@ -448,15 +490,19 @@ void PrimaryDepthCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint2 pixel = dispatchThreadId.xy;
     // .x = 7 bits for meshlet triangle index, 25 bits for visible cluster index
     // .y = 32-bit depth
-    Texture2D<uint2> visibilityTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
+    Texture2D<uint64_t> visibilityTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
     
-    uint visibilityDataY = visibilityTexture[pixel].y;
-    float depth = asfloat(0x7F7FFFFF); // FLT_MAX
-    if (!(visibilityDataY == 0xFFFFFFFFu))
+    uint64_t vis = visibilityTexture[pixel];
+    float depth;
+    if (vis == 0xFFFFFFFFFFFFFFFF) // no visible geometry
     {
-        depth = asfloat(visibilityDataY);
-        // Sign bit was stolen for face orientation; clear it
-        depth = asfloat(asuint(depth) & 0x7FFFFFFF);
+        depth = asfloat(0x7F7FFFFF); // FLT_MAX
+    }
+    else
+    {
+        uint clusterIndex;
+        uint meshletTriangleIndex;
+        UnpackVisKey(vis, depth, clusterIndex, meshletTriangleIndex);
     }
 
     RWTexture2D<float> linearDepthTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::LinearDepthMap)];

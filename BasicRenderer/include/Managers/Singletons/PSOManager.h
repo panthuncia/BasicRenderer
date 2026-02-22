@@ -6,15 +6,15 @@
 #include <string>
 #include <filesystem>
 #include <optional>
+#include <boost/container_hash/hash.hpp>
 
 #include <rhi.h>
+#include <OpenRenderGraph/OpenRenderGraph.h>
 
 #pragma warning(push, 0)   // Disable all warnings for dxc header
 #include "ThirdParty/DirectX/dxcapi.h"
 #pragma warning(pop)
 #include "Render/PSOFlags.h"
-#include "Render/PipelineState.h"
-#include "Resources/ResourceIdentifier.h"
 #include "Materials/TechniqueDescriptor.h"
 
 using Microsoft::WRL::ComPtr;
@@ -36,15 +36,37 @@ namespace std {
     struct hash<PSOKey> {
         std::size_t operator()(const PSOKey& key) const noexcept {
             // Combine the hash of psoFlags, materialCompileFlags, and wireframe
-            std::size_t h1 = std::hash<uint64_t>{}(key.psoFlags);
-            std::size_t h2 = std::hash<uint64_t>{}(key.materialCompileFlags);
-			std::size_t h3 = std::hash<bool>{}(key.wireframe);
+			std::size_t seed = 0;
 
-            // Boost's hash_combine equivalent
-            std::size_t combinedHash = h1 ^ (h2 + 0x9e3779b9 + (h1 << 6) + (h1 >> 2));
-            combinedHash ^= (h3 + 0x9e3779b9 + (combinedHash << 6) + (combinedHash >> 2));
+			boost::hash_combine(seed, key.psoFlags);
+			boost::hash_combine(seed, key.materialCompileFlags);
+			boost::hash_combine(seed, key.wireframe);
+            return seed;
+        }
+    };
+}
 
-            return combinedHash;
+struct RasterPSOKey {
+	MaterialRasterFlags materialRasterFlags;
+	bool wireframe;
+
+	RasterPSOKey(MaterialRasterFlags materialRasterFlags, bool wireframe) : materialRasterFlags(materialRasterFlags), wireframe(wireframe) {}
+    bool operator==(const RasterPSOKey& other) const {
+        return materialRasterFlags == other.materialRasterFlags && wireframe == other.wireframe;
+	}
+};
+
+namespace std {
+    template <>
+    struct hash<RasterPSOKey> {
+        std::size_t operator()(const RasterPSOKey& key) const noexcept {
+            // Combine the hash of materialRasterFlags and wireframe
+            std::size_t seed = 0;
+
+			boost::hash_combine(seed, key.materialRasterFlags);
+			boost::hash_combine(seed, key.wireframe);
+
+            return seed;
         }
     };
 }
@@ -56,6 +78,13 @@ struct ShaderInfo {
     ShaderInfo(const std::wstring& file, const std::wstring& entry, const std::wstring& tgt)
         : filename(file), entryPoint(entry), target(tgt) {}
 };
+
+struct ShaderLibraryInfo {
+    std::wstring filename;
+	std::wstring target;
+    ShaderLibraryInfo(const std::wstring& file, const std::wstring& tgt) : filename(file), target(tgt) {}
+};
+
 struct ShaderInfoBundle {
     ShaderInfoBundle(const std::vector<DxcDefine>& defs, bool debug = false, bool warnings = true) : 
         defines(defs), enableDebugInfo(debug), warningsAsErrors(warnings) {}
@@ -81,6 +110,12 @@ struct ShaderBundle {
 	uint64_t resourceIDsHash = 0;
 };
 
+struct ShaderLibraryBundle {
+    Microsoft::WRL::ComPtr<ID3DBlob> libraryBlob;
+    PipelineResources resourceDescriptorSlots;
+    uint64_t resourceIDsHash = 0;
+};
+
 class PSOManager {
 public:
 
@@ -104,9 +139,12 @@ public:
 	const PipelineState& GetVisibilityBufferPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
 	const PipelineState& GetVisibilityBufferMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
 
+    const PipelineState& GetClusterLODRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
+
+
     const PipelineState& GetDeferredPSO(UINT psoFlags);
 
-    PipelineState MakeComputePipeline(rhi::PipelineLayout layout,
+    PipelineState MakeComputePipeline(rhi::PipelineLayoutHandle layout,
         const wchar_t* shaderPath,
         const wchar_t* entryPoint,
         std::vector<DxcDefine> defines = {},
@@ -116,7 +154,10 @@ public:
     const rhi::PipelineLayout& GetComputeRootSignature();
     void ReloadShaders();
     std::vector<DxcDefine> GetShaderDefines(UINT psoFlags, MaterialCompileFlags materialFlags);
+	std::vector<DxcDefine> GetRasterShaderDefines(MaterialRasterFlags materialRasterFlags);
 	ShaderBundle CompileShaders(const ShaderInfoBundle& shaderInfoBundle);
+	ShaderLibraryBundle CompileShaderLibrary(const ShaderLibraryInfo& libraryInfo, const std::vector<DxcDefine>& defines = {});
+
     void GetPreprocessedBlob(
         const std::wstring& filename,
         const std::wstring& entryPoint,
@@ -159,6 +200,8 @@ private:
     std::unordered_map<PSOKey, PipelineState> m_visibilityBufferPSOCache;
     std::unordered_map<PSOKey, PipelineState> m_visibilityBufferMeshPSOCache;
 
+    std::unordered_map<RasterPSOKey, PipelineState> m_clusterLODRasterPSOCache;
+
 	std::unordered_map<unsigned int, PipelineState> m_deferredPSOCache;
 
     ComPtr<IDxcUtils> pUtils;
@@ -179,6 +222,8 @@ private:
 
 	PipelineState CreateVisibilityBufferPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
 	PipelineState CreateVisibilityBufferMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
+
+    PipelineState CreateClusterLODRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
 
     PipelineState CreateDeferredPSO(UINT psoFlags);
 

@@ -58,9 +58,9 @@ public:
 				Builtin::CameraBuffer,
 				Builtin::IndirectCommandBuffers::Master)
 			.WithShaderResource(ECSResourceResolver(drawSetIndicesQuery))
-			.WithUnorderedAccess(Builtin::IndirectCommandBuffers::MeshletCulling,
-				Builtin::MeshInstanceMeshletCullingBitfieldGroup,
-				Builtin::MeshInstanceOcclusionCullingBitfieldGroup)
+			//.WithUnorderedAccess(Builtin::IndirectCommandBuffers::MeshletCulling,
+			//	Builtin::MeshInstanceMeshletCullingBitfieldGroup,
+			//	Builtin::MeshInstanceOcclusionCullingBitfieldGroup)
 			.WithUnorderedAccess(ECSResourceResolver(indirectCommandBuffersQuery));
 	}
 
@@ -71,19 +71,17 @@ public:
 		RegisterSRV(Builtin::IndirectCommandBuffers::Master);
 	}
 
-	PassReturn Execute(RenderContext& context) override {
-		auto& commandList = context.commandList;
+	PassReturn Execute(PassExecutionContext& executionContext) override {
+	    auto* renderContext = executionContext.hostData->Get<RenderContext>();
+	    auto& context = *renderContext;
+		auto& commandList = executionContext.commandList;
 
 		// Set the descriptor heaps
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
 		commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
 
-		unsigned int drawRootConstants[NumDrawInfoRootConstants] = {};
-
 		unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
-
-		//auto& primaryDepth = context.currentScene->GetPrimaryCamera().get<Components::DepthMap>();
 
 		bool shadows = getShadowsEnabled();
 		
@@ -110,10 +108,8 @@ public:
 				commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &viewInfo->gpu.cameraBufferIndex);
 
 				// How many draws are we processing?
-				drawRootConstants[MaxDrawIndex] = wl.count - 1;
-				commandList.PushConstants(rhi::ShaderStage::Compute, 0, DrawInfoRootSignatureIndex, 0, NumDrawInfoRootConstants, drawRootConstants);
 
-				miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = viewInfo->gpu.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+				//miscRootConstants[MESH_INSTANCE_MESHLET_CULLING_BITFIELD_BUFFER_UAV_DESCRIPTOR_INDEX] = viewInfo->gpu.meshInstanceMeshletCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 				miscRootConstants[MESHLET_CULLING_RESET_BUFFER_UAV_DESCRIPTOR_INDEX] = viewInfo->gpu.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 				// What type of light are we processing for?
 				auto lightType = viewInfo->lightType;
@@ -121,10 +117,11 @@ public:
 				auto srvIndex = lightType == Components::LightType::Point ? linearDepthMap->GetSRVInfo(SRVViewType::Texture2DArray, 0).slot.index : linearDepthMap->GetSRVInfo(0).slot.index;
 				
 				miscRootConstants[LINEAR_DEPTH_MAP_SRV_DESCRIPTOR_INDEX] = srvIndex;
-				miscRootConstants[MESH_INSTANCE_OCCLUSION_CULLING_BUFFER_UAV_DESCRIPTOR_INDEX] = viewInfo->gpu.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
+				//miscRootConstants[MESH_INSTANCE_OCCLUSION_CULLING_BUFFER_UAV_DESCRIPTOR_INDEX] = viewInfo->gpu.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 				miscRootConstants[MESHLET_CULLING_INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = viewInfo->gpu.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 				miscRootConstants[INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = wl.buffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 				miscRootConstants[ACTIVE_DRAW_SET_INDICES_BUFFER_SRV_DESCRIPTOR_INDEX] = context.objectManager->GetActiveDrawSetIndices(flags)->GetSRVInfo(0).slot.index;
+				miscRootConstants[MAX_DRAW_INDEX] = wl.count - 1;
 				commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
 
 				commandList.Dispatch(numThreadGroups, 1, 1);
@@ -151,7 +148,7 @@ private:
 		}
 
 		m_PSO = PSOManager::GetInstance().MakeComputePipeline(
-			PSOManager::GetInstance().GetComputeRootSignature(),
+			PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
 			L"shaders/objectCulling.hlsl",
 			L"ObjectCullingCSMain",
 			defines,
@@ -160,7 +157,7 @@ private:
 		defines.push_back({ L"BLEND_OBJECTS", L"1" });
 
 		m_blendPSO = PSOManager::GetInstance().MakeComputePipeline(
-			PSOManager::GetInstance().GetComputeRootSignature(),
+			PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
 			L"shaders/objectCulling.hlsl",
 			L"ObjectCullingCSMain",
 			defines,

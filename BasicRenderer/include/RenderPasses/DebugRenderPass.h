@@ -14,7 +14,9 @@ public:
     void Setup() override {
     }
 
-    PassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
         //if (m_texture == nullptr) {
         //    return {};
         //}

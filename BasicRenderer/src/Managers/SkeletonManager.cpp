@@ -2,7 +2,7 @@
 
 #include "Animation/Skeleton.h"
 #include "Resources/Buffers/BufferView.h"
-#include "Managers/Singletons/UploadManager.h"
+#include "Render/Runtime/UploadServiceAccess.h"
 #include "../../generated/BuiltinResources.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
 
@@ -148,7 +148,7 @@ void SkeletonManager::UpdateInstanceTransforms(Skeleton& inst) {
 
     const size_t bytes = rec.boneCount * sizeof(DirectX::XMMATRIX);
     BUFFER_UPLOAD(inst.GetBoneMatrices().data(), bytes,
-        UploadManager::UploadTarget::FromShared(m_boneTransforms),
+        rg::runtime::UploadTarget::FromShared(m_boneTransforms),
         rec.transformsView->GetOffset());
 
     //rec.dirty = false;

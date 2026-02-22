@@ -32,7 +32,7 @@ public:
 			Builtin::GBuffer::Albedo,
 			Builtin::GBuffer::Emissive,
 			Builtin::GBuffer::MetallicRoughness,
-			Builtin::PrimaryCamera::DepthTexture,
+			Builtin::PrimaryCamera::LinearDepthMap,
 			Builtin::Environment::CurrentCubemap,
 			Builtin::Shadows::ShadowMaps)
 			.WithUnorderedAccess(Builtin::Color::HDRColorTarget);
@@ -68,14 +68,16 @@ public:
 		RegisterSRV(Builtin::GBuffer::Albedo);
 		RegisterSRV(Builtin::GBuffer::Emissive);
 		RegisterSRV(Builtin::GBuffer::MetallicRoughness);
-		RegisterSRV(Builtin::PrimaryCamera::DepthTexture);
+		RegisterSRV(Builtin::PrimaryCamera::LinearDepthMap);
 
 		RegisterUAV(Builtin::Color::HDRColorTarget);
 	}
 
-	PassReturn Execute(RenderContext& context) override {
+	PassReturn Execute(PassExecutionContext& executionContext) override {
+	    auto* renderContext = executionContext.hostData->Get<RenderContext>();
+	    auto& context = *renderContext;
 		auto& psoManager = PSOManager::GetInstance();
-		auto& commandList = context.commandList;
+		auto& commandList = executionContext.commandList;
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(),
 			context.samplerDescriptorHeap.GetHandle());
@@ -93,7 +95,7 @@ public:
 		settings[EnableGTAO] = m_gtaoEnabled;
 		commandList.PushConstants(rhi::ShaderStage::Compute, 0,
 			SettingsRootSignatureIndex, 0,
-			NumSettingsRootConstants, &settings);
+			NumSettingsRootConstants, settings);
 
 		uint32_t w = context.renderResolution.x;
 		uint32_t h = context.renderResolution.y;

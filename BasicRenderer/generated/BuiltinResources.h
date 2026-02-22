@@ -6,11 +6,20 @@
 struct Builtin {
   inline static constexpr std::string_view ActiveDrawSetIndices = "Builtin::ActiveDrawSetIndices";
   inline static constexpr std::string_view BRDFLUT = "Builtin::BRDFLUT";
+  struct CLod {
+    inline static constexpr std::string_view ChildLocalMeshletIndices = "Builtin::CLod::ChildLocalMeshletIndices";
+    inline static constexpr std::string_view Children = "Builtin::CLod::Children";
+    inline static constexpr std::string_view Groups = "Builtin::CLod::Groups";
+    inline static constexpr std::string_view MeshletBounds = "Builtin::CLod::MeshletBounds";
+    inline static constexpr std::string_view Nodes = "Builtin::CLod::Nodes";
+    inline static constexpr std::string_view Offsets = "Builtin::CLod::Offsets";
+  };
   inline static constexpr std::string_view CameraBuffer = "Builtin::CameraBuffer";
   struct Color {
     inline static constexpr std::string_view HDRColorTarget = "Builtin::Color::HDRColorTarget";
     inline static constexpr std::string_view SRGBColorTarget = "Builtin::Color::SRGBColorTarget";
   };
+  inline static constexpr std::string_view CullingCameraBuffer = "Builtin::CullingCameraBuffer";
   inline static constexpr std::string_view DebugTexture = "Builtin::DebugTexture";
   struct Environment {
     inline static constexpr std::string_view CurrentCubemap = "Builtin::Environment::CurrentCubemap";
@@ -36,7 +45,6 @@ struct Builtin {
   };
   struct IndirectCommandBuffers {
     inline static constexpr std::string_view Master = "Builtin::IndirectCommandBuffers::Master";
-    inline static constexpr std::string_view MeshletCulling = "Builtin::IndirectCommandBuffers::MeshletCulling";
     inline static constexpr std::string_view Primary = "Builtin::IndirectCommandBuffers::Primary";
   };
   struct Light {
@@ -51,16 +59,12 @@ struct Builtin {
     inline static constexpr std::string_view SpotLightMatrixBuffer = "Builtin::Light::SpotLightMatrixBuffer";
     inline static constexpr std::string_view ViewResourceGroup = "Builtin::Light::ViewResourceGroup";
   };
-  inline static constexpr std::string_view MeshInstanceMeshletCullingBitfieldGroup = "Builtin::MeshInstanceMeshletCullingBitfieldGroup";
-  inline static constexpr std::string_view MeshInstanceOcclusionCullingBitfieldGroup = "Builtin::MeshInstanceOcclusionCullingBitfieldGroup";
   struct MeshResources {
-    inline static constexpr std::string_view ClusterToVisibleClusterTableIndexBuffer = "Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer";
     inline static constexpr std::string_view MeshletBounds = "Builtin::MeshResources::MeshletBounds";
     inline static constexpr std::string_view MeshletOffsets = "Builtin::MeshResources::MeshletOffsets";
     inline static constexpr std::string_view MeshletTriangles = "Builtin::MeshResources::MeshletTriangles";
     inline static constexpr std::string_view MeshletVertexIndices = "Builtin::MeshResources::MeshletVertexIndices";
   };
-  inline static constexpr std::string_view MeshletCullingBitfieldGroup = "Builtin::MeshletCullingBitfieldGroup";
   inline static constexpr std::string_view NormalMatrixBuffer = "Builtin::NormalMatrixBuffer";
   struct PPLL {
     inline static constexpr std::string_view Counter = "Builtin::PPLL::Counter";
@@ -82,15 +86,10 @@ struct Builtin {
   struct PrimaryCamera {
     inline static constexpr std::string_view DepthTexture = "Builtin::PrimaryCamera::DepthTexture";
     struct IndirectCommandBuffers {
-      inline static constexpr std::string_view MeshletCulling = "Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling";
-      inline static constexpr std::string_view MeshletCullingReset = "Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset";
       inline static constexpr std::string_view Primary = "Builtin::PrimaryCamera::IndirectCommandBuffers::Primary";
     };
     inline static constexpr std::string_view LinearDepthMap = "Builtin::PrimaryCamera::LinearDepthMap";
-    inline static constexpr std::string_view MeshletBitfield = "Builtin::PrimaryCamera::MeshletBitfield";
     inline static constexpr std::string_view VisibilityTexture = "Builtin::PrimaryCamera::VisibilityTexture";
-    inline static constexpr std::string_view VisibleClusterTable = "Builtin::PrimaryCamera::VisibleClusterTable";
-    inline static constexpr std::string_view VisibleClusterTableCounter = "Builtin::PrimaryCamera::VisibleClusterTableCounter";
   };
   struct Shadows {
     inline static constexpr std::string_view LinearShadowMaps = "Builtin::Shadows::LinearShadowMaps";

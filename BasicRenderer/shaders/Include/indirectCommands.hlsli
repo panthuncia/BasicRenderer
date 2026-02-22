@@ -21,4 +21,12 @@ struct DispatchIndirectCommand
     uint dispatchZ;
 };
 
+struct RasterizeClustersCommand
+{
+    uint baseClusterOffset;
+    uint xDim;
+    uint rasterBucketID;
+    uint dispatchX, dispatchY, dispatchZ;
+};
+
 #endif // __INDIRECT_COMMANDS_HLSLI__

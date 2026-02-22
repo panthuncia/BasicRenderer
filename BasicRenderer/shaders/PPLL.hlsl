@@ -4,6 +4,7 @@
 #include "include/outputTypes.hlsli"
 #include "include/utilities.hlsli"
 #include "fullscreenVS.hlsli"
+#include "PerPassRootConstants/ppllFillRootConstants.h"
 
 //https://github.com/GPUOpen-Effects/TressFX/blob/master/src/Shaders/TressFXPPLL.hlsl
 
@@ -22,7 +23,7 @@ int AllocateFragment(int2 vScreenAddress, RWStructuredBuffer<uint> LinkedListCou
     uint newAddress;
     InterlockedAdd(LinkedListCounter[0], 1, newAddress);
 
-    if (newAddress < 0 || newAddress >= PPLLNodePoolSize)
+    if (newAddress < 0 || newAddress >= PPLL_NODE_POOL_SIZE)
         newAddress = FRAGMENT_LIST_NULL;
     return newAddress;
 }

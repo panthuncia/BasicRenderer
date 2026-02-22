@@ -17,7 +17,7 @@
 
 #include "Scene/Scene.h"
 #include "Managers/InputManager.h"
-#include "Render/RenderGraph.h"
+#include "Render/RenderGraph/RenderGraph.h"
 #include "Resources/ShadowMaps.h"
 #include "RenderPasses/DebugRenderPass.h"
 #include "NsightAftermathGpuCrashTracker.h"
@@ -29,10 +29,12 @@
 #include "Managers/EnvironmentManager.h"
 #include "Managers/MaterialManager.h"
 #include "Managers/SkeletonManager.h"
+#include "Managers/ReadbackManager.h"
 #include "Factories/TextureFactory.h"
 #include "Scene/MovementState.h"
 #include "../generated/BuiltinResources.h"
 #include "Utilities/Timer.h"
+#include "Render/RenderContext.h"
 
 using namespace Microsoft::WRL;
 
@@ -108,6 +110,7 @@ private:
     std::shared_ptr<Scene> currentScene;
 
     std::unique_ptr<RenderGraph> currentRenderGraph = nullptr;
+    bool m_renderGraphRuntimeInitialized = false;
     bool rebuildRenderGraph = true;
 
     RenderContext m_context;
@@ -124,6 +127,7 @@ private:
 	std::unique_ptr<EnvironmentManager> m_pEnvironmentManager = nullptr;
 	std::unique_ptr<MaterialManager> m_pMaterialManager = nullptr;
 	std::unique_ptr<SkeletonManager> m_pSkeletonManager = nullptr;
+    std::unique_ptr<br::ReadbackManager> m_pReadbackManager = nullptr;
     std::unique_ptr<TextureFactory> m_pTextureFactory = nullptr;
 
 	ManagerInterface m_managerInterface;
@@ -200,7 +204,6 @@ private:
     class CoreResourceProvider : public IResourceProvider {
 	public:
         std::shared_ptr<PixelBuffer> m_currentDebugTexture = nullptr;
-		std::shared_ptr<Resource> m_primaryCameraMeshletBitfield = nullptr;
         std::shared_ptr<PixelBuffer> m_HDRColorTarget = nullptr;
 		std::shared_ptr<PixelBuffer> m_upscaledHDRColorTarget = nullptr;
 		std::shared_ptr<PixelBuffer> m_gbufferMotionVectors = nullptr;
@@ -212,8 +215,6 @@ private:
 				return m_HDRColorTarget;
             if (key.ToString() == Builtin::DebugTexture)
 				return m_currentDebugTexture;
-			if (key.ToString() == Builtin::PrimaryCamera::MeshletBitfield)
-				return m_primaryCameraMeshletBitfield;
             if (key.ToString() == Builtin::PostProcessing::UpscaledHDR)
 				return m_upscaledHDRColorTarget;
 		
@@ -230,7 +231,6 @@ private:
                 Builtin::GBuffer::MotionVectors,
                 Builtin::Color::HDRColorTarget,
                 Builtin::DebugTexture,
-                Builtin::PrimaryCamera::MeshletBitfield,
 				Builtin::PostProcessing::UpscaledHDR,
 			};
         }
@@ -241,7 +241,6 @@ private:
 
         void Cleanup() {
             m_currentDebugTexture = nullptr;
-            m_primaryCameraMeshletBitfield = nullptr;
 			m_HDRColorTarget = nullptr;
 			m_upscaledHDRColorTarget = nullptr;
 			m_gbufferMotionVectors = nullptr;

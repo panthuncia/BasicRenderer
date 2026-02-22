@@ -5,7 +5,6 @@
 #include <algorithm> // For std::lower_bound, std::upper_bound
 #include <rhi.h>
 
-#include "Managers/Singletons/DeviceManager.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
@@ -13,7 +12,7 @@
 
 using Microsoft::WRL::ComPtr;
 
-class SortedUnsignedIntBuffer : public DynamicBufferBase, public IHasMemoryMetadata {
+class SortedUnsignedIntBuffer : public BufferBase, public IHasMemoryMetadata {
 public:
     static std::shared_ptr<SortedUnsignedIntBuffer> CreateShared(uint64_t capacity = 64, std::string name = "", bool UAV = false) {
         return std::shared_ptr<SortedUnsignedIntBuffer>(new SortedUnsignedIntBuffer(capacity, name, UAV));
@@ -38,23 +37,6 @@ public:
         return static_cast<UINT>(m_data.size());
     }
 
-    rhi::Resource GetAPIResource() override {
-        return m_dataBuffer->GetAPIResource();
-    }
-
-    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
-        m_metadataBundles.emplace_back(bundle);
-        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
-    }
-
-    SymbolicTracker* GetStateTracker() override {
-        return m_dataBuffer->GetStateTracker();
-    }
-protected:
-    rhi::BarrierBatch GetEnhancedBarrierGroup(RangeSpec range, rhi::ResourceAccessType prevAccessType, rhi::ResourceAccessType newAccessType, rhi::ResourceLayout prevLayout, rhi::ResourceLayout newLayout, rhi::ResourceSyncState prevSyncState, rhi::ResourceSyncState newSyncState) {
-        return m_dataBuffer->GetEnhancedBarrierGroup(range, prevAccessType, newAccessType, prevLayout, newLayout, prevSyncState, newSyncState);
-    }
-
 private:
     SortedUnsignedIntBuffer(uint64_t capacity = 64, std::string name = "", bool UAV = false)
         : m_capacity(capacity), m_UAV(UAV), m_earliestModifiedIndex(0) {
@@ -62,14 +44,7 @@ private:
         SetName(name);
     }
 
-    void OnSetName() override {
-        if (name != "") {
-            m_dataBuffer->SetName((m_name + ": " + name).c_str());
-        }
-        else {
-            m_dataBuffer->SetName(m_name.c_str());
-        }
-    }
+    void OnSetName() override;
 
     void AssignDescriptorSlots();
 
@@ -88,4 +63,9 @@ private:
     void CreateBuffer(uint64_t capacity);
 
     void GrowBuffer(uint64_t newSize);
+
+    void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
+        m_metadataBundles.emplace_back(bundle);
+        ApplyMetadataToBacking(bundle);
+    }
 };

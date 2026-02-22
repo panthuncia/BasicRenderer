@@ -11,14 +11,13 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "../../generated/BuiltinResources.h"
 #include "Resources/Components.h"
-#include "Resources/MemoryStatisticsComponents.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
+#include "Resources/Buffers/Buffer.h"
+#include "Managers/Singletons/ECSManager.h"
+#include "Render/MemoryIntrospectionAPI.h"
 
 IndirectCommandBufferManager::IndirectCommandBufferManager() {
     m_indirectCommandsResourceGroup = std::make_shared<ResourceGroup>("IndirectCommandBuffers");
-    m_meshletCullingCommandResourceGroup = std::make_shared<ResourceGroup>("MeshletCullingCommandBuffers");
-
-    m_resolvers[Builtin::IndirectCommandBuffers::MeshletCulling] = std::make_shared<ResourceGroupResolver>(m_meshletCullingCommandResourceGroup);
 }
 
 IndirectCommandBufferManager::~IndirectCommandBufferManager() {
@@ -63,7 +62,7 @@ IndirectCommandBufferManager::CreateBuffersForView(uint64_t viewID) {
         auto res = CreateIndexedStructuredBuffer(size, sizeof(DispatchMeshIndirectCommand), true, true);
         res->SetName("IndirectCommandBuffer(flags=" + GetDebugNameForTechnique(technique) +
             ", view=" + std::to_string(viewID) + ")");
-        res->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Indirect command buffers" }));
+        rg::memory::SetResourceUsageHint(*res, "Indirect command buffers");
         auto dyn = std::make_shared<DynamicGloballyIndexedResource>(res);
         auto entity = dyn->GetECSEntity();
 
@@ -90,14 +89,12 @@ IndirectCommandBufferManager::CreateBuffersForView(uint64_t viewID) {
     auto makeMeshlet = [&](const char* label) {
         auto r = CreateIndexedStructuredBuffer((std::max)(m_totalIndirectCommands, 1u), sizeof(DispatchIndirectCommand), true, true);
         r->SetName(std::string(label) + " (view=" + std::to_string(viewID) + ")");
-		r->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Indirect command buffers" }));
+        rg::memory::SetResourceUsageHint(*r, "Indirect command buffers");
         auto dyn = std::make_shared<DynamicGloballyIndexedResource>(r);
         dyn->GetECSEntity().set<Components::Resource>({ dyn });
         return dyn;    };
     perView.meshletCullingIndirectCommandBuffer = makeMeshlet("MeshletCullingIndirectCommandBuffer");
     perView.meshletCullingResetIndirectCommandBuffer = makeMeshlet("MeshletCullingResetIndirectCommandBuffer");
-    m_meshletCullingCommandResourceGroup->AddResource(perView.meshletCullingIndirectCommandBuffer);
-    m_meshletCullingCommandResourceGroup->AddResource(perView.meshletCullingResetIndirectCommandBuffer);
 
     // Store
     m_viewIDToBuffers[viewID] = perView;
@@ -118,12 +115,6 @@ void IndirectCommandBufferManager::UnregisterBuffers(uint64_t viewID) {
 
     for (auto& [flags, dyn] : perView.buffersByFlags) {
         m_indirectCommandsResourceGroup->RemoveResource(dyn.buffer->GetResource().get());
-    }
-    if (perView.meshletCullingIndirectCommandBuffer) {
-        m_meshletCullingCommandResourceGroup->RemoveResource(perView.meshletCullingIndirectCommandBuffer->GetResource().get());
-    }
-    if (perView.meshletCullingResetIndirectCommandBuffer) {
-        m_meshletCullingCommandResourceGroup->RemoveResource(perView.meshletCullingResetIndirectCommandBuffer->GetResource().get());
     }
 
     m_viewIDToBuffers.erase(it);
@@ -163,7 +154,7 @@ void IndirectCommandBufferManager::UpdateBuffersForTechnique(TechniqueDescriptor
             auto res = CreateIndexedStructuredBuffer(curr, sizeof(DispatchMeshIndirectCommand), true, true);
             res->SetName("IndirectCommandBuffer(flags=" + GetDebugNameForTechnique(technique) +
                 ", view=" + std::to_string(viewID) + ")");
-            res->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Indirect command buffers" }));
+            rg::memory::SetResourceUsageHint(*res, "Indirect command buffers");
             it->second.buffer->SetResource(res);
             it->second.count = numDraws;
         }
@@ -173,7 +164,7 @@ void IndirectCommandBufferManager::UpdateBuffersForTechnique(TechniqueDescriptor
 			std::string techniqueName = GetDebugNameForTechnique(technique);
             res->SetName("IndirectCommandBuffer(flags=" + techniqueName +
                 ", view=" + std::to_string(viewID) + ")");
-			res->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Indirect command buffers" }));
+            rg::memory::SetResourceUsageHint(*res, "Indirect command buffers");
             auto dyn = std::make_shared<DynamicGloballyIndexedResource>(res);
             perView.buffersByFlags.emplace(technique.compileFlags, dyn);
             m_indirectCommandsResourceGroup->AddResource(dyn);
@@ -331,9 +322,8 @@ void IndirectCommandBufferManager::RecreateMeshletBuffersForAllViews() {
         auto makeMeshlet = [&](const char* label) {
             auto r = CreateIndexedStructuredBuffer(m_totalIndirectCommands, sizeof(DispatchIndirectCommand), true, true);
             r->SetName(std::string(label) + " (view=" + std::to_string(viewID) + ")");
-            r->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Indirect command buffers" }));
+            rg::memory::SetResourceUsageHint(*r, "Indirect command buffers");
             auto dyn = std::make_shared<DynamicGloballyIndexedResource>(r);
-            m_meshletCullingCommandResourceGroup->AddResource(dyn);
             return dyn;
             };
 
@@ -354,7 +344,7 @@ void IndirectCommandBufferManager::EnsurePerViewFlagsBuffers(uint64_t viewID) {
         auto res = CreateIndexedStructuredBuffer(cap, sizeof(DispatchMeshIndirectCommand), true, true);
         res->SetName("IndirectCommandBuffer(flags=" + std::to_string(static_cast<uint64_t>(technique.compileFlags)) +
             ", view=" + std::to_string(viewID) + ")");
-        res->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Indirect command buffers" }));
+        rg::memory::SetResourceUsageHint(*res, "Indirect command buffers");
 
         auto dyn = std::make_shared<DynamicGloballyIndexedResource>(res);
         perView.buffersByFlags.emplace(technique.compileFlags, dyn);

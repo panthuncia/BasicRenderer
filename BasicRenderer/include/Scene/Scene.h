@@ -11,6 +11,7 @@
 #include "Managers/LightManager.h"
 #include "Import/MeshData.h"
 #include "Managers/ManagerInterface.h"
+#include "Managers/Singletons/SettingsManager.h"
 
 class DynamicGloballyIndexedResource;
 

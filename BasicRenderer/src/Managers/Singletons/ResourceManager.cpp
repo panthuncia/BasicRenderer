@@ -1,48 +1,16 @@
 #include "Managers/Singletons/ResourceManager.h"
 
 #include <rhi_helpers.h>
+#include <OpenRenderGraph/OpenRenderGraph.h>
 
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "Managers/Singletons/UploadManager.h"
+#include "Render/Runtime/UploadServiceAccess.h"
+
 void ResourceManager::Initialize() {
 
 	auto device = DeviceManager::GetInstance().GetDevice();
-	m_cbvSrvUavHeap = std::make_shared<DescriptorHeap>(
-        device, 
-        rhi::DescriptorHeapType::CbvSrvUav, 
-        1000000 /*D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1*/, 
-        true,
-        "cbvSrvUavHeap");
-
-	m_samplerHeap = std::make_shared<DescriptorHeap>(
-        device, 
-        rhi::DescriptorHeapType::Sampler, 
-        2048, 
-        true,
-        "samplerHeap");
-
-	m_rtvHeap = std::make_shared<DescriptorHeap>(
-        device, 
-        rhi::DescriptorHeapType::RTV, 
-        10000, 
-        false,
-        "rtvHeap");
-
-	m_dsvHeap = std::make_shared<DescriptorHeap>(
-        device, 
-        rhi::DescriptorHeapType::DSV,
-        10000, 
-        false,
-        "dsvHeap");
-
-	m_nonShaderVisibleHeap = std::make_shared<DescriptorHeap>(
-        device, 
-        rhi::DescriptorHeapType::CbvSrvUav, 
-        100000, 
-        false,
-        "nonShaderVisibleHeap");
 
 	m_perFrameBuffer = CreateIndexedConstantBuffer(sizeof(PerFrameCB), "PerFrameCB");
 
@@ -72,15 +40,6 @@ void ResourceManager::Initialize() {
 	m_uavCounterReset->Unmap(0, 0);
 }
 
-rhi::DescriptorHeap ResourceManager::GetSRVDescriptorHeap() {
-	return m_cbvSrvUavHeap->GetHeap();
-}
-
-rhi::DescriptorHeap ResourceManager::GetSamplerDescriptorHeap() {
-	return m_samplerHeap->GetHeap();
-}
-
-
 void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, DirectX::XMUINT2 screenRes, DirectX::XMUINT3 clusterSizes, unsigned int frameIndex) {
 	perFrameCBData.mainCameraIndex = cameraIndex;
 	perFrameCBData.numLights = numLights;
@@ -93,230 +52,10 @@ void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, Dir
 	perFrameCBData.clusterZSplitDepth = 6.0f;
 	perFrameCBData.frameIndex = frameIndex % 64; // Wrap around every 64 frames
 
-	BUFFER_UPLOAD(&perFrameCBData, sizeof(PerFrameCB), UploadManager::UploadTarget::FromShared(m_perFrameBuffer), 0);
+	BUFFER_UPLOAD(&perFrameCBData, sizeof(PerFrameCB), rg::runtime::UploadTarget::FromShared(m_perFrameBuffer), 0);
 }
-
-UINT ResourceManager::CreateIndexedSampler(const rhi::SamplerDesc& samplerDesc) {
-	auto device = DeviceManager::GetInstance().GetDevice();
-
-	UINT index = m_samplerHeap->AllocateDescriptor();
-
-	device.CreateSampler({ m_samplerHeap->GetHeap().GetHandle(), index}, samplerDesc);
-	return index;
-}
-
-void ResourceManager::AssignDescriptorSlots(
-    GloballyIndexedResource& target,
-    rhi::Resource& apiResource,
-    const ViewRequirements& req)
-{
-    auto device = DeviceManager::GetInstance().GetDevice();
-
-    if (!m_cbvSrvUavHeap || !m_samplerHeap || !m_rtvHeap || !m_dsvHeap || !m_nonShaderVisibleHeap) {
-        spdlog::error("ResourceManager::AssignDescriptorSlots called before ResourceManager::Initialize");
-        throw std::runtime_error("ResourceManager::AssignDescriptorSlots called before ResourceManager::Initialize");
-    }
-
-    // Texture path
-    if (const auto* tex = std::get_if<ViewRequirements::TextureViews>(&req.views))
-    {
-        const auto& cbvSrvUavHeap = m_cbvSrvUavHeap;
-        const auto& nonShaderVisibleHeap = m_nonShaderVisibleHeap;
-        const auto& rtvHeap = m_rtvHeap;
-        const auto& dsvHeap = m_dsvHeap;
-
-        // SRV
-        if (tex->createSRV)
-        {
-            auto srvInfos = CreateShaderResourceViewsPerMip(
-                device,
-                apiResource,
-                tex->srvFormat == rhi::Format::Unknown ? tex->baseFormat : tex->srvFormat,
-                cbvSrvUavHeap.get(),
-                tex->mipLevels,
-                tex->isCubemap,
-                tex->isArray,
-                tex->arraySize);
-
-            SRVViewType srvViewType = SRVViewType::Invalid;
-            if (tex->isArray) {
-                srvViewType = tex->isCubemap ? SRVViewType::TextureCubeArray : SRVViewType::Texture2DArray;
-            }
-            else if (tex->isCubemap) {
-                srvViewType = SRVViewType::TextureCube;
-            }
-            else {
-                srvViewType = SRVViewType::Texture2D;
-            }
-
-            target.SetDefaultSRVViewType(srvViewType);
-            target.SetSRVView(srvViewType, cbvSrvUavHeap, srvInfos);
-
-            // View cubemap as Texture2DArray
-            if (tex->createCubemapAsArraySRV && tex->isCubemap)
-            {
-                auto secondarySrvInfos = CreateShaderResourceViewsPerMip(
-                    device,
-                    apiResource,
-                    tex->srvFormat == rhi::Format::Unknown ? tex->baseFormat : tex->srvFormat,
-                    cbvSrvUavHeap.get(),
-                    tex->mipLevels,
-                    /*isCubemap*/ false,
-                    /*isArray*/   tex->isArray,
-                    /*arraySize*/ 6u);
-
-                target.SetSRVView(SRVViewType::Texture2DArray, cbvSrvUavHeap, secondarySrvInfos);
-            }
-        }
-
-        // UAV (shader visible)
-        if (tex->createUAV)
-        {
-            auto uavInfos = CreateUnorderedAccessViewsPerMip(
-                device,
-                apiResource,
-                tex->uavFormat == rhi::Format::Unknown && !rhi::helpers::IsSRGB(tex->baseFormat) ? tex->baseFormat : tex->uavFormat,
-                cbvSrvUavHeap.get(),
-                tex->mipLevels,
-                tex->isArray,
-                tex->totalArraySlices,
-                tex->uavFirstMip,
-                tex->isCubemap);
-
-            target.SetUAVGPUDescriptors(cbvSrvUavHeap, uavInfos);
-        }
-
-        // UAV (non-shader visible)
-        if (tex->createNonShaderVisibleUAV)
-        {
-            auto nonShaderUavInfos = CreateNonShaderVisibleUnorderedAccessViewsPerMip(
-                device,
-                apiResource,
-                tex->uavFormat == rhi::Format::Unknown ? tex->baseFormat : tex->uavFormat,
-                nonShaderVisibleHeap.get(),
-                tex->mipLevels,
-                tex->isArray,
-                tex->arraySize,
-                tex->uavFirstMip);
-
-            target.SetUAVCPUDescriptors(nonShaderVisibleHeap, nonShaderUavInfos);
-        }
-
-        // RTV
-        if (tex->createRTV)
-        {
-            auto rtvInfos = CreateRenderTargetViews(
-                device,
-                apiResource,
-                tex->rtvFormat == rhi::Format::Unknown ? tex->baseFormat : tex->rtvFormat,
-                rtvHeap.get(),
-                tex->isCubemap,
-                tex->isArray,
-                tex->arraySize,
-                tex->mipLevels);
-
-            target.SetRTVDescriptors(rtvHeap, rtvInfos);
-        }
-
-        // DSV
-        if (tex->createDSV)
-        {
-            auto dsvInfos = CreateDepthStencilViews(
-                device,
-                apiResource,
-                dsvHeap.get(),
-                tex->dsvFormat == rhi::Format::Unknown ? tex->baseFormat : tex->dsvFormat,
-                tex->isCubemap,
-                tex->isArray,
-                tex->arraySize,
-                tex->mipLevels);
-
-            target.SetDSVDescriptors(dsvHeap, dsvInfos);
-        }
-
-        return;
-    }
-
-    // Buffer path
-    if (const auto* buf = std::get_if<ViewRequirements::BufferViews>(&req.views))
-    {
-        // CBV
-        if (buf->createCBV)
-        {
-            const uint32_t index = m_cbvSrvUavHeap->AllocateDescriptor();
-            ShaderVisibleIndexInfo cbvInfo{};
-            cbvInfo.slot.index = index;
-            cbvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
-
-            target.SetCBVDescriptor(m_cbvSrvUavHeap, cbvInfo);
-            device.CreateConstantBufferView(
-                { m_cbvSrvUavHeap->GetHeap().GetHandle(), index },
-                apiResource.GetHandle(),
-                buf->cbvDesc);
-        }
-
-        // SRV
-        if (buf->createSRV)
-        {
-            const uint32_t index = m_cbvSrvUavHeap->AllocateDescriptor();
-            ShaderVisibleIndexInfo srvInfo{};
-            srvInfo.slot.index = index;
-            srvInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
-
-            device.CreateShaderResourceView(
-                { m_cbvSrvUavHeap->GetHeap().GetHandle(), index },
-                apiResource.GetHandle(),
-                buf->srvDesc);
-
-            target.SetSRVView(SRVViewType::Buffer, m_cbvSrvUavHeap, { { srvInfo } });
-        }
-
-        // UAV (shader visible)
-        if (buf->createUAV)
-        {
-            const uint32_t index = m_cbvSrvUavHeap->AllocateDescriptor();
-            ShaderVisibleIndexInfo uavInfo{};
-            uavInfo.slot.index = index;
-            uavInfo.slot.heap = m_cbvSrvUavHeap->GetHeap().GetHandle();
-
-            device.CreateUnorderedAccessView(
-                { m_cbvSrvUavHeap->GetHeap().GetHandle(), index },
-                apiResource.GetHandle(),
-                buf->uavDesc);
-
-            target.SetUAVGPUDescriptors(m_cbvSrvUavHeap, { { uavInfo } }, buf->uavCounterOffset);
-        }
-
-        // UAV (non-shader visible)
-        if (buf->createNonShaderVisibleUAV)
-        {
-            const uint32_t index = m_nonShaderVisibleHeap->AllocateDescriptor();
-            NonShaderVisibleIndexInfo uavInfo{};
-            uavInfo.slot.index = index;
-            uavInfo.slot.heap = m_nonShaderVisibleHeap->GetHeap().GetHandle();
-
-            device.CreateUnorderedAccessView(
-                { m_nonShaderVisibleHeap->GetHeap().GetHandle(), index },
-                apiResource.GetHandle(),
-                buf->uavDesc);
-
-            target.SetUAVCPUDescriptors(m_nonShaderVisibleHeap, { { uavInfo } });
-        }
-
-        return;
-    }
-
-    spdlog::error("ResourceManager::AssignDescriptorSlots: invalid ViewRequirements variant");
-    throw std::runtime_error("ResourceManager::AssignDescriptorSlots: invalid ViewRequirements");
-}
-
 void ResourceManager::Cleanup()
 {
 	m_perFrameBuffer.reset();
-	m_cbvSrvUavHeap.reset();
-	m_samplerHeap.reset();
-	m_rtvHeap.reset();
-	m_dsvHeap.reset();
-	m_nonShaderVisibleHeap.reset();
 	m_uavCounterReset.Reset();
 }

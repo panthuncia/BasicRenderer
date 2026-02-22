@@ -1,5 +1,6 @@
 #pragma once
 #include <DirectXMath.h>
+#include "ThirdParty/meshoptimizer/clusterlod.h"
 
 struct ClippingPlane {
 	DirectX::XMFLOAT4 plane;
@@ -33,6 +34,14 @@ struct CameraInfo {
     unsigned int isOrtho = 0; // bool
 	DirectX::XMFLOAT2 uvScaleToNextPowerOfTwo = { 1.0f, 1.0f }; // Scale to next power of two, for linear depth buffer
     unsigned int pad[1];
+};
+
+struct CullingCameraInfo {
+    DirectX::XMFLOAT4 positionWorldSpace;
+    float projY = 0.0f;
+	float zNear = 0.0f;
+	float errorPixels = 0.0f; // Target error in pixels for LOD calculations
+	float pad[1];
 };
 
 struct PerFrameCB {
@@ -86,16 +95,17 @@ struct PerMeshCB {
 	unsigned int vertexByteSize;
     unsigned int skinningVertexByteSize;
 
-	unsigned int vertexBufferOffset;
-    unsigned int meshletBufferOffset;
-    unsigned int meshletVerticesBufferOffset;
-    unsigned int meshletTrianglesBufferOffset;
-
 	BoundingSphere boundingSphere;
 
-	unsigned int numVertices;
+    unsigned int clodMeshletBufferOffset;
+    unsigned int clodMeshletVerticesBufferOffset;
+    unsigned int clodMeshletTrianglesBufferOffset;
+    unsigned int clodNumMeshlets;
+
+    unsigned int vertexBufferOffset;
+    unsigned int numVertices;
     unsigned int numMeshlets;
-    unsigned int pad[2];
+    unsigned int pad[1];
 };
 
 struct PerMeshInstanceCB {
@@ -103,10 +113,6 @@ struct PerMeshInstanceCB {
     unsigned int perObjectBufferIndex;
     unsigned int skinningInstanceSlot;
     unsigned int postSkinningVertexBufferOffset;
-	unsigned int meshletBoundsBufferStartIndex;
-    unsigned int meshletBitfieldStartIndex;
-	unsigned int clusterToVisibleClusterTableStartIndex;
-	unsigned int pad[1];
 };
 
 struct PerMaterialCB {
@@ -153,7 +159,7 @@ struct PerMaterialCB {
     unsigned int roughnessChannel;
     
     DirectX::XMUINT3 emissiveChannels;
-	float pad0;
+	unsigned int rasterBuckedIndex;
 };
 
 struct LightInfo {
@@ -204,7 +210,7 @@ namespace XeGTAO {
         DirectX::XMUINT2 ViewportSize;
         DirectX::XMFLOAT2 ViewportPixelSize; // .zw == 1.0 / ViewportSize.xy
 
-        DirectX::XMFLOAT2 DepthUnpackConsts;
+        DirectX::XMFLOAT2 DepthUnpackConsts; // UNUSED if source depth is linear view depth.
         DirectX::XMFLOAT2 CameraTanHalfFOV;
 
         DirectX::XMFLOAT2 NDCToViewMul;
@@ -215,6 +221,7 @@ namespace XeGTAO {
         float EffectFalloffRange;
 
         float RadiusMultiplier;
+        DirectX::XMFLOAT2 SourceDepthUVScale; // Scale UVs when sampling source depth if texture is padded (e.g. to next power-of-two).
         float Padding0;
         float FinalValuePower;
         float DenoiseBlurBeta;
@@ -228,29 +235,6 @@ namespace XeGTAO {
 
 struct GTAOInfo {
     XeGTAO::GTAOConstants g_GTAOConstants;
-
-    uint g_samplerPointClampDescriptorIndex;
-    uint g_srcRawDepthDescriptorIndex; // source depth buffer data (in NDC space in DirectX)
-    uint g_outWorkingDepthMIP0DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
-    uint g_outWorkingDepthMIP1DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
-    
-    uint g_outWorkingDepthMIP2DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
-    uint g_outWorkingDepthMIP3DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
-    uint g_outWorkingDepthMIP4DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
-    // input output textures for the second pass (XeGTAO_MainPass)
-    uint g_srcWorkingDepthDescriptorIndex; // viewspace depth with MIPs, output by XeGTAO_PrefilterDepths16x16 and consumed by XeGTAO_MainPass
-    
-    uint g_srcNormalmapDescriptorIndex; // source normal map
-    uint g_srcHilbertLUTDescriptorIndex; // hilbert lookup table  (if any) (unused)
-    uint g_outWorkingAOTermDescriptorIndex; // output AO term (includes bent normals if enabled - packed as R11G11B10 scaled by AO)// // Moved to root constant
-    uint g_outWorkingEdgesDescriptorIndex; // output depth-based edges used by the denoiser
-    
-    uint g_outNormalmapDescriptorIndex; // output viewspace normals if generating from depth (unused)
-    // input output textures for the third pass (XeGTAO_Denoise)
-    //uint g_srcWorkingAOTermDescriptorIndex; // coming from previous pass // Moved to root constant
-    uint g_srcWorkingEdgesDescriptorIndex; // coming from previous pass
-    uint g_outFinalAOTermDescriptorIndex; // final AO term - just 'visibility' or 'visibility + bent normals'
-    uint pad[1];
 };
 
 struct EnvironmentInfo {
@@ -286,18 +270,59 @@ struct SkinningInstanceGPUInfo {
     uint32_t _pad = 0;
 };
 
+struct MeshInstanceClodOffsets
+{
+    uint groupsBase;
+    uint childrenBase;
+    uint childLocalMeshletIndicesBase;
+    uint meshletsBase;
+
+    uint meshletBoundsBase;
+    uint lodNodesBase;
+    uint rootNode; // node index (relative to lodNodesBase) to start traversal from
+};
+
+// Cluster LOD data
+// One entry per (group -> refinedGroup) edge.
+// refinedGroup == -1 means "terminal meshlets" (original geometry)
+struct ClusterLODChild
+{
+    int32_t  refinedGroup;              // group id to refine into, or -1
+    uint32_t firstLocalMeshletIndex;     // group-local start meshlet index for this child bucket
+    uint32_t localMeshletCount;          // number of local meshlets in this contiguous child range
+    uint32_t pad = 0;
+};
+
+struct ClusterLODGroup
+{
+    clodBounds bounds; // 5 floats
+	float pad0[3]; // pad to 32 bytes
+    uint32_t firstMeshlet = 0;
+    uint32_t meshletCount = 0;
+    int32_t depth = 0;
+
+    uint32_t firstChild = 0;    // offset into m_clodChildren
+    uint32_t childCount = 0;    // number of ClusterLODChild entries for this group
+    uint32_t terminalChildCount = 0;
+    uint32_t pad = 0;
+};
+
+struct VisibleCluster {
+    unsigned int viewID;
+    unsigned int instanceID;
+    unsigned int meshletID;
+};
+
 
 enum RootSignatureLayout {
     PerObjectRootSignatureIndex,
     PerMeshRootSignatureIndex,
 	ViewRootSignatureIndex,
 	SettingsRootSignatureIndex,
-	DrawInfoRootSignatureIndex,
-	TransparencyInfoRootSignatureIndex,
-	LightClusterRootSignatureIndex,
 	MiscUintRootSignatureIndex,
 	MiscFloatRootSignatureIndex,
 	ResourceDescriptorIndicesRootSignatureIndex,
+	IndirectCommandSignatureRootSignatureIndex,
 	NumRootSignatureParameters
 };
 
@@ -325,21 +350,6 @@ enum SettingsRootConstants {
 	NumSettingsRootConstants
 };
 
-enum DrawInfoRootConstants {
-    MaxDrawIndex,
-	NumDrawInfoRootConstants
-};
-
-enum TransparencyInfoRootConstants {
-    PPLLNodePoolSize,
-	NumTransparencyInfoRootConstants
-};
-
-enum LightClusterRootConstants {
-    LightPagesPoolSize,
-	NumLightClusterRootConstants
-};
-
 enum MiscUintRootConstants { // Used for pass-specific one-off constants
     UintRootConstant0,
     UintRootConstant1,
@@ -365,7 +375,7 @@ enum MiscFloatRootConstants { // Used for pass-specific one-off constants
 	NumMiscFloatRootConstants
 };
 
-enum ResourceDescriptorIndicesRootConstants {
+enum ResourceDescriptorIndicesRootConstants { // Auto-assigned, do not set manually
     ResourceDescriptorIndex0,
     ResourceDescriptorIndex1,
 	ResourceDescriptorIndex2,
@@ -402,4 +412,14 @@ enum ResourceDescriptorIndicesRootConstants {
 	ResourceDescriptorIndex33,
 	ResourceDescriptorIndex34,
     NumResourceDescriptorIndicesRootConstants
+};
+
+// Used for root constants in indirect command signatures.
+// You can technically use these as regular root constants as well
+enum IndirectCommandSignatureRootConstants {
+    IndirectCommandSignatureRootConstant0,
+    IndirectCommandSignatureRootConstant1,
+    IndirectCommandSignatureRootConstant2,
+    IndirectCommandSignatureRootConstant3,
+    NumIndirectCommandSignatureRootConstants
 };

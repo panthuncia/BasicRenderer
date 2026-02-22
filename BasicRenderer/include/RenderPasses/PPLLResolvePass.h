@@ -3,6 +3,7 @@
 #include <functional>
 
 #include "RenderPasses/Base/RenderPass.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Scene/Scene.h"
@@ -32,10 +33,12 @@ public:
 		RegisterSRV(Builtin::CameraBuffer);
 	}
 
-	PassReturn Execute(RenderContext& context) override {
+	PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+	    auto& context = *renderContext;
 
 		auto& psoManager = PSOManager::GetInstance();
-		auto& commandList = context.commandList;
+		auto& commandList = executionContext.commandList;
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -97,8 +100,8 @@ private:
         auto& layout = PSOManager::GetInstance().GetRootSignature(); // rhi::PipelineLayoutPtr
         rhi::SubobjLayout soLayout{ layout.GetHandle() };
 
-        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()) };
-        rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()) };
+        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()), "FullscreenVSMain" };
+        rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()), "PPLLResolvePS" };
 
         rhi::RasterState rs{};
         rs.fill = rhi::FillMode::Solid;
@@ -135,6 +138,8 @@ private:
 
         rhi::SubobjSample soSmp{ rhi::SampleDesc{ 1, 0 } };
 
+        rhi::SubobjPrimitiveTopology soTopo{ rhi::PrimitiveTopology::TriangleStrip };
+
         const rhi::PipelineStreamItem items[] = {
             rhi::Make(soLayout),
             rhi::Make(soVS),
@@ -144,6 +149,7 @@ private:
             rhi::Make(soDepth),
             rhi::Make(soRTV),
             rhi::Make(soSmp),
+			rhi::Make(soTopo)
         };
 
         auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), m_pso);

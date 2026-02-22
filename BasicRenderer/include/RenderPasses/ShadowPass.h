@@ -66,8 +66,8 @@ public:
             Builtin::Light::InfoBuffer,
             Builtin::Light::PointLightCubemapBuffer,
             Builtin::Light::DirectionalLightCascadeBuffer,
-            Builtin::Light::SpotLightMatrixBuffer,
-            Builtin::MeshletCullingBitfieldGroup)
+            Builtin::Light::SpotLightMatrixBuffer)
+            //Builtin::MeshletCullingBitfieldGroup)
             .WithRenderTarget(Subresources(Builtin::Shadows::LinearShadowMaps, Mip{ 0, 1 }))
             .WithDepthReadWrite(Builtin::Shadows::ShadowMaps)
             .IsGeometryPass();
@@ -108,13 +108,13 @@ public:
         }
     }
 
-    PassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
 
-        auto& commandList = context.commandList;
+        auto& commandList = executionContext.commandList;
 
         SetupCommonState(context, commandList);
-        SetCommonRootConstants(context, commandList);
-
 
         if (m_meshShaders) {
             if (m_indirect) {
@@ -138,7 +138,7 @@ public:
 
 private:
     // Common setup code that doesn't change between techniques
-    void SetupCommonState(RenderContext& context, rhi::CommandList& commandList) {
+    void SetupCommonState(const RenderContext& context, rhi::CommandList& commandList) {
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -155,11 +155,7 @@ private:
 		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
     }
 
-    void SetCommonRootConstants(RenderContext& context, rhi::CommandList& commandList) {
-
-    }
-
-    void ExecuteRegular(RenderContext& context, rhi::CommandList& commandList) {
+    void ExecuteRegular(const RenderContext& context, rhi::CommandList& commandList) {
         auto& psoManager = PSOManager::GetInstance();
         auto drawObjects = [&]() {
 
@@ -282,7 +278,7 @@ private:
             });
     }
 
-    void ExecuteMeshShader(RenderContext& context, rhi::CommandList& commandList) {
+    void ExecuteMeshShader(const RenderContext& context, rhi::CommandList& commandList) {
         auto& psoManager = PSOManager::GetInstance();
         auto drawObjects = [&]() {
             // Opaque objects
@@ -334,8 +330,8 @@ private:
 				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, 0, 2, lightInfo);
 
                 unsigned int misc[NumMiscUintRootConstants] = {};
-                misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = context.viewManager->Get(lightViewInfo.viewIDs[0])->gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
+                //misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = context.viewManager->Get(lightViewInfo.viewIDs[0])->gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
                 drawObjects();
                 break;
@@ -367,8 +363,8 @@ private:
 					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, LightViewIndex, 1, &lightViewIndex);
 
                     unsigned int misc[NumMiscUintRootConstants] = {};
-                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = context.viewManager->Get(lightViewInfo.viewIDs[i])->gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
-					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
+                    //misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = context.viewManager->Get(lightViewInfo.viewIDs[i])->gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
                     lightViewIndex += 1;
                     drawObjects();
@@ -402,8 +398,8 @@ private:
 					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, ViewRootSignatureIndex, LightViewIndex, 1, &lightViewIndex);
 
                     unsigned int misc[NumMiscUintRootConstants] = {};
-                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = context.viewManager->Get(lightViewInfo.viewIDs[i])->gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
-					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
+                    //misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = context.viewManager->Get(lightViewInfo.viewIDs[i])->gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
                     lightViewIndex += 1;
                     drawObjects();
@@ -414,7 +410,7 @@ private:
             });
     }
 
-    void ExecuteMeshShaderIndirect(RenderContext& context, rhi::CommandList& commandList) {
+    void ExecuteMeshShaderIndirect(const RenderContext& context, rhi::CommandList& commandList) {
         auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
         auto& psoManager = PSOManager::GetInstance();
 
@@ -458,8 +454,8 @@ private:
                 auto workloads = context.indirectCommandBufferManager->GetBuffersForRenderPhase(views[0], Engine::Primary::ShadowMapsPass);
 
                 unsigned int misc[NumMiscUintRootConstants] = {};
-                misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = context.viewManager->Get(lightViewInfo.viewIDs[0])->gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
+                //misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = context.viewManager->Get(lightViewInfo.viewIDs[0])->gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
+				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
 				for (auto& workload : workloads) {
                     drawObjects(workload.second.buffer->GetAPIResource().GetHandle(), workload.first, workload.second.count, workload.second.buffer->GetResource()->GetUAVCounterOffset());
@@ -496,8 +492,8 @@ private:
                     auto& views = lightViewInfo.viewIDs;
 
                     unsigned int misc[NumMiscUintRootConstants] = {};
-                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = context.viewManager->Get(views[i])->gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
-					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
+                    //misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = context.viewManager->Get(views[i])->gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
                     for (auto& workload : context.indirectCommandBufferManager->GetBuffersForRenderPhase(views[i], Engine::Primary::ShadowMapsPass)) {
                         drawObjects(workload.second.buffer->GetAPIResource().GetHandle(), workload.first, workload.second.count, workload.second.buffer->GetResource()->GetUAVCounterOffset());
@@ -535,8 +531,8 @@ private:
                     auto& views = lightViewInfo.viewIDs;
 
                     unsigned int misc[NumMiscUintRootConstants] = {};
-                    misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = context.viewManager->Get(views[i])->gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
-					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
+                    //misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = context.viewManager->Get(views[i])->gpu.meshletBitfieldBuffer->GetResource()->GetSRVInfo(0).slot.index;
+					commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
                     for (auto& workload : context.indirectCommandBufferManager->GetBuffersForRenderPhase(views[i], Engine::Primary::ShadowMapsPass)) {
                         drawObjects(workload.second.buffer->GetAPIResource().GetHandle(), workload.first, workload.second.count, workload.second.buffer->GetResource()->GetUAVCounterOffset());

@@ -33,7 +33,7 @@ inline TransparencyPick PickTransparency(const MaterialDescription& d) {
     return t;
 }
 
-inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) {
+inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) { // TODO: The alpha-test/double-sided logic is wrong here
     TechniqueDescriptor tech{};
     const auto transparency = PickTransparency(d);
 	tech.passes.insert(Engine::Primary::ShadowMapsPass); // All materials cast shadows
@@ -46,6 +46,8 @@ inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) {
         if (transparency.isTransparent) {
 			tech.compileFlags |= MaterialCompileFlags::MaterialCompileAlphaTest;
 			tech.compileFlags |= MaterialCompileFlags::MaterialCompileDoubleSided;
+			tech.rasterFlags |= MaterialRasterFlags::MaterialRasterFlagsAlphaTest;
+			tech.rasterFlags |= MaterialRasterFlags::MaterialRasterFlagsDoubleSided;
         }
 		tech.passes.insert(Engine::Primary::GBufferPass);
     }
@@ -67,6 +69,7 @@ inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) {
 	if (d.heightMap.texture) {
 		tech.compileFlags |= MaterialCompileFlags::MaterialCompileParallax;
 	}
+
     return tech;
 }
 
@@ -147,6 +150,7 @@ public:
     void SetTextureScale(float scale);
     void SetHeightmapScale(float scale);
     void SetCompileFlagsID(uint32_t id);
+    void SetRasterBucketIndex(uint32_t index);
     PSOFlags GetPSOFlags() const { return m_psoFlags; }
     MaterialFlags GetMaterialFlags() const { return static_cast<MaterialFlags>(m_materialData.materialFlags); }
     static std::shared_ptr<Material> GetDefaultMaterial();

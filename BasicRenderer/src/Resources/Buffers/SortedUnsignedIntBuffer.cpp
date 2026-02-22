@@ -2,8 +2,23 @@
 
 #include <algorithm>
 
-#include "Managers/Singletons/ResourceManager.h"
-#include "Managers/Singletons/UploadManager.h"
+#include "Resources/ExternalBackingResource.h"
+#include "Resources/GPUBacking/GpuBufferBacking.h"
+#include "Render/Runtime/UploadServiceAccess.h"
+#include "Managers/Singletons/DeviceManager.h"
+
+void SortedUnsignedIntBuffer::OnSetName() {
+    if (!m_dataBuffer) {
+        return;
+    }
+
+    if (name != "") {
+        m_dataBuffer->SetName((m_name + ": " + name).c_str());
+    }
+    else {
+        m_dataBuffer->SetName(m_name.c_str());
+    }
+}
 
 void SortedUnsignedIntBuffer::Insert(unsigned int element) {
     // Resize the buffer if necessary
@@ -29,7 +44,7 @@ void SortedUnsignedIntBuffer::Insert(unsigned int element) {
     // Upload the entire suffix so GPU content matches the CPU vector after the insertion shift
     const unsigned int* src = m_data.data() + index;
     const uint32_t count = static_cast<uint32_t>(m_data.size() - index);
-    BUFFER_UPLOAD(src, sizeof(unsigned int) * count, UploadManager::UploadTarget::FromShared(shared_from_this()), index * sizeof(unsigned int));
+    BUFFER_UPLOAD(src, sizeof(unsigned int) * count, rg::runtime::UploadTarget::FromShared(shared_from_this()), index * sizeof(unsigned int));
 }
 
 void SortedUnsignedIntBuffer::Remove(unsigned int element) {
@@ -51,14 +66,14 @@ void SortedUnsignedIntBuffer::Remove(unsigned int element) {
         if (!m_data.empty() && index < m_data.size()) {
             const unsigned int* src = m_data.data() + index;
             const uint32_t count = static_cast<uint32_t>(m_data.size() - index);
-            BUFFER_UPLOAD(src, sizeof(unsigned int) * count, UploadManager::UploadTarget::FromShared(shared_from_this()), index * sizeof(unsigned int));
+            BUFFER_UPLOAD(src, sizeof(unsigned int) * count, rg::runtime::UploadTarget::FromShared(shared_from_this()), index * sizeof(unsigned int));
         }
 
         // Zero out the last stale slot (not strictly required if readers clamp to Size())
         if (m_data.size() < m_capacity) {
             const unsigned int zero = 0u;
             const uint32_t lastSlot = static_cast<uint32_t>(m_data.size());
-            BUFFER_UPLOAD(&zero, sizeof(unsigned int), UploadManager::UploadTarget::FromShared(shared_from_this()), lastSlot * sizeof(unsigned int));
+            BUFFER_UPLOAD(&zero, sizeof(unsigned int), rg::runtime::UploadTarget::FromShared(shared_from_this()), lastSlot * sizeof(unsigned int));
         }
     }
 }
@@ -66,10 +81,11 @@ void SortedUnsignedIntBuffer::Remove(unsigned int element) {
 void SortedUnsignedIntBuffer::CreateBuffer(uint64_t capacity) {
     auto device = DeviceManager::GetInstance().GetDevice();
     m_capacity = capacity;
-    m_dataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, capacity * sizeof(unsigned int), GetGlobalResourceID(), m_UAV);
+    auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, capacity * sizeof(unsigned int), GetGlobalResourceID(), m_UAV);
+    SetBacking(std::move(newDataBuffer), capacity * sizeof(unsigned int));
     
     for (const auto& bundle : m_metadataBundles) {
-        m_dataBuffer->ApplyMetadataComponentBundle(bundle);
+		ApplyMetadataToBacking(bundle);
 	}
 
 	AssignDescriptorSlots();
@@ -79,8 +95,13 @@ void SortedUnsignedIntBuffer::GrowBuffer(uint64_t newSize) {
     auto device = DeviceManager::GetInstance().GetDevice();
     auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, newSize * sizeof(unsigned int), GetGlobalResourceID(), m_UAV);
 	// Copy existing data to new buffer and discard old buffer after copy
-    UploadManager::GetInstance().QueueCopyAndDiscard(shared_from_this(), std::move(m_dataBuffer), m_capacity * sizeof(unsigned int));
-    m_dataBuffer = std::move(newDataBuffer);
+    if (m_dataBuffer) {
+        auto oldBackingResource = ExternalBackingResource::CreateShared(std::move(m_dataBuffer));
+        if (auto* uploadService = rg::runtime::GetActiveUploadService()) {
+            uploadService->QueueResourceCopy(shared_from_this(), oldBackingResource, m_capacity * sizeof(unsigned int));
+        }
+    }
+    SetBacking(std::move(newDataBuffer), newSize * sizeof(unsigned int));
 
     m_capacity = newSize;
     AssignDescriptorSlots();
@@ -89,20 +110,17 @@ void SortedUnsignedIntBuffer::GrowBuffer(uint64_t newSize) {
 
 void SortedUnsignedIntBuffer::AssignDescriptorSlots()
 {
-    auto& rm = ResourceManager::GetInstance();
-
-    ResourceManager::ViewRequirements req{};
-    ResourceManager::ViewRequirements::BufferViews b{};
+    BufferBase::DescriptorRequirements requirements{};
 
     const uint32_t numElements = static_cast<uint32_t>(m_capacity);
 
-    b.createCBV = false;
-    b.createSRV = true;
-    b.createUAV = false;
-    b.createNonShaderVisibleUAV = false;
-    b.uavCounterOffset = 0;
+    requirements.createCBV = false;
+    requirements.createSRV = true;
+    requirements.createUAV = false;
+    requirements.createNonShaderVisibleUAV = false;
+    requirements.uavCounterOffset = 0;
 
-    b.srvDesc = rhi::SrvDesc{
+    requirements.srvDesc = rhi::SrvDesc{
         .dimension = rhi::SrvDim::Buffer,
         .formatOverride = rhi::Format::Unknown,
         .buffer = {
@@ -113,8 +131,5 @@ void SortedUnsignedIntBuffer::AssignDescriptorSlots()
         },
     };
 
-
-    req.views = b;
-    auto resource = m_dataBuffer->GetAPIResource();
-    rm.AssignDescriptorSlots(*this, resource, req);
+    SetDescriptorRequirements(requirements);
 }

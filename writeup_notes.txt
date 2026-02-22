@@ -1,0 +1,1 @@
+- Storing buffers in a struct was causing undefined behavior in mesh shaders

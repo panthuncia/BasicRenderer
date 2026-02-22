@@ -58,7 +58,9 @@ public:
 		m_meshShaders = inputs.meshShaders;
 		m_indirect = inputs.indirect;
 
-        builder->WithShaderResource(Builtin::CameraBuffer,
+        builder->WithShaderResource(
+            MESH_RESOURCE_IDFENTIFIERS,
+            Builtin::CameraBuffer,
             Builtin::Environment::PrefilteredCubemapsGroup,
             Builtin::Light::ActiveLightIndices,
             Builtin::Light::InfoBuffer,
@@ -84,7 +86,7 @@ public:
             builder->WithShaderResource(Builtin::GTAO::OutputAOTerm);
         }
         if (m_meshShaders) {
-            builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::PrimaryCamera::MeshletBitfield);
+            //builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::PrimaryCamera::MeshletBitfield);
             if (m_indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
                 auto& ecsWorld = ECSManager::GetInstance().GetWorld();
                 auto forwardPassEntity = ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ForwardPass);
@@ -134,12 +136,14 @@ public:
         RegisterSRV(Builtin::Light::DirectionalLightCascadeBuffer);
         RegisterSRV(Builtin::Environment::InfoBuffer);
 
-        if (m_meshShaders)
-            m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
+        //if (m_meshShaders)
+            //m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
     }
 
-    PassReturn Execute(RenderContext& context) override {
-        auto& commandList = context.commandList;
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
+        auto& commandList = executionContext.commandList;
 
         SetupCommonState(context, commandList);
         SetCommonRootConstants(context, commandList);
@@ -167,7 +171,7 @@ public:
 
 private:
     // Common setup code that doesn't change between techniques
-    void SetupCommonState(RenderContext& context, rhi::CommandList& commandList) {
+    void SetupCommonState(const RenderContext& context, rhi::CommandList& commandList) {
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -195,18 +199,18 @@ private:
 		commandList.BindLayout(PSOManager::GetInstance().GetRootSignature().GetHandle());
     }
 
-    void SetCommonRootConstants(RenderContext& context, rhi::CommandList& commandList) {
+    void SetCommonRootConstants(const RenderContext& context, rhi::CommandList& commandList) {
         unsigned int settings[NumSettingsRootConstants] = { getShadowsEnabled(), getPunctualLightingEnabled(), m_gtaoEnabled };
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, SettingsRootSignatureIndex, 0, NumSettingsRootConstants, &settings);
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, SettingsRootSignatureIndex, 0, NumSettingsRootConstants, settings);
 
         if (m_meshShaders) {
             unsigned int misc[NumMiscUintRootConstants] = {};
-            misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
-			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
+            //misc[MESHLET_CULLING_BITFIELD_BUFFER_SRV_DESCRIPTOR_INDEX] = m_primaryCameraMeshletBitfield->GetResource()->GetSRVInfo(0).slot.index;
+			commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
         }
     }
 
-    void ExecuteRegular(RenderContext& context, rhi::CommandList& commandList) {
+    void ExecuteRegular(const RenderContext& context, rhi::CommandList& commandList) {
         // Regular forward rendering using DrawIndexedInstanced
         auto& psoManager = PSOManager::GetInstance();
 
@@ -232,7 +236,7 @@ private:
             });
     }
 
-    void ExecuteMeshShader(RenderContext& context, rhi::CommandList& commandList) {
+    void ExecuteMeshShader(const RenderContext& context, rhi::CommandList& commandList) {
         // Mesh shading path using DispatchMesh
         auto& psoManager = PSOManager::GetInstance();
 
@@ -258,7 +262,7 @@ private:
             });
     }
 
-    void ExecuteMeshShaderIndirect(RenderContext& context, rhi::CommandList& commandList) {
+    void ExecuteMeshShaderIndirect(const RenderContext& context, rhi::CommandList& commandList) {
         // Mesh shading with ExecuteIndirect
         auto& psoManager = PSOManager::GetInstance();
 

@@ -4,12 +4,12 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 
-class ClearVisibilityBufferPass : public ComputePass {
+class ClearVisibilityBufferPass : public RenderPass {
 public:
 	ClearVisibilityBufferPass() {
 	}
 
-	void DeclareResourceUsages(ComputePassBuilder* builder) override {
+	void DeclareResourceUsages(RenderPassBuilder* builder) override {
 		builder->WithUnorderedAccess(Builtin::PrimaryCamera::VisibilityTexture,
 			Builtin::GBuffer::Albedo,
 			Builtin::GBuffer::Emissive,
@@ -17,6 +17,7 @@ public:
 			Builtin::GBuffer::Normals,
 			Builtin::GBuffer::MotionVectors,
 			Builtin::Color::HDRColorTarget);
+		builder->WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture);
 	}
 
 	void Setup() override {
@@ -27,11 +28,14 @@ public:
 		m_normals = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::Normals);
 		m_motionVectors = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::MotionVectors);
 		m_HDRColorTarget = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::Color::HDRColorTarget);
+		m_depthTexture = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PrimaryCamera::DepthTexture);
 	}
 
-	PassReturn Execute(RenderContext& context) override {
+	PassReturn Execute(PassExecutionContext& executionContext) override {
+		auto* renderContext = executionContext.hostData->Get<RenderContext>();
+		auto& context = *renderContext;
 		auto& psoManager = PSOManager::GetInstance();
-		auto& commandList = context.commandList;
+		auto& commandList = executionContext.commandList;
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(),
 			context.samplerDescriptorHeap.GetHandle());
@@ -63,13 +67,25 @@ public:
 			}
 			};
 
+		auto clearDepth = [&](GloballyIndexedResource* resource) {
+			if (resource) {
+				commandList.ClearDepthStencilView(
+					resource->GetDSVInfo(0).slot,
+					true,
+					false,
+					1.0f,
+					0
+				);
+			}
+			};
+
 		clearResource(m_albedo);
 		clearResource(m_metallicRoughness);
 		clearResource(m_emissive);
 		clearResource(m_normals);
 		clearResource(m_motionVectors);
 		clearResource(m_HDRColorTarget); // TODO: Only needed because of non-zero initialized memory issue- make a clear manager instead?
-
+		clearDepth(m_depthTexture); // same
 		return {};
 	}
 
@@ -85,4 +101,5 @@ private:
 	GloballyIndexedResource* m_normals;
 	GloballyIndexedResource* m_motionVectors;
 	GloballyIndexedResource* m_HDRColorTarget;
+	GloballyIndexedResource* m_depthTexture;
 };

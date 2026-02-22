@@ -16,7 +16,20 @@ if (POLICY CMP0141)
   endif()
 endif()
 
+if (POLICY CMP0091)
+  cmake_policy(SET CMP0091 NEW)
+endif()
+
 project ("BasicRenderer")
+
+if (WIN32)
+  add_compile_definitions(NOMINMAX)
+endif()
+
+if (MSVC)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/EHsc>)
+endif()
 
 #set(CMAKE_VS_JUST_MY_CODE_DEBUGGING ON) # Skip external code in the debugger.
 
@@ -28,6 +41,7 @@ set(USD_DBG_ZIP  "${CMAKE_SOURCE_DIR}/ThirdParty/OpenUSD_dbg.zip")
 set(USD_REL_ZIP  "${CMAKE_SOURCE_DIR}/ThirdParty/OpenUSD_rel.zip")
 set(USD_DBG_DIR  "${CMAKE_SOURCE_DIR}/ThirdParty/usd_dbg")
 set(USD_REL_DIR  "${CMAKE_SOURCE_DIR}/ThirdParty/usd_rel")
+set(BASICRENDERER_USD_VARIANT "" CACHE STRING "USD package variant to use: dbg or rel. Leave empty for automatic selection.")
 
 # Download if the folder isn't already there
 if(NOT EXISTS "${USD_DBG_DIR}")
@@ -57,15 +71,26 @@ if(NOT EXISTS "${USD_REL_DIR}")
 endif()
 
 # Include sub-projects.
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/ThirdParty/usd_dbg")
-set(PXR_DIR "${CMAKE_SOURCE_DIR}/ThirdParty/usd_dbg/lib/cmake/pxr")
-else()
-list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/ThirdParty/usd_rel")
-set(PXR_DIR "${CMAKE_SOURCE_DIR}/ThirdParty/usd_rel/lib/cmake/pxr")
+if(NOT BASICRENDERER_USD_VARIANT)
+  if(CMAKE_CONFIGURATION_TYPES)
+    set(BASICRENDERER_USD_VARIANT "rel")
+  elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(BASICRENDERER_USD_VARIANT "dbg")
+  else()
+    set(BASICRENDERER_USD_VARIANT "rel")
+  endif()
 endif()
 
+if(NOT BASICRENDERER_USD_VARIANT STREQUAL "dbg" AND NOT BASICRENDERER_USD_VARIANT STREQUAL "rel")
+  message(FATAL_ERROR "BASICRENDERER_USD_VARIANT must be 'dbg' or 'rel'.")
+endif()
+
+set(_usd_selected_dir "${CMAKE_SOURCE_DIR}/ThirdParty/usd_${BASICRENDERER_USD_VARIANT}")
+list(APPEND CMAKE_PREFIX_PATH "${_usd_selected_dir}")
+set(PXR_DIR "${_usd_selected_dir}/lib/cmake/pxr")
+
+add_subdirectory("ThirdParty")
+add_subdirectory("BasicRHI")
+add_subdirectory("OpenRenderGraph")
 add_subdirectory ("BasicRenderer")
 add_subdirectory("UsdPlugins")
-add_subdirectory("BasicRHI")
-add_subdirectory("ThirdParty")

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RenderPasses/Base/RenderPass.h"
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Scene/Scene.h"
@@ -23,9 +24,11 @@ public:
         m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
     }
 
-    PassReturn Execute(RenderContext& context) override {
+    PassReturn Execute(PassExecutionContext& executionContext) override {
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
         auto& psoManager = PSOManager::GetInstance();
-        auto& commandList = context.commandList;
+        auto& commandList = executionContext.commandList;
 
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
@@ -46,14 +49,14 @@ public:
 		misc[BLOOM_SOURCE_SRV_DESCRIPTOR_INDEX] = m_pHDRTarget->GetSRVInfo(1).slot.index; // Bloom texture index
         misc[DST_WIDTH] = m_pHDRTarget->GetWidth();
         misc[DST_HEIGHT] = m_pHDRTarget->GetHeight();
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, &misc);
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
         float miscFloats[NumMiscFloatRootConstants] = {};
 
         miscFloats[FloatRootConstant0] = 0.001f; // Kernel size
         miscFloats[FloatRootConstant1] = misc[UintRootConstant2] / (float) misc[UintRootConstant3]; // Aspect ratio
 
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscFloatRootSignatureIndex, 0, NumMiscFloatRootConstants, &miscFloats);
+		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscFloatRootSignatureIndex, 0, NumMiscFloatRootConstants, miscFloats);
 
         commandList.Draw(3, 1, 0, 0); // Fullscreen triangle
         return {};
@@ -87,8 +90,8 @@ private:
 
         auto& layout = PSOManager::GetInstance().GetRootSignature(); // rhi::PipelineLayout&
         rhi::SubobjLayout soLayout{ layout.GetHandle() };
-        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()) };
-        rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()) };
+        rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()), "FullscreenVSNoViewRayMain" };
+        rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel,  rhi::DXIL(compiled.pixelShader.Get()), "blend" };
 
         rhi::RasterState rs{};
         rs.fill = rhi::FillMode::Solid;
@@ -102,17 +105,13 @@ private:
         bs.numAttachments = 0;
         rhi::SubobjBlend soBlend{ bs };
 
-        rhi::DepthStencilState ds{};
-        ds.depthEnable = false;
-        ds.depthWrite = false;
-        rhi::SubobjDepth soDepth{ ds };
-
         rhi::RenderTargets rts{};
         rts.count = 0;
         rhi::SubobjRTVs soRTVs{ rts };
 
-        rhi::SubobjDSV soDSV{ rhi::Format::Unknown }; // no DSV
         rhi::SubobjSample soSample{ rhi::SampleDesc{1, 0} };
+
+        rhi::SubobjPrimitiveTopology soTopo{ rhi::PrimitiveTopology::TriangleStrip };
 
         const rhi::PipelineStreamItem items[] = {
             rhi::Make(soLayout),
@@ -120,10 +119,9 @@ private:
             rhi::Make(soPS),
             rhi::Make(soRaster),
             rhi::Make(soBlend),
-            rhi::Make(soDepth),
             rhi::Make(soRTVs),
-            rhi::Make(soDSV),
             rhi::Make(soSample),
+			rhi::Make(soTopo)
         };
 
         // 3) Create PSO

@@ -5,12 +5,9 @@
 #include <vector>
 #include <string_view>
 
-#include "Resources/TextureDescription.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
-#include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
-#include "Render/PassBuilders.h"
-#include "Interfaces/IDynamicDeclaredResources.h"
+#include "OpenRenderGraph/OpenRenderGraph.h"
 
 class PixelBuffer;
 class Sampler;
@@ -64,13 +61,14 @@ private:
 
         void DeclareResourceUsages(ComputePassBuilder* builder) override;
 
-        void Update(const UpdateContext& context) override {}
+        void Update(const UpdateExecutionContext& context) override {}
 
-        PassReturn Execute(RenderContext& context) override;
+        PassReturn Execute(PassExecutionContext& context) override;
 
-        void Cleanup() override {}
+        void Cleanup() override {
+        }
 
-        bool DeclaredResourcesChanged() override {
+        bool DeclaredResourcesChanged() const override {
             return m_declaredResourcesChanged;
         }
 
@@ -111,9 +109,6 @@ private:
 
         std::vector<Job> m_pending;
 
-        // simple ring retire (adapt count to your frames-in-flight)
-        static constexpr uint32_t kFramesInFlight = 3;
-
         std::shared_ptr<LazyDynamicStructuredBuffer<MipmapSpdConstants>> m_pMipConstants;
 
         PipelineState m_psoVec2D;
@@ -127,28 +122,28 @@ private:
             auto& layout = psoManager.GetRootSignature();
 
             m_psoVec2D = psoManager.MakeComputePipeline(
-                layout,
+                layout.GetHandle(),
                 L"shaders/Utilities/mipmapping.hlsl",
                 L"MipmapCSMain",
                 { }, // no defines
                 "MipmapSPD[Vec2D]");
 
             m_psoVecArray = psoManager.MakeComputePipeline(
-                layout,
+                layout.GetHandle(),
                 L"shaders/Utilities/mipmapping.hlsl",
                 L"MipmapCSMain",
                 { DxcDefine{ L"MIPMAP_ARRAY", L"1" } },
                 "MipmapSPD[VecArray]");
 
             m_psoScalar2D = psoManager.MakeComputePipeline(
-                layout,
+                layout.GetHandle(),
                 L"shaders/Utilities/mipmapping.hlsl",
                 L"MipmapCSMain",
                 { DxcDefine{ L"MIPMAP_SCALAR", L"1" } },
                 "MipmapSPD[Scalar2D]");
 
             m_psoScalarArray = psoManager.MakeComputePipeline(
-                layout,
+                layout.GetHandle(),
                 L"shaders/Utilities/mipmapping.hlsl",
                 L"MipmapCSMain",
                 { DxcDefine{ L"MIPMAP_SCALAR", L"1" }, DxcDefine{ L"MIPMAP_ARRAY", L"1" } },

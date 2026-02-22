@@ -8,13 +8,11 @@
 #include <functional>
 #include <flecs.h>
 
-#include "Interfaces/IResourceProvider.h"
-#include "Resources/ResourceIdentifier.h"
+#include "OpenRenderGraph/OpenRenderGraph.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Scene/Components.h"
 #include "ShaderBuffers.h"
 #include "Managers/IndirectCommandBufferManager.h"
-#include "Interfaces/IResourceResolver.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 
 class IndirectCommandBufferManager;
@@ -52,21 +50,14 @@ struct ViewCreationParams {
 
 struct ViewResources {
     std::shared_ptr<BufferView> cameraBufferView;
+	std::shared_ptr<BufferView> cullingCameraBufferView;
     uint32_t cameraBufferIndex = 0;
 
     Components::IndirectCommandBuffers indirectCommandBuffers;
 
-    std::shared_ptr<DynamicGloballyIndexedResource> meshletBitfieldBuffer;
-    std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceMeshletCullingBitfieldBuffer;
-    std::shared_ptr<DynamicGloballyIndexedResource> meshInstanceOcclusionCullingBitfieldBuffer;
-
-    std::shared_ptr<PixelBuffer> depthMap;
-    std::shared_ptr<PixelBuffer> linearDepthMap;
-
-    // Cached descriptor indices (filled after descriptor registration, optional)
-    uint32_t meshletBitfieldSRVIndex = 0;
-    uint32_t meshInstanceMeshletCullingBitfieldSRVIndex = 0;
-    uint32_t meshInstanceOcclusionCullingBitfieldSRVIndex = 0;
+	std::shared_ptr<PixelBuffer> depthMap = nullptr;
+    std::shared_ptr<PixelBuffer> linearDepthMap = nullptr;
+    std::shared_ptr<PixelBuffer> visibilityBuffer = nullptr;
 };
 
 struct View {
@@ -89,6 +80,18 @@ struct ViewFilter {
     bool requireLightType = false;
     Components::LightType lightType;
 
+    static ViewFilter PrimaryCameras() {
+        ViewFilter filter;
+        filter.requirePrimary = true;
+        return filter;
+	}
+
+    static ViewFilter Shadows() {
+        ViewFilter filter;
+        filter.requireShadow = true;
+        return filter;
+	}
+
     bool Match(const View& v) const {
         if (requirePrimary && !v.flags.primaryCamera) return false;
         if (requireShadow && !v.flags.shadow) return false;
@@ -104,6 +107,7 @@ struct ViewEvents {
     std::function<void(uint64_t)>    onDestroyed;
     std::function<void(const View&)> onCameraUpdated;
     std::function<void(const View&)> onDepthAttached;
+	std::function<void(const View&)> onVisibilityBufferAttached;
 };
 
 class ViewManager : public IResourceProvider {
@@ -131,12 +135,12 @@ public:
         std::shared_ptr<PixelBuffer> depth,
         std::shared_ptr<PixelBuffer> linearDepth);
 
+	void AttachVisibilityBuffer(uint64_t viewID, std::shared_ptr<PixelBuffer> visibilityBuffer);
+
     // Update camera matrices/params
     void UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo);
 
-    // Resize resources when global counts change
-    void ResizeMeshletBitfields(uint64_t numMeshlets);
-    void ResizeInstanceBitfields(uint32_t numInstances);
+	uint32_t GetCameraBufferSize() const { return static_cast<uint32_t>(m_cameraBuffer->Size()); }
 
     // Access
     View* Get(uint64_t viewID);
@@ -146,14 +150,14 @@ public:
     template<class F>
     void ForEachView(F&& f) {
         for (auto& [_, v] : m_views)
-            std::forward<F>(f)(v);
+            std::forward<F>(f)(v.id);
     }
 
     template<class F>
     void ForEachFiltered(const ViewFilter& filter, F&& f) {
         for (auto& [_, v] : m_views)
             if (filter.Match(v))
-                std::forward<F>(f)(v);
+                std::forward<F>(f)(v.id);
     }
 
     // Indirect workloads + full view data
@@ -182,29 +186,16 @@ public:
 private:
     ViewManager();
 
-    // Helpers
-    void AllocateBitfields(View& v);
-    void ReplaceBitfield(std::shared_ptr<DynamicGloballyIndexedResource>& holder,
-        uint64_t newElementCountBits,
-        const wchar_t* labelFormat,
-        uint64_t viewID);
-
     std::unordered_map<uint64_t, View> m_views;
     std::atomic<uint64_t> m_nextViewID{ 1 };
 
 
     // Core buffers/groups
     std::shared_ptr<LazyDynamicStructuredBuffer<CameraInfo>> m_cameraBuffer;
-    std::shared_ptr<ResourceGroup> m_meshletBitfieldGroup;
-    std::shared_ptr<ResourceGroup> m_meshInstanceMeshletCullingBitfieldGroup;
-    std::shared_ptr<ResourceGroup> m_meshInstanceOcclusionCullingBitfieldGroup;
+	std::shared_ptr<LazyDynamicStructuredBuffer<CullingCameraInfo>> m_cullingCameraBuffer;
 
     std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
     std::unordered_map<ResourceIdentifier, std::shared_ptr<IResourceResolver>, ResourceIdentifier::Hasher> m_resolvers;
-
-    // Global sizing
-    uint64_t m_currentMeshletBitfieldSizeBits = 1;
-    uint32_t m_currentMeshInstanceBitfieldSizeBits = 1;
 
     IndirectCommandBufferManager* m_indirectManager = nullptr;
 

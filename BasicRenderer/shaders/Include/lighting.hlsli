@@ -223,9 +223,20 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
         // Loop through all pages of lights in the cluster
         uint pageIndex = activeCluster.ptrFirstPage;
 
-        while (pageIndex != LIGHT_PAGE_ADDRESS_NULL) {
-            for (uint i = 0; i < lightPagesBuffer[pageIndex].numLightsInPage; i++) {
-                unsigned int index = activeLightIndices[lightPagesBuffer[pageIndex].lightIndices[i]];
+        uint remainingLights = clusterLightCount;
+        uint maxPagesToVisit = max(1u, (clusterLightCount + LIGHTS_PER_PAGE - 1u) / LIGHTS_PER_PAGE);
+        uint pagesVisited = 0;
+
+        while (pageIndex != LIGHT_PAGE_ADDRESS_NULL && remainingLights > 0 && pagesVisited < maxPagesToVisit) {
+            LightPage page = lightPagesBuffer[pageIndex];
+            uint lightsInPage = min(page.numLightsInPage, LIGHTS_PER_PAGE);
+            lightsInPage = min(lightsInPage, remainingLights);
+            if (lightsInPage == 0) {
+                break;
+            }
+
+            for (uint i = 0; i < lightsInPage; i++) {
+                unsigned int index = activeLightIndices[page.lightIndices[i]];
 #else
         for (uint i = 0; i < perFrameBuffer.numLights; i++)
         {
@@ -274,7 +285,9 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
             //}
         }
 #if defined(PSO_CLUSTERED_LIGHTING)
-            pageIndex = lightPagesBuffer[pageIndex].ptrNextPage;
+            remainingLights -= lightsInPage;
+            pageIndex = page.ptrNextPage;
+            pagesVisited++;
         }
 #endif
     }

@@ -1,5 +1,6 @@
 #include "Managers/MaterialManager.h"
 #include "../generated/BuiltinResources.h"
+#include "Render/RasterBucketFlags.h"
 
 // TODO: Use LazyDynamicStructuredBuffer and active indices buffer like draw calls? Would reduce number of no-op indirect arguments
 MaterialManager::MaterialManager() {
@@ -38,6 +39,10 @@ void MaterialManager::IncrementMaterialUsageCount(Material& material) {
 	uint32_t materialID = material.GetMaterialID();
 	material.SetCompileFlagsID(flagsSlot);
 	unsigned int materialSlot = GetMaterialSlot(materialID, material.GetData());
+
+	unsigned int rasterSlot = GetRasterFlagsSlot(material.Technique().rasterFlags);
+	material.SetRasterBucketIndex(rasterSlot); // Base index, before fixed flags offsetting
+
 	m_materialUsageCounts[materialSlot]++;
 }
 
@@ -123,6 +128,27 @@ unsigned int MaterialManager::GetCompileFlagsSlot(MaterialCompileFlags flags) {
 	if (std::find(m_activeCompileFlags.begin(), m_activeCompileFlags.end(), flags) == m_activeCompileFlags.end()) {
 		m_activeCompileFlags.push_back(flags);
 	}
+	return slot;
+}
+
+unsigned int MaterialManager::GetRasterFlagsSlot(MaterialRasterFlags rasterFlags) {
+	unsigned int slot; // Each material raster bucket is followed by m_numFixedRasterCombinations slots for fixed flags
+	auto it = m_rasterFlagToBucketMapping.find(static_cast<uint32_t>(rasterFlags));
+	if (it != m_rasterFlagToBucketMapping.end()) {
+		slot = it->second; // Base slot for this raster flags combination
+		return slot;
+	}
+	if (!m_freeRasterBuckets.empty()) {
+		slot = m_freeRasterBuckets.back();
+		m_freeRasterBuckets.pop_back();
+		m_bucketToRasterFlagMapping[slot] = rasterFlags;
+	}
+	else {
+		slot = m_rasterBucketsUsed++;
+		m_bucketToRasterFlagMapping.push_back(rasterFlags);
+	}
+
+	m_rasterFlagToBucketMapping[static_cast<uint32_t>(rasterFlags)] = slot;
 	return slot;
 }
 

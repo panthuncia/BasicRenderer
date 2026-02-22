@@ -407,9 +407,14 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
     CameraInfo info;
 	auto planes = GetFrustumPlanesPerspective(aspect, fov, zNear, zFar);
 	info.view = XMMatrixIdentity();
-	info.unjitteredProjection = XMMatrixPerspectiveFovRH(fov, aspect, zNear, zFar);
+	info.viewInverse = XMMatrixIdentity();
+	info.unjitteredProjection = XMMatrixPerspectiveFovRH(fov, aspect, zFar, zNear);  // Note the reversed near/far for reversed Z
+	info.jitteredProjection = info.unjitteredProjection;
 	info.viewProjection = DirectX::XMMatrixMultiply(info.view, info.unjitteredProjection);
 	info.projectionInverse = XMMatrixInverse(nullptr, info.unjitteredProjection);
+	info.prevView = info.view;
+	info.prevJitteredProjection = info.jitteredProjection;
+	info.positionWorldSpace = { 0.0f, 0.0f, 0.0f, 1.0f };
 	info.clippingPlanes[0] = planes[0];
 	info.clippingPlanes[1] = planes[1];
 	info.clippingPlanes[2] = planes[2];

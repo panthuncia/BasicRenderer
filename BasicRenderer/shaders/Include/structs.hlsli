@@ -17,11 +17,25 @@ struct PSInput {
 struct VisBufferPSInput
 {
     float4 position : SV_POSITION; // Screen-space position, required for rasterization
-    nointerpolation uint visibleClusterTableIndex : TEXCOORD0;
-    float linearDepth : TEXCOORD1;
+    float linearDepth : TEXCOORD0;
 #if defined (PSO_ALPHA_TEST)
-    float2 texcoord : TEXCOORD2;
+    float2 texcoord : TEXCOORD1;
+    nointerpolation uint materialDataIndex : TEXCOORD2; // convenience for alpha test
 #endif
+    nointerpolation uint visibleClusterIndex : TEXCOORD3;
+    nointerpolation uint viewID : TEXCOORD4;
+};
+
+struct ClodViewRasterInfo
+{
+    uint visibilityUAVDescriptorIndex;
+    uint scissorMinX;
+    uint scissorMinY;
+    uint scissorMaxX;
+    uint scissorMaxY;
+    float viewportScaleX;
+    float viewportScaleY;
+    uint pad0;
 };
 
 struct ClippingPlane {
@@ -56,6 +70,15 @@ struct Camera {
     bool isOrtho;
     float2 UVScaleToNextPowerOf2;
     uint pad[1];
+};
+
+struct CullingCameraInfo
+{
+    float4 positionWorldSpace;
+    float projY;
+    float zNear;
+    float errorPixels; // Target error in pixels for LOD calculations
+    float pad;
 };
 
 struct PerFrameBuffer {
@@ -153,7 +176,7 @@ struct MaterialInfo {
     uint roughnessChannel;
 
     uint3 emissiveChannels;
-    float pad0;
+    uint rasterBucketIndex;
 };
 
 struct SingleMatrix {
@@ -172,17 +195,18 @@ struct PerMeshBuffer {
     uint vertexFlags;
     uint vertexByteSize;
     uint skinningVertexByteSize;
-    
-    uint vertexBufferOffset;
-    uint meshletBufferOffset;
-    uint meshletVerticesBufferOffset;
-    uint meshletTrianglesBufferOffset;
-    
+
     BoundingSphere boundingSphere;
     
+    uint clodMeshletBufferOffset;
+    uint clodMeshletVerticesBufferOffset;
+    uint clodMeshletTrianglesBufferOffset;
+    uint clodNumMeshlets;
+    
+    uint vertexBufferOffset;
     uint numVertices;
     uint numMeshlets;
-    uint pad[2];
+    uint pad[1];
 };
 
 struct PerMeshInstanceBuffer {
@@ -190,10 +214,6 @@ struct PerMeshInstanceBuffer {
     uint perObjectBufferIndex;
     uint skinningInstanceSlot;
     uint postSkinningVertexBufferOffset;
-    uint meshletBoundsBufferStartIndex;
-    uint meshletBitfieldStartIndex;
-    uint clusterToVisibleClusterTableStartIndex;
-    uint pad[1];
 };
 
 #define LIGHTS_PER_PAGE 12
@@ -227,6 +247,7 @@ struct GTAOConstants {
     float EffectFalloffRange;
 
     float RadiusMultiplier;
+    float2 SourceDepthUVScale;
     float Padding0;
     float FinalValuePower;
     float DenoiseBlurBeta;
@@ -239,29 +260,6 @@ struct GTAOConstants {
 
 struct GTAOInfo {
     GTAOConstants g_GTAOConstants;
-    
-    uint g_samplerPointClampDescriptorIndex;
-    uint g_srcRawDepthDescriptorIndex; // source depth buffer data (in NDC space in DirectX)
-    uint g_outWorkingDepthMIP0DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
-    uint g_outWorkingDepthMIP1DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
-    
-    uint g_outWorkingDepthMIP2DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
-    uint g_outWorkingDepthMIP3DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
-    uint g_outWorkingDepthMIP4DescriptorIndex; // output viewspace depth MIP (these are views into g_srcWorkingDepth MIP levels)
-    // input output textures for the second pass (XeGTAO_MainPass)
-    uint g_srcWorkingDepthDescriptorIndex; // viewspace depth with MIPs, output by XeGTAO_PrefilterDepths16x16 and consumed by XeGTAO_MainPass
-    
-    uint g_srcNormalmapDescriptorIndex; // source normal map
-    uint g_srcHilbertLUTDescriptorIndex; // hilbert lookup table  (if any) (unused)
-    uint g_outWorkingAOTermDescriptorIndex; // output AO term (includes bent normals if enabled - packed as R11G11B10 scaled by AO)
-    uint g_outWorkingEdgesDescriptorIndex; // output depth-based edges used by the denoiser
-    
-    uint g_outNormalmapDescriptorIndex; // output viewspace normals if generating from depth (unused)
-    // input output textures for the third pass (XeGTAO_Denoise)
-    //uint g_srcWorkingAOTermDescriptorIndex; // coming from previous pass // Moved to root constant
-    uint g_srcWorkingEdgesDescriptorIndex; // coming from previous pass
-    uint g_outFinalAOTermDescriptorIndex; // final AO term - just 'visibility' or 'visibility + bent normals'
-    uint pad[1];
 };
 
 struct FragmentInfo {
@@ -324,17 +322,33 @@ struct MaterialInputs
     float ambientOcclusion;
 };
 
-struct VisibleClusterInfo {
-    uint2 drawcallIndexAndMeshletIndex; // .x = drawcall index, .y = meshlet local index
-    uint pad[2];
-};
-
 struct SkinningInstanceGPUInfo
 {
     uint transformOffsetMatrices;
     uint invBindOffsetMatrices;
     uint boneCount;
     uint pad[1];
+};
+
+// TODO: packing?
+/*
+struct ClusterCandidateNode
+{
+    uint viewIndex;
+
+    uint perMeshBufferIndex;
+    uint perMeshInstanceBufferIndex;
+    uint perObjectBufferIndex;
+
+    uint rootGroupGlobal; // absolute group index in global groups buffer
+    uint flags; // bits: fullyInside, skipFrustum, wasVisibleLastFrame, etc.
+};*/
+
+struct VisibleCluster
+{
+    unsigned int viewID;
+    unsigned int instanceID;
+    unsigned int meshletID;
 };
 
 #endif // __STRUCTS_HLSL__

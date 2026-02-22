@@ -47,8 +47,10 @@ public:
 		RegisterUAV(Builtin::PostSkinningVertices);
 	}
 
-	PassReturn Execute(RenderContext& context) override {
-		auto& commandList = context.commandList;
+	PassReturn Execute(PassExecutionContext& executionContext) override {
+	    auto* renderContext = executionContext.hostData->Get<RenderContext>();
+	    auto& context = *renderContext;
+		auto& commandList = executionContext.commandList;
 
 		// Set the descriptor heaps
 		commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
@@ -70,7 +72,7 @@ public:
 				auto& mesh = *pMesh->GetMesh();
 				perMeshConstants[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
 				perMeshConstants[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-				commandList.PushConstants(rhi::ShaderStage::Compute, 0, PerMeshRootSignatureIndex, PerMeshBufferIndex, NumPerMeshRootConstants, &perMeshConstants);
+				commandList.PushConstants(rhi::ShaderStage::Compute, 0, PerMeshRootSignatureIndex, PerMeshBufferIndex, NumPerMeshRootConstants, perMeshConstants);
 
 				unsigned int numGroups = static_cast<unsigned int>(std::ceil(mesh.GetNumVertices(meshShadersEnabled) / 64.0));
 				commandList.Dispatch(numGroups, 1, 1);
@@ -88,7 +90,7 @@ private:
 
 	void CreatePSO() {
 		m_PSO = PSOManager::GetInstance().MakeComputePipeline(
-			PSOManager::GetInstance().GetComputeRootSignature(),
+			PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
 			L"shaders/skinning.hlsl",
 			L"CSMain",
 			{},

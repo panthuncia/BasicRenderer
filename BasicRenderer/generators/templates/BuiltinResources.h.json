@@ -5,14 +5,17 @@
       "LinearDepthMap": {},
       "DepthTexture": {},
       "VisibilityTexture": {},
-      "MeshletBitfield": {},
-      "VisibleClusterTable": {},
-      "VisibleClusterTableCounter": {},
       "IndirectCommandBuffers": {
-        "Primary": {},
-        "MeshletCulling": {},
-        "MeshletCullingReset": {}
+        "Primary": {}
       }
+    },
+    "CLod": {
+      "Offsets": {},
+      "Groups": {},
+      "Children": {},
+      "ChildLocalMeshletIndices": {},
+      "MeshletBounds": {},
+      "Nodes": {}
     },
     "PerObjectBuffer": {},
     "PerMeshBuffer": {},
@@ -24,18 +27,15 @@
       "MeshletOffsets": {},
       "MeshletVertexIndices": {},
       "MeshletTriangles": {},
-      "MeshletBounds": {},
-      "ClusterToVisibleClusterTableIndexBuffer": {}
+      "MeshletBounds": {}
     },
     "SkeletonResources": {
       "BoneTransforms": {},
       "InverseBindMatrices": {},
       "SkinningInstanceInfo": {}
     },
-    "MeshletCullingBitfieldGroup": {},
-    "MeshInstanceMeshletCullingBitfieldGroup": {},
-    "MeshInstanceOcclusionCullingBitfieldGroup": {},
     "CameraBuffer": {},
+    "CullingCameraBuffer": {},
     "Light": {
       "ViewResourceGroup": {},
       "BufferGroup": {},
@@ -58,7 +58,6 @@
     },
     "IndirectCommandBuffers": {
       "Primary": {},
-      "MeshletCulling": {},
       "Master": {}
     },
     "GBuffer": {
