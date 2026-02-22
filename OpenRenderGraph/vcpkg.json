@@ -1,0 +1,16 @@
+{
+  "name": "openrendergraph",
+  "version": "0.1.0",
+  "dependencies": [
+    "spdlog",
+    "flecs",
+    "boost-container-hash",
+    {
+      "name": "imgui",
+      "features": [ "dx12-binding", "win32-binding" ]
+    },
+    "implot",
+    "shader-slang"
+  ],
+  "builtin-baseline": "edffab1bcd2cb5b8c17d6ba34d5651ea0bf82979"
+}

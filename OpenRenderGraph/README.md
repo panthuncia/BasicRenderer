@@ -265,3 +265,40 @@ For capture requests from `RGInspector`, pass a callback that forwards to `IRead
 
 If you consume ORG in another project, ensure equivalent dependencies are available.
 
+## Packaging and standalone usage
+
+`OpenRenderGraph` exports a package target:
+
+- `OpenRenderGraph::OpenRenderGraph`
+
+and expects `BasicRHI::BasicRHI` to be available (installed package preferred).
+
+### Build and install ORG
+
+```powershell
+cmake -S OpenRenderGraph -B out/build/org -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH="out/install/rhi"
+cmake --build out/build/org
+cmake --install out/build/org --prefix out/install/org
+```
+
+### Consume ORG from another CMake project
+
+```cmake
+find_package(OpenRenderGraph CONFIG REQUIRED)
+target_link_libraries(MyTarget PRIVATE OpenRenderGraph::OpenRenderGraph)
+```
+
+### Submodule fallback mode
+
+If `BasicRHI` is not installed, ORG can fallback to an in-tree sibling `../BasicRHI`:
+
+- `OPENRENDERGRAPH_ENABLE_SUBMODULE_FALLBACK=ON` (default)
+
+When fallback is used, you can forward BasicRHI manual dependency options:
+
+- `OPENRENDERGRAPH_FORWARD_BASICRHI_DEP_OPTIONS=ON` (default)
+- `OPENRENDERGRAPH_BASICRHI_ENABLE_STREAMLINE=ON|OFF`
+- `OPENRENDERGRAPH_BASICRHI_ENABLE_PIX=ON|OFF`
+- `OPENRENDERGRAPH_BASICRHI_STREAMLINE_HEADERS_DIR=<path>`
+- `OPENRENDERGRAPH_BASICRHI_PIX_HEADERS_DIR=<path>`
+

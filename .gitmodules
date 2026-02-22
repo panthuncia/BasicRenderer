@@ -1,3 +1,6 @@
 [submodule "ThirdParty/assimp"]
 	path = ThirdParty/assimp
 	url = https://github.com/assimp/assimp.git
+[submodule "BasicRHI"]
+	path = BasicRHI
+	url = git@github.com:panthuncia/BasicRHI.git
