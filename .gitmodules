@@ -4,3 +4,6 @@
 [submodule "BasicRHI"]
 	path = BasicRHI
 	url = git@github.com:panthuncia/BasicRHI.git
+[submodule "OpenRenderGraph"]
+	path = OpenRenderGraph
+	url = git@github.com:panthuncia/OpenRenderGraph.git
