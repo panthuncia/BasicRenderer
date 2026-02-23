@@ -1,12 +1,14 @@
 #pragma once
 
 #include <rhi.h>
+#include <cstring>
 
 #include "Render/RenderGraph/RenderGraph.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "Resources/Buffers/Buffer.h"
+#include "ShaderBuffers.h"
 #include "../shaders/PerPassRootConstants/clodRootConstants.h"
 
 struct RasterBucketsHistogramIndirectCommand
@@ -37,6 +39,10 @@ struct CLodViewRasterInfo
 
     friend bool operator==(const CLodViewRasterInfo&, const CLodViewRasterInfo&) = default;
 };
+
+static constexpr uint32_t CLodReplayBufferSizeBytes = 8u * 1024u * 1024u;
+static constexpr uint32_t CLodReplayBufferNumUints = CLodReplayBufferSizeBytes / sizeof(uint32_t);
+static constexpr uint32_t CLodMaxViewDepthIndices = 512u;
 
 inline std::shared_ptr<Buffer> CreateAliasedUnmaterializedStructuredBuffer(
     uint32_t numElements,
@@ -114,6 +120,15 @@ public:
             .add<CLodWorkGraphTelemetryBufferTag>()
             .add<CLodExtensionTypeTag>(typeEntity);
 
+        m_occlusionReplayBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodReplayBufferNumUints, sizeof(uint32_t), true, false, false, false);
+        m_occlusionReplayBuffer->SetName("CLod Occlusion Replay Buffer");
+        m_occlusionReplayStateBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReplayBufferState), true, false, false, false);
+        m_occlusionReplayStateBuffer->SetName("CLod Occlusion Replay State Buffer");
+        m_occlusionNodeGpuInputsBuffer = CreateAliasedUnmaterializedStructuredBuffer(3, sizeof(CLodNodeGpuInput), true, false, false, false);
+        m_occlusionNodeGpuInputsBuffer->SetName("CLod Occlusion Node GPU Inputs Buffer");
+        m_viewDepthSrvIndicesBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodMaxViewDepthIndices, sizeof(CLodViewDepthSRVIndex), true, false, false, false);
+        m_viewDepthSrvIndicesBuffer->SetName("CLod View Depth SRV Indices Buffer");
+
         m_rasterBucketsOffsetsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
         m_rasterBucketsOffsetsBuffer->SetName("CLod Raster bucket offsets");
         m_rasterBucketsBlockSumsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
@@ -155,7 +170,11 @@ public:
             m_visibleClustersBuffer,
             m_visibleClustersCounterBuffer,
             m_histogramIndirectCommand,
-            m_workGraphTelemetryBuffer);
+            m_workGraphTelemetryBuffer,
+            m_occlusionReplayBuffer,
+            m_occlusionReplayStateBuffer,
+            m_occlusionNodeGpuInputsBuffer,
+            m_viewDepthSrvIndicesBuffer);
         cullPassDesc.where = RenderGraph::ExternalInsertPoint::After("SkinningPass");
         outPasses.push_back(std::move(cullPassDesc));
 
@@ -228,6 +247,10 @@ private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
     std::shared_ptr<Buffer> m_workGraphTelemetryBuffer;
+    std::shared_ptr<Buffer> m_occlusionReplayBuffer;
+    std::shared_ptr<Buffer> m_occlusionReplayStateBuffer;
+    std::shared_ptr<Buffer> m_occlusionNodeGpuInputsBuffer;
+    std::shared_ptr<Buffer> m_viewDepthSrvIndicesBuffer;
 
     // Histogram Pass Buffers
     std::shared_ptr<Buffer> m_histogramIndirectCommand;
@@ -278,7 +301,11 @@ private:
             std::shared_ptr<Buffer> visibleClustersBuffer,
             std::shared_ptr<Buffer> visibleClustersCounterBuffer,
             std::shared_ptr<Buffer> histogramIndirectCommand,
-            std::shared_ptr<Buffer> workGraphTelemetryBuffer) {
+            std::shared_ptr<Buffer> workGraphTelemetryBuffer,
+            std::shared_ptr<Buffer> occlusionReplayBuffer,
+            std::shared_ptr<Buffer> occlusionReplayStateBuffer,
+            std::shared_ptr<Buffer> occlusionNodeGpuInputsBuffer,
+            std::shared_ptr<Buffer> viewDepthSrvIndicesBuffer) {
             CreatePipelines(
                 DeviceManager::GetInstance().GetDevice(),
                 PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -294,6 +321,10 @@ private:
             m_visibleClustersCounterBuffer = visibleClustersCounterBuffer;
             m_histogramIndirectCommand = histogramIndirectCommand;
             m_workGraphTelemetryBuffer = workGraphTelemetryBuffer;
+            m_occlusionReplayBuffer = occlusionReplayBuffer;
+            m_occlusionReplayStateBuffer = occlusionReplayStateBuffer;
+            m_occlusionNodeGpuInputsBuffer = occlusionNodeGpuInputsBuffer;
+            m_viewDepthSrvIndicesBuffer = viewDepthSrvIndicesBuffer;
         }
 
         ~HierarchialCullingPass() {
@@ -309,7 +340,11 @@ private:
                 m_visibleClustersBuffer,
                 m_visibleClustersCounterBuffer,
                 m_histogramIndirectCommand,
-                m_workGraphTelemetryBuffer)
+                m_workGraphTelemetryBuffer,
+                m_occlusionReplayBuffer,
+                m_occlusionReplayStateBuffer,
+                m_occlusionNodeGpuInputsBuffer,
+                m_viewDepthSrvIndicesBuffer)
                 .WithShaderResource(Builtin::IndirectCommandBuffers::Master,
                     Builtin::CLod::Offsets,
                     Builtin::CLod::Groups,
@@ -393,6 +428,10 @@ private:
             uintRootConstants[CLOD_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
             uintRootConstants[CLOD_WORKGRAPH_TELEMETRY_DESCRIPTOR_INDEX] = m_workGraphTelemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
             uintRootConstants[CLOD_WORKGRAPH_TELEMETRY_ENABLED] = IsCLodWorkGraphTelemetryEnabled() ? 1u : 0u;
+            uintRootConstants[CLOD_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX] = m_occlusionReplayBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+            uintRootConstants[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+            uintRootConstants[CLOD_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+            uintRootConstants[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX] = m_viewDepthSrvIndicesBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 
             commandList.PushConstants(
                 rhi::ShaderStage::Compute,
@@ -438,6 +477,30 @@ private:
             commandList.BindPipeline(m_createCommandPipelineState.GetAPIPipelineState().GetHandle());
             commandList.Dispatch(1, 1, 1); // Single thread group, one thread
 
+            // TODO: Move to post-raster pass
+            //rhi::BufferBarrier replayDispatchBarriers[2] = {};
+            //replayDispatchBarriers[0].buffer = m_occlusionReplayBuffer->GetAPIResource().GetHandle();
+            //replayDispatchBarriers[0].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+            //replayDispatchBarriers[0].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+            //replayDispatchBarriers[0].beforeSync = rhi::ResourceSyncState::ComputeShading;
+            //replayDispatchBarriers[0].afterSync = rhi::ResourceSyncState::ComputeShading;
+
+            //replayDispatchBarriers[1].buffer = m_occlusionNodeGpuInputsBuffer->GetAPIResource().GetHandle();
+            //replayDispatchBarriers[1].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+            //replayDispatchBarriers[1].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+            //replayDispatchBarriers[1].beforeSync = rhi::ResourceSyncState::ComputeShading;
+            //replayDispatchBarriers[1].afterSync = rhi::ResourceSyncState::ComputeShading;
+
+            //rhi::BarrierBatch replayBarrierBatch{};
+            //replayBarrierBatch.buffers = rhi::Span<rhi::BufferBarrier>(replayDispatchBarriers, 2);
+            //commandList.Barriers(replayBarrierBatch);
+
+            //rhi::WorkGraphDispatchDesc replayDispatchDesc{};
+            //replayDispatchDesc.dispatchMode = rhi::WorkGraphDispatchMode::MultiNodeGpuInput;
+            //replayDispatchDesc.multiNodeGpuInput.inputBuffer = m_occlusionNodeGpuInputsBuffer->GetAPIResource().GetHandle();
+            //replayDispatchDesc.multiNodeGpuInput.inputAddressOffset = 0;
+            //commandList.DispatchWorkGraph(replayDispatchDesc);
+
             return {};
         }
 
@@ -449,6 +512,89 @@ private:
 
             uint32_t zero = 0u;
             BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
+
+            CLodReplayBufferState replayState{};
+            replayState.nodeGroupWriteOffsetBytes = 0;
+            replayState.meshletWriteOffsetBytes = CLodReplayBufferSizeBytes;
+            replayState.nodeGroupDroppedRecords = 0;
+            replayState.meshletDroppedRecords = 0;
+            BUFFER_UPLOAD(
+                &replayState,
+                sizeof(CLodReplayBufferState),
+                rg::runtime::UploadTarget::FromShared(m_occlusionReplayStateBuffer),
+                0);
+
+            std::vector<CLodViewDepthSRVIndex> viewDepthSrvIndices(CLodMaxViewDepthIndices);
+            for (uint32_t i = 0; i < CLodMaxViewDepthIndices; ++i) {
+                viewDepthSrvIndices[i].cameraBufferIndex = i;
+                viewDepthSrvIndices[i].linearDepthSRVIndex = 0;
+            }
+
+            context.viewManager->ForEachView([&](uint64_t viewID) {
+                const auto* view = context.viewManager->Get(viewID);
+                if (!view || !view->gpu.lastFrameLinearDepthMap) {
+                    return;
+                }
+
+                const uint32_t cameraBufferIndex = view->gpu.cameraBufferIndex;
+                if (cameraBufferIndex >= CLodMaxViewDepthIndices) {
+                    return;
+                }
+
+                const auto linearDepthMap = view->gpu.lastFrameLinearDepthMap;
+                uint32_t slice = 0;
+                if (view->cameraInfo.depthBufferArrayIndex >= 0) {
+                    slice = static_cast<uint32_t>(view->cameraInfo.depthBufferArrayIndex);
+                }
+
+                const uint32_t maxSlices = linearDepthMap->GetNumSRVSlices();
+                if (maxSlices == 0) {
+                    return;
+                }
+
+                slice = (std::min)(slice, maxSlices - 1);
+                viewDepthSrvIndices[cameraBufferIndex].cameraBufferIndex = cameraBufferIndex;
+                viewDepthSrvIndices[cameraBufferIndex].linearDepthSRVIndex = linearDepthMap->GetSRVInfo(0, slice).slot.index;
+            });
+
+            BUFFER_UPLOAD(
+                viewDepthSrvIndices.data(),
+                static_cast<uint32_t>(viewDepthSrvIndices.size() * sizeof(CLodViewDepthSRVIndex)),
+                rg::runtime::UploadTarget::FromShared(m_viewDepthSrvIndicesBuffer),
+                0);
+
+            CLodNodeGpuInput nodeGpuInputs[3] = {};
+            CLodMultiNodeGpuInput multiNodeGpuInput{};
+            multiNodeGpuInput.numNodeInputs = 2;
+            multiNodeGpuInput.pad0 = 0;
+            multiNodeGpuInput.nodeInputStride = sizeof(CLodNodeGpuInput);
+
+            if (ID3D12Resource* nodeInputResource = rhi::dx12::get_resource(m_occlusionNodeGpuInputsBuffer->GetAPIResource())) {
+                const uint64_t nodeInputBufferAddress = nodeInputResource->GetGPUVirtualAddress();
+                multiNodeGpuInput.nodeInputsAddress = nodeInputBufferAddress + sizeof(CLodNodeGpuInput);
+            }
+
+            if (ID3D12Resource* replayResource = rhi::dx12::get_resource(m_occlusionReplayBuffer->GetAPIResource())) {
+                const uint64_t replayAddress = replayResource->GetGPUVirtualAddress();
+                nodeGpuInputs[1].entrypointIndex = 1;
+                nodeGpuInputs[1].numRecords = 0;
+                nodeGpuInputs[1].recordsAddress = replayAddress;
+                nodeGpuInputs[1].recordStride = sizeof(CLodNodeGroupReplayRecord);
+
+                nodeGpuInputs[2].entrypointIndex = 2;
+                nodeGpuInputs[2].numRecords = 0;
+                nodeGpuInputs[2].recordsAddress = replayAddress + CLodReplayBufferSizeBytes;
+                nodeGpuInputs[2].recordStride = sizeof(CLodMeshletReplayRecord);
+            }
+
+            static_assert(sizeof(CLodMultiNodeGpuInput) == sizeof(CLodNodeGpuInput));
+            std::memcpy(&nodeGpuInputs[0], &multiNodeGpuInput, sizeof(CLodMultiNodeGpuInput));
+
+            BUFFER_UPLOAD(
+                nodeGpuInputs,
+                sizeof(nodeGpuInputs),
+                rg::runtime::UploadTarget::FromShared(m_occlusionNodeGpuInputsBuffer),
+                0);
 
             if (IsCLodWorkGraphTelemetryEnabled()) {
                 std::vector<uint32_t> zeroTelemetry(CLodWorkGraphCounterCount, 0u);
@@ -477,6 +623,10 @@ private:
         std::shared_ptr<Buffer> m_scratchBuffer;
         std::shared_ptr<Buffer> m_histogramIndirectCommand;
         std::shared_ptr<Buffer> m_workGraphTelemetryBuffer;
+        std::shared_ptr<Buffer> m_occlusionReplayBuffer;
+        std::shared_ptr<Buffer> m_occlusionReplayStateBuffer;
+        std::shared_ptr<Buffer> m_occlusionNodeGpuInputsBuffer;
+        std::shared_ptr<Buffer> m_viewDepthSrvIndicesBuffer;
         bool m_declaredResourcesChanged = true;
         RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
 
@@ -498,8 +648,10 @@ private:
 
             // Export the node shader symbols from the library
             // These are the *export names* (function symbols), not NodeID strings.
-            std::array<rhi::ShaderExportDesc, 4> exports = { {
+            std::array<rhi::ShaderExportDesc, 6> exports = { {
                 { "WG_ObjectCull",   nullptr },
+                { "WG_ReplayNodeGroup", nullptr },
+                { "WG_ReplayMeshlet", nullptr },
                 { "WG_TraverseNodes",     nullptr },
                 { "WG_GroupEvaluate",     nullptr },
                 { "WG_ClusterCullBuckets",  nullptr },
@@ -512,8 +664,10 @@ private:
             std::array<rhi::ShaderLibraryDesc, 1> libraries = { library };
 
             // Entry point is by NodeID (the [NodeID("ObjectCull")] in HLSL)
-            std::array<rhi::NodeIDDesc, 1> entrypoints = { {
-                { "ObjectCull", 0 }
+            std::array<rhi::NodeIDDesc, 3> entrypoints = { {
+                { "ObjectCull", 0 },
+                { "ReplayNodeGroup", 0 },
+                { "ReplayMeshlet", 0 }
             } };
 
             // Build the work graph desc

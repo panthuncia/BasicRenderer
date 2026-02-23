@@ -47,6 +47,7 @@ struct Builtin {
     inline static constexpr std::string_view Master = "Builtin::IndirectCommandBuffers::Master";
     inline static constexpr std::string_view Primary = "Builtin::IndirectCommandBuffers::Primary";
   };
+  inline static constexpr std::string_view LastFrameLinearDepthMaps = "Builtin::LastFrameLinearDepthMaps";
   struct Light {
     inline static constexpr std::string_view ActiveLightIndices = "Builtin::Light::ActiveLightIndices";
     inline static constexpr std::string_view BufferGroup = "Builtin::Light::BufferGroup";

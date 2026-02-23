@@ -172,6 +172,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 	m_pIndirectCommandBufferManager = IndirectCommandBufferManager::CreateUnique();
 	m_pViewManager = ViewManager::CreateUnique();
 	m_pEnvironmentManager = EnvironmentManager::CreateUnique();
+    CreateDefaultEnvironmentResources();
     m_pEnvironmentManager->SetRequestReadbackFn([this](std::shared_ptr<PixelBuffer> texture, std::wstring outputFile, std::function<void()> callback, bool cubemap) {
         if (!m_pReadbackManager) {
             return;
@@ -197,6 +198,10 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         m_pMaterialManager.get(),
         m_pSkeletonManager.get(),
         m_pTextureFactory.get());
+
+    m_warnedNullScene = false;
+    m_warnedMissingPrimaryCamera = false;
+    m_warnedUsingFallbackEnvironment = false;
 
     auto& world = ECSManager::GetInstance().GetWorld();
     world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
@@ -307,6 +312,70 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 }
 
 void Renderer::CreateGlobalResources() {
+}
+
+void Renderer::CreateDefaultEnvironmentResources() {
+    auto makeFallbackCubemap = [](uint32_t resolution, bool generateMipMaps, const char* name) {
+        TextureDescription desc;
+        desc.channels = 4;
+        desc.isCubemap = true;
+        desc.format = rhi::Format::R8G8B8A8_UNorm;
+        desc.hasSRV = true;
+        desc.generateMipMaps = generateMipMaps;
+
+        ImageDimensions dims;
+        dims.width = resolution;
+        dims.height = resolution;
+        dims.rowPitch = resolution * 4;
+        dims.slicePitch = resolution * resolution * 4;
+        for (int i = 0; i < 6; ++i) {
+            desc.imageDimensions.push_back(dims);
+        }
+
+        auto cubemap = PixelBuffer::CreateShared(desc);
+        cubemap->SetName(name);
+        return cubemap;
+    };
+
+    auto reflectionResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("reflectionCubemapResolution")();
+    auto skyboxResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("skyboxResolution")();
+
+    m_defaultEnvironmentCubemap = makeFallbackCubemap(skyboxResolution, false, "Fallback Environment Cubemap");
+    m_defaultEnvironmentPrefilteredCubemap = makeFallbackCubemap(reflectionResolution, true, "Fallback Prefiltered Environment Cubemap");
+
+    rg::memory::SetResourceUsageHint(*m_defaultEnvironmentCubemap, "Fallback environment resources");
+    rg::memory::SetResourceUsageHint(*m_defaultEnvironmentPrefilteredCubemap, "Fallback environment resources");
+}
+
+bool Renderer::IsSceneReadyForFrame(bool logWarnings) {
+    if (!currentScene) {
+        if (logWarnings && !m_warnedNullScene) {
+            spdlog::warn("Renderer: current scene is null. Skipping scene update/render work until a valid scene is set.");
+        }
+        m_warnedNullScene = true;
+        m_warnedMissingPrimaryCamera = false;
+        return false;
+    }
+
+    m_warnedNullScene = false;
+
+    auto& primaryCamera = currentScene->GetPrimaryCamera();
+    const bool hasPrimaryCamera = primaryCamera
+        && primaryCamera.is_alive()
+        && primaryCamera.has<Components::Camera>()
+        && primaryCamera.has<Components::DepthMap>()
+        && primaryCamera.has<Components::RenderViewRef>();
+
+    if (!hasPrimaryCamera) {
+        if (logWarnings && !m_warnedMissingPrimaryCamera) {
+            spdlog::warn("Renderer: primary camera is missing or invalid. Skipping scene update/render work until a valid camera is available.");
+        }
+        m_warnedMissingPrimaryCamera = true;
+        return false;
+    }
+
+    m_warnedMissingPrimaryCamera = false;
+    return true;
 }
 
 void Renderer::SetSettings() {
@@ -736,6 +805,9 @@ void Renderer::Update(float elapsedSeconds) {
         }
     }
 
+    if (!IsSceneReadyForFrame()) {
+        return;
+    }
     if (rebuildRenderGraph) {
 		CreateRenderGraph();
     }
@@ -815,6 +887,9 @@ void Renderer::Update(float elapsedSeconds) {
 }
 
 void Renderer::PostUpdate() {
+	if (!currentScene) {
+        return;
+    }
 	currentScene->PostUpdate();
 }
 
@@ -823,6 +898,14 @@ void Renderer::Render() {
 	//ZoneScopedN("Renderer::Render");
 
     auto deltaTime = m_frameTimer.tick();
+    if (!IsSceneReadyForFrame()) {
+        return;
+    }
+
+    if (!currentRenderGraph) {
+        return;
+    }
+
     // Record all the commands we need to render the scene into the command list
     auto& commandAllocator = m_commandAllocators[m_frameIndex];
     auto& commandList = m_commandLists[m_frameIndex];
@@ -1028,6 +1111,8 @@ void Renderer::Cleanup() {
     rg::runtime::SetActiveDescriptorService(nullptr);
     m_renderGraphRuntimeInitialized = false;
     m_currentEnvironment.reset();
+    m_defaultEnvironmentCubemap.reset();
+    m_defaultEnvironmentPrefilteredCubemap.reset();
 	currentScene.reset();
 	m_pIndirectCommandBufferManager.reset();
 	m_pViewManager.reset();
@@ -1041,6 +1126,9 @@ void Renderer::Cleanup() {
     m_pTextureFactory.reset();
     m_hierarchySystem.destruct();
     m_settingsSubscriptions.clear();
+    m_warnedUsingFallbackEnvironment = false;
+    m_warnedNullScene = false;
+    m_warnedMissingPrimaryCamera = false;
     m_readbackFence.Reset();
 	spdlog::info("Cleaning up singletons");
     Material::DestroyDefaultMaterial();
@@ -1084,14 +1172,33 @@ std::shared_ptr<Scene>& Renderer::GetCurrentScene() {
 }
 
 void Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
+	if (!newScene) {
+        currentScene.reset();
+        rebuildRenderGraph = true;
+        IsSceneReadyForFrame(true);
+        return;
+    }
+
 	newScene->GetRoot().add<Components::ActiveScene>();
     currentScene = newScene;
     //currentScene->SetDepthMap(m_depthMap);
     currentScene->Activate(m_managerInterface);
+	m_warnedNullScene = false;
+	m_warnedMissingPrimaryCamera = false;
 	rebuildRenderGraph = true;
 }
 
 std::shared_ptr<Scene> Renderer::AppendScene(std::shared_ptr<Scene> scene) {
+	if (!scene) {
+        spdlog::warn("Renderer: attempted to append a null scene. Ignoring append request.");
+        return nullptr;
+    }
+
+	if (!currentScene) {
+        spdlog::warn("Renderer: attempted to append a scene while no current scene exists. Ignoring append request.");
+        return nullptr;
+    }
+
 	return GetCurrentScene()->AppendScene(scene);
 }
 
@@ -1174,6 +1281,11 @@ void Renderer::SetupInputHandlers() {
 }
 
 void Renderer::CreateRenderGraph() {
+    if (!IsSceneReadyForFrame()) {
+        rebuildRenderGraph = true;
+        return;
+    }
+
     StallPipeline();
 
     // TODO: Find a better way to handle resources like this
@@ -1305,10 +1417,28 @@ void Renderer::CreateRenderGraph() {
         BuildMainShadowPass(newGraph.get());
         debugPassBuilder.WithShaderResource(Builtin::PrimaryCamera::LinearDepthMap);
     }
+
+    BuildLinearDepthDownsamplePass(newGraph.get());
 	
+    auto currentEnvironmentCubemap = m_defaultEnvironmentCubemap;
+    auto currentEnvironmentPrefilteredCubemap = m_defaultEnvironmentPrefilteredCubemap;
+    if (m_currentEnvironment != nullptr
+        && m_currentEnvironment->GetEnvironmentCubemap() != nullptr
+        && m_currentEnvironment->GetEnvironmentCubemap()->ImagePtr() != nullptr
+        && m_currentEnvironment->GetEnvironmentPrefilteredCubemap() != nullptr) {
+        currentEnvironmentCubemap = m_currentEnvironment->GetEnvironmentCubemap()->ImagePtr();
+        currentEnvironmentPrefilteredCubemap = m_currentEnvironment->GetEnvironmentPrefilteredCubemap();
+        m_warnedUsingFallbackEnvironment = false;
+    }
+    else if (!m_warnedUsingFallbackEnvironment) {
+        spdlog::warn("Renderer: no valid environment is active. Using fallback blank cubemaps.");
+        m_warnedUsingFallbackEnvironment = true;
+    }
+
+    newGraph->RegisterResource(Builtin::Environment::CurrentCubemap, currentEnvironmentCubemap);
+    newGraph->RegisterResource(Builtin::Environment::CurrentPrefilteredCubemap, currentEnvironmentPrefilteredCubemap);
+
     if (m_currentEnvironment != nullptr) {
-        newGraph->RegisterResource(Builtin::Environment::CurrentCubemap, m_currentEnvironment->GetEnvironmentCubemap()->ImagePtr());
-        newGraph->RegisterResource(Builtin::Environment::CurrentPrefilteredCubemap, m_currentEnvironment->GetEnvironmentPrefilteredCubemap());
         newGraph->BuildComputePass("SkyboxPass")
             .Build<SkyboxRenderPass>();
     }
@@ -1376,6 +1506,8 @@ void Renderer::CreateRenderGraph() {
 			.Build<DebugSpherePass>();
     }
 
+        BuildLinearDepthHistoryCopyPass(newGraph.get());
+
     newGraph->CompileStructural();
     newGraph->Setup();
 
@@ -1387,6 +1519,7 @@ void Renderer::SetEnvironmentInternal(std::wstring name) {
     std::filesystem::path envpath = std::filesystem::path(GetExePath()) / L"textures" / L"environment" / (name+L".hdr");
 
     if (std::filesystem::exists(envpath)) {
+		m_warnedUsingFallbackEnvironment = false;
 		m_preFrameDeferredFunctions.defer([envpath, name, this]() { // Don't change this during rendering
             m_currentEnvironment = m_pEnvironmentManager->CreateEnvironment(name);
             m_pEnvironmentManager->SetFromHDRI(m_currentEnvironment.get(), envpath.string());
@@ -1394,7 +1527,13 @@ void Renderer::SetEnvironmentInternal(std::wstring name) {
 			});
     }
     else {
-        spdlog::error("Environment file not found: " + envpath.string());
+        m_currentEnvironment.reset();
+        ResourceManager::GetInstance().SetActiveEnvironmentIndex(0);
+        rebuildRenderGraph = true;
+        if (!m_warnedUsingFallbackEnvironment) {
+            spdlog::warn("Environment file not found: {}. Falling back to blank environment resources.", envpath.string());
+            m_warnedUsingFallbackEnvironment = true;
+        }
     }
 }
 

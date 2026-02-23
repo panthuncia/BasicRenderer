@@ -29,6 +29,8 @@
 #include "RenderPasses/PPLLResolvePass.h"
 #include "RenderPasses/PostProcessing/ScreenSpaceReflectionsPass.h"
 #include "RenderPasses/PostProcessing/SpecularIBLPass.h"
+#include "RenderPasses/FidelityFX/Downsample.h"
+#include "RenderPasses/FidelityFX/LinearDepthHistoryCopyPass.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Render/MemoryIntrospectionAPI.h"
 
@@ -367,6 +369,16 @@ void BuildMainShadowPass(RenderGraph* graph) {
 
     graph->BuildRenderPass("ShadowPass")
         .Build<ShadowPass>(ShadowPassInputs{ wireframe, useMeshShaders, indirect, true, clearRTVs });
+}
+
+void BuildLinearDepthDownsamplePass(RenderGraph* graph) {
+    graph->BuildComputePass("LinearDepthDownsamplePass")
+        .Build<DownsamplePass>();
+}
+
+void BuildLinearDepthHistoryCopyPass(RenderGraph* graph) {
+    graph->BuildRenderPass("LinearDepthHistoryCopyPass")
+        .Build<LinearDepthHistoryCopyPass>();
 }
 
 void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {

@@ -57,6 +57,7 @@ struct ViewResources {
 
 	std::shared_ptr<PixelBuffer> depthMap = nullptr;
     std::shared_ptr<PixelBuffer> linearDepthMap = nullptr;
+    std::shared_ptr<PixelBuffer> lastFrameLinearDepthMap = nullptr;
     std::shared_ptr<PixelBuffer> visibilityBuffer = nullptr;
 };
 
@@ -196,6 +197,9 @@ private:
 
     std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
     std::unordered_map<ResourceIdentifier, std::shared_ptr<IResourceResolver>, ResourceIdentifier::Hasher> m_resolvers;
+
+    std::shared_ptr<ResourceGroup> m_lastFrameLinearDepthGroup;
+    std::unordered_map<uint64_t, std::shared_ptr<PixelBuffer>> m_lastFrameLinearDepthBySource;
 
     IndirectCommandBufferManager* m_indirectManager = nullptr;
 

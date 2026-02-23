@@ -117,6 +117,11 @@ private:
 
 	std::string m_environmentName;
 	std::unique_ptr<Environment> m_currentEnvironment = nullptr;
+    std::shared_ptr<PixelBuffer> m_defaultEnvironmentCubemap = nullptr;
+    std::shared_ptr<PixelBuffer> m_defaultEnvironmentPrefilteredCubemap = nullptr;
+    bool m_warnedUsingFallbackEnvironment = false;
+    bool m_warnedNullScene = false;
+    bool m_warnedMissingPrimaryCamera = false;
 
     // GPU resource managers
     std::unique_ptr<LightManager> m_pLightManager = nullptr;
@@ -142,10 +147,12 @@ private:
     void MoveForward();
     void SetupInputHandlers();
     void CreateGlobalResources();
+    void CreateDefaultEnvironmentResources();
     void CreateRenderGraph();
     void SetSettings();
     void SetEnvironmentInternal(std::wstring name);
 	void ToggleMeshShaders(bool useMeshShaders);
+    bool IsSceneReadyForFrame(bool logWarnings = true);
 
     void WaitForFrame(uint8_t frameIndex);
     void SignalFence(rhi::Queue commandQueue, uint8_t currentFrameIndex);

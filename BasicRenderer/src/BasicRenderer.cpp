@@ -372,7 +372,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     
 	//renderer.GetCurrentScene()->AppendScene(robot->Clone());
 
-    //renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
 
     for (int i = 0; i < 000; i++) {
         auto sphereInstance = renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());

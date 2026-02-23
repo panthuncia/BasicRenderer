@@ -58,4 +58,40 @@ void OcclusionCulling(out bool fullyCulled, in const Camera camera, float3 viewS
     fullyCulled = fMaxOcclusionDepth < boundingSphereDepth - scaledBoundingRadius;
 }
 
+void OcclusionCullingPerspectiveTexture2D(
+    out bool fullyCulled,
+    in const Camera camera,
+    float3 viewSpaceCenter,
+    float boundingSphereDepth,
+    float scaledBoundingRadius,
+    uint depthMapDescriptorIndex)
+{
+    const float3 vHZB = float3(camera.depthResX, camera.depthResY, camera.numDepthMips);
+
+    viewSpaceCenter.y = -viewSpaceCenter.y;
+    float4 vLBRT = sphere_screen_extents(viewSpaceCenter.xyz, scaledBoundingRadius, camera.projection);
+    vLBRT.x = -vLBRT.x;
+    vLBRT.z = -vLBRT.z;
+
+    const float4 vToUV = float4(0.5f, -0.5f, 0.5f, -0.5f);
+    float4 vUV = saturate(vLBRT.xwzy * vToUV + 0.5f);
+    float4 vAABB = vUV * vHZB.xyxy;
+    float2 vExtents = vAABB.zw - vAABB.xy;
+
+    float fMipLevel = ceil(log2(max(vExtents.x, vExtents.y)));
+    fMipLevel = clamp(fMipLevel, 0.0f, vHZB.z - 1.0f);
+
+    vUV *= camera.UVScaleToNextPowerOf2.xyxy;
+
+    Texture2D<float> depthBuffer = ResourceDescriptorHeap[depthMapDescriptorIndex];
+    float4 occlusionDepth = float4(
+        depthBuffer.SampleLevel(g_pointClamp, vUV.xy, fMipLevel),
+        depthBuffer.SampleLevel(g_pointClamp, vUV.zy, fMipLevel),
+        depthBuffer.SampleLevel(g_pointClamp, vUV.zw, fMipLevel),
+        depthBuffer.SampleLevel(g_pointClamp, vUV.xw, fMipLevel));
+
+    const float fMaxOcclusionDepth = max(max(occlusionDepth.x, occlusionDepth.y), max(occlusionDepth.z, occlusionDepth.w));
+    fullyCulled = fMaxOcclusionDepth < boundingSphereDepth - scaledBoundingRadius;
+}
+
 #endif // OCCLUSION_CULLING_HLSLI

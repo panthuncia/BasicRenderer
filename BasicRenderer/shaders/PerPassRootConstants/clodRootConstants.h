@@ -30,4 +30,10 @@
 #define CLOD_WORKGRAPH_TELEMETRY_DESCRIPTOR_INDEX UintRootConstant10 // aliased
 #define CLOD_WORKGRAPH_TELEMETRY_ENABLED UintRootConstant9 // aliased
 
+// Work graph occlusion replay resources (hierarchical culling pass)
+#define CLOD_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX UintRootConstant5 // aliased
+#define CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX UintRootConstant6 // aliased
+#define CLOD_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX UintRootConstant7 // aliased
+#define CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX UintRootConstant8 // aliased
+
 #endif // CLOD_ROOT_CONSTANTS_H

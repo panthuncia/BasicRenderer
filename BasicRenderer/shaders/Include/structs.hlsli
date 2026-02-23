@@ -232,6 +232,58 @@ struct Cluster {
     uint pad[2];
 };
 
+static const uint CLOD_REPLAY_RECORD_TYPE_NODE = 0;
+static const uint CLOD_REPLAY_RECORD_TYPE_GROUP = 1;
+static const uint CLOD_REPLAY_BUFFER_SIZE_BYTES = 8u * 1024u * 1024u;
+
+struct CLodNodeGroupReplayRecord
+{
+    uint type;
+    uint instanceIndex;
+    uint viewId;
+    uint nodeOrGroupId;
+};
+
+struct CLodMeshletReplayRecord
+{
+    uint instanceIndex;
+    uint viewId;
+    uint groupId;
+    uint localMeshletIndex;
+};
+
+struct CLodReplayBufferState
+{
+    uint nodeGroupWriteOffsetBytes;
+    uint meshletWriteOffsetBytes;
+    uint nodeGroupDroppedRecords;
+    uint meshletDroppedRecords;
+};
+
+struct CLodViewDepthSRVIndex
+{
+    uint cameraBufferIndex;
+    uint linearDepthSRVIndex;
+    uint pad0;
+    uint pad1;
+};
+
+struct CLodNodeGpuInput
+{
+    uint entrypointIndex;
+    uint numRecords;
+    uint64_t recordsAddress;
+    uint64_t recordStride;
+};
+
+struct CLodMultiNodeGpuInput
+{
+    uint numNodeInputs;
+    uint pad0;
+    uint64_t nodeInputsAddress;
+    uint64_t nodeInputStride;
+};
+
 struct GTAOConstants {
     uint2 ViewportSize;
     float2 ViewportPixelSize; // .zw == 1.0 / ViewportSize.xy

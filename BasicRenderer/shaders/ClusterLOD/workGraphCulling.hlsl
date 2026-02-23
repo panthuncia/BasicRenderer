@@ -3,6 +3,7 @@
 #include "include/structs.hlsli"
 #include "include/indirectCommands.hlsli"
 #include "include/waveIntrinsicsHelpers.hlsli"
+#include "include/occlusionCulling.hlsli"
 #include "PerPassRootConstants/clodRootConstants.h"
 
 struct MeshInstanceClodOffsets
@@ -146,6 +147,56 @@ void WGTelemetryAdd(uint counterIndex, uint value)
     InterlockedAdd(telemetryCounters[counterIndex], value);
 }
 
+bool ReplayTryAppendNodeGroup(uint type, uint instanceIndex, uint viewId, uint nodeOrGroupId)
+{
+    RWByteAddressBuffer replayBuffer = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodReplayBufferState> replayState = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
+
+    const uint recordSize = sizeof(CLodNodeGroupReplayRecord);
+
+    uint oldWrite = 0;
+    InterlockedAdd(replayState[0].nodeGroupWriteOffsetBytes, recordSize, oldWrite);
+
+    const uint newWrite = oldWrite + recordSize;
+    const uint meshletWrite = replayState[0].meshletWriteOffsetBytes;
+    const bool valid = (newWrite <= CLOD_REPLAY_BUFFER_SIZE_BYTES) && (newWrite <= meshletWrite);
+
+    if (!valid) {
+        InterlockedAdd(replayState[0].nodeGroupDroppedRecords, 1u);
+        return false;
+    }
+
+    replayBuffer.Store4(oldWrite, uint4(type, instanceIndex, viewId, nodeOrGroupId));
+    return true;
+}
+
+bool ReplayTryAppendMeshlet(uint instanceIndex, uint viewId, uint groupId, uint localMeshletIndex)
+{
+    RWByteAddressBuffer replayBuffer = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodReplayBufferState> replayState = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
+
+    const uint recordSize = sizeof(CLodMeshletReplayRecord);
+
+    uint oldWrite = 0;
+    InterlockedAdd(replayState[0].meshletWriteOffsetBytes, 0u - recordSize, oldWrite);
+
+    const uint newWrite = oldWrite - recordSize;
+    const uint nodeWrite = replayState[0].nodeGroupWriteOffsetBytes;
+    const bool valid =
+        (oldWrite <= CLOD_REPLAY_BUFFER_SIZE_BYTES) &&
+        (oldWrite >= recordSize) &&
+        (newWrite <= CLOD_REPLAY_BUFFER_SIZE_BYTES) &&
+        (newWrite >= nodeWrite);
+
+    if (!valid) {
+        InterlockedAdd(replayState[0].meshletDroppedRecords, 1u);
+        return false;
+    }
+
+    replayBuffer.Store4(newWrite, uint4(instanceIndex, viewId, groupId, localMeshletIndex));
+    return true;
+}
+
 // ----- records -----
 struct ObjectCullRecord
 {
@@ -182,6 +233,93 @@ struct MeshletBucketRecord
 
     uint3 dispatchGrid : SV_DispatchGrid; // drives broadcasting node launch
 };
+
+// Phase-2 entry: replay queued node/group work items.
+[Shader("node")]
+[NodeID("ReplayNodeGroup")]
+[NodeLaunch("coalescing")]
+[NumThreads(32, 1, 1)]
+[NodeIsProgramEntry]
+void WG_ReplayNodeGroup(
+    [MaxRecords(32)] GroupNodeInputRecords<CLodNodeGroupReplayRecord> inRecs,
+    uint3 gtid : SV_GroupThreadID,
+    [MaxRecords(32)] NodeOutput<TraverseNodeRecord> TraverseNodes,
+    [MaxRecords(32)] NodeOutput<GroupEvalRecord> GroupEvaluate)
+{
+    const uint lane = gtid.x;
+    const uint inputCount = inRecs.Count();
+    const bool inRange = lane < inputCount;
+
+    bool emitTraverse = false;
+    bool emitGroup = false;
+    TraverseNodeRecord traverseRecord = (TraverseNodeRecord)0;
+    GroupEvalRecord groupRecord = (GroupEvalRecord)0;
+
+    if (inRange) {
+        const CLodNodeGroupReplayRecord rec = inRecs[lane];
+        if (rec.type == CLOD_REPLAY_RECORD_TYPE_NODE) {
+            emitTraverse = true;
+            traverseRecord.instanceIndex = rec.instanceIndex;
+            traverseRecord.nodeId = rec.nodeOrGroupId;
+            traverseRecord.viewId = rec.viewId;
+        }
+        else {
+            emitGroup = true;
+            groupRecord.instanceIndex = rec.instanceIndex;
+            groupRecord.groupId = rec.nodeOrGroupId;
+            groupRecord.viewId = rec.viewId;
+        }
+    }
+
+    ThreadNodeOutputRecords<TraverseNodeRecord> outTraverse =
+        TraverseNodes.GetThreadNodeOutputRecords(emitTraverse ? 1 : 0);
+    ThreadNodeOutputRecords<GroupEvalRecord> outGroup =
+        GroupEvaluate.GetThreadNodeOutputRecords(emitGroup ? 1 : 0);
+
+    if (emitTraverse) {
+        outTraverse.Get() = traverseRecord;
+    }
+
+    if (emitGroup) {
+        outGroup.Get() = groupRecord;
+    }
+
+    outTraverse.OutputComplete();
+    outGroup.OutputComplete();
+}
+
+// Phase-2 entry: replay queued meshlet work items.
+[Shader("node")]
+[NodeID("ReplayMeshlet")]
+[NodeLaunch("coalescing")]
+[NumThreads(32, 1, 1)]
+[NodeIsProgramEntry]
+void WG_ReplayMeshlet(
+    [MaxRecords(32)] GroupNodeInputRecords<CLodMeshletReplayRecord> inRecs,
+    uint3 gtid : SV_GroupThreadID,
+    [MaxRecords(32)] NodeOutput<MeshletBucketRecord> ClusterCullBuckets)
+{
+    const uint lane = gtid.x;
+    const uint inputCount = inRecs.Count();
+    const bool emitBucket = lane < inputCount;
+
+    ThreadNodeOutputRecords<MeshletBucketRecord> outBucket =
+        ClusterCullBuckets.GetThreadNodeOutputRecords(emitBucket ? 1 : 0);
+
+    if (emitBucket) {
+        const CLodMeshletReplayRecord rec = inRecs[lane];
+        MeshletBucketRecord bucket = (MeshletBucketRecord)0;
+        bucket.instanceIndex = rec.instanceIndex;
+        bucket.viewId = rec.viewId;
+        bucket.groupId = rec.groupId;
+        bucket.childFirstLocalMeshletIndex = rec.localMeshletIndex;
+        bucket.childLocalMeshletCount = 1;
+        bucket.dispatchGrid = uint3(1, 1, 1);
+        outBucket.Get() = bucket;
+    }
+
+    outBucket.OutputComplete();
+}
 
 // struct MeshletWorkRecord
 // {
@@ -588,6 +726,7 @@ void WG_GroupEvaluate(
     ClusterLODChild child = (ClusterLODChild) 0;
     bool generatingGroupWantsTraversal = false;
     bool forceBucket = false;
+    bool replayedOccludedRefinedGroup = false;
 
     if (activeChild) {
         StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
@@ -634,7 +773,34 @@ void WG_GroupEvaluate(
                 perFrameBuffer.screenResY,
                 cam.zNear);
 
-            generatingGroupWantsTraversal = !refinedCulled && (px > cam.errorPixels);
+            bool occlusionCulled = false;
+            if (!refinedCulled && !camera.isOrtho) {
+                StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
+                    ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
+                const uint depthMapDescriptorIndex = viewDepthSRVIndices[s.viewId].linearDepthSRVIndex;
+                if (depthMapDescriptorIndex != 0) {
+                    OcclusionCullingPerspectiveTexture2D(
+                        occlusionCulled,
+                        camera,
+                        refinedViewSpaceCenter,
+                        -refinedViewSpaceCenter.z,
+                        worldRadius,
+                        depthMapDescriptorIndex);
+                }
+            }
+
+            if (occlusionCulled) {
+                ReplayTryAppendNodeGroup(
+                    CLOD_REPLAY_RECORD_TYPE_GROUP,
+                    s.instanceIndex,
+                    s.viewId,
+                    (uint) child.refinedGroup);
+                replayedOccludedRefinedGroup = true;
+                generatingGroupWantsTraversal = false;
+            }
+            else {
+                generatingGroupWantsTraversal = !refinedCulled && (px > cam.errorPixels);
+            }
             if (generatingGroupWantsTraversal) {
                 WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_REFINED_TRAVERSAL_THREADS, 1);
             }
@@ -643,7 +809,8 @@ void WG_GroupEvaluate(
 
     // Emit one record per terminal child bucket.
     const bool emitBucket = activeChild && (child.localMeshletCount != 0)
-        && (forceBucket || !generatingGroupWantsTraversal);
+        && (forceBucket || !generatingGroupWantsTraversal)
+        && !replayedOccludedRefinedGroup;
     if (emitBucket) {
         WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_EMIT_BUCKET_THREADS, 1);
     }
@@ -727,13 +894,38 @@ void WG_ClusterCullBuckets(
 
         const ClusterLODGroup grp = groups[off.groupsBase + b.groupId];
         const uint localMeshlet = b.childFirstLocalMeshletIndex + i;
-        meshletId = grp.firstMeshlet + localMeshlet;
+        const uint localMeshletId = grp.firstMeshlet + localMeshlet;
+        meshletId = off.meshletsBase + localMeshletId;
 
-        const BoundingSphere meshletBounds = meshletBoundsBuffer[meshletId];
+        const BoundingSphere meshletBounds = meshletBoundsBuffer[off.meshletBoundsBase + localMeshletId];
         const float3 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, camera.view);
         const float meshletRadiusWorld = meshletBounds.sphere.w * MaxAxisScale_RowVector(objectModelMatrix);
 
         survives = !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, camera);
+
+        if (survives && !camera.isOrtho) {
+            StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
+                ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
+            const uint depthMapDescriptorIndex = viewDepthSRVIndices[b.viewId].linearDepthSRVIndex;
+            if (depthMapDescriptorIndex != 0) {
+                bool occlusionCulled = false;
+                OcclusionCullingPerspectiveTexture2D(
+                    occlusionCulled,
+                    camera,
+                    meshletCenterViewSpace,
+                    -meshletCenterViewSpace.z,
+                    meshletRadiusWorld,
+                    depthMapDescriptorIndex);
+                if (occlusionCulled) {
+                    ReplayTryAppendMeshlet(
+                        b.instanceIndex,
+                        b.viewId,
+                        b.groupId,
+                        b.childFirstLocalMeshletIndex + i);
+                    survives = false;
+                }
+            }
+        }
     }
 
     const bool contributes = inRange && survives;

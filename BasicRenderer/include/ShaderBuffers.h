@@ -307,6 +307,53 @@ struct ClusterLODGroup
     uint32_t pad = 0;
 };
 
+enum class CLodReplayRecordType : uint32_t {
+    Node = 0,
+    Group = 1,
+};
+
+struct CLodNodeGroupReplayRecord {
+    uint32_t type = 0; // CLodReplayRecordType
+    uint32_t instanceIndex = 0;
+    uint32_t viewId = 0;
+    uint32_t nodeOrGroupId = 0;
+};
+
+struct CLodMeshletReplayRecord {
+    uint32_t instanceIndex = 0;
+    uint32_t viewId = 0;
+    uint32_t groupId = 0;
+    uint32_t localMeshletIndex = 0;
+};
+
+struct CLodReplayBufferState {
+    uint32_t nodeGroupWriteOffsetBytes = 0;
+    uint32_t meshletWriteOffsetBytes = 0;
+    uint32_t nodeGroupDroppedRecords = 0;
+    uint32_t meshletDroppedRecords = 0;
+};
+
+struct CLodViewDepthSRVIndex {
+    uint32_t cameraBufferIndex = 0;
+    uint32_t linearDepthSRVIndex = 0;
+    uint32_t pad0 = 0;
+    uint32_t pad1 = 0;
+};
+
+struct CLodNodeGpuInput {
+    uint32_t entrypointIndex = 0;
+    uint32_t numRecords = 0;
+    uint64_t recordsAddress = 0;
+    uint64_t recordStride = 0;
+};
+
+struct CLodMultiNodeGpuInput {
+    uint32_t numNodeInputs = 0;
+    uint32_t pad0 = 0;
+    uint64_t nodeInputsAddress = 0;
+    uint64_t nodeInputStride = 0;
+};
+
 struct VisibleCluster {
     unsigned int viewID;
     unsigned int instanceID;
@@ -362,6 +409,7 @@ enum MiscUintRootConstants { // Used for pass-specific one-off constants
 	UintRootConstant8,
 	UintRootConstant9,
 	UintRootConstant10,
+    UintRootConstant11,
 	NumMiscUintRootConstants
 };
 

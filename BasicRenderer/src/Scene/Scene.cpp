@@ -467,7 +467,9 @@ void Scene::PostUpdate() {
 }
 
 std::shared_ptr<Scene> Scene::AppendScene(std::shared_ptr<Scene> scene) {
-
+	if (!scene) {
+		return nullptr;
+	}
 	auto root = scene->GetRoot();
 
 	root.child_of(ECSSceneRoot);

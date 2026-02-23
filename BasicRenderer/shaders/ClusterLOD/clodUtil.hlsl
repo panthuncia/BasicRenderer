@@ -46,6 +46,32 @@ void CreateRasterBucketsHistogramCommandCSMain()
     outCommand[0].dispatchX = dispatchX;
     outCommand[0].dispatchY = dispatchY;
     outCommand[0].dispatchZ = 1;
+
+    StructuredBuffer<CLodReplayBufferState> replayStateBuffer = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodNodeGpuInput> nodeInputs = ResourceDescriptorHeap[CLOD_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX];
+
+    const CLodReplayBufferState replayState = replayStateBuffer[0];
+
+    const uint nodeGroupRecordStride = sizeof(CLodNodeGroupReplayRecord);
+    const uint meshletRecordStride = sizeof(CLodMeshletReplayRecord);
+    uint nodeGroupRecordCount = replayState.nodeGroupWriteOffsetBytes / nodeGroupRecordStride;
+    nodeGroupRecordCount = (nodeGroupRecordCount > replayState.nodeGroupDroppedRecords)
+        ? (nodeGroupRecordCount - replayState.nodeGroupDroppedRecords)
+        : 0u;
+
+    uint meshletRecordCount = 0;
+    if (replayState.meshletWriteOffsetBytes <= CLOD_REPLAY_BUFFER_SIZE_BYTES)
+    {
+        meshletRecordCount = (CLOD_REPLAY_BUFFER_SIZE_BYTES - replayState.meshletWriteOffsetBytes) / meshletRecordStride;
+    }
+    meshletRecordCount = (meshletRecordCount > replayState.meshletDroppedRecords)
+        ? (meshletRecordCount - replayState.meshletDroppedRecords)
+        : 0u;
+
+    // Slot 0 is CLodMultiNodeGpuInput (CPU initialized); slot 1+ are CLodNodeGpuInput records.
+    nodeInputs[1].numRecords = nodeGroupRecordCount;
+    nodeInputs[2].numRecords = meshletRecordCount;
+    nodeInputs[2].recordsAddress = nodeInputs[2].recordsAddress - (uint64_t(meshletRecordCount) * uint64_t(meshletRecordStride));
 }
 
 // IndirectCommandSignatureRootConstant0 = cluster count

@@ -1,8 +1,12 @@
 #include "Managers/ViewManager.h"
 
+#include <algorithm>
+
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/IndirectCommandBufferManager.h"
 #include "Resources/ResourceGroup.h"
+#include "Resources/PixelBuffer.h"
+#include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "../../generated/BuiltinResources.h"
 #include "Resources/DynamicResource.h"
 #include "Resources/MemoryStatisticsComponents.h"
@@ -11,10 +15,13 @@ ViewManager::ViewManager() {
     auto& resourceManager = ResourceManager::GetInstance();
     m_cameraBuffer = LazyDynamicStructuredBuffer<CameraInfo>::CreateShared(1, "cameraBuffer<ViewManager>");
 	m_cullingCameraBuffer = LazyDynamicStructuredBuffer<CullingCameraInfo>::CreateShared(1, "cullingCameraBuffer<ViewManager>");
+    m_lastFrameLinearDepthGroup = std::make_shared<ResourceGroup>("LastFrameLinearDepthMaps");
 
     // Register provided resources
     m_resources[Builtin::CameraBuffer] = m_cameraBuffer;
 	m_resources[Builtin::CullingCameraBuffer] = m_cullingCameraBuffer;
+    m_resolvers[Builtin::LastFrameLinearDepthMaps] =
+        std::make_shared<ResourceGroupResolver>(m_lastFrameLinearDepthGroup);
 }
 
 void ViewManager::SetIndirectCommandBufferManager(IndirectCommandBufferManager* manager) {
@@ -80,6 +87,28 @@ void ViewManager::DestroyView(uint64_t viewID) {
     m_cameraBuffer->Remove(v.gpu.cameraBufferView.get());
 	m_cullingCameraBuffer->Remove(v.gpu.cullingCameraBufferView.get());
 
+    if (v.gpu.linearDepthMap) {
+        const uint64_t sourceID = v.gpu.linearDepthMap->GetGlobalResourceID();
+        bool stillReferenced = false;
+        for (const auto& [otherViewID, otherView] : m_views) {
+            if (otherViewID == viewID || !otherView.gpu.linearDepthMap) {
+                continue;
+            }
+            if (otherView.gpu.linearDepthMap->GetGlobalResourceID() == sourceID) {
+                stillReferenced = true;
+                break;
+            }
+        }
+
+        if (!stillReferenced) {
+            auto it = m_lastFrameLinearDepthBySource.find(sourceID);
+            if (it != m_lastFrameLinearDepthBySource.end()) {
+                m_lastFrameLinearDepthGroup->RemoveResource(it->second.get());
+                m_lastFrameLinearDepthBySource.erase(it);
+            }
+        }
+    }
+
     m_views.erase(it);
     if (m_events.onDestroyed) m_events.onDestroyed(viewID);
 }
@@ -91,6 +120,24 @@ void ViewManager::AttachDepth(uint64_t viewID,
     if (!v) return;
     v->gpu.depthMap = depth;
     v->gpu.linearDepthMap = linearDepth;
+    v->gpu.lastFrameLinearDepthMap.reset();
+
+    if (linearDepth) {
+        const uint64_t sourceID = linearDepth->GetGlobalResourceID();
+        auto it = m_lastFrameLinearDepthBySource.find(sourceID);
+        if (it == m_lastFrameLinearDepthBySource.end()) {
+            auto desc = linearDepth->GetDescription();
+            auto history = PixelBuffer::CreateShared(desc);
+            history->SetName("Last Frame Linear Depth");
+            m_lastFrameLinearDepthBySource[sourceID] = history;
+            m_lastFrameLinearDepthGroup->AddResource(history);
+            v->gpu.lastFrameLinearDepthMap = history;
+        }
+        else {
+            v->gpu.lastFrameLinearDepthMap = it->second;
+        }
+    }
+
     if (m_events.onDepthAttached) {
         m_events.onDepthAttached(*v);
     }
