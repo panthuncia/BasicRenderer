@@ -173,7 +173,7 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
 
         VisibleCluster clusterData = visibleClusterBuffer[clusterIndex];
         d.drawcallAndMeshlet.x = clusterData.instanceID;
-        d.drawcallAndMeshlet.y = clusterData.meshletID;
+        d.drawcallAndMeshlet.y = clusterData.globalMeshletIndex;
 
         PerMeshInstanceBuffer inst = perMeshInstanceBuffer[d.drawcallAndMeshlet.x];
         d.objAndMesh = uint2(inst.perObjectBufferIndex, inst.perMeshBufferIndex);
@@ -183,7 +183,7 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
 //#if defined(VISBUF_USE_CLOD_MESHLETS)
         d.meshInfo = uint4(mesh.vertexByteSize, mesh.vertexFlags, mesh.numVertices, mesh.clodMeshletTrianglesBufferOffset);
         d.meshletVerticesBufferOffset = mesh.clodMeshletVerticesBufferOffset;
-        Meshlet m = meshletBuffer[mesh.clodMeshletBufferOffset + d.drawcallAndMeshlet.y];
+        Meshlet m = meshletBuffer[d.drawcallAndMeshlet.y];
 // #else
 //         d.meshInfo = uint4(mesh.vertexByteSize, mesh.vertexFlags, mesh.numVertices, mesh.meshletTrianglesBufferOffset);
 //         d.meshletVerticesBufferOffset = mesh.meshletVerticesBufferOffset;

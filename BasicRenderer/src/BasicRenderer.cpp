@@ -335,6 +335,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto carScene = LoadModel("models/porche.glb");
     //carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
     //carScene->GetRoot().set<Components::Position>({ 1.0, 0.0, 1.0 });
+    auto sphereScene = LoadModel("models/sphere.glb");
+
 
 	auto mountainScene = LoadModel("models/terrain.glb");
 	mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
@@ -353,8 +355,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //auto robot = LoadModel("models/robot.usdz");
 
-	auto sphereScene = LoadModel("models/sphere.glb");
-
 
     renderer.SetCurrentScene(baseScene);
 
@@ -364,6 +364,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(carScene->Clone());
     renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
+
+    mountainScene = LoadModel("models/terrain.glb");
+    mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
+    mountainScene->GetRoot().set<Components::Position>({ 0.0, -10.0, 0.0 });
+	renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
+
     //renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 	//renderer.GetCurrentScene()->AppendScene(shiba->Clone());
 

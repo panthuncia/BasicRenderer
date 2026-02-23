@@ -327,7 +327,7 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
 
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
 
-    setup.meshletIndex = cluster.meshletID;
+    setup.meshletIndex = cluster.globalMeshletIndex;
     setup.meshInstanceBuffer = meshInstanceBuffer[cluster.instanceID];
     setup.viewID = cluster.viewID;
 

@@ -866,7 +866,7 @@ void WG_ClusterCullBuckets(
         WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_ACTIVE_LANES, inRangeLaneCount);
     }
 
-    uint meshletId = 0;
+    uint globalMeshletIndex = 0;
     bool survives = false;
 
     if (inRange) {
@@ -895,7 +895,7 @@ void WG_ClusterCullBuckets(
         const ClusterLODGroup grp = groups[off.groupsBase + b.groupId];
         const uint localMeshlet = b.childFirstLocalMeshletIndex + i;
         const uint localMeshletId = grp.firstMeshlet + localMeshlet;
-        meshletId = off.meshletsBase + localMeshletId;
+        globalMeshletIndex = off.meshletsBase + localMeshletId;
 
         const BoundingSphere meshletBounds = meshletBoundsBuffer[off.meshletBoundsBase + localMeshletId];
         const float3 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, camera.view);
@@ -963,7 +963,7 @@ void WG_ClusterCullBuckets(
 
             VisibleCluster vc = (VisibleCluster) 0;
             vc.instanceID = b.instanceIndex;
-            vc.meshletID = meshletId;
+            vc.globalMeshletIndex = globalMeshletIndex;
             vc.viewID = b.viewId;
             visibleClusters[index] = vc;
         }

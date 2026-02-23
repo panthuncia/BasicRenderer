@@ -104,7 +104,7 @@ bool InitializeMeshletInternalCLod(
     VisibleCluster cluster = visibleClusters[visibleMeshletIndex];
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
 
-    setup.meshletIndex = cluster.meshletID;
+    setup.meshletIndex = cluster.globalMeshletIndex;
     setup.meshInstanceBuffer =  meshInstanceBuffer[cluster.instanceID];
     setup.viewID = cluster.viewID;
 
@@ -172,7 +172,7 @@ bool InitializeMeshletFromVisibleCluster(uint visibleClusterIndex, out MeshletSe
 
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     PerMeshInstanceBuffer meshInstance = meshInstanceBuffer[cluster.instanceID];
-    return InitializeMeshletInternal(cluster.meshletID, meshInstance, setup);
+    return InitializeMeshletInternal(cluster.globalMeshletIndex, meshInstance, setup);
 }
 
 uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
