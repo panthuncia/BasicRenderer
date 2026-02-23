@@ -550,7 +550,9 @@ private:
                     Builtin::PerMeshInstanceBuffer,
                     Builtin::PerObjectBuffer,
                     Builtin::CameraBuffer,
-                    Builtin::PerMeshBuffer)
+                    Builtin::PerMeshBuffer,
+                    Builtin::PrimaryCamera::LinearDepthMap, 
+                    Builtin::Shadows::LinearShadowMaps)
                 .WithShaderResource(ECSResourceResolver(drawSetIndicesQuery));
 
         }
