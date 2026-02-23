@@ -233,9 +233,7 @@ void BuildGBufferPipeline(RenderGraph* graph) {
         graph->BuildComputePass("EvaluateMaterialGroupsPass")
             .Build<EvaluateMaterialGroupsPass>();
 
-        // Copy depth to a separate resource for post-processing use
-        graph->BuildComputePass("PrimaryDepthCopyPass1")
-            .Build<PrimaryDepthCopyPass>();
+        // PrimaryDepthCopyPass is disabled for CLod two-phase path.
     }
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <rhi.h>
+#include <rhi_interop_dx12.h>
 #include <cstring>
 
 #include "Render/RenderGraph/RenderGraph.h"
@@ -8,6 +9,7 @@
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "Resources/Buffers/Buffer.h"
+#include "RenderPasses/FidelityFX/Downsample.h"
 #include "ShaderBuffers.h"
 #include "../shaders/PerPassRootConstants/clodRootConstants.h"
 
@@ -151,6 +153,15 @@ public:
         m_rasterBucketsIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
         m_rasterBucketsIndirectArgsBuffer->SetName("CLod Raster bucket indirect args");
 
+        m_visibleClustersCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
+        m_visibleClustersCounterBufferPhase2->SetName("CLod Visible Clusters Counter Buffer Phase2");
+
+        m_rasterBucketsHistogramBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+        m_rasterBucketsHistogramBufferPhase2->SetName("Raster bucket histogram phase2");
+
+        m_rasterBucketsWriteCursorBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+        m_rasterBucketsWriteCursorBufferPhase2->SetName("CLod Raster bucket write cursor phase2");
+
         m_type = type;
     }
 
@@ -159,12 +170,16 @@ public:
     }
 
     void GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override {
-        // Add the hierarchical culling pass
+
+        // First hierarchial culling pass
+        // Occlusion culls based on last frame's depth buffer
+        // Anything that fails only occlusion test gets sent to phase 2 
+        // Any clusters that pass gets written out as a visible cluster
         RenderGraph::ExternalPassDesc cullPassDesc;
-        cullPassDesc.type = RenderGraph::PassType::Render;
-        cullPassDesc.name = "CLod::HierarchialCullingPass";
+        cullPassDesc.type = RenderGraph::PassType::Compute;
+        cullPassDesc.name = "CLod::HierarchialCullingPass1";
         HierarchialCullingPassInputs cullPassInputs;
-        cullPassInputs.isFirstPass = true; // For now, always true
+        cullPassInputs.isFirstPass = true;
         cullPassDesc.pass = std::make_shared<HierarchialCullingPass>(
             cullPassInputs,
             m_visibleClustersBuffer,
@@ -178,9 +193,10 @@ public:
         cullPassDesc.where = RenderGraph::ExternalInsertPoint::After("SkinningPass");
         outPasses.push_back(std::move(cullPassDesc));
 
+		// Histogram + prefix sum passes to prepare for indirect dispatch rasterization
         RenderGraph::ExternalPassDesc histogramPassDesc;
         histogramPassDesc.type = RenderGraph::PassType::Compute;
-        histogramPassDesc.name = "CLod::RasterBucketsHistogramPass";
+        histogramPassDesc.name = "CLod::RasterBucketsHistogramPass1";
         histogramPassDesc.pass = std::make_shared<RasterBucketHistogramPass>(
             m_visibleClustersBuffer,
             m_visibleClustersCounterBuffer,
@@ -190,7 +206,7 @@ public:
 
         RenderGraph::ExternalPassDesc prefixScanPassDesc;
         prefixScanPassDesc.type = RenderGraph::PassType::Compute;
-        prefixScanPassDesc.name = "CLod::RasterBucketsPrefixScanPass";
+        prefixScanPassDesc.name = "CLod::RasterBucketsPrefixScanPass1";
         prefixScanPassDesc.pass = std::make_shared<RasterBucketBlockScanPass>(
             m_rasterBucketsHistogramBuffer,
             m_rasterBucketsOffsetsBuffer,
@@ -199,7 +215,7 @@ public:
 
         RenderGraph::ExternalPassDesc prefixOffsetsPassDesc;
         prefixOffsetsPassDesc.type = RenderGraph::PassType::Compute;
-        prefixOffsetsPassDesc.name = "CLod::RasterBucketsPrefixOffsetsPass";
+        prefixOffsetsPassDesc.name = "CLod::RasterBucketsPrefixOffsetsPass1";
         prefixOffsetsPassDesc.pass = std::make_shared<RasterBucketBlockOffsetsPass>(
             m_rasterBucketsOffsetsBuffer,
             m_rasterBucketsBlockSumsBuffer,
@@ -209,11 +225,11 @@ public:
 
         RenderGraph::ExternalPassDesc compactPassDesc;
         compactPassDesc.type = RenderGraph::PassType::Compute;
-        compactPassDesc.name = "CLod::RasterBucketsCompactAndArgsPass";
+        compactPassDesc.name = "CLod::RasterBucketsCompactAndArgsPass1";
         compactPassDesc.pass = std::make_shared<RasterBucketCompactAndArgsPass>(
             m_visibleClustersBuffer,
             m_visibleClustersCounterBuffer,
-            m_histogramIndirectCommand, // Reused for cluster compaction
+            m_histogramIndirectCommand,
             m_rasterBucketsHistogramBuffer,
             m_rasterBucketsOffsetsBuffer,
             m_rasterBucketsWriteCursorBuffer,
@@ -222,10 +238,10 @@ public:
             m_maxVisibleClusters);
         outPasses.push_back(std::move(compactPassDesc));
 
+		// First rasterization pass, using indirect args from histogram compaction
         RenderGraph::ExternalPassDesc rasterizePassDesc;
         rasterizePassDesc.type = RenderGraph::PassType::Render;
-        rasterizePassDesc.name = "CLod::RasterizeClustersPass";
-        rasterizePassDesc.where = RenderGraph::ExternalInsertPoint::Before("MaterialHistogramPass");
+        rasterizePassDesc.name = "CLod::RasterizeClustersPass1";
         ClusterRasterizationPassInputs rasterizePassInputs;
         rasterizePassInputs.clearGbuffer = true;
         rasterizePassInputs.wireframe = false;
@@ -236,6 +252,112 @@ public:
             m_rasterBucketsIndirectArgsBuffer);
         rasterizePassDesc.isGeometryPass = true;
         outPasses.push_back(std::move(rasterizePassDesc));
+
+        // If we are writing a visibility buffer, we need to extract depth before downsample
+        if (m_type != CLodExtensionType::Shadow) {
+            RenderGraph::ExternalPassDesc depthCopyPassDesc;
+            depthCopyPassDesc.type = RenderGraph::PassType::Compute;
+            depthCopyPassDesc.name = "CLod::LinearDepthCopyPass1";
+            depthCopyPassDesc.pass = std::make_shared<PerViewLinearDepthCopyPass>();
+            outPasses.push_back(std::move(depthCopyPassDesc));
+        }
+
+		// Build HZB for occlusion culling in phase 2
+        RenderGraph::ExternalPassDesc downsamplePassDesc;
+        downsamplePassDesc.type = RenderGraph::PassType::Compute;
+        downsamplePassDesc.name = "CLod::LinearDepthDownsamplePass1";
+        downsamplePassDesc.pass = std::make_shared<DownsamplePass>();
+        outPasses.push_back(std::move(downsamplePassDesc));
+
+		// Second hierarchial culling pass
+		// Anything that failed only occlusion in the first pass gets another chance,
+		// using the HZB built from this frame's depth buffer
+        RenderGraph::ExternalPassDesc cullPassDesc2;
+        cullPassDesc2.type = RenderGraph::PassType::Render;
+        cullPassDesc2.name = "CLod::HierarchialCullingPass2";
+        HierarchialCullingPassInputs cullPassInputs2;
+        cullPassInputs2.isFirstPass = false;
+        cullPassDesc2.pass = std::make_shared<HierarchialCullingPass>(
+            cullPassInputs2,
+            m_visibleClustersBuffer,
+            m_visibleClustersCounterBufferPhase2,
+            m_histogramIndirectCommand,
+            m_workGraphTelemetryBuffer,
+            m_occlusionReplayBuffer,
+            m_occlusionReplayStateBuffer,
+            m_occlusionNodeGpuInputsBuffer,
+            m_viewDepthSrvIndicesBuffer);
+        outPasses.push_back(std::move(cullPassDesc2));
+
+		// Histogram + prefix sum passes again
+        RenderGraph::ExternalPassDesc histogramPassDesc2;
+        histogramPassDesc2.type = RenderGraph::PassType::Compute;
+        histogramPassDesc2.name = "CLod::RasterBucketsHistogramPass2";
+        histogramPassDesc2.pass = std::make_shared<RasterBucketHistogramPass>(
+            m_visibleClustersBuffer,
+            m_visibleClustersCounterBufferPhase2,
+            m_histogramIndirectCommand,
+            m_rasterBucketsHistogramBufferPhase2);
+        outPasses.push_back(std::move(histogramPassDesc2));
+
+        RenderGraph::ExternalPassDesc prefixScanPassDesc2;
+        prefixScanPassDesc2.type = RenderGraph::PassType::Compute;
+        prefixScanPassDesc2.name = "CLod::RasterBucketsPrefixScanPass2";
+        prefixScanPassDesc2.pass = std::make_shared<RasterBucketBlockScanPass>(
+            m_rasterBucketsHistogramBufferPhase2,
+            m_rasterBucketsOffsetsBuffer,
+            m_rasterBucketsBlockSumsBuffer);
+        outPasses.push_back(std::move(prefixScanPassDesc2));
+
+        RenderGraph::ExternalPassDesc prefixOffsetsPassDesc2;
+        prefixOffsetsPassDesc2.type = RenderGraph::PassType::Compute;
+        prefixOffsetsPassDesc2.name = "CLod::RasterBucketsPrefixOffsetsPass2";
+        prefixOffsetsPassDesc2.pass = std::make_shared<RasterBucketBlockOffsetsPass>(
+            m_rasterBucketsOffsetsBuffer,
+            m_rasterBucketsBlockSumsBuffer,
+            m_rasterBucketsScannedBlockSumsBuffer,
+            m_rasterBucketsTotalCountBuffer);
+        outPasses.push_back(std::move(prefixOffsetsPassDesc2));
+
+        RenderGraph::ExternalPassDesc compactPassDesc2;
+        compactPassDesc2.type = RenderGraph::PassType::Compute;
+        compactPassDesc2.name = "CLod::RasterBucketsCompactAndArgsPass2";
+        compactPassDesc2.pass = std::make_shared<RasterBucketCompactAndArgsPass>(
+            m_visibleClustersBuffer,
+            m_visibleClustersCounterBufferPhase2,
+            m_histogramIndirectCommand,
+            m_rasterBucketsHistogramBufferPhase2,
+            m_rasterBucketsOffsetsBuffer,
+            m_rasterBucketsWriteCursorBufferPhase2,
+            m_compactedVisibleClustersBuffer,
+            m_rasterBucketsIndirectArgsBuffer,
+            m_maxVisibleClusters);
+        outPasses.push_back(std::move(compactPassDesc2));
+
+		// Second rasterization pass, using indirect args from phase 2 histogram compaction
+        RenderGraph::ExternalPassDesc rasterizePassDesc2;
+        rasterizePassDesc2.type = RenderGraph::PassType::Render;
+        rasterizePassDesc2.name = "CLod::RasterizeClustersPass2";
+        rasterizePassDesc2.where = RenderGraph::ExternalInsertPoint::Before("MaterialHistogramPass");
+        ClusterRasterizationPassInputs rasterizePassInputs2;
+        rasterizePassInputs2.clearGbuffer = false;
+        rasterizePassInputs2.wireframe = false;
+        rasterizePassDesc2.pass = std::make_shared<ClusterRasterizationPass>(
+            rasterizePassInputs2,
+            m_compactedVisibleClustersBuffer,
+            m_rasterBucketsHistogramBufferPhase2,
+            m_rasterBucketsIndirectArgsBuffer);
+        rasterizePassDesc2.isGeometryPass = true;
+        outPasses.push_back(std::move(rasterizePassDesc2));
+
+        // Ensure linear depth contains any updates introduced by the second CLod raster pass
+        if (m_type != CLodExtensionType::Shadow) {
+            RenderGraph::ExternalPassDesc depthCopyPassDesc2;
+            depthCopyPassDesc2.type = RenderGraph::PassType::Compute;
+            depthCopyPassDesc2.name = "CLod::LinearDepthCopyPass2";
+            depthCopyPassDesc2.pass = std::make_shared<PerViewLinearDepthCopyPass>();
+            outPasses.push_back(std::move(depthCopyPassDesc2));
+        }
     }
 
 private:
@@ -262,10 +384,77 @@ private:
     std::shared_ptr<Buffer> m_rasterBucketsScannedBlockSumsBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsTotalCountBuffer;
 
+    // Phase-2 CPU-reset resources (duplicated to avoid pre-execute Update clobbering)
+    std::shared_ptr<Buffer> m_visibleClustersCounterBufferPhase2;
+    std::shared_ptr<Buffer> m_rasterBucketsHistogramBufferPhase2;
+    std::shared_ptr<Buffer> m_rasterBucketsWriteCursorBufferPhase2;
+
     // Compaction Pass Buffers
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsWriteCursorBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBuffer;
+
+    class PerViewLinearDepthCopyPass : public ComputePass {
+    public:
+        PerViewLinearDepthCopyPass() {
+            m_pso = PSOManager::GetInstance().MakeComputePipeline(
+                PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
+                L"shaders/gbuffer.hlsl",
+                L"PerViewPrimaryDepthCopyCS",
+                {},
+                "PerViewPrimaryDepthCopyPSO");
+        }
+
+        void DeclareResourceUsages(ComputePassBuilder* builder) override {
+            builder->WithShaderResource(Builtin::PrimaryCamera::VisibilityTexture)
+                .WithUnorderedAccess(Builtin::PrimaryCamera::LinearDepthMap, Builtin::Shadows::LinearShadowMaps);
+        }
+
+        void Setup() override {}
+
+        PassReturn Execute(PassExecutionContext& executionContext) override {
+            auto* renderContext = executionContext.hostData->Get<RenderContext>();
+            auto& context = *renderContext;
+            auto& commandList = executionContext.commandList;
+
+            commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
+            commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
+            commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
+
+            uint32_t rootConstants[NumMiscUintRootConstants] = {};
+
+            context.viewManager->ForEachView([&](uint64_t viewID) {
+                const auto* view = context.viewManager->Get(viewID);
+                if (!view || !view->gpu.visibilityBuffer || !view->gpu.linearDepthMap) {
+                    return;
+                }
+
+                rootConstants[UintRootConstant0] = view->gpu.visibilityBuffer->GetSRVInfo(0).slot.index;
+                rootConstants[UintRootConstant1] = view->gpu.linearDepthMap->GetUAVShaderVisibleInfo(0).slot.index;
+                rootConstants[UintRootConstant2] = view->gpu.visibilityBuffer->GetWidth();
+                rootConstants[UintRootConstant3] = view->gpu.visibilityBuffer->GetHeight();
+
+                commandList.PushConstants(
+                    rhi::ShaderStage::Compute,
+                    0,
+                    MiscUintRootSignatureIndex,
+                    0,
+                    NumMiscUintRootConstants,
+                    rootConstants);
+
+                const uint32_t groupsX = (rootConstants[UintRootConstant2] + 7u) / 8u;
+                const uint32_t groupsY = (rootConstants[UintRootConstant3] + 7u) / 8u;
+                commandList.Dispatch(groupsX, groupsY, 1);
+            });
+
+            return {};
+        }
+
+        void Cleanup() override {}
+
+    private:
+        PipelineState m_pso;
+    };
 
     // ---------------------------------------------------------------
     // Hierarchial Culling Pass
@@ -294,7 +483,7 @@ private:
         return seed;
     }
 
-    class HierarchialCullingPass : public RenderPass, public IDynamicDeclaredResources {
+    class HierarchialCullingPass : public ComputePass, public IDynamicDeclaredResources {
     public:
         HierarchialCullingPass(
             HierarchialCullingPassInputs inputs,
@@ -311,6 +500,7 @@ private:
                 PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
                 m_workGraph,
                 m_createCommandPipelineState);
+            m_isFirstPass = inputs.isFirstPass;
             auto memSize = m_workGraph->GetRequiredScratchMemorySize();
             m_scratchBuffer = Buffer::CreateShared( // TODO: Make a way for the graph to provide things like this, to allow for aliasing
                 rhi::HeapType::DeviceLocal,
@@ -330,7 +520,7 @@ private:
         ~HierarchialCullingPass() {
         }
 
-        void DeclareResourceUsages(RenderPassBuilder* builder) override {
+        void DeclareResourceUsages(ComputePassBuilder* builder) override {
             auto ecsWorld = ECSManager::GetInstance().GetWorld();
             flecs::query<> drawSetIndicesQuery = ecsWorld.query_builder<>()
                 .with<Components::IsActiveDrawSetIndices>()
@@ -391,33 +581,6 @@ private:
 
             commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
 
-            std::vector<ObjectCullRecord> cullRecords;
-
-            // Build cull records for all indirect buffers
-            // TODO: Non-opaque objects, and non-primary cameras
-            ViewFilter filter = ViewFilter::PrimaryCameras();
-            context.viewManager->ForEachFiltered(filter, [&](uint64_t view) {
-                auto viewInfo = context.viewManager->Get(view);
-                auto cameraBufferIndex = viewInfo->gpu.cameraBufferIndex;
-                auto workloads = context.indirectCommandBufferManager->GetViewIndirectBuffersForRenderPhase(view, m_renderPhase);
-                for (auto& wl : workloads) {
-                    auto count = wl.workload.count;
-                    if (count == 0) {
-                        continue;
-                    }
-                    ObjectCullRecord record{};
-                    record.viewDataIndex = cameraBufferIndex;
-                    record.activeDrawSetIndicesSRVIndex = context.objectManager->GetActiveDrawSetIndices(wl.flags)->GetSRVInfo(0).slot.index;
-                    record.activeDrawCount = count;
-                    // Calculate dispatch grid size (assuming 64 threads per group)
-                    record.dispatchGridX = static_cast<uint>((count + 63) / 64);
-                    record.dispatchGridY = 1;
-                    record.dispatchGridZ = 1;
-                    cullRecords.push_back(record);
-                }
-
-                });
-
             commandList.SetWorkGraph(m_workGraph->GetHandle(), m_scratchBuffer->GetAPIResource().GetHandle(), true); // Reset every time for now
 
             BindResourceDescriptorIndices(commandList, m_pipelineResources);
@@ -431,7 +594,7 @@ private:
             uintRootConstants[CLOD_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX] = m_occlusionReplayBuffer->GetUAVShaderVisibleInfo(0).slot.index;
             uintRootConstants[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetUAVShaderVisibleInfo(0).slot.index;
             uintRootConstants[CLOD_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            uintRootConstants[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX] = m_viewDepthSrvIndicesBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+            uintRootConstants[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX] = m_viewDepthSrvIndicesBuffer->GetSRVInfo(0).slot.index;
 
             commandList.PushConstants(
                 rhi::ShaderStage::Compute,
@@ -441,41 +604,85 @@ private:
                 NumMiscUintRootConstants,
                 uintRootConstants);
 
-            rhi::WorkGraphDispatchDesc dispatchDesc{};
-            dispatchDesc.dispatchMode = rhi::WorkGraphDispatchMode::NodeCpuInput;
-            dispatchDesc.nodeCpuInput.entryPointIndex = 0; // ObjectCull node
-            dispatchDesc.nodeCpuInput.pRecords = cullRecords.data();
-            dispatchDesc.nodeCpuInput.numRecords = static_cast<uint32_t>(cullRecords.size());
-            dispatchDesc.nodeCpuInput.recordByteStride = sizeof(ObjectCullRecord);
+            if (m_isFirstPass) {
+                std::vector<ObjectCullRecord> cullRecords;
 
-            // Builds list of visible clusters
-            commandList.DispatchWorkGraph(dispatchDesc);
+                ViewFilter filter = ViewFilter::PrimaryCameras();
+                context.viewManager->ForEachFiltered(filter, [&](uint64_t view) {
+                    auto viewInfo = context.viewManager->Get(view);
+                    auto cameraBufferIndex = viewInfo->gpu.cameraBufferIndex;
+                    auto workloads = context.indirectCommandBufferManager->GetViewIndirectBuffersForRenderPhase(view, m_renderPhase);
+                    for (auto& wl : workloads) {
+                        auto count = wl.workload.count;
+                        if (count == 0) {
+                            continue;
+                        }
+                        ObjectCullRecord record{};
+                        record.viewDataIndex = cameraBufferIndex;
+                        record.activeDrawSetIndicesSRVIndex = context.objectManager->GetActiveDrawSetIndices(wl.flags)->GetSRVInfo(0).slot.index;
+                        record.activeDrawCount = count;
+                        record.dispatchGridX = static_cast<uint>((count + 63) / 64);
+                        record.dispatchGridY = 1;
+                        record.dispatchGridZ = 1;
+                        cullRecords.push_back(record);
+                    }
+                    });
 
-            // UAV barrier on the visible cluster counter
-            rhi::BufferBarrier barrier{};
-            barrier.buffer = m_visibleClustersCounterBuffer->GetAPIResource().GetHandle();
-            barrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-            barrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
-            barrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
-            barrier.afterSync = rhi::ResourceSyncState::ComputeShading;
-            rhi::BarrierBatch bufferBarriers{};
-            bufferBarriers.buffers = rhi::Span<rhi::BufferBarrier>(&barrier, 1);
-            commandList.Barriers(bufferBarriers);
+                rhi::WorkGraphDispatchDesc dispatchDesc{};
+                dispatchDesc.dispatchMode = rhi::WorkGraphDispatchMode::NodeCpuInput;
+                dispatchDesc.nodeCpuInput.entryPointIndex = 0;
+                dispatchDesc.nodeCpuInput.pRecords = cullRecords.data();
+                dispatchDesc.nodeCpuInput.numRecords = static_cast<uint32_t>(cullRecords.size());
+                dispatchDesc.nodeCpuInput.recordByteStride = sizeof(ObjectCullRecord);
+                commandList.DispatchWorkGraph(dispatchDesc);
 
-            // Create indirect command buffer for cluster histogram
-            BindResourceDescriptorIndices(commandList, m_createCommandPipelineState.GetResourceDescriptorSlots());
+                rhi::BufferBarrier barrier{};
+                barrier.buffer = m_visibleClustersCounterBuffer->GetAPIResource().GetHandle();
+                barrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+                barrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+                barrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
+                barrier.afterSync = rhi::ResourceSyncState::ComputeShading;
+                rhi::BarrierBatch bufferBarriers{};
+                bufferBarriers.buffers = rhi::Span<rhi::BufferBarrier>(&barrier, 1);
+                commandList.Barriers(bufferBarriers);
 
-            uintRootConstants[CLOD_NUM_RASTER_BUCKETS] = context.materialManager->GetRasterBucketCount();
-            commandList.PushConstants(
-                rhi::ShaderStage::Compute,
-                0,
-                MiscUintRootSignatureIndex,
-                0,
-                NumMiscUintRootConstants,
-                uintRootConstants);
+                BindResourceDescriptorIndices(commandList, m_createCommandPipelineState.GetResourceDescriptorSlots());
+                uintRootConstants[CLOD_NUM_RASTER_BUCKETS] = context.materialManager->GetRasterBucketCount();
+                commandList.PushConstants(
+                    rhi::ShaderStage::Compute,
+                    0,
+                    MiscUintRootSignatureIndex,
+                    0,
+                    NumMiscUintRootConstants,
+                    uintRootConstants);
 
-            commandList.BindPipeline(m_createCommandPipelineState.GetAPIPipelineState().GetHandle());
-            commandList.Dispatch(1, 1, 1); // Single thread group, one thread
+                commandList.BindPipeline(m_createCommandPipelineState.GetAPIPipelineState().GetHandle());
+                commandList.Dispatch(1, 1, 1);
+            }
+            else {
+                rhi::BufferBarrier replayDispatchBarriers[2] = {};
+                replayDispatchBarriers[0].buffer = m_occlusionReplayBuffer->GetAPIResource().GetHandle();
+                replayDispatchBarriers[0].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+                replayDispatchBarriers[0].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+                replayDispatchBarriers[0].beforeSync = rhi::ResourceSyncState::ComputeShading;
+                replayDispatchBarriers[0].afterSync = rhi::ResourceSyncState::ComputeShading;
+
+                replayDispatchBarriers[1].buffer = m_occlusionNodeGpuInputsBuffer->GetAPIResource().GetHandle();
+                replayDispatchBarriers[1].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+                replayDispatchBarriers[1].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+                replayDispatchBarriers[1].beforeSync = rhi::ResourceSyncState::ComputeShading;
+                replayDispatchBarriers[1].afterSync = rhi::ResourceSyncState::ComputeShading;
+
+                rhi::BarrierBatch replayBarrierBatch{};
+                replayBarrierBatch.buffers = rhi::Span<rhi::BufferBarrier>(replayDispatchBarriers, 2);
+                commandList.Barriers(replayBarrierBatch);
+
+                rhi::WorkGraphDispatchDesc replayDispatchDesc{};
+                replayDispatchDesc.dispatchMode = rhi::WorkGraphDispatchMode::MultiNodeGpuInput;
+                replayDispatchDesc.multiNodeGpuInput.inputBuffer = m_occlusionNodeGpuInputsBuffer->GetAPIResource().GetHandle();
+                replayDispatchDesc.multiNodeGpuInput.inputAddressOffset = 0;
+                commandList.DispatchWorkGraph(replayDispatchDesc);
+            }
 
             // TODO: Move to post-raster pass
             //rhi::BufferBarrier replayDispatchBarriers[2] = {};
@@ -513,6 +720,10 @@ private:
             uint32_t zero = 0u;
             BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
 
+            if (!m_isFirstPass) {
+                return;
+            }
+
             CLodReplayBufferState replayState{};
             replayState.nodeGroupWriteOffsetBytes = 0;
             replayState.meshletWriteOffsetBytes = CLodReplayBufferSizeBytes;
@@ -532,7 +743,7 @@ private:
 
             context.viewManager->ForEachView([&](uint64_t viewID) {
                 const auto* view = context.viewManager->Get(viewID);
-                if (!view || !view->gpu.lastFrameLinearDepthMap) {
+                if (!view || !view->gpu.linearDepthMap) {
                     return;
                 }
 
@@ -541,7 +752,7 @@ private:
                     return;
                 }
 
-                const auto linearDepthMap = view->gpu.lastFrameLinearDepthMap;
+                const auto linearDepthMap = view->gpu.linearDepthMap;
                 uint32_t slice = 0;
                 if (view->cameraInfo.depthBufferArrayIndex >= 0) {
                     slice = static_cast<uint32_t>(view->cameraInfo.depthBufferArrayIndex);
@@ -627,6 +838,7 @@ private:
         std::shared_ptr<Buffer> m_occlusionReplayStateBuffer;
         std::shared_ptr<Buffer> m_occlusionNodeGpuInputsBuffer;
         std::shared_ptr<Buffer> m_viewDepthSrvIndicesBuffer;
+        bool m_isFirstPass = true;
         bool m_declaredResourcesChanged = true;
         RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
 

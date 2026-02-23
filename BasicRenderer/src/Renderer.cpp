@@ -1418,7 +1418,7 @@ void Renderer::CreateRenderGraph() {
         debugPassBuilder.WithShaderResource(Builtin::PrimaryCamera::LinearDepthMap);
     }
 
-    BuildLinearDepthDownsamplePass(newGraph.get());
+    // Linear depth downsample is scheduled by CLodExtension between phase-1 and phase-2.
 	
     auto currentEnvironmentCubemap = m_defaultEnvironmentCubemap;
     auto currentEnvironmentPrefilteredCubemap = m_defaultEnvironmentPrefilteredCubemap;
@@ -1506,7 +1506,7 @@ void Renderer::CreateRenderGraph() {
 			.Build<DebugSpherePass>();
     }
 
-        BuildLinearDepthHistoryCopyPass(newGraph.get());
+	BuildLinearDepthHistoryCopyPass(newGraph.get());
 
     newGraph->CompileStructural();
     newGraph->Setup();

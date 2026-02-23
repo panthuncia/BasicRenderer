@@ -475,6 +475,37 @@ void EvaluateGBufferOptimized(uint2 pixel)
 }
 
 [numthreads(8, 8, 1)]
+void PerViewPrimaryDepthCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint screenW = UintRootConstant2;
+    uint screenH = UintRootConstant3;
+
+    if (dispatchThreadId.x >= screenW || dispatchThreadId.y >= screenH)
+    {
+        return;
+    }
+
+    uint2 pixel = dispatchThreadId.xy;
+    Texture2D<uint64_t> visibilityTexture = ResourceDescriptorHeap[UintRootConstant0];
+    uint64_t vis = visibilityTexture[pixel];
+
+    float depth;
+    if (vis == 0xFFFFFFFFFFFFFFFF)
+    {
+        depth = asfloat(0x7F7FFFFF);
+    }
+    else
+    {
+        uint clusterIndex;
+        uint meshletTriangleIndex;
+        UnpackVisKey(vis, depth, clusterIndex, meshletTriangleIndex);
+    }
+
+    RWTexture2D<float> linearDepthTexture = ResourceDescriptorHeap[UintRootConstant1];
+    linearDepthTexture[pixel] = depth;
+}
+
+[numthreads(8, 8, 1)]
 void PrimaryDepthCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];

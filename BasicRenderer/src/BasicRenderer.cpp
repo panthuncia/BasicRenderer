@@ -365,10 +365,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //renderer.GetCurrentScene()->AppendScene(carScene->Clone());
     renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
 
-    mountainScene = LoadModel("models/terrain.glb");
-    mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
-    mountainScene->GetRoot().set<Components::Position>({ 0.0, -10.0, 0.0 });
-	renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
+    //mountainScene = LoadModel("models/terrain.glb");
+    //mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
+    //mountainScene->GetRoot().set<Components::Position>({ 0.0, -10.0, 0.0 });
+	//renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 	//renderer.GetCurrentScene()->AppendScene(shiba->Clone());
