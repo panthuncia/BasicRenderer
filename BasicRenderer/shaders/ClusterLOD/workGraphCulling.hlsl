@@ -128,6 +128,28 @@ static const uint WG_COUNTER_GROUP_EVALUATE_COALESCED_INPUT_COUNT_6 = 43;
 static const uint WG_COUNTER_GROUP_EVALUATE_COALESCED_INPUT_COUNT_7 = 44;
 static const uint WG_COUNTER_GROUP_EVALUATE_COALESCED_INPUT_COUNT_8 = 45;
 
+static const uint WG_COUNTER_PHASE1_OCCLUSION_NODE_REPLAY_ENQUEUE_ATTEMPTS = 46;
+static const uint WG_COUNTER_PHASE1_OCCLUSION_GROUP_REPLAY_ENQUEUE_ATTEMPTS = 47;
+static const uint WG_COUNTER_PHASE1_OCCLUSION_CLUSTER_REPLAY_ENQUEUE_ATTEMPTS = 48;
+
+static const uint WG_COUNTER_PHASE2_REPLAY_NODE_GROUP_LAUNCHES = 49;
+static const uint WG_COUNTER_PHASE2_REPLAY_NODE_GROUP_INPUT_RECORDS = 50;
+static const uint WG_COUNTER_PHASE2_REPLAY_NODE_INPUT_RECORDS = 51;
+static const uint WG_COUNTER_PHASE2_REPLAY_GROUP_INPUT_RECORDS = 52;
+static const uint WG_COUNTER_PHASE2_REPLAY_NODE_RECORDS_EMITTED = 53;
+static const uint WG_COUNTER_PHASE2_REPLAY_GROUP_RECORDS_EMITTED = 54;
+
+static const uint WG_COUNTER_PHASE2_REPLAY_MESHLET_LAUNCHES = 55;
+static const uint WG_COUNTER_PHASE2_REPLAY_MESHLET_INPUT_RECORDS = 56;
+static const uint WG_COUNTER_PHASE2_REPLAY_MESHLET_BUCKET_RECORDS_EMITTED = 57;
+
+static const uint WG_COUNTER_PHASE2_REPLAY_TRAVERSE_RECORDS_CONSUMED = 58;
+static const uint WG_COUNTER_PHASE2_REPLAY_GROUP_RECORDS_CONSUMED = 59;
+static const uint WG_COUNTER_PHASE2_REPLAY_CLUSTER_BUCKET_RECORDS_CONSUMED = 60;
+
+static const uint CLOD_RECORD_SOURCE_PASS1 = 0;
+static const uint CLOD_RECORD_SOURCE_REPLAY = 1;
+
 static const uint TRAVERSE_THREADS_PER_GROUP = 32;
 static const uint TRAVERSE_CHILD_LANES = 4;
 static const uint TRAVERSE_RECORDS_PER_GROUP = TRAVERSE_THREADS_PER_GROUP / TRAVERSE_CHILD_LANES;
@@ -149,6 +171,13 @@ void WGTelemetryAdd(uint counterIndex, uint value)
 
 bool ReplayTryAppendNodeGroup(uint type, uint instanceIndex, uint viewId, uint nodeOrGroupId)
 {
+    if (type == CLOD_REPLAY_RECORD_TYPE_NODE) {
+        WGTelemetryAdd(WG_COUNTER_PHASE1_OCCLUSION_NODE_REPLAY_ENQUEUE_ATTEMPTS, 1);
+    }
+    else {
+        WGTelemetryAdd(WG_COUNTER_PHASE1_OCCLUSION_GROUP_REPLAY_ENQUEUE_ATTEMPTS, 1);
+    }
+
     RWByteAddressBuffer replayBuffer = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX];
     RWStructuredBuffer<CLodReplayBufferState> replayState = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
 
@@ -172,6 +201,8 @@ bool ReplayTryAppendNodeGroup(uint type, uint instanceIndex, uint viewId, uint n
 
 bool ReplayTryAppendMeshlet(uint instanceIndex, uint viewId, uint groupId, uint localMeshletIndex)
 {
+    WGTelemetryAdd(WG_COUNTER_PHASE1_OCCLUSION_CLUSTER_REPLAY_ENQUEUE_ATTEMPTS, 1);
+
     RWByteAddressBuffer replayBuffer = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX];
     RWStructuredBuffer<CLodReplayBufferState> replayState = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
 
@@ -211,7 +242,7 @@ struct TraverseNodeRecord
     uint instanceIndex;
     uint nodeId;
     uint viewId;
-    uint pad0;
+    uint sourceTag;
 };
 
 struct GroupEvalRecord
@@ -219,7 +250,7 @@ struct GroupEvalRecord
     uint instanceIndex;
     uint groupId;
     uint viewId;
-    uint pad0;
+    uint sourceTag;
 };
 
 struct MeshletBucketRecord
@@ -230,6 +261,7 @@ struct MeshletBucketRecord
     uint groupId;
     uint childFirstLocalMeshletIndex;
     uint childLocalMeshletCount;
+    uint sourceTag;
 
     uint3 dispatchGrid : SV_DispatchGrid; // drives broadcasting node launch
 };
@@ -250,6 +282,11 @@ void WG_ReplayNodeGroup(
     const uint inputCount = inRecs.Count();
     const bool inRange = lane < inputCount;
 
+    if (lane == 0) {
+        WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_NODE_GROUP_LAUNCHES, 1);
+        WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_NODE_GROUP_INPUT_RECORDS, inputCount);
+    }
+
     bool emitTraverse = false;
     bool emitGroup = false;
     TraverseNodeRecord traverseRecord = (TraverseNodeRecord)0;
@@ -262,12 +299,16 @@ void WG_ReplayNodeGroup(
             traverseRecord.instanceIndex = rec.instanceIndex;
             traverseRecord.nodeId = rec.nodeOrGroupId;
             traverseRecord.viewId = rec.viewId;
+            traverseRecord.sourceTag = CLOD_RECORD_SOURCE_REPLAY;
+            WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_NODE_INPUT_RECORDS, 1);
         }
         else {
             emitGroup = true;
             groupRecord.instanceIndex = rec.instanceIndex;
             groupRecord.groupId = rec.nodeOrGroupId;
             groupRecord.viewId = rec.viewId;
+            groupRecord.sourceTag = CLOD_RECORD_SOURCE_REPLAY;
+            WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_GROUP_INPUT_RECORDS, 1);
         }
     }
 
@@ -278,10 +319,12 @@ void WG_ReplayNodeGroup(
 
     if (emitTraverse) {
         outTraverse.Get() = traverseRecord;
+        WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_NODE_RECORDS_EMITTED, 1);
     }
 
     if (emitGroup) {
         outGroup.Get() = groupRecord;
+        WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_GROUP_RECORDS_EMITTED, 1);
     }
 
     outTraverse.OutputComplete();
@@ -303,6 +346,11 @@ void WG_ReplayMeshlet(
     const uint inputCount = inRecs.Count();
     const bool emitBucket = lane < inputCount;
 
+    if (lane == 0) {
+        WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_MESHLET_LAUNCHES, 1);
+        WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_MESHLET_INPUT_RECORDS, inputCount);
+    }
+
     ThreadNodeOutputRecords<MeshletBucketRecord> outBucket =
         ClusterCullBuckets.GetThreadNodeOutputRecords(emitBucket ? 1 : 0);
 
@@ -314,8 +362,11 @@ void WG_ReplayMeshlet(
         bucket.groupId = rec.groupId;
         bucket.childFirstLocalMeshletIndex = rec.localMeshletIndex;
         bucket.childLocalMeshletCount = 1;
+        bucket.sourceTag = CLOD_RECORD_SOURCE_REPLAY;
         bucket.dispatchGrid = uint3(1, 1, 1);
         outBucket.Get() = bucket;
+
+        WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_MESHLET_BUCKET_RECORDS_EMITTED, 1);
     }
 
     outBucket.OutputComplete();
@@ -423,6 +474,7 @@ void WG_ObjectCull(
             outRecord.viewId = hdr.viewDataIndex;
             outRecord.instanceIndex =perMeshInstanceBufferIndex;
             outRecord.nodeId = off.rootNode;   // BVH root node for this mesh
+            outRecord.sourceTag = CLOD_RECORD_SOURCE_PASS1;
             outCount = 1;
 
             WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_VISIBLE_THREADS, 1);
@@ -463,6 +515,7 @@ struct TraverseSlotState
     uint instanceIndex;
     uint viewId;
     uint groupId;
+    uint sourceTag;
 };
 
 groupshared TraverseSlotState g_slotState[TRAVERSE_RECORDS_PER_GROUP];
@@ -476,6 +529,7 @@ struct GroupEvaluateSlotState
     uint childBase;
     uint clampedChildCount;
     uint terminalChildCount;
+    uint sourceTag;
 };
 
 groupshared GroupEvaluateSlotState g_groupSlotState[GROUP_EVALUATE_RECORDS_PER_GROUP];
@@ -508,6 +562,10 @@ void WG_TraverseNodes(
 
         if (slotActive) {
             const TraverseNodeRecord rec = inRecs[slot];
+            if (rec.sourceTag == CLOD_RECORD_SOURCE_REPLAY) {
+                WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_TRAVERSE_RECORDS_CONSUMED, 1);
+            }
+            const bool replaySource = (rec.sourceTag == CLOD_RECORD_SOURCE_REPLAY);
 
             StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
@@ -541,7 +599,7 @@ void WG_TraverseNodes(
             const float3 nodeCenterObjectSpace = node.metric.centerAndRadius.xyz;
             const float3 nodeCenterViewSpace = ToViewSpace(nodeCenterObjectSpace, objectModelMatrix, camera.view);
             const float nodeRadiusWorld = node.metric.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
-            const bool nodeCulled = SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, camera);
+            const bool nodeCulled = !replaySource && SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, camera);
 
             if (nodeCulled) {
                 WGTelemetryAdd(WG_COUNTER_TRAVERSE_CULLED_NODE_RECORDS, 1);
@@ -563,17 +621,46 @@ void WG_TraverseNodes(
                     WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
                 }
                 else if (node.range.isGroup == 0) {
-                    s.emitChildren = 1;
-                    s.childCount = min(node.range.countMinusOne + 1, TRAVERSE_CHILD_LANES);
-                    s.childBase = node.range.indexOrOffset;
-                    s.instanceIndex = rec.instanceIndex;
-                    s.viewId = rec.viewId;
+                    bool occlusionCulled = false;
+                    if (!camera.isOrtho) {
+                        StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
+                            ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
+                        const uint depthMapDescriptorIndex = viewDepthSRVIndices[rec.viewId].linearDepthSRVIndex;
+                        if (depthMapDescriptorIndex != 0) {
+                            OcclusionCullingPerspectiveTexture2D(
+                                occlusionCulled,
+                                camera,
+                                nodeCenterViewSpace,
+                                -nodeCenterViewSpace.z,
+                                nodeRadiusWorld,
+                                depthMapDescriptorIndex);
+                        }
+                    }
+
+                    if (occlusionCulled) {
+                        if (!replaySource) {
+                            ReplayTryAppendNodeGroup(
+                                CLOD_REPLAY_RECORD_TYPE_NODE,
+                                rec.instanceIndex,
+                                rec.viewId,
+                                rec.nodeId);
+                        }
+                    }
+                    else {
+                        s.emitChildren = 1;
+                        s.childCount = min(node.range.countMinusOne + 1, TRAVERSE_CHILD_LANES);
+                        s.childBase = node.range.indexOrOffset;
+                        s.instanceIndex = rec.instanceIndex;
+                        s.viewId = rec.viewId;
+                        s.sourceTag = rec.sourceTag;
+                    }
                 }
                 else {
                     s.emitGroup = 1;
                     s.instanceIndex = rec.instanceIndex;
                     s.viewId = rec.viewId;
                     s.groupId = node.range.indexOrOffset;
+                    s.sourceTag = rec.sourceTag;
                 }
             }
         }
@@ -602,6 +689,7 @@ void WG_TraverseNodes(
         r.instanceIndex = s.instanceIndex;
         r.viewId = s.viewId;
         r.nodeId = s.childBase + lane;
+        r.sourceTag = s.sourceTag;
         outNodes.Get() = r;
 
         WGTelemetryAdd(WG_COUNTER_TRAVERSE_TRAVERSE_RECORDS, 1);
@@ -612,6 +700,7 @@ void WG_TraverseNodes(
         r.instanceIndex = s.instanceIndex;
         r.viewId = s.viewId;
         r.groupId = s.groupId;
+        r.sourceTag = s.sourceTag;
         outGroups.Get() = r;
 
         WGTelemetryAdd(WG_COUNTER_TRAVERSE_GROUP_RECORDS, 1);
@@ -651,6 +740,10 @@ void WG_GroupEvaluate(
 
         if (slotActive) {
             const GroupEvalRecord rec = inRecs[slot];
+            if (rec.sourceTag == CLOD_RECORD_SOURCE_REPLAY) {
+                WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_GROUP_RECORDS_CONSUMED, 1);
+            }
+            const bool replaySource = (rec.sourceTag == CLOD_RECORD_SOURCE_REPLAY);
             WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_GROUP_RECORDS, 1);
 
             StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
@@ -679,7 +772,7 @@ void WG_GroupEvaluate(
             const float3 groupCenterObjectSpace = grp.bounds.centerAndRadius.xyz;
             const float3 groupCenterViewSpace = ToViewSpace(groupCenterObjectSpace, objectModelMatrix, camera.view);
             const float groupRadiusWorld = grp.bounds.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
-            const bool groupCulled = SphereOutsideFrustumViewSpace(groupCenterViewSpace, groupRadiusWorld, camera);
+            const bool groupCulled = !replaySource && SphereOutsideFrustumViewSpace(groupCenterViewSpace, groupRadiusWorld, camera);
 
             if (groupCulled) {
                 WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_CULLED_GROUP_RECORDS, 1);
@@ -708,6 +801,7 @@ void WG_GroupEvaluate(
                     s.childBase = off.childrenBase + grp.firstChild;
                     s.terminalChildCount = min(grp.terminalChildCount, GROUP_EVALUATE_CHILD_LANES);
                     s.clampedChildCount = min(grp.childCount, GROUP_EVALUATE_CHILD_LANES);
+                    s.sourceTag = rec.sourceTag;
                 }
             }
         }
@@ -762,7 +856,8 @@ void WG_GroupEvaluate(
 
             float worldRadius = refinedGrp.bounds.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
             float3 refinedViewSpaceCenter = mul(float4(worldSpaceCenter, 1.0f), camera.view).xyz;
-            const bool refinedCulled = SphereOutsideFrustumViewSpace(refinedViewSpaceCenter, worldRadius, camera);
+            const bool replaySource = (s.sourceTag == CLOD_RECORD_SOURCE_REPLAY);
+            const bool refinedCulled = !replaySource && SphereOutsideFrustumViewSpace(refinedViewSpaceCenter, worldRadius, camera);
 
             float px = ProjectedErrorPixels(
                 worldSpaceCenter,
@@ -790,11 +885,13 @@ void WG_GroupEvaluate(
             }
 
             if (occlusionCulled) {
-                ReplayTryAppendNodeGroup(
-                    CLOD_REPLAY_RECORD_TYPE_GROUP,
-                    s.instanceIndex,
-                    s.viewId,
-                    (uint) child.refinedGroup);
+                if (!replaySource) {
+                    ReplayTryAppendNodeGroup(
+                        CLOD_REPLAY_RECORD_TYPE_GROUP,
+                        s.instanceIndex,
+                        s.viewId,
+                        (uint) child.refinedGroup);
+                }
                 replayedOccludedRefinedGroup = true;
                 generatingGroupWantsTraversal = false;
             }
@@ -825,6 +922,7 @@ void WG_GroupEvaluate(
         b.groupId = s.groupId;
         b.childFirstLocalMeshletIndex = child.firstLocalMeshletIndex;
         b.childLocalMeshletCount = child.localMeshletCount;
+        b.sourceTag = s.sourceTag;
 
         const uint groupsX = (b.childLocalMeshletCount + CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP - 1) / CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP;
         b.dispatchGrid = uint3(groupsX, 1, 1);
@@ -852,6 +950,9 @@ void WG_ClusterCullBuckets(
     const uint i = DTid.x;
 
     const bool inRange = (i < b.childLocalMeshletCount);
+    if (GTid.x == 0 && b.sourceTag == CLOD_RECORD_SOURCE_REPLAY) {
+        WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_CLUSTER_BUCKET_RECORDS_CONSUMED, 1);
+    }
     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_THREADS, 1);
     if (inRange) {
         WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_IN_RANGE_THREADS, 1);
@@ -870,6 +971,7 @@ void WG_ClusterCullBuckets(
     bool survives = false;
 
     if (inRange) {
+        const bool replaySource = (b.sourceTag == CLOD_RECORD_SOURCE_REPLAY);
         StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
         const MeshInstanceClodOffsets off = clodOffsets[b.instanceIndex];
@@ -901,7 +1003,7 @@ void WG_ClusterCullBuckets(
         const float3 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, camera.view);
         const float meshletRadiusWorld = meshletBounds.sphere.w * MaxAxisScale_RowVector(objectModelMatrix);
 
-        survives = !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, camera);
+        survives = replaySource || !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, camera);
 
         if (survives && !camera.isOrtho) {
             StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
@@ -917,11 +1019,13 @@ void WG_ClusterCullBuckets(
                     meshletRadiusWorld,
                     depthMapDescriptorIndex);
                 if (occlusionCulled) {
-                    ReplayTryAppendMeshlet(
-                        b.instanceIndex,
-                        b.viewId,
-                        b.groupId,
-                        b.childFirstLocalMeshletIndex + i);
+                    if (!replaySource) {
+                        ReplayTryAppendMeshlet(
+                            b.instanceIndex,
+                            b.viewId,
+                            b.groupId,
+                            b.childFirstLocalMeshletIndex + i);
+                    }
                     survives = false;
                 }
             }

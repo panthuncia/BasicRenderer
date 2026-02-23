@@ -359,6 +359,7 @@ public:
             RenderGraph::ExternalPassDesc depthCopyPassDesc2;
             depthCopyPassDesc2.type = RenderGraph::PassType::Compute;
             depthCopyPassDesc2.name = "CLod::LinearDepthCopyPass2";
+			depthCopyPassDesc2.where = RenderGraph::ExternalInsertPoint::Before("DeferredShadingPass");
             depthCopyPassDesc2.pass = std::make_shared<PerViewLinearDepthCopyPass>();
             outPasses.push_back(std::move(depthCopyPassDesc2));
         }

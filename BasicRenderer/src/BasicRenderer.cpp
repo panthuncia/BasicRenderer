@@ -340,7 +340,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	auto mountainScene = LoadModel("models/terrain.glb");
 	mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
-	mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
+	mountainScene->GetRoot().set<Components::Position>({ 0.0, 40.0, 0.0 });
 
     //auto tigerScene = LoadModel("models/tiger.glb");
     //tigerScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
@@ -380,7 +380,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
 
-    for (int i = 0; i < 000; i++) {
+    for (int i = 0; i < 7000; i++) {
         auto sphereInstance = renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
         auto point = getRandomPointInVolume(-20, 20, -20, 20, -20, 20);
         sphereInstance->GetRoot().set<Components::Position>({ point.x, point.y, point.z });

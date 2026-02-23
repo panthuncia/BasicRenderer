@@ -1240,7 +1240,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
         if (readbackService) {
             readbackService->RequestReadbackCapture(
-                "CLod::HierarchialCullingPass",
+                "CLod::HierarchialCullingPass2",
                 clodTelemetryResource,
                 RangeSpec{},
                 [this](ReadbackCaptureResult&& result) {
@@ -1274,9 +1274,11 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 const uint32_t clusterThreads = counter(CLodWorkGraphCounterIndex::ClusterCullThreads);
                 const uint32_t clusterActive = counter(CLodWorkGraphCounterIndex::ClusterCullInRangeThreads);
                 const uint32_t visibleWrites = counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites);
+                const uint32_t replayNodeGroupInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeGroupInputRecords);
+                const uint32_t replayMeshletInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords);
 
                 spdlog::info(
-                    "CLod WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, GroupEval {}/{} active-child, ClusterCull {}/{} in-range, visible writes {}",
+                    "CLod WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, GroupEval {}/{} active-child, ClusterCull {}/{} in-range, visible writes {}, replay(node/group={}, meshlet={})",
                     objectActive,
                     objectThreads,
                     traverseActive,
@@ -1285,7 +1287,9 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     groupThreads,
                     clusterActive,
                     clusterThreads,
-                    visibleWrites);
+                    visibleWrites,
+                    replayNodeGroupInput,
+                    replayMeshletInput);
                 });
         }
 
@@ -1294,7 +1298,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
             if (readbackService) {
                 readbackService->RequestReadbackCapture(
-                    "CLod::HierarchialCullingPass",
+                    "CLod::HierarchialCullingPass2",
                     clodVisibleCounterResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {
@@ -1314,7 +1318,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     });
 
                 readbackService->RequestReadbackCapture(
-                    "CLod::HierarchialCullingPass",
+                    "CLod::HierarchialCullingPass2",
                     clodVisibleClustersResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {
@@ -1475,6 +1479,36 @@ inline void Menu::DrawCLodTelemetryWindow() {
         drawUtilizationRow("ClusterCull waves with survivors", survivingWaves, clusterWaves);
 
         ImGui::Text("Visible cluster writes: %u", counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites));
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("Occlusion -> Phase 2 enqueue attempts");
+        ImGui::Text("Node attempts: %u | Group attempts: %u | Cluster attempts: %u",
+            counter(CLodWorkGraphCounterIndex::Phase1OcclusionNodeReplayEnqueueAttempts),
+            counter(CLodWorkGraphCounterIndex::Phase1OcclusionGroupReplayEnqueueAttempts),
+            counter(CLodWorkGraphCounterIndex::Phase1OcclusionClusterReplayEnqueueAttempts));
+
+        ImGui::TextUnformatted("Phase 2 replay launch validation");
+        ImGui::Text("ReplayNodeGroup launches: %u | input records: %u",
+            counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeGroupLaunches),
+            counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeGroupInputRecords));
+        ImGui::Text("ReplayNodeGroup input split: nodes=%u groups=%u",
+            counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeInputRecords),
+            counter(CLodWorkGraphCounterIndex::Phase2ReplayGroupInputRecords));
+        ImGui::Text("ReplayNodeGroup emitted: traverse=%u groupEval=%u",
+            counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeRecordsEmitted),
+            counter(CLodWorkGraphCounterIndex::Phase2ReplayGroupRecordsEmitted));
+        ImGui::Text("ReplayMeshlet launches: %u | input records: %u | emitted bucket records: %u",
+            counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletLaunches),
+            counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords),
+            counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletBucketRecordsEmitted));
+
+        ImGui::TextUnformatted("Phase 2 downstream consumption");
+        ImGui::Text("Replay Traverse records consumed: %u",
+            counter(CLodWorkGraphCounterIndex::Phase2ReplayTraverseRecordsConsumed));
+        ImGui::Text("Replay GroupEvaluate records consumed: %u",
+            counter(CLodWorkGraphCounterIndex::Phase2ReplayGroupRecordsConsumed));
+        ImGui::Text("Replay ClusterCull bucket records consumed: %u",
+            counter(CLodWorkGraphCounterIndex::Phase2ReplayClusterBucketRecordsConsumed));
     }
 
     ImGui::Separator();

@@ -57,6 +57,25 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     GroupEvaluateCoalescedInputCount7,
     GroupEvaluateCoalescedInputCount8,
 
+    Phase1OcclusionNodeReplayEnqueueAttempts,
+    Phase1OcclusionGroupReplayEnqueueAttempts,
+    Phase1OcclusionClusterReplayEnqueueAttempts,
+
+    Phase2ReplayNodeGroupLaunches,
+    Phase2ReplayNodeGroupInputRecords,
+    Phase2ReplayNodeInputRecords,
+    Phase2ReplayGroupInputRecords,
+    Phase2ReplayNodeRecordsEmitted,
+    Phase2ReplayGroupRecordsEmitted,
+
+    Phase2ReplayMeshletLaunches,
+    Phase2ReplayMeshletInputRecords,
+    Phase2ReplayMeshletBucketRecordsEmitted,
+
+    Phase2ReplayTraverseRecordsConsumed,
+    Phase2ReplayGroupRecordsConsumed,
+    Phase2ReplayClusterBucketRecordsConsumed,
+
     Count
 };
 

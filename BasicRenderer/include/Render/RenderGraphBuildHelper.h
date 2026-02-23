@@ -387,7 +387,7 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
 	bool wireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 
 	// Uses existing GBuffer resources
-    graph->BuildComputePass("Deferred render pass").Build<DeferredShadingPass>();
+    graph->BuildComputePass("DeferredShadingPass").Build<DeferredShadingPass>();
 
 	// Forward pass for materials incompatible with deferred rendering
     graph->BuildRenderPass("Forward render pass").Build<ForwardRenderPass>(ForwardRenderPassInputs{
