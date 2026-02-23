@@ -306,7 +306,16 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
     uint clusterCount = IndirectCommandSignatureRootConstant0;
 
     StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
-    uint numBuckets = CLOD_NUM_RASTER_BUCKETS;
+    const uint numBucketsPacked = CLOD_NUM_RASTER_BUCKETS;
+    const bool appendToExisting = ((numBucketsPacked & 0x80000000u) != 0u);
+    const uint numBuckets = (numBucketsPacked & 0x7FFFFFFFu);
+
+    uint baseClusterOffset = 0u;
+    if (appendToExisting)
+    {
+        StructuredBuffer<uint> appendBaseCounter = ResourceDescriptorHeap[CLOD_COMPACTED_APPEND_BASE_COUNTER_DESCRIPTOR_INDEX];
+        baseClusterOffset = appendBaseCounter.Load(0);
+    }
 
     if (linearizedID < clusterCount)
     {
@@ -321,7 +330,7 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
         uint localOffset = 0;
         InterlockedAdd(writeCursor[bucketIndex], 1, localOffset);
 
-        uint dst = offsets[bucketIndex] + localOffset;
+        uint dst = baseClusterOffset + offsets[bucketIndex] + localOffset;
         compactedClusters[dst] = cluster;
     }
 
@@ -347,7 +356,7 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
                 dispatchY = kMaxDim;
             }
 
-            cmd.baseClusterOffset = offsets[linearizedID]; // base offset
+            cmd.baseClusterOffset = baseClusterOffset + offsets[linearizedID]; // base offset
             cmd.xDim = dispatchX;              // xDim for 2D linearization
             cmd.rasterBucketID = linearizedID;   // bucket index
 

@@ -229,13 +229,15 @@ public:
         compactPassDesc.pass = std::make_shared<RasterBucketCompactAndArgsPass>(
             m_visibleClustersBuffer,
             m_visibleClustersCounterBuffer,
+            m_visibleClustersCounterBuffer,
             m_histogramIndirectCommand,
             m_rasterBucketsHistogramBuffer,
             m_rasterBucketsOffsetsBuffer,
             m_rasterBucketsWriteCursorBuffer,
             m_compactedVisibleClustersBuffer,
             m_rasterBucketsIndirectArgsBuffer,
-            m_maxVisibleClusters);
+            m_maxVisibleClusters,
+            false);
         outPasses.push_back(std::move(compactPassDesc));
 
 		// First rasterization pass, using indirect args from histogram compaction
@@ -273,7 +275,7 @@ public:
 		// Anything that failed only occlusion in the first pass gets another chance,
 		// using the HZB built from this frame's depth buffer
         RenderGraph::ExternalPassDesc cullPassDesc2;
-        cullPassDesc2.type = RenderGraph::PassType::Render;
+        cullPassDesc2.type = RenderGraph::PassType::Compute;
         cullPassDesc2.name = "CLod::HierarchialCullingPass2";
         HierarchialCullingPassInputs cullPassInputs2;
         cullPassInputs2.isFirstPass = false;
@@ -325,13 +327,15 @@ public:
         compactPassDesc2.pass = std::make_shared<RasterBucketCompactAndArgsPass>(
             m_visibleClustersBuffer,
             m_visibleClustersCounterBufferPhase2,
+            m_visibleClustersCounterBuffer,
             m_histogramIndirectCommand,
             m_rasterBucketsHistogramBufferPhase2,
             m_rasterBucketsOffsetsBuffer,
             m_rasterBucketsWriteCursorBufferPhase2,
             m_compactedVisibleClustersBuffer,
             m_rasterBucketsIndirectArgsBuffer,
-            m_maxVisibleClusters);
+            m_maxVisibleClusters,
+            true);
         outPasses.push_back(std::move(compactPassDesc2));
 
 		// Second rasterization pass, using indirect args from phase 2 histogram compaction
@@ -646,18 +650,6 @@ private:
                 bufferBarriers.buffers = rhi::Span<rhi::BufferBarrier>(&barrier, 1);
                 commandList.Barriers(bufferBarriers);
 
-                BindResourceDescriptorIndices(commandList, m_createCommandPipelineState.GetResourceDescriptorSlots());
-                uintRootConstants[CLOD_NUM_RASTER_BUCKETS] = context.materialManager->GetRasterBucketCount();
-                commandList.PushConstants(
-                    rhi::ShaderStage::Compute,
-                    0,
-                    MiscUintRootSignatureIndex,
-                    0,
-                    NumMiscUintRootConstants,
-                    uintRootConstants);
-
-                commandList.BindPipeline(m_createCommandPipelineState.GetAPIPipelineState().GetHandle());
-                commandList.Dispatch(1, 1, 1);
             }
             else {
                 rhi::BufferBarrier replayDispatchBarriers[2] = {};
@@ -683,6 +675,29 @@ private:
                 replayDispatchDesc.multiNodeGpuInput.inputAddressOffset = 0;
                 commandList.DispatchWorkGraph(replayDispatchDesc);
             }
+
+            rhi::BufferBarrier counterBarrier{};
+            counterBarrier.buffer = m_visibleClustersCounterBuffer->GetAPIResource().GetHandle();
+            counterBarrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+            counterBarrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+            counterBarrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
+            counterBarrier.afterSync = rhi::ResourceSyncState::ComputeShading;
+            rhi::BarrierBatch counterBarrierBatch{};
+            counterBarrierBatch.buffers = rhi::Span<rhi::BufferBarrier>(&counterBarrier, 1);
+            commandList.Barriers(counterBarrierBatch);
+
+            BindResourceDescriptorIndices(commandList, m_createCommandPipelineState.GetResourceDescriptorSlots());
+            uintRootConstants[CLOD_NUM_RASTER_BUCKETS] = context.materialManager->GetRasterBucketCount();
+            commandList.PushConstants(
+                rhi::ShaderStage::Compute,
+                0,
+                MiscUintRootSignatureIndex,
+                0,
+                NumMiscUintRootConstants,
+                uintRootConstants);
+
+            commandList.BindPipeline(m_createCommandPipelineState.GetAPIPipelineState().GetHandle());
+            commandList.Dispatch(1, 1, 1);
 
             // TODO: Move to post-raster pass
             //rhi::BufferBarrier replayDispatchBarriers[2] = {};
@@ -1203,22 +1218,26 @@ private:
         RasterBucketCompactAndArgsPass(
             std::shared_ptr<Buffer> visibleClustersBuffer,
             std::shared_ptr<Buffer> visibleClustersCounterBuffer,
+            std::shared_ptr<Buffer> compactedBaseCounterBuffer,
             std::shared_ptr<Buffer> indirectCommand,
             std::shared_ptr<Buffer> histogramBuffer,
             std::shared_ptr<Buffer> offsetsBuffer,
             std::shared_ptr<Buffer> writeCursorBuffer,
             std::shared_ptr<Buffer> compactedClustersBuffer,
             std::shared_ptr<Buffer> indirectArgsBuffer,
-            uint64_t maxVisibleClusters)
+            uint64_t maxVisibleClusters,
+            bool appendToExisting)
             : m_visibleClustersBuffer(std::move(visibleClustersBuffer)),
             m_visibleClustersCounterBuffer(std::move(visibleClustersCounterBuffer)),
+            m_compactedBaseCounterBuffer(std::move(compactedBaseCounterBuffer)),
             m_indirectCommand(std::move(indirectCommand)),
             m_histogramBuffer(std::move(histogramBuffer)),
             m_offsetsBuffer(std::move(offsetsBuffer)),
             m_writeCursorBuffer(std::move(writeCursorBuffer)),
             m_compactedClustersBuffer(std::move(compactedClustersBuffer)),
             m_indirectArgsBuffer(std::move(indirectArgsBuffer)),
-            m_maxVisibleClusters(maxVisibleClusters)
+            m_maxVisibleClusters(maxVisibleClusters),
+            m_appendToExisting(appendToExisting)
         {
             m_pso = PSOManager::GetInstance().MakeComputePipeline(
                 PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -1243,6 +1262,7 @@ private:
             builder->WithShaderResource(
                 m_visibleClustersBuffer,
                 m_visibleClustersCounterBuffer,
+                m_compactedBaseCounterBuffer,
                 m_histogramBuffer,
                 m_offsetsBuffer,
                 Builtin::PerMeshInstanceBuffer,
@@ -1285,7 +1305,8 @@ private:
             rc[CLOD_RASTER_BUCKETS_WRITE_CURSOR_DESCRIPTOR_INDEX] = m_writeCursorBuffer->GetUAVShaderVisibleInfo(0).slot.index;
             rc[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
             rc[CLOD_RASTER_BUCKETS_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_indirectArgsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            rc[CLOD_NUM_RASTER_BUCKETS] = numBuckets;
+            rc[CLOD_COMPACTED_APPEND_BASE_COUNTER_DESCRIPTOR_INDEX] = m_compactedBaseCounterBuffer->GetSRVInfo(0).slot.index;
+            rc[CLOD_NUM_RASTER_BUCKETS] = numBuckets | (m_appendToExisting ? 0x80000000u : 0u);
             commandList.PushConstants(
                 rhi::ShaderStage::Compute,
                 0,
@@ -1332,6 +1353,7 @@ private:
 
         std::shared_ptr<Buffer> m_visibleClustersBuffer;
         std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
+        std::shared_ptr<Buffer> m_compactedBaseCounterBuffer;
         std::shared_ptr<Buffer> m_indirectCommand;
         std::shared_ptr<Buffer> m_histogramBuffer;
         std::shared_ptr<Buffer> m_offsetsBuffer;
@@ -1340,6 +1362,7 @@ private:
         std::shared_ptr<Buffer> m_indirectArgsBuffer;
 
         uint64_t m_maxVisibleClusters = 0;
+        bool m_appendToExisting = false;
     };
 
     // --------------------------------------------------------------
