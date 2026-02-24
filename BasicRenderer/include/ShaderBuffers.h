@@ -29,7 +29,7 @@ struct CameraInfo {
     int depthBufferArrayIndex = -1;
     unsigned int depthResX;
 	unsigned int depthResY;
-    uint16_t numDepthMips;
+    uint32_t numDepthMips;
 
     unsigned int isOrtho = 0; // bool
 	DirectX::XMFLOAT2 uvScaleToNextPowerOfTwo = { 1.0f, 1.0f }; // Scale to next power of two, for linear depth buffer
