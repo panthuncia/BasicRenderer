@@ -38,6 +38,10 @@
 
 using namespace Microsoft::WRL;
 
+namespace rg::runtime {
+class IUploadPolicyService;
+}
+
 class DeferredFunctions {
 public:
     // enqueue any void() callable
@@ -207,6 +211,8 @@ private:
     GpuCrashTracker m_gpuCrashTracker;
 
 	DeferredFunctions m_preFrameDeferredFunctions;
+
+    std::shared_ptr<rg::runtime::IUploadPolicyService> m_uploadPolicyService = nullptr;
 
     class CoreResourceProvider : public IResourceProvider {
 	public:

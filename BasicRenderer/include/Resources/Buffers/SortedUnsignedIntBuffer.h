@@ -9,6 +9,7 @@
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Interfaces/IHasMemoryMetadata.h"
+#include "Render/Runtime/UploadPolicyServiceAccess.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -40,8 +41,19 @@ public:
 private:
     SortedUnsignedIntBuffer(uint64_t capacity = 64, std::string name = "", bool UAV = false)
         : m_capacity(capacity), m_UAV(UAV), m_earliestModifiedIndex(0) {
+        SetUploadPolicyTag(rg::runtime::UploadPolicyTag::CoalescedRetained);
         CreateBuffer(capacity);
         SetName(name);
+    }
+
+    void OnUploadPolicyBeginFrame() override {
+        SyncUploadPolicyState();
+        m_uploadPolicyState.BeginFrame();
+    }
+
+    void OnUploadPolicyFlush() override {
+        SyncUploadPolicyState();
+        m_uploadPolicyState.FlushToUploadService(rg::runtime::UploadTarget::FromShared(shared_from_this()));
     }
 
     void OnSetName() override;
@@ -64,8 +76,23 @@ private:
 
     void GrowBuffer(uint64_t newSize);
 
+    void SyncUploadPolicyState() {
+        const auto tag = GetUploadPolicyTag();
+        if (m_uploadPolicyState.GetPolicy().tag == tag) {
+            return;
+        }
+
+        rg::runtime::UploadPolicyConfig config{};
+        config.tag = tag;
+        m_uploadPolicyState.SetPolicy(config, GetBufferSize());
+    }
+
+    void StageOrUpload(const void* data, size_t size, size_t offset);
+
     void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
         m_metadataBundles.emplace_back(bundle);
         ApplyMetadataToBacking(bundle);
     }
+
+    rg::runtime::BufferUploadPolicyState m_uploadPolicyState{};
 };

@@ -66,6 +66,7 @@
 #include "Resources/Resource.h"
 #include "Render/MemoryIntrospectionBackend.h"
 #include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadPolicyServiceAccess.h"
 #include "Render/Runtime/DescriptorServiceAccess.h"
 
 void D3D12DebugCallback(
@@ -141,6 +142,13 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     if (auto* uploadService = currentRenderGraph->GetUploadService()) {
             uploadService->Initialize();
         rg::runtime::SetActiveUploadService(uploadService);
+    }
+    if (!m_uploadPolicyService) {
+        m_uploadPolicyService = rg::runtime::CreateDefaultUploadPolicyService();
+    }
+    if (m_uploadPolicyService) {
+        m_uploadPolicyService->Initialize();
+        rg::runtime::SetActiveUploadPolicyService(m_uploadPolicyService.get());
     }
     if (auto* descriptorService = currentRenderGraph->GetDescriptorService()) {
         descriptorService->Initialize();
@@ -784,6 +792,7 @@ void Renderer::WaitForFrame(uint8_t currentFrameIndex) {
 
 void Renderer::Update(float elapsedSeconds) {
     WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
+    rg::runtime::BeginUploadPolicyFrame();
 
     //ZoneScopedN("Renderer::Update");
 
@@ -873,6 +882,8 @@ void Renderer::Update(float elapsedSeconds) {
 
     RendererUpdateHostData updateHostData;
     updateHostData.data = &updateData;
+
+    rg::runtime::FlushUploadPolicies();
 
     UpdateExecutionContext context{};
     context.frameIndex = m_frameIndex;
@@ -1094,6 +1105,9 @@ void Renderer::Cleanup() {
         if (auto* uploadService = currentRenderGraph->GetUploadService()) {
             uploadService->Cleanup();
         }
+        if (m_uploadPolicyService) {
+            m_uploadPolicyService->Cleanup();
+        }
         if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
             readbackService->Cleanup();
         }
@@ -1108,7 +1122,9 @@ void Renderer::Cleanup() {
     m_coreResourceProvider.Cleanup();
     currentRenderGraph.reset();
     rg::runtime::SetActiveUploadService(nullptr);
+    rg::runtime::SetActiveUploadPolicyService(nullptr);
     rg::runtime::SetActiveDescriptorService(nullptr);
+    m_uploadPolicyService.reset();
     m_renderGraphRuntimeInitialized = false;
     m_currentEnvironment.reset();
     m_defaultEnvironmentCubemap.reset();
@@ -1306,6 +1322,9 @@ void Renderer::CreateRenderGraph() {
         if (auto* uploadService = currentRenderGraph->GetUploadService()) {
             uploadService->Initialize();
             rg::runtime::SetActiveUploadService(uploadService);
+        }
+        if (m_uploadPolicyService) {
+            rg::runtime::SetActiveUploadPolicyService(m_uploadPolicyService.get());
         }
         if (auto* descriptorService = currentRenderGraph->GetDescriptorService()) {
             descriptorService->Initialize();

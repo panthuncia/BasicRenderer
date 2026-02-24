@@ -78,7 +78,7 @@ void OcclusionCullingPerspectiveTexture2D(
     float4 vAABB = vUV * vHZB.xyxy;
     float2 vExtents = vAABB.zw - vAABB.xy;
 
-    float fMipLevel = ceil(log2(max(vExtents.x, vExtents.y)));
+    float fMipLevel = ceil(log2(max(vExtents.x, vExtents.y)))+1;
     fMipLevel = clamp(fMipLevel, 0.0f, vHZB.z - 1.0f);
 
     vUV *= camera.UVScaleToNextPowerOf2.xyxy;

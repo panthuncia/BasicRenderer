@@ -7,6 +7,7 @@
 #include "Resources/ExternalBackingResource.h"
 #include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadPolicyServiceAccess.h"
 
 std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementSize) {
     size_t requiredSize = size;
@@ -70,14 +71,36 @@ std::unique_ptr<BufferView> DynamicBuffer::AddData(const void* data, size_t size
 	std::unique_ptr<BufferView> view = Allocate(actualSize, elementSize);
     
 	if (data != nullptr) {
-        BUFFER_UPLOAD(data, size, rg::runtime::UploadTarget::FromShared(shared_from_this()), view->GetOffset());
+        StageOrUpload(data, size, view->GetOffset());
 	}
 
 	return std::move(view);
 }
 
 void DynamicBuffer::UpdateView(BufferView* view, const void* data) {
-    BUFFER_UPLOAD(data, view->GetSize(), rg::runtime::UploadTarget::FromShared(shared_from_this()), view->GetOffset());
+    StageOrUpload(data, view->GetSize(), view->GetOffset());
+}
+
+void DynamicBuffer::StageOrUpload(const void* data, size_t size, size_t offset) {
+    if (GetUploadPolicyTag() != rg::runtime::UploadPolicyTag::Immediate
+        && rg::runtime::GetActiveUploadPolicyService() == nullptr) {
+        BUFFER_UPLOAD(data, size, rg::runtime::UploadTarget::FromShared(shared_from_this()), offset);
+        return;
+    }
+
+    SyncUploadPolicyState();
+    EnsureUploadPolicyRegistration();
+
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+    const bool staged = m_uploadPolicyState.StageWrite(data, size, offset, GetBufferSize(), __FILE__, __LINE__);
+#else
+    const bool staged = m_uploadPolicyState.StageWrite(data, size, offset, GetBufferSize());
+#endif
+    if (staged) {
+        return;
+    }
+
+    BUFFER_UPLOAD(data, size, rg::runtime::UploadTarget::FromShared(shared_from_this()), offset);
 }
 
 void DynamicBuffer::Deallocate(const BufferView* view) {
@@ -163,6 +186,7 @@ void DynamicBuffer::CreateBuffer(size_t capacity) {
     m_capacity = capacity;
     auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, capacity, GetGlobalResourceID(), m_UAV);
     SetBacking(std::move(newDataBuffer), capacity);
+    m_uploadPolicyState.OnBufferResized(GetBufferSize());
     m_memoryBlocks.push_back({ 0, capacity, true });
 
     for (const auto& bundle : m_metadataBundles) {
@@ -182,6 +206,7 @@ void DynamicBuffer::GrowBuffer(size_t newSize) {
         }
     }
 	SetBacking(std::move(newDataBuffer), newSize);
+    m_uploadPolicyState.OnBufferResized(GetBufferSize());
 
     m_capacity = newSize;
 

@@ -11,6 +11,7 @@
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Resources/Buffers/MemoryBlock.h"
 #include "Interfaces/IHasMemoryMetadata.h"
+#include "Render/Runtime/UploadPolicyServiceAccess.h"
 
 class BufferView;
 
@@ -26,6 +27,16 @@ public:
 	std::unique_ptr<BufferView> AddData(const void* data, size_t size, size_t elementSize, size_t fullAllocationSize = 0);
 	void UpdateView(BufferView* view, const void* data) override;
 
+    void OnUploadPolicyBeginFrame() override {
+        SyncUploadPolicyState();
+        m_uploadPolicyState.BeginFrame();
+    }
+
+    void OnUploadPolicyFlush() override {
+        SyncUploadPolicyState();
+        m_uploadPolicyState.FlushToUploadService(rg::runtime::UploadTarget::FromShared(shared_from_this()));
+    }
+
     size_t Size() const {
         return m_capacity;
     }
@@ -37,6 +48,7 @@ public:
 private:
     DynamicBuffer(bool byteAddress, size_t elementSize, size_t capacity, std::string name = "", bool UAV = false)
         : m_byteAddress(byteAddress), m_elementSize(elementSize), m_UAV(UAV), m_needsUpdate(false) {
+        SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Coalesced);
 
         size_t bufferSize = elementSize * capacity;
         {
@@ -81,8 +93,23 @@ private:
     void CreateBuffer(size_t capacity);
     void GrowBuffer(size_t newSize);
 
+    void SyncUploadPolicyState() {
+        const auto tag = GetUploadPolicyTag();
+        if (m_uploadPolicyState.GetPolicy().tag == tag) {
+            return;
+        }
+
+        rg::runtime::UploadPolicyConfig config{};
+        config.tag = tag;
+        m_uploadPolicyState.SetPolicy(config, GetBufferSize());
+    }
+
+    void StageOrUpload(const void* data, size_t size, size_t offset);
+
     void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
         m_metadataBundles.emplace_back(bundle);
         ApplyMetadataToBacking(bundle);
     }
+
+    rg::runtime::BufferUploadPolicyState m_uploadPolicyState{};
 };

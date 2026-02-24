@@ -75,11 +75,11 @@ public:
     }
 
     void UpdateView(BufferView* view, const void* data) {
-        BUFFER_UPLOAD(data, sizeof(T), rg::runtime::UploadTarget::FromShared(shared_from_this()), view->GetOffset());
+        StageOrUpload(data, sizeof(T), view->GetOffset());
     }
 
 	void UpdateAt(uint64_t index, const T& data) {
-        BUFFER_UPLOAD(&data, sizeof(T), rg::runtime::UploadTarget::FromShared(shared_from_this()), index * m_elementSize);
+        StageOrUpload(&data, sizeof(T), index * m_elementSize);
     }
 
     uint64_t Size() {
@@ -90,9 +90,20 @@ public:
 		return m_elementSize;
 	}
 
+    void OnUploadPolicyBeginFrame() override {
+        SyncUploadPolicyState();
+        m_uploadPolicyState.BeginFrame();
+    }
+
+    void OnUploadPolicyFlush() override {
+        SyncUploadPolicyState();
+        m_uploadPolicyState.FlushToUploadService(rg::runtime::UploadTarget::FromShared(shared_from_this()));
+    }
+
 private:
     LazyDynamicStructuredBuffer(UINT capacity = 64, std::string name = "", uint64_t alignment = 1, bool UAV = false)
         : m_capacity(capacity), m_UAV(UAV), m_needsUpdate(false) {
+        SetUploadPolicyTag(rg::runtime::UploadPolicyTag::CoalescedRetained);
         if (alignment == 0) {
 			alignment = 1;
         }
@@ -134,7 +145,7 @@ private:
                 .kind = rhi::BufferViewKind::Structured,
                 .firstElement = 0,
                 .numElements = newCapacity,
-                .structureByteStride = static_cast<uint32_t>(sizeof(T)),
+                .structureByteStride = m_elementSize,
             },
         };
 
@@ -146,7 +157,7 @@ private:
                 .kind = rhi::BufferViewKind::Structured,
                 .firstElement = 0,
                 .numElements = newCapacity,
-                .structureByteStride = static_cast<uint32_t>(sizeof(T)),
+                .structureByteStride = m_elementSize,
                 .counterOffsetInBytes = 0,
             },
         };
@@ -156,9 +167,10 @@ private:
 
     void CreateBuffer(uint64_t capacity, size_t previousCapacity = 0) {
         if (m_dataBuffer != nullptr) {
-            QueueResourceCopyFromOldBacking(previousCapacity * sizeof(T));
+            QueueResourceCopyFromOldBacking(previousCapacity * static_cast<size_t>(m_elementSize));
         }
 		CreateAndSetBacking(rhi::HeapType::DeviceLocal, m_elementSize * capacity, m_UAV);
+        m_uploadPolicyState.OnBufferResized(GetBufferSize());
 
         for (const auto& bundle : m_metadataBundles) {
             ApplyMetadataToBacking(bundle);
@@ -170,8 +182,43 @@ private:
 
     }
 
+    void SyncUploadPolicyState() {
+        const auto tag = GetUploadPolicyTag();
+        if (m_uploadPolicyState.GetPolicy().tag == tag) {
+            return;
+        }
+
+        rg::runtime::UploadPolicyConfig config{};
+        config.tag = tag;
+        m_uploadPolicyState.SetPolicy(config, GetBufferSize());
+    }
+
+    void StageOrUpload(const void* data, size_t size, size_t offset) {
+        if (GetUploadPolicyTag() != rg::runtime::UploadPolicyTag::Immediate
+            && rg::runtime::GetActiveUploadPolicyService() == nullptr) {
+            BUFFER_UPLOAD(data, size, rg::runtime::UploadTarget::FromShared(shared_from_this()), offset);
+            return;
+        }
+
+        SyncUploadPolicyState();
+        EnsureUploadPolicyRegistration();
+
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+        const bool staged = m_uploadPolicyState.StageWrite(data, size, offset, GetBufferSize(), __FILE__, __LINE__);
+#else
+        const bool staged = m_uploadPolicyState.StageWrite(data, size, offset, GetBufferSize());
+#endif
+        if (staged) {
+            return;
+        }
+
+        BUFFER_UPLOAD(data, size, rg::runtime::UploadTarget::FromShared(shared_from_this()), offset);
+    }
+
     void ApplyMetadataComponentBundle(const EntityComponentBundle& bundle) override {
         m_metadataBundles.emplace_back(bundle);
         ApplyMetadataToBacking(bundle);
     }
+
+    rg::runtime::BufferUploadPolicyState m_uploadPolicyState{};
 };

@@ -5,6 +5,7 @@
 #include "Resources/ExternalBackingResource.h"
 #include "Resources/GPUBacking/GpuBufferBacking.h"
 #include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/Runtime/UploadPolicyServiceAccess.h"
 #include "Managers/Singletons/DeviceManager.h"
 
 void SortedUnsignedIntBuffer::OnSetName() {
@@ -44,7 +45,7 @@ void SortedUnsignedIntBuffer::Insert(unsigned int element) {
     // Upload the entire suffix so GPU content matches the CPU vector after the insertion shift
     const unsigned int* src = m_data.data() + index;
     const uint32_t count = static_cast<uint32_t>(m_data.size() - index);
-    BUFFER_UPLOAD(src, sizeof(unsigned int) * count, rg::runtime::UploadTarget::FromShared(shared_from_this()), index * sizeof(unsigned int));
+    StageOrUpload(src, sizeof(unsigned int) * count, index * sizeof(unsigned int));
 }
 
 void SortedUnsignedIntBuffer::Remove(unsigned int element) {
@@ -66,16 +67,38 @@ void SortedUnsignedIntBuffer::Remove(unsigned int element) {
         if (!m_data.empty() && index < m_data.size()) {
             const unsigned int* src = m_data.data() + index;
             const uint32_t count = static_cast<uint32_t>(m_data.size() - index);
-            BUFFER_UPLOAD(src, sizeof(unsigned int) * count, rg::runtime::UploadTarget::FromShared(shared_from_this()), index * sizeof(unsigned int));
+            StageOrUpload(src, sizeof(unsigned int) * count, index * sizeof(unsigned int));
         }
 
         // Zero out the last stale slot (not strictly required if readers clamp to Size())
         if (m_data.size() < m_capacity) {
             const unsigned int zero = 0u;
             const uint32_t lastSlot = static_cast<uint32_t>(m_data.size());
-            BUFFER_UPLOAD(&zero, sizeof(unsigned int), rg::runtime::UploadTarget::FromShared(shared_from_this()), lastSlot * sizeof(unsigned int));
+            StageOrUpload(&zero, sizeof(unsigned int), lastSlot * sizeof(unsigned int));
         }
     }
+}
+
+void SortedUnsignedIntBuffer::StageOrUpload(const void* data, size_t size, size_t offset) {
+    if (GetUploadPolicyTag() != rg::runtime::UploadPolicyTag::Immediate
+        && rg::runtime::GetActiveUploadPolicyService() == nullptr) {
+        BUFFER_UPLOAD(data, size, rg::runtime::UploadTarget::FromShared(shared_from_this()), offset);
+        return;
+    }
+
+    SyncUploadPolicyState();
+    EnsureUploadPolicyRegistration();
+
+#if BUILD_TYPE == BUILD_TYPE_DEBUG
+    const bool staged = m_uploadPolicyState.StageWrite(data, size, offset, GetBufferSize(), __FILE__, __LINE__);
+#else
+    const bool staged = m_uploadPolicyState.StageWrite(data, size, offset, GetBufferSize());
+#endif
+    if (staged) {
+        return;
+    }
+
+    BUFFER_UPLOAD(data, size, rg::runtime::UploadTarget::FromShared(shared_from_this()), offset);
 }
 
 void SortedUnsignedIntBuffer::CreateBuffer(uint64_t capacity) {
@@ -83,6 +106,7 @@ void SortedUnsignedIntBuffer::CreateBuffer(uint64_t capacity) {
     m_capacity = capacity;
     auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, capacity * sizeof(unsigned int), GetGlobalResourceID(), m_UAV);
     SetBacking(std::move(newDataBuffer), capacity * sizeof(unsigned int));
+    m_uploadPolicyState.OnBufferResized(GetBufferSize());
     
     for (const auto& bundle : m_metadataBundles) {
 		ApplyMetadataToBacking(bundle);
@@ -102,6 +126,7 @@ void SortedUnsignedIntBuffer::GrowBuffer(uint64_t newSize) {
         }
     }
     SetBacking(std::move(newDataBuffer), newSize * sizeof(unsigned int));
+    m_uploadPolicyState.OnBufferResized(GetBufferSize());
 
     m_capacity = newSize;
     AssignDescriptorSlots();
