@@ -363,6 +363,13 @@ public:
             depthCopyPassDesc2.pass = std::make_shared<PerViewLinearDepthCopyPass>();
             outPasses.push_back(std::move(depthCopyPassDesc2));
         }
+
+        // Build HZB for next frame
+        RenderGraph::ExternalPassDesc downsamplePassDesc2;
+        downsamplePassDesc2.type = RenderGraph::PassType::Compute;
+        downsamplePassDesc2.name = "CLod::LinearDepthDownsamplePass2";
+        downsamplePassDesc2.pass = std::make_shared<DownsamplePass>();
+        outPasses.push_back(std::move(downsamplePassDesc2));
     }
 
 private:

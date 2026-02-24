@@ -45,10 +45,10 @@ AF4 SpdLoadSourceImage(ASU2 p, AU1 slice)
     
 #if defined (DOWNSAMPLE_ARRAY)
     Texture2DArray<float> imgSrc = ResourceDescriptorHeap[UintRootConstant1];
-    float result = imgSrc.SampleLevel(g_linearClamp, float3(textureCoord, slice), 0);
+    float result = imgSrc.Load(int4((int)p.x, (int)p.y, (int)slice, 0));
 #else
     Texture2D<float> imgSrc = ResourceDescriptorHeap[UintRootConstant1];
-    float result = imgSrc.SampleLevel(g_linearClamp, textureCoord, 0);
+    float result = imgSrc.Load(int3((int) p.x, (int) p.y, 0));
 #endif
     return AF4(result, result, result, result);
 }

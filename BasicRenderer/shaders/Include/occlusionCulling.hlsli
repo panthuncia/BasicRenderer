@@ -78,17 +78,20 @@ void OcclusionCullingPerspectiveTexture2D(
     float4 vAABB = vUV * vHZB.xyxy;
     float2 vExtents = vAABB.zw - vAABB.xy;
 
-    float fMipLevel = ceil(log2(max(vExtents.x, vExtents.y)))+1;
+    float fMipLevel = ceil(log2(max(vExtents.x, vExtents.y)));
     fMipLevel = clamp(fMipLevel, 0.0f, vHZB.z - 1.0f);
 
     vUV *= camera.UVScaleToNextPowerOf2.xyxy;
 
     Texture2D<float> depthBuffer = ResourceDescriptorHeap[depthMapDescriptorIndex];
+
+    // xy = top-left, zw = bottom-right
+    // zy = top-right, xw = bottom-left
     float4 occlusionDepth = float4(
-        depthBuffer.SampleLevel(g_pointClamp, vUV.xy, fMipLevel),
-        depthBuffer.SampleLevel(g_pointClamp, vUV.zy, fMipLevel),
-        depthBuffer.SampleLevel(g_pointClamp, vUV.zw, fMipLevel),
-        depthBuffer.SampleLevel(g_pointClamp, vUV.xw, fMipLevel));
+        depthBuffer.Load(uint3(vUV.xy, fMipLevel)),
+        depthBuffer.Load(uint3(vUV.zy, fMipLevel)),
+        depthBuffer.Load(uint3(vUV.zw, fMipLevel)),
+        depthBuffer.Load(uint3(vUV.xw, fMipLevel)));
 
     const float fMaxOcclusionDepth = max(max(occlusionDepth.x, occlusionDepth.y), max(occlusionDepth.z, occlusionDepth.w));
     fullyCulled = fMaxOcclusionDepth < boundingSphereDepth - scaledBoundingRadius;
