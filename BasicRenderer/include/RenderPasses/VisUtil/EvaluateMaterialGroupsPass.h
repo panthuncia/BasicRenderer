@@ -39,7 +39,10 @@ public:
             Builtin::CameraBuffer,
             Builtin::PostSkinningVertices,
             Builtin::NormalMatrixBuffer,
-            Builtin::PerMaterialDataBuffer)
+            Builtin::PerMaterialDataBuffer,
+            Builtin::CLod::Offsets,
+			Builtin::CLod::Groups,
+            Builtin::CLod::ChildLocalMeshletIndices)
             .WithUnorderedAccess(Builtin::GBuffer::Normals,
                 Builtin::GBuffer::Albedo,
                 Builtin::GBuffer::Emissive,
@@ -62,6 +65,9 @@ public:
         RegisterSRV(Builtin::CameraBuffer);
         RegisterSRV(Builtin::PostSkinningVertices);
         RegisterSRV(Builtin::NormalMatrixBuffer);
+		RegisterSRV(Builtin::CLod::Offsets);
+		RegisterSRV(Builtin::CLod::Groups);
+    	RegisterSRV(Builtin::CLod::ChildLocalMeshletIndices);
 
         RegisterUAV(Builtin::GBuffer::Normals);
         RegisterUAV(Builtin::GBuffer::Albedo);

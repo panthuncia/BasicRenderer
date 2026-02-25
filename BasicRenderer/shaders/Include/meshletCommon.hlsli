@@ -36,6 +36,8 @@ struct MeshletSetup
     uint vertCount;
     uint triCount;
     uint vertOffset;
+    uint groupVertexBase;
+    uint groupVertexCount;
     uint postSkinningBufferOffset;
     uint prevPostSkinningBufferOffset;
     // ByteAddressBuffer vertexBuffer;
@@ -70,6 +72,8 @@ bool InitializeMeshletInternal(
     setup.vertCount = setup.meshlet.VertCount;
     setup.triCount = setup.meshlet.TriCount;
     setup.vertOffset = setup.meshlet.VertOffset;
+    setup.groupVertexBase = 0;
+    setup.groupVertexCount = 0;
 
     // setup.vertexBuffer = vertexBuffer;
     // setup.meshletTrianglesBuffer = meshletTrianglesBuffer;
@@ -122,6 +126,8 @@ bool InitializeMeshletInternalCLod(
     setup.vertCount = setup.meshlet.VertCount;
     setup.triCount = setup.meshlet.TriCount;
     setup.vertOffset = setup.meshlet.VertOffset;
+    setup.groupVertexBase = 0;
+    setup.groupVertexCount = 0;
 
     // setup.vertexBuffer = vertexBuffer;
     // setup.meshletTrianglesBuffer = meshletTrianglesBuffer;

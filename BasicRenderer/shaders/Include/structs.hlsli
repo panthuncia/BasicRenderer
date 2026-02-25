@@ -401,6 +401,7 @@ struct VisibleCluster
     unsigned int viewID;
     unsigned int instanceID;
     unsigned int globalMeshletIndex;
+    unsigned int groupID;
 };
 
 #endif // __STRUCTS_HLSL__

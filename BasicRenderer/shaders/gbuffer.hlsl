@@ -5,6 +5,7 @@
 #include "include/utilities.hlsli"
 #include "include/waveIntrinsicsHelpers.hlsli"
 #include "include/visibilityPacking.hlsli"
+#include "include/clodStructs.hlsli"
 
 // http://filmicworlds.com/blog/visibility-buffer-rendering-with-material-graphs/
 struct BarycentricDeriv
@@ -148,6 +149,7 @@ struct MeshletResolveData {
     uint2 postBases; // x = postSkinningBase, y = prevPostSkinningBase
 
     uint meshletVerticesBufferOffset;
+    uint2 groupVertexInfo; // x = groupVertexRemapBase, y = groupVertexCount
 };
 
 MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
@@ -168,6 +170,10 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
         StructuredBuffer<PerMeshBuffer> perMeshBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+        StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+        StructuredBuffer<ClusterLODGroup> groups =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
         StructuredBuffer<Meshlet> meshletBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletOffsets)];
 
@@ -177,12 +183,15 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
 
         PerMeshInstanceBuffer inst = perMeshInstanceBuffer[d.drawcallAndMeshlet.x];
         d.objAndMesh = uint2(inst.perObjectBufferIndex, inst.perMeshBufferIndex);
+        MeshInstanceClodOffsets off = clodOffsets[d.drawcallAndMeshlet.x];
+        ClusterLODGroup group = groups[off.groupsBase + clusterData.groupID];
 
         PerMeshBuffer mesh = perMeshBuffer[d.objAndMesh.y];
 
 //#if defined(VISBUF_USE_CLOD_MESHLETS)
         d.meshInfo = uint4(mesh.vertexByteSize, mesh.vertexFlags, mesh.numVertices, mesh.clodMeshletTrianglesBufferOffset);
         d.meshletVerticesBufferOffset = mesh.clodMeshletVerticesBufferOffset;
+        d.groupVertexInfo = uint2(off.childLocalMeshletIndicesBase + group.firstGroupVertex, group.groupVertexCount);
         Meshlet m = meshletBuffer[d.drawcallAndMeshlet.y];
 // #else
 //         d.meshInfo = uint4(mesh.vertexByteSize, mesh.vertexFlags, mesh.numVertices, mesh.meshletTrianglesBufferOffset);
@@ -212,6 +221,7 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
     d.meshletInfo = WaveReadLaneAt(d.meshletInfo, leader);
     d.postBases = WaveReadLaneAt(d.postBases, leader);
     d.meshletVerticesBufferOffset = WaveReadLaneAt(d.meshletVerticesBufferOffset, leader);
+    d.groupVertexInfo = WaveReadLaneAt(d.groupVertexInfo, leader);
 
     return d;
 }
@@ -219,6 +229,7 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
 void ComputeTriVertexByteOffsetsCompact(
     MeshletResolveData d,
     StructuredBuffer<uint> meshletVerticesBuffer,
+    StructuredBuffer<uint> groupVertexRemapBuffer,
     uint3 triIdx,
     out uint o0,
     out uint o1,
@@ -227,9 +238,15 @@ void ComputeTriVertexByteOffsetsCompact(
     uint stride = d.meshInfo.x;
     uint base = d.meshletVerticesBufferOffset + d.meshletInfo.x;
 
-    uint v0 = meshletVerticesBuffer[base + triIdx.x];
-    uint v1 = meshletVerticesBuffer[base + triIdx.y];
-    uint v2 = meshletVerticesBuffer[base + triIdx.z];
+    uint groupBase = d.groupVertexInfo.x;
+
+    uint local0 = meshletVerticesBuffer[base + triIdx.x];
+    uint local1 = meshletVerticesBuffer[base + triIdx.y];
+    uint local2 = meshletVerticesBuffer[base + triIdx.z];
+
+    uint v0 = groupVertexRemapBuffer[groupBase + local0];
+    uint v1 = groupVertexRemapBuffer[groupBase + local1];
+    uint v2 = groupVertexRemapBuffer[groupBase + local2];
 
     o0 = d.postBases.x + v0 * stride;
     o1 = d.postBases.x + v1 * stride;
@@ -322,9 +339,10 @@ void EvaluateGBufferOptimized(uint2 pixel)
     triIdx = DecodeTriangleCompact(meshletTriangleIndex, md, meshletTrianglesBuffer);
 
     StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletVertexIndices)];
+    StructuredBuffer<uint> groupVertexRemapBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::ChildLocalMeshletIndices)];
 
     uint o0, o1, o2;
-    ComputeTriVertexByteOffsetsCompact(md, meshletVerticesBuffer, triIdx, o0, o1, o2);
+    ComputeTriVertexByteOffsetsCompact(md, meshletVerticesBuffer, groupVertexRemapBuffer, triIdx, o0, o1, o2);
     p0 = LoadPositionOnly(o0, vertexBuffer);
     p1 = LoadPositionOnly(o1, vertexBuffer);
     p2 = LoadPositionOnly(o2, vertexBuffer);
@@ -427,10 +445,15 @@ void EvaluateGBufferOptimized(uint2 pixel)
         uint stride = md.meshInfo.x;
         uint prevBase = md.postBases.y;
         uint base = md.meshletVerticesBufferOffset + md.meshletInfo.x;
+        uint groupBase = md.groupVertexInfo.x;
 
-        uint v0 = meshletVerticesBuffer[base + triIdx.x];
-        uint v1 = meshletVerticesBuffer[base + triIdx.y];
-        uint v2 = meshletVerticesBuffer[base + triIdx.z];
+        uint local0 = meshletVerticesBuffer[base + triIdx.x];
+        uint local1 = meshletVerticesBuffer[base + triIdx.y];
+        uint local2 = meshletVerticesBuffer[base + triIdx.z];
+
+        uint v0 = groupVertexRemapBuffer[groupBase + local0];
+        uint v1 = groupVertexRemapBuffer[groupBase + local1];
+        uint v2 = groupVertexRemapBuffer[groupBase + local2];
 
         uint o0Prev = prevBase + v0 * stride;
         uint o1Prev = prevBase + v1 * stride;

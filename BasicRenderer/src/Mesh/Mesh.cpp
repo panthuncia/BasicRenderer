@@ -166,7 +166,7 @@ void Mesh::LogClusterLODHierarchyStats() const
 		lodLevelCount,
 		maxDepth);
 
-	spdlog::info("  children: entries={} | localMeshletIndexCount={}",
+	spdlog::info("  children: entries={} | groupVertexRemapCount={}",
 		uint32_t(m_clodChildren.size()),
 		uint32_t(m_clodChildLocalMeshletIndices.size()));
 
@@ -605,10 +605,31 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 			outGroup.firstMeshlet = firstMeshlet;
 			outGroup.meshletCount = meshletCount;
 			outGroup.depth = group.depth;
+			outGroup.firstGroupVertex = 0;
+			outGroup.groupVertexCount = 0;
 			outGroup.firstChild = 0;
 			outGroup.childCount = 0;
 
 			m_clodGroups.push_back(outGroup);
+
+			std::unordered_map<uint32_t, uint32_t> groupVertexToLocal;
+			groupVertexToLocal.reserve(cluster_count * MS_MESHLET_SIZE);
+			std::vector<uint32_t> groupLocalToGlobal;
+			groupLocalToGlobal.reserve(cluster_count * MS_MESHLET_SIZE);
+
+			auto getGroupLocalVertexIndex = [&](uint32_t globalVertexIndex) -> uint32_t
+				{
+					auto it = groupVertexToLocal.find(globalVertexIndex);
+					if (it != groupVertexToLocal.end())
+					{
+						return it->second;
+					}
+
+					const uint32_t localIndex = uint32_t(groupLocalToGlobal.size());
+					groupVertexToLocal.emplace(globalVertexIndex, localIndex);
+					groupLocalToGlobal.push_back(globalVertexIndex);
+					return localIndex;
+				};
 
 			// Child buckets keyed by refined group id
 			struct ChildBucket
@@ -686,13 +707,19 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 				// clodLocalIndices should match cluster vertex_count
 				assert(unique == c.vertex_count);
 
+				std::vector<uint32_t> groupLocalVerts(unique);
+				for (size_t v = 0; v < unique; ++v)
+				{
+					groupLocalVerts[v] = getGroupLocalVertexIndex(localVerts[v]);
+				}
+
 				meshopt_Meshlet ml{};
 				ml.vertex_offset = uint32_t(m_clodMeshletVertices.size());
 				ml.triangle_offset = uint32_t(m_clodMeshletTriangles.size());
 				ml.vertex_count = uint32_t(unique);
 				ml.triangle_count = triCount;
 
-				m_clodMeshletVertices.insert(m_clodMeshletVertices.end(), localVerts.begin(), localVerts.end());
+				m_clodMeshletVertices.insert(m_clodMeshletVertices.end(), groupLocalVerts.begin(), groupLocalVerts.end());
 				m_clodMeshletTriangles.insert(m_clodMeshletTriangles.end(), localTris.begin(), localTris.end());
 
 				// Bounds: you can also use c.bounds directly; keeping your computeMeshletBounds path is fine.
@@ -726,11 +753,6 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 
 				m_clodChildren.push_back(child);
 
-				// Preserve compatibility buffer (identity mapping for contiguous local ranges).
-				for (uint32_t local = 0; local < child.localMeshletCount; ++local)
-				{
-					m_clodChildLocalMeshletIndices.push_back(child.firstLocalMeshletIndex + local);
-				}
 			}
 
 			assert(localMeshletCursor == meshletCount);
@@ -748,6 +770,13 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 			}
 
 			maxChildrenObserved = std::max(maxChildrenObserved, grp.childCount);
+
+			grp.firstGroupVertex = uint32_t(m_clodChildLocalMeshletIndices.size());
+			grp.groupVertexCount = uint32_t(groupLocalToGlobal.size());
+			m_clodChildLocalMeshletIndices.insert(
+				m_clodChildLocalMeshletIndices.end(),
+				groupLocalToGlobal.begin(),
+				groupLocalToGlobal.end());
 
 			// firstChild points to start of this group's child records that were just appended.
 			grp.firstChild = uint32_t(m_clodChildren.size()) - grp.childCount;

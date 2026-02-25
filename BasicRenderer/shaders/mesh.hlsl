@@ -6,6 +6,7 @@
 #include "Common/defines.h"
 #include "include/meshletPayload.hlsli"
 #include "Include/meshletCommon.hlsli"
+#include "Include/clodStructs.hlsli"
 
 PSInput GetVertexAttributes(uint blockByteOffset, uint prevBlockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID, PerObjectBuffer objectBuffer) {
     uint byteOffset = blockByteOffset + index * vertexSize;
@@ -198,6 +199,7 @@ void EmitMeshletVisBufferForView(
 VisBufferPSInput GetVisBufferVertexAttributesForViewIndexed(
     uint meshletVerticesBaseOffset,
     uint meshletVertexIndex,
+    uint groupVertexBase,
     uint blockByteOffset,
     uint flags,
     uint vertexSize,
@@ -209,7 +211,9 @@ VisBufferPSInput GetVisBufferVertexAttributesForViewIndexed(
     ClodViewRasterInfo rasterInfo)
 {
     StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletVertexIndices)];
-    uint vertexIndex = meshletVerticesBuffer[meshletVerticesBaseOffset + meshletVertexIndex];
+    StructuredBuffer<uint> groupVertexRemapBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::ChildLocalMeshletIndices)];
+    uint groupLocalVertexIndex = meshletVerticesBuffer[meshletVerticesBaseOffset + meshletVertexIndex];
+    uint vertexIndex = groupVertexRemapBuffer[groupVertexBase + groupLocalVertexIndex];
     return GetVisBufferVertexAttributesForView(
         blockByteOffset,
         vertexIndex,
@@ -238,6 +242,7 @@ void EmitMeshletVisBufferForViewIndexed(
         outputVertices[i] = GetVisBufferVertexAttributesForViewIndexed(
             setup.meshBuffer.clodMeshletVerticesBufferOffset,
             meshletVertexIndex,
+            setup.groupVertexBase,
             setup.postSkinningBufferOffset,
             setup.meshBuffer.vertexFlags,
             setup.meshBuffer.vertexByteSize,
@@ -339,6 +344,13 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
 
     setup.meshBuffer = perMeshBuffer[setup.meshInstanceBuffer.perMeshBufferIndex];
     setup.objectBuffer = perObjectBuffer[setup.meshInstanceBuffer.perObjectBufferIndex];
+
+    StructuredBuffer<MeshInstanceClodOffsets> clodOffsets = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+    StructuredBuffer<ClusterLODGroup> groups = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+    MeshInstanceClodOffsets offsets = clodOffsets[cluster.instanceID];
+    ClusterLODGroup group = groups[offsets.groupsBase + cluster.groupID];
+    setup.groupVertexBase = offsets.childLocalMeshletIndicesBase + group.firstGroupVertex;
+    setup.groupVertexCount = group.groupVertexCount;
 
     uint meshletOffset = setup.meshBuffer.clodMeshletBufferOffset;
 

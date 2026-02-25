@@ -5,45 +5,7 @@
 #include "include/waveIntrinsicsHelpers.hlsli"
 #include "include/occlusionCulling.hlsli"
 #include "PerPassRootConstants/clodRootConstants.h"
-
-struct MeshInstanceClodOffsets
-{
-    uint groupsBase;
-    uint childrenBase;
-    uint childLocalMeshletIndicesBase;
-    uint meshletsBase;
-
-    uint meshletBoundsBase;
-    uint lodNodesBase;
-    uint rootNode; // node index (relative to lodNodesBase) to start traversal from
-};
-struct ClodBounds
-{
-    float4 centerAndRadius; // xyz = center, w = radius
-    float error; // simplification error in mesh space
-    float pad[3];
-};
-
-struct ClusterLODChild
-{
-    int refinedGroup; // -1 => terminal meshlets bucket
-    uint firstLocalMeshletIndex; // group-local contiguous start meshlet index
-    uint localMeshletCount;
-    uint pad0;
-};
-
-struct ClusterLODGroup
-{
-    ClodBounds bounds; // center/radius/error
-    uint firstMeshlet;
-    uint meshletCount;
-    int depth;
-
-    uint firstChild;
-    uint childCount;
-    uint terminalChildCount;
-    uint pad1;
-};
+#include "Include/clodStructs.hlsli"
 
 // meshopt_Meshlet layout on GPU
 struct Meshlet
@@ -1069,6 +1031,7 @@ void WG_ClusterCullBuckets(
             vc.instanceID = b.instanceIndex;
             vc.globalMeshletIndex = globalMeshletIndex;
             vc.viewID = b.viewId;
+            vc.groupID = b.groupId;
             visibleClusters[index] = vc;
         }
     }

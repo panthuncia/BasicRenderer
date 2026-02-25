@@ -296,15 +296,17 @@ struct ClusterLODChild
 struct ClusterLODGroup
 {
     clodBounds bounds; // 5 floats
-	float pad0[3]; // pad to 32 bytes
     uint32_t firstMeshlet = 0;
     uint32_t meshletCount = 0;
     int32_t depth = 0;
 
+	uint32_t firstGroupVertex = 0;
+    uint32_t groupVertexCount = 0;
     uint32_t firstChild = 0;    // offset into m_clodChildren
     uint32_t childCount = 0;    // number of ClusterLODChild entries for this group
+
     uint32_t terminalChildCount = 0;
-    uint32_t pad = 0;
+    uint32_t pad[3] = {0};
 };
 
 enum class CLodReplayRecordType : uint32_t {
@@ -358,6 +360,7 @@ struct VisibleCluster {
     unsigned int viewID;
     unsigned int instanceID;
     unsigned int globalMeshletIndex;
+    unsigned int groupID;
 };
 
 

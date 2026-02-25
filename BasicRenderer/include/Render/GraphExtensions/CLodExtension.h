@@ -1436,6 +1436,9 @@ private:
                 Builtin::PerMaterialDataBuffer,
                 Builtin::PostSkinningVertices,
                 Builtin::CameraBuffer,
+                Builtin::CLod::ChildLocalMeshletIndices,
+                Builtin::CLod::Offsets,
+                Builtin::CLod::Groups,
                 Builtin::MeshResources::MeshletTriangles,
                 Builtin::MeshResources::MeshletVertexIndices,
                 Builtin::MeshResources::MeshletOffsets,
@@ -1455,7 +1458,9 @@ private:
             //RegisterSRV(Builtin::MeshResources::MeshletOffsets);
             RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
             RegisterSRV(Builtin::MeshResources::MeshletTriangles);
-
+			RegisterSRV(Builtin::CLod::ChildLocalMeshletIndices);
+			RegisterSRV(Builtin::CLod::Offsets);
+			RegisterSRV(Builtin::CLod::Groups);
             RegisterSRV(Builtin::NormalMatrixBuffer);
             RegisterSRV(Builtin::PostSkinningVertices);
             RegisterSRV(Builtin::PerObjectBuffer);
