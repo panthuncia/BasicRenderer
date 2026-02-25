@@ -86,7 +86,6 @@ static void BuildMemorySnapshotFromRecords(
 
         minorBuckets[cat] += bytes;
 
-        // Per-resource row (unchanged)
         ui::MemoryResourceRow row{};
         row.bytes = bytes;
         row.uid = record.resourceID;
@@ -98,7 +97,6 @@ static void BuildMemorySnapshotFromRecords(
         row.type = cat;
         out.resources.push_back(row);
 
-        // NEW: per-resource index entry (this is what the frame-graph builder will use)
         if (outIndex && record.resourceID != 0) {
             auto& info = (*outIndex)[record.resourceID];
             info.bytes = bytes;
@@ -202,9 +200,21 @@ static void BuildFrameGraphSnapshotFromBatches(
         row.footprintBytes = footprint;
         row.hasEndTransitions = b.HasTransitions(QueueKind::Graphics, RenderGraph::BatchTransitionPhase::AfterPasses);
 
-        row.passNames.reserve(b.computePasses.size() + b.renderPasses.size());
-        for (auto const& p : b.computePasses) row.passNames.push_back(p.name);
-        for (auto const& p : b.renderPasses)  row.passNames.push_back(p.name);
+        size_t totalPassCount = 0;
+        for (size_t queueIndex = 0; queueIndex < static_cast<size_t>(QueueKind::Count); ++queueIndex) {
+            totalPassCount += b.Passes(static_cast<QueueKind>(queueIndex)).size();
+        }
+        row.passNames.reserve(totalPassCount);
+        for (size_t queueIndex = 0; queueIndex < static_cast<size_t>(QueueKind::Count); ++queueIndex) {
+            const auto queue = static_cast<QueueKind>(queueIndex);
+            for (const auto& queuedPass : b.Passes(queue)) {
+                std::visit(
+                    [&](const auto& pass) {
+                        row.passNames.push_back(pass.name);
+                    },
+                    queuedPass);
+            }
+        }
 
         row.categories.reserve(catSum.size());
         for (auto& [label, bytes] : catSum) {

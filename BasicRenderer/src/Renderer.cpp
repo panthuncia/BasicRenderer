@@ -1367,9 +1367,6 @@ void Renderer::CreateRenderGraph() {
     newGraph->RegisterResource(Builtin::PrimaryCamera::DepthTexture, depthTexture);
     newGraph->RegisterResource(Builtin::PrimaryCamera::LinearDepthMap, depth.linearDepthMap);
 
-	//newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCulling, primaryCamera->gpu.indirectCommandBuffers.meshletCullingIndirectCommandBuffer);
-	//newGraph->RegisterResource(Builtin::PrimaryCamera::IndirectCommandBuffers::MeshletCullingReset, primaryCamera->gpu.indirectCommandBuffers.meshletCullingResetIndirectCommandBuffer);
-
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
         useMeshShaders = false;
@@ -1382,10 +1379,6 @@ void Renderer::CreateRenderGraph() {
     // Skinning comes before Z prepass
     newGraph->BuildComputePass("SkinningPass")
         .Build<SkinningPass>();
-    
-    // Cluster LOD
-    // 2^25 visible clusters allowed due to index precision
-
     
     bool indirect = getIndirectDrawsEnabled();
     if (!useMeshShaders) { // Indirect draws only supported with mesh shaders
