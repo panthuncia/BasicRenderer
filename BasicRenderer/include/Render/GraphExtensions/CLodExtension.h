@@ -551,7 +551,6 @@ private:
                     Builtin::CLod::Offsets,
                     Builtin::CLod::Groups,
                     Builtin::CLod::Children,
-                    Builtin::CLod::ChildLocalMeshletIndices,
                     Builtin::CLod::Nodes,
                     Builtin::CLod::MeshletBounds,
                     Builtin::CullingCameraBuffer,
@@ -570,7 +569,6 @@ private:
             RegisterSRV(Builtin::CLod::Offsets);
             RegisterSRV(Builtin::CLod::Groups);
             RegisterSRV(Builtin::CLod::Children);
-            RegisterSRV(Builtin::CLod::ChildLocalMeshletIndices);
             RegisterSRV(Builtin::CullingCameraBuffer);
             RegisterSRV(Builtin::PerMeshInstanceBuffer);
             RegisterSRV(Builtin::PerObjectBuffer);
@@ -1436,7 +1434,6 @@ private:
                 Builtin::PerMaterialDataBuffer,
                 Builtin::PostSkinningVertices,
                 Builtin::CameraBuffer,
-                Builtin::CLod::ChildLocalMeshletIndices,
                 Builtin::CLod::Offsets,
                 Builtin::CLod::Groups,
                 Builtin::MeshResources::MeshletTriangles,
@@ -1458,7 +1455,6 @@ private:
             //RegisterSRV(Builtin::MeshResources::MeshletOffsets);
             RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
             RegisterSRV(Builtin::MeshResources::MeshletTriangles);
-			RegisterSRV(Builtin::CLod::ChildLocalMeshletIndices);
 			RegisterSRV(Builtin::CLod::Offsets);
 			RegisterSRV(Builtin::CLod::Groups);
             RegisterSRV(Builtin::NormalMatrixBuffer);

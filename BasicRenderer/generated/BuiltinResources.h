@@ -7,7 +7,6 @@ struct Builtin {
   inline static constexpr std::string_view ActiveDrawSetIndices = "Builtin::ActiveDrawSetIndices";
   inline static constexpr std::string_view BRDFLUT = "Builtin::BRDFLUT";
   struct CLod {
-    inline static constexpr std::string_view ChildLocalMeshletIndices = "Builtin::CLod::ChildLocalMeshletIndices";
     inline static constexpr std::string_view Children = "Builtin::CLod::Children";
     inline static constexpr std::string_view Groups = "Builtin::CLod::Groups";
     inline static constexpr std::string_view MeshletBounds = "Builtin::CLod::MeshletBounds";

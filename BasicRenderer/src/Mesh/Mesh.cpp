@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <numeric>
+#include <unordered_map>
 
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
@@ -166,9 +167,12 @@ void Mesh::LogClusterLODHierarchyStats() const
 		lodLevelCount,
 		maxDepth);
 
-	spdlog::info("  children: entries={} | groupVertexRemapCount={}",
+	const uint32_t duplicatedVertexCount = m_clodDuplicatedVertices.empty()
+		? 0u
+		: uint32_t(m_clodDuplicatedVertices.size() / m_perMeshBufferData.vertexByteSize);
+	spdlog::info("  children: entries={} | duplicatedGroupVertices={}",
 		uint32_t(m_clodChildren.size()),
-		uint32_t(m_clodChildLocalMeshletIndices.size()));
+		duplicatedVertexCount);
 
 	spdlog::info("  traversal nodes: total={} | interior={} | leafGroupNodes={}",
 		nodeCount, interiorNodes, leafGroupNodes);
@@ -516,7 +520,8 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 	m_clodMeshletBounds.clear();
 	m_clodMeshletRefinedGroup.clear();
 	m_clodChildren.clear();
-	m_clodChildLocalMeshletIndices.clear();
+	m_clodDuplicatedVertices.clear();
+	m_clodDuplicatedSkinningVertices.clear();
 
 	// traversal hierarchy storage
 	m_clodNodes.clear();
@@ -579,7 +584,8 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 		m_clodMeshletBounds.clear();
 		m_clodMeshletRefinedGroup.clear();
 		m_clodChildren.clear();
-		m_clodChildLocalMeshletIndices.clear();
+		m_clodDuplicatedVertices.clear();
+		m_clodDuplicatedSkinningVertices.clear();
 		m_clodNodes.clear();
 		m_clodLodNodeRanges.clear();
 		m_clodLodLevelRoots.clear();
@@ -722,22 +728,8 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 				m_clodMeshletVertices.insert(m_clodMeshletVertices.end(), groupLocalVerts.begin(), groupLocalVerts.end());
 				m_clodMeshletTriangles.insert(m_clodMeshletTriangles.end(), localTris.begin(), localTris.end());
 
-				// Bounds: you can also use c.bounds directly; keeping your computeMeshletBounds path is fine.
-				const unsigned int* vertsPtr = reinterpret_cast<const unsigned int*>(
-					m_clodMeshletVertices.data() + ml.vertex_offset);
-				const unsigned char* trisPtr = reinterpret_cast<const unsigned char*>(
-					m_clodMeshletTriangles.data() + ml.triangle_offset);
-
-				meshopt_Bounds b = meshopt_computeMeshletBounds(
-					vertsPtr,
-					trisPtr,
-					ml.triangle_count,
-					reinterpret_cast<const float*>(m_vertices->data()),
-					globalVertexCount,
-					vertexStrideBytes);
-
 				BoundingSphere sphere{};
-				sphere.sphere = DirectX::XMFLOAT4(b.center[0], b.center[1], b.center[2], b.radius);
+				sphere.sphere = DirectX::XMFLOAT4(c.bounds.center[0], c.bounds.center[1], c.bounds.center[2], c.bounds.radius);
 
 				m_clodMeshlets.push_back(ml);
 				m_clodMeshletBounds.push_back(sphere);
@@ -771,12 +763,26 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 
 			maxChildrenObserved = std::max(maxChildrenObserved, grp.childCount);
 
-			grp.firstGroupVertex = uint32_t(m_clodChildLocalMeshletIndices.size());
+			grp.firstGroupVertex = uint32_t(m_clodDuplicatedVertices.size() / vertexStrideBytes);
 			grp.groupVertexCount = uint32_t(groupLocalToGlobal.size());
-			m_clodChildLocalMeshletIndices.insert(
-				m_clodChildLocalMeshletIndices.end(),
-				groupLocalToGlobal.begin(),
-				groupLocalToGlobal.end());
+
+			for (uint32_t globalVertexIndex : groupLocalToGlobal)
+			{
+				const size_t srcVertexByteOffset = size_t(globalVertexIndex) * vertexStrideBytes;
+				m_clodDuplicatedVertices.insert(
+					m_clodDuplicatedVertices.end(),
+					m_vertices->begin() + srcVertexByteOffset,
+					m_vertices->begin() + srcVertexByteOffset + vertexStrideBytes);
+
+				if (m_skinningVertices && m_skinningVertexSize > 0)
+				{
+					const size_t srcSkinningByteOffset = size_t(globalVertexIndex) * m_skinningVertexSize;
+					m_clodDuplicatedSkinningVertices.insert(
+						m_clodDuplicatedSkinningVertices.end(),
+						m_skinningVertices->begin() + srcSkinningByteOffset,
+						m_skinningVertices->begin() + srcSkinningByteOffset + m_skinningVertexSize);
+				}
+			}
 
 			// firstChild points to start of this group's child records that were just appended.
 			grp.firstChild = uint32_t(m_clodChildren.size()) - grp.childCount;
@@ -814,6 +820,11 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 
 	if (maxChildrenObserved > MaxGroupChildren)
 		throw std::runtime_error("Exceeded maximum allowed Cluster LOD children per group");
+
+	if (!m_clodDuplicatedVertices.empty())
+	{
+		m_perMeshBufferData.numVertices = static_cast<uint32_t>(m_clodDuplicatedVertices.size() / m_perMeshBufferData.vertexByteSize);
+	}
 
 	{
 		std::vector<uint32_t> refinedGroupParentCounts(m_clodGroups.size(), 0);
@@ -1077,7 +1088,6 @@ void Mesh::SetCLodBufferViews(
 	std::unique_ptr<BufferView> clusterLODMeshletVerticesView,
 	std::unique_ptr<BufferView> clusterLODMeshletTrianglesView,
 	std::unique_ptr<BufferView> clusterLODMeshletBoundsView,
-	std::unique_ptr<BufferView> childLocalMeshletIndicesView,
 	std::unique_ptr<BufferView> clusterLODNodesView
 ) {
 	m_clusterLODGroupsView = std::move(clusterLODGroupsView);
@@ -1086,7 +1096,6 @@ void Mesh::SetCLodBufferViews(
 	m_clusterLODMeshletVerticesView = std::move(clusterLODMeshletVerticesView);
 	m_clusterLODMeshletTrianglesView = std::move(clusterLODMeshletTrianglesView);
 	m_clusterLODMeshletBoundsView = std::move(clusterLODMeshletBoundsView);
-	m_childLocalMeshletIndicesView = std::move(childLocalMeshletIndicesView);
 	m_clusterLODNodesView = std::move(clusterLODNodesView);
 
 	m_perMeshBufferData.clodMeshletBufferOffset = static_cast<uint32_t>(m_clusterLODMeshletsView->GetOffset() / sizeof(meshopt_Meshlet));
@@ -1104,7 +1113,7 @@ void Mesh::SetBaseSkin(std::shared_ptr<Skeleton> skeleton) {
 
 void Mesh::UpdateVertexCount(bool meshletReorderedVertices) {
 	//m_perMeshBufferData.numVertices = static_cast<uint32_t>(meshletReorderedVertices ? m_meshletReorderedVertices.size() / m_perMeshBufferData.vertexByteSize : m_vertices->size() / m_perMeshBufferData.vertexByteSize);
-	m_perMeshBufferData.numVertices = static_cast<uint32_t>(m_vertices->size() / m_perMeshBufferData.vertexByteSize);
+	m_perMeshBufferData.numVertices = static_cast<uint32_t>(GetStreamingNumVertices());
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}

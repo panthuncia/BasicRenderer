@@ -58,7 +58,6 @@ private:
 
 	//std::shared_ptr<DynamicBuffer> m_clusterLODMeshlets;
 	std::shared_ptr<DynamicBuffer> m_clusterLODMeshletBounds;
-	std::shared_ptr<DynamicBuffer> m_childLocalMeshletIndices;
 	std::shared_ptr<DynamicBuffer> m_clusterLODNodes;
 	uint64_t m_activeMeshletCount = 0;
 

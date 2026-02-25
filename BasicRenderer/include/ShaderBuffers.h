@@ -274,7 +274,6 @@ struct MeshInstanceClodOffsets
 {
     uint groupsBase;
     uint childrenBase;
-    uint childLocalMeshletIndicesBase;
     uint meshletsBase;
 
     uint meshletBoundsBase;

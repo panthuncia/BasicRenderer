@@ -338,7 +338,6 @@ void WG_ReplayMeshlet(
 // {
 //     uint instanceIndex;
 //     uint meshletId;  // absolute meshlet index into the meshlet buffer (after base)
-//     uint viewId;
 //     uint fixedRasterBucketOffset;
 // };
 

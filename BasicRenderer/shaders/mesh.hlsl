@@ -211,9 +211,8 @@ VisBufferPSInput GetVisBufferVertexAttributesForViewIndexed(
     ClodViewRasterInfo rasterInfo)
 {
     StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletVertexIndices)];
-    StructuredBuffer<uint> groupVertexRemapBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::ChildLocalMeshletIndices)];
     uint groupLocalVertexIndex = meshletVerticesBuffer[meshletVerticesBaseOffset + meshletVertexIndex];
-    uint vertexIndex = groupVertexRemapBuffer[groupVertexBase + groupLocalVertexIndex];
+    uint vertexIndex = groupVertexBase + groupLocalVertexIndex;
     return GetVisBufferVertexAttributesForView(
         blockByteOffset,
         vertexIndex,
@@ -349,7 +348,7 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
     StructuredBuffer<ClusterLODGroup> groups = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
     MeshInstanceClodOffsets offsets = clodOffsets[cluster.instanceID];
     ClusterLODGroup group = groups[offsets.groupsBase + cluster.groupID];
-    setup.groupVertexBase = offsets.childLocalMeshletIndicesBase + group.firstGroupVertex;
+    setup.groupVertexBase = group.firstGroupVertex;
     setup.groupVertexCount = group.groupVertexCount;
 
     uint meshletOffset = setup.meshBuffer.clodMeshletBufferOffset;

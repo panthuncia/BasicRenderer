@@ -70,14 +70,33 @@ public:
 		auto size = m_vertices->size() / m_perMeshBufferData.vertexByteSize;
 		return size;
 	}
+	uint64_t GetStreamingNumVertices() const {
+		if (!m_clodDuplicatedVertices.empty()) {
+			return m_clodDuplicatedVertices.size() / m_perMeshBufferData.vertexByteSize;
+		}
+		return m_vertices->size() / m_perMeshBufferData.vertexByteSize;
+	}
     rhi::VertexBufferView GetVertexBufferView() const;
     rhi::IndexBufferView GetIndexBufferView() const;
 	PerMeshCB& GetPerMeshCBData() { return m_perMeshBufferData; };
     UINT GetIndexCount() const;
 	uint64_t GetGlobalID() const;
 	std::vector<std::byte>& GetVertices() { return *m_vertices; }
+	const std::vector<std::byte>& GetStreamingVertices() const {
+		return m_clodDuplicatedVertices.empty() ? *m_vertices : m_clodDuplicatedVertices;
+	}
 	//std::vector<std::byte>& GetMeshletReorderedVertices() { return m_meshletReorderedVertices; }
 	std::vector<std::byte>& GetSkinningVertices() { return *m_skinningVertices; }
+	const std::vector<std::byte>& GetStreamingSkinningVertices() const {
+		if (!m_clodDuplicatedSkinningVertices.empty()) {
+			return m_clodDuplicatedSkinningVertices;
+		}
+		if (m_skinningVertices) {
+			return *m_skinningVertices;
+		}
+		static const std::vector<std::byte> empty;
+		return empty;
+	}
 	//std::vector<std::byte>& GetMeshletReorderedSkinningVertices() { return m_meshletReorderedSkinningVertices; }
 	std::vector<meshopt_Meshlet>& GetMeshlets() { return m_meshlets; }
 	std::vector<unsigned int>& GetMeshletVertices() { return m_meshletVertices; }
@@ -136,7 +155,6 @@ public:
 		std::unique_ptr<BufferView> clusterLODMeshletVerticesView,
 		std::unique_ptr<BufferView> clusterLODMeshletTrianglesView,
 		std::unique_ptr<BufferView> clusterLODMeshletBoundsView,
-		std::unique_ptr<BufferView> childLocalMeshletIndicesView,
 		std::unique_ptr<BufferView> clodNodesView
 	);
 
@@ -162,10 +180,6 @@ public:
 
 	const std::vector<BoundingSphere>& GetCLodBounds() const {
 		return m_clodMeshletBounds;
-	}
-
-	const std::vector<uint32_t>& GetCLodChildLocalMeshletIndices() const {
-		return m_clodChildLocalMeshletIndices;
 	}
 
 	const std::vector<ClusterLODNode>& GetCLodNodes() const {
@@ -194,10 +208,6 @@ public:
 
 	const BufferView* GetCLodMeshletBoundsView() const {
 		return m_clusterLODMeshletBoundsView.get();
-	}
-
-	const BufferView* GetCLodChildLocalMeshletIndicesView() const {
-		return m_childLocalMeshletIndicesView.get();
 	}
 
 	const BufferView* GetCLodNodesView() const {
@@ -247,7 +257,8 @@ private:
 	std::vector<int32_t>         m_clodMeshletRefinedGroup;
 	//uint32_t                     m_clodRootGroup = 0;
 	std::vector<ClusterLODChild> m_clodChildren;
-	std::vector<uint32_t>        m_clodChildLocalMeshletIndices; // local indices within the group
+	std::vector<std::byte>       m_clodDuplicatedVertices;
+	std::vector<std::byte>       m_clodDuplicatedSkinningVertices;
 
 	std::vector<ClusterLODNode>      m_clodNodes;
 	std::vector<ClusterLODNodeRangeAlloc> m_clodLodNodeRanges;  // per depth
@@ -261,7 +272,6 @@ private:
 	std::unique_ptr<BufferView> m_clusterLODMeshletVerticesView = nullptr;
 	std::unique_ptr<BufferView> m_clusterLODMeshletTrianglesView = nullptr;
 	std::unique_ptr<BufferView> m_clusterLODMeshletBoundsView = nullptr;
-	std::unique_ptr<BufferView> m_childLocalMeshletIndicesView = nullptr;
 	std::unique_ptr<BufferView> m_clusterLODNodesView = nullptr;
 
 	UINT m_indexCount = 0;
