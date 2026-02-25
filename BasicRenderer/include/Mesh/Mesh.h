@@ -76,6 +76,9 @@ public:
 		}
 		return m_vertices->size() / m_perMeshBufferData.vertexByteSize;
 	}
+	uint32_t GetCLodGroupCount() const {
+		return static_cast<uint32_t>(m_clodGroupChunks.size());
+	}
     rhi::VertexBufferView GetVertexBufferView() const;
     rhi::IndexBufferView GetIndexBufferView() const;
 	PerMeshCB& GetPerMeshCBData() { return m_perMeshBufferData; };
@@ -182,6 +185,31 @@ public:
 		return m_clodMeshletBounds;
 	}
 
+	const std::vector<ClusterLODGroupChunk>& GetCLodGroupChunks() const {
+		return m_clodGroupChunks;
+	}
+
+	const std::vector<std::vector<std::byte>>& GetCLodGroupVertexChunks() const {
+		return m_clodGroupVertexChunks;
+	}
+
+	const std::vector<std::vector<std::byte>>& GetCLodGroupSkinningVertexChunks() const {
+		return m_clodGroupSkinningVertexChunks;
+	}
+
+	const std::vector<std::vector<uint32_t>>& GetCLodGroupMeshletVertexChunks() const {
+		return m_clodGroupMeshletVertexChunks;
+	}
+
+	void ReleaseCLodChunkUploadData() {
+		m_clodGroupVertexChunks.clear();
+		m_clodGroupVertexChunks.shrink_to_fit();
+		m_clodGroupSkinningVertexChunks.clear();
+		m_clodGroupSkinningVertexChunks.shrink_to_fit();
+		m_clodGroupMeshletVertexChunks.clear();
+		m_clodGroupMeshletVertexChunks.shrink_to_fit();
+	}
+
 	const std::vector<ClusterLODNode>& GetCLodNodes() const {
 		return m_clodNodes;
 	}
@@ -212,6 +240,27 @@ public:
 
 	const BufferView* GetCLodNodesView() const {
 		return m_clusterLODNodesView.get();
+	}
+
+	void SetCLodGroupChunkViews(
+		std::vector<std::unique_ptr<BufferView>> preSkinningVertexChunkViews,
+		std::vector<std::unique_ptr<BufferView>> postSkinningVertexChunkViews,
+		std::vector<std::unique_ptr<BufferView>> meshletVertexChunkViews) {
+		m_clodPreSkinningVertexChunkViews = std::move(preSkinningVertexChunkViews);
+		m_clodPostSkinningVertexChunkViews = std::move(postSkinningVertexChunkViews);
+		m_clodMeshletVertexChunkViews = std::move(meshletVertexChunkViews);
+	}
+
+	const std::vector<std::unique_ptr<BufferView>>& GetCLodPreSkinningVertexChunkViews() const {
+		return m_clodPreSkinningVertexChunkViews;
+	}
+
+	const std::vector<std::unique_ptr<BufferView>>& GetCLodPostSkinningVertexChunkViews() const {
+		return m_clodPostSkinningVertexChunkViews;
+	}
+
+	const std::vector<std::unique_ptr<BufferView>>& GetCLodMeshletVertexChunkViews() const {
+		return m_clodMeshletVertexChunkViews;
 	}
 
 	uint32_t GetCLodRootNodeIndex() const { // For hierarchy cut
@@ -259,6 +308,13 @@ private:
 	std::vector<ClusterLODChild> m_clodChildren;
 	std::vector<std::byte>       m_clodDuplicatedVertices;
 	std::vector<std::byte>       m_clodDuplicatedSkinningVertices;
+	std::vector<ClusterLODGroupChunk> m_clodGroupChunks;
+	std::vector<std::vector<std::byte>> m_clodGroupVertexChunks;
+	std::vector<std::vector<std::byte>> m_clodGroupSkinningVertexChunks;
+	std::vector<std::vector<uint32_t>> m_clodGroupMeshletVertexChunks;
+	std::vector<std::unique_ptr<BufferView>> m_clodPreSkinningVertexChunkViews;
+	std::vector<std::unique_ptr<BufferView>> m_clodPostSkinningVertexChunkViews;
+	std::vector<std::unique_ptr<BufferView>> m_clodMeshletVertexChunkViews;
 
 	std::vector<ClusterLODNode>      m_clodNodes;
 	std::vector<ClusterLODNodeRangeAlloc> m_clodLodNodeRanges;  // per depth

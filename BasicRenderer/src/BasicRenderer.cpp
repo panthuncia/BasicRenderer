@@ -380,9 +380,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
 
-    for (int i = 0; i < 1000; i++) {
+    for (int i = 0; i < 5; i++) {
         auto sphereInstance = renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
-        auto point = getRandomPointInVolume(-20, 20, -20, 20, -20, 20);
+        auto point = getRandomPointInVolume(-2, 2, -2, 2, -2, 2);
         sphereInstance->GetRoot().set<Components::Position>({ point.x, point.y, point.z });
     }
 

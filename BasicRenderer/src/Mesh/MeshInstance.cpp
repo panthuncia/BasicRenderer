@@ -22,7 +22,7 @@ void MeshInstance::SetBufferViewUsingBaseMesh(std::unique_ptr<BufferView> perMes
 	m_perMeshInstanceBufferView = std::move(perMeshInstanceBufferView);
 	//Skinning
 	auto postSkinningView = m_mesh->GetPostSkinningVertexBufferView();
-	if (postSkinningView == nullptr || m_perMeshInstanceBufferView == nullptr) {
+	if (m_perMeshInstanceBufferView == nullptr) {
 		return; // no need to update
 	}
 	//Meshlet bounds
@@ -31,7 +31,9 @@ void MeshInstance::SetBufferViewUsingBaseMesh(std::unique_ptr<BufferView> perMes
 	//	m_perMeshInstanceBufferData.meshletBoundsBufferStartIndex = static_cast<uint32_t>(meshletBoundsView->GetOffset() / sizeof(BoundingSphere));
 	//}
 
-	m_perMeshInstanceBufferData.postSkinningVertexBufferOffset = static_cast<uint32_t>(postSkinningView->GetOffset());
+	m_perMeshInstanceBufferData.postSkinningVertexBufferOffset = (postSkinningView != nullptr)
+		? static_cast<uint32_t>(postSkinningView->GetOffset())
+		: 0u;
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
 	}

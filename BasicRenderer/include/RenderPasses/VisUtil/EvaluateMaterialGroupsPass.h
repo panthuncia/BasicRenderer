@@ -41,6 +41,7 @@ public:
             Builtin::NormalMatrixBuffer,
             Builtin::PerMaterialDataBuffer,
             Builtin::CLod::Offsets,
+			Builtin::CLod::GroupChunks,
 			Builtin::CLod::Groups)
             .WithUnorderedAccess(Builtin::GBuffer::Normals,
                 Builtin::GBuffer::Albedo,
@@ -65,6 +66,7 @@ public:
         RegisterSRV(Builtin::PostSkinningVertices);
         RegisterSRV(Builtin::NormalMatrixBuffer);
 		RegisterSRV(Builtin::CLod::Offsets);
+        RegisterSRV(Builtin::CLod::GroupChunks);
 		RegisterSRV(Builtin::CLod::Groups);
 
         RegisterUAV(Builtin::GBuffer::Normals);

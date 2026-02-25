@@ -53,6 +53,7 @@ private:
 	std::shared_ptr<DynamicBuffer> m_perMeshInstanceBuffers;
 
 	std::shared_ptr<DynamicBuffer> m_perMeshInstanceClodOffsets;
+	std::shared_ptr<DynamicBuffer> m_perMeshInstanceClodGroupChunks;
 	std::shared_ptr<DynamicBuffer> m_clusterLODGroups;
 	std::shared_ptr<DynamicBuffer> m_clusterLODChildren;
 

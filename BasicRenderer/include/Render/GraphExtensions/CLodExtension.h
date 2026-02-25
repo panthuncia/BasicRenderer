@@ -549,6 +549,7 @@ private:
                 m_viewDepthSrvIndicesBuffer)
                 .WithShaderResource(Builtin::IndirectCommandBuffers::Master,
                     Builtin::CLod::Offsets,
+                    Builtin::CLod::GroupChunks,
                     Builtin::CLod::Groups,
                     Builtin::CLod::Children,
                     Builtin::CLod::Nodes,
@@ -567,6 +568,7 @@ private:
         void Setup() override {
             RegisterSRV(Builtin::IndirectCommandBuffers::Master);
             RegisterSRV(Builtin::CLod::Offsets);
+            RegisterSRV(Builtin::CLod::GroupChunks);
             RegisterSRV(Builtin::CLod::Groups);
             RegisterSRV(Builtin::CLod::Children);
             RegisterSRV(Builtin::CullingCameraBuffer);
@@ -1435,6 +1437,7 @@ private:
                 Builtin::PostSkinningVertices,
                 Builtin::CameraBuffer,
                 Builtin::CLod::Offsets,
+                Builtin::CLod::GroupChunks,
                 Builtin::CLod::Groups,
                 Builtin::MeshResources::MeshletTriangles,
                 Builtin::MeshResources::MeshletVertexIndices,
@@ -1456,6 +1459,7 @@ private:
             RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
             RegisterSRV(Builtin::MeshResources::MeshletTriangles);
 			RegisterSRV(Builtin::CLod::Offsets);
+            RegisterSRV(Builtin::CLod::GroupChunks);
 			RegisterSRV(Builtin::CLod::Groups);
             RegisterSRV(Builtin::NormalMatrixBuffer);
             RegisterSRV(Builtin::PostSkinningVertices);

@@ -26,6 +26,7 @@ MeshManager::MeshManager() {
 
 	// Cluster LOD data
 	m_perMeshInstanceClodOffsets = DynamicBuffer::CreateShared(sizeof(MeshInstanceClodOffsets), 1, "perMeshInstanceClodOffsets");
+	m_perMeshInstanceClodGroupChunks = DynamicBuffer::CreateShared(sizeof(ClusterLODGroupChunk), 1, "perMeshInstanceClodGroupChunks");
 	m_clusterLODGroups = DynamicBuffer::CreateShared(sizeof(ClusterLODGroup), 1, "clusterLODGroups");
 	m_clusterLODChildren = DynamicBuffer::CreateShared(sizeof(ClusterLODChild), 1, "clusterLODChildren");
 	//m_clusterLODMeshlets = DynamicBuffer::CreateShared(sizeof(meshopt_Meshlet), 1, "clusterLODMeshlets");
@@ -57,6 +58,7 @@ MeshManager::MeshManager() {
 	//m_resources[Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer] = m_clusterToVisibleClusterTableIndexBuffer;
 
 	m_resources[Builtin::CLod::Offsets] = m_perMeshInstanceClodOffsets;
+	m_resources[Builtin::CLod::GroupChunks] = m_perMeshInstanceClodGroupChunks;
 	m_resources[Builtin::CLod::Groups] = m_clusterLODGroups;
 	m_resources[Builtin::CLod::Children] = m_clusterLODChildren;
 	//m_resources[Builtin::CLod::Meshlets] = m_clusterLODMeshlets;
@@ -67,10 +69,36 @@ MeshManager::MeshManager() {
 
 void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedVertices) {
 	mesh->SetCurrentMeshManager(this);
+	if (mesh->GetPreSkinningVertexBufferView() != nullptr) {
+		m_preSkinningVertices->Deallocate(mesh->GetPreSkinningVertexBufferView());
+		mesh->SetPreSkinningVertexBufferView(nullptr);
+	}
+	if (mesh->GetPostSkinningVertexBufferView() != nullptr) {
+		m_postSkinningVertices->Deallocate(mesh->GetPostSkinningVertexBufferView());
+		mesh->SetPostSkinningVertexBufferView(nullptr);
+	}
+	for (const auto& chunkView : mesh->GetCLodPreSkinningVertexChunkViews()) {
+		if (chunkView) {
+			m_preSkinningVertices->Deallocate(chunkView.get());
+		}
+	}
+	for (const auto& chunkView : mesh->GetCLodPostSkinningVertexChunkViews()) {
+		if (chunkView) {
+			m_postSkinningVertices->Deallocate(chunkView.get());
+		}
+	}
+	for (const auto& chunkView : mesh->GetCLodMeshletVertexChunkViews()) {
+		if (chunkView) {
+			m_meshletVertexIndices->Deallocate(chunkView.get());
+		}
+	}
+	mesh->SetCLodGroupChunkViews({}, {}, {});
 	//auto& vertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedVertices() : mesh->GetVertices();
 	//auto& skinningVertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedSkinningVertices() : mesh->GetSkinningVertices();
 	const auto& vertices = mesh->GetStreamingVertices();
 	const auto& skinningVertices = mesh->GetStreamingSkinningVertices();
+	const auto& groupVertexChunks = mesh->GetCLodGroupVertexChunks();
+	const auto& groupMeshletVertexChunks = mesh->GetCLodGroupMeshletVertexChunks();
 	
 	auto numVertices = mesh->GetStreamingNumVertices();
 	if (vertices.empty()) {
@@ -82,13 +110,41 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	std::unique_ptr<BufferView> preSkinningView = nullptr;
 	//std::unique_ptr<BufferView> meshletBoundsView = nullptr;
 	size_t vertexByteSize = mesh->GetPerMeshCBData().vertexByteSize;
+	std::vector<std::unique_ptr<BufferView>> clodPreSkinningChunkViews;
+	std::vector<std::unique_ptr<BufferView>> clodPostSkinningChunkViews;
+	std::vector<std::unique_ptr<BufferView>> clodMeshletVertexChunkViews;
+
+	const bool hasGroupChunks = !groupVertexChunks.empty() && (groupVertexChunks.size() == groupMeshletVertexChunks.size());
 	if (mesh->GetPerMeshCBData().vertexFlags & VertexFlags::VERTEX_SKINNED) {
 		unsigned int skinningVertexByteSize = mesh->GetSkinningVertexSize();
 		preSkinningView = m_preSkinningVertices->AddData(skinningVertices.data(), numVertices * skinningVertexByteSize, skinningVertexByteSize);
 	}
+	else if (hasGroupChunks) {
+		clodPostSkinningChunkViews.reserve(groupVertexChunks.size());
+		for (const auto& groupChunk : groupVertexChunks)
+		{
+			clodPostSkinningChunkViews.push_back(
+				m_postSkinningVertices->AddData(groupChunk.data(), groupChunk.size(), vertexByteSize));
+		}
+	}
 	else {
 		postSkinningView = m_postSkinningVertices->AddData(vertices.data(), numVertices * vertexByteSize, vertexByteSize);
 		//meshletBoundsView = m_meshletBoundsBuffer->AddData(mesh->GetMeshletBounds().data(), mesh->GetMeshletCount() * sizeof(BoundingSphere), sizeof(BoundingSphere));
+	}
+
+	if (hasGroupChunks)
+	{
+		clodMeshletVertexChunkViews.reserve(groupMeshletVertexChunks.size());
+		for (const auto& meshletChunk : groupMeshletVertexChunks)
+		{
+			clodMeshletVertexChunkViews.push_back(
+				m_meshletVertexIndices->AddData(meshletChunk.data(), meshletChunk.size() * sizeof(uint32_t), sizeof(uint32_t)));
+		}
+	}
+	else
+	{
+		clodMeshletVertexChunkViews.push_back(
+			m_meshletVertexIndices->AddData(mesh->GetCLodMeshletVertices().data(), mesh->GetCLodMeshletVertices().size() * sizeof(uint32_t), sizeof(uint32_t)));
 	}
 
 	// Per mesh buffer
@@ -99,7 +155,13 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	if (preSkinningView) {
 		mesh->SetPreSkinningVertexBufferView(std::move(preSkinningView));
 	}
-	mesh->SetPostSkinningVertexBufferView(std::move(postSkinningView));
+	if (postSkinningView) {
+		mesh->SetPostSkinningVertexBufferView(std::move(postSkinningView));
+	}
+	mesh->SetCLodGroupChunkViews(
+		std::move(clodPreSkinningChunkViews),
+		std::move(clodPostSkinningChunkViews),
+		std::move(clodMeshletVertexChunkViews));
 	//mesh->SetMeshletBoundsBufferView(std::move(meshletBoundsView));
 
 	// cluster LOD data
@@ -109,9 +171,6 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	
 	// Meshlet offsets
 	auto clusterLODMeshletsView = m_meshletOffsets->AddData(mesh->GetCLodMeshlets().data(), mesh->GetCLodMeshlets().size() * sizeof(meshopt_Meshlet), sizeof(meshopt_Meshlet));
-	
-	// Mesh-local indices into the vertex/index buffer
-	auto clusterLODMeshletVerticesView = m_meshletVertexIndices->AddData(mesh->GetCLodMeshletVertices().data(), mesh->GetCLodMeshletVertices().size() * sizeof(uint32_t), sizeof(uint32_t));
 	
 	// uint8 indices into the vertex index list
 	auto clusterLODMeshletTrianglesView = m_meshletTriangles->AddData(mesh->GetCLodMeshletTriangles().data(), mesh->GetCLodMeshletTriangles().size() * sizeof(uint8_t), sizeof(uint8_t));
@@ -123,10 +182,12 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 		std::move(clusterLODGroupsView), 
 		std::move(clusterLODChildrenView), 
 		std::move(clusterLODMeshletsView), 
-		std::move(clusterLODMeshletVerticesView),
+		nullptr,
 		std::move(clusterLODMeshletTrianglesView),
 		std::move(clusterLODMeshletBoundsView),
 		std::move(clusterLODNodesView));
+
+	mesh->ReleaseCLodChunkUploadData();
 }
 
 void MeshManager::RemoveMesh(Mesh* mesh) {
@@ -143,6 +204,21 @@ void MeshManager::RemoveMesh(Mesh* mesh) {
 	auto postSkinningView = mesh->GetPostSkinningVertexBufferView();
 	if (postSkinningView != nullptr) {
 		m_postSkinningVertices->Deallocate(postSkinningView);
+	}
+	for (const auto& chunkView : mesh->GetCLodPreSkinningVertexChunkViews()) {
+		if (chunkView) {
+			m_preSkinningVertices->Deallocate(chunkView.get());
+		}
+	}
+	for (const auto& chunkView : mesh->GetCLodPostSkinningVertexChunkViews()) {
+		if (chunkView) {
+			m_postSkinningVertices->Deallocate(chunkView.get());
+		}
+	}
+	for (const auto& chunkView : mesh->GetCLodMeshletVertexChunkViews()) {
+		if (chunkView) {
+			m_meshletVertexIndices->Deallocate(chunkView.get());
+		}
 	}
 	// Deallocate the per mesh buffer view
 	auto& perMeshBufferView = mesh->GetPerMeshBufferView();
@@ -191,6 +267,43 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	auto clusterLODMeshletsView = mesh->GetMesh()->GetCLodMeshletsView();
 	auto clusterLODMeshletBoundsView = mesh->GetMesh()->GetCLodMeshletBoundsView();
 	auto clusterLODNodesView = mesh->GetMesh()->GetCLodNodesView();
+	auto& meshGroupChunks = mesh->GetMesh()->GetCLodGroupChunks();
+	auto& meshGroupViews = mesh->GetMesh()->GetCLodPostSkinningVertexChunkViews();
+	auto& meshGroupMeshletViews = mesh->GetMesh()->GetCLodMeshletVertexChunkViews();
+	std::vector<ClusterLODGroupChunk> instanceGroupChunks(meshGroupChunks.size());
+	for (size_t groupIndex = 0; groupIndex < meshGroupChunks.size(); ++groupIndex)
+	{
+		ClusterLODGroupChunk chunk = meshGroupChunks[groupIndex];
+		if (!mesh->HasSkin())
+		{
+			if (groupIndex < meshGroupViews.size() && meshGroupViews[groupIndex])
+			{
+				chunk.vertexChunkByteOffset = static_cast<uint32_t>(meshGroupViews[groupIndex]->GetOffset());
+			}
+		}
+		else
+		{
+			const auto& group = mesh->GetMesh()->GetCLodGroups()[groupIndex];
+			chunk.vertexChunkByteOffset = mesh->GetPerMeshInstanceBufferData().postSkinningVertexBufferOffset +
+				group.firstGroupVertex * mesh->GetMesh()->GetPerMeshCBData().vertexByteSize;
+		}
+
+		if (groupIndex < meshGroupMeshletViews.size() && meshGroupMeshletViews[groupIndex])
+		{
+			chunk.meshletVerticesBase = static_cast<uint32_t>(meshGroupMeshletViews[groupIndex]->GetOffset() / sizeof(uint32_t));
+		}
+
+		instanceGroupChunks[groupIndex] = chunk;
+	}
+
+	std::unique_ptr<BufferView> clodGroupChunksView = nullptr;
+	if (!instanceGroupChunks.empty())
+	{
+		clodGroupChunksView = m_perMeshInstanceClodGroupChunks->AddData(
+			instanceGroupChunks.data(),
+			instanceGroupChunks.size() * sizeof(ClusterLODGroupChunk),
+			sizeof(ClusterLODGroupChunk));
+	}
 
 	MeshInstanceClodOffsets clodOffsets = {};
 	clodOffsets.groupsBase = static_cast<uint32_t>(clusterLODGroupsView->GetOffset() / sizeof(ClusterLODGroup));
@@ -199,11 +312,16 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	clodOffsets.meshletBoundsBase = static_cast<uint32_t>(clusterLODMeshletBoundsView->GetOffset() / sizeof(BoundingSphere));
 	clodOffsets.lodNodesBase = static_cast<uint32_t>(clusterLODNodesView->GetOffset() / sizeof(ClusterLODNode));
 	clodOffsets.rootNode = mesh->GetMesh()->GetCLodRootNodeIndex();
+	clodOffsets.groupChunkTableBase = (clodGroupChunksView != nullptr)
+		? static_cast<uint32_t>(clodGroupChunksView->GetOffset() / sizeof(ClusterLODGroupChunk))
+		: 0u;
+	clodOffsets.groupChunkTableCount = static_cast<uint32_t>(instanceGroupChunks.size());
 	//clodOffsets.rootGroup = mesh->GetMesh()->GetCLodRootGroup();
 	auto clodOffsetsView = m_perMeshInstanceClodOffsets->AddData(&clodOffsets, sizeof(MeshInstanceClodOffsets), sizeof(MeshInstanceClodOffsets)); // Indexable by mesh instance
 
 	mesh->SetCLodBufferViews(
-		std::move(clodOffsetsView)
+		std::move(clodOffsetsView),
+		std::move(clodGroupChunksView)
 	);
 }
 
@@ -233,7 +351,11 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 	if (clodBuffersView != nullptr) {
 		m_perMeshInstanceClodOffsets->Deallocate(clodBuffersView);
 	}
-	mesh->SetCLodBufferViews(nullptr);
+	auto clodGroupChunksView = mesh->GetCLodGroupChunksView();
+	if (clodGroupChunksView != nullptr) {
+		m_perMeshInstanceClodGroupChunks->Deallocate(clodGroupChunksView);
+	}
+	mesh->SetCLodBufferViews(nullptr, nullptr);
 }
 
 void MeshManager::UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data) {

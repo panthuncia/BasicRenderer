@@ -10,6 +10,16 @@ struct MeshInstanceClodOffsets
     uint meshletBoundsBase;
     uint lodNodesBase;
     uint rootNode; // node index (relative to lodNodesBase) to start traversal from
+    uint groupChunkTableBase;
+    uint groupChunkTableCount;
+};
+
+struct ClusterLODGroupChunk
+{
+    uint vertexChunkByteOffset;
+    uint meshletVerticesBase;
+    uint groupVertexCount;
+    uint meshletVertexCount;
 };
 struct ClodBounds
 {

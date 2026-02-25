@@ -8,6 +8,7 @@ struct Builtin {
   inline static constexpr std::string_view BRDFLUT = "Builtin::BRDFLUT";
   struct CLod {
     inline static constexpr std::string_view Children = "Builtin::CLod::Children";
+    inline static constexpr std::string_view GroupChunks = "Builtin::CLod::GroupChunks";
     inline static constexpr std::string_view Groups = "Builtin::CLod::Groups";
     inline static constexpr std::string_view MeshletBounds = "Builtin::CLod::MeshletBounds";
     inline static constexpr std::string_view Nodes = "Builtin::CLod::Nodes";

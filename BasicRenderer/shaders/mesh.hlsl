@@ -199,7 +199,6 @@ void EmitMeshletVisBufferForView(
 VisBufferPSInput GetVisBufferVertexAttributesForViewIndexed(
     uint meshletVerticesBaseOffset,
     uint meshletVertexIndex,
-    uint groupVertexBase,
     uint blockByteOffset,
     uint flags,
     uint vertexSize,
@@ -212,10 +211,9 @@ VisBufferPSInput GetVisBufferVertexAttributesForViewIndexed(
 {
     StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletVertexIndices)];
     uint groupLocalVertexIndex = meshletVerticesBuffer[meshletVerticesBaseOffset + meshletVertexIndex];
-    uint vertexIndex = groupVertexBase + groupLocalVertexIndex;
     return GetVisBufferVertexAttributesForView(
         blockByteOffset,
-        vertexIndex,
+        groupLocalVertexIndex,
         flags,
         vertexSize,
         vGroupID,
@@ -239,9 +237,8 @@ void EmitMeshletVisBufferForViewIndexed(
     {
         uint meshletVertexIndex = setup.vertOffset + i;
         outputVertices[i] = GetVisBufferVertexAttributesForViewIndexed(
-            setup.meshBuffer.clodMeshletVerticesBufferOffset,
+            setup.groupMeshletVerticesBase,
             meshletVertexIndex,
-            setup.groupVertexBase,
             setup.postSkinningBufferOffset,
             setup.meshBuffer.vertexFlags,
             setup.meshBuffer.vertexByteSize,
@@ -346,10 +343,20 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
 
     StructuredBuffer<MeshInstanceClodOffsets> clodOffsets = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
     StructuredBuffer<ClusterLODGroup> groups = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+    StructuredBuffer<ClusterLODGroupChunk> groupChunks = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::GroupChunks)];
     MeshInstanceClodOffsets offsets = clodOffsets[cluster.instanceID];
     ClusterLODGroup group = groups[offsets.groupsBase + cluster.groupID];
-    setup.groupVertexBase = group.firstGroupVertex;
-    setup.groupVertexCount = group.groupVertexCount;
+    if (cluster.groupID >= offsets.groupChunkTableCount)
+    {
+        return false;
+    }
+
+    ClusterLODGroupChunk groupChunk = groupChunks[offsets.groupChunkTableBase + cluster.groupID];
+    setup.groupVertexBase = 0;
+    setup.groupVertexCount = groupChunk.groupVertexCount;
+    setup.groupVertexChunkByteOffset = groupChunk.vertexChunkByteOffset;
+    setup.groupMeshletVerticesBase = groupChunk.meshletVerticesBase;
+    setup.groupMeshletVertexCount = groupChunk.meshletVertexCount;
 
     uint meshletOffset = setup.meshBuffer.clodMeshletBufferOffset;
 
@@ -368,15 +375,24 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
     setup.triCount = setup.meshlet.TriCount;
     setup.vertOffset = setup.meshlet.VertOffset;
 
-    uint postSkinningBase = setup.meshInstanceBuffer.postSkinningVertexBufferOffset;
-    setup.postSkinningBufferOffset = postSkinningBase;
-    setup.prevPostSkinningBufferOffset = postSkinningBase;
+    if (setup.vertOffset + setup.vertCount > setup.groupMeshletVertexCount)
+    {
+        return false;
+    }
+
+    setup.postSkinningBufferOffset = 0;
+    setup.prevPostSkinningBufferOffset = 0;
 
     if (setup.meshBuffer.vertexFlags & VERTEX_SKINNED)
     {
         uint stride = setup.meshBuffer.vertexByteSize * setup.meshBuffer.numVertices;
-        setup.postSkinningBufferOffset += stride * (perFrameBuffer.frameIndex % 2);
-        setup.prevPostSkinningBufferOffset += stride * ((perFrameBuffer.frameIndex + 1) % 2);
+        setup.postSkinningBufferOffset = setup.groupVertexChunkByteOffset + stride * (perFrameBuffer.frameIndex % 2);
+        setup.prevPostSkinningBufferOffset = setup.groupVertexChunkByteOffset + stride * ((perFrameBuffer.frameIndex + 1) % 2);
+    }
+    else
+    {
+        setup.postSkinningBufferOffset = setup.groupVertexChunkByteOffset;
+        setup.prevPostSkinningBufferOffset = setup.groupVertexChunkByteOffset;
     }
 
     return true;

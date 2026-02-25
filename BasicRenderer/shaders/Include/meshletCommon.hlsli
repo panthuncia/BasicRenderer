@@ -6,6 +6,7 @@
 #include "include/cbuffers.hlsli"
 #include "include/loadingUtils.hlsli"
 #include "include/vertex.hlsli"
+#include "Include/clodStructs.hlsli"
 // Meshlet description
 struct Meshlet
 {
@@ -38,6 +39,9 @@ struct MeshletSetup
     uint vertOffset;
     uint groupVertexBase;
     uint groupVertexCount;
+    uint groupVertexChunkByteOffset;
+    uint groupMeshletVerticesBase;
+    uint groupMeshletVertexCount;
     uint postSkinningBufferOffset;
     uint prevPostSkinningBufferOffset;
     // ByteAddressBuffer vertexBuffer;
@@ -74,6 +78,9 @@ bool InitializeMeshletInternal(
     setup.vertOffset = setup.meshlet.VertOffset;
     setup.groupVertexBase = 0;
     setup.groupVertexCount = 0;
+    setup.groupVertexChunkByteOffset = 0;
+    setup.groupMeshletVerticesBase = 0;
+    setup.groupMeshletVertexCount = 0;
 
     // setup.vertexBuffer = vertexBuffer;
     // setup.meshletTrianglesBuffer = meshletTrianglesBuffer;
@@ -128,6 +135,9 @@ bool InitializeMeshletInternalCLod(
     setup.vertOffset = setup.meshlet.VertOffset;
     setup.groupVertexBase = 0;
     setup.groupVertexCount = 0;
+    setup.groupVertexChunkByteOffset = 0;
+    setup.groupMeshletVerticesBase = 0;
+    setup.groupMeshletVertexCount = 0;
 
     // setup.vertexBuffer = vertexBuffer;
     // setup.meshletTrianglesBuffer = meshletTrianglesBuffer;
