@@ -170,9 +170,13 @@ static void BuildFrameGraphSnapshotFromBatches(
             }
             };
 
-        scanTransitions(b.renderTransitions);
-        scanTransitions(b.computeTransitions);
-        scanTransitions(b.batchEndTransitions);
+        for (size_t phaseIndex = 0; phaseIndex < static_cast<size_t>(RenderGraph::BatchTransitionPhase::Count); ++phaseIndex) {
+            const auto phase = static_cast<RenderGraph::BatchTransitionPhase>(phaseIndex);
+            for (size_t queueIndex = 0; queueIndex < static_cast<size_t>(QueueKind::Count); ++queueIndex) {
+                const auto queue = static_cast<QueueKind>(queueIndex);
+                scanTransitions(b.Transitions(queue, phase));
+            }
+        }
 
         for (auto id : b.allResources) uniqueIds.insert(id);
         for (auto id : b.internallyTransitionedResources) uniqueIds.insert(id);
@@ -196,7 +200,7 @@ static void BuildFrameGraphSnapshotFromBatches(
         ui::FrameGraphBatchRow row{};
         row.label = "Batch " + std::to_string(bi);
         row.footprintBytes = footprint;
-        row.hasEndTransitions = !b.batchEndTransitions.empty();
+        row.hasEndTransitions = b.HasTransitions(QueueKind::Graphics, RenderGraph::BatchTransitionPhase::AfterPasses);
 
         row.passNames.reserve(b.computePasses.size() + b.renderPasses.size());
         for (auto const& p : b.computePasses) row.passNames.push_back(p.name);
