@@ -8,6 +8,8 @@
 #include "Render/RenderContext.h"
 #include "Managers/Singletons/SettingsManager.h"
 
+// Old version, ignore this file. New version: EvaluateMaterialGroupsPass.h
+
 class GBufferConstructionPass : public ComputePass {
 public:
 	GBufferConstructionPass() {
