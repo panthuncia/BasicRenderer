@@ -726,15 +726,8 @@ private:
         if (meshManager == nullptr) {
             serviced = true;
         }
-        else if (isLoad) {
-            serviced = meshManager->SetCLodGroupResidencyForInstance(req.meshInstanceIndex, req.groupGlobalIndex, true);
-            if (!serviced) {
-                const uint32_t globalApplied = meshManager->SetCLodGroupResidencyForGlobal(req.groupGlobalIndex, true);
-                serviced = (globalApplied > 0);
-            }
-        }
         else {
-            const uint32_t globalApplied = meshManager->SetCLodGroupResidencyForGlobal(req.groupGlobalIndex, false);
+            const uint32_t globalApplied = meshManager->SetCLodGroupResidencyForGlobal(req.groupGlobalIndex, isLoad);
             serviced = (globalApplied > 0);
         }
 
