@@ -1,5 +1,7 @@
 #pragma once
 
+#include <spdlog/spdlog.h>
+
 #include "Render/RenderGraph/RenderGraph.h"
 #include "RenderPasses/ReadbackCapturePass.h"
 #include "Render/Runtime/IReadbackService.h"
@@ -25,12 +27,24 @@ public:
 
         for (auto& capture : captures) {
             auto resource = capture.resource.lock();
+            if (!resource && capture.resourceId != 0) {
+                resource = rg.GetResourceByID(capture.resourceId);
+            }
+
             if (!resource) {
+                spdlog::warn(
+                    "ReadbackCaptureExtension: dropping capture for pass '{}' because resource id {} is no longer available.",
+                    capture.passName,
+                    capture.resourceId);
                 continue;
             }
 
             auto handle = rg.RequestResourceHandle(resource.get(), /*allowFailure=*/true);
             if (handle.GetGeneration() == 0) {
+                spdlog::warn(
+                    "ReadbackCaptureExtension: failed to resolve handle for capture resource id {} after pass '{}'.",
+                    capture.resourceId,
+                    capture.passName);
                 continue;
             }
 
