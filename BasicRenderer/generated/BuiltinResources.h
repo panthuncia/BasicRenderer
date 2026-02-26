@@ -14,15 +14,15 @@ struct Builtin {
     inline static constexpr std::string_view Nodes = "Builtin::CLod::Nodes";
     inline static constexpr std::string_view Offsets = "Builtin::CLod::Offsets";
     inline static constexpr std::string_view StreamingActiveGroupsBits = "Builtin::CLod::StreamingActiveGroupsBits";
-    inline static constexpr std::string_view StreamingLastUsedFrames = "Builtin::CLod::StreamingLastUsedFrames";
+    inline static constexpr std::string_view StreamingEvictionExemptBits = "Builtin::CLod::StreamingEvictionExemptBits";
     inline static constexpr std::string_view StreamingLoadCounter = "Builtin::CLod::StreamingLoadCounter";
     inline static constexpr std::string_view StreamingLoadRequestBits = "Builtin::CLod::StreamingLoadRequestBits";
     inline static constexpr std::string_view StreamingLoadRequests = "Builtin::CLod::StreamingLoadRequests";
     inline static constexpr std::string_view StreamingNonResidentBits = "Builtin::CLod::StreamingNonResidentBits";
     inline static constexpr std::string_view StreamingRuntimeState = "Builtin::CLod::StreamingRuntimeState";
-    inline static constexpr std::string_view StreamingUnloadCounter = "Builtin::CLod::StreamingUnloadCounter";
-    inline static constexpr std::string_view StreamingUnloadRequestBits = "Builtin::CLod::StreamingUnloadRequestBits";
-    inline static constexpr std::string_view StreamingUnloadRequests = "Builtin::CLod::StreamingUnloadRequests";
+    inline static constexpr std::string_view StreamingTouchedGroups = "Builtin::CLod::StreamingTouchedGroups";
+    inline static constexpr std::string_view StreamingTouchedGroupsBits = "Builtin::CLod::StreamingTouchedGroupsBits";
+    inline static constexpr std::string_view StreamingTouchedGroupsCounter = "Builtin::CLod::StreamingTouchedGroupsCounter";
   };
   inline static constexpr std::string_view CameraBuffer = "Builtin::CameraBuffer";
   struct Color {

@@ -428,9 +428,13 @@ private:
     std::function<uint32_t()> getAutoAliasPoolRetireIdleFrames;
     std::function<void(uint32_t)> setAutoAliasPoolRetireIdleFrames;
 
-    uint32_t m_clodStreamingUnloadAfterFrames = 120;
-    std::function<uint32_t()> getCLodStreamingUnloadAfterFrames;
-    std::function<void(uint32_t)> setCLodStreamingUnloadAfterFrames;
+    uint32_t m_clodStreamingCpuUploadBudgetRequests = 64;
+    std::function<uint32_t()> getCLodStreamingCpuUploadBudgetRequests;
+    std::function<void(uint32_t)> setCLodStreamingCpuUploadBudgetRequests;
+
+    uint32_t m_clodStreamingResidentBudgetGroups = 0xFFFFFFFFu;
+    std::function<uint32_t()> getCLodStreamingResidentBudgetGroups;
+    std::function<void(uint32_t)> setCLodStreamingResidentBudgetGroups;
 
     float m_autoAliasPoolGrowthHeadroom = 1.5f;
     std::function<float()> getAutoAliasPoolGrowthHeadroom;
@@ -627,10 +631,15 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_autoAliasPoolRetireIdleFrames = getAutoAliasPoolRetireIdleFrames();
     observerSetting(m_autoAliasPoolRetireIdleFrames, "autoAliasPoolRetireIdleFrames");
 
-    getCLodStreamingUnloadAfterFrames = settingsManager.getSettingGetter<uint32_t>("clodStreamingUnloadAfterFrames");
-    setCLodStreamingUnloadAfterFrames = settingsManager.getSettingSetter<uint32_t>("clodStreamingUnloadAfterFrames");
-    m_clodStreamingUnloadAfterFrames = getCLodStreamingUnloadAfterFrames();
-    observerSetting(m_clodStreamingUnloadAfterFrames, "clodStreamingUnloadAfterFrames");
+    getCLodStreamingCpuUploadBudgetRequests = settingsManager.getSettingGetter<uint32_t>("clodStreamingCpuUploadBudgetRequests");
+    setCLodStreamingCpuUploadBudgetRequests = settingsManager.getSettingSetter<uint32_t>("clodStreamingCpuUploadBudgetRequests");
+    m_clodStreamingCpuUploadBudgetRequests = getCLodStreamingCpuUploadBudgetRequests();
+    observerSetting(m_clodStreamingCpuUploadBudgetRequests, "clodStreamingCpuUploadBudgetRequests");
+
+    getCLodStreamingResidentBudgetGroups = settingsManager.getSettingGetter<uint32_t>("clodStreamingResidentBudgetGroups");
+    setCLodStreamingResidentBudgetGroups = settingsManager.getSettingSetter<uint32_t>("clodStreamingResidentBudgetGroups");
+    m_clodStreamingResidentBudgetGroups = getCLodStreamingResidentBudgetGroups();
+    observerSetting(m_clodStreamingResidentBudgetGroups, "clodStreamingResidentBudgetGroups");
 
     getAutoAliasPoolGrowthHeadroom = settingsManager.getSettingGetter<float>("autoAliasPoolGrowthHeadroom");
     setAutoAliasPoolGrowthHeadroom = settingsManager.getSettingSetter<float>("autoAliasPoolGrowthHeadroom");
@@ -764,10 +773,17 @@ inline void Menu::Render(RenderContext& context, rhi::CommandList commandList) {
 		if (ImGui::Checkbox("Use Async Compute", &m_useAsyncCompute)) {
 			setUseAsyncCompute(m_useAsyncCompute);
 		}
-        int clodUnloadAfterFrames = static_cast<int>(m_clodStreamingUnloadAfterFrames);
-        if (ImGui::SliderInt("CLod unload after N frames", &clodUnloadAfterFrames, 1, 6000)) {
-            m_clodStreamingUnloadAfterFrames = static_cast<uint32_t>(std::max(clodUnloadAfterFrames, 1));
-            setCLodStreamingUnloadAfterFrames(m_clodStreamingUnloadAfterFrames);
+        int clodCpuUploadBudget = static_cast<int>(std::min<uint32_t>(m_clodStreamingCpuUploadBudgetRequests, 4096u));
+        if (ImGui::SliderInt("CLod CPU Upload Budget", &clodCpuUploadBudget, 1, 4096)) {
+            m_clodStreamingCpuUploadBudgetRequests = static_cast<uint32_t>(std::max(clodCpuUploadBudget, 1));
+            setCLodStreamingCpuUploadBudgetRequests(m_clodStreamingCpuUploadBudgetRequests);
+        }
+        constexpr uint32_t kClodResidentBudgetMin = 1u;
+        constexpr uint32_t kClodResidentBudgetMax = 2147483647u;
+        uint32_t clodResidentBudget = std::clamp(m_clodStreamingResidentBudgetGroups, kClodResidentBudgetMin, kClodResidentBudgetMax);
+        if (ImGui::SliderScalar("CLod Resident Budget", ImGuiDataType_U32, &clodResidentBudget, &kClodResidentBudgetMin, &kClodResidentBudgetMax)) {
+            m_clodStreamingResidentBudgetGroups = clodResidentBudget;
+            setCLodStreamingResidentBudgetGroups(m_clodStreamingResidentBudgetGroups);
         }
         ImGui::Checkbox("Render Graph Inspector", &showRG);
         ImGui::Checkbox("Memory introspection", &showMemoryIntrospection);

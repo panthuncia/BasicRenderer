@@ -441,9 +441,10 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<AutoAliasPackingStrategy>("autoAliasPackingStrategy", AutoAliasPackingStrategy::GreedySweepLine);
     settingsManager.registerSetting<bool>("autoAliasEnableLogging", false);
     settingsManager.registerSetting<bool>("autoAliasLogExclusionReasons", false);
-    settingsManager.registerSetting<uint32_t>("clodStreamingUnloadAfterFrames", 120u);
 	settingsManager.registerSetting<uint32_t>("autoAliasPoolRetireIdleFrames", 120u);
 	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
+    settingsManager.registerSetting<uint32_t>("clodStreamingCpuUploadBudgetRequests", 64u);
+    settingsManager.registerSetting<uint32_t>("clodStreamingResidentBudgetGroups", 0xFFFFFFFFu);
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
 	getCameraSpeed = settingsManager.getSettingGetter<float>("cameraSpeed");

@@ -7,6 +7,7 @@
 #include "Mesh/MeshInstance.h"
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "Managers/ViewManager.h"
+#include <limits>
 #include "../../generated/BuiltinResources.h"
 #include "Render/MemoryIntrospectionAPI.h"
 
@@ -460,6 +461,61 @@ void MeshManager::GetCLodActiveUniqueAssetGroupRanges(std::vector<CLodActiveGrou
 
 		const uint32_t rangeEnd = state.groupsBase + state.groupCount;
 		outMaxGroupIndex = std::max(outMaxGroupIndex, rangeEnd);
+	}
+}
+
+void MeshManager::GetCLodCoarsestUniqueAssetGroupRanges(std::vector<CLodActiveGroupRange>& outRanges) const {
+	outRanges.clear();
+
+	std::unordered_set<uint64_t> seenRanges;
+	seenRanges.reserve(m_clodStreamingStatesByInstanceIndex.size());
+
+	for (const auto& [_, state] : m_clodStreamingStatesByInstanceIndex) {
+		if (state.groupCount == 0u || state.instance == nullptr || state.instance->GetMesh() == nullptr) {
+			continue;
+		}
+
+		const uint64_t key = (static_cast<uint64_t>(state.groupsBase) << 32ull) | static_cast<uint64_t>(state.groupCount);
+		if (!seenRanges.insert(key).second) {
+			continue;
+		}
+
+		const auto& groups = state.instance->GetMesh()->GetCLodGroups();
+		const uint32_t localGroupCount = std::min<uint32_t>(state.groupCount, static_cast<uint32_t>(groups.size()));
+		if (localGroupCount == 0u) {
+			continue;
+		}
+
+		int32_t coarsestDepth = groups[0].depth;
+		for (uint32_t groupLocalIndex = 1u; groupLocalIndex < localGroupCount; ++groupLocalIndex) {
+			coarsestDepth = std::max(coarsestDepth, groups[groupLocalIndex].depth);
+		}
+
+		uint32_t runStart = std::numeric_limits<uint32_t>::max();
+		for (uint32_t groupLocalIndex = 0u; groupLocalIndex < localGroupCount; ++groupLocalIndex) {
+			const bool isCoarsest = groups[groupLocalIndex].depth == coarsestDepth;
+			if (isCoarsest) {
+				if (runStart == std::numeric_limits<uint32_t>::max()) {
+					runStart = groupLocalIndex;
+				}
+				continue;
+			}
+
+			if (runStart != std::numeric_limits<uint32_t>::max()) {
+				CLodActiveGroupRange range{};
+				range.groupsBase = state.groupsBase + runStart;
+				range.groupCount = groupLocalIndex - runStart;
+				outRanges.push_back(range);
+				runStart = std::numeric_limits<uint32_t>::max();
+			}
+		}
+
+		if (runStart != std::numeric_limits<uint32_t>::max()) {
+			CLodActiveGroupRange range{};
+			range.groupsBase = state.groupsBase + runStart;
+			range.groupCount = localGroupCount - runStart;
+			outRanges.push_back(range);
+		}
 	}
 }
 

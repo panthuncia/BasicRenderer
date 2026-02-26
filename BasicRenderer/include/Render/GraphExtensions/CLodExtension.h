@@ -6,6 +6,7 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <limits>
 #include <unordered_set>
 #include <vector>
 
@@ -20,9 +21,9 @@
 #include "ShaderBuffers.h"
 #include "../shaders/PerPassRootConstants/clodRootConstants.h"
 
-static constexpr const char* CLodStreamingUnloadAfterFramesSettingName = "clodStreamingUnloadAfterFrames";
 static constexpr const char* CLodStreamingMeshManagerGetterSettingName = "getMeshManager";
 static constexpr const char* CLodStreamingCpuUploadBudgetSettingName = "clodStreamingCpuUploadBudgetRequests";
+static constexpr const char* CLodStreamingResidentBudgetSettingName = "clodStreamingResidentBudgetGroups";
 
 struct RasterBucketsHistogramIndirectCommand
 {
@@ -58,6 +59,7 @@ static constexpr uint32_t CLodReplayBufferNumUints = CLodReplayBufferSizeBytes /
 static constexpr uint32_t CLodMaxViewDepthIndices = 512u;
 static constexpr uint32_t CLodStreamingInitialGroupCapacity = 1024u;
 static constexpr uint32_t CLodStreamingRequestCapacity = (1u << 16);
+static constexpr uint32_t CLodStreamingTouchCapacity = CLodStreamingRequestCapacity;
 
 static constexpr uint32_t CLodBitsetWordCount(uint32_t bitCount) {
     return (bitCount + 31u) / 32u;
@@ -95,6 +97,10 @@ public:
     explicit CLodExtension(CLodExtensionType type, uint64_t maxVisibleClusters) : m_maxVisibleClusters(maxVisibleClusters) {
     m_streamingNonResidentBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
     m_streamingActiveGroupsBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
+    m_streamingPinnedGroupsBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
+    m_streamingEvictionExemptBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
+    m_streamingResidencyInitializedBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
+    m_streamingLruCurrentStampByGroup.assign(m_streamingStorageGroupCapacity, 0ull);
     m_streamingRequestsInProgressBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
     m_streamingNonResidentBitsUploadPending = true;
 
@@ -121,8 +127,16 @@ public:
             m_streamingCpuUploadBudgetRequests = 64u;
         }
 
+        try {
+            auto getResidentBudget = SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodStreamingResidentBudgetSettingName);
+            m_streamingResidentBudgetGroups = std::max(getResidentBudget(), 1u);
+        }
+        catch (...) {
+            m_streamingResidentBudgetGroups = std::numeric_limits<uint32_t>::max();
+        }
+
         m_streamingLoadReadbackSlots.assign(m_streamingReadbackRingSize, {});
-        m_streamingUnloadReadbackSlots.assign(m_streamingReadbackRingSize, {});
+        m_streamingTouchReadbackSlots.assign(m_streamingReadbackRingSize, {});
 
         // Initialize global entity for extension type
         auto ecsWorld = ECSManager::GetInstance().GetWorld();
@@ -235,15 +249,6 @@ public:
             false);
         m_streamingActiveGroupsBits->SetName("CLod Streaming Active Groups Bits");
 
-        m_streamingLastUsedFrames = CreateAliasedUnmaterializedStructuredBuffer(
-            m_streamingStorageGroupCapacity,
-            sizeof(uint32_t),
-            true,
-            false,
-            false,
-            false);
-        m_streamingLastUsedFrames->SetName("CLod Streaming LastUsedFrames");
-
         m_streamingLoadRequestBits = CreateAliasedUnmaterializedStructuredBuffer(
             CLodBitsetWordCount(m_streamingStorageGroupCapacity),
             sizeof(uint32_t),
@@ -265,26 +270,26 @@ public:
         m_streamingLoadCounter = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
         m_streamingLoadCounter->SetName("CLod Streaming Load Counter");
 
-        m_streamingUnloadRequestBits = CreateAliasedUnmaterializedStructuredBuffer(
+        m_streamingTouchedGroupsBits = CreateAliasedUnmaterializedStructuredBuffer(
             CLodBitsetWordCount(m_streamingStorageGroupCapacity),
             sizeof(uint32_t),
             true,
             false,
             false,
             false);
-        m_streamingUnloadRequestBits->SetName("CLod Streaming Unload Request Bits");
+        m_streamingTouchedGroupsBits->SetName("CLod Streaming Touched Groups Bits");
 
-        m_streamingUnloadRequests = CreateAliasedUnmaterializedStructuredBuffer(
-            CLodStreamingRequestCapacity,
-            sizeof(CLodStreamingRequest),
+        m_streamingTouchedGroups = CreateAliasedUnmaterializedStructuredBuffer(
+            CLodStreamingTouchCapacity,
+            sizeof(uint32_t),
             true,
             false,
             false,
             false);
-        m_streamingUnloadRequests->SetName("CLod Streaming Unload Requests");
+        m_streamingTouchedGroups->SetName("CLod Streaming Touched Groups");
 
-        m_streamingUnloadCounter = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-        m_streamingUnloadCounter->SetName("CLod Streaming Unload Counter");
+        m_streamingTouchedGroupsCounter = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+        m_streamingTouchedGroupsCounter->SetName("CLod Streaming Touched Groups Counter");
 
         m_streamingRuntimeState = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodStreamingRuntimeState), true, false, false, false);
         m_streamingRuntimeState->SetName("CLod Streaming Runtime State");
@@ -297,17 +302,24 @@ public:
         for (auto& slot : m_streamingLoadReadbackSlots) {
             slot = {};
         }
-        for (auto& slot : m_streamingUnloadReadbackSlots) {
+        for (auto& slot : m_streamingTouchReadbackSlots) {
             slot = {};
         }
         m_pendingStreamingRequests.clear();
+        m_streamingLruEntries.clear();
+        m_streamingLruSerial = 0u;
+        m_streamingResidentGroupsCount = 0u;
         std::fill(m_streamingNonResidentBitsCpu.begin(), m_streamingNonResidentBitsCpu.end(), 0u);
         std::fill(m_streamingActiveGroupsBitsCpu.begin(), m_streamingActiveGroupsBitsCpu.end(), 0u);
+        std::fill(m_streamingPinnedGroupsBitsCpu.begin(), m_streamingPinnedGroupsBitsCpu.end(), 0u);
+        std::fill(m_streamingEvictionExemptBitsCpu.begin(), m_streamingEvictionExemptBitsCpu.end(), 0u);
+        std::fill(m_streamingResidencyInitializedBitsCpu.begin(), m_streamingResidencyInitializedBitsCpu.end(), 0u);
+        std::fill(m_streamingLruCurrentStampByGroup.begin(), m_streamingLruCurrentStampByGroup.end(), 0ull);
         std::fill(m_streamingRequestsInProgressBitsCpu.begin(), m_streamingRequestsInProgressBitsCpu.end(), 0u);
         m_streamingActiveGroupScanCount = 0u;
         m_streamingReadbackScheduleCursor = 0u;
         m_streamingNonResidentBitsUploadPending = true;
-        m_streamingLastUsedFramesResetPending = true;
+        m_streamingTouchedGroupsBitsResetPending = true;
     }
 
     void GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override {
@@ -315,13 +327,12 @@ public:
 
         rg.RegisterResource(Builtin::CLod::StreamingNonResidentBits, m_streamingNonResidentBits);
         rg.RegisterResource(Builtin::CLod::StreamingActiveGroupsBits, m_streamingActiveGroupsBits);
-        rg.RegisterResource(Builtin::CLod::StreamingLastUsedFrames, m_streamingLastUsedFrames);
         rg.RegisterResource(Builtin::CLod::StreamingLoadRequestBits, m_streamingLoadRequestBits);
         rg.RegisterResource(Builtin::CLod::StreamingLoadRequests, m_streamingLoadRequests);
         rg.RegisterResource(Builtin::CLod::StreamingLoadCounter, m_streamingLoadCounter);
-        rg.RegisterResource(Builtin::CLod::StreamingUnloadRequestBits, m_streamingUnloadRequestBits);
-        rg.RegisterResource(Builtin::CLod::StreamingUnloadRequests, m_streamingUnloadRequests);
-        rg.RegisterResource(Builtin::CLod::StreamingUnloadCounter, m_streamingUnloadCounter);
+        rg.RegisterResource(Builtin::CLod::StreamingTouchedGroupsBits, m_streamingTouchedGroupsBits);
+        rg.RegisterResource(Builtin::CLod::StreamingTouchedGroups, m_streamingTouchedGroups);
+        rg.RegisterResource(Builtin::CLod::StreamingTouchedGroupsCounter, m_streamingTouchedGroupsCounter);
         rg.RegisterResource(Builtin::CLod::StreamingRuntimeState, m_streamingRuntimeState);
 
         RenderGraph::ExternalPassDesc streamingBeginPassDesc;
@@ -329,21 +340,13 @@ public:
         streamingBeginPassDesc.name = "CLod::StreamingBeginFramePass";
         streamingBeginPassDesc.where = RenderGraph::ExternalInsertPoint::After("SkinningPass");
 
-        std::function<uint32_t()> clodUnloadAfterFramesGetter = []() { return 120u; };
-        try {
-            clodUnloadAfterFramesGetter = SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodStreamingUnloadAfterFramesSettingName);
-        }
-        catch (...) {
-        }
-
         streamingBeginPassDesc.pass = std::make_shared<CLodStreamingBeginFramePass>(
             m_streamingLoadCounter,
-            m_streamingUnloadCounter,
             m_streamingLoadRequestBits,
-            m_streamingUnloadRequestBits,
             m_streamingNonResidentBits,
             m_streamingActiveGroupsBits,
-            m_streamingLastUsedFrames,
+            m_streamingTouchedGroupsBits,
+            m_streamingTouchedGroupsCounter,
             m_streamingRuntimeState,
             [this](std::vector<uint32_t>& outBits) {
                 if (!m_streamingNonResidentBitsUploadPending) {
@@ -358,25 +361,24 @@ public:
                 outBits = m_streamingActiveGroupsBitsCpu;
                 outActiveScanCount = m_streamingActiveGroupScanCount;
             },
-            [this]() {
-                return static_cast<uint32_t>(m_streamingNonResidentBitsCpu.size());
-            },
-            [this](uint32_t& outElementCount) {
-                if (!m_streamingLastUsedFramesResetPending) {
+            [this](std::vector<uint32_t>& outBits) {
+                if (!m_streamingTouchedGroupsBitsResetPending) {
                     return false;
                 }
 
-                outElementCount = m_streamingStorageGroupCapacity;
-                m_streamingLastUsedFramesResetPending = false;
+                outBits.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
+                m_streamingTouchedGroupsBitsResetPending = false;
                 return true;
+            },
+            [this]() {
+                return static_cast<uint32_t>(m_streamingNonResidentBitsCpu.size());
             },
             [this]() {
                 ScheduleStreamingReadbacks();
             },
             [this]() {
                 ProcessStreamingRequestsBudgeted();
-            },
-            std::move(clodUnloadAfterFramesGetter));
+            });
         outPasses.push_back(std::move(streamingBeginPassDesc));
 
         // First hierarchial culling pass
@@ -499,13 +501,6 @@ public:
             m_viewDepthSrvIndicesBuffer);
         outPasses.push_back(std::move(cullPassDesc2));
 
-        RenderGraph::ExternalPassDesc streamingMaintenancePassDesc;
-        streamingMaintenancePassDesc.type = RenderGraph::PassType::Compute;
-        streamingMaintenancePassDesc.name = "CLod::StreamingMaintenancePass";
-        streamingMaintenancePassDesc.pass = std::make_shared<CLodStreamingMaintenancePass>(
-            [this]() { return m_streamingActiveGroupScanCount; });
-        outPasses.push_back(std::move(streamingMaintenancePassDesc));
-
 		// Histogram + prefix sum passes again
         RenderGraph::ExternalPassDesc histogramPassDesc2;
         histogramPassDesc2.type = RenderGraph::PassType::Compute;
@@ -617,12 +612,112 @@ private:
         CLodStreamingRequest request{};
     };
 
+    struct StreamingTouchedReadbackState {
+        bool pending = false;
+        uint64_t captureId = 0;
+        bool hasCounter = false;
+        bool hasGroups = false;
+        uint32_t groupCount = 0;
+        std::vector<uint32_t> groups;
+    };
+
+    struct StreamingLruEntry {
+        uint32_t groupIndex = 0u;
+        uint64_t stamp = 0u;
+    };
+
     static uint32_t BitWordAddress(uint32_t key) {
         return key >> 5u;
     }
 
     static uint32_t BitMask(uint32_t key) {
         return 1u << (key & 31u);
+    }
+
+    bool IsGroupPinned(uint32_t groupIndex) const {
+        const uint32_t wordAddress = BitWordAddress(groupIndex);
+        if (wordAddress >= m_streamingPinnedGroupsBitsCpu.size()) {
+            return false;
+        }
+
+        return (m_streamingPinnedGroupsBitsCpu[wordAddress] & BitMask(groupIndex)) != 0u;
+    }
+
+    bool IsGroupActive(uint32_t groupIndex) const {
+        const uint32_t wordAddress = BitWordAddress(groupIndex);
+        if (wordAddress >= m_streamingActiveGroupsBitsCpu.size()) {
+            return false;
+        }
+
+        return (m_streamingActiveGroupsBitsCpu[wordAddress] & BitMask(groupIndex)) != 0u;
+    }
+
+    bool IsGroupResident(uint32_t groupIndex) const {
+        const uint32_t wordAddress = BitWordAddress(groupIndex);
+        if (wordAddress >= m_streamingNonResidentBitsCpu.size()) {
+            return false;
+        }
+
+        return (m_streamingNonResidentBitsCpu[wordAddress] & BitMask(groupIndex)) == 0u;
+    }
+
+    void TouchStreamingLru(uint32_t groupIndex) {
+        if (groupIndex >= m_streamingLruCurrentStampByGroup.size()) {
+            return;
+        }
+
+        const uint64_t stamp = ++m_streamingLruSerial;
+        m_streamingLruCurrentStampByGroup[groupIndex] = stamp;
+        m_streamingLruEntries.push_back({ groupIndex, stamp });
+    }
+
+    bool TryEvictLruVictim(uint32_t avoidGroup, CLodStreamingOperationStats& frameStats) {
+        while (!m_streamingLruEntries.empty()) {
+            const StreamingLruEntry entry = m_streamingLruEntries.front();
+            m_streamingLruEntries.pop_front();
+
+            if (entry.groupIndex >= m_streamingLruCurrentStampByGroup.size()) {
+                continue;
+            }
+            if (m_streamingLruCurrentStampByGroup[entry.groupIndex] != entry.stamp) {
+                continue;
+            }
+            if (entry.groupIndex == avoidGroup) {
+                continue;
+            }
+            if (!IsGroupActive(entry.groupIndex)) {
+                continue;
+            }
+            if (IsGroupPinned(entry.groupIndex)) {
+                continue;
+            }
+            if (!IsGroupResident(entry.groupIndex)) {
+                continue;
+            }
+
+            CLodStreamingRequest evictReq{};
+            evictReq.groupGlobalIndex = entry.groupIndex;
+
+            bool residencyBitChanged = false;
+            const bool serviced = ApplyStreamingRequest(evictReq, false, residencyBitChanged);
+
+            frameStats.unloadRequested++;
+            frameStats.unloadUnique++;
+            if (!serviced) {
+                frameStats.unloadFailed++;
+                continue;
+            }
+
+            if (residencyBitChanged) {
+                frameStats.unloadApplied++;
+                if (m_streamingResidentGroupsCount > 0u) {
+                    m_streamingResidentGroupsCount--;
+                }
+                return true;
+            }
+        }
+
+        return false;
     }
 
     void EnsureStreamingStorageCapacity(uint32_t requiredGroupCount) {
@@ -635,22 +730,27 @@ private:
 
         m_streamingNonResidentBits->ResizeStructured(newWordCount);
         m_streamingActiveGroupsBits->ResizeStructured(newWordCount);
+        m_streamingTouchedGroupsBits->ResizeStructured(newWordCount);
         m_streamingLoadRequestBits->ResizeStructured(newWordCount);
-        m_streamingUnloadRequestBits->ResizeStructured(newWordCount);
-        m_streamingLastUsedFrames->ResizeStructured(newCapacity);
 
         m_streamingNonResidentBitsCpu.resize(newWordCount, 0u);
         m_streamingActiveGroupsBitsCpu.resize(newWordCount, 0u);
+        m_streamingPinnedGroupsBitsCpu.resize(newWordCount, 0u);
+        m_streamingEvictionExemptBitsCpu.resize(newWordCount, 0u);
+        m_streamingResidencyInitializedBitsCpu.resize(newWordCount, 0u);
         m_streamingRequestsInProgressBitsCpu.resize(newWordCount, 0u);
+        m_streamingLruCurrentStampByGroup.resize(newCapacity, 0ull);
         m_streamingStorageGroupCapacity = newCapacity;
 
         m_streamingNonResidentBitsUploadPending = true;
-        m_streamingLastUsedFramesResetPending = true;
+        m_streamingTouchedGroupsBitsResetPending = true;
     }
 
     void RefreshStreamingActiveGroupDomain() {
         std::fill(m_streamingActiveGroupsBitsCpu.begin(), m_streamingActiveGroupsBitsCpu.end(), 0u);
+        std::fill(m_streamingPinnedGroupsBitsCpu.begin(), m_streamingPinnedGroupsBitsCpu.end(), 0u);
         m_streamingActiveGroupScanCount = 0u;
+        m_streamingTouchedGroupsBitsResetPending = true;
 
         MeshManager* meshManager = nullptr;
         if (m_getMeshManager) {
@@ -677,6 +777,46 @@ private:
                 m_streamingActiveGroupsBitsCpu[wordAddress] |= BitMask(groupIndex);
             }
         }
+
+        std::vector<MeshManager::CLodActiveGroupRange> coarsestRanges;
+        meshManager->GetCLodCoarsestUniqueAssetGroupRanges(coarsestRanges);
+        for (const auto& range : coarsestRanges) {
+            const uint32_t rangeBegin = std::min(range.groupsBase, m_streamingStorageGroupCapacity);
+            const uint32_t rangeEnd = std::min(range.groupsBase + range.groupCount, m_streamingStorageGroupCapacity);
+            for (uint32_t groupIndex = rangeBegin; groupIndex < rangeEnd; ++groupIndex) {
+                const uint32_t wordAddress = BitWordAddress(groupIndex);
+                m_streamingPinnedGroupsBitsCpu[wordAddress] |= BitMask(groupIndex);
+                m_streamingEvictionExemptBitsCpu[wordAddress] |= BitMask(groupIndex);
+            }
+        }
+
+        uint32_t residentCount = 0u;
+        for (uint32_t groupIndex = 0u; groupIndex < m_streamingActiveGroupScanCount; ++groupIndex) {
+            const uint32_t wordAddress = BitWordAddress(groupIndex);
+            const uint32_t bitMask = BitMask(groupIndex);
+            const bool isActive = (m_streamingActiveGroupsBitsCpu[wordAddress] & bitMask) != 0u;
+            if (!isActive) {
+                continue;
+            }
+
+            const bool initialized = (m_streamingResidencyInitializedBitsCpu[wordAddress] & bitMask) != 0u;
+            const bool pinned = (m_streamingPinnedGroupsBitsCpu[wordAddress] & bitMask) != 0u;
+            if (!initialized) {
+                m_streamingResidencyInitializedBitsCpu[wordAddress] |= bitMask;
+                if (!pinned) {
+                    meshManager->SetCLodGroupResidencyForGlobal(groupIndex, false);
+                    m_streamingNonResidentBitsCpu[wordAddress] |= bitMask;
+                    m_streamingNonResidentBitsUploadPending = true;
+                }
+            }
+
+            const bool resident = (m_streamingNonResidentBitsCpu[wordAddress] & bitMask) == 0u;
+            if (resident) {
+                residentCount++;
+            }
+        }
+
+        m_streamingResidentGroupsCount = residentCount;
     }
 
     bool IsStreamingRequestInProgress(uint32_t groupIndex) const {
@@ -750,8 +890,8 @@ private:
         return true;
     }
 
-    StreamingRequestReadbackState* FindStreamingReadbackStateByCaptureId(bool isLoad, uint64_t captureId) {
-        auto& slots = isLoad ? m_streamingLoadReadbackSlots : m_streamingUnloadReadbackSlots;
+    StreamingRequestReadbackState* FindStreamingLoadReadbackStateByCaptureId(uint64_t captureId) {
+        auto& slots = m_streamingLoadReadbackSlots;
         for (auto& slot : slots) {
             if (slot.pending && slot.captureId == captureId) {
                 return &slot;
@@ -761,7 +901,18 @@ private:
         return nullptr;
     }
 
-    void TryFinalizeStreamingReadback(StreamingRequestReadbackState& state, bool isLoad) {
+    StreamingTouchedReadbackState* FindStreamingTouchedReadbackStateByCaptureId(uint64_t captureId) {
+        auto& slots = m_streamingTouchReadbackSlots;
+        for (auto& slot : slots) {
+            if (slot.pending && slot.captureId == captureId) {
+                return &slot;
+            }
+        }
+
+        return nullptr;
+    }
+
+    void TryFinalizeStreamingLoadReadback(StreamingRequestReadbackState& state) {
         if (!state.pending || !state.hasCounter || !state.hasRequests) {
             return;
         }
@@ -787,19 +938,35 @@ private:
 
             MarkStreamingRequestInProgress(req.groupGlobalIndex);
             PendingStreamingRequest pending{};
-            pending.isLoad = isLoad;
+            pending.isLoad = true;
             pending.request = req;
             m_pendingStreamingRequests.push_back(pending);
             queuedCount++;
         }
 
         spdlog::info(
-            "CLod streaming: observed {} {} requests ({} unique groups, {} queued, {} deduped/in-progress)",
+            "CLod streaming: observed {} load requests ({} unique groups, {} queued, {} deduped/in-progress)",
             static_cast<uint32_t>(decodeCount),
-            isLoad ? "load" : "unload",
             static_cast<uint32_t>(seen.size()),
             queuedCount,
             static_cast<uint32_t>(seen.size()) - queuedCount);
+
+        state = {};
+    }
+
+    void TryFinalizeStreamingTouchedReadback(StreamingTouchedReadbackState& state) {
+        if (!state.pending || !state.hasCounter || !state.hasGroups) {
+            return;
+        }
+
+        const size_t decodeCount = std::min<size_t>(state.groupCount, state.groups.size());
+        for (size_t i = 0; i < decodeCount; ++i) {
+            const uint32_t groupIndex = state.groups[i];
+            if (groupIndex >= m_streamingStorageGroupCapacity) {
+                EnsureStreamingStorageCapacity(groupIndex + 1u);
+            }
+            TouchStreamingLru(groupIndex);
+        }
 
         state = {};
     }
@@ -812,14 +979,14 @@ private:
         if (m_streamingLoadReadbackSlots.size() != m_streamingReadbackRingSize) {
             m_streamingLoadReadbackSlots.assign(m_streamingReadbackRingSize, {});
         }
-        if (m_streamingUnloadReadbackSlots.size() != m_streamingReadbackRingSize) {
-            m_streamingUnloadReadbackSlots.assign(m_streamingReadbackRingSize, {});
+        if (m_streamingTouchReadbackSlots.size() != m_streamingReadbackRingSize) {
+            m_streamingTouchReadbackSlots.assign(m_streamingReadbackRingSize, {});
         }
 
         int32_t selectedSlot = -1;
         for (uint32_t i = 0; i < m_streamingReadbackRingSize; ++i) {
             const uint32_t slotIndex = (m_streamingReadbackScheduleCursor + i) % m_streamingReadbackRingSize;
-            if (!m_streamingLoadReadbackSlots[slotIndex].pending && !m_streamingUnloadReadbackSlots[slotIndex].pending) {
+            if (!m_streamingLoadReadbackSlots[slotIndex].pending && !m_streamingTouchReadbackSlots[slotIndex].pending) {
                 selectedSlot = static_cast<int32_t>(slotIndex);
                 break;
             }
@@ -833,23 +1000,23 @@ private:
         m_streamingReadbackScheduleCursor = (slotIndex + 1u) % m_streamingReadbackRingSize;
 
         auto& loadSlot = m_streamingLoadReadbackSlots[slotIndex];
-        auto& unloadSlot = m_streamingUnloadReadbackSlots[slotIndex];
+        auto& touchSlot = m_streamingTouchReadbackSlots[slotIndex];
 
         loadSlot = {};
         loadSlot.pending = true;
         loadSlot.captureId = ++m_streamingReadbackCaptureSerial;
 
-        unloadSlot = {};
-        unloadSlot.pending = true;
-        unloadSlot.captureId = ++m_streamingReadbackCaptureSerial;
+        touchSlot = {};
+        touchSlot.pending = true;
+        touchSlot.captureId = ++m_streamingReadbackCaptureSerial;
 
         const uint64_t loadCaptureId = loadSlot.captureId;
         m_streamingReadbackService->RequestReadbackCapture(
-            "CLod::StreamingMaintenancePass",
+            "CLod::HierarchialCullingPass2",
             m_streamingLoadCounter.get(),
             RangeSpec{},
             [this, loadCaptureId](ReadbackCaptureResult&& result) {
-                auto* state = FindStreamingReadbackStateByCaptureId(true, loadCaptureId);
+                auto* state = FindStreamingLoadReadbackStateByCaptureId(loadCaptureId);
                 if (state == nullptr) {
                     return;
                 }
@@ -861,15 +1028,15 @@ private:
 
                 state->requestCount = std::min<uint32_t>(requestCount, CLodStreamingRequestCapacity);
                 state->hasCounter = true;
-                TryFinalizeStreamingReadback(*state, true);
+                TryFinalizeStreamingLoadReadback(*state);
             });
 
         m_streamingReadbackService->RequestReadbackCapture(
-            "CLod::StreamingMaintenancePass",
+            "CLod::HierarchialCullingPass2",
             m_streamingLoadRequests.get(),
             RangeSpec{},
             [this, loadCaptureId](ReadbackCaptureResult&& result) {
-                auto* state = FindStreamingReadbackStateByCaptureId(true, loadCaptureId);
+                auto* state = FindStreamingLoadReadbackStateByCaptureId(loadCaptureId);
                 if (state == nullptr) {
                     return;
                 }
@@ -882,16 +1049,16 @@ private:
                 }
 
                 state->hasRequests = true;
-                TryFinalizeStreamingReadback(*state, true);
+                TryFinalizeStreamingLoadReadback(*state);
             });
 
-        const uint64_t unloadCaptureId = unloadSlot.captureId;
+        const uint64_t touchCaptureId = touchSlot.captureId;
         m_streamingReadbackService->RequestReadbackCapture(
-            "CLod::StreamingMaintenancePass",
-            m_streamingUnloadCounter.get(),
+            "CLod::HierarchialCullingPass2",
+            m_streamingTouchedGroupsCounter.get(),
             RangeSpec{},
-            [this, unloadCaptureId](ReadbackCaptureResult&& result) {
-                auto* state = FindStreamingReadbackStateByCaptureId(false, unloadCaptureId);
+            [this, touchCaptureId](ReadbackCaptureResult&& result) {
+                auto* state = FindStreamingTouchedReadbackStateByCaptureId(touchCaptureId);
                 if (state == nullptr) {
                     return;
                 }
@@ -901,30 +1068,30 @@ private:
                     std::memcpy(&requestCount, result.data.data(), sizeof(uint32_t));
                 }
 
-                state->requestCount = std::min<uint32_t>(requestCount, CLodStreamingRequestCapacity);
+                state->groupCount = std::min<uint32_t>(requestCount, CLodStreamingTouchCapacity);
                 state->hasCounter = true;
-                TryFinalizeStreamingReadback(*state, false);
+                TryFinalizeStreamingTouchedReadback(*state);
             });
 
         m_streamingReadbackService->RequestReadbackCapture(
-            "CLod::StreamingMaintenancePass",
-            m_streamingUnloadRequests.get(),
+            "CLod::HierarchialCullingPass2",
+            m_streamingTouchedGroups.get(),
             RangeSpec{},
-            [this, unloadCaptureId](ReadbackCaptureResult&& result) {
-                auto* state = FindStreamingReadbackStateByCaptureId(false, unloadCaptureId);
+            [this, touchCaptureId](ReadbackCaptureResult&& result) {
+                auto* state = FindStreamingTouchedReadbackStateByCaptureId(touchCaptureId);
                 if (state == nullptr) {
                     return;
                 }
 
-                const size_t stride = sizeof(CLodStreamingRequest);
-                const size_t decodedCount = std::min<size_t>(result.data.size() / stride, CLodStreamingRequestCapacity);
-                state->requests.resize(decodedCount);
+                const size_t stride = sizeof(uint32_t);
+                const size_t decodedCount = std::min<size_t>(result.data.size() / stride, CLodStreamingTouchCapacity);
+                state->groups.resize(decodedCount);
                 if (decodedCount > 0) {
-                    std::memcpy(state->requests.data(), result.data.data(), decodedCount * stride);
+                    std::memcpy(state->groups.data(), result.data.data(), decodedCount * stride);
                 }
 
-                state->hasRequests = true;
-                TryFinalizeStreamingReadback(*state, false);
+                state->hasGroups = true;
+                TryFinalizeStreamingTouchedReadback(*state);
             });
     }
 
@@ -937,29 +1104,33 @@ private:
             const PendingStreamingRequest pending = m_pendingStreamingRequests.front();
             m_pendingStreamingRequests.pop_front();
 
-            bool residencyBitChanged = false;
-            const bool serviced = ApplyStreamingRequest(pending.request, pending.isLoad, residencyBitChanged);
+            if (pending.request.groupGlobalIndex >= m_streamingStorageGroupCapacity) {
+                EnsureStreamingStorageCapacity(pending.request.groupGlobalIndex + 1u);
+            }
 
-            if (pending.isLoad) {
-                frameStats.loadRequested++;
-                frameStats.loadUnique++;
-                if (!serviced) {
-                    frameStats.loadFailed++;
-                }
-                else if (residencyBitChanged) {
-                    frameStats.loadApplied++;
+            if (!IsGroupResident(pending.request.groupGlobalIndex)) {
+                while (m_streamingResidentGroupsCount >= m_streamingResidentBudgetGroups) {
+                    const bool evicted = TryEvictLruVictim(pending.request.groupGlobalIndex, frameStats);
+                    if (!evicted) {
+                        break;
+                    }
                 }
             }
-            else {
-                frameStats.unloadRequested++;
-                frameStats.unloadUnique++;
-                if (!serviced) {
-                    frameStats.unloadFailed++;
-                }
-                else if (residencyBitChanged) {
-                    frameStats.unloadApplied++;
-                }
+
+            bool residencyBitChanged = false;
+            const bool serviced = ApplyStreamingRequest(pending.request, true, residencyBitChanged);
+
+            frameStats.loadRequested++;
+            frameStats.loadUnique++;
+            if (!serviced) {
+                frameStats.loadFailed++;
             }
+            else if (residencyBitChanged) {
+                frameStats.loadApplied++;
+                m_streamingResidentGroupsCount++;
+            }
+
+            TouchStreamingLru(pending.request.groupGlobalIndex);
 
             ClearStreamingRequestInProgress(pending.request.groupGlobalIndex);
             processed++;
@@ -998,32 +1169,39 @@ private:
     // Streaming runtime buffers
     std::shared_ptr<Buffer> m_streamingNonResidentBits;
     std::shared_ptr<Buffer> m_streamingActiveGroupsBits;
-    std::shared_ptr<Buffer> m_streamingLastUsedFrames;
+    std::shared_ptr<Buffer> m_streamingTouchedGroupsBits;
     std::shared_ptr<Buffer> m_streamingLoadRequestBits;
     std::shared_ptr<Buffer> m_streamingLoadRequests;
     std::shared_ptr<Buffer> m_streamingLoadCounter;
-    std::shared_ptr<Buffer> m_streamingUnloadRequestBits;
-    std::shared_ptr<Buffer> m_streamingUnloadRequests;
-    std::shared_ptr<Buffer> m_streamingUnloadCounter;
+    std::shared_ptr<Buffer> m_streamingTouchedGroups;
+    std::shared_ptr<Buffer> m_streamingTouchedGroupsCounter;
     std::shared_ptr<Buffer> m_streamingRuntimeState;
 
     std::vector<uint32_t> m_streamingNonResidentBitsCpu;
     std::vector<uint32_t> m_streamingActiveGroupsBitsCpu;
+    std::vector<uint32_t> m_streamingPinnedGroupsBitsCpu;
+    std::vector<uint32_t> m_streamingEvictionExemptBitsCpu;
+    std::vector<uint32_t> m_streamingResidencyInitializedBitsCpu;
     std::vector<uint32_t> m_streamingRequestsInProgressBitsCpu;
+    std::vector<uint64_t> m_streamingLruCurrentStampByGroup;
+    std::deque<StreamingLruEntry> m_streamingLruEntries;
+    uint64_t m_streamingLruSerial = 0u;
+    uint32_t m_streamingResidentGroupsCount = 0u;
     uint32_t m_streamingActiveGroupScanCount = 0u;
     uint32_t m_streamingStorageGroupCapacity = CLodStreamingInitialGroupCapacity;
     bool m_streamingNonResidentBitsUploadPending = false;
-    bool m_streamingLastUsedFramesResetPending = true;
+    bool m_streamingTouchedGroupsBitsResetPending = true;
     uint32_t m_streamingReadbackRingSize = 2u;
     uint32_t m_streamingReadbackScheduleCursor = 0u;
     uint32_t m_streamingCpuUploadBudgetRequests = 64u;
+    uint32_t m_streamingResidentBudgetGroups = std::numeric_limits<uint32_t>::max();
     rg::runtime::IReadbackService* m_streamingReadbackService = nullptr;
     std::function<MeshManager*()> m_getMeshManager = []() { return nullptr; };
 
     uint64_t m_streamingReadbackCaptureSerial = 0;
     uint64_t m_streamingOperationSampleSerial = 0;
     std::vector<StreamingRequestReadbackState> m_streamingLoadReadbackSlots;
-    std::vector<StreamingRequestReadbackState> m_streamingUnloadReadbackSlots;
+    std::vector<StreamingTouchedReadbackState> m_streamingTouchReadbackSlots;
     std::deque<PendingStreamingRequest> m_pendingStreamingRequests;
 
     // Compaction Pass Buffers
@@ -1097,40 +1275,36 @@ private:
     public:
         CLodStreamingBeginFramePass(
             std::shared_ptr<Buffer> loadCounter,
-            std::shared_ptr<Buffer> unloadCounter,
             std::shared_ptr<Buffer> loadRequestBits,
-            std::shared_ptr<Buffer> unloadRequestBits,
             std::shared_ptr<Buffer> nonResidentBits,
             std::shared_ptr<Buffer> activeGroupsBits,
-            std::shared_ptr<Buffer> lastUsedFrames,
+            std::shared_ptr<Buffer> touchedGroupsBits,
+            std::shared_ptr<Buffer> touchedGroupsCounter,
             std::shared_ptr<Buffer> runtimeState,
             std::function<bool(std::vector<uint32_t>&)> tryConsumeNonResidentBitsUpload,
             std::function<void(std::vector<uint32_t>&, uint32_t&)> getActiveGroupsBitsUpload,
+            std::function<bool(std::vector<uint32_t>&)> tryConsumeTouchedGroupsBitsReset,
             std::function<uint32_t()> getBitsetWordCount,
-            std::function<bool(uint32_t&)> tryConsumeLastUsedFramesReset,
             std::function<void()> scheduleStreamingReadbacks,
-            std::function<void()> processStreamingRequests,
-            std::function<uint32_t()> getUnloadAfterFrames)
+            std::function<void()> processStreamingRequests)
             : m_loadCounter(std::move(loadCounter))
-            , m_unloadCounter(std::move(unloadCounter))
             , m_loadRequestBits(std::move(loadRequestBits))
-            , m_unloadRequestBits(std::move(unloadRequestBits))
             , m_nonResidentBits(std::move(nonResidentBits))
             , m_activeGroupsBits(std::move(activeGroupsBits))
-            , m_lastUsedFrames(std::move(lastUsedFrames))
+            , m_touchedGroupsBits(std::move(touchedGroupsBits))
+            , m_touchedGroupsCounter(std::move(touchedGroupsCounter))
             , m_runtimeState(std::move(runtimeState))
             , m_tryConsumeNonResidentBitsUpload(std::move(tryConsumeNonResidentBitsUpload))
             , m_getActiveGroupsBitsUpload(std::move(getActiveGroupsBitsUpload))
+            , m_tryConsumeTouchedGroupsBitsReset(std::move(tryConsumeTouchedGroupsBitsReset))
             , m_getBitsetWordCount(std::move(getBitsetWordCount))
-            , m_tryConsumeLastUsedFramesReset(std::move(tryConsumeLastUsedFramesReset))
             , m_scheduleStreamingReadbacks(std::move(scheduleStreamingReadbacks))
-            , m_processStreamingRequests(std::move(processStreamingRequests))
-            , m_getUnloadAfterFrames(std::move(getUnloadAfterFrames)) {
+            , m_processStreamingRequests(std::move(processStreamingRequests)) {
         }
 
         void DeclareResourceUsages(ComputePassBuilder* builder) override {
-            builder->WithUnorderedAccess(m_loadCounter, m_unloadCounter, m_nonResidentBits, m_activeGroupsBits, m_lastUsedFrames, m_runtimeState)
-                .WithUnorderedAccess(Builtin::CLod::StreamingLoadRequestBits, Builtin::CLod::StreamingUnloadRequestBits);
+            builder->WithUnorderedAccess(m_loadCounter, m_touchedGroupsCounter, m_nonResidentBits, m_activeGroupsBits, m_touchedGroupsBits, m_runtimeState)
+                .WithUnorderedAccess(Builtin::CLod::StreamingLoadRequestBits);
         }
 
         void Setup() override {}
@@ -1158,7 +1332,7 @@ private:
 
             const uint32_t zero = 0u;
             BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_loadCounter), 0);
-            BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_unloadCounter), 0);
+            BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_touchedGroupsCounter), 0);
 
             const uint32_t bitsetWordCount = std::max(m_getBitsetWordCount ? m_getBitsetWordCount() : 1u, 1u);
             std::vector<uint32_t> zeroBits(bitsetWordCount, 0u);
@@ -1166,11 +1340,6 @@ private:
                 zeroBits.data(),
                 static_cast<uint32_t>(zeroBits.size() * sizeof(uint32_t)),
                 rg::runtime::UploadTarget::FromShared(m_loadRequestBits),
-                0);
-            BUFFER_UPLOAD(
-                zeroBits.data(),
-                static_cast<uint32_t>(zeroBits.size() * sizeof(uint32_t)),
-                rg::runtime::UploadTarget::FromShared(m_unloadRequestBits),
                 0);
 
             std::vector<uint32_t> nonResidentBitsUpload;
@@ -1195,19 +1364,18 @@ private:
                     0);
             }
 
-            uint32_t lastUsedFramesCount = 0u;
-            if (m_tryConsumeLastUsedFramesReset && m_tryConsumeLastUsedFramesReset(lastUsedFramesCount) && lastUsedFramesCount > 0u) {
-                std::vector<uint32_t> zeroLastUsed(lastUsedFramesCount, 0u);
+            std::vector<uint32_t> touchedGroupsBitsReset;
+            if (m_tryConsumeTouchedGroupsBitsReset && m_tryConsumeTouchedGroupsBitsReset(touchedGroupsBitsReset)) {
                 BUFFER_UPLOAD(
-                    zeroLastUsed.data(),
-                    static_cast<uint32_t>(zeroLastUsed.size() * sizeof(uint32_t)),
-                    rg::runtime::UploadTarget::FromShared(m_lastUsedFrames),
+                    touchedGroupsBitsReset.data(),
+                    static_cast<uint32_t>(touchedGroupsBitsReset.size() * sizeof(uint32_t)),
+                    rg::runtime::UploadTarget::FromShared(m_touchedGroupsBits),
                     0);
             }
 
             CLodStreamingRuntimeState state{};
             state.activeGroupScanCount = activeGroupScanCount;
-            state.unloadAfterFrames = std::max(m_getUnloadAfterFrames ? m_getUnloadAfterFrames() : 120u, 1u);
+            state.unloadAfterFrames = 0u;
             state.activeGroupsBitsetWordCount = CLodBitsetWordCount(activeGroupScanCount);
             BUFFER_UPLOAD(
                 &state,
@@ -1220,81 +1388,18 @@ private:
 
     private:
         std::shared_ptr<Buffer> m_loadCounter;
-        std::shared_ptr<Buffer> m_unloadCounter;
         std::shared_ptr<Buffer> m_loadRequestBits;
-        std::shared_ptr<Buffer> m_unloadRequestBits;
         std::shared_ptr<Buffer> m_nonResidentBits;
         std::shared_ptr<Buffer> m_activeGroupsBits;
-        std::shared_ptr<Buffer> m_lastUsedFrames;
+        std::shared_ptr<Buffer> m_touchedGroupsBits;
+        std::shared_ptr<Buffer> m_touchedGroupsCounter;
         std::shared_ptr<Buffer> m_runtimeState;
         std::function<bool(std::vector<uint32_t>&)> m_tryConsumeNonResidentBitsUpload;
         std::function<void(std::vector<uint32_t>&, uint32_t&)> m_getActiveGroupsBitsUpload;
+        std::function<bool(std::vector<uint32_t>&)> m_tryConsumeTouchedGroupsBitsReset;
         std::function<uint32_t()> m_getBitsetWordCount;
-        std::function<bool(uint32_t&)> m_tryConsumeLastUsedFramesReset;
         std::function<void()> m_scheduleStreamingReadbacks;
         std::function<void()> m_processStreamingRequests;
-        std::function<uint32_t()> m_getUnloadAfterFrames;
-    };
-
-    class CLodStreamingMaintenancePass : public ComputePass {
-    public:
-        explicit CLodStreamingMaintenancePass(std::function<uint32_t()> getActiveGroupScanCount)
-            : m_getActiveGroupScanCount(std::move(getActiveGroupScanCount)) {
-            m_pso = PSOManager::GetInstance().MakeComputePipeline(
-                PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
-                L"shaders/ClusterLOD/streamingMaintenance.hlsl",
-                L"CSMain",
-                {},
-                "CLodStreamingMaintenance");
-        }
-
-        void DeclareResourceUsages(ComputePassBuilder* builder) override {
-            builder->WithShaderResource(
-                    Builtin::CLod::StreamingRuntimeState,
-                    Builtin::CLod::StreamingActiveGroupsBits,
-                    Builtin::CLod::StreamingLastUsedFrames,
-                    Builtin::CLod::StreamingNonResidentBits)
-                .WithUnorderedAccess(
-                    Builtin::CLod::StreamingUnloadRequestBits,
-                    Builtin::CLod::StreamingUnloadRequests,
-                    Builtin::CLod::StreamingUnloadCounter);
-        }
-
-        void Setup() override {
-            RegisterSRV(Builtin::CLod::StreamingRuntimeState);
-            RegisterSRV(Builtin::CLod::StreamingActiveGroupsBits);
-            RegisterSRV(Builtin::CLod::StreamingLastUsedFrames);
-            RegisterSRV(Builtin::CLod::StreamingNonResidentBits);
-            RegisterSRV(Builtin::CLod::StreamingUnloadRequestBits);
-            RegisterSRV(Builtin::CLod::StreamingUnloadRequests);
-            RegisterSRV(Builtin::CLod::StreamingUnloadCounter);
-        }
-
-        PassReturn Execute(PassExecutionContext& executionContext) override {
-            auto* renderContext = executionContext.hostData->Get<RenderContext>();
-            auto& context = *renderContext;
-            auto& commandList = executionContext.commandList;
-
-            commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-            commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-            commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-            BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-
-            const uint32_t activeScanCount = m_getActiveGroupScanCount ? m_getActiveGroupScanCount() : 0u;
-            if (activeScanCount == 0u) {
-                return {};
-            }
-
-            const uint32_t groupsX = (activeScanCount + 63u) / 64u;
-            commandList.Dispatch(groupsX, 1u, 1u);
-            return {};
-        }
-
-        void Cleanup() override {}
-
-    private:
-        PipelineState m_pso;
-        std::function<uint32_t()> m_getActiveGroupScanCount;
     };
 
     // ---------------------------------------------------------------
@@ -1377,7 +1482,9 @@ private:
                 m_occlusionNodeGpuInputsBuffer,
                 m_viewDepthSrvIndicesBuffer)
                 .WithUnorderedAccess(
-                    Builtin::CLod::StreamingLastUsedFrames,
+                    Builtin::CLod::StreamingTouchedGroupsBits,
+                    Builtin::CLod::StreamingTouchedGroups,
+                    Builtin::CLod::StreamingTouchedGroupsCounter,
                     Builtin::CLod::StreamingLoadRequestBits,
                     Builtin::CLod::StreamingLoadRequests,
                     Builtin::CLod::StreamingLoadCounter,
@@ -1410,7 +1517,9 @@ private:
             RegisterSRV(Builtin::CLod::Children);
             RegisterSRV(Builtin::CLod::StreamingActiveGroupsBits);
             RegisterSRV(Builtin::CLod::StreamingNonResidentBits);
-            RegisterSRV(Builtin::CLod::StreamingLastUsedFrames);
+            RegisterSRV(Builtin::CLod::StreamingTouchedGroupsBits);
+            RegisterSRV(Builtin::CLod::StreamingTouchedGroups);
+            RegisterSRV(Builtin::CLod::StreamingTouchedGroupsCounter);
             RegisterSRV(Builtin::CLod::StreamingLoadRequestBits);
             RegisterSRV(Builtin::CLod::StreamingLoadRequests);
             RegisterSRV(Builtin::CLod::StreamingLoadCounter);
