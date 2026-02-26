@@ -779,7 +779,7 @@ inline void Menu::Render(RenderContext& context, rhi::CommandList commandList) {
             setCLodStreamingCpuUploadBudgetRequests(m_clodStreamingCpuUploadBudgetRequests);
         }
         constexpr uint32_t kClodResidentBudgetMin = 1u;
-        constexpr uint32_t kClodResidentBudgetMax = 2147483647u;
+        constexpr uint32_t kClodResidentBudgetMax = 50000u;
         uint32_t clodResidentBudget = std::clamp(m_clodStreamingResidentBudgetGroups, kClodResidentBudgetMin, kClodResidentBudgetMax);
         if (ImGui::SliderScalar("CLod Resident Budget", ImGuiDataType_U32, &clodResidentBudget, &kClodResidentBudgetMin, &kClodResidentBudgetMax)) {
             m_clodStreamingResidentBudgetGroups = clodResidentBudget;

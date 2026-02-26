@@ -519,6 +519,59 @@ void MeshManager::GetCLodCoarsestUniqueAssetGroupRanges(std::vector<CLodActiveGr
 	}
 }
 
+void MeshManager::GetCLodUniqueAssetParentMap(std::vector<int32_t>& outParentGroupByGlobal, uint32_t& outMaxGroupIndex) const {
+	outParentGroupByGlobal.clear();
+	outMaxGroupIndex = 0u;
+
+	std::unordered_set<uint64_t> seenRanges;
+	seenRanges.reserve(m_clodStreamingStatesByInstanceIndex.size());
+
+	for (const auto& [_, state] : m_clodStreamingStatesByInstanceIndex) {
+		if (state.groupCount == 0u || state.instance == nullptr || state.instance->GetMesh() == nullptr) {
+			continue;
+		}
+
+		const uint64_t key = (static_cast<uint64_t>(state.groupsBase) << 32ull) | static_cast<uint64_t>(state.groupCount);
+		if (!seenRanges.insert(key).second) {
+			continue;
+		}
+
+		const auto& groups = state.instance->GetMesh()->GetCLodGroups();
+		const auto& children = state.instance->GetMesh()->GetCLodChildren();
+		const uint32_t localGroupCount = std::min<uint32_t>(state.groupCount, static_cast<uint32_t>(groups.size()));
+		if (localGroupCount == 0u) {
+			continue;
+		}
+
+		const uint32_t rangeEnd = state.groupsBase + localGroupCount;
+		outMaxGroupIndex = std::max(outMaxGroupIndex, rangeEnd);
+		if (outParentGroupByGlobal.size() < rangeEnd) {
+			outParentGroupByGlobal.resize(rangeEnd, -1);
+		}
+
+		for (uint32_t groupLocalIndex = 0u; groupLocalIndex < localGroupCount; ++groupLocalIndex) {
+			const auto& group = groups[groupLocalIndex];
+			const uint32_t childBegin = group.firstChild;
+			const uint32_t childEnd = std::min<uint32_t>(childBegin + group.childCount, static_cast<uint32_t>(children.size()));
+			for (uint32_t childIndex = childBegin; childIndex < childEnd; ++childIndex) {
+				const int32_t refinedGroupLocal = children[childIndex].refinedGroup;
+				if (refinedGroupLocal < 0) {
+					continue;
+				}
+
+				const uint32_t refinedGroupLocalU32 = static_cast<uint32_t>(refinedGroupLocal);
+				if (refinedGroupLocalU32 >= localGroupCount) {
+					continue;
+				}
+
+				const uint32_t parentGlobal = state.groupsBase + groupLocalIndex;
+				const uint32_t childGlobal = state.groupsBase + refinedGroupLocalU32;
+				outParentGroupByGlobal[childGlobal] = static_cast<int32_t>(parentGlobal);
+			}
+		}
+	}
+}
+
 void MeshManager::UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data) {
 	view->GetBuffer()->UpdateView(view.get(), &data);
 }

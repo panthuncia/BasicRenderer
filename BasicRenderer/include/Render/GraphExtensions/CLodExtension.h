@@ -671,6 +671,75 @@ private:
         m_streamingLruEntries.push_back({ groupIndex, stamp });
     }
 
+    bool TryQueuePendingLoadRequest(const CLodStreamingRequest& req) {
+        const uint32_t groupIndex = req.groupGlobalIndex;
+        if (groupIndex >= m_streamingStorageGroupCapacity) {
+            EnsureStreamingStorageCapacity(groupIndex + 1u);
+        }
+
+        if (IsStreamingRequestInProgress(groupIndex)) {
+            return false;
+        }
+
+        MarkStreamingRequestInProgress(groupIndex);
+        PendingStreamingRequest pending{};
+        pending.isLoad = true;
+        pending.request = req;
+        m_pendingStreamingRequests.push_back(pending);
+        return true;
+    }
+
+    uint32_t QueueLoadRequestWithParents(const CLodStreamingRequest& requestedLoad) {
+        if (requestedLoad.groupGlobalIndex >= m_streamingStorageGroupCapacity) {
+            EnsureStreamingStorageCapacity(requestedLoad.groupGlobalIndex + 1u);
+        }
+
+        uint32_t queuedCount = 0u;
+        std::vector<uint32_t> parentChain;
+        uint32_t currentGroup = requestedLoad.groupGlobalIndex;
+        const size_t maxHops = m_streamingParentGroupByGlobal.size();
+        for (size_t hop = 0; hop < maxHops; ++hop) {
+            if (currentGroup >= m_streamingParentGroupByGlobal.size()) {
+                break;
+            }
+
+            const int32_t parent = m_streamingParentGroupByGlobal[currentGroup];
+            if (parent < 0) {
+                break;
+            }
+
+            const uint32_t parentGroup = static_cast<uint32_t>(parent);
+            if (parentGroup == currentGroup) {
+                break;
+            }
+
+            parentChain.push_back(parentGroup);
+            currentGroup = parentGroup;
+        }
+
+        for (auto it = parentChain.rbegin(); it != parentChain.rend(); ++it) {
+            const uint32_t parentGroup = *it;
+            if (!IsGroupActive(parentGroup)) {
+                continue;
+            }
+            if (IsGroupResident(parentGroup)) {
+                continue;
+            }
+
+            CLodStreamingRequest parentLoad = requestedLoad;
+            parentLoad.groupGlobalIndex = parentGroup;
+            if (TryQueuePendingLoadRequest(parentLoad)) {
+                queuedCount++;
+            }
+        }
+
+        if (TryQueuePendingLoadRequest(requestedLoad)) {
+            queuedCount++;
+        }
+
+        return queuedCount;
+    }
+
     bool TryEvictLruVictim(uint32_t avoidGroup, CLodStreamingOperationStats& frameStats) {
         while (!m_streamingLruEntries.empty()) {
             const StreamingLruEntry entry = m_streamingLruEntries.front();
@@ -740,6 +809,7 @@ private:
         m_streamingResidencyInitializedBitsCpu.resize(newWordCount, 0u);
         m_streamingRequestsInProgressBitsCpu.resize(newWordCount, 0u);
         m_streamingLruCurrentStampByGroup.resize(newCapacity, 0ull);
+        m_streamingParentGroupByGlobal.resize(newCapacity, -1);
         m_streamingStorageGroupCapacity = newCapacity;
 
         m_streamingNonResidentBitsUploadPending = true;
@@ -766,6 +836,18 @@ private:
         meshManager->GetCLodActiveUniqueAssetGroupRanges(ranges, maxGroupIndex);
 
         EnsureStreamingStorageCapacity(maxGroupIndex);
+        std::fill(m_streamingParentGroupByGlobal.begin(), m_streamingParentGroupByGlobal.end(), -1);
+
+        std::vector<int32_t> parentGroupByGlobal;
+        uint32_t parentMapMaxGroupIndex = 0u;
+        meshManager->GetCLodUniqueAssetParentMap(parentGroupByGlobal, parentMapMaxGroupIndex);
+        if (parentMapMaxGroupIndex > 0u) {
+            EnsureStreamingStorageCapacity(parentMapMaxGroupIndex);
+            if (!parentGroupByGlobal.empty()) {
+                const size_t copyCount = std::min(parentGroupByGlobal.size(), m_streamingParentGroupByGlobal.size());
+                std::copy_n(parentGroupByGlobal.begin(), copyCount, m_streamingParentGroupByGlobal.begin());
+            }
+        }
 
         m_streamingActiveGroupScanCount = maxGroupIndex;
 
@@ -928,20 +1010,7 @@ private:
                 continue;
             }
 
-            if (req.groupGlobalIndex >= m_streamingStorageGroupCapacity) {
-                EnsureStreamingStorageCapacity(req.groupGlobalIndex + 1u);
-            }
-
-            if (IsStreamingRequestInProgress(req.groupGlobalIndex)) {
-                continue;
-            }
-
-            MarkStreamingRequestInProgress(req.groupGlobalIndex);
-            PendingStreamingRequest pending{};
-            pending.isLoad = true;
-            pending.request = req;
-            m_pendingStreamingRequests.push_back(pending);
-            queuedCount++;
+            queuedCount += QueueLoadRequestWithParents(req);
         }
 
         spdlog::info(
@@ -1183,6 +1252,7 @@ private:
     std::vector<uint32_t> m_streamingEvictionExemptBitsCpu;
     std::vector<uint32_t> m_streamingResidencyInitializedBitsCpu;
     std::vector<uint32_t> m_streamingRequestsInProgressBitsCpu;
+    std::vector<int32_t> m_streamingParentGroupByGlobal;
     std::vector<uint64_t> m_streamingLruCurrentStampByGroup;
     std::deque<StreamingLruEntry> m_streamingLruEntries;
     uint64_t m_streamingLruSerial = 0u;
@@ -1194,7 +1264,7 @@ private:
     uint32_t m_streamingReadbackRingSize = 2u;
     uint32_t m_streamingReadbackScheduleCursor = 0u;
     uint32_t m_streamingCpuUploadBudgetRequests = 64u;
-    uint32_t m_streamingResidentBudgetGroups = std::numeric_limits<uint32_t>::max();
+    uint32_t m_streamingResidentBudgetGroups = 50000u;
     rg::runtime::IReadbackService* m_streamingReadbackService = nullptr;
     std::function<MeshManager*()> m_getMeshManager = []() { return nullptr; };
 
