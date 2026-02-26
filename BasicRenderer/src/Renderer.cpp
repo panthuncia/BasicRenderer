@@ -159,14 +159,15 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();
     Menu::GetInstance().Initialize(hwnd, rhi::dx12::get_swapchain(m_swapChain.Get())); // TODO: VK imgui
-        if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
-		readbackService->Initialize(m_readbackFence.Get());
-        }
+    if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
+        readbackService->Initialize(m_readbackFence.Get());
+    }
     m_pReadbackManager = std::make_unique<br::ReadbackManager>();
+    
     m_pReadbackManager->Initialize(m_readbackFence.Get());
-        if (auto* statisticsService = currentRenderGraph->GetStatisticsService()) {
-		statisticsService->Initialize();
-        }
+    if (auto* statisticsService = currentRenderGraph->GetStatisticsService()) {
+        statisticsService->Initialize();
+    }
 
     UpscalingManager::GetInstance().Setup();
 
@@ -435,6 +436,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<bool>("useAsyncCompute", true);
 	settingsManager.registerSetting<AutoAliasMode>("autoAliasMode", AutoAliasMode::Balanced);
     settingsManager.registerSetting<AutoAliasPackingStrategy>("autoAliasPackingStrategy", AutoAliasPackingStrategy::GreedySweepLine);
+    settingsManager.registerSetting<bool>("autoAliasEnableLogging", false);
     settingsManager.registerSetting<bool>("autoAliasLogExclusionReasons", false);
 	settingsManager.registerSetting<uint32_t>("autoAliasPoolRetireIdleFrames", 120u);
 	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
