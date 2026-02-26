@@ -21,6 +21,22 @@ struct ClusterLODGroupChunk
     uint groupVertexCount;
     uint meshletVertexCount;
 };
+
+struct CLodStreamingRequest
+{
+    uint groupGlobalIndex;
+    uint meshInstanceIndex;
+    uint meshBufferIndex;
+    uint viewId;
+};
+
+struct CLodStreamingRuntimeState
+{
+    uint maxTouchedGroupIndex;
+    uint pad0;
+    uint pad1;
+    uint pad2;
+};
 struct ClodBounds
 {
     float4 centerAndRadius; // xyz = center, w = radius

@@ -109,8 +109,34 @@ static const uint WG_COUNTER_PHASE2_REPLAY_TRAVERSE_RECORDS_CONSUMED = 58;
 static const uint WG_COUNTER_PHASE2_REPLAY_GROUP_RECORDS_CONSUMED = 59;
 static const uint WG_COUNTER_PHASE2_REPLAY_CLUSTER_BUCKET_RECORDS_CONSUMED = 60;
 
+static const uint CLOD_STREAM_MAX_TRACKED_GROUPS = (1u << 20);
+static const uint CLOD_STREAM_REQUEST_CAPACITY = (1u << 16);
+
 static const uint CLOD_RECORD_SOURCE_PASS1 = 0;
 static const uint CLOD_RECORD_SOURCE_REPLAY = 1;
+
+uint CLodBitMask(uint key)
+{
+    return 1u << (key & 31u);
+}
+
+uint CLodBitWordAddress(uint key)
+{
+    return (key >> 5u) * 4u;
+}
+
+bool CLodReadBit(ByteAddressBuffer bits, uint key)
+{
+    const uint packed = bits.Load(CLodBitWordAddress(key));
+    return (packed & CLodBitMask(key)) != 0u;
+}
+
+bool CLodTrySetBit(RWByteAddressBuffer bits, uint key)
+{
+    uint oldPacked = 0;
+    bits.InterlockedOr(CLodBitWordAddress(key), CLodBitMask(key), oldPacked);
+    return (oldPacked & CLodBitMask(key)) == 0u;
+}
 
 static const uint TRAVERSE_THREADS_PER_GROUP = 32;
 static const uint TRAVERSE_CHILD_LANES = 4;
@@ -739,6 +765,16 @@ void WG_GroupEvaluate(
                 WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_CULLED_GROUP_RECORDS, 1);
             }
             else {
+                if (groupIndex < CLOD_STREAM_MAX_TRACKED_GROUPS) {
+                    RWStructuredBuffer<uint> lastUsedFrames =
+                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLastUsedFrames)];
+                    RWStructuredBuffer<CLodStreamingRuntimeState> runtimeState =
+                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
+                    lastUsedFrames[groupIndex] = perFrameBuffer.frameIndex;
+                    uint oldMaxTouched = 0;
+                    InterlockedMax(runtimeState[0].maxTouchedGroupIndex, groupIndex + 1u, oldMaxTouched);
+                }
+
                 float4 groupCenterObjectSpace4 = float4(groupCenterObjectSpace, 1.0f);
                 float3 groupCenterWorldSpace = mul(groupCenterObjectSpace4, objectModelMatrix).xyz;
                 float groupProjectedError = ProjectedErrorPixels(
@@ -810,54 +846,88 @@ void WG_GroupEvaluate(
         forceBucket = (lane < s.terminalChildCount) || (child.refinedGroup < 0);
 
         if (!forceBucket && child.refinedGroup >= 0) {
-            const ClusterLODGroup refinedGrp = groups[off.groupsBase + (uint) child.refinedGroup];
+            const uint refinedGroupGlobalIndex = off.groupsBase + (uint) child.refinedGroup;
+            const ClusterLODGroup refinedGrp = groups[refinedGroupGlobalIndex];
+            bool refinedResident = true;
 
-            float4 objectSpaceCenter = float4(refinedGrp.bounds.centerAndRadius.xyz, 1.0);
-            float3 worldSpaceCenter = mul(objectSpaceCenter, objectModelMatrix).xyz;
-
-            float worldRadius = refinedGrp.bounds.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
-            float3 refinedViewSpaceCenter = mul(float4(worldSpaceCenter, 1.0f), camera.view).xyz;
-            const bool replaySource = (s.sourceTag == CLOD_RECORD_SOURCE_REPLAY);
-            const bool refinedCulled = !replaySource && SphereOutsideFrustumViewSpace(refinedViewSpaceCenter, worldRadius, camera);
-
-            float px = ProjectedErrorPixels(
-                worldSpaceCenter,
-                worldRadius,
-                refinedGrp.bounds.error,
-                cam.positionWorldSpace.xyz,
-                cam.projY,
-                perFrameBuffer.screenResY,
-                cam.zNear);
-
-            bool occlusionCulled = false;
-            if (!refinedCulled && !camera.isOrtho) {
-                StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
-                    ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
-                const uint depthMapDescriptorIndex = viewDepthSRVIndices[s.viewId].linearDepthSRVIndex;
-                if (depthMapDescriptorIndex != 0) {
-                    OcclusionCullingPerspectiveTexture2D(
-                        occlusionCulled,
-                        camera,
-                        refinedViewSpaceCenter,
-                        -refinedViewSpaceCenter.z,
-                        worldRadius,
-                        depthMapDescriptorIndex);
-                }
+            if (refinedGroupGlobalIndex < CLOD_STREAM_MAX_TRACKED_GROUPS) {
+                ByteAddressBuffer nonResidentBits =
+                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
+                refinedResident = !CLodReadBit(nonResidentBits, refinedGroupGlobalIndex);
             }
 
-            if (occlusionCulled) {
-                if (!replaySource) {
-                    ReplayTryAppendNodeGroup(
-                        CLOD_REPLAY_RECORD_TYPE_GROUP,
-                        s.instanceIndex,
-                        s.viewId,
-                        (uint) child.refinedGroup);
+            if (!refinedResident) {
+                RWByteAddressBuffer loadRequestBits =
+                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequestBits)];
+                RWStructuredBuffer<CLodStreamingRequest> loadRequests =
+                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
+                RWStructuredBuffer<uint> loadRequestCounter =
+                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
+
+                if (refinedGroupGlobalIndex < CLOD_STREAM_MAX_TRACKED_GROUPS && CLodTrySetBit(loadRequestBits, refinedGroupGlobalIndex)) {
+                    uint requestIndex = 0;
+                    InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
+                    if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY) {
+                        CLodStreamingRequest req = (CLodStreamingRequest)0;
+                        req.groupGlobalIndex = refinedGroupGlobalIndex;
+                        req.meshInstanceIndex = s.instanceIndex;
+                        req.meshBufferIndex = perMeshInstanceBuffer[s.instanceIndex].perMeshBufferIndex;
+                        req.viewId = s.viewId;
+                        loadRequests[requestIndex] = req;
+                    }
                 }
-                replayedOccludedRefinedGroup = true;
+
                 generatingGroupWantsTraversal = false;
-            }
-            else {
-                generatingGroupWantsTraversal = !refinedCulled && (px > cam.errorPixels);
+                replayedOccludedRefinedGroup = false;
+                forceBucket = true;
+            } else {
+                float4 objectSpaceCenter = float4(refinedGrp.bounds.centerAndRadius.xyz, 1.0);
+                float3 worldSpaceCenter = mul(objectSpaceCenter, objectModelMatrix).xyz;
+
+                float worldRadius = refinedGrp.bounds.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
+                float3 refinedViewSpaceCenter = mul(float4(worldSpaceCenter, 1.0f), camera.view).xyz;
+                const bool replaySource = (s.sourceTag == CLOD_RECORD_SOURCE_REPLAY);
+                const bool refinedCulled = !replaySource && SphereOutsideFrustumViewSpace(refinedViewSpaceCenter, worldRadius, camera);
+
+                float px = ProjectedErrorPixels(
+                    worldSpaceCenter,
+                    worldRadius,
+                    refinedGrp.bounds.error,
+                    cam.positionWorldSpace.xyz,
+                    cam.projY,
+                    perFrameBuffer.screenResY,
+                    cam.zNear);
+
+                bool occlusionCulled = false;
+                if (!refinedCulled && !camera.isOrtho) {
+                    StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
+                        ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
+                    const uint depthMapDescriptorIndex = viewDepthSRVIndices[s.viewId].linearDepthSRVIndex;
+                    if (depthMapDescriptorIndex != 0) {
+                        OcclusionCullingPerspectiveTexture2D(
+                            occlusionCulled,
+                            camera,
+                            refinedViewSpaceCenter,
+                            -refinedViewSpaceCenter.z,
+                            worldRadius,
+                            depthMapDescriptorIndex);
+                    }
+                }
+
+                if (occlusionCulled) {
+                    if (!replaySource) {
+                        ReplayTryAppendNodeGroup(
+                            CLOD_REPLAY_RECORD_TYPE_GROUP,
+                            s.instanceIndex,
+                            s.viewId,
+                            (uint) child.refinedGroup);
+                    }
+                    replayedOccludedRefinedGroup = true;
+                    generatingGroupWantsTraversal = false;
+                }
+                else {
+                    generatingGroupWantsTraversal = !refinedCulled && (px > cam.errorPixels);
+                }
             }
             if (generatingGroupWantsTraversal) {
                 WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_REFINED_TRAVERSAL_THREADS, 1);

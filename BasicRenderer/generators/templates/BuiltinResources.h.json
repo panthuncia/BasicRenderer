@@ -16,7 +16,16 @@
       "GroupChunks": {},
       "Children": {},
       "MeshletBounds": {},
-      "Nodes": {}
+      "Nodes": {},
+      "StreamingLastUsedFrames": {},
+      "StreamingLoadCounter": {},
+      "StreamingLoadRequestBits": {},
+      "StreamingLoadRequests": {},
+      "StreamingNonResidentBits": {},
+      "StreamingRuntimeState": {},
+      "StreamingUnloadCounter": {},
+      "StreamingUnloadRequestBits": {},
+      "StreamingUnloadRequests": {}
     },
     "PerObjectBuffer": {},
     "PerMeshBuffer": {},

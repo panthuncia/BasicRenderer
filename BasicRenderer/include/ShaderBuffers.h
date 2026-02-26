@@ -291,6 +291,22 @@ struct ClusterLODGroupChunk
     uint32_t meshletVertexCount = 0;
 };
 
+struct CLodStreamingRequest
+{
+    uint32_t groupGlobalIndex = 0;
+    uint32_t meshInstanceIndex = 0;
+    uint32_t meshBufferIndex = 0;
+    uint32_t viewId = 0;
+};
+
+struct CLodStreamingRuntimeState
+{
+    uint32_t maxTouchedGroupIndex = 0;
+    uint32_t pad0 = 0;
+    uint32_t pad1 = 0;
+    uint32_t pad2 = 0;
+};
+
 // Cluster LOD data
 // One entry per (group -> refinedGroup) edge.
 // refinedGroup == -1 means "terminal meshlets" (original geometry)

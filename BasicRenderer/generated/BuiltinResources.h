@@ -13,6 +13,15 @@ struct Builtin {
     inline static constexpr std::string_view MeshletBounds = "Builtin::CLod::MeshletBounds";
     inline static constexpr std::string_view Nodes = "Builtin::CLod::Nodes";
     inline static constexpr std::string_view Offsets = "Builtin::CLod::Offsets";
+    inline static constexpr std::string_view StreamingLastUsedFrames = "Builtin::CLod::StreamingLastUsedFrames";
+    inline static constexpr std::string_view StreamingLoadCounter = "Builtin::CLod::StreamingLoadCounter";
+    inline static constexpr std::string_view StreamingLoadRequestBits = "Builtin::CLod::StreamingLoadRequestBits";
+    inline static constexpr std::string_view StreamingLoadRequests = "Builtin::CLod::StreamingLoadRequests";
+    inline static constexpr std::string_view StreamingNonResidentBits = "Builtin::CLod::StreamingNonResidentBits";
+    inline static constexpr std::string_view StreamingRuntimeState = "Builtin::CLod::StreamingRuntimeState";
+    inline static constexpr std::string_view StreamingUnloadCounter = "Builtin::CLod::StreamingUnloadCounter";
+    inline static constexpr std::string_view StreamingUnloadRequestBits = "Builtin::CLod::StreamingUnloadRequestBits";
+    inline static constexpr std::string_view StreamingUnloadRequests = "Builtin::CLod::StreamingUnloadRequests";
   };
   inline static constexpr std::string_view CameraBuffer = "Builtin::CameraBuffer";
   struct Color {

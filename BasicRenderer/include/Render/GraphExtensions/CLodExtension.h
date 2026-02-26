@@ -2,7 +2,10 @@
 
 #include <rhi.h>
 #include <rhi_interop_dx12.h>
+#include <algorithm>
 #include <cstring>
+#include <unordered_set>
+#include <vector>
 
 #include "Render/RenderGraph/RenderGraph.h"
 #include "Managers/Singletons/DeviceManager.h"
@@ -45,6 +48,9 @@ struct CLodViewRasterInfo
 static constexpr uint32_t CLodReplayBufferSizeBytes = 8u * 1024u * 1024u;
 static constexpr uint32_t CLodReplayBufferNumUints = CLodReplayBufferSizeBytes / sizeof(uint32_t);
 static constexpr uint32_t CLodMaxViewDepthIndices = 512u;
+static constexpr uint32_t CLodStreamingMaxTrackedGroups = (1u << 20);
+static constexpr uint32_t CLodStreamingRequestCapacity = (1u << 16);
+static constexpr uint32_t CLodStreamingBitsetUints = (CLodStreamingMaxTrackedGroups + 31u) / 32u;
 
 inline std::shared_ptr<Buffer> CreateAliasedUnmaterializedStructuredBuffer(
     uint32_t numElements,
@@ -162,6 +168,69 @@ public:
         m_rasterBucketsWriteCursorBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
         m_rasterBucketsWriteCursorBufferPhase2->SetName("CLod Raster bucket write cursor phase2");
 
+        m_streamingNonResidentBits = CreateAliasedUnmaterializedStructuredBuffer(
+            CLodStreamingBitsetUints,
+            sizeof(uint32_t),
+            true,
+            false,
+            false,
+            false);
+        m_streamingNonResidentBits->SetName("CLod Streaming NonResident Bits");
+
+        m_streamingLastUsedFrames = CreateAliasedUnmaterializedStructuredBuffer(
+            CLodStreamingMaxTrackedGroups,
+            sizeof(uint32_t),
+            true,
+            false,
+            false,
+            false);
+        m_streamingLastUsedFrames->SetName("CLod Streaming LastUsedFrames");
+
+        m_streamingLoadRequestBits = CreateAliasedUnmaterializedStructuredBuffer(
+            CLodStreamingBitsetUints,
+            sizeof(uint32_t),
+            true,
+            false,
+            false,
+            false);
+        m_streamingLoadRequestBits->SetName("CLod Streaming Load Request Bits");
+
+        m_streamingLoadRequests = CreateAliasedUnmaterializedStructuredBuffer(
+            CLodStreamingRequestCapacity,
+            sizeof(CLodStreamingRequest),
+            true,
+            false,
+            false,
+            false);
+        m_streamingLoadRequests->SetName("CLod Streaming Load Requests");
+
+        m_streamingLoadCounter = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+        m_streamingLoadCounter->SetName("CLod Streaming Load Counter");
+
+        m_streamingUnloadRequestBits = CreateAliasedUnmaterializedStructuredBuffer(
+            CLodStreamingBitsetUints,
+            sizeof(uint32_t),
+            true,
+            false,
+            false,
+            false);
+        m_streamingUnloadRequestBits->SetName("CLod Streaming Unload Request Bits");
+
+        m_streamingUnloadRequests = CreateAliasedUnmaterializedStructuredBuffer(
+            CLodStreamingRequestCapacity,
+            sizeof(CLodStreamingRequest),
+            true,
+            false,
+            false,
+            false);
+        m_streamingUnloadRequests->SetName("CLod Streaming Unload Requests");
+
+        m_streamingUnloadCounter = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+        m_streamingUnloadCounter->SetName("CLod Streaming Unload Counter");
+
+        m_streamingRuntimeState = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodStreamingRuntimeState), true, false, false, false);
+        m_streamingRuntimeState->SetName("CLod Streaming Runtime State");
+
         m_type = type;
     }
 
@@ -170,6 +239,28 @@ public:
     }
 
     void GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override {
+
+        rg.RegisterResource(Builtin::CLod::StreamingNonResidentBits, m_streamingNonResidentBits);
+        rg.RegisterResource(Builtin::CLod::StreamingLastUsedFrames, m_streamingLastUsedFrames);
+        rg.RegisterResource(Builtin::CLod::StreamingLoadRequestBits, m_streamingLoadRequestBits);
+        rg.RegisterResource(Builtin::CLod::StreamingLoadRequests, m_streamingLoadRequests);
+        rg.RegisterResource(Builtin::CLod::StreamingLoadCounter, m_streamingLoadCounter);
+        rg.RegisterResource(Builtin::CLod::StreamingUnloadRequestBits, m_streamingUnloadRequestBits);
+        rg.RegisterResource(Builtin::CLod::StreamingUnloadRequests, m_streamingUnloadRequests);
+        rg.RegisterResource(Builtin::CLod::StreamingUnloadCounter, m_streamingUnloadCounter);
+        rg.RegisterResource(Builtin::CLod::StreamingRuntimeState, m_streamingRuntimeState);
+
+        RenderGraph::ExternalPassDesc streamingBeginPassDesc;
+        streamingBeginPassDesc.type = RenderGraph::PassType::Compute;
+        streamingBeginPassDesc.name = "CLod::StreamingBeginFramePass";
+        streamingBeginPassDesc.where = RenderGraph::ExternalInsertPoint::After("SkinningPass");
+        streamingBeginPassDesc.pass = std::make_shared<CLodStreamingBeginFramePass>(
+            m_streamingLoadCounter,
+            m_streamingUnloadCounter,
+            m_streamingLoadRequestBits,
+            m_streamingUnloadRequestBits,
+            m_streamingRuntimeState);
+        outPasses.push_back(std::move(streamingBeginPassDesc));
 
         // First hierarchial culling pass
         // Occlusion culls based on last frame's depth buffer
@@ -190,7 +281,7 @@ public:
             m_occlusionReplayStateBuffer,
             m_occlusionNodeGpuInputsBuffer,
             m_viewDepthSrvIndicesBuffer);
-        cullPassDesc.where = RenderGraph::ExternalInsertPoint::After("SkinningPass");
+        cullPassDesc.where = RenderGraph::ExternalInsertPoint::After("CLod::StreamingBeginFramePass");
         outPasses.push_back(std::move(cullPassDesc));
 
 		// Histogram + prefix sum passes to prepare for indirect dispatch rasterization
@@ -291,6 +382,12 @@ public:
             m_viewDepthSrvIndicesBuffer);
         outPasses.push_back(std::move(cullPassDesc2));
 
+        RenderGraph::ExternalPassDesc streamingMaintenancePassDesc;
+        streamingMaintenancePassDesc.type = RenderGraph::PassType::Compute;
+        streamingMaintenancePassDesc.name = "CLod::StreamingMaintenancePass";
+        streamingMaintenancePassDesc.pass = std::make_shared<CLodStreamingMaintenancePass>(CLodStreamingMaxTrackedGroups);
+        outPasses.push_back(std::move(streamingMaintenancePassDesc));
+
 		// Histogram + prefix sum passes again
         RenderGraph::ExternalPassDesc histogramPassDesc2;
         histogramPassDesc2.type = RenderGraph::PassType::Compute;
@@ -372,6 +469,116 @@ public:
         outPasses.push_back(std::move(downsamplePassDesc2));
     }
 
+    void GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override {
+        (void)outPasses;
+        auto* readbackService = rg.GetReadbackService();
+        if (readbackService == nullptr) {
+            return;
+        }
+
+        if (!m_streamingLoadCapturePending) {
+            m_streamingLoadCapturePending = true;
+            readbackService->RequestReadbackCapture(
+                "CLod::StreamingMaintenancePass",
+                m_streamingLoadCounter.get(),
+                RangeSpec{},
+                [this](ReadbackCaptureResult&& result) {
+                    m_streamingLoadCapturePending = false;
+                    if (result.data.size() < sizeof(uint32_t)) {
+                        return;
+                    }
+
+                    uint32_t requestCount = 0;
+                    std::memcpy(&requestCount, result.data.data(), sizeof(uint32_t));
+                    if (requestCount == 0) {
+                        return;
+                    }
+
+                    requestCount = std::min<uint32_t>(requestCount, CLodStreamingRequestCapacity);
+                    if (requestCount > 0) {
+                        m_streamingLoadRequestReadbackCount = requestCount;
+                    }
+                });
+
+            readbackService->RequestReadbackCapture(
+                "CLod::StreamingMaintenancePass",
+                m_streamingLoadRequests.get(),
+                RangeSpec{},
+                [this](ReadbackCaptureResult&& result) {
+                    const size_t stride = sizeof(CLodStreamingRequest);
+                    const size_t maxToDecode = std::min<size_t>(m_streamingLoadRequestReadbackCount, CLodStreamingRequestCapacity);
+                    const size_t expectedBytes = maxToDecode * stride;
+                    if (maxToDecode == 0 || result.data.size() < expectedBytes) {
+                        return;
+                    }
+
+                    std::vector<CLodStreamingRequest> requests(maxToDecode);
+                    std::memcpy(requests.data(), result.data.data(), expectedBytes);
+                    std::unordered_set<uint32_t> dedup;
+                    dedup.reserve(requests.size());
+                    uint32_t deduped = 0;
+                    for (const auto& req : requests) {
+                        if (dedup.insert(req.groupGlobalIndex).second) {
+                            deduped++;
+                        }
+                    }
+                    spdlog::info("CLod streaming: observed {} load requests ({} unique groups)", static_cast<uint32_t>(requests.size()), deduped);
+                    m_streamingLoadRequestReadbackCount = 0;
+                });
+        }
+
+        if (!m_streamingUnloadCapturePending) {
+            m_streamingUnloadCapturePending = true;
+            readbackService->RequestReadbackCapture(
+                "CLod::StreamingMaintenancePass",
+                m_streamingUnloadCounter.get(),
+                RangeSpec{},
+                [this](ReadbackCaptureResult&& result) {
+                    m_streamingUnloadCapturePending = false;
+                    if (result.data.size() < sizeof(uint32_t)) {
+                        return;
+                    }
+
+                    uint32_t requestCount = 0;
+                    std::memcpy(&requestCount, result.data.data(), sizeof(uint32_t));
+                    if (requestCount == 0) {
+                        return;
+                    }
+
+                    requestCount = std::min<uint32_t>(requestCount, CLodStreamingRequestCapacity);
+                    if (requestCount > 0) {
+                        m_streamingUnloadRequestReadbackCount = requestCount;
+                    }
+                });
+
+            readbackService->RequestReadbackCapture(
+                "CLod::StreamingMaintenancePass",
+                m_streamingUnloadRequests.get(),
+                RangeSpec{},
+                [this](ReadbackCaptureResult&& result) {
+                    const size_t stride = sizeof(CLodStreamingRequest);
+                    const size_t maxToDecode = std::min<size_t>(m_streamingUnloadRequestReadbackCount, CLodStreamingRequestCapacity);
+                    const size_t expectedBytes = maxToDecode * stride;
+                    if (maxToDecode == 0 || result.data.size() < expectedBytes) {
+                        return;
+                    }
+
+                    std::vector<CLodStreamingRequest> requests(maxToDecode);
+                    std::memcpy(requests.data(), result.data.data(), expectedBytes);
+                    std::unordered_set<uint32_t> dedup;
+                    dedup.reserve(requests.size());
+                    uint32_t deduped = 0;
+                    for (const auto& req : requests) {
+                        if (dedup.insert(req.groupGlobalIndex).second) {
+                            deduped++;
+                        }
+                    }
+                    spdlog::info("CLod streaming: observed {} unload requests ({} unique groups)", static_cast<uint32_t>(requests.size()), deduped);
+                    m_streamingUnloadRequestReadbackCount = 0;
+                });
+        }
+    }
+
 private:
 
     CLodExtensionType m_type;
@@ -400,6 +607,22 @@ private:
     std::shared_ptr<Buffer> m_visibleClustersCounterBufferPhase2;
     std::shared_ptr<Buffer> m_rasterBucketsHistogramBufferPhase2;
     std::shared_ptr<Buffer> m_rasterBucketsWriteCursorBufferPhase2;
+
+    // Streaming runtime buffers
+    std::shared_ptr<Buffer> m_streamingNonResidentBits;
+    std::shared_ptr<Buffer> m_streamingLastUsedFrames;
+    std::shared_ptr<Buffer> m_streamingLoadRequestBits;
+    std::shared_ptr<Buffer> m_streamingLoadRequests;
+    std::shared_ptr<Buffer> m_streamingLoadCounter;
+    std::shared_ptr<Buffer> m_streamingUnloadRequestBits;
+    std::shared_ptr<Buffer> m_streamingUnloadRequests;
+    std::shared_ptr<Buffer> m_streamingUnloadCounter;
+    std::shared_ptr<Buffer> m_streamingRuntimeState;
+
+    bool m_streamingLoadCapturePending = false;
+    bool m_streamingUnloadCapturePending = false;
+    uint32_t m_streamingLoadRequestReadbackCount = 0;
+    uint32_t m_streamingUnloadRequestReadbackCount = 0;
 
     // Compaction Pass Buffers
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
@@ -466,6 +689,132 @@ private:
 
     private:
         PipelineState m_pso;
+    };
+
+    class CLodStreamingBeginFramePass : public ComputePass {
+    public:
+        CLodStreamingBeginFramePass(
+            std::shared_ptr<Buffer> loadCounter,
+            std::shared_ptr<Buffer> unloadCounter,
+            std::shared_ptr<Buffer> loadRequestBits,
+            std::shared_ptr<Buffer> unloadRequestBits,
+            std::shared_ptr<Buffer> runtimeState)
+            : m_loadCounter(std::move(loadCounter))
+            , m_unloadCounter(std::move(unloadCounter))
+            , m_loadRequestBits(std::move(loadRequestBits))
+            , m_unloadRequestBits(std::move(unloadRequestBits))
+            , m_runtimeState(std::move(runtimeState)) {
+        }
+
+        void DeclareResourceUsages(ComputePassBuilder* builder) override {
+            builder->WithUnorderedAccess(m_loadCounter, m_unloadCounter, m_runtimeState)
+                .WithUnorderedAccess(Builtin::CLod::StreamingLoadRequestBits, Builtin::CLod::StreamingUnloadRequestBits);
+        }
+
+        void Setup() override {}
+
+        PassReturn Execute(PassExecutionContext& executionContext) override {
+            auto* renderContext = executionContext.hostData->Get<RenderContext>();
+            auto& context = *renderContext;
+            auto& commandList = executionContext.commandList;
+            commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
+            return {};
+        }
+
+        void Update(const UpdateExecutionContext& executionContext) override {
+            auto* updateContext = executionContext.hostData ? executionContext.hostData->Get<UpdateContext>() : nullptr;
+            if (!updateContext) {
+                return;
+            }
+
+            const uint32_t zero = 0u;
+            BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_loadCounter), 0);
+            BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_unloadCounter), 0);
+
+            std::vector<uint32_t> zeroBits(CLodStreamingBitsetUints, 0u);
+            BUFFER_UPLOAD(
+                zeroBits.data(),
+                static_cast<uint32_t>(zeroBits.size() * sizeof(uint32_t)),
+                rg::runtime::UploadTarget::FromShared(m_loadRequestBits),
+                0);
+            BUFFER_UPLOAD(
+                zeroBits.data(),
+                static_cast<uint32_t>(zeroBits.size() * sizeof(uint32_t)),
+                rg::runtime::UploadTarget::FromShared(m_unloadRequestBits),
+                0);
+
+            CLodStreamingRuntimeState state{};
+            state.maxTouchedGroupIndex = CLodStreamingMaxTrackedGroups;
+            BUFFER_UPLOAD(
+                &state,
+                sizeof(CLodStreamingRuntimeState),
+                rg::runtime::UploadTarget::FromShared(m_runtimeState),
+                0);
+        }
+
+        void Cleanup() override {}
+
+    private:
+        std::shared_ptr<Buffer> m_loadCounter;
+        std::shared_ptr<Buffer> m_unloadCounter;
+        std::shared_ptr<Buffer> m_loadRequestBits;
+        std::shared_ptr<Buffer> m_unloadRequestBits;
+        std::shared_ptr<Buffer> m_runtimeState;
+    };
+
+    class CLodStreamingMaintenancePass : public ComputePass {
+    public:
+        explicit CLodStreamingMaintenancePass(uint32_t maxTrackedGroups)
+            : m_maxTrackedGroups(maxTrackedGroups) {
+            m_pso = PSOManager::GetInstance().MakeComputePipeline(
+                PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
+                L"shaders/ClusterLOD/streamingMaintenance.hlsl",
+                L"CSMain",
+                {},
+                "CLodStreamingMaintenance");
+        }
+
+        void DeclareResourceUsages(ComputePassBuilder* builder) override {
+            builder->WithShaderResource(
+                    Builtin::CLod::StreamingRuntimeState,
+                    Builtin::CLod::StreamingLastUsedFrames,
+                    Builtin::CLod::StreamingNonResidentBits)
+                .WithUnorderedAccess(
+                    Builtin::CLod::StreamingNonResidentBits,
+                    Builtin::CLod::StreamingUnloadRequestBits,
+                    Builtin::CLod::StreamingUnloadRequests,
+                    Builtin::CLod::StreamingUnloadCounter);
+        }
+
+        void Setup() override {
+            RegisterSRV(Builtin::CLod::StreamingRuntimeState);
+            RegisterSRV(Builtin::CLod::StreamingLastUsedFrames);
+            RegisterSRV(Builtin::CLod::StreamingNonResidentBits);
+            RegisterSRV(Builtin::CLod::StreamingUnloadRequestBits);
+            RegisterSRV(Builtin::CLod::StreamingUnloadRequests);
+            RegisterSRV(Builtin::CLod::StreamingUnloadCounter);
+        }
+
+        PassReturn Execute(PassExecutionContext& executionContext) override {
+            auto* renderContext = executionContext.hostData->Get<RenderContext>();
+            auto& context = *renderContext;
+            auto& commandList = executionContext.commandList;
+
+            commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
+            commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
+            commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
+            BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+
+            const uint32_t groupsX = (m_maxTrackedGroups + 63u) / 64u;
+            commandList.Dispatch(groupsX, 1u, 1u);
+            return {};
+        }
+
+        void Cleanup() override {}
+
+    private:
+        PipelineState m_pso;
+        uint32_t m_maxTrackedGroups = 0u;
     };
 
     // ---------------------------------------------------------------
@@ -547,6 +896,12 @@ private:
                 m_occlusionReplayStateBuffer,
                 m_occlusionNodeGpuInputsBuffer,
                 m_viewDepthSrvIndicesBuffer)
+                .WithUnorderedAccess(
+                    Builtin::CLod::StreamingLastUsedFrames,
+                    Builtin::CLod::StreamingLoadRequestBits,
+                    Builtin::CLod::StreamingLoadRequests,
+                    Builtin::CLod::StreamingLoadCounter,
+                    Builtin::CLod::StreamingRuntimeState)
                 .WithShaderResource(Builtin::IndirectCommandBuffers::Master,
                     Builtin::CLod::Offsets,
                     Builtin::CLod::GroupChunks,
@@ -554,6 +909,7 @@ private:
                     Builtin::CLod::Children,
                     Builtin::CLod::Nodes,
                     Builtin::CLod::MeshletBounds,
+                    Builtin::CLod::StreamingNonResidentBits,
                     Builtin::CullingCameraBuffer,
                     Builtin::PerMeshInstanceBuffer,
                     Builtin::PerObjectBuffer,
@@ -571,6 +927,12 @@ private:
             RegisterSRV(Builtin::CLod::GroupChunks);
             RegisterSRV(Builtin::CLod::Groups);
             RegisterSRV(Builtin::CLod::Children);
+            RegisterSRV(Builtin::CLod::StreamingNonResidentBits);
+            RegisterSRV(Builtin::CLod::StreamingLastUsedFrames);
+            RegisterSRV(Builtin::CLod::StreamingLoadRequestBits);
+            RegisterSRV(Builtin::CLod::StreamingLoadRequests);
+            RegisterSRV(Builtin::CLod::StreamingLoadCounter);
+            RegisterSRV(Builtin::CLod::StreamingRuntimeState);
             RegisterSRV(Builtin::CullingCameraBuffer);
             RegisterSRV(Builtin::PerMeshInstanceBuffer);
             RegisterSRV(Builtin::PerObjectBuffer);

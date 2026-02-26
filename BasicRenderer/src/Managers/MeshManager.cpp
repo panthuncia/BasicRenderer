@@ -187,7 +187,6 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 		std::move(clusterLODMeshletBoundsView),
 		std::move(clusterLODNodesView));
 
-	mesh->ReleaseCLodChunkUploadData();
 }
 
 void MeshManager::RemoveMesh(Mesh* mesh) {
