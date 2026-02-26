@@ -301,9 +301,9 @@ struct CLodStreamingRequest
 
 struct CLodStreamingRuntimeState
 {
-    uint32_t maxTouchedGroupIndex = 0;
-    uint32_t pad0 = 0;
-    uint32_t pad1 = 0;
+    uint32_t activeGroupScanCount = 0;
+    uint32_t unloadAfterFrames = 120;
+    uint32_t activeGroupsBitsetWordCount = 0;
     uint32_t pad2 = 0;
 };
 

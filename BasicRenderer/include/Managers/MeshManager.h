@@ -1,6 +1,8 @@
 #pragma once
 
 #include <memory>
+#include <unordered_map>
+#include <vector>
 
 #include "ShaderBuffers.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
@@ -18,6 +20,11 @@ class ViewManager;
 
 class MeshManager : public IResourceProvider {
 public:
+	struct CLodActiveGroupRange {
+		uint32_t groupsBase = 0;
+		uint32_t groupCount = 0;
+	};
+
 	static std::unique_ptr<MeshManager> CreateUnique() {
 		return std::unique_ptr<MeshManager>(new MeshManager());
 	}
@@ -25,6 +32,10 @@ public:
 	void AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVertices);
 	void RemoveMesh(Mesh* mesh);
 	void RemoveMeshInstance(MeshInstance* mesh);
+
+	bool SetCLodGroupResidencyForInstance(uint32_t meshInstanceIndex, uint32_t groupGlobalIndex, bool resident);
+	uint32_t SetCLodGroupResidencyForGlobal(uint32_t groupGlobalIndex, bool resident);
+	void GetCLodActiveUniqueAssetGroupRanges(std::vector<CLodActiveGroupRange>& outRanges, uint32_t& outMaxGroupIndex) const;
 
 	void UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data);
 	void UpdatePerMeshInstanceBuffer(std::unique_ptr<BufferView>& view, PerMeshInstanceCB& data);
@@ -61,6 +72,21 @@ private:
 	std::shared_ptr<DynamicBuffer> m_clusterLODMeshletBounds;
 	std::shared_ptr<DynamicBuffer> m_clusterLODNodes;
 	uint64_t m_activeMeshletCount = 0;
+
+	struct CLodInstanceStreamingState {
+		MeshInstance* instance = nullptr;
+		uint32_t meshInstanceIndex = 0;
+		uint32_t groupsBase = 0;
+		uint32_t groupCount = 0;
+		BufferView* groupChunksView = nullptr;
+		std::vector<ClusterLODGroupChunk> baselineGroupChunks;
+		std::vector<ClusterLODGroupChunk> activeGroupChunks;
+	};
+
+	std::unordered_map<uint32_t, CLodInstanceStreamingState> m_clodStreamingStatesByInstanceIndex;
+	std::unordered_map<const MeshInstance*, uint32_t> m_clodStreamingInstanceLookup;
+
+	bool ApplyCLodGroupResidency(CLodInstanceStreamingState& state, uint32_t groupLocalIndex, bool resident);
 
 	ViewManager* m_pViewManager;
 };

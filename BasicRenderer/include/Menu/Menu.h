@@ -273,6 +273,16 @@ private:
     bool m_clodTelemetryCapturePending = false;
     uint64_t m_clodTelemetryCaptureCount = 0;
     std::string m_clodTelemetryStatus = "No captures yet.";
+
+    struct CLodStreamingOpsHistorySample {
+        std::chrono::steady_clock::time_point timestamp;
+        CLodStreamingOperationStats stats{};
+    };
+
+    uint64_t m_clodStreamingOpsLastSequence = 0;
+    CLodStreamingOperationStats m_clodStreamingOpsLatest{};
+    std::vector<CLodStreamingOpsHistorySample> m_clodStreamingOpsHistory;
+
     bool m_clodCaptureStatsPending = false;
     uint64_t m_clodCaptureStatsId = 0;
     bool m_clodCaptureHasPendingCounter = false;
@@ -417,6 +427,10 @@ private:
     uint32_t m_autoAliasPoolRetireIdleFrames = 120;
     std::function<uint32_t()> getAutoAliasPoolRetireIdleFrames;
     std::function<void(uint32_t)> setAutoAliasPoolRetireIdleFrames;
+
+    uint32_t m_clodStreamingUnloadAfterFrames = 120;
+    std::function<uint32_t()> getCLodStreamingUnloadAfterFrames;
+    std::function<void(uint32_t)> setCLodStreamingUnloadAfterFrames;
 
     float m_autoAliasPoolGrowthHeadroom = 1.5f;
     std::function<float()> getAutoAliasPoolGrowthHeadroom;
@@ -613,6 +627,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_autoAliasPoolRetireIdleFrames = getAutoAliasPoolRetireIdleFrames();
     observerSetting(m_autoAliasPoolRetireIdleFrames, "autoAliasPoolRetireIdleFrames");
 
+    getCLodStreamingUnloadAfterFrames = settingsManager.getSettingGetter<uint32_t>("clodStreamingUnloadAfterFrames");
+    setCLodStreamingUnloadAfterFrames = settingsManager.getSettingSetter<uint32_t>("clodStreamingUnloadAfterFrames");
+    m_clodStreamingUnloadAfterFrames = getCLodStreamingUnloadAfterFrames();
+    observerSetting(m_clodStreamingUnloadAfterFrames, "clodStreamingUnloadAfterFrames");
+
     getAutoAliasPoolGrowthHeadroom = settingsManager.getSettingGetter<float>("autoAliasPoolGrowthHeadroom");
     setAutoAliasPoolGrowthHeadroom = settingsManager.getSettingSetter<float>("autoAliasPoolGrowthHeadroom");
     m_autoAliasPoolGrowthHeadroom = getAutoAliasPoolGrowthHeadroom();
@@ -745,6 +764,11 @@ inline void Menu::Render(RenderContext& context, rhi::CommandList commandList) {
 		if (ImGui::Checkbox("Use Async Compute", &m_useAsyncCompute)) {
 			setUseAsyncCompute(m_useAsyncCompute);
 		}
+        int clodUnloadAfterFrames = static_cast<int>(m_clodStreamingUnloadAfterFrames);
+        if (ImGui::SliderInt("CLod unload after N frames", &clodUnloadAfterFrames, 1, 6000)) {
+            m_clodStreamingUnloadAfterFrames = static_cast<uint32_t>(std::max(clodUnloadAfterFrames, 1));
+            setCLodStreamingUnloadAfterFrames(m_clodStreamingUnloadAfterFrames);
+        }
         ImGui::Checkbox("Render Graph Inspector", &showRG);
         ImGui::Checkbox("Memory introspection", &showMemoryIntrospection);
         ImGui::Checkbox("CLod telemetry", &showCLodTelemetry);
@@ -1361,6 +1385,63 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
     ImGui::SameLine();
     ImGui::Text("Status: %s", m_clodTelemetryStatus.c_str());
+
+    {
+        CLodStreamingOperationStats latestOps{};
+        if (TryReadCLodStreamingOperationStats(m_clodStreamingOpsLastSequence, latestOps)) {
+            m_clodStreamingOpsLatest = latestOps;
+            m_clodStreamingOpsHistory.push_back({ std::chrono::steady_clock::now(), latestOps });
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        const auto horizon = std::chrono::seconds(5);
+        m_clodStreamingOpsHistory.erase(
+            std::remove_if(
+                m_clodStreamingOpsHistory.begin(),
+                m_clodStreamingOpsHistory.end(),
+                [&](const CLodStreamingOpsHistorySample& sample) {
+                    return (now - sample.timestamp) > horizon;
+                }),
+            m_clodStreamingOpsHistory.end());
+
+        CLodStreamingOperationStats max5s{};
+        for (const auto& sample : m_clodStreamingOpsHistory) {
+            max5s.loadRequested = std::max(max5s.loadRequested, sample.stats.loadRequested);
+            max5s.loadUnique = std::max(max5s.loadUnique, sample.stats.loadUnique);
+            max5s.loadApplied = std::max(max5s.loadApplied, sample.stats.loadApplied);
+            max5s.loadFailed = std::max(max5s.loadFailed, sample.stats.loadFailed);
+
+            max5s.unloadRequested = std::max(max5s.unloadRequested, sample.stats.unloadRequested);
+            max5s.unloadUnique = std::max(max5s.unloadUnique, sample.stats.unloadUnique);
+            max5s.unloadApplied = std::max(max5s.unloadApplied, sample.stats.unloadApplied);
+            max5s.unloadFailed = std::max(max5s.unloadFailed, sample.stats.unloadFailed);
+        }
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("Streaming operations (per frame)");
+        ImGui::Text("Load: requested=%u unique=%u applied=%u failed=%u",
+            m_clodStreamingOpsLatest.loadRequested,
+            m_clodStreamingOpsLatest.loadUnique,
+            m_clodStreamingOpsLatest.loadApplied,
+            m_clodStreamingOpsLatest.loadFailed);
+        ImGui::Text("Unload: requested=%u unique=%u applied=%u failed=%u",
+            m_clodStreamingOpsLatest.unloadRequested,
+            m_clodStreamingOpsLatest.unloadUnique,
+            m_clodStreamingOpsLatest.unloadApplied,
+            m_clodStreamingOpsLatest.unloadFailed);
+
+        ImGui::TextUnformatted("Max in last 5 seconds");
+        ImGui::Text("Load max: requested=%u unique=%u applied=%u failed=%u",
+            max5s.loadRequested,
+            max5s.loadUnique,
+            max5s.loadApplied,
+            max5s.loadFailed);
+        ImGui::Text("Unload max: requested=%u unique=%u applied=%u failed=%u",
+            max5s.unloadRequested,
+            max5s.unloadUnique,
+            max5s.unloadApplied,
+            max5s.unloadFailed);
+    }
 
     if (m_clodTelemetryHasData) {
         auto counter = [&](CLodWorkGraphCounterIndex idx) -> uint32_t {

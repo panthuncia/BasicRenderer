@@ -231,6 +231,7 @@ void MeshManager::RemoveMesh(Mesh* mesh) {
 
 void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVertices) {
 	mesh->SetCurrentMeshManager(this);
+	(void)useMeshletReorderedVertices;
 	//auto& vertices = useMeshletReorderedVertices ? mesh->GetMesh()->GetMeshletReorderedVertices() : mesh->GetMesh()->GetVertices();
 	const auto& vertices = mesh->GetMesh()->GetStreamingVertices();
 	auto numVertices = mesh->GetMesh()->GetStreamingNumVertices();
@@ -322,6 +323,20 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 		std::move(clodOffsetsView),
 		std::move(clodGroupChunksView)
 	);
+
+	if (!instanceGroupChunks.empty() && mesh->GetCLodGroupChunksView() != nullptr) {
+		CLodInstanceStreamingState state{};
+		state.instance = mesh;
+		state.meshInstanceIndex = static_cast<uint32_t>(mesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
+		state.groupsBase = clodOffsets.groupsBase;
+		state.groupCount = clodOffsets.groupChunkTableCount;
+		state.groupChunksView = const_cast<BufferView*>(mesh->GetCLodGroupChunksView());
+		state.baselineGroupChunks = instanceGroupChunks;
+		state.activeGroupChunks = instanceGroupChunks;
+
+		m_clodStreamingStatesByInstanceIndex[state.meshInstanceIndex] = std::move(state);
+		m_clodStreamingInstanceLookup[mesh] = static_cast<uint32_t>(mesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
+	}
 }
 
 void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
@@ -355,6 +370,97 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 		m_perMeshInstanceClodGroupChunks->Deallocate(clodGroupChunksView);
 	}
 	mesh->SetCLodBufferViews(nullptr, nullptr);
+
+	auto itLookup = m_clodStreamingInstanceLookup.find(mesh);
+	if (itLookup != m_clodStreamingInstanceLookup.end()) {
+		m_clodStreamingStatesByInstanceIndex.erase(itLookup->second);
+		m_clodStreamingInstanceLookup.erase(itLookup);
+	}
+}
+
+bool MeshManager::ApplyCLodGroupResidency(CLodInstanceStreamingState& state, uint32_t groupLocalIndex, bool resident) {
+	if (state.groupChunksView == nullptr || groupLocalIndex >= state.groupCount || groupLocalIndex >= state.baselineGroupChunks.size()) {
+		return false;
+	}
+
+	ClusterLODGroupChunk desired = state.baselineGroupChunks[groupLocalIndex];
+	if (!resident) {
+		desired.groupVertexCount = 0;
+		desired.meshletVertexCount = 0;
+	}
+
+	if (groupLocalIndex >= state.activeGroupChunks.size()) {
+		return false;
+	}
+
+	if (state.activeGroupChunks[groupLocalIndex].groupVertexCount == desired.groupVertexCount
+		&& state.activeGroupChunks[groupLocalIndex].meshletVertexCount == desired.meshletVertexCount
+		&& state.activeGroupChunks[groupLocalIndex].vertexChunkByteOffset == desired.vertexChunkByteOffset
+		&& state.activeGroupChunks[groupLocalIndex].meshletVerticesBase == desired.meshletVerticesBase) {
+		return true;
+	}
+
+	state.activeGroupChunks[groupLocalIndex] = desired;
+	m_perMeshInstanceClodGroupChunks->UpdateView(state.groupChunksView, state.activeGroupChunks.data());
+	return true;
+}
+
+bool MeshManager::SetCLodGroupResidencyForInstance(uint32_t meshInstanceIndex, uint32_t groupGlobalIndex, bool resident) {
+	auto it = m_clodStreamingStatesByInstanceIndex.find(meshInstanceIndex);
+	if (it == m_clodStreamingStatesByInstanceIndex.end()) {
+		return false;
+	}
+
+	auto& state = it->second;
+	if (groupGlobalIndex < state.groupsBase || groupGlobalIndex >= (state.groupsBase + state.groupCount)) {
+		return false;
+	}
+
+	const uint32_t groupLocalIndex = groupGlobalIndex - state.groupsBase;
+	return ApplyCLodGroupResidency(state, groupLocalIndex, resident);
+}
+
+uint32_t MeshManager::SetCLodGroupResidencyForGlobal(uint32_t groupGlobalIndex, bool resident) {
+	uint32_t appliedCount = 0;
+	for (auto& [_, state] : m_clodStreamingStatesByInstanceIndex) {
+		if (groupGlobalIndex < state.groupsBase || groupGlobalIndex >= (state.groupsBase + state.groupCount)) {
+			continue;
+		}
+
+		const uint32_t groupLocalIndex = groupGlobalIndex - state.groupsBase;
+		if (ApplyCLodGroupResidency(state, groupLocalIndex, resident)) {
+			appliedCount++;
+		}
+	}
+
+	return appliedCount;
+}
+
+void MeshManager::GetCLodActiveUniqueAssetGroupRanges(std::vector<CLodActiveGroupRange>& outRanges, uint32_t& outMaxGroupIndex) const {
+	outRanges.clear();
+	outMaxGroupIndex = 0u;
+
+	std::unordered_set<uint64_t> seenRanges;
+	seenRanges.reserve(m_clodStreamingStatesByInstanceIndex.size());
+
+	for (const auto& [_, state] : m_clodStreamingStatesByInstanceIndex) {
+		if (state.groupCount == 0u) {
+			continue;
+		}
+
+		const uint64_t key = (static_cast<uint64_t>(state.groupsBase) << 32ull) | static_cast<uint64_t>(state.groupCount);
+		if (!seenRanges.insert(key).second) {
+			continue;
+		}
+
+		CLodActiveGroupRange range{};
+		range.groupsBase = state.groupsBase;
+		range.groupCount = state.groupCount;
+		outRanges.push_back(range);
+
+		const uint32_t rangeEnd = state.groupsBase + state.groupCount;
+		outMaxGroupIndex = std::max(outMaxGroupIndex, rangeEnd);
+	}
 }
 
 void MeshManager::UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data) {

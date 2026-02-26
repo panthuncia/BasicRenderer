@@ -50,7 +50,7 @@ void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, Dir
 	perFrameCBData.lightClusterGridSizeZ = clusterSizes.z;
 	perFrameCBData.nearClusterCount = 4;
 	perFrameCBData.clusterZSplitDepth = 6.0f;
-	perFrameCBData.frameIndex = frameIndex % 64; // Wrap around every 64 frames
+	perFrameCBData.frameIndex = frameIndex;
 
 	BUFFER_UPLOAD(&perFrameCBData, sizeof(PerFrameCB), rg::runtime::UploadTarget::FromShared(m_perFrameBuffer), 0);
 }

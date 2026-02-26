@@ -32,9 +32,9 @@ struct CLodStreamingRequest
 
 struct CLodStreamingRuntimeState
 {
-    uint maxTouchedGroupIndex;
-    uint pad0;
-    uint pad1;
+    uint activeGroupScanCount;
+    uint unloadAfterFrames;
+    uint activeGroupsBitsetWordCount;
     uint pad2;
 };
 struct ClodBounds

@@ -109,7 +109,6 @@ static const uint WG_COUNTER_PHASE2_REPLAY_TRAVERSE_RECORDS_CONSUMED = 58;
 static const uint WG_COUNTER_PHASE2_REPLAY_GROUP_RECORDS_CONSUMED = 59;
 static const uint WG_COUNTER_PHASE2_REPLAY_CLUSTER_BUCKET_RECORDS_CONSUMED = 60;
 
-static const uint CLOD_STREAM_MAX_TRACKED_GROUPS = (1u << 20);
 static const uint CLOD_STREAM_REQUEST_CAPACITY = (1u << 16);
 
 static const uint CLOD_RECORD_SOURCE_PASS1 = 0;
@@ -765,14 +764,12 @@ void WG_GroupEvaluate(
                 WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_CULLED_GROUP_RECORDS, 1);
             }
             else {
-                if (groupIndex < CLOD_STREAM_MAX_TRACKED_GROUPS) {
-                    RWStructuredBuffer<uint> lastUsedFrames =
-                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLastUsedFrames)];
-                    RWStructuredBuffer<CLodStreamingRuntimeState> runtimeState =
-                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
+                RWStructuredBuffer<uint> lastUsedFrames =
+                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLastUsedFrames)];
+                StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
+                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
+                if (groupIndex < runtimeState[0].activeGroupScanCount) {
                     lastUsedFrames[groupIndex] = perFrameBuffer.frameIndex;
-                    uint oldMaxTouched = 0;
-                    InterlockedMax(runtimeState[0].maxTouchedGroupIndex, groupIndex + 1u, oldMaxTouched);
                 }
 
                 float4 groupCenterObjectSpace4 = float4(groupCenterObjectSpace, 1.0f);
@@ -849,8 +846,11 @@ void WG_GroupEvaluate(
             const uint refinedGroupGlobalIndex = off.groupsBase + (uint) child.refinedGroup;
             const ClusterLODGroup refinedGrp = groups[refinedGroupGlobalIndex];
             bool refinedResident = true;
+            StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
+            const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
 
-            if (refinedGroupGlobalIndex < CLOD_STREAM_MAX_TRACKED_GROUPS) {
+            if (refinedGroupGlobalIndex < activeGroupScanCount) {
                 ByteAddressBuffer nonResidentBits =
                     ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
                 refinedResident = !CLodReadBit(nonResidentBits, refinedGroupGlobalIndex);
@@ -864,7 +864,7 @@ void WG_GroupEvaluate(
                 RWStructuredBuffer<uint> loadRequestCounter =
                     ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
 
-                if (refinedGroupGlobalIndex < CLOD_STREAM_MAX_TRACKED_GROUPS && CLodTrySetBit(loadRequestBits, refinedGroupGlobalIndex)) {
+                if (refinedGroupGlobalIndex < activeGroupScanCount && CLodTrySetBit(loadRequestBits, refinedGroupGlobalIndex)) {
                     uint requestIndex = 0;
                     InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
                     if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY) {
@@ -879,7 +879,6 @@ void WG_GroupEvaluate(
 
                 generatingGroupWantsTraversal = false;
                 replayedOccludedRefinedGroup = false;
-                forceBucket = true;
             } else {
                 float4 objectSpaceCenter = float4(refinedGrp.bounds.centerAndRadius.xyz, 1.0);
                 float3 worldSpaceCenter = mul(objectSpaceCenter, objectModelMatrix).xyz;

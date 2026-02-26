@@ -2,7 +2,6 @@
 #include "include/structs.hlsli"
 #include "Include/clodStructs.hlsli"
 
-static const uint CLOD_STREAM_MAX_TRACKED_GROUPS = (1u << 20);
 static const uint CLOD_STREAM_REQUEST_CAPACITY = (1u << 16);
 
 uint CLodBitMask(uint key)
@@ -35,13 +34,13 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
+    ByteAddressBuffer activeGroupsBits =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingActiveGroupsBits)];
     StructuredBuffer<uint> lastUsedFrames =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLastUsedFrames)];
     ByteAddressBuffer nonResidentBits =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
 
-    RWByteAddressBuffer outNonResidentBits =
-        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
     RWByteAddressBuffer unloadRequestBits =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingUnloadRequestBits)];
     RWStructuredBuffer<CLodStreamingRequest> unloadRequests =
@@ -50,9 +49,14 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingUnloadCounter)];
 
     const uint groupIndex = dispatchThreadId.x;
-    const uint maxTouched = min(runtimeState[0].maxTouchedGroupIndex, CLOD_STREAM_MAX_TRACKED_GROUPS);
+    const uint activeScanCount = runtimeState[0].activeGroupScanCount;
 
-    if (groupIndex >= maxTouched)
+    if (groupIndex >= activeScanCount)
+    {
+        return;
+    }
+
+    if (!CLodReadBit(activeGroupsBits, groupIndex))
     {
         return;
     }
@@ -68,14 +72,9 @@ void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
     }
 
-    static const uint kUnloadAfterFrames = 120u;
+    const uint kUnloadAfterFrames = max(runtimeState[0].unloadAfterFrames, 1u);
     const uint idleFrames = (perFrameBuffer.frameIndex >= lastUsed) ? (perFrameBuffer.frameIndex - lastUsed) : 0u;
     if (idleFrames <= kUnloadAfterFrames)
-    {
-        return;
-    }
-
-    if (!CLodTrySetBit(outNonResidentBits, groupIndex))
     {
         return;
     }

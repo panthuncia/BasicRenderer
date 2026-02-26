@@ -95,3 +95,59 @@ inline void SetCLodWorkGraphTelemetryEnabled(bool enabled) {
 inline bool IsCLodWorkGraphTelemetryEnabled() {
     return g_clodWorkGraphTelemetryEnabled.load(std::memory_order_relaxed) != 0u;
 }
+
+struct CLodStreamingOperationStats {
+    uint32_t loadRequested = 0;
+    uint32_t loadUnique = 0;
+    uint32_t loadApplied = 0;
+    uint32_t loadFailed = 0;
+
+    uint32_t unloadRequested = 0;
+    uint32_t unloadUnique = 0;
+    uint32_t unloadApplied = 0;
+    uint32_t unloadFailed = 0;
+};
+
+inline std::atomic<uint64_t> g_clodStreamingOperationStatsSequence = 0;
+inline std::atomic<uint32_t> g_clodStreamingLoadRequested = 0;
+inline std::atomic<uint32_t> g_clodStreamingLoadUnique = 0;
+inline std::atomic<uint32_t> g_clodStreamingLoadApplied = 0;
+inline std::atomic<uint32_t> g_clodStreamingLoadFailed = 0;
+inline std::atomic<uint32_t> g_clodStreamingUnloadRequested = 0;
+inline std::atomic<uint32_t> g_clodStreamingUnloadUnique = 0;
+inline std::atomic<uint32_t> g_clodStreamingUnloadApplied = 0;
+inline std::atomic<uint32_t> g_clodStreamingUnloadFailed = 0;
+
+inline void PublishCLodStreamingOperationStats(const CLodStreamingOperationStats& stats) {
+    g_clodStreamingLoadRequested.store(stats.loadRequested, std::memory_order_relaxed);
+    g_clodStreamingLoadUnique.store(stats.loadUnique, std::memory_order_relaxed);
+    g_clodStreamingLoadApplied.store(stats.loadApplied, std::memory_order_relaxed);
+    g_clodStreamingLoadFailed.store(stats.loadFailed, std::memory_order_relaxed);
+
+    g_clodStreamingUnloadRequested.store(stats.unloadRequested, std::memory_order_relaxed);
+    g_clodStreamingUnloadUnique.store(stats.unloadUnique, std::memory_order_relaxed);
+    g_clodStreamingUnloadApplied.store(stats.unloadApplied, std::memory_order_relaxed);
+    g_clodStreamingUnloadFailed.store(stats.unloadFailed, std::memory_order_relaxed);
+
+    g_clodStreamingOperationStatsSequence.fetch_add(1u, std::memory_order_relaxed);
+}
+
+inline bool TryReadCLodStreamingOperationStats(uint64_t& inOutSequence, CLodStreamingOperationStats& outStats) {
+    const uint64_t sequence = g_clodStreamingOperationStatsSequence.load(std::memory_order_relaxed);
+    if (sequence == inOutSequence) {
+        return false;
+    }
+
+    outStats.loadRequested = g_clodStreamingLoadRequested.load(std::memory_order_relaxed);
+    outStats.loadUnique = g_clodStreamingLoadUnique.load(std::memory_order_relaxed);
+    outStats.loadApplied = g_clodStreamingLoadApplied.load(std::memory_order_relaxed);
+    outStats.loadFailed = g_clodStreamingLoadFailed.load(std::memory_order_relaxed);
+
+    outStats.unloadRequested = g_clodStreamingUnloadRequested.load(std::memory_order_relaxed);
+    outStats.unloadUnique = g_clodStreamingUnloadUnique.load(std::memory_order_relaxed);
+    outStats.unloadApplied = g_clodStreamingUnloadApplied.load(std::memory_order_relaxed);
+    outStats.unloadFailed = g_clodStreamingUnloadFailed.load(std::memory_order_relaxed);
+
+    inOutSequence = sequence;
+    return true;
+}
