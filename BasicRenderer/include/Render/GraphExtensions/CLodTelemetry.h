@@ -26,6 +26,8 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     GroupEvaluateActiveChildThreads,
     GroupEvaluateEmitBucketThreads,
     GroupEvaluateRefinedTraversalThreads,
+    GroupEvaluateNonResidentRefinedChildThreads,
+    GroupEvaluateNonResidentFallbackBucketThreads,
 
     ClusterCullThreads,
     ClusterCullInRangeThreads,

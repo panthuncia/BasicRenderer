@@ -1263,7 +1263,7 @@ private:
     bool m_streamingTouchedGroupsBitsResetPending = true;
     uint32_t m_streamingReadbackRingSize = 2u;
     uint32_t m_streamingReadbackScheduleCursor = 0u;
-    uint32_t m_streamingCpuUploadBudgetRequests = 64u;
+    uint32_t m_streamingCpuUploadBudgetRequests = 640u;
     uint32_t m_streamingResidentBudgetGroups = 50000u;
     rg::runtime::IReadbackService* m_streamingReadbackService = nullptr;
     std::function<MeshManager*()> m_getMeshManager = []() { return nullptr; };

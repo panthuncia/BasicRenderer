@@ -779,7 +779,7 @@ inline void Menu::Render(RenderContext& context, rhi::CommandList commandList) {
             setCLodStreamingCpuUploadBudgetRequests(m_clodStreamingCpuUploadBudgetRequests);
         }
         constexpr uint32_t kClodResidentBudgetMin = 1u;
-        constexpr uint32_t kClodResidentBudgetMax = 50000u;
+        constexpr uint32_t kClodResidentBudgetMax = 1000000u;
         uint32_t clodResidentBudget = std::clamp(m_clodStreamingResidentBudgetGroups, kClodResidentBudgetMin, kClodResidentBudgetMax);
         if (ImGui::SliderScalar("CLod Resident Budget", ImGuiDataType_U32, &clodResidentBudget, &kClodResidentBudgetMin, &kClodResidentBudgetMax)) {
             m_clodStreamingResidentBudgetGroups = clodResidentBudget;
@@ -1537,12 +1537,14 @@ inline void Menu::DrawCLodTelemetryWindow() {
             ImPlot::EndPlot();
         }
 
-        ImGui::Text("GroupEvaluate outcomes: groups=%u culled=%u rejectedByError=%u emitBucket=%u refinedTraversal=%u",
+        ImGui::Text("GroupEvaluate outcomes: groups=%u culled=%u rejectedByError=%u emitBucket=%u refinedTraversal=%u nonResidentRefined=%u nonResidentFallbackEmit=%u",
             counter(CLodWorkGraphCounterIndex::GroupEvaluateGroupRecords),
             counter(CLodWorkGraphCounterIndex::GroupEvaluateCulledGroupRecords),
             counter(CLodWorkGraphCounterIndex::GroupEvaluateRejectedByErrorRecords),
             counter(CLodWorkGraphCounterIndex::GroupEvaluateEmitBucketThreads),
-            counter(CLodWorkGraphCounterIndex::GroupEvaluateRefinedTraversalThreads));
+            counter(CLodWorkGraphCounterIndex::GroupEvaluateRefinedTraversalThreads),
+            counter(CLodWorkGraphCounterIndex::GroupEvaluateNonResidentRefinedChildThreads),
+            counter(CLodWorkGraphCounterIndex::GroupEvaluateNonResidentFallbackBucketThreads));
 
         const uint32_t groupCoalescedLaunches = counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedLaunches);
         const uint32_t groupCoalescedInputRecords = counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputRecords);
