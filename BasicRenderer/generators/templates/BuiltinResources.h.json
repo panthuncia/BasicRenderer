@@ -15,6 +15,7 @@
       "Groups": {},
       "GroupChunks": {},
       "CompressedPositions": {},
+      "CompressedNormals": {},
       "CompressedMeshletVertexIndices": {},
       "Children": {},
       "MeshletBounds": {},

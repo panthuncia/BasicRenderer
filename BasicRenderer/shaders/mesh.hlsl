@@ -10,6 +10,7 @@
 
 #define CLOD_COMPRESSED_POSITIONS 1u
 #define CLOD_COMPRESSED_MESHLET_VERTEX_INDICES 2u
+#define CLOD_COMPRESSED_NORMALS 4u
 
 uint ReadPackedBits32(StructuredBuffer<uint> words, uint startBit, uint bitCount)
 {
@@ -52,6 +53,35 @@ float3 DecodeCompressedPosition(
     int3 q = int3(px, py, pz) + minQ;
     float invScale = 1.0f / float(1u << quantExp);
     return float3(q) * invScale;
+}
+
+float2 UnpackSnorm16x2(uint packed)
+{
+    int signedPacked = asint(packed);
+    int x = (signedPacked << 16) >> 16;
+    int y = signedPacked >> 16;
+    float sx = max(-1.0f, (float)x / 32767.0f);
+    float sy = max(-1.0f, (float)y / 32767.0f);
+    return float2(sx, sy);
+}
+
+float3 OctDecodeNormal(float2 e)
+{
+    float3 v = float3(e.x, e.y, 1.0f - abs(e.x) - abs(e.y));
+    if (v.z < 0.0f)
+    {
+        float2 folded = (1.0f - abs(v.yx)) * float2(v.x >= 0.0f ? 1.0f : -1.0f, v.y >= 0.0f ? 1.0f : -1.0f);
+        v.x = folded.x;
+        v.y = folded.y;
+    }
+    return normalize(v);
+}
+
+float3 DecodeCompressedNormal(uint groupLocalVertexIndex, uint compressedNormalWordsBase)
+{
+    StructuredBuffer<uint> compressedNormalWords = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::CompressedNormals)];
+    uint packed = compressedNormalWords[compressedNormalWordsBase + groupLocalVertexIndex];
+    return OctDecodeNormal(UnpackSnorm16x2(packed));
 }
 
 VisBufferPSInput BuildVisBufferVertexAttributesForView(
@@ -268,6 +298,7 @@ VisBufferPSInput GetVisBufferVertexAttributesForViewIndexed(
     uint compressedPositionBitsZ,
     uint compressedPositionQuantExp,
     int3 compressedPositionMinQ,
+    uint compressedNormalWordsBase,
     uint compressedMeshletVertexWordsBase,
     uint compressedMeshletVertexBits,
     uint compressedFlags,
@@ -309,6 +340,10 @@ VisBufferPSInput GetVisBufferVertexAttributesForViewIndexed(
             compressedPositionQuantExp,
             compressedPositionMinQ);
     }
+    if ((flags & VERTEX_SKINNED) == 0u && (compressedFlags & CLOD_COMPRESSED_NORMALS) != 0u)
+    {
+        vertex.normal = DecodeCompressedNormal(groupLocalVertexIndex, compressedNormalWordsBase);
+    }
 
     return BuildVisBufferVertexAttributesForView(
         vertex,
@@ -340,6 +375,7 @@ void EmitMeshletVisBufferForViewIndexed(
             setup.compressedPositionBitsZ,
             setup.compressedPositionQuantExp,
             setup.compressedPositionMinQ,
+            setup.compressedNormalWordsBase,
             setup.compressedMeshletVertexWordsBase,
             setup.compressedMeshletVertexBits,
             setup.compressedFlags,
@@ -473,6 +509,8 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
         groupChunk.compressedPositionMinQx,
         groupChunk.compressedPositionMinQy,
         groupChunk.compressedPositionMinQz);
+    setup.compressedNormalWordsBase = groupChunk.compressedNormalWordsBase;
+    setup.compressedNormalWordCount = groupChunk.compressedNormalWordCount;
     setup.compressedMeshletVertexWordsBase = groupChunk.compressedMeshletVertexWordsBase;
     setup.compressedMeshletVertexWordCount = groupChunk.compressedMeshletVertexWordCount;
     setup.compressedMeshletVertexBits = groupChunk.compressedMeshletVertexBits;

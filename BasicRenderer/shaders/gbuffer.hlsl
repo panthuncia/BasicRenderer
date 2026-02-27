@@ -9,6 +9,7 @@
 
 #define CLOD_COMPRESSED_POSITIONS 1u
 #define CLOD_COMPRESSED_MESHLET_VERTEX_INDICES 2u
+#define CLOD_COMPRESSED_NORMALS 4u
 
 // http://filmicworlds.com/blog/visibility-buffer-rendering-with-material-graphs/
 struct BarycentricDeriv
@@ -161,6 +162,8 @@ struct MeshletResolveData {
     uint compressedPositionBitsZ;
     uint compressedPositionQuantExp;
     int3 compressedPositionMinQ;
+    uint compressedNormalWordsBase;
+    uint compressedNormalWordCount;
     uint compressedMeshletVertexWordsBase;
     uint compressedMeshletVertexWordCount;
     uint compressedMeshletVertexBits;
@@ -215,6 +218,35 @@ float3 DecodeCompressedPosition(uint groupLocalVertexIndex, MeshletResolveData d
     return float3(q) * invScale;
 }
 
+float2 UnpackSnorm16x2(uint packed)
+{
+    int signedPacked = asint(packed);
+    int x = (signedPacked << 16) >> 16;
+    int y = signedPacked >> 16;
+    float sx = max(-1.0f, (float)x / 32767.0f);
+    float sy = max(-1.0f, (float)y / 32767.0f);
+    return float2(sx, sy);
+}
+
+float3 OctDecodeNormal(float2 e)
+{
+    float3 v = float3(e.x, e.y, 1.0f - abs(e.x) - abs(e.y));
+    if (v.z < 0.0f)
+    {
+        float2 folded = (1.0f - abs(v.yx)) * float2(v.x >= 0.0f ? 1.0f : -1.0f, v.y >= 0.0f ? 1.0f : -1.0f);
+        v.x = folded.x;
+        v.y = folded.y;
+    }
+    return normalize(v);
+}
+
+float3 DecodeCompressedNormal(uint groupLocalVertexIndex, MeshletResolveData d)
+{
+    StructuredBuffer<uint> compressedNormalWords = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::CompressedNormals)];
+    uint packed = compressedNormalWords[d.compressedNormalWordsBase + groupLocalVertexIndex];
+    return OctDecodeNormal(UnpackSnorm16x2(packed));
+}
+
 MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
 {
     MeshletResolveData d = (MeshletResolveData) 0;
@@ -266,6 +298,8 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
             groupChunk.compressedPositionMinQx,
             groupChunk.compressedPositionMinQy,
             groupChunk.compressedPositionMinQz);
+        d.compressedNormalWordsBase = groupChunk.compressedNormalWordsBase;
+        d.compressedNormalWordCount = groupChunk.compressedNormalWordCount;
         d.compressedMeshletVertexWordsBase = groupChunk.compressedMeshletVertexWordsBase;
         d.compressedMeshletVertexWordCount = groupChunk.compressedMeshletVertexWordCount;
         d.compressedMeshletVertexBits = groupChunk.compressedMeshletVertexBits;
@@ -326,6 +360,8 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
     d.compressedPositionMinQ.x = WaveReadLaneAt(d.compressedPositionMinQ.x, leader);
     d.compressedPositionMinQ.y = WaveReadLaneAt(d.compressedPositionMinQ.y, leader);
     d.compressedPositionMinQ.z = WaveReadLaneAt(d.compressedPositionMinQ.z, leader);
+    d.compressedNormalWordsBase = WaveReadLaneAt(d.compressedNormalWordsBase, leader);
+    d.compressedNormalWordCount = WaveReadLaneAt(d.compressedNormalWordCount, leader);
     d.compressedMeshletVertexWordsBase = WaveReadLaneAt(d.compressedMeshletVertexWordsBase, leader);
     d.compressedMeshletVertexWordCount = WaveReadLaneAt(d.compressedMeshletVertexWordCount, leader);
     d.compressedMeshletVertexBits = WaveReadLaneAt(d.compressedMeshletVertexBits, leader);
@@ -522,9 +558,22 @@ void EvaluateGBufferOptimized(uint2 pixel)
     BarycentricDeriv bary = CalcFullBary(clip0, clip1, clip2, pixelNdc, winSize);
 
     // Attribute-only loads
-    float3 n0 = LoadNormalOnly(o0, vertexBuffer);
-    float3 n1 = LoadNormalOnly(o1, vertexBuffer);
-    float3 n2 = LoadNormalOnly(o2, vertexBuffer);
+    float3 n0 = 0;
+    float3 n1 = 0;
+    float3 n2 = 0;
+    bool useCompressedNormals = ((md.meshInfo.y & VERTEX_SKINNED) == 0u) && ((md.compressedFlags & CLOD_COMPRESSED_NORMALS) != 0u);
+    if (useCompressedNormals)
+    {
+        n0 = DecodeCompressedNormal(local0, md);
+        n1 = DecodeCompressedNormal(local1, md);
+        n2 = DecodeCompressedNormal(local2, md);
+    }
+    else
+    {
+        n0 = LoadNormalOnly(o0, vertexBuffer);
+        n1 = LoadNormalOnly(o1, vertexBuffer);
+        n2 = LoadNormalOnly(o2, vertexBuffer);
+    }
 
     float2 uv0 = LoadTexcoordOnly(o0, vertexBuffer, md.meshInfo.y);
     float2 uv1 = LoadTexcoordOnly(o1, vertexBuffer, md.meshInfo.y);

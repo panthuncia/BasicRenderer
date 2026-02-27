@@ -304,6 +304,10 @@ struct ClusterLODGroupChunk
     int32_t compressedPositionMinQy = 0;
     int32_t compressedPositionMinQz = 0;
 
+    // Compressed group-local normal stream (oct-encoded snorm16x2 packed into u32)
+    uint32_t compressedNormalWordsBase = 0;
+    uint32_t compressedNormalWordCount = 0;
+
     // Compressed group-local meshlet vertex index stream (u32 bitstream words)
     uint32_t compressedMeshletVertexWordsBase = 0;
     uint32_t compressedMeshletVertexWordCount = 0;

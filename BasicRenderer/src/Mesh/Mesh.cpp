@@ -28,6 +28,7 @@ namespace
 {
 	constexpr uint32_t CLOD_COMPRESSED_POSITIONS = 1u << 0;
 	constexpr uint32_t CLOD_COMPRESSED_MESHLET_VERTEX_INDICES = 1u << 1;
+	constexpr uint32_t CLOD_COMPRESSED_NORMALS = 1u << 2;
 
 	struct U32Stats
 	{
@@ -128,6 +129,43 @@ namespace
 		if (diagonal < 100.0f) return 10u;
 		return 8u;
 	}
+
+	std::array<float, 2> OctEncodeNormal(DirectX::XMFLOAT3 normal)
+	{
+		float nx = normal.x;
+		float ny = normal.y;
+		float nz = normal.z;
+		const float denom = std::abs(nx) + std::abs(ny) + std::abs(nz);
+		if (denom > 1e-8f)
+		{
+			nx /= denom;
+			ny /= denom;
+			nz /= denom;
+		}
+
+		if (nz < 0.0f)
+		{
+			const float ox = nx;
+			nx = (1.0f - std::abs(ny)) * (ox >= 0.0f ? 1.0f : -1.0f);
+			ny = (1.0f - std::abs(ox)) * (ny >= 0.0f ? 1.0f : -1.0f);
+		}
+
+		return { nx, ny };
+	}
+
+	int32_t QuantizeSnorm16(float value)
+	{
+		const float clamped = std::max(-1.0f, std::min(1.0f, value));
+		const float scaled = std::round(clamped * 32767.0f);
+		return static_cast<int32_t>(scaled);
+	}
+
+	uint32_t PackOctNormalSnorm16(const std::array<float, 2>& oct)
+	{
+		const uint16_t x = static_cast<uint16_t>(static_cast<int16_t>(QuantizeSnorm16(oct[0])));
+		const uint16_t y = static_cast<uint16_t>(static_cast<int16_t>(QuantizeSnorm16(oct[1])));
+		return static_cast<uint32_t>(x) | (static_cast<uint32_t>(y) << 16u);
+	}
 }
 
 
@@ -176,6 +214,7 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 	m_clodGroupSkinningVertexChunks = data.groupSkinningVertexChunks;
 	m_clodGroupMeshletVertexChunks = data.groupMeshletVertexChunks;
 	m_clodGroupCompressedPositionWordChunks = data.groupCompressedPositionWordChunks;
+	m_clodGroupCompressedNormalWordChunks = data.groupCompressedNormalWordChunks;
 	m_clodGroupCompressedMeshletVertexWordChunks = data.groupCompressedMeshletVertexWordChunks;
 	m_clodGroupMeshletChunks = data.groupMeshletChunks;
 	m_clodGroupMeshletTriangleChunks = data.groupMeshletTriangleChunks;
@@ -215,6 +254,7 @@ ClusterLODPrebuiltData Mesh::GetClusterLODPrebuiltData() const
 	out.groupSkinningVertexChunks = m_clodGroupSkinningVertexChunks;
 	out.groupMeshletVertexChunks = m_clodGroupMeshletVertexChunks;
 	out.groupCompressedPositionWordChunks = m_clodGroupCompressedPositionWordChunks;
+	out.groupCompressedNormalWordChunks = m_clodGroupCompressedNormalWordChunks;
 	out.groupCompressedMeshletVertexWordChunks = m_clodGroupCompressedMeshletVertexWordChunks;
 	out.groupMeshletChunks = m_clodGroupMeshletChunks;
 	out.groupMeshletTriangleChunks = m_clodGroupMeshletTriangleChunks;
@@ -681,6 +721,7 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 	m_clodGroupSkinningVertexChunks.clear();
 	m_clodGroupMeshletVertexChunks.clear();
 	m_clodGroupCompressedPositionWordChunks.clear();
+	m_clodGroupCompressedNormalWordChunks.clear();
 	m_clodGroupCompressedMeshletVertexWordChunks.clear();
 	m_clodGroupMeshletChunks.clear();
 	m_clodGroupMeshletTriangleChunks.clear();
@@ -756,6 +797,7 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 		m_clodGroupSkinningVertexChunks.clear();
 		m_clodGroupMeshletVertexChunks.clear();
 		m_clodGroupCompressedPositionWordChunks.clear();
+		m_clodGroupCompressedNormalWordChunks.clear();
 		m_clodGroupCompressedMeshletVertexWordChunks.clear();
 		m_clodGroupMeshletChunks.clear();
 		m_clodGroupMeshletTriangleChunks.clear();
@@ -1045,6 +1087,21 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 			}
 			m_clodGroupCompressedPositionWordChunks.push_back(std::move(groupCompressedPositionWords));
 
+			std::vector<uint32_t> groupCompressedNormalWords;
+			groupCompressedNormalWords.reserve(groupLocalToGlobal.size());
+			for (uint32_t globalVertexIndex : groupLocalToGlobal)
+			{
+				const size_t byteOffset = static_cast<size_t>(globalVertexIndex) * vertexStrideBytes + 12u;
+				DirectX::XMFLOAT3 normal{};
+				std::memcpy(&normal.x, m_vertices->data() + byteOffset, sizeof(float));
+				std::memcpy(&normal.y, m_vertices->data() + byteOffset + sizeof(float), sizeof(float));
+				std::memcpy(&normal.z, m_vertices->data() + byteOffset + sizeof(float) * 2, sizeof(float));
+
+				auto oct = OctEncodeNormal(normal);
+				groupCompressedNormalWords.push_back(PackOctNormalSnorm16(oct));
+			}
+			m_clodGroupCompressedNormalWordChunks.push_back(std::move(groupCompressedNormalWords));
+
 			const uint32_t meshletVertexBits = BitsNeededForRange(std::max<uint32_t>(1u, grp.groupVertexCount) - 1u);
 			std::vector<uint32_t> groupCompressedMeshletVertexWords;
 			uint64_t meshletVertexBitCursor = 0;
@@ -1104,10 +1161,12 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 			groupChunk.compressedPositionMinQx = minQuantized[0];
 			groupChunk.compressedPositionMinQy = minQuantized[1];
 			groupChunk.compressedPositionMinQz = minQuantized[2];
+			groupChunk.compressedNormalWordsBase = 0;
+			groupChunk.compressedNormalWordCount = static_cast<uint32_t>(m_clodGroupCompressedNormalWordChunks.back().size());
 			groupChunk.compressedMeshletVertexWordsBase = 0;
 			groupChunk.compressedMeshletVertexWordCount = static_cast<uint32_t>(m_clodGroupCompressedMeshletVertexWordChunks.back().size());
 			groupChunk.compressedMeshletVertexBits = meshletVertexBits;
-			groupChunk.compressedFlags = CLOD_COMPRESSED_POSITIONS | CLOD_COMPRESSED_MESHLET_VERTEX_INDICES;
+			groupChunk.compressedFlags = CLOD_COMPRESSED_POSITIONS | CLOD_COMPRESSED_MESHLET_VERTEX_INDICES | CLOD_COMPRESSED_NORMALS;
 
 			// firstChild points to start of this group's child records that were just appended.
 			grp.firstChild = uint32_t(m_clodChildren.size()) - grp.childCount;

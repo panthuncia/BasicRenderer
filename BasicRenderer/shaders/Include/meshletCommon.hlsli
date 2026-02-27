@@ -50,6 +50,8 @@ struct MeshletSetup
     uint compressedPositionBitsZ;
     uint compressedPositionQuantExp;
     int3 compressedPositionMinQ;
+    uint compressedNormalWordsBase;
+    uint compressedNormalWordCount;
     uint compressedMeshletVertexWordsBase;
     uint compressedMeshletVertexWordCount;
     uint compressedMeshletVertexBits;
@@ -101,6 +103,8 @@ bool InitializeMeshletInternal(
     setup.compressedPositionBitsZ = 0;
     setup.compressedPositionQuantExp = 0;
     setup.compressedPositionMinQ = int3(0, 0, 0);
+    setup.compressedNormalWordsBase = 0;
+    setup.compressedNormalWordCount = 0;
     setup.compressedMeshletVertexWordsBase = 0;
     setup.compressedMeshletVertexWordCount = 0;
     setup.compressedMeshletVertexBits = 0;
@@ -189,6 +193,8 @@ bool InitializeMeshletInternalCLod(
         groupChunk.compressedPositionMinQx,
         groupChunk.compressedPositionMinQy,
         groupChunk.compressedPositionMinQz);
+    setup.compressedNormalWordsBase = groupChunk.compressedNormalWordsBase;
+    setup.compressedNormalWordCount = groupChunk.compressedNormalWordCount;
     setup.compressedMeshletVertexWordsBase = groupChunk.compressedMeshletVertexWordsBase;
     setup.compressedMeshletVertexWordCount = groupChunk.compressedMeshletVertexWordCount;
     setup.compressedMeshletVertexBits = groupChunk.compressedMeshletVertexBits;

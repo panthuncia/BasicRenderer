@@ -19,6 +19,7 @@ MeshManager::MeshManager() {
 	m_meshletVertexIndices = DynamicBuffer::CreateShared(sizeof(unsigned int), 1, "meshletVertexIndices");
 	m_meshletTriangles = DynamicBuffer::CreateShared(1, 4, "meshletTriangles", true);
 	m_clodCompressedPositions = DynamicBuffer::CreateShared(sizeof(uint32_t), 1, "clodCompressedPositions");
+	m_clodCompressedNormals = DynamicBuffer::CreateShared(sizeof(uint32_t), 1, "clodCompressedNormals");
 	m_clodCompressedMeshletVertexIndices = DynamicBuffer::CreateShared(sizeof(uint32_t), 1, "clodCompressedMeshletVertexIndices");
 	//m_meshletBoundsBuffer = DynamicBuffer::CreateShared(sizeof(BoundingSphere), 1, "meshletBoundsBuffer", false, true);
 
@@ -43,6 +44,7 @@ MeshManager::MeshManager() {
 	rg::memory::SetResourceUsageHint(*m_meshletVertexIndices, "Mesh Data");
 	rg::memory::SetResourceUsageHint(*m_meshletTriangles, "Mesh Data");
 	rg::memory::SetResourceUsageHint(*m_clodCompressedPositions, "Mesh Data");
+	rg::memory::SetResourceUsageHint(*m_clodCompressedNormals, "Mesh Data");
 	rg::memory::SetResourceUsageHint(*m_clodCompressedMeshletVertexIndices, "Mesh Data");
 	//m_meshletBoundsBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
 
@@ -66,6 +68,7 @@ MeshManager::MeshManager() {
 	m_resources[Builtin::CLod::GroupChunks] = m_perMeshInstanceClodGroupChunks;
 	m_resources[Builtin::CLod::Groups] = m_clusterLODGroups;
 	m_resources[Builtin::CLod::CompressedPositions] = m_clodCompressedPositions;
+	m_resources[Builtin::CLod::CompressedNormals] = m_clodCompressedNormals;
 	m_resources[Builtin::CLod::CompressedMeshletVertexIndices] = m_clodCompressedMeshletVertexIndices;
 	m_resources[Builtin::CLod::Children] = m_clusterLODChildren;
 	//m_resources[Builtin::CLod::Meshlets] = m_clusterLODMeshlets;
@@ -104,6 +107,11 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 			m_clodCompressedPositions->Deallocate(chunkView.get());
 		}
 	}
+	for (const auto& chunkView : mesh->GetCLodCompressedNormalChunkViews()) {
+		if (chunkView) {
+			m_clodCompressedNormals->Deallocate(chunkView.get());
+		}
+	}
 	for (const auto& chunkView : mesh->GetCLodCompressedMeshletVertexChunkViews()) {
 		if (chunkView) {
 			m_clodCompressedMeshletVertexIndices->Deallocate(chunkView.get());
@@ -124,7 +132,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 			m_clusterLODMeshletBounds->Deallocate(chunkView.get());
 		}
 	}
-	mesh->SetCLodGroupChunkViews({}, {}, {}, {}, {}, {}, {}, {});
+	mesh->SetCLodGroupChunkViews({}, {}, {}, {}, {}, {}, {}, {}, {});
 	//auto& vertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedVertices() : mesh->GetVertices();
 	//auto& skinningVertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedSkinningVertices() : mesh->GetSkinningVertices();
 	const auto& vertices = mesh->GetStreamingVertices();
@@ -132,6 +140,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	const auto& groupVertexChunks = mesh->GetCLodGroupVertexChunks();
 	const auto& groupMeshletVertexChunks = mesh->GetCLodGroupMeshletVertexChunks();
 	const auto& groupCompressedPositionWordChunks = mesh->GetCLodGroupCompressedPositionWordChunks();
+	const auto& groupCompressedNormalWordChunks = mesh->GetCLodGroupCompressedNormalWordChunks();
 	const auto& groupCompressedMeshletVertexWordChunks = mesh->GetCLodGroupCompressedMeshletVertexWordChunks();
 	const auto& groupMeshletChunks = mesh->GetCLodGroupMeshletChunks();
 	const auto& groupMeshletTriangleChunks = mesh->GetCLodGroupMeshletTriangleChunks();
@@ -151,6 +160,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	std::vector<std::unique_ptr<BufferView>> clodPostSkinningChunkViews;
 	std::vector<std::unique_ptr<BufferView>> clodMeshletVertexChunkViews;
 	std::vector<std::unique_ptr<BufferView>> clodCompressedPositionChunkViews;
+	std::vector<std::unique_ptr<BufferView>> clodCompressedNormalChunkViews;
 	std::vector<std::unique_ptr<BufferView>> clodCompressedMeshletVertexChunkViews;
  	std::vector<std::unique_ptr<BufferView>> clodMeshletChunkViews;
 	std::vector<std::unique_ptr<BufferView>> clodMeshletTriangleChunkViews;
@@ -165,6 +175,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	const bool hasCompressedGroupChunks =
 		hasGroupChunks &&
 		(groupVertexChunks.size() == groupCompressedPositionWordChunks.size()) &&
+		(groupVertexChunks.size() == groupCompressedNormalWordChunks.size()) &&
 		(groupVertexChunks.size() == groupCompressedMeshletVertexWordChunks.size());
 	if (mesh->GetPerMeshCBData().vertexFlags & VertexFlags::VERTEX_SKINNED) {
 		unsigned int skinningVertexByteSize = mesh->GetSkinningVertexSize();
@@ -222,6 +233,13 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 					m_clodCompressedPositions->AddData(compressedChunk.data(), compressedChunk.size() * sizeof(uint32_t), sizeof(uint32_t)));
 			}
 
+			clodCompressedNormalChunkViews.reserve(groupCompressedNormalWordChunks.size());
+			for (const auto& compressedChunk : groupCompressedNormalWordChunks)
+			{
+				clodCompressedNormalChunkViews.push_back(
+					m_clodCompressedNormals->AddData(compressedChunk.data(), compressedChunk.size() * sizeof(uint32_t), sizeof(uint32_t)));
+			}
+
 			clodCompressedMeshletVertexChunkViews.reserve(groupCompressedMeshletVertexWordChunks.size());
 			for (const auto& compressedChunk : groupCompressedMeshletVertexWordChunks)
 			{
@@ -258,6 +276,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 		std::move(clodPostSkinningChunkViews),
 		std::move(clodMeshletVertexChunkViews),
 		std::move(clodCompressedPositionChunkViews),
+		std::move(clodCompressedNormalChunkViews),
 		std::move(clodCompressedMeshletVertexChunkViews),
 		std::move(clodMeshletChunkViews),
 		std::move(clodMeshletTriangleChunkViews),
@@ -322,6 +341,11 @@ void MeshManager::RemoveMesh(Mesh* mesh) {
 	for (const auto& chunkView : mesh->GetCLodCompressedPositionChunkViews()) {
 		if (chunkView) {
 			m_clodCompressedPositions->Deallocate(chunkView.get());
+		}
+	}
+	for (const auto& chunkView : mesh->GetCLodCompressedNormalChunkViews()) {
+		if (chunkView) {
+			m_clodCompressedNormals->Deallocate(chunkView.get());
 		}
 	}
 	for (const auto& chunkView : mesh->GetCLodCompressedMeshletVertexChunkViews()) {
@@ -394,6 +418,7 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	auto& meshGroupViews = mesh->GetMesh()->GetCLodPostSkinningVertexChunkViews();
 	auto& meshGroupMeshletViews = mesh->GetMesh()->GetCLodMeshletVertexChunkViews();
 	auto& meshGroupCompressedPositionViews = mesh->GetMesh()->GetCLodCompressedPositionChunkViews();
+	auto& meshGroupCompressedNormalViews = mesh->GetMesh()->GetCLodCompressedNormalChunkViews();
 	auto& meshGroupCompressedMeshletVertexViews = mesh->GetMesh()->GetCLodCompressedMeshletVertexChunkViews();
 	auto& meshGroupMeshletChunkViews = mesh->GetMesh()->GetCLodMeshletChunkViews();
 	auto& meshGroupMeshletTriangleChunkViews = mesh->GetMesh()->GetCLodMeshletTriangleChunkViews();
@@ -435,6 +460,10 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 		if (groupIndex < meshGroupCompressedPositionViews.size() && meshGroupCompressedPositionViews[groupIndex])
 		{
 			chunk.compressedPositionWordsBase = static_cast<uint32_t>(meshGroupCompressedPositionViews[groupIndex]->GetOffset() / sizeof(uint32_t));
+		}
+		if (groupIndex < meshGroupCompressedNormalViews.size() && meshGroupCompressedNormalViews[groupIndex])
+		{
+			chunk.compressedNormalWordsBase = static_cast<uint32_t>(meshGroupCompressedNormalViews[groupIndex]->GetOffset() / sizeof(uint32_t));
 		}
 		if (groupIndex < meshGroupCompressedMeshletVertexViews.size() && meshGroupCompressedMeshletVertexViews[groupIndex])
 		{

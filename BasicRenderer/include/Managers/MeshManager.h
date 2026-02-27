@@ -56,6 +56,7 @@ private:
 	std::shared_ptr<DynamicBuffer> m_meshletVertexIndices; // 
 	std::shared_ptr<DynamicBuffer> m_meshletTriangles;
 	std::shared_ptr<DynamicBuffer> m_clodCompressedPositions;
+	std::shared_ptr<DynamicBuffer> m_clodCompressedNormals;
 	std::shared_ptr<DynamicBuffer> m_clodCompressedMeshletVertexIndices;
 	//std::shared_ptr<DynamicBuffer> m_meshletBoundsBuffer;
 	//std::shared_ptr<DynamicBuffer> m_meshletBitfieldBuffer;

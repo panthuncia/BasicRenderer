@@ -34,6 +34,9 @@ struct ClusterLODGroupChunk
     int compressedPositionMinQy;
     int compressedPositionMinQz;
 
+    uint compressedNormalWordsBase;
+    uint compressedNormalWordCount;
+
     uint compressedMeshletVertexWordsBase;
     uint compressedMeshletVertexWordCount;
     uint compressedMeshletVertexBits;
