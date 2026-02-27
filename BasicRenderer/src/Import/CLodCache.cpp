@@ -694,12 +694,16 @@ namespace CLodCache {
 		if (groupLocalIndex >= prebuilt.groupDiskSpans.size()) {
 			return false;
 		}
+		return LoadGroupPayload(prebuilt.cacheSource, prebuilt.groupDiskSpans[groupLocalIndex], outPayload);
+	}
 
-		if (prebuilt.cacheSource.containerFileName.empty()) {
+	bool LoadGroupPayload(const ClusterLODCacheSource& cacheSource, const ClusterLODGroupDiskSpans& groupDiskSpan, LoadedGroupPayload& outPayload)
+	{
+		if (cacheSource.containerFileName.empty()) {
 			return false;
 		}
 
-		const std::wstring containerPath = GetCacheFilePathBySource(prebuilt.cacheSource.containerFileName, prebuilt.cacheSource.sourceIdentifier);
+		const std::wstring containerPath = GetCacheFilePathBySource(cacheSource.containerFileName, cacheSource.sourceIdentifier);
 		std::ifstream file(containerPath, std::ios::binary);
 		if (!file.is_open()) {
 			return false;
@@ -711,20 +715,15 @@ namespace CLodCache {
 			return false;
 		}
 
-		if (groupLocalIndex >= header.groupCount) {
-			return false;
-		}
-
-		const auto& spans = prebuilt.groupDiskSpans[groupLocalIndex];
-		if (!ReadSpanFromFile(file, spans.vertexChunk, outPayload.vertexChunk)) return false;
-		if (!ReadSpanFromFile(file, spans.skinningChunk, outPayload.skinningChunk)) return false;
-		if (!ReadSpanFromFile(file, spans.meshletVertexChunk, outPayload.meshletVertexChunk)) return false;
-		if (!ReadSpanFromFile(file, spans.compressedPositionWordChunk, outPayload.compressedPositionWordChunk)) return false;
-		if (!ReadSpanFromFile(file, spans.compressedNormalWordChunk, outPayload.compressedNormalWordChunk)) return false;
-		if (!ReadSpanFromFile(file, spans.compressedMeshletVertexWordChunk, outPayload.compressedMeshletVertexWordChunk)) return false;
-		if (!ReadSpanFromFile(file, spans.meshletChunk, outPayload.meshletChunk)) return false;
-		if (!ReadSpanFromFile(file, spans.meshletTriangleChunk, outPayload.meshletTriangleChunk)) return false;
-		if (!ReadSpanFromFile(file, spans.meshletBoundsChunk, outPayload.meshletBoundsChunk)) return false;
+		if (!ReadSpanFromFile(file, groupDiskSpan.vertexChunk, outPayload.vertexChunk)) return false;
+		if (!ReadSpanFromFile(file, groupDiskSpan.skinningChunk, outPayload.skinningChunk)) return false;
+		if (!ReadSpanFromFile(file, groupDiskSpan.meshletVertexChunk, outPayload.meshletVertexChunk)) return false;
+		if (!ReadSpanFromFile(file, groupDiskSpan.compressedPositionWordChunk, outPayload.compressedPositionWordChunk)) return false;
+		if (!ReadSpanFromFile(file, groupDiskSpan.compressedNormalWordChunk, outPayload.compressedNormalWordChunk)) return false;
+		if (!ReadSpanFromFile(file, groupDiskSpan.compressedMeshletVertexWordChunk, outPayload.compressedMeshletVertexWordChunk)) return false;
+		if (!ReadSpanFromFile(file, groupDiskSpan.meshletChunk, outPayload.meshletChunk)) return false;
+		if (!ReadSpanFromFile(file, groupDiskSpan.meshletTriangleChunk, outPayload.meshletTriangleChunk)) return false;
+		if (!ReadSpanFromFile(file, groupDiskSpan.meshletBoundsChunk, outPayload.meshletBoundsChunk)) return false;
 
 		return true;
 	}

@@ -114,24 +114,17 @@ void MeshManager::CLodDiskStreamingWorkerMain() {
 		result.groupGlobalIndex = request.groupGlobalIndex;
 		result.groupLocalIndex = request.groupLocalIndex;
 
-		CLodCache::CacheData cacheData{};
-		cacheData.buildConfigHash = request.cacheSource.buildConfigHash;
-		cacheData.prebuiltData.cacheSource = request.cacheSource;
-
-		if (request.groupLocalIndex < request.groupDiskSpans.size()) {
-			cacheData.prebuiltData.groupDiskSpans = request.groupDiskSpans;
-			CLodCache::LoadedGroupPayload payload{};
-			if (CLodCache::LoadGroupPayload(cacheData, request.groupLocalIndex, payload)) {
-				result.vertexChunk = std::move(payload.vertexChunk);
-				result.meshletVertexChunk = std::move(payload.meshletVertexChunk);
-				result.compressedPositionWordChunk = std::move(payload.compressedPositionWordChunk);
-				result.compressedNormalWordChunk = std::move(payload.compressedNormalWordChunk);
-				result.compressedMeshletVertexWordChunk = std::move(payload.compressedMeshletVertexWordChunk);
-				result.meshletChunk = std::move(payload.meshletChunk);
-				result.meshletTriangleChunk = std::move(payload.meshletTriangleChunk);
-				result.meshletBoundsChunk = std::move(payload.meshletBoundsChunk);
-				result.success = true;
-			}
+		CLodCache::LoadedGroupPayload payload{};
+		if (CLodCache::LoadGroupPayload(request.cacheSource, request.groupDiskSpan, payload)) {
+			result.vertexChunk = std::move(payload.vertexChunk);
+			result.meshletVertexChunk = std::move(payload.meshletVertexChunk);
+			result.compressedPositionWordChunk = std::move(payload.compressedPositionWordChunk);
+			result.compressedNormalWordChunk = std::move(payload.compressedNormalWordChunk);
+			result.compressedMeshletVertexWordChunk = std::move(payload.compressedMeshletVertexWordChunk);
+			result.meshletChunk = std::move(payload.meshletChunk);
+			result.meshletTriangleChunk = std::move(payload.meshletTriangleChunk);
+			result.meshletBoundsChunk = std::move(payload.meshletBoundsChunk);
+			result.success = true;
 		}
 
 		{
@@ -739,7 +732,7 @@ bool MeshManager::QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodI
 		request.groupGlobalIndex = groupGlobalIndex;
 		request.groupLocalIndex = groupLocalIndex;
 		request.cacheSource = mesh->GetCLodCacheSource();
-		request.groupDiskSpans = groupDiskSpans;
+		request.groupDiskSpan = groupDiskSpans[groupLocalIndex];
 		m_clodDiskStreamingRequests.push_back(std::move(request));
 	}
 

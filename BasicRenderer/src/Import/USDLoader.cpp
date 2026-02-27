@@ -637,14 +637,22 @@ namespace USDLoader {
 				if (fi >= 0 && (size_t)fi < useFace.size()) useFace[fi] = 1;
 		}
 
-		// raw index list into control mesh points
-		std::vector<uint32_t> rawIndices =
-			TriangulateIndices(faceVertCounts, faceVertIndices);
-
 		std::string primName = mesh.GetPrim().GetName().GetString();
 
 		// Reserve final arrays
-		size_t cornerCount = rawIndices.size();
+		size_t cornerCount = 0;
+		for (size_t faceIndex = 0; faceIndex < faceVertCounts.size(); ++faceIndex) {
+			if (subset && !useFace[faceIndex]) {
+				continue;
+			}
+			const int fvCount = faceVertCounts[faceIndex];
+			if (fvCount == 3) {
+				cornerCount += 3;
+			}
+			else if (fvCount > 3) {
+				cornerCount += static_cast<size_t>(fvCount - 2) * 3;
+			}
+		}
 		meshData.positions.reserve(cornerCount * 3);
 
 		// normals

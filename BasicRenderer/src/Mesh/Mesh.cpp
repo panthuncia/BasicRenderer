@@ -175,15 +175,16 @@ namespace
 	{
 		int32_t refinedGroup = -1;
 		clodBounds bounds{};
-		std::vector<unsigned int> indices;
+		uint32_t indicesOffset = 0;
+		uint32_t indexCount = 0;
 		uint32_t vertexCount = 0;
 	};
 
 	struct CapturedClusterLODGroup
 	{
-		uint32_t groupId = 0;
 		int depth = 0;
 		clodBounds simplified{};
+		std::vector<unsigned int> flattenedIndices;
 		std::vector<CapturedClusterLODCluster> clusters;
 	};
 
@@ -207,7 +208,7 @@ namespace
 	};
 
 	template <typename Func>
-	void RunDeterministicParallelFor(size_t itemCount, Func&& func)
+	void RunParallelFor(size_t itemCount, Func&& func)
 	{
 		if (itemCount == 0)
 		{
@@ -387,16 +388,17 @@ namespace
 			for (uint32_t clusterIndex : bucket.clusterIndices)
 			{
 				const CapturedClusterLODCluster& cluster = capturedGroup.clusters[clusterIndex];
-				const uint32_t triangleCount = static_cast<uint32_t>(cluster.indices.size() / 3);
+				const uint32_t triangleCount = cluster.indexCount / 3;
+				const unsigned int* clusterIndices = capturedGroup.flattenedIndices.data() + cluster.indicesOffset;
 
 				std::vector<unsigned int> localVertices(cluster.vertexCount);
-				std::vector<unsigned char> localTriangles(cluster.indices.size());
+				std::vector<unsigned char> localTriangles(cluster.indexCount);
 
 				const size_t uniqueVertexCount = clodLocalIndices(
 					localVertices.data(),
 					localTriangles.data(),
-					cluster.indices.data(),
-					cluster.indices.size());
+					clusterIndices,
+					cluster.indexCount);
 
 				assert(uniqueVertexCount == cluster.vertexCount);
 
@@ -1201,12 +1203,33 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 		size_t refinedCapSplitPartitionCount = 0;
 		config.partition_refined_split_count = &refinedCapSplitPartitionCount;
 
-		std::vector<CapturedClusterLODGroup> capturedGroups;
-		capturedGroups.reserve(1024);
-
 		struct CaptureOutputContext
 		{
-			std::vector<CapturedClusterLODGroup>* capturedGroups = nullptr;
+			const std::vector<std::byte>* vertices = nullptr;
+			size_t vertexStrideBytes = 0;
+			const std::vector<std::byte>* skinningVertices = nullptr;
+			size_t skinningVertexStrideBytes = 0;
+			std::vector<ClusterLODGroup>* groups = nullptr;
+			std::vector<ClusterLODChild>* children = nullptr;
+			std::vector<std::byte>* duplicatedVertices = nullptr;
+			std::vector<std::byte>* duplicatedSkinningVertices = nullptr;
+			std::vector<ClusterLODGroupChunk>* groupChunks = nullptr;
+			std::vector<std::vector<std::byte>>* groupVertexChunks = nullptr;
+			std::vector<std::vector<std::byte>>* groupSkinningVertexChunks = nullptr;
+			std::vector<std::vector<uint32_t>>* groupMeshletVertexChunks = nullptr;
+			std::vector<std::vector<uint32_t>>* groupCompressedPositionWordChunks = nullptr;
+			std::vector<std::vector<uint32_t>>* groupCompressedNormalWordChunks = nullptr;
+			std::vector<std::vector<uint32_t>>* groupCompressedMeshletVertexWordChunks = nullptr;
+			std::vector<std::vector<meshopt_Meshlet>>* groupMeshletChunks = nullptr;
+			std::vector<std::vector<uint8_t>>* groupMeshletTriangleChunks = nullptr;
+			std::vector<std::vector<BoundingSphere>>* groupMeshletBoundsChunks = nullptr;
+			float meshPositionQuantScale = 1.0f;
+			uint32_t meshPositionQuantExp = 0;
+			std::atomic<uint32_t> nextGroupId = 0;
+			std::mutex finalizeMutex;
+			uint32_t cumulativeMeshletCount = 0;
+			uint32_t maxChildrenObserved = 0;
+			uint32_t maxDepthObserved = 0;
 		};
 
 		struct ClodBuildCallbacks
@@ -1214,12 +1237,13 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 			static int Output(void* outputContext, clodGroup group, const clodCluster* clusters, size_t clusterCount, size_t, unsigned int)
 			{
 				CaptureOutputContext* context = static_cast<CaptureOutputContext*>(outputContext);
+				const uint32_t groupId = context->nextGroupId.fetch_add(1u, std::memory_order_relaxed);
 
 				CapturedClusterLODGroup capturedGroup{};
-				capturedGroup.groupId = static_cast<uint32_t>(context->capturedGroups->size());
 				capturedGroup.depth = group.depth;
 				capturedGroup.simplified = group.simplified;
 				capturedGroup.clusters.reserve(clusterCount);
+				capturedGroup.flattenedIndices.reserve(clusterCount * MS_MESHLET_SIZE * 3);
 
 				for (size_t clusterIndex = 0; clusterIndex < clusterCount; ++clusterIndex)
 				{
@@ -1229,18 +1253,80 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 					capturedCluster.refinedGroup = static_cast<int32_t>(cluster.refined);
 					capturedCluster.bounds = cluster.bounds;
 					capturedCluster.vertexCount = static_cast<uint32_t>(cluster.vertex_count);
-					capturedCluster.indices.assign(cluster.indices, cluster.indices + cluster.index_count);
+					capturedCluster.indicesOffset = static_cast<uint32_t>(capturedGroup.flattenedIndices.size());
+					capturedCluster.indexCount = static_cast<uint32_t>(cluster.index_count);
+					capturedGroup.flattenedIndices.insert(
+						capturedGroup.flattenedIndices.end(),
+						cluster.indices,
+						cluster.indices + cluster.index_count);
 
 					capturedGroup.clusters.push_back(std::move(capturedCluster));
 				}
 
-				context->capturedGroups->push_back(std::move(capturedGroup));
-				return static_cast<int>(context->capturedGroups->size() - 1);
+				ClusterLODGroupBuildOutput output = BuildClusterLODGroupOutput(
+					capturedGroup,
+					*context->vertices,
+					context->vertexStrideBytes,
+					context->skinningVertices,
+					context->skinningVertexStrideBytes,
+					context->meshPositionQuantScale,
+					context->meshPositionQuantExp);
+
+				ClusterLODGroup finalizedGroup = output.group;
+
+				std::lock_guard<std::mutex> lock(context->finalizeMutex);
+
+				auto ensureIndexedStorage = [&](auto& container)
+					{
+						if (container.size() <= groupId)
+						{
+							container.resize(static_cast<size_t>(groupId) + 1ull);
+						}
+					};
+
+				ensureIndexedStorage(*context->groups);
+				ensureIndexedStorage(*context->groupChunks);
+				ensureIndexedStorage(*context->groupVertexChunks);
+				ensureIndexedStorage(*context->groupSkinningVertexChunks);
+				ensureIndexedStorage(*context->groupMeshletVertexChunks);
+				ensureIndexedStorage(*context->groupCompressedPositionWordChunks);
+				ensureIndexedStorage(*context->groupCompressedNormalWordChunks);
+				ensureIndexedStorage(*context->groupCompressedMeshletVertexWordChunks);
+				ensureIndexedStorage(*context->groupMeshletChunks);
+				ensureIndexedStorage(*context->groupMeshletTriangleChunks);
+				ensureIndexedStorage(*context->groupMeshletBoundsChunks);
+
+				finalizedGroup.firstMeshlet = context->cumulativeMeshletCount;
+				finalizedGroup.firstGroupVertex = static_cast<uint32_t>(context->duplicatedVertices->size() / context->vertexStrideBytes);
+				finalizedGroup.firstChild = static_cast<uint32_t>(context->children->size());
+
+				context->cumulativeMeshletCount += finalizedGroup.meshletCount;
+				context->children->insert(context->children->end(), output.children.begin(), output.children.end());
+				context->duplicatedVertices->insert(context->duplicatedVertices->end(), output.vertexChunk.begin(), output.vertexChunk.end());
+				context->duplicatedSkinningVertices->insert(context->duplicatedSkinningVertices->end(), output.skinningVertexChunk.begin(), output.skinningVertexChunk.end());
+
+				(*context->groupVertexChunks)[groupId] = std::move(output.vertexChunk);
+				(*context->groupSkinningVertexChunks)[groupId] = std::move(output.skinningVertexChunk);
+				(*context->groupMeshletVertexChunks)[groupId] = std::move(output.meshletVertices);
+				(*context->groupCompressedPositionWordChunks)[groupId] = std::move(output.compressedPositionWords);
+				(*context->groupCompressedNormalWordChunks)[groupId] = std::move(output.compressedNormalWords);
+				(*context->groupCompressedMeshletVertexWordChunks)[groupId] = std::move(output.compressedMeshletVertexWords);
+				(*context->groupMeshletChunks)[groupId] = std::move(output.groupMeshletChunk);
+				(*context->groupMeshletTriangleChunks)[groupId] = std::move(output.groupMeshletTriangleChunk);
+				(*context->groupMeshletBoundsChunks)[groupId] = std::move(output.groupMeshletBoundsChunk);
+
+				(*context->groupChunks)[groupId] = output.groupChunk;
+				(*context->groups)[groupId] = finalizedGroup;
+
+				context->maxChildrenObserved = std::max(context->maxChildrenObserved, finalizedGroup.childCount);
+				context->maxDepthObserved = (std::max)(context->maxDepthObserved, static_cast<uint32_t>(std::max(finalizedGroup.depth, 0)));
+
+				return static_cast<int>(groupId);
 			}
 
 			static void Iterate(void* iterationContext, void*, int, size_t taskCount)
 			{
-				RunDeterministicParallelFor(taskCount, [&](size_t taskIndex)
+				RunParallelFor(taskCount, [&](size_t taskIndex)
 					{
 						clodBuild_iterationTask(iterationContext, taskIndex, 0);
 					});
@@ -1248,7 +1334,26 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 		};
 
 		CaptureOutputContext captureContext{};
-		captureContext.capturedGroups = &capturedGroups;
+		captureContext.vertices = m_vertices.get();
+		captureContext.vertexStrideBytes = vertexStrideBytes;
+		captureContext.skinningVertices = m_skinningVertices.get();
+		captureContext.skinningVertexStrideBytes = m_skinningVertexSize;
+		captureContext.groups = &m_clodGroups;
+		captureContext.children = &m_clodChildren;
+		captureContext.duplicatedVertices = &m_clodDuplicatedVertices;
+		captureContext.duplicatedSkinningVertices = &m_clodDuplicatedSkinningVertices;
+		captureContext.groupChunks = &m_clodGroupChunks;
+		captureContext.groupVertexChunks = &m_clodGroupVertexChunks;
+		captureContext.groupSkinningVertexChunks = &m_clodGroupSkinningVertexChunks;
+		captureContext.groupMeshletVertexChunks = &m_clodGroupMeshletVertexChunks;
+		captureContext.groupCompressedPositionWordChunks = &m_clodGroupCompressedPositionWordChunks;
+		captureContext.groupCompressedNormalWordChunks = &m_clodGroupCompressedNormalWordChunks;
+		captureContext.groupCompressedMeshletVertexWordChunks = &m_clodGroupCompressedMeshletVertexWordChunks;
+		captureContext.groupMeshletChunks = &m_clodGroupMeshletChunks;
+		captureContext.groupMeshletTriangleChunks = &m_clodGroupMeshletTriangleChunks;
+		captureContext.groupMeshletBoundsChunks = &m_clodGroupMeshletBoundsChunks;
+		captureContext.meshPositionQuantScale = meshPositionQuantScale;
+		captureContext.meshPositionQuantExp = meshPositionQuantExp;
 
 		clodBuildParallelConfig parallelConfig{};
 		parallelConfig.iteration_callback = &ClodBuildCallbacks::Iterate;
@@ -1256,60 +1361,8 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 
 		clodBuildEx(config, mesh, &captureContext, &ClodBuildCallbacks::Output, parallelConfigPtr);
 
-		std::vector<ClusterLODGroupBuildOutput> groupOutputs(capturedGroups.size());
-		RunDeterministicParallelFor(capturedGroups.size(), [&](size_t groupIndex)
-			{
-				groupOutputs[groupIndex] = BuildClusterLODGroupOutput(
-					capturedGroups[groupIndex],
-					*m_vertices,
-					vertexStrideBytes,
-					m_skinningVertices.get(),
-					m_skinningVertexSize,
-					meshPositionQuantScale,
-					meshPositionQuantExp);
-			});
-
-		m_clodGroups.reserve(groupOutputs.size());
-		m_clodGroupChunks.resize(groupOutputs.size());
-		m_clodGroupVertexChunks.reserve(groupOutputs.size());
-		m_clodGroupSkinningVertexChunks.reserve(groupOutputs.size());
-		m_clodGroupMeshletVertexChunks.reserve(groupOutputs.size());
-		m_clodGroupCompressedPositionWordChunks.reserve(groupOutputs.size());
-		m_clodGroupCompressedNormalWordChunks.reserve(groupOutputs.size());
-		m_clodGroupCompressedMeshletVertexWordChunks.reserve(groupOutputs.size());
-		m_clodGroupMeshletChunks.reserve(groupOutputs.size());
-		m_clodGroupMeshletTriangleChunks.reserve(groupOutputs.size());
-		m_clodGroupMeshletBoundsChunks.reserve(groupOutputs.size());
-
-		maxChildrenObserved = 0;
-		uint32_t cumulativeMeshletCount = 0;
-		for (size_t groupIndex = 0; groupIndex < groupOutputs.size(); ++groupIndex)
-		{
-			ClusterLODGroupBuildOutput& output = groupOutputs[groupIndex];
-			ClusterLODGroup group = output.group;
-
-			group.firstMeshlet = cumulativeMeshletCount;
-			group.firstGroupVertex = static_cast<uint32_t>(m_clodDuplicatedVertices.size() / vertexStrideBytes);
-			group.firstChild = static_cast<uint32_t>(m_clodChildren.size());
-			cumulativeMeshletCount += group.meshletCount;
-			m_clodChildren.insert(m_clodChildren.end(), output.children.begin(), output.children.end());
-			m_clodDuplicatedVertices.insert(m_clodDuplicatedVertices.end(), output.vertexChunk.begin(), output.vertexChunk.end());
-			m_clodDuplicatedSkinningVertices.insert(m_clodDuplicatedSkinningVertices.end(), output.skinningVertexChunk.begin(), output.skinningVertexChunk.end());
-
-			m_clodGroupVertexChunks.push_back(std::move(output.vertexChunk));
-			m_clodGroupSkinningVertexChunks.push_back(std::move(output.skinningVertexChunk));
-			m_clodGroupMeshletVertexChunks.push_back(std::move(output.meshletVertices));
-			m_clodGroupCompressedPositionWordChunks.push_back(std::move(output.compressedPositionWords));
-			m_clodGroupCompressedNormalWordChunks.push_back(std::move(output.compressedNormalWords));
-			m_clodGroupCompressedMeshletVertexWordChunks.push_back(std::move(output.compressedMeshletVertexWords));
-			m_clodGroupMeshletChunks.push_back(std::move(output.groupMeshletChunk));
-			m_clodGroupMeshletTriangleChunks.push_back(std::move(output.groupMeshletTriangleChunk));
-			m_clodGroupMeshletBoundsChunks.push_back(std::move(output.groupMeshletBoundsChunk));
-
-			m_clodGroupChunks[groupIndex] = output.groupChunk;
-			m_clodGroups.push_back(group);
-			maxChildrenObserved = std::max(maxChildrenObserved, group.childCount);
-		}
+		maxChildrenObserved = captureContext.maxChildrenObserved;
+		m_clodMaxDepth = captureContext.maxDepthObserved;
 
 		for (size_t groupIndex = 0; groupIndex < m_clodGroups.size(); ++groupIndex)
 		{
@@ -1317,11 +1370,6 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 			{
 				m_clodGroupChunks[groupIndex].groupVertexCount = m_clodGroups[groupIndex].groupVertexCount;
 			}
-		}
-
-		for (const ClusterLODGroup& group : m_clodGroups)
-		{
-			m_clodMaxDepth = (std::max)(m_clodMaxDepth, static_cast<uint32_t>(std::max(group.depth, 0)));
 		}
 
 		if (refinedCapSplitPartitionCount > 0)
@@ -1441,6 +1489,18 @@ void Mesh::CreateMeshlets(const std::vector<UINT32>& indices) {
 		0.5);
 
 	m_meshlets.resize(meshletCount);
+	size_t usedVertexCount = 0;
+	size_t usedTriangleByteCount = 0;
+	for (const auto& meshlet : m_meshlets) {
+		usedVertexCount = std::max(usedVertexCount, static_cast<size_t>(meshlet.vertex_offset + meshlet.vertex_count));
+		usedTriangleByteCount = std::max(usedTriangleByteCount, static_cast<size_t>(meshlet.triangle_offset + ((meshlet.triangle_count * 3 + 3) & ~3)));
+	}
+	m_meshletVertices.resize(usedVertexCount);
+	m_meshletTriangles.resize(usedTriangleByteCount);
+	m_meshletVertices.shrink_to_fit();
+	m_meshletTriangles.shrink_to_fit();
+	m_meshletBounds.clear();
+	m_meshletBounds.reserve(m_meshlets.size());
 
 	size_t globalVertexCount =
 		m_vertices->size() / m_perMeshBufferData.vertexByteSize;

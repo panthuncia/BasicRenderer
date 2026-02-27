@@ -101,7 +101,7 @@ private:
 	struct CLodDiskStreamingRequest {
 		uint32_t groupGlobalIndex = 0;
 		ClusterLODCacheSource cacheSource{};
-		std::vector<ClusterLODGroupDiskSpans> groupDiskSpans;
+		ClusterLODGroupDiskSpans groupDiskSpan{};
 		uint32_t groupLocalIndex = 0;
 	};
 
