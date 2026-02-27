@@ -502,6 +502,7 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	auto& meshGroupMeshletChunkViews = mesh->GetMesh()->GetCLodMeshletChunkViews();
 	auto& meshGroupMeshletTriangleChunkViews = mesh->GetMesh()->GetCLodMeshletTriangleChunkViews();
 	auto& meshGroupMeshletBoundsChunkViews = mesh->GetMesh()->GetCLodMeshletBoundsChunkViews();
+	std::vector<ClusterLODGroupChunk> baselineGroupChunks(meshGroupChunks.size());
 	std::vector<ClusterLODGroupChunk> instanceGroupChunks(meshGroupChunks.size());
 	for (size_t groupIndex = 0; groupIndex < meshGroupChunks.size(); ++groupIndex)
 	{
@@ -565,6 +566,8 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 			chunk.compressedMeshletVertexWordsBase = static_cast<uint32_t>(meshGroupCompressedMeshletVertexViews[groupIndex]->GetOffset() / sizeof(uint32_t));
 		}
 
+		baselineGroupChunks[groupIndex] = chunk;
+
 		if (!hasRuntimeChunkData) {
 			chunk.groupVertexCount = 0;
 			chunk.meshletVertexCount = 0;
@@ -612,7 +615,7 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 		state.groupsBase = clodOffsets.groupsBase;
 		state.groupCount = clodOffsets.groupChunkTableCount;
 		state.groupChunksView = const_cast<BufferView*>(mesh->GetCLodGroupChunksView());
-		state.baselineGroupChunks = instanceGroupChunks;
+		state.baselineGroupChunks = std::move(baselineGroupChunks);
 		state.activeGroupChunks = instanceGroupChunks;
 
 		m_clodStreamingStatesByInstanceIndex[state.meshInstanceIndex] = std::move(state);
@@ -839,13 +842,8 @@ void MeshManager::ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult&
 			if (compressedMeshletVertexViews[localIndex]) chunk.compressedMeshletVertexWordsBase = static_cast<uint32_t>(compressedMeshletVertexViews[localIndex]->GetOffset() / sizeof(uint32_t));
 
 			state.baselineGroupChunks[localIndex] = chunk;
-
-			const bool currentlyResident = state.activeGroupChunks[localIndex].meshletCount > 0u
-				|| state.activeGroupChunks[localIndex].groupVertexCount > 0u;
-			if (currentlyResident) {
-				state.activeGroupChunks[localIndex] = chunk;
-				m_perMeshInstanceClodGroupChunks->UpdateView(state.groupChunksView, state.activeGroupChunks.data());
-			}
+			state.activeGroupChunks[localIndex] = chunk;
+			m_perMeshInstanceClodGroupChunks->UpdateView(state.groupChunksView, state.activeGroupChunks.data());
 		}
 	}
 }
