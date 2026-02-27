@@ -5,6 +5,7 @@
 #include <memory>
 #include <atomic>
 #include <optional>
+#include <string>
 #include <rhi.h>
 #include <meshoptimizer.h>
 #include <ThirdParty/meshoptimizer/clusterlod.h>
@@ -56,6 +57,34 @@ struct ClusterLODNodeRangeAlloc
 	uint32_t count = 0;
 };
 
+struct ClusterLODDiskChunkSpan
+{
+	uint64_t offset = 0;
+	uint64_t sizeBytes = 0;
+};
+
+struct ClusterLODGroupDiskSpans
+{
+	ClusterLODDiskChunkSpan vertexChunk;
+	ClusterLODDiskChunkSpan skinningChunk;
+	ClusterLODDiskChunkSpan meshletVertexChunk;
+	ClusterLODDiskChunkSpan compressedPositionWordChunk;
+	ClusterLODDiskChunkSpan compressedNormalWordChunk;
+	ClusterLODDiskChunkSpan compressedMeshletVertexWordChunk;
+	ClusterLODDiskChunkSpan meshletChunk;
+	ClusterLODDiskChunkSpan meshletTriangleChunk;
+	ClusterLODDiskChunkSpan meshletBoundsChunk;
+};
+
+struct ClusterLODCacheSource
+{
+	std::string sourceIdentifier;
+	std::string primPath;
+	std::string subsetName;
+	uint64_t buildConfigHash = 0;
+	std::wstring containerFileName;
+};
+
 struct ClusterLODPrebuiltData
 {
 	std::vector<ClusterLODGroup> groups;
@@ -76,6 +105,8 @@ struct ClusterLODPrebuiltData
 	std::vector<std::vector<meshopt_Meshlet>> groupMeshletChunks;
 	std::vector<std::vector<uint8_t>> groupMeshletTriangleChunks;
 	std::vector<std::vector<BoundingSphere>> groupMeshletBoundsChunks;
+	std::vector<ClusterLODGroupDiskSpans> groupDiskSpans;
+	ClusterLODCacheSource cacheSource;
 	std::vector<ClusterLODNode> nodes;
 };
 
@@ -248,6 +279,18 @@ public:
 		return m_clodGroupMeshletBoundsChunks;
 	}
 
+	const std::vector<ClusterLODGroupDiskSpans>& GetCLodGroupDiskSpans() const {
+		return m_clodGroupDiskSpans;
+	}
+
+	const ClusterLODCacheSource& GetCLodCacheSource() const {
+		return m_clodCacheSource;
+	}
+
+	bool HasCLodDiskStreamingSource() const {
+		return !m_clodGroupDiskSpans.empty() && !m_clodCacheSource.containerFileName.empty();
+	}
+
 	void ReleaseCLodChunkUploadData() {
 		m_clodGroupVertexChunks.clear();
 		m_clodGroupVertexChunks.shrink_to_fit();
@@ -358,6 +401,38 @@ public:
 		return m_clodMeshletBoundsChunkViews;
 	}
 
+	std::vector<std::unique_ptr<BufferView>>& AccessCLodPostSkinningVertexChunkViews() {
+		return m_clodPostSkinningVertexChunkViews;
+	}
+
+	std::vector<std::unique_ptr<BufferView>>& AccessCLodMeshletVertexChunkViews() {
+		return m_clodMeshletVertexChunkViews;
+	}
+
+	std::vector<std::unique_ptr<BufferView>>& AccessCLodCompressedPositionChunkViews() {
+		return m_clodCompressedPositionChunkViews;
+	}
+
+	std::vector<std::unique_ptr<BufferView>>& AccessCLodCompressedNormalChunkViews() {
+		return m_clodCompressedNormalChunkViews;
+	}
+
+	std::vector<std::unique_ptr<BufferView>>& AccessCLodCompressedMeshletVertexChunkViews() {
+		return m_clodCompressedMeshletVertexChunkViews;
+	}
+
+	std::vector<std::unique_ptr<BufferView>>& AccessCLodMeshletChunkViews() {
+		return m_clodMeshletChunkViews;
+	}
+
+	std::vector<std::unique_ptr<BufferView>>& AccessCLodMeshletTriangleChunkViews() {
+		return m_clodMeshletTriangleChunkViews;
+	}
+
+	std::vector<std::unique_ptr<BufferView>>& AccessCLodMeshletBoundsChunkViews() {
+		return m_clodMeshletBoundsChunkViews;
+	}
+
 	uint32_t GetCLodRootNodeIndex() const { // For hierarchy cut
 		return m_clodTopRootNode;
 	}
@@ -416,6 +491,8 @@ private:
 	std::vector<std::vector<meshopt_Meshlet>> m_clodGroupMeshletChunks;
 	std::vector<std::vector<uint8_t>> m_clodGroupMeshletTriangleChunks;
 	std::vector<std::vector<BoundingSphere>> m_clodGroupMeshletBoundsChunks;
+	std::vector<ClusterLODGroupDiskSpans> m_clodGroupDiskSpans;
+	ClusterLODCacheSource m_clodCacheSource;
 	std::vector<std::unique_ptr<BufferView>> m_clodPreSkinningVertexChunkViews;
 	std::vector<std::unique_ptr<BufferView>> m_clodPostSkinningVertexChunkViews;
 	std::vector<std::unique_ptr<BufferView>> m_clodMeshletVertexChunkViews;

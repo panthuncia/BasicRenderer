@@ -1168,6 +1168,12 @@ private:
         const uint32_t budget = std::max(m_streamingCpuUploadBudgetRequests, 1u);
         CLodStreamingOperationStats frameStats{};
 
+        if (m_getMeshManager) {
+            if (auto* meshManager = m_getMeshManager()) {
+                meshManager->ProcessCLodDiskStreamingIO(budget);
+            }
+        }
+
         uint32_t processed = 0;
         while (processed < budget && !m_pendingStreamingRequests.empty()) {
             const PendingStreamingRequest pending = m_pendingStreamingRequests.front();

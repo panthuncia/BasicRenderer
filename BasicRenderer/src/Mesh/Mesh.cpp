@@ -629,6 +629,8 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 	m_clodGroupMeshletChunks = data.groupMeshletChunks;
 	m_clodGroupMeshletTriangleChunks = data.groupMeshletTriangleChunks;
 	m_clodGroupMeshletBoundsChunks = data.groupMeshletBoundsChunks;
+	m_clodGroupDiskSpans = data.groupDiskSpans;
+	m_clodCacheSource = data.cacheSource;
 	m_clodNodes = data.nodes;
 	m_clodTopRootNode = 0;
 
@@ -669,6 +671,8 @@ ClusterLODPrebuiltData Mesh::GetClusterLODPrebuiltData() const
 	out.groupMeshletChunks = m_clodGroupMeshletChunks;
 	out.groupMeshletTriangleChunks = m_clodGroupMeshletTriangleChunks;
 	out.groupMeshletBoundsChunks = m_clodGroupMeshletBoundsChunks;
+	out.groupDiskSpans = m_clodGroupDiskSpans;
+	out.cacheSource = m_clodCacheSource;
 	out.nodes = m_clodNodes;
 	return out;
 }

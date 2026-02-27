@@ -1,10 +1,15 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
+#include <condition_variable>
+#include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "ShaderBuffers.h"
+#include "Mesh/Mesh.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Interfaces/IResourceProvider.h"
 
@@ -28,6 +33,7 @@ public:
 	static std::unique_ptr<MeshManager> CreateUnique() {
 		return std::unique_ptr<MeshManager>(new MeshManager());
 	}
+	~MeshManager();
 	void AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedVertices);
 	void AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVertices);
 	void RemoveMesh(Mesh* mesh);
@@ -38,6 +44,7 @@ public:
 	void GetCLodActiveUniqueAssetGroupRanges(std::vector<CLodActiveGroupRange>& outRanges, uint32_t& outMaxGroupIndex) const;
 	void GetCLodCoarsestUniqueAssetGroupRanges(std::vector<CLodActiveGroupRange>& outRanges) const;
 	void GetCLodUniqueAssetParentMap(std::vector<int32_t>& outParentGroupByGlobal, uint32_t& outMaxGroupIndex) const;
+	void ProcessCLodDiskStreamingIO(uint32_t maxCompletedRequests = 64u);
 
 	void UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data);
 	void UpdatePerMeshInstanceBuffer(std::unique_ptr<BufferView>& view, PerMeshInstanceCB& data);
@@ -90,6 +97,40 @@ private:
 
 	std::unordered_map<uint32_t, CLodInstanceStreamingState> m_clodStreamingStatesByInstanceIndex;
 	std::unordered_map<const MeshInstance*, uint32_t> m_clodStreamingInstanceLookup;
+
+	struct CLodDiskStreamingRequest {
+		uint32_t groupGlobalIndex = 0;
+		ClusterLODCacheSource cacheSource{};
+		std::vector<ClusterLODGroupDiskSpans> groupDiskSpans;
+		uint32_t groupLocalIndex = 0;
+	};
+
+	struct CLodDiskStreamingResult {
+		uint32_t groupGlobalIndex = 0;
+		uint32_t groupLocalIndex = 0;
+		bool success = false;
+		std::vector<std::byte> vertexChunk;
+		std::vector<uint32_t> meshletVertexChunk;
+		std::vector<uint32_t> compressedPositionWordChunk;
+		std::vector<uint32_t> compressedNormalWordChunk;
+		std::vector<uint32_t> compressedMeshletVertexWordChunk;
+		std::vector<meshopt_Meshlet> meshletChunk;
+		std::vector<uint8_t> meshletTriangleChunk;
+		std::vector<BoundingSphere> meshletBoundsChunk;
+	};
+
+	std::thread m_clodDiskStreamingThread;
+	std::mutex m_clodDiskStreamingMutex;
+	std::condition_variable m_clodDiskStreamingCv;
+	bool m_clodDiskStreamingStop = false;
+	std::deque<CLodDiskStreamingRequest> m_clodDiskStreamingRequests;
+	std::deque<CLodDiskStreamingResult> m_clodDiskStreamingResults;
+	std::unordered_set<uint32_t> m_clodDiskStreamingQueuedGroups;
+
+	void CLodDiskStreamingWorkerMain();
+	bool QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodInstanceStreamingState& state, uint32_t groupLocalIndex);
+	void ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result);
+ 
 
 	bool ApplyCLodGroupResidency(CLodInstanceStreamingState& state, uint32_t groupLocalIndex, bool resident);
 

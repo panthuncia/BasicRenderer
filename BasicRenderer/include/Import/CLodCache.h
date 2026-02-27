@@ -1,14 +1,16 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "Mesh/Mesh.h"
 
 namespace CLodCache {
 
-inline constexpr uint32_t kSchemaVersion = 6;
+inline constexpr uint32_t kSchemaVersion = 7;
 
 struct CacheKey {
 	std::string sourceIdentifier;
@@ -22,10 +24,23 @@ struct CacheData {
 	ClusterLODPrebuiltData prebuiltData;
 };
 
+struct LoadedGroupPayload {
+	std::vector<std::byte> vertexChunk;
+	std::vector<std::byte> skinningChunk;
+	std::vector<uint32_t> meshletVertexChunk;
+	std::vector<uint32_t> compressedPositionWordChunk;
+	std::vector<uint32_t> compressedNormalWordChunk;
+	std::vector<uint32_t> compressedMeshletVertexWordChunk;
+	std::vector<meshopt_Meshlet> meshletChunk;
+	std::vector<uint8_t> meshletTriangleChunk;
+	std::vector<BoundingSphere> meshletBoundsChunk;
+};
+
 uint64_t ComputeBuildConfigHash();
 std::wstring BuildCacheFileName(const CacheKey& key, uint64_t buildConfigHash);
 
 std::optional<CacheData> TryLoad(const CacheKey& key, uint64_t expectedBuildConfigHash);
 bool Save(const CacheKey& key, const CacheData& data);
+bool LoadGroupPayload(const CacheData& cacheData, uint32_t groupLocalIndex, LoadedGroupPayload& outPayload);
 
 }
