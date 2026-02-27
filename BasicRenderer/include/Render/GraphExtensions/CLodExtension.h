@@ -840,7 +840,17 @@ private:
             const bool pinned = (m_streamingPinnedGroupsBitsCpu[wordAddress] & bitMask) != 0u;
             if (!initialized) {
                 m_streamingResidencyInitializedBitsCpu[wordAddress] |= bitMask;
-                if (!pinned) {
+                if (pinned) {
+                    const uint32_t pinnedApplied = meshManager->SetCLodGroupResidencyForGlobal(groupIndex, true);
+                    if (pinnedApplied == 0u) {
+                        m_streamingNonResidentBitsCpu[wordAddress] |= bitMask;
+                        m_streamingNonResidentBitsUploadPending = true;
+                    }
+                    else {
+                        m_streamingNonResidentBitsCpu[wordAddress] &= ~bitMask;
+                    }
+                }
+                else {
                     meshManager->SetCLodGroupResidencyForGlobal(groupIndex, false);
                     m_streamingNonResidentBitsCpu[wordAddress] |= bitMask;
                     m_streamingNonResidentBitsUploadPending = true;
