@@ -5,9 +5,6 @@ struct MeshInstanceClodOffsets
 {
     uint groupsBase;
     uint childrenBase;
-    uint meshletsBase;
-
-    uint meshletBoundsBase;
     uint lodNodesBase;
     uint rootNode; // node index (relative to lodNodesBase) to start traversal from
     uint groupChunkTableBase;
@@ -20,6 +17,12 @@ struct ClusterLODGroupChunk
     uint meshletVerticesBase;
     uint groupVertexCount;
     uint meshletVertexCount;
+    uint meshletBase;
+    uint meshletCount;
+    uint meshletTrianglesByteOffset;
+    uint meshletTrianglesByteCount;
+    uint meshletBoundsBase;
+    uint meshletBoundsCount;
 };
 
 struct CLodStreamingRequest

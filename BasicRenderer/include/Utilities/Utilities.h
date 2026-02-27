@@ -28,6 +28,7 @@ class Mesh;
 class Sampler;
 class TextureAsset;
 class Buffer;
+struct ClusterLODPrebuiltData;
 
 void ThrowIfFailed(HRESULT hr);
 
@@ -36,7 +37,7 @@ void print(Args... args) {
 	(std::cout << ... << args) << std::endl;
 }
 
-std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name);
+std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name, const ClusterLODPrebuiltData* prebuiltClusterLOD = nullptr);
 
 DirectX::XMMATRIX RemoveScalingFromMatrix(const DirectX::XMMATRIX& initialMatrix);
 

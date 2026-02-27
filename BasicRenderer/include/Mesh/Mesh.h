@@ -56,14 +56,34 @@ struct ClusterLODNodeRangeAlloc
 	uint32_t count = 0;
 };
 
+struct ClusterLODPrebuiltData
+{
+	std::vector<ClusterLODGroup> groups;
+	std::vector<meshopt_Meshlet> meshlets;
+	std::vector<uint32_t> meshletVertices;
+	std::vector<uint8_t> meshletTriangles;
+	std::vector<BoundingSphere> meshletBounds;
+	std::vector<ClusterLODChild> children;
+	std::vector<std::byte> duplicatedVertices;
+	std::vector<std::byte> duplicatedSkinningVertices;
+	std::vector<ClusterLODGroupChunk> groupChunks;
+	std::vector<std::vector<std::byte>> groupVertexChunks;
+	std::vector<std::vector<std::byte>> groupSkinningVertexChunks;
+	std::vector<std::vector<uint32_t>> groupMeshletVertexChunks;
+	std::vector<std::vector<meshopt_Meshlet>> groupMeshletChunks;
+	std::vector<std::vector<uint8_t>> groupMeshletTriangleChunks;
+	std::vector<std::vector<BoundingSphere>> groupMeshletBoundsChunks;
+	std::vector<ClusterLODNode> nodes;
+};
+
 class Mesh {
 public:
 	~Mesh()
 	{
 		auto& deletionManager = DeletionManager::GetInstance();
 	}
-	static std::shared_ptr<Mesh> CreateShared(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
-		return std::shared_ptr<Mesh>(new Mesh(std::move(vertices), vertexSize, std::move(skinningVertices), skinningVertexSize, indices, material, flags));
+	static std::shared_ptr<Mesh> CreateShared(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags, const ClusterLODPrebuiltData* prebuiltClusterLOD = nullptr) {
+		return std::shared_ptr<Mesh>(new Mesh(std::move(vertices), vertexSize, std::move(skinningVertices), skinningVertexSize, indices, material, flags, prebuiltClusterLOD));
     }
 	uint64_t GetNumVertices(bool meshletReorderedVertices) const {
 		//uint64_t size = meshletReorderedVertices ? m_meshletReorderedVertices.size() / m_perMeshBufferData.vertexByteSize : m_vertices->size() / m_perMeshBufferData.vertexByteSize;
@@ -201,6 +221,18 @@ public:
 		return m_clodGroupMeshletVertexChunks;
 	}
 
+	const std::vector<std::vector<meshopt_Meshlet>>& GetCLodGroupMeshletChunks() const {
+		return m_clodGroupMeshletChunks;
+	}
+
+	const std::vector<std::vector<uint8_t>>& GetCLodGroupMeshletTriangleChunks() const {
+		return m_clodGroupMeshletTriangleChunks;
+	}
+
+	const std::vector<std::vector<BoundingSphere>>& GetCLodGroupMeshletBoundsChunks() const {
+		return m_clodGroupMeshletBoundsChunks;
+	}
+
 	void ReleaseCLodChunkUploadData() {
 		m_clodGroupVertexChunks.clear();
 		m_clodGroupVertexChunks.shrink_to_fit();
@@ -208,6 +240,12 @@ public:
 		m_clodGroupSkinningVertexChunks.shrink_to_fit();
 		m_clodGroupMeshletVertexChunks.clear();
 		m_clodGroupMeshletVertexChunks.shrink_to_fit();
+		m_clodGroupMeshletChunks.clear();
+		m_clodGroupMeshletChunks.shrink_to_fit();
+		m_clodGroupMeshletTriangleChunks.clear();
+		m_clodGroupMeshletTriangleChunks.shrink_to_fit();
+		m_clodGroupMeshletBoundsChunks.clear();
+		m_clodGroupMeshletBoundsChunks.shrink_to_fit();
 	}
 
 	const std::vector<ClusterLODNode>& GetCLodNodes() const {
@@ -245,10 +283,16 @@ public:
 	void SetCLodGroupChunkViews(
 		std::vector<std::unique_ptr<BufferView>> preSkinningVertexChunkViews,
 		std::vector<std::unique_ptr<BufferView>> postSkinningVertexChunkViews,
-		std::vector<std::unique_ptr<BufferView>> meshletVertexChunkViews) {
+		std::vector<std::unique_ptr<BufferView>> meshletVertexChunkViews,
+		std::vector<std::unique_ptr<BufferView>> meshletChunkViews,
+		std::vector<std::unique_ptr<BufferView>> meshletTriangleChunkViews,
+		std::vector<std::unique_ptr<BufferView>> meshletBoundsChunkViews) {
 		m_clodPreSkinningVertexChunkViews = std::move(preSkinningVertexChunkViews);
 		m_clodPostSkinningVertexChunkViews = std::move(postSkinningVertexChunkViews);
 		m_clodMeshletVertexChunkViews = std::move(meshletVertexChunkViews);
+		m_clodMeshletChunkViews = std::move(meshletChunkViews);
+		m_clodMeshletTriangleChunkViews = std::move(meshletTriangleChunkViews);
+		m_clodMeshletBoundsChunkViews = std::move(meshletBoundsChunkViews);
 	}
 
 	const std::vector<std::unique_ptr<BufferView>>& GetCLodPreSkinningVertexChunkViews() const {
@@ -263,6 +307,18 @@ public:
 		return m_clodMeshletVertexChunkViews;
 	}
 
+	const std::vector<std::unique_ptr<BufferView>>& GetCLodMeshletChunkViews() const {
+		return m_clodMeshletChunkViews;
+	}
+
+	const std::vector<std::unique_ptr<BufferView>>& GetCLodMeshletTriangleChunkViews() const {
+		return m_clodMeshletTriangleChunkViews;
+	}
+
+	const std::vector<std::unique_ptr<BufferView>>& GetCLodMeshletBoundsChunkViews() const {
+		return m_clodMeshletBoundsChunkViews;
+	}
+
 	uint32_t GetCLodRootNodeIndex() const { // For hierarchy cut
 		return m_clodTopRootNode;
 	}
@@ -271,8 +327,10 @@ public:
 		return m_clodLodLevelRoots.back();
 	}
 
+	ClusterLODPrebuiltData GetClusterLODPrebuiltData() const;
+
 private:
-    Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags);
+	Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags, const ClusterLODPrebuiltData* prebuiltClusterLOD);
     void CreateVertexBuffer();
     void CreateMeshlets(const std::vector<UINT32>& indices);
 	//void CreateMeshletReorderedVertices();
@@ -282,6 +340,7 @@ private:
 	void BuildClusterLOD(const std::vector<UINT32>& indices);
 	void BuildClusterLODTraversalHierarchy(uint32_t preferredNodeWidth);
 	void LogClusterLODHierarchyStats() const;
+	void ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data);
     static int GetNextGlobalIndex();
 
     static std::atomic<uint32_t> globalMeshCount;
@@ -312,15 +371,22 @@ private:
 	std::vector<std::vector<std::byte>> m_clodGroupVertexChunks;
 	std::vector<std::vector<std::byte>> m_clodGroupSkinningVertexChunks;
 	std::vector<std::vector<uint32_t>> m_clodGroupMeshletVertexChunks;
+	std::vector<std::vector<meshopt_Meshlet>> m_clodGroupMeshletChunks;
+	std::vector<std::vector<uint8_t>> m_clodGroupMeshletTriangleChunks;
+	std::vector<std::vector<BoundingSphere>> m_clodGroupMeshletBoundsChunks;
 	std::vector<std::unique_ptr<BufferView>> m_clodPreSkinningVertexChunkViews;
 	std::vector<std::unique_ptr<BufferView>> m_clodPostSkinningVertexChunkViews;
 	std::vector<std::unique_ptr<BufferView>> m_clodMeshletVertexChunkViews;
+	std::vector<std::unique_ptr<BufferView>> m_clodMeshletChunkViews;
+	std::vector<std::unique_ptr<BufferView>> m_clodMeshletTriangleChunkViews;
+	std::vector<std::unique_ptr<BufferView>> m_clodMeshletBoundsChunkViews;
 
 	std::vector<ClusterLODNode>      m_clodNodes;
 	std::vector<ClusterLODNodeRangeAlloc> m_clodLodNodeRanges;  // per depth
 	std::vector<uint32_t>            m_clodLodLevelRoots;        // node index per depth (== 1+depth)
 	uint32_t                         m_clodTopRootNode = 0;      // always 0
 	uint32_t                         m_clodMaxDepth = 0;
+	std::optional<ClusterLODPrebuiltData> m_prebuiltClusterLOD;
 
 	std::unique_ptr<BufferView> m_clusterLODGroupsView = nullptr;
 	std::unique_ptr<BufferView> m_clusterLODChildrenView = nullptr;

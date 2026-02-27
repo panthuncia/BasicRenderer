@@ -43,10 +43,13 @@ namespace
 }
 
 
-Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags) {
+Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags, const ClusterLODPrebuiltData* prebuiltClusterLOD) {
     m_vertices = std::move(vertices);
 	if (skinningVertices.has_value()) {
 		m_skinningVertices = std::move(skinningVertices.value());
+	}
+	if (prebuiltClusterLOD != nullptr) {
+		m_prebuiltClusterLOD = *prebuiltClusterLOD;
 	}
 	m_perMeshBufferData.vertexFlags = flags;
 	m_perMeshBufferData.vertexByteSize = vertexSize;
@@ -67,6 +70,65 @@ Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertex
     this->material = material;
 
 	m_globalMeshID = GetNextGlobalIndex();
+}
+
+void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
+{
+	m_clodGroups = data.groups;
+	m_clodMeshlets = data.meshlets;
+	m_clodMeshletVertices = data.meshletVertices;
+	m_clodMeshletTriangles = data.meshletTriangles;
+	m_clodMeshletBounds = data.meshletBounds;
+	m_clodMeshletRefinedGroup.clear();
+	m_clodChildren = data.children;
+	m_clodDuplicatedVertices = data.duplicatedVertices;
+	m_clodDuplicatedSkinningVertices = data.duplicatedSkinningVertices;
+	m_clodGroupChunks = data.groupChunks;
+	m_clodGroupVertexChunks = data.groupVertexChunks;
+	m_clodGroupSkinningVertexChunks = data.groupSkinningVertexChunks;
+	m_clodGroupMeshletVertexChunks = data.groupMeshletVertexChunks;
+	m_clodGroupMeshletChunks = data.groupMeshletChunks;
+	m_clodGroupMeshletTriangleChunks = data.groupMeshletTriangleChunks;
+	m_clodGroupMeshletBoundsChunks = data.groupMeshletBoundsChunks;
+	m_clodNodes = data.nodes;
+	m_clodTopRootNode = 0;
+
+	m_clodMaxDepth = 0;
+	for (const auto& group : m_clodGroups) {
+		m_clodMaxDepth = std::max<uint32_t>(m_clodMaxDepth, static_cast<uint32_t>(std::max(group.depth, 0)));
+	}
+	m_clodLodLevelRoots.resize(m_clodMaxDepth + 1);
+	for (uint32_t depth = 0; depth <= m_clodMaxDepth; ++depth) {
+		m_clodLodLevelRoots[depth] = 1u + depth;
+	}
+	m_clodLodNodeRanges.clear();
+
+	if (!m_clodDuplicatedVertices.empty())
+	{
+		m_perMeshBufferData.numVertices = static_cast<uint32_t>(m_clodDuplicatedVertices.size() / m_perMeshBufferData.vertexByteSize);
+	}
+}
+
+ClusterLODPrebuiltData Mesh::GetClusterLODPrebuiltData() const
+{
+	ClusterLODPrebuiltData out{};
+	out.groups = m_clodGroups;
+	out.meshlets = m_clodMeshlets;
+	out.meshletVertices = m_clodMeshletVertices;
+	out.meshletTriangles = m_clodMeshletTriangles;
+	out.meshletBounds = m_clodMeshletBounds;
+	out.children = m_clodChildren;
+	out.duplicatedVertices = m_clodDuplicatedVertices;
+	out.duplicatedSkinningVertices = m_clodDuplicatedSkinningVertices;
+	out.groupChunks = m_clodGroupChunks;
+	out.groupVertexChunks = m_clodGroupVertexChunks;
+	out.groupSkinningVertexChunks = m_clodGroupSkinningVertexChunks;
+	out.groupMeshletVertexChunks = m_clodGroupMeshletVertexChunks;
+	out.groupMeshletChunks = m_clodGroupMeshletChunks;
+	out.groupMeshletTriangleChunks = m_clodGroupMeshletTriangleChunks;
+	out.groupMeshletBoundsChunks = m_clodGroupMeshletBoundsChunks;
+	out.nodes = m_clodNodes;
+	return out;
 }
 
 void Mesh::CreateVertexBuffer() {
@@ -526,6 +588,9 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 	m_clodGroupVertexChunks.clear();
 	m_clodGroupSkinningVertexChunks.clear();
 	m_clodGroupMeshletVertexChunks.clear();
+	m_clodGroupMeshletChunks.clear();
+	m_clodGroupMeshletTriangleChunks.clear();
+	m_clodGroupMeshletBoundsChunks.clear();
 
 	// traversal hierarchy storage
 	m_clodNodes.clear();
@@ -594,6 +659,9 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 		m_clodGroupVertexChunks.clear();
 		m_clodGroupSkinningVertexChunks.clear();
 		m_clodGroupMeshletVertexChunks.clear();
+		m_clodGroupMeshletChunks.clear();
+		m_clodGroupMeshletTriangleChunks.clear();
+		m_clodGroupMeshletBoundsChunks.clear();
 		m_clodNodes.clear();
 		m_clodLodNodeRanges.clear();
 		m_clodLodLevelRoots.clear();
@@ -631,6 +699,9 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 			std::vector<uint32_t> groupLocalToGlobal;
 			groupLocalToGlobal.reserve(cluster_count * MS_MESHLET_SIZE);
 			const uint32_t groupMeshletVerticesStart = uint32_t(m_clodMeshletVertices.size());
+			const uint32_t groupMeshletsStart = uint32_t(m_clodMeshlets.size());
+			const uint32_t groupMeshletTrianglesStart = uint32_t(m_clodMeshletTriangles.size());
+			const uint32_t groupMeshletBoundsStart = uint32_t(m_clodMeshletBounds.size());
 			uint32_t groupMeshletVertexCursor = 0;
 
 			auto getGroupLocalVertexIndex = [&](uint32_t globalVertexIndex) -> uint32_t
@@ -815,6 +886,9 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 			m_clodGroupSkinningVertexChunks.push_back(std::move(groupSkinningChunk));
 
 			const uint32_t groupMeshletVertexCount = uint32_t(m_clodMeshletVertices.size()) - groupMeshletVerticesStart;
+			const uint32_t groupMeshletCount = uint32_t(m_clodMeshlets.size()) - groupMeshletsStart;
+			const uint32_t groupMeshletTriangleByteCount = uint32_t(m_clodMeshletTriangles.size()) - groupMeshletTrianglesStart;
+			const uint32_t groupMeshletBoundsCount = uint32_t(m_clodMeshletBounds.size()) - groupMeshletBoundsStart;
 			std::vector<uint32_t> groupMeshletVertexChunk;
 			groupMeshletVertexChunk.reserve(groupMeshletVertexCount);
 			groupMeshletVertexChunk.insert(
@@ -822,6 +896,32 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 				m_clodMeshletVertices.begin() + groupMeshletVerticesStart,
 				m_clodMeshletVertices.begin() + groupMeshletVerticesStart + groupMeshletVertexCount);
 			m_clodGroupMeshletVertexChunks.push_back(std::move(groupMeshletVertexChunk));
+
+			std::vector<meshopt_Meshlet> groupMeshletChunk;
+			groupMeshletChunk.reserve(groupMeshletCount);
+			for (uint32_t meshletIndex = 0; meshletIndex < groupMeshletCount; ++meshletIndex)
+			{
+				meshopt_Meshlet meshlet = m_clodMeshlets[groupMeshletsStart + meshletIndex];
+				meshlet.triangle_offset -= groupMeshletTrianglesStart;
+				groupMeshletChunk.push_back(meshlet);
+			}
+			m_clodGroupMeshletChunks.push_back(std::move(groupMeshletChunk));
+
+			std::vector<uint8_t> groupMeshletTriangleChunk;
+			groupMeshletTriangleChunk.reserve(groupMeshletTriangleByteCount);
+			groupMeshletTriangleChunk.insert(
+				groupMeshletTriangleChunk.end(),
+				m_clodMeshletTriangles.begin() + groupMeshletTrianglesStart,
+				m_clodMeshletTriangles.begin() + groupMeshletTrianglesStart + groupMeshletTriangleByteCount);
+			m_clodGroupMeshletTriangleChunks.push_back(std::move(groupMeshletTriangleChunk));
+
+			std::vector<BoundingSphere> groupMeshletBoundsChunk;
+			groupMeshletBoundsChunk.reserve(groupMeshletBoundsCount);
+			groupMeshletBoundsChunk.insert(
+				groupMeshletBoundsChunk.end(),
+				m_clodMeshletBounds.begin() + groupMeshletBoundsStart,
+				m_clodMeshletBounds.begin() + groupMeshletBoundsStart + groupMeshletBoundsCount);
+			m_clodGroupMeshletBoundsChunks.push_back(std::move(groupMeshletBoundsChunk));
 
 			if (m_clodGroupChunks.size() <= size_t(groupId))
 			{
@@ -832,6 +932,12 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 			groupChunk.meshletVerticesBase = 0;
 			groupChunk.groupVertexCount = grp.groupVertexCount;
 			groupChunk.meshletVertexCount = groupMeshletVertexCount;
+			groupChunk.meshletBase = 0;
+			groupChunk.meshletCount = groupMeshletCount;
+			groupChunk.meshletTrianglesByteOffset = 0;
+			groupChunk.meshletTrianglesByteCount = groupMeshletTriangleByteCount;
+			groupChunk.meshletBoundsBase = 0;
+			groupChunk.meshletBoundsCount = groupMeshletBoundsCount;
 
 			// firstChild points to start of this group's child records that were just appended.
 			grp.firstChild = uint32_t(m_clodChildren.size()) - grp.childCount;
@@ -1065,8 +1171,13 @@ void Mesh::ComputeBoundingSphere(const std::vector<UINT32>& indices) {
 //}
 
 void Mesh::CreateBuffers(const std::vector<UINT32>& indices) {
-
-	BuildClusterLOD(indices);
+	if (m_prebuiltClusterLOD.has_value()) {
+		ApplyPrebuiltClusterLODData(m_prebuiltClusterLOD.value());
+		m_prebuiltClusterLOD.reset();
+	}
+	else {
+		BuildClusterLOD(indices);
+	}
 	CreateMeshlets(indices);
 	//CreateMeshletReorderedVertices();
     CreateVertexBuffer();

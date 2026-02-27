@@ -357,13 +357,10 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
     setup.groupVertexChunkByteOffset = groupChunk.vertexChunkByteOffset;
     setup.groupMeshletVerticesBase = groupChunk.meshletVerticesBase;
     setup.groupMeshletVertexCount = groupChunk.meshletVertexCount;
+    setup.groupMeshletTrianglesByteOffset = groupChunk.meshletTrianglesByteOffset;
 
-    uint meshletOffset = setup.meshBuffer.clodMeshletBufferOffset;
-
-    // ClusterLOD culling writes an absolute meshlet index (already includes meshletOffset).
-    // Validate against this mesh's meshlet span before dereferencing.
-    uint meshletStart = meshletOffset;
-    uint meshletEnd = meshletOffset + setup.meshBuffer.clodNumMeshlets;
+    uint meshletStart = groupChunk.meshletBase;
+    uint meshletEnd = groupChunk.meshletBase + groupChunk.meshletCount;
     if (setup.meshletIndex < meshletStart || setup.meshletIndex >= meshletEnd)
     {
         return false;
@@ -376,6 +373,10 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
     setup.vertOffset = setup.meshlet.VertOffset;
 
     if (setup.vertOffset + setup.vertCount > setup.groupMeshletVertexCount)
+    {
+        return false;
+    }
+    if (setup.meshlet.TriOffset + setup.meshlet.TriCount * 3u > groupChunk.meshletTrianglesByteCount)
     {
         return false;
     }

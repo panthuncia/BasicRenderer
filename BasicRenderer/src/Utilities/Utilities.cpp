@@ -61,7 +61,7 @@ void ThrowIfFailed(HRESULT hr) {
     }
 }
 
-std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name) {
+std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name, const ClusterLODPrebuiltData* prebuiltClusterLOD) {
     bool hasTexcoords = !meshData.texcoords.empty();
     bool hasJoints = !meshData.joints.empty() && !meshData.weights.empty();
 
@@ -104,7 +104,7 @@ std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name) 
 		skinningVertices = std::move(skinningData);
 	}
 
-    return Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningVertices), skinningVertexSize, meshData.indices, meshData.material, meshData.flags);
+    return Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningVertices), skinningVertexSize, meshData.indices, meshData.material, meshData.flags, prebuiltClusterLOD);
 }
 
 XMMATRIX RemoveScalingFromMatrix(const XMMATRIX& initialMatrix) {

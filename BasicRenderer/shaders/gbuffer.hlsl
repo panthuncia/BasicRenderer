@@ -191,11 +191,22 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
         ClusterLODGroupChunk groupChunk = groupChunks[off.groupChunkTableBase + clusterData.groupID];
 
 //#if defined(VISBUF_USE_CLOD_MESHLETS)
-        d.meshInfo = uint4(mesh.vertexByteSize, mesh.vertexFlags, mesh.numVertices, mesh.clodMeshletTrianglesBufferOffset);
+        d.meshInfo = uint4(mesh.vertexByteSize, mesh.vertexFlags, mesh.numVertices, groupChunk.meshletTrianglesByteOffset);
         d.meshletVerticesChunkBase = groupChunk.meshletVerticesBase;
         d.meshletVerticesChunkCount = groupChunk.meshletVertexCount;
         d.groupVertexChunkByteOffset = groupChunk.vertexChunkByteOffset;
-        Meshlet m = meshletBuffer[d.drawcallAndMeshlet.y];
+        Meshlet m = (Meshlet)0;
+        const uint meshletStart = groupChunk.meshletBase;
+        const uint meshletEnd = groupChunk.meshletBase + groupChunk.meshletCount;
+        if (d.drawcallAndMeshlet.y >= meshletStart && d.drawcallAndMeshlet.y < meshletEnd)
+        {
+            m = meshletBuffer[d.drawcallAndMeshlet.y];
+            if (m.VertOffset + m.VertCount > groupChunk.meshletVertexCount
+                || m.TriOffset + m.TriCount * 3u > groupChunk.meshletTrianglesByteCount)
+            {
+                m = (Meshlet)0;
+            }
+        }
 // #else
 //         d.meshInfo = uint4(mesh.vertexByteSize, mesh.vertexFlags, mesh.numVertices, mesh.meshletTrianglesBufferOffset);
 //         d.meshletVerticesBufferOffset = mesh.meshletVerticesBufferOffset;

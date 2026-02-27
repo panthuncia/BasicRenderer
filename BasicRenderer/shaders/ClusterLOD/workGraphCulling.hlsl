@@ -850,6 +850,8 @@ void WG_GroupEvaluate(
 
         StructuredBuffer<ClusterLODGroup> groups =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+        StructuredBuffer<ClusterLODGroupChunk> groupChunks =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::GroupChunks)];
         StructuredBuffer<ClusterLODChild> children =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Children)];
 
@@ -1030,10 +1032,10 @@ void WG_ClusterCullBuckets(
         StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
         const MeshInstanceClodOffsets off = clodOffsets[b.instanceIndex];
-
         StructuredBuffer<ClusterLODGroup> groups =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
-
+        StructuredBuffer<ClusterLODGroupChunk> groupChunks =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::GroupChunks)];
         StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
         const PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[b.instanceIndex];
@@ -1049,12 +1051,20 @@ void WG_ClusterCullBuckets(
         StructuredBuffer<BoundingSphere> meshletBoundsBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshletBounds)];
 
+        if (b.groupId >= off.groupChunkTableCount) {
+            survives = false;
+        }
+        else {
         const ClusterLODGroup grp = groups[off.groupsBase + b.groupId];
+		const ClusterLODGroupChunk groupChunk = groupChunks[off.groupChunkTableBase + b.groupId];
         const uint localMeshlet = b.childFirstLocalMeshletIndex + i;
-        const uint localMeshletId = grp.firstMeshlet + localMeshlet;
-        globalMeshletIndex = off.meshletsBase + localMeshletId;
+        if (localMeshlet >= groupChunk.meshletCount || localMeshlet >= groupChunk.meshletBoundsCount) {
+            survives = false;
+        }
+        else {
+        globalMeshletIndex = groupChunk.meshletBase + localMeshlet;
 
-        const BoundingSphere meshletBounds = meshletBoundsBuffer[off.meshletBoundsBase + localMeshletId];
+        const BoundingSphere meshletBounds = meshletBoundsBuffer[groupChunk.meshletBoundsBase + localMeshlet];
         const float3 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, camera.view);
         const float meshletRadiusWorld = meshletBounds.sphere.w * MaxAxisScale_RowVector(objectModelMatrix);
 
@@ -1084,6 +1094,8 @@ void WG_ClusterCullBuckets(
                     survives = false;
                 }
             }
+        }
+		}
         }
     }
 

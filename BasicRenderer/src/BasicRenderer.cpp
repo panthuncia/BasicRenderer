@@ -338,9 +338,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto sphereScene = LoadModel("models/sphere.glb");
 
 
-	//auto mountainScene = LoadModel("models/terrain.glb");
-	//mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
-	//mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
+	auto mountainScene = LoadModel("models/terrain.glb");
+	mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
+	mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
 
     //auto tigerScene = LoadModel("models/tiger.glb");
     //tigerScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
@@ -349,7 +349,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //auto usdScene = LoadModel("models/sponza.usdz");
     
-    auto bistro = LoadModel("models/bistroExterior.usdz");
+    //auto bistro = LoadModel("models/bistroExterior.usdz");
     //auto wine = LoadModel("models/bistroInterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
@@ -368,12 +368,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //mountainScene = LoadModel("models/terrain.glb");
     //mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
     //mountainScene->GetRoot().set<Components::Position>({ 0.0, -10.0, 0.0 });
-	//renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
+	renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 	//renderer.GetCurrentScene()->AppendScene(shiba->Clone());
 
-    renderer.GetCurrentScene()->AppendScene(bistro->Clone());
+    //renderer.GetCurrentScene()->AppendScene(bistro->Clone());
     //renderer.GetCurrentScene()->AppendScene(wine->Clone());
     
 	//renderer.GetCurrentScene()->AppendScene(robot->Clone());

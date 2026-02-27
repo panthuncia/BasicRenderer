@@ -50,6 +50,7 @@
 #include "Animation/AnimationController.h"
 
 #include "Import/USDLoader.h"
+#include "Import/CLodCacheLoader.h"
 
 namespace USDLoader {
 
@@ -846,8 +847,14 @@ namespace USDLoader {
 			auto matAPI = UsdShadeMaterialBindingAPI(mesh);
 			auto mat = matAPI.ComputeBoundMaterial();
 			ProcessMaterial(mat, stage, isUSDZ, directory);
+
+			auto cacheIdentity = CLodCacheLoader::BuildIdentity(mesh, stage, "");
+			auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
+			const ClusterLODPrebuiltData* prebuiltDataPtr = prebuiltData ? &(*prebuiltData) : nullptr;
+
 			MeshData geomData;
 			LoadGeom(geomData, mesh, std::nullopt, metersPerUnit, uvSetFor(mat), skinQ, skelJointOrderRaw, skelJointOrderMapped);
+
 			auto mtlPtr = loadingCache.materialCache.find(
 				mat.GetPrim().GetPath().GetString());
 			geomData.material = mtlPtr != loadingCache.materialCache.end()
@@ -855,7 +862,13 @@ namespace USDLoader {
 				: nullptr;
 			auto mPtr = MeshFromData(
 				geomData,
-				s2ws(mesh.GetPrim().GetName().GetString()));
+				s2ws(mesh.GetPrim().GetName().GetString()),
+				prebuiltDataPtr);
+
+			if (!prebuiltData.has_value()) {
+				CLodCacheLoader::SavePrebuilt(cacheIdentity, mPtr->GetClusterLODPrebuiltData());
+			}
+
 			outMeshes.push_back(mPtr);
 		}
 		else {
@@ -864,6 +877,11 @@ namespace USDLoader {
 				// subset familyName=="materialBind", so:
 				auto mat = UsdShadeMaterialBindingAPI(subset).ComputeBoundMaterial();
 				ProcessMaterial(mat, stage, isUSDZ, directory);
+
+				auto cacheIdentity = CLodCacheLoader::BuildIdentity(mesh, stage, subset.GetPrim().GetName().GetString());
+				auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
+				const ClusterLODPrebuiltData* prebuiltDataPtr = prebuiltData ? &(*prebuiltData) : nullptr;
+
 				MeshData geomData;
 				LoadGeom(
 					geomData,
@@ -880,10 +898,17 @@ namespace USDLoader {
 				geomData.material = mtlPtr != loadingCache.materialCache.end()
 					? mtlPtr->second
 					: nullptr;
+
 				auto mPtr = MeshFromData(
 					geomData,
 					s2ws(mesh.GetPrim().GetName().GetString()) +
-					L"_" + s2ws(subset.GetPrim().GetName().GetString()));
+					L"_" + s2ws(subset.GetPrim().GetName().GetString()),
+					prebuiltDataPtr);
+
+				if (!prebuiltData.has_value()) {
+					CLodCacheLoader::SavePrebuilt(cacheIdentity, mPtr->GetClusterLODPrebuiltData());
+				}
+
 				outMeshes.push_back(mPtr);
 			}
 		}
