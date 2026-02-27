@@ -609,11 +609,6 @@ Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertex
 void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 {
 	m_clodGroups = data.groups;
-	m_clodMeshlets = data.meshlets;
-	m_clodMeshletVertices = data.meshletVertices;
-	m_clodMeshletTriangles = data.meshletTriangles;
-	m_clodMeshletBounds = data.meshletBounds;
-	m_clodMeshletRefinedGroup.clear();
 	m_clodChildren = data.children;
 	m_clodDuplicatedVertices = data.duplicatedVertices;
 	m_clodDuplicatedSkinningVertices = data.duplicatedSkinningVertices;
@@ -652,10 +647,6 @@ ClusterLODPrebuiltData Mesh::GetClusterLODPrebuiltData() const
 {
 	ClusterLODPrebuiltData out{};
 	out.groups = m_clodGroups;
-	out.meshlets = m_clodMeshlets;
-	out.meshletVertices = m_clodMeshletVertices;
-	out.meshletTriangles = m_clodMeshletTriangles;
-	out.meshletBounds = m_clodMeshletBounds;
 	out.children = m_clodChildren;
 	out.duplicatedVertices = m_clodDuplicatedVertices;
 	out.duplicatedSkinningVertices = m_clodDuplicatedSkinningVertices;
@@ -1120,11 +1111,6 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 {
 	// Clear any previous data
 	m_clodGroups.clear();
-	m_clodMeshlets.clear();
-	m_clodMeshletVertices.clear();
-	m_clodMeshletTriangles.clear();
-	m_clodMeshletBounds.clear();
-	m_clodMeshletRefinedGroup.clear();
 	m_clodChildren.clear();
 	m_clodDuplicatedVertices.clear();
 	m_clodDuplicatedSkinningVertices.clear();
@@ -1192,11 +1178,6 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 	for (;;)
 	{
 		m_clodGroups.clear();
-		m_clodMeshlets.clear();
-		m_clodMeshletVertices.clear();
-		m_clodMeshletTriangles.clear();
-		m_clodMeshletBounds.clear();
-		m_clodMeshletRefinedGroup.clear();
 		m_clodChildren.clear();
 		m_clodDuplicatedVertices.clear();
 		m_clodDuplicatedSkinningVertices.clear();
@@ -1301,25 +1282,16 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 		m_clodGroupMeshletBoundsChunks.reserve(groupOutputs.size());
 
 		maxChildrenObserved = 0;
+		uint32_t cumulativeMeshletCount = 0;
 		for (size_t groupIndex = 0; groupIndex < groupOutputs.size(); ++groupIndex)
 		{
 			ClusterLODGroupBuildOutput& output = groupOutputs[groupIndex];
 			ClusterLODGroup group = output.group;
 
-			group.firstMeshlet = static_cast<uint32_t>(m_clodMeshlets.size());
+			group.firstMeshlet = cumulativeMeshletCount;
 			group.firstGroupVertex = static_cast<uint32_t>(m_clodDuplicatedVertices.size() / vertexStrideBytes);
 			group.firstChild = static_cast<uint32_t>(m_clodChildren.size());
-
-			const uint32_t groupTriangleStart = static_cast<uint32_t>(m_clodMeshletTriangles.size());
-
-			for (meshopt_Meshlet meshlet : output.meshlets)
-			{
-				meshlet.triangle_offset += groupTriangleStart;
-				m_clodMeshlets.push_back(meshlet);
-			}
-			m_clodMeshletVertices.insert(m_clodMeshletVertices.end(), output.meshletVertices.begin(), output.meshletVertices.end());
-			m_clodMeshletTriangles.insert(m_clodMeshletTriangles.end(), output.meshletTriangles.begin(), output.meshletTriangles.end());
-			m_clodMeshletBounds.insert(m_clodMeshletBounds.end(), output.meshletBounds.begin(), output.meshletBounds.end());
+			cumulativeMeshletCount += group.meshletCount;
 			m_clodChildren.insert(m_clodChildren.end(), output.children.begin(), output.children.end());
 			m_clodDuplicatedVertices.insert(m_clodDuplicatedVertices.end(), output.vertexChunk.begin(), output.vertexChunk.end());
 			m_clodDuplicatedSkinningVertices.insert(m_clodDuplicatedSkinningVertices.end(), output.skinningVertexChunk.begin(), output.skinningVertexChunk.end());
@@ -1453,10 +1425,6 @@ void Mesh::CreateMeshlets(const std::vector<UINT32>& indices) {
 	m_meshlets.resize(maxMeshlets);
 	m_meshletVertices.resize(maxMeshlets * maxVertices);
 	m_meshletTriangles.resize(maxMeshlets * maxPrimitives * 3);
-
-    m_meshlets = std::vector<meshopt_Meshlet>(maxMeshlets);
-	m_meshletVertices = std::vector<unsigned int>(maxMeshlets*maxVertices);
-	m_meshletTriangles = std::vector<unsigned char>(maxMeshlets * maxPrimitives * 3);
     
 	auto meshletCount = meshopt_buildMeshletsSpatial(
 		m_meshlets.data(), 
@@ -1655,18 +1623,10 @@ BufferView* Mesh::GetPostSkinningVertexBufferView() {
 void Mesh::SetCLodBufferViews(
 	std::unique_ptr<BufferView> clusterLODGroupsView,
 	std::unique_ptr<BufferView> clusterLODChildrenView,
-	std::unique_ptr<BufferView> clusterLODMeshletsView,
-	std::unique_ptr<BufferView> clusterLODMeshletVerticesView,
-	std::unique_ptr<BufferView> clusterLODMeshletTrianglesView,
-	std::unique_ptr<BufferView> clusterLODMeshletBoundsView,
 	std::unique_ptr<BufferView> clusterLODNodesView
 ) {
 	m_clusterLODGroupsView = std::move(clusterLODGroupsView);
 	m_clusterLODChildrenView = std::move(clusterLODChildrenView);
-	m_clusterLODMeshletsView = std::move(clusterLODMeshletsView);
-	m_clusterLODMeshletVerticesView = std::move(clusterLODMeshletVerticesView);
-	m_clusterLODMeshletTrianglesView = std::move(clusterLODMeshletTrianglesView);
-	m_clusterLODMeshletBoundsView = std::move(clusterLODMeshletBoundsView);
 	m_clusterLODNodesView = std::move(clusterLODNodesView);
 
 	auto firstChunkOffsetDiv = [](const auto& chunkViews, uint32_t divisor) -> uint32_t {
@@ -1686,16 +1646,14 @@ void Mesh::SetCLodBufferViews(
 		return 0u;
 	};
 
-	m_perMeshBufferData.clodMeshletBufferOffset = (m_clusterLODMeshletsView != nullptr)
-		? static_cast<uint32_t>(m_clusterLODMeshletsView->GetOffset() / sizeof(meshopt_Meshlet))
-		: firstChunkOffsetDiv(m_clodMeshletChunkViews, sizeof(meshopt_Meshlet));
-	m_perMeshBufferData.clodMeshletVerticesBufferOffset = (m_clusterLODMeshletVerticesView != nullptr)
-		? static_cast<uint32_t>(m_clusterLODMeshletVerticesView->GetOffset() / sizeof(uint32_t))
-		: firstChunkOffsetDiv(m_clodMeshletVertexChunkViews, sizeof(uint32_t));
-	m_perMeshBufferData.clodMeshletTrianglesBufferOffset = (m_clusterLODMeshletTrianglesView != nullptr)
-		? static_cast<uint32_t>(m_clusterLODMeshletTrianglesView->GetOffset())
-		: firstChunkOffsetBytes(m_clodMeshletTriangleChunkViews); // Intentionally in bytes to index byteaddressbuffer
-	m_perMeshBufferData.clodNumMeshlets = static_cast<uint32_t>(m_clodMeshlets.size());
+	m_perMeshBufferData.clodMeshletBufferOffset = firstChunkOffsetDiv(m_clodMeshletChunkViews, sizeof(meshopt_Meshlet));
+	m_perMeshBufferData.clodMeshletVerticesBufferOffset = firstChunkOffsetDiv(m_clodMeshletVertexChunkViews, sizeof(uint32_t));
+	m_perMeshBufferData.clodMeshletTrianglesBufferOffset = firstChunkOffsetBytes(m_clodMeshletTriangleChunkViews); // Intentionally in bytes to index byteaddressbuffer
+	uint32_t totalMeshletCount = 0;
+	for (const auto& group : m_clodGroups) {
+		totalMeshletCount += group.meshletCount;
+	}
+	m_perMeshBufferData.clodNumMeshlets = totalMeshletCount;
 	if (m_pCurrentMeshManager != nullptr && m_perMeshBufferView != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
 	}

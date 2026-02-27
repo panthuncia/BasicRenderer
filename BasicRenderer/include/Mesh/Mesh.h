@@ -88,10 +88,6 @@ struct ClusterLODCacheSource
 struct ClusterLODPrebuiltData
 {
 	std::vector<ClusterLODGroup> groups;
-	std::vector<meshopt_Meshlet> meshlets;
-	std::vector<uint32_t> meshletVertices;
-	std::vector<uint8_t> meshletTriangles;
-	std::vector<BoundingSphere> meshletBounds;
 	std::vector<ClusterLODChild> children;
 	std::vector<std::byte> duplicatedVertices;
 	std::vector<std::byte> duplicatedSkinningVertices;
@@ -178,7 +174,7 @@ public:
 	}
 
 	uint32_t GetCLodMeshletCount() {
-		return static_cast<uint32_t>(m_clodMeshlets.size());
+		return m_perMeshBufferData.clodNumMeshlets;
 	}
 
 	void SetPerMeshBufferView(std::unique_ptr<BufferView> view) {
@@ -208,10 +204,6 @@ public:
 	void SetCLodBufferViews(
 		std::unique_ptr<BufferView> clusterLODGroupsView,
 		std::unique_ptr<BufferView> clusterLODChildrenView,
-		std::unique_ptr<BufferView> clusterLODMeshletsView,
-		std::unique_ptr<BufferView> clusterLODMeshletVerticesView,
-		std::unique_ptr<BufferView> clusterLODMeshletTrianglesView,
-		std::unique_ptr<BufferView> clusterLODMeshletBoundsView,
 		std::unique_ptr<BufferView> clodNodesView
 	);
 
@@ -221,22 +213,6 @@ public:
 
 	const std::vector<ClusterLODChild>& GetCLodChildren() const {
 		return m_clodChildren;
-	}
-
-	const std::vector<meshopt_Meshlet>& GetCLodMeshlets() const {
-		return m_clodMeshlets;
-	}
-
-	const std::vector<uint32_t>& GetCLodMeshletVertices() const {
-		return m_clodMeshletVertices;
-	}
-
-	const std::vector<uint8_t>& GetCLodMeshletTriangles() const {
-		return m_clodMeshletTriangles;
-	}
-
-	const std::vector<BoundingSphere>& GetCLodBounds() const {
-		return m_clodMeshletBounds;
 	}
 
 	const std::vector<ClusterLODGroupChunk>& GetCLodGroupChunks() const {
@@ -322,22 +298,6 @@ public:
 
 	const BufferView* GetCLodChildrenView() const {
 		return m_clusterLODChildrenView.get();
-	}
-
-	const BufferView* GetCLodMeshletsView() const {
-		return m_clusterLODMeshletsView.get();
-	}
-
-	const BufferView* GetCLodMeshletVerticesView() const {
-		return m_clusterLODMeshletVerticesView.get();
-	}
-
-	const BufferView* GetCLodMeshletTrianglesView() const {
-		return m_clusterLODMeshletTrianglesView.get();
-	}
-
-	const BufferView* GetCLodMeshletBoundsView() const {
-		return m_clusterLODMeshletBoundsView.get();
 	}
 
 	const BufferView* GetCLodNodesView() const {
@@ -472,11 +432,6 @@ private:
 
 	// TODO: packing
 	std::vector<ClusterLODGroup> m_clodGroups;
-	std::vector<meshopt_Meshlet> m_clodMeshlets;
-	std::vector<uint32_t>        m_clodMeshletVertices;
-	std::vector<uint8_t>         m_clodMeshletTriangles;
-	std::vector<BoundingSphere>  m_clodMeshletBounds;
-	std::vector<int32_t>         m_clodMeshletRefinedGroup;
 	//uint32_t                     m_clodRootGroup = 0;
 	std::vector<ClusterLODChild> m_clodChildren;
 	std::vector<std::byte>       m_clodDuplicatedVertices;
@@ -512,10 +467,6 @@ private:
 
 	std::unique_ptr<BufferView> m_clusterLODGroupsView = nullptr;
 	std::unique_ptr<BufferView> m_clusterLODChildrenView = nullptr;
-	std::unique_ptr<BufferView> m_clusterLODMeshletsView = nullptr;
-	std::unique_ptr<BufferView> m_clusterLODMeshletVerticesView = nullptr;
-	std::unique_ptr<BufferView> m_clusterLODMeshletTrianglesView = nullptr;
-	std::unique_ptr<BufferView> m_clusterLODMeshletBoundsView = nullptr;
 	std::unique_ptr<BufferView> m_clusterLODNodesView = nullptr;
 
 	UINT m_indexCount = 0;

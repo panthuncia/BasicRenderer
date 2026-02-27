@@ -10,7 +10,7 @@
 
 namespace CLodCache {
 
-inline constexpr uint32_t kSchemaVersion = 7;
+inline constexpr uint32_t kSchemaVersion = 8;
 
 struct CacheKey {
 	std::string sourceIdentifier;
@@ -41,6 +41,7 @@ std::wstring BuildCacheFileName(const CacheKey& key, uint64_t buildConfigHash);
 
 std::optional<CacheData> TryLoad(const CacheKey& key, uint64_t expectedBuildConfigHash);
 bool Save(const CacheKey& key, const CacheData& data);
+bool Save(const CacheKey& key, uint32_t schemaVersion, uint64_t buildConfigHash, const ClusterLODPrebuiltData& prebuiltData);
 bool LoadGroupPayload(const CacheData& cacheData, uint32_t groupLocalIndex, LoadedGroupPayload& outPayload);
 
 }

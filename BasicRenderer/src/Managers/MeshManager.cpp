@@ -353,14 +353,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	}
 	else
 	{
-		clodMeshletVertexChunkViews.push_back(
-			m_meshletVertexIndices->AddData(mesh->GetCLodMeshletVertices().data(), mesh->GetCLodMeshletVertices().size() * sizeof(uint32_t), sizeof(uint32_t)));
-		clodMeshletChunkViews.push_back(
-			m_meshletOffsets->AddData(mesh->GetCLodMeshlets().data(), mesh->GetCLodMeshlets().size() * sizeof(meshopt_Meshlet), sizeof(meshopt_Meshlet)));
-		clodMeshletTriangleChunkViews.push_back(
-			m_meshletTriangles->AddData(mesh->GetCLodMeshletTriangles().data(), mesh->GetCLodMeshletTriangles().size() * sizeof(uint8_t), sizeof(uint8_t)));
-		clodMeshletBoundsChunkViews.push_back(
-			m_clusterLODMeshletBounds->AddData(mesh->GetCLodBounds().data(), mesh->GetCLodBounds().size() * sizeof(BoundingSphere), sizeof(BoundingSphere)));
+		throw std::runtime_error("CLod chunk data is required; legacy full-mesh CLod arrays are no longer supported.");
 	}
 
 	// Per mesh buffer
@@ -391,23 +384,11 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	auto clusterLODGroupsView = m_clusterLODGroups->AddData(mesh->GetCLodGroups().data(), mesh->GetCLodGroups().size() * sizeof(ClusterLODGroup), sizeof(ClusterLODGroup));
 	auto clusterLODChildrenView = m_clusterLODChildren->AddData(mesh->GetCLodChildren().data(), mesh->GetCLodChildren().size() * sizeof(ClusterLODChild), sizeof(ClusterLODChild));
 	
-	std::unique_ptr<BufferView> clusterLODMeshletsView = nullptr;
-	std::unique_ptr<BufferView> clusterLODMeshletTrianglesView = nullptr;
-	std::unique_ptr<BufferView> clusterLODMeshletBoundsView = nullptr;
-	if (!(hasGroupChunks || hasDiskBackedGroupChunks)) {
-		clusterLODMeshletsView = m_meshletOffsets->AddData(mesh->GetCLodMeshlets().data(), mesh->GetCLodMeshlets().size() * sizeof(meshopt_Meshlet), sizeof(meshopt_Meshlet));
-		clusterLODMeshletTrianglesView = m_meshletTriangles->AddData(mesh->GetCLodMeshletTriangles().data(), mesh->GetCLodMeshletTriangles().size() * sizeof(uint8_t), sizeof(uint8_t));
-		clusterLODMeshletBoundsView = m_clusterLODMeshletBounds->AddData(mesh->GetCLodBounds().data(), mesh->GetCLodBounds().size() * sizeof(BoundingSphere), sizeof(BoundingSphere));
-	}
 	auto clusterLODNodesView = m_clusterLODNodes->AddData(mesh->GetCLodNodes().data(), mesh->GetCLodNodes().size() * sizeof(ClusterLODNode), sizeof(ClusterLODNode));
 
 	mesh->SetCLodBufferViews( // TODO: cleanup on remove
 		std::move(clusterLODGroupsView), 
 		std::move(clusterLODChildrenView), 
-		std::move(clusterLODMeshletsView), 
-		nullptr,
-		std::move(clusterLODMeshletTrianglesView),
-		std::move(clusterLODMeshletBoundsView),
 		std::move(clusterLODNodesView));
 	mesh->ReleaseCLodChunkUploadData();
 
