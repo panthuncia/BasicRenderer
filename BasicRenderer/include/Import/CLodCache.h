@@ -8,7 +8,7 @@
 
 namespace CLodCache {
 
-inline constexpr uint32_t kSchemaVersion = 4;
+inline constexpr uint32_t kSchemaVersion = 5;
 
 struct CacheKey {
 	std::string sourceIdentifier;

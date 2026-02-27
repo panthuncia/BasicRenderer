@@ -55,6 +55,8 @@ private:
 	std::shared_ptr<DynamicBuffer> m_meshletOffsets; // meshopt_Meshlet
 	std::shared_ptr<DynamicBuffer> m_meshletVertexIndices; // 
 	std::shared_ptr<DynamicBuffer> m_meshletTriangles;
+	std::shared_ptr<DynamicBuffer> m_clodCompressedPositions;
+	std::shared_ptr<DynamicBuffer> m_clodCompressedMeshletVertexIndices;
 	//std::shared_ptr<DynamicBuffer> m_meshletBoundsBuffer;
 	//std::shared_ptr<DynamicBuffer> m_meshletBitfieldBuffer;
 	//std::shared_ptr<DynamicBuffer> m_clusterToVisibleClusterTableIndexBuffer; // Used by visibility buffer, for drawcall indexing

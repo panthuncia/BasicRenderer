@@ -23,6 +23,21 @@ struct ClusterLODGroupChunk
     uint meshletTrianglesByteCount;
     uint meshletBoundsBase;
     uint meshletBoundsCount;
+
+    uint compressedPositionWordsBase;
+    uint compressedPositionWordCount;
+    uint compressedPositionBitsX;
+    uint compressedPositionBitsY;
+    uint compressedPositionBitsZ;
+    uint compressedPositionQuantExp;
+    int compressedPositionMinQx;
+    int compressedPositionMinQy;
+    int compressedPositionMinQz;
+
+    uint compressedMeshletVertexWordsBase;
+    uint compressedMeshletVertexWordCount;
+    uint compressedMeshletVertexBits;
+    uint compressedFlags;
 };
 
 struct CLodStreamingRequest

@@ -8,6 +8,83 @@
 #include "Include/meshletCommon.hlsli"
 #include "Include/clodStructs.hlsli"
 
+#define CLOD_COMPRESSED_POSITIONS 1u
+#define CLOD_COMPRESSED_MESHLET_VERTEX_INDICES 2u
+
+uint ReadPackedBits32(StructuredBuffer<uint> words, uint startBit, uint bitCount)
+{
+    if (bitCount == 0u)
+    {
+        return 0u;
+    }
+
+    uint wordIndex = startBit >> 5;
+    uint bitOffset = startBit & 31u;
+    uint packed = words[wordIndex] >> bitOffset;
+    if (bitOffset + bitCount > 32u)
+    {
+        packed |= words[wordIndex + 1u] << (32u - bitOffset);
+    }
+
+    uint mask = (bitCount >= 32u) ? 0xffffffffu : ((1u << bitCount) - 1u);
+    return packed & mask;
+}
+
+float3 DecodeCompressedPosition(
+    uint groupLocalVertexIndex,
+    uint compressedPositionWordsBase,
+    uint bitsX,
+    uint bitsY,
+    uint bitsZ,
+    uint quantExp,
+    int3 minQ)
+{
+    StructuredBuffer<uint> compressedPositionWords = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::CompressedPositions)];
+    uint bitsPerVertex = bitsX + bitsY + bitsZ;
+    uint bitCursor = compressedPositionWordsBase * 32u + groupLocalVertexIndex * bitsPerVertex;
+
+    uint px = ReadPackedBits32(compressedPositionWords, bitCursor, bitsX);
+    bitCursor += bitsX;
+    uint py = ReadPackedBits32(compressedPositionWords, bitCursor, bitsY);
+    bitCursor += bitsY;
+    uint pz = ReadPackedBits32(compressedPositionWords, bitCursor, bitsZ);
+
+    int3 q = int3(px, py, pz) + minQ;
+    float invScale = 1.0f / float(1u << quantExp);
+    return float3(q) * invScale;
+}
+
+VisBufferPSInput BuildVisBufferVertexAttributesForView(
+    Vertex vertex,
+    uint3 vGroupID,
+    PerObjectBuffer objectBuffer,
+    uint viewID,
+    uint clusterIndex,
+    uint materialDataIndex,
+    ClodViewRasterInfo rasterInfo)
+{
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+    Camera viewCamera = cameras[viewID];
+
+    float4 pos = float4(vertex.position.xyz, 1.0f);
+    float4 worldPosition = mul(pos, objectBuffer.model);
+    float4 viewPosition = mul(worldPosition, viewCamera.view);
+
+    VisBufferPSInput result;
+    result.position = mul(viewPosition, viewCamera.projection);
+    result.position.x = result.position.x * rasterInfo.viewportScaleX + result.position.w * (rasterInfo.viewportScaleX - 1.0f);
+    result.position.y = result.position.y * rasterInfo.viewportScaleY + result.position.w * (1.0f - rasterInfo.viewportScaleY);
+    result.visibleClusterIndex = clusterIndex;
+    result.linearDepth = -viewPosition.z;
+    result.viewID = viewID;
+#if defined(PSO_ALPHA_TEST)
+    result.texcoord = vertex.texcoord;
+    result.materialDataIndex = materialDataIndex;
+#endif
+
+    return result;
+}
+
 PSInput GetVertexAttributes(uint blockByteOffset, uint prevBlockByteOffset, uint index, uint flags, uint vertexSize, uint3 vGroupID, PerObjectBuffer objectBuffer) {
     uint byteOffset = blockByteOffset + index * vertexSize;
     ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostSkinningVertices)];
@@ -118,27 +195,14 @@ VisBufferPSInput GetVisBufferVertexAttributesForView(
     ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostSkinningVertices)];
     uint byteOffset = blockByteOffset + index * vertexSize;
     Vertex vertex = LoadVertex(byteOffset, vertexBuffer, flags);
-
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
-    Camera viewCamera = cameras[viewID];
-
-    float4 pos = float4(vertex.position.xyz, 1.0f);
-    float4 worldPosition = mul(pos, objectBuffer.model);
-    float4 viewPosition = mul(worldPosition, viewCamera.view);
-
-    VisBufferPSInput result;
-    result.position = mul(viewPosition, viewCamera.projection);
-    result.position.x = result.position.x * rasterInfo.viewportScaleX + result.position.w * (rasterInfo.viewportScaleX - 1.0f);
-    result.position.y = result.position.y * rasterInfo.viewportScaleY + result.position.w * (1.0f - rasterInfo.viewportScaleY);
-    result.visibleClusterIndex = clusterIndex;
-    result.linearDepth = -viewPosition.z;
-    result.viewID = viewID;
-#if defined(PSO_ALPHA_TEST)
-    result.texcoord = vertex.texcoord;
-    result.materialDataIndex = materialDataIndex;
-#endif
-
-    return result;
+    return BuildVisBufferVertexAttributesForView(
+        vertex,
+        vGroupID,
+        objectBuffer,
+        viewID,
+        clusterIndex,
+        materialDataIndex,
+        rasterInfo);
 }
 
 void WriteTriangles(uint uGroupThreadID, MeshletSetup setup, out indices uint3 outputTriangles[MS_MESHLET_SIZE])
@@ -198,6 +262,15 @@ void EmitMeshletVisBufferForView(
 
 VisBufferPSInput GetVisBufferVertexAttributesForViewIndexed(
     uint meshletVerticesBaseOffset,
+    uint compressedPositionWordsBase,
+    uint compressedPositionBitsX,
+    uint compressedPositionBitsY,
+    uint compressedPositionBitsZ,
+    uint compressedPositionQuantExp,
+    int3 compressedPositionMinQ,
+    uint compressedMeshletVertexWordsBase,
+    uint compressedMeshletVertexBits,
+    uint compressedFlags,
     uint meshletVertexIndex,
     uint blockByteOffset,
     uint flags,
@@ -209,13 +282,36 @@ VisBufferPSInput GetVisBufferVertexAttributesForViewIndexed(
     uint materialDataIndex,
     ClodViewRasterInfo rasterInfo)
 {
-    StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletVertexIndices)];
-    uint groupLocalVertexIndex = meshletVerticesBuffer[meshletVerticesBaseOffset + meshletVertexIndex];
-    return GetVisBufferVertexAttributesForView(
-        blockByteOffset,
-        groupLocalVertexIndex,
-        flags,
-        vertexSize,
+    ByteAddressBuffer vertexBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostSkinningVertices)];
+    uint groupLocalVertexIndex = 0;
+    if ((compressedFlags & 2u) != 0u && compressedMeshletVertexBits > 0u)
+    {
+        StructuredBuffer<uint> compressedMeshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::CompressedMeshletVertexIndices)];
+        uint startBit = compressedMeshletVertexWordsBase * 32u + meshletVertexIndex * compressedMeshletVertexBits;
+        groupLocalVertexIndex = ReadPackedBits32(compressedMeshletVerticesBuffer, startBit, compressedMeshletVertexBits);
+    }
+    else
+    {
+        StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletVertexIndices)];
+        groupLocalVertexIndex = meshletVerticesBuffer[meshletVerticesBaseOffset + meshletVertexIndex];
+    }
+
+    uint byteOffset = blockByteOffset + groupLocalVertexIndex * vertexSize;
+    Vertex vertex = LoadVertex(byteOffset, vertexBuffer, flags);
+    if ((flags & VERTEX_SKINNED) == 0u && (compressedFlags & CLOD_COMPRESSED_POSITIONS) != 0u)
+    {
+        vertex.position = DecodeCompressedPosition(
+            groupLocalVertexIndex,
+            compressedPositionWordsBase,
+            compressedPositionBitsX,
+            compressedPositionBitsY,
+            compressedPositionBitsZ,
+            compressedPositionQuantExp,
+            compressedPositionMinQ);
+    }
+
+    return BuildVisBufferVertexAttributesForView(
+        vertex,
         vGroupID,
         objectBuffer,
         viewID,
@@ -238,6 +334,15 @@ void EmitMeshletVisBufferForViewIndexed(
         uint meshletVertexIndex = setup.vertOffset + i;
         outputVertices[i] = GetVisBufferVertexAttributesForViewIndexed(
             setup.groupMeshletVerticesBase,
+            setup.compressedPositionWordsBase,
+            setup.compressedPositionBitsX,
+            setup.compressedPositionBitsY,
+            setup.compressedPositionBitsZ,
+            setup.compressedPositionQuantExp,
+            setup.compressedPositionMinQ,
+            setup.compressedMeshletVertexWordsBase,
+            setup.compressedMeshletVertexBits,
+            setup.compressedFlags,
             meshletVertexIndex,
             setup.postSkinningBufferOffset,
             setup.meshBuffer.vertexFlags,
@@ -358,6 +463,20 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
     setup.groupMeshletVerticesBase = groupChunk.meshletVerticesBase;
     setup.groupMeshletVertexCount = groupChunk.meshletVertexCount;
     setup.groupMeshletTrianglesByteOffset = groupChunk.meshletTrianglesByteOffset;
+    setup.compressedPositionWordsBase = groupChunk.compressedPositionWordsBase;
+    setup.compressedPositionWordCount = groupChunk.compressedPositionWordCount;
+    setup.compressedPositionBitsX = groupChunk.compressedPositionBitsX;
+    setup.compressedPositionBitsY = groupChunk.compressedPositionBitsY;
+    setup.compressedPositionBitsZ = groupChunk.compressedPositionBitsZ;
+    setup.compressedPositionQuantExp = groupChunk.compressedPositionQuantExp;
+    setup.compressedPositionMinQ = int3(
+        groupChunk.compressedPositionMinQx,
+        groupChunk.compressedPositionMinQy,
+        groupChunk.compressedPositionMinQz);
+    setup.compressedMeshletVertexWordsBase = groupChunk.compressedMeshletVertexWordsBase;
+    setup.compressedMeshletVertexWordCount = groupChunk.compressedMeshletVertexWordCount;
+    setup.compressedMeshletVertexBits = groupChunk.compressedMeshletVertexBits;
+    setup.compressedFlags = groupChunk.compressedFlags;
 
     uint meshletStart = groupChunk.meshletBase;
     uint meshletEnd = groupChunk.meshletBase + groupChunk.meshletCount;

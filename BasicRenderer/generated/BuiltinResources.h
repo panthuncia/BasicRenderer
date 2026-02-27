@@ -1,13 +1,15 @@
 #pragma once
 
 #include <string_view>
-// GENERATED CODE — DO NOT EDIT
+// GENERATED CODE ï¿½ DO NOT EDIT
 
 struct Builtin {
   inline static constexpr std::string_view ActiveDrawSetIndices = "Builtin::ActiveDrawSetIndices";
   inline static constexpr std::string_view BRDFLUT = "Builtin::BRDFLUT";
   struct CLod {
     inline static constexpr std::string_view Children = "Builtin::CLod::Children";
+    inline static constexpr std::string_view CompressedMeshletVertexIndices = "Builtin::CLod::CompressedMeshletVertexIndices";
+    inline static constexpr std::string_view CompressedPositions = "Builtin::CLod::CompressedPositions";
     inline static constexpr std::string_view GroupChunks = "Builtin::CLod::GroupChunks";
     inline static constexpr std::string_view Groups = "Builtin::CLod::Groups";
     inline static constexpr std::string_view MeshletBounds = "Builtin::CLod::MeshletBounds";

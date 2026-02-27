@@ -7,6 +7,9 @@
 #include "include/visibilityPacking.hlsli"
 #include "include/clodStructs.hlsli"
 
+#define CLOD_COMPRESSED_POSITIONS 1u
+#define CLOD_COMPRESSED_MESHLET_VERTEX_INDICES 2u
+
 // http://filmicworlds.com/blog/visibility-buffer-rendering-with-material-graphs/
 struct BarycentricDeriv
 {
@@ -151,8 +154,66 @@ struct MeshletResolveData {
     uint meshletVerticesChunkBase;
     uint meshletVerticesChunkCount;
     uint groupVertexChunkByteOffset;
-    uint pad0;
+    uint compressedPositionWordsBase;
+    uint compressedPositionWordCount;
+    uint compressedPositionBitsX;
+    uint compressedPositionBitsY;
+    uint compressedPositionBitsZ;
+    uint compressedPositionQuantExp;
+    int3 compressedPositionMinQ;
+    uint compressedMeshletVertexWordsBase;
+    uint compressedMeshletVertexWordCount;
+    uint compressedMeshletVertexBits;
+    uint compressedFlags;
 };
+
+uint ReadPackedBits32(StructuredBuffer<uint> words, uint startBit, uint bitCount)
+{
+    if (bitCount == 0u)
+    {
+        return 0u;
+    }
+
+    uint wordIndex = startBit >> 5;
+    uint bitOffset = startBit & 31u;
+    uint packed = words[wordIndex] >> bitOffset;
+    if (bitOffset + bitCount > 32u)
+    {
+        packed |= words[wordIndex + 1u] << (32u - bitOffset);
+    }
+
+    uint mask = (bitCount >= 32u) ? 0xffffffffu : ((1u << bitCount) - 1u);
+    return packed & mask;
+}
+
+uint DecodeMeshletVertexLocalIndex(uint absoluteMeshletVertexIndex, MeshletResolveData d, StructuredBuffer<uint> meshletVerticesBuffer)
+{
+    if ((d.compressedFlags & CLOD_COMPRESSED_MESHLET_VERTEX_INDICES) != 0u && d.compressedMeshletVertexBits > 0u)
+    {
+        StructuredBuffer<uint> compressedMeshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::CompressedMeshletVertexIndices)];
+        uint startBit = d.compressedMeshletVertexWordsBase * 32u + absoluteMeshletVertexIndex * d.compressedMeshletVertexBits;
+        return ReadPackedBits32(compressedMeshletVerticesBuffer, startBit, d.compressedMeshletVertexBits);
+    }
+
+    return meshletVerticesBuffer[d.meshletVerticesChunkBase + absoluteMeshletVertexIndex];
+}
+
+float3 DecodeCompressedPosition(uint groupLocalVertexIndex, MeshletResolveData d)
+{
+    StructuredBuffer<uint> compressedPositionWords = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::CompressedPositions)];
+    uint bitsPerVertex = d.compressedPositionBitsX + d.compressedPositionBitsY + d.compressedPositionBitsZ;
+    uint bitCursor = d.compressedPositionWordsBase * 32u + groupLocalVertexIndex * bitsPerVertex;
+
+    uint px = ReadPackedBits32(compressedPositionWords, bitCursor, d.compressedPositionBitsX);
+    bitCursor += d.compressedPositionBitsX;
+    uint py = ReadPackedBits32(compressedPositionWords, bitCursor, d.compressedPositionBitsY);
+    bitCursor += d.compressedPositionBitsY;
+    uint pz = ReadPackedBits32(compressedPositionWords, bitCursor, d.compressedPositionBitsZ);
+
+    int3 q = int3(px, py, pz) + d.compressedPositionMinQ;
+    float invScale = 1.0f / float(1u << d.compressedPositionQuantExp);
+    return float3(q) * invScale;
+}
 
 MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
 {
@@ -195,6 +256,20 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
         d.meshletVerticesChunkBase = groupChunk.meshletVerticesBase;
         d.meshletVerticesChunkCount = groupChunk.meshletVertexCount;
         d.groupVertexChunkByteOffset = groupChunk.vertexChunkByteOffset;
+        d.compressedPositionWordsBase = groupChunk.compressedPositionWordsBase;
+        d.compressedPositionWordCount = groupChunk.compressedPositionWordCount;
+        d.compressedPositionBitsX = groupChunk.compressedPositionBitsX;
+        d.compressedPositionBitsY = groupChunk.compressedPositionBitsY;
+        d.compressedPositionBitsZ = groupChunk.compressedPositionBitsZ;
+        d.compressedPositionQuantExp = groupChunk.compressedPositionQuantExp;
+        d.compressedPositionMinQ = int3(
+            groupChunk.compressedPositionMinQx,
+            groupChunk.compressedPositionMinQy,
+            groupChunk.compressedPositionMinQz);
+        d.compressedMeshletVertexWordsBase = groupChunk.compressedMeshletVertexWordsBase;
+        d.compressedMeshletVertexWordCount = groupChunk.compressedMeshletVertexWordCount;
+        d.compressedMeshletVertexBits = groupChunk.compressedMeshletVertexBits;
+        d.compressedFlags = groupChunk.compressedFlags;
         Meshlet m = (Meshlet)0;
         const uint meshletStart = groupChunk.meshletBase;
         const uint meshletEnd = groupChunk.meshletBase + groupChunk.meshletCount;
@@ -242,7 +317,19 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
     d.meshletVerticesChunkBase = WaveReadLaneAt(d.meshletVerticesChunkBase, leader);
     d.meshletVerticesChunkCount = WaveReadLaneAt(d.meshletVerticesChunkCount, leader);
     d.groupVertexChunkByteOffset = WaveReadLaneAt(d.groupVertexChunkByteOffset, leader);
-    d.pad0 = WaveReadLaneAt(d.pad0, leader);
+    d.compressedPositionWordsBase = WaveReadLaneAt(d.compressedPositionWordsBase, leader);
+    d.compressedPositionWordCount = WaveReadLaneAt(d.compressedPositionWordCount, leader);
+    d.compressedPositionBitsX = WaveReadLaneAt(d.compressedPositionBitsX, leader);
+    d.compressedPositionBitsY = WaveReadLaneAt(d.compressedPositionBitsY, leader);
+    d.compressedPositionBitsZ = WaveReadLaneAt(d.compressedPositionBitsZ, leader);
+    d.compressedPositionQuantExp = WaveReadLaneAt(d.compressedPositionQuantExp, leader);
+    d.compressedPositionMinQ.x = WaveReadLaneAt(d.compressedPositionMinQ.x, leader);
+    d.compressedPositionMinQ.y = WaveReadLaneAt(d.compressedPositionMinQ.y, leader);
+    d.compressedPositionMinQ.z = WaveReadLaneAt(d.compressedPositionMinQ.z, leader);
+    d.compressedMeshletVertexWordsBase = WaveReadLaneAt(d.compressedMeshletVertexWordsBase, leader);
+    d.compressedMeshletVertexWordCount = WaveReadLaneAt(d.compressedMeshletVertexWordCount, leader);
+    d.compressedMeshletVertexBits = WaveReadLaneAt(d.compressedMeshletVertexBits, leader);
+    d.compressedFlags = WaveReadLaneAt(d.compressedFlags, leader);
 
     return d;
 }
@@ -256,11 +343,39 @@ void ComputeTriVertexByteOffsetsCompact(
     out uint o2)
 {
     uint stride = d.meshInfo.x;
-    uint base = d.meshletVerticesChunkBase + d.meshletInfo.x;
+    uint local0 = 0;
+    uint local1 = 0;
+    uint local2 = 0;
 
-    uint local0 = meshletVerticesBuffer[base + triIdx.x];
-    uint local1 = meshletVerticesBuffer[base + triIdx.y];
-    uint local2 = meshletVerticesBuffer[base + triIdx.z];
+    if ((d.compressedFlags & 2u) != 0u && d.compressedMeshletVertexBits > 0u)
+    {
+        StructuredBuffer<uint> compressedMeshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::CompressedMeshletVertexIndices)];
+        uint indices[3] = { d.meshletInfo.x + triIdx.x, d.meshletInfo.x + triIdx.y, d.meshletInfo.x + triIdx.z };
+        [unroll]
+        for (uint i = 0; i < 3; ++i)
+        {
+            uint startBit = d.compressedMeshletVertexWordsBase * 32u + indices[i] * d.compressedMeshletVertexBits;
+            uint wordIndex = startBit >> 5;
+            uint bitOffset = startBit & 31u;
+            uint packed = compressedMeshletVerticesBuffer[wordIndex] >> bitOffset;
+            if (bitOffset + d.compressedMeshletVertexBits > 32u)
+            {
+                packed |= compressedMeshletVerticesBuffer[wordIndex + 1u] << (32u - bitOffset);
+            }
+            uint mask = (d.compressedMeshletVertexBits >= 32u) ? 0xffffffffu : ((1u << d.compressedMeshletVertexBits) - 1u);
+            uint local = packed & mask;
+            if (i == 0u) local0 = local;
+            if (i == 1u) local1 = local;
+            if (i == 2u) local2 = local;
+        }
+    }
+    else
+    {
+        uint base = d.meshletInfo.x;
+        local0 = DecodeMeshletVertexLocalIndex(base + triIdx.x, d, meshletVerticesBuffer);
+        local1 = DecodeMeshletVertexLocalIndex(base + triIdx.y, d, meshletVerticesBuffer);
+        local2 = DecodeMeshletVertexLocalIndex(base + triIdx.z, d, meshletVerticesBuffer);
+    }
 
     o0 = d.postBases.x + local0 * stride;
     o1 = d.postBases.x + local1 * stride;
@@ -358,9 +473,24 @@ void EvaluateGBufferOptimized(uint2 pixel)
     StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletVertexIndices)];
     uint o0, o1, o2;
     ComputeTriVertexByteOffsetsCompact(md, meshletVerticesBuffer, triIdx, o0, o1, o2);
-    p0 = LoadPositionOnly(o0, vertexBuffer);
-    p1 = LoadPositionOnly(o1, vertexBuffer);
-    p2 = LoadPositionOnly(o2, vertexBuffer);
+    uint base = md.meshletInfo.x;
+    uint local0 = DecodeMeshletVertexLocalIndex(base + triIdx.x, md, meshletVerticesBuffer);
+    uint local1 = DecodeMeshletVertexLocalIndex(base + triIdx.y, md, meshletVerticesBuffer);
+    uint local2 = DecodeMeshletVertexLocalIndex(base + triIdx.z, md, meshletVerticesBuffer);
+
+    bool useCompressedPositions = ((md.meshInfo.y & VERTEX_SKINNED) == 0u) && ((md.compressedFlags & CLOD_COMPRESSED_POSITIONS) != 0u);
+    if (useCompressedPositions)
+    {
+        p0 = DecodeCompressedPosition(local0, md);
+        p1 = DecodeCompressedPosition(local1, md);
+        p2 = DecodeCompressedPosition(local2, md);
+    }
+    else
+    {
+        p0 = LoadPositionOnly(o0, vertexBuffer);
+        p1 = LoadPositionOnly(o1, vertexBuffer);
+        p2 = LoadPositionOnly(o2, vertexBuffer);
+    }
     // if (triIsLeader)
     // {
     //     p0 = LoadPositionOnly(o0, vertexBuffer);
@@ -459,11 +589,6 @@ void EvaluateGBufferOptimized(uint2 pixel)
     {
         uint stride = md.meshInfo.x;
         uint prevBase = md.postBases.y;
-        uint base = md.meshletVerticesChunkBase + md.meshletInfo.x;
-
-        uint local0 = meshletVerticesBuffer[base + triIdx.x];
-        uint local1 = meshletVerticesBuffer[base + triIdx.y];
-        uint local2 = meshletVerticesBuffer[base + triIdx.z];
 
         uint o0Prev = prevBase + local0 * stride;
         uint o1Prev = prevBase + local1 * stride;

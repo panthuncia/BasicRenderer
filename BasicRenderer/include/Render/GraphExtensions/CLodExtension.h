@@ -2465,6 +2465,8 @@ private:
                 Builtin::MeshResources::MeshletTriangles,
                 Builtin::MeshResources::MeshletVertexIndices,
                 Builtin::MeshResources::MeshletOffsets,
+                Builtin::CLod::CompressedMeshletVertexIndices,
+                Builtin::CLod::CompressedPositions,
                 m_compactedVisibleClustersBuffer,
                 m_rasterBucketsHistogramBuffer,
                 m_viewRasterInfoBuffer)
@@ -2492,6 +2494,8 @@ private:
             RegisterSRV(Builtin::PerMeshBuffer);
             RegisterSRV(Builtin::PerMaterialDataBuffer);
             RegisterSRV(Builtin::MeshResources::MeshletOffsets);
+            RegisterSRV(Builtin::CLod::CompressedMeshletVertexIndices);
+			RegisterSRV(Builtin::CLod::CompressedPositions);
 
             //RegisterSRV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
         }

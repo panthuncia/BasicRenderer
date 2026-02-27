@@ -292,6 +292,23 @@ struct ClusterLODGroupChunk
     uint32_t meshletTrianglesByteCount = 0;
     uint32_t meshletBoundsBase = 0;
     uint32_t meshletBoundsCount = 0;
+
+    // Compressed group-local position stream (u32 bitstream words)
+    uint32_t compressedPositionWordsBase = 0;
+    uint32_t compressedPositionWordCount = 0;
+    uint32_t compressedPositionBitsX = 0;
+    uint32_t compressedPositionBitsY = 0;
+    uint32_t compressedPositionBitsZ = 0;
+    uint32_t compressedPositionQuantExp = 0;
+    int32_t compressedPositionMinQx = 0;
+    int32_t compressedPositionMinQy = 0;
+    int32_t compressedPositionMinQz = 0;
+
+    // Compressed group-local meshlet vertex index stream (u32 bitstream words)
+    uint32_t compressedMeshletVertexWordsBase = 0;
+    uint32_t compressedMeshletVertexWordCount = 0;
+    uint32_t compressedMeshletVertexBits = 0;
+    uint32_t compressedFlags = 0;
 };
 
 struct CLodStreamingRequest

@@ -6,6 +6,10 @@
 #include <algorithm>
 #include <numeric>
 #include <unordered_map>
+#include <bit>
+#include <cmath>
+#include <array>
+#include <cstring>
 
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
@@ -22,6 +26,9 @@ std::atomic<uint32_t> Mesh::globalMeshCount = 0;
 
 namespace
 {
+	constexpr uint32_t CLOD_COMPRESSED_POSITIONS = 1u << 0;
+	constexpr uint32_t CLOD_COMPRESSED_MESHLET_VERTEX_INDICES = 1u << 1;
+
 	struct U32Stats
 	{
 		uint32_t count = 0;
@@ -40,6 +47,87 @@ namespace
 		double avg() const { return count ? double(sum) / double(count) : 0.0; }
 		bool   any() const { return count != 0; }
 	};
+
+	uint32_t BitsNeededForRange(uint32_t range)
+	{
+		if (range == 0)
+		{
+			return 1;
+		}
+		return 32u - static_cast<uint32_t>(std::countl_zero(range));
+	}
+
+	void AppendBits(std::vector<uint32_t>& words, uint64_t& bitCursor, uint32_t value, uint32_t bitCount)
+	{
+		if (bitCount == 0)
+		{
+			return;
+		}
+
+		const uint64_t requiredBits = bitCursor + bitCount;
+		const size_t requiredWords = static_cast<size_t>((requiredBits + 31ull) / 32ull);
+		if (words.size() < requiredWords)
+		{
+			words.resize(requiredWords, 0u);
+		}
+
+		const uint64_t bitOffset = bitCursor & 31ull;
+		const uint64_t wordIndex = bitCursor >> 5ull;
+		const uint64_t mask = (bitCount >= 32u) ? 0xffffffffull : ((1ull << bitCount) - 1ull);
+		const uint64_t clampedValue = static_cast<uint64_t>(value) & mask;
+		words[static_cast<size_t>(wordIndex)] |= static_cast<uint32_t>(clampedValue << bitOffset);
+
+		const uint32_t spillBits = static_cast<uint32_t>(bitOffset) + bitCount;
+		if (spillBits > 32u)
+		{
+			if (words.size() <= static_cast<size_t>(wordIndex + 1ull))
+			{
+				words.resize(static_cast<size_t>(wordIndex + 2ull), 0u);
+			}
+			words[static_cast<size_t>(wordIndex + 1ull)] |= static_cast<uint32_t>(clampedValue >> (32u - static_cast<uint32_t>(bitOffset)));
+		}
+
+		bitCursor += bitCount;
+	}
+
+	uint32_t ComputeMeshQuantizationExponent(const std::vector<std::byte>& vertices, size_t vertexStrideBytes)
+	{
+		if (vertices.empty() || vertexStrideBytes < sizeof(float) * 3)
+		{
+			return 10u;
+		}
+
+		DirectX::XMFLOAT3 minv{ std::numeric_limits<float>::max(), std::numeric_limits<float>::max(), std::numeric_limits<float>::max() };
+		DirectX::XMFLOAT3 maxv{ -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max() };
+		const size_t vertexCount = vertices.size() / vertexStrideBytes;
+		for (size_t vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex)
+		{
+			const size_t byteOffset = vertexIndex * vertexStrideBytes;
+			float px = 0.0f;
+			float py = 0.0f;
+			float pz = 0.0f;
+			std::memcpy(&px, vertices.data() + byteOffset, sizeof(float));
+			std::memcpy(&py, vertices.data() + byteOffset + sizeof(float), sizeof(float));
+			std::memcpy(&pz, vertices.data() + byteOffset + sizeof(float) * 2, sizeof(float));
+
+			minv.x = std::min(minv.x, px);
+			minv.y = std::min(minv.y, py);
+			minv.z = std::min(minv.z, pz);
+			maxv.x = std::max(maxv.x, px);
+			maxv.y = std::max(maxv.y, py);
+			maxv.z = std::max(maxv.z, pz);
+		}
+
+		const float dx = maxv.x - minv.x;
+		const float dy = maxv.y - minv.y;
+		const float dz = maxv.z - minv.z;
+		const float diagonal = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+		if (diagonal < 1.0f) return 14u;
+		if (diagonal < 10.0f) return 12u;
+		if (diagonal < 100.0f) return 10u;
+		return 8u;
+	}
 }
 
 
@@ -87,6 +175,8 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 	m_clodGroupVertexChunks = data.groupVertexChunks;
 	m_clodGroupSkinningVertexChunks = data.groupSkinningVertexChunks;
 	m_clodGroupMeshletVertexChunks = data.groupMeshletVertexChunks;
+	m_clodGroupCompressedPositionWordChunks = data.groupCompressedPositionWordChunks;
+	m_clodGroupCompressedMeshletVertexWordChunks = data.groupCompressedMeshletVertexWordChunks;
 	m_clodGroupMeshletChunks = data.groupMeshletChunks;
 	m_clodGroupMeshletTriangleChunks = data.groupMeshletTriangleChunks;
 	m_clodGroupMeshletBoundsChunks = data.groupMeshletBoundsChunks;
@@ -124,6 +214,8 @@ ClusterLODPrebuiltData Mesh::GetClusterLODPrebuiltData() const
 	out.groupVertexChunks = m_clodGroupVertexChunks;
 	out.groupSkinningVertexChunks = m_clodGroupSkinningVertexChunks;
 	out.groupMeshletVertexChunks = m_clodGroupMeshletVertexChunks;
+	out.groupCompressedPositionWordChunks = m_clodGroupCompressedPositionWordChunks;
+	out.groupCompressedMeshletVertexWordChunks = m_clodGroupCompressedMeshletVertexWordChunks;
 	out.groupMeshletChunks = m_clodGroupMeshletChunks;
 	out.groupMeshletTriangleChunks = m_clodGroupMeshletTriangleChunks;
 	out.groupMeshletBoundsChunks = m_clodGroupMeshletBoundsChunks;
@@ -588,6 +680,8 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 	m_clodGroupVertexChunks.clear();
 	m_clodGroupSkinningVertexChunks.clear();
 	m_clodGroupMeshletVertexChunks.clear();
+	m_clodGroupCompressedPositionWordChunks.clear();
+	m_clodGroupCompressedMeshletVertexWordChunks.clear();
 	m_clodGroupMeshletChunks.clear();
 	m_clodGroupMeshletTriangleChunks.clear();
 	m_clodGroupMeshletBoundsChunks.clear();
@@ -604,6 +698,8 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 
 	const size_t vertexStrideBytes = m_perMeshBufferData.vertexByteSize;
 	const size_t globalVertexCount = m_vertices->size() / vertexStrideBytes;
+	const uint32_t meshPositionQuantExp = ComputeMeshQuantizationExponent(*m_vertices, vertexStrideBytes);
+	const float meshPositionQuantScale = static_cast<float>(1u << meshPositionQuantExp);
 
 	clodMesh mesh{};
 	mesh.indices = idx;
@@ -659,6 +755,8 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 		m_clodGroupVertexChunks.clear();
 		m_clodGroupSkinningVertexChunks.clear();
 		m_clodGroupMeshletVertexChunks.clear();
+		m_clodGroupCompressedPositionWordChunks.clear();
+		m_clodGroupCompressedMeshletVertexWordChunks.clear();
 		m_clodGroupMeshletChunks.clear();
 		m_clodGroupMeshletTriangleChunks.clear();
 		m_clodGroupMeshletBoundsChunks.clear();
@@ -897,6 +995,65 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 				m_clodMeshletVertices.begin() + groupMeshletVerticesStart + groupMeshletVertexCount);
 			m_clodGroupMeshletVertexChunks.push_back(std::move(groupMeshletVertexChunk));
 
+			std::array<int32_t, 3> minQuantized = {
+				std::numeric_limits<int32_t>::max(),
+				std::numeric_limits<int32_t>::max(),
+				std::numeric_limits<int32_t>::max()
+			};
+			std::array<int32_t, 3> maxQuantized = {
+				std::numeric_limits<int32_t>::min(),
+				std::numeric_limits<int32_t>::min(),
+				std::numeric_limits<int32_t>::min()
+			};
+			std::vector<std::array<int32_t, 3>> quantizedGroupPositions;
+			quantizedGroupPositions.reserve(groupLocalToGlobal.size());
+
+			for (uint32_t globalVertexIndex : groupLocalToGlobal)
+			{
+				const size_t byteOffset = static_cast<size_t>(globalVertexIndex) * vertexStrideBytes;
+				float px = 0.0f;
+				float py = 0.0f;
+				float pz = 0.0f;
+				std::memcpy(&px, m_vertices->data() + byteOffset, sizeof(float));
+				std::memcpy(&py, m_vertices->data() + byteOffset + sizeof(float), sizeof(float));
+				std::memcpy(&pz, m_vertices->data() + byteOffset + sizeof(float) * 2, sizeof(float));
+
+				const int32_t qx = static_cast<int32_t>(std::floor(px * meshPositionQuantScale + 0.5f));
+				const int32_t qy = static_cast<int32_t>(std::floor(py * meshPositionQuantScale + 0.5f));
+				const int32_t qz = static_cast<int32_t>(std::floor(pz * meshPositionQuantScale + 0.5f));
+
+				quantizedGroupPositions.push_back({ qx, qy, qz });
+				minQuantized[0] = std::min(minQuantized[0], qx);
+				minQuantized[1] = std::min(minQuantized[1], qy);
+				minQuantized[2] = std::min(minQuantized[2], qz);
+				maxQuantized[0] = std::max(maxQuantized[0], qx);
+				maxQuantized[1] = std::max(maxQuantized[1], qy);
+				maxQuantized[2] = std::max(maxQuantized[2], qz);
+			}
+
+			const uint32_t positionBitsX = BitsNeededForRange(static_cast<uint32_t>(maxQuantized[0] - minQuantized[0]));
+			const uint32_t positionBitsY = BitsNeededForRange(static_cast<uint32_t>(maxQuantized[1] - minQuantized[1]));
+			const uint32_t positionBitsZ = BitsNeededForRange(static_cast<uint32_t>(maxQuantized[2] - minQuantized[2]));
+
+			std::vector<uint32_t> groupCompressedPositionWords;
+			uint64_t positionBitCursor = 0;
+			for (const auto& quantized : quantizedGroupPositions)
+			{
+				AppendBits(groupCompressedPositionWords, positionBitCursor, static_cast<uint32_t>(quantized[0] - minQuantized[0]), positionBitsX);
+				AppendBits(groupCompressedPositionWords, positionBitCursor, static_cast<uint32_t>(quantized[1] - minQuantized[1]), positionBitsY);
+				AppendBits(groupCompressedPositionWords, positionBitCursor, static_cast<uint32_t>(quantized[2] - minQuantized[2]), positionBitsZ);
+			}
+			m_clodGroupCompressedPositionWordChunks.push_back(std::move(groupCompressedPositionWords));
+
+			const uint32_t meshletVertexBits = BitsNeededForRange(std::max<uint32_t>(1u, grp.groupVertexCount) - 1u);
+			std::vector<uint32_t> groupCompressedMeshletVertexWords;
+			uint64_t meshletVertexBitCursor = 0;
+			for (uint32_t localVertexIndex : m_clodGroupMeshletVertexChunks.back())
+			{
+				AppendBits(groupCompressedMeshletVertexWords, meshletVertexBitCursor, localVertexIndex, meshletVertexBits);
+			}
+			m_clodGroupCompressedMeshletVertexWordChunks.push_back(std::move(groupCompressedMeshletVertexWords));
+
 			std::vector<meshopt_Meshlet> groupMeshletChunk;
 			groupMeshletChunk.reserve(groupMeshletCount);
 			for (uint32_t meshletIndex = 0; meshletIndex < groupMeshletCount; ++meshletIndex)
@@ -938,6 +1095,19 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 			groupChunk.meshletTrianglesByteCount = groupMeshletTriangleByteCount;
 			groupChunk.meshletBoundsBase = 0;
 			groupChunk.meshletBoundsCount = groupMeshletBoundsCount;
+			groupChunk.compressedPositionWordsBase = 0;
+			groupChunk.compressedPositionWordCount = static_cast<uint32_t>(m_clodGroupCompressedPositionWordChunks.back().size());
+			groupChunk.compressedPositionBitsX = positionBitsX;
+			groupChunk.compressedPositionBitsY = positionBitsY;
+			groupChunk.compressedPositionBitsZ = positionBitsZ;
+			groupChunk.compressedPositionQuantExp = meshPositionQuantExp;
+			groupChunk.compressedPositionMinQx = minQuantized[0];
+			groupChunk.compressedPositionMinQy = minQuantized[1];
+			groupChunk.compressedPositionMinQz = minQuantized[2];
+			groupChunk.compressedMeshletVertexWordsBase = 0;
+			groupChunk.compressedMeshletVertexWordCount = static_cast<uint32_t>(m_clodGroupCompressedMeshletVertexWordChunks.back().size());
+			groupChunk.compressedMeshletVertexBits = meshletVertexBits;
+			groupChunk.compressedFlags = CLOD_COMPRESSED_POSITIONS | CLOD_COMPRESSED_MESHLET_VERTEX_INDICES;
 
 			// firstChild points to start of this group's child records that were just appended.
 			grp.firstChild = uint32_t(m_clodChildren.size()) - grp.childCount;

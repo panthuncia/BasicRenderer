@@ -118,6 +118,8 @@ namespace CLodCache {
 			out.prebuiltData.groupVertexChunks.assign(groupCount, {});
 			out.prebuiltData.groupSkinningVertexChunks.assign(groupCount, {});
 			out.prebuiltData.groupMeshletVertexChunks.assign(groupCount, {});
+			out.prebuiltData.groupCompressedPositionWordChunks.assign(groupCount, {});
+			out.prebuiltData.groupCompressedMeshletVertexWordChunks.assign(groupCount, {});
 			out.prebuiltData.groupMeshletChunks.assign(groupCount, {});
 			out.prebuiltData.groupMeshletTriangleChunks.assign(groupCount, {});
 			out.prebuiltData.groupMeshletBoundsChunks.assign(groupCount, {});
@@ -170,6 +172,8 @@ namespace CLodCache {
 			const std::vector<std::byte>& vertexChunk,
 			const std::vector<std::byte>& skinningChunk,
 			const std::vector<uint32_t>& meshletVertexChunk,
+			const std::vector<uint32_t>& compressedPositionWordChunk,
+			const std::vector<uint32_t>& compressedMeshletVertexWordChunk,
 			const std::vector<meshopt_Meshlet>& meshletChunk,
 			const std::vector<uint8_t>& meshletTriangleChunk,
 			const std::vector<BoundingSphere>& meshletBoundsChunk)
@@ -198,6 +202,16 @@ namespace CLodCache {
 			meshletVertices.assign(meshletVertexChunk.begin(), meshletVertexChunk.end());
 			groupRoot.CreateAttribute(pxr::TfToken("groupMeshletVertexChunk"), pxr::SdfValueTypeNames->UIntArray, true)
 				.Set(meshletVertices);
+
+			pxr::VtArray<uint32_t> compressedPositionWords;
+			compressedPositionWords.assign(compressedPositionWordChunk.begin(), compressedPositionWordChunk.end());
+			groupRoot.CreateAttribute(pxr::TfToken("groupCompressedPositionWordChunk"), pxr::SdfValueTypeNames->UIntArray, true)
+				.Set(compressedPositionWords);
+
+			pxr::VtArray<uint32_t> compressedMeshletVertexWords;
+			compressedMeshletVertexWords.assign(compressedMeshletVertexWordChunk.begin(), compressedMeshletVertexWordChunk.end());
+			groupRoot.CreateAttribute(pxr::TfToken("groupCompressedMeshletVertexWordChunk"), pxr::SdfValueTypeNames->UIntArray, true)
+				.Set(compressedMeshletVertexWords);
 
 			std::vector<std::byte> meshletChunkBytes(meshletChunk.size() * sizeof(meshopt_Meshlet));
 			if (!meshletChunkBytes.empty()) {
@@ -235,6 +249,9 @@ namespace CLodCache {
 		boost::hash_combine(seed, static_cast<uint32_t>(32)); // target bucket clusters
 		boost::hash_combine(seed, static_cast<uint32_t>(4));  // max group children
 		boost::hash_combine(seed, static_cast<uint32_t>(4));  // traversal node fanout
+		boost::hash_combine(seed, static_cast<uint32_t>(1));  // compressed group position bitstream enabled
+		boost::hash_combine(seed, static_cast<uint32_t>(1));  // compressed meshlet vertex index bitstream enabled
+		boost::hash_combine(seed, static_cast<uint32_t>(1));  // mesh quantization heuristic version
 		return static_cast<uint64_t>(seed);
 	}
 
@@ -328,6 +345,16 @@ namespace CLodCache {
 				out.prebuiltData.groupMeshletVertexChunks[groupIndex].assign(meshletVertexChunk.begin(), meshletVertexChunk.end());
 			}
 
+			pxr::VtArray<uint32_t> compressedPositionWordChunk;
+			if (groupPrim.GetAttribute(pxr::TfToken("groupCompressedPositionWordChunk")).Get(&compressedPositionWordChunk)) {
+				out.prebuiltData.groupCompressedPositionWordChunks[groupIndex].assign(compressedPositionWordChunk.begin(), compressedPositionWordChunk.end());
+			}
+
+			pxr::VtArray<uint32_t> compressedMeshletVertexWordChunk;
+			if (groupPrim.GetAttribute(pxr::TfToken("groupCompressedMeshletVertexWordChunk")).Get(&compressedMeshletVertexWordChunk)) {
+				out.prebuiltData.groupCompressedMeshletVertexWordChunks[groupIndex].assign(compressedMeshletVertexWordChunk.begin(), compressedMeshletVertexWordChunk.end());
+			}
+
 			pxr::VtArray<unsigned char> meshletChunkBytes;
 			if (groupPrim.GetAttribute(pxr::TfToken("groupMeshletChunk")).Get(&meshletChunkBytes)) {
 				const std::vector<std::byte> bytes = ToBytes(meshletChunkBytes);
@@ -388,6 +415,8 @@ namespace CLodCache {
 		metadataOnly.prebuiltData.groupVertexChunks.clear();
 		metadataOnly.prebuiltData.groupSkinningVertexChunks.clear();
 		metadataOnly.prebuiltData.groupMeshletVertexChunks.clear();
+		metadataOnly.prebuiltData.groupCompressedPositionWordChunks.clear();
+		metadataOnly.prebuiltData.groupCompressedMeshletVertexWordChunks.clear();
 		metadataOnly.prebuiltData.groupMeshletChunks.clear();
 		metadataOnly.prebuiltData.groupMeshletTriangleChunks.clear();
 		metadataOnly.prebuiltData.groupMeshletBoundsChunks.clear();
@@ -407,11 +436,13 @@ namespace CLodCache {
 			const auto& vertexChunk = (groupIndex < data.prebuiltData.groupVertexChunks.size()) ? data.prebuiltData.groupVertexChunks[groupIndex] : emptyBytes;
 			const auto& skinningChunk = (groupIndex < data.prebuiltData.groupSkinningVertexChunks.size()) ? data.prebuiltData.groupSkinningVertexChunks[groupIndex] : emptyBytes;
 			const auto& meshletVertexChunk = (groupIndex < data.prebuiltData.groupMeshletVertexChunks.size()) ? data.prebuiltData.groupMeshletVertexChunks[groupIndex] : emptyU32;
+			const auto& compressedPositionWordChunk = (groupIndex < data.prebuiltData.groupCompressedPositionWordChunks.size()) ? data.prebuiltData.groupCompressedPositionWordChunks[groupIndex] : emptyU32;
+			const auto& compressedMeshletVertexWordChunk = (groupIndex < data.prebuiltData.groupCompressedMeshletVertexWordChunks.size()) ? data.prebuiltData.groupCompressedMeshletVertexWordChunks[groupIndex] : emptyU32;
 			const auto& meshletChunk = (groupIndex < data.prebuiltData.groupMeshletChunks.size()) ? data.prebuiltData.groupMeshletChunks[groupIndex] : emptyMeshlets;
 			const auto& meshletTriangleChunk = (groupIndex < data.prebuiltData.groupMeshletTriangleChunks.size()) ? data.prebuiltData.groupMeshletTriangleChunks[groupIndex] : emptyU8;
 			const auto& meshletBoundsChunk = (groupIndex < data.prebuiltData.groupMeshletBoundsChunks.size()) ? data.prebuiltData.groupMeshletBoundsChunks[groupIndex] : emptyBounds;
 
-			if (!SaveGroupPayloadLayer(key, data.buildConfigHash, groupIndex, vertexChunk, skinningChunk, meshletVertexChunk, meshletChunk, meshletTriangleChunk, meshletBoundsChunk)) {
+			if (!SaveGroupPayloadLayer(key, data.buildConfigHash, groupIndex, vertexChunk, skinningChunk, meshletVertexChunk, compressedPositionWordChunk, compressedMeshletVertexWordChunk, meshletChunk, meshletTriangleChunk, meshletBoundsChunk)) {
 				spdlog::warn("Failed to save CLod group payload {}", groupIndex);
 				return false;
 			}

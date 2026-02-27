@@ -43,6 +43,17 @@ struct MeshletSetup
     uint groupMeshletVerticesBase;
     uint groupMeshletVertexCount;
     uint groupMeshletTrianglesByteOffset;
+    uint compressedPositionWordsBase;
+    uint compressedPositionWordCount;
+    uint compressedPositionBitsX;
+    uint compressedPositionBitsY;
+    uint compressedPositionBitsZ;
+    uint compressedPositionQuantExp;
+    int3 compressedPositionMinQ;
+    uint compressedMeshletVertexWordsBase;
+    uint compressedMeshletVertexWordCount;
+    uint compressedMeshletVertexBits;
+    uint compressedFlags;
     uint postSkinningBufferOffset;
     uint prevPostSkinningBufferOffset;
     // ByteAddressBuffer vertexBuffer;
@@ -83,6 +94,17 @@ bool InitializeMeshletInternal(
     setup.groupMeshletVerticesBase = 0;
     setup.groupMeshletVertexCount = 0;
     setup.groupMeshletTrianglesByteOffset = setup.meshBuffer.clodMeshletTrianglesBufferOffset;
+    setup.compressedPositionWordsBase = 0;
+    setup.compressedPositionWordCount = 0;
+    setup.compressedPositionBitsX = 0;
+    setup.compressedPositionBitsY = 0;
+    setup.compressedPositionBitsZ = 0;
+    setup.compressedPositionQuantExp = 0;
+    setup.compressedPositionMinQ = int3(0, 0, 0);
+    setup.compressedMeshletVertexWordsBase = 0;
+    setup.compressedMeshletVertexWordCount = 0;
+    setup.compressedMeshletVertexBits = 0;
+    setup.compressedFlags = 0;
 
     // setup.vertexBuffer = vertexBuffer;
     // setup.meshletTrianglesBuffer = meshletTrianglesBuffer;
@@ -157,6 +179,20 @@ bool InitializeMeshletInternalCLod(
     setup.groupMeshletVerticesBase = groupChunk.meshletVerticesBase;
     setup.groupMeshletVertexCount = groupChunk.meshletVertexCount;
     setup.groupMeshletTrianglesByteOffset = groupChunk.meshletTrianglesByteOffset;
+    setup.compressedPositionWordsBase = groupChunk.compressedPositionWordsBase;
+    setup.compressedPositionWordCount = groupChunk.compressedPositionWordCount;
+    setup.compressedPositionBitsX = groupChunk.compressedPositionBitsX;
+    setup.compressedPositionBitsY = groupChunk.compressedPositionBitsY;
+    setup.compressedPositionBitsZ = groupChunk.compressedPositionBitsZ;
+    setup.compressedPositionQuantExp = groupChunk.compressedPositionQuantExp;
+    setup.compressedPositionMinQ = int3(
+        groupChunk.compressedPositionMinQx,
+        groupChunk.compressedPositionMinQy,
+        groupChunk.compressedPositionMinQz);
+    setup.compressedMeshletVertexWordsBase = groupChunk.compressedMeshletVertexWordsBase;
+    setup.compressedMeshletVertexWordCount = groupChunk.compressedMeshletVertexWordCount;
+    setup.compressedMeshletVertexBits = groupChunk.compressedMeshletVertexBits;
+    setup.compressedFlags = groupChunk.compressedFlags;
 
     if (setup.vertOffset + setup.vertCount > setup.groupMeshletVertexCount)
     {

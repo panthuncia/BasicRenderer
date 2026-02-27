@@ -70,6 +70,8 @@ struct ClusterLODPrebuiltData
 	std::vector<std::vector<std::byte>> groupVertexChunks;
 	std::vector<std::vector<std::byte>> groupSkinningVertexChunks;
 	std::vector<std::vector<uint32_t>> groupMeshletVertexChunks;
+	std::vector<std::vector<uint32_t>> groupCompressedPositionWordChunks;
+	std::vector<std::vector<uint32_t>> groupCompressedMeshletVertexWordChunks;
 	std::vector<std::vector<meshopt_Meshlet>> groupMeshletChunks;
 	std::vector<std::vector<uint8_t>> groupMeshletTriangleChunks;
 	std::vector<std::vector<BoundingSphere>> groupMeshletBoundsChunks;
@@ -221,6 +223,14 @@ public:
 		return m_clodGroupMeshletVertexChunks;
 	}
 
+	const std::vector<std::vector<uint32_t>>& GetCLodGroupCompressedPositionWordChunks() const {
+		return m_clodGroupCompressedPositionWordChunks;
+	}
+
+	const std::vector<std::vector<uint32_t>>& GetCLodGroupCompressedMeshletVertexWordChunks() const {
+		return m_clodGroupCompressedMeshletVertexWordChunks;
+	}
+
 	const std::vector<std::vector<meshopt_Meshlet>>& GetCLodGroupMeshletChunks() const {
 		return m_clodGroupMeshletChunks;
 	}
@@ -240,6 +250,10 @@ public:
 		m_clodGroupSkinningVertexChunks.shrink_to_fit();
 		m_clodGroupMeshletVertexChunks.clear();
 		m_clodGroupMeshletVertexChunks.shrink_to_fit();
+		m_clodGroupCompressedPositionWordChunks.clear();
+		m_clodGroupCompressedPositionWordChunks.shrink_to_fit();
+		m_clodGroupCompressedMeshletVertexWordChunks.clear();
+		m_clodGroupCompressedMeshletVertexWordChunks.shrink_to_fit();
 		m_clodGroupMeshletChunks.clear();
 		m_clodGroupMeshletChunks.shrink_to_fit();
 		m_clodGroupMeshletTriangleChunks.clear();
@@ -284,12 +298,16 @@ public:
 		std::vector<std::unique_ptr<BufferView>> preSkinningVertexChunkViews,
 		std::vector<std::unique_ptr<BufferView>> postSkinningVertexChunkViews,
 		std::vector<std::unique_ptr<BufferView>> meshletVertexChunkViews,
+		std::vector<std::unique_ptr<BufferView>> compressedPositionChunkViews,
+		std::vector<std::unique_ptr<BufferView>> compressedMeshletVertexChunkViews,
 		std::vector<std::unique_ptr<BufferView>> meshletChunkViews,
 		std::vector<std::unique_ptr<BufferView>> meshletTriangleChunkViews,
 		std::vector<std::unique_ptr<BufferView>> meshletBoundsChunkViews) {
 		m_clodPreSkinningVertexChunkViews = std::move(preSkinningVertexChunkViews);
 		m_clodPostSkinningVertexChunkViews = std::move(postSkinningVertexChunkViews);
 		m_clodMeshletVertexChunkViews = std::move(meshletVertexChunkViews);
+		m_clodCompressedPositionChunkViews = std::move(compressedPositionChunkViews);
+		m_clodCompressedMeshletVertexChunkViews = std::move(compressedMeshletVertexChunkViews);
 		m_clodMeshletChunkViews = std::move(meshletChunkViews);
 		m_clodMeshletTriangleChunkViews = std::move(meshletTriangleChunkViews);
 		m_clodMeshletBoundsChunkViews = std::move(meshletBoundsChunkViews);
@@ -305,6 +323,14 @@ public:
 
 	const std::vector<std::unique_ptr<BufferView>>& GetCLodMeshletVertexChunkViews() const {
 		return m_clodMeshletVertexChunkViews;
+	}
+
+	const std::vector<std::unique_ptr<BufferView>>& GetCLodCompressedPositionChunkViews() const {
+		return m_clodCompressedPositionChunkViews;
+	}
+
+	const std::vector<std::unique_ptr<BufferView>>& GetCLodCompressedMeshletVertexChunkViews() const {
+		return m_clodCompressedMeshletVertexChunkViews;
 	}
 
 	const std::vector<std::unique_ptr<BufferView>>& GetCLodMeshletChunkViews() const {
@@ -371,12 +397,16 @@ private:
 	std::vector<std::vector<std::byte>> m_clodGroupVertexChunks;
 	std::vector<std::vector<std::byte>> m_clodGroupSkinningVertexChunks;
 	std::vector<std::vector<uint32_t>> m_clodGroupMeshletVertexChunks;
+	std::vector<std::vector<uint32_t>> m_clodGroupCompressedPositionWordChunks;
+	std::vector<std::vector<uint32_t>> m_clodGroupCompressedMeshletVertexWordChunks;
 	std::vector<std::vector<meshopt_Meshlet>> m_clodGroupMeshletChunks;
 	std::vector<std::vector<uint8_t>> m_clodGroupMeshletTriangleChunks;
 	std::vector<std::vector<BoundingSphere>> m_clodGroupMeshletBoundsChunks;
 	std::vector<std::unique_ptr<BufferView>> m_clodPreSkinningVertexChunkViews;
 	std::vector<std::unique_ptr<BufferView>> m_clodPostSkinningVertexChunkViews;
 	std::vector<std::unique_ptr<BufferView>> m_clodMeshletVertexChunkViews;
+	std::vector<std::unique_ptr<BufferView>> m_clodCompressedPositionChunkViews;
+	std::vector<std::unique_ptr<BufferView>> m_clodCompressedMeshletVertexChunkViews;
 	std::vector<std::unique_ptr<BufferView>> m_clodMeshletChunkViews;
 	std::vector<std::unique_ptr<BufferView>> m_clodMeshletTriangleChunkViews;
 	std::vector<std::unique_ptr<BufferView>> m_clodMeshletBoundsChunkViews;
