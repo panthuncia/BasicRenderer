@@ -1221,11 +1221,19 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 		std::vector<CapturedClusterLODGroup> capturedGroups;
 		capturedGroups.reserve(1024);
 
-		clodBuild(config, mesh,
-			[&](clodGroup group, const clodCluster* clusters, size_t clusterCount) -> int
+		struct CaptureOutputContext
+		{
+			std::vector<CapturedClusterLODGroup>* capturedGroups = nullptr;
+		};
+
+		struct ClodBuildCallbacks
+		{
+			static int Output(void* outputContext, clodGroup group, const clodCluster* clusters, size_t clusterCount, size_t, unsigned int)
 			{
+				CaptureOutputContext* context = static_cast<CaptureOutputContext*>(outputContext);
+
 				CapturedClusterLODGroup capturedGroup{};
-				capturedGroup.groupId = static_cast<uint32_t>(capturedGroups.size());
+				capturedGroup.groupId = static_cast<uint32_t>(context->capturedGroups->size());
 				capturedGroup.depth = group.depth;
 				capturedGroup.simplified = group.simplified;
 				capturedGroup.clusters.reserve(clusterCount);
@@ -1243,9 +1251,27 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 					capturedGroup.clusters.push_back(std::move(capturedCluster));
 				}
 
-				capturedGroups.push_back(std::move(capturedGroup));
-				return static_cast<int>(capturedGroups.size() - 1);
-			});
+				context->capturedGroups->push_back(std::move(capturedGroup));
+				return static_cast<int>(context->capturedGroups->size() - 1);
+			}
+
+			static void Iterate(void* iterationContext, void*, int, size_t taskCount)
+			{
+				RunDeterministicParallelFor(taskCount, [&](size_t taskIndex)
+					{
+						clodBuild_iterationTask(iterationContext, taskIndex, 0);
+					});
+			}
+		};
+
+		CaptureOutputContext captureContext{};
+		captureContext.capturedGroups = &capturedGroups;
+
+		clodBuildParallelConfig parallelConfig{};
+		parallelConfig.iteration_callback = &ClodBuildCallbacks::Iterate;
+		const clodBuildParallelConfig* parallelConfigPtr = (std::thread::hardware_concurrency() > 1u) ? &parallelConfig : nullptr;
+
+		clodBuildEx(config, mesh, &captureContext, &ClodBuildCallbacks::Output, parallelConfigPtr);
 
 		std::vector<ClusterLODGroupBuildOutput> groupOutputs(capturedGroups.size());
 		RunDeterministicParallelFor(capturedGroups.size(), [&](size_t groupIndex)

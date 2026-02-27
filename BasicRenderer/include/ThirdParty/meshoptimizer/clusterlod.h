@@ -144,6 +144,18 @@ struct clodGroup
 // returned value gets saved for clusters emitted from this group (clodCluster::refined)
 typedef int (*clodOutput)(void* output_context, clodGroup group, const clodCluster* clusters, size_t cluster_count);
 
+// extended output callback variant used by clodBuildEx; task/thread indices are for diagnostics only
+typedef int (*clodOutputEx)(void* output_context, clodGroup group, const clodCluster* clusters, size_t cluster_count, size_t task_index, unsigned int thread_index);
+
+// called once per LOD iteration (except the final terminal output pass)
+// callback is expected to schedule tasks [0, task_count) and call clodBuild_iterationTask for each of them
+typedef void (*clodIteration)(void* iteration_context, void* output_context, int depth, size_t task_count);
+
+struct clodBuildParallelConfig
+{
+	clodIteration iteration_callback;
+};
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -156,6 +168,12 @@ clodConfig clodDefaultConfigRT(size_t max_triangles);
 // build cluster LOD hierarchy, calling output callbacks as new clusters and groups are generated
 // returns the total number of clusters produced
 size_t clodBuild(clodConfig config, clodMesh mesh, void* output_context, clodOutput output_callback);
+
+// extended build entry point supporting deterministic inner-threaded per-iteration execution
+size_t clodBuildEx(clodConfig config, clodMesh mesh, void* output_context, clodOutputEx output_callback, const clodBuildParallelConfig* parallel_config);
+
+// helper used by clodIteration callback to execute one task from the current iteration
+void clodBuild_iterationTask(void* iteration_context, size_t task_index, unsigned int thread_index);
 
 // extract meshlet-local indices from cluster indices produced by clodBuild
 // fills triangles[] and vertices[] such that vertices[triangles[i]] == indices[i]
@@ -177,6 +195,50 @@ size_t clodBuild(clodConfig config, clodMesh mesh, Output output)
 	};
 
 	return clodBuild(config, mesh, &output, &Call::output);
+}
+
+template <typename OutputEx, typename Iteration>
+size_t clodBuildEx(clodConfig config, clodMesh mesh, OutputEx output, Iteration iteration)
+{
+	struct CallContext
+	{
+		OutputEx* output;
+		Iteration* iteration;
+	};
+
+	struct Call
+	{
+		static int output(void* output_context, clodGroup group, const clodCluster* clusters, size_t cluster_count, size_t task_index, unsigned int thread_index)
+		{
+			CallContext* context = static_cast<CallContext*>(output_context);
+			return (*context->output)(group, clusters, cluster_count, task_index, thread_index);
+		}
+
+		static void iterate(void* iteration_context, void* iteration_output_context, int depth, size_t task_count)
+		{
+			CallContext* context = static_cast<CallContext*>(iteration_output_context);
+			(*context->iteration)(iteration_context, depth, task_count);
+		}
+	};
+
+	CallContext callContext{ &output, &iteration };
+	clodBuildParallelConfig parallelConfig{};
+	parallelConfig.iteration_callback = &Call::iterate;
+	return clodBuildEx(config, mesh, &callContext, &Call::output, &parallelConfig);
+}
+
+template <typename OutputEx>
+size_t clodBuildEx(clodConfig config, clodMesh mesh, OutputEx output)
+{
+	struct Call
+	{
+		static int output(void* output_context, clodGroup group, const clodCluster* clusters, size_t cluster_count, size_t task_index, unsigned int thread_index)
+		{
+			return (*static_cast<OutputEx*>(output_context))(group, clusters, cluster_count, task_index, thread_index);
+		}
+	};
+
+	return clodBuildEx(config, mesh, &output, &Call::output, nullptr);
 }
 #endif
 
@@ -595,7 +657,26 @@ static std::vector<unsigned int> simplify(const clodConfig& config, const clodMe
 	return lod;
 }
 
-static int outputGroup(const clodConfig& config, const clodMesh& mesh, const std::vector<Cluster>& clusters, const std::vector<int>& group, const clodBounds& simplified, int depth, void* output_context, clodOutput output_callback)
+struct IterationTaskResult
+{
+	bool computed = false;
+	bool terminal = false;
+	clodBounds bounds{};
+	std::vector<unsigned int> simplified;
+	unsigned int threadIndex = 0;
+};
+
+struct IterationContext
+{
+	clodConfig config{};
+	clodMesh mesh{};
+	const std::vector<std::vector<int> >* groups = NULL;
+	const std::vector<unsigned char>* locks = NULL;
+	std::vector<Cluster>* clusters = NULL;
+	std::vector<IterationTaskResult>* taskResults = NULL;
+};
+
+static int outputGroupEx(const clodConfig& config, const clodMesh& mesh, const std::vector<Cluster>& clusters, const std::vector<int>& group, const clodBounds& simplified, int depth, void* output_context, clodOutputEx output_callback, size_t task_index, unsigned int thread_index)
 {
 	std::vector<clodCluster> group_clusters(group.size());
 
@@ -611,7 +692,44 @@ static int outputGroup(const clodConfig& config, const clodMesh& mesh, const std
 		result.vertex_count = cluster.vertices;
 	}
 
-	return output_callback ? output_callback(output_context, {depth, simplified}, group_clusters.data(), group_clusters.size()) : -1;
+	return output_callback ? output_callback(output_context, {depth, simplified}, group_clusters.data(), group_clusters.size(), task_index, thread_index) : -1;
+}
+
+static void runIterationTask(IterationContext& context, size_t task_index, unsigned int thread_index)
+{
+	assert(context.groups != NULL && context.locks != NULL && context.clusters != NULL && context.taskResults != NULL);
+	assert(task_index < context.groups->size());
+
+	IterationTaskResult& taskResult = (*context.taskResults)[task_index];
+	const std::vector<int>& group = (*context.groups)[task_index];
+	const std::vector<Cluster>& clusters = *context.clusters;
+
+	std::vector<unsigned int> merged;
+	merged.reserve(group.size() * context.config.max_triangles * 3);
+	for (size_t j = 0; j < group.size(); ++j)
+		merged.insert(merged.end(), clusters[group[j]].indices.begin(), clusters[group[j]].indices.end());
+
+	size_t target_size = size_t((merged.size() / 3) * context.config.simplify_ratio) * 3;
+
+	taskResult.bounds = boundsMerge(clusters, group);
+
+	float error = 0.f;
+	std::vector<unsigned int> simplified = simplify(context.config, context.mesh, merged, *context.locks, target_size, &error);
+	if (simplified.size() > merged.size() * context.config.simplify_threshold)
+	{
+		taskResult.terminal = true;
+		taskResult.bounds.error = FLT_MAX;
+		taskResult.simplified.clear();
+		taskResult.threadIndex = thread_index;
+		taskResult.computed = true;
+		return;
+	}
+
+	taskResult.terminal = false;
+	taskResult.bounds.error = std::max(taskResult.bounds.error * context.config.simplify_error_merge_previous, error) + error * context.config.simplify_error_merge_additive;
+	taskResult.simplified = std::move(simplified);
+	taskResult.threadIndex = thread_index;
+	taskResult.computed = true;
 }
 
 } // namespace clod
@@ -666,7 +784,7 @@ clodConfig clodDefaultConfigRT(size_t max_triangles)
 	return config;
 }
 
-size_t clodBuild(clodConfig config, clodMesh mesh, void* output_context, clodOutput output_callback)
+size_t clodBuildEx(clodConfig config, clodMesh mesh, void* output_context, clodOutputEx output_callback, const clodBuildParallelConfig* parallel_config)
 {
 	using namespace clod;
 
@@ -718,49 +836,57 @@ size_t clodBuild(clodConfig config, clodMesh mesh, void* output_context, clodOut
 		// mark boundaries between groups with a lock bit to avoid gaps in simplified result
 		lockBoundary(locks, groups, clusters, remap, mesh.vertex_lock);
 
-		// every group needs to be simplified now
+		std::vector<IterationTaskResult> taskResults(groups.size());
+		IterationContext iterationContext{};
+		iterationContext.config = config;
+		iterationContext.mesh = mesh;
+		iterationContext.groups = &groups;
+		iterationContext.locks = &locks;
+		iterationContext.clusters = &clusters;
+		iterationContext.taskResults = &taskResults;
+
+		if (parallel_config && parallel_config->iteration_callback)
+		{
+			parallel_config->iteration_callback(&iterationContext, output_context, depth, groups.size());
+		}
+		else
+		{
+			for (size_t i = 0; i < groups.size(); ++i)
+			{
+				runIterationTask(iterationContext, i, 0);
+			}
+		}
+
 		for (size_t i = 0; i < groups.size(); ++i)
 		{
-			std::vector<unsigned int> merged;
-			merged.reserve(groups[i].size() * config.max_triangles * 3);
-			for (size_t j = 0; j < groups[i].size(); ++j)
-				merged.insert(merged.end(), clusters[groups[i][j]].indices.begin(), clusters[groups[i][j]].indices.end());
-
-			size_t target_size = size_t((merged.size() / 3) * config.simplify_ratio) * 3;
-
-			// enforce bounds and error monotonicity
-			// note: it is incorrect to use the precise bounds of the merged or simplified mesh, because this may violate monotonicity
-			clodBounds bounds = boundsMerge(clusters, groups[i]);
-
-			float error = 0.f;
-			std::vector<unsigned int> simplified = simplify(config, mesh, merged, locks, target_size, &error);
-			if (simplified.size() > merged.size() * config.simplify_threshold)
+			if (!taskResults[i].computed)
 			{
-				bounds.error = FLT_MAX; // terminal group, won't simplify further
-				outputGroup(config, mesh, clusters, groups[i], bounds, depth, output_context, output_callback);
-				continue; // simplification is stuck; abandon the merge
+				runIterationTask(iterationContext, i, 0);
+			}
+		}
+
+		for (size_t i = 0; i < groups.size(); ++i)
+		{
+			const std::vector<int>& group = groups[i];
+			IterationTaskResult& taskResult = taskResults[i];
+
+			if (taskResult.terminal)
+			{
+				outputGroupEx(config, mesh, clusters, group, taskResult.bounds, depth, output_context, output_callback, i, taskResult.threadIndex);
+				continue;
 			}
 
-			// enforce error monotonicity (with an optional hierarchical factor to separate transitions more)
-			bounds.error = std::max(bounds.error * config.simplify_error_merge_previous, error) + error * config.simplify_error_merge_additive;
+			const int refined = outputGroupEx(config, mesh, clusters, group, taskResult.bounds, depth, output_context, output_callback, i, taskResult.threadIndex);
 
-			// output the new group with all clusters; the resulting id will be recorded in new clusters as clodCluster::refined
-			int refined = outputGroup(config, mesh, clusters, groups[i], bounds, depth, output_context, output_callback);
+			for (size_t j = 0; j < group.size(); ++j)
+				clusters[group[j]].indices = std::vector<unsigned int>();
 
-			// discard clusters from the group - they won't be used anymore
-			for (size_t j = 0; j < groups[i].size(); ++j)
-				clusters[groups[i][j]].indices = std::vector<unsigned int>();
-
-			std::vector<Cluster> split = clusterize(config, mesh, simplified.data(), simplified.size());
+			std::vector<Cluster> split = clusterize(config, mesh, taskResult.simplified.data(), taskResult.simplified.size());
 
 			for (Cluster& cluster : split)
 			{
 				cluster.refined = refined;
-
-				// update cluster group bounds to the group-merged bounds; this ensures that we compute the group bounds for whatever group this cluster will be part of conservatively
-				cluster.bounds = bounds;
-
-				// enqueue new cluster for further processing
+				cluster.bounds = taskResult.bounds;
 				clusters.push_back(std::move(cluster));
 				pending.push_back(int(clusters.size()) - 1);
 			}
@@ -777,10 +903,37 @@ size_t clodBuild(clodConfig config, clodMesh mesh, void* output_context, clodOut
 		clodBounds bounds = cluster.bounds;
 		bounds.error = FLT_MAX; // terminal group, won't simplify further
 
-		outputGroup(config, mesh, clusters, pending, bounds, depth, output_context, output_callback);
+		outputGroupEx(config, mesh, clusters, pending, bounds, depth, output_context, output_callback, 0, 0);
 	}
 
 	return clusters.size();
+}
+
+size_t clodBuild(clodConfig config, clodMesh mesh, void* output_context, clodOutput output_callback)
+{
+	struct OutputAdapterContext
+	{
+		void* outputContext;
+		clodOutput outputCallback;
+	};
+
+	struct OutputAdapter
+	{
+		static int output(void* output_context, clodGroup group, const clodCluster* clusters, size_t cluster_count, size_t, unsigned int)
+		{
+			OutputAdapterContext* context = static_cast<OutputAdapterContext*>(output_context);
+			return context->outputCallback ? context->outputCallback(context->outputContext, group, clusters, cluster_count) : -1;
+		}
+	};
+
+	OutputAdapterContext adapter{ output_context, output_callback };
+	return clodBuildEx(config, mesh, &adapter, &OutputAdapter::output, NULL);
+}
+
+void clodBuild_iterationTask(void* iteration_context, size_t task_index, unsigned int thread_index)
+{
+	clod::IterationContext* context = static_cast<clod::IterationContext*>(iteration_context);
+	clod::runIterationTask(*context, task_index, thread_index);
 }
 
 size_t clodLocalIndices(unsigned int* vertices, unsigned char* triangles, const unsigned int* indices, size_t index_count)
