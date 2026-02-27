@@ -13,6 +13,7 @@
 #include "Import/Filetypes.h"
 #include "Scene/Scene.h"
 #include "Mesh/Mesh.h"
+#include "Import/CLodCacheLoader.h"
 #include "Animation/Skeleton.h"
 #include "Scene/Components.h"
 #include "Animation/AnimationController.h"
@@ -20,6 +21,20 @@
 #include "Import/AssimpLoader.h"
 
 namespace AssimpLoader {
+
+    namespace {
+        CLodCacheLoader::MeshCacheIdentity BuildAssimpCacheIdentity(const std::string& sourceFilePath, const aiMesh* mesh, unsigned int meshIndex)
+        {
+            CLodCacheLoader::MeshCacheIdentity identity{};
+            identity.sourceIdentifier = sourceFilePath;
+            identity.primPath = "/Assimp/Mesh/" + std::to_string(meshIndex);
+            if (mesh != nullptr && mesh->mName.length > 0) {
+                identity.primPath += "/" + std::string(mesh->mName.C_Str());
+            }
+            identity.subsetName = "";
+            return identity;
+        }
+    }
 
     rhi::AddressMode aiTextureMapModeToRHI(aiTextureMapMode mode) {
         switch (mode) {
@@ -391,7 +406,8 @@ namespace AssimpLoader {
 
     static std::pair<std::vector<std::shared_ptr<Mesh>>, std::vector<int>> parseAiMeshes(
         const aiScene* pScene,
-        const std::vector<std::shared_ptr<Material>>& materials
+        const std::vector<std::shared_ptr<Material>>& materials,
+        const std::string& sourceFilePath
     )
     {
         std::vector<std::shared_ptr<Mesh>> meshes;
@@ -498,7 +514,16 @@ namespace AssimpLoader {
                 }
             }
 
-            meshes.push_back(MeshFromData(geometry, s2ws(aMesh->mName.C_Str())));
+            auto cacheIdentity = BuildAssimpCacheIdentity(sourceFilePath, aMesh, i);
+            auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
+            const ClusterLODPrebuiltData* prebuiltDataPtr = prebuiltData ? &(*prebuiltData) : nullptr;
+
+            auto mesh = MeshFromData(geometry, s2ws(aMesh->mName.C_Str()), prebuiltDataPtr);
+            if (!prebuiltData.has_value()) {
+                CLodCacheLoader::SavePrebuilt(cacheIdentity, mesh->GetClusterLODPrebuiltData());
+            }
+
+            meshes.push_back(mesh);
         }
 
         return { meshes , meshSkinIndices };
@@ -595,7 +620,7 @@ namespace AssimpLoader {
                 }
 
                 if (!found) {
-                    // This channel references a node we didn’t find
+                    // This channel references a node we didnï¿½t find
                     spdlog::warn("Animation {} references unknown node: {}", animName, nodeName);
                     continue;
                 }
@@ -731,7 +756,7 @@ namespace AssimpLoader {
         std::string directory = GetDirectoryFromPath(filePath);
 
         auto materials = LoadMaterialsFromAssimpScene(pScene, directory);
-        auto [meshes, meshSkinIndices] = parseAiMeshes(pScene, materials);
+        auto [meshes, meshSkinIndices] = parseAiMeshes(pScene, materials, filePath);
         std::vector<flecs::entity> nodes;
         std::unordered_map<std::string, flecs::entity> nodeMap;
         buildAiNodeHierarchy(scene, pScene->mRootNode, pScene, meshes, nodes, nodeMap);

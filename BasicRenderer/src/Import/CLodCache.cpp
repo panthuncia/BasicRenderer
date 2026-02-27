@@ -7,6 +7,7 @@
 #include <limits>
 #include <sstream>
 #include <vector>
+#include <cwctype>
 
 #include <boost/container_hash/hash.hpp>
 #include <pxr/base/vt/array.h>
@@ -27,6 +28,56 @@ namespace CLodCache {
 	namespace {
 		static constexpr const char* kRootPrimPath = "/CLodCache";
 		static constexpr const char* kGroupsPrimPath = "/CLodCache/Groups";
+
+		std::wstring SanitizeFolderName(const std::wstring& input)
+		{
+			if (input.empty()) {
+				return L"scene";
+			}
+
+			std::wstring out;
+			out.reserve(input.size());
+			for (wchar_t ch : input) {
+				if (std::iswalnum(ch) != 0 || ch == L'_' || ch == L'-') {
+					out.push_back(ch);
+				}
+				else {
+					out.push_back(L'_');
+				}
+			}
+
+			if (out.empty()) {
+				return L"scene";
+			}
+
+			return out;
+		}
+
+		std::wstring BuildSceneCacheSubdirectory(const std::string& sourceIdentifier)
+		{
+			std::wstring stem = L"scene";
+			if (!sourceIdentifier.empty()) {
+				std::filesystem::path sourcePath = s2ws(sourceIdentifier);
+				std::wstring sourceStem = sourcePath.stem().wstring();
+				if (!sourceStem.empty()) {
+					stem = sourceStem;
+				}
+			}
+
+			stem = SanitizeFolderName(stem);
+
+			size_t hashSeed = 0;
+			boost::hash_combine(hashSeed, sourceIdentifier);
+
+			std::wstringstream folderName;
+			folderName << stem << L"_" << std::hex << hashSeed;
+			return L"clod\\" + folderName.str();
+		}
+
+		std::wstring GetCacheFilePathBySource(const std::wstring& fileName, const std::string& sourceIdentifier)
+		{
+			return GetCacheFilePath(fileName, BuildSceneCacheSubdirectory(sourceIdentifier));
+		}
 
 		template<typename T>
 		void WritePod(std::vector<std::byte>& out, const T& value)
@@ -328,7 +379,7 @@ namespace CLodCache {
 			const std::vector<BoundingSphere>& meshletBoundsChunk)
 		{
 			const std::wstring groupFileName = BuildGroupPayloadFileName(key, buildConfigHash, groupIndex);
-			const std::wstring groupCachePath = GetCacheFilePath(groupFileName, L"clod");
+			const std::wstring groupCachePath = GetCacheFilePathBySource(groupFileName, key.sourceIdentifier);
 
 			auto groupStage = pxr::UsdStage::CreateNew(ws2s(groupCachePath), pxr::UsdStage::LoadNone);
 			if (!groupStage) {
@@ -426,7 +477,7 @@ namespace CLodCache {
 	std::optional<CacheData> TryLoad(const CacheKey& key, uint64_t expectedBuildConfigHash)
 	{
 		const std::wstring fileName = BuildCacheFileName(key, expectedBuildConfigHash);
-		const std::wstring cachePath = GetCacheFilePath(fileName, L"clod");
+		const std::wstring cachePath = GetCacheFilePathBySource(fileName, key.sourceIdentifier);
 		if (!std::filesystem::exists(cachePath)) {
 			return std::nullopt;
 		}
@@ -571,9 +622,9 @@ namespace CLodCache {
 	bool Save(const CacheKey& key, const CacheData& data)
 	{
 		const std::wstring fileName = BuildCacheFileName(key, data.buildConfigHash);
-		const std::wstring cachePath = GetCacheFilePath(fileName, L"clod");
+		const std::wstring cachePath = GetCacheFilePathBySource(fileName, key.sourceIdentifier);
 		const std::wstring containerFileName = BuildGroupContainerFileName(key, data.buildConfigHash);
-		const std::wstring containerPath = GetCacheFilePath(containerFileName, L"clod");
+		const std::wstring containerPath = GetCacheFilePathBySource(containerFileName, key.sourceIdentifier);
 
 		std::vector<ClusterLODGroupDiskSpans> groupDiskSpans;
 		if (!SaveContainerPayload(containerPath, data, groupDiskSpans)) {
@@ -649,7 +700,7 @@ namespace CLodCache {
 			return false;
 		}
 
-		const std::wstring containerPath = GetCacheFilePath(prebuilt.cacheSource.containerFileName, L"clod");
+		const std::wstring containerPath = GetCacheFilePathBySource(prebuilt.cacheSource.containerFileName, prebuilt.cacheSource.sourceIdentifier);
 		std::ifstream file(containerPath, std::ios::binary);
 		if (!file.is_open()) {
 			return false;

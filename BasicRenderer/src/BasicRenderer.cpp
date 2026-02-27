@@ -349,21 +349,25 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //auto usdScene = LoadModel("models/sponza.usdz");
     
-    auto bistro = LoadModel("models/bistroExteriorNoMats.usdz");
+    //auto bistro = LoadModel("models/bistroExteriorNoMats.usdz");
     //auto wine = LoadModel("models/bistroInterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
     //auto robot = LoadModel("models/robot.usdz");
 
+	//auto zorah = LoadModel("models/zorah/zorah_main_public.gltf");
+
 
     renderer.SetCurrentScene(baseScene);
+
+	//renderer.GetCurrentScene()->AppendScene(zorah->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(usdScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(curtains->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(carScene->Clone());
-    //renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
+    renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
 
     //mountainScene = LoadModel("models/terrain.glb");
     //mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
@@ -373,7 +377,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 	//renderer.GetCurrentScene()->AppendScene(shiba->Clone());
 
-    renderer.GetCurrentScene()->AppendScene(bistro->Clone());
+    //renderer.GetCurrentScene()->AppendScene(bistro->Clone());
     //renderer.GetCurrentScene()->AppendScene(wine->Clone());
     
 	//renderer.GetCurrentScene()->AppendScene(robot->Clone());

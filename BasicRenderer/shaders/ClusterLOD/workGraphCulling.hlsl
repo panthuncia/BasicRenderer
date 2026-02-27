@@ -112,7 +112,6 @@ static const uint WG_COUNTER_PHASE2_REPLAY_GROUP_RECORDS_CONSUMED = 61;
 static const uint WG_COUNTER_PHASE2_REPLAY_CLUSTER_BUCKET_RECORDS_CONSUMED = 62;
 
 static const uint CLOD_STREAM_REQUEST_CAPACITY = (1u << 16);
-static const uint CLOD_STREAM_TOUCH_CAPACITY = CLOD_STREAM_REQUEST_CAPACITY;
 
 static const uint CLOD_RECORD_SOURCE_PASS1 = 0;
 static const uint CLOD_RECORD_SOURCE_REPLAY = 1;
@@ -767,24 +766,6 @@ void WG_GroupEvaluate(
                 WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_CULLED_GROUP_RECORDS, 1);
             }
             else {
-                StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
-                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
-                RWByteAddressBuffer touchedGroupsBits =
-                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroupsBits)];
-                RWStructuredBuffer<uint> touchedGroups =
-                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroups)];
-                RWStructuredBuffer<uint> touchedGroupsCounter =
-                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroupsCounter)];
-                if (groupIndex < runtimeState[0].activeGroupScanCount) {
-                    if (CLodTrySetBit(touchedGroupsBits, groupIndex)) {
-                        uint touchedIndex = 0;
-                        InterlockedAdd(touchedGroupsCounter[0], 1u, touchedIndex);
-                        if (touchedIndex < CLOD_STREAM_TOUCH_CAPACITY) {
-                            touchedGroups[touchedIndex] = groupIndex;
-                        }
-                    }
-                }
-
                 float4 groupCenterObjectSpace4 = float4(groupCenterObjectSpace, 1.0f);
                 float3 groupCenterWorldSpace = mul(groupCenterObjectSpace4, objectModelMatrix).xyz;
                 float groupProjectedError = ProjectedErrorPixels(

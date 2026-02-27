@@ -59,7 +59,6 @@ static constexpr uint32_t CLodReplayBufferNumUints = CLodReplayBufferSizeBytes /
 static constexpr uint32_t CLodMaxViewDepthIndices = 512u;
 static constexpr uint32_t CLodStreamingInitialGroupCapacity = 1024u;
 static constexpr uint32_t CLodStreamingRequestCapacity = (1u << 16);
-static constexpr uint32_t CLodStreamingTouchCapacity = CLodStreamingRequestCapacity;
 
 static constexpr uint32_t CLodBitsetWordCount(uint32_t bitCount) {
     return (bitCount + 31u) / 32u;
@@ -136,7 +135,6 @@ public:
         }
 
         m_streamingLoadReadbackSlots.assign(m_streamingReadbackRingSize, {});
-        m_streamingTouchReadbackSlots.assign(m_streamingReadbackRingSize, {});
 
         // Initialize global entity for extension type
         auto ecsWorld = ECSManager::GetInstance().GetWorld();
@@ -270,27 +268,6 @@ public:
         m_streamingLoadCounter = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
         m_streamingLoadCounter->SetName("CLod Streaming Load Counter");
 
-        m_streamingTouchedGroupsBits = CreateAliasedUnmaterializedStructuredBuffer(
-            CLodBitsetWordCount(m_streamingStorageGroupCapacity),
-            sizeof(uint32_t),
-            true,
-            false,
-            false,
-            false);
-        m_streamingTouchedGroupsBits->SetName("CLod Streaming Touched Groups Bits");
-
-        m_streamingTouchedGroups = CreateAliasedUnmaterializedStructuredBuffer(
-            CLodStreamingTouchCapacity,
-            sizeof(uint32_t),
-            true,
-            false,
-            false,
-            false);
-        m_streamingTouchedGroups->SetName("CLod Streaming Touched Groups");
-
-        m_streamingTouchedGroupsCounter = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-        m_streamingTouchedGroupsCounter->SetName("CLod Streaming Touched Groups Counter");
-
         m_streamingRuntimeState = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodStreamingRuntimeState), true, false, false, false);
         m_streamingRuntimeState->SetName("CLod Streaming Runtime State");
 
@@ -300,9 +277,6 @@ public:
     void OnRegistryReset(ResourceRegistry* reg) override {
         (void)reg;
         for (auto& slot : m_streamingLoadReadbackSlots) {
-            slot = {};
-        }
-        for (auto& slot : m_streamingTouchReadbackSlots) {
             slot = {};
         }
         m_pendingStreamingRequests.clear();
@@ -319,7 +293,6 @@ public:
         m_streamingActiveGroupScanCount = 0u;
         m_streamingReadbackScheduleCursor = 0u;
         m_streamingNonResidentBitsUploadPending = true;
-        m_streamingTouchedGroupsBitsResetPending = true;
     }
 
     void GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override {
@@ -330,9 +303,6 @@ public:
         rg.RegisterResource(Builtin::CLod::StreamingLoadRequestBits, m_streamingLoadRequestBits);
         rg.RegisterResource(Builtin::CLod::StreamingLoadRequests, m_streamingLoadRequests);
         rg.RegisterResource(Builtin::CLod::StreamingLoadCounter, m_streamingLoadCounter);
-        rg.RegisterResource(Builtin::CLod::StreamingTouchedGroupsBits, m_streamingTouchedGroupsBits);
-        rg.RegisterResource(Builtin::CLod::StreamingTouchedGroups, m_streamingTouchedGroups);
-        rg.RegisterResource(Builtin::CLod::StreamingTouchedGroupsCounter, m_streamingTouchedGroupsCounter);
         rg.RegisterResource(Builtin::CLod::StreamingRuntimeState, m_streamingRuntimeState);
 
         RenderGraph::ExternalPassDesc streamingBeginPassDesc;
@@ -345,8 +315,6 @@ public:
             m_streamingLoadRequestBits,
             m_streamingNonResidentBits,
             m_streamingActiveGroupsBits,
-            m_streamingTouchedGroupsBits,
-            m_streamingTouchedGroupsCounter,
             m_streamingRuntimeState,
             [this](std::vector<uint32_t>& outBits) {
                 if (!m_streamingNonResidentBitsUploadPending) {
@@ -360,15 +328,6 @@ public:
             [this](std::vector<uint32_t>& outBits, uint32_t& outActiveScanCount) {
                 outBits = m_streamingActiveGroupsBitsCpu;
                 outActiveScanCount = m_streamingActiveGroupScanCount;
-            },
-            [this](std::vector<uint32_t>& outBits) {
-                if (!m_streamingTouchedGroupsBitsResetPending) {
-                    return false;
-                }
-
-                outBits.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
-                m_streamingTouchedGroupsBitsResetPending = false;
-                return true;
             },
             [this]() {
                 return static_cast<uint32_t>(m_streamingNonResidentBitsCpu.size());
@@ -612,15 +571,6 @@ private:
         CLodStreamingRequest request{};
     };
 
-    struct StreamingTouchedReadbackState {
-        bool pending = false;
-        uint64_t captureId = 0;
-        bool hasCounter = false;
-        bool hasGroups = false;
-        uint32_t groupCount = 0;
-        std::vector<uint32_t> groups;
-    };
-
     struct StreamingLruEntry {
         uint32_t groupIndex = 0u;
         uint64_t stamp = 0u;
@@ -675,6 +625,14 @@ private:
         const uint32_t groupIndex = req.groupGlobalIndex;
         if (groupIndex >= m_streamingStorageGroupCapacity) {
             EnsureStreamingStorageCapacity(groupIndex + 1u);
+        }
+
+        if (!IsGroupActive(groupIndex)) {
+            return false;
+        }
+
+        if (IsGroupResident(groupIndex)) {
+            return false;
         }
 
         if (IsStreamingRequestInProgress(groupIndex)) {
@@ -799,7 +757,6 @@ private:
 
         m_streamingNonResidentBits->ResizeStructured(newWordCount);
         m_streamingActiveGroupsBits->ResizeStructured(newWordCount);
-        m_streamingTouchedGroupsBits->ResizeStructured(newWordCount);
         m_streamingLoadRequestBits->ResizeStructured(newWordCount);
 
         m_streamingNonResidentBitsCpu.resize(newWordCount, 0u);
@@ -813,14 +770,12 @@ private:
         m_streamingStorageGroupCapacity = newCapacity;
 
         m_streamingNonResidentBitsUploadPending = true;
-        m_streamingTouchedGroupsBitsResetPending = true;
     }
 
     void RefreshStreamingActiveGroupDomain() {
         std::fill(m_streamingActiveGroupsBitsCpu.begin(), m_streamingActiveGroupsBitsCpu.end(), 0u);
         std::fill(m_streamingPinnedGroupsBitsCpu.begin(), m_streamingPinnedGroupsBitsCpu.end(), 0u);
         m_streamingActiveGroupScanCount = 0u;
-        m_streamingTouchedGroupsBitsResetPending = true;
 
         MeshManager* meshManager = nullptr;
         if (m_getMeshManager) {
@@ -983,17 +938,6 @@ private:
         return nullptr;
     }
 
-    StreamingTouchedReadbackState* FindStreamingTouchedReadbackStateByCaptureId(uint64_t captureId) {
-        auto& slots = m_streamingTouchReadbackSlots;
-        for (auto& slot : slots) {
-            if (slot.pending && slot.captureId == captureId) {
-                return &slot;
-            }
-        }
-
-        return nullptr;
-    }
-
     void TryFinalizeStreamingLoadReadback(StreamingRequestReadbackState& state) {
         if (!state.pending || !state.hasCounter || !state.hasRequests) {
             return;
@@ -1023,23 +967,6 @@ private:
         state = {};
     }
 
-    void TryFinalizeStreamingTouchedReadback(StreamingTouchedReadbackState& state) {
-        if (!state.pending || !state.hasCounter || !state.hasGroups) {
-            return;
-        }
-
-        const size_t decodeCount = std::min<size_t>(state.groupCount, state.groups.size());
-        for (size_t i = 0; i < decodeCount; ++i) {
-            const uint32_t groupIndex = state.groups[i];
-            if (groupIndex >= m_streamingStorageGroupCapacity) {
-                EnsureStreamingStorageCapacity(groupIndex + 1u);
-            }
-            TouchStreamingLru(groupIndex);
-        }
-
-        state = {};
-    }
-
     void ScheduleStreamingReadbacks() {
         if (m_streamingReadbackService == nullptr || m_streamingReadbackRingSize == 0u) {
             return;
@@ -1048,14 +975,11 @@ private:
         if (m_streamingLoadReadbackSlots.size() != m_streamingReadbackRingSize) {
             m_streamingLoadReadbackSlots.assign(m_streamingReadbackRingSize, {});
         }
-        if (m_streamingTouchReadbackSlots.size() != m_streamingReadbackRingSize) {
-            m_streamingTouchReadbackSlots.assign(m_streamingReadbackRingSize, {});
-        }
 
         int32_t selectedSlot = -1;
         for (uint32_t i = 0; i < m_streamingReadbackRingSize; ++i) {
             const uint32_t slotIndex = (m_streamingReadbackScheduleCursor + i) % m_streamingReadbackRingSize;
-            if (!m_streamingLoadReadbackSlots[slotIndex].pending && !m_streamingTouchReadbackSlots[slotIndex].pending) {
+            if (!m_streamingLoadReadbackSlots[slotIndex].pending) {
                 selectedSlot = static_cast<int32_t>(slotIndex);
                 break;
             }
@@ -1069,15 +993,10 @@ private:
         m_streamingReadbackScheduleCursor = (slotIndex + 1u) % m_streamingReadbackRingSize;
 
         auto& loadSlot = m_streamingLoadReadbackSlots[slotIndex];
-        auto& touchSlot = m_streamingTouchReadbackSlots[slotIndex];
 
         loadSlot = {};
         loadSlot.pending = true;
         loadSlot.captureId = ++m_streamingReadbackCaptureSerial;
-
-        touchSlot = {};
-        touchSlot.pending = true;
-        touchSlot.captureId = ++m_streamingReadbackCaptureSerial;
 
         const uint64_t loadCaptureId = loadSlot.captureId;
         m_streamingReadbackService->RequestReadbackCapture(
@@ -1119,48 +1038,6 @@ private:
 
                 state->hasRequests = true;
                 TryFinalizeStreamingLoadReadback(*state);
-            });
-
-        const uint64_t touchCaptureId = touchSlot.captureId;
-        m_streamingReadbackService->RequestReadbackCapture(
-            "CLod::HierarchialCullingPass2",
-            m_streamingTouchedGroupsCounter.get(),
-            RangeSpec{},
-            [this, touchCaptureId](ReadbackCaptureResult&& result) {
-                auto* state = FindStreamingTouchedReadbackStateByCaptureId(touchCaptureId);
-                if (state == nullptr) {
-                    return;
-                }
-
-                uint32_t requestCount = 0;
-                if (result.data.size() >= sizeof(uint32_t)) {
-                    std::memcpy(&requestCount, result.data.data(), sizeof(uint32_t));
-                }
-
-                state->groupCount = std::min<uint32_t>(requestCount, CLodStreamingTouchCapacity);
-                state->hasCounter = true;
-                TryFinalizeStreamingTouchedReadback(*state);
-            });
-
-        m_streamingReadbackService->RequestReadbackCapture(
-            "CLod::HierarchialCullingPass2",
-            m_streamingTouchedGroups.get(),
-            RangeSpec{},
-            [this, touchCaptureId](ReadbackCaptureResult&& result) {
-                auto* state = FindStreamingTouchedReadbackStateByCaptureId(touchCaptureId);
-                if (state == nullptr) {
-                    return;
-                }
-
-                const size_t stride = sizeof(uint32_t);
-                const size_t decodedCount = std::min<size_t>(result.data.size() / stride, CLodStreamingTouchCapacity);
-                state->groups.resize(decodedCount);
-                if (decodedCount > 0) {
-                    std::memcpy(state->groups.data(), result.data.data(), decodedCount * stride);
-                }
-
-                state->hasGroups = true;
-                TryFinalizeStreamingTouchedReadback(*state);
             });
     }
 
@@ -1244,12 +1121,9 @@ private:
     // Streaming runtime buffers
     std::shared_ptr<Buffer> m_streamingNonResidentBits;
     std::shared_ptr<Buffer> m_streamingActiveGroupsBits;
-    std::shared_ptr<Buffer> m_streamingTouchedGroupsBits;
     std::shared_ptr<Buffer> m_streamingLoadRequestBits;
     std::shared_ptr<Buffer> m_streamingLoadRequests;
     std::shared_ptr<Buffer> m_streamingLoadCounter;
-    std::shared_ptr<Buffer> m_streamingTouchedGroups;
-    std::shared_ptr<Buffer> m_streamingTouchedGroupsCounter;
     std::shared_ptr<Buffer> m_streamingRuntimeState;
 
     std::vector<uint32_t> m_streamingNonResidentBitsCpu;
@@ -1266,7 +1140,6 @@ private:
     uint32_t m_streamingActiveGroupScanCount = 0u;
     uint32_t m_streamingStorageGroupCapacity = CLodStreamingInitialGroupCapacity;
     bool m_streamingNonResidentBitsUploadPending = false;
-    bool m_streamingTouchedGroupsBitsResetPending = true;
     uint32_t m_streamingReadbackRingSize = 2u;
     uint32_t m_streamingReadbackScheduleCursor = 0u;
     uint32_t m_streamingCpuUploadBudgetRequests = 640u;
@@ -1277,7 +1150,6 @@ private:
     uint64_t m_streamingReadbackCaptureSerial = 0;
     uint64_t m_streamingOperationSampleSerial = 0;
     std::vector<StreamingRequestReadbackState> m_streamingLoadReadbackSlots;
-    std::vector<StreamingTouchedReadbackState> m_streamingTouchReadbackSlots;
     std::deque<PendingStreamingRequest> m_pendingStreamingRequests;
 
     // Compaction Pass Buffers
@@ -1354,12 +1226,9 @@ private:
             std::shared_ptr<Buffer> loadRequestBits,
             std::shared_ptr<Buffer> nonResidentBits,
             std::shared_ptr<Buffer> activeGroupsBits,
-            std::shared_ptr<Buffer> touchedGroupsBits,
-            std::shared_ptr<Buffer> touchedGroupsCounter,
             std::shared_ptr<Buffer> runtimeState,
             std::function<bool(std::vector<uint32_t>&)> tryConsumeNonResidentBitsUpload,
             std::function<void(std::vector<uint32_t>&, uint32_t&)> getActiveGroupsBitsUpload,
-            std::function<bool(std::vector<uint32_t>&)> tryConsumeTouchedGroupsBitsReset,
             std::function<uint32_t()> getBitsetWordCount,
             std::function<void()> scheduleStreamingReadbacks,
             std::function<void()> processStreamingRequests)
@@ -1367,19 +1236,16 @@ private:
             , m_loadRequestBits(std::move(loadRequestBits))
             , m_nonResidentBits(std::move(nonResidentBits))
             , m_activeGroupsBits(std::move(activeGroupsBits))
-            , m_touchedGroupsBits(std::move(touchedGroupsBits))
-            , m_touchedGroupsCounter(std::move(touchedGroupsCounter))
             , m_runtimeState(std::move(runtimeState))
             , m_tryConsumeNonResidentBitsUpload(std::move(tryConsumeNonResidentBitsUpload))
             , m_getActiveGroupsBitsUpload(std::move(getActiveGroupsBitsUpload))
-            , m_tryConsumeTouchedGroupsBitsReset(std::move(tryConsumeTouchedGroupsBitsReset))
             , m_getBitsetWordCount(std::move(getBitsetWordCount))
             , m_scheduleStreamingReadbacks(std::move(scheduleStreamingReadbacks))
             , m_processStreamingRequests(std::move(processStreamingRequests)) {
         }
 
         void DeclareResourceUsages(ComputePassBuilder* builder) override {
-            builder->WithUnorderedAccess(m_loadCounter, m_touchedGroupsCounter, m_nonResidentBits, m_activeGroupsBits, m_touchedGroupsBits, m_runtimeState)
+            builder->WithUnorderedAccess(m_loadCounter, m_nonResidentBits, m_activeGroupsBits, m_runtimeState)
                 .WithUnorderedAccess(Builtin::CLod::StreamingLoadRequestBits);
         }
 
@@ -1408,7 +1274,6 @@ private:
 
             const uint32_t zero = 0u;
             BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_loadCounter), 0);
-            BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_touchedGroupsCounter), 0);
 
             const uint32_t bitsetWordCount = std::max(m_getBitsetWordCount ? m_getBitsetWordCount() : 1u, 1u);
             std::vector<uint32_t> zeroBits(bitsetWordCount, 0u);
@@ -1440,15 +1305,6 @@ private:
                     0);
             }
 
-            std::vector<uint32_t> touchedGroupsBitsReset;
-            if (m_tryConsumeTouchedGroupsBitsReset && m_tryConsumeTouchedGroupsBitsReset(touchedGroupsBitsReset)) {
-                BUFFER_UPLOAD(
-                    touchedGroupsBitsReset.data(),
-                    static_cast<uint32_t>(touchedGroupsBitsReset.size() * sizeof(uint32_t)),
-                    rg::runtime::UploadTarget::FromShared(m_touchedGroupsBits),
-                    0);
-            }
-
             CLodStreamingRuntimeState state{};
             state.activeGroupScanCount = activeGroupScanCount;
             state.unloadAfterFrames = 0u;
@@ -1467,12 +1323,9 @@ private:
         std::shared_ptr<Buffer> m_loadRequestBits;
         std::shared_ptr<Buffer> m_nonResidentBits;
         std::shared_ptr<Buffer> m_activeGroupsBits;
-        std::shared_ptr<Buffer> m_touchedGroupsBits;
-        std::shared_ptr<Buffer> m_touchedGroupsCounter;
         std::shared_ptr<Buffer> m_runtimeState;
         std::function<bool(std::vector<uint32_t>&)> m_tryConsumeNonResidentBitsUpload;
         std::function<void(std::vector<uint32_t>&, uint32_t&)> m_getActiveGroupsBitsUpload;
-        std::function<bool(std::vector<uint32_t>&)> m_tryConsumeTouchedGroupsBitsReset;
         std::function<uint32_t()> m_getBitsetWordCount;
         std::function<void()> m_scheduleStreamingReadbacks;
         std::function<void()> m_processStreamingRequests;
@@ -1558,9 +1411,6 @@ private:
                 m_occlusionNodeGpuInputsBuffer,
                 m_viewDepthSrvIndicesBuffer)
                 .WithUnorderedAccess(
-                    Builtin::CLod::StreamingTouchedGroupsBits,
-                    Builtin::CLod::StreamingTouchedGroups,
-                    Builtin::CLod::StreamingTouchedGroupsCounter,
                     Builtin::CLod::StreamingLoadRequestBits,
                     Builtin::CLod::StreamingLoadRequests,
                     Builtin::CLod::StreamingLoadCounter,
@@ -1593,9 +1443,6 @@ private:
             RegisterSRV(Builtin::CLod::Children);
             RegisterSRV(Builtin::CLod::StreamingActiveGroupsBits);
             RegisterSRV(Builtin::CLod::StreamingNonResidentBits);
-            RegisterSRV(Builtin::CLod::StreamingTouchedGroupsBits);
-            RegisterSRV(Builtin::CLod::StreamingTouchedGroups);
-            RegisterSRV(Builtin::CLod::StreamingTouchedGroupsCounter);
             RegisterSRV(Builtin::CLod::StreamingLoadRequestBits);
             RegisterSRV(Builtin::CLod::StreamingLoadRequests);
             RegisterSRV(Builtin::CLod::StreamingLoadCounter);

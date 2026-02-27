@@ -194,7 +194,6 @@ namespace
 		std::vector<uint32_t> meshletVertices;
 		std::vector<uint8_t> meshletTriangles;
 		std::vector<BoundingSphere> meshletBounds;
-		std::vector<int32_t> meshletRefinedGroup;
 		std::vector<ClusterLODChild> children;
 		std::vector<std::byte> vertexChunk;
 		std::vector<std::byte> skinningVertexChunk;
@@ -422,7 +421,6 @@ namespace
 
 				output.meshlets.push_back(meshlet);
 				output.meshletBounds.push_back(sphere);
-				output.meshletRefinedGroup.push_back(cluster.refinedGroup);
 
 				++localMeshletCursor;
 			}
@@ -1322,7 +1320,6 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 			m_clodMeshletVertices.insert(m_clodMeshletVertices.end(), output.meshletVertices.begin(), output.meshletVertices.end());
 			m_clodMeshletTriangles.insert(m_clodMeshletTriangles.end(), output.meshletTriangles.begin(), output.meshletTriangles.end());
 			m_clodMeshletBounds.insert(m_clodMeshletBounds.end(), output.meshletBounds.begin(), output.meshletBounds.end());
-			m_clodMeshletRefinedGroup.insert(m_clodMeshletRefinedGroup.end(), output.meshletRefinedGroup.begin(), output.meshletRefinedGroup.end());
 			m_clodChildren.insert(m_clodChildren.end(), output.children.begin(), output.children.end());
 			m_clodDuplicatedVertices.insert(m_clodDuplicatedVertices.end(), output.vertexChunk.begin(), output.vertexChunk.end());
 			m_clodDuplicatedSkinningVertices.insert(m_clodDuplicatedSkinningVertices.end(), output.skinningVertexChunk.begin(), output.skinningVertexChunk.end());
@@ -1672,11 +1669,32 @@ void Mesh::SetCLodBufferViews(
 	m_clusterLODMeshletBoundsView = std::move(clusterLODMeshletBoundsView);
 	m_clusterLODNodesView = std::move(clusterLODNodesView);
 
-	m_perMeshBufferData.clodMeshletBufferOffset = static_cast<uint32_t>(m_clusterLODMeshletsView->GetOffset() / sizeof(meshopt_Meshlet));
+	auto firstChunkOffsetDiv = [](const auto& chunkViews, uint32_t divisor) -> uint32_t {
+		for (const auto& chunkView : chunkViews) {
+			if (chunkView != nullptr) {
+				return static_cast<uint32_t>(chunkView->GetOffset() / divisor);
+			}
+		}
+		return 0u;
+	};
+	auto firstChunkOffsetBytes = [](const auto& chunkViews) -> uint32_t {
+		for (const auto& chunkView : chunkViews) {
+			if (chunkView != nullptr) {
+				return static_cast<uint32_t>(chunkView->GetOffset());
+			}
+		}
+		return 0u;
+	};
+
+	m_perMeshBufferData.clodMeshletBufferOffset = (m_clusterLODMeshletsView != nullptr)
+		? static_cast<uint32_t>(m_clusterLODMeshletsView->GetOffset() / sizeof(meshopt_Meshlet))
+		: firstChunkOffsetDiv(m_clodMeshletChunkViews, sizeof(meshopt_Meshlet));
 	m_perMeshBufferData.clodMeshletVerticesBufferOffset = (m_clusterLODMeshletVerticesView != nullptr)
 		? static_cast<uint32_t>(m_clusterLODMeshletVerticesView->GetOffset() / sizeof(uint32_t))
-		: 0u;
-	m_perMeshBufferData.clodMeshletTrianglesBufferOffset = static_cast<uint32_t>(m_clusterLODMeshletTrianglesView->GetOffset()); // Intentionally in bytes to index byteaddressbuffer
+		: firstChunkOffsetDiv(m_clodMeshletVertexChunkViews, sizeof(uint32_t));
+	m_perMeshBufferData.clodMeshletTrianglesBufferOffset = (m_clusterLODMeshletTrianglesView != nullptr)
+		? static_cast<uint32_t>(m_clusterLODMeshletTrianglesView->GetOffset())
+		: firstChunkOffsetBytes(m_clodMeshletTriangleChunkViews); // Intentionally in bytes to index byteaddressbuffer
 	m_perMeshBufferData.clodNumMeshlets = static_cast<uint32_t>(m_clodMeshlets.size());
 	if (m_pCurrentMeshManager != nullptr && m_perMeshBufferView != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshBuffer(m_perMeshBufferView, m_perMeshBufferData);
