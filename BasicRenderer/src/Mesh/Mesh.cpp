@@ -522,8 +522,19 @@ std::shared_ptr<Mesh> MeshIngestBuilder::Build(
 		cpuDataPolicy);
 }
 
+ClusterLODPrebuildArtifacts MeshIngestBuilder::BuildClusterLODArtifacts() const {
+	const std::vector<std::byte>* skinningVertices = m_skinningVertices.empty() ? nullptr : &m_skinningVertices;
+	return Mesh::BuildClusterLODArtifactsFromGeometry(
+		m_vertices,
+		m_vertexSize,
+		skinningVertices,
+		m_skinningVertexSize,
+		m_indices,
+		m_flags);
+}
 
-Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD, MeshCpuDataPolicy cpuDataPolicy) {
+
+Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD, MeshCpuDataPolicy cpuDataPolicy, bool deferResourceCreation) {
     m_vertices = std::move(vertices);
 	if (skinningVertices.has_value()) {
 		m_skinningVertices = std::move(skinningVertices.value());
@@ -546,14 +557,20 @@ Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertex
 	m_perMeshBufferData.clodNumMeshlets = 0;
 
 	m_skinningVertexSize = skinningVertexSize;
-	CreateBuffers(indices);
     this->material = material;
 
-	if (cpuDataPolicy == MeshCpuDataPolicy::ReleaseAfterUpload) {
-		ReleaseCpuGeometryData();
-	}
+	if (!deferResourceCreation) {
+		CreateBuffers(indices);
 
-	m_globalMeshID = GetNextGlobalIndex();
+		if (cpuDataPolicy == MeshCpuDataPolicy::ReleaseAfterUpload) {
+			ReleaseCpuGeometryData();
+		}
+
+		m_globalMeshID = GetNextGlobalIndex();
+	}
+	else {
+		m_globalMeshID = 0;
+	}
 }
 
 void Mesh::ReleaseCpuGeometryData() {
@@ -679,6 +696,55 @@ ClusterLODCacheBuildPayload Mesh::GetClusterLODCacheBuildPayload() const
 	payload.groupMeshletTriangleChunks = &m_clodCacheBuildChunkData.groupMeshletTriangleChunks;
 	payload.groupMeshletBoundsChunks = &m_clodCacheBuildChunkData.groupMeshletBoundsChunks;
 	return payload;
+}
+
+ClusterLODCacheBuildOwnedData Mesh::GetClusterLODCacheBuildOwnedData() const
+{
+	ClusterLODCacheBuildOwnedData owned{};
+	owned.groupVertexChunks = m_clodCacheBuildChunkData.groupVertexChunks;
+	owned.groupSkinningVertexChunks = m_clodCacheBuildChunkData.groupSkinningVertexChunks;
+	owned.groupMeshletVertexChunks = m_clodCacheBuildChunkData.groupMeshletVertexChunks;
+	owned.groupCompressedPositionWordChunks = m_clodCacheBuildChunkData.groupCompressedPositionWordChunks;
+	owned.groupCompressedNormalWordChunks = m_clodCacheBuildChunkData.groupCompressedNormalWordChunks;
+	owned.groupCompressedMeshletVertexWordChunks = m_clodCacheBuildChunkData.groupCompressedMeshletVertexWordChunks;
+	owned.groupMeshletChunks = m_clodCacheBuildChunkData.groupMeshletChunks;
+	owned.groupMeshletTriangleChunks = m_clodCacheBuildChunkData.groupMeshletTriangleChunks;
+	owned.groupMeshletBoundsChunks = m_clodCacheBuildChunkData.groupMeshletBoundsChunks;
+	return owned;
+}
+
+ClusterLODPrebuildArtifacts Mesh::BuildClusterLODArtifactsFromGeometry(
+	const std::vector<std::byte>& vertices,
+	unsigned int vertexSize,
+	const std::vector<std::byte>* skinningVertices,
+	unsigned int skinningVertexSize,
+	const std::vector<uint32_t>& indices,
+	unsigned int flags)
+{
+	auto verticesCopy = std::make_unique<std::vector<std::byte>>(vertices);
+	std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVerticesCopy;
+	if (skinningVertices != nullptr && !skinningVertices->empty()) {
+		skinningVerticesCopy = std::make_unique<std::vector<std::byte>>(*skinningVertices);
+	}
+
+	Mesh tempMesh(
+		std::move(verticesCopy),
+		vertexSize,
+		std::move(skinningVerticesCopy),
+		skinningVertexSize,
+		indices,
+		nullptr,
+		flags,
+		std::nullopt,
+		MeshCpuDataPolicy::Retain,
+		true);
+
+	tempMesh.BuildClusterLOD(indices);
+
+	ClusterLODPrebuildArtifacts artifacts{};
+	artifacts.prebuiltData = tempMesh.GetClusterLODPrebuiltData();
+	artifacts.cacheBuildData = tempMesh.GetClusterLODCacheBuildOwnedData();
+	return artifacts;
 }
 
 void Mesh::CreateVertexBuffer() {

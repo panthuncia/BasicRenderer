@@ -107,6 +107,39 @@ struct ClusterLODCacheBuildPayload
 	const std::vector<std::vector<BoundingSphere>>* groupMeshletBoundsChunks = nullptr;
 };
 
+struct ClusterLODCacheBuildOwnedData
+{
+	std::vector<std::vector<std::byte>> groupVertexChunks;
+	std::vector<std::vector<std::byte>> groupSkinningVertexChunks;
+	std::vector<std::vector<uint32_t>> groupMeshletVertexChunks;
+	std::vector<std::vector<uint32_t>> groupCompressedPositionWordChunks;
+	std::vector<std::vector<uint32_t>> groupCompressedNormalWordChunks;
+	std::vector<std::vector<uint32_t>> groupCompressedMeshletVertexWordChunks;
+	std::vector<std::vector<meshopt_Meshlet>> groupMeshletChunks;
+	std::vector<std::vector<uint8_t>> groupMeshletTriangleChunks;
+	std::vector<std::vector<BoundingSphere>> groupMeshletBoundsChunks;
+
+	ClusterLODCacheBuildPayload AsPayload() const {
+		ClusterLODCacheBuildPayload payload{};
+		payload.groupVertexChunks = &groupVertexChunks;
+		payload.groupSkinningVertexChunks = &groupSkinningVertexChunks;
+		payload.groupMeshletVertexChunks = &groupMeshletVertexChunks;
+		payload.groupCompressedPositionWordChunks = &groupCompressedPositionWordChunks;
+		payload.groupCompressedNormalWordChunks = &groupCompressedNormalWordChunks;
+		payload.groupCompressedMeshletVertexWordChunks = &groupCompressedMeshletVertexWordChunks;
+		payload.groupMeshletChunks = &groupMeshletChunks;
+		payload.groupMeshletTriangleChunks = &groupMeshletTriangleChunks;
+		payload.groupMeshletBoundsChunks = &groupMeshletBoundsChunks;
+		return payload;
+	}
+};
+
+struct ClusterLODPrebuildArtifacts
+{
+	ClusterLODPrebuiltData prebuiltData;
+	ClusterLODCacheBuildOwnedData cacheBuildData;
+};
+
 enum class MeshCpuDataPolicy {
 	Retain,
 	ReleaseAfterUpload,
@@ -415,9 +448,18 @@ public:
 
 	ClusterLODPrebuiltData GetClusterLODPrebuiltData() const;
 	ClusterLODCacheBuildPayload GetClusterLODCacheBuildPayload() const;
+	ClusterLODCacheBuildOwnedData GetClusterLODCacheBuildOwnedData() const;
+
+	static ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
+		const std::vector<std::byte>& vertices,
+		unsigned int vertexSize,
+		const std::vector<std::byte>* skinningVertices,
+		unsigned int skinningVertexSize,
+		const std::vector<uint32_t>& indices,
+		unsigned int flags);
 
 private:
-	Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD, MeshCpuDataPolicy cpuDataPolicy);
+	Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD, MeshCpuDataPolicy cpuDataPolicy, bool deferResourceCreation = false);
 	void ReleaseCpuGeometryData();
     void CreateVertexBuffer();
     void CreateMeshlets(const std::vector<UINT32>& indices);
@@ -563,6 +605,8 @@ public:
 		const std::shared_ptr<Material>& material,
 		std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD = std::nullopt,
 		MeshCpuDataPolicy cpuDataPolicy = MeshCpuDataPolicy::Retain);
+
+	ClusterLODPrebuildArtifacts BuildClusterLODArtifacts() const;
 
 private:
 	unsigned int m_vertexSize = 0;

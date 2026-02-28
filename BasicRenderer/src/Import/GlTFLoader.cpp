@@ -65,6 +65,21 @@ struct PrimitiveData {
     std::shared_ptr<Mesh> mesh;
 };
 
+struct PrimitivePreprocessData {
+    MeshIngestBuilder ingest;
+    CLodCacheLoader::MeshCacheIdentity cacheIdentity{};
+    std::optional<ClusterLODPrebuiltData> prebuiltData;
+
+    PrimitivePreprocessData(
+        MeshIngestBuilder&& ingestData,
+        CLodCacheLoader::MeshCacheIdentity&& identity,
+        std::optional<ClusterLODPrebuiltData>&& prebuilt)
+        : ingest(std::move(ingestData))
+        , cacheIdentity(std::move(identity))
+        , prebuiltData(std::move(prebuilt)) {
+    }
+};
+
 enum class BufferBacking {
     FileSpan,
     DataUri,
@@ -506,10 +521,9 @@ ParsedDocument ParseDocument(const std::string& filePath) {
     return doc;
 }
 
-std::shared_ptr<Mesh> BuildMeshFromPrimitive(
+PrimitivePreprocessData BuildPrimitivePreprocessData(
     const ParsedDocument& doc,
     const json& primitive,
-    const std::shared_ptr<Material>& defaultMaterial,
     const std::string& sourceFilePath,
     size_t meshIndex,
     size_t primitiveIndex)
@@ -674,31 +688,45 @@ std::shared_ptr<Mesh> BuildMeshFromPrimitive(
     cacheIdentity.subsetName = "";
 
     auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
-    const bool hadPrebuiltData = prebuiltData.has_value();
+    if (!prebuiltData.has_value()) {
+        ClusterLODPrebuildArtifacts artifacts = ingest.BuildClusterLODArtifacts();
 
-    auto mesh = ingest.Build(defaultMaterial, std::move(prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
-
-    if (!hadPrebuiltData) {
         const std::string cacheSaveKey = BuildCacheSaveKey(cacheIdentity);
         std::lock_guard<std::mutex> cacheSaveGuard(GetCacheSaveMutexForKey(cacheSaveKey));
 
         auto prebuiltSavedByOtherWorker = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
         if (prebuiltSavedByOtherWorker.has_value()) {
-            mesh->AdoptCLodDiskStreamingMetadata(prebuiltSavedByOtherWorker.value());
+            prebuiltData = std::move(prebuiltSavedByOtherWorker);
         }
         else {
-            const bool cacheSaved = CLodCacheLoader::SavePrebuilt(cacheIdentity, mesh->GetClusterLODPrebuiltData(), mesh->GetClusterLODCacheBuildPayload());
+            const bool cacheSaved = CLodCacheLoader::SavePrebuilt(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload());
             if (!cacheSaved) {
                 spdlog::warn("Failed to save CLOD cache for {} (mesh {}, primitive {})", sourceFilePath, meshIndex, primitiveIndex);
+                prebuiltData = std::move(artifacts.prebuiltData);
             }
             else {
                 auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
                 if (diskBackedPrebuilt.has_value()) {
-                    mesh->AdoptCLodDiskStreamingMetadata(diskBackedPrebuilt.value());
+                    prebuiltData = std::move(diskBackedPrebuilt);
+                }
+                else {
+                    prebuiltData = std::move(artifacts.prebuiltData);
                 }
             }
         }
     }
+
+    return PrimitivePreprocessData(std::move(ingest), std::move(cacheIdentity), std::move(prebuiltData));
+}
+
+std::shared_ptr<Mesh> FinalizePrimitiveMesh(
+    PrimitivePreprocessData&& preprocessData,
+    const std::shared_ptr<Material>& defaultMaterial,
+    const std::string& sourceFilePath,
+    size_t meshIndex,
+    size_t primitiveIndex)
+{
+    auto mesh = preprocessData.ingest.Build(defaultMaterial, std::move(preprocessData.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
 
     return mesh;
 }
@@ -725,6 +753,8 @@ std::vector<std::vector<PrimitiveData>> BuildMeshes(
 
     std::vector<PrimitiveWorkItem> workItems;
     workItems.reserve(meshArray.size());
+    std::vector<std::vector<std::optional<PrimitivePreprocessData>>> preprocessed;
+    preprocessed.resize(meshArray.size());
 
     for (size_t meshIndex = 0; meshIndex < meshArray.size(); ++meshIndex) {
         const auto& mesh = meshArray[meshIndex];
@@ -734,6 +764,7 @@ std::vector<std::vector<PrimitiveData>> BuildMeshes(
 
         const auto& primitiveArray = mesh["primitives"];
         allMeshes[meshIndex].resize(primitiveArray.size());
+        preprocessed[meshIndex].resize(primitiveArray.size());
         workItems.reserve(workItems.size() + primitiveArray.size());
 
         for (size_t primitiveIndex = 0; primitiveIndex < primitiveArray.size(); ++primitiveIndex) {
@@ -747,14 +778,27 @@ std::vector<std::vector<PrimitiveData>> BuildMeshes(
 
     TaskSchedulerManager::GetInstance().ParallelFor(workItems.size(), [&](size_t workIndex) {
         const PrimitiveWorkItem& workItem = workItems[workIndex];
-        allMeshes[workItem.meshIndex][workItem.primitiveIndex].mesh = BuildMeshFromPrimitive(
+        preprocessed[workItem.meshIndex][workItem.primitiveIndex] = BuildPrimitivePreprocessData(
             doc,
             *workItem.primitive,
-            defaultMaterial,
             sourceFilePath,
             workItem.meshIndex,
             workItem.primitiveIndex);
         });
+
+    for (const PrimitiveWorkItem& workItem : workItems) {
+        auto& preprocessSlot = preprocessed[workItem.meshIndex][workItem.primitiveIndex];
+        if (!preprocessSlot.has_value()) {
+            throw std::runtime_error("Missing preprocessed primitive data");
+        }
+
+        allMeshes[workItem.meshIndex][workItem.primitiveIndex].mesh = FinalizePrimitiveMesh(
+            std::move(preprocessSlot.value()),
+            defaultMaterial,
+            sourceFilePath,
+            workItem.meshIndex,
+            workItem.primitiveIndex);
+    }
 
     return allMeshes;
 }
