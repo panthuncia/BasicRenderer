@@ -48,11 +48,11 @@ std::optional<ClusterLODPrebuiltData> TryLoadPrebuilt(const MeshCacheIdentity& i
 	return std::move(cached->prebuiltData);
 }
 
-bool SavePrebuilt(const MeshCacheIdentity& identity, const ClusterLODPrebuiltData& prebuiltData)
+bool SavePrebuilt(const MeshCacheIdentity& identity, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload)
 {
 	const auto cacheKey = ToCacheKey(identity);
 	const uint64_t buildHash = CLodCache::ComputeBuildConfigHash();
-	return CLodCache::Save(cacheKey, CLodCache::kSchemaVersion, buildHash, prebuiltData);
+	return CLodCache::Save(cacheKey, CLodCache::kSchemaVersion, buildHash, prebuiltData, payload);
 }
 
 }

@@ -932,7 +932,12 @@ namespace USDLoader {
 				std::move(prebuiltData));
 
 			if (!hadPrebuiltData) {
-				CLodCacheLoader::SavePrebuilt(cacheIdentity, mPtr->GetClusterLODPrebuiltData());
+				if (CLodCacheLoader::SavePrebuilt(cacheIdentity, mPtr->GetClusterLODPrebuiltData(), mPtr->GetClusterLODCacheBuildPayload())) {
+					auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
+					if (diskBackedPrebuilt.has_value()) {
+						mPtr->AdoptCLodDiskStreamingMetadata(diskBackedPrebuilt.value());
+					}
+				}
 			}
 
 			outMeshes.push_back(mPtr);
@@ -986,7 +991,12 @@ namespace USDLoader {
 					std::move(prebuiltData));
 
 				if (!hadPrebuiltData) {
-					CLodCacheLoader::SavePrebuilt(cacheIdentity, mPtr->GetClusterLODPrebuiltData());
+					if (CLodCacheLoader::SavePrebuilt(cacheIdentity, mPtr->GetClusterLODPrebuiltData(), mPtr->GetClusterLODCacheBuildPayload())) {
+						auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
+						if (diskBackedPrebuilt.has_value()) {
+							mPtr->AdoptCLodDiskStreamingMetadata(diskBackedPrebuilt.value());
+						}
+					}
 				}
 
 				outMeshes.push_back(mPtr);

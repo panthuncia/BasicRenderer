@@ -66,17 +66,11 @@ struct ClusterLODDiskChunkSpan
 	uint64_t sizeBytes = 0;
 };
 
-struct ClusterLODGroupDiskSpans
+struct ClusterLODGroupDiskLocator
 {
-	ClusterLODDiskChunkSpan vertexChunk;
-	ClusterLODDiskChunkSpan skinningChunk;
-	ClusterLODDiskChunkSpan meshletVertexChunk;
-	ClusterLODDiskChunkSpan compressedPositionWordChunk;
-	ClusterLODDiskChunkSpan compressedNormalWordChunk;
-	ClusterLODDiskChunkSpan compressedMeshletVertexWordChunk;
-	ClusterLODDiskChunkSpan meshletChunk;
-	ClusterLODDiskChunkSpan meshletTriangleChunk;
-	ClusterLODDiskChunkSpan meshletBoundsChunk;
+	uint64_t blobOffset = 0;
+	uint32_t blobSizeBytes = 0;
+	uint32_t reserved = 0;
 };
 
 struct ClusterLODCacheSource
@@ -95,18 +89,22 @@ struct ClusterLODPrebuiltData
 	std::vector<std::byte> duplicatedVertices;
 	std::vector<std::byte> duplicatedSkinningVertices;
 	std::vector<ClusterLODGroupChunk> groupChunks;
-	std::vector<std::vector<std::byte>> groupVertexChunks;
-	std::vector<std::vector<std::byte>> groupSkinningVertexChunks;
-	std::vector<std::vector<uint32_t>> groupMeshletVertexChunks;
-	std::vector<std::vector<uint32_t>> groupCompressedPositionWordChunks;
-	std::vector<std::vector<uint32_t>> groupCompressedNormalWordChunks;
-	std::vector<std::vector<uint32_t>> groupCompressedMeshletVertexWordChunks;
-	std::vector<std::vector<meshopt_Meshlet>> groupMeshletChunks;
-	std::vector<std::vector<uint8_t>> groupMeshletTriangleChunks;
-	std::vector<std::vector<BoundingSphere>> groupMeshletBoundsChunks;
-	std::vector<ClusterLODGroupDiskSpans> groupDiskSpans;
+	std::vector<ClusterLODGroupDiskLocator> groupDiskLocators;
 	ClusterLODCacheSource cacheSource;
 	std::vector<ClusterLODNode> nodes;
+};
+
+struct ClusterLODCacheBuildPayload
+{
+	const std::vector<std::vector<std::byte>>* groupVertexChunks = nullptr;
+	const std::vector<std::vector<std::byte>>* groupSkinningVertexChunks = nullptr;
+	const std::vector<std::vector<uint32_t>>* groupMeshletVertexChunks = nullptr;
+	const std::vector<std::vector<uint32_t>>* groupCompressedPositionWordChunks = nullptr;
+	const std::vector<std::vector<uint32_t>>* groupCompressedNormalWordChunks = nullptr;
+	const std::vector<std::vector<uint32_t>>* groupCompressedMeshletVertexWordChunks = nullptr;
+	const std::vector<std::vector<meshopt_Meshlet>>* groupMeshletChunks = nullptr;
+	const std::vector<std::vector<uint8_t>>* groupMeshletTriangleChunks = nullptr;
+	const std::vector<std::vector<BoundingSphere>>* groupMeshletBoundsChunks = nullptr;
 };
 
 enum class MeshCpuDataPolicy {
@@ -250,44 +248,12 @@ public:
 		return m_clodGroupChunks;
 	}
 
-	const std::vector<std::vector<std::byte>>& GetCLodGroupVertexChunks() const {
-		return m_clodGroupVertexChunks;
+	std::vector<ClusterLODGroupChunk>& AccessCLodGroupChunks() {
+		return m_clodGroupChunks;
 	}
 
-	const std::vector<std::vector<std::byte>>& GetCLodGroupSkinningVertexChunks() const {
-		return m_clodGroupSkinningVertexChunks;
-	}
-
-	const std::vector<std::vector<uint32_t>>& GetCLodGroupMeshletVertexChunks() const {
-		return m_clodGroupMeshletVertexChunks;
-	}
-
-	const std::vector<std::vector<uint32_t>>& GetCLodGroupCompressedPositionWordChunks() const {
-		return m_clodGroupCompressedPositionWordChunks;
-	}
-
-	const std::vector<std::vector<uint32_t>>& GetCLodGroupCompressedNormalWordChunks() const {
-		return m_clodGroupCompressedNormalWordChunks;
-	}
-
-	const std::vector<std::vector<uint32_t>>& GetCLodGroupCompressedMeshletVertexWordChunks() const {
-		return m_clodGroupCompressedMeshletVertexWordChunks;
-	}
-
-	const std::vector<std::vector<meshopt_Meshlet>>& GetCLodGroupMeshletChunks() const {
-		return m_clodGroupMeshletChunks;
-	}
-
-	const std::vector<std::vector<uint8_t>>& GetCLodGroupMeshletTriangleChunks() const {
-		return m_clodGroupMeshletTriangleChunks;
-	}
-
-	const std::vector<std::vector<BoundingSphere>>& GetCLodGroupMeshletBoundsChunks() const {
-		return m_clodGroupMeshletBoundsChunks;
-	}
-
-	const std::vector<ClusterLODGroupDiskSpans>& GetCLodGroupDiskSpans() const {
-		return m_clodGroupDiskSpans;
+	const std::vector<ClusterLODGroupDiskLocator>& GetCLodGroupDiskLocators() const {
+		return m_clodGroupDiskLocators;
 	}
 
 	const ClusterLODCacheSource& GetCLodCacheSource() const {
@@ -295,29 +261,12 @@ public:
 	}
 
 	bool HasCLodDiskStreamingSource() const {
-		return !m_clodGroupDiskSpans.empty() && !m_clodCacheSource.containerFileName.empty();
+		return !m_clodCacheSource.containerFileName.empty();
 	}
 
-	void ReleaseCLodChunkUploadData() {
-		m_clodGroupVertexChunks.clear();
-		m_clodGroupVertexChunks.shrink_to_fit();
-		m_clodGroupSkinningVertexChunks.clear();
-		m_clodGroupSkinningVertexChunks.shrink_to_fit();
-		m_clodGroupMeshletVertexChunks.clear();
-		m_clodGroupMeshletVertexChunks.shrink_to_fit();
-		m_clodGroupCompressedPositionWordChunks.clear();
-		m_clodGroupCompressedPositionWordChunks.shrink_to_fit();
-		m_clodGroupCompressedNormalWordChunks.clear();
-		m_clodGroupCompressedNormalWordChunks.shrink_to_fit();
-		m_clodGroupCompressedMeshletVertexWordChunks.clear();
-		m_clodGroupCompressedMeshletVertexWordChunks.shrink_to_fit();
-		m_clodGroupMeshletChunks.clear();
-		m_clodGroupMeshletChunks.shrink_to_fit();
-		m_clodGroupMeshletTriangleChunks.clear();
-		m_clodGroupMeshletTriangleChunks.shrink_to_fit();
-		m_clodGroupMeshletBoundsChunks.clear();
-		m_clodGroupMeshletBoundsChunks.shrink_to_fit();
-	}
+	void AdoptCLodDiskStreamingMetadata(const ClusterLODPrebuiltData& data);
+
+	void ReleaseCLodChunkUploadData();
 
 	const std::vector<ClusterLODNode>& GetCLodNodes() const {
 		return m_clodNodes;
@@ -465,6 +414,7 @@ public:
 	}
 
 	ClusterLODPrebuiltData GetClusterLODPrebuiltData() const;
+	ClusterLODCacheBuildPayload GetClusterLODCacheBuildPayload() const;
 
 private:
 	Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD, MeshCpuDataPolicy cpuDataPolicy);
@@ -479,6 +429,7 @@ private:
 	void BuildClusterLODTraversalHierarchy(uint32_t preferredNodeWidth);
 	void LogClusterLODHierarchyStats() const;
 	void ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data);
+	void ClearCLodCacheBuildChunkData(bool shrinkToFit);
 	static SparseChunkViewTable ToSparseChunkViewTable(std::vector<std::unique_ptr<BufferView>>&& denseViews) {
 		SparseChunkViewTable sparseViews;
 		sparseViews.reserve(denseViews.size());
@@ -522,16 +473,18 @@ private:
 	std::vector<std::byte>       m_clodDuplicatedVertices;
 	std::vector<std::byte>       m_clodDuplicatedSkinningVertices;
 	std::vector<ClusterLODGroupChunk> m_clodGroupChunks;
-	std::vector<std::vector<std::byte>> m_clodGroupVertexChunks;
-	std::vector<std::vector<std::byte>> m_clodGroupSkinningVertexChunks;
-	std::vector<std::vector<uint32_t>> m_clodGroupMeshletVertexChunks;
-	std::vector<std::vector<uint32_t>> m_clodGroupCompressedPositionWordChunks;
-	std::vector<std::vector<uint32_t>> m_clodGroupCompressedNormalWordChunks;
-	std::vector<std::vector<uint32_t>> m_clodGroupCompressedMeshletVertexWordChunks;
-	std::vector<std::vector<meshopt_Meshlet>> m_clodGroupMeshletChunks;
-	std::vector<std::vector<uint8_t>> m_clodGroupMeshletTriangleChunks;
-	std::vector<std::vector<BoundingSphere>> m_clodGroupMeshletBoundsChunks;
-	std::vector<ClusterLODGroupDiskSpans> m_clodGroupDiskSpans;
+	struct ClusterLODCacheBuildChunkData {
+		std::vector<std::vector<std::byte>> groupVertexChunks;
+		std::vector<std::vector<std::byte>> groupSkinningVertexChunks;
+		std::vector<std::vector<uint32_t>> groupMeshletVertexChunks;
+		std::vector<std::vector<uint32_t>> groupCompressedPositionWordChunks;
+		std::vector<std::vector<uint32_t>> groupCompressedNormalWordChunks;
+		std::vector<std::vector<uint32_t>> groupCompressedMeshletVertexWordChunks;
+		std::vector<std::vector<meshopt_Meshlet>> groupMeshletChunks;
+		std::vector<std::vector<uint8_t>> groupMeshletTriangleChunks;
+		std::vector<std::vector<BoundingSphere>> groupMeshletBoundsChunks;
+	} m_clodCacheBuildChunkData;
+	std::vector<ClusterLODGroupDiskLocator> m_clodGroupDiskLocators;
 	ClusterLODCacheSource m_clodCacheSource;
 	SparseChunkViewTable m_clodPreSkinningVertexChunkViews;
 	SparseChunkViewTable m_clodPostSkinningVertexChunkViews;

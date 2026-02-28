@@ -646,23 +646,50 @@ void Mesh::ReleaseCpuGeometryData() {
 	}
 }
 
+void Mesh::ClearCLodCacheBuildChunkData(bool shrinkToFit)
+{
+	auto clearChunkStorage = [shrinkToFit](auto& chunks) {
+		chunks.clear();
+		if (shrinkToFit) {
+			chunks.shrink_to_fit();
+		}
+	};
+
+	clearChunkStorage(m_clodCacheBuildChunkData.groupVertexChunks);
+	clearChunkStorage(m_clodCacheBuildChunkData.groupSkinningVertexChunks);
+	clearChunkStorage(m_clodCacheBuildChunkData.groupMeshletVertexChunks);
+	clearChunkStorage(m_clodCacheBuildChunkData.groupCompressedPositionWordChunks);
+	clearChunkStorage(m_clodCacheBuildChunkData.groupCompressedNormalWordChunks);
+	clearChunkStorage(m_clodCacheBuildChunkData.groupCompressedMeshletVertexWordChunks);
+	clearChunkStorage(m_clodCacheBuildChunkData.groupMeshletChunks);
+	clearChunkStorage(m_clodCacheBuildChunkData.groupMeshletTriangleChunks);
+	clearChunkStorage(m_clodCacheBuildChunkData.groupMeshletBoundsChunks);
+}
+
+void Mesh::ReleaseCLodChunkUploadData()
+{
+	ClearCLodCacheBuildChunkData(true);
+}
+
 void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 {
+	const bool hasDiskBackedStreamingSource = !data.groupDiskLocators.empty() && !data.cacheSource.containerFileName.empty();
+
 	m_clodGroups = data.groups;
 	m_clodChildren = data.children;
 	m_clodDuplicatedVertices = data.duplicatedVertices;
 	m_clodDuplicatedSkinningVertices = data.duplicatedSkinningVertices;
 	m_clodGroupChunks = data.groupChunks;
-	m_clodGroupVertexChunks = data.groupVertexChunks;
-	m_clodGroupSkinningVertexChunks = data.groupSkinningVertexChunks;
-	m_clodGroupMeshletVertexChunks = data.groupMeshletVertexChunks;
-	m_clodGroupCompressedPositionWordChunks = data.groupCompressedPositionWordChunks;
-	m_clodGroupCompressedNormalWordChunks = data.groupCompressedNormalWordChunks;
-	m_clodGroupCompressedMeshletVertexWordChunks = data.groupCompressedMeshletVertexWordChunks;
-	m_clodGroupMeshletChunks = data.groupMeshletChunks;
-	m_clodGroupMeshletTriangleChunks = data.groupMeshletTriangleChunks;
-	m_clodGroupMeshletBoundsChunks = data.groupMeshletBoundsChunks;
-	m_clodGroupDiskSpans = data.groupDiskSpans;
+	if (hasDiskBackedStreamingSource && m_clodGroupChunks.size() != m_clodGroups.size()) {
+		m_clodGroupChunks.assign(m_clodGroups.size(), {});
+		for (size_t groupIndex = 0; groupIndex < m_clodGroups.size(); ++groupIndex) {
+			m_clodGroupChunks[groupIndex].groupVertexCount = m_clodGroups[groupIndex].groupVertexCount;
+			m_clodGroupChunks[groupIndex].meshletCount = m_clodGroups[groupIndex].meshletCount;
+			m_clodGroupChunks[groupIndex].meshletBoundsCount = m_clodGroups[groupIndex].meshletCount;
+		}
+	}
+	ClearCLodCacheBuildChunkData(false);
+	m_clodGroupDiskLocators = data.groupDiskLocators;
 	m_clodCacheSource = data.cacheSource;
 	m_clodNodes = data.nodes;
 	m_clodTopRootNode = 0;
@@ -683,6 +710,27 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 	}
 }
 
+void Mesh::AdoptCLodDiskStreamingMetadata(const ClusterLODPrebuiltData& data)
+{
+	if (data.groupDiskLocators.empty() || data.cacheSource.containerFileName.empty()) {
+		return;
+	}
+
+	m_clodGroupDiskLocators = data.groupDiskLocators;
+	m_clodCacheSource = data.cacheSource;
+
+	if (m_clodGroupChunks.size() != m_clodGroups.size()) {
+		m_clodGroupChunks.assign(m_clodGroups.size(), {});
+		for (size_t groupIndex = 0; groupIndex < m_clodGroups.size(); ++groupIndex) {
+			m_clodGroupChunks[groupIndex].groupVertexCount = m_clodGroups[groupIndex].groupVertexCount;
+			m_clodGroupChunks[groupIndex].meshletCount = m_clodGroups[groupIndex].meshletCount;
+			m_clodGroupChunks[groupIndex].meshletBoundsCount = m_clodGroups[groupIndex].meshletCount;
+		}
+	}
+
+	ClearCLodCacheBuildChunkData(false);
+}
+
 ClusterLODPrebuiltData Mesh::GetClusterLODPrebuiltData() const
 {
 	ClusterLODPrebuiltData out{};
@@ -691,19 +739,25 @@ ClusterLODPrebuiltData Mesh::GetClusterLODPrebuiltData() const
 	out.duplicatedVertices = m_clodDuplicatedVertices;
 	out.duplicatedSkinningVertices = m_clodDuplicatedSkinningVertices;
 	out.groupChunks = m_clodGroupChunks;
-	out.groupVertexChunks = m_clodGroupVertexChunks;
-	out.groupSkinningVertexChunks = m_clodGroupSkinningVertexChunks;
-	out.groupMeshletVertexChunks = m_clodGroupMeshletVertexChunks;
-	out.groupCompressedPositionWordChunks = m_clodGroupCompressedPositionWordChunks;
-	out.groupCompressedNormalWordChunks = m_clodGroupCompressedNormalWordChunks;
-	out.groupCompressedMeshletVertexWordChunks = m_clodGroupCompressedMeshletVertexWordChunks;
-	out.groupMeshletChunks = m_clodGroupMeshletChunks;
-	out.groupMeshletTriangleChunks = m_clodGroupMeshletTriangleChunks;
-	out.groupMeshletBoundsChunks = m_clodGroupMeshletBoundsChunks;
-	out.groupDiskSpans = m_clodGroupDiskSpans;
+	out.groupDiskLocators = m_clodGroupDiskLocators;
 	out.cacheSource = m_clodCacheSource;
 	out.nodes = m_clodNodes;
 	return out;
+}
+
+ClusterLODCacheBuildPayload Mesh::GetClusterLODCacheBuildPayload() const
+{
+	ClusterLODCacheBuildPayload payload{};
+	payload.groupVertexChunks = &m_clodCacheBuildChunkData.groupVertexChunks;
+	payload.groupSkinningVertexChunks = &m_clodCacheBuildChunkData.groupSkinningVertexChunks;
+	payload.groupMeshletVertexChunks = &m_clodCacheBuildChunkData.groupMeshletVertexChunks;
+	payload.groupCompressedPositionWordChunks = &m_clodCacheBuildChunkData.groupCompressedPositionWordChunks;
+	payload.groupCompressedNormalWordChunks = &m_clodCacheBuildChunkData.groupCompressedNormalWordChunks;
+	payload.groupCompressedMeshletVertexWordChunks = &m_clodCacheBuildChunkData.groupCompressedMeshletVertexWordChunks;
+	payload.groupMeshletChunks = &m_clodCacheBuildChunkData.groupMeshletChunks;
+	payload.groupMeshletTriangleChunks = &m_clodCacheBuildChunkData.groupMeshletTriangleChunks;
+	payload.groupMeshletBoundsChunks = &m_clodCacheBuildChunkData.groupMeshletBoundsChunks;
+	return payload;
 }
 
 void Mesh::CreateVertexBuffer() {
@@ -1155,15 +1209,7 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 	m_clodDuplicatedVertices.clear();
 	m_clodDuplicatedSkinningVertices.clear();
 	m_clodGroupChunks.clear();
-	m_clodGroupVertexChunks.clear();
-	m_clodGroupSkinningVertexChunks.clear();
-	m_clodGroupMeshletVertexChunks.clear();
-	m_clodGroupCompressedPositionWordChunks.clear();
-	m_clodGroupCompressedNormalWordChunks.clear();
-	m_clodGroupCompressedMeshletVertexWordChunks.clear();
-	m_clodGroupMeshletChunks.clear();
-	m_clodGroupMeshletTriangleChunks.clear();
-	m_clodGroupMeshletBoundsChunks.clear();
+	ClearCLodCacheBuildChunkData(false);
 
 	// traversal hierarchy storage
 	m_clodNodes.clear();
@@ -1222,15 +1268,7 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 		m_clodDuplicatedVertices.clear();
 		m_clodDuplicatedSkinningVertices.clear();
 		m_clodGroupChunks.clear();
-		m_clodGroupVertexChunks.clear();
-		m_clodGroupSkinningVertexChunks.clear();
-		m_clodGroupMeshletVertexChunks.clear();
-		m_clodGroupCompressedPositionWordChunks.clear();
-		m_clodGroupCompressedNormalWordChunks.clear();
-		m_clodGroupCompressedMeshletVertexWordChunks.clear();
-		m_clodGroupMeshletChunks.clear();
-		m_clodGroupMeshletTriangleChunks.clear();
-		m_clodGroupMeshletBoundsChunks.clear();
+		ClearCLodCacheBuildChunkData(false);
 		m_clodNodes.clear();
 		m_clodLodNodeRanges.clear();
 		m_clodLodLevelRoots.clear();
@@ -1387,15 +1425,15 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 		captureContext.duplicatedVertices = &m_clodDuplicatedVertices;
 		captureContext.duplicatedSkinningVertices = &m_clodDuplicatedSkinningVertices;
 		captureContext.groupChunks = &m_clodGroupChunks;
-		captureContext.groupVertexChunks = &m_clodGroupVertexChunks;
-		captureContext.groupSkinningVertexChunks = &m_clodGroupSkinningVertexChunks;
-		captureContext.groupMeshletVertexChunks = &m_clodGroupMeshletVertexChunks;
-		captureContext.groupCompressedPositionWordChunks = &m_clodGroupCompressedPositionWordChunks;
-		captureContext.groupCompressedNormalWordChunks = &m_clodGroupCompressedNormalWordChunks;
-		captureContext.groupCompressedMeshletVertexWordChunks = &m_clodGroupCompressedMeshletVertexWordChunks;
-		captureContext.groupMeshletChunks = &m_clodGroupMeshletChunks;
-		captureContext.groupMeshletTriangleChunks = &m_clodGroupMeshletTriangleChunks;
-		captureContext.groupMeshletBoundsChunks = &m_clodGroupMeshletBoundsChunks;
+		captureContext.groupVertexChunks = &m_clodCacheBuildChunkData.groupVertexChunks;
+		captureContext.groupSkinningVertexChunks = &m_clodCacheBuildChunkData.groupSkinningVertexChunks;
+		captureContext.groupMeshletVertexChunks = &m_clodCacheBuildChunkData.groupMeshletVertexChunks;
+		captureContext.groupCompressedPositionWordChunks = &m_clodCacheBuildChunkData.groupCompressedPositionWordChunks;
+		captureContext.groupCompressedNormalWordChunks = &m_clodCacheBuildChunkData.groupCompressedNormalWordChunks;
+		captureContext.groupCompressedMeshletVertexWordChunks = &m_clodCacheBuildChunkData.groupCompressedMeshletVertexWordChunks;
+		captureContext.groupMeshletChunks = &m_clodCacheBuildChunkData.groupMeshletChunks;
+		captureContext.groupMeshletTriangleChunks = &m_clodCacheBuildChunkData.groupMeshletTriangleChunks;
+		captureContext.groupMeshletBoundsChunks = &m_clodCacheBuildChunkData.groupMeshletBoundsChunks;
 		captureContext.meshPositionQuantScale = meshPositionQuantScale;
 		captureContext.meshPositionQuantExp = meshPositionQuantExp;
 

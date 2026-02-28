@@ -101,7 +101,6 @@ private:
 	struct CLodDiskStreamingRequest {
 		uint32_t groupGlobalIndex = 0;
 		ClusterLODCacheSource cacheSource{};
-		ClusterLODGroupDiskSpans groupDiskSpan{};
 		uint32_t groupLocalIndex = 0;
 	};
 
@@ -109,6 +108,7 @@ private:
 		uint32_t groupGlobalIndex = 0;
 		uint32_t groupLocalIndex = 0;
 		bool success = false;
+		std::optional<ClusterLODGroupChunk> groupChunkMetadata;
 		std::vector<std::byte> vertexChunk;
 		std::vector<uint32_t> meshletVertexChunk;
 		std::vector<uint32_t> compressedPositionWordChunk;

@@ -546,7 +546,7 @@ namespace AssimpLoader {
                 meshFlags,
                 std::move(prebuiltData));
             if (!hadPrebuiltData) {
-                CLodCacheLoader::SavePrebuilt(cacheIdentity, mesh->GetClusterLODPrebuiltData());
+                CLodCacheLoader::SavePrebuilt(cacheIdentity, mesh->GetClusterLODPrebuiltData(), mesh->GetClusterLODCacheBuildPayload());
             }
 
             meshes.push_back(mesh);

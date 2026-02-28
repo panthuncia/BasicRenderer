@@ -656,9 +656,15 @@ std::shared_ptr<Mesh> BuildMeshFromPrimitive(
     auto mesh = ingest.Build(defaultMaterial, std::move(prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
 
     if (!hadPrebuiltData) {
-        const bool cacheSaved = CLodCacheLoader::SavePrebuilt(cacheIdentity, mesh->GetClusterLODPrebuiltData());
+        const bool cacheSaved = CLodCacheLoader::SavePrebuilt(cacheIdentity, mesh->GetClusterLODPrebuiltData(), mesh->GetClusterLODCacheBuildPayload());
         if (!cacheSaved) {
             spdlog::warn("Failed to save CLOD cache for {} (mesh {}, primitive {})", sourceFilePath, meshIndex, primitiveIndex);
+        }
+        else {
+            auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
+            if (diskBackedPrebuilt.has_value()) {
+                mesh->AdoptCLodDiskStreamingMetadata(diskBackedPrebuilt.value());
+            }
         }
     }
 
