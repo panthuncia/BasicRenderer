@@ -614,81 +614,16 @@ namespace CLodCache {
 		}
 
 		const uint32_t groupCount = static_cast<uint32_t>(out.prebuiltData.groupChunks.size());
-		const bool hasContainerSpans = (out.prebuiltData.groupDiskSpans.size() == groupCount) && groupCount > 0;
+		const bool hasContainerSpans = (out.prebuiltData.groupDiskSpans.size() == groupCount);
 		if (hasContainerSpans) {
 			return out;
 		}
 
-		out.prebuiltData.groupDiskSpans.assign(groupCount, {});
-		for (uint32_t groupIndex = 0; groupIndex < groupCount; ++groupIndex) {
-			const pxr::SdfPath groupPrimPath(GroupPrimPathString(groupIndex));
-			stage->Load(groupPrimPath);
-
-			pxr::UsdPrim groupPrim = stage->GetPrimAtPath(groupPrimPath);
-			if (!groupPrim) {
-				stage->Unload(groupPrimPath);
-				continue;
-			}
-
-			pxr::VtArray<unsigned char> vertexChunk;
-			if (groupPrim.GetAttribute(pxr::TfToken("groupVertexChunk")).Get(&vertexChunk)) {
-				out.prebuiltData.groupVertexChunks[groupIndex] = ToBytes(vertexChunk);
-			}
-
-			pxr::VtArray<unsigned char> skinningChunk;
-			if (groupPrim.GetAttribute(pxr::TfToken("groupSkinningVertexChunk")).Get(&skinningChunk)) {
-				out.prebuiltData.groupSkinningVertexChunks[groupIndex] = ToBytes(skinningChunk);
-			}
-
-			pxr::VtArray<uint32_t> meshletVertexChunk;
-			if (groupPrim.GetAttribute(pxr::TfToken("groupMeshletVertexChunk")).Get(&meshletVertexChunk)) {
-				out.prebuiltData.groupMeshletVertexChunks[groupIndex].assign(meshletVertexChunk.begin(), meshletVertexChunk.end());
-			}
-
-			pxr::VtArray<uint32_t> compressedPositionWordChunk;
-			if (groupPrim.GetAttribute(pxr::TfToken("groupCompressedPositionWordChunk")).Get(&compressedPositionWordChunk)) {
-				out.prebuiltData.groupCompressedPositionWordChunks[groupIndex].assign(compressedPositionWordChunk.begin(), compressedPositionWordChunk.end());
-			}
-
-			pxr::VtArray<uint32_t> compressedNormalWordChunk;
-			if (groupPrim.GetAttribute(pxr::TfToken("groupCompressedNormalWordChunk")).Get(&compressedNormalWordChunk)) {
-				out.prebuiltData.groupCompressedNormalWordChunks[groupIndex].assign(compressedNormalWordChunk.begin(), compressedNormalWordChunk.end());
-			}
-
-			pxr::VtArray<uint32_t> compressedMeshletVertexWordChunk;
-			if (groupPrim.GetAttribute(pxr::TfToken("groupCompressedMeshletVertexWordChunk")).Get(&compressedMeshletVertexWordChunk)) {
-				out.prebuiltData.groupCompressedMeshletVertexWordChunks[groupIndex].assign(compressedMeshletVertexWordChunk.begin(), compressedMeshletVertexWordChunk.end());
-			}
-
-			pxr::VtArray<unsigned char> meshletChunkBytes;
-			if (groupPrim.GetAttribute(pxr::TfToken("groupMeshletChunk")).Get(&meshletChunkBytes)) {
-				const std::vector<std::byte> bytes = ToBytes(meshletChunkBytes);
-				const size_t count = bytes.size() / sizeof(meshopt_Meshlet);
-				out.prebuiltData.groupMeshletChunks[groupIndex].resize(count);
-				if (count > 0) {
-					std::memcpy(out.prebuiltData.groupMeshletChunks[groupIndex].data(), bytes.data(), count * sizeof(meshopt_Meshlet));
-				}
-			}
-
-			pxr::VtArray<unsigned char> meshletTriangleChunk;
-			if (groupPrim.GetAttribute(pxr::TfToken("groupMeshletTriangleChunk")).Get(&meshletTriangleChunk)) {
-				out.prebuiltData.groupMeshletTriangleChunks[groupIndex].assign(meshletTriangleChunk.begin(), meshletTriangleChunk.end());
-			}
-
-			pxr::VtArray<unsigned char> meshletBoundsChunk;
-			if (groupPrim.GetAttribute(pxr::TfToken("groupMeshletBoundsChunk")).Get(&meshletBoundsChunk)) {
-				const std::vector<std::byte> bytes = ToBytes(meshletBoundsChunk);
-				const size_t count = bytes.size() / sizeof(BoundingSphere);
-				out.prebuiltData.groupMeshletBoundsChunks[groupIndex].resize(count);
-				if (count > 0) {
-					std::memcpy(out.prebuiltData.groupMeshletBoundsChunks[groupIndex].data(), bytes.data(), count * sizeof(BoundingSphere));
-				}
-			}
-
-			stage->Unload(groupPrimPath);
-		}
-
-		return out;
+		spdlog::warn(
+			"CLod cache '{}' is missing disk span metadata for {} groups; treating as cache miss.",
+			ws2s(cachePath),
+			groupCount);
+		return std::nullopt;
 	}
 
 	bool Save(const CacheKey& key, const CacheData& data)

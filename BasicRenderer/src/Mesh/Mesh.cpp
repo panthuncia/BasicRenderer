@@ -578,8 +578,31 @@ namespace
 	}
 }
 
+std::shared_ptr<Mesh> MeshIngestBuilder::Build(
+	const std::shared_ptr<Material>& material,
+	std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD,
+	MeshCpuDataPolicy cpuDataPolicy) {
+	auto vertices = std::make_unique<std::vector<std::byte>>(std::move(m_vertices));
 
-Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD) {
+	std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices;
+	if (!m_skinningVertices.empty()) {
+		skinningVertices = std::make_unique<std::vector<std::byte>>(std::move(m_skinningVertices));
+	}
+
+	return Mesh::CreateSharedFromIngest(
+		std::move(vertices),
+		m_vertexSize,
+		std::move(skinningVertices),
+		m_skinningVertexSize,
+		std::move(m_indices),
+		material,
+		m_flags,
+		std::move(prebuiltClusterLOD),
+		cpuDataPolicy);
+}
+
+
+Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD, MeshCpuDataPolicy cpuDataPolicy) {
     m_vertices = std::move(vertices);
 	if (skinningVertices.has_value()) {
 		m_skinningVertices = std::move(skinningVertices.value());
@@ -605,7 +628,22 @@ Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertex
 	CreateBuffers(indices);
     this->material = material;
 
+	if (cpuDataPolicy == MeshCpuDataPolicy::ReleaseAfterUpload) {
+		ReleaseCpuGeometryData();
+	}
+
 	m_globalMeshID = GetNextGlobalIndex();
+}
+
+void Mesh::ReleaseCpuGeometryData() {
+	if (m_vertices) {
+		m_vertices->clear();
+		m_vertices->shrink_to_fit();
+	}
+	if (m_skinningVertices) {
+		m_skinningVertices->clear();
+		m_skinningVertices->shrink_to_fit();
+	}
 }
 
 void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)

@@ -49,18 +49,26 @@ static std::unordered_set<ImageFiletype> STBImageSupportedFiletypes = {
 
 enum class SceneFiletype {
 	OTHER,
+	GLTF,
 	USD,
 };
 
 enum class SceneLoader {
 	UNKNOWN,
+	GlTF,
 	Assimp,
 	OpenUSD
 };
 
 static std::unordered_map<SceneFiletype, SceneLoader> sceneFiletypeToLoader = {
+	{SceneFiletype::GLTF, SceneLoader::GlTF},
 	{SceneFiletype::USD, SceneLoader::OpenUSD},
 	{SceneFiletype::OTHER, SceneLoader::Assimp} // default loader
+};
+
+static std::unordered_set<std::string> gltfFileExtensions = {
+	".gltf", ".glb",
+	"gltf", "glb"
 };
 
 static std::unordered_set<std::string> usdFileExtensions = {
@@ -72,7 +80,14 @@ inline bool isUsdExt(const std::string& ext) {
 	return usdFileExtensions.contains(ext);
 }
 
+inline bool isGltfExt(const std::string& ext) {
+	return gltfFileExtensions.contains(ext);
+}
+
 inline SceneFiletype GetSceneFiletype(const std::string& ext) {
+	if (isGltfExt(ext)) {
+		return SceneFiletype::GLTF;
+	}
 	if (isUsdExt(ext)) {
 		return SceneFiletype::USD;
 	}

@@ -205,11 +205,11 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 	const auto& groupMeshletBoundsChunks = mesh->GetCLodGroupMeshletBoundsChunks();
 	const auto& groupDiskSpans = mesh->GetCLodGroupDiskSpans();
 	
-	auto numVertices = mesh->GetStreamingNumVertices();
-	if (vertices.empty()) {
-		// Handle empty vertices case
-		throw std::runtime_error("Mesh vertices are empty");
-	}
+	//auto numVertices = mesh->GetStreamingNumVertices();
+	//if (vertices.empty()) {
+	//	// Handle empty vertices case
+	//	throw std::runtime_error("Mesh vertices are empty");
+	//}
 
 	std::unique_ptr<BufferView> postSkinningView = nullptr;
 	std::unique_ptr<BufferView> preSkinningView = nullptr;
@@ -237,11 +237,12 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 		(groupVertexChunks.size() == groupCompressedPositionWordChunks.size()) &&
 		(groupVertexChunks.size() == groupCompressedNormalWordChunks.size()) &&
 		(groupVertexChunks.size() == groupCompressedMeshletVertexWordChunks.size());
+	const bool preferDiskBackedStreaming = hasDiskBackedGroupChunks && mesh->HasCLodDiskStreamingSource();
 	if (mesh->GetPerMeshCBData().vertexFlags & VertexFlags::VERTEX_SKINNED) {
 		unsigned int skinningVertexByteSize = mesh->GetSkinningVertexSize();
-		preSkinningView = m_preSkinningVertices->AddData(skinningVertices.data(), numVertices * skinningVertexByteSize, skinningVertexByteSize);
+		//preSkinningView = m_preSkinningVertices->AddData(skinningVertices.data(), numVertices * skinningVertexByteSize, skinningVertexByteSize);
 	}
-	else if (hasGroupChunks || hasDiskBackedGroupChunks) {
+	else if (!preferDiskBackedStreaming && (hasGroupChunks || hasDiskBackedGroupChunks)) {
 		clodPostSkinningChunkViews.reserve(mesh->GetCLodGroupChunks().size());
 		for (size_t groupIndex = 0; groupIndex < mesh->GetCLodGroupChunks().size(); ++groupIndex)
 		{
@@ -256,13 +257,24 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 		}
 	}
 	else {
-		postSkinningView = m_postSkinningVertices->AddData(vertices.data(), numVertices * vertexByteSize, vertexByteSize);
+		//postSkinningView = m_postSkinningVertices->AddData(vertices.data(), numVertices * vertexByteSize, vertexByteSize);
 		//meshletBoundsView = m_meshletBoundsBuffer->AddData(mesh->GetMeshletBounds().data(), mesh->GetMeshletCount() * sizeof(BoundingSphere), sizeof(BoundingSphere));
 	}
 
 	if (hasGroupChunks || hasDiskBackedGroupChunks)
 	{
 		const size_t groupCount = mesh->GetCLodGroupChunks().size();
+		if (preferDiskBackedStreaming) {
+			clodPostSkinningChunkViews.resize(groupCount);
+			clodMeshletVertexChunkViews.resize(groupCount);
+			clodMeshletChunkViews.resize(groupCount);
+			clodMeshletTriangleChunkViews.resize(groupCount);
+			clodMeshletBoundsChunkViews.resize(groupCount);
+			clodCompressedPositionChunkViews.resize(groupCount);
+			clodCompressedNormalChunkViews.resize(groupCount);
+			clodCompressedMeshletVertexChunkViews.resize(groupCount);
+		}
+		else {
 		clodMeshletVertexChunkViews.reserve(groupCount);
 		for (size_t groupIndex = 0; groupIndex < groupCount; ++groupIndex)
 		{
@@ -342,6 +354,7 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 			clodCompressedPositionChunkViews.resize(groupCount);
 			clodCompressedNormalChunkViews.resize(groupCount);
 			clodCompressedMeshletVertexChunkViews.resize(groupCount);
+		}
 		}
 	}
 	else

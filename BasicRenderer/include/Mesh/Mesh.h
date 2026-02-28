@@ -6,6 +6,7 @@
 #include <atomic>
 #include <optional>
 #include <string>
+#include <stdexcept>
 #include <rhi.h>
 #include <meshoptimizer.h>
 #include <ThirdParty/meshoptimizer/clusterlod.h>
@@ -21,6 +22,7 @@ class Material;
 class MeshManager;
 class Skeleton;
 class Buffer;
+class Mesh;
 
 struct ClusterLODTraversalMetric
 {
@@ -106,25 +108,32 @@ struct ClusterLODPrebuiltData
 	std::vector<ClusterLODNode> nodes;
 };
 
+enum class MeshCpuDataPolicy {
+	Retain,
+	ReleaseAfterUpload,
+};
+
 class Mesh {
 public:
 	~Mesh()
 	{
 		auto& deletionManager = DeletionManager::GetInstance();
 	}
-	static std::shared_ptr<Mesh> CreateShared(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD = std::nullopt) {
-		return std::shared_ptr<Mesh>(new Mesh(std::move(vertices), vertexSize, std::move(skinningVertices), skinningVertexSize, indices, material, flags, std::move(prebuiltClusterLOD)));
+	static std::shared_ptr<Mesh> CreateShared(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD = std::nullopt, MeshCpuDataPolicy cpuDataPolicy = MeshCpuDataPolicy::Retain) {
+		return std::shared_ptr<Mesh>(new Mesh(std::move(vertices), vertexSize, std::move(skinningVertices), skinningVertexSize, indices, material, flags, std::move(prebuiltClusterLOD), cpuDataPolicy));
     }
+	static std::shared_ptr<Mesh> CreateSharedFromIngest(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, std::vector<UINT32>&& indices, const std::shared_ptr<Material> material, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD = std::nullopt, MeshCpuDataPolicy cpuDataPolicy = MeshCpuDataPolicy::Retain) {
+		return std::shared_ptr<Mesh>(new Mesh(std::move(vertices), vertexSize, std::move(skinningVertices), skinningVertexSize, indices, material, flags, std::move(prebuiltClusterLOD), cpuDataPolicy));
+	}
 	uint64_t GetNumVertices(bool meshletReorderedVertices) const {
 		//uint64_t size = meshletReorderedVertices ? m_meshletReorderedVertices.size() / m_perMeshBufferData.vertexByteSize : m_vertices->size() / m_perMeshBufferData.vertexByteSize;
-		auto size = m_vertices->size() / m_perMeshBufferData.vertexByteSize;
-		return size;
+		return static_cast<uint64_t>(m_perMeshBufferData.numVertices);
 	}
 	uint64_t GetStreamingNumVertices() const {
 		if (!m_clodDuplicatedVertices.empty()) {
 			return m_clodDuplicatedVertices.size() / m_perMeshBufferData.vertexByteSize;
 		}
-		return m_vertices->size() / m_perMeshBufferData.vertexByteSize;
+		return static_cast<uint64_t>(m_perMeshBufferData.numVertices);
 	}
 	uint32_t GetCLodGroupCount() const {
 		return static_cast<uint32_t>(m_clodGroupChunks.size());
@@ -134,12 +143,31 @@ public:
 	PerMeshCB& GetPerMeshCBData() { return m_perMeshBufferData; };
     UINT GetIndexCount() const;
 	uint64_t GetGlobalID() const;
-	std::vector<std::byte>& GetVertices() { return *m_vertices; }
+	std::vector<std::byte>& GetVertices() {
+		if (!m_vertices) {
+			static std::vector<std::byte> empty;
+			return empty;
+		}
+		return *m_vertices;
+	}
 	const std::vector<std::byte>& GetStreamingVertices() const {
-		return m_clodDuplicatedVertices.empty() ? *m_vertices : m_clodDuplicatedVertices;
+		if (!m_clodDuplicatedVertices.empty()) {
+			return m_clodDuplicatedVertices;
+		}
+		if (m_vertices) {
+			return *m_vertices;
+		}
+		static const std::vector<std::byte> empty;
+		return empty;
 	}
 	//std::vector<std::byte>& GetMeshletReorderedVertices() { return m_meshletReorderedVertices; }
-	std::vector<std::byte>& GetSkinningVertices() { return *m_skinningVertices; }
+	std::vector<std::byte>& GetSkinningVertices() {
+		if (!m_skinningVertices) {
+			static std::vector<std::byte> empty;
+			return empty;
+		}
+		return *m_skinningVertices;
+	}
 	const std::vector<std::byte>& GetStreamingSkinningVertices() const {
 		if (!m_clodDuplicatedSkinningVertices.empty()) {
 			return m_clodDuplicatedSkinningVertices;
@@ -404,7 +432,8 @@ public:
 	ClusterLODPrebuiltData GetClusterLODPrebuiltData() const;
 
 private:
-	Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD);
+	Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD, MeshCpuDataPolicy cpuDataPolicy);
+	void ReleaseCpuGeometryData();
     void CreateVertexBuffer();
     void CreateMeshlets(const std::vector<UINT32>& indices);
 	//void CreateMeshletReorderedVertices();
@@ -481,4 +510,56 @@ private:
 	MeshManager* m_pCurrentMeshManager = nullptr;
 
 	std::shared_ptr<Skeleton> m_baseSkeleton = nullptr;
+};
+
+class MeshIngestBuilder {
+public:
+	MeshIngestBuilder(unsigned int vertexSize, unsigned int skinningVertexSize, unsigned int flags)
+		: m_vertexSize(vertexSize), m_skinningVertexSize(skinningVertexSize), m_flags(flags) {}
+
+	void ReserveVertices(size_t vertexCount) {
+		m_vertices.reserve(vertexCount * static_cast<size_t>(m_vertexSize));
+	}
+
+	void ReserveIndices(size_t indexCount) {
+		m_indices.reserve(indexCount);
+	}
+
+	void AppendVertexBytes(const std::byte* data, size_t byteCount) {
+		if (byteCount != m_vertexSize) {
+			throw std::runtime_error("MeshIngestBuilder vertex byte size mismatch");
+		}
+		m_vertices.insert(m_vertices.end(), data, data + byteCount);
+	}
+
+	void AppendSkinningVertexBytes(const std::byte* data, size_t byteCount) {
+		if (m_skinningVertexSize == 0) {
+			throw std::runtime_error("MeshIngestBuilder has no skinning vertex format");
+		}
+		if (byteCount != m_skinningVertexSize) {
+			throw std::runtime_error("MeshIngestBuilder skinning vertex byte size mismatch");
+		}
+		m_skinningVertices.insert(m_skinningVertices.end(), data, data + byteCount);
+	}
+
+	void AppendIndex(uint32_t index) {
+		m_indices.push_back(index);
+	}
+
+	void AppendIndices(const uint32_t* data, size_t count) {
+		m_indices.insert(m_indices.end(), data, data + count);
+	}
+
+	std::shared_ptr<Mesh> Build(
+		const std::shared_ptr<Material>& material,
+		std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD = std::nullopt,
+		MeshCpuDataPolicy cpuDataPolicy = MeshCpuDataPolicy::Retain);
+
+private:
+	unsigned int m_vertexSize = 0;
+	unsigned int m_skinningVertexSize = 0;
+	unsigned int m_flags = 0;
+	std::vector<std::byte> m_vertices;
+	std::vector<std::byte> m_skinningVertices;
+	std::vector<uint32_t> m_indices;
 };
