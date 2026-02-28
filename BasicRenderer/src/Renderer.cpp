@@ -156,7 +156,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         rg::runtime::SetActiveDescriptorService(descriptorService);
     }
     ResourceManager::GetInstance().Initialize();
-    TaskSchedulerManager::GetInstance().Initialize();
+    TaskSchedulerManager::GetInstance().Initialize(16);
     PSOManager::GetInstance().initialize();
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();

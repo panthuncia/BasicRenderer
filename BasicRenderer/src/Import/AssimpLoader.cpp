@@ -14,6 +14,7 @@
 #include "Import/Filetypes.h"
 #include "Scene/Scene.h"
 #include "Mesh/Mesh.h"
+#include "Mesh/ClusterLODUtilities.h"
 #include "Import/CLodCacheLoader.h"
 #include "Animation/Skeleton.h"
 #include "Scene/Components.h"
@@ -529,7 +530,30 @@ namespace AssimpLoader {
 
             auto cacheIdentity = BuildAssimpCacheIdentity(sourceFilePath, aMesh, i);
             auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
-            const bool hadPrebuiltData = prebuiltData.has_value();
+
+            if (!prebuiltData.has_value()) {
+                const std::vector<std::byte>* skinningBytes = (skinningData && !skinningData->empty()) ? skinningData.get() : nullptr;
+                ClusterLODPrebuildArtifacts artifacts = BuildClusterLODArtifactsFromGeometry(
+                    *rawData,
+                    vertexSize,
+                    skinningBytes,
+                    skinningVertexSize,
+                    indices,
+                    meshFlags);
+
+                if (CLodCacheLoader::SavePrebuilt(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload())) {
+                    auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
+                    if (diskBackedPrebuilt.has_value()) {
+                        prebuiltData = std::move(diskBackedPrebuilt);
+                    }
+                    else {
+                        prebuiltData = std::move(artifacts.prebuiltData);
+                    }
+                }
+                else {
+                    prebuiltData = std::move(artifacts.prebuiltData);
+                }
+            }
 
             std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices;
             if (hasBones) {
@@ -545,9 +569,6 @@ namespace AssimpLoader {
                 material,
                 meshFlags,
                 std::move(prebuiltData));
-            if (!hadPrebuiltData) {
-                CLodCacheLoader::SavePrebuilt(cacheIdentity, mesh->GetClusterLODPrebuiltData(), mesh->GetClusterLODCacheBuildPayload());
-            }
 
             meshes.push_back(mesh);
         }

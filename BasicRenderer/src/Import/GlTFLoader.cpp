@@ -583,7 +583,7 @@ PrimitivePreprocessData BuildPrimitivePreprocessData(
     MeshIngestBuilder ingest(vertexSize, 0, meshFlags);
     ingest.ReserveVertices(vertexCount);
 
-    constexpr size_t kVertexChunkSize = 8192;
+    constexpr size_t kVertexChunkSize = 32768;
     for (size_t firstVertex = 0; firstVertex < vertexCount; firstVertex += kVertexChunkSize) {
         const size_t chunkVertexCount = std::min(kVertexChunkSize, vertexCount - firstVertex);
 
@@ -658,7 +658,7 @@ PrimitivePreprocessData BuildPrimitivePreprocessData(
 
         ingest.ReserveIndices(indexAccessor.count);
 
-        constexpr size_t kIndexChunkSize = 32768;
+        constexpr size_t kIndexChunkSize = 131072;
         for (size_t firstIndex = 0; firstIndex < indexAccessor.count; firstIndex += kIndexChunkSize) {
             const size_t chunkIndexCount = std::min(kIndexChunkSize, indexAccessor.count - firstIndex);
             size_t indexStride = 0;

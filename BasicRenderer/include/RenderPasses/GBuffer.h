@@ -317,8 +317,8 @@ private:
                 perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
 				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
 
-				commandList.SetIndexBuffer(mesh.GetIndexBufferView());
-                commandList.DrawIndexed(mesh.GetIndexCount(), 1, 0, 0, 0);
+				//commandList.SetIndexBuffer(mesh.GetIndexBufferView());
+                //commandList.DrawIndexed(mesh.GetIndexCount(), 1, 0, 0, 0);
             }
             });
     }
@@ -344,7 +344,7 @@ private:
 				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
 
                 // Mesh shaders use DispatchMesh
-                commandList.DispatchMesh(mesh.GetMeshletCount(), 1, 1);
+                //commandList.DispatchMesh(mesh.GetMeshletCount(), 1, 1);
             }
             });
     }

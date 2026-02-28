@@ -46,6 +46,7 @@
 #include "Import/Filetypes.h"
 #include "Scene/Scene.h"
 #include "Mesh/Mesh.h"
+#include "Mesh/ClusterLODUtilities.h"
 #include "Animation/Skeleton.h"
 #include "Scene/Components.h"
 #include "Animation/AnimationController.h"
@@ -906,7 +907,6 @@ namespace USDLoader {
 
 			auto cacheIdentity = CLodCacheLoader::BuildIdentity(mesh, stage, "");
 			auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
-			const bool hadPrebuiltData = prebuiltData.has_value();
 
 			std::unique_ptr<std::vector<std::byte>> rawData;
 			std::optional<std::unique_ptr<std::vector<std::byte>>> skinningData;
@@ -915,6 +915,30 @@ namespace USDLoader {
 			std::vector<UINT32> indices;
 			unsigned int vertexFlags = 0;
 			LoadGeom(rawData, skinningData, vertexSize, skinningVertexSize, indices, vertexFlags, mesh, std::nullopt, metersPerUnit, uvSetFor(mat), skinQ, skelJointOrderRaw, skelJointOrderMapped);
+
+			if (!prebuiltData.has_value()) {
+				const std::vector<std::byte>* skinningBytes = (skinningData && *skinningData) ? skinningData->get() : nullptr;
+				ClusterLODPrebuildArtifacts artifacts = BuildClusterLODArtifactsFromGeometry(
+					*rawData,
+					vertexSize,
+					skinningBytes,
+					skinningVertexSize,
+					indices,
+					vertexFlags);
+
+				if (CLodCacheLoader::SavePrebuilt(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload())) {
+					auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
+					if (diskBackedPrebuilt.has_value()) {
+						prebuiltData = std::move(diskBackedPrebuilt);
+					}
+					else {
+						prebuiltData = std::move(artifacts.prebuiltData);
+					}
+				}
+				else {
+					prebuiltData = std::move(artifacts.prebuiltData);
+				}
+			}
 
 			auto mtlPtr = loadingCache.materialCache.find(
 				mat.GetPrim().GetPath().GetString());
@@ -931,15 +955,6 @@ namespace USDLoader {
 				vertexFlags,
 				std::move(prebuiltData));
 
-			if (!hadPrebuiltData) {
-				if (CLodCacheLoader::SavePrebuilt(cacheIdentity, mPtr->GetClusterLODPrebuiltData(), mPtr->GetClusterLODCacheBuildPayload())) {
-					auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
-					if (diskBackedPrebuilt.has_value()) {
-						mPtr->AdoptCLodDiskStreamingMetadata(diskBackedPrebuilt.value());
-					}
-				}
-			}
-
 			outMeshes.push_back(mPtr);
 		}
 		else {
@@ -951,7 +966,6 @@ namespace USDLoader {
 
 				auto cacheIdentity = CLodCacheLoader::BuildIdentity(mesh, stage, subset.GetPrim().GetName().GetString());
 				auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
-				const bool hadPrebuiltData = prebuiltData.has_value();
 
 				std::unique_ptr<std::vector<std::byte>> rawData;
 				std::optional<std::unique_ptr<std::vector<std::byte>>> skinningData;
@@ -974,6 +988,30 @@ namespace USDLoader {
 					skelJointOrderRaw,
 					skelJointOrderMapped);
 
+				if (!prebuiltData.has_value()) {
+					const std::vector<std::byte>* skinningBytes = (skinningData && *skinningData) ? skinningData->get() : nullptr;
+					ClusterLODPrebuildArtifacts artifacts = BuildClusterLODArtifactsFromGeometry(
+						*rawData,
+						vertexSize,
+						skinningBytes,
+						skinningVertexSize,
+						indices,
+						vertexFlags);
+
+					if (CLodCacheLoader::SavePrebuilt(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload())) {
+						auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
+						if (diskBackedPrebuilt.has_value()) {
+							prebuiltData = std::move(diskBackedPrebuilt);
+						}
+						else {
+							prebuiltData = std::move(artifacts.prebuiltData);
+						}
+					}
+					else {
+						prebuiltData = std::move(artifacts.prebuiltData);
+					}
+				}
+
 				auto mtlPtr = loadingCache.materialCache.find(
 					mat.GetPrim().GetPath().GetString());
 				auto material = mtlPtr != loadingCache.materialCache.end()
@@ -989,15 +1027,6 @@ namespace USDLoader {
 					material,
 					vertexFlags,
 					std::move(prebuiltData));
-
-				if (!hadPrebuiltData) {
-					if (CLodCacheLoader::SavePrebuilt(cacheIdentity, mPtr->GetClusterLODPrebuiltData(), mPtr->GetClusterLODCacheBuildPayload())) {
-						auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
-						if (diskBackedPrebuilt.has_value()) {
-							mPtr->AdoptCLodDiskStreamingMetadata(diskBackedPrebuilt.value());
-						}
-					}
-				}
 
 				outMeshes.push_back(mPtr);
 			}

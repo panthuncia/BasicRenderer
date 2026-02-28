@@ -173,13 +173,14 @@ namespace CLodCache {
 
 			WriteVectorPod(out, prebuiltData.groups);
 			WriteVectorPod(out, prebuiltData.children);
-			const uint8_t hasDuplicatedVertexStreams =
-				(!prebuiltData.duplicatedVertices.empty() || !prebuiltData.duplicatedSkinningVertices.empty()) ? 1u : 0u;
+			WritePod(out, prebuiltData.objectBoundingSphere);
+			const uint8_t hasDuplicatedVertexStreams = 0;
+				//(!prebuiltData.duplicatedVertices.empty() || !prebuiltData.duplicatedSkinningVertices.empty()) ? 1u : 0u;
 			WritePod(out, hasDuplicatedVertexStreams);
-			if (hasDuplicatedVertexStreams != 0u) {
+/*			if (hasDuplicatedVertexStreams != 0u) {
 				WriteVectorPod(out, prebuiltData.duplicatedVertices);
 				WriteVectorPod(out, prebuiltData.duplicatedSkinningVertices);
-			}
+			}*/
 			const uint8_t hasInlineGroupChunks = prebuiltData.groupChunks.empty() ? 0u : 1u;
 			WritePod(out, hasInlineGroupChunks);
 			if (hasInlineGroupChunks != 0u) {
@@ -203,15 +204,16 @@ namespace CLodCache {
 
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.groups)) return false;
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.children)) return false;
+			if (!ReadPod(blob, offset, out.prebuiltData.objectBoundingSphere)) return false;
 			uint8_t hasDuplicatedVertexStreams = 0u;
 			if (!ReadPod(blob, offset, hasDuplicatedVertexStreams)) return false;
 			if (hasDuplicatedVertexStreams != 0u) {
-				if (!ReadVectorPod(blob, offset, out.prebuiltData.duplicatedVertices)) return false;
-				if (!ReadVectorPod(blob, offset, out.prebuiltData.duplicatedSkinningVertices)) return false;
+				//if (!ReadVectorPod(blob, offset, out.prebuiltData.duplicatedVertices)) return false;
+				//if (!ReadVectorPod(blob, offset, out.prebuiltData.duplicatedSkinningVertices)) return false;
 			}
 			else {
-				out.prebuiltData.duplicatedVertices.clear();
-				out.prebuiltData.duplicatedSkinningVertices.clear();
+				//out.prebuiltData.duplicatedVertices.clear();
+				//out.prebuiltData.duplicatedSkinningVertices.clear();
 			}
 
 			if (out.schemaVersion >= 10u) {

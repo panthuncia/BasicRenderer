@@ -193,17 +193,8 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 		}
 	}
 	mesh->SetCLodGroupChunkViews({}, {}, {}, {}, {}, {}, {}, {}, {});
-	//auto& vertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedVertices() : mesh->GetVertices();
-	//auto& skinningVertices = useMeshletReorderedVertices ? mesh->GetMeshletReorderedSkinningVertices() : mesh->GetSkinningVertices();
-	const auto& vertices = mesh->GetStreamingVertices();
-	const auto& skinningVertices = mesh->GetStreamingSkinningVertices();
+
 	const auto& groupDiskLocators = mesh->GetCLodGroupDiskLocators();
-	
-	//auto numVertices = mesh->GetStreamingNumVertices();
-	//if (vertices.empty()) {
-	//	// Handle empty vertices case
-	//	throw std::runtime_error("Mesh vertices are empty");
-	//}
 
 	std::unique_ptr<BufferView> postSkinningView = nullptr;
 	std::unique_ptr<BufferView> preSkinningView = nullptr;
@@ -345,18 +336,11 @@ void MeshManager::RemoveMesh(Mesh* mesh) {
 void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVertices) {
 	mesh->SetCurrentMeshManager(this);
 	(void)useMeshletReorderedVertices;
-	//auto& vertices = useMeshletReorderedVertices ? mesh->GetMesh()->GetMeshletReorderedVertices() : mesh->GetMesh()->GetVertices();
-	const auto& vertices = mesh->GetMesh()->GetStreamingVertices();
-	auto numVertices = mesh->GetMesh()->GetStreamingNumVertices();
 
 	auto vertexSize = mesh->GetMesh()->GetPerMeshCBData().vertexByteSize;
 	unsigned int meshInstanceBufferSize = static_cast<uint32_t>(m_perMeshInstanceBuffers->Size());
 	if (mesh->HasSkin()) { // Skinned meshes need unique post-skinning vertex buffers
-		auto postSkinningView = m_postSkinningVertices->AddData(vertices.data(), numVertices * vertexSize, vertexSize, numVertices * vertexSize * 2); // Allocate twice the size, since we need to ping-pong for motion vectors
-		BUFFER_UPLOAD(vertices.data(), numVertices * vertexSize, rg::runtime::UploadTarget::FromShared(postSkinningView->GetBuffer()), postSkinningView->GetOffset() + numVertices * vertexSize);
-		auto perMeshInstanceBufferView = m_perMeshInstanceBuffers->AddData(&mesh->GetPerMeshInstanceBufferData(), sizeof(PerMeshInstanceCB), sizeof(PerMeshInstanceCB));
-		//auto meshletBoundsBufferView = m_meshletBoundsBuffer->AddData(mesh->GetMesh()->GetMeshletBounds().data(), mesh->GetMesh()->GetMeshletCount() * sizeof(BoundingSphere), sizeof(BoundingSphere));
-		mesh->SetBufferViews(std::move(postSkinningView), std::move(perMeshInstanceBufferView));
+		// TODO: CLod skinning
 	}
 	else { // Non-skinned meshes can share post-skinning vertex buffers
 		auto perMeshInstanceBufferView = m_perMeshInstanceBuffers->AddData(&mesh->GetPerMeshInstanceBufferData(), sizeof(PerMeshInstanceCB), sizeof(PerMeshInstanceCB));
@@ -369,11 +353,6 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	uint32_t perMeshIndex = static_cast<uint32_t>(
 		mesh->GetMesh()->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
 	mesh->SetPerMeshBufferIndex(perMeshIndex);
-
-	// This buffer is used for draw call indexing in the visibility buffer, to unpack uint25 visibility data
-	//auto clusterIndicesView = m_clusterToVisibleClusterTableIndexBuffer->Allocate(mesh->GetMesh()->GetMeshletCount() * sizeof(unsigned int), sizeof(unsigned int));
-	//mesh->SetClusterToVisibleClusterIndicesBufferView(std::move(clusterIndicesView));
-
 
 	auto clusterLODGroupsView = mesh->GetMesh()->GetCLodGroupsView();
 	auto clusterLODChildrenView = mesh->GetMesh()->GetCLodChildrenView();
@@ -510,19 +489,11 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 	// - Per-mesh instance buffer
 	// - Meshlet bounds
 
-	auto postSkinningView = mesh->GetPostSkinningVertexBufferView();
-	if (postSkinningView != nullptr) {
-		m_postSkinningVertices->Deallocate(postSkinningView);
-	}
 	auto perMeshInstanceBufferView = mesh->GetPerMeshInstanceBufferView();
 	if (perMeshInstanceBufferView != nullptr) {
 		m_perMeshInstanceBuffers->Deallocate(perMeshInstanceBufferView);
 	}
-	//auto meshletBoundsView = mesh->GetMeshletBoundsBufferView();
-	//if (meshletBoundsView != nullptr) {
-	//	m_meshletBoundsBuffer->Deallocate(meshletBoundsView);
-	//}
-	mesh->SetBufferViews(nullptr, nullptr);
+	mesh->SetBufferViews(nullptr);
 	m_activeMeshletCount -= mesh->GetMesh()->GetCLodMeshletCount();
 
 	auto clodBuffersView = mesh->GetCLodOffsetsView();
