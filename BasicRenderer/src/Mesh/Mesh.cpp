@@ -45,6 +45,90 @@ namespace
 			metric.boundingSphereRadius);
 		return sphere;
 	}
+
+	ClusterLODRuntimeSummary BuildRuntimeSummary(
+		const std::vector<ClusterLODGroup>& groups,
+		const std::vector<ClusterLODChild>& children,
+		const std::vector<ClusterLODGroupChunk>& groupChunks)
+	{
+		ClusterLODRuntimeSummary summary{};
+		summary.groupChunkHints.resize(groups.size());
+		summary.parentGroupByLocal.assign(groups.size(), -1);
+		summary.firstGroupVertexByLocal.resize(groups.size(), 0u);
+
+		if (groups.empty()) {
+			return summary;
+		}
+
+		int32_t coarsestDepth = groups[0].depth;
+		for (size_t groupIndex = 0; groupIndex < groups.size(); ++groupIndex) {
+			const auto& group = groups[groupIndex];
+			summary.firstGroupVertexByLocal[groupIndex] = group.firstGroupVertex;
+			if (groupIndex < groupChunks.size()) {
+				const auto& chunk = groupChunks[groupIndex];
+				auto& hint = summary.groupChunkHints[groupIndex];
+				hint.groupVertexCount = chunk.groupVertexCount;
+				hint.meshletVertexCount = chunk.meshletVertexCount;
+				hint.meshletCount = chunk.meshletCount;
+				hint.meshletTrianglesByteCount = chunk.meshletTrianglesByteCount;
+				hint.meshletBoundsCount = chunk.meshletBoundsCount;
+				hint.compressedPositionWordCount = chunk.compressedPositionWordCount;
+				hint.compressedNormalWordCount = chunk.compressedNormalWordCount;
+				hint.compressedMeshletVertexWordCount = chunk.compressedMeshletVertexWordCount;
+			}
+			else {
+				auto& hint = summary.groupChunkHints[groupIndex];
+				hint.groupVertexCount = group.groupVertexCount;
+				hint.meshletCount = group.meshletCount;
+				hint.meshletBoundsCount = group.meshletCount;
+			}
+			coarsestDepth = std::max(coarsestDepth, group.depth);
+		}
+
+		uint32_t runStart = std::numeric_limits<uint32_t>::max();
+		for (uint32_t groupLocalIndex = 0u; groupLocalIndex < static_cast<uint32_t>(groups.size()); ++groupLocalIndex) {
+			const bool isCoarsest = groups[groupLocalIndex].depth == coarsestDepth;
+			if (isCoarsest) {
+				if (runStart == std::numeric_limits<uint32_t>::max()) {
+					runStart = groupLocalIndex;
+				}
+				continue;
+			}
+
+			if (runStart != std::numeric_limits<uint32_t>::max()) {
+				summary.coarsestRanges.push_back({ runStart, groupLocalIndex - runStart });
+				runStart = std::numeric_limits<uint32_t>::max();
+			}
+		}
+
+		if (runStart != std::numeric_limits<uint32_t>::max()) {
+			summary.coarsestRanges.push_back({
+				runStart,
+				static_cast<uint32_t>(groups.size()) - runStart });
+		}
+
+		const uint32_t localGroupCount = static_cast<uint32_t>(groups.size());
+		for (uint32_t groupLocalIndex = 0u; groupLocalIndex < localGroupCount; ++groupLocalIndex) {
+			const auto& group = groups[groupLocalIndex];
+			const uint32_t childBegin = group.firstChild;
+			const uint32_t childEnd = std::min<uint32_t>(childBegin + group.childCount, static_cast<uint32_t>(children.size()));
+			for (uint32_t childIndex = childBegin; childIndex < childEnd; ++childIndex) {
+				const int32_t refinedGroupLocal = children[childIndex].refinedGroup;
+				if (refinedGroupLocal < 0) {
+					continue;
+				}
+
+				const uint32_t refinedGroupLocalU32 = static_cast<uint32_t>(refinedGroupLocal);
+				if (refinedGroupLocalU32 >= localGroupCount) {
+					continue;
+				}
+
+				summary.parentGroupByLocal[refinedGroupLocalU32] = static_cast<int32_t>(groupLocalIndex);
+			}
+		}
+
+		return summary;
+	}
 }
 
 std::shared_ptr<Mesh> MeshIngestBuilder::Build(
@@ -138,6 +222,20 @@ void Mesh::ReleaseCLodChunkUploadData()
 	ClearCLodCacheBuildChunkData(true);
 }
 
+void Mesh::ReleaseCLodHierarchyCpuData()
+{
+	m_clodGroups.clear();
+	m_clodGroups.shrink_to_fit();
+	m_clodChildren.clear();
+	m_clodChildren.shrink_to_fit();
+}
+
+void Mesh::ReleaseCLodGroupChunkMetadataCpuData()
+{
+	m_clodGroupChunks.clear();
+	m_clodGroupChunks.shrink_to_fit();
+}
+
 void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 {
 	const bool hasDiskBackedStreamingSource = !data.groupDiskLocators.empty() && !data.cacheSource.containerFileName.empty();
@@ -153,6 +251,7 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 			m_clodGroupChunks[groupIndex].meshletBoundsCount = m_clodGroups[groupIndex].meshletCount;
 		}
 	}
+	m_clodRuntimeSummary = BuildRuntimeSummary(m_clodGroups, m_clodChildren, m_clodGroupChunks);
 	ClearCLodCacheBuildChunkData(false);
 	m_clodGroupDiskLocators = data.groupDiskLocators;
 	m_clodCacheSource = data.cacheSource;
@@ -195,6 +294,8 @@ void Mesh::AdoptCLodDiskStreamingMetadata(const ClusterLODPrebuiltData& data)
 			m_clodGroupChunks[groupIndex].meshletBoundsCount = m_clodGroups[groupIndex].meshletCount;
 		}
 	}
+
+	m_clodRuntimeSummary = BuildRuntimeSummary(m_clodGroups, m_clodChildren, m_clodGroupChunks);
 
 	ClearCLodCacheBuildChunkData(false);
 }

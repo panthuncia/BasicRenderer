@@ -141,6 +141,32 @@ struct ClusterLODPrebuildArtifacts
 	ClusterLODCacheBuildOwnedData cacheBuildData;
 };
 
+struct ClusterLODRuntimeSummary
+{
+	struct GroupChunkHint
+	{
+		uint32_t groupVertexCount = 0;
+		uint32_t meshletVertexCount = 0;
+		uint32_t meshletCount = 0;
+		uint32_t meshletTrianglesByteCount = 0;
+		uint32_t meshletBoundsCount = 0;
+		uint32_t compressedPositionWordCount = 0;
+		uint32_t compressedNormalWordCount = 0;
+		uint32_t compressedMeshletVertexWordCount = 0;
+	};
+
+	struct GroupRange
+	{
+		uint32_t firstGroup = 0;
+		uint32_t groupCount = 0;
+	};
+
+	std::vector<GroupChunkHint> groupChunkHints;
+	std::vector<int32_t> parentGroupByLocal;
+	std::vector<uint32_t> firstGroupVertexByLocal;
+	std::vector<GroupRange> coarsestRanges;
+};
+
 enum class MeshCpuDataPolicy {
 	Retain,
 	ReleaseAfterUpload,
@@ -166,7 +192,7 @@ public:
 	}
 
 	uint32_t GetCLodGroupCount() const {
-		return static_cast<uint32_t>(m_clodGroupChunks.size());
+		return static_cast<uint32_t>(m_clodRuntimeSummary.groupChunkHints.size());
 	}
 
 	PerMeshCB& GetPerMeshCBData() { return m_perMeshBufferData; };
@@ -222,12 +248,12 @@ public:
 		return m_clodChildren;
 	}
 
-	const std::vector<ClusterLODGroupChunk>& GetCLodGroupChunks() const {
-		return m_clodGroupChunks;
+	const ClusterLODRuntimeSummary& GetCLodRuntimeSummary() const {
+		return m_clodRuntimeSummary;
 	}
 
-	std::vector<ClusterLODGroupChunk>& AccessCLodGroupChunks() {
-		return m_clodGroupChunks;
+	const std::vector<ClusterLODRuntimeSummary::GroupChunkHint>& GetCLodGroupChunkHints() const {
+		return m_clodRuntimeSummary.groupChunkHints;
 	}
 
 	const std::vector<ClusterLODGroupDiskLocator>& GetCLodGroupDiskLocators() const {
@@ -245,6 +271,8 @@ public:
 	void AdoptCLodDiskStreamingMetadata(const ClusterLODPrebuiltData& data);
 
 	void ReleaseCLodChunkUploadData();
+	void ReleaseCLodHierarchyCpuData();
+	void ReleaseCLodGroupChunkMetadataCpuData();
 
 	const std::vector<ClusterLODNode>& GetCLodNodes() const {
 		return m_clodNodes;
@@ -433,6 +461,7 @@ private:
 	std::vector<ClusterLODGroup> m_clodGroups;
 	std::vector<ClusterLODChild> m_clodChildren;
 	std::vector<ClusterLODGroupChunk> m_clodGroupChunks;
+	ClusterLODRuntimeSummary m_clodRuntimeSummary;
 	struct ClusterLODCacheBuildChunkData {
 		std::vector<std::vector<std::byte>> groupVertexChunks;
 		std::vector<std::vector<std::byte>> groupSkinningVertexChunks;
