@@ -8,9 +8,12 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <DirectXMath.h>
@@ -19,6 +22,7 @@
 
 #include "Materials/Material.h"
 #include "Import/CLodCacheLoader.h"
+#include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Mesh/Mesh.h"
 #include "Mesh/VertexFlags.h"
 #include "Scene/Components.h"
@@ -94,26 +98,45 @@ uint64_t GetFileSize(const std::filesystem::path& path) {
 }
 
 std::vector<uint8_t> ReadFileRange(const std::filesystem::path& path, uint64_t offset, uint64_t size) {
-    std::ifstream file(path, std::ios::binary);
-    if (!file) {
-        throw std::runtime_error("Failed to open file: " + path.string());
-    }
-
-    const uint64_t fileSize = GetFileSize(path);
-    if (offset > fileSize || size > fileSize - offset) {
-        throw std::runtime_error("Read range out of file bounds: " + path.string());
-    }
-
-    file.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
-    std::vector<uint8_t> out(static_cast<size_t>(size));
-    if (size > 0) {
-        file.read(reinterpret_cast<char*>(out.data()), static_cast<std::streamsize>(size));
+    std::vector<uint8_t> out;
+    TaskSchedulerManager::GetInstance().RunIoTask([&]() {
+        std::ifstream file(path, std::ios::binary);
         if (!file) {
-            throw std::runtime_error("Failed to read file range: " + path.string());
+            throw std::runtime_error("Failed to open file: " + path.string());
         }
-    }
+
+        const uint64_t fileSize = GetFileSize(path);
+        if (offset > fileSize || size > fileSize - offset) {
+            throw std::runtime_error("Read range out of file bounds: " + path.string());
+        }
+
+        file.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+        out.resize(static_cast<size_t>(size));
+        if (size > 0) {
+            file.read(reinterpret_cast<char*>(out.data()), static_cast<std::streamsize>(size));
+            if (!file) {
+                throw std::runtime_error("Failed to read file range: " + path.string());
+            }
+        }
+        });
 
     return out;
+}
+
+std::mutex& GetCacheSaveMutexForKey(const std::string& key) {
+    static std::mutex cacheMutexTableGuard;
+    static std::unordered_map<std::string, std::unique_ptr<std::mutex>> cacheMutexTable;
+
+    std::lock_guard<std::mutex> lock(cacheMutexTableGuard);
+    auto& mutexPtr = cacheMutexTable[key];
+    if (!mutexPtr) {
+        mutexPtr = std::make_unique<std::mutex>();
+    }
+    return *mutexPtr;
+}
+
+std::string BuildCacheSaveKey(const CLodCacheLoader::MeshCacheIdentity& cacheIdentity) {
+    return cacheIdentity.sourceIdentifier + "|" + cacheIdentity.primPath + "|" + cacheIdentity.subsetName;
 }
 
 uint32_t ReadU32LE(const std::filesystem::path& path, uint64_t offset) {
@@ -656,14 +679,23 @@ std::shared_ptr<Mesh> BuildMeshFromPrimitive(
     auto mesh = ingest.Build(defaultMaterial, std::move(prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
 
     if (!hadPrebuiltData) {
-        const bool cacheSaved = CLodCacheLoader::SavePrebuilt(cacheIdentity, mesh->GetClusterLODPrebuiltData(), mesh->GetClusterLODCacheBuildPayload());
-        if (!cacheSaved) {
-            spdlog::warn("Failed to save CLOD cache for {} (mesh {}, primitive {})", sourceFilePath, meshIndex, primitiveIndex);
+        const std::string cacheSaveKey = BuildCacheSaveKey(cacheIdentity);
+        std::lock_guard<std::mutex> cacheSaveGuard(GetCacheSaveMutexForKey(cacheSaveKey));
+
+        auto prebuiltSavedByOtherWorker = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
+        if (prebuiltSavedByOtherWorker.has_value()) {
+            mesh->AdoptCLodDiskStreamingMetadata(prebuiltSavedByOtherWorker.value());
         }
         else {
-            auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
-            if (diskBackedPrebuilt.has_value()) {
-                mesh->AdoptCLodDiskStreamingMetadata(diskBackedPrebuilt.value());
+            const bool cacheSaved = CLodCacheLoader::SavePrebuilt(cacheIdentity, mesh->GetClusterLODPrebuiltData(), mesh->GetClusterLODCacheBuildPayload());
+            if (!cacheSaved) {
+                spdlog::warn("Failed to save CLOD cache for {} (mesh {}, primitive {})", sourceFilePath, meshIndex, primitiveIndex);
+            }
+            else {
+                auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
+                if (diskBackedPrebuilt.has_value()) {
+                    mesh->AdoptCLodDiskStreamingMetadata(diskBackedPrebuilt.value());
+                }
             }
         }
     }
@@ -682,25 +714,47 @@ std::vector<std::vector<PrimitiveData>> BuildMeshes(
         return allMeshes;
     }
 
-    allMeshes.reserve(doc.gltf["meshes"].size());
+    struct PrimitiveWorkItem {
+        size_t meshIndex = 0;
+        size_t primitiveIndex = 0;
+        const json* primitive = nullptr;
+    };
 
-    for (size_t meshIndex = 0; meshIndex < doc.gltf["meshes"].size(); ++meshIndex) {
-        const auto& mesh = doc.gltf["meshes"][meshIndex];
-        std::vector<PrimitiveData> primitives;
+    const auto& meshArray = doc.gltf["meshes"];
+    allMeshes.resize(meshArray.size());
+
+    std::vector<PrimitiveWorkItem> workItems;
+    workItems.reserve(meshArray.size());
+
+    for (size_t meshIndex = 0; meshIndex < meshArray.size(); ++meshIndex) {
+        const auto& mesh = meshArray[meshIndex];
         if (!mesh.contains("primitives")) {
-            allMeshes.push_back(std::move(primitives));
             continue;
         }
 
-        for (size_t primitiveIndex = 0; primitiveIndex < mesh["primitives"].size(); ++primitiveIndex) {
-            const auto& primitive = mesh["primitives"][primitiveIndex];
-            PrimitiveData p{};
-            p.mesh = BuildMeshFromPrimitive(doc, primitive, defaultMaterial, sourceFilePath, meshIndex, primitiveIndex);
-            primitives.push_back(std::move(p));
-        }
+        const auto& primitiveArray = mesh["primitives"];
+        allMeshes[meshIndex].resize(primitiveArray.size());
+        workItems.reserve(workItems.size() + primitiveArray.size());
 
-        allMeshes.push_back(std::move(primitives));
+        for (size_t primitiveIndex = 0; primitiveIndex < primitiveArray.size(); ++primitiveIndex) {
+            workItems.push_back(PrimitiveWorkItem{
+                .meshIndex = meshIndex,
+                .primitiveIndex = primitiveIndex,
+                .primitive = &primitiveArray[primitiveIndex]
+                });
+        }
     }
+
+    TaskSchedulerManager::GetInstance().ParallelFor(workItems.size(), [&](size_t workIndex) {
+        const PrimitiveWorkItem& workItem = workItems[workIndex];
+        allMeshes[workItem.meshIndex][workItem.primitiveIndex].mesh = BuildMeshFromPrimitive(
+            doc,
+            *workItem.primitive,
+            defaultMaterial,
+            sourceFilePath,
+            workItem.meshIndex,
+            workItem.primitiveIndex);
+        });
 
     return allMeshes;
 }

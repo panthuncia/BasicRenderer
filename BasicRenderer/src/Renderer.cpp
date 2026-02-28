@@ -18,6 +18,7 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/ResourceManager.h"
+#include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Render/RenderContext.h"
 #include "OpenRenderGraph/OpenRenderGraph.h"
 #include "Render/PassBuilders.h"
@@ -155,6 +156,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         rg::runtime::SetActiveDescriptorService(descriptorService);
     }
     ResourceManager::GetInstance().Initialize();
+    TaskSchedulerManager::GetInstance().Initialize();
     PSOManager::GetInstance().initialize();
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();
@@ -1126,6 +1128,7 @@ void Renderer::Cleanup() {
         m_pReadbackManager->Cleanup();
     }
     ResourceManager::GetInstance().Cleanup();
+    TaskSchedulerManager::GetInstance().Cleanup();
     m_coreResourceProvider.Cleanup();
     currentRenderGraph.reset();
     rg::runtime::SetActiveUploadService(nullptr);

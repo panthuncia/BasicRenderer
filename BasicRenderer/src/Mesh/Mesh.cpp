@@ -10,13 +10,12 @@
 #include <cmath>
 #include <array>
 #include <cstring>
-#include <thread>
 #include <mutex>
-#include <exception>
 #include <cassert>
 
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
+#include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Render/PSOFlags.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Materials/Material.h"
@@ -206,84 +205,6 @@ namespace
 		std::vector<BoundingSphere> groupMeshletBoundsChunk;
 		ClusterLODGroupChunk groupChunk{};
 	};
-
-	template <typename Func>
-	void RunParallelFor(size_t itemCount, Func&& func)
-	{
-		if (itemCount == 0)
-		{
-			return;
-		}
-
-		const unsigned int hardwareThreads = std::max(1u, std::thread::hardware_concurrency());
-		const size_t workerCount = std::min<size_t>(static_cast<size_t>(hardwareThreads), itemCount);
-
-		if (workerCount <= 1)
-		{
-			for (size_t itemIndex = 0; itemIndex < itemCount; ++itemIndex)
-			{
-				func(itemIndex);
-			}
-			return;
-		}
-
-		std::atomic<size_t> nextIndex = 0;
-		std::atomic<bool> stopRequested = false;
-		std::exception_ptr workerException;
-		std::mutex exceptionMutex;
-
-		auto workerBody = [&]()
-			{
-				for (;;)
-				{
-					if (stopRequested.load(std::memory_order_acquire))
-					{
-						return;
-					}
-
-					const size_t itemIndex = nextIndex.fetch_add(1, std::memory_order_relaxed);
-					if (itemIndex >= itemCount)
-					{
-						return;
-					}
-
-					try
-					{
-						func(itemIndex);
-					}
-					catch (...)
-					{
-						std::lock_guard<std::mutex> lock(exceptionMutex);
-						if (!workerException)
-						{
-							workerException = std::current_exception();
-							stopRequested.store(true, std::memory_order_release);
-						}
-						return;
-					}
-				}
-			};
-
-		std::vector<std::jthread> workers;
-		workers.reserve(workerCount);
-		for (size_t workerIndex = 0; workerIndex < workerCount; ++workerIndex)
-		{
-			workers.emplace_back(workerBody);
-		}
-
-		for (std::jthread& worker : workers)
-		{
-			if (worker.joinable())
-			{
-				worker.join();
-			}
-		}
-
-		if (workerException)
-		{
-			std::rethrow_exception(workerException);
-		}
-	}
 
 	ClusterLODGroupBuildOutput BuildClusterLODGroupOutput(
 		const CapturedClusterLODGroup& capturedGroup,
@@ -1407,7 +1328,7 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 
 			static void Iterate(void* iterationContext, void*, int, size_t taskCount)
 			{
-				RunParallelFor(taskCount, [&](size_t taskIndex)
+				TaskSchedulerManager::GetInstance().ParallelFor(taskCount, [&](size_t taskIndex)
 					{
 						clodBuild_iterationTask(iterationContext, taskIndex, 0);
 					});
@@ -1439,7 +1360,7 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 
 		clodBuildParallelConfig parallelConfig{};
 		parallelConfig.iteration_callback = &ClodBuildCallbacks::Iterate;
-		const clodBuildParallelConfig* parallelConfigPtr = (std::thread::hardware_concurrency() > 1u) ? &parallelConfig : nullptr;
+		const clodBuildParallelConfig* parallelConfigPtr = TaskSchedulerManager::GetInstance().GetNumTaskThreads() > 1u ? &parallelConfig : nullptr;
 
 		clodBuildEx(config, mesh, &captureContext, &ClodBuildCallbacks::Output, parallelConfigPtr);
 
