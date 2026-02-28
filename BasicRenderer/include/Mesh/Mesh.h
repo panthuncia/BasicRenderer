@@ -431,10 +431,7 @@ private:
 
 	// TODO: packing
 	std::vector<ClusterLODGroup> m_clodGroups;
-	//uint32_t                     m_clodRootGroup = 0;
 	std::vector<ClusterLODChild> m_clodChildren;
-	//std::vector<std::byte>       m_clodDuplicatedVertices;
-	//std::vector<std::byte>       m_clodDuplicatedSkinningVertices;
 	std::vector<ClusterLODGroupChunk> m_clodGroupChunks;
 	struct ClusterLODCacheBuildChunkData {
 		std::vector<std::vector<std::byte>> groupVertexChunks;

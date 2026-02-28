@@ -161,26 +161,18 @@ namespace CLodCache {
 		}
 
 		std::vector<std::byte> SerializeMetadata(
-			uint32_t schemaVersion,
 			uint64_t buildConfigHash,
 			const ClusterLODPrebuiltData& prebuiltData,
 			const std::vector<ClusterLODGroupDiskLocator>& groupDiskLocators,
 			const ClusterLODCacheSource& cacheSource)
 		{
 			std::vector<std::byte> out;
-			WritePod(out, schemaVersion);
+			WritePod(out, kSchemaVersion);
 			WritePod(out, buildConfigHash);
 
 			WriteVectorPod(out, prebuiltData.groups);
 			WriteVectorPod(out, prebuiltData.children);
 			WritePod(out, prebuiltData.objectBoundingSphere);
-			const uint8_t hasDuplicatedVertexStreams = 0;
-				//(!prebuiltData.duplicatedVertices.empty() || !prebuiltData.duplicatedSkinningVertices.empty()) ? 1u : 0u;
-			WritePod(out, hasDuplicatedVertexStreams);
-/*			if (hasDuplicatedVertexStreams != 0u) {
-				WriteVectorPod(out, prebuiltData.duplicatedVertices);
-				WriteVectorPod(out, prebuiltData.duplicatedSkinningVertices);
-			}*/
 			const uint8_t hasInlineGroupChunks = prebuiltData.groupChunks.empty() ? 0u : 1u;
 			WritePod(out, hasInlineGroupChunks);
 			if (hasInlineGroupChunks != 0u) {
@@ -200,34 +192,20 @@ namespace CLodCache {
 		{
 			size_t offset = 0;
 			if (!ReadPod(blob, offset, out.schemaVersion)) return false;
+			if (out.schemaVersion != kSchemaVersion) return false;
 			if (!ReadPod(blob, offset, out.buildConfigHash)) return false;
 
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.groups)) return false;
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.children)) return false;
 			if (!ReadPod(blob, offset, out.prebuiltData.objectBoundingSphere)) return false;
-			uint8_t hasDuplicatedVertexStreams = 0u;
-			if (!ReadPod(blob, offset, hasDuplicatedVertexStreams)) return false;
-			if (hasDuplicatedVertexStreams != 0u) {
-				//if (!ReadVectorPod(blob, offset, out.prebuiltData.duplicatedVertices)) return false;
-				//if (!ReadVectorPod(blob, offset, out.prebuiltData.duplicatedSkinningVertices)) return false;
-			}
-			else {
-				//out.prebuiltData.duplicatedVertices.clear();
-				//out.prebuiltData.duplicatedSkinningVertices.clear();
-			}
 
-			if (out.schemaVersion >= 10u) {
-				uint8_t hasInlineGroupChunks = 0u;
-				if (!ReadPod(blob, offset, hasInlineGroupChunks)) return false;
-				if (hasInlineGroupChunks != 0u) {
-					if (!ReadVectorPod(blob, offset, out.prebuiltData.groupChunks)) return false;
-				}
-				else {
-					out.prebuiltData.groupChunks.clear();
-				}
+			uint8_t hasInlineGroupChunks = 0u;
+			if (!ReadPod(blob, offset, hasInlineGroupChunks)) return false;
+			if (hasInlineGroupChunks != 0u) {
+				if (!ReadVectorPod(blob, offset, out.prebuiltData.groupChunks)) return false;
 			}
 			else {
-				if (!ReadVectorPod(blob, offset, out.prebuiltData.groupChunks)) return false;
+				out.prebuiltData.groupChunks.clear();
 			}
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.groupDiskLocators)) return false;
 			if (!ReadString(blob, offset, out.prebuiltData.cacheSource.sourceIdentifier)) return false;
@@ -547,7 +525,7 @@ namespace CLodCache {
 	}
 
 	namespace {
-		bool SaveImpl(const CacheKey& key, uint32_t schemaVersion, uint64_t buildConfigHash, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload)
+		bool SaveImpl(const CacheKey& key, uint64_t buildConfigHash, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload)
 		{
 			const std::wstring fileName = BuildCacheFileName(key, buildConfigHash);
 			const std::wstring cachePath = GetCacheFilePathBySource(fileName, key.sourceIdentifier);
@@ -577,7 +555,7 @@ namespace CLodCache {
 			}
 
 			prim.CreateAttribute(pxr::TfToken("clodSchemaVersion"), pxr::SdfValueTypeNames->Int, true)
-				.Set(static_cast<int>(schemaVersion));
+				.Set(static_cast<int>(kSchemaVersion));
 			prim.CreateAttribute(pxr::TfToken("clodBuildConfigHash"), pxr::SdfValueTypeNames->Int64, true)
 				.Set(static_cast<int64_t>(buildConfigHash));
 
@@ -588,7 +566,7 @@ namespace CLodCache {
 			cacheSource.buildConfigHash = buildConfigHash;
 			cacheSource.containerFileName = containerFileName;
 
-			auto blob = SerializeMetadata(schemaVersion, buildConfigHash, prebuiltData, groupDiskLocators, cacheSource);
+			auto blob = SerializeMetadata(buildConfigHash, prebuiltData, groupDiskLocators, cacheSource);
 			auto vtBlob = ToVtUChar(blob);
 			prim.CreateAttribute(pxr::TfToken("clodBlob"), pxr::SdfValueTypeNames->UCharArray, true)
 				.Set(vtBlob);
@@ -718,13 +696,16 @@ namespace CLodCache {
 
 	bool Save(const CacheKey& key, const CacheData& data)
 	{
+		if (data.schemaVersion != kSchemaVersion) {
+			return false;
+		}
 		ClusterLODCacheBuildPayload payload{};
-		return SaveImpl(key, data.schemaVersion, data.buildConfigHash, data.prebuiltData, payload);
+		return SaveImpl(key, data.buildConfigHash, data.prebuiltData, payload);
 	}
 
-	bool Save(const CacheKey& key, uint32_t schemaVersion, uint64_t buildConfigHash, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload)
+	bool Save(const CacheKey& key, uint64_t buildConfigHash, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload)
 	{
-		return SaveImpl(key, schemaVersion, buildConfigHash, prebuiltData, payload);
+		return SaveImpl(key, buildConfigHash, prebuiltData, payload);
 	}
 
 	bool LoadGroupPayload(const CacheData& cacheData, uint32_t groupLocalIndex, LoadedGroupPayload& outPayload)

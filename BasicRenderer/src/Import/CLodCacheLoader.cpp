@@ -52,7 +52,7 @@ bool SavePrebuilt(const MeshCacheIdentity& identity, const ClusterLODPrebuiltDat
 {
 	const auto cacheKey = ToCacheKey(identity);
 	const uint64_t buildHash = CLodCache::ComputeBuildConfigHash();
-	return CLodCache::Save(cacheKey, CLodCache::kSchemaVersion, buildHash, prebuiltData, payload);
+	return CLodCache::Save(cacheKey, buildHash, prebuiltData, payload);
 }
 
 }
