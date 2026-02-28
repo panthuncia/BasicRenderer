@@ -1734,18 +1734,34 @@ void Mesh::SetCLodBufferViews(
 	m_clusterLODNodesView = std::move(clusterLODNodesView);
 
 	auto firstChunkOffsetDiv = [](const auto& chunkViews, uint32_t divisor) -> uint32_t {
-		for (const auto& chunkView : chunkViews) {
-			if (chunkView != nullptr) {
-				return static_cast<uint32_t>(chunkView->GetOffset() / divisor);
+		uint32_t minGroupIndex = std::numeric_limits<uint32_t>::max();
+		uint64_t selectedOffset = 0u;
+		bool found = false;
+		for (const auto& [groupIndex, chunkView] : chunkViews) {
+			if (chunkView != nullptr && groupIndex < minGroupIndex) {
+				minGroupIndex = groupIndex;
+				selectedOffset = chunkView->GetOffset();
+				found = true;
 			}
+		}
+		if (found) {
+			return static_cast<uint32_t>(selectedOffset / divisor);
 		}
 		return 0u;
 	};
 	auto firstChunkOffsetBytes = [](const auto& chunkViews) -> uint32_t {
-		for (const auto& chunkView : chunkViews) {
-			if (chunkView != nullptr) {
-				return static_cast<uint32_t>(chunkView->GetOffset());
+		uint32_t minGroupIndex = std::numeric_limits<uint32_t>::max();
+		uint64_t selectedOffset = 0u;
+		bool found = false;
+		for (const auto& [groupIndex, chunkView] : chunkViews) {
+			if (chunkView != nullptr && groupIndex < minGroupIndex) {
+				minGroupIndex = groupIndex;
+				selectedOffset = chunkView->GetOffset();
+				found = true;
 			}
+		}
+		if (found) {
+			return static_cast<uint32_t>(selectedOffset);
 		}
 		return 0u;
 	};

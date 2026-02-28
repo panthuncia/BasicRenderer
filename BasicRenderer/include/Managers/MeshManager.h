@@ -92,7 +92,7 @@ private:
 		uint32_t groupCount = 0;
 		BufferView* groupChunksView = nullptr;
 		std::vector<ClusterLODGroupChunk> baselineGroupChunks;
-		std::vector<ClusterLODGroupChunk> activeGroupChunks;
+		std::vector<uint8_t> groupResidentFlags;
 	};
 
 	std::unordered_map<uint32_t, CLodInstanceStreamingState> m_clodStreamingStatesByInstanceIndex;
@@ -130,7 +130,11 @@ private:
 	void CLodDiskStreamingWorkerMain();
 	bool QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodInstanceStreamingState& state, uint32_t groupLocalIndex);
 	void ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result);
- 
+	void UploadCLodGroupChunkTable(const CLodInstanceStreamingState& state);
+ 	bool IsCLodGroupResident(const CLodInstanceStreamingState& state, uint32_t groupLocalIndex) const;
+	bool IsAnyCLodInstanceResidentForGlobalGroup(uint32_t groupGlobalIndex) const;
+	void DeallocateCLodGroupChunkViews(Mesh& mesh, uint32_t groupLocalIndex);
+ 	static void ZeroCLodGroupChunkCounts(ClusterLODGroupChunk& chunk);
 
 	bool ApplyCLodGroupResidency(CLodInstanceStreamingState& state, uint32_t groupLocalIndex, bool resident);
 
