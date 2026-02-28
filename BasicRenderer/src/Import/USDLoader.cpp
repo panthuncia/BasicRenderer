@@ -2,6 +2,7 @@
 #include <DirectXMath.h>
 #include <filesystem>
 #include <vector>
+#include <cstring>
 
 #include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/resolver.h>
@@ -583,7 +584,12 @@ namespace USDLoader {
 	}
 
 	void LoadGeom(
-		MeshData& meshData,
+		std::unique_ptr<std::vector<std::byte>>& rawData,
+		std::optional<std::unique_ptr<std::vector<std::byte>>>& skinningData,
+		unsigned int& vertexSize,
+		unsigned int& skinningVertexSize,
+		std::vector<UINT32>& indices,
+		unsigned int& vertexFlags,
 		const UsdGeomMesh& mesh,
 		const std::optional<UsdGeomSubset> subset,
 		double metersPerUnit,
@@ -592,6 +598,10 @@ namespace USDLoader {
 		const VtTokenArray& skelJointOrderRaw,
 		const VtTokenArray& skelJointOrderMapped)
 	{
+		rawData = std::make_unique<std::vector<std::byte>>();
+		skinningData.reset();
+		indices.clear();
+		vertexFlags = 0;
 
 		// If we have a skeleton, build joint mappings
 
@@ -653,7 +663,6 @@ namespace USDLoader {
 				cornerCount += static_cast<size_t>(fvCount - 2) * 3;
 			}
 		}
-		meshData.positions.reserve(cornerCount * 3);
 
 		// normals
 
@@ -683,7 +692,7 @@ namespace USDLoader {
 		std::vector<float> rawNormals;
 		if (gotNormals) {
 			FlattenVecArray<GfVec3f>(usdNormals, rawNormals, 1.0f);
-			meshData.flags |= VertexFlags::VERTEX_NORMALS;
+			vertexFlags |= VertexFlags::VERTEX_NORMALS;
 		}
 
 		InterpolationType normInterp = gotNormals
@@ -707,7 +716,7 @@ namespace USDLoader {
 				rawTC.push_back(float(uv[0]));
 				rawTC.push_back(1.0f - float(uv[1]));
 			}
-			meshData.flags |= VertexFlags::VERTEX_TEXCOORDS;
+			vertexFlags |= VertexFlags::VERTEX_TEXCOORDS;
 		}
 
 		// skinning
@@ -767,13 +776,48 @@ namespace USDLoader {
 			weightInterp = GetInterpolationType(
 				bindAPI.GetJointWeightsPrimvar().GetInterpolation());
 
-			meshData.flags |= VertexFlags::VERTEX_SKINNED;
+			vertexFlags |= VertexFlags::VERTEX_SKINNED;
 		}
 
-		// Flatten to "vertex" arrays
-		// Triangulate while PRESERVING original fv order
+		vertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + (gotTC ? sizeof(DirectX::XMFLOAT2) : 0);
+		skinningVertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMUINT4) + sizeof(DirectX::XMFLOAT4);
+		rawData->resize(cornerCount * vertexSize);
+		indices.reserve(cornerCount);
+
+		const bool hasSkinning = !rawJoints.empty();
+		if (hasSkinning) {
+			skinningData = std::make_unique<std::vector<std::byte>>(cornerCount * skinningVertexSize);
+		}
+
+		auto tupleBase = [](InterpolationType interp, size_t faceIndex, size_t fvIndex, uint32_t vertIndex, size_t numComponents) -> size_t {
+			switch (interp) {
+			case InterpolationType::Constant:
+				return 0;
+			case InterpolationType::Uniform:
+				return faceIndex * numComponents;
+			case InterpolationType::Vertex:
+			case InterpolationType::Varying:
+				return static_cast<size_t>(vertIndex) * numComponents;
+			case InterpolationType::FaceVarying:
+				return fvIndex * numComponents;
+			}
+			return 0;
+		};
+
+		auto copyTupleFloat = [&](std::byte* dst, const std::vector<float>& raw, size_t numComponents, InterpolationType interp, size_t faceIndex, size_t fvIndex, uint32_t vertIndex) {
+			const size_t base = tupleBase(interp, faceIndex, fvIndex, vertIndex, numComponents);
+			std::memcpy(dst, raw.data() + base, numComponents * sizeof(float));
+		};
+
+		auto copyTupleUInt = [&](std::byte* dst, const std::vector<uint32_t>& raw, size_t numComponents, InterpolationType interp, size_t faceIndex, size_t fvIndex, uint32_t vertIndex) {
+			const size_t base = tupleBase(interp, faceIndex, fvIndex, vertIndex, numComponents);
+			std::memcpy(dst, raw.data() + base, numComponents * sizeof(uint32_t));
+		};
+
+		const DirectX::XMFLOAT3 defaultNormal{ 0.0f, 0.0f, 0.0f };
+
 		size_t fvOffset = 0;
-		uint32_t vtxCounter = 0;
+		size_t outVertex = 0;
 		for (size_t f = 0; f < faceVertCounts.size(); ++f) {
 			int fc = faceVertCounts[f];
 			if (!subset || useFace[f]) {
@@ -783,33 +827,37 @@ namespace USDLoader {
 						size_t fvIndex = fvOffset + cornerIdxs[c];
 						uint32_t vertIdx = faceVertIndices[fvIndex];
 
-						EmitPrimvar(meshData.positions, ctrlPos, 3, InterpolationType::Vertex, f, fvIndex, vertIdx);
+						const size_t outBase = outVertex * vertexSize;
+						std::byte* outPtr = rawData->data() + outBase;
 
+						const size_t posBase = static_cast<size_t>(vertIdx) * 3;
+						std::memcpy(outPtr, ctrlPos.data() + posBase, sizeof(DirectX::XMFLOAT3));
+
+						size_t offset = sizeof(DirectX::XMFLOAT3);
 						if (gotNormals) {
-							EmitPrimvar(meshData.normals, rawNormals, 3, normInterp, f, fvIndex, vertIdx);
+							copyTupleFloat(outPtr + offset, rawNormals, 3, normInterp, f, fvIndex, vertIdx);
 						}
+						else {
+							std::memcpy(outPtr + offset, &defaultNormal, sizeof(defaultNormal));
+						}
+						offset += sizeof(DirectX::XMFLOAT3);
 
 						if (gotTC) {
-							EmitPrimvar(meshData.texcoords, rawTC, 2,
-								tcInterp,
-								f, fvIndex, vertIdx);
+							copyTupleFloat(outPtr + offset, rawTC, 2, tcInterp, f, fvIndex, vertIdx);
 						}
 
-						if (!rawJoints.empty()) {
-							EmitPrimvar(meshData.joints,
-								rawJoints,
-								4,
-								jointInterp,
-								f, fvIndex, vertIdx);
+						if (hasSkinning) {
+							std::byte* skinPtr = skinningData.value()->data() + outVertex * skinningVertexSize;
+							std::memcpy(skinPtr, outPtr, sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3));
 
-							EmitPrimvar(meshData.weights,
-								rawWeights,
-								4,
-								weightInterp,
-								f, fvIndex, vertIdx);
+							const size_t jointsOffset = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3);
+							const size_t weightsOffset = jointsOffset + sizeof(DirectX::XMUINT4);
+							copyTupleUInt(skinPtr + jointsOffset, rawJoints, 4, jointInterp, f, fvIndex, vertIdx);
+							copyTupleFloat(skinPtr + weightsOffset, rawWeights, 4, weightInterp, f, fvIndex, vertIdx);
 						}
 
-						meshData.indices.push_back(vtxCounter++);
+						indices.push_back(static_cast<UINT32>(outVertex));
+						outVertex++;
 					}
 				}
 			}
@@ -858,22 +906,32 @@ namespace USDLoader {
 
 			auto cacheIdentity = CLodCacheLoader::BuildIdentity(mesh, stage, "");
 			auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
-			const ClusterLODPrebuiltData* prebuiltDataPtr = prebuiltData ? &(*prebuiltData) : nullptr;
+			const bool hadPrebuiltData = prebuiltData.has_value();
 
-			MeshData geomData;
-			LoadGeom(geomData, mesh, std::nullopt, metersPerUnit, uvSetFor(mat), skinQ, skelJointOrderRaw, skelJointOrderMapped);
+			std::unique_ptr<std::vector<std::byte>> rawData;
+			std::optional<std::unique_ptr<std::vector<std::byte>>> skinningData;
+			unsigned int vertexSize = 0;
+			unsigned int skinningVertexSize = 0;
+			std::vector<UINT32> indices;
+			unsigned int vertexFlags = 0;
+			LoadGeom(rawData, skinningData, vertexSize, skinningVertexSize, indices, vertexFlags, mesh, std::nullopt, metersPerUnit, uvSetFor(mat), skinQ, skelJointOrderRaw, skelJointOrderMapped);
 
 			auto mtlPtr = loadingCache.materialCache.find(
 				mat.GetPrim().GetPath().GetString());
-			geomData.material = mtlPtr != loadingCache.materialCache.end()
+			auto material = mtlPtr != loadingCache.materialCache.end()
 				? mtlPtr->second
 				: nullptr;
-			auto mPtr = MeshFromData(
-				geomData,
-				s2ws(mesh.GetPrim().GetName().GetString()),
-				prebuiltDataPtr);
+			auto mPtr = Mesh::CreateShared(
+				std::move(rawData),
+				vertexSize,
+				std::move(skinningData),
+				skinningVertexSize,
+				indices,
+				material,
+				vertexFlags,
+				std::move(prebuiltData));
 
-			if (!prebuiltData.has_value()) {
+			if (!hadPrebuiltData) {
 				CLodCacheLoader::SavePrebuilt(cacheIdentity, mPtr->GetClusterLODPrebuiltData());
 			}
 
@@ -888,11 +946,21 @@ namespace USDLoader {
 
 				auto cacheIdentity = CLodCacheLoader::BuildIdentity(mesh, stage, subset.GetPrim().GetName().GetString());
 				auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
-				const ClusterLODPrebuiltData* prebuiltDataPtr = prebuiltData ? &(*prebuiltData) : nullptr;
+				const bool hadPrebuiltData = prebuiltData.has_value();
 
-				MeshData geomData;
+				std::unique_ptr<std::vector<std::byte>> rawData;
+				std::optional<std::unique_ptr<std::vector<std::byte>>> skinningData;
+				unsigned int vertexSize = 0;
+				unsigned int skinningVertexSize = 0;
+				std::vector<UINT32> indices;
+				unsigned int vertexFlags = 0;
 				LoadGeom(
-					geomData,
+					rawData,
+					skinningData,
+					vertexSize,
+					skinningVertexSize,
+					indices,
+					vertexFlags,
 					mesh,
 					subset,
 					metersPerUnit,
@@ -903,17 +971,21 @@ namespace USDLoader {
 
 				auto mtlPtr = loadingCache.materialCache.find(
 					mat.GetPrim().GetPath().GetString());
-				geomData.material = mtlPtr != loadingCache.materialCache.end()
+				auto material = mtlPtr != loadingCache.materialCache.end()
 					? mtlPtr->second
 					: nullptr;
 
-				auto mPtr = MeshFromData(
-					geomData,
-					s2ws(mesh.GetPrim().GetName().GetString()) +
-					L"_" + s2ws(subset.GetPrim().GetName().GetString()),
-					prebuiltDataPtr);
+				auto mPtr = Mesh::CreateShared(
+					std::move(rawData),
+					vertexSize,
+					std::move(skinningData),
+					skinningVertexSize,
+					indices,
+					material,
+					vertexFlags,
+					std::move(prebuiltData));
 
-				if (!prebuiltData.has_value()) {
+				if (!hadPrebuiltData) {
 					CLodCacheLoader::SavePrebuilt(cacheIdentity, mPtr->GetClusterLODPrebuiltData());
 				}
 

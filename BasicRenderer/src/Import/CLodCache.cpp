@@ -173,8 +173,13 @@ namespace CLodCache {
 
 			WriteVectorPod(out, prebuiltData.groups);
 			WriteVectorPod(out, prebuiltData.children);
-			WriteVectorPod(out, prebuiltData.duplicatedVertices);
-			WriteVectorPod(out, prebuiltData.duplicatedSkinningVertices);
+			const uint8_t hasDuplicatedVertexStreams =
+				(!prebuiltData.duplicatedVertices.empty() || !prebuiltData.duplicatedSkinningVertices.empty()) ? 1u : 0u;
+			WritePod(out, hasDuplicatedVertexStreams);
+			if (hasDuplicatedVertexStreams != 0u) {
+				WriteVectorPod(out, prebuiltData.duplicatedVertices);
+				WriteVectorPod(out, prebuiltData.duplicatedSkinningVertices);
+			}
 			WriteVectorPod(out, prebuiltData.groupChunks);
 			WriteVectorPod(out, groupDiskSpans);
 			WriteString(out, cacheSource.sourceIdentifier);
@@ -194,8 +199,16 @@ namespace CLodCache {
 
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.groups)) return false;
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.children)) return false;
-			if (!ReadVectorPod(blob, offset, out.prebuiltData.duplicatedVertices)) return false;
-			if (!ReadVectorPod(blob, offset, out.prebuiltData.duplicatedSkinningVertices)) return false;
+			uint8_t hasDuplicatedVertexStreams = 0u;
+			if (!ReadPod(blob, offset, hasDuplicatedVertexStreams)) return false;
+			if (hasDuplicatedVertexStreams != 0u) {
+				if (!ReadVectorPod(blob, offset, out.prebuiltData.duplicatedVertices)) return false;
+				if (!ReadVectorPod(blob, offset, out.prebuiltData.duplicatedSkinningVertices)) return false;
+			}
+			else {
+				out.prebuiltData.duplicatedVertices.clear();
+				out.prebuiltData.duplicatedSkinningVertices.clear();
+			}
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.groupChunks)) return false;
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.groupDiskSpans)) return false;
 			if (!ReadString(blob, offset, out.prebuiltData.cacheSource.sourceIdentifier)) return false;

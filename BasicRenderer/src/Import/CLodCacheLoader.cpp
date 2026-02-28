@@ -45,7 +45,7 @@ std::optional<ClusterLODPrebuiltData> TryLoadPrebuilt(const MeshCacheIdentity& i
 		return std::nullopt;
 	}
 
-	return cached->prebuiltData;
+	return std::move(cached->prebuiltData);
 }
 
 bool SavePrebuilt(const MeshCacheIdentity& identity, const ClusterLODPrebuiltData& prebuiltData)

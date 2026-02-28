@@ -10,6 +10,7 @@
 #include <DirectXTex.h>
 
 #include "Import/MeshData.h"
+#include "Mesh/Mesh.h"
 #include "Render/DescriptorHeap.h"
 #include "Resources/HeapIndexInfo.h"
 #include "ShaderBuffers.h"
@@ -24,11 +25,9 @@
 #endif
 
 class DescriptorHeap;
-class Mesh;
 class Sampler;
 class TextureAsset;
 class Buffer;
-struct ClusterLODPrebuiltData;
 
 void ThrowIfFailed(HRESULT hr);
 
@@ -37,7 +36,7 @@ void print(Args... args) {
 	(std::cout << ... << args) << std::endl;
 }
 
-std::shared_ptr<Mesh> MeshFromData(const MeshData& meshData, std::wstring name, const ClusterLODPrebuiltData* prebuiltClusterLOD = nullptr);
+std::shared_ptr<Mesh> MeshFromData(MeshData&& meshData, std::wstring name, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD = std::nullopt);
 
 DirectX::XMMATRIX RemoveScalingFromMatrix(const DirectX::XMMATRIX& initialMatrix);
 

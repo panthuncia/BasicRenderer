@@ -579,13 +579,13 @@ namespace
 }
 
 
-Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags, const ClusterLODPrebuiltData* prebuiltClusterLOD) {
+Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD) {
     m_vertices = std::move(vertices);
 	if (skinningVertices.has_value()) {
 		m_skinningVertices = std::move(skinningVertices.value());
 	}
-	if (prebuiltClusterLOD != nullptr) {
-		m_prebuiltClusterLOD = *prebuiltClusterLOD;
+	if (prebuiltClusterLOD.has_value()) {
+		m_prebuiltClusterLOD = std::move(prebuiltClusterLOD);
 	}
 	m_perMeshBufferData.vertexFlags = flags;
 	m_perMeshBufferData.vertexByteSize = vertexSize;
@@ -1213,6 +1213,7 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 			std::vector<ClusterLODChild>* children = nullptr;
 			std::vector<std::byte>* duplicatedVertices = nullptr;
 			std::vector<std::byte>* duplicatedSkinningVertices = nullptr;
+			bool buildDuplicatedVertexStreams = false;
 			std::vector<ClusterLODGroupChunk>* groupChunks = nullptr;
 			std::vector<std::vector<std::byte>>* groupVertexChunks = nullptr;
 			std::vector<std::vector<std::byte>>* groupSkinningVertexChunks = nullptr;
@@ -1228,6 +1229,7 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 			std::atomic<uint32_t> nextGroupId = 0;
 			std::mutex finalizeMutex;
 			uint32_t cumulativeMeshletCount = 0;
+			uint32_t cumulativeGroupVertexCount = 0;
 			uint32_t maxChildrenObserved = 0;
 			uint32_t maxDepthObserved = 0;
 		};
@@ -1297,13 +1299,16 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 				ensureIndexedStorage(*context->groupMeshletBoundsChunks);
 
 				finalizedGroup.firstMeshlet = context->cumulativeMeshletCount;
-				finalizedGroup.firstGroupVertex = static_cast<uint32_t>(context->duplicatedVertices->size() / context->vertexStrideBytes);
+				finalizedGroup.firstGroupVertex = context->cumulativeGroupVertexCount;
 				finalizedGroup.firstChild = static_cast<uint32_t>(context->children->size());
 
 				context->cumulativeMeshletCount += finalizedGroup.meshletCount;
+				context->cumulativeGroupVertexCount += finalizedGroup.groupVertexCount;
 				context->children->insert(context->children->end(), output.children.begin(), output.children.end());
-				context->duplicatedVertices->insert(context->duplicatedVertices->end(), output.vertexChunk.begin(), output.vertexChunk.end());
-				context->duplicatedSkinningVertices->insert(context->duplicatedSkinningVertices->end(), output.skinningVertexChunk.begin(), output.skinningVertexChunk.end());
+				if (context->buildDuplicatedVertexStreams) {
+					context->duplicatedVertices->insert(context->duplicatedVertices->end(), output.vertexChunk.begin(), output.vertexChunk.end());
+					context->duplicatedSkinningVertices->insert(context->duplicatedSkinningVertices->end(), output.skinningVertexChunk.begin(), output.skinningVertexChunk.end());
+				}
 
 				(*context->groupVertexChunks)[groupId] = std::move(output.vertexChunk);
 				(*context->groupSkinningVertexChunks)[groupId] = std::move(output.skinningVertexChunk);
@@ -1338,6 +1343,7 @@ void Mesh::BuildClusterLOD(const std::vector<UINT32>& indices)
 		captureContext.vertexStrideBytes = vertexStrideBytes;
 		captureContext.skinningVertices = m_skinningVertices.get();
 		captureContext.skinningVertexStrideBytes = m_skinningVertexSize;
+		captureContext.buildDuplicatedVertexStreams = (m_perMeshBufferData.vertexFlags & VertexFlags::VERTEX_SKINNED) != 0;
 		captureContext.groups = &m_clodGroups;
 		captureContext.children = &m_clodChildren;
 		captureContext.duplicatedVertices = &m_clodDuplicatedVertices;
@@ -1613,7 +1619,7 @@ void Mesh::CreateBuffers(const std::vector<UINT32>& indices) {
 	else {
 		BuildClusterLOD(indices);
 	}
-	CreateMeshlets(indices);
+	// Legacy full-mesh meshlet generation removed to reduce load-time memory usage.
 	//CreateMeshletReorderedVertices();
     CreateVertexBuffer();
 	ComputeBoundingSphere(indices);

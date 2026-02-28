@@ -112,8 +112,8 @@ public:
 	{
 		auto& deletionManager = DeletionManager::GetInstance();
 	}
-	static std::shared_ptr<Mesh> CreateShared(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags, const ClusterLODPrebuiltData* prebuiltClusterLOD = nullptr) {
-		return std::shared_ptr<Mesh>(new Mesh(std::move(vertices), vertexSize, std::move(skinningVertices), skinningVertexSize, indices, material, flags, prebuiltClusterLOD));
+	static std::shared_ptr<Mesh> CreateShared(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD = std::nullopt) {
+		return std::shared_ptr<Mesh>(new Mesh(std::move(vertices), vertexSize, std::move(skinningVertices), skinningVertexSize, indices, material, flags, std::move(prebuiltClusterLOD)));
     }
 	uint64_t GetNumVertices(bool meshletReorderedVertices) const {
 		//uint64_t size = meshletReorderedVertices ? m_meshletReorderedVertices.size() / m_perMeshBufferData.vertexByteSize : m_vertices->size() / m_perMeshBufferData.vertexByteSize;
@@ -404,7 +404,7 @@ public:
 	ClusterLODPrebuiltData GetClusterLODPrebuiltData() const;
 
 private:
-	Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags, const ClusterLODPrebuiltData* prebuiltClusterLOD);
+	Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material>, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD);
     void CreateVertexBuffer();
     void CreateMeshlets(const std::vector<UINT32>& indices);
 	//void CreateMeshletReorderedVertices();
