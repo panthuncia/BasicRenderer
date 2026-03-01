@@ -867,17 +867,18 @@ private:
         }
 
         if (!initRequests.empty()) {
-            std::vector<uint32_t> appliedCounts;
-            meshManager->SetCLodGroupResidencyForGlobalBatch(initRequests, appliedCounts);
+            std::vector<MeshManager::CLodGlobalResidencyResult> results;
+            meshManager->SetCLodGroupResidencyForGlobalBatchEx(initRequests, results);
 
-            const size_t appliedCount = std::min(appliedCounts.size(), initRequests.size());
-            for (size_t i = 0; i < appliedCount; ++i) {
+            const size_t resultCount = std::min(results.size(), initRequests.size());
+            for (size_t i = 0; i < resultCount; ++i) {
                 const uint32_t wordAddress = initRequestWordAddresses[i];
                 const uint32_t bitMask = initRequestBitMasks[i];
                 const bool pinned = initRequestPinnedFlags[i] != 0u;
+                const auto& result = results[i];
 
                 if (pinned) {
-                    if (appliedCounts[i] == 0u) {
+                    if (!result.applied) {
                         m_streamingNonResidentBitsCpu[wordAddress] |= bitMask;
                         m_streamingNonResidentBitsUploadPending = true;
                     }
@@ -958,8 +959,8 @@ private:
             serviced = true;
         }
         else {
-            const uint32_t globalApplied = meshManager->SetCLodGroupResidencyForGlobal(req.groupGlobalIndex, false);
-            serviced = (globalApplied > 0);
+            const auto result = meshManager->SetCLodGroupResidencyForGlobalEx(req.groupGlobalIndex, false);
+            serviced = result.serviced;
         }
 
         if (!serviced) {
@@ -1194,17 +1195,18 @@ private:
         }
 
         if (meshManager != nullptr && !loadBatchRequests.empty()) {
-            std::vector<uint32_t> appliedCounts;
-            meshManager->SetCLodGroupResidencyForGlobalBatch(loadBatchRequests, appliedCounts);
+            std::vector<MeshManager::CLodGlobalResidencyResult> results;
+            meshManager->SetCLodGroupResidencyForGlobalBatchEx(loadBatchRequests, results);
 
-            const size_t count = std::min(loadBatchEntries.size(), appliedCounts.size());
+            const size_t count = std::min(loadBatchEntries.size(), results.size());
             for (size_t i = 0; i < count; ++i) {
                 const auto& entry = loadBatchEntries[i];
-                const bool serviced = appliedCounts[i] > 0u;
+                const auto& result = results[i];
+                const bool serviced = result.serviced;
                 if (!serviced) {
                     frameStats.loadFailed++;
                 }
-                else {
+                else if (result.applied) {
                     m_streamingNonResidentBitsCpu[entry.wordAddress] &= ~entry.bitMask;
                     const bool residencyBitChanged = (m_streamingNonResidentBitsCpu[entry.wordAddress] != entry.oldWord);
                     if (residencyBitChanged) {
