@@ -151,6 +151,7 @@ bool InitializeMeshletInternalCLod(
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
     StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletOffsets)];
     StructuredBuffer<MeshInstanceClodOffsets> clodOffsets = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+    StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
     StructuredBuffer<ClusterLODGroupChunk> groupChunks = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::GroupChunks)];
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
 
@@ -158,12 +159,13 @@ bool InitializeMeshletInternalCLod(
     setup.objectBuffer = perObjectBuffer[setup.meshInstanceBuffer.perObjectBufferIndex];
 
     MeshInstanceClodOffsets offsets = clodOffsets[cluster.instanceID];
-    if (cluster.groupID >= offsets.groupChunkTableCount)
+    CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[offsets.clodMeshMetadataIndex];
+    if (cluster.groupID >= clodMeshMetadata.groupChunkTableCount)
     {
         return false;
     }
 
-    ClusterLODGroupChunk groupChunk = groupChunks[offsets.groupChunkTableBase + cluster.groupID];
+    ClusterLODGroupChunk groupChunk = groupChunks[clodMeshMetadata.groupChunkTableBase + cluster.groupID];
 
     uint meshletStart = groupChunk.meshletBase;
     uint meshletEnd = groupChunk.meshletBase + groupChunk.meshletCount;

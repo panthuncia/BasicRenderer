@@ -10,7 +10,7 @@
 
 namespace CLodCache {
 
-inline constexpr uint32_t kSchemaVersion = 9;
+inline constexpr uint32_t kSchemaVersion = 13;
 
 struct CacheKey {
 	std::string sourceIdentifier;
@@ -25,6 +25,7 @@ struct CacheData {
 };
 
 struct LoadedGroupPayload {
+	std::optional<ClusterLODGroupChunk> groupChunkMetadata;
 	std::vector<std::byte> vertexChunk;
 	std::vector<std::byte> skinningChunk;
 	std::vector<uint32_t> meshletVertexChunk;
@@ -41,8 +42,8 @@ std::wstring BuildCacheFileName(const CacheKey& key, uint64_t buildConfigHash);
 
 std::optional<CacheData> TryLoad(const CacheKey& key, uint64_t expectedBuildConfigHash);
 bool Save(const CacheKey& key, const CacheData& data);
-bool Save(const CacheKey& key, uint32_t schemaVersion, uint64_t buildConfigHash, const ClusterLODPrebuiltData& prebuiltData);
+bool Save(const CacheKey& key, uint64_t buildConfigHash, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload);
 bool LoadGroupPayload(const CacheData& cacheData, uint32_t groupLocalIndex, LoadedGroupPayload& outPayload);
-bool LoadGroupPayload(const ClusterLODCacheSource& cacheSource, const ClusterLODGroupDiskSpans& groupDiskSpan, LoadedGroupPayload& outPayload);
+bool LoadGroupPayload(const ClusterLODCacheSource& cacheSource, uint32_t groupLocalIndex, LoadedGroupPayload& outPayload);
 
 }

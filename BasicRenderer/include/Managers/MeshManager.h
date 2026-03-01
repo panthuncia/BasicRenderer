@@ -30,6 +30,17 @@ public:
 		uint32_t groupCount = 0;
 	};
 
+	struct CLodGlobalResidencyRequest {
+		uint32_t groupGlobalIndex = 0;
+		bool resident = false;
+	};
+
+	struct CLodGlobalResidencyResult {
+		bool serviced = false;
+		bool applied = false;
+		bool queued = false;
+	};
+
 	static std::unique_ptr<MeshManager> CreateUnique() {
 		return std::unique_ptr<MeshManager>(new MeshManager());
 	}
@@ -39,8 +50,14 @@ public:
 	void RemoveMesh(Mesh* mesh);
 	void RemoveMeshInstance(MeshInstance* mesh);
 
-	bool SetCLodGroupResidencyForInstance(uint32_t meshInstanceIndex, uint32_t groupGlobalIndex, bool resident);
 	uint32_t SetCLodGroupResidencyForGlobal(uint32_t groupGlobalIndex, bool resident);
+	void SetCLodGroupResidencyForGlobalBatch(
+		const std::vector<CLodGlobalResidencyRequest>& requests,
+		std::vector<uint32_t>& outAppliedCounts);
+	CLodGlobalResidencyResult SetCLodGroupResidencyForGlobalEx(uint32_t groupGlobalIndex, bool resident);
+	void SetCLodGroupResidencyForGlobalBatchEx(
+		const std::vector<CLodGlobalResidencyRequest>& requests,
+		std::vector<CLodGlobalResidencyResult>& outResults);
 	void GetCLodActiveUniqueAssetGroupRanges(std::vector<CLodActiveGroupRange>& outRanges, uint32_t& outMaxGroupIndex) const;
 	void GetCLodCoarsestUniqueAssetGroupRanges(std::vector<CLodActiveGroupRange>& outRanges) const;
 	void GetCLodUniqueAssetParentMap(std::vector<int32_t>& outParentGroupByGlobal, uint32_t& outMaxGroupIndex) const;
@@ -76,7 +93,8 @@ private:
 	std::shared_ptr<DynamicBuffer> m_perMeshInstanceBuffers;
 
 	std::shared_ptr<DynamicBuffer> m_perMeshInstanceClodOffsets;
-	std::shared_ptr<DynamicBuffer> m_perMeshInstanceClodGroupChunks;
+	std::shared_ptr<DynamicBuffer> m_clodSharedGroupChunks;
+	std::shared_ptr<DynamicBuffer> m_clodMeshMetadata;
 	std::shared_ptr<DynamicBuffer> m_clusterLODGroups;
 	std::shared_ptr<DynamicBuffer> m_clusterLODChildren;
 
@@ -85,30 +103,50 @@ private:
 	std::shared_ptr<DynamicBuffer> m_clusterLODNodes;
 	uint64_t m_activeMeshletCount = 0;
 
-	struct CLodInstanceStreamingState {
+	struct CLodSharedStreamingState {
+		Mesh* mesh = nullptr;
+		std::unique_ptr<BufferView> ownedMeshMetadataView;
+		uint32_t clodMeshMetadataIndex = 0;
+		uint32_t groupsBase = 0;
+		uint32_t groupCount = 0;
+		std::unique_ptr<BufferView> ownedGroupChunksView;
+		BufferView* groupChunksView = nullptr;
+		std::vector<ClusterLODGroupChunk> baselineGroupChunks;
+		std::vector<uint8_t> groupResidentFlags;
+		uint32_t activeInstanceCount = 0;
+		bool residencyTableDirty = false;
+	};
+
+	struct CLodSharedStreamingRange {
+		uint32_t begin = 0;
+		uint32_t end = 0;
+		std::shared_ptr<CLodSharedStreamingState> state;
+	};
+
+	struct CLodStreamingInstanceState {
 		MeshInstance* instance = nullptr;
 		uint32_t meshInstanceIndex = 0;
 		uint32_t groupsBase = 0;
 		uint32_t groupCount = 0;
-		BufferView* groupChunksView = nullptr;
-		std::vector<ClusterLODGroupChunk> baselineGroupChunks;
-		std::vector<ClusterLODGroupChunk> activeGroupChunks;
+		std::shared_ptr<CLodSharedStreamingState> sharedMeshState;
 	};
 
-	std::unordered_map<uint32_t, CLodInstanceStreamingState> m_clodStreamingStatesByInstanceIndex;
-	std::unordered_map<const MeshInstance*, uint32_t> m_clodStreamingInstanceLookup;
+	std::unordered_map<uint32_t, CLodStreamingInstanceState> m_clodStreamingStateByInstanceIndex;
+	std::unordered_map<const MeshInstance*, uint32_t> m_clodStreamingInstanceIndexByPtr;
+	std::unordered_map<const Mesh*, std::shared_ptr<CLodSharedStreamingState>> m_clodSharedStreamingStateByMesh;
+	std::vector<CLodSharedStreamingRange> m_clodSharedStreamingRanges;
+	bool m_clodSharedStreamingRangesDirty = true;
 
 	struct CLodDiskStreamingRequest {
 		uint32_t groupGlobalIndex = 0;
 		ClusterLODCacheSource cacheSource{};
-		ClusterLODGroupDiskSpans groupDiskSpan{};
 		uint32_t groupLocalIndex = 0;
 	};
 
 	struct CLodDiskStreamingResult {
 		uint32_t groupGlobalIndex = 0;
-		uint32_t groupLocalIndex = 0;
 		bool success = false;
+		std::optional<ClusterLODGroupChunk> groupChunkMetadata;
 		std::vector<std::byte> vertexChunk;
 		std::vector<uint32_t> meshletVertexChunk;
 		std::vector<uint32_t> compressedPositionWordChunk;
@@ -128,11 +166,16 @@ private:
 	std::unordered_set<uint32_t> m_clodDiskStreamingQueuedGroups;
 
 	void CLodDiskStreamingWorkerMain();
-	bool QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodInstanceStreamingState& state, uint32_t groupLocalIndex);
+	bool QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool& outQueued);
 	void ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result);
- 
-
-	bool ApplyCLodGroupResidency(CLodInstanceStreamingState& state, uint32_t groupLocalIndex, bool resident);
+	void UploadCLodGroupChunkTable(const CLodSharedStreamingState& state);
+	bool IsCLodGroupResident(const CLodSharedStreamingState& state, uint32_t groupLocalIndex) const;
+	void DeallocateCLodGroupChunkViews(Mesh& mesh, uint32_t groupLocalIndex);
+ 	static void ZeroCLodGroupChunkCounts(ClusterLODGroupChunk& chunk);
+	bool ApplyCLodGroupResidency(CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool resident, bool uploadTableImmediately);
+	void UploadDirtyCLodGroupChunkTables(const std::vector<std::shared_ptr<CLodSharedStreamingState>>& touchedSharedStates);
+	void RebuildCLodSharedStreamingRangeIndex();
+	std::shared_ptr<CLodSharedStreamingState> FindCLodSharedStreamingStateByGlobalGroup(uint32_t groupGlobalIndex, uint32_t& outGroupLocalIndex);
 
 	ViewManager* m_pViewManager;
 };

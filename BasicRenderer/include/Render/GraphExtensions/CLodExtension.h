@@ -123,7 +123,7 @@ public:
             m_streamingCpuUploadBudgetRequests = std::max(getBudget(), 1u);
         }
         catch (...) {
-            m_streamingCpuUploadBudgetRequests = 64u;
+            m_streamingCpuUploadBudgetRequests = 10000u;
         }
 
         try {
@@ -726,7 +726,7 @@ private:
             evictReq.groupGlobalIndex = entry.groupIndex;
 
             bool residencyBitChanged = false;
-            const bool serviced = ApplyStreamingRequest(evictReq, false, residencyBitChanged);
+            const bool serviced = ApplyStreamingRequest(evictReq, residencyBitChanged);
 
             frameStats.unloadRequested++;
             frameStats.unloadUnique++;
@@ -827,7 +827,20 @@ private:
             }
         }
 
-        uint32_t residentCount = 0u;
+        meshManager->ProcessCLodDiskStreamingIO();
+
+        std::vector<MeshManager::CLodGlobalResidencyRequest> initRequests;
+        initRequests.reserve(m_streamingActiveGroupScanCount);
+
+        std::vector<uint32_t> initRequestWordAddresses;
+        initRequestWordAddresses.reserve(m_streamingActiveGroupScanCount);
+
+        std::vector<uint32_t> initRequestBitMasks;
+        initRequestBitMasks.reserve(m_streamingActiveGroupScanCount);
+
+        std::vector<uint8_t> initRequestPinnedFlags;
+        initRequestPinnedFlags.reserve(m_streamingActiveGroupScanCount);
+
         for (uint32_t groupIndex = 0u; groupIndex < m_streamingActiveGroupScanCount; ++groupIndex) {
             const uint32_t wordAddress = BitWordAddress(groupIndex);
             const uint32_t bitMask = BitMask(groupIndex);
@@ -837,12 +850,35 @@ private:
             }
 
             const bool initialized = (m_streamingResidencyInitializedBitsCpu[wordAddress] & bitMask) != 0u;
+            if (initialized) {
+                continue;
+            }
+
             const bool pinned = (m_streamingPinnedGroupsBitsCpu[wordAddress] & bitMask) != 0u;
-            if (!initialized) {
-                m_streamingResidencyInitializedBitsCpu[wordAddress] |= bitMask;
+            m_streamingResidencyInitializedBitsCpu[wordAddress] |= bitMask;
+
+            MeshManager::CLodGlobalResidencyRequest initRequest{};
+            initRequest.groupGlobalIndex = groupIndex;
+            initRequest.resident = pinned;
+            initRequests.push_back(initRequest);
+            initRequestWordAddresses.push_back(wordAddress);
+            initRequestBitMasks.push_back(bitMask);
+            initRequestPinnedFlags.push_back(pinned ? 1u : 0u);
+        }
+
+        if (!initRequests.empty()) {
+            std::vector<MeshManager::CLodGlobalResidencyResult> results;
+            meshManager->SetCLodGroupResidencyForGlobalBatchEx(initRequests, results);
+
+            const size_t resultCount = std::min(results.size(), initRequests.size());
+            for (size_t i = 0; i < resultCount; ++i) {
+                const uint32_t wordAddress = initRequestWordAddresses[i];
+                const uint32_t bitMask = initRequestBitMasks[i];
+                const bool pinned = initRequestPinnedFlags[i] != 0u;
+                const auto& result = results[i];
+
                 if (pinned) {
-                    const uint32_t pinnedApplied = meshManager->SetCLodGroupResidencyForGlobal(groupIndex, true);
-                    if (pinnedApplied == 0u) {
+                    if (!result.applied) {
                         m_streamingNonResidentBitsCpu[wordAddress] |= bitMask;
                         m_streamingNonResidentBitsUploadPending = true;
                     }
@@ -851,10 +887,19 @@ private:
                     }
                 }
                 else {
-                    meshManager->SetCLodGroupResidencyForGlobal(groupIndex, false);
                     m_streamingNonResidentBitsCpu[wordAddress] |= bitMask;
                     m_streamingNonResidentBitsUploadPending = true;
                 }
+            }
+        }
+
+        uint32_t residentCount = 0u;
+        for (uint32_t groupIndex = 0u; groupIndex < m_streamingActiveGroupScanCount; ++groupIndex) {
+            const uint32_t wordAddress = BitWordAddress(groupIndex);
+            const uint32_t bitMask = BitMask(groupIndex);
+            const bool isActive = (m_streamingActiveGroupsBitsCpu[wordAddress] & bitMask) != 0u;
+            if (!isActive) {
+                continue;
             }
 
             const bool resident = (m_streamingNonResidentBitsCpu[wordAddress] & bitMask) == 0u;
@@ -892,7 +937,7 @@ private:
         m_streamingRequestsInProgressBitsCpu[wordAddress] &= ~bitMask;
     }
 
-    bool ApplyStreamingRequest(const CLodStreamingRequest& req, bool isLoad, bool& outResidencyBitChanged) {
+    bool ApplyStreamingRequest(const CLodStreamingRequest& req, bool& outResidencyBitChanged) {
         outResidencyBitChanged = false;
 
         const uint32_t groupIndex = req.groupGlobalIndex;
@@ -914,20 +959,15 @@ private:
             serviced = true;
         }
         else {
-            const uint32_t globalApplied = meshManager->SetCLodGroupResidencyForGlobal(req.groupGlobalIndex, isLoad);
-            serviced = (globalApplied > 0);
+            const auto result = meshManager->SetCLodGroupResidencyForGlobalEx(req.groupGlobalIndex, false);
+            serviced = result.serviced;
         }
 
         if (!serviced) {
             return false;
         }
 
-        if (isLoad) {
-            m_streamingNonResidentBitsCpu[wordAddress] &= ~bitMask;
-        }
-        else {
-            m_streamingNonResidentBitsCpu[wordAddress] |= bitMask;
-        }
+        m_streamingNonResidentBitsCpu[wordAddress] |= bitMask;
 
         outResidencyBitChanged = (m_streamingNonResidentBitsCpu[wordAddress] != oldWord);
         if (outResidencyBitChanged) {
@@ -967,12 +1007,14 @@ private:
             queuedCount += QueueLoadRequestWithParents(req);
         }
 
-        spdlog::info(
-            "CLod streaming: observed {} load requests ({} unique groups, {} queued, {} deduped/in-progress)",
-            static_cast<uint32_t>(decodeCount),
-            static_cast<uint32_t>(seen.size()),
-            queuedCount,
-            static_cast<uint32_t>(seen.size()) - queuedCount);
+        if (decodeCount > 0 || seen.size() > 0 || queuedCount > 0) {
+            spdlog::info(
+                "CLod streaming: observed {} load requests ({} unique groups, {} queued, {} deduped/in-progress)",
+                static_cast<uint32_t>(decodeCount),
+                static_cast<uint32_t>(seen.size()),
+                queuedCount,
+                static_cast<uint32_t>(seen.size()) - queuedCount);
+        }
 
         state = {};
     }
@@ -1055,11 +1097,27 @@ private:
         const uint32_t budget = std::max(m_streamingCpuUploadBudgetRequests, 1u);
         CLodStreamingOperationStats frameStats{};
 
+        MeshManager* meshManager = nullptr;
         if (m_getMeshManager) {
-            if (auto* meshManager = m_getMeshManager()) {
-                meshManager->ProcessCLodDiskStreamingIO(budget);
-            }
+            meshManager = m_getMeshManager();
         }
+
+        if (meshManager != nullptr) {
+            meshManager->ProcessCLodDiskStreamingIO(budget);
+        }
+
+        struct PendingLoadBatchEntry {
+            uint32_t groupIndex = 0u;
+            uint32_t wordAddress = 0u;
+            uint32_t bitMask = 0u;
+            uint32_t oldWord = 0u;
+        };
+
+        std::vector<MeshManager::CLodGlobalResidencyRequest> loadBatchRequests;
+        loadBatchRequests.reserve(budget);
+
+        std::vector<PendingLoadBatchEntry> loadBatchEntries;
+        loadBatchEntries.reserve(budget);
 
         uint32_t processed = 0;
         while (processed < budget && !m_pendingStreamingRequests.empty()) {
@@ -1079,23 +1137,97 @@ private:
                 }
             }
 
-            bool residencyBitChanged = false;
-            const bool serviced = ApplyStreamingRequest(pending.request, true, residencyBitChanged);
+            if (!pending.isLoad) {
+                bool residencyBitChanged = false;
+                const bool serviced = ApplyStreamingRequest(pending.request, residencyBitChanged);
+                frameStats.unloadRequested++;
+                frameStats.unloadUnique++;
+                if (!serviced) {
+                    frameStats.unloadFailed++;
+                }
+                else if (residencyBitChanged) {
+                    frameStats.unloadApplied++;
+                    if (m_streamingResidentGroupsCount > 0u) {
+                        m_streamingResidentGroupsCount--;
+                    }
+                }
+
+                TouchStreamingLru(pending.request.groupGlobalIndex);
+                ClearStreamingRequestInProgress(pending.request.groupGlobalIndex);
+                processed++;
+                continue;
+            }
 
             frameStats.loadRequested++;
             frameStats.loadUnique++;
-            if (!serviced) {
-                frameStats.loadFailed++;
-            }
-            else if (residencyBitChanged) {
-                frameStats.loadApplied++;
-                m_streamingResidentGroupsCount++;
+
+            const uint32_t groupIndex = pending.request.groupGlobalIndex;
+            const uint32_t wordAddress = BitWordAddress(groupIndex);
+            const uint32_t bitMask = BitMask(groupIndex);
+            const uint32_t oldWord = m_streamingNonResidentBitsCpu[wordAddress];
+
+            if (meshManager == nullptr) {
+                m_streamingNonResidentBitsCpu[wordAddress] &= ~bitMask;
+                const bool residencyBitChanged = (m_streamingNonResidentBitsCpu[wordAddress] != oldWord);
+                if (residencyBitChanged) {
+                    frameStats.loadApplied++;
+                    m_streamingResidentGroupsCount++;
+                    m_streamingNonResidentBitsUploadPending = true;
+                }
+
+                TouchStreamingLru(groupIndex);
+                ClearStreamingRequestInProgress(groupIndex);
+                processed++;
+                continue;
             }
 
-            TouchStreamingLru(pending.request.groupGlobalIndex);
+            MeshManager::CLodGlobalResidencyRequest req{};
+            req.groupGlobalIndex = groupIndex;
+            req.resident = true;
+            loadBatchRequests.push_back(req);
 
-            ClearStreamingRequestInProgress(pending.request.groupGlobalIndex);
+            PendingLoadBatchEntry entry{};
+            entry.groupIndex = groupIndex;
+            entry.wordAddress = wordAddress;
+            entry.bitMask = bitMask;
+            entry.oldWord = oldWord;
+            loadBatchEntries.push_back(entry);
+
             processed++;
+        }
+
+        if (meshManager != nullptr && !loadBatchRequests.empty()) {
+            std::vector<MeshManager::CLodGlobalResidencyResult> results;
+            meshManager->SetCLodGroupResidencyForGlobalBatchEx(loadBatchRequests, results);
+
+            const size_t count = std::min(loadBatchEntries.size(), results.size());
+            for (size_t i = 0; i < count; ++i) {
+                const auto& entry = loadBatchEntries[i];
+                const auto& result = results[i];
+                const bool serviced = result.serviced;
+                if (!serviced) {
+                    frameStats.loadFailed++;
+                }
+                else if (result.applied) {
+                    m_streamingNonResidentBitsCpu[entry.wordAddress] &= ~entry.bitMask;
+                    const bool residencyBitChanged = (m_streamingNonResidentBitsCpu[entry.wordAddress] != entry.oldWord);
+                    if (residencyBitChanged) {
+                        frameStats.loadApplied++;
+                        m_streamingResidentGroupsCount++;
+                        m_streamingNonResidentBitsUploadPending = true;
+                    }
+                }
+
+                TouchStreamingLru(entry.groupIndex);
+                ClearStreamingRequestInProgress(entry.groupIndex);
+            }
+
+            for (size_t i = count; i < loadBatchEntries.size(); ++i) {
+                const auto& entry = loadBatchEntries[i];
+                frameStats.loadFailed++;
+                TouchStreamingLru(entry.groupIndex);
+                ClearStreamingRequestInProgress(entry.groupIndex);
+            }
         }
 
         PublishCLodStreamingOperationStats(frameStats);
@@ -1434,6 +1566,7 @@ private:
                     Builtin::CLod::MeshletBounds,
                     Builtin::CLod::StreamingActiveGroupsBits,
                     Builtin::CLod::StreamingNonResidentBits,
+                    Builtin::CLod::MeshMetadata,
                     Builtin::CullingCameraBuffer,
                     Builtin::PerMeshInstanceBuffer,
                     Builtin::PerObjectBuffer,
@@ -1457,6 +1590,7 @@ private:
             RegisterSRV(Builtin::CLod::StreamingLoadRequests);
             RegisterSRV(Builtin::CLod::StreamingLoadCounter);
             RegisterSRV(Builtin::CLod::StreamingRuntimeState);
+			RegisterSRV(Builtin::CLod::MeshMetadata);
             RegisterSRV(Builtin::CullingCameraBuffer);
             RegisterSRV(Builtin::PerMeshInstanceBuffer);
             RegisterSRV(Builtin::PerObjectBuffer);
@@ -2325,6 +2459,7 @@ private:
                 Builtin::CLod::Offsets,
                 Builtin::CLod::GroupChunks,
                 Builtin::CLod::Groups,
+                Builtin::CLod::MeshMetadata,
                 Builtin::MeshResources::MeshletTriangles,
                 Builtin::MeshResources::MeshletVertexIndices,
                 Builtin::MeshResources::MeshletOffsets,
@@ -2361,6 +2496,7 @@ private:
             RegisterSRV(Builtin::CLod::CompressedMeshletVertexIndices);
 			RegisterSRV(Builtin::CLod::CompressedPositions);
 			RegisterSRV(Builtin::CLod::CompressedNormals);
+			RegisterSRV(Builtin::CLod::MeshMetadata);
 
             //RegisterSRV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
         }

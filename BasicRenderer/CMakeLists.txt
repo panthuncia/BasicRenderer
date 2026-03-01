@@ -73,6 +73,7 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(unofficial-tree-sitter CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
+find_package(enkiTS CONFIG REQUIRED)
 find_package(pxr CONFIG REQUIRED)
 find_package(implot CONFIG REQUIRED)
 find_package(Boost REQUIRED COMPONENTS container_hash)
@@ -604,6 +605,7 @@ PRIVATE
     imgui::imgui 
     meshoptimizer
     assimp::assimp 
+    enkiTS::enkiTS
     flecs::flecs 
     flecs::flecs_static 
     unofficial::tree-sitter::tree-sitter

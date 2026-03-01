@@ -10,53 +10,67 @@
 #include "Render/Runtime/UploadPolicyServiceAccess.h"
 
 std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementSize) {
-    size_t requiredSize = size;
+	size_t requiredSize = size;
 
-    // Search for a free block
-    for (auto it = m_memoryBlocks.begin(); it != m_memoryBlocks.end(); ++it)
-    {
-        if (it->isFree && it->size >= requiredSize)
-        {
-            size_t remainingSize = it->size - requiredSize;
-            size_t offset = it->offset;
+	// Search for a free block using the size-indexed set - O(log n)
+	auto freeIt = m_freeBlocks.lower_bound({ requiredSize, 0 });
+	if (freeIt != m_freeBlocks.end())
+	{
+		size_t blockOffset = freeIt->second;
 
-            it->isFree = false;
-            it->size = requiredSize;
+		// Remove from free index
+		m_freeBlocks.erase(freeIt);
 
-            if (remainingSize > 0)
-            {
-                // Split the block
-                m_memoryBlocks.insert(it + 1, { offset + requiredSize, remainingSize, true });
-            }
-            auto viewedWeak = std::weak_ptr(
-                std::dynamic_pointer_cast<DynamicBuffer>(Resource::weak_from_this().lock())
-            );
-            // Return BufferView
-            return BufferView::CreateUnique(viewedWeak, offset, requiredSize, elementSize);
-        }
-    }
+		// Update block in the offset map
+		auto& block = m_blocksByOffset[blockOffset];
+		size_t remainingSize = block.size - requiredSize;
 
-    // No suitable block found, need to grow the buffer
+		block.isFree = false;
+		block.size = requiredSize;
 
-    // Delete the last block if it is free
-    size_t newBlockSize = (std::max)(m_capacity, requiredSize);
-    size_t growBy = newBlockSize;
-    if (!m_memoryBlocks.empty() && m_memoryBlocks.back().isFree)
-    {
-        growBy -= m_memoryBlocks.back().size;
-        m_memoryBlocks.pop_back();
-    }
-    size_t newCapacity = m_capacity + growBy;
+		if (remainingSize > 0)
+		{
+			// Split the block
+			size_t newOffset = blockOffset + requiredSize;
+			m_blocksByOffset[newOffset] = { newOffset, remainingSize, true };
+			m_freeBlocks.insert({ remainingSize, newOffset });
+		}
 
-    GrowBuffer(newCapacity);
-    MemoryBlock newBlock;
-    newBlock.isFree = true;
-	newBlock.offset = m_capacity - newBlockSize;
-	newBlock.size = newBlockSize;
-    m_memoryBlocks.push_back(newBlock);
+		// Cache the weak pointer to avoid repeated dynamic_pointer_cast
+		if (!m_weakPtrCached) {
+			m_cachedWeakPtr = std::weak_ptr(
+				std::dynamic_pointer_cast<DynamicBuffer>(Resource::weak_from_this().lock())
+			);
+			m_weakPtrCached = true;
+		}
+		// Return BufferView
+		return BufferView::CreateUnique(m_cachedWeakPtr, blockOffset, requiredSize, elementSize);
+	}
+
+	// No suitable block found, need to grow the buffer
+
+	// Absorb the last block if it is free
+	size_t newBlockSize = (std::max)(m_capacity, requiredSize);
+	size_t growBy = newBlockSize;
+	if (!m_blocksByOffset.empty())
+	{
+		auto lastIt = std::prev(m_blocksByOffset.end());
+		if (lastIt->second.isFree)
+		{
+			growBy -= lastIt->second.size;
+			m_freeBlocks.erase({ lastIt->second.size, lastIt->second.offset });
+			m_blocksByOffset.erase(lastIt);
+		}
+	}
+	size_t newCapacity = m_capacity + growBy;
+
+	GrowBuffer(newCapacity);
+	size_t newOffset = m_capacity - newBlockSize;
+	m_blocksByOffset[newOffset] = { newOffset, newBlockSize, true };
+	m_freeBlocks.insert({ newBlockSize, newOffset });
 	spdlog::info("Growing buffer to {} bytes", newCapacity);
-    // Try allocating again
-    return Allocate(size, elementSize);
+	// Try allocating again
+	return Allocate(size, elementSize);
 }
 
 std::unique_ptr<BufferView> DynamicBuffer::AddData(const void* data, size_t size, size_t elementSize, size_t fullAllocationSize) {
@@ -74,7 +88,7 @@ std::unique_ptr<BufferView> DynamicBuffer::AddData(const void* data, size_t size
         StageOrUpload(data, size, view->GetOffset());
 	}
 
-	return std::move(view);
+	return view;
 }
 
 void DynamicBuffer::UpdateView(BufferView* view, const void* data) {
@@ -107,39 +121,39 @@ void DynamicBuffer::Deallocate(const BufferView* view) {
     size_t offset = view->GetOffset();
     size_t size = view->GetSize();
 
-    // Find the block
-    for (auto it = m_memoryBlocks.begin(); it != m_memoryBlocks.end(); ++it)
+    // Find the block by offset - O(log n)
+    auto it = m_blocksByOffset.find(offset);
+    if (it == m_blocksByOffset.end() || it->second.size != size || it->second.isFree)
     {
-        if (it->offset == offset && it->size == size && !it->isFree)
+        return;
+    }
+
+    it->second.isFree = true;
+
+    // Coalesce with next block if free
+    auto nextIt = std::next(it);
+    if (nextIt != m_blocksByOffset.end() && nextIt->second.isFree)
+    {
+        m_freeBlocks.erase({ nextIt->second.size, nextIt->second.offset });
+        it->second.size += nextIt->second.size;
+        m_blocksByOffset.erase(nextIt);
+    }
+
+    // Coalesce with previous block if free
+    if (it != m_blocksByOffset.begin())
+    {
+        auto prevIt = std::prev(it);
+        if (prevIt->second.isFree)
         {
-            it->isFree = true;
-
-            // Coalesce with previous block if free
-            if (it != m_memoryBlocks.begin())
-            {
-                auto prevIt = it - 1;
-                if (prevIt->isFree)
-                {
-                    prevIt->size += it->size;
-                    m_memoryBlocks.erase(it);
-                    it = prevIt;
-                }
-            }
-
-            // Coalesce with next block if free
-            if ((it + 1) != m_memoryBlocks.end())
-            {
-                auto nextIt = it + 1;
-                if (nextIt->isFree)
-                {
-                    it->size += nextIt->size;
-                    m_memoryBlocks.erase(nextIt);
-                }
-            }
-
-            break;
+            m_freeBlocks.erase({ prevIt->second.size, prevIt->second.offset });
+            prevIt->second.size += it->second.size;
+            m_blocksByOffset.erase(it);
+            it = prevIt;
         }
     }
+
+    // Add the (possibly coalesced) block to the free index
+    m_freeBlocks.insert({ it->second.size, it->second.offset });
 }
 
 void DynamicBuffer::AssignDescriptorSlots()
@@ -182,16 +196,17 @@ void DynamicBuffer::AssignDescriptorSlots()
 }
 
 void DynamicBuffer::CreateBuffer(size_t capacity) {
-    auto device = DeviceManager::GetInstance().GetDevice();
-    m_capacity = capacity;
-    auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, capacity, GetGlobalResourceID(), m_UAV);
-    SetBacking(std::move(newDataBuffer), capacity);
-    m_uploadPolicyState.OnBufferResized(GetBufferSize());
-    m_memoryBlocks.push_back({ 0, capacity, true });
+	auto device = DeviceManager::GetInstance().GetDevice();
+	m_capacity = capacity;
+	auto newDataBuffer = GpuBufferBacking::CreateUnique(rhi::HeapType::DeviceLocal, capacity, GetGlobalResourceID(), m_UAV);
+	SetBacking(std::move(newDataBuffer), capacity);
+	m_uploadPolicyState.OnBufferResized(GetBufferSize());
+	m_blocksByOffset[0] = { 0, capacity, true };
+	m_freeBlocks.insert({ capacity, 0 });
 
-    for (const auto& bundle : m_metadataBundles) {
-        ApplyMetadataToBacking(bundle);
-    }
+	for (const auto& bundle : m_metadataBundles) {
+		ApplyMetadataToBacking(bundle);
+	}
 
 	AssignDescriptorSlots();
 }

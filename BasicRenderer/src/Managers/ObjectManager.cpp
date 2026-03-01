@@ -18,10 +18,10 @@
 
 ObjectManager::ObjectManager() {
 	auto& resourceManager = ResourceManager::GetInstance();
-	m_perObjectBuffers = DynamicBuffer::CreateShared(sizeof(PerObjectCB), 1, "perObjectBuffers<PerObjectCB>");
-	m_masterIndirectCommandsBuffer = DynamicBuffer::CreateShared(sizeof(DispatchMeshIndirectCommand), 1, "masterIndirectCommandsBuffer<IndirectCommand>");
+	m_perObjectBuffers = DynamicBuffer::CreateShared(sizeof(PerObjectCB), 10000, "perObjectBuffers<PerObjectCB>");
+	m_masterIndirectCommandsBuffer = DynamicBuffer::CreateShared(sizeof(DispatchMeshIndirectCommand), 10000, "masterIndirectCommandsBuffer<IndirectCommand>");
 
-	m_normalMatrixBuffer = LazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>::CreateShared(1, "normalMatrixBuffer");
+	m_normalMatrixBuffer = LazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>::CreateShared(10000, "normalMatrixBuffer");
 
 	rg::memory::SetResourceUsageHint(*m_perObjectBuffers, "PerMesh, PerMeshInstance, PerObject");
 	rg::memory::SetResourceUsageHint(*m_normalMatrixBuffer, "PerMesh, PerMeshInstance, PerObject");
@@ -57,7 +57,7 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 			command.perObjectBufferIndex = static_cast<uint32_t>(perObjectCBview->GetOffset() / sizeof(PerObjectCB));
 			command.perMeshBufferIndex = static_cast<uint32_t>(mesh->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
 			command.perMeshInstanceBufferIndex = static_cast<uint32_t>(meshInstance->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-			command.dispatchMeshArguments.ThreadGroupCountX = DivRoundUp(mesh->GetMeshletCount(), AS_GROUP_SIZE);
+			command.dispatchMeshArguments.ThreadGroupCountX = 0; //DivRoundUp(mesh->GetMeshletCount(), AS_GROUP_SIZE);
 			command.dispatchMeshArguments.ThreadGroupCountY = 1;
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
 			std::shared_ptr<BufferView> view = m_masterIndirectCommandsBuffer->AddData(&command, sizeof(DispatchMeshIndirectCommand), sizeof(DispatchMeshIndirectCommand));

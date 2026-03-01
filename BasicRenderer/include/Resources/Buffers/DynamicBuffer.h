@@ -3,6 +3,8 @@
 #pragma once
 
 #include <vector>
+#include <map>
+#include <set>
 #include <functional>
 #include <typeinfo>
 #include <string>
@@ -81,7 +83,11 @@ private:
     size_t m_capacity;
     bool m_needsUpdate;
 
-    std::vector<MemoryBlock> m_memoryBlocks;
+    std::map<size_t, MemoryBlock> m_blocksByOffset;
+    std::set<std::pair<size_t, size_t>> m_freeBlocks; // (size, offset)
+
+    std::weak_ptr<ViewedDynamicBufferBase> m_cachedWeakPtr;
+    bool m_weakPtrCached = false;
 
     inline static std::string m_baseName = "DynamicBuffer";
 	std::string m_name = m_baseName;

@@ -483,16 +483,18 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
     setup.objectBuffer = perObjectBuffer[setup.meshInstanceBuffer.perObjectBufferIndex];
 
     StructuredBuffer<MeshInstanceClodOffsets> clodOffsets = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+    StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
     StructuredBuffer<ClusterLODGroup> groups = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
     StructuredBuffer<ClusterLODGroupChunk> groupChunks = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::GroupChunks)];
     MeshInstanceClodOffsets offsets = clodOffsets[cluster.instanceID];
-    ClusterLODGroup group = groups[offsets.groupsBase + cluster.groupID];
-    if (cluster.groupID >= offsets.groupChunkTableCount)
+    CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[offsets.clodMeshMetadataIndex];
+    ClusterLODGroup group = groups[clodMeshMetadata.groupsBase + cluster.groupID];
+    if (cluster.groupID >= clodMeshMetadata.groupChunkTableCount)
     {
         return false;
     }
 
-    ClusterLODGroupChunk groupChunk = groupChunks[offsets.groupChunkTableBase + cluster.groupID];
+    ClusterLODGroupChunk groupChunk = groupChunks[clodMeshMetadata.groupChunkTableBase + cluster.groupID];
     setup.groupVertexBase = 0;
     setup.groupVertexCount = groupChunk.groupVertexCount;
     setup.groupVertexChunkByteOffset = groupChunk.vertexChunkByteOffset;
