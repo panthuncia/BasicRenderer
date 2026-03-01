@@ -3,6 +3,14 @@
 
 struct MeshInstanceClodOffsets
 {
+    uint clodMeshMetadataIndex;
+    uint pad0;
+    uint pad1;
+    uint pad2;
+};
+
+struct CLodMeshMetadata
+{
     uint groupsBase;
     uint childrenBase;
     uint lodNodesBase;

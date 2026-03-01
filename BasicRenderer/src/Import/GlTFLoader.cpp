@@ -580,7 +580,19 @@ PrimitivePreprocessData BuildPrimitivePreprocessData(
     }
 
     const uint8_t vertexSize = static_cast<uint8_t>(sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0));
+
+    CLodCacheLoader::MeshCacheIdentity cacheIdentity{};
+    cacheIdentity.sourceIdentifier = sourceFilePath;
+    cacheIdentity.primPath = "/glTF/Mesh/" + std::to_string(meshIndex) + "/Primitive/" + std::to_string(primitiveIndex);
+    cacheIdentity.subsetName = "";
+
+    auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
+
     MeshIngestBuilder ingest(vertexSize, 0, meshFlags);
+    if (prebuiltData.has_value()) {
+        return PrimitivePreprocessData(std::move(ingest), std::move(cacheIdentity), std::move(prebuiltData));
+    }
+
     ingest.ReserveVertices(vertexCount);
 
     constexpr size_t kVertexChunkSize = 32768;
@@ -682,12 +694,6 @@ PrimitivePreprocessData BuildPrimitivePreprocessData(
         }
     }
 
-    CLodCacheLoader::MeshCacheIdentity cacheIdentity{};
-    cacheIdentity.sourceIdentifier = sourceFilePath;
-    cacheIdentity.primPath = "/glTF/Mesh/" + std::to_string(meshIndex) + "/Primitive/" + std::to_string(primitiveIndex);
-    cacheIdentity.subsetName = "";
-
-    auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
     if (!prebuiltData.has_value()) {
         ClusterLODPrebuildArtifacts artifacts = ingest.BuildClusterLODArtifacts();
 

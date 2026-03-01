@@ -54,21 +54,13 @@ public:
     void SetPerMeshBufferIndex(uint32_t index);
 	void SetSkinningInstanceSlot(uint32_t slot);
 
-    void SetCLodBufferViews(
-        std::unique_ptr<BufferView> perMeshInstanceClodOffsetsView,
-        std::unique_ptr<BufferView> perMeshInstanceClodGroupChunksView
-    ) {
+    void SetCLodBufferViews(std::unique_ptr<BufferView> perMeshInstanceClodOffsetsView) {
         m_perMeshInstanceClodOffsetsView = std::move(perMeshInstanceClodOffsetsView);
-        m_perMeshInstanceClodGroupChunksView = std::move(perMeshInstanceClodGroupChunksView);
     }
 
 
     const BufferView* GetCLodOffsetsView() const {
         return m_perMeshInstanceClodOffsetsView.get();
-    }
-
-    const BufferView* GetCLodGroupChunksView() const {
-        return m_perMeshInstanceClodGroupChunksView.get();
     }
 
 private:
@@ -85,7 +77,6 @@ private:
     std::unique_ptr<BufferView> m_perMeshInstanceBufferView;
 
     std::unique_ptr<BufferView> m_perMeshInstanceClodOffsetsView = nullptr;
-    std::unique_ptr<BufferView> m_perMeshInstanceClodGroupChunksView = nullptr;
 
 	float m_animationSpeed = 1.0f;
 };

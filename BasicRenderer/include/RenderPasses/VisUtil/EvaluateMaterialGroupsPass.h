@@ -45,7 +45,8 @@ public:
 			Builtin::CLod::Groups,
             Builtin::CLod::CompressedMeshletVertexIndices,
 			Builtin::CLod::CompressedPositions,
-            Builtin::CLod::CompressedNormals)
+            Builtin::CLod::CompressedNormals,
+            Builtin::CLod::MeshMetadata)
             .WithUnorderedAccess(Builtin::GBuffer::Normals,
                 Builtin::GBuffer::Albedo,
                 Builtin::GBuffer::Emissive,
@@ -74,6 +75,7 @@ public:
 		RegisterSRV(Builtin::CLod::CompressedMeshletVertexIndices);
 		RegisterSRV(Builtin::CLod::CompressedPositions);
 		RegisterSRV(Builtin::CLod::CompressedNormals);
+		RegisterSRV(Builtin::CLod::MeshMetadata);
 
         RegisterUAV(Builtin::GBuffer::Normals);
         RegisterUAV(Builtin::GBuffer::Albedo);

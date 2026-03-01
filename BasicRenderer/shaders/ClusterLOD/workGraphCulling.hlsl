@@ -456,12 +456,15 @@ void WG_ObjectCull(
         if (!culled) {
             StructuredBuffer<MeshInstanceClodOffsets> meshInstanceClodOffsets =
                             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+            StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer =
+                            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
 
             const MeshInstanceClodOffsets off = meshInstanceClodOffsets[perMeshInstanceBufferIndex];
+            const CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[off.clodMeshMetadataIndex];
 
             outRecord.viewId = hdr.viewDataIndex;
             outRecord.instanceIndex =perMeshInstanceBufferIndex;
-            outRecord.nodeId = off.rootNode;   // BVH root node for this mesh
+            outRecord.nodeId = clodMeshMetadata.rootNode;   // BVH root node for this mesh
             outRecord.sourceTag = CLOD_RECORD_SOURCE_PASS1;
             outCount = 1;
 
@@ -557,7 +560,10 @@ void WG_TraverseNodes(
 
             StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+            StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
             const MeshInstanceClodOffsets off = clodOffsets[rec.instanceIndex];
+            const CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[off.clodMeshMetadataIndex];
             StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
             const uint objectBufferIndex = perMeshInstanceBuffer[rec.instanceIndex].perObjectBufferIndex;
@@ -575,7 +581,7 @@ void WG_TraverseNodes(
             StructuredBuffer<ClusterLODNode> lodNodes =
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Nodes)];
 
-            const ClusterLODNode node = lodNodes[off.lodNodesBase + rec.nodeId];
+            const ClusterLODNode node = lodNodes[clodMeshMetadata.lodNodesBase + rec.nodeId];
 
             if (node.range.isGroup == 0) {
                 WGTelemetryAdd(WG_COUNTER_TRAVERSE_INTERNAL_NODE_RECORDS, 1);
@@ -736,7 +742,10 @@ void WG_GroupEvaluate(
 
             StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
                         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+            StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer =
+                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
             const MeshInstanceClodOffsets off = clodOffsets[rec.instanceIndex];
+            const CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[off.clodMeshMetadataIndex];
             StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
                         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
             const uint objectBufferIndex = perMeshInstanceBuffer[rec.instanceIndex].perObjectBufferIndex;
@@ -754,7 +763,7 @@ void WG_GroupEvaluate(
             StructuredBuffer<ClusterLODGroup> groups =
                         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
 
-            const uint groupIndex = off.groupsBase + rec.groupId;
+            const uint groupIndex = clodMeshMetadata.groupsBase + rec.groupId;
             const ClusterLODGroup grp = groups[groupIndex];
 
             const float3 groupCenterObjectSpace = grp.bounds.centerAndRadius.xyz;
@@ -786,7 +795,7 @@ void WG_GroupEvaluate(
                     s.instanceIndex = rec.instanceIndex;
                     s.groupId = rec.groupId;
                     s.viewId = rec.viewId;
-                    s.childBase = off.childrenBase + grp.firstChild;
+                    s.childBase = clodMeshMetadata.childrenBase + grp.firstChild;
                     s.terminalChildCount = min(grp.terminalChildCount, GROUP_EVALUATE_CHILD_LANES);
                     s.clampedChildCount = min(grp.childCount, GROUP_EVALUATE_CHILD_LANES);
                     s.sourceTag = rec.sourceTag;
@@ -814,7 +823,10 @@ void WG_GroupEvaluate(
     if (activeChild) {
         StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+        StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
         const MeshInstanceClodOffsets off = clodOffsets[s.instanceIndex];
+        const CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[off.clodMeshMetadataIndex];
         StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
         const uint objectBufferIndex = perMeshInstanceBuffer[s.instanceIndex].perObjectBufferIndex;
@@ -840,7 +852,7 @@ void WG_GroupEvaluate(
         forceBucket = (lane < s.terminalChildCount) || (child.refinedGroup < 0);
 
         if (!forceBucket && child.refinedGroup >= 0) {
-            const uint refinedGroupGlobalIndex = off.groupsBase + (uint) child.refinedGroup;
+            const uint refinedGroupGlobalIndex = clodMeshMetadata.groupsBase + (uint) child.refinedGroup;
             const ClusterLODGroup refinedGrp = groups[refinedGroupGlobalIndex];
             bool refinedResident = true;
             StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
@@ -1012,7 +1024,10 @@ void WG_ClusterCullBuckets(
         const bool replaySource = (b.sourceTag == CLOD_RECORD_SOURCE_REPLAY);
         StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+        StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
         const MeshInstanceClodOffsets off = clodOffsets[b.instanceIndex];
+        const CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[off.clodMeshMetadataIndex];
         StructuredBuffer<ClusterLODGroup> groups =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
         StructuredBuffer<ClusterLODGroupChunk> groupChunks =
@@ -1032,12 +1047,12 @@ void WG_ClusterCullBuckets(
         StructuredBuffer<BoundingSphere> meshletBoundsBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshletBounds)];
 
-        if (b.groupId >= off.groupChunkTableCount) {
+        if (b.groupId >= clodMeshMetadata.groupChunkTableCount) {
             survives = false;
         }
         else {
-        const ClusterLODGroup grp = groups[off.groupsBase + b.groupId];
-		const ClusterLODGroupChunk groupChunk = groupChunks[off.groupChunkTableBase + b.groupId];
+        const ClusterLODGroup grp = groups[clodMeshMetadata.groupsBase + b.groupId];
+		const ClusterLODGroupChunk groupChunk = groupChunks[clodMeshMetadata.groupChunkTableBase + b.groupId];
         const uint localMeshlet = b.childFirstLocalMeshletIndex + i;
         if (localMeshlet >= groupChunk.meshletCount || localMeshlet >= groupChunk.meshletBoundsCount) {
             survives = false;

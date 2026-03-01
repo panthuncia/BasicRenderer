@@ -267,6 +267,8 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
         StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+        StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
         StructuredBuffer<ClusterLODGroupChunk> groupChunks =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::GroupChunks)];
         StructuredBuffer<Meshlet> meshletBuffer =
@@ -279,9 +281,10 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
         PerMeshInstanceBuffer inst = perMeshInstanceBuffer[d.drawcallAndMeshlet.x];
         d.objAndMesh = uint2(inst.perObjectBufferIndex, inst.perMeshBufferIndex);
         MeshInstanceClodOffsets off = clodOffsets[d.drawcallAndMeshlet.x];
+        CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[off.clodMeshMetadataIndex];
 
         PerMeshBuffer mesh = perMeshBuffer[d.objAndMesh.y];
-        ClusterLODGroupChunk groupChunk = groupChunks[off.groupChunkTableBase + clusterData.groupID];
+        ClusterLODGroupChunk groupChunk = groupChunks[clodMeshMetadata.groupChunkTableBase + clusterData.groupID];
 
 //#if defined(VISBUF_USE_CLOD_MESHLETS)
         d.meshInfo = uint4(mesh.vertexByteSize, mesh.vertexFlags, mesh.numVertices, groupChunk.meshletTrianglesByteOffset);
