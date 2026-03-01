@@ -123,7 +123,7 @@ public:
             m_streamingCpuUploadBudgetRequests = std::max(getBudget(), 1u);
         }
         catch (...) {
-            m_streamingCpuUploadBudgetRequests = 64u;
+            m_streamingCpuUploadBudgetRequests = 10000u;
         }
 
         try {

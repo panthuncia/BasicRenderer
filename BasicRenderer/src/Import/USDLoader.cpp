@@ -916,17 +916,30 @@ namespace USDLoader {
 			unsigned int vertexFlags = 0;
 			LoadGeom(rawData, skinningData, vertexSize, skinningVertexSize, indices, vertexFlags, mesh, std::nullopt, metersPerUnit, uvSetFor(mat), skinQ, skelJointOrderRaw, skelJointOrderMapped);
 
-			if (!prebuiltData.has_value()) {
-				const std::vector<std::byte>* skinningBytes = (skinningData && *skinningData) ? skinningData->get() : nullptr;
-				ClusterLODPrebuildArtifacts artifacts = BuildClusterLODArtifactsFromGeometry(
-					*rawData,
-					vertexSize,
-					skinningBytes,
-					skinningVertexSize,
-					indices,
-					vertexFlags);
+			MeshIngestBuilder ingest(vertexSize, (skinningData && *skinningData) ? skinningVertexSize : 0, vertexFlags);
+			const size_t vertexCount = rawData->size() / static_cast<size_t>(vertexSize);
+			ingest.ReserveVertices(vertexCount);
+			for (size_t vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex) {
+				const std::byte* vertexBytes = rawData->data() + vertexIndex * static_cast<size_t>(vertexSize);
+				ingest.AppendVertexBytes(vertexBytes, vertexSize);
+			}
 
-				if (CLodCacheLoader::SavePrebuilt(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload())) {
+			if (skinningData && *skinningData) {
+				const size_t skinningVertexCount = (*skinningData)->size() / static_cast<size_t>(skinningVertexSize);
+				ingest.ReserveVertices(skinningVertexCount);
+				for (size_t vertexIndex = 0; vertexIndex < skinningVertexCount; ++vertexIndex) {
+					const std::byte* skinningVertexBytes = (*skinningData)->data() + vertexIndex * static_cast<size_t>(skinningVertexSize);
+					ingest.AppendSkinningVertexBytes(skinningVertexBytes, skinningVertexSize);
+				}
+			}
+
+			ingest.ReserveIndices(indices.size());
+			ingest.AppendIndices(indices.data(), indices.size());
+
+			if (!prebuiltData.has_value()) {
+				ClusterLODPrebuildArtifacts artifacts = ingest.BuildClusterLODArtifacts();
+
+				if (CLodCacheLoader::SavePrebuiltLocked(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload())) {
 					auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
 					if (diskBackedPrebuilt.has_value()) {
 						prebuiltData = std::move(diskBackedPrebuilt);
@@ -945,15 +958,7 @@ namespace USDLoader {
 			auto material = mtlPtr != loadingCache.materialCache.end()
 				? mtlPtr->second
 				: nullptr;
-			auto mPtr = Mesh::CreateShared(
-				std::move(rawData),
-				vertexSize,
-				std::move(skinningData),
-				skinningVertexSize,
-				indices,
-				material,
-				vertexFlags,
-				std::move(prebuiltData));
+			auto mPtr = ingest.Build(material, std::move(prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
 
 			outMeshes.push_back(mPtr);
 		}
@@ -988,17 +993,30 @@ namespace USDLoader {
 					skelJointOrderRaw,
 					skelJointOrderMapped);
 
-				if (!prebuiltData.has_value()) {
-					const std::vector<std::byte>* skinningBytes = (skinningData && *skinningData) ? skinningData->get() : nullptr;
-					ClusterLODPrebuildArtifacts artifacts = BuildClusterLODArtifactsFromGeometry(
-						*rawData,
-						vertexSize,
-						skinningBytes,
-						skinningVertexSize,
-						indices,
-						vertexFlags);
+				MeshIngestBuilder ingest(vertexSize, (skinningData && *skinningData) ? skinningVertexSize : 0, vertexFlags);
+				const size_t vertexCount = rawData->size() / static_cast<size_t>(vertexSize);
+				ingest.ReserveVertices(vertexCount);
+				for (size_t vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex) {
+					const std::byte* vertexBytes = rawData->data() + vertexIndex * static_cast<size_t>(vertexSize);
+					ingest.AppendVertexBytes(vertexBytes, vertexSize);
+				}
 
-					if (CLodCacheLoader::SavePrebuilt(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload())) {
+				if (skinningData && *skinningData) {
+					const size_t skinningVertexCount = (*skinningData)->size() / static_cast<size_t>(skinningVertexSize);
+					ingest.ReserveVertices(skinningVertexCount);
+					for (size_t vertexIndex = 0; vertexIndex < skinningVertexCount; ++vertexIndex) {
+						const std::byte* skinningVertexBytes = (*skinningData)->data() + vertexIndex * static_cast<size_t>(skinningVertexSize);
+						ingest.AppendSkinningVertexBytes(skinningVertexBytes, skinningVertexSize);
+					}
+				}
+
+				ingest.ReserveIndices(indices.size());
+				ingest.AppendIndices(indices.data(), indices.size());
+
+				if (!prebuiltData.has_value()) {
+					ClusterLODPrebuildArtifacts artifacts = ingest.BuildClusterLODArtifacts();
+
+					if (CLodCacheLoader::SavePrebuiltLocked(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload())) {
 						auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
 						if (diskBackedPrebuilt.has_value()) {
 							prebuiltData = std::move(diskBackedPrebuilt);
@@ -1018,15 +1036,7 @@ namespace USDLoader {
 					? mtlPtr->second
 					: nullptr;
 
-				auto mPtr = Mesh::CreateShared(
-					std::move(rawData),
-					vertexSize,
-					std::move(skinningData),
-					skinningVertexSize,
-					indices,
-					material,
-					vertexFlags,
-					std::move(prebuiltData));
+				auto mPtr = ingest.Build(material, std::move(prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
 
 				outMeshes.push_back(mPtr);
 			}
@@ -1334,6 +1344,10 @@ namespace USDLoader {
 	std::shared_ptr<Scene> LoadModel(std::string filePath) {
 
 		UsdStageRefPtr stage = UsdStage::Open(filePath);
+		if (!stage) {
+			spdlog::error("USD stage open failed for {}", filePath);
+			return nullptr;
+		}
 
 		// Grab the context USD created for this stage:
 		auto ctx = stage->GetPathResolverContext();

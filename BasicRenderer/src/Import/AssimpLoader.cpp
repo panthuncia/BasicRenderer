@@ -7,6 +7,7 @@
 #include <vector>
 #include <cstring>
 #include <rhi.h>
+#include <algorithm>
 
 #include "Materials/Material.h"
 #include "Materials/MaterialFlags.h"
@@ -14,7 +15,6 @@
 #include "Import/Filetypes.h"
 #include "Scene/Scene.h"
 #include "Mesh/Mesh.h"
-#include "Mesh/ClusterLODUtilities.h"
 #include "Import/CLodCacheLoader.h"
 #include "Animation/Skeleton.h"
 #include "Scene/Components.h"
@@ -436,13 +436,13 @@ namespace AssimpLoader {
             }
 
             const uint32_t numVertices = static_cast<uint32_t>(aMesh->mNumVertices);
-            const uint8_t vertexSize = static_cast<uint8_t>(sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + (hasTexcoords ? sizeof(DirectX::XMFLOAT2) : 0));
+            const unsigned int vertexSize = static_cast<unsigned int>(sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + (hasTexcoords ? sizeof(DirectX::XMFLOAT2) : 0));
             const unsigned int skinningVertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMUINT4) + sizeof(DirectX::XMFLOAT4);
 
-            auto rawData = std::make_unique<std::vector<std::byte>>(static_cast<size_t>(numVertices) * vertexSize);
-            std::unique_ptr<std::vector<std::byte>> skinningData;
+            std::vector<std::byte> rawData(static_cast<size_t>(numVertices) * vertexSize);
+            std::vector<std::byte> skinningData;
             if (hasBones) {
-                skinningData = std::make_unique<std::vector<std::byte>>(static_cast<size_t>(numVertices) * skinningVertexSize);
+                skinningData.resize(static_cast<size_t>(numVertices) * skinningVertexSize);
             }
 
             const DirectX::XMFLOAT3 defaultNormal{ 0.0f, 0.0f, 0.0f };
@@ -454,21 +454,21 @@ namespace AssimpLoader {
                     : defaultNormal;
 
                 const size_t baseOffset = static_cast<size_t>(v) * vertexSize;
-                std::memcpy(rawData->data() + baseOffset, &position, sizeof(position));
+                std::memcpy(rawData.data() + baseOffset, &position, sizeof(position));
                 size_t offset = sizeof(DirectX::XMFLOAT3);
-                std::memcpy(rawData->data() + baseOffset + offset, &normal, sizeof(normal));
+                std::memcpy(rawData.data() + baseOffset + offset, &normal, sizeof(normal));
                 offset += sizeof(DirectX::XMFLOAT3);
 
                 if (hasTexcoords) {
                     const DirectX::XMFLOAT2 texcoord{ aMesh->mTextureCoords[0][v].x, -aMesh->mTextureCoords[0][v].y };
-                    std::memcpy(rawData->data() + baseOffset + offset, &texcoord, sizeof(texcoord));
+                    std::memcpy(rawData.data() + baseOffset + offset, &texcoord, sizeof(texcoord));
                 }
 
                 if (hasBones) {
                     const size_t skinBaseOffset = static_cast<size_t>(v) * skinningVertexSize;
-                    std::memcpy(skinningData->data() + skinBaseOffset, &position, sizeof(position));
+                    std::memcpy(skinningData.data() + skinBaseOffset, &position, sizeof(position));
                     size_t skinOffset = sizeof(DirectX::XMFLOAT3);
-                    std::memcpy(skinningData->data() + skinBaseOffset + skinOffset, &normal, sizeof(normal));
+                    std::memcpy(skinningData.data() + skinBaseOffset + skinOffset, &normal, sizeof(normal));
                 }
             }
 
@@ -477,6 +477,9 @@ namespace AssimpLoader {
 
             for (unsigned int f = 0; f < aMesh->mNumFaces; f++) {
                 const aiFace& face = aMesh->mFaces[f];
+                if (face.mNumIndices != 3) {
+                    throw std::runtime_error("Assimp mesh contains non-triangle face; expected triangulated input");
+                }
                 for (unsigned int idx = 0; idx < face.mNumIndices; idx++) {
                     indices.push_back(face.mIndices[idx]);
                 }
@@ -515,8 +518,8 @@ namespace AssimpLoader {
                             const size_t jointsOffset = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3);
                             const size_t weightsOffset = jointsOffset + sizeof(DirectX::XMUINT4);
 
-                            auto* joints = reinterpret_cast<uint32_t*>(skinningData->data() + vertexBase + jointsOffset);
-                            auto* weights = reinterpret_cast<float*>(skinningData->data() + vertexBase + weightsOffset);
+                            auto* joints = reinterpret_cast<uint32_t*>(skinningData.data() + vertexBase + jointsOffset);
+                            auto* weights = reinterpret_cast<float*>(skinningData.data() + vertexBase + weightsOffset);
                             joints[count] = b;
                             weights[count] = weight;
                             count++;
@@ -531,17 +534,31 @@ namespace AssimpLoader {
             auto cacheIdentity = BuildAssimpCacheIdentity(sourceFilePath, aMesh, i);
             auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
 
-            if (!prebuiltData.has_value()) {
-                const std::vector<std::byte>* skinningBytes = (skinningData && !skinningData->empty()) ? skinningData.get() : nullptr;
-                ClusterLODPrebuildArtifacts artifacts = BuildClusterLODArtifactsFromGeometry(
-                    *rawData,
-                    vertexSize,
-                    skinningBytes,
-                    skinningVertexSize,
-                    indices,
-                    meshFlags);
+            MeshIngestBuilder ingest(vertexSize, hasBones ? skinningVertexSize : 0, meshFlags);
+            ingest.ReserveVertices(numVertices);
+            if (hasBones) {
+                ingest.ReserveVertices(numVertices);
+            }
+            for (uint32_t v = 0; v < numVertices; ++v) {
+                const size_t baseOffset = static_cast<size_t>(v) * vertexSize;
+                ingest.AppendVertexBytes(rawData.data() + baseOffset, vertexSize);
+                if (hasBones) {
+                    const size_t skinBaseOffset = static_cast<size_t>(v) * skinningVertexSize;
+                    ingest.AppendSkinningVertexBytes(skinningData.data() + skinBaseOffset, skinningVertexSize);
+                }
+            }
 
-                if (CLodCacheLoader::SavePrebuilt(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload())) {
+            ingest.ReserveIndices(indices.size());
+            ingest.AppendIndices(indices.data(), indices.size());
+
+            if (!prebuiltData.has_value()) {
+                ClusterLODPrebuildArtifacts artifacts = ingest.BuildClusterLODArtifacts();
+
+                auto loadedBeforeSave = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
+                if (loadedBeforeSave.has_value()) {
+                    prebuiltData = std::move(loadedBeforeSave);
+                }
+                else if (CLodCacheLoader::SavePrebuiltLocked(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload())) {
                     auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
                     if (diskBackedPrebuilt.has_value()) {
                         prebuiltData = std::move(diskBackedPrebuilt);
@@ -551,24 +568,12 @@ namespace AssimpLoader {
                     }
                 }
                 else {
+                    spdlog::warn("Failed to save CLOD cache for {} (mesh {})", sourceFilePath, i);
                     prebuiltData = std::move(artifacts.prebuiltData);
                 }
             }
 
-            std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices;
-            if (hasBones) {
-                skinningVertices = std::move(skinningData);
-            }
-
-            auto mesh = Mesh::CreateShared(
-                std::move(rawData),
-                vertexSize,
-                std::move(skinningVertices),
-                skinningVertexSize,
-                indices,
-                material,
-                meshFlags,
-                std::move(prebuiltData));
+            auto mesh = ingest.Build(material, std::move(prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
 
             meshes.push_back(mesh);
         }
@@ -790,7 +795,12 @@ namespace AssimpLoader {
 
     std::shared_ptr<Scene> LoadModel(std::string filePath) {
         Assimp::Importer importer;
-        const aiScene* pScene = importer.ReadFile(filePath, 0/* aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_OptimizeGraph | aiProcess_OptimizeMeshes*/);
+        constexpr unsigned int kAssimpProcessFlags =
+            aiProcess_Triangulate |
+            aiProcess_FlipUVs |
+            aiProcess_OptimizeGraph |
+            aiProcess_OptimizeMeshes;
+        const aiScene* pScene = importer.ReadFile(filePath, kAssimpProcessFlags);
 
         if (!pScene || pScene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !pScene->mRootNode) {
             spdlog::error("Model loading failed for {}. Error: {}", filePath, importer.GetErrorString());

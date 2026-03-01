@@ -355,12 +355,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //auto robot = LoadModel("models/robot.usdz");
 
-	auto zorah = LoadModel("models/zorah/zorah_main_public.gltf");
+	//auto zorah = LoadModel("models/zorah/zorah_main_public.gltf");
 
+	auto island = LoadModel("models/island/usd/island.usda");
 
     renderer.SetCurrentScene(baseScene);
 
-	renderer.GetCurrentScene()->AppendScene(zorah->Clone());
+	renderer.GetCurrentScene()->AppendScene(island->Clone());
+
+	//renderer.GetCurrentScene()->AppendScene(zorah->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(usdScene->Clone());
     //renderer.GetCurrentScene()->AppendScene(curtains->Clone());

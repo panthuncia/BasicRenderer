@@ -138,22 +138,6 @@ std::vector<uint8_t> ReadFileRange(const std::filesystem::path& path, uint64_t o
     return out;
 }
 
-std::mutex& GetCacheSaveMutexForKey(const std::string& key) {
-    static std::mutex cacheMutexTableGuard;
-    static std::unordered_map<std::string, std::unique_ptr<std::mutex>> cacheMutexTable;
-
-    std::lock_guard<std::mutex> lock(cacheMutexTableGuard);
-    auto& mutexPtr = cacheMutexTable[key];
-    if (!mutexPtr) {
-        mutexPtr = std::make_unique<std::mutex>();
-    }
-    return *mutexPtr;
-}
-
-std::string BuildCacheSaveKey(const CLodCacheLoader::MeshCacheIdentity& cacheIdentity) {
-    return cacheIdentity.sourceIdentifier + "|" + cacheIdentity.primPath + "|" + cacheIdentity.subsetName;
-}
-
 uint32_t ReadU32LE(const std::filesystem::path& path, uint64_t offset) {
     auto bytes = ReadFileRange(path, offset, sizeof(uint32_t));
     uint32_t value = 0;
@@ -697,27 +681,18 @@ PrimitivePreprocessData BuildPrimitivePreprocessData(
     if (!prebuiltData.has_value()) {
         ClusterLODPrebuildArtifacts artifacts = ingest.BuildClusterLODArtifacts();
 
-        const std::string cacheSaveKey = BuildCacheSaveKey(cacheIdentity);
-        std::lock_guard<std::mutex> cacheSaveGuard(GetCacheSaveMutexForKey(cacheSaveKey));
-
-        auto prebuiltSavedByOtherWorker = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
-        if (prebuiltSavedByOtherWorker.has_value()) {
-            prebuiltData = std::move(prebuiltSavedByOtherWorker);
+        const bool cacheSaved = CLodCacheLoader::SavePrebuiltLocked(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload());
+        if (!cacheSaved) {
+            spdlog::warn("Failed to save CLOD cache for {} (mesh {}, primitive {})", sourceFilePath, meshIndex, primitiveIndex);
+            prebuiltData = std::move(artifacts.prebuiltData);
         }
         else {
-            const bool cacheSaved = CLodCacheLoader::SavePrebuilt(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload());
-            if (!cacheSaved) {
-                spdlog::warn("Failed to save CLOD cache for {} (mesh {}, primitive {})", sourceFilePath, meshIndex, primitiveIndex);
-                prebuiltData = std::move(artifacts.prebuiltData);
+            auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
+            if (diskBackedPrebuilt.has_value()) {
+                prebuiltData = std::move(diskBackedPrebuilt);
             }
             else {
-                auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
-                if (diskBackedPrebuilt.has_value()) {
-                    prebuiltData = std::move(diskBackedPrebuilt);
-                }
-                else {
-                    prebuiltData = std::move(artifacts.prebuiltData);
-                }
+                prebuiltData = std::move(artifacts.prebuiltData);
             }
         }
     }
