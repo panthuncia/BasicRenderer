@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <vector>
 #include <cstring>
+#include <unordered_set>
 
 #include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/resolver.h>
@@ -25,6 +26,7 @@
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdGeom/primvarsAPI.h>
 #include <pxr/usd/usdGeom/primvar.h>
+#include <pxr/usd/usdGeom/pointInstancer.h>
 #include <pxr/usd/usdSkel/skeleton.h>
 #include <pxr/usd/usdSkel/animation.h>
 #include <pxr/usd/usdSkel/bindingAPI.h>
@@ -1252,6 +1254,141 @@ namespace USDLoader {
 
 	}
 
+	void ProcessPointInstancer(
+		const UsdGeomPointInstancer& pointInstancer,
+		flecs::entity instancerEntity,
+		std::unordered_set<std::string>& prototypeRootsToSkip,
+		const UsdStageRefPtr& stage,
+		std::shared_ptr<Scene>& scene,
+		UsdSkelCache& skelCache,
+		double metersPerUnit,
+		GfRotation upRot,
+		const std::string& directory,
+		bool isUSDZ)
+	{
+		SdfPathVector prototypeTargets;
+		if (!pointInstancer.GetPrototypesRel().GetTargets(&prototypeTargets)) {
+			spdlog::warn("PointInstancer '{}' has no valid prototypes relationship targets.", pointInstancer.GetPrim().GetPath().GetString());
+			return;
+		}
+
+		for (const auto& prototypeTarget : prototypeTargets) {
+			prototypeRootsToSkip.insert(prototypeTarget.GetString());
+		}
+
+		std::vector<std::vector<std::shared_ptr<Mesh>>> meshesByPrototype;
+		meshesByPrototype.resize(prototypeTargets.size());
+
+		for (size_t prototypeIndex = 0; prototypeIndex < prototypeTargets.size(); ++prototypeIndex) {
+			const auto& prototypeTarget = prototypeTargets[prototypeIndex];
+			UsdPrim prototypeRoot = stage->GetPrimAtPath(prototypeTarget);
+			if (!prototypeRoot) {
+				spdlog::warn("PointInstancer '{}' references invalid prototype target '{}'.",
+					pointInstancer.GetPrim().GetPath().GetString(),
+					prototypeTarget.GetString());
+				continue;
+			}
+
+			for (const auto& prototypePrim : UsdPrimRange(prototypeRoot)) {
+				std::vector<std::shared_ptr<Mesh>> prototypePrimMeshes;
+				ProcessMeshAndAnimations(prototypePrim, prototypePrimMeshes, skelCache, stage, scene, metersPerUnit, upRot, directory, isUSDZ);
+				if (!prototypePrimMeshes.empty()) {
+					auto& prototypeMeshes = meshesByPrototype[prototypeIndex];
+					prototypeMeshes.insert(prototypeMeshes.end(), prototypePrimMeshes.begin(), prototypePrimMeshes.end());
+				}
+			}
+
+			if (meshesByPrototype[prototypeIndex].empty()) {
+				spdlog::warn("PointInstancer '{}' prototype '{}' resolved no renderable meshes.",
+					pointInstancer.GetPrim().GetPath().GetString(),
+					prototypeTarget.GetString());
+			}
+		}
+
+		const UsdTimeCode timeCode = UsdTimeCode::Default();
+
+		VtIntArray protoIndices;
+		if (!pointInstancer.GetProtoIndicesAttr().Get(&protoIndices, timeCode)) {
+			spdlog::warn("PointInstancer '{}' has no readable protoIndices at default time.", pointInstancer.GetPrim().GetPath().GetString());
+			return;
+		}
+
+		std::vector<bool> mask = pointInstancer.ComputeMaskAtTime(timeCode);
+		if (!mask.empty() && !UsdGeomPointInstancer::ApplyMaskToArray(mask, &protoIndices)) {
+			spdlog::warn("PointInstancer '{}' mask application to protoIndices failed.", pointInstancer.GetPrim().GetPath().GetString());
+			return;
+		}
+
+		VtArray<GfMatrix4d> instanceTransforms;
+		if (!pointInstancer.ComputeInstanceTransformsAtTime(
+			&instanceTransforms,
+			timeCode,
+			timeCode,
+			UsdGeomPointInstancer::IncludeProtoXform,
+			UsdGeomPointInstancer::ApplyMask)) {
+			spdlog::warn("PointInstancer '{}' failed to compute instance transforms.", pointInstancer.GetPrim().GetPath().GetString());
+			return;
+		}
+
+		const size_t emittedCount = std::min(instanceTransforms.size(), protoIndices.size());
+		if (instanceTransforms.size() != protoIndices.size()) {
+			spdlog::warn(
+				"PointInstancer '{}' transform/proto index count mismatch (transforms={}, indices={}), clamping to {}.",
+				pointInstancer.GetPrim().GetPath().GetString(),
+				instanceTransforms.size(),
+				protoIndices.size(),
+				emittedCount);
+		}
+
+		const std::string baseName = pointInstancer.GetPrim().GetName().GetString();
+
+		for (size_t instanceIndex = 0; instanceIndex < emittedCount; ++instanceIndex) {
+			const int prototypeIndex = protoIndices[instanceIndex];
+			if (prototypeIndex < 0 || static_cast<size_t>(prototypeIndex) >= meshesByPrototype.size()) {
+				spdlog::warn("PointInstancer '{}' has out-of-range proto index {} at instance {}.",
+					pointInstancer.GetPrim().GetPath().GetString(),
+					prototypeIndex,
+					instanceIndex);
+				continue;
+			}
+
+			auto& prototypeMeshes = meshesByPrototype[prototypeIndex];
+			if (prototypeMeshes.empty()) {
+				continue;
+			}
+
+			const GfTransform instanceTransform(instanceTransforms[instanceIndex]);
+			const GfVec3d translation = instanceTransform.GetTranslation();
+			const GfQuaternion rotation = instanceTransform.GetRotation().GetQuaternion();
+			const GfVec3d scale = instanceTransform.GetScale();
+
+			auto instanceEntity = scene->CreateRenderableEntityECS(
+				prototypeMeshes,
+				s2ws(baseName + "_instance_" + std::to_string(instanceIndex)));
+
+			instanceEntity.set<Components::Position>({
+				DirectX::XMFLOAT3(
+					static_cast<float>(translation[0] * metersPerUnit),
+					static_cast<float>(translation[1] * metersPerUnit),
+					static_cast<float>(translation[2] * metersPerUnit))
+				});
+			instanceEntity.set<Components::Rotation>({
+				DirectX::XMFLOAT4(
+					static_cast<float>(rotation.GetImaginary()[0]),
+					static_cast<float>(rotation.GetImaginary()[1]),
+					static_cast<float>(rotation.GetImaginary()[2]),
+					static_cast<float>(rotation.GetReal()))
+				});
+			instanceEntity.set<Components::Scale>({
+				DirectX::XMFLOAT3(
+					static_cast<float>(scale[0]),
+					static_cast<float>(scale[1]),
+					static_cast<float>(scale[2]))
+				});
+			instanceEntity.child_of(instancerEntity);
+		}
+	}
+
 	void ParseNodeHierarchy(std::shared_ptr<Scene> scene,
 		const pxr::UsdStageRefPtr& stage,
 		double metersPerUnit,
@@ -1259,9 +1396,15 @@ namespace USDLoader {
 		const std::string& directory,
 		UsdSkelCache& skelCache,
 		bool isUSDZ) {
+		std::unordered_set<std::string> prototypeRootsToSkip;
 
 		std::function<void(const UsdPrim& prim,
 			flecs::entity parent, bool hasCorrectedAxis)> RecurseHierarchy = [&](const UsdPrim& prim, flecs::entity parent, bool hasCorrectedAxis) {
+				if (prototypeRootsToSkip.contains(prim.GetPath().GetString())) {
+					spdlog::info("Skipping PointInstancer prototype subtree root '{}' during normal traversal.", prim.GetPath().GetString());
+					return;
+				}
+
 				spdlog::info("Prim: {}", prim.GetName().GetString());
 
 				GfVec3d translation = { 0, 0, 0 };
@@ -1310,7 +1453,10 @@ namespace USDLoader {
 				}
 
 				std::vector<std::shared_ptr<Mesh>> meshes;
-				ProcessMeshAndAnimations(prim, meshes, skelCache, stage, scene, metersPerUnit, upRot, directory, isUSDZ);
+				const bool isPointInstancer = prim.IsA<UsdGeomPointInstancer>();
+				if (!isPointInstancer) {
+					ProcessMeshAndAnimations(prim, meshes, skelCache, stage, scene, metersPerUnit, upRot, directory, isUSDZ);
+				}
 
 				flecs::entity entity;
 				if (meshes.size() > 0) {
@@ -1332,7 +1478,25 @@ namespace USDLoader {
 					spdlog::warn("Node {} has no parent", entity.name().c_str());
 				}
 
+				if (isPointInstancer) {
+					ProcessPointInstancer(
+						UsdGeomPointInstancer(prim),
+						entity,
+						prototypeRootsToSkip,
+						stage,
+						scene,
+						skelCache,
+						metersPerUnit,
+						upRot,
+						directory,
+						isUSDZ);
+				}
+
 				for (auto& child : childrenToRecurse) {
+					if (prototypeRootsToSkip.contains(child.GetPath().GetString())) {
+						spdlog::info("Skipping PointInstancer prototype child '{}' during normal traversal.", child.GetPath().GetString());
+						continue;
+					}
 					RecurseHierarchy(child, entity, hasCorrectedAxis);
 				}
 			};
