@@ -1007,12 +1007,14 @@ private:
             queuedCount += QueueLoadRequestWithParents(req);
         }
 
-        spdlog::info(
-            "CLod streaming: observed {} load requests ({} unique groups, {} queued, {} deduped/in-progress)",
-            static_cast<uint32_t>(decodeCount),
-            static_cast<uint32_t>(seen.size()),
-            queuedCount,
-            static_cast<uint32_t>(seen.size()) - queuedCount);
+        if (decodeCount > 0 || seen.size() > 0 || queuedCount > 0) {
+            spdlog::info(
+                "CLod streaming: observed {} load requests ({} unique groups, {} queued, {} deduped/in-progress)",
+                static_cast<uint32_t>(decodeCount),
+                static_cast<uint32_t>(seen.size()),
+                queuedCount,
+                static_cast<uint32_t>(seen.size()) - queuedCount);
+        }
 
         state = {};
     }
