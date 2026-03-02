@@ -162,7 +162,8 @@ ClusterLODPrebuildArtifacts MeshIngestBuilder::BuildClusterLODArtifacts() const 
 		skinningVertices,
 		m_skinningVertexSize,
 		m_indices,
-		m_flags);
+		m_flags,
+		m_clusterLODBuilderSettings);
 }
 
 

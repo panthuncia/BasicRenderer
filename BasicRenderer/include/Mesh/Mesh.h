@@ -141,6 +141,20 @@ struct ClusterLODPrebuildArtifacts
 	ClusterLODCacheBuildOwnedData cacheBuildData;
 };
 
+struct ClusterLODBuilderSettings
+{
+	bool disableSloppyFallback = false;
+	float lodErrorMergePrevious = 1.5f;
+	float lodErrorMergeAdditive = 0.0f;
+	uint32_t partitionSizeFloor = 8u;
+	bool allowOverflowTerminalMerge = true;
+	bool preserveImportedNormals = true;
+	bool enableNormalAttributeSimplification = true;
+	float normalAttributeWeight = 1.0f;
+	float simplifyTangentWeight = 0.01f;
+	float simplifyTangentSignWeight = 0.5f;
+};
+
 struct ClusterLODRuntimeSummary
 {
 	struct GroupChunkHint
@@ -512,8 +526,15 @@ private:
 
 class MeshIngestBuilder {
 public:
-	MeshIngestBuilder(unsigned int vertexSize, unsigned int skinningVertexSize, unsigned int flags)
-		: m_vertexSize(vertexSize), m_skinningVertexSize(skinningVertexSize), m_flags(flags) {}
+	MeshIngestBuilder(
+		unsigned int vertexSize,
+		unsigned int skinningVertexSize,
+		unsigned int flags,
+		ClusterLODBuilderSettings clusterLODBuilderSettings = {})
+		: m_vertexSize(vertexSize),
+		  m_skinningVertexSize(skinningVertexSize),
+		  m_flags(flags),
+		  m_clusterLODBuilderSettings(std::move(clusterLODBuilderSettings)) {}
 
 	void ReserveVertices(size_t vertexCount) {
 		m_vertices.reserve(vertexCount * static_cast<size_t>(m_vertexSize));
@@ -555,6 +576,14 @@ public:
 
 	ClusterLODPrebuildArtifacts BuildClusterLODArtifacts() const;
 
+	void SetClusterLODBuilderSettings(const ClusterLODBuilderSettings& settings) {
+		m_clusterLODBuilderSettings = settings;
+	}
+
+	const ClusterLODBuilderSettings& GetClusterLODBuilderSettings() const {
+		return m_clusterLODBuilderSettings;
+	}
+
 private:
 	unsigned int m_vertexSize = 0;
 	unsigned int m_skinningVertexSize = 0;
@@ -562,4 +591,5 @@ private:
 	std::vector<std::byte> m_vertices;
 	std::vector<std::byte> m_skinningVertices;
 	std::vector<uint32_t> m_indices;
+	ClusterLODBuilderSettings m_clusterLODBuilderSettings{};
 };

@@ -710,12 +710,16 @@ static void runIterationTask(IterationContext& context, size_t task_index, unsig
 		merged.insert(merged.end(), clusters[group[j]].indices.begin(), clusters[group[j]].indices.end());
 
 	size_t target_size = size_t((merged.size() / 3) * context.config.simplify_ratio) * 3;
+	if (!merged.empty())
+		target_size = std::max<size_t>(3, target_size);
 
 	taskResult.bounds = boundsMerge(clusters, group);
 
 	float error = 0.f;
 	std::vector<unsigned int> simplified = simplify(context.config, context.mesh, merged, *context.locks, target_size, &error);
-	if (simplified.size() > merged.size() * context.config.simplify_threshold)
+	const bool invalidSimplifiedTopology = !simplified.empty() && (simplified.size() % 3) != 0;
+	const bool emptyOrDegenerateSimplified = !merged.empty() && simplified.size() < 3;
+	if (simplified.size() > merged.size() * context.config.simplify_threshold || invalidSimplifiedTopology || emptyOrDegenerateSimplified)
 	{
 		taskResult.terminal = true;
 		taskResult.bounds.error = FLT_MAX;
@@ -877,11 +881,17 @@ size_t clodBuildEx(clodConfig config, clodMesh mesh, void* output_context, clodO
 			}
 
 			const int refined = outputGroupEx(config, mesh, clusters, group, taskResult.bounds, depth, output_context, output_callback, i, taskResult.threadIndex);
+			std::vector<Cluster> split = clusterize(config, mesh, taskResult.simplified.data(), taskResult.simplified.size());
+			if (split.empty())
+			{
+				clodBounds terminalBounds = taskResult.bounds;
+				terminalBounds.error = FLT_MAX;
+				outputGroupEx(config, mesh, clusters, group, terminalBounds, depth, output_context, output_callback, i, taskResult.threadIndex);
+				continue;
+			}
 
 			for (size_t j = 0; j < group.size(); ++j)
 				clusters[group[j]].indices = std::vector<unsigned int>();
-
-			std::vector<Cluster> split = clusterize(config, mesh, taskResult.simplified.data(), taskResult.simplified.size());
 
 			for (Cluster& cluster : split)
 			{

@@ -13,13 +13,12 @@
 #include <atomic>
 #include <cassert>
 #include <stdexcept>
-#include <cstdlib>
-#include <string>
 
 #include <spdlog/spdlog.h>
 
 #include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Mesh/VertexFlags.h"
+#include "Utilities/mikktspace.h"
 
 #include "../shaders/Common/defines.h"
 
@@ -147,106 +146,6 @@ namespace
 		return static_cast<uint32_t>(x) | (static_cast<uint32_t>(y) << 16u);
 	}
 
-	bool TryGetEnvValue(const char* name, std::string& value)
-	{
-#ifdef _MSC_VER
-		char* buffer = nullptr;
-		size_t bufferLength = 0;
-		const errno_t result = _dupenv_s(&buffer, &bufferLength, name);
-		if (result != 0 || buffer == nullptr)
-		{
-			return false;
-		}
-
-		value.assign(buffer);
-		std::free(buffer);
-		return true;
-#else
-		const char* text = std::getenv(name);
-		if (text == nullptr)
-		{
-			return false;
-		}
-
-		value.assign(text);
-		return true;
-#endif
-	}
-
-	bool ParseBoolString(const char* value, bool fallback)
-	{
-		if (value == nullptr)
-		{
-			return fallback;
-		}
-
-		std::string text(value);
-		std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-		if (text == "1" || text == "true" || text == "yes" || text == "on")
-		{
-			return true;
-		}
-		if (text == "0" || text == "false" || text == "no" || text == "off")
-		{
-			return false;
-		}
-
-		return fallback;
-	}
-
-	bool GetEnvBool(const char* name, bool fallback)
-	{
-		std::string value;
-		if (!TryGetEnvValue(name, value))
-		{
-			return fallback;
-		}
-
-		return ParseBoolString(value.c_str(), fallback);
-	}
-
-	uint32_t GetEnvU32(const char* name, uint32_t fallback)
-	{
-		std::string value;
-		if (!TryGetEnvValue(name, value))
-		{
-			return fallback;
-		}
-
-		char* end = nullptr;
-		const unsigned long parsed = std::strtoul(value.c_str(), &end, 10);
-		if (end == value.c_str())
-		{
-			return fallback;
-		}
-
-		if (parsed > std::numeric_limits<uint32_t>::max())
-		{
-			return fallback;
-		}
-
-		return static_cast<uint32_t>(parsed);
-	}
-
-	float GetEnvFloat(const char* name, float fallback)
-	{
-		std::string value;
-		if (!TryGetEnvValue(name, value))
-		{
-			return fallback;
-		}
-
-		char* end = nullptr;
-		const float parsed = std::strtof(value.c_str(), &end);
-		if (end == value.c_str())
-		{
-			return fallback;
-		}
-
-		return parsed;
-	}
-
 	DirectX::XMFLOAT3 ReadVertexFloat3(const std::vector<std::byte>& vertices, size_t vertexStrideBytes, uint32_t vertexIndex, size_t attributeByteOffset)
 	{
 		DirectX::XMFLOAT3 value{};
@@ -277,6 +176,195 @@ namespace
 
 		const float invLen = 1.0f / std::sqrt(lenSq);
 		return DirectX::XMFLOAT3(value.x * invLen, value.y * invLen, value.z * invLen);
+	}
+
+	DirectX::XMFLOAT2 ReadVertexFloat2(const std::vector<std::byte>& vertices, size_t vertexStrideBytes, uint32_t vertexIndex, size_t attributeByteOffset)
+	{
+		DirectX::XMFLOAT2 value{};
+		const size_t byteOffset = static_cast<size_t>(vertexIndex) * vertexStrideBytes + attributeByteOffset;
+		std::memcpy(&value.x, vertices.data() + byteOffset, sizeof(float));
+		std::memcpy(&value.y, vertices.data() + byteOffset + sizeof(float), sizeof(float));
+		return value;
+	}
+
+	DirectX::XMFLOAT3 BuildFallbackTangentFromNormal(DirectX::XMFLOAT3 normal)
+	{
+		normal = NormalizeOrFallback(normal, DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f));
+		DirectX::XMFLOAT3 axis = (std::abs(normal.z) < 0.999f)
+			? DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f)
+			: DirectX::XMFLOAT3(0.0f, 1.0f, 0.0f);
+
+		DirectX::XMFLOAT3 tangent(
+			axis.y * normal.z - axis.z * normal.y,
+			axis.z * normal.x - axis.x * normal.z,
+			axis.x * normal.y - axis.y * normal.x);
+
+		const float tangentLenSq = tangent.x * tangent.x + tangent.y * tangent.y + tangent.z * tangent.z;
+		if (tangentLenSq <= 1e-20f)
+		{
+			return DirectX::XMFLOAT3(1.0f, 0.0f, 0.0f);
+		}
+
+		const float invTangentLen = 1.0f / std::sqrt(tangentLenSq);
+		return DirectX::XMFLOAT3(tangent.x * invTangentLen, tangent.y * invTangentLen, tangent.z * invTangentLen);
+	}
+
+	struct MikkTangentBuildData
+	{
+		const std::vector<std::byte>* vertices = nullptr;
+		size_t vertexStrideBytes = 0;
+		const std::vector<uint32_t>* indices = nullptr;
+		size_t positionByteOffset = 0;
+		size_t normalByteOffset = 0;
+		size_t texcoordByteOffset = 0;
+		std::vector<DirectX::XMFLOAT3> accumulatedTangents;
+		std::vector<float> accumulatedSigns;
+		std::vector<uint32_t> accumulatedContributions;
+	};
+
+	int MikkGetNumFaces(const SMikkTSpaceContext* context)
+	{
+		const MikkTangentBuildData* data = static_cast<const MikkTangentBuildData*>(context->m_pUserData);
+		return static_cast<int>(data->indices->size() / 3ull);
+	}
+
+	int MikkGetNumVerticesOfFace(const SMikkTSpaceContext*, const int)
+	{
+		return 3;
+	}
+
+	void MikkGetPosition(const SMikkTSpaceContext* context, float positionOut[], const int face, const int vertexInFace)
+	{
+		const MikkTangentBuildData* data = static_cast<const MikkTangentBuildData*>(context->m_pUserData);
+		const size_t index = static_cast<size_t>(face) * 3ull + static_cast<size_t>(vertexInFace);
+		const uint32_t vertexIndex = (*data->indices)[index];
+		const DirectX::XMFLOAT3 position = ReadVertexFloat3(*data->vertices, data->vertexStrideBytes, vertexIndex, data->positionByteOffset);
+		positionOut[0] = position.x;
+		positionOut[1] = position.y;
+		positionOut[2] = position.z;
+	}
+
+	void MikkGetNormal(const SMikkTSpaceContext* context, float normalOut[], const int face, const int vertexInFace)
+	{
+		const MikkTangentBuildData* data = static_cast<const MikkTangentBuildData*>(context->m_pUserData);
+		const size_t index = static_cast<size_t>(face) * 3ull + static_cast<size_t>(vertexInFace);
+		const uint32_t vertexIndex = (*data->indices)[index];
+		const DirectX::XMFLOAT3 normal = ReadVertexFloat3(*data->vertices, data->vertexStrideBytes, vertexIndex, data->normalByteOffset);
+		normalOut[0] = normal.x;
+		normalOut[1] = normal.y;
+		normalOut[2] = normal.z;
+	}
+
+	void MikkGetTexCoord(const SMikkTSpaceContext* context, float texcoordOut[], const int face, const int vertexInFace)
+	{
+		const MikkTangentBuildData* data = static_cast<const MikkTangentBuildData*>(context->m_pUserData);
+		const size_t index = static_cast<size_t>(face) * 3ull + static_cast<size_t>(vertexInFace);
+		const uint32_t vertexIndex = (*data->indices)[index];
+		const DirectX::XMFLOAT2 texcoord = ReadVertexFloat2(*data->vertices, data->vertexStrideBytes, vertexIndex, data->texcoordByteOffset);
+		texcoordOut[0] = texcoord.x;
+		texcoordOut[1] = texcoord.y;
+	}
+
+	void MikkSetTSpaceBasic(const SMikkTSpaceContext* context, const float tangent[], const float sign, const int face, const int vertexInFace)
+	{
+		MikkTangentBuildData* data = static_cast<MikkTangentBuildData*>(context->m_pUserData);
+		const size_t index = static_cast<size_t>(face) * 3ull + static_cast<size_t>(vertexInFace);
+		const uint32_t vertexIndex = (*data->indices)[index];
+		if (vertexIndex >= data->accumulatedTangents.size())
+		{
+			return;
+		}
+
+		DirectX::XMFLOAT3& accumulatedTangent = data->accumulatedTangents[vertexIndex];
+		accumulatedTangent.x += tangent[0];
+		accumulatedTangent.y += tangent[1];
+		accumulatedTangent.z += tangent[2];
+		data->accumulatedSigns[vertexIndex] += sign;
+		data->accumulatedContributions[vertexIndex] += 1u;
+	}
+
+	bool GenerateMikkTangents(
+		const std::vector<std::byte>& vertices,
+		size_t vertexStrideBytes,
+		const std::vector<uint32_t>& indices,
+		std::vector<DirectX::XMFLOAT4>& outTangents)
+	{
+		constexpr size_t PositionByteOffset = 0;
+		constexpr size_t NormalByteOffset = sizeof(float) * 3;
+		constexpr size_t TexcoordByteOffset = sizeof(float) * 6;
+
+		if (vertexStrideBytes < sizeof(float) * 8 || indices.empty() || (indices.size() % 3ull) != 0ull)
+		{
+			return false;
+		}
+
+		const size_t vertexCount = vertices.size() / vertexStrideBytes;
+		if (vertexCount == 0)
+		{
+			return false;
+		}
+
+		for (uint32_t index : indices)
+		{
+			if (static_cast<size_t>(index) >= vertexCount)
+			{
+				return false;
+			}
+		}
+
+		MikkTangentBuildData buildData{};
+		buildData.vertices = &vertices;
+		buildData.vertexStrideBytes = vertexStrideBytes;
+		buildData.indices = &indices;
+		buildData.positionByteOffset = PositionByteOffset;
+		buildData.normalByteOffset = NormalByteOffset;
+		buildData.texcoordByteOffset = TexcoordByteOffset;
+		buildData.accumulatedTangents.assign(vertexCount, DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f));
+		buildData.accumulatedSigns.assign(vertexCount, 0.0f);
+		buildData.accumulatedContributions.assign(vertexCount, 0u);
+
+		SMikkTSpaceInterface mikkInterface{};
+		mikkInterface.m_getNumFaces = &MikkGetNumFaces;
+		mikkInterface.m_getNumVerticesOfFace = &MikkGetNumVerticesOfFace;
+		mikkInterface.m_getPosition = &MikkGetPosition;
+		mikkInterface.m_getNormal = &MikkGetNormal;
+		mikkInterface.m_getTexCoord = &MikkGetTexCoord;
+		mikkInterface.m_setTSpaceBasic = &MikkSetTSpaceBasic;
+
+		SMikkTSpaceContext mikkContext{};
+		mikkContext.m_pInterface = &mikkInterface;
+		mikkContext.m_pUserData = &buildData;
+
+		if (genTangSpaceDefault(&mikkContext) == 0)
+		{
+			return false;
+		}
+
+		outTangents.resize(vertexCount);
+		for (size_t vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex)
+		{
+			DirectX::XMFLOAT3 tangent = buildData.accumulatedTangents[vertexIndex];
+			const float tangentLenSq = tangent.x * tangent.x + tangent.y * tangent.y + tangent.z * tangent.z;
+
+			if (buildData.accumulatedContributions[vertexIndex] == 0u || tangentLenSq <= 1e-20f ||
+				!std::isfinite(tangent.x) || !std::isfinite(tangent.y) || !std::isfinite(tangent.z))
+			{
+				const DirectX::XMFLOAT3 normal = ReadVertexFloat3(vertices, vertexStrideBytes, static_cast<uint32_t>(vertexIndex), NormalByteOffset);
+				tangent = BuildFallbackTangentFromNormal(normal);
+			}
+			else
+			{
+				const float invLen = 1.0f / std::sqrt(tangentLenSq);
+				tangent.x *= invLen;
+				tangent.y *= invLen;
+				tangent.z *= invLen;
+			}
+
+			const float sign = buildData.accumulatedSigns[vertexIndex] < 0.0f ? -1.0f : 1.0f;
+			outTangents[vertexIndex] = DirectX::XMFLOAT4(tangent.x, tangent.y, tangent.z, sign);
+		}
+
+		return true;
 	}
 
 	std::vector<DirectX::XMFLOAT3> RecalculateGroupNormals(
@@ -409,6 +497,7 @@ namespace
 		size_t skinningVertexStrideBytes,
 		float meshPositionQuantScale,
 		uint32_t meshPositionQuantExp,
+		bool recomputeNormals,
 		uint32_t maxGroupChildren,
 		bool allowOverflowTerminalMerge)
 	{
@@ -624,24 +713,36 @@ namespace
 		}
 
 		const bool hasNormalStream = vertexStrideBytes >= sizeof(float) * 6;
-		std::vector<DirectX::XMFLOAT3> recomputedGroupNormals;
+		std::vector<DirectX::XMFLOAT3> groupNormals;
 		if (hasNormalStream)
 		{
-			recomputedGroupNormals = RecalculateGroupNormals(
-				groupLocalToGlobal,
-				output.meshlets,
-				output.meshletVertices,
-				output.meshletTriangles,
-				vertices,
-				vertexStrideBytes);
-
 			constexpr size_t NormalByteOffset = sizeof(float) * 3;
-			for (size_t groupVertexIndex = 0; groupVertexIndex < recomputedGroupNormals.size(); ++groupVertexIndex)
+			groupNormals.resize(groupLocalToGlobal.size());
+
+			if (recomputeNormals)
 			{
-				const size_t destinationByteOffset = groupVertexIndex * vertexStrideBytes + NormalByteOffset;
-				std::memcpy(output.vertexChunk.data() + destinationByteOffset, &recomputedGroupNormals[groupVertexIndex].x, sizeof(float));
-				std::memcpy(output.vertexChunk.data() + destinationByteOffset + sizeof(float), &recomputedGroupNormals[groupVertexIndex].y, sizeof(float));
-				std::memcpy(output.vertexChunk.data() + destinationByteOffset + sizeof(float) * 2, &recomputedGroupNormals[groupVertexIndex].z, sizeof(float));
+				groupNormals = RecalculateGroupNormals(
+					groupLocalToGlobal,
+					output.meshlets,
+					output.meshletVertices,
+					output.meshletTriangles,
+					vertices,
+					vertexStrideBytes);
+
+				for (size_t groupVertexIndex = 0; groupVertexIndex < groupNormals.size(); ++groupVertexIndex)
+				{
+					const size_t destinationByteOffset = groupVertexIndex * vertexStrideBytes + NormalByteOffset;
+					std::memcpy(output.vertexChunk.data() + destinationByteOffset, &groupNormals[groupVertexIndex].x, sizeof(float));
+					std::memcpy(output.vertexChunk.data() + destinationByteOffset + sizeof(float), &groupNormals[groupVertexIndex].y, sizeof(float));
+					std::memcpy(output.vertexChunk.data() + destinationByteOffset + sizeof(float) * 2, &groupNormals[groupVertexIndex].z, sizeof(float));
+				}
+			}
+			else
+			{
+				for (size_t groupVertexIndex = 0; groupVertexIndex < groupLocalToGlobal.size(); ++groupVertexIndex)
+				{
+					groupNormals[groupVertexIndex] = ReadVertexFloat3(vertices, vertexStrideBytes, groupLocalToGlobal[groupVertexIndex], NormalByteOffset);
+				}
 			}
 		}
 
@@ -695,8 +796,8 @@ namespace
 
 		if (hasNormalStream)
 		{
-			output.compressedNormalWords.reserve(recomputedGroupNormals.size());
-			for (const DirectX::XMFLOAT3& normal : recomputedGroupNormals)
+			output.compressedNormalWords.reserve(groupNormals.size());
+			for (const DirectX::XMFLOAT3& normal : groupNormals)
 			{
 				auto oct = OctEncodeNormal(normal);
 				output.compressedNormalWords.push_back(PackOctNormalSnorm16(oct));
@@ -1039,17 +1140,83 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	const std::vector<std::byte>* skinningVertices,
 	unsigned int skinningVertexSize,
 	const std::vector<uint32_t>& indices,
-	unsigned int flags)
+	unsigned int flags,
+	const ClusterLODBuilderSettings& settings)
 {
 	ClusterLODBuildState state{};
 
-	static_assert(sizeof(UINT32) == sizeof(unsigned int), "UINT32 must be 32-bit");
 	const unsigned int* idx = reinterpret_cast<const unsigned int*>(indices.data());
 
 	const size_t vertexStrideBytes = vertexSize;
 	const size_t globalVertexCount = vertices.size() / vertexStrideBytes;
 	const uint32_t meshPositionQuantExp = ComputeMeshQuantizationExponent(vertices, vertexStrideBytes);
 	const float meshPositionQuantScale = static_cast<float>(1u << meshPositionQuantExp);
+
+	const bool enableNormalAttributeSimplification = settings.enableNormalAttributeSimplification;
+	const float normalAttributeWeight = std::max(0.0f, settings.normalAttributeWeight);
+	const float tangentAttributeWeight = std::max(0.0f, settings.simplifyTangentWeight);
+	const float tangentSignAttributeWeight = std::max(0.0f, settings.simplifyTangentSignWeight);
+	const bool hasNormalStreamInSource = (flags & VertexFlags::VERTEX_NORMALS) != 0u && vertexStrideBytes >= sizeof(float) * 6;
+	const bool hasTexcoordStreamInSource = (flags & VertexFlags::VERTEX_TEXCOORDS) != 0u && vertexStrideBytes >= sizeof(float) * 8;
+	const bool recomputeGroupNormals = hasNormalStreamInSource && !settings.preserveImportedNormals;
+	std::vector<float> simplifyAttributeStream;
+	std::vector<float> simplifyAttributeWeights;
+	uint32_t simplifyAttributeCount = 0;
+	uint32_t simplifyProtectMask = 0;
+	std::vector<DirectX::XMFLOAT4> tangentAttributeStream;
+
+	if (enableNormalAttributeSimplification && hasNormalStreamInSource && hasTexcoordStreamInSource)
+	{
+		if (!GenerateMikkTangents(vertices, vertexStrideBytes, indices, tangentAttributeStream))
+		{
+			spdlog::warn("ClusterLOD: failed to generate MikkTSpace tangents; continuing without tangent simplification attributes");
+			tangentAttributeStream.clear();
+		}
+	}
+
+	if (enableNormalAttributeSimplification && hasNormalStreamInSource)
+	{
+		simplifyAttributeWeights.push_back(normalAttributeWeight);
+		simplifyAttributeWeights.push_back(normalAttributeWeight);
+		simplifyAttributeWeights.push_back(normalAttributeWeight);
+		simplifyProtectMask |= ((1u << 3u) - 1u) << simplifyAttributeCount;
+		simplifyAttributeCount += 3u;
+	}
+
+	if (enableNormalAttributeSimplification && !tangentAttributeStream.empty())
+	{
+		simplifyAttributeWeights.push_back(tangentAttributeWeight);
+		simplifyAttributeWeights.push_back(tangentAttributeWeight);
+		simplifyAttributeWeights.push_back(tangentAttributeWeight);
+		simplifyAttributeWeights.push_back(tangentSignAttributeWeight);
+		simplifyProtectMask |= ((1u << 4u) - 1u) << simplifyAttributeCount;
+		simplifyAttributeCount += 4u;
+	}
+
+	if (simplifyAttributeCount > 0u)
+	{
+		simplifyAttributeStream.resize(globalVertexCount * static_cast<size_t>(simplifyAttributeCount));
+		for (size_t vertexIndex = 0; vertexIndex < globalVertexCount; ++vertexIndex)
+		{
+			size_t destinationFloatOffset = vertexIndex * static_cast<size_t>(simplifyAttributeCount);
+
+			if (enableNormalAttributeSimplification && hasNormalStreamInSource)
+			{
+				const size_t normalSourceByteOffset = vertexIndex * vertexStrideBytes + sizeof(float) * 3;
+				std::memcpy(&simplifyAttributeStream[destinationFloatOffset], vertices.data() + normalSourceByteOffset, sizeof(float) * 3);
+				destinationFloatOffset += 3ull;
+			}
+
+			if (enableNormalAttributeSimplification && !tangentAttributeStream.empty())
+			{
+				const DirectX::XMFLOAT4 tangent = tangentAttributeStream[vertexIndex];
+				simplifyAttributeStream[destinationFloatOffset + 0ull] = tangent.x;
+				simplifyAttributeStream[destinationFloatOffset + 1ull] = tangent.y;
+				simplifyAttributeStream[destinationFloatOffset + 2ull] = tangent.z;
+				simplifyAttributeStream[destinationFloatOffset + 3ull] = tangent.w;
+			}
+		}
+	}
 
 	clodMesh mesh{};
 	mesh.indices = idx;
@@ -1058,12 +1225,12 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	mesh.vertex_positions = reinterpret_cast<const float*>(vertices.data());
 	mesh.vertex_positions_stride = vertexStrideBytes;
 
-	mesh.vertex_attributes = nullptr;
-	mesh.vertex_attributes_stride = 0;
+	mesh.vertex_attributes = simplifyAttributeStream.empty() ? nullptr : simplifyAttributeStream.data();
+	mesh.vertex_attributes_stride = simplifyAttributeStream.empty() ? 0 : sizeof(float) * simplifyAttributeCount;
 	mesh.vertex_lock = nullptr;
-	mesh.attribute_weights = nullptr;
-	mesh.attribute_count = 0;
-	mesh.attribute_protect_mask = 0;
+	mesh.attribute_weights = simplifyAttributeWeights.empty() ? nullptr : simplifyAttributeWeights.data();
+	mesh.attribute_count = simplifyAttributeStream.empty() ? 0 : simplifyAttributeCount;
+	mesh.attribute_protect_mask = simplifyAttributeStream.empty() ? 0 : simplifyProtectMask;
 
 	clodConfig config = clodDefaultConfig(/*max_triangles=*/MS_MESHLET_SIZE);
 	config.max_vertices = MS_MESHLET_SIZE;
@@ -1071,21 +1238,27 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	config.min_triangles = MS_MESHLET_MIN_SIZE;
 	config.cluster_spatial = true;
 	config.cluster_fill_weight = 0.5f;
+	config.cluster_split_factor = 2.0f;
 	config.partition_spatial = true;
 	config.partition_sort = true;
 	config.optimize_clusters = true;
 	config.optimize_bounds = true;
 
-	const bool disableSloppyFallback = GetEnvBool("BR_CLOD_DISABLE_SLOPPY_FALLBACK", true);
-	const float simplifyErrorMergeAdditive = std::max(0.0f, GetEnvFloat("BR_CLOD_ERROR_MERGE_ADDITIVE", 0.25f));
-	const uint32_t partitionSizeFloor = std::max<uint32_t>(1u, GetEnvU32("BR_CLOD_PARTITION_SIZE_FLOOR", 8u));
-	const bool allowOverflowTerminalMerge = GetEnvBool("BR_CLOD_ALLOW_OVERFLOW_TERMINAL_MERGE", true);
+	const bool disableSloppyFallback = settings.disableSloppyFallback;
+	const float lodErrorMergeAdditive = std::max(0.0f, settings.lodErrorMergeAdditive);
+	const float lodErrorMergePrevious = std::max(0.0f, settings.lodErrorMergePrevious);
+	const uint32_t partitionSizeFloor = std::max<uint32_t>(1u, settings.partitionSizeFloor);
+	const bool allowOverflowTerminalMerge = settings.allowOverflowTerminalMerge;
 
 	if (disableSloppyFallback)
 	{
 		config.simplify_fallback_sloppy = false;
 	}
-	config.simplify_error_merge_additive = simplifyErrorMergeAdditive;
+
+	config.simplify_error_factor_sloppy = 2.0f;
+
+	config.simplify_error_merge_additive = lodErrorMergeAdditive;
+	config.simplify_error_merge_previous = lodErrorMergePrevious;
 
 	constexpr uint32_t MaxGroupChildren = 4;
 	constexpr uint32_t TraversalNodeFanout = 4;
@@ -1095,6 +1268,11 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 
 	uint32_t maxChildrenObserved = 0;
 	uint32_t selectedTargetBucketClusters = TargetBucketClusters;
+	uint32_t retryCount = 0;
+	uint64_t cumulativeRefinedCapSplitPartitionCount = 0;
+	uint32_t cumulativeOverflowMergedGroupCount = 0;
+	uint32_t cumulativeOverflowMergedChildBucketCount = 0;
+	bool usedMinBucketOverflowFallback = false;
 
 	for (;;)
 	{
@@ -1146,6 +1324,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 			std::vector<std::vector<BoundingSphere>>* groupMeshletBoundsChunks = nullptr;
 			float meshPositionQuantScale = 1.0f;
 			uint32_t meshPositionQuantExp = 0;
+			bool recomputeGroupNormals = false;
 			std::atomic<uint32_t> nextGroupId = 0;
 			std::mutex finalizeMutex;
 			uint32_t cumulativeMeshletCount = 0;
@@ -1197,6 +1376,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 					context->skinningVertexStrideBytes,
 					context->meshPositionQuantScale,
 					context->meshPositionQuantExp,
+					context->recomputeGroupNormals,
 					context->maxGroupChildren,
 					context->allowOverflowTerminalMerge);
 
@@ -1291,6 +1471,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		captureContext.groupMeshletBoundsChunks = &state.groupMeshletBoundsChunks;
 		captureContext.meshPositionQuantScale = meshPositionQuantScale;
 		captureContext.meshPositionQuantExp = meshPositionQuantExp;
+		captureContext.recomputeGroupNormals = recomputeGroupNormals;
 		captureContext.maxGroupChildren = MaxGroupChildren;
 		captureContext.allowOverflowTerminalMerge = allowOverflowTerminalMerge;
 
@@ -1318,6 +1499,9 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 				refinedCapSplitPartitionCount,
 				selectedTargetBucketClusters);
 		}
+		cumulativeRefinedCapSplitPartitionCount += refinedCapSplitPartitionCount;
+		cumulativeOverflowMergedGroupCount += captureContext.overflowMergedGroupCount;
+		cumulativeOverflowMergedChildBucketCount += captureContext.overflowMergedChildBucketCount;
 
 		if (captureContext.overflowMergedGroupCount > 0)
 		{
@@ -1337,6 +1521,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		{
 			if (allowOverflowTerminalMerge)
 			{
+				usedMinBucketOverflowFallback = true;
 				spdlog::warn(
 					"ClusterLOD: unable to satisfy max children at minimum bucket target {}; using overflow-terminal-merge fallback",
 					selectedTargetBucketClusters);
@@ -1354,6 +1539,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 			selectedTargetBucketClusters,
 			reducedTarget);
 		selectedTargetBucketClusters = reducedTarget;
+		retryCount++;
 	}
 
 	if (maxChildrenObserved > MaxGroupChildren)
@@ -1370,6 +1556,34 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		throw std::runtime_error("Exceeded maximum allowed Cluster LOD children per group");
 		}
 	}
+
+	const uint32_t totalGroupCount = static_cast<uint32_t>(state.groups.size());
+	uint32_t groupsWithRefinedChildren = 0;
+	for (const ClusterLODGroup& group : state.groups)
+	{
+		if (group.childCount > group.terminalChildCount)
+		{
+			groupsWithRefinedChildren++;
+		}
+	}
+
+	const float refinedGroupRatio = totalGroupCount > 0
+		? static_cast<float>(groupsWithRefinedChildren) / static_cast<float>(totalGroupCount)
+		: 0.0f;
+
+	spdlog::info(
+		"ClusterLOD metrics: groups={} refined_groups={} refined_ratio={:.3f} retries={} cap_splits={} overflow_merged_groups={} overflow_merged_child_buckets={} min_bucket_overflow_fallback={} normal_attributes={} tangent_attributes={}"
+		,
+		totalGroupCount,
+		groupsWithRefinedChildren,
+		refinedGroupRatio,
+		retryCount,
+		cumulativeRefinedCapSplitPartitionCount,
+		cumulativeOverflowMergedGroupCount,
+		cumulativeOverflowMergedChildBucketCount,
+		usedMinBucketOverflowFallback ? 1 : 0,
+		hasNormalStreamInSource && enableNormalAttributeSimplification ? 1 : 0,
+		(!tangentAttributeStream.empty() && enableNormalAttributeSimplification) ? 1 : 0);
 
 	{
 		std::vector<uint32_t> refinedGroupParentCounts(state.groups.size(), 0);
