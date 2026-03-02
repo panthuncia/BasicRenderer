@@ -13,6 +13,8 @@
 #include <atomic>
 #include <cassert>
 #include <stdexcept>
+#include <cstdlib>
+#include <string>
 
 #include <spdlog/spdlog.h>
 
@@ -145,6 +147,222 @@ namespace
 		return static_cast<uint32_t>(x) | (static_cast<uint32_t>(y) << 16u);
 	}
 
+	bool TryGetEnvValue(const char* name, std::string& value)
+	{
+#ifdef _MSC_VER
+		char* buffer = nullptr;
+		size_t bufferLength = 0;
+		const errno_t result = _dupenv_s(&buffer, &bufferLength, name);
+		if (result != 0 || buffer == nullptr)
+		{
+			return false;
+		}
+
+		value.assign(buffer);
+		std::free(buffer);
+		return true;
+#else
+		const char* text = std::getenv(name);
+		if (text == nullptr)
+		{
+			return false;
+		}
+
+		value.assign(text);
+		return true;
+#endif
+	}
+
+	bool ParseBoolString(const char* value, bool fallback)
+	{
+		if (value == nullptr)
+		{
+			return fallback;
+		}
+
+		std::string text(value);
+		std::transform(text.begin(), text.end(), text.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+		if (text == "1" || text == "true" || text == "yes" || text == "on")
+		{
+			return true;
+		}
+		if (text == "0" || text == "false" || text == "no" || text == "off")
+		{
+			return false;
+		}
+
+		return fallback;
+	}
+
+	bool GetEnvBool(const char* name, bool fallback)
+	{
+		std::string value;
+		if (!TryGetEnvValue(name, value))
+		{
+			return fallback;
+		}
+
+		return ParseBoolString(value.c_str(), fallback);
+	}
+
+	uint32_t GetEnvU32(const char* name, uint32_t fallback)
+	{
+		std::string value;
+		if (!TryGetEnvValue(name, value))
+		{
+			return fallback;
+		}
+
+		char* end = nullptr;
+		const unsigned long parsed = std::strtoul(value.c_str(), &end, 10);
+		if (end == value.c_str())
+		{
+			return fallback;
+		}
+
+		if (parsed > std::numeric_limits<uint32_t>::max())
+		{
+			return fallback;
+		}
+
+		return static_cast<uint32_t>(parsed);
+	}
+
+	float GetEnvFloat(const char* name, float fallback)
+	{
+		std::string value;
+		if (!TryGetEnvValue(name, value))
+		{
+			return fallback;
+		}
+
+		char* end = nullptr;
+		const float parsed = std::strtof(value.c_str(), &end);
+		if (end == value.c_str())
+		{
+			return fallback;
+		}
+
+		return parsed;
+	}
+
+	DirectX::XMFLOAT3 ReadVertexFloat3(const std::vector<std::byte>& vertices, size_t vertexStrideBytes, uint32_t vertexIndex, size_t attributeByteOffset)
+	{
+		DirectX::XMFLOAT3 value{};
+		const size_t byteOffset = static_cast<size_t>(vertexIndex) * vertexStrideBytes + attributeByteOffset;
+		std::memcpy(&value.x, vertices.data() + byteOffset, sizeof(float));
+		std::memcpy(&value.y, vertices.data() + byteOffset + sizeof(float), sizeof(float));
+		std::memcpy(&value.z, vertices.data() + byteOffset + sizeof(float) * 2, sizeof(float));
+		return value;
+	}
+
+	DirectX::XMFLOAT3 NormalizeOrFallback(DirectX::XMFLOAT3 value, DirectX::XMFLOAT3 fallback)
+	{
+		const float lenSq = value.x * value.x + value.y * value.y + value.z * value.z;
+		if (lenSq <= 1e-20f)
+		{
+			const float fallbackLenSq = fallback.x * fallback.x + fallback.y * fallback.y + fallback.z * fallback.z;
+			if (fallbackLenSq <= 1e-20f)
+			{
+				return DirectX::XMFLOAT3(0.0f, 0.0f, 1.0f);
+			}
+
+			const float invFallbackLen = 1.0f / std::sqrt(fallbackLenSq);
+			return DirectX::XMFLOAT3(
+				fallback.x * invFallbackLen,
+				fallback.y * invFallbackLen,
+				fallback.z * invFallbackLen);
+		}
+
+		const float invLen = 1.0f / std::sqrt(lenSq);
+		return DirectX::XMFLOAT3(value.x * invLen, value.y * invLen, value.z * invLen);
+	}
+
+	std::vector<DirectX::XMFLOAT3> RecalculateGroupNormals(
+		const std::vector<uint32_t>& groupLocalToGlobal,
+		const std::vector<meshopt_Meshlet>& meshlets,
+		const std::vector<uint32_t>& meshletVertices,
+		const std::vector<uint8_t>& meshletTriangles,
+		const std::vector<std::byte>& vertices,
+		size_t vertexStrideBytes)
+	{
+		constexpr size_t PositionByteOffset = 0;
+		constexpr size_t NormalByteOffset = sizeof(float) * 3;
+
+		std::vector<DirectX::XMFLOAT3> accumulatedNormals(groupLocalToGlobal.size(), DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f));
+
+		for (const meshopt_Meshlet& meshlet : meshlets)
+		{
+			const uint32_t meshletVertexOffset = meshlet.vertex_offset;
+			const uint32_t meshletTriangleOffset = meshlet.triangle_offset;
+
+			for (uint32_t triangleIndex = 0; triangleIndex < meshlet.triangle_count; ++triangleIndex)
+			{
+				const uint32_t triBase = meshletTriangleOffset + triangleIndex * 3u;
+				const uint32_t localIndex0 = static_cast<uint32_t>(meshletTriangles[triBase + 0u]);
+				const uint32_t localIndex1 = static_cast<uint32_t>(meshletTriangles[triBase + 1u]);
+				const uint32_t localIndex2 = static_cast<uint32_t>(meshletTriangles[triBase + 2u]);
+
+				if (localIndex0 >= meshlet.vertex_count || localIndex1 >= meshlet.vertex_count || localIndex2 >= meshlet.vertex_count)
+				{
+					continue;
+				}
+
+				const uint32_t groupVertex0 = meshletVertices[meshletVertexOffset + localIndex0];
+				const uint32_t groupVertex1 = meshletVertices[meshletVertexOffset + localIndex1];
+				const uint32_t groupVertex2 = meshletVertices[meshletVertexOffset + localIndex2];
+
+				if (groupVertex0 >= groupLocalToGlobal.size() || groupVertex1 >= groupLocalToGlobal.size() || groupVertex2 >= groupLocalToGlobal.size())
+				{
+					continue;
+				}
+
+				const DirectX::XMFLOAT3 p0 = ReadVertexFloat3(vertices, vertexStrideBytes, groupLocalToGlobal[groupVertex0], PositionByteOffset);
+				const DirectX::XMFLOAT3 p1 = ReadVertexFloat3(vertices, vertexStrideBytes, groupLocalToGlobal[groupVertex1], PositionByteOffset);
+				const DirectX::XMFLOAT3 p2 = ReadVertexFloat3(vertices, vertexStrideBytes, groupLocalToGlobal[groupVertex2], PositionByteOffset);
+
+				const float e10x = p1.x - p0.x;
+				const float e10y = p1.y - p0.y;
+				const float e10z = p1.z - p0.z;
+				const float e20x = p2.x - p0.x;
+				const float e20y = p2.y - p0.y;
+				const float e20z = p2.z - p0.z;
+
+				const DirectX::XMFLOAT3 faceNormal(
+					e10y * e20z - e10z * e20y,
+					e10z * e20x - e10x * e20z,
+					e10x * e20y - e10y * e20x);
+
+				accumulatedNormals[groupVertex0].x += faceNormal.x;
+				accumulatedNormals[groupVertex0].y += faceNormal.y;
+				accumulatedNormals[groupVertex0].z += faceNormal.z;
+				accumulatedNormals[groupVertex1].x += faceNormal.x;
+				accumulatedNormals[groupVertex1].y += faceNormal.y;
+				accumulatedNormals[groupVertex1].z += faceNormal.z;
+				accumulatedNormals[groupVertex2].x += faceNormal.x;
+				accumulatedNormals[groupVertex2].y += faceNormal.y;
+				accumulatedNormals[groupVertex2].z += faceNormal.z;
+			}
+		}
+
+		std::vector<DirectX::XMFLOAT3> result;
+		result.resize(groupLocalToGlobal.size());
+
+		for (size_t groupVertex = 0; groupVertex < groupLocalToGlobal.size(); ++groupVertex)
+		{
+			const DirectX::XMFLOAT3 sourceNormal = ReadVertexFloat3(
+				vertices,
+				vertexStrideBytes,
+				groupLocalToGlobal[groupVertex],
+				NormalByteOffset);
+
+			result[groupVertex] = NormalizeOrFallback(accumulatedNormals[groupVertex], sourceNormal);
+		}
+
+		return result;
+	}
+
 	struct CapturedClusterLODCluster
 	{
 		int32_t refinedGroup = -1;
@@ -179,6 +397,8 @@ namespace
 		std::vector<uint8_t> groupMeshletTriangleChunk;
 		std::vector<BoundingSphere> groupMeshletBoundsChunk;
 		ClusterLODGroupChunk groupChunk{};
+		bool usedOverflowTerminalMerge = false;
+		uint32_t mergedChildBucketCount = 0;
 	};
 
 	ClusterLODGroupBuildOutput BuildClusterLODGroupOutput(
@@ -188,7 +408,9 @@ namespace
 		const std::vector<std::byte>* skinningVertices,
 		size_t skinningVertexStrideBytes,
 		float meshPositionQuantScale,
-		uint32_t meshPositionQuantExp)
+		uint32_t meshPositionQuantExp,
+		uint32_t maxGroupChildren,
+		bool allowOverflowTerminalMerge)
 	{
 		ClusterLODGroupBuildOutput output{};
 
@@ -332,11 +554,40 @@ namespace
 
 		assert(localMeshletCursor == output.group.meshletCount);
 
+		if (allowOverflowTerminalMerge && maxGroupChildren > 0u && output.children.size() > maxGroupChildren)
+		{
+			const uint32_t originalChildCount = static_cast<uint32_t>(output.children.size());
+			const uint32_t keepChildCount = maxGroupChildren - 1u;
+
+			std::vector<ClusterLODChild> mergedChildren;
+			mergedChildren.reserve(maxGroupChildren);
+
+			for (uint32_t childIndex = 0; childIndex < keepChildCount; ++childIndex)
+			{
+				mergedChildren.push_back(output.children[childIndex]);
+			}
+
+			const ClusterLODChild& firstMergedChild = output.children[keepChildCount];
+			const ClusterLODChild& lastMergedChild = output.children.back();
+
+			ClusterLODChild mergedChild{};
+			mergedChild.refinedGroup = -1;
+			mergedChild.firstLocalMeshletIndex = firstMergedChild.firstLocalMeshletIndex;
+			mergedChild.localMeshletCount =
+				(lastMergedChild.firstLocalMeshletIndex + lastMergedChild.localMeshletCount) - firstMergedChild.firstLocalMeshletIndex;
+
+			mergedChildren.push_back(mergedChild);
+			output.children = std::move(mergedChildren);
+
+			output.usedOverflowTerminalMerge = true;
+			output.mergedChildBucketCount = originalChildCount - maxGroupChildren;
+		}
+
 		output.group.childCount = static_cast<uint32_t>(output.children.size());
 		output.group.terminalChildCount = 0;
-		for (const ChildBucket& bucket : buckets)
+		for (const ClusterLODChild& child : output.children)
 		{
-			if (bucket.refinedGroup < 0)
+			if (child.refinedGroup < 0)
 			{
 				output.group.terminalChildCount++;
 			}
@@ -369,6 +620,28 @@ namespace
 					output.skinningVertexChunk.end(),
 					skinningVertices->begin() + static_cast<std::ptrdiff_t>(sourceSkinningByteOffset),
 					skinningVertices->begin() + static_cast<std::ptrdiff_t>(sourceSkinningByteOffset + skinningVertexStrideBytes));
+			}
+		}
+
+		const bool hasNormalStream = vertexStrideBytes >= sizeof(float) * 6;
+		std::vector<DirectX::XMFLOAT3> recomputedGroupNormals;
+		if (hasNormalStream)
+		{
+			recomputedGroupNormals = RecalculateGroupNormals(
+				groupLocalToGlobal,
+				output.meshlets,
+				output.meshletVertices,
+				output.meshletTriangles,
+				vertices,
+				vertexStrideBytes);
+
+			constexpr size_t NormalByteOffset = sizeof(float) * 3;
+			for (size_t groupVertexIndex = 0; groupVertexIndex < recomputedGroupNormals.size(); ++groupVertexIndex)
+			{
+				const size_t destinationByteOffset = groupVertexIndex * vertexStrideBytes + NormalByteOffset;
+				std::memcpy(output.vertexChunk.data() + destinationByteOffset, &recomputedGroupNormals[groupVertexIndex].x, sizeof(float));
+				std::memcpy(output.vertexChunk.data() + destinationByteOffset + sizeof(float), &recomputedGroupNormals[groupVertexIndex].y, sizeof(float));
+				std::memcpy(output.vertexChunk.data() + destinationByteOffset + sizeof(float) * 2, &recomputedGroupNormals[groupVertexIndex].z, sizeof(float));
 			}
 		}
 
@@ -420,17 +693,14 @@ namespace
 			AppendBits(output.compressedPositionWords, positionBitCursor, static_cast<uint32_t>(quantized[2] - minQuantized[2]), positionBitsZ);
 		}
 
-		output.compressedNormalWords.reserve(groupLocalToGlobal.size());
-		for (uint32_t globalVertexIndex : groupLocalToGlobal)
+		if (hasNormalStream)
 		{
-			const size_t byteOffset = static_cast<size_t>(globalVertexIndex) * vertexStrideBytes + 12u;
-			DirectX::XMFLOAT3 normal{};
-			std::memcpy(&normal.x, vertices.data() + byteOffset, sizeof(float));
-			std::memcpy(&normal.y, vertices.data() + byteOffset + sizeof(float), sizeof(float));
-			std::memcpy(&normal.z, vertices.data() + byteOffset + sizeof(float) * 2, sizeof(float));
-
-			auto oct = OctEncodeNormal(normal);
-			output.compressedNormalWords.push_back(PackOctNormalSnorm16(oct));
+			output.compressedNormalWords.reserve(recomputedGroupNormals.size());
+			for (const DirectX::XMFLOAT3& normal : recomputedGroupNormals)
+			{
+				auto oct = OctEncodeNormal(normal);
+				output.compressedNormalWords.push_back(PackOctNormalSnorm16(oct));
+			}
 		}
 
 		const uint32_t meshletVertexBits = BitsNeededForRange(std::max<uint32_t>(1u, output.group.groupVertexCount) - 1u);
@@ -468,7 +738,11 @@ namespace
 		output.groupChunk.compressedMeshletVertexWordsBase = 0;
 		output.groupChunk.compressedMeshletVertexWordCount = static_cast<uint32_t>(output.compressedMeshletVertexWords.size());
 		output.groupChunk.compressedMeshletVertexBits = meshletVertexBits;
-		output.groupChunk.compressedFlags = CLOD_COMPRESSED_POSITIONS | CLOD_COMPRESSED_MESHLET_VERTEX_INDICES | CLOD_COMPRESSED_NORMALS;
+		output.groupChunk.compressedFlags = CLOD_COMPRESSED_POSITIONS | CLOD_COMPRESSED_MESHLET_VERTEX_INDICES;
+		if (!output.compressedNormalWords.empty())
+		{
+			output.groupChunk.compressedFlags |= CLOD_COMPRESSED_NORMALS;
+		}
 
 		return output;
 	}
@@ -802,6 +1076,17 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	config.optimize_clusters = true;
 	config.optimize_bounds = true;
 
+	const bool disableSloppyFallback = GetEnvBool("BR_CLOD_DISABLE_SLOPPY_FALLBACK", true);
+	const float simplifyErrorMergeAdditive = std::max(0.0f, GetEnvFloat("BR_CLOD_ERROR_MERGE_ADDITIVE", 0.25f));
+	const uint32_t partitionSizeFloor = std::max<uint32_t>(1u, GetEnvU32("BR_CLOD_PARTITION_SIZE_FLOOR", 8u));
+	const bool allowOverflowTerminalMerge = GetEnvBool("BR_CLOD_ALLOW_OVERFLOW_TERMINAL_MERGE", true);
+
+	if (disableSloppyFallback)
+	{
+		config.simplify_fallback_sloppy = false;
+	}
+	config.simplify_error_merge_additive = simplifyErrorMergeAdditive;
+
 	constexpr uint32_t MaxGroupChildren = 4;
 	constexpr uint32_t TraversalNodeFanout = 4;
 	constexpr uint32_t TargetBucketClusters = 32;
@@ -833,7 +1118,8 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		state.topRootNode = 0;
 		state.maxDepth = 0;
 
-		config.partition_size = std::max<size_t>(1, (selectedTargetBucketClusters * 3) / 4);
+		const size_t requestedPartitionSize = std::max<size_t>(1, (selectedTargetBucketClusters * 3) / 4);
+		config.partition_size = std::max<size_t>(requestedPartitionSize, static_cast<size_t>(partitionSizeFloor));
 		size_t refinedCapSplitPartitionCount = 0;
 		config.partition_refined_split_count = &refinedCapSplitPartitionCount;
 
@@ -866,6 +1152,10 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 			uint32_t cumulativeGroupVertexCount = 0;
 			uint32_t maxChildrenObserved = 0;
 			uint32_t maxDepthObserved = 0;
+			uint32_t maxGroupChildren = 0;
+			bool allowOverflowTerminalMerge = false;
+			uint32_t overflowMergedGroupCount = 0;
+			uint32_t overflowMergedChildBucketCount = 0;
 		};
 
 		struct ClodBuildCallbacks
@@ -906,7 +1196,9 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 					context->skinningVertices,
 					context->skinningVertexStrideBytes,
 					context->meshPositionQuantScale,
-					context->meshPositionQuantExp);
+					context->meshPositionQuantExp,
+					context->maxGroupChildren,
+					context->allowOverflowTerminalMerge);
 
 				ClusterLODGroup finalizedGroup = output.group;
 
@@ -959,6 +1251,11 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 
 				context->maxChildrenObserved = std::max(context->maxChildrenObserved, finalizedGroup.childCount);
 				context->maxDepthObserved = (std::max)(context->maxDepthObserved, static_cast<uint32_t>(std::max(finalizedGroup.depth, 0)));
+				if (output.usedOverflowTerminalMerge)
+				{
+					context->overflowMergedGroupCount++;
+					context->overflowMergedChildBucketCount += output.mergedChildBucketCount;
+				}
 
 				return static_cast<int>(groupId);
 			}
@@ -994,6 +1291,8 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		captureContext.groupMeshletBoundsChunks = &state.groupMeshletBoundsChunks;
 		captureContext.meshPositionQuantScale = meshPositionQuantScale;
 		captureContext.meshPositionQuantExp = meshPositionQuantExp;
+		captureContext.maxGroupChildren = MaxGroupChildren;
+		captureContext.allowOverflowTerminalMerge = allowOverflowTerminalMerge;
 
 		clodBuildParallelConfig parallelConfig{};
 		parallelConfig.iteration_callback = &ClodBuildCallbacks::Iterate;
@@ -1020,6 +1319,15 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 				selectedTargetBucketClusters);
 		}
 
+		if (captureContext.overflowMergedGroupCount > 0)
+		{
+			spdlog::warn(
+				"ClusterLOD: merged overflow child buckets into terminal buckets for {} groups ({} child buckets merged) at bucket target {}",
+				captureContext.overflowMergedGroupCount,
+				captureContext.overflowMergedChildBucketCount,
+				selectedTargetBucketClusters);
+		}
+
 		if (maxChildrenObserved <= MaxGroupChildren)
 		{
 			break;
@@ -1027,6 +1335,14 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 
 		if (selectedTargetBucketClusters <= MinTargetBucketClusters)
 		{
+			if (allowOverflowTerminalMerge)
+			{
+				spdlog::warn(
+					"ClusterLOD: unable to satisfy max children at minimum bucket target {}; using overflow-terminal-merge fallback",
+					selectedTargetBucketClusters);
+				break;
+			}
+
 			throw std::runtime_error("Cluster LOD: unable to satisfy maximum children per group while preserving refined-group bucket semantics");
 		}
 
@@ -1042,7 +1358,17 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 
 	if (maxChildrenObserved > MaxGroupChildren)
 	{
+		if (allowOverflowTerminalMerge)
+		{
+			spdlog::warn(
+				"ClusterLOD: continuing with overflow-terminal-merge fallback despite observed child fanout {} > {}",
+				maxChildrenObserved,
+				MaxGroupChildren);
+		}
+		else
+		{
 		throw std::runtime_error("Exceeded maximum allowed Cluster LOD children per group");
+		}
 	}
 
 	{
