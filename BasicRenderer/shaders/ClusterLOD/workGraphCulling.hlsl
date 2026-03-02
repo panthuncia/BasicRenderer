@@ -485,16 +485,14 @@ void WG_ObjectCull(
     outRecs.OutputComplete();
 }
 
-// clusterlod.h comment formula, converted to pixels:
-// projectedErrorPx = (error / max(dist - radius, znear)) * (projY * 0.5) * viewportHeight
-float ProjectedErrorPixels(float3 worldCenter, float worldRadius, float errorMeshSpace, float3 cameraPos, float projY, float screenHeight, float zNear) {
+// NVIDIA-style error-over-distance metric:
+// errorOverDistance = (error * scale) / max(dist - radius, znear)
+float ErrorOverDistance(float3 worldCenter, float worldRadius, float errorMeshSpace, float errorScale, float3 cameraPos, float zNear) {
     // Conservative "distance to sphere surface"
     float dist = length(worldCenter - cameraPos);
     float denom = max(dist - worldRadius, zNear);
 
-    // bounds.error / denom * (projY * 0.5) * screenHeight
-    float frac = (errorMeshSpace / denom) * (projY * 0.5f);
-    return frac * screenHeight;
+    return (errorMeshSpace * errorScale) / denom;
 }
 
 struct TraverseSlotState
@@ -576,7 +574,6 @@ void WG_TraverseNodes(
             StructuredBuffer<CullingCameraInfo> cameraInfos =
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
             const CullingCameraInfo cam = cameraInfos[rec.viewId];
-            ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
 
             StructuredBuffer<ClusterLODNode> lodNodes =
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Nodes)];
@@ -590,9 +587,10 @@ void WG_TraverseNodes(
                 WGTelemetryAdd(WG_COUNTER_TRAVERSE_LEAF_NODE_RECORDS, 1);
             }
 
+            const float nodeUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
             const float3 nodeCenterObjectSpace = node.metric.centerAndRadius.xyz;
             const float3 nodeCenterViewSpace = ToViewSpace(nodeCenterObjectSpace, objectModelMatrix, camera.view);
-            const float nodeRadiusWorld = node.metric.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
+            const float nodeRadiusWorld = node.metric.centerAndRadius.w * nodeUniformScale;
             const bool nodeCulled = !replaySource && SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, camera);
 
             if (nodeCulled) {
@@ -601,16 +599,15 @@ void WG_TraverseNodes(
             else {
                 float4 nodeCenterObjectSpace4 = float4(nodeCenterObjectSpace, 1.0f);
                 float3 nodeCenterWorldSpace = mul(nodeCenterObjectSpace4, objectModelMatrix).xyz;
-                float nodeProjectedError = ProjectedErrorPixels(
+                float nodeErrorOverDistance = ErrorOverDistance(
                     nodeCenterWorldSpace,
                     nodeRadiusWorld,
                     node.metric.maxQuadricError,
+                    nodeUniformScale,
                     cam.positionWorldSpace.xyz,
-                    cam.projY,
-                    perFrameBuffer.screenResY,
                     cam.zNear);
 
-                const bool nodeWantsTraversal = nodeProjectedError > cam.errorPixels;
+                const bool nodeWantsTraversal = nodeErrorOverDistance >= cam.errorOverDistanceThreshold;
                 if (!nodeWantsTraversal) {
                     WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
                 }
@@ -758,7 +755,6 @@ void WG_GroupEvaluate(
             StructuredBuffer<CullingCameraInfo> cameraInfos =
                         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
             const CullingCameraInfo cam = cameraInfos[rec.viewId];
-            ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
 
             StructuredBuffer<ClusterLODGroup> groups =
                         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
@@ -766,9 +762,10 @@ void WG_GroupEvaluate(
             const uint groupIndex = clodMeshMetadata.groupsBase + rec.groupId;
             const ClusterLODGroup grp = groups[groupIndex];
 
+            const float groupUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
             const float3 groupCenterObjectSpace = grp.bounds.centerAndRadius.xyz;
             const float3 groupCenterViewSpace = ToViewSpace(groupCenterObjectSpace, objectModelMatrix, camera.view);
-            const float groupRadiusWorld = grp.bounds.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
+            const float groupRadiusWorld = grp.bounds.centerAndRadius.w * groupUniformScale;
             const bool groupCulled = !replaySource && SphereOutsideFrustumViewSpace(groupCenterViewSpace, groupRadiusWorld, camera);
 
             if (groupCulled) {
@@ -777,16 +774,15 @@ void WG_GroupEvaluate(
             else {
                 float4 groupCenterObjectSpace4 = float4(groupCenterObjectSpace, 1.0f);
                 float3 groupCenterWorldSpace = mul(groupCenterObjectSpace4, objectModelMatrix).xyz;
-                float groupProjectedError = ProjectedErrorPixels(
+                float groupErrorOverDistance = ErrorOverDistance(
                     groupCenterWorldSpace,
                     groupRadiusWorld,
                     grp.bounds.error,
+                    groupUniformScale,
                     cam.positionWorldSpace.xyz,
-                    cam.projY,
-                    perFrameBuffer.screenResY,
                     cam.zNear);
 
-                const bool groupWantsTraversal = groupProjectedError > cam.errorPixels;
+                const bool groupWantsTraversal = groupErrorOverDistance >= cam.errorOverDistanceThreshold;
                 if (!groupWantsTraversal) {
                     WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_REJECTED_BY_ERROR_RECORDS, 1);
                 }
@@ -839,7 +835,6 @@ void WG_GroupEvaluate(
         StructuredBuffer<CullingCameraInfo> cameraInfos =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
         const CullingCameraInfo cam = cameraInfos[s.viewId];
-        ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
 
         StructuredBuffer<ClusterLODGroup> groups =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
@@ -895,18 +890,18 @@ void WG_GroupEvaluate(
                 float4 objectSpaceCenter = float4(refinedGrp.bounds.centerAndRadius.xyz, 1.0);
                 float3 worldSpaceCenter = mul(objectSpaceCenter, objectModelMatrix).xyz;
 
-                float worldRadius = refinedGrp.bounds.centerAndRadius.w * MaxAxisScale_RowVector(objectModelMatrix);
+                const float refinedUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
+                float worldRadius = refinedGrp.bounds.centerAndRadius.w * refinedUniformScale;
                 float3 refinedViewSpaceCenter = mul(float4(worldSpaceCenter, 1.0f), camera.view).xyz;
                 const bool replaySource = (s.sourceTag == CLOD_RECORD_SOURCE_REPLAY);
                 const bool refinedCulled = !replaySource && SphereOutsideFrustumViewSpace(refinedViewSpaceCenter, worldRadius, camera);
 
-                float px = ProjectedErrorPixels(
+                float refinedErrorOverDistance = ErrorOverDistance(
                     worldSpaceCenter,
                     worldRadius,
                     refinedGrp.bounds.error,
+                    refinedUniformScale,
                     cam.positionWorldSpace.xyz,
-                    cam.projY,
-                    perFrameBuffer.screenResY,
                     cam.zNear);
 
                 bool occlusionCulled = false;
@@ -937,7 +932,7 @@ void WG_GroupEvaluate(
                     generatingGroupWantsTraversal = false;
                 }
                 else {
-                    generatingGroupWantsTraversal = !refinedCulled && (px > cam.errorPixels);
+                    generatingGroupWantsTraversal = !refinedCulled && (refinedErrorOverDistance >= cam.errorOverDistanceThreshold);
                 }
             }
             if (generatingGroupWantsTraversal) {

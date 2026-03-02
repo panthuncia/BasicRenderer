@@ -40,7 +40,7 @@ struct CullingCameraInfo {
     DirectX::XMFLOAT4 positionWorldSpace;
     float projY = 0.0f;
 	float zNear = 0.0f;
-	float errorPixels = 0.0f; // Target error in pixels for LOD calculations
+    float errorOverDistanceThreshold = 0.0f; // Threshold for (error * scale) / distance metric
 	float pad[1];
 };
 

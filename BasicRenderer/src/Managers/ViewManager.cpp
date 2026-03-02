@@ -1,6 +1,7 @@
 #include "Managers/ViewManager.h"
 
 #include <algorithm>
+#include <limits>
 
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/IndirectCommandBufferManager.h"
@@ -10,6 +11,22 @@
 #include "../../generated/BuiltinResources.h"
 #include "Resources/DynamicResource.h"
 #include "Resources/MemoryStatisticsComponents.h"
+
+namespace
+{
+    constexpr float kClusterLodErrorPixels = 1.0f;
+
+    float ComputeErrorOverDistanceThreshold(const CameraInfo& cameraInfo, float errorPixels)
+    {
+        const float projY = cameraInfo.jitteredProjection.r[1].m128_f32[1];
+        const float screenHeight = static_cast<float>(cameraInfo.depthResY);
+        const float denom = (projY * 0.5f) * screenHeight;
+        if (denom <= 0.0f) {
+            return std::numeric_limits<float>::max();
+        }
+        return errorPixels / denom;
+    }
+}
 
 ViewManager::ViewManager() {
     auto& resourceManager = ResourceManager::GetInstance();
@@ -56,7 +73,7 @@ uint64_t ViewManager::CreateView(const CameraInfo& cameraInfo,
         .positionWorldSpace = cameraInfo.positionWorldSpace,
         .projY = cameraInfo.jitteredProjection.r[1].m128_f32[1], // [1][1]
         .zNear = cameraInfo.zNear,
-        .errorPixels = 1.0f // TODO: make configurable
+        .errorOverDistanceThreshold = ComputeErrorOverDistanceThreshold(cameraInfo, kClusterLodErrorPixels)
     };
 
 	v.gpu.cullingCameraBufferView = m_cullingCameraBuffer->Add();
@@ -162,7 +179,7 @@ void ViewManager::UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo) {
 	cullInfo.positionWorldSpace = cameraInfo.positionWorldSpace;
 	cullInfo.projY = cameraInfo.jitteredProjection.r[1].m128_f32[1]; // [1][1]
 	cullInfo.zNear = cameraInfo.zNear;
-	cullInfo.errorPixels = 0.02f; // TODO: make configurable
+    cullInfo.errorOverDistanceThreshold = ComputeErrorOverDistanceThreshold(cameraInfo, kClusterLodErrorPixels);
 	m_cullingCameraBuffer->UpdateView(v->gpu.cullingCameraBufferView.get(), &cullInfo);
     
     if (m_events.onCameraUpdated) {
