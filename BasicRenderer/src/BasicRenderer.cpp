@@ -349,7 +349,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //auto usdScene = LoadModel("models/sponza.usdz");
     
-    auto bistro = LoadModel("models/bistroExteriorNoMats.usdz");
+    //auto bistro = LoadModel("models/bistroExteriorNoMats.usdz");
     //auto wine = LoadModel("models/bistroInterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
@@ -357,11 +357,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	//auto zorah = LoadModel("models/zorah/zorah_main_public.gltf");
 
-	//auto island = LoadModel("models/island/usd/island.usda");
+	auto island = LoadModel("models/island/usd/elements/isMountainB/instance.usda");
 
     renderer.SetCurrentScene(baseScene);
 
-	//renderer.GetCurrentScene()->AppendScene(island->Clone());
+	renderer.GetCurrentScene()->AppendScene(island->Clone());
 
 	//renderer.GetCurrentScene()->AppendScene(zorah->Clone());
 
@@ -371,7 +371,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
 
 
-    renderer.GetCurrentScene()->AppendScene(bistro->Clone());
+    //renderer.GetCurrentScene()->AppendScene(bistro->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
 

@@ -447,6 +447,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
     settingsManager.registerSetting<uint32_t>("clodStreamingCpuUploadBudgetRequests", 10000u);
     settingsManager.registerSetting<uint32_t>("clodStreamingResidentBudgetGroups", 0xFFFFFFFFu);
+	settingsManager.registerSetting<uint32_t>("usdPointInstancerMaxInstances", 10000u);
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
 	getCameraSpeed = settingsManager.getSettingGetter<float>("cameraSpeed");

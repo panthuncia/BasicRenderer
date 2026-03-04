@@ -52,6 +52,7 @@
 #include "Animation/Skeleton.h"
 #include "Scene/Components.h"
 #include "Animation/AnimationController.h"
+#include "Managers/Singletons/SettingsManager.h"
 
 #include "Import/USDLoader.h"
 #include "Import/CLodCacheLoader.h"
@@ -85,6 +86,25 @@ namespace USDLoader {
 	};
 
 	LoadingCaches loadingCache;
+
+	static uint32_t GetUsdPointInstancerMaxInstances() {
+		static std::function<uint32_t(void)> getMaxInstances;
+		if (!getMaxInstances) {
+			try {
+				getMaxInstances = SettingsManager::GetInstance().getSettingGetter<uint32_t>("usdPointInstancerMaxInstances");
+			}
+			catch (...) {
+				return 0u;
+			}
+		}
+
+		try {
+			return getMaxInstances();
+		}
+		catch (...) {
+			return 0u;
+		}
+	}
 
 	static std::vector<uint32_t> SwizzleToIndices(const std::string& swizzle) {
 		std::vector<uint32_t> indices;
@@ -1276,35 +1296,6 @@ namespace USDLoader {
 			prototypeRootsToSkip.insert(prototypeTarget.GetString());
 		}
 
-		std::vector<std::vector<std::shared_ptr<Mesh>>> meshesByPrototype;
-		meshesByPrototype.resize(prototypeTargets.size());
-
-		for (size_t prototypeIndex = 0; prototypeIndex < prototypeTargets.size(); ++prototypeIndex) {
-			const auto& prototypeTarget = prototypeTargets[prototypeIndex];
-			UsdPrim prototypeRoot = stage->GetPrimAtPath(prototypeTarget);
-			if (!prototypeRoot) {
-				spdlog::warn("PointInstancer '{}' references invalid prototype target '{}'.",
-					pointInstancer.GetPrim().GetPath().GetString(),
-					prototypeTarget.GetString());
-				continue;
-			}
-
-			for (const auto& prototypePrim : UsdPrimRange(prototypeRoot)) {
-				std::vector<std::shared_ptr<Mesh>> prototypePrimMeshes;
-				ProcessMeshAndAnimations(prototypePrim, prototypePrimMeshes, skelCache, stage, scene, metersPerUnit, upRot, directory, isUSDZ);
-				if (!prototypePrimMeshes.empty()) {
-					auto& prototypeMeshes = meshesByPrototype[prototypeIndex];
-					prototypeMeshes.insert(prototypeMeshes.end(), prototypePrimMeshes.begin(), prototypePrimMeshes.end());
-				}
-			}
-
-			if (meshesByPrototype[prototypeIndex].empty()) {
-				spdlog::warn("PointInstancer '{}' prototype '{}' resolved no renderable meshes.",
-					pointInstancer.GetPrim().GetPath().GetString(),
-					prototypeTarget.GetString());
-			}
-		}
-
 		const UsdTimeCode timeCode = UsdTimeCode::Default();
 
 		VtIntArray protoIndices;
@@ -1338,6 +1329,45 @@ namespace USDLoader {
 				instanceTransforms.size(),
 				protoIndices.size(),
 				emittedCount);
+		}
+
+		const uint32_t maxInstances = GetUsdPointInstancerMaxInstances();
+		if (maxInstances > 0u && emittedCount > static_cast<size_t>(maxInstances)) {
+			spdlog::warn(
+				"Skipping PointInstancer '{}' because it would emit {} instances (limit {}).",
+				pointInstancer.GetPrim().GetPath().GetString(),
+				emittedCount,
+				maxInstances);
+			return;
+		}
+
+		std::vector<std::vector<std::shared_ptr<Mesh>>> meshesByPrototype;
+		meshesByPrototype.resize(prototypeTargets.size());
+
+		for (size_t prototypeIndex = 0; prototypeIndex < prototypeTargets.size(); ++prototypeIndex) {
+			const auto& prototypeTarget = prototypeTargets[prototypeIndex];
+			UsdPrim prototypeRoot = stage->GetPrimAtPath(prototypeTarget);
+			if (!prototypeRoot) {
+				spdlog::warn("PointInstancer '{}' references invalid prototype target '{}'.",
+					pointInstancer.GetPrim().GetPath().GetString(),
+					prototypeTarget.GetString());
+				continue;
+			}
+
+			for (const auto& prototypePrim : UsdPrimRange(prototypeRoot)) {
+				std::vector<std::shared_ptr<Mesh>> prototypePrimMeshes;
+				ProcessMeshAndAnimations(prototypePrim, prototypePrimMeshes, skelCache, stage, scene, metersPerUnit, upRot, directory, isUSDZ);
+				if (!prototypePrimMeshes.empty()) {
+					auto& prototypeMeshes = meshesByPrototype[prototypeIndex];
+					prototypeMeshes.insert(prototypeMeshes.end(), prototypePrimMeshes.begin(), prototypePrimMeshes.end());
+				}
+			}
+
+			if (meshesByPrototype[prototypeIndex].empty()) {
+				spdlog::warn("PointInstancer '{}' prototype '{}' resolved no renderable meshes.",
+					pointInstancer.GetPrim().GetPath().GetString(),
+					prototypeTarget.GetString());
+			}
 		}
 
 		const std::string baseName = pointInstancer.GetPrim().GetName().GetString();
