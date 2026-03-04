@@ -1770,10 +1770,8 @@ private:
             }
 
             CLodReplayBufferState replayState{};
-            replayState.nodeGroupWriteOffsetBytes = 0;
-            replayState.meshletWriteOffsetBytes = CLodReplayBufferSizeBytes;
-            replayState.nodeGroupDroppedRecords = 0;
-            replayState.meshletDroppedRecords = 0;
+            replayState.totalWriteCount = 0;
+            replayState.droppedRecords = 0;
             BUFFER_UPLOAD(
                 &replayState,
                 sizeof(CLodReplayBufferState),
@@ -1839,7 +1837,7 @@ private:
 
                 nodeGpuInputs[2].entrypointIndex = 2;
                 nodeGpuInputs[2].numRecords = 0;
-                nodeGpuInputs[2].recordsAddress = replayAddress + CLodReplayBufferSizeBytes;
+                nodeGpuInputs[2].recordsAddress = replayAddress;
                 nodeGpuInputs[2].recordStride = sizeof(CLodMeshletReplayRecord);
             }
 

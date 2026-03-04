@@ -54,24 +54,13 @@ void CreateRasterBucketsHistogramCommandCSMain()
 
     const uint nodeGroupRecordStride = sizeof(CLodNodeGroupReplayRecord);
     const uint meshletRecordStride = sizeof(CLodMeshletReplayRecord);
-    uint nodeGroupRecordCount = replayState.nodeGroupWriteOffsetBytes / nodeGroupRecordStride;
-    nodeGroupRecordCount = (nodeGroupRecordCount > replayState.nodeGroupDroppedRecords)
-        ? (nodeGroupRecordCount - replayState.nodeGroupDroppedRecords)
-        : 0u;
-
-    uint meshletRecordCount = 0;
-    if (replayState.meshletWriteOffsetBytes <= CLOD_REPLAY_BUFFER_SIZE_BYTES)
-    {
-        meshletRecordCount = (CLOD_REPLAY_BUFFER_SIZE_BYTES - replayState.meshletWriteOffsetBytes) / meshletRecordStride;
-    }
-    meshletRecordCount = (meshletRecordCount > replayState.meshletDroppedRecords)
-        ? (meshletRecordCount - replayState.meshletDroppedRecords)
-        : 0u;
+    const uint replayRecordCount = min(replayState.totalWriteCount, CLOD_REPLAY_SLOT_CAPACITY);
 
     // Slot 0 is CLodMultiNodeGpuInput (CPU initialized); slot 1+ are CLodNodeGpuInput records.
-    nodeInputs[1].numRecords = nodeGroupRecordCount;
-    nodeInputs[2].numRecords = meshletRecordCount;
-    nodeInputs[2].recordsAddress = nodeInputs[2].recordsAddress - (uint64_t(meshletRecordCount) * uint64_t(meshletRecordStride));
+    nodeInputs[1].numRecords = replayRecordCount;
+    nodeInputs[1].recordStride = nodeGroupRecordStride;
+    nodeInputs[2].numRecords = replayRecordCount;
+    nodeInputs[2].recordStride = meshletRecordStride;
 }
 
 // IndirectCommandSignatureRootConstant0 = cluster count

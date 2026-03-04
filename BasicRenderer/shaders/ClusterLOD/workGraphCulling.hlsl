@@ -170,21 +170,22 @@ bool ReplayTryAppendNodeGroup(uint type, uint instanceIndex, uint viewId, uint n
     RWByteAddressBuffer replayBuffer = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX];
     RWStructuredBuffer<CLodReplayBufferState> replayState = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
 
-    const uint recordSize = sizeof(CLodNodeGroupReplayRecord);
+    const uint recordSize = CLOD_REPLAY_SLOT_STRIDE_BYTES;
+    const uint capacity = CLOD_REPLAY_SLOT_CAPACITY;
 
-    uint oldWrite = 0;
-    InterlockedAdd(replayState[0].nodeGroupWriteOffsetBytes, recordSize, oldWrite);
+    uint slot = 0;
+    InterlockedAdd(replayState[0].totalWriteCount, 1u, slot);
 
-    const uint newWrite = oldWrite + recordSize;
-    const uint meshletWrite = replayState[0].meshletWriteOffsetBytes;
-    const bool valid = (newWrite <= CLOD_REPLAY_BUFFER_SIZE_BYTES) && (newWrite <= meshletWrite);
+    const bool valid = slot < capacity;
 
     if (!valid) {
-        InterlockedAdd(replayState[0].nodeGroupDroppedRecords, 1u);
+        InterlockedAdd(replayState[0].droppedRecords, 1u);
         return false;
     }
 
-    replayBuffer.Store4(oldWrite, uint4(type, instanceIndex, viewId, nodeOrGroupId));
+    const uint byteOffset = slot * recordSize;
+    replayBuffer.Store4(byteOffset, uint4(type, instanceIndex, viewId, nodeOrGroupId));
+    replayBuffer.Store(byteOffset + 16u, 0u);
     return true;
 }
 
@@ -195,25 +196,22 @@ bool ReplayTryAppendMeshlet(uint instanceIndex, uint viewId, uint groupId, uint 
     RWByteAddressBuffer replayBuffer = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX];
     RWStructuredBuffer<CLodReplayBufferState> replayState = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
 
-    const uint recordSize = sizeof(CLodMeshletReplayRecord);
+    const uint recordSize = CLOD_REPLAY_SLOT_STRIDE_BYTES;
+    const uint capacity = CLOD_REPLAY_SLOT_CAPACITY;
 
-    uint oldWrite = 0;
-    InterlockedAdd(replayState[0].meshletWriteOffsetBytes, 0u - recordSize, oldWrite);
+    uint slot = 0;
+    InterlockedAdd(replayState[0].totalWriteCount, 1u, slot);
 
-    const uint newWrite = oldWrite - recordSize;
-    const uint nodeWrite = replayState[0].nodeGroupWriteOffsetBytes;
-    const bool valid =
-        (oldWrite <= CLOD_REPLAY_BUFFER_SIZE_BYTES) &&
-        (oldWrite >= recordSize) &&
-        (newWrite <= CLOD_REPLAY_BUFFER_SIZE_BYTES) &&
-        (newWrite >= nodeWrite);
+    const bool valid = slot < capacity;
 
     if (!valid) {
-        InterlockedAdd(replayState[0].meshletDroppedRecords, 1u);
+        InterlockedAdd(replayState[0].droppedRecords, 1u);
         return false;
     }
 
-    replayBuffer.Store4(newWrite, uint4(instanceIndex, viewId, groupId, localMeshletIndex));
+    const uint byteOffset = slot * recordSize;
+    replayBuffer.Store4(byteOffset, uint4(CLOD_REPLAY_RECORD_TYPE_MESHLET, instanceIndex, viewId, groupId));
+    replayBuffer.Store(byteOffset + 16u, localMeshletIndex);
     return true;
 }
 
@@ -294,7 +292,7 @@ void WG_ReplayNodeGroup(
             traverseRecord.allowRefine = 1u;
             WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_NODE_INPUT_RECORDS, 1);
         }
-        else {
+        else if (rec.type == CLOD_REPLAY_RECORD_TYPE_GROUP) {
             emitGroup = true;
             groupRecord.instanceIndex = rec.instanceIndex;
             groupRecord.groupId = rec.nodeOrGroupId;
@@ -337,23 +335,31 @@ void WG_ReplayMeshlet(
 {
     const uint lane = gtid.x;
     const uint inputCount = inRecs.Count();
-    const bool emitBucket = lane < inputCount;
+    bool emitBucket = false;
+    CLodMeshletReplayRecord meshletRecord = (CLodMeshletReplayRecord)0;
 
     if (lane == 0) {
         WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_MESHLET_LAUNCHES, 1);
         WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_MESHLET_INPUT_RECORDS, inputCount);
     }
 
+    if (lane < inputCount) {
+        const CLodMeshletReplayRecord rec = inRecs[lane];
+        if (rec.type == CLOD_REPLAY_RECORD_TYPE_MESHLET) {
+            emitBucket = true;
+            meshletRecord = rec;
+        }
+    }
+
     ThreadNodeOutputRecords<MeshletBucketRecord> outBucket =
         ClusterCullBuckets.GetThreadNodeOutputRecords(emitBucket ? 1 : 0);
 
     if (emitBucket) {
-        const CLodMeshletReplayRecord rec = inRecs[lane];
         MeshletBucketRecord bucket = (MeshletBucketRecord)0;
-        bucket.instanceIndex = rec.instanceIndex;
-        bucket.viewId = rec.viewId;
-        bucket.groupId = rec.groupId;
-        bucket.childFirstLocalMeshletIndex = rec.localMeshletIndex;
+        bucket.instanceIndex = meshletRecord.instanceIndex;
+        bucket.viewId = meshletRecord.viewId;
+        bucket.groupId = meshletRecord.groupId;
+        bucket.childFirstLocalMeshletIndex = meshletRecord.localMeshletIndex;
         bucket.childLocalMeshletCount = 1;
         bucket.sourceTag = CLOD_RECORD_SOURCE_REPLAY;
         bucket.dispatchGrid = uint3(1, 1, 1);

@@ -234,6 +234,7 @@ struct Cluster {
 
 static const uint CLOD_REPLAY_RECORD_TYPE_NODE = 0;
 static const uint CLOD_REPLAY_RECORD_TYPE_GROUP = 1;
+static const uint CLOD_REPLAY_RECORD_TYPE_MESHLET = 2;
 static const uint CLOD_REPLAY_BUFFER_SIZE_BYTES = 8u * 1024u * 1024u;
 
 struct CLodNodeGroupReplayRecord
@@ -242,22 +243,27 @@ struct CLodNodeGroupReplayRecord
     uint instanceIndex;
     uint viewId;
     uint nodeOrGroupId;
+    uint pad0;
 };
 
 struct CLodMeshletReplayRecord
 {
+    uint type;
     uint instanceIndex;
     uint viewId;
     uint groupId;
     uint localMeshletIndex;
 };
 
+static const uint CLOD_REPLAY_SLOT_STRIDE_BYTES = sizeof(CLodMeshletReplayRecord);
+static const uint CLOD_REPLAY_SLOT_CAPACITY = CLOD_REPLAY_BUFFER_SIZE_BYTES / CLOD_REPLAY_SLOT_STRIDE_BYTES;
+
 struct CLodReplayBufferState
 {
-    uint nodeGroupWriteOffsetBytes;
-    uint meshletWriteOffsetBytes;
-    uint nodeGroupDroppedRecords;
-    uint meshletDroppedRecords;
+    uint totalWriteCount;
+    uint droppedRecords;
+    uint pad0;
+    uint pad1;
 };
 
 struct CLodViewDepthSRVIndex

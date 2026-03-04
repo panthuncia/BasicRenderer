@@ -369,6 +369,7 @@ struct ClusterLODGroup
 enum class CLodReplayRecordType : uint32_t {
     Node = 0,
     Group = 1,
+    Meshlet = 2,
 };
 
 struct CLodNodeGroupReplayRecord {
@@ -376,9 +377,11 @@ struct CLodNodeGroupReplayRecord {
     uint32_t instanceIndex = 0;
     uint32_t viewId = 0;
     uint32_t nodeOrGroupId = 0;
+    uint32_t pad0 = 0;
 };
 
 struct CLodMeshletReplayRecord {
+    uint32_t type = 0; // CLodReplayRecordType
     uint32_t instanceIndex = 0;
     uint32_t viewId = 0;
     uint32_t groupId = 0;
@@ -386,10 +389,10 @@ struct CLodMeshletReplayRecord {
 };
 
 struct CLodReplayBufferState {
-    uint32_t nodeGroupWriteOffsetBytes = 0;
-    uint32_t meshletWriteOffsetBytes = 0;
-    uint32_t nodeGroupDroppedRecords = 0;
-    uint32_t meshletDroppedRecords = 0;
+    uint32_t totalWriteCount = 0;
+    uint32_t droppedRecords = 0;
+    uint32_t pad0 = 0;
+    uint32_t pad1 = 0;
 };
 
 struct CLodViewDepthSRVIndex {
