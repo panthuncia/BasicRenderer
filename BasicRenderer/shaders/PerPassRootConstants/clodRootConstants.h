@@ -24,6 +24,9 @@
 #define CLOD_RASTER_BUCKETS_INDIRECT_ARGS_DESCRIPTOR_INDEX UintRootConstant10
 #define CLOD_COMPACTED_APPEND_BASE_COUNTER_DESCRIPTOR_INDEX UintRootConstant11
 
+// Work graph culling pass
+#define CLOD_VISIBLE_CLUSTERS_CAPACITY UintRootConstant11 // aliased
+
 // Raster pass
 #define CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX UintRootConstant10 // aliased
 

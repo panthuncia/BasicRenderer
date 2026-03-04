@@ -93,7 +93,7 @@ inline std::shared_ptr<Buffer> CreateAliasedUnmaterializedStructuredBuffer(
 
 class CLodExtension final : public RenderGraph::IRenderGraphExtension {
 public:
-    explicit CLodExtension(CLodExtensionType type, uint64_t maxVisibleClusters) : m_maxVisibleClusters(maxVisibleClusters) {
+    explicit CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters) : m_maxVisibleClusters(maxVisibleClusters) {
     m_streamingNonResidentBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
     m_streamingActiveGroupsBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
     m_streamingPinnedGroupsBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
@@ -349,6 +349,7 @@ public:
         cullPassDesc.name = "CLod::HierarchialCullingPass1";
         HierarchialCullingPassInputs cullPassInputs;
         cullPassInputs.isFirstPass = true;
+		cullPassInputs.maxVisibleClusters = m_maxVisibleClusters;
         cullPassDesc.pass = std::make_shared<HierarchialCullingPass>(
             cullPassInputs,
             m_visibleClustersBuffer,
@@ -448,6 +449,7 @@ public:
         cullPassDesc2.name = "CLod::HierarchialCullingPass2";
         HierarchialCullingPassInputs cullPassInputs2;
         cullPassInputs2.isFirstPass = false;
+		cullPassInputs2.maxVisibleClusters = m_maxVisibleClusters;
         cullPassDesc2.pass = std::make_shared<HierarchialCullingPass>(
             cullPassInputs2,
             m_visibleClustersBuffer,
@@ -1234,7 +1236,7 @@ private:
     }
 
     CLodExtensionType m_type;
-    uint64_t m_maxVisibleClusters;
+    uint32_t m_maxVisibleClusters;
 
     // Buffers used across CLod passes
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
@@ -1489,6 +1491,7 @@ private:
 
     struct HierarchialCullingPassInputs {
         bool isFirstPass;
+		unsigned int maxVisibleClusters;
 
         friend bool operator==(const HierarchialCullingPassInputs&, const HierarchialCullingPassInputs&) = default;
     };
@@ -1497,6 +1500,7 @@ private:
         std::size_t seed = 0;
 
         boost::hash_combine(seed, i.isFirstPass);
+		boost::hash_combine(seed, i.maxVisibleClusters);
         return seed;
     }
 
@@ -1532,6 +1536,7 @@ private:
             m_occlusionReplayStateBuffer = occlusionReplayStateBuffer;
             m_occlusionNodeGpuInputsBuffer = occlusionNodeGpuInputsBuffer;
             m_viewDepthSrvIndicesBuffer = viewDepthSrvIndicesBuffer;
+			m_maxVisibleClusters = inputs.maxVisibleClusters;
         }
 
         ~HierarchialCullingPass() {
@@ -1629,6 +1634,7 @@ private:
             uintRootConstants[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetUAVShaderVisibleInfo(0).slot.index;
             uintRootConstants[CLOD_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
             uintRootConstants[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX] = m_viewDepthSrvIndicesBuffer->GetSRVInfo(0).slot.index;
+            uintRootConstants[CLOD_VISIBLE_CLUSTERS_CAPACITY] = static_cast<uint32_t>(m_maxVisibleClusters);
 
             commandList.PushConstants(
                 rhi::ShaderStage::Compute,
@@ -1728,30 +1734,6 @@ private:
 
             commandList.BindPipeline(m_createCommandPipelineState.GetAPIPipelineState().GetHandle());
             commandList.Dispatch(1, 1, 1);
-
-            // TODO: Move to post-raster pass
-            //rhi::BufferBarrier replayDispatchBarriers[2] = {};
-            //replayDispatchBarriers[0].buffer = m_occlusionReplayBuffer->GetAPIResource().GetHandle();
-            //replayDispatchBarriers[0].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-            //replayDispatchBarriers[0].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
-            //replayDispatchBarriers[0].beforeSync = rhi::ResourceSyncState::ComputeShading;
-            //replayDispatchBarriers[0].afterSync = rhi::ResourceSyncState::ComputeShading;
-
-            //replayDispatchBarriers[1].buffer = m_occlusionNodeGpuInputsBuffer->GetAPIResource().GetHandle();
-            //replayDispatchBarriers[1].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-            //replayDispatchBarriers[1].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
-            //replayDispatchBarriers[1].beforeSync = rhi::ResourceSyncState::ComputeShading;
-            //replayDispatchBarriers[1].afterSync = rhi::ResourceSyncState::ComputeShading;
-
-            //rhi::BarrierBatch replayBarrierBatch{};
-            //replayBarrierBatch.buffers = rhi::Span<rhi::BufferBarrier>(replayDispatchBarriers, 2);
-            //commandList.Barriers(replayBarrierBatch);
-
-            //rhi::WorkGraphDispatchDesc replayDispatchDesc{};
-            //replayDispatchDesc.dispatchMode = rhi::WorkGraphDispatchMode::MultiNodeGpuInput;
-            //replayDispatchDesc.multiNodeGpuInput.inputBuffer = m_occlusionNodeGpuInputsBuffer->GetAPIResource().GetHandle();
-            //replayDispatchDesc.multiNodeGpuInput.inputAddressOffset = 0;
-            //commandList.DispatchWorkGraph(replayDispatchDesc);
 
             return {};
         }
@@ -1883,6 +1865,7 @@ private:
         std::shared_ptr<Buffer> m_viewDepthSrvIndicesBuffer;
         bool m_isFirstPass = true;
         bool m_declaredResourcesChanged = true;
+        unsigned int m_maxVisibleClusters;
         RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
 
         void CreatePipelines(

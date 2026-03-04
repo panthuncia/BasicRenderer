@@ -1354,7 +1354,7 @@ void Renderer::CreateRenderGraph() {
             m_pReadbackManager.get()));
         currentRenderGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>(
             currentRenderGraph->GetReadbackService()));
-        currentRenderGraph->RegisterExtension(std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint64_t>(pow(2, 25))));
+        currentRenderGraph->RegisterExtension(std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint32_t>(pow(2, 25))));
 		m_renderGraphRuntimeInitialized = true;
     }
 

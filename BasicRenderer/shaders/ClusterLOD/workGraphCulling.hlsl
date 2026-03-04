@@ -1106,6 +1106,7 @@ void WG_ClusterCullBuckets(
             ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
         RWStructuredBuffer<uint> visibleClusterCounter =
             ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
+        const uint visibleClusterCapacity = CLOD_VISIBLE_CLUSTERS_CAPACITY;
 
         const uint leaderLane = WaveFirstLaneFromMask(survivingMask);
         const uint laneRank = GetLaneRankInGroup(survivingMask, WaveGetLaneIndex());
@@ -1117,11 +1118,20 @@ void WG_ClusterCullBuckets(
 
         baseIndex = WaveReadLaneAt(baseIndex, leaderLane);
 
-        if (isWaveLeader) {
-            WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES, survivingCount);
+        const uint availableCount =
+            (baseIndex < visibleClusterCapacity)
+                ? min(survivingCount, visibleClusterCapacity - baseIndex)
+                : 0u;
+
+        if (WaveGetLaneIndex() == leaderLane && (baseIndex + survivingCount > visibleClusterCapacity)) {
+            InterlockedMin(visibleClusterCounter[0], visibleClusterCapacity);
         }
 
-        if (contributes) {
+        if (isWaveLeader) {
+            WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES, availableCount);
+        }
+
+        if (contributes && (laneRank < availableCount)) {
             const uint index = baseIndex + laneRank;
 
             VisibleCluster vc = (VisibleCluster) 0;
