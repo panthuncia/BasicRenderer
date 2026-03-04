@@ -402,6 +402,57 @@ std::vector<uint32_t> GenerateSequentialIndices(size_t vertexCount) {
     return indices;
 }
 
+void LogDeclaredExtensions(const json& gltf, const std::string& filePath) {
+    auto readStringArray = [](const json& object, const char* key) {
+        std::vector<std::string> values;
+        if (!object.contains(key) || !object[key].is_array()) {
+            return values;
+        }
+
+        const auto& array = object[key];
+        values.reserve(array.size());
+        for (const auto& entry : array) {
+            if (entry.is_string()) {
+                values.push_back(entry.get<std::string>());
+            }
+        }
+        return values;
+    };
+
+    auto joinNames = [](const std::vector<std::string>& names) {
+        std::string joined;
+        for (size_t i = 0; i < names.size(); ++i) {
+            if (i > 0) {
+                joined += ", ";
+            }
+            joined += names[i];
+        }
+        return joined;
+    };
+
+    const auto extensionsUsed = readStringArray(gltf, "extensionsUsed");
+    const auto extensionsRequired = readStringArray(gltf, "extensionsRequired");
+
+    if (extensionsUsed.empty() && extensionsRequired.empty()) {
+        spdlog::info("glTF extensions for {}: none declared", filePath);
+        return;
+    }
+
+    if (!extensionsUsed.empty()) {
+        spdlog::info("glTF extensionsUsed for {}: {}", filePath, joinNames(extensionsUsed));
+    }
+    else {
+        spdlog::info("glTF extensionsUsed for {}: none", filePath);
+    }
+
+    if (!extensionsRequired.empty()) {
+        spdlog::info("glTF extensionsRequired for {}: {}", filePath, joinNames(extensionsRequired));
+    }
+    else {
+        spdlog::info("glTF extensionsRequired for {}: none", filePath);
+    }
+}
+
 ParsedDocument ParseDocument(const std::string& filePath) {
     const std::filesystem::path path(filePath);
     if (!std::filesystem::is_regular_file(path)) {
@@ -800,8 +851,6 @@ void ApplyNodeTransform(const json& gltfNode, flecs::entity entity) {
             matrixValues[4], matrixValues[5], matrixValues[6], matrixValues[7],
             matrixValues[8], matrixValues[9], matrixValues[10], matrixValues[11],
             matrixValues[12], matrixValues[13], matrixValues[14], matrixValues[15]);
-
-        matrix = XMMatrixTranspose(matrix);
         XMMatrixDecompose(&scale, &rotation, &translation, matrix);
     }
     else {
@@ -887,11 +936,37 @@ void BuildNodeHierarchy(
         }
     }
 
-    flecs::entity sceneRoot = scene->GetRoot();
-    for (size_t nodeIndex = 0; nodeIndex < entities.size(); ++nodeIndex) {
-        if (!hasParent[nodeIndex]) {
-            entities[nodeIndex].child_of(sceneRoot);
+    std::vector<size_t> rootNodes;
+    if (gltf.contains("scenes") && gltf["scenes"].is_array() && !gltf["scenes"].empty()) {
+        size_t sceneIndex = gltf.value<size_t>("scene", static_cast<size_t>(0));
+        if (sceneIndex >= gltf["scenes"].size()) {
+            throw std::runtime_error("Default scene index out of range");
         }
+
+        const auto& selectedScene = gltf["scenes"][sceneIndex];
+        if (selectedScene.contains("nodes") && selectedScene["nodes"].is_array()) {
+            rootNodes.reserve(selectedScene["nodes"].size());
+            for (const auto& nodeValue : selectedScene["nodes"]) {
+                const size_t rootIndex = nodeValue.get<size_t>();
+                if (rootIndex >= entities.size()) {
+                    throw std::runtime_error("Scene root node index out of range");
+                }
+                rootNodes.push_back(rootIndex);
+            }
+        }
+    }
+
+    if (rootNodes.empty()) {
+        for (size_t nodeIndex = 0; nodeIndex < entities.size(); ++nodeIndex) {
+            if (!hasParent[nodeIndex]) {
+                rootNodes.push_back(nodeIndex);
+            }
+        }
+    }
+
+    flecs::entity sceneRoot = scene->GetRoot();
+    for (const size_t rootIndex : rootNodes) {
+        entities[rootIndex].child_of(sceneRoot);
     }
 }
 
@@ -902,6 +977,7 @@ namespace GlTFLoader {
 std::shared_ptr<Scene> LoadModel(std::string filePath) {
     try {
         ParsedDocument doc = ParseDocument(filePath);
+        LogDeclaredExtensions(doc.gltf, filePath);
 
         auto scene = std::make_shared<Scene>();
         auto defaultMaterial = Material::GetDefaultMaterial();

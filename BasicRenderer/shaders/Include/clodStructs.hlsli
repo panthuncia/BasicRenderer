@@ -56,7 +56,7 @@ struct CLodStreamingRequest
     uint groupGlobalIndex;
     uint meshInstanceIndex;
     uint meshBufferIndex;
-    uint viewId;
+    uint viewId; // low 16 bits: viewId, high 16 bits: quantized priority
 };
 
 struct CLodStreamingRuntimeState

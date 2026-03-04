@@ -112,6 +112,8 @@ static const uint WG_COUNTER_PHASE2_REPLAY_GROUP_RECORDS_CONSUMED = 61;
 static const uint WG_COUNTER_PHASE2_REPLAY_CLUSTER_BUCKET_RECORDS_CONSUMED = 62;
 
 static const uint CLOD_STREAM_REQUEST_CAPACITY = (1u << 16);
+static const uint CLOD_STREAM_VIEWID_MASK = 0xFFFFu;
+static const uint CLOD_STREAM_PRIORITY_SHIFT = 16u;
 
 static const uint CLOD_RECORD_SOURCE_PASS1 = 0;
 static const uint CLOD_RECORD_SOURCE_REPLAY = 1;
@@ -137,6 +139,14 @@ bool CLodTrySetBit(RWByteAddressBuffer bits, uint key)
     uint oldPacked = 0;
     bits.InterlockedOr(CLodBitWordAddress(key), CLodBitMask(key), oldPacked);
     return (oldPacked & CLodBitMask(key)) == 0u;
+}
+
+uint CLodPackViewPriority(uint viewId, float fallbackErrorOverDistance)
+{
+    const float clampedPriority = min(max(fallbackErrorOverDistance * 1024.0f, 0.0f), 65535.0f);
+    const uint quantizedPriority = (uint)(clampedPriority + 0.5f);
+    return ((quantizedPriority & CLOD_STREAM_VIEWID_MASK) << CLOD_STREAM_PRIORITY_SHIFT)
+        | (viewId & CLOD_STREAM_VIEWID_MASK);
 }
 
 static const uint TRAVERSE_THREADS_PER_GROUP = 32;
@@ -872,6 +882,8 @@ void WG_GroupEvaluate(
         if (!forceBucket && child.refinedGroup >= 0) {
             const uint refinedGroupGlobalIndex = clodMeshMetadata.groupsBase + (uint) child.refinedGroup;
             const ClusterLODGroup refinedGrp = groups[refinedGroupGlobalIndex];
+            const uint generatingGroupGlobalIndex = clodMeshMetadata.groupsBase + s.groupId;
+            const ClusterLODGroup generatingGrp = groups[generatingGroupGlobalIndex];
             bool refinedResident = true;
             StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
@@ -887,14 +899,23 @@ void WG_GroupEvaluate(
                 nonResidentRefinedChild = true;
                 WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_NON_RESIDENT_REFINED_CHILD_THREADS, 1);
 
-                RWByteAddressBuffer loadRequestBits =
-                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequestBits)];
+                const float4 generatingObjectSpaceCenter = float4(generatingGrp.bounds.centerAndRadius.xyz, 1.0);
+                const float3 generatingWorldSpaceCenter = mul(generatingObjectSpaceCenter, objectModelMatrix).xyz;
+                const float generatingUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
+                const float generatingWorldRadius = generatingGrp.bounds.centerAndRadius.w * generatingUniformScale;
+                const float fallbackErrorOverDistance = ErrorOverDistance(
+                    generatingWorldSpaceCenter,
+                    generatingWorldRadius,
+                    generatingGrp.bounds.error,
+                    generatingUniformScale,
+                    cam.positionWorldSpace.xyz,
+                    cam.zNear);
                 RWStructuredBuffer<CLodStreamingRequest> loadRequests =
                     ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
                 RWStructuredBuffer<uint> loadRequestCounter =
                     ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
 
-                if (refinedGroupGlobalIndex < activeGroupScanCount && CLodTrySetBit(loadRequestBits, refinedGroupGlobalIndex)) {
+                if (refinedGroupGlobalIndex < activeGroupScanCount) {
                     uint requestIndex = 0;
                     InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
                     if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY) {
@@ -902,7 +923,7 @@ void WG_GroupEvaluate(
                         req.groupGlobalIndex = refinedGroupGlobalIndex;
                         req.meshInstanceIndex = s.instanceIndex;
                         req.meshBufferIndex = perMeshInstanceBuffer[s.instanceIndex].perMeshBufferIndex;
-                        req.viewId = s.viewId;
+                        req.viewId = CLodPackViewPriority(s.viewId, fallbackErrorOverDistance);
                         loadRequests[requestIndex] = req;
                     }
                 }

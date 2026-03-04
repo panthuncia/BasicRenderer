@@ -7,6 +7,7 @@
 #include <deque>
 #include <functional>
 #include <limits>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -101,6 +102,7 @@ public:
     m_streamingResidencyInitializedBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
     m_streamingLruCurrentStampByGroup.assign(m_streamingStorageGroupCapacity, 0ull);
     m_streamingRequestsInProgressBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
+    m_pendingLoadPriorityByGroup.assign(m_streamingStorageGroupCapacity, 0u);
     m_streamingNonResidentBitsUploadPending = true;
 
         try {
@@ -290,6 +292,7 @@ public:
         std::fill(m_streamingResidencyInitializedBitsCpu.begin(), m_streamingResidencyInitializedBitsCpu.end(), 0u);
         std::fill(m_streamingLruCurrentStampByGroup.begin(), m_streamingLruCurrentStampByGroup.end(), 0ull);
         std::fill(m_streamingRequestsInProgressBitsCpu.begin(), m_streamingRequestsInProgressBitsCpu.end(), 0u);
+        std::fill(m_pendingLoadPriorityByGroup.begin(), m_pendingLoadPriorityByGroup.end(), 0u);
         m_streamingActiveGroupScanCount = 0u;
         m_streamingReadbackScheduleCursor = 0u;
         m_streamingNonResidentBitsUploadPending = true;
@@ -571,6 +574,7 @@ private:
     struct PendingStreamingRequest {
         bool isLoad = true;
         CLodStreamingRequest request{};
+        uint32_t priority = 0u;
     };
 
     struct StreamingLruEntry {
@@ -584,6 +588,10 @@ private:
 
     static uint32_t BitMask(uint32_t key) {
         return 1u << (key & 31u);
+    }
+
+    static uint32_t UnpackStreamingRequestPriority(const CLodStreamingRequest& req) {
+        return (req.viewId >> 16u) & 0xFFFFu;
     }
 
     bool IsGroupPinned(uint32_t groupIndex) const {
@@ -623,7 +631,7 @@ private:
         m_streamingLruEntries.push_back({ groupIndex, stamp });
     }
 
-    bool TryQueuePendingLoadRequest(const CLodStreamingRequest& req) {
+    bool TryQueuePendingLoadRequest(const CLodStreamingRequest& req, uint32_t priority) {
         const uint32_t groupIndex = req.groupGlobalIndex;
         if (groupIndex >= m_streamingStorageGroupCapacity) {
             EnsureStreamingStorageCapacity(groupIndex + 1u);
@@ -638,18 +646,28 @@ private:
         }
 
         if (IsStreamingRequestInProgress(groupIndex)) {
+            if (groupIndex < m_pendingLoadPriorityByGroup.size() && priority > m_pendingLoadPriorityByGroup[groupIndex]) {
+                m_pendingLoadPriorityByGroup[groupIndex] = priority;
+                PendingStreamingRequest pending{};
+                pending.isLoad = true;
+                pending.request = req;
+                pending.priority = priority;
+                m_pendingStreamingRequests.push_back(pending);
+            }
             return false;
         }
 
         MarkStreamingRequestInProgress(groupIndex);
+        m_pendingLoadPriorityByGroup[groupIndex] = priority;
         PendingStreamingRequest pending{};
         pending.isLoad = true;
         pending.request = req;
+        pending.priority = priority;
         m_pendingStreamingRequests.push_back(pending);
         return true;
     }
 
-    uint32_t QueueLoadRequestWithParents(const CLodStreamingRequest& requestedLoad) {
+    uint32_t QueueLoadRequestWithParents(const CLodStreamingRequest& requestedLoad, uint32_t requestedPriority) {
         if (requestedLoad.groupGlobalIndex >= m_streamingStorageGroupCapacity) {
             EnsureStreamingStorageCapacity(requestedLoad.groupGlobalIndex + 1u);
         }
@@ -688,12 +706,16 @@ private:
 
             CLodStreamingRequest parentLoad = requestedLoad;
             parentLoad.groupGlobalIndex = parentGroup;
-            if (TryQueuePendingLoadRequest(parentLoad)) {
+            const uint32_t parentPriority =
+                (requestedPriority == std::numeric_limits<uint32_t>::max())
+                    ? requestedPriority
+                    : requestedPriority + 1u;
+            if (TryQueuePendingLoadRequest(parentLoad, parentPriority)) {
                 queuedCount++;
             }
         }
 
-        if (TryQueuePendingLoadRequest(requestedLoad)) {
+        if (TryQueuePendingLoadRequest(requestedLoad, requestedPriority)) {
             queuedCount++;
         }
 
@@ -767,6 +789,7 @@ private:
         m_streamingEvictionExemptBitsCpu.resize(newWordCount, 0u);
         m_streamingResidencyInitializedBitsCpu.resize(newWordCount, 0u);
         m_streamingRequestsInProgressBitsCpu.resize(newWordCount, 0u);
+        m_pendingLoadPriorityByGroup.resize(newCapacity, 0u);
         m_streamingLruCurrentStampByGroup.resize(newCapacity, 0ull);
         m_streamingParentGroupByGlobal.resize(newCapacity, -1);
         m_streamingStorageGroupCapacity = newCapacity;
@@ -997,25 +1020,36 @@ private:
 
         const size_t decodeCount = std::min<size_t>(state.requestCount, state.requests.size());
         uint32_t queuedCount = 0;
-        std::unordered_set<uint32_t> seen;
-        seen.reserve(decodeCount);
+        std::unordered_map<uint32_t, uint32_t> maxPriorityByGroup;
+        maxPriorityByGroup.reserve(decodeCount);
 
         for (size_t i = 0; i < decodeCount; ++i) {
             const CLodStreamingRequest& req = state.requests[i];
-            if (!seen.insert(req.groupGlobalIndex).second) {
-                continue;
-            }
+            const uint32_t groupIndex = req.groupGlobalIndex;
+            const uint32_t priority = UnpackStreamingRequestPriority(req);
 
-            queuedCount += QueueLoadRequestWithParents(req);
+            auto it = maxPriorityByGroup.find(groupIndex);
+            if (it == maxPriorityByGroup.end()) {
+                maxPriorityByGroup.emplace(groupIndex, priority);
+            }
+            else {
+                it->second = std::max(it->second, priority);
+            }
         }
 
-        if (decodeCount > 0 || seen.size() > 0 || queuedCount > 0) {
+        for (const auto& [groupIndex, priority] : maxPriorityByGroup) {
+            CLodStreamingRequest req{};
+            req.groupGlobalIndex = groupIndex;
+            queuedCount += QueueLoadRequestWithParents(req, priority);
+        }
+
+        if (decodeCount > 0 || !maxPriorityByGroup.empty() || queuedCount > 0) {
             spdlog::info(
                 "CLod streaming: observed {} load requests ({} unique groups, {} queued, {} deduped/in-progress)",
                 static_cast<uint32_t>(decodeCount),
-                static_cast<uint32_t>(seen.size()),
+                static_cast<uint32_t>(maxPriorityByGroup.size()),
                 queuedCount,
-                static_cast<uint32_t>(seen.size()) - queuedCount);
+                static_cast<uint32_t>(maxPriorityByGroup.size()) - queuedCount);
         }
 
         state = {};
@@ -1123,8 +1157,35 @@ private:
 
         uint32_t processed = 0;
         while (processed < budget && !m_pendingStreamingRequests.empty()) {
-            const PendingStreamingRequest pending = m_pendingStreamingRequests.front();
-            m_pendingStreamingRequests.pop_front();
+            auto selectedIt = m_pendingStreamingRequests.end();
+            for (auto it = m_pendingStreamingRequests.begin(); it != m_pendingStreamingRequests.end(); ++it) {
+                if (selectedIt == m_pendingStreamingRequests.end() || it->priority > selectedIt->priority) {
+                    selectedIt = it;
+                }
+            }
+
+            if (selectedIt == m_pendingStreamingRequests.end()) {
+                break;
+            }
+
+            const PendingStreamingRequest pending = *selectedIt;
+            m_pendingStreamingRequests.erase(selectedIt);
+
+            const uint32_t groupIndex = pending.request.groupGlobalIndex;
+            if (groupIndex >= m_streamingStorageGroupCapacity) {
+                EnsureStreamingStorageCapacity(groupIndex + 1u);
+            }
+
+            if (pending.isLoad) {
+                if (groupIndex >= m_pendingLoadPriorityByGroup.size()) {
+                    processed++;
+                    continue;
+                }
+
+                if (pending.priority < m_pendingLoadPriorityByGroup[groupIndex]) {
+                    continue;
+                }
+            }
 
             if (pending.request.groupGlobalIndex >= m_streamingStorageGroupCapacity) {
                 EnsureStreamingStorageCapacity(pending.request.groupGlobalIndex + 1u);
@@ -1156,6 +1217,7 @@ private:
 
                 TouchStreamingLru(pending.request.groupGlobalIndex);
                 ClearStreamingRequestInProgress(pending.request.groupGlobalIndex);
+                m_pendingLoadPriorityByGroup[pending.request.groupGlobalIndex] = 0u;
                 processed++;
                 continue;
             }
@@ -1163,7 +1225,6 @@ private:
             frameStats.loadRequested++;
             frameStats.loadUnique++;
 
-            const uint32_t groupIndex = pending.request.groupGlobalIndex;
             const uint32_t wordAddress = BitWordAddress(groupIndex);
             const uint32_t bitMask = BitMask(groupIndex);
             const uint32_t oldWord = m_streamingNonResidentBitsCpu[wordAddress];
@@ -1179,6 +1240,7 @@ private:
 
                 TouchStreamingLru(groupIndex);
                 ClearStreamingRequestInProgress(groupIndex);
+                m_pendingLoadPriorityByGroup[groupIndex] = 0u;
                 processed++;
                 continue;
             }
@@ -1222,6 +1284,7 @@ private:
 
                 TouchStreamingLru(entry.groupIndex);
                 ClearStreamingRequestInProgress(entry.groupIndex);
+                m_pendingLoadPriorityByGroup[entry.groupIndex] = 0u;
             }
 
             for (size_t i = count; i < loadBatchEntries.size(); ++i) {
@@ -1229,6 +1292,7 @@ private:
                 frameStats.loadFailed++;
                 TouchStreamingLru(entry.groupIndex);
                 ClearStreamingRequestInProgress(entry.groupIndex);
+                m_pendingLoadPriorityByGroup[entry.groupIndex] = 0u;
             }
         }
 
@@ -1276,6 +1340,7 @@ private:
     std::vector<uint32_t> m_streamingEvictionExemptBitsCpu;
     std::vector<uint32_t> m_streamingResidencyInitializedBitsCpu;
     std::vector<uint32_t> m_streamingRequestsInProgressBitsCpu;
+    std::vector<uint32_t> m_pendingLoadPriorityByGroup;
     std::vector<int32_t> m_streamingParentGroupByGlobal;
     std::vector<uint64_t> m_streamingLruCurrentStampByGroup;
     std::deque<StreamingLruEntry> m_streamingLruEntries;
