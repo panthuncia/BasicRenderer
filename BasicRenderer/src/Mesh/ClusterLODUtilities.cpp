@@ -1250,15 +1250,17 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	const uint32_t partitionSizeFloor = std::max<uint32_t>(1u, settings.partitionSizeFloor);
 	const bool allowOverflowTerminalMerge = settings.allowOverflowTerminalMerge;
 
-	if (disableSloppyFallback)
-	{
-		config.simplify_fallback_sloppy = false;
-	}
+	// TODO: This needs to be on, or generation breaks. Why?
+	// Error factor is high to prevent it from actually being used
+	config.simplify_fallback_sloppy = true;
+	config.simplify_error_factor_sloppy = 10.0f;
 
-	config.simplify_error_factor_sloppy = 2.0f;
+	config.simplify_fallback_permissive = false;
 
 	config.simplify_error_merge_additive = lodErrorMergeAdditive;
 	config.simplify_error_merge_previous = lodErrorMergePrevious;
+
+	config.partition_max_refined_groups = 4;
 
 	constexpr uint32_t MaxGroupChildren = 4;
 	constexpr uint32_t TraversalNodeFanout = 4;
