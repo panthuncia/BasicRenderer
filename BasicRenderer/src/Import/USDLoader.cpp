@@ -4,6 +4,7 @@
 #include <vector>
 #include <cstring>
 #include <unordered_set>
+#include <cmath>
 
 #include <pxr/usd/ar/asset.h>
 #include <pxr/usd/ar/resolver.h>
@@ -542,6 +543,90 @@ namespace USDLoader {
 		}
 	}
 
+	static std::vector<float> ComputeSmoothNormals(
+		const std::vector<float>& ctrlPos,
+		const VtArray<int>& faceVertCounts,
+		const VtArray<int>& faceVertIndices,
+		const std::vector<uint8_t>* useFaceMask)
+	{
+		const size_t controlPointCount = ctrlPos.size() / 3;
+		std::vector<GfVec3f> accumulated(controlPointCount, GfVec3f(0.0f));
+
+		size_t fvOffset = 0;
+		for (size_t faceIndex = 0; faceIndex < faceVertCounts.size(); ++faceIndex) {
+			const int fvCount = faceVertCounts[faceIndex];
+			if (fvCount < 3) {
+				fvOffset += fvCount;
+				continue;
+			}
+
+			if (useFaceMask && !useFaceMask->empty() && !(*useFaceMask)[faceIndex]) {
+				fvOffset += fvCount;
+				continue;
+			}
+
+			const uint32_t i0 = static_cast<uint32_t>(faceVertIndices[fvOffset]);
+			if (i0 >= controlPointCount) {
+				spdlog::warn("Invalid position index {} while computing smooth normals.", i0);
+				fvOffset += fvCount;
+				continue;
+			}
+
+			const GfVec3f p0(
+				ctrlPos[i0 * 3 + 0],
+				ctrlPos[i0 * 3 + 1],
+				ctrlPos[i0 * 3 + 2]);
+
+			for (int corner = 1; corner + 1 < fvCount; ++corner) {
+				const uint32_t i1 = static_cast<uint32_t>(faceVertIndices[fvOffset + corner]);
+				const uint32_t i2 = static_cast<uint32_t>(faceVertIndices[fvOffset + corner + 1]);
+
+				if (i1 >= controlPointCount || i2 >= controlPointCount) {
+					spdlog::warn("Invalid position index ({}, {}) while computing smooth normals.", i1, i2);
+					continue;
+				}
+
+				const GfVec3f p1(
+					ctrlPos[i1 * 3 + 0],
+					ctrlPos[i1 * 3 + 1],
+					ctrlPos[i1 * 3 + 2]);
+				const GfVec3f p2(
+					ctrlPos[i2 * 3 + 0],
+					ctrlPos[i2 * 3 + 1],
+					ctrlPos[i2 * 3 + 2]);
+
+				const GfVec3f e1 = p1 - p0;
+				const GfVec3f e2 = p2 - p0;
+				const GfVec3f faceNormal = GfCross(e1, e2);
+
+				if (GfDot(faceNormal, faceNormal) <= 1e-20f) {
+					continue;
+				}
+
+				accumulated[i0] += faceNormal;
+				accumulated[i1] += faceNormal;
+				accumulated[i2] += faceNormal;
+			}
+
+			fvOffset += fvCount;
+		}
+
+		std::vector<float> normals;
+		normals.resize(controlPointCount * 3, 0.0f);
+		for (size_t i = 0; i < controlPointCount; ++i) {
+			GfVec3f n = accumulated[i];
+			const float len2 = GfDot(n, n);
+			if (len2 > 1e-20f) {
+				n *= (1.0f / std::sqrt(len2));
+			}
+			normals[i * 3 + 0] = n[0];
+			normals[i * 3 + 1] = n[1];
+			normals[i * 3 + 2] = n[2];
+		}
+
+		return normals;
+	}
+
 	template<typename T>
 	inline void EmitPrimvar(
 		std::vector<T>& dst,             // where to append
@@ -691,6 +776,7 @@ namespace USDLoader {
 
 		VtArray<GfVec3f> usdNormals;
 		bool gotNormals = mesh.GetNormalsAttr().Get(&usdNormals);
+		bool generatedSmoothNormals = false;
 
 		// In case we have "normals:indices"
 		VtIntArray nIdx;
@@ -717,10 +803,20 @@ namespace USDLoader {
 			FlattenVecArray<GfVec3f>(usdNormals, rawNormals, 1.0f);
 			vertexFlags |= VertexFlags::VERTEX_NORMALS;
 		}
+		else {
+			rawNormals = ComputeSmoothNormals(ctrlPos, faceVertCounts, faceVertIndices, subset ? &useFace : nullptr);
+			if (!rawNormals.empty()) {
+				gotNormals = true;
+				generatedSmoothNormals = true;
+				vertexFlags |= VertexFlags::VERTEX_NORMALS;
+				spdlog::info("Generated smooth normals for mesh '{}' because no normals attribute was authored.", primName);
+			}
+		}
 
-		InterpolationType normInterp = gotNormals
-			? GetInterpolationType(mesh.GetNormalsInterpolation())
-			: InterpolationType::Vertex;
+		InterpolationType normInterp = InterpolationType::Vertex;
+		if (gotNormals && !generatedSmoothNormals) {
+			normInterp = GetInterpolationType(mesh.GetNormalsInterpolation());
+		}
 
 		// texcoords
 		UsdAttribute tcAttr = mesh.GetPrim().GetAttribute(TfToken("primvars:" + uvSetName));
