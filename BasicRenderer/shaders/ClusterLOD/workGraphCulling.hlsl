@@ -232,6 +232,7 @@ struct TraverseNodeRecord
     uint nodeId;
     uint viewId;
     uint sourceTag;
+    uint allowRefine;
 };
 
 struct GroupEvalRecord
@@ -240,6 +241,7 @@ struct GroupEvalRecord
     uint groupId;
     uint viewId;
     uint sourceTag;
+    uint allowRefine;
 };
 
 struct MeshletBucketRecord
@@ -289,6 +291,7 @@ void WG_ReplayNodeGroup(
             traverseRecord.nodeId = rec.nodeOrGroupId;
             traverseRecord.viewId = rec.viewId;
             traverseRecord.sourceTag = CLOD_RECORD_SOURCE_REPLAY;
+            traverseRecord.allowRefine = 1u;
             WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_NODE_INPUT_RECORDS, 1);
         }
         else {
@@ -297,6 +300,7 @@ void WG_ReplayNodeGroup(
             groupRecord.groupId = rec.nodeOrGroupId;
             groupRecord.viewId = rec.viewId;
             groupRecord.sourceTag = CLOD_RECORD_SOURCE_REPLAY;
+            groupRecord.allowRefine = 1u;
             WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_GROUP_INPUT_RECORDS, 1);
         }
     }
@@ -466,6 +470,7 @@ void WG_ObjectCull(
             outRecord.instanceIndex =perMeshInstanceBufferIndex;
             outRecord.nodeId = clodMeshMetadata.rootNode;   // BVH root node for this mesh
             outRecord.sourceTag = CLOD_RECORD_SOURCE_PASS1;
+            outRecord.allowRefine = 1u;
             outCount = 1;
 
             WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_VISIBLE_THREADS, 1);
@@ -505,6 +510,7 @@ struct TraverseSlotState
     uint viewId;
     uint groupId;
     uint sourceTag;
+    bool allowRefine;
 };
 
 groupshared TraverseSlotState g_slotState[TRAVERSE_RECORDS_PER_GROUP];
@@ -519,6 +525,7 @@ struct GroupEvaluateSlotState
     uint clampedChildCount;
     uint terminalChildCount;
     uint sourceTag;
+    bool allowRefine;
 };
 
 groupshared GroupEvaluateSlotState g_groupSlotState[GROUP_EVALUATE_RECORDS_PER_GROUP];
@@ -551,6 +558,7 @@ void WG_TraverseNodes(
 
         if (slotActive) {
             const TraverseNodeRecord rec = inRecs[slot];
+            const bool parentAllowsRefine = (rec.allowRefine != 0u);
             if (rec.sourceTag == CLOD_RECORD_SOURCE_REPLAY) {
                 WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_TRAVERSE_RECORDS_CONSUMED, 1);
             }
@@ -607,11 +615,10 @@ void WG_TraverseNodes(
                     cam.positionWorldSpace.xyz,
                     cam.zNear);
 
-                const bool nodeWantsTraversal = nodeErrorOverDistance >= cam.errorOverDistanceThreshold;
+                const bool nodeWantsTraversal = parentAllowsRefine && (nodeErrorOverDistance >= cam.errorOverDistanceThreshold);
                 if (!nodeWantsTraversal) {
                     WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
-                }
-                else if (node.range.isGroup == 0) {
+                } else if (node.range.isGroup == 0) {
                     bool occlusionCulled = false;
                     if (!camera.isOrtho) {
                         StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
@@ -644,14 +651,17 @@ void WG_TraverseNodes(
                         s.instanceIndex = rec.instanceIndex;
                         s.viewId = rec.viewId;
                         s.sourceTag = rec.sourceTag;
+                        s.allowRefine = nodeWantsTraversal;
                     }
                 }
                 else {
+
                     s.emitGroup = 1;
                     s.instanceIndex = rec.instanceIndex;
                     s.viewId = rec.viewId;
                     s.groupId = node.range.indexOrOffset;
                     s.sourceTag = rec.sourceTag;
+                    s.allowRefine = nodeWantsTraversal;
                 }
             }
         }
@@ -681,6 +691,7 @@ void WG_TraverseNodes(
         r.viewId = s.viewId;
         r.nodeId = s.childBase + lane;
         r.sourceTag = s.sourceTag;
+        r.allowRefine = s.allowRefine ? 1u : 0u;
         outNodes.Get() = r;
 
         WGTelemetryAdd(WG_COUNTER_TRAVERSE_TRAVERSE_RECORDS, 1);
@@ -692,6 +703,7 @@ void WG_TraverseNodes(
         r.viewId = s.viewId;
         r.groupId = s.groupId;
         r.sourceTag = s.sourceTag;
+        r.allowRefine = s.allowRefine ? 1u : 0u;
         outGroups.Get() = r;
 
         WGTelemetryAdd(WG_COUNTER_TRAVERSE_GROUP_RECORDS, 1);
@@ -752,9 +764,6 @@ void WG_GroupEvaluate(
             StructuredBuffer<Camera> cameras =
                         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
             const Camera camera = cameras[rec.viewId];
-            StructuredBuffer<CullingCameraInfo> cameraInfos =
-                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
-            const CullingCameraInfo cam = cameraInfos[rec.viewId];
 
             StructuredBuffer<ClusterLODGroup> groups =
                         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
@@ -772,30 +781,16 @@ void WG_GroupEvaluate(
                 WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_CULLED_GROUP_RECORDS, 1);
             }
             else {
-                float4 groupCenterObjectSpace4 = float4(groupCenterObjectSpace, 1.0f);
-                float3 groupCenterWorldSpace = mul(groupCenterObjectSpace4, objectModelMatrix).xyz;
-                float groupErrorOverDistance = ErrorOverDistance(
-                    groupCenterWorldSpace,
-                    groupRadiusWorld,
-                    grp.bounds.error,
-                    groupUniformScale,
-                    cam.positionWorldSpace.xyz,
-                    cam.zNear);
-
-                const bool groupWantsTraversal = groupErrorOverDistance >= cam.errorOverDistanceThreshold;
-                if (!groupWantsTraversal) {
-                    WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_REJECTED_BY_ERROR_RECORDS, 1);
-                }
-                else {
-                    s.active = 1;
-                    s.instanceIndex = rec.instanceIndex;
-                    s.groupId = rec.groupId;
-                    s.viewId = rec.viewId;
-                    s.childBase = clodMeshMetadata.childrenBase + grp.firstChild;
-                    s.terminalChildCount = min(grp.terminalChildCount, GROUP_EVALUATE_CHILD_LANES);
-                    s.clampedChildCount = min(grp.childCount, GROUP_EVALUATE_CHILD_LANES);
-                    s.sourceTag = rec.sourceTag;
-                }
+                // No second error gate here; activation is visibility-based.
+                s.active = 1;
+                s.instanceIndex = rec.instanceIndex;
+                s.groupId = rec.groupId;
+                s.viewId = rec.viewId;
+                s.childBase = clodMeshMetadata.childrenBase + grp.firstChild;
+                s.terminalChildCount = min(grp.terminalChildCount, GROUP_EVALUATE_CHILD_LANES);
+                s.clampedChildCount = min(grp.childCount, GROUP_EVALUATE_CHILD_LANES);
+                s.sourceTag = rec.sourceTag;
+                s.allowRefine = rec.allowRefine;
             }
         }
 
@@ -844,7 +839,7 @@ void WG_GroupEvaluate(
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Children)];
 
         child = children[s.childBase + lane];
-        forceBucket = (lane < s.terminalChildCount) || (child.refinedGroup < 0);
+        forceBucket = (s.allowRefine == 0u) || (lane < s.terminalChildCount) || (child.refinedGroup < 0);
 
         if (!forceBucket && child.refinedGroup >= 0) {
             const uint refinedGroupGlobalIndex = clodMeshMetadata.groupsBase + (uint) child.refinedGroup;
