@@ -158,6 +158,32 @@ void WGTelemetryAdd(uint counterIndex, uint value)
     InterlockedAdd(telemetryCounters[counterIndex], value);
 }
 
+void ReplayReserveSlotsWave(
+    RWStructuredBuffer<CLodReplayBufferState> replayState,
+    uint capacity,
+    out uint slot,
+    out bool valid)
+{
+    const uint4 activeMask = WaveActiveBallot(true);
+    const uint activeCount = CountBits128(activeMask);
+    const uint leaderLane = WaveFirstLaneFromMask(activeMask);
+    const uint laneRank = GetLaneRankInGroup(activeMask, WaveGetLaneIndex());
+
+    uint baseSlot = 0;
+    if (WaveGetLaneIndex() == leaderLane) {
+        InterlockedAdd(replayState[0].totalWriteCount, activeCount, baseSlot);
+    }
+
+    baseSlot = WaveReadLaneAt(baseSlot, leaderLane);
+    slot = baseSlot + laneRank;
+    valid = slot < capacity;
+
+    const uint droppedCount = CountBits128(WaveActiveBallot(!valid));
+    if (WaveGetLaneIndex() == leaderLane && droppedCount > 0) {
+        InterlockedAdd(replayState[0].droppedRecords, droppedCount);
+    }
+}
+
 bool ReplayTryAppendNodeGroup(uint type, uint instanceIndex, uint viewId, uint nodeOrGroupId)
 {
     if (type == CLOD_REPLAY_RECORD_TYPE_NODE) {
@@ -174,12 +200,10 @@ bool ReplayTryAppendNodeGroup(uint type, uint instanceIndex, uint viewId, uint n
     const uint capacity = CLOD_REPLAY_SLOT_CAPACITY;
 
     uint slot = 0;
-    InterlockedAdd(replayState[0].totalWriteCount, 1u, slot);
-
-    const bool valid = slot < capacity;
+    bool valid = false;
+    ReplayReserveSlotsWave(replayState, capacity, slot, valid);
 
     if (!valid) {
-        InterlockedAdd(replayState[0].droppedRecords, 1u);
         return false;
     }
 
@@ -200,12 +224,10 @@ bool ReplayTryAppendMeshlet(uint instanceIndex, uint viewId, uint groupId, uint 
     const uint capacity = CLOD_REPLAY_SLOT_CAPACITY;
 
     uint slot = 0;
-    InterlockedAdd(replayState[0].totalWriteCount, 1u, slot);
-
-    const bool valid = slot < capacity;
+    bool valid = false;
+    ReplayReserveSlotsWave(replayState, capacity, slot, valid);
 
     if (!valid) {
-        InterlockedAdd(replayState[0].droppedRecords, 1u);
         return false;
     }
 
