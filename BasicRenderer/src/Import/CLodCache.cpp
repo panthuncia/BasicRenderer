@@ -185,6 +185,20 @@ namespace CLodCache {
 			WritePod(out, cacheSource.buildConfigHash);
 			WriteString(out, ws2s(cacheSource.containerFileName));
 			WriteVectorPod(out, prebuiltData.nodes);
+
+			// --- Voxel group mapping ---
+			const auto& vgm = prebuiltData.voxelGroupMapping;
+			const uint32_t payloadCount = static_cast<uint32_t>(vgm.payloads.size());
+			WritePod(out, payloadCount);
+			for (const VoxelGroupPayload& payload : vgm.payloads)
+			{
+				WritePod(out, payload.resolution);
+				WritePod(out, payload.aabbMin);
+				WritePod(out, payload.aabbMax);
+				WriteVectorPod(out, payload.activeCells);
+			}
+			WriteVectorPod(out, vgm.groupToPayloadIndex);
+
 			return out;
 		}
 
@@ -216,6 +230,20 @@ namespace CLodCache {
 			if (!ReadString(blob, offset, containerFileName)) return false;
 			out.prebuiltData.cacheSource.containerFileName = s2ws(containerFileName);
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.nodes)) return false;
+
+			// --- Voxel group mapping ---
+			uint32_t payloadCount = 0;
+			if (!ReadPod(blob, offset, payloadCount)) return false;
+			out.prebuiltData.voxelGroupMapping.payloads.resize(payloadCount);
+			for (uint32_t pi = 0; pi < payloadCount; ++pi)
+			{
+				VoxelGroupPayload& payload = out.prebuiltData.voxelGroupMapping.payloads[pi];
+				if (!ReadPod(blob, offset, payload.resolution)) return false;
+				if (!ReadPod(blob, offset, payload.aabbMin)) return false;
+				if (!ReadPod(blob, offset, payload.aabbMax)) return false;
+				if (!ReadVectorPod(blob, offset, payload.activeCells)) return false;
+			}
+			if (!ReadVectorPod(blob, offset, out.prebuiltData.voxelGroupMapping.groupToPayloadIndex)) return false;
 
 			return offset == blob.size();
 		}

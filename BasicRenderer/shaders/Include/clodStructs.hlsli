@@ -94,7 +94,10 @@ struct ClusterLODGroup
     uint childCount;
 
     uint terminalChildCount;
-    uint pad0[3];
+    uint flags;
+    uint pad0[2];
 };
+
+static const uint CLOD_GROUP_FLAG_IS_VOXEL = 1u << 0;
 
 #endif // CLOD_STRUCTS_HLSLI

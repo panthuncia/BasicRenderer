@@ -1,4 +1,5 @@
 #include "Mesh/ClusterLODUtilities.h"
+#include "Mesh/VoxelGroupBuilder.h"
 
 #include <limits>
 #include <vector>
@@ -885,6 +886,7 @@ namespace
 		std::vector<uint32_t> lodLevelRoots;
 		uint32_t topRootNode = 0;
 		uint32_t maxDepth = 0;
+		VoxelGroupMapping voxelGroupMapping;
 	};
 
 	void BuildClusterLODTraversalHierarchy(ClusterLODBuildState& state, uint32_t preferredNodeWidth)
@@ -1622,6 +1624,404 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		}
 	}
 
+	// Voxel hierarchy: detect terminal coarsest groups and build voxel group tree
+	if (settings.enableVoxelFallback && state.maxDepth > 0)
+	{
+		// Find groups at the coarsest depth that are fully terminal (no further refinement possible).
+		std::vector<uint32_t> terminalCoarsestGroupIndices;
+		for (uint32_t gIdx = 0; gIdx < static_cast<uint32_t>(state.groups.size()); ++gIdx)
+		{
+			const ClusterLODGroup& grp = state.groups[gIdx];
+			if (static_cast<uint32_t>(grp.depth) == state.maxDepth && grp.childCount > 0 && grp.childCount == grp.terminalChildCount)
+			{
+				terminalCoarsestGroupIndices.push_back(gIdx);
+			}
+		}
+
+		if (!terminalCoarsestGroupIndices.empty())
+		{
+			const uint32_t baseResolution = settings.voxelGridBaseResolution;
+			const uint32_t coarsenFactor  = std::max(2u, settings.voxelCoarsenFactor);
+			const uint32_t minResolution  = std::max(1u, settings.voxelMinResolution);
+			const uint32_t raysPerCell    = settings.voxelRaysPerCell;
+			const float errorMultiplier   = settings.voxelTerminalErrorMultiplier;
+			const uint32_t originalMaxDepth = state.maxDepth;
+			const size_t   originalGroupCount = state.groups.size();
+
+			// Helper: read vertex position from a group's vertex chunk.
+			auto readGroupPos = [&](uint32_t grpIdx, uint32_t groupLocalVertex) -> DirectX::XMFLOAT3
+			{
+				DirectX::XMFLOAT3 p{};
+				if (grpIdx >= state.groupVertexChunks.size()) return p;
+				const auto& chunk = state.groupVertexChunks[grpIdx];
+				const size_t off = static_cast<size_t>(groupLocalVertex) * vertexStrideBytes;
+				if (off + sizeof(float) * 3 <= chunk.size())
+				{
+					std::memcpy(&p.x, chunk.data() + off, sizeof(float));
+					std::memcpy(&p.y, chunk.data() + off + sizeof(float), sizeof(float));
+					std::memcpy(&p.z, chunk.data() + off + sizeof(float) * 2, sizeof(float));
+				}
+				return p;
+			};
+
+			// Helper: extract all triangle indices + AABB from one mesh group's meshlet data.
+			auto extractGroupTriangles = [&](uint32_t grpIdx,
+				std::vector<uint32_t>& outTriIndices,
+				DirectX::XMFLOAT3& outMin,
+				DirectX::XMFLOAT3& outMax)
+			{
+				if (grpIdx >= state.groupVertexChunks.size() || state.groupVertexChunks[grpIdx].empty()) return;
+				if (grpIdx >= state.groupMeshletChunks.size()) return;
+				const auto& meshlets       = state.groupMeshletChunks[grpIdx];
+				const auto& meshletTris    = state.groupMeshletTriangleChunks[grpIdx];
+				const auto& meshletVerts   = state.groupMeshletVertexChunks[grpIdx];
+
+				for (const auto& meshlet : meshlets)
+				{
+					for (uint32_t triIdx = 0; triIdx < meshlet.triangle_count; ++triIdx)
+					{
+						const uint32_t triBase = meshlet.triangle_offset + triIdx * 3u;
+						if (triBase + 2u >= meshletTris.size()) continue;
+						const uint32_t ml0 = static_cast<uint32_t>(meshletTris[triBase + 0u]);
+						const uint32_t ml1 = static_cast<uint32_t>(meshletTris[triBase + 1u]);
+						const uint32_t ml2 = static_cast<uint32_t>(meshletTris[triBase + 2u]);
+						if (ml0 >= meshlet.vertex_count || ml1 >= meshlet.vertex_count || ml2 >= meshlet.vertex_count) continue;
+
+						const uint32_t gv0 = meshletVerts[meshlet.vertex_offset + ml0];
+						const uint32_t gv1 = meshletVerts[meshlet.vertex_offset + ml1];
+						const uint32_t gv2 = meshletVerts[meshlet.vertex_offset + ml2];
+
+						DirectX::XMFLOAT3 p0 = readGroupPos(grpIdx, gv0);
+						DirectX::XMFLOAT3 p1 = readGroupPos(grpIdx, gv1);
+						DirectX::XMFLOAT3 p2 = readGroupPos(grpIdx, gv2);
+
+						outMin.x = std::min({ outMin.x, p0.x, p1.x, p2.x });
+						outMin.y = std::min({ outMin.y, p0.y, p1.y, p2.y });
+						outMin.z = std::min({ outMin.z, p0.z, p1.z, p2.z });
+						outMax.x = std::max({ outMax.x, p0.x, p1.x, p2.x });
+						outMax.y = std::max({ outMax.y, p0.y, p1.y, p2.y });
+						outMax.z = std::max({ outMax.z, p0.z, p1.z, p2.z });
+
+						outTriIndices.push_back(gv0);
+						outTriIndices.push_back(gv1);
+						outTriIndices.push_back(gv2);
+					}
+				}
+			};
+
+			// Helper: append a voxel group + empty chunk placeholders to the build state.
+			auto appendVoxelGroup = [&](const ClusterLODGroup& grp) -> uint32_t
+			{
+				const uint32_t idx = static_cast<uint32_t>(state.groups.size());
+				state.groups.push_back(grp);
+				state.groupChunks.push_back(ClusterLODGroupChunk{});
+				state.groupVertexChunks.push_back({});
+				state.groupSkinningVertexChunks.push_back({});
+				state.groupMeshletVertexChunks.push_back({});
+				state.groupCompressedPositionWordChunks.push_back({});
+				state.groupCompressedNormalWordChunks.push_back({});
+				state.groupCompressedMeshletVertexWordChunks.push_back({});
+				state.groupMeshletChunks.push_back({});
+				state.groupMeshletTriangleChunks.push_back({});
+				state.groupMeshletBoundsChunks.push_back({});
+				return idx;
+			};
+
+			// Morton-sort terminal groups by center, merge into spatial batches
+			float maxTerminalError = 0.0f;
+			std::vector<DirectX::XMFLOAT3> termCenters(terminalCoarsestGroupIndices.size());
+			DirectX::XMFLOAT3 tGlobalMin = { FLT_MAX, FLT_MAX, FLT_MAX };
+			DirectX::XMFLOAT3 tGlobalMax = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+
+			for (size_t i = 0; i < terminalCoarsestGroupIndices.size(); ++i)
+			{
+				const auto& b = state.groups[terminalCoarsestGroupIndices[i]].bounds;
+				maxTerminalError = std::max(maxTerminalError, b.error);
+				termCenters[i] = DirectX::XMFLOAT3(b.center[0], b.center[1], b.center[2]);
+				tGlobalMin.x = std::min(tGlobalMin.x, b.center[0]);
+				tGlobalMin.y = std::min(tGlobalMin.y, b.center[1]);
+				tGlobalMin.z = std::min(tGlobalMin.z, b.center[2]);
+				tGlobalMax.x = std::max(tGlobalMax.x, b.center[0]);
+				tGlobalMax.y = std::max(tGlobalMax.y, b.center[1]);
+				tGlobalMax.z = std::max(tGlobalMax.z, b.center[2]);
+			}
+
+			std::vector<uint32_t> sortedTermIndices = MortonSort(
+				termCenters.data(), static_cast<uint32_t>(termCenters.size()),
+				tGlobalMin,
+				tGlobalMax);
+
+			std::vector<std::vector<uint32_t>> leafBatches = MergeGroupsSpatial(sortedTermIndices, MaxGroupChildren);
+
+			// Create leaf-level voxel groups (depth = maxDepth + 1)
+			struct VoxelLevelGroup
+			{
+				uint32_t groupIndex;       // index in state.groups
+				uint32_t payloadIndex;     // index in voxelGroupMapping.payloads
+				DirectX::XMFLOAT3 center;
+			};
+
+			uint32_t currentVoxelDepth = originalMaxDepth + 1;
+			float currentLevelError = maxTerminalError * errorMultiplier;
+			std::vector<VoxelLevelGroup> currentLevelGroups;
+
+			for (const auto& batch : leafBatches)
+			{
+				// Collect combined triangles from all terminal mesh groups in this batch.
+				std::vector<std::byte> batchVertices;
+				std::vector<uint32_t> batchTriIndices;
+				DirectX::XMFLOAT3 batchMin = { FLT_MAX, FLT_MAX, FLT_MAX };
+				DirectX::XMFLOAT3 batchMax = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+				size_t batchVertexCount = 0;
+
+				for (uint32_t termLocalIdx : batch)
+				{
+					const uint32_t meshGrpIdx = terminalCoarsestGroupIndices[termLocalIdx];
+					if (meshGrpIdx >= state.groupVertexChunks.size()) continue;
+					const auto& chunk = state.groupVertexChunks[meshGrpIdx];
+					if (chunk.empty()) continue;
+
+					const uint32_t baseVertex = static_cast<uint32_t>(batchVertexCount);
+					batchVertices.insert(batchVertices.end(), chunk.begin(), chunk.end());
+					batchVertexCount += chunk.size() / vertexStrideBytes;
+
+					// Extract triangles using the per-group meshlet data.
+					std::vector<uint32_t> groupTriIndices;
+					DirectX::XMFLOAT3 groupMin = { FLT_MAX, FLT_MAX, FLT_MAX };
+					DirectX::XMFLOAT3 groupMax = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+					extractGroupTriangles(meshGrpIdx, groupTriIndices, groupMin, groupMax);
+
+					// Re-index group-local → batch-local by adding base offset.
+					for (uint32_t idx : groupTriIndices)
+						batchTriIndices.push_back(baseVertex + idx);
+
+					batchMin.x = std::min(batchMin.x, groupMin.x);
+					batchMin.y = std::min(batchMin.y, groupMin.y);
+					batchMin.z = std::min(batchMin.z, groupMin.z);
+					batchMax.x = std::max(batchMax.x, groupMax.x);
+					batchMax.y = std::max(batchMax.y, groupMax.y);
+					batchMax.z = std::max(batchMax.z, groupMax.z);
+				}
+
+				if (batchTriIndices.empty()) continue;
+
+				// Slightly expand AABB for boundary precision.
+				const float eps = 1e-4f;
+				batchMin.x -= eps; batchMin.y -= eps; batchMin.z -= eps;
+				batchMax.x += eps; batchMax.y += eps; batchMax.z += eps;
+
+				// Voxelize combined triangles.
+				VoxelizeTrianglesInput voxInput{};
+				voxInput.vertices        = &batchVertices;
+				voxInput.vertexStrideBytes = vertexStrideBytes;
+				voxInput.triangleIndices  = &batchTriIndices;
+				voxInput.aabbMin          = { batchMin.x, batchMin.y, batchMin.z };
+				voxInput.aabbMax          = { batchMax.x, batchMax.y, batchMax.z };
+				voxInput.resolution       = baseResolution;
+				voxInput.raysPerCell      = raysPerCell;
+
+				VoxelGroupPayload batchPayload = VoxelizeTriangles(voxInput);
+
+				if (batchPayload.activeCells.empty()) continue;
+
+				const uint32_t payloadIdx = static_cast<uint32_t>(state.voxelGroupMapping.payloads.size());
+				state.voxelGroupMapping.payloads.push_back(std::move(batchPayload));
+
+				// Create child entries that refine into the terminal mesh groups.
+				const uint32_t firstChildIdx = static_cast<uint32_t>(state.children.size());
+				for (uint32_t termLocalIdx : batch)
+				{
+					ClusterLODChild child{};
+					child.refinedGroup = static_cast<int32_t>(terminalCoarsestGroupIndices[termLocalIdx]);
+					child.firstLocalMeshletIndex = 0;
+					child.localMeshletCount = 0;
+					state.children.push_back(child);
+				}
+
+				// Compute bounding sphere (center of AABB, radius = half-diagonal).
+				const float cx = (batchMin.x + batchMax.x) * 0.5f;
+				const float cy = (batchMin.y + batchMax.y) * 0.5f;
+				const float cz = (batchMin.z + batchMax.z) * 0.5f;
+				const float dx = batchMax.x - batchMin.x;
+				const float dy = batchMax.y - batchMin.y;
+				const float dz = batchMax.z - batchMin.z;
+				const float radius = std::sqrt(dx * dx + dy * dy + dz * dz) * 0.5f;
+
+				ClusterLODGroup voxelGroup{};
+				voxelGroup.bounds.center[0] = cx;
+				voxelGroup.bounds.center[1] = cy;
+				voxelGroup.bounds.center[2] = cz;
+				voxelGroup.bounds.radius     = radius;
+				voxelGroup.bounds.error      = currentLevelError;
+				voxelGroup.depth             = static_cast<int32_t>(currentVoxelDepth);
+				voxelGroup.firstChild        = firstChildIdx;
+				voxelGroup.childCount        = static_cast<uint32_t>(batch.size());
+				voxelGroup.terminalChildCount = 0;
+				voxelGroup.meshletCount      = 0;
+				voxelGroup.groupVertexCount  = 0;
+				voxelGroup.firstMeshlet      = 0;
+				voxelGroup.firstGroupVertex  = 0;
+				voxelGroup.flags             = CLOD_GROUP_FLAG_IS_VOXEL;
+
+				const uint32_t newGroupIdx = appendVoxelGroup(voxelGroup);
+
+				state.voxelGroupMapping.groupToPayloadIndex.resize(state.groups.size(), -1);
+				state.voxelGroupMapping.groupToPayloadIndex[newGroupIdx] = static_cast<int32_t>(payloadIdx);
+
+				VoxelLevelGroup lvl{};
+				lvl.groupIndex   = newGroupIdx;
+				lvl.payloadIndex = payloadIdx;
+				lvl.center       = { cx, cy, cz };
+				currentLevelGroups.push_back(lvl);
+			}
+
+			// Iterative coarsening loop
+			uint32_t currentResolution = baseResolution;
+
+			while (currentLevelGroups.size() > 1)
+			{
+				const uint32_t parentResolution = currentResolution / coarsenFactor;
+				if (parentResolution < minResolution) break;
+
+				currentVoxelDepth++;
+				const float parentError = currentLevelError * errorMultiplier;
+
+				// Morton-sort current-level groups by center.
+				DirectX::XMFLOAT3 lvlMin = { FLT_MAX, FLT_MAX, FLT_MAX };
+				DirectX::XMFLOAT3 lvlMax = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+				std::vector<DirectX::XMFLOAT3> lvlCenters(currentLevelGroups.size());
+
+				for (size_t i = 0; i < currentLevelGroups.size(); ++i)
+				{
+					const auto& c = currentLevelGroups[i].center;
+					lvlCenters[i] = c;
+					lvlMin.x = std::min(lvlMin.x, c.x);
+					lvlMin.y = std::min(lvlMin.y, c.y);
+					lvlMin.z = std::min(lvlMin.z, c.z);
+					lvlMax.x = std::max(lvlMax.x, c.x);
+					lvlMax.y = std::max(lvlMax.y, c.y);
+					lvlMax.z = std::max(lvlMax.z, c.z);
+				}
+
+				std::vector<uint32_t> sortedLvlIndices = MortonSort(
+					lvlCenters.data(), static_cast<uint32_t>(currentLevelGroups.size()),
+					lvlMin,
+					lvlMax);
+
+				std::vector<std::vector<uint32_t>> parentBatches = MergeGroupsSpatial(sortedLvlIndices, MaxGroupChildren);
+
+				std::vector<VoxelLevelGroup> nextLevelGroups;
+
+				for (const auto& batch : parentBatches)
+				{
+					// Gather child payloads and compute combined AABB.
+					std::vector<const VoxelGroupPayload*> childPayloads;
+					childPayloads.reserve(batch.size());
+					DirectX::XMFLOAT3 parentMin = { FLT_MAX, FLT_MAX, FLT_MAX };
+					DirectX::XMFLOAT3 parentMax = { -FLT_MAX, -FLT_MAX, -FLT_MAX };
+
+					for (uint32_t batchIdx : batch)
+					{
+						const auto& childGrp = currentLevelGroups[batchIdx];
+						const auto& cp = state.voxelGroupMapping.payloads[childGrp.payloadIndex];
+						childPayloads.push_back(&cp);
+						parentMin.x = std::min(parentMin.x, cp.aabbMin.x);
+						parentMin.y = std::min(parentMin.y, cp.aabbMin.y);
+						parentMin.z = std::min(parentMin.z, cp.aabbMin.z);
+						parentMax.x = std::max(parentMax.x, cp.aabbMax.x);
+						parentMax.y = std::max(parentMax.y, cp.aabbMax.y);
+						parentMax.z = std::max(parentMax.z, cp.aabbMax.z);
+					}
+
+					const float eps = 1e-4f;
+					parentMin.x -= eps; parentMin.y -= eps; parentMin.z -= eps;
+					parentMax.x += eps; parentMax.y += eps; parentMax.z += eps;
+
+					// VoxelizeVoxels: reduce child voxel payloads into coarser parent.
+					VoxelizeVoxelsInput vvInput{};
+					vvInput.children    = &childPayloads;
+					vvInput.aabbMin     = { parentMin.x, parentMin.y, parentMin.z };
+					vvInput.aabbMax     = { parentMax.x, parentMax.y, parentMax.z };
+					vvInput.resolution  = parentResolution;
+					vvInput.raysPerCell = raysPerCell;
+
+					VoxelGroupPayload parentPayload = VoxelizeVoxels(vvInput);
+
+					if (parentPayload.activeCells.empty()) continue;
+
+					const uint32_t payloadIdx = static_cast<uint32_t>(state.voxelGroupMapping.payloads.size());
+					state.voxelGroupMapping.payloads.push_back(std::move(parentPayload));
+
+					// Children entries that refine into the child voxel groups.
+					const uint32_t firstChildIdx = static_cast<uint32_t>(state.children.size());
+					for (uint32_t batchIdx : batch)
+					{
+						ClusterLODChild child{};
+						child.refinedGroup = static_cast<int32_t>(currentLevelGroups[batchIdx].groupIndex);
+						child.firstLocalMeshletIndex = 0;
+						child.localMeshletCount = 0;
+						state.children.push_back(child);
+					}
+
+					const float pcx = (parentMin.x + parentMax.x) * 0.5f;
+					const float pcy = (parentMin.y + parentMax.y) * 0.5f;
+					const float pcz = (parentMin.z + parentMax.z) * 0.5f;
+					const float pdx = parentMax.x - parentMin.x;
+					const float pdy = parentMax.y - parentMin.y;
+					const float pdz = parentMax.z - parentMin.z;
+					const float pRadius = std::sqrt(pdx * pdx + pdy * pdy + pdz * pdz) * 0.5f;
+
+					ClusterLODGroup parentGroup{};
+					parentGroup.bounds.center[0] = pcx;
+					parentGroup.bounds.center[1] = pcy;
+					parentGroup.bounds.center[2] = pcz;
+					parentGroup.bounds.radius     = pRadius;
+					parentGroup.bounds.error      = parentError;
+					parentGroup.depth             = static_cast<int32_t>(currentVoxelDepth);
+					parentGroup.firstChild        = firstChildIdx;
+					parentGroup.childCount        = static_cast<uint32_t>(batch.size());
+					parentGroup.terminalChildCount = 0;
+					parentGroup.meshletCount      = 0;
+					parentGroup.groupVertexCount  = 0;
+					parentGroup.firstMeshlet      = 0;
+					parentGroup.firstGroupVertex  = 0;
+					parentGroup.flags             = CLOD_GROUP_FLAG_IS_VOXEL;
+
+					const uint32_t newGroupIdx = appendVoxelGroup(parentGroup);
+
+					state.voxelGroupMapping.groupToPayloadIndex.resize(state.groups.size(), -1);
+					state.voxelGroupMapping.groupToPayloadIndex[newGroupIdx] = static_cast<int32_t>(payloadIdx);
+
+					VoxelLevelGroup lvl{};
+					lvl.groupIndex   = newGroupIdx;
+					lvl.payloadIndex = payloadIdx;
+					lvl.center       = { pcx, pcy, pcz };
+					nextLevelGroups.push_back(lvl);
+				}
+
+				currentLevelGroups = std::move(nextLevelGroups);
+				currentLevelError  = parentError;
+				currentResolution  = parentResolution;
+			}
+
+			// Ensure groupToPayloadIndex covers all groups (mesh groups map to -1).
+			state.voxelGroupMapping.groupToPayloadIndex.resize(state.groups.size(), -1);
+
+			const size_t voxelGroupCount = state.groups.size() - originalGroupCount;
+			const uint32_t voxelLevelCount = currentVoxelDepth - originalMaxDepth;
+
+			spdlog::info(
+				"ClusterLOD: voxel hierarchy built — {} voxel groups across {} levels "
+				"({} leaf batches from {} terminal mesh groups, final resolution {})",
+				voxelGroupCount,
+				voxelLevelCount,
+				leafBatches.size(),
+				terminalCoarsestGroupIndices.size(),
+				currentResolution);
+		}
+	}
+
+	// Build traversal hierarchy (including any voxel groups added above).
 	BuildClusterLODTraversalHierarchy(state, /*preferredNodeWidth=*/TraversalNodeFanout);
 
 	for (const ClusterLODNode& node : state.nodes)
@@ -1642,6 +2042,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	artifacts.prebuiltData.objectBoundingSphere = BuildObjectBoundingSphereFromRootNode(state.nodes, state.topRootNode);
 	artifacts.prebuiltData.groupChunks = std::move(state.groupChunks);
 	artifacts.prebuiltData.nodes = std::move(state.nodes);
+	artifacts.prebuiltData.voxelGroupMapping = std::move(state.voxelGroupMapping);
 
 	artifacts.cacheBuildData.groupVertexChunks = std::move(state.groupVertexChunks);
 	artifacts.cacheBuildData.groupSkinningVertexChunks = std::move(state.groupSkinningVertexChunks);
