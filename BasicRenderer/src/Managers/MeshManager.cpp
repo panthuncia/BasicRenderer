@@ -41,6 +41,17 @@ MeshManager::MeshManager() {
 	m_clusterLODMeshletBounds = DynamicBuffer::CreateShared(sizeof(BoundingSphere), 10000, "clusterLODMeshletBounds", false, true);
 	m_clusterLODNodes = DynamicBuffer::CreateShared(sizeof(ClusterLODNode), 10000, "clusterLODNodes");
 
+	// These pools receive large streamed CLod payloads. Avoid coalesced upload scratch mirrors,
+	// which otherwise grow to the full buffer capacity on the CPU.
+	m_postSkinningVertices->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
+	m_meshletOffsets->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
+	m_meshletVertexIndices->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
+	m_meshletTriangles->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
+	m_clodCompressedPositions->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
+	m_clodCompressedNormals->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
+	m_clodCompressedMeshletVertexIndices->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
+	m_clusterLODMeshletBounds->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
+
 	// Tag resources for memory statistics
 	rg::memory::SetResourceUsageHint(*m_preSkinningVertices, "Mesh Data");
 	rg::memory::SetResourceUsageHint(*m_postSkinningVertices, "Mesh Data");
@@ -491,6 +502,7 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 		sharedState->groupChunksView = sharedState->ownedGroupChunksView.get();
 		sharedState->baselineGroupChunks = std::move(baselineGroupChunks);
 		sharedState->groupResidentFlags = std::move(groupResidentFlags);
+		sharedState->residentGroupAllocations.resize(sharedState->groupCount);
 
 		m_clodSharedStreamingStateByMesh[meshPtr] = sharedState;
 		m_clodSharedStreamingRangesDirty = true;
@@ -551,6 +563,7 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 			if (sharedMeshState != nullptr && sharedMeshState->activeInstanceCount > 0u) {
 				sharedMeshState->activeInstanceCount--;
 				if (sharedMeshState->activeInstanceCount == 0u) {
+					ReleaseAllCLodGroupChunkAllocations(*sharedMeshState);
 					if (sharedMeshState->ownedMeshMetadataView != nullptr) {
 						m_clodMeshMetadata->Deallocate(sharedMeshState->ownedMeshMetadataView.get());
 						sharedMeshState->ownedMeshMetadataView = nullptr;
@@ -582,7 +595,8 @@ void MeshManager::ProcessCLodDiskStreamingIO(uint32_t maxCompletedRequests) {
 	}
 
 	for (auto& result : completed) {
-		ApplyCompletedCLodDiskStreamingResult(result);
+		const bool applied = ApplyCompletedCLodDiskStreamingResult(result);
+		m_clodDiskStreamingCompletions.push_back({ result.groupGlobalIndex, applied });
 	}
 }
 
@@ -652,34 +666,30 @@ bool MeshManager::QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodS
 	if (groupLocalIndex >= mesh->GetCLodGroupCount()) {
 		return false;
 	}
+	if (groupLocalIndex >= state.residentGroupAllocations.size()) {
+		return false;
+	}
 
-	const auto* groupVertexView = mesh->GetCLodPostSkinningVertexChunkView(groupLocalIndex);
-	const auto* meshletVertexView = mesh->GetCLodMeshletVertexChunkView(groupLocalIndex);
-	const auto* compressedPositionView = mesh->GetCLodCompressedPositionChunkView(groupLocalIndex);
-	const auto* compressedNormalView = mesh->GetCLodCompressedNormalChunkView(groupLocalIndex);
-	const auto* compressedMeshletVertexView = mesh->GetCLodCompressedMeshletVertexChunkView(groupLocalIndex);
-	const auto* meshletView = mesh->GetCLodMeshletChunkView(groupLocalIndex);
-	const auto* triangleView = mesh->GetCLodMeshletTriangleChunkView(groupLocalIndex);
-	const auto* boundsView = mesh->GetCLodMeshletBoundsChunkView(groupLocalIndex);
+	const auto& residentAllocations = state.residentGroupAllocations[groupLocalIndex];
 	const auto& groupChunkHints = mesh->GetCLodGroupChunkHints();
 	if (groupLocalIndex >= groupChunkHints.size()) {
 		return false;
 	}
 	const auto& sourceChunk = groupChunkHints[groupLocalIndex];
 
-	const bool hasCoreViews = (groupVertexView != nullptr
-		&& meshletVertexView != nullptr
-		&& meshletView != nullptr
-		&& triangleView != nullptr
-		&& boundsView != nullptr);
+	const bool hasCoreViews = residentAllocations.vertexChunk != nullptr
+		&& residentAllocations.meshletVertexChunk != nullptr
+		&& residentAllocations.meshletChunk != nullptr
+		&& residentAllocations.meshletTriangleChunk != nullptr
+		&& residentAllocations.meshletBoundsChunk != nullptr;
 
 	const bool needsCompressed = (sourceChunk.compressedPositionWordCount > 0u)
 		|| (sourceChunk.compressedNormalWordCount > 0u)
 		|| (sourceChunk.compressedMeshletVertexWordCount > 0u);
 
-	const bool hasCompressedViews = (compressedPositionView != nullptr)
-		&& (compressedNormalView != nullptr)
-		&& (compressedMeshletVertexView != nullptr);
+	const bool hasCompressedViews = residentAllocations.compressedPositionWordChunk != nullptr
+		&& residentAllocations.compressedNormalWordChunk != nullptr
+		&& residentAllocations.compressedMeshletVertexWordChunk != nullptr;
 
 	if (hasCoreViews && (!needsCompressed || hasCompressedViews)) {
 		return true;
@@ -713,89 +723,101 @@ bool MeshManager::QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodS
 	return false;
 }
 
-void MeshManager::ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result) {
+bool MeshManager::ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result) {
 	if (!result.success) {
-		return;
+		return false;
 	}
 
 	uint32_t localIndex = 0u;
 	auto sharedState = FindCLodSharedStreamingStateByGlobalGroup(result.groupGlobalIndex, localIndex);
 	if (sharedState == nullptr || sharedState->mesh == nullptr) {
-		return;
+		return false;
 	}
 
 	auto* mesh = sharedState->mesh;
 	if (localIndex >= sharedState->baselineGroupChunks.size()) {
-		return;
+		return false;
+	}
+	if (localIndex >= sharedState->residentGroupAllocations.size()) {
+		return false;
 	}
 
+	auto& residentAllocations = sharedState->residentGroupAllocations[localIndex];
+	residentAllocations.Reset();
+
 	if (!result.vertexChunk.empty()) {
-		mesh->SetCLodPostSkinningVertexChunkView(localIndex, m_postSkinningVertices->AddData(
+		residentAllocations.vertexChunk = m_postSkinningVertices->AddData(
 			result.vertexChunk.data(),
 			result.vertexChunk.size(),
-			mesh->GetPerMeshCBData().vertexByteSize));
+			mesh->GetPerMeshCBData().vertexByteSize);
 	}
 	if (!result.meshletVertexChunk.empty()) {
-		mesh->SetCLodMeshletVertexChunkView(localIndex, m_meshletVertexIndices->AddData(
+		residentAllocations.meshletVertexChunk = m_meshletVertexIndices->AddData(
 			result.meshletVertexChunk.data(),
 			result.meshletVertexChunk.size() * sizeof(uint32_t),
-			sizeof(uint32_t)));
+			sizeof(uint32_t));
 	}
 	if (!result.compressedPositionWordChunk.empty()) {
-		mesh->SetCLodCompressedPositionChunkView(localIndex, m_clodCompressedPositions->AddData(
+		residentAllocations.compressedPositionWordChunk = m_clodCompressedPositions->AddData(
 			result.compressedPositionWordChunk.data(),
 			result.compressedPositionWordChunk.size() * sizeof(uint32_t),
-			sizeof(uint32_t)));
+			sizeof(uint32_t));
 	}
 	if (!result.compressedNormalWordChunk.empty()) {
-		mesh->SetCLodCompressedNormalChunkView(localIndex, m_clodCompressedNormals->AddData(
+		residentAllocations.compressedNormalWordChunk = m_clodCompressedNormals->AddData(
 			result.compressedNormalWordChunk.data(),
 			result.compressedNormalWordChunk.size() * sizeof(uint32_t),
-			sizeof(uint32_t)));
+			sizeof(uint32_t));
 	}
 	if (!result.compressedMeshletVertexWordChunk.empty()) {
-		mesh->SetCLodCompressedMeshletVertexChunkView(localIndex, m_clodCompressedMeshletVertexIndices->AddData(
+		residentAllocations.compressedMeshletVertexWordChunk = m_clodCompressedMeshletVertexIndices->AddData(
 			result.compressedMeshletVertexWordChunk.data(),
 			result.compressedMeshletVertexWordChunk.size() * sizeof(uint32_t),
-			sizeof(uint32_t)));
+			sizeof(uint32_t));
 	}
 	if (!result.meshletChunk.empty()) {
-		mesh->SetCLodMeshletChunkView(localIndex, m_meshletOffsets->AddData(
+		residentAllocations.meshletChunk = m_meshletOffsets->AddData(
 			result.meshletChunk.data(),
 			result.meshletChunk.size() * sizeof(meshopt_Meshlet),
-			sizeof(meshopt_Meshlet)));
+			sizeof(meshopt_Meshlet));
 	}
 	if (!result.meshletTriangleChunk.empty()) {
-		mesh->SetCLodMeshletTriangleChunkView(localIndex, m_meshletTriangles->AddData(
+		residentAllocations.meshletTriangleChunk = m_meshletTriangles->AddData(
 			result.meshletTriangleChunk.data(),
 			result.meshletTriangleChunk.size() * sizeof(uint8_t),
-			sizeof(uint8_t)));
+			sizeof(uint8_t));
 	}
 	if (!result.meshletBoundsChunk.empty()) {
-		mesh->SetCLodMeshletBoundsChunkView(localIndex, m_clusterLODMeshletBounds->AddData(
+		residentAllocations.meshletBoundsChunk = m_clusterLODMeshletBounds->AddData(
 			result.meshletBoundsChunk.data(),
 			result.meshletBoundsChunk.size() * sizeof(BoundingSphere),
-			sizeof(BoundingSphere)));
+			sizeof(BoundingSphere));
 	}
 
 	ClusterLODGroupChunk chunk = sharedState->baselineGroupChunks[localIndex];
 	if (result.groupChunkMetadata.has_value()) {
 		chunk = result.groupChunkMetadata.value();
 	}
-	if (const auto* view = mesh->GetCLodPostSkinningVertexChunkView(localIndex); view != nullptr) chunk.vertexChunkByteOffset = static_cast<uint32_t>(view->GetOffset());
-	if (const auto* view = mesh->GetCLodMeshletVertexChunkView(localIndex); view != nullptr) chunk.meshletVerticesBase = static_cast<uint32_t>(view->GetOffset() / sizeof(uint32_t));
-	if (const auto* view = mesh->GetCLodMeshletChunkView(localIndex); view != nullptr) chunk.meshletBase = static_cast<uint32_t>(view->GetOffset() / sizeof(meshopt_Meshlet));
-	if (const auto* view = mesh->GetCLodMeshletTriangleChunkView(localIndex); view != nullptr) chunk.meshletTrianglesByteOffset = static_cast<uint32_t>(view->GetOffset());
-	if (const auto* view = mesh->GetCLodMeshletBoundsChunkView(localIndex); view != nullptr) chunk.meshletBoundsBase = static_cast<uint32_t>(view->GetOffset() / sizeof(BoundingSphere));
-	if (const auto* view = mesh->GetCLodCompressedPositionChunkView(localIndex); view != nullptr) chunk.compressedPositionWordsBase = static_cast<uint32_t>(view->GetOffset() / sizeof(uint32_t));
-	if (const auto* view = mesh->GetCLodCompressedNormalChunkView(localIndex); view != nullptr) chunk.compressedNormalWordsBase = static_cast<uint32_t>(view->GetOffset() / sizeof(uint32_t));
-	if (const auto* view = mesh->GetCLodCompressedMeshletVertexChunkView(localIndex); view != nullptr) chunk.compressedMeshletVertexWordsBase = static_cast<uint32_t>(view->GetOffset() / sizeof(uint32_t));
+	if (residentAllocations.vertexChunk != nullptr) chunk.vertexChunkByteOffset = static_cast<uint32_t>(residentAllocations.vertexChunk->GetOffset());
+	if (residentAllocations.meshletVertexChunk != nullptr) chunk.meshletVerticesBase = static_cast<uint32_t>(residentAllocations.meshletVertexChunk->GetOffset() / sizeof(uint32_t));
+	if (residentAllocations.meshletChunk != nullptr) chunk.meshletBase = static_cast<uint32_t>(residentAllocations.meshletChunk->GetOffset() / sizeof(meshopt_Meshlet));
+	if (residentAllocations.meshletTriangleChunk != nullptr) chunk.meshletTrianglesByteOffset = static_cast<uint32_t>(residentAllocations.meshletTriangleChunk->GetOffset());
+	if (residentAllocations.meshletBoundsChunk != nullptr) chunk.meshletBoundsBase = static_cast<uint32_t>(residentAllocations.meshletBoundsChunk->GetOffset() / sizeof(BoundingSphere));
+	if (residentAllocations.compressedPositionWordChunk != nullptr) chunk.compressedPositionWordsBase = static_cast<uint32_t>(residentAllocations.compressedPositionWordChunk->GetOffset() / sizeof(uint32_t));
+	if (residentAllocations.compressedNormalWordChunk != nullptr) chunk.compressedNormalWordsBase = static_cast<uint32_t>(residentAllocations.compressedNormalWordChunk->GetOffset() / sizeof(uint32_t));
+	if (residentAllocations.compressedMeshletVertexWordChunk != nullptr) chunk.compressedMeshletVertexWordsBase = static_cast<uint32_t>(residentAllocations.compressedMeshletVertexWordChunk->GetOffset() / sizeof(uint32_t));
 
 	sharedState->baselineGroupChunks[localIndex] = chunk;
 	if (localIndex < sharedState->groupResidentFlags.size()) {
 		sharedState->groupResidentFlags[localIndex] = 1u;
 	}
 	UploadCLodGroupChunkTable(*sharedState);
+	return true;
+}
+
+void MeshManager::DrainCompletedCLodDiskStreamingGroups(std::vector<CLodDiskStreamingCompletion>& outCompletions) {
+	outCompletions = std::move(m_clodDiskStreamingCompletions);
+	m_clodDiskStreamingCompletions.clear();
 }
 
 void MeshManager::ZeroCLodGroupChunkCounts(ClusterLODGroupChunk& chunk) {
@@ -816,38 +838,26 @@ bool MeshManager::IsCLodGroupResident(const CLodSharedStreamingState& state, uin
 	return state.groupResidentFlags[groupLocalIndex] != 0u;
 }
 
-void MeshManager::DeallocateCLodGroupChunkViews(Mesh& mesh, uint32_t groupLocalIndex) {
-	if (const auto* view = mesh.GetCLodPostSkinningVertexChunkView(groupLocalIndex); view != nullptr) {
-		m_postSkinningVertices->Deallocate(const_cast<BufferView*>(view));
-		mesh.SetCLodPostSkinningVertexChunkView(groupLocalIndex, nullptr);
+void MeshManager::DeallocateCLodGroupChunkAllocations(CLodSharedStreamingState& state, uint32_t groupLocalIndex) {
+	if (groupLocalIndex >= state.residentGroupAllocations.size()) {
+		return;
 	}
-	if (const auto* view = mesh.GetCLodMeshletVertexChunkView(groupLocalIndex); view != nullptr) {
-		m_meshletVertexIndices->Deallocate(const_cast<BufferView*>(view));
-		mesh.SetCLodMeshletVertexChunkView(groupLocalIndex, nullptr);
-	}
-	if (const auto* view = mesh.GetCLodCompressedPositionChunkView(groupLocalIndex); view != nullptr) {
-		m_clodCompressedPositions->Deallocate(const_cast<BufferView*>(view));
-		mesh.SetCLodCompressedPositionChunkView(groupLocalIndex, nullptr);
-	}
-	if (const auto* view = mesh.GetCLodCompressedNormalChunkView(groupLocalIndex); view != nullptr) {
-		m_clodCompressedNormals->Deallocate(const_cast<BufferView*>(view));
-		mesh.SetCLodCompressedNormalChunkView(groupLocalIndex, nullptr);
-	}
-	if (const auto* view = mesh.GetCLodCompressedMeshletVertexChunkView(groupLocalIndex); view != nullptr) {
-		m_clodCompressedMeshletVertexIndices->Deallocate(const_cast<BufferView*>(view));
-		mesh.SetCLodCompressedMeshletVertexChunkView(groupLocalIndex, nullptr);
-	}
-	if (const auto* view = mesh.GetCLodMeshletChunkView(groupLocalIndex); view != nullptr) {
-		m_meshletOffsets->Deallocate(const_cast<BufferView*>(view));
-		mesh.SetCLodMeshletChunkView(groupLocalIndex, nullptr);
-	}
-	if (const auto* view = mesh.GetCLodMeshletTriangleChunkView(groupLocalIndex); view != nullptr) {
-		m_meshletTriangles->Deallocate(const_cast<BufferView*>(view));
-		mesh.SetCLodMeshletTriangleChunkView(groupLocalIndex, nullptr);
-	}
-	if (const auto* view = mesh.GetCLodMeshletBoundsChunkView(groupLocalIndex); view != nullptr) {
-		m_clusterLODMeshletBounds->Deallocate(const_cast<BufferView*>(view));
-		mesh.SetCLodMeshletBoundsChunkView(groupLocalIndex, nullptr);
+
+	auto& residentAllocations = state.residentGroupAllocations[groupLocalIndex];
+	m_postSkinningVertices->Deallocate(residentAllocations.vertexChunk.get());
+	m_meshletVertexIndices->Deallocate(residentAllocations.meshletVertexChunk.get());
+	m_clodCompressedPositions->Deallocate(residentAllocations.compressedPositionWordChunk.get());
+	m_clodCompressedNormals->Deallocate(residentAllocations.compressedNormalWordChunk.get());
+	m_clodCompressedMeshletVertexIndices->Deallocate(residentAllocations.compressedMeshletVertexWordChunk.get());
+	m_meshletOffsets->Deallocate(residentAllocations.meshletChunk.get());
+	m_meshletTriangles->Deallocate(residentAllocations.meshletTriangleChunk.get());
+	m_clusterLODMeshletBounds->Deallocate(residentAllocations.meshletBoundsChunk.get());
+	residentAllocations.Reset();
+}
+
+void MeshManager::ReleaseAllCLodGroupChunkAllocations(CLodSharedStreamingState& state) {
+	for (uint32_t groupLocalIndex = 0u; groupLocalIndex < state.groupCount; ++groupLocalIndex) {
+		DeallocateCLodGroupChunkAllocations(state, groupLocalIndex);
 	}
 }
 
@@ -903,9 +913,7 @@ bool MeshManager::ApplyCLodGroupResidency(CLodSharedStreamingState& state, uint3
 
 	state.groupResidentFlags[groupLocalIndex] = resident ? 1u : 0u;
 	if (!resident) {
-		if (state.mesh != nullptr) {
-			DeallocateCLodGroupChunkViews(*state.mesh, groupLocalIndex);
-		}
+		DeallocateCLodGroupChunkAllocations(state, groupLocalIndex);
 	}
 
 	if (uploadTableImmediately) {
@@ -1145,6 +1153,73 @@ void MeshManager::GetCLodUniqueAssetParentMap(std::vector<int32_t>& outParentGro
 			outParentGroupByGlobal[childGlobal] = static_cast<int32_t>(parentGlobal);
 		}
 	}
+}
+
+MeshManager::CLodStreamingDebugStats MeshManager::GetCLodStreamingDebugStats() {
+	CLodStreamingDebugStats stats{};
+	auto getBufferViewSizeBytes = [](const std::unique_ptr<BufferView>& view) -> uint64_t {
+		return view ? static_cast<uint64_t>(view->GetSize()) : 0ull;
+	};
+	auto countResidentGroupAllocations = [](const CLodSharedStreamingState::ResidentGroupAllocations& allocations) -> uint32_t {
+		uint32_t count = 0u;
+		count += allocations.vertexChunk ? 1u : 0u;
+		count += allocations.meshletVertexChunk ? 1u : 0u;
+		count += allocations.compressedPositionWordChunk ? 1u : 0u;
+		count += allocations.compressedNormalWordChunk ? 1u : 0u;
+		count += allocations.compressedMeshletVertexWordChunk ? 1u : 0u;
+		count += allocations.meshletChunk ? 1u : 0u;
+		count += allocations.meshletTriangleChunk ? 1u : 0u;
+		count += allocations.meshletBoundsChunk ? 1u : 0u;
+		return count;
+	};
+	auto sumResidentGroupAllocationBytes = [&](const CLodSharedStreamingState::ResidentGroupAllocations& allocations) -> uint64_t {
+		return getBufferViewSizeBytes(allocations.vertexChunk)
+			+ getBufferViewSizeBytes(allocations.meshletVertexChunk)
+			+ getBufferViewSizeBytes(allocations.compressedPositionWordChunk)
+			+ getBufferViewSizeBytes(allocations.compressedNormalWordChunk)
+			+ getBufferViewSizeBytes(allocations.compressedMeshletVertexWordChunk)
+			+ getBufferViewSizeBytes(allocations.meshletChunk)
+			+ getBufferViewSizeBytes(allocations.meshletTriangleChunk)
+			+ getBufferViewSizeBytes(allocations.meshletBoundsChunk);
+	};
+	auto getCompletedResultSizeBytes = [](const CLodDiskStreamingResult& result) -> uint64_t {
+		return static_cast<uint64_t>(result.vertexChunk.size())
+			+ static_cast<uint64_t>(result.meshletVertexChunk.size() * sizeof(uint32_t))
+			+ static_cast<uint64_t>(result.compressedPositionWordChunk.size() * sizeof(uint32_t))
+			+ static_cast<uint64_t>(result.compressedNormalWordChunk.size() * sizeof(uint32_t))
+			+ static_cast<uint64_t>(result.compressedMeshletVertexWordChunk.size() * sizeof(uint32_t))
+			+ static_cast<uint64_t>(result.meshletChunk.size() * sizeof(meshopt_Meshlet))
+			+ static_cast<uint64_t>(result.meshletTriangleChunk.size() * sizeof(uint8_t))
+			+ static_cast<uint64_t>(result.meshletBoundsChunk.size() * sizeof(BoundingSphere));
+	};
+
+	for (const auto& [_, sharedState] : m_clodSharedStreamingStateByMesh) {
+		if (sharedState == nullptr) {
+			continue;
+		}
+
+		for (size_t groupIndex = 0; groupIndex < sharedState->groupResidentFlags.size(); ++groupIndex) {
+			if (sharedState->groupResidentFlags[groupIndex] != 0u) {
+				stats.residentGroups++;
+			}
+		}
+
+		for (const auto& allocations : sharedState->residentGroupAllocations) {
+			stats.residentAllocations += countResidentGroupAllocations(allocations);
+			stats.residentAllocationBytes += sumResidentGroupAllocationBytes(allocations);
+		}
+	}
+
+	{
+		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
+		stats.queuedRequests = static_cast<uint32_t>(m_clodDiskStreamingRequests.size());
+		stats.completedResults = static_cast<uint32_t>(m_clodDiskStreamingResults.size());
+		for (const auto& result : m_clodDiskStreamingResults) {
+			stats.completedResultBytes += getCompletedResultSizeBytes(result);
+		}
+	}
+
+	return stats;
 }
 
 void MeshManager::UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data) {

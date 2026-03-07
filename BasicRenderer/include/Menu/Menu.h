@@ -1431,7 +1431,32 @@ inline void Menu::DrawCLodTelemetryWindow() {
             max5s.unloadUnique = std::max(max5s.unloadUnique, sample.stats.unloadUnique);
             max5s.unloadApplied = std::max(max5s.unloadApplied, sample.stats.unloadApplied);
             max5s.unloadFailed = std::max(max5s.unloadFailed, sample.stats.unloadFailed);
+
+            max5s.residentGroups = std::max(max5s.residentGroups, sample.stats.residentGroups);
+            max5s.residentAllocations = std::max(max5s.residentAllocations, sample.stats.residentAllocations);
+            max5s.queuedRequests = std::max(max5s.queuedRequests, sample.stats.queuedRequests);
+            max5s.completedResults = std::max(max5s.completedResults, sample.stats.completedResults);
+            max5s.residentAllocationBytes = std::max(max5s.residentAllocationBytes, sample.stats.residentAllocationBytes);
+            max5s.completedResultBytes = std::max(max5s.completedResultBytes, sample.stats.completedResultBytes);
         }
+
+        auto formatBytes = [](uint64_t bytes) {
+            const double kib = 1024.0;
+            const double mib = kib * 1024.0;
+            const double gib = mib * 1024.0;
+
+            if (bytes >= static_cast<uint64_t>(gib)) {
+                return std::format("{:.2f} GiB", static_cast<double>(bytes) / gib);
+            }
+            if (bytes >= static_cast<uint64_t>(mib)) {
+                return std::format("{:.2f} MiB", static_cast<double>(bytes) / mib);
+            }
+            if (bytes >= static_cast<uint64_t>(kib)) {
+                return std::format("{:.2f} KiB", static_cast<double>(bytes) / kib);
+            }
+
+            return std::format("{} B", bytes);
+        };
 
         ImGui::Separator();
         ImGui::TextUnformatted("Streaming operations (per frame)");
@@ -1445,6 +1470,14 @@ inline void Menu::DrawCLodTelemetryWindow() {
             m_clodStreamingOpsLatest.unloadUnique,
             m_clodStreamingOpsLatest.unloadApplied,
             m_clodStreamingOpsLatest.unloadFailed);
+        ImGui::Text("Resident: groups=%u allocations=%u bytes=%s",
+            m_clodStreamingOpsLatest.residentGroups,
+            m_clodStreamingOpsLatest.residentAllocations,
+            formatBytes(m_clodStreamingOpsLatest.residentAllocationBytes).c_str());
+        ImGui::Text("Backlog: queued=%u completed=%u completedBytes=%s",
+            m_clodStreamingOpsLatest.queuedRequests,
+            m_clodStreamingOpsLatest.completedResults,
+            formatBytes(m_clodStreamingOpsLatest.completedResultBytes).c_str());
 
         ImGui::TextUnformatted("Max in last 5 seconds");
         ImGui::Text("Load max: requested=%u unique=%u applied=%u failed=%u",
@@ -1457,6 +1490,14 @@ inline void Menu::DrawCLodTelemetryWindow() {
             max5s.unloadUnique,
             max5s.unloadApplied,
             max5s.unloadFailed);
+        ImGui::Text("Resident max: groups=%u allocations=%u bytes=%s",
+            max5s.residentGroups,
+            max5s.residentAllocations,
+            formatBytes(max5s.residentAllocationBytes).c_str());
+        ImGui::Text("Backlog max: queued=%u completed=%u completedBytes=%s",
+            max5s.queuedRequests,
+            max5s.completedResults,
+            formatBytes(max5s.completedResultBytes).c_str());
     }
 
     if (m_clodTelemetryHasData) {

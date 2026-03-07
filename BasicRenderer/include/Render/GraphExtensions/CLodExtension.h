@@ -117,7 +117,7 @@ public:
             m_streamingReadbackRingSize = std::max<uint32_t>(getFramesInFlight(), 1u);
         }
         catch (...) {
-            m_streamingReadbackRingSize = 2u;
+            m_streamingReadbackRingSize = 3u;
         }
 
         try {
@@ -750,7 +750,7 @@ private:
             evictReq.groupGlobalIndex = entry.groupIndex;
 
             bool residencyBitChanged = false;
-            const bool serviced = ApplyStreamingRequest(evictReq, residencyBitChanged);
+            const bool serviced = ApplyEvictionRequest(evictReq, residencyBitChanged);
 
             frameStats.unloadRequested++;
             frameStats.unloadUnique++;
@@ -853,6 +853,7 @@ private:
         }
 
         meshManager->ProcessCLodDiskStreamingIO();
+        ApplyDiskStreamingCompletions(meshManager);
 
         std::vector<MeshManager::CLodGlobalResidencyRequest> initRequests;
         initRequests.reserve(m_streamingActiveGroupScanCount);
@@ -909,6 +910,7 @@ private:
                     }
                     else {
                         m_streamingNonResidentBitsCpu[wordAddress] &= ~bitMask;
+                        m_streamingNonResidentBitsUploadPending = true;
                     }
                 }
                 else {
@@ -962,7 +964,9 @@ private:
         m_streamingRequestsInProgressBitsCpu[wordAddress] &= ~bitMask;
     }
 
-    bool ApplyStreamingRequest(const CLodStreamingRequest& req, bool& outResidencyBitChanged) {
+    /// Evicts a group: marks it non-resident in MeshManager and sets its
+    /// non-resident bit so the GPU will stop traversing into it.
+    bool ApplyEvictionRequest(const CLodStreamingRequest& req, bool& outResidencyBitChanged) {
         outResidencyBitChanged = false;
 
         const uint32_t groupIndex = req.groupGlobalIndex;
@@ -1000,6 +1004,47 @@ private:
         }
 
         return true;
+    }
+
+    /// Drains groups that finished disk streaming IO since the last call and
+    /// synchronises the extension's CPU-side non-resident bitset accordingly.
+    /// This is the bridge between MeshManager (which owns the IO thread and
+    /// buffer uploads) and the extension (which owns the GPU-visible residency
+    /// bits). Must be called after every ProcessCLodDiskStreamingIO().
+    void ApplyDiskStreamingCompletions(MeshManager* meshManager) {
+        if (meshManager == nullptr) {
+            return;
+        }
+
+        std::vector<MeshManager::CLodDiskStreamingCompletion> completions;
+        meshManager->DrainCompletedCLodDiskStreamingGroups(completions);
+
+        for (const auto& completion : completions) {
+            const uint32_t groupIndex = completion.groupGlobalIndex;
+            if (groupIndex >= m_streamingStorageGroupCapacity) {
+                continue;
+            }
+
+            // Always clear in-progress — the IO has finished (success or fail).
+            ClearStreamingRequestInProgress(groupIndex);
+            if (groupIndex < m_pendingLoadPriorityByGroup.size()) {
+                m_pendingLoadPriorityByGroup[groupIndex] = 0u;
+            }
+
+            if (completion.success) {
+                const uint32_t wordAddress = BitWordAddress(groupIndex);
+                const uint32_t bitMask = BitMask(groupIndex);
+                const bool wasNonResident = (m_streamingNonResidentBitsCpu[wordAddress] & bitMask) != 0u;
+                m_streamingNonResidentBitsCpu[wordAddress] &= ~bitMask;
+                if (wasNonResident) {
+                    m_streamingResidentGroupsCount++;
+                    m_streamingNonResidentBitsUploadPending = true;
+                }
+                TouchStreamingLru(groupIndex);
+            }
+            // On failure: in-progress is cleared so the GPU can re-request.
+            // The non-resident bit stays set (group is still non-resident).
+        }
     }
 
     StreamingRequestReadbackState* FindStreamingLoadReadbackStateByCaptureId(uint64_t captureId) {
@@ -1140,6 +1185,7 @@ private:
 
         if (meshManager != nullptr) {
             meshManager->ProcessCLodDiskStreamingIO(budget);
+            ApplyDiskStreamingCompletions(meshManager);
         }
 
         struct PendingLoadBatchEntry {
@@ -1202,7 +1248,7 @@ private:
 
             if (!pending.isLoad) {
                 bool residencyBitChanged = false;
-                const bool serviced = ApplyStreamingRequest(pending.request, residencyBitChanged);
+                const bool serviced = ApplyEvictionRequest(pending.request, residencyBitChanged);
                 frameStats.unloadRequested++;
                 frameStats.unloadUnique++;
                 if (!serviced) {
@@ -1282,6 +1328,14 @@ private:
                     }
                 }
 
+                if (result.queued && !result.applied) {
+                    // Disk streaming is in-flight. Keep InProgress set so the
+                    // extension won't re-submit this group. The completion will
+                    // be picked up by ApplyDiskStreamingCompletions() when the
+                    // IO thread finishes.
+                    continue;
+                }
+
                 TouchStreamingLru(entry.groupIndex);
                 ClearStreamingRequestInProgress(entry.groupIndex);
                 m_pendingLoadPriorityByGroup[entry.groupIndex] = 0u;
@@ -1294,6 +1348,16 @@ private:
                 ClearStreamingRequestInProgress(entry.groupIndex);
                 m_pendingLoadPriorityByGroup[entry.groupIndex] = 0u;
             }
+        }
+
+        if (meshManager != nullptr) {
+            const auto debugStats = meshManager->GetCLodStreamingDebugStats();
+            frameStats.residentGroups = debugStats.residentGroups;
+            frameStats.residentAllocations = debugStats.residentAllocations;
+            frameStats.queuedRequests = debugStats.queuedRequests;
+            frameStats.completedResults = debugStats.completedResults;
+            frameStats.residentAllocationBytes = debugStats.residentAllocationBytes;
+            frameStats.completedResultBytes = debugStats.completedResultBytes;
         }
 
         PublishCLodStreamingOperationStats(frameStats);
@@ -1349,10 +1413,10 @@ private:
     uint32_t m_streamingActiveGroupScanCount = 0u;
     uint32_t m_streamingStorageGroupCapacity = CLodStreamingInitialGroupCapacity;
     bool m_streamingNonResidentBitsUploadPending = false;
-    uint32_t m_streamingReadbackRingSize = 2u;
+    uint32_t m_streamingReadbackRingSize = 3u;
     uint32_t m_streamingReadbackScheduleCursor = 0u;
-    uint32_t m_streamingCpuUploadBudgetRequests = 640u;
-    uint32_t m_streamingResidentBudgetGroups = 50000u;
+    uint32_t m_streamingCpuUploadBudgetRequests = 0u;
+    uint32_t m_streamingResidentBudgetGroups = 0u;
     rg::runtime::IReadbackService* m_streamingReadbackService = nullptr;
     std::function<MeshManager*()> m_getMeshManager = []() { return nullptr; };
 

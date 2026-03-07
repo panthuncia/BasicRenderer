@@ -1264,8 +1264,8 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 
 	config.partition_max_refined_groups = 4;
 
-	constexpr uint32_t MaxGroupChildren = 4;
-	constexpr uint32_t TraversalNodeFanout = 4;
+	constexpr uint32_t MaxGroupChildren = 32;
+	constexpr uint32_t TraversalNodeFanout = 32;
 	constexpr uint32_t TargetBucketClusters = 32;
 	constexpr uint32_t MinTargetBucketClusters = 4;
 	config.partition_max_refined_groups = MaxGroupChildren;

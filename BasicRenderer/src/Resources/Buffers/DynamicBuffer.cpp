@@ -43,8 +43,8 @@ std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementS
 			);
 			m_weakPtrCached = true;
 		}
-		// Return BufferView
-		return BufferView::CreateUnique(m_cachedWeakPtr, blockOffset, requiredSize, elementSize);
+        // Return BufferView
+        return BufferView::CreateUnique(m_cachedWeakPtr, blockOffset, requiredSize, elementSize);
 	}
 
 	// No suitable block found, need to grow the buffer
@@ -70,7 +70,7 @@ std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementS
 	m_freeBlocks.insert({ newBlockSize, newOffset });
 	spdlog::info("Growing buffer to {} bytes", newCapacity);
 	// Try allocating again
-	return Allocate(size, elementSize);
+    return Allocate(size, elementSize);
 }
 
 std::unique_ptr<BufferView> DynamicBuffer::AddData(const void* data, size_t size, size_t elementSize, size_t fullAllocationSize) {
@@ -82,13 +82,13 @@ std::unique_ptr<BufferView> DynamicBuffer::AddData(const void* data, size_t size
 			actualSize = size;
 		}
     }
-	std::unique_ptr<BufferView> view = Allocate(actualSize, elementSize);
+    std::unique_ptr<BufferView> view = Allocate(actualSize, elementSize);
     
 	if (data != nullptr) {
         StageOrUpload(data, size, view->GetOffset());
 	}
 
-	return view;
+    return view;
 }
 
 void DynamicBuffer::UpdateView(BufferView* view, const void* data) {
@@ -118,6 +118,10 @@ void DynamicBuffer::StageOrUpload(const void* data, size_t size, size_t offset) 
 }
 
 void DynamicBuffer::Deallocate(const BufferView* view) {
+    if (view == nullptr) {
+        return;
+    }
+
     size_t offset = view->GetOffset();
     size_t size = view->GetSize();
 

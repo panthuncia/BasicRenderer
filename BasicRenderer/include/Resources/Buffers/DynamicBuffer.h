@@ -10,12 +10,11 @@
 #include <string>
 
 #include "Resources/Resource.h"
+#include "Resources/Buffers/BufferView.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Resources/Buffers/MemoryBlock.h"
 #include "Interfaces/IHasMemoryMetadata.h"
 #include "Render/Runtime/UploadPolicyServiceAccess.h"
-
-class BufferView;
 
 class DynamicBuffer : public ViewedDynamicBufferBase, public IHasMemoryMetadata {
 public:
