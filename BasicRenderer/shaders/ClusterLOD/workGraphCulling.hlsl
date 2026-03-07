@@ -792,6 +792,8 @@ void WG_GroupEvaluate(
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
             RWStructuredBuffer<uint> loadRequestCounter =
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
+            RWByteAddressBuffer loadRequestBits =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequestBits)];
             StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
                 ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
             const uint depthMapDescriptorIndex = camera.isOrtho
@@ -837,15 +839,23 @@ void WG_GroupEvaluate(
                             cam.zNear);
 
                         if (refinedGroupGlobalIndex < activeGroupScanCount) {
-                            uint requestIndex = 0;
-                            InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
-                            if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY) {
-                                CLodStreamingRequest req = (CLodStreamingRequest)0;
-                                req.groupGlobalIndex = refinedGroupGlobalIndex;
-                                req.meshInstanceIndex = rec.instanceIndex;
-                                req.meshBufferIndex = instanceData.perMeshBufferIndex;
-                                req.viewId = CLodPackViewPriority(rec.viewId, fallbackErrorOverDistance);
-                                loadRequests[requestIndex] = req;
+                            // Deduplicate: set a bit per group so only the first
+                            // thread for each non-resident group touches the atomic
+                            // counter.  Without this gate every non-resident child
+                            // encounter (potentially thousands when entering a new
+                            // area) serialises on loadRequestCounter[0], stalling
+                            // the entire work graph.
+                            if (CLodTrySetBit(loadRequestBits, refinedGroupGlobalIndex)) {
+                                uint requestIndex = 0;
+                                InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
+                                if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY) {
+                                    CLodStreamingRequest req = (CLodStreamingRequest)0;
+                                    req.groupGlobalIndex = refinedGroupGlobalIndex;
+                                    req.meshInstanceIndex = rec.instanceIndex;
+                                    req.meshBufferIndex = instanceData.perMeshBufferIndex;
+                                    req.viewId = CLodPackViewPriority(rec.viewId, fallbackErrorOverDistance);
+                                    loadRequests[requestIndex] = req;
+                                }
                             }
                         }
                     }

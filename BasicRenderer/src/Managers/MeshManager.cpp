@@ -505,13 +505,22 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 			{
 				chunk.compressedPositionWordsBase = static_cast<uint32_t>(compressedPositionView->GetOffset() / sizeof(uint32_t));
 			}
+			else if (chunk.compressedPositionWordCount > 0u) {
+				hasRuntimeChunkData = false;
+			}
 			if (const auto* compressedNormalView = mesh->GetMesh()->GetCLodCompressedNormalChunkView(groupIndexU32); compressedNormalView != nullptr)
 			{
 				chunk.compressedNormalWordsBase = static_cast<uint32_t>(compressedNormalView->GetOffset() / sizeof(uint32_t));
 			}
+			else if (chunk.compressedNormalWordCount > 0u) {
+				hasRuntimeChunkData = false;
+			}
 			if (const auto* compressedMeshletVertexView = mesh->GetMesh()->GetCLodCompressedMeshletVertexChunkView(groupIndexU32); compressedMeshletVertexView != nullptr)
 			{
 				chunk.compressedMeshletVertexWordsBase = static_cast<uint32_t>(compressedMeshletVertexView->GetOffset() / sizeof(uint32_t));
+			}
+			else if (chunk.compressedMeshletVertexWordCount > 0u) {
+				hasRuntimeChunkData = false;
 			}
 
 			baselineGroupChunks[groupIndex] = chunk;
@@ -567,6 +576,7 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 
 		m_clodSharedStreamingStateByMesh[meshPtr] = sharedState;
 		m_clodSharedStreamingRangesDirty = true;
+		m_clodStreamingStructureDirty = true;
 	}
 	else {
 		sharedState = sharedStateIt->second;
@@ -636,6 +646,7 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 					}
 					m_clodSharedStreamingStateByMesh.erase(mesh->GetMesh().get());
 					m_clodSharedStreamingRangesDirty = true;
+					m_clodStreamingStructureDirty = true;
 				}
 			}
 		}
@@ -737,21 +748,21 @@ bool MeshManager::QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodS
 	}
 	const auto& sourceChunk = groupChunkHints[groupLocalIndex];
 
-	const bool hasCoreViews = residentAllocations.vertexChunk != nullptr
-		&& residentAllocations.meshletVertexChunk != nullptr
-		&& residentAllocations.meshletChunk != nullptr
-		&& residentAllocations.meshletTriangleChunk != nullptr
-		&& residentAllocations.meshletBoundsChunk != nullptr;
+	auto streamReady = [](uint32_t count, const auto& view) {
+		return count == 0u || view != nullptr;
+	};
 
-	const bool needsCompressed = (sourceChunk.compressedPositionWordCount > 0u)
-		|| (sourceChunk.compressedNormalWordCount > 0u)
-		|| (sourceChunk.compressedMeshletVertexWordCount > 0u);
+	const bool hasRequiredViews =
+		streamReady(sourceChunk.groupVertexCount, residentAllocations.vertexChunk)
+		&& streamReady(sourceChunk.meshletVertexCount, residentAllocations.meshletVertexChunk)
+		&& streamReady(sourceChunk.meshletCount, residentAllocations.meshletChunk)
+		&& streamReady(sourceChunk.meshletTrianglesByteCount, residentAllocations.meshletTriangleChunk)
+		&& streamReady(sourceChunk.meshletBoundsCount, residentAllocations.meshletBoundsChunk)
+		&& streamReady(sourceChunk.compressedPositionWordCount, residentAllocations.compressedPositionWordChunk)
+		&& streamReady(sourceChunk.compressedNormalWordCount, residentAllocations.compressedNormalWordChunk)
+		&& streamReady(sourceChunk.compressedMeshletVertexWordCount, residentAllocations.compressedMeshletVertexWordChunk);
 
-	const bool hasCompressedViews = residentAllocations.compressedPositionWordChunk != nullptr
-		&& residentAllocations.compressedNormalWordChunk != nullptr
-		&& residentAllocations.compressedMeshletVertexWordChunk != nullptr;
-
-	if (hasCoreViews && (!needsCompressed || hasCompressedViews)) {
+	if (hasRequiredViews) {
 		return true;
 	}
 
@@ -870,6 +881,27 @@ bool MeshManager::ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult&
 	if (localIndex < sharedState->groupResidentFlags.size()) {
 		sharedState->groupResidentFlags[localIndex] = 1u;
 	}
+
+	// Incremental debug stats: count newly-allocated buffers and bytes.
+	{
+		auto sz = [](const std::unique_ptr<BufferView>& v) -> uint64_t { return v ? static_cast<uint64_t>(v->GetSize()) : 0ull; };
+		uint32_t ac = 0u;
+		ac += residentAllocations.vertexChunk ? 1u : 0u;
+		ac += residentAllocations.meshletVertexChunk ? 1u : 0u;
+		ac += residentAllocations.compressedPositionWordChunk ? 1u : 0u;
+		ac += residentAllocations.compressedNormalWordChunk ? 1u : 0u;
+		ac += residentAllocations.compressedMeshletVertexWordChunk ? 1u : 0u;
+		ac += residentAllocations.meshletChunk ? 1u : 0u;
+		ac += residentAllocations.meshletTriangleChunk ? 1u : 0u;
+		ac += residentAllocations.meshletBoundsChunk ? 1u : 0u;
+		m_debugResidentAllocations += ac;
+		m_debugResidentAllocationBytes += sz(residentAllocations.vertexChunk) + sz(residentAllocations.meshletVertexChunk)
+			+ sz(residentAllocations.compressedPositionWordChunk) + sz(residentAllocations.compressedNormalWordChunk)
+			+ sz(residentAllocations.compressedMeshletVertexWordChunk) + sz(residentAllocations.meshletChunk)
+			+ sz(residentAllocations.meshletTriangleChunk) + sz(residentAllocations.meshletBoundsChunk);
+		m_debugResidentGroups++;
+	}
+
 	UploadCLodGroupChunkTable(*sharedState);
 	return true;
 }
@@ -954,24 +986,60 @@ bool MeshManager::ApplyCLodGroupResidency(CLodSharedStreamingState& state, uint3
 		const bool invalidChunk =
 			(chunk.meshletCount > 0u && chunk.meshletVertexCount == 0u)
 			|| (chunk.meshletCount > 0u && chunk.meshletTrianglesByteCount == 0u)
-			|| (chunk.meshletBoundsCount > 0u && chunk.meshletBase == 0u && chunk.meshletCount > 0u);
+			|| (chunk.meshletBoundsCount > 0u && chunk.meshletBase == 0u && chunk.meshletCount > 0u)
+			|| (chunk.compressedPositionWordCount > 0u && chunk.compressedPositionWordsBase == 0u)
+			|| (chunk.compressedNormalWordCount > 0u && chunk.compressedNormalWordsBase == 0u)
+			|| (chunk.compressedMeshletVertexWordCount > 0u && chunk.compressedMeshletVertexWordsBase == 0u);
 		if (invalidChunk) {
 			spdlog::error(
-				"CLOD residency activation rejected: invalid chunk metadata (groupsBase={}, groupLocalIndex={}, groupGlobalIndex={}, meshletCount={}, meshletVertexCount={}, meshletTrianglesByteCount={}, meshletBoundsCount={})",
+				"CLOD residency activation rejected: invalid chunk metadata (groupsBase={}, groupLocalIndex={}, groupGlobalIndex={}, meshletCount={}, meshletVertexCount={}, meshletTrianglesByteCount={}, meshletBoundsCount={}, compressedPositionWordCount={}, compressedPositionWordsBase={}, compressedNormalWordCount={}, compressedNormalWordsBase={}, compressedMeshletVertexWordCount={}, compressedMeshletVertexWordsBase={})",
 				state.groupsBase,
 				groupLocalIndex,
 				state.groupsBase + groupLocalIndex,
 				chunk.meshletCount,
 				chunk.meshletVertexCount,
 				chunk.meshletTrianglesByteCount,
-				chunk.meshletBoundsCount);
+				chunk.meshletBoundsCount,
+				chunk.compressedPositionWordCount,
+				chunk.compressedPositionWordsBase,
+				chunk.compressedNormalWordCount,
+				chunk.compressedNormalWordsBase,
+				chunk.compressedMeshletVertexWordCount,
+				chunk.compressedMeshletVertexWordsBase);
 			assert(false && "CLOD streamed group chunk metadata invalid on residency activation");
 			return false;
 		}
 	}
 
 	state.groupResidentFlags[groupLocalIndex] = resident ? 1u : 0u;
-	if (!resident) {
+	if (resident) {
+		m_debugResidentGroups++;
+	} else {
+		if (m_debugResidentGroups > 0u) m_debugResidentGroups--;
+		// Subtract allocation stats before deallocation zeroes the views.
+		if (groupLocalIndex < state.residentGroupAllocations.size()) {
+			auto& allocs = state.residentGroupAllocations[groupLocalIndex];
+			auto countAllocs = [](const CLodSharedStreamingState::ResidentGroupAllocations& a) -> uint32_t {
+				uint32_t c = 0u;
+				c += a.vertexChunk ? 1u : 0u;
+				c += a.meshletVertexChunk ? 1u : 0u;
+				c += a.compressedPositionWordChunk ? 1u : 0u;
+				c += a.compressedNormalWordChunk ? 1u : 0u;
+				c += a.compressedMeshletVertexWordChunk ? 1u : 0u;
+				c += a.meshletChunk ? 1u : 0u;
+				c += a.meshletTriangleChunk ? 1u : 0u;
+				c += a.meshletBoundsChunk ? 1u : 0u;
+				return c;
+			};
+			auto sumAllocBytes = [](const CLodSharedStreamingState::ResidentGroupAllocations& a) -> uint64_t {
+				auto sz = [](const std::unique_ptr<BufferView>& v) -> uint64_t { return v ? static_cast<uint64_t>(v->GetSize()) : 0ull; };
+				return sz(a.vertexChunk) + sz(a.meshletVertexChunk) + sz(a.compressedPositionWordChunk) + sz(a.compressedNormalWordChunk) + sz(a.compressedMeshletVertexWordChunk) + sz(a.meshletChunk) + sz(a.meshletTriangleChunk) + sz(a.meshletBoundsChunk);
+			};
+			const uint32_t ac = countAllocs(allocs);
+			const uint64_t ab = sumAllocBytes(allocs);
+			m_debugResidentAllocations = (m_debugResidentAllocations >= ac) ? (m_debugResidentAllocations - ac) : 0u;
+			m_debugResidentAllocationBytes = (m_debugResidentAllocationBytes >= ab) ? (m_debugResidentAllocationBytes - ab) : 0ull;
+		}
 		DeallocateCLodGroupChunkAllocations(state, groupLocalIndex);
 	}
 
@@ -1214,33 +1282,102 @@ void MeshManager::GetCLodUniqueAssetParentMap(std::vector<int32_t>& outParentGro
 	}
 }
 
-MeshManager::CLodStreamingDebugStats MeshManager::GetCLodStreamingDebugStats() {
+void MeshManager::GetCLodStreamingDomainSnapshot(CLodStreamingDomainSnapshot& outSnapshot) const {
+	outSnapshot.activeRanges.clear();
+	outSnapshot.coarsestRanges.clear();
+	outSnapshot.parentGroupByGlobal.clear();
+	outSnapshot.maxGroupIndex = 0;
+
+	std::unordered_set<uint64_t> seenRanges;
+	seenRanges.reserve(m_clodStreamingStateByInstanceIndex.size());
+
+	for (const auto& [_, state] : m_clodStreamingStateByInstanceIndex) {
+		if (state.groupCount == 0u) {
+			continue;
+		}
+
+		const uint64_t key = (static_cast<uint64_t>(state.groupsBase) << 32ull) | static_cast<uint64_t>(state.groupCount);
+		if (!seenRanges.insert(key).second) {
+			continue;
+		}
+
+		// Active range (same as GetCLodActiveUniqueAssetGroupRanges)
+		CLodActiveGroupRange activeRange{};
+		activeRange.groupsBase = state.groupsBase;
+		activeRange.groupCount = state.groupCount;
+		outSnapshot.activeRanges.push_back(activeRange);
+
+		const uint32_t rangeEnd = state.groupsBase + state.groupCount;
+		outSnapshot.maxGroupIndex = std::max(outSnapshot.maxGroupIndex, rangeEnd);
+
+		if (state.instance == nullptr || state.instance->GetMesh() == nullptr) {
+			continue;
+		}
+
+		const auto& summary = state.instance->GetMesh()->GetCLodRuntimeSummary();
+
+		// Coarsest ranges (same as GetCLodCoarsestUniqueAssetGroupRanges)
+		for (const auto& localRange : summary.coarsestRanges) {
+			if (localRange.groupCount == 0u || localRange.firstGroup >= state.groupCount) {
+				continue;
+			}
+			const uint32_t clampedCount = std::min<uint32_t>(
+				localRange.groupCount,
+				state.groupCount - localRange.firstGroup);
+			if (clampedCount == 0u) {
+				continue;
+			}
+			CLodActiveGroupRange coarsest{};
+			coarsest.groupsBase = state.groupsBase + localRange.firstGroup;
+			coarsest.groupCount = clampedCount;
+			outSnapshot.coarsestRanges.push_back(coarsest);
+		}
+
+		// Parent map (same as GetCLodUniqueAssetParentMap)
+		const uint32_t localGroupCount = std::min<uint32_t>(state.groupCount, static_cast<uint32_t>(summary.parentGroupByLocal.size()));
+		if (localGroupCount == 0u) {
+			continue;
+		}
+		const uint32_t parentRangeEnd = state.groupsBase + localGroupCount;
+		outSnapshot.maxGroupIndex = std::max(outSnapshot.maxGroupIndex, parentRangeEnd);
+		if (outSnapshot.parentGroupByGlobal.size() < parentRangeEnd) {
+			outSnapshot.parentGroupByGlobal.resize(parentRangeEnd, -1);
+		}
+		for (uint32_t groupLocalIndex = 0u; groupLocalIndex < localGroupCount; ++groupLocalIndex) {
+			const int32_t parentLocal = summary.parentGroupByLocal[groupLocalIndex];
+			if (parentLocal < 0) {
+				continue;
+			}
+			const uint32_t parentLocalU32 = static_cast<uint32_t>(parentLocal);
+			if (parentLocalU32 >= localGroupCount) {
+				continue;
+			}
+			const uint32_t parentGlobal = state.groupsBase + parentLocalU32;
+			const uint32_t childGlobal = state.groupsBase + groupLocalIndex;
+			outSnapshot.parentGroupByGlobal[childGlobal] = static_cast<int32_t>(parentGlobal);
+		}
+	}
+}
+
+bool MeshManager::ConsumeCLodStreamingStructureDirty() {
+	if (!m_clodStreamingStructureDirty) {
+		return false;
+	}
+	m_clodStreamingStructureDirty = false;
+	return true;
+}
+
+MeshManager::CLodStreamingDebugStats MeshManager::GetCLodStreamingDebugStats() const {
 	CLodStreamingDebugStats stats{};
-	auto getBufferViewSizeBytes = [](const std::unique_ptr<BufferView>& view) -> uint64_t {
-		return view ? static_cast<uint64_t>(view->GetSize()) : 0ull;
-	};
-	auto countResidentGroupAllocations = [](const CLodSharedStreamingState::ResidentGroupAllocations& allocations) -> uint32_t {
-		uint32_t count = 0u;
-		count += allocations.vertexChunk ? 1u : 0u;
-		count += allocations.meshletVertexChunk ? 1u : 0u;
-		count += allocations.compressedPositionWordChunk ? 1u : 0u;
-		count += allocations.compressedNormalWordChunk ? 1u : 0u;
-		count += allocations.compressedMeshletVertexWordChunk ? 1u : 0u;
-		count += allocations.meshletChunk ? 1u : 0u;
-		count += allocations.meshletTriangleChunk ? 1u : 0u;
-		count += allocations.meshletBoundsChunk ? 1u : 0u;
-		return count;
-	};
-	auto sumResidentGroupAllocationBytes = [&](const CLodSharedStreamingState::ResidentGroupAllocations& allocations) -> uint64_t {
-		return getBufferViewSizeBytes(allocations.vertexChunk)
-			+ getBufferViewSizeBytes(allocations.meshletVertexChunk)
-			+ getBufferViewSizeBytes(allocations.compressedPositionWordChunk)
-			+ getBufferViewSizeBytes(allocations.compressedNormalWordChunk)
-			+ getBufferViewSizeBytes(allocations.compressedMeshletVertexWordChunk)
-			+ getBufferViewSizeBytes(allocations.meshletChunk)
-			+ getBufferViewSizeBytes(allocations.meshletTriangleChunk)
-			+ getBufferViewSizeBytes(allocations.meshletBoundsChunk);
-	};
+	stats.residentGroups = m_debugResidentGroups;
+	stats.residentAllocations = m_debugResidentAllocations;
+	stats.residentAllocationBytes = m_debugResidentAllocationBytes;
+	{
+		std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(m_clodDiskStreamingMutex));
+		stats.queuedRequests = static_cast<uint32_t>(m_clodDiskStreamingRequests.size());
+	}
+	stats.completedResults = static_cast<uint32_t>(m_clodDiskStreamingResults.size());
+
 	auto getCompletedResultSizeBytes = [](const CLodDiskStreamingResult& result) -> uint64_t {
 		return static_cast<uint64_t>(result.vertexChunk.size())
 			+ static_cast<uint64_t>(result.meshletVertexChunk.size() * sizeof(uint32_t))
@@ -1251,29 +1388,6 @@ MeshManager::CLodStreamingDebugStats MeshManager::GetCLodStreamingDebugStats() {
 			+ static_cast<uint64_t>(result.meshletTriangleChunk.size() * sizeof(uint8_t))
 			+ static_cast<uint64_t>(result.meshletBoundsChunk.size() * sizeof(BoundingSphere));
 	};
-
-	for (const auto& [_, sharedState] : m_clodSharedStreamingStateByMesh) {
-		if (sharedState == nullptr) {
-			continue;
-		}
-
-		for (size_t groupIndex = 0; groupIndex < sharedState->groupResidentFlags.size(); ++groupIndex) {
-			if (sharedState->groupResidentFlags[groupIndex] != 0u) {
-				stats.residentGroups++;
-			}
-		}
-
-		for (const auto& allocations : sharedState->residentGroupAllocations) {
-			stats.residentAllocations += countResidentGroupAllocations(allocations);
-			stats.residentAllocationBytes += sumResidentGroupAllocationBytes(allocations);
-		}
-	}
-
-	{
-		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
-		stats.queuedRequests = static_cast<uint32_t>(m_clodDiskStreamingRequests.size());
-	}
-	stats.completedResults = static_cast<uint32_t>(m_clodDiskStreamingResults.size());
 	for (const auto& result : m_clodDiskStreamingResults) {
 		stats.completedResultBytes += getCompletedResultSizeBytes(result);
 	}

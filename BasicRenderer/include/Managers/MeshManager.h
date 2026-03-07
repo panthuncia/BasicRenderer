@@ -74,7 +74,24 @@ public:
 	void GetCLodActiveUniqueAssetGroupRanges(std::vector<CLodActiveGroupRange>& outRanges, uint32_t& outMaxGroupIndex) const;
 	void GetCLodCoarsestUniqueAssetGroupRanges(std::vector<CLodActiveGroupRange>& outRanges) const;
 	void GetCLodUniqueAssetParentMap(std::vector<int32_t>& outParentGroupByGlobal, uint32_t& outMaxGroupIndex) const;
-	CLodStreamingDebugStats GetCLodStreamingDebugStats();
+
+	/// Fused single-pass snapshot that combines GetCLodActiveUniqueAssetGroupRanges,
+	/// GetCLodCoarsestUniqueAssetGroupRanges, and GetCLodUniqueAssetParentMap.
+	struct CLodStreamingDomainSnapshot {
+		std::vector<CLodActiveGroupRange> activeRanges;
+		std::vector<CLodActiveGroupRange> coarsestRanges;
+		std::vector<int32_t> parentGroupByGlobal;
+		uint32_t maxGroupIndex = 0;
+	};
+	void GetCLodStreamingDomainSnapshot(CLodStreamingDomainSnapshot& outSnapshot) const;
+
+	/// Returns true when mesh/instance adds or removes have changed the
+	/// streaming structure since the last call.  After returning true the
+	/// flag is cleared automatically so subsequent calls return false until
+	/// the next structural change.
+	bool ConsumeCLodStreamingStructureDirty();
+
+	CLodStreamingDebugStats GetCLodStreamingDebugStats() const;
 	void ProcessCLodDiskStreamingIO(uint32_t maxCompletedRequests = 64u);
 
 	/// Drains groups that completed disk streaming since the last call.
@@ -178,6 +195,13 @@ private:
 	std::unordered_map<const Mesh*, std::shared_ptr<CLodSharedStreamingState>> m_clodSharedStreamingStateByMesh;
 	std::vector<CLodSharedStreamingRange> m_clodSharedStreamingRanges;
 	bool m_clodSharedStreamingRangesDirty = true;
+	/// Set whenever mesh/instance structural changes occur; consumed by CLodExtension.
+	bool m_clodStreamingStructureDirty = true;
+
+	// Incremental debug-stats counters — updated in place by residency mutations.
+	uint32_t m_debugResidentGroups = 0;
+	uint32_t m_debugResidentAllocations = 0;
+	uint64_t m_debugResidentAllocationBytes = 0;
 
 	struct CLodDiskStreamingRequest {
 		uint32_t groupGlobalIndex = 0;

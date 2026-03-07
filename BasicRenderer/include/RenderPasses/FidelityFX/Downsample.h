@@ -6,11 +6,14 @@
 #include <vector>
 
 #include "RenderPasses/Base/ComputePass.h"
+#include "BuiltinResources.h"
+#include "Managers/ViewManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
 #include "Resources/PixelBuffer.h"
+#include "Utilities/Utilities.h"
 
 #define A_CPU
 #include "../shaders/FidelityFX/ffx_a.h"
