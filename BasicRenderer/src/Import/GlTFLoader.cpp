@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -556,6 +557,111 @@ ParsedDocument ParseDocument(const std::string& filePath) {
     return doc;
 }
 
+std::vector<uint32_t> ReadAllIndices(const ParsedDocument& doc, const json& primitive, size_t vertexCount) {
+    std::vector<uint32_t> indices;
+    if (primitive.contains("indices")) {
+        const size_t accessorIndex = primitive["indices"].get<size_t>();
+        const AccessorInfo indexAccessor = GetAccessorInfo(doc.gltf, accessorIndex);
+        if (NumComponentsForType(indexAccessor.type) != 1) {
+            throw std::runtime_error("Index accessor must be SCALAR");
+        }
+
+        indices.reserve(indexAccessor.count);
+        constexpr size_t kIndexChunkSize = 131072;
+        for (size_t firstIndex = 0; firstIndex < indexAccessor.count; firstIndex += kIndexChunkSize) {
+            const size_t chunkIndexCount = std::min(kIndexChunkSize, indexAccessor.count - firstIndex);
+            size_t indexStride = 0;
+            size_t indexComponents = 0;
+            int indexComponentType = 0;
+            const auto indexBytes = ReadAccessorRawWindow(doc, accessorIndex, firstIndex, chunkIndexCount, &indexStride, &indexComponents, &indexComponentType);
+            if (indexComponents != 1) {
+                throw std::runtime_error("Index accessor component mismatch");
+            }
+
+            for (size_t i = 0; i < chunkIndexCount; ++i) {
+                const size_t indexBase = i * indexStride;
+                indices.push_back(static_cast<uint32_t>(ReadComponentAsDouble(indexBytes, indexComponentType, indexBase)));
+            }
+        }
+    }
+    else {
+        indices.reserve(vertexCount);
+        for (size_t i = 0; i < vertexCount; ++i) {
+            indices.push_back(static_cast<uint32_t>(i));
+        }
+    }
+    return indices;
+}
+
+std::vector<XMFLOAT3> ComputeSmoothNormals(
+    const ParsedDocument& doc,
+    size_t positionAccessorIndex,
+    size_t vertexCount,
+    const std::vector<uint32_t>& indices)
+{
+    // Read all positions
+    std::vector<XMFLOAT3> positions(vertexCount);
+    constexpr size_t kChunkSize = 32768;
+    for (size_t first = 0; first < vertexCount; first += kChunkSize) {
+        const size_t count = std::min(kChunkSize, vertexCount - first);
+        size_t stride = 0, components = 0;
+        int componentType = 0;
+        const auto bytes = ReadAccessorRawWindow(doc, positionAccessorIndex, first, count, &stride, &components, &componentType);
+        const size_t componentBytes = BytesPerComponent(componentType);
+        for (size_t i = 0; i < count; ++i) {
+            const size_t base = i * stride;
+            positions[first + i] = XMFLOAT3(
+                static_cast<float>(ReadComponentAsDouble(bytes, componentType, base + componentBytes * 0)),
+                static_cast<float>(ReadComponentAsDouble(bytes, componentType, base + componentBytes * 1)),
+                static_cast<float>(ReadComponentAsDouble(bytes, componentType, base + componentBytes * 2)));
+        }
+    }
+
+    // Accumulate area-weighted face normals per vertex
+    std::vector<XMFLOAT3> normals(vertexCount, XMFLOAT3(0.0f, 0.0f, 0.0f));
+    for (size_t tri = 0; tri + 2 < indices.size(); tri += 3) {
+        const uint32_t i0 = indices[tri + 0];
+        const uint32_t i1 = indices[tri + 1];
+        const uint32_t i2 = indices[tri + 2];
+        if (i0 >= vertexCount || i1 >= vertexCount || i2 >= vertexCount) {
+            continue;
+        }
+
+        const XMFLOAT3& p0 = positions[i0];
+        const XMFLOAT3& p1 = positions[i1];
+        const XMFLOAT3& p2 = positions[i2];
+        const float e1x = p1.x - p0.x, e1y = p1.y - p0.y, e1z = p1.z - p0.z;
+        const float e2x = p2.x - p0.x, e2y = p2.y - p0.y, e2z = p2.z - p0.z;
+
+        const XMFLOAT3 faceNormal(
+            e1y * e2z - e1z * e2y,
+            e1z * e2x - e1x * e2z,
+            e1x * e2y - e1y * e2x);
+
+        const float lenSq = faceNormal.x * faceNormal.x + faceNormal.y * faceNormal.y + faceNormal.z * faceNormal.z;
+        if (lenSq <= 1e-20f) {
+            continue;
+        }
+
+        normals[i0].x += faceNormal.x; normals[i0].y += faceNormal.y; normals[i0].z += faceNormal.z;
+        normals[i1].x += faceNormal.x; normals[i1].y += faceNormal.y; normals[i1].z += faceNormal.z;
+        normals[i2].x += faceNormal.x; normals[i2].y += faceNormal.y; normals[i2].z += faceNormal.z;
+    }
+
+    // Normalize
+    for (size_t i = 0; i < vertexCount; ++i) {
+        const float lenSq = normals[i].x * normals[i].x + normals[i].y * normals[i].y + normals[i].z * normals[i].z;
+        if (lenSq > 1e-20f) {
+            const float invLen = 1.0f / std::sqrt(lenSq);
+            normals[i].x *= invLen;
+            normals[i].y *= invLen;
+            normals[i].z *= invLen;
+        }
+    }
+
+    return normals;
+}
+
 PrimitivePreprocessData BuildPrimitivePreprocessData(
     const ParsedDocument& doc,
     const json& primitive,
@@ -606,10 +712,7 @@ PrimitivePreprocessData BuildPrimitivePreprocessData(
         hasTexcoords = true;
     }
 
-    unsigned int meshFlags = 0;
-    if (hasNormals) {
-        meshFlags |= VertexFlags::VERTEX_NORMALS;
-    }
+    unsigned int meshFlags = VertexFlags::VERTEX_NORMALS; // Always present: authored or generated
     if (hasTexcoords) {
         meshFlags |= VertexFlags::VERTEX_TEXCOORDS;
     }
@@ -626,6 +729,17 @@ PrimitivePreprocessData BuildPrimitivePreprocessData(
     MeshIngestBuilder ingest(vertexSize, 0, meshFlags);
     if (prebuiltData.has_value()) {
         return PrimitivePreprocessData(std::move(ingest), std::move(cacheIdentity), std::move(prebuiltData));
+    }
+
+    // Read indices early (needed for smooth normal generation and ingest)
+    std::vector<uint32_t> allIndices = ReadAllIndices(doc, primitive, vertexCount);
+
+    // Generate smooth normals when the primitive lacks a NORMAL attribute
+    std::vector<XMFLOAT3> generatedNormals;
+    if (!hasNormals) {
+        generatedNormals = ComputeSmoothNormals(doc, positionAccessorIndex, vertexCount, allIndices);
+        spdlog::info("glTF: Generated smooth normals for mesh {} primitive {} ({} vertices)",
+            meshIndex, primitiveIndex, vertexCount);
     }
 
     ingest.ReserveVertices(vertexCount);
@@ -667,7 +781,7 @@ PrimitivePreprocessData BuildPrimitivePreprocessData(
                 static_cast<float>(ReadComponentAsDouble(positionBytes, positionComponentType, positionBase + positionComponentBytes * 1)),
                 static_cast<float>(ReadComponentAsDouble(positionBytes, positionComponentType, positionBase + positionComponentBytes * 2)));
 
-            XMFLOAT3 normal(0.0f, 0.0f, 0.0f);
+            XMFLOAT3 normal;
             if (hasNormals) {
                 const size_t normalBase = i * normalStride;
                 normal = XMFLOAT3(
@@ -675,6 +789,9 @@ PrimitivePreprocessData BuildPrimitivePreprocessData(
                     static_cast<float>(ReadComponentAsDouble(normalBytes, normalComponentType, normalBase + normalComponentBytes * 1)),
                     static_cast<float>(ReadComponentAsDouble(normalBytes, normalComponentType, normalBase + normalComponentBytes * 2))
                 );
+            }
+            else {
+                normal = generatedNormals[firstVertex + i];
             }
 
             std::array<std::byte, sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + sizeof(XMFLOAT2)> packedVertex{};
@@ -696,38 +813,8 @@ PrimitivePreprocessData BuildPrimitivePreprocessData(
         }
     }
 
-    if (primitive.contains("indices")) {
-        const size_t accessorIndex = primitive["indices"].get<size_t>();
-        const AccessorInfo indexAccessor = GetAccessorInfo(doc.gltf, accessorIndex);
-        if (NumComponentsForType(indexAccessor.type) != 1) {
-            throw std::runtime_error("Index accessor must be SCALAR");
-        }
-
-        ingest.ReserveIndices(indexAccessor.count);
-
-        constexpr size_t kIndexChunkSize = 131072;
-        for (size_t firstIndex = 0; firstIndex < indexAccessor.count; firstIndex += kIndexChunkSize) {
-            const size_t chunkIndexCount = std::min(kIndexChunkSize, indexAccessor.count - firstIndex);
-            size_t indexStride = 0;
-            size_t indexComponents = 0;
-            int indexComponentType = 0;
-            const auto indexBytes = ReadAccessorRawWindow(doc, accessorIndex, firstIndex, chunkIndexCount, &indexStride, &indexComponents, &indexComponentType);
-            if (indexComponents != 1) {
-                throw std::runtime_error("Index accessor component mismatch");
-            }
-
-            for (size_t i = 0; i < chunkIndexCount; ++i) {
-                const size_t indexBase = i * indexStride;
-                ingest.AppendIndex(static_cast<uint32_t>(ReadComponentAsDouble(indexBytes, indexComponentType, indexBase)));
-            }
-        }
-    }
-    else {
-        ingest.ReserveIndices(vertexCount);
-        for (size_t i = 0; i < vertexCount; ++i) {
-            ingest.AppendIndex(static_cast<uint32_t>(i));
-        }
-    }
+    ingest.ReserveIndices(allIndices.size());
+    ingest.AppendIndices(allIndices.data(), allIndices.size());
 
     if (!prebuiltData.has_value()) {
         ClusterLODPrebuildArtifacts artifacts = ingest.BuildClusterLODArtifacts();

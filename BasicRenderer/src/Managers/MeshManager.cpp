@@ -1,6 +1,7 @@
 #include "Managers/MeshManager.h"
 
 #include "Managers/Singletons/ResourceManager.h"
+#include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Mesh/Mesh.h"
 #include "Resources/ResourceGroup.h"
 #include "Resources/Buffers/BufferView.h"
@@ -51,6 +52,7 @@ MeshManager::MeshManager() {
 	m_clodCompressedNormals->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
 	m_clodCompressedMeshletVertexIndices->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
 	m_clusterLODMeshletBounds->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
+	m_clodSharedGroupChunks->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
 
 	// Tag resources for memory statistics
 	rg::memory::SetResourceUsageHint(*m_preSkinningVertices, "Mesh Data");
@@ -91,45 +93,94 @@ MeshManager::MeshManager() {
 	m_resources[Builtin::CLod::MeshletBounds] = m_clusterLODMeshletBounds;
 	m_resources[Builtin::CLod::Nodes] = m_clusterLODNodes;
 
-	m_clodDiskStreamingThread = std::thread([this]() {
-		CLodDiskStreamingWorkerMain();
-	});
-
 }
 
 MeshManager::~MeshManager() {
-	{
-		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
-		m_clodDiskStreamingStop = true;
-	}
-	m_clodDiskStreamingCv.notify_all();
-	if (m_clodDiskStreamingThread.joinable()) {
-		m_clodDiskStreamingThread.join();
-	}
 }
 
-void MeshManager::CLodDiskStreamingWorkerMain() {
-	for (;;) {
-		CLodDiskStreamingRequest request{};
-		{
-			std::unique_lock<std::mutex> lock(m_clodDiskStreamingMutex);
-			m_clodDiskStreamingCv.wait(lock, [this]() {
-				return m_clodDiskStreamingStop || !m_clodDiskStreamingRequests.empty();
-			});
-
-			if (m_clodDiskStreamingStop) {
-				return;
-			}
-
-			request = m_clodDiskStreamingRequests.front();
-			m_clodDiskStreamingRequests.pop_front();
+void MeshManager::DispatchCLodDiskStreamingBatch() {
+	// Drain up to kMaxIoBatchSize requests from the pending queue.
+	std::vector<CLodDiskStreamingRequest> batch;
+	{
+		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
+		const uint32_t toDrain = std::min<uint32_t>(kMaxIoBatchSize, static_cast<uint32_t>(m_clodDiskStreamingRequests.size()));
+		if (toDrain == 0u) {
+			return;
 		}
+		batch.reserve(toDrain);
+		for (uint32_t i = 0; i < toDrain; ++i) {
+			batch.push_back(std::move(m_clodDiskStreamingRequests[i]));
+		}
+		m_clodDiskStreamingRequests.erase(m_clodDiskStreamingRequests.begin(),
+			m_clodDiskStreamingRequests.begin() + toDrain);
+	}
 
-		CLodDiskStreamingResult result{};
+	// Pre-allocate results vector (one slot per request, written in parallel).
+	std::vector<CLodDiskStreamingResult> results(batch.size());
+
+	// Group requests by container path so each parallel worker can reuse one
+	// file handle for all groups from the same container.
+	// The lambda captures batch/results by reference and is dispatched over
+	// the task scheduler's thread pool (including IO-pinned threads).
+	auto& scheduler = TaskSchedulerManager::GetInstance();
+	scheduler.ParallelFor(batch.size(), [&batch, &results](size_t i) {
+		const auto& request = batch[i];
+		auto& result = results[i];
 		result.groupGlobalIndex = request.groupGlobalIndex;
 
+		// Thread-local container file handle cache. Each worker thread keeps
+		// the last-used container open, avoiding repeated open/close syscalls
+		// when consecutive requests target the same file.
+		struct TLContainerState {
+			std::wstring containerFileName;
+			std::string sourceIdentifier;
+			std::ifstream file;
+			uint32_t groupCount = 0;
+			bool valid = false;
+		};
+		thread_local TLContainerState tls;
+
+		// Reuse if same container, otherwise re-open.
+		if (!tls.valid
+			|| tls.containerFileName != request.cacheSource.containerFileName
+			|| tls.sourceIdentifier != request.cacheSource.sourceIdentifier) {
+			tls.file.close();
+			tls.valid = false;
+			tls.containerFileName = request.cacheSource.containerFileName;
+			tls.sourceIdentifier = request.cacheSource.sourceIdentifier;
+			tls.groupCount = 0;
+			if (CLodCache::OpenContainerFile(request.cacheSource, tls.file, tls.groupCount)) {
+				tls.valid = true;
+			}
+		}
+
+		if (!tls.valid || request.groupLocalIndex >= tls.groupCount) {
+			result.success = false;
+			return;
+		}
+
+		// Look up the disk locator from the directory embedded in the file.
+		const uint64_t directoryEntryOffset =
+			static_cast<uint64_t>(sizeof(uint32_t) * 4) // ContainerHeader: magic + version + reserved + groupCount
+			+ static_cast<uint64_t>(request.groupLocalIndex) * static_cast<uint64_t>(sizeof(ClusterLODGroupDiskLocator));
+
+		tls.file.seekg(static_cast<std::streamoff>(directoryEntryOffset), std::ios::beg);
+		if (!tls.file.good()) {
+			result.success = false;
+			tls.valid = false; // Stream is bad; force re-open next time.
+			return;
+		}
+
+		ClusterLODGroupDiskLocator locator{};
+		tls.file.read(reinterpret_cast<char*>(&locator), sizeof(locator));
+		if (!tls.file.good()) {
+			result.success = false;
+			tls.valid = false;
+			return;
+		}
+
 		CLodCache::LoadedGroupPayload payload{};
-		if (CLodCache::LoadGroupPayload(request.cacheSource, request.groupLocalIndex, payload)) {
+		if (CLodCache::LoadGroupPayloadDirect(tls.file, locator, payload)) {
 			result.groupChunkMetadata = payload.groupChunkMetadata;
 			result.vertexChunk = std::move(payload.vertexChunk);
 			result.meshletVertexChunk = std::move(payload.meshletVertexChunk);
@@ -141,12 +192,22 @@ void MeshManager::CLodDiskStreamingWorkerMain() {
 			result.meshletBoundsChunk = std::move(payload.meshletBoundsChunk);
 			result.success = true;
 		}
-
-		{
-			std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
-			m_clodDiskStreamingQueuedGroups.erase(request.groupGlobalIndex);
-			m_clodDiskStreamingResults.push_back(std::move(result));
+		else {
+			result.success = false;
+			// If the read failed, the stream might be in a bad state.
+			tls.file.clear();
 		}
+	});
+
+	// Merge results back (single-threaded).
+	{
+		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
+		for (auto& result : results) {
+			m_clodDiskStreamingQueuedGroups.erase(result.groupGlobalIndex);
+		}
+	}
+	for (auto& result : results) {
+		m_clodDiskStreamingResults.push_back(std::move(result));
 	}
 }
 
@@ -584,20 +645,19 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 }
 
 void MeshManager::ProcessCLodDiskStreamingIO(uint32_t maxCompletedRequests) {
-	std::deque<CLodDiskStreamingResult> completed;
-	{
-		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
-		const uint32_t toDrain = std::min<uint32_t>(maxCompletedRequests, static_cast<uint32_t>(m_clodDiskStreamingResults.size()));
-		for (uint32_t i = 0; i < toDrain; ++i) {
-			completed.push_back(std::move(m_clodDiskStreamingResults.front()));
-			m_clodDiskStreamingResults.pop_front();
-		}
-	}
+	// First, dispatch a batch of pending IO requests in parallel across the
+	// task scheduler's thread pool. This replaces the old single-threaded worker.
+	DispatchCLodDiskStreamingBatch();
 
-	for (auto& result : completed) {
+	// Now apply completed results (from this dispatch and any previous ones).
+	const uint32_t toDrain = std::min<uint32_t>(maxCompletedRequests, static_cast<uint32_t>(m_clodDiskStreamingResults.size()));
+	for (uint32_t i = 0; i < toDrain; ++i) {
+		auto& result = m_clodDiskStreamingResults[i];
 		const bool applied = ApplyCompletedCLodDiskStreamingResult(result);
 		m_clodDiskStreamingCompletions.push_back({ result.groupGlobalIndex, applied });
 	}
+	m_clodDiskStreamingResults.erase(m_clodDiskStreamingResults.begin(),
+		m_clodDiskStreamingResults.begin() + toDrain);
 }
 
 void MeshManager::RebuildCLodSharedStreamingRangeIndex() {
@@ -719,7 +779,6 @@ bool MeshManager::QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodS
 	}
 
 	outQueued = true;
-	m_clodDiskStreamingCv.notify_one();
 	return false;
 }
 
@@ -1213,10 +1272,10 @@ MeshManager::CLodStreamingDebugStats MeshManager::GetCLodStreamingDebugStats() {
 	{
 		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
 		stats.queuedRequests = static_cast<uint32_t>(m_clodDiskStreamingRequests.size());
-		stats.completedResults = static_cast<uint32_t>(m_clodDiskStreamingResults.size());
-		for (const auto& result : m_clodDiskStreamingResults) {
-			stats.completedResultBytes += getCompletedResultSizeBytes(result);
-		}
+	}
+	stats.completedResults = static_cast<uint32_t>(m_clodDiskStreamingResults.size());
+	for (const auto& result : m_clodDiskStreamingResults) {
+		stats.completedResultBytes += getCompletedResultSizeBytes(result);
 	}
 
 	return stats;

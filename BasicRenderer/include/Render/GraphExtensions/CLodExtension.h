@@ -1201,21 +1201,17 @@ private:
         std::vector<PendingLoadBatchEntry> loadBatchEntries;
         loadBatchEntries.reserve(budget);
 
+        // Sort ascending by priority so highest-priority items are at the back.
+        // pop_back() is O(1) on a vector, turning the old O(n*budget) scan into O(n log n).
+        std::sort(m_pendingStreamingRequests.begin(), m_pendingStreamingRequests.end(),
+            [](const PendingStreamingRequest& a, const PendingStreamingRequest& b) {
+                return a.priority < b.priority;
+            });
+
         uint32_t processed = 0;
         while (processed < budget && !m_pendingStreamingRequests.empty()) {
-            auto selectedIt = m_pendingStreamingRequests.end();
-            for (auto it = m_pendingStreamingRequests.begin(); it != m_pendingStreamingRequests.end(); ++it) {
-                if (selectedIt == m_pendingStreamingRequests.end() || it->priority > selectedIt->priority) {
-                    selectedIt = it;
-                }
-            }
-
-            if (selectedIt == m_pendingStreamingRequests.end()) {
-                break;
-            }
-
-            const PendingStreamingRequest pending = *selectedIt;
-            m_pendingStreamingRequests.erase(selectedIt);
+            const PendingStreamingRequest pending = m_pendingStreamingRequests.back();
+            m_pendingStreamingRequests.pop_back();
 
             const uint32_t groupIndex = pending.request.groupGlobalIndex;
             if (groupIndex >= m_streamingStorageGroupCapacity) {
@@ -1423,7 +1419,7 @@ private:
     uint64_t m_streamingReadbackCaptureSerial = 0;
     uint64_t m_streamingOperationSampleSerial = 0;
     std::vector<StreamingRequestReadbackState> m_streamingLoadReadbackSlots;
-    std::deque<PendingStreamingRequest> m_pendingStreamingRequests;
+    std::vector<PendingStreamingRequest> m_pendingStreamingRequests;
 
     // Compaction Pass Buffers
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;

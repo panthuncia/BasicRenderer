@@ -826,4 +826,82 @@ namespace CLodCache {
 		return true;
 	}
 
+	bool LoadGroupPayloadDirect(std::ifstream& file,
+		const ClusterLODGroupDiskLocator& locator,
+		LoadedGroupPayload& outPayload)
+	{
+		if (locator.blobSizeBytes < sizeof(GroupPayloadHeader)) {
+			return false;
+		}
+
+		if (locator.blobOffset > static_cast<uint64_t>((std::numeric_limits<std::streamoff>::max)())) {
+			return false;
+		}
+
+		file.seekg(static_cast<std::streamoff>(locator.blobOffset), std::ios::beg);
+		if (!file.good()) {
+			return false;
+		}
+
+		GroupPayloadHeader groupHeader{};
+		file.read(reinterpret_cast<char*>(&groupHeader), sizeof(groupHeader));
+		if (!file.good()) {
+			return false;
+		}
+
+		outPayload.groupChunkMetadata = groupHeader.groupChunkMetadata;
+
+		uint64_t totalBlobBytes = sizeof(GroupPayloadHeader);
+		totalBlobBytes += groupHeader.vertexChunkSizeBytes;
+		totalBlobBytes += groupHeader.skinningChunkSizeBytes;
+		totalBlobBytes += groupHeader.meshletVertexChunkSizeBytes;
+		totalBlobBytes += groupHeader.compressedPositionWordChunkSizeBytes;
+		totalBlobBytes += groupHeader.compressedNormalWordChunkSizeBytes;
+		totalBlobBytes += groupHeader.compressedMeshletVertexWordChunkSizeBytes;
+		totalBlobBytes += groupHeader.meshletChunkSizeBytes;
+		totalBlobBytes += groupHeader.meshletTriangleChunkSizeBytes;
+		totalBlobBytes += groupHeader.meshletBoundsChunkSizeBytes;
+		if (totalBlobBytes != static_cast<uint64_t>(locator.blobSizeBytes)) {
+			return false;
+		}
+
+		if (!ReadVectorRaw(file, groupHeader.vertexChunkSizeBytes, outPayload.vertexChunk)) return false;
+		if (!ReadVectorRaw(file, groupHeader.skinningChunkSizeBytes, outPayload.skinningChunk)) return false;
+		if (!ReadVectorRaw(file, groupHeader.meshletVertexChunkSizeBytes, outPayload.meshletVertexChunk)) return false;
+		if (!ReadVectorRaw(file, groupHeader.compressedPositionWordChunkSizeBytes, outPayload.compressedPositionWordChunk)) return false;
+		if (!ReadVectorRaw(file, groupHeader.compressedNormalWordChunkSizeBytes, outPayload.compressedNormalWordChunk)) return false;
+		if (!ReadVectorRaw(file, groupHeader.compressedMeshletVertexWordChunkSizeBytes, outPayload.compressedMeshletVertexWordChunk)) return false;
+		if (!ReadVectorRaw(file, groupHeader.meshletChunkSizeBytes, outPayload.meshletChunk)) return false;
+		if (!ReadVectorRaw(file, groupHeader.meshletTriangleChunkSizeBytes, outPayload.meshletTriangleChunk)) return false;
+		if (!ReadVectorRaw(file, groupHeader.meshletBoundsChunkSizeBytes, outPayload.meshletBoundsChunk)) return false;
+
+		return true;
+	}
+
+	bool OpenContainerFile(const ClusterLODCacheSource& cacheSource,
+		std::ifstream& outFile,
+		uint32_t& outGroupCount)
+	{
+		outGroupCount = 0u;
+		if (cacheSource.containerFileName.empty()) {
+			return false;
+		}
+
+		const std::wstring containerPath = GetCacheFilePathBySource(cacheSource.containerFileName, cacheSource.sourceIdentifier);
+		outFile.open(containerPath, std::ios::binary);
+		if (!outFile.is_open()) {
+			return false;
+		}
+
+		ContainerHeader header{};
+		outFile.read(reinterpret_cast<char*>(&header), sizeof(header));
+		if (!outFile.good() || header.magic != kContainerMagic || header.version != 3u) {
+			outFile.close();
+			return false;
+		}
+
+		outGroupCount = header.groupCount;
+		return true;
+	}
+
 }

@@ -2,8 +2,6 @@
 
 #include <memory>
 #include <mutex>
-#include <condition_variable>
-#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -201,16 +199,19 @@ private:
 		std::vector<BoundingSphere> meshletBoundsChunk;
 	};
 
-	std::thread m_clodDiskStreamingThread;
+	// Pending requests waiting to be dispatched (guarded by m_clodDiskStreamingMutex).
 	std::mutex m_clodDiskStreamingMutex;
-	std::condition_variable m_clodDiskStreamingCv;
-	bool m_clodDiskStreamingStop = false;
-	std::deque<CLodDiskStreamingRequest> m_clodDiskStreamingRequests;
-	std::deque<CLodDiskStreamingResult> m_clodDiskStreamingResults;
+	std::vector<CLodDiskStreamingRequest> m_clodDiskStreamingRequests;
 	std::unordered_set<uint32_t> m_clodDiskStreamingQueuedGroups;
+
+	// Completed results waiting to be applied on the main thread.
+	std::vector<CLodDiskStreamingResult> m_clodDiskStreamingResults;
 	std::vector<CLodDiskStreamingCompletion> m_clodDiskStreamingCompletions;
 
-	void CLodDiskStreamingWorkerMain();
+	/// Maximum number of IO requests dispatched per ProcessCLodDiskStreamingIO call.
+	static constexpr uint32_t kMaxIoBatchSize = 128u;
+
+	void DispatchCLodDiskStreamingBatch();
 	bool QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool& outQueued);
 	bool ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result);
 	void UploadCLodGroupChunkTable(const CLodSharedStreamingState& state);
