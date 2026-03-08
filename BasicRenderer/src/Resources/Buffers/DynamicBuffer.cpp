@@ -50,24 +50,27 @@ std::unique_ptr<BufferView> DynamicBuffer::Allocate(size_t size, size_t elementS
 	// No suitable block found, need to grow the buffer
 
 	// Absorb the last block if it is free
+    size_t previousCapacity = m_capacity;
 	size_t newBlockSize = (std::max)(m_capacity, requiredSize);
 	size_t growBy = newBlockSize;
+    size_t newBlockOffset = previousCapacity;
 	if (!m_blocksByOffset.empty())
 	{
 		auto lastIt = std::prev(m_blocksByOffset.end());
 		if (lastIt->second.isFree)
 		{
+            newBlockOffset = lastIt->second.offset;
 			growBy -= lastIt->second.size;
 			m_freeBlocks.erase({ lastIt->second.size, lastIt->second.offset });
 			m_blocksByOffset.erase(lastIt);
 		}
 	}
-	size_t newCapacity = m_capacity + growBy;
+    size_t newCapacity = DynamicBuffer::AlignBufferCapacity(previousCapacity + growBy, m_byteAddress);
 
 	GrowBuffer(newCapacity);
-	size_t newOffset = m_capacity - newBlockSize;
-	m_blocksByOffset[newOffset] = { newOffset, newBlockSize, true };
-	m_freeBlocks.insert({ newBlockSize, newOffset });
+    size_t trackedFreeSize = m_capacity - newBlockOffset;
+    m_blocksByOffset[newBlockOffset] = { newBlockOffset, trackedFreeSize, true };
+    m_freeBlocks.insert({ trackedFreeSize, newBlockOffset });
 	spdlog::info("Growing buffer to {} bytes", newCapacity);
 	// Try allocating again
     return Allocate(size, elementSize);
