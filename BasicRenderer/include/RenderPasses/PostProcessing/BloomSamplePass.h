@@ -65,6 +65,7 @@ public:
 		rhi::ColorAttachment colorAttachment{};
 		colorAttachment.rtv = m_pHDRTarget->GetRTVInfo(m_mipIndex + mipOffset).slot;
 		colorAttachment.loadOp = m_isUpsample ? rhi::LoadOp::Load : rhi::LoadOp::DontCare;
+		colorAttachment.mipSlice = m_mipIndex + mipOffset;
 		colorAttachment.storeOp = rhi::StoreOp::Store;
 		colorAttachment.resource = m_pHDRTarget->GetAPIResource().GetHandle();
 		passInfo.colors = { &colorAttachment };
