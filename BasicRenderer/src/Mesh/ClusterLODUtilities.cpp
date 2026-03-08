@@ -1257,7 +1257,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	config.simplify_fallback_sloppy = true;
 	config.simplify_error_factor_sloppy = 10.0f;
 
-	config.simplify_fallback_permissive = false;
+	config.simplify_fallback_permissive = true;
 
 	config.simplify_error_merge_additive = lodErrorMergeAdditive;
 	config.simplify_error_merge_previous = lodErrorMergePrevious;
@@ -1625,6 +1625,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	}
 
 	// Voxel hierarchy: detect terminal coarsest groups and build voxel group tree
+	// Disabled for now, until voxel rendering is implemented
 	if (settings.enableVoxelFallback && state.maxDepth > 0)
 	{
 		// Find groups at the coarsest depth that are fully terminal (no further refinement possible).

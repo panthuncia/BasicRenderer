@@ -184,7 +184,7 @@ struct ClusterLODBuilderSettings
 	float simplifyTangentSignWeight = 0.5f;
 
 	// ---- Voxel hierarchy settings ----
-	bool enableVoxelFallback = true;             // Enable voxel-based coarse LOD when decimation fails
+	bool enableVoxelFallback = false;            // Enable voxel-based coarse LOD when decimation fails (disabled until voxel rendering is implemented)
 	uint32_t voxelGridBaseResolution = 32u;       // Resolution of the finest voxel grid level
 	uint32_t voxelMinResolution = 2u;             // Minimum resolution floor; hierarchy stops when resolution would drop below this
 	uint32_t voxelRaysPerCell = 64u;              // Number of rays cast per active cell for opacity sampling

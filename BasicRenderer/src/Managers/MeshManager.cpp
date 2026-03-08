@@ -868,6 +868,18 @@ bool MeshManager::ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult&
 	if (result.groupChunkMetadata.has_value()) {
 		chunk = result.groupChunkMetadata.value();
 	}
+
+	// Diagnostic: detect mismatch between metadata-declared meshlet count and
+	// the actual data delivered by disk streaming.  An empty meshletChunk with
+	// a non-zero meshletCount means the shader will index into the meshlet
+	// buffer at an offset that was never written, producing zero vert/tri counts.
+	if (chunk.meshletCount > 0u && result.meshletChunk.empty()) {
+		spdlog::error(
+			"CLod streaming: group {} (local {}) metadata declares meshletCount={} "
+			"but loaded meshletChunk is empty — meshlet data will be missing on GPU",
+			result.groupGlobalIndex, localIndex, chunk.meshletCount);
+		assert(false && "CLod streaming: non-zero meshletCount but empty meshletChunk");
+	}
 	if (residentAllocations.vertexChunk != nullptr) chunk.vertexChunkByteOffset = static_cast<uint32_t>(residentAllocations.vertexChunk->GetOffset());
 	if (residentAllocations.meshletVertexChunk != nullptr) chunk.meshletVerticesBase = static_cast<uint32_t>(residentAllocations.meshletVertexChunk->GetOffset() / sizeof(uint32_t));
 	if (residentAllocations.meshletChunk != nullptr) chunk.meshletBase = static_cast<uint32_t>(residentAllocations.meshletChunk->GetOffset() / sizeof(meshopt_Meshlet));
