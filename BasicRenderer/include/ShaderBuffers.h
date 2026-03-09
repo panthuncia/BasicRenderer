@@ -78,11 +78,15 @@ struct PerFrameCB {
     unsigned int pad[3];
 };
 
+// Object flags (shared with HLSL OBJECT_FLAG_* defines)
+static constexpr unsigned int OBJECT_FLAG_REVERSE_WINDING = 1u << 0;
+
 struct PerObjectCB {
     DirectX::XMMATRIX modelMatrix;
     DirectX::XMMATRIX prevModelMatrix;
     unsigned int normalMatrixBufferIndex;
-    unsigned int pad[3];
+    unsigned int objectFlags;
+    unsigned int pad[2];
 };
 
 struct BoundingSphere {
@@ -288,21 +292,25 @@ struct CLodMeshMetadata
     uint groupChunkTableCount;
 };
 
+/// GPU-visible page table entry — maps a virtual page ID to a slab + byte offset.
+struct PageTableEntry
+{
+    uint32_t slabIndex      = 0; ///< Which slab ByteAddressBuffer this page lives in.
+    uint32_t slabByteOffset = 0; ///< Byte offset of the page start within that slab.
+};
+
 struct ClusterLODGroupChunk
 {
-    uint32_t vertexChunkByteOffset = 0;
-    uint32_t meshletVerticesBase = 0;
+    // ── Group metadata ────────────────────────────────────────────────────
     uint32_t groupVertexCount = 0;
     uint32_t meshletVertexCount = 0;
     uint32_t meshletBase = 0;
     uint32_t meshletCount = 0;
-    uint32_t meshletTrianglesByteOffset = 0;
     uint32_t meshletTrianglesByteCount = 0;
     uint32_t meshletBoundsBase = 0;
     uint32_t meshletBoundsCount = 0;
 
     // Compressed group-local position stream (u32 bitstream words)
-    uint32_t compressedPositionWordsBase = 0;
     uint32_t compressedPositionWordCount = 0;
     uint32_t compressedPositionBitsX = 0;
     uint32_t compressedPositionBitsY = 0;
@@ -313,14 +321,34 @@ struct ClusterLODGroupChunk
     int32_t compressedPositionMinQz = 0;
 
     // Compressed group-local normal stream (oct-encoded snorm16x2 packed into u32)
-    uint32_t compressedNormalWordsBase = 0;
     uint32_t compressedNormalWordCount = 0;
 
     // Compressed group-local meshlet vertex index stream (u32 bitstream words)
-    uint32_t compressedMeshletVertexWordsBase = 0;
     uint32_t compressedMeshletVertexWordCount = 0;
     uint32_t compressedMeshletVertexBits = 0;
     uint32_t compressedFlags = 0;
+
+    // ── Page-pool fields ────────────────────────────────────────────────
+    // The 6 large data streams (vertices, meshlet vertex indices, triangles,
+    // compressed positions/normals/meshlet vertices) are stored in a
+    // unified slab ByteAddressBuffer.  Meshlets and bounds stay in their
+    // global StructuredBuffers.
+    //
+    // The slab descriptor index + base byte offset are resolved on the CPU
+    // and stored here so the shader can bind the slab directly without a
+    // page-table lookup.
+    uint32_t pagePoolSlabDescriptorIndex = 0;         ///< Raw descriptor-heap index of the slab BAB.
+    uint32_t pagePoolSlabByteOffset = 0;              ///< Byte offset of allocation start within the slab.
+    uint32_t vertexIntraPageByteOffset = 0;           ///< Byte offset within allocation for vertex data.
+    uint32_t meshletVertexIntraPageByteOffset = 0;    ///< Byte offset within allocation for meshlet vertex indices.
+    uint32_t triangleIntraPageByteOffset = 0;         ///< Byte offset within allocation for triangle data.
+    uint32_t compPosIntraPageByteOffset = 0;          ///< Byte offset within allocation for compressed positions.
+    uint32_t compNormIntraPageByteOffset = 0;         ///< Byte offset within allocation for compressed normals.
+    uint32_t compMeshletVertIntraPageByteOffset = 0;  ///< Byte offset within allocation for compressed meshlet vertex indices.
+    uint32_t pagePoolPad0 = 0;                        ///< Padding to 16-byte alignment.
+    uint32_t pagePoolPad1 = 0;                        ///< Padding.
+    uint32_t pagePoolPad2 = 0;                        ///< Padding.
+    uint32_t pagePoolPad3 = 0;                        ///< Padding (was pagePoolFlags).
 };
 
 struct CLodStreamingRequest

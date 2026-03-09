@@ -19,20 +19,25 @@ struct CLodMeshMetadata
     uint groupChunkTableCount;
 };
 
+/// GPU-visible page table entry — maps a virtual page ID to a slab + byte offset.
+struct PageTableEntry
+{
+    uint slabIndex;      // Which slab ByteAddressBuffer this page lives in.
+    uint slabByteOffset; // Byte offset of the page start within that slab.
+};
+
 struct ClusterLODGroupChunk
 {
-    uint vertexChunkByteOffset;
-    uint meshletVerticesBase;
+    // Group metadata
     uint groupVertexCount;
     uint meshletVertexCount;
     uint meshletBase;
     uint meshletCount;
-    uint meshletTrianglesByteOffset;
     uint meshletTrianglesByteCount;
     uint meshletBoundsBase;
     uint meshletBoundsCount;
 
-    uint compressedPositionWordsBase;
+    // Compressed group-local position stream (u32 bitstream words)
     uint compressedPositionWordCount;
     uint compressedPositionBitsX;
     uint compressedPositionBitsY;
@@ -42,13 +47,30 @@ struct ClusterLODGroupChunk
     int compressedPositionMinQy;
     int compressedPositionMinQz;
 
-    uint compressedNormalWordsBase;
+    // Compressed group-local normal stream (oct-encoded snorm16x2 packed into u32)
     uint compressedNormalWordCount;
 
-    uint compressedMeshletVertexWordsBase;
+    // Compressed group-local meshlet vertex index stream (u32 bitstream words)
     uint compressedMeshletVertexWordCount;
     uint compressedMeshletVertexBits;
     uint compressedFlags;
+
+    // Page-pool fields
+    // The 6 large data streams live in a unified slab ByteAddressBuffer
+    // addressed via the fields below.
+    // Meshlets and bounds stay in their global StructuredBuffers.
+    uint pagePoolSlabDescriptorIndex; // Descriptor-heap index of the slab BAB
+    uint pagePoolSlabByteOffset;      // Byte offset of allocation start in slab
+    uint vertexIntraPageByteOffset;
+    uint meshletVertexIntraPageByteOffset;
+    uint triangleIntraPageByteOffset;
+    uint compPosIntraPageByteOffset;
+    uint compNormIntraPageByteOffset;
+    uint compMeshletVertIntraPageByteOffset;
+    uint pagePoolPad0;
+    uint pagePoolPad1;
+    uint pagePoolPad2;
+    uint pagePoolPad3; // was pagePoolFlags
 };
 
 struct CLodStreamingRequest

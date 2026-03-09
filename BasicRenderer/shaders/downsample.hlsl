@@ -126,8 +126,6 @@ void SpdStoreIntermediate(AU1 x, AU1 y, AF4 value)
 #include "FidelityFX/ffx_spd.h"
 
 // Main function
-//--------------------------------------------------------------------------------------
-//--------------------------------------------------------------------------------------
 [numthreads(256, 1, 1)]
 void DownsampleCSMain(uint3 WorkGroupId : SV_GroupID, uint LocalThreadIndex : SV_GroupIndex)
 {

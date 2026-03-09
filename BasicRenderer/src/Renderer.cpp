@@ -242,6 +242,11 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
 
             object.perObjectCB.prevModelMatrix = object.perObjectCB.modelMatrix;
             object.perObjectCB.modelMatrix = mOut.matrix;
+
+            // Detect mirrored (negative-determinant) transforms and set the reverse-winding flag
+            XMVECTOR det = XMMatrixDeterminant(mOut.matrix);
+            object.perObjectCB.objectFlags = (XMVectorGetX(det) < 0.0f) ? OBJECT_FLAG_REVERSE_WINDING : 0u;
+
             m_managerInterface.GetObjectManager()->UpdatePerObjectBuffer(drawInfo.perObjectCBView.get(), object.perObjectCB);
 
             auto& modelMatrix = object.perObjectCB.modelMatrix;

@@ -187,7 +187,8 @@ struct PerObjectBuffer {
     row_major matrix model;
     row_major matrix prevModel;
     uint normalMatrixBufferIndex;
-    uint pad[3];
+    uint objectFlags;
+    uint pad[2];
 };
 
 struct PerMeshBuffer {

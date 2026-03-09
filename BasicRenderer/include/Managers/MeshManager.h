@@ -9,6 +9,7 @@
 #include "ShaderBuffers.h"
 #include "Mesh/Mesh.h"
 #include "Resources/Buffers/LazyDynamicStructuredBuffer.h"
+#include "Resources/Buffers/PagePool.h"
 #include "Interfaces/IResourceProvider.h"
 
 class Mesh;
@@ -48,7 +49,7 @@ public:
 		uint64_t completedResultBytes = 0;
 	};
 
-	/// Represents the outcome of a single disk-streamed group IO.
+	// Represents the outcome of a single disk-streamed group IO.
 	struct CLodDiskStreamingCompletion {
 		uint32_t groupGlobalIndex = 0;
 		bool success = false;
@@ -75,8 +76,8 @@ public:
 	void GetCLodCoarsestUniqueAssetGroupRanges(std::vector<CLodActiveGroupRange>& outRanges) const;
 	void GetCLodUniqueAssetParentMap(std::vector<int32_t>& outParentGroupByGlobal, uint32_t& outMaxGroupIndex) const;
 
-	/// Fused single-pass snapshot that combines GetCLodActiveUniqueAssetGroupRanges,
-	/// GetCLodCoarsestUniqueAssetGroupRanges, and GetCLodUniqueAssetParentMap.
+	// Fused single-pass snapshot that combines GetCLodActiveUniqueAssetGroupRanges,
+	// GetCLodCoarsestUniqueAssetGroupRanges, and GetCLodUniqueAssetParentMap.
 	struct CLodStreamingDomainSnapshot {
 		std::vector<CLodActiveGroupRange> activeRanges;
 		std::vector<CLodActiveGroupRange> coarsestRanges;
@@ -85,18 +86,18 @@ public:
 	};
 	void GetCLodStreamingDomainSnapshot(CLodStreamingDomainSnapshot& outSnapshot) const;
 
-	/// Returns true when mesh/instance adds or removes have changed the
-	/// streaming structure since the last call.  After returning true the
-	/// flag is cleared automatically so subsequent calls return false until
-	/// the next structural change.
+	// Returns true when mesh/instance adds or removes have changed the
+	// streaming structure since the last call.  After returning true the
+	// flag is cleared automatically so subsequent calls return false until
+	// the next structural change.
 	bool ConsumeCLodStreamingStructureDirty();
 
 	CLodStreamingDebugStats GetCLodStreamingDebugStats() const;
 	void ProcessCLodDiskStreamingIO(uint32_t maxCompletedRequests = 64u);
 
-	/// Drains groups that completed disk streaming since the last call.
-	/// The extension uses this to learn which groups became resident (or failed)
-	/// so it can update the GPU-visible non-resident bitset accordingly.
+	// Drains groups that completed disk streaming since the last call.
+	// The extension uses this to learn which groups became resident (or failed)
+	// so it can update the GPU-visible non-resident bitset accordingly.
 	void DrainCompletedCLodDiskStreamingGroups(std::vector<CLodDiskStreamingCompletion>& outCompletions);
 
 	void UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data);
@@ -115,9 +116,7 @@ private:
 	std::shared_ptr<DynamicBuffer> m_meshletOffsets; // meshopt_Meshlet
 	std::shared_ptr<DynamicBuffer> m_meshletVertexIndices; // 
 	std::shared_ptr<DynamicBuffer> m_meshletTriangles;
-	std::shared_ptr<DynamicBuffer> m_clodCompressedPositions;
-	std::shared_ptr<DynamicBuffer> m_clodCompressedNormals;
-	std::shared_ptr<DynamicBuffer> m_clodCompressedMeshletVertexIndices;
+
 	//std::shared_ptr<DynamicBuffer> m_meshletBoundsBuffer;
 	//std::shared_ptr<DynamicBuffer> m_meshletBitfieldBuffer;
 	//std::shared_ptr<DynamicBuffer> m_clusterToVisibleClusterTableIndexBuffer; // Used by visibility buffer, for drawcall indexing
@@ -141,24 +140,16 @@ private:
 
 	struct CLodSharedStreamingState {
 		struct ResidentGroupAllocations {
-			std::unique_ptr<BufferView> vertexChunk;
-			std::unique_ptr<BufferView> meshletVertexChunk;
-			std::unique_ptr<BufferView> compressedPositionWordChunk;
-			std::unique_ptr<BufferView> compressedNormalWordChunk;
-			std::unique_ptr<BufferView> compressedMeshletVertexWordChunk;
 			std::unique_ptr<BufferView> meshletChunk;
-			std::unique_ptr<BufferView> meshletTriangleChunk;
 			std::unique_ptr<BufferView> meshletBoundsChunk;
 
+			// Page-pool allocation (all 6 large streams live here)
+			PagePool::PageAllocation pageAllocation;
+
 			void Reset() {
-				vertexChunk.reset();
-				meshletVertexChunk.reset();
-				compressedPositionWordChunk.reset();
-				compressedNormalWordChunk.reset();
-				compressedMeshletVertexWordChunk.reset();
 				meshletChunk.reset();
-				meshletTriangleChunk.reset();
 				meshletBoundsChunk.reset();
+				pageAllocation.Reset();
 			}
 		};
 
@@ -195,7 +186,7 @@ private:
 	std::unordered_map<const Mesh*, std::shared_ptr<CLodSharedStreamingState>> m_clodSharedStreamingStateByMesh;
 	std::vector<CLodSharedStreamingRange> m_clodSharedStreamingRanges;
 	bool m_clodSharedStreamingRangesDirty = true;
-	/// Set whenever mesh/instance structural changes occur; consumed by CLodExtension.
+	// Set whenever mesh/instance structural changes occur; consumed by CLodExtension.
 	bool m_clodStreamingStructureDirty = true;
 
 	// Incremental debug-stats counters — updated in place by residency mutations.
@@ -232,7 +223,7 @@ private:
 	std::vector<CLodDiskStreamingResult> m_clodDiskStreamingResults;
 	std::vector<CLodDiskStreamingCompletion> m_clodDiskStreamingCompletions;
 
-	/// Maximum number of IO requests dispatched per ProcessCLodDiskStreamingIO call.
+	// Maximum number of IO requests dispatched per ProcessCLodDiskStreamingIO call.
 	static constexpr uint32_t kMaxIoBatchSize = 128u;
 
 	void DispatchCLodDiskStreamingBatch();
@@ -249,4 +240,13 @@ private:
 	std::shared_ptr<CLodSharedStreamingState> FindCLodSharedStreamingStateByGlobalGroup(uint32_t groupGlobalIndex, uint32_t& outGroupLocalIndex);
 
 	ViewManager* m_pViewManager;
+
+	// Page pool for CLod streaming
+	std::unique_ptr<PagePool> m_clodPagePool;
+
+	size_t PackGroupPayloadForPagePool(
+		const CLodDiskStreamingResult& result,
+		const Mesh* mesh,
+		std::vector<std::byte>& outBlob,
+		ClusterLODGroupChunk& inOutChunk);
 };

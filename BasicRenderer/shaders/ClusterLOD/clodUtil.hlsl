@@ -102,7 +102,7 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
     }
 }
 
-// --- Prefix sum for raster bucket histogram ---------------------------------
+// Prefix sum for raster bucket histogram
 
 static const uint CLOD_BUCKET_BLOCK_SIZE = 1024; // must be power-of-two
 static const uint CLOD_BUCKET_SCAN_THREADS = 256;

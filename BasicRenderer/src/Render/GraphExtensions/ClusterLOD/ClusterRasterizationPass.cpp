@@ -55,9 +55,6 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
             Builtin::MeshResources::MeshletTriangles,
             Builtin::MeshResources::MeshletVertexIndices,
             Builtin::MeshResources::MeshletOffsets,
-            Builtin::CLod::CompressedMeshletVertexIndices,
-            Builtin::CLod::CompressedPositions,
-            Builtin::CLod::CompressedNormals,
             m_compactedVisibleClustersBuffer,
             m_rasterBucketsHistogramBuffer,
             m_viewRasterInfoBuffer)
@@ -83,9 +80,6 @@ void ClusterRasterizationPass::Setup() {
     RegisterSRV(Builtin::PerMeshBuffer);
     RegisterSRV(Builtin::PerMaterialDataBuffer);
     RegisterSRV(Builtin::MeshResources::MeshletOffsets);
-    RegisterSRV(Builtin::CLod::CompressedMeshletVertexIndices);
-    RegisterSRV(Builtin::CLod::CompressedPositions);
-    RegisterSRV(Builtin::CLod::CompressedNormals);
     RegisterSRV(Builtin::CLod::MeshMetadata);
 }
 

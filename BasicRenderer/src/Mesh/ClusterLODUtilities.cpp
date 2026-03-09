@@ -816,17 +816,13 @@ namespace
 		output.groupMeshletTriangleChunk = output.meshletTriangles;
 		output.groupMeshletBoundsChunk = output.meshletBounds;
 
-		output.groupChunk.vertexChunkByteOffset = 0;
-		output.groupChunk.meshletVerticesBase = 0;
 		output.groupChunk.groupVertexCount = output.group.groupVertexCount;
 		output.groupChunk.meshletVertexCount = static_cast<uint32_t>(output.meshletVertices.size());
 		output.groupChunk.meshletBase = 0;
 		output.groupChunk.meshletCount = static_cast<uint32_t>(output.meshlets.size());
-		output.groupChunk.meshletTrianglesByteOffset = 0;
 		output.groupChunk.meshletTrianglesByteCount = static_cast<uint32_t>(output.meshletTriangles.size());
 		output.groupChunk.meshletBoundsBase = 0;
 		output.groupChunk.meshletBoundsCount = static_cast<uint32_t>(output.meshletBounds.size());
-		output.groupChunk.compressedPositionWordsBase = 0;
 		output.groupChunk.compressedPositionWordCount = static_cast<uint32_t>(output.compressedPositionWords.size());
 		output.groupChunk.compressedPositionBitsX = positionBitsX;
 		output.groupChunk.compressedPositionBitsY = positionBitsY;
@@ -835,9 +831,7 @@ namespace
 		output.groupChunk.compressedPositionMinQx = minQuantized[0];
 		output.groupChunk.compressedPositionMinQy = minQuantized[1];
 		output.groupChunk.compressedPositionMinQz = minQuantized[2];
-		output.groupChunk.compressedNormalWordsBase = 0;
 		output.groupChunk.compressedNormalWordCount = static_cast<uint32_t>(output.compressedNormalWords.size());
-		output.groupChunk.compressedMeshletVertexWordsBase = 0;
 		output.groupChunk.compressedMeshletVertexWordCount = static_cast<uint32_t>(output.compressedMeshletVertexWords.size());
 		output.groupChunk.compressedMeshletVertexBits = meshletVertexBits;
 		output.groupChunk.compressedFlags = CLOD_COMPRESSED_POSITIONS | CLOD_COMPRESSED_MESHLET_VERTEX_INDICES;

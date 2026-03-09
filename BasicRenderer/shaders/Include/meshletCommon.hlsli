@@ -58,9 +58,8 @@ struct MeshletSetup
     uint compressedFlags;
     uint postSkinningBufferOffset;
     uint prevPostSkinningBufferOffset;
-    // ByteAddressBuffer vertexBuffer;
-    // ByteAddressBuffer meshletTrianglesBuffer;
-    // StructuredBuffer<uint> meshletVerticesBuffer;
+    // Page-pool addressing (0 = non-CLod / not loaded)
+    uint pagePoolSlabDescriptorIndex;  // Descriptor-heap index of the slab ByteAddressBuffer
 };
 
 // Internal common initialization (indices already chosen)
@@ -113,6 +112,8 @@ bool InitializeMeshletInternal(
     // setup.vertexBuffer = vertexBuffer;
     // setup.meshletTrianglesBuffer = meshletTrianglesBuffer;
     // setup.meshletVerticesBuffer = meshletVerticesBuffer;
+
+    setup.pagePoolSlabDescriptorIndex = 0;
 
     uint postSkinningBase = meshInstance.postSkinningVertexBufferOffset;
     setup.postSkinningBufferOffset = postSkinningBase;
@@ -181,11 +182,7 @@ bool InitializeMeshletInternalCLod(
     setup.vertOffset = setup.meshlet.VertOffset;
     setup.groupVertexBase = 0;
     setup.groupVertexCount = groupChunk.groupVertexCount;
-    setup.groupVertexChunkByteOffset = groupChunk.vertexChunkByteOffset;
-    setup.groupMeshletVerticesBase = groupChunk.meshletVerticesBase;
     setup.groupMeshletVertexCount = groupChunk.meshletVertexCount;
-    setup.groupMeshletTrianglesByteOffset = groupChunk.meshletTrianglesByteOffset;
-    setup.compressedPositionWordsBase = groupChunk.compressedPositionWordsBase;
     setup.compressedPositionWordCount = groupChunk.compressedPositionWordCount;
     setup.compressedPositionBitsX = groupChunk.compressedPositionBitsX;
     setup.compressedPositionBitsY = groupChunk.compressedPositionBitsY;
@@ -195,9 +192,7 @@ bool InitializeMeshletInternalCLod(
         groupChunk.compressedPositionMinQx,
         groupChunk.compressedPositionMinQy,
         groupChunk.compressedPositionMinQz);
-    setup.compressedNormalWordsBase = groupChunk.compressedNormalWordsBase;
     setup.compressedNormalWordCount = groupChunk.compressedNormalWordCount;
-    setup.compressedMeshletVertexWordsBase = groupChunk.compressedMeshletVertexWordsBase;
     setup.compressedMeshletVertexWordCount = groupChunk.compressedMeshletVertexWordCount;
     setup.compressedMeshletVertexBits = groupChunk.compressedMeshletVertexBits;
     setup.compressedFlags = groupChunk.compressedFlags;
@@ -216,15 +211,23 @@ bool InitializeMeshletInternalCLod(
     // setup.meshletTrianglesBuffer = meshletTrianglesBuffer;
     // setup.meshletVerticesBuffer = meshletVerticesBuffer;
 
-    uint postSkinningBase = setup.meshInstanceBuffer.postSkinningVertexBufferOffset;
-    setup.postSkinningBufferOffset = postSkinningBase;
-    setup.prevPostSkinningBufferOffset = postSkinningBase;
-
-    if (setup.meshBuffer.vertexFlags & VERTEX_SKINNED)
+    // ── Page-pool addressing ─────────────────────────────────────────────
+    setup.pagePoolSlabDescriptorIndex = groupChunk.pagePoolSlabDescriptorIndex;
     {
-        uint stride = setup.meshBuffer.vertexByteSize * setup.meshBuffer.numVertices;
-        setup.postSkinningBufferOffset += stride * (perFrameBuffer.frameIndex % 2);
-        setup.prevPostSkinningBufferOffset += stride * ((perFrameBuffer.frameIndex + 1) % 2);
+        uint slabBase = groupChunk.pagePoolSlabByteOffset;
+        setup.groupVertexChunkByteOffset     = slabBase + groupChunk.vertexIntraPageByteOffset;
+        setup.groupMeshletVerticesBase       = (slabBase + groupChunk.meshletVertexIntraPageByteOffset) / 4u;
+        setup.groupMeshletTrianglesByteOffset = slabBase + groupChunk.triangleIntraPageByteOffset;
+        setup.compressedPositionWordsBase    = (slabBase + groupChunk.compPosIntraPageByteOffset) / 4u;
+        setup.compressedNormalWordsBase      = (slabBase + groupChunk.compNormIntraPageByteOffset) / 4u;
+        setup.compressedMeshletVertexWordsBase = (slabBase + groupChunk.compMeshletVertIntraPageByteOffset) / 4u;
+    }
+
+    // Vertex data lives in the slab.
+    {
+        uint slabBase = groupChunk.pagePoolSlabByteOffset;
+        setup.postSkinningBufferOffset     = slabBase + groupChunk.vertexIntraPageByteOffset;
+        setup.prevPostSkinningBufferOffset = setup.postSkinningBufferOffset;
     }
 
     if (setup.meshletIndex >= setup.meshBuffer.clodMeshletBufferOffset + setup.meshBuffer.clodNumMeshlets)
@@ -263,7 +266,12 @@ bool InitializeMeshletFromVisibleCluster(uint visibleClusterIndex, out MeshletSe
 
 uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
 {
-    ByteAddressBuffer meshletTrianglesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletTriangles)];
+    ByteAddressBuffer meshletTrianglesBuffer;
+    if (setup.pagePoolSlabDescriptorIndex != 0u)
+        meshletTrianglesBuffer = ResourceDescriptorHeap[setup.pagePoolSlabDescriptorIndex];
+    else
+        meshletTrianglesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletTriangles)];
+
     uint triOffset = setup.groupMeshletTrianglesByteOffset + setup.meshlet.TriOffset + triLocalIndex * 3;
     uint alignedOffset = (triOffset / 4) * 4;
     uint firstWord = meshletTrianglesBuffer.Load(alignedOffset);
