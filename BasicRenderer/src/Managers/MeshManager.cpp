@@ -424,28 +424,11 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 			chunk.compressedPositionWordCount = hint.compressedPositionWordCount;
 			chunk.compressedNormalWordCount = hint.compressedNormalWordCount;
 			chunk.compressedMeshletVertexWordCount = hint.compressedMeshletVertexWordCount;
-			bool hasRuntimeChunkData = true;
-			if (const auto* meshletView = mesh->GetMesh()->GetCLodMeshletChunkView(groupIndexU32); meshletView != nullptr)
-			{
-				chunk.meshletBase = static_cast<uint32_t>(meshletView->GetOffset() / sizeof(meshopt_Meshlet));
-			}
-			else {
-				hasRuntimeChunkData = false;
-			}
-			if (const auto* boundsView = mesh->GetMesh()->GetCLodMeshletBoundsChunkView(groupIndexU32); boundsView != nullptr)
-			{
-				chunk.meshletBoundsBase = static_cast<uint32_t>(boundsView->GetOffset() / sizeof(BoundingSphere));
-			}
-			else {
-				hasRuntimeChunkData = false;
-			}
 
-			// Vertex, meshlet-vertex, triangle, and compressed streams all live
-			// in the page-pool slab.  Groups start non-resident and become
-			// resident once streaming populates the slab allocation.
-			if (chunk.pagePoolSlabDescriptorIndex == 0u && chunk.meshletCount > 0u) {
-				hasRuntimeChunkData = false;
-			}
+			// All 8 data streams live in the page-pool slab. Groups start
+			// non-resident and become resident once streaming populates the
+			// slab allocation.
+			bool hasRuntimeChunkData = (chunk.pagePoolSlabDescriptorIndex != 0u || chunk.meshletCount == 0u);
 
 			baselineGroupChunks[groupIndex] = chunk;
 
@@ -673,10 +656,9 @@ bool MeshManager::QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodS
 	const auto& sourceChunk = groupChunkHints[groupLocalIndex];
 
 	// The page-pool path considers a group "ready" when the page allocation is valid
-	// and the global meshlet/bounds allocations are present.
+	// (meshlets + bounds are packed into the page-pool blob).
 	const bool hasRequiredAllocations = residentAllocations.pageAllocation.IsValid()
-		&& (sourceChunk.meshletCount == 0u || residentAllocations.meshletChunk != nullptr)
-		&& (sourceChunk.meshletBoundsCount == 0u || residentAllocations.meshletBoundsChunk != nullptr);
+		|| sourceChunk.meshletCount == 0u;
 
 	if (hasRequiredAllocations) {
 		return true;
@@ -745,26 +727,8 @@ bool MeshManager::ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult&
 		assert(false && "CLod streaming: non-zero meshletCount but empty meshletChunk");
 	}
 
-	// Meshlets + bounds stay in global StructuredBuffers
-	if (!result.meshletChunk.empty()) {
-		residentAllocations.meshletChunk = m_meshletOffsets->AddData(
-			result.meshletChunk.data(),
-			result.meshletChunk.size() * sizeof(meshopt_Meshlet),
-			sizeof(meshopt_Meshlet));
-	}
-	if (!result.meshletBoundsChunk.empty()) {
-		residentAllocations.meshletBoundsChunk = m_clusterLODMeshletBounds->AddData(
-			result.meshletBoundsChunk.data(),
-			result.meshletBoundsChunk.size() * sizeof(BoundingSphere),
-			sizeof(BoundingSphere));
-	}
-
-	if (residentAllocations.meshletChunk != nullptr) {
-		chunk.meshletBase = static_cast<uint32_t>(residentAllocations.meshletChunk->GetOffset() / sizeof(meshopt_Meshlet));
-	}
-	if (residentAllocations.meshletBoundsChunk != nullptr) {
-		chunk.meshletBoundsBase = static_cast<uint32_t>(residentAllocations.meshletBoundsChunk->GetOffset() / sizeof(BoundingSphere));
-	}
+	// Meshlets + bounds are packed into the page-pool blob (streams 7 & 8)
+	// — no global StructuredBuffer uploads needed.
 
 	// Pack data streams into a contiguous page-pool blob
 	std::vector<std::byte> blob;
@@ -784,8 +748,6 @@ bool MeshManager::ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult&
 		if (!pageAlloc.IsValid()) {
 			spdlog::error("CLod streaming: failed to allocate {} pages for group {}",
 						  pagesNeeded, result.groupGlobalIndex);
-			m_meshletOffsets->Deallocate(residentAllocations.meshletChunk.get());
-			m_clusterLODMeshletBounds->Deallocate(residentAllocations.meshletBoundsChunk.get());
 			residentAllocations.Reset();
 			return false;
 		}
@@ -811,11 +773,8 @@ bool MeshManager::ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult&
 
 	// Debug stats
 	{
-		auto sz = [](const std::unique_ptr<BufferView>& v) -> uint64_t { return v ? static_cast<uint64_t>(v->GetSize()) : 0ull; };
-		m_debugResidentAllocations += 3u; // 1 page alloc + meshlet + bounds global allocs
-		m_debugResidentAllocationBytes += blobSize
-			+ sz(residentAllocations.meshletChunk)
-			+ sz(residentAllocations.meshletBoundsChunk);
+		m_debugResidentAllocations += 1u; // page alloc only (meshlets + bounds in page pool)
+		m_debugResidentAllocationBytes += blobSize;
 		m_debugResidentGroups++;
 	}
 
@@ -853,11 +812,8 @@ void MeshManager::DeallocateCLodGroupChunkAllocations(CLodSharedStreamingState& 
 
 	auto& residentAllocations = state.residentGroupAllocations[groupLocalIndex];
 
-	// Free pages for the 6 paged streams.
+	// Free pages for all 8 paged streams.
 	m_clodPagePool->FreePages(residentAllocations.pageAllocation);
-	// Meshlets and bounds still live in their global StructuredBuffers.
-	m_meshletOffsets->Deallocate(residentAllocations.meshletChunk.get());
-	m_clusterLODMeshletBounds->Deallocate(residentAllocations.meshletBoundsChunk.get());
 
 	// Clear page-pool fields in the baseline chunk so the shader sees zeros.
 	if (groupLocalIndex < state.baselineGroupChunks.size()) {
@@ -909,7 +865,6 @@ bool MeshManager::ApplyCLodGroupResidency(CLodSharedStreamingState& state, uint3
 		const bool invalidChunk =
 			(chunk.meshletCount > 0u && chunk.meshletVertexCount == 0u)
 			|| (chunk.meshletCount > 0u && chunk.meshletTrianglesByteCount == 0u)
-			|| (chunk.meshletBoundsCount > 0u && chunk.meshletBase == 0u && chunk.meshletCount > 0u)
 			|| (chunk.meshletCount > 0u && chunk.pagePoolSlabDescriptorIndex == 0u);
 		if (invalidChunk) {
 			spdlog::error(
@@ -936,15 +891,10 @@ bool MeshManager::ApplyCLodGroupResidency(CLodSharedStreamingState& state, uint3
 		if (groupLocalIndex < state.residentGroupAllocations.size()) {
 			auto& allocs = state.residentGroupAllocations[groupLocalIndex];
 			auto countAllocs = [](const CLodSharedStreamingState::ResidentGroupAllocations& a) -> uint32_t {
-				uint32_t c = 0u;
-				c += a.pageAllocation.IsValid() ? 1u : 0u;
-				c += a.meshletChunk ? 1u : 0u;
-				c += a.meshletBoundsChunk ? 1u : 0u;
-				return c;
+				return a.pageAllocation.IsValid() ? 1u : 0u;
 			};
 			auto sumAllocBytes = [](const CLodSharedStreamingState::ResidentGroupAllocations& a) -> uint64_t {
-				auto sz = [](const std::unique_ptr<BufferView>& v) -> uint64_t { return v ? static_cast<uint64_t>(v->GetSize()) : 0ull; };
-				return sz(a.meshletChunk) + sz(a.meshletBoundsChunk);
+				return 0ull; // All data lives in page pool; byte accounting is in the page allocation itself.
 			};
 			const uint32_t ac = countAllocs(allocs);
 			const uint64_t ab = sumAllocBytes(allocs);
@@ -1286,10 +1236,8 @@ size_t MeshManager::PackGroupPayloadForPagePool(
 	std::vector<std::byte>& outBlob,
 	ClusterLODGroupChunk& inOutChunk)
 {
-	// Pack the 6 large data streams into a single contiguous blob with 4-byte
-	// alignment per stream.  Meshlets and bounds stay in their global
-	// StructuredBuffers (small, and the visibility-buffer pipeline depends on
-	// globally-unique meshlet indices).
+	// Pack the 8 data streams into a single contiguous blob with 4-byte
+	// alignment per stream.
 	//
 	// Record the byte offset of each stream relative to the start of the blob
 	// in the chunk's intra-page-offset fields.
@@ -1347,7 +1295,17 @@ size_t MeshManager::PackGroupPayloadForPagePool(
 		appendStream(result.compressedMeshletVertexWordChunk.data(), bytes, inOutChunk.compMeshletVertIntraPageByteOffset);
 	}
 
-	// Meshlets and bounds are NOT packed here — they go to global buffers.
+	// 7. Meshlet offsets (meshopt_Meshlet, 16 bytes each)
+	{
+		const size_t bytes = result.meshletChunk.size() * sizeof(meshopt_Meshlet);
+		appendStream(result.meshletChunk.data(), bytes, inOutChunk.meshletIntraPageByteOffset);
+	}
+
+	// 8. Meshlet bounds (BoundingSphere, 16 bytes each)
+	{
+		const size_t bytes = result.meshletBoundsChunk.size() * sizeof(BoundingSphere);
+		appendStream(result.meshletBoundsChunk.data(), bytes, inOutChunk.boundsIntraPageByteOffset);
+	}
 
 	// Final size (4-byte aligned for good measure).
 	outBlob.resize(align4(outBlob.size()));

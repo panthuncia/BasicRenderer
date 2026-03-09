@@ -26,6 +26,14 @@ Meshlet LoadMeshlet(uint4 raw)
     return m;
 }
 
+// Load a Meshlet from a page-pool slab ByteAddressBuffer.
+// meshletByteAddr = slabByteOffset + meshletIntraPageByteOffset + localMeshletIndex * 16
+Meshlet LoadMeshletFromSlab(uint slabDescriptorIndex, uint meshletByteAddr)
+{
+    ByteAddressBuffer slabBuffer = ResourceDescriptorHeap[slabDescriptorIndex];
+    return LoadMeshlet(slabBuffer.Load4(meshletByteAddr));
+}
+
 struct MeshletSetup
 {
     uint viewID; // Which view this meshlet is being rendered for (for CLod path)
@@ -144,13 +152,12 @@ bool InitializeMeshletInternalCLod(
     VisibleCluster cluster = visibleClusters[visibleMeshletIndex];
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
 
-    setup.meshletIndex = cluster.globalMeshletIndex;
+    setup.meshletIndex = cluster.localMeshletIndex;
     setup.meshInstanceBuffer =  meshInstanceBuffer[cluster.instanceID];
     setup.viewID = cluster.viewID;
 
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
-    StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletOffsets)];
     StructuredBuffer<MeshInstanceClodOffsets> clodOffsets = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
     StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
     StructuredBuffer<ClusterLODGroupChunk> groupChunks = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::GroupChunks)];
@@ -168,14 +175,18 @@ bool InitializeMeshletInternalCLod(
 
     ClusterLODGroupChunk groupChunk = groupChunks[clodMeshMetadata.groupChunkTableBase + cluster.groupID];
 
-    uint meshletStart = groupChunk.meshletBase;
-    uint meshletEnd = groupChunk.meshletBase + groupChunk.meshletCount;
-    if (setup.meshletIndex < meshletStart || setup.meshletIndex >= meshletEnd)
+    // meshletIndex is group-local
+    if (setup.meshletIndex >= groupChunk.meshletCount)
     {
         return false;
     }
 
-    setup.meshlet = meshletBuffer[setup.meshletIndex];
+    // Load meshlet from the page-pool slab
+    {
+        uint slabBase = groupChunk.pagePoolSlabByteOffset;
+        uint meshletAddr = slabBase + groupChunk.meshletIntraPageByteOffset + setup.meshletIndex * 16u;
+        setup.meshlet = LoadMeshletFromSlab(groupChunk.pagePoolSlabDescriptorIndex, meshletAddr);
+    }
 
     setup.vertCount = setup.meshlet.VertCount;
     setup.triCount = setup.meshlet.TriCount;
@@ -228,11 +239,6 @@ bool InitializeMeshletInternalCLod(
         uint slabBase = groupChunk.pagePoolSlabByteOffset;
         setup.postSkinningBufferOffset     = slabBase + groupChunk.vertexIntraPageByteOffset;
         setup.prevPostSkinningBufferOffset = setup.postSkinningBufferOffset;
-    }
-
-    if (setup.meshletIndex >= setup.meshBuffer.clodMeshletBufferOffset + setup.meshBuffer.clodNumMeshlets)
-    {
-        return false;
     }
 
     return true;

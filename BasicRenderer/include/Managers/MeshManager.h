@@ -140,15 +140,10 @@ private:
 
 	struct CLodSharedStreamingState {
 		struct ResidentGroupAllocations {
-			std::unique_ptr<BufferView> meshletChunk;
-			std::unique_ptr<BufferView> meshletBoundsChunk;
-
-			// Page-pool allocation (all 6 large streams live here)
+			// Page-pool allocation (all 8 data streams live here)
 			PagePool::PageAllocation pageAllocation;
 
 			void Reset() {
-				meshletChunk.reset();
-				meshletBoundsChunk.reset();
 				pageAllocation.Reset();
 			}
 		};

@@ -818,10 +818,8 @@ namespace
 
 		output.groupChunk.groupVertexCount = output.group.groupVertexCount;
 		output.groupChunk.meshletVertexCount = static_cast<uint32_t>(output.meshletVertices.size());
-		output.groupChunk.meshletBase = 0;
 		output.groupChunk.meshletCount = static_cast<uint32_t>(output.meshlets.size());
 		output.groupChunk.meshletTrianglesByteCount = static_cast<uint32_t>(output.meshletTriangles.size());
-		output.groupChunk.meshletBoundsBase = 0;
 		output.groupChunk.meshletBoundsCount = static_cast<uint32_t>(output.meshletBounds.size());
 		output.groupChunk.compressedPositionWordCount = static_cast<uint32_t>(output.compressedPositionWords.size());
 		output.groupChunk.compressedPositionBitsX = positionBitsX;

@@ -496,14 +496,13 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
 
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
 
-    setup.meshletIndex = cluster.globalMeshletIndex;
+    setup.meshletIndex = cluster.localMeshletIndex;
     setup.meshInstanceBuffer = meshInstanceBuffer[cluster.instanceID];
     setup.viewID = cluster.viewID;
 
     // TODO: Fetch only necessary data for visibility buffer
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
-    StructuredBuffer<Meshlet> meshletBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletOffsets)];
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
 
     setup.meshBuffer = perMeshBuffer[setup.meshInstanceBuffer.perMeshBufferIndex];
@@ -551,14 +550,18 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
         setup.compressedMeshletVertexWordsBase = (slabBase + groupChunk.compMeshletVertIntraPageByteOffset) / 4u;
     }
 
-    uint meshletStart = groupChunk.meshletBase;
-    uint meshletEnd = groupChunk.meshletBase + groupChunk.meshletCount;
-    if (setup.meshletIndex < meshletStart || setup.meshletIndex >= meshletEnd)
+    // meshletIndex is now group-local
+    if (setup.meshletIndex >= groupChunk.meshletCount)
     {
         return false;
     }
 
-    setup.meshlet = meshletBuffer[setup.meshletIndex];
+    // Load meshlet from the page-pool slab
+    {
+        uint slabBase = groupChunk.pagePoolSlabByteOffset;
+        uint meshletAddr = slabBase + groupChunk.meshletIntraPageByteOffset + setup.meshletIndex * 16u;
+        setup.meshlet = LoadMeshletFromSlab(groupChunk.pagePoolSlabDescriptorIndex, meshletAddr);
+    }
 
     setup.vertCount = setup.meshlet.VertCount;
     setup.triCount = setup.meshlet.TriCount;

@@ -277,9 +277,6 @@ struct SkinningInstanceGPUInfo {
 struct MeshInstanceClodOffsets
 {
     uint clodMeshMetadataIndex;
-    uint pad0;
-    uint pad1;
-    uint pad2;
 };
 
 struct CLodMeshMetadata
@@ -292,22 +289,20 @@ struct CLodMeshMetadata
     uint groupChunkTableCount;
 };
 
-/// GPU-visible page table entry — maps a virtual page ID to a slab + byte offset.
+// GPU-visible page table entry - maps a virtual page ID to a slab + byte offset.
 struct PageTableEntry
 {
-    uint32_t slabIndex      = 0; ///< Which slab ByteAddressBuffer this page lives in.
-    uint32_t slabByteOffset = 0; ///< Byte offset of the page start within that slab.
+    uint32_t slabIndex      = 0; // Which slab ByteAddressBuffer this page lives in.
+    uint32_t slabByteOffset = 0; // Byte offset of the page start within that slab.
 };
 
 struct ClusterLODGroupChunk
 {
-    // ── Group metadata ────────────────────────────────────────────────────
+    // Group metadata
     uint32_t groupVertexCount = 0;
     uint32_t meshletVertexCount = 0;
-    uint32_t meshletBase = 0;
     uint32_t meshletCount = 0;
     uint32_t meshletTrianglesByteCount = 0;
-    uint32_t meshletBoundsBase = 0;
     uint32_t meshletBoundsCount = 0;
 
     // Compressed group-local position stream (u32 bitstream words)
@@ -328,27 +323,24 @@ struct ClusterLODGroupChunk
     uint32_t compressedMeshletVertexBits = 0;
     uint32_t compressedFlags = 0;
 
-    // ── Page-pool fields ────────────────────────────────────────────────
-    // The 6 large data streams (vertices, meshlet vertex indices, triangles,
-    // compressed positions/normals/meshlet vertices) are stored in a
-    // unified slab ByteAddressBuffer.  Meshlets and bounds stay in their
-    // global StructuredBuffers.
+    // Page-pool fields 
+    // All 8 data streams (vertices, meshlet vertex indices, triangles,
+    // compressed positions/normals/meshlet vertices, meshlets, bounds)
+    // are stored in a unified slab ByteAddressBuffer.
     //
     // The slab descriptor index + base byte offset are resolved on the CPU
     // and stored here so the shader can bind the slab directly without a
     // page-table lookup.
-    uint32_t pagePoolSlabDescriptorIndex = 0;         ///< Raw descriptor-heap index of the slab BAB.
-    uint32_t pagePoolSlabByteOffset = 0;              ///< Byte offset of allocation start within the slab.
-    uint32_t vertexIntraPageByteOffset = 0;           ///< Byte offset within allocation for vertex data.
-    uint32_t meshletVertexIntraPageByteOffset = 0;    ///< Byte offset within allocation for meshlet vertex indices.
-    uint32_t triangleIntraPageByteOffset = 0;         ///< Byte offset within allocation for triangle data.
-    uint32_t compPosIntraPageByteOffset = 0;          ///< Byte offset within allocation for compressed positions.
-    uint32_t compNormIntraPageByteOffset = 0;         ///< Byte offset within allocation for compressed normals.
-    uint32_t compMeshletVertIntraPageByteOffset = 0;  ///< Byte offset within allocation for compressed meshlet vertex indices.
-    uint32_t pagePoolPad0 = 0;                        ///< Padding to 16-byte alignment.
-    uint32_t pagePoolPad1 = 0;                        ///< Padding.
-    uint32_t pagePoolPad2 = 0;                        ///< Padding.
-    uint32_t pagePoolPad3 = 0;                        ///< Padding (was pagePoolFlags).
+    uint32_t pagePoolSlabDescriptorIndex = 0;         // Raw descriptor-heap index of the slab BAB.
+    uint32_t pagePoolSlabByteOffset = 0;              // Byte offset of allocation start within the slab.
+    uint32_t vertexIntraPageByteOffset = 0;           // Byte offset within allocation for vertex data.
+    uint32_t meshletVertexIntraPageByteOffset = 0;    // Byte offset within allocation for meshlet vertex indices.
+    uint32_t triangleIntraPageByteOffset = 0;         // Byte offset within allocation for triangle data.
+    uint32_t compPosIntraPageByteOffset = 0;          // Byte offset within allocation for compressed positions.
+    uint32_t compNormIntraPageByteOffset = 0;         // Byte offset within allocation for compressed normals.
+    uint32_t compMeshletVertIntraPageByteOffset = 0;  // Byte offset within allocation for compressed meshlet vertex indices.
+    uint32_t meshletIntraPageByteOffset = 0;          // Byte offset within allocation for meshlet offsets.
+    uint32_t boundsIntraPageByteOffset = 0;           // Byte offset within allocation for meshlet bounds.
 };
 
 struct CLodStreamingRequest
@@ -450,7 +442,7 @@ struct CLodMultiNodeGpuInput {
 struct VisibleCluster {
     unsigned int viewID;
     unsigned int instanceID;
-    unsigned int globalMeshletIndex;
+    unsigned int localMeshletIndex;
     unsigned int groupID;
 };
 

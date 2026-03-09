@@ -306,12 +306,10 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
         StructuredBuffer<ClusterLODGroupChunk> groupChunks =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::GroupChunks)];
-        StructuredBuffer<Meshlet> meshletBuffer =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletOffsets)];
 
         VisibleCluster clusterData = visibleClusterBuffer[clusterIndex];
         d.drawcallAndMeshlet.x = clusterData.instanceID;
-        d.drawcallAndMeshlet.y = clusterData.globalMeshletIndex;
+        d.drawcallAndMeshlet.y = clusterData.localMeshletIndex;
 
         PerMeshInstanceBuffer inst = perMeshInstanceBuffer[d.drawcallAndMeshlet.x];
         d.objAndMesh = uint2(inst.perObjectBufferIndex, inst.perMeshBufferIndex);
@@ -350,11 +348,12 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
         }
 
         Meshlet m = (Meshlet)0;
-        const uint meshletStart = groupChunk.meshletBase;
-        const uint meshletEnd = groupChunk.meshletBase + groupChunk.meshletCount;
-        if (d.drawcallAndMeshlet.y >= meshletStart && d.drawcallAndMeshlet.y < meshletEnd)
+        // localMeshletIndex is group-local; load from slab
+        if (d.drawcallAndMeshlet.y < groupChunk.meshletCount)
         {
-            m = meshletBuffer[d.drawcallAndMeshlet.y];
+            uint slabBase = groupChunk.pagePoolSlabByteOffset;
+            uint meshletAddr = slabBase + groupChunk.meshletIntraPageByteOffset + d.drawcallAndMeshlet.y * 16u;
+            m = LoadMeshletFromSlab(groupChunk.pagePoolSlabDescriptorIndex, meshletAddr);
             if (m.VertOffset + m.VertCount > groupChunk.meshletVertexCount
                 || m.TriOffset + m.TriCount * 3u > groupChunk.meshletTrianglesByteCount)
             {

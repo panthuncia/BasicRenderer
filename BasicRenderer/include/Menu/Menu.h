@@ -1193,7 +1193,7 @@ inline void Menu::TryFinalizeCLodCaptureStats(uint64_t captureId) {
         const VisibleCluster& cluster = m_clodCapturePendingClusters[i];
         viewHistogram[cluster.viewID]++;
         instanceHistogram[cluster.instanceID]++;
-        const uint64_t key = (static_cast<uint64_t>(cluster.instanceID) << 32ull) | static_cast<uint64_t>(cluster.globalMeshletIndex);
+        const uint64_t key = (static_cast<uint64_t>(cluster.instanceID) << 32ull) | (static_cast<uint64_t>(cluster.groupID) << 16ull) | static_cast<uint64_t>(cluster.localMeshletIndex);
         uniqueMeshlets.insert(key);
     }
 

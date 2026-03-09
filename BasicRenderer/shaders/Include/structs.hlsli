@@ -407,7 +407,7 @@ struct VisibleCluster
 {
     unsigned int viewID;
     unsigned int instanceID;
-    unsigned int globalMeshletIndex;
+    unsigned int localMeshletIndex;
     unsigned int groupID;
 };
 

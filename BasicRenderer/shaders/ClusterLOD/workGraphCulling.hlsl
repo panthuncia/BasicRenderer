@@ -986,7 +986,7 @@ void WG_ClusterCullBuckets(
         WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_ACTIVE_LANES, inRangeLaneCount);
     }
 
-    uint globalMeshletIndex = 0;
+    uint localMeshletIndex = 0;
     bool survives = false;
 
     if (inRange) {
@@ -1013,9 +1013,6 @@ void WG_ClusterCullBuckets(
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
         const Camera camera = cameras[b.viewId];
 
-        StructuredBuffer<BoundingSphere> meshletBoundsBuffer =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshletBounds)];
-
         if (b.groupId >= clodMeshMetadata.groupChunkTableCount) {
             survives = false;
         }
@@ -1027,9 +1024,13 @@ void WG_ClusterCullBuckets(
             survives = false;
         }
         else {
-        globalMeshletIndex = groupChunk.meshletBase + localMeshlet;
+        localMeshletIndex = localMeshlet;
 
-        const BoundingSphere meshletBounds = meshletBoundsBuffer[groupChunk.meshletBoundsBase + localMeshlet];
+        // Load bounds from the page-pool slab ByteAddressBuffer
+        ByteAddressBuffer slabBuffer = ResourceDescriptorHeap[groupChunk.pagePoolSlabDescriptorIndex];
+        const uint boundsAddr = groupChunk.pagePoolSlabByteOffset + groupChunk.boundsIntraPageByteOffset + localMeshlet * 16u;
+        const float4 boundsSphere = asfloat(slabBuffer.Load4(boundsAddr));
+        const BoundingSphere meshletBounds = { boundsSphere };
         const float3 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, camera.view);
         const float meshletRadiusWorld = meshletBounds.sphere.w * MaxAxisScale_RowVector(objectModelMatrix);
 
@@ -1109,7 +1110,7 @@ void WG_ClusterCullBuckets(
 
             VisibleCluster vc = (VisibleCluster) 0;
             vc.instanceID = b.instanceIndex;
-            vc.globalMeshletIndex = globalMeshletIndex;
+            vc.localMeshletIndex = localMeshletIndex;
             vc.viewID = b.viewId;
             vc.groupID = b.groupId;
             visibleClusters[index] = vc;

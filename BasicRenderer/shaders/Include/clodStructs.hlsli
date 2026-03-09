@@ -4,9 +4,6 @@
 struct MeshInstanceClodOffsets
 {
     uint clodMeshMetadataIndex;
-    uint pad0;
-    uint pad1;
-    uint pad2;
 };
 
 struct CLodMeshMetadata
@@ -31,10 +28,8 @@ struct ClusterLODGroupChunk
     // Group metadata
     uint groupVertexCount;
     uint meshletVertexCount;
-    uint meshletBase;
     uint meshletCount;
     uint meshletTrianglesByteCount;
-    uint meshletBoundsBase;
     uint meshletBoundsCount;
 
     // Compressed group-local position stream (u32 bitstream words)
@@ -56,9 +51,8 @@ struct ClusterLODGroupChunk
     uint compressedFlags;
 
     // Page-pool fields
-    // The 6 large data streams live in a unified slab ByteAddressBuffer
+    // All 8 data streams live in a unified slab ByteAddressBuffer
     // addressed via the fields below.
-    // Meshlets and bounds stay in their global StructuredBuffers.
     uint pagePoolSlabDescriptorIndex; // Descriptor-heap index of the slab BAB
     uint pagePoolSlabByteOffset;      // Byte offset of allocation start in slab
     uint vertexIntraPageByteOffset;
@@ -67,10 +61,8 @@ struct ClusterLODGroupChunk
     uint compPosIntraPageByteOffset;
     uint compNormIntraPageByteOffset;
     uint compMeshletVertIntraPageByteOffset;
-    uint pagePoolPad0;
-    uint pagePoolPad1;
-    uint pagePoolPad2;
-    uint pagePoolPad3; // was pagePoolFlags
+    uint meshletIntraPageByteOffset;
+    uint boundsIntraPageByteOffset;
 };
 
 struct CLodStreamingRequest
