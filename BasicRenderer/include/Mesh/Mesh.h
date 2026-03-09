@@ -84,7 +84,7 @@ struct ClusterLODCacheSource
 
 // ---- Voxel group data model ----
 
-/// A single active cell in a voxel grid.
+// A single active cell in a voxel grid.
 struct VoxelCell
 {
 	uint32_t x = 0;       // Cell grid coordinate
@@ -93,8 +93,8 @@ struct VoxelCell
 	float    opacity = 0.0f; // Fraction of rays that hit geometry [0,1]
 };
 
-/// Per-group voxel payload. Each voxel group in the hierarchy stores one of these.
-/// Contains the sparse voxel grid at a single resolution that this group represents.
+// Per-group voxel payload. Each voxel group in the hierarchy stores one of these.
+// Contains the sparse voxel grid at a single resolution that this group represents.
 struct VoxelGroupPayload
 {
 	uint32_t resolution = 0;           // Cells per axis for this group's grid
@@ -103,7 +103,7 @@ struct VoxelGroupPayload
 	std::vector<VoxelCell> activeCells; // Sparse list of non-empty cells
 };
 
-/// Mapping from group index to voxel payload index (-1 for non-voxel groups).
+// Mapping from group index to voxel payload index (-1 for non-voxel groups).
 struct VoxelGroupMapping
 {
 	std::vector<int32_t> groupToPayloadIndex;       // Per-group: index into payloads[], or -1

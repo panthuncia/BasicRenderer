@@ -47,17 +47,17 @@ bool Save(const CacheKey& key, uint64_t buildConfigHash, const ClusterLODPrebuil
 bool LoadGroupPayload(const CacheData& cacheData, uint32_t groupLocalIndex, LoadedGroupPayload& outPayload);
 bool LoadGroupPayload(const ClusterLODCacheSource& cacheSource, uint32_t groupLocalIndex, LoadedGroupPayload& outPayload);
 
-/// Load a single group payload from an already-opened container stream using a
-/// pre-resolved disk locator. Avoids re-opening the file and re-reading the
-/// directory for every request, giving a large throughput improvement when many
-/// groups are streamed from the same container.
+// Load a single group payload from an already-opened container stream using a
+// pre-resolved disk locator. Avoids re-opening the file and re-reading the
+// directory for every request, giving a large throughput improvement when many
+// groups are streamed from the same container.
 bool LoadGroupPayloadDirect(std::ifstream& file,
 	const ClusterLODGroupDiskLocator& locator,
 	LoadedGroupPayload& outPayload);
 
-/// Open a container file and validate its header.  Returns true on success.
-/// The caller keeps the ifstream around for repeated LoadGroupPayloadDirect
-/// calls, avoiding per-request open/close overhead.
+// Open a container file and validate its header.  Returns true on success.
+// The caller keeps the ifstream around for repeated LoadGroupPayloadDirect
+// calls, avoiding per-request open/close overhead.
 bool OpenContainerFile(const ClusterLODCacheSource& cacheSource,
 	std::ifstream& outFile,
 	uint32_t& outGroupCount);

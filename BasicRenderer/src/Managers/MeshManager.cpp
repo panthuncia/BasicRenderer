@@ -206,8 +206,11 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 			m_clodDiskStreamingQueuedGroups.erase(result.groupGlobalIndex);
 		}
 	}
-	for (auto& result : results) {
-		m_clodDiskStreamingResults.push_back(std::move(result));
+	{
+		std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
+		for (auto& result : results) {
+			m_clodDiskStreamingResults.push_back(std::move(result));
+		}
 	}
 }
 
@@ -567,15 +570,41 @@ void MeshManager::ProcessCLodDiskStreamingIO(uint32_t maxCompletedRequests) {
 	// task scheduler's thread pool. This replaces the old single-threaded worker.
 	DispatchCLodDiskStreamingBatch();
 
-	// Now apply completed results (from this dispatch and any previous ones).
-	const uint32_t toDrain = std::min<uint32_t>(maxCompletedRequests, static_cast<uint32_t>(m_clodDiskStreamingResults.size()));
-	for (uint32_t i = 0; i < toDrain; ++i) {
-		auto& result = m_clodDiskStreamingResults[i];
-		const bool applied = ApplyCompletedCLodDiskStreamingResult(result);
-		m_clodDiskStreamingCompletions.push_back({ result.groupGlobalIndex, applied });
+	// Drain completed results into a local vector under the results lock so the
+	// IO thread (once moved to background) can continue pushing results.
+	std::vector<CLodDiskStreamingResult> localResults;
+	{
+		std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
+		const uint32_t toDrain = std::min<uint32_t>(maxCompletedRequests,
+			static_cast<uint32_t>(m_clodDiskStreamingResults.size()));
+		if (toDrain > 0u) {
+			localResults.reserve(toDrain);
+			for (uint32_t i = 0; i < toDrain; ++i) {
+				localResults.push_back(std::move(m_clodDiskStreamingResults[i]));
+			}
+			m_clodDiskStreamingResults.erase(m_clodDiskStreamingResults.begin(),
+				m_clodDiskStreamingResults.begin() + toDrain);
+		}
 	}
-	m_clodDiskStreamingResults.erase(m_clodDiskStreamingResults.begin(),
-		m_clodDiskStreamingResults.begin() + toDrain);
+
+	// Apply each result under the residency lock and record completions.
+	if (!localResults.empty()) {
+		std::vector<CLodDiskStreamingCompletion> newCompletions;
+		newCompletions.reserve(localResults.size());
+		{
+			std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
+			for (auto& result : localResults) {
+				const bool applied = ApplyCompletedCLodDiskStreamingResult(result);
+				newCompletions.push_back({ result.groupGlobalIndex, applied });
+			}
+		}
+		{
+			std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
+			for (auto& c : newCompletions) {
+				m_clodDiskStreamingCompletions.push_back(std::move(c));
+			}
+		}
+	}
 }
 
 void MeshManager::RebuildCLodSharedStreamingRangeIndex() {
@@ -773,9 +802,9 @@ bool MeshManager::ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult&
 
 	// Debug stats
 	{
-		m_debugResidentAllocations += 1u; // page alloc only (meshlets + bounds in page pool)
-		m_debugResidentAllocationBytes += blobSize;
-		m_debugResidentGroups++;
+		m_debugResidentAllocations.fetch_add(1u, std::memory_order_relaxed);
+		m_debugResidentAllocationBytes.fetch_add(blobSize, std::memory_order_relaxed);
+		m_debugResidentGroups.fetch_add(1u, std::memory_order_relaxed);
 	}
 
 	UploadCLodGroupChunkTable(*sharedState);
@@ -783,6 +812,7 @@ bool MeshManager::ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult&
 }
 
 void MeshManager::DrainCompletedCLodDiskStreamingGroups(std::vector<CLodDiskStreamingCompletion>& outCompletions) {
+	std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
 	outCompletions = std::move(m_clodDiskStreamingCompletions);
 	m_clodDiskStreamingCompletions.clear();
 }
@@ -884,9 +914,12 @@ bool MeshManager::ApplyCLodGroupResidency(CLodSharedStreamingState& state, uint3
 
 	state.groupResidentFlags[groupLocalIndex] = resident ? 1u : 0u;
 	if (resident) {
-		m_debugResidentGroups++;
+		m_debugResidentGroups.fetch_add(1u, std::memory_order_relaxed);
 	} else {
-		if (m_debugResidentGroups > 0u) m_debugResidentGroups--;
+		{
+			uint32_t prev = m_debugResidentGroups.load(std::memory_order_relaxed);
+			if (prev > 0u) m_debugResidentGroups.store(prev - 1u, std::memory_order_relaxed);
+		}
 		// Subtract allocation stats before deallocation zeroes the views.
 		if (groupLocalIndex < state.residentGroupAllocations.size()) {
 			auto& allocs = state.residentGroupAllocations[groupLocalIndex];
@@ -898,8 +931,14 @@ bool MeshManager::ApplyCLodGroupResidency(CLodSharedStreamingState& state, uint3
 			};
 			const uint32_t ac = countAllocs(allocs);
 			const uint64_t ab = sumAllocBytes(allocs);
-			m_debugResidentAllocations = (m_debugResidentAllocations >= ac) ? (m_debugResidentAllocations - ac) : 0u;
-			m_debugResidentAllocationBytes = (m_debugResidentAllocationBytes >= ab) ? (m_debugResidentAllocationBytes - ab) : 0ull;
+			{
+				uint32_t prevAllocs = m_debugResidentAllocations.load(std::memory_order_relaxed);
+				m_debugResidentAllocations.store((prevAllocs >= ac) ? (prevAllocs - ac) : 0u, std::memory_order_relaxed);
+			}
+			{
+				uint64_t prevBytes = m_debugResidentAllocationBytes.load(std::memory_order_relaxed);
+				m_debugResidentAllocationBytes.store((prevBytes >= ab) ? (prevBytes - ab) : 0ull, std::memory_order_relaxed);
+			}
 		}
 		DeallocateCLodGroupChunkAllocations(state, groupLocalIndex);
 	}
@@ -951,7 +990,10 @@ MeshManager::CLodGlobalResidencyResult MeshManager::SetCLodGroupResidencyForGlob
 		}
 	}
 
-	result.applied = ApplyCLodGroupResidency(*sharedState, groupLocalIndex, resident, true);
+	{
+		std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
+		result.applied = ApplyCLodGroupResidency(*sharedState, groupLocalIndex, resident, true);
+	}
 	result.serviced = result.applied;
 	return result;
 }
@@ -972,6 +1014,8 @@ void MeshManager::SetCLodGroupResidencyForGlobalBatchEx(
 	}
 
 	ProcessCLodDiskStreamingIO();
+
+	std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
 
 	std::vector<std::shared_ptr<CLodSharedStreamingState>> touchedSharedStates;
 	touchedSharedStates.reserve(requests.size());
@@ -1221,11 +1265,7 @@ void MeshManager::GetCLodStreamingDomainSnapshot(CLodStreamingDomainSnapshot& ou
 }
 
 bool MeshManager::ConsumeCLodStreamingStructureDirty() {
-	if (!m_clodStreamingStructureDirty) {
-		return false;
-	}
-	m_clodStreamingStructureDirty = false;
-	return true;
+	return m_clodStreamingStructureDirty.exchange(false);
 }
 
 // ── Page-pool streaming helpers ────────────────────────────────────────────
@@ -1314,27 +1354,30 @@ size_t MeshManager::PackGroupPayloadForPagePool(
 
 MeshManager::CLodStreamingDebugStats MeshManager::GetCLodStreamingDebugStats() const {
 	CLodStreamingDebugStats stats{};
-	stats.residentGroups = m_debugResidentGroups;
-	stats.residentAllocations = m_debugResidentAllocations;
-	stats.residentAllocationBytes = m_debugResidentAllocationBytes;
+	stats.residentGroups = m_debugResidentGroups.load(std::memory_order_relaxed);
+	stats.residentAllocations = m_debugResidentAllocations.load(std::memory_order_relaxed);
+	stats.residentAllocationBytes = m_debugResidentAllocationBytes.load(std::memory_order_relaxed);
 	{
-		std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(m_clodDiskStreamingMutex));
+		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
 		stats.queuedRequests = static_cast<uint32_t>(m_clodDiskStreamingRequests.size());
 	}
-	stats.completedResults = static_cast<uint32_t>(m_clodDiskStreamingResults.size());
+	{
+		std::lock_guard<std::mutex> lock(m_clodDiskStreamingResultsMutex);
+		stats.completedResults = static_cast<uint32_t>(m_clodDiskStreamingResults.size());
 
-	auto getCompletedResultSizeBytes = [](const CLodDiskStreamingResult& result) -> uint64_t {
-		return static_cast<uint64_t>(result.vertexChunk.size())
-			+ static_cast<uint64_t>(result.meshletVertexChunk.size() * sizeof(uint32_t))
-			+ static_cast<uint64_t>(result.compressedPositionWordChunk.size() * sizeof(uint32_t))
-			+ static_cast<uint64_t>(result.compressedNormalWordChunk.size() * sizeof(uint32_t))
-			+ static_cast<uint64_t>(result.compressedMeshletVertexWordChunk.size() * sizeof(uint32_t))
-			+ static_cast<uint64_t>(result.meshletChunk.size() * sizeof(meshopt_Meshlet))
-			+ static_cast<uint64_t>(result.meshletTriangleChunk.size() * sizeof(uint8_t))
-			+ static_cast<uint64_t>(result.meshletBoundsChunk.size() * sizeof(BoundingSphere));
-	};
-	for (const auto& result : m_clodDiskStreamingResults) {
-		stats.completedResultBytes += getCompletedResultSizeBytes(result);
+		auto getCompletedResultSizeBytes = [](const CLodDiskStreamingResult& result) -> uint64_t {
+			return static_cast<uint64_t>(result.vertexChunk.size())
+				+ static_cast<uint64_t>(result.meshletVertexChunk.size() * sizeof(uint32_t))
+				+ static_cast<uint64_t>(result.compressedPositionWordChunk.size() * sizeof(uint32_t))
+				+ static_cast<uint64_t>(result.compressedNormalWordChunk.size() * sizeof(uint32_t))
+				+ static_cast<uint64_t>(result.compressedMeshletVertexWordChunk.size() * sizeof(uint32_t))
+				+ static_cast<uint64_t>(result.meshletChunk.size() * sizeof(meshopt_Meshlet))
+				+ static_cast<uint64_t>(result.meshletTriangleChunk.size() * sizeof(uint8_t))
+				+ static_cast<uint64_t>(result.meshletBoundsChunk.size() * sizeof(BoundingSphere));
+		};
+		for (const auto& result : m_clodDiskStreamingResults) {
+			stats.completedResultBytes += getCompletedResultSizeBytes(result);
+		}
 	}
 
 	return stats;

@@ -8,6 +8,7 @@
 
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBuffer.h"
+#include "Resources/ResourceGroup.h"
 #include "ShaderBuffers.h"
 
 class GpuBufferBacking;
@@ -78,6 +79,9 @@ public:
 	// Get the page-table DynamicBuffer (StructuredBuffer<PageTableEntry>).
 	std::shared_ptr<DynamicBuffer> GetPageTableBuffer() const;
 
+	// Get the ResourceGroup tracking all slab buffers (for render graph declarations).
+	std::shared_ptr<ResourceGroup> GetSlabResourceGroup() const { return m_slabResourceGroup; }
+
 	// Total pages across all slabs.
 	uint32_t GetTotalPageCount() const;
 
@@ -136,6 +140,9 @@ private:
 
 	// GPU-side StructuredBuffer<PageTableEntry>.
 	std::shared_ptr<DynamicBuffer> m_pageTableBuffer;
+
+	// ResourceGroup tracking all slab buffers for render graph auto-invalidation.
+	std::shared_ptr<ResourceGroup> m_slabResourceGroup;
 
 	// Try to allocate 'count' contiguous pages from slab at 'slabIndex'.
 	// Returns the local page index (within the slab) if successful, or ~0u on failure.

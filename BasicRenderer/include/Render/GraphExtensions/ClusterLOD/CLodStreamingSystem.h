@@ -1,10 +1,14 @@
 #pragma once
 
+#include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <functional>
 #include <limits>
 #include <memory>
+#include <mutex>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -17,22 +21,13 @@
 class CLodStreamingSystem {
 public:
     CLodStreamingSystem();
+    ~CLodStreamingSystem();
 
     void OnRegistryReset(ResourceRegistry* reg);
     void GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses);
     void GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses);
 
 private:
-    struct StreamingRequestReadbackState {
-        bool pending = false;
-        uint64_t captureId = 0;
-        uint64_t sampleId = 0;
-        bool hasCounter = false;
-        bool hasRequests = false;
-        uint32_t requestCount = 0;
-        std::vector<CLodStreamingRequest> requests;
-    };
-
     struct StreamingServiceSummary {
         uint32_t requested = 0;
         uint32_t unique = 0;
@@ -76,9 +71,8 @@ private:
     void ClearStreamingRequestInProgress(uint32_t groupIndex);
     bool ApplyEvictionRequest(const CLodStreamingRequest& req, bool& outResidencyBitChanged);
     void ApplyDiskStreamingCompletions(MeshManager* meshManager);
-    StreamingRequestReadbackState* FindStreamingLoadReadbackStateByCaptureId(uint64_t captureId);
-    void TryFinalizeStreamingLoadReadback(StreamingRequestReadbackState& state);
-    void ScheduleStreamingReadbacks();
+    void PollCompletedReadbackSlots();
+    void StreamingWorkerMain();
     void ProcessStreamingRequestsBudgeted();
 
     std::shared_ptr<Buffer> m_streamingNonResidentBits;
@@ -104,15 +98,10 @@ private:
     uint32_t m_streamingStorageGroupCapacity = CLodStreamingInitialGroupCapacity;
     bool m_streamingNonResidentBitsUploadPending = false;
     uint32_t m_streamingReadbackRingSize = 3u;
-    uint32_t m_streamingReadbackScheduleCursor = 0u;
     uint32_t m_streamingCpuUploadBudgetRequests = 0u;
     uint32_t m_streamingResidentBudgetGroups = 0u;
-    rg::runtime::IReadbackService* m_streamingReadbackService = nullptr;
     std::function<MeshManager*()> m_getMeshManager = []() { return nullptr; };
 
-    uint64_t m_streamingReadbackCaptureSerial = 0;
-    uint64_t m_streamingOperationSampleSerial = 0;
-    std::vector<StreamingRequestReadbackState> m_streamingLoadReadbackSlots;
     std::vector<PendingStreamingRequest> m_pendingStreamingRequests;
     bool m_streamingDomainDirty = true;
 
@@ -123,4 +112,27 @@ private:
     std::vector<uint8_t> m_initRequestPinnedFlags;
     std::vector<MeshManager::CLodGlobalResidencyRequest> m_loadBatchRequests;
     std::vector<PendingLoadBatchEntry> m_loadBatchEntries;
+
+    // ── Self-managed readback pipeline ─────────────────────────────────
+    // Dedicated fence signalled when a readback copy completes on the copy queue.
+    rhi::TimelinePtr m_streamingReadbackFencePtr;
+    rhi::Timeline m_streamingReadbackFenceHandle;
+    std::atomic<uint64_t> m_streamingReadbackFenceCounter{0};
+
+    struct ReadbackStagingSlot {
+        std::shared_ptr<Buffer> counterStaging;
+        std::shared_ptr<Buffer> requestsStaging;
+        uint64_t fenceValue = 0;
+        bool inFlight = false;
+    };
+    std::vector<ReadbackStagingSlot> m_readbackStagingSlots;
+    uint32_t m_readbackStagingCursor = 0;
+
+    // ── Background streaming worker thread ─────────────────────────────
+    std::thread m_streamingWorkerThread;
+    std::mutex m_streamingWorkerMutex;
+    std::condition_variable m_streamingWorkerCV;
+    std::atomic<bool> m_streamingWorkerQuit{false};
+    // Decoded (groupIndex, priority) pairs produced by the worker, consumed by the main thread.
+    std::vector<std::pair<uint32_t, uint32_t>> m_decodedReadbackBatch;
 };

@@ -26,8 +26,8 @@ static void ClearBit(std::vector<uint32_t>& bitmap, uint32_t index) {
 	bitmap[index >> 5u] &= ~(1u << (index & 31u));
 }
 
-/// Scan for 'count' contiguous set bits in 'bitmap' (total 'totalBits' bits).
-/// Returns the starting bit index, or ~0u if not found.
+// Scan for 'count' contiguous set bits in 'bitmap' (total 'totalBits' bits).
+// Returns the starting bit index, or ~0u if not found.
 static uint32_t FindContiguousSetBits(const std::vector<uint32_t>& bitmap,
 									  uint32_t totalBits, uint32_t count) {
 	if (count == 0u) return ~0u;
@@ -63,6 +63,9 @@ PagePool::PagePool(const Config& config)
 		/*capacity=*/m_pagesPerSlab, // start with room for one slab
 		m_config.debugName + "::PageTable");
 	m_pageTableBuffer->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
+
+	// Resource group for slab buffers (render graph auto-invalidation).
+	m_slabResourceGroup = std::make_shared<ResourceGroup>(m_config.debugName + "::Slabs");
 }
 
 PagePool::~PagePool() = default;
@@ -94,6 +97,9 @@ bool PagePool::AllocateNewSlab() {
 
 	m_slabs.push_back(std::move(slab));
 	m_totalPageCapacity += m_pagesPerSlab;
+
+	// Register new slab in the resource group for render graph tracking.
+	m_slabResourceGroup->AddResource(m_slabs.back().buffer);
 
 	// Extend the CPU page table mirror.
 	const uint32_t oldCapacity = static_cast<uint32_t>(m_pageTableCpu.size());

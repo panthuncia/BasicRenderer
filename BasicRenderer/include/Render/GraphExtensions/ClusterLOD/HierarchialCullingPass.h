@@ -13,6 +13,7 @@
 #include "Render/RenderGraph/RenderGraph.h"
 
 class Buffer;
+class ResourceGroup;
 
 struct HierarchialCullingPassInputs {
     bool isFirstPass;
@@ -40,7 +41,8 @@ public:
         std::shared_ptr<Buffer> occlusionReplayBuffer,
         std::shared_ptr<Buffer> occlusionReplayStateBuffer,
         std::shared_ptr<Buffer> occlusionNodeGpuInputsBuffer,
-        std::shared_ptr<Buffer> viewDepthSrvIndicesBuffer);
+        std::shared_ptr<Buffer> viewDepthSrvIndicesBuffer,
+        std::shared_ptr<ResourceGroup> slabResourceGroup = nullptr);
     ~HierarchialCullingPass();
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
@@ -79,6 +81,7 @@ private:
     std::shared_ptr<Buffer> m_occlusionReplayStateBuffer;
     std::shared_ptr<Buffer> m_occlusionNodeGpuInputsBuffer;
     std::shared_ptr<Buffer> m_viewDepthSrvIndicesBuffer;
+    std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     bool m_isFirstPass = true;
     bool m_declaredResourcesChanged = true;
     unsigned int m_maxVisibleClusters = 0u;

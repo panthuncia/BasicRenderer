@@ -10,16 +10,19 @@
 #include "Render/RenderContext.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "BuiltinResources.h"
+#include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "../shaders/PerPassRootConstants/clodRootConstants.h"
 
 ClusterRasterizationPass::ClusterRasterizationPass(
     ClusterRasterizationPassInputs inputs,
     std::shared_ptr<Buffer> compactedVisibleClustersBuffer,
     std::shared_ptr<Buffer> rasterBucketsHistogramBuffer,
-    std::shared_ptr<Buffer> rasterBucketsIndirectArgsBuffer)
+    std::shared_ptr<Buffer> rasterBucketsIndirectArgsBuffer,
+    std::shared_ptr<ResourceGroup> slabResourceGroup)
     : m_compactedVisibleClustersBuffer(std::move(compactedVisibleClustersBuffer))
     , m_rasterBucketsHistogramBuffer(std::move(rasterBucketsHistogramBuffer))
-    , m_rasterBucketsIndirectArgsBuffer(std::move(rasterBucketsIndirectArgsBuffer)) {
+    , m_rasterBucketsIndirectArgsBuffer(std::move(rasterBucketsIndirectArgsBuffer))
+    , m_slabResourceGroup(std::move(slabResourceGroup)) {
     m_wireframe = inputs.wireframe;
     m_clearGbuffer = inputs.clearGbuffer;
 
@@ -63,6 +66,11 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
 
     for (auto& vb : m_visibilityBuffers) {
         builder->WithUnorderedAccess(vb);
+    }
+
+    // Declare page pool slabs for bindless access (auto-invalidates when new slabs are added).
+    if (m_slabResourceGroup) {
+        builder->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
     }
 }
 

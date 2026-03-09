@@ -17,6 +17,9 @@
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
 #include "Resources/components.h"
+#include "Managers/MeshManager.h"
+#include "Managers/Singletons/SettingsManager.h"
+#include "Resources/Buffers/PagePool.h"
 #include "ShaderBuffers.h"
 
 CLodExtension::~CLodExtension() = default;
@@ -123,6 +126,17 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_streamingSystem->GatherStructuralPasses(rg, outPasses);
     }
 
+    // Retrieve the page pool slab ResourceGroup for render graph tracking.
+    std::shared_ptr<ResourceGroup> slabGroup;
+    try {
+        auto getter = SettingsManager::GetInstance().getSettingGetter<std::function<MeshManager*()>>(CLodStreamingMeshManagerGetterSettingName);
+        if (auto* mm = getter()()) {
+            if (auto* pool = mm->GetCLodPagePool()) {
+                slabGroup = pool->GetSlabResourceGroup();
+            }
+        }
+    } catch (...) {}
+
     RenderGraph::ExternalPassDesc cullPassDesc;
     cullPassDesc.type = RenderGraph::PassType::Compute;
     cullPassDesc.name = "CLod::HierarchialCullingPass1";
@@ -138,7 +152,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_occlusionReplayBuffer,
         m_occlusionReplayStateBuffer,
         m_occlusionNodeGpuInputsBuffer,
-        m_viewDepthSrvIndicesBuffer);
+        m_viewDepthSrvIndicesBuffer,
+        slabGroup);
     cullPassDesc.where = RenderGraph::ExternalInsertPoint::After("CLod::StreamingBeginFramePass");
     outPasses.push_back(std::move(cullPassDesc));
 
@@ -198,7 +213,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         rasterizePassInputs,
         m_compactedVisibleClustersBuffer,
         m_rasterBucketsHistogramBuffer,
-        m_rasterBucketsIndirectArgsBuffer);
+        m_rasterBucketsIndirectArgsBuffer,
+        slabGroup);
     rasterizePassDesc.isGeometryPass = true;
     outPasses.push_back(std::move(rasterizePassDesc));
 
@@ -231,7 +247,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_occlusionReplayBuffer,
         m_occlusionReplayStateBuffer,
         m_occlusionNodeGpuInputsBuffer,
-        m_viewDepthSrvIndicesBuffer);
+        m_viewDepthSrvIndicesBuffer,
+        slabGroup);
     outPasses.push_back(std::move(cullPassDesc2));
 
     RenderGraph::ExternalPassDesc histogramPassDesc2;
@@ -291,7 +308,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         rasterizePassInputs2,
         m_compactedVisibleClustersBuffer,
         m_rasterBucketsHistogramBufferPhase2,
-        m_rasterBucketsIndirectArgsBuffer);
+        m_rasterBucketsIndirectArgsBuffer,
+        slabGroup);
     rasterizePassDesc2.isGeometryPass = true;
     outPasses.push_back(std::move(rasterizePassDesc2));
 

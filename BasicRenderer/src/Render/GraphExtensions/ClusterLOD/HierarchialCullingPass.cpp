@@ -20,6 +20,7 @@
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Resources/components.h"
 #include "Resources/Resolvers/ECSResourceResolver.h"
+#include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "BuiltinResources.h"
 #include "ShaderBuffers.h"
 #include "../shaders/PerPassRootConstants/clodRootConstants.h"
@@ -33,7 +34,8 @@ HierarchialCullingPass::HierarchialCullingPass(
     std::shared_ptr<Buffer> occlusionReplayBuffer,
     std::shared_ptr<Buffer> occlusionReplayStateBuffer,
     std::shared_ptr<Buffer> occlusionNodeGpuInputsBuffer,
-    std::shared_ptr<Buffer> viewDepthSrvIndicesBuffer) {
+    std::shared_ptr<Buffer> viewDepthSrvIndicesBuffer,
+    std::shared_ptr<ResourceGroup> slabResourceGroup) {
     CreatePipelines(
         DeviceManager::GetInstance().GetDevice(),
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -54,6 +56,7 @@ HierarchialCullingPass::HierarchialCullingPass(
     m_occlusionReplayStateBuffer = std::move(occlusionReplayStateBuffer);
     m_occlusionNodeGpuInputsBuffer = std::move(occlusionNodeGpuInputsBuffer);
     m_viewDepthSrvIndicesBuffer = std::move(viewDepthSrvIndicesBuffer);
+    m_slabResourceGroup = std::move(slabResourceGroup);
     m_maxVisibleClusters = inputs.maxVisibleClusters;
 }
 
@@ -99,6 +102,11 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
             Builtin::PrimaryCamera::LinearDepthMap,
             Builtin::Shadows::LinearShadowMaps)
         .WithShaderResource(ECSResourceResolver(drawSetIndicesQuery));
+
+    // Declare page pool slabs for bindless access (auto-invalidates when new slabs are added).
+    if (m_slabResourceGroup) {
+        builder->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
+    }
 }
 
 void HierarchialCullingPass::Setup() {

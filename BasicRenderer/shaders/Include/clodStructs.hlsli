@@ -16,7 +16,7 @@ struct CLodMeshMetadata
     uint groupChunkTableCount;
 };
 
-/// GPU-visible page table entry — maps a virtual page ID to a slab + byte offset.
+// GPU-visible page table entry — maps a virtual page ID to a slab + byte offset.
 struct PageTableEntry
 {
     uint slabIndex;      // Which slab ByteAddressBuffer this page lives in.

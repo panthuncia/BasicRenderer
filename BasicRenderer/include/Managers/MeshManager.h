@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -103,6 +104,9 @@ public:
 	void UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data);
 	void UpdatePerMeshInstanceBuffer(std::unique_ptr<BufferView>& view, PerMeshInstanceCB& data);
 	void SetViewManager(ViewManager* viewManager) { m_pViewManager = viewManager; }
+
+	// Access the CLod page pool (may be null if no CLod meshes loaded).
+	PagePool* GetCLodPagePool() const { return m_clodPagePool.get(); }
 	uint64_t GetActiveMeshletCount() const { return m_activeMeshletCount; }
 
 	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
@@ -182,12 +186,12 @@ private:
 	std::vector<CLodSharedStreamingRange> m_clodSharedStreamingRanges;
 	bool m_clodSharedStreamingRangesDirty = true;
 	// Set whenever mesh/instance structural changes occur; consumed by CLodExtension.
-	bool m_clodStreamingStructureDirty = true;
+	std::atomic<bool> m_clodStreamingStructureDirty{true};
 
 	// Incremental debug-stats counters — updated in place by residency mutations.
-	uint32_t m_debugResidentGroups = 0;
-	uint32_t m_debugResidentAllocations = 0;
-	uint64_t m_debugResidentAllocationBytes = 0;
+	std::atomic<uint32_t> m_debugResidentGroups{0};
+	std::atomic<uint32_t> m_debugResidentAllocations{0};
+	std::atomic<uint64_t> m_debugResidentAllocationBytes{0};
 
 	struct CLodDiskStreamingRequest {
 		uint32_t groupGlobalIndex = 0;
@@ -210,13 +214,21 @@ private:
 	};
 
 	// Pending requests waiting to be dispatched (guarded by m_clodDiskStreamingMutex).
-	std::mutex m_clodDiskStreamingMutex;
+	mutable std::mutex m_clodDiskStreamingMutex;
 	std::vector<CLodDiskStreamingRequest> m_clodDiskStreamingRequests;
 	std::unordered_set<uint32_t> m_clodDiskStreamingQueuedGroups;
+
+	// Guards m_clodDiskStreamingResults and m_clodDiskStreamingCompletions.
+	mutable std::mutex m_clodDiskStreamingResultsMutex;
 
 	// Completed results waiting to be applied on the main thread.
 	std::vector<CLodDiskStreamingResult> m_clodDiskStreamingResults;
 	std::vector<CLodDiskStreamingCompletion> m_clodDiskStreamingCompletions;
+
+	// Guards CLodSharedStreamingState interiors (groupResidentFlags,
+	// baselineGroupChunks, residentGroupAllocations, residencyTableDirty),
+	// m_clodPagePool, and m_clodSharedGroupChunks UpdateView calls.
+	mutable std::mutex m_clodResidencyMutex;
 
 	// Maximum number of IO requests dispatched per ProcessCLodDiskStreamingIO call.
 	static constexpr uint32_t kMaxIoBatchSize = 128u;
