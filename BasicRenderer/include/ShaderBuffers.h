@@ -363,8 +363,11 @@ struct ClusterLODGroup
     uint32_t childCount = 0;    // number of ClusterLODChild entries for this group
 
     uint32_t terminalChildCount = 0;
-    uint32_t pad[3] = {0};
+    uint32_t flags = 0;         // Bit 0: IS_VOXEL_GROUP
+    uint32_t pad[2] = {0};
 };
+
+static constexpr uint32_t CLOD_GROUP_FLAG_IS_VOXEL = 1u << 0;
 
 enum class CLodReplayRecordType : uint32_t {
     Node = 0,

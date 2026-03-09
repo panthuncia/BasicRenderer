@@ -73,6 +73,25 @@ public:
 		}
 	}
 
+	void GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override {
+		// Some systems enqueue uploads during GatherFramePasses() itself
+		// (for example CLod streaming disk-IO completions materializing
+		// geometry/chunk-table updates). The structural Builtin::Uploads pass
+		// has already recorded by then, so without a second upload pass those
+		// updates would slip to the next frame. Re-run the upload pass early in
+		// the frame pass stage so newly queued uploads are visible this frame.
+		if (auto* uploadService = rg.GetUploadService()) {
+			if (auto upload = uploadService->GetUploadPass()) {
+				RenderGraph::ExternalPassDesc d;
+				d.type = RenderGraph::PassType::Render;
+				d.name = "Builtin::LateUploads";
+				d.where = RenderGraph::ExternalInsertPoint::After("Builtin::Uploads");
+				d.pass = upload;
+				outPasses.push_back(std::move(d));
+			}
+		}
+	}
+
 private:
 	TextureFactory* m_textureFactory = nullptr; // non-owning
 	rg::runtime::IUploadService* m_uploadService = nullptr; // non-owning

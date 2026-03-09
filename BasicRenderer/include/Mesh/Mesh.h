@@ -82,6 +82,34 @@ struct ClusterLODCacheSource
 	std::wstring containerFileName;
 };
 
+// ---- Voxel group data model ----
+
+/// A single active cell in a voxel grid.
+struct VoxelCell
+{
+	uint32_t x = 0;       // Cell grid coordinate
+	uint32_t y = 0;
+	uint32_t z = 0;
+	float    opacity = 0.0f; // Fraction of rays that hit geometry [0,1]
+};
+
+/// Per-group voxel payload. Each voxel group in the hierarchy stores one of these.
+/// Contains the sparse voxel grid at a single resolution that this group represents.
+struct VoxelGroupPayload
+{
+	uint32_t resolution = 0;           // Cells per axis for this group's grid
+	DirectX::XMFLOAT3 aabbMin{};      // World-space AABB of the voxelized region
+	DirectX::XMFLOAT3 aabbMax{};
+	std::vector<VoxelCell> activeCells; // Sparse list of non-empty cells
+};
+
+/// Mapping from group index to voxel payload index (-1 for non-voxel groups).
+struct VoxelGroupMapping
+{
+	std::vector<int32_t> groupToPayloadIndex;       // Per-group: index into payloads[], or -1
+	std::vector<VoxelGroupPayload> payloads;         // Flat array of voxel payloads
+};
+
 struct ClusterLODPrebuiltData
 {
 	std::vector<ClusterLODGroup> groups;
@@ -93,6 +121,7 @@ struct ClusterLODPrebuiltData
 	std::vector<ClusterLODGroupDiskLocator> groupDiskLocators;
 	ClusterLODCacheSource cacheSource;
 	std::vector<ClusterLODNode> nodes;
+	VoxelGroupMapping voxelGroupMapping; // Per-group voxel payloads (empty when no voxel groups exist)
 };
 
 struct ClusterLODCacheBuildPayload
@@ -153,6 +182,14 @@ struct ClusterLODBuilderSettings
 	float normalAttributeWeight = 1.0f;
 	float simplifyTangentWeight = 0.01f;
 	float simplifyTangentSignWeight = 0.5f;
+
+	// ---- Voxel hierarchy settings ----
+	bool enableVoxelFallback = false;            // Enable voxel-based coarse LOD when decimation fails (disabled until voxel rendering is implemented)
+	uint32_t voxelGridBaseResolution = 32u;       // Resolution of the finest voxel grid level
+	uint32_t voxelMinResolution = 2u;             // Minimum resolution floor; hierarchy stops when resolution would drop below this
+	uint32_t voxelRaysPerCell = 64u;              // Number of rays cast per active cell for opacity sampling
+	float    voxelTerminalErrorMultiplier = 2.0f;  // Error scaling applied to voxel-derived coarse groups
+	uint32_t voxelCoarsenFactor = 2u;             // Resolution divisor per hierarchy level (2 = halve each level)
 };
 
 struct ClusterLODRuntimeSummary
@@ -433,6 +470,14 @@ public:
 		return m_clodLodLevelRoots.back();
 	}
 
+	const VoxelGroupMapping& GetVoxelGroupMapping() const {
+		return m_voxelGroupMapping;
+	}
+
+	bool HasVoxelGroups() const {
+		return !m_voxelGroupMapping.payloads.empty();
+	}
+
 	ClusterLODPrebuiltData GetClusterLODPrebuiltData() const;
 	ClusterLODCacheBuildPayload GetClusterLODCacheBuildPayload() const;
 	ClusterLODCacheBuildOwnedData GetClusterLODCacheBuildOwnedData() const;
@@ -504,6 +549,7 @@ private:
 	std::vector<uint32_t>            m_clodLodLevelRoots;        // node index per depth (== 1+depth)
 	uint32_t                         m_clodTopRootNode = 0;      // always 0
 	uint32_t                         m_clodMaxDepth = 0;
+	VoxelGroupMapping                m_voxelGroupMapping;        // Per-group voxel payloads (empty when no voxel groups exist)
 	std::optional<ClusterLODPrebuiltData> m_prebuiltClusterLOD;
 
 	std::unique_ptr<BufferView> m_clusterLODGroupsView = nullptr;

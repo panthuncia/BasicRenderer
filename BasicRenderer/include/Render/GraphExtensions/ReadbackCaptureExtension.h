@@ -4,6 +4,7 @@
 
 #include "Render/RenderGraph/RenderGraph.h"
 #include "RenderPasses/ReadbackCapturePass.h"
+#include "RenderPasses/ReadbackCopyCapturePass.h"
 #include "Render/Runtime/IReadbackService.h"
 
 class ReadbackCaptureExtension final : public RenderGraph::IRenderGraphExtension {
@@ -49,15 +50,30 @@ public:
             }
 
             RenderGraph::ExternalPassDesc desc{};
-            desc.type = RenderGraph::PassType::Render;
             desc.where = RenderGraph::ExternalInsertPoint::After(capture.passName);
             desc.registerName = false;
 
-            ReadbackCaptureInputs inputs{};
-            inputs.target = ResourceHandleAndRange(handle, capture.range);
+            if (capture.preferCopyQueue) {
+                // Route through copy-queue CopyPass for lower latency
+                desc.type = RenderGraph::PassType::Copy;
+                desc.copyQueueSelection = CopyQueueSelection::Copy;
 
-            auto pass = std::make_shared<ReadbackCapturePass>(inputs, std::move(capture.callback), m_readbackService);
-            desc.pass = pass;
+                ReadbackCopyCaptureInputs inputs{};
+                inputs.target = ResourceHandleAndRange(handle, capture.range);
+
+                auto pass = std::make_shared<ReadbackCopyCapturePass>(inputs, std::move(capture.callback), m_readbackService);
+                desc.pass = pass;
+            }
+            else {
+                // Default: graphics-queue RenderPass (existing path)
+                desc.type = RenderGraph::PassType::Render;
+
+                ReadbackCaptureInputs inputs{};
+                inputs.target = ResourceHandleAndRange(handle, capture.range);
+
+                auto pass = std::make_shared<ReadbackCapturePass>(inputs, std::move(capture.callback), m_readbackService);
+                desc.pass = pass;
+            }
 
             desc.name = "ReadbackCapture::" + capture.passName + "::" + std::to_string(handle.GetGlobalResourceID()) + "::" + std::to_string(localIndex++);
             out.push_back(std::move(desc));

@@ -149,13 +149,12 @@ uint CLodPackViewPriority(uint viewId, float fallbackErrorOverDistance)
         | (viewId & CLOD_STREAM_VIEWID_MASK);
 }
 
-static const uint TRAVERSE_THREADS_PER_GROUP = 32;
-static const uint TRAVERSE_CHILD_LANES = 4;
-static const uint TRAVERSE_RECORDS_PER_GROUP = TRAVERSE_THREADS_PER_GROUP / TRAVERSE_CHILD_LANES;
+static const uint COALESCING_THREADS_PER_GROUP = 1;
+static const uint BVH_MAX_CHILDREN = 32;
+static const uint COALESCED_INPUT_COUNT_HISTOGRAM_BUCKETS = 8;
 
-static const uint GROUP_EVALUATE_THREADS_PER_GROUP = 32;
-static const uint GROUP_EVALUATE_CHILD_LANES = 4;
-static const uint GROUP_EVALUATE_RECORDS_PER_GROUP = GROUP_EVALUATE_THREADS_PER_GROUP / GROUP_EVALUATE_CHILD_LANES;
+static const uint TRAVERSE_RECORDS_PER_GROUP = COALESCING_THREADS_PER_GROUP;
+static const uint GROUP_EVALUATE_RECORDS_PER_GROUP = COALESCING_THREADS_PER_GROUP;
 
 void WGTelemetryAdd(uint counterIndex, uint value)
 {
@@ -538,428 +537,110 @@ float ErrorOverDistance(float3 worldCenter, float worldRadius, float errorMeshSp
     return (errorMeshSpace * errorScale) / denom;
 }
 
-struct TraverseSlotState
-{
-    uint emitChildren;
-    uint emitGroup;
-    uint childCount;
-    uint childBase;
-    uint instanceIndex;
-    uint viewId;
-    uint groupId;
-    uint sourceTag;
-    bool allowRefine;
-};
-
-groupshared TraverseSlotState g_slotState[TRAVERSE_RECORDS_PER_GROUP];
-
-struct GroupEvaluateSlotState
-{
-    uint active;
-    uint instanceIndex;
-    uint groupId;
-    uint viewId;
-    uint childBase;
-    uint clampedChildCount;
-    uint terminalChildCount;
-    uint sourceTag;
-    bool allowRefine;
-};
-
-groupshared GroupEvaluateSlotState g_groupSlotState[GROUP_EVALUATE_RECORDS_PER_GROUP];
-
 // Node: TraverseNodes (recursive, BVH-only)
 [Shader("node")]
 [NodeID("TraverseNodes")]
 [NodeLaunch("coalescing")]
-[NumThreads(TRAVERSE_THREADS_PER_GROUP, 1, 1)]
+[NumThreads(COALESCING_THREADS_PER_GROUP, 1, 1)]
 [NodeMaxRecursionDepth(25)]
 void WG_TraverseNodes(
     [MaxRecords(TRAVERSE_RECORDS_PER_GROUP)] GroupNodeInputRecords<TraverseNodeRecord> inRecs,
-    uint3 gtid : SV_GroupThreadID,
-    [MaxRecords(32)] NodeOutput<TraverseNodeRecord> TraverseNodes,
-    [MaxRecords(TRAVERSE_RECORDS_PER_GROUP)] NodeOutput<GroupEvalRecord> GroupEvaluate) {
-    const uint lane = gtid.x % TRAVERSE_CHILD_LANES;
-    const uint slot = gtid.x / TRAVERSE_CHILD_LANES;
+    uint GI : SV_GroupIndex,
+    [MaxRecords(TRAVERSE_RECORDS_PER_GROUP * BVH_MAX_CHILDREN)] NodeOutput<TraverseNodeRecord> TraverseNodes,
+    [MaxRecords(TRAVERSE_RECORDS_PER_GROUP)] NodeOutput<GroupEvalRecord> GroupEvaluate)
+{
+    const uint slot = GI;
     const uint inputCount = inRecs.Count();
     const bool slotActive = slot < inputCount;
 
     WGTelemetryAdd(WG_COUNTER_TRAVERSE_THREADS, 1);
-    if (lane == 0) {
+    if (slot == 0) {
         WGTelemetryAdd(WG_COUNTER_TRAVERSE_COALESCED_LAUNCHES, 1);
         WGTelemetryAdd(WG_COUNTER_TRAVERSE_COALESCED_INPUT_RECORDS, inputCount);
-        if (inputCount > 0 && inputCount <= TRAVERSE_RECORDS_PER_GROUP) {
+        if (inputCount > 0 && inputCount <= COALESCED_INPUT_COUNT_HISTOGRAM_BUCKETS) {
             WGTelemetryAdd(WG_COUNTER_TRAVERSE_COALESCED_INPUT_COUNT_1 + (inputCount - 1), 1);
         }
+    }
 
-        TraverseSlotState s = (TraverseSlotState) 0;
+    uint emitTraverseCount = 0;
+    bool emitGroup = false;
+    TraverseNodeRecord childRecords[BVH_MAX_CHILDREN];
+    GroupEvalRecord groupRecord = (GroupEvalRecord)0;
 
-        if (slotActive) {
-            const TraverseNodeRecord rec = inRecs[slot];
-            const bool parentAllowsRefine = (rec.allowRefine != 0u);
-            if (rec.sourceTag == CLOD_RECORD_SOURCE_REPLAY) {
-                WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_TRAVERSE_RECORDS_CONSUMED, 1);
-            }
-            const bool replaySource = (rec.sourceTag == CLOD_RECORD_SOURCE_REPLAY);
-
-            StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
-                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
-            StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer =
-                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
-            const MeshInstanceClodOffsets off = clodOffsets[rec.instanceIndex];
-            const CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[off.clodMeshMetadataIndex];
-            StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
-                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-            const uint objectBufferIndex = perMeshInstanceBuffer[rec.instanceIndex].perObjectBufferIndex;
-            StructuredBuffer<PerObjectBuffer> perObjectBuffer =
-                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
-            const row_major matrix objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
-            StructuredBuffer<Camera> cameras =
-                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
-            const Camera camera = cameras[rec.viewId];
-            StructuredBuffer<CullingCameraInfo> cameraInfos =
-                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
-            const CullingCameraInfo cam = cameraInfos[rec.viewId];
-
-            StructuredBuffer<ClusterLODNode> lodNodes =
-                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Nodes)];
-
-            const ClusterLODNode node = lodNodes[clodMeshMetadata.lodNodesBase + rec.nodeId];
-
-            if (node.range.isGroup == 0) {
-                WGTelemetryAdd(WG_COUNTER_TRAVERSE_INTERNAL_NODE_RECORDS, 1);
-            }
-            else {
-                WGTelemetryAdd(WG_COUNTER_TRAVERSE_LEAF_NODE_RECORDS, 1);
-            }
-
-            const float nodeUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
-            const float3 nodeCenterObjectSpace = node.metric.centerAndRadius.xyz;
-            const float3 nodeCenterViewSpace = ToViewSpace(nodeCenterObjectSpace, objectModelMatrix, camera.view);
-            const float nodeRadiusWorld = node.metric.centerAndRadius.w * nodeUniformScale;
-            const bool nodeCulled = !replaySource && SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, camera);
-
-            if (nodeCulled) {
-                WGTelemetryAdd(WG_COUNTER_TRAVERSE_CULLED_NODE_RECORDS, 1);
-            }
-            else {
-                float4 nodeCenterObjectSpace4 = float4(nodeCenterObjectSpace, 1.0f);
-                float3 nodeCenterWorldSpace = mul(nodeCenterObjectSpace4, objectModelMatrix).xyz;
-                float nodeErrorOverDistance = ErrorOverDistance(
-                    nodeCenterWorldSpace,
-                    nodeRadiusWorld,
-                    node.metric.maxQuadricError,
-                    nodeUniformScale,
-                    cam.positionWorldSpace.xyz,
-                    cam.zNear);
-
-                const bool nodeWantsTraversal = parentAllowsRefine && (nodeErrorOverDistance >= cam.errorOverDistanceThreshold);
-                if (!nodeWantsTraversal) {
-                    WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
-                } else if (node.range.isGroup == 0) {
-                    bool occlusionCulled = false;
-                    if (!camera.isOrtho) {
-                        StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
-                            ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
-                        const uint depthMapDescriptorIndex = viewDepthSRVIndices[rec.viewId].linearDepthSRVIndex;
-                        if (depthMapDescriptorIndex != 0) {
-                            OcclusionCullingPerspectiveTexture2D(
-                                occlusionCulled,
-                                camera,
-                                nodeCenterViewSpace,
-                                -nodeCenterViewSpace.z,
-                                nodeRadiusWorld,
-                                depthMapDescriptorIndex);
-                        }
-                    }
-
-                    if (occlusionCulled) {
-                        if (!replaySource) {
-                            ReplayTryAppendNodeGroup(
-                                CLOD_REPLAY_RECORD_TYPE_NODE,
-                                rec.instanceIndex,
-                                rec.viewId,
-                                rec.nodeId);
-                        }
-                    }
-                    else {
-                        s.emitChildren = 1;
-                        s.childCount = min(node.range.countMinusOne + 1, TRAVERSE_CHILD_LANES);
-                        s.childBase = node.range.indexOrOffset;
-                        s.instanceIndex = rec.instanceIndex;
-                        s.viewId = rec.viewId;
-                        s.sourceTag = rec.sourceTag;
-                        s.allowRefine = nodeWantsTraversal;
-                    }
-                }
-                else {
-
-                    s.emitGroup = 1;
-                    s.instanceIndex = rec.instanceIndex;
-                    s.viewId = rec.viewId;
-                    s.groupId = node.range.indexOrOffset;
-                    s.sourceTag = rec.sourceTag;
-                    s.allowRefine = nodeWantsTraversal;
-                }
-            }
+    if (slotActive) {
+        const TraverseNodeRecord rec = inRecs[slot];
+        const bool parentAllowsRefine = (rec.allowRefine != 0u);
+        if (rec.sourceTag == CLOD_RECORD_SOURCE_REPLAY) {
+            WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_TRAVERSE_RECORDS_CONSUMED, 1);
         }
+        const bool replaySource = (rec.sourceTag == CLOD_RECORD_SOURCE_REPLAY);
 
-        g_slotState[slot] = s;
-    }
-
-    GroupMemoryBarrierWithGroupSync();
-
-    const TraverseSlotState s = g_slotState[slot];
-
-    const bool emitTraverse = slotActive && (s.emitChildren != 0) && (lane < s.childCount);
-    if (emitTraverse) {
-        WGTelemetryAdd(WG_COUNTER_TRAVERSE_ACTIVE_CHILD_THREADS, 1);
-    }
-
-    const bool emitGroup = slotActive && (lane == 0) && (s.emitGroup != 0);
-
-    ThreadNodeOutputRecords<TraverseNodeRecord> outNodes =
-        TraverseNodes.GetThreadNodeOutputRecords(emitTraverse ? 1 : 0);
-    ThreadNodeOutputRecords<GroupEvalRecord> outGroups =
-        GroupEvaluate.GetThreadNodeOutputRecords(emitGroup ? 1 : 0);
-
-    if (emitTraverse) {
-        TraverseNodeRecord r;
-        r.instanceIndex = s.instanceIndex;
-        r.viewId = s.viewId;
-        r.nodeId = s.childBase + lane;
-        r.sourceTag = s.sourceTag;
-        r.allowRefine = s.allowRefine ? 1u : 0u;
-        outNodes.Get() = r;
-
-        WGTelemetryAdd(WG_COUNTER_TRAVERSE_TRAVERSE_RECORDS, 1);
-    }
-
-    if (emitGroup) {
-        GroupEvalRecord r;
-        r.instanceIndex = s.instanceIndex;
-        r.viewId = s.viewId;
-        r.groupId = s.groupId;
-        r.sourceTag = s.sourceTag;
-        r.allowRefine = s.allowRefine ? 1u : 0u;
-        outGroups.Get() = r;
-
-        WGTelemetryAdd(WG_COUNTER_TRAVERSE_GROUP_RECORDS, 1);
-    }
-
-    outNodes.OutputComplete();
-    outGroups.OutputComplete();
-}
-
-#define CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP 32
-// Node: GroupEvaluate
-[Shader("node")]
-[NodeID("GroupEvaluate")]
-[NodeLaunch("coalescing")]
-[NumThreads(GROUP_EVALUATE_THREADS_PER_GROUP, 1, 1)]
-void WG_GroupEvaluate(
-    [MaxRecords(GROUP_EVALUATE_RECORDS_PER_GROUP)] GroupNodeInputRecords<GroupEvalRecord> inRecs,
-    uint3 gtid : SV_GroupThreadID,
-    [MaxRecords(GROUP_EVALUATE_RECORDS_PER_GROUP * GROUP_EVALUATE_CHILD_LANES)] NodeOutput<MeshletBucketRecord> ClusterCullBuckets) {
-    const uint lane = gtid.x % GROUP_EVALUATE_CHILD_LANES;
-    const uint slot = gtid.x / GROUP_EVALUATE_CHILD_LANES;
-    const uint inputCount = inRecs.Count();
-    const bool slotActive = slot < inputCount;
-
-    WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_THREADS, 1);
-
-    if (lane == 0) {
-        if (slot == 0) {
-            WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_COALESCED_LAUNCHES, 1);
-            WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_COALESCED_INPUT_RECORDS, inputCount);
-            if (inputCount > 0 && inputCount <= GROUP_EVALUATE_RECORDS_PER_GROUP) {
-                WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_COALESCED_INPUT_COUNT_1 + (inputCount - 1), 1);
-            }
-        }
-
-        GroupEvaluateSlotState s = (GroupEvaluateSlotState) 0;
-
-        if (slotActive) {
-            const GroupEvalRecord rec = inRecs[slot];
-            if (rec.sourceTag == CLOD_RECORD_SOURCE_REPLAY) {
-                WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_GROUP_RECORDS_CONSUMED, 1);
-            }
-            const bool replaySource = (rec.sourceTag == CLOD_RECORD_SOURCE_REPLAY);
-            WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_GROUP_RECORDS, 1);
-
-            StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
-                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
-            StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer =
-                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
-            const MeshInstanceClodOffsets off = clodOffsets[rec.instanceIndex];
-            const CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[off.clodMeshMetadataIndex];
-            StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
-                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-            const uint objectBufferIndex = perMeshInstanceBuffer[rec.instanceIndex].perObjectBufferIndex;
-            StructuredBuffer<PerObjectBuffer> perObjectBuffer =
-                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
-            const row_major matrix objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
-            StructuredBuffer<Camera> cameras =
-                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
-            const Camera camera = cameras[rec.viewId];
-
-            StructuredBuffer<ClusterLODGroup> groups =
-                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
-
-            const uint groupIndex = clodMeshMetadata.groupsBase + rec.groupId;
-            const ClusterLODGroup grp = groups[groupIndex];
-
-            const float groupUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
-            const float3 groupCenterObjectSpace = grp.bounds.centerAndRadius.xyz;
-            const float3 groupCenterViewSpace = ToViewSpace(groupCenterObjectSpace, objectModelMatrix, camera.view);
-            const float groupRadiusWorld = grp.bounds.centerAndRadius.w * groupUniformScale;
-            const bool groupCulled = !replaySource && SphereOutsideFrustumViewSpace(groupCenterViewSpace, groupRadiusWorld, camera);
-
-            if (groupCulled) {
-                WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_CULLED_GROUP_RECORDS, 1);
-            }
-            else {
-                // No second error gate here; activation is visibility-based.
-                s.active = 1;
-                s.instanceIndex = rec.instanceIndex;
-                s.groupId = rec.groupId;
-                s.viewId = rec.viewId;
-                s.childBase = clodMeshMetadata.childrenBase + grp.firstChild;
-                s.terminalChildCount = min(grp.terminalChildCount, GROUP_EVALUATE_CHILD_LANES);
-                s.clampedChildCount = min(grp.childCount, GROUP_EVALUATE_CHILD_LANES);
-                s.sourceTag = rec.sourceTag;
-                s.allowRefine = rec.allowRefine;
-            }
-        }
-
-        g_groupSlotState[slot] = s;
-    }
-
-    GroupMemoryBarrierWithGroupSync();
-
-    const GroupEvaluateSlotState s = g_groupSlotState[slot];
-    const bool activeChild = slotActive && (s.active != 0) && (lane < s.clampedChildCount);
-    if (activeChild) {
-        WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_ACTIVE_CHILD_THREADS, 1);
-    }
-
-    ClusterLODChild child = (ClusterLODChild) 0;
-    bool generatingGroupWantsTraversal = false;
-    bool forceBucket = false;
-    bool replayedOccludedRefinedGroup = false;
-    bool nonResidentRefinedChild = false;
-
-    if (activeChild) {
         StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
         StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
-        const MeshInstanceClodOffsets off = clodOffsets[s.instanceIndex];
+        const MeshInstanceClodOffsets off = clodOffsets[rec.instanceIndex];
         const CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[off.clodMeshMetadataIndex];
         StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-        const uint objectBufferIndex = perMeshInstanceBuffer[s.instanceIndex].perObjectBufferIndex;
+        const uint objectBufferIndex = perMeshInstanceBuffer[rec.instanceIndex].perObjectBufferIndex;
         StructuredBuffer<PerObjectBuffer> perObjectBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
         const row_major matrix objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
         StructuredBuffer<Camera> cameras =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
-        const Camera camera = cameras[s.viewId];
+        const Camera camera = cameras[rec.viewId];
         StructuredBuffer<CullingCameraInfo> cameraInfos =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
-        const CullingCameraInfo cam = cameraInfos[s.viewId];
+        const CullingCameraInfo cam = cameraInfos[rec.viewId];
+        StructuredBuffer<ClusterLODNode> lodNodes =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Nodes)];
 
-        StructuredBuffer<ClusterLODGroup> groups =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
-        StructuredBuffer<ClusterLODGroupChunk> groupChunks =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::GroupChunks)];
-        StructuredBuffer<ClusterLODChild> children =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Children)];
+        const ClusterLODNode node = lodNodes[clodMeshMetadata.lodNodesBase + rec.nodeId];
 
-        child = children[s.childBase + lane];
-        forceBucket = (s.allowRefine == 0u) || (lane < s.terminalChildCount) || (child.refinedGroup < 0);
+        if (node.range.isGroup == 0) {
+            WGTelemetryAdd(WG_COUNTER_TRAVERSE_INTERNAL_NODE_RECORDS, 1);
+        }
+        else {
+            WGTelemetryAdd(WG_COUNTER_TRAVERSE_LEAF_NODE_RECORDS, 1);
+        }
 
-        if (!forceBucket && child.refinedGroup >= 0) {
-            const uint refinedGroupGlobalIndex = clodMeshMetadata.groupsBase + (uint) child.refinedGroup;
-            const ClusterLODGroup refinedGrp = groups[refinedGroupGlobalIndex];
-            const uint generatingGroupGlobalIndex = clodMeshMetadata.groupsBase + s.groupId;
-            const ClusterLODGroup generatingGrp = groups[generatingGroupGlobalIndex];
-            bool refinedResident = true;
-            StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
-                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
-            const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
+        const float nodeUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
+        const float3 nodeCenterObjectSpace = node.metric.centerAndRadius.xyz;
+        const float3 nodeCenterViewSpace = ToViewSpace(nodeCenterObjectSpace, objectModelMatrix, camera.view);
+        const float nodeRadiusWorld = node.metric.centerAndRadius.w * nodeUniformScale;
+        const bool nodeCulled = !replaySource && SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, camera);
 
-            if (refinedGroupGlobalIndex < activeGroupScanCount) {
-                ByteAddressBuffer nonResidentBits =
-                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
-                refinedResident = !CLodReadBit(nonResidentBits, refinedGroupGlobalIndex);
+        if (nodeCulled) {
+            WGTelemetryAdd(WG_COUNTER_TRAVERSE_CULLED_NODE_RECORDS, 1);
+        }
+        else {
+            const float3 nodeCenterWorldSpace = mul(float4(nodeCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
+            const float nodeErrorOverDistance = ErrorOverDistance(
+                nodeCenterWorldSpace,
+                nodeRadiusWorld,
+                node.metric.maxQuadricError,
+                nodeUniformScale,
+                cam.positionWorldSpace.xyz,
+                cam.zNear);
+
+            const bool nodeWantsTraversal = parentAllowsRefine && (nodeErrorOverDistance >= cam.errorOverDistanceThreshold);
+            if (!nodeWantsTraversal) {
+                WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
             }
-
-            if (!refinedResident) {
-                nonResidentRefinedChild = true;
-                WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_NON_RESIDENT_REFINED_CHILD_THREADS, 1);
-
-                const float4 generatingObjectSpaceCenter = float4(generatingGrp.bounds.centerAndRadius.xyz, 1.0);
-                const float3 generatingWorldSpaceCenter = mul(generatingObjectSpaceCenter, objectModelMatrix).xyz;
-                const float generatingUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
-                const float generatingWorldRadius = generatingGrp.bounds.centerAndRadius.w * generatingUniformScale;
-                const float fallbackErrorOverDistance = ErrorOverDistance(
-                    generatingWorldSpaceCenter,
-                    generatingWorldRadius,
-                    generatingGrp.bounds.error,
-                    generatingUniformScale,
-                    cam.positionWorldSpace.xyz,
-                    cam.zNear);
-                RWStructuredBuffer<CLodStreamingRequest> loadRequests =
-                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
-                RWStructuredBuffer<uint> loadRequestCounter =
-                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
-
-                if (refinedGroupGlobalIndex < activeGroupScanCount) {
-                    uint requestIndex = 0;
-                    InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
-                    if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY) {
-                        CLodStreamingRequest req = (CLodStreamingRequest)0;
-                        req.groupGlobalIndex = refinedGroupGlobalIndex;
-                        req.meshInstanceIndex = s.instanceIndex;
-                        req.meshBufferIndex = perMeshInstanceBuffer[s.instanceIndex].perMeshBufferIndex;
-                        req.viewId = CLodPackViewPriority(s.viewId, fallbackErrorOverDistance);
-                        loadRequests[requestIndex] = req;
-                    }
-                }
-
-                generatingGroupWantsTraversal = false;
-                replayedOccludedRefinedGroup = false;
-            } else {
-                float4 objectSpaceCenter = float4(refinedGrp.bounds.centerAndRadius.xyz, 1.0);
-                float3 worldSpaceCenter = mul(objectSpaceCenter, objectModelMatrix).xyz;
-
-                const float refinedUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
-                float worldRadius = refinedGrp.bounds.centerAndRadius.w * refinedUniformScale;
-                float3 refinedViewSpaceCenter = mul(float4(worldSpaceCenter, 1.0f), camera.view).xyz;
-                const bool replaySource = (s.sourceTag == CLOD_RECORD_SOURCE_REPLAY);
-                const bool refinedCulled = !replaySource && SphereOutsideFrustumViewSpace(refinedViewSpaceCenter, worldRadius, camera);
-
-                float refinedErrorOverDistance = ErrorOverDistance(
-                    worldSpaceCenter,
-                    worldRadius,
-                    refinedGrp.bounds.error,
-                    refinedUniformScale,
-                    cam.positionWorldSpace.xyz,
-                    cam.zNear);
-
+            else if (node.range.isGroup == 0) {
                 bool occlusionCulled = false;
-                if (!refinedCulled && !camera.isOrtho) {
+                if (!camera.isOrtho) {
                     StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
                         ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
-                    const uint depthMapDescriptorIndex = viewDepthSRVIndices[s.viewId].linearDepthSRVIndex;
+                    const uint depthMapDescriptorIndex = viewDepthSRVIndices[rec.viewId].linearDepthSRVIndex;
                     if (depthMapDescriptorIndex != 0) {
                         OcclusionCullingPerspectiveTexture2D(
                             occlusionCulled,
                             camera,
-                            refinedViewSpaceCenter,
-                            -refinedViewSpaceCenter.z,
-                            worldRadius,
+                            nodeCenterViewSpace,
+                            -nodeCenterViewSpace.z,
+                            nodeRadiusWorld,
                             depthMapDescriptorIndex);
                     }
                 }
@@ -967,56 +648,305 @@ void WG_GroupEvaluate(
                 if (occlusionCulled) {
                     if (!replaySource) {
                         ReplayTryAppendNodeGroup(
-                            CLOD_REPLAY_RECORD_TYPE_GROUP,
-                            s.instanceIndex,
-                            s.viewId,
-                            (uint) child.refinedGroup);
+                            CLOD_REPLAY_RECORD_TYPE_NODE,
+                            rec.instanceIndex,
+                            rec.viewId,
+                            rec.nodeId);
                     }
-                    replayedOccludedRefinedGroup = true;
-                    generatingGroupWantsTraversal = false;
                 }
                 else {
-                    generatingGroupWantsTraversal = !refinedCulled && (refinedErrorOverDistance >= cam.errorOverDistanceThreshold);
+                    emitTraverseCount = min(node.range.countMinusOne + 1u, BVH_MAX_CHILDREN);
+                    [unroll]
+                    for (uint childIndex = 0; childIndex < BVH_MAX_CHILDREN; ++childIndex) {
+                        if (childIndex >= emitTraverseCount) {
+                            break;
+                        }
+
+                        TraverseNodeRecord childRecord = (TraverseNodeRecord)0;
+                        childRecord.instanceIndex = rec.instanceIndex;
+                        childRecord.viewId = rec.viewId;
+                        childRecord.nodeId = node.range.indexOrOffset + childIndex;
+                        childRecord.sourceTag = rec.sourceTag;
+                        childRecord.allowRefine = nodeWantsTraversal ? 1u : 0u;
+                        childRecords[childIndex] = childRecord;
+                    }
                 }
             }
-            if (generatingGroupWantsTraversal) {
-                WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_REFINED_TRAVERSAL_THREADS, 1);
+            else {
+                emitGroup = true;
+                groupRecord.instanceIndex = rec.instanceIndex;
+                groupRecord.viewId = rec.viewId;
+                groupRecord.groupId = node.range.indexOrOffset;
+                groupRecord.sourceTag = rec.sourceTag;
+                groupRecord.allowRefine = nodeWantsTraversal ? 1u : 0u;
             }
         }
     }
 
-    // Emit one record per terminal child bucket.
-    const bool shouldEmitCurrentLevelBucket =
-        forceBucket || nonResidentRefinedChild || !generatingGroupWantsTraversal;
+    ThreadNodeOutputRecords<TraverseNodeRecord> outNodes =
+        TraverseNodes.GetThreadNodeOutputRecords(emitTraverseCount);
+    ThreadNodeOutputRecords<GroupEvalRecord> outGroups =
+        GroupEvaluate.GetThreadNodeOutputRecords(emitGroup ? 1 : 0);
 
-    const bool emitBucket = activeChild && (child.localMeshletCount != 0)
-        && shouldEmitCurrentLevelBucket
-        && !replayedOccludedRefinedGroup;
+    if (emitTraverseCount > 0) {
+        WGTelemetryAdd(WG_COUNTER_TRAVERSE_ACTIVE_CHILD_THREADS, emitTraverseCount);
+        [unroll]
+        for (uint childIndex = 0; childIndex < BVH_MAX_CHILDREN; ++childIndex) {
+            if (childIndex >= emitTraverseCount) {
+                break;
+            }
 
-    if (emitBucket && nonResidentRefinedChild) {
-        WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_NON_RESIDENT_FALLBACK_BUCKET_THREADS, 1);
+            outNodes[childIndex] = childRecords[childIndex];
+            WGTelemetryAdd(WG_COUNTER_TRAVERSE_TRAVERSE_RECORDS, 1);
+        }
     }
 
-    if (emitBucket) {
-        WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_EMIT_BUCKET_THREADS, 1);
+    if (emitGroup) {
+        outGroups.Get() = groupRecord;
+        WGTelemetryAdd(WG_COUNTER_TRAVERSE_GROUP_RECORDS, 1);
+    }
+
+    outNodes.OutputComplete();
+    outGroups.OutputComplete();
+}
+#define CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP 32
+// Node: GroupEvaluate
+[Shader("node")]
+[NodeID("GroupEvaluate")]
+[NodeLaunch("coalescing")]
+[NumThreads(COALESCING_THREADS_PER_GROUP, 1, 1)]
+void WG_GroupEvaluate(
+    [MaxRecords(GROUP_EVALUATE_RECORDS_PER_GROUP)] GroupNodeInputRecords<GroupEvalRecord> inRecs,
+    uint GI : SV_GroupIndex,
+    [MaxRecords(GROUP_EVALUATE_RECORDS_PER_GROUP * BVH_MAX_CHILDREN)] NodeOutput<MeshletBucketRecord> ClusterCullBuckets)
+{
+    const uint slot = GI;
+    const uint inputCount = inRecs.Count();
+    const bool slotActive = slot < inputCount;
+
+    WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_THREADS, 1);
+    if (slot == 0) {
+        WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_COALESCED_LAUNCHES, 1);
+        WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_COALESCED_INPUT_RECORDS, inputCount);
+        if (inputCount > 0 && inputCount <= COALESCED_INPUT_COUNT_HISTOGRAM_BUCKETS) {
+            WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_COALESCED_INPUT_COUNT_1 + (inputCount - 1), 1);
+        }
+    }
+
+    uint emitBucketCount = 0;
+    MeshletBucketRecord bucketRecords[BVH_MAX_CHILDREN];
+
+    if (slotActive) {
+        const GroupEvalRecord rec = inRecs[slot];
+        if (rec.sourceTag == CLOD_RECORD_SOURCE_REPLAY) {
+            WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_GROUP_RECORDS_CONSUMED, 1);
+        }
+        const bool replaySource = (rec.sourceTag == CLOD_RECORD_SOURCE_REPLAY);
+        WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_GROUP_RECORDS, 1);
+
+        StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+        StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
+        const MeshInstanceClodOffsets off = clodOffsets[rec.instanceIndex];
+        const CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[off.clodMeshMetadataIndex];
+        StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+        const PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[rec.instanceIndex];
+        const uint objectBufferIndex = instanceData.perObjectBufferIndex;
+        StructuredBuffer<PerObjectBuffer> perObjectBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
+        const row_major matrix objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
+        StructuredBuffer<Camera> cameras =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+        const Camera camera = cameras[rec.viewId];
+        StructuredBuffer<ClusterLODGroup> groups =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+
+        const uint groupIndex = clodMeshMetadata.groupsBase + rec.groupId;
+        const ClusterLODGroup grp = groups[groupIndex];
+        const float groupUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
+        const float3 groupCenterObjectSpace = grp.bounds.centerAndRadius.xyz;
+        const float3 groupCenterViewSpace = ToViewSpace(groupCenterObjectSpace, objectModelMatrix, camera.view);
+        const float groupRadiusWorld = grp.bounds.centerAndRadius.w * groupUniformScale;
+        const bool groupCulled = !replaySource && SphereOutsideFrustumViewSpace(groupCenterViewSpace, groupRadiusWorld, camera);
+
+        if (groupCulled) {
+            WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_CULLED_GROUP_RECORDS, 1);
+        }
+        else {
+            const uint childBase = clodMeshMetadata.childrenBase + grp.firstChild;
+            const uint clampedChildCount = min(grp.childCount, BVH_MAX_CHILDREN);
+            const uint terminalChildCount = min(grp.terminalChildCount, BVH_MAX_CHILDREN);
+            StructuredBuffer<CullingCameraInfo> cameraInfos =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
+            const CullingCameraInfo cam = cameraInfos[rec.viewId];
+            StructuredBuffer<ClusterLODChild> children =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Children)];
+            StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
+            const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
+            ByteAddressBuffer nonResidentBits =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
+            RWStructuredBuffer<CLodStreamingRequest> loadRequests =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
+            RWStructuredBuffer<uint> loadRequestCounter =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
+            RWByteAddressBuffer loadRequestBits =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequestBits)];
+            StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
+                ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
+            const uint depthMapDescriptorIndex = camera.isOrtho
+                ? 0u
+                : viewDepthSRVIndices[rec.viewId].linearDepthSRVIndex;
+            const float3 generatingWorldSpaceCenter = mul(float4(grp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+            const float generatingWorldRadius = grp.bounds.centerAndRadius.w * groupUniformScale;
+
+            [unroll]
+            for (uint childIndex = 0; childIndex < BVH_MAX_CHILDREN; ++childIndex) {
+                if (childIndex >= clampedChildCount) {
+                    break;
+                }
+
+                WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_ACTIVE_CHILD_THREADS, 1);
+
+                const ClusterLODChild child = children[childBase + childIndex];
+                const bool forceBucket = (rec.allowRefine == 0u) || (childIndex < terminalChildCount) || (child.refinedGroup < 0);
+
+                bool generatingGroupWantsTraversal = false;
+                bool replayedOccludedRefinedGroup = false;
+                bool nonResidentRefinedChild = false;
+
+                if (!forceBucket && child.refinedGroup >= 0) {
+                    const uint refinedGroupGlobalIndex = clodMeshMetadata.groupsBase + (uint) child.refinedGroup;
+                    const ClusterLODGroup refinedGrp = groups[refinedGroupGlobalIndex];
+                    bool refinedResident = true;
+
+                    if (refinedGroupGlobalIndex < activeGroupScanCount) {
+                        refinedResident = !CLodReadBit(nonResidentBits, refinedGroupGlobalIndex);
+                    }
+
+                    if (!refinedResident) {
+                        nonResidentRefinedChild = true;
+                        WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_NON_RESIDENT_REFINED_CHILD_THREADS, 1);
+
+                        const float fallbackErrorOverDistance = ErrorOverDistance(
+                            generatingWorldSpaceCenter,
+                            generatingWorldRadius,
+                            grp.bounds.error,
+                            groupUniformScale,
+                            cam.positionWorldSpace.xyz,
+                            cam.zNear);
+
+                        if (refinedGroupGlobalIndex < activeGroupScanCount) {
+                            // Deduplicate: set a bit per group so only the first
+                            // thread for each non-resident group touches the atomic
+                            // counter.  Without this gate every non-resident child
+                            // encounter (potentially thousands when entering a new
+                            // area) serialises on loadRequestCounter[0], stalling
+                            // the entire work graph.
+                            if (CLodTrySetBit(loadRequestBits, refinedGroupGlobalIndex)) {
+                                uint requestIndex = 0;
+                                InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
+                                if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY) {
+                                    CLodStreamingRequest req = (CLodStreamingRequest)0;
+                                    req.groupGlobalIndex = refinedGroupGlobalIndex;
+                                    req.meshInstanceIndex = rec.instanceIndex;
+                                    req.meshBufferIndex = instanceData.perMeshBufferIndex;
+                                    req.viewId = CLodPackViewPriority(rec.viewId, fallbackErrorOverDistance);
+                                    loadRequests[requestIndex] = req;
+                                }
+                            }
+                        }
+                    }
+                    else {
+                        const float3 refinedWorldSpaceCenter = mul(float4(refinedGrp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+                        const float refinedWorldRadius = refinedGrp.bounds.centerAndRadius.w * groupUniformScale;
+                        const float3 refinedViewSpaceCenter = mul(float4(refinedWorldSpaceCenter, 1.0f), camera.view).xyz;
+                        const bool refinedCulled = !replaySource && SphereOutsideFrustumViewSpace(refinedViewSpaceCenter, refinedWorldRadius, camera);
+                        const float refinedErrorOverDistance = ErrorOverDistance(
+                            refinedWorldSpaceCenter,
+                            refinedWorldRadius,
+                            refinedGrp.bounds.error,
+                            groupUniformScale,
+                            cam.positionWorldSpace.xyz,
+                            cam.zNear);
+
+                        bool occlusionCulled = false;
+                        if (!refinedCulled && depthMapDescriptorIndex != 0) {
+                            OcclusionCullingPerspectiveTexture2D(
+                                occlusionCulled,
+                                camera,
+                                refinedViewSpaceCenter,
+                                -refinedViewSpaceCenter.z,
+                                refinedWorldRadius,
+                                depthMapDescriptorIndex);
+                        }
+
+                        if (occlusionCulled) {
+                            if (!replaySource) {
+                                ReplayTryAppendNodeGroup(
+                                    CLOD_REPLAY_RECORD_TYPE_GROUP,
+                                    rec.instanceIndex,
+                                    rec.viewId,
+                                    (uint)child.refinedGroup);
+                            }
+                            replayedOccludedRefinedGroup = true;
+                        }
+                        else {
+                            generatingGroupWantsTraversal = !refinedCulled && (refinedErrorOverDistance >= cam.errorOverDistanceThreshold);
+                        }
+                    }
+
+                    if (generatingGroupWantsTraversal) {
+                        WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_REFINED_TRAVERSAL_THREADS, 1);
+                    }
+                }
+
+                const bool shouldEmitCurrentLevelBucket =
+                    forceBucket || nonResidentRefinedChild || !generatingGroupWantsTraversal;
+                const bool emitBucket = (child.localMeshletCount != 0)
+                    && shouldEmitCurrentLevelBucket
+                    && !replayedOccludedRefinedGroup;
+
+                if (emitBucket && nonResidentRefinedChild) {
+                    WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_NON_RESIDENT_FALLBACK_BUCKET_THREADS, 1);
+                }
+
+                if (emitBucket) {
+                    WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_EMIT_BUCKET_THREADS, 1);
+
+                    MeshletBucketRecord bucketRecord = (MeshletBucketRecord)0;
+                    bucketRecord.instanceIndex = rec.instanceIndex;
+                    bucketRecord.viewId = rec.viewId;
+                    bucketRecord.groupId = rec.groupId;
+                    bucketRecord.childFirstLocalMeshletIndex = child.firstLocalMeshletIndex;
+                    bucketRecord.childLocalMeshletCount = child.localMeshletCount;
+                    bucketRecord.sourceTag = rec.sourceTag;
+                    bucketRecord.dispatchGrid = uint3(
+                        (bucketRecord.childLocalMeshletCount + CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP - 1) / CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP,
+                        1,
+                        1);
+
+                    bucketRecords[emitBucketCount] = bucketRecord;
+                    emitBucketCount++;
+                }
+            }
+        }
     }
 
     ThreadNodeOutputRecords<MeshletBucketRecord> outBuckets =
-        ClusterCullBuckets.GetThreadNodeOutputRecords(emitBucket ? 1 : 0);
+        ClusterCullBuckets.GetThreadNodeOutputRecords(emitBucketCount);
 
-    if (emitBucket) {
-        MeshletBucketRecord b;
-        b.instanceIndex = s.instanceIndex;
-        b.viewId = s.viewId;
-        b.groupId = s.groupId;
-        b.childFirstLocalMeshletIndex = child.firstLocalMeshletIndex;
-        b.childLocalMeshletCount = child.localMeshletCount;
-        b.sourceTag = s.sourceTag;
+    if (emitBucketCount > 0) {
+        [unroll]
+        for (uint bucketIndex = 0; bucketIndex < BVH_MAX_CHILDREN; ++bucketIndex) {
+            if (bucketIndex >= emitBucketCount) {
+                break;
+            }
 
-        const uint groupsX = (b.childLocalMeshletCount + CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP - 1) / CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP;
-        b.dispatchGrid = uint3(groupsX, 1, 1);
-
-        outBuckets.Get() = b;
+            outBuckets[bucketIndex] = bucketRecords[bucketIndex];
+        }
     }
 
     outBuckets.OutputComplete();

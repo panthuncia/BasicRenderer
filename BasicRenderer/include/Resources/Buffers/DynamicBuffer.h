@@ -10,12 +10,11 @@
 #include <string>
 
 #include "Resources/Resource.h"
+#include "Resources/Buffers/BufferView.h"
 #include "Resources/Buffers/DynamicBufferBase.h"
 #include "Resources/Buffers/MemoryBlock.h"
 #include "Interfaces/IHasMemoryMetadata.h"
 #include "Render/Runtime/UploadPolicyServiceAccess.h"
-
-class BufferView;
 
 class DynamicBuffer : public ViewedDynamicBufferBase, public IHasMemoryMetadata {
 public:
@@ -47,17 +46,22 @@ public:
 		return m_mappedData;
 	}
 
+    static size_t AlignBufferCapacity(size_t size, bool byteAddress) {
+        if (!byteAddress) {
+            return size;
+        }
+
+        const size_t align = 4;
+        const size_t rem = size % align;
+        return rem ? (size + (align - rem)) : size;
+    }
+
 private:
     DynamicBuffer(bool byteAddress, size_t elementSize, size_t capacity, std::string name = "", bool UAV = false)
         : m_byteAddress(byteAddress), m_elementSize(elementSize), m_UAV(UAV), m_needsUpdate(false) {
         SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Coalesced);
 
-        size_t bufferSize = elementSize * capacity;
-        {
-            const size_t align = 4;
-            const size_t rem = bufferSize % align;
-            if (rem) bufferSize += (align - rem); // Align up to 4 bytes
-        }
+        size_t bufferSize = AlignBufferCapacity(elementSize * capacity, m_byteAddress);
 		m_capacity = bufferSize;
         CreateBuffer(bufferSize);
         SetName(name);

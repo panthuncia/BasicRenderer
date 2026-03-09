@@ -1,0 +1,16 @@
+#pragma once
+
+#include "RenderPasses/Base/ComputePass.h"
+
+class PerViewLinearDepthCopyPass : public ComputePass {
+public:
+    PerViewLinearDepthCopyPass();
+
+    void DeclareResourceUsages(ComputePassBuilder* builder) override;
+    void Setup() override;
+    PassReturn Execute(PassExecutionContext& executionContext) override;
+    void Cleanup() override;
+
+private:
+    PipelineState m_pso;
+};

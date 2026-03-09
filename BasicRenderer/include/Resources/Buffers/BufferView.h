@@ -1,6 +1,7 @@
 #pragma once
 #include <typeindex>
 #include <memory>
+#include <cstdint>
 
 class ViewedDynamicBufferBase;
 

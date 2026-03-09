@@ -2,8 +2,6 @@
 
 #include <memory>
 #include <mutex>
-#include <condition_variable>
-#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -41,6 +39,21 @@ public:
 		bool queued = false;
 	};
 
+	struct CLodStreamingDebugStats {
+		uint32_t residentGroups = 0;
+		uint32_t residentAllocations = 0;
+		uint32_t queuedRequests = 0;
+		uint32_t completedResults = 0;
+		uint64_t residentAllocationBytes = 0;
+		uint64_t completedResultBytes = 0;
+	};
+
+	/// Represents the outcome of a single disk-streamed group IO.
+	struct CLodDiskStreamingCompletion {
+		uint32_t groupGlobalIndex = 0;
+		bool success = false;
+	};
+
 	static std::unique_ptr<MeshManager> CreateUnique() {
 		return std::unique_ptr<MeshManager>(new MeshManager());
 	}
@@ -61,7 +74,30 @@ public:
 	void GetCLodActiveUniqueAssetGroupRanges(std::vector<CLodActiveGroupRange>& outRanges, uint32_t& outMaxGroupIndex) const;
 	void GetCLodCoarsestUniqueAssetGroupRanges(std::vector<CLodActiveGroupRange>& outRanges) const;
 	void GetCLodUniqueAssetParentMap(std::vector<int32_t>& outParentGroupByGlobal, uint32_t& outMaxGroupIndex) const;
+
+	/// Fused single-pass snapshot that combines GetCLodActiveUniqueAssetGroupRanges,
+	/// GetCLodCoarsestUniqueAssetGroupRanges, and GetCLodUniqueAssetParentMap.
+	struct CLodStreamingDomainSnapshot {
+		std::vector<CLodActiveGroupRange> activeRanges;
+		std::vector<CLodActiveGroupRange> coarsestRanges;
+		std::vector<int32_t> parentGroupByGlobal;
+		uint32_t maxGroupIndex = 0;
+	};
+	void GetCLodStreamingDomainSnapshot(CLodStreamingDomainSnapshot& outSnapshot) const;
+
+	/// Returns true when mesh/instance adds or removes have changed the
+	/// streaming structure since the last call.  After returning true the
+	/// flag is cleared automatically so subsequent calls return false until
+	/// the next structural change.
+	bool ConsumeCLodStreamingStructureDirty();
+
+	CLodStreamingDebugStats GetCLodStreamingDebugStats() const;
 	void ProcessCLodDiskStreamingIO(uint32_t maxCompletedRequests = 64u);
+
+	/// Drains groups that completed disk streaming since the last call.
+	/// The extension uses this to learn which groups became resident (or failed)
+	/// so it can update the GPU-visible non-resident bitset accordingly.
+	void DrainCompletedCLodDiskStreamingGroups(std::vector<CLodDiskStreamingCompletion>& outCompletions);
 
 	void UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data);
 	void UpdatePerMeshInstanceBuffer(std::unique_ptr<BufferView>& view, PerMeshInstanceCB& data);
@@ -104,6 +140,28 @@ private:
 	uint64_t m_activeMeshletCount = 0;
 
 	struct CLodSharedStreamingState {
+		struct ResidentGroupAllocations {
+			std::unique_ptr<BufferView> vertexChunk;
+			std::unique_ptr<BufferView> meshletVertexChunk;
+			std::unique_ptr<BufferView> compressedPositionWordChunk;
+			std::unique_ptr<BufferView> compressedNormalWordChunk;
+			std::unique_ptr<BufferView> compressedMeshletVertexWordChunk;
+			std::unique_ptr<BufferView> meshletChunk;
+			std::unique_ptr<BufferView> meshletTriangleChunk;
+			std::unique_ptr<BufferView> meshletBoundsChunk;
+
+			void Reset() {
+				vertexChunk.reset();
+				meshletVertexChunk.reset();
+				compressedPositionWordChunk.reset();
+				compressedNormalWordChunk.reset();
+				compressedMeshletVertexWordChunk.reset();
+				meshletChunk.reset();
+				meshletTriangleChunk.reset();
+				meshletBoundsChunk.reset();
+			}
+		};
+
 		Mesh* mesh = nullptr;
 		std::unique_ptr<BufferView> ownedMeshMetadataView;
 		uint32_t clodMeshMetadataIndex = 0;
@@ -113,6 +171,7 @@ private:
 		BufferView* groupChunksView = nullptr;
 		std::vector<ClusterLODGroupChunk> baselineGroupChunks;
 		std::vector<uint8_t> groupResidentFlags;
+		std::vector<ResidentGroupAllocations> residentGroupAllocations;
 		uint32_t activeInstanceCount = 0;
 		bool residencyTableDirty = false;
 	};
@@ -136,6 +195,13 @@ private:
 	std::unordered_map<const Mesh*, std::shared_ptr<CLodSharedStreamingState>> m_clodSharedStreamingStateByMesh;
 	std::vector<CLodSharedStreamingRange> m_clodSharedStreamingRanges;
 	bool m_clodSharedStreamingRangesDirty = true;
+	/// Set whenever mesh/instance structural changes occur; consumed by CLodExtension.
+	bool m_clodStreamingStructureDirty = true;
+
+	// Incremental debug-stats counters — updated in place by residency mutations.
+	uint32_t m_debugResidentGroups = 0;
+	uint32_t m_debugResidentAllocations = 0;
+	uint64_t m_debugResidentAllocationBytes = 0;
 
 	struct CLodDiskStreamingRequest {
 		uint32_t groupGlobalIndex = 0;
@@ -157,20 +223,25 @@ private:
 		std::vector<BoundingSphere> meshletBoundsChunk;
 	};
 
-	std::thread m_clodDiskStreamingThread;
+	// Pending requests waiting to be dispatched (guarded by m_clodDiskStreamingMutex).
 	std::mutex m_clodDiskStreamingMutex;
-	std::condition_variable m_clodDiskStreamingCv;
-	bool m_clodDiskStreamingStop = false;
-	std::deque<CLodDiskStreamingRequest> m_clodDiskStreamingRequests;
-	std::deque<CLodDiskStreamingResult> m_clodDiskStreamingResults;
+	std::vector<CLodDiskStreamingRequest> m_clodDiskStreamingRequests;
 	std::unordered_set<uint32_t> m_clodDiskStreamingQueuedGroups;
 
-	void CLodDiskStreamingWorkerMain();
+	// Completed results waiting to be applied on the main thread.
+	std::vector<CLodDiskStreamingResult> m_clodDiskStreamingResults;
+	std::vector<CLodDiskStreamingCompletion> m_clodDiskStreamingCompletions;
+
+	/// Maximum number of IO requests dispatched per ProcessCLodDiskStreamingIO call.
+	static constexpr uint32_t kMaxIoBatchSize = 128u;
+
+	void DispatchCLodDiskStreamingBatch();
 	bool QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool& outQueued);
-	void ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result);
+	bool ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result);
 	void UploadCLodGroupChunkTable(const CLodSharedStreamingState& state);
 	bool IsCLodGroupResident(const CLodSharedStreamingState& state, uint32_t groupLocalIndex) const;
-	void DeallocateCLodGroupChunkViews(Mesh& mesh, uint32_t groupLocalIndex);
+	void DeallocateCLodGroupChunkAllocations(CLodSharedStreamingState& state, uint32_t groupLocalIndex);
+	void ReleaseAllCLodGroupChunkAllocations(CLodSharedStreamingState& state);
  	static void ZeroCLodGroupChunkCounts(ClusterLODGroupChunk& chunk);
 	bool ApplyCLodGroupResidency(CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool resident, bool uploadTableImmediately);
 	void UploadDirtyCLodGroupChunkTables(const std::vector<std::shared_ptr<CLodSharedStreamingState>>& touchedSharedStates);

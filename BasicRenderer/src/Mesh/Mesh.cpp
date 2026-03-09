@@ -259,6 +259,7 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 	m_clodNodes = data.nodes;
 	m_clodTopRootNode = 0;
 	m_perMeshBufferData.boundingSphere = data.objectBoundingSphere;
+	m_voxelGroupMapping = data.voxelGroupMapping;
 
 	m_clodMaxDepth = 0;
 	for (const auto& group : m_clodGroups) {
@@ -311,6 +312,7 @@ ClusterLODPrebuiltData Mesh::GetClusterLODPrebuiltData() const
 	out.groupDiskLocators = m_clodGroupDiskLocators;
 	out.cacheSource = m_clodCacheSource;
 	out.nodes = m_clodNodes;
+	out.voxelGroupMapping = m_voxelGroupMapping;
 	return out;
 }
 

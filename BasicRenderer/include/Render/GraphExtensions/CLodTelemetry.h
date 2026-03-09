@@ -108,6 +108,14 @@ struct CLodStreamingOperationStats {
     uint32_t unloadUnique = 0;
     uint32_t unloadApplied = 0;
     uint32_t unloadFailed = 0;
+
+    uint32_t residentGroups = 0;
+    uint32_t residentAllocations = 0;
+    uint32_t queuedRequests = 0;
+    uint32_t completedResults = 0;
+
+    uint64_t residentAllocationBytes = 0;
+    uint64_t completedResultBytes = 0;
 };
 
 inline std::atomic<uint64_t> g_clodStreamingOperationStatsSequence = 0;
@@ -119,6 +127,12 @@ inline std::atomic<uint32_t> g_clodStreamingUnloadRequested = 0;
 inline std::atomic<uint32_t> g_clodStreamingUnloadUnique = 0;
 inline std::atomic<uint32_t> g_clodStreamingUnloadApplied = 0;
 inline std::atomic<uint32_t> g_clodStreamingUnloadFailed = 0;
+inline std::atomic<uint32_t> g_clodStreamingResidentGroups = 0;
+inline std::atomic<uint32_t> g_clodStreamingResidentAllocations = 0;
+inline std::atomic<uint32_t> g_clodStreamingQueuedRequests = 0;
+inline std::atomic<uint32_t> g_clodStreamingCompletedResults = 0;
+inline std::atomic<uint64_t> g_clodStreamingResidentAllocationBytes = 0;
+inline std::atomic<uint64_t> g_clodStreamingCompletedResultBytes = 0;
 
 inline void PublishCLodStreamingOperationStats(const CLodStreamingOperationStats& stats) {
     g_clodStreamingLoadRequested.store(stats.loadRequested, std::memory_order_relaxed);
@@ -130,6 +144,12 @@ inline void PublishCLodStreamingOperationStats(const CLodStreamingOperationStats
     g_clodStreamingUnloadUnique.store(stats.unloadUnique, std::memory_order_relaxed);
     g_clodStreamingUnloadApplied.store(stats.unloadApplied, std::memory_order_relaxed);
     g_clodStreamingUnloadFailed.store(stats.unloadFailed, std::memory_order_relaxed);
+    g_clodStreamingResidentGroups.store(stats.residentGroups, std::memory_order_relaxed);
+    g_clodStreamingResidentAllocations.store(stats.residentAllocations, std::memory_order_relaxed);
+    g_clodStreamingQueuedRequests.store(stats.queuedRequests, std::memory_order_relaxed);
+    g_clodStreamingCompletedResults.store(stats.completedResults, std::memory_order_relaxed);
+    g_clodStreamingResidentAllocationBytes.store(stats.residentAllocationBytes, std::memory_order_relaxed);
+    g_clodStreamingCompletedResultBytes.store(stats.completedResultBytes, std::memory_order_relaxed);
 
     g_clodStreamingOperationStatsSequence.fetch_add(1u, std::memory_order_relaxed);
 }
@@ -149,6 +169,13 @@ inline bool TryReadCLodStreamingOperationStats(uint64_t& inOutSequence, CLodStre
     outStats.unloadUnique = g_clodStreamingUnloadUnique.load(std::memory_order_relaxed);
     outStats.unloadApplied = g_clodStreamingUnloadApplied.load(std::memory_order_relaxed);
     outStats.unloadFailed = g_clodStreamingUnloadFailed.load(std::memory_order_relaxed);
+
+    outStats.residentGroups = g_clodStreamingResidentGroups.load(std::memory_order_relaxed);
+    outStats.residentAllocations = g_clodStreamingResidentAllocations.load(std::memory_order_relaxed);
+    outStats.queuedRequests = g_clodStreamingQueuedRequests.load(std::memory_order_relaxed);
+    outStats.completedResults = g_clodStreamingCompletedResults.load(std::memory_order_relaxed);
+    outStats.residentAllocationBytes = g_clodStreamingResidentAllocationBytes.load(std::memory_order_relaxed);
+    outStats.completedResultBytes = g_clodStreamingCompletedResultBytes.load(std::memory_order_relaxed);
 
     inOutSequence = sequence;
     return true;
