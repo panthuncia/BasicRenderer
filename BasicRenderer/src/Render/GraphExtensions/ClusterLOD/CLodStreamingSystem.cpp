@@ -238,7 +238,7 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
         RenderGraph::ExternalPassDesc uploadDesc{};
         uploadDesc.type = RenderGraph::PassType::Copy;
         uploadDesc.name = "CLod::StreamingUpload";
-        uploadDesc.where = RenderGraph::ExternalInsertPoint::After("CLod::HierarchialCullingPass2");
+        uploadDesc.where = RenderGraph::ExternalInsertPoint::After("EvaluateMaterialGroupsPass");
         uploadDesc.copyQueueSelection = CopyQueueSelection::Copy;
         uploadDesc.pass = std::make_shared<StreamingUploadPass>(std::move(inputs));
         outPasses.push_back(std::move(uploadDesc));
@@ -279,7 +279,7 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
             RenderGraph::ExternalPassDesc readbackDesc{};
             readbackDesc.type = RenderGraph::PassType::Copy;
             readbackDesc.name = "CLod::StreamingReadbackCopy";
-            readbackDesc.where = RenderGraph::ExternalInsertPoint::After("CLod::HierarchialCullingPass2");
+            readbackDesc.where = RenderGraph::ExternalInsertPoint::After("EvaluateMaterialGroupsPass");
             readbackDesc.copyQueueSelection = CopyQueueSelection::Copy;
             readbackDesc.pass = std::make_shared<CLodStreamingReadbackCopyPass>(
                 std::move(readbackInputs),
