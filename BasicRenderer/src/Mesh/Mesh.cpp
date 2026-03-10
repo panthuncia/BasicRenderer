@@ -154,19 +154,6 @@ std::shared_ptr<Mesh> MeshIngestBuilder::Build(
 		cpuDataPolicy);
 }
 
-ClusterLODPrebuildArtifacts MeshIngestBuilder::BuildClusterLODArtifacts() const {
-	const std::vector<std::byte>* skinningVertices = m_skinningVertices.empty() ? nullptr : &m_skinningVertices;
-	return BuildClusterLODArtifactsFromGeometry(
-		m_vertices,
-		m_vertexSize,
-		skinningVertices,
-		m_skinningVertexSize,
-		m_indices,
-		m_flags,
-		m_clusterLODBuilderSettings);
-}
-
-
 Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD, MeshCpuDataPolicy cpuDataPolicy, bool deferResourceCreation) {
 	if (prebuiltClusterLOD.has_value()) {
 		m_prebuiltClusterLOD = std::move(prebuiltClusterLOD);

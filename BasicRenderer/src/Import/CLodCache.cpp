@@ -21,7 +21,7 @@
 
 #include <spdlog/spdlog.h>
 
-#include "Utilities/Utilities.h"
+#include "Utilities/CachePathUtilities.h"
 
 namespace CLodCache {
 
@@ -559,6 +559,9 @@ namespace CLodCache {
 			const std::wstring cachePath = GetCacheFilePathBySource(fileName, key.sourceIdentifier);
 			const std::wstring containerFileName = BuildGroupContainerFileName(key, buildConfigHash);
 			const std::wstring containerPath = GetCacheFilePathBySource(containerFileName, key.sourceIdentifier);
+
+			spdlog::info("CLodCache::SaveImpl  metadata='{}' container='{}'",
+				ws2s(cachePath), ws2s(containerPath));
 
 			std::vector<ClusterLODGroupDiskLocator> groupDiskLocators;
 			if (!SaveContainerPayload(containerPath, prebuiltData, payload, groupDiskLocators)) {

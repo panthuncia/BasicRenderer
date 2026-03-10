@@ -4,7 +4,7 @@
 #include <vector>
 #include <directxmath.h>
 
-#include "Mesh/Mesh.h"
+#include "Mesh/ClusterLODTypes.h"
 
 // Input: triangle-based source geometry to voxelize into a single group.
 struct VoxelizeTrianglesInput

@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "Mesh/Mesh.h"
+#include "Mesh/ClusterLODTypes.h"
 
 namespace CLodCache {
 

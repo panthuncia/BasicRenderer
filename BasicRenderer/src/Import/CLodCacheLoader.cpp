@@ -6,6 +6,8 @@
 #include <mutex>
 #include <unordered_map>
 
+#include <spdlog/spdlog.h>
+
 namespace CLodCacheLoader {
 
 namespace {
@@ -59,11 +61,15 @@ std::optional<ClusterLODPrebuiltData> TryLoadPrebuilt(const MeshCacheIdentity& i
 {
 	const auto cacheKey = ToCacheKey(identity);
 	const uint64_t buildHash = CLodCache::ComputeBuildConfigHash();
+	spdlog::debug("CLodCacheLoader::TryLoadPrebuilt  src='{}' prim='{}' subset='{}' hash=0x{:X}",
+		identity.sourceIdentifier, identity.primPath, identity.subsetName, buildHash);
 	auto cached = CLodCache::TryLoad(cacheKey, buildHash);
 	if (!cached.has_value()) {
+		spdlog::debug("  -> cache not found on disk.");
 		return std::nullopt;
 	}
 
+	spdlog::debug("  -> cache HIT (groups={}).", cached->prebuiltData.groups.size());
 	return std::move(cached->prebuiltData);
 }
 
@@ -76,12 +82,20 @@ bool SavePrebuilt(const MeshCacheIdentity& identity, const ClusterLODPrebuiltDat
 
 bool SavePrebuiltLocked(const MeshCacheIdentity& identity, const ClusterLODPrebuiltData& prebuiltData, const ClusterLODCacheBuildPayload& payload)
 {
+	spdlog::debug("CLodCacheLoader::SavePrebuiltLocked  src='{}' prim='{}' subset='{}'",
+		identity.sourceIdentifier, identity.primPath, identity.subsetName);
 	std::lock_guard<std::mutex> saveLock(GetCacheSaveMutexForIdentity(identity));
 	if (TryLoadPrebuilt(identity).has_value()) {
+		spdlog::debug("  -> already cached (race-condition guard).");
 		return true;
 	}
 
-	return SavePrebuilt(identity, prebuiltData, payload);
+	bool ok = SavePrebuilt(identity, prebuiltData, payload);
+	if (ok)
+		spdlog::debug("  -> SavePrebuilt succeeded.");
+	else
+		spdlog::warn("  -> SavePrebuilt FAILED.");
+	return ok;
 }
 
 }

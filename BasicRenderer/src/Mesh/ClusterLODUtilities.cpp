@@ -1605,15 +1605,6 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 				maxParentCount = std::max(maxParentCount, parentCount);
 			}
 		}
-
-		if (groupsWithMultipleParents > 0)
-		{
-			spdlog::warn(
-				"ClusterLOD: {} refined groups have multiple parents (max={} parents). "
-				"Work-graph traversal can emit duplicate meshlets unless refined-group traversal is deduplicated.",
-				groupsWithMultipleParents,
-				maxParentCount);
-		}
 	}
 
 	// Voxel hierarchy: detect terminal coarsest groups and build voxel group tree

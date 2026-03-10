@@ -6,7 +6,7 @@
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/mesh.h>
 
-#include "Mesh/Mesh.h"
+#include "Mesh/ClusterLODTypes.h"
 
 namespace CLodCacheLoader {
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Mesh/Mesh.h"
+#include "Mesh/ClusterLODTypes.h"
 
 ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	const std::vector<std::byte>& vertices,
