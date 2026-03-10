@@ -1438,6 +1438,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
             max5s.completedResults = std::max(max5s.completedResults, sample.stats.completedResults);
             max5s.residentAllocationBytes = std::max(max5s.residentAllocationBytes, sample.stats.residentAllocationBytes);
             max5s.completedResultBytes = std::max(max5s.completedResultBytes, sample.stats.completedResultBytes);
+            max5s.streamedBytesThisFrame = std::max(max5s.streamedBytesThisFrame, sample.stats.streamedBytesThisFrame);
         }
 
         auto formatBytes = [](uint64_t bytes) {
@@ -1478,6 +1479,14 @@ inline void Menu::DrawCLodTelemetryWindow() {
             m_clodStreamingOpsLatest.queuedRequests,
             m_clodStreamingOpsLatest.completedResults,
             formatBytes(m_clodStreamingOpsLatest.completedResultBytes).c_str());
+        {
+            const double kbPerFrame = static_cast<double>(m_clodStreamingOpsLatest.streamedBytesThisFrame) / 1024.0;
+            const float fps = ImGui::GetIO().Framerate;
+            const double gbPerSec = (fps > 0.0f)
+                ? (static_cast<double>(m_clodStreamingOpsLatest.streamedBytesThisFrame) * static_cast<double>(fps)) / (1024.0 * 1024.0 * 1024.0)
+                : 0.0;
+            ImGui::Text("Throughput: %.1f KB/frame  %.3f GB/s", kbPerFrame, gbPerSec);
+        }
 
         ImGui::TextUnformatted("Max in last 5 seconds");
         ImGui::Text("Load max: requested=%u unique=%u applied=%u failed=%u",
@@ -1498,6 +1507,14 @@ inline void Menu::DrawCLodTelemetryWindow() {
             max5s.queuedRequests,
             max5s.completedResults,
             formatBytes(max5s.completedResultBytes).c_str());
+        {
+            const double kbPerFrame = static_cast<double>(max5s.streamedBytesThisFrame) / 1024.0;
+            const float fps = ImGui::GetIO().Framerate;
+            const double gbPerSec = (fps > 0.0f)
+                ? (static_cast<double>(max5s.streamedBytesThisFrame) * static_cast<double>(fps)) / (1024.0 * 1024.0 * 1024.0)
+                : 0.0;
+            ImGui::Text("Throughput max: %.1f KB/frame  %.3f GB/s", kbPerFrame, gbPerSec);
+        }
     }
 
     if (m_clodTelemetryHasData) {

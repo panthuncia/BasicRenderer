@@ -1062,6 +1062,8 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
         frameStats.completedResults = debugStats.completedResults;
         frameStats.residentAllocationBytes = debugStats.residentAllocationBytes;
         frameStats.completedResultBytes = debugStats.completedResultBytes;
+        frameStats.streamedBytesThisFrame = debugStats.totalStreamedBytes - m_prevTotalStreamedBytes;
+        m_prevTotalStreamedBytes = debugStats.totalStreamedBytes;
     }
 
     PublishCLodStreamingOperationStats(frameStats);

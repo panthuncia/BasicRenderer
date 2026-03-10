@@ -48,6 +48,7 @@ public:
 		uint32_t completedResults = 0;
 		uint64_t residentAllocationBytes = 0;
 		uint64_t completedResultBytes = 0;
+		uint64_t totalStreamedBytes = 0;
 	};
 
 	// Represents the outcome of a single disk-streamed group IO.
@@ -202,6 +203,7 @@ private:
 	std::atomic<uint32_t> m_debugResidentGroups{0};
 	std::atomic<uint32_t> m_debugResidentAllocations{0};
 	std::atomic<uint64_t> m_debugResidentAllocationBytes{0};
+	std::atomic<uint64_t> m_debugTotalStreamedBytes{0};
 
 	struct CLodDiskStreamingRequest {
 		uint32_t groupGlobalIndex = 0;

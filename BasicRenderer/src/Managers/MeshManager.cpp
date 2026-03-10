@@ -854,6 +854,7 @@ MeshManager::DiskStreamingApplyResult MeshManager::ApplyCompletedCLodDiskStreami
 	{
 		m_debugResidentAllocations.fetch_add(1u, std::memory_order_relaxed);
 		m_debugResidentAllocationBytes.fetch_add(blobSize, std::memory_order_relaxed);
+		m_debugTotalStreamedBytes.fetch_add(blobSize, std::memory_order_relaxed);
 		m_debugResidentGroups.fetch_add(1u, std::memory_order_relaxed);
 	}
 
@@ -1407,6 +1408,7 @@ MeshManager::CLodStreamingDebugStats MeshManager::GetCLodStreamingDebugStats() c
 	stats.residentGroups = m_debugResidentGroups.load(std::memory_order_relaxed);
 	stats.residentAllocations = m_debugResidentAllocations.load(std::memory_order_relaxed);
 	stats.residentAllocationBytes = m_debugResidentAllocationBytes.load(std::memory_order_relaxed);
+	stats.totalStreamedBytes = m_debugTotalStreamedBytes.load(std::memory_order_relaxed);
 	{
 		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
 		stats.queuedRequests = static_cast<uint32_t>(m_clodDiskStreamingRequests.size());

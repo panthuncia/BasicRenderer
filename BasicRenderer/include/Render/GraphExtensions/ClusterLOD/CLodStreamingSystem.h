@@ -100,6 +100,7 @@ private:
     uint32_t m_streamingReadbackRingSize = 3u;
     uint32_t m_streamingCpuUploadBudgetRequests = 0u;
     uint32_t m_streamingResidentBudgetGroups = 0u;
+    uint64_t m_prevTotalStreamedBytes = 0u;
     std::function<MeshManager*()> m_getMeshManager = []() { return nullptr; };
 
     std::vector<PendingStreamingRequest> m_pendingStreamingRequests;

@@ -116,6 +116,7 @@ struct CLodStreamingOperationStats {
 
     uint64_t residentAllocationBytes = 0;
     uint64_t completedResultBytes = 0;
+    uint64_t streamedBytesThisFrame = 0;
 };
 
 inline std::atomic<uint64_t> g_clodStreamingOperationStatsSequence = 0;
@@ -133,6 +134,7 @@ inline std::atomic<uint32_t> g_clodStreamingQueuedRequests = 0;
 inline std::atomic<uint32_t> g_clodStreamingCompletedResults = 0;
 inline std::atomic<uint64_t> g_clodStreamingResidentAllocationBytes = 0;
 inline std::atomic<uint64_t> g_clodStreamingCompletedResultBytes = 0;
+inline std::atomic<uint64_t> g_clodStreamingStreamedBytesThisFrame = 0;
 
 inline void PublishCLodStreamingOperationStats(const CLodStreamingOperationStats& stats) {
     g_clodStreamingLoadRequested.store(stats.loadRequested, std::memory_order_relaxed);
@@ -150,6 +152,7 @@ inline void PublishCLodStreamingOperationStats(const CLodStreamingOperationStats
     g_clodStreamingCompletedResults.store(stats.completedResults, std::memory_order_relaxed);
     g_clodStreamingResidentAllocationBytes.store(stats.residentAllocationBytes, std::memory_order_relaxed);
     g_clodStreamingCompletedResultBytes.store(stats.completedResultBytes, std::memory_order_relaxed);
+    g_clodStreamingStreamedBytesThisFrame.store(stats.streamedBytesThisFrame, std::memory_order_relaxed);
 
     g_clodStreamingOperationStatsSequence.fetch_add(1u, std::memory_order_relaxed);
 }
@@ -176,6 +179,7 @@ inline bool TryReadCLodStreamingOperationStats(uint64_t& inOutSequence, CLodStre
     outStats.completedResults = g_clodStreamingCompletedResults.load(std::memory_order_relaxed);
     outStats.residentAllocationBytes = g_clodStreamingResidentAllocationBytes.load(std::memory_order_relaxed);
     outStats.completedResultBytes = g_clodStreamingCompletedResultBytes.load(std::memory_order_relaxed);
+    outStats.streamedBytesThisFrame = g_clodStreamingStreamedBytesThisFrame.load(std::memory_order_relaxed);
 
     inOutSequence = sequence;
     return true;
