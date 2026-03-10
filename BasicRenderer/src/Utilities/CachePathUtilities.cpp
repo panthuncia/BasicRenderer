@@ -1,7 +1,9 @@
 #include "Utilities/CachePathUtilities.h"
 
 #include <filesystem>
+#include <mutex>
 #include <system_error>
+#include <unordered_set>
 
 #include <windows.h>
 
@@ -75,7 +77,20 @@ std::string ws2s(const std::wstring_view& wide)
 std::wstring GetCacheFilePath(const std::wstring& fileName, const std::wstring& directory) {
 	std::filesystem::path workingDir = std::filesystem::current_path();
 	std::filesystem::path cacheDir = workingDir / L"cache" / directory;
-	std::filesystem::create_directories(cacheDir);
+
+	// Avoid repeated OS syscalls: only call create_directories once per unique
+	// directory path.  The set persists for the lifetime of the process.
+	{
+		static std::mutex s_ensuredMutex;
+		static std::unordered_set<std::wstring> s_ensuredDirs;
+		std::wstring cacheDirStr = cacheDir.wstring();
+		std::lock_guard<std::mutex> lock(s_ensuredMutex);
+		if (s_ensuredDirs.find(cacheDirStr) == s_ensuredDirs.end()) {
+			std::filesystem::create_directories(cacheDir);
+			s_ensuredDirs.insert(std::move(cacheDirStr));
+		}
+	}
+
 	std::filesystem::path filePath = cacheDir / fileName;
 	return filePath.wstring();
 }
