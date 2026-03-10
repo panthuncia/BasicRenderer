@@ -85,7 +85,7 @@ MeshManager::MeshManager() {
 		PagePool::Config ppConfig;
 		ppConfig.pageSize  = 65536;              // 64 KB
 		ppConfig.slabSize  = 256 * 1024 * 1024;  // 256 MB
-		ppConfig.maxSlabs  = 16;
+		ppConfig.maxSlabs  = 32;
 		ppConfig.debugName = "CLodPagePool";
 		m_clodPagePool = std::make_unique<PagePool>(ppConfig);
 	}
@@ -594,8 +594,16 @@ void MeshManager::ProcessCLodDiskStreamingIO(uint32_t maxCompletedRequests) {
 		{
 			std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
 			for (auto& result : localResults) {
-				const bool applied = ApplyCompletedCLodDiskStreamingResult(result);
-				newCompletions.push_back({ result.groupGlobalIndex, applied });
+				const auto applyResult = ApplyCompletedCLodDiskStreamingResult(result);
+				if (applyResult == DiskStreamingApplyResult::FailedPageExhaustion) {
+					// Preserve the loaded data so it can be retried after evictions
+					// free page-pool pages.
+					m_clodDiskStreamingPageExhaustedRetry.push_back(std::move(result));
+				}
+				else {
+					newCompletions.push_back({ result.groupGlobalIndex,
+						applyResult == DiskStreamingApplyResult::Applied });
+				}
 			}
 		}
 		{
@@ -605,6 +613,48 @@ void MeshManager::ProcessCLodDiskStreamingIO(uint32_t maxCompletedRequests) {
 			}
 		}
 	}
+}
+
+uint32_t MeshManager::GetPageExhaustedResultCount() const {
+	return static_cast<uint32_t>(m_clodDiskStreamingPageExhaustedRetry.size());
+}
+
+uint32_t MeshManager::RetryPageExhaustedResults(uint32_t maxRetries) {
+	if (m_clodDiskStreamingPageExhaustedRetry.empty()) {
+		return 0u;
+	}
+
+	uint32_t applied = 0u;
+	std::vector<CLodDiskStreamingCompletion> newCompletions;
+
+	{
+		std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
+
+		// Iterate from back so we can efficiently pop retried entries.
+		for (uint32_t i = 0; i < maxRetries && !m_clodDiskStreamingPageExhaustedRetry.empty(); ++i) {
+			auto& result = m_clodDiskStreamingPageExhaustedRetry.back();
+			const auto applyResult = ApplyCompletedCLodDiskStreamingResult(result);
+			if (applyResult == DiskStreamingApplyResult::FailedPageExhaustion) {
+				// Still no pages available — stop retrying this round.
+				break;
+			}
+			newCompletions.push_back({ result.groupGlobalIndex,
+				applyResult == DiskStreamingApplyResult::Applied });
+			if (applyResult == DiskStreamingApplyResult::Applied) {
+				applied++;
+			}
+			m_clodDiskStreamingPageExhaustedRetry.pop_back();
+		}
+	}
+
+	if (!newCompletions.empty()) {
+		std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
+		for (auto& c : newCompletions) {
+			m_clodDiskStreamingCompletions.push_back(std::move(c));
+		}
+	}
+
+	return applied;
 }
 
 void MeshManager::RebuildCLodSharedStreamingRangeIndex() {
@@ -720,21 +770,21 @@ bool MeshManager::QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodS
 	return false;
 }
 
-bool MeshManager::ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result) {
+MeshManager::DiskStreamingApplyResult MeshManager::ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result) {
 	if (!result.success) {
-		return false;
+		return DiskStreamingApplyResult::FailedPermanent;
 	}
 
 	uint32_t localIndex = 0u;
 	auto sharedState = FindCLodSharedStreamingStateByGlobalGroup(result.groupGlobalIndex, localIndex);
 	if (sharedState == nullptr || sharedState->mesh == nullptr) {
-		return false;
+		return DiskStreamingApplyResult::FailedPermanent;
 	}
 
 	auto* mesh = sharedState->mesh;
 	if (localIndex >= sharedState->baselineGroupChunks.size() ||
 		localIndex >= sharedState->residentGroupAllocations.size()) {
-		return false;
+		return DiskStreamingApplyResult::FailedPermanent;
 	}
 
 	auto& residentAllocations = sharedState->residentGroupAllocations[localIndex];
@@ -775,10 +825,10 @@ bool MeshManager::ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult&
 	if (pagesNeeded > 0) {
 		pageAlloc = m_clodPagePool->AllocatePages(pagesNeeded);
 		if (!pageAlloc.IsValid()) {
-			spdlog::error("CLod streaming: failed to allocate {} pages for group {}",
+			spdlog::warn("CLod streaming: page pool exhausted — failed to allocate {} pages for group {} (will retry after eviction)",
 						  pagesNeeded, result.groupGlobalIndex);
 			residentAllocations.Reset();
-			return false;
+			return DiskStreamingApplyResult::FailedPageExhaustion;
 		}
 	}
 
@@ -808,7 +858,7 @@ bool MeshManager::ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult&
 	}
 
 	UploadCLodGroupChunkTable(*sharedState);
-	return true;
+	return DiskStreamingApplyResult::Applied;
 }
 
 void MeshManager::DrainCompletedCLodDiskStreamingGroups(std::vector<CLodDiskStreamingCompletion>& outCompletions) {

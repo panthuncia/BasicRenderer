@@ -874,6 +874,26 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
     if (meshManager != nullptr) {
         meshManager->ProcessCLodDiskStreamingIO(budget);
         ApplyDiskStreamingCompletions(meshManager);
+
+        // If disk streaming results failed because the page pool ran out of
+        // pages, evict LRU victims to free pages and then retry.
+        while (meshManager->GetPageExhaustedResultCount() > 0u) {
+            const bool evicted = TryEvictLruVictim(/*avoidGroup=*/UINT32_MAX, frameStats);
+            if (!evicted) {
+                spdlog::warn("CLod streaming: {} results pending due to page exhaustion but no LRU victims to evict",
+                             meshManager->GetPageExhaustedResultCount());
+                break;
+            }
+
+            const uint32_t retried = meshManager->RetryPageExhaustedResults(1u);
+            // Drain completions produced by the retry so residency bits are updated.
+            ApplyDiskStreamingCompletions(meshManager);
+            if (retried == 0u) {
+                // Eviction freed some pages but still not enough for the next
+                // result — continue evicting.
+                continue;
+            }
+        }
     }
 
     m_loadBatchRequests.clear();

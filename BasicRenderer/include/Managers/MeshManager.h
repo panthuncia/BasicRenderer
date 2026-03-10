@@ -96,6 +96,16 @@ public:
 	CLodStreamingDebugStats GetCLodStreamingDebugStats() const;
 	void ProcessCLodDiskStreamingIO(uint32_t maxCompletedRequests = 64u);
 
+	// Returns the number of disk streaming results that failed due to page
+	// pool exhaustion and are waiting to be retried after evictions free pages.
+	uint32_t GetPageExhaustedResultCount() const;
+
+	// Retries applying up to `maxRetries` page-exhausted results.  Call this
+	// after evicting groups from the LRU so that freed pages can be reused.
+	// Completions are pushed into the normal DrainCompletedCLodDiskStreamingGroups
+	// queue.  Returns the number of results that were successfully applied.
+	uint32_t RetryPageExhaustedResults(uint32_t maxRetries = 1u);
+
 	// Drains groups that completed disk streaming since the last call.
 	// The extension uses this to learn which groups became resident (or failed)
 	// so it can update the GPU-visible non-resident bitset accordingly.
@@ -225,6 +235,10 @@ private:
 	std::vector<CLodDiskStreamingResult> m_clodDiskStreamingResults;
 	std::vector<CLodDiskStreamingCompletion> m_clodDiskStreamingCompletions;
 
+	// Results that failed because the page pool had no free pages.
+	// Retried after the streaming system evicts LRU victims.
+	std::vector<CLodDiskStreamingResult> m_clodDiskStreamingPageExhaustedRetry;
+
 	// Guards CLodSharedStreamingState interiors (groupResidentFlags,
 	// baselineGroupChunks, residentGroupAllocations, residencyTableDirty),
 	// m_clodPagePool, and m_clodSharedGroupChunks UpdateView calls.
@@ -235,7 +249,13 @@ private:
 
 	void DispatchCLodDiskStreamingBatch();
 	bool QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool& outQueued);
-	bool ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result);
+
+	enum class DiskStreamingApplyResult {
+		Applied,
+		FailedPermanent,
+		FailedPageExhaustion,
+	};
+	DiskStreamingApplyResult ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result);
 	void UploadCLodGroupChunkTable(const CLodSharedStreamingState& state);
 	bool IsCLodGroupResident(const CLodSharedStreamingState& state, uint32_t groupLocalIndex) const;
 	void DeallocateCLodGroupChunkAllocations(CLodSharedStreamingState& state, uint32_t groupLocalIndex);
