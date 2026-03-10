@@ -64,7 +64,7 @@ static bool ProcessFile(const fs::path& path) {
     auto pathStr   = canonical.string();
     auto fmt       = DetectFormat(canonical);
 
-    spdlog::info("──────────────────────────────────────────────────");
+    spdlog::info("---------------------------------------------------");
     spdlog::info("[{}] Processing: {}", FormatName(fmt), pathStr);
     spdlog::info("  File size: {} bytes", fs::file_size(canonical));
 

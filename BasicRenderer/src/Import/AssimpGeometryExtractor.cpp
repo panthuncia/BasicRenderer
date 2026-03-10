@@ -14,6 +14,7 @@
 #include "Import/CLodCacheLoader.h"
 #include "Mesh/ClusterLODTypes.h"
 #include "Mesh/VertexFlags.h"
+#include "Utilities/CachePathUtilities.h"
 
 namespace {
 
@@ -23,7 +24,7 @@ CLodCacheLoader::MeshCacheIdentity BuildAssimpCacheIdentity(
 	unsigned int meshIndex)
 {
 	CLodCacheLoader::MeshCacheIdentity identity{};
-	identity.sourceIdentifier = sourceFilePath;
+	identity.sourceIdentifier = NormalizeCacheSourcePath(sourceFilePath);
 	identity.primPath = "/Assimp/Mesh/" + std::to_string(meshIndex);
 	if (mesh != nullptr && mesh->mName.length > 0) {
 		identity.primPath += "/" + std::string(mesh->mName.C_Str());

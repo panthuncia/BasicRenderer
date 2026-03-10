@@ -25,6 +25,7 @@
 #include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Mesh/ClusterLODTypes.h"
 #include "Mesh/VertexFlags.h"
+#include "Utilities/CachePathUtilities.h"
 
 using nlohmann::json;
 using namespace DirectX;
@@ -713,7 +714,7 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 	const uint8_t vertexSize = static_cast<uint8_t>(sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0));
 
 	CLodCacheLoader::MeshCacheIdentity cacheIdentity{};
-	cacheIdentity.sourceIdentifier = sourceFilePath;
+	cacheIdentity.sourceIdentifier = NormalizeCacheSourcePath(sourceFilePath);
 	cacheIdentity.primPath = "/glTF/Mesh/" + std::to_string(meshIndex) + "/Primitive/" + std::to_string(primitiveIndex);
 	cacheIdentity.subsetName = "";
 

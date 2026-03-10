@@ -8,6 +8,8 @@
 
 #include <spdlog/spdlog.h>
 
+#include "Utilities/CachePathUtilities.h"
+
 namespace CLodCacheLoader {
 
 namespace {
@@ -50,7 +52,8 @@ MeshCacheIdentity BuildIdentity(
 {
 	MeshCacheIdentity identity{};
 	if (stage && stage->GetRootLayer()) {
-		identity.sourceIdentifier = stage->GetRootLayer()->GetIdentifier();
+		identity.sourceIdentifier = NormalizeCacheSourcePath(
+			stage->GetRootLayer()->GetIdentifier());
 	}
 	identity.primPath = mesh.GetPrim().GetPath().GetString();
 	identity.subsetName = subsetName;

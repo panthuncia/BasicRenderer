@@ -79,3 +79,11 @@ std::wstring GetCacheFilePath(const std::wstring& fileName, const std::wstring& 
 	std::filesystem::path filePath = cacheDir / fileName;
 	return filePath.wstring();
 }
+
+std::string NormalizeCacheSourcePath(const std::string& path) {
+	if (path.empty()) return path;
+	std::error_code ec;
+	auto canonical = std::filesystem::weakly_canonical(std::filesystem::path(path), ec);
+	if (ec) return path; // if canonicalisation fails, use original
+	return canonical.generic_string(); // forward-slash, absolute
+}
