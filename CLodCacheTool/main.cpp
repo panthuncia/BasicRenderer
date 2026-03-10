@@ -199,7 +199,7 @@ int main(int argc, char* argv[]) {
     auto totalT1 = std::chrono::steady_clock::now();
     auto totalMs = std::chrono::duration_cast<std::chrono::milliseconds>(totalT1 - totalT0).count();
 
-    spdlog::info("══════════════════════════════════════════════════");
+    spdlog::info("=====================================================");
     spdlog::info("Done.  {} succeeded, {} failed.  Total time: {} ms", successes, failures, totalMs);
 
     // Report cache directory contents
