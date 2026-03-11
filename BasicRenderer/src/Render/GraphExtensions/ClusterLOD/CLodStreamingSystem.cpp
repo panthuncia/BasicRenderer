@@ -106,7 +106,7 @@ CLodStreamingSystem::CLodStreamingSystem() {
         false);
     m_usedGroupsBuffer->SetName("CLod Used Groups Buffer");
 
-    // ── Self-managed readback pipeline ─────────────────────────────────
+    // Self-managed readback pipeline
     {
         auto device = DeviceManager::GetInstance().GetDevice();
         auto result = device.CreateTimeline(m_streamingReadbackFencePtr, 0, "CLodStreamingReadbackFence");
@@ -978,7 +978,7 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
             continue;
         }
 
-        // ── Load path ──────────────────────────────────────────────────
+        // Load path
         frameStats.loadRequested++;
         frameStats.loadUnique++;
 
@@ -991,7 +991,7 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
         }
 
         if (meshManager == nullptr) {
-            // No mesh manager — just mark resident in CPU bits.
+            // mark resident in CPU bits.
             const uint32_t wordAddress = BitWordAddress(groupIndex);
             const uint32_t bitMask = BitMask(groupIndex);
             const uint32_t oldWord = m_streamingNonResidentBitsCpu[wordAddress];

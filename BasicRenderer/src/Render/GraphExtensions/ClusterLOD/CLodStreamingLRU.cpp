@@ -9,7 +9,7 @@ CLodStreamingLRU::~CLodStreamingLRU() {
 void CLodStreamingLRU::Insert(uint32_t groupIndex) {
     auto it = m_map.find(groupIndex);
     if (it != m_map.end()) {
-        // Already present — move to MRU position.
+        // Already present- move to MRU position.
         Unlink(it->second);
         PushBack(it->second);
         return;
@@ -55,10 +55,10 @@ void CLodStreamingLRU::Clear() {
     m_pinned.clear();
 }
 
-// ── Pinned group tracking ──────────────────────────────────────────────
+// Pinned group tracking
 
 void CLodStreamingLRU::Pin(uint32_t groupIndex) {
-    // Remove from LRU if present — pinned groups are not evictable.
+    // Remove from LRU if present- pinned groups are not evictable.
     Remove(groupIndex);
     m_pinned.insert(groupIndex);
 }
@@ -71,7 +71,7 @@ bool CLodStreamingLRU::IsPinned(uint32_t groupIndex) const {
     return m_pinned.count(groupIndex) != 0;
 }
 
-// ── Intrusive list helpers ─────────────────────────────────────────────
+// list helpers
 
 void CLodStreamingLRU::Unlink(Node* node) {
     if (node->prev) {

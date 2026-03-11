@@ -85,7 +85,7 @@ PagePool::~PagePool() = default;
 // Slab management
 bool PagePool::AllocateNewSlab() {
 	if (static_cast<uint32_t>(m_slabs.size()) >= m_config.maxSlabs) {
-		spdlog::error("PagePool: cannot allocate new slab — maxSlabs ({}) reached", m_config.maxSlabs);
+		spdlog::error("PagePool: cannot allocate new slab- maxSlabs ({}) reached", m_config.maxSlabs);
 		return false;
 	}
 
@@ -170,7 +170,7 @@ PagePool::PageAllocation PagePool::AllocatePages(uint32_t count) {
 		return {};
 	}
 
-	// If pre-allocated, all slabs are already created — no on-demand growth.
+	// If pre-allocated, all slabs are already created
 	if (m_config.preAllocate) {
 		return {};
 	}
@@ -259,8 +259,7 @@ void PagePool::FlushPageTableUpdates() {
 	// was created with structured element size = sizeof(PageTableEntry).
 	// We use the BUFFER_UPLOAD macro which uploads to an offset.
 	if (m_pageTableBuffer->Size() < tableBytes) {
-		// Recreate with a larger capacity — DynamicBuffer doesn't expose a direct resize,
-		// but we can just create a fresh buffer.
+		// Recreate with a larger capacity
 		m_pageTableBuffer = DynamicBuffer::CreateShared(
 			sizeof(PageTableEntry),
 			m_pageTableCpu.size(),
