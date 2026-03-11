@@ -10,30 +10,27 @@
 
 CLodStreamingBeginFramePass::CLodStreamingBeginFramePass(
     std::shared_ptr<Buffer> loadCounter,
-    std::shared_ptr<Buffer> loadRequestBits,
+    std::shared_ptr<Buffer> usedGroupsCounter,
     std::shared_ptr<Buffer> nonResidentBits,
     std::shared_ptr<Buffer> activeGroupsBits,
     std::shared_ptr<Buffer> runtimeState,
     std::function<bool(std::vector<uint32_t>&)> tryConsumeNonResidentBitsUpload,
     std::function<void(std::vector<uint32_t>&, uint32_t&)> getActiveGroupsBitsUpload,
-    std::function<uint32_t()> getBitsetWordCount,
     std::function<void()> scheduleStreamingReadbacks,
     std::function<void()> processStreamingRequests)
     : m_loadCounter(std::move(loadCounter))
-    , m_loadRequestBits(std::move(loadRequestBits))
+    , m_usedGroupsCounter(std::move(usedGroupsCounter))
     , m_nonResidentBits(std::move(nonResidentBits))
     , m_activeGroupsBits(std::move(activeGroupsBits))
     , m_runtimeState(std::move(runtimeState))
     , m_tryConsumeNonResidentBitsUpload(std::move(tryConsumeNonResidentBitsUpload))
     , m_getActiveGroupsBitsUpload(std::move(getActiveGroupsBitsUpload))
-    , m_getBitsetWordCount(std::move(getBitsetWordCount))
     , m_scheduleStreamingReadbacks(std::move(scheduleStreamingReadbacks))
     , m_processStreamingRequests(std::move(processStreamingRequests)) {
 }
 
 void CLodStreamingBeginFramePass::DeclareResourceUsages(ComputePassBuilder* builder) {
-    builder->WithUnorderedAccess(m_loadCounter, m_nonResidentBits, m_activeGroupsBits, m_runtimeState)
-        .WithUnorderedAccess(Builtin::CLod::StreamingLoadRequestBits);
+    builder->WithUnorderedAccess(m_loadCounter, m_usedGroupsCounter, m_nonResidentBits, m_activeGroupsBits, m_runtimeState);
 }
 
 void CLodStreamingBeginFramePass::Setup() {}
@@ -61,14 +58,7 @@ void CLodStreamingBeginFramePass::Update(const UpdateExecutionContext& execution
 
     const uint32_t zero = 0u;
     BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_loadCounter), 0);
-
-    const uint32_t bitsetWordCount = std::max(m_getBitsetWordCount ? m_getBitsetWordCount() : 1u, 1u);
-    std::vector<uint32_t> zeroBits(bitsetWordCount, 0u);
-    BUFFER_UPLOAD(
-        zeroBits.data(),
-        static_cast<uint32_t>(zeroBits.size() * sizeof(uint32_t)),
-        rg::runtime::UploadTarget::FromShared(m_loadRequestBits),
-        0);
+    BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_usedGroupsCounter), 0);
 
     std::vector<uint32_t> nonResidentBitsUpload;
     if (m_tryConsumeNonResidentBitsUpload && m_tryConsumeNonResidentBitsUpload(nonResidentBitsUpload)) {

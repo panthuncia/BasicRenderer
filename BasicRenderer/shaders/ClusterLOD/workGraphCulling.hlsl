@@ -112,6 +112,7 @@ static const uint WG_COUNTER_PHASE2_REPLAY_GROUP_RECORDS_CONSUMED = 61;
 static const uint WG_COUNTER_PHASE2_REPLAY_CLUSTER_BUCKET_RECORDS_CONSUMED = 62;
 
 static const uint CLOD_STREAM_REQUEST_CAPACITY = (1u << 16);
+static const uint CLOD_USED_GROUPS_CAPACITY = (1u << 17);
 static const uint CLOD_STREAM_VIEWID_MASK = 0xFFFFu;
 static const uint CLOD_STREAM_PRIORITY_SHIFT = 16u;
 
@@ -792,8 +793,10 @@ void WG_GroupEvaluate(
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
             RWStructuredBuffer<uint> loadRequestCounter =
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
-            RWByteAddressBuffer loadRequestBits =
-                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequestBits)];
+            RWStructuredBuffer<uint> usedGroupsCounter =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroupsCounter)];
+            RWStructuredBuffer<uint> usedGroupsBuffer =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroups)];
             StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
                 ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
             const uint depthMapDescriptorIndex = camera.isOrtho
@@ -839,23 +842,15 @@ void WG_GroupEvaluate(
                             cam.zNear);
 
                         if (refinedGroupGlobalIndex < activeGroupScanCount) {
-                            // Deduplicate: set a bit per group so only the first
-                            // thread for each non-resident group touches the atomic
-                            // counter.  Without this gate every non-resident child
-                            // encounter (potentially thousands when entering a new
-                            // area) serialises on loadRequestCounter[0], stalling
-                            // the entire work graph.
-                            if (CLodTrySetBit(loadRequestBits, refinedGroupGlobalIndex)) {
-                                uint requestIndex = 0;
-                                InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
-                                if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY) {
-                                    CLodStreamingRequest req = (CLodStreamingRequest)0;
-                                    req.groupGlobalIndex = refinedGroupGlobalIndex;
-                                    req.meshInstanceIndex = rec.instanceIndex;
-                                    req.meshBufferIndex = instanceData.perMeshBufferIndex;
-                                    req.viewId = CLodPackViewPriority(rec.viewId, fallbackErrorOverDistance);
-                                    loadRequests[requestIndex] = req;
-                                }
+                            uint requestIndex = 0;
+                            InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
+                            if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY) {
+                                CLodStreamingRequest req = (CLodStreamingRequest)0;
+                                req.groupGlobalIndex = refinedGroupGlobalIndex;
+                                req.meshInstanceIndex = rec.instanceIndex;
+                                req.meshBufferIndex = instanceData.perMeshBufferIndex;
+                                req.viewId = CLodPackViewPriority(rec.viewId, fallbackErrorOverDistance);
+                                loadRequests[requestIndex] = req;
                             }
                         }
                     }
@@ -932,6 +927,16 @@ void WG_GroupEvaluate(
                     emitBucketCount++;
                 }
             }
+
+            // Append this group to the used-groups buffer so the CPU LRU
+            // knows which groups are actively rendered.
+            if (emitBucketCount > 0) {
+                uint usedSlot = 0;
+                InterlockedAdd(usedGroupsCounter[0], 1u, usedSlot);
+                if (usedSlot < CLOD_USED_GROUPS_CAPACITY) {
+                    usedGroupsBuffer[usedSlot] = groupIndex;
+                }
+            }
         }
     }
 
@@ -959,7 +964,7 @@ void WG_GroupEvaluate(
 [NodeID("ClusterCullBuckets")]
 [NodeLaunch("broadcasting")]
 [NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
-[NodeMaxDispatchGrid(64, 1, 1)] // TODO: Sane max?
+[NodeMaxDispatchGrid(128/CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)] // 128 clusters per group is current max
 void WG_ClusterCullBuckets(
     DispatchNodeInputRecord< MeshletBucketRecord> inRec,
     uint3 DTid : SV_DispatchThreadID,
