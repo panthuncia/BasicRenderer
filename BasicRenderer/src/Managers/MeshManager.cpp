@@ -83,10 +83,11 @@ MeshManager::MeshManager() {
 	// Page pool
 	{
 		PagePool::Config ppConfig;
-		ppConfig.pageSize  = 65536;              // 64 KB
-		ppConfig.slabSize  = 256 * 1024 * 1024;  // 256 MB
-		ppConfig.maxSlabs  = 32;
-		ppConfig.debugName = "CLodPagePool";
+		ppConfig.pageSize     = 65536;              // 64 KB
+		ppConfig.slabSize     = 256 * 1024 * 1024;  // 256 MB
+		ppConfig.maxSlabs     = 32;
+		ppConfig.preAllocate  = true;
+		ppConfig.debugName    = "CLodPagePool";
 		m_clodPagePool = std::make_unique<PagePool>(ppConfig);
 	}
 	m_resources[Builtin::CLod::PageTable] = m_clodPagePool->GetPageTableBuffer();
@@ -592,18 +593,11 @@ void MeshManager::ProcessCLodDiskStreamingIO(uint32_t maxCompletedRequests) {
 		std::vector<CLodDiskStreamingCompletion> newCompletions;
 		newCompletions.reserve(localResults.size());
 		{
-			std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
+				std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
 			for (auto& result : localResults) {
 				const auto applyResult = ApplyCompletedCLodDiskStreamingResult(result);
-				if (applyResult == DiskStreamingApplyResult::FailedPageExhaustion) {
-					// Preserve the loaded data so it can be retried after evictions
-					// free page-pool pages.
-					m_clodDiskStreamingPageExhaustedRetry.push_back(std::move(result));
-				}
-				else {
-					newCompletions.push_back({ result.groupGlobalIndex,
-						applyResult == DiskStreamingApplyResult::Applied });
-				}
+				newCompletions.push_back({ result.groupGlobalIndex,
+					applyResult == DiskStreamingApplyResult::Applied });
 			}
 		}
 		{
@@ -615,47 +609,7 @@ void MeshManager::ProcessCLodDiskStreamingIO(uint32_t maxCompletedRequests) {
 	}
 }
 
-uint32_t MeshManager::GetPageExhaustedResultCount() const {
-	return static_cast<uint32_t>(m_clodDiskStreamingPageExhaustedRetry.size());
-}
 
-uint32_t MeshManager::RetryPageExhaustedResults(uint32_t maxRetries) {
-	if (m_clodDiskStreamingPageExhaustedRetry.empty()) {
-		return 0u;
-	}
-
-	uint32_t applied = 0u;
-	std::vector<CLodDiskStreamingCompletion> newCompletions;
-
-	{
-		std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
-
-		// Iterate from back so we can efficiently pop retried entries.
-		for (uint32_t i = 0; i < maxRetries && !m_clodDiskStreamingPageExhaustedRetry.empty(); ++i) {
-			auto& result = m_clodDiskStreamingPageExhaustedRetry.back();
-			const auto applyResult = ApplyCompletedCLodDiskStreamingResult(result);
-			if (applyResult == DiskStreamingApplyResult::FailedPageExhaustion) {
-				// Still no pages available — stop retrying this round.
-				break;
-			}
-			newCompletions.push_back({ result.groupGlobalIndex,
-				applyResult == DiskStreamingApplyResult::Applied });
-			if (applyResult == DiskStreamingApplyResult::Applied) {
-				applied++;
-			}
-			m_clodDiskStreamingPageExhaustedRetry.pop_back();
-		}
-	}
-
-	if (!newCompletions.empty()) {
-		std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
-		for (auto& c : newCompletions) {
-			m_clodDiskStreamingCompletions.push_back(std::move(c));
-		}
-	}
-
-	return applied;
-}
 
 void MeshManager::RebuildCLodSharedStreamingRangeIndex() {
 	if (!m_clodSharedStreamingRangesDirty) {
@@ -825,10 +779,10 @@ MeshManager::DiskStreamingApplyResult MeshManager::ApplyCompletedCLodDiskStreami
 	if (pagesNeeded > 0) {
 		pageAlloc = m_clodPagePool->AllocatePages(pagesNeeded);
 		if (!pageAlloc.IsValid()) {
-			spdlog::warn("CLod streaming: page pool exhausted — failed to allocate {} pages for group {} (will retry after eviction)",
+			spdlog::warn("CLod streaming: page pool exhausted — failed to allocate {} pages for group {} (pre-eviction should have freed enough)",
 						  pagesNeeded, result.groupGlobalIndex);
 			residentAllocations.Reset();
-			return DiskStreamingApplyResult::FailedPageExhaustion;
+			return DiskStreamingApplyResult::FailedPermanent;
 		}
 	}
 
@@ -866,6 +820,49 @@ void MeshManager::DrainCompletedCLodDiskStreamingGroups(std::vector<CLodDiskStre
 	std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
 	outCompletions = std::move(m_clodDiskStreamingCompletions);
 	m_clodDiskStreamingCompletions.clear();
+}
+
+bool MeshManager::FreeCLodGroupEviction(uint32_t groupGlobalIndex) {
+	uint32_t localIndex = 0u;
+	auto sharedState = FindCLodSharedStreamingStateByGlobalGroup(groupGlobalIndex, localIndex);
+	if (sharedState == nullptr) {
+		return false;
+	}
+
+	std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
+	return ApplyCLodGroupResidency(*sharedState, localIndex, false, true);
+}
+
+bool MeshManager::QueueCLodGroupDiskIO(uint32_t groupGlobalIndex) {
+	uint32_t localIndex = 0u;
+	auto sharedState = FindCLodSharedStreamingStateByGlobalGroup(groupGlobalIndex, localIndex);
+	if (sharedState == nullptr || sharedState->mesh == nullptr) {
+		return false;
+	}
+
+	bool queued = false;
+	QueueCLodDiskStreamingRequest(groupGlobalIndex, *sharedState, localIndex, queued);
+	return queued;
+}
+
+MeshManager::CLodGroupStreamingInfo MeshManager::GetCLodGroupStreamingInfo(uint32_t groupGlobalIndex) const {
+	CLodGroupStreamingInfo info{};
+
+	uint32_t localIndex = 0u;
+	auto sharedState = const_cast<MeshManager*>(this)->FindCLodSharedStreamingStateByGlobalGroup(groupGlobalIndex, localIndex);
+	if (sharedState == nullptr || sharedState->mesh == nullptr) {
+		return info;
+	}
+
+	const auto& hints = sharedState->mesh->GetCLodGroupChunkHints();
+	if (localIndex >= hints.size()) {
+		return info;
+	}
+
+	info.hint = hints[localIndex];
+	info.vertexByteSize = sharedState->mesh->GetPerMeshCBData().vertexByteSize;
+	info.valid = true;
+	return info;
 }
 
 void MeshManager::ZeroCLodGroupChunkCounts(ClusterLODGroupChunk& chunk) {

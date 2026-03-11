@@ -97,20 +97,27 @@ public:
 	CLodStreamingDebugStats GetCLodStreamingDebugStats() const;
 	void ProcessCLodDiskStreamingIO(uint32_t maxCompletedRequests = 64u);
 
-	// Returns the number of disk streaming results that failed due to page
-	// pool exhaustion and are waiting to be retried after evictions free pages.
-	uint32_t GetPageExhaustedResultCount() const;
-
-	// Retries applying up to `maxRetries` page-exhausted results.  Call this
-	// after evicting groups from the LRU so that freed pages can be reused.
-	// Completions are pushed into the normal DrainCompletedCLodDiskStreamingGroups
-	// queue.  Returns the number of results that were successfully applied.
-	uint32_t RetryPageExhaustedResults(uint32_t maxRetries = 1u);
-
 	// Drains groups that completed disk streaming since the last call.
 	// The extension uses this to learn which groups became resident (or failed)
 	// so it can update the GPU-visible non-resident bitset accordingly.
 	void DrainCompletedCLodDiskStreamingGroups(std::vector<CLodDiskStreamingCompletion>& outCompletions);
+
+	// Focused eviction: frees a resident group's page-pool pages, marks it
+	// non-resident, and uploads the chunk table.  Returns true on success.
+	bool FreeCLodGroupEviction(uint32_t groupGlobalIndex);
+
+	// Queues disk I/O for a group without any residency side-effects.
+	// Returns true if the request was queued (or was already in the queue).
+	bool QueueCLodGroupDiskIO(uint32_t groupGlobalIndex);
+
+	struct CLodGroupStreamingInfo {
+		ClusterLODRuntimeSummary::GroupChunkHint hint{};
+		uint32_t vertexByteSize = 0;
+		bool valid = false;
+	};
+	// Retrieves the chunk hint and vertex byte size for a group so that
+	// the caller can compute the estimated page count before dispatching I/O.
+	CLodGroupStreamingInfo GetCLodGroupStreamingInfo(uint32_t groupGlobalIndex) const;
 
 	void UpdatePerMeshBuffer(std::unique_ptr<BufferView>& view, PerMeshCB& data);
 	void UpdatePerMeshInstanceBuffer(std::unique_ptr<BufferView>& view, PerMeshInstanceCB& data);
@@ -237,10 +244,6 @@ private:
 	std::vector<CLodDiskStreamingResult> m_clodDiskStreamingResults;
 	std::vector<CLodDiskStreamingCompletion> m_clodDiskStreamingCompletions;
 
-	// Results that failed because the page pool had no free pages.
-	// Retried after the streaming system evicts LRU victims.
-	std::vector<CLodDiskStreamingResult> m_clodDiskStreamingPageExhaustedRetry;
-
 	// Guards CLodSharedStreamingState interiors (groupResidentFlags,
 	// baselineGroupChunks, residentGroupAllocations, residencyTableDirty),
 	// m_clodPagePool, and m_clodSharedGroupChunks UpdateView calls.
@@ -255,7 +258,6 @@ private:
 	enum class DiskStreamingApplyResult {
 		Applied,
 		FailedPermanent,
-		FailedPageExhaustion,
 	};
 	DiskStreamingApplyResult ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result);
 	void UploadCLodGroupChunkTable(const CLodSharedStreamingState& state);

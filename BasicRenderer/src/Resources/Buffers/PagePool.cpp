@@ -66,6 +66,18 @@ PagePool::PagePool(const Config& config)
 
 	// Resource group for slab buffers (render graph auto-invalidation).
 	m_slabResourceGroup = std::make_shared<ResourceGroup>(m_config.debugName + "::Slabs");
+
+	// Pre-allocate all slabs if requested.
+	if (m_config.preAllocate) {
+		for (uint32_t i = 0; i < m_config.maxSlabs; ++i) {
+			if (!AllocateNewSlab()) {
+				spdlog::error("PagePool: pre-allocation failed at slab {}", i);
+				break;
+			}
+		}
+		spdlog::info("PagePool: pre-allocated {} slabs ({} total pages)",
+					 static_cast<uint32_t>(m_slabs.size()), m_totalPageCapacity);
+	}
 }
 
 PagePool::~PagePool() = default;
@@ -153,12 +165,17 @@ PagePool::PageAllocation PagePool::AllocatePages(uint32_t count) {
 		}
 	}
 
-	// Need a new slab.
 	if (count > m_pagesPerSlab) {
 		spdlog::error("PagePool: allocation of {} pages exceeds pagesPerSlab ({})", count, m_pagesPerSlab);
 		return {};
 	}
 
+	// If pre-allocated, all slabs are already created — no on-demand growth.
+	if (m_config.preAllocate) {
+		return {};
+	}
+
+	// Need a new slab.
 	if (!AllocateNewSlab()) {
 		return {};
 	}

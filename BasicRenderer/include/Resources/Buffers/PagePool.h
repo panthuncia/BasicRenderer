@@ -32,6 +32,7 @@ public:
 		uint64_t pageSize     = 65536; // Bytes per page (default 64 KB).
 		uint64_t slabSize     = 256 * 1024 * 1024; // Bytes per slab (default 256 MB).
 		uint32_t maxSlabs     = 16; // Hard cap on slab count.
+		bool     preAllocate  = false; // Allocate all slabs up-front in the constructor.
 		std::string debugName = "CLodPagePool";
 	};
 

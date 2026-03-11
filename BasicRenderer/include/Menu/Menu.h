@@ -432,10 +432,6 @@ private:
     std::function<uint32_t()> getCLodStreamingCpuUploadBudgetRequests;
     std::function<void(uint32_t)> setCLodStreamingCpuUploadBudgetRequests;
 
-    uint32_t m_clodStreamingResidentBudgetGroups = 0xFFFFFFFFu;
-    std::function<uint32_t()> getCLodStreamingResidentBudgetGroups;
-    std::function<void(uint32_t)> setCLodStreamingResidentBudgetGroups;
-
     float m_autoAliasPoolGrowthHeadroom = 1.5f;
     std::function<float()> getAutoAliasPoolGrowthHeadroom;
     std::function<void(float)> setAutoAliasPoolGrowthHeadroom;
@@ -636,11 +632,6 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_clodStreamingCpuUploadBudgetRequests = getCLodStreamingCpuUploadBudgetRequests();
     observerSetting(m_clodStreamingCpuUploadBudgetRequests, "clodStreamingCpuUploadBudgetRequests");
 
-    getCLodStreamingResidentBudgetGroups = settingsManager.getSettingGetter<uint32_t>("clodStreamingResidentBudgetGroups");
-    setCLodStreamingResidentBudgetGroups = settingsManager.getSettingSetter<uint32_t>("clodStreamingResidentBudgetGroups");
-    m_clodStreamingResidentBudgetGroups = getCLodStreamingResidentBudgetGroups();
-    observerSetting(m_clodStreamingResidentBudgetGroups, "clodStreamingResidentBudgetGroups");
-
     getAutoAliasPoolGrowthHeadroom = settingsManager.getSettingGetter<float>("autoAliasPoolGrowthHeadroom");
     setAutoAliasPoolGrowthHeadroom = settingsManager.getSettingSetter<float>("autoAliasPoolGrowthHeadroom");
     m_autoAliasPoolGrowthHeadroom = getAutoAliasPoolGrowthHeadroom();
@@ -777,13 +768,6 @@ inline void Menu::Render(RenderContext& context, rhi::CommandList commandList) {
         if (ImGui::SliderInt("CLod CPU Upload Budget", &clodCpuUploadBudget, 1, 4096)) {
             m_clodStreamingCpuUploadBudgetRequests = static_cast<uint32_t>(std::max(clodCpuUploadBudget, 1));
             setCLodStreamingCpuUploadBudgetRequests(m_clodStreamingCpuUploadBudgetRequests);
-        }
-        constexpr uint32_t kClodResidentBudgetMin = 1u;
-        constexpr uint32_t kClodResidentBudgetMax = 1000000u;
-        uint32_t clodResidentBudget = std::clamp(m_clodStreamingResidentBudgetGroups, kClodResidentBudgetMin, kClodResidentBudgetMax);
-        if (ImGui::SliderScalar("CLod Resident Budget", ImGuiDataType_U32, &clodResidentBudget, &kClodResidentBudgetMin, &kClodResidentBudgetMax)) {
-            m_clodStreamingResidentBudgetGroups = clodResidentBudget;
-            setCLodStreamingResidentBudgetGroups(m_clodStreamingResidentBudgetGroups);
         }
         ImGui::Checkbox("Render Graph Inspector", &showRG);
         ImGui::Checkbox("Memory introspection", &showMemoryIntrospection);

@@ -79,10 +79,11 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
             m_occlusionNodeGpuInputsBuffer,
             m_viewDepthSrvIndicesBuffer)
         .WithUnorderedAccess(
-            Builtin::CLod::StreamingLoadRequestBits,
             Builtin::CLod::StreamingLoadRequests,
             Builtin::CLod::StreamingLoadCounter,
-            Builtin::CLod::StreamingRuntimeState)
+            Builtin::CLod::StreamingRuntimeState,
+            Builtin::CLod::StreamingTouchedGroupsCounter,
+            Builtin::CLod::StreamingTouchedGroups)
         .WithShaderResource(
             Builtin::IndirectCommandBuffers::Master,
             Builtin::CLod::Offsets,
@@ -117,10 +118,11 @@ void HierarchialCullingPass::Setup() {
     RegisterSRV(Builtin::CLod::Children);
     RegisterSRV(Builtin::CLod::StreamingActiveGroupsBits);
     RegisterSRV(Builtin::CLod::StreamingNonResidentBits);
-    RegisterSRV(Builtin::CLod::StreamingLoadRequestBits);
     RegisterSRV(Builtin::CLod::StreamingLoadRequests);
     RegisterSRV(Builtin::CLod::StreamingLoadCounter);
     RegisterSRV(Builtin::CLod::StreamingRuntimeState);
+    RegisterSRV(Builtin::CLod::StreamingTouchedGroupsCounter);
+    RegisterSRV(Builtin::CLod::StreamingTouchedGroups);
     RegisterSRV(Builtin::CLod::MeshMetadata);
     RegisterSRV(Builtin::CullingCameraBuffer);
     RegisterSRV(Builtin::PerMeshInstanceBuffer);
