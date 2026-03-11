@@ -153,20 +153,21 @@ private:
 	std::shared_ptr<DynamicBuffer> m_clodSharedGroupChunks;
 	std::shared_ptr<DynamicBuffer> m_clodMeshMetadata;
 	std::shared_ptr<DynamicBuffer> m_clusterLODGroups;
-	std::shared_ptr<DynamicBuffer> m_clusterLODChildren;
+	std::shared_ptr<DynamicBuffer> m_clusterLODSegments;
 
 	//std::shared_ptr<DynamicBuffer> m_clusterLODMeshlets;
 	std::shared_ptr<DynamicBuffer> m_clusterLODMeshletBounds;
 	std::shared_ptr<DynamicBuffer> m_clusterLODNodes;
+	std::shared_ptr<DynamicBuffer> m_clodGroupPageMap;
 	uint64_t m_activeMeshletCount = 0;
 
 	struct CLodSharedStreamingState {
 		struct ResidentGroupAllocations {
-			// Page-pool allocation (all 8 data streams live here)
-			PagePool::PageAllocation pageAllocation;
+			// Per-child page allocations (one page per child)
+			std::vector<PagePool::PageAllocation> pageAllocations;
 
 			void Reset() {
-				pageAllocation.Reset();
+				pageAllocations.clear();
 			}
 		};
 
@@ -182,6 +183,17 @@ private:
 		std::vector<ResidentGroupAllocations> residentGroupAllocations;
 		uint32_t activeInstanceCount = 0;
 		bool residencyTableDirty = false;
+
+		// Copies of hierarchy data needed at streaming-apply time.
+		// (The Mesh releases its CPU copies after setup via ReleaseCLodHierarchyCpuData.)
+		std::vector<ClusterLODGroup> groups;
+		std::vector<ClusterLODGroupSegment> segments;
+
+		// GroupPageMap buffer view for this mesh's page map entries.
+		std::unique_ptr<BufferView> ownedPageMapView;
+		uint32_t pageMapGlobalBase = 0; // global offset into GroupPageMap buffer
+		uint32_t totalPageMapEntries = 0;
+		std::vector<GroupPageMapEntry> pageMapEntriesCPU; // CPU mirror for UpdateView
 	};
 
 	struct CLodSharedStreamingRange {
@@ -222,14 +234,7 @@ private:
 		uint32_t groupGlobalIndex = 0;
 		bool success = false;
 		std::optional<ClusterLODGroupChunk> groupChunkMetadata;
-		std::vector<std::byte> vertexChunk;
-		std::vector<uint32_t> meshletVertexChunk;
-		std::vector<uint32_t> compressedPositionWordChunk;
-		std::vector<uint32_t> compressedNormalWordChunk;
-		std::vector<uint32_t> compressedMeshletVertexWordChunk;
-		std::vector<meshopt_Meshlet> meshletChunk;
-		std::vector<uint8_t> meshletTriangleChunk;
-		std::vector<BoundingSphere> meshletBoundsChunk;
+		std::vector<std::vector<std::byte>> pageBlobs;
 	};
 
 	// Pending requests waiting to be dispatched (guarded by m_clodDiskStreamingMutex).
@@ -274,10 +279,4 @@ private:
 
 	// Page pool for CLod streaming
 	std::unique_ptr<PagePool> m_clodPagePool;
-
-	size_t PackGroupPayloadForPagePool(
-		const CLodDiskStreamingResult& result,
-		const Mesh* mesh,
-		std::vector<std::byte>& outBlob,
-		ClusterLODGroupChunk& inOutChunk);
 };

@@ -85,7 +85,7 @@ public:
 
 	void SetCLodBufferViews(
 		std::unique_ptr<BufferView> clusterLODGroupsView,
-		std::unique_ptr<BufferView> clusterLODChildrenView,
+		std::unique_ptr<BufferView> clusterLODSegmentsView,
 		std::unique_ptr<BufferView> clodNodesView
 	);
 
@@ -93,8 +93,8 @@ public:
 		return m_clodGroups;
 	}
 
-	const std::vector<ClusterLODChild>& GetCLodChildren() const {
-		return m_clodChildren;
+	const std::vector<ClusterLODGroupSegment>& GetCLodSegments() const {
+		return m_clodSegments;
 	}
 
 	const ClusterLODRuntimeSummary& GetCLodRuntimeSummary() const {
@@ -131,8 +131,8 @@ public:
 		return m_clusterLODGroupsView.get();
 	}
 
-	const BufferView* GetCLodChildrenView() const {
-		return m_clusterLODChildrenView.get();
+	const BufferView* GetCLodSegmentsView() const {
+		return m_clusterLODSegmentsView.get();
 	}
 
 	const BufferView* GetCLodNodesView() const {
@@ -316,19 +316,11 @@ private:
 
 	// TODO: packing
 	std::vector<ClusterLODGroup> m_clodGroups;
-	std::vector<ClusterLODChild> m_clodChildren;
+	std::vector<ClusterLODGroupSegment> m_clodSegments;
 	std::vector<ClusterLODGroupChunk> m_clodGroupChunks;
 	ClusterLODRuntimeSummary m_clodRuntimeSummary;
 	struct ClusterLODCacheBuildChunkData {
-		std::vector<std::vector<std::byte>> groupVertexChunks;
-		std::vector<std::vector<std::byte>> groupSkinningVertexChunks;
-		std::vector<std::vector<uint32_t>> groupMeshletVertexChunks;
-		std::vector<std::vector<uint32_t>> groupCompressedPositionWordChunks;
-		std::vector<std::vector<uint32_t>> groupCompressedNormalWordChunks;
-		std::vector<std::vector<uint32_t>> groupCompressedMeshletVertexWordChunks;
-		std::vector<std::vector<meshopt_Meshlet>> groupMeshletChunks;
-		std::vector<std::vector<uint8_t>> groupMeshletTriangleChunks;
-		std::vector<std::vector<BoundingSphere>> groupMeshletBoundsChunks;
+		std::vector<std::vector<std::vector<std::byte>>> groupPageBlobs;
 	} m_clodCacheBuildChunkData;
 	std::vector<ClusterLODGroupDiskLocator> m_clodGroupDiskLocators;
 	ClusterLODCacheSource m_clodCacheSource;
@@ -351,7 +343,7 @@ private:
 	std::optional<ClusterLODPrebuiltData> m_prebuiltClusterLOD;
 
 	std::unique_ptr<BufferView> m_clusterLODGroupsView = nullptr;
-	std::unique_ptr<BufferView> m_clusterLODChildrenView = nullptr;
+	std::unique_ptr<BufferView> m_clusterLODSegmentsView = nullptr;
 	std::unique_ptr<BufferView> m_clusterLODNodesView = nullptr;
 
 	//UINT m_indexCount = 0;

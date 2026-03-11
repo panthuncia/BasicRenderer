@@ -12,6 +12,55 @@ struct BoundingSphere {
 	DirectX::XMFLOAT4 sphere;
 };
 
+// Embedded at byte 0 of each page-tile in the page pool.
+// Self-contained: carries all stream offsets + compression params.
+// 32 x uint32 = 128 bytes, aligned to GPU cache lines.
+struct CLodPageHeader
+{
+	uint32_t vertexCount = 0;
+	uint32_t meshletCount = 0;
+	uint32_t meshletVertexCount = 0;
+	uint32_t meshletTrianglesByteCount = 0;
+
+	uint32_t compressedPositionWordCount = 0;
+	uint32_t compressedNormalWordCount = 0;
+	uint32_t compressedMeshletVertexWordCount = 0;
+
+	// Byte offsets of each stream relative to page start (after this header)
+	uint32_t vertexOffset = 0;
+	uint32_t meshletVertexOffset = 0;
+	uint32_t triangleOffset = 0;
+	uint32_t compPosOffset = 0;
+	uint32_t compNormOffset = 0;
+	uint32_t compMeshletVertOffset = 0;
+	uint32_t meshletStructOffset = 0;
+	uint32_t boundsOffset = 0;
+
+	// Compression parameters (duplicated per-page for self-containment)
+	uint32_t compressedPositionBitsX = 0;
+	uint32_t compressedPositionBitsY = 0;
+	uint32_t compressedPositionBitsZ = 0;
+	uint32_t compressedPositionQuantExp = 0;
+	int32_t  compressedPositionMinQx = 0;
+	int32_t  compressedPositionMinQy = 0;
+	int32_t  compressedPositionMinQz = 0;
+	uint32_t compressedMeshletVertexBits = 0;
+	uint32_t compressedFlags = 0;
+
+	uint32_t reserved[8] = {}; // pad to 128 bytes (32 x uint32)
+};
+static_assert(sizeof(CLodPageHeader) == 128, "CLodPageHeader must be 128 bytes");
+
+// Runtime-filled entry mapping a group-local page index to its physical slab location.
+struct GroupPageMapEntry
+{
+	uint32_t slabDescriptorIndex = 0; // Descriptor-heap index of the slab BAB
+	uint32_t slabByteOffset = 0;      // Byte offset of page start in slab
+};
+
+// Legacy: retained for CPU-side streaming state tracking only.
+// No longer uploaded as a GPU StructuredBuffer - replaced by
+// CLodPageHeader (embedded in pages) + GroupPageMapEntry (runtime indirection).
 struct ClusterLODGroupChunk
 {
 	// Group metadata
@@ -62,12 +111,13 @@ struct ClusterLODGroupChunk
 // Cluster LOD data
 // One entry per (group -> refinedGroup) edge.
 // refinedGroup == -1 means "terminal meshlets" (original geometry)
-struct ClusterLODChild
+// A segment references a contiguous run of meshlets within a single page.
+struct ClusterLODGroupSegment
 {
 	int32_t  refinedGroup;              // group id to refine into, or -1
-	uint32_t firstLocalMeshletIndex;     // group-local start meshlet index for this child bucket
-	uint32_t localMeshletCount;          // number of local meshlets in this contiguous child range
-	uint32_t pad = 0;
+	uint32_t firstMeshletInPage;         // page-local start meshlet index
+	uint32_t meshletCount;               // number of meshlets in this segment
+	uint32_t pageIndex = 0;              // group-local page index (0..pageCount-1)
 };
 
 struct ClusterLODGroup
@@ -79,12 +129,13 @@ struct ClusterLODGroup
 
 	uint32_t firstGroupVertex = 0;
 	uint32_t groupVertexCount = 0;
-	uint32_t firstChild = 0;    // offset into m_clodChildren
-	uint32_t childCount = 0;    // number of ClusterLODChild entries for this group
+	uint32_t firstSegment = 0;    // offset into m_clodSegments
+	uint32_t segmentCount = 0;    // number of ClusterLODGroupSegment entries for this group
 
-	uint32_t terminalChildCount = 0;
+	uint32_t terminalSegmentCount = 0;
 	uint32_t flags = 0;         // Bit 0: IS_VOXEL_GROUP
-	uint32_t pad[2] = {0};
+	uint32_t pageMapBase = 0;   // absolute index into GroupPageMap buffer
+	uint32_t pageCount = 0;     // number of pages for this group
 };
 
 static constexpr uint32_t CLOD_GROUP_FLAG_IS_VOXEL = 1u << 0;

@@ -279,11 +279,13 @@ struct MeshInstanceClodOffsets
 struct CLodMeshMetadata
 {
     uint groupsBase;
-    uint childrenBase;
+    uint segmentsBase;
     uint lodNodesBase;
     uint rootNode; // node index (relative to lodNodesBase) to start traversal from
     uint groupChunkTableBase;
     uint groupChunkTableCount;
+    uint pageMapBase; // global offset into GroupPageMap buffer for this mesh
+    uint pad0;
 };
 
 // GPU-visible page table entry - maps a virtual page ID to a slab + byte offset.
@@ -328,7 +330,10 @@ struct CLodMeshletReplayRecord {
     uint32_t instanceIndex = 0;
     uint32_t viewId = 0;
     uint32_t groupId = 0;
-    uint32_t localMeshletIndex = 0;
+    uint32_t localMeshletIndex = 0;       // page-local meshlet index
+    uint32_t pageSlabDescriptorIndex = 0; // pre-resolved page slab descriptor
+    uint32_t pageSlabByteOffset = 0;      // pre-resolved page slab byte offset
+    uint32_t pad = 0;
 };
 
 struct CLodReplayBufferState {
@@ -362,8 +367,10 @@ struct CLodMultiNodeGpuInput {
 struct VisibleCluster {
     unsigned int viewID;
     unsigned int instanceID;
-    unsigned int localMeshletIndex;
+    unsigned int localMeshletIndex;       // page-local meshlet index
     unsigned int groupID;
+    unsigned int pageSlabDescriptorIndex; // pre-resolved page slab descriptor
+    unsigned int pageSlabByteOffset;      // pre-resolved page slab byte offset
 };
 
 

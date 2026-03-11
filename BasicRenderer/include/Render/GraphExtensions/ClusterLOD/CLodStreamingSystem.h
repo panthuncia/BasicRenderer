@@ -98,7 +98,7 @@ private:
     std::vector<uint32_t> m_initRequestBitMasks;
     std::vector<uint8_t> m_initRequestPinnedFlags;
 
-    // ── Self-managed readback pipeline ─────────────────────────────────
+    // Self-managed readback pipeline 
     // Dedicated fence signalled when a readback copy completes on the copy queue.
     rhi::TimelinePtr m_streamingReadbackFencePtr;
     rhi::Timeline m_streamingReadbackFenceHandle;
@@ -115,7 +115,7 @@ private:
     std::vector<ReadbackStagingSlot> m_readbackStagingSlots;
     uint32_t m_readbackStagingCursor = 0;
 
-    // ── Background streaming worker thread ─────────────────────────────
+    // Background streaming worker thread
     std::thread m_streamingWorkerThread;
     std::mutex m_streamingWorkerMutex;
     std::condition_variable m_streamingWorkerCV;

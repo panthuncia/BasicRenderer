@@ -253,7 +253,10 @@ struct CLodMeshletReplayRecord
     uint instanceIndex;
     uint viewId;
     uint groupId;
-    uint localMeshletIndex;
+    uint localMeshletIndex;       // page-local meshlet index
+    uint pageSlabDescriptorIndex; // pre-resolved page slab descriptor
+    uint pageSlabByteOffset;      // pre-resolved page slab byte offset
+    uint pad;
 };
 
 static const uint CLOD_REPLAY_SLOT_STRIDE_BYTES = sizeof(CLodMeshletReplayRecord);
@@ -407,8 +410,10 @@ struct VisibleCluster
 {
     unsigned int viewID;
     unsigned int instanceID;
-    unsigned int localMeshletIndex;
+    unsigned int localMeshletIndex;       // page-local meshlet index
     unsigned int groupID;
+    unsigned int pageSlabDescriptorIndex; // pre-resolved page slab descriptor
+    unsigned int pageSlabByteOffset;      // pre-resolved page slab byte offset
 };
 
 #endif // __STRUCTS_HLSL__

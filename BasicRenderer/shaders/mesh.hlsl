@@ -7,6 +7,7 @@
 #include "include/meshletPayload.hlsli"
 #include "Include/meshletCommon.hlsli"
 #include "Include/clodStructs.hlsli"
+#include "Include/clodPageAccess.hlsli"
 
 #define CLOD_COMPRESSED_POSITIONS 1u
 #define CLOD_COMPRESSED_MESHLET_VERTEX_INDICES 2u
@@ -508,59 +509,55 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
     setup.meshBuffer = perMeshBuffer[setup.meshInstanceBuffer.perMeshBufferIndex];
     setup.objectBuffer = perObjectBuffer[setup.meshInstanceBuffer.perObjectBufferIndex];
 
-    StructuredBuffer<MeshInstanceClodOffsets> clodOffsets = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
-    StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
-    StructuredBuffer<ClusterLODGroup> groups = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
-    StructuredBuffer<ClusterLODGroupChunk> groupChunks = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::GroupChunks)];
-    MeshInstanceClodOffsets offsets = clodOffsets[cluster.instanceID];
-    CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[offsets.clodMeshMetadataIndex];
-    ClusterLODGroup group = groups[clodMeshMetadata.groupsBase + cluster.groupID];
-    if (cluster.groupID >= clodMeshMetadata.groupChunkTableCount)
+    // Use pre-resolved page address from VisibleCluster
+    const uint pageSlabDesc = cluster.pageSlabDescriptorIndex;
+    const uint pageSlabOff  = cluster.pageSlabByteOffset;
+    if (pageSlabDesc == 0)
     {
         return false;
     }
 
-    ClusterLODGroupChunk groupChunk = groupChunks[clodMeshMetadata.groupChunkTableBase + cluster.groupID];
-    setup.groupVertexBase = 0;
-    setup.groupVertexCount = groupChunk.groupVertexCount;
-    setup.groupMeshletVertexCount = groupChunk.meshletVertexCount;
-    setup.compressedPositionWordCount = groupChunk.compressedPositionWordCount;
-    setup.compressedPositionBitsX = groupChunk.compressedPositionBitsX;
-    setup.compressedPositionBitsY = groupChunk.compressedPositionBitsY;
-    setup.compressedPositionBitsZ = groupChunk.compressedPositionBitsZ;
-    setup.compressedPositionQuantExp = groupChunk.compressedPositionQuantExp;
-    setup.compressedPositionMinQ = int3(
-        groupChunk.compressedPositionMinQx,
-        groupChunk.compressedPositionMinQy,
-        groupChunk.compressedPositionMinQz);
-    setup.compressedNormalWordCount = groupChunk.compressedNormalWordCount;
-    setup.compressedMeshletVertexWordCount = groupChunk.compressedMeshletVertexWordCount;
-    setup.compressedMeshletVertexBits = groupChunk.compressedMeshletVertexBits;
-    setup.compressedFlags = groupChunk.compressedFlags;
+    CLodPageHeader hdr = LoadPageHeader(pageSlabDesc, pageSlabOff);
 
-    // Page-pool addressing
-    setup.pagePoolSlabDescriptorIndex = groupChunk.pagePoolSlabDescriptorIndex;
+    setup.groupVertexBase = 0;
+    setup.groupVertexCount = hdr.vertexCount;
+    setup.groupMeshletVertexCount = hdr.meshletVertexCount;
+    setup.compressedPositionWordCount = hdr.compressedPositionWordCount;
+    setup.compressedPositionBitsX = hdr.compressedPositionBitsX;
+    setup.compressedPositionBitsY = hdr.compressedPositionBitsY;
+    setup.compressedPositionBitsZ = hdr.compressedPositionBitsZ;
+    setup.compressedPositionQuantExp = hdr.compressedPositionQuantExp;
+    setup.compressedPositionMinQ = int3(
+        hdr.compressedPositionMinQx,
+        hdr.compressedPositionMinQy,
+        hdr.compressedPositionMinQz);
+    setup.compressedNormalWordCount = hdr.compressedNormalWordCount;
+    setup.compressedMeshletVertexWordCount = hdr.compressedMeshletVertexWordCount;
+    setup.compressedMeshletVertexBits = hdr.compressedMeshletVertexBits;
+    setup.compressedFlags = hdr.compressedFlags;
+
+    // Page-pool addressing from pre-resolved page location
+    setup.pagePoolSlabDescriptorIndex = pageSlabDesc;
     {
-        uint slabBase = groupChunk.pagePoolSlabByteOffset;
-        setup.groupVertexChunkByteOffset       = slabBase + groupChunk.vertexIntraPageByteOffset;
-        setup.groupMeshletVerticesBase         = (slabBase + groupChunk.meshletVertexIntraPageByteOffset) / 4u;
-        setup.groupMeshletTrianglesByteOffset  = slabBase + groupChunk.triangleIntraPageByteOffset;
-        setup.compressedPositionWordsBase      = (slabBase + groupChunk.compPosIntraPageByteOffset) / 4u;
-        setup.compressedNormalWordsBase        = (slabBase + groupChunk.compNormIntraPageByteOffset) / 4u;
-        setup.compressedMeshletVertexWordsBase = (slabBase + groupChunk.compMeshletVertIntraPageByteOffset) / 4u;
+        uint base = pageSlabOff;
+        setup.groupVertexChunkByteOffset       = base + hdr.vertexOffset;
+        setup.groupMeshletVerticesBase         = (base + hdr.meshletVertexOffset) / 4u;
+        setup.groupMeshletTrianglesByteOffset  = base + hdr.triangleOffset;
+        setup.compressedPositionWordsBase      = (base + hdr.compPosOffset) / 4u;
+        setup.compressedNormalWordsBase        = (base + hdr.compNormOffset) / 4u;
+        setup.compressedMeshletVertexWordsBase = (base + hdr.compMeshletVertOffset) / 4u;
     }
 
-    // meshletIndex is now group-local
-    if (setup.meshletIndex >= groupChunk.meshletCount)
+    // meshletIndex is now page-local
+    if (setup.meshletIndex >= hdr.meshletCount)
     {
         return false;
     }
 
     // Load meshlet from the page-pool slab
     {
-        uint slabBase = groupChunk.pagePoolSlabByteOffset;
-        uint meshletAddr = slabBase + groupChunk.meshletIntraPageByteOffset + setup.meshletIndex * 16u;
-        setup.meshlet = LoadMeshletFromSlab(groupChunk.pagePoolSlabDescriptorIndex, meshletAddr);
+        uint meshletAddr = pageSlabOff + hdr.meshletStructOffset + setup.meshletIndex * 16u;
+        setup.meshlet = LoadMeshletFromSlab(pageSlabDesc, meshletAddr);
     }
 
     setup.vertCount = setup.meshlet.VertCount;
@@ -571,15 +568,14 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
     {
         return false;
     }
-    if (setup.meshlet.TriOffset + setup.meshlet.TriCount * 3u > groupChunk.meshletTrianglesByteCount)
+    if (setup.meshlet.TriOffset + setup.meshlet.TriCount * 3u > hdr.meshletTrianglesByteCount)
     {
         return false;
     }
 
-    // Vertex data lives in the slab.
+    // Vertex data lives in the slab page.
     {
-        uint slabBase = groupChunk.pagePoolSlabByteOffset;
-        setup.postSkinningBufferOffset     = slabBase + groupChunk.vertexIntraPageByteOffset;
+        setup.postSkinningBufferOffset     = pageSlabOff + hdr.vertexOffset;
         setup.prevPostSkinningBufferOffset = setup.postSkinningBufferOffset;
     }
 

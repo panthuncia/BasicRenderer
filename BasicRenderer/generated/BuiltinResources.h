@@ -7,8 +7,8 @@ struct Builtin {
   inline static constexpr std::string_view ActiveDrawSetIndices = "Builtin::ActiveDrawSetIndices";
   inline static constexpr std::string_view BRDFLUT = "Builtin::BRDFLUT";
   struct CLod {
-    inline static constexpr std::string_view Children = "Builtin::CLod::Children";
     inline static constexpr std::string_view GroupChunks = "Builtin::CLod::GroupChunks";
+    inline static constexpr std::string_view GroupPageMap = "Builtin::CLod::GroupPageMap";
     inline static constexpr std::string_view Groups = "Builtin::CLod::Groups";
     inline static constexpr std::string_view MeshMetadata = "Builtin::CLod::MeshMetadata";
     inline static constexpr std::string_view MeshletBounds = "Builtin::CLod::MeshletBounds";
@@ -16,6 +16,7 @@ struct Builtin {
     inline static constexpr std::string_view Offsets = "Builtin::CLod::Offsets";
     inline static constexpr std::string_view PagePoolSlabBase = "Builtin::CLod::PagePoolSlabBase";
     inline static constexpr std::string_view PageTable = "Builtin::CLod::PageTable";
+    inline static constexpr std::string_view Segments = "Builtin::CLod::Segments";
     inline static constexpr std::string_view StreamingActiveGroupsBits = "Builtin::CLod::StreamingActiveGroupsBits";
     inline static constexpr std::string_view StreamingEvictionExemptBits = "Builtin::CLod::StreamingEvictionExemptBits";
     inline static constexpr std::string_view StreamingLoadCounter = "Builtin::CLod::StreamingLoadCounter";

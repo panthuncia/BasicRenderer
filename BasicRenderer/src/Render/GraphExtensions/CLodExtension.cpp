@@ -331,6 +331,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
 
 void CLodExtension::GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) {
     if (m_streamingSystem) {
-        m_streamingSystem->GatherFramePasses(rg, outPasses);
+       m_streamingSystem->GatherFramePasses(rg, outPasses);
     }
 }

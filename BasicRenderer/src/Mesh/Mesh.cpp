@@ -48,7 +48,7 @@ namespace
 
 	ClusterLODRuntimeSummary BuildRuntimeSummary(
 		const std::vector<ClusterLODGroup>& groups,
-		const std::vector<ClusterLODChild>& children,
+		const std::vector<ClusterLODGroupSegment>& segments,
 		const std::vector<ClusterLODGroupChunk>& groupChunks)
 	{
 		ClusterLODRuntimeSummary summary{};
@@ -75,12 +75,14 @@ namespace
 				hint.compressedPositionWordCount = chunk.compressedPositionWordCount;
 				hint.compressedNormalWordCount = chunk.compressedNormalWordCount;
 				hint.compressedMeshletVertexWordCount = chunk.compressedMeshletVertexWordCount;
+				hint.segmentCount = group.segmentCount;
 			}
 			else {
 				auto& hint = summary.groupChunkHints[groupIndex];
 				hint.groupVertexCount = group.groupVertexCount;
 				hint.meshletCount = group.meshletCount;
 				hint.meshletBoundsCount = group.meshletCount;
+				hint.segmentCount = group.segmentCount;
 			}
 			coarsestDepth = std::max(coarsestDepth, group.depth);
 		}
@@ -110,10 +112,10 @@ namespace
 		const uint32_t localGroupCount = static_cast<uint32_t>(groups.size());
 		for (uint32_t groupLocalIndex = 0u; groupLocalIndex < localGroupCount; ++groupLocalIndex) {
 			const auto& group = groups[groupLocalIndex];
-			const uint32_t childBegin = group.firstChild;
-			const uint32_t childEnd = std::min<uint32_t>(childBegin + group.childCount, static_cast<uint32_t>(children.size()));
-			for (uint32_t childIndex = childBegin; childIndex < childEnd; ++childIndex) {
-				const int32_t refinedGroupLocal = children[childIndex].refinedGroup;
+			const uint32_t segBegin = group.firstSegment;
+			const uint32_t segEnd = std::min<uint32_t>(segBegin + group.segmentCount, static_cast<uint32_t>(segments.size()));
+			for (uint32_t segIndex = segBegin; segIndex < segEnd; ++segIndex) {
+				const int32_t refinedGroupLocal = segments[segIndex].refinedGroup;
 				if (refinedGroupLocal < 0) {
 					continue;
 				}
@@ -194,15 +196,7 @@ void Mesh::ClearCLodCacheBuildChunkData(bool shrinkToFit)
 		}
 	};
 
-	clearChunkStorage(m_clodCacheBuildChunkData.groupVertexChunks);
-	clearChunkStorage(m_clodCacheBuildChunkData.groupSkinningVertexChunks);
-	clearChunkStorage(m_clodCacheBuildChunkData.groupMeshletVertexChunks);
-	clearChunkStorage(m_clodCacheBuildChunkData.groupCompressedPositionWordChunks);
-	clearChunkStorage(m_clodCacheBuildChunkData.groupCompressedNormalWordChunks);
-	clearChunkStorage(m_clodCacheBuildChunkData.groupCompressedMeshletVertexWordChunks);
-	clearChunkStorage(m_clodCacheBuildChunkData.groupMeshletChunks);
-	clearChunkStorage(m_clodCacheBuildChunkData.groupMeshletTriangleChunks);
-	clearChunkStorage(m_clodCacheBuildChunkData.groupMeshletBoundsChunks);
+	clearChunkStorage(m_clodCacheBuildChunkData.groupPageBlobs);
 }
 
 void Mesh::ReleaseCLodChunkUploadData()
@@ -214,8 +208,8 @@ void Mesh::ReleaseCLodHierarchyCpuData()
 {
 	m_clodGroups.clear();
 	m_clodGroups.shrink_to_fit();
-	m_clodChildren.clear();
-	m_clodChildren.shrink_to_fit();
+	m_clodSegments.clear();
+	m_clodSegments.shrink_to_fit();
 }
 
 void Mesh::ReleaseCLodGroupChunkMetadataCpuData()
@@ -229,7 +223,7 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 	const bool hasDiskBackedStreamingSource = !data.groupDiskLocators.empty() && !data.cacheSource.containerFileName.empty();
 
 	m_clodGroups = data.groups;
-	m_clodChildren = data.children;
+	m_clodSegments = data.segments;
 	m_clodGroupChunks = data.groupChunks;
 	if (hasDiskBackedStreamingSource && m_clodGroupChunks.size() != m_clodGroups.size()) {
 		m_clodGroupChunks.assign(m_clodGroups.size(), {});
@@ -239,7 +233,7 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 			m_clodGroupChunks[groupIndex].meshletBoundsCount = m_clodGroups[groupIndex].meshletCount;
 		}
 	}
-	m_clodRuntimeSummary = BuildRuntimeSummary(m_clodGroups, m_clodChildren, m_clodGroupChunks);
+	m_clodRuntimeSummary = BuildRuntimeSummary(m_clodGroups, m_clodSegments, m_clodGroupChunks);
 	ClearCLodCacheBuildChunkData(false);
 	m_clodGroupDiskLocators = data.groupDiskLocators;
 	m_clodCacheSource = data.cacheSource;
@@ -284,7 +278,7 @@ void Mesh::AdoptCLodDiskStreamingMetadata(const ClusterLODPrebuiltData& data)
 		}
 	}
 
-	m_clodRuntimeSummary = BuildRuntimeSummary(m_clodGroups, m_clodChildren, m_clodGroupChunks);
+	m_clodRuntimeSummary = BuildRuntimeSummary(m_clodGroups, m_clodSegments, m_clodGroupChunks);
 
 	ClearCLodCacheBuildChunkData(false);
 }
@@ -293,7 +287,7 @@ ClusterLODPrebuiltData Mesh::GetClusterLODPrebuiltData() const
 {
 	ClusterLODPrebuiltData out{};
 	out.groups = m_clodGroups;
-	out.children = m_clodChildren;
+	out.segments = m_clodSegments;
 	out.objectBoundingSphere = m_perMeshBufferData.boundingSphere;
 	out.groupChunks = m_clodGroupChunks;
 	out.groupDiskLocators = m_clodGroupDiskLocators;
@@ -306,30 +300,14 @@ ClusterLODPrebuiltData Mesh::GetClusterLODPrebuiltData() const
 ClusterLODCacheBuildPayload Mesh::GetClusterLODCacheBuildPayload() const
 {
 	ClusterLODCacheBuildPayload payload{};
-	payload.groupVertexChunks = &m_clodCacheBuildChunkData.groupVertexChunks;
-	payload.groupSkinningVertexChunks = &m_clodCacheBuildChunkData.groupSkinningVertexChunks;
-	payload.groupMeshletVertexChunks = &m_clodCacheBuildChunkData.groupMeshletVertexChunks;
-	payload.groupCompressedPositionWordChunks = &m_clodCacheBuildChunkData.groupCompressedPositionWordChunks;
-	payload.groupCompressedNormalWordChunks = &m_clodCacheBuildChunkData.groupCompressedNormalWordChunks;
-	payload.groupCompressedMeshletVertexWordChunks = &m_clodCacheBuildChunkData.groupCompressedMeshletVertexWordChunks;
-	payload.groupMeshletChunks = &m_clodCacheBuildChunkData.groupMeshletChunks;
-	payload.groupMeshletTriangleChunks = &m_clodCacheBuildChunkData.groupMeshletTriangleChunks;
-	payload.groupMeshletBoundsChunks = &m_clodCacheBuildChunkData.groupMeshletBoundsChunks;
+	payload.groupPageBlobs = &m_clodCacheBuildChunkData.groupPageBlobs;
 	return payload;
 }
 
 ClusterLODCacheBuildOwnedData Mesh::GetClusterLODCacheBuildOwnedData() const
 {
 	ClusterLODCacheBuildOwnedData owned{};
-	owned.groupVertexChunks = m_clodCacheBuildChunkData.groupVertexChunks;
-	owned.groupSkinningVertexChunks = m_clodCacheBuildChunkData.groupSkinningVertexChunks;
-	owned.groupMeshletVertexChunks = m_clodCacheBuildChunkData.groupMeshletVertexChunks;
-	owned.groupCompressedPositionWordChunks = m_clodCacheBuildChunkData.groupCompressedPositionWordChunks;
-	owned.groupCompressedNormalWordChunks = m_clodCacheBuildChunkData.groupCompressedNormalWordChunks;
-	owned.groupCompressedMeshletVertexWordChunks = m_clodCacheBuildChunkData.groupCompressedMeshletVertexWordChunks;
-	owned.groupMeshletChunks = m_clodCacheBuildChunkData.groupMeshletChunks;
-	owned.groupMeshletTriangleChunks = m_clodCacheBuildChunkData.groupMeshletTriangleChunks;
-	owned.groupMeshletBoundsChunks = m_clodCacheBuildChunkData.groupMeshletBoundsChunks;
+	owned.groupPageBlobs = m_clodCacheBuildChunkData.groupPageBlobs;
 	return owned;
 }
 
@@ -382,11 +360,11 @@ BufferView* Mesh::GetPostSkinningVertexBufferView() {
 
 void Mesh::SetCLodBufferViews(
 	std::unique_ptr<BufferView> clusterLODGroupsView,
-	std::unique_ptr<BufferView> clusterLODChildrenView,
+	std::unique_ptr<BufferView> clusterLODSegmentsView,
 	std::unique_ptr<BufferView> clusterLODNodesView
 ) {
 	m_clusterLODGroupsView = std::move(clusterLODGroupsView);
-	m_clusterLODChildrenView = std::move(clusterLODChildrenView);
+	m_clusterLODSegmentsView = std::move(clusterLODSegmentsView);
 	m_clusterLODNodesView = std::move(clusterLODNodesView);
 
 	auto firstChunkOffsetDiv = [](const auto& chunkViews, uint32_t divisor) -> uint32_t {

@@ -11,7 +11,7 @@
 
 namespace CLodCache {
 
-inline constexpr uint32_t kSchemaVersion = 16;
+inline constexpr uint32_t kSchemaVersion = 17;
 
 struct CacheKey {
 	std::string sourceIdentifier;
@@ -27,15 +27,7 @@ struct CacheData {
 
 struct LoadedGroupPayload {
 	std::optional<ClusterLODGroupChunk> groupChunkMetadata;
-	std::vector<std::byte> vertexChunk;
-	std::vector<std::byte> skinningChunk;
-	std::vector<uint32_t> meshletVertexChunk;
-	std::vector<uint32_t> compressedPositionWordChunk;
-	std::vector<uint32_t> compressedNormalWordChunk;
-	std::vector<uint32_t> compressedMeshletVertexWordChunk;
-	std::vector<meshopt_Meshlet> meshletChunk;
-	std::vector<uint8_t> meshletTriangleChunk;
-	std::vector<BoundingSphere> meshletBoundsChunk;
+	std::vector<std::vector<std::byte>> pageBlobs;
 };
 
 uint64_t ComputeBuildConfigHash();

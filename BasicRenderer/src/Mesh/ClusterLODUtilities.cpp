@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <unordered_map>
+#include <unordered_set>
 #include <bit>
 #include <cmath>
 #include <array>
@@ -36,6 +37,21 @@ namespace
 			return 1;
 		}
 		return 32u - static_cast<uint32_t>(std::countl_zero(range));
+	}
+
+	uint32_t ReadBits(const std::vector<uint32_t>& words, uint64_t& bitCursor, uint32_t bitCount)
+	{
+		if (bitCount == 0) return 0;
+		const uint64_t bitOffset = bitCursor & 31ull;
+		const uint64_t wordIndex = bitCursor >> 5ull;
+		const uint64_t mask = (bitCount >= 32u) ? 0xffffffffull : ((1ull << bitCount) - 1ull);
+		uint32_t value = (words[static_cast<size_t>(wordIndex)] >> static_cast<uint32_t>(bitOffset)) & static_cast<uint32_t>(mask);
+		const uint32_t spillBits = static_cast<uint32_t>(bitOffset) + bitCount;
+		if (spillBits > 32u) {
+			value |= (words[static_cast<size_t>(wordIndex + 1ull)] << (32u - static_cast<uint32_t>(bitOffset))) & static_cast<uint32_t>(mask);
+		}
+		bitCursor += bitCount;
+		return value;
 	}
 
 	void AppendBits(std::vector<uint32_t>& words, uint64_t& bitCursor, uint32_t value, uint32_t bitCount)
@@ -69,6 +85,40 @@ namespace
 		}
 
 		bitCursor += bitCount;
+	}
+
+	// Compute the exact byte size of a packed page blob given its contents.
+	// All stream sizes match the layout in the blob construction loop exactly.
+	size_t ComputePageBlobSize(
+		uint32_t vertexCount,
+		uint32_t meshletVertexCount,
+		uint32_t triangleBytes,
+		uint32_t meshletCount,
+		size_t vertexStrideBytes,
+		uint32_t posBitsPerVertex, // bitsX + bitsY + bitsZ
+		bool hasNormals)
+	{
+		auto align4 = [](size_t v) -> size_t { return (v + 3u) & ~size_t(3); };
+
+		const uint32_t mvBits = BitsNeededForRange(std::max<uint32_t>(1u, vertexCount) - 1u);
+		const size_t compPosWords = (vertexCount > 0 && posBitsPerVertex > 0)
+			? static_cast<size_t>((static_cast<uint64_t>(vertexCount) * posBitsPerVertex + 31ull) / 32ull)
+			: 0;
+		const size_t compMVWords = (meshletVertexCount > 0 && mvBits > 0)
+			? static_cast<size_t>((static_cast<uint64_t>(meshletVertexCount) * mvBits + 31ull) / 32ull)
+			: 0;
+
+		size_t size = CLOD_PAGE_HEADER_SIZE;
+		size = align4(size) + align4(static_cast<size_t>(vertexCount) * vertexStrideBytes);
+		size = align4(size) + align4(static_cast<size_t>(meshletVertexCount) * sizeof(uint32_t));
+		size = align4(size) + align4(static_cast<size_t>(triangleBytes));
+		size = align4(size) + align4(compPosWords * sizeof(uint32_t));
+		if (hasNormals)
+			size = align4(size) + align4(static_cast<size_t>(vertexCount) * sizeof(uint32_t));
+		size = align4(size) + align4(compMVWords * sizeof(uint32_t));
+		size = align4(size) + align4(static_cast<size_t>(meshletCount) * sizeof(meshopt_Meshlet));
+		size = align4(size) + align4(static_cast<size_t>(meshletCount) * sizeof(BoundingSphere));
+		return align4(size);
 	}
 
 	uint32_t ComputeMeshQuantizationExponent(const std::vector<std::byte>& vertices, size_t vertexStrideBytes)
@@ -476,18 +526,16 @@ namespace
 		std::vector<uint32_t> meshletVertices;
 		std::vector<uint8_t> meshletTriangles;
 		std::vector<BoundingSphere> meshletBounds;
-		std::vector<ClusterLODChild> children;
+		std::vector<ClusterLODGroupSegment> segments;
 		std::vector<std::byte> vertexChunk;
 		std::vector<std::byte> skinningVertexChunk;
 		std::vector<uint32_t> compressedPositionWords;
 		std::vector<uint32_t> compressedNormalWords;
 		std::vector<uint32_t> compressedMeshletVertexWords;
-		std::vector<meshopt_Meshlet> groupMeshletChunk;
-		std::vector<uint8_t> groupMeshletTriangleChunk;
-		std::vector<BoundingSphere> groupMeshletBoundsChunk;
+		std::vector<std::vector<std::byte>> pageBlobs;
 		ClusterLODGroupChunk groupChunk{};
 		bool usedOverflowTerminalMerge = false;
-		uint32_t mergedChildBucketCount = 0;
+		uint32_t mergedSegmentBucketCount = 0;
 	};
 
 	ClusterLODGroupBuildOutput BuildClusterLODGroupOutput(
@@ -510,9 +558,9 @@ namespace
 		output.group.meshletCount = static_cast<uint32_t>(capturedGroup.clusters.size());
 		output.group.firstGroupVertex = 0;
 		output.group.groupVertexCount = 0;
-		output.group.firstChild = 0;
-		output.group.childCount = 0;
-		output.group.terminalChildCount = 0;
+		output.group.firstSegment = 0;
+		output.group.segmentCount = 0;
+		output.group.terminalSegmentCount = 0;
 
 		std::unordered_map<uint32_t, uint32_t> groupVertexToLocal;
 		groupVertexToLocal.reserve(capturedGroup.clusters.size() * MS_MESHLET_SIZE);
@@ -586,13 +634,15 @@ namespace
 				return lhs.refinedGroup < rhs.refinedGroup;
 			});
 
+		// Track which bucket (refinedGroup) each meshlet belongs to
+		std::vector<int32_t> meshletBucketTag;
+		meshletBucketTag.reserve(capturedGroup.clusters.size());
+
 		uint32_t groupMeshletVertexCursor = 0;
 		uint32_t localMeshletCursor = 0;
 
 		for (const ChildBucket& bucket : buckets)
 		{
-			const uint32_t bucketLocalStart = localMeshletCursor;
-
 			for (uint32_t clusterIndex : bucket.clusterIndices)
 			{
 				const CapturedClusterLODCluster& cluster = capturedGroup.clusters[clusterIndex];
@@ -631,61 +681,13 @@ namespace
 
 				output.meshlets.push_back(meshlet);
 				output.meshletBounds.push_back(sphere);
+				meshletBucketTag.push_back(bucket.refinedGroup);
 
 				++localMeshletCursor;
 			}
-
-			ClusterLODChild child{};
-			child.refinedGroup = bucket.refinedGroup;
-			child.firstLocalMeshletIndex = bucketLocalStart;
-			child.localMeshletCount = static_cast<uint32_t>(bucket.clusterIndices.size());
-			output.children.push_back(child);
 		}
 
 		assert(localMeshletCursor == output.group.meshletCount);
-
-		if (allowOverflowTerminalMerge && maxGroupChildren > 0u && output.children.size() > maxGroupChildren)
-		{
-			const uint32_t originalChildCount = static_cast<uint32_t>(output.children.size());
-			const uint32_t keepChildCount = maxGroupChildren - 1u;
-
-			std::vector<ClusterLODChild> mergedChildren;
-			mergedChildren.reserve(maxGroupChildren);
-
-			for (uint32_t childIndex = 0; childIndex < keepChildCount; ++childIndex)
-			{
-				mergedChildren.push_back(output.children[childIndex]);
-			}
-
-			const ClusterLODChild& firstMergedChild = output.children[keepChildCount];
-			const ClusterLODChild& lastMergedChild = output.children.back();
-
-			ClusterLODChild mergedChild{};
-			mergedChild.refinedGroup = -1;
-			mergedChild.firstLocalMeshletIndex = firstMergedChild.firstLocalMeshletIndex;
-			mergedChild.localMeshletCount =
-				(lastMergedChild.firstLocalMeshletIndex + lastMergedChild.localMeshletCount) - firstMergedChild.firstLocalMeshletIndex;
-
-			mergedChildren.push_back(mergedChild);
-			output.children = std::move(mergedChildren);
-
-			output.usedOverflowTerminalMerge = true;
-			output.mergedChildBucketCount = originalChildCount - maxGroupChildren;
-		}
-
-		output.group.childCount = static_cast<uint32_t>(output.children.size());
-		output.group.terminalChildCount = 0;
-		for (const ClusterLODChild& child : output.children)
-		{
-			if (child.refinedGroup < 0)
-			{
-				output.group.terminalChildCount++;
-			}
-			else
-			{
-				break;
-			}
-		}
 
 		output.group.groupVertexCount = static_cast<uint32_t>(groupLocalToGlobal.size());
 
@@ -812,10 +814,6 @@ namespace
 			AppendBits(output.compressedMeshletVertexWords, meshletVertexBitCursor, localVertexIndex, meshletVertexBits);
 		}
 
-		output.groupMeshletChunk = output.meshlets;
-		output.groupMeshletTriangleChunk = output.meshletTriangles;
-		output.groupMeshletBoundsChunk = output.meshletBounds;
-
 		output.groupChunk.groupVertexCount = output.group.groupVertexCount;
 		output.groupChunk.meshletVertexCount = static_cast<uint32_t>(output.meshletVertices.size());
 		output.groupChunk.meshletCount = static_cast<uint32_t>(output.meshlets.size());
@@ -836,6 +834,303 @@ namespace
 		if (!output.compressedNormalWords.empty())
 		{
 			output.groupChunk.compressedFlags |= CLOD_COMPRESSED_NORMALS;
+		}
+
+		// Greedy meshlet-to-page binning + segment creation + page blob construction
+		{
+			const uint32_t groupVertexCount = output.group.groupVertexCount;
+			const uint32_t groupMeshletVertexBits = meshletVertexBits;
+			const uint32_t posBitsX = positionBitsX;
+			const uint32_t posBitsY = positionBitsY;
+			const uint32_t posBitsZ = positionBitsZ;
+			const uint32_t bitsPerGroupVertex = posBitsX + posBitsY + posBitsZ;
+			const bool hasNormals = !output.compressedNormalWords.empty();
+
+			auto align4 = [](size_t v) -> size_t { return (v + 3u) & ~size_t(3); };
+
+			// Page binning
+			struct PageBin {
+				std::unordered_set<uint32_t> vertexSet;
+				std::vector<uint32_t> meshletIndices;   // group-local meshlet indices
+				std::vector<int32_t>  meshletBucketTags; // refinedGroup per meshlet
+				uint32_t totalMeshletVertexCount = 0;
+				uint32_t totalTriangleBytes = 0;
+			};
+
+			std::vector<PageBin> pageBins;
+			pageBins.emplace_back();
+
+			const uint32_t totalMeshlets = static_cast<uint32_t>(output.meshlets.size());
+			for (uint32_t mi = 0; mi < totalMeshlets; ++mi) {
+				const auto& meshlet = output.meshlets[mi];
+
+				// Count new vertices this meshlet would add to the current page
+				uint32_t newVertexCount = 0;
+				for (uint32_t vi = 0; vi < meshlet.vertex_count; ++vi) {
+					const uint32_t gv = output.meshletVertices[meshlet.vertex_offset + vi];
+					if (pageBins.back().vertexSet.find(gv) == pageBins.back().vertexSet.end()) {
+						++newVertexCount;
+					}
+				}
+
+				const uint32_t candidateV = static_cast<uint32_t>(pageBins.back().vertexSet.size()) + newVertexCount;
+				const uint32_t candidateMV = pageBins.back().totalMeshletVertexCount + meshlet.vertex_count;
+				const uint32_t candidateT = pageBins.back().totalTriangleBytes + meshlet.triangle_count * 3u;
+				const uint32_t candidateM = static_cast<uint32_t>(pageBins.back().meshletIndices.size()) + 1u;
+
+				const size_t candidateSize = ComputePageBlobSize(
+					candidateV, candidateMV, candidateT, candidateM,
+					vertexStrideBytes, bitsPerGroupVertex, hasNormals);
+
+				if (candidateSize > CLOD_PAGE_SIZE && !pageBins.back().meshletIndices.empty()) {
+					// Current page is full - start a new one
+					pageBins.emplace_back();
+
+					// Recount new vertices against the fresh page (all are new)
+					newVertexCount = meshlet.vertex_count;
+				}
+
+				// Add meshlet to current page
+				PageBin& page = pageBins.back();
+				for (uint32_t vi = 0; vi < meshlet.vertex_count; ++vi) {
+					page.vertexSet.insert(output.meshletVertices[meshlet.vertex_offset + vi]);
+				}
+				page.meshletIndices.push_back(mi);
+				page.meshletBucketTags.push_back(meshletBucketTag[mi]);
+				page.totalMeshletVertexCount += meshlet.vertex_count;
+				page.totalTriangleBytes += meshlet.triangle_count * 3u;
+			}
+
+			// Remove empty trailing bin (if group had zero meshlets)
+			if (!pageBins.empty() && pageBins.back().meshletIndices.empty()) {
+				pageBins.pop_back();
+			}
+
+			assert(pageBins.size() <= CLOD_MAX_PAGES_PER_GROUP && "Group exceeds CLOD_MAX_PAGES_PER_GROUP");
+
+			// Create segments from page bins
+			// For each page, walk meshlets in order and create a segment for each contiguous run of the same refinedGroup.
+			for (uint32_t pi = 0; pi < static_cast<uint32_t>(pageBins.size()); ++pi) {
+				const PageBin& page = pageBins[pi];
+				if (page.meshletIndices.empty()) continue;
+
+				uint32_t runStart = 0;
+				int32_t runTag = page.meshletBucketTags[0];
+
+				for (uint32_t i = 1; i <= static_cast<uint32_t>(page.meshletIndices.size()); ++i) {
+					const bool endOfPage = (i == static_cast<uint32_t>(page.meshletIndices.size()));
+					const bool tagChanged = !endOfPage && (page.meshletBucketTags[i] != runTag);
+
+					if (endOfPage || tagChanged) {
+						ClusterLODGroupSegment seg{};
+						seg.refinedGroup = runTag;
+						seg.pageIndex = pi;
+						seg.firstMeshletInPage = runStart;
+						seg.meshletCount = i - runStart;
+						output.segments.push_back(seg);
+
+						if (!endOfPage) {
+							runStart = i;
+							runTag = page.meshletBucketTags[i];
+						}
+					}
+				}
+			}
+
+			// Sort segments: terminal (refinedGroup < 0) first, then non-terminal.
+			// Stable sort preserves page-order within each category.
+			std::stable_sort(output.segments.begin(), output.segments.end(),
+				[](const ClusterLODGroupSegment& a, const ClusterLODGroupSegment& b) {
+					const bool aTerminal = (a.refinedGroup < 0);
+					const bool bTerminal = (b.refinedGroup < 0);
+					return aTerminal > bTerminal; // terminals first
+				});
+
+			// Apply overflow merge if too many segments
+			if (allowOverflowTerminalMerge && maxGroupChildren > 0u && output.segments.size() > maxGroupChildren) {
+				const uint32_t keepCount = maxGroupChildren;
+				// Merge all excess segments into terminal segments by setting refinedGroup = -1
+				for (uint32_t si = keepCount; si < static_cast<uint32_t>(output.segments.size()); ++si) {
+					output.segments[si].refinedGroup = -1;
+				}
+				// Trim to max
+				output.segments.resize(keepCount);
+				output.usedOverflowTerminalMerge = true;
+			}
+
+			output.group.pageCount = static_cast<uint32_t>(pageBins.size());
+			output.group.segmentCount = static_cast<uint32_t>(output.segments.size());
+			output.group.terminalSegmentCount = 0;
+			for (const ClusterLODGroupSegment& seg : output.segments) {
+				if (seg.refinedGroup < 0) {
+					output.group.terminalSegmentCount++;
+				} else {
+					break;
+				}
+			}
+
+			// Build page blobs (one per page bin)
+			output.pageBlobs.resize(pageBins.size());
+
+			for (uint32_t pi = 0; pi < static_cast<uint32_t>(pageBins.size()); ++pi) {
+				const PageBin& page = pageBins[pi];
+				const uint32_t pageMeshletCount = static_cast<uint32_t>(page.meshletIndices.size());
+				if (pageMeshletCount == 0) continue;
+
+				// Build page-local vertex subset from the vertex set
+				std::vector<uint32_t> pageToGroup(page.vertexSet.begin(), page.vertexSet.end());
+				std::sort(pageToGroup.begin(), pageToGroup.end());
+				std::unordered_map<uint32_t, uint32_t> groupToPage;
+				groupToPage.reserve(pageToGroup.size());
+				for (uint32_t pv = 0; pv < static_cast<uint32_t>(pageToGroup.size()); ++pv) {
+					groupToPage[pageToGroup[pv]] = pv;
+				}
+				const uint32_t pageVertexCount = static_cast<uint32_t>(pageToGroup.size());
+
+				// Extract page's raw vertex data
+				std::vector<std::byte> pageVertices(static_cast<size_t>(pageVertexCount) * vertexStrideBytes);
+				for (uint32_t pv = 0; pv < pageVertexCount; ++pv) {
+					const uint32_t gv = pageToGroup[pv];
+					std::memcpy(
+						pageVertices.data() + static_cast<size_t>(pv) * vertexStrideBytes,
+						output.vertexChunk.data() + static_cast<size_t>(gv) * vertexStrideBytes,
+						vertexStrideBytes);
+				}
+
+				// Remap meshlet vertex indices to page-local + extract triangles
+				std::vector<uint32_t> pageMeshletVertices;
+				uint32_t pageMeshletVertexCursor = 0;
+				std::vector<meshopt_Meshlet> pageMeshlets(pageMeshletCount);
+
+				uint32_t triByteStart = UINT32_MAX;
+				uint32_t triByteEnd = 0;
+				for (uint32_t li = 0; li < pageMeshletCount; ++li) {
+					const auto& meshlet = output.meshlets[page.meshletIndices[li]];
+					const uint32_t triEnd = meshlet.triangle_offset + meshlet.triangle_count * 3u;
+					if (meshlet.triangle_offset < triByteStart) triByteStart = meshlet.triangle_offset;
+					if (triEnd > triByteEnd) triByteEnd = triEnd;
+				}
+				if (triByteStart == UINT32_MAX) triByteStart = 0;
+
+				for (uint32_t li = 0; li < pageMeshletCount; ++li) {
+					const auto& srcMeshlet = output.meshlets[page.meshletIndices[li]];
+					auto& dstMeshlet = pageMeshlets[li];
+
+					dstMeshlet.vertex_offset = pageMeshletVertexCursor;
+					dstMeshlet.vertex_count = srcMeshlet.vertex_count;
+					dstMeshlet.triangle_offset = srcMeshlet.triangle_offset - triByteStart;
+					dstMeshlet.triangle_count = srcMeshlet.triangle_count;
+
+					for (uint32_t vi = 0; vi < srcMeshlet.vertex_count; ++vi) {
+						const uint32_t groupLocalVertex = output.meshletVertices[srcMeshlet.vertex_offset + vi];
+						pageMeshletVertices.push_back(groupToPage[groupLocalVertex]);
+					}
+					pageMeshletVertexCursor += srcMeshlet.vertex_count;
+				}
+
+				// Extract page's triangle bytes
+				std::vector<uint8_t> pageTriangles(
+					output.meshletTriangles.begin() + triByteStart,
+					output.meshletTriangles.begin() + triByteEnd);
+
+				// Extract compressed positions for page's vertex subset
+				std::vector<uint32_t> pageCompPositionWords;
+				if (!output.compressedPositionWords.empty() && bitsPerGroupVertex > 0) {
+					uint64_t outBitCursor = 0;
+					for (uint32_t pv = 0; pv < pageVertexCount; ++pv) {
+						const uint32_t gv = pageToGroup[pv];
+						uint64_t readCursor = static_cast<uint64_t>(gv) * bitsPerGroupVertex;
+						const uint32_t qx = ReadBits(output.compressedPositionWords, readCursor, posBitsX);
+						const uint32_t qy = ReadBits(output.compressedPositionWords, readCursor, posBitsY);
+						const uint32_t qz = ReadBits(output.compressedPositionWords, readCursor, posBitsZ);
+						AppendBits(pageCompPositionWords, outBitCursor, qx, posBitsX);
+						AppendBits(pageCompPositionWords, outBitCursor, qy, posBitsY);
+						AppendBits(pageCompPositionWords, outBitCursor, qz, posBitsZ);
+					}
+				}
+
+				// Extract compressed normals for page's vertex subset
+				std::vector<uint32_t> pageCompNormalWords;
+				if (hasNormals) {
+					pageCompNormalWords.reserve(pageVertexCount);
+					for (uint32_t pv = 0; pv < pageVertexCount; ++pv) {
+						pageCompNormalWords.push_back(output.compressedNormalWords[pageToGroup[pv]]);
+					}
+				}
+
+				// Remap + repack compressed meshlet vertex indices (page-local bit width)
+				const uint32_t pageMeshletVertexBits = BitsNeededForRange(std::max<uint32_t>(1u, pageVertexCount) - 1u);
+				std::vector<uint32_t> pageCompMeshletVertexWords;
+				if (!output.compressedMeshletVertexWords.empty() && groupMeshletVertexBits > 0) {
+					uint64_t outBitCursor = 0;
+					for (uint32_t li = 0; li < pageMeshletCount; ++li) {
+						const auto& srcMeshlet = output.meshlets[page.meshletIndices[li]];
+						for (uint32_t vi = 0; vi < srcMeshlet.vertex_count; ++vi) {
+							uint64_t readCursor = static_cast<uint64_t>(srcMeshlet.vertex_offset + vi) * groupMeshletVertexBits;
+							const uint32_t groupLocalVertex = ReadBits(output.compressedMeshletVertexWords, readCursor, groupMeshletVertexBits);
+							const uint32_t pageLocalVertex = groupToPage[groupLocalVertex];
+							AppendBits(pageCompMeshletVertexWords, outBitCursor, pageLocalVertex, pageMeshletVertexBits);
+						}
+					}
+				}
+
+				// Extract page's meshlet bounds
+				std::vector<BoundingSphere> pageBounds;
+				pageBounds.reserve(pageMeshletCount);
+				for (uint32_t li = 0; li < pageMeshletCount; ++li) {
+					pageBounds.push_back(output.meshletBounds[page.meshletIndices[li]]);
+				}
+
+				// Build page blob: CLodPageHeader + 8 streams
+				CLodPageHeader header{};
+				header.vertexCount = pageVertexCount;
+				header.meshletCount = pageMeshletCount;
+				header.meshletVertexCount = static_cast<uint32_t>(pageMeshletVertices.size());
+				header.meshletTrianglesByteCount = static_cast<uint32_t>(pageTriangles.size());
+				header.compressedPositionWordCount = static_cast<uint32_t>(pageCompPositionWords.size());
+				header.compressedNormalWordCount = static_cast<uint32_t>(pageCompNormalWords.size());
+				header.compressedMeshletVertexWordCount = static_cast<uint32_t>(pageCompMeshletVertexWords.size());
+
+				header.compressedPositionBitsX = posBitsX;
+				header.compressedPositionBitsY = posBitsY;
+				header.compressedPositionBitsZ = posBitsZ;
+				header.compressedPositionQuantExp = output.groupChunk.compressedPositionQuantExp;
+				header.compressedPositionMinQx = output.groupChunk.compressedPositionMinQx;
+				header.compressedPositionMinQy = output.groupChunk.compressedPositionMinQy;
+				header.compressedPositionMinQz = output.groupChunk.compressedPositionMinQz;
+				header.compressedMeshletVertexBits = pageMeshletVertexBits;
+				header.compressedFlags = output.groupChunk.compressedFlags;
+
+				auto& blob = output.pageBlobs[pi];
+				blob.clear();
+				size_t cursor = sizeof(CLodPageHeader);
+
+				auto appendStream = [&](const void* data, size_t bytes, uint32_t& offsetOut) {
+					cursor = align4(cursor);
+					offsetOut = static_cast<uint32_t>(cursor);
+					if (bytes > 0) {
+						blob.resize(cursor + bytes);
+						std::memcpy(blob.data() + cursor, data, bytes);
+						cursor += bytes;
+					}
+				};
+
+				blob.resize(sizeof(CLodPageHeader), std::byte{0});
+
+				appendStream(pageVertices.data(), pageVertices.size(), header.vertexOffset);
+				appendStream(pageMeshletVertices.data(), pageMeshletVertices.size() * sizeof(uint32_t), header.meshletVertexOffset);
+				appendStream(pageTriangles.data(), pageTriangles.size(), header.triangleOffset);
+				appendStream(pageCompPositionWords.data(), pageCompPositionWords.size() * sizeof(uint32_t), header.compPosOffset);
+				appendStream(pageCompNormalWords.data(), pageCompNormalWords.size() * sizeof(uint32_t), header.compNormOffset);
+				appendStream(pageCompMeshletVertexWords.data(), pageCompMeshletVertexWords.size() * sizeof(uint32_t), header.compMeshletVertOffset);
+				appendStream(pageMeshlets.data(), pageMeshlets.size() * sizeof(meshopt_Meshlet), header.meshletStructOffset);
+				appendStream(pageBounds.data(), pageBounds.size() * sizeof(BoundingSphere), header.boundsOffset);
+
+				blob.resize(align4(blob.size()));
+				std::memcpy(blob.data(), &header, sizeof(CLodPageHeader));
+
+				assert(blob.size() <= CLOD_PAGE_SIZE && "Page blob exceeds CLOD_PAGE_SIZE");
+			}
 		}
 
 		return output;
@@ -860,10 +1155,13 @@ namespace
 	struct ClusterLODBuildState
 	{
 		std::vector<ClusterLODGroup> groups;
-		std::vector<ClusterLODChild> children;
+		std::vector<ClusterLODGroupSegment> segments;
 		std::vector<std::byte> duplicatedVertices;
 		std::vector<std::byte> duplicatedSkinningVertices;
 		std::vector<ClusterLODGroupChunk> groupChunks;
+		std::vector<std::vector<std::vector<std::byte>>> groupPageBlobs;
+
+		// Raw per-group streams kept for voxel hierarchy building (reads vertex/meshlet data).
 		std::vector<std::vector<std::byte>> groupVertexChunks;
 		std::vector<std::vector<std::byte>> groupSkinningVertexChunks;
 		std::vector<std::vector<uint32_t>> groupMeshletVertexChunks;
@@ -873,6 +1171,7 @@ namespace
 		std::vector<std::vector<meshopt_Meshlet>> groupMeshletChunks;
 		std::vector<std::vector<uint8_t>> groupMeshletTriangleChunks;
 		std::vector<std::vector<BoundingSphere>> groupMeshletBoundsChunks;
+
 		std::vector<ClusterLODNode> nodes;
 		std::vector<ClusterLODNodeRangeAlloc> lodNodeRanges;
 		std::vector<uint32_t> lodLevelRoots;
@@ -1244,10 +1543,8 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	const uint32_t partitionSizeFloor = std::max<uint32_t>(1u, settings.partitionSizeFloor);
 	const bool allowOverflowTerminalMerge = settings.allowOverflowTerminalMerge;
 
-	// TODO: This needs to be on, or generation breaks. Why?
-	// Error factor is high to prevent it from actually being used
-	config.simplify_fallback_sloppy = true;
-	config.simplify_error_factor_sloppy = 10.0f;
+	config.simplify_fallback_sloppy = true; // TODO: Useful?
+	config.simplify_error_factor_sloppy = 100.0f; // Scales error for sloppy groups
 
 	config.simplify_fallback_permissive = true;
 
@@ -1258,8 +1555,8 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 
 	constexpr uint32_t MaxGroupChildren = 32;
 	constexpr uint32_t TraversalNodeFanout = 32;
-	constexpr uint32_t TargetBucketClusters = 128;
-	constexpr uint32_t MinTargetBucketClusters = 64;
+	constexpr uint32_t TargetBucketClusters = 512;
+	constexpr uint32_t MinTargetBucketClusters = 256;
 	config.partition_max_refined_groups = MaxGroupChildren;
 
 	uint32_t maxChildrenObserved = 0;
@@ -1273,10 +1570,11 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	for (;;)
 	{
 		state.groups.clear();
-		state.children.clear();
+		state.segments.clear();
 		state.duplicatedVertices.clear();
 		state.duplicatedSkinningVertices.clear();
 		state.groupChunks.clear();
+		state.groupPageBlobs.clear();
 		state.groupVertexChunks.clear();
 		state.groupSkinningVertexChunks.clear();
 		state.groupMeshletVertexChunks.clear();
@@ -1304,11 +1602,13 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 			const std::vector<std::byte>* skinningVertices = nullptr;
 			size_t skinningVertexStrideBytes = 0;
 			std::vector<ClusterLODGroup>* groups = nullptr;
-			std::vector<ClusterLODChild>* children = nullptr;
+			std::vector<ClusterLODGroupSegment>* segments = nullptr;
 			std::vector<std::byte>* duplicatedVertices = nullptr;
 			std::vector<std::byte>* duplicatedSkinningVertices = nullptr;
 			bool buildDuplicatedVertexStreams = false;
 			std::vector<ClusterLODGroupChunk>* groupChunks = nullptr;
+			std::vector<std::vector<std::vector<std::byte>>>* groupPageBlobs = nullptr;
+			// Raw per-group streams for voxel hierarchy
 			std::vector<std::vector<std::byte>>* groupVertexChunks = nullptr;
 			std::vector<std::vector<std::byte>>* groupSkinningVertexChunks = nullptr;
 			std::vector<std::vector<uint32_t>>* groupMeshletVertexChunks = nullptr;
@@ -1390,6 +1690,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 
 				ensureIndexedStorage(*context->groups);
 				ensureIndexedStorage(*context->groupChunks);
+				ensureIndexedStorage(*context->groupPageBlobs);
 				ensureIndexedStorage(*context->groupVertexChunks);
 				ensureIndexedStorage(*context->groupSkinningVertexChunks);
 				ensureIndexedStorage(*context->groupMeshletVertexChunks);
@@ -1402,35 +1703,38 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 
 				finalizedGroup.firstMeshlet = context->cumulativeMeshletCount;
 				finalizedGroup.firstGroupVertex = context->cumulativeGroupVertexCount;
-				finalizedGroup.firstChild = static_cast<uint32_t>(context->children->size());
+				finalizedGroup.firstSegment = static_cast<uint32_t>(context->segments->size());
 
 				context->cumulativeMeshletCount += finalizedGroup.meshletCount;
 				context->cumulativeGroupVertexCount += finalizedGroup.groupVertexCount;
-				context->children->insert(context->children->end(), output.children.begin(), output.children.end());
+				context->segments->insert(context->segments->end(), output.segments.begin(), output.segments.end());
 				if (context->buildDuplicatedVertexStreams) {
 					context->duplicatedVertices->insert(context->duplicatedVertices->end(), output.vertexChunk.begin(), output.vertexChunk.end());
 					context->duplicatedSkinningVertices->insert(context->duplicatedSkinningVertices->end(), output.skinningVertexChunk.begin(), output.skinningVertexChunk.end());
 				}
 
+				(*context->groupPageBlobs)[groupId] = std::move(output.pageBlobs);
+
+				// Store raw streams for voxel hierarchy building
 				(*context->groupVertexChunks)[groupId] = std::move(output.vertexChunk);
 				(*context->groupSkinningVertexChunks)[groupId] = std::move(output.skinningVertexChunk);
 				(*context->groupMeshletVertexChunks)[groupId] = std::move(output.meshletVertices);
 				(*context->groupCompressedPositionWordChunks)[groupId] = std::move(output.compressedPositionWords);
 				(*context->groupCompressedNormalWordChunks)[groupId] = std::move(output.compressedNormalWords);
 				(*context->groupCompressedMeshletVertexWordChunks)[groupId] = std::move(output.compressedMeshletVertexWords);
-				(*context->groupMeshletChunks)[groupId] = std::move(output.groupMeshletChunk);
-				(*context->groupMeshletTriangleChunks)[groupId] = std::move(output.groupMeshletTriangleChunk);
-				(*context->groupMeshletBoundsChunks)[groupId] = std::move(output.groupMeshletBoundsChunk);
+				(*context->groupMeshletChunks)[groupId] = std::move(output.meshlets);
+				(*context->groupMeshletTriangleChunks)[groupId] = std::move(output.meshletTriangles);
+				(*context->groupMeshletBoundsChunks)[groupId] = std::move(output.meshletBounds);
 
 				(*context->groupChunks)[groupId] = output.groupChunk;
 				(*context->groups)[groupId] = finalizedGroup;
 
-				context->maxChildrenObserved = std::max(context->maxChildrenObserved, finalizedGroup.childCount);
+				context->maxChildrenObserved = std::max(context->maxChildrenObserved, finalizedGroup.segmentCount);
 				context->maxDepthObserved = (std::max)(context->maxDepthObserved, static_cast<uint32_t>(std::max(finalizedGroup.depth, 0)));
 				if (output.usedOverflowTerminalMerge)
 				{
 					context->overflowMergedGroupCount++;
-					context->overflowMergedChildBucketCount += output.mergedChildBucketCount;
+					context->overflowMergedChildBucketCount += output.mergedSegmentBucketCount;
 				}
 
 				return static_cast<int>(groupId);
@@ -1452,10 +1756,11 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		captureContext.skinningVertexStrideBytes = skinningVertexSize;
 		captureContext.buildDuplicatedVertexStreams = (flags & VertexFlags::VERTEX_SKINNED) != 0;
 		captureContext.groups = &state.groups;
-		captureContext.children = &state.children;
+		captureContext.segments = &state.segments;
 		captureContext.duplicatedVertices = &state.duplicatedVertices;
 		captureContext.duplicatedSkinningVertices = &state.duplicatedSkinningVertices;
 		captureContext.groupChunks = &state.groupChunks;
+		captureContext.groupPageBlobs = &state.groupPageBlobs;
 		captureContext.groupVertexChunks = &state.groupVertexChunks;
 		captureContext.groupSkinningVertexChunks = &state.groupSkinningVertexChunks;
 		captureContext.groupMeshletVertexChunks = &state.groupMeshletVertexChunks;
@@ -1557,7 +1862,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	uint32_t groupsWithRefinedChildren = 0;
 	for (const ClusterLODGroup& group : state.groups)
 	{
-		if (group.childCount > group.terminalChildCount)
+		if (group.segmentCount > group.terminalSegmentCount)
 		{
 			groupsWithRefinedChildren++;
 		}
@@ -1583,11 +1888,11 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 
 	{
 		std::vector<uint32_t> refinedGroupParentCounts(state.groups.size(), 0);
-		for (const ClusterLODChild& child : state.children)
+		for (const ClusterLODGroupSegment& seg : state.segments)
 		{
-			if (child.refinedGroup >= 0)
+			if (seg.refinedGroup >= 0)
 			{
-				const uint32_t refinedGroup = static_cast<uint32_t>(child.refinedGroup);
+				const uint32_t refinedGroup = static_cast<uint32_t>(seg.refinedGroup);
 				if (refinedGroup < refinedGroupParentCounts.size())
 				{
 					refinedGroupParentCounts[refinedGroup]++;
@@ -1616,7 +1921,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		for (uint32_t gIdx = 0; gIdx < static_cast<uint32_t>(state.groups.size()); ++gIdx)
 		{
 			const ClusterLODGroup& grp = state.groups[gIdx];
-			if (static_cast<uint32_t>(grp.depth) == state.maxDepth && grp.childCount > 0 && grp.childCount == grp.terminalChildCount)
+			if (static_cast<uint32_t>(grp.depth) == state.maxDepth && grp.segmentCount > 0 && grp.segmentCount == grp.terminalSegmentCount)
 			{
 				terminalCoarsestGroupIndices.push_back(gIdx);
 			}
@@ -1812,14 +2117,14 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 				state.voxelGroupMapping.payloads.push_back(std::move(batchPayload));
 
 				// Create child entries that refine into the terminal mesh groups.
-				const uint32_t firstChildIdx = static_cast<uint32_t>(state.children.size());
+				const uint32_t firstSegmentIdx = static_cast<uint32_t>(state.segments.size());
 				for (uint32_t termLocalIdx : batch)
 				{
-					ClusterLODChild child{};
-					child.refinedGroup = static_cast<int32_t>(terminalCoarsestGroupIndices[termLocalIdx]);
-					child.firstLocalMeshletIndex = 0;
-					child.localMeshletCount = 0;
-					state.children.push_back(child);
+					ClusterLODGroupSegment seg{};
+					seg.refinedGroup = static_cast<int32_t>(terminalCoarsestGroupIndices[termLocalIdx]);
+					seg.firstMeshletInPage = 0;
+					seg.meshletCount = 0;
+					state.segments.push_back(seg);
 				}
 
 				// Compute bounding sphere (center of AABB, radius = half-diagonal).
@@ -1838,9 +2143,9 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 				voxelGroup.bounds.radius     = radius;
 				voxelGroup.bounds.error      = currentLevelError;
 				voxelGroup.depth             = static_cast<int32_t>(currentVoxelDepth);
-				voxelGroup.firstChild        = firstChildIdx;
-				voxelGroup.childCount        = static_cast<uint32_t>(batch.size());
-				voxelGroup.terminalChildCount = 0;
+				voxelGroup.firstSegment        = firstSegmentIdx;
+				voxelGroup.segmentCount        = static_cast<uint32_t>(batch.size());
+				voxelGroup.terminalSegmentCount = 0;
 				voxelGroup.meshletCount      = 0;
 				voxelGroup.groupVertexCount  = 0;
 				voxelGroup.firstMeshlet      = 0;
@@ -1937,14 +2242,14 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 					state.voxelGroupMapping.payloads.push_back(std::move(parentPayload));
 
 					// Children entries that refine into the child voxel groups.
-					const uint32_t firstChildIdx = static_cast<uint32_t>(state.children.size());
+					const uint32_t firstSegmentIdx = static_cast<uint32_t>(state.segments.size());
 					for (uint32_t batchIdx : batch)
 					{
-						ClusterLODChild child{};
-						child.refinedGroup = static_cast<int32_t>(currentLevelGroups[batchIdx].groupIndex);
-						child.firstLocalMeshletIndex = 0;
-						child.localMeshletCount = 0;
-						state.children.push_back(child);
+						ClusterLODGroupSegment seg{};
+						seg.refinedGroup = static_cast<int32_t>(currentLevelGroups[batchIdx].groupIndex);
+						seg.firstMeshletInPage = 0;
+						seg.meshletCount = 0;
+						state.segments.push_back(seg);
 					}
 
 					const float pcx = (parentMin.x + parentMax.x) * 0.5f;
@@ -1962,9 +2267,9 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 					parentGroup.bounds.radius     = pRadius;
 					parentGroup.bounds.error      = parentError;
 					parentGroup.depth             = static_cast<int32_t>(currentVoxelDepth);
-					parentGroup.firstChild        = firstChildIdx;
-					parentGroup.childCount        = static_cast<uint32_t>(batch.size());
-					parentGroup.terminalChildCount = 0;
+					parentGroup.firstSegment        = firstSegmentIdx;
+					parentGroup.segmentCount        = static_cast<uint32_t>(batch.size());
+					parentGroup.terminalSegmentCount = 0;
 					parentGroup.meshletCount      = 0;
 					parentGroup.groupVertexCount  = 0;
 					parentGroup.firstMeshlet      = 0;
@@ -2020,23 +2325,24 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		}
 	}
 
+	// Assign mesh-local pageMapBase for each group (running cumulative offset).
+	{
+		uint32_t localPageMapCursor = 0;
+		for (auto& grp : state.groups) {
+			grp.pageMapBase = localPageMapCursor;
+			localPageMapCursor += grp.pageCount;
+		}
+	}
+
 	ClusterLODPrebuildArtifacts artifacts{};
 	artifacts.prebuiltData.groups = std::move(state.groups);
-	artifacts.prebuiltData.children = std::move(state.children);
+	artifacts.prebuiltData.segments = std::move(state.segments);
 	artifacts.prebuiltData.objectBoundingSphere = BuildObjectBoundingSphereFromRootNode(state.nodes, state.topRootNode);
 	artifacts.prebuiltData.groupChunks = std::move(state.groupChunks);
 	artifacts.prebuiltData.nodes = std::move(state.nodes);
 	artifacts.prebuiltData.voxelGroupMapping = std::move(state.voxelGroupMapping);
 
-	artifacts.cacheBuildData.groupVertexChunks = std::move(state.groupVertexChunks);
-	artifacts.cacheBuildData.groupSkinningVertexChunks = std::move(state.groupSkinningVertexChunks);
-	artifacts.cacheBuildData.groupMeshletVertexChunks = std::move(state.groupMeshletVertexChunks);
-	artifacts.cacheBuildData.groupCompressedPositionWordChunks = std::move(state.groupCompressedPositionWordChunks);
-	artifacts.cacheBuildData.groupCompressedNormalWordChunks = std::move(state.groupCompressedNormalWordChunks);
-	artifacts.cacheBuildData.groupCompressedMeshletVertexWordChunks = std::move(state.groupCompressedMeshletVertexWordChunks);
-	artifacts.cacheBuildData.groupMeshletChunks = std::move(state.groupMeshletChunks);
-	artifacts.cacheBuildData.groupMeshletTriangleChunks = std::move(state.groupMeshletTriangleChunks);
-	artifacts.cacheBuildData.groupMeshletBoundsChunks = std::move(state.groupMeshletBoundsChunks);
+	artifacts.cacheBuildData.groupPageBlobs = std::move(state.groupPageBlobs);
 
 	return artifacts;
 }

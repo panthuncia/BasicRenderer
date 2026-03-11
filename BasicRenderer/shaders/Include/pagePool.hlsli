@@ -1,8 +1,8 @@
 #ifndef PAGE_POOL_HLSLI
 #define PAGE_POOL_HLSLI
 
-// Page-pool constants — must match PagePool::Config on the CPU side.
-#define PAGE_POOL_PAGE_SIZE  65536u   // 64 KB
+// Page-pool constants - must match PagePool::Config on the CPU side.
+#define PAGE_POOL_PAGE_SIZE  256 * 1024   // 256 KB
 
 // Resolve a virtual page ID to a byte offset within a slab.
 // `pageTable` is a StructuredBuffer<PageTableEntry> bound via

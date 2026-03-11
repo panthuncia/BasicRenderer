@@ -11,6 +11,7 @@
 #include "Managers/ViewManager.h"
 #include "Import/CLodCache.h"
 #include <algorithm>
+#include <bit>
 #include <limits>
 #include <cassert>
 #include "../../generated/BuiltinResources.h"
@@ -35,10 +36,11 @@ MeshManager::MeshManager() {
 	m_clodSharedGroupChunks = DynamicBuffer::CreateShared(sizeof(ClusterLODGroupChunk), 10000, "clodSharedGroupChunks");
 	m_clodMeshMetadata = DynamicBuffer::CreateShared(sizeof(CLodMeshMetadata), 10000, "clodMeshMetadata");
 	m_clusterLODGroups = DynamicBuffer::CreateShared(sizeof(ClusterLODGroup), 10000, "clusterLODGroups");
-	m_clusterLODChildren = DynamicBuffer::CreateShared(sizeof(ClusterLODChild), 10000, "clusterLODChildren");
+	m_clusterLODSegments = DynamicBuffer::CreateShared(sizeof(ClusterLODGroupSegment), 10000, "clusterLODSegments");
 	//m_clusterLODMeshlets = DynamicBuffer::CreateShared(sizeof(meshopt_Meshlet), 1, "clusterLODMeshlets");
 	m_clusterLODMeshletBounds = DynamicBuffer::CreateShared(sizeof(BoundingSphere), 10000, "clusterLODMeshletBounds", false, true);
 	m_clusterLODNodes = DynamicBuffer::CreateShared(sizeof(ClusterLODNode), 10000, "clusterLODNodes");
+	m_clodGroupPageMap = DynamicBuffer::CreateShared(sizeof(GroupPageMapEntry), 10000, "clodGroupPageMap");
 
 	m_postSkinningVertices->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
 	m_meshletOffsets->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
@@ -46,6 +48,7 @@ MeshManager::MeshManager() {
 	m_meshletTriangles->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
 	m_clusterLODMeshletBounds->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
 	m_clodSharedGroupChunks->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
+	m_clodGroupPageMap->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
 
 	// Tag resources for memory statistics
 	rg::memory::SetResourceUsageHint(*m_preSkinningVertices, "Mesh Data");
@@ -75,15 +78,16 @@ MeshManager::MeshManager() {
 	m_resources[Builtin::CLod::GroupChunks] = m_clodSharedGroupChunks;
 	m_resources[Builtin::CLod::MeshMetadata] = m_clodMeshMetadata;
 	m_resources[Builtin::CLod::Groups] = m_clusterLODGroups;
-	m_resources[Builtin::CLod::Children] = m_clusterLODChildren;
+	m_resources[Builtin::CLod::Segments] = m_clusterLODSegments;
 	//m_resources[Builtin::CLod::Meshlets] = m_clusterLODMeshlets;
 	m_resources[Builtin::CLod::MeshletBounds] = m_clusterLODMeshletBounds;
 	m_resources[Builtin::CLod::Nodes] = m_clusterLODNodes;
+	m_resources[Builtin::CLod::GroupPageMap] = m_clodGroupPageMap;
 
 	// Page pool
 	{
 		PagePool::Config ppConfig;
-		ppConfig.pageSize     = 65536;              // 64 KB
+		ppConfig.pageSize     = 256 * 1024;         // 256 KB
 		ppConfig.slabSize     = 256 * 1024 * 1024;  // 256 MB
 		ppConfig.maxSlabs     = 32;
 		ppConfig.preAllocate  = true;
@@ -183,14 +187,7 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 		CLodCache::LoadedGroupPayload payload{};
 		if (CLodCache::LoadGroupPayloadDirect(tls.file, locator, payload)) {
 			result.groupChunkMetadata = payload.groupChunkMetadata;
-			result.vertexChunk = std::move(payload.vertexChunk);
-			result.meshletVertexChunk = std::move(payload.meshletVertexChunk);
-			result.compressedPositionWordChunk = std::move(payload.compressedPositionWordChunk);
-			result.compressedNormalWordChunk = std::move(payload.compressedNormalWordChunk);
-			result.compressedMeshletVertexWordChunk = std::move(payload.compressedMeshletVertexWordChunk);
-			result.meshletChunk = std::move(payload.meshletChunk);
-			result.meshletTriangleChunk = std::move(payload.meshletTriangleChunk);
-			result.meshletBoundsChunk = std::move(payload.meshletBoundsChunk);
+			result.pageBlobs = std::move(payload.pageBlobs);
 			result.success = true;
 		}
 		else {
@@ -313,13 +310,121 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 
 	// Cluster LOD hierarchy data is shared per mesh; per-instance state stores only indirection/instance IDs.
 	auto clusterLODGroupsView = m_clusterLODGroups->AddData(mesh->GetCLodGroups().data(), mesh->GetCLodGroups().size() * sizeof(ClusterLODGroup), sizeof(ClusterLODGroup));
-	auto clusterLODChildrenView = m_clusterLODChildren->AddData(mesh->GetCLodChildren().data(), mesh->GetCLodChildren().size() * sizeof(ClusterLODChild), sizeof(ClusterLODChild));
+	auto clusterLODSegmentsView = m_clusterLODSegments->AddData(mesh->GetCLodSegments().data(), mesh->GetCLodSegments().size() * sizeof(ClusterLODGroupSegment), sizeof(ClusterLODGroupSegment));
 	
 	auto clusterLODNodesView = m_clusterLODNodes->AddData(mesh->GetCLodNodes().data(), mesh->GetCLodNodes().size() * sizeof(ClusterLODNode), sizeof(ClusterLODNode));
 
+	// Create shared streaming state (once per mesh, before hierarchy CPU data is released)
+	{
+		const uint32_t groupsBase = static_cast<uint32_t>(clusterLODGroupsView->GetOffset() / sizeof(ClusterLODGroup));
+		const auto& groupChunkHints = mesh->GetCLodGroupChunkHints();
+		std::vector<ClusterLODGroupChunk> baselineGroupChunks(groupChunkHints.size());
+		std::vector<ClusterLODGroupChunk> materializedGroupChunks(groupChunkHints.size());
+		std::vector<uint8_t> groupResidentFlags(groupChunkHints.size(), 1u);
+
+		for (size_t groupIndex = 0; groupIndex < groupChunkHints.size(); ++groupIndex)
+		{
+			ClusterLODGroupChunk chunk{};
+			const auto& hint = groupChunkHints[groupIndex];
+			chunk.groupVertexCount = hint.groupVertexCount;
+			chunk.meshletVertexCount = hint.meshletVertexCount;
+			chunk.meshletCount = hint.meshletCount;
+			chunk.meshletTrianglesByteCount = hint.meshletTrianglesByteCount;
+			chunk.meshletBoundsCount = hint.meshletBoundsCount;
+			chunk.compressedPositionWordCount = hint.compressedPositionWordCount;
+			chunk.compressedNormalWordCount = hint.compressedNormalWordCount;
+			chunk.compressedMeshletVertexWordCount = hint.compressedMeshletVertexWordCount;
+
+			bool hasRuntimeChunkData = (chunk.pagePoolSlabDescriptorIndex != 0u || chunk.meshletCount == 0u);
+			baselineGroupChunks[groupIndex] = chunk;
+
+			if (!hasRuntimeChunkData) {
+				chunk.groupVertexCount = 0;
+				chunk.meshletVertexCount = 0;
+				chunk.meshletCount = 0;
+				chunk.meshletTrianglesByteCount = 0;
+				chunk.meshletBoundsCount = 0;
+				chunk.compressedPositionWordCount = 0;
+				chunk.compressedNormalWordCount = 0;
+				chunk.compressedMeshletVertexWordCount = 0;
+				groupResidentFlags[groupIndex] = 0u;
+			}
+
+			materializedGroupChunks[groupIndex] = chunk;
+		}
+
+		std::unique_ptr<BufferView> sharedGroupChunksView = nullptr;
+		if (!materializedGroupChunks.empty())
+		{
+			sharedGroupChunksView = m_clodSharedGroupChunks->AddData(
+				materializedGroupChunks.data(),
+				materializedGroupChunks.size() * sizeof(ClusterLODGroupChunk),
+				sizeof(ClusterLODGroupChunk));
+		}
+
+		auto sharedState = std::make_shared<CLodSharedStreamingState>();
+		sharedState->mesh = mesh.get();
+
+		// Move hierarchy data into the shared state for streaming-apply time
+		// (the Mesh releases its copies below via ReleaseCLodHierarchyCpuData).
+		sharedState->groups = mesh->GetCLodGroups();
+		sharedState->segments = mesh->GetCLodSegments();
+
+		// Compute total page-map entries needed for all groups in this mesh.
+		uint32_t totalPageMapEntries = 0;
+		for (const auto& grp : sharedState->groups) {
+			totalPageMapEntries += grp.pageCount;
+		}
+
+		// Allocate a contiguous range in the GroupPageMap buffer.
+		std::unique_ptr<BufferView> pageMapView = nullptr;
+		uint32_t pageMapGlobalBase = 0;
+		if (totalPageMapEntries > 0) {
+			std::vector<GroupPageMapEntry> initialPageMapEntries(totalPageMapEntries); // zero-init
+			pageMapView = m_clodGroupPageMap->AddData(
+				initialPageMapEntries.data(),
+				totalPageMapEntries * sizeof(GroupPageMapEntry),
+				sizeof(GroupPageMapEntry));
+			if (pageMapView) {
+				pageMapGlobalBase = static_cast<uint32_t>(pageMapView->GetOffset() / sizeof(GroupPageMapEntry));
+			}
+		}
+
+		CLodMeshMetadata clodMeshMetadata{};
+		clodMeshMetadata.groupsBase = groupsBase;
+		clodMeshMetadata.segmentsBase = static_cast<uint32_t>(clusterLODSegmentsView->GetOffset() / sizeof(ClusterLODGroupSegment));
+		clodMeshMetadata.lodNodesBase = static_cast<uint32_t>(clusterLODNodesView->GetOffset() / sizeof(ClusterLODNode));
+		clodMeshMetadata.rootNode = mesh->GetCLodRootNodeIndex();
+		clodMeshMetadata.groupChunkTableBase = (sharedGroupChunksView != nullptr)
+			? static_cast<uint32_t>(sharedGroupChunksView->GetOffset() / sizeof(ClusterLODGroupChunk))
+			: 0u;
+		clodMeshMetadata.groupChunkTableCount = static_cast<uint32_t>(materializedGroupChunks.size());
+		clodMeshMetadata.pageMapBase = pageMapGlobalBase;
+		sharedState->ownedMeshMetadataView = m_clodMeshMetadata->AddData(&clodMeshMetadata, sizeof(CLodMeshMetadata), sizeof(CLodMeshMetadata));
+		if (sharedState->ownedMeshMetadataView != nullptr) {
+			sharedState->clodMeshMetadataIndex = static_cast<uint32_t>(sharedState->ownedMeshMetadataView->GetOffset() / sizeof(CLodMeshMetadata));
+		}
+
+		sharedState->groupsBase = groupsBase;
+		sharedState->groupCount = static_cast<uint32_t>(materializedGroupChunks.size());
+		sharedState->ownedGroupChunksView = std::move(sharedGroupChunksView);
+		sharedState->groupChunksView = sharedState->ownedGroupChunksView.get();
+		sharedState->baselineGroupChunks = std::move(baselineGroupChunks);
+		sharedState->groupResidentFlags = std::move(groupResidentFlags);
+		sharedState->ownedPageMapView = std::move(pageMapView);
+		sharedState->pageMapGlobalBase = pageMapGlobalBase;
+		sharedState->totalPageMapEntries = totalPageMapEntries;
+		sharedState->pageMapEntriesCPU.resize(totalPageMapEntries);
+		sharedState->residentGroupAllocations.resize(sharedState->groupCount);
+
+		m_clodSharedStreamingStateByMesh[mesh.get()] = sharedState;
+		m_clodSharedStreamingRangesDirty = true;
+		m_clodStreamingStructureDirty = true;
+	}
+
 	mesh->SetCLodBufferViews( // TODO: cleanup on remove
 		std::move(clusterLODGroupsView), 
-		std::move(clusterLODChildrenView), 
+		std::move(clusterLODSegmentsView), 
 		std::move(clusterLODNodesView));
 	mesh->ReleaseCLodChunkUploadData();
 	mesh->ReleaseCLodHierarchyCpuData();
@@ -401,95 +506,10 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 		mesh->GetMesh()->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
 	mesh->SetPerMeshBufferIndex(perMeshIndex);
 
-	auto clusterLODGroupsView = mesh->GetMesh()->GetCLodGroupsView();
-	auto clusterLODChildrenView = mesh->GetMesh()->GetCLodChildrenView();
-	auto clusterLODNodesView = mesh->GetMesh()->GetCLodNodesView();
-	const uint32_t groupsBase = static_cast<uint32_t>(clusterLODGroupsView->GetOffset() / sizeof(ClusterLODGroup));
-
 	auto meshPtr = mesh->GetMesh().get();
 	auto sharedStateIt = m_clodSharedStreamingStateByMesh.find(meshPtr);
 	std::shared_ptr<CLodSharedStreamingState> sharedState;
-	if (sharedStateIt == m_clodSharedStreamingStateByMesh.end()) {
-		const auto& groupChunkHints = mesh->GetMesh()->GetCLodGroupChunkHints();
-		std::vector<ClusterLODGroupChunk> baselineGroupChunks(groupChunkHints.size());
-		std::vector<ClusterLODGroupChunk> materializedGroupChunks(groupChunkHints.size());
-		std::vector<uint8_t> groupResidentFlags(groupChunkHints.size(), 1u);
-
-		for (size_t groupIndex = 0; groupIndex < groupChunkHints.size(); ++groupIndex)
-		{
-			const uint32_t groupIndexU32 = static_cast<uint32_t>(groupIndex);
-			ClusterLODGroupChunk chunk{};
-			const auto& hint = groupChunkHints[groupIndex];
-			chunk.groupVertexCount = hint.groupVertexCount;
-			chunk.meshletVertexCount = hint.meshletVertexCount;
-			chunk.meshletCount = hint.meshletCount;
-			chunk.meshletTrianglesByteCount = hint.meshletTrianglesByteCount;
-			chunk.meshletBoundsCount = hint.meshletBoundsCount;
-			chunk.compressedPositionWordCount = hint.compressedPositionWordCount;
-			chunk.compressedNormalWordCount = hint.compressedNormalWordCount;
-			chunk.compressedMeshletVertexWordCount = hint.compressedMeshletVertexWordCount;
-
-			// All 8 data streams live in the page-pool slab. Groups start
-			// non-resident and become resident once streaming populates the
-			// slab allocation.
-			bool hasRuntimeChunkData = (chunk.pagePoolSlabDescriptorIndex != 0u || chunk.meshletCount == 0u);
-
-			baselineGroupChunks[groupIndex] = chunk;
-
-			if (!hasRuntimeChunkData) {
-				chunk.groupVertexCount = 0;
-				chunk.meshletVertexCount = 0;
-				chunk.meshletCount = 0;
-				chunk.meshletTrianglesByteCount = 0;
-				chunk.meshletBoundsCount = 0;
-				chunk.compressedPositionWordCount = 0;
-				chunk.compressedNormalWordCount = 0;
-				chunk.compressedMeshletVertexWordCount = 0;
-				groupResidentFlags[groupIndex] = 0u;
-			}
-
-			materializedGroupChunks[groupIndex] = chunk;
-		}
-
-		std::unique_ptr<BufferView> sharedGroupChunksView = nullptr;
-		if (!materializedGroupChunks.empty())
-		{
-			sharedGroupChunksView = m_clodSharedGroupChunks->AddData(
-				materializedGroupChunks.data(),
-				materializedGroupChunks.size() * sizeof(ClusterLODGroupChunk),
-				sizeof(ClusterLODGroupChunk));
-		}
-
-		sharedState = std::make_shared<CLodSharedStreamingState>();
-		sharedState->mesh = mesh->GetMesh().get();
-
-		CLodMeshMetadata clodMeshMetadata{};
-		clodMeshMetadata.groupsBase = groupsBase;
-		clodMeshMetadata.childrenBase = static_cast<uint32_t>(clusterLODChildrenView->GetOffset() / sizeof(ClusterLODChild));
-		clodMeshMetadata.lodNodesBase = static_cast<uint32_t>(clusterLODNodesView->GetOffset() / sizeof(ClusterLODNode));
-		clodMeshMetadata.rootNode = mesh->GetMesh()->GetCLodRootNodeIndex();
-		clodMeshMetadata.groupChunkTableBase = (sharedGroupChunksView != nullptr)
-			? static_cast<uint32_t>(sharedGroupChunksView->GetOffset() / sizeof(ClusterLODGroupChunk))
-			: 0u;
-		clodMeshMetadata.groupChunkTableCount = static_cast<uint32_t>(materializedGroupChunks.size());
-		sharedState->ownedMeshMetadataView = m_clodMeshMetadata->AddData(&clodMeshMetadata, sizeof(CLodMeshMetadata), sizeof(CLodMeshMetadata));
-		if (sharedState->ownedMeshMetadataView != nullptr) {
-			sharedState->clodMeshMetadataIndex = static_cast<uint32_t>(sharedState->ownedMeshMetadataView->GetOffset() / sizeof(CLodMeshMetadata));
-		}
-
-		sharedState->groupsBase = groupsBase;
-		sharedState->groupCount = static_cast<uint32_t>(materializedGroupChunks.size());
-		sharedState->ownedGroupChunksView = std::move(sharedGroupChunksView);
-		sharedState->groupChunksView = sharedState->ownedGroupChunksView.get();
-		sharedState->baselineGroupChunks = std::move(baselineGroupChunks);
-		sharedState->groupResidentFlags = std::move(groupResidentFlags);
-		sharedState->residentGroupAllocations.resize(sharedState->groupCount);
-
-		m_clodSharedStreamingStateByMesh[meshPtr] = sharedState;
-		m_clodSharedStreamingRangesDirty = true;
-		m_clodStreamingStructureDirty = true;
-	}
-	else {
+	if (sharedStateIt != m_clodSharedStreamingStateByMesh.end()) {
 		sharedState = sharedStateIt->second;
 	}
 
@@ -690,7 +710,7 @@ bool MeshManager::QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodS
 
 	// The page-pool path considers a group "ready" when the page allocation is valid
 	// (meshlets + bounds are packed into the page-pool blob).
-	const bool hasRequiredAllocations = residentAllocations.pageAllocation.IsValid()
+	const bool hasRequiredAllocations = !residentAllocations.pageAllocations.empty()
 		|| sourceChunk.meshletCount == 0u;
 
 	if (hasRequiredAllocations) {
@@ -750,53 +770,68 @@ MeshManager::DiskStreamingApplyResult MeshManager::ApplyCompletedCLodDiskStreami
 		chunk = result.groupChunkMetadata.value();
 	}
 
-	// Detect mismatch between metadata-declared meshlet count and
-	// the actual data delivered by disk streaming.
-	if (chunk.meshletCount > 0u && result.meshletChunk.empty()) {
-		spdlog::error(
-			"CLod streaming: group {} (local {}) metadata declares meshletCount={} "
-			"but loaded meshletChunk is empty — meshlet data will be missing on GPU",
-			result.groupGlobalIndex, localIndex, chunk.meshletCount);
-		assert(false && "CLod streaming: non-zero meshletCount but empty meshletChunk");
+	const auto& meshGroups = sharedState->groups;
+	const auto& meshSegments = sharedState->segments;
+	if (localIndex >= meshGroups.size()) {
+		return DiskStreamingApplyResult::FailedPermanent;
+	}
+	const auto& group = meshGroups[localIndex];
+	const uint32_t sCount = group.pageCount;
+
+	if (result.pageBlobs.size() != sCount) {
+		spdlog::error("CLod streaming: group {} (local {}) expected {} page blobs but got {}",
+			result.groupGlobalIndex, localIndex, sCount, result.pageBlobs.size());
+		return DiskStreamingApplyResult::FailedPermanent;
 	}
 
-	// Meshlets + bounds are packed into the page-pool blob (streams 7 & 8)
-	// — no global StructuredBuffer uploads needed.
+	// Allocate one page per segment and upload pre-packed blobs
+	size_t totalBlobBytes = 0;
+	std::vector<GroupPageMapEntry> pageMapEntries(sCount);
 
-	// Pack data streams into a contiguous page-pool blob
-	std::vector<std::byte> blob;
-	const size_t blobSize = PackGroupPayloadForPagePool(result, mesh, blob, chunk);
+	for (uint32_t ci = 0; ci < sCount; ++ci) {
+		const auto& blob = result.pageBlobs[ci];
+		totalBlobBytes += blob.size();
 
-	if (blobSize == 0) {
-		spdlog::warn("CLod streaming: group {} produced an empty blob", result.groupGlobalIndex);
-	}
+		if (blob.empty()) {
+			pageMapEntries[ci] = {};
+			continue;
+		}
 
-	// Allocate pages
-	const uint64_t pageSize = m_clodPagePool->GetPageSize();
-	const uint32_t pagesNeeded = static_cast<uint32_t>((blobSize + pageSize - 1) / pageSize);
-
-	PagePool::PageAllocation pageAlloc;
-	if (pagesNeeded > 0) {
-		pageAlloc = m_clodPagePool->AllocatePages(pagesNeeded);
+		PagePool::PageAllocation pageAlloc = m_clodPagePool->AllocatePages(1);
 		if (!pageAlloc.IsValid()) {
-			spdlog::warn("CLod streaming: page pool exhausted — failed to allocate {} pages for group {} (pre-eviction should have freed enough)",
-						  pagesNeeded, result.groupGlobalIndex);
+			spdlog::warn("CLod streaming: page pool exhausted allocating page for segment {} of group {}",
+						  ci, result.groupGlobalIndex);
+			for (auto& alloc : residentAllocations.pageAllocations) {
+				m_clodPagePool->FreePages(alloc);
+			}
 			residentAllocations.Reset();
 			return DiskStreamingApplyResult::FailedPermanent;
 		}
+
+		m_clodPagePool->UploadToAllocation(pageAlloc, blob.data(), blob.size());
+
+		pageMapEntries[ci].slabDescriptorIndex = m_clodPagePool->GetSlabDescriptorIndex(pageAlloc);
+		pageMapEntries[ci].slabByteOffset = static_cast<uint32_t>(m_clodPagePool->PageToSlabByteOffset(pageAlloc.firstPageID));
+
+		residentAllocations.pageAllocations.push_back(pageAlloc);
 	}
 
-	// Upload blob to slab
-	if (blobSize > 0 && pageAlloc.IsValid()) {
-		m_clodPagePool->UploadToAllocation(pageAlloc, blob.data(), blobSize);
+	// Upload GroupPageMap entries for this group
+	if (sharedState->ownedPageMapView && !pageMapEntries.empty()) {
+		const uint32_t pageMapOffset = group.pageMapBase;
+		for (uint32_t i = 0; i < sCount; ++i) {
+			sharedState->pageMapEntriesCPU[pageMapOffset + i] = pageMapEntries[i];
+		}
+		m_clodGroupPageMap->UpdateView(
+			sharedState->ownedPageMapView.get(),
+			sharedState->pageMapEntriesCPU.data());
 	}
 
-	// Patch chunk with page-pool addressing
-	chunk.pagePoolSlabDescriptorIndex = m_clodPagePool->GetSlabDescriptorIndex(pageAlloc);
-	chunk.pagePoolSlabByteOffset = static_cast<uint32_t>(m_clodPagePool->PageToSlabByteOffset(pageAlloc.firstPageID));
-
-	// Store allocation handle for later deallocation.
-	residentAllocations.pageAllocation = pageAlloc;
+	if (!residentAllocations.pageAllocations.empty()) {
+		const auto& firstAlloc = residentAllocations.pageAllocations[0];
+		chunk.pagePoolSlabDescriptorIndex = m_clodPagePool->GetSlabDescriptorIndex(firstAlloc);
+		chunk.pagePoolSlabByteOffset = static_cast<uint32_t>(m_clodPagePool->PageToSlabByteOffset(firstAlloc.firstPageID));
+	}
 
 	// Commit chunk updates.
 	sharedState->baselineGroupChunks[localIndex] = chunk;
@@ -806,9 +841,9 @@ MeshManager::DiskStreamingApplyResult MeshManager::ApplyCompletedCLodDiskStreami
 
 	// Debug stats
 	{
-		m_debugResidentAllocations.fetch_add(1u, std::memory_order_relaxed);
-		m_debugResidentAllocationBytes.fetch_add(blobSize, std::memory_order_relaxed);
-		m_debugTotalStreamedBytes.fetch_add(blobSize, std::memory_order_relaxed);
+		m_debugResidentAllocations.fetch_add(static_cast<uint32_t>(residentAllocations.pageAllocations.size()), std::memory_order_relaxed);
+		m_debugResidentAllocationBytes.fetch_add(totalBlobBytes, std::memory_order_relaxed);
+		m_debugTotalStreamedBytes.fetch_add(totalBlobBytes, std::memory_order_relaxed);
 		m_debugResidentGroups.fetch_add(1u, std::memory_order_relaxed);
 	}
 
@@ -890,14 +925,32 @@ void MeshManager::DeallocateCLodGroupChunkAllocations(CLodSharedStreamingState& 
 
 	auto& residentAllocations = state.residentGroupAllocations[groupLocalIndex];
 
-	// Free pages for all 8 paged streams.
-	m_clodPagePool->FreePages(residentAllocations.pageAllocation);
+	// Free each per-child page allocation.
+	for (auto& alloc : residentAllocations.pageAllocations) {
+		m_clodPagePool->FreePages(alloc);
+	}
 
 	// Clear page-pool fields in the baseline chunk so the shader sees zeros.
 	if (groupLocalIndex < state.baselineGroupChunks.size()) {
 		auto& chunk = state.baselineGroupChunks[groupLocalIndex];
 		chunk.pagePoolSlabDescriptorIndex = 0;
 		chunk.pagePoolSlabByteOffset = 0;
+	}
+
+	// Zero out the GroupPageMap entries for this group
+	if (state.ownedPageMapView && state.mesh) {
+		const auto& meshGroups = state.mesh->GetCLodGroups();
+		if (groupLocalIndex < meshGroups.size()) {
+			const auto& grp = meshGroups[groupLocalIndex];
+			if (grp.pageCount > 0) {
+				for (uint32_t i = 0; i < grp.pageCount; ++i) {
+					state.pageMapEntriesCPU[grp.pageMapBase + i] = {};
+				}
+				m_clodGroupPageMap->UpdateView(
+					state.ownedPageMapView.get(),
+					state.pageMapEntriesCPU.data());
+			}
+		}
 	}
 
 	residentAllocations.Reset();
@@ -972,7 +1025,7 @@ bool MeshManager::ApplyCLodGroupResidency(CLodSharedStreamingState& state, uint3
 		if (groupLocalIndex < state.residentGroupAllocations.size()) {
 			auto& allocs = state.residentGroupAllocations[groupLocalIndex];
 			auto countAllocs = [](const CLodSharedStreamingState::ResidentGroupAllocations& a) -> uint32_t {
-				return a.pageAllocation.IsValid() ? 1u : 0u;
+				return static_cast<uint32_t>(a.pageAllocations.size());
 			};
 			auto sumAllocBytes = [](const CLodSharedStreamingState::ResidentGroupAllocations& a) -> uint64_t {
 				return 0ull; // All data lives in page pool; byte accounting is in the page allocation itself.
@@ -1316,90 +1369,6 @@ bool MeshManager::ConsumeCLodStreamingStructureDirty() {
 	return m_clodStreamingStructureDirty.exchange(false);
 }
 
-// ── Page-pool streaming helpers ────────────────────────────────────────────
-
-size_t MeshManager::PackGroupPayloadForPagePool(
-	const CLodDiskStreamingResult& result,
-	const Mesh* mesh,
-	std::vector<std::byte>& outBlob,
-	ClusterLODGroupChunk& inOutChunk)
-{
-	// Pack the 8 data streams into a single contiguous blob with 4-byte
-	// alignment per stream.
-	//
-	// Record the byte offset of each stream relative to the start of the blob
-	// in the chunk's intra-page-offset fields.
-
-	auto align4 = [](size_t v) -> size_t { return (v + 3u) & ~size_t(3); };
-
-	size_t cursor = 0;
-
-	// Helper: appends raw bytes, records intra-page offset.
-	auto appendStream = [&](const void* data, size_t bytes, uint32_t& intraOffsetOut) {
-		cursor = align4(cursor);
-		intraOffsetOut = static_cast<uint32_t>(cursor);
-		if (bytes > 0) {
-			outBlob.resize(cursor + bytes);
-			std::memcpy(outBlob.data() + cursor, data, bytes);
-			cursor += bytes;
-		}
-	};
-
-	outBlob.clear();
-
-	// 1. Vertex data (byte-addressed, variable stride)
-	{
-		const size_t bytes = result.vertexChunk.size(); // already raw bytes
-		appendStream(result.vertexChunk.data(), bytes, inOutChunk.vertexIntraPageByteOffset);
-	}
-
-	// 2. Meshlet vertex indices (uint32_t each)
-	{
-		const size_t bytes = result.meshletVertexChunk.size() * sizeof(uint32_t);
-		appendStream(result.meshletVertexChunk.data(), bytes, inOutChunk.meshletVertexIntraPageByteOffset);
-	}
-
-	// 3. Meshlet triangles (uint8_t, byte-addressed)
-	{
-		const size_t bytes = result.meshletTriangleChunk.size() * sizeof(uint8_t);
-		appendStream(result.meshletTriangleChunk.data(), bytes, inOutChunk.triangleIntraPageByteOffset);
-	}
-
-	// 4. Compressed positions (uint32_t words)
-	{
-		const size_t bytes = result.compressedPositionWordChunk.size() * sizeof(uint32_t);
-		appendStream(result.compressedPositionWordChunk.data(), bytes, inOutChunk.compPosIntraPageByteOffset);
-	}
-
-	// 5. Compressed normals (uint32_t words)
-	{
-		const size_t bytes = result.compressedNormalWordChunk.size() * sizeof(uint32_t);
-		appendStream(result.compressedNormalWordChunk.data(), bytes, inOutChunk.compNormIntraPageByteOffset);
-	}
-
-	// 6. Compressed meshlet vertex indices (uint32_t words)
-	{
-		const size_t bytes = result.compressedMeshletVertexWordChunk.size() * sizeof(uint32_t);
-		appendStream(result.compressedMeshletVertexWordChunk.data(), bytes, inOutChunk.compMeshletVertIntraPageByteOffset);
-	}
-
-	// 7. Meshlet offsets (meshopt_Meshlet, 16 bytes each)
-	{
-		const size_t bytes = result.meshletChunk.size() * sizeof(meshopt_Meshlet);
-		appendStream(result.meshletChunk.data(), bytes, inOutChunk.meshletIntraPageByteOffset);
-	}
-
-	// 8. Meshlet bounds (BoundingSphere, 16 bytes each)
-	{
-		const size_t bytes = result.meshletBoundsChunk.size() * sizeof(BoundingSphere);
-		appendStream(result.meshletBoundsChunk.data(), bytes, inOutChunk.boundsIntraPageByteOffset);
-	}
-
-	// Final size (4-byte aligned for good measure).
-	outBlob.resize(align4(outBlob.size()));
-	return outBlob.size();
-}
-
 MeshManager::CLodStreamingDebugStats MeshManager::GetCLodStreamingDebugStats() const {
 	CLodStreamingDebugStats stats{};
 	stats.residentGroups = m_debugResidentGroups.load(std::memory_order_relaxed);
@@ -1415,14 +1384,11 @@ MeshManager::CLodStreamingDebugStats MeshManager::GetCLodStreamingDebugStats() c
 		stats.completedResults = static_cast<uint32_t>(m_clodDiskStreamingResults.size());
 
 		auto getCompletedResultSizeBytes = [](const CLodDiskStreamingResult& result) -> uint64_t {
-			return static_cast<uint64_t>(result.vertexChunk.size())
-				+ static_cast<uint64_t>(result.meshletVertexChunk.size() * sizeof(uint32_t))
-				+ static_cast<uint64_t>(result.compressedPositionWordChunk.size() * sizeof(uint32_t))
-				+ static_cast<uint64_t>(result.compressedNormalWordChunk.size() * sizeof(uint32_t))
-				+ static_cast<uint64_t>(result.compressedMeshletVertexWordChunk.size() * sizeof(uint32_t))
-				+ static_cast<uint64_t>(result.meshletChunk.size() * sizeof(meshopt_Meshlet))
-				+ static_cast<uint64_t>(result.meshletTriangleChunk.size() * sizeof(uint8_t))
-				+ static_cast<uint64_t>(result.meshletBoundsChunk.size() * sizeof(BoundingSphere));
+			uint64_t total = 0;
+			for (const auto& blob : result.pageBlobs) {
+				total += static_cast<uint64_t>(blob.size());
+			}
+			return total;
 		};
 		for (const auto& result : m_clodDiskStreamingResults) {
 			stats.completedResultBytes += getCompletedResultSizeBytes(result);

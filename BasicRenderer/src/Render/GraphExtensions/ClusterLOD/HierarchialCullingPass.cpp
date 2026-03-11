@@ -89,12 +89,13 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
             Builtin::CLod::Offsets,
             Builtin::CLod::GroupChunks,
             Builtin::CLod::Groups,
-            Builtin::CLod::Children,
+            Builtin::CLod::Segments,
             Builtin::CLod::Nodes,
             Builtin::CLod::MeshletBounds,
             Builtin::CLod::StreamingActiveGroupsBits,
             Builtin::CLod::StreamingNonResidentBits,
             Builtin::CLod::MeshMetadata,
+            Builtin::CLod::GroupPageMap,
             Builtin::CullingCameraBuffer,
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerObjectBuffer,
@@ -115,7 +116,7 @@ void HierarchialCullingPass::Setup() {
     RegisterSRV(Builtin::CLod::Offsets);
     RegisterSRV(Builtin::CLod::GroupChunks);
     RegisterSRV(Builtin::CLod::Groups);
-    RegisterSRV(Builtin::CLod::Children);
+    RegisterSRV(Builtin::CLod::Segments);
     RegisterSRV(Builtin::CLod::StreamingActiveGroupsBits);
     RegisterSRV(Builtin::CLod::StreamingNonResidentBits);
     RegisterSRV(Builtin::CLod::StreamingLoadRequests);
@@ -129,6 +130,7 @@ void HierarchialCullingPass::Setup() {
     RegisterSRV(Builtin::PerObjectBuffer);
     RegisterSRV(Builtin::CLod::Nodes);
     RegisterSRV(Builtin::CLod::MeshletBounds);
+	RegisterSRV(Builtin::CLod::GroupPageMap);
     RegisterSRV(Builtin::CameraBuffer);
     RegisterSRV(Builtin::PerMeshBuffer);
 }

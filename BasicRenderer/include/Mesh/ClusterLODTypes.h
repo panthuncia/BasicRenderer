@@ -2,7 +2,7 @@
 
 // Standalone header containing all ClusterLOD data types and the
 // MeshIngestBuilder class.  No GPU / RHI / DeletionManager / BufferView
-// dependencies — only standard library, DirectXMath, meshoptimizer, and the
+// dependencies - only standard library, DirectXMath, meshoptimizer, and the
 // CLod shader types header.
 
 #include <cstdint>
@@ -114,7 +114,7 @@ struct VoxelGroupMapping
 struct ClusterLODPrebuiltData
 {
 	std::vector<ClusterLODGroup> groups;
-	std::vector<ClusterLODChild> children;
+	std::vector<ClusterLODGroupSegment> segments;
 	BoundingSphere objectBoundingSphere{};
 	std::vector<ClusterLODGroupChunk> groupChunks;
 	std::vector<ClusterLODGroupDiskLocator> groupDiskLocators;
@@ -125,40 +125,16 @@ struct ClusterLODPrebuiltData
 
 struct ClusterLODCacheBuildPayload
 {
-	const std::vector<std::vector<std::byte>>* groupVertexChunks = nullptr;
-	const std::vector<std::vector<std::byte>>* groupSkinningVertexChunks = nullptr;
-	const std::vector<std::vector<uint32_t>>* groupMeshletVertexChunks = nullptr;
-	const std::vector<std::vector<uint32_t>>* groupCompressedPositionWordChunks = nullptr;
-	const std::vector<std::vector<uint32_t>>* groupCompressedNormalWordChunks = nullptr;
-	const std::vector<std::vector<uint32_t>>* groupCompressedMeshletVertexWordChunks = nullptr;
-	const std::vector<std::vector<meshopt_Meshlet>>* groupMeshletChunks = nullptr;
-	const std::vector<std::vector<uint8_t>>* groupMeshletTriangleChunks = nullptr;
-	const std::vector<std::vector<BoundingSphere>>* groupMeshletBoundsChunks = nullptr;
+	const std::vector<std::vector<std::vector<std::byte>>>* groupPageBlobs = nullptr;
 };
 
 struct ClusterLODCacheBuildOwnedData
 {
-	std::vector<std::vector<std::byte>> groupVertexChunks;
-	std::vector<std::vector<std::byte>> groupSkinningVertexChunks;
-	std::vector<std::vector<uint32_t>> groupMeshletVertexChunks;
-	std::vector<std::vector<uint32_t>> groupCompressedPositionWordChunks;
-	std::vector<std::vector<uint32_t>> groupCompressedNormalWordChunks;
-	std::vector<std::vector<uint32_t>> groupCompressedMeshletVertexWordChunks;
-	std::vector<std::vector<meshopt_Meshlet>> groupMeshletChunks;
-	std::vector<std::vector<uint8_t>> groupMeshletTriangleChunks;
-	std::vector<std::vector<BoundingSphere>> groupMeshletBoundsChunks;
+	std::vector<std::vector<std::vector<std::byte>>> groupPageBlobs;
 
 	ClusterLODCacheBuildPayload AsPayload() const {
 		ClusterLODCacheBuildPayload payload{};
-		payload.groupVertexChunks = &groupVertexChunks;
-		payload.groupSkinningVertexChunks = &groupSkinningVertexChunks;
-		payload.groupMeshletVertexChunks = &groupMeshletVertexChunks;
-		payload.groupCompressedPositionWordChunks = &groupCompressedPositionWordChunks;
-		payload.groupCompressedNormalWordChunks = &groupCompressedNormalWordChunks;
-		payload.groupCompressedMeshletVertexWordChunks = &groupCompressedMeshletVertexWordChunks;
-		payload.groupMeshletChunks = &groupMeshletChunks;
-		payload.groupMeshletTriangleChunks = &groupMeshletTriangleChunks;
-		payload.groupMeshletBoundsChunks = &groupMeshletBoundsChunks;
+		payload.groupPageBlobs = &groupPageBlobs;
 		return payload;
 	}
 };
@@ -206,6 +182,7 @@ struct ClusterLODRuntimeSummary
 		uint32_t compressedPositionWordCount = 0;
 		uint32_t compressedNormalWordCount = 0;
 		uint32_t compressedMeshletVertexWordCount = 0;
+		uint32_t segmentCount = 0; // number of segments (= pages before re-binning) for per-segment paging
 	};
 
 	struct GroupRange
