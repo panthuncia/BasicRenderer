@@ -360,7 +360,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	//auto island = LoadModel("models/island/usd/elements/isMountainB/instance.usda");
 
+	//auto quad = LoadModel("models/quad.usdz");
+
     renderer.SetCurrentScene(baseScene);
+
+	//renderer.GetCurrentScene()->AppendScene(quad->Clone());
 
 	//renderer.GetCurrentScene()->AppendScene(island->Clone());
 

@@ -1,6 +1,7 @@
 #pragma once
 #include <DirectXMath.h>
 #include "ThirdParty/meshoptimizer/clusterlod.h"
+#include "Mesh/ClusterLODShaderTypes.h"
 
 struct ClippingPlane {
 	DirectX::XMFLOAT4 plane;
@@ -78,15 +79,15 @@ struct PerFrameCB {
     unsigned int pad[3];
 };
 
+// Object flags (shared with HLSL OBJECT_FLAG_* defines)
+static constexpr unsigned int OBJECT_FLAG_REVERSE_WINDING = 1u << 0;
+
 struct PerObjectCB {
     DirectX::XMMATRIX modelMatrix;
     DirectX::XMMATRIX prevModelMatrix;
     unsigned int normalMatrixBufferIndex;
-    unsigned int pad[3];
-};
-
-struct BoundingSphere {
-	DirectX::XMFLOAT4 sphere;
+    unsigned int objectFlags;
+    unsigned int pad[2];
 };
 
 struct PerMeshCB {
@@ -273,54 +274,25 @@ struct SkinningInstanceGPUInfo {
 struct MeshInstanceClodOffsets
 {
     uint clodMeshMetadataIndex;
-    uint pad0;
-    uint pad1;
-    uint pad2;
 };
 
 struct CLodMeshMetadata
 {
     uint groupsBase;
-    uint childrenBase;
+    uint segmentsBase;
     uint lodNodesBase;
     uint rootNode; // node index (relative to lodNodesBase) to start traversal from
     uint groupChunkTableBase;
     uint groupChunkTableCount;
+    uint pageMapBase; // global offset into GroupPageMap buffer for this mesh
+    uint pad0;
 };
 
-struct ClusterLODGroupChunk
+// GPU-visible page table entry - maps a virtual page ID to a slab + byte offset.
+struct PageTableEntry
 {
-    uint32_t vertexChunkByteOffset = 0;
-    uint32_t meshletVerticesBase = 0;
-    uint32_t groupVertexCount = 0;
-    uint32_t meshletVertexCount = 0;
-    uint32_t meshletBase = 0;
-    uint32_t meshletCount = 0;
-    uint32_t meshletTrianglesByteOffset = 0;
-    uint32_t meshletTrianglesByteCount = 0;
-    uint32_t meshletBoundsBase = 0;
-    uint32_t meshletBoundsCount = 0;
-
-    // Compressed group-local position stream (u32 bitstream words)
-    uint32_t compressedPositionWordsBase = 0;
-    uint32_t compressedPositionWordCount = 0;
-    uint32_t compressedPositionBitsX = 0;
-    uint32_t compressedPositionBitsY = 0;
-    uint32_t compressedPositionBitsZ = 0;
-    uint32_t compressedPositionQuantExp = 0;
-    int32_t compressedPositionMinQx = 0;
-    int32_t compressedPositionMinQy = 0;
-    int32_t compressedPositionMinQz = 0;
-
-    // Compressed group-local normal stream (oct-encoded snorm16x2 packed into u32)
-    uint32_t compressedNormalWordsBase = 0;
-    uint32_t compressedNormalWordCount = 0;
-
-    // Compressed group-local meshlet vertex index stream (u32 bitstream words)
-    uint32_t compressedMeshletVertexWordsBase = 0;
-    uint32_t compressedMeshletVertexWordCount = 0;
-    uint32_t compressedMeshletVertexBits = 0;
-    uint32_t compressedFlags = 0;
+    uint32_t slabIndex      = 0; // Which slab ByteAddressBuffer this page lives in.
+    uint32_t slabByteOffset = 0; // Byte offset of the page start within that slab.
 };
 
 struct CLodStreamingRequest
@@ -338,36 +310,6 @@ struct CLodStreamingRuntimeState
     uint32_t activeGroupsBitsetWordCount = 0;
     uint32_t pad2 = 0;
 };
-
-// Cluster LOD data
-// One entry per (group -> refinedGroup) edge.
-// refinedGroup == -1 means "terminal meshlets" (original geometry)
-struct ClusterLODChild
-{
-    int32_t  refinedGroup;              // group id to refine into, or -1
-    uint32_t firstLocalMeshletIndex;     // group-local start meshlet index for this child bucket
-    uint32_t localMeshletCount;          // number of local meshlets in this contiguous child range
-    uint32_t pad = 0;
-};
-
-struct ClusterLODGroup
-{
-    clodBounds bounds; // 5 floats
-    uint32_t firstMeshlet = 0;
-    uint32_t meshletCount = 0;
-    int32_t depth = 0;
-
-	uint32_t firstGroupVertex = 0;
-    uint32_t groupVertexCount = 0;
-    uint32_t firstChild = 0;    // offset into m_clodChildren
-    uint32_t childCount = 0;    // number of ClusterLODChild entries for this group
-
-    uint32_t terminalChildCount = 0;
-    uint32_t flags = 0;         // Bit 0: IS_VOXEL_GROUP
-    uint32_t pad[2] = {0};
-};
-
-static constexpr uint32_t CLOD_GROUP_FLAG_IS_VOXEL = 1u << 0;
 
 enum class CLodReplayRecordType : uint32_t {
     Node = 0,
@@ -388,7 +330,10 @@ struct CLodMeshletReplayRecord {
     uint32_t instanceIndex = 0;
     uint32_t viewId = 0;
     uint32_t groupId = 0;
-    uint32_t localMeshletIndex = 0;
+    uint32_t localMeshletIndex = 0;       // page-local meshlet index
+    uint32_t pageSlabDescriptorIndex = 0; // pre-resolved page slab descriptor
+    uint32_t pageSlabByteOffset = 0;      // pre-resolved page slab byte offset
+    uint32_t pad = 0;
 };
 
 struct CLodReplayBufferState {
@@ -422,8 +367,10 @@ struct CLodMultiNodeGpuInput {
 struct VisibleCluster {
     unsigned int viewID;
     unsigned int instanceID;
-    unsigned int globalMeshletIndex;
+    unsigned int localMeshletIndex;       // page-local meshlet index
     unsigned int groupID;
+    unsigned int pageSlabDescriptorIndex; // pre-resolved page slab descriptor
+    unsigned int pageSlabByteOffset;      // pre-resolved page slab byte offset
 };
 
 

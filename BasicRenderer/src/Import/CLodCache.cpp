@@ -21,7 +21,7 @@
 
 #include <spdlog/spdlog.h>
 
-#include "Utilities/Utilities.h"
+#include "Utilities/CachePathUtilities.h"
 
 namespace CLodCache {
 
@@ -171,7 +171,7 @@ namespace CLodCache {
 			WritePod(out, buildConfigHash);
 
 			WriteVectorPod(out, prebuiltData.groups);
-			WriteVectorPod(out, prebuiltData.children);
+			WriteVectorPod(out, prebuiltData.segments);
 			WritePod(out, prebuiltData.objectBoundingSphere);
 			const uint8_t hasInlineGroupChunks = prebuiltData.groupChunks.empty() ? 0u : 1u;
 			WritePod(out, hasInlineGroupChunks);
@@ -210,7 +210,7 @@ namespace CLodCache {
 			if (!ReadPod(blob, offset, out.buildConfigHash)) return false;
 
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.groups)) return false;
-			if (!ReadVectorPod(blob, offset, out.prebuiltData.children)) return false;
+			if (!ReadVectorPod(blob, offset, out.prebuiltData.segments)) return false;
 			if (!ReadPod(blob, offset, out.prebuiltData.objectBoundingSphere)) return false;
 
 			uint8_t hasInlineGroupChunks = 0u;
@@ -259,15 +259,9 @@ namespace CLodCache {
 
 		struct GroupPayloadHeader {
 			ClusterLODGroupChunk groupChunkMetadata{};
-			uint32_t vertexChunkSizeBytes = 0;
-			uint32_t skinningChunkSizeBytes = 0;
-			uint32_t meshletVertexChunkSizeBytes = 0;
-			uint32_t compressedPositionWordChunkSizeBytes = 0;
-			uint32_t compressedNormalWordChunkSizeBytes = 0;
-			uint32_t compressedMeshletVertexWordChunkSizeBytes = 0;
-			uint32_t meshletChunkSizeBytes = 0;
-			uint32_t meshletTriangleChunkSizeBytes = 0;
-			uint32_t meshletBoundsChunkSizeBytes = 0;
+			uint32_t pageCount = 0;
+			// Followed by pageCount x uint32_t page blob sizes,
+			// then pageCount page blobs in sequence.
 		};
 
 		std::wstring BuildGroupContainerFileName(const CacheKey& key, uint64_t buildConfigHash)
@@ -335,11 +329,7 @@ namespace CLodCache {
 			}
 
 			for (uint32_t groupIndex = 0; groupIndex < groupCount; ++groupIndex) {
-				const std::vector<std::byte> emptyBytes;
-				const std::vector<uint32_t> emptyU32;
-				const std::vector<meshopt_Meshlet> emptyMeshlets;
-				const std::vector<uint8_t> emptyU8;
-				const std::vector<BoundingSphere> emptyBounds;
+				const std::vector<std::vector<std::byte>> emptyPageBlobs;
 				ClusterLODGroupChunk groupChunkMetadata{};
 				if (groupIndex < prebuiltData.groupChunks.size()) {
 					groupChunkMetadata = prebuiltData.groupChunks[groupIndex];
@@ -350,52 +340,39 @@ namespace CLodCache {
 					groupChunkMetadata.meshletCount = group.meshletCount;
 					groupChunkMetadata.meshletBoundsCount = group.meshletCount;
 				}
-				const auto* vertexChunks = payload.groupVertexChunks;
-				const auto* skinningChunks = payload.groupSkinningVertexChunks;
-				const auto* meshletVertexChunks = payload.groupMeshletVertexChunks;
-				const auto* compressedPositionWordChunks = payload.groupCompressedPositionWordChunks;
-				const auto* compressedNormalWordChunks = payload.groupCompressedNormalWordChunks;
-				const auto* compressedMeshletVertexWordChunks = payload.groupCompressedMeshletVertexWordChunks;
-				const auto* meshletChunks = payload.groupMeshletChunks;
-				const auto* meshletTriangleChunks = payload.groupMeshletTriangleChunks;
-				const auto* meshletBoundsChunks = payload.groupMeshletBoundsChunks;
 
-				const auto& vertexChunk = (vertexChunks != nullptr && groupIndex < vertexChunks->size()) ? (*vertexChunks)[groupIndex] : emptyBytes;
-				const auto& skinningChunk = (skinningChunks != nullptr && groupIndex < skinningChunks->size()) ? (*skinningChunks)[groupIndex] : emptyBytes;
-				const auto& meshletVertexChunk = (meshletVertexChunks != nullptr && groupIndex < meshletVertexChunks->size()) ? (*meshletVertexChunks)[groupIndex] : emptyU32;
-				const auto& compressedPositionWordChunk = (compressedPositionWordChunks != nullptr && groupIndex < compressedPositionWordChunks->size()) ? (*compressedPositionWordChunks)[groupIndex] : emptyU32;
-				const auto& compressedNormalWordChunk = (compressedNormalWordChunks != nullptr && groupIndex < compressedNormalWordChunks->size()) ? (*compressedNormalWordChunks)[groupIndex] : emptyU32;
-				const auto& compressedMeshletVertexWordChunk = (compressedMeshletVertexWordChunks != nullptr && groupIndex < compressedMeshletVertexWordChunks->size()) ? (*compressedMeshletVertexWordChunks)[groupIndex] : emptyU32;
-				const auto& meshletChunk = (meshletChunks != nullptr && groupIndex < meshletChunks->size()) ? (*meshletChunks)[groupIndex] : emptyMeshlets;
-				const auto& meshletTriangleChunk = (meshletTriangleChunks != nullptr && groupIndex < meshletTriangleChunks->size()) ? (*meshletTriangleChunks)[groupIndex] : emptyU8;
-				const auto& meshletBoundsChunk = (meshletBoundsChunks != nullptr && groupIndex < meshletBoundsChunks->size()) ? (*meshletBoundsChunks)[groupIndex] : emptyBounds;
+				const auto* pageBlobsPtr = payload.groupPageBlobs;
+				const auto& pageBlobs = (pageBlobsPtr != nullptr && groupIndex < pageBlobsPtr->size()) ? (*pageBlobsPtr)[groupIndex] : emptyPageBlobs;
 
 				GroupPayloadHeader groupHeader{};
 				groupHeader.groupChunkMetadata = groupChunkMetadata;
-				if (!TryGetByteSize(vertexChunk, groupHeader.vertexChunkSizeBytes)) return false;
-				if (!TryGetByteSize(skinningChunk, groupHeader.skinningChunkSizeBytes)) return false;
-				if (!TryGetByteSize(meshletVertexChunk, groupHeader.meshletVertexChunkSizeBytes)) return false;
-				if (!TryGetByteSize(compressedPositionWordChunk, groupHeader.compressedPositionWordChunkSizeBytes)) return false;
-				if (!TryGetByteSize(compressedNormalWordChunk, groupHeader.compressedNormalWordChunkSizeBytes)) return false;
-				if (!TryGetByteSize(compressedMeshletVertexWordChunk, groupHeader.compressedMeshletVertexWordChunkSizeBytes)) return false;
-				if (!TryGetByteSize(meshletChunk, groupHeader.meshletChunkSizeBytes)) return false;
-				if (!TryGetByteSize(meshletTriangleChunk, groupHeader.meshletTriangleChunkSizeBytes)) return false;
-				if (!TryGetByteSize(meshletBoundsChunk, groupHeader.meshletBoundsChunkSizeBytes)) return false;
+				groupHeader.pageCount = static_cast<uint32_t>(pageBlobs.size());
 
 				const uint64_t blobOffset64 = static_cast<uint64_t>(file.tellp());
-				if (blobOffset64 > static_cast<uint64_t>((std::numeric_limits<uint64_t>::max)())) return false;
 
 				file.write(reinterpret_cast<const char*>(&groupHeader), sizeof(groupHeader));
 				if (!file.good()) return false;
-				if (!WriteVectorRaw(file, vertexChunk)) return false;
-				if (!WriteVectorRaw(file, skinningChunk)) return false;
-				if (!WriteVectorRaw(file, meshletVertexChunk)) return false;
-				if (!WriteVectorRaw(file, compressedPositionWordChunk)) return false;
-				if (!WriteVectorRaw(file, compressedNormalWordChunk)) return false;
-				if (!WriteVectorRaw(file, compressedMeshletVertexWordChunk)) return false;
-				if (!WriteVectorRaw(file, meshletChunk)) return false;
-				if (!WriteVectorRaw(file, meshletTriangleChunk)) return false;
-				if (!WriteVectorRaw(file, meshletBoundsChunk)) return false;
+
+				// Write per-page blob sizes
+				std::vector<uint32_t> pageBlobSizes(pageBlobs.size());
+				for (size_t pi = 0; pi < pageBlobs.size(); ++pi) {
+					if (pageBlobs[pi].size() > static_cast<size_t>((std::numeric_limits<uint32_t>::max)())) return false;
+					pageBlobSizes[pi] = static_cast<uint32_t>(pageBlobs[pi].size());
+				}
+				if (!pageBlobSizes.empty()) {
+					file.write(reinterpret_cast<const char*>(pageBlobSizes.data()),
+						static_cast<std::streamsize>(pageBlobSizes.size() * sizeof(uint32_t)));
+					if (!file.good()) return false;
+				}
+
+				// Write page blob data
+				for (const auto& pageBlob : pageBlobs) {
+					if (!pageBlob.empty()) {
+						file.write(reinterpret_cast<const char*>(pageBlob.data()),
+							static_cast<std::streamsize>(pageBlob.size()));
+						if (!file.good()) return false;
+					}
+				}
 
 				const uint64_t blobEnd64 = static_cast<uint64_t>(file.tellp());
 				if (blobEnd64 < blobOffset64) return false;
@@ -559,6 +536,9 @@ namespace CLodCache {
 			const std::wstring cachePath = GetCacheFilePathBySource(fileName, key.sourceIdentifier);
 			const std::wstring containerFileName = BuildGroupContainerFileName(key, buildConfigHash);
 			const std::wstring containerPath = GetCacheFilePathBySource(containerFileName, key.sourceIdentifier);
+
+			spdlog::info("CLodCache::SaveImpl  metadata='{}' container='{}'",
+				ws2s(cachePath), ws2s(containerPath));
 
 			std::vector<ClusterLODGroupDiskLocator> groupDiskLocators;
 			if (!SaveContainerPayload(containerPath, prebuiltData, payload, groupDiskLocators)) {
@@ -799,29 +779,29 @@ namespace CLodCache {
 
 		outPayload.groupChunkMetadata = groupHeader.groupChunkMetadata;
 
-		uint64_t totalBlobBytes = sizeof(GroupPayloadHeader);
-		totalBlobBytes += groupHeader.vertexChunkSizeBytes;
-		totalBlobBytes += groupHeader.skinningChunkSizeBytes;
-		totalBlobBytes += groupHeader.meshletVertexChunkSizeBytes;
-		totalBlobBytes += groupHeader.compressedPositionWordChunkSizeBytes;
-		totalBlobBytes += groupHeader.compressedNormalWordChunkSizeBytes;
-		totalBlobBytes += groupHeader.compressedMeshletVertexWordChunkSizeBytes;
-		totalBlobBytes += groupHeader.meshletChunkSizeBytes;
-		totalBlobBytes += groupHeader.meshletTriangleChunkSizeBytes;
-		totalBlobBytes += groupHeader.meshletBoundsChunkSizeBytes;
+		const uint32_t pageCount = groupHeader.pageCount;
+		const uint64_t sizeTableBytes = static_cast<uint64_t>(pageCount) * sizeof(uint32_t);
+
+		// Read per-page blob sizes
+		std::vector<uint32_t> pageBlobSizes(pageCount);
+		if (pageCount > 0) {
+			file.read(reinterpret_cast<char*>(pageBlobSizes.data()),
+				static_cast<std::streamsize>(sizeTableBytes));
+			if (!file.good()) return false;
+		}
+
+		// Validate total size
+		uint64_t totalBlobBytes = sizeof(GroupPayloadHeader) + sizeTableBytes;
+		for (uint32_t s : pageBlobSizes) totalBlobBytes += s;
 		if (totalBlobBytes != static_cast<uint64_t>(groupDiskLocator.blobSizeBytes)) {
 			return false;
 		}
 
-		if (!ReadVectorRaw(file, groupHeader.vertexChunkSizeBytes, outPayload.vertexChunk)) return false;
-		if (!ReadVectorRaw(file, groupHeader.skinningChunkSizeBytes, outPayload.skinningChunk)) return false;
-		if (!ReadVectorRaw(file, groupHeader.meshletVertexChunkSizeBytes, outPayload.meshletVertexChunk)) return false;
-		if (!ReadVectorRaw(file, groupHeader.compressedPositionWordChunkSizeBytes, outPayload.compressedPositionWordChunk)) return false;
-		if (!ReadVectorRaw(file, groupHeader.compressedNormalWordChunkSizeBytes, outPayload.compressedNormalWordChunk)) return false;
-		if (!ReadVectorRaw(file, groupHeader.compressedMeshletVertexWordChunkSizeBytes, outPayload.compressedMeshletVertexWordChunk)) return false;
-		if (!ReadVectorRaw(file, groupHeader.meshletChunkSizeBytes, outPayload.meshletChunk)) return false;
-		if (!ReadVectorRaw(file, groupHeader.meshletTriangleChunkSizeBytes, outPayload.meshletTriangleChunk)) return false;
-		if (!ReadVectorRaw(file, groupHeader.meshletBoundsChunkSizeBytes, outPayload.meshletBoundsChunk)) return false;
+		// Read page blobs
+		outPayload.pageBlobs.resize(pageCount);
+		for (uint32_t pi = 0; pi < pageCount; ++pi) {
+			if (!ReadVectorRaw(file, pageBlobSizes[pi], outPayload.pageBlobs[pi])) return false;
+		}
 
 		return true;
 	}
@@ -851,29 +831,26 @@ namespace CLodCache {
 
 		outPayload.groupChunkMetadata = groupHeader.groupChunkMetadata;
 
-		uint64_t totalBlobBytes = sizeof(GroupPayloadHeader);
-		totalBlobBytes += groupHeader.vertexChunkSizeBytes;
-		totalBlobBytes += groupHeader.skinningChunkSizeBytes;
-		totalBlobBytes += groupHeader.meshletVertexChunkSizeBytes;
-		totalBlobBytes += groupHeader.compressedPositionWordChunkSizeBytes;
-		totalBlobBytes += groupHeader.compressedNormalWordChunkSizeBytes;
-		totalBlobBytes += groupHeader.compressedMeshletVertexWordChunkSizeBytes;
-		totalBlobBytes += groupHeader.meshletChunkSizeBytes;
-		totalBlobBytes += groupHeader.meshletTriangleChunkSizeBytes;
-		totalBlobBytes += groupHeader.meshletBoundsChunkSizeBytes;
+		const uint32_t pageCount = groupHeader.pageCount;
+		const uint64_t sizeTableBytes = static_cast<uint64_t>(pageCount) * sizeof(uint32_t);
+
+		std::vector<uint32_t> pageBlobSizes(pageCount);
+		if (pageCount > 0) {
+			file.read(reinterpret_cast<char*>(pageBlobSizes.data()),
+				static_cast<std::streamsize>(sizeTableBytes));
+			if (!file.good()) return false;
+		}
+
+		uint64_t totalBlobBytes = sizeof(GroupPayloadHeader) + sizeTableBytes;
+		for (uint32_t s : pageBlobSizes) totalBlobBytes += s;
 		if (totalBlobBytes != static_cast<uint64_t>(locator.blobSizeBytes)) {
 			return false;
 		}
 
-		if (!ReadVectorRaw(file, groupHeader.vertexChunkSizeBytes, outPayload.vertexChunk)) return false;
-		if (!ReadVectorRaw(file, groupHeader.skinningChunkSizeBytes, outPayload.skinningChunk)) return false;
-		if (!ReadVectorRaw(file, groupHeader.meshletVertexChunkSizeBytes, outPayload.meshletVertexChunk)) return false;
-		if (!ReadVectorRaw(file, groupHeader.compressedPositionWordChunkSizeBytes, outPayload.compressedPositionWordChunk)) return false;
-		if (!ReadVectorRaw(file, groupHeader.compressedNormalWordChunkSizeBytes, outPayload.compressedNormalWordChunk)) return false;
-		if (!ReadVectorRaw(file, groupHeader.compressedMeshletVertexWordChunkSizeBytes, outPayload.compressedMeshletVertexWordChunk)) return false;
-		if (!ReadVectorRaw(file, groupHeader.meshletChunkSizeBytes, outPayload.meshletChunk)) return false;
-		if (!ReadVectorRaw(file, groupHeader.meshletTriangleChunkSizeBytes, outPayload.meshletTriangleChunk)) return false;
-		if (!ReadVectorRaw(file, groupHeader.meshletBoundsChunkSizeBytes, outPayload.meshletBoundsChunk)) return false;
+		outPayload.pageBlobs.resize(pageCount);
+		for (uint32_t pi = 0; pi < pageCount; ++pi) {
+			if (!ReadVectorRaw(file, pageBlobSizes[pi], outPayload.pageBlobs[pi])) return false;
+		}
 
 		return true;
 	}

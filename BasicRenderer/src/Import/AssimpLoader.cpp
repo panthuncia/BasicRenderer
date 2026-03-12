@@ -21,22 +21,9 @@
 #include "Animation/AnimationController.h"
 #include "Resources/PixelBuffer.h"
 #include "Import/AssimpLoader.h"
+#include "Import/AssimpGeometryExtractor.h"
 
 namespace AssimpLoader {
-
-    namespace {
-        CLodCacheLoader::MeshCacheIdentity BuildAssimpCacheIdentity(const std::string& sourceFilePath, const aiMesh* mesh, unsigned int meshIndex)
-        {
-            CLodCacheLoader::MeshCacheIdentity identity{};
-            identity.sourceIdentifier = sourceFilePath;
-            identity.primPath = "/Assimp/Mesh/" + std::to_string(meshIndex);
-            if (mesh != nullptr && mesh->mName.length > 0) {
-                identity.primPath += "/" + std::string(mesh->mName.C_Str());
-            }
-            identity.subsetName = "";
-            return identity;
-        }
-    }
 
     rhi::AddressMode aiTextureMapModeToRHI(aiTextureMapMode mode) {
         switch (mode) {
@@ -412,22 +399,17 @@ namespace AssimpLoader {
         const std::string& sourceFilePath
     )
     {
+        // Geometry extraction + CLod cache building
+        auto extraction = AssimpGeometryExtractor::ExtractAll(pScene, sourceFilePath);
+
         std::vector<std::shared_ptr<Mesh>> meshes;
-        meshes.reserve(pScene->mNumMeshes);
+        meshes.reserve(extraction.meshes.size());
         std::vector<int> meshSkinIndices;
-        meshSkinIndices.reserve(pScene->mNumMeshes);
+        meshSkinIndices.reserve(extraction.meshes.size());
 
-        // Assimp doesn't have a concept of a "skin" like glTF, so we'll just increment a counter
-        // each time we encounter a mesh with bones.
         int currentSkinIndex = -1;
-        for (unsigned int i = 0; i < pScene->mNumMeshes; ++i) {
-            aiMesh* aMesh = pScene->mMeshes[i];
-
-            const bool hasBones = aMesh->HasBones();
-            const bool hasNormals = aMesh->HasNormals();
-            const bool hasTexcoords = aMesh->HasTextureCoords(0);
-
-            if (hasBones) {
+        for (auto& em : extraction.meshes) {
+            if (em.hasBones) {
                 currentSkinIndex++;
                 meshSkinIndices.push_back(currentSkinIndex);
             }
@@ -435,150 +417,21 @@ namespace AssimpLoader {
                 meshSkinIndices.push_back(-1);
             }
 
-            const uint32_t numVertices = static_cast<uint32_t>(aMesh->mNumVertices);
-            const unsigned int vertexSize = static_cast<unsigned int>(sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + (hasTexcoords ? sizeof(DirectX::XMFLOAT2) : 0));
-            const unsigned int skinningVertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMUINT4) + sizeof(DirectX::XMFLOAT4);
-
-            std::vector<std::byte> rawData(static_cast<size_t>(numVertices) * vertexSize);
-            std::vector<std::byte> skinningData;
-            if (hasBones) {
-                skinningData.resize(static_cast<size_t>(numVertices) * skinningVertexSize);
-            }
-
-            const DirectX::XMFLOAT3 defaultNormal{ 0.0f, 0.0f, 0.0f };
-            for (uint32_t v = 0; v < numVertices; ++v) {
-                const auto& pos = aMesh->mVertices[v];
-                const DirectX::XMFLOAT3 position{ pos.x, pos.y, pos.z };
-                const DirectX::XMFLOAT3 normal = hasNormals
-                    ? DirectX::XMFLOAT3{ aMesh->mNormals[v].x, aMesh->mNormals[v].y, aMesh->mNormals[v].z }
-                    : defaultNormal;
-
-                const size_t baseOffset = static_cast<size_t>(v) * vertexSize;
-                std::memcpy(rawData.data() + baseOffset, &position, sizeof(position));
-                size_t offset = sizeof(DirectX::XMFLOAT3);
-                std::memcpy(rawData.data() + baseOffset + offset, &normal, sizeof(normal));
-                offset += sizeof(DirectX::XMFLOAT3);
-
-                if (hasTexcoords) {
-                    const DirectX::XMFLOAT2 texcoord{ aMesh->mTextureCoords[0][v].x, -aMesh->mTextureCoords[0][v].y };
-                    std::memcpy(rawData.data() + baseOffset + offset, &texcoord, sizeof(texcoord));
-                }
-
-                if (hasBones) {
-                    const size_t skinBaseOffset = static_cast<size_t>(v) * skinningVertexSize;
-                    std::memcpy(skinningData.data() + skinBaseOffset, &position, sizeof(position));
-                    size_t skinOffset = sizeof(DirectX::XMFLOAT3);
-                    std::memcpy(skinningData.data() + skinBaseOffset + skinOffset, &normal, sizeof(normal));
-                }
-            }
-
-            std::vector<UINT32> indices;
-            indices.reserve(aMesh->mNumFaces * 3);
-
-            for (unsigned int f = 0; f < aMesh->mNumFaces; f++) {
-                const aiFace& face = aMesh->mFaces[f];
-                if (face.mNumIndices != 3) {
-                    throw std::runtime_error("Assimp mesh contains non-triangle face; expected triangulated input");
-                }
-                for (unsigned int idx = 0; idx < face.mNumIndices; idx++) {
-                    indices.push_back(face.mIndices[idx]);
-                }
-            }
-
             std::shared_ptr<Material> material = nullptr;
-            if (aMesh->mMaterialIndex < materials.size()) {
-                material = materials[aMesh->mMaterialIndex];
+            if (em.materialIndex < materials.size()) {
+                material = materials[em.materialIndex];
             }
 
-            unsigned int meshFlags = 0;
-            if (hasNormals) {
-                meshFlags |= VertexFlags::VERTEX_NORMALS;
-            }
-            if (hasTexcoords) {
-                meshFlags |= VertexFlags::VERTEX_TEXCOORDS;
-            }
-
-            if (hasBones) {
-                meshFlags |= VertexFlags::VERTEX_SKINNED;
-
-                // We'll accumulate up to 4 influences per vertex
-                std::vector<unsigned int> jointCount(aMesh->mNumVertices, 0);
-
-                for (unsigned int b = 0; b < aMesh->mNumBones; b++) {
-                    aiBone* bone = aMesh->mBones[b];
-
-                    for (unsigned int w = 0; w < bone->mNumWeights; w++) {
-                        const aiVertexWeight& vw = bone->mWeights[w];
-                        unsigned int vertexID = vw.mVertexId;
-                        float weight = vw.mWeight;
-
-                        unsigned int& count = jointCount[vertexID];
-                        if (count < 4 && weight > 0.0f) {
-                            const size_t vertexBase = static_cast<size_t>(vertexID) * skinningVertexSize;
-                            const size_t jointsOffset = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3);
-                            const size_t weightsOffset = jointsOffset + sizeof(DirectX::XMUINT4);
-
-                            auto* joints = reinterpret_cast<uint32_t*>(skinningData.data() + vertexBase + jointsOffset);
-                            auto* weights = reinterpret_cast<float*>(skinningData.data() + vertexBase + weightsOffset);
-                            joints[count] = b;
-                            weights[count] = weight;
-                            count++;
-                        }
-                        else if (weight > 0.0f) {
-                            throw std::runtime_error("Vertex has more than 4 non-zero bone influences");
-                        }
-                    }
-                }
-            }
-
-            auto cacheIdentity = BuildAssimpCacheIdentity(sourceFilePath, aMesh, i);
-            auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
-
-            MeshIngestBuilder ingest(vertexSize, hasBones ? skinningVertexSize : 0, meshFlags);
-            ingest.ReserveVertices(numVertices);
-            if (hasBones) {
-                ingest.ReserveVertices(numVertices);
-            }
-            for (uint32_t v = 0; v < numVertices; ++v) {
-                const size_t baseOffset = static_cast<size_t>(v) * vertexSize;
-                ingest.AppendVertexBytes(rawData.data() + baseOffset, vertexSize);
-                if (hasBones) {
-                    const size_t skinBaseOffset = static_cast<size_t>(v) * skinningVertexSize;
-                    ingest.AppendSkinningVertexBytes(skinningData.data() + skinBaseOffset, skinningVertexSize);
-                }
-            }
-
-            ingest.ReserveIndices(indices.size());
-            ingest.AppendIndices(indices.data(), indices.size());
-
-            if (!prebuiltData.has_value()) {
-                ClusterLODPrebuildArtifacts artifacts = ingest.BuildClusterLODArtifacts();
-
-                auto loadedBeforeSave = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
-                if (loadedBeforeSave.has_value()) {
-                    prebuiltData = std::move(loadedBeforeSave);
-                }
-                else if (CLodCacheLoader::SavePrebuiltLocked(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload())) {
-                    auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
-                    if (diskBackedPrebuilt.has_value()) {
-                        prebuiltData = std::move(diskBackedPrebuilt);
-                    }
-                    else {
-                        prebuiltData = std::move(artifacts.prebuiltData);
-                    }
-                }
-                else {
-                    spdlog::warn("Failed to save CLOD cache for {} (mesh {})", sourceFilePath, i);
-                    prebuiltData = std::move(artifacts.prebuiltData);
-                }
-            }
-
-            auto mesh = ingest.Build(material, std::move(prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
+            // Phase 2: GPU mesh creation
+            auto mesh = em.result.ingest.Build(
+                material,
+                std::move(em.result.prebuiltData),
+                MeshCpuDataPolicy::ReleaseAfterUpload);
 
             meshes.push_back(mesh);
         }
 
-        return { meshes , meshSkinIndices };
+        return { meshes, meshSkinIndices };
     }
 
     static void buildAiNodeHierarchy(

@@ -20,6 +20,7 @@
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Resources/components.h"
 #include "Resources/Resolvers/ECSResourceResolver.h"
+#include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "BuiltinResources.h"
 #include "ShaderBuffers.h"
 #include "../shaders/PerPassRootConstants/clodRootConstants.h"
@@ -33,7 +34,8 @@ HierarchialCullingPass::HierarchialCullingPass(
     std::shared_ptr<Buffer> occlusionReplayBuffer,
     std::shared_ptr<Buffer> occlusionReplayStateBuffer,
     std::shared_ptr<Buffer> occlusionNodeGpuInputsBuffer,
-    std::shared_ptr<Buffer> viewDepthSrvIndicesBuffer) {
+    std::shared_ptr<Buffer> viewDepthSrvIndicesBuffer,
+    std::shared_ptr<ResourceGroup> slabResourceGroup) {
     CreatePipelines(
         DeviceManager::GetInstance().GetDevice(),
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -54,6 +56,7 @@ HierarchialCullingPass::HierarchialCullingPass(
     m_occlusionReplayStateBuffer = std::move(occlusionReplayStateBuffer);
     m_occlusionNodeGpuInputsBuffer = std::move(occlusionNodeGpuInputsBuffer);
     m_viewDepthSrvIndicesBuffer = std::move(viewDepthSrvIndicesBuffer);
+    m_slabResourceGroup = std::move(slabResourceGroup);
     m_maxVisibleClusters = inputs.maxVisibleClusters;
 }
 
@@ -76,21 +79,23 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
             m_occlusionNodeGpuInputsBuffer,
             m_viewDepthSrvIndicesBuffer)
         .WithUnorderedAccess(
-            Builtin::CLod::StreamingLoadRequestBits,
             Builtin::CLod::StreamingLoadRequests,
             Builtin::CLod::StreamingLoadCounter,
-            Builtin::CLod::StreamingRuntimeState)
+            Builtin::CLod::StreamingRuntimeState,
+            Builtin::CLod::StreamingTouchedGroupsCounter,
+            Builtin::CLod::StreamingTouchedGroups)
         .WithShaderResource(
             Builtin::IndirectCommandBuffers::Master,
             Builtin::CLod::Offsets,
             Builtin::CLod::GroupChunks,
             Builtin::CLod::Groups,
-            Builtin::CLod::Children,
+            Builtin::CLod::Segments,
             Builtin::CLod::Nodes,
             Builtin::CLod::MeshletBounds,
             Builtin::CLod::StreamingActiveGroupsBits,
             Builtin::CLod::StreamingNonResidentBits,
             Builtin::CLod::MeshMetadata,
+            Builtin::CLod::GroupPageMap,
             Builtin::CullingCameraBuffer,
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerObjectBuffer,
@@ -99,6 +104,11 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
             Builtin::PrimaryCamera::LinearDepthMap,
             Builtin::Shadows::LinearShadowMaps)
         .WithShaderResource(ECSResourceResolver(drawSetIndicesQuery));
+
+    // Declare page pool slabs for bindless access (auto-invalidates when new slabs are added).
+    if (m_slabResourceGroup) {
+        builder->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
+    }
 }
 
 void HierarchialCullingPass::Setup() {
@@ -106,19 +116,21 @@ void HierarchialCullingPass::Setup() {
     RegisterSRV(Builtin::CLod::Offsets);
     RegisterSRV(Builtin::CLod::GroupChunks);
     RegisterSRV(Builtin::CLod::Groups);
-    RegisterSRV(Builtin::CLod::Children);
+    RegisterSRV(Builtin::CLod::Segments);
     RegisterSRV(Builtin::CLod::StreamingActiveGroupsBits);
     RegisterSRV(Builtin::CLod::StreamingNonResidentBits);
-    RegisterSRV(Builtin::CLod::StreamingLoadRequestBits);
     RegisterSRV(Builtin::CLod::StreamingLoadRequests);
     RegisterSRV(Builtin::CLod::StreamingLoadCounter);
     RegisterSRV(Builtin::CLod::StreamingRuntimeState);
+    RegisterSRV(Builtin::CLod::StreamingTouchedGroupsCounter);
+    RegisterSRV(Builtin::CLod::StreamingTouchedGroups);
     RegisterSRV(Builtin::CLod::MeshMetadata);
     RegisterSRV(Builtin::CullingCameraBuffer);
     RegisterSRV(Builtin::PerMeshInstanceBuffer);
     RegisterSRV(Builtin::PerObjectBuffer);
     RegisterSRV(Builtin::CLod::Nodes);
     RegisterSRV(Builtin::CLod::MeshletBounds);
+	RegisterSRV(Builtin::CLod::GroupPageMap);
     RegisterSRV(Builtin::CameraBuffer);
     RegisterSRV(Builtin::PerMeshBuffer);
 }
@@ -326,7 +338,7 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
         nodeGpuInputs[1].entrypointIndex = 1;
         nodeGpuInputs[1].numRecords = 0;
         nodeGpuInputs[1].recordsAddress = replayAddress;
-        nodeGpuInputs[1].recordStride = sizeof(CLodNodeGroupReplayRecord);
+        nodeGpuInputs[1].recordStride = sizeof(CLodMeshletReplayRecord); // must match CLOD_REPLAY_SLOT_STRIDE_BYTES (unified slot stride)
 
         nodeGpuInputs[2].entrypointIndex = 2;
         nodeGpuInputs[2].numRecords = 0;

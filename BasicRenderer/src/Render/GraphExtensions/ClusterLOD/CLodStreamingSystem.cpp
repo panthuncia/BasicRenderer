@@ -3,14 +3,18 @@
 #include <algorithm>
 #include <bit>
 #include <cstring>
+#include <unordered_set>
 
 #include <spdlog/spdlog.h>
 
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/ViewManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodStreamingBeginFramePass.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodStreamingReadbackCopyPass.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "RenderPasses/StreamingUploadPass.h"
+#include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "BuiltinResources.h"
 
 CLodStreamingSystem::CLodStreamingSystem() {
@@ -19,12 +23,13 @@ CLodStreamingSystem::CLodStreamingSystem() {
     m_streamingPinnedGroupsBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
     m_streamingEvictionExemptBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
     m_streamingResidencyInitializedBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
-    m_streamingLruCurrentStampByGroup.assign(m_streamingStorageGroupCapacity, 0ull);
     m_streamingRequestsInProgressBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
     m_pendingLoadPriorityByGroup.assign(m_streamingStorageGroupCapacity, 0u);
     m_streamingNonResidentBitsUploadPending = true;
 
     try {
+        // TODO: Don't send the manager through settings, it's dumb.
+        // We should probably have a way to pass user data to extensions
         auto getter = SettingsManager::GetInstance().getSettingGetter<std::function<MeshManager*()>>(CLodStreamingMeshManagerGetterSettingName);
         m_getMeshManager = getter();
     }
@@ -46,16 +51,6 @@ CLodStreamingSystem::CLodStreamingSystem() {
     catch (...) {
         m_streamingCpuUploadBudgetRequests = 10000u;
     }
-
-    try {
-        auto getResidentBudget = SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodStreamingResidentBudgetSettingName);
-        m_streamingResidentBudgetGroups = std::max(getResidentBudget(), 1u);
-    }
-    catch (...) {
-        m_streamingResidentBudgetGroups = std::numeric_limits<uint32_t>::max();
-    }
-
-    m_streamingLoadReadbackSlots.assign(m_streamingReadbackRingSize, {});
 
     m_streamingNonResidentBits = CreateAliasedUnmaterializedStructuredBuffer(
         CLodBitsetWordCount(m_streamingStorageGroupCapacity),
@@ -98,40 +93,90 @@ CLodStreamingSystem::CLodStreamingSystem() {
 
     m_streamingRuntimeState = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodStreamingRuntimeState), true, false, false, false);
     m_streamingRuntimeState->SetName("CLod Streaming Runtime State");
+
+    m_usedGroupsCounter = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_usedGroupsCounter->SetName("CLod Used Groups Counter");
+
+    m_usedGroupsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodUsedGroupsCapacity,
+        sizeof(uint32_t),
+        true,
+        false,
+        false,
+        false);
+    m_usedGroupsBuffer->SetName("CLod Used Groups Buffer");
+
+    // Self-managed readback pipeline
+    {
+        auto device = DeviceManager::GetInstance().GetDevice();
+        auto result = device.CreateTimeline(m_streamingReadbackFencePtr, 0, "CLodStreamingReadbackFence");
+        if (result == rhi::Result::Ok && m_streamingReadbackFencePtr) {
+            m_streamingReadbackFenceHandle = m_streamingReadbackFencePtr.Get();
+        }
+    }
+
+    const uint64_t counterStagingBytes = sizeof(uint32_t);
+    const uint64_t requestsStagingBytes = static_cast<uint64_t>(CLodStreamingRequestCapacity) * sizeof(CLodStreamingRequest);
+    const uint64_t usedGroupsCounterStagingBytes = sizeof(uint32_t);
+    const uint64_t usedGroupsBufferStagingBytes = static_cast<uint64_t>(CLodUsedGroupsCapacity) * sizeof(uint32_t);
+    m_readbackStagingSlots.resize(m_streamingReadbackRingSize);
+    for (uint32_t i = 0; i < m_streamingReadbackRingSize; ++i) {
+        auto& slot = m_readbackStagingSlots[i];
+        slot.counterStaging = Buffer::CreateShared(rhi::HeapType::Readback, counterStagingBytes);
+        slot.counterStaging->SetName(("CLodReadbackCounter_" + std::to_string(i)).c_str());
+        slot.requestsStaging = Buffer::CreateShared(rhi::HeapType::Readback, requestsStagingBytes);
+        slot.requestsStaging->SetName(("CLodReadbackRequests_" + std::to_string(i)).c_str());
+        slot.usedGroupsCounterStaging = Buffer::CreateShared(rhi::HeapType::Readback, usedGroupsCounterStagingBytes);
+        slot.usedGroupsCounterStaging->SetName(("CLodReadbackUsedGroupsCounter_" + std::to_string(i)).c_str());
+        slot.usedGroupsBufferStaging = Buffer::CreateShared(rhi::HeapType::Readback, usedGroupsBufferStagingBytes);
+        slot.usedGroupsBufferStaging->SetName(("CLodReadbackUsedGroupsBuffer_" + std::to_string(i)).c_str());
+    }
+
+    // Start the background streaming worker thread.
+    m_streamingWorkerThread = std::thread(&CLodStreamingSystem::StreamingWorkerMain, this);
+}
+
+CLodStreamingSystem::~CLodStreamingSystem() {
+    m_streamingWorkerQuit.store(true, std::memory_order_release);
+    m_streamingWorkerCV.notify_all();
+    if (m_streamingWorkerThread.joinable()) {
+        m_streamingWorkerThread.join();
+    }
 }
 
 void CLodStreamingSystem::OnRegistryReset(ResourceRegistry* reg) {
     (void)reg;
-    for (auto& slot : m_streamingLoadReadbackSlots) {
-        slot = {};
-    }
     m_pendingStreamingRequests.clear();
-    m_streamingLruEntries.clear();
-    m_streamingLruSerial = 0u;
+    m_lru.Clear();
     m_streamingResidentGroupsCount = 0u;
     std::fill(m_streamingNonResidentBitsCpu.begin(), m_streamingNonResidentBitsCpu.end(), 0u);
     std::fill(m_streamingActiveGroupsBitsCpu.begin(), m_streamingActiveGroupsBitsCpu.end(), 0u);
     std::fill(m_streamingPinnedGroupsBitsCpu.begin(), m_streamingPinnedGroupsBitsCpu.end(), 0u);
     std::fill(m_streamingEvictionExemptBitsCpu.begin(), m_streamingEvictionExemptBitsCpu.end(), 0u);
     std::fill(m_streamingResidencyInitializedBitsCpu.begin(), m_streamingResidencyInitializedBitsCpu.end(), 0u);
-    std::fill(m_streamingLruCurrentStampByGroup.begin(), m_streamingLruCurrentStampByGroup.end(), 0ull);
     std::fill(m_streamingRequestsInProgressBitsCpu.begin(), m_streamingRequestsInProgressBitsCpu.end(), 0u);
     std::fill(m_pendingLoadPriorityByGroup.begin(), m_pendingLoadPriorityByGroup.end(), 0u);
     m_streamingActiveGroupScanCount = 0u;
-    m_streamingReadbackScheduleCursor = 0u;
     m_streamingNonResidentBitsUploadPending = true;
     m_streamingDomainDirty = true;
+
+    // Discard any stale decoded readback data from the worker thread.
+    {
+        std::lock_guard lock(m_streamingWorkerMutex);
+        m_decodedReadbackBatch.clear();
+        m_decodedUsedGroupsBatch.clear();
+    }
 }
 
 void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) {
-    m_streamingReadbackService = rg.GetReadbackService();
-
     rg.RegisterResource(Builtin::CLod::StreamingNonResidentBits, m_streamingNonResidentBits);
     rg.RegisterResource(Builtin::CLod::StreamingActiveGroupsBits, m_streamingActiveGroupsBits);
     rg.RegisterResource(Builtin::CLod::StreamingLoadRequestBits, m_streamingLoadRequestBits);
     rg.RegisterResource(Builtin::CLod::StreamingLoadRequests, m_streamingLoadRequests);
     rg.RegisterResource(Builtin::CLod::StreamingLoadCounter, m_streamingLoadCounter);
     rg.RegisterResource(Builtin::CLod::StreamingRuntimeState, m_streamingRuntimeState);
+    rg.RegisterResource(Builtin::CLod::StreamingTouchedGroupsCounter, m_usedGroupsCounter);
+    rg.RegisterResource(Builtin::CLod::StreamingTouchedGroups, m_usedGroupsBuffer);
 
     RenderGraph::ExternalPassDesc streamingBeginPassDesc;
     streamingBeginPassDesc.type = RenderGraph::PassType::Compute;
@@ -140,7 +185,7 @@ void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<Re
 
     streamingBeginPassDesc.pass = std::make_shared<CLodStreamingBeginFramePass>(
         m_streamingLoadCounter,
-        m_streamingLoadRequestBits,
+        m_usedGroupsCounter,
         m_streamingNonResidentBits,
         m_streamingActiveGroupsBits,
         m_streamingRuntimeState,
@@ -158,10 +203,7 @@ void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<Re
             outActiveScanCount = m_streamingActiveGroupScanCount;
         },
         [this]() {
-            return static_cast<uint32_t>(m_streamingNonResidentBitsCpu.size());
-        },
-        [this]() {
-            ScheduleStreamingReadbacks();
+            PollCompletedReadbackSlots();
         },
         [this]() {
             ProcessStreamingRequestsBudgeted();
@@ -180,20 +222,88 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
     }
 
     RefreshStreamingActiveGroupDomain();
-    m_streamingReadbackService = rg.GetReadbackService();
 
     auto streamingUploads = rg::runtime::ConsumeStreamingUploadsDispatch();
     if (!streamingUploads.empty()) {
         StreamingUploadInputs inputs;
         inputs.uploads = std::move(streamingUploads);
 
+        // Use the persistent slab ResourceGroup from PagePool so the
+        // render graph can schedule transitions. The group auto-tracks
+        // new slabs via version bumps.
+        MeshManager* mm = m_getMeshManager ? m_getMeshManager() : nullptr;
+        if (mm) {
+            if (PagePool* pool = mm->GetCLodPagePool()) {
+                auto slabGroup = pool->GetSlabResourceGroup();
+                // Also include the page table buffer in the group if not present.
+                if (auto pt = pool->GetPageTableBuffer()) {
+                    slabGroup->AddResource(pt); // no-op if already present
+                }
+                inputs.poolResolver = std::make_unique<ResourceGroupResolver>(slabGroup);
+            }
+        }
+
         RenderGraph::ExternalPassDesc uploadDesc{};
         uploadDesc.type = RenderGraph::PassType::Copy;
         uploadDesc.name = "CLod::StreamingUpload";
-        uploadDesc.where = RenderGraph::ExternalInsertPoint::Before("CLod::StreamingBeginFramePass");
+        uploadDesc.where = RenderGraph::ExternalInsertPoint::After("EvaluateMaterialGroupsPass");
         uploadDesc.copyQueueSelection = CopyQueueSelection::Copy;
         uploadDesc.pass = std::make_shared<StreamingUploadPass>(std::move(inputs));
         outPasses.push_back(std::move(uploadDesc));
+    }
+
+    // Schedule a readback copy pass to capture the load counter + load requests
+    // produced by culling pass 2 into a staging buffer ring slot.
+    if (m_streamingReadbackFenceHandle.IsValid() && !m_readbackStagingSlots.empty()) {
+        uint32_t selectedSlot = UINT32_MAX;
+        uint64_t fv = 0;
+        {
+            std::lock_guard lock(m_streamingWorkerMutex);
+            // Find a slot that the worker has already processed (inFlight == false).
+            for (uint32_t i = 0; i < static_cast<uint32_t>(m_readbackStagingSlots.size()); ++i) {
+                const uint32_t idx = (m_readbackStagingCursor + i) % static_cast<uint32_t>(m_readbackStagingSlots.size());
+                if (!m_readbackStagingSlots[idx].inFlight) {
+                    selectedSlot = idx;
+                    break;
+                }
+            }
+
+            if (selectedSlot != UINT32_MAX) {
+                m_readbackStagingCursor = (selectedSlot + 1u) % static_cast<uint32_t>(m_readbackStagingSlots.size());
+                fv = m_streamingReadbackFenceCounter.fetch_add(1, std::memory_order_relaxed) + 1;
+                auto& slot = m_readbackStagingSlots[selectedSlot];
+                slot.fenceValue = fv;
+                slot.inFlight = true;
+            }
+        }
+
+        if (selectedSlot != UINT32_MAX) {
+            auto& slot = m_readbackStagingSlots[selectedSlot];
+
+            CLodStreamingReadbackCopyInputs readbackInputs{};
+            readbackInputs.counterSource = m_streamingLoadCounter;
+            readbackInputs.requestsSource = m_streamingLoadRequests;
+            readbackInputs.usedGroupsCounterSource = m_usedGroupsCounter;
+            readbackInputs.usedGroupsBufferSource = m_usedGroupsBuffer;
+
+            RenderGraph::ExternalPassDesc readbackDesc{};
+            readbackDesc.type = RenderGraph::PassType::Copy;
+            readbackDesc.name = "CLod::StreamingReadbackCopy";
+            readbackDesc.where = RenderGraph::ExternalInsertPoint::After("EvaluateMaterialGroupsPass");
+            readbackDesc.copyQueueSelection = CopyQueueSelection::Copy;
+            readbackDesc.pass = std::make_shared<CLodStreamingReadbackCopyPass>(
+                std::move(readbackInputs),
+                slot.counterStaging,
+                slot.requestsStaging,
+                slot.usedGroupsCounterStaging,
+                slot.usedGroupsBufferStaging,
+                m_streamingReadbackFenceHandle,
+                fv);
+            outPasses.push_back(std::move(readbackDesc));
+
+            // Wake the background worker so it can HostWait for the new fence value.
+            m_streamingWorkerCV.notify_one();
+        }
     }
 }
 
@@ -234,16 +344,6 @@ bool CLodStreamingSystem::IsGroupResident(uint32_t groupIndex) const {
     }
 
     return (m_streamingNonResidentBitsCpu[wordAddress] & BitMask(groupIndex)) == 0u;
-}
-
-void CLodStreamingSystem::TouchStreamingLru(uint32_t groupIndex) {
-    if (groupIndex >= m_streamingLruCurrentStampByGroup.size()) {
-        return;
-    }
-
-    const uint64_t stamp = ++m_streamingLruSerial;
-    m_streamingLruCurrentStampByGroup[groupIndex] = stamp;
-    m_streamingLruEntries.push_back({ groupIndex, stamp });
 }
 
 bool CLodStreamingSystem::TryQueuePendingLoadRequest(const CLodStreamingRequest& req, uint32_t priority) {
@@ -338,49 +438,38 @@ uint32_t CLodStreamingSystem::QueueLoadRequestWithParents(const CLodStreamingReq
 }
 
 bool CLodStreamingSystem::TryEvictLruVictim(uint32_t avoidGroup, CLodStreamingOperationStats& frameStats) {
-    while (!m_streamingLruEntries.empty()) {
-        const StreamingLruEntry entry = m_streamingLruEntries.front();
-        m_streamingLruEntries.pop_front();
+    uint32_t victimGroup = 0u;
+    const bool found = m_lru.EvictOldest(victimGroup, [&](uint32_t g) {
+        if (g == avoidGroup) return true;
+        if (!IsGroupActive(g)) return true;
+        if (IsGroupPinned(g)) return true;
+        if (!IsGroupResident(g)) return true;
+        return false;
+    });
 
-        if (entry.groupIndex >= m_streamingLruCurrentStampByGroup.size()) {
-            continue;
-        }
-        if (m_streamingLruCurrentStampByGroup[entry.groupIndex] != entry.stamp) {
-            continue;
-        }
-        if (entry.groupIndex == avoidGroup) {
-            continue;
-        }
-        if (!IsGroupActive(entry.groupIndex)) {
-            continue;
-        }
-        if (IsGroupPinned(entry.groupIndex)) {
-            continue;
-        }
-        if (!IsGroupResident(entry.groupIndex)) {
-            continue;
-        }
+    if (!found) {
+        return false;
+    }
 
-        CLodStreamingRequest evictReq{};
-        evictReq.groupGlobalIndex = entry.groupIndex;
+    CLodStreamingRequest evictReq{};
+    evictReq.groupGlobalIndex = victimGroup;
 
-        bool residencyBitChanged = false;
-        const bool serviced = ApplyEvictionRequest(evictReq, residencyBitChanged);
+    bool residencyBitChanged = false;
+    const bool serviced = ApplyEvictionRequest(evictReq, residencyBitChanged);
 
-        frameStats.unloadRequested++;
-        frameStats.unloadUnique++;
-        if (!serviced) {
-            frameStats.unloadFailed++;
-            continue;
+    frameStats.unloadRequested++;
+    frameStats.unloadUnique++;
+    if (!serviced) {
+        frameStats.unloadFailed++;
+        return false;
+    }
+
+    if (residencyBitChanged) {
+        frameStats.unloadApplied++;
+        if (m_streamingResidentGroupsCount > 0u) {
+            m_streamingResidentGroupsCount--;
         }
-
-        if (residencyBitChanged) {
-            frameStats.unloadApplied++;
-            if (m_streamingResidentGroupsCount > 0u) {
-                m_streamingResidentGroupsCount--;
-            }
-            return true;
-        }
+        return true;
     }
 
     return false;
@@ -396,7 +485,6 @@ void CLodStreamingSystem::EnsureStreamingStorageCapacity(uint32_t requiredGroupC
 
     m_streamingNonResidentBits->ResizeStructured(newWordCount);
     m_streamingActiveGroupsBits->ResizeStructured(newWordCount);
-    m_streamingLoadRequestBits->ResizeStructured(newWordCount);
 
     m_streamingNonResidentBitsCpu.resize(newWordCount, 0u);
     m_streamingActiveGroupsBitsCpu.resize(newWordCount, 0u);
@@ -405,7 +493,6 @@ void CLodStreamingSystem::EnsureStreamingStorageCapacity(uint32_t requiredGroupC
     m_streamingResidencyInitializedBitsCpu.resize(newWordCount, 0u);
     m_streamingRequestsInProgressBitsCpu.resize(newWordCount, 0u);
     m_pendingLoadPriorityByGroup.resize(newCapacity, 0u);
-    m_streamingLruCurrentStampByGroup.resize(newCapacity, 0ull);
     m_streamingParentGroupByGlobal.resize(newCapacity, -1);
     m_streamingStorageGroupCapacity = newCapacity;
 
@@ -422,7 +509,16 @@ void CLodStreamingSystem::RefreshStreamingActiveGroupDomain() {
         return;
     }
 
-    meshManager->ProcessCLodDiskStreamingIO();
+    meshManager->ProcessCLodDiskStreamingIO(64u,
+        [this, meshManager](uint32_t groupGlobalIndex, uint32_t pagesNeeded) -> bool {
+            auto* pool = meshManager->GetCLodPagePool();
+            if (!pool) return false;
+            CLodStreamingOperationStats evictStats{};
+            while (pool->GetFreePageCount() < pagesNeeded && m_streamingResidentGroupsCount > 0u) {
+                if (!TryEvictLruVictim(groupGlobalIndex, evictStats)) break;
+            }
+            return pool->GetFreePageCount() >= pagesNeeded;
+        });
     ApplyDiskStreamingCompletions(meshManager);
 
     if (m_streamingDomainDirty) {
@@ -461,6 +557,7 @@ void CLodStreamingSystem::RefreshStreamingActiveGroupDomain() {
                 const uint32_t bm = BitMask(groupIndex);
                 m_streamingPinnedGroupsBitsCpu[wa] |= bm;
                 m_streamingEvictionExemptBitsCpu[wa] |= bm;
+                m_lru.Pin(groupIndex);
             }
         }
     }
@@ -589,8 +686,7 @@ bool CLodStreamingSystem::ApplyEvictionRequest(const CLodStreamingRequest& req, 
         serviced = true;
     }
     else {
-        const auto result = meshManager->SetCLodGroupResidencyForGlobalEx(req.groupGlobalIndex, false);
-        serviced = result.serviced;
+        serviced = meshManager->FreeCLodGroupEviction(req.groupGlobalIndex);
     }
 
     if (!serviced) {
@@ -605,6 +701,18 @@ bool CLodStreamingSystem::ApplyEvictionRequest(const CLodStreamingRequest& req, 
     }
 
     return true;
+}
+
+void CLodStreamingSystem::TouchWithParentChain(uint32_t groupIndex) {
+    m_lru.Touch(groupIndex);
+    int32_t current = static_cast<int32_t>(groupIndex);
+    for (size_t hop = 0; hop < m_streamingParentGroupByGlobal.size(); ++hop) {
+        if (current < 0 || static_cast<uint32_t>(current) >= m_streamingParentGroupByGlobal.size()) break;
+        int32_t parent = m_streamingParentGroupByGlobal[static_cast<uint32_t>(current)];
+        if (parent < 0 || parent == current) break;
+        m_lru.Touch(static_cast<uint32_t>(parent));
+        current = parent;
+    }
 }
 
 void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager) {
@@ -634,8 +742,12 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
             if (wasNonResident) {
                 m_streamingResidentGroupsCount++;
                 m_streamingNonResidentBitsUploadPending = true;
+                m_lru.Insert(groupIndex);
+                TouchWithParentChain(groupIndex);
             }
-            TouchStreamingLru(groupIndex);
+            else {
+                TouchWithParentChain(groupIndex);
+            }
         }
         else {
             const uint32_t wordAddress = BitWordAddress(groupIndex);
@@ -647,133 +759,175 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
     }
 }
 
-CLodStreamingSystem::StreamingRequestReadbackState* CLodStreamingSystem::FindStreamingLoadReadbackStateByCaptureId(uint64_t captureId) {
-    auto& slots = m_streamingLoadReadbackSlots;
-    for (auto& slot : slots) {
-        if (slot.pending && slot.captureId == captureId) {
-            return &slot;
-        }
+void CLodStreamingSystem::PollCompletedReadbackSlots() {
+    // Drain decoded (groupIndex, priority) pairs produced by the background worker thread.
+    std::vector<std::pair<uint32_t, uint32_t>> batch;
+    std::vector<uint32_t> usedGroupsBatch;
+    {
+        std::lock_guard lock(m_streamingWorkerMutex);
+        batch.swap(m_decodedReadbackBatch);
+        usedGroupsBatch.swap(m_decodedUsedGroupsBatch);
     }
 
-    return nullptr;
-}
+    // Touch the LRU for all GPU-reported visible groups and their parent chains.
+    for (const uint32_t groupIndex : usedGroupsBatch) {
+        TouchWithParentChain(groupIndex);
+    }
 
-void CLodStreamingSystem::TryFinalizeStreamingLoadReadback(StreamingRequestReadbackState& state) {
-    if (!state.pending || !state.hasCounter || !state.hasRequests) {
+    if (batch.empty()) {
         return;
     }
 
-    const size_t decodeCount = std::min<size_t>(state.requestCount, state.requests.size());
     uint32_t queuedCount = 0;
-    std::unordered_map<uint32_t, uint32_t> maxPriorityByGroup;
-    maxPriorityByGroup.reserve(decodeCount);
-
-    for (size_t i = 0; i < decodeCount; ++i) {
-        const CLodStreamingRequest& req = state.requests[i];
-        const uint32_t groupIndex = req.groupGlobalIndex;
-        const uint32_t priority = UnpackStreamingRequestPriority(req);
-
-        auto it = maxPriorityByGroup.find(groupIndex);
-        if (it == maxPriorityByGroup.end()) {
-            maxPriorityByGroup.emplace(groupIndex, priority);
-        }
-        else {
-            it->second = std::max(it->second, priority);
-        }
-    }
-
-    for (const auto& [groupIndex, priority] : maxPriorityByGroup) {
+    for (const auto& [groupIndex, priority] : batch) {
         CLodStreamingRequest req{};
         req.groupGlobalIndex = groupIndex;
         queuedCount += QueueLoadRequestWithParents(req, priority);
     }
 
-    if (decodeCount > 0 || !maxPriorityByGroup.empty() || queuedCount > 0) {
-        spdlog::info(
-            "CLod streaming: observed {} load requests ({} unique groups, {} queued, {} deduped/in-progress)",
-            static_cast<uint32_t>(decodeCount),
-            static_cast<uint32_t>(maxPriorityByGroup.size()),
-            queuedCount,
-            static_cast<uint32_t>(maxPriorityByGroup.size()) - queuedCount);
-    }
-
-    state = {};
+    spdlog::info(
+        "CLod streaming: drained {} decoded groups from worker, {} queued, {} LRU touches",
+        static_cast<uint32_t>(batch.size()),
+        queuedCount,
+        static_cast<uint32_t>(usedGroupsBatch.size()));
 }
 
-void CLodStreamingSystem::ScheduleStreamingReadbacks() {
-    if (m_streamingReadbackService == nullptr || m_streamingReadbackRingSize == 0u) {
-        return;
-    }
+void CLodStreamingSystem::StreamingWorkerMain() {
+    uint64_t lastProcessed = 0;
 
-    if (m_streamingLoadReadbackSlots.size() != m_streamingReadbackRingSize) {
-        m_streamingLoadReadbackSlots.assign(m_streamingReadbackRingSize, {});
-    }
-
-    int32_t selectedSlot = -1;
-    for (uint32_t i = 0; i < m_streamingReadbackRingSize; ++i) {
-        const uint32_t slotIndex = (m_streamingReadbackScheduleCursor + i) % m_streamingReadbackRingSize;
-        if (!m_streamingLoadReadbackSlots[slotIndex].pending) {
-            selectedSlot = static_cast<int32_t>(slotIndex);
-            break;
+    while (!m_streamingWorkerQuit.load(std::memory_order_relaxed)) {
+        // Wait until there is a new fence value to process.
+        {
+            std::unique_lock lock(m_streamingWorkerMutex);
+            m_streamingWorkerCV.wait(lock, [&] {
+                return m_streamingWorkerQuit.load(std::memory_order_relaxed)
+                    || m_streamingReadbackFenceCounter.load(std::memory_order_relaxed) > lastProcessed;
+            });
         }
+        if (m_streamingWorkerQuit.load(std::memory_order_relaxed)) break;
+
+        const uint64_t target = m_streamingReadbackFenceCounter.load(std::memory_order_acquire);
+        if (target <= lastProcessed) continue;
+
+        // HostWait with a timeout so we can check for shutdown periodically.
+        while (!m_streamingWorkerQuit.load(std::memory_order_relaxed)) {
+            auto result = m_streamingReadbackFenceHandle.HostWait(target, 100);
+            if (result != rhi::Result::WaitTimeout) break;
+        }
+        if (m_streamingWorkerQuit.load(std::memory_order_relaxed)) break;
+
+        // Process all completed staging slots under the mutex.
+        {
+            std::lock_guard lock(m_streamingWorkerMutex);
+
+            // Cross-slot deduplication: a single map/set for all slots in
+            // this batch so the same group doesn't appear multiple times in
+            // the output when it was requested across consecutive frames.
+            std::unordered_map<uint32_t, uint32_t> batchMaxPriorityByGroup;
+            std::unordered_set<uint32_t> batchUsedGroups;
+            uint32_t totalRequestCount = 0;
+            uint32_t totalUsedGroupsCount = 0;
+
+            for (auto& slot : m_readbackStagingSlots) {
+                if (!slot.inFlight || slot.fenceValue > target) {
+                    continue;
+                }
+
+                // Map and read the load counter
+                uint32_t requestCount = 0;
+                {
+                    auto apiResource = slot.counterStaging->GetAPIResource();
+                    void* mapped = nullptr;
+                    apiResource.Map(&mapped);
+                    if (mapped) {
+                        std::memcpy(&requestCount, mapped, sizeof(uint32_t));
+                        apiResource.Unmap(0, 0);
+                    }
+                }
+                requestCount = std::min<uint32_t>(requestCount, CLodStreamingRequestCapacity);
+
+                if (requestCount > 0) {
+                    // Map and read the load request array
+                    std::vector<CLodStreamingRequest> requests(requestCount);
+                    {
+                        auto apiResource = slot.requestsStaging->GetAPIResource();
+                        void* mapped = nullptr;
+                        apiResource.Map(&mapped);
+                        if (mapped) {
+                            std::memcpy(requests.data(), mapped, requestCount * sizeof(CLodStreamingRequest));
+                            apiResource.Unmap(0, 0);
+                        }
+                    }
+
+                    totalRequestCount += requestCount;
+                    for (uint32_t i = 0; i < requestCount; ++i) {
+                        const uint32_t groupIndex = requests[i].groupGlobalIndex;
+                        const uint32_t priority = UnpackStreamingRequestPriority(requests[i]);
+                        auto it = batchMaxPriorityByGroup.find(groupIndex);
+                        if (it == batchMaxPriorityByGroup.end()) {
+                            batchMaxPriorityByGroup.emplace(groupIndex, priority);
+                        } else {
+                            it->second = std::max(it->second, priority);
+                        }
+                    }
+                }
+
+                // Read the used-groups append buffer (GPU-reported visible groups for LRU touch).
+                uint32_t usedGroupsCount = 0;
+                if (slot.usedGroupsCounterStaging) {
+                    auto apiResource = slot.usedGroupsCounterStaging->GetAPIResource();
+                    void* mapped = nullptr;
+                    apiResource.Map(&mapped);
+                    if (mapped) {
+                        std::memcpy(&usedGroupsCount, mapped, sizeof(uint32_t));
+                        apiResource.Unmap(0, 0);
+                    }
+                }
+                usedGroupsCount = std::min<uint32_t>(usedGroupsCount, CLodUsedGroupsCapacity);
+
+                if (usedGroupsCount > 0 && slot.usedGroupsBufferStaging) {
+                    std::vector<uint32_t> usedGroups(usedGroupsCount);
+                    {
+                        auto apiResource = slot.usedGroupsBufferStaging->GetAPIResource();
+                        void* mapped = nullptr;
+                        apiResource.Map(&mapped);
+                        if (mapped) {
+                            std::memcpy(usedGroups.data(), mapped, usedGroupsCount * sizeof(uint32_t));
+                            apiResource.Unmap(0, 0);
+                        }
+                    }
+
+                    totalUsedGroupsCount += usedGroupsCount;
+                    batchUsedGroups.insert(usedGroups.begin(), usedGroups.end());
+                }
+
+                slot.inFlight = false;
+            }
+
+            // Push cross-slot deduplicated results for the main thread.
+            for (const auto& [groupIndex, priority] : batchMaxPriorityByGroup) {
+                m_decodedReadbackBatch.emplace_back(groupIndex, priority);
+            }
+            for (const uint32_t g : batchUsedGroups) {
+                m_decodedUsedGroupsBatch.push_back(g);
+            }
+
+            if (totalRequestCount > 0) {
+                spdlog::info(
+                    "CLod streaming worker: {} requests ({} unique groups) decoded",
+                    totalRequestCount,
+                    static_cast<uint32_t>(batchMaxPriorityByGroup.size()));
+            }
+            if (totalUsedGroupsCount > 0) {
+                spdlog::info(
+                    "CLod streaming worker: {} used groups ({} unique) decoded",
+                    totalUsedGroupsCount,
+                    static_cast<uint32_t>(batchUsedGroups.size()));
+            }
+        }
+
+        lastProcessed = target;
     }
-
-    if (selectedSlot < 0) {
-        return;
-    }
-
-    const uint32_t slotIndex = static_cast<uint32_t>(selectedSlot);
-    m_streamingReadbackScheduleCursor = (slotIndex + 1u) % m_streamingReadbackRingSize;
-
-    auto& loadSlot = m_streamingLoadReadbackSlots[slotIndex];
-
-    loadSlot = {};
-    loadSlot.pending = true;
-    loadSlot.captureId = ++m_streamingReadbackCaptureSerial;
-
-    const uint64_t loadCaptureId = loadSlot.captureId;
-    m_streamingReadbackService->RequestReadbackCapture(
-        "CLod::HierarchialCullingPass2",
-        m_streamingLoadCounter.get(),
-        RangeSpec{},
-        [this, loadCaptureId](ReadbackCaptureResult&& result) {
-            auto* state = FindStreamingLoadReadbackStateByCaptureId(loadCaptureId);
-            if (state == nullptr) {
-                return;
-            }
-
-            uint32_t requestCount = 0;
-            if (result.data.size() >= sizeof(uint32_t)) {
-                std::memcpy(&requestCount, result.data.data(), sizeof(uint32_t));
-            }
-
-            state->requestCount = std::min<uint32_t>(requestCount, CLodStreamingRequestCapacity);
-            state->hasCounter = true;
-            TryFinalizeStreamingLoadReadback(*state);
-        },
-        true);
-
-    m_streamingReadbackService->RequestReadbackCapture(
-        "CLod::HierarchialCullingPass2",
-        m_streamingLoadRequests.get(),
-        RangeSpec{},
-        [this, loadCaptureId](ReadbackCaptureResult&& result) {
-            auto* state = FindStreamingLoadReadbackStateByCaptureId(loadCaptureId);
-            if (state == nullptr) {
-                return;
-            }
-
-            const size_t stride = sizeof(CLodStreamingRequest);
-            const size_t decodedCount = std::min<size_t>(result.data.size() / stride, CLodStreamingRequestCapacity);
-            state->requests.resize(decodedCount);
-            if (decodedCount > 0) {
-                std::memcpy(state->requests.data(), result.data.data(), decodedCount * stride);
-            }
-
-            state->hasRequests = true;
-            TryFinalizeStreamingLoadReadback(*state);
-        },
-        true);
 }
 
 void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
@@ -786,14 +940,17 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
     }
 
     if (meshManager != nullptr) {
+        // No eviction callback here: this runs during pass Update, after
+        // ConsumeStreamingUploadsDispatch() has already drained queued
+        // uploads.  Evicting + loading here would leave the GPU with stale
+        // page-map entries / slab data until next frame while the
+        // non-resident bit is already cleared, causing wrong geometry.
+        // Eviction is only safe in RefreshStreamingActiveGroupDomain
+        // (graph-building phase) where streaming uploads are consumed
+        // immediately afterwards.
         meshManager->ProcessCLodDiskStreamingIO(budget);
         ApplyDiskStreamingCompletions(meshManager);
     }
-
-    m_loadBatchRequests.clear();
-    m_loadBatchRequests.reserve(budget);
-    m_loadBatchEntries.clear();
-    m_loadBatchEntries.reserve(budget);
 
     const size_t n = m_pendingStreamingRequests.size();
     if (n > budget) {
@@ -813,6 +970,9 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
                 return a.priority < b.priority;
             });
     }
+
+    auto* pool = meshManager ? meshManager->GetCLodPagePool() : nullptr;
+    const uint64_t pageSize = pool ? pool->GetPageSize() : 0u;
 
     uint32_t processed = 0;
     while (processed < budget && !m_pendingStreamingRequests.empty()) {
@@ -835,19 +995,6 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
             }
         }
 
-        if (pending.request.groupGlobalIndex >= m_streamingStorageGroupCapacity) {
-            EnsureStreamingStorageCapacity(pending.request.groupGlobalIndex + 1u);
-        }
-
-        if (!IsGroupResident(pending.request.groupGlobalIndex)) {
-            while (m_streamingResidentGroupsCount >= m_streamingResidentBudgetGroups) {
-                const bool evicted = TryEvictLruVictim(pending.request.groupGlobalIndex, frameStats);
-                if (!evicted) {
-                    break;
-                }
-            }
-        }
-
         if (!pending.isLoad) {
             bool residencyBitChanged = false;
             const bool serviced = ApplyEvictionRequest(pending.request, residencyBitChanged);
@@ -863,89 +1010,87 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
                 }
             }
 
-            TouchStreamingLru(pending.request.groupGlobalIndex);
+            m_lru.Remove(pending.request.groupGlobalIndex);
             ClearStreamingRequestInProgress(pending.request.groupGlobalIndex);
             m_pendingLoadPriorityByGroup[pending.request.groupGlobalIndex] = 0u;
             processed++;
             continue;
         }
 
+        // Load path
         frameStats.loadRequested++;
         frameStats.loadUnique++;
 
-        const uint32_t wordAddress = BitWordAddress(groupIndex);
-        const uint32_t bitMask = BitMask(groupIndex);
-        const uint32_t oldWord = m_streamingNonResidentBitsCpu[wordAddress];
-
-        if (meshManager == nullptr) {
-            m_streamingNonResidentBitsCpu[wordAddress] &= ~bitMask;
-            const bool residencyBitChanged = (m_streamingNonResidentBitsCpu[wordAddress] != oldWord);
-            if (residencyBitChanged) {
-                frameStats.loadApplied++;
-                m_streamingResidentGroupsCount++;
-                m_streamingNonResidentBitsUploadPending = true;
-            }
-
-            TouchStreamingLru(groupIndex);
+        if (IsGroupResident(groupIndex)) {
+            TouchWithParentChain(groupIndex);
             ClearStreamingRequestInProgress(groupIndex);
             m_pendingLoadPriorityByGroup[groupIndex] = 0u;
             processed++;
             continue;
         }
 
-        MeshManager::CLodGlobalResidencyRequest req{};
-        req.groupGlobalIndex = groupIndex;
-        req.resident = true;
-        m_loadBatchRequests.push_back(req);
-
-        PendingLoadBatchEntry entry{};
-        entry.groupIndex = groupIndex;
-        entry.wordAddress = wordAddress;
-        entry.bitMask = bitMask;
-        entry.oldWord = oldWord;
-        m_loadBatchEntries.push_back(entry);
-
-        processed++;
-    }
-
-    if (meshManager != nullptr && !m_loadBatchRequests.empty()) {
-        std::vector<MeshManager::CLodGlobalResidencyResult> results;
-        meshManager->SetCLodGroupResidencyForGlobalBatchEx(m_loadBatchRequests, results);
-
-        const size_t count = std::min(m_loadBatchEntries.size(), results.size());
-        for (size_t i = 0; i < count; ++i) {
-            const auto& entry = m_loadBatchEntries[i];
-            const auto& result = results[i];
-            const bool serviced = result.serviced;
-            if (!serviced) {
-                frameStats.loadFailed++;
+        if (meshManager == nullptr) {
+            // mark resident in CPU bits.
+            const uint32_t wordAddress = BitWordAddress(groupIndex);
+            const uint32_t bitMask = BitMask(groupIndex);
+            const uint32_t oldWord = m_streamingNonResidentBitsCpu[wordAddress];
+            m_streamingNonResidentBitsCpu[wordAddress] &= ~bitMask;
+            if (m_streamingNonResidentBitsCpu[wordAddress] != oldWord) {
+                frameStats.loadApplied++;
+                m_streamingResidentGroupsCount++;
+                m_streamingNonResidentBitsUploadPending = true;
             }
-            else if (result.applied) {
-                m_streamingNonResidentBitsCpu[entry.wordAddress] &= ~entry.bitMask;
-                const bool residencyBitChanged = (m_streamingNonResidentBitsCpu[entry.wordAddress] != entry.oldWord);
-                if (residencyBitChanged) {
-                    frameStats.loadApplied++;
-                    m_streamingResidentGroupsCount++;
-                    m_streamingNonResidentBitsUploadPending = true;
+            m_lru.Insert(groupIndex);
+            TouchWithParentChain(groupIndex);
+            ClearStreamingRequestInProgress(groupIndex);
+            m_pendingLoadPriorityByGroup[groupIndex] = 0u;
+            processed++;
+            continue;
+        }
+
+        // If disk I/O is already queued/in-flight for this group (e.g. from a
+        // priority-escalation re-entry), skip the pre-eviction and re-queue.
+        // The I/O will complete on its own and pages were already pre-evicted
+        // when the request was first submitted.
+        if (meshManager->IsCLodGroupDiskIOQueued(groupIndex)) {
+            processed++;
+            continue;
+        }
+
+        // Pre-evict: estimate pages needed and evict LRU until enough free.
+        if (pool && pageSize > 0) {
+            const auto info = meshManager->GetCLodGroupStreamingInfo(groupIndex);
+            const uint32_t pagesNeeded = info.valid
+                ? CLodEstimatePagesNeeded(info.hint, info.vertexByteSize, pageSize)
+                : 1u;
+
+            while (pool->GetFreePageCount() < pagesNeeded && m_streamingResidentGroupsCount > 0u) {
+                if (!TryEvictLruVictim(groupIndex, frameStats)) {
+                    break;
                 }
             }
 
-            if (result.queued && !result.applied) {
+            if (pool->GetFreePageCount() < pagesNeeded) {
+                frameStats.loadFailed++;
+                ClearStreamingRequestInProgress(groupIndex);
+                m_pendingLoadPriorityByGroup[groupIndex] = 0u;
+                processed++;
                 continue;
             }
-
-            TouchStreamingLru(entry.groupIndex);
-            ClearStreamingRequestInProgress(entry.groupIndex);
-            m_pendingLoadPriorityByGroup[entry.groupIndex] = 0u;
         }
 
-        for (size_t i = count; i < m_loadBatchEntries.size(); ++i) {
-            const auto& entry = m_loadBatchEntries[i];
+        // Queue disk I/O.
+        const bool queued = meshManager->QueueCLodGroupDiskIO(groupIndex);
+        if (queued) {
+            MarkStreamingRequestInProgress(groupIndex);
+        }
+        else {
             frameStats.loadFailed++;
-            TouchStreamingLru(entry.groupIndex);
-            ClearStreamingRequestInProgress(entry.groupIndex);
-            m_pendingLoadPriorityByGroup[entry.groupIndex] = 0u;
+            ClearStreamingRequestInProgress(groupIndex);
+            m_pendingLoadPriorityByGroup[groupIndex] = 0u;
         }
+
+        processed++;
     }
 
     if (meshManager != nullptr) {
@@ -956,6 +1101,8 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
         frameStats.completedResults = debugStats.completedResults;
         frameStats.residentAllocationBytes = debugStats.residentAllocationBytes;
         frameStats.completedResultBytes = debugStats.completedResultBytes;
+        frameStats.streamedBytesThisFrame = debugStats.totalStreamedBytes - m_prevTotalStreamedBytes;
+        m_prevTotalStreamedBytes = debugStats.totalStreamedBytes;
     }
 
     PublishCLodStreamingOperationStats(frameStats);

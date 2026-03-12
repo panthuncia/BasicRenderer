@@ -5,10 +5,15 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/MaterialManager.h"
+#include "Managers/MeshManager.h"
 #include "Render/RenderContext.h"
 #include "Render/IndirectCommand.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
+#include "Resources/Buffers/PagePool.h"
+#include "Resources/Resolvers/ResourceGroupResolver.h"
 
 class EvaluateMaterialGroupsPass : public ComputePass {
 public:
@@ -24,10 +29,24 @@ public:
             .with<CLodExtensionTypeTag>(visBufferTag)
             .with<VisibleClustersBufferTag>()
             .build();
+
+        // Retrieve the page pool slab ResourceGroup for render graph tracking.
+        try {
+            auto getter = SettingsManager::GetInstance().getSettingGetter<std::function<MeshManager*()>>(CLodStreamingMeshManagerGetterSettingName);
+            if (auto* mm = getter()()) {
+                if (auto* pool = mm->GetCLodPagePool()) {
+                    m_slabResourceGroup = pool->GetSlabResourceGroup();
+                }
+            }
+        } catch (...) {}
     }
 
     void DeclareResourceUsages(ComputePassBuilder* b) override {
         b->WithShaderResource(ECSResourceResolver(m_visibleClustersQuery));
+
+        if (m_slabResourceGroup) {
+            b->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
+        }
 
         b->WithShaderResource("Builtin::VisUtil::PixelListBuffer",
             MESH_RESOURCE_IDFENTIFIERS,
@@ -43,9 +62,6 @@ public:
             Builtin::CLod::Offsets,
 			Builtin::CLod::GroupChunks,
 			Builtin::CLod::Groups,
-            Builtin::CLod::CompressedMeshletVertexIndices,
-			Builtin::CLod::CompressedPositions,
-            Builtin::CLod::CompressedNormals,
             Builtin::CLod::MeshMetadata)
             .WithUnorderedAccess(Builtin::GBuffer::Normals,
                 Builtin::GBuffer::Albedo,
@@ -72,9 +88,6 @@ public:
 		RegisterSRV(Builtin::CLod::Offsets);
         RegisterSRV(Builtin::CLod::GroupChunks);
 		RegisterSRV(Builtin::CLod::Groups);
-		RegisterSRV(Builtin::CLod::CompressedMeshletVertexIndices);
-		RegisterSRV(Builtin::CLod::CompressedPositions);
-		RegisterSRV(Builtin::CLod::CompressedNormals);
 		RegisterSRV(Builtin::CLod::MeshMetadata);
 
         RegisterUAV(Builtin::GBuffer::Normals);
@@ -161,5 +174,6 @@ private:
     std::unordered_map<MaterialCompileFlags, PipelineState> m_psoCache;
     Resource* m_materialEvalCmds;
     flecs::query<> m_visibleClustersQuery;
+    std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     uint32_t m_visibleClusterBufferSRVIndex = 0;
 };

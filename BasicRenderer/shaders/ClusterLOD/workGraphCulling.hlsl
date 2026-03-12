@@ -6,6 +6,7 @@
 #include "include/occlusionCulling.hlsli"
 #include "PerPassRootConstants/clodRootConstants.h"
 #include "Include/clodStructs.hlsli"
+#include "Include/clodPageAccess.hlsli"
 
 // meshopt_Meshlet layout on GPU
 struct Meshlet
@@ -112,6 +113,7 @@ static const uint WG_COUNTER_PHASE2_REPLAY_GROUP_RECORDS_CONSUMED = 61;
 static const uint WG_COUNTER_PHASE2_REPLAY_CLUSTER_BUCKET_RECORDS_CONSUMED = 62;
 
 static const uint CLOD_STREAM_REQUEST_CAPACITY = (1u << 16);
+static const uint CLOD_USED_GROUPS_CAPACITY = (1u << 17);
 static const uint CLOD_STREAM_VIEWID_MASK = 0xFFFFu;
 static const uint CLOD_STREAM_PRIORITY_SHIFT = 16u;
 
@@ -222,7 +224,8 @@ bool ReplayTryAppendNodeGroup(uint type, uint instanceIndex, uint viewId, uint n
     return true;
 }
 
-bool ReplayTryAppendMeshlet(uint instanceIndex, uint viewId, uint groupId, uint localMeshletIndex)
+bool ReplayTryAppendMeshlet(uint instanceIndex, uint viewId, uint groupId, uint localMeshletIndex,
+                            uint pageSlabDescriptorIndex, uint pageSlabByteOffset)
 {
     WGTelemetryAdd(WG_COUNTER_PHASE1_OCCLUSION_CLUSTER_REPLAY_ENQUEUE_ATTEMPTS, 1);
 
@@ -242,7 +245,7 @@ bool ReplayTryAppendMeshlet(uint instanceIndex, uint viewId, uint groupId, uint 
 
     const uint byteOffset = slot * recordSize;
     replayBuffer.Store4(byteOffset, uint4(CLOD_REPLAY_RECORD_TYPE_MESHLET, instanceIndex, viewId, groupId));
-    replayBuffer.Store(byteOffset + 16u, localMeshletIndex);
+    replayBuffer.Store4(byteOffset + 16u, uint4(localMeshletIndex, pageSlabDescriptorIndex, pageSlabByteOffset, 0u));
     return true;
 }
 
@@ -279,9 +282,11 @@ struct MeshletBucketRecord
     uint viewId;
 
     uint groupId;
-    uint childFirstLocalMeshletIndex;
+    uint childFirstLocalMeshletIndex; // page-local
     uint childLocalMeshletCount;
     uint sourceTag;
+    uint pageSlabDescriptorIndex;     // pre-resolved page slab descriptor
+    uint pageSlabByteOffset;          // pre-resolved page slab byte offset
 
     uint3 dispatchGrid : SV_DispatchGrid; // drives broadcasting node launch
 };
@@ -393,6 +398,8 @@ void WG_ReplayMeshlet(
         bucket.childFirstLocalMeshletIndex = meshletRecord.localMeshletIndex;
         bucket.childLocalMeshletCount = 1;
         bucket.sourceTag = CLOD_RECORD_SOURCE_REPLAY;
+        bucket.pageSlabDescriptorIndex = meshletRecord.pageSlabDescriptorIndex;
+        bucket.pageSlabByteOffset = meshletRecord.pageSlabByteOffset;
         bucket.dispatchGrid = uint3(1, 1, 1);
         outBucket.Get() = bucket;
 
@@ -775,14 +782,14 @@ void WG_GroupEvaluate(
             WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_CULLED_GROUP_RECORDS, 1);
         }
         else {
-            const uint childBase = clodMeshMetadata.childrenBase + grp.firstChild;
-            const uint clampedChildCount = min(grp.childCount, BVH_MAX_CHILDREN);
-            const uint terminalChildCount = min(grp.terminalChildCount, BVH_MAX_CHILDREN);
+            const uint segBase = clodMeshMetadata.segmentsBase + grp.firstSegment;
+            const uint clampedSegmentCount = min(grp.segmentCount, BVH_MAX_CHILDREN);
+            const uint terminalSegmentCount = min(grp.terminalSegmentCount, BVH_MAX_CHILDREN);
             StructuredBuffer<CullingCameraInfo> cameraInfos =
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
             const CullingCameraInfo cam = cameraInfos[rec.viewId];
-            StructuredBuffer<ClusterLODChild> children =
-                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Children)];
+            StructuredBuffer<ClusterLODGroupSegment> segments =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Segments)];
             StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
             const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
@@ -792,8 +799,10 @@ void WG_GroupEvaluate(
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
             RWStructuredBuffer<uint> loadRequestCounter =
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
-            RWByteAddressBuffer loadRequestBits =
-                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequestBits)];
+            RWStructuredBuffer<uint> usedGroupsCounter =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroupsCounter)];
+            RWStructuredBuffer<uint> usedGroupsBuffer =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroups)];
             StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
                 ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
             const uint depthMapDescriptorIndex = camera.isOrtho
@@ -804,21 +813,21 @@ void WG_GroupEvaluate(
 
             [unroll]
             for (uint childIndex = 0; childIndex < BVH_MAX_CHILDREN; ++childIndex) {
-                if (childIndex >= clampedChildCount) {
+                if (childIndex >= clampedSegmentCount) {
                     break;
                 }
 
                 WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_ACTIVE_CHILD_THREADS, 1);
 
-                const ClusterLODChild child = children[childBase + childIndex];
-                const bool forceBucket = (rec.allowRefine == 0u) || (childIndex < terminalChildCount) || (child.refinedGroup < 0);
+                const ClusterLODGroupSegment seg = segments[segBase + childIndex];
+                const bool forceBucket = (rec.allowRefine == 0u) || (childIndex < terminalSegmentCount) || (seg.refinedGroup < 0);
 
                 bool generatingGroupWantsTraversal = false;
                 bool replayedOccludedRefinedGroup = false;
                 bool nonResidentRefinedChild = false;
 
-                if (!forceBucket && child.refinedGroup >= 0) {
-                    const uint refinedGroupGlobalIndex = clodMeshMetadata.groupsBase + (uint) child.refinedGroup;
+                if (!forceBucket && seg.refinedGroup >= 0) {
+                    const uint refinedGroupGlobalIndex = clodMeshMetadata.groupsBase + (uint) seg.refinedGroup;
                     const ClusterLODGroup refinedGrp = groups[refinedGroupGlobalIndex];
                     bool refinedResident = true;
 
@@ -839,23 +848,15 @@ void WG_GroupEvaluate(
                             cam.zNear);
 
                         if (refinedGroupGlobalIndex < activeGroupScanCount) {
-                            // Deduplicate: set a bit per group so only the first
-                            // thread for each non-resident group touches the atomic
-                            // counter.  Without this gate every non-resident child
-                            // encounter (potentially thousands when entering a new
-                            // area) serialises on loadRequestCounter[0], stalling
-                            // the entire work graph.
-                            if (CLodTrySetBit(loadRequestBits, refinedGroupGlobalIndex)) {
-                                uint requestIndex = 0;
-                                InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
-                                if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY) {
-                                    CLodStreamingRequest req = (CLodStreamingRequest)0;
-                                    req.groupGlobalIndex = refinedGroupGlobalIndex;
-                                    req.meshInstanceIndex = rec.instanceIndex;
-                                    req.meshBufferIndex = instanceData.perMeshBufferIndex;
-                                    req.viewId = CLodPackViewPriority(rec.viewId, fallbackErrorOverDistance);
-                                    loadRequests[requestIndex] = req;
-                                }
+                            uint requestIndex = 0;
+                            InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
+                            if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY) {
+                                CLodStreamingRequest req = (CLodStreamingRequest)0;
+                                req.groupGlobalIndex = refinedGroupGlobalIndex;
+                                req.meshInstanceIndex = rec.instanceIndex;
+                                req.meshBufferIndex = instanceData.perMeshBufferIndex;
+                                req.viewId = CLodPackViewPriority(rec.viewId, fallbackErrorOverDistance);
+                                loadRequests[requestIndex] = req;
                             }
                         }
                     }
@@ -889,7 +890,7 @@ void WG_GroupEvaluate(
                                     CLOD_REPLAY_RECORD_TYPE_GROUP,
                                     rec.instanceIndex,
                                     rec.viewId,
-                                    (uint)child.refinedGroup);
+                                    (uint)seg.refinedGroup);
                             }
                             replayedOccludedRefinedGroup = true;
                         }
@@ -905,7 +906,7 @@ void WG_GroupEvaluate(
 
                 const bool shouldEmitCurrentLevelBucket =
                     forceBucket || nonResidentRefinedChild || !generatingGroupWantsTraversal;
-                const bool emitBucket = (child.localMeshletCount != 0)
+                const bool emitBucket = (seg.meshletCount != 0)
                     && shouldEmitCurrentLevelBucket
                     && !replayedOccludedRefinedGroup;
 
@@ -916,13 +917,19 @@ void WG_GroupEvaluate(
                 if (emitBucket) {
                     WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_EMIT_BUCKET_THREADS, 1);
 
+                    // Resolve page address for this child
+                    // grp.pageMapBase is mesh-local; add meshMeta global base.
+                    const GroupPageMapEntry pageEntry = LoadGroupPageMapEntry(clodMeshMetadata.pageMapBase + grp.pageMapBase, seg.pageIndex);
+
                     MeshletBucketRecord bucketRecord = (MeshletBucketRecord)0;
                     bucketRecord.instanceIndex = rec.instanceIndex;
                     bucketRecord.viewId = rec.viewId;
                     bucketRecord.groupId = rec.groupId;
-                    bucketRecord.childFirstLocalMeshletIndex = child.firstLocalMeshletIndex;
-                    bucketRecord.childLocalMeshletCount = child.localMeshletCount;
+                    bucketRecord.childFirstLocalMeshletIndex = seg.firstMeshletInPage;
+                    bucketRecord.childLocalMeshletCount = seg.meshletCount;
                     bucketRecord.sourceTag = rec.sourceTag;
+                    bucketRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
+                    bucketRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
                     bucketRecord.dispatchGrid = uint3(
                         (bucketRecord.childLocalMeshletCount + CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP - 1) / CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP,
                         1,
@@ -930,6 +937,16 @@ void WG_GroupEvaluate(
 
                     bucketRecords[emitBucketCount] = bucketRecord;
                     emitBucketCount++;
+                }
+            }
+
+            // Append this group to the used-groups buffer so the CPU LRU
+            // knows which groups are actively rendered.
+            if (emitBucketCount > 0) {
+                uint usedSlot = 0;
+                InterlockedAdd(usedGroupsCounter[0], 1u, usedSlot);
+                if (usedSlot < CLOD_USED_GROUPS_CAPACITY) {
+                    usedGroupsBuffer[usedSlot] = groupIndex;
                 }
             }
         }
@@ -959,7 +976,7 @@ void WG_GroupEvaluate(
 [NodeID("ClusterCullBuckets")]
 [NodeLaunch("broadcasting")]
 [NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
-[NodeMaxDispatchGrid(64, 1, 1)] // TODO: Sane max?
+[NodeMaxDispatchGrid(512/CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)] // 512 clusters per group is current max
 void WG_ClusterCullBuckets(
     DispatchNodeInputRecord< MeshletBucketRecord> inRec,
     uint3 DTid : SV_DispatchThreadID,
@@ -986,21 +1003,11 @@ void WG_ClusterCullBuckets(
         WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_ACTIVE_LANES, inRangeLaneCount);
     }
 
-    uint globalMeshletIndex = 0;
+    uint localMeshletIndex = 0;
     bool survives = false;
 
     if (inRange) {
         const bool replaySource = (b.sourceTag == CLOD_RECORD_SOURCE_REPLAY);
-        StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
-        StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
-        const MeshInstanceClodOffsets off = clodOffsets[b.instanceIndex];
-        const CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[off.clodMeshMetadataIndex];
-        StructuredBuffer<ClusterLODGroup> groups =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
-        StructuredBuffer<ClusterLODGroupChunk> groupChunks =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::GroupChunks)];
         StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
         const PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[b.instanceIndex];
@@ -1013,23 +1020,30 @@ void WG_ClusterCullBuckets(
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
         const Camera camera = cameras[b.viewId];
 
-        StructuredBuffer<BoundingSphere> meshletBoundsBuffer =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshletBounds)];
+        // Use pre-resolved page address from the bucket record
+        const uint pageSlabDesc = b.pageSlabDescriptorIndex;
+        const uint pageSlabOff  = b.pageSlabByteOffset;
 
-        if (b.groupId >= clodMeshMetadata.groupChunkTableCount) {
+        if (pageSlabDesc == 0) {
             survives = false;
         }
         else {
-        const ClusterLODGroup grp = groups[clodMeshMetadata.groupsBase + b.groupId];
-		const ClusterLODGroupChunk groupChunk = groupChunks[clodMeshMetadata.groupChunkTableBase + b.groupId];
+        // Load page header fields we need (boundsOffset and meshletCount)
+        ByteAddressBuffer slab = ResourceDescriptorHeap[pageSlabDesc];
+        const uint pageMeshletCount = slab.Load(pageSlabOff + 4);  // meshletCount at uint[1]
+        const uint pageBoundsOffset = LoadPageBoundsOffset(pageSlabDesc, pageSlabOff);
+
         const uint localMeshlet = b.childFirstLocalMeshletIndex + i;
-        if (localMeshlet >= groupChunk.meshletCount || localMeshlet >= groupChunk.meshletBoundsCount) {
+        if (localMeshlet >= pageMeshletCount) {
             survives = false;
         }
         else {
-        globalMeshletIndex = groupChunk.meshletBase + localMeshlet;
+        localMeshletIndex = localMeshlet;
 
-        const BoundingSphere meshletBounds = meshletBoundsBuffer[groupChunk.meshletBoundsBase + localMeshlet];
+        // Load bounds from the page-pool slab ByteAddressBuffer
+        const uint boundsAddr = pageSlabOff + pageBoundsOffset + localMeshlet * 16u;
+        const float4 boundsSphere = asfloat(slab.Load4(boundsAddr));
+        const BoundingSphere meshletBounds = { boundsSphere };
         const float3 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, camera.view);
         const float meshletRadiusWorld = meshletBounds.sphere.w * MaxAxisScale_RowVector(objectModelMatrix);
 
@@ -1054,7 +1068,9 @@ void WG_ClusterCullBuckets(
                             b.instanceIndex,
                             b.viewId,
                             b.groupId,
-                            b.childFirstLocalMeshletIndex + i);
+                            b.childFirstLocalMeshletIndex + i,
+                            pageSlabDesc,
+                            pageSlabOff);
                     }
                     survives = false;
                 }
@@ -1109,9 +1125,11 @@ void WG_ClusterCullBuckets(
 
             VisibleCluster vc = (VisibleCluster) 0;
             vc.instanceID = b.instanceIndex;
-            vc.globalMeshletIndex = globalMeshletIndex;
+            vc.localMeshletIndex = localMeshletIndex;
             vc.viewID = b.viewId;
             vc.groupID = b.groupId;
+            vc.pageSlabDescriptorIndex = b.pageSlabDescriptorIndex;
+            vc.pageSlabByteOffset = b.pageSlabByteOffset;
             visibleClusters[index] = vc;
         }
     }

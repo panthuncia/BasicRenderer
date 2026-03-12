@@ -57,6 +57,7 @@
 
 #include "Import/USDLoader.h"
 #include "Import/CLodCacheLoader.h"
+#include "Import/USDGeometryExtractor.h"
 
 namespace USDLoader {
 
@@ -481,509 +482,6 @@ namespace USDLoader {
 		loadingCache.materialCache[material.GetPrim().GetPath().GetString()] = newMaterial;
 	}
 
-	enum class InterpolationType {
-		Constant,
-		Uniform,
-		Varying,
-		Vertex,
-		FaceVarying
-	};
-
-	static InterpolationType GetInterpolationType(const TfToken& tok) {
-		if (tok == UsdGeomTokens->constant)    return InterpolationType::Constant;
-		if (tok == UsdGeomTokens->uniform)     return InterpolationType::Uniform;
-		if (tok == UsdGeomTokens->varying)     return InterpolationType::Varying;
-		if (tok == UsdGeomTokens->vertex)      return InterpolationType::Vertex;
-		if (tok == UsdGeomTokens->faceVarying) return InterpolationType::FaceVarying;
-		// fallback
-		return InterpolationType::Vertex;
-	}
-
-	// Fan-triangulate an n-gon index list -> triangles
-	static std::vector<uint32_t> TriangulateIndices(
-		VtArray<int> const& faceVertCounts,
-		VtArray<int> const& faceVertIndices)
-	{
-		std::vector<uint32_t> out;
-		out.reserve(faceVertIndices.size()); // at least as many corners
-		size_t offset = 0;
-		for (int fvCount : faceVertCounts) {
-			// a single triangle
-			if (fvCount == 3) {
-				out.push_back(faceVertIndices[offset + 0]);
-				out.push_back(faceVertIndices[offset + 1]);
-				out.push_back(faceVertIndices[offset + 2]);
-			}
-			else {
-				// fan: (0,i,i+1)
-				for (int i = 1; i + 1 < fvCount; ++i) {
-					out.push_back(faceVertIndices[offset + 0]);
-					out.push_back(faceVertIndices[offset + i]);
-					out.push_back(faceVertIndices[offset + i + 1]);
-				}
-			}
-			offset += fvCount;
-		}
-		return out;
-	}
-
-	// Builds a flat float buffer from a GfVecN array
-	template<typename GfVecN>
-	static void FlattenVecArray(
-		VtArray<GfVecN> const& src,
-		std::vector<float>& dst,
-		float                   scale = 1.0f)
-	{
-		constexpr size_t N = GfVecN::dimension;
-		dst.clear();
-		dst.reserve(src.size() * N);
-		for (auto const& v : src) {
-			for (size_t i = 0; i < N; ++i)
-				dst.push_back(float(v[i] * scale));
-		}
-	}
-
-	static std::vector<float> ComputeSmoothNormals(
-		const std::vector<float>& ctrlPos,
-		const VtArray<int>& faceVertCounts,
-		const VtArray<int>& faceVertIndices,
-		const std::vector<uint8_t>* useFaceMask)
-	{
-		const size_t controlPointCount = ctrlPos.size() / 3;
-		std::vector<GfVec3f> accumulated(controlPointCount, GfVec3f(0.0f));
-
-		size_t fvOffset = 0;
-		for (size_t faceIndex = 0; faceIndex < faceVertCounts.size(); ++faceIndex) {
-			const int fvCount = faceVertCounts[faceIndex];
-			if (fvCount < 3) {
-				fvOffset += fvCount;
-				continue;
-			}
-
-			if (useFaceMask && !useFaceMask->empty() && !(*useFaceMask)[faceIndex]) {
-				fvOffset += fvCount;
-				continue;
-			}
-
-			const uint32_t i0 = static_cast<uint32_t>(faceVertIndices[fvOffset]);
-			if (i0 >= controlPointCount) {
-				spdlog::warn("Invalid position index {} while computing smooth normals.", i0);
-				fvOffset += fvCount;
-				continue;
-			}
-
-			const GfVec3f p0(
-				ctrlPos[i0 * 3 + 0],
-				ctrlPos[i0 * 3 + 1],
-				ctrlPos[i0 * 3 + 2]);
-
-			for (int corner = 1; corner + 1 < fvCount; ++corner) {
-				const uint32_t i1 = static_cast<uint32_t>(faceVertIndices[fvOffset + corner]);
-				const uint32_t i2 = static_cast<uint32_t>(faceVertIndices[fvOffset + corner + 1]);
-
-				if (i1 >= controlPointCount || i2 >= controlPointCount) {
-					spdlog::warn("Invalid position index ({}, {}) while computing smooth normals.", i1, i2);
-					continue;
-				}
-
-				const GfVec3f p1(
-					ctrlPos[i1 * 3 + 0],
-					ctrlPos[i1 * 3 + 1],
-					ctrlPos[i1 * 3 + 2]);
-				const GfVec3f p2(
-					ctrlPos[i2 * 3 + 0],
-					ctrlPos[i2 * 3 + 1],
-					ctrlPos[i2 * 3 + 2]);
-
-				const GfVec3f e1 = p1 - p0;
-				const GfVec3f e2 = p2 - p0;
-				const GfVec3f faceNormal = GfCross(e1, e2);
-
-				if (GfDot(faceNormal, faceNormal) <= 1e-20f) {
-					continue;
-				}
-
-				accumulated[i0] += faceNormal;
-				accumulated[i1] += faceNormal;
-				accumulated[i2] += faceNormal;
-			}
-
-			fvOffset += fvCount;
-		}
-
-		std::vector<float> normals;
-		normals.resize(controlPointCount * 3, 0.0f);
-		for (size_t i = 0; i < controlPointCount; ++i) {
-			GfVec3f n = accumulated[i];
-			const float len2 = GfDot(n, n);
-			if (len2 > 1e-20f) {
-				n *= (1.0f / std::sqrt(len2));
-			}
-			normals[i * 3 + 0] = n[0];
-			normals[i * 3 + 1] = n[1];
-			normals[i * 3 + 2] = n[2];
-		}
-
-		return normals;
-	}
-
-	template<typename T>
-	inline void EmitPrimvar(
-		std::vector<T>& dst,             // where to append
-		std::vector<T> const& raw,             // flat raw array
-		size_t                numComponents,   // e.g. 3 for normals, 2 for uvs, 4 for skin
-		InterpolationType     interp,          // how it was authored
-		size_t                faceIndex,       // current face number
-		size_t                fvIndex,         // index into face vertex array
-		uint32_t              vertIndex)       // control point index
-	{
-		size_t base = 0;
-		switch (interp) {
-		case InterpolationType::Constant:
-			// one tuple at raw[0...numComponents-1]
-			base = 0;
-			break;
-		case InterpolationType::Uniform:
-			// one tuple per face
-			base = faceIndex * numComponents;
-			break;
-		case InterpolationType::Vertex:
-		case InterpolationType::Varying:
-			// one tuple per control point
-			base = vertIndex * numComponents;
-			break;
-		case InterpolationType::FaceVarying:
-			// one tuple per face vertex
-			base = fvIndex * numComponents;
-			break;
-		}
-		// copy the tuple
-		for (size_t c = 0; c < numComponents; ++c) {
-			dst.push_back(raw[base + c]);
-		}
-	}
-
-	std::optional<UsdSkelSkinningQuery>
-		ExtractSkinningQuery(const UsdGeomMesh& mesh, const UsdSkelCache& skelCache)
-	{
-		UsdSkelBindingAPI bindAPI(mesh.GetPrim());
-		UsdSkelSkeleton skel = bindAPI.GetInheritedSkeleton();
-		if (!skel)
-			return std::nullopt;
-
-		// populate & build the query
-		skelCache.Populate(UsdSkelRoot(skel.GetPrim()), UsdPrimDefaultPredicate);
-		VtTokenArray skelJoints, meshJoints;
-		skel.GetJointsAttr().Get(&skelJoints);
-		bindAPI.GetJointsAttr().Get(&meshJoints);
-
-		UsdSkelSkinningQuery skinQ(
-			mesh.GetPrim(),
-			skelJoints,
-			meshJoints,
-			bindAPI.GetJointIndicesAttr(),
-			bindAPI.GetJointWeightsAttr(),
-			bindAPI.GetSkinningMethodAttr(),
-			bindAPI.GetGeomBindTransformAttr(),
-			bindAPI.GetJointsAttr(),
-			bindAPI.GetBlendShapesAttr(),
-			bindAPI.GetBlendShapeTargetsRel());
-		return skinQ;
-	}
-
-	void LoadGeom(
-		std::unique_ptr<std::vector<std::byte>>& rawData,
-		std::optional<std::unique_ptr<std::vector<std::byte>>>& skinningData,
-		unsigned int& vertexSize,
-		unsigned int& skinningVertexSize,
-		std::vector<UINT32>& indices,
-		unsigned int& vertexFlags,
-		const UsdGeomMesh& mesh,
-		const std::optional<UsdGeomSubset> subset,
-		double metersPerUnit,
-		const std::string& uvSetName,
-		const std::optional<UsdSkelSkinningQuery>& skinQ,
-		const VtTokenArray& skelJointOrderRaw,
-		const VtTokenArray& skelJointOrderMapped)
-	{
-		rawData = std::make_unique<std::vector<std::byte>>();
-		skinningData.reset();
-		indices.clear();
-		vertexFlags = 0;
-
-		// If we have a skeleton, build joint mappings
-
-		std::unordered_map<unsigned int, unsigned int> jointMapping;
-		// Build integer mapping from mapped to raw joint order
-		for (unsigned int i = 0; i < skelJointOrderMapped.size(); i++) {
-			std::string jointName = skelJointOrderMapped[i].GetString();
-
-			// Find the joint in the raw order
-			auto it = std::find_if(skelJointOrderRaw.begin(), skelJointOrderRaw.end(),
-				[&jointName](const pxr::TfToken& token) {
-					return token.GetString() == jointName;
-				});
-			// Get index
-			if (it != skelJointOrderRaw.end()) {
-				unsigned int rawIndex = static_cast<unsigned int>(std::distance(skelJointOrderRaw.begin(), it));
-				jointMapping[i] = rawIndex;
-			}
-			else {
-				spdlog::error("Joint {} not found in raw joint order.", jointName);
-				throw std::runtime_error("Invalid joint name in mapped joint orrder");
-			}
-		}
-
-		// positions
-		VtArray<GfVec3f> usdPts;
-		mesh.GetPointsAttr().Get(&usdPts);
-
-		std::vector<float> ctrlPos;
-		FlattenVecArray<GfVec3f>(usdPts, ctrlPos, static_cast<float>(metersPerUnit));
-
-		// control mesh points
-		VtArray<int> faceVertCounts, faceVertIndices;
-		mesh.GetFaceVertexCountsAttr().Get(&faceVertCounts);
-		mesh.GetFaceVertexIndicesAttr().Get(&faceVertIndices);
-
-		// Apply subset if present
-		std::vector<uint8_t> useFace(faceVertCounts.size(), 0);
-		if (subset) {
-			VtArray<int> subsetFaceIndices;
-			subset->GetIndicesAttr().Get(&subsetFaceIndices);
-			for (int fi : subsetFaceIndices)
-				if (fi >= 0 && (size_t)fi < useFace.size()) useFace[fi] = 1;
-		}
-
-		std::string primName = mesh.GetPrim().GetName().GetString();
-
-		// Reserve final arrays
-		size_t cornerCount = 0;
-		for (size_t faceIndex = 0; faceIndex < faceVertCounts.size(); ++faceIndex) {
-			if (subset && !useFace[faceIndex]) {
-				continue;
-			}
-			const int fvCount = faceVertCounts[faceIndex];
-			if (fvCount == 3) {
-				cornerCount += 3;
-			}
-			else if (fvCount > 3) {
-				cornerCount += static_cast<size_t>(fvCount - 2) * 3;
-			}
-		}
-
-		// normals
-
-		VtArray<GfVec3f> usdNormals;
-		bool gotNormals = mesh.GetNormalsAttr().Get(&usdNormals);
-		bool generatedSmoothNormals = false;
-
-		// In case we have "normals:indices"
-		VtIntArray nIdx;
-		UsdAttribute nIdxAttr = mesh.GetPrim().GetAttribute(TfToken("normals:indices"));
-		bool hasNIdx = nIdxAttr && nIdxAttr.Get(&nIdx);
-
-		if (gotNormals && hasNIdx) {
-			VtArray<GfVec3f> deindexed;
-			deindexed.resize(nIdx.size());
-			for (size_t i = 0; i < nIdx.size(); ++i) {
-				int src = nIdx[i];
-				if (src >= 0 && (size_t)src < usdNormals.size()) {
-					deindexed[i] = usdNormals[src];
-				}
-				else {
-					spdlog::warn("Invalid normal index {} in 'normals:indices' for prim '{}'", src, primName);
-				}
-			}
-			usdNormals.swap(deindexed);
-		}
-
-		std::vector<float> rawNormals;
-		if (gotNormals) {
-			FlattenVecArray<GfVec3f>(usdNormals, rawNormals, 1.0f);
-			vertexFlags |= VertexFlags::VERTEX_NORMALS;
-		}
-		else {
-			rawNormals = ComputeSmoothNormals(ctrlPos, faceVertCounts, faceVertIndices, subset ? &useFace : nullptr);
-			if (!rawNormals.empty()) {
-				gotNormals = true;
-				generatedSmoothNormals = true;
-				vertexFlags |= VertexFlags::VERTEX_NORMALS;
-				spdlog::info("Generated smooth normals for mesh '{}' because no normals attribute was authored.", primName);
-			}
-		}
-
-		InterpolationType normInterp = InterpolationType::Vertex;
-		if (gotNormals && !generatedSmoothNormals) {
-			normInterp = GetInterpolationType(mesh.GetNormalsInterpolation());
-		}
-
-		// texcoords
-		UsdAttribute tcAttr = mesh.GetPrim().GetAttribute(TfToken("primvars:" + uvSetName));
-		UsdGeomPrimvar uvPrim(tcAttr);
-		VtArray<GfVec2f> usdTC;
-		bool gotTC = (uvPrim && uvPrim.ComputeFlattened(&usdTC));
-		InterpolationType tcInterp = gotTC
-			? GetInterpolationType(uvPrim.GetInterpolation())
-			: InterpolationType::Vertex;
-		std::vector<float> rawTC;
-		if (gotTC) {
-			VtIntArray stIndices;
-			// flip Y for DX
-			rawTC.reserve(usdTC.size() * 2);
-			for (auto const& uv : usdTC) {
-				rawTC.push_back(float(uv[0]));
-				rawTC.push_back(1.0f - float(uv[1]));
-			}
-			vertexFlags |= VertexFlags::VERTEX_TEXCOORDS;
-		}
-
-		// skinning
-		UsdSkelBindingAPI bindAPI(mesh.GetPrim());
-		UsdSkelSkeleton    skel = bindAPI.GetInheritedSkeleton();
-		std::vector<uint32_t> rawJoints;
-		std::vector<float>    rawWeights;
-		InterpolationType jointInterp = InterpolationType::Vertex,
-			weightInterp = InterpolationType::Vertex;
-
-		if (skinQ) {
-
-			// compute per-point joint influences
-			VtIntArray   jointIndices;
-			VtFloatArray jointWeights;
-			skinQ.value().ComputeVaryingJointInfluences(
-				usdPts.size(), &jointIndices, &jointWeights);
-
-			// flatten into rawJoints/rawWeights
-			rawJoints.reserve(jointIndices.size());
-			rawWeights.reserve(jointWeights.size());
-
-			unsigned int influencesPerPoint = skinQ.value().GetNumInfluencesPerComponent();
-			// reserve numPoints*slots
-			unsigned short maxInfluencesPerJoint = 4; // TODO: Support arbitrary numbers of influences
-			rawJoints.reserve(usdPts.size() * maxInfluencesPerJoint);
-			rawWeights.reserve(usdPts.size() * maxInfluencesPerJoint);
-
-			size_t cursor = 0;
-			for (size_t pt = 0; pt < usdPts.size(); ++pt) {
-				for (unsigned int slot = 0; slot < maxInfluencesPerJoint; ++slot) {
-					if (slot < influencesPerPoint) {
-						if (cursor < jointIndices.size()) {
-							rawJoints.push_back((uint32_t)jointMapping[jointIndices[cursor]]);
-							rawWeights.push_back(jointWeights[cursor]);
-							++cursor;
-						}
-						else {
-							rawJoints.push_back(0u);
-							rawWeights.push_back(0.0f);
-						}
-					}
-					else {
-						rawJoints.push_back(0u); // padding
-						rawWeights.push_back(0.0f); // padding
-					}
-				}
-				// Jump ahead to match influencesPerPoint
-				if (maxInfluencesPerJoint < influencesPerPoint) {
-					cursor += influencesPerPoint - maxInfluencesPerJoint;
-				}
-			}
-
-			// record interpolation tokens
-			jointInterp = GetInterpolationType(
-				bindAPI.GetJointIndicesPrimvar().GetInterpolation());
-			weightInterp = GetInterpolationType(
-				bindAPI.GetJointWeightsPrimvar().GetInterpolation());
-
-			vertexFlags |= VertexFlags::VERTEX_SKINNED;
-		}
-
-		vertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + (gotTC ? sizeof(DirectX::XMFLOAT2) : 0);
-		skinningVertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMUINT4) + sizeof(DirectX::XMFLOAT4);
-		rawData->resize(cornerCount * vertexSize);
-		indices.reserve(cornerCount);
-
-		const bool hasSkinning = !rawJoints.empty();
-		if (hasSkinning) {
-			skinningData = std::make_unique<std::vector<std::byte>>(cornerCount * skinningVertexSize);
-		}
-
-		auto tupleBase = [](InterpolationType interp, size_t faceIndex, size_t fvIndex, uint32_t vertIndex, size_t numComponents) -> size_t {
-			switch (interp) {
-			case InterpolationType::Constant:
-				return 0;
-			case InterpolationType::Uniform:
-				return faceIndex * numComponents;
-			case InterpolationType::Vertex:
-			case InterpolationType::Varying:
-				return static_cast<size_t>(vertIndex) * numComponents;
-			case InterpolationType::FaceVarying:
-				return fvIndex * numComponents;
-			}
-			return 0;
-		};
-
-		auto copyTupleFloat = [&](std::byte* dst, const std::vector<float>& raw, size_t numComponents, InterpolationType interp, size_t faceIndex, size_t fvIndex, uint32_t vertIndex) {
-			const size_t base = tupleBase(interp, faceIndex, fvIndex, vertIndex, numComponents);
-			std::memcpy(dst, raw.data() + base, numComponents * sizeof(float));
-		};
-
-		auto copyTupleUInt = [&](std::byte* dst, const std::vector<uint32_t>& raw, size_t numComponents, InterpolationType interp, size_t faceIndex, size_t fvIndex, uint32_t vertIndex) {
-			const size_t base = tupleBase(interp, faceIndex, fvIndex, vertIndex, numComponents);
-			std::memcpy(dst, raw.data() + base, numComponents * sizeof(uint32_t));
-		};
-
-		const DirectX::XMFLOAT3 defaultNormal{ 0.0f, 0.0f, 0.0f };
-
-		size_t fvOffset = 0;
-		size_t outVertex = 0;
-		for (size_t f = 0; f < faceVertCounts.size(); ++f) {
-			int fc = faceVertCounts[f];
-			if (!subset || useFace[f]) {
-				for (int i = 1; i + 1 < fc; ++i) {
-					int cornerIdxs[3] = { 0, i, i + 1 };
-					for (int c = 0; c < 3; ++c) {
-						size_t fvIndex = fvOffset + cornerIdxs[c];
-						uint32_t vertIdx = faceVertIndices[fvIndex];
-
-						const size_t outBase = outVertex * vertexSize;
-						std::byte* outPtr = rawData->data() + outBase;
-
-						const size_t posBase = static_cast<size_t>(vertIdx) * 3;
-						std::memcpy(outPtr, ctrlPos.data() + posBase, sizeof(DirectX::XMFLOAT3));
-
-						size_t offset = sizeof(DirectX::XMFLOAT3);
-						if (gotNormals) {
-							copyTupleFloat(outPtr + offset, rawNormals, 3, normInterp, f, fvIndex, vertIdx);
-						}
-						else {
-							std::memcpy(outPtr + offset, &defaultNormal, sizeof(defaultNormal));
-						}
-						offset += sizeof(DirectX::XMFLOAT3);
-
-						if (gotTC) {
-							copyTupleFloat(outPtr + offset, rawTC, 2, tcInterp, f, fvIndex, vertIdx);
-						}
-
-						if (hasSkinning) {
-							std::byte* skinPtr = skinningData.value()->data() + outVertex * skinningVertexSize;
-							std::memcpy(skinPtr, outPtr, sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3));
-
-							const size_t jointsOffset = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3);
-							const size_t weightsOffset = jointsOffset + sizeof(DirectX::XMUINT4);
-							copyTupleUInt(skinPtr + jointsOffset, rawJoints, 4, jointInterp, f, fvIndex, vertIdx);
-							copyTupleFloat(skinPtr + weightsOffset, rawWeights, 4, weightInterp, f, fvIndex, vertIdx);
-						}
-
-						indices.push_back(static_cast<UINT32>(outVertex));
-						outVertex++;
-					}
-				}
-			}
-			fvOffset += fc;
-		}
-	}
-
 	std::string& uvSetFor(const UsdShadeMaterial& mat)
 	{
 		auto& materialPath = mat.GetPrim().GetPath().GetString();
@@ -1008,7 +506,7 @@ namespace USDLoader {
 		}
 
 		// Extract skin once
-		auto skinQ = ExtractSkinningQuery(mesh, skelCache);
+		auto skinQ = USDGeometryExtractor::GetSkinningQuery(mesh, skelCache);
 
 		// Gather subsets
 		UsdShadeMaterialBindingAPI  bindAPI(mesh);
@@ -1018,144 +516,42 @@ namespace USDLoader {
 
 		// If no subsets: one full mesh with ComputeBoundMaterial()
 		if (subsets.empty()) {
-			// find whichever material is on the mesh itself
 			auto matAPI = UsdShadeMaterialBindingAPI(mesh);
 			auto mat = matAPI.ComputeBoundMaterial();
 			ProcessMaterial(mat, stage, isUSDZ, directory);
 
-			auto cacheIdentity = CLodCacheLoader::BuildIdentity(mesh, stage, "");
-			auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
+			// Phase 1: geometry extraction + CLod cache
+			auto result = USDGeometryExtractor::ExtractSubMesh(
+				mesh, std::nullopt, stage, metersPerUnit, uvSetFor(mat),
+				skinQ, skelJointOrderRaw, skelJointOrderMapped);
 
-			std::unique_ptr<std::vector<std::byte>> rawData;
-			std::optional<std::unique_ptr<std::vector<std::byte>>> skinningData;
-			unsigned int vertexSize = 0;
-			unsigned int skinningVertexSize = 0;
-			std::vector<UINT32> indices;
-			unsigned int vertexFlags = 0;
-			LoadGeom(rawData, skinningData, vertexSize, skinningVertexSize, indices, vertexFlags, mesh, std::nullopt, metersPerUnit, uvSetFor(mat), skinQ, skelJointOrderRaw, skelJointOrderMapped);
-
-			MeshIngestBuilder ingest(vertexSize, (skinningData && *skinningData) ? skinningVertexSize : 0, vertexFlags);
-			const size_t vertexCount = rawData->size() / static_cast<size_t>(vertexSize);
-			ingest.ReserveVertices(vertexCount);
-			for (size_t vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex) {
-				const std::byte* vertexBytes = rawData->data() + vertexIndex * static_cast<size_t>(vertexSize);
-				ingest.AppendVertexBytes(vertexBytes, vertexSize);
-			}
-
-			if (skinningData && *skinningData) {
-				const size_t skinningVertexCount = (*skinningData)->size() / static_cast<size_t>(skinningVertexSize);
-				ingest.ReserveVertices(skinningVertexCount);
-				for (size_t vertexIndex = 0; vertexIndex < skinningVertexCount; ++vertexIndex) {
-					const std::byte* skinningVertexBytes = (*skinningData)->data() + vertexIndex * static_cast<size_t>(skinningVertexSize);
-					ingest.AppendSkinningVertexBytes(skinningVertexBytes, skinningVertexSize);
-				}
-			}
-
-			ingest.ReserveIndices(indices.size());
-			ingest.AppendIndices(indices.data(), indices.size());
-
-			if (!prebuiltData.has_value()) {
-				ClusterLODPrebuildArtifacts artifacts = ingest.BuildClusterLODArtifacts();
-
-				if (CLodCacheLoader::SavePrebuiltLocked(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload())) {
-					auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
-					if (diskBackedPrebuilt.has_value()) {
-						prebuiltData = std::move(diskBackedPrebuilt);
-					}
-					else {
-						prebuiltData = std::move(artifacts.prebuiltData);
-					}
-				}
-				else {
-					prebuiltData = std::move(artifacts.prebuiltData);
-				}
-			}
-
+			// Phase 2: GPU mesh creation
 			auto mtlPtr = loadingCache.materialCache.find(
 				mat.GetPrim().GetPath().GetString());
 			auto material = mtlPtr != loadingCache.materialCache.end()
 				? mtlPtr->second
 				: nullptr;
-			auto mPtr = ingest.Build(material, std::move(prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
-
+			auto mPtr = result.ingest.Build(material, std::move(result.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
 			outMeshes.push_back(mPtr);
 		}
 		else {
 			// Otherwise: one mesh per subset
 			for (auto const& subset : subsets) {
-				// subset familyName=="materialBind", so:
 				auto mat = UsdShadeMaterialBindingAPI(subset).ComputeBoundMaterial();
 				ProcessMaterial(mat, stage, isUSDZ, directory);
 
-				auto cacheIdentity = CLodCacheLoader::BuildIdentity(mesh, stage, subset.GetPrim().GetName().GetString());
-				auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
+				// Phase 1: geometry extraction + CLod cache
+				auto result = USDGeometryExtractor::ExtractSubMesh(
+					mesh, std::make_optional(subset), stage, metersPerUnit, uvSetFor(mat),
+					skinQ, skelJointOrderRaw, skelJointOrderMapped);
 
-				std::unique_ptr<std::vector<std::byte>> rawData;
-				std::optional<std::unique_ptr<std::vector<std::byte>>> skinningData;
-				unsigned int vertexSize = 0;
-				unsigned int skinningVertexSize = 0;
-				std::vector<UINT32> indices;
-				unsigned int vertexFlags = 0;
-				LoadGeom(
-					rawData,
-					skinningData,
-					vertexSize,
-					skinningVertexSize,
-					indices,
-					vertexFlags,
-					mesh,
-					subset,
-					metersPerUnit,
-					uvSetFor(mat),
-					skinQ,
-					skelJointOrderRaw,
-					skelJointOrderMapped);
-
-				MeshIngestBuilder ingest(vertexSize, (skinningData && *skinningData) ? skinningVertexSize : 0, vertexFlags);
-				const size_t vertexCount = rawData->size() / static_cast<size_t>(vertexSize);
-				ingest.ReserveVertices(vertexCount);
-				for (size_t vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex) {
-					const std::byte* vertexBytes = rawData->data() + vertexIndex * static_cast<size_t>(vertexSize);
-					ingest.AppendVertexBytes(vertexBytes, vertexSize);
-				}
-
-				if (skinningData && *skinningData) {
-					const size_t skinningVertexCount = (*skinningData)->size() / static_cast<size_t>(skinningVertexSize);
-					ingest.ReserveVertices(skinningVertexCount);
-					for (size_t vertexIndex = 0; vertexIndex < skinningVertexCount; ++vertexIndex) {
-						const std::byte* skinningVertexBytes = (*skinningData)->data() + vertexIndex * static_cast<size_t>(skinningVertexSize);
-						ingest.AppendSkinningVertexBytes(skinningVertexBytes, skinningVertexSize);
-					}
-				}
-
-				ingest.ReserveIndices(indices.size());
-				ingest.AppendIndices(indices.data(), indices.size());
-
-				if (!prebuiltData.has_value()) {
-					ClusterLODPrebuildArtifacts artifacts = ingest.BuildClusterLODArtifacts();
-
-					if (CLodCacheLoader::SavePrebuiltLocked(cacheIdentity, artifacts.prebuiltData, artifacts.cacheBuildData.AsPayload())) {
-						auto diskBackedPrebuilt = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
-						if (diskBackedPrebuilt.has_value()) {
-							prebuiltData = std::move(diskBackedPrebuilt);
-						}
-						else {
-							prebuiltData = std::move(artifacts.prebuiltData);
-						}
-					}
-					else {
-						prebuiltData = std::move(artifacts.prebuiltData);
-					}
-				}
-
+				// Phase 2: GPU mesh creation
 				auto mtlPtr = loadingCache.materialCache.find(
 					mat.GetPrim().GetPath().GetString());
 				auto material = mtlPtr != loadingCache.materialCache.end()
 					? mtlPtr->second
 					: nullptr;
-
-				auto mPtr = ingest.Build(material, std::move(prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
-
+				auto mPtr = result.ingest.Build(material, std::move(result.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
 				outMeshes.push_back(mPtr);
 			}
 		}
@@ -1300,7 +696,7 @@ namespace USDLoader {
 			return; // Not a mesh prim
 		}
 
-		auto skinningQuery = ExtractSkinningQuery(mesh, skelCache);
+		auto skinningQuery = USDGeometryExtractor::GetSkinningQuery(mesh, skelCache);
 
 		UsdSkelBindingAPI bindingAPI(prim);
 		std::shared_ptr<Skeleton> skeleton;

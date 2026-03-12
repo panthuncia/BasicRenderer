@@ -74,7 +74,7 @@ namespace
 		return static_cast<uint32_t>(std::max(0, std::min(c, static_cast<int32_t>(res) - 1)));
 	}
 
-	// Triangle-AABB overlap test (Separating Axis Theorem — Akenine-Möller method)
+	// Triangle-AABB overlap test (Separating Axis Theorem- Akenine-Möller method)
 	bool TriangleAABBOverlap(const Float3& v0, const Float3& v1, const Float3& v2,
 		const Float3& boxCenter, const Float3& boxHalfSize)
 	{

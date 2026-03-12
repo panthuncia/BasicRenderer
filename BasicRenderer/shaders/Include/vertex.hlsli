@@ -18,6 +18,9 @@ struct Vertex {
 #define VERTEX_TEXCOORDS 1 << 2
 #define VERTEX_SKINNED 1 << 3
 
+// Per-object flags (mirrors OBJECT_FLAG_* in ShaderBuffers.h)
+#define OBJECT_FLAG_REVERSE_WINDING (1u << 0)
+
 Vertex LoadVertex(uint byteOffset, ByteAddressBuffer buffer, uint flags) {
     Vertex vertex;
 

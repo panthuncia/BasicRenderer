@@ -412,6 +412,10 @@ private:
 	std::function<bool()> getUseAsyncCompute;
     std::function<void(bool)> setUseAsyncCompute;
 
+	bool m_heavyDebug = false;
+	std::function<bool()> getHeavyDebug;
+	std::function<void(bool)> setHeavyDebug;
+
     AutoAliasMode m_autoAliasMode = AutoAliasMode::Balanced;
     std::function<AutoAliasMode()> getAutoAliasMode;
     std::function<void(AutoAliasMode)> setAutoAliasMode;
@@ -431,10 +435,6 @@ private:
     uint32_t m_clodStreamingCpuUploadBudgetRequests = 64;
     std::function<uint32_t()> getCLodStreamingCpuUploadBudgetRequests;
     std::function<void(uint32_t)> setCLodStreamingCpuUploadBudgetRequests;
-
-    uint32_t m_clodStreamingResidentBudgetGroups = 0xFFFFFFFFu;
-    std::function<uint32_t()> getCLodStreamingResidentBudgetGroups;
-    std::function<void(uint32_t)> setCLodStreamingResidentBudgetGroups;
 
     float m_autoAliasPoolGrowthHeadroom = 1.5f;
     std::function<float()> getAutoAliasPoolGrowthHeadroom;
@@ -611,6 +611,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_useAsyncCompute = getUseAsyncCompute();
 	observerSetting(m_useAsyncCompute, "useAsyncCompute");
 
+	getHeavyDebug = settingsManager.getSettingGetter<bool>("heavyDebug");
+	setHeavyDebug = settingsManager.getSettingSetter<bool>("heavyDebug");
+	m_heavyDebug = getHeavyDebug();
+	observerSetting(m_heavyDebug, "heavyDebug");
+
     getAutoAliasMode = settingsManager.getSettingGetter<AutoAliasMode>("autoAliasMode");
     setAutoAliasMode = settingsManager.getSettingSetter<AutoAliasMode>("autoAliasMode");
     m_autoAliasMode = getAutoAliasMode();
@@ -635,11 +640,6 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     setCLodStreamingCpuUploadBudgetRequests = settingsManager.getSettingSetter<uint32_t>("clodStreamingCpuUploadBudgetRequests");
     m_clodStreamingCpuUploadBudgetRequests = getCLodStreamingCpuUploadBudgetRequests();
     observerSetting(m_clodStreamingCpuUploadBudgetRequests, "clodStreamingCpuUploadBudgetRequests");
-
-    getCLodStreamingResidentBudgetGroups = settingsManager.getSettingGetter<uint32_t>("clodStreamingResidentBudgetGroups");
-    setCLodStreamingResidentBudgetGroups = settingsManager.getSettingSetter<uint32_t>("clodStreamingResidentBudgetGroups");
-    m_clodStreamingResidentBudgetGroups = getCLodStreamingResidentBudgetGroups();
-    observerSetting(m_clodStreamingResidentBudgetGroups, "clodStreamingResidentBudgetGroups");
 
     getAutoAliasPoolGrowthHeadroom = settingsManager.getSettingGetter<float>("autoAliasPoolGrowthHeadroom");
     setAutoAliasPoolGrowthHeadroom = settingsManager.getSettingSetter<float>("autoAliasPoolGrowthHeadroom");
@@ -773,17 +773,13 @@ inline void Menu::Render(RenderContext& context, rhi::CommandList commandList) {
 		if (ImGui::Checkbox("Use Async Compute", &m_useAsyncCompute)) {
 			setUseAsyncCompute(m_useAsyncCompute);
 		}
+		if (ImGui::Checkbox("Heavy Debug (1 pass/batch + GPU drain)", &m_heavyDebug)) {
+			setHeavyDebug(m_heavyDebug);
+		}
         int clodCpuUploadBudget = static_cast<int>(std::min<uint32_t>(m_clodStreamingCpuUploadBudgetRequests, 4096u));
         if (ImGui::SliderInt("CLod CPU Upload Budget", &clodCpuUploadBudget, 1, 4096)) {
             m_clodStreamingCpuUploadBudgetRequests = static_cast<uint32_t>(std::max(clodCpuUploadBudget, 1));
             setCLodStreamingCpuUploadBudgetRequests(m_clodStreamingCpuUploadBudgetRequests);
-        }
-        constexpr uint32_t kClodResidentBudgetMin = 1u;
-        constexpr uint32_t kClodResidentBudgetMax = 1000000u;
-        uint32_t clodResidentBudget = std::clamp(m_clodStreamingResidentBudgetGroups, kClodResidentBudgetMin, kClodResidentBudgetMax);
-        if (ImGui::SliderScalar("CLod Resident Budget", ImGuiDataType_U32, &clodResidentBudget, &kClodResidentBudgetMin, &kClodResidentBudgetMax)) {
-            m_clodStreamingResidentBudgetGroups = clodResidentBudget;
-            setCLodStreamingResidentBudgetGroups(m_clodStreamingResidentBudgetGroups);
         }
         ImGui::Checkbox("Render Graph Inspector", &showRG);
         ImGui::Checkbox("Memory introspection", &showMemoryIntrospection);
@@ -1193,7 +1189,7 @@ inline void Menu::TryFinalizeCLodCaptureStats(uint64_t captureId) {
         const VisibleCluster& cluster = m_clodCapturePendingClusters[i];
         viewHistogram[cluster.viewID]++;
         instanceHistogram[cluster.instanceID]++;
-        const uint64_t key = (static_cast<uint64_t>(cluster.instanceID) << 32ull) | static_cast<uint64_t>(cluster.globalMeshletIndex);
+        const uint64_t key = (static_cast<uint64_t>(cluster.instanceID) << 32ull) | (static_cast<uint64_t>(cluster.groupID) << 16ull) | static_cast<uint64_t>(cluster.localMeshletIndex);
         uniqueMeshlets.insert(key);
     }
 
@@ -1438,6 +1434,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
             max5s.completedResults = std::max(max5s.completedResults, sample.stats.completedResults);
             max5s.residentAllocationBytes = std::max(max5s.residentAllocationBytes, sample.stats.residentAllocationBytes);
             max5s.completedResultBytes = std::max(max5s.completedResultBytes, sample.stats.completedResultBytes);
+            max5s.streamedBytesThisFrame = std::max(max5s.streamedBytesThisFrame, sample.stats.streamedBytesThisFrame);
         }
 
         auto formatBytes = [](uint64_t bytes) {
@@ -1478,6 +1475,14 @@ inline void Menu::DrawCLodTelemetryWindow() {
             m_clodStreamingOpsLatest.queuedRequests,
             m_clodStreamingOpsLatest.completedResults,
             formatBytes(m_clodStreamingOpsLatest.completedResultBytes).c_str());
+        {
+            const double kbPerFrame = static_cast<double>(m_clodStreamingOpsLatest.streamedBytesThisFrame) / 1024.0;
+            const float fps = ImGui::GetIO().Framerate;
+            const double gbPerSec = (fps > 0.0f)
+                ? (static_cast<double>(m_clodStreamingOpsLatest.streamedBytesThisFrame) * static_cast<double>(fps)) / (1024.0 * 1024.0 * 1024.0)
+                : 0.0;
+            ImGui::Text("Throughput: %.1f KB/frame  %.3f GB/s", kbPerFrame, gbPerSec);
+        }
 
         ImGui::TextUnformatted("Max in last 5 seconds");
         ImGui::Text("Load max: requested=%u unique=%u applied=%u failed=%u",
@@ -1498,6 +1503,14 @@ inline void Menu::DrawCLodTelemetryWindow() {
             max5s.queuedRequests,
             max5s.completedResults,
             formatBytes(max5s.completedResultBytes).c_str());
+        {
+            const double kbPerFrame = static_cast<double>(max5s.streamedBytesThisFrame) / 1024.0;
+            const float fps = ImGui::GetIO().Framerate;
+            const double gbPerSec = (fps > 0.0f)
+                ? (static_cast<double>(max5s.streamedBytesThisFrame) * static_cast<double>(fps)) / (1024.0 * 1024.0 * 1024.0)
+                : 0.0;
+            ImGui::Text("Throughput max: %.1f KB/frame  %.3f GB/s", kbPerFrame, gbPerSec);
+        }
     }
 
     if (m_clodTelemetryHasData) {

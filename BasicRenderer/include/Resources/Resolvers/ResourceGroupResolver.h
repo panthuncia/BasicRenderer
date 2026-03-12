@@ -19,6 +19,10 @@ public:
 		return m_resourceGroup->GetChildren();
     }
 
+    uint64_t GetContentVersion() const override {
+        return m_resourceGroup ? m_resourceGroup->GetContentVersion() : 0;
+    }
+
 private:
     std::shared_ptr<ResourceGroup> m_resourceGroup;
 };

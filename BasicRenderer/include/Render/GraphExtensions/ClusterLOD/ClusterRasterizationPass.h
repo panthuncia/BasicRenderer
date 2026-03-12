@@ -15,6 +15,7 @@
 #include "Resources/PixelBuffer.h"
 
 class Buffer;
+class ResourceGroup;
 
 struct ClusterRasterizationPassInputs {
     bool wireframe;
@@ -37,7 +38,8 @@ public:
         ClusterRasterizationPassInputs inputs,
         std::shared_ptr<Buffer> compactedVisibleClustersBuffer,
         std::shared_ptr<Buffer> rasterBucketsHistogramBuffer,
-        std::shared_ptr<Buffer> rasterBucketsIndirectArgsBuffer);
+        std::shared_ptr<Buffer> rasterBucketsIndirectArgsBuffer,
+        std::shared_ptr<ResourceGroup> slabResourceGroup = nullptr);
     ~ClusterRasterizationPass();
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override;
@@ -58,6 +60,8 @@ private:
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsHistogramBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBuffer;
+
+    std::shared_ptr<ResourceGroup> m_slabResourceGroup;
 
     rhi::CommandSignaturePtr m_rasterizationCommandSignature;
 
