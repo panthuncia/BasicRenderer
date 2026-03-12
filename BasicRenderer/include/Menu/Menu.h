@@ -412,6 +412,10 @@ private:
 	std::function<bool()> getUseAsyncCompute;
     std::function<void(bool)> setUseAsyncCompute;
 
+	bool m_heavyDebug = false;
+	std::function<bool()> getHeavyDebug;
+	std::function<void(bool)> setHeavyDebug;
+
     AutoAliasMode m_autoAliasMode = AutoAliasMode::Balanced;
     std::function<AutoAliasMode()> getAutoAliasMode;
     std::function<void(AutoAliasMode)> setAutoAliasMode;
@@ -607,6 +611,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_useAsyncCompute = getUseAsyncCompute();
 	observerSetting(m_useAsyncCompute, "useAsyncCompute");
 
+	getHeavyDebug = settingsManager.getSettingGetter<bool>("heavyDebug");
+	setHeavyDebug = settingsManager.getSettingSetter<bool>("heavyDebug");
+	m_heavyDebug = getHeavyDebug();
+	observerSetting(m_heavyDebug, "heavyDebug");
+
     getAutoAliasMode = settingsManager.getSettingGetter<AutoAliasMode>("autoAliasMode");
     setAutoAliasMode = settingsManager.getSettingSetter<AutoAliasMode>("autoAliasMode");
     m_autoAliasMode = getAutoAliasMode();
@@ -763,6 +772,9 @@ inline void Menu::Render(RenderContext& context, rhi::CommandList commandList) {
         DrawLoadModelButton();
 		if (ImGui::Checkbox("Use Async Compute", &m_useAsyncCompute)) {
 			setUseAsyncCompute(m_useAsyncCompute);
+		}
+		if (ImGui::Checkbox("Heavy Debug (1 pass/batch + GPU drain)", &m_heavyDebug)) {
+			setHeavyDebug(m_heavyDebug);
 		}
         int clodCpuUploadBudget = static_cast<int>(std::min<uint32_t>(m_clodStreamingCpuUploadBudgetRequests, 4096u));
         if (ImGui::SliderInt("CLod CPU Upload Budget", &clodCpuUploadBudget, 1, 4096)) {

@@ -60,6 +60,7 @@
 #include "Render/RenderGraphBuildHelper.h"
 #include "Managers/Singletons/UpscalingManager.h"
 #include "Managers/Singletons/FFXManager.h"
+#include "Render/Runtime/OpenRenderGraphSettings.h"
 #include "Render/GraphExtensions/IOExtension.h"
 #include "Render/GraphExtensions/CLodExtension.h"
 #include "RenderPasses/DebugGridPass.h"
@@ -450,6 +451,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<bool>("autoAliasLogExclusionReasons", false);
 	settingsManager.registerSetting<uint32_t>("autoAliasPoolRetireIdleFrames", 120u);
 	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
+    settingsManager.registerSetting<bool>("heavyDebug", false);
     settingsManager.registerSetting<uint32_t>("clodStreamingCpuUploadBudgetRequests", 100u);
 	settingsManager.registerSetting<uint32_t>("usdPointInstancerMaxInstances", 10000u);
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
@@ -1028,6 +1030,24 @@ void Renderer::Render() {
     auto graphicsQueue = deviceManager.GetGraphicsQueue();
     graphicsQueue.Submit({ &commandList.Get() });
 
+    // Sync SettingsManager values into OpenRenderGraphSettings so the
+    // DefaultRenderGraphSettingsService reads up-to-date values.
+    {
+        auto& sm = SettingsManager::GetInstance();
+        rg::runtime::OpenRenderGraphSettings orgSettings{};
+        orgSettings.numFramesInFlight        = m_numFramesInFlight;
+        orgSettings.collectPipelineStatistics = false;
+        orgSettings.useAsyncCompute           = sm.getSettingGetter<bool>("useAsyncCompute")();
+        orgSettings.autoAliasMode             = static_cast<uint8_t>(sm.getSettingGetter<AutoAliasMode>("autoAliasMode")());
+        orgSettings.autoAliasPackingStrategy  = static_cast<uint8_t>(sm.getSettingGetter<AutoAliasPackingStrategy>("autoAliasPackingStrategy")());
+        orgSettings.autoAliasEnableLogging    = sm.getSettingGetter<bool>("autoAliasEnableLogging")();
+        orgSettings.autoAliasLogExclusionReasons = sm.getSettingGetter<bool>("autoAliasLogExclusionReasons")();
+        orgSettings.autoAliasPoolRetireIdleFrames = sm.getSettingGetter<uint32_t>("autoAliasPoolRetireIdleFrames")();
+        orgSettings.autoAliasPoolGrowthHeadroom   = sm.getSettingGetter<float>("autoAliasPoolGrowthHeadroom")();
+        orgSettings.heavyDebug                = sm.getSettingGetter<bool>("heavyDebug")();
+        rg::runtime::SetOpenRenderGraphSettings(orgSettings);
+    }
+
     currentRenderGraph->Execute(passExecutionContext); // Main render graph execution
 	
 	commandList->Recycle(commandAllocator.Get());
@@ -1179,19 +1199,10 @@ void Renderer::Cleanup() {
 }
 
 void Renderer::CheckDebugMessages() {
-    //ComPtr<ID3D12InfoQueue> infoQueue;
-    //if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&infoQueue)))) {
-    //    UINT64 messageCount = infoQueue->GetNumStoredMessages();
-    //    for (UINT64 i = 0; i < messageCount; ++i) {
-    //        SIZE_T messageLength = 0;
-    //        infoQueue->GetMessage(i, nullptr, &messageLength);
-    //        D3D12_MESSAGE* pMessage = (D3D12_MESSAGE*)malloc(messageLength);
-    //        infoQueue->GetMessage(i, pMessage, &messageLength);
-    //        std::cerr << "D3D12 Debug Message: " << pMessage->pDescription << std::endl;
-    //        free(pMessage);
-    //    }
-    //    infoQueue->ClearStoredMessages();
-    //}
+    auto device = DeviceManager::GetInstance().GetDevice();
+    if (device) {
+        device.CheckDebugMessages();
+    }
 }
 
 void Renderer::SetEnvironment(std::string environmentName) {

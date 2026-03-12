@@ -338,7 +338,7 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
         nodeGpuInputs[1].entrypointIndex = 1;
         nodeGpuInputs[1].numRecords = 0;
         nodeGpuInputs[1].recordsAddress = replayAddress;
-        nodeGpuInputs[1].recordStride = sizeof(CLodNodeGroupReplayRecord);
+        nodeGpuInputs[1].recordStride = sizeof(CLodMeshletReplayRecord); // must match CLOD_REPLAY_SLOT_STRIDE_BYTES (unified slot stride)
 
         nodeGpuInputs[2].entrypointIndex = 2;
         nodeGpuInputs[2].numRecords = 0;

@@ -52,15 +52,15 @@ void CreateRasterBucketsHistogramCommandCSMain()
 
     const CLodReplayBufferState replayState = replayStateBuffer[0];
 
-    const uint nodeGroupRecordStride = sizeof(CLodNodeGroupReplayRecord);
-    const uint meshletRecordStride = sizeof(CLodMeshletReplayRecord);
     const uint replayRecordCount = min(replayState.totalWriteCount, CLOD_REPLAY_SLOT_CAPACITY);
 
     // Slot 0 is CLodMultiNodeGpuInput (CPU initialized); slot 1+ are CLodNodeGpuInput records.
+    // Both entry points must use the unified slot stride because all replay record types
+    // (node/group and meshlet) share the same fixed-stride buffer.
     nodeInputs[1].numRecords = replayRecordCount;
-    nodeInputs[1].recordStride = nodeGroupRecordStride;
+    nodeInputs[1].recordStride = CLOD_REPLAY_SLOT_STRIDE_BYTES;
     nodeInputs[2].numRecords = replayRecordCount;
-    nodeInputs[2].recordStride = meshletRecordStride;
+    nodeInputs[2].recordStride = CLOD_REPLAY_SLOT_STRIDE_BYTES;
 }
 
 // IndirectCommandSignatureRootConstant0 = cluster count
