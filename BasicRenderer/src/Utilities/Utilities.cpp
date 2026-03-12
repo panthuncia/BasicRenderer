@@ -1377,17 +1377,17 @@ XMFLOAT3X3 GetUpperLeft3x3(const XMMATRIX& matrix) {
     XMFLOAT3X3 result;
 
     // Extract the upper-left 3x3 part of the XMMATRIX
-    result.m[0][0] = matrix.r[0].m128_f32[0]; // Row 0, Col 0
-    result.m[0][1] = matrix.r[0].m128_f32[1]; // Row 0, Col 1
-    result.m[0][2] = matrix.r[0].m128_f32[2]; // Row 0, Col 2
+    result.m[0][0] = XMVectorGetX(matrix.r[0]); // Row 0, Col 0
+    result.m[0][1] = XMVectorGetY(matrix.r[0]); // Row 0, Col 1
+    result.m[0][2] = XMVectorGetZ(matrix.r[0]); // Row 0, Col 2
 
-    result.m[1][0] = matrix.r[1].m128_f32[0]; // Row 1, Col 0
-    result.m[1][1] = matrix.r[1].m128_f32[1]; // Row 1, Col 1
-    result.m[1][2] = matrix.r[1].m128_f32[2]; // Row 1, Col 2
+    result.m[1][0] = XMVectorGetX(matrix.r[1]); // Row 1, Col 0
+    result.m[1][1] = XMVectorGetY(matrix.r[1]); // Row 1, Col 1
+    result.m[1][2] = XMVectorGetZ(matrix.r[1]); // Row 1, Col 2
 
-    result.m[2][0] = matrix.r[2].m128_f32[0]; // Row 2, Col 0
-    result.m[2][1] = matrix.r[2].m128_f32[1]; // Row 2, Col 1
-    result.m[2][2] = matrix.r[2].m128_f32[2]; // Row 2, Col 2
+    result.m[2][0] = XMVectorGetX(matrix.r[2]); // Row 2, Col 0
+    result.m[2][1] = XMVectorGetY(matrix.r[2]); // Row 2, Col 1
+    result.m[2][2] = XMVectorGetZ(matrix.r[2]); // Row 2, Col 2
 
     return result;
 }
@@ -1421,7 +1421,7 @@ DirectX::XMVECTOR QuaternionFromAxisAngle(const XMFLOAT3& dir) {
 	DirectX::XMVECTOR rot;
     if (dotProduct < -0.9999f) {
         XMVECTOR perpendicularAxis = XMVector3Cross(defaultDirection, XMVectorSet(1, 0, 0, 0));
-        if (XMVector3Length(perpendicularAxis).m128_f32[0] < 0.01f) {
+        if (XMVectorGetX(XMVector3Length(perpendicularAxis)) < 0.01f) {
             perpendicularAxis = XMVector3Cross(defaultDirection, XMVectorSet(0, 1, 0, 0));
         }
         perpendicularAxis = XMVector3Normalize(perpendicularAxis);

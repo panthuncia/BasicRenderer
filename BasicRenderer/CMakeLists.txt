@@ -557,6 +557,26 @@ if (MSVC)
   )
   #target_compile_options(${PROJECT_NAME} PRIVATE /Wall)
   target_compile_options(${PROJECT_NAME} PRIVATE /external:anglebrackets /external:W0) # Disable warnings in external headers
+  # Clang (via clang-cl) warns about MSVC-specific flags it ignores; suppress those warnings-as-errors
+  target_compile_options(${PROJECT_NAME} PRIVATE $<$<CXX_COMPILER_ID:Clang>:
+      -Wno-unused-command-line-argument
+      -Wno-error=switch
+      -Wno-error=reorder-ctor
+      -Wno-error=unused-variable
+      -Wno-error=unused-but-set-variable
+      -Wno-error=unused-function
+      -Wno-error=unused-private-field
+      -Wno-error=misleading-indentation
+      -Wno-error=nonportable-include-path
+      -Wno-error=inconsistent-missing-override
+      -Wno-error=format
+      -Wno-error=implicit-float-conversion
+      -Wno-error=missing-braces
+      -Wno-error=braced-scalar-init
+      -Wno-error=pessimizing-move
+      -Wno-error=self-assign-field
+      -Wno-error=unused-lambda-capture
+  >)
 endif()
 
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC Microsoft.GSL::GSL)

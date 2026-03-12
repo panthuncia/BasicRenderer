@@ -18,7 +18,7 @@ namespace
 
     float ComputeErrorOverDistanceThreshold(const CameraInfo& cameraInfo, float errorPixels)
     {
-        const float projY = cameraInfo.jitteredProjection.r[1].m128_f32[1];
+        const float projY = DirectX::XMVectorGetY(cameraInfo.jitteredProjection.r[1]);
         const float screenHeight = static_cast<float>(cameraInfo.depthResY);
         const float denom = (projY * 0.5f) * screenHeight;
         if (denom <= 0.0f) {
@@ -71,7 +71,7 @@ uint64_t ViewManager::CreateView(const CameraInfo& cameraInfo,
 
     CullingCameraInfo cullCam{
         .positionWorldSpace = cameraInfo.positionWorldSpace,
-        .projY = cameraInfo.jitteredProjection.r[1].m128_f32[1], // [1][1]
+        .projY = DirectX::XMVectorGetY(cameraInfo.jitteredProjection.r[1]), // [1][1]
         .zNear = cameraInfo.zNear,
         .errorOverDistanceThreshold = ComputeErrorOverDistanceThreshold(cameraInfo, kClusterLodErrorPixels)
     };
@@ -177,7 +177,7 @@ void ViewManager::UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo) {
     m_cameraBuffer->UpdateView(v->gpu.cameraBufferView.get(), &cameraInfo);
 	CullingCameraInfo cullInfo;
 	cullInfo.positionWorldSpace = cameraInfo.positionWorldSpace;
-	cullInfo.projY = cameraInfo.jitteredProjection.r[1].m128_f32[1]; // [1][1]
+	cullInfo.projY = DirectX::XMVectorGetY(cameraInfo.jitteredProjection.r[1]); // [1][1]
 	cullInfo.zNear = cameraInfo.zNear;
     cullInfo.errorOverDistanceThreshold = ComputeErrorOverDistanceThreshold(cameraInfo, kClusterLodErrorPixels);
 	m_cullingCameraBuffer->UpdateView(v->gpu.cullingCameraBufferView.get(), &cullInfo);

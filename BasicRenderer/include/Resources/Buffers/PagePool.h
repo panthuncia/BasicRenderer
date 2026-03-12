@@ -45,7 +45,8 @@ public:
 		void Reset() { firstPageID = 0; pageCount = 0; }
 	};
 
-	explicit PagePool(const Config& config = {});
+	PagePool() : PagePool(Config{}) {}
+	explicit PagePool(const Config& config);
 	~PagePool();
 
 	// Non-copyable, non-movable.

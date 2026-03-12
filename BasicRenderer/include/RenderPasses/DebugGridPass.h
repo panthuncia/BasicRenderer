@@ -42,7 +42,8 @@ public:
         float overallOpacity = 1.0f;
     };
 
-    explicit DebugGridPass(const Params& p = {})
+    DebugGridPass() : DebugGridPass(Params{}) {}
+    explicit DebugGridPass(const Params& p)
         : m_params(p)
     {
         CreatePSO();

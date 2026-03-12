@@ -302,18 +302,18 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
             Components::Light& light = entity.get_mut<Components::Light>();
             XMVECTOR worldForward = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
             light.lightInfo.dirWorldSpace = XMVector3Normalize(XMVector3TransformNormal(worldForward, mOut.matrix));
-            light.lightInfo.posWorldSpace = XMVectorSet(mOut.matrix.r[3].m128_f32[0],  // _41
-                mOut.matrix.r[3].m128_f32[1],  // _42
-                mOut.matrix.r[3].m128_f32[2],  // _43
+            light.lightInfo.posWorldSpace = XMVectorSet(XMVectorGetX(mOut.matrix.r[3]),  // _41
+                XMVectorGetY(mOut.matrix.r[3]),  // _42
+                XMVectorGetZ(mOut.matrix.r[3]),  // _43
                 1.0f);
             switch(light.lightInfo.type){
             case Components::LightType::Spot:
                 light.lightInfo.boundingSphere = ComputeConeBoundingSphere(light.lightInfo.posWorldSpace, light.lightInfo.dirWorldSpace, light.lightInfo.maxRange, acos(light.lightInfo.outerConeAngle));
                 break;
             case Components::LightType::Point:
-                light.lightInfo.boundingSphere = { {mOut.matrix.r[3].m128_f32[0],  // _41
-                    mOut.matrix.r[3].m128_f32[1],  // _42
-                    mOut.matrix.r[3].m128_f32[2],  // _43
+                light.lightInfo.boundingSphere = { {XMVectorGetX(mOut.matrix.r[3]),  // _41
+                    XMVectorGetY(mOut.matrix.r[3]),  // _42
+                    XMVectorGetZ(mOut.matrix.r[3]),  // _43
                     light.lightInfo.maxRange} };
             }
 

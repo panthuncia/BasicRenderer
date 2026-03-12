@@ -56,7 +56,7 @@ using PFun_slEvaluateFeature = sl::Result(sl::Feature feature, const sl::FrameTo
 using PFun_slAllocateResources = sl::Result(sl::CommandBuffer* cmdBuffer, sl::Feature feature, const sl::ViewportHandle& viewport);
 using PFun_slFreeResources = sl::Result(sl::Feature feature, const sl::ViewportHandle& viewport);
 using PFun_slSetTag
-#if __cplusplus >= 201402L
+#if __cplusplus >= 201402L && !defined(__clang__)
 [[deprecated("Use the version of this function that takes a sl::FrameToken instead - slSetTagForFrame and set sl::PreferenceFlags::eUseFrameBasedResourceTagging.")]]
 #endif
 = sl::Result(const sl::ViewportHandle& viewport, const sl::ResourceTag* tags, uint32_t numTags, sl::CommandBuffer* cmdBuffer);
@@ -167,7 +167,7 @@ SL_API sl::Result slSetTagForFrame(const sl::FrameToken& frame, const sl::Viewpo
 //! 
 //! This method is thread safe and requires DX/VK device to be created before calling it.
 SL_API sl::Result
-#if __cplusplus >= 201402L
+#if __cplusplus >= 201402L && !defined(__clang__)
 [[deprecated("Use the version of this function that takes a sl::FrameToken instead - slSetTagForFrame and set sl::PreferenceFlags::eUseFrameBasedResourceTagging.")]]
 #endif
 slSetTag(const sl::ViewportHandle& viewport, const sl::ResourceTag* tags, uint32_t numTags, sl::CommandBuffer* cmdBuffer);

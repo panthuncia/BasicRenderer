@@ -725,6 +725,17 @@ typedef unsigned char validate_uint32[sizeof(stbi__uint32) == 4 ? 1 : -1];
 
 #ifdef _MSC_VER
 
+#if defined(__clang__)
+// clang-cl: __cpuid macro conflicts with compiler builtins; SSE2 is always
+// available on x64, so skip CPUID detection entirely.
+#define STBI_SIMD_ALIGN(type, name) __declspec(align(16)) type name
+
+#if !defined(STBI_NO_JPEG) && defined(STBI_SSE2)
+static int stbi__sse2_available(void) { return 1; }
+#endif
+
+#else // real MSVC
+
 #if _MSC_VER >= 1400  // not VC6
 #include <intrin.h> // __cpuid
 static int stbi__cpuid3(void) {
@@ -752,6 +763,8 @@ static int stbi__sse2_available(void) {
     return ((info3 >> 26) & 1) != 0;
 }
 #endif
+
+#endif // __clang__ vs real MSVC
 
 #else // assume GCC-style if not VC++
 #define STBI_SIMD_ALIGN(type, name) type name __attribute__((aligned(16)))
