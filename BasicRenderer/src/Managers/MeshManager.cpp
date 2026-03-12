@@ -198,12 +198,11 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 	});
 
 	// Merge results back (single-threaded).
-	{
-		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
-		for (auto& result : results) {
-			m_clodDiskStreamingQueuedGroups.erase(result.groupGlobalIndex);
-		}
-	}
+	// NOTE: Do NOT erase from m_clodDiskStreamingQueuedGroups here.
+	// The group must stay in the dedup set until its result is fully applied
+	// in ProcessCLodDiskStreamingIO, otherwise a re-request arriving between
+	// dispatch completion and result application would re-queue the same
+	// group for disk I/O, causing duplicate reads and page-pool churn.
 	{
 		std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
 		for (auto& result : results) {
@@ -638,6 +637,17 @@ void MeshManager::ProcessCLodDiskStreamingIO(
 			newCompletions.push_back({ result.groupGlobalIndex,
 				applyResult == DiskStreamingApplyResult::Applied });
 		}
+
+		// Now that all results are applied, remove them from the dedup set.
+		// This must happen AFTER application so that concurrent re-requests
+		// for the same group are blocked until the data is fully resident.
+		{
+			std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
+			for (auto& result : localResults) {
+				m_clodDiskStreamingQueuedGroups.erase(result.groupGlobalIndex);
+			}
+		}
+
 		{
 			std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
 			for (auto& c : newCompletions) {
@@ -896,6 +906,11 @@ bool MeshManager::FreeCLodGroupEviction(uint32_t groupGlobalIndex) {
 
 	std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
 	return ApplyCLodGroupResidency(*sharedState, localIndex, false, true);
+}
+
+bool MeshManager::IsCLodGroupDiskIOQueued(uint32_t groupGlobalIndex) const {
+	std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
+	return m_clodDiskStreamingQueuedGroups.count(groupGlobalIndex) != 0;
 }
 
 bool MeshManager::QueueCLodGroupDiskIO(uint32_t groupGlobalIndex) {

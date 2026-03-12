@@ -113,6 +113,9 @@ public:
 	// Returns true if the request was queued (or was already in the queue).
 	bool QueueCLodGroupDiskIO(uint32_t groupGlobalIndex);
 
+	// Returns true if the group currently has disk I/O queued or in-flight.
+	bool IsCLodGroupDiskIOQueued(uint32_t groupGlobalIndex) const;
+
 	struct CLodGroupStreamingInfo {
 		ClusterLODRuntimeSummary::GroupChunkHint hint{};
 		uint32_t vertexByteSize = 0;

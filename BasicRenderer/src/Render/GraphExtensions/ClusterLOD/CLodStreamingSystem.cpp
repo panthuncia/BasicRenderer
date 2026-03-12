@@ -820,6 +820,14 @@ void CLodStreamingSystem::StreamingWorkerMain() {
         {
             std::lock_guard lock(m_streamingWorkerMutex);
 
+            // Cross-slot deduplication: a single map/set for all slots in
+            // this batch so the same group doesn't appear multiple times in
+            // the output when it was requested across consecutive frames.
+            std::unordered_map<uint32_t, uint32_t> batchMaxPriorityByGroup;
+            std::unordered_set<uint32_t> batchUsedGroups;
+            uint32_t totalRequestCount = 0;
+            uint32_t totalUsedGroupsCount = 0;
+
             for (auto& slot : m_readbackStagingSlots) {
                 if (!slot.inFlight || slot.fenceValue > target) {
                     continue;
@@ -851,29 +859,17 @@ void CLodStreamingSystem::StreamingWorkerMain() {
                         }
                     }
 
-                    // Deduplicate by group, keeping max priority
-                    std::unordered_map<uint32_t, uint32_t> maxPriorityByGroup;
-                    maxPriorityByGroup.reserve(requestCount);
+                    totalRequestCount += requestCount;
                     for (uint32_t i = 0; i < requestCount; ++i) {
                         const uint32_t groupIndex = requests[i].groupGlobalIndex;
                         const uint32_t priority = UnpackStreamingRequestPriority(requests[i]);
-                        auto it = maxPriorityByGroup.find(groupIndex);
-                        if (it == maxPriorityByGroup.end()) {
-                            maxPriorityByGroup.emplace(groupIndex, priority);
+                        auto it = batchMaxPriorityByGroup.find(groupIndex);
+                        if (it == batchMaxPriorityByGroup.end()) {
+                            batchMaxPriorityByGroup.emplace(groupIndex, priority);
                         } else {
                             it->second = std::max(it->second, priority);
                         }
                     }
-
-                    // Push decoded pairs for the main thread
-                    for (const auto& [groupIndex, priority] : maxPriorityByGroup) {
-                        m_decodedReadbackBatch.emplace_back(groupIndex, priority);
-                    }
-
-                    spdlog::info(
-                        "CLod streaming worker: {} requests ({} unique groups) decoded",
-                        requestCount,
-                        static_cast<uint32_t>(maxPriorityByGroup.size()));
                 }
 
                 // Read the used-groups append buffer (GPU-reported visible groups for LRU touch).
@@ -901,19 +897,32 @@ void CLodStreamingSystem::StreamingWorkerMain() {
                         }
                     }
 
-                    // Deduplicate and push for the main thread to touch LRU.
-                    std::unordered_set<uint32_t> uniqueGroups(usedGroups.begin(), usedGroups.end());
-                    for (const uint32_t g : uniqueGroups) {
-                        m_decodedUsedGroupsBatch.push_back(g);
-                    }
-
-                    spdlog::info(
-                        "CLod streaming worker: {} used groups ({} unique) decoded",
-                        usedGroupsCount,
-                        static_cast<uint32_t>(uniqueGroups.size()));
+                    totalUsedGroupsCount += usedGroupsCount;
+                    batchUsedGroups.insert(usedGroups.begin(), usedGroups.end());
                 }
 
                 slot.inFlight = false;
+            }
+
+            // Push cross-slot deduplicated results for the main thread.
+            for (const auto& [groupIndex, priority] : batchMaxPriorityByGroup) {
+                m_decodedReadbackBatch.emplace_back(groupIndex, priority);
+            }
+            for (const uint32_t g : batchUsedGroups) {
+                m_decodedUsedGroupsBatch.push_back(g);
+            }
+
+            if (totalRequestCount > 0) {
+                spdlog::info(
+                    "CLod streaming worker: {} requests ({} unique groups) decoded",
+                    totalRequestCount,
+                    static_cast<uint32_t>(batchMaxPriorityByGroup.size()));
+            }
+            if (totalUsedGroupsCount > 0) {
+                spdlog::info(
+                    "CLod streaming worker: {} used groups ({} unique) decoded",
+                    totalUsedGroupsCount,
+                    static_cast<uint32_t>(batchUsedGroups.size()));
             }
         }
 
@@ -1035,6 +1044,15 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
             TouchWithParentChain(groupIndex);
             ClearStreamingRequestInProgress(groupIndex);
             m_pendingLoadPriorityByGroup[groupIndex] = 0u;
+            processed++;
+            continue;
+        }
+
+        // If disk I/O is already queued/in-flight for this group (e.g. from a
+        // priority-escalation re-entry), skip the pre-eviction and re-queue.
+        // The I/O will complete on its own and pages were already pre-evicted
+        // when the request was first submitted.
+        if (meshManager->IsCLodGroupDiskIOQueued(groupIndex)) {
             processed++;
             continue;
         }
