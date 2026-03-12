@@ -18,6 +18,23 @@
       }
     },
     {
+      "name": "linux-cross-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "cacheVariables": {
+        "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/cmake/linux-to-windows-clang-cl.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-clang-cl",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/vcpkg-triplets"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
       "name": "debug",
       "displayName": "Debug",
       "inherits": "windows-base",
@@ -93,6 +110,30 @@
       "environment": {
         "CFLAGS": "/fsanitize=address",
         "CXXFLAGS": "/fsanitize=address"
+      }
+    },
+    {
+      "name": "linux-cross-debug",
+      "displayName": "Linux Cross → Windows Debug",
+      "inherits": "linux-cross-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "linux-cross-release",
+      "displayName": "Linux Cross → Windows Release",
+      "inherits": "linux-cross-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "linux-cross-relwithdebinfo",
+      "displayName": "Linux Cross → Windows RelWithDebInfo",
+      "inherits": "linux-cross-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
       }
     }
   ]

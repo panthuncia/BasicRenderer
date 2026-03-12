@@ -9,9 +9,16 @@ set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CAC
 if (POLICY CMP0141)
   cmake_policy(SET CMP0141 NEW)
 
-  if (MSVC)
+  if (MSVC AND NOT CMAKE_CROSSCOMPILING)
+    # Native MSVC: use PDB (Program Database) debug info
     set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
       "$<IF:$<CONFIG:Debug,RelWithDebInfo>,ProgramDatabase,>"
+    )
+  elseif(MSVC AND CMAKE_CROSSCOMPILING)
+    # clang-cl cross-compile: use embedded CodeView (/Z7) since
+    # lld-link has limited PDB generation support
+    set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT
+      "$<IF:$<CONFIG:Debug,RelWithDebInfo>,Embedded,>"
     )
   endif()
 endif()

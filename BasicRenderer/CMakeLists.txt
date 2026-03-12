@@ -570,10 +570,17 @@ add_compile_options("/wd4267")
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /bigobj")
 
-# Compile‐only: /Zi on RelWithDebInfo
-target_compile_options(${PROJECT_NAME} PRIVATE
-  $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:RelWithDebInfo>>:/Zi>
-)
+# Compile‐only: debug info on RelWithDebInfo
+# Native MSVC uses /Zi (PDB); clang-cl cross-compile uses /Z7 (embedded CodeView)
+if(CMAKE_CROSSCOMPILING)
+  target_compile_options(${PROJECT_NAME} PRIVATE
+    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:RelWithDebInfo>>:/Z7>
+  )
+else()
+  target_compile_options(${PROJECT_NAME} PRIVATE
+    $<$<AND:$<CXX_COMPILER_ID:MSVC>,$<CONFIG:RelWithDebInfo>>:/Zi>
+  )
+endif()
 
 # Link‐only: /DEBUG on RelWithDebInfo
 target_link_options(${PROJECT_NAME} PRIVATE
