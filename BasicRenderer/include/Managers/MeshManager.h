@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -95,7 +96,9 @@ public:
 	bool ConsumeCLodStreamingStructureDirty();
 
 	CLodStreamingDebugStats GetCLodStreamingDebugStats() const;
-	void ProcessCLodDiskStreamingIO(uint32_t maxCompletedRequests = 64u);
+	void ProcessCLodDiskStreamingIO(
+		uint32_t maxCompletedRequests = 64u,
+		std::function<bool(uint32_t groupGlobalIndex, uint32_t pagesNeeded)> evictForGroup = nullptr);
 
 	// Drains groups that completed disk streaming since the last call.
 	// The extension uses this to learn which groups became resident (or failed)
@@ -263,6 +266,7 @@ private:
 	enum class DiskStreamingApplyResult {
 		Applied,
 		FailedPermanent,
+		FailedPoolExhausted,
 	};
 	DiskStreamingApplyResult ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result);
 	void UploadCLodGroupChunkTable(const CLodSharedStreamingState& state);

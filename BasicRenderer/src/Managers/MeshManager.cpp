@@ -586,7 +586,9 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 	}
 }
 
-void MeshManager::ProcessCLodDiskStreamingIO(uint32_t maxCompletedRequests) {
+void MeshManager::ProcessCLodDiskStreamingIO(
+	uint32_t maxCompletedRequests,
+	std::function<bool(uint32_t groupGlobalIndex, uint32_t pagesNeeded)> evictForGroup) {
 	// First, dispatch a batch of pending IO requests in parallel across the
 	// task scheduler's thread pool. This replaces the old single-threaded worker.
 	DispatchCLodDiskStreamingBatch();
@@ -608,17 +610,33 @@ void MeshManager::ProcessCLodDiskStreamingIO(uint32_t maxCompletedRequests) {
 		}
 	}
 
-	// Apply each result under the residency lock and record completions.
+	// Apply each result with per-result locking so the eviction callback
+	// can be invoked outside m_clodResidencyMutex (it acquires it internally).
 	if (!localResults.empty()) {
 		std::vector<CLodDiskStreamingCompletion> newCompletions;
 		newCompletions.reserve(localResults.size());
-		{
-				std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
-			for (auto& result : localResults) {
-				const auto applyResult = ApplyCompletedCLodDiskStreamingResult(result);
-				newCompletions.push_back({ result.groupGlobalIndex,
-					applyResult == DiskStreamingApplyResult::Applied });
+		for (auto& result : localResults) {
+			// Count pages needed before acquiring the lock.
+			uint32_t pagesNeeded = 0u;
+			if (result.success) {
+				for (const auto& blob : result.pageBlobs) {
+					if (!blob.empty()) pagesNeeded++;
+				}
 			}
+
+			// If the pool doesn't have enough free pages, try the eviction callback.
+			if (result.success && pagesNeeded > 0u && evictForGroup &&
+				m_clodPagePool->GetFreePageCount() < pagesNeeded) {
+				evictForGroup(result.groupGlobalIndex, pagesNeeded);
+			}
+
+			DiskStreamingApplyResult applyResult;
+			{
+				std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
+				applyResult = ApplyCompletedCLodDiskStreamingResult(result);
+			}
+			newCompletions.push_back({ result.groupGlobalIndex,
+				applyResult == DiskStreamingApplyResult::Applied });
 		}
 		{
 			std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
@@ -784,6 +802,18 @@ MeshManager::DiskStreamingApplyResult MeshManager::ApplyCompletedCLodDiskStreami
 		return DiskStreamingApplyResult::FailedPermanent;
 	}
 
+	// Pre-check: count pages needed and bail early if the pool can't satisfy.
+	// This avoids partial allocations that would need to be rolled back.
+	{
+		uint32_t pagesNeeded = 0u;
+		for (uint32_t ci = 0; ci < sCount; ++ci) {
+			if (!result.pageBlobs[ci].empty()) pagesNeeded++;
+		}
+		if (pagesNeeded > 0u && m_clodPagePool->GetFreePageCount() < pagesNeeded) {
+			return DiskStreamingApplyResult::FailedPoolExhausted;
+		}
+	}
+
 	// Allocate one page per segment and upload pre-packed blobs
 	size_t totalBlobBytes = 0;
 	std::vector<GroupPageMapEntry> pageMapEntries(sCount);
@@ -937,19 +967,18 @@ void MeshManager::DeallocateCLodGroupChunkAllocations(CLodSharedStreamingState& 
 		chunk.pagePoolSlabByteOffset = 0;
 	}
 
-	// Zero out the GroupPageMap entries for this group
-	if (state.ownedPageMapView && state.mesh) {
-		const auto& meshGroups = state.mesh->GetCLodGroups();
-		if (groupLocalIndex < meshGroups.size()) {
-			const auto& grp = meshGroups[groupLocalIndex];
-			if (grp.pageCount > 0) {
-				for (uint32_t i = 0; i < grp.pageCount; ++i) {
-					state.pageMapEntriesCPU[grp.pageMapBase + i] = {};
-				}
-				m_clodGroupPageMap->UpdateView(
-					state.ownedPageMapView.get(),
-					state.pageMapEntriesCPU.data());
+	// Zero out the GroupPageMap entries for this group.
+	// Use state.groups (the retained copy) instead of state.mesh->GetCLodGroups()
+	// because the mesh releases its CPU hierarchy data after setup.
+	if (state.ownedPageMapView && groupLocalIndex < state.groups.size()) {
+		const auto& grp = state.groups[groupLocalIndex];
+		if (grp.pageCount > 0) {
+			for (uint32_t i = 0; i < grp.pageCount; ++i) {
+				state.pageMapEntriesCPU[grp.pageMapBase + i] = {};
 			}
+			m_clodGroupPageMap->UpdateView(
+				state.ownedPageMapView.get(),
+				state.pageMapEntriesCPU.data());
 		}
 	}
 

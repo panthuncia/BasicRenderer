@@ -58,6 +58,7 @@ private:
     void ClearStreamingRequestInProgress(uint32_t groupIndex);
     bool ApplyEvictionRequest(const CLodStreamingRequest& req, bool& outResidencyBitChanged);
     void ApplyDiskStreamingCompletions(MeshManager* meshManager);
+    void TouchWithParentChain(uint32_t groupIndex);
     void PollCompletedReadbackSlots();
     void StreamingWorkerMain();
     void ProcessStreamingRequestsBudgeted();

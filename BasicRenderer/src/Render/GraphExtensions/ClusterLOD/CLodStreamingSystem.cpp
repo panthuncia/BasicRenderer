@@ -509,7 +509,16 @@ void CLodStreamingSystem::RefreshStreamingActiveGroupDomain() {
         return;
     }
 
-    meshManager->ProcessCLodDiskStreamingIO();
+    meshManager->ProcessCLodDiskStreamingIO(64u,
+        [this, meshManager](uint32_t groupGlobalIndex, uint32_t pagesNeeded) -> bool {
+            auto* pool = meshManager->GetCLodPagePool();
+            if (!pool) return false;
+            CLodStreamingOperationStats evictStats{};
+            while (pool->GetFreePageCount() < pagesNeeded && m_streamingResidentGroupsCount > 0u) {
+                if (!TryEvictLruVictim(groupGlobalIndex, evictStats)) break;
+            }
+            return pool->GetFreePageCount() >= pagesNeeded;
+        });
     ApplyDiskStreamingCompletions(meshManager);
 
     if (m_streamingDomainDirty) {
@@ -694,6 +703,18 @@ bool CLodStreamingSystem::ApplyEvictionRequest(const CLodStreamingRequest& req, 
     return true;
 }
 
+void CLodStreamingSystem::TouchWithParentChain(uint32_t groupIndex) {
+    m_lru.Touch(groupIndex);
+    int32_t current = static_cast<int32_t>(groupIndex);
+    for (size_t hop = 0; hop < m_streamingParentGroupByGlobal.size(); ++hop) {
+        if (current < 0 || static_cast<uint32_t>(current) >= m_streamingParentGroupByGlobal.size()) break;
+        int32_t parent = m_streamingParentGroupByGlobal[static_cast<uint32_t>(current)];
+        if (parent < 0 || parent == current) break;
+        m_lru.Touch(static_cast<uint32_t>(parent));
+        current = parent;
+    }
+}
+
 void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager) {
     if (meshManager == nullptr) {
         return;
@@ -722,9 +743,10 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
                 m_streamingResidentGroupsCount++;
                 m_streamingNonResidentBitsUploadPending = true;
                 m_lru.Insert(groupIndex);
+                TouchWithParentChain(groupIndex);
             }
             else {
-                m_lru.Touch(groupIndex);
+                TouchWithParentChain(groupIndex);
             }
         }
         else {
@@ -747,9 +769,9 @@ void CLodStreamingSystem::PollCompletedReadbackSlots() {
         usedGroupsBatch.swap(m_decodedUsedGroupsBatch);
     }
 
-    // Touch the LRU for all GPU-reported visible groups.
+    // Touch the LRU for all GPU-reported visible groups and their parent chains.
     for (const uint32_t groupIndex : usedGroupsBatch) {
-        m_lru.Touch(groupIndex);
+        TouchWithParentChain(groupIndex);
     }
 
     if (batch.empty()) {
@@ -909,6 +931,14 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
     }
 
     if (meshManager != nullptr) {
+        // No eviction callback here: this runs during pass Update, after
+        // ConsumeStreamingUploadsDispatch() has already drained queued
+        // uploads.  Evicting + loading here would leave the GPU with stale
+        // page-map entries / slab data until next frame while the
+        // non-resident bit is already cleared, causing wrong geometry.
+        // Eviction is only safe in RefreshStreamingActiveGroupDomain
+        // (graph-building phase) where streaming uploads are consumed
+        // immediately afterwards.
         meshManager->ProcessCLodDiskStreamingIO(budget);
         ApplyDiskStreamingCompletions(meshManager);
     }
@@ -983,7 +1013,7 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
         frameStats.loadUnique++;
 
         if (IsGroupResident(groupIndex)) {
-            m_lru.Touch(groupIndex);
+            TouchWithParentChain(groupIndex);
             ClearStreamingRequestInProgress(groupIndex);
             m_pendingLoadPriorityByGroup[groupIndex] = 0u;
             processed++;
@@ -1002,6 +1032,7 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
                 m_streamingNonResidentBitsUploadPending = true;
             }
             m_lru.Insert(groupIndex);
+            TouchWithParentChain(groupIndex);
             ClearStreamingRequestInProgress(groupIndex);
             m_pendingLoadPriorityByGroup[groupIndex] = 0u;
             processed++;
