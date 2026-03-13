@@ -102,16 +102,15 @@ inline size_t CLodEstimateBlobSize(
 }
 
 // Returns the number of pages needed for a group.
-// With per-segment paging, each segment = 1 page, so this returns the segment count.
-// Falls back to blob-size estimation when segment count is unavailable.
+// Uses the physical page count when available (post-bin-packing),
+// falls back to blob-size estimation otherwise.
 inline uint32_t CLodEstimatePagesNeeded(
     const ClusterLODRuntimeSummary::GroupChunkHint& hint,
     uint32_t vertexByteSize,
     uint64_t pageSize)
 {
-    // segmentCount is stored in the hint when available; else fall back to blob estimate.
-    if (hint.segmentCount > 0) {
-        return hint.segmentCount;
+    if (hint.pageCount > 0) {
+        return hint.pageCount;
     }
     const size_t blobSize = CLodEstimateBlobSize(hint, vertexByteSize);
     return static_cast<uint32_t>((blobSize + pageSize - 1) / pageSize);

@@ -76,6 +76,7 @@ namespace
 				hint.compressedNormalWordCount = chunk.compressedNormalWordCount;
 				hint.compressedMeshletVertexWordCount = chunk.compressedMeshletVertexWordCount;
 				hint.segmentCount = group.segmentCount;
+				hint.pageCount = group.pageCount;
 			}
 			else {
 				auto& hint = summary.groupChunkHints[groupIndex];
@@ -83,6 +84,7 @@ namespace
 				hint.meshletCount = group.meshletCount;
 				hint.meshletBoundsCount = group.meshletCount;
 				hint.segmentCount = group.segmentCount;
+				hint.pageCount = group.pageCount;
 			}
 			coarsestDepth = std::max(coarsestDepth, group.depth);
 		}

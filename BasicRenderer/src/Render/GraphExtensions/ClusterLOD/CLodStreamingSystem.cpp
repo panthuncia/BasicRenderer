@@ -345,10 +345,6 @@ bool CLodStreamingSystem::TryQueuePendingLoadRequest(const CLodStreamingRequest&
         EnsureStreamingStorageCapacity(groupIndex + 1u);
     }
 
-    if (!IsGroupActive(groupIndex)) {
-        return false;
-    }
-
     if (IsGroupResident(groupIndex)) {
         return false;
     }
@@ -402,9 +398,7 @@ uint32_t CLodStreamingSystem::QueueLoadRequestWithParents(const CLodStreamingReq
 
     for (auto it = parentChain.rbegin(); it != parentChain.rend(); ++it) {
         const uint32_t parentGroup = *it;
-        if (!IsGroupActive(parentGroup)) {
-            continue;
-        }
+
         if (IsGroupResident(parentGroup)) {
             continue;
         }
@@ -1114,10 +1108,6 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
             continue;
         }
 
-        if (pending.priority < m_pendingLoadPriorityByGroup[groupIndex]) {
-            continue;
-        }
-
         // Load path
         frameStats.loadRequested++;
         frameStats.loadUnique++;
@@ -1219,17 +1209,6 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
 
         processed++;
     }
-
-    // Purge stale entries that would never make progress: groups that became
-    // resident (loaded by a previous iteration or completion) or inactive
-    // (removed from the streaming domain). Without this, the queue grows
-    // unboundedly across frames and stale requests cause needless evictions.
-    std::erase_if(m_pendingStreamingRequests, [this](const PendingStreamingRequest& p) {
-        const uint32_t g = p.request.groupGlobalIndex;
-        return g >= m_streamingStorageGroupCapacity
-            || IsGroupResident(g)
-            || !IsGroupActive(g);
-    });
 
     if (meshManager != nullptr) {
         const auto debugStats = meshManager->GetCLodStreamingDebugStats();
