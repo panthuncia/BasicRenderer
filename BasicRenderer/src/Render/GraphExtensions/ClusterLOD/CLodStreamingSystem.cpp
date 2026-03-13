@@ -22,9 +22,6 @@ CLodStreamingSystem::CLodStreamingSystem() {
     m_streamingActiveGroupsBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
     m_streamingPinnedGroupsBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
     m_streamingResidencyInitializedBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
-    m_streamingRequestsInProgressBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
-    m_pendingLoadPriorityByGroup.assign(m_streamingStorageGroupCapacity, 0u);
-    m_groupUsesPinnedStorage.assign(m_streamingStorageGroupCapacity, 0u);
     m_streamingNonResidentBitsUploadPending = true;
 
     try {
@@ -146,7 +143,7 @@ void CLodStreamingSystem::OnRegistryReset(ResourceRegistry* reg) {
     std::vector<uint32_t> ownedPinnedGroups;
     ownedPinnedGroups.reserve(m_groupOwnedPages.size());
     for (const auto& [groupIndex, _] : m_groupOwnedPages) {
-        if (groupIndex < m_groupUsesPinnedStorage.size() && m_groupUsesPinnedStorage[groupIndex] != 0u) {
+        if (UsesPinnedStorage(groupIndex)) {
             ownedPinnedGroups.push_back(groupIndex);
         }
     }
@@ -166,15 +163,15 @@ void CLodStreamingSystem::OnRegistryReset(ResourceRegistry* reg) {
     m_pageOwnerSegment.clear();
     m_groupOwnedPages.clear();
     m_preAllocatedPagesByGroup.clear();
-    std::fill(m_groupUsesPinnedStorage.begin(), m_groupUsesPinnedStorage.end(), 0u);
+    m_groupsUsingPinnedStorage.clear();
     m_pageLruInitialized = false;
     m_streamingResidentGroupsCount = 0u;
     std::fill(m_streamingNonResidentBitsCpu.begin(), m_streamingNonResidentBitsCpu.end(), 0u);
     std::fill(m_streamingActiveGroupsBitsCpu.begin(), m_streamingActiveGroupsBitsCpu.end(), 0u);
     std::fill(m_streamingPinnedGroupsBitsCpu.begin(), m_streamingPinnedGroupsBitsCpu.end(), 0u);
     std::fill(m_streamingResidencyInitializedBitsCpu.begin(), m_streamingResidencyInitializedBitsCpu.end(), 0u);
-    std::fill(m_streamingRequestsInProgressBitsCpu.begin(), m_streamingRequestsInProgressBitsCpu.end(), 0u);
-    std::fill(m_pendingLoadPriorityByGroup.begin(), m_pendingLoadPriorityByGroup.end(), 0u);
+    m_streamingRequestsInProgress.clear();
+    m_pendingLoadPriorityByGroup.clear();
     m_streamingActiveGroupScanCount = 0u;
     m_streamingNonResidentBitsUploadPending = true;
     m_streamingDomainDirty = true;
@@ -364,6 +361,10 @@ bool CLodStreamingSystem::IsGroupResident(uint32_t groupIndex) const {
     return (m_streamingNonResidentBitsCpu[wordAddress] & BitMask(groupIndex)) == 0u;
 }
 
+bool CLodStreamingSystem::UsesPinnedStorage(uint32_t groupIndex) const {
+    return m_groupsUsingPinnedStorage.count(groupIndex) != 0u;
+}
+
 bool CLodStreamingSystem::TryQueuePendingLoadRequest(const CLodStreamingRequest& req, uint32_t priority) {
     const uint32_t groupIndex = req.groupGlobalIndex;
     if (groupIndex >= m_streamingStorageGroupCapacity) {
@@ -378,14 +379,14 @@ bool CLodStreamingSystem::TryQueuePendingLoadRequest(const CLodStreamingRequest&
         // Only update the priority tracker — do NOT push a duplicate entry.
         // The existing entry in m_pendingStreamingRequests (or in-flight I/O)
         // will pick up the elevated priority via m_pendingLoadPriorityByGroup.
-        if (groupIndex < m_pendingLoadPriorityByGroup.size() && priority > m_pendingLoadPriorityByGroup[groupIndex]) {
-            m_pendingLoadPriorityByGroup[groupIndex] = priority;
+        if (priority > GetPendingLoadPriority(groupIndex)) {
+            SetPendingLoadPriority(groupIndex, priority);
         }
         return false;
     }
 
     MarkStreamingRequestInProgress(groupIndex);
-    m_pendingLoadPriorityByGroup[groupIndex] = priority;
+    SetPendingLoadPriority(groupIndex, priority);
     PendingStreamingRequest pending{};
     pending.request = req;
     pending.priority = priority;
@@ -487,13 +488,11 @@ void CLodStreamingSystem::EnsurePageTrackingCapacity(MeshManager* meshManager) {
 void CLodStreamingSystem::ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshManager* meshManager) {
     auto it = m_groupOwnedPages.find(groupIndex);
     if (it == m_groupOwnedPages.end()) {
-        if (groupIndex < m_groupUsesPinnedStorage.size()) {
-            m_groupUsesPinnedStorage[groupIndex] = 0u;
-        }
+        SetGroupUsesPinnedStorage(groupIndex, false);
         return;
     }
 
-    const bool usesPinnedStorage = groupIndex < m_groupUsesPinnedStorage.size() && m_groupUsesPinnedStorage[groupIndex] != 0u;
+    const bool usesPinnedStorage = UsesPinnedStorage(groupIndex);
     std::vector<uint32_t> pinnedPagesToFree;
     if (usesPinnedStorage) {
         pinnedPagesToFree.reserve(it->second.size());
@@ -523,9 +522,7 @@ void CLodStreamingSystem::ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshMan
     }
 
     m_groupOwnedPages.erase(it);
-    if (groupIndex < m_groupUsesPinnedStorage.size()) {
-        m_groupUsesPinnedStorage[groupIndex] = 0u;
-    }
+    SetGroupUsesPinnedStorage(groupIndex, false);
 }
 
 std::vector<uint32_t> CLodStreamingSystem::PopFreePages(uint32_t count, MeshManager* meshManager) {
@@ -601,7 +598,7 @@ CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForG
     auto ownedIt = m_groupOwnedPages.find(groupIndex);
     if (ownedIt != m_groupOwnedPages.end()) {
         const auto& owned = ownedIt->second;
-        const bool ownedUsesPinnedStorage = groupIndex < m_groupUsesPinnedStorage.size() && m_groupUsesPinnedStorage[groupIndex] != 0u;
+        const bool ownedUsesPinnedStorage = UsesPinnedStorage(groupIndex);
         for (uint32_t seg = 0; seg < segmentCount && seg < static_cast<uint32_t>(owned.size()); ++seg) {
             uint32_t existingPage = owned[seg];
             if (existingPage != ~0u && existingPage < m_pageOwnerGroup.size()
@@ -672,9 +669,7 @@ CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForG
 
 void CLodStreamingSystem::AssignPagesToGroup(uint32_t groupIndex, const PreAllocatedPages& pages) {
     m_groupOwnedPages[groupIndex] = pages.pagesBySegment;
-    if (groupIndex < m_groupUsesPinnedStorage.size()) {
-        m_groupUsesPinnedStorage[groupIndex] = pages.usesPinnedStorage ? 1u : 0u;
-    }
+    SetGroupUsesPinnedStorage(groupIndex, pages.usesPinnedStorage);
 
     for (uint32_t seg = 0; seg < pages.segmentCount; ++seg) {
         uint32_t page = pages.pagesBySegment[seg];
@@ -769,11 +764,8 @@ void CLodStreamingSystem::EnsureStreamingStorageCapacity(uint32_t requiredGroupC
     m_streamingActiveGroupsBitsCpu.resize(newWordCount, 0u);
     m_streamingPinnedGroupsBitsCpu.resize(newWordCount, 0u);
     m_streamingResidencyInitializedBitsCpu.resize(newWordCount, 0u);
-    m_streamingRequestsInProgressBitsCpu.resize(newWordCount, 0u);
     m_usedGroupsBitsCpu.resize(newWordCount, 0u);
-    m_pendingLoadPriorityByGroup.resize(newCapacity, 0u);
     m_streamingParentGroupByGlobal.resize(newCapacity, -1);
-    m_groupUsesPinnedStorage.resize(newCapacity, 0u);
     m_streamingStorageGroupCapacity = newCapacity;
 
     m_streamingNonResidentBitsUploadPending = true;
@@ -835,7 +827,7 @@ void CLodStreamingSystem::RefreshStreamingActiveGroupDomain() {
         std::vector<uint32_t> groupsToRelease;
         groupsToRelease.reserve(m_groupOwnedPages.size());
         for (const auto& [groupIndex, _] : m_groupOwnedPages) {
-            if (groupIndex >= m_groupUsesPinnedStorage.size() || m_groupUsesPinnedStorage[groupIndex] == 0u) {
+            if (!UsesPinnedStorage(groupIndex)) {
                 continue;
             }
 
@@ -861,9 +853,7 @@ void CLodStreamingSystem::RefreshStreamingActiveGroupDomain() {
                 m_streamingResidencyInitializedBitsCpu[wa] &= ~mask;
             }
             ClearStreamingRequestInProgress(groupIndex);
-            if (groupIndex < m_pendingLoadPriorityByGroup.size()) {
-                m_pendingLoadPriorityByGroup[groupIndex] = 0u;
-            }
+            ClearPendingLoadPriority(groupIndex);
             m_streamingNonResidentBitsUploadPending = true;
         }
 
@@ -899,9 +889,7 @@ void CLodStreamingSystem::RefreshStreamingActiveGroupDomain() {
                 m_streamingResidencyInitializedBitsCpu[wa] &= ~mask;
             }
             ClearStreamingRequestInProgress(groupIndex);
-            if (groupIndex < m_pendingLoadPriorityByGroup.size()) {
-                m_pendingLoadPriorityByGroup[groupIndex] = 0u;
-            }
+            ClearPendingLoadPriority(groupIndex);
             m_streamingNonResidentBitsUploadPending = true;
         }
     }
@@ -993,29 +981,37 @@ void CLodStreamingSystem::RefreshStreamingActiveGroupDomain() {
 }
 
 bool CLodStreamingSystem::IsStreamingRequestInProgress(uint32_t groupIndex) const {
-    const uint32_t wordAddress = BitWordAddress(groupIndex);
-    if (wordAddress >= m_streamingRequestsInProgressBitsCpu.size()) {
-        return false;
-    }
-
-    const uint32_t bitMask = BitMask(groupIndex);
-    return (m_streamingRequestsInProgressBitsCpu[wordAddress] & bitMask) != 0u;
+    return m_streamingRequestsInProgress.count(groupIndex) != 0u;
 }
 
 void CLodStreamingSystem::MarkStreamingRequestInProgress(uint32_t groupIndex) {
-    const uint32_t wordAddress = BitWordAddress(groupIndex);
-    const uint32_t bitMask = BitMask(groupIndex);
-    m_streamingRequestsInProgressBitsCpu[wordAddress] |= bitMask;
+    m_streamingRequestsInProgress.insert(groupIndex);
 }
 
 void CLodStreamingSystem::ClearStreamingRequestInProgress(uint32_t groupIndex) {
-    const uint32_t wordAddress = BitWordAddress(groupIndex);
-    if (wordAddress >= m_streamingRequestsInProgressBitsCpu.size()) {
+    m_streamingRequestsInProgress.erase(groupIndex);
+}
+
+uint32_t CLodStreamingSystem::GetPendingLoadPriority(uint32_t groupIndex) const {
+    auto it = m_pendingLoadPriorityByGroup.find(groupIndex);
+    return it != m_pendingLoadPriorityByGroup.end() ? it->second : 0u;
+}
+
+void CLodStreamingSystem::SetPendingLoadPriority(uint32_t groupIndex, uint32_t priority) {
+    m_pendingLoadPriorityByGroup[groupIndex] = priority;
+}
+
+void CLodStreamingSystem::ClearPendingLoadPriority(uint32_t groupIndex) {
+    m_pendingLoadPriorityByGroup.erase(groupIndex);
+}
+
+void CLodStreamingSystem::SetGroupUsesPinnedStorage(uint32_t groupIndex, bool usesPinnedStorage) {
+    if (usesPinnedStorage) {
+        m_groupsUsingPinnedStorage.insert(groupIndex);
         return;
     }
 
-    const uint32_t bitMask = BitMask(groupIndex);
-    m_streamingRequestsInProgressBitsCpu[wordAddress] &= ~bitMask;
+    m_groupsUsingPinnedStorage.erase(groupIndex);
 }
 
 void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager) {
@@ -1033,9 +1029,7 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
         }
 
         ClearStreamingRequestInProgress(groupIndex);
-        if (groupIndex < m_pendingLoadPriorityByGroup.size()) {
-            m_pendingLoadPriorityByGroup[groupIndex] = 0u;
-        }
+        ClearPendingLoadPriority(groupIndex);
 
         auto preAllocIt = m_preAllocatedPagesByGroup.find(groupIndex);
 
@@ -1274,18 +1268,18 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
     if (n > budget) {
         auto it = m_pendingStreamingRequests.begin() + static_cast<ptrdiff_t>(n - budget);
         std::nth_element(m_pendingStreamingRequests.begin(), it, m_pendingStreamingRequests.end(),
-            [](const PendingStreamingRequest& a, const PendingStreamingRequest& b) {
-                return a.priority < b.priority;
+            [this](const PendingStreamingRequest& a, const PendingStreamingRequest& b) {
+                return GetPendingLoadPriority(a.request.groupGlobalIndex) < GetPendingLoadPriority(b.request.groupGlobalIndex);
             });
         std::sort(it, m_pendingStreamingRequests.end(),
-            [](const PendingStreamingRequest& a, const PendingStreamingRequest& b) {
-                return a.priority < b.priority;
+            [this](const PendingStreamingRequest& a, const PendingStreamingRequest& b) {
+                return GetPendingLoadPriority(a.request.groupGlobalIndex) < GetPendingLoadPriority(b.request.groupGlobalIndex);
             });
     }
     else {
         std::sort(m_pendingStreamingRequests.begin(), m_pendingStreamingRequests.end(),
-            [](const PendingStreamingRequest& a, const PendingStreamingRequest& b) {
-                return a.priority < b.priority;
+            [this](const PendingStreamingRequest& a, const PendingStreamingRequest& b) {
+                return GetPendingLoadPriority(a.request.groupGlobalIndex) < GetPendingLoadPriority(b.request.groupGlobalIndex);
             });
     }
 
@@ -1302,11 +1296,6 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
             EnsureStreamingStorageCapacity(groupIndex + 1u);
         }
 
-        if (groupIndex >= m_pendingLoadPriorityByGroup.size()) {
-            processed++;
-            continue;
-        }
-
         // Load path
         frameStats.loadRequested++;
         frameStats.loadUnique++;
@@ -1316,7 +1305,7 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
         // wastefully evict pages for geometry that will never be rendered.
         if (!IsGroupActive(groupIndex)) {
             ClearStreamingRequestInProgress(groupIndex);
-            m_pendingLoadPriorityByGroup[groupIndex] = 0u;
+            ClearPendingLoadPriority(groupIndex);
             processed++;
             continue;
         }
@@ -1324,7 +1313,7 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
         if (IsGroupResident(groupIndex)) {
             TouchGroupPages(groupIndex);
             ClearStreamingRequestInProgress(groupIndex);
-            m_pendingLoadPriorityByGroup[groupIndex] = 0u;
+            ClearPendingLoadPriority(groupIndex);
             processed++;
             continue;
         }
@@ -1341,7 +1330,7 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
                 m_streamingNonResidentBitsUploadPending = true;
             }
             ClearStreamingRequestInProgress(groupIndex);
-            m_pendingLoadPriorityByGroup[groupIndex] = 0u;
+            ClearPendingLoadPriority(groupIndex);
             processed++;
             continue;
         }
@@ -1372,7 +1361,7 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
                 // LRU exhausted — can't allocate pages.
                 frameStats.loadFailed++;
                 ClearStreamingRequestInProgress(groupIndex);
-                m_pendingLoadPriorityByGroup[groupIndex] = 0u;
+                ClearPendingLoadPriority(groupIndex);
                 processed++;
                 continue;
             }
@@ -1393,7 +1382,7 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
                         groupIndex, pagesNeeded, allocated);
                     ReleasePreAllocatedPages(preAlloc, meshManager);
                     ClearStreamingRequestInProgress(groupIndex);
-                    m_pendingLoadPriorityByGroup[groupIndex] = 0u;
+                    ClearPendingLoadPriority(groupIndex);
                     frameStats.loadFailed++;
                     processed++;
                     continue;
@@ -1426,7 +1415,7 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
                 m_preAllocatedPagesByGroup.erase(paIt);
             }
             ClearStreamingRequestInProgress(groupIndex);
-            m_pendingLoadPriorityByGroup[groupIndex] = 0u;
+            ClearPendingLoadPriority(groupIndex);
         }
 
         processed++;

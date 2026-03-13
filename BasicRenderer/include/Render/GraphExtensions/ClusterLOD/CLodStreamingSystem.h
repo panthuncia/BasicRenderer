@@ -9,6 +9,7 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "Managers/MeshManager.h"
@@ -47,6 +48,7 @@ private:
     bool IsGroupPinned(uint32_t groupIndex) const;
     bool IsGroupActive(uint32_t groupIndex) const;
     bool IsGroupResident(uint32_t groupIndex) const;
+    bool UsesPinnedStorage(uint32_t groupIndex) const;
     bool TryQueuePendingLoadRequest(const CLodStreamingRequest& req, uint32_t priority);
     uint32_t QueueLoadRequestWithParents(const CLodStreamingRequest& requestedLoad, uint32_t requestedPriority);
     void EnsureStreamingStorageCapacity(uint32_t requiredGroupCount);
@@ -54,6 +56,10 @@ private:
     bool IsStreamingRequestInProgress(uint32_t groupIndex) const;
     void MarkStreamingRequestInProgress(uint32_t groupIndex);
     void ClearStreamingRequestInProgress(uint32_t groupIndex);
+    uint32_t GetPendingLoadPriority(uint32_t groupIndex) const;
+    void SetPendingLoadPriority(uint32_t groupIndex, uint32_t priority);
+    void ClearPendingLoadPriority(uint32_t groupIndex);
+    void SetGroupUsesPinnedStorage(uint32_t groupIndex, bool usesPinnedStorage);
     void ApplyDiskStreamingCompletions(MeshManager* meshManager);
     void TouchGroupPages(uint32_t groupIndex);
     void PollCompletedReadbackSlots();
@@ -89,16 +95,16 @@ private:
     std::vector<uint32_t> m_streamingActiveGroupsBitsCpu;
     std::vector<uint32_t> m_streamingPinnedGroupsBitsCpu;
     std::vector<uint32_t> m_streamingResidencyInitializedBitsCpu;
-    std::vector<uint32_t> m_streamingRequestsInProgressBitsCpu;
     std::vector<uint32_t> m_usedGroupsBitsCpu; // groups reported as visible by the GPU last frame
-    std::vector<uint32_t> m_pendingLoadPriorityByGroup;
     std::vector<int32_t> m_streamingParentGroupByGlobal;
-    std::vector<uint8_t> m_groupUsesPinnedStorage;
     CLodPageLRU m_pageLru;
     std::vector<int32_t> m_pageOwnerGroup;       // pageID → group global index (-1 = unowned)
     std::vector<uint32_t> m_pageOwnerSegment;    // pageID → segment index within owning group
     std::unordered_map<uint32_t, std::vector<uint32_t>> m_groupOwnedPages; // group → pageIDs by segment (~0u = no page)
     std::unordered_map<uint32_t, PreAllocatedPages> m_preAllocatedPagesByGroup;
+    std::unordered_set<uint32_t> m_streamingRequestsInProgress;
+    std::unordered_map<uint32_t, uint32_t> m_pendingLoadPriorityByGroup;
+    std::unordered_set<uint32_t> m_groupsUsingPinnedStorage;
     bool m_pageLruInitialized = false;
     uint32_t m_streamingResidentGroupsCount = 0u;
     uint32_t m_streamingActiveGroupScanCount = 0u;
