@@ -29,7 +29,6 @@ void CLodPageLRU::Remove(uint32_t pageID) {
 }
 
 void CLodPageLRU::Touch(uint32_t pageID) {
-    if (m_pinned.count(pageID)) return;
     auto it = m_map.find(pageID);
     if (it == m_map.end()) return;
 
@@ -38,16 +37,16 @@ void CLodPageLRU::Touch(uint32_t pageID) {
 }
 
 uint32_t CLodPageLRU::PopOldest() {
-    while (m_head) {
+    uint32_t remaining = static_cast<uint32_t>(m_map.size());
+    while (remaining > 0u && m_head) {
         Node* node = m_head;
         uint32_t pageID = node->pageID;
         Unlink(node);
-        m_map.erase(pageID);
-        delete node;
+        PushBack(node);
 
         if (m_pinned.count(pageID)) {
-            // Pinned page was inconsistently in the LRU list — clean it
-            // up by removing the node but do not return it for eviction.
+            // Pinned pages stay represented in the LRU, but cannot be evicted.
+            --remaining;
             continue;
         }
         return pageID;
@@ -75,8 +74,7 @@ void CLodPageLRU::Clear() {
 // Pinned page tracking
 
 void CLodPageLRU::Pin(uint32_t pageID) {
-    // Remove from LRU if present - pinned pages are not evictable.
-    Remove(pageID);
+    Insert(pageID);
     m_pinned.insert(pageID);
 }
 

@@ -13,7 +13,7 @@ PagePool::PagePool(const Config& config)
 	assert(m_config.pageSize > 0 && (m_config.pageSize & (m_config.pageSize - 1)) == 0
 		   && "pageSize must be a power of two");
 	assert(m_config.slabSize >= m_config.pageSize);
-	assert(m_config.maxSlabs > 0);
+	assert(m_config.numStreamingSlabs > 0);
 
 	m_pagesPerSlab = static_cast<uint32_t>(m_config.slabSize / m_config.pageSize);
 
@@ -27,40 +27,42 @@ PagePool::PagePool(const Config& config)
 	// Resource group for slab buffers (render graph auto-invalidation).
 	m_slabResourceGroup = std::make_shared<ResourceGroup>(m_config.debugName + "::Slabs");
 
-	// Pre-allocate all slabs if requested.
-	if (m_config.preAllocate) {
-		for (uint32_t i = 0; i < m_config.maxSlabs; ++i) {
-			if (!AllocateNewSlab()) {
-				spdlog::error("PagePool: pre-allocation failed at slab {}", i);
-				break;
-			}
+	for (uint32_t i = 0; i < m_config.numStreamingSlabs; ++i) {
+		if (!AllocateNewSlab(SlabRole::General)) {
+			spdlog::error("PagePool: failed to allocate streaming slab {}", i);
+			break;
 		}
-		spdlog::info("PagePool: pre-allocated {} slabs ({} total pages)",
-					 static_cast<uint32_t>(m_slabs.size()), m_totalPageCapacity);
 	}
+
+	spdlog::info("PagePool: initialized {} general slabs ({} total pages)",
+		static_cast<uint32_t>(m_generalSlabCount), m_totalPageCapacity);
 }
 
 PagePool::~PagePool() = default;
 
 // Slab management
-bool PagePool::AllocateNewSlab() {
-	if (static_cast<uint32_t>(m_slabs.size()) >= m_config.maxSlabs) {
-		spdlog::error("PagePool: cannot allocate new slab- maxSlabs ({}) reached", m_config.maxSlabs);
+bool PagePool::AllocateNewSlab(SlabRole role) {
+	if (role == SlabRole::General && m_generalSlabCount >= m_config.numStreamingSlabs) {
+		spdlog::error("PagePool: cannot allocate new streaming slab - numStreamingSlabs ({}) reached", m_config.numStreamingSlabs);
 		return false;
 	}
 
 	const uint32_t slabIndex = static_cast<uint32_t>(m_slabs.size());
 	Slab slab;
+	slab.role = role;
 	slab.buffer = DynamicBuffer::CreateShared(
 		/*elementSize=*/1,
 		/*capacity=*/m_config.slabSize,
-		m_config.debugName + "::Slab" + std::to_string(slabIndex),
+		m_config.debugName + "::" + (role == SlabRole::Pinned ? "PinnedSlab" : "Slab") + std::to_string(slabIndex),
 		/*byteAddress=*/true,
 		/*UAV=*/false);
 	slab.buffer->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
 
 	m_slabs.push_back(std::move(slab));
 	m_totalPageCapacity += m_pagesPerSlab;
+	if (role == SlabRole::General) {
+		m_generalSlabCount++;
+	}
 
 	// Register new slab in the resource group for render graph tracking.
 	m_slabResourceGroup->AddResource(m_slabs.back().buffer);
@@ -79,7 +81,8 @@ bool PagePool::AllocateNewSlab() {
 
 	m_pageTableDirty = true;
 
-	spdlog::info("PagePool: allocated slab {} ({:.1f} MB, {} pages)",
+	spdlog::info("PagePool: allocated {} slab {} ({:.1f} MB, {} pages)",
+				 role == SlabRole::Pinned ? "pinned" : "general",
 				 slabIndex,
 				 static_cast<double>(m_config.slabSize) / (1024.0 * 1024.0),
 				 m_pagesPerSlab);
@@ -161,4 +164,51 @@ std::shared_ptr<DynamicBuffer> PagePool::GetPageTableBuffer() const {
 
 uint32_t PagePool::GetTotalPageCount() const {
 	return m_totalPageCapacity;
+}
+
+uint32_t PagePool::GetGeneralPageCount() const {
+	return m_generalSlabCount * m_pagesPerSlab;
+}
+
+std::vector<uint32_t> PagePool::AllocatePinnedPages(uint32_t count) {
+	std::vector<uint32_t> pageIDs;
+	pageIDs.reserve(count);
+	if (count == 0u) {
+		return pageIDs;
+	}
+
+	while (m_freePinnedPageIDs.size() < count) {
+		if (!AllocateNewSlab(SlabRole::Pinned)) {
+			spdlog::error("PagePool: unable to grow pinned slab pool for {} requested pages", count);
+			return {};
+		}
+
+		const uint32_t slabIndex = static_cast<uint32_t>(m_slabs.size() - 1u);
+		const uint32_t firstGlobalPageID = slabIndex * m_pagesPerSlab;
+		for (uint32_t pageOffset = 0; pageOffset < m_pagesPerSlab; ++pageOffset) {
+			m_freePinnedPageIDs.push_back(firstGlobalPageID + pageOffset);
+		}
+	}
+
+	for (uint32_t i = 0; i < count; ++i) {
+		pageIDs.push_back(m_freePinnedPageIDs.back());
+		m_freePinnedPageIDs.pop_back();
+	}
+
+	return pageIDs;
+}
+
+void PagePool::FreePinnedPages(const std::vector<uint32_t>& pageIDs) {
+	for (uint32_t pageID : pageIDs) {
+		const uint32_t slabIndex = PageToSlabIndex(pageID);
+		if (slabIndex >= m_slabs.size()) {
+			continue;
+		}
+
+		if (m_slabs[slabIndex].role != SlabRole::Pinned) {
+			continue;
+		}
+
+		m_freePinnedPageIDs.push_back(pageID);
+	}
 }

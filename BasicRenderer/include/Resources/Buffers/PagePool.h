@@ -31,8 +31,7 @@ public:
 	struct Config {
 		uint64_t pageSize     = 256 * 1024; // Bytes per page (default 256 KB).
 		uint64_t slabSize     = 256 * 1024 * 1024; // Bytes per slab (default 256 MB).
-		uint32_t maxSlabs     = 16; // Hard cap on slab count.
-		bool     preAllocate  = false; // Allocate all slabs up-front in the constructor.
+		uint32_t numStreamingSlabs = 16; // General-purpose streaming slabs created up-front.
 		std::string debugName = "CLodPagePool";
 	};
 
@@ -75,14 +74,17 @@ public:
 	// Total pages across all slabs.
 	uint32_t GetTotalPageCount() const;
 
+	// Total pages across general-purpose slabs.
+	uint32_t GetGeneralPageCount() const;
+
 	// Page size in bytes.
 	uint64_t GetPageSize() const { return m_config.pageSize; }
 
 	// Slab size in bytes.
 	uint64_t GetSlabSize() const { return m_config.slabSize; }
 
-	// Maximum number of slabs.
-	uint32_t GetMaxSlabs() const { return m_config.maxSlabs; }
+	// Number of streaming slabs created up-front.
+	uint32_t GetNumStreamingSlabs() const { return m_config.numStreamingSlabs; }
 
 	// Pages per slab.
 	uint32_t GetPagesPerSlab() const { return m_pagesPerSlab; }
@@ -105,16 +107,31 @@ public:
 	// Should be called once per frame after any alloc/free operations.
 	void FlushPageTableUpdates();
 
+	// Allocate pages from dedicated pinned slabs. The returned pages do not
+	// participate in the CLod eviction LRU.
+	std::vector<uint32_t> AllocatePinnedPages(uint32_t count);
+
+	// Return pinned pages to the dedicated pinned-slab free list.
+	void FreePinnedPages(const std::vector<uint32_t>& pageIDs);
+
 private:
+	enum class SlabRole : uint8_t {
+		General,
+		Pinned,
+	};
+
 	struct Slab {
 		std::shared_ptr<DynamicBuffer> buffer; // The GPU ByteAddressBuffer.
+		SlabRole role = SlabRole::General;
 	};
 
 	Config     m_config;
 	uint32_t   m_pagesPerSlab = 0;
 	uint32_t   m_totalPageCapacity = 0;
+	uint32_t   m_generalSlabCount = 0;
 
 	std::vector<Slab> m_slabs;
+	std::vector<uint32_t> m_freePinnedPageIDs;
 
 	// CPU-side mirror of the page table: indexed by global page ID.
 	std::vector<PageTableEntry> m_pageTableCpu;
@@ -126,8 +143,8 @@ private:
 	// ResourceGroup tracking all slab buffers for render graph auto-invalidation.
 	std::shared_ptr<ResourceGroup> m_slabResourceGroup;
 
-	// Allocate a new slab. Returns false if maxSlabs is reached.
-	bool AllocateNewSlab();
+	// Allocate a new slab. Streaming slabs are capped by numStreamingSlabs.
+	bool AllocateNewSlab(SlabRole role);
 
 	// Update the page table CPU mirror entries for pages [firstGlobal, firstGlobal+count).
 	void UpdatePageTableEntries(uint32_t firstGlobalPageID, uint32_t count);

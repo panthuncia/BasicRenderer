@@ -6,11 +6,11 @@
 
 // Page-level doubly-linked list LRU for cluster-LOD streaming.
 //
-// - Each page in the pool occupies exactly one node in the list (unless pinned).
+// - Each page in the pool occupies exactly one node in the list.
 // - Front = least-recently-used, back = most-recently-used.
 // - Touch() moves a node to the back in O(1).
-// - PopOldest() removes and returns the oldest page.
-// - Pinned pages are tracked separately and never enter the LRU.
+// - PopOldest() rotates the oldest evictable page to MRU and returns it.
+// - Pinned pages stay in the LRU but are skipped by PopOldest().
 //
 // Thread safety: none - intended to be owned by a single thread (the worker).
 class CLodPageLRU {
@@ -33,20 +33,20 @@ public:
     // No-op if not present or pinned.
     void Touch(uint32_t pageID);
 
-    // Remove and return the least-recently-used page.
-    // Returns ~0u if the LRU is empty.
+    // Return the least-recently-used evictable page and move it to MRU.
+    // Returns ~0u if every tracked page is pinned or the LRU is empty.
     uint32_t PopOldest();
 
     // Is this page tracked in the LRU?
     bool Contains(uint32_t pageID) const;
 
-    // Number of pages in the LRU (excludes pinned).
+    // Number of pages tracked by the LRU.
     uint32_t Size() const { return static_cast<uint32_t>(m_map.size()); }
 
     // Clear all entries (LRU + pinned).
     void Clear();
 
-    // Pinned page tracking (outside the LRU)
+    // Pinned page tracking (still represented in the LRU).
     void Pin(uint32_t pageID);
     void Unpin(uint32_t pageID);
     bool IsPinned(uint32_t pageID) const;

@@ -62,17 +62,20 @@ private:
 
     // Page-level LRU helpers
     void InitializePageLru(MeshManager* meshManager);
+    void EnsurePageTrackingCapacity(MeshManager* meshManager);
     std::vector<uint32_t> PopFreePages(uint32_t count, MeshManager* meshManager);
+    void ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshManager* meshManager);
 
     struct PreAllocatedPages {
         std::vector<uint32_t> pagesBySegment; // segment index → pageID
         std::vector<bool> segmentNeedsFetch;  // true = need disk data; false = reused still-valid page
         uint32_t segmentCount = 0;
+        bool usesPinnedStorage = false;
     };
 
     PreAllocatedPages PreAllocatePagesForGroup(uint32_t groupIndex, uint32_t segmentCount, MeshManager* meshManager);
     void AssignPagesToGroup(uint32_t groupIndex, const PreAllocatedPages& pages);
-    void ReleasePreAllocatedPages(const PreAllocatedPages& pages);
+    void ReleasePreAllocatedPages(const PreAllocatedPages& pages, MeshManager* meshManager);
 
     std::shared_ptr<Buffer> m_streamingNonResidentBits;
     std::shared_ptr<Buffer> m_streamingActiveGroupsBits;
@@ -87,8 +90,10 @@ private:
     std::vector<uint32_t> m_streamingPinnedGroupsBitsCpu;
     std::vector<uint32_t> m_streamingResidencyInitializedBitsCpu;
     std::vector<uint32_t> m_streamingRequestsInProgressBitsCpu;
+    std::vector<uint32_t> m_usedGroupsBitsCpu; // groups reported as visible by the GPU last frame
     std::vector<uint32_t> m_pendingLoadPriorityByGroup;
     std::vector<int32_t> m_streamingParentGroupByGlobal;
+    std::vector<uint8_t> m_groupUsesPinnedStorage;
     CLodPageLRU m_pageLru;
     std::vector<int32_t> m_pageOwnerGroup;       // pageID → group global index (-1 = unowned)
     std::vector<uint32_t> m_pageOwnerSegment;    // pageID → segment index within owning group
