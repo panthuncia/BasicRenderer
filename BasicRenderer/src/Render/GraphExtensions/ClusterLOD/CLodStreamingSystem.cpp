@@ -354,12 +354,11 @@ bool CLodStreamingSystem::TryQueuePendingLoadRequest(const CLodStreamingRequest&
     }
 
     if (IsStreamingRequestInProgress(groupIndex)) {
+        // Only update the priority tracker — do NOT push a duplicate entry.
+        // The existing entry in m_pendingStreamingRequests (or in-flight I/O)
+        // will pick up the elevated priority via m_pendingLoadPriorityByGroup.
         if (groupIndex < m_pendingLoadPriorityByGroup.size() && priority > m_pendingLoadPriorityByGroup[groupIndex]) {
             m_pendingLoadPriorityByGroup[groupIndex] = priority;
-            PendingStreamingRequest pending{};
-            pending.request = req;
-            pending.priority = priority;
-            m_pendingStreamingRequests.push_back(pending);
         }
         return false;
     }
@@ -560,12 +559,18 @@ CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForG
 void CLodStreamingSystem::AssignPagesToGroup(uint32_t groupIndex, const PreAllocatedPages& pages) {
     m_groupOwnedPages[groupIndex] = pages.pagesBySegment;
 
+    const bool pinned = IsGroupPinned(groupIndex);
     for (uint32_t seg = 0; seg < pages.segmentCount; ++seg) {
         uint32_t page = pages.pagesBySegment[seg];
         if (page != ~0u && page < m_pageOwnerGroup.size()) {
             m_pageOwnerGroup[page] = static_cast<int32_t>(groupIndex);
             m_pageOwnerSegment[page] = seg;
-            m_pageLru.Insert(page);
+            if (pinned) {
+                // Pinned pages must stay out of the evictable LRU.
+                m_pageLru.Pin(page);
+            } else {
+                m_pageLru.Insert(page);
+            }
         }
     }
 }
@@ -864,6 +869,15 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
         }
         else {
             if (preAllocIt != m_preAllocatedPagesByGroup.end()) {
+                // If this was a pinned group, unpin the pre-allocated pages
+                // before releasing them back to the LRU.
+                if (IsGroupPinned(groupIndex)) {
+                    for (uint32_t page : preAllocIt->second.pagesBySegment) {
+                        if (page != ~0u) {
+                            m_pageLru.Unpin(page);
+                        }
+                    }
+                }
                 ReleasePreAllocatedPages(preAllocIt->second);
                 m_preAllocatedPagesByGroup.erase(preAllocIt);
             }
@@ -1108,6 +1122,16 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
         frameStats.loadRequested++;
         frameStats.loadUnique++;
 
+        // Skip groups that are no longer in the active domain (e.g. after a
+        // streaming domain refresh removed them). Processing these would
+        // wastefully evict pages for geometry that will never be rendered.
+        if (!IsGroupActive(groupIndex)) {
+            ClearStreamingRequestInProgress(groupIndex);
+            m_pendingLoadPriorityByGroup[groupIndex] = 0u;
+            processed++;
+            continue;
+        }
+
         if (IsGroupResident(groupIndex)) {
             TouchGroupPages(groupIndex);
             ClearStreamingRequestInProgress(groupIndex);
@@ -1135,6 +1159,14 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
 
         // If disk I/O is already queued/in-flight for this group, skip.
         if (meshManager->IsCLodGroupDiskIOQueued(groupIndex)) {
+            processed++;
+            continue;
+        }
+
+        // If pages are already pre-allocated (from pinned-group init or a
+        // previous frame), skip — overwriting the map entry would leak the
+        // existing pages out of the LRU permanently.
+        if (m_preAllocatedPagesByGroup.count(groupIndex)) {
             processed++;
             continue;
         }
@@ -1187,6 +1219,17 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
 
         processed++;
     }
+
+    // Purge stale entries that would never make progress: groups that became
+    // resident (loaded by a previous iteration or completion) or inactive
+    // (removed from the streaming domain). Without this, the queue grows
+    // unboundedly across frames and stale requests cause needless evictions.
+    std::erase_if(m_pendingStreamingRequests, [this](const PendingStreamingRequest& p) {
+        const uint32_t g = p.request.groupGlobalIndex;
+        return g >= m_streamingStorageGroupCapacity
+            || IsGroupResident(g)
+            || !IsGroupActive(g);
+    });
 
     if (meshManager != nullptr) {
         const auto debugStats = meshManager->GetCLodStreamingDebugStats();

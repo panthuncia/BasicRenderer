@@ -38,14 +38,21 @@ void CLodPageLRU::Touch(uint32_t pageID) {
 }
 
 uint32_t CLodPageLRU::PopOldest() {
-    if (!m_head) return ~0u;
+    while (m_head) {
+        Node* node = m_head;
+        uint32_t pageID = node->pageID;
+        Unlink(node);
+        m_map.erase(pageID);
+        delete node;
 
-    Node* node = m_head;
-    uint32_t pageID = node->pageID;
-    Unlink(node);
-    m_map.erase(pageID);
-    delete node;
-    return pageID;
+        if (m_pinned.count(pageID)) {
+            // Pinned page was inconsistently in the LRU list — clean it
+            // up by removing the node but do not return it for eviction.
+            continue;
+        }
+        return pageID;
+    }
+    return ~0u;
 }
 
 bool CLodPageLRU::Contains(uint32_t pageID) const {
