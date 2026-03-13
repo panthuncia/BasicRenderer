@@ -15,7 +15,7 @@
 #include "Render/RenderGraph/RenderGraph.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
-#include "Render/GraphExtensions/ClusterLOD/CLodStreamingLRU.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodPageLRU.h"
 #include "Resources/Buffers/Buffer.h"
 
 class CLodStreamingSystem {
@@ -36,7 +36,6 @@ private:
     };
 
     struct PendingStreamingRequest {
-        bool isLoad = true;
         CLodStreamingRequest request{};
         uint32_t priority = 0u;
     };
@@ -50,22 +49,33 @@ private:
     bool IsGroupResident(uint32_t groupIndex) const;
     bool TryQueuePendingLoadRequest(const CLodStreamingRequest& req, uint32_t priority);
     uint32_t QueueLoadRequestWithParents(const CLodStreamingRequest& requestedLoad, uint32_t requestedPriority);
-    bool TryEvictLruVictim(uint32_t avoidGroup, CLodStreamingOperationStats& frameStats);
     void EnsureStreamingStorageCapacity(uint32_t requiredGroupCount);
     void RefreshStreamingActiveGroupDomain();
     bool IsStreamingRequestInProgress(uint32_t groupIndex) const;
     void MarkStreamingRequestInProgress(uint32_t groupIndex);
     void ClearStreamingRequestInProgress(uint32_t groupIndex);
-    bool ApplyEvictionRequest(const CLodStreamingRequest& req, bool& outResidencyBitChanged);
     void ApplyDiskStreamingCompletions(MeshManager* meshManager);
-    void TouchWithParentChain(uint32_t groupIndex);
+    void TouchGroupPages(uint32_t groupIndex);
     void PollCompletedReadbackSlots();
     void StreamingWorkerMain();
     void ProcessStreamingRequestsBudgeted();
 
+    // Page-level LRU helpers
+    void InitializePageLru(MeshManager* meshManager);
+    std::vector<uint32_t> PopFreePages(uint32_t count, MeshManager* meshManager);
+
+    struct PreAllocatedPages {
+        std::vector<uint32_t> pagesBySegment; // segment index → pageID
+        std::vector<bool> segmentNeedsFetch;  // true = need disk data; false = reused still-valid page
+        uint32_t segmentCount = 0;
+    };
+
+    PreAllocatedPages PreAllocatePagesForGroup(uint32_t groupIndex, uint32_t segmentCount, MeshManager* meshManager);
+    void AssignPagesToGroup(uint32_t groupIndex, const PreAllocatedPages& pages);
+    void ReleasePreAllocatedPages(const PreAllocatedPages& pages);
+
     std::shared_ptr<Buffer> m_streamingNonResidentBits;
     std::shared_ptr<Buffer> m_streamingActiveGroupsBits;
-    std::shared_ptr<Buffer> m_streamingLoadRequestBits;
     std::shared_ptr<Buffer> m_streamingLoadRequests;
     std::shared_ptr<Buffer> m_streamingLoadCounter;
     std::shared_ptr<Buffer> m_streamingRuntimeState;
@@ -75,12 +85,16 @@ private:
     std::vector<uint32_t> m_streamingNonResidentBitsCpu;
     std::vector<uint32_t> m_streamingActiveGroupsBitsCpu;
     std::vector<uint32_t> m_streamingPinnedGroupsBitsCpu;
-    std::vector<uint32_t> m_streamingEvictionExemptBitsCpu;
     std::vector<uint32_t> m_streamingResidencyInitializedBitsCpu;
     std::vector<uint32_t> m_streamingRequestsInProgressBitsCpu;
     std::vector<uint32_t> m_pendingLoadPriorityByGroup;
     std::vector<int32_t> m_streamingParentGroupByGlobal;
-    CLodStreamingLRU m_lru;
+    CLodPageLRU m_pageLru;
+    std::vector<int32_t> m_pageOwnerGroup;       // pageID → group global index (-1 = unowned)
+    std::vector<uint32_t> m_pageOwnerSegment;    // pageID → segment index within owning group
+    std::unordered_map<uint32_t, std::vector<uint32_t>> m_groupOwnedPages; // group → pageIDs by segment (~0u = no page)
+    std::unordered_map<uint32_t, PreAllocatedPages> m_preAllocatedPagesByGroup;
+    bool m_pageLruInitialized = false;
     uint32_t m_streamingResidentGroupsCount = 0u;
     uint32_t m_streamingActiveGroupScanCount = 0u;
     uint32_t m_streamingStorageGroupCapacity = CLodStreamingInitialGroupCapacity;
@@ -94,10 +108,6 @@ private:
     bool m_streamingDomainDirty = true;
 
     MeshManager::CLodStreamingDomainSnapshot m_cachedDomainSnapshot;
-    std::vector<MeshManager::CLodGlobalResidencyRequest> m_initRequests;
-    std::vector<uint32_t> m_initRequestWordAddresses;
-    std::vector<uint32_t> m_initRequestBitMasks;
-    std::vector<uint8_t> m_initRequestPinnedFlags;
 
     // Self-managed readback pipeline 
     // Dedicated fence signalled when a readback copy completes on the copy queue.

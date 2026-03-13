@@ -36,17 +36,17 @@ VoxelGroupPayload VoxelizeTriangles(const VoxelizeTrianglesInput& input);
 // Each child is a VoxelGroupPayload whose cells are treated as box primitives.
 struct VoxelizeVoxelsInput
 {
-	/// Child voxel payloads to merge.
+	// Child voxel payloads to merge.
 	const std::vector<const VoxelGroupPayload*>* children = nullptr;
 
-	/// Parent AABB (typically union of child AABBs, slightly expanded).
+	// Parent AABB (typically union of child AABBs, slightly expanded).
 	DirectX::XMFLOAT3 aabbMin{};
 	DirectX::XMFLOAT3 aabbMax{};
 
-	/// Resolution (cells per axis) for the parent voxel grid.
+	// Resolution (cells per axis) for the parent voxel grid.
 	uint32_t resolution = 16;
 
-	/// Number of rays cast per active parent cell for opacity sampling.
+	// Number of rays cast per active parent cell for opacity sampling.
 	uint32_t raysPerCell = 64;
 };
 

@@ -81,8 +81,8 @@ inline std::shared_ptr<Buffer> CreateAliasedUnmaterializedStructuredBuffer(
     return buffer;
 }
 
-/// Estimates the packed blob size (bytes) for a group from its chunk hints,
-/// mirroring the alignment logic of PackGroupPayloadForPagePool.
+// Estimates the packed blob size (bytes) for a group from its chunk hints,
+// mirroring the alignment logic of PackGroupPayloadForPagePool.
 inline size_t CLodEstimateBlobSize(
     const ClusterLODRuntimeSummary::GroupChunkHint& hint,
     uint32_t vertexByteSize)
@@ -101,9 +101,9 @@ inline size_t CLodEstimateBlobSize(
     return align4(size);
 }
 
-/// Returns the number of pages needed for a group.
-/// With per-segment paging, each segment = 1 page, so this returns the segment count.
-/// Falls back to blob-size estimation when segment count is unavailable.
+// Returns the number of pages needed for a group.
+// With per-segment paging, each segment = 1 page, so this returns the segment count.
+// Falls back to blob-size estimation when segment count is unavailable.
 inline uint32_t CLodEstimatePagesNeeded(
     const ClusterLODRuntimeSummary::GroupChunkHint& hint,
     uint32_t vertexByteSize,

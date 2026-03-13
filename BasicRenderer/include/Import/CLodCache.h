@@ -47,6 +47,15 @@ bool LoadGroupPayloadDirect(std::ifstream& file,
 	const ClusterLODGroupDiskLocator& locator,
 	LoadedGroupPayload& outPayload);
 
+// Selective variant: reads all metadata but only fetches page blobs where
+// segmentNeedsFetch[i] is true.  Skipped segments get an empty blob in
+// outPayload.pageBlobs.  segmentNeedsFetch.size() must equal the on-disk
+// page count or be empty (which falls back to reading everything).
+bool LoadGroupPayloadSelective(std::ifstream& file,
+	const ClusterLODGroupDiskLocator& locator,
+	const std::vector<bool>& segmentNeedsFetch,
+	LoadedGroupPayload& outPayload);
+
 // Open a container file and validate its header.  Returns true on success.
 // The caller keeps the ifstream around for repeated LoadGroupPayloadDirect
 // calls, avoiding per-request open/close overhead.

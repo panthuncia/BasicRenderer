@@ -16,8 +16,8 @@
 
 namespace USDGeometryExtractor {
 
-/// Extract geometry for a single mesh (or mesh+subset), populate
-/// MeshIngestBuilder, and build/load CLod cache.
+// Extract geometry for a single mesh (or mesh+subset), populate
+// MeshIngestBuilder, and build/load CLod cache.
 MeshPreprocessResult ExtractSubMesh(
 	const pxr::UsdGeomMesh& mesh,
 	const std::optional<pxr::UsdGeomSubset>& subset,
@@ -28,19 +28,19 @@ MeshPreprocessResult ExtractSubMesh(
 	const pxr::VtTokenArray& skelJointOrderRaw,
 	const pxr::VtTokenArray& skelJointOrderMapped);
 
-/// Build a UsdSkelSkinningQuery for a mesh if it has skinning data.
+// Build a UsdSkelSkinningQuery for a mesh if it has skinning data.
 std::optional<pxr::UsdSkelSkinningQuery> GetSkinningQuery(
 	const pxr::UsdGeomMesh& mesh,
 	const pxr::UsdSkelCache& skelCache);
 
-/// Results from ExtractAll (CLI stage-wide extraction).
+// Results from ExtractAll (CLI stage-wide extraction).
 struct StageExtractionResult {
 	size_t meshesProcessed = 0;
 	size_t submeshesProcessed = 0;
 	size_t cachesBuilt = 0;
 };
 
-/// Open a USD stage and extract geometry + build CLod caches for every mesh.
+// Open a USD stage and extract geometry + build CLod caches for every mesh.
 StageExtractionResult ExtractAll(const std::string& filePath);
 
 } // namespace USDGeometryExtractor

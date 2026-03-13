@@ -53,22 +53,10 @@ public:
 	PagePool(const PagePool&) = delete;
 	PagePool& operator=(const PagePool&) = delete;
 
-	// Allocate 'count' contiguous pages. Returns an invalid PageAllocation if
-	// no slab has room and we've hit maxSlabs.
-	PageAllocation AllocatePages(uint32_t count);
-
-	// Free a previously-returned allocation. O(1).
-	void FreePages(const PageAllocation& alloc);
-
 	// Upload `dataSize` bytes of CPU data into the slab at the given page +
 	// intra-page byte offset. The data must fit within the allocation.
 	void UploadToPage(uint32_t globalPageID, uint32_t intraPageByteOffset,
 					  const void* data, size_t dataSize);
-
-	// Upload a group's packed payload as a contiguous blob starting at the
-	// first page of the allocation.
-	void UploadToAllocation(const PageAllocation& alloc, const void* data,
-							size_t dataSize);
 
 	// Accessors
 
@@ -86,12 +74,6 @@ public:
 
 	// Total pages across all slabs.
 	uint32_t GetTotalPageCount() const;
-
-	// Number of pages currently free.
-	uint32_t GetFreePageCount() const;
-
-	// Number of currently allocated (in-use) pages.
-	uint32_t GetAllocatedPageCount() const { return GetTotalPageCount() - GetFreePageCount(); }
 
 	// Page size in bytes.
 	uint64_t GetPageSize() const { return m_config.pageSize; }
@@ -126,8 +108,6 @@ public:
 private:
 	struct Slab {
 		std::shared_ptr<DynamicBuffer> buffer; // The GPU ByteAddressBuffer.
-		std::vector<uint32_t>          freeBitmap; // 1-bit-per-page: 1 = free.
-		uint32_t                       freeCount = 0;
 	};
 
 	Config     m_config;
@@ -145,10 +125,6 @@ private:
 
 	// ResourceGroup tracking all slab buffers for render graph auto-invalidation.
 	std::shared_ptr<ResourceGroup> m_slabResourceGroup;
-
-	// Try to allocate 'count' contiguous pages from slab at 'slabIndex'.
-	// Returns the local page index (within the slab) if successful, or ~0u on failure.
-	uint32_t TryAllocateFromSlab(uint32_t slabIndex, uint32_t count);
 
 	// Allocate a new slab. Returns false if maxSlabs is reached.
 	bool AllocateNewSlab();
