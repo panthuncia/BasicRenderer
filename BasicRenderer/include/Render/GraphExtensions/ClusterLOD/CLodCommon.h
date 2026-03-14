@@ -41,7 +41,7 @@ struct CLodViewRasterInfo
     friend bool operator==(const CLodViewRasterInfo&, const CLodViewRasterInfo&) = default;
 };
 
-inline constexpr uint32_t CLodReplayBufferSizeBytes = 8u * 1024u * 1024u;
+inline constexpr uint32_t CLodReplayBufferSizeBytes = 100u * 1024u * 1024u;
 inline constexpr uint32_t CLodReplayBufferNumUints = CLodReplayBufferSizeBytes / sizeof(uint32_t);
 inline constexpr uint32_t CLodMaxViewDepthIndices = 512u;
 inline constexpr uint32_t CLodStreamingInitialGroupCapacity = 1024u;

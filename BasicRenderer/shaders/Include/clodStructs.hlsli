@@ -126,4 +126,65 @@ struct ClusterLODGroup
 
 static const uint CLOD_GROUP_FLAG_IS_VOXEL = 1u << 0;
 
+static const uint CLOD_REPLAY_RECORD_TYPE_NODE = 0;
+static const uint CLOD_REPLAY_RECORD_TYPE_GROUP = 1;
+static const uint CLOD_REPLAY_RECORD_TYPE_MESHLET = 2;
+static const uint CLOD_REPLAY_BUFFER_SIZE_BYTES = 100u * 1024u * 1024u;
+
+struct CLodNodeGroupReplayRecord
+{
+    uint type;
+    uint instanceIndex;
+    uint viewId;
+    uint nodeOrGroupId;
+    uint pad0;
+};
+
+struct CLodMeshletReplayRecord
+{
+    uint type;
+    uint instanceIndex;
+    uint viewId;
+    uint groupId;
+    uint localMeshletIndex;       // page-local meshlet index
+    uint pageSlabDescriptorIndex; // pre-resolved page slab descriptor
+    uint pageSlabByteOffset;      // pre-resolved page slab byte offset
+    uint pad;
+};
+
+static const uint CLOD_REPLAY_SLOT_STRIDE_BYTES = sizeof(CLodMeshletReplayRecord);
+static const uint CLOD_REPLAY_SLOT_CAPACITY = CLOD_REPLAY_BUFFER_SIZE_BYTES / CLOD_REPLAY_SLOT_STRIDE_BYTES;
+
+struct CLodReplayBufferState
+{
+    uint totalWriteCount;
+    uint droppedRecords;
+    uint pad0;
+    uint pad1;
+};
+
+struct CLodViewDepthSRVIndex
+{
+    uint cameraBufferIndex;
+    uint linearDepthSRVIndex;
+    uint pad0;
+    uint pad1;
+};
+
+struct CLodNodeGpuInput
+{
+    uint entrypointIndex;
+    uint numRecords;
+    uint64_t recordsAddress;
+    uint64_t recordStride;
+};
+
+struct CLodMultiNodeGpuInput
+{
+    uint numNodeInputs;
+    uint pad0;
+    uint64_t nodeInputsAddress;
+    uint64_t nodeInputStride;
+};
+
 #endif // CLOD_STRUCTS_HLSLI

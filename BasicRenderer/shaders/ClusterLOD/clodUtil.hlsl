@@ -3,6 +3,7 @@
 #include "include/waveIntrinsicsHelpers.hlsli"
 #include "PerPassRootConstants/clodRootConstants.h"
 #include "include/indirectCommands.hlsli"
+#include "include/clodStructs.hlsli"
 
 struct RasterBucketsHistogramIndirectCommand
 {
