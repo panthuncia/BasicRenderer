@@ -105,6 +105,10 @@ private:
     std::unordered_set<uint32_t> m_streamingRequestsInProgress;
     std::unordered_map<uint32_t, uint32_t> m_pendingLoadPriorityByGroup;
     std::unordered_set<uint32_t> m_groupsUsingPinnedStorage;
+    // Groups whose pages are temporarily LRU-pinned until the GPU confirms
+    // usage via readback. Maps groupIndex → readback generation at pin time.
+    std::unordered_map<uint32_t, uint64_t> m_readbackGapPinnedGroups;
+    uint64_t m_readbackGeneration = 0;
     bool m_pageLruInitialized = false;
     uint32_t m_streamingResidentGroupsCount = 0u;
     uint32_t m_streamingActiveGroupScanCount = 0u;

@@ -164,6 +164,8 @@ void CLodStreamingSystem::OnRegistryReset(ResourceRegistry* reg) {
     m_groupOwnedPages.clear();
     m_preAllocatedPagesByGroup.clear();
     m_groupsUsingPinnedStorage.clear();
+    m_readbackGapPinnedGroups.clear();
+    m_readbackGeneration = 0;
     m_pageLruInitialized = false;
     m_streamingResidentGroupsCount = 0u;
     std::fill(m_streamingNonResidentBitsCpu.begin(), m_streamingNonResidentBitsCpu.end(), 0u);
@@ -492,6 +494,10 @@ void CLodStreamingSystem::ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshMan
         return;
     }
 
+    // If pages were pinned during the readback-gap window, unpin them
+    // before returning them to the LRU / freeing pinned storage.
+    const bool hadReadbackGapPin = m_readbackGapPinnedGroups.erase(groupIndex) != 0;
+
     const bool usesPinnedStorage = UsesPinnedStorage(groupIndex);
     std::vector<uint32_t> pinnedPagesToFree;
     if (usesPinnedStorage) {
@@ -501,6 +507,10 @@ void CLodStreamingSystem::ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshMan
     for (uint32_t page : it->second) {
         if (page == ~0u) {
             continue;
+        }
+
+        if (hadReadbackGapPin && !usesPinnedStorage) {
+            m_pageLru.Unpin(page);
         }
 
         if (page < m_pageOwnerGroup.size()) {
@@ -703,7 +713,7 @@ void CLodStreamingSystem::ReleasePreAllocatedPages(const PreAllocatedPages& page
         }
 
         if (pages.segmentNeedsFetch[seg]) {
-            // Fresh page that was never assigned — clear ownership and return to LRU.
+            // Fresh page that was never assigned - clear ownership and return to LRU.
             if (page < m_pageOwnerGroup.size()) {
                 m_pageOwnerGroup[page] = -1;
                 m_pageOwnerSegment[page] = 0u;
@@ -1044,8 +1054,24 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
             }
 
             if (preAllocIt != m_preAllocatedPagesByGroup.end()) {
+                const bool usesPinnedStorage = preAllocIt->second.usesPinnedStorage;
                 AssignPagesToGroup(groupIndex, preAllocIt->second);
                 m_preAllocatedPagesByGroup.erase(preAllocIt);
+
+                // Pin newly-assigned pages in the LRU until the GPU confirms
+                // usage via readback. This prevents eviction during the
+                // multi-frame readback latency window.
+                if (!usesPinnedStorage) {
+                    auto ownedIt = m_groupOwnedPages.find(groupIndex);
+                    if (ownedIt != m_groupOwnedPages.end()) {
+                        for (uint32_t page : ownedIt->second) {
+                            if (page != ~0u) {
+                                m_pageLru.Pin(page);
+                            }
+                        }
+                    }
+                    m_readbackGapPinnedGroups[groupIndex] = m_readbackGeneration;
+                }
             }
             TouchGroupPages(groupIndex);
         }
@@ -1074,10 +1100,10 @@ void CLodStreamingSystem::PollCompletedReadbackSlots() {
         usedGroupsBatch.swap(m_decodedUsedGroupsBatch);
     }
 
-    // Rebuild the used-groups bitset so PopFreePages can protect visible groups.
-    // Only clear and rebuild when fresh data arrived — if the worker hasn't
-    // produced new readback results this frame, keep the previous bitset so
-    // visible groups remain protected across the readback latency gap.
+    // Rebuild the used-groups protection bitset from the deduplicated append
+    // buffer. The shader now appends every non-culled traversed group, so
+    // this covers the full active traversal chain instead of just bucket
+    // emitters.
     if (!usedGroupsBatch.empty()) {
         std::fill(m_usedGroupsBitsCpu.begin(), m_usedGroupsBitsCpu.end(), 0u);
         for (const uint32_t groupIndex : usedGroupsBatch) {
@@ -1091,6 +1117,43 @@ void CLodStreamingSystem::PollCompletedReadbackSlots() {
     // Touch the page LRU for all GPU-reported visible groups and their parent chains.
     for (const uint32_t groupIndex : usedGroupsBatch) {
         TouchGroupPages(groupIndex);
+
+        auto gapIt = m_readbackGapPinnedGroups.find(groupIndex);
+        if (gapIt != m_readbackGapPinnedGroups.end()) {
+            auto ownedIt = m_groupOwnedPages.find(groupIndex);
+            if (ownedIt != m_groupOwnedPages.end()) {
+                for (uint32_t page : ownedIt->second) {
+                    if (page != ~0u) {
+                        m_pageLru.Unpin(page);
+                    }
+                }
+            }
+            m_readbackGapPinnedGroups.erase(gapIt);
+        }
+    }
+
+    // Safety timeout: unpin groups that were loaded but never rendered
+    // within a generous window (2x readback ring depth).
+    if (!usedGroupsBatch.empty()) {
+        ++m_readbackGeneration;
+        const uint64_t maxAge = static_cast<uint64_t>(m_streamingReadbackRingSize) * 2u;
+        std::vector<uint32_t> expiredGroups;
+        for (const auto& [g, gen] : m_readbackGapPinnedGroups) {
+            if (m_readbackGeneration - gen > maxAge) {
+                expiredGroups.push_back(g);
+            }
+        }
+        for (uint32_t g : expiredGroups) {
+            auto ownedIt = m_groupOwnedPages.find(g);
+            if (ownedIt != m_groupOwnedPages.end()) {
+                for (uint32_t page : ownedIt->second) {
+                    if (page != ~0u) {
+                        m_pageLru.Unpin(page);
+                    }
+                }
+            }
+            m_readbackGapPinnedGroups.erase(g);
+        }
     }
 
     if (batch.empty()) {
