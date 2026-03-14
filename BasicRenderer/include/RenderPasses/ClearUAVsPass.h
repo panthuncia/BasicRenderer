@@ -5,7 +5,7 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/ResourceManager.h"
 #include "Scene/Scene.h"
-#include "Managers/Singletons/ECSManager.h"
+#include "Managers/Singletons/RendererECSManager.h"
 #include "Scene/Components.h"
 #include "boost/container_hash/hash.hpp"
 
@@ -31,8 +31,8 @@ public:
 		auto inputs = Inputs<ClearIndirectDrawCommandUAVPassInputs>();
 		m_clearBlend = inputs.clearBlend;
 
-		auto ecsWorld = ECSManager::GetInstance().GetWorld();
-		auto blendEntity = ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::OITAccumulationPass);
+		auto ecsWorld = RendererECSManager::GetInstance().GetWorld();
+		auto blendEntity = RendererECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::OITAccumulationPass);
 		m_nonBlendQuery = ECSResourceResolver(ecsWorld.query_builder<>()
 			.with<Components::IsIndirectArguments>()
 			.without<Components::ParticipatesInPass>(blendEntity)
@@ -49,7 +49,7 @@ public:
   
 	void Setup() override {
 
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::LightViewInfo>().cached().cache_kind(flecs::QueryCacheAll).build();
 
 		m_nonBlendIndirectCommandBuffers = m_nonBlendQuery.ResolveAs<DynamicGloballyIndexedResource>();

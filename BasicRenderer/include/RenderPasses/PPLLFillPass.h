@@ -11,7 +11,7 @@
 #include "Materials/Material.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/ResourceManager.h"
-#include "Managers/Singletons/ECSManager.h"
+#include "Managers/Singletons/RendererECSManager.h"
 #include "Mesh/MeshInstance.h"
 #include "../shaders/PerPassRootConstants/ppllFillRootConstants.h"
 
@@ -44,9 +44,9 @@ public:
 		m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
 
 		m_clusteredLightingEnabled = settingsManager.getSettingGetter<bool>("enableClusteredLighting")();
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
 		m_blendMeshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
-			.with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::OITAccumulationPass))
+			.with<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::OITAccumulationPass))
 			.cached().cache_kind(flecs::QueryCacheAll)
 			.build();
 	}
@@ -92,8 +92,8 @@ public:
 			builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS);
 			//builder->WithShaderResource(Builtin::PrimaryCamera::MeshletBitfield);
 			if (m_indirect) {
-				auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-				auto oitFillPassEntity = ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::OITAccumulationPass);
+				auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
+				auto oitFillPassEntity = RendererECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::OITAccumulationPass);
 				flecs::query<> indirectQuery = ecsWorld.query_builder<>()
 					.with<Components::IsIndirectArguments>()
 					.with<Components::ParticipatesInPass>(oitFillPassEntity) // Query for command lists that participate in this pass
@@ -320,7 +320,7 @@ private:
 		auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
 
 		auto workloads = context.indirectCommandBufferManager->GetBuffersForRenderPhase(
-			context.currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID,
+			context.primaryViewID,
 			Engine::Primary::OITAccumulationPass);
 
 		for (auto& workload : workloads) {

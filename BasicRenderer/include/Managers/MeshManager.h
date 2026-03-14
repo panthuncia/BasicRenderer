@@ -244,7 +244,7 @@ private:
 	// Maximum number of IO requests dispatched per ProcessCLodDiskStreamingIO call.
 	static constexpr uint32_t kMaxIoBatchSize = 128u;
 
-	void DispatchCLodDiskStreamingBatch(uint32_t maxDispatchRequests);
+	void DispatchCLodDiskStreamingBatch();
 	bool QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool& outQueued, const std::vector<bool>& segmentNeedsFetch = {}, const std::vector<uint32_t>& preAllocatedPages = {});
 
 	enum class DiskStreamingApplyResult {

@@ -35,6 +35,9 @@ set(CLOD_SHARED_SOURCES
 
     # Singletons needed by the pipeline
     "${BR_SRC}/Managers/Singletons/TaskSchedulerManager.cpp"
+
+    # Telemetry used by TaskSchedulerManager
+    "${BR_SRC}/Telemetry/FrameTaskGraphTelemetry.cpp"
 )
 
 add_executable(CLodCacheTool

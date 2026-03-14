@@ -12,7 +12,7 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/MeshManager.h"
-#include "Managers/Singletons/ECSManager.h"
+#include "Managers/Singletons/RendererECSManager.h"
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
 
@@ -44,9 +44,9 @@ public:
         getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
         getShadowsEnabled = settingsManager.getSettingGetter<bool>("enableShadows");
 
-        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+        auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
         m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
-            .with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::GBufferPass))
+            .with<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::GBufferPass))
             .cached().cache_kind(flecs::QueryCacheAll).build();
     }
 
@@ -81,10 +81,10 @@ public:
         if (m_meshShaders) {
             //builder->WithShaderResource(Builtin::PerMeshBuffer, Builtin::PrimaryCamera::MeshletBitfield);
             if (m_indirect) {
-				auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+                auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
                 flecs::query<> indirectQuery = ecsWorld.query_builder<>()
                     .with<Components::IsIndirectArguments>()
-                    .with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::GBufferPass)) // Query for command lists that participate in this pass
+                    .with<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::GBufferPass)) // Query for command lists that participate in this pass
                     //.cached().cache_kind(flecs::QueryCacheAll)
                     .build();
                 builder->WithIndirectArguments(ECSResourceResolver(indirectQuery));
@@ -357,7 +357,7 @@ private:
 
         // Opaque indirect draws
         auto workloads = context.indirectCommandBufferManager->GetBuffersForRenderPhase(
-            context.currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID,
+            context.primaryViewID,
             m_GBufferRenderPhase);
 		for (auto& workload : workloads) {
             auto& pso = psoManager.GetMeshPrePassPSO(context.globalPSOFlags | PSOFlags::PSO_DEFERRED, workload.first, m_wireframe);

@@ -24,9 +24,6 @@ MeshManager::MeshManager() {
 	m_meshletOffsets = DynamicBuffer::CreateShared(sizeof(meshopt_Meshlet), 1, "meshletOffsets");
 	m_meshletVertexIndices = DynamicBuffer::CreateShared(sizeof(unsigned int), 1, "meshletVertexIndices");
 	m_meshletTriangles = DynamicBuffer::CreateShared(1, 4, "meshletTriangles", true);
-	//m_meshletBoundsBuffer = DynamicBuffer::CreateShared(sizeof(BoundingSphere), 1, "meshletBoundsBuffer", false, true);
-
-	//m_clusterToVisibleClusterTableIndexBuffer = DynamicBuffer::CreateShared(sizeof(unsigned int), 1, "clusterIndicesBuffer", false, true);
 
 	m_perMeshBuffers = DynamicBuffer::CreateShared(sizeof(PerMeshCB), 1, "PerMeshBuffers");
 	m_perMeshInstanceBuffers = DynamicBuffer::CreateShared(sizeof(PerMeshCB), 1, "perMeshInstanceBuffers");
@@ -37,7 +34,6 @@ MeshManager::MeshManager() {
 	m_clodMeshMetadata = DynamicBuffer::CreateShared(sizeof(CLodMeshMetadata), 10000, "clodMeshMetadata");
 	m_clusterLODGroups = DynamicBuffer::CreateShared(sizeof(ClusterLODGroup), 10000, "clusterLODGroups");
 	m_clusterLODSegments = DynamicBuffer::CreateShared(sizeof(ClusterLODGroupSegment), 10000, "clusterLODSegments");
-	//m_clusterLODMeshlets = DynamicBuffer::CreateShared(sizeof(meshopt_Meshlet), 1, "clusterLODMeshlets");
 	m_clusterLODMeshletBounds = DynamicBuffer::CreateShared(sizeof(BoundingSphere), 10000, "clusterLODMeshletBounds", false, true);
 	m_clusterLODNodes = DynamicBuffer::CreateShared(sizeof(ClusterLODNode), 10000, "clusterLODNodes");
 	m_clodGroupPageMap = DynamicBuffer::CreateShared(sizeof(GroupPageMapEntry), 10000, "clodGroupPageMap");
@@ -56,9 +52,6 @@ MeshManager::MeshManager() {
 	rg::memory::SetResourceUsageHint(*m_meshletOffsets, "Mesh Data");
 	rg::memory::SetResourceUsageHint(*m_meshletVertexIndices, "Mesh Data");
 	rg::memory::SetResourceUsageHint(*m_meshletTriangles, "Mesh Data");
-	//m_meshletBoundsBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Mesh Data" }));
-
-	//m_clusterToVisibleClusterTableIndexBuffer->ApplyMetadataComponentBundle(EntityComponentBundle().Set<MemoryStatisticsComponents::ResourceUsage>({ "Visibility Buffer Resources" }));
 
 	rg::memory::SetResourceUsageHint(*m_perMeshBuffers, "PerMesh, PerMeshInstance, PerObject");
 	rg::memory::SetResourceUsageHint(*m_perMeshInstanceBuffers, "PerMesh, PerMeshInstance, PerObject");
@@ -68,18 +61,15 @@ MeshManager::MeshManager() {
 	m_resources[Builtin::PostSkinningVertices] = m_postSkinningVertices;
 	m_resources[Builtin::PerMeshBuffer] = m_perMeshBuffers;
 	m_resources[Builtin::PerMeshInstanceBuffer] = m_perMeshInstanceBuffers;
-	//m_resources[Builtin::MeshResources::MeshletBounds] = m_meshletBoundsBuffer;
 	m_resources[Builtin::MeshResources::MeshletOffsets] = m_meshletOffsets;
 	m_resources[Builtin::MeshResources::MeshletVertexIndices] = m_meshletVertexIndices;
 	m_resources[Builtin::MeshResources::MeshletTriangles] = m_meshletTriangles;
-	//m_resources[Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer] = m_clusterToVisibleClusterTableIndexBuffer;
 
 	m_resources[Builtin::CLod::Offsets] = m_perMeshInstanceClodOffsets;
 	m_resources[Builtin::CLod::GroupChunks] = m_clodSharedGroupChunks;
 	m_resources[Builtin::CLod::MeshMetadata] = m_clodMeshMetadata;
 	m_resources[Builtin::CLod::Groups] = m_clusterLODGroups;
 	m_resources[Builtin::CLod::Segments] = m_clusterLODSegments;
-	//m_resources[Builtin::CLod::Meshlets] = m_clusterLODMeshlets;
 	m_resources[Builtin::CLod::MeshletBounds] = m_clusterLODMeshletBounds;
 	m_resources[Builtin::CLod::Nodes] = m_clusterLODNodes;
 	m_resources[Builtin::CLod::GroupPageMap] = m_clodGroupPageMap;
@@ -89,7 +79,7 @@ MeshManager::MeshManager() {
 		PagePool::Config ppConfig;
 		ppConfig.pageSize     = 256 * 1024;         // 256 KB
 		ppConfig.slabSize     = 256 * 1024 * 1024;  // 256 MB
-		ppConfig.numStreamingSlabs = 64;
+		ppConfig.numStreamingSlabs = 32;
 		ppConfig.debugName    = "CLodPagePool";
 		m_clodPagePool = std::make_unique<PagePool>(ppConfig);
 	}
@@ -102,18 +92,12 @@ MeshManager::MeshManager() {
 MeshManager::~MeshManager() {
 }
 
-void MeshManager::DispatchCLodDiskStreamingBatch(uint32_t maxDispatchRequests) {
-	if (maxDispatchRequests == 0u) {
-		return;
-	}
-
+void MeshManager::DispatchCLodDiskStreamingBatch() {
 	// Drain up to kMaxIoBatchSize requests from the pending queue.
 	std::vector<CLodDiskStreamingRequest> batch;
 	{
 		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
-		const uint32_t toDrain = std::min<uint32_t>(
-			kMaxIoBatchSize,
-			std::min<uint32_t>(maxDispatchRequests, static_cast<uint32_t>(m_clodDiskStreamingRequests.size())));
+		const uint32_t toDrain = std::min<uint32_t>(kMaxIoBatchSize, static_cast<uint32_t>(m_clodDiskStreamingRequests.size()));
 		if (toDrain == 0u) {
 			return;
 		}
@@ -263,7 +247,6 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 
 	std::unique_ptr<BufferView> postSkinningView = nullptr;
 	std::unique_ptr<BufferView> preSkinningView = nullptr;
-	//std::unique_ptr<BufferView> meshletBoundsView = nullptr;
 	size_t vertexByteSize = mesh->GetPerMeshCBData().vertexByteSize;
 	std::vector<std::unique_ptr<BufferView>> clodPreSkinningChunkViews;
 	std::vector<std::unique_ptr<BufferView>> clodPostSkinningChunkViews;
@@ -593,28 +576,16 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 
 void MeshManager::ProcessCLodDiskStreamingIO(
 	uint32_t maxCompletedRequests) {
-	const uint32_t completionBudget = std::max(maxCompletedRequests, 1u);
-	uint32_t pendingResults = 0u;
-	{
-		std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
-		pendingResults = static_cast<uint32_t>(m_clodDiskStreamingResults.size());
-	}
-
-	const uint32_t dispatchBudget = pendingResults >= completionBudget
-		? 0u
-		: (completionBudget - pendingResults);
-
 	// First, dispatch a batch of pending IO requests in parallel across the
-	// task scheduler's thread pool. Keep dispatch bounded by the completion
-	// budget so faster CPU-side scheduling cannot flood the upload path.
-	DispatchCLodDiskStreamingBatch(dispatchBudget);
+	// task scheduler's thread pool. This replaces the old single-threaded worker.
+	DispatchCLodDiskStreamingBatch();
 
 	// Drain completed results into a local vector under the results lock so the
 	// IO thread (once moved to background) can continue pushing results.
 	std::vector<CLodDiskStreamingResult> localResults;
 	{
 		std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
-		const uint32_t toDrain = std::min<uint32_t>(completionBudget,
+		const uint32_t toDrain = std::min<uint32_t>(maxCompletedRequests,
 			static_cast<uint32_t>(m_clodDiskStreamingResults.size()));
 		if (toDrain > 0u) {
 			localResults.reserve(toDrain);

@@ -9,14 +9,14 @@
 #include "Render/RenderContext.h"
 #include "Mesh/Mesh.h"
 #include "Scene/Scene.h"
-#include "Managers/Singletons/ECSManager.h"
+#include "Managers/Singletons/RendererECSManager.h"
 
 class DebugSpherePass : public RenderPass {
 public:
 	DebugSpherePass() {
 		CreateDebugRootSignature();
 		CreateDebugMeshPSO();
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
 		m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::MeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 	}
 	~DebugSpherePass() {

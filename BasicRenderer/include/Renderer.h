@@ -6,8 +6,10 @@
 #define DX12RENDERER_H
 
 #include <windows.h>
+#include <chrono>
 #include <directxmath.h>
 #include <memory>
+#include <mutex>
 #include <functional>
 #include <flecs.h>
 
@@ -32,9 +34,11 @@
 #include "Managers/ReadbackManager.h"
 #include "Factories/TextureFactory.h"
 #include "Scene/MovementState.h"
+#include "Telemetry/FrameTaskGraphTelemetry.h"
 #include "../generated/BuiltinResources.h"
 #include "Utilities/Timer.h"
 #include "Render/RenderContext.h"
+#include "Render/SceneRenderBridge.h"
 
 using namespace Microsoft::WRL;
 
@@ -140,8 +144,6 @@ private:
     std::unique_ptr<TextureFactory> m_pTextureFactory = nullptr;
 
 	ManagerInterface m_managerInterface;
-    flecs::system m_hierarchySystem;
-
     DirectX::XMUINT3 m_lightClusterSize = { 12, 12, 24 };
     FrameTimer m_frameTimer;
 
@@ -157,6 +159,13 @@ private:
     void SetEnvironmentInternal(std::wstring name);
 	void ToggleMeshShaders(bool useMeshShaders);
     bool IsSceneReadyForFrame(bool logWarnings = true);
+    flecs::entity GetValidatedPrimaryRenderCamera(bool attemptResync = true);
+    void BootstrapCommittedSceneSnapshot();
+    void CommitCompletedSceneSnapshot();
+    void ScheduleSceneUpdateTask(float elapsedSeconds);
+    bool HasCommittedSceneSnapshot() const;
+    bool NeedsSceneSnapshotBootstrap() const;
+    br::render::SceneOverlapStatus GetSceneOverlapStatus() const;
 
     void WaitForFrame(uint8_t frameIndex);
     void SignalFence(rhi::Queue commandQueue, uint8_t currentFrameIndex);
@@ -164,6 +173,18 @@ private:
     void CheckDebugMessages();
     void FlushCommandQueue();
     void CreateRTVs();
+    void RunGameUpdateStage(float elapsedSeconds);
+    void RunAnimationUpdateStage(float elapsedSeconds);
+    void RunTransformPropagationStage();
+    void RunSceneBridgeSyncStage();
+    void RunRenderResourceSyncStage();
+    void BeginFrameTaskGraphCapture();
+    void RecordFrameTaskStage(
+        const char* stageName,
+        br::telemetry::CpuTaskDomain domain,
+        const std::chrono::steady_clock::time_point& stageStart,
+        const std::chrono::steady_clock::time_point& stageEnd);
+    void PublishFrameTaskGraphCapture();
 
     void StallPipeline();
 
@@ -211,6 +232,19 @@ private:
     GpuCrashTracker m_gpuCrashTracker;
 
 	DeferredFunctions m_preFrameDeferredFunctions;
+    int32_t m_lastFrameTaskNodeIndex = -1;
+    br::render::SceneRenderBridge m_sceneRenderBridge;
+    bool m_sceneRenderOverlapEnabled = true;
+    std::shared_ptr<br::render::SceneFrameSnapshot> m_committedSceneSnapshot;
+    std::shared_ptr<br::render::SceneFrameSnapshot> m_completedSceneSnapshot;
+    mutable std::mutex m_sceneSnapshotMutex;
+    std::atomic<bool> m_sceneTaskInFlight = false;
+    std::atomic<bool> m_sceneTaskCompleted = false;
+    uint64_t m_nextSceneSnapshotSequence = 1;
+    uint64_t m_lastCommittedSceneSnapshotSequence = 0;
+    uint64_t m_lastCompletedSceneSnapshotSequence = 0;
+    uint64_t m_lastCommittedSceneSourceFrame = 0;
+    double m_lastSceneTaskDurationMs = 0.0;
 
     std::shared_ptr<rg::runtime::IUploadPolicyService> m_uploadPolicyService = nullptr;
 

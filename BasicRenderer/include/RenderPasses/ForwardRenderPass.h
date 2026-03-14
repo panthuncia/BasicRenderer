@@ -12,7 +12,7 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/MeshManager.h"
-#include "Managers/Singletons/ECSManager.h"
+#include "Managers/Singletons/RendererECSManager.h"
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
 #include "Resources/Resolvers/ECSResourceResolver.h"
@@ -88,8 +88,8 @@ public:
         if (m_meshShaders) {
             //builder->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS, Builtin::PrimaryCamera::MeshletBitfield);
             if (m_indirect) { // Indirect draws only supported with mesh shaders, becasue I'm not writing a separate codepath for doing it the bad way
-                auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-                auto forwardPassEntity = ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ForwardPass);
+                auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
+                auto forwardPassEntity = RendererECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ForwardPass);
 				flecs::query<> indirectQuery = ecsWorld.query_builder<>()
                     .with<Components::IsIndirectArguments>()
 					.with<Components::ParticipatesInPass>(forwardPassEntity) // Query for command lists that participate in this pass
@@ -101,9 +101,9 @@ public:
     }
 
     void Setup() override {
-        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+        auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
         m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
-			.with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ForwardPass))
+            .with<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ForwardPass))
             .cached().cache_kind(flecs::QueryCacheAll)
             .build();
 
@@ -269,7 +269,7 @@ private:
         auto commandSignature = CommandSignatureManager::GetInstance().GetDispatchMeshCommandSignature();
 		auto manager = context.indirectCommandBufferManager;
 
-        auto primaryViewID = context.currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID; // TODO: Better way of accessing this?
+        auto primaryViewID = context.primaryViewID;
         auto workloads = manager->GetBuffersForRenderPhase(primaryViewID, Engine::Primary::ForwardPass);
 
 		for (auto& workload : workloads) {

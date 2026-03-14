@@ -10,9 +10,132 @@
 
 #include <rhi_conversions_dx12.h>
 
+#include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Utilities/Utilities.h"
 
 namespace br {
+
+namespace {
+
+void SaveCubemapReadbackToDds(
+    const std::shared_ptr<Resource>& readbackBuffer,
+    const std::vector<rhi::CopyableFootprint>& fps,
+    uint32_t width,
+    uint32_t height,
+    DXGI_FORMAT format,
+    uint32_t numMipLevels,
+    const std::wstring& outputFile)
+{
+    void* mappedData = nullptr;
+    readbackBuffer->GetAPIResource().Map(&mappedData);
+
+    DirectX::ScratchImage scratchImage;
+    scratchImage.InitializeCube(format, width, height, 1, numMipLevels);
+
+    constexpr uint32_t faces = 6;
+    for (uint32_t mipLevel = 0; mipLevel < numMipLevels; ++mipLevel) {
+        for (uint32_t faceIndex = 0; faceIndex < faces; ++faceIndex) {
+            const uint32_t subresourceIndex = CalcSubresource(mipLevel, faceIndex, 0, numMipLevels, faces);
+
+            DirectX::Image image;
+            image.width = fps[subresourceIndex].width;
+            image.height = fps[subresourceIndex].height;
+            image.format = format;
+            image.rowPitch = static_cast<size_t>(fps[subresourceIndex].rowPitch);
+            image.slicePitch = image.rowPitch * image.height;
+            image.pixels = static_cast<uint8_t*>(mappedData) + fps[subresourceIndex].offset;
+
+            const DirectX::Image* destImage = scratchImage.GetImage(mipLevel, faceIndex, 0);
+
+            const size_t destRowPitch = destImage->rowPitch;
+            const size_t srcRowPitch = image.rowPitch;
+            const size_t rowCount = image.height;
+
+            uint8_t* destPixels = destImage->pixels;
+            uint8_t* srcPixels = image.pixels;
+
+            for (size_t row = 0; row < rowCount; ++row) {
+                std::memcpy(destPixels + row * destRowPitch, srcPixels + row * srcRowPitch, (std::min)(destRowPitch, srcRowPitch));
+            }
+        }
+    }
+
+    readbackBuffer->GetAPIResource().Unmap(0, 0);
+
+    auto hr = DirectX::SaveToDDSFile(
+        scratchImage.GetImages(),
+        scratchImage.GetImageCount(),
+        scratchImage.GetMetadata(),
+        DirectX::DDS_FLAGS_NONE,
+        outputFile.c_str());
+    if (FAILED(hr)) {
+        spdlog::error("Failed to save the cubemap to a .dds file!");
+    }
+}
+
+void SaveTextureReadbackToDds(
+    const std::shared_ptr<Resource>& readbackBuffer,
+    const std::vector<rhi::CopyableFootprint>& fps,
+    uint32_t width,
+    uint32_t height,
+    DXGI_FORMAT dxgiFmt,
+    uint32_t numMipLevels,
+    const std::wstring& outputFile)
+{
+    void* mappedData = nullptr;
+    readbackBuffer->GetAPIResource().Map(&mappedData);
+
+    DirectX::ScratchImage scratchImage;
+    scratchImage.Initialize2D(
+        dxgiFmt,
+        width,
+        height,
+        1,
+        numMipLevels);
+
+    for (uint32_t mipLevel = 0; mipLevel < numMipLevels; ++mipLevel) {
+        const uint32_t subresourceIndex = CalcSubresource(mipLevel, 0, 0, numMipLevels, 1);
+
+        DirectX::Image src{};
+        src.width = fps[subresourceIndex].width;
+        src.height = fps[subresourceIndex].height;
+        src.format = dxgiFmt;
+        src.rowPitch = static_cast<size_t>(fps[subresourceIndex].rowPitch);
+        src.slicePitch = src.rowPitch * src.height;
+        src.pixels = static_cast<uint8_t*>(mappedData) + fps[subresourceIndex].offset;
+
+        const DirectX::Image* dst = scratchImage.GetImage(mipLevel, 0, 0);
+
+        const size_t dstRowPitch = dst->rowPitch;
+        const size_t srcRowPitch = src.rowPitch;
+        const size_t rows = src.height;
+
+        uint8_t* dstPixels = dst->pixels;
+        const uint8_t* srcPixels = src.pixels;
+
+        for (size_t row = 0; row < rows; ++row) {
+            std::memcpy(
+                dstPixels + row * dstRowPitch,
+                srcPixels + row * srcRowPitch,
+                (std::min)(dstRowPitch, srcRowPitch));
+        }
+    }
+
+    readbackBuffer->GetAPIResource().Unmap(0, 0);
+
+    const auto hr = DirectX::SaveToDDSFile(
+        scratchImage.GetImages(),
+        scratchImage.GetImageCount(),
+        scratchImage.GetMetadata(),
+        DirectX::DDS_FLAGS_NONE,
+        outputFile.c_str());
+
+    if (FAILED(hr)) {
+        spdlog::error("Failed to save the texture to a .dds file!");
+    }
+}
+
+}
 
 ReadbackManager::ReadbackManager() {
     m_readbackPass = std::make_shared<ReadbackPass>(*this);
@@ -153,52 +276,9 @@ void ReadbackManager::SaveCubemapToDDS(
     readbackRequest.outputFile = outputFile;
     readbackRequest.fenceValue = fenceValue;
     readbackRequest.callback = [=]() {
-        std::thread([=] {
-            void* mappedData = nullptr;
-            readbackBuffer->GetAPIResource().Map(&mappedData);
-
-            DirectX::ScratchImage scratchImage;
-            scratchImage.InitializeCube(format, width, height, 1, numMipLevels);
-
-            for (uint32_t mipLevel = 0; mipLevel < numMipLevels; ++mipLevel) {
-                for (uint32_t faceIndex = 0; faceIndex < faces; ++faceIndex) {
-                    const uint32_t subresourceIndex = CalcSubresource(mipLevel, faceIndex, 0, numMipLevels, faces);
-
-                    DirectX::Image image;
-                    image.width = fps[subresourceIndex].width;
-                    image.height = fps[subresourceIndex].height;
-                    image.format = format;
-                    image.rowPitch = static_cast<size_t>(fps[subresourceIndex].rowPitch);
-                    image.slicePitch = image.rowPitch * image.height;
-                    image.pixels = static_cast<uint8_t*>(mappedData) + fps[subresourceIndex].offset;
-
-                    const DirectX::Image* destImage = scratchImage.GetImage(mipLevel, faceIndex, 0);
-
-                    const size_t destRowPitch = destImage->rowPitch;
-                    const size_t srcRowPitch = image.rowPitch;
-                    const size_t rowCount = image.height;
-
-                    uint8_t* destPixels = destImage->pixels;
-                    uint8_t* srcPixels = image.pixels;
-
-                    for (size_t row = 0; row < rowCount; ++row) {
-                        std::memcpy(destPixels + row * destRowPitch, srcPixels + row * srcRowPitch, (std::min)(destRowPitch, srcRowPitch));
-                    }
-                }
-            }
-
-            readbackBuffer->GetAPIResource().Unmap(0, 0);
-
-            auto hr = DirectX::SaveToDDSFile(
-                scratchImage.GetImages(),
-                scratchImage.GetImageCount(),
-                scratchImage.GetMetadata(),
-                DirectX::DDS_FLAGS_NONE,
-                outputFile.c_str());
-            if (FAILED(hr)) {
-                spdlog::error("Failed to save the cubemap to a .dds file!");
-            }
-            }).detach();
+        TaskSchedulerManager::GetInstance().RunBackgroundTask("ReadbackManager::SaveCubemapToDDS", [=]() {
+            SaveCubemapReadbackToDds(readbackBuffer, fps, width, height, format, numMipLevels, outputFile);
+        });
         };
 
     std::scoped_lock lock(m_mutex);
@@ -266,59 +346,9 @@ void ReadbackManager::SaveTextureToDDS(
     readbackRequest.outputFile = outputFile;
     readbackRequest.fenceValue = fenceValue;
     readbackRequest.callback = [=]() {
-        std::thread([=] {
-            void* mappedData = nullptr;
-            readbackBuffer->GetAPIResource().Map(&mappedData);
-
-            DirectX::ScratchImage scratchImage;
-            scratchImage.Initialize2D(
-                dxgiFmt,
-                width,
-                height,
-                1,
-                numMipLevels);
-
-            for (uint32_t mipLevel = 0; mipLevel < numMipLevels; ++mipLevel) {
-                const uint32_t subresourceIndex = CalcSubresource(mipLevel, 0, 0, numMipLevels, 1);
-
-                DirectX::Image src{};
-                src.width = fps[subresourceIndex].width;
-                src.height = fps[subresourceIndex].height;
-                src.format = dxgiFmt;
-                src.rowPitch = static_cast<size_t>(fps[subresourceIndex].rowPitch);
-                src.slicePitch = src.rowPitch * src.height;
-                src.pixels = static_cast<uint8_t*>(mappedData) + fps[subresourceIndex].offset;
-
-                const DirectX::Image* dst = scratchImage.GetImage(mipLevel, 0, 0);
-
-                const size_t dstRowPitch = dst->rowPitch;
-                const size_t srcRowPitch = src.rowPitch;
-                const size_t rows = src.height;
-
-                uint8_t* dstPixels = dst->pixels;
-                const uint8_t* srcPixels = src.pixels;
-
-                for (size_t row = 0; row < rows; ++row) {
-                    std::memcpy(
-                        dstPixels + row * dstRowPitch,
-                        srcPixels + row * srcRowPitch,
-                        (std::min)(dstRowPitch, srcRowPitch));
-                }
-            }
-
-            readbackBuffer->GetAPIResource().Unmap(0, 0);
-
-            const auto hr = DirectX::SaveToDDSFile(
-                scratchImage.GetImages(),
-                scratchImage.GetImageCount(),
-                scratchImage.GetMetadata(),
-                DirectX::DDS_FLAGS_NONE,
-                outputFile.c_str());
-
-            if (FAILED(hr)) {
-                spdlog::error("Failed to save the texture to a .dds file!");
-            }
-            }).detach();
+        TaskSchedulerManager::GetInstance().RunBackgroundTask("ReadbackManager::SaveTextureToDDS", [=]() {
+            SaveTextureReadbackToDds(readbackBuffer, fps, width, height, dxgiFmt, numMipLevels, outputFile);
+        });
         };
 
     std::scoped_lock lock(m_mutex);

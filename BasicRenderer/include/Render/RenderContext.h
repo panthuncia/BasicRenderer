@@ -4,6 +4,7 @@
 #include <OpenRenderGraph/OpenRenderGraph.h>
 
 #include "Scene/Components.h"
+#include "Render/SceneFrameSnapshot.h"
 
 class Scene;
 class ObjectManager;
@@ -26,6 +27,10 @@ struct RenderContext {
 	MaterialManager* materialManager;
 
     Scene* currentScene;
+	Components::Camera primaryCamera;
+	Components::DepthMap primaryDepthMap;
+	uint64_t primaryViewID = 0;
+	bool hasPrimaryCamera = false;
     rhi::DescriptorHeap textureDescriptorHeap;
 	rhi::DescriptorHeap samplerDescriptorHeap;
 	rhi::DescriptorHeap rtvHeap;
@@ -37,6 +42,7 @@ struct RenderContext {
 	DirectX::XMUINT2 outputResolution;
     unsigned int globalPSOFlags;
 	float deltaTime;
+	br::render::SceneOverlapStatus sceneOverlapStatus;
 };
 
 struct UpdateContext {

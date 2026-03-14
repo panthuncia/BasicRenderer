@@ -35,7 +35,8 @@
 #include "ShaderBuffers.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
-#include "Managers/Singletons/ECSManager.h"
+#include "Telemetry/FrameTaskGraphTelemetry.h"
+#include "Managers/Singletons/RendererECSManager.h"
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -283,6 +284,14 @@ private:
     CLodStreamingOperationStats m_clodStreamingOpsLatest{};
     std::vector<CLodStreamingOpsHistorySample> m_clodStreamingOpsHistory;
 
+    uint64_t m_frameTaskGraphLastSequence = 0;
+    br::telemetry::FrameTaskGraphSnapshot m_frameTaskGraphLatest{};
+    bool m_frameTaskGraphHasData = false;
+    std::vector<br::telemetry::FrameTaskGraphSnapshot> m_frameTaskGraphHistory;
+    int m_frameTaskGraphAverageWindow = 30;
+    bool m_frameTaskGraphShowLatestOverlay = true;
+    br::render::SceneOverlapStatus m_sceneOverlapStatus{};
+
     bool m_clodCaptureStatsPending = false;
     uint64_t m_clodCaptureStatsId = 0;
     bool m_clodCaptureHasPendingCounter = false;
@@ -298,6 +307,7 @@ private:
 
     int FindFileIndex(const std::vector<std::string>& hdrFiles, const std::string& existingFile);
     void DrawCLodTelemetryWindow();
+    void DrawFrameTaskGraphWindow();
     void DrawAutoAliasPlannerWindow();
     void TryFinalizeCLodCaptureStats(uint64_t captureId);
 
@@ -651,15 +661,15 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_meshShadersSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 
     // CLod queries
-    m_telemetryQuery = ECSManager::GetInstance().GetWorld()
+    m_telemetryQuery = RendererECSManager::GetInstance().GetWorld()
         .query_builder<const Components::Resource>()
         .with<CLodWorkGraphTelemetryBufferTag>()
         .build();
-    m_visibleClustersQuery = ECSManager::GetInstance().GetWorld()
+    m_visibleClustersQuery = RendererECSManager::GetInstance().GetWorld()
         .query_builder<const Components::Resource>()
         .with<VisibleClustersBufferTag>()
         .build();
-    m_visibleCounterQuery = ECSManager::GetInstance().GetWorld()
+    m_visibleCounterQuery = RendererECSManager::GetInstance().GetWorld()
         .query_builder<const Components::Resource>()
         .with<VisibleClustersCounterTag>()
         .build();
@@ -689,6 +699,8 @@ static bool PassUsesResourceAdapter(const void* passAndRes, uint64_t resourceId,
 }
 
 inline void Menu::Render(RenderContext& context, rhi::CommandList commandList) {
+    m_sceneOverlapStatus = context.sceneOverlapStatus;
+
 	ImGui_ImplDX12_NewFrame();
 	ImGui_ImplWin32_NewFrame();
 
@@ -696,6 +708,7 @@ inline void Menu::Render(RenderContext& context, rhi::CommandList commandList) {
     static bool showRG = false;
     static bool showMemoryIntrospection = false;
     static bool showCLodTelemetry = false;
+    static bool showFrameTaskGraph = false;
     static bool showAutoAliasPlanner = false;
 
     SetCLodWorkGraphTelemetryEnabled(showCLodTelemetry || m_clodTelemetryCapturePending || m_clodCaptureStatsPending);
@@ -784,6 +797,7 @@ inline void Menu::Render(RenderContext& context, rhi::CommandList commandList) {
         ImGui::Checkbox("Render Graph Inspector", &showRG);
         ImGui::Checkbox("Memory introspection", &showMemoryIntrospection);
         ImGui::Checkbox("CLod telemetry", &showCLodTelemetry);
+        ImGui::Checkbox("CPU frame task graph", &showFrameTaskGraph);
         ImGui::Checkbox("Auto Alias Planner", &showAutoAliasPlanner);
         std::string memoryString = "Memory usage: unavailable";
         const double KiB = 1024.0;
@@ -884,6 +898,10 @@ inline void Menu::Render(RenderContext& context, rhi::CommandList commandList) {
 
     if (showCLodTelemetry) {
         DrawCLodTelemetryWindow();
+    }
+
+    if (showFrameTaskGraph) {
+        DrawFrameTaskGraphWindow();
     }
 
     if (showAutoAliasPlanner) {
@@ -1128,11 +1146,26 @@ inline void Menu::DisplaySceneNode(flecs::entity node, bool isOnlyChild) {
 }
 
 inline void Menu::DisplaySceneGraph() {
+    if (m_sceneOverlapStatus.taskInFlight) {
+        ImGui::TextDisabled("Scene graph is paused while async scene update is running.");
+        return;
+    }
+
     auto root = getSceneRoot();
+    if (!root) {
+        ImGui::TextDisabled("No scene root available.");
+        return;
+    }
+
     DisplaySceneNode(root, true);
 }
 
 inline void Menu::DisplaySelectedNode() {
+    if (m_sceneOverlapStatus.taskInFlight) {
+        selectedNode = {};
+        return;
+    }
+
     if (selectedNode) {
         ImGui::Begin("Selected Node Transform", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
 
@@ -1701,6 +1734,419 @@ inline void Menu::DrawCLodTelemetryWindow() {
         ImGui::Text("Max clusters/instance: %u (%.1f%% of total)",
             m_clodCaptureStats.maxClustersPerInstance,
             m_clodCaptureStats.dominantInstancePercent);
+    }
+
+    ImGui::End();
+}
+
+inline void Menu::DrawFrameTaskGraphWindow() {
+    ImGui::Begin("CPU Frame Task Graph", nullptr);
+
+    ImGui::Text(
+        "Scene overlap: %s | committed=%llu | completed=%llu | source frame=%llu | last task=%.2f ms",
+        m_sceneOverlapStatus.taskInFlight ? "running" : (m_sceneOverlapStatus.enabled ? "idle" : "disabled"),
+        static_cast<unsigned long long>(m_sceneOverlapStatus.committedSnapshotSequence),
+        static_cast<unsigned long long>(m_sceneOverlapStatus.lastCompletedSnapshotSequence),
+        static_cast<unsigned long long>(m_sceneOverlapStatus.lastCommittedSourceFrame),
+        m_sceneOverlapStatus.lastTaskDurationMs);
+    if (!m_sceneOverlapStatus.hasCommittedSnapshot) {
+        ImGui::TextDisabled("No committed scene snapshot is available yet.");
+    }
+    ImGui::Separator();
+
+    br::telemetry::FrameTaskGraphSnapshot latestSnapshot{};
+    if (br::telemetry::TryReadFrameTaskGraphSnapshot(m_frameTaskGraphLastSequence, latestSnapshot)) {
+        m_frameTaskGraphLatest = latestSnapshot;
+        m_frameTaskGraphHasData = true;
+        if (m_frameTaskGraphHistory.empty() || m_frameTaskGraphHistory.back().frameNumber != latestSnapshot.frameNumber) {
+            m_frameTaskGraphHistory.push_back(latestSnapshot);
+            constexpr size_t kMaxHistoryFrames = 240;
+            if (m_frameTaskGraphHistory.size() > kMaxHistoryFrames) {
+                m_frameTaskGraphHistory.erase(m_frameTaskGraphHistory.begin());
+            }
+        }
+    }
+
+    if (!m_frameTaskGraphHasData || m_frameTaskGraphLatest.nodeCount == 0) {
+        ImGui::TextDisabled("No CPU frame task graph snapshots published yet.");
+        ImGui::End();
+        return;
+    }
+
+    const auto domainName = [](br::telemetry::CpuTaskDomain domain) {
+        switch (domain) {
+        case br::telemetry::CpuTaskDomain::MainThread:
+            return "Main";
+        case br::telemetry::CpuTaskDomain::Worker:
+            return "Worker";
+        case br::telemetry::CpuTaskDomain::IOService:
+            return "IO";
+        case br::telemetry::CpuTaskDomain::BackgroundService:
+            return "Background";
+        default:
+            return "Unknown";
+        }
+    };
+
+    const auto domainLane = [](br::telemetry::CpuTaskDomain domain) {
+        switch (domain) {
+        case br::telemetry::CpuTaskDomain::MainThread:
+            return 0;
+        case br::telemetry::CpuTaskDomain::Worker:
+            return 1;
+        case br::telemetry::CpuTaskDomain::IOService:
+            return 2;
+        case br::telemetry::CpuTaskDomain::BackgroundService:
+            return 3;
+        default:
+            return 0;
+        }
+    };
+
+    const auto domainColor = [](br::telemetry::CpuTaskDomain domain) {
+        switch (domain) {
+        case br::telemetry::CpuTaskDomain::MainThread:
+            return IM_COL32(74, 144, 226, 255);
+        case br::telemetry::CpuTaskDomain::Worker:
+            return IM_COL32(91, 192, 120, 255);
+        case br::telemetry::CpuTaskDomain::IOService:
+            return IM_COL32(245, 166, 35, 255);
+        case br::telemetry::CpuTaskDomain::BackgroundService:
+            return IM_COL32(214, 93, 177, 255);
+        default:
+            return IM_COL32(160, 160, 160, 255);
+        }
+    };
+
+    struct StageAggregate {
+        char name[64]{};
+        br::telemetry::CpuTaskDomain domain = br::telemetry::CpuTaskDomain::MainThread;
+        int32_t dependencyNodeIndex = -1;
+        uint64_t avgStartUs = 0;
+        uint64_t avgSpanUs = 0;
+        uint64_t avgTotalDurationUs = 0;
+        uint64_t minTotalDurationUs = 0;
+        uint64_t maxTotalDurationUs = 0;
+        uint64_t latestStartUs = 0;
+        uint64_t latestSpanUs = 0;
+        uint64_t latestTotalDurationUs = 0;
+        uint32_t avgDispatchCount = 0;
+        uint32_t latestDispatchCount = 0;
+        uint32_t sampleCount = 0;
+    };
+
+    const int clampedAverageWindow = (std::max)(1, (std::min)(m_frameTaskGraphAverageWindow, 120));
+    m_frameTaskGraphAverageWindow = clampedAverageWindow;
+
+    const size_t historyCount = m_frameTaskGraphHistory.size();
+    const size_t windowCount = (std::min)(historyCount, static_cast<size_t>(m_frameTaskGraphAverageWindow));
+    const size_t windowStart = historyCount > windowCount ? (historyCount - windowCount) : 0;
+
+    const auto buildStageGroups = [](const br::telemetry::FrameTaskGraphSnapshot& snapshot) {
+        std::vector<StageAggregate> groups;
+        groups.reserve(snapshot.nodeCount);
+
+        for (uint32_t nodeIndex = 0; nodeIndex < snapshot.nodeCount; ++nodeIndex) {
+            const auto& node = snapshot.nodes[nodeIndex];
+            auto existingGroup = std::find_if(groups.begin(), groups.end(), [&](const StageAggregate& group) {
+                return group.domain == node.domain && std::strcmp(group.name, node.name) == 0;
+            });
+
+            if (existingGroup == groups.end()) {
+                StageAggregate group{};
+                std::snprintf(group.name, sizeof(group.name), "%s", node.name);
+                group.domain = node.domain;
+                group.dependencyNodeIndex = node.dependencyNodeIndex;
+                group.latestStartUs = node.startTimeUs;
+                group.latestSpanUs = node.durationUs;
+                group.latestTotalDurationUs = node.durationUs;
+                group.latestDispatchCount = 1;
+                groups.push_back(group);
+                continue;
+            }
+
+            const uint64_t currentEndUs = existingGroup->latestStartUs + existingGroup->latestSpanUs;
+            existingGroup->latestStartUs = (std::min)(existingGroup->latestStartUs, node.startTimeUs);
+            const uint64_t nodeEndUs = node.startTimeUs + node.durationUs;
+            const uint64_t updatedEndUs = (std::max)(currentEndUs, nodeEndUs);
+            existingGroup->latestSpanUs = updatedEndUs - existingGroup->latestStartUs;
+            existingGroup->latestTotalDurationUs += node.durationUs;
+            ++existingGroup->latestDispatchCount;
+        }
+
+        return groups;
+    };
+
+    std::vector<StageAggregate> stageAggregates = buildStageGroups(m_frameTaskGraphLatest);
+
+    uint64_t latestFrameEndUs = 0;
+    for (uint32_t nodeIndex = 0; nodeIndex < m_frameTaskGraphLatest.nodeCount; ++nodeIndex) {
+        const auto& node = m_frameTaskGraphLatest.nodes[nodeIndex];
+        latestFrameEndUs = (std::max)(latestFrameEndUs, node.startTimeUs + node.durationUs);
+    }
+
+    for (auto& aggregate : stageAggregates) {
+        uint64_t totalStartUs = 0;
+        uint64_t totalSpanUs = 0;
+        uint64_t totalBusyUs = 0;
+        uint64_t totalDispatches = 0;
+
+        for (size_t historyIndex = windowStart; historyIndex < historyCount; ++historyIndex) {
+            const auto groupedSnapshot = buildStageGroups(m_frameTaskGraphHistory[historyIndex]);
+            const auto match = std::find_if(groupedSnapshot.begin(), groupedSnapshot.end(), [&](const StageAggregate& snapshotGroup) {
+                return snapshotGroup.domain == aggregate.domain && std::strcmp(snapshotGroup.name, aggregate.name) == 0;
+            });
+            if (match == groupedSnapshot.end()) {
+                continue;
+            }
+
+            totalStartUs += match->latestStartUs;
+            totalSpanUs += match->latestSpanUs;
+            totalBusyUs += match->latestTotalDurationUs;
+            totalDispatches += match->latestDispatchCount;
+            if (aggregate.sampleCount == 0) {
+                aggregate.minTotalDurationUs = match->latestTotalDurationUs;
+                aggregate.maxTotalDurationUs = match->latestTotalDurationUs;
+            }
+            else {
+                aggregate.minTotalDurationUs = (std::min)(aggregate.minTotalDurationUs, match->latestTotalDurationUs);
+                aggregate.maxTotalDurationUs = (std::max)(aggregate.maxTotalDurationUs, match->latestTotalDurationUs);
+            }
+            ++aggregate.sampleCount;
+        }
+
+        if (aggregate.sampleCount > 0) {
+            aggregate.avgStartUs = totalStartUs / aggregate.sampleCount;
+            aggregate.avgSpanUs = totalSpanUs / aggregate.sampleCount;
+            aggregate.avgTotalDurationUs = totalBusyUs / aggregate.sampleCount;
+            aggregate.avgDispatchCount = static_cast<uint32_t>(totalDispatches / aggregate.sampleCount);
+        }
+        else {
+            aggregate.avgStartUs = aggregate.latestStartUs;
+            aggregate.avgSpanUs = aggregate.latestSpanUs;
+            aggregate.avgTotalDurationUs = aggregate.latestTotalDurationUs;
+            aggregate.minTotalDurationUs = aggregate.latestTotalDurationUs;
+            aggregate.maxTotalDurationUs = aggregate.latestTotalDurationUs;
+            aggregate.avgDispatchCount = aggregate.latestDispatchCount;
+        }
+    }
+
+    std::vector<float> frameHistoryMs;
+    frameHistoryMs.reserve(windowCount);
+    uint64_t avgFrameEndUs = 0;
+    uint64_t minFrameEndUs = 0;
+    uint64_t maxFrameEndUs = 0;
+    uint32_t frameSamples = 0;
+    for (size_t historyIndex = windowStart; historyIndex < historyCount; ++historyIndex) {
+        const auto& snapshot = m_frameTaskGraphHistory[historyIndex];
+        uint64_t frameEndUs = 0;
+        for (uint32_t nodeIndex = 0; nodeIndex < snapshot.nodeCount; ++nodeIndex) {
+            const auto& node = snapshot.nodes[nodeIndex];
+            frameEndUs = (std::max)(frameEndUs, node.startTimeUs + node.durationUs);
+        }
+        frameHistoryMs.push_back(static_cast<float>(frameEndUs) / 1000.0f);
+        avgFrameEndUs += frameEndUs;
+        if (frameSamples == 0) {
+            minFrameEndUs = frameEndUs;
+            maxFrameEndUs = frameEndUs;
+        }
+        else {
+            minFrameEndUs = (std::min)(minFrameEndUs, frameEndUs);
+            maxFrameEndUs = (std::max)(maxFrameEndUs, frameEndUs);
+        }
+        ++frameSamples;
+    }
+    if (frameSamples > 0) {
+        avgFrameEndUs /= frameSamples;
+    }
+
+    ImGui::Text(
+        "Frame %llu | swap index %u | nodes %u | grouped stages %zu",
+        static_cast<unsigned long long>(m_frameTaskGraphLatest.frameNumber),
+        static_cast<unsigned int>(m_frameTaskGraphLatest.frameIndex),
+        m_frameTaskGraphLatest.nodeCount,
+        stageAggregates.size());
+    ImGui::Text(
+        "Frame total: latest %.3f ms | avg(%u) %.3f ms | min/max %.3f / %.3f ms",
+        static_cast<double>(latestFrameEndUs) / 1000.0,
+        frameSamples,
+        static_cast<double>(avgFrameEndUs) / 1000.0,
+        static_cast<double>(minFrameEndUs) / 1000.0,
+        static_cast<double>(maxFrameEndUs) / 1000.0);
+    if (m_frameTaskGraphLatest.droppedNodeCount > 0) {
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+            "Dropped %u task nodes in the latest snapshot because the capture buffer filled.",
+            m_frameTaskGraphLatest.droppedNodeCount);
+    }
+
+    ImGui::SliderInt("Average window (frames)", &m_frameTaskGraphAverageWindow, 1, 120);
+    ImGui::Checkbox("Overlay latest frame", &m_frameTaskGraphShowLatestOverlay);
+
+    if (!frameHistoryMs.empty() && ImPlot::BeginPlot("##CpuFrameTaskFrameHistory", ImVec2(-1.0f, 150.0f), ImPlotFlags_NoLegend)) {
+        ImPlot::SetupAxes("Recent frames", "ms", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+        std::vector<float> xValues(frameHistoryMs.size());
+        for (size_t i = 0; i < frameHistoryMs.size(); ++i) {
+            xValues[i] = static_cast<float>(i);
+        }
+        ImPlot::PlotLine("Frame total", xValues.data(), frameHistoryMs.data(), static_cast<int>(frameHistoryMs.size()));
+        if (frameSamples > 0) {
+            const double avgLine[2] = { static_cast<double>(avgFrameEndUs) / 1000.0, static_cast<double>(avgFrameEndUs) / 1000.0 };
+            const double avgX[2] = { 0.0, static_cast<double>((std::max)(size_t{ 1 }, frameHistoryMs.size())) - 1.0 };
+            ImPlot::SetNextLineStyle(ImVec4(0.95f, 0.8f, 0.2f, 1.0f), 1.5f);
+            ImPlot::PlotLine("Average", avgX, avgLine, 2);
+        }
+        ImPlot::EndPlot();
+    }
+
+    std::vector<size_t> bottleneckOrder(stageAggregates.size());
+    for (size_t i = 0; i < bottleneckOrder.size(); ++i) {
+        bottleneckOrder[i] = i;
+    }
+    std::sort(bottleneckOrder.begin(), bottleneckOrder.end(), [&](size_t lhs, size_t rhs) {
+        return stageAggregates[lhs].avgTotalDurationUs > stageAggregates[rhs].avgTotalDurationUs;
+    });
+
+    ImGui::SeparatorText("Bottlenecks");
+    const size_t maxBottlenecks = (std::min)(size_t{ 5 }, bottleneckOrder.size());
+    for (size_t rank = 0; rank < maxBottlenecks; ++rank) {
+        const auto& aggregate = stageAggregates[bottleneckOrder[rank]];
+        ImGui::Text(
+            "%zu. %s [%s] avg busy %.3f ms | latest busy %.3f ms | avg dispatches %u",
+            rank + 1,
+            aggregate.name,
+            domainName(aggregate.domain),
+            static_cast<double>(aggregate.avgTotalDurationUs) / 1000.0,
+            static_cast<double>(aggregate.latestTotalDurationUs) / 1000.0,
+            aggregate.avgDispatchCount);
+    }
+
+    ImGui::SeparatorText("Timeline");
+
+    constexpr int kDomainLaneCount = 4;
+    const float laneHeight = 26.0f;
+    const float laneSpacing = 10.0f;
+    const float labelWidth = 92.0f;
+    const float timelineHeight = kDomainLaneCount * laneHeight + (kDomainLaneCount - 1) * laneSpacing;
+    const ImVec2 canvasSize(ImGui::GetContentRegionAvail().x, timelineHeight + 8.0f);
+
+    ImGui::BeginChild("##CpuFrameTaskTimeline", canvasSize, true, ImGuiWindowFlags_NoMove);
+    {
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const float width = (std::max)(ImGui::GetContentRegionAvail().x, 1.0f);
+        const float timelineWidth = (std::max)(width - labelWidth - 12.0f, 1.0f);
+        const float frameSpanUs = static_cast<float>((std::max)(avgFrameEndUs, uint64_t{ 1 }));
+
+        for (int lane = 0; lane < kDomainLaneCount; ++lane) {
+            const float y0 = origin.y + lane * (laneHeight + laneSpacing);
+            const float y1 = y0 + laneHeight;
+            const char* label = lane == 0 ? "Main" : lane == 1 ? "Worker" : lane == 2 ? "IO" : "Background";
+            drawList->AddText(ImVec2(origin.x, y0 + 4.0f), IM_COL32(220, 220, 220, 255), label);
+            drawList->AddRectFilled(
+                ImVec2(origin.x + labelWidth, y0),
+                ImVec2(origin.x + labelWidth + timelineWidth, y1),
+                IM_COL32(32, 32, 32, 255),
+                4.0f);
+        }
+
+        for (size_t nodeIndex = 0; nodeIndex < stageAggregates.size(); ++nodeIndex) {
+            const auto& aggregate = stageAggregates[nodeIndex];
+            const int lane = domainLane(aggregate.domain);
+            const float laneY0 = origin.y + lane * (laneHeight + laneSpacing);
+            const float startNorm = static_cast<float>(aggregate.avgStartUs) / frameSpanUs;
+            const float endNorm = static_cast<float>(aggregate.avgStartUs + aggregate.avgSpanUs) / frameSpanUs;
+            const float x0 = origin.x + labelWidth + startNorm * timelineWidth;
+            const float x1 = origin.x + labelWidth + (std::max)(endNorm * timelineWidth, startNorm * timelineWidth + 2.0f);
+            const ImVec2 rectMin(x0, laneY0 + 3.0f);
+            const ImVec2 rectMax(x1, laneY0 + laneHeight - 3.0f);
+            const ImU32 fillColor = domainColor(aggregate.domain);
+
+            drawList->AddRectFilled(rectMin, rectMax, fillColor, 4.0f);
+            drawList->AddRect(rectMin, rectMax, IM_COL32(20, 20, 20, 255), 4.0f);
+
+            if ((rectMax.x - rectMin.x) > 48.0f) {
+                drawList->AddText(ImVec2(rectMin.x + 6.0f, rectMin.y + 3.0f), IM_COL32(10, 10, 10, 255), aggregate.name);
+            }
+
+            if (m_frameTaskGraphShowLatestOverlay) {
+                const float latestStartNorm = static_cast<float>(aggregate.latestStartUs) / frameSpanUs;
+                const float latestEndNorm = static_cast<float>(aggregate.latestStartUs + aggregate.latestSpanUs) / frameSpanUs;
+                const float latestX0 = origin.x + labelWidth + latestStartNorm * timelineWidth;
+                const float latestX1 = origin.x + labelWidth + (std::max)(latestEndNorm * timelineWidth, latestStartNorm * timelineWidth + 2.0f);
+                drawList->AddRect(
+                    ImVec2(latestX0, laneY0 + 1.0f),
+                    ImVec2(latestX1, laneY0 + laneHeight - 1.0f),
+                    IM_COL32(255, 255, 255, 160),
+                    4.0f,
+                    0,
+                    1.5f);
+            }
+
+            ImGui::SetCursorScreenPos(rectMin);
+            ImGui::InvisibleButton(std::format("##CpuFrameTaskNode{}", nodeIndex).c_str(), ImVec2(rectMax.x - rectMin.x, rectMax.y - rectMin.y));
+            if (ImGui::IsItemHovered()) {
+                ImGui::BeginTooltip();
+                ImGui::TextUnformatted(aggregate.name);
+                ImGui::Text("Domain: %s", domainName(aggregate.domain));
+                ImGui::Text("Avg start: %.3f ms", static_cast<double>(aggregate.avgStartUs) / 1000.0);
+                ImGui::Text("Avg span: %.3f ms", static_cast<double>(aggregate.avgSpanUs) / 1000.0);
+                ImGui::Text("Avg busy: %.3f ms", static_cast<double>(aggregate.avgTotalDurationUs) / 1000.0);
+                ImGui::Text("Latest busy: %.3f ms", static_cast<double>(aggregate.latestTotalDurationUs) / 1000.0);
+                ImGui::Text("Min/max busy: %.3f / %.3f ms", static_cast<double>(aggregate.minTotalDurationUs) / 1000.0, static_cast<double>(aggregate.maxTotalDurationUs) / 1000.0);
+                ImGui::Text("Avg/latest dispatches: %u / %u", aggregate.avgDispatchCount, aggregate.latestDispatchCount);
+                ImGui::Text("Samples: %u", aggregate.sampleCount);
+                ImGui::Text("Dependency: %d", aggregate.dependencyNodeIndex);
+                ImGui::EndTooltip();
+            }
+        }
+
+        ImGui::Dummy(ImVec2(width, timelineHeight));
+    }
+    ImGui::EndChild();
+
+    ImGui::SeparatorText("Stages");
+    if (ImGui::BeginTable("##CpuFrameTaskStages", 9, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Stage");
+        ImGui::TableSetupColumn("Domain");
+        ImGui::TableSetupColumn("Avg Start (ms)");
+        ImGui::TableSetupColumn("Avg Span (ms)");
+        ImGui::TableSetupColumn("Avg Busy (ms)");
+        ImGui::TableSetupColumn("Latest Busy (ms)");
+        ImGui::TableSetupColumn("Dispatches");
+        ImGui::TableSetupColumn("Min/Max Busy (ms)");
+        ImGui::TableSetupColumn("Depends On");
+        ImGui::TableHeadersRow();
+
+        for (size_t nodeIndex = 0; nodeIndex < stageAggregates.size(); ++nodeIndex) {
+            const auto& aggregate = stageAggregates[nodeIndex];
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted(aggregate.name);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(domainName(aggregate.domain));
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%.3f", static_cast<double>(aggregate.avgStartUs) / 1000.0);
+            ImGui::TableSetColumnIndex(3);
+            ImGui::Text("%.3f", static_cast<double>(aggregate.avgSpanUs) / 1000.0);
+            ImGui::TableSetColumnIndex(4);
+            ImGui::Text("%.3f", static_cast<double>(aggregate.avgTotalDurationUs) / 1000.0);
+            ImGui::TableSetColumnIndex(5);
+            ImGui::Text("%.3f", static_cast<double>(aggregate.latestTotalDurationUs) / 1000.0);
+            ImGui::TableSetColumnIndex(6);
+            ImGui::Text("%u / %u", aggregate.avgDispatchCount, aggregate.latestDispatchCount);
+            ImGui::TableSetColumnIndex(7);
+            ImGui::Text("%.3f / %.3f", static_cast<double>(aggregate.minTotalDurationUs) / 1000.0, static_cast<double>(aggregate.maxTotalDurationUs) / 1000.0);
+            ImGui::TableSetColumnIndex(8);
+            if (aggregate.dependencyNodeIndex >= 0 && static_cast<uint32_t>(aggregate.dependencyNodeIndex) < m_frameTaskGraphLatest.nodeCount) {
+                ImGui::TextUnformatted(m_frameTaskGraphLatest.nodes[aggregate.dependencyNodeIndex].name);
+            }
+            else {
+                ImGui::TextDisabled("None");
+            }
+        }
+
+        ImGui::EndTable();
     }
 
     ImGui::End();

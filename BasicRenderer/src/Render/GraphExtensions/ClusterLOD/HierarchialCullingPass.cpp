@@ -11,7 +11,7 @@
 #include "Managers\ObjectManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/Singletons/DeviceManager.h"
-#include "Managers/Singletons/ECSManager.h"
+#include "Managers/Singletons/RendererECSManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/ViewManager.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
@@ -63,7 +63,7 @@ HierarchialCullingPass::HierarchialCullingPass(
 HierarchialCullingPass::~HierarchialCullingPass() = default;
 
 void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) {
-    auto ecsWorld = ECSManager::GetInstance().GetWorld();
+    auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
     flecs::query<> drawSetIndicesQuery = ecsWorld.query_builder<>()
         .with<Components::IsActiveDrawSetIndices>()
         .with<Components::ParticipatesInPass>(flecs::Wildcard)

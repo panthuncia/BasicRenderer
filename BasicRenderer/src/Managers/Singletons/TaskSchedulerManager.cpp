@@ -9,6 +9,8 @@
 
 #include <spdlog/spdlog.h>
 
+#include "Telemetry/FrameTaskGraphTelemetry.h"
+
 namespace br {
 
 struct TaskSchedulerManager::RuntimeState {
@@ -17,14 +19,37 @@ struct TaskSchedulerManager::RuntimeState {
 };
 
 namespace {
-constexpr bool kEnableFineGrainedSchedulerTracing = false;
+constexpr bool kEnableFineGrainedSchedulerTracing = true;
 
 thread_local bool g_isIoWorkerThread = false;
+thread_local bool g_isBackgroundWorkerThread = false;
 
 void PlotIoQueueDepth(size_t depth) {
     if constexpr (kEnableFineGrainedSchedulerTracing) {
         TracyCPlotI("TaskScheduler/IO Queue Depth", static_cast<int64_t>(depth));
     }
+}
+
+void PlotBackgroundQueueDepth(size_t depth) {
+    if constexpr (kEnableFineGrainedSchedulerTracing) {
+        TracyCPlotI("TaskScheduler/Background Queue Depth", static_cast<int64_t>(depth));
+    }
+}
+
+void RecordTaskNodeForTelemetry(
+    std::string_view taskName,
+    telemetry::CpuTaskDomain domain,
+    const std::chrono::steady_clock::time_point& taskStart,
+    const std::chrono::steady_clock::time_point& taskEnd) {
+    if (taskName.empty()) {
+        return;
+    }
+
+    std::array<char, 64> telemetryName{};
+    const size_t copyLength = (std::min)(telemetryName.size() - 1, taskName.size());
+    std::memcpy(telemetryName.data(), taskName.data(), copyLength);
+    telemetryName[copyLength] = '\0';
+    telemetry::RecordFrameTaskNode(telemetryName.data(), domain, -1, taskStart, taskEnd);
 }
 
 }
@@ -34,7 +59,7 @@ TaskSchedulerManager& TaskSchedulerManager::GetInstance() {
     return instance;
 }
 
-void TaskSchedulerManager::Initialize(uint32_t ioThreadCount, uint32_t externalTaskThreads) {
+void TaskSchedulerManager::Initialize(uint32_t ioThreadCount, uint32_t externalTaskThreads, uint32_t backgroundThreadCount) {
     if (m_initialized) {
         return;
     }
@@ -48,12 +73,21 @@ void TaskSchedulerManager::Initialize(uint32_t ioThreadCount, uint32_t externalT
     m_runtimeState->workerArena = std::make_unique<tbb::task_arena>(static_cast<int>(m_workerThreadCount));
 
     m_ioShutdownRequested.store(false, std::memory_order_relaxed);
+    m_backgroundShutdownRequested.store(false, std::memory_order_relaxed);
     m_ioTasks.clear();
+    m_backgroundTasks.clear();
     m_ioThreads.clear();
+    m_backgroundThreads.clear();
     m_ioThreads.reserve(ioThreadCount);
+    m_backgroundThreads.reserve(backgroundThreadCount);
     for (uint32_t ioThreadIndex = 0; ioThreadIndex < ioThreadCount; ++ioThreadIndex) {
         m_ioThreads.emplace_back([this]() {
             IoWorkerLoop();
+        });
+    }
+    for (uint32_t backgroundThreadIndex = 0; backgroundThreadIndex < backgroundThreadCount; ++backgroundThreadIndex) {
+        m_backgroundThreads.emplace_back([this]() {
+            BackgroundWorkerLoop();
         });
     }
 
@@ -66,9 +100,10 @@ void TaskSchedulerManager::Initialize(uint32_t ioThreadCount, uint32_t externalT
     m_initialized = true;
 
     spdlog::info(
-        "TaskSchedulerManager initialized: workerThreads={}, ioThreads={}, externalTaskThreads={}",
+        "TaskSchedulerManager initialized: workerThreads={}, ioThreads={}, backgroundThreads={}, externalTaskThreads={}",
         m_workerThreadCount,
         static_cast<uint32_t>(m_ioThreads.size()),
+        static_cast<uint32_t>(m_backgroundThreads.size()),
         externalTaskThreads);
 }
 
@@ -82,26 +117,32 @@ void TaskSchedulerManager::RunIoTask(std::string_view taskName, std::function<vo
         : std::string(taskName);
 
     if (!m_initialized || m_ioThreads.empty()) {
+        const auto taskStart = std::chrono::steady_clock::now();
         if constexpr (kEnableFineGrainedSchedulerTracing) {
             TracyCZone(ctx, 1);
             TracyCZoneName(ctx, taskNameStorage.c_str(), taskNameStorage.size());
             task();
             TracyCZoneEnd(ctx);
-            return;
         }
-        task();
+        else {
+            task();
+        }
+        RecordTaskNodeForTelemetry(taskNameStorage, telemetry::CpuTaskDomain::IOService, taskStart, std::chrono::steady_clock::now());
         return;
     }
 
     if (g_isIoWorkerThread) {
+        const auto taskStart = std::chrono::steady_clock::now();
         if constexpr (kEnableFineGrainedSchedulerTracing) {
             TracyCZone(ctx, 1);
             TracyCZoneName(ctx, taskNameStorage.c_str(), taskNameStorage.size());
             task();
             TracyCZoneEnd(ctx);
-            return;
         }
-        task();
+        else {
+            task();
+        }
+        RecordTaskNodeForTelemetry(taskNameStorage, telemetry::CpuTaskDomain::IOService, taskStart, std::chrono::steady_clock::now());
         return;
     }
 
@@ -111,14 +152,29 @@ void TaskSchedulerManager::RunIoTask(std::string_view taskName, std::function<vo
     {
         std::lock_guard<std::mutex> lock(m_ioMutex);
         m_ioTasks.emplace_back([task = std::move(task), completion, taskNameStorage]() mutable {
-            (void)taskNameStorage;
-            try {
-                task();
-                completion->set_value();
+            const auto taskStart = std::chrono::steady_clock::now();
+            if constexpr (kEnableFineGrainedSchedulerTracing) {
+                TracyCZone(ctx, 1);
+                TracyCZoneName(ctx, taskNameStorage.c_str(), taskNameStorage.size());
+                try {
+                    task();
+                    completion->set_value();
+                }
+                catch (...) {
+                    completion->set_exception(std::current_exception());
+                }
+                TracyCZoneEnd(ctx);
             }
-            catch (...) {
-                completion->set_exception(std::current_exception());
+            else {
+                try {
+                    task();
+                    completion->set_value();
+                }
+                catch (...) {
+                    completion->set_exception(std::current_exception());
+                }
             }
+            RecordTaskNodeForTelemetry(taskNameStorage, telemetry::CpuTaskDomain::IOService, taskStart, std::chrono::steady_clock::now());
         });
         PlotIoQueueDepth(m_ioTasks.size());
     }
@@ -127,16 +183,83 @@ void TaskSchedulerManager::RunIoTask(std::string_view taskName, std::function<vo
     future.get();
 }
 
+void TaskSchedulerManager::RunBackgroundTask(std::function<void()>&& task) {
+    RunBackgroundTask({}, std::move(task));
+}
+
+void TaskSchedulerManager::RunBackgroundTask(std::string_view taskName, std::function<void()>&& task) {
+    const std::string taskNameStorage = taskName.empty()
+        ? std::string("TaskScheduler::RunBackgroundTask")
+        : std::string(taskName);
+
+    if (!m_initialized || m_backgroundThreads.empty()) {
+        const auto taskStart = std::chrono::steady_clock::now();
+        if constexpr (kEnableFineGrainedSchedulerTracing) {
+            TracyCZone(ctx, 1);
+            TracyCZoneName(ctx, taskNameStorage.c_str(), taskNameStorage.size());
+            task();
+            TracyCZoneEnd(ctx);
+        }
+        else {
+            task();
+        }
+        RecordTaskNodeForTelemetry(taskNameStorage, telemetry::CpuTaskDomain::BackgroundService, taskStart, std::chrono::steady_clock::now());
+        return;
+    }
+
+    if (g_isBackgroundWorkerThread) {
+        const auto taskStart = std::chrono::steady_clock::now();
+        if constexpr (kEnableFineGrainedSchedulerTracing) {
+            TracyCZone(ctx, 1);
+            TracyCZoneName(ctx, taskNameStorage.c_str(), taskNameStorage.size());
+            task();
+            TracyCZoneEnd(ctx);
+        }
+        else {
+            task();
+        }
+        RecordTaskNodeForTelemetry(taskNameStorage, telemetry::CpuTaskDomain::BackgroundService, taskStart, std::chrono::steady_clock::now());
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_backgroundMutex);
+        m_backgroundTasks.emplace_back([task = std::move(task), taskNameStorage]() mutable {
+            const auto taskStart = std::chrono::steady_clock::now();
+            if constexpr (kEnableFineGrainedSchedulerTracing) {
+                TracyCZone(ctx, 1);
+                TracyCZoneName(ctx, taskNameStorage.c_str(), taskNameStorage.size());
+                task();
+                TracyCZoneEnd(ctx);
+            }
+            else {
+                task();
+            }
+            RecordTaskNodeForTelemetry(taskNameStorage, telemetry::CpuTaskDomain::BackgroundService, taskStart, std::chrono::steady_clock::now());
+        });
+        PlotBackgroundQueueDepth(m_backgroundTasks.size());
+    }
+
+    m_backgroundCv.notify_one();
+}
+
 void TaskSchedulerManager::Cleanup() {
     if (!m_initialized) {
         return;
     }
 
     m_ioShutdownRequested.store(true, std::memory_order_release);
+    m_backgroundShutdownRequested.store(true, std::memory_order_release);
     m_ioCv.notify_all();
+    m_backgroundCv.notify_all();
     for (std::thread& ioThread : m_ioThreads) {
         if (ioThread.joinable()) {
             ioThread.join();
+        }
+    }
+    for (std::thread& backgroundThread : m_backgroundThreads) {
+        if (backgroundThread.joinable()) {
+            backgroundThread.join();
         }
     }
 
@@ -144,8 +267,13 @@ void TaskSchedulerManager::Cleanup() {
         std::lock_guard<std::mutex> lock(m_ioMutex);
         m_ioTasks.clear();
     }
+    {
+        std::lock_guard<std::mutex> lock(m_backgroundMutex);
+        m_backgroundTasks.clear();
+    }
 
     m_ioThreads.clear();
+    m_backgroundThreads.clear();
     m_runtimeState.reset();
     m_ioRoundRobin.store(0, std::memory_order_relaxed);
     m_workerThreadCount = 0;
@@ -161,12 +289,30 @@ void TaskSchedulerManager::ParallelForImpl(std::string_view taskName, size_t ite
     const std::string taskNameStorage = taskName.empty()
         ? std::string("TaskScheduler::ParallelFor")
         : std::string(taskName);
-    (void)taskNameStorage;
 
     if (!m_initialized || itemCount == 1 || !m_runtimeState || !m_runtimeState->workerArena) {
-        for (size_t itemIndex = 0; itemIndex < itemCount; ++itemIndex) {
-            func(itemIndex);
+        thread_local bool s_namedInlineThread = false;
+        const auto taskStart = std::chrono::steady_clock::now();
+        if constexpr (kEnableFineGrainedSchedulerTracing) {
+            if (!s_namedInlineThread) {
+                TracyCSetThreadName("Task Inline");
+                s_namedInlineThread = true;
+            }
+
+            TracyCZone(ctx, 1);
+            TracyCZoneName(ctx, taskNameStorage.c_str(), taskNameStorage.size());
+            TracyCZoneValue(ctx, itemCount);
+            for (size_t itemIndex = 0; itemIndex < itemCount; ++itemIndex) {
+                func(itemIndex);
+            }
+            TracyCZoneEnd(ctx);
         }
+        else {
+            for (size_t itemIndex = 0; itemIndex < itemCount; ++itemIndex) {
+                func(itemIndex);
+            }
+        }
+        RecordTaskNodeForTelemetry(taskNameStorage, telemetry::CpuTaskDomain::Worker, taskStart, std::chrono::steady_clock::now());
         return;
     }
 
@@ -179,9 +325,28 @@ void TaskSchedulerManager::ParallelForImpl(std::string_view taskName, size_t ite
         for (size_t chunkBegin = 0; chunkBegin < itemCount; chunkBegin += chunkSize) {
             const size_t chunkEnd = (std::min)(itemCount, chunkBegin + chunkSize);
             group.run([&, chunkBegin, chunkEnd]() {
-                for (size_t itemIndex = chunkBegin; itemIndex < chunkEnd; ++itemIndex) {
-                    func(itemIndex);
+                thread_local bool s_namedWorkerThread = false;
+                const auto taskStart = std::chrono::steady_clock::now();
+                if constexpr (kEnableFineGrainedSchedulerTracing) {
+                    if (!s_namedWorkerThread) {
+                        TracyCSetThreadName("Task Worker");
+                        s_namedWorkerThread = true;
+                    }
+
+                    TracyCZone(ctx, 1);
+                    TracyCZoneName(ctx, taskNameStorage.c_str(), taskNameStorage.size());
+                    TracyCZoneValue(ctx, chunkEnd - chunkBegin);
+                    for (size_t itemIndex = chunkBegin; itemIndex < chunkEnd; ++itemIndex) {
+                        func(itemIndex);
+                    }
+                    TracyCZoneEnd(ctx);
                 }
+                else {
+                    for (size_t itemIndex = chunkBegin; itemIndex < chunkEnd; ++itemIndex) {
+                        func(itemIndex);
+                    }
+                }
+                RecordTaskNodeForTelemetry(taskNameStorage, telemetry::CpuTaskDomain::Worker, taskStart, std::chrono::steady_clock::now());
             });
         }
         group.wait();
@@ -222,6 +387,42 @@ void TaskSchedulerManager::IoWorkerLoop() {
     }
 
     g_isIoWorkerThread = false;
+}
+
+void TaskSchedulerManager::BackgroundWorkerLoop() {
+    g_isBackgroundWorkerThread = true;
+
+    static std::atomic<uint32_t> s_workerIdCounter = 0;
+    const uint32_t workerId = s_workerIdCounter.fetch_add(1, std::memory_order_relaxed);
+    std::array<char, 32> workerName{};
+    const int charsWritten = std::snprintf(workerName.data(), workerName.size(), "Background Worker %u", workerId);
+    if constexpr (kEnableFineGrainedSchedulerTracing) {
+        if (charsWritten > 0) {
+            TracyCSetThreadName(workerName.data());
+        }
+    }
+
+    while (!m_backgroundShutdownRequested.load(std::memory_order_acquire)) {
+        std::function<void()> task;
+        {
+            std::unique_lock<std::mutex> lock(m_backgroundMutex);
+            m_backgroundCv.wait(lock, [this]() {
+                return m_backgroundShutdownRequested.load(std::memory_order_relaxed) || !m_backgroundTasks.empty();
+            });
+
+            if (m_backgroundShutdownRequested.load(std::memory_order_relaxed) && m_backgroundTasks.empty()) {
+                break;
+            }
+
+            task = std::move(m_backgroundTasks.front());
+            m_backgroundTasks.pop_front();
+            PlotBackgroundQueueDepth(m_backgroundTasks.size());
+        }
+
+        task();
+    }
+
+    g_isBackgroundWorkerThread = false;
 }
 
 }

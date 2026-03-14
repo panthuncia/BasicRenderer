@@ -128,6 +128,27 @@ void LightManager::RemoveLight(LightInfo* light) {
 
 }
 
+void LightManager::RemoveLight(flecs::entity light) {
+	if (!light.is_alive() || !light.has<Components::LightViewInfo>()) {
+		return;
+	}
+
+	auto& viewInfo = light.get<Components::LightViewInfo>();
+	m_activeLightIndices->Remove(viewInfo.lightBufferIndex);
+	m_lightBuffer->Remove(viewInfo.lightBufferView.get());
+
+	if (auto depthMap = light.try_get<Components::DepthMap>()) {
+		if (depthMap->depthMap) {
+			m_pShadowMapResourceGroup->RemoveResource(depthMap->depthMap.get());
+		}
+		if (depthMap->linearDepthMap) {
+			m_pLinearShadowMapResourceGroup->RemoveResource(depthMap->linearDepthMap.get());
+		}
+	}
+
+	RemoveLightViewInfo(light);
+}
+
 unsigned int LightManager::GetNumLights() {
 	return m_activeLightIndices->Size();
 }

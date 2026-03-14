@@ -25,8 +25,13 @@ option(BASICRENDERER_USE_PACKAGE_DEPS "Prefer preinstalled BasicRHI/OpenRenderGr
 option(BASICRENDERER_ENABLE_SUBMODULE_FALLBACK "Allow fallback to in-tree BasicRHI/OpenRenderGraph" ON)
 
 if(BASICRENDERER_USE_PACKAGE_DEPS)
+    find_package(BasicScene CONFIG QUIET)
     find_package(BasicRHI CONFIG QUIET)
     find_package(OpenRenderGraph CONFIG QUIET)
+endif()
+
+if(TARGET BasicScene AND NOT TARGET BasicScene::BasicScene)
+    add_library(BasicScene::BasicScene ALIAS BasicScene)
 endif()
 
 if(TARGET BasicRHI AND NOT TARGET BasicRHI::BasicRHI)
@@ -38,6 +43,14 @@ if(TARGET OpenRenderGraph AND NOT TARGET OpenRenderGraph::OpenRenderGraph)
 endif()
 
 if(BASICRENDERER_ENABLE_SUBMODULE_FALLBACK)
+    if(NOT TARGET BasicScene::BasicScene AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/../BasicScene/CMakeLists.txt")
+        add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../BasicScene" "${CMAKE_CURRENT_BINARY_DIR}/_deps/BasicScene")
+    endif()
+
+    if(TARGET BasicScene AND NOT TARGET BasicScene::BasicScene)
+        add_library(BasicScene::BasicScene ALIAS BasicScene)
+    endif()
+
     if(NOT TARGET BasicRHI::BasicRHI AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/../BasicRHI/CMakeLists.txt")
         add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../BasicRHI" "${CMAKE_CURRENT_BINARY_DIR}/_deps/BasicRHI")
     endif()
@@ -53,6 +66,10 @@ if(BASICRENDERER_ENABLE_SUBMODULE_FALLBACK)
     if(TARGET OpenRenderGraph AND NOT TARGET OpenRenderGraph::OpenRenderGraph)
         add_library(OpenRenderGraph::OpenRenderGraph ALIAS OpenRenderGraph)
     endif()
+endif()
+
+if(NOT TARGET BasicScene::BasicScene)
+    message(FATAL_ERROR "BasicRenderer requires BasicScene::BasicScene. Install BasicScene package or provide BasicScene as submodule.")
 endif()
 
 if(NOT TARGET BasicRHI::BasicRHI)
@@ -650,6 +667,7 @@ PRIVATE
     usdSkel
     implot::implot
     OpenRenderGraph::OpenRenderGraph
+    BasicScene::BasicScene
     BasicRHI::BasicRHI
     Boost::container_hash
     TBB::tbb

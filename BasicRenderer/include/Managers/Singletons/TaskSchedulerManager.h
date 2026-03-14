@@ -24,10 +24,12 @@ class TaskSchedulerManager {
 public:
     static TaskSchedulerManager& GetInstance();
 
-    void Initialize(uint32_t ioThreadCount = 2, uint32_t externalTaskThreads = 0);
+    void Initialize(uint32_t ioThreadCount = 2, uint32_t externalTaskThreads = 0, uint32_t backgroundThreadCount = 1);
     void Cleanup();
     void RunIoTask(std::function<void()>&& task);
     void RunIoTask(std::string_view taskName, std::function<void()>&& task);
+    void RunBackgroundTask(std::function<void()>&& task);
+    void RunBackgroundTask(std::string_view taskName, std::function<void()>&& task);
 
     bool IsInitialized() const {
         return m_initialized;
@@ -39,6 +41,10 @@ public:
 
     uint32_t GetNumIoThreads() const {
         return static_cast<uint32_t>(m_ioThreads.size());
+    }
+
+    uint32_t GetNumBackgroundThreads() const {
+        return static_cast<uint32_t>(m_backgroundThreads.size());
     }
 
     template <typename Func>
@@ -62,15 +68,21 @@ private:
     TaskSchedulerManager() = default;
 
     void IoWorkerLoop();
+    void BackgroundWorkerLoop();
     void ParallelForImpl(std::string_view taskName, size_t itemCount, std::function<void(size_t)>&& func);
 
     std::unique_ptr<RuntimeState> m_runtimeState;
     std::vector<std::thread> m_ioThreads;
+    std::vector<std::thread> m_backgroundThreads;
     std::deque<std::function<void()>> m_ioTasks;
+    std::deque<std::function<void()>> m_backgroundTasks;
     std::mutex m_ioMutex;
+    std::mutex m_backgroundMutex;
     std::condition_variable m_ioCv;
+    std::condition_variable m_backgroundCv;
     std::atomic<uint32_t> m_ioRoundRobin = 0;
     std::atomic<bool> m_ioShutdownRequested = false;
+    std::atomic<bool> m_backgroundShutdownRequested = false;
     uint32_t m_workerThreadCount = 0;
     bool m_initialized = false;
 };
