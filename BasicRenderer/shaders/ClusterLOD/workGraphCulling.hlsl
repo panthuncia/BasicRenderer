@@ -811,6 +811,17 @@ void WG_GroupEvaluate(
             const float3 generatingWorldSpaceCenter = mul(float4(grp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
             const float generatingWorldRadius = grp.bounds.centerAndRadius.w * groupUniformScale;
 
+            // Append every non-culled traversed group so the CPU can protect
+            // the full active traversal chain from eviction, not just the
+            // subset of groups that happened to emit fallback buckets.
+            {
+                uint usedSlot = 0;
+                InterlockedAdd(usedGroupsCounter[0], 1u, usedSlot);
+                if (usedSlot < CLOD_USED_GROUPS_CAPACITY) {
+                    usedGroupsBuffer[usedSlot] = groupIndex;
+                }
+            }
+
             [unroll]
             for (uint childIndex = 0; childIndex < BVH_MAX_CHILDREN; ++childIndex) {
                 if (childIndex >= clampedSegmentCount) {
@@ -940,15 +951,6 @@ void WG_GroupEvaluate(
                 }
             }
 
-            // Append this group to the used-groups buffer so the CPU LRU
-            // knows which groups are actively rendered.
-            if (emitBucketCount > 0) {
-                uint usedSlot = 0;
-                InterlockedAdd(usedGroupsCounter[0], 1u, usedSlot);
-                if (usedSlot < CLOD_USED_GROUPS_CAPACITY) {
-                    usedGroupsBuffer[usedSlot] = groupIndex;
-                }
-            }
         }
     }
 

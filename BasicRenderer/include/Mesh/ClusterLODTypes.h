@@ -183,6 +183,7 @@ struct ClusterLODRuntimeSummary
 		uint32_t compressedNormalWordCount = 0;
 		uint32_t compressedMeshletVertexWordCount = 0;
 		uint32_t segmentCount = 0; // number of segments (= pages before re-binning) for per-segment paging
+		uint32_t pageCount = 0;    // number of physical pages after bin-packing
 	};
 
 	struct GroupRange

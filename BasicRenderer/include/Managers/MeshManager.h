@@ -31,17 +31,6 @@ public:
 		uint32_t groupCount = 0;
 	};
 
-	struct CLodGlobalResidencyRequest {
-		uint32_t groupGlobalIndex = 0;
-		bool resident = false;
-	};
-
-	struct CLodGlobalResidencyResult {
-		bool serviced = false;
-		bool applied = false;
-		bool queued = false;
-	};
-
 	struct CLodStreamingDebugStats {
 		uint32_t residentGroups = 0;
 		uint32_t residentAllocations = 0;
@@ -67,14 +56,6 @@ public:
 	void RemoveMesh(Mesh* mesh);
 	void RemoveMeshInstance(MeshInstance* mesh);
 
-	uint32_t SetCLodGroupResidencyForGlobal(uint32_t groupGlobalIndex, bool resident);
-	void SetCLodGroupResidencyForGlobalBatch(
-		const std::vector<CLodGlobalResidencyRequest>& requests,
-		std::vector<uint32_t>& outAppliedCounts);
-	CLodGlobalResidencyResult SetCLodGroupResidencyForGlobalEx(uint32_t groupGlobalIndex, bool resident);
-	void SetCLodGroupResidencyForGlobalBatchEx(
-		const std::vector<CLodGlobalResidencyRequest>& requests,
-		std::vector<CLodGlobalResidencyResult>& outResults);
 	void GetCLodActiveUniqueAssetGroupRanges(std::vector<CLodActiveGroupRange>& outRanges, uint32_t& outMaxGroupIndex) const;
 	void GetCLodCoarsestUniqueAssetGroupRanges(std::vector<CLodActiveGroupRange>& outRanges) const;
 	void GetCLodUniqueAssetParentMap(std::vector<int32_t>& outParentGroupByGlobal, uint32_t& outMaxGroupIndex) const;
@@ -97,8 +78,7 @@ public:
 
 	CLodStreamingDebugStats GetCLodStreamingDebugStats() const;
 	void ProcessCLodDiskStreamingIO(
-		uint32_t maxCompletedRequests = 64u,
-		std::function<bool(uint32_t groupGlobalIndex, uint32_t pagesNeeded)> evictForGroup = nullptr);
+		uint32_t maxCompletedRequests = 64u);
 
 	// Drains groups that completed disk streaming since the last call.
 	// The extension uses this to learn which groups became resident (or failed)
@@ -111,7 +91,7 @@ public:
 
 	// Queues disk I/O for a group without any residency side-effects.
 	// Returns true if the request was queued (or was already in the queue).
-	bool QueueCLodGroupDiskIO(uint32_t groupGlobalIndex);
+	bool QueueCLodGroupDiskIO(uint32_t groupGlobalIndex, const std::vector<bool>& segmentNeedsFetch = {}, const std::vector<uint32_t>& preAllocatedPages = {});
 
 	// Returns true if the group currently has disk I/O queued or in-flight.
 	bool IsCLodGroupDiskIOQueued(uint32_t groupGlobalIndex) const;
@@ -188,7 +168,6 @@ private:
 		std::vector<uint8_t> groupResidentFlags;
 		std::vector<ResidentGroupAllocations> residentGroupAllocations;
 		uint32_t activeInstanceCount = 0;
-		bool residencyTableDirty = false;
 
 		// Copies of hierarchy data needed at streaming-apply time.
 		// (The Mesh releases its CPU copies after setup via ReleaseCLodHierarchyCpuData.)
@@ -227,13 +206,14 @@ private:
 	// Incremental debug-stats counters — updated in place by residency mutations.
 	std::atomic<uint32_t> m_debugResidentGroups{0};
 	std::atomic<uint32_t> m_debugResidentAllocations{0};
-	std::atomic<uint64_t> m_debugResidentAllocationBytes{0};
 	std::atomic<uint64_t> m_debugTotalStreamedBytes{0};
 
 	struct CLodDiskStreamingRequest {
 		uint32_t groupGlobalIndex = 0;
 		ClusterLODCacheSource cacheSource{};
 		uint32_t groupLocalIndex = 0;
+		std::vector<bool> segmentNeedsFetch; // true = fetch from disk; false = reuse existing slab data
+		std::vector<uint32_t> preAllocatedPages; // page IDs pre-allocated by the LRU
 	};
 
 	struct CLodDiskStreamingResult {
@@ -241,6 +221,7 @@ private:
 		bool success = false;
 		std::optional<ClusterLODGroupChunk> groupChunkMetadata;
 		std::vector<std::vector<std::byte>> pageBlobs;
+		std::vector<uint32_t> preAllocatedPages; // forwarded from request
 	};
 
 	// Pending requests waiting to be dispatched (guarded by m_clodDiskStreamingMutex).
@@ -256,7 +237,7 @@ private:
 	std::vector<CLodDiskStreamingCompletion> m_clodDiskStreamingCompletions;
 
 	// Guards CLodSharedStreamingState interiors (groupResidentFlags,
-	// baselineGroupChunks, residentGroupAllocations, residencyTableDirty),
+	// baselineGroupChunks, residentGroupAllocations),
 	// m_clodPagePool, and m_clodSharedGroupChunks UpdateView calls.
 	mutable std::mutex m_clodResidencyMutex;
 
@@ -264,21 +245,20 @@ private:
 	static constexpr uint32_t kMaxIoBatchSize = 128u;
 
 	void DispatchCLodDiskStreamingBatch();
-	bool QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool& outQueued);
+	bool QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool& outQueued, const std::vector<bool>& segmentNeedsFetch = {}, const std::vector<uint32_t>& preAllocatedPages = {});
 
 	enum class DiskStreamingApplyResult {
 		Applied,
 		FailedPermanent,
-		FailedPoolExhausted,
 	};
-	DiskStreamingApplyResult ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result);
+	DiskStreamingApplyResult ApplyCompletedCLodDiskStreamingResult(CLodDiskStreamingResult& result, const std::vector<uint32_t>& preAllocatedPages);
 	void UploadCLodGroupChunkTable(const CLodSharedStreamingState& state);
 	bool IsCLodGroupResident(const CLodSharedStreamingState& state, uint32_t groupLocalIndex) const;
 	void DeallocateCLodGroupChunkAllocations(CLodSharedStreamingState& state, uint32_t groupLocalIndex);
 	void ReleaseAllCLodGroupChunkAllocations(CLodSharedStreamingState& state);
  	static void ZeroCLodGroupChunkCounts(ClusterLODGroupChunk& chunk);
-	bool ApplyCLodGroupResidency(CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool resident, bool uploadTableImmediately);
-	void UploadDirtyCLodGroupChunkTables(const std::vector<std::shared_ptr<CLodSharedStreamingState>>& touchedSharedStates);
+	bool ApplyCLodGroupEviction(CLodSharedStreamingState& state, uint32_t groupLocalIndex);
+
 	void RebuildCLodSharedStreamingRangeIndex();
 	std::shared_ptr<CLodSharedStreamingState> FindCLodSharedStreamingStateByGlobalGroup(uint32_t groupGlobalIndex, uint32_t& outGroupLocalIndex);
 

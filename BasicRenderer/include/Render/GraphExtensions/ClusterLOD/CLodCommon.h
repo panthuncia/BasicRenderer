@@ -41,7 +41,7 @@ struct CLodViewRasterInfo
     friend bool operator==(const CLodViewRasterInfo&, const CLodViewRasterInfo&) = default;
 };
 
-inline constexpr uint32_t CLodReplayBufferSizeBytes = 8u * 1024u * 1024u;
+inline constexpr uint32_t CLodReplayBufferSizeBytes = 100u * 1024u * 1024u;
 inline constexpr uint32_t CLodReplayBufferNumUints = CLodReplayBufferSizeBytes / sizeof(uint32_t);
 inline constexpr uint32_t CLodMaxViewDepthIndices = 512u;
 inline constexpr uint32_t CLodStreamingInitialGroupCapacity = 1024u;
@@ -81,8 +81,8 @@ inline std::shared_ptr<Buffer> CreateAliasedUnmaterializedStructuredBuffer(
     return buffer;
 }
 
-/// Estimates the packed blob size (bytes) for a group from its chunk hints,
-/// mirroring the alignment logic of PackGroupPayloadForPagePool.
+// Estimates the packed blob size (bytes) for a group from its chunk hints,
+// mirroring the alignment logic of PackGroupPayloadForPagePool.
 inline size_t CLodEstimateBlobSize(
     const ClusterLODRuntimeSummary::GroupChunkHint& hint,
     uint32_t vertexByteSize)
@@ -101,17 +101,16 @@ inline size_t CLodEstimateBlobSize(
     return align4(size);
 }
 
-/// Returns the number of pages needed for a group.
-/// With per-segment paging, each segment = 1 page, so this returns the segment count.
-/// Falls back to blob-size estimation when segment count is unavailable.
+// Returns the number of pages needed for a group.
+// Uses the physical page count when available (post-bin-packing),
+// falls back to blob-size estimation otherwise.
 inline uint32_t CLodEstimatePagesNeeded(
     const ClusterLODRuntimeSummary::GroupChunkHint& hint,
     uint32_t vertexByteSize,
     uint64_t pageSize)
 {
-    // segmentCount is stored in the hint when available; else fall back to blob estimate.
-    if (hint.segmentCount > 0) {
-        return hint.segmentCount;
+    if (hint.pageCount > 0) {
+        return hint.pageCount;
     }
     const size_t blobSize = CLodEstimateBlobSize(hint, vertexByteSize);
     return static_cast<uint32_t>((blobSize + pageSize - 1) / pageSize);

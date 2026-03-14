@@ -855,6 +855,70 @@ namespace CLodCache {
 		return true;
 	}
 
+	bool LoadGroupPayloadSelective(std::ifstream& file,
+		const ClusterLODGroupDiskLocator& locator,
+		const std::vector<bool>& segmentNeedsFetch,
+		LoadedGroupPayload& outPayload)
+	{
+		// Fall back to full read if no skip mask provided.
+		if (segmentNeedsFetch.empty()) {
+			return LoadGroupPayloadDirect(file, locator, outPayload);
+		}
+
+		if (locator.blobSizeBytes < sizeof(GroupPayloadHeader)) {
+			return false;
+		}
+
+		if (locator.blobOffset > static_cast<uint64_t>((std::numeric_limits<std::streamoff>::max)())) {
+			return false;
+		}
+
+		file.seekg(static_cast<std::streamoff>(locator.blobOffset), std::ios::beg);
+		if (!file.good()) {
+			return false;
+		}
+
+		GroupPayloadHeader groupHeader{};
+		file.read(reinterpret_cast<char*>(&groupHeader), sizeof(groupHeader));
+		if (!file.good()) {
+			return false;
+		}
+
+		outPayload.groupChunkMetadata = groupHeader.groupChunkMetadata;
+
+		const uint32_t pageCount = groupHeader.pageCount;
+		const uint64_t sizeTableBytes = static_cast<uint64_t>(pageCount) * sizeof(uint32_t);
+
+		std::vector<uint32_t> pageBlobSizes(pageCount);
+		if (pageCount > 0) {
+			file.read(reinterpret_cast<char*>(pageBlobSizes.data()),
+				static_cast<std::streamsize>(sizeTableBytes));
+			if (!file.good()) return false;
+		}
+
+		uint64_t totalBlobBytes = sizeof(GroupPayloadHeader) + sizeTableBytes;
+		for (uint32_t s : pageBlobSizes) totalBlobBytes += s;
+		if (totalBlobBytes != static_cast<uint64_t>(locator.blobSizeBytes)) {
+			return false;
+		}
+
+		outPayload.pageBlobs.resize(pageCount);
+		for (uint32_t pi = 0; pi < pageCount; ++pi) {
+			if (pi < static_cast<uint32_t>(segmentNeedsFetch.size()) && !segmentNeedsFetch[pi]) {
+				// Skip this blob — seek forward.
+				if (pageBlobSizes[pi] > 0) {
+					file.seekg(static_cast<std::streamoff>(pageBlobSizes[pi]), std::ios::cur);
+					if (!file.good()) return false;
+				}
+				// Leave outPayload.pageBlobs[pi] empty.
+			} else {
+				if (!ReadVectorRaw(file, pageBlobSizes[pi], outPayload.pageBlobs[pi])) return false;
+			}
+		}
+
+		return true;
+	}
+
 	bool OpenContainerFile(const ClusterLODCacheSource& cacheSource,
 		std::ifstream& outFile,
 		uint32_t& outGroupCount)

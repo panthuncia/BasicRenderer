@@ -31,8 +31,7 @@ public:
 	struct Config {
 		uint64_t pageSize     = 256 * 1024; // Bytes per page (default 256 KB).
 		uint64_t slabSize     = 256 * 1024 * 1024; // Bytes per slab (default 256 MB).
-		uint32_t maxSlabs     = 16; // Hard cap on slab count.
-		bool     preAllocate  = false; // Allocate all slabs up-front in the constructor.
+		uint32_t numStreamingSlabs = 16; // General-purpose streaming slabs created up-front.
 		std::string debugName = "CLodPagePool";
 	};
 
@@ -53,22 +52,10 @@ public:
 	PagePool(const PagePool&) = delete;
 	PagePool& operator=(const PagePool&) = delete;
 
-	// Allocate 'count' contiguous pages. Returns an invalid PageAllocation if
-	// no slab has room and we've hit maxSlabs.
-	PageAllocation AllocatePages(uint32_t count);
-
-	// Free a previously-returned allocation. O(1).
-	void FreePages(const PageAllocation& alloc);
-
 	// Upload `dataSize` bytes of CPU data into the slab at the given page +
 	// intra-page byte offset. The data must fit within the allocation.
 	void UploadToPage(uint32_t globalPageID, uint32_t intraPageByteOffset,
 					  const void* data, size_t dataSize);
-
-	// Upload a group's packed payload as a contiguous blob starting at the
-	// first page of the allocation.
-	void UploadToAllocation(const PageAllocation& alloc, const void* data,
-							size_t dataSize);
 
 	// Accessors
 
@@ -87,11 +74,8 @@ public:
 	// Total pages across all slabs.
 	uint32_t GetTotalPageCount() const;
 
-	// Number of pages currently free.
-	uint32_t GetFreePageCount() const;
-
-	// Number of currently allocated (in-use) pages.
-	uint32_t GetAllocatedPageCount() const { return GetTotalPageCount() - GetFreePageCount(); }
+	// Total pages across general-purpose slabs.
+	uint32_t GetGeneralPageCount() const;
 
 	// Page size in bytes.
 	uint64_t GetPageSize() const { return m_config.pageSize; }
@@ -99,8 +83,8 @@ public:
 	// Slab size in bytes.
 	uint64_t GetSlabSize() const { return m_config.slabSize; }
 
-	// Maximum number of slabs.
-	uint32_t GetMaxSlabs() const { return m_config.maxSlabs; }
+	// Number of streaming slabs created up-front.
+	uint32_t GetNumStreamingSlabs() const { return m_config.numStreamingSlabs; }
 
 	// Pages per slab.
 	uint32_t GetPagesPerSlab() const { return m_pagesPerSlab; }
@@ -123,18 +107,31 @@ public:
 	// Should be called once per frame after any alloc/free operations.
 	void FlushPageTableUpdates();
 
+	// Allocate pages from dedicated pinned slabs. The returned pages do not
+	// participate in the CLod eviction LRU.
+	std::vector<uint32_t> AllocatePinnedPages(uint32_t count);
+
+	// Return pinned pages to the dedicated pinned-slab free list.
+	void FreePinnedPages(const std::vector<uint32_t>& pageIDs);
+
 private:
+	enum class SlabRole : uint8_t {
+		General,
+		Pinned,
+	};
+
 	struct Slab {
 		std::shared_ptr<DynamicBuffer> buffer; // The GPU ByteAddressBuffer.
-		std::vector<uint32_t>          freeBitmap; // 1-bit-per-page: 1 = free.
-		uint32_t                       freeCount = 0;
+		SlabRole role = SlabRole::General;
 	};
 
 	Config     m_config;
 	uint32_t   m_pagesPerSlab = 0;
 	uint32_t   m_totalPageCapacity = 0;
+	uint32_t   m_generalSlabCount = 0;
 
 	std::vector<Slab> m_slabs;
+	std::vector<uint32_t> m_freePinnedPageIDs;
 
 	// CPU-side mirror of the page table: indexed by global page ID.
 	std::vector<PageTableEntry> m_pageTableCpu;
@@ -146,12 +143,8 @@ private:
 	// ResourceGroup tracking all slab buffers for render graph auto-invalidation.
 	std::shared_ptr<ResourceGroup> m_slabResourceGroup;
 
-	// Try to allocate 'count' contiguous pages from slab at 'slabIndex'.
-	// Returns the local page index (within the slab) if successful, or ~0u on failure.
-	uint32_t TryAllocateFromSlab(uint32_t slabIndex, uint32_t count);
-
-	// Allocate a new slab. Returns false if maxSlabs is reached.
-	bool AllocateNewSlab();
+	// Allocate a new slab. Streaming slabs are capped by numStreamingSlabs.
+	bool AllocateNewSlab(SlabRole role);
 
 	// Update the page table CPU mirror entries for pages [firstGlobal, firstGlobal+count).
 	void UpdatePageTableEntries(uint32_t firstGlobalPageID, uint32_t count);

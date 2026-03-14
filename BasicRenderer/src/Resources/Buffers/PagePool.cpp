@@ -1,50 +1,10 @@
 #include "Resources/Buffers/PagePool.h"
 
-#include <algorithm>
 #include <cassert>
-#include <cstring>
 #include <spdlog/spdlog.h>
 
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "Render/Runtime/UploadServiceAccess.h"
-
-// helpers
-
-static uint32_t BitmapWordCount(uint32_t bits) {
-	return (bits + 31u) / 32u;
-}
-
-static bool TestBit(const std::vector<uint32_t>& bitmap, uint32_t index) {
-	return (bitmap[index >> 5u] & (1u << (index & 31u))) != 0u;
-}
-
-static void SetBit(std::vector<uint32_t>& bitmap, uint32_t index) {
-	bitmap[index >> 5u] |= (1u << (index & 31u));
-}
-
-static void ClearBit(std::vector<uint32_t>& bitmap, uint32_t index) {
-	bitmap[index >> 5u] &= ~(1u << (index & 31u));
-}
-
-// Scan for 'count' contiguous set bits in 'bitmap' (total 'totalBits' bits).
-// Returns the starting bit index, or ~0u if not found.
-static uint32_t FindContiguousSetBits(const std::vector<uint32_t>& bitmap,
-									  uint32_t totalBits, uint32_t count) {
-	if (count == 0u) return ~0u;
-	uint32_t run = 0u;
-	uint32_t runStart = 0u;
-	for (uint32_t i = 0; i < totalBits; ++i) {
-		if (TestBit(bitmap, i)) {
-			if (run == 0u) runStart = i;
-			++run;
-			if (run >= count) return runStart;
-		}
-		else {
-			run = 0u;
-		}
-	}
-	return ~0u;
-}
 
 // PagePool implementation
 PagePool::PagePool(const Config& config)
@@ -53,7 +13,7 @@ PagePool::PagePool(const Config& config)
 	assert(m_config.pageSize > 0 && (m_config.pageSize & (m_config.pageSize - 1)) == 0
 		   && "pageSize must be a power of two");
 	assert(m_config.slabSize >= m_config.pageSize);
-	assert(m_config.maxSlabs > 0);
+	assert(m_config.numStreamingSlabs > 0);
 
 	m_pagesPerSlab = static_cast<uint32_t>(m_config.slabSize / m_config.pageSize);
 
@@ -67,48 +27,42 @@ PagePool::PagePool(const Config& config)
 	// Resource group for slab buffers (render graph auto-invalidation).
 	m_slabResourceGroup = std::make_shared<ResourceGroup>(m_config.debugName + "::Slabs");
 
-	// Pre-allocate all slabs if requested.
-	if (m_config.preAllocate) {
-		for (uint32_t i = 0; i < m_config.maxSlabs; ++i) {
-			if (!AllocateNewSlab()) {
-				spdlog::error("PagePool: pre-allocation failed at slab {}", i);
-				break;
-			}
+	for (uint32_t i = 0; i < m_config.numStreamingSlabs; ++i) {
+		if (!AllocateNewSlab(SlabRole::General)) {
+			spdlog::error("PagePool: failed to allocate streaming slab {}", i);
+			break;
 		}
-		spdlog::info("PagePool: pre-allocated {} slabs ({} total pages)",
-					 static_cast<uint32_t>(m_slabs.size()), m_totalPageCapacity);
 	}
+
+	spdlog::info("PagePool: initialized {} general slabs ({} total pages)",
+		static_cast<uint32_t>(m_generalSlabCount), m_totalPageCapacity);
 }
 
 PagePool::~PagePool() = default;
 
 // Slab management
-bool PagePool::AllocateNewSlab() {
-	if (static_cast<uint32_t>(m_slabs.size()) >= m_config.maxSlabs) {
-		spdlog::error("PagePool: cannot allocate new slab- maxSlabs ({}) reached", m_config.maxSlabs);
+bool PagePool::AllocateNewSlab(SlabRole role) {
+	if (role == SlabRole::General && m_generalSlabCount >= m_config.numStreamingSlabs) {
+		spdlog::error("PagePool: cannot allocate new streaming slab - numStreamingSlabs ({}) reached", m_config.numStreamingSlabs);
 		return false;
 	}
 
 	const uint32_t slabIndex = static_cast<uint32_t>(m_slabs.size());
 	Slab slab;
+	slab.role = role;
 	slab.buffer = DynamicBuffer::CreateShared(
 		/*elementSize=*/1,
 		/*capacity=*/m_config.slabSize,
-		m_config.debugName + "::Slab" + std::to_string(slabIndex),
+		m_config.debugName + "::" + (role == SlabRole::Pinned ? "PinnedSlab" : "Slab") + std::to_string(slabIndex),
 		/*byteAddress=*/true,
 		/*UAV=*/false);
 	slab.buffer->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
 
-	slab.freeBitmap.assign(BitmapWordCount(m_pagesPerSlab), ~0u);
-	// Mask out trailing bits in the last word if pagesPerSlab isn't a multiple of 32.
-	const uint32_t trailingBits = m_pagesPerSlab & 31u;
-	if (trailingBits != 0u) {
-		slab.freeBitmap.back() = (1u << trailingBits) - 1u;
-	}
-	slab.freeCount = m_pagesPerSlab;
-
 	m_slabs.push_back(std::move(slab));
 	m_totalPageCapacity += m_pagesPerSlab;
+	if (role == SlabRole::General) {
+		m_generalSlabCount++;
+	}
 
 	// Register new slab in the resource group for render graph tracking.
 	m_slabResourceGroup->AddResource(m_slabs.back().buffer);
@@ -127,83 +81,12 @@ bool PagePool::AllocateNewSlab() {
 
 	m_pageTableDirty = true;
 
-	spdlog::info("PagePool: allocated slab {} ({:.1f} MB, {} pages)",
+	spdlog::info("PagePool: allocated {} slab {} ({:.1f} MB, {} pages)",
+				 role == SlabRole::Pinned ? "pinned" : "general",
 				 slabIndex,
 				 static_cast<double>(m_config.slabSize) / (1024.0 * 1024.0),
 				 m_pagesPerSlab);
 	return true;
-}
-
-// Allocation
-
-uint32_t PagePool::TryAllocateFromSlab(uint32_t slabIndex, uint32_t count) {
-	auto& slab = m_slabs[slabIndex];
-	if (slab.freeCount < count) return ~0u;
-
-	uint32_t localPage = FindContiguousSetBits(slab.freeBitmap, m_pagesPerSlab, count);
-	if (localPage == ~0u) return ~0u;
-
-	// Mark pages as allocated (clear free bits).
-	for (uint32_t i = 0; i < count; ++i) {
-		ClearBit(slab.freeBitmap, localPage + i);
-	}
-	slab.freeCount -= count;
-	return localPage;
-}
-
-PagePool::PageAllocation PagePool::AllocatePages(uint32_t count) {
-	if (count == 0u) return {};
-
-	// Try existing slabs first.
-	for (uint32_t si = 0; si < static_cast<uint32_t>(m_slabs.size()); ++si) {
-		uint32_t localPage = TryAllocateFromSlab(si, count);
-		if (localPage != ~0u) {
-			PageAllocation alloc;
-			alloc.firstPageID = si * m_pagesPerSlab + localPage;
-			alloc.pageCount = count;
-			return alloc;
-		}
-	}
-
-	if (count > m_pagesPerSlab) {
-		spdlog::error("PagePool: allocation of {} pages exceeds pagesPerSlab ({})", count, m_pagesPerSlab);
-		return {};
-	}
-
-	// If pre-allocated, all slabs are already created
-	if (m_config.preAllocate) {
-		return {};
-	}
-
-	// Need a new slab.
-	if (!AllocateNewSlab()) {
-		return {};
-	}
-
-	uint32_t si = static_cast<uint32_t>(m_slabs.size()) - 1u;
-	uint32_t localPage = TryAllocateFromSlab(si, count);
-	assert(localPage != ~0u);
-
-	PageAllocation alloc;
-	alloc.firstPageID = si * m_pagesPerSlab + localPage;
-	alloc.pageCount = count;
-	return alloc;
-}
-
-void PagePool::FreePages(const PageAllocation& alloc) {
-	if (!alloc.IsValid()) return;
-
-	const uint32_t si = PageToSlabIndex(alloc.firstPageID);
-	const uint32_t localBase = alloc.firstPageID - si * m_pagesPerSlab;
-
-	assert(si < m_slabs.size());
-	auto& slab = m_slabs[si];
-
-	for (uint32_t i = 0; i < alloc.pageCount; ++i) {
-		assert(!TestBit(slab.freeBitmap, localBase + i) && "double-free detected");
-		SetBit(slab.freeBitmap, localBase + i);
-	}
-	slab.freeCount += alloc.pageCount;
 }
 
 // Upload
@@ -214,22 +97,6 @@ void PagePool::UploadToPage(uint32_t globalPageID, uint32_t intraPageByteOffset,
 
 	const uint64_t slabOffset = PageToSlabByteOffset(globalPageID) + intraPageByteOffset;
 	assert(intraPageByteOffset + dataSize <= m_config.pageSize);
-
-	auto& slab = m_slabs[si];
-	BUFFER_UPLOAD(data, dataSize,
-				  rg::runtime::UploadTarget::FromShared(slab.buffer),
-				  slabOffset);
-}
-
-void PagePool::UploadToAllocation(const PageAllocation& alloc, const void* data,
-								  size_t dataSize) {
-	if (!alloc.IsValid() || dataSize == 0) return;
-
-	const uint32_t si = PageToSlabIndex(alloc.firstPageID);
-	assert(si < m_slabs.size());
-
-	const uint64_t slabOffset = PageToSlabByteOffset(alloc.firstPageID);
-	assert(dataSize <= static_cast<size_t>(alloc.pageCount) * m_config.pageSize);
 
 	auto& slab = m_slabs[si];
 	BUFFER_UPLOAD(data, dataSize,
@@ -299,10 +166,49 @@ uint32_t PagePool::GetTotalPageCount() const {
 	return m_totalPageCapacity;
 }
 
-uint32_t PagePool::GetFreePageCount() const {
-	uint32_t total = 0;
-	for (const auto& slab : m_slabs) {
-		total += slab.freeCount;
+uint32_t PagePool::GetGeneralPageCount() const {
+	return m_generalSlabCount * m_pagesPerSlab;
+}
+
+std::vector<uint32_t> PagePool::AllocatePinnedPages(uint32_t count) {
+	std::vector<uint32_t> pageIDs;
+	pageIDs.reserve(count);
+	if (count == 0u) {
+		return pageIDs;
 	}
-	return total;
+
+	while (m_freePinnedPageIDs.size() < count) {
+		if (!AllocateNewSlab(SlabRole::Pinned)) {
+			spdlog::error("PagePool: unable to grow pinned slab pool for {} requested pages", count);
+			return {};
+		}
+
+		const uint32_t slabIndex = static_cast<uint32_t>(m_slabs.size() - 1u);
+		const uint32_t firstGlobalPageID = slabIndex * m_pagesPerSlab;
+		for (uint32_t pageOffset = 0; pageOffset < m_pagesPerSlab; ++pageOffset) {
+			m_freePinnedPageIDs.push_back(firstGlobalPageID + pageOffset);
+		}
+	}
+
+	for (uint32_t i = 0; i < count; ++i) {
+		pageIDs.push_back(m_freePinnedPageIDs.back());
+		m_freePinnedPageIDs.pop_back();
+	}
+
+	return pageIDs;
+}
+
+void PagePool::FreePinnedPages(const std::vector<uint32_t>& pageIDs) {
+	for (uint32_t pageID : pageIDs) {
+		const uint32_t slabIndex = PageToSlabIndex(pageID);
+		if (slabIndex >= m_slabs.size()) {
+			continue;
+		}
+
+		if (m_slabs[slabIndex].role != SlabRole::Pinned) {
+			continue;
+		}
+
+		m_freePinnedPageIDs.push_back(pageID);
+	}
 }

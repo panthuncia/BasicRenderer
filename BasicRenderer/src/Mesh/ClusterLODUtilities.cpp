@@ -1546,7 +1546,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	config.simplify_fallback_sloppy = true; // TODO: Useful?
 	config.simplify_error_factor_sloppy = 100.0f; // Scales error for sloppy groups
 
-	config.simplify_fallback_permissive = true;
+	config.simplify_fallback_permissive = false; // Simplify in permissive, disable fallback-only
 
 	config.simplify_error_merge_additive = lodErrorMergeAdditive;
 	config.simplify_error_merge_previous = lodErrorMergePrevious;

@@ -198,14 +198,24 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
         dispatchDesc.nodeCpuInput.recordByteStride = sizeof(ObjectCullRecord);
         commandList.DispatchWorkGraph(dispatchDesc);
 
-        rhi::BufferBarrier barrier{};
-        barrier.buffer = m_visibleClustersCounterBuffer->GetAPIResource().GetHandle();
-        barrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-        barrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
-        barrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
-        barrier.afterSync = rhi::ResourceSyncState::ComputeShading;
+        rhi::BufferBarrier postWorkGraphBarriers[3] = {};
+        postWorkGraphBarriers[0].buffer = m_visibleClustersCounterBuffer->GetAPIResource().GetHandle();
+        postWorkGraphBarriers[0].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+        postWorkGraphBarriers[0].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+        postWorkGraphBarriers[0].beforeSync = rhi::ResourceSyncState::ComputeShading;
+        postWorkGraphBarriers[0].afterSync = rhi::ResourceSyncState::ComputeShading;
+        postWorkGraphBarriers[1].buffer = m_occlusionReplayStateBuffer->GetAPIResource().GetHandle();
+        postWorkGraphBarriers[1].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+        postWorkGraphBarriers[1].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+        postWorkGraphBarriers[1].beforeSync = rhi::ResourceSyncState::ComputeShading;
+        postWorkGraphBarriers[1].afterSync = rhi::ResourceSyncState::ComputeShading;
+        postWorkGraphBarriers[2].buffer = m_occlusionReplayBuffer->GetAPIResource().GetHandle();
+        postWorkGraphBarriers[2].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+        postWorkGraphBarriers[2].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+        postWorkGraphBarriers[2].beforeSync = rhi::ResourceSyncState::ComputeShading;
+        postWorkGraphBarriers[2].afterSync = rhi::ResourceSyncState::ComputeShading;
         rhi::BarrierBatch bufferBarriers{};
-        bufferBarriers.buffers = rhi::Span<rhi::BufferBarrier>(&barrier, 1);
+        bufferBarriers.buffers = rhi::Span<rhi::BufferBarrier>(postWorkGraphBarriers, 3);
         commandList.Barriers(bufferBarriers);
     }
     else {
