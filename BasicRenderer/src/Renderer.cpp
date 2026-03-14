@@ -807,24 +807,32 @@ void Renderer::WaitForFrame(uint8_t currentFrameIndex) {
 }
 
 void Renderer::Update(float elapsedSeconds) {
-    WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
-    rg::runtime::BeginUploadPolicyFrame();
+    ZoneScopedN("Renderer::Update");
 
-    //ZoneScopedN("Renderer::Update");
+    {
+        ZoneScopedN("Renderer::Update::WaitForFrame");
+        WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
+    }
+    rg::runtime::BeginUploadPolicyFrame();
 
 	auto& deviceManager = DeviceManager::GetInstance();
 	auto graphicsQueue = deviceManager.GetGraphicsQueue();
 	auto computeQueue = deviceManager.GetComputeQueue();
     if (currentRenderGraph) {
+        ZoneScopedN("Renderer::Update::FrameStatistics");
         if (auto* statisticsService = currentRenderGraph->GetStatisticsService()) {
             statisticsService->OnFrameComplete(m_frameIndex, computeQueue); // Gather statistics for the last iteration of the frame
             statisticsService->OnFrameComplete(m_frameIndex, graphicsQueue); // Gather statistics for the last iteration of the frame
         }
     }
 
-	m_preFrameDeferredFunctions.flush(); // Execute anything we deferred until now
+    {
+	    ZoneScopedN("Renderer::Update::DeferredWork");
+	    m_preFrameDeferredFunctions.flush(); // Execute anything we deferred until now
+    }
 
     if (currentRenderGraph) {
+        ZoneScopedN("Renderer::Update::DeferredReleases");
         if (auto* uploadService = currentRenderGraph->GetUploadService()) {
             uploadService->ProcessDeferredReleases(m_frameIndex);
         }
@@ -839,21 +847,33 @@ void Renderer::Update(float elapsedSeconds) {
 
 	Components::Position& cameraPosition = currentScene->GetPrimaryCamera().get_mut<Components::Position>();
 	Components::Rotation& cameraRotation = currentScene->GetPrimaryCamera().get_mut<Components::Rotation>();
-	ApplyMovement(cameraPosition, cameraRotation, movementState, elapsedSeconds);
-	RotatePitchYaw(cameraRotation, verticalAngle, horizontalAngle);
+    {
+        ZoneScopedN("Renderer::Update::CameraMotion");
+        ApplyMovement(cameraPosition, cameraRotation, movementState, elapsedSeconds);
+        RotatePitchYaw(cameraRotation, verticalAngle, horizontalAngle);
+    }
 
     //spdlog::info("horizontal angle: {}", horizontalAngle);
     //spdlog::info("vertical angle: {}", verticalAngle);
     verticalAngle = 0;
     horizontalAngle = 0;
 
-    currentScene->Update(elapsedSeconds);
+    {
+        ZoneScopedN("Renderer::Update::SceneUpdate");
+        currentScene->Update(elapsedSeconds);
+    }
 
-    m_pSkeletonManager->TickAnimations(elapsedSeconds);
-    m_pSkeletonManager->UpdateAllDirtyInstances();
+    {
+        ZoneScopedN("Renderer::Update::Skeletons");
+        m_pSkeletonManager->TickAnimations(elapsedSeconds);
+        m_pSkeletonManager->UpdateAllDirtyInstances();
+    }
 
     auto& world = ECSManager::GetInstance().GetWorld();
-	world.progress();
+    {
+	    ZoneScopedN("Renderer::Update::WorldProgress");
+	    world.progress();
+    }
 
     auto& camera = currentScene->GetPrimaryCamera();
     unsigned int cameraIndex = m_pViewManager->Get(camera.get<Components::RenderViewRef>().viewID)->gpu.cameraBufferIndex;
@@ -864,7 +884,10 @@ void Renderer::Update(float elapsedSeconds) {
     commandAllocator->Recycle();
     auto& resourceManager = ResourceManager::GetInstance();
     auto res = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
-    resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), { res.x, res.y }, m_lightClusterSize, static_cast<uint32_t>(m_totalFramesRendered));
+    {
+        ZoneScopedN("Renderer::Update::PerFrameBuffer");
+        resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), { res.x, res.y }, m_lightClusterSize, static_cast<uint32_t>(m_totalFramesRendered));
+    }
 
     const Components::DrawStats& drawStats = world.get<Components::DrawStats>();
     auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
@@ -899,7 +922,10 @@ void Renderer::Update(float elapsedSeconds) {
     RendererUpdateHostData updateHostData;
     updateHostData.data = &updateData;
 
-    rg::runtime::FlushUploadPolicies();
+    {
+        ZoneScopedN("Renderer::Update::FlushUploadPolicies");
+        rg::runtime::FlushUploadPolicies();
+    }
 
     UpdateExecutionContext context{};
     context.frameIndex = m_frameIndex;
@@ -907,7 +933,10 @@ void Renderer::Update(float elapsedSeconds) {
     context.deltaTime = elapsedSeconds;
     context.hostData = &updateHostData;
 
-	currentRenderGraph->Update(context, deviceManager.GetDevice());
+    {
+        ZoneScopedN("Renderer::Update::RenderGraphUpdate");
+        currentRenderGraph->Update(context, deviceManager.GetDevice());
+    }
 
     //resourceManager.ExecuteResourceTransitions();
     commandList->Recycle(commandAllocator.Get());
@@ -921,8 +950,7 @@ void Renderer::PostUpdate() {
 }
 
 void Renderer::Render() {
-
-	//ZoneScopedN("Renderer::Render");
+    ZoneScopedN("Renderer::Render");
 
     auto deltaTime = m_frameTimer.tick();
     if (!IsSceneReadyForFrame()) {
@@ -1022,13 +1050,19 @@ void Renderer::Render() {
     rhi::BarrierBatch batch = {};
 	batch.textures = { &rtvBarrier };
 
-    commandList->Barriers(batch);
+    {
+        ZoneScopedN("Renderer::Render::PrepareBackbuffer");
+        commandList->Barriers(batch);
+    }
    
     commandList->End();
 
     // Execute the command list
     auto graphicsQueue = deviceManager.GetGraphicsQueue();
-    graphicsQueue.Submit({ &commandList.Get() });
+    {
+        ZoneScopedN("Renderer::Render::SubmitSetup");
+        graphicsQueue.Submit({ &commandList.Get() });
+    }
 
     // Sync SettingsManager values into OpenRenderGraphSettings so the
     // DefaultRenderGraphSettingsService reads up-to-date values.
@@ -1048,11 +1082,17 @@ void Renderer::Render() {
         rg::runtime::SetOpenRenderGraphSettings(orgSettings);
     }
 
-    currentRenderGraph->Execute(passExecutionContext); // Main render graph execution
+    {
+        ZoneScopedN("Renderer::Render::RenderGraphExecute");
+        currentRenderGraph->Execute(passExecutionContext); // Main render graph execution
+    }
 	
 	commandList->Recycle(commandAllocator.Get());
 
-    Menu::GetInstance().Render(m_context, commandList.Get()); // Render menu
+    {
+        ZoneScopedN("Renderer::Render::Menu");
+        Menu::GetInstance().Render(m_context, commandList.Get()); // Render menu
+    }
 
 
     // Indicate that the back buffer will now be used to present
@@ -1064,21 +1104,34 @@ void Renderer::Render() {
 	rtvBarrier.beforeSync = rhi::ResourceSyncState::All;
 	rtvBarrier.texture = renderTargets[m_frameIndex];
 	batch.textures = { &rtvBarrier };
-	commandList->Barriers(batch);
+    {
+        ZoneScopedN("Renderer::Render::TransitionForPresent");
+        commandList->Barriers(batch);
+    }
 
     commandList->End();
 
     // Execute the command list
-    graphicsQueue.Submit({ &commandList.Get() });
+    {
+        ZoneScopedN("Renderer::Render::SubmitPresent");
+        graphicsQueue.Submit({ &commandList.Get() });
+    }
 
     // Present the frame
-    m_swapChain->Present(!m_allowTearing);
+    {
+        ZoneScopedN("Renderer::Render::Present");
+        m_swapChain->Present(!m_allowTearing);
+    }
 
     AdvanceFrameIndex();
 
-    SignalFence(graphicsQueue, m_frameIndex);
+    {
+        ZoneScopedN("Renderer::Render::SignalFence");
+        SignalFence(graphicsQueue, m_frameIndex);
+    }
 
     if (currentRenderGraph) {
+        ZoneScopedN("Renderer::Render::ReadbackRequests");
         if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
             readbackService->ProcessReadbackRequests(); // Process readback captures
         }
@@ -1088,6 +1141,7 @@ void Renderer::Render() {
     }
 
     DeletionManager::GetInstance().ProcessDeletions();
+    FrameMark;
 }
 
 void Renderer::SignalFence(rhi::Queue commandQueue, uint8_t frameIndexToSignal) {

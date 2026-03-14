@@ -102,12 +102,18 @@ MeshManager::MeshManager() {
 MeshManager::~MeshManager() {
 }
 
-void MeshManager::DispatchCLodDiskStreamingBatch() {
+void MeshManager::DispatchCLodDiskStreamingBatch(uint32_t maxDispatchRequests) {
+	if (maxDispatchRequests == 0u) {
+		return;
+	}
+
 	// Drain up to kMaxIoBatchSize requests from the pending queue.
 	std::vector<CLodDiskStreamingRequest> batch;
 	{
 		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
-		const uint32_t toDrain = std::min<uint32_t>(kMaxIoBatchSize, static_cast<uint32_t>(m_clodDiskStreamingRequests.size()));
+		const uint32_t toDrain = std::min<uint32_t>(
+			kMaxIoBatchSize,
+			std::min<uint32_t>(maxDispatchRequests, static_cast<uint32_t>(m_clodDiskStreamingRequests.size())));
 		if (toDrain == 0u) {
 			return;
 		}
@@ -127,7 +133,7 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 	// The lambda captures batch/results by reference and is dispatched over
 	// the task scheduler's thread pool (including IO-pinned threads).
 	auto& scheduler = TaskSchedulerManager::GetInstance();
-	scheduler.ParallelFor(batch.size(), [&batch, &results](size_t i) {
+	scheduler.ParallelFor("MeshManager::DispatchCLodDiskStreamingBatch", batch.size(), [&batch, &results](size_t i) {
 		const auto& request = batch[i];
 		auto& result = results[i];
 		result.groupGlobalIndex = request.groupGlobalIndex;
@@ -587,16 +593,28 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 
 void MeshManager::ProcessCLodDiskStreamingIO(
 	uint32_t maxCompletedRequests) {
+	const uint32_t completionBudget = std::max(maxCompletedRequests, 1u);
+	uint32_t pendingResults = 0u;
+	{
+		std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
+		pendingResults = static_cast<uint32_t>(m_clodDiskStreamingResults.size());
+	}
+
+	const uint32_t dispatchBudget = pendingResults >= completionBudget
+		? 0u
+		: (completionBudget - pendingResults);
+
 	// First, dispatch a batch of pending IO requests in parallel across the
-	// task scheduler's thread pool. This replaces the old single-threaded worker.
-	DispatchCLodDiskStreamingBatch();
+	// task scheduler's thread pool. Keep dispatch bounded by the completion
+	// budget so faster CPU-side scheduling cannot flood the upload path.
+	DispatchCLodDiskStreamingBatch(dispatchBudget);
 
 	// Drain completed results into a local vector under the results lock so the
 	// IO thread (once moved to background) can continue pushing results.
 	std::vector<CLodDiskStreamingResult> localResults;
 	{
 		std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
-		const uint32_t toDrain = std::min<uint32_t>(maxCompletedRequests,
+		const uint32_t toDrain = std::min<uint32_t>(completionBudget,
 			static_cast<uint32_t>(m_clodDiskStreamingResults.size()));
 		if (toDrain > 0u) {
 			localResults.reserve(toDrain);

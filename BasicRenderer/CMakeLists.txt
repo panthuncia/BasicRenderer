@@ -73,8 +73,10 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(unofficial-tree-sitter CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
-find_package(enkiTS CONFIG REQUIRED)
 find_package(pxr CONFIG REQUIRED)
+if(NOT TARGET TBB::tbb)
+    find_package(TBB CONFIG REQUIRED)
+endif()
 find_package(implot CONFIG REQUIRED)
 find_package(Boost REQUIRED COMPONENTS container_hash)
 find_package(Tracy REQUIRED CONFIG)
@@ -581,7 +583,7 @@ endif()
 
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC Microsoft.GSL::GSL)
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
-target_include_directories(${PROJECT_NAME} BEFORE PUBLIC "${BASICRENDERER_USD_ROOT}/usd/include/")
+target_include_directories(${PROJECT_NAME} BEFORE PUBLIC "${BASICRENDERER_USD_ROOT}/usd_$<IF:$<CONFIG:Debug>,dbg,rel>/include/")
 # Heck off Microsoft
 add_compile_definitions(NOMINMAX)
 
@@ -632,7 +634,6 @@ PRIVATE
     imgui::imgui 
     meshoptimizer
     assimp::assimp 
-    enkiTS::enkiTS
     flecs::flecs 
     flecs::flecs_static 
     unofficial::tree-sitter::tree-sitter
@@ -651,6 +652,7 @@ PRIVATE
     OpenRenderGraph::OpenRenderGraph
     BasicRHI::BasicRHI
     Boost::container_hash
+    TBB::tbb
     Tracy::TracyClient
     slang::slang
     "${BASICRENDERER_SOURCE_ROOT}/WinPixEventRuntime.lib" 

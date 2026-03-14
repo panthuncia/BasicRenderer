@@ -66,12 +66,15 @@ target_include_directories(CLodCacheTool PRIVATE "${BR_ROOT}")
 find_package(spdlog       REQUIRED CONFIG)
 find_package(assimp       REQUIRED CONFIG)
 find_package(nlohmann_json REQUIRED CONFIG)
-find_package(enkiTS       REQUIRED CONFIG)
 find_package(Boost        REQUIRED CONFIG COMPONENTS container_hash)
 find_package(DirectX-Headers CONFIG REQUIRED)
+find_package(Tracy REQUIRED CONFIG)
 
 # OpenUSD – prefix path already set by the top-level CMakeLists.txt
 find_package(pxr REQUIRED CONFIG)
+if(NOT TARGET TBB::tbb)
+    find_package(TBB CONFIG REQUIRED)
+endif()
 
 # meshoptimizer is added via ThirdParty/meshoptimizer
 
@@ -80,9 +83,10 @@ target_link_libraries(CLodCacheTool PRIVATE
     spdlog::spdlog_header_only
     assimp::assimp
     nlohmann_json::nlohmann_json
-    enkiTS::enkiTS
     meshoptimizer
     Boost::container_hash
+    TBB::tbb
+    Tracy::TracyClient
 
     # OpenUSD libs needed by CLodCache / CLodCacheLoader / USDGeometryExtractor
     usd
@@ -102,8 +106,8 @@ target_include_directories(CLodCacheTool PRIVATE ${DIRECTX_HEADERS_INCLUDE_DIR})
 # OpenUSD headers
 get_filename_component(REPO_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 set(BASICRENDERER_USD_ROOT_TOOL "${REPO_ROOT}/ThirdParty" CACHE PATH "")
-target_include_directories(CLodCacheTool PRIVATE
-    "${BASICRENDERER_USD_ROOT_TOOL}/usd/include/"
+target_include_directories(CLodCacheTool BEFORE PRIVATE
+    "${BASICRENDERER_USD_ROOT_TOOL}/usd_$<IF:$<CONFIG:Debug>,dbg,rel>/include/"
 )
 
 # MSVC tweaks
