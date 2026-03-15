@@ -72,6 +72,7 @@
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "Render/Runtime/UploadPolicyServiceAccess.h"
 #include "Render/Runtime/DescriptorServiceAccess.h"
+#include "Render/TbbTaskService.h"
 
 void D3D12DebugCallback(
     D3D12_MESSAGE_CATEGORY Category,
@@ -163,6 +164,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     }
     ResourceManager::GetInstance().Initialize();
     TaskSchedulerManager::GetInstance().Initialize(16);
+    currentRenderGraph->SetTaskService(std::make_shared<br::TbbTaskService>());
     PSOManager::GetInstance().initialize();
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();
