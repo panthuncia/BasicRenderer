@@ -12,6 +12,11 @@
 inline constexpr const char* CLodStreamingMeshManagerGetterSettingName = "getMeshManager";
 inline constexpr const char* CLodStreamingCpuUploadBudgetSettingName = "clodStreamingCpuUploadBudgetRequests";
 
+enum class CLodPriorityMode : uint8_t {
+    Max, // Duplicate group requests keep the maximum reported priority
+    Sum, // Duplicate group requests accumulate (sum) their priorities
+};
+
 struct RasterBucketsHistogramIndirectCommand
 {
     unsigned int clusterCount;

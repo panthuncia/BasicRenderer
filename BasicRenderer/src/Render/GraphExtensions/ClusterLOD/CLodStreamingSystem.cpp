@@ -140,14 +140,22 @@ void CLodStreamingSystem::OnRegistryReset(ResourceRegistry* reg) {
         meshManager = m_getMeshManager();
     }
 
-    std::vector<uint32_t> ownedPinnedGroups;
-    ownedPinnedGroups.reserve(m_groupOwnedPages.size());
-    for (const auto& [groupIndex, _] : m_groupOwnedPages) {
-        if (UsesPinnedStorage(groupIndex)) {
-            ownedPinnedGroups.push_back(groupIndex);
-        }
+    if (meshManager != nullptr) {
+        meshManager->InvalidateCLodDiskStreamingPipeline();
     }
-    for (uint32_t groupIndex : ownedPinnedGroups) {
+
+    // Evict ALL resident groups so MeshManager clears groupResidentFlags,
+    // zeroes GroupChunks counts, and wipes GroupPageMap entries. Without this,
+    // the GPU reads stale chunk data with freed-page references after rebuild.
+    std::vector<uint32_t> ownedGroups;
+    ownedGroups.reserve(m_groupOwnedPages.size());
+    for (const auto& [groupIndex, _] : m_groupOwnedPages) {
+        ownedGroups.push_back(groupIndex);
+    }
+    for (uint32_t groupIndex : ownedGroups) {
+        if (meshManager != nullptr && IsGroupResident(groupIndex)) {
+            meshManager->FreeCLodGroupEviction(groupIndex);
+        }
         ReleaseOwnedPagesForGroup(groupIndex, meshManager);
     }
 
@@ -168,7 +176,7 @@ void CLodStreamingSystem::OnRegistryReset(ResourceRegistry* reg) {
     m_readbackGeneration = 0;
     m_pageLruInitialized = false;
     m_streamingResidentGroupsCount = 0u;
-    std::fill(m_streamingNonResidentBitsCpu.begin(), m_streamingNonResidentBitsCpu.end(), 0u);
+    std::fill(m_streamingNonResidentBitsCpu.begin(), m_streamingNonResidentBitsCpu.end(), ~0u);
     std::fill(m_streamingActiveGroupsBitsCpu.begin(), m_streamingActiveGroupsBitsCpu.end(), 0u);
     std::fill(m_streamingPinnedGroupsBitsCpu.begin(), m_streamingPinnedGroupsBitsCpu.end(), 0u);
     std::fill(m_streamingResidencyInitializedBitsCpu.begin(), m_streamingResidencyInitializedBitsCpu.end(), 0u);
@@ -184,6 +192,12 @@ void CLodStreamingSystem::OnRegistryReset(ResourceRegistry* reg) {
         m_decodedReadbackBatch.clear();
         m_decodedUsedGroupsBatch.clear();
     }
+
+    // Clear in-flight flags so the worker thread doesn't process stale readback data.
+    for (auto& slot : m_readbackStagingSlots) {
+        slot.inFlight = false;
+    }
+    m_readbackStagingCursor = 0;
 }
 
 void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) {
@@ -381,8 +395,12 @@ bool CLodStreamingSystem::TryQueuePendingLoadRequest(const CLodStreamingRequest&
         // Only update the priority tracker — do NOT push a duplicate entry.
         // The existing entry in m_pendingStreamingRequests (or in-flight I/O)
         // will pick up the elevated priority via m_pendingLoadPriorityByGroup.
-        if (priority > GetPendingLoadPriority(groupIndex)) {
-            SetPendingLoadPriority(groupIndex, priority);
+        if (m_priorityMode == CLodPriorityMode::Sum) {
+            SetPendingLoadPriority(groupIndex, GetPendingLoadPriority(groupIndex) + priority);
+        } else {
+            if (priority > GetPendingLoadPriority(groupIndex)) {
+                SetPendingLoadPriority(groupIndex, priority);
+            }
         }
         return false;
     }
@@ -1249,7 +1267,11 @@ void CLodStreamingSystem::StreamingWorkerMain() {
                         if (it == batchMaxPriorityByGroup.end()) {
                             batchMaxPriorityByGroup.emplace(groupIndex, priority);
                         } else {
-                            it->second = std::max(it->second, priority);
+                            if (m_priorityMode == CLodPriorityMode::Sum) {
+                                it->second += priority;
+                            } else {
+                                it->second = std::max(it->second, priority);
+                            }
                         }
                     }
                 }
@@ -1466,7 +1488,8 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
         }
 
         // Queue disk I/O with the segment fetch mask and pre-allocated pages.
-        const bool queued = meshManager->QueueCLodGroupDiskIO(groupIndex, segmentNeedsFetch, preAllocPageIDs);
+        const uint32_t ioPriority = GetPendingLoadPriority(groupIndex);
+        const bool queued = meshManager->QueueCLodGroupDiskIO(groupIndex, segmentNeedsFetch, preAllocPageIDs, ioPriority);
         if (queued) {
             MarkStreamingRequestInProgress(groupIndex);
         }

@@ -92,21 +92,44 @@ MeshManager::MeshManager() {
 MeshManager::~MeshManager() {
 }
 
+void MeshManager::InvalidateCLodDiskStreamingPipeline() {
+	// Bump generation so in-flight IO tasks produce stale results that will be rejected.
+	m_clodDiskStreamingGeneration.fetch_add(1, std::memory_order_release);
+
+	{
+		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
+		m_clodDiskStreamingRequests.clear();
+		m_clodDiskStreamingQueuedGroups.clear();
+	}
+	{
+		std::lock_guard<std::mutex> lock(m_clodDiskStreamingResultsMutex);
+		m_clodDiskStreamingResults.clear();
+		m_clodDiskStreamingCompletions.clear();
+	}
+}
+
 void MeshManager::DispatchCLodDiskStreamingBatch() {
-	// Drain up to kMaxIoBatchSize requests from the pending queue.
+	// Drain up to kMaxIoBatchSize highest-priority requests from the pending queue.
 	std::vector<CLodDiskStreamingRequest> batch;
 	{
 		std::lock_guard<std::mutex> lock(m_clodDiskStreamingMutex);
-		const uint32_t toDrain = std::min<uint32_t>(kMaxIoBatchSize, static_cast<uint32_t>(m_clodDiskStreamingRequests.size()));
-		if (toDrain == 0u) {
+		if (m_clodDiskStreamingRequests.empty()) {
 			return;
 		}
+
+		// Sort so highest-priority requests are at the back.
+		std::sort(m_clodDiskStreamingRequests.begin(), m_clodDiskStreamingRequests.end(),
+			[](const CLodDiskStreamingRequest& a, const CLodDiskStreamingRequest& b) {
+				return a.priority < b.priority;
+			});
+
+		const uint32_t toDrain = std::min<uint32_t>(kMaxIoBatchSize, static_cast<uint32_t>(m_clodDiskStreamingRequests.size()));
+		// Take from the back (highest priority).
 		batch.reserve(toDrain);
 		for (uint32_t i = 0; i < toDrain; ++i) {
-			batch.push_back(std::move(m_clodDiskStreamingRequests[i]));
+			batch.push_back(std::move(m_clodDiskStreamingRequests[m_clodDiskStreamingRequests.size() - 1 - i]));
 		}
-		m_clodDiskStreamingRequests.erase(m_clodDiskStreamingRequests.begin(),
-			m_clodDiskStreamingRequests.begin() + toDrain);
+		m_clodDiskStreamingRequests.resize(m_clodDiskStreamingRequests.size() - toDrain);
 	}
 
 	// Dispatch each request as a fire-and-forget IO task on the dedicated IO
@@ -127,6 +150,7 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 			[this, request = std::move(request)]() mutable {
 			CLodDiskStreamingResult result{};
 			result.groupGlobalIndex = request.groupGlobalIndex;
+			result.generation = request.generation;
 
 			struct TLContainerState {
 				std::wstring containerFileName;
@@ -596,9 +620,17 @@ void MeshManager::ProcessCLodDiskStreamingIO(
 
 	// Apply each result under the residency lock.
 	if (!localResults.empty()) {
+		const uint64_t currentGeneration = m_clodDiskStreamingGeneration.load(std::memory_order_acquire);
 		std::vector<CLodDiskStreamingCompletion> newCompletions;
 		newCompletions.reserve(localResults.size());
 		for (auto& result : localResults) {
+			// Reject stale results from a previous generation (pre-rebuild IO).
+			if (result.generation != currentGeneration) {
+				spdlog::info("CLod streaming: rejecting stale IO result for group {} (gen {} vs current {})",
+					result.groupGlobalIndex, result.generation, currentGeneration);
+				newCompletions.push_back({ result.groupGlobalIndex, false });
+				continue;
+			}
 			DiskStreamingApplyResult applyResult;
 			{
 				std::lock_guard<std::mutex> residencyLock(m_clodResidencyMutex);
@@ -683,7 +715,7 @@ std::shared_ptr<MeshManager::CLodSharedStreamingState> MeshManager::FindCLodShar
 	return it->state;
 }
 
-bool MeshManager::QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool& outQueued, const std::vector<bool>& segmentNeedsFetch, const std::vector<uint32_t>& preAllocatedPages) {
+bool MeshManager::QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool& outQueued, const std::vector<bool>& segmentNeedsFetch, const std::vector<uint32_t>& preAllocatedPages, uint32_t priority) {
 	outQueued = false;
 	if (state.mesh == nullptr) {
 		return false;
@@ -735,6 +767,8 @@ bool MeshManager::QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodS
 		request.cacheSource = mesh->GetCLodCacheSource();
 		request.segmentNeedsFetch = segmentNeedsFetch;
 		request.preAllocatedPages = preAllocatedPages;
+		request.generation = m_clodDiskStreamingGeneration.load(std::memory_order_acquire);
+		request.priority = priority;
 		m_clodDiskStreamingRequests.push_back(std::move(request));
 	}
 
@@ -866,7 +900,7 @@ bool MeshManager::IsCLodGroupDiskIOQueued(uint32_t groupGlobalIndex) const {
 	return m_clodDiskStreamingQueuedGroups.count(groupGlobalIndex) != 0;
 }
 
-bool MeshManager::QueueCLodGroupDiskIO(uint32_t groupGlobalIndex, const std::vector<bool>& segmentNeedsFetch, const std::vector<uint32_t>& preAllocatedPages) {
+bool MeshManager::QueueCLodGroupDiskIO(uint32_t groupGlobalIndex, const std::vector<bool>& segmentNeedsFetch, const std::vector<uint32_t>& preAllocatedPages, uint32_t priority) {
 	uint32_t localIndex = 0u;
 	auto sharedState = FindCLodSharedStreamingStateByGlobalGroup(groupGlobalIndex, localIndex);
 	if (sharedState == nullptr || sharedState->mesh == nullptr) {
@@ -874,7 +908,7 @@ bool MeshManager::QueueCLodGroupDiskIO(uint32_t groupGlobalIndex, const std::vec
 	}
 
 	bool queued = false;
-	QueueCLodDiskStreamingRequest(groupGlobalIndex, *sharedState, localIndex, queued, segmentNeedsFetch, preAllocatedPages);
+	QueueCLodDiskStreamingRequest(groupGlobalIndex, *sharedState, localIndex, queued, segmentNeedsFetch, preAllocatedPages, priority);
 	return queued;
 }
 
