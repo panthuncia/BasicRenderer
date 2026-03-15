@@ -135,15 +135,6 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 	// Dispatch each request as a fire-and-forget IO task on the dedicated IO
 	// thread pool. Each task captures its request by move, performs the disk
 	// read, and pushes the result directly into the shared results vector.
-	// The thread_local file handle cache works well here — the 16 stable IO
-	// threads each keep one cached handle, matching the old per-TBB-worker
-	// caching but with better thread affinity.
-	//
-	// NOTE: Do NOT erase from m_clodDiskStreamingQueuedGroups here.
-	// The group must stay in the dedup set until its result is fully applied
-	// in ProcessCLodDiskStreamingIO, otherwise a re-request arriving between
-	// dispatch and result application would re-queue the same group for disk
-	// I/O, causing duplicate reads and page-pool churn.
 	auto& scheduler = TaskSchedulerManager::GetInstance();
 	for (auto& request : batch) {
 		scheduler.QueueIoTask("CLodDiskStreaming",
