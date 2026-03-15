@@ -1111,6 +1111,15 @@ void Renderer::Update(float elapsedSeconds) {
     runCapturedStage("AnimationUpdate", [&]() {
         RunAnimationUpdateStage(elapsedSeconds);
     });
+    // Flush deferred functions before rebuilding the render graph so that
+    // deferred state changes (e.g. environment creation from SetEnvironmentInternal)
+    // are visible when the graph is constructed.
+    if (!m_preFrameDeferredFunctions.empty()) {
+        runCapturedStage("DeferredWorkEarly", [&]() {
+            ZoneScopedN("Renderer::Update::DeferredWorkEarly");
+            m_preFrameDeferredFunctions.flush();
+        });
+    }
     if (rebuildRenderGraph) {
         runCapturedStage("RenderGraphBuild", [&]() {
             ZoneScopedN("Renderer::Update::RenderGraphBuild");
@@ -1213,11 +1222,6 @@ void Renderer::Update(float elapsedSeconds) {
                 statisticsService->OnFrameComplete(m_frameIndex, computeQueue); // Gather statistics for the last iteration of the frame
                 statisticsService->OnFrameComplete(m_frameIndex, graphicsQueue); // Gather statistics for the last iteration of the frame
             }
-        }
-
-        {
-            ZoneScopedN("Renderer::Update::DeferredWork");
-            m_preFrameDeferredFunctions.flush(); // Execute anything we deferred until now
         }
 
         if (currentRenderGraph) {
