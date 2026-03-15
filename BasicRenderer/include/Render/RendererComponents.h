@@ -63,4 +63,8 @@ namespace Components {
         std::unordered_map<uint64_t, std::vector<std::shared_ptr<MeshInstance>>> meshesByPass;
     };
 
+    /// Tag added to render-world entities whose data was updated during IngestSnapshot.
+    /// Consumed by RunRenderResourceSyncStage to limit GPU buffer writes.
+    struct RenderTransformUpdated {};
+
 } // namespace Components

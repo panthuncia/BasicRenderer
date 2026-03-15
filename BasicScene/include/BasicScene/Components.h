@@ -134,6 +134,14 @@ namespace Components {
     struct Animated {};
     struct SkipShadowPass {};
 
+    /// Added to entities whose local Position/Rotation/Scale was modified.
+    /// Propagated to descendants before the transform system runs.
+    struct TransformDirty {};
+
+    /// Set by the transform system on entities whose world Matrix was recomputed this frame.
+    /// Consumed by the snapshot export to identify changed entities.
+    struct TransformUpdatedThisFrame {};
+
     struct Name {
         Name() = default;
         Name(std::string name) : name(std::move(name)) {}

@@ -43,8 +43,12 @@ private:
     mutable flecs::query<Components::StableSceneID, Components::Matrix, Components::Light> m_exportLightQuery;
     mutable uint64_t m_cachedExportSceneID = 0;
 
+    // Export-side generation cache for detecting mesh changes without scene-side flags
+    mutable std::unordered_map<uint64_t, uint64_t> m_lastExportedMeshGeneration;
+
     // Hints for vector pre-reservation
     mutable size_t m_lastRenderableCount = 0;
+    mutable size_t m_lastChangedRenderableCount = 0;
     mutable size_t m_lastCameraCount = 0;
     mutable size_t m_lastLightCount = 0;
 };

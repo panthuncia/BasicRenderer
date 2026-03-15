@@ -319,6 +319,8 @@ void Renderer::ScheduleSceneUpdateTask(float elapsedSeconds) {
             Components::Rotation& cameraRotation = scene->GetPrimaryCameraRotation();
             ApplyMovement(cameraPosition, cameraRotation, movementSnapshot, elapsedSeconds);
             RotatePitchYaw(cameraRotation, verticalAngleSnapshot, horizontalAngleSnapshot);
+            scene->GetPrimaryCamera().modified<Components::Position>();
+            scene->GetPrimaryCamera().modified<Components::Rotation>();
         }
 
         scene->Update(elapsedSeconds);
@@ -391,6 +393,9 @@ void Renderer::RunRenderResourceSyncStage() {
             .build();
         m_renderSyncLightQuery = world.query_builder<Components::Matrix, Components::Light>()
             .with<Components::Active>()
+            .build();
+        m_renderTransformUpdatedCleanupQuery = world.query_builder<>()
+            .with<Components::RenderTransformUpdated>()
             .build();
         m_renderSyncQueriesBuilt = true;
     }
@@ -520,6 +525,11 @@ void Renderer::RunRenderResourceSyncStage() {
             m_managerInterface.GetLightManager()->UpdateLightBufferView(viewInfo.lightBufferView.get(), light.lightInfo);
             m_managerInterface.GetLightManager()->UpdateLightViewInfo(entity);
         }
+    });
+
+    // Clean up RenderTransformUpdated tags so they're fresh for next frame's IngestSnapshot
+    m_renderTransformUpdatedCleanupQuery.each([](flecs::entity e) {
+        e.remove<Components::RenderTransformUpdated>();
     });
 }
 
@@ -1071,37 +1081,6 @@ void Renderer::Update(float elapsedSeconds) {
         RecordFrameTaskStage(stageName, br::telemetry::CpuTaskDomain::MainThread, stageStart, stageEnd);
     };
 
-    runCapturedStage("WaitForFrame", [&]() {
-        ZoneScopedN("Renderer::Update::WaitForFrame");
-        WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
-    });
-    rg::runtime::BeginUploadPolicyFrame();
-
-	auto& deviceManager = DeviceManager::GetInstance();
-	auto graphicsQueue = deviceManager.GetGraphicsQueue();
-	auto computeQueue = deviceManager.GetComputeQueue();
-    runCapturedStage("FrameMaintenance", [&]() {
-        if (currentRenderGraph) {
-            ZoneScopedN("Renderer::Update::FrameStatistics");
-            if (auto* statisticsService = currentRenderGraph->GetStatisticsService()) {
-                statisticsService->OnFrameComplete(m_frameIndex, computeQueue); // Gather statistics for the last iteration of the frame
-                statisticsService->OnFrameComplete(m_frameIndex, graphicsQueue); // Gather statistics for the last iteration of the frame
-            }
-        }
-
-        {
-	        ZoneScopedN("Renderer::Update::DeferredWork");
-	        m_preFrameDeferredFunctions.flush(); // Execute anything we deferred until now
-        }
-
-        if (currentRenderGraph) {
-            ZoneScopedN("Renderer::Update::DeferredReleases");
-            if (auto* uploadService = currentRenderGraph->GetUploadService()) {
-                uploadService->ProcessDeferredReleases(m_frameIndex);
-            }
-        }
-    });
-
     if (!IsSceneReadyForFrame()) {
         return;
     }
@@ -1113,6 +1092,8 @@ void Renderer::Update(float elapsedSeconds) {
                 Components::Rotation& cameraRotation = currentScene->GetPrimaryCameraRotation();
                 ApplyMovement(cameraPosition, cameraRotation, movementState, elapsedSeconds);
                 RotatePitchYaw(cameraRotation, verticalAngle, horizontalAngle);
+                currentScene->GetPrimaryCamera().modified<Components::Position>();
+                currentScene->GetPrimaryCamera().modified<Components::Rotation>();
                 verticalAngle = 0.0f;
                 horizontalAngle = 0.0f;
             }
@@ -1205,6 +1186,8 @@ void Renderer::Update(float elapsedSeconds) {
     context.deltaTime = elapsedSeconds;
     context.hostData = &updateHostData;
 
+	auto& deviceManager = DeviceManager::GetInstance();
+
     runCapturedStage("RenderGraphUpdate", [&]() {
         ZoneScopedN("Renderer::Update::RenderGraphUpdate");
         currentRenderGraph->Update(context, deviceManager.GetDevice());
@@ -1215,7 +1198,36 @@ void Renderer::Update(float elapsedSeconds) {
         ScheduleSceneUpdateTask(elapsedSeconds);
     });
 
-    //resourceManager.ExecuteResourceTransitions();
+    runCapturedStage("WaitForFrame", [&]() {
+        ZoneScopedN("Renderer::Update::WaitForFrame");
+        WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
+        });
+    rg::runtime::BeginUploadPolicyFrame();
+
+    auto graphicsQueue = deviceManager.GetGraphicsQueue();
+    auto computeQueue = deviceManager.GetComputeQueue();
+    runCapturedStage("FrameMaintenance", [&]() {
+        if (currentRenderGraph) {
+            ZoneScopedN("Renderer::Update::FrameStatistics");
+            if (auto* statisticsService = currentRenderGraph->GetStatisticsService()) {
+                statisticsService->OnFrameComplete(m_frameIndex, computeQueue); // Gather statistics for the last iteration of the frame
+                statisticsService->OnFrameComplete(m_frameIndex, graphicsQueue); // Gather statistics for the last iteration of the frame
+            }
+        }
+
+        {
+            ZoneScopedN("Renderer::Update::DeferredWork");
+            m_preFrameDeferredFunctions.flush(); // Execute anything we deferred until now
+        }
+
+        if (currentRenderGraph) {
+            ZoneScopedN("Renderer::Update::DeferredReleases");
+            if (auto* uploadService = currentRenderGraph->GetUploadService()) {
+                uploadService->ProcessDeferredReleases(m_frameIndex);
+            }
+        }
+        });
+
     commandList->Recycle(commandAllocator.Get());
 }
 
@@ -1497,6 +1509,7 @@ void Renderer::Cleanup() {
 	m_renderSyncObjectQuery = {};
 	m_renderSyncCameraQuery = {};
 	m_renderSyncLightQuery = {};
+	m_renderTransformUpdatedCleanupQuery = {};
 	m_renderSyncQueriesBuilt = false;
 	spdlog::info("Cleaning up resources");
     if (currentRenderGraph) {

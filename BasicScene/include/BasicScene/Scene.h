@@ -68,5 +68,10 @@ private:
     void ActivateLight(flecs::entity& entity);
     void ActivateCamera(flecs::entity& entity);
 
+    // Cached queries for PropagateTransforms (must be destroyed before the world)
+    flecs::query<> m_updatedCleanupQuery;
+    flecs::query<> m_dirtyQuery;
+    bool m_propagateQueriesBuilt = false;
+
     void ActivateAllAnimatedEntities();
 };

@@ -240,6 +240,7 @@ private:
     flecs::query<Components::Matrix, Components::RenderableObject, Components::ObjectDrawInfo> m_renderSyncObjectQuery;
     flecs::query<Components::Matrix, Components::Camera, Components::RenderViewRef> m_renderSyncCameraQuery;
     flecs::query<Components::Matrix, Components::Light> m_renderSyncLightQuery;
+    flecs::query<> m_renderTransformUpdatedCleanupQuery;
     bool m_renderSyncQueriesBuilt = false;
     std::shared_ptr<br::render::SceneFrameSnapshot> m_committedSceneSnapshot;
     std::shared_ptr<br::render::SceneFrameSnapshot> m_completedSceneSnapshot;

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "Scene/Components.h"
@@ -43,9 +44,17 @@ struct SceneFrameSnapshot {
     uint64_t sourceFrameNumber = 0;
     Components::DrawStats drawStats;
     Components::GlobalMeshLibrary meshLibrary;
-    std::vector<SnapshotRenderable> renderables;
-    std::vector<SnapshotCamera> cameras;
-    std::vector<SnapshotLight> lights;
+
+    // Complete set of alive entity IDs (for stale detection)
+    std::unordered_set<StableSceneID> aliveRenderableIDs;
+    std::unordered_set<StableSceneID> aliveCameraIDs;
+    std::unordered_set<StableSceneID> aliveLightIDs;
+
+    // Only entities that actually changed this frame
+    std::vector<SnapshotRenderable> changedRenderables;
+    std::vector<SnapshotCamera> changedCameras;
+    std::vector<SnapshotLight> changedLights;
+
     bool hasPrimaryCamera = false;
     StableSceneID primaryCameraStableID = 0;
 };

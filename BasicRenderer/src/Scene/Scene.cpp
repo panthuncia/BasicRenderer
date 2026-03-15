@@ -50,11 +50,30 @@ namespace {
 			world.set<flecs::Rest>({});
 			world.set_threads(8);
 
+				// Mark entities dirty when local transforms change
+			world.observer<Components::Position>()
+				.event(flecs::OnSet)
+				.each([](flecs::entity e, Components::Position&) {
+					e.add<Components::TransformDirty>();
+				});
+			world.observer<Components::Rotation>()
+				.event(flecs::OnSet)
+				.each([](flecs::entity e, Components::Rotation&) {
+					e.add<Components::TransformDirty>();
+				});
+			world.observer<Components::Scale>()
+				.event(flecs::OnSet)
+				.each([](flecs::entity e, Components::Scale&) {
+					e.add<Components::TransformDirty>();
+				});
+
+			// Transform system: only recompute matrices for dirty entities
 			world.system<const Components::Position, const Components::Rotation, const Components::Scale, const Components::Matrix*, Components::Matrix>()
 				.with<Components::Active>()
+				.with<Components::TransformDirty>()
 				.term_at(3).parent().cascade()
 				.cached().cache_kind(flecs::QueryCacheAll)
-				.each([](flecs::entity, const Components::Position& position, const Components::Rotation& rotation, const Components::Scale& scale, const Components::Matrix* matrix, Components::Matrix& output) {
+				.each([](flecs::entity e, const Components::Position& position, const Components::Rotation& rotation, const Components::Scale& scale, const Components::Matrix* matrix, Components::Matrix& output) {
 					XMMATRIX matRotation = XMMatrixRotationQuaternion(rotation.rot);
 					XMMATRIX matTranslation = XMMatrixTranslationFromVector(position.pos);
 					XMMATRIX matScale = XMMatrixScalingFromVector(scale.scale);
@@ -62,6 +81,8 @@ namespace {
 					if (matrix != nullptr) {
 						output.matrix = output.matrix * matrix->matrix;
 					}
+					e.remove<Components::TransformDirty>();
+					e.add<Components::TransformUpdatedThisFrame>();
 				});
 		});
 	}
@@ -87,6 +108,15 @@ namespace {
 		AssignStableSceneID(entity);
 		entity.children([](flecs::entity child) {
 			ReassignStableSceneIDsRecursive(child);
+		});
+	}
+
+	void PropagateTransformDirtyToChildren(flecs::entity parent, std::unordered_set<uint64_t>& visited) {
+		parent.children([&](flecs::entity child) {
+			if (child.has<Components::Active>() && visited.insert(child.id()).second) {
+				child.add<Components::TransformDirty>();
+				PropagateTransformDirtyToChildren(child, visited);
+			}
 		});
 	}
 }
@@ -472,7 +502,47 @@ Components::Rotation& Scene::GetPrimaryCameraRotation() {
 }
 
 void Scene::PropagateTransforms() {
-	GetSceneWorld().progress();
+	auto& world = GetSceneWorld();
+
+	// Lazy-init helper queries (stored as members so they're destroyed with the Scene)
+	if (!m_propagateQueriesBuilt) {
+		m_updatedCleanupQuery = world.query_builder<>()
+			.with<Components::TransformUpdatedThisFrame>()
+			.build();
+		m_dirtyQuery = world.query_builder<>()
+			.with<Components::TransformDirty>()
+			.with<Components::Active>()
+			.build();
+		m_propagateQueriesBuilt = true;
+	}
+
+	// Clear previous frame's TransformUpdatedThisFrame tags
+	world.defer_begin();
+	m_updatedCleanupQuery.each([](flecs::entity e) {
+		e.remove<Components::TransformUpdatedThisFrame>();
+	});
+	world.defer_end();
+
+	// Propagate TransformDirty from dirty entities to their active descendants
+	std::vector<flecs::entity> dirtyRoots;
+	m_dirtyQuery.each([&](flecs::entity e) {
+		dirtyRoots.push_back(e);
+	});
+
+	if (!dirtyRoots.empty()) {
+		std::unordered_set<uint64_t> visited;
+		for (auto& e : dirtyRoots) {
+			visited.insert(e.id());
+		}
+		world.defer_begin();
+		for (auto& e : dirtyRoots) {
+			PropagateTransformDirtyToChildren(e, visited);
+		}
+		world.defer_end();
+	}
+
+	// Run all systems (transform system now filters by TransformDirty)
+	world.progress();
 }
 
 void Scene::PostUpdate() {
@@ -536,6 +606,7 @@ Scene::~Scene() {
 void activate_hierarchy(flecs::entity src) {
 
 	src.add<Components::Active>();
+	src.add<Components::TransformDirty>();
 
 	src.children([&](flecs::entity e) {
 		activate_hierarchy(e);
