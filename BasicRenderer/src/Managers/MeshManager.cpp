@@ -948,8 +948,8 @@ void MeshManager::DeallocateCLodGroupChunkAllocations(CLodSharedStreamingState& 
 
 	auto& residentAllocations = state.residentGroupAllocations[groupLocalIndex];
 
-	// Page ownership is now managed by CLodStreamingSystem's page LRU.
-	// We only clear metadata here — the pages themselves are returned to the
+	// Page ownership is managed by CLodStreamingSystem's page LRU.
+	// We only clear metadata here, the pages themselves are returned to the
 	// LRU by the streaming system when it evicts the group.
 
 	// Clear page-pool fields in the baseline chunk so the shader sees zeros.

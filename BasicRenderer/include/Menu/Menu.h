@@ -2043,6 +2043,16 @@ inline void Menu::DrawFrameTaskGraphWindow() {
 
     std::vector<NodeLayout> nodeLayouts(m_frameTaskGraphLatest.nodeCount);
 
+    // Compute the earliest start time among visible (non-WaitForFrame) nodes
+    // so we can subtract it from all displayed times, eliminating the gap.
+    uint64_t displayTimeBaseUs = UINT64_MAX;
+    for (uint32_t i = 0; i < m_frameTaskGraphLatest.nodeCount; ++i) {
+        const auto& n = m_frameTaskGraphLatest.nodes[i];
+        if (!isWaitForFrame(n.name))
+            displayTimeBaseUs = (std::min)(displayTimeBaseUs, n.startTimeUs);
+    }
+    if (displayTimeBaseUs == UINT64_MAX) displayTimeBaseUs = 0;
+
     constexpr float kBarHeight = 0.6f;
     constexpr float kSubLaneHeight = 0.85f;
     constexpr float kDomainGap = 0.6f;
@@ -2077,8 +2087,8 @@ inline void Menu::DrawFrameTaskGraphWindow() {
 
         for (uint32_t idx : domainNodes) {
             const auto& node = m_frameTaskGraphLatest.nodes[idx];
-            float startMs = static_cast<float>(node.startTimeUs) / 1000.0f;
-            float endMs = static_cast<float>(node.startTimeUs + node.durationUs) / 1000.0f;
+            float startMs = static_cast<float>(node.startTimeUs - displayTimeBaseUs) / 1000.0f;
+            float endMs = static_cast<float>(node.startTimeUs + node.durationUs - displayTimeBaseUs) / 1000.0f;
 
             int subLane = -1;
             for (int s = 0; s < static_cast<int>(subLanes.size()); ++s) {
@@ -2109,7 +2119,7 @@ inline void Menu::DrawFrameTaskGraphWindow() {
     for (uint32_t i = 0; i < m_frameTaskGraphLatest.nodeCount; ++i) {
         const auto& n = m_frameTaskGraphLatest.nodes[i];
         if (!isWaitForFrame(n.name))
-            timelineFrameEndUs = (std::max)(timelineFrameEndUs, n.startTimeUs + n.durationUs);
+            timelineFrameEndUs = (std::max)(timelineFrameEndUs, n.startTimeUs + n.durationUs - displayTimeBaseUs);
     }
 
     if (ImPlot::BeginPlot("##CpuTaskGantt", ImVec2(-1.0f, ganttPlotHeight), ImPlotFlags_NoLegend)) {
@@ -2228,7 +2238,7 @@ inline void Menu::DrawFrameTaskGraphWindow() {
                     ImGui::BeginTooltip();
                     ImGui::TextUnformatted(node.name);
                     ImGui::Text("Domain: %s", domainName(node.domain));
-                    ImGui::Text("Start: %.3f ms", static_cast<double>(node.startTimeUs) / 1000.0);
+                    ImGui::Text("Start: %.3f ms", static_cast<double>(node.startTimeUs - displayTimeBaseUs) / 1000.0);
                     ImGui::Text("Duration: %.3f ms", static_cast<double>(node.durationUs) / 1000.0);
                     if (node.dependencyNodeIndex >= 0 &&
                         static_cast<uint32_t>(node.dependencyNodeIndex) < m_frameTaskGraphLatest.nodeCount) {
