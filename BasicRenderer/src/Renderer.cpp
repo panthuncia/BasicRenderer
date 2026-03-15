@@ -527,10 +527,13 @@ void Renderer::RunRenderResourceSyncStage() {
         }
     });
 
-    // Clean up RenderTransformUpdated tags so they're fresh for next frame's IngestSnapshot
+    // Clean up RenderTransformUpdated tags so they're fresh for next frame's IngestSnapshot.
+    // Defer structural changes to avoid modifying tables while the query has them locked.
+    world.defer_begin();
     m_renderTransformUpdatedCleanupQuery.each([](flecs::entity e) {
         e.remove<Components::RenderTransformUpdated>();
     });
+    world.defer_end();
 }
 
 void Renderer::BeginFrameTaskGraphCapture() {
