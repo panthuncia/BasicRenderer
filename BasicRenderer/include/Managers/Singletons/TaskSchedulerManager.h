@@ -28,6 +28,8 @@ public:
     void Cleanup();
     void RunIoTask(std::function<void()>&& task);
     void RunIoTask(std::string_view taskName, std::function<void()>&& task);
+    void QueueIoTask(std::function<void()>&& task);
+    void QueueIoTask(std::string_view taskName, std::function<void()>&& task);
     void RunBackgroundTask(std::function<void()>&& task);
     void RunBackgroundTask(std::string_view taskName, std::function<void()>&& task);
 

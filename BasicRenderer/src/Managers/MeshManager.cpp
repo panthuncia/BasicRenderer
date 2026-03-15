@@ -109,95 +109,92 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 			m_clodDiskStreamingRequests.begin() + toDrain);
 	}
 
-	// Pre-allocate results vector (one slot per request, written in parallel).
-	std::vector<CLodDiskStreamingResult> results(batch.size());
-
-	// Group requests by container path so each parallel worker can reuse one
-	// file handle for all groups from the same container.
-	// The lambda captures batch/results by reference and is dispatched over
-	// the task scheduler's thread pool (including IO-pinned threads).
-	auto& scheduler = TaskSchedulerManager::GetInstance();
-	scheduler.ParallelFor("MeshManager::DispatchCLodDiskStreamingBatch", batch.size(), [&batch, &results](size_t i) {
-		const auto& request = batch[i];
-		auto& result = results[i];
-		result.groupGlobalIndex = request.groupGlobalIndex;
-
-		// Thread-local container file handle cache. Each worker thread keeps
-		// the last-used container open, avoiding repeated open/close syscalls
-		// when consecutive requests target the same file.
-		struct TLContainerState {
-			std::wstring containerFileName;
-			std::string sourceIdentifier;
-			std::ifstream file;
-			uint32_t groupCount = 0;
-			bool valid = false;
-		};
-		thread_local TLContainerState tls;
-
-		// Reuse if same container, otherwise re-open.
-		if (!tls.valid
-			|| tls.containerFileName != request.cacheSource.containerFileName
-			|| tls.sourceIdentifier != request.cacheSource.sourceIdentifier) {
-			tls.file.close();
-			tls.valid = false;
-			tls.containerFileName = request.cacheSource.containerFileName;
-			tls.sourceIdentifier = request.cacheSource.sourceIdentifier;
-			tls.groupCount = 0;
-			if (CLodCache::OpenContainerFile(request.cacheSource, tls.file, tls.groupCount)) {
-				tls.valid = true;
-			}
-		}
-
-		if (!tls.valid || request.groupLocalIndex >= tls.groupCount) {
-			result.success = false;
-			return;
-		}
-
-		// Look up the disk locator from the directory embedded in the file.
-		const uint64_t directoryEntryOffset =
-			static_cast<uint64_t>(sizeof(uint32_t) * 4) // ContainerHeader: magic + version + reserved + groupCount
-			+ static_cast<uint64_t>(request.groupLocalIndex) * static_cast<uint64_t>(sizeof(ClusterLODGroupDiskLocator));
-
-		tls.file.seekg(static_cast<std::streamoff>(directoryEntryOffset), std::ios::beg);
-		if (!tls.file.good()) {
-			result.success = false;
-			tls.valid = false; // Stream is bad; force re-open next time.
-			return;
-		}
-
-		ClusterLODGroupDiskLocator locator{};
-		tls.file.read(reinterpret_cast<char*>(&locator), sizeof(locator));
-		if (!tls.file.good()) {
-			result.success = false;
-			tls.valid = false;
-			return;
-		}
-
-		CLodCache::LoadedGroupPayload payload{};
-		if (CLodCache::LoadGroupPayloadSelective(tls.file, locator, request.segmentNeedsFetch, payload)) {
-			result.groupChunkMetadata = payload.groupChunkMetadata;
-			result.pageBlobs = std::move(payload.pageBlobs);
-			result.preAllocatedPages = request.preAllocatedPages;
-			result.success = true;
-		}
-		else {
-			result.success = false;
-			// If the read failed, the stream might be in a bad state.
-			tls.file.clear();
-		}
-	});
-
-	// Merge results back (single-threaded).
+	// Dispatch each request as a fire-and-forget IO task on the dedicated IO
+	// thread pool. Each task captures its request by move, performs the disk
+	// read, and pushes the result directly into the shared results vector.
+	// The thread_local file handle cache works well here — the 16 stable IO
+	// threads each keep one cached handle, matching the old per-TBB-worker
+	// caching but with better thread affinity.
+	//
 	// NOTE: Do NOT erase from m_clodDiskStreamingQueuedGroups here.
 	// The group must stay in the dedup set until its result is fully applied
 	// in ProcessCLodDiskStreamingIO, otherwise a re-request arriving between
-	// dispatch completion and result application would re-queue the same
-	// group for disk I/O, causing duplicate reads and page-pool churn.
-	{
-		std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
-		for (auto& result : results) {
+	// dispatch and result application would re-queue the same group for disk
+	// I/O, causing duplicate reads and page-pool churn.
+	auto& scheduler = TaskSchedulerManager::GetInstance();
+	for (auto& request : batch) {
+		scheduler.QueueIoTask("CLodDiskStreaming",
+			[this, request = std::move(request)]() mutable {
+			CLodDiskStreamingResult result{};
+			result.groupGlobalIndex = request.groupGlobalIndex;
+
+			struct TLContainerState {
+				std::wstring containerFileName;
+				std::string sourceIdentifier;
+				std::ifstream file;
+				uint32_t groupCount = 0;
+				bool valid = false;
+			};
+			thread_local TLContainerState tls;
+
+			if (!tls.valid
+				|| tls.containerFileName != request.cacheSource.containerFileName
+				|| tls.sourceIdentifier != request.cacheSource.sourceIdentifier) {
+				tls.file.close();
+				tls.valid = false;
+				tls.containerFileName = request.cacheSource.containerFileName;
+				tls.sourceIdentifier = request.cacheSource.sourceIdentifier;
+				tls.groupCount = 0;
+				if (CLodCache::OpenContainerFile(request.cacheSource, tls.file, tls.groupCount)) {
+					tls.valid = true;
+				}
+			}
+
+			if (!tls.valid || request.groupLocalIndex >= tls.groupCount) {
+				result.success = false;
+				std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
+				m_clodDiskStreamingResults.push_back(std::move(result));
+				return;
+			}
+
+			const uint64_t directoryEntryOffset =
+				static_cast<uint64_t>(sizeof(uint32_t) * 4)
+				+ static_cast<uint64_t>(request.groupLocalIndex) * static_cast<uint64_t>(sizeof(ClusterLODGroupDiskLocator));
+
+			tls.file.seekg(static_cast<std::streamoff>(directoryEntryOffset), std::ios::beg);
+			if (!tls.file.good()) {
+				result.success = false;
+				tls.valid = false;
+				std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
+				m_clodDiskStreamingResults.push_back(std::move(result));
+				return;
+			}
+
+			ClusterLODGroupDiskLocator locator{};
+			tls.file.read(reinterpret_cast<char*>(&locator), sizeof(locator));
+			if (!tls.file.good()) {
+				result.success = false;
+				tls.valid = false;
+				std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
+				m_clodDiskStreamingResults.push_back(std::move(result));
+				return;
+			}
+
+			CLodCache::LoadedGroupPayload payload{};
+			if (CLodCache::LoadGroupPayloadSelective(tls.file, locator, request.segmentNeedsFetch, payload)) {
+				result.groupChunkMetadata = payload.groupChunkMetadata;
+				result.pageBlobs = std::move(payload.pageBlobs);
+				result.preAllocatedPages = std::move(request.preAllocatedPages);
+				result.success = true;
+			}
+			else {
+				result.success = false;
+				tls.file.clear();
+			}
+
+			std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
 			m_clodDiskStreamingResults.push_back(std::move(result));
-		}
+		});
 	}
 }
 

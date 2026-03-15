@@ -183,6 +183,51 @@ void TaskSchedulerManager::RunIoTask(std::string_view taskName, std::function<vo
     future.get();
 }
 
+void TaskSchedulerManager::QueueIoTask(std::function<void()>&& task) {
+    QueueIoTask({}, std::move(task));
+}
+
+void TaskSchedulerManager::QueueIoTask(std::string_view taskName, std::function<void()>&& task) {
+    const std::string taskNameStorage = taskName.empty()
+        ? std::string("TaskScheduler::QueueIoTask")
+        : std::string(taskName);
+
+    if (!m_initialized || m_ioThreads.empty()) {
+        const auto taskStart = std::chrono::steady_clock::now();
+        if constexpr (kEnableFineGrainedSchedulerTracing) {
+            TracyCZone(ctx, 1);
+            TracyCZoneName(ctx, taskNameStorage.c_str(), taskNameStorage.size());
+            task();
+            TracyCZoneEnd(ctx);
+        }
+        else {
+            task();
+        }
+        RecordTaskNodeForTelemetry(taskNameStorage, telemetry::CpuTaskDomain::IOService, taskStart, std::chrono::steady_clock::now());
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_ioMutex);
+        m_ioTasks.emplace_back([task = std::move(task), taskNameStorage]() mutable {
+            const auto taskStart = std::chrono::steady_clock::now();
+            if constexpr (kEnableFineGrainedSchedulerTracing) {
+                TracyCZone(ctx, 1);
+                TracyCZoneName(ctx, taskNameStorage.c_str(), taskNameStorage.size());
+                task();
+                TracyCZoneEnd(ctx);
+            }
+            else {
+                task();
+            }
+            RecordTaskNodeForTelemetry(taskNameStorage, telemetry::CpuTaskDomain::IOService, taskStart, std::chrono::steady_clock::now());
+        });
+        PlotIoQueueDepth(m_ioTasks.size());
+    }
+
+    m_ioCv.notify_one();
+}
+
 void TaskSchedulerManager::RunBackgroundTask(std::function<void()>&& task) {
     RunBackgroundTask({}, std::move(task));
 }
