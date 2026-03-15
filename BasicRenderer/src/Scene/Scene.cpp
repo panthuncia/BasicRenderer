@@ -285,6 +285,7 @@ void Scene::ProcessEntitySkins(bool overrideExistingSkins) {
 		// Discard old instances and add new ones
 		if (oldMeshInstances) {
 			Components::MeshInstances meshInstances;
+			meshInstances.generation = oldMeshInstances->generation + 1;
 			for (auto& meshInstance : oldMeshInstances->meshInstances) {
 				meshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(meshInstance->GetMesh())));
 			}

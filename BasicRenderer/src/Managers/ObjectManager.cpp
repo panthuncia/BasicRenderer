@@ -127,6 +127,22 @@ void ObjectManager::UpdateNormalMatrixBuffer(BufferView* view, void* data) {
 	m_normalMatrixBuffer->UpdateView(view, data);
 }
 
+rg::runtime::BulkWriteHandle ObjectManager::BeginPerObjectBulkWrite() {
+	return m_perObjectBuffers->BeginBulkWrite();
+}
+
+void ObjectManager::EndPerObjectBulkWrite(size_t dirtyOffset, size_t dirtySize) {
+	m_perObjectBuffers->EndBulkWrite(dirtyOffset, dirtySize);
+}
+
+rg::runtime::BulkWriteHandle ObjectManager::BeginNormalMatrixBulkWrite() {
+	return m_normalMatrixBuffer->BeginBulkWrite();
+}
+
+void ObjectManager::EndNormalMatrixBulkWrite(size_t dirtyOffset, size_t dirtySize) {
+	m_normalMatrixBuffer->EndBulkWrite(dirtyOffset, dirtySize);
+}
+
 std::shared_ptr<Resource> ObjectManager::ProvideResource(ResourceIdentifier const& key) {
 	return m_resources[key];
 }

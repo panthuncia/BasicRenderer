@@ -8,6 +8,7 @@
 #include <math.h>
 #include <atlbase.h>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <typeindex>
 #include <utility>
@@ -379,32 +380,86 @@ void Renderer::RunRenderResourceSyncStage() {
 
     auto& world = RendererECSManager::GetInstance().GetWorld();
 
-    auto objectQuery = world.query_builder<Components::Matrix, Components::RenderableObject, Components::ObjectDrawInfo>()
-        .with<Components::Active>()
-        .build();
-    objectQuery.each([&](flecs::entity, Components::Matrix& worldMatrix, Components::RenderableObject& object, Components::ObjectDrawInfo& drawInfo) {
-        object.perObjectCB.prevModelMatrix = object.perObjectCB.modelMatrix;
-        object.perObjectCB.modelMatrix = worldMatrix.matrix;
+    if (!m_renderSyncQueriesBuilt) {
+        m_renderSyncObjectQuery = world.query_builder<Components::Matrix, Components::RenderableObject, Components::ObjectDrawInfo>()
+            .with<Components::Active>()
+            .build();
+        m_renderSyncCameraQuery = world.query_builder<Components::Matrix, Components::Camera, Components::RenderViewRef>()
+            .with<Components::Active>()
+            .build();
+        m_renderSyncLightQuery = world.query_builder<Components::Matrix, Components::Light>()
+            .with<Components::Active>()
+            .build();
+        m_renderSyncQueriesBuilt = true;
+    }
 
-        const XMVECTOR det = XMMatrixDeterminant(worldMatrix.matrix);
-        object.perObjectCB.objectFlags = (XMVectorGetX(det) < 0.0f) ? OBJECT_FLAG_REVERSE_WINDING : 0u;
-
-        m_managerInterface.GetObjectManager()->UpdatePerObjectBuffer(drawInfo.perObjectCBView.get(), object.perObjectCB);
-
-        const auto& modelMatrix = object.perObjectCB.modelMatrix;
-        const XMMATRIX upperLeft3x3 = XMMatrixSet(
-            XMVectorGetX(modelMatrix.r[0]), XMVectorGetY(modelMatrix.r[0]), XMVectorGetZ(modelMatrix.r[0]), 0.0f,
-            XMVectorGetX(modelMatrix.r[1]), XMVectorGetY(modelMatrix.r[1]), XMVectorGetZ(modelMatrix.r[1]), 0.0f,
-            XMVectorGetX(modelMatrix.r[2]), XMVectorGetY(modelMatrix.r[2]), XMVectorGetZ(modelMatrix.r[2]), 0.0f,
-            0.0f, 0.0f, 0.0f, 1.0f);
-        XMMATRIX normalMat = XMMatrixInverse(nullptr, upperLeft3x3);
-        m_managerInterface.GetObjectManager()->UpdateNormalMatrixBuffer(drawInfo.normalMatrixView.get(), reinterpret_cast<void*>(&normalMat));
+    // Collect object entity data for parallel processing
+    struct ObjectSyncItem {
+        Components::Matrix* worldMatrix;
+        Components::RenderableObject* object;
+        Components::ObjectDrawInfo* drawInfo;
+    };
+    std::vector<ObjectSyncItem> objectItems;
+    m_renderSyncObjectQuery.run([&](flecs::iter& it) {
+        while (it.next()) {
+            auto matrices = it.field<Components::Matrix>(0);
+            auto objects = it.field<Components::RenderableObject>(1);
+            auto drawInfos = it.field<Components::ObjectDrawInfo>(2);
+            for (auto i : it) {
+                objectItems.push_back({ &matrices[i], &objects[i], &drawInfos[i] });
+            }
+        }
     });
 
-    auto cameraQuery = world.query_builder<Components::Matrix, Components::Camera, Components::RenderViewRef>()
-        .with<Components::Active>()
-        .build();
-    cameraQuery.each([&](flecs::entity entity, Components::Matrix& worldMatrix, Components::Camera& camera, Components::RenderViewRef& renderView) {
+    auto* objectManager = m_managerInterface.GetObjectManager();
+
+    // Pre-size scratch buffers single-threaded so the parallel loop can
+    // memcpy into non-overlapping regions without any synchronization.
+    auto perObjectHandle = objectManager->BeginPerObjectBulkWrite();
+    auto normalMatrixHandle = objectManager->BeginNormalMatrixBulkWrite();
+
+    TaskSchedulerManager::GetInstance().ParallelFor("ObjectSync", objectItems.size(),
+        [&objectItems, &perObjectHandle, &normalMatrixHandle](size_t idx) {
+            auto& [worldMatrix, object, drawInfo] = objectItems[idx];
+            object->perObjectCB.prevModelMatrix = object->perObjectCB.modelMatrix;
+            object->perObjectCB.modelMatrix = worldMatrix->matrix;
+
+            const XMVECTOR det = XMMatrixDeterminant(worldMatrix->matrix);
+            object->perObjectCB.objectFlags = (XMVectorGetX(det) < 0.0f) ? OBJECT_FLAG_REVERSE_WINDING : 0u;
+
+            // Write per-object data directly into the scratch buffer (lock-free).
+            {
+                const size_t offset = drawInfo->perObjectCBView->GetOffset();
+                const size_t sz = sizeof(PerObjectCB);
+                std::memcpy(perObjectHandle.data + offset, &object->perObjectCB, sz);
+            }
+
+            const auto& modelMatrix = object->perObjectCB.modelMatrix;
+            const XMMATRIX upperLeft3x3 = XMMatrixSet(
+                XMVectorGetX(modelMatrix.r[0]), XMVectorGetY(modelMatrix.r[0]), XMVectorGetZ(modelMatrix.r[0]), 0.0f,
+                XMVectorGetX(modelMatrix.r[1]), XMVectorGetY(modelMatrix.r[1]), XMVectorGetZ(modelMatrix.r[1]), 0.0f,
+                XMVectorGetX(modelMatrix.r[2]), XMVectorGetY(modelMatrix.r[2]), XMVectorGetZ(modelMatrix.r[2]), 0.0f,
+                0.0f, 0.0f, 0.0f, 1.0f);
+            XMMATRIX normalMat = XMMatrixInverse(nullptr, upperLeft3x3);
+
+            // Write normal matrix directly into the scratch buffer (lock-free).
+            {
+                const size_t offset = drawInfo->normalMatrixView->GetOffset();
+                const size_t sz = sizeof(DirectX::XMFLOAT4X4);
+                DirectX::XMFLOAT4X4 stored;
+                XMStoreFloat4x4(&stored, normalMat);
+                std::memcpy(normalMatrixHandle.data + offset, &stored, sz);
+            }
+        });
+
+    // Register dirty ranges single-threaded.
+    // Mark the entire used portion dirty — the coalescer handles this efficiently.
+    if (!objectItems.empty()) {
+        objectManager->EndPerObjectBulkWrite(0, perObjectHandle.capacity);
+        objectManager->EndNormalMatrixBulkWrite(0, normalMatrixHandle.capacity);
+    }
+
+    m_renderSyncCameraQuery.each([&](flecs::entity entity, Components::Matrix& worldMatrix, Components::Camera& camera, Components::RenderViewRef& renderView) {
         const XMMATRIX cameraModel = RemoveScalingFromMatrix(worldMatrix.matrix);
         const XMMATRIX view = XMMatrixInverse(nullptr, cameraModel);
         DirectX::XMMATRIX projection = camera.info.unjitteredProjection;
@@ -435,10 +490,7 @@ void Renderer::RunRenderResourceSyncStage() {
         m_managerInterface.GetViewManager()->UpdateCamera(renderView.viewID, camera.info);
     });
 
-    auto lightQuery = world.query_builder<Components::Matrix, Components::Light>()
-        .with<Components::Active>()
-        .build();
-    lightQuery.each([&](flecs::entity entity, Components::Matrix& worldMatrix, Components::Light& light) {
+    m_renderSyncLightQuery.each([&](flecs::entity entity, Components::Matrix& worldMatrix, Components::Light& light) {
         const XMVECTOR worldForward = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
         light.lightInfo.dirWorldSpace = XMVector3Normalize(XMVector3TransformNormal(worldForward, worldMatrix.matrix));
         light.lightInfo.posWorldSpace = XMVectorSet(
@@ -1440,6 +1492,10 @@ void Renderer::Cleanup() {
 	spdlog::info("Stalling pipeline for cleanup");
 	StallPipeline();
 	m_sceneRenderBridge.Clear(m_managerInterface);
+	m_renderSyncObjectQuery = {};
+	m_renderSyncCameraQuery = {};
+	m_renderSyncLightQuery = {};
+	m_renderSyncQueriesBuilt = false;
 	spdlog::info("Cleaning up resources");
     if (currentRenderGraph) {
         if (auto* uploadService = currentRenderGraph->GetUploadService()) {

@@ -30,9 +30,6 @@ public:
     void UpdateInstanceTransforms(Skeleton& skinningInstance);
     void UpdateAllDirtyInstances();
 
-    // Useful?
-    // void SetAnimation(Skeleton& inst);
-
     // IResourceProvider
     std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
     std::vector<ResourceIdentifier> GetSupportedKeys() override;
@@ -63,6 +60,8 @@ private:
     };
 
 private:
+    void RebuildIterationList();
+
     // Global packed buffers
     std::shared_ptr<DynamicBuffer> m_inverseBindMatrices;  // float4x4[]
     std::shared_ptr<DynamicBuffer> m_boneTransforms;       // float4x4[]
@@ -74,6 +73,14 @@ private:
     // Records
     std::unordered_map<const Skeleton*, BaseRecord>    m_bases;
     std::unordered_map<const Skeleton*, InstanceRecord> m_instances;
+
+    // Flat iteration list for parallel-for access
+    struct InstanceEntry {
+        Skeleton* skeleton;
+        InstanceRecord* record;
+    };
+    std::vector<InstanceEntry> m_iterationList;
+    bool m_iterationListDirty = true;
 
     // Free-list for instance slots
     std::vector<uint32_t> m_freeInstanceSlots;

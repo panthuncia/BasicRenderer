@@ -12,6 +12,7 @@
 #include "Scene/Components.h"
 #include "Interfaces/IResourceProvider.h"
 #include "Materials/TechniqueDescriptor.h"
+#include "Render/Runtime/BufferUploadPolicy.h"
 
 class BufferView;
 class DynamicBuffer;
@@ -25,6 +26,12 @@ public:
 	void RemoveObject(const Components::ObjectDrawInfo* drawInfo);
 	void UpdatePerObjectBuffer(BufferView*, PerObjectCB& data);
 	void UpdateNormalMatrixBuffer(BufferView* view, void* data);
+
+	rg::runtime::BulkWriteHandle BeginPerObjectBulkWrite();
+	void EndPerObjectBulkWrite(size_t dirtyOffset, size_t dirtySize);
+	rg::runtime::BulkWriteHandle BeginNormalMatrixBulkWrite();
+	void EndNormalMatrixBulkWrite(size_t dirtyOffset, size_t dirtySize);
+
 	std::shared_ptr<DynamicBuffer>& GetPerObjectBuffers() {
 		return m_perObjectBuffers;
 	}

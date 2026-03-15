@@ -235,6 +235,12 @@ private:
     int32_t m_lastFrameTaskNodeIndex = -1;
     br::render::SceneRenderBridge m_sceneRenderBridge;
     bool m_sceneRenderOverlapEnabled = true;
+
+    // Cached renderer ECS queries for RunRenderResourceSyncStage
+    flecs::query<Components::Matrix, Components::RenderableObject, Components::ObjectDrawInfo> m_renderSyncObjectQuery;
+    flecs::query<Components::Matrix, Components::Camera, Components::RenderViewRef> m_renderSyncCameraQuery;
+    flecs::query<Components::Matrix, Components::Light> m_renderSyncLightQuery;
+    bool m_renderSyncQueriesBuilt = false;
     std::shared_ptr<br::render::SceneFrameSnapshot> m_committedSceneSnapshot;
     std::shared_ptr<br::render::SceneFrameSnapshot> m_completedSceneSnapshot;
     mutable std::mutex m_sceneSnapshotMutex;

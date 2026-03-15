@@ -17,6 +17,7 @@
 #include <vector>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 
 #include "Render/RenderContext.h"
@@ -289,7 +290,7 @@ private:
     bool m_frameTaskGraphHasData = false;
     std::vector<br::telemetry::FrameTaskGraphSnapshot> m_frameTaskGraphHistory;
     int m_frameTaskGraphAverageWindow = 30;
-    bool m_frameTaskGraphShowLatestOverlay = true;
+    bool m_frameTaskGraphPaused = false;
     br::render::SceneOverlapStatus m_sceneOverlapStatus{};
 
     bool m_clodCaptureStatsPending = false;
@@ -1754,15 +1755,19 @@ inline void Menu::DrawFrameTaskGraphWindow() {
     }
     ImGui::Separator();
 
-    br::telemetry::FrameTaskGraphSnapshot latestSnapshot{};
-    if (br::telemetry::TryReadFrameTaskGraphSnapshot(m_frameTaskGraphLastSequence, latestSnapshot)) {
-        m_frameTaskGraphLatest = latestSnapshot;
-        m_frameTaskGraphHasData = true;
-        if (m_frameTaskGraphHistory.empty() || m_frameTaskGraphHistory.back().frameNumber != latestSnapshot.frameNumber) {
-            m_frameTaskGraphHistory.push_back(latestSnapshot);
-            constexpr size_t kMaxHistoryFrames = 240;
-            if (m_frameTaskGraphHistory.size() > kMaxHistoryFrames) {
-                m_frameTaskGraphHistory.erase(m_frameTaskGraphHistory.begin());
+    ImGui::Checkbox("Pause", &m_frameTaskGraphPaused);
+
+    if (!m_frameTaskGraphPaused) {
+        br::telemetry::FrameTaskGraphSnapshot latestSnapshot{};
+        if (br::telemetry::TryReadFrameTaskGraphSnapshot(m_frameTaskGraphLastSequence, latestSnapshot)) {
+            m_frameTaskGraphLatest = latestSnapshot;
+            m_frameTaskGraphHasData = true;
+            if (m_frameTaskGraphHistory.empty() || m_frameTaskGraphHistory.back().frameNumber != latestSnapshot.frameNumber) {
+                m_frameTaskGraphHistory.push_back(latestSnapshot);
+                constexpr size_t kMaxHistoryFrames = 240;
+                if (m_frameTaskGraphHistory.size() > kMaxHistoryFrames) {
+                    m_frameTaskGraphHistory.erase(m_frameTaskGraphHistory.begin());
+                }
             }
         }
     }
@@ -1788,21 +1793,6 @@ inline void Menu::DrawFrameTaskGraphWindow() {
         }
     };
 
-    const auto domainLane = [](br::telemetry::CpuTaskDomain domain) {
-        switch (domain) {
-        case br::telemetry::CpuTaskDomain::MainThread:
-            return 0;
-        case br::telemetry::CpuTaskDomain::Worker:
-            return 1;
-        case br::telemetry::CpuTaskDomain::IOService:
-            return 2;
-        case br::telemetry::CpuTaskDomain::BackgroundService:
-            return 3;
-        default:
-            return 0;
-        }
-    };
-
     const auto domainColor = [](br::telemetry::CpuTaskDomain domain) {
         switch (domain) {
         case br::telemetry::CpuTaskDomain::MainThread:
@@ -1816,6 +1806,10 @@ inline void Menu::DrawFrameTaskGraphWindow() {
         default:
             return IM_COL32(160, 160, 160, 255);
         }
+    };
+
+    const auto isWaitForFrame = [](const char* name) {
+        return std::strcmp(name, "WaitForFrame") == 0;
     };
 
     struct StageAggregate {
@@ -1980,8 +1974,22 @@ inline void Menu::DrawFrameTaskGraphWindow() {
             m_frameTaskGraphLatest.droppedNodeCount);
     }
 
+    {
+        uint64_t waitUs = 0;
+        bool hasWait = false;
+        for (uint32_t i = 0; i < m_frameTaskGraphLatest.nodeCount; ++i) {
+            if (isWaitForFrame(m_frameTaskGraphLatest.nodes[i].name)) {
+                waitUs += m_frameTaskGraphLatest.nodes[i].durationUs;
+                hasWait = true;
+            }
+        }
+        if (hasWait) {
+            ImGui::TextDisabled("WaitForFrame: %.3f ms (hidden from graph, GPU throughput proxy)",
+                static_cast<double>(waitUs) / 1000.0);
+        }
+    }
+
     ImGui::SliderInt("Average window (frames)", &m_frameTaskGraphAverageWindow, 1, 120);
-    ImGui::Checkbox("Overlay latest frame", &m_frameTaskGraphShowLatestOverlay);
 
     if (!frameHistoryMs.empty() && ImPlot::BeginPlot("##CpuFrameTaskFrameHistory", ImVec2(-1.0f, 150.0f), ImPlotFlags_NoLegend)) {
         ImPlot::SetupAxes("Recent frames", "ms", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
@@ -2008,12 +2016,14 @@ inline void Menu::DrawFrameTaskGraphWindow() {
     });
 
     ImGui::SeparatorText("Bottlenecks");
-    const size_t maxBottlenecks = (std::min)(size_t{ 5 }, bottleneckOrder.size());
-    for (size_t rank = 0; rank < maxBottlenecks; ++rank) {
-        const auto& aggregate = stageAggregates[bottleneckOrder[rank]];
+    size_t bottleneckRank = 0;
+    for (size_t i = 0; i < bottleneckOrder.size() && bottleneckRank < 5; ++i) {
+        const auto& aggregate = stageAggregates[bottleneckOrder[i]];
+        if (isWaitForFrame(aggregate.name)) continue;
+        ++bottleneckRank;
         ImGui::Text(
             "%zu. %s [%s] avg busy %.3f ms | latest busy %.3f ms | avg dispatches %u",
-            rank + 1,
+            bottleneckRank,
             aggregate.name,
             domainName(aggregate.domain),
             static_cast<double>(aggregate.avgTotalDurationUs) / 1000.0,
@@ -2021,89 +2031,218 @@ inline void Menu::DrawFrameTaskGraphWindow() {
             aggregate.avgDispatchCount);
     }
 
-    ImGui::SeparatorText("Timeline");
+    ImGui::SeparatorText("Task Graph");
 
-    constexpr int kDomainLaneCount = 4;
-    const float laneHeight = 26.0f;
-    const float laneSpacing = 10.0f;
-    const float labelWidth = 92.0f;
-    const float timelineHeight = kDomainLaneCount * laneHeight + (kDomainLaneCount - 1) * laneSpacing;
-    const ImVec2 canvasSize(ImGui::GetContentRegionAvail().x, timelineHeight + 8.0f);
+    // Layout: assign Y position per individual node, grouped into domain swim lanes.
+    // Concurrent tasks within a domain are stacked into sub-lanes.
+    struct NodeLayout {
+        float yCenter;
+        float startMs;
+        float endMs;
+    };
 
-    ImGui::BeginChild("##CpuFrameTaskTimeline", canvasSize, true, ImGuiWindowFlags_NoMove);
-    {
-        ImDrawList* drawList = ImGui::GetWindowDrawList();
-        const ImVec2 origin = ImGui::GetCursorScreenPos();
-        const float width = (std::max)(ImGui::GetContentRegionAvail().x, 1.0f);
-        const float timelineWidth = (std::max)(width - labelWidth - 12.0f, 1.0f);
-        const float frameSpanUs = static_cast<float>((std::max)(avgFrameEndUs, uint64_t{ 1 }));
+    std::vector<NodeLayout> nodeLayouts(m_frameTaskGraphLatest.nodeCount);
 
-        for (int lane = 0; lane < kDomainLaneCount; ++lane) {
-            const float y0 = origin.y + lane * (laneHeight + laneSpacing);
-            const float y1 = y0 + laneHeight;
-            const char* label = lane == 0 ? "Main" : lane == 1 ? "Worker" : lane == 2 ? "IO" : "Background";
-            drawList->AddText(ImVec2(origin.x, y0 + 4.0f), IM_COL32(220, 220, 220, 255), label);
-            drawList->AddRectFilled(
-                ImVec2(origin.x + labelWidth, y0),
-                ImVec2(origin.x + labelWidth + timelineWidth, y1),
-                IM_COL32(32, 32, 32, 255),
-                4.0f);
+    constexpr float kBarHeight = 0.6f;
+    constexpr float kSubLaneHeight = 0.85f;
+    constexpr float kDomainGap = 0.6f;
+    constexpr int kDomainOrder[] = { 0, 1, 2, 3 }; // Main, Worker, IO, Background
+
+    float currentY = 0.0f;
+    float domainLabelY[4] = {};
+    bool domainHasNodes[4] = {};
+
+    for (int di = 0; di < 4; ++di) {
+        auto domain = static_cast<br::telemetry::CpuTaskDomain>(kDomainOrder[di]);
+
+        std::vector<uint32_t> domainNodes;
+        for (uint32_t i = 0; i < m_frameTaskGraphLatest.nodeCount; ++i) {
+            if (m_frameTaskGraphLatest.nodes[i].domain == domain && !isWaitForFrame(m_frameTaskGraphLatest.nodes[i].name))
+                domainNodes.push_back(i);
         }
 
-        for (size_t nodeIndex = 0; nodeIndex < stageAggregates.size(); ++nodeIndex) {
-            const auto& aggregate = stageAggregates[nodeIndex];
-            const int lane = domainLane(aggregate.domain);
-            const float laneY0 = origin.y + lane * (laneHeight + laneSpacing);
-            const float startNorm = static_cast<float>(aggregate.avgStartUs) / frameSpanUs;
-            const float endNorm = static_cast<float>(aggregate.avgStartUs + aggregate.avgSpanUs) / frameSpanUs;
-            const float x0 = origin.x + labelWidth + startNorm * timelineWidth;
-            const float x1 = origin.x + labelWidth + (std::max)(endNorm * timelineWidth, startNorm * timelineWidth + 2.0f);
-            const ImVec2 rectMin(x0, laneY0 + 3.0f);
-            const ImVec2 rectMax(x1, laneY0 + laneHeight - 3.0f);
-            const ImU32 fillColor = domainColor(aggregate.domain);
+        if (domainNodes.empty()) {
+            domainLabelY[di] = currentY;
+            continue;
+        }
+        domainHasNodes[di] = true;
 
-            drawList->AddRectFilled(rectMin, rectMax, fillColor, 4.0f);
-            drawList->AddRect(rectMin, rectMax, IM_COL32(20, 20, 20, 255), 4.0f);
+        std::sort(domainNodes.begin(), domainNodes.end(), [&](uint32_t a, uint32_t b) {
+            return m_frameTaskGraphLatest.nodes[a].startTimeUs < m_frameTaskGraphLatest.nodes[b].startTimeUs;
+        });
 
-            if ((rectMax.x - rectMin.x) > 48.0f) {
-                drawList->AddText(ImVec2(rectMin.x + 6.0f, rectMin.y + 3.0f), IM_COL32(10, 10, 10, 255), aggregate.name);
+        struct SubLane { float endTimeMs; };
+        std::vector<SubLane> subLanes;
+        float domainBaseY = currentY;
+
+        for (uint32_t idx : domainNodes) {
+            const auto& node = m_frameTaskGraphLatest.nodes[idx];
+            float startMs = static_cast<float>(node.startTimeUs) / 1000.0f;
+            float endMs = static_cast<float>(node.startTimeUs + node.durationUs) / 1000.0f;
+
+            int subLane = -1;
+            for (int s = 0; s < static_cast<int>(subLanes.size()); ++s) {
+                if (subLanes[s].endTimeMs <= startMs) {
+                    subLane = s;
+                    break;
+                }
             }
-
-            if (m_frameTaskGraphShowLatestOverlay) {
-                const float latestStartNorm = static_cast<float>(aggregate.latestStartUs) / frameSpanUs;
-                const float latestEndNorm = static_cast<float>(aggregate.latestStartUs + aggregate.latestSpanUs) / frameSpanUs;
-                const float latestX0 = origin.x + labelWidth + latestStartNorm * timelineWidth;
-                const float latestX1 = origin.x + labelWidth + (std::max)(latestEndNorm * timelineWidth, latestStartNorm * timelineWidth + 2.0f);
-                drawList->AddRect(
-                    ImVec2(latestX0, laneY0 + 1.0f),
-                    ImVec2(latestX1, laneY0 + laneHeight - 1.0f),
-                    IM_COL32(255, 255, 255, 160),
-                    4.0f,
-                    0,
-                    1.5f);
+            if (subLane < 0) {
+                subLane = static_cast<int>(subLanes.size());
+                subLanes.push_back({});
             }
+            subLanes[subLane].endTimeMs = endMs;
 
-            ImGui::SetCursorScreenPos(rectMin);
-            ImGui::InvisibleButton(std::format("##CpuFrameTaskNode{}", nodeIndex).c_str(), ImVec2(rectMax.x - rectMin.x, rectMax.y - rectMin.y));
-            if (ImGui::IsItemHovered()) {
-                ImGui::BeginTooltip();
-                ImGui::TextUnformatted(aggregate.name);
-                ImGui::Text("Domain: %s", domainName(aggregate.domain));
-                ImGui::Text("Avg start: %.3f ms", static_cast<double>(aggregate.avgStartUs) / 1000.0);
-                ImGui::Text("Avg span: %.3f ms", static_cast<double>(aggregate.avgSpanUs) / 1000.0);
-                ImGui::Text("Avg busy: %.3f ms", static_cast<double>(aggregate.avgTotalDurationUs) / 1000.0);
-                ImGui::Text("Latest busy: %.3f ms", static_cast<double>(aggregate.latestTotalDurationUs) / 1000.0);
-                ImGui::Text("Min/max busy: %.3f / %.3f ms", static_cast<double>(aggregate.minTotalDurationUs) / 1000.0, static_cast<double>(aggregate.maxTotalDurationUs) / 1000.0);
-                ImGui::Text("Avg/latest dispatches: %u / %u", aggregate.avgDispatchCount, aggregate.latestDispatchCount);
-                ImGui::Text("Samples: %u", aggregate.sampleCount);
-                ImGui::Text("Dependency: %d", aggregate.dependencyNodeIndex);
-                ImGui::EndTooltip();
-            }
+            float y = domainBaseY + subLane * kSubLaneHeight + kSubLaneHeight * 0.5f;
+            nodeLayouts[idx] = { y, startMs, endMs };
         }
 
-        ImGui::Dummy(ImVec2(width, timelineHeight));
+        float domainHeight = (std::max)(1.0f, static_cast<float>(subLanes.size())) * kSubLaneHeight;
+        domainLabelY[di] = domainBaseY + domainHeight * 0.5f;
+        currentY = domainBaseY + domainHeight + kDomainGap;
     }
-    ImGui::EndChild();
+
+    float totalYRange = (std::max)(currentY, 1.0f);
+    float ganttPlotHeight = (std::max)(200.0f, (std::min)(totalYRange * 35.0f, 500.0f));
+
+    uint64_t timelineFrameEndUs = 0;
+    for (uint32_t i = 0; i < m_frameTaskGraphLatest.nodeCount; ++i) {
+        const auto& n = m_frameTaskGraphLatest.nodes[i];
+        if (!isWaitForFrame(n.name))
+            timelineFrameEndUs = (std::max)(timelineFrameEndUs, n.startTimeUs + n.durationUs);
+    }
+
+    if (ImPlot::BeginPlot("##CpuTaskGantt", ImVec2(-1.0f, ganttPlotHeight), ImPlotFlags_NoLegend)) {
+        ImPlot::SetupAxes("Time (ms)", nullptr, 0, ImPlotAxisFlags_Invert | ImPlotAxisFlags_NoGridLines);
+        const double maxTimeMs = static_cast<double>(timelineFrameEndUs) / 1000.0 * 1.05;
+        ImPlot::SetupAxisLimits(ImAxis_X1, 0.0, (std::max)(maxTimeMs, 0.1), ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, -0.5, static_cast<double>(totalYRange) + 0.5, ImPlotCond_Always);
+
+        std::vector<double> yTicks;
+        std::vector<const char*> yLabels;
+        for (int di = 0; di < 4; ++di) {
+            if (domainHasNodes[di]) {
+                yTicks.push_back(static_cast<double>(domainLabelY[di]));
+                yLabels.push_back(domainName(static_cast<br::telemetry::CpuTaskDomain>(kDomainOrder[di])));
+            }
+        }
+        if (!yTicks.empty()) {
+            ImPlot::SetupAxisTicks(ImAxis_Y1, yTicks.data(), static_cast<int>(yTicks.size()), yLabels.data());
+        }
+
+        ImDrawList* drawList = ImPlot::GetPlotDrawList();
+
+        // Draw domain swim-lane backgrounds
+        for (int di = 0; di < 4; ++di) {
+            if (!domainHasNodes[di]) continue;
+            float dMinY = 1e9f, dMaxY = -1e9f;
+            for (uint32_t i = 0; i < m_frameTaskGraphLatest.nodeCount; ++i) {
+                if (m_frameTaskGraphLatest.nodes[i].domain == static_cast<br::telemetry::CpuTaskDomain>(kDomainOrder[di])) {
+                    dMinY = (std::min)(dMinY, nodeLayouts[i].yCenter - kBarHeight * 0.5f);
+                    dMaxY = (std::max)(dMaxY, nodeLayouts[i].yCenter + kBarHeight * 0.5f);
+                }
+            }
+            ImVec2 bgMin = ImPlot::PlotToPixels(0.0, static_cast<double>(dMinY - 0.15f));
+            ImVec2 bgMax = ImPlot::PlotToPixels(maxTimeMs, static_cast<double>(dMaxY + 0.15f));
+            drawList->AddRectFilled(bgMin, bgMax, IM_COL32(40, 40, 40, 80), 4.0f);
+        }
+
+        // Draw task bars
+        for (uint32_t i = 0; i < m_frameTaskGraphLatest.nodeCount; ++i) {
+            const auto& node = m_frameTaskGraphLatest.nodes[i];
+            if (isWaitForFrame(node.name)) continue;
+            const auto& layout = nodeLayouts[i];
+
+            ImVec2 pMin = ImPlot::PlotToPixels(
+                static_cast<double>(layout.startMs),
+                static_cast<double>(layout.yCenter - kBarHeight * 0.5f));
+            ImVec2 pMax = ImPlot::PlotToPixels(
+                static_cast<double>(layout.endMs),
+                static_cast<double>(layout.yCenter + kBarHeight * 0.5f));
+
+            if (pMax.x - pMin.x < 3.0f) pMax.x = pMin.x + 3.0f;
+
+            ImU32 color = domainColor(node.domain);
+            drawList->AddRectFilled(pMin, pMax, color, 3.0f);
+            drawList->AddRect(pMin, pMax, IM_COL32(20, 20, 20, 200), 3.0f);
+
+            float barPx = pMax.x - pMin.x;
+            if (barPx > 44.0f) {
+                drawList->AddText(nullptr, 0.0f,
+                    ImVec2(pMin.x + 4.0f, pMin.y + 1.0f),
+                    IM_COL32(10, 10, 10, 255), node.name, nullptr, barPx - 6.0f);
+            }
+        }
+
+        // Draw dependency arrows
+        for (uint32_t i = 0; i < m_frameTaskGraphLatest.nodeCount; ++i) {
+            const auto& node = m_frameTaskGraphLatest.nodes[i];
+            if (isWaitForFrame(node.name)) continue;
+            if (node.dependencyNodeIndex < 0 ||
+                static_cast<uint32_t>(node.dependencyNodeIndex) >= m_frameTaskGraphLatest.nodeCount)
+                continue;
+            if (isWaitForFrame(m_frameTaskGraphLatest.nodes[static_cast<uint32_t>(node.dependencyNodeIndex)].name))
+                continue;
+
+            const auto& depLayout = nodeLayouts[static_cast<uint32_t>(node.dependencyNodeIndex)];
+            const auto& thisLayout = nodeLayouts[i];
+
+            ImVec2 from = ImPlot::PlotToPixels(
+                static_cast<double>(depLayout.endMs),
+                static_cast<double>(depLayout.yCenter));
+            ImVec2 to = ImPlot::PlotToPixels(
+                static_cast<double>(thisLayout.startMs),
+                static_cast<double>(thisLayout.yCenter));
+
+            const ImU32 arrowColor = IM_COL32(255, 220, 80, 200);
+            drawList->AddLine(from, to, arrowColor, 1.5f);
+
+            // Arrowhead
+            float dx = to.x - from.x;
+            float dy = to.y - from.y;
+            float lenSq = dx * dx + dy * dy;
+            if (lenSq > 4.0f) {
+                float invLen = 1.0f / std::sqrt(lenSq);
+                dx *= invLen;
+                dy *= invLen;
+                constexpr float arrowSz = 7.0f;
+                ImVec2 p1(to.x - dx * arrowSz - dy * arrowSz * 0.4f,
+                          to.y - dy * arrowSz + dx * arrowSz * 0.4f);
+                ImVec2 p2(to.x - dx * arrowSz + dy * arrowSz * 0.4f,
+                          to.y - dy * arrowSz - dx * arrowSz * 0.4f);
+                drawList->AddTriangleFilled(to, p1, p2, arrowColor);
+            }
+        }
+
+        // Tooltip on hover
+        if (ImPlot::IsPlotHovered()) {
+            ImPlotPoint mouse = ImPlot::GetPlotMousePos();
+            for (uint32_t i = 0; i < m_frameTaskGraphLatest.nodeCount; ++i) {
+                if (isWaitForFrame(m_frameTaskGraphLatest.nodes[i].name)) continue;
+                const auto& layout = nodeLayouts[i];
+                if (mouse.x >= static_cast<double>(layout.startMs) &&
+                    mouse.x <= static_cast<double>(layout.endMs) &&
+                    mouse.y >= static_cast<double>(layout.yCenter - kBarHeight * 0.5f) &&
+                    mouse.y <= static_cast<double>(layout.yCenter + kBarHeight * 0.5f)) {
+                    const auto& node = m_frameTaskGraphLatest.nodes[i];
+                    ImGui::BeginTooltip();
+                    ImGui::TextUnformatted(node.name);
+                    ImGui::Text("Domain: %s", domainName(node.domain));
+                    ImGui::Text("Start: %.3f ms", static_cast<double>(node.startTimeUs) / 1000.0);
+                    ImGui::Text("Duration: %.3f ms", static_cast<double>(node.durationUs) / 1000.0);
+                    if (node.dependencyNodeIndex >= 0 &&
+                        static_cast<uint32_t>(node.dependencyNodeIndex) < m_frameTaskGraphLatest.nodeCount) {
+                        ImGui::Text("Depends on: %s",
+                            m_frameTaskGraphLatest.nodes[node.dependencyNodeIndex].name);
+                    }
+                    ImGui::EndTooltip();
+                    break;
+                }
+            }
+        }
+
+        ImPlot::EndPlot();
+    }
 
     ImGui::SeparatorText("Stages");
     if (ImGui::BeginTable("##CpuFrameTaskStages", 9, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
@@ -2120,6 +2259,7 @@ inline void Menu::DrawFrameTaskGraphWindow() {
 
         for (size_t nodeIndex = 0; nodeIndex < stageAggregates.size(); ++nodeIndex) {
             const auto& aggregate = stageAggregates[nodeIndex];
+            if (isWaitForFrame(aggregate.name)) continue;
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
             ImGui::TextUnformatted(aggregate.name);

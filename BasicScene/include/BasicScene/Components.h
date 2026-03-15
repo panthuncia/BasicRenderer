@@ -153,6 +153,9 @@ namespace Components {
             : meshInstances(std::move(instances)) {
         }
         std::vector<std::shared_ptr<MeshInstance>> meshInstances;
+        uint64_t generation = 0;
+
+        void BumpGeneration() { ++generation; }
     };
 
 } // namespace Components
