@@ -7,13 +7,15 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 #include <atlbase.h>
+#include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <typeindex>
+#include <utility>
 
 #include <rhi_interop_dx12.h>
 #include <tracy/Tracy.hpp>
 #include <spdlog/spdlog.h>
-
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
@@ -48,7 +50,7 @@
 #include "Aftermath/GFSDK_Aftermath.h"
 #include "NsightAftermathHelpers.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
-#include "Managers/Singletons/ECSManager.h"
+#include "Managers/Singletons/RendererECSManager.h"
 #include "Managers/IndirectCommandBufferManager.h"
 #include "Utilities/MathUtils.h"
 #include "Scene/MovementState.h"
@@ -70,6 +72,7 @@
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "Render/Runtime/UploadPolicyServiceAccess.h"
 #include "Render/Runtime/DescriptorServiceAccess.h"
+#include "Render/TbbTaskService.h"
 
 void D3D12DebugCallback(
     D3D12_MESSAGE_CATEGORY Category,
@@ -110,10 +113,10 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     UpscalingManager::GetInstance().InitFFX(); // Needs device
     FFXManager::GetInstance().InitFFX();
     SetSettings();
-    ECSManager::GetInstance().Initialize();
+    RendererECSManager::GetInstance().Initialize();
     TrackedEntityToken::SetHooks({
         .isRuntimeAlive = []() {
-            return ECSManager::GetInstance().IsAlive();
+            return RendererECSManager::GetInstance().IsAlive();
         },
         .destroyEntity = [](flecs::world& world, flecs::entity_t id) {
             flecs::entity entity{ world, id };
@@ -124,16 +127,19 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
         });
 
     Resource::SetEntityHooks({
-        .createEntity = []() -> flecs::entity {
-            return ECSManager::GetInstance().GetWorld().entity();
+        .createEntity = []() -> Resource::ECSEntityHandle {
+            auto& world = RendererECSManager::GetInstance().GetWorld();
+            auto entity = world.entity();
+            return { .world = &world, .id = entity.id() };
         },
-        .destroyEntity = [](flecs::entity& entity) {
-            if (entity && entity.is_alive()) {
-                entity.destruct();
+        .destroyEntity = [](flecs::world& world, flecs::entity_t id) {
+			flecs::entity entity{ world, id };
+			if (entity.is_alive()) {
+				entity.destruct();
             }
         },
         .isRuntimeAlive = []() {
-            return ECSManager::GetInstance().IsAlive();
+            return RendererECSManager::GetInstance().IsAlive();
         }
         });
 
@@ -158,6 +164,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     }
     ResourceManager::GetInstance().Initialize();
     TaskSchedulerManager::GetInstance().Initialize(16);
+    currentRenderGraph->SetTaskService(std::make_shared<br::TbbTaskService>());
     PSOManager::GetInstance().initialize();
     DeletionManager::GetInstance().Initialize();
 	CommandSignatureManager::GetInstance().Initialize();
@@ -215,117 +222,332 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_warnedMissingPrimaryCamera = false;
     m_warnedUsingFallbackEnvironment = false;
 
-    auto& world = ECSManager::GetInstance().GetWorld();
-    world.component<Components::GlobalMeshLibrary>().add(flecs::Exclusive);
-	world.add<Components::GlobalMeshLibrary>();
-    world.component<Components::DrawStats>("DrawStats").add(flecs::Exclusive);
-    world.component<Components::ActiveScene>().add(flecs::OnInstantiate, flecs::Inherit);
-    world.set<Components::DrawStats>({ 0, {} });
+	m_isInitialized = true;
+}
 
-	//RegisterAllSystems(world, m_pLightManager.get(), m_pMeshManager.get(), m_pObjectManager.get(), m_pIndirectCommandBufferManager.get(), m_pCameraManager.get());
-    m_hierarchySystem =
-        world.system<const Components::Position, const Components::Rotation, const Components::Scale, const Components::Matrix*, Components::Matrix>()
-        .with<Components::Active>()
-        .term_at(3).parent().cascade()
-        .cached().cache_kind(flecs::QueryCacheAll)
-        .each([&](flecs::entity entity, const Components::Position& position, const Components::Rotation& rotation, const Components::Scale& scale, const Components::Matrix* matrix, Components::Matrix& mOut) {
-        XMMATRIX matRotation = XMMatrixRotationQuaternion(rotation.rot);
-        XMMATRIX matTranslation = XMMatrixTranslationFromVector(position.pos);
-        XMMATRIX matScale = XMMatrixScalingFromVector(scale.scale);
-        mOut.matrix = (matScale * matRotation * matTranslation);
-        if (matrix != nullptr) {
-            mOut.matrix = mOut.matrix * matrix->matrix;
+void Renderer::RunGameUpdateStage(float elapsedSeconds) {
+    ZoneScopedN("Renderer::Update::GameUpdate");
+    currentScene->Update(elapsedSeconds);
+}
+
+void Renderer::RunAnimationUpdateStage(float elapsedSeconds) {
+    ZoneScopedN("Renderer::Update::AnimationUpdate");
+    m_pSkeletonManager->TickAnimations(elapsedSeconds);
+    m_pSkeletonManager->UpdateAllDirtyInstances();
+}
+
+void Renderer::RunTransformPropagationStage() {
+    ZoneScopedN("Renderer::Update::TransformPropagation");
+    currentScene->PropagateTransforms();
+}
+
+void Renderer::RunSceneBridgeSyncStage() {
+    ZoneScopedN("Renderer::Update::SceneBridgeSync");
+    m_sceneRenderBridge.Sync(*currentScene, m_managerInterface);
+}
+
+void Renderer::BootstrapCommittedSceneSnapshot() {
+    if (!currentScene) {
+        std::scoped_lock lock(m_sceneSnapshotMutex);
+        m_committedSceneSnapshot.reset();
+        return;
+    }
+
+    auto snapshot = std::make_shared<br::render::SceneFrameSnapshot>(
+        m_sceneRenderBridge.ExportSnapshot(*currentScene, m_nextSceneSnapshotSequence++, m_totalFramesRendered));
+    m_sceneRenderBridge.IngestSnapshot(*snapshot, m_managerInterface);
+
+    std::scoped_lock lock(m_sceneSnapshotMutex);
+    m_committedSceneSnapshot = std::move(snapshot);
+    m_lastCommittedSceneSnapshotSequence = m_committedSceneSnapshot->snapshotSequence;
+    m_lastCommittedSceneSourceFrame = m_committedSceneSnapshot->sourceFrameNumber;
+}
+
+void Renderer::CommitCompletedSceneSnapshot() {
+    if (!m_sceneTaskCompleted.exchange(false)) {
+        return;
+    }
+
+    std::shared_ptr<br::render::SceneFrameSnapshot> completedSnapshot;
+    {
+        std::scoped_lock lock(m_sceneSnapshotMutex);
+        completedSnapshot = std::exchange(m_completedSceneSnapshot, nullptr);
+    }
+
+    if (!completedSnapshot) {
+        return;
+    }
+
+    if (!currentScene || completedSnapshot->sceneID != currentScene->GetSceneID()) {
+        return;
+    }
+
+    m_sceneRenderBridge.IngestSnapshot(*completedSnapshot, m_managerInterface);
+    {
+        std::scoped_lock lock(m_sceneSnapshotMutex);
+        m_committedSceneSnapshot = std::move(completedSnapshot);
+        m_lastCommittedSceneSnapshotSequence = m_committedSceneSnapshot->snapshotSequence;
+        m_lastCommittedSceneSourceFrame = m_committedSceneSnapshot->sourceFrameNumber;
+    }
+}
+
+void Renderer::ScheduleSceneUpdateTask(float elapsedSeconds) {
+    if (!m_sceneRenderOverlapEnabled || !currentScene || m_sceneTaskInFlight.exchange(true)) {
+        return;
+    }
+
+    auto scene = currentScene;
+    const auto movementSnapshot = movementState;
+    const float verticalAngleSnapshot = verticalAngle;
+    const float horizontalAngleSnapshot = horizontalAngle;
+    const uint64_t snapshotSequence = m_nextSceneSnapshotSequence++;
+    const uint64_t sourceFrameNumber = m_totalFramesRendered + 1;
+
+    verticalAngle = 0.0f;
+    horizontalAngle = 0.0f;
+
+    TaskSchedulerManager::GetInstance().RunBackgroundTask("SceneUpdateOverlap", [this, scene, elapsedSeconds, movementSnapshot, verticalAngleSnapshot, horizontalAngleSnapshot, snapshotSequence, sourceFrameNumber]() mutable {
+        const auto taskStart = std::chrono::steady_clock::now();
+
+        if (!scene) {
+            m_sceneTaskInFlight.store(false);
+            return;
         }
 
-        if (entity.has<Components::RenderableObject>() && entity.has<Components::ObjectDrawInfo>()) {
-            Components::RenderableObject& object = entity.get_mut<Components::RenderableObject>();
-            Components::ObjectDrawInfo& drawInfo = entity.get_mut<Components::ObjectDrawInfo>();
+        if (scene->HasUsablePrimaryCamera()) {
+            Components::Position& cameraPosition = scene->GetPrimaryCameraPosition();
+            Components::Rotation& cameraRotation = scene->GetPrimaryCameraRotation();
+            ApplyMovement(cameraPosition, cameraRotation, movementSnapshot, elapsedSeconds);
+            RotatePitchYaw(cameraRotation, verticalAngleSnapshot, horizontalAngleSnapshot);
+            scene->GetPrimaryCamera().modified<Components::Position>();
+            scene->GetPrimaryCamera().modified<Components::Rotation>();
+        }
 
-            object.perObjectCB.prevModelMatrix = object.perObjectCB.modelMatrix;
-            object.perObjectCB.modelMatrix = mOut.matrix;
+        scene->Update(elapsedSeconds);
+        scene->PropagateTransforms();
 
-            // Detect mirrored (negative-determinant) transforms and set the reverse-winding flag
-            XMVECTOR det = XMMatrixDeterminant(mOut.matrix);
-            object.perObjectCB.objectFlags = (XMVectorGetX(det) < 0.0f) ? OBJECT_FLAG_REVERSE_WINDING : 0u;
+        auto snapshot = std::make_shared<br::render::SceneFrameSnapshot>(
+            m_sceneRenderBridge.ExportSnapshot(*scene, snapshotSequence, sourceFrameNumber));
 
-            m_managerInterface.GetObjectManager()->UpdatePerObjectBuffer(drawInfo.perObjectCBView.get(), object.perObjectCB);
+        const auto taskEnd = std::chrono::steady_clock::now();
+        const auto durationMs = std::chrono::duration<double, std::milli>(taskEnd - taskStart).count();
 
-            auto& modelMatrix = object.perObjectCB.modelMatrix;
-            XMMATRIX upperLeft3x3 = XMMatrixSet(
+        {
+            std::scoped_lock lock(m_sceneSnapshotMutex);
+            m_completedSceneSnapshot = std::move(snapshot);
+            m_lastCompletedSceneSnapshotSequence = snapshotSequence;
+            m_lastSceneTaskDurationMs = durationMs;
+        }
+
+        m_sceneTaskCompleted.store(true);
+        m_sceneTaskInFlight.store(false);
+    });
+}
+
+bool Renderer::HasCommittedSceneSnapshot() const {
+    std::scoped_lock lock(m_sceneSnapshotMutex);
+    return static_cast<bool>(m_committedSceneSnapshot);
+}
+
+bool Renderer::NeedsSceneSnapshotBootstrap() const {
+    if (!m_sceneRenderOverlapEnabled || !currentScene || m_sceneTaskInFlight.load()) {
+        return false;
+    }
+
+    if (!currentScene->HasUsablePrimaryCamera()) {
+        return false;
+    }
+
+    return !HasCommittedSceneSnapshot() || !m_sceneRenderBridge.HasPrimaryCamera();
+}
+
+br::render::SceneOverlapStatus Renderer::GetSceneOverlapStatus() const {
+    br::render::SceneOverlapStatus status;
+    status.enabled = m_sceneRenderOverlapEnabled;
+    status.taskInFlight = m_sceneTaskInFlight.load();
+
+    std::scoped_lock lock(m_sceneSnapshotMutex);
+    status.hasCommittedSnapshot = static_cast<bool>(m_committedSceneSnapshot);
+    status.committedSnapshotSequence = m_lastCommittedSceneSnapshotSequence;
+    status.lastCompletedSnapshotSequence = m_lastCompletedSceneSnapshotSequence;
+    status.lastCommittedSourceFrame = m_lastCommittedSceneSourceFrame;
+    status.lastTaskDurationMs = m_lastSceneTaskDurationMs;
+    if (m_completedSceneSnapshot) {
+        status.pendingSnapshotSequence = m_completedSceneSnapshot->snapshotSequence;
+    }
+
+    return status;
+}
+
+void Renderer::RunRenderResourceSyncStage() {
+    ZoneScopedN("Renderer::Update::RenderResourceSync");
+
+    auto& world = RendererECSManager::GetInstance().GetWorld();
+
+    if (!m_renderSyncQueriesBuilt) {
+        m_renderSyncObjectQuery = world.query_builder<Components::Matrix, Components::RenderableObject, Components::ObjectDrawInfo>()
+            .with<Components::Active>()
+            .build();
+        m_renderSyncCameraQuery = world.query_builder<Components::Matrix, Components::Camera, Components::RenderViewRef>()
+            .with<Components::Active>()
+            .build();
+        m_renderSyncLightQuery = world.query_builder<Components::Matrix, Components::Light>()
+            .with<Components::Active>()
+            .build();
+        m_renderTransformUpdatedCleanupQuery = world.query_builder<>()
+            .with<Components::RenderTransformUpdated>()
+            .build();
+        m_renderSyncQueriesBuilt = true;
+    }
+
+    // Collect object entity data for parallel processing
+    struct ObjectSyncItem {
+        Components::Matrix* worldMatrix;
+        Components::RenderableObject* object;
+        Components::ObjectDrawInfo* drawInfo;
+    };
+    std::vector<ObjectSyncItem> objectItems;
+    m_renderSyncObjectQuery.run([&](flecs::iter& it) {
+        while (it.next()) {
+            auto matrices = it.field<Components::Matrix>(0);
+            auto objects = it.field<Components::RenderableObject>(1);
+            auto drawInfos = it.field<Components::ObjectDrawInfo>(2);
+            for (auto i : it) {
+                objectItems.push_back({ &matrices[i], &objects[i], &drawInfos[i] });
+            }
+        }
+    });
+
+    auto* objectManager = m_managerInterface.GetObjectManager();
+
+    // Pre-size scratch buffers single-threaded so the parallel loop can
+    // memcpy into non-overlapping regions without any synchronization.
+    auto perObjectHandle = objectManager->BeginPerObjectBulkWrite();
+    auto normalMatrixHandle = objectManager->BeginNormalMatrixBulkWrite();
+
+    TaskSchedulerManager::GetInstance().ParallelFor("ObjectSync", objectItems.size(),
+        [&objectItems, &perObjectHandle, &normalMatrixHandle](size_t idx) {
+            auto& [worldMatrix, object, drawInfo] = objectItems[idx];
+            object->perObjectCB.prevModelMatrix = object->perObjectCB.modelMatrix;
+            object->perObjectCB.modelMatrix = worldMatrix->matrix;
+
+            const XMVECTOR det = XMMatrixDeterminant(worldMatrix->matrix);
+            object->perObjectCB.objectFlags = (XMVectorGetX(det) < 0.0f) ? OBJECT_FLAG_REVERSE_WINDING : 0u;
+
+            // Write per-object data directly into the scratch buffer (lock-free).
+            {
+                const size_t offset = drawInfo->perObjectCBView->GetOffset();
+                const size_t sz = sizeof(PerObjectCB);
+                std::memcpy(perObjectHandle.data + offset, &object->perObjectCB, sz);
+            }
+
+            const auto& modelMatrix = object->perObjectCB.modelMatrix;
+            const XMMATRIX upperLeft3x3 = XMMatrixSet(
                 XMVectorGetX(modelMatrix.r[0]), XMVectorGetY(modelMatrix.r[0]), XMVectorGetZ(modelMatrix.r[0]), 0.0f,
                 XMVectorGetX(modelMatrix.r[1]), XMVectorGetY(modelMatrix.r[1]), XMVectorGetZ(modelMatrix.r[1]), 0.0f,
                 XMVectorGetX(modelMatrix.r[2]), XMVectorGetY(modelMatrix.r[2]), XMVectorGetZ(modelMatrix.r[2]), 0.0f,
-                0.0f, 0.0f, 0.0f, 1.0f
-            );
+                0.0f, 0.0f, 0.0f, 1.0f);
             XMMATRIX normalMat = XMMatrixInverse(nullptr, upperLeft3x3);
-            m_managerInterface.GetObjectManager()->UpdateNormalMatrixBuffer(drawInfo.normalMatrixView.get(), &normalMat);
+
+            // Write normal matrix directly into the scratch buffer (lock-free).
+            {
+                const size_t offset = drawInfo->normalMatrixView->GetOffset();
+                const size_t sz = sizeof(DirectX::XMFLOAT4X4);
+                DirectX::XMFLOAT4X4 stored;
+                XMStoreFloat4x4(&stored, normalMat);
+                std::memcpy(normalMatrixHandle.data + offset, &stored, sz);
+            }
+        });
+
+    // Register dirty ranges single-threaded.
+    // Mark the entire used portion dirty — the coalescer handles this efficiently.
+    if (!objectItems.empty()) {
+        objectManager->EndPerObjectBulkWrite(0, perObjectHandle.capacity);
+        objectManager->EndNormalMatrixBulkWrite(0, normalMatrixHandle.capacity);
+    }
+
+    m_renderSyncCameraQuery.each([&](flecs::entity entity, Components::Matrix& worldMatrix, Components::Camera& camera, Components::RenderViewRef& renderView) {
+        const XMMATRIX cameraModel = RemoveScalingFromMatrix(worldMatrix.matrix);
+        const XMMATRIX view = XMMatrixInverse(nullptr, cameraModel);
+        DirectX::XMMATRIX projection = camera.info.unjitteredProjection;
+        camera.info.prevJitteredProjection = camera.info.jitteredProjection;
+        if (m_jitter && entity.has<Components::PrimaryCamera>()) {
+            const auto jitterPixelSpace = UpscalingManager::GetInstance().GetJitter(m_totalFramesRendered);
+            camera.jitterPixelSpace = jitterPixelSpace;
+            const auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+            const DirectX::XMFLOAT2 jitterNDC = {
+                (jitterPixelSpace.x / renderRes.x),
+                (jitterPixelSpace.y / renderRes.y)
+            };
+            camera.jitterNDC = jitterNDC;
+            const auto jitterMatrix = DirectX::XMMatrixTranslation(jitterNDC.x, jitterNDC.y, 0.0f);
+            projection = XMMatrixMultiply(projection, jitterMatrix);
         }
 
-        if (entity.has<Components::Camera>() && entity.has<Components::RenderViewRef>()) {
-            auto cameraModel = RemoveScalingFromMatrix(mOut.matrix);
+        camera.info.jitteredProjection = projection;
+        camera.info.prevView = camera.info.view;
+        camera.info.view = view;
+        camera.info.viewInverse = cameraModel;
+        camera.info.viewProjection = XMMatrixMultiply(camera.info.view, projection);
+        camera.info.projectionInverse = XMMatrixInverse(nullptr, projection);
 
-            Components::Camera& camera = entity.get_mut<Components::Camera>();
+        const auto pos = GetGlobalPositionFromMatrix(worldMatrix.matrix);
+        camera.info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0f };
 
-			auto view = XMMatrixInverse(nullptr, cameraModel);
-			DirectX::XMMATRIX projection = camera.info.unjitteredProjection;
-			camera.info.prevJitteredProjection = camera.info.jitteredProjection; // Save previous jittered projection matrix
-            if (m_jitter && entity.has<Components::PrimaryCamera>()) {
-                // Apply jitter
-                auto jitterPixelSpace = UpscalingManager::GetInstance().GetJitter(m_totalFramesRendered);
-                camera.jitterPixelSpace = jitterPixelSpace;
-                auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
-                DirectX::XMFLOAT2 jitterNDC = {
-                    (jitterPixelSpace.x / renderRes.x),
-                    (jitterPixelSpace.y / renderRes.y)
-                };
-				camera.jitterNDC = jitterNDC;
-				auto jitterMatrix = DirectX::XMMatrixTranslation(jitterNDC.x, jitterNDC.y, 0.0f);
-				projection = XMMatrixMultiply(projection, jitterMatrix); // Apply jitter to projection matrix
-            }
+        m_managerInterface.GetViewManager()->UpdateCamera(renderView.viewID, camera.info);
+    });
 
-			camera.info.jitteredProjection = projection; // Save jittered projection matrix
-            camera.info.prevView = camera.info.view; // Save view from last frame
-
-            camera.info.view = view;
-			camera.info.viewInverse = cameraModel;
-            camera.info.viewProjection = XMMatrixMultiply(camera.info.view, projection);
-			camera.info.projectionInverse = XMMatrixInverse(nullptr, projection);
-
-            auto pos = GetGlobalPositionFromMatrix(mOut.matrix);
-            camera.info.positionWorldSpace = { pos.x, pos.y, pos.z, 1.0 };
-
-            auto renderView = entity.get_mut<Components::RenderViewRef>();
-            m_managerInterface.GetViewManager()->UpdateCamera(renderView.viewID, camera.info);
+    m_renderSyncLightQuery.each([&](flecs::entity entity, Components::Matrix& worldMatrix, Components::Light& light) {
+        const XMVECTOR worldForward = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
+        light.lightInfo.dirWorldSpace = XMVector3Normalize(XMVector3TransformNormal(worldForward, worldMatrix.matrix));
+        light.lightInfo.posWorldSpace = XMVectorSet(
+            XMVectorGetX(worldMatrix.matrix.r[3]),
+            XMVectorGetY(worldMatrix.matrix.r[3]),
+            XMVectorGetZ(worldMatrix.matrix.r[3]),
+            1.0f);
+        switch (light.lightInfo.type) {
+        case Components::LightType::Spot:
+            light.lightInfo.boundingSphere = ComputeConeBoundingSphere(light.lightInfo.posWorldSpace, light.lightInfo.dirWorldSpace, light.lightInfo.maxRange, acos(light.lightInfo.outerConeAngle));
+            break;
+        case Components::LightType::Point:
+            light.lightInfo.boundingSphere = {{
+                XMVectorGetX(worldMatrix.matrix.r[3]),
+                XMVectorGetY(worldMatrix.matrix.r[3]),
+                XMVectorGetZ(worldMatrix.matrix.r[3]),
+                light.lightInfo.maxRange }};
+            break;
+        default:
+            break;
         }
 
-        if (entity.has<Components::Light>()) {
-            Components::Light& light = entity.get_mut<Components::Light>();
-            XMVECTOR worldForward = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
-            light.lightInfo.dirWorldSpace = XMVector3Normalize(XMVector3TransformNormal(worldForward, mOut.matrix));
-            light.lightInfo.posWorldSpace = XMVectorSet(XMVectorGetX(mOut.matrix.r[3]),  // _41
-                XMVectorGetY(mOut.matrix.r[3]),  // _42
-                XMVectorGetZ(mOut.matrix.r[3]),  // _43
-                1.0f);
-            switch(light.lightInfo.type){
-            case Components::LightType::Spot:
-                light.lightInfo.boundingSphere = ComputeConeBoundingSphere(light.lightInfo.posWorldSpace, light.lightInfo.dirWorldSpace, light.lightInfo.maxRange, acos(light.lightInfo.outerConeAngle));
-                break;
-            case Components::LightType::Point:
-                light.lightInfo.boundingSphere = { {XMVectorGetX(mOut.matrix.r[3]),  // _41
-                    XMVectorGetY(mOut.matrix.r[3]),  // _42
-                    XMVectorGetZ(mOut.matrix.r[3]),  // _43
-                    light.lightInfo.maxRange} };
-            }
-
-            if (light.lightInfo.shadowCaster) {
-				const Components::LightViewInfo& viewInfo = entity.get<Components::LightViewInfo>();
-				m_managerInterface.GetLightManager()->UpdateLightBufferView(viewInfo.lightBufferView.get(), light.lightInfo);
-				m_managerInterface.GetLightManager()->UpdateLightViewInfo(entity);
-            }
+        if (light.lightInfo.shadowCaster && entity.has<Components::LightViewInfo>()) {
+            const Components::LightViewInfo& viewInfo = entity.get<Components::LightViewInfo>();
+            m_managerInterface.GetLightManager()->UpdateLightBufferView(viewInfo.lightBufferView.get(), light.lightInfo);
+            m_managerInterface.GetLightManager()->UpdateLightViewInfo(entity);
         }
+    });
 
-            });
-	m_isInitialized = true;
+    // Clean up RenderTransformUpdated tags so they're fresh for next frame's IngestSnapshot
+    m_renderTransformUpdatedCleanupQuery.each([](flecs::entity e) {
+        e.remove<Components::RenderTransformUpdated>();
+    });
+}
+
+void Renderer::BeginFrameTaskGraphCapture() {
+    br::telemetry::BeginFrameTaskGraphCapture(m_totalFramesRendered, m_frameIndex);
+    m_lastFrameTaskNodeIndex = -1;
+}
+
+void Renderer::RecordFrameTaskStage(
+    const char* stageName,
+    br::telemetry::CpuTaskDomain domain,
+    const std::chrono::steady_clock::time_point& stageStart,
+    const std::chrono::steady_clock::time_point& stageEnd) {
+    m_lastFrameTaskNodeIndex = br::telemetry::RecordFrameTaskNode(stageName, domain, m_lastFrameTaskNodeIndex, stageStart, stageEnd);
+}
+
+void Renderer::PublishFrameTaskGraphCapture() {
+    br::telemetry::PublishFrameTaskGraphSnapshot();
 }
 
 void Renderer::CreateGlobalResources() {
@@ -376,12 +598,9 @@ bool Renderer::IsSceneReadyForFrame(bool logWarnings) {
 
     m_warnedNullScene = false;
 
-    auto& primaryCamera = currentScene->GetPrimaryCamera();
-    const bool hasPrimaryCamera = primaryCamera
-        && primaryCamera.is_alive()
-        && primaryCamera.has<Components::Camera>()
-        && primaryCamera.has<Components::DepthMap>()
-        && primaryCamera.has<Components::RenderViewRef>();
+    const bool hasPrimaryCamera = m_sceneRenderOverlapEnabled
+        ? (NeedsSceneSnapshotBootstrap() || (HasCommittedSceneSnapshot() && m_sceneRenderBridge.HasPrimaryCamera()))
+        : currentScene->HasUsablePrimaryCamera();
 
     if (!hasPrimaryCamera) {
         if (logWarnings && !m_warnedMissingPrimaryCamera) {
@@ -393,6 +612,50 @@ bool Renderer::IsSceneReadyForFrame(bool logWarnings) {
 
     m_warnedMissingPrimaryCamera = false;
     return true;
+}
+
+flecs::entity Renderer::GetValidatedPrimaryRenderCamera(bool attemptResync) {
+    if (!currentScene || !RendererECSManager::GetInstance().IsAlive()) {
+        return {};
+    }
+
+    if (m_sceneRenderOverlapEnabled && !HasCommittedSceneSnapshot()) {
+        return {};
+    }
+
+    if (!m_sceneRenderOverlapEnabled && !currentScene->HasUsablePrimaryCamera()) {
+        return {};
+    }
+
+    if (m_sceneRenderOverlapEnabled && NeedsSceneSnapshotBootstrap()) {
+        if (attemptResync) {
+            BootstrapCommittedSceneSnapshot();
+        }
+
+        if (!HasCommittedSceneSnapshot()) {
+            return {};
+        }
+    }
+
+    auto validateCamera = [](flecs::entity camera) {
+        return camera
+            && camera.is_alive()
+            && camera.has<Components::Camera>()
+            && camera.has<Components::RenderViewRef>()
+            && camera.has<Components::DepthMap>();
+    };
+
+    auto primaryCamera = m_sceneRenderBridge.GetPrimaryCameraEntity();
+    if (!validateCamera(primaryCamera) && attemptResync && !m_sceneRenderOverlapEnabled) {
+        m_sceneRenderBridge.Sync(*currentScene, m_managerInterface);
+        primaryCamera = m_sceneRenderBridge.GetPrimaryCameraEntity();
+    }
+
+    if (!validateCamera(primaryCamera)) {
+        return {};
+    }
+
+    return primaryCamera;
 }
 
 void Renderer::SetSettings() {
@@ -422,9 +685,9 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<bool>("collectPipelineStatistics", false);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
-        return currentScene->GetRoot();
-        });
-    settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
+        if (!currentScene || m_sceneTaskInFlight.load()) {
+            return {};
+        }
         return currentScene->GetRoot();
         });
     bool meshShaderSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
@@ -452,7 +715,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<uint32_t>("autoAliasPoolRetireIdleFrames", 120u);
 	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
     settingsManager.registerSetting<bool>("heavyDebug", false);
-    settingsManager.registerSetting<uint32_t>("clodStreamingCpuUploadBudgetRequests", 100u);
+    settingsManager.registerSetting<uint32_t>("clodStreamingCpuUploadBudgetRequests", 50u);
 	settingsManager.registerSetting<uint32_t>("usdPointInstancerMaxInstances", 10000u);
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
@@ -593,7 +856,7 @@ void Renderer::ToggleMeshShaders(bool useMeshShaders) {
 	// 4. Remove and re-add all instances to the mesh manager
 	// 5. Remove and re-add all objects from the object manager to rebuild indirect draw info
 
-	auto& world = ECSManager::GetInstance().GetWorld();
+    auto& world = RendererECSManager::GetInstance().GetWorld();
 	auto& meshLibrary = world.get_mut<Components::GlobalMeshLibrary>().meshes;
 
 	// Remove all meshes from the mesh manager
@@ -807,55 +1070,65 @@ void Renderer::WaitForFrame(uint8_t currentFrameIndex) {
 }
 
 void Renderer::Update(float elapsedSeconds) {
-    WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
-    rg::runtime::BeginUploadPolicyFrame();
+    ZoneScopedN("Renderer::Update");
 
-    //ZoneScopedN("Renderer::Update");
+    BeginFrameTaskGraphCapture();
 
-	auto& deviceManager = DeviceManager::GetInstance();
-	auto graphicsQueue = deviceManager.GetGraphicsQueue();
-	auto computeQueue = deviceManager.GetComputeQueue();
-    if (currentRenderGraph) {
-        if (auto* statisticsService = currentRenderGraph->GetStatisticsService()) {
-            statisticsService->OnFrameComplete(m_frameIndex, computeQueue); // Gather statistics for the last iteration of the frame
-            statisticsService->OnFrameComplete(m_frameIndex, graphicsQueue); // Gather statistics for the last iteration of the frame
-        }
-    }
-
-	m_preFrameDeferredFunctions.flush(); // Execute anything we deferred until now
-
-    if (currentRenderGraph) {
-        if (auto* uploadService = currentRenderGraph->GetUploadService()) {
-            uploadService->ProcessDeferredReleases(m_frameIndex);
-        }
-    }
+    const auto runCapturedStage = [this](const char* stageName, auto&& stageFn) {
+        const auto stageStart = std::chrono::steady_clock::now();
+        stageFn();
+        const auto stageEnd = std::chrono::steady_clock::now();
+        RecordFrameTaskStage(stageName, br::telemetry::CpuTaskDomain::MainThread, stageStart, stageEnd);
+    };
 
     if (!IsSceneReadyForFrame()) {
         return;
     }
-    if (rebuildRenderGraph) {
-		CreateRenderGraph();
+    if (NeedsSceneSnapshotBootstrap()) {
+        runCapturedStage("BootstrapSceneSnapshot", [&]() {
+            ZoneScopedN("Renderer::Update::BootstrapSceneSnapshot");
+            if (currentScene->HasUsablePrimaryCamera()) {
+                Components::Position& cameraPosition = currentScene->GetPrimaryCameraPosition();
+                Components::Rotation& cameraRotation = currentScene->GetPrimaryCameraRotation();
+                ApplyMovement(cameraPosition, cameraRotation, movementState, elapsedSeconds);
+                RotatePitchYaw(cameraRotation, verticalAngle, horizontalAngle);
+                currentScene->GetPrimaryCamera().modified<Components::Position>();
+                currentScene->GetPrimaryCamera().modified<Components::Rotation>();
+                verticalAngle = 0.0f;
+                horizontalAngle = 0.0f;
+            }
+            RunGameUpdateStage(elapsedSeconds);
+            RunTransformPropagationStage();
+            BootstrapCommittedSceneSnapshot();
+        });
+    } else {
+        runCapturedStage("CommitSceneSnapshot", [&]() {
+            ZoneScopedN("Renderer::Update::CommitSceneSnapshot");
+            CommitCompletedSceneSnapshot();
+        });
     }
 
-	Components::Position& cameraPosition = currentScene->GetPrimaryCamera().get_mut<Components::Position>();
-	Components::Rotation& cameraRotation = currentScene->GetPrimaryCamera().get_mut<Components::Rotation>();
-	ApplyMovement(cameraPosition, cameraRotation, movementState, elapsedSeconds);
-	RotatePitchYaw(cameraRotation, verticalAngle, horizontalAngle);
+    runCapturedStage("AnimationUpdate", [&]() {
+        RunAnimationUpdateStage(elapsedSeconds);
+    });
+    if (rebuildRenderGraph) {
+        runCapturedStage("RenderGraphBuild", [&]() {
+            ZoneScopedN("Renderer::Update::RenderGraphBuild");
+		    CreateRenderGraph();
+        });
+    }
+    runCapturedStage("RenderResourceSync", [&]() {
+        RunRenderResourceSyncStage();
+    });
 
-    //spdlog::info("horizontal angle: {}", horizontalAngle);
-    //spdlog::info("vertical angle: {}", verticalAngle);
-    verticalAngle = 0;
-    horizontalAngle = 0;
+    auto& world = RendererECSManager::GetInstance().GetWorld();
 
-    currentScene->Update(elapsedSeconds);
-
-    m_pSkeletonManager->TickAnimations(elapsedSeconds);
-    m_pSkeletonManager->UpdateAllDirtyInstances();
-
-    auto& world = ECSManager::GetInstance().GetWorld();
-	world.progress();
-
-    auto& camera = currentScene->GetPrimaryCamera();
+    auto camera = GetValidatedPrimaryRenderCamera(false);
+    if (!camera) {
+        rebuildRenderGraph = true;
+        spdlog::warn("Renderer: bridged primary camera is unavailable after scene sync. Skipping frame update work.");
+        return;
+    }
     unsigned int cameraIndex = m_pViewManager->Get(camera.get<Components::RenderViewRef>().viewID)->gpu.cameraBufferIndex;
 	auto& commandAllocator = m_commandAllocators[m_frameIndex];
 	auto& commandList = m_commandLists[m_frameIndex];
@@ -864,7 +1137,10 @@ void Renderer::Update(float elapsedSeconds) {
     commandAllocator->Recycle();
     auto& resourceManager = ResourceManager::GetInstance();
     auto res = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
-    resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), { res.x, res.y }, m_lightClusterSize, static_cast<uint32_t>(m_totalFramesRendered));
+    runCapturedStage("PerFrameBuffer", [&]() {
+        ZoneScopedN("Renderer::Update::PerFrameBuffer");
+        resourceManager.UpdatePerFrameBuffer(cameraIndex, m_pLightManager->GetNumLights(), { res.x, res.y }, m_lightClusterSize, static_cast<uint32_t>(m_totalFramesRendered));
+    });
 
     const Components::DrawStats& drawStats = world.get<Components::DrawStats>();
     auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
@@ -878,7 +1154,7 @@ void Renderer::Update(float elapsedSeconds) {
     updateData.lightManager = m_pLightManager.get();
     updateData.environmentManager = m_pEnvironmentManager.get();
     updateData.materialManager = m_pMaterialManager.get();
-    updateData.currentScene = currentScene.get();
+    updateData.currentScene = m_sceneRenderOverlapEnabled ? nullptr : currentScene.get();
     updateData.frameIndex = m_frameIndex;
     updateData.frameFenceValue = m_currentFrameFenceValue;
     updateData.renderResolution = renderRes;
@@ -899,7 +1175,10 @@ void Renderer::Update(float elapsedSeconds) {
     RendererUpdateHostData updateHostData;
     updateHostData.data = &updateData;
 
-    rg::runtime::FlushUploadPolicies();
+    runCapturedStage("FlushUploadPolicies", [&]() {
+        ZoneScopedN("Renderer::Update::FlushUploadPolicies");
+        rg::runtime::FlushUploadPolicies();
+    });
 
     UpdateExecutionContext context{};
     context.frameIndex = m_frameIndex;
@@ -907,9 +1186,48 @@ void Renderer::Update(float elapsedSeconds) {
     context.deltaTime = elapsedSeconds;
     context.hostData = &updateHostData;
 
-	currentRenderGraph->Update(context, deviceManager.GetDevice());
+	auto& deviceManager = DeviceManager::GetInstance();
 
-    //resourceManager.ExecuteResourceTransitions();
+    runCapturedStage("RenderGraphUpdate", [&]() {
+        ZoneScopedN("Renderer::Update::RenderGraphUpdate");
+        currentRenderGraph->Update(context, deviceManager.GetDevice());
+    });
+
+    runCapturedStage("ScheduleSceneUpdate", [&]() {
+        ZoneScopedN("Renderer::Update::ScheduleSceneUpdate");
+        ScheduleSceneUpdateTask(elapsedSeconds);
+    });
+
+    runCapturedStage("WaitForFrame", [&]() {
+        ZoneScopedN("Renderer::Update::WaitForFrame");
+        WaitForFrame(m_frameIndex); // Wait for the previous iteration of the frame to finish
+        });
+    rg::runtime::BeginUploadPolicyFrame();
+
+    auto graphicsQueue = deviceManager.GetGraphicsQueue();
+    auto computeQueue = deviceManager.GetComputeQueue();
+    runCapturedStage("FrameMaintenance", [&]() {
+        if (currentRenderGraph) {
+            ZoneScopedN("Renderer::Update::FrameStatistics");
+            if (auto* statisticsService = currentRenderGraph->GetStatisticsService()) {
+                statisticsService->OnFrameComplete(m_frameIndex, computeQueue); // Gather statistics for the last iteration of the frame
+                statisticsService->OnFrameComplete(m_frameIndex, graphicsQueue); // Gather statistics for the last iteration of the frame
+            }
+        }
+
+        {
+            ZoneScopedN("Renderer::Update::DeferredWork");
+            m_preFrameDeferredFunctions.flush(); // Execute anything we deferred until now
+        }
+
+        if (currentRenderGraph) {
+            ZoneScopedN("Renderer::Update::DeferredReleases");
+            if (auto* uploadService = currentRenderGraph->GetUploadService()) {
+                uploadService->ProcessDeferredReleases(m_frameIndex);
+            }
+        }
+        });
+
     commandList->Recycle(commandAllocator.Get());
 }
 
@@ -921,8 +1239,14 @@ void Renderer::PostUpdate() {
 }
 
 void Renderer::Render() {
+    ZoneScopedN("Renderer::Render");
 
-	//ZoneScopedN("Renderer::Render");
+    const auto runCapturedStage = [this](const char* stageName, auto&& stageFn) {
+        const auto stageStart = std::chrono::steady_clock::now();
+        stageFn();
+        const auto stageEnd = std::chrono::steady_clock::now();
+        RecordFrameTaskStage(stageName, br::telemetry::CpuTaskDomain::MainThread, stageStart, stageEnd);
+    };
 
     auto deltaTime = m_frameTimer.tick();
     if (!IsSceneReadyForFrame()) {
@@ -937,44 +1261,59 @@ void Renderer::Render() {
     auto& commandAllocator = m_commandAllocators[m_frameIndex];
     auto& commandList = m_commandLists[m_frameIndex];
 
-	auto& world = ECSManager::GetInstance().GetWorld();
+    auto& world = RendererECSManager::GetInstance().GetWorld();
 	const Components::DrawStats& drawStats = world.get<Components::DrawStats>();
     auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
     auto outputRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("outputResolution")();
 
-	auto& deviceManager = DeviceManager::GetInstance();
+    auto& deviceManager = DeviceManager::GetInstance();
 
-    m_context.currentScene = currentScene.get();
-    m_context.textureDescriptorHeap = rg::runtime::GetActiveSRVDescriptorHeap();
-    m_context.samplerDescriptorHeap = rg::runtime::GetActiveSamplerDescriptorHeap();
-    m_context.rtvHeap = rtvHeap.Get();
-    m_context.rtvDescriptorSize = rtvDescriptorSize;
-    m_context.dsvDescriptorSize = dsvDescriptorSize;
-    m_context.frameIndex = m_frameIndex;
-    m_context.frameFenceValue = m_currentFrameFenceValue;
-    m_context.renderResolution = { renderRes.x, renderRes.y };
-	m_context.outputResolution = { outputRes.x, outputRes.y };
-	m_context.viewManager = m_pViewManager.get();
-	m_context.objectManager = m_pObjectManager.get();
-	m_context.meshManager = m_pMeshManager.get();
-	m_context.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
-	m_context.lightManager = m_pLightManager.get();
-	m_context.environmentManager = m_pEnvironmentManager.get();
-	m_context.materialManager = m_pMaterialManager.get();
-	m_context.drawStats = drawStats;
-	m_context.deltaTime = deltaTime;
+    runCapturedStage("PrepareRenderContext", [&]() {
+        m_context.currentScene = m_sceneRenderOverlapEnabled ? nullptr : currentScene.get();
+        m_context.hasPrimaryCamera = false;
+        m_context.primaryViewID = 0;
+        m_context.textureDescriptorHeap = rg::runtime::GetActiveSRVDescriptorHeap();
+        m_context.samplerDescriptorHeap = rg::runtime::GetActiveSamplerDescriptorHeap();
+        m_context.rtvHeap = rtvHeap.Get();
+        m_context.rtvDescriptorSize = rtvDescriptorSize;
+        m_context.dsvDescriptorSize = dsvDescriptorSize;
+        m_context.frameIndex = m_frameIndex;
+        m_context.frameFenceValue = m_currentFrameFenceValue;
+        m_context.renderResolution = { renderRes.x, renderRes.y };
+	    m_context.outputResolution = { outputRes.x, outputRes.y };
+	    m_context.viewManager = m_pViewManager.get();
+	    m_context.objectManager = m_pObjectManager.get();
+	    m_context.meshManager = m_pMeshManager.get();
+	    m_context.indirectCommandBufferManager = m_pIndirectCommandBufferManager.get();
+	    m_context.lightManager = m_pLightManager.get();
+	    m_context.environmentManager = m_pEnvironmentManager.get();
+	    m_context.materialManager = m_pMaterialManager.get();
+	    m_context.drawStats = drawStats;
+	    m_context.deltaTime = deltaTime;
+        m_context.sceneOverlapStatus = GetSceneOverlapStatus();
 
-    unsigned int globalPSOFlags = 0;
-    if (m_imageBasedLighting) {
-        globalPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
-    }
-	if (m_clusteredLighting) {
-		globalPSOFlags |= PSOFlags::PSO_CLUSTERED_LIGHTING;
-	}
-    if (m_screenSpaceReflections) {
-        globalPSOFlags |= PSOFlags::PSO_SCREENSPACE_REFLECTIONS;
-    }
-	m_context.globalPSOFlags = globalPSOFlags;
+        auto primaryCamera = GetValidatedPrimaryRenderCamera(false);
+        if (primaryCamera) {
+            m_context.hasPrimaryCamera = true;
+            m_context.primaryViewID = primaryCamera.get<Components::RenderViewRef>().viewID;
+            m_context.primaryCamera = primaryCamera.get<Components::Camera>();
+            if (auto depthMap = primaryCamera.try_get<Components::DepthMap>()) {
+                m_context.primaryDepthMap = *depthMap;
+            }
+        }
+
+        unsigned int globalPSOFlags = 0;
+        if (m_imageBasedLighting) {
+            globalPSOFlags |= PSOFlags::PSO_IMAGE_BASED_LIGHTING;
+        }
+	    if (m_clusteredLighting) {
+		    globalPSOFlags |= PSOFlags::PSO_CLUSTERED_LIGHTING;
+	    }
+        if (m_screenSpaceReflections) {
+            globalPSOFlags |= PSOFlags::PSO_SCREENSPACE_REFLECTIONS;
+        }
+	    m_context.globalPSOFlags = globalPSOFlags;
+    });
 
     struct RendererHostFrameData : IHostExecutionData {
         rhi::DescriptorHeap textureDescriptorHeap;
@@ -1022,13 +1361,19 @@ void Renderer::Render() {
     rhi::BarrierBatch batch = {};
 	batch.textures = { &rtvBarrier };
 
-    commandList->Barriers(batch);
+    runCapturedStage("PrepareBackbuffer", [&]() {
+        ZoneScopedN("Renderer::Render::PrepareBackbuffer");
+        commandList->Barriers(batch);
+    });
    
     commandList->End();
 
     // Execute the command list
     auto graphicsQueue = deviceManager.GetGraphicsQueue();
-    graphicsQueue.Submit({ &commandList.Get() });
+    runCapturedStage("SubmitSetup", [&]() {
+        ZoneScopedN("Renderer::Render::SubmitSetup");
+        graphicsQueue.Submit({ &commandList.Get() });
+    });
 
     // Sync SettingsManager values into OpenRenderGraphSettings so the
     // DefaultRenderGraphSettingsService reads up-to-date values.
@@ -1048,11 +1393,17 @@ void Renderer::Render() {
         rg::runtime::SetOpenRenderGraphSettings(orgSettings);
     }
 
-    currentRenderGraph->Execute(passExecutionContext); // Main render graph execution
+    runCapturedStage("RenderGraphExecute", [&]() {
+        ZoneScopedN("Renderer::Render::RenderGraphExecute");
+        currentRenderGraph->Execute(passExecutionContext); // Main render graph execution
+    });
 	
 	commandList->Recycle(commandAllocator.Get());
 
-    Menu::GetInstance().Render(m_context, commandList.Get()); // Render menu
+    runCapturedStage("Menu", [&]() {
+        ZoneScopedN("Renderer::Render::Menu");
+        Menu::GetInstance().Render(m_context, commandList.Get()); // Render menu
+    });
 
 
     // Indicate that the back buffer will now be used to present
@@ -1064,30 +1415,50 @@ void Renderer::Render() {
 	rtvBarrier.beforeSync = rhi::ResourceSyncState::All;
 	rtvBarrier.texture = renderTargets[m_frameIndex];
 	batch.textures = { &rtvBarrier };
-	commandList->Barriers(batch);
+    runCapturedStage("TransitionForPresent", [&]() {
+        ZoneScopedN("Renderer::Render::TransitionForPresent");
+        commandList->Barriers(batch);
+    });
 
     commandList->End();
 
     // Execute the command list
-    graphicsQueue.Submit({ &commandList.Get() });
+    runCapturedStage("SubmitPresent", [&]() {
+        ZoneScopedN("Renderer::Render::SubmitPresent");
+        graphicsQueue.Submit({ &commandList.Get() });
+    });
 
     // Present the frame
-    m_swapChain->Present(!m_allowTearing);
+    runCapturedStage("Present", [&]() {
+        ZoneScopedN("Renderer::Render::Present");
+        m_swapChain->Present(!m_allowTearing);
+    });
 
     AdvanceFrameIndex();
 
-    SignalFence(graphicsQueue, m_frameIndex);
+    runCapturedStage("SignalFence", [&]() {
+        ZoneScopedN("Renderer::Render::SignalFence");
+        SignalFence(graphicsQueue, m_frameIndex);
+    });
 
-    if (currentRenderGraph) {
-        if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
-            readbackService->ProcessReadbackRequests(); // Process readback captures
+    runCapturedStage("ReadbackRequests", [&]() {
+        if (currentRenderGraph) {
+            ZoneScopedN("Renderer::Render::ReadbackRequests");
+            if (auto* readbackService = currentRenderGraph->GetReadbackService()) {
+                readbackService->ProcessReadbackRequests(); // Process readback captures
+            }
         }
-    }
-    if (m_pReadbackManager) {
-        m_pReadbackManager->ProcessReadbackRequests(); // Save images to disk if requested
-    }
+        if (m_pReadbackManager) {
+            m_pReadbackManager->ProcessReadbackRequests(); // Save images to disk if requested
+        }
+    });
 
-    DeletionManager::GetInstance().ProcessDeletions();
+    runCapturedStage("DeletionProcessing", [&]() {
+        DeletionManager::GetInstance().ProcessDeletions();
+    });
+
+    PublishFrameTaskGraphCapture();
+    FrameMark;
 }
 
 void Renderer::SignalFence(rhi::Queue commandQueue, uint8_t frameIndexToSignal) {
@@ -1134,6 +1505,12 @@ void Renderer::Cleanup() {
     // Wait for all GPU frames to complete
 	spdlog::info("Stalling pipeline for cleanup");
 	StallPipeline();
+	m_sceneRenderBridge.Clear(m_managerInterface);
+	m_renderSyncObjectQuery = {};
+	m_renderSyncCameraQuery = {};
+	m_renderSyncLightQuery = {};
+	m_renderTransformUpdatedCleanupQuery = {};
+	m_renderSyncQueriesBuilt = false;
 	spdlog::info("Cleaning up resources");
     if (currentRenderGraph) {
         if (auto* uploadService = currentRenderGraph->GetUploadService()) {
@@ -1175,7 +1552,6 @@ void Renderer::Cleanup() {
 	m_pSkeletonManager.reset();
     m_pReadbackManager.reset();
     m_pTextureFactory.reset();
-    m_hierarchySystem.destruct();
     m_settingsSubscriptions.clear();
     m_warnedUsingFallbackEnvironment = false;
     m_warnedNullScene = false;
@@ -1189,7 +1565,7 @@ void Renderer::Cleanup() {
 	UpscalingManager::GetInstance().Shutdown();
     TrackedEntityToken::ResetHooks();
     Resource::ResetEntityHooks();
-    ECSManager::GetInstance().Cleanup();
+    RendererECSManager::GetInstance().Cleanup();
     DeletionManager::GetInstance().Cleanup();
 	spdlog::info("Cleaning up swap chain");
     m_swapChain.Reset();
@@ -1215,16 +1591,36 @@ std::shared_ptr<Scene>& Renderer::GetCurrentScene() {
 
 void Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
 	if (!newScene) {
+    m_sceneTaskCompleted.store(false);
+    {
+        std::scoped_lock lock(m_sceneSnapshotMutex);
+        m_committedSceneSnapshot.reset();
+        m_completedSceneSnapshot.reset();
+    }
+        m_sceneRenderBridge.Clear(m_managerInterface);
         currentScene.reset();
         rebuildRenderGraph = true;
         IsSceneReadyForFrame(true);
         return;
     }
 
+	if (currentScene != newScene) {
+		m_sceneRenderBridge.Clear(m_managerInterface);
+	}
+
+    m_sceneTaskCompleted.store(false);
+    {
+        std::scoped_lock lock(m_sceneSnapshotMutex);
+        m_committedSceneSnapshot.reset();
+        m_completedSceneSnapshot.reset();
+    }
+
 	newScene->GetRoot().add<Components::ActiveScene>();
     currentScene = newScene;
     //currentScene->SetDepthMap(m_depthMap);
     currentScene->Activate(m_managerInterface);
+    currentScene->PropagateTransforms();
+    BootstrapCommittedSceneSnapshot();
 	m_warnedNullScene = false;
 	m_warnedMissingPrimaryCamera = false;
 	rebuildRenderGraph = true;
@@ -1233,6 +1629,11 @@ void Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
 std::shared_ptr<Scene> Renderer::AppendScene(std::shared_ptr<Scene> scene) {
 	if (!scene) {
         spdlog::warn("Renderer: attempted to append a null scene. Ignoring append request.");
+        return nullptr;
+    }
+
+	if (m_sceneTaskInFlight.load()) {
+        spdlog::warn("Renderer: attempted to append a scene while async scene overlap work is running. Ignoring append request for v1 overlap safety.");
         return nullptr;
     }
 
@@ -1328,11 +1729,18 @@ void Renderer::CreateRenderGraph() {
         return;
     }
 
+    auto primaryCameraEntity = GetValidatedPrimaryRenderCamera(true);
+    if (!primaryCameraEntity) {
+        spdlog::warn("Renderer: primary camera bridge is not ready during render graph creation. Deferring rebuild.");
+        rebuildRenderGraph = true;
+        return;
+    }
+
     StallPipeline();
 
     // TODO: Find a better way to handle resources like this
     // TODO: this access pattern is stupid
-    auto primaryViewID = currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID;
+    auto primaryViewID = primaryCameraEntity.get<Components::RenderViewRef>().viewID;
     auto primaryCamera = m_pViewManager->Get(primaryViewID);
 
     // TODO: Primary camera and current environment will change, and I'd rather not recompile the graph every time that happens.
@@ -1387,7 +1795,7 @@ void Renderer::CreateRenderGraph() {
 	newGraph->RegisterProvider(m_pSkeletonManager.get());
     newGraph->RegisterProvider(&m_coreResourceProvider);
 
-	auto& depth = currentScene->GetPrimaryCamera().get<Components::DepthMap>();
+    auto& depth = primaryCameraEntity.get<Components::DepthMap>();
     std::shared_ptr<PixelBuffer> depthTexture = depth.depthMap;
 
     newGraph->RegisterResource(Builtin::PrimaryCamera::DepthTexture, depthTexture);
@@ -1441,7 +1849,7 @@ void Renderer::CreateRenderGraph() {
     // GTAO pass
     if (m_gtaoEnabled) {
 		RegisterGTAOResources(newGraph.get());
-        BuildGTAOPipeline(newGraph.get(), currentScene->GetPrimaryCamera().try_get<Components::Camera>());
+        BuildGTAOPipeline(newGraph.get(), primaryCameraEntity.try_get<Components::Camera>());
     }
 
 	if (m_clusteredLighting) {  // TODO: active cluster determination using Z prepass

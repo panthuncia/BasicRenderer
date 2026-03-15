@@ -15,7 +15,7 @@ public:
             {},
             "BuildPixelListPSO");
 
-        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+        auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
 
         // Global LOD extension visibility buffer tag
         auto visBufferTag = ecsWorld.component<CLodExtensionVisibilityBufferTag>();

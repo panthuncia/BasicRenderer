@@ -4,16 +4,19 @@
 #include <cstdint>
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
+#include <deque>
 #include <exception>
-#include <limits>
+#include <future>
 #include <mutex>
 #include <functional>
 #include <memory>
+#include <string>
+#include <string_view>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
-
-#include <enkiTS/TaskScheduler.h>
 
 namespace br {
 
@@ -21,129 +24,68 @@ class TaskSchedulerManager {
 public:
     static TaskSchedulerManager& GetInstance();
 
-    void Initialize(uint32_t ioThreadCount = 2, uint32_t externalTaskThreads = 0);
+    void Initialize(uint32_t ioThreadCount = 2, uint32_t externalTaskThreads = 0, uint32_t backgroundThreadCount = 1);
     void Cleanup();
     void RunIoTask(std::function<void()>&& task);
+    void RunIoTask(std::string_view taskName, std::function<void()>&& task);
+    void QueueIoTask(std::function<void()>&& task);
+    void QueueIoTask(std::string_view taskName, std::function<void()>&& task);
+    void RunBackgroundTask(std::function<void()>&& task);
+    void RunBackgroundTask(std::string_view taskName, std::function<void()>&& task);
 
     bool IsInitialized() const {
         return m_initialized;
     }
 
-    enki::TaskScheduler& GetScheduler() {
-        return m_scheduler;
-    }
-
-    const enki::TaskScheduler& GetScheduler() const {
-        return m_scheduler;
-    }
-
     uint32_t GetNumTaskThreads() const {
-        return m_initialized ? m_scheduler.GetNumTaskThreads() : 0u;
+        return m_initialized ? m_workerThreadCount : 0u;
     }
 
     uint32_t GetNumIoThreads() const {
-        return static_cast<uint32_t>(m_ioThreadNumbers.size());
+        return static_cast<uint32_t>(m_ioThreads.size());
+    }
+
+    uint32_t GetNumBackgroundThreads() const {
+        return static_cast<uint32_t>(m_backgroundThreads.size());
     }
 
     template <typename Func>
     void ParallelFor(size_t itemCount, Func&& func) {
-        if (itemCount == 0) {
-            return;
-        }
+        ParallelFor({}, itemCount, std::forward<Func>(func));
+    }
 
-        if (!m_initialized || itemCount == 1) {
-            for (size_t itemIndex = 0; itemIndex < itemCount; ++itemIndex) {
-                func(itemIndex);
-            }
-            return;
-        }
-
+    template <typename Func>
+    void ParallelFor(std::string_view taskName, size_t itemCount, Func&& func) {
         using Callable = std::decay_t<Func>;
         Callable callable = std::forward<Func>(func);
 
-        std::atomic<bool> stopRequested = false;
-        std::exception_ptr workerException;
-        std::mutex exceptionMutex;
-
-        struct ParallelForTask final : enki::ITaskSet {
-            ParallelForTask(
-                Callable* callableIn,
-                size_t baseIndexIn,
-                size_t itemCountIn,
-                std::atomic<bool>* stopRequestedIn,
-                std::exception_ptr* workerExceptionIn,
-                std::mutex* exceptionMutexIn)
-                : callable(callableIn)
-                , baseIndex(baseIndexIn)
-                , itemCount(itemCountIn)
-                , stopRequested(stopRequestedIn)
-                , workerException(workerExceptionIn)
-                , exceptionMutex(exceptionMutexIn) {
-                m_SetSize = static_cast<uint32_t>(itemCount);
-            }
-
-            void ExecuteRange(enki::TaskSetPartition range, uint32_t) override {
-                const size_t start = static_cast<size_t>(range.start);
-                const size_t end = static_cast<size_t>(range.end);
-                for (size_t localIndex = start; localIndex < end; ++localIndex) {
-                    if (stopRequested->load(std::memory_order_acquire)) {
-                        return;
-                    }
-
-                    const size_t itemIndex = baseIndex + localIndex;
-                    try {
-                        (*callable)(itemIndex);
-                    }
-                    catch (...) {
-                        std::lock_guard<std::mutex> lock(*exceptionMutex);
-                        if (!*workerException) {
-                            *workerException = std::current_exception();
-                            stopRequested->store(true, std::memory_order_release);
-                        }
-                        return;
-                    }
-                }
-            }
-
-            Callable* callable;
-            size_t baseIndex = 0;
-            size_t itemCount = 0;
-            std::atomic<bool>* stopRequested = nullptr;
-            std::exception_ptr* workerException = nullptr;
-            std::mutex* exceptionMutex = nullptr;
-        };
-
-        constexpr size_t kMaxTaskSetSize = static_cast<size_t>(std::numeric_limits<uint32_t>::max());
-        size_t baseIndex = 0;
-
-        while (baseIndex < itemCount) {
-            const size_t currentChunk = (std::min)(kMaxTaskSetSize, itemCount - baseIndex);
-            ParallelForTask task(
-                &callable,
-                baseIndex,
-                currentChunk,
-                &stopRequested,
-                &workerException,
-                &exceptionMutex);
-
-            m_scheduler.AddTaskSetToPipe(&task);
-            m_scheduler.WaitforTask(&task);
-
-            if (workerException) {
-                std::rethrow_exception(workerException);
-            }
-
-            baseIndex += currentChunk;
-        }
+        ParallelForImpl(taskName, itemCount, [callable = std::move(callable)](size_t itemIndex) mutable {
+            callable(itemIndex);
+        });
     }
 
 private:
+    struct RuntimeState;
+
     TaskSchedulerManager() = default;
 
-    enki::TaskScheduler m_scheduler;
-    std::vector<uint32_t> m_ioThreadNumbers;
-    std::vector<std::unique_ptr<enki::IPinnedTask>> m_ioLoopTasks;
+    void IoWorkerLoop();
+    void BackgroundWorkerLoop();
+    void ParallelForImpl(std::string_view taskName, size_t itemCount, std::function<void(size_t)>&& func);
+
+    std::unique_ptr<RuntimeState> m_runtimeState;
+    std::vector<std::thread> m_ioThreads;
+    std::vector<std::thread> m_backgroundThreads;
+    std::deque<std::function<void()>> m_ioTasks;
+    std::deque<std::function<void()>> m_backgroundTasks;
+    std::mutex m_ioMutex;
+    std::mutex m_backgroundMutex;
+    std::condition_variable m_ioCv;
+    std::condition_variable m_backgroundCv;
     std::atomic<uint32_t> m_ioRoundRobin = 0;
+    std::atomic<bool> m_ioShutdownRequested = false;
+    std::atomic<bool> m_backgroundShutdownRequested = false;
+    uint32_t m_workerThreadCount = 0;
     bool m_initialized = false;
 };
 

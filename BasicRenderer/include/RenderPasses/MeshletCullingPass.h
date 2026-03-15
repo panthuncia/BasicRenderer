@@ -69,7 +69,7 @@ public:
 		getShadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows");
 		m_occlusionCullingEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")();
 
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().cached().cache_kind(flecs::QueryCacheAll).build();
 
 		CreatePSO();
@@ -138,7 +138,7 @@ public:
 
 		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
 
-		unsigned int cameraIndex = context.viewManager->Get(context.currentScene->GetPrimaryCamera().get<Components::RenderViewRef>().viewID)->gpu.cameraBufferIndex;
+		unsigned int cameraIndex = context.viewManager->Get(context.primaryViewID)->gpu.cameraBufferIndex;
 		commandList.PushConstants(rhi::ShaderStage::Compute, 0, ViewRootSignatureIndex, LightViewIndex, 1, &cameraIndex);
 
 		// Culling for main camera

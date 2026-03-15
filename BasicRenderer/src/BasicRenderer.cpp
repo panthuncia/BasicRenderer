@@ -414,8 +414,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         auto light1 = renderer.GetCurrentScene()->CreatePointLightECS(L"light"+std::to_wstring(i), XMFLOAT3(point.x, point.y, point.z), color, 3.0, 0.0, 0.0, 1.0, false);
     }
 
-    auto& depthMap = light.get<Components::DepthMap>();
-    renderer.SetDebugTexture(depthMap.linearDepthMap);
+    if (light.has<Components::DepthMap>()) {
+        auto& depthMap = light.get<Components::DepthMap>();
+        renderer.SetDebugTexture(depthMap.linearDepthMap);
+    }
 
 
     MSG msg = {};

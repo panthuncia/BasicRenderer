@@ -5,6 +5,7 @@
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "../../generated/BuiltinResources.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
+#include "Managers/Singletons/TaskSchedulerManager.h"
 
 #include <DirectXMath.h>
 
@@ -111,6 +112,7 @@ uint32_t SkeletonManager::AcquireSkinningInstance(const std::shared_ptr<Skeleton
     skinningInstance->SetSkinningInstanceSlot(rec.instanceSlot);
 
     auto [insIt, _ok] = m_instances.emplace(skinningInstance.get(), std::move(rec));
+    m_iterationListDirty = true;
     return insIt->second.instanceSlot;
 }
 
@@ -135,6 +137,7 @@ void SkeletonManager::ReleaseSkinningInstance(Skeleton* skinningInstance) {
     skinningInstance->SetSkinningInstanceSlot(kInvalidSlot);
 
     m_instances.erase(it);
+    m_iterationListDirty = true;
 }
 
 void SkeletonManager::UpdateInstanceTransforms(Skeleton& inst) {
@@ -154,20 +157,40 @@ void SkeletonManager::UpdateInstanceTransforms(Skeleton& inst) {
     //rec.dirty = false;
 }
 
-void SkeletonManager::TickAnimations(float elapsedSeconds) {
+void SkeletonManager::RebuildIterationList() {
+    m_iterationList.clear();
+    m_iterationList.reserve(m_instances.size());
     for (auto& [ptr, rec] : m_instances) {
-        Skeleton* skel = const_cast<Skeleton*>(ptr);
-        skel->UpdateTransforms(elapsedSeconds);
-        rec.dirty = true;
+        m_iterationList.push_back({ const_cast<Skeleton*>(ptr), &rec });
     }
+    m_iterationListDirty = false;
+}
+
+void SkeletonManager::TickAnimations(float elapsedSeconds) {
+    if (m_iterationListDirty) {
+        RebuildIterationList();
+    }
+
+    TaskSchedulerManager::GetInstance().ParallelFor("SkeletonTick", m_iterationList.size(),
+        [this, elapsedSeconds](size_t i) {
+            auto& entry = m_iterationList[i];
+            entry.skeleton->UpdateTransforms(elapsedSeconds);
+            entry.record->dirty = true;
+        });
 }
 
 void SkeletonManager::UpdateAllDirtyInstances() {
-    for (auto& [ptr, rec] : m_instances) {
-        if (rec.dirty) {
-            UpdateInstanceTransforms(*const_cast<Skeleton*>(ptr));
-        }
+    if (m_iterationListDirty) {
+        RebuildIterationList();
     }
+
+    TaskSchedulerManager::GetInstance().ParallelFor("SkeletonUpload", m_iterationList.size(),
+        [this](size_t i) {
+            auto& entry = m_iterationList[i];
+            if (entry.record->dirty) {
+                UpdateInstanceTransforms(*entry.skeleton);
+            }
+        });
 }
 
 std::shared_ptr<Resource> SkeletonManager::ProvideResource(ResourceIdentifier const& key) {

@@ -1,30 +1,28 @@
 #include "Managers/Singletons/ECSManager.h"
 
-#include <thread>
-
 #include "Scene/Components.h"
 
 void ECSManager::Initialize() {
-	world.component<Components::ActiveScene>().add(flecs::Exclusive);
+	br::scene::SceneWorldManager::GetInstance().Initialize([](flecs::world& world) {
+		world.component<Components::ActiveScene>().add(flecs::Exclusive);
 
-	flecs::entity game = world.pipeline()
-		.with(flecs::System)
-		.build();
-	world.set<Components::GameScene>({ game });
+		flecs::entity game = world.pipeline()
+			.with(flecs::System)
+			.build();
+		world.set<Components::GameScene>({ game });
 
-	world.import<flecs::stats>();
+		world.import<flecs::stats>();
 
-	// Creates REST server on default port (27750)
-	world.set<flecs::Rest>({});
+		// Creates REST server on default port (27750)
+		world.set<flecs::Rest>({});
 
-	world.set_threads(8);
-
-	m_isAlive = true;
+		world.set_threads(8);
+	});
 }
 
 void ECSManager::Cleanup()
 {
-	m_isAlive = false;
-	world.release();
+	m_renderPhaseEntities.clear();
+	br::scene::SceneWorldManager::GetInstance().Cleanup();
 }
 

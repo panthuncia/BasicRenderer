@@ -28,6 +28,16 @@ public:
 	std::unique_ptr<BufferView> AddData(const void* data, size_t size, size_t elementSize, size_t fullAllocationSize = 0);
 	void UpdateView(BufferView* view, const void* data) override;
 
+    rg::runtime::BulkWriteHandle BeginBulkWrite() {
+        SyncUploadPolicyState();
+        EnsureUploadPolicyRegistration();
+        return m_uploadPolicyState.PrepareBulkWrite(GetBufferSize());
+    }
+
+    void EndBulkWrite(size_t dirtyOffset, size_t dirtySize) {
+        m_uploadPolicyState.CommitBulkRegion(dirtyOffset, dirtySize);
+    }
+
     void OnUploadPolicyBeginFrame() override {
         SyncUploadPolicyState();
         m_uploadPolicyState.BeginFrame();

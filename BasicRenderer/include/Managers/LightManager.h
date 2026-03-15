@@ -34,6 +34,7 @@ public:
     ~LightManager();
     AddLightReturn AddLight(LightInfo* lightInfo, uint64_t entityId);
     void RemoveLight(LightInfo* light);
+	void RemoveLight(flecs::entity light);
     unsigned int GetNumLights();
     void SetCurrentCamera(flecs::entity camera);
 	void SetViewManager(ViewManager* viewManager);

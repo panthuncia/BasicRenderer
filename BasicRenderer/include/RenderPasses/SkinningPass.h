@@ -6,13 +6,13 @@
 #include "Managers/Singletons/DeviceManager.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "Managers/Singletons/ECSManager.h"
+#include "Managers/Singletons/RendererECSManager.h"
 
 class SkinningPass : public ComputePass {
 public:
 	SkinningPass() {
 		getMeshShadersEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader");
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
 		skinnedQuery = ecsWorld.query_builder<Components::Skinned, Components::ObjectDrawInfo, Components::MeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		CreatePSO();
 	}

@@ -13,7 +13,7 @@
 #include "../../generated/BuiltinResources.h"
 #include "Materials/Material.h"
 #include "Resources/components.h"
-#include "Managers/Singletons/ECSManager.h"
+#include "Managers/Singletons/RendererECSManager.h"
 #include "Render/MemoryIntrospectionAPI.h"
 
 ObjectManager::ObjectManager() {
@@ -72,7 +72,7 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 				buf->GetECSEntity().add<Components::IsActiveDrawSetIndices>();
 				buf->GetECSEntity().set<Components::Resource>({ buf });
 				for (auto& phase : meshInstance->GetMesh()->material->Technique().passes) {
-					buf->GetECSEntity().add<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(phase));
+					buf->GetECSEntity().add<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(phase));
 				}
 			}
 			m_activeDrawSetIndices[materialFlags]->Insert(index);
@@ -125,6 +125,22 @@ void ObjectManager::UpdatePerObjectBuffer(BufferView* view, PerObjectCB& data) {
 void ObjectManager::UpdateNormalMatrixBuffer(BufferView* view, void* data) {
 	std::lock_guard<std::mutex> lock(m_normalMatrixUpdateMutex);
 	m_normalMatrixBuffer->UpdateView(view, data);
+}
+
+rg::runtime::BulkWriteHandle ObjectManager::BeginPerObjectBulkWrite() {
+	return m_perObjectBuffers->BeginBulkWrite();
+}
+
+void ObjectManager::EndPerObjectBulkWrite(size_t dirtyOffset, size_t dirtySize) {
+	m_perObjectBuffers->EndBulkWrite(dirtyOffset, dirtySize);
+}
+
+rg::runtime::BulkWriteHandle ObjectManager::BeginNormalMatrixBulkWrite() {
+	return m_normalMatrixBuffer->BeginBulkWrite();
+}
+
+void ObjectManager::EndNormalMatrixBulkWrite(size_t dirtyOffset, size_t dirtySize) {
+	m_normalMatrixBuffer->EndBulkWrite(dirtyOffset, dirtySize);
 }
 
 std::shared_ptr<Resource> ObjectManager::ProvideResource(ResourceIdentifier const& key) {

@@ -91,10 +91,15 @@ public:
 
 	// Queues disk I/O for a group without any residency side-effects.
 	// Returns true if the request was queued (or was already in the queue).
-	bool QueueCLodGroupDiskIO(uint32_t groupGlobalIndex, const std::vector<bool>& segmentNeedsFetch = {}, const std::vector<uint32_t>& preAllocatedPages = {});
+	bool QueueCLodGroupDiskIO(uint32_t groupGlobalIndex, const std::vector<bool>& segmentNeedsFetch = {}, const std::vector<uint32_t>& preAllocatedPages = {}, uint32_t priority = 0u);
 
 	// Returns true if the group currently has disk I/O queued or in-flight.
 	bool IsCLodGroupDiskIOQueued(uint32_t groupGlobalIndex) const;
+
+	// Invalidates all in-flight and queued disk streaming IO.
+	// Bumps a generation counter so that stale in-flight results are rejected.
+	// Must be called when page allocations are invalidated (e.g. render graph rebuild).
+	void InvalidateCLodDiskStreamingPipeline();
 
 	struct CLodGroupStreamingInfo {
 		ClusterLODRuntimeSummary::GroupChunkHint hint{};
@@ -214,6 +219,8 @@ private:
 		uint32_t groupLocalIndex = 0;
 		std::vector<bool> segmentNeedsFetch; // true = fetch from disk; false = reuse existing slab data
 		std::vector<uint32_t> preAllocatedPages; // page IDs pre-allocated by the LRU
+		uint64_t generation = 0; // generation at time of request
+		uint32_t priority = 0; // streaming priority for I/O dispatch ordering
 	};
 
 	struct CLodDiskStreamingResult {
@@ -222,12 +229,16 @@ private:
 		std::optional<ClusterLODGroupChunk> groupChunkMetadata;
 		std::vector<std::vector<std::byte>> pageBlobs;
 		std::vector<uint32_t> preAllocatedPages; // forwarded from request
+		uint64_t generation = 0; // generation at time of request
 	};
 
 	// Pending requests waiting to be dispatched (guarded by m_clodDiskStreamingMutex).
 	mutable std::mutex m_clodDiskStreamingMutex;
 	std::vector<CLodDiskStreamingRequest> m_clodDiskStreamingRequests;
 	std::unordered_set<uint32_t> m_clodDiskStreamingQueuedGroups;
+
+	// Generation counter for invalidating in-flight disk IO across rebuilds.
+	std::atomic<uint64_t> m_clodDiskStreamingGeneration{0};
 
 	// Guards m_clodDiskStreamingResults and m_clodDiskStreamingCompletions.
 	mutable std::mutex m_clodDiskStreamingResultsMutex;
@@ -245,7 +256,7 @@ private:
 	static constexpr uint32_t kMaxIoBatchSize = 128u;
 
 	void DispatchCLodDiskStreamingBatch();
-	bool QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool& outQueued, const std::vector<bool>& segmentNeedsFetch = {}, const std::vector<uint32_t>& preAllocatedPages = {});
+	bool QueueCLodDiskStreamingRequest(uint32_t groupGlobalIndex, CLodSharedStreamingState& state, uint32_t groupLocalIndex, bool& outQueued, const std::vector<bool>& segmentNeedsFetch = {}, const std::vector<uint32_t>& preAllocatedPages = {}, uint32_t priority = 0u);
 
 	enum class DiskStreamingApplyResult {
 		Applied,

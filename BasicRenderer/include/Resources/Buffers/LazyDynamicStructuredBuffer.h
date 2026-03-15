@@ -82,6 +82,16 @@ public:
         StageOrUpload(&data, sizeof(T), index * m_elementSize);
     }
 
+    rg::runtime::BulkWriteHandle BeginBulkWrite() {
+        SyncUploadPolicyState();
+        EnsureUploadPolicyRegistration();
+        return m_uploadPolicyState.PrepareBulkWrite(GetBufferSize());
+    }
+
+    void EndBulkWrite(size_t dirtyOffset, size_t dirtySize) {
+        m_uploadPolicyState.CommitBulkRegion(dirtyOffset, dirtySize);
+    }
+
     uint64_t Size() {
         return m_usedCapacity;
     }

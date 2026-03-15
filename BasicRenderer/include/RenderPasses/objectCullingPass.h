@@ -32,7 +32,7 @@ public:
 	ObjectCullingPass(){
 		getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 		getShadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows");
-		auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+		auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
 		lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().cached().cache_kind(flecs::QueryCacheAll).build();
 
 		CreatePSO();
@@ -45,7 +45,7 @@ public:
 		auto input = Inputs<ObjectCullingPassInputs>();
 		m_isOccludersPass = input.isOccludersPass;
 		m_enableOcclusion = input.enableOcclusion;
-		auto ecsWorld = ECSManager::GetInstance().GetWorld();
+		auto ecsWorld = RendererECSManager::GetInstance().GetWorld();
 		flecs::query<> drawSetIndicesQuery = ecsWorld.query_builder<>()
 			.with<Components::IsActiveDrawSetIndices>()
 			.with<Components::ParticipatesInPass>(flecs::Wildcard)

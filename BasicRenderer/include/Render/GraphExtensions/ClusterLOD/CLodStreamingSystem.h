@@ -24,6 +24,9 @@ public:
     CLodStreamingSystem();
     ~CLodStreamingSystem();
 
+    void SetPriorityMode(CLodPriorityMode mode) { m_priorityMode = mode; }
+    CLodPriorityMode GetPriorityMode() const { return m_priorityMode; }
+
     void OnRegistryReset(ResourceRegistry* reg);
     void GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses);
     void GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses);
@@ -120,6 +123,7 @@ private:
     std::function<MeshManager*()> m_getMeshManager = []() { return nullptr; };
 
     std::vector<PendingStreamingRequest> m_pendingStreamingRequests;
+    CLodPriorityMode m_priorityMode = CLodPriorityMode::Max;
     bool m_streamingDomainDirty = true;
 
     MeshManager::CLodStreamingDomainSnapshot m_cachedDomainSnapshot;

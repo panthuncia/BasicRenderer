@@ -12,7 +12,7 @@
 #include "Materials/Material.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
-#include "Managers/Singletons/ECSManager.h"
+#include "Managers/Singletons/RendererECSManager.h"
 #include "Mesh/MeshInstance.h"
 #include "Managers/LightManager.h"
 #include "../../shaders/PerPassRootConstants/amplificationShaderRootConstants.h"
@@ -40,10 +40,10 @@ public:
     ShadowPass() {
         getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
         getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
-        auto& ecsWorld = ECSManager::GetInstance().GetWorld();
+        auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
         lightQuery = ecsWorld.query_builder<Components::Light, Components::LightViewInfo, Components::DepthMap>().without<Components::SkipShadowPass>().cached().cache_kind(flecs::QueryCacheAll).build();
         m_meshInstancesQuery = ecsWorld.query_builder<Components::ObjectDrawInfo, Components::PerPassMeshes>()
-            .with<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ShadowMapsPass))
+            .with<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ShadowMapsPass))
             .cached().cache_kind(flecs::QueryCacheAll).build();
     }
 
@@ -72,8 +72,8 @@ public:
             .WithDepthReadWrite(Builtin::Shadows::ShadowMaps)
             .IsGeometryPass();
         if (m_meshShaders) {
-            auto& ecsWorld = ECSManager::GetInstance().GetWorld();
-            auto shadowPassEntity = ECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ShadowMapsPass);
+            auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
+            auto shadowPassEntity = RendererECSManager::GetInstance().GetRenderPhaseEntity(Engine::Primary::ShadowMapsPass);
             flecs::query<> indirectQuery = ecsWorld.query_builder<>()
                 .with<Components::IsIndirectArguments>()
                 .with<Components::ParticipatesInPass>(shadowPassEntity) // Query for command lists that participate in this pass

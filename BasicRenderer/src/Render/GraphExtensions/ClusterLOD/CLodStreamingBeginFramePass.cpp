@@ -62,10 +62,10 @@ void CLodStreamingBeginFramePass::Update(const UpdateExecutionContext& execution
 
     std::vector<uint32_t> nonResidentBitsUpload;
     if (m_tryConsumeNonResidentBitsUpload && m_tryConsumeNonResidentBitsUpload(nonResidentBitsUpload)) {
-        rg::runtime::QueueStreamingUploadDispatch(
+        BUFFER_UPLOAD(
             nonResidentBitsUpload.data(),
-            nonResidentBitsUpload.size() * sizeof(uint32_t),
-            m_nonResidentBits,
+            static_cast<uint32_t>(nonResidentBitsUpload.size() * sizeof(uint32_t)),
+            rg::runtime::UploadTarget::FromShared(m_nonResidentBits),
             0);
     }
 

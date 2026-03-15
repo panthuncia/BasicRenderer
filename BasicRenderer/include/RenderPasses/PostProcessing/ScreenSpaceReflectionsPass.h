@@ -71,11 +71,9 @@ public:
 		//);
 
 
-        auto& camera = context.currentScene->GetPrimaryCamera().get<Components::Camera>();
-
         FFXManager::GetInstance().EvaluateSSSR(
             executionContext.commandList,
-            &camera,
+			&context.primaryCamera,
             m_pHDRTarget,
             m_pDepthTexture,
 			m_pNormals,

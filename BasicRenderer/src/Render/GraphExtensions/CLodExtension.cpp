@@ -3,7 +3,7 @@
 #include <cmath>
 #include <memory>
 
-#include "Managers/Singletons/ECSManager.h"
+#include "Managers/Singletons/RendererECSManager.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodStreamingSystem.h"
@@ -28,7 +28,7 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
     : m_type(type)
     , m_maxVisibleClusters(maxVisibleClusters)
     , m_streamingSystem(std::make_unique<CLodStreamingSystem>()) {
-    auto ecsWorld = ECSManager::GetInstance().GetWorld();
+    auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
     switch (type) {
     case CLodExtensionType::VisiblityBuffer:
         if (!ecsWorld.component<CLodExtensionVisibilityBufferTag>().has(flecs::Exclusive)) {

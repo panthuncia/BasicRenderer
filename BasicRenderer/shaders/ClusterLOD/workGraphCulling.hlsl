@@ -847,27 +847,49 @@ void WG_GroupEvaluate(
                     }
 
                     if (!refinedResident) {
-                        nonResidentRefinedChild = true;
-                        WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_NON_RESIDENT_REFINED_CHILD_THREADS, 1);
-
-                        const float fallbackErrorOverDistance = ErrorOverDistance(
-                            generatingWorldSpaceCenter,
-                            generatingWorldRadius,
-                            grp.bounds.error,
+                        // Before requesting a stream-in, check whether the
+                        // child would actually be traversed if it were resident.
+                        // The hierarchy metadata (bounds, error) is always
+                        // available — only the page-pool meshlet data is
+                        // non-resident.  Without this check, groups whose
+                        // error is below the threshold get loaded, never used,
+                        // evicted, then re-requested every few frames.
+                        const float3 refinedWorldSpaceCenter = mul(float4(refinedGrp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+                        const float refinedWorldRadius = refinedGrp.bounds.centerAndRadius.w * groupUniformScale;
+                        const float3 refinedViewSpaceCenter = mul(float4(refinedWorldSpaceCenter, 1.0f), camera.view).xyz;
+                        const bool refinedCulled = !replaySource && SphereOutsideFrustumViewSpace(refinedViewSpaceCenter, refinedWorldRadius, camera);
+                        const float refinedErrorOverDistance = ErrorOverDistance(
+                            refinedWorldSpaceCenter,
+                            refinedWorldRadius,
+                            refinedGrp.bounds.error,
                             groupUniformScale,
                             cam.positionWorldSpace.xyz,
                             cam.zNear);
+                        const bool wouldTraverse = !refinedCulled && (refinedErrorOverDistance >= cam.errorOverDistanceThreshold);
 
-                        if (refinedGroupGlobalIndex < activeGroupScanCount) {
-                            uint requestIndex = 0;
-                            InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
-                            if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY) {
-                                CLodStreamingRequest req = (CLodStreamingRequest)0;
-                                req.groupGlobalIndex = refinedGroupGlobalIndex;
-                                req.meshInstanceIndex = rec.instanceIndex;
-                                req.meshBufferIndex = instanceData.perMeshBufferIndex;
-                                req.viewId = CLodPackViewPriority(rec.viewId, fallbackErrorOverDistance);
-                                loadRequests[requestIndex] = req;
+                        if (wouldTraverse) {
+                            nonResidentRefinedChild = true;
+                            WGTelemetryAdd(WG_COUNTER_GROUP_EVALUATE_NON_RESIDENT_REFINED_CHILD_THREADS, 1);
+
+                            const float fallbackErrorOverDistance = ErrorOverDistance(
+                                generatingWorldSpaceCenter,
+                                generatingWorldRadius,
+                                grp.bounds.error,
+                                groupUniformScale,
+                                cam.positionWorldSpace.xyz,
+                                cam.zNear);
+
+                            if (refinedGroupGlobalIndex < activeGroupScanCount) {
+                                uint requestIndex = 0;
+                                InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
+                                if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY) {
+                                    CLodStreamingRequest req = (CLodStreamingRequest)0;
+                                    req.groupGlobalIndex = refinedGroupGlobalIndex;
+                                    req.meshInstanceIndex = rec.instanceIndex;
+                                    req.meshBufferIndex = instanceData.perMeshBufferIndex;
+                                    req.viewId = CLodPackViewPriority(rec.viewId, fallbackErrorOverDistance);
+                                    loadRequests[requestIndex] = req;
+                                }
                             }
                         }
                     }

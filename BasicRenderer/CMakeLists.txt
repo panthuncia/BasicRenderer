@@ -25,8 +25,13 @@ option(BASICRENDERER_USE_PACKAGE_DEPS "Prefer preinstalled BasicRHI/OpenRenderGr
 option(BASICRENDERER_ENABLE_SUBMODULE_FALLBACK "Allow fallback to in-tree BasicRHI/OpenRenderGraph" ON)
 
 if(BASICRENDERER_USE_PACKAGE_DEPS)
+    find_package(BasicScene CONFIG QUIET)
     find_package(BasicRHI CONFIG QUIET)
     find_package(OpenRenderGraph CONFIG QUIET)
+endif()
+
+if(TARGET BasicScene AND NOT TARGET BasicScene::BasicScene)
+    add_library(BasicScene::BasicScene ALIAS BasicScene)
 endif()
 
 if(TARGET BasicRHI AND NOT TARGET BasicRHI::BasicRHI)
@@ -38,6 +43,14 @@ if(TARGET OpenRenderGraph AND NOT TARGET OpenRenderGraph::OpenRenderGraph)
 endif()
 
 if(BASICRENDERER_ENABLE_SUBMODULE_FALLBACK)
+    if(NOT TARGET BasicScene::BasicScene AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/../BasicScene/CMakeLists.txt")
+        add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../BasicScene" "${CMAKE_CURRENT_BINARY_DIR}/_deps/BasicScene")
+    endif()
+
+    if(TARGET BasicScene AND NOT TARGET BasicScene::BasicScene)
+        add_library(BasicScene::BasicScene ALIAS BasicScene)
+    endif()
+
     if(NOT TARGET BasicRHI::BasicRHI AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/../BasicRHI/CMakeLists.txt")
         add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../BasicRHI" "${CMAKE_CURRENT_BINARY_DIR}/_deps/BasicRHI")
     endif()
@@ -53,6 +66,10 @@ if(BASICRENDERER_ENABLE_SUBMODULE_FALLBACK)
     if(TARGET OpenRenderGraph AND NOT TARGET OpenRenderGraph::OpenRenderGraph)
         add_library(OpenRenderGraph::OpenRenderGraph ALIAS OpenRenderGraph)
     endif()
+endif()
+
+if(NOT TARGET BasicScene::BasicScene)
+    message(FATAL_ERROR "BasicRenderer requires BasicScene::BasicScene. Install BasicScene package or provide BasicScene as submodule.")
 endif()
 
 if(NOT TARGET BasicRHI::BasicRHI)
@@ -73,8 +90,10 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(unofficial-tree-sitter CONFIG REQUIRED)
 find_package(assimp CONFIG REQUIRED)
-find_package(enkiTS CONFIG REQUIRED)
 find_package(pxr CONFIG REQUIRED)
+if(NOT TARGET TBB::tbb)
+    find_package(TBB CONFIG REQUIRED)
+endif()
 find_package(implot CONFIG REQUIRED)
 find_package(Boost REQUIRED COMPONENTS container_hash)
 find_package(Tracy REQUIRED CONFIG)
@@ -581,7 +600,7 @@ endif()
 
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC Microsoft.GSL::GSL)
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
-target_include_directories(${PROJECT_NAME} BEFORE PUBLIC "${BASICRENDERER_USD_ROOT}/usd/include/")
+target_include_directories(${PROJECT_NAME} BEFORE PUBLIC "${BASICRENDERER_USD_ROOT}/usd_$<IF:$<CONFIG:Debug>,dbg,rel>/include/")
 # Heck off Microsoft
 add_compile_definitions(NOMINMAX)
 
@@ -632,7 +651,6 @@ PRIVATE
     imgui::imgui 
     meshoptimizer
     assimp::assimp 
-    enkiTS::enkiTS
     flecs::flecs 
     flecs::flecs_static 
     unofficial::tree-sitter::tree-sitter
@@ -649,8 +667,10 @@ PRIVATE
     usdSkel
     implot::implot
     OpenRenderGraph::OpenRenderGraph
+    BasicScene::BasicScene
     BasicRHI::BasicRHI
     Boost::container_hash
+    TBB::tbb
     Tracy::TracyClient
     slang::slang
     "${BASICRENDERER_SOURCE_ROOT}/WinPixEventRuntime.lib" 

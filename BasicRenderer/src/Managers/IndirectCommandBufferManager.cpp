@@ -13,7 +13,7 @@
 #include "Resources/Components.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "Resources/Buffers/Buffer.h"
-#include "Managers/Singletons/ECSManager.h"
+#include "Managers/Singletons/RendererECSManager.h"
 #include "Render/MemoryIntrospectionAPI.h"
 
 IndirectCommandBufferManager::IndirectCommandBufferManager() {
@@ -71,7 +71,7 @@ IndirectCommandBufferManager::CreateBuffersForView(uint64_t viewID) {
 
         // Tag participation and kind
         for (auto& pass : technique.passes) {
-            entity.add<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(pass));
+            entity.add<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(pass));
         }
         entity.add<Components::IsIndirectArguments>();
 
@@ -172,7 +172,7 @@ void IndirectCommandBufferManager::UpdateBuffersForTechnique(TechniqueDescriptor
             auto entity = dyn->GetECSEntity();
             entity.set<Components::Resource>({ dyn });
             for (auto& pass : technique.passes) {
-                entity.add<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(pass));
+                entity.add<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(pass));
             }
             entity.add<Components::IsIndirectArguments>();
 
@@ -353,7 +353,7 @@ void IndirectCommandBufferManager::EnsurePerViewFlagsBuffers(uint64_t viewID) {
         auto entity = dyn->GetECSEntity();
         entity.set<Components::Resource>({ dyn });
         for (auto& pass : technique.passes) {
-            entity.add<Components::ParticipatesInPass>(ECSManager::GetInstance().GetRenderPhaseEntity(pass));
+            entity.add<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(pass));
         }
         entity.add<Components::IsIndirectArguments>();
 

@@ -1742,7 +1742,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 
 			static void Iterate(void* iterationContext, void*, int, size_t taskCount)
 			{
-				TaskSchedulerManager::GetInstance().ParallelFor(taskCount, [&](size_t taskIndex)
+				TaskSchedulerManager::GetInstance().ParallelFor("ClusterLODUtilities::BuildIteration", taskCount, [&](size_t taskIndex)
 					{
 						clodBuild_iterationTask(iterationContext, taskIndex, 0);
 					});
