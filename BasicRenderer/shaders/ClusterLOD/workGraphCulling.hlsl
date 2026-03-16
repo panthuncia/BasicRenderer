@@ -1006,7 +1006,21 @@ void WG_ClusterCullBuckets(
     uint3 DTid : SV_DispatchThreadID,
     uint3 GTid : SV_GroupThreadID){
 
-    const MeshletBucketRecord b = inRec.Get();
+    // Only lane 0 reads the record; broadcast via wave shuffles to avoid
+    // the memory barriers that every-lane inRec.Get() would incur.
+    MeshletBucketRecord b;
+    if (WaveIsFirstLane()) {
+        b = inRec.Get();
+    }
+    b.instanceIndex              = WaveReadLaneFirst(b.instanceIndex);
+    b.viewId                     = WaveReadLaneFirst(b.viewId);
+    b.groupId                    = WaveReadLaneFirst(b.groupId);
+    b.childFirstLocalMeshletIndex = WaveReadLaneFirst(b.childFirstLocalMeshletIndex);
+    b.childLocalMeshletCount     = WaveReadLaneFirst(b.childLocalMeshletCount);
+    b.sourceTag                  = WaveReadLaneFirst(b.sourceTag);
+    b.pageSlabDescriptorIndex    = WaveReadLaneFirst(b.pageSlabDescriptorIndex);
+    b.pageSlabByteOffset         = WaveReadLaneFirst(b.pageSlabByteOffset);
+
     const uint i = DTid.x;
 
     const bool inRange = (i < b.childLocalMeshletCount);

@@ -1551,7 +1551,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	config.simplify_error_merge_additive = lodErrorMergeAdditive;
 	config.simplify_error_merge_previous = lodErrorMergePrevious;
 
-	config.partition_max_refined_groups = 4;
+	config.partition_max_refined_groups = 32;
 
 	constexpr uint32_t MaxGroupChildren = 32;
 	constexpr uint32_t TraversalNodeFanout = 32;

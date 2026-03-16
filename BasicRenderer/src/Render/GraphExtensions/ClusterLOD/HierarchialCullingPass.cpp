@@ -62,7 +62,7 @@ HierarchialCullingPass::HierarchialCullingPass(
 
 HierarchialCullingPass::~HierarchialCullingPass() = default;
 
-void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) {
+void HierarchialCullingPass::DeclareResourceUsages(RenderPassBuilder* builder) {
     auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
     flecs::query<> drawSetIndicesQuery = ecsWorld.query_builder<>()
         .with<Components::IsActiveDrawSetIndices>()
