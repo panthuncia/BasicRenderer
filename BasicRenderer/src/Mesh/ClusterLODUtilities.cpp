@@ -527,6 +527,7 @@ namespace
 		std::vector<uint8_t> meshletTriangles;
 		std::vector<BoundingSphere> meshletBounds;
 		std::vector<ClusterLODGroupSegment> segments;
+		std::vector<BoundingSphere> segmentBounds;
 		std::vector<std::byte> vertexChunk;
 		std::vector<std::byte> skinningVertexChunk;
 		std::vector<uint32_t> compressedPositionWords;
@@ -534,8 +535,6 @@ namespace
 		std::vector<uint32_t> compressedMeshletVertexWords;
 		std::vector<std::vector<std::byte>> pageBlobs;
 		ClusterLODGroupChunk groupChunk{};
-		bool usedOverflowTerminalMerge = false;
-		uint32_t mergedSegmentBucketCount = 0;
 	};
 
 	ClusterLODGroupBuildOutput BuildClusterLODGroupOutput(
@@ -546,9 +545,7 @@ namespace
 		size_t skinningVertexStrideBytes,
 		float meshPositionQuantScale,
 		uint32_t meshPositionQuantExp,
-		bool recomputeNormals,
-		uint32_t maxGroupChildren,
-		bool allowOverflowTerminalMerge)
+		bool recomputeNormals)
 	{
 		ClusterLODGroupBuildOutput output{};
 
@@ -906,8 +903,6 @@ namespace
 				pageBins.pop_back();
 			}
 
-			assert(pageBins.size() <= CLOD_MAX_PAGES_PER_GROUP && "Group exceeds CLOD_MAX_PAGES_PER_GROUP");
-
 			// Create segments from page bins
 			// For each page, walk meshlets in order and create a segment for each contiguous run of the same refinedGroup.
 			for (uint32_t pi = 0; pi < static_cast<uint32_t>(pageBins.size()); ++pi) {
@@ -946,16 +941,37 @@ namespace
 					return aTerminal > bTerminal; // terminals first
 				});
 
-			// Apply overflow merge if too many segments
-			if (allowOverflowTerminalMerge && maxGroupChildren > 0u && output.segments.size() > maxGroupChildren) {
-				const uint32_t keepCount = maxGroupChildren;
-				// Merge all excess segments into terminal segments by setting refinedGroup = -1
-				for (uint32_t si = keepCount; si < static_cast<uint32_t>(output.segments.size()); ++si) {
-					output.segments[si].refinedGroup = -1;
+			// Compute per-segment bounding spheres from constituent meshlet bounds.
+			// pageBins[seg.pageIndex].meshletIndices maps page-local → group-local meshlet index.
+			output.segmentBounds.resize(output.segments.size());
+			for (uint32_t si = 0; si < static_cast<uint32_t>(output.segments.size()); ++si) {
+				const ClusterLODGroupSegment& seg = output.segments[si];
+				const PageBin& page = pageBins[seg.pageIndex];
+
+				// Collect the centers+radii of this segment's meshlets for sphere merge.
+				float mergedCx = 0.f, mergedCy = 0.f, mergedCz = 0.f, mergedR = 0.f;
+				if (seg.meshletCount > 0) {
+					// Use meshopt_computeSphereBounds to get a tight enclosing sphere.
+					std::vector<float> centers(seg.meshletCount * 4); // interleaved cx,cy,cz,padding
+					std::vector<float> radii(seg.meshletCount);
+					for (uint32_t mi = 0; mi < seg.meshletCount; ++mi) {
+						const uint32_t groupLocalMeshlet = page.meshletIndices[seg.firstMeshletInPage + mi];
+						const BoundingSphere& mb = output.meshletBounds[groupLocalMeshlet];
+						centers[mi * 4 + 0] = mb.sphere.x;
+						centers[mi * 4 + 1] = mb.sphere.y;
+						centers[mi * 4 + 2] = mb.sphere.z;
+						centers[mi * 4 + 3] = 0.f;
+						radii[mi] = mb.sphere.w;
+					}
+					meshopt_Bounds merged = meshopt_computeSphereBounds(
+						centers.data(), seg.meshletCount, sizeof(float) * 4,
+						radii.data(), sizeof(float));
+					mergedCx = merged.center[0];
+					mergedCy = merged.center[1];
+					mergedCz = merged.center[2];
+					mergedR = merged.radius;
 				}
-				// Trim to max
-				output.segments.resize(keepCount);
-				output.usedOverflowTerminalMerge = true;
+				output.segmentBounds[si].sphere = DirectX::XMFLOAT4(mergedCx, mergedCy, mergedCz, mergedR);
 			}
 
 			output.group.pageCount = static_cast<uint32_t>(pageBins.size());
@@ -1156,6 +1172,7 @@ namespace
 	{
 		std::vector<ClusterLODGroup> groups;
 		std::vector<ClusterLODGroupSegment> segments;
+		std::vector<BoundingSphere> segmentBounds;
 		std::vector<std::byte> duplicatedVertices;
 		std::vector<std::byte> duplicatedSkinningVertices;
 		std::vector<ClusterLODGroupChunk> groupChunks;
@@ -1193,19 +1210,24 @@ namespace
 
 		const uint32_t lodLevelCount = state.maxDepth + 1;
 
-		std::vector<std::vector<uint32_t>> groupsByDepth(lodLevelCount);
-		groupsByDepth.shrink_to_fit();
+		// Collect segments (not groups) by depth for segment-leaf BVH.
+		struct SegmentLeafInfo { uint32_t segGlobalIndex; uint32_t ownerGroupId; };
+		std::vector<std::vector<SegmentLeafInfo>> segmentsByDepth(lodLevelCount);
 		for (uint32_t groupID = 0; groupID < uint32_t(state.groups.size()); ++groupID)
 		{
-			const uint32_t d = uint32_t(state.groups[groupID].depth);
-			groupsByDepth[d].push_back(groupID);
+			const ClusterLODGroup& grp = state.groups[groupID];
+			const uint32_t d = uint32_t(grp.depth);
+			for (uint32_t s = 0; s < grp.segmentCount; ++s)
+			{
+				segmentsByDepth[d].push_back({ grp.firstSegment + s, groupID });
+			}
 		}
 
 		for (uint32_t d = 0; d < lodLevelCount; ++d)
 		{
-			if (groupsByDepth[d].empty())
+			if (segmentsByDepth[d].empty())
 			{
-				throw std::runtime_error("Cluster LOD: missing groups for an intermediate depth; compact depths or handle gaps.");
+				throw std::runtime_error("Cluster LOD: missing segments for an intermediate depth; compact depths or handle gaps.");
 			}
 		}
 
@@ -1219,7 +1241,7 @@ namespace
 
 		for (uint32_t depth = 0; depth < lodLevelCount; ++depth)
 		{
-			const uint32_t leafCount = uint32_t(groupsByDepth[depth].size());
+			const uint32_t leafCount = uint32_t(segmentsByDepth[depth].size());
 
 			uint32_t nodeCount = leafCount;
 			uint32_t iterCount = leafCount;
@@ -1242,8 +1264,8 @@ namespace
 
 		for (uint32_t depth = 0; depth < lodLevelCount; ++depth)
 		{
-			const auto& groupIDs = groupsByDepth[depth];
-			const uint32_t leafCount = uint32_t(groupIDs.size());
+			const auto& segLeaves = segmentsByDepth[depth];
+			const uint32_t leafCount = uint32_t(segLeaves.size());
 			const ClusterLODNodeRangeAlloc& range = state.lodNodeRanges[depth];
 
 			uint32_t writeOffset = range.offset;
@@ -1251,20 +1273,23 @@ namespace
 
 			for (uint32_t i = 0; i < leafCount; ++i)
 			{
-				const uint32_t groupID = groupIDs[i];
-				const ClusterLODGroup& grp = state.groups[groupID];
+				const SegmentLeafInfo& info = segLeaves[i];
+				const ClusterLODGroupSegment& seg = state.segments[info.segGlobalIndex];
+				const ClusterLODGroup& grp = state.groups[info.ownerGroupId];
+				const BoundingSphere& segBounds = state.segmentBounds[info.segGlobalIndex];
 
 				ClusterLODNode& node = (leafCount == 1) ? state.nodes[1 + depth] : state.nodes[writeOffset++];
 
 				node = {};
-				node.range.isGroup = 1;
-				node.range.indexOrOffset = groupID;
-				node.range.countMinusOne = (grp.meshletCount > 0) ? (grp.meshletCount - 1) : 0;
+				node.range.isGroup = 2;  // segment-leaf
+				node.range.indexOrOffset = info.segGlobalIndex;
+				node.range.countMinusOne = (seg.meshletCount > 0) ? (seg.meshletCount - 1) : 0;
+				node.range.ownerGroupId = info.ownerGroupId;
 
-				node.traversalMetric.boundingSphereX = grp.bounds.center[0];
-				node.traversalMetric.boundingSphereY = grp.bounds.center[1];
-				node.traversalMetric.boundingSphereZ = grp.bounds.center[2];
-				node.traversalMetric.boundingSphereRadius = grp.bounds.radius;
+				node.traversalMetric.boundingSphereX = segBounds.sphere.x;
+				node.traversalMetric.boundingSphereY = segBounds.sphere.y;
+				node.traversalMetric.boundingSphereZ = segBounds.sphere.z;
+				node.traversalMetric.boundingSphereRadius = segBounds.sphere.w;
 				node.traversalMetric.maxQuadricError = grp.bounds.error;
 			}
 
@@ -1541,7 +1566,6 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	const float lodErrorMergeAdditive = std::max(0.0f, settings.lodErrorMergeAdditive);
 	const float lodErrorMergePrevious = std::max(0.0f, settings.lodErrorMergePrevious);
 	const uint32_t partitionSizeFloor = std::max<uint32_t>(1u, settings.partitionSizeFloor);
-	const bool allowOverflowTerminalMerge = settings.allowOverflowTerminalMerge;
 
 	config.simplify_fallback_sloppy = true; // TODO: Useful?
 	config.simplify_error_factor_sloppy = 100.0f; // Scales error for sloppy groups
@@ -1551,46 +1575,13 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	config.simplify_error_merge_additive = lodErrorMergeAdditive;
 	config.simplify_error_merge_previous = lodErrorMergePrevious;
 
-	config.partition_max_refined_groups = 32;
-
-	constexpr uint32_t MaxGroupChildren = 32;
-	constexpr uint32_t TraversalNodeFanout = 32;
+	constexpr uint32_t MaxGroupChildren = 8;
+	constexpr uint32_t TraversalNodeFanout = 8;
 	constexpr uint32_t TargetBucketClusters = 512;
-	constexpr uint32_t MinTargetBucketClusters = 256;
-	config.partition_max_refined_groups = MaxGroupChildren;
+	config.partition_max_refined_groups = 8;
 
-	uint32_t maxChildrenObserved = 0;
-	uint32_t selectedTargetBucketClusters = TargetBucketClusters;
-	uint32_t retryCount = 0;
-	uint64_t cumulativeRefinedCapSplitPartitionCount = 0;
-	uint32_t cumulativeOverflowMergedGroupCount = 0;
-	uint32_t cumulativeOverflowMergedChildBucketCount = 0;
-	bool usedMinBucketOverflowFallback = false;
-
-	for (;;)
 	{
-		state.groups.clear();
-		state.segments.clear();
-		state.duplicatedVertices.clear();
-		state.duplicatedSkinningVertices.clear();
-		state.groupChunks.clear();
-		state.groupPageBlobs.clear();
-		state.groupVertexChunks.clear();
-		state.groupSkinningVertexChunks.clear();
-		state.groupMeshletVertexChunks.clear();
-		state.groupCompressedPositionWordChunks.clear();
-		state.groupCompressedNormalWordChunks.clear();
-		state.groupCompressedMeshletVertexWordChunks.clear();
-		state.groupMeshletChunks.clear();
-		state.groupMeshletTriangleChunks.clear();
-		state.groupMeshletBoundsChunks.clear();
-		state.nodes.clear();
-		state.lodNodeRanges.clear();
-		state.lodLevelRoots.clear();
-		state.topRootNode = 0;
-		state.maxDepth = 0;
-
-		const size_t requestedPartitionSize = std::max<size_t>(1, (selectedTargetBucketClusters * 3) / 4);
+		const size_t requestedPartitionSize = std::max<size_t>(1, (TargetBucketClusters * 3) / 4);
 		config.partition_size = std::max<size_t>(requestedPartitionSize, static_cast<size_t>(partitionSizeFloor));
 		size_t refinedCapSplitPartitionCount = 0;
 		config.partition_refined_split_count = &refinedCapSplitPartitionCount;
@@ -1603,6 +1594,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 			size_t skinningVertexStrideBytes = 0;
 			std::vector<ClusterLODGroup>* groups = nullptr;
 			std::vector<ClusterLODGroupSegment>* segments = nullptr;
+			std::vector<BoundingSphere>* segmentBounds = nullptr;
 			std::vector<std::byte>* duplicatedVertices = nullptr;
 			std::vector<std::byte>* duplicatedSkinningVertices = nullptr;
 			bool buildDuplicatedVertexStreams = false;
@@ -1627,10 +1619,6 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 			uint32_t cumulativeGroupVertexCount = 0;
 			uint32_t maxChildrenObserved = 0;
 			uint32_t maxDepthObserved = 0;
-			uint32_t maxGroupChildren = 0;
-			bool allowOverflowTerminalMerge = false;
-			uint32_t overflowMergedGroupCount = 0;
-			uint32_t overflowMergedChildBucketCount = 0;
 		};
 
 		struct ClodBuildCallbacks
@@ -1672,9 +1660,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 					context->skinningVertexStrideBytes,
 					context->meshPositionQuantScale,
 					context->meshPositionQuantExp,
-					context->recomputeGroupNormals,
-					context->maxGroupChildren,
-					context->allowOverflowTerminalMerge);
+					context->recomputeGroupNormals);
 
 				ClusterLODGroup finalizedGroup = output.group;
 
@@ -1708,6 +1694,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 				context->cumulativeMeshletCount += finalizedGroup.meshletCount;
 				context->cumulativeGroupVertexCount += finalizedGroup.groupVertexCount;
 				context->segments->insert(context->segments->end(), output.segments.begin(), output.segments.end());
+				context->segmentBounds->insert(context->segmentBounds->end(), output.segmentBounds.begin(), output.segmentBounds.end());
 				if (context->buildDuplicatedVertexStreams) {
 					context->duplicatedVertices->insert(context->duplicatedVertices->end(), output.vertexChunk.begin(), output.vertexChunk.end());
 					context->duplicatedSkinningVertices->insert(context->duplicatedSkinningVertices->end(), output.skinningVertexChunk.begin(), output.skinningVertexChunk.end());
@@ -1729,13 +1716,8 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 				(*context->groupChunks)[groupId] = output.groupChunk;
 				(*context->groups)[groupId] = finalizedGroup;
 
-				context->maxChildrenObserved = std::max(context->maxChildrenObserved, finalizedGroup.segmentCount);
+		context->maxChildrenObserved = std::max(context->maxChildrenObserved, finalizedGroup.segmentCount);
 				context->maxDepthObserved = (std::max)(context->maxDepthObserved, static_cast<uint32_t>(std::max(finalizedGroup.depth, 0)));
-				if (output.usedOverflowTerminalMerge)
-				{
-					context->overflowMergedGroupCount++;
-					context->overflowMergedChildBucketCount += output.mergedSegmentBucketCount;
-				}
 
 				return static_cast<int>(groupId);
 			}
@@ -1757,6 +1739,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		captureContext.buildDuplicatedVertexStreams = (flags & VertexFlags::VERTEX_SKINNED) != 0;
 		captureContext.groups = &state.groups;
 		captureContext.segments = &state.segments;
+		captureContext.segmentBounds = &state.segmentBounds;
 		captureContext.duplicatedVertices = &state.duplicatedVertices;
 		captureContext.duplicatedSkinningVertices = &state.duplicatedSkinningVertices;
 		captureContext.groupChunks = &state.groupChunks;
@@ -1773,16 +1756,12 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		captureContext.meshPositionQuantScale = meshPositionQuantScale;
 		captureContext.meshPositionQuantExp = meshPositionQuantExp;
 		captureContext.recomputeGroupNormals = recomputeGroupNormals;
-		captureContext.maxGroupChildren = MaxGroupChildren;
-		captureContext.allowOverflowTerminalMerge = allowOverflowTerminalMerge;
-
 		clodBuildParallelConfig parallelConfig{};
 		parallelConfig.iteration_callback = &ClodBuildCallbacks::Iterate;
 		const clodBuildParallelConfig* parallelConfigPtr = TaskSchedulerManager::GetInstance().GetNumTaskThreads() > 1u ? &parallelConfig : nullptr;
 
 		clodBuildEx(config, mesh, &captureContext, &ClodBuildCallbacks::Output, parallelConfigPtr);
 
-		maxChildrenObserved = captureContext.maxChildrenObserved;
 		state.maxDepth = captureContext.maxDepthObserved;
 
 		for (size_t groupIndex = 0; groupIndex < state.groups.size(); ++groupIndex)
@@ -1798,63 +1777,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 			spdlog::info(
 				"ClusterLOD: refined-group cap split {} partitions at bucket target {}",
 				refinedCapSplitPartitionCount,
-				selectedTargetBucketClusters);
-		}
-		cumulativeRefinedCapSplitPartitionCount += refinedCapSplitPartitionCount;
-		cumulativeOverflowMergedGroupCount += captureContext.overflowMergedGroupCount;
-		cumulativeOverflowMergedChildBucketCount += captureContext.overflowMergedChildBucketCount;
-
-		if (captureContext.overflowMergedGroupCount > 0)
-		{
-			spdlog::warn(
-				"ClusterLOD: merged overflow child buckets into terminal buckets for {} groups ({} child buckets merged) at bucket target {}",
-				captureContext.overflowMergedGroupCount,
-				captureContext.overflowMergedChildBucketCount,
-				selectedTargetBucketClusters);
-		}
-
-		if (maxChildrenObserved <= MaxGroupChildren)
-		{
-			break;
-		}
-
-		if (selectedTargetBucketClusters <= MinTargetBucketClusters)
-		{
-			if (allowOverflowTerminalMerge)
-			{
-				usedMinBucketOverflowFallback = true;
-				spdlog::warn(
-					"ClusterLOD: unable to satisfy max children at minimum bucket target {}; using overflow-terminal-merge fallback",
-					selectedTargetBucketClusters);
-				break;
-			}
-
-			throw std::runtime_error("Cluster LOD: unable to satisfy maximum children per group while preserving refined-group bucket semantics");
-		}
-
-		const uint32_t reducedTarget = std::max<uint32_t>(MinTargetBucketClusters, selectedTargetBucketClusters / 2);
-		spdlog::warn(
-			"ClusterLOD: child fanout exceeded {} (observed={}) at bucket target {}, retrying with {}",
-			MaxGroupChildren,
-			maxChildrenObserved,
-			selectedTargetBucketClusters,
-			reducedTarget);
-		selectedTargetBucketClusters = reducedTarget;
-		retryCount++;
-	}
-
-	if (maxChildrenObserved > MaxGroupChildren)
-	{
-		if (allowOverflowTerminalMerge)
-		{
-			spdlog::warn(
-				"ClusterLOD: continuing with overflow-terminal-merge fallback despite observed child fanout {} > {}",
-				maxChildrenObserved,
-				MaxGroupChildren);
-		}
-		else
-		{
-		throw std::runtime_error("Exceeded maximum allowed Cluster LOD children per group");
+				TargetBucketClusters);
 		}
 	}
 
@@ -1873,16 +1796,11 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		: 0.0f;
 
 	spdlog::info(
-		"ClusterLOD metrics: groups={} refined_groups={} refined_ratio={:.3f} retries={} cap_splits={} overflow_merged_groups={} overflow_merged_child_buckets={} min_bucket_overflow_fallback={} normal_attributes={} tangent_attributes={}"
-		,
+		"ClusterLOD metrics: groups={} segments={} refined_groups={} refined_ratio={:.3f} normal_attributes={} tangent_attributes={}",
 		totalGroupCount,
+		static_cast<uint32_t>(state.segments.size()),
 		groupsWithRefinedChildren,
 		refinedGroupRatio,
-		retryCount,
-		cumulativeRefinedCapSplitPartitionCount,
-		cumulativeOverflowMergedGroupCount,
-		cumulativeOverflowMergedChildBucketCount,
-		usedMinBucketOverflowFallback ? 1 : 0,
 		hasNormalStreamInSource && enableNormalAttributeSimplification ? 1 : 0,
 		(!tangentAttributeStream.empty() && enableNormalAttributeSimplification) ? 1 : 0);
 
@@ -2337,6 +2255,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	ClusterLODPrebuildArtifacts artifacts{};
 	artifacts.prebuiltData.groups = std::move(state.groups);
 	artifacts.prebuiltData.segments = std::move(state.segments);
+	artifacts.prebuiltData.segmentBounds = std::move(state.segmentBounds);
 	artifacts.prebuiltData.objectBoundingSphere = BuildObjectBoundingSphereFromRootNode(state.nodes, state.topRootNode);
 	artifacts.prebuiltData.groupChunks = std::move(state.groupChunks);
 	artifacts.prebuiltData.nodes = std::move(state.nodes);

@@ -600,6 +600,17 @@ std::vector<uint32_t> CLodStreamingSystem::PopFreePages(uint32_t count, MeshMana
                 if (meshManager) {
                     meshManager->FreeCLodGroupEviction(g);
                 }
+
+                // Residency-driven error override: this child is now non-resident,
+                // so force its parent to render (error=0) instead of traversing.
+                if (meshManager && g < static_cast<uint32_t>(m_streamingParentGroupByGlobal.size())) {
+                    const int32_t parentGlobal = m_streamingParentGroupByGlobal[g];
+                    if (parentGlobal >= 0 && m_errorOverriddenGroups.find(static_cast<uint32_t>(parentGlobal)) == m_errorOverriddenGroups.end()) {
+                        const float zeroError = 0.0f;
+                        meshManager->PatchCLodGroupError(static_cast<uint32_t>(parentGlobal), zeroError);
+                        m_errorOverriddenGroups.insert(static_cast<uint32_t>(parentGlobal));
+                    }
+                }
             }
         }
 
@@ -832,6 +843,25 @@ void CLodStreamingSystem::RefreshStreamingActiveGroupDomain() {
             std::copy_n(m_cachedDomainSnapshot.parentGroupByGlobal.begin(), copyCount, m_streamingParentGroupByGlobal.begin());
         }
 
+        // Build reverse mapping: parent → children (for residency error override)
+        m_childGroupsByGlobal.clear();
+        for (uint32_t childGlobal = 0; childGlobal < static_cast<uint32_t>(m_streamingParentGroupByGlobal.size()); ++childGlobal) {
+            const int32_t parent = m_streamingParentGroupByGlobal[childGlobal];
+            if (parent >= 0) {
+                m_childGroupsByGlobal[static_cast<uint32_t>(parent)].push_back(childGlobal);
+            }
+        }
+
+        // Copy original error values for residency-driven error override
+        m_groupOriginalErrorByGlobal.assign(m_streamingStorageGroupCapacity, 0.0f);
+        if (!m_cachedDomainSnapshot.groupOriginalErrorByGlobal.empty()) {
+            const size_t errorCopyCount = std::min(
+                m_cachedDomainSnapshot.groupOriginalErrorByGlobal.size(),
+                m_groupOriginalErrorByGlobal.size());
+            std::copy_n(m_cachedDomainSnapshot.groupOriginalErrorByGlobal.begin(), errorCopyCount, m_groupOriginalErrorByGlobal.begin());
+        }
+        m_errorOverriddenGroups.clear();
+
         m_streamingActiveGroupScanCount = maxGroupIndex;
 
         for (const auto& range : m_cachedDomainSnapshot.activeRanges) {
@@ -919,6 +949,26 @@ void CLodStreamingSystem::RefreshStreamingActiveGroupDomain() {
             ClearStreamingRequestInProgress(groupIndex);
             ClearPendingLoadPriority(groupIndex);
             m_streamingNonResidentBitsUploadPending = true;
+        }
+
+        // Initial error override: patch error to 0 for any parent group whose
+        // children are not all resident. Without this, groups with FLT_MAX error
+        // (coarsest/terminal groups or simplification failures) will always tell
+        // the GPU to traverse into non-resident children, causing geometry holes.
+        // The eviction path handles subsequent transitions, but this covers the
+        // initial state where children were never loaded.
+        for (const auto& [parent, children] : m_childGroupsByGlobal) {
+            bool anyChildNonResident = false;
+            for (uint32_t child : children) {
+                if (!IsGroupResident(child)) {
+                    anyChildNonResident = true;
+                    break;
+                }
+            }
+            if (anyChildNonResident && m_errorOverriddenGroups.find(parent) == m_errorOverriddenGroups.end()) {
+                meshManager->PatchCLodGroupError(parent, 0.0f);
+                m_errorOverriddenGroups.insert(parent);
+            }
         }
     }
 
@@ -1092,6 +1142,35 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
                 }
             }
             TouchGroupPages(groupIndex);
+
+            // Residency-driven error override: this child just became resident.
+            // Check if all children of its parent are now resident — if so,
+            // restore the parent's original error so the GPU can traverse again.
+            if (groupIndex < static_cast<uint32_t>(m_streamingParentGroupByGlobal.size())) {
+                const int32_t parentGlobal = m_streamingParentGroupByGlobal[groupIndex];
+                if (parentGlobal >= 0) {
+                    const uint32_t parentU32 = static_cast<uint32_t>(parentGlobal);
+                    if (m_errorOverriddenGroups.count(parentU32)) {
+                        auto childIt = m_childGroupsByGlobal.find(parentU32);
+                        bool allChildrenResident = true;
+                        if (childIt != m_childGroupsByGlobal.end()) {
+                            for (uint32_t child : childIt->second) {
+                                if (!IsGroupResident(child)) {
+                                    allChildrenResident = false;
+                                    break;
+                                }
+                            }
+                        }
+                        if (allChildrenResident) {
+                            const float originalError = (parentU32 < m_groupOriginalErrorByGlobal.size())
+                                ? m_groupOriginalErrorByGlobal[parentU32]
+                                : 0.0f;
+                            meshManager->PatchCLodGroupError(parentU32, originalError);
+                            m_errorOverriddenGroups.erase(parentU32);
+                        }
+                    }
+                }
+            }
         }
         else {
             if (preAllocIt != m_preAllocatedPagesByGroup.end()) {

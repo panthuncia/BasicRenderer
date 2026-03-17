@@ -100,6 +100,9 @@ private:
     std::vector<uint32_t> m_streamingResidencyInitializedBitsCpu;
     std::vector<uint32_t> m_usedGroupsBitsCpu; // groups reported as visible by the GPU last frame
     std::vector<int32_t> m_streamingParentGroupByGlobal;
+    std::unordered_map<uint32_t, std::vector<uint32_t>> m_childGroupsByGlobal; // parent → children
+    std::vector<float> m_groupOriginalErrorByGlobal;
+    std::unordered_set<uint32_t> m_errorOverriddenGroups; // groups whose GPU error is currently 0
     CLodPageLRU m_pageLru;
     std::vector<int32_t> m_pageOwnerGroup;       // pageID → group global index (-1 = unowned)
     std::vector<uint32_t> m_pageOwnerSegment;    // pageID → segment index within owning group

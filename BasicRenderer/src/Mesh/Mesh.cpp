@@ -54,6 +54,7 @@ namespace
 		ClusterLODRuntimeSummary summary{};
 		summary.groupChunkHints.resize(groups.size());
 		summary.parentGroupByLocal.assign(groups.size(), -1);
+		summary.groupErrorByLocal.resize(groups.size(), 0.0f);
 		summary.firstGroupVertexByLocal.resize(groups.size(), 0u);
 
 		if (groups.empty()) {
@@ -64,6 +65,7 @@ namespace
 		for (size_t groupIndex = 0; groupIndex < groups.size(); ++groupIndex) {
 			const auto& group = groups[groupIndex];
 			summary.firstGroupVertexByLocal[groupIndex] = group.firstGroupVertex;
+			summary.groupErrorByLocal[groupIndex] = group.bounds.error;
 			if (groupIndex < groupChunks.size()) {
 				const auto& chunk = groupChunks[groupIndex];
 				auto& hint = summary.groupChunkHints[groupIndex];

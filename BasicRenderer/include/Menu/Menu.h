@@ -1353,26 +1353,22 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 const uint32_t objectActive = counter(CLodWorkGraphCounterIndex::ObjectCullInRangeThreads);
                 const uint32_t traverseThreads = counter(CLodWorkGraphCounterIndex::TraverseNodesThreads);
                 const uint32_t traverseActive = counter(CLodWorkGraphCounterIndex::TraverseNodesActiveChildThreads);
-                const uint32_t groupThreads = counter(CLodWorkGraphCounterIndex::GroupEvaluateThreads);
-                const uint32_t groupActive = counter(CLodWorkGraphCounterIndex::GroupEvaluateActiveChildThreads);
                 const uint32_t clusterThreads = counter(CLodWorkGraphCounterIndex::ClusterCullThreads);
                 const uint32_t clusterActive = counter(CLodWorkGraphCounterIndex::ClusterCullInRangeThreads);
                 const uint32_t visibleWrites = counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites);
-                const uint32_t replayNodeGroupInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeGroupInputRecords);
+                const uint32_t replayNodeInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeInputRecords);
                 const uint32_t replayMeshletInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords);
 
                 spdlog::info(
-                    "CLod WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, GroupEval {}/{} active-child, ClusterCull {}/{} in-range, visible writes {}, replay(node/group={}, meshlet={})",
+                    "CLod WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, ClusterCull {}/{} in-range, visible writes {}, replay(node={}, meshlet={})",
                     objectActive,
                     objectThreads,
                     traverseActive,
                     traverseThreads,
-                    groupActive,
-                    groupThreads,
                     clusterActive,
                     clusterThreads,
                     visibleWrites,
-                    replayNodeGroupInput,
+                    replayNodeInput,
                     replayMeshletInput);
                 });
         }
@@ -1569,10 +1565,6 @@ inline void Menu::DrawCLodTelemetryWindow() {
             counter(CLodWorkGraphCounterIndex::TraverseNodesActiveChildThreads),
             counter(CLodWorkGraphCounterIndex::TraverseNodesThreads));
         drawUtilizationRow(
-            "GroupEvaluate active child threads",
-            counter(CLodWorkGraphCounterIndex::GroupEvaluateActiveChildThreads),
-            counter(CLodWorkGraphCounterIndex::GroupEvaluateThreads));
-        drawUtilizationRow(
             "ClusterCull in-range threads",
             counter(CLodWorkGraphCounterIndex::ClusterCullInRangeThreads),
             counter(CLodWorkGraphCounterIndex::ClusterCullThreads));
@@ -1625,53 +1617,6 @@ inline void Menu::DrawCLodTelemetryWindow() {
             ImPlot::EndPlot();
         }
 
-        ImGui::Text("GroupEvaluate outcomes: groups=%u culled=%u rejectedByError=%u emitBucket=%u refinedTraversal=%u nonResidentRefined=%u nonResidentFallbackEmit=%u",
-            counter(CLodWorkGraphCounterIndex::GroupEvaluateGroupRecords),
-            counter(CLodWorkGraphCounterIndex::GroupEvaluateCulledGroupRecords),
-            counter(CLodWorkGraphCounterIndex::GroupEvaluateRejectedByErrorRecords),
-            counter(CLodWorkGraphCounterIndex::GroupEvaluateEmitBucketThreads),
-            counter(CLodWorkGraphCounterIndex::GroupEvaluateRefinedTraversalThreads),
-            counter(CLodWorkGraphCounterIndex::GroupEvaluateNonResidentRefinedChildThreads),
-            counter(CLodWorkGraphCounterIndex::GroupEvaluateNonResidentFallbackBucketThreads));
-
-        const uint32_t groupCoalescedLaunches = counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedLaunches);
-        const uint32_t groupCoalescedInputRecords = counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputRecords);
-        const float groupAvgRecordsPerLaunch = (groupCoalescedLaunches > 0)
-            ? (static_cast<float>(groupCoalescedInputRecords) / static_cast<float>(groupCoalescedLaunches))
-            : 0.0f;
-        const float groupPackingPercent = 100.0f * groupAvgRecordsPerLaunch / 8.0f;
-
-        ImGui::Text("GroupEvaluate coalesced launches: %u | input records: %u | avg records/launch: %.2f (%.1f%% of 8)",
-            groupCoalescedLaunches,
-            groupCoalescedInputRecords,
-            groupAvgRecordsPerLaunch,
-            groupPackingPercent);
-
-        std::array<uint32_t, 8> groupInputHistogram = {
-            counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputCount1),
-            counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputCount2),
-            counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputCount3),
-            counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputCount4),
-            counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputCount5),
-            counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputCount6),
-            counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputCount7),
-            counter(CLodWorkGraphCounterIndex::GroupEvaluateCoalescedInputCount8)
-        };
-
-        ImGui::TextUnformatted("GroupEvaluate coalesced input histogram (records per launch):");
-        float groupHistogramValues[8] = {};
-        for (size_t i = 0; i < groupInputHistogram.size(); ++i) {
-            groupHistogramValues[i] = static_cast<float>(groupInputHistogram[i]);
-        }
-
-        static const char* kGroupHistogramLabels[8] = { "1", "2", "3", "4", "5", "6", "7", "8" };
-        if (ImPlot::BeginPlot("##GroupEvaluateCoalescedInputHistogram", ImVec2(-1.0f, 150.0f), ImPlotFlags_NoLegend)) {
-            ImPlot::SetupAxes("Records", "Launches", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-            ImPlot::SetupAxisTicks(ImAxis_X1, 0.0, 7.0, 8, kGroupHistogramLabels);
-            ImPlot::PlotBars("Launches", groupHistogramValues, 8, 0.6f, 0.0f);
-            ImPlot::EndPlot();
-        }
-
         const uint32_t clusterWaves = counter(CLodWorkGraphCounterIndex::ClusterCullWaves);
         const uint32_t zeroSurvivorWaves = counter(CLodWorkGraphCounterIndex::ClusterCullZeroSurvivorWaves);
         const uint32_t survivingWaves = (clusterWaves > zeroSurvivorWaves)
@@ -1683,21 +1628,16 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
         ImGui::Separator();
         ImGui::TextUnformatted("Occlusion -> Phase 2 enqueue attempts");
-        ImGui::Text("Node attempts: %u | Group attempts: %u | Cluster attempts: %u",
+        ImGui::Text("Node attempts: %u | Cluster attempts: %u",
             counter(CLodWorkGraphCounterIndex::Phase1OcclusionNodeReplayEnqueueAttempts),
-            counter(CLodWorkGraphCounterIndex::Phase1OcclusionGroupReplayEnqueueAttempts),
             counter(CLodWorkGraphCounterIndex::Phase1OcclusionClusterReplayEnqueueAttempts));
 
         ImGui::TextUnformatted("Phase 2 replay launch validation");
-        ImGui::Text("ReplayNodeGroup launches: %u | input records: %u",
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeGroupLaunches),
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeGroupInputRecords));
-        ImGui::Text("ReplayNodeGroup input split: nodes=%u groups=%u",
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeInputRecords),
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayGroupInputRecords));
-        ImGui::Text("ReplayNodeGroup emitted: traverse=%u groupEval=%u",
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeRecordsEmitted),
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayGroupRecordsEmitted));
+        ImGui::Text("ReplayNode launches: %u | input records: %u",
+            counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeLaunches),
+            counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeInputRecords));
+        ImGui::Text("ReplayNode emitted traverse records: %u",
+            counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeRecordsEmitted));
         ImGui::Text("ReplayMeshlet launches: %u | input records: %u | emitted bucket records: %u",
             counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletLaunches),
             counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords),
@@ -1706,8 +1646,6 @@ inline void Menu::DrawCLodTelemetryWindow() {
         ImGui::TextUnformatted("Phase 2 downstream consumption");
         ImGui::Text("Replay Traverse records consumed: %u",
             counter(CLodWorkGraphCounterIndex::Phase2ReplayTraverseRecordsConsumed));
-        ImGui::Text("Replay GroupEvaluate records consumed: %u",
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayGroupRecordsConsumed));
         ImGui::Text("Replay ClusterCull bucket records consumed: %u",
             counter(CLodWorkGraphCounterIndex::Phase2ReplayClusterBucketRecordsConsumed));
     }

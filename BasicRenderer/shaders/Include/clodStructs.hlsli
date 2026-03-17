@@ -127,8 +127,7 @@ struct ClusterLODGroup
 static const uint CLOD_GROUP_FLAG_IS_VOXEL = 1u << 0;
 
 static const uint CLOD_REPLAY_RECORD_TYPE_NODE = 0;
-static const uint CLOD_REPLAY_RECORD_TYPE_GROUP = 1;
-static const uint CLOD_REPLAY_RECORD_TYPE_MESHLET = 2;
+static const uint CLOD_REPLAY_RECORD_TYPE_MESHLET = 1;
 static const uint CLOD_REPLAY_BUFFER_SIZE_BYTES = 100u * 1024u * 1024u;
 
 struct CLodNodeGroupReplayRecord

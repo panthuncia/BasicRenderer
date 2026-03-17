@@ -66,9 +66,14 @@ public:
 		std::vector<CLodActiveGroupRange> activeRanges;
 		std::vector<CLodActiveGroupRange> coarsestRanges;
 		std::vector<int32_t> parentGroupByGlobal;
+		std::vector<float> groupOriginalErrorByGlobal;
 		uint32_t maxGroupIndex = 0;
 	};
 	void GetCLodStreamingDomainSnapshot(CLodStreamingDomainSnapshot& outSnapshot) const;
+
+	// Patch a single group's error field in the GPU groups buffer.
+	// Used by the streaming system to override error for residency transitions.
+	void PatchCLodGroupError(uint32_t groupGlobalIndex, float error);
 
 	// Returns true when mesh/instance adds or removes have changed the
 	// streaming structure since the last call.  After returning true the

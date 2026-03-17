@@ -10,4 +10,3 @@
 #define CLOD_MAX_CLUSTERS_PER_GROUP 512
 #define CLOD_PAGE_SIZE 256*1024
 #define CLOD_PAGE_HEADER_SIZE 128       // 32 x uint32, GPU cache-line aligned
-#define CLOD_MAX_PAGES_PER_GROUP 32     // BVH_MAX_CHILDREN

@@ -1151,6 +1151,7 @@ void MeshManager::GetCLodStreamingDomainSnapshot(CLodStreamingDomainSnapshot& ou
 	outSnapshot.activeRanges.clear();
 	outSnapshot.coarsestRanges.clear();
 	outSnapshot.parentGroupByGlobal.clear();
+	outSnapshot.groupOriginalErrorByGlobal.clear();
 	outSnapshot.maxGroupIndex = 0;
 
 	std::unordered_set<uint64_t> seenRanges;
@@ -1208,6 +1209,9 @@ void MeshManager::GetCLodStreamingDomainSnapshot(CLodStreamingDomainSnapshot& ou
 		if (outSnapshot.parentGroupByGlobal.size() < parentRangeEnd) {
 			outSnapshot.parentGroupByGlobal.resize(parentRangeEnd, -1);
 		}
+		if (outSnapshot.groupOriginalErrorByGlobal.size() < parentRangeEnd) {
+			outSnapshot.groupOriginalErrorByGlobal.resize(parentRangeEnd, 0.0f);
+		}
 		for (uint32_t groupLocalIndex = 0u; groupLocalIndex < localGroupCount; ++groupLocalIndex) {
 			const int32_t parentLocal = summary.parentGroupByLocal[groupLocalIndex];
 			if (parentLocal < 0) {
@@ -1221,11 +1225,32 @@ void MeshManager::GetCLodStreamingDomainSnapshot(CLodStreamingDomainSnapshot& ou
 			const uint32_t childGlobal = state.groupsBase + groupLocalIndex;
 			outSnapshot.parentGroupByGlobal[childGlobal] = static_cast<int32_t>(parentGlobal);
 		}
+
+		// Original error values for residency-driven error override
+		const uint32_t errorLocalCount = std::min<uint32_t>(localGroupCount, static_cast<uint32_t>(summary.groupErrorByLocal.size()));
+		for (uint32_t groupLocalIndex = 0u; groupLocalIndex < errorLocalCount; ++groupLocalIndex) {
+			const uint32_t globalIndex = state.groupsBase + groupLocalIndex;
+			if (globalIndex < outSnapshot.groupOriginalErrorByGlobal.size()) {
+				outSnapshot.groupOriginalErrorByGlobal[globalIndex] = summary.groupErrorByLocal[groupLocalIndex];
+			}
+		}
 	}
 }
 
 bool MeshManager::ConsumeCLodStreamingStructureDirty() {
 	return m_clodStreamingStructureDirty.exchange(false);
+}
+
+void MeshManager::PatchCLodGroupError(uint32_t groupGlobalIndex, float error) {
+	// bounds.error is at byte offset 16 within ClusterLODGroup:
+	// clodBounds { float center[3]; float radius; float error; } → error at offset 16
+	constexpr size_t errorFieldOffset = 16;
+	const size_t byteOffset = static_cast<size_t>(groupGlobalIndex) * sizeof(ClusterLODGroup) + errorFieldOffset;
+	auto handle = m_clusterLODGroups->BeginBulkWrite();
+	if (handle.data && byteOffset + sizeof(float) <= handle.capacity) {
+		std::memcpy(handle.data + byteOffset, &error, sizeof(float));
+		m_clusterLODGroups->EndBulkWrite(byteOffset, sizeof(float));
+	}
 }
 
 MeshManager::CLodStreamingDebugStats MeshManager::GetCLodStreamingDebugStats() const {

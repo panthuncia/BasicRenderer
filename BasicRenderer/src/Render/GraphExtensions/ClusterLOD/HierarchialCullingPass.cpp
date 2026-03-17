@@ -402,7 +402,7 @@ void HierarchialCullingPass::CreatePipelines(
         { "WG_ReplayNodeGroup", nullptr },
         { "WG_ReplayMeshlet", nullptr },
         { "WG_TraverseNodes", nullptr },
-        { "WG_GroupEvaluate", nullptr },
+        { "WG_SegmentEvaluate", nullptr },
         { "WG_ClusterCullBuckets", nullptr },
     }};
 
