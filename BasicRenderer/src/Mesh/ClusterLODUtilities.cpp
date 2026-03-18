@@ -1286,10 +1286,48 @@ namespace
 				node.range.countMinusOne = (seg.meshletCount > 0) ? (seg.meshletCount - 1) : 0;
 				node.range.ownerGroupId = info.ownerGroupId;
 
-				node.traversalMetric.boundingSphereX = segBounds.sphere.x;
-				node.traversalMetric.boundingSphereY = segBounds.sphere.y;
-				node.traversalMetric.boundingSphereZ = segBounds.sphere.z;
-				node.traversalMetric.boundingSphereRadius = segBounds.sphere.w;
+				if (false) { // Testing
+					node.traversalMetric.boundingSphereX = segBounds.sphere.x;
+					node.traversalMetric.boundingSphereY = segBounds.sphere.y;
+					node.traversalMetric.boundingSphereZ = segBounds.sphere.z;
+					node.traversalMetric.boundingSphereRadius = segBounds.sphere.w;
+				} else {
+					// Expand the BVH leaf bounding sphere to enclose the owning
+					// group's bounding sphere.  SegmentEvaluate checks the LOD
+					// cut conditions using group-level bounds, so the BVH must be
+					// conservative w.r.t. group-level ErrorOverDistance to avoid
+					// pruning segments whose group condition 1 would pass.
+					const float sx = segBounds.sphere.x, sy = segBounds.sphere.y, sz = segBounds.sphere.z;
+					const float sr = segBounds.sphere.w;
+					const float gx = grp.bounds.center[0], gy = grp.bounds.center[1], gz = grp.bounds.center[2];
+					const float gr = grp.bounds.radius;
+
+					const float dx = gx - sx, dy = gy - sy, dz = gz - sz;
+					const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+					float cx, cy, cz, cr;
+					if (dist + gr <= sr) {
+						// Group sphere is inside segment sphere.
+						cx = sx; cy = sy; cz = sz; cr = sr;
+					}
+					else if (dist + sr <= gr) {
+						// Segment sphere is inside group sphere.
+						cx = gx; cy = gy; cz = gz; cr = gr;
+					}
+					else {
+						// General case: compute minimal enclosing sphere of both.
+						cr = (dist + sr + gr) * 0.5f;
+						const float t = (cr - sr) / std::max(dist, 1e-12f);
+						cx = sx + dx * t;
+						cy = sy + dy * t;
+						cz = sz + dz * t;
+					}
+
+					node.traversalMetric.boundingSphereX = cx;
+					node.traversalMetric.boundingSphereY = cy;
+					node.traversalMetric.boundingSphereZ = cz;
+					node.traversalMetric.boundingSphereRadius = cr;
+				}
 				node.traversalMetric.maxQuadricError = grp.bounds.error;
 			}
 
