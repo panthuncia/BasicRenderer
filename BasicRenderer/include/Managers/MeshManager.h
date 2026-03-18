@@ -184,6 +184,13 @@ private:
 		std::vector<ClusterLODGroup> groups;
 		std::vector<ClusterLODGroupSegment> segments;
 
+		// Parent-child mapping and original error values, copied from
+		// the runtime summary at AddMesh time so that the streaming
+		// domain snapshot always has reliable data regardless of mesh
+		// object lifetime or summary state.
+		std::vector<int32_t> parentGroupByLocal;
+		std::vector<float> groupErrorByLocal;
+
 		// GroupPageMap buffer view for this mesh's page map entries.
 		std::unique_ptr<BufferView> ownedPageMapView;
 		uint32_t pageMapGlobalBase = 0; // global offset into GroupPageMap buffer

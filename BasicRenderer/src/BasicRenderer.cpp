@@ -303,11 +303,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // Aftermath
 
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
-    //HMODULE pixLoaded = PIXLoadLatestWinPixGpuCapturerLibrary();
-    //if (!pixLoaded) {
-    //    // Print the error code for debugging purposes
-    //    spdlog::warn("Could not load PIX! Error: {}", GetLastError());
-    //}
+    HMODULE pixLoaded = PIXLoadLatestWinPixGpuCapturerLibrary();
+    if (!pixLoaded) {
+        // Print the error code for debugging purposes
+        spdlog::warn("Could not load PIX! Error: {}", GetLastError());
+    }
 #endif
 
     SetDllDirectoryA(".\\D3D\\");
@@ -350,7 +350,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto usdScene = LoadModel("models/sponza.usdz");
     
     //auto bistro = LoadModel("models/bistroExteriorNoMats.usdz");
-    auto bistro = LoadModel("models/post.glb");
+    auto bistro = LoadModel("models/bistroExterior.glb");
     //auto wine = LoadModel("models/bistroInterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
