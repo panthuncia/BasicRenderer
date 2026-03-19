@@ -103,6 +103,16 @@ static const uint CLOD_STREAM_PRIORITY_SHIFT = 16u;
 static const uint CLOD_RECORD_SOURCE_PASS1 = 0;
 static const uint CLOD_RECORD_SOURCE_REPLAY = 1;
 
+bool CLodWorkGraphTelemetryEnabled()
+{
+    return (CLOD_WORKGRAPH_FLAGS & CLOD_WORKGRAPH_FLAG_TELEMETRY_ENABLED) != 0u;
+}
+
+bool CLodWorkGraphOcclusionEnabled()
+{
+    return (CLOD_WORKGRAPH_FLAGS & CLOD_WORKGRAPH_FLAG_OCCLUSION_ENABLED) != 0u;
+}
+
 uint CLodBitMask(uint key)
 {
     return 1u << (key & 31u);
@@ -144,7 +154,7 @@ static const uint SEGMENT_EVALUATE_RECORDS_PER_GROUP = SEGMENT_EVALUATE_THREADS_
 
 void WGTelemetryAdd(uint counterIndex, uint value)
 {
-    if (CLOD_WORKGRAPH_TELEMETRY_ENABLED == 0)
+    if (!CLodWorkGraphTelemetryEnabled())
     {
         return;
     }
@@ -580,38 +590,29 @@ void WG_TraverseNodes(
             WGTelemetryAdd(WG_COUNTER_TRAVERSE_CULLED_NODE_RECORDS, 1);
         }
         else {
-            // LOD pre-filter: for segment-leaves, the node stores the
-            // *parent* group's error and the BVH sphere is expanded to
-            // enclose the owning group's sphere.  Using the node sphere is
-            // conservative — SegmentEvaluate performs the authoritative check
-            // with the real group and parent spheres.
-            const float3 lodCheckWorldCenter = mul(float4(nodeCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
-            const float lodCheckWorldRadius = nodeRadiusWorld;
+            // LOD pre-filter: for segment-leaves, check if the own group's
+            // error-over-distance exceeds threshold (condition 1 of the
+            // meshoptimizer rendering rule).  Uses the actual group sphere
+            // for accuracy; the BVH node sphere is only for frustum culling.
+            // For internal nodes, the BVH node sphere and propagated max
+            // error provide a conservative bound.
 
             bool nodeWantsTraversal = false;
             if (node.range.isGroup != 0) {
                 const uint groupGlobalIndex = clodMeshMetadata.groupsBase + node.range.ownerGroupId;
                 const ClusterLODGroup grp = groups[groupGlobalIndex];
 
-                if (grp.parentGroupId < 0) {
-                    nodeWantsTraversal = parentAllowsRefine;
-                }
-                else {
-                    const uint parentGlobalIndex = clodMeshMetadata.groupsBase + (uint)grp.parentGroupId;
-                    const ClusterLODGroup parentGrp = groups[parentGlobalIndex];
-                    const float3 parentWorldCenter = mul(float4(parentGrp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
-                    const float parentWorldRadius = parentGrp.bounds.centerAndRadius.w * nodeUniformScale;
-                    const float parentErrorOverDistance = ErrorOverDistance(
-                        parentWorldCenter,
-                        parentWorldRadius,
-                        parentGrp.bounds.error,
-                        nodeUniformScale,
-                        cam.positionWorldSpace.xyz,
-                        cam.zNear);
-                    nodeWantsTraversal = parentAllowsRefine && (parentErrorOverDistance >= cam.errorOverDistanceThreshold);
-                }
+                const float3 grpWorldCenter = mul(float4(grp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+                const float grpWorldRadius = grp.bounds.centerAndRadius.w * nodeUniformScale;
+                const float grpEOD = ErrorOverDistance(
+                    grpWorldCenter, grpWorldRadius,
+                    grp.bounds.error, nodeUniformScale,
+                    cam.positionWorldSpace.xyz, cam.zNear);
+                nodeWantsTraversal = parentAllowsRefine && (grpEOD >= cam.errorOverDistanceThreshold);
             }
             else {
+                const float3 lodCheckWorldCenter = mul(float4(nodeCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
+                const float lodCheckWorldRadius = nodeRadiusWorld;
                 const float nodeErrorOverDistance = ErrorOverDistance(
                     lodCheckWorldCenter,
                     lodCheckWorldRadius,
@@ -623,10 +624,9 @@ void WG_TraverseNodes(
             }
 
             if (node.range.isGroup != 0) {
-                // Segment-leaf: use the exact parent group sphere here so
-                // TraverseNodes and SegmentEvaluate make the same parent-level
-                // LOD decision. The cached node sphere remains the conservative
-                // primitive for culling, but not for the leaf refine test.
+                // Segment-leaf: pruned if own group's error is under
+                // threshold.  SegmentEvaluate performs the full two-sided
+                // check (own group + child group).
                 if (!nodeWantsTraversal) {
                     WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
                 }
@@ -645,7 +645,7 @@ void WG_TraverseNodes(
             }
             else {
                 bool occlusionCulled = false;
-                if (!camera.isOrtho) {
+                if (CLodWorkGraphOcclusionEnabled() && !camera.isOrtho) {
                     StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
                         ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
                     const uint depthMapDescriptorIndex = viewDepthSRVIndices[rec.viewId].linearDepthSRVIndex;
@@ -784,14 +784,20 @@ void WG_SegmentEvaluate(
             }
         }
 
-        // LOD cut criterion (parent-error model):
-        // The BVH node level already verified the parent's error was above
-        // threshold (meaning the coarser level wasn't good enough).  Here
-        // we check if this group's own error is acceptable — if so, render
-        // at this level.  Terminal segments always render.
+        // LOD cut criterion (per-cluster model, matches meshoptimizer):
+        // Render a segment when:
+        // 1. Own group's error is over threshold (this level needs to be
+        //    visible — the simplification that produced this group is too
+        //    coarse).  Root groups have FLT_MAX error so always pass.
+        // 2. Terminal segment (finest geometry, no finer child) OR the
+        //    child group's error is under threshold (the finer level this
+        //    segment was derived from is acceptable).
+        // This naturally handles multi-parent groups because each segment
+        // checks only its own group and its own child — no shared
+        // parentGroupId required.
         const bool isTerminal = (seg.refinedGroup < 0);
 
-        // Own group's error: if at or below threshold, this level is acceptable.
+        // Condition 1: own group's error over threshold.
         const float3 ownGroupWorldCenter = mul(float4(grp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
         const float ownGroupWorldRadius = grp.bounds.centerAndRadius.w * groupUniformScale;
         const float ownGroupErrorOverDistance = ErrorOverDistance(
@@ -801,39 +807,44 @@ void WG_SegmentEvaluate(
             groupUniformScale,
             cam.positionWorldSpace.xyz,
             cam.zNear);
-        const bool ownGroupAcceptable = (ownGroupErrorOverDistance < cam.errorOverDistanceThreshold);
+        const bool ownGroupNeedsRefinement = (ownGroupErrorOverDistance >= cam.errorOverDistanceThreshold);
 
-        // Bidirectional LOD guarantee: re-check the parent's error using
-        // the parent's own bounding sphere.  If the parent is acceptable
-        // (its error-over-distance is below threshold), this level is not
-        // needed — the parent will render instead.  Root groups
-        // (parentGroupId < 0) always pass because they have no parent.
-        bool parentNeedsRefinement = true;
-        if (grp.parentGroupId >= 0) {
-            const uint parentGlobalIndex = clodMeshMetadata.groupsBase + (uint)grp.parentGroupId;
-            const ClusterLODGroup parentGrp = groups[parentGlobalIndex];
-            const float3 parentWorldCenter = mul(float4(parentGrp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
-            const float parentWorldRadius = parentGrp.bounds.centerAndRadius.w * groupUniformScale;
-            const float parentErrorOverDistance = ErrorOverDistance(
-                parentWorldCenter, parentWorldRadius,
-                parentGrp.bounds.error, groupUniformScale,
+        // Condition 2: terminal or child group's error is acceptable.
+        bool childAcceptable = isTerminal;
+        if (!isTerminal) {
+            const uint childGroupGlobalIndex = clodMeshMetadata.groupsBase + (uint)seg.refinedGroup;
+            const ClusterLODGroup childGrp = groups[childGroupGlobalIndex];
+            const float3 childWorldCenter = mul(float4(childGrp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+            const float childWorldRadius = childGrp.bounds.centerAndRadius.w * groupUniformScale;
+            const float childEOD = ErrorOverDistance(
+                childWorldCenter, childWorldRadius,
+                childGrp.bounds.error, groupUniformScale,
                 cam.positionWorldSpace.xyz, cam.zNear);
-            parentNeedsRefinement = (parentErrorOverDistance >= cam.errorOverDistanceThreshold);
+            childAcceptable = (childEOD < cam.errorOverDistanceThreshold);
         }
 
-        bool shouldEmit = parentNeedsRefinement && (ownGroupAcceptable || isTerminal) && (seg.meshletCount != 0);
+        bool shouldEmit = ownGroupNeedsRefinement && childAcceptable && (seg.meshletCount != 0);
 
-        // Streaming fallback: if this level isn't acceptable and a finer
-        // level exists, check residency.  If non-resident, force render
-        // at this level and issue a streaming request.
-        if (!shouldEmit && parentNeedsRefinement && !isTerminal && rec.allowRefine != 0u && seg.meshletCount != 0) {
+        // Load streaming residency data (shared by own-group check and fallback).
+        StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
+        const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
+        ByteAddressBuffer nonResidentBits =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
+
+        // Suppress emission when own group's pages are non-resident.
+        if (shouldEmit && groupGlobalIndex < activeGroupScanCount) {
+            if (CLodReadBit(nonResidentBits, groupGlobalIndex)) {
+                shouldEmit = false;
+            }
+        }
+
+        // Streaming fallback: own group needs refinement and the child
+        // group isn't acceptable (or non-resident), so this segment
+        // didn't qualify to emit.  If the child is non-resident, force
+        // render at this level and request the child be streamed in.
+        if (!shouldEmit && ownGroupNeedsRefinement && !isTerminal && rec.allowRefine != 0u && seg.meshletCount != 0) {
             const uint refinedGroupGlobalIndex = clodMeshMetadata.groupsBase + (uint)seg.refinedGroup;
-
-            StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
-                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
-            const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
-            ByteAddressBuffer nonResidentBits =
-                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
 
             bool refinedResident = true;
             if (refinedGroupGlobalIndex < activeGroupScanCount) {
@@ -1002,7 +1013,7 @@ void WG_ClusterCullBuckets(
 
                 survives = replaySource || !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, camera);
 
-                if (survives && depthMapDescriptorIndex != 0) {
+                if (survives && CLodWorkGraphOcclusionEnabled() && depthMapDescriptorIndex != 0) {
                     bool occlusionCulled = false;
                     OcclusionCullingPerspectiveTexture2D(
                         occlusionCulled,

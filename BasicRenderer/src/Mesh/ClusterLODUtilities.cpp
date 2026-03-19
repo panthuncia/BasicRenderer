@@ -1338,12 +1338,11 @@ namespace
 					node.traversalMetric.boundingSphereRadius = segBounds.sphere.w;
 				} else {
 					// Expand the BVH leaf bounding sphere to enclose the owning
-					// group's bounding sphere AND the parent group's bounding
-					// sphere.  SegmentEvaluate checks ErrorOverDistance using the
-					// parent's sphere, so the BVH node sphere must enclose it to
-					// be a valid conservative pre-filter.  Without this, the BVH
-					// can compute a lower EOD than the parent sphere and
-					// incorrectly prune segments that SegmentEvaluate would emit.
+					// group's bounding sphere.  This is needed for conservative
+					// frustum culling — the BVH node sphere must cover the
+					// spatial region of the group.  The LOD pre-filter in
+					// TraverseNodes loads the actual group sphere for accuracy,
+					// so only frustum culling relies on this expanded sphere.
 					const float sx = segBounds.sphere.x, sy = segBounds.sphere.y, sz = segBounds.sphere.z;
 					const float sr = segBounds.sphere.w;
 					const float gx = grp.bounds.center[0], gy = grp.bounds.center[1], gz = grp.bounds.center[2];
@@ -1366,37 +1365,20 @@ namespace
 						cy = sy + dy * t;
 						cz = sz + dz * t;
 					}
-
-					// Merge with parent group sphere so the BVH EOD is always
-					// >= the parent-sphere EOD used in SegmentEvaluate.
-					const int32_t parentGrpId = parentGroupIdForGroup[info.ownerGroupId];
-					if (parentGrpId >= 0) {
-						const auto& pb = state.groups[parentGrpId].bounds;
-						const float px = pb.center[0], py = pb.center[1], pz = pb.center[2];
-						const float pr = pb.radius;
-
-						const float dpx = px - cx, dpy = py - cy, dpz = pz - cz;
-						const float pdist = std::sqrt(dpx * dpx + dpy * dpy + dpz * dpz);
-
-						if (pdist + cr <= pr) {
-							cx = px; cy = py; cz = pz; cr = pr;
-						}
-						else if (pdist + pr > cr) {
-							const float newR = (pdist + cr + pr) * 0.5f;
-							const float pt = (newR - cr) / std::max(pdist, 1e-12f);
-							cx = cx + dpx * pt;
-							cy = cy + dpy * pt;
-							cz = cz + dpz * pt;
-							cr = newR;
-						}
-					}
+					// Pad for floating-point rounding in the minimal-enclosing
+					// sphere formula to guarantee strict enclosure.
+					cr *= (1.0f + 1e-5f);
 
 					node.traversalMetric.boundingSphereX = cx;
 					node.traversalMetric.boundingSphereY = cy;
 					node.traversalMetric.boundingSphereZ = cz;
 					node.traversalMetric.boundingSphereRadius = cr;
 				}
-				node.traversalMetric.maxQuadricError = parentErrorForGroup[info.ownerGroupId];
+				// Store the own group's error for propagation to parent BVH
+				// internal nodes.  TraverseNodes loads the actual group for
+				// the leaf-level LOD check, but internal nodes use the
+				// propagated maxQuadricError as a conservative bound.
+				node.traversalMetric.maxQuadricError = grp.bounds.error;
 			}
 
 			if (leafCount == 1) {
@@ -1459,7 +1441,7 @@ namespace
 					node.traversalMetric.boundingSphereX = merged.center[0];
 					node.traversalMetric.boundingSphereY = merged.center[1];
 					node.traversalMetric.boundingSphereZ = merged.center[2];
-					node.traversalMetric.boundingSphereRadius = merged.radius;
+					node.traversalMetric.boundingSphereRadius = merged.radius * (1.0f + 1e-5f);
 				}
 
 				lastLayerOffset = writeOffset;
@@ -1499,7 +1481,7 @@ namespace
 				node.traversalMetric.boundingSphereX = merged.center[0];
 				node.traversalMetric.boundingSphereY = merged.center[1];
 				node.traversalMetric.boundingSphereZ = merged.center[2];
-				node.traversalMetric.boundingSphereRadius = merged.radius;
+				node.traversalMetric.boundingSphereRadius = merged.radius * (1.0f + 1e-5f);
 
 				return node;
 			};
