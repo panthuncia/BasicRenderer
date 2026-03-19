@@ -556,6 +556,8 @@ void WG_TraverseNodes(
         StructuredBuffer<CullingCameraInfo> cameraInfos =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
         const CullingCameraInfo cam = cameraInfos[rec.viewId];
+        StructuredBuffer<ClusterLODGroup> groups =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
         StructuredBuffer<ClusterLODNode> lodNodes =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Nodes)];
 
@@ -586,20 +588,45 @@ void WG_TraverseNodes(
             const float3 lodCheckWorldCenter = mul(float4(nodeCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
             const float lodCheckWorldRadius = nodeRadiusWorld;
 
-            const float nodeErrorOverDistance = ErrorOverDistance(
-                lodCheckWorldCenter,
-                lodCheckWorldRadius,
-                node.metric.maxQuadricError,
-                nodeUniformScale,
-                cam.positionWorldSpace.xyz,
-                cam.zNear);
+            bool nodeWantsTraversal = false;
+            if (node.range.isGroup != 0) {
+                const uint groupGlobalIndex = clodMeshMetadata.groupsBase + node.range.ownerGroupId;
+                const ClusterLODGroup grp = groups[groupGlobalIndex];
 
-            const bool nodeWantsTraversal = parentAllowsRefine && (nodeErrorOverDistance >= cam.errorOverDistanceThreshold);
+                if (grp.parentGroupId < 0) {
+                    nodeWantsTraversal = parentAllowsRefine;
+                }
+                else {
+                    const uint parentGlobalIndex = clodMeshMetadata.groupsBase + (uint)grp.parentGroupId;
+                    const ClusterLODGroup parentGrp = groups[parentGlobalIndex];
+                    const float3 parentWorldCenter = mul(float4(parentGrp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+                    const float parentWorldRadius = parentGrp.bounds.centerAndRadius.w * nodeUniformScale;
+                    const float parentErrorOverDistance = ErrorOverDistance(
+                        parentWorldCenter,
+                        parentWorldRadius,
+                        parentGrp.bounds.error,
+                        nodeUniformScale,
+                        cam.positionWorldSpace.xyz,
+                        cam.zNear);
+                    nodeWantsTraversal = parentAllowsRefine && (parentErrorOverDistance >= cam.errorOverDistanceThreshold);
+                }
+            }
+            else {
+                const float nodeErrorOverDistance = ErrorOverDistance(
+                    lodCheckWorldCenter,
+                    lodCheckWorldRadius,
+                    node.metric.maxQuadricError,
+                    nodeUniformScale,
+                    cam.positionWorldSpace.xyz,
+                    cam.zNear);
+                nodeWantsTraversal = parentAllowsRefine && (nodeErrorOverDistance >= cam.errorOverDistanceThreshold);
+            }
 
             if (node.range.isGroup != 0) {
-                // Segment-leaf: parent error stored in node was above threshold,
-                // meaning the parent (coarser) level wasn't good enough.
-                // Emit to SegmentEvaluate to check own-group error.
+                // Segment-leaf: use the exact parent group sphere here so
+                // TraverseNodes and SegmentEvaluate make the same parent-level
+                // LOD decision. The cached node sphere remains the conservative
+                // primitive for culling, but not for the leaf refine test.
                 if (!nodeWantsTraversal) {
                     WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
                 }
