@@ -39,34 +39,36 @@ struct MeshletSetup
 {
     uint viewID; // Which view this meshlet is being rendered for (for CLod path)
     uint meshletIndex;
-    Meshlet meshlet;
+    Meshlet meshlet; // Used by non-CLod path
     PerMeshBuffer meshBuffer;
     PerMeshInstanceBuffer meshInstanceBuffer;
     PerObjectBuffer objectBuffer;
     uint vertCount;
     uint triCount;
-    uint vertOffset;
-    uint groupVertexBase;
-    uint groupVertexCount;
-    uint groupVertexChunkByteOffset;
-    uint groupMeshletVerticesBase;
-    uint groupMeshletVertexCount;
-    uint groupMeshletTrianglesByteOffset;
-    uint compressedPositionWordsBase;
-    uint compressedPositionWordCount;
-    uint compressedPositionBitsX;
-    uint compressedPositionBitsY;
-    uint compressedPositionBitsZ;
-    uint compressedPositionQuantExp;
-    int3 compressedPositionMinQ;
-    uint compressedNormalWordsBase;
-    uint compressedNormalWordCount;
-    uint compressedMeshletVertexWordsBase;
-    uint compressedMeshletVertexWordCount;
-    uint compressedMeshletVertexBits;
-    uint compressedFlags;
+    uint vertOffset; // Non-CLod: meshlet.VertOffset; CLod: unused (0)
+
+    // Non-CLod vertex/triangle addressing
     uint postSkinningBufferOffset;
     uint prevPostSkinningBufferOffset;
+    uint groupMeshletTrianglesByteOffset; // Non-CLod triangle buffer offset
+
+    // Per-meshlet compression from CLodMeshletDescriptor
+    uint bitsX;
+    uint bitsY;
+    uint bitsZ;
+    int3 minQ;
+    uint positionBitOffset;     // bit offset within page position bitstream
+    uint normalWordOffset;      // word offset within page normal array
+    uint triangleByteOffset;    // byte offset within page triangle stream
+
+    // Page-level stream base byte offsets (absolute in slab)
+    uint positionBitstreamBase;
+    uint normalArrayBase;
+    uint triangleStreamBase;
+
+    // Mesh-wide quantization
+    uint compressedPositionQuantExp;
+
     // Page-pool addressing (0 = non-CLod / not loaded)
     uint pagePoolSlabDescriptorIndex;  // Descriptor-heap index of the slab ByteAddressBuffer
 };
@@ -98,25 +100,20 @@ bool InitializeMeshletInternal(
     setup.vertCount = setup.meshlet.VertCount;
     setup.triCount = setup.meshlet.TriCount;
     setup.vertOffset = setup.meshlet.VertOffset;
-    setup.groupVertexBase = 0;
-    setup.groupVertexCount = 0;
-    setup.groupVertexChunkByteOffset = 0;
-    setup.groupMeshletVerticesBase = 0;
-    setup.groupMeshletVertexCount = 0;
     setup.groupMeshletTrianglesByteOffset = setup.meshBuffer.clodMeshletTrianglesBufferOffset;
-    setup.compressedPositionWordsBase = 0;
-    setup.compressedPositionWordCount = 0;
-    setup.compressedPositionBitsX = 0;
-    setup.compressedPositionBitsY = 0;
-    setup.compressedPositionBitsZ = 0;
+
+    // CLod per-meshlet fields unused in non-CLod path
+    setup.bitsX = 0;
+    setup.bitsY = 0;
+    setup.bitsZ = 0;
+    setup.minQ = int3(0, 0, 0);
+    setup.positionBitOffset = 0;
+    setup.normalWordOffset = 0;
+    setup.triangleByteOffset = 0;
+    setup.positionBitstreamBase = 0;
+    setup.normalArrayBase = 0;
+    setup.triangleStreamBase = 0;
     setup.compressedPositionQuantExp = 0;
-    setup.compressedPositionMinQ = int3(0, 0, 0);
-    setup.compressedNormalWordsBase = 0;
-    setup.compressedNormalWordCount = 0;
-    setup.compressedMeshletVertexWordsBase = 0;
-    setup.compressedMeshletVertexWordCount = 0;
-    setup.compressedMeshletVertexBits = 0;
-    setup.compressedFlags = 0;
 
     // setup.vertexBuffer = vertexBuffer;
     // setup.meshletTrianglesBuffer = meshletTrianglesBuffer;
@@ -159,7 +156,6 @@ bool InitializeMeshletInternalCLod(
 
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
 
     setup.meshBuffer = perMeshBuffer[setup.meshInstanceBuffer.perMeshBufferIndex];
     setup.objectBuffer = perObjectBuffer[setup.meshInstanceBuffer.perObjectBufferIndex];
@@ -180,59 +176,36 @@ bool InitializeMeshletInternalCLod(
         return false;
     }
 
-    // Load meshlet from the page-pool slab
-    {
-        uint meshletAddr = pageSlabOff + hdr.meshletStructOffset + setup.meshletIndex * 16u;
-        setup.meshlet = LoadMeshletFromSlab(pageSlabDesc, meshletAddr);
-    }
+    // Load per-meshlet descriptor
+    CLodMeshletDescriptor desc = LoadMeshletDescriptor(
+        pageSlabDesc, pageSlabOff, hdr.descriptorOffset, setup.meshletIndex);
 
-    setup.vertCount = setup.meshlet.VertCount;
-    setup.triCount = setup.meshlet.TriCount;
-    setup.vertOffset = setup.meshlet.VertOffset;
-    setup.groupVertexBase = 0;
-    setup.groupVertexCount = hdr.vertexCount;
-    setup.groupMeshletVertexCount = hdr.meshletVertexCount;
-    setup.compressedPositionWordCount = hdr.compressedPositionWordCount;
-    setup.compressedPositionBitsX = hdr.compressedPositionBitsX;
-    setup.compressedPositionBitsY = hdr.compressedPositionBitsY;
-    setup.compressedPositionBitsZ = hdr.compressedPositionBitsZ;
+    setup.meshlet = (Meshlet)0; // Not used in CLod path
+    setup.vertCount = CLodDescVertexCount(desc);
+    setup.triCount = CLodDescTriangleCount(desc);
+    setup.vertOffset = 0;
+
+    // Per-meshlet compression from descriptor
+    setup.bitsX = CLodDescBitsX(desc);
+    setup.bitsY = CLodDescBitsY(desc);
+    setup.bitsZ = CLodDescBitsZ(desc);
+    setup.minQ = int3(desc.minQx, desc.minQy, desc.minQz);
+    setup.positionBitOffset = desc.positionBitOffset;
+    setup.normalWordOffset = desc.normalWordOffset;
+    setup.triangleByteOffset = desc.triangleByteOffset;
+
+    // Page-level stream base offsets (absolute in slab)
+    setup.positionBitstreamBase = pageSlabOff + hdr.positionBitstreamOffset;
+    setup.normalArrayBase = pageSlabOff + hdr.normalArrayOffset;
+    setup.triangleStreamBase = pageSlabOff + hdr.triangleStreamOffset;
+
     setup.compressedPositionQuantExp = hdr.compressedPositionQuantExp;
-    setup.compressedPositionMinQ = int3(
-        hdr.compressedPositionMinQx,
-        hdr.compressedPositionMinQy,
-        hdr.compressedPositionMinQz);
-    setup.compressedNormalWordCount = hdr.compressedNormalWordCount;
-    setup.compressedMeshletVertexWordCount = hdr.compressedMeshletVertexWordCount;
-    setup.compressedMeshletVertexBits = hdr.compressedMeshletVertexBits;
-    setup.compressedFlags = hdr.compressedFlags;
-
-    if (setup.vertOffset + setup.vertCount > setup.groupMeshletVertexCount)
-    {
-        return false;
-    }
-
-    if (setup.meshlet.TriOffset + setup.meshlet.TriCount * 3u > hdr.meshletTrianglesByteCount)
-    {
-        return false;
-    }
-
-    // ── Page-pool addressing from pre-resolved page location ─────────────
     setup.pagePoolSlabDescriptorIndex = pageSlabDesc;
-    {
-        uint base = pageSlabOff;
-        setup.groupVertexChunkByteOffset     = base + hdr.vertexOffset;
-        setup.groupMeshletVerticesBase       = (base + hdr.meshletVertexOffset) / 4u;
-        setup.groupMeshletTrianglesByteOffset = base + hdr.triangleOffset;
-        setup.compressedPositionWordsBase    = (base + hdr.compPosOffset) / 4u;
-        setup.compressedNormalWordsBase      = (base + hdr.compNormOffset) / 4u;
-        setup.compressedMeshletVertexWordsBase = (base + hdr.compMeshletVertOffset) / 4u;
-    }
 
-    // Vertex data lives in the slab page.
-    {
-        setup.postSkinningBufferOffset     = pageSlabOff + hdr.vertexOffset;
-        setup.prevPostSkinningBufferOffset = setup.postSkinningBufferOffset;
-    }
+    // Non-CLod fields unused
+    setup.groupMeshletTrianglesByteOffset = 0;
+    setup.postSkinningBufferOffset = 0;
+    setup.prevPostSkinningBufferOffset = 0;
 
     return true;
 }
@@ -265,15 +238,24 @@ bool InitializeMeshletFromVisibleCluster(uint visibleClusterIndex, out MeshletSe
 
 uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
 {
-    ByteAddressBuffer meshletTrianglesBuffer;
-    if (setup.pagePoolSlabDescriptorIndex != 0u)
-        meshletTrianglesBuffer = ResourceDescriptorHeap[setup.pagePoolSlabDescriptorIndex];
-    else
-        meshletTrianglesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletTriangles)];
+    ByteAddressBuffer triangleBuffer;
+    uint triOffset;
 
-    uint triOffset = setup.groupMeshletTrianglesByteOffset + setup.meshlet.TriOffset + triLocalIndex * 3;
+    if (setup.pagePoolSlabDescriptorIndex != 0u)
+    {
+        // CLod path: triangle stream in slab, addressed by per-meshlet descriptor
+        triangleBuffer = ResourceDescriptorHeap[setup.pagePoolSlabDescriptorIndex];
+        triOffset = setup.triangleStreamBase + setup.triangleByteOffset + triLocalIndex * 3;
+    }
+    else
+    {
+        // Non-CLod path: original triangle buffer
+        triangleBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletTriangles)];
+        triOffset = setup.groupMeshletTrianglesByteOffset + setup.meshlet.TriOffset + triLocalIndex * 3;
+    }
+
     uint alignedOffset = (triOffset / 4) * 4;
-    uint firstWord = meshletTrianglesBuffer.Load(alignedOffset);
+    uint firstWord = triangleBuffer.Load(alignedOffset);
     uint byteOffset = triOffset % 4;
 
     // Load first byte
@@ -290,14 +272,14 @@ uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
     {
         // The second byte is in this word, but the third byte spills into the next word
         b1 = (firstWord >> ((byteOffset + 1) * 8)) & 0xFF;
-        uint secondWord = meshletTrianglesBuffer.Load(alignedOffset + 4);
+        uint secondWord = triangleBuffer.Load(alignedOffset + 4);
         b2 = secondWord & 0xFF;
     }
     else
     { // byteOffset == 3
         // The first byte is at the last position in firstWord,
         // The next two bytes must come from the next word.
-        uint secondWord = meshletTrianglesBuffer.Load(alignedOffset + 4);
+        uint secondWord = triangleBuffer.Load(alignedOffset + 4);
         b1 = secondWord & 0xFF;
         b2 = (secondWord >> 8) & 0xFF;
     }

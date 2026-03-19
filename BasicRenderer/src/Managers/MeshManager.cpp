@@ -327,26 +327,17 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 			ClusterLODGroupChunk chunk{};
 			const auto& hint = groupChunkHints[groupIndex];
 			chunk.groupVertexCount = hint.groupVertexCount;
-			chunk.meshletVertexCount = hint.meshletVertexCount;
 			chunk.meshletCount = hint.meshletCount;
 			chunk.meshletTrianglesByteCount = hint.meshletTrianglesByteCount;
-			chunk.meshletBoundsCount = hint.meshletBoundsCount;
-			chunk.compressedPositionWordCount = hint.compressedPositionWordCount;
-			chunk.compressedNormalWordCount = hint.compressedNormalWordCount;
-			chunk.compressedMeshletVertexWordCount = hint.compressedMeshletVertexWordCount;
 
-			bool hasRuntimeChunkData = (chunk.pagePoolSlabDescriptorIndex != 0u || chunk.meshletCount == 0u);
+			// Fresh chunks start non-resident, so expose zero counts to the GPU.
+			bool hasRuntimeChunkData = (chunk.meshletCount == 0u);
 			baselineGroupChunks[groupIndex] = chunk;
 
 			if (!hasRuntimeChunkData) {
 				chunk.groupVertexCount = 0;
-				chunk.meshletVertexCount = 0;
 				chunk.meshletCount = 0;
 				chunk.meshletTrianglesByteCount = 0;
-				chunk.meshletBoundsCount = 0;
-				chunk.compressedPositionWordCount = 0;
-				chunk.compressedNormalWordCount = 0;
-				chunk.compressedMeshletVertexWordCount = 0;
 				groupResidentFlags[groupIndex] = 0u;
 			}
 
@@ -365,14 +356,11 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 		auto sharedState = std::make_shared<CLodSharedStreamingState>();
 		sharedState->mesh = mesh.get();
 
-		// Move hierarchy data into the shared state for streaming-apply time
-		// (the Mesh releases its copies below via ReleaseCLodHierarchyCpuData).
+		// Move hierarchy data into the shared state before the mesh releases its CPU copies.
 		sharedState->groups = mesh->GetCLodGroups();
 		sharedState->segments = mesh->GetCLodSegments();
 
-		// Copy parent-child mapping and error values from the runtime summary.
-		// These are used by GetCLodStreamingDomainSnapshot to reliably build
-		// the streaming parent/child maps regardless of mesh object state.
+		// Cache parent-child mapping and error values for streaming snapshots.
 		{
 			const auto& summary = mesh->GetCLodRuntimeSummary();
 			sharedState->parentGroupByLocal = summary.parentGroupByLocal;
@@ -430,13 +418,9 @@ void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedV
 		m_clodSharedStreamingRangesDirty = true;
 		m_clodStreamingStructureDirty = true;
 
-		// NOTE: No CPU-side error=0 patching needed here.  SegmentEvaluate now
-		// checks the per-segment refined-child residency on the GPU
-		// (via NonResidentBits) and forces rendering at the current level
-		// when the refined child isn't resident yet.
 	}
 
-	mesh->SetCLodBufferViews( // TODO: cleanup on remove
+	mesh->SetCLodBufferViews(
 		std::move(clusterLODGroupsView), 
 		std::move(clusterLODSegmentsView), 
 		std::move(clusterLODNodesView));
@@ -602,12 +586,10 @@ void MeshManager::RemoveMeshInstance(MeshInstance* mesh) {
 
 void MeshManager::ProcessCLodDiskStreamingIO(
 	uint32_t maxCompletedRequests) {
-	// First, dispatch a batch of pending IO requests in parallel across the
-	// task scheduler's thread pool. This replaces the old single-threaded worker.
+	// Dispatch pending IO requests across the task scheduler's IO workers.
 	DispatchCLodDiskStreamingBatch();
 
-	// Drain completed results into a local vector under the results lock so the
-	// IO thread (once moved to background) can continue pushing results.
+	// Drain completed results into a local vector under the results lock.
 	std::vector<CLodDiskStreamingResult> localResults;
 	{
 		std::lock_guard<std::mutex> resultsLock(m_clodDiskStreamingResultsMutex);
@@ -860,11 +842,7 @@ MeshManager::DiskStreamingApplyResult MeshManager::ApplyCompletedCLodDiskStreami
 			sharedState->pageMapEntriesCPU.data());
 	}
 
-	if (!residentAllocations.pageAllocations.empty()) {
-		const auto& firstAlloc = residentAllocations.pageAllocations[0];
-		chunk.pagePoolSlabDescriptorIndex = m_clodPagePool->GetSlabDescriptorIndex(firstAlloc);
-		chunk.pagePoolSlabByteOffset = static_cast<uint32_t>(m_clodPagePool->PageToSlabByteOffset(firstAlloc.firstPageID));
-	}
+	// Page slab info is now stored per-page in GroupPageMapEntry, not in the group chunk.
 
 	// Commit chunk updates.
 	sharedState->baselineGroupChunks[localIndex] = chunk;
@@ -939,13 +917,8 @@ MeshManager::CLodGroupStreamingInfo MeshManager::GetCLodGroupStreamingInfo(uint3
 
 void MeshManager::ZeroCLodGroupChunkCounts(ClusterLODGroupChunk& chunk) {
 	chunk.groupVertexCount = 0;
-	chunk.meshletVertexCount = 0;
 	chunk.meshletCount = 0;
 	chunk.meshletTrianglesByteCount = 0;
-	chunk.meshletBoundsCount = 0;
-	chunk.compressedPositionWordCount = 0;
-	chunk.compressedNormalWordCount = 0;
-	chunk.compressedMeshletVertexWordCount = 0;
 }
 
 bool MeshManager::IsCLodGroupResident(const CLodSharedStreamingState& state, uint32_t groupLocalIndex) const {
@@ -969,8 +942,7 @@ void MeshManager::DeallocateCLodGroupChunkAllocations(CLodSharedStreamingState& 
 	// Clear page-pool fields in the baseline chunk so the shader sees zeros.
 	if (groupLocalIndex < state.baselineGroupChunks.size()) {
 		auto& chunk = state.baselineGroupChunks[groupLocalIndex];
-		chunk.pagePoolSlabDescriptorIndex = 0;
-		chunk.pagePoolSlabByteOffset = 0;
+		ZeroCLodGroupChunkCounts(chunk);
 	}
 
 	// Zero out the GroupPageMap entries for this group.
@@ -1213,8 +1185,7 @@ void MeshManager::GetCLodStreamingDomainSnapshot(CLodStreamingDomainSnapshot& ou
 			outSnapshot.coarsestRanges.push_back(coarsest);
 		}
 
-		// Parent map — prefer the copy stored in the shared streaming state
-		// (populated in AddMesh before hierarchy CPU data is released).
+		// Prefer the parent map cached in the shared streaming state.
 		const auto& parentMap = (state.sharedMeshState && !state.sharedMeshState->parentGroupByLocal.empty())
 			? state.sharedMeshState->parentGroupByLocal
 			: summary.parentGroupByLocal;
@@ -1264,7 +1235,7 @@ bool MeshManager::ConsumeCLodStreamingStructureDirty() {
 
 void MeshManager::PatchCLodGroupError(uint32_t groupGlobalIndex, float error) {
 	// bounds.error is at byte offset 16 within ClusterLODGroup:
-	// clodBounds { float center[3]; float radius; float error; } → error at offset 16
+	// clodBounds { float center[3]; float radius; float error; }, so error is at offset 16
 	constexpr size_t errorFieldOffset = 16;
 	const size_t byteOffset = static_cast<size_t>(groupGlobalIndex) * sizeof(ClusterLODGroup) + errorFieldOffset;
 	auto handle = m_clusterLODGroups->BeginBulkWrite();

@@ -9,4 +9,5 @@
 // Cluster LOD page-tile constants
 #define CLOD_MAX_CLUSTERS_PER_GROUP 512
 #define CLOD_PAGE_SIZE 256*1024
-#define CLOD_PAGE_HEADER_SIZE 128       // 32 x uint32, GPU cache-line aligned
+#define CLOD_PAGE_HEADER_SIZE 64        // 16 x uint32
+#define CLOD_MESHLET_DESCRIPTOR_SIZE 48  // 12 x uint32 = 3 x Load4

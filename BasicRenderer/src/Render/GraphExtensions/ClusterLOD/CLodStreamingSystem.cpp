@@ -25,8 +25,6 @@ CLodStreamingSystem::CLodStreamingSystem() {
     m_streamingNonResidentBitsUploadPending = true;
 
     try {
-        // TODO: Don't send the manager through settings, it's dumb.
-        // We should probably have a way to pass user data to extensions
         auto getter = SettingsManager::GetInstance().getSettingGetter<std::function<MeshManager*()>>(CLodStreamingMeshManagerGetterSettingName);
         m_getMeshManager = getter();
     }
@@ -392,9 +390,7 @@ bool CLodStreamingSystem::TryQueuePendingLoadRequest(const CLodStreamingRequest&
     }
 
     if (IsStreamingRequestInProgress(groupIndex)) {
-        // Only update the priority tracker — do NOT push a duplicate entry.
-        // The existing entry in m_pendingStreamingRequests (or in-flight I/O)
-        // will pick up the elevated priority via m_pendingLoadPriorityByGroup.
+        // Update priority without enqueueing a duplicate request.
         if (m_priorityMode == CLodPriorityMode::Sum) {
             SetPendingLoadPriority(groupIndex, GetPendingLoadPriority(groupIndex) + priority);
         } else {
@@ -632,7 +628,6 @@ CLodStreamingSystem::PreAllocatedPages CLodStreamingSystem::PreAllocatePagesForG
             if (existingPage != ~0u && existingPage < m_pageOwnerGroup.size()
                 && m_pageOwnerGroup[existingPage] == static_cast<int32_t>(groupIndex)
                 && ownedUsesPinnedStorage == result.usesPinnedStorage) {
-                // Page still has valid slab data — reuse it.
                 if (!result.usesPinnedStorage) {
                     m_pageLru.Touch(existingPage);
                 }
@@ -832,7 +827,6 @@ void CLodStreamingSystem::RefreshStreamingActiveGroupDomain() {
             std::copy_n(m_cachedDomainSnapshot.parentGroupByGlobal.begin(), copyCount, m_streamingParentGroupByGlobal.begin());
         }
 
-        // Build reverse mapping: parent → children (for residency error override)
         m_childGroupsByGlobal.clear();
         for (uint32_t childGlobal = 0; childGlobal < static_cast<uint32_t>(m_streamingParentGroupByGlobal.size()); ++childGlobal) {
             const int32_t parent = m_streamingParentGroupByGlobal[childGlobal];
@@ -987,7 +981,6 @@ void CLodStreamingSystem::RefreshStreamingActiveGroupDomain() {
 
             m_preAllocatedPagesByGroup[groupIndex] = std::move(preAlloc);
 
-            // Build fetch mask (all true for initial load — every segment needs data).
             auto paIt = m_preAllocatedPagesByGroup.find(groupIndex);
             std::vector<bool> segmentNeedsFetch;
             std::vector<uint32_t> preAllocPageIDs;
@@ -1095,11 +1088,7 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
                 AssignPagesToGroup(groupIndex, preAllocIt->second);
                 m_preAllocatedPagesByGroup.erase(preAllocIt);
 
-                // Pin newly-assigned pages in the LRU until the GPU confirms
-                // usage via readback. This prevents eviction during the
-                // multi-frame readback latency window.
-                // TODO: This could lock pages if they are never rendered.
-                // Handled with a timeout, but is there a better way?
+                // Pin newly-assigned pages until GPU readback confirms use.
                 if (!usesPinnedStorage) {
                     auto ownedIt = m_groupOwnedPages.find(groupIndex);
                     if (ownedIt != m_groupOwnedPages.end()) {
@@ -1403,9 +1392,7 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
         frameStats.loadRequested++;
         frameStats.loadUnique++;
 
-        // Skip groups that are no longer in the active domain (e.g. after a
-        // streaming domain refresh removed them). Processing these would
-        // wastefully evict pages for geometry that will never be rendered.
+        // Skip groups that are no longer in the active domain.
         if (!IsGroupActive(groupIndex)) {
             ClearStreamingRequestInProgress(groupIndex);
             ClearPendingLoadPriority(groupIndex);
@@ -1422,7 +1409,6 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
         }
 
         if (meshManager == nullptr) {
-            // No MeshManager — just mark resident in CPU bits.
             const uint32_t wordAddress = BitWordAddress(groupIndex);
             const uint32_t bitMask = BitMask(groupIndex);
             const uint32_t oldWord = m_streamingNonResidentBitsCpu[wordAddress];
@@ -1444,9 +1430,7 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
             continue;
         }
 
-        // If pages are already pre-allocated (from pinned-group init or a
-        // previous frame), skip — overwriting the map entry would leak the
-        // existing pages out of the LRU permanently.
+        // If pages are already pre-allocated, skip to avoid leaking them from the LRU.
         if (m_preAllocatedPagesByGroup.count(groupIndex)) {
             processed++;
             continue;
@@ -1461,7 +1445,6 @@ void CLodStreamingSystem::ProcessStreamingRequestsBudgeted() {
 
             auto preAlloc = PreAllocatePagesForGroup(groupIndex, pagesNeeded, meshManager);
             if (preAlloc.segmentCount == 0) {
-                // LRU exhausted — can't allocate pages.
                 frameStats.loadFailed++;
                 ClearStreamingRequestInProgress(groupIndex);
                 ClearPendingLoadPriority(groupIndex);

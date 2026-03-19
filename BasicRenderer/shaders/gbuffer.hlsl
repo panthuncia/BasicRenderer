@@ -9,7 +9,6 @@
 #include "include/clodPageAccess.hlsli"
 
 #define CLOD_COMPRESSED_POSITIONS 1u
-#define CLOD_COMPRESSED_MESHLET_VERTEX_INDICES 2u
 #define CLOD_COMPRESSED_NORMALS 4u
 
 // http://filmicworlds.com/blog/visibility-buffer-rendering-with-material-graphs/
@@ -144,34 +143,32 @@ struct MeshletResolveData {
     uint2 objAndMesh; // x = perObjectBufferIndex, y = perMeshBufferIndex
 
     // Mesh info
-    uint4 meshInfo; // x = vertexByteSize, y = vertexFlags, z = numVertices, w = meshletTrianglesBufferOffset
+    uint4 meshInfo; // x = vertexByteSize, y = vertexFlags, z = numVertices, w = unused
     uint materialDataIndex;
 
-    // Meshlet info
-    uint4 meshletInfo; // x = vertOffset, y = triOffset, z = vertCount, w = triCount
+    // Per-meshlet counts
+    uint vertexCount;
+    uint triangleCount;
 
-    // Post-skinning ping-pong byte offsets
-    uint2 postBases; // x = postSkinningBase, y = prevPostSkinningBase
+    // Per-meshlet compression from CLodMeshletDescriptor
+    uint bitsX;
+    uint bitsY;
+    uint bitsZ;
+    int3 minQ;
+    uint positionBitOffset;     // bit offset within page position bitstream
+    uint normalWordOffset;      // word offset within page normal array
+    uint triangleByteOffset;    // byte offset within page triangle stream
 
-    uint meshletVerticesChunkBase;
-    uint meshletVerticesChunkCount;
-    uint groupVertexChunkByteOffset;
-    uint compressedPositionWordsBase;
-    uint compressedPositionWordCount;
-    uint compressedPositionBitsX;
-    uint compressedPositionBitsY;
-    uint compressedPositionBitsZ;
+    // Page-level stream base byte offsets (absolute in slab)
+    uint positionBitstreamBase;
+    uint normalArrayBase;
+    uint triangleStreamBase;
+
+    // Mesh-wide quantization
     uint compressedPositionQuantExp;
-    int3 compressedPositionMinQ;
-    uint compressedNormalWordsBase;
-    uint compressedNormalWordCount;
-    uint compressedMeshletVertexWordsBase;
-    uint compressedMeshletVertexWordCount;
-    uint compressedMeshletVertexBits;
-    uint compressedFlags;
 
     // Page-pool addressing (0 = not loaded)
-    uint pagePoolSlabDescriptorIndex;  // Descriptor-heap index of the slab ByteAddressBuffer
+    uint pagePoolSlabDescriptorIndex;
 };
 
 uint ReadPackedBits32(StructuredBuffer<uint> words, uint startBit, uint bitCount)
@@ -213,43 +210,19 @@ uint ReadPackedBits32_BA(ByteAddressBuffer buf, uint startBit, uint bitCount)
     return packed & mask;
 }
 
-uint DecodeMeshletVertexLocalIndex(uint absoluteMeshletVertexIndex, MeshletResolveData d, StructuredBuffer<uint> meshletVerticesBuffer)
+float3 DecodeCompressedPosition(uint meshletLocalVertex, MeshletResolveData d)
 {
-    if ((d.compressedFlags & CLOD_COMPRESSED_MESHLET_VERTEX_INDICES) != 0u && d.compressedMeshletVertexBits > 0u)
-    {
-        uint startBit = d.compressedMeshletVertexWordsBase * 32u + absoluteMeshletVertexIndex * d.compressedMeshletVertexBits;
-        if (d.pagePoolSlabDescriptorIndex != 0u)
-        {
-            ByteAddressBuffer slab = ResourceDescriptorHeap[d.pagePoolSlabDescriptorIndex];
-            return ReadPackedBits32_BA(slab, startBit, d.compressedMeshletVertexBits);
-        }
-        else
-        {
-            return ReadPackedBits32(meshletVerticesBuffer, startBit, d.compressedMeshletVertexBits);
-        }
-    }
-
-    if (d.pagePoolSlabDescriptorIndex != 0u)
-    {
-        ByteAddressBuffer slab = ResourceDescriptorHeap[d.pagePoolSlabDescriptorIndex];
-        return slab.Load((d.meshletVerticesChunkBase + absoluteMeshletVertexIndex) * 4u);
-    }
-    return meshletVerticesBuffer[d.meshletVerticesChunkBase + absoluteMeshletVertexIndex];
-}
-
-float3 DecodeCompressedPosition(uint groupLocalVertexIndex, MeshletResolveData d)
-{
-    uint bitsPerVertex = d.compressedPositionBitsX + d.compressedPositionBitsY + d.compressedPositionBitsZ;
-    uint bitCursor = d.compressedPositionWordsBase * 32u + groupLocalVertexIndex * bitsPerVertex;
+    uint bitsPerVertex = d.bitsX + d.bitsY + d.bitsZ;
+    uint bitCursor = d.positionBitstreamBase * 8u + d.positionBitOffset + meshletLocalVertex * bitsPerVertex;
 
     ByteAddressBuffer slab = ResourceDescriptorHeap[d.pagePoolSlabDescriptorIndex];
-    uint px = ReadPackedBits32_BA(slab, bitCursor, d.compressedPositionBitsX);
-    bitCursor += d.compressedPositionBitsX;
-    uint py = ReadPackedBits32_BA(slab, bitCursor, d.compressedPositionBitsY);
-    bitCursor += d.compressedPositionBitsY;
-    uint pz = ReadPackedBits32_BA(slab, bitCursor, d.compressedPositionBitsZ);
+    uint px = ReadPackedBits32_BA(slab, bitCursor, d.bitsX);
+    bitCursor += d.bitsX;
+    uint py = ReadPackedBits32_BA(slab, bitCursor, d.bitsY);
+    bitCursor += d.bitsY;
+    uint pz = ReadPackedBits32_BA(slab, bitCursor, d.bitsZ);
 
-    int3 q = int3(px, py, pz) + d.compressedPositionMinQ;
+    int3 q = int3(px, py, pz) + d.minQ;
     float invScale = 1.0f / float(1u << d.compressedPositionQuantExp);
     return float3(q) * invScale;
 }
@@ -276,10 +249,11 @@ float3 OctDecodeNormal(float2 e)
     return normalize(v);
 }
 
-float3 DecodeCompressedNormal(uint groupLocalVertexIndex, MeshletResolveData d)
+float3 DecodeCompressedNormal(uint meshletLocalVertex, MeshletResolveData d)
 {
     ByteAddressBuffer slab = ResourceDescriptorHeap[d.pagePoolSlabDescriptorIndex];
-    uint packed = slab.Load((d.compressedNormalWordsBase + groupLocalVertexIndex) * 4u);
+    uint addr = d.normalArrayBase + (d.normalWordOffset + meshletLocalVertex) * 4u;
+    uint packed = slab.Load(addr);
     return OctDecodeNormal(UnpackSnorm16x2(packed));
 }
 
@@ -293,8 +267,6 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
 
     if (isLeader)
     {
-        ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
-
         StructuredBuffer<VisibleCluster> visibleClusterBuffer =
             ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
         StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
@@ -311,143 +283,69 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
 
         PerMeshBuffer mesh = perMeshBuffer[d.objAndMesh.y];
 
-        // Use pre-resolved page address from VisibleCluster
         const uint pageSlabDesc = clusterData.pageSlabDescriptorIndex;
         const uint pageSlabOff  = clusterData.pageSlabByteOffset;
 
         CLodPageHeader hdr = LoadPageHeader(pageSlabDesc, pageSlabOff);
 
-        d.meshletVerticesChunkCount = hdr.meshletVertexCount;
-        d.compressedPositionWordCount = hdr.compressedPositionWordCount;
-        d.compressedPositionBitsX = hdr.compressedPositionBitsX;
-        d.compressedPositionBitsY = hdr.compressedPositionBitsY;
-        d.compressedPositionBitsZ = hdr.compressedPositionBitsZ;
-        d.compressedPositionQuantExp = hdr.compressedPositionQuantExp;
-        d.compressedPositionMinQ = int3(
-            hdr.compressedPositionMinQx,
-            hdr.compressedPositionMinQy,
-            hdr.compressedPositionMinQz);
-        d.compressedNormalWordCount = hdr.compressedNormalWordCount;
-        d.compressedMeshletVertexWordCount = hdr.compressedMeshletVertexWordCount;
-        d.compressedMeshletVertexBits = hdr.compressedMeshletVertexBits;
-        d.compressedFlags = hdr.compressedFlags;
+        // Load per-meshlet descriptor
+        CLodMeshletDescriptor desc = LoadMeshletDescriptor(
+            pageSlabDesc, pageSlabOff, hdr.descriptorOffset, d.drawcallAndMeshlet.y);
 
-        // Page-pool addressing from pre-resolved page location
-        d.pagePoolSlabDescriptorIndex = pageSlabDesc;
-        {
-            uint base = pageSlabOff;
-            d.meshInfo = uint4(mesh.vertexByteSize, mesh.vertexFlags, mesh.numVertices,
-                               base + hdr.triangleOffset);
-            d.groupVertexChunkByteOffset       = base + hdr.vertexOffset;
-            d.meshletVerticesChunkBase         = (base + hdr.meshletVertexOffset) / 4u;
-            d.compressedPositionWordsBase      = (base + hdr.compPosOffset) / 4u;
-            d.compressedNormalWordsBase        = (base + hdr.compNormOffset) / 4u;
-            d.compressedMeshletVertexWordsBase = (base + hdr.compMeshletVertOffset) / 4u;
-        }
-
-        Meshlet m = (Meshlet)0;
-        // localMeshletIndex is page-local; load from slab
-        if (d.drawcallAndMeshlet.y < hdr.meshletCount)
-        {
-            uint meshletAddr = pageSlabOff + hdr.meshletStructOffset + d.drawcallAndMeshlet.y * 16u;
-            m = LoadMeshletFromSlab(pageSlabDesc, meshletAddr);
-            if (m.VertOffset + m.VertCount > hdr.meshletVertexCount
-                || m.TriOffset + m.TriCount * 3u > hdr.meshletTrianglesByteCount)
-            {
-                m = (Meshlet)0;
-            }
-        }
-
+        d.meshInfo = uint4(mesh.vertexByteSize, mesh.vertexFlags, mesh.numVertices, 0);
         d.materialDataIndex = mesh.materialDataIndex;
-        d.meshletInfo = uint4(m.VertOffset, m.TriOffset, m.VertCount, m.TriCount);
 
-        // Vertex data lives in the slab page.
-        {
-            d.postBases = uint2(pageSlabOff + hdr.vertexOffset,
-                                pageSlabOff + hdr.vertexOffset);
-        }
+        // Per-meshlet from descriptor
+        d.vertexCount = CLodDescVertexCount(desc);
+        d.triangleCount = CLodDescTriangleCount(desc);
+        d.bitsX = CLodDescBitsX(desc);
+        d.bitsY = CLodDescBitsY(desc);
+        d.bitsZ = CLodDescBitsZ(desc);
+        d.minQ = int3(desc.minQx, desc.minQy, desc.minQz);
+        d.positionBitOffset = desc.positionBitOffset;
+        d.normalWordOffset = desc.normalWordOffset;
+        d.triangleByteOffset = desc.triangleByteOffset;
+
+        // Page-level stream base offsets (absolute in slab)
+        d.positionBitstreamBase = pageSlabOff + hdr.positionBitstreamOffset;
+        d.normalArrayBase = pageSlabOff + hdr.normalArrayOffset;
+        d.triangleStreamBase = pageSlabOff + hdr.triangleStreamOffset;
+
+        d.compressedPositionQuantExp = hdr.compressedPositionQuantExp;
+        d.pagePoolSlabDescriptorIndex = pageSlabDesc;
     }
 
     d.drawcallAndMeshlet = WaveReadLaneAt(d.drawcallAndMeshlet, leader);
     d.objAndMesh = WaveReadLaneAt(d.objAndMesh, leader);
     d.meshInfo = WaveReadLaneAt(d.meshInfo, leader);
     d.materialDataIndex = WaveReadLaneAt(d.materialDataIndex, leader);
-    d.meshletInfo = WaveReadLaneAt(d.meshletInfo, leader);
-    d.postBases = WaveReadLaneAt(d.postBases, leader);
-    d.meshletVerticesChunkBase = WaveReadLaneAt(d.meshletVerticesChunkBase, leader);
-    d.meshletVerticesChunkCount = WaveReadLaneAt(d.meshletVerticesChunkCount, leader);
-    d.groupVertexChunkByteOffset = WaveReadLaneAt(d.groupVertexChunkByteOffset, leader);
-    d.compressedPositionWordsBase = WaveReadLaneAt(d.compressedPositionWordsBase, leader);
-    d.compressedPositionWordCount = WaveReadLaneAt(d.compressedPositionWordCount, leader);
-    d.compressedPositionBitsX = WaveReadLaneAt(d.compressedPositionBitsX, leader);
-    d.compressedPositionBitsY = WaveReadLaneAt(d.compressedPositionBitsY, leader);
-    d.compressedPositionBitsZ = WaveReadLaneAt(d.compressedPositionBitsZ, leader);
+    d.vertexCount = WaveReadLaneAt(d.vertexCount, leader);
+    d.triangleCount = WaveReadLaneAt(d.triangleCount, leader);
+    d.bitsX = WaveReadLaneAt(d.bitsX, leader);
+    d.bitsY = WaveReadLaneAt(d.bitsY, leader);
+    d.bitsZ = WaveReadLaneAt(d.bitsZ, leader);
+    d.minQ.x = WaveReadLaneAt(d.minQ.x, leader);
+    d.minQ.y = WaveReadLaneAt(d.minQ.y, leader);
+    d.minQ.z = WaveReadLaneAt(d.minQ.z, leader);
+    d.positionBitOffset = WaveReadLaneAt(d.positionBitOffset, leader);
+    d.normalWordOffset = WaveReadLaneAt(d.normalWordOffset, leader);
+    d.triangleByteOffset = WaveReadLaneAt(d.triangleByteOffset, leader);
+    d.positionBitstreamBase = WaveReadLaneAt(d.positionBitstreamBase, leader);
+    d.normalArrayBase = WaveReadLaneAt(d.normalArrayBase, leader);
+    d.triangleStreamBase = WaveReadLaneAt(d.triangleStreamBase, leader);
     d.compressedPositionQuantExp = WaveReadLaneAt(d.compressedPositionQuantExp, leader);
-    d.compressedPositionMinQ.x = WaveReadLaneAt(d.compressedPositionMinQ.x, leader);
-    d.compressedPositionMinQ.y = WaveReadLaneAt(d.compressedPositionMinQ.y, leader);
-    d.compressedPositionMinQ.z = WaveReadLaneAt(d.compressedPositionMinQ.z, leader);
-    d.compressedNormalWordsBase = WaveReadLaneAt(d.compressedNormalWordsBase, leader);
-    d.compressedNormalWordCount = WaveReadLaneAt(d.compressedNormalWordCount, leader);
-    d.compressedMeshletVertexWordsBase = WaveReadLaneAt(d.compressedMeshletVertexWordsBase, leader);
-    d.compressedMeshletVertexWordCount = WaveReadLaneAt(d.compressedMeshletVertexWordCount, leader);
-    d.compressedMeshletVertexBits = WaveReadLaneAt(d.compressedMeshletVertexBits, leader);
-    d.compressedFlags = WaveReadLaneAt(d.compressedFlags, leader);
     d.pagePoolSlabDescriptorIndex = WaveReadLaneAt(d.pagePoolSlabDescriptorIndex, leader);
 
     return d;
 }
 
-void ComputeTriVertexByteOffsetsCompact(
-    MeshletResolveData d,
-    StructuredBuffer<uint> meshletVerticesBuffer,
-    uint3 triIdx,
-    out uint o0,
-    out uint o1,
-    out uint o2)
+uint3 DecodeTriangleCompact(uint triLocalIndex, MeshletResolveData d)
 {
-    uint stride = d.meshInfo.x;
-    uint local0 = 0;
-    uint local1 = 0;
-    uint local2 = 0;
+    uint triOffset = d.triangleStreamBase + d.triangleByteOffset + triLocalIndex * 3u;
 
-    if ((d.compressedFlags & 2u) != 0u && d.compressedMeshletVertexBits > 0u)
-    {
-        uint indices[3] = { d.meshletInfo.x + triIdx.x, d.meshletInfo.x + triIdx.y, d.meshletInfo.x + triIdx.z };
-
-        if (d.pagePoolSlabDescriptorIndex != 0u)
-        {
-            ByteAddressBuffer slab = ResourceDescriptorHeap[d.pagePoolSlabDescriptorIndex];
-            [unroll]
-            for (uint i = 0; i < 3; ++i)
-            {
-                uint startBit = d.compressedMeshletVertexWordsBase * 32u + indices[i] * d.compressedMeshletVertexBits;
-                uint local = ReadPackedBits32_BA(slab, startBit, d.compressedMeshletVertexBits);
-                if (i == 0u) local0 = local;
-                if (i == 1u) local1 = local;
-                if (i == 2u) local2 = local;
-            }
-        }
-    }
-    else
-    {
-        uint base = d.meshletInfo.x;
-        local0 = DecodeMeshletVertexLocalIndex(base + triIdx.x, d, meshletVerticesBuffer);
-        local1 = DecodeMeshletVertexLocalIndex(base + triIdx.y, d, meshletVerticesBuffer);
-        local2 = DecodeMeshletVertexLocalIndex(base + triIdx.z, d, meshletVerticesBuffer);
-    }
-
-    o0 = d.postBases.x + local0 * stride;
-    o1 = d.postBases.x + local1 * stride;
-    o2 = d.postBases.x + local2 * stride;
-}
-
-uint3 DecodeTriangleCompact(uint triLocalIndex, MeshletResolveData d, ByteAddressBuffer meshletTrianglesBuffer)
-{
-    // triOffsetBytes = meshletTrianglesBufferOffset + meshletTriOffset + triLocalIndex * 3
-    uint triOffset = d.meshInfo.w + d.meshletInfo.y + triLocalIndex * 3u;
-
+    ByteAddressBuffer slab = ResourceDescriptorHeap[d.pagePoolSlabDescriptorIndex];
     uint alignedOffset = (triOffset / 4u) * 4u;
-    uint firstWord = meshletTrianglesBuffer.Load(alignedOffset);
+    uint firstWord = slab.Load(alignedOffset);
     uint byteOffset = triOffset % 4u;
 
     uint b0 = (firstWord >> (byteOffset * 8u)) & 0xFFu;
@@ -461,12 +359,12 @@ uint3 DecodeTriangleCompact(uint triLocalIndex, MeshletResolveData d, ByteAddres
     else if (byteOffset == 2u)
     {
         b1 = (firstWord >> ((byteOffset + 1u) * 8u)) & 0xFFu;
-        uint secondWord = meshletTrianglesBuffer.Load(alignedOffset + 4u);
+        uint secondWord = slab.Load(alignedOffset + 4u);
         b2 = secondWord & 0xFFu;
     }
     else // byteOffset == 3
     {
-        uint secondWord = meshletTrianglesBuffer.Load(alignedOffset + 4u);
+        uint secondWord = slab.Load(alignedOffset + 4u);
         b1 = secondWord & 0xFFu;
         b2 = (secondWord >> 8u) & 0xFFu;
     }
@@ -495,13 +393,8 @@ void EvaluateGBufferOptimized(uint2 pixel)
     MeshletResolveData md = LoadMeshletResolveData_Wave(clusterIndex);
 
     // per-lane validity checks using broadcasted triCount
-    if (meshletTriangleIndex >= md.meshletInfo.w) // triCount
+    if (meshletTriangleIndex >= md.triangleCount)
         return;
-
-    // Resources — bind slab (CLod data lives in page pool).
-    ByteAddressBuffer slab = ResourceDescriptorHeap[md.pagePoolSlabDescriptorIndex];
-    ByteAddressBuffer vertexBuffer = slab;
-    ByteAddressBuffer meshletTrianglesBuffer = slab;
 
     // Triangle-level wave dedup (key = triKey) for DecodeTriangle + position loads
     // This optimization did help somewhat
@@ -511,49 +404,13 @@ void EvaluateGBufferOptimized(uint2 pixel)
     uint triLeader = WaveFirstLaneFromMask(triMask);
     bool triIsLeader = (WaveGetLaneIndex() == triLeader);
 
-    uint3 triIdx = 0;
-    float3 p0 = 0, p1 = 0, p2 = 0;
+    uint3 triIdx = DecodeTriangleCompact(meshletTriangleIndex, md);
 
-    triIdx = DecodeTriangleCompact(meshletTriangleIndex, md, meshletTrianglesBuffer);
-
-    if (md.meshletInfo.x + md.meshletInfo.z > md.meshletVerticesChunkCount)
-        return;
-
-    StructuredBuffer<uint> meshletVerticesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::MeshResources::MeshletVertexIndices)];
-    uint o0, o1, o2;
-    ComputeTriVertexByteOffsetsCompact(md, meshletVerticesBuffer, triIdx, o0, o1, o2);
-    uint base = md.meshletInfo.x;
-    uint local0 = DecodeMeshletVertexLocalIndex(base + triIdx.x, md, meshletVerticesBuffer);
-    uint local1 = DecodeMeshletVertexLocalIndex(base + triIdx.y, md, meshletVerticesBuffer);
-    uint local2 = DecodeMeshletVertexLocalIndex(base + triIdx.z, md, meshletVerticesBuffer);
-
-    bool useCompressedPositions = ((md.meshInfo.y & VERTEX_SKINNED) == 0u) && ((md.compressedFlags & CLOD_COMPRESSED_POSITIONS) != 0u);
-    if (useCompressedPositions)
-    {
-        p0 = DecodeCompressedPosition(local0, md);
-        p1 = DecodeCompressedPosition(local1, md);
-        p2 = DecodeCompressedPosition(local2, md);
-    }
-    else
-    {
-        p0 = LoadPositionOnly(o0, vertexBuffer);
-        p1 = LoadPositionOnly(o1, vertexBuffer);
-        p2 = LoadPositionOnly(o2, vertexBuffer);
-    }
-    // if (triIsLeader)
-    // {
-    //     p0 = LoadPositionOnly(o0, vertexBuffer);
-    //     p1 = LoadPositionOnly(o1, vertexBuffer);
-    //     p2 = LoadPositionOnly(o2, vertexBuffer);
-    // }
-
-    // triIdx = WaveReadLaneAt(triIdx, triLeader);
-    // p0 = WaveReadLaneAt(p0, triLeader);
-    // p1 = WaveReadLaneAt(p1, triLeader);
-    // p2 = WaveReadLaneAt(p2, triLeader);
-
-    // uint o0, o1, o2;
-    // ComputeTriVertexByteOffsetsCompact(md, triIdx, o0, o1, o2);
+    // Triangle indices are meshlet-local vertex indices (0..vertexCount-1).
+    // Positions and normals decoded directly from per-meshlet compressed streams.
+    float3 p0 = DecodeCompressedPosition(triIdx.x, md);
+    float3 p1 = DecodeCompressedPosition(triIdx.y, md);
+    float3 p2 = DecodeCompressedPosition(triIdx.z, md);
 
     // Object buffer (per-lane; is it worth broadcasting?)
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
@@ -570,27 +427,15 @@ void EvaluateGBufferOptimized(uint2 pixel)
 
     BarycentricDeriv bary = CalcFullBary(clip0, clip1, clip2, pixelNdc, winSize);
 
-    // Attribute-only loads
-    float3 n0 = 0;
-    float3 n1 = 0;
-    float3 n2 = 0;
-    bool useCompressedNormals = ((md.meshInfo.y & VERTEX_SKINNED) == 0u) && ((md.compressedFlags & CLOD_COMPRESSED_NORMALS) != 0u);
-    if (useCompressedNormals)
-    {
-        n0 = DecodeCompressedNormal(local0, md);
-        n1 = DecodeCompressedNormal(local1, md);
-        n2 = DecodeCompressedNormal(local2, md);
-    }
-    else
-    {
-        n0 = LoadNormalOnly(o0, vertexBuffer);
-        n1 = LoadNormalOnly(o1, vertexBuffer);
-        n2 = LoadNormalOnly(o2, vertexBuffer);
-    }
+    // Attribute-only loads — normals from per-meshlet compressed stream
+    float3 n0 = DecodeCompressedNormal(triIdx.x, md);
+    float3 n1 = DecodeCompressedNormal(triIdx.y, md);
+    float3 n2 = DecodeCompressedNormal(triIdx.z, md);
 
-    float2 uv0 = LoadTexcoordOnly(o0, vertexBuffer, md.meshInfo.y);
-    float2 uv1 = LoadTexcoordOnly(o1, vertexBuffer, md.meshInfo.y);
-    float2 uv2 = LoadTexcoordOnly(o2, vertexBuffer, md.meshInfo.y);
+    // TODO: texcoord stream not yet in per-meshlet format
+    float2 uv0 = float2(0, 0);
+    float2 uv1 = float2(0, 0);
+    float2 uv2 = float2(0, 0);
 
     // Interpolate UV + derivs
     float3 interpU = InterpolateWithDeriv(bary, uv0.x, uv1.x, uv2.x);
@@ -640,33 +485,9 @@ void EvaluateGBufferOptimized(uint2 pixel)
         dpdx, dpdy, dudx, dudy,
         materialInputs);
 
-    // Motion vectors from per-pixel world position, no per-vertex reprojection
-    // TODO: I think this is correct? Validate.
+    // Motion vectors — CLod meshes are not skinned, so no previous-frame position
     float4 clipCur = mul(float4(worldPosition, 1.0f), gs_unjitteredViewProj);
-
     float3 prevWorldPosition = worldPosition;
-
-    uint vertexFlags = md.meshInfo.y;
-    if (vertexFlags & VERTEX_SKINNED)
-    {
-        uint stride = md.meshInfo.x;
-        uint prevBase = md.postBases.y;
-
-        uint o0Prev = prevBase + local0 * stride;
-        uint o1Prev = prevBase + local1 * stride;
-        uint o2Prev = prevBase + local2 * stride;
-
-        float3 p0Prev = LoadPositionOnly(o0Prev, vertexBuffer);
-        float3 p1Prev = LoadPositionOnly(o1Prev, vertexBuffer);
-        float3 p2Prev = LoadPositionOnly(o2Prev, vertexBuffer);
-
-        float3 prevX = InterpolateWithDeriv(bary, p0Prev.x, p1Prev.x, p2Prev.x);
-        float3 prevY = InterpolateWithDeriv(bary, p0Prev.y, p1Prev.y, p2Prev.y);
-        float3 prevZ = InterpolateWithDeriv(bary, p0Prev.z, p1Prev.z, p2Prev.z);
-
-        float3 prevPosOS = float3(prevX.x, prevY.x, prevZ.x);
-        prevWorldPosition = mul(float4(prevPosOS, 1.0f), obj.prevModel).xyz;
-    }
 
     float4 clipPrev = mul(float4(prevWorldPosition, 1.0f), gs_prevUnjitteredViewProj);
 

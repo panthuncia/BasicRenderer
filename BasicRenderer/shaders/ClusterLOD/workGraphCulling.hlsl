@@ -797,77 +797,7 @@ void WG_SegmentEvaluate(
             cam.zNear);
         const bool ownGroupNeedsRefinement = (ownGroupErrorOverDistance >= cam.errorOverDistanceThreshold);
 
-#ifdef CLOD_PER_REFINED_GROUP_SEGMENTS
-        // Legacy: full two-sided LOD cut at segment level.
-        const bool isTerminal = (seg.refinedGroup < 0);
-        bool childAcceptable = isTerminal;
-        if (!isTerminal) {
-            const uint childGroupGlobalIndex = clodMeshMetadata.groupsBase + (uint)seg.refinedGroup;
-            const ClusterLODGroup childGrp = groups[childGroupGlobalIndex];
-            const float3 childWorldCenter = mul(float4(childGrp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
-            const float childWorldRadius = childGrp.bounds.centerAndRadius.w * groupUniformScale;
-            const float childEOD = ErrorOverDistance(
-                childWorldCenter, childWorldRadius,
-                childGrp.bounds.error, groupUniformScale,
-                cam.positionWorldSpace.xyz, cam.zNear);
-            childAcceptable = (childEOD < cam.errorOverDistanceThreshold);
-        }
-
-        bool shouldEmit = ownGroupNeedsRefinement && childAcceptable && (seg.meshletCount != 0);
-
-        // Load streaming residency data.
-        StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
-        const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
-        ByteAddressBuffer nonResidentBits =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
-
-        // Suppress emission when own group's pages are non-resident.
-        bool ownGroupNonResident = false;
-        if (shouldEmit && groupGlobalIndex < activeGroupScanCount) {
-            if (CLodReadBit(nonResidentBits, groupGlobalIndex)) {
-                shouldEmit = false;
-                ownGroupNonResident = true;
-            }
-        }
-
-        // Streaming fallback: if child is non-resident, render at this level.
-        // Guard: skip when own group is non-resident (can't render garbage).
-        if (!shouldEmit && !ownGroupNonResident && ownGroupNeedsRefinement && !isTerminal && rec.allowRefine != 0u && seg.meshletCount != 0) {
-            const uint refinedGroupGlobalIndex = clodMeshMetadata.groupsBase + (uint)seg.refinedGroup;
-
-            bool refinedResident = true;
-            if (refinedGroupGlobalIndex < activeGroupScanCount) {
-                refinedResident = !CLodReadBit(nonResidentBits, refinedGroupGlobalIndex);
-            }
-
-            if (!refinedResident) {
-                shouldEmit = true;
-
-                WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_NON_RESIDENT_REFINED_CHILD_THREADS, 1);
-
-                if (refinedGroupGlobalIndex < activeGroupScanCount) {
-                    const float fallbackErrorOverDistance = ownGroupErrorOverDistance;
-
-                    RWStructuredBuffer<CLodStreamingRequest> loadRequests =
-                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
-                    RWStructuredBuffer<uint> loadRequestCounter =
-                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
-                    uint requestIndex = 0;
-                    InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
-                    if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY) {
-                        CLodStreamingRequest req = (CLodStreamingRequest)0;
-                        req.groupGlobalIndex = refinedGroupGlobalIndex;
-                        req.meshInstanceIndex = rec.instanceIndex;
-                        req.meshBufferIndex = instanceData.perMeshBufferIndex;
-                        req.viewId = CLodPackViewPriority(rec.viewId, fallbackErrorOverDistance);
-                        loadRequests[requestIndex] = req;
-                    }
-                }
-            }
-        }
-#else
-        // New: condition 2 deferred to per-meshlet in ClusterCullBuckets.
+        // Condition 2 deferred to per-meshlet in ClusterCullBuckets.
         bool shouldEmit = ownGroupNeedsRefinement && (seg.meshletCount != 0);
 
         // Suppress emission when own group's pages are non-resident.
@@ -883,7 +813,6 @@ void WG_SegmentEvaluate(
                 }
             }
         }
-#endif
 
         emitBucket = shouldEmit;
 
@@ -957,17 +886,14 @@ void WG_ClusterCullBuckets(
     uint pageSlabDesc = 0;
     uint pageSlabOff = 0;
     uint pageMeshletCount = 0;
-    uint pageBoundsOffset = 0;
+    uint pageDescriptorOffset = 0;
     uint depthMapDescriptorIndex = 0;
-#ifndef CLOD_PER_REFINED_GROUP_SEGMENTS
-    uint pageRefinedGroupIdOffset = 0;
     float groupUniformScale = 0.0f;
     CullingCameraInfo cam = (CullingCameraInfo)0;
     uint groupsBase = 0;
     uint meshBufferIndex = 0;
     uint activeGroupScanCount = 0;
     float ownGroupErrorOverDistance = 0.0f;
-#endif
 
     if (hasBucket && b.pageSlabDescriptorIndex != 0) {
         pageValid = true;
@@ -986,9 +912,10 @@ void WG_ClusterCullBuckets(
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
         camera = cameras[b.viewId];
 
+        // Load meshletCount (uint[0]) and descriptorOffset (uint[2]) from new 64-byte header
         ByteAddressBuffer slab = ResourceDescriptorHeap[pageSlabDesc];
-        pageMeshletCount = slab.Load(pageSlabOff + 4);
-        pageBoundsOffset = LoadPageBoundsOffset(pageSlabDesc, pageSlabOff);
+        pageMeshletCount = slab.Load(pageSlabOff);         // meshletCount at offset 0
+        pageDescriptorOffset = slab.Load(pageSlabOff + 8); // descriptorOffset at offset 8
 
         if (!camera.isOrtho) {
             StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
@@ -996,9 +923,7 @@ void WG_ClusterCullBuckets(
             depthMapDescriptorIndex = viewDepthSRVIndices[b.viewId].linearDepthSRVIndex;
         }
 
-#ifndef CLOD_PER_REFINED_GROUP_SEGMENTS
         // Per-meshlet condition 2 + streaming fallback state
-        pageRefinedGroupIdOffset = LoadPageRefinedGroupIdOffset(pageSlabDesc, pageSlabOff);
         groupUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
         meshBufferIndex = perMeshInstanceBuffer[b.instanceIndex].perMeshBufferIndex;
 
@@ -1028,7 +953,6 @@ void WG_ClusterCullBuckets(
         StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
         activeGroupScanCount = runtimeState[0].activeGroupScanCount;
-#endif
     }
 
     // Meshlet loop
@@ -1054,21 +978,20 @@ void WG_ClusterCullBuckets(
             if (localMeshlet < pageMeshletCount) {
                 localMeshletIndex = localMeshlet;
 
-                ByteAddressBuffer slab = ResourceDescriptorHeap[pageSlabDesc];
-                const uint boundsAddr = pageSlabOff + pageBoundsOffset + localMeshlet * 16u;
-                const float4 boundsSphere = asfloat(slab.Load4(boundsAddr));
+                // Load per-meshlet descriptor (3 x Load4 = 48 bytes)
+                CLodMeshletDescriptor desc = LoadMeshletDescriptor(pageSlabDesc, pageSlabOff, pageDescriptorOffset, localMeshlet);
+                const float4 boundsSphere = desc.bounds;
                 const BoundingSphere meshletBounds = { boundsSphere };
                 const float3 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, camera.view);
                 const float meshletRadiusWorld = meshletBounds.sphere.w * MaxAxisScale_RowVector(objectModelMatrix);
 
                 survives = replaySource || !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, camera);
 
-#ifndef CLOD_PER_REFINED_GROUP_SEGMENTS
-                // Per-meshlet LOD condition 2: load refined group ID from page blob.
+                // Per-meshlet LOD condition 2: read refined group ID from descriptor.
                 // Terminal meshlets (refinedGroupId < 0) pass automatically.
                 // Non-terminal meshlets check if the child group is acceptable.
-                if (survives && pageRefinedGroupIdOffset != 0) {
-                    const int refinedGroupId = asint(slab.Load(pageSlabOff + pageRefinedGroupIdOffset + localMeshlet * 4u));
+                if (survives) {
+                    const int refinedGroupId = CLodDescRefinedGroupId(desc);
                     if (refinedGroupId >= 0) {
                         StructuredBuffer<ClusterLODGroup> groups =
                             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
@@ -1082,7 +1005,7 @@ void WG_ClusterCullBuckets(
                             cam.positionWorldSpace.xyz, cam.zNear);
 
                         if (childEOD >= cam.errorOverDistanceThreshold) {
-                            // Child not acceptable — check if child is loaded
+                            // Child exceeds the threshold; check residency.
                             ByteAddressBuffer nonResidentBits =
                                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
                             bool childResident = true;
@@ -1091,10 +1014,8 @@ void WG_ClusterCullBuckets(
                             }
 
                             if (childResident) {
-                                // Child is resident and handles its own rendering
                                 survives = false;
                             } else {
-                                // Child not loaded — render as fallback, request streaming
                                 WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_NON_RESIDENT_REFINED_CHILD_THREADS, 1);
                                 if (childGroupGlobalIndex < activeGroupScanCount) {
                                     RWStructuredBuffer<CLodStreamingRequest> loadRequests =
@@ -1116,7 +1037,6 @@ void WG_ClusterCullBuckets(
                         }
                     }
                 }
-#endif // !CLOD_PER_REFINED_GROUP_SEGMENTS
 
                 if (survives && CLodWorkGraphOcclusionEnabled() && depthMapDescriptorIndex != 0) {
                     bool occlusionCulled = false;
@@ -1143,7 +1063,7 @@ void WG_ClusterCullBuckets(
             }
         }
 
-        // Wave-cooperative visible cluster output (one atomic per iteration) TODO: atomic compaction
+        // Wave-cooperative visible cluster output.
         const bool contributes = active && survives;
         const uint4 survivingMask = WaveActiveBallot(contributes);
         const uint survivingCount = CountBits128(survivingMask);

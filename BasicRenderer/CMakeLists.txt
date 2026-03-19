@@ -227,7 +227,7 @@ function(add_symlink_or_copy_per_config source destination IS_DIRECTORY target_n
     if (IS_DIRECTORY)
         add_custom_target(
             "${target_name}_sync" ALL
-            COMMENT "Syncing directory ${destination} ← ${source}"
+            COMMENT "Syncing directory ${destination} <- ${source}"
             VERBATIM
             COMMAND ${CMAKE_COMMAND} -E remove_directory "${destination}"
             COMMAND ${CMAKE_COMMAND} -E $<IF:$<CONFIG:Release>,copy_directory,create_symlink> "${source}" "${destination}"
@@ -235,7 +235,7 @@ function(add_symlink_or_copy_per_config source destination IS_DIRECTORY target_n
     else()
         add_custom_target(
             "${target_name}_sync" ALL
-            COMMENT "Syncing file ${destination} ← ${source}"
+            COMMENT "Syncing file ${destination} <- ${source}"
             VERBATIM
             COMMAND ${CMAKE_COMMAND} -E remove "${destination}"
             COMMAND ${CMAKE_COMMAND} -E $<IF:$<CONFIG:Release>,copy,create_symlink> "${source}" "${destination}"

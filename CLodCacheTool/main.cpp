@@ -1,11 +1,11 @@
-// CLodCacheTool – Offline ClusterLOD cache builder
+// CLodCacheTool - Offline ClusterLOD cache builder
 //
-// Usage:  CLodCacheTool <file1> [file2 …]
+// Usage:  CLodCacheTool <file1> [file2 ...]
 //
 // Supported formats (auto-detected by extension):
-//   .usd / .usda / .usdc / .usdz    → USD
-//   .gltf / .glb                     → glTF
-//   anything else (fbx, obj, …)      → Assimp
+//   .usd / .usda / .usdc / .usdz    -> USD
+//   .gltf / .glb                     -> glTF
+//   anything else (fbx, obj, ...)    -> Assimp
 //
 // Caches are written to the same location the renderer would use,
 // so a subsequent renderer launch will hit the cache instead of rebuilding.
@@ -45,7 +45,7 @@ static AssetFormat DetectFormat(const fs::path& path) {
         return AssetFormat::USD;
     if (ext == ".gltf" || ext == ".glb")
         return AssetFormat::GlTF;
-    return AssetFormat::Assimp;   // fbx, obj, dae, …
+    return AssetFormat::Assimp;   // fbx, obj, dae, ...
 }
 
 static const char* FormatName(AssetFormat f) {
@@ -132,7 +132,7 @@ int main(int argc, char* argv[]) {
         if (fs::exists(cacheRoot))
             spdlog::info("  (cache root already exists)");
         else
-            spdlog::info("  (cache root does NOT exist yet — will be created on first save)");
+            spdlog::info("  (cache root does NOT exist yet - will be created on first save)");
     }
 
     if (argc < 2) {
@@ -217,7 +217,7 @@ int main(int argc, char* argv[]) {
             spdlog::info("Cache directory: {} file(s), {:.2f} MB total",
                          cacheFileCount, cacheBytes / (1024.0 * 1024.0));
         } else {
-            spdlog::warn("Cache directory was NOT created — no caches were written.");
+            spdlog::warn("Cache directory was NOT created - no caches were written.");
         }
     }
 

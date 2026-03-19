@@ -340,7 +340,6 @@ namespace CLodCache {
 					const auto& group = prebuiltData.groups[groupIndex];
 					groupChunkMetadata.groupVertexCount = group.groupVertexCount;
 					groupChunkMetadata.meshletCount = group.meshletCount;
-					groupChunkMetadata.meshletBoundsCount = group.meshletCount;
 				}
 
 				const auto* pageBlobsPtr = payload.groupPageBlobs;
