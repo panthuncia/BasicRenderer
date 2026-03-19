@@ -1,6 +1,9 @@
 #ifndef CLOD_STRUCTS_HLSLI
 #define CLOD_STRUCTS_HLSLI
 
+// Must match CLOD_PER_REFINED_GROUP_SEGMENTS in ClusterLODShaderTypes.h
+// #define CLOD_PER_REFINED_GROUP_SEGMENTS
+
 struct MeshInstanceClodOffsets
 {
     uint clodMeshMetadataIndex;

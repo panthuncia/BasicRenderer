@@ -904,9 +904,38 @@ namespace
 				pageBins.pop_back();
 			}
 
-			// Create segments from page bins — one segment per page.
-			// Per-meshlet refined group IDs are stored in the page blob
-			// so ClusterCullBuckets can check condition 2 per-meshlet.
+			// Create segments from page bins.
+#ifdef CLOD_PER_REFINED_GROUP_SEGMENTS
+			// Legacy: split each page into segments by contiguous runs of the same refinedGroup.
+			for (uint32_t pi = 0; pi < static_cast<uint32_t>(pageBins.size()); ++pi) {
+				const PageBin& page = pageBins[pi];
+				if (page.meshletIndices.empty()) continue;
+
+				uint32_t runStart = 0;
+				int32_t runTag = page.meshletBucketTags[0];
+
+				for (uint32_t i = 1; i <= static_cast<uint32_t>(page.meshletIndices.size()); ++i) {
+					const bool endOfPage = (i == static_cast<uint32_t>(page.meshletIndices.size()));
+					const bool tagChanged = !endOfPage && (page.meshletBucketTags[i] != runTag);
+
+					if (endOfPage || tagChanged) {
+						ClusterLODGroupSegment seg{};
+						seg.refinedGroup = runTag;
+						seg.pageIndex = pi;
+						seg.firstMeshletInPage = runStart;
+						seg.meshletCount = i - runStart;
+						output.segments.push_back(seg);
+
+						if (!endOfPage) {
+							runStart = i;
+							runTag = page.meshletBucketTags[i];
+						}
+					}
+				}
+			}
+#else
+			// One segment per page. Per-meshlet refined group IDs are stored
+			// in the page blob so ClusterCullBuckets can check condition 2.
 			for (uint32_t pi = 0; pi < static_cast<uint32_t>(pageBins.size()); ++pi) {
 				const PageBin& page = pageBins[pi];
 				if (page.meshletIndices.empty()) continue;
@@ -928,6 +957,7 @@ namespace
 				seg.meshletCount = static_cast<uint32_t>(page.meshletIndices.size());
 				output.segments.push_back(seg);
 			}
+#endif
 
 			// Sort segments: terminal (refinedGroup < 0) first, then non-terminal.
 			// Stable sort preserves page-order within each category.
@@ -1101,6 +1131,15 @@ namespace
 					pageRefinedGroupIds[li] = page.meshletBucketTags[li];
 				}
 
+#ifdef CLOD_PER_REFINED_GROUP_SEGMENTS
+				// Legacy: per-meshlet LODError (float). Terminal = 0, others = group error.
+				std::vector<float> pageLodErrors(pageMeshletCount);
+				for (uint32_t li = 0; li < pageMeshletCount; ++li) {
+					const int32_t tag = page.meshletBucketTags[li];
+					pageLodErrors[li] = (tag < 0) ? 0.0f : capturedGroup.simplified.error;
+				}
+#endif
+
 				// Build page blob: CLodPageHeader + 8 streams
 				CLodPageHeader header{};
 				header.vertexCount = pageVertexCount;
@@ -1145,7 +1184,11 @@ namespace
 				appendStream(pageCompMeshletVertexWords.data(), pageCompMeshletVertexWords.size() * sizeof(uint32_t), header.compMeshletVertOffset);
 				appendStream(pageMeshlets.data(), pageMeshlets.size() * sizeof(meshopt_Meshlet), header.meshletStructOffset);
 				appendStream(pageBounds.data(), pageBounds.size() * sizeof(BoundingSphere), header.boundsOffset);
+#ifdef CLOD_PER_REFINED_GROUP_SEGMENTS
+				appendStream(pageLodErrors.data(), pageLodErrors.size() * sizeof(float), header.refinedGroupIdOffset);
+#else
 				appendStream(pageRefinedGroupIds.data(), pageRefinedGroupIds.size() * sizeof(int32_t), header.refinedGroupIdOffset);
+#endif
 
 				blob.resize(align4(blob.size()));
 				std::memcpy(blob.data(), &header, sizeof(CLodPageHeader));

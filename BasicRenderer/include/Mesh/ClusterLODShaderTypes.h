@@ -8,6 +8,12 @@
 #include <DirectXMath.h>
 #include "ThirdParty/meshoptimizer/clusterlod.h"
 
+// Define to use legacy per-refined-group segment splitting with
+// segment-level LOD condition 2 + streaming fallback.
+// When undefined (default), segments are one-per-page and condition 2
+// is evaluated per-meshlet in ClusterCullBuckets.
+// #define CLOD_PER_REFINED_GROUP_SEGMENTS
+
 struct BoundingSphere {
 	DirectX::XMFLOAT4 sphere;
 };
