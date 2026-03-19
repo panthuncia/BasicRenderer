@@ -1231,6 +1231,25 @@ namespace
 			}
 		}
 
+		// Build parent error map: for each group, store the max error of any
+		// parent (coarser) group that refines into it.  Coarsest-level groups
+		// have no parent and get FLT_MAX so they are always traversed.
+		std::vector<float> parentErrorForGroup(state.groups.size(), std::numeric_limits<float>::max());
+		for (uint32_t groupID = 0; groupID < uint32_t(state.groups.size()); ++groupID)
+		{
+			const ClusterLODGroup& grp = state.groups[groupID];
+			const float parentError = grp.bounds.error;
+			for (uint32_t s = 0; s < grp.segmentCount; ++s)
+			{
+				const ClusterLODGroupSegment& seg = state.segments[grp.firstSegment + s];
+				if (seg.refinedGroup >= 0)
+				{
+					const uint32_t childGroupId = static_cast<uint32_t>(seg.refinedGroup);
+					parentErrorForGroup[childGroupId] = std::max(parentErrorForGroup[childGroupId], parentError);
+				}
+			}
+		}
+
 		state.lodNodeRanges.assign(lodLevelCount, {});
 		state.lodLevelRoots.resize(lodLevelCount);
 		for (uint32_t d = 0; d < lodLevelCount; ++d) {
@@ -1328,7 +1347,7 @@ namespace
 					node.traversalMetric.boundingSphereZ = cz;
 					node.traversalMetric.boundingSphereRadius = cr;
 				}
-				node.traversalMetric.maxQuadricError = grp.bounds.error;
+				node.traversalMetric.maxQuadricError = parentErrorForGroup[info.ownerGroupId];
 			}
 
 			if (leafCount == 1) {

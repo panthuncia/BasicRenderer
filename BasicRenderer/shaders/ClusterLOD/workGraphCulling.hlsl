@@ -578,10 +578,32 @@ void WG_TraverseNodes(
             WGTelemetryAdd(WG_COUNTER_TRAVERSE_CULLED_NODE_RECORDS, 1);
         }
         else {
-            const float3 nodeCenterWorldSpace = mul(float4(nodeCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
+            // For segment-leaves, the node stores the *parent* group's error
+            // and the BVH sphere is expanded to enclose the owning group's
+            // sphere.  We still use the node sphere for frustum/occlusion
+            // culling (above), but the LOD error check uses the owning
+            // group's bounding sphere for spatial accuracy.
+            float3 lodCheckWorldCenter;
+            float lodCheckWorldRadius;
+
+            if (node.range.isGroup != 0) {
+                // Segment-leaf: load the owning group's sphere for the LOD check.
+                StructuredBuffer<ClusterLODGroup> groups =
+                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+                const uint groupGlobalIndex = clodMeshMetadata.groupsBase + node.range.ownerGroupId;
+                const ClusterLODGroup grp = groups[groupGlobalIndex];
+                lodCheckWorldCenter = mul(float4(grp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+                lodCheckWorldRadius = grp.bounds.centerAndRadius.w * nodeUniformScale;
+            }
+            else {
+                // Internal node: use the BVH node sphere directly.
+                lodCheckWorldCenter = mul(float4(nodeCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
+                lodCheckWorldRadius = nodeRadiusWorld;
+            }
+
             const float nodeErrorOverDistance = ErrorOverDistance(
-                nodeCenterWorldSpace,
-                nodeRadiusWorld,
+                lodCheckWorldCenter,
+                lodCheckWorldRadius,
                 node.metric.maxQuadricError,
                 nodeUniformScale,
                 cam.positionWorldSpace.xyz,
@@ -590,17 +612,21 @@ void WG_TraverseNodes(
             const bool nodeWantsTraversal = parentAllowsRefine && (nodeErrorOverDistance >= cam.errorOverDistanceThreshold);
 
             if (node.range.isGroup != 0) {
-                // Segment-leaf: always emit to SegmentEvaluate (skip error
-                // pruning here). SegmentEvaluate checks both LOD conditions
-                // using group-level bounds, avoiding spatial mismatch with
-                // BVH node (segment) bounds at LOD transitions.
-                emitSegment = true;
-                segmentRecord.instanceIndex = rec.instanceIndex;
-                segmentRecord.segmentIndex = node.range.indexOrOffset;
-                segmentRecord.ownerGroupId = node.range.ownerGroupId;
-                segmentRecord.viewId = rec.viewId;
-                segmentRecord.sourceTag = rec.sourceTag;
-                segmentRecord.allowRefine = rec.allowRefine;
+                // Segment-leaf: parent error stored in node was above threshold,
+                // meaning the parent (coarser) level wasn't good enough.
+                // Emit to SegmentEvaluate to check own-group error.
+                if (!nodeWantsTraversal) {
+                    WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
+                }
+                else {
+                    emitSegment = true;
+                    segmentRecord.instanceIndex = rec.instanceIndex;
+                    segmentRecord.segmentIndex = node.range.indexOrOffset;
+                    segmentRecord.ownerGroupId = node.range.ownerGroupId;
+                    segmentRecord.viewId = rec.viewId;
+                    segmentRecord.sourceTag = rec.sourceTag;
+                    segmentRecord.allowRefine = rec.allowRefine;
+                }
             }
             else if (!nodeWantsTraversal) {
                 WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
@@ -648,7 +674,6 @@ void WG_TraverseNodes(
                     }
                 }
             }
-            // (segment-leaf case handled above, before error check)
         }
     }
 
@@ -747,15 +772,14 @@ void WG_SegmentEvaluate(
             }
         }
 
-        // LOD cut criterion (per meshoptimizer clodGroup docs):
-        // Condition 1: own group error > threshold
-        // Condition 2: terminal OR refined group error <= threshold
-        // Both conditions use group-level bounds so the cut decision is
-        // spatially consistent with the refined group's own evaluation.
+        // LOD cut criterion (parent-error model):
+        // The BVH node level already verified the parent's error was above
+        // threshold (meaning the coarser level wasn't good enough).  Here
+        // we check if this group's own error is acceptable — if so, render
+        // at this level.  Terminal segments always render.
         const bool isTerminal = (seg.refinedGroup < 0);
-        bool groupWantsTraversal = false;
 
-        // Condition 1: own group's error must strictly exceed threshold.
+        // Own group's error: if at or below threshold, this level is acceptable.
         const float3 ownGroupWorldCenter = mul(float4(grp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
         const float ownGroupWorldRadius = grp.bounds.centerAndRadius.w * groupUniformScale;
         const float ownGroupErrorOverDistance = ErrorOverDistance(
@@ -765,23 +789,16 @@ void WG_SegmentEvaluate(
             groupUniformScale,
             cam.positionWorldSpace.xyz,
             cam.zNear);
-        const bool ownGroupAboveThreshold = (ownGroupErrorOverDistance > cam.errorOverDistanceThreshold);
+        const bool ownGroupAcceptable = (ownGroupErrorOverDistance <= cam.errorOverDistanceThreshold);
 
-        if (ownGroupAboveThreshold && !isTerminal && rec.allowRefine != 0u) {
+        bool shouldEmit = (ownGroupAcceptable || isTerminal) && (seg.meshletCount != 0);
+
+        // Streaming fallback: if this level isn't acceptable and a finer
+        // level exists, check residency.  If non-resident, force render
+        // at this level and issue a streaming request.
+        if (!shouldEmit && !isTerminal && rec.allowRefine != 0u && seg.meshletCount != 0) {
             const uint refinedGroupGlobalIndex = clodMeshMetadata.groupsBase + (uint)seg.refinedGroup;
-            const ClusterLODGroup refinedGrp = groups[refinedGroupGlobalIndex];
-            const float3 refinedWorldCenter = mul(float4(refinedGrp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
-            const float refinedWorldRadius = refinedGrp.bounds.centerAndRadius.w * groupUniformScale;
-            const float refinedGroupErrorOverDistance = ErrorOverDistance(
-                refinedWorldCenter,
-                refinedWorldRadius,
-                refinedGrp.bounds.error,
-                groupUniformScale,
-                cam.positionWorldSpace.xyz,
-                cam.zNear);
-            groupWantsTraversal = (refinedGroupErrorOverDistance > cam.errorOverDistanceThreshold);
 
-            // Check whether this segment's refined child group is resident.
             StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
             const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
@@ -793,31 +810,14 @@ void WG_SegmentEvaluate(
                 refinedResident = !CLodReadBit(nonResidentBits, refinedGroupGlobalIndex);
             }
 
-            // Streaming residency override: even if the error metric wants to
-            // traverse into finer detail, we must render at this level when the
-            // refined child's data isn't available yet.
-            if (groupWantsTraversal && !refinedResident) {
-                groupWantsTraversal = false;
-            }
-
-            if (groupWantsTraversal) {
-                WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_REFINED_TRAVERSAL_THREADS, 1);
-            }
-
-            // Streaming request when the refined child is non-resident.
             if (!refinedResident) {
+                // Finer level not loaded — render at this level as fallback.
+                shouldEmit = true;
+
                 WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_NON_RESIDENT_REFINED_CHILD_THREADS, 1);
 
                 if (refinedGroupGlobalIndex < activeGroupScanCount) {
-                    const float3 groupWorldCenterForPriority = mul(float4(grp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
-                    const float groupWorldRadiusForPriority = grp.bounds.centerAndRadius.w * groupUniformScale;
-                    const float fallbackErrorOverDistance = ErrorOverDistance(
-                        groupWorldCenterForPriority,
-                        groupWorldRadiusForPriority,
-                        grp.bounds.error,
-                        groupUniformScale,
-                        cam.positionWorldSpace.xyz,
-                        cam.zNear);
+                    const float fallbackErrorOverDistance = ownGroupErrorOverDistance;
 
                     RWStructuredBuffer<CLodStreamingRequest> loadRequests =
                         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
@@ -837,9 +837,7 @@ void WG_SegmentEvaluate(
             }
         }
 
-        // Emit bucket if: own group above threshold AND (terminal, or refined
-        // error at/below threshold, or parent disallowed refine, or non-resident).
-        emitBucket = ownGroupAboveThreshold && (seg.meshletCount != 0) && !groupWantsTraversal;
+        emitBucket = shouldEmit;
 
         if (emitBucket) {
             WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_EMIT_BUCKET_THREADS, 1);
