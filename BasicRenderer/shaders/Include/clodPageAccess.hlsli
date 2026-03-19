@@ -45,7 +45,7 @@ CLodPageHeader LoadPageHeader(uint slabDescriptorIndex, uint pageByteOffset)
     hdr.compressedFlags                  = d5.w;
 
     uint4 d6 = slab.Load4(pageByteOffset + 96);
-    hdr.lodErrorOffset = d6.x;
+    hdr.refinedGroupIdOffset = d6.x;
     hdr.reserved1 = 0;
     hdr.reserved2 = 0;
     hdr.reserved3 = 0;
@@ -64,8 +64,8 @@ uint LoadPageBoundsOffset(uint slabDescriptorIndex, uint pageByteOffset)
     return slab.Load(pageByteOffset + 56); // boundsOffset is uint[14]
 }
 
-// Load only the lodErrorOffset field from the page header (byte offset 96).
-uint LoadPageLodErrorOffset(uint slabDescriptorIndex, uint pageByteOffset)
+// Load only the refinedGroupIdOffset field from the page header (byte offset 96).
+uint LoadPageRefinedGroupIdOffset(uint slabDescriptorIndex, uint pageByteOffset)
 {
     ByteAddressBuffer slab = ResourceDescriptorHeap[slabDescriptorIndex];
     return slab.Load(pageByteOffset + 96);

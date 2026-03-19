@@ -59,7 +59,7 @@ struct CLodPageHeader
     uint compressedMeshletVertexBits;
     uint compressedFlags;
 
-    uint lodErrorOffset;
+    uint refinedGroupIdOffset;
     uint reserved1;
     uint reserved2;
     uint reserved3;

@@ -47,7 +47,7 @@ struct CLodPageHeader
 	uint32_t compressedMeshletVertexBits = 0;
 	uint32_t compressedFlags = 0;
 
-	uint32_t lodErrorOffset = 0; // byte offset of per-meshlet LODError stream
+	uint32_t refinedGroupIdOffset = 0; // byte offset of per-meshlet refined group ID stream (int32, -1 = terminal)
 	uint32_t reserved[7] = {}; // pad to 128 bytes (32 x uint32)
 };
 static_assert(sizeof(CLodPageHeader) == 128, "CLodPageHeader must be 128 bytes");

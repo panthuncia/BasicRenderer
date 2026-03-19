@@ -118,7 +118,7 @@ namespace
 		size = align4(size) + align4(compMVWords * sizeof(uint32_t));
 		size = align4(size) + align4(static_cast<size_t>(meshletCount) * sizeof(meshopt_Meshlet));
 		size = align4(size) + align4(static_cast<size_t>(meshletCount) * sizeof(BoundingSphere));
-		size = align4(size) + align4(static_cast<size_t>(meshletCount) * sizeof(float)); // per-meshlet LODError
+		size = align4(size) + align4(static_cast<size_t>(meshletCount) * sizeof(int32_t)); // per-meshlet refined group ID
 		return align4(size);
 	}
 
@@ -904,33 +904,29 @@ namespace
 				pageBins.pop_back();
 			}
 
-			// Create segments from page bins
-			// For each page, walk meshlets in order and create a segment for each contiguous run of the same refinedGroup.
+			// Create segments from page bins — one segment per page.
+			// Per-meshlet refined group IDs are stored in the page blob
+			// so ClusterCullBuckets can check condition 2 per-meshlet.
 			for (uint32_t pi = 0; pi < static_cast<uint32_t>(pageBins.size()); ++pi) {
 				const PageBin& page = pageBins[pi];
 				if (page.meshletIndices.empty()) continue;
 
-				uint32_t runStart = 0;
-				int32_t runTag = page.meshletBucketTags[0];
-
-				for (uint32_t i = 1; i <= static_cast<uint32_t>(page.meshletIndices.size()); ++i) {
-					const bool endOfPage = (i == static_cast<uint32_t>(page.meshletIndices.size()));
-					const bool tagChanged = !endOfPage && (page.meshletBucketTags[i] != runTag);
-
-					if (endOfPage || tagChanged) {
-						ClusterLODGroupSegment seg{};
-						seg.refinedGroup = runTag;
-						seg.pageIndex = pi;
-						seg.firstMeshletInPage = runStart;
-						seg.meshletCount = i - runStart;
-						output.segments.push_back(seg);
-
-						if (!endOfPage) {
-							runStart = i;
-							runTag = page.meshletBucketTags[i];
-						}
+				// Determine a representative refinedGroup for the segment:
+				// -1 if all terminal, otherwise first non-terminal tag.
+				int32_t representativeTag = -1;
+				for (uint32_t i = 0; i < static_cast<uint32_t>(page.meshletBucketTags.size()); ++i) {
+					if (page.meshletBucketTags[i] >= 0) {
+						representativeTag = page.meshletBucketTags[i];
+						break;
 					}
 				}
+
+				ClusterLODGroupSegment seg{};
+				seg.refinedGroup = representativeTag;
+				seg.pageIndex = pi;
+				seg.firstMeshletInPage = 0;
+				seg.meshletCount = static_cast<uint32_t>(page.meshletIndices.size());
+				output.segments.push_back(seg);
 			}
 
 			// Sort segments: terminal (refinedGroup < 0) first, then non-terminal.
@@ -1098,12 +1094,11 @@ namespace
 					pageBounds.push_back(output.meshletBounds[page.meshletIndices[li]]);
 				}
 
-				// Build per-meshlet LODError: terminal meshlets get 0, others get
-				// the owning group's simplification error.
-				std::vector<float> pageLodErrors(pageMeshletCount);
+				// Build per-meshlet refined group ID stream: terminal meshlets
+				// get -1, others get the refined (child) group index.
+				std::vector<int32_t> pageRefinedGroupIds(pageMeshletCount);
 				for (uint32_t li = 0; li < pageMeshletCount; ++li) {
-					const int32_t tag = page.meshletBucketTags[li];
-					pageLodErrors[li] = (tag < 0) ? 0.0f : capturedGroup.simplified.error;
+					pageRefinedGroupIds[li] = page.meshletBucketTags[li];
 				}
 
 				// Build page blob: CLodPageHeader + 8 streams
@@ -1150,7 +1145,7 @@ namespace
 				appendStream(pageCompMeshletVertexWords.data(), pageCompMeshletVertexWords.size() * sizeof(uint32_t), header.compMeshletVertOffset);
 				appendStream(pageMeshlets.data(), pageMeshlets.size() * sizeof(meshopt_Meshlet), header.meshletStructOffset);
 				appendStream(pageBounds.data(), pageBounds.size() * sizeof(BoundingSphere), header.boundsOffset);
-				appendStream(pageLodErrors.data(), pageLodErrors.size() * sizeof(float), header.lodErrorOffset);
+				appendStream(pageRefinedGroupIds.data(), pageRefinedGroupIds.size() * sizeof(int32_t), header.refinedGroupIdOffset);
 
 				blob.resize(align4(blob.size()));
 				std::memcpy(blob.data(), &header, sizeof(CLodPageHeader));

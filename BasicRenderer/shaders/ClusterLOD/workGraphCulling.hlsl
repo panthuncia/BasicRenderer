@@ -784,18 +784,9 @@ void WG_SegmentEvaluate(
             }
         }
 
-        // LOD cut criterion (per-cluster model, matches meshoptimizer):
-        // Render a segment when:
-        // 1. Own group's error is over threshold (this level needs to be
-        //    visible — the simplification that produced this group is too
-        //    coarse).  Root groups have FLT_MAX error so always pass.
-        // 2. Terminal segment (finest geometry, no finer child) OR the
-        //    child group's error is under threshold (the finer level this
-        //    segment was derived from is acceptable).
-        // This naturally handles multi-parent groups because each segment
-        // checks only its own group and its own child — no shared
-        // parentGroupId required.
-        const bool isTerminal = (seg.refinedGroup < 0);
+        // LOD cut: condition 1 only (own group needs refinement).
+        // Condition 2 (child-acceptable) is deferred to per-meshlet
+        // in ClusterCullBuckets via the refined group ID page stream.
 
         // Condition 1: own group's error over threshold.
         const float3 ownGroupWorldCenter = mul(float4(grp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
@@ -809,71 +800,18 @@ void WG_SegmentEvaluate(
             cam.zNear);
         const bool ownGroupNeedsRefinement = (ownGroupErrorOverDistance >= cam.errorOverDistanceThreshold);
 
-        // Condition 2: terminal or child group's error is acceptable.
-        bool childAcceptable = isTerminal;
-        if (!isTerminal) {
-            const uint childGroupGlobalIndex = clodMeshMetadata.groupsBase + (uint)seg.refinedGroup;
-            const ClusterLODGroup childGrp = groups[childGroupGlobalIndex];
-            const float3 childWorldCenter = mul(float4(childGrp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
-            const float childWorldRadius = childGrp.bounds.centerAndRadius.w * groupUniformScale;
-            const float childEOD = ErrorOverDistance(
-                childWorldCenter, childWorldRadius,
-                childGrp.bounds.error, groupUniformScale,
-                cam.positionWorldSpace.xyz, cam.zNear);
-            childAcceptable = (childEOD < cam.errorOverDistanceThreshold);
-        }
-
-        bool shouldEmit = ownGroupNeedsRefinement && childAcceptable && (seg.meshletCount != 0);
-
-        // Load streaming residency data (shared by own-group check and fallback).
-        StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
-        const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
-        ByteAddressBuffer nonResidentBits =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
+        bool shouldEmit = ownGroupNeedsRefinement && (seg.meshletCount != 0);
 
         // Suppress emission when own group's pages are non-resident.
-        if (shouldEmit && groupGlobalIndex < activeGroupScanCount) {
-            if (CLodReadBit(nonResidentBits, groupGlobalIndex)) {
-                shouldEmit = false;
-            }
-        }
-
-        // Streaming fallback: own group needs refinement and the child
-        // group isn't acceptable (or non-resident), so this segment
-        // didn't qualify to emit.  If the child is non-resident, force
-        // render at this level and request the child be streamed in.
-        if (!shouldEmit && ownGroupNeedsRefinement && !isTerminal && rec.allowRefine != 0u && seg.meshletCount != 0) {
-            const uint refinedGroupGlobalIndex = clodMeshMetadata.groupsBase + (uint)seg.refinedGroup;
-
-            bool refinedResident = true;
-            if (refinedGroupGlobalIndex < activeGroupScanCount) {
-                refinedResident = !CLodReadBit(nonResidentBits, refinedGroupGlobalIndex);
-            }
-
-            if (!refinedResident) {
-                // Finer level not loaded — render at this level as fallback.
-                shouldEmit = true;
-
-                WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_NON_RESIDENT_REFINED_CHILD_THREADS, 1);
-
-                if (refinedGroupGlobalIndex < activeGroupScanCount) {
-                    const float fallbackErrorOverDistance = ownGroupErrorOverDistance;
-
-                    RWStructuredBuffer<CLodStreamingRequest> loadRequests =
-                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
-                    RWStructuredBuffer<uint> loadRequestCounter =
-                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
-                    uint requestIndex = 0;
-                    InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
-                    if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY) {
-                        CLodStreamingRequest req = (CLodStreamingRequest)0;
-                        req.groupGlobalIndex = refinedGroupGlobalIndex;
-                        req.meshInstanceIndex = rec.instanceIndex;
-                        req.meshBufferIndex = instanceData.perMeshBufferIndex;
-                        req.viewId = CLodPackViewPriority(rec.viewId, fallbackErrorOverDistance);
-                        loadRequests[requestIndex] = req;
-                    }
+        {
+            StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
+            const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
+            ByteAddressBuffer nonResidentBits =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
+            if (shouldEmit && groupGlobalIndex < activeGroupScanCount) {
+                if (CLodReadBit(nonResidentBits, groupGlobalIndex)) {
+                    shouldEmit = false;
                 }
             }
         }
@@ -952,6 +890,13 @@ void WG_ClusterCullBuckets(
     uint pageMeshletCount = 0;
     uint pageBoundsOffset = 0;
     uint depthMapDescriptorIndex = 0;
+    uint pageRefinedGroupIdOffset = 0;
+    float groupUniformScale = 0.0f;
+    CullingCameraInfo cam = (CullingCameraInfo)0;
+    uint groupsBase = 0;
+    uint meshBufferIndex = 0;
+    uint activeGroupScanCount = 0;
+    float ownGroupErrorOverDistance = 0.0f;
 
     if (hasBucket && b.pageSlabDescriptorIndex != 0) {
         pageValid = true;
@@ -979,6 +924,38 @@ void WG_ClusterCullBuckets(
                 ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
             depthMapDescriptorIndex = viewDepthSRVIndices[b.viewId].linearDepthSRVIndex;
         }
+
+        // Per-meshlet condition 2 + streaming fallback state
+        pageRefinedGroupIdOffset = LoadPageRefinedGroupIdOffset(pageSlabDesc, pageSlabOff);
+        groupUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
+        meshBufferIndex = perMeshInstanceBuffer[b.instanceIndex].perMeshBufferIndex;
+
+        StructuredBuffer<CullingCameraInfo> cameraInfos =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
+        cam = cameraInfos[b.viewId];
+
+        StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
+        StructuredBuffer<CLodMeshMetadata> clodMeshMetadataBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::MeshMetadata)];
+        const MeshInstanceClodOffsets clodOff = clodOffsets[b.instanceIndex];
+        groupsBase = clodMeshMetadataBuffer[clodOff.clodMeshMetadataIndex].groupsBase;
+
+        // Own group EOD for streaming request priority
+        {
+            StructuredBuffer<ClusterLODGroup> groups =
+                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+            const ClusterLODGroup ownGrp = groups[groupsBase + b.groupId];
+            const float3 ownWorldCenter = mul(float4(ownGrp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+            const float ownWorldRadius = ownGrp.bounds.centerAndRadius.w * groupUniformScale;
+            ownGroupErrorOverDistance = ErrorOverDistance(
+                ownWorldCenter, ownWorldRadius, ownGrp.bounds.error, groupUniformScale,
+                cam.positionWorldSpace.xyz, cam.zNear);
+        }
+
+        StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
+        activeGroupScanCount = runtimeState[0].activeGroupScanCount;
     }
 
     // Meshlet loop
@@ -1012,6 +989,59 @@ void WG_ClusterCullBuckets(
                 const float meshletRadiusWorld = meshletBounds.sphere.w * MaxAxisScale_RowVector(objectModelMatrix);
 
                 survives = replaySource || !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, camera);
+
+                // Per-meshlet LOD condition 2: load refined group ID from page blob.
+                // Terminal meshlets (refinedGroupId < 0) pass automatically.
+                // Non-terminal meshlets check if the child group is acceptable.
+                if (survives && pageRefinedGroupIdOffset != 0) {
+                    const int refinedGroupId = asint(slab.Load(pageSlabOff + pageRefinedGroupIdOffset + localMeshlet * 4u));
+                    if (refinedGroupId >= 0) {
+                        StructuredBuffer<ClusterLODGroup> groups =
+                            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
+                        const uint childGroupGlobalIndex = groupsBase + (uint)refinedGroupId;
+                        const ClusterLODGroup childGrp = groups[childGroupGlobalIndex];
+                        const float3 childWorldCenter = mul(float4(childGrp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+                        const float childWorldRadius = childGrp.bounds.centerAndRadius.w * groupUniformScale;
+                        const float childEOD = ErrorOverDistance(
+                            childWorldCenter, childWorldRadius,
+                            childGrp.bounds.error, groupUniformScale,
+                            cam.positionWorldSpace.xyz, cam.zNear);
+
+                        if (childEOD >= cam.errorOverDistanceThreshold) {
+                            // Child not acceptable — check if child is loaded
+                            ByteAddressBuffer nonResidentBits =
+                                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
+                            bool childResident = true;
+                            if (childGroupGlobalIndex < activeGroupScanCount) {
+                                childResident = !CLodReadBit(nonResidentBits, childGroupGlobalIndex);
+                            }
+
+                            if (childResident) {
+                                // Child is resident and handles its own rendering
+                                survives = false;
+                            } else {
+                                // Child not loaded — render as fallback, request streaming
+                                WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_NON_RESIDENT_REFINED_CHILD_THREADS, 1);
+                                if (childGroupGlobalIndex < activeGroupScanCount) {
+                                    RWStructuredBuffer<CLodStreamingRequest> loadRequests =
+                                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadRequests)];
+                                    RWStructuredBuffer<uint> loadRequestCounter =
+                                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingLoadCounter)];
+                                    uint requestIndex = 0;
+                                    InterlockedAdd(loadRequestCounter[0], 1u, requestIndex);
+                                    if (requestIndex < CLOD_STREAM_REQUEST_CAPACITY) {
+                                        CLodStreamingRequest req = (CLodStreamingRequest)0;
+                                        req.groupGlobalIndex = childGroupGlobalIndex;
+                                        req.meshInstanceIndex = b.instanceIndex;
+                                        req.meshBufferIndex = meshBufferIndex;
+                                        req.viewId = CLodPackViewPriority(b.viewId, ownGroupErrorOverDistance);
+                                        loadRequests[requestIndex] = req;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 if (survives && CLodWorkGraphOcclusionEnabled() && depthMapDescriptorIndex != 0) {
                     bool occlusionCulled = false;
