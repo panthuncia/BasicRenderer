@@ -578,28 +578,13 @@ void WG_TraverseNodes(
             WGTelemetryAdd(WG_COUNTER_TRAVERSE_CULLED_NODE_RECORDS, 1);
         }
         else {
-            // For segment-leaves, the node stores the *parent* group's error
-            // and the BVH sphere is expanded to enclose the owning group's
-            // sphere.  We still use the node sphere for frustum/occlusion
-            // culling (above), but the LOD error check uses the owning
-            // group's bounding sphere for spatial accuracy.
-            float3 lodCheckWorldCenter;
-            float lodCheckWorldRadius;
-
-            if (node.range.isGroup != 0) {
-                // Segment-leaf: load the owning group's sphere for the LOD check.
-                StructuredBuffer<ClusterLODGroup> groups =
-                    ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
-                const uint groupGlobalIndex = clodMeshMetadata.groupsBase + node.range.ownerGroupId;
-                const ClusterLODGroup grp = groups[groupGlobalIndex];
-                lodCheckWorldCenter = mul(float4(grp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
-                lodCheckWorldRadius = grp.bounds.centerAndRadius.w * nodeUniformScale;
-            }
-            else {
-                // Internal node: use the BVH node sphere directly.
-                lodCheckWorldCenter = mul(float4(nodeCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
-                lodCheckWorldRadius = nodeRadiusWorld;
-            }
+            // LOD pre-filter: for segment-leaves, the node stores the
+            // *parent* group's error and the BVH sphere is expanded to
+            // enclose the owning group's sphere.  Using the node sphere is
+            // conservative — SegmentEvaluate performs the authoritative check
+            // with the real group and parent spheres.
+            const float3 lodCheckWorldCenter = mul(float4(nodeCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
+            const float lodCheckWorldRadius = nodeRadiusWorld;
 
             const float nodeErrorOverDistance = ErrorOverDistance(
                 lodCheckWorldCenter,
@@ -789,14 +774,32 @@ void WG_SegmentEvaluate(
             groupUniformScale,
             cam.positionWorldSpace.xyz,
             cam.zNear);
-        const bool ownGroupAcceptable = (ownGroupErrorOverDistance <= cam.errorOverDistanceThreshold);
+        const bool ownGroupAcceptable = (ownGroupErrorOverDistance < cam.errorOverDistanceThreshold);
 
-        bool shouldEmit = (ownGroupAcceptable || isTerminal) && (seg.meshletCount != 0);
+        // Bidirectional LOD guarantee: re-check the parent's error using
+        // the parent's own bounding sphere.  If the parent is acceptable
+        // (its error-over-distance is below threshold), this level is not
+        // needed — the parent will render instead.  Root groups
+        // (parentGroupId < 0) always pass because they have no parent.
+        bool parentNeedsRefinement = true;
+        if (grp.parentGroupId >= 0) {
+            const uint parentGlobalIndex = clodMeshMetadata.groupsBase + (uint)grp.parentGroupId;
+            const ClusterLODGroup parentGrp = groups[parentGlobalIndex];
+            const float3 parentWorldCenter = mul(float4(parentGrp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+            const float parentWorldRadius = parentGrp.bounds.centerAndRadius.w * groupUniformScale;
+            const float parentErrorOverDistance = ErrorOverDistance(
+                parentWorldCenter, parentWorldRadius,
+                parentGrp.bounds.error, groupUniformScale,
+                cam.positionWorldSpace.xyz, cam.zNear);
+            parentNeedsRefinement = (parentErrorOverDistance >= cam.errorOverDistanceThreshold);
+        }
+
+        bool shouldEmit = parentNeedsRefinement && (ownGroupAcceptable || isTerminal) && (seg.meshletCount != 0);
 
         // Streaming fallback: if this level isn't acceptable and a finer
         // level exists, check residency.  If non-resident, force render
         // at this level and issue a streaming request.
-        if (!shouldEmit && !isTerminal && rec.allowRefine != 0u && seg.meshletCount != 0) {
+        if (!shouldEmit && parentNeedsRefinement && !isTerminal && rec.allowRefine != 0u && seg.meshletCount != 0) {
             const uint refinedGroupGlobalIndex = clodMeshMetadata.groupsBase + (uint)seg.refinedGroup;
 
             StructuredBuffer<CLodStreamingRuntimeState> runtimeState =

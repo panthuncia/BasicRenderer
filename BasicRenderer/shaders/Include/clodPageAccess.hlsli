@@ -44,7 +44,8 @@ CLodPageHeader LoadPageHeader(uint slabDescriptorIndex, uint pageByteOffset)
     hdr.compressedMeshletVertexBits      = d5.z;
     hdr.compressedFlags                  = d5.w;
 
-    hdr.reserved0 = 0;
+    uint4 d6 = slab.Load4(pageByteOffset + 96);
+    hdr.lodErrorOffset = d6.x;
     hdr.reserved1 = 0;
     hdr.reserved2 = 0;
     hdr.reserved3 = 0;
@@ -61,6 +62,13 @@ uint LoadPageBoundsOffset(uint slabDescriptorIndex, uint pageByteOffset)
 {
     ByteAddressBuffer slab = ResourceDescriptorHeap[slabDescriptorIndex];
     return slab.Load(pageByteOffset + 56); // boundsOffset is uint[14]
+}
+
+// Load only the lodErrorOffset field from the page header (byte offset 96).
+uint LoadPageLodErrorOffset(uint slabDescriptorIndex, uint pageByteOffset)
+{
+    ByteAddressBuffer slab = ResourceDescriptorHeap[slabDescriptorIndex];
+    return slab.Load(pageByteOffset + 96);
 }
 
 // Resolve a group-local page index to a physical slab location via the GroupPageMap buffer.

@@ -59,7 +59,7 @@ struct CLodPageHeader
     uint compressedMeshletVertexBits;
     uint compressedFlags;
 
-    uint reserved0;
+    uint lodErrorOffset;
     uint reserved1;
     uint reserved2;
     uint reserved3;
@@ -122,6 +122,7 @@ struct ClusterLODGroup
     uint flags;
     uint pageMapBase; // absolute index into GroupPageMap buffer
     uint pageCount;   // number of pages for this group
+    int parentGroupId; // mesh-local group index of the parent group (-1 for root)
 };
 
 static const uint CLOD_GROUP_FLAG_IS_VOXEL = 1u << 0;

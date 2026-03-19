@@ -47,7 +47,8 @@ struct CLodPageHeader
 	uint32_t compressedMeshletVertexBits = 0;
 	uint32_t compressedFlags = 0;
 
-	uint32_t reserved[8] = {}; // pad to 128 bytes (32 x uint32)
+	uint32_t lodErrorOffset = 0; // byte offset of per-meshlet LODError stream
+	uint32_t reserved[7] = {}; // pad to 128 bytes (32 x uint32)
 };
 static_assert(sizeof(CLodPageHeader) == 128, "CLodPageHeader must be 128 bytes");
 
@@ -136,6 +137,7 @@ struct ClusterLODGroup
 	uint32_t flags = 0;         // Bit 0: IS_VOXEL_GROUP
 	uint32_t pageMapBase = 0;   // absolute index into GroupPageMap buffer
 	uint32_t pageCount = 0;     // number of pages for this group
+	int32_t  parentGroupId = -1; // mesh-local group index of the parent group (-1 for root)
 };
 
 static constexpr uint32_t CLOD_GROUP_FLAG_IS_VOXEL = 1u << 0;

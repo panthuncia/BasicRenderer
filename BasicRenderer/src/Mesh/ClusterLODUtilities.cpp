@@ -118,6 +118,7 @@ namespace
 		size = align4(size) + align4(compMVWords * sizeof(uint32_t));
 		size = align4(size) + align4(static_cast<size_t>(meshletCount) * sizeof(meshopt_Meshlet));
 		size = align4(size) + align4(static_cast<size_t>(meshletCount) * sizeof(BoundingSphere));
+		size = align4(size) + align4(static_cast<size_t>(meshletCount) * sizeof(float)); // per-meshlet LODError
 		return align4(size);
 	}
 
@@ -1097,6 +1098,14 @@ namespace
 					pageBounds.push_back(output.meshletBounds[page.meshletIndices[li]]);
 				}
 
+				// Build per-meshlet LODError: terminal meshlets get 0, others get
+				// the owning group's simplification error.
+				std::vector<float> pageLodErrors(pageMeshletCount);
+				for (uint32_t li = 0; li < pageMeshletCount; ++li) {
+					const int32_t tag = page.meshletBucketTags[li];
+					pageLodErrors[li] = (tag < 0) ? 0.0f : capturedGroup.simplified.error;
+				}
+
 				// Build page blob: CLodPageHeader + 8 streams
 				CLodPageHeader header{};
 				header.vertexCount = pageVertexCount;
@@ -1141,6 +1150,7 @@ namespace
 				appendStream(pageCompMeshletVertexWords.data(), pageCompMeshletVertexWords.size() * sizeof(uint32_t), header.compMeshletVertOffset);
 				appendStream(pageMeshlets.data(), pageMeshlets.size() * sizeof(meshopt_Meshlet), header.meshletStructOffset);
 				appendStream(pageBounds.data(), pageBounds.size() * sizeof(BoundingSphere), header.boundsOffset);
+				appendStream(pageLodErrors.data(), pageLodErrors.size() * sizeof(float), header.lodErrorOffset);
 
 				blob.resize(align4(blob.size()));
 				std::memcpy(blob.data(), &header, sizeof(CLodPageHeader));
@@ -1232,9 +1242,11 @@ namespace
 		}
 
 		// Build parent error map: for each group, store the max error of any
-		// parent (coarser) group that refines into it.  Coarsest-level groups
-		// have no parent and get FLT_MAX so they are always traversed.
-		std::vector<float> parentErrorForGroup(state.groups.size(), std::numeric_limits<float>::max());
+		// parent (coarser) group that refines into it.  Also track the parent
+		// group ID so the shader can load the parent's sphere for an exact
+		// bidirectional LOD check.
+		std::vector<float> parentErrorForGroup(state.groups.size(), 0.0f);
+		std::vector<int32_t> parentGroupIdForGroup(state.groups.size(), -1);
 		for (uint32_t groupID = 0; groupID < uint32_t(state.groups.size()); ++groupID)
 		{
 			const ClusterLODGroup& grp = state.groups[groupID];
@@ -1245,9 +1257,23 @@ namespace
 				if (seg.refinedGroup >= 0)
 				{
 					const uint32_t childGroupId = static_cast<uint32_t>(seg.refinedGroup);
-					parentErrorForGroup[childGroupId] = std::max(parentErrorForGroup[childGroupId], parentError);
+					if (parentError >= parentErrorForGroup[childGroupId])
+					{
+						parentErrorForGroup[childGroupId] = parentError;
+						parentGroupIdForGroup[childGroupId] = static_cast<int32_t>(groupID);
+					}
 				}
 			}
+		}
+		// Root groups (no parent) get FLT_MAX so they are always traversed.
+		// Assign parentGroupId to each group.
+		for (uint32_t i = 0; i < uint32_t(state.groups.size()); ++i)
+		{
+			if (parentGroupIdForGroup[i] < 0)
+			{
+				parentErrorForGroup[i] = std::numeric_limits<float>::max();
+			}
+			state.groups[i].parentGroupId = parentGroupIdForGroup[i];
 		}
 
 		state.lodNodeRanges.assign(lodLevelCount, {});
@@ -1312,10 +1338,12 @@ namespace
 					node.traversalMetric.boundingSphereRadius = segBounds.sphere.w;
 				} else {
 					// Expand the BVH leaf bounding sphere to enclose the owning
-					// group's bounding sphere.  SegmentEvaluate checks the LOD
-					// cut conditions using group-level bounds, so the BVH must be
-					// conservative w.r.t. group-level ErrorOverDistance to avoid
-					// pruning segments whose group condition 1 would pass.
+					// group's bounding sphere AND the parent group's bounding
+					// sphere.  SegmentEvaluate checks ErrorOverDistance using the
+					// parent's sphere, so the BVH node sphere must enclose it to
+					// be a valid conservative pre-filter.  Without this, the BVH
+					// can compute a lower EOD than the parent sphere and
+					// incorrectly prune segments that SegmentEvaluate would emit.
 					const float sx = segBounds.sphere.x, sy = segBounds.sphere.y, sz = segBounds.sphere.z;
 					const float sr = segBounds.sphere.w;
 					const float gx = grp.bounds.center[0], gy = grp.bounds.center[1], gz = grp.bounds.center[2];
@@ -1326,20 +1354,41 @@ namespace
 
 					float cx, cy, cz, cr;
 					if (dist + gr <= sr) {
-						// Group sphere is inside segment sphere.
 						cx = sx; cy = sy; cz = sz; cr = sr;
 					}
 					else if (dist + sr <= gr) {
-						// Segment sphere is inside group sphere.
 						cx = gx; cy = gy; cz = gz; cr = gr;
 					}
 					else {
-						// General case: compute minimal enclosing sphere of both.
 						cr = (dist + sr + gr) * 0.5f;
 						const float t = (cr - sr) / std::max(dist, 1e-12f);
 						cx = sx + dx * t;
 						cy = sy + dy * t;
 						cz = sz + dz * t;
+					}
+
+					// Merge with parent group sphere so the BVH EOD is always
+					// >= the parent-sphere EOD used in SegmentEvaluate.
+					const int32_t parentGrpId = parentGroupIdForGroup[info.ownerGroupId];
+					if (parentGrpId >= 0) {
+						const auto& pb = state.groups[parentGrpId].bounds;
+						const float px = pb.center[0], py = pb.center[1], pz = pb.center[2];
+						const float pr = pb.radius;
+
+						const float dpx = px - cx, dpy = py - cy, dpz = pz - cz;
+						const float pdist = std::sqrt(dpx * dpx + dpy * dpy + dpz * dpz);
+
+						if (pdist + cr <= pr) {
+							cx = px; cy = py; cz = pz; cr = pr;
+						}
+						else if (pdist + pr > cr) {
+							const float newR = (pdist + cr + pr) * 0.5f;
+							const float pt = (newR - cr) / std::max(pdist, 1e-12f);
+							cx = cx + dpx * pt;
+							cy = cy + dpy * pt;
+							cz = cz + dpz * pt;
+							cr = newR;
+						}
 					}
 
 					node.traversalMetric.boundingSphereX = cx;
