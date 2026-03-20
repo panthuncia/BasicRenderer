@@ -1,13 +1,16 @@
 
 # BasicRenderer
 
-A hobby DX12 renderer, written to experiment with real-time rendering for undergraduate ISPs and my own interest
+![Zorah AO example](images/zorah_ao.png)
+
+An advanced DX12 research renderer, written to experiment with real-time rendering- particularly with regard to advanced geometry rendering techniques
 
 Feature development is driven purely by what I'm interested in at the moment.
 
 
 ## Graphical features
 
+- Nanite-style virtualized geometry using a novel work-graph approach, capable of real-time rendering of scenes with tens of billions of triangles
 - Image-based lighting
 - Normal mapping & contact-refinement parallax heightmaps
 - Support for arbitrary numbers of point, spot, and directional lights using clustered lighting
@@ -23,7 +26,6 @@ Feature development is driven purely by what I'm interested in at the moment.
 - A powerful render graph for automatic resource transitions and queue synchronization. Supports both retained-mode and immediate-mode GPU command execution.
 - Low-level RHI (Only DX12 backend implemented, for now, but built to support Vulkan)
 - GPU-driven rendering with compute culling & ExecuteIndirect
-- Per-meshlet occlusion & frustrum culling
 - Visibility buffer (UE5-style), Deferred, and forward+ rendering
 - Clustered lighting with a paged linked-list
 - Async-compute
@@ -33,6 +35,8 @@ Feature development is driven purely by what I'm interested in at the moment.
 - A basic UI for feature toggles, importing new asset files, debug view selection, and scene graph introspection & modification
 
 ## Gallery
+![Zorah cluster example](images/zorah_clusters.png)
+
 ![San-Miguel example](images/SanMiguel.png)
 
 ![Bistro example](images/Bistro.png)
@@ -40,10 +44,6 @@ Feature development is driven purely by what I'm interested in at the moment.
 ![Sponza example](images/Sponza.png)
 
 ![SSR example](images/SSR.png)
-
-![Meshlets example](images/meshlets.png)
-
-![Meshlet culling example](images/culling.png)
 
 ## Supported file formats
 - USD using OpenUSD, https://github.com/PixarAnimationStudios/OpenUSD
