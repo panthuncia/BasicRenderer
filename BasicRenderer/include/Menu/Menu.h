@@ -872,6 +872,7 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 		ImGui::Begin("Render Graph Inspector", nullptr);
         RGInspectorOptions opts;
         RGInspector::Show(m_renderGraph->GetBatches(),
+            m_renderGraph->GetQueueRegistry(),
             PassUsesResourceAdapter,
             [this](uint64_t resourceId) -> std::string {
                 if (!m_renderGraph) return {};
