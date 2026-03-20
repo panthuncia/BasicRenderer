@@ -16,11 +16,12 @@ namespace Components {
 
     struct DepthMap {
         DepthMap() = default;
-        DepthMap(std::shared_ptr<PixelBuffer> depthMap, std::shared_ptr<PixelBuffer> linearDepthMap)
-            : depthMap(depthMap), linearDepthMap(linearDepthMap) {
+        DepthMap(std::shared_ptr<PixelBuffer> depthMap, std::shared_ptr<PixelBuffer> linearDepthMap, std::shared_ptr<PixelBuffer> projectedDepthMap)
+            : depthMap(depthMap), linearDepthMap(linearDepthMap), projectedDepthMap(projectedDepthMap) {
         }
         std::shared_ptr<PixelBuffer> depthMap;
         std::shared_ptr<PixelBuffer> linearDepthMap;
+        std::shared_ptr<PixelBuffer> projectedDepthMap;
     };
 
     struct RenderViewRef {

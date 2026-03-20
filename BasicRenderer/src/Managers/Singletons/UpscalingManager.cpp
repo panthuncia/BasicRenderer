@@ -122,7 +122,7 @@ bool UpscalingManager::InitFFX() {
         ffx::CreateContextDescUpscale createUpscaling;
         createUpscaling.maxUpscaleSize = { outputRes.x, outputRes.y };
         createUpscaling.maxRenderSize = { renderRes.x, renderRes.y };
-        createUpscaling.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE | FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE;
+        createUpscaling.flags = FFX_UPSCALE_ENABLE_AUTO_EXPOSURE | FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE | FFX_UPSCALE_ENABLE_DEPTH_INVERTED;
 
         ffx::CreateContext(m_fsrUpscalingContext, nullptr, createUpscaling, backendDesc);
 		m_fsrIntialized = true;
@@ -145,8 +145,8 @@ DirectX::XMFLOAT2 UpscalingManager::GetJitter(uint64_t frameNumber) {
         unsigned int sequenceLength = 16;
         unsigned int sequenceIndex = frameNumber % sequenceLength;
         DirectX::XMFLOAT2 sequenceOffset = {
-            2.0f * Halton(sequenceIndex + 1, 2) - 1.0f,
-            2.0f * Halton(sequenceIndex + 1, 3) - 1.0f };
+            Halton(sequenceIndex + 1, 2) - 0.5f,
+            Halton(sequenceIndex + 1, 3) - 0.5f };
         return sequenceOffset;
         break;
     }
@@ -286,13 +286,11 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
     StoreFloat4x4(camera->info.unjitteredProjection, cameraViewToClipPrev); // TODO: should we store the actual previous prjection matrix?
     sl::matrixMul(consts.clipToPrevClip, clipToPrevCameraView, cameraViewToClipPrev); // Transform between current and previous clip space
     sl::matrixFullInvert(consts.prevClipToClip, consts.clipToPrevClip); // Transform between previous and current clip space
-	consts.jitterOffset.x = camera->jitterNDC.x; // Docs say this should be pixel space, but that causes screen shaking. Not sure what's wrong.
-    consts.jitterOffset.y = -camera->jitterNDC.y;
+	consts.jitterOffset.x = camera->jitterPixelSpace.x;
+    consts.jitterOffset.y = camera->jitterPixelSpace.y;
 
-    // Set motion vector scaling based on your setup
-    //consts.mvecScale = { -1,1 }; // Values in eMotionVectors are in [-1,1] range
-	consts.mvecScale = { -1.0f / renderRes.x, 1.0f / renderRes.y }; // Values in eMotionVectors are in pixel space // TODO: I don't think this is right, but {-1, 1} looks more wrong
-    //consts.mvecScale = myCustomScaling; // Custom scaling to ensure values end up in [-1,1] range
+    // Motion vectors are curNDC - prevNDC; DLSS expects prevNDC - curNDC, so negate both.
+    consts.mvecScale = { -1.0f, -1.0f };
 
     consts.cameraPinholeOffset = { 0, 0 };
     consts.cameraPos = { camera->info.positionWorldSpace.x, camera->info.positionWorldSpace.y, camera->info.positionWorldSpace.z };
@@ -306,7 +304,7 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
     consts.cameraFar = camera->info.zFar;
     consts.cameraFOV = camera->info.fov;
     consts.cameraAspectRatio = camera->info.aspectRatio;
-    consts.depthInverted = sl::Boolean::eFalse;
+    consts.depthInverted = sl::Boolean::eTrue; // Reverse-Z: near=1, far=0
     consts.cameraMotionIncluded = sl::Boolean::eTrue;
     consts.motionVectors3D = sl::Boolean::eFalse;
     consts.reset = sl::Boolean::eFalse;
@@ -360,9 +358,12 @@ void UpscalingManager::EvaluateFSR3(rhi::CommandList& commandList, const Compone
 
     // Jitter is calculated earlier in the frame using a callback from the camera update
     dispatchUpscale.jitterOffset.x = camera->jitterPixelSpace.x;
-    dispatchUpscale.jitterOffset.y = -camera->jitterPixelSpace.y;
-	dispatchUpscale.motionVectorScale.x = -static_cast<float>(renderRes.x); // FFX expects left-handed, we use right-handed
-    dispatchUpscale.motionVectorScale.y = static_cast<float>(renderRes.y);
+    dispatchUpscale.jitterOffset.y = camera->jitterPixelSpace.y;
+	// Motion vectors are curNDC - prevNDC in [-1,1]. FSR expects prevScreenPixel - curScreenPixel.
+	// X negated for direction convention; Y positive because direction flip and NDC-Y-up→screen-Y-down cancel.
+	// Divide by 2 because NDC spans 2 units for full screen width/height.
+	dispatchUpscale.motionVectorScale.x = -static_cast<float>(renderRes.x) / 2.0f;
+    dispatchUpscale.motionVectorScale.y = static_cast<float>(renderRes.y) / 2.0f;
     dispatchUpscale.reset = false;
     dispatchUpscale.enableSharpening = false;
     //dispatchUpscale.sharpness = m_Sharpness;
@@ -379,17 +380,9 @@ void UpscalingManager::EvaluateFSR3(rhi::CommandList& commandList, const Compone
     // Setup camera params as required
     dispatchUpscale.cameraFovAngleVertical = camera->fov;
 
-    bool s_InvertedDepth = false;
-    if (s_InvertedDepth) // TODO: FFX docs says this is preferred. Why?
-    {
-        dispatchUpscale.cameraFar = camera->zNear;
-        dispatchUpscale.cameraNear = FLT_MAX;
-    }
-    else
-    {
-        dispatchUpscale.cameraFar = camera->zFar;
-        dispatchUpscale.cameraNear = camera->zNear;
-    }
+    // Actual physical distances; FFX_UPSCALE_ENABLE_DEPTH_INVERTED handles the reverse-Z layout.
+    dispatchUpscale.cameraNear = camera->zNear;
+    dispatchUpscale.cameraFar = camera->zFar;
 
     ffx::Dispatch(m_fsrUpscalingContext, dispatchUpscale);
 }

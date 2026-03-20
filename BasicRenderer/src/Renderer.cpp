@@ -480,8 +480,8 @@ void Renderer::RunRenderResourceSyncStage() {
             camera.jitterPixelSpace = jitterPixelSpace;
             const auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
             const DirectX::XMFLOAT2 jitterNDC = {
-                (jitterPixelSpace.x / renderRes.x),
-                (jitterPixelSpace.y / renderRes.y)
+                (2.0f * jitterPixelSpace.x / renderRes.x),
+                (-2.0f * jitterPixelSpace.y / renderRes.y)
             };
             camera.jitterNDC = jitterNDC;
             const auto jitterMatrix = DirectX::XMMatrixTranslation(jitterNDC.x, jitterNDC.y, 0.0f);
@@ -809,6 +809,7 @@ void Renderer::SetSettings() {
     m_settingsSubscriptions.push_back(settingsManager.addObserver<UpscalingMode>("upscalingMode", [this](const UpscalingMode& newValue) {
 
         m_preFrameDeferredFunctions.defer([newValue, this]() { // Don't do this during a frame
+            StallPipeline(); // Wait for all GPU work before destroying contexts
             UpscalingManager::GetInstance().Shutdown();
             UpscalingManager::GetInstance().InitFFX(); // Needs device
             UpscalingManager::GetInstance().SetUpscalingMode(newValue);
@@ -818,18 +819,24 @@ void Renderer::SetSettings() {
             FFXManager::GetInstance().InitFFX();
 
             CreateTextures();
+            auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+            m_sceneRenderBridge.ResyncPrimaryCameraDepth(*m_pViewManager, renderRes.x, renderRes.y);
             rebuildRenderGraph = true;
             });
 		}));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<UpscaleQualityMode>("upscalingQualityMode", [this](const UpscaleQualityMode& newValue) {
 
         m_preFrameDeferredFunctions.defer([newValue, this]() { // Don't do this during a frame
+            StallPipeline(); // Wait for all GPU work before destroying contexts
             UpscalingManager::GetInstance().SetUpscalingQualityMode(newValue);
             UpscalingManager::GetInstance().Shutdown();
+            UpscalingManager::GetInstance().InitFFX(); // Recreate FSR context before Setup queries it
             UpscalingManager::GetInstance().Setup();
             FFXManager::GetInstance().Shutdown();
             FFXManager::GetInstance().InitFFX();
             CreateTextures();
+            auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+            m_sceneRenderBridge.ResyncPrimaryCameraDepth(*m_pViewManager, renderRes.x, renderRes.y);
             rebuildRenderGraph = true;
             });
         }));
@@ -1053,8 +1060,8 @@ void Renderer::CreateRTVs() {
 }
 
 void Renderer::OnResize(UINT newWidth, UINT newHeight) {
-    // Wait for the GPU to complete all operations
-	WaitForFrame(m_frameIndex);
+    // Wait for all in-flight GPU work before destroying resources
+	StallPipeline();
 
     // Release the resources tied to the swap chain
     auto numFramesInFlight = getNumFramesInFlight();
@@ -1075,7 +1082,8 @@ void Renderer::OnResize(UINT newWidth, UINT newHeight) {
 
     CreateTextures();
 
-
+    auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+    m_sceneRenderBridge.ResyncPrimaryCameraDepth(*m_pViewManager, renderRes.x, renderRes.y);
 
 	//Rebuild the render graph
 	rebuildRenderGraph = true;
@@ -1807,6 +1815,13 @@ void Renderer::CreateRenderGraph() {
 
     newGraph->RegisterResource(Builtin::PrimaryCamera::DepthTexture, depthTexture);
     newGraph->RegisterResource(Builtin::PrimaryCamera::LinearDepthMap, depth.linearDepthMap);
+    // In visibility rendering (CLod), projected depth is computed by the depth copy pass.
+    // In standard rasterization, the hardware DSV already contains projected depth.
+    if (m_visibilityRendering) {
+        newGraph->RegisterResource(Builtin::PrimaryCamera::ProjectedDepthTexture, depth.projectedDepthMap);
+    } else {
+        newGraph->RegisterResource(Builtin::PrimaryCamera::ProjectedDepthTexture, depthTexture);
+    }
     newGraph->RegisterResource(Builtin::Backbuffer, m_dynamicBackbuffer);
 
     bool useMeshShaders = getMeshShadersEnabled();

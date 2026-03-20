@@ -582,6 +582,26 @@ void PerViewPrimaryDepthCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     RWTexture2D<float> linearDepthTexture = ResourceDescriptorHeap[UintRootConstant1];
     linearDepthTexture[pixel] = depth;
+
+    // Write projected (non-linear) depth for upscalers
+    uint projectedDepthUAVIndex = UintRootConstant4;
+    if (projectedDepthUAVIndex != 0xFFFFFFFF)
+    {
+        float projectedDepth;
+        if (vis == 0xFFFFFFFFFFFFFFFF)
+        {
+            projectedDepth = 0.0; // Reverse-Z far plane
+        }
+        else
+        {
+            // M22 = proj[2][2], M32 = proj[3][2] from the unjittered projection matrix
+            float M22 = FloatRootConstant0;
+            float M32 = FloatRootConstant1;
+            projectedDepth = -M22 + M32 / depth;
+        }
+        RWTexture2D<float> projectedDepthTexture = ResourceDescriptorHeap[projectedDepthUAVIndex];
+        projectedDepthTexture[pixel] = projectedDepth;
+    }
 }
 
 [numthreads(8, 8, 1)]

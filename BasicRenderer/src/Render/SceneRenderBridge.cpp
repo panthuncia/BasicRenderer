@@ -617,4 +617,13 @@ flecs::entity SceneRenderBridge::GetPrimaryCameraEntity() const {
     return flecs::entity{ renderWorld, m_primaryCameraEntityId };
 }
 
+void SceneRenderBridge::ResyncPrimaryCameraDepth(ViewManager& viewManager, uint32_t renderWidth, uint32_t renderHeight) {
+    if (m_primaryCameraEntityId == 0) return;
+    auto& renderWorld = RendererECSManager::GetInstance().GetWorld();
+    auto entity = flecs::entity{ renderWorld, m_primaryCameraEntityId };
+    if (!entity.is_alive() || !entity.has<Components::Camera>()) return;
+    const auto camera = entity.get<Components::Camera>();
+    SyncCameraDerivedState(entity, camera, entity.has<Components::PrimaryCamera>(), viewManager, renderWidth, renderHeight);
+}
+
 } // namespace br::render

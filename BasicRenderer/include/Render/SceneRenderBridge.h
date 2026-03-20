@@ -9,6 +9,7 @@
 #include "Scene/Scene.h"
 
 class ManagerInterface;
+class ViewManager;
 
 namespace br::render {
 
@@ -28,6 +29,7 @@ public:
 
     bool HasPrimaryCamera() const;
     flecs::entity GetPrimaryCameraEntity() const;
+    void ResyncPrimaryCameraDepth(ViewManager& viewManager, uint32_t renderWidth, uint32_t renderHeight);
 
 private:
     void EnsureExportQueries(flecs::world& sceneWorld) const;
