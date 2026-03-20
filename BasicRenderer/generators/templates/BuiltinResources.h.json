@@ -110,6 +110,7 @@
     },
     "ActiveDrawSetIndices": {},
     "BRDFLUT": {},
-    "DebugTexture": {}
+    "DebugTexture": {},
+    "DebugVisualization": {}
   }
 }

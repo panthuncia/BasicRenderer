@@ -7,6 +7,7 @@
 #include "include/visibilityPacking.hlsli"
 #include "include/clodStructs.hlsli"
 #include "include/clodPageAccess.hlsli"
+#include "include/debugPayload.hlsli"
 
 #define CLOD_COMPRESSED_POSITIONS 1u
 #define CLOD_COMPRESSED_NORMALS 4u
@@ -504,15 +505,52 @@ void EvaluateGBufferOptimized(uint2 pixel)
     RWTexture2D<float2> motionVectorTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::MotionVectors)];
 
     //Debug meshlets
-    float3 viewDir = normalize(gs_camPos - worldPosition);
-    float4 debugColor = lightUints(md.drawcallAndMeshlet.y, worldNormal, viewDir);
+    //float3 viewDir = normalize(gs_camPos - worldPosition);
+    //float4 debugColor = lightUints(md.drawcallAndMeshlet.y, worldNormal, viewDir);
 
     normalsTexture[pixel].xyz = materialInputs.normalWS;
-    //albedoTexture[pixel] = float4(materialInputs.albedo, materialInputs.ambientOcclusion);
-    albedoTexture[pixel] = float4(debugColor.xyz, materialInputs.ambientOcclusion);
+    albedoTexture[pixel] = float4(materialInputs.albedo, materialInputs.ambientOcclusion);
+    //albedoTexture[pixel] = float4(debugColor.xyz, materialInputs.ambientOcclusion);
     emissiveTexture[pixel].xyz = materialInputs.emissive;
     metallicRoughnessTexture[pixel] = float2(materialInputs.metallic, materialInputs.roughness);
     motionVectorTexture[pixel] = motionVector;
+
+    // Debug visualization writes
+    ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
+    uint outputType = perFrame.outputType;
+    if (outputType != OUTPUT_COLOR) {
+        RWTexture2D<uint2> debugVisTex = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::DebugVisualization)];
+        uint2 payload = uint2(DEBUG_SENTINEL, DEBUG_SENTINEL);
+        switch (outputType) {
+            case OUTPUT_NORMAL:
+                payload = PackDebugFloat3(materialInputs.normalWS * 0.5 + 0.5);
+                break;
+            case OUTPUT_ALBEDO:
+                payload = PackDebugFloat3(materialInputs.albedo);
+                break;
+            case OUTPUT_METALLIC:
+                payload = PackDebugFloat3(materialInputs.metallic.xxx);
+                break;
+            case OUTPUT_ROUGHNESS:
+                payload = PackDebugFloat3(materialInputs.roughness.xxx);
+                break;
+            case OUTPUT_EMISSIVE:
+                payload = PackDebugFloat3(materialInputs.emissive);
+                break;
+            case OUTPUT_AO:
+                payload = PackDebugFloat3(materialInputs.ambientOcclusion.xxx);
+                break;
+            case OUTPUT_MESHLETS:
+                payload = PackDebugUint(md.drawcallAndMeshlet.y);
+                break;
+            case OUTPUT_MODEL_NORMALS:
+                payload = PackDebugFloat3(normalOS * 0.5 + 0.5);
+                break;
+        }
+        if (payload.x != DEBUG_SENTINEL) {
+            WriteDebugPixel(debugVisTex, pixel, payload);
+        }
+    }
 }
 
 [numthreads(8, 8, 1)]

@@ -6,6 +6,7 @@
 #include "include/lighting.hlsli"
 #include "include/gammaCorrection.hlsli"
 #include "include/outputTypes.hlsli"
+#include "include/debugPayload.hlsli"
 
 [numthreads(8, 8, 1)]
 void DeferredCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -58,43 +59,38 @@ void DeferredCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     RWTexture2D<float4> hdrTarget = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Color::HDRColorTarget)];
     
-    float4 outColor;
-    switch (perFrameBuffer.outputType)
-    {
-        case OUTPUT_COLOR:
-            outColor = float4(lighting, 1.0);
-            break;
-        case OUTPUT_NORMAL:
-            outColor = float4(fragmentInfo.normalWS * 0.5 + 0.5, 1.0);
-            break;
-        case OUTPUT_ALBEDO:
-            outColor = float4(fragmentInfo.albedo.rgb, 1.0);
-            break;
-        case OUTPUT_METALLIC:
-            outColor = float4(fragmentInfo.metallic.xxx, 1.0);
-            break;
-        case OUTPUT_ROUGHNESS:
-            outColor = float4(fragmentInfo.roughness.xxx, 1.0);
-            break;
-        case OUTPUT_EMISSIVE:
-            outColor = float4(fragmentInfo.emissive.rgb, 1.0);
-            break;
-        case OUTPUT_AO:
-            outColor = float4(fragmentInfo.diffuseAmbientOcclusion.xxx, 1.0);
-            break;
-        case OUTPUT_DEPTH:{
+    // Always write lighting to HDR target
+    hdrTarget[pixel] = float4(lighting, 1.0);
+
+    // Write debug payload for lighting-derived modes
+    if (perFrameBuffer.outputType != OUTPUT_COLOR) {
+        RWTexture2D<uint2> debugVisTex = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::DebugVisualization)];
+        uint2 payload = uint2(DEBUG_SENTINEL, DEBUG_SENTINEL);
+        switch (perFrameBuffer.outputType) {
+            case OUTPUT_DEPTH: {
                 float scaledDepth = abs(linearZ) * 0.1;
-                outColor = float4(scaledDepth.xxx, 1.0);
+                payload = PackDebugFloat3(scaledDepth.xxx);
                 break;
             }
 #if defined(PSO_IMAGE_BASED_LIGHTING)
-        case OUTPUT_DIFFUSE_IBL:      outColor = float4(lightingOutput.diffuseIBL.rgb, 1.0); break;
-        case OUTPUT_SPECULAR_IBL:     outColor = float4(lightingOutput.specularIBL.rgb, 1.0); break;
+            case OUTPUT_DIFFUSE_IBL:
+                payload = PackDebugFloat3(lightingOutput.diffuseIBL.rgb);
+                break;
+            case OUTPUT_SPECULAR_IBL:
+                payload = PackDebugFloat3(lightingOutput.specularIBL.rgb);
+                break;
 #endif
-        default:
-            outColor = float4(1, 0, 0, 1);
-            break;
+#if defined(PSO_CLUSTERED_LIGHTING)
+            case OUTPUT_LIGHT_CLUSTER_ID:
+                payload = PackDebugUint(lightingOutput.clusterIndex);
+                break;
+            case OUTPUT_LIGHT_CLUSTER_LIGHT_COUNT:
+                payload = PackDebugUint(lightingOutput.clusterLightCount);
+                break;
+#endif
+        }
+        if (payload.x != DEBUG_SENTINEL) {
+            WriteDebugPixel(debugVisTex, pixel, payload);
+        }
     }
-
-    hdrTarget[pixel] = outColor;
 }

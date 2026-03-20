@@ -35,7 +35,8 @@ public:
 			Builtin::PrimaryCamera::LinearDepthMap,
 			Builtin::Environment::CurrentCubemap,
 			Builtin::Shadows::ShadowMaps)
-			.WithUnorderedAccess(Builtin::Color::HDRColorTarget);
+			.WithUnorderedAccess(Builtin::Color::HDRColorTarget,
+				Builtin::DebugVisualization);
 
 		if (m_clusteredLightingEnabled) {
 			builder->WithShaderResource(Builtin::Light::ClusterBuffer, Builtin::Light::PagesBuffer);
@@ -71,6 +72,7 @@ public:
 		RegisterSRV(Builtin::PrimaryCamera::LinearDepthMap);
 
 		RegisterUAV(Builtin::Color::HDRColorTarget);
+		RegisterUAV(Builtin::DebugVisualization);
 	}
 
 	PassReturn Execute(PassExecutionContext& executionContext) override {

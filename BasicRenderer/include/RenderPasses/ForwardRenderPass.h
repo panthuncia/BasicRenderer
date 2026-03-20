@@ -78,6 +78,7 @@ public:
             .WithRenderTarget(Builtin::Color::HDRColorTarget)
             .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
             .IsGeometryPass();
+        builder->WithUnorderedAccess(Builtin::DebugVisualization);
         if (m_clusteredLightingEnabled) {
             builder->WithShaderResource(Builtin::Light::ClusterBuffer, Builtin::Light::PagesBuffer);
         }
@@ -135,6 +136,8 @@ public:
         RegisterSRV(Builtin::Light::SpotLightMatrixBuffer);
         RegisterSRV(Builtin::Light::DirectionalLightCascadeBuffer);
         RegisterSRV(Builtin::Environment::InfoBuffer);
+
+        RegisterUAV(Builtin::DebugVisualization);
 
         //if (m_meshShaders)
             //m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);

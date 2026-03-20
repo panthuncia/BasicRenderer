@@ -107,6 +107,26 @@ void CreateGBufferResources(RenderGraph* graph) {
     graph->RegisterResource(Builtin::GBuffer::Emissive, emissive);
 }
 
+void CreateDebugVisualizationResources(RenderGraph* graph) {
+    auto resolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+
+    TextureDescription debugVisDesc;
+    debugVisDesc.channels = 2;
+    debugVisDesc.format = rhi::Format::R32G32_UInt;
+    debugVisDesc.hasUAV = true;
+    debugVisDesc.uavFormat = rhi::Format::R32G32_UInt;
+    debugVisDesc.hasSRV = true;
+    debugVisDesc.srvFormat = rhi::Format::R32G32_UInt;
+    debugVisDesc.hasNonShaderVisibleUAV = true;
+    debugVisDesc.allowAlias = true;
+    ImageDimensions debugVisDims = { resolution.x, resolution.y, 0, 0 };
+    debugVisDesc.imageDimensions.push_back(debugVisDims);
+    auto debugVisTex = PixelBuffer::CreateSharedUnmaterialized(debugVisDesc);
+    debugVisTex->SetName("Debug Visualization");
+    rg::memory::SetResourceUsageHint(*debugVisTex, "Debug");
+    graph->RegisterResource(Builtin::DebugVisualization, debugVisTex);
+}
+
 void BuildBRDFIntegrationPass(RenderGraph* graph) {
 	TextureDescription brdfDesc;
     brdfDesc.arraySize = 1;

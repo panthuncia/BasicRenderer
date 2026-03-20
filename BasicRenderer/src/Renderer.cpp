@@ -43,6 +43,7 @@
 #include "RenderPasses/PostProcessing/luminanceHistogram.h"
 #include "RenderPasses/PostProcessing/luminanceHistogramAverage.h"
 #include "RenderPasses/ClearVisibilityBufferPass.h"
+#include "RenderPasses/PostProcessing/DebugResolvePass.h"
 #include "Resources/TextureDescription.h"
 #include "Menu/Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -1845,6 +1846,8 @@ void Renderer::CreateRenderGraph() {
 
     CreateGBufferResources(newGraph.get());
 
+    CreateDebugVisualizationResources(newGraph.get());
+
     if (m_visibilityRendering) {
         newGraph->BuildRenderPass("ClearVisibilityBufferPass")
             .Build<ClearVisibilityBufferPass>();
@@ -1944,6 +1947,9 @@ void Renderer::CreateRenderGraph() {
 
     newGraph->BuildRenderPass("TonemappingPass")
         .Build<TonemappingPass>();
+
+    newGraph->BuildRenderPass("DebugResolvePass")
+        .Build<DebugResolvePass>();
 
     debugPassBuilder.Build<DebugRenderPass>();
 	if (m_coreResourceProvider.m_currentDebugTexture != nullptr) {

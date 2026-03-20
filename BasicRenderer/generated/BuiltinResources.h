@@ -35,6 +35,7 @@ struct Builtin {
   };
   inline static constexpr std::string_view CullingCameraBuffer = "Builtin::CullingCameraBuffer";
   inline static constexpr std::string_view DebugTexture = "Builtin::DebugTexture";
+  inline static constexpr std::string_view DebugVisualization = "Builtin::DebugVisualization";
   struct Environment {
     inline static constexpr std::string_view CurrentCubemap = "Builtin::Environment::CurrentCubemap";
     inline static constexpr std::string_view CurrentPrefilteredCubemap = "Builtin::Environment::CurrentPrefilteredCubemap";
