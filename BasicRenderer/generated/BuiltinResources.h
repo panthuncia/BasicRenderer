@@ -6,6 +6,7 @@
 struct Builtin {
   inline static constexpr std::string_view ActiveDrawSetIndices = "Builtin::ActiveDrawSetIndices";
   inline static constexpr std::string_view BRDFLUT = "Builtin::BRDFLUT";
+  inline static constexpr std::string_view Backbuffer = "Builtin::Backbuffer";
   struct CLod {
     inline static constexpr std::string_view GroupChunks = "Builtin::CLod::GroupChunks";
     inline static constexpr std::string_view GroupPageMap = "Builtin::CLod::GroupPageMap";

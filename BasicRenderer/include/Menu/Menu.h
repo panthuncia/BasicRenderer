@@ -235,7 +235,7 @@ public:
     static Menu& GetInstance();
 
     void Initialize(HWND hwnd, IDXGISwapChain3* swapChain);
-    void Render(RenderContext& context, rhi::CommandList commandList);
+    void Render(const RenderContext& context, rhi::CommandList commandList);
     bool HandleInput(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 	void SetRenderGraph(RenderGraph* renderGraph) { m_renderGraph = renderGraph; }
     void Cleanup() {
@@ -699,7 +699,7 @@ static bool PassUsesResourceAdapter(const void* passAndRes, uint64_t resourceId,
     }
 }
 
-inline void Menu::Render(RenderContext& context, rhi::CommandList commandList) {
+inline void Menu::Render(const RenderContext& context, rhi::CommandList commandList) {
     m_sceneOverlapStatus = context.sceneOverlapStatus;
 
 	ImGui_ImplDX12_NewFrame();

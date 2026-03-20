@@ -27,6 +27,8 @@ public:
             Builtin::CameraBuffer)
             .WithRenderTarget(Builtin::Color::HDRColorTarget);
 
+        builder->WithUnorderedAccess(Builtin::DebugVisualization);
+
         if (m_gtaoEnabled) {
             builder->WithShaderResource(Builtin::GTAO::OutputAOTerm);
         }
@@ -47,6 +49,7 @@ public:
 		RegisterSRV(Builtin::PrimaryCamera::DepthTexture);
 		RegisterSRV(Builtin::CameraBuffer);
 		RegisterSRV(Builtin::PostProcessing::ScreenSpaceReflections);
+		RegisterUAV(Builtin::DebugVisualization);
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override {

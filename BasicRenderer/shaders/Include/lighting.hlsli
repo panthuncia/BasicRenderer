@@ -169,6 +169,8 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
 #endif // IMAGE_BASED_LIGHTING
 
     // Direct lighting
+    uint clusterIndex = 0; // Which light cluster this fragment belongs to
+    uint clusterLightCount = 0; // Number of lights in the cluster
         
     if (enablePunctualLights)
     {
@@ -201,9 +203,6 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
         
         StructuredBuffer<unsigned int> activeLightIndices = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::ActiveLightIndices)];
         StructuredBuffer<LightInfo> lights = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Light::InfoBuffer)];
-        
-        uint clusterIndex = 0; // Which light cluster this fragment belongs to
-        uint clusterLightCount = 0; // Number of lights in the cluster
 
 #if defined(PSO_CLUSTERED_LIGHTING)
         
@@ -300,6 +299,10 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
     output.diffuseIBL = debugDiffuse;
     output.specularIBL = debugSpecular;
 #endif // IMAGE_BASED_LIGHTING
+#if defined(PSO_CLUSTERED_LIGHTING)
+    output.clusterIndex = clusterIndex;
+    output.clusterLightCount = clusterLightCount;
+#endif
     return output;
 }
 

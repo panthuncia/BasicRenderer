@@ -3,6 +3,7 @@
 #include "fullscreenVS.hlsli"
 #include "include/IBL.hlsli"
 #include "include/utilities.hlsli"
+#include "include/debugPayload.hlsli"
 
 // UintRootConstant0 is screen-space reflection SRV
 // UintRootConstan1 is depth texture SRV
@@ -49,5 +50,11 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
     GetFragmentInfoScreenSpace(input.position.xy, viewDirWS, positionVS, positionWS, enableGTAO, fragmentInfo);
     
     float3 specularIBL = evaluateSpecularIBLFromSSR(reflectionColor.rgb, fragmentInfo.normalWS, fragmentInfo.normalWS, fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.F0, fragmentInfo.roughness, fragmentInfo.perceptualRoughness, fragmentInfo.NdotV);
+
+    if (perFrameBuffer.outputType == OUTPUT_SPECULAR_IBL) {
+        RWTexture2D<uint2> debugVisTex = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::DebugVisualization)];
+        WriteDebugPixel(debugVisTex, screenAddress, PackDebugFloat3(specularIBL));
+    }
+
     return float4(specularIBL, 1.0);
 }

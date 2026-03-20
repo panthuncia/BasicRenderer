@@ -67,6 +67,9 @@ void DeferredCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         RWTexture2D<uint2> debugVisTex = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::DebugVisualization)];
         uint2 payload = uint2(DEBUG_SENTINEL, DEBUG_SENTINEL);
         switch (perFrameBuffer.outputType) {
+            case OUTPUT_AO:
+                payload = PackDebugFloat3(fragmentInfo.diffuseAmbientOcclusion.xxx);
+                break;
             case OUTPUT_DEPTH: {
                 float scaledDepth = abs(linearZ) * 0.1;
                 payload = PackDebugFloat3(scaledDepth.xxx);

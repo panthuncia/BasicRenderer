@@ -44,6 +44,7 @@
 #include "RenderPasses/PostProcessing/luminanceHistogramAverage.h"
 #include "RenderPasses/ClearVisibilityBufferPass.h"
 #include "RenderPasses/PostProcessing/DebugResolvePass.h"
+#include "RenderPasses/MenuRenderPass.h"
 #include "Resources/TextureDescription.h"
 #include "Menu/Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -69,6 +70,8 @@
 #include "RenderPasses/DebugGridPass.h"
 #include "Render/GraphExtensions/ReadbackCaptureExtension.h"
 #include "Resources/Resource.h"
+#include "Resources/DynamicResource.h"
+#include "Resources/ExternalTextureResource.h"
 #include "Render/MemoryIntrospectionBackend.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "Render/Runtime/UploadPolicyServiceAccess.h"
@@ -943,6 +946,16 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         renderTargets[n] = m_swapChain->Image(n);
     }
 
+    // Wrap swapchain images for render-graph tracking
+    m_backbufferResources.resize(m_numFramesInFlight);
+    for (UINT n = 0; n < m_numFramesInFlight; n++) {
+        m_backbufferResources[n] = std::make_shared<ExternalTextureResource>(
+            renderTargets[n], x_res, y_res);
+        m_backbufferResources[n]->SetName("Backbuffer " + std::to_string(n));
+    }
+    m_dynamicBackbuffer = std::make_shared<DynamicResource>(m_backbufferResources[0]);
+    m_dynamicBackbuffer->SetName("Backbuffer");
+
     CreateRTVs();
 
     // Create command allocator
@@ -1031,6 +1044,11 @@ void Renderer::CreateRTVs() {
         rtvDesc.formatOverride = rhi::Format::R8G8B8A8_UNorm;
         rtvDesc.range = { 0, 1, 0, 1 };
         device.CreateRenderTargetView({ rtvHeap->GetHandle(), n }, renderTargets[n], rtvDesc);
+
+        // Keep external texture wrappers in sync after resize
+        if (n < m_backbufferResources.size() && m_backbufferResources[n]) {
+            m_backbufferResources[n]->SetHandle(renderTargets[n]);
+        }
     }
 }
 
@@ -1354,25 +1372,6 @@ void Renderer::Render() {
     passExecutionContext.frameFenceValue = m_context.frameFenceValue;
     passExecutionContext.deltaTime = m_context.deltaTime;
     passExecutionContext.hostData = &hostFrameData;
-
-    // TODO: Incorporate this into the render graph
-    // Indicate that the back buffer will be used as a render target
-	rhi::TextureBarrier rtvBarrier = {};
-	rtvBarrier.afterAccess = rhi::ResourceAccessType::RenderTarget;
-	rtvBarrier.afterLayout = rhi::ResourceLayout::RenderTarget;
-	rtvBarrier.afterSync = rhi::ResourceSyncState::All;
-	rtvBarrier.beforeAccess = rhi::ResourceAccessType::Common;
-	rtvBarrier.beforeLayout = rhi::ResourceLayout::Common;
-	rtvBarrier.beforeSync = rhi::ResourceSyncState::All;
-
-	rtvBarrier.texture = renderTargets[m_frameIndex];
-    rhi::BarrierBatch batch = {};
-	batch.textures = { &rtvBarrier };
-
-    runCapturedStage("PrepareBackbuffer", [&]() {
-        ZoneScopedN("Renderer::Render::PrepareBackbuffer");
-        commandList->Barriers(batch);
-    });
    
     commandList->End();
 
@@ -1403,18 +1402,13 @@ void Renderer::Render() {
 
     runCapturedStage("RenderGraphExecute", [&]() {
         ZoneScopedN("Renderer::Render::RenderGraphExecute");
+        m_dynamicBackbuffer->SetResource(m_backbufferResources[m_frameIndex]);
         currentRenderGraph->Execute(passExecutionContext); // Main render graph execution
     });
-	
+
+	// Transition backbuffer to Common for present
 	commandList->Recycle(commandAllocator.Get());
-
-    runCapturedStage("Menu", [&]() {
-        ZoneScopedN("Renderer::Render::Menu");
-        Menu::GetInstance().Render(m_context, commandList.Get()); // Render menu
-    });
-
-
-    // Indicate that the back buffer will now be used to present
+	rhi::TextureBarrier rtvBarrier = {};
 	rtvBarrier.afterAccess = rhi::ResourceAccessType::Common;
 	rtvBarrier.afterLayout = rhi::ResourceLayout::Common;
 	rtvBarrier.afterSync = rhi::ResourceSyncState::All;
@@ -1422,11 +1416,16 @@ void Renderer::Render() {
 	rtvBarrier.beforeLayout = rhi::ResourceLayout::RenderTarget;
 	rtvBarrier.beforeSync = rhi::ResourceSyncState::All;
 	rtvBarrier.texture = renderTargets[m_frameIndex];
+	rhi::BarrierBatch batch = {};
 	batch.textures = { &rtvBarrier };
     runCapturedStage("TransitionForPresent", [&]() {
         ZoneScopedN("Renderer::Render::TransitionForPresent");
         commandList->Barriers(batch);
     });
+
+    // Keep the symbolic tracker in sync with the manual barrier above so the
+    // graph emits a Common->RenderTarget transition on the next frame.
+    m_backbufferResources[m_frameIndex]->ResetToCommon();
 
     commandList->End();
 
@@ -1808,6 +1807,7 @@ void Renderer::CreateRenderGraph() {
 
     newGraph->RegisterResource(Builtin::PrimaryCamera::DepthTexture, depthTexture);
     newGraph->RegisterResource(Builtin::PrimaryCamera::LinearDepthMap, depth.linearDepthMap);
+    newGraph->RegisterResource(Builtin::Backbuffer, m_dynamicBackbuffer);
 
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
@@ -1950,6 +1950,9 @@ void Renderer::CreateRenderGraph() {
 
     newGraph->BuildRenderPass("DebugResolvePass")
         .Build<DebugResolvePass>();
+
+    newGraph->BuildRenderPass("MenuRenderPass")
+        .Build<MenuRenderPass>();
 
     debugPassBuilder.Build<DebugRenderPass>();
 	if (m_coreResourceProvider.m_currentDebugTexture != nullptr) {

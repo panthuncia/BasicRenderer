@@ -12,7 +12,8 @@ public:
 	}
 
 	void DeclareResourceUsages(RenderPassBuilder* builder) override {
-		builder->WithShaderResource(Builtin::DebugVisualization, Builtin::CameraBuffer);
+		builder->WithShaderResource(Builtin::DebugVisualization, Builtin::CameraBuffer)
+			.WithRenderTarget(Builtin::Backbuffer);
 	}
 
 	void Setup() override {
