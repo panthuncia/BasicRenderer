@@ -1,10 +1,12 @@
 {
   "Builtin": {
+    "Backbuffer": {},
     "LastFrameLinearDepthMaps": {},
     "PerMaterialDataBuffer": {},
     "PrimaryCamera": {
       "LinearDepthMap": {},
       "DepthTexture": {},
+      "ProjectedDepthTexture": {},
       "VisibilityTexture": {},
       "IndirectCommandBuffers": {
         "Primary": {}
@@ -110,6 +112,7 @@
     },
     "ActiveDrawSetIndices": {},
     "BRDFLUT": {},
-    "DebugTexture": {}
+    "DebugTexture": {},
+    "DebugVisualization": {}
   }
 }

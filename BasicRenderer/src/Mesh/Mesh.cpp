@@ -54,6 +54,7 @@ namespace
 		ClusterLODRuntimeSummary summary{};
 		summary.groupChunkHints.resize(groups.size());
 		summary.parentGroupByLocal.assign(groups.size(), -1);
+		summary.groupErrorByLocal.resize(groups.size(), 0.0f);
 		summary.firstGroupVertexByLocal.resize(groups.size(), 0u);
 
 		if (groups.empty()) {
@@ -64,17 +65,13 @@ namespace
 		for (size_t groupIndex = 0; groupIndex < groups.size(); ++groupIndex) {
 			const auto& group = groups[groupIndex];
 			summary.firstGroupVertexByLocal[groupIndex] = group.firstGroupVertex;
+			summary.groupErrorByLocal[groupIndex] = group.bounds.error;
 			if (groupIndex < groupChunks.size()) {
 				const auto& chunk = groupChunks[groupIndex];
 				auto& hint = summary.groupChunkHints[groupIndex];
 				hint.groupVertexCount = chunk.groupVertexCount;
-				hint.meshletVertexCount = chunk.meshletVertexCount;
 				hint.meshletCount = chunk.meshletCount;
 				hint.meshletTrianglesByteCount = chunk.meshletTrianglesByteCount;
-				hint.meshletBoundsCount = chunk.meshletBoundsCount;
-				hint.compressedPositionWordCount = chunk.compressedPositionWordCount;
-				hint.compressedNormalWordCount = chunk.compressedNormalWordCount;
-				hint.compressedMeshletVertexWordCount = chunk.compressedMeshletVertexWordCount;
 				hint.segmentCount = group.segmentCount;
 				hint.pageCount = group.pageCount;
 			}
@@ -82,7 +79,6 @@ namespace
 				auto& hint = summary.groupChunkHints[groupIndex];
 				hint.groupVertexCount = group.groupVertexCount;
 				hint.meshletCount = group.meshletCount;
-				hint.meshletBoundsCount = group.meshletCount;
 				hint.segmentCount = group.segmentCount;
 				hint.pageCount = group.pageCount;
 			}
@@ -232,7 +228,6 @@ void Mesh::ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data)
 		for (size_t groupIndex = 0; groupIndex < m_clodGroups.size(); ++groupIndex) {
 			m_clodGroupChunks[groupIndex].groupVertexCount = m_clodGroups[groupIndex].groupVertexCount;
 			m_clodGroupChunks[groupIndex].meshletCount = m_clodGroups[groupIndex].meshletCount;
-			m_clodGroupChunks[groupIndex].meshletBoundsCount = m_clodGroups[groupIndex].meshletCount;
 		}
 	}
 	m_clodRuntimeSummary = BuildRuntimeSummary(m_clodGroups, m_clodSegments, m_clodGroupChunks);
@@ -276,7 +271,6 @@ void Mesh::AdoptCLodDiskStreamingMetadata(const ClusterLODPrebuiltData& data)
 		for (size_t groupIndex = 0; groupIndex < m_clodGroups.size(); ++groupIndex) {
 			m_clodGroupChunks[groupIndex].groupVertexCount = m_clodGroups[groupIndex].groupVertexCount;
 			m_clodGroupChunks[groupIndex].meshletCount = m_clodGroups[groupIndex].meshletCount;
-			m_clodGroupChunks[groupIndex].meshletBoundsCount = m_clodGroups[groupIndex].meshletCount;
 		}
 	}
 

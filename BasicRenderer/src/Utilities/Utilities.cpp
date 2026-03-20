@@ -1488,10 +1488,31 @@ Components::DepthMap CreateDepthMapComponent(unsigned int xRes, unsigned int yRe
     std::shared_ptr<PixelBuffer> linearDepthBuffer = PixelBuffer::CreateShared(downsampledDesc);
     linearDepthBuffer->SetName("linear Depth Buffer");
 
+	// Projected (non-linear) depth for upscalers — R32_Float with UAV+SRV, same resolution as depth buffer
+	TextureDescription projectedDesc;
+	ImageDimensions projDims;
+	projDims.width = xRes;
+	projDims.height = yRes;
+	projectedDesc.imageDimensions.push_back(projDims);
+	projectedDesc.format = rhi::Format::R32_Float;
+	projectedDesc.arraySize = arraySize;
+	projectedDesc.isArray = arraySize > 1;
+	projectedDesc.hasDSV = false;
+	projectedDesc.hasSRV = true;
+	projectedDesc.hasUAV = true;
+	projectedDesc.isCubemap = isCubemap;
+	projectedDesc.channels = 1;
+	projectedDesc.srvFormat = rhi::Format::R32_Float;
+	projectedDesc.uavFormat = rhi::Format::R32_Float;
+	projectedDesc.generateMipMaps = false;
+
+	std::shared_ptr<PixelBuffer> projectedDepthBuffer = PixelBuffer::CreateShared(projectedDesc);
+	projectedDepthBuffer->SetName("Projected Depth Buffer");
 
 	Components::DepthMap depthMap;
 	depthMap.depthMap = depthBuffer;
 	depthMap.linearDepthMap = linearDepthBuffer;
+	depthMap.projectedDepthMap = projectedDepthBuffer;
 
 	return depthMap;
 }

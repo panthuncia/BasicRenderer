@@ -113,6 +113,8 @@ target_link_libraries(resource_codegen
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp")
 add_executable (${PROJECT_NAME} WIN32  ${SOURCES})
 
+target_precompile_headers(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/pch.h")
+
 if (CMAKE_VERSION VERSION_GREATER 3.14)
   set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
 endif()
@@ -227,7 +229,7 @@ function(add_symlink_or_copy_per_config source destination IS_DIRECTORY target_n
     if (IS_DIRECTORY)
         add_custom_target(
             "${target_name}_sync" ALL
-            COMMENT "Syncing directory ${destination} ← ${source}"
+            COMMENT "Syncing directory ${destination} <- ${source}"
             VERBATIM
             COMMAND ${CMAKE_COMMAND} -E remove_directory "${destination}"
             COMMAND ${CMAKE_COMMAND} -E $<IF:$<CONFIG:Release>,copy_directory,create_symlink> "${source}" "${destination}"
@@ -235,7 +237,7 @@ function(add_symlink_or_copy_per_config source destination IS_DIRECTORY target_n
     else()
         add_custom_target(
             "${target_name}_sync" ALL
-            COMMENT "Syncing file ${destination} ← ${source}"
+            COMMENT "Syncing file ${destination} <- ${source}"
             VERBATIM
             COMMAND ${CMAKE_COMMAND} -E remove "${destination}"
             COMMAND ${CMAKE_COMMAND} -E $<IF:$<CONFIG:Release>,copy,create_symlink> "${source}" "${destination}"

@@ -6,8 +6,7 @@
 
 class ClearVisibilityBufferPass : public RenderPass {
 public:
-	ClearVisibilityBufferPass() {
-	}
+	ClearVisibilityBufferPass() {}
 
 	void DeclareResourceUsages(RenderPassBuilder* builder) override {
 		builder->WithUnorderedAccess(Builtin::PrimaryCamera::VisibilityTexture,
@@ -18,6 +17,7 @@ public:
 			Builtin::GBuffer::MotionVectors,
 			Builtin::Color::HDRColorTarget);
 		builder->WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture);
+		builder->WithUnorderedAccess(Builtin::DebugVisualization);
 	}
 
 	void Setup() override {
@@ -29,6 +29,7 @@ public:
 		m_motionVectors = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::MotionVectors);
 		m_HDRColorTarget = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::Color::HDRColorTarget);
 		m_depthTexture = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::PrimaryCamera::DepthTexture);
+		m_debugVisualization = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::DebugVisualization);
 	}
 
 	PassReturn Execute(PassExecutionContext& executionContext) override {
@@ -86,6 +87,18 @@ public:
 		clearResource(m_motionVectors);
 		clearResource(m_HDRColorTarget); // TODO: Only needed because of non-zero initialized memory issue- make a clear manager instead?
 		clearDepth(m_depthTexture); // same
+
+		// Clear debug visualization texture to sentinel (0xFFFFFFFF)
+		{
+			rhi::UavClearInfo debugClearInfo{};
+			debugClearInfo.cpuVisible = m_debugVisualization->GetUAVNonShaderVisibleInfo(0).slot;
+			debugClearInfo.shaderVisible = m_debugVisualization->GetUAVShaderVisibleInfo(0).slot;
+			debugClearInfo.resource = m_debugVisualization->GetAPIResource();
+			rhi::UavClearUint debugClearValue{};
+			debugClearValue.v[0] = 0xFFFFFFFF;
+			debugClearValue.v[1] = 0xFFFFFFFF;
+			commandList.ClearUavUint(debugClearInfo, debugClearValue);
+		}
 		return {};
 	}
 
@@ -102,4 +115,5 @@ private:
 	GloballyIndexedResource* m_motionVectors;
 	GloballyIndexedResource* m_HDRColorTarget;
 	GloballyIndexedResource* m_depthTexture;
+	GloballyIndexedResource* m_debugVisualization;
 };

@@ -67,8 +67,9 @@ public:
                 Builtin::GBuffer::Albedo,
                 Builtin::GBuffer::Emissive,
                 Builtin::GBuffer::MetallicRoughness,
-                Builtin::GBuffer::MotionVectors)
-            .WithIndirectArguments("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
+                Builtin::GBuffer::MotionVectors,
+                Builtin::DebugVisualization);
+        b->WithIndirectArguments("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }
 
     void Setup() override {
@@ -95,6 +96,7 @@ public:
         RegisterUAV(Builtin::GBuffer::Emissive);
         RegisterUAV(Builtin::GBuffer::MetallicRoughness);
 		RegisterUAV(Builtin::GBuffer::MotionVectors);
+        RegisterUAV(Builtin::DebugVisualization);
 
         std::vector<GloballyIndexedResource*> visibleClusterResources;
         m_visibleClustersQuery.each([&](flecs::entity e) {

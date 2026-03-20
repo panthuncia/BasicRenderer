@@ -30,9 +30,12 @@
 // Raster pass
 #define CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX UintRootConstant10 // aliased
 
-// Work graph telemetry
+// Work graph flags
 #define CLOD_WORKGRAPH_TELEMETRY_DESCRIPTOR_INDEX UintRootConstant10 // aliased
-#define CLOD_WORKGRAPH_TELEMETRY_ENABLED UintRootConstant9 // aliased
+#define CLOD_WORKGRAPH_FLAGS UintRootConstant9 // aliased
+
+#define CLOD_WORKGRAPH_FLAG_TELEMETRY_ENABLED (1u << 0)
+#define CLOD_WORKGRAPH_FLAG_OCCLUSION_ENABLED (1u << 1)
 
 // Work graph occlusion replay resources (hierarchical culling pass)
 #define CLOD_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX UintRootConstant5 // aliased

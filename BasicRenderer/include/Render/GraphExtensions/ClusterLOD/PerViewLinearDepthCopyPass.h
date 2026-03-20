@@ -2,6 +2,8 @@
 
 #include "RenderPasses/Base/ComputePass.h"
 
+class PixelBuffer;
+
 class PerViewLinearDepthCopyPass : public ComputePass {
 public:
     PerViewLinearDepthCopyPass();
@@ -13,4 +15,5 @@ public:
 
 private:
     PipelineState m_pso;
+    PixelBuffer* m_pProjectedDepthTexture = nullptr;
 };

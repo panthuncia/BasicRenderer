@@ -17,17 +17,6 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     TraverseNodesRejectedByErrorRecords,
     TraverseNodesActiveChildThreads,
     TraverseNodesTraverseRecordsEmitted,
-    TraverseNodesGroupRecordsEmitted,
-
-    GroupEvaluateThreads,
-    GroupEvaluateGroupRecords,
-    GroupEvaluateCulledGroupRecords,
-    GroupEvaluateRejectedByErrorRecords,
-    GroupEvaluateActiveChildThreads,
-    GroupEvaluateEmitBucketThreads,
-    GroupEvaluateRefinedTraversalThreads,
-    GroupEvaluateNonResidentRefinedChildThreads,
-    GroupEvaluateNonResidentFallbackBucketThreads,
 
     ClusterCullThreads,
     ClusterCullInRangeThreads,
@@ -48,35 +37,29 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     TraverseNodesCoalescedInputCount7,
     TraverseNodesCoalescedInputCount8,
 
-    GroupEvaluateCoalescedLaunches,
-    GroupEvaluateCoalescedInputRecords,
-    GroupEvaluateCoalescedInputCount1,
-    GroupEvaluateCoalescedInputCount2,
-    GroupEvaluateCoalescedInputCount3,
-    GroupEvaluateCoalescedInputCount4,
-    GroupEvaluateCoalescedInputCount5,
-    GroupEvaluateCoalescedInputCount6,
-    GroupEvaluateCoalescedInputCount7,
-    GroupEvaluateCoalescedInputCount8,
-
     Phase1OcclusionNodeReplayEnqueueAttempts,
-    Phase1OcclusionGroupReplayEnqueueAttempts,
     Phase1OcclusionClusterReplayEnqueueAttempts,
 
-    Phase2ReplayNodeGroupLaunches,
-    Phase2ReplayNodeGroupInputRecords,
+    Phase2ReplayNodeLaunches,
     Phase2ReplayNodeInputRecords,
-    Phase2ReplayGroupInputRecords,
     Phase2ReplayNodeRecordsEmitted,
-    Phase2ReplayGroupRecordsEmitted,
 
     Phase2ReplayMeshletLaunches,
     Phase2ReplayMeshletInputRecords,
     Phase2ReplayMeshletBucketRecordsEmitted,
 
     Phase2ReplayTraverseRecordsConsumed,
-    Phase2ReplayGroupRecordsConsumed,
     Phase2ReplayClusterBucketRecordsConsumed,
+
+    TraverseNodesSegmentRecordsEmitted,
+
+    SegmentEvaluateThreads,
+    SegmentEvaluateSegmentRecords,
+    SegmentEvaluateEmitBucketThreads,
+    SegmentEvaluateRefinedTraversalThreads,
+    SegmentEvaluateNonResidentRefinedChildThreads,
+    SegmentEvaluateCoalescedLaunches,
+    SegmentEvaluateCoalescedInputRecords,
 
     Count
 };

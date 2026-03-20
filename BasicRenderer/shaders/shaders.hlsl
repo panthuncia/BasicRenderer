@@ -7,6 +7,7 @@
 #include "include/gammaCorrection.hlsli"
 #include "include/outputTypes.hlsli"
 #include "include/materialFlags.hlsli"
+#include "include/debugPayload.hlsli"
 #include "fullscreenVS.hlsli"
 
 PSInput VSMain(uint vertexID : SV_VertexID) {
@@ -227,45 +228,63 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
     
     float3 lighting = lightingOutput.lighting;
     
-    switch (perFrameBuffer.outputType) {
-        case OUTPUT_COLOR:
-            return float4(lighting, 1.0);
-        case OUTPUT_NORMAL: // Normal
-            return float4(fragmentInfo.normalWS * 0.5 + 0.5, 1.0);
-        case OUTPUT_ALBEDO:
-            return float4(fragmentInfo.albedo.rgb, 1.0);
-        case OUTPUT_METALLIC:
-            return float4(fragmentInfo.metallic, fragmentInfo.metallic, fragmentInfo.metallic, 1.0);
-        case OUTPUT_ROUGHNESS:
-            return float4(fragmentInfo.roughness, fragmentInfo.roughness, fragmentInfo.roughness, 1.0);
-        case OUTPUT_EMISSIVE:
-            return float4(fragmentInfo.emissive.rgb, 1.0);
-        case OUTPUT_AO:
-            return float4(fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.diffuseAmbientOcclusion, fragmentInfo.diffuseAmbientOcclusion, 1.0);
-        case OUTPUT_DEPTH:{
-                float depth = abs(input.positionViewSpace.z)*0.1;
-                return float4(depth, depth, depth, 1.0);
+    // Write debug payload when not in COLOR mode
+    if (perFrameBuffer.outputType != OUTPUT_COLOR) {
+        RWTexture2D<uint2> debugVisTex = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::DebugVisualization)];
+        uint2 pixel = uint2(input.position.xy);
+        uint2 payload = uint2(DEBUG_SENTINEL, DEBUG_SENTINEL);
+        switch (perFrameBuffer.outputType) {
+            case OUTPUT_NORMAL:
+                payload = PackDebugFloat3(fragmentInfo.normalWS * 0.5 + 0.5);
+                break;
+            case OUTPUT_ALBEDO:
+                payload = PackDebugFloat3(fragmentInfo.albedo.rgb);
+                break;
+            case OUTPUT_METALLIC:
+                payload = PackDebugFloat3(fragmentInfo.metallic.xxx);
+                break;
+            case OUTPUT_ROUGHNESS:
+                payload = PackDebugFloat3(fragmentInfo.roughness.xxx);
+                break;
+            case OUTPUT_EMISSIVE:
+                payload = PackDebugFloat3(fragmentInfo.emissive.rgb);
+                break;
+            case OUTPUT_AO:
+                payload = PackDebugFloat3(fragmentInfo.diffuseAmbientOcclusion.xxx);
+                break;
+            case OUTPUT_DEPTH: {
+                float depth = abs(input.positionViewSpace.z) * 0.1;
+                payload = PackDebugFloat3(depth.xxx);
+                break;
             }
 #if defined(PSO_IMAGE_BASED_LIGHTING)
-        case OUTPUT_DIFFUSE_IBL:
-            return float4(lightingOutput.diffuseIBL.rgb, 1.0);
-        case OUTPUT_SPECULAR_IBL:
-            return float4(lightingOutput.specularIBL.rgb, 1.0);
-#endif // IMAGE_BASED_LIGHTING
-        case OUTPUT_MESHLETS:{
-                return lightUints(input.meshletIndex, fragmentInfo.normalWS, viewDir);
-            }
-        case OUTPUT_MODEL_NORMALS:{
-                return float4(input.normalModelSpace * 0.5 + 0.5, 1.0);
-            }
-//        case OUTPUT_LIGHT_CLUSTER_ID:{
-//                return lightUints(lightingOutput.clusterID, lightingOutput.normalWS, lightingOutput.viewDir);
-//            }
-//        case OUTPUT_LIGHT_CLUSTER_LIGHT_COUNT:{
-//                return lightUints(lightingOutput.clusterLightCount, lightingOutput.normalWS, lightingOutput.viewDir);
-//            }
-        default:
-            return float4(1.0, 0.0, 0.0, 1.0);
+            case OUTPUT_DIFFUSE_IBL:
+                payload = PackDebugFloat3(lightingOutput.diffuseIBL.rgb);
+                break;
+            case OUTPUT_SPECULAR_IBL:
+                payload = PackDebugFloat3(lightingOutput.specularIBL.rgb);
+                break;
+#endif
+#if defined(PSO_CLUSTERED_LIGHTING)
+            case OUTPUT_LIGHT_CLUSTER_ID:
+                payload = PackDebugUint(lightingOutput.clusterIndex);
+                break;
+            case OUTPUT_LIGHT_CLUSTER_LIGHT_COUNT:
+                payload = PackDebugUint(lightingOutput.clusterLightCount);
+                break;
+#endif
+            case OUTPUT_MESHLETS:
+                payload = PackDebugUint(input.meshletIndex);
+                break;
+            case OUTPUT_MODEL_NORMALS:
+                payload = PackDebugFloat3(input.normalModelSpace * 0.5 + 0.5);
+                break;
+        }
+        if (payload.x != DEBUG_SENTINEL) {
+            WriteDebugPixel(debugVisTex, pixel, payload);
+        }
     }
+
+    return float4(lighting, 1.0);
 #endif // PSO_SHADOW
 }

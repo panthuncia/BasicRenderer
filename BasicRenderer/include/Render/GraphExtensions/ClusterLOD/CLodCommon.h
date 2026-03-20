@@ -46,7 +46,7 @@ struct CLodViewRasterInfo
     friend bool operator==(const CLodViewRasterInfo&, const CLodViewRasterInfo&) = default;
 };
 
-inline constexpr uint32_t CLodReplayBufferSizeBytes = 100u * 1024u * 1024u;
+inline constexpr uint32_t CLodReplayBufferSizeBytes = 200u * 1024u * 1024u; // 100 MB
 inline constexpr uint32_t CLodReplayBufferNumUints = CLodReplayBufferSizeBytes / sizeof(uint32_t);
 inline constexpr uint32_t CLodMaxViewDepthIndices = 512u;
 inline constexpr uint32_t CLodStreamingInitialGroupCapacity = 1024u;
@@ -86,37 +86,12 @@ inline std::shared_ptr<Buffer> CreateAliasedUnmaterializedStructuredBuffer(
     return buffer;
 }
 
-// Estimates the packed blob size (bytes) for a group from its chunk hints,
-// mirroring the alignment logic of PackGroupPayloadForPagePool.
-inline size_t CLodEstimateBlobSize(
-    const ClusterLODRuntimeSummary::GroupChunkHint& hint,
-    uint32_t vertexByteSize)
-{
-    auto align4 = [](size_t v) -> size_t { return (v + 3u) & ~size_t(3); };
-
-    size_t size = 0;
-    size = align4(size) + hint.groupVertexCount * vertexByteSize;             // 1. vertex data
-    size = align4(size) + hint.meshletVertexCount * sizeof(uint32_t);         // 2. meshlet vertex indices
-    size = align4(size) + hint.meshletTrianglesByteCount * sizeof(uint8_t);   // 3. meshlet triangles
-    size = align4(size) + hint.compressedPositionWordCount * sizeof(uint32_t);// 4. compressed positions
-    size = align4(size) + hint.compressedNormalWordCount * sizeof(uint32_t);  // 5. compressed normals
-    size = align4(size) + hint.compressedMeshletVertexWordCount * sizeof(uint32_t); // 6. compressed meshlet verts
-    size = align4(size) + hint.meshletCount * sizeof(meshopt_Meshlet);        // 7. meshlet offsets
-    size = align4(size) + hint.meshletBoundsCount * sizeof(BoundingSphere);   // 8. meshlet bounds
-    return align4(size);
-}
-
 // Returns the number of pages needed for a group.
-// Uses the physical page count when available (post-bin-packing),
-// falls back to blob-size estimation otherwise.
+// Uses the physical page count set during the build pipeline.
 inline uint32_t CLodEstimatePagesNeeded(
     const ClusterLODRuntimeSummary::GroupChunkHint& hint,
-    uint32_t vertexByteSize,
-    uint64_t pageSize)
+    uint32_t /*vertexByteSize*/,
+    uint64_t /*pageSize*/)
 {
-    if (hint.pageCount > 0) {
-        return hint.pageCount;
-    }
-    const size_t blobSize = CLodEstimateBlobSize(hint, vertexByteSize);
-    return static_cast<uint32_t>((blobSize + pageSize - 1) / pageSize);
+    return hint.pageCount;
 }

@@ -62,7 +62,7 @@ HierarchialCullingPass::HierarchialCullingPass(
 
 HierarchialCullingPass::~HierarchialCullingPass() = default;
 
-void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) {
+void HierarchialCullingPass::DeclareResourceUsages(RenderPassBuilder* builder) {
     auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
     flecs::query<> drawSetIndicesQuery = ecsWorld.query_builder<>()
         .with<Components::IsActiveDrawSetIndices>()
@@ -151,7 +151,14 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     uintRootConstants[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_WORKGRAPH_TELEMETRY_DESCRIPTOR_INDEX] = m_workGraphTelemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_WORKGRAPH_TELEMETRY_ENABLED] = IsCLodWorkGraphTelemetryEnabled() ? 1u : 0u;
+    uint32_t workGraphFlags = 0u;
+    if (IsCLodWorkGraphTelemetryEnabled()) {
+        workGraphFlags |= CLOD_WORKGRAPH_FLAG_TELEMETRY_ENABLED;
+    }
+    if (SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")()) {
+        workGraphFlags |= CLOD_WORKGRAPH_FLAG_OCCLUSION_ENABLED;
+    }
+    uintRootConstants[CLOD_WORKGRAPH_FLAGS] = workGraphFlags;
     uintRootConstants[CLOD_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX] = m_occlusionReplayBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
@@ -402,7 +409,7 @@ void HierarchialCullingPass::CreatePipelines(
         { "WG_ReplayNodeGroup", nullptr },
         { "WG_ReplayMeshlet", nullptr },
         { "WG_TraverseNodes", nullptr },
-        { "WG_GroupEvaluate", nullptr },
+        { "WG_SegmentEvaluate", nullptr },
         { "WG_ClusterCullBuckets", nullptr },
     }};
 

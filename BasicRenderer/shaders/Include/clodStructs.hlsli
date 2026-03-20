@@ -25,40 +25,17 @@ struct PageTableEntry
     uint slabByteOffset; // Byte offset of the page start within that slab.
 };
 
-// Embedded at byte 0 of each page-tile. Self-contained: all stream offsets + compression params.
-// 32 x uint32 = 128 bytes. Load via 8 x Load4 from slab ByteAddressBuffer.
+// Embedded at byte 0 of each page-tile. Simplified header.
+// 16 x uint32 = 64 bytes.
 struct CLodPageHeader
 {
-    uint vertexCount;
-    uint meshletCount;
-    uint meshletVertexCount;
-    uint meshletTrianglesByteCount;
+    uint meshletCount;                // [0]
+    uint compressedPositionQuantExp;  // [1] mesh-wide quantization exponent
+    uint descriptorOffset;            // [2] byte offset to CLodMeshletDescriptor array
+    uint positionBitstreamOffset;     // [3] byte offset to position bitstream
 
-    uint compressedPositionWordCount;
-    uint compressedNormalWordCount;
-    uint compressedMeshletVertexWordCount;
-
-    // Byte offsets of each stream relative to page start
-    uint vertexOffset;
-    uint meshletVertexOffset;
-    uint triangleOffset;
-    uint compPosOffset;
-    uint compNormOffset;
-    uint compMeshletVertOffset;
-    uint meshletStructOffset;
-    uint boundsOffset;
-
-    // Compression parameters
-    uint compressedPositionBitsX;
-    uint compressedPositionBitsY;
-    uint compressedPositionBitsZ;
-    uint compressedPositionQuantExp;
-    int  compressedPositionMinQx;
-    int  compressedPositionMinQy;
-    int  compressedPositionMinQz;
-    uint compressedMeshletVertexBits;
-    uint compressedFlags;
-
+    uint normalArrayOffset;           // [4] byte offset to normal array
+    uint triangleStreamOffset;        // [5] byte offset to triangle byte stream
     uint reserved0;
     uint reserved1;
     uint reserved2;
@@ -67,7 +44,35 @@ struct CLodPageHeader
     uint reserved5;
     uint reserved6;
     uint reserved7;
+    uint reserved8;
+    uint reserved9;
 };
+
+// Per-meshlet descriptor. Self-contained: compression params, bounds, LOD metadata.
+// 12 x uint32 = 48 bytes = 3 x Load4.
+struct CLodMeshletDescriptor
+{
+    uint positionBitOffset;           // [0] bit offset into page position bitstream
+    uint normalWordOffset;            // [1] word offset into page normal array
+    uint triangleByteOffset;          // [2] byte offset into page triangle stream
+
+    int  minQx;                       // [3] per-meshlet quantization offset X
+    int  minQy;                       // [4] per-meshlet quantization offset Y
+    int  minQz;                       // [5] per-meshlet quantization offset Z
+
+    uint bitsAndVertexCount;          // [6] bitsX:8 | bitsY:8 | bitsZ:8 | vertexCount:8
+    uint triangleCountAndRefinedGroup; // [7] triangleCount:16 | (refinedGroupId+1):16
+
+    float4 bounds;                    // [8-11] bounding sphere {cx, cy, cz, radius}
+};
+
+// Helper functions to unpack CLodMeshletDescriptor fields
+uint CLodDescBitsX(CLodMeshletDescriptor desc) { return desc.bitsAndVertexCount & 0xFFu; }
+uint CLodDescBitsY(CLodMeshletDescriptor desc) { return (desc.bitsAndVertexCount >> 8u) & 0xFFu; }
+uint CLodDescBitsZ(CLodMeshletDescriptor desc) { return (desc.bitsAndVertexCount >> 16u) & 0xFFu; }
+uint CLodDescVertexCount(CLodMeshletDescriptor desc) { return (desc.bitsAndVertexCount >> 24u) & 0xFFu; }
+uint CLodDescTriangleCount(CLodMeshletDescriptor desc) { return desc.triangleCountAndRefinedGroup & 0xFFFFu; }
+int  CLodDescRefinedGroupId(CLodMeshletDescriptor desc) { return (int)(desc.triangleCountAndRefinedGroup >> 16u) - 1; }
 
 // Runtime-filled entry: maps group-local page index to physical slab location.
 struct GroupPageMapEntry
@@ -122,13 +127,13 @@ struct ClusterLODGroup
     uint flags;
     uint pageMapBase; // absolute index into GroupPageMap buffer
     uint pageCount;   // number of pages for this group
+    int parentGroupId; // mesh-local group index of the parent group (-1 for root)
 };
 
 static const uint CLOD_GROUP_FLAG_IS_VOXEL = 1u << 0;
 
 static const uint CLOD_REPLAY_RECORD_TYPE_NODE = 0;
-static const uint CLOD_REPLAY_RECORD_TYPE_GROUP = 1;
-static const uint CLOD_REPLAY_RECORD_TYPE_MESHLET = 2;
+static const uint CLOD_REPLAY_RECORD_TYPE_MESHLET = 1;
 static const uint CLOD_REPLAY_BUFFER_SIZE_BYTES = 100u * 1024u * 1024u;
 
 struct CLodNodeGroupReplayRecord

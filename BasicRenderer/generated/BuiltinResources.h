@@ -1,11 +1,12 @@
 #pragma once
 
 #include <string_view>
-// GENERATED CODE — DO NOT EDIT
+// GENERATED CODE ï¿½ DO NOT EDIT
 
 struct Builtin {
   inline static constexpr std::string_view ActiveDrawSetIndices = "Builtin::ActiveDrawSetIndices";
   inline static constexpr std::string_view BRDFLUT = "Builtin::BRDFLUT";
+  inline static constexpr std::string_view Backbuffer = "Builtin::Backbuffer";
   struct CLod {
     inline static constexpr std::string_view GroupChunks = "Builtin::CLod::GroupChunks";
     inline static constexpr std::string_view GroupPageMap = "Builtin::CLod::GroupPageMap";
@@ -35,6 +36,7 @@ struct Builtin {
   };
   inline static constexpr std::string_view CullingCameraBuffer = "Builtin::CullingCameraBuffer";
   inline static constexpr std::string_view DebugTexture = "Builtin::DebugTexture";
+  inline static constexpr std::string_view DebugVisualization = "Builtin::DebugVisualization";
   struct Environment {
     inline static constexpr std::string_view CurrentCubemap = "Builtin::Environment::CurrentCubemap";
     inline static constexpr std::string_view CurrentPrefilteredCubemap = "Builtin::Environment::CurrentPrefilteredCubemap";
@@ -104,6 +106,7 @@ struct Builtin {
       inline static constexpr std::string_view Primary = "Builtin::PrimaryCamera::IndirectCommandBuffers::Primary";
     };
     inline static constexpr std::string_view LinearDepthMap = "Builtin::PrimaryCamera::LinearDepthMap";
+    inline static constexpr std::string_view ProjectedDepthTexture = "Builtin::PrimaryCamera::ProjectedDepthTexture";
     inline static constexpr std::string_view VisibilityTexture = "Builtin::PrimaryCamera::VisibilityTexture";
   };
   struct Shadows {

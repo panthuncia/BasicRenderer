@@ -106,7 +106,7 @@ AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
         if (m_pShadowMapResourceGroup != nullptr) {
             auto map = m_pShadowMapResourceGroup->AddMap(lightInfo, getShadowResolution());
 			auto linearMap = m_pLinearShadowMapResourceGroup->AddMap(lightInfo, getShadowResolution());
-            shadowMapComponent = Components::DepthMap(map, linearMap);
+            shadowMapComponent = Components::DepthMap(map, linearMap, nullptr);
 			viewInfo.depthMap = map;
 			viewInfo.linearDepthMap = linearMap;
 			viewInfo.depthResX = map->GetWidth();

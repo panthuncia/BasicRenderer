@@ -66,9 +66,14 @@ public:
 		std::vector<CLodActiveGroupRange> activeRanges;
 		std::vector<CLodActiveGroupRange> coarsestRanges;
 		std::vector<int32_t> parentGroupByGlobal;
+		std::vector<float> groupOriginalErrorByGlobal;
 		uint32_t maxGroupIndex = 0;
 	};
 	void GetCLodStreamingDomainSnapshot(CLodStreamingDomainSnapshot& outSnapshot) const;
+
+	// Patch a single group's error field in the GPU groups buffer.
+	// Used by the streaming system to override error for residency transitions.
+	void PatchCLodGroupError(uint32_t groupGlobalIndex, float error);
 
 	// Returns true when mesh/instance adds or removes have changed the
 	// streaming structure since the last call.  After returning true the
@@ -178,6 +183,13 @@ private:
 		// (The Mesh releases its CPU copies after setup via ReleaseCLodHierarchyCpuData.)
 		std::vector<ClusterLODGroup> groups;
 		std::vector<ClusterLODGroupSegment> segments;
+
+		// Parent-child mapping and original error values, copied from
+		// the runtime summary at AddMesh time so that the streaming
+		// domain snapshot always has reliable data regardless of mesh
+		// object lifetime or summary state.
+		std::vector<int32_t> parentGroupByLocal;
+		std::vector<float> groupErrorByLocal;
 
 		// GroupPageMap buffer view for this mesh's page map entries.
 		std::unique_ptr<BufferView> ownedPageMapView;

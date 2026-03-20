@@ -172,6 +172,7 @@ namespace CLodCache {
 
 			WriteVectorPod(out, prebuiltData.groups);
 			WriteVectorPod(out, prebuiltData.segments);
+			WriteVectorPod(out, prebuiltData.segmentBounds);
 			WritePod(out, prebuiltData.objectBoundingSphere);
 			const uint8_t hasInlineGroupChunks = prebuiltData.groupChunks.empty() ? 0u : 1u;
 			WritePod(out, hasInlineGroupChunks);
@@ -211,6 +212,7 @@ namespace CLodCache {
 
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.groups)) return false;
 			if (!ReadVectorPod(blob, offset, out.prebuiltData.segments)) return false;
+			if (!ReadVectorPod(blob, offset, out.prebuiltData.segmentBounds)) return false;
 			if (!ReadPod(blob, offset, out.prebuiltData.objectBoundingSphere)) return false;
 
 			uint8_t hasInlineGroupChunks = 0u;
@@ -338,7 +340,6 @@ namespace CLodCache {
 					const auto& group = prebuiltData.groups[groupIndex];
 					groupChunkMetadata.groupVertexCount = group.groupVertexCount;
 					groupChunkMetadata.meshletCount = group.meshletCount;
-					groupChunkMetadata.meshletBoundsCount = group.meshletCount;
 				}
 
 				const auto* pageBlobsPtr = payload.groupPageBlobs;

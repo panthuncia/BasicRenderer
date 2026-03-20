@@ -138,7 +138,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     } catch (...) {}
 
     RenderGraph::ExternalPassDesc cullPassDesc;
-    cullPassDesc.type = RenderGraph::PassType::Compute;
+    cullPassDesc.type = RenderGraph::PassType::Render;
     cullPassDesc.name = "CLod::HierarchialCullingPass1";
     HierarchialCullingPassInputs cullPassInputs;
     cullPassInputs.isFirstPass = true;
@@ -233,7 +233,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     outPasses.push_back(std::move(downsamplePassDesc));
 
     RenderGraph::ExternalPassDesc cullPassDesc2;
-    cullPassDesc2.type = RenderGraph::PassType::Compute;
+    cullPassDesc2.type = RenderGraph::PassType::Render;
     cullPassDesc2.name = "CLod::HierarchialCullingPass2";
     HierarchialCullingPassInputs cullPassInputs2;
     cullPassInputs2.isFirstPass = false;

@@ -76,7 +76,7 @@ private:
     void ReleaseOwnedPagesForGroup(uint32_t groupIndex, MeshManager* meshManager);
 
     struct PreAllocatedPages {
-        std::vector<uint32_t> pagesBySegment; // segment index → pageID
+		std::vector<uint32_t> pagesBySegment; // segment index to page ID
         std::vector<bool> segmentNeedsFetch;  // true = need disk data; false = reused still-valid page
         uint32_t segmentCount = 0;
         bool usesPinnedStorage = false;
@@ -100,16 +100,19 @@ private:
     std::vector<uint32_t> m_streamingResidencyInitializedBitsCpu;
     std::vector<uint32_t> m_usedGroupsBitsCpu; // groups reported as visible by the GPU last frame
     std::vector<int32_t> m_streamingParentGroupByGlobal;
+	std::unordered_map<uint32_t, std::vector<uint32_t>> m_childGroupsByGlobal; // parent to children
+    std::vector<float> m_groupOriginalErrorByGlobal;
+    std::unordered_set<uint32_t> m_errorOverriddenGroups; // groups whose GPU error is currently 0
     CLodPageLRU m_pageLru;
-    std::vector<int32_t> m_pageOwnerGroup;       // pageID → group global index (-1 = unowned)
-    std::vector<uint32_t> m_pageOwnerSegment;    // pageID → segment index within owning group
-    std::unordered_map<uint32_t, std::vector<uint32_t>> m_groupOwnedPages; // group → pageIDs by segment (~0u = no page)
+	std::vector<int32_t> m_pageOwnerGroup;       // page ID to group global index (-1 = unowned)
+	std::vector<uint32_t> m_pageOwnerSegment;    // page ID to segment index within owning group
+	std::unordered_map<uint32_t, std::vector<uint32_t>> m_groupOwnedPages; // group to page IDs by segment (~0u = no page)
     std::unordered_map<uint32_t, PreAllocatedPages> m_preAllocatedPagesByGroup;
     std::unordered_set<uint32_t> m_streamingRequestsInProgress;
     std::unordered_map<uint32_t, uint32_t> m_pendingLoadPriorityByGroup;
     std::unordered_set<uint32_t> m_groupsUsingPinnedStorage;
     // Groups whose pages are temporarily LRU-pinned until the GPU confirms
-    // usage via readback. Maps groupIndex → readback generation at pin time.
+	// usage via readback. Maps groupIndex to readback generation at pin time.
     std::unordered_map<uint32_t, uint64_t> m_readbackGapPinnedGroups;
     uint64_t m_readbackGeneration = 0;
     bool m_pageLruInitialized = false;

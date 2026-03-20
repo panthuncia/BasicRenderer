@@ -40,6 +40,9 @@
 #include "Render/RenderContext.h"
 #include "Render/SceneRenderBridge.h"
 
+class DynamicResource;
+class ExternalTextureResource;
+
 using namespace Microsoft::WRL;
 
 namespace rg::runtime {
@@ -94,6 +97,8 @@ private:
 
     rhi::DescriptorHeapPtr rtvHeap;
 	std::vector<rhi::ResourceHandle> renderTargets;
+	std::vector<std::shared_ptr<ExternalTextureResource>> m_backbufferResources;
+	std::shared_ptr<DynamicResource> m_dynamicBackbuffer;
     //ComPtr<ID3D12DescriptorHeap> dsvHeap;
 	//std::vector<ComPtr<ID3D12Resource>> depthStencilBuffers;
 	//Components::DepthMap m_depthMap;

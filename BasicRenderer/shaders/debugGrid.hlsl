@@ -131,7 +131,7 @@ void DebugGridCSMain(uint3 dtid : SV_DispatchThreadID)
     float axisOp = saturate(asfloat(RC_AxisOpacity));
     float overallOp = saturate(asfloat(RC_OverallOpacity));
 
-    float4x4 invViewProj = inverse(cam.viewProjection);
+    float4x4 invViewProj = inverse(mul(cam.view, cam.unjitteredProjection));
     float4x4 invView = inverse(cam.view);
 
     float3 camPos = invView[3].xyz;
@@ -157,12 +157,18 @@ void DebugGridCSMain(uint3 dtid : SV_DispatchThreadID)
 
     // Depth-aware occlusion against scene linear depth (-viewSpaceZ)
     Texture2D<float> linearDepthTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::LinearDepthMap)];
-    float sceneLinearDepth = linearDepthTexture[clampedPix];
+    // Remap output-resolution pixel coords to render-resolution coords
+    int2 depthPix = int2(clamp(uv * float2(cam.depthResX, cam.depthResY), 0, float2(cam.depthResX - 1, cam.depthResY - 1)));
+    float sceneLinearDepth = linearDepthTexture[depthPix];
     const float noGeometryDepth = asfloat(0x7F7FFFFF);
 
     float gridLinearDepth = -mul(float4(hit, 1.0), cam.view).z;
     const float depthEpsilon = 1e-3;
     bool occludedByScene = (sceneLinearDepth != noGeometryDepth) && (sceneLinearDepth + depthEpsilon < gridLinearDepth);
+
+    // Defer (skip) rendering when the grid is nearly coplanar with scene geometry to avoid Z-fighting
+    const float deferEpsilon = 5e-3;
+    bool deferredByProximity = (sceneLinearDepth != noGeometryDepth) && (abs(sceneLinearDepth - gridLinearDepth) < deferEpsilon * gridLinearDepth);
 
     // Camera-relative snapping to reduce far-from-origin precision issues
     float2 camXZ = camPos.xz;
@@ -188,7 +194,7 @@ void DebugGridCSMain(uint3 dtid : SV_DispatchThreadID)
     float aAxisZ = axisZ * axisOp * overallOp;
 
     // Mask out invalid hits
-    float valid = (hitValid && !occludedByScene) ? 1.0 : 0.0;
+    float valid = (hitValid && !occludedByScene && !deferredByProximity) ? 1.0 : 0.0;
     aMinor *= valid;
     aMajor *= valid;
     aAxisX *= valid;

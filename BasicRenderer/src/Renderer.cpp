@@ -43,6 +43,8 @@
 #include "RenderPasses/PostProcessing/luminanceHistogram.h"
 #include "RenderPasses/PostProcessing/luminanceHistogramAverage.h"
 #include "RenderPasses/ClearVisibilityBufferPass.h"
+#include "RenderPasses/PostProcessing/DebugResolvePass.h"
+#include "RenderPasses/MenuRenderPass.h"
 #include "Resources/TextureDescription.h"
 #include "Menu/Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
@@ -68,6 +70,8 @@
 #include "RenderPasses/DebugGridPass.h"
 #include "Render/GraphExtensions/ReadbackCaptureExtension.h"
 #include "Resources/Resource.h"
+#include "Resources/DynamicResource.h"
+#include "Resources/ExternalTextureResource.h"
 #include "Render/MemoryIntrospectionBackend.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "Render/Runtime/UploadPolicyServiceAccess.h"
@@ -476,8 +480,8 @@ void Renderer::RunRenderResourceSyncStage() {
             camera.jitterPixelSpace = jitterPixelSpace;
             const auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
             const DirectX::XMFLOAT2 jitterNDC = {
-                (jitterPixelSpace.x / renderRes.x),
-                (jitterPixelSpace.y / renderRes.y)
+                (2.0f * jitterPixelSpace.x / renderRes.x),
+                (-2.0f * jitterPixelSpace.y / renderRes.y)
             };
             camera.jitterNDC = jitterNDC;
             const auto jitterMatrix = DirectX::XMMatrixTranslation(jitterNDC.x, jitterNDC.y, 0.0f);
@@ -805,6 +809,7 @@ void Renderer::SetSettings() {
     m_settingsSubscriptions.push_back(settingsManager.addObserver<UpscalingMode>("upscalingMode", [this](const UpscalingMode& newValue) {
 
         m_preFrameDeferredFunctions.defer([newValue, this]() { // Don't do this during a frame
+            StallPipeline(); // Wait for all GPU work before destroying contexts
             UpscalingManager::GetInstance().Shutdown();
             UpscalingManager::GetInstance().InitFFX(); // Needs device
             UpscalingManager::GetInstance().SetUpscalingMode(newValue);
@@ -814,18 +819,24 @@ void Renderer::SetSettings() {
             FFXManager::GetInstance().InitFFX();
 
             CreateTextures();
+            auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+            m_sceneRenderBridge.ResyncPrimaryCameraDepth(*m_pViewManager, renderRes.x, renderRes.y);
             rebuildRenderGraph = true;
             });
 		}));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<UpscaleQualityMode>("upscalingQualityMode", [this](const UpscaleQualityMode& newValue) {
 
         m_preFrameDeferredFunctions.defer([newValue, this]() { // Don't do this during a frame
+            StallPipeline(); // Wait for all GPU work before destroying contexts
             UpscalingManager::GetInstance().SetUpscalingQualityMode(newValue);
             UpscalingManager::GetInstance().Shutdown();
+            UpscalingManager::GetInstance().InitFFX(); // Recreate FSR context before Setup queries it
             UpscalingManager::GetInstance().Setup();
             FFXManager::GetInstance().Shutdown();
             FFXManager::GetInstance().InitFFX();
             CreateTextures();
+            auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+            m_sceneRenderBridge.ResyncPrimaryCameraDepth(*m_pViewManager, renderRes.x, renderRes.y);
             rebuildRenderGraph = true;
             });
         }));
@@ -942,6 +953,16 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
         renderTargets[n] = m_swapChain->Image(n);
     }
 
+    // Wrap swapchain images for render-graph tracking
+    m_backbufferResources.resize(m_numFramesInFlight);
+    for (UINT n = 0; n < m_numFramesInFlight; n++) {
+        m_backbufferResources[n] = std::make_shared<ExternalTextureResource>(
+            renderTargets[n], x_res, y_res);
+        m_backbufferResources[n]->SetName("Backbuffer " + std::to_string(n));
+    }
+    m_dynamicBackbuffer = std::make_shared<DynamicResource>(m_backbufferResources[0]);
+    m_dynamicBackbuffer->SetName("Backbuffer");
+
     CreateRTVs();
 
     // Create command allocator
@@ -1030,12 +1051,17 @@ void Renderer::CreateRTVs() {
         rtvDesc.formatOverride = rhi::Format::R8G8B8A8_UNorm;
         rtvDesc.range = { 0, 1, 0, 1 };
         device.CreateRenderTargetView({ rtvHeap->GetHandle(), n }, renderTargets[n], rtvDesc);
+
+        // Keep external texture wrappers in sync after resize
+        if (n < m_backbufferResources.size() && m_backbufferResources[n]) {
+            m_backbufferResources[n]->SetHandle(renderTargets[n]);
+        }
     }
 }
 
 void Renderer::OnResize(UINT newWidth, UINT newHeight) {
-    // Wait for the GPU to complete all operations
-	WaitForFrame(m_frameIndex);
+    // Wait for all in-flight GPU work before destroying resources
+	StallPipeline();
 
     // Release the resources tied to the swap chain
     auto numFramesInFlight = getNumFramesInFlight();
@@ -1056,7 +1082,8 @@ void Renderer::OnResize(UINT newWidth, UINT newHeight) {
 
     CreateTextures();
 
-
+    auto renderRes = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
+    m_sceneRenderBridge.ResyncPrimaryCameraDepth(*m_pViewManager, renderRes.x, renderRes.y);
 
 	//Rebuild the render graph
 	rebuildRenderGraph = true;
@@ -1353,25 +1380,6 @@ void Renderer::Render() {
     passExecutionContext.frameFenceValue = m_context.frameFenceValue;
     passExecutionContext.deltaTime = m_context.deltaTime;
     passExecutionContext.hostData = &hostFrameData;
-
-    // TODO: Incorporate this into the render graph
-    // Indicate that the back buffer will be used as a render target
-	rhi::TextureBarrier rtvBarrier = {};
-	rtvBarrier.afterAccess = rhi::ResourceAccessType::RenderTarget;
-	rtvBarrier.afterLayout = rhi::ResourceLayout::RenderTarget;
-	rtvBarrier.afterSync = rhi::ResourceSyncState::All;
-	rtvBarrier.beforeAccess = rhi::ResourceAccessType::Common;
-	rtvBarrier.beforeLayout = rhi::ResourceLayout::Common;
-	rtvBarrier.beforeSync = rhi::ResourceSyncState::All;
-
-	rtvBarrier.texture = renderTargets[m_frameIndex];
-    rhi::BarrierBatch batch = {};
-	batch.textures = { &rtvBarrier };
-
-    runCapturedStage("PrepareBackbuffer", [&]() {
-        ZoneScopedN("Renderer::Render::PrepareBackbuffer");
-        commandList->Barriers(batch);
-    });
    
     commandList->End();
 
@@ -1402,18 +1410,13 @@ void Renderer::Render() {
 
     runCapturedStage("RenderGraphExecute", [&]() {
         ZoneScopedN("Renderer::Render::RenderGraphExecute");
+        m_dynamicBackbuffer->SetResource(m_backbufferResources[m_frameIndex]);
         currentRenderGraph->Execute(passExecutionContext); // Main render graph execution
     });
-	
+
+	// Transition backbuffer to Common for present
 	commandList->Recycle(commandAllocator.Get());
-
-    runCapturedStage("Menu", [&]() {
-        ZoneScopedN("Renderer::Render::Menu");
-        Menu::GetInstance().Render(m_context, commandList.Get()); // Render menu
-    });
-
-
-    // Indicate that the back buffer will now be used to present
+	rhi::TextureBarrier rtvBarrier = {};
 	rtvBarrier.afterAccess = rhi::ResourceAccessType::Common;
 	rtvBarrier.afterLayout = rhi::ResourceLayout::Common;
 	rtvBarrier.afterSync = rhi::ResourceSyncState::All;
@@ -1421,11 +1424,16 @@ void Renderer::Render() {
 	rtvBarrier.beforeLayout = rhi::ResourceLayout::RenderTarget;
 	rtvBarrier.beforeSync = rhi::ResourceSyncState::All;
 	rtvBarrier.texture = renderTargets[m_frameIndex];
+	rhi::BarrierBatch batch = {};
 	batch.textures = { &rtvBarrier };
     runCapturedStage("TransitionForPresent", [&]() {
         ZoneScopedN("Renderer::Render::TransitionForPresent");
         commandList->Barriers(batch);
     });
+
+    // Keep the symbolic tracker in sync with the manual barrier above so the
+    // graph emits a Common->RenderTarget transition on the next frame.
+    m_backbufferResources[m_frameIndex]->ResetToCommon();
 
     commandList->End();
 
@@ -1807,6 +1815,14 @@ void Renderer::CreateRenderGraph() {
 
     newGraph->RegisterResource(Builtin::PrimaryCamera::DepthTexture, depthTexture);
     newGraph->RegisterResource(Builtin::PrimaryCamera::LinearDepthMap, depth.linearDepthMap);
+    // In visibility rendering (CLod), projected depth is computed by the depth copy pass.
+    // In standard rasterization, the hardware DSV already contains projected depth.
+    if (m_visibilityRendering) {
+        newGraph->RegisterResource(Builtin::PrimaryCamera::ProjectedDepthTexture, depth.projectedDepthMap);
+    } else {
+        newGraph->RegisterResource(Builtin::PrimaryCamera::ProjectedDepthTexture, depthTexture);
+    }
+    newGraph->RegisterResource(Builtin::Backbuffer, m_dynamicBackbuffer);
 
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {
@@ -1844,6 +1860,8 @@ void Renderer::CreateRenderGraph() {
 	m_pViewManager->AttachVisibilityBuffer(primaryViewID, visibilityBuffer);
 
     CreateGBufferResources(newGraph.get());
+
+    CreateDebugVisualizationResources(newGraph.get());
 
     if (m_visibilityRendering) {
         newGraph->BuildRenderPass("ClearVisibilityBufferPass")
@@ -1944,6 +1962,12 @@ void Renderer::CreateRenderGraph() {
 
     newGraph->BuildRenderPass("TonemappingPass")
         .Build<TonemappingPass>();
+
+    newGraph->BuildRenderPass("DebugResolvePass")
+        .Build<DebugResolvePass>();
+
+    newGraph->BuildRenderPass("MenuRenderPass")
+        .Build<MenuRenderPass>();
 
     debugPassBuilder.Build<DebugRenderPass>();
 	if (m_coreResourceProvider.m_currentDebugTexture != nullptr) {

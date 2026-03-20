@@ -10,7 +10,6 @@
 #include "Include/clodPageAccess.hlsli"
 
 #define CLOD_COMPRESSED_POSITIONS 1u
-#define CLOD_COMPRESSED_MESHLET_VERTEX_INDICES 2u
 #define CLOD_COMPRESSED_NORMALS 4u
 
 uint ReadPackedBits32(StructuredBuffer<uint> words, uint startBit, uint bitCount)
@@ -53,8 +52,9 @@ uint ReadPackedBits32_BA(ByteAddressBuffer buf, uint startBit, uint bitCount)
 }
 
 float3 DecodeCompressedPosition(
-    uint groupLocalVertexIndex,
-    uint compressedPositionWordsBase,
+    uint meshletLocalVertex,
+    uint positionBitstreamBase,
+    uint positionBitOffset,
     uint bitsX,
     uint bitsY,
     uint bitsZ,
@@ -63,7 +63,7 @@ float3 DecodeCompressedPosition(
     uint pagePoolSlabDescriptorIndex)
 {
     uint bitsPerVertex = bitsX + bitsY + bitsZ;
-    uint bitCursor = compressedPositionWordsBase * 32u + groupLocalVertexIndex * bitsPerVertex;
+    uint bitCursor = positionBitstreamBase * 8u + positionBitOffset + meshletLocalVertex * bitsPerVertex;
 
     ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
     uint px = ReadPackedBits32_BA(slab, bitCursor, bitsX);
@@ -99,10 +99,11 @@ float3 OctDecodeNormal(float2 e)
     return normalize(v);
 }
 
-float3 DecodeCompressedNormal(uint groupLocalVertexIndex, uint compressedNormalWordsBase, uint pagePoolSlabDescriptorIndex)
+float3 DecodeCompressedNormal(uint meshletLocalVertex, uint normalArrayBase, uint normalWordOffset, uint pagePoolSlabDescriptorIndex)
 {
     ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
-    uint packed = slab.Load((compressedNormalWordsBase + groupLocalVertexIndex) * 4u);
+    uint addr = normalArrayBase + (normalWordOffset + meshletLocalVertex) * 4u;
+    uint packed = slab.Load(addr);
     return OctDecodeNormal(UnpackSnorm16x2(packed));
 }
 
@@ -314,75 +315,44 @@ void EmitMeshletVisBufferForView(
     WriteTriangles(uGroupThreadID, setup, outputTriangles);
 }
 
-VisBufferPSInput GetVisBufferVertexAttributesForViewIndexed(
-    uint meshletVerticesBaseOffset,
-    uint compressedPositionWordsBase,
-    uint compressedPositionBitsX,
-    uint compressedPositionBitsY,
-    uint compressedPositionBitsZ,
-    uint compressedPositionQuantExp,
-    int3 compressedPositionMinQ,
-    uint compressedNormalWordsBase,
-    uint compressedMeshletVertexWordsBase,
-    uint compressedMeshletVertexBits,
-    uint compressedFlags,
-    uint meshletVertexIndex,
-    uint blockByteOffset,
-    uint flags,
-    uint vertexSize,
+VisBufferPSInput GetVisBufferVertexAttributesForViewCLod(
+    uint meshletLocalVertex,
+    MeshletSetup setup,
     uint3 vGroupID,
-    PerObjectBuffer objectBuffer,
     uint viewID,
     uint clusterIndex,
-    uint materialDataIndex,
-    ClodViewRasterInfo rasterInfo,
-    uint pagePoolSlabDescriptorIndex)
+    ClodViewRasterInfo rasterInfo)
 {
-    // CLod path: all buffers live in the slab.
-    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
-    ByteAddressBuffer vertexBuffer = slab;
-
-    uint groupLocalVertexIndex = 0;
-    if ((compressedFlags & 2u) != 0u && compressedMeshletVertexBits > 0u)
-    {
-        uint startBit = compressedMeshletVertexWordsBase * 32u + meshletVertexIndex * compressedMeshletVertexBits;
-        groupLocalVertexIndex = ReadPackedBits32_BA(slab, startBit, compressedMeshletVertexBits);
-    }
-    else
-    {
-        groupLocalVertexIndex = slab.Load((meshletVerticesBaseOffset + meshletVertexIndex) * 4u);
-    }
-
-    uint byteOffset = blockByteOffset + groupLocalVertexIndex * vertexSize;
-    Vertex vertex = LoadVertex(byteOffset, vertexBuffer, flags);
-    if ((flags & VERTEX_SKINNED) == 0u && (compressedFlags & CLOD_COMPRESSED_POSITIONS) != 0u)
-    {
-        vertex.position = DecodeCompressedPosition(
-            groupLocalVertexIndex,
-            compressedPositionWordsBase,
-            compressedPositionBitsX,
-            compressedPositionBitsY,
-            compressedPositionBitsZ,
-            compressedPositionQuantExp,
-            compressedPositionMinQ,
-            pagePoolSlabDescriptorIndex);
-    }
-    if ((flags & VERTEX_SKINNED) == 0u && (compressedFlags & CLOD_COMPRESSED_NORMALS) != 0u)
-    {
-        vertex.normal = DecodeCompressedNormal(groupLocalVertexIndex, compressedNormalWordsBase, pagePoolSlabDescriptorIndex);
-    }
+    // Decode position and normal from per-meshlet compressed streams
+    Vertex vertex = (Vertex)0;
+    vertex.position = DecodeCompressedPosition(
+        meshletLocalVertex,
+        setup.positionBitstreamBase,
+        setup.positionBitOffset,
+        setup.bitsX,
+        setup.bitsY,
+        setup.bitsZ,
+        setup.compressedPositionQuantExp,
+        setup.minQ,
+        setup.pagePoolSlabDescriptorIndex);
+    vertex.normal = DecodeCompressedNormal(
+        meshletLocalVertex,
+        setup.normalArrayBase,
+        setup.normalWordOffset,
+        setup.pagePoolSlabDescriptorIndex);
+    // TODO: texcoord stream not yet in per-meshlet format
 
     return BuildVisBufferVertexAttributesForView(
         vertex,
         vGroupID,
-        objectBuffer,
+        setup.objectBuffer,
         viewID,
         clusterIndex,
-        materialDataIndex,
+        setup.meshBuffer.materialDataIndex,
         rasterInfo);
 }
 
-void EmitMeshletVisBufferForViewIndexed(
+void EmitMeshletVisBufferForViewCLod(
     uint uGroupThreadID,
     MeshletSetup setup,
     uint viewID,
@@ -393,31 +363,9 @@ void EmitMeshletVisBufferForViewIndexed(
 {
     for (uint i = uGroupThreadID; i < setup.vertCount; i += MS_THREAD_GROUP_SIZE)
     {
-        uint meshletVertexIndex = setup.vertOffset + i;
-        outputVertices[i] = GetVisBufferVertexAttributesForViewIndexed(
-            setup.groupMeshletVerticesBase,
-            setup.compressedPositionWordsBase,
-            setup.compressedPositionBitsX,
-            setup.compressedPositionBitsY,
-            setup.compressedPositionBitsZ,
-            setup.compressedPositionQuantExp,
-            setup.compressedPositionMinQ,
-            setup.compressedNormalWordsBase,
-            setup.compressedMeshletVertexWordsBase,
-            setup.compressedMeshletVertexBits,
-            setup.compressedFlags,
-            meshletVertexIndex,
-            setup.postSkinningBufferOffset,
-            setup.meshBuffer.vertexFlags,
-            setup.meshBuffer.vertexByteSize,
-            setup.meshletIndex,
-            setup.objectBuffer,
-            viewID,
-            clusterIndex,
-            setup.meshBuffer.materialDataIndex,
-            rasterInfo,
-            setup.pagePoolSlabDescriptorIndex
-        );
+        // Vertex i is meshlet-local (0..vertexCount-1)
+        outputVertices[i] = GetVisBufferVertexAttributesForViewCLod(
+            i, setup, setup.meshletIndex, viewID, clusterIndex, rasterInfo);
     }
 
     WriteTriangles(uGroupThreadID, setup, outputTriangles);
@@ -488,23 +436,14 @@ void VisibilityBufferMSMain(
 
 bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSetup setup, in uint bucketMeshletIndex, in uint bucketCount)
 {
-	// if (bucketMeshletIndex >= bucketCount)
-    // {
-    //     setup.vertCount = 0;
-    //     setup.triCount = 0;
-    //     return false;
-    // }	
-
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
 
     setup.meshletIndex = cluster.localMeshletIndex;
     setup.meshInstanceBuffer = meshInstanceBuffer[cluster.instanceID];
     setup.viewID = cluster.viewID;
 
-    // TODO: Fetch only necessary data for visibility buffer
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
 
     setup.meshBuffer = perMeshBuffer[setup.meshInstanceBuffer.perMeshBufferIndex];
     setup.objectBuffer = perObjectBuffer[setup.meshInstanceBuffer.perObjectBufferIndex];
@@ -519,65 +458,42 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
 
     CLodPageHeader hdr = LoadPageHeader(pageSlabDesc, pageSlabOff);
 
-    setup.groupVertexBase = 0;
-    setup.groupVertexCount = hdr.vertexCount;
-    setup.groupMeshletVertexCount = hdr.meshletVertexCount;
-    setup.compressedPositionWordCount = hdr.compressedPositionWordCount;
-    setup.compressedPositionBitsX = hdr.compressedPositionBitsX;
-    setup.compressedPositionBitsY = hdr.compressedPositionBitsY;
-    setup.compressedPositionBitsZ = hdr.compressedPositionBitsZ;
-    setup.compressedPositionQuantExp = hdr.compressedPositionQuantExp;
-    setup.compressedPositionMinQ = int3(
-        hdr.compressedPositionMinQx,
-        hdr.compressedPositionMinQy,
-        hdr.compressedPositionMinQz);
-    setup.compressedNormalWordCount = hdr.compressedNormalWordCount;
-    setup.compressedMeshletVertexWordCount = hdr.compressedMeshletVertexWordCount;
-    setup.compressedMeshletVertexBits = hdr.compressedMeshletVertexBits;
-    setup.compressedFlags = hdr.compressedFlags;
-
-    // Page-pool addressing from pre-resolved page location
-    setup.pagePoolSlabDescriptorIndex = pageSlabDesc;
-    {
-        uint base = pageSlabOff;
-        setup.groupVertexChunkByteOffset       = base + hdr.vertexOffset;
-        setup.groupMeshletVerticesBase         = (base + hdr.meshletVertexOffset) / 4u;
-        setup.groupMeshletTrianglesByteOffset  = base + hdr.triangleOffset;
-        setup.compressedPositionWordsBase      = (base + hdr.compPosOffset) / 4u;
-        setup.compressedNormalWordsBase        = (base + hdr.compNormOffset) / 4u;
-        setup.compressedMeshletVertexWordsBase = (base + hdr.compMeshletVertOffset) / 4u;
-    }
-
     // meshletIndex is now page-local
     if (setup.meshletIndex >= hdr.meshletCount)
     {
         return false;
     }
 
-    // Load meshlet from the page-pool slab
-    {
-        uint meshletAddr = pageSlabOff + hdr.meshletStructOffset + setup.meshletIndex * 16u;
-        setup.meshlet = LoadMeshletFromSlab(pageSlabDesc, meshletAddr);
-    }
+    // Load per-meshlet descriptor
+    CLodMeshletDescriptor desc = LoadMeshletDescriptor(
+        pageSlabDesc, pageSlabOff, hdr.descriptorOffset, setup.meshletIndex);
 
-    setup.vertCount = setup.meshlet.VertCount;
-    setup.triCount = setup.meshlet.TriCount;
-    setup.vertOffset = setup.meshlet.VertOffset;
+    setup.meshlet = (Meshlet)0;
+    setup.vertCount = CLodDescVertexCount(desc);
+    setup.triCount = CLodDescTriangleCount(desc);
+    setup.vertOffset = 0;
 
-    if (setup.vertOffset + setup.vertCount > setup.groupMeshletVertexCount)
-    {
-        return false;
-    }
-    if (setup.meshlet.TriOffset + setup.meshlet.TriCount * 3u > hdr.meshletTrianglesByteCount)
-    {
-        return false;
-    }
+    // Per-meshlet compression from descriptor
+    setup.bitsX = CLodDescBitsX(desc);
+    setup.bitsY = CLodDescBitsY(desc);
+    setup.bitsZ = CLodDescBitsZ(desc);
+    setup.minQ = int3(desc.minQx, desc.minQy, desc.minQz);
+    setup.positionBitOffset = desc.positionBitOffset;
+    setup.normalWordOffset = desc.normalWordOffset;
+    setup.triangleByteOffset = desc.triangleByteOffset;
 
-    // Vertex data lives in the slab page.
-    {
-        setup.postSkinningBufferOffset     = pageSlabOff + hdr.vertexOffset;
-        setup.prevPostSkinningBufferOffset = setup.postSkinningBufferOffset;
-    }
+    // Page-level stream base offsets (absolute in slab)
+    setup.positionBitstreamBase = pageSlabOff + hdr.positionBitstreamOffset;
+    setup.normalArrayBase = pageSlabOff + hdr.normalArrayOffset;
+    setup.triangleStreamBase = pageSlabOff + hdr.triangleStreamOffset;
+
+    setup.compressedPositionQuantExp = hdr.compressedPositionQuantExp;
+    setup.pagePoolSlabDescriptorIndex = pageSlabDesc;
+
+    // Non-CLod fields unused
+    setup.groupMeshletTrianglesByteOffset = 0;
+    setup.postSkinningBufferOffset = 0;
+    setup.prevPostSkinningBufferOffset = 0;
 
     return true;
 }
@@ -621,7 +537,7 @@ void ClusterLODBucketMSMain(
     if (draw)
     {
         ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[setup.viewID];
-        EmitMeshletVisBufferForViewIndexed(uGroupThreadID, setup, setup.viewID, visibleClusterIndex, viewRasterInfo, outputVertices, outputTriangles);
+        EmitMeshletVisBufferForViewCLod(uGroupThreadID, setup, setup.viewID, visibleClusterIndex, viewRasterInfo, outputVertices, outputTriangles);
         EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
     }
 }

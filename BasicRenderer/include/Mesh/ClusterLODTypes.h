@@ -43,10 +43,10 @@ struct ClusterLODTraversalMetric
 
 struct ClusterLODNodeRange
 {
-	uint32_t isGroup = 0;
-	uint32_t indexOrOffset = 0;
-	uint32_t countMinusOne = 0;
-	uint32_t padding = 0;
+	uint32_t isGroup = 0;        // 0=internal, 1=voxel-group-leaf, 2=segment-leaf
+	uint32_t indexOrOffset = 0;  // segment-leaf: mesh-local segment index; internal: child offset
+	uint32_t countMinusOne = 0;  // internal: childCount-1; leaf: unused
+	uint32_t ownerGroupId = 0;   // segment-leaf: mesh-local group index (for page resolution + streaming)
 };
 
 struct ClusterLODNode
@@ -115,6 +115,7 @@ struct ClusterLODPrebuiltData
 {
 	std::vector<ClusterLODGroup> groups;
 	std::vector<ClusterLODGroupSegment> segments;
+	std::vector<BoundingSphere> segmentBounds;
 	BoundingSphere objectBoundingSphere{};
 	std::vector<ClusterLODGroupChunk> groupChunks;
 	std::vector<ClusterLODGroupDiskLocator> groupDiskLocators;
@@ -153,7 +154,6 @@ struct ClusterLODBuilderSettings
 	float lodErrorMergePrevious = 1.5f;
 	float lodErrorMergeAdditive = 0.0f;
 	uint32_t partitionSizeFloor = 8u;
-	bool allowOverflowTerminalMerge = true;
 	bool preserveImportedNormals = true;
 	bool enableNormalAttributeSimplification = true;
 	float normalAttributeWeight = 1.0f;
@@ -175,13 +175,8 @@ struct ClusterLODRuntimeSummary
 	struct GroupChunkHint
 	{
 		uint32_t groupVertexCount = 0;
-		uint32_t meshletVertexCount = 0;
 		uint32_t meshletCount = 0;
 		uint32_t meshletTrianglesByteCount = 0;
-		uint32_t meshletBoundsCount = 0;
-		uint32_t compressedPositionWordCount = 0;
-		uint32_t compressedNormalWordCount = 0;
-		uint32_t compressedMeshletVertexWordCount = 0;
 		uint32_t segmentCount = 0; // number of segments (= pages before re-binning) for per-segment paging
 		uint32_t pageCount = 0;    // number of physical pages after bin-packing
 	};
@@ -194,6 +189,7 @@ struct ClusterLODRuntimeSummary
 
 	std::vector<GroupChunkHint> groupChunkHints;
 	std::vector<int32_t> parentGroupByLocal;
+	std::vector<float> groupErrorByLocal;
 	std::vector<uint32_t> firstGroupVertexByLocal;
 	std::vector<GroupRange> coarsestRanges;
 };

@@ -30,7 +30,7 @@ inline rg::Hash64 HashValue(const HierarchialCullingPassInputs& i) {
     return seed;
 }
 
-class HierarchialCullingPass : public ComputePass, public IDynamicDeclaredResources {
+class HierarchialCullingPass : public RenderPass, public IDynamicDeclaredResources {
 public:
     HierarchialCullingPass(
         HierarchialCullingPassInputs inputs,
@@ -45,7 +45,7 @@ public:
         std::shared_ptr<ResourceGroup> slabResourceGroup = nullptr);
     ~HierarchialCullingPass();
 
-    void DeclareResourceUsages(ComputePassBuilder* builder) override;
+    void DeclareResourceUsages(RenderPassBuilder* builder) override;
     void Setup() override;
     PassReturn Execute(PassExecutionContext& executionContext) override;
     void Update(const UpdateExecutionContext& executionContext) override;
