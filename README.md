@@ -65,6 +65,10 @@ Feature development is driven purely by what I'm interested in at the moment.
 - [OpenUSD](https://github.com/PixarAnimationStudios/OpenUSD)
   
 ## Notable sources for development ideas
+[NVidia cluster LOD sample](https://github.com/nvpro-samples/vk_lod_clusters)
+
+[Bevy's virtualized geometry](https://jms55.github.io/posts/2024-06-09-virtual-geometry-bevy-0-14/)
+
 [Visibility Buffer Rendering with Material Graphs](http://filmicworlds.com/blog/visibility-buffer-rendering-with-material-graphs/), by John Hable
 
 [Filament](https://github.com/google/filament) for the material model, with additions from [MaterialX](https://github.com/AcademySoftwareFoundation/MaterialX)
