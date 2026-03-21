@@ -475,6 +475,7 @@ void Renderer::RunRenderResourceSyncStage() {
         const XMMATRIX view = XMMatrixInverse(nullptr, cameraModel);
         DirectX::XMMATRIX projection = camera.info.unjitteredProjection;
         camera.info.prevJitteredProjection = camera.info.jitteredProjection;
+        camera.info.prevUnjitteredProjection = camera.info.unjitteredProjection;
         if (m_jitter && entity.has<Components::PrimaryCamera>()) {
             const auto jitterPixelSpace = UpscalingManager::GetInstance().GetJitter(m_totalFramesRendered);
             camera.jitterPixelSpace = jitterPixelSpace;

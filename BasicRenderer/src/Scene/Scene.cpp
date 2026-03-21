@@ -444,6 +444,7 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 	info.projectionInverse = XMMatrixInverse(nullptr, info.unjitteredProjection);
 	info.prevView = info.view;
 	info.prevJitteredProjection = info.jitteredProjection;
+	info.prevUnjitteredProjection = info.unjitteredProjection;
 	info.positionWorldSpace = { 0.0f, 0.0f, 0.0f, 1.0f };
 	info.clippingPlanes[0] = planes[0];
 	info.clippingPlanes[1] = planes[1];

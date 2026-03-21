@@ -19,6 +19,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <queue>
 
 #include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"
@@ -245,8 +246,40 @@ public:
 		m_visibleCounterQuery = {};
     }
 
+    // ImGui descriptor heap allocator for user textures (slot 0 reserved for font atlas).
+    uint32_t AllocateImGuiDescriptor() {
+        std::lock_guard lock(imguiHeapMutex_);
+        if (!imguiHeapFreeSlots_.empty()) {
+            uint32_t idx = imguiHeapFreeSlots_.front();
+            imguiHeapFreeSlots_.pop();
+            return idx;
+        }
+        if (imguiHeapNextSlot_ < kImGuiHeapCapacity) {
+            return imguiHeapNextSlot_++;
+        }
+        throw std::runtime_error("ImGui descriptor heap exhausted");
+    }
+    void FreeImGuiDescriptor(uint32_t index) {
+        if (index == 0) return; // never free the font atlas slot
+        std::lock_guard lock(imguiHeapMutex_);
+        imguiHeapFreeSlots_.push(index);
+    }
+    ImTextureID GetImGuiGpuDescriptorHandle(uint32_t index) const {
+        return static_cast<ImTextureID>(imguiHeapGpuStart_ + static_cast<uint64_t>(index) * imguiHeapIncrementSize_);
+    }
+    rhi::DescriptorHeapHandle GetImGuiHeapHandle() const {
+        return g_pd3dSrvDescHeap->GetHandle();
+    }
+
 private:
+    static constexpr uint32_t kImGuiHeapCapacity = 64;
     rhi::DescriptorHeapPtr g_pd3dSrvDescHeap;
+    uint64_t imguiHeapGpuStart_ = 0;
+    uint32_t imguiHeapIncrementSize_ = 0;
+    uint32_t imguiHeapNextSlot_ = 1; // slot 0 = font atlas
+    std::queue<uint32_t> imguiHeapFreeSlots_;
+    std::mutex imguiHeapMutex_;
+
     Menu() { 
         ImGui::CreateContext();
 		ImPlot::CreateContext();
@@ -471,7 +504,7 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     environmentsDir = std::filesystem::path(GetExePath()) / "textures" / "environment";
 
 	auto device = DeviceManager::GetInstance().GetDevice();
-	auto result = device.CreateDescriptorHeap({ rhi::DescriptorHeapType::CbvSrvUav, 1, true }, g_pd3dSrvDescHeap);
+	auto result = device.CreateDescriptorHeap({ rhi::DescriptorHeapType::CbvSrvUav, kImGuiHeapCapacity, true }, g_pd3dSrvDescHeap);
 
     // Setup Platform/Renderer backends
     ImGui_ImplWin32_Init(hwnd);
@@ -481,6 +514,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
         rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get()),
         rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetCPUDescriptorHandleForHeapStart(),
         rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetGPUDescriptorHandleForHeapStart());
+
+    // Cache GPU start and increment size for user-texture descriptor allocation.
+    imguiHeapGpuStart_ = rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetGPUDescriptorHandleForHeapStart().ptr;
+    imguiHeapIncrementSize_ = device.GetDescriptorHandleIncrementSize(rhi::DescriptorHeapType::CbvSrvUav);
+
     ImGui_ImplWin32_EnableDpiAwareness();
 
 
@@ -676,26 +714,28 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
         .build();
 }
 
-static bool PassUsesResourceAdapter(const void* passAndRes, uint64_t resourceId, bool isCompute) {
-    if (isCompute) {
+static bool PassUsesResourceAdapter(const void* passAndRes, uint64_t resourceId, int passKind) {
+    auto checkRequirements = [&](const auto& requirements) {
+        for (const auto& req : requirements) {
+            if (req.resourceHandleAndRange.resource.GetGlobalResourceID() == resourceId) {
+                return true;
+            }
+        }
+        return false;
+    };
+    switch (passKind) {
+    case 1: { // Compute
         auto& pr = *reinterpret_cast<const RenderGraph::ComputePassAndResources*>(passAndRes);
-		bool found = false;
-        for (const auto& req : pr.resources.frameResourceRequirements) {
-            if (req.resourceHandleAndRange.resource.GetGlobalResourceID() == resourceId) {
-				found = true;
-            }
-        }
-		return found;
+        return checkRequirements(pr.resources.frameResourceRequirements);
     }
-    else {
+    case 2: { // Copy
+        auto& pr = *reinterpret_cast<const RenderGraph::CopyPassAndResources*>(passAndRes);
+        return checkRequirements(pr.resources.frameResourceRequirements);
+    }
+    default: { // Render (0)
         auto& pr = *reinterpret_cast<const RenderGraph::RenderPassAndResources*>(passAndRes);
-        bool found = false;
-        for (const auto& req : pr.resources.frameResourceRequirements) {
-            if (req.resourceHandleAndRange.resource.GetGlobalResourceID() == resourceId) {
-                found = true;
-            }
-        }
-        return found;
+        return checkRequirements(pr.resources.frameResourceRequirements);
+    }
     }
 }
 
@@ -871,6 +911,10 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     if (showRG) {
 		ImGui::Begin("Render Graph Inspector", nullptr);
         RGInspectorOptions opts;
+        opts.imguiAllocDescriptor = [this]() { return AllocateImGuiDescriptor(); };
+        opts.imguiFreeDescriptor = [this](uint32_t idx) { FreeImGuiDescriptor(idx); };
+        opts.imguiGpuHandle = [this](uint32_t idx) { return GetImGuiGpuDescriptorHandle(idx); };
+        opts.imguiHeapHandle = GetImGuiHeapHandle();
         RGInspector::Show(m_renderGraph->GetBatches(),
             m_renderGraph->GetQueueRegistry(),
             PassUsesResourceAdapter,

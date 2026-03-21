@@ -52,6 +52,7 @@ struct Camera {
     
     row_major matrix prevView;
     row_major matrix prevJitteredProjection;
+    row_major matrix prevUnjitteredProjection;
     
     row_major matrix unjitteredProjection;
 

@@ -110,7 +110,7 @@ groupshared float4x4 gs_unjitteredProj;
 
 groupshared float4x4 gs_viewProj; // view * proj (row-vector convention)
 groupshared float4x4 gs_unjitteredViewProj; // view * unjitteredProj
-groupshared float4x4 gs_prevUnjitteredViewProj; // prevView * unjitteredProj
+groupshared float4x4 gs_prevUnjitteredViewProj; // prevView * prevUnjitteredProj
 
 void InitGroupConstants(uint groupIndex)
 {
@@ -132,7 +132,7 @@ void InitGroupConstants(uint groupIndex)
 
         gs_viewProj = mul(gs_view, gs_proj);
         gs_unjitteredViewProj = mul(gs_view, gs_unjitteredProj);
-        gs_prevUnjitteredViewProj = mul(gs_prevView, gs_unjitteredProj);
+        gs_prevUnjitteredViewProj = mul(gs_prevView, cam.prevUnjitteredProjection);
     }
 
     GroupMemoryBarrierWithGroupSync();
@@ -486,9 +486,9 @@ void EvaluateGBufferOptimized(uint2 pixel)
         dpdx, dpdy, dudx, dudy,
         materialInputs);
 
-    // Motion vectors — CLod meshes are not skinned, so no previous-frame position
+    // Motion vectors use the previous object transform even for rigid CLod meshes.
     float4 clipCur = mul(float4(worldPosition, 1.0f), gs_unjitteredViewProj);
-    float3 prevWorldPosition = worldPosition;
+    float3 prevWorldPosition = mul(float4(posOS, 1.0f), obj.prevModel).xyz;
 
     float4 clipPrev = mul(float4(prevWorldPosition, 1.0f), gs_prevUnjitteredViewProj);
 

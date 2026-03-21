@@ -13,7 +13,7 @@ public:
     void DeclareResourceUsages(ComputePassBuilder* builder) override {
         builder->WithShaderResource(Builtin::Environment::CurrentCubemap, Builtin::Environment::InfoBuffer)
             .WithShaderResource(Builtin::PrimaryCamera::LinearDepthMap, Builtin::CameraBuffer)
-            .WithUnorderedAccess(Builtin::Color::HDRColorTarget);
+            .WithUnorderedAccess(Builtin::Color::HDRColorTarget, Builtin::GBuffer::MotionVectors);
     }
 
     void Setup() override {
@@ -21,6 +21,7 @@ public:
         m_cameraBufferDescriptorIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::CameraBuffer)->GetSRVInfo(0).slot.index;
         m_environmentInfoDescriptorIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::Environment::InfoBuffer)->GetSRVInfo(0).slot.index;
         m_hdrTargetDescriptorIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::Color::HDRColorTarget)->GetUAVShaderVisibleInfo(0).slot.index;
+        m_motionVectorsDescriptorIndex = m_resourceRegistryView->RequestPtr<GloballyIndexedResource>(Builtin::GBuffer::MotionVectors)->GetUAVShaderVisibleInfo(0).slot.index;
         m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
     }
 
@@ -40,6 +41,7 @@ public:
         rootConstants[1] = m_cameraBufferDescriptorIndex;
         rootConstants[2] = m_environmentInfoDescriptorIndex;
         rootConstants[3] = m_hdrTargetDescriptorIndex;
+        rootConstants[4] = m_motionVectorsDescriptorIndex;
         commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, rootConstants);
 
         const uint32_t w = m_pHDRTarget->GetWidth();
@@ -66,6 +68,7 @@ private:
     uint32_t m_cameraBufferDescriptorIndex = 0;
     uint32_t m_environmentInfoDescriptorIndex = 0;
     uint32_t m_hdrTargetDescriptorIndex = 0;
+    uint32_t m_motionVectorsDescriptorIndex = 0;
     void CreatePSO() {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
             PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),

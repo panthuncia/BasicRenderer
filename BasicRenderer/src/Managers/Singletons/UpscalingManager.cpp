@@ -283,7 +283,7 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
     sl::matrixMul(clipToPrevCameraView, consts.clipToCameraView, cameraViewToPrevCameraView);
 
     sl::float4x4 cameraViewToClipPrev;
-    StoreFloat4x4(camera->info.unjitteredProjection, cameraViewToClipPrev); // TODO: should we store the actual previous prjection matrix?
+    StoreFloat4x4(camera->info.prevUnjitteredProjection, cameraViewToClipPrev);
     sl::matrixMul(consts.clipToPrevClip, clipToPrevCameraView, cameraViewToClipPrev); // Transform between current and previous clip space
     sl::matrixFullInvert(consts.prevClipToClip, consts.clipToPrevClip); // Transform between previous and current clip space
 	consts.jitterOffset.x = camera->jitterPixelSpace.x;
