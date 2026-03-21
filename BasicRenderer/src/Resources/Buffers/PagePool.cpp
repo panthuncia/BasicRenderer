@@ -99,9 +99,12 @@ void PagePool::UploadToPage(uint32_t globalPageID, uint32_t intraPageByteOffset,
 	assert(intraPageByteOffset + dataSize <= m_config.pageSize);
 
 	auto& slab = m_slabs[si];
-	BUFFER_UPLOAD(data, dataSize,
-				  rg::runtime::UploadTarget::FromShared(slab.buffer),
-				  slabOffset);
+	auto target = rg::runtime::UploadTarget::FromShared(slab.buffer);
+	if (m_uploadFn) {
+		m_uploadFn(data, dataSize, target, slabOffset);
+	} else {
+		BUFFER_UPLOAD(data, dataSize, target, slabOffset);
+	}
 }
 
 // Page table
@@ -134,9 +137,12 @@ void PagePool::FlushPageTableUpdates() {
 		m_pageTableBuffer->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
 	}
 
-	BUFFER_UPLOAD(m_pageTableCpu.data(), tableBytes,
-				  rg::runtime::UploadTarget::FromShared(m_pageTableBuffer),
-				  0);
+	auto target = rg::runtime::UploadTarget::FromShared(m_pageTableBuffer);
+	if (m_uploadFn) {
+		m_uploadFn(m_pageTableCpu.data(), tableBytes, target, 0);
+	} else {
+		BUFFER_UPLOAD(m_pageTableCpu.data(), tableBytes, target, 0);
+	}
 
 	m_pageTableDirty = false;
 }

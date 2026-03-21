@@ -115,6 +115,12 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
     m_rasterBucketsWriteCursorBufferPhase2->SetName("CLod Raster bucket write cursor phase2");
 }
 
+void CLodExtension::Initialize(RenderGraph& rg) {
+    if (m_streamingSystem) {
+        m_streamingSystem->Initialize(rg);
+    }
+}
+
 void CLodExtension::OnRegistryReset(ResourceRegistry* reg) {
     if (m_streamingSystem) {
         m_streamingSystem->OnRegistryReset(reg);

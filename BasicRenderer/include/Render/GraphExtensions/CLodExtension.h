@@ -14,6 +14,7 @@ public:
     explicit CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters);
     ~CLodExtension();
 
+    void Initialize(RenderGraph& rg) override;
     void OnRegistryReset(ResourceRegistry* reg) override;
     void GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override;
     void GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override;
