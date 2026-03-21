@@ -449,12 +449,14 @@ ParsedDocument ParseDocument(const std::string& filePath) {
 	}
 
 	ParsedDocument doc;
-	const std::string extension = path.extension().string();
+	std::string extension = path.extension().string();
+	std::transform(extension.begin(), extension.end(), extension.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
 	std::optional<GLBChunkSpan> glbJsonChunk;
 	std::optional<GLBChunkSpan> glbBinChunk;
 
-	if (extension == ".glb" || extension == ".GLB") {
+	if (extension == ".glb") {
 		const uint64_t fileSize = GetFileSize(path);
 		const GLBHeader header = ReadGLBHeader(path);
 		if (header.length != fileSize) {
@@ -519,8 +521,33 @@ ParsedDocument ParseDocument(const std::string& filePath) {
 			}
 		}
 		else {
-			if (!(extension == ".glb" || extension == ".GLB")) {
-				throw std::runtime_error("Non-GLB buffer missing URI");
+			if (extension != ".glb") {
+				// Dump buffer object and top-level extensions for diagnostics.
+				std::string bufferDump = buffer.dump(2);
+				std::string extensionsUsed;
+				if (doc.gltf.contains("extensionsUsed")) {
+					extensionsUsed = doc.gltf["extensionsUsed"].dump();
+				}
+				std::string extensionsRequired;
+				if (doc.gltf.contains("extensionsRequired")) {
+					extensionsRequired = doc.gltf["extensionsRequired"].dump();
+				}
+				std::string bufferExtensions;
+				if (buffer.contains("extensions")) {
+					bufferExtensions = buffer["extensions"].dump(2);
+				}
+				spdlog::error("Buffer [{}] has no 'uri' field in non-GLB file: {}", bufferIndex, filePath);
+				spdlog::error("  Buffer object: {}", bufferDump);
+				if (!bufferExtensions.empty())
+					spdlog::error("  Buffer extensions: {}", bufferExtensions);
+				if (!extensionsUsed.empty())
+					spdlog::error("  extensionsUsed: {}", extensionsUsed);
+				if (!extensionsRequired.empty())
+					spdlog::error("  extensionsRequired: {}", extensionsRequired);
+				spdlog::error("  Total buffers in file: {}", doc.gltf["buffers"].size());
+				throw std::runtime_error(
+					"Non-GLB buffer[" + std::to_string(bufferIndex) + "] missing URI in " + filePath
+					+ (extensionsRequired.empty() ? "" : " (extensionsRequired: " + extensionsRequired + ")"));
 			}
 			if (!glbBinChunk.has_value()) {
 				throw std::runtime_error("GLB binary chunk not found");
