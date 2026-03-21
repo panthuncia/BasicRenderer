@@ -104,7 +104,6 @@ static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_PAGE_BOUNDS = 51;
 
 static const uint WG_COUNTER_CHILD_PREFILTER_FRUSTUM_CULLED = 52;
 static const uint WG_COUNTER_CHILD_PREFILTER_LOD_REJECTED = 53;
-static const uint WG_COUNTER_CHILD_PREFILTER_OCCLUSION_CULLED = 54;
 
 static const uint CLOD_STREAM_REQUEST_CAPACITY = (1u << 16);
 static const uint CLOD_USED_GROUPS_CAPACITY = (1u << 17);
@@ -558,9 +557,14 @@ void WG_TraverseNodes(
 
         const float nodeUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
         const float3 nodeCenterObjectSpace = node.metric.centerAndRadius.xyz;
+        const float3 nodeCenterViewSpace = ToViewSpace(nodeCenterObjectSpace, objectModelMatrix, camera.view);
         const float nodeRadiusWorld = node.metric.centerAndRadius.w * nodeUniformScale;
+        const bool nodeCulled = !replaySource && SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, camera);
 
-        {
+        if (nodeCulled) {
+            WGTelemetryAdd(WG_COUNTER_TRAVERSE_CULLED_NODE_RECORDS, 1);
+        }
+        else {
             // LOD pre-filter: for segment-leaves, check if the own group's
             // error-over-distance exceeds threshold (condition 1 of the
             // meshoptimizer rendering rule).  Uses the actual group sphere
@@ -660,7 +664,7 @@ void WG_TraverseNodes(
                 }
             }
             else {
-                // Internal node: LOD check + child emission (frustum + occlusion per-child).
+                // Internal node: LOD check + occlusion + child emission.
                 const float3 lodCheckWorldCenter = mul(float4(nodeCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
                 const float lodCheckWorldRadius = nodeRadiusWorld;
                 const float nodeErrorOverDistance = ErrorOverDistance(
@@ -676,88 +680,90 @@ void WG_TraverseNodes(
                     WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
                 }
                 else {
-                    const uint childCount = min(node.range.countMinusOne + 1u, BVH_MAX_CHILDREN);
-                    const uint sourceTag = UnpackSourceTag(rec.nodeIdPacked);
-
-                    // Pre-filter children: load each child, frustum cull + occlusion + LOD check,
-                    // and only emit records for survivors.
-                    [loop]
-                    for (uint childIndex = 0; childIndex < childCount; ++childIndex) {
-                        const uint childNodeId = node.range.indexOrOffset + childIndex;
-                        const ClusterLODNode child = lodNodes[clodMeshMetadata.lodNodesBase + childNodeId];
-
-                        // Frustum cull child.
-                        const float3 childCenterVS = ToViewSpace(child.metric.centerAndRadius.xyz, objectModelMatrix, camera.view);
-                        const float childRadiusWorld = child.metric.centerAndRadius.w * nodeUniformScale;
-                        if (!replaySource && SphereOutsideFrustumViewSpace(childCenterVS, childRadiusWorld, camera)) {
-                            WGTelemetryAdd(WG_COUNTER_CHILD_PREFILTER_FRUSTUM_CULLED, 1);
-                            continue;
+                    bool occlusionCulled = false;
+                    if (CLodWorkGraphOcclusionEnabled() && !camera.isOrtho) {
+                        StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
+                            ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
+                        const uint depthMapDescriptorIndex = viewDepthSRVIndices[rec.viewId].linearDepthSRVIndex;
+                        if (depthMapDescriptorIndex != 0) {
+                            if (replaySource) {
+                                // Phase 2 replay: HZB is from this frame's Phase 1 depth,
+                                // so test current-frame bounding spheres.
+                                OcclusionCullingPerspectiveTexture2D(
+                                    occlusionCulled,
+                                    camera,
+                                    nodeCenterViewSpace,
+                                    -nodeCenterViewSpace.z,
+                                    nodeRadiusWorld,
+                                    depthMapDescriptorIndex);
+                            } else {
+                                // Phase 1: HZB is from previous frame's depth,
+                                // so reproject bounding sphere into previous frame's camera space.
+                                const row_major matrix prevModelMatrix = perObjectBuffer[objectBufferIndex].prevModel;
+                                const float prevNodeUniformScale = MaxAxisScale_RowVector(prevModelMatrix);
+                                const float3 prevNodeCenterViewSpace = ToViewSpace(nodeCenterObjectSpace, prevModelMatrix, camera.prevView);
+                                const float prevNodeRadiusWorld = node.metric.centerAndRadius.w * prevNodeUniformScale;
+                                OcclusionCullingPerspectiveTexture2D(
+                                    occlusionCulled,
+                                    camera,
+                                    prevNodeCenterViewSpace,
+                                    -prevNodeCenterViewSpace.z,
+                                    prevNodeRadiusWorld,
+                                    depthMapDescriptorIndex,
+                                    camera.prevUnjitteredProjection);
+                            }
                         }
+                    }
 
-                        // Occlusion cull child.
-                        if (CLodWorkGraphOcclusionEnabled() && !camera.isOrtho) {
-                            StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
-                                ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
-                            const uint depthMapDescriptorIndex = viewDepthSRVIndices[rec.viewId].linearDepthSRVIndex;
-                            if (depthMapDescriptorIndex != 0) {
-                                bool childOccluded = false;
-                                if (replaySource) {
-                                    // Phase 2 replay: HZB is from this frame's Phase 1 depth,
-                                    // so test current-frame bounding spheres.
-                                    OcclusionCullingPerspectiveTexture2D(
-                                        childOccluded,
-                                        camera,
-                                        childCenterVS,
-                                        -childCenterVS.z,
-                                        childRadiusWorld,
-                                        depthMapDescriptorIndex);
-                                } else {
-                                    // Phase 1: HZB is from previous frame's depth,
-                                    // so reproject child bounding sphere into previous frame's camera space.
-                                    const row_major matrix prevModelMatrix = perObjectBuffer[objectBufferIndex].prevModel;
-                                    const float prevUniformScale = MaxAxisScale_RowVector(prevModelMatrix);
-                                    const float3 prevChildCenterVS = ToViewSpace(child.metric.centerAndRadius.xyz, prevModelMatrix, camera.prevView);
-                                    const float prevChildRadiusWorld = child.metric.centerAndRadius.w * prevUniformScale;
-                                    OcclusionCullingPerspectiveTexture2D(
-                                        childOccluded,
-                                        camera,
-                                        prevChildCenterVS,
-                                        -prevChildCenterVS.z,
-                                        prevChildRadiusWorld,
-                                        depthMapDescriptorIndex,
-                                        camera.prevUnjitteredProjection);
-                                }
-                                if (childOccluded) {
-                                    if (!replaySource) {
-                                        ReplayTryAppendNode(rec.instanceIndex, rec.viewId, childNodeId);
-                                    }
-                                    WGTelemetryAdd(WG_COUNTER_CHILD_PREFILTER_OCCLUSION_CULLED, 1);
+                    if (occlusionCulled) {
+                        if (!replaySource) {
+                            ReplayTryAppendNode(
+                                rec.instanceIndex,
+                                rec.viewId,
+                                UnpackNodeId(rec.nodeIdPacked));
+                        }
+                    }
+                    else {
+                        const uint childCount = min(node.range.countMinusOne + 1u, BVH_MAX_CHILDREN);
+                        const uint sourceTag = UnpackSourceTag(rec.nodeIdPacked);
+
+                        // Pre-filter children: load each child, frustum cull + LOD check,
+                        // and only emit records for survivors.
+                        [loop]
+                        for (uint childIndex = 0; childIndex < childCount; ++childIndex) {
+                            const uint childNodeId = node.range.indexOrOffset + childIndex;
+                            const ClusterLODNode child = lodNodes[clodMeshMetadata.lodNodesBase + childNodeId];
+
+                            // Frustum cull child.
+                            const float3 childCenterVS = ToViewSpace(child.metric.centerAndRadius.xyz, objectModelMatrix, camera.view);
+                            const float childRadiusWorld = child.metric.centerAndRadius.w * nodeUniformScale;
+                            if (!replaySource && SphereOutsideFrustumViewSpace(childCenterVS, childRadiusWorld, camera)) {
+                                WGTelemetryAdd(WG_COUNTER_CHILD_PREFILTER_FRUSTUM_CULLED, 1);
+                                continue;
+                            }
+
+                            // LOD pre-filter for internal children only.
+                            // Leaf children use the group sphere for LOD (different from node sphere),
+                            // so we skip the LOD check here and let the leaf thread handle it.
+                            if (child.range.isLeaf == 0) {
+                                const float3 childWorldCenter = mul(float4(child.metric.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+                                const float childEOD = ErrorOverDistance(
+                                    childWorldCenter, childRadiusWorld,
+                                    child.metric.maxQuadricError, nodeUniformScale,
+                                    cam.positionWorldSpace.xyz, cam.zNear);
+                                if (childEOD < cam.errorOverDistanceThreshold) {
+                                    WGTelemetryAdd(WG_COUNTER_CHILD_PREFILTER_LOD_REJECTED, 1);
                                     continue;
                                 }
                             }
-                        }
 
-                        // LOD pre-filter for internal children only.
-                        // Leaf children use the group sphere for LOD (different from node sphere),
-                        // so we skip the LOD check here and let the leaf thread handle it.
-                        if (child.range.isLeaf == 0) {
-                            const float3 childWorldCenter = mul(float4(child.metric.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
-                            const float childEOD = ErrorOverDistance(
-                                childWorldCenter, childRadiusWorld,
-                                child.metric.maxQuadricError, nodeUniformScale,
-                                cam.positionWorldSpace.xyz, cam.zNear);
-                            if (childEOD < cam.errorOverDistanceThreshold) {
-                                WGTelemetryAdd(WG_COUNTER_CHILD_PREFILTER_LOD_REJECTED, 1);
-                                continue;
-                            }
+                            TraverseNodeRecord childRecord = (TraverseNodeRecord)0;
+                            childRecord.instanceIndex = rec.instanceIndex;
+                            childRecord.viewId = rec.viewId;
+                            childRecord.nodeIdPacked = PackTraverseNodeId(childNodeId, sourceTag, 1u);
+                            childRecords[emitTraverseCount] = childRecord;
+                            emitTraverseCount++;
                         }
-
-                        TraverseNodeRecord childRecord = (TraverseNodeRecord)0;
-                        childRecord.instanceIndex = rec.instanceIndex;
-                        childRecord.viewId = rec.viewId;
-                        childRecord.nodeIdPacked = PackTraverseNodeId(childNodeId, sourceTag, 1u);
-                        childRecords[emitTraverseCount] = childRecord;
-                        emitTraverseCount++;
                     }
                 }
             }
@@ -796,40 +802,41 @@ void WG_TraverseNodes(
             out64[i] = r;
             offset += 64;
         }
-        if (n32) {
+        for (uint i32 = 0; i32 < n32; i32++) {
             MeshletBucketRecord r = bucketRecord;
             r.meshletIndexAndCount = PackMeshletIndexAndCount(offset, 32);
-            out32.Get() = r;
+            out32[i32] = r;
             offset += 32;
         }
-        if (n16) {
+        for (uint i16 = 0; i16 < n16; i16++) {
             MeshletBucketRecord r = bucketRecord;
             r.meshletIndexAndCount = PackMeshletIndexAndCount(offset, 16);
-            out16.Get() = r;
+            out16[i16] = r;
             offset += 16;
         }
-        if (n8) {
+        for (uint i8 = 0; i8 < n8; i8++) {
             MeshletBucketRecord r = bucketRecord;
             r.meshletIndexAndCount = PackMeshletIndexAndCount(offset, 8);
-            out8.Get() = r;
+            out8[i8] = r;
             offset += 8;
         }
-        if (n4) {
+        for (uint i4 = 0; i4 < n4; i4++) {
             MeshletBucketRecord r = bucketRecord;
             r.meshletIndexAndCount = PackMeshletIndexAndCount(offset, 4);
-            out4.Get() = r;
+            out4[i4] = r;
             offset += 4;
         }
-        if (n2) {
+        for (uint i2 = 0; i2 < n2; i2++) {
             MeshletBucketRecord r = bucketRecord;
             r.meshletIndexAndCount = PackMeshletIndexAndCount(offset, 2);
-            out2.Get() = r;
+            out2[i2] = r;
             offset += 2;
         }
-        if (n1) {
+        for (uint i1 = 0; i1 < n1; i1++) {
             MeshletBucketRecord r = bucketRecord;
             r.meshletIndexAndCount = PackMeshletIndexAndCount(offset, 1);
-            out1.Get() = r;
+            out1[i1] = r;
+            offset += 1;
         }
         WGTelemetryAdd(WG_COUNTER_TRAVERSE_SEGMENT_RECORDS, 1);
     }
@@ -1159,7 +1166,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
     }
 }
 
-// ClusterCull variant entry points — one per bucket size.
+// ClusterCull variant entry points - one per bucket size.
 // Each variant processes a fixed number of meshlets per lane, eliminating wave divergence.
 
 [Shader("node")]

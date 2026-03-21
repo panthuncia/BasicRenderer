@@ -18,6 +18,7 @@
 #include <vector>
 
 #include <DirectXMath.h>
+#include <meshoptimizer.h>
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 
@@ -64,6 +65,7 @@ struct AccessorInfo {
 enum class BufferBacking {
 	FileSpan,
 	DataUri,
+	Fallback, // URI-less buffer used by EXT_meshopt_compression; not directly readable
 };
 
 struct BufferSource {
@@ -77,6 +79,12 @@ struct BufferSource {
 struct ParsedDocument {
 	json gltf;
 	std::vector<BufferSource> buffers;
+	bool hasMeshoptCompression = false;
+
+	// Cache of decompressed bufferView data for EXT_meshopt_compression.
+	// Keyed by bufferView index. Protected by mutex for parallel access.
+	std::unordered_map<size_t, std::vector<uint8_t>> decompressedBufferViews;
+	std::unique_ptr<std::mutex> decompressedViewsMutex = std::make_unique<std::mutex>();
 };
 
 // Constants
@@ -328,6 +336,12 @@ double ReadComponentAsDouble(const std::vector<uint8_t>& source, int componentTy
 // Buffer reading
 
 std::vector<uint8_t> ReadFromSource(const BufferSource& source, uint64_t offset, uint64_t size) {
+	if (source.backing == BufferBacking::Fallback) {
+		throw std::runtime_error(
+			"Attempted to read from a fallback buffer (no URI). "
+			"This buffer is only used by EXT_meshopt_compression and should not be read directly.");
+	}
+
 	if (source.backing == BufferBacking::DataUri) {
 		const auto bytes = DecodeDataUri(source.dataUri);
 		if (offset > bytes.size() || size > bytes.size() - offset) {
@@ -348,17 +362,98 @@ std::vector<uint8_t> ReadFromSource(const BufferSource& source, uint64_t offset,
 	return ReadFileRange(source.filePath, source.fileOffset + offset, size);
 }
 
-std::vector<uint8_t> ReadAccessorRawWindow(const ParsedDocument& doc, size_t accessorIndex, size_t firstElement, size_t elementCount, size_t* outStride, size_t* outComponentCount, int* outComponentType) {
+// EXT_meshopt_compression: check if a bufferView is meshopt-compressed.
+bool IsMeshoptCompressedView(const json& gltf, size_t bufferViewIndex) {
+	const auto& bvArray = gltf.at("bufferViews");
+	if (bufferViewIndex >= bvArray.size()) return false;
+	const auto& bv = bvArray[bufferViewIndex];
+	return bv.contains("extensions") &&
+	       bv["extensions"].contains("EXT_meshopt_compression");
+}
+
+// EXT_meshopt_compression: decompress a bufferView and cache the result.
+// Returns a pointer to the decompressed data vector (stable because it's in an unordered_map).
+const std::vector<uint8_t>& GetDecompressedBufferView(ParsedDocument& doc, size_t bufferViewIndex) {
+	// Fast path: check cache under lock.
+	{
+		std::lock_guard<std::mutex> lock(*doc.decompressedViewsMutex);
+		auto it = doc.decompressedBufferViews.find(bufferViewIndex);
+		if (it != doc.decompressedBufferViews.end()) {
+			return it->second;
+		}
+	}
+
+	const auto& bv = doc.gltf["bufferViews"][bufferViewIndex];
+	const auto& ext = bv["extensions"]["EXT_meshopt_compression"];
+
+	const size_t compBufferIndex = ext.at("buffer").get<size_t>();
+	const size_t compByteOffset = ext.value<size_t>("byteOffset", static_cast<size_t>(0));
+	const size_t compByteLength = ext.at("byteLength").get<size_t>();
+	const size_t count = ext.at("count").get<size_t>();
+	const size_t stride = ext.at("byteStride").get<size_t>();
+	const std::string mode = ext.at("mode").get<std::string>();
+	const std::string filter = ext.value<std::string>("filter", "NONE");
+
+	if (compBufferIndex >= doc.buffers.size()) {
+		throw std::runtime_error("EXT_meshopt_compression: buffer index " +
+			std::to_string(compBufferIndex) + " out of range");
+	}
+
+	// Read compressed data from the source buffer.
+	auto compressedData = ReadFromSource(doc.buffers[compBufferIndex], compByteOffset, compByteLength);
+
+	// Decompress.
+	std::vector<uint8_t> decompressed(count * stride);
+	int rc = -1;
+	if (mode == "ATTRIBUTES") {
+		rc = meshopt_decodeVertexBuffer(decompressed.data(), count, stride,
+			compressedData.data(), compressedData.size());
+	} else if (mode == "TRIANGLES") {
+		rc = meshopt_decodeIndexBuffer(decompressed.data(), count, stride,
+			compressedData.data(), compressedData.size());
+	} else if (mode == "INDICES") {
+		rc = meshopt_decodeIndexSequence(decompressed.data(), count, stride,
+			compressedData.data(), compressedData.size());
+	} else {
+		throw std::runtime_error("EXT_meshopt_compression: unsupported mode '" + mode + "'");
+	}
+
+	if (rc != 0) {
+		throw std::runtime_error("EXT_meshopt_compression: meshopt decode failed for bufferView " +
+			std::to_string(bufferViewIndex) + " (mode=" + mode + ")");
+	}
+
+	// Apply optional decode filter.
+	if (filter == "OCTAHEDRAL") {
+		meshopt_decodeFilterOct(decompressed.data(), count, stride);
+	} else if (filter == "QUATERNION") {
+		meshopt_decodeFilterQuat(decompressed.data(), count, stride);
+	} else if (filter == "EXPONENTIAL") {
+		meshopt_decodeFilterExp(decompressed.data(), count, stride);
+	} else if (filter != "NONE") {
+		throw std::runtime_error("EXT_meshopt_compression: unsupported filter '" + filter + "'");
+	}
+
+	spdlog::debug("EXT_meshopt_compression: decompressed bufferView {} (mode={}, filter={}, count={}, stride={})",
+		bufferViewIndex, mode, filter, count, stride);
+
+	// Cache under lock.
+	std::lock_guard<std::mutex> lock(*doc.decompressedViewsMutex);
+	auto [it, inserted] = doc.decompressedBufferViews.emplace(bufferViewIndex, std::move(decompressed));
+	return it->second;
+}
+
+std::vector<uint8_t> ReadAccessorRawWindow(ParsedDocument& doc, size_t accessorIndex, size_t firstElement, size_t elementCount, size_t* outStride, size_t* outComponentCount, int* outComponentType) {
 	const AccessorInfo accessor = GetAccessorInfo(doc.gltf, accessorIndex);
 	const BufferViewInfo view = GetBufferViewInfo(doc.gltf, accessor.bufferViewIndex);
-
-	if (view.bufferIndex >= doc.buffers.size()) {
-		throw std::runtime_error("Buffer index out of range");
-	}
 
 	const size_t componentCount = NumComponentsForType(accessor.type);
 	const size_t componentBytes = BytesPerComponent(accessor.componentType);
 	const size_t packedElementSize = componentCount * componentBytes;
+
+	// For meshopt-compressed views, the stride comes from the extension, not the bufferView.
+	const bool isMeshoptView = doc.hasMeshoptCompression &&
+		IsMeshoptCompressedView(doc.gltf, accessor.bufferViewIndex);
 	const size_t stride = view.byteStride == 0 ? packedElementSize : view.byteStride;
 
 	if (elementCount == 0) {
@@ -372,6 +467,31 @@ std::vector<uint8_t> ReadAccessorRawWindow(const ParsedDocument& doc, size_t acc
 		throw std::runtime_error("Accessor window out of bounds");
 	}
 
+	*outStride = stride;
+	*outComponentCount = componentCount;
+	*outComponentType = accessor.componentType;
+
+	if (isMeshoptView) {
+		// Read from the decompressed bufferView cache. The decompressed data
+		// represents the full bufferView contents starting at byte 0, so we
+		// offset from the accessor's byteOffset only (bufferView.byteOffset
+		// was already accounted for during decompression).
+		const auto& decompressed = GetDecompressedBufferView(doc, accessor.bufferViewIndex);
+		const size_t relativeStart = accessor.byteOffset + firstElement * stride;
+		const size_t bytesNeeded = (elementCount - 1) * stride + packedElementSize;
+
+		if (relativeStart + bytesNeeded > decompressed.size()) {
+			throw std::runtime_error("Accessor range exceeds decompressed bufferView bounds");
+		}
+
+		return std::vector<uint8_t>(decompressed.begin() + relativeStart,
+			decompressed.begin() + relativeStart + bytesNeeded);
+	}
+
+	if (view.bufferIndex >= doc.buffers.size()) {
+		throw std::runtime_error("Buffer index out of range");
+	}
+
 	const uint64_t relativeStart = static_cast<uint64_t>(view.byteOffset + accessor.byteOffset + firstElement * stride);
 	const uint64_t relativeEnd = relativeStart + static_cast<uint64_t>((elementCount - 1) * stride + packedElementSize);
 	const uint64_t viewEnd = static_cast<uint64_t>(view.byteOffset + view.byteLength);
@@ -379,10 +499,6 @@ std::vector<uint8_t> ReadAccessorRawWindow(const ParsedDocument& doc, size_t acc
 	if (relativeEnd > viewEnd) {
 		throw std::runtime_error("Accessor range exceeds bufferView bounds");
 	}
-
-	*outStride = stride;
-	*outComponentCount = componentCount;
-	*outComponentType = accessor.componentType;
 
 	return ReadFromSource(doc.buffers[view.bufferIndex], relativeStart, relativeEnd - relativeStart);
 }
@@ -493,6 +609,17 @@ ParsedDocument ParseDocument(const std::string& filePath) {
 		throw std::runtime_error("glTF contains no buffers");
 	}
 
+	// Detect EXT_meshopt_compression usage.
+	if (doc.gltf.contains("extensionsUsed") && doc.gltf["extensionsUsed"].is_array()) {
+		for (const auto& ext : doc.gltf["extensionsUsed"]) {
+			if (ext.is_string() && ext.get<std::string>() == "EXT_meshopt_compression") {
+				doc.hasMeshoptCompression = true;
+				spdlog::info("glTF: EXT_meshopt_compression detected in {}", filePath);
+				break;
+			}
+		}
+	}
+
 	const std::filesystem::path parent = path.parent_path();
 
 	for (size_t bufferIndex = 0; bufferIndex < doc.gltf["buffers"].size(); ++bufferIndex) {
@@ -522,6 +649,18 @@ ParsedDocument ParseDocument(const std::string& filePath) {
 		}
 		else {
 			if (extension != ".glb") {
+				if (doc.hasMeshoptCompression) {
+					// EXT_meshopt_compression: URI-less buffers are fallback placeholders.
+					// The actual data is stored on bufferViews via the extension and will
+					// be decompressed on demand, but we still need this buffer entry for
+					// the extension's compressed data references.
+					source.backing = BufferBacking::Fallback;
+					source.fileLength = buffer.value<uint64_t>("byteLength", static_cast<uint64_t>(0));
+					spdlog::debug("glTF: buffer[{}] is a meshopt fallback (no URI, byteLength={})",
+						bufferIndex, source.fileLength);
+					doc.buffers.push_back(std::move(source));
+					continue;
+				}
 				// Dump buffer object and top-level extensions for diagnostics.
 				std::string bufferDump = buffer.dump(2);
 				std::string extensionsUsed;
@@ -574,7 +713,7 @@ ParsedDocument ParseDocument(const std::string& filePath) {
 
 // Index reading
 
-std::vector<uint32_t> ReadAllIndices(const ParsedDocument& doc, const json& primitive, size_t vertexCount) {
+std::vector<uint32_t> ReadAllIndices(ParsedDocument& doc, const json& primitive, size_t vertexCount) {
 	std::vector<uint32_t> indices;
 	if (primitive.contains("indices")) {
 		const size_t accessorIndex = primitive["indices"].get<size_t>();
@@ -613,7 +752,7 @@ std::vector<uint32_t> ReadAllIndices(const ParsedDocument& doc, const json& prim
 // Normal generation
 
 std::vector<XMFLOAT3> ComputeSmoothNormals(
-	const ParsedDocument& doc,
+	ParsedDocument& doc,
 	size_t positionAccessorIndex,
 	size_t vertexCount,
 	const std::vector<uint32_t>& indices)
@@ -684,7 +823,7 @@ std::vector<XMFLOAT3> ComputeSmoothNormals(
 // Per-primitive Preprocessing
 
 MeshPreprocessResult BuildPrimitivePreprocessData(
-	const ParsedDocument& doc,
+	ParsedDocument& doc,
 	const json& primitive,
 	const std::string& sourceFilePath,
 	size_t meshIndex,
