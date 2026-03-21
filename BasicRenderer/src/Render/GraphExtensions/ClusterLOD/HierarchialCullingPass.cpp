@@ -409,10 +409,9 @@ void HierarchialCullingPass::CreatePipelines(
         static_cast<uint32_t>(compiled.libraryBlob->GetBufferSize())
     };
 
-    std::array<rhi::ShaderExportDesc, 10> exports = {{
+    std::array<rhi::ShaderExportDesc, 9> exports = {{
         { "WG_ObjectCull", nullptr },
         { "WG_TraverseNodes", nullptr },
-        { "WG_SegmentEvaluate", nullptr },
         { "WG_ClusterCull1", nullptr },
         { "WG_ClusterCull2", nullptr },
         { "WG_ClusterCull4", nullptr },
