@@ -650,13 +650,32 @@ void WG_TraverseNodes(
                         ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
                     const uint depthMapDescriptorIndex = viewDepthSRVIndices[rec.viewId].linearDepthSRVIndex;
                     if (depthMapDescriptorIndex != 0) {
-                        OcclusionCullingPerspectiveTexture2D(
-                            occlusionCulled,
-                            camera,
-                            nodeCenterViewSpace,
-                            -nodeCenterViewSpace.z,
-                            nodeRadiusWorld,
-                            depthMapDescriptorIndex);
+                        if (replaySource) {
+                            // Phase 2 replay: HZB is from this frame's Phase 1 depth,
+                            // so test current-frame bounding spheres.
+                            OcclusionCullingPerspectiveTexture2D(
+                                occlusionCulled,
+                                camera,
+                                nodeCenterViewSpace,
+                                -nodeCenterViewSpace.z,
+                                nodeRadiusWorld,
+                                depthMapDescriptorIndex);
+                        } else {
+                            // Phase 1: HZB is from previous frame's depth,
+                            // so reproject bounding sphere into previous frame's camera space.
+                            const row_major matrix prevModelMatrix = perObjectBuffer[objectBufferIndex].prevModel;
+                            const float prevNodeUniformScale = MaxAxisScale_RowVector(prevModelMatrix);
+                            const float3 prevNodeCenterViewSpace = ToViewSpace(nodeCenterObjectSpace, prevModelMatrix, camera.prevView);
+                            const float prevNodeRadiusWorld = node.metric.centerAndRadius.w * prevNodeUniformScale;
+                            OcclusionCullingPerspectiveTexture2D(
+                                occlusionCulled,
+                                camera,
+                                prevNodeCenterViewSpace,
+                                -prevNodeCenterViewSpace.z,
+                                prevNodeRadiusWorld,
+                                depthMapDescriptorIndex,
+                                camera.prevUnjitteredProjection);
+                        }
                     }
                 }
 
@@ -882,6 +901,7 @@ void WG_ClusterCullBuckets(
     bool pageValid = false;
     bool replaySource = false;
     row_major matrix objectModelMatrix = (float4x4)0;
+    row_major matrix prevModelMatrix = (float4x4)0;
     Camera camera = (Camera)0;
     uint pageSlabDesc = 0;
     uint pageSlabOff = 0;
@@ -907,6 +927,7 @@ void WG_ClusterCullBuckets(
         StructuredBuffer<PerObjectBuffer> perObjectBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
         objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
+        prevModelMatrix = perObjectBuffer[objectBufferIndex].prevModel;
 
         StructuredBuffer<Camera> cameras =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
@@ -1040,13 +1061,31 @@ void WG_ClusterCullBuckets(
 
                 if (survives && CLodWorkGraphOcclusionEnabled() && depthMapDescriptorIndex != 0) {
                     bool occlusionCulled = false;
-                    OcclusionCullingPerspectiveTexture2D(
-                        occlusionCulled,
-                        camera,
-                        meshletCenterViewSpace,
-                        -meshletCenterViewSpace.z,
-                        meshletRadiusWorld,
-                        depthMapDescriptorIndex);
+                    if (replaySource) {
+                        // Phase 2 replay: HZB is from this frame's Phase 1 depth,
+                        // so test current-frame bounding spheres.
+                        OcclusionCullingPerspectiveTexture2D(
+                            occlusionCulled,
+                            camera,
+                            meshletCenterViewSpace,
+                            -meshletCenterViewSpace.z,
+                            meshletRadiusWorld,
+                            depthMapDescriptorIndex);
+                    } else {
+                        // Phase 1: HZB is from previous frame's depth,
+                        // so reproject bounding sphere into previous frame's camera space.
+                        const float prevMeshletScale = MaxAxisScale_RowVector(prevModelMatrix);
+                        const float3 prevMeshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, prevModelMatrix, camera.prevView);
+                        const float prevMeshletRadiusWorld = meshletBounds.sphere.w * prevMeshletScale;
+                        OcclusionCullingPerspectiveTexture2D(
+                            occlusionCulled,
+                            camera,
+                            prevMeshletCenterViewSpace,
+                            -prevMeshletCenterViewSpace.z,
+                            prevMeshletRadiusWorld,
+                            depthMapDescriptorIndex,
+                            camera.prevUnjitteredProjection);
+                    }
                     if (occlusionCulled) {
                         if (!replaySource) {
                             ReplayTryAppendMeshlet(
