@@ -1672,6 +1672,35 @@ inline void Menu::DrawCLodTelemetryWindow() {
         ImGui::Text("Visible cluster writes: %u", counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites));
 
         ImGui::Separator();
+        ImGui::TextUnformatted("ClusterCull meshlet rejection breakdown");
+        {
+            const uint32_t meshletIter = counter(CLodWorkGraphCounterIndex::ClusterCullMeshletIterations);
+            const uint32_t rejFrustum = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedFrustum);
+            const uint32_t rejCond2 = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedCondition2);
+            const uint32_t rejOccl = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedOcclusion);
+            const uint32_t rejOOR = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedOutOfRange);
+            const uint32_t rejPageBounds = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedPageBounds);
+            const uint32_t survived = counter(CLodWorkGraphCounterIndex::ClusterCullSurvivingLanes);
+            const uint32_t totalRejected = rejFrustum + rejCond2 + rejOccl + rejOOR + rejPageBounds;
+
+            ImGui::Text("Meshlet iterations evaluated: %u", meshletIter);
+            ImGui::Text("Survived: %u", survived);
+            ImGui::Text("Rejected total: %u", totalRejected);
+
+            auto rejectionRow = [](const char* label, uint32_t count, uint32_t total) {
+                const float pct = (total > 0)
+                    ? (100.0f * static_cast<float>(count) / static_cast<float>(total))
+                    : 0.0f;
+                ImGui::Text("  %s: %u (%.1f%%)", label, count, pct);
+            };
+            rejectionRow("Frustum cull", rejFrustum, totalRejected);
+            rejectionRow("Condition 2 (child group refinement)", rejCond2, totalRejected);
+            rejectionRow("Occlusion cull", rejOccl, totalRejected);
+            rejectionRow("WaveActiveMax padding (inactive iterations)", rejOOR, totalRejected);
+            rejectionRow("Page bounds overflow", rejPageBounds, totalRejected);
+        }
+
+        ImGui::Separator();
         ImGui::TextUnformatted("Occlusion -> Phase 2 enqueue attempts");
         ImGui::Text("Node attempts: %u | Cluster attempts: %u",
             counter(CLodWorkGraphCounterIndex::Phase1OcclusionNodeReplayEnqueueAttempts),

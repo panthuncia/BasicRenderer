@@ -95,6 +95,13 @@ static const uint WG_COUNTER_SEGMENT_EVALUATE_NON_RESIDENT_REFINED_CHILD_THREADS
 static const uint WG_COUNTER_SEGMENT_EVALUATE_COALESCED_LAUNCHES = 44;
 static const uint WG_COUNTER_SEGMENT_EVALUATE_COALESCED_INPUT_RECORDS = 45;
 
+static const uint WG_COUNTER_CLUSTER_CULL_MESHLET_ITERATIONS = 46;
+static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_FRUSTUM = 47;
+static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2 = 48;
+static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_OCCLUSION = 49;
+static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_OUT_OF_RANGE = 50;
+static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_PAGE_BOUNDS = 51;
+
 static const uint CLOD_STREAM_REQUEST_CAPACITY = (1u << 16);
 static const uint CLOD_USED_GROUPS_CAPACITY = (1u << 17);
 static const uint CLOD_STREAM_VIEWID_MASK = 0xFFFFu;
@@ -151,6 +158,7 @@ static const uint COALESCED_INPUT_COUNT_HISTOGRAM_BUCKETS = 8;
 static const uint TRAVERSE_RECORDS_PER_GROUP = TRAVERSE_THREADS_PER_GROUP;
 static const uint SEGMENT_EVALUATE_THREADS_PER_GROUP = 32;
 static const uint SEGMENT_EVALUATE_RECORDS_PER_GROUP = SEGMENT_EVALUATE_THREADS_PER_GROUP;
+static const uint MAX_RECORDS_PER_SEGMENT = 8;
 
 void WGTelemetryAdd(uint counterIndex, uint value)
 {
@@ -334,7 +342,7 @@ void WG_ReplayNodeGroup(
 void WG_ReplayMeshlet(
     [MaxRecords(32)] GroupNodeInputRecords<CLodMeshletReplayRecord> inRecs,
     uint3 gtid : SV_GroupThreadID,
-    [MaxRecords(32)] NodeOutput<MeshletBucketRecord> ClusterCullBuckets)
+    [MaxRecords(32)] NodeOutput<MeshletBucketRecord> ClusterCull1)
 {
     const uint lane = gtid.x;
     const uint inputCount = inRecs.Count();
@@ -355,7 +363,7 @@ void WG_ReplayMeshlet(
     }
 
     ThreadNodeOutputRecords<MeshletBucketRecord> outBucket =
-        ClusterCullBuckets.GetThreadNodeOutputRecords(emitBucket ? 1 : 0);
+        ClusterCull1.GetThreadNodeOutputRecords(emitBucket ? 1 : 0);
 
     if (emitBucket) {
         MeshletBucketRecord bucket = (MeshletBucketRecord)0;
@@ -404,6 +412,21 @@ bool SphereOutsideFrustumViewSpace(float3 viewSpaceCenter, float radius, Camera 
     {
         float4 plane = camera.clippingPlanes[i].plane;
         float distanceToPlane = dot(plane.xyz, viewSpaceCenter) + plane.w;
+        if (distanceToPlane < -radius)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool SphereOutsideFrustumViewSpace(float3 viewSpaceCenter, float radius, float4 planes[6])
+{
+    [unroll]
+    for (uint i = 0; i < 6; ++i)
+    {
+        float distanceToPlane = dot(planes[i].xyz, viewSpaceCenter) + planes[i].w;
         if (distanceToPlane < -radius)
         {
             return true;
@@ -744,7 +767,13 @@ void WG_TraverseNodes(
 void WG_SegmentEvaluate(
     [MaxRecords(SEGMENT_EVALUATE_RECORDS_PER_GROUP)] GroupNodeInputRecords<SegmentEvalRecord> inRecs,
     uint GI : SV_GroupIndex,
-    [MaxRecords(SEGMENT_EVALUATE_RECORDS_PER_GROUP)] NodeOutput<MeshletBucketRecord> ClusterCullBuckets)
+    [MaxRecords(SEGMENT_EVALUATE_RECORDS_PER_GROUP * MAX_RECORDS_PER_SEGMENT)] NodeOutput<MeshletBucketRecord> ClusterCull1,
+    [MaxRecordsSharedWith(ClusterCull1)] NodeOutput<MeshletBucketRecord> ClusterCull2,
+    [MaxRecordsSharedWith(ClusterCull1)] NodeOutput<MeshletBucketRecord> ClusterCull4,
+    [MaxRecordsSharedWith(ClusterCull1)] NodeOutput<MeshletBucketRecord> ClusterCull8,
+    [MaxRecordsSharedWith(ClusterCull1)] NodeOutput<MeshletBucketRecord> ClusterCull16,
+    [MaxRecordsSharedWith(ClusterCull1)] NodeOutput<MeshletBucketRecord> ClusterCull32,
+    [MaxRecordsSharedWith(ClusterCull1)] NodeOutput<MeshletBucketRecord> ClusterCull64)
 {
     const uint slot = GI;
     const uint inputCount = inRecs.Count();
@@ -758,6 +787,10 @@ void WG_SegmentEvaluate(
 
     bool emitBucket = false;
     MeshletBucketRecord bucketRecord = (MeshletBucketRecord)0;
+    uint segMeshletCount = 0;
+
+    // Decomposition counts for each bucket variant
+    uint n64 = 0, n32 = 0, n16 = 0, n8 = 0, n4 = 0, n2 = 0, n1 = 0;
 
     if (slotActive) {
         const SegmentEvalRecord rec = inRecs[slot];
@@ -844,42 +877,116 @@ void WG_SegmentEvaluate(
             bucketRecord.viewId = rec.viewId;
             bucketRecord.groupId = rec.ownerGroupId;
             bucketRecord.childFirstLocalMeshletIndex = seg.firstMeshletInPage;
-            bucketRecord.childLocalMeshletCount = seg.meshletCount;
+            bucketRecord.childLocalMeshletCount = 0; // set per-record below
             bucketRecord.sourceTag = rec.sourceTag;
             bucketRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
             bucketRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
+
+            // Decompose meshlet count into bucket-sized records (max 8 records)
+            segMeshletCount = seg.meshletCount;
+            uint tail = segMeshletCount;
+            uint budget = MAX_RECORDS_PER_SEGMENT;
+
+            // fill with 64-buckets
+            n64 = min(tail / 64, budget);
+            tail -= n64 * 64;
+            budget -= n64;
+
+            // Greedily extract from tail when budget allows multi-record tail
+            if (tail >= 32 && budget >= 2) { n32 = 1; tail -= 32; budget--; }
+            if (tail >= 16 && budget >= 2) { n16 = 1; tail -= 16; budget--; }
+            if (tail >= 8  && budget >= 2) { n8  = 1; tail -= 8;  budget--; }
+            if (tail >= 4  && budget >= 2) { n4  = 1; tail -= 4;  budget--; }
+            if (tail >= 2  && budget >= 2) { n2  = 1; tail -= 2;  budget--; }
+
+            // Final tail bucket (round up to smallest fitting size)
+            if      (tail > 32) { n64++; }
+            else if (tail > 16) { n32++; }
+            else if (tail > 8)  { n16++; }
+            else if (tail > 4)  { n8++;  }
+            else if (tail > 2)  { n4++;  }
+            else if (tail > 1)  { n2++;  }
+            else if (tail > 0)  { n1 = 1; }
         }
     }
 
-    ThreadNodeOutputRecords<MeshletBucketRecord> outBuckets =
-        ClusterCullBuckets.GetThreadNodeOutputRecords(emitBucket ? 1 : 0);
+    // Allocate output records for each variant
+    ThreadNodeOutputRecords<MeshletBucketRecord> out64 = ClusterCull64.GetThreadNodeOutputRecords(n64);
+    ThreadNodeOutputRecords<MeshletBucketRecord> out32 = ClusterCull32.GetThreadNodeOutputRecords(n32);
+    ThreadNodeOutputRecords<MeshletBucketRecord> out16 = ClusterCull16.GetThreadNodeOutputRecords(n16);
+    ThreadNodeOutputRecords<MeshletBucketRecord> out8  = ClusterCull8.GetThreadNodeOutputRecords(n8);
+    ThreadNodeOutputRecords<MeshletBucketRecord> out4  = ClusterCull4.GetThreadNodeOutputRecords(n4);
+    ThreadNodeOutputRecords<MeshletBucketRecord> out2  = ClusterCull2.GetThreadNodeOutputRecords(n2);
+    ThreadNodeOutputRecords<MeshletBucketRecord> out1  = ClusterCull1.GetThreadNodeOutputRecords(n1);
 
     if (emitBucket) {
-        outBuckets.Get() = bucketRecord;
+        uint offset = bucketRecord.childFirstLocalMeshletIndex;
+
+        for (uint i = 0; i < n64; i++) {
+            MeshletBucketRecord r = bucketRecord;
+            r.childFirstLocalMeshletIndex = offset;
+            r.childLocalMeshletCount = 64;
+            out64[i] = r;
+            offset += 64;
+        }
+        if (n32) {
+            MeshletBucketRecord r = bucketRecord;
+            r.childFirstLocalMeshletIndex = offset;
+            r.childLocalMeshletCount = 32;
+            out32.Get() = r;
+            offset += 32;
+        }
+        if (n16) {
+            MeshletBucketRecord r = bucketRecord;
+            r.childFirstLocalMeshletIndex = offset;
+            r.childLocalMeshletCount = 16;
+            out16.Get() = r;
+            offset += 16;
+        }
+        if (n8) {
+            MeshletBucketRecord r = bucketRecord;
+            r.childFirstLocalMeshletIndex = offset;
+            r.childLocalMeshletCount = 8;
+            out8.Get() = r;
+            offset += 8;
+        }
+        if (n4) {
+            MeshletBucketRecord r = bucketRecord;
+            r.childFirstLocalMeshletIndex = offset;
+            r.childLocalMeshletCount = 4;
+            out4.Get() = r;
+            offset += 4;
+        }
+        if (n2) {
+            MeshletBucketRecord r = bucketRecord;
+            r.childFirstLocalMeshletIndex = offset;
+            r.childLocalMeshletCount = 2;
+            out2.Get() = r;
+            offset += 2;
+        }
+        if (n1) {
+            MeshletBucketRecord r = bucketRecord;
+            r.childFirstLocalMeshletIndex = offset;
+            r.childLocalMeshletCount = 1;
+            out1.Get() = r;
+        }
     }
 
-    outBuckets.OutputComplete();
+    out64.OutputComplete();
+    out32.OutputComplete();
+    out16.OutputComplete();
+    out8.OutputComplete();
+    out4.OutputComplete();
+    out2.OutputComplete();
+    out1.OutputComplete();
 }
 
 
-// Node: ClusterCull (coalescing - each thread owns one bucket, loops over its meshlets)
-[Shader("node")]
-[NodeID("ClusterCullBuckets")]
-[NodeLaunch("coalescing")]
-[NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
-void WG_ClusterCullBuckets(
-    [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
-    uint GI : SV_GroupIndex)
+// Shared cluster-cull implementation called by each bucket-size variant.
+// FIXED_LOOP_COUNT is the bucket size (1, 2, 4, 8, 16, 32, or 64) - all active lanes
+// in a variant wave process the same number of iterations, eliminating WaveActiveMax divergence.
+void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputCount, uint FIXED_LOOP_COUNT)
 {
-    const uint inputCount = inRecs.Count();
-    const bool hasBucket = GI < inputCount;
-
-    // Each thread reads its own bucket record (divergent across threads).
-    MeshletBucketRecord b = (MeshletBucketRecord)0;
-    if (hasBucket) {
-        b = inRecs[GI];
-    }
-
     // Telemetry (coalesced launch level)
     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_THREADS, 1);
     if (hasBucket) {
@@ -897,23 +1004,31 @@ void WG_ClusterCullBuckets(
         WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_ACTIVE_LANES, inputCount);
     }
 
-    // Pre-load per-bucket data (loaded once, reused across meshlets)
+    // Pre-load per-bucket data (loaded once, reused across meshlets).
+    // Only the camera fields needed for the hot frustum-culling loop are loaded here
+    // (view matrix + 6 clip planes).  Occlusion-specific camera matrices (projection,
+    // prevView, prevUnjitteredProjection) and prevModelMatrix are deferred to the
+    // occlusion branch to reduce register pressure.
     bool pageValid = false;
     bool replaySource = false;
     row_major matrix objectModelMatrix = (float4x4)0;
-    row_major matrix prevModelMatrix = (float4x4)0;
-    Camera camera = (Camera)0;
+    row_major matrix viewMatrix = (float4x4)0;
+    float4 frustumPlanes[6];
     uint pageSlabDesc = 0;
     uint pageSlabOff = 0;
     uint pageMeshletCount = 0;
     uint pageDescriptorOffset = 0;
     uint depthMapDescriptorIndex = 0;
+    uint2 depthRes = uint2(0, 0);
+    uint numDepthMips = 0;
+    float2 hzbUVScale = float2(0, 0);
     float groupUniformScale = 0.0f;
     CullingCameraInfo cam = (CullingCameraInfo)0;
     uint groupsBase = 0;
     uint meshBufferIndex = 0;
     uint activeGroupScanCount = 0;
     float ownGroupErrorOverDistance = 0.0f;
+    uint objectBufferIndex = 0;
 
     if (hasBucket && b.pageSlabDescriptorIndex != 0) {
         pageValid = true;
@@ -923,25 +1038,31 @@ void WG_ClusterCullBuckets(
 
         StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-        const uint objectBufferIndex = perMeshInstanceBuffer[b.instanceIndex].perObjectBufferIndex;
+        objectBufferIndex = perMeshInstanceBuffer[b.instanceIndex].perObjectBufferIndex;
         StructuredBuffer<PerObjectBuffer> perObjectBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
         objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
-        prevModelMatrix = perObjectBuffer[objectBufferIndex].prevModel;
 
+        // Load only the camera fields needed for the hot culling loop.
+        // Occlusion matrices are deferred to the occlusion branch.
         StructuredBuffer<Camera> cameras =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
-        camera = cameras[b.viewId];
+        viewMatrix = cameras[b.viewId].view;
+        [unroll] for (uint p = 0; p < 6; p++)
+            frustumPlanes[p] = cameras[b.viewId].clippingPlanes[p].plane;
 
         // Load meshletCount (uint[0]) and descriptorOffset (uint[2]) from new 64-byte header
         ByteAddressBuffer slab = ResourceDescriptorHeap[pageSlabDesc];
         pageMeshletCount = slab.Load(pageSlabOff);         // meshletCount at offset 0
         pageDescriptorOffset = slab.Load(pageSlabOff + 8); // descriptorOffset at offset 8
 
-        if (!camera.isOrtho) {
+        if (!cameras[b.viewId].isOrtho) {
             StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
                 ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
             depthMapDescriptorIndex = viewDepthSRVIndices[b.viewId].linearDepthSRVIndex;
+            depthRes = uint2(cameras[b.viewId].depthResX, cameras[b.viewId].depthResY);
+            numDepthMips = cameras[b.viewId].numDepthMips;
+            hzbUVScale = cameras[b.viewId].UVScaleToNextPowerOf2;
         }
 
         // Per-meshlet condition 2 + streaming fallback state
@@ -976,9 +1097,9 @@ void WG_ClusterCullBuckets(
         activeGroupScanCount = runtimeState[0].activeGroupScanCount;
     }
 
-    // Meshlet loop
+    // Meshlet loop — fixed iteration count eliminates WaveActiveMax divergence.
+    // Lanes with fewer meshlets (e.g. replay count=1) simply skip inactive iterations.
     const uint meshletCount = hasBucket ? b.childLocalMeshletCount : 0;
-    const uint maxMeshlets = WaveActiveMax(meshletCount);
 
     RWStructuredBuffer<VisibleCluster> visibleClusters =
         ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
@@ -988,7 +1109,7 @@ void WG_ClusterCullBuckets(
 
     uint totalSurvivors = 0;
 
-    for (uint m = 0; m < maxMeshlets; m++) {
+    for (uint m = 0; m < FIXED_LOOP_COUNT; m++) {
         const bool active = (m < meshletCount) && pageValid;
         uint localMeshletIndex = 0;
         bool survives = false;
@@ -1003,10 +1124,14 @@ void WG_ClusterCullBuckets(
                 CLodMeshletDescriptor desc = LoadMeshletDescriptor(pageSlabDesc, pageSlabOff, pageDescriptorOffset, localMeshlet);
                 const float4 boundsSphere = desc.bounds;
                 const BoundingSphere meshletBounds = { boundsSphere };
-                const float3 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, camera.view);
-                const float meshletRadiusWorld = meshletBounds.sphere.w * MaxAxisScale_RowVector(objectModelMatrix);
+                const float3 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, viewMatrix);
+                const float meshletRadiusWorld = meshletBounds.sphere.w * groupUniformScale;
 
-                survives = replaySource || !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, camera);
+                survives = replaySource || !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, frustumPlanes);
+
+                if (!survives) {
+                    WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_FRUSTUM, 1);
+                }
 
                 // Per-meshlet LOD condition 2: read refined group ID from descriptor.
                 // Terminal meshlets (refinedGroupId < 0) pass automatically.
@@ -1036,6 +1161,7 @@ void WG_ClusterCullBuckets(
 
                             if (childResident) {
                                 survives = false;
+                                WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2, 1);
                             } else {
                                 WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_NON_RESIDENT_REFINED_CHILD_THREADS, 1);
                                 if (childGroupGlobalIndex < activeGroupScanCount) {
@@ -1061,12 +1187,17 @@ void WG_ClusterCullBuckets(
 
                 if (survives && CLodWorkGraphOcclusionEnabled() && depthMapDescriptorIndex != 0) {
                     bool occlusionCulled = false;
+                    // Lazy-load only the occlusion-specific camera matrices when needed,
+                    // keeping them off the register file during the main frustum/LOD loop.
+                    StructuredBuffer<Camera> occCameras =
+                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
                     if (replaySource) {
                         // Phase 2 replay: HZB is from this frame's Phase 1 depth,
                         // so test current-frame bounding spheres.
                         OcclusionCullingPerspectiveTexture2D(
                             occlusionCulled,
-                            camera,
+                            depthRes, numDepthMips, hzbUVScale,
+                            occCameras[b.viewId].projection,
                             meshletCenterViewSpace,
                             -meshletCenterViewSpace.z,
                             meshletRadiusWorld,
@@ -1074,17 +1205,20 @@ void WG_ClusterCullBuckets(
                     } else {
                         // Phase 1: HZB is from previous frame's depth,
                         // so reproject bounding sphere into previous frame's camera space.
+                        StructuredBuffer<PerObjectBuffer> prevObjBuf =
+                            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
+                        const row_major matrix prevModelMatrix = prevObjBuf[objectBufferIndex].prevModel;
                         const float prevMeshletScale = MaxAxisScale_RowVector(prevModelMatrix);
-                        const float3 prevMeshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, prevModelMatrix, camera.prevView);
+                        const float3 prevMeshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, prevModelMatrix, occCameras[b.viewId].prevView);
                         const float prevMeshletRadiusWorld = meshletBounds.sphere.w * prevMeshletScale;
                         OcclusionCullingPerspectiveTexture2D(
                             occlusionCulled,
-                            camera,
+                            depthRes, numDepthMips, hzbUVScale,
+                            occCameras[b.viewId].prevUnjitteredProjection,
                             prevMeshletCenterViewSpace,
                             -prevMeshletCenterViewSpace.z,
                             prevMeshletRadiusWorld,
-                            depthMapDescriptorIndex,
-                            camera.prevUnjitteredProjection);
+                            depthMapDescriptorIndex);
                     }
                     if (occlusionCulled) {
                         if (!replaySource) {
@@ -1097,10 +1231,17 @@ void WG_ClusterCullBuckets(
                                 pageSlabOff);
                         }
                         survives = false;
+                        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_OCCLUSION, 1);
                     }
                 }
+            } else {
+                WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_PAGE_BOUNDS, 1);
             }
+        } else {
+            WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_OUT_OF_RANGE, 1);
         }
+
+        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_MESHLET_ITERATIONS, active ? 1 : 0);
 
         // Wave-cooperative visible cluster output.
         const bool contributes = active && survives;
@@ -1152,4 +1293,112 @@ void WG_ClusterCullBuckets(
             WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_ZERO_SURVIVOR_WAVES, 1);
         }
     }
+}
+
+// ClusterCull variant entry points — one per bucket size.
+// Each variant processes a fixed number of meshlets per lane, eliminating wave divergence.
+
+[Shader("node")]
+[NodeID("ClusterCull1")]
+[NodeLaunch("coalescing")]
+[NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
+void WG_ClusterCull1(
+    [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
+    uint GI : SV_GroupIndex)
+{
+    const uint inputCount = inRecs.Count();
+    const bool hasBucket = GI < inputCount;
+    MeshletBucketRecord b = (MeshletBucketRecord)0;
+    if (hasBucket) b = inRecs[GI];
+    ClusterCullBody(b, hasBucket, GI, inputCount, 1);
+}
+
+[Shader("node")]
+[NodeID("ClusterCull2")]
+[NodeLaunch("coalescing")]
+[NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
+void WG_ClusterCull2(
+    [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
+    uint GI : SV_GroupIndex)
+{
+    const uint inputCount = inRecs.Count();
+    const bool hasBucket = GI < inputCount;
+    MeshletBucketRecord b = (MeshletBucketRecord)0;
+    if (hasBucket) b = inRecs[GI];
+    ClusterCullBody(b, hasBucket, GI, inputCount, 2);
+}
+
+[Shader("node")]
+[NodeID("ClusterCull4")]
+[NodeLaunch("coalescing")]
+[NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
+void WG_ClusterCull4(
+    [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
+    uint GI : SV_GroupIndex)
+{
+    const uint inputCount = inRecs.Count();
+    const bool hasBucket = GI < inputCount;
+    MeshletBucketRecord b = (MeshletBucketRecord)0;
+    if (hasBucket) b = inRecs[GI];
+    ClusterCullBody(b, hasBucket, GI, inputCount, 4);
+}
+
+[Shader("node")]
+[NodeID("ClusterCull8")]
+[NodeLaunch("coalescing")]
+[NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
+void WG_ClusterCull8(
+    [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
+    uint GI : SV_GroupIndex)
+{
+    const uint inputCount = inRecs.Count();
+    const bool hasBucket = GI < inputCount;
+    MeshletBucketRecord b = (MeshletBucketRecord)0;
+    if (hasBucket) b = inRecs[GI];
+    ClusterCullBody(b, hasBucket, GI, inputCount, 8);
+}
+
+[Shader("node")]
+[NodeID("ClusterCull16")]
+[NodeLaunch("coalescing")]
+[NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
+void WG_ClusterCull16(
+    [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
+    uint GI : SV_GroupIndex)
+{
+    const uint inputCount = inRecs.Count();
+    const bool hasBucket = GI < inputCount;
+    MeshletBucketRecord b = (MeshletBucketRecord)0;
+    if (hasBucket) b = inRecs[GI];
+    ClusterCullBody(b, hasBucket, GI, inputCount, 16);
+}
+
+[Shader("node")]
+[NodeID("ClusterCull32")]
+[NodeLaunch("coalescing")]
+[NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
+void WG_ClusterCull32(
+    [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
+    uint GI : SV_GroupIndex)
+{
+    const uint inputCount = inRecs.Count();
+    const bool hasBucket = GI < inputCount;
+    MeshletBucketRecord b = (MeshletBucketRecord)0;
+    if (hasBucket) b = inRecs[GI];
+    ClusterCullBody(b, hasBucket, GI, inputCount, 32);
+}
+
+[Shader("node")]
+[NodeID("ClusterCull64")]
+[NodeLaunch("coalescing")]
+[NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
+void WG_ClusterCull64(
+    [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
+    uint GI : SV_GroupIndex)
+{
+    const uint inputCount = inRecs.Count();
+    const bool hasBucket = GI < inputCount;
+    MeshletBucketRecord b = (MeshletBucketRecord)0;
+    if (hasBucket) b = inRecs[GI];
+    ClusterCullBody(b, hasBucket, GI, inputCount, 64);
 }

@@ -296,7 +296,7 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
     // scale to pixel-space by multiplying by render resolution
     consts.mvecScale = { -1.0f, 1.0f };
     consts.mvecScale.x *= renderRes.x;
-	consts.mvecScale.y *= renderRes.y;
+    consts.mvecScale.y *= renderRes.y;
 
     consts.cameraPinholeOffset = { 0, 0 };
     consts.cameraPos = { camera->info.positionWorldSpace.x, camera->info.positionWorldSpace.y, camera->info.positionWorldSpace.z };

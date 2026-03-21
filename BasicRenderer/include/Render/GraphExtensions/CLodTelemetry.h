@@ -61,6 +61,13 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     SegmentEvaluateCoalescedLaunches,
     SegmentEvaluateCoalescedInputRecords,
 
+    ClusterCullMeshletIterations,
+    ClusterCullRejectedFrustum,
+    ClusterCullRejectedCondition2,
+    ClusterCullRejectedOcclusion,
+    ClusterCullRejectedOutOfRange,
+    ClusterCullRejectedPageBounds,
+
     Count
 };
 
