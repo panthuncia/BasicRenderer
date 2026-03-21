@@ -292,8 +292,10 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
     }
 
     CLodReplayBufferState replayState{};
-    replayState.totalWriteCount = 0;
-    replayState.droppedRecords = 0;
+    replayState.nodeWriteCount = 0;
+    replayState.meshletWriteCount = 0;
+    replayState.nodeDropped = 0;
+    replayState.meshletDropped = 0;
     BUFFER_UPLOAD(
         &replayState,
         sizeof(CLodReplayBufferState),
@@ -352,15 +354,18 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
 
     if (ID3D12Resource* replayResource = rhi::dx12::get_resource(m_occlusionReplayBuffer->GetAPIResource())) {
         const uint64_t replayAddress = replayResource->GetGPUVirtualAddress();
-        nodeGpuInputs[1].entrypointIndex = 1;
-        nodeGpuInputs[1].numRecords = 0;
-        nodeGpuInputs[1].recordsAddress = replayAddress;
-        nodeGpuInputs[1].recordStride = sizeof(CLodMeshletReplayRecord); // must match CLOD_REPLAY_SLOT_STRIDE_BYTES (unified slot stride)
 
+        // Entry point 1 = TraverseNodes — node replay region at offset 0
+        nodeGpuInputs[1].entrypointIndex = 1;
+        nodeGpuInputs[1].numRecords = 0; // patched by GPU in CreateRasterBucketsHistogramCommandCSMain
+        nodeGpuInputs[1].recordsAddress = replayAddress;
+        nodeGpuInputs[1].recordStride = CLodNodeReplayStrideBytes;
+
+        // Entry point 2 = ClusterCull1 — meshlet replay region at midpoint offset
         nodeGpuInputs[2].entrypointIndex = 2;
-        nodeGpuInputs[2].numRecords = 0;
-        nodeGpuInputs[2].recordsAddress = replayAddress;
-        nodeGpuInputs[2].recordStride = sizeof(CLodMeshletReplayRecord);
+        nodeGpuInputs[2].numRecords = 0; // patched by GPU in CreateRasterBucketsHistogramCommandCSMain
+        nodeGpuInputs[2].recordsAddress = replayAddress + CLodReplayMeshletRegionOffset;
+        nodeGpuInputs[2].recordStride = CLodMeshletReplayStrideBytes;
     }
 
     static_assert(sizeof(CLodMultiNodeGpuInput) == sizeof(CLodNodeGpuInput));
@@ -404,10 +409,8 @@ void HierarchialCullingPass::CreatePipelines(
         static_cast<uint32_t>(compiled.libraryBlob->GetBufferSize())
     };
 
-    std::array<rhi::ShaderExportDesc, 12> exports = {{
+    std::array<rhi::ShaderExportDesc, 10> exports = {{
         { "WG_ObjectCull", nullptr },
-        { "WG_ReplayNodeGroup", nullptr },
-        { "WG_ReplayMeshlet", nullptr },
         { "WG_TraverseNodes", nullptr },
         { "WG_SegmentEvaluate", nullptr },
         { "WG_ClusterCull1", nullptr },
@@ -426,8 +429,8 @@ void HierarchialCullingPass::CreatePipelines(
     std::array<rhi::ShaderLibraryDesc, 1> libraries = { library };
     std::array<rhi::NodeIDDesc, 3> entrypoints = {{
         { "ObjectCull", 0 },
-        { "ReplayNodeGroup", 0 },
-        { "ReplayMeshlet", 0 }
+        { "TraverseNodes", 0 },
+        { "ClusterCull1", 0 }
     }};
 
     rhi::WorkGraphDesc wg{};

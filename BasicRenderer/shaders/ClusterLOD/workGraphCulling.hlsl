@@ -171,7 +171,8 @@ void WGTelemetryAdd(uint counterIndex, uint value)
     InterlockedAdd(telemetryCounters[counterIndex], value);
 }
 
-void ReplayReserveSlotsWave(
+// Wave-cooperative slot reservation for the node replay region.
+void ReplayReserveNodeSlotsWave(
     RWStructuredBuffer<CLodReplayBufferState> replayState,
     uint capacity,
     out uint slot,
@@ -184,7 +185,7 @@ void ReplayReserveSlotsWave(
 
     uint baseSlot = 0;
     if (WaveGetLaneIndex() == leaderLane) {
-        InterlockedAdd(replayState[0].totalWriteCount, activeCount, baseSlot);
+        InterlockedAdd(replayState[0].nodeWriteCount, activeCount, baseSlot);
     }
 
     baseSlot = WaveReadLaneAt(baseSlot, leaderLane);
@@ -193,10 +194,38 @@ void ReplayReserveSlotsWave(
 
     const uint droppedCount = CountBits128(WaveActiveBallot(!valid));
     if (WaveGetLaneIndex() == leaderLane && droppedCount > 0) {
-        InterlockedAdd(replayState[0].droppedRecords, droppedCount);
+        InterlockedAdd(replayState[0].nodeDropped, droppedCount);
     }
 }
 
+// Wave-cooperative slot reservation for the meshlet replay region.
+void ReplayReserveMeshletSlotsWave(
+    RWStructuredBuffer<CLodReplayBufferState> replayState,
+    uint capacity,
+    out uint slot,
+    out bool valid)
+{
+    const uint4 activeMask = WaveActiveBallot(true);
+    const uint activeCount = CountBits128(activeMask);
+    const uint leaderLane = WaveFirstLaneFromMask(activeMask);
+    const uint laneRank = GetLaneRankInGroup(activeMask, WaveGetLaneIndex());
+
+    uint baseSlot = 0;
+    if (WaveGetLaneIndex() == leaderLane) {
+        InterlockedAdd(replayState[0].meshletWriteCount, activeCount, baseSlot);
+    }
+
+    baseSlot = WaveReadLaneAt(baseSlot, leaderLane);
+    slot = baseSlot + laneRank;
+    valid = slot < capacity;
+
+    const uint droppedCount = CountBits128(WaveActiveBallot(!valid));
+    if (WaveGetLaneIndex() == leaderLane && droppedCount > 0) {
+        InterlockedAdd(replayState[0].meshletDropped, droppedCount);
+    }
+}
+
+// Write a TraverseNodeRecord directly to the node replay region.
 bool ReplayTryAppendNode(uint instanceIndex, uint viewId, uint nodeId)
 {
     WGTelemetryAdd(WG_COUNTER_PHASE1_OCCLUSION_NODE_REPLAY_ENQUEUE_ATTEMPTS, 1);
@@ -204,23 +233,22 @@ bool ReplayTryAppendNode(uint instanceIndex, uint viewId, uint nodeId)
     RWByteAddressBuffer replayBuffer = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX];
     RWStructuredBuffer<CLodReplayBufferState> replayState = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
 
-    const uint recordSize = CLOD_REPLAY_SLOT_STRIDE_BYTES;
-    const uint capacity = CLOD_REPLAY_SLOT_CAPACITY;
-
     uint slot = 0;
     bool valid = false;
-    ReplayReserveSlotsWave(replayState, capacity, slot, valid);
+    ReplayReserveNodeSlotsWave(replayState, CLOD_NODE_REPLAY_CAPACITY, slot, valid);
 
     if (!valid) {
         return false;
     }
 
-    const uint byteOffset = slot * recordSize;
-    replayBuffer.Store4(byteOffset, uint4(CLOD_REPLAY_RECORD_TYPE_NODE, instanceIndex, viewId, nodeId));
-    replayBuffer.Store(byteOffset + 16u, 0u);
+    // TraverseNodeRecord layout: instanceIndex, nodeId, viewId, sourceTag, allowRefine
+    const uint byteOffset = slot * CLOD_NODE_REPLAY_STRIDE_BYTES;
+    replayBuffer.Store4(byteOffset, uint4(instanceIndex, nodeId, viewId, CLOD_RECORD_SOURCE_REPLAY));
+    replayBuffer.Store(byteOffset + 16u, 1u); // allowRefine = 1
     return true;
 }
 
+// Write a MeshletBucketRecord directly to the meshlet replay region.
 bool ReplayTryAppendMeshlet(uint instanceIndex, uint viewId, uint groupId, uint localMeshletIndex,
                             uint pageSlabDescriptorIndex, uint pageSlabByteOffset)
 {
@@ -229,20 +257,19 @@ bool ReplayTryAppendMeshlet(uint instanceIndex, uint viewId, uint groupId, uint 
     RWByteAddressBuffer replayBuffer = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX];
     RWStructuredBuffer<CLodReplayBufferState> replayState = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
 
-    const uint recordSize = CLOD_REPLAY_SLOT_STRIDE_BYTES;
-    const uint capacity = CLOD_REPLAY_SLOT_CAPACITY;
-
     uint slot = 0;
     bool valid = false;
-    ReplayReserveSlotsWave(replayState, capacity, slot, valid);
+    ReplayReserveMeshletSlotsWave(replayState, CLOD_MESHLET_REPLAY_CAPACITY, slot, valid);
 
     if (!valid) {
         return false;
     }
 
-    const uint byteOffset = slot * recordSize;
-    replayBuffer.Store4(byteOffset, uint4(CLOD_REPLAY_RECORD_TYPE_MESHLET, instanceIndex, viewId, groupId));
-    replayBuffer.Store4(byteOffset + 16u, uint4(localMeshletIndex, pageSlabDescriptorIndex, pageSlabByteOffset, 0u));
+    // MeshletBucketRecord layout: instanceIndex, viewId, groupId, childFirstLocalMeshletIndex,
+    //                             childLocalMeshletCount, sourceTag, pageSlabDescriptorIndex, pageSlabByteOffset
+    const uint byteOffset = CLOD_REPLAY_MESHLET_REGION_OFFSET + slot * CLOD_MESHLET_REPLAY_STRIDE_BYTES;
+    replayBuffer.Store4(byteOffset,       uint4(instanceIndex, viewId, groupId, localMeshletIndex));
+    replayBuffer.Store4(byteOffset + 16u, uint4(1u, CLOD_RECORD_SOURCE_REPLAY, pageSlabDescriptorIndex, pageSlabByteOffset));
     return true;
 }
 
@@ -286,102 +313,6 @@ struct MeshletBucketRecord
     uint pageSlabDescriptorIndex;     // pre-resolved page slab descriptor
     uint pageSlabByteOffset;          // pre-resolved page slab byte offset
 };
-
-// Phase-2 entry: replay queued node work items.
-[Shader("node")]
-[NodeID("ReplayNodeGroup")]
-[NodeLaunch("coalescing")]
-[NumThreads(32, 1, 1)]
-[NodeIsProgramEntry]
-void WG_ReplayNodeGroup(
-    [MaxRecords(32)] GroupNodeInputRecords<CLodNodeGroupReplayRecord> inRecs,
-    uint3 gtid : SV_GroupThreadID,
-    [MaxRecords(32)] NodeOutput<TraverseNodeRecord> TraverseNodes)
-{
-    const uint lane = gtid.x;
-    const uint inputCount = inRecs.Count();
-    const bool inRange = lane < inputCount;
-
-    if (lane == 0) {
-        WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_NODE_LAUNCHES, 1);
-        WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_NODE_INPUT_RECORDS, inputCount);
-    }
-
-    bool emitTraverse = false;
-    TraverseNodeRecord traverseRecord = (TraverseNodeRecord)0;
-
-    if (inRange) {
-        const CLodNodeGroupReplayRecord rec = inRecs[lane];
-        if (rec.type == CLOD_REPLAY_RECORD_TYPE_NODE) {
-            emitTraverse = true;
-            traverseRecord.instanceIndex = rec.instanceIndex;
-            traverseRecord.nodeId = rec.nodeOrGroupId;
-            traverseRecord.viewId = rec.viewId;
-            traverseRecord.sourceTag = CLOD_RECORD_SOURCE_REPLAY;
-            traverseRecord.allowRefine = 1u;
-        }
-    }
-
-    ThreadNodeOutputRecords<TraverseNodeRecord> outTraverse =
-        TraverseNodes.GetThreadNodeOutputRecords(emitTraverse ? 1 : 0);
-
-    if (emitTraverse) {
-        outTraverse.Get() = traverseRecord;
-        WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_NODE_RECORDS_EMITTED, 1);
-    }
-
-    outTraverse.OutputComplete();
-}
-
-// Phase-2 entry: replay queued meshlet work items.
-[Shader("node")]
-[NodeID("ReplayMeshlet")]
-[NodeLaunch("coalescing")]
-[NumThreads(32, 1, 1)]
-[NodeIsProgramEntry]
-void WG_ReplayMeshlet(
-    [MaxRecords(32)] GroupNodeInputRecords<CLodMeshletReplayRecord> inRecs,
-    uint3 gtid : SV_GroupThreadID,
-    [MaxRecords(32)] NodeOutput<MeshletBucketRecord> ClusterCull1)
-{
-    const uint lane = gtid.x;
-    const uint inputCount = inRecs.Count();
-    bool emitBucket = false;
-    CLodMeshletReplayRecord meshletRecord = (CLodMeshletReplayRecord)0;
-
-    if (lane == 0) {
-        WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_MESHLET_LAUNCHES, 1);
-        WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_MESHLET_INPUT_RECORDS, inputCount);
-    }
-
-    if (lane < inputCount) {
-        const CLodMeshletReplayRecord rec = inRecs[lane];
-        if (rec.type == CLOD_REPLAY_RECORD_TYPE_MESHLET) {
-            emitBucket = true;
-            meshletRecord = rec;
-        }
-    }
-
-    ThreadNodeOutputRecords<MeshletBucketRecord> outBucket =
-        ClusterCull1.GetThreadNodeOutputRecords(emitBucket ? 1 : 0);
-
-    if (emitBucket) {
-        MeshletBucketRecord bucket = (MeshletBucketRecord)0;
-        bucket.instanceIndex = meshletRecord.instanceIndex;
-        bucket.viewId = meshletRecord.viewId;
-        bucket.groupId = meshletRecord.groupId;
-        bucket.childFirstLocalMeshletIndex = meshletRecord.localMeshletIndex;
-        bucket.childLocalMeshletCount = 1;
-        bucket.sourceTag = CLOD_RECORD_SOURCE_REPLAY;
-        bucket.pageSlabDescriptorIndex = meshletRecord.pageSlabDescriptorIndex;
-        bucket.pageSlabByteOffset = meshletRecord.pageSlabByteOffset;
-        outBucket.Get() = bucket;
-
-        WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_MESHLET_BUCKET_RECORDS_EMITTED, 1);
-    }
-
-    outBucket.OutputComplete();
-}
 
 // struct MeshletWorkRecord
 // {
@@ -537,6 +468,7 @@ float ErrorOverDistance(float3 worldCenter, float worldRadius, float errorMeshSp
 [Shader("node")]
 [NodeID("TraverseNodes")]
 [NodeLaunch("coalescing")]
+[NodeIsProgramEntry]
 [NumThreads(TRAVERSE_THREADS_PER_GROUP, 1, 1)]
 [NodeMaxRecursionDepth(25)]
 void WG_TraverseNodes(
@@ -1301,6 +1233,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 [Shader("node")]
 [NodeID("ClusterCull1")]
 [NodeLaunch("coalescing")]
+[NodeIsProgramEntry]
 [NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
 void WG_ClusterCull1(
     [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,

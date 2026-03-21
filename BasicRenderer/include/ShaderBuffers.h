@@ -312,36 +312,11 @@ struct CLodStreamingRuntimeState
     uint32_t pad2 = 0;
 };
 
-enum class CLodReplayRecordType : uint32_t {
-    Node = 0,
-    Group = 1,
-    Meshlet = 2,
-};
-
-struct CLodNodeGroupReplayRecord {
-    uint32_t type = 0; // CLodReplayRecordType
-    uint32_t instanceIndex = 0;
-    uint32_t viewId = 0;
-    uint32_t nodeOrGroupId = 0;
-    uint32_t pad0 = 0;
-};
-
-struct CLodMeshletReplayRecord {
-    uint32_t type = 0; // CLodReplayRecordType
-    uint32_t instanceIndex = 0;
-    uint32_t viewId = 0;
-    uint32_t groupId = 0;
-    uint32_t localMeshletIndex = 0;       // page-local meshlet index
-    uint32_t pageSlabDescriptorIndex = 0; // pre-resolved page slab descriptor
-    uint32_t pageSlabByteOffset = 0;      // pre-resolved page slab byte offset
-    uint32_t pad = 0;
-};
-
 struct CLodReplayBufferState {
-    uint32_t totalWriteCount = 0;
-    uint32_t droppedRecords = 0;
-    uint32_t pad0 = 0;
-    uint32_t pad1 = 0;
+    uint32_t nodeWriteCount = 0;
+    uint32_t meshletWriteCount = 0;
+    uint32_t nodeDropped = 0;
+    uint32_t meshletDropped = 0;
 };
 
 struct CLodViewDepthSRVIndex {

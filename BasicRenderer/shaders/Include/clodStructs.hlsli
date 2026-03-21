@@ -132,40 +132,25 @@ struct ClusterLODGroup
 
 static const uint CLOD_GROUP_FLAG_IS_VOXEL = 1u << 0;
 
-static const uint CLOD_REPLAY_RECORD_TYPE_NODE = 0;
-static const uint CLOD_REPLAY_RECORD_TYPE_MESHLET = 1;
-static const uint CLOD_REPLAY_BUFFER_SIZE_BYTES = 100u * 1024u * 1024u;
+// Replay buffer: single physical buffer split into two regions.
+// Node region stores TraverseNodeRecord (20 bytes), meshlet region stores MeshletBucketRecord (32 bytes).
+static const uint CLOD_REPLAY_BUFFER_SIZE_BYTES       = 100u * 1024u * 1024u;
+static const uint CLOD_REPLAY_NODE_REGION_SIZE_BYTES   = CLOD_REPLAY_BUFFER_SIZE_BYTES / 2;
+static const uint CLOD_REPLAY_MESHLET_REGION_OFFSET    = CLOD_REPLAY_NODE_REGION_SIZE_BYTES;
+static const uint CLOD_REPLAY_MESHLET_REGION_SIZE_BYTES = CLOD_REPLAY_BUFFER_SIZE_BYTES - CLOD_REPLAY_NODE_REGION_SIZE_BYTES;
 
-struct CLodNodeGroupReplayRecord
-{
-    uint type;
-    uint instanceIndex;
-    uint viewId;
-    uint nodeOrGroupId;
-    uint pad0;
-};
+static const uint CLOD_NODE_REPLAY_STRIDE_BYTES    = 20u;  // 5 uints (TraverseNodeRecord)
+static const uint CLOD_MESHLET_REPLAY_STRIDE_BYTES = 32u;  // 8 uints (MeshletBucketRecord)
 
-struct CLodMeshletReplayRecord
-{
-    uint type;
-    uint instanceIndex;
-    uint viewId;
-    uint groupId;
-    uint localMeshletIndex;       // page-local meshlet index
-    uint pageSlabDescriptorIndex; // pre-resolved page slab descriptor
-    uint pageSlabByteOffset;      // pre-resolved page slab byte offset
-    uint pad;
-};
-
-static const uint CLOD_REPLAY_SLOT_STRIDE_BYTES = sizeof(CLodMeshletReplayRecord);
-static const uint CLOD_REPLAY_SLOT_CAPACITY = CLOD_REPLAY_BUFFER_SIZE_BYTES / CLOD_REPLAY_SLOT_STRIDE_BYTES;
+static const uint CLOD_NODE_REPLAY_CAPACITY    = CLOD_REPLAY_NODE_REGION_SIZE_BYTES / CLOD_NODE_REPLAY_STRIDE_BYTES;
+static const uint CLOD_MESHLET_REPLAY_CAPACITY = CLOD_REPLAY_MESHLET_REGION_SIZE_BYTES / CLOD_MESHLET_REPLAY_STRIDE_BYTES;
 
 struct CLodReplayBufferState
 {
-    uint totalWriteCount;
-    uint droppedRecords;
-    uint pad0;
-    uint pad1;
+    uint nodeWriteCount;
+    uint meshletWriteCount;
+    uint nodeDropped;
+    uint meshletDropped;
 };
 
 struct CLodViewDepthSRVIndex

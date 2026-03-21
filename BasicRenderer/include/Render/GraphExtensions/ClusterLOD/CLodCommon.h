@@ -46,7 +46,11 @@ struct CLodViewRasterInfo
     friend bool operator==(const CLodViewRasterInfo&, const CLodViewRasterInfo&) = default;
 };
 
-inline constexpr uint32_t CLodReplayBufferSizeBytes = 200u * 1024u * 1024u; // 100 MB
+inline constexpr uint32_t CLodReplayBufferSizeBytes = 200u * 1024u * 1024u; // 200 MB physical, GPU uses first 100 MB
+inline constexpr uint32_t CLodReplayNodeRegionSizeBytes = 50u * 1024u * 1024u;    // must match HLSL CLOD_REPLAY_NODE_REGION_SIZE_BYTES
+inline constexpr uint32_t CLodReplayMeshletRegionOffset = CLodReplayNodeRegionSizeBytes;
+inline constexpr uint32_t CLodNodeReplayStrideBytes = 20u;   // sizeof(TraverseNodeRecord): 5 uints
+inline constexpr uint32_t CLodMeshletReplayStrideBytes = 32u; // sizeof(MeshletBucketRecord): 8 uints
 inline constexpr uint32_t CLodReplayBufferNumUints = CLodReplayBufferSizeBytes / sizeof(uint32_t);
 inline constexpr uint32_t CLodMaxViewDepthIndices = 512u;
 inline constexpr uint32_t CLodStreamingInitialGroupCapacity = 1024u;
