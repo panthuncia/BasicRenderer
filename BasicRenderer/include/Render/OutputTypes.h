@@ -15,6 +15,7 @@ enum OutputType {
 	MODEL_NORMAL = 11,
 	LIGHT_CLUSTER_ID = 12,
 	CLUSTERED_LIGHT_COUNT = 13,
+	MOTION_VECTORS = 14,
 };
 
 inline std::vector<std::string> OutputTypeNames = {
@@ -32,4 +33,5 @@ inline std::vector<std::string> OutputTypeNames = {
 	"Model Normal",
 	"Light Cluster ID",
 	"Clustered Light Count",
+	"Motion Vectors",
 };

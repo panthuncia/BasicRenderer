@@ -14,7 +14,7 @@
 
 namespace
 {
-    constexpr float kClusterLodErrorPixels = 6.0f;
+    constexpr float kClusterLodErrorPixels = 3.0f;
 
     float ComputeErrorOverDistanceThreshold(const CameraInfo& cameraInfo, float errorPixels)
     {

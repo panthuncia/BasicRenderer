@@ -166,6 +166,7 @@ void SyncRenderableDerivedState(flecs::entity dst, const Components::MeshInstanc
     const auto perPassMeshes = BuildPerPassMeshes(meshInstances);
     const auto* oldSignature = dst.try_get<RenderableSignature>();
     const bool signatureChanged = oldSignature == nullptr || oldSignature->meshInstanceKeys != newSignature.meshInstanceKeys;
+    const auto* matrix = dst.try_get<Components::Matrix>();
 
     if (meshInstances) {
         dst.set<Components::MeshInstances>(*meshInstances);
@@ -176,7 +177,12 @@ void SyncRenderableDerivedState(flecs::entity dst, const Components::MeshInstanc
     }
 
     if (!dst.has<Components::RenderableObject>()) {
-        dst.set<Components::RenderableObject>({});
+        Components::RenderableObject renderable{};
+        if (matrix) {
+            renderable.perObjectCB.modelMatrix = matrix->matrix;
+            renderable.perObjectCB.prevModelMatrix = matrix->matrix;
+        }
+        dst.set<Components::RenderableObject>(renderable);
     }
 
     if (signatureChanged) {
@@ -231,8 +237,23 @@ void SyncCameraDerivedState(
         dst.set<Components::DepthMap>(depthMap);
         dst.set<CameraResourceSignature>(newSignature);
     } else {
+        const auto existing = dst.get<Components::Camera>();
         const auto depthMap = dst.get<Components::DepthMap>();
-        dst.set<Components::Camera>(BuildRendererCamera(sceneCamera, depthMap, renderWidth, renderHeight));
+        auto rendererCamera = BuildRendererCamera(sceneCamera, depthMap, renderWidth, renderHeight);
+        // Preserve view/projection history maintained by RunRenderResourceSyncStage.
+        // The scene camera does not maintain these — its view stays at identity.
+        rendererCamera.info.view = existing.info.view;
+        rendererCamera.info.viewInverse = existing.info.viewInverse;
+        rendererCamera.info.prevView = existing.info.prevView;
+        rendererCamera.info.jitteredProjection = existing.info.jitteredProjection;
+        rendererCamera.info.prevJitteredProjection = existing.info.prevJitteredProjection;
+        rendererCamera.info.prevUnjitteredProjection = existing.info.prevUnjitteredProjection;
+        rendererCamera.info.viewProjection = existing.info.viewProjection;
+        rendererCamera.info.projectionInverse = existing.info.projectionInverse;
+        rendererCamera.info.positionWorldSpace = existing.info.positionWorldSpace;
+        rendererCamera.jitterPixelSpace = existing.jitterPixelSpace;
+        rendererCamera.jitterNDC = existing.jitterNDC;
+        dst.set<Components::Camera>(rendererCamera);
     }
 }
 

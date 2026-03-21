@@ -546,6 +546,9 @@ void EvaluateGBufferOptimized(uint2 pixel)
             case OUTPUT_MODEL_NORMALS:
                 payload = PackDebugFloat3(normalOS * 0.5 + 0.5);
                 break;
+            case OUTPUT_MOTION_VECTORS:
+                payload = PackDebugFloat3(float3(motionVector * 0.5 + 0.5, 0.5));
+                break;
         }
         if (payload.x != DEBUG_SENTINEL) {
             WriteDebugPixel(debugVisTex, pixel, payload);

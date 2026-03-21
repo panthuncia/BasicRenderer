@@ -279,6 +279,13 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
             case OUTPUT_MODEL_NORMALS:
                 payload = PackDebugFloat3(input.normalModelSpace * 0.5 + 0.5);
                 break;
+            case OUTPUT_MOTION_VECTORS: {
+                float3 ndc = (input.clipPosition / input.clipPosition.w).xyz;
+                float3 prevNdc = (input.prevClipPosition / input.prevClipPosition.w).xyz;
+                float2 mv = (ndc - prevNdc).xy;
+                payload = PackDebugFloat3(float3(mv * 0.5 + 0.5, 0.5));
+                break;
+            }
         }
         if (payload.x != DEBUG_SENTINEL) {
             WriteDebugPixel(debugVisTex, pixel, payload);

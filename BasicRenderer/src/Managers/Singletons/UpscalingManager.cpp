@@ -289,8 +289,14 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
 	consts.jitterOffset.x = camera->jitterPixelSpace.x;
     consts.jitterOffset.y = camera->jitterPixelSpace.y;
 
-    // Motion vectors are curNDC - prevNDC; DLSS expects prevNDC - curNDC, so negate both.
-    consts.mvecScale = { -1.0f, -1.0f };
+    // Motion vectors are (ndcCur - ndcPrev) in NDC space ([-1,1], Y-up).
+    // DLSS expects vectors pointing toward the previous frame in screen space (Y-down).
+    // X: negate to reverse direction (current->previous).
+    // Y: negate for direction reversal, negate again for Y-up->Y-down = net positive.
+    // scale to pixel-space by multiplying by render resolution
+    consts.mvecScale = { -1.0f, 1.0f };
+    consts.mvecScale.x *= renderRes.x;
+	consts.mvecScale.y *= renderRes.y;
 
     consts.cameraPinholeOffset = { 0, 0 };
     consts.cameraPos = { camera->info.positionWorldSpace.x, camera->info.positionWorldSpace.y, camera->info.positionWorldSpace.z };

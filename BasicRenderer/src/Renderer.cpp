@@ -112,6 +112,7 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
     settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { x_res, y_res });
     settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { x_res, y_res });
+    settingsManager.registerSetting<bool>("enableVisibilityRendering", m_visibilityRendering);
     LoadPipeline(hwnd, x_res, y_res);
     UpscalingManager::GetInstance().InitSL();
     UpscalingManager::GetInstance().InitFFX(); // Needs device
@@ -689,7 +690,6 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("drawBoundingSpheres", false);
     settingsManager.registerSetting<bool>("enableClusteredLighting", m_clusteredLighting);
     settingsManager.registerSetting<DirectX::XMUINT3>("lightClusterSize", m_lightClusterSize);
-	settingsManager.registerSetting<bool>("enableVisibilityRendering", m_visibilityRendering);
     settingsManager.registerSetting<bool>("collectPipelineStatistics", false);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
