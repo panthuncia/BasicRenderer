@@ -225,6 +225,30 @@ void ReplayReserveMeshletSlotsWave(
     }
 }
 
+// Pack/unpack helpers for compressed TraverseNodeRecord (3 uints = 12 bytes).
+// nodeIdPacked: [31]=sourceTag, [30]=allowRefine, [29:0]=nodeId
+uint PackTraverseNodeId(uint nodeId, uint sourceTag, uint allowRefine) {
+    return (sourceTag << 31u) | (allowRefine << 30u) | (nodeId & 0x3FFFFFFFu);
+}
+uint UnpackNodeId(uint packed)       { return packed & 0x3FFFFFFFu; }
+uint UnpackSourceTag(uint packed)    { return packed >> 31u; }
+uint UnpackAllowRefine(uint packed)  { return (packed >> 30u) & 1u; }
+
+// Pack/unpack helpers for compressed MeshletBucketRecord (6 uints = 24 bytes).
+// groupIdPacked: [31]=sourceTag, [30:0]=groupId
+uint PackGroupId(uint groupId, uint sourceTag) {
+    return (sourceTag << 31u) | (groupId & 0x7FFFFFFFu);
+}
+uint UnpackGroupId(uint packed)        { return packed & 0x7FFFFFFFu; }
+uint UnpackGroupSourceTag(uint packed) { return packed >> 31u; }
+
+// meshletIndexAndCount: [31:16]=count, [15:0]=firstLocalMeshletIndex
+uint PackMeshletIndexAndCount(uint firstIndex, uint count) {
+    return (count << 16u) | (firstIndex & 0xFFFFu);
+}
+uint UnpackMeshletFirstIndex(uint packed) { return packed & 0xFFFFu; }
+uint UnpackMeshletCount(uint packed)      { return packed >> 16u; }
+
 // Write a TraverseNodeRecord directly to the node replay region.
 bool ReplayTryAppendNode(uint instanceIndex, uint viewId, uint nodeId)
 {
@@ -241,10 +265,11 @@ bool ReplayTryAppendNode(uint instanceIndex, uint viewId, uint nodeId)
         return false;
     }
 
-    // TraverseNodeRecord layout: instanceIndex, nodeId, viewId, sourceTag, allowRefine
+    // TraverseNodeRecord layout: instanceIndex, nodeIdPacked, viewId (3 uints = 12 bytes)
     const uint byteOffset = slot * CLOD_NODE_REPLAY_STRIDE_BYTES;
-    replayBuffer.Store4(byteOffset, uint4(instanceIndex, nodeId, viewId, CLOD_RECORD_SOURCE_REPLAY));
-    replayBuffer.Store(byteOffset + 16u, 1u); // allowRefine = 1
+    const uint packed = PackTraverseNodeId(nodeId, CLOD_RECORD_SOURCE_REPLAY, 1u);
+    replayBuffer.Store2(byteOffset, uint2(instanceIndex, packed));
+    replayBuffer.Store(byteOffset + 8u, viewId);
     return true;
 }
 
@@ -265,11 +290,13 @@ bool ReplayTryAppendMeshlet(uint instanceIndex, uint viewId, uint groupId, uint 
         return false;
     }
 
-    // MeshletBucketRecord layout: instanceIndex, viewId, groupId, childFirstLocalMeshletIndex,
-    //                             childLocalMeshletCount, sourceTag, pageSlabDescriptorIndex, pageSlabByteOffset
+    // MeshletBucketRecord layout: instanceIndex, viewId, groupIdPacked,
+    //                             meshletIndexAndCount, pageSlabDescriptorIndex, pageSlabByteOffset (6 uints = 24 bytes)
     const uint byteOffset = CLOD_REPLAY_MESHLET_REGION_OFFSET + slot * CLOD_MESHLET_REPLAY_STRIDE_BYTES;
-    replayBuffer.Store4(byteOffset,       uint4(instanceIndex, viewId, groupId, localMeshletIndex));
-    replayBuffer.Store4(byteOffset + 16u, uint4(1u, CLOD_RECORD_SOURCE_REPLAY, pageSlabDescriptorIndex, pageSlabByteOffset));
+    replayBuffer.Store4(byteOffset,       uint4(instanceIndex, viewId,
+                                                PackGroupId(groupId, CLOD_RECORD_SOURCE_REPLAY),
+                                                PackMeshletIndexAndCount(localMeshletIndex, 1u)));
+    replayBuffer.Store2(byteOffset + 16u, uint2(pageSlabDescriptorIndex, pageSlabByteOffset));
     return true;
 }
 
@@ -285,23 +312,18 @@ struct ObjectCullRecord
 struct TraverseNodeRecord
 {
     uint instanceIndex;
-    uint nodeId;
+    uint nodeIdPacked; // [31]=sourceTag, [30]=allowRefine, [29:0]=nodeId
     uint viewId;
-    uint sourceTag;
-    uint allowRefine;
 };
 
 struct MeshletBucketRecord
 {
     uint instanceIndex;
     uint viewId;
-
-    uint groupId;
-    uint childFirstLocalMeshletIndex; // page-local
-    uint childLocalMeshletCount;
-    uint sourceTag;
-    uint pageSlabDescriptorIndex;     // pre-resolved page slab descriptor
-    uint pageSlabByteOffset;          // pre-resolved page slab byte offset
+    uint groupIdPacked;         // [31]=sourceTag, [30:0]=groupId
+    uint meshletIndexAndCount;  // [31:16]=count, [15:0]=firstLocalMeshletIndex
+    uint pageSlabDescriptorIndex;
+    uint pageSlabByteOffset;
 };
 
 // struct MeshletWorkRecord
@@ -422,9 +444,7 @@ void WG_ObjectCull(
 
             outRecord.viewId = hdr.viewDataIndex;
             outRecord.instanceIndex =perMeshInstanceBufferIndex;
-            outRecord.nodeId = clodMeshMetadata.rootNode;   // BVH root node for this mesh
-            outRecord.sourceTag = CLOD_RECORD_SOURCE_PASS1;
-            outRecord.allowRefine = 1u;
+            outRecord.nodeIdPacked = PackTraverseNodeId(clodMeshMetadata.rootNode, CLOD_RECORD_SOURCE_PASS1, 1u);
             outCount = 1;
 
             WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_VISIBLE_THREADS, 1);
@@ -494,11 +514,11 @@ void WG_TraverseNodes(
 
     if (slotActive) {
         const TraverseNodeRecord rec = inRecs[slot];
-        const bool parentAllowsRefine = (rec.allowRefine != 0u);
-        if (rec.sourceTag == CLOD_RECORD_SOURCE_REPLAY) {
+        const bool parentAllowsRefine = (UnpackAllowRefine(rec.nodeIdPacked) != 0u);
+        if (UnpackSourceTag(rec.nodeIdPacked) == CLOD_RECORD_SOURCE_REPLAY) {
             WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_TRAVERSE_RECORDS_CONSUMED, 1);
         }
-        const bool replaySource = (rec.sourceTag == CLOD_RECORD_SOURCE_REPLAY);
+        const bool replaySource = (UnpackSourceTag(rec.nodeIdPacked) == CLOD_RECORD_SOURCE_REPLAY);
 
         StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
@@ -523,7 +543,7 @@ void WG_TraverseNodes(
         StructuredBuffer<ClusterLODNode> lodNodes =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Nodes)];
 
-        const ClusterLODNode node = lodNodes[clodMeshMetadata.lodNodesBase + rec.nodeId];
+        const ClusterLODNode node = lodNodes[clodMeshMetadata.lodNodesBase + UnpackNodeId(rec.nodeIdPacked)];
 
         if (node.range.isGroup == 0) {
             WGTelemetryAdd(WG_COUNTER_TRAVERSE_INTERNAL_NODE_RECORDS, 1);
@@ -611,10 +631,8 @@ void WG_TraverseNodes(
 
                         bucketRecord.instanceIndex = rec.instanceIndex;
                         bucketRecord.viewId = rec.viewId;
-                        bucketRecord.groupId = node.range.ownerGroupId;
-                        bucketRecord.childFirstLocalMeshletIndex = seg.firstMeshletInPage;
-                        bucketRecord.childLocalMeshletCount = 0; // set per-record below
-                        bucketRecord.sourceTag = rec.sourceTag;
+                        bucketRecord.groupIdPacked = PackGroupId(node.range.ownerGroupId, UnpackSourceTag(rec.nodeIdPacked));
+                        bucketRecord.meshletIndexAndCount = PackMeshletIndexAndCount(seg.firstMeshletInPage, 0); // count set per-record below
                         bucketRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
                         bucketRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
 
@@ -699,7 +717,7 @@ void WG_TraverseNodes(
                             ReplayTryAppendNode(
                                 rec.instanceIndex,
                                 rec.viewId,
-                                rec.nodeId);
+                                UnpackNodeId(rec.nodeIdPacked));
                         }
                     }
                     else {
@@ -713,9 +731,7 @@ void WG_TraverseNodes(
                             TraverseNodeRecord childRecord = (TraverseNodeRecord)0;
                             childRecord.instanceIndex = rec.instanceIndex;
                             childRecord.viewId = rec.viewId;
-                            childRecord.nodeId = node.range.indexOrOffset + childIndex;
-                            childRecord.sourceTag = rec.sourceTag;
-                            childRecord.allowRefine = 1u;
+                            childRecord.nodeIdPacked = PackTraverseNodeId(node.range.indexOrOffset + childIndex, UnpackSourceTag(rec.nodeIdPacked), 1u);
                             childRecords[childIndex] = childRecord;
                         }
                     }
@@ -748,54 +764,47 @@ void WG_TraverseNodes(
     }
 
     if (emitBucket) {
-        uint offset = bucketRecord.childFirstLocalMeshletIndex;
+        uint offset = UnpackMeshletFirstIndex(bucketRecord.meshletIndexAndCount);
 
         for (uint i = 0; i < n64; i++) {
             MeshletBucketRecord r = bucketRecord;
-            r.childFirstLocalMeshletIndex = offset;
-            r.childLocalMeshletCount = 64;
+            r.meshletIndexAndCount = PackMeshletIndexAndCount(offset, 64);
             out64[i] = r;
             offset += 64;
         }
         if (n32) {
             MeshletBucketRecord r = bucketRecord;
-            r.childFirstLocalMeshletIndex = offset;
-            r.childLocalMeshletCount = 32;
+            r.meshletIndexAndCount = PackMeshletIndexAndCount(offset, 32);
             out32.Get() = r;
             offset += 32;
         }
         if (n16) {
             MeshletBucketRecord r = bucketRecord;
-            r.childFirstLocalMeshletIndex = offset;
-            r.childLocalMeshletCount = 16;
+            r.meshletIndexAndCount = PackMeshletIndexAndCount(offset, 16);
             out16.Get() = r;
             offset += 16;
         }
         if (n8) {
             MeshletBucketRecord r = bucketRecord;
-            r.childFirstLocalMeshletIndex = offset;
-            r.childLocalMeshletCount = 8;
+            r.meshletIndexAndCount = PackMeshletIndexAndCount(offset, 8);
             out8.Get() = r;
             offset += 8;
         }
         if (n4) {
             MeshletBucketRecord r = bucketRecord;
-            r.childFirstLocalMeshletIndex = offset;
-            r.childLocalMeshletCount = 4;
+            r.meshletIndexAndCount = PackMeshletIndexAndCount(offset, 4);
             out4.Get() = r;
             offset += 4;
         }
         if (n2) {
             MeshletBucketRecord r = bucketRecord;
-            r.childFirstLocalMeshletIndex = offset;
-            r.childLocalMeshletCount = 2;
+            r.meshletIndexAndCount = PackMeshletIndexAndCount(offset, 2);
             out2.Get() = r;
             offset += 2;
         }
         if (n1) {
             MeshletBucketRecord r = bucketRecord;
-            r.childFirstLocalMeshletIndex = offset;
-            r.childLocalMeshletCount = 1;
+            r.meshletIndexAndCount = PackMeshletIndexAndCount(offset, 1);
             out1.Get() = r;
         }
         WGTelemetryAdd(WG_COUNTER_TRAVERSE_SEGMENT_RECORDS, 1);
@@ -821,8 +830,8 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
     // Telemetry (coalesced launch level)
     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_THREADS, 1);
     if (hasBucket) {
-        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_IN_RANGE_THREADS, b.childLocalMeshletCount);
-        if (b.sourceTag == CLOD_RECORD_SOURCE_REPLAY) {
+        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_IN_RANGE_THREADS, UnpackMeshletCount(b.meshletIndexAndCount));
+        if (UnpackGroupSourceTag(b.groupIdPacked) == CLOD_RECORD_SOURCE_REPLAY) {
             WGTelemetryAdd(WG_COUNTER_PHASE2_REPLAY_CLUSTER_BUCKET_RECORDS_CONSUMED, 1);
         }
     }
@@ -863,7 +872,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 
     if (hasBucket && b.pageSlabDescriptorIndex != 0) {
         pageValid = true;
-        replaySource = (b.sourceTag == CLOD_RECORD_SOURCE_REPLAY);
+        replaySource = (UnpackGroupSourceTag(b.groupIdPacked) == CLOD_RECORD_SOURCE_REPLAY);
         pageSlabDesc = b.pageSlabDescriptorIndex;
         pageSlabOff = b.pageSlabByteOffset;
 
@@ -915,7 +924,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         {
             StructuredBuffer<ClusterLODGroup> groups =
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
-            const ClusterLODGroup ownGrp = groups[groupsBase + b.groupId];
+            const ClusterLODGroup ownGrp = groups[groupsBase + UnpackGroupId(b.groupIdPacked)];
             const float3 ownWorldCenter = mul(float4(ownGrp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
             const float ownWorldRadius = ownGrp.bounds.centerAndRadius.w * groupUniformScale;
             ownGroupErrorOverDistance = ErrorOverDistance(
@@ -930,7 +939,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 
     // Meshlet loop — fixed iteration count eliminates WaveActiveMax divergence.
     // Lanes with fewer meshlets (e.g. replay count=1) simply skip inactive iterations.
-    const uint meshletCount = hasBucket ? b.childLocalMeshletCount : 0;
+    const uint meshletCount = hasBucket ? UnpackMeshletCount(b.meshletIndexAndCount) : 0;
 
     RWStructuredBuffer<VisibleCluster> visibleClusters =
         ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
@@ -946,7 +955,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         bool survives = false;
 
         if (active) {
-            const uint localMeshlet = b.childFirstLocalMeshletIndex + m;
+            const uint localMeshlet = UnpackMeshletFirstIndex(b.meshletIndexAndCount) + m;
 
             if (localMeshlet < pageMeshletCount) {
                 localMeshletIndex = localMeshlet;
@@ -1056,7 +1065,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                             ReplayTryAppendMeshlet(
                                 b.instanceIndex,
                                 b.viewId,
-                                b.groupId,
+                                UnpackGroupId(b.groupIdPacked),
                                 localMeshlet,
                                 pageSlabDesc,
                                 pageSlabOff);
@@ -1110,7 +1119,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 vc.instanceID = b.instanceIndex;
                 vc.localMeshletIndex = localMeshletIndex;
                 vc.viewID = b.viewId;
-                vc.groupID = b.groupId;
+                vc.groupID = UnpackGroupId(b.groupIdPacked);
                 vc.pageSlabDescriptorIndex = b.pageSlabDescriptorIndex;
                 vc.pageSlabByteOffset = b.pageSlabByteOffset;
                 visibleClusters[index] = vc;

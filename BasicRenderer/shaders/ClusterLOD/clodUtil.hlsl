@@ -57,8 +57,8 @@ void CreateRasterBucketsHistogramCommandCSMain()
     const uint meshletReplayCount = min(replayState.meshletWriteCount, CLOD_MESHLET_REPLAY_CAPACITY);
 
     // Slot 0 is CLodMultiNodeGpuInput (CPU initialized); slot 1+ are CLodNodeGpuInput records.
-    // Entry point 1 = TraverseNodes (node replay region, 20-byte stride).
-    // Entry point 2 = ClusterCull1  (meshlet replay region, 32-byte stride).
+    // Entry point 1 = TraverseNodes (node replay region, 12-byte stride).
+    // Entry point 2 = ClusterCull1  (meshlet replay region, 24-byte stride).
     // recordsAddress for meshlet region is patched by C++ to include CLOD_REPLAY_MESHLET_REGION_OFFSET.
     nodeInputs[1].numRecords = nodeReplayCount;
     nodeInputs[1].recordStride = CLOD_NODE_REPLAY_STRIDE_BYTES;
