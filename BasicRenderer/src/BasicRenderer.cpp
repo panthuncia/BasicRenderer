@@ -356,7 +356,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     //auto robot = LoadModel("models/robot.usdz");
 
-	auto zorah = LoadModel("models/zorah/zorah_main_public.gltf");
+	auto zorah = LoadModel("models/zorahv2/zorah_main_public.v2.gltf");
 
 	//auto island = LoadModel("models/island/usd/elements/isMountainB/instance.usda");
 
