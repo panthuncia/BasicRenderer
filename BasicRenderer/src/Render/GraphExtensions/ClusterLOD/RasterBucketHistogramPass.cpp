@@ -69,7 +69,7 @@ void RasterBucketHistogramPass::Setup() {
 }
 
 PassReturn RasterBucketHistogramPass::Execute(PassExecutionContext& executionContext) {
-    if (m_runWhenComputeSWRasterEnabledOnly && !SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")()) {
+    if (m_runWhenComputeSWRasterEnabledOnly && !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
         return {};
     }
 
@@ -107,7 +107,7 @@ PassReturn RasterBucketHistogramPass::Execute(PassExecutionContext& executionCon
 }
 
 void RasterBucketHistogramPass::Update(const UpdateExecutionContext& executionContext) {
-    if (m_runWhenComputeSWRasterEnabledOnly && !SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")()) {
+    if (m_runWhenComputeSWRasterEnabledOnly && !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
         return;
     }
 

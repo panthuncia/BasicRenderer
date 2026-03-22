@@ -17,6 +17,35 @@ enum class CLodPriorityMode : uint8_t {
     Sum, // Duplicate group requests accumulate (sum) their priorities
 };
 
+enum class CLodSoftwareRasterMode : uint8_t {
+    Disabled,
+    Compute,
+    WorkGraph,
+};
+
+inline constexpr const char* CLodSoftwareRasterModeSettingName = "clodSoftwareRasterMode";
+inline constexpr const char* CLodSoftwareRasterModeNames[] = {
+    "Disabled",
+    "Compute",
+    "Work Graph",
+};
+inline constexpr int CLodSoftwareRasterModeCount = static_cast<int>(sizeof(CLodSoftwareRasterModeNames) / sizeof(CLodSoftwareRasterModeNames[0]));
+
+constexpr bool CLodSoftwareRasterEnabled(CLodSoftwareRasterMode mode)
+{
+    return mode != CLodSoftwareRasterMode::Disabled;
+}
+
+constexpr bool CLodSoftwareRasterUsesCompute(CLodSoftwareRasterMode mode)
+{
+    return mode == CLodSoftwareRasterMode::Compute;
+}
+
+constexpr bool CLodSoftwareRasterUsesWorkGraph(CLodSoftwareRasterMode mode)
+{
+    return mode == CLodSoftwareRasterMode::WorkGraph;
+}
+
 struct RasterBucketsHistogramIndirectCommand
 {
     unsigned int clusterCount;

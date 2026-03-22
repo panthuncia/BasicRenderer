@@ -37,6 +37,7 @@
 #include "Render/MemoryIntrospectionAPI.h"
 #include "ShaderBuffers.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "Telemetry/FrameTaskGraphTelemetry.h"
 #include "Managers/Singletons/RendererECSManager.h"
@@ -435,13 +436,9 @@ private:
 	std::function<bool()> getMeshletCullingEnabled;
 	std::function<void(bool)> setMeshletCullingEnabled;
 
-    bool enableSoftwareRaster = true;
-    std::function<bool()> getEnableSoftwareRaster;
-    std::function<void(bool)> setEnableSoftwareRaster;
-
-    bool useComputeSWRaster = false;
-    std::function<bool()> getUseComputeSWRaster;
-    std::function<void(bool)> setUseComputeSWRaster;
+    CLodSoftwareRasterMode m_clodSoftwareRasterMode = CLodSoftwareRasterMode::Disabled;
+    std::function<CLodSoftwareRasterMode()> getCLodSoftwareRasterMode;
+    std::function<void(CLodSoftwareRasterMode)> setCLodSoftwareRasterMode;
 
     bool wireframeEnabled = false;
 	std::function<bool()> getWireframeEnabled;
@@ -641,15 +638,10 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
 	meshletCulling = getMeshletCullingEnabled();
 	observerSetting(meshletCulling, "enableMeshletCulling");
 
-    getEnableSoftwareRaster = settingsManager.getSettingGetter<bool>("enableSoftwareRaster");
-    setEnableSoftwareRaster = settingsManager.getSettingSetter<bool>("enableSoftwareRaster");
-    enableSoftwareRaster = getEnableSoftwareRaster();
-    observerSetting(enableSoftwareRaster, "enableSoftwareRaster");
-
-    getUseComputeSWRaster = settingsManager.getSettingGetter<bool>("useComputeSwRaster");
-    setUseComputeSWRaster = settingsManager.getSettingSetter<bool>("useComputeSwRaster");
-    useComputeSWRaster = getUseComputeSWRaster();
-    observerSetting(useComputeSWRaster, "useComputeSwRaster");
+    getCLodSoftwareRasterMode = settingsManager.getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName);
+    setCLodSoftwareRasterMode = settingsManager.getSettingSetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName);
+    m_clodSoftwareRasterMode = getCLodSoftwareRasterMode();
+    observerSetting(m_clodSoftwareRasterMode, CLodSoftwareRasterModeSettingName);
 
 	setWireframeEnabled = settingsManager.getSettingSetter<bool>("enableWireframe");
 	getWireframeEnabled = settingsManager.getSettingGetter<bool>("enableWireframe");
@@ -842,17 +834,11 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 		if (ImGui::Checkbox("Meshlet Culling", &meshletCulling)) {
 			setMeshletCullingEnabled(meshletCulling);
 		}
-        if (ImGui::Checkbox("Enable Software Raster", &enableSoftwareRaster)) {
-            setEnableSoftwareRaster(enableSoftwareRaster);
-        }
-        if (!enableSoftwareRaster) {
-            ImGui::BeginDisabled();
-        }
-        if (ImGui::Checkbox("Use Compute SW Raster", &useComputeSWRaster)) {
-            setUseComputeSWRaster(useComputeSWRaster);
-        }
-        if (!enableSoftwareRaster) {
-            ImGui::EndDisabled();
+        int clodSoftwareRasterModeIndex = static_cast<int>(m_clodSoftwareRasterMode);
+        if (ImGui::Combo("Software Raster Mode", &clodSoftwareRasterModeIndex, CLodSoftwareRasterModeNames, CLodSoftwareRasterModeCount)) {
+            clodSoftwareRasterModeIndex = std::clamp(clodSoftwareRasterModeIndex, 0, CLodSoftwareRasterModeCount - 1);
+            m_clodSoftwareRasterMode = static_cast<CLodSoftwareRasterMode>(clodSoftwareRasterModeIndex);
+            setCLodSoftwareRasterMode(m_clodSoftwareRasterMode);
         }
 		if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
 			setWireframeEnabled(wireframeEnabled);

@@ -1091,7 +1091,8 @@ void PSOManager::GetPreprocessedBlob(
 #endif
     opts.warningsAsErrors = true;
 
-    auto args = BuildArguments(opts, shaderDir);
+    std::vector<std::wstring> ownedArgs;
+    auto args = BuildArguments(opts, shaderDir, ownedArgs);
 
     args.push_back(L"-P"); // Preprocess only
     auto preProcessedResult = InvokeCompile(
@@ -1344,7 +1345,8 @@ void PSOManager::CompileShader(
 #endif
     opts.warningsAsErrors = true;
 
-    auto args = BuildArguments(opts, shaderDir);
+    std::vector<std::wstring> ownedArgs;
+    auto args = BuildArguments(opts, shaderDir, ownedArgs);
 
     ComPtr<IDxcIncludeHandler> includeHandler;
     HRESULT hr = pUtils->CreateDefaultIncludeHandler(&includeHandler);
@@ -1387,7 +1389,8 @@ ComPtr<IDxcIncludeHandler> PSOManager::CreateIncludeHandler()
 
 std::vector<LPCWSTR> PSOManager::BuildArguments(
     const ShaderCompileOptions& opts,
-    const std::filesystem::path& shaderDir)
+    const std::filesystem::path& shaderDir,
+    std::vector<std::wstring>& ownedArgs)
 {
     std::vector<LPCWSTR> args;
 
@@ -1407,7 +1410,15 @@ std::vector<LPCWSTR> PSOManager::BuildArguments(
 
     for (auto& def : opts.defines) {
         args.push_back(L"-D");
-        args.push_back(def.Name);
+        if (def.Value && def.Value[0] != L'\0') {
+            ownedArgs.emplace_back(def.Name);
+            ownedArgs.back().push_back(L'=');
+            ownedArgs.back().append(def.Value);
+            args.push_back(ownedArgs.back().c_str());
+        }
+        else {
+            args.push_back(def.Name);
+        }
     }
 
     // always include shaders folder

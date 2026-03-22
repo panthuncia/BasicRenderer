@@ -159,8 +159,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_streamingSystem->GatherStructuralPasses(rg, outPasses);
     }
 
-    const bool enableSoftwareRaster = SettingsManager::GetInstance().getSettingGetter<bool>("enableSoftwareRaster")();
-    const bool useComputeSWRaster = enableSoftwareRaster && SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")();
+    const auto softwareRasterMode = SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)();
+    const bool useComputeSWRaster = CLodSoftwareRasterUsesCompute(softwareRasterMode);
 
     // Retrieve the page pool slab ResourceGroup for render graph tracking.
     std::shared_ptr<ResourceGroup> slabGroup;
@@ -180,6 +180,17 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     HierarchialCullingPassInputs cullPassInputs;
     cullPassInputs.isFirstPass = true;
     cullPassInputs.maxVisibleClusters = m_maxVisibleClusters;
+    switch (softwareRasterMode) {
+    case CLodSoftwareRasterMode::Disabled:
+        cullPassInputs.workGraphMode = HierarchialCullingWorkGraphMode::HardwareOnly;
+        break;
+    case CLodSoftwareRasterMode::Compute:
+        cullPassInputs.workGraphMode = HierarchialCullingWorkGraphMode::SoftwareRasterCompute;
+        break;
+    case CLodSoftwareRasterMode::WorkGraph:
+        cullPassInputs.workGraphMode = HierarchialCullingWorkGraphMode::SoftwareRasterWorkGraph;
+        break;
+    }
     cullPassDesc.pass = std::make_shared<HierarchialCullingPass>(
         cullPassInputs,
         m_visibleClustersBuffer,
@@ -362,6 +373,17 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     HierarchialCullingPassInputs cullPassInputs2;
     cullPassInputs2.isFirstPass = false;
     cullPassInputs2.maxVisibleClusters = m_maxVisibleClusters;
+    switch (softwareRasterMode) {
+    case CLodSoftwareRasterMode::Disabled:
+        cullPassInputs2.workGraphMode = HierarchialCullingWorkGraphMode::HardwareOnly;
+        break;
+    case CLodSoftwareRasterMode::Compute:
+        cullPassInputs2.workGraphMode = HierarchialCullingWorkGraphMode::SoftwareRasterCompute;
+        break;
+    case CLodSoftwareRasterMode::WorkGraph:
+        cullPassInputs2.workGraphMode = HierarchialCullingWorkGraphMode::SoftwareRasterWorkGraph;
+        break;
+    }
     cullPassDesc2.pass = std::make_shared<HierarchialCullingPass>(
         cullPassInputs2,
         m_visibleClustersBuffer,

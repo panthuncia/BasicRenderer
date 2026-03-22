@@ -3,6 +3,7 @@
 #include "Managers/MaterialManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/SettingsManager.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
 #include "../shaders/PerPassRootConstants/clodCreateCommandRootConstants.h"
 
@@ -33,7 +34,7 @@ void RasterBucketCreateCommandPass::DeclareResourceUsages(ComputePassBuilder* bu
 void RasterBucketCreateCommandPass::Setup() {}
 
 PassReturn RasterBucketCreateCommandPass::Execute(PassExecutionContext& executionContext) {
-    if (m_runWhenComputeSWRasterEnabledOnly && !SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")()) {
+    if (m_runWhenComputeSWRasterEnabledOnly && !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
         return {};
     }
 

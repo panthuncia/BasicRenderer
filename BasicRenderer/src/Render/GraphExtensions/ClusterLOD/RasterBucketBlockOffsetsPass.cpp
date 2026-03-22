@@ -3,6 +3,7 @@
 #include "Managers/MaterialManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/SettingsManager.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
 #include "BuiltinResources.h"
 #include "../shaders/PerPassRootConstants/clodPrefixOffsetsRootConstants.h"
@@ -34,7 +35,7 @@ void RasterBucketBlockOffsetsPass::DeclareResourceUsages(ComputePassBuilder* bui
 void RasterBucketBlockOffsetsPass::Setup() {}
 
 PassReturn RasterBucketBlockOffsetsPass::Execute(PassExecutionContext& executionContext) {
-    if (m_runWhenComputeSWRasterEnabledOnly && !SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")()) {
+    if (m_runWhenComputeSWRasterEnabledOnly && !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
         return {};
     }
 
@@ -73,7 +74,7 @@ PassReturn RasterBucketBlockOffsetsPass::Execute(PassExecutionContext& execution
 }
 
 void RasterBucketBlockOffsetsPass::Update(const UpdateExecutionContext& executionContext) {
-    if (m_runWhenComputeSWRasterEnabledOnly && !SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")()) {
+    if (m_runWhenComputeSWRasterEnabledOnly && !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
         return;
     }
 

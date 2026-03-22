@@ -67,6 +67,7 @@
 #include "Render/Runtime/OpenRenderGraphSettings.h"
 #include "Render/GraphExtensions/IOExtension.h"
 #include "Render/GraphExtensions/CLodExtension.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "RenderPasses/DebugGridPass.h"
 #include "Render/GraphExtensions/ReadbackCaptureExtension.h"
 #include "Resources/Resource.h"
@@ -798,8 +799,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableGTAO", m_gtaoEnabled);
 	settingsManager.registerSetting<bool>("enableOcclusionCulling", m_occlusionCulling);
 	settingsManager.registerSetting<bool>("enableMeshletCulling", m_meshletCulling);
-    settingsManager.registerSetting<bool>("enableSoftwareRaster", true);
-    settingsManager.registerSetting<bool>("useComputeSwRaster", false);
+    settingsManager.registerSetting<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName, CLodSoftwareRasterMode::WorkGraph);
     settingsManager.registerSetting<bool>("enableBloom", m_bloom);
     settingsManager.registerSetting<bool>("enableJitter", m_jitter);
     settingsManager.registerSetting<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene", [this](std::shared_ptr<Scene> scene) -> std::shared_ptr<Scene> {
@@ -883,11 +883,7 @@ void Renderer::SetSettings() {
 		m_occlusionCulling = newValue;
 		rebuildRenderGraph = true;
 		}));
-        m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableSoftwareRaster", [this](const bool& newValue) {
-                (void)newValue;
-                rebuildRenderGraph = true;
-                }));
-    m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("useComputeSwRaster", [this](const bool& newValue) {
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName, [this](const CLodSoftwareRasterMode& newValue) {
         (void)newValue;
         rebuildRenderGraph = true;
         }));

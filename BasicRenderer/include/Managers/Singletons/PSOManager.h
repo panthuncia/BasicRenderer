@@ -248,7 +248,8 @@ private:
 
     std::vector<LPCWSTR> BuildArguments(
         const ShaderCompileOptions& opts,
-        const std::filesystem::path& shaderDir);
+        const std::filesystem::path& shaderDir,
+        std::vector<std::wstring>& ownedArgs);
 
     ComPtr<IDxcResult> InvokeCompile(
         const DxcBuffer& srcBuffer,

@@ -8,6 +8,7 @@
 
 #include "BuiltinRenderPasses.h"
 #include "Interfaces/IDynamicDeclaredResources.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderPhase.h"
 #include "RenderPasses/Base/ComputePass.h"
 #include "Render/RenderGraph/RenderGraph.h"
@@ -17,9 +18,16 @@ class Buffer;
 class PixelBuffer;
 class ResourceGroup;
 
+enum class HierarchialCullingWorkGraphMode : uint8_t {
+    HardwareOnly,
+    SoftwareRasterCompute,
+    SoftwareRasterWorkGraph,
+};
+
 struct HierarchialCullingPassInputs {
     bool isFirstPass;
     unsigned int maxVisibleClusters;
+    HierarchialCullingWorkGraphMode workGraphMode = HierarchialCullingWorkGraphMode::SoftwareRasterWorkGraph;
 
     friend bool operator==(const HierarchialCullingPassInputs&, const HierarchialCullingPassInputs&) = default;
 };
@@ -29,6 +37,7 @@ inline rg::Hash64 HashValue(const HierarchialCullingPassInputs& i) {
 
     boost::hash_combine(seed, i.isFirstPass);
     boost::hash_combine(seed, i.maxVisibleClusters);
+    boost::hash_combine(seed, static_cast<uint8_t>(i.workGraphMode));
     return seed;
 }
 
@@ -96,5 +105,6 @@ private:
     bool m_isFirstPass = true;
     bool m_declaredResourcesChanged = true;
     unsigned int m_maxVisibleClusters = 0u;
+    HierarchialCullingWorkGraphMode m_workGraphMode = HierarchialCullingWorkGraphMode::SoftwareRasterWorkGraph;
     RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
 };
