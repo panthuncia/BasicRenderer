@@ -4,7 +4,7 @@
 #include "include/indirectCommands.hlsli"
 #include "include/waveIntrinsicsHelpers.hlsli"
 #include "include/occlusionCulling.hlsli"
-#include "PerPassRootConstants/clodRootConstants.h"
+#include "PerPassRootConstants/clodWorkGraphRootConstants.h"
 #include "Include/clodStructs.hlsli"
 #include "Include/clodPageAccess.hlsli"
 
@@ -115,32 +115,32 @@ static const uint CLOD_RECORD_SOURCE_REPLAY = 1;
 
 bool CLodWorkGraphTelemetryEnabled()
 {
-    return (CLOD_WORKGRAPH_FLAGS & CLOD_WORKGRAPH_FLAG_TELEMETRY_ENABLED) != 0u;
+    return (CLOD_WG_FLAGS & CLOD_WG_FLAG_TELEMETRY_ENABLED) != 0u;
 }
 
 bool CLodWorkGraphOcclusionEnabled()
 {
-    return (CLOD_WORKGRAPH_FLAGS & CLOD_WORKGRAPH_FLAG_OCCLUSION_ENABLED) != 0u;
+    return (CLOD_WG_FLAGS & CLOD_WG_FLAG_OCCLUSION_ENABLED) != 0u;
 }
 
 bool CLodWorkGraphSWRasterEnabled()
 {
-    return (CLOD_WORKGRAPH_FLAGS & CLOD_WORKGRAPH_FLAG_SW_RASTER_ENABLED) != 0u;
+    return (CLOD_WG_FLAGS & CLOD_WG_FLAG_SW_RASTER_ENABLED) != 0u;
 }
 
 bool CLodWorkGraphIsPhase2()
 {
-    return (CLOD_WORKGRAPH_FLAGS & CLOD_WORKGRAPH_FLAG_PHASE2) != 0u;
+    return (CLOD_WG_FLAGS & CLOD_WG_FLAG_PHASE2) != 0u;
 }
 
 bool CLodWorkGraphUseComputeSWRaster()
 {
-    return (CLOD_WORKGRAPH_FLAGS & CLOD_WORKGRAPH_FLAG_COMPUTE_SW_RASTER) != 0u;
+    return (CLOD_WG_FLAGS & CLOD_WG_FLAG_COMPUTE_SW_RASTER) != 0u;
 }
 
 float CLodSWRasterDiameterThreshold()
 {
-    return float(CLOD_WORKGRAPH_FLAGS >> CLOD_WORKGRAPH_SW_RASTER_THRESHOLD_SHIFT);
+    return float(CLOD_WG_FLAGS >> CLOD_WG_SW_RASTER_THRESHOLD_SHIFT);
 }
 
 uint CLodBitMask(uint key)
@@ -190,7 +190,7 @@ void WGTelemetryAdd(uint counterIndex, uint value)
         return;
     }
 
-    RWStructuredBuffer<uint> telemetryCounters = ResourceDescriptorHeap[CLOD_WORKGRAPH_TELEMETRY_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> telemetryCounters = ResourceDescriptorHeap[CLOD_WG_TELEMETRY_DESCRIPTOR_INDEX];
     InterlockedAdd(telemetryCounters[counterIndex], value);
 }
 
@@ -277,8 +277,8 @@ bool ReplayTryAppendNode(uint instanceIndex, uint viewId, uint nodeId)
 {
     WGTelemetryAdd(WG_COUNTER_PHASE1_OCCLUSION_NODE_REPLAY_ENQUEUE_ATTEMPTS, 1);
 
-    RWByteAddressBuffer replayBuffer = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX];
-    RWStructuredBuffer<CLodReplayBufferState> replayState = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
+    RWByteAddressBuffer replayBuffer = ResourceDescriptorHeap[CLOD_WG_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodReplayBufferState> replayState = ResourceDescriptorHeap[CLOD_WG_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
 
     uint slot = 0;
     bool valid = false;
@@ -302,8 +302,8 @@ bool ReplayTryAppendMeshlet(uint instanceIndex, uint viewId, uint groupId, uint 
 {
     WGTelemetryAdd(WG_COUNTER_PHASE1_OCCLUSION_CLUSTER_REPLAY_ENQUEUE_ATTEMPTS, 1);
 
-    RWByteAddressBuffer replayBuffer = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX];
-    RWStructuredBuffer<CLodReplayBufferState> replayState = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
+    RWByteAddressBuffer replayBuffer = ResourceDescriptorHeap[CLOD_WG_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodReplayBufferState> replayState = ResourceDescriptorHeap[CLOD_WG_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
 
     uint slot = 0;
     bool valid = false;
@@ -696,7 +696,7 @@ void WG_TraverseNodes(
                     bool occlusionCulled = false;
                     if (CLodWorkGraphOcclusionEnabled() && !camera.isOrtho) {
                         StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
-                            ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
+                            ResourceDescriptorHeap[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
                         const uint depthMapDescriptorIndex = viewDepthSRVIndices[rec.viewId].linearDepthSRVIndex;
                         if (depthMapDescriptorIndex != 0) {
                             if (replaySource) {
@@ -952,7 +952,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 
         if (!cameras[b.viewId].isOrtho) {
             StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
-                ResourceDescriptorHeap[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
+                ResourceDescriptorHeap[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
             depthMapDescriptorIndex = viewDepthSRVIndices[b.viewId].linearDepthSRVIndex;
             depthRes = uint2(cameras[b.viewId].depthResX, cameras[b.viewId].depthResY);
             numDepthMips = cameras[b.viewId].numDepthMips;
@@ -996,24 +996,24 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
     const uint meshletCount = hasBucket ? UnpackMeshletCount(b.meshletIndexAndCount) : 0;
 
     globallycoherent RWStructuredBuffer<VisibleCluster> visibleClusters =
-        ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+        ResourceDescriptorHeap[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     RWStructuredBuffer<uint> visibleClusterCounter =
-        ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
+        ResourceDescriptorHeap[CLOD_WG_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
     RWStructuredBuffer<CLodReplayBufferState> replayState =
-        ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
-    const uint visibleClusterCapacity = CLOD_VISIBLE_CLUSTERS_CAPACITY;
+        ResourceDescriptorHeap[CLOD_WG_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
+    const uint visibleClusterCapacity = CLOD_WG_VISIBLE_CLUSTERS_CAPACITY;
 
     // Phase 2: read Phase 1's final HW count to offset writes and avoid overwriting Phase 1 entries.
     // Always bind the resource to avoid DXC ICE with conditional ResourceDescriptorHeap casts.
-    StructuredBuffer<uint> phase1HWBaseCounter = ResourceDescriptorHeap[CLOD_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> phase1HWBaseCounter = ResourceDescriptorHeap[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
     const uint phase1HWBase = CLodWorkGraphIsPhase2() ? phase1HWBaseCounter.Load(0) : 0u;
 
     // SW raster classification setup.
     const bool swRasterEnabled = CLodWorkGraphSWRasterEnabled();
     const float swDiameterThreshold = CLodSWRasterDiameterThreshold();
     RWStructuredBuffer<uint> swVisibleClusterCounter =
-        ResourceDescriptorHeap[CLOD_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
-    StructuredBuffer<uint> swWriteBaseCounter = ResourceDescriptorHeap[CLOD_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
+        ResourceDescriptorHeap[CLOD_WG_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> swWriteBaseCounter = ResourceDescriptorHeap[CLOD_WG_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
     const uint swWriteBase = CLodWorkGraphIsPhase2() ? swWriteBaseCounter.Load(0) : 0u;
     // Pre-compute screen-space scale: projDiameter = meshletRadiusWorld * swScreenScale / (-viewZ)
     // swScreenScale = 2 * projY * viewportHeight / 2 = projY * viewportHeight
@@ -1196,21 +1196,24 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 uint hwCombinedBase = 0;
                 if (WaveGetLaneIndex() == hwLeader) {
                     InterlockedAdd(replayState[0].visibleClusterCombinedCount, hwCount, hwCombinedBase);
-                    InterlockedAdd(visibleClusterCounter[0], hwCount, hwBase);
                 }
-                hwBase = WaveReadLaneAt(hwBase, hwLeader);
                 hwCombinedBase = WaveReadLaneAt(hwCombinedBase, hwLeader);
 
                 // Global write position accounts for Phase 1 entries (phase1HWBase == 0 for Phase 1).
-                const uint hwGlobalBase = phase1HWBase + hwBase;
                 const uint hwAvail =
                     (hwCombinedBase < visibleClusterCapacity)
                         ? min(hwCount, visibleClusterCapacity - hwCombinedBase)
                         : 0u;
 
+                if (WaveGetLaneIndex() == hwLeader) {
+                    InterlockedAdd(visibleClusterCounter[0], hwAvail, hwBase);
+                }
+                hwBase = WaveReadLaneAt(hwBase, hwLeader);
+
+                const uint hwGlobalBase = phase1HWBase + hwBase;
+
                 if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwCount > visibleClusterCapacity)) {
                     InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
-                    InterlockedMin(visibleClusterCounter[0], hwBase + hwAvail);
                 }
 
                 if (isWaveLeader) {
@@ -1238,9 +1241,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 uint swCombinedBase = 0;
                 if (WaveGetLaneIndex() == swLeader) {
                     InterlockedAdd(replayState[0].visibleClusterCombinedCount, swIterCount, swCombinedBase);
-                    InterlockedAdd(swVisibleClusterCounter[0], swIterCount, swBase);
                 }
-                swBase = WaveReadLaneAt(swBase, swLeader);
                 swCombinedBase = WaveReadLaneAt(swCombinedBase, swLeader);
 
                 swAvail =
@@ -1248,9 +1249,13 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                         ? min(swIterCount, visibleClusterCapacity - swCombinedBase)
                         : 0u;
 
+                if (WaveGetLaneIndex() == swLeader) {
+                    InterlockedAdd(swVisibleClusterCounter[0], swAvail, swBase);
+                }
+                swBase = WaveReadLaneAt(swBase, swLeader);
+
                 if (WaveGetLaneIndex() == swLeader && (swCombinedBase + swIterCount > visibleClusterCapacity)) {
                     InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
-                    InterlockedMin(swVisibleClusterCounter[0], swBase + swAvail);
                 }
 
                 if (outputSW && (swRank < swAvail)) {

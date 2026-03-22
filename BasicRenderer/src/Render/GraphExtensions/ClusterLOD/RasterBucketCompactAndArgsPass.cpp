@@ -11,7 +11,7 @@
 #include "Render/RenderContext.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "BuiltinResources.h"
-#include "../shaders/PerPassRootConstants/clodRootConstants.h"
+#include "../shaders/PerPassRootConstants/clodCompactionRootConstants.h"
 
 RasterBucketCompactAndArgsPass::RasterBucketCompactAndArgsPass(
     std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -110,23 +110,23 @@ PassReturn RasterBucketCompactAndArgsPass::Execute(PassExecutionContext& executi
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
 
     unsigned int rc[NumMiscUintRootConstants] = {};
-    rc[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
-    rc[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
-    rc[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetSRVInfo(0).slot.index;
-    rc[CLOD_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX] = m_offsetsBuffer->GetSRVInfo(0).slot.index;
-    rc[CLOD_RASTER_BUCKETS_WRITE_CURSOR_DESCRIPTOR_INDEX] = m_writeCursorBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rc[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rc[CLOD_RASTER_BUCKETS_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_indirectArgsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rc[CLOD_COMPACTED_APPEND_BASE_COUNTER_DESCRIPTOR_INDEX] = m_compactedBaseCounterBuffer->GetSRVInfo(0).slot.index;
-    rc[CLOD_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = m_sortedToUnsortedMappingBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rc[CLOD_NUM_RASTER_BUCKETS] = numBuckets | (m_appendToExisting ? 0x80000000u : 0u);
+    rc[CLOD_COMPACTION_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
+    rc[CLOD_COMPACTION_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
+    rc[CLOD_COMPACTION_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetSRVInfo(0).slot.index;
+    rc[CLOD_COMPACTION_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX] = m_offsetsBuffer->GetSRVInfo(0).slot.index;
+    rc[CLOD_COMPACTION_RASTER_BUCKETS_WRITE_CURSOR_DESCRIPTOR_INDEX] = m_writeCursorBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rc[CLOD_COMPACTION_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rc[CLOD_COMPACTION_RASTER_BUCKETS_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_indirectArgsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rc[CLOD_COMPACTION_APPEND_BASE_COUNTER_DESCRIPTOR_INDEX] = m_compactedBaseCounterBuffer->GetSRVInfo(0).slot.index;
+    rc[CLOD_COMPACTION_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = m_sortedToUnsortedMappingBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rc[CLOD_COMPACTION_NUM_RASTER_BUCKETS] = numBuckets | (m_appendToExisting ? 0x80000000u : 0u);
     if (m_appendToExisting) {
-        rc[CLOD_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] = m_compactedBaseCounterBuffer->GetSRVInfo(0).slot.index;
+        rc[CLOD_COMPACTION_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = m_compactedBaseCounterBuffer->GetSRVInfo(0).slot.index;
     }
-    rc[CLOD_VISIBLE_CLUSTERS_READ_MODE_FLAGS] =
-        (m_readReverse ? CLOD_VISIBLE_CLUSTERS_READ_FLAG_REVERSED : 0u) |
-        (m_buildSoftwareRasterDispatch ? CLOD_VISIBLE_CLUSTERS_READ_FLAG_BUILD_SW_DISPATCH : 0u);
-    rc[CLOD_VISIBLE_CLUSTERS_READ_CAPACITY] = static_cast<uint32_t>(m_maxVisibleClusters);
+    rc[CLOD_COMPACTION_READ_MODE_FLAGS] =
+        (m_readReverse ? CLOD_COMPACTION_READ_FLAG_REVERSED : 0u) |
+        (m_buildSoftwareRasterDispatch ? CLOD_COMPACTION_READ_FLAG_BUILD_SW_DISPATCH : 0u);
+    rc[CLOD_COMPACTION_READ_CAPACITY] = static_cast<uint32_t>(m_maxVisibleClusters);
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
         0,

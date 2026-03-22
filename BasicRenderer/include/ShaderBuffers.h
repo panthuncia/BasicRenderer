@@ -403,8 +403,10 @@ enum MiscUintRootConstants { // Used for pass-specific one-off constants
 	UintRootConstant7,
 	UintRootConstant8,
 	UintRootConstant9,
-	UintRootConstant10,
+	UintRootConstant10, 
     UintRootConstant11,
+    UintRootConstant12,
+    UintRootConstant13,
 	NumMiscUintRootConstants
 };
 
@@ -451,8 +453,6 @@ enum ResourceDescriptorIndicesRootConstants { // Auto-assigned, do not set manua
 	ResourceDescriptorIndex29,
 	ResourceDescriptorIndex30,
 	ResourceDescriptorIndex31,
-	ResourceDescriptorIndex32,
-	ResourceDescriptorIndex33,
     NumResourceDescriptorIndicesRootConstants
 };
 

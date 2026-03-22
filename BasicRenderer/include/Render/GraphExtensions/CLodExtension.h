@@ -42,6 +42,10 @@ private:
     std::shared_ptr<Buffer> m_visibleClustersCounterBufferPhase2;
     std::shared_ptr<Buffer> m_rasterBucketsHistogramBufferPhase2;
     std::shared_ptr<Buffer> m_rasterBucketsWriteCursorBufferPhase2;
+    std::shared_ptr<Buffer> m_rasterBucketsHistogramBufferSw;
+    std::shared_ptr<Buffer> m_rasterBucketsHistogramBufferPhase2Sw;
+    std::shared_ptr<Buffer> m_rasterBucketsWriteCursorBufferSw;
+    std::shared_ptr<Buffer> m_rasterBucketsWriteCursorBufferPhase2Sw;
 
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsWriteCursorBuffer;

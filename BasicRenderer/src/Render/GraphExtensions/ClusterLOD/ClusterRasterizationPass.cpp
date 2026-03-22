@@ -11,7 +11,7 @@
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "BuiltinResources.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
-#include "../shaders/PerPassRootConstants/clodRootConstants.h"
+#include "../shaders/PerPassRootConstants/clodRasterizationRootConstants.h"
 
 ClusterRasterizationPass::ClusterRasterizationPass(
     ClusterRasterizationPassInputs inputs,
@@ -174,10 +174,10 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
     auto& psoManager = PSOManager::GetInstance();
 
     uint32_t misc[NumMiscUintRootConstants] = {};
-    misc[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = m_sortedToUnsortedMappingBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = m_sortedToUnsortedMappingBuffer->GetSRVInfo(0).slot.index;
     commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
     auto numBuckets = context.materialManager->GetRasterBucketCount();

@@ -114,8 +114,20 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
     m_rasterBucketsHistogramBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
     m_rasterBucketsHistogramBufferPhase2->SetName("Raster bucket histogram phase2");
 
+    m_rasterBucketsHistogramBufferSw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_rasterBucketsHistogramBufferSw->SetName("Raster bucket histogram SW phase1");
+
+    m_rasterBucketsHistogramBufferPhase2Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_rasterBucketsHistogramBufferPhase2Sw->SetName("Raster bucket histogram SW phase2");
+
     m_rasterBucketsWriteCursorBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
     m_rasterBucketsWriteCursorBufferPhase2->SetName("CLod Raster bucket write cursor phase2");
+
+    m_rasterBucketsWriteCursorBufferSw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_rasterBucketsWriteCursorBufferSw->SetName("CLod Raster bucket write cursor SW phase1");
+
+    m_rasterBucketsWriteCursorBufferPhase2Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_rasterBucketsWriteCursorBufferPhase2Sw->SetName("CLod Raster bucket write cursor SW phase2");
 
     m_swVisibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
     m_swVisibleClustersCounterBuffer->SetName("CLod SW Visible Clusters Counter Buffer Phase1");
@@ -265,7 +277,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_visibleClustersBuffer,
             m_swVisibleClustersCounterBuffer,
             m_histogramIndirectCommand,
-            m_rasterBucketsHistogramBuffer,
+            m_rasterBucketsHistogramBufferSw,
             nullptr,
             true,
             m_maxVisibleClusters,
@@ -276,7 +288,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         swPrefixScanPassDesc.type = RenderGraph::PassType::Compute;
         swPrefixScanPassDesc.name = "CLod::RasterBucketsPrefixScanPassSW1";
         swPrefixScanPassDesc.pass = std::make_shared<RasterBucketBlockScanPass>(
-            m_rasterBucketsHistogramBuffer,
+            m_rasterBucketsHistogramBufferSw,
             m_rasterBucketsOffsetsBuffer,
             m_rasterBucketsBlockSumsBuffer,
             true);
@@ -301,9 +313,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_swVisibleClustersCounterBuffer,
             m_swVisibleClustersCounterBuffer,
             m_histogramIndirectCommand,
-            m_rasterBucketsHistogramBuffer,
+            m_rasterBucketsHistogramBufferSw,
             m_rasterBucketsOffsetsBuffer,
-            m_rasterBucketsWriteCursorBuffer,
+            m_rasterBucketsWriteCursorBufferSw,
             m_compactedVisibleClustersBuffer,
             m_rasterBucketsIndirectArgsBuffer,
             m_sortedToUnsortedMappingBuffer,
@@ -319,7 +331,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         swRasterizePassDesc.name = "CLod::SoftwareRasterizeClustersPass1";
         swRasterizePassDesc.pass = std::make_shared<ClusterSoftwareRasterizationPass>(
             m_compactedVisibleClustersBuffer,
-            m_rasterBucketsHistogramBuffer,
+            m_rasterBucketsHistogramBufferSw,
             m_rasterBucketsIndirectArgsBuffer,
             m_sortedToUnsortedMappingBuffer,
             m_viewRasterInfoBuffer,
@@ -363,7 +375,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_viewRasterInfoBuffer,
         slabGroup,
         m_visibleClustersCounterBuffer,
-        useComputeSWRaster ? m_swVisibleClustersCounterBuffer : nullptr);  // Phase 1 SW counter only needed for compute SW readback path
+        m_swVisibleClustersCounterBuffer);  // Phase 2 SW writes must stay disjoint from Phase 1 because the visibility buffer stores unsorted indices.
     outPasses.push_back(std::move(cullPassDesc2));
 
     RenderGraph::ExternalPassDesc histogramPassDesc2;
@@ -450,7 +462,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_visibleClustersBuffer,
             m_swVisibleClustersCounterBufferPhase2,
             m_histogramIndirectCommand,
-            m_rasterBucketsHistogramBufferPhase2,
+            m_rasterBucketsHistogramBufferPhase2Sw,
             m_swVisibleClustersCounterBuffer,
             true,
             m_maxVisibleClusters,
@@ -461,7 +473,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         swPrefixScanPassDesc2.type = RenderGraph::PassType::Compute;
         swPrefixScanPassDesc2.name = "CLod::RasterBucketsPrefixScanPassSW2";
         swPrefixScanPassDesc2.pass = std::make_shared<RasterBucketBlockScanPass>(
-            m_rasterBucketsHistogramBufferPhase2,
+            m_rasterBucketsHistogramBufferPhase2Sw,
             m_rasterBucketsOffsetsBuffer,
             m_rasterBucketsBlockSumsBuffer,
             true);
@@ -486,9 +498,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_swVisibleClustersCounterBufferPhase2,
             m_swVisibleClustersCounterBuffer,
             m_histogramIndirectCommand,
-            m_rasterBucketsHistogramBufferPhase2,
+            m_rasterBucketsHistogramBufferPhase2Sw,
             m_rasterBucketsOffsetsBuffer,
-            m_rasterBucketsWriteCursorBufferPhase2,
+            m_rasterBucketsWriteCursorBufferPhase2Sw,
             m_compactedVisibleClustersBuffer,
             m_rasterBucketsIndirectArgsBuffer,
             m_sortedToUnsortedMappingBuffer,
@@ -504,7 +516,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         swRasterizePassDesc2.name = "CLod::SoftwareRasterizeClustersPass2";
         swRasterizePassDesc2.pass = std::make_shared<ClusterSoftwareRasterizationPass>(
             m_compactedVisibleClustersBuffer,
-            m_rasterBucketsHistogramBufferPhase2,
+            m_rasterBucketsHistogramBufferPhase2Sw,
             m_rasterBucketsIndirectArgsBuffer,
             m_sortedToUnsortedMappingBuffer,
             m_viewRasterInfoBuffer,

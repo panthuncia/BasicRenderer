@@ -5,7 +5,7 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Render/RenderContext.h"
 #include "BuiltinResources.h"
-#include "../shaders/PerPassRootConstants/clodRootConstants.h"
+#include "../shaders/PerPassRootConstants/clodPrefixOffsetsRootConstants.h"
 
 RasterBucketBlockOffsetsPass::RasterBucketBlockOffsetsPass(
     std::shared_ptr<Buffer> offsetsBuffer,
@@ -53,12 +53,12 @@ PassReturn RasterBucketBlockOffsetsPass::Execute(PassExecutionContext& execution
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
 
     uint32_t rc[NumMiscUintRootConstants] = {};
-    rc[UintRootConstant0] = numBuckets;
-    rc[UintRootConstant1] = numBlocks;
-    rc[CLOD_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX] = m_offsetsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rc[CLOD_RASTER_BUCKETS_BLOCK_SUMS_DESCRIPTOR_INDEX] = m_blockSumsBuffer->GetSRVInfo(0).slot.index;
-    rc[CLOD_RASTER_BUCKETS_SCANNED_BLOCK_SUMS_DESCRIPTOR_INDEX] = m_scannedBlockSumsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rc[CLOD_RASTER_BUCKETS_TOTAL_COUNT_DESCRIPTOR_INDEX] = m_totalCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rc[CLOD_PREFIX_OFFSETS_NUM_BUCKETS] = numBuckets;
+    rc[CLOD_PREFIX_OFFSETS_NUM_BLOCKS] = numBlocks;
+    rc[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX] = m_offsetsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rc[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_BLOCK_SUMS_DESCRIPTOR_INDEX] = m_blockSumsBuffer->GetSRVInfo(0).slot.index;
+    rc[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_SCANNED_BLOCK_SUMS_DESCRIPTOR_INDEX] = m_scannedBlockSumsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rc[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_TOTAL_COUNT_DESCRIPTOR_INDEX] = m_totalCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

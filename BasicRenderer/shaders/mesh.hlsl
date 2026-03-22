@@ -8,6 +8,7 @@
 #include "Include/meshletCommon.hlsli"
 #include "Include/clodStructs.hlsli"
 #include "Include/clodPageAccess.hlsli"
+#include "PerPassRootConstants/clodRasterizationRootConstants.h"
 
 #define CLOD_COMPRESSED_POSITIONS 1u
 #define CLOD_COMPRESSED_NORMALS 4u
@@ -426,13 +427,11 @@ void VisibilityBufferMSMain(
     {
         return;
     }
-    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
+    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
     ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[setup.viewID];
     EmitMeshletVisBufferForView(uGroupThreadID, setup, setup.viewID, 0, viewRasterInfo, outputVertices, outputTriangles);
     EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
 }
-
-#include "PerPassRootConstants/clodRootConstants.h"
 
 bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSetup setup, in uint bucketMeshletIndex, in uint bucketCount)
 {
@@ -516,9 +515,9 @@ void ClusterLODBucketMSMain(
 
     uint linearizedID = vGroupID.x + vGroupID.y * dispatchX;
 
-    StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
-    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
-    StructuredBuffer<uint> sortedToUnsortedMapping = ResourceDescriptorHeap[CLOD_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
+    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> sortedToUnsortedMapping = ResourceDescriptorHeap[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX];
     uint count = histogram[bucketIndex];
 
     bool draw = linearizedID < count;
@@ -528,7 +527,7 @@ void ClusterLODBucketMSMain(
     uint unsortedClusterIndex = 0;
 
     if (draw) {   
-        StructuredBuffer<VisibleCluster> compactedClusters = ResourceDescriptorHeap[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
+        StructuredBuffer<VisibleCluster> compactedClusters = ResourceDescriptorHeap[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
         cluster = compactedClusters[visibleClusterIndex];
         unsortedClusterIndex = sortedToUnsortedMapping[visibleClusterIndex];
         draw = InitializeMeshletFromCompactedCluster(cluster, setup, linearizedID, count);

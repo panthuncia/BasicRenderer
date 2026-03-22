@@ -10,7 +10,7 @@
 #include "Render/RenderContext.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "BuiltinResources.h"
-#include "../shaders/PerPassRootConstants/clodRootConstants.h"
+#include "../shaders/PerPassRootConstants/clodHistogramRootConstants.h"
 
 RasterBucketHistogramPass::RasterBucketHistogramPass(
     std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -84,14 +84,14 @@ PassReturn RasterBucketHistogramPass::Execute(PassExecutionContext& executionCon
     BindResourceDescriptorIndices(commandList, m_histogramPipeline.GetResourceDescriptorSlots());
 
     uint32_t uintRootConstants[NumMiscUintRootConstants] = {};
-    uintRootConstants[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
-    uintRootConstants[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
-    uintRootConstants[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
+    uintRootConstants[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
+    uintRootConstants[CLOD_HISTOGRAM_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     if (m_readBaseCounterBuffer) {
-        uintRootConstants[CLOD_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] = m_readBaseCounterBuffer->GetSRVInfo(0).slot.index;
+        uintRootConstants[CLOD_HISTOGRAM_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = m_readBaseCounterBuffer->GetSRVInfo(0).slot.index;
     }
-    uintRootConstants[CLOD_VISIBLE_CLUSTERS_READ_MODE_FLAGS] = m_readReverse ? CLOD_VISIBLE_CLUSTERS_READ_FLAG_REVERSED : 0u;
-    uintRootConstants[CLOD_VISIBLE_CLUSTERS_READ_CAPACITY] = m_visibleClustersCapacity;
+    uintRootConstants[CLOD_HISTOGRAM_READ_MODE_FLAGS] = m_readReverse ? CLOD_HISTOGRAM_READ_FLAG_REVERSED : 0u;
+    uintRootConstants[CLOD_HISTOGRAM_READ_CAPACITY] = m_visibleClustersCapacity;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

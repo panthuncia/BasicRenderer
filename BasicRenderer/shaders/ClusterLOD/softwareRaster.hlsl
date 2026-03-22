@@ -10,7 +10,8 @@
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
 #include "include/vertex.hlsli"
-#include "PerPassRootConstants/clodRootConstants.h"
+#include "PerPassRootConstants/clodWorkGraphRootConstants.h"
+#include "PerPassRootConstants/clodRasterizationRootConstants.h"
 #include "Include/clodStructs.hlsli"
 #include "Include/clodPageAccess.hlsli"
 #include "Include/visibilityPacking.hlsli"
@@ -299,7 +300,7 @@ void WG_SWRaster(
     // Load VisibleCluster from buffer via indirection
     uint unsortedClusterIndex = batch.clusterIndices[clusterIdx];
     globallycoherent RWStructuredBuffer<VisibleCluster> visibleClusters =
-        ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+        ResourceDescriptorHeap[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     VisibleCluster vc = visibleClusters[unsortedClusterIndex];
 
     StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuf =
@@ -311,7 +312,7 @@ void WG_SWRaster(
 [numthreads(SW_RASTER_THREADS, 1, 1)]
 void SWRasterIndirectCSMain(uint3 dtid : SV_DispatchThreadID, uint GI : SV_GroupIndex, uint3 groupId : SV_GroupID)
 {
-    StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
     const uint bucketID = IndirectCommandSignatureRootConstant2;
     const uint clusterCount = histogram[bucketID];
 
@@ -324,11 +325,11 @@ void SWRasterIndirectCSMain(uint3 dtid : SV_DispatchThreadID, uint GI : SV_Group
 
     const uint sortedClusterIndex = IndirectCommandSignatureRootConstant0 + clusterIdx;
     StructuredBuffer<VisibleCluster> compactedVisibleClusters =
-        ResourceDescriptorHeap[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
+        ResourceDescriptorHeap[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
     StructuredBuffer<uint> sortedToUnsortedMapping =
-        ResourceDescriptorHeap[CLOD_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX];
+        ResourceDescriptorHeap[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX];
     StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuf =
-        ResourceDescriptorHeap[CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
+        ResourceDescriptorHeap[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
 
     const VisibleCluster vc = compactedVisibleClusters[sortedClusterIndex];
     const uint unsortedClusterIndex = sortedToUnsortedMapping[sortedClusterIndex];

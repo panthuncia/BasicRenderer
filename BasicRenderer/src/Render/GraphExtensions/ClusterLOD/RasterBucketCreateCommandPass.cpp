@@ -4,7 +4,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Render/RenderContext.h"
-#include "../shaders/PerPassRootConstants/clodRootConstants.h"
+#include "../shaders/PerPassRootConstants/clodCreateCommandRootConstants.h"
 
 RasterBucketCreateCommandPass::RasterBucketCreateCommandPass(
     std::shared_ptr<Buffer> visibleClustersCounterBuffer,
@@ -47,11 +47,11 @@ PassReturn RasterBucketCreateCommandPass::Execute(PassExecutionContext& executio
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
 
     uint32_t rc[NumMiscUintRootConstants] = {};
-    rc[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
-    rc[CLOD_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
-    rc[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetSRVInfo(0).slot.index;
-    rc[CLOD_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rc[CLOD_NUM_RASTER_BUCKETS] = context.materialManager->GetRasterBucketCount();
+    rc[CLOD_CREATE_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
+    rc[CLOD_CREATE_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
+    rc[CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetSRVInfo(0).slot.index;
+    rc[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rc[CLOD_CREATE_NUM_RASTER_BUCKETS] = context.materialManager->GetRasterBucketCount();
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

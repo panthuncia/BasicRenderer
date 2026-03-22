@@ -5,7 +5,7 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Render/RenderContext.h"
 #include "BuiltinResources.h"
-#include "../shaders/PerPassRootConstants/clodRootConstants.h"
+#include "../shaders/PerPassRootConstants/clodPrefixScanRootConstants.h"
 
 RasterBucketBlockScanPass::RasterBucketBlockScanPass(
     std::shared_ptr<Buffer> histogramBuffer,
@@ -51,9 +51,10 @@ PassReturn RasterBucketBlockScanPass::Execute(PassExecutionContext& executionCon
 
     uint32_t rc[NumMiscUintRootConstants] = {};
     rc[UintRootConstant0] = numBuckets;
-    rc[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetSRVInfo(0).slot.index;
-    rc[CLOD_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX] = m_offsetsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rc[CLOD_RASTER_BUCKETS_BLOCK_SUMS_DESCRIPTOR_INDEX] = m_blockSumsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rc[CLOD_PREFIX_SCAN_NUM_BUCKETS] = numBuckets;
+    rc[CLOD_PREFIX_SCAN_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetSRVInfo(0).slot.index;
+    rc[CLOD_PREFIX_SCAN_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX] = m_offsetsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rc[CLOD_PREFIX_SCAN_RASTER_BUCKETS_BLOCK_SUMS_DESCRIPTOR_INDEX] = m_blockSumsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

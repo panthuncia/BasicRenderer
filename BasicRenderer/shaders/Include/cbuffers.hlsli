@@ -88,9 +88,6 @@ cbuffer ResourceDescriptorIndices : register(b6) {
     uint ResourceDescriptorIndex29;
     uint ResourceDescriptorIndex30;
     uint ResourceDescriptorIndex31;
-    uint ResourceDescriptorIndex32;
-    uint ResourceDescriptorIndex33;
-    uint ResourceDescriptorIndex34;
 };
 
 cbuffer IndirectCommandSignatureRootConstants : register(b7)

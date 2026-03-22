@@ -23,7 +23,8 @@
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "BuiltinResources.h"
 #include "ShaderBuffers.h"
-#include "../shaders/PerPassRootConstants/clodRootConstants.h"
+#include "../shaders/PerPassRootConstants/clodCreateCommandRootConstants.h"
+#include "../shaders/PerPassRootConstants/clodWorkGraphRootConstants.h"
 
 HierarchialCullingPass::HierarchialCullingPass(
     HierarchialCullingPassInputs inputs,
@@ -172,43 +173,43 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     BindResourceDescriptorIndices(commandList, m_pipelineResources);
 
     uint32_t uintRootConstants[NumMiscUintRootConstants] = {};
-    uintRootConstants[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_swVisibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_WORKGRAPH_TELEMETRY_DESCRIPTOR_INDEX] = m_workGraphTelemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_swVisibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_TELEMETRY_DESCRIPTOR_INDEX] = m_workGraphTelemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
     uint32_t workGraphFlags = 0u;
     if (IsCLodWorkGraphTelemetryEnabled()) {
-        workGraphFlags |= CLOD_WORKGRAPH_FLAG_TELEMETRY_ENABLED;
+        workGraphFlags |= CLOD_WG_FLAG_TELEMETRY_ENABLED;
     }
     if (SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")()) {
-        workGraphFlags |= CLOD_WORKGRAPH_FLAG_OCCLUSION_ENABLED;
+        workGraphFlags |= CLOD_WG_FLAG_OCCLUSION_ENABLED;
     }
-    workGraphFlags |= CLOD_WORKGRAPH_FLAG_SW_RASTER_ENABLED;
+    workGraphFlags |= CLOD_WG_FLAG_SW_RASTER_ENABLED;
     if (SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")()) {
-        workGraphFlags |= CLOD_WORKGRAPH_FLAG_COMPUTE_SW_RASTER;
+        workGraphFlags |= CLOD_WG_FLAG_COMPUTE_SW_RASTER;
     }
     constexpr uint32_t swRasterThreshold = 16; // pixel diameter threshold
-    workGraphFlags |= (swRasterThreshold << CLOD_WORKGRAPH_SW_RASTER_THRESHOLD_SHIFT);
+    workGraphFlags |= (swRasterThreshold << CLOD_WG_SW_RASTER_THRESHOLD_SHIFT);
     if (!m_isFirstPass) {
-        workGraphFlags |= CLOD_WORKGRAPH_FLAG_PHASE2;
+        workGraphFlags |= CLOD_WG_FLAG_PHASE2;
     }
-    uintRootConstants[CLOD_WORKGRAPH_FLAGS] = workGraphFlags;
-    uintRootConstants[CLOD_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX] = m_occlusionReplayBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX] = m_viewDepthSrvIndicesBuffer->GetSRVInfo(0).slot.index;
-    uintRootConstants[CLOD_VISIBLE_CLUSTERS_CAPACITY] = static_cast<uint32_t>(m_maxVisibleClusters);
+    uintRootConstants[CLOD_WG_FLAGS] = workGraphFlags;
+    uintRootConstants[CLOD_WG_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX] = m_occlusionReplayBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX] = m_viewDepthSrvIndicesBuffer->GetSRVInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_VISIBLE_CLUSTERS_CAPACITY] = static_cast<uint32_t>(m_maxVisibleClusters);
 
     // Always bind valid SRV descriptors for the aliased write-base slots.
     // Phase 1 does not read these counters, but the shader still forms StructuredBuffer
     // views from the aliased root constants before branching on the phase flag.
-    uintRootConstants[CLOD_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] =
+    uintRootConstants[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] =
         (m_phase1VisibleClustersCounterBuffer ? m_phase1VisibleClustersCounterBuffer : m_visibleClustersCounterBuffer)
             ->GetSRVInfo(0)
             .slot.index;
-    uintRootConstants[CLOD_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] =
+    uintRootConstants[CLOD_WG_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] =
         (m_swWriteBaseCounterBuffer ? m_swWriteBaseCounterBuffer : m_swVisibleClustersCounterBuffer)
             ->GetSRVInfo(0)
             .slot.index;
@@ -315,9 +316,9 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
 
     BindResourceDescriptorIndices(commandList, m_createCommandPipelineState.GetResourceDescriptorSlots());
     // Reset aliased slots for CreateRasterBucketsHistogramCommandCSMain
-    uintRootConstants[CLOD_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_NUM_RASTER_BUCKETS] = context.materialManager->GetRasterBucketCount();
+    uintRootConstants[CLOD_CREATE_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_CREATE_NUM_RASTER_BUCKETS] = context.materialManager->GetRasterBucketCount();
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
         0,
