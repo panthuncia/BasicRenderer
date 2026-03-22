@@ -159,7 +159,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_streamingSystem->GatherStructuralPasses(rg, outPasses);
     }
 
-    const bool useComputeSWRaster = SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")();
+    const bool enableSoftwareRaster = SettingsManager::GetInstance().getSettingGetter<bool>("enableSoftwareRaster")();
+    const bool useComputeSWRaster = enableSoftwareRaster && SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")();
 
     // Retrieve the page pool slab ResourceGroup for render graph tracking.
     std::shared_ptr<ResourceGroup> slabGroup;

@@ -277,8 +277,7 @@ void SWRasterCluster(
 }
 
 
-// SWRaster – broadcasting work graph node
-
+// SWRaster: broadcasting work graph node for WG dispatch
 [Shader("node")]
 [NodeID("SWRaster")]
 [NodeLaunch("broadcasting")]
@@ -308,6 +307,7 @@ void WG_SWRaster(
     SWRasterCluster(vc, unsortedClusterIndex, GI, subGroup, viewRasterInfoBuf);
 }
 
+// Non-WG SW raster
 [shader("compute")]
 [numthreads(SW_RASTER_THREADS, 1, 1)]
 void SWRasterIndirectCSMain(uint3 dtid : SV_DispatchThreadID, uint GI : SV_GroupIndex, uint3 groupId : SV_GroupID)

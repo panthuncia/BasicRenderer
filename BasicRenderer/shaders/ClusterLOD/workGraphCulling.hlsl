@@ -1159,8 +1159,65 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 
         WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_MESHLET_ITERATIONS, active ? 1 : 0);
 
-        // SW/HW classification, tiny meshlets go to software rasterization.
+        // Benchmark mode: bypass all SW/HW classification and SW batch generation.
+        // Survivors go straight through the HW path so the work-graph cost excludes
+        // the software-raster routing logic itself.
         const bool contributes = active && survives;
+        if (!swRasterEnabled) {
+            VisibleCluster hwOnlyVC = (VisibleCluster)0;
+            if (contributes) {
+                hwOnlyVC.instanceID = b.instanceIndex;
+                hwOnlyVC.localMeshletIndex = localMeshletIndex;
+                hwOnlyVC.viewID = b.viewId;
+                hwOnlyVC.groupID = UnpackGroupId(b.groupIdPacked);
+                hwOnlyVC.pageSlabDescriptorIndex = b.pageSlabDescriptorIndex;
+                hwOnlyVC.pageSlabByteOffset = b.pageSlabByteOffset;
+            }
+
+            const uint4 hwMask = WaveActiveBallot(contributes);
+            const uint hwCount = CountBits128(hwMask);
+            totalSurvivors += hwCount;
+
+            if (hwCount > 0) {
+                const uint hwLeader = WaveFirstLaneFromMask(hwMask);
+                const uint hwRank = GetLaneRankInGroup(hwMask, WaveGetLaneIndex());
+
+                uint hwBase = 0;
+                uint hwCombinedBase = 0;
+                if (WaveGetLaneIndex() == hwLeader) {
+                    InterlockedAdd(replayState[0].visibleClusterCombinedCount, hwCount, hwCombinedBase);
+                }
+                hwCombinedBase = WaveReadLaneAt(hwCombinedBase, hwLeader);
+
+                const uint hwAvail =
+                    (hwCombinedBase < visibleClusterCapacity)
+                        ? min(hwCount, visibleClusterCapacity - hwCombinedBase)
+                        : 0u;
+
+                if (WaveGetLaneIndex() == hwLeader) {
+                    InterlockedAdd(visibleClusterCounter[0], hwAvail, hwBase);
+                }
+                hwBase = WaveReadLaneAt(hwBase, hwLeader);
+
+                const uint hwGlobalBase = phase1HWBase + hwBase;
+
+                if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwCount > visibleClusterCapacity)) {
+                    InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
+                }
+
+                if (isWaveLeader) {
+                    WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES, hwAvail);
+                }
+
+                if (contributes && (hwRank < hwAvail)) {
+                    visibleClusters[hwGlobalBase + hwRank] = hwOnlyVC;
+                }
+            }
+
+            continue;
+        }
+
+        // SW/HW classification, tiny meshlets go to software rasterization.
         bool isSW = false;
         if (contributes && swRasterEnabled) {
             // Projected diameter in pixels = meshletRadiusWorld * swScreenScale / (-viewZ)

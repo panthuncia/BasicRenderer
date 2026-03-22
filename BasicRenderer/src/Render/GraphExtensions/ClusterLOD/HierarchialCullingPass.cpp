@@ -186,8 +186,11 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     if (SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")()) {
         workGraphFlags |= CLOD_WG_FLAG_OCCLUSION_ENABLED;
     }
-    workGraphFlags |= CLOD_WG_FLAG_SW_RASTER_ENABLED;
-    if (SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")()) {
+    const bool enableSoftwareRaster = SettingsManager::GetInstance().getSettingGetter<bool>("enableSoftwareRaster")();
+    if (enableSoftwareRaster) {
+        workGraphFlags |= CLOD_WG_FLAG_SW_RASTER_ENABLED;
+    }
+    if (enableSoftwareRaster && SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")()) {
         workGraphFlags |= CLOD_WG_FLAG_COMPUTE_SW_RASTER;
     }
     constexpr uint32_t swRasterThreshold = 16; // pixel diameter threshold
