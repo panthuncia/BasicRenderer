@@ -181,6 +181,11 @@ struct CLodMultiNodeGpuInput
     uint64_t nodeInputStride;
 };
 
+// Shared software-raster launch constants.
+#define SW_RASTER_THREADS            32
+#define SW_RASTER_GROUPS_PER_CLUSTER 4
+#define SW_RASTER_MAX_VERTS          128
+
 // Batched work graph record for software rasterization of small clusters.
 // Broadcasting node: ClusterCull accumulates up to SW_BATCH_MAX_CLUSTERS
 // cluster indices per record. SWRaster reads full VisibleCluster data from
@@ -189,7 +194,7 @@ struct CLodMultiNodeGpuInput
 
 struct SWRasterBatchRecord
 {
-    uint3 dispatchGrid : SV_DispatchGrid; // (1 * numClusters, 1, 1)
+    uint3 dispatchGrid : SV_DispatchGrid; // (4 * numClusters, 1, 1)
     uint numClusters;                       // 1..SW_BATCH_MAX_CLUSTERS
     uint clusterIndices[SW_BATCH_MAX_CLUSTERS]; // unsorted visible cluster buffer indices
 };

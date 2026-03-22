@@ -133,6 +133,11 @@ bool CLodWorkGraphIsPhase2()
     return (CLOD_WORKGRAPH_FLAGS & CLOD_WORKGRAPH_FLAG_PHASE2) != 0u;
 }
 
+bool CLodWorkGraphUseComputeSWRaster()
+{
+    return (CLOD_WORKGRAPH_FLAGS & CLOD_WORKGRAPH_FLAG_COMPUTE_SW_RASTER) != 0u;
+}
+
 float CLodSWRasterDiameterThreshold()
 {
     return float(CLOD_WORKGRAPH_FLAGS >> CLOD_WORKGRAPH_SW_RASTER_THRESHOLD_SHIFT);
@@ -867,7 +872,7 @@ void WG_TraverseNodes(
 // after the meshlet loop, satisfying the Work Graphs spec requirement that
 // Get*NodeOutputRecords / OutputComplete are not inside varying flow control.
 #define SW_BATCH_ACCUM_CAPACITY (CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 64)
-#define SW_RASTER_GROUPS_PER_CLUSTER 1
+#define SW_RASTER_GROUPS_PER_CLUSTER 4
 
 groupshared uint gs_swBatchIndices[SW_BATCH_ACCUM_CAPACITY];
 
@@ -1008,6 +1013,8 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
     const float swDiameterThreshold = CLodSWRasterDiameterThreshold();
     RWStructuredBuffer<uint> swVisibleClusterCounter =
         ResourceDescriptorHeap[CLOD_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> swWriteBaseCounter = ResourceDescriptorHeap[CLOD_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
+    const uint swWriteBase = CLodWorkGraphIsPhase2() ? swWriteBaseCounter.Load(0) : 0u;
     // Pre-compute screen-space scale: projDiameter = meshletRadiusWorld * swScreenScale / (-viewZ)
     // swScreenScale = 2 * projY * viewportHeight / 2 = projY * viewportHeight
     // depthRes.y is the viewport height; cam.projY is projection[1][1].
@@ -1248,7 +1255,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 
                 if (outputSW && (swRank < swAvail)) {
                     // Write visible cluster top-down from the end of the buffer.
-                    const uint swIndex = visibleClusterCapacity - 1 - (swBase + swRank);
+                    const uint swIndex = visibleClusterCapacity - 1 - (swWriteBase + swBase + swRank);
                     visibleClusters[swIndex] = vc;
 
                     // Accumulate index into batch buffer.
@@ -1296,7 +1303,7 @@ void WG_ClusterCull1(
     ClusterCullBody(b, hasBucket, GI, inputCount, 1, swPending);
 
     GroupMemoryBarrierWithGroupSync();
-    const uint numBatches = (swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS;
+    const uint numBatches = CLodWorkGraphUseComputeSWRaster() ? 0u : ((swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS);
     GroupNodeOutputRecords<SWRasterBatchRecord> swBatchOut = 
         swRasterOutput.GetGroupNodeOutputRecords(numBatches);
     if (GI == 0) {
@@ -1329,7 +1336,7 @@ void WG_ClusterCull2(
     ClusterCullBody(b, hasBucket, GI, inputCount, 2, swPending);
 
     GroupMemoryBarrierWithGroupSync();
-    const uint numBatches = (swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS;
+    const uint numBatches = CLodWorkGraphUseComputeSWRaster() ? 0u : ((swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS);
     GroupNodeOutputRecords<SWRasterBatchRecord> swBatchOut =
         swRasterOutput.GetGroupNodeOutputRecords(numBatches);
     if (GI == 0) {
@@ -1362,7 +1369,7 @@ void WG_ClusterCull4(
     ClusterCullBody(b, hasBucket, GI, inputCount, 4, swPending);
 
     GroupMemoryBarrierWithGroupSync();
-    const uint numBatches = (swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS;
+    const uint numBatches = CLodWorkGraphUseComputeSWRaster() ? 0u : ((swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS);
     GroupNodeOutputRecords<SWRasterBatchRecord> swBatchOut =
         swRasterOutput.GetGroupNodeOutputRecords(numBatches);
     if (GI == 0) {
@@ -1395,7 +1402,7 @@ void WG_ClusterCull8(
     ClusterCullBody(b, hasBucket, GI, inputCount, 8, swPending);
 
     GroupMemoryBarrierWithGroupSync();
-    const uint numBatches = (swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS;
+    const uint numBatches = CLodWorkGraphUseComputeSWRaster() ? 0u : ((swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS);
     GroupNodeOutputRecords<SWRasterBatchRecord> swBatchOut =
         swRasterOutput.GetGroupNodeOutputRecords(numBatches);
     if (GI == 0) {
@@ -1428,7 +1435,7 @@ void WG_ClusterCull16(
     ClusterCullBody(b, hasBucket, GI, inputCount, 16, swPending);
 
     GroupMemoryBarrierWithGroupSync();
-    const uint numBatches = (swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS;
+    const uint numBatches = CLodWorkGraphUseComputeSWRaster() ? 0u : ((swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS);
     GroupNodeOutputRecords<SWRasterBatchRecord> swBatchOut =
         swRasterOutput.GetGroupNodeOutputRecords(numBatches);
     if (GI == 0) {
@@ -1461,7 +1468,7 @@ void WG_ClusterCull32(
     ClusterCullBody(b, hasBucket, GI, inputCount, 32, swPending);
 
     GroupMemoryBarrierWithGroupSync();
-    const uint numBatches = (swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS;
+    const uint numBatches = CLodWorkGraphUseComputeSWRaster() ? 0u : ((swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS);
     GroupNodeOutputRecords<SWRasterBatchRecord> swBatchOut =
         swRasterOutput.GetGroupNodeOutputRecords(numBatches);
     if (GI == 0) {
@@ -1494,7 +1501,7 @@ void WG_ClusterCull64(
     ClusterCullBody(b, hasBucket, GI, inputCount, 64, swPending);
 
     GroupMemoryBarrierWithGroupSync();
-    const uint numBatches = (swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS;
+    const uint numBatches = CLodWorkGraphUseComputeSWRaster() ? 0u : ((swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS);
     GroupNodeOutputRecords<SWRasterBatchRecord> swBatchOut =
         swRasterOutput.GetGroupNodeOutputRecords(numBatches);
     if (GI == 0) {

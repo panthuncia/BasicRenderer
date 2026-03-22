@@ -8,11 +8,13 @@
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodStreamingSystem.h"
 #include "Render/GraphExtensions/ClusterLOD/ClusterRasterizationPass.h"
+#include "Render/GraphExtensions/ClusterLOD/ClusterSoftwareRasterizationPass.h"
 #include "Render/GraphExtensions/ClusterLOD/HierarchialCullingPass.h"
 #include "Render/GraphExtensions/ClusterLOD/PerViewLinearDepthCopyPass.h"
 #include "Render/GraphExtensions/ClusterLOD/RasterBucketBlockOffsetsPass.h"
 #include "Render/GraphExtensions/ClusterLOD/RasterBucketBlockScanPass.h"
 #include "Render/GraphExtensions/ClusterLOD/RasterBucketCompactAndArgsPass.h"
+#include "Render/GraphExtensions/ClusterLOD/RasterBucketCreateCommandPass.h"
 #include "Render/GraphExtensions/ClusterLOD/RasterBucketHistogramPass.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
@@ -116,7 +118,10 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
     m_rasterBucketsWriteCursorBufferPhase2->SetName("CLod Raster bucket write cursor phase2");
 
     m_swVisibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
-    m_swVisibleClustersCounterBuffer->SetName("CLod SW Visible Clusters Counter Buffer");
+    m_swVisibleClustersCounterBuffer->SetName("CLod SW Visible Clusters Counter Buffer Phase1");
+
+    m_swVisibleClustersCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
+    m_swVisibleClustersCounterBufferPhase2->SetName("CLod SW Visible Clusters Counter Buffer Phase2");
 
     m_sortedToUnsortedMappingBuffer = CreateAliasedUnmaterializedStructuredBuffer(static_cast<uint32_t>(maxVisibleClusters), sizeof(uint32_t), true, false);
     m_sortedToUnsortedMappingBuffer->SetName("CLod Sorted-to-Unsorted Mapping Buffer");
@@ -141,6 +146,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     if (m_streamingSystem) {
         m_streamingSystem->GatherStructuralPasses(rg, outPasses);
     }
+
+    const bool useComputeSWRaster = SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")();
 
     // Retrieve the page pool slab ResourceGroup for render graph tracking.
     std::shared_ptr<ResourceGroup> slabGroup;
@@ -239,6 +246,88 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     rasterizePassDesc.isGeometryPass = true;
     outPasses.push_back(std::move(rasterizePassDesc));
 
+    if (useComputeSWRaster) {
+        RenderGraph::ExternalPassDesc swCreateCommandPassDesc;
+        swCreateCommandPassDesc.type = RenderGraph::PassType::Compute;
+        swCreateCommandPassDesc.name = "CLod::RasterBucketsCreateCommandPassSW1";
+        swCreateCommandPassDesc.pass = std::make_shared<RasterBucketCreateCommandPass>(
+            m_swVisibleClustersCounterBuffer,
+            m_histogramIndirectCommand,
+            m_occlusionReplayStateBuffer,
+            m_occlusionNodeGpuInputsBuffer,
+            true);
+        outPasses.push_back(std::move(swCreateCommandPassDesc));
+
+        RenderGraph::ExternalPassDesc swHistogramPassDesc;
+        swHistogramPassDesc.type = RenderGraph::PassType::Compute;
+        swHistogramPassDesc.name = "CLod::RasterBucketsHistogramPassSW1";
+        swHistogramPassDesc.pass = std::make_shared<RasterBucketHistogramPass>(
+            m_visibleClustersBuffer,
+            m_swVisibleClustersCounterBuffer,
+            m_histogramIndirectCommand,
+            m_rasterBucketsHistogramBuffer,
+            nullptr,
+            true,
+            m_maxVisibleClusters,
+            true);
+        outPasses.push_back(std::move(swHistogramPassDesc));
+
+        RenderGraph::ExternalPassDesc swPrefixScanPassDesc;
+        swPrefixScanPassDesc.type = RenderGraph::PassType::Compute;
+        swPrefixScanPassDesc.name = "CLod::RasterBucketsPrefixScanPassSW1";
+        swPrefixScanPassDesc.pass = std::make_shared<RasterBucketBlockScanPass>(
+            m_rasterBucketsHistogramBuffer,
+            m_rasterBucketsOffsetsBuffer,
+            m_rasterBucketsBlockSumsBuffer,
+            true);
+        outPasses.push_back(std::move(swPrefixScanPassDesc));
+
+        RenderGraph::ExternalPassDesc swPrefixOffsetsPassDesc;
+        swPrefixOffsetsPassDesc.type = RenderGraph::PassType::Compute;
+        swPrefixOffsetsPassDesc.name = "CLod::RasterBucketsPrefixOffsetsPassSW1";
+        swPrefixOffsetsPassDesc.pass = std::make_shared<RasterBucketBlockOffsetsPass>(
+            m_rasterBucketsOffsetsBuffer,
+            m_rasterBucketsBlockSumsBuffer,
+            m_rasterBucketsScannedBlockSumsBuffer,
+            m_rasterBucketsTotalCountBuffer,
+            true);
+        outPasses.push_back(std::move(swPrefixOffsetsPassDesc));
+
+        RenderGraph::ExternalPassDesc swCompactPassDesc;
+        swCompactPassDesc.type = RenderGraph::PassType::Compute;
+        swCompactPassDesc.name = "CLod::RasterBucketsCompactAndArgsPassSW1";
+        swCompactPassDesc.pass = std::make_shared<RasterBucketCompactAndArgsPass>(
+            m_visibleClustersBuffer,
+            m_swVisibleClustersCounterBuffer,
+            m_swVisibleClustersCounterBuffer,
+            m_histogramIndirectCommand,
+            m_rasterBucketsHistogramBuffer,
+            m_rasterBucketsOffsetsBuffer,
+            m_rasterBucketsWriteCursorBuffer,
+            m_compactedVisibleClustersBuffer,
+            m_rasterBucketsIndirectArgsBuffer,
+            m_sortedToUnsortedMappingBuffer,
+            m_maxVisibleClusters,
+            false,
+            true,
+            true,
+            true);
+        outPasses.push_back(std::move(swCompactPassDesc));
+
+        RenderGraph::ExternalPassDesc swRasterizePassDesc;
+        swRasterizePassDesc.type = RenderGraph::PassType::Compute;
+        swRasterizePassDesc.name = "CLod::SoftwareRasterizeClustersPass1";
+        swRasterizePassDesc.pass = std::make_shared<ClusterSoftwareRasterizationPass>(
+            m_compactedVisibleClustersBuffer,
+            m_rasterBucketsHistogramBuffer,
+            m_rasterBucketsIndirectArgsBuffer,
+            m_sortedToUnsortedMappingBuffer,
+            m_viewRasterInfoBuffer,
+            slabGroup,
+            true);
+        outPasses.push_back(std::move(swRasterizePassDesc));
+    }
+
     if (m_type != CLodExtensionType::Shadow) {
         RenderGraph::ExternalPassDesc depthCopyPassDesc;
         depthCopyPassDesc.type = RenderGraph::PassType::Compute;
@@ -264,7 +353,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         cullPassInputs2,
         m_visibleClustersBuffer,
         m_visibleClustersCounterBufferPhase2,
-        m_swVisibleClustersCounterBuffer,
+        m_swVisibleClustersCounterBufferPhase2,
         m_histogramIndirectCommand,
         m_workGraphTelemetryBuffer,
         m_occlusionReplayBuffer,
@@ -273,7 +362,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_viewDepthSrvIndicesBuffer,
         m_viewRasterInfoBuffer,
         slabGroup,
-        m_visibleClustersCounterBuffer);  // Phase 1's HW counter for write offset
+        m_visibleClustersCounterBuffer,
+        useComputeSWRaster ? m_swVisibleClustersCounterBuffer : nullptr);  // Phase 1 SW counter only needed for compute SW readback path
     outPasses.push_back(std::move(cullPassDesc2));
 
     RenderGraph::ExternalPassDesc histogramPassDesc2;
@@ -340,6 +430,88 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         slabGroup);
     rasterizePassDesc2.isGeometryPass = true;
     outPasses.push_back(std::move(rasterizePassDesc2));
+
+    if (useComputeSWRaster) {
+        RenderGraph::ExternalPassDesc swCreateCommandPassDesc2;
+        swCreateCommandPassDesc2.type = RenderGraph::PassType::Compute;
+        swCreateCommandPassDesc2.name = "CLod::RasterBucketsCreateCommandPassSW2";
+        swCreateCommandPassDesc2.pass = std::make_shared<RasterBucketCreateCommandPass>(
+            m_swVisibleClustersCounterBufferPhase2,
+            m_histogramIndirectCommand,
+            m_occlusionReplayStateBuffer,
+            m_occlusionNodeGpuInputsBuffer,
+            true);
+        outPasses.push_back(std::move(swCreateCommandPassDesc2));
+
+        RenderGraph::ExternalPassDesc swHistogramPassDesc2;
+        swHistogramPassDesc2.type = RenderGraph::PassType::Compute;
+        swHistogramPassDesc2.name = "CLod::RasterBucketsHistogramPassSW2";
+        swHistogramPassDesc2.pass = std::make_shared<RasterBucketHistogramPass>(
+            m_visibleClustersBuffer,
+            m_swVisibleClustersCounterBufferPhase2,
+            m_histogramIndirectCommand,
+            m_rasterBucketsHistogramBufferPhase2,
+            m_swVisibleClustersCounterBuffer,
+            true,
+            m_maxVisibleClusters,
+            true);
+        outPasses.push_back(std::move(swHistogramPassDesc2));
+
+        RenderGraph::ExternalPassDesc swPrefixScanPassDesc2;
+        swPrefixScanPassDesc2.type = RenderGraph::PassType::Compute;
+        swPrefixScanPassDesc2.name = "CLod::RasterBucketsPrefixScanPassSW2";
+        swPrefixScanPassDesc2.pass = std::make_shared<RasterBucketBlockScanPass>(
+            m_rasterBucketsHistogramBufferPhase2,
+            m_rasterBucketsOffsetsBuffer,
+            m_rasterBucketsBlockSumsBuffer,
+            true);
+        outPasses.push_back(std::move(swPrefixScanPassDesc2));
+
+        RenderGraph::ExternalPassDesc swPrefixOffsetsPassDesc2;
+        swPrefixOffsetsPassDesc2.type = RenderGraph::PassType::Compute;
+        swPrefixOffsetsPassDesc2.name = "CLod::RasterBucketsPrefixOffsetsPassSW2";
+        swPrefixOffsetsPassDesc2.pass = std::make_shared<RasterBucketBlockOffsetsPass>(
+            m_rasterBucketsOffsetsBuffer,
+            m_rasterBucketsBlockSumsBuffer,
+            m_rasterBucketsScannedBlockSumsBuffer,
+            m_rasterBucketsTotalCountBuffer,
+            true);
+        outPasses.push_back(std::move(swPrefixOffsetsPassDesc2));
+
+        RenderGraph::ExternalPassDesc swCompactPassDesc2;
+        swCompactPassDesc2.type = RenderGraph::PassType::Compute;
+        swCompactPassDesc2.name = "CLod::RasterBucketsCompactAndArgsPassSW2";
+        swCompactPassDesc2.pass = std::make_shared<RasterBucketCompactAndArgsPass>(
+            m_visibleClustersBuffer,
+            m_swVisibleClustersCounterBufferPhase2,
+            m_swVisibleClustersCounterBuffer,
+            m_histogramIndirectCommand,
+            m_rasterBucketsHistogramBufferPhase2,
+            m_rasterBucketsOffsetsBuffer,
+            m_rasterBucketsWriteCursorBufferPhase2,
+            m_compactedVisibleClustersBuffer,
+            m_rasterBucketsIndirectArgsBuffer,
+            m_sortedToUnsortedMappingBuffer,
+            m_maxVisibleClusters,
+            true,
+            true,
+            true,
+            true);
+        outPasses.push_back(std::move(swCompactPassDesc2));
+
+        RenderGraph::ExternalPassDesc swRasterizePassDesc2;
+        swRasterizePassDesc2.type = RenderGraph::PassType::Compute;
+        swRasterizePassDesc2.name = "CLod::SoftwareRasterizeClustersPass2";
+        swRasterizePassDesc2.pass = std::make_shared<ClusterSoftwareRasterizationPass>(
+            m_compactedVisibleClustersBuffer,
+            m_rasterBucketsHistogramBufferPhase2,
+            m_rasterBucketsIndirectArgsBuffer,
+            m_sortedToUnsortedMappingBuffer,
+            m_viewRasterInfoBuffer,
+            slabGroup,
+            true);
+        outPasses.push_back(std::move(swRasterizePassDesc2));
+    }
 
     if (m_type != CLodExtensionType::Shadow) {
         RenderGraph::ExternalPassDesc depthCopyPassDesc2;

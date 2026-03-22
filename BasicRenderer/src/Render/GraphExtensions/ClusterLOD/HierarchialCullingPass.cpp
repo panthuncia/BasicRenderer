@@ -38,7 +38,8 @@ HierarchialCullingPass::HierarchialCullingPass(
     std::shared_ptr<Buffer> viewDepthSrvIndicesBuffer,
     std::shared_ptr<Buffer> viewRasterInfoBuffer,
     std::shared_ptr<ResourceGroup> slabResourceGroup,
-    std::shared_ptr<Buffer> phase1VisibleClustersCounterBuffer) {
+    std::shared_ptr<Buffer> phase1VisibleClustersCounterBuffer,
+    std::shared_ptr<Buffer> swWriteBaseCounterBuffer) {
     CreatePipelines(
         DeviceManager::GetInstance().GetDevice(),
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -63,6 +64,7 @@ HierarchialCullingPass::HierarchialCullingPass(
     m_viewRasterInfoBuffer = std::move(viewRasterInfoBuffer);
     m_slabResourceGroup = std::move(slabResourceGroup);
     m_phase1VisibleClustersCounterBuffer = std::move(phase1VisibleClustersCounterBuffer);
+    m_swWriteBaseCounterBuffer = std::move(swWriteBaseCounterBuffer);
     m_maxVisibleClusters = inputs.maxVisibleClusters;
 }
 
@@ -116,6 +118,9 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
     // Phase 2 reads Phase 1's HW counter to offset writes in the visible clusters buffer.
     if (m_phase1VisibleClustersCounterBuffer) {
         builder->WithShaderResource(m_phase1VisibleClustersCounterBuffer);
+    }
+    if (m_swWriteBaseCounterBuffer) {
+        builder->WithShaderResource(m_swWriteBaseCounterBuffer);
     }
 
     // Declare visibility buffer UAVs for SW raster render graph tracking.
@@ -181,6 +186,9 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
         workGraphFlags |= CLOD_WORKGRAPH_FLAG_OCCLUSION_ENABLED;
     }
     workGraphFlags |= CLOD_WORKGRAPH_FLAG_SW_RASTER_ENABLED;
+    if (SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")()) {
+        workGraphFlags |= CLOD_WORKGRAPH_FLAG_COMPUTE_SW_RASTER;
+    }
     constexpr uint32_t swRasterThreshold = 16; // pixel diameter threshold
     workGraphFlags |= (swRasterThreshold << CLOD_WORKGRAPH_SW_RASTER_THRESHOLD_SHIFT);
     if (!m_isFirstPass) {
@@ -193,11 +201,17 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     uintRootConstants[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX] = m_viewDepthSrvIndicesBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_VISIBLE_CLUSTERS_CAPACITY] = static_cast<uint32_t>(m_maxVisibleClusters);
 
-    // Phase 2: bind Phase 1's HW counter on the aliased RC4 slot so the work graph can offset writes.
-    if (m_phase1VisibleClustersCounterBuffer) {
-        uintRootConstants[CLOD_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] =
-            m_phase1VisibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
-    }
+    // Always bind valid SRV descriptors for the aliased write-base slots.
+    // Phase 1 does not read these counters, but the shader still forms StructuredBuffer
+    // views from the aliased root constants before branching on the phase flag.
+    uintRootConstants[CLOD_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] =
+        (m_phase1VisibleClustersCounterBuffer ? m_phase1VisibleClustersCounterBuffer : m_visibleClustersCounterBuffer)
+            ->GetSRVInfo(0)
+            .slot.index;
+    uintRootConstants[CLOD_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] =
+        (m_swWriteBaseCounterBuffer ? m_swWriteBaseCounterBuffer : m_swVisibleClustersCounterBuffer)
+            ->GetSRVInfo(0)
+            .slot.index;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
@@ -328,10 +342,7 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
 
     uint32_t zero = 0u;
     BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
-    // Only Phase 1 clears the shared SW counter; Phase 2 accumulates from Phase 1's final value.
-    if (m_isFirstPass) {
-        BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_swVisibleClustersCounterBuffer), 0);
-    }
+    BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_swVisibleClustersCounterBuffer), 0);
 
     // Collect visibility buffers for render graph tracking and view raster info for SW raster.
     {

@@ -2,6 +2,7 @@
 
 #include "Managers/MaterialManager.h"
 #include "Managers/Singletons/PSOManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Render/RenderContext.h"
 #include "BuiltinResources.h"
 #include "../shaders/PerPassRootConstants/clodRootConstants.h"
@@ -10,11 +11,13 @@ RasterBucketBlockOffsetsPass::RasterBucketBlockOffsetsPass(
     std::shared_ptr<Buffer> offsetsBuffer,
     std::shared_ptr<Buffer> blockSumsBuffer,
     std::shared_ptr<Buffer> scannedBlockSumsBuffer,
-    std::shared_ptr<Buffer> totalCountBuffer)
+    std::shared_ptr<Buffer> totalCountBuffer,
+    bool runWhenComputeSWRasterEnabledOnly)
     : m_offsetsBuffer(std::move(offsetsBuffer))
     , m_blockSumsBuffer(std::move(blockSumsBuffer))
     , m_scannedBlockSumsBuffer(std::move(scannedBlockSumsBuffer))
-    , m_totalCountBuffer(std::move(totalCountBuffer)) {
+    , m_totalCountBuffer(std::move(totalCountBuffer))
+    , m_runWhenComputeSWRasterEnabledOnly(runWhenComputeSWRasterEnabledOnly) {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
         L"Shaders/ClusterLOD/clodUtil.hlsl",
@@ -31,6 +34,10 @@ void RasterBucketBlockOffsetsPass::DeclareResourceUsages(ComputePassBuilder* bui
 void RasterBucketBlockOffsetsPass::Setup() {}
 
 PassReturn RasterBucketBlockOffsetsPass::Execute(PassExecutionContext& executionContext) {
+    if (m_runWhenComputeSWRasterEnabledOnly && !SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")()) {
+        return {};
+    }
+
     auto* renderContext = executionContext.hostData->Get<RenderContext>();
     auto& context = *renderContext;
 
@@ -66,6 +73,10 @@ PassReturn RasterBucketBlockOffsetsPass::Execute(PassExecutionContext& execution
 }
 
 void RasterBucketBlockOffsetsPass::Update(const UpdateExecutionContext& executionContext) {
+    if (m_runWhenComputeSWRasterEnabledOnly && !SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")()) {
+        return;
+    }
+
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
     auto numBuckets = context.materialManager->GetRasterBucketCount();

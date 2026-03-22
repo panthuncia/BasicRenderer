@@ -47,7 +47,8 @@ public:
         std::shared_ptr<Buffer> viewDepthSrvIndicesBuffer,
         std::shared_ptr<Buffer> viewRasterInfoBuffer,
         std::shared_ptr<ResourceGroup> slabResourceGroup = nullptr,
-        std::shared_ptr<Buffer> phase1VisibleClustersCounterBuffer = nullptr);
+        std::shared_ptr<Buffer> phase1VisibleClustersCounterBuffer = nullptr,
+        std::shared_ptr<Buffer> swWriteBaseCounterBuffer = nullptr);
     ~HierarchialCullingPass();
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
@@ -90,6 +91,7 @@ private:
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     std::shared_ptr<Buffer> m_phase1VisibleClustersCounterBuffer; // Phase 2 only: Phase 1's HW counter for write offset
+    std::shared_ptr<Buffer> m_swWriteBaseCounterBuffer; // Phase 2 only: Phase 1's SW counter for top-down write offset
     std::vector<std::shared_ptr<PixelBuffer>> m_visibilityBuffers;
     bool m_isFirstPass = true;
     bool m_declaredResourcesChanged = true;

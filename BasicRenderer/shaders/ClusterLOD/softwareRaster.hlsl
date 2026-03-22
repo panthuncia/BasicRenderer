@@ -2,8 +2,8 @@
 // Compile with DXC target: lib_6_8 (Shader Model 6.8)
 //
 // Broadcasting launch: receives SWRasterBatchRecord from ClusterCull nodes.
-// Each record carries up to 8 cluster indices; each cluster gets 1 thread group
-// of 128 threads. Vertices are decoded into per-group
+// Each record carries up to 8 cluster indices; each cluster gets 4 thread groups
+// of 32 threads (128 threads per cluster). Vertices are decoded into per-group
 // groupshared, then triangles are rasterized via edge functions + InterlockedMin
 // to the per-view visibility buffer.
 
@@ -88,42 +88,16 @@ uint3 SWDecodeTriangle(ByteAddressBuffer slab, uint triStreamBase, uint triByteO
     return uint3(i0, i1, i2);
 }
 
-// Groupshared vertex cache (per thread group)
-
-#define SW_RASTER_THREADS            128
-#define SW_RASTER_GROUPS_PER_CLUSTER 1
-#define SW_RASTER_MAX_VERTS          128
-
 groupshared float2  gs_screenPos[SW_RASTER_MAX_VERTS];
 groupshared float   gs_linearDepth[SW_RASTER_MAX_VERTS];
 
-
-// SWRaster – broadcasting work graph node
-
-[Shader("node")]
-[NodeID("SWRaster")]
-[NodeLaunch("broadcasting")]
-[NodeMaxDispatchGrid(8, 1, 1)]
-[NumThreads(SW_RASTER_THREADS, 1, 1)]
-void WG_SWRaster(
-    DispatchNodeInputRecord<SWRasterBatchRecord> inputRecord,
-    uint GI : SV_GroupIndex,
-    uint3 groupId : SV_GroupID)
+void SWRasterCluster(
+    VisibleCluster vc,
+    uint unsortedClusterIndex,
+    uint GI,
+    uint subGroup,
+    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuf)
 {
-    SWRasterBatchRecord batch = inputRecord.Get();
-
-    // Each cluster gets SW_RASTER_GROUPS_PER_CLUSTER thread groups.
-    uint clusterIdx = groupId.x / SW_RASTER_GROUPS_PER_CLUSTER;
-    uint subGroup   = groupId.x % SW_RASTER_GROUPS_PER_CLUSTER;
-
-    if (clusterIdx >= batch.numClusters) return;
-
-    // Load VisibleCluster from buffer via indirection
-    uint unsortedClusterIndex = batch.clusterIndices[clusterIdx];
-    globallycoherent RWStructuredBuffer<VisibleCluster> visibleClusters =
-        ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
-    VisibleCluster vc = visibleClusters[unsortedClusterIndex];
-
     // Load page header + meshlet descriptor
     CLodPageHeader hdr = LoadPageHeader(vc.pageSlabDescriptorIndex, vc.pageSlabByteOffset);
     CLodMeshletDescriptor desc = LoadMeshletDescriptor(
@@ -133,7 +107,6 @@ void WG_SWRaster(
     const uint vertCount = CLodDescVertexCount(desc);
     const uint triCount  = CLodDescTriangleCount(desc);
 
-    // Load instance / camera / view-raster data
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     StructuredBuffer<PerMeshInstanceBuffer> meshInstBuf =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
@@ -147,8 +120,6 @@ void WG_SWRaster(
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
     CullingCameraInfo cam = cullingCameras[vc.viewID];
 
-    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuf =
-        ResourceDescriptorHeap[CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
     ClodViewRasterInfo rasterInfo = viewRasterInfoBuf[vc.viewID];
 
     const float visWidth  = float(rasterInfo.scissorMaxX - rasterInfo.scissorMinX);
@@ -160,8 +131,6 @@ void WG_SWRaster(
     row_major matrix modelViewProjection = mul(objData.model, cam.viewProjection);
     float4 modelViewZ = mul(objData.model, cam.viewZ);
 
-    // Decode vertices, transform to screen space
-    // Each of 128 threads handles ceil(vertCount/128) vertices.
     for (uint v = GI; v < vertCount; v += SW_RASTER_THREADS)
     {
         float3 localPos = SWDecodeCompressedPosition(
@@ -177,7 +146,6 @@ void WG_SWRaster(
         float4 clipPos  = mul(localPos4, modelViewProjection);
         float viewZ = dot(localPos4, modelViewZ);
 
-        // Perspective divide -> NDC -> pixel coordinates
         float invW = 1.0f / clipPos.w;
         float2 ndc = clipPos.xy * invW;
 
@@ -185,14 +153,12 @@ void WG_SWRaster(
         screen.x = (ndc.x + 1.0f) * 0.5f * visWidth  + scissorMinXf;
         screen.y = (1.0f - ndc.y) * 0.5f * visHeight + scissorMinYf;
 
-        gs_screenPos[v]   = screen;
-    gs_linearDepth[v] = -viewZ;
+        gs_screenPos[v] = screen;
+        gs_linearDepth[v] = -viewZ;
     }
 
     GroupMemoryBarrierWithGroupSync();
 
-    // Rasterize triangles via edge functions
-    // Distributed across all 4 groups x 32 threads = 128 logical threads.
     RWTexture2D<uint64_t> visBuffer =
         ResourceDescriptorHeap[NonUniformResourceIndex(rasterInfo.visibilityUAVDescriptorIndex)];
     RWTexture2D<uint2> debugVisTex =
@@ -221,17 +187,14 @@ void WG_SWRaster(
         float depth1 = gs_linearDepth[tri.y];
         float depth2 = gs_linearDepth[tri.z];
 
-        // Reject behind-camera triangles (any vertex with negative linear depth).
         if (depth0 <= 0.0f || depth1 <= 0.0f || depth2 <= 0.0f) continue;
 
-        // Signed area in render-target space (Y-down after viewport transform).
-        // With the engine PSOs using frontCCW = true, front-facing triangles are negative
         float2 e01 = s1 - s0;
         float2 e02 = s2 - s0;
         float twiceArea = e01.x * e02.y - e01.y * e02.x;
         if (swRasterDebugMode)
         {
-            if (abs(twiceArea) <= 1e-8f) continue; // degenerate
+            if (abs(twiceArea) <= 1e-8f) continue;
 
             if (twiceArea > 0.0f)
             {
@@ -248,16 +211,15 @@ void WG_SWRaster(
                 twiceArea = e01.x * e02.y - e01.y * e02.x;
             }
         }
-        else if (twiceArea >= 0.0f) continue; // backface or degenerate
+        else if (twiceArea >= 0.0f) continue;
 
         float invTwiceArea = -1.0f / twiceArea;
 
-        // Bounding box -> integer pixel range, clamped to scissor + buffer dims.
         float2 bbMinF = min(min(s0, s1), s2);
         float2 bbMaxF = max(max(s0, s1), s2);
 
         int2 minPx = int2(floor(bbMinF));
-        int2 maxPx = int2(floor(bbMaxF)); // inclusive
+        int2 maxPx = int2(floor(bbMaxF));
 
         minPx = max(minPx, int2(rasterInfo.scissorMinX, rasterInfo.scissorMinY));
         maxPx = min(maxPx, int2(int(rasterInfo.scissorMaxX) - 1, int(rasterInfo.scissorMaxY) - 1));
@@ -265,11 +227,8 @@ void WG_SWRaster(
         maxPx = min(maxPx, int2(int(visDims.x) - 1, int(visDims.y) - 1));
         if (minPx.x > maxPx.x || minPx.y > maxPx.y) continue;
 
-        // Edge function setup at pixel-center of minPx.
         float2 origin = float2(float(minPx.x) + 0.5f, float(minPx.y) + 0.5f);
 
-        // Edge function: E_ij(p) = (p - si) x (sj - si)
-        // b0 = E12 / 2A, b1 = E20 / 2A, b2 = E01 / 2A
         float2 e12 = s2 - s1;
         float2 e20 = s0 - s2;
 
@@ -277,7 +236,6 @@ void WG_SWRaster(
         float row_b1 = ((origin.x - s2.x) * e20.y - (origin.y - s2.y) * e20.x) * invTwiceArea;
         float row_b2 = 1.0f - row_b0 - row_b1;
 
-        // Per-pixel step along x and y.
         float dx_b0 =  e12.y * invTwiceArea;
         float dx_b1 =  e20.y * invTwiceArea;
         float dy_b0 = -e12.x * invTwiceArea;
@@ -302,7 +260,6 @@ void WG_SWRaster(
                         WriteDebugPixel(debugVisTex, uint2(px, py), PackDebugUint(1u));
                     }
 
-                    // TODO: is linear depth interpolation good enough?
                     float depth = b0 * depth0 + b1 * depth1 + b2 * depth2;
                     uint64_t visKey = PackVisKey(depth, unsortedClusterIndex, t);
                     InterlockedMin(visBuffer[uint2(px, py)], visKey);
@@ -316,4 +273,64 @@ void WG_SWRaster(
             scanline_b1 += dy_b1;
         }
     }
+}
+
+
+// SWRaster – broadcasting work graph node
+
+[Shader("node")]
+[NodeID("SWRaster")]
+[NodeLaunch("broadcasting")]
+[NodeMaxDispatchGrid(32, 1, 1)]
+[NumThreads(SW_RASTER_THREADS, 1, 1)]
+void WG_SWRaster(
+    DispatchNodeInputRecord<SWRasterBatchRecord> inputRecord,
+    uint GI : SV_GroupIndex,
+    uint3 groupId : SV_GroupID)
+{
+    SWRasterBatchRecord batch = inputRecord.Get();
+
+    // Each cluster gets SW_RASTER_GROUPS_PER_CLUSTER thread groups.
+    uint clusterIdx = groupId.x / SW_RASTER_GROUPS_PER_CLUSTER;
+    uint subGroup   = groupId.x % SW_RASTER_GROUPS_PER_CLUSTER;
+
+    if (clusterIdx >= batch.numClusters) return;
+
+    // Load VisibleCluster from buffer via indirection
+    uint unsortedClusterIndex = batch.clusterIndices[clusterIdx];
+    globallycoherent RWStructuredBuffer<VisibleCluster> visibleClusters =
+        ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+    VisibleCluster vc = visibleClusters[unsortedClusterIndex];
+
+    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuf =
+        ResourceDescriptorHeap[CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
+    SWRasterCluster(vc, unsortedClusterIndex, GI, subGroup, viewRasterInfoBuf);
+}
+
+[shader("compute")]
+[numthreads(SW_RASTER_THREADS, 1, 1)]
+void SWRasterIndirectCSMain(uint3 dtid : SV_DispatchThreadID, uint GI : SV_GroupIndex, uint3 groupId : SV_GroupID)
+{
+    StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
+    const uint bucketID = IndirectCommandSignatureRootConstant2;
+    const uint clusterCount = histogram[bucketID];
+
+    const uint linearizedGroupID = groupId.x + groupId.y * IndirectCommandSignatureRootConstant1;
+    const uint clusterIdx = linearizedGroupID / SW_RASTER_GROUPS_PER_CLUSTER;
+    const uint subGroup = linearizedGroupID % SW_RASTER_GROUPS_PER_CLUSTER;
+    if (clusterIdx >= clusterCount) {
+        return;
+    }
+
+    const uint sortedClusterIndex = IndirectCommandSignatureRootConstant0 + clusterIdx;
+    StructuredBuffer<VisibleCluster> compactedVisibleClusters =
+        ResourceDescriptorHeap[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> sortedToUnsortedMapping =
+        ResourceDescriptorHeap[CLOD_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX];
+    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuf =
+        ResourceDescriptorHeap[CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
+
+    const VisibleCluster vc = compactedVisibleClusters[sortedClusterIndex];
+    const uint unsortedClusterIndex = sortedToUnsortedMapping[sortedClusterIndex];
+    SWRasterCluster(vc, unsortedClusterIndex, GI, subGroup, viewRasterInfoBuf);
 }

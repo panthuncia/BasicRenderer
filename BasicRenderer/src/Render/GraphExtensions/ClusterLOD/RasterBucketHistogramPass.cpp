@@ -5,6 +5,7 @@
 #include "Managers/MaterialManager.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
 #include "Render/Runtime/UploadServiceAccess.h"
@@ -16,7 +17,10 @@ RasterBucketHistogramPass::RasterBucketHistogramPass(
     std::shared_ptr<Buffer> visibleClustersCounterBuffer,
     std::shared_ptr<Buffer> histogramIndirectCommand,
     std::shared_ptr<Buffer> histogramBuffer,
-    std::shared_ptr<Buffer> readBaseCounterBuffer) {
+    std::shared_ptr<Buffer> readBaseCounterBuffer,
+    bool readReverse,
+    uint32_t visibleClustersCapacity,
+    bool runWhenComputeSWRasterEnabledOnly) {
     CreatePipelines(
         DeviceManager::GetInstance().GetDevice(),
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -37,6 +41,9 @@ RasterBucketHistogramPass::RasterBucketHistogramPass(
     m_histogramIndirectCommand = std::move(histogramIndirectCommand);
     m_histogramBuffer = std::move(histogramBuffer);
     m_readBaseCounterBuffer = std::move(readBaseCounterBuffer);
+    m_readReverse = readReverse;
+    m_visibleClustersCapacity = visibleClustersCapacity;
+    m_runWhenComputeSWRasterEnabledOnly = runWhenComputeSWRasterEnabledOnly;
 }
 
 RasterBucketHistogramPass::~RasterBucketHistogramPass() = default;
@@ -62,6 +69,10 @@ void RasterBucketHistogramPass::Setup() {
 }
 
 PassReturn RasterBucketHistogramPass::Execute(PassExecutionContext& executionContext) {
+    if (m_runWhenComputeSWRasterEnabledOnly && !SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")()) {
+        return {};
+    }
+
     auto* renderContext = executionContext.hostData->Get<RenderContext>();
     auto& context = *renderContext;
     auto& commandList = executionContext.commandList;
@@ -79,6 +90,8 @@ PassReturn RasterBucketHistogramPass::Execute(PassExecutionContext& executionCon
     if (m_readBaseCounterBuffer) {
         uintRootConstants[CLOD_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] = m_readBaseCounterBuffer->GetSRVInfo(0).slot.index;
     }
+    uintRootConstants[CLOD_VISIBLE_CLUSTERS_READ_MODE_FLAGS] = m_readReverse ? CLOD_VISIBLE_CLUSTERS_READ_FLAG_REVERSED : 0u;
+    uintRootConstants[CLOD_VISIBLE_CLUSTERS_READ_CAPACITY] = m_visibleClustersCapacity;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
@@ -94,6 +107,10 @@ PassReturn RasterBucketHistogramPass::Execute(PassExecutionContext& executionCon
 }
 
 void RasterBucketHistogramPass::Update(const UpdateExecutionContext& executionContext) {
+    if (m_runWhenComputeSWRasterEnabledOnly && !SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")()) {
+        return;
+    }
+
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
 

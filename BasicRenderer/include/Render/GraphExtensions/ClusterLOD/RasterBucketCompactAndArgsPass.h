@@ -22,7 +22,10 @@ public:
         std::shared_ptr<Buffer> indirectArgsBuffer,
         std::shared_ptr<Buffer> sortedToUnsortedMappingBuffer,
         uint64_t maxVisibleClusters,
-        bool appendToExisting);
+        bool appendToExisting,
+        bool readReverse = false,
+        bool buildSoftwareRasterDispatch = false,
+        bool runWhenComputeSWRasterEnabledOnly = false);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
@@ -47,4 +50,7 @@ private:
 
     uint64_t m_maxVisibleClusters = 0;
     bool m_appendToExisting = false;
+    bool m_readReverse = false;
+    bool m_buildSoftwareRasterDispatch = false;
+    bool m_runWhenComputeSWRasterEnabledOnly = false;
 };

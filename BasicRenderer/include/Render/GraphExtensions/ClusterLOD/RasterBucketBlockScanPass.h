@@ -11,7 +11,8 @@ public:
     RasterBucketBlockScanPass(
         std::shared_ptr<Buffer> histogramBuffer,
         std::shared_ptr<Buffer> offsetsBuffer,
-        std::shared_ptr<Buffer> blockSumsBuffer);
+        std::shared_ptr<Buffer> blockSumsBuffer,
+        bool runWhenComputeSWRasterEnabledOnly = false);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
@@ -25,4 +26,5 @@ private:
     std::shared_ptr<Buffer> m_histogramBuffer;
     std::shared_ptr<Buffer> m_offsetsBuffer;
     std::shared_ptr<Buffer> m_blockSumsBuffer;
+    bool m_runWhenComputeSWRasterEnabledOnly = false;
 };

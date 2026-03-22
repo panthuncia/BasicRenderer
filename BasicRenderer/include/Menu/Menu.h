@@ -435,6 +435,10 @@ private:
 	std::function<bool()> getMeshletCullingEnabled;
 	std::function<void(bool)> setMeshletCullingEnabled;
 
+    bool useComputeSWRaster = false;
+    std::function<bool()> getUseComputeSWRaster;
+    std::function<void(bool)> setUseComputeSWRaster;
+
     bool wireframeEnabled = false;
 	std::function<bool()> getWireframeEnabled;
 	std::function<void(bool)> setWireframeEnabled;
@@ -633,6 +637,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
 	meshletCulling = getMeshletCullingEnabled();
 	observerSetting(meshletCulling, "enableMeshletCulling");
 
+    getUseComputeSWRaster = settingsManager.getSettingGetter<bool>("useComputeSwRaster");
+    setUseComputeSWRaster = settingsManager.getSettingSetter<bool>("useComputeSwRaster");
+    useComputeSWRaster = getUseComputeSWRaster();
+    observerSetting(useComputeSWRaster, "useComputeSwRaster");
+
 	setWireframeEnabled = settingsManager.getSettingSetter<bool>("enableWireframe");
 	getWireframeEnabled = settingsManager.getSettingGetter<bool>("enableWireframe");
 	wireframeEnabled = getWireframeEnabled();
@@ -824,6 +833,9 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 		if (ImGui::Checkbox("Meshlet Culling", &meshletCulling)) {
 			setMeshletCullingEnabled(meshletCulling);
 		}
+        if (ImGui::Checkbox("Use Compute SW Raster", &useComputeSWRaster)) {
+            setUseComputeSWRaster(useComputeSWRaster);
+        }
 		if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
 			setWireframeEnabled(wireframeEnabled);
 		}

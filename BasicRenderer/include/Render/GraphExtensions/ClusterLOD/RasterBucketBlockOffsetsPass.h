@@ -12,7 +12,8 @@ public:
         std::shared_ptr<Buffer> offsetsBuffer,
         std::shared_ptr<Buffer> blockSumsBuffer,
         std::shared_ptr<Buffer> scannedBlockSumsBuffer,
-        std::shared_ptr<Buffer> totalCountBuffer);
+        std::shared_ptr<Buffer> totalCountBuffer,
+        bool runWhenComputeSWRasterEnabledOnly = false);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
@@ -27,4 +28,5 @@ private:
     std::shared_ptr<Buffer> m_blockSumsBuffer;
     std::shared_ptr<Buffer> m_scannedBlockSumsBuffer;
     std::shared_ptr<Buffer> m_totalCountBuffer;
+    bool m_runWhenComputeSWRasterEnabledOnly = false;
 };

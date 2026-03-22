@@ -453,7 +453,6 @@ enum ResourceDescriptorIndicesRootConstants { // Auto-assigned, do not set manua
 	ResourceDescriptorIndex31,
 	ResourceDescriptorIndex32,
 	ResourceDescriptorIndex33,
-	ResourceDescriptorIndex34,
     NumResourceDescriptorIndicesRootConstants
 };
 

@@ -6,6 +6,7 @@
 #include "Managers/MaterialManager.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
 #include "Render/Runtime/UploadServiceAccess.h"
@@ -24,7 +25,10 @@ RasterBucketCompactAndArgsPass::RasterBucketCompactAndArgsPass(
     std::shared_ptr<Buffer> indirectArgsBuffer,
     std::shared_ptr<Buffer> sortedToUnsortedMappingBuffer,
     uint64_t maxVisibleClusters,
-    bool appendToExisting)
+    bool appendToExisting,
+    bool readReverse,
+    bool buildSoftwareRasterDispatch,
+    bool runWhenComputeSWRasterEnabledOnly)
     : m_visibleClustersBuffer(std::move(visibleClustersBuffer))
     , m_visibleClustersCounterBuffer(std::move(visibleClustersCounterBuffer))
     , m_compactedBaseCounterBuffer(std::move(compactedBaseCounterBuffer))
@@ -37,6 +41,9 @@ RasterBucketCompactAndArgsPass::RasterBucketCompactAndArgsPass(
     , m_sortedToUnsortedMappingBuffer(std::move(sortedToUnsortedMappingBuffer))
     , m_maxVisibleClusters(maxVisibleClusters)
     , m_appendToExisting(appendToExisting)
+    , m_readReverse(readReverse)
+    , m_buildSoftwareRasterDispatch(buildSoftwareRasterDispatch)
+    , m_runWhenComputeSWRasterEnabledOnly(runWhenComputeSWRasterEnabledOnly)
 {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -82,6 +89,10 @@ void RasterBucketCompactAndArgsPass::Setup() {
 }
 
 PassReturn RasterBucketCompactAndArgsPass::Execute(PassExecutionContext& executionContext) {
+    if (m_runWhenComputeSWRasterEnabledOnly && !SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")()) {
+        return {};
+    }
+
     auto* renderContext = executionContext.hostData->Get<RenderContext>();
     auto& context = *renderContext;
     auto& commandList = executionContext.commandList;
@@ -109,6 +120,13 @@ PassReturn RasterBucketCompactAndArgsPass::Execute(PassExecutionContext& executi
     rc[CLOD_COMPACTED_APPEND_BASE_COUNTER_DESCRIPTOR_INDEX] = m_compactedBaseCounterBuffer->GetSRVInfo(0).slot.index;
     rc[CLOD_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = m_sortedToUnsortedMappingBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rc[CLOD_NUM_RASTER_BUCKETS] = numBuckets | (m_appendToExisting ? 0x80000000u : 0u);
+    if (m_appendToExisting) {
+        rc[CLOD_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] = m_compactedBaseCounterBuffer->GetSRVInfo(0).slot.index;
+    }
+    rc[CLOD_VISIBLE_CLUSTERS_READ_MODE_FLAGS] =
+        (m_readReverse ? CLOD_VISIBLE_CLUSTERS_READ_FLAG_REVERSED : 0u) |
+        (m_buildSoftwareRasterDispatch ? CLOD_VISIBLE_CLUSTERS_READ_FLAG_BUILD_SW_DISPATCH : 0u);
+    rc[CLOD_VISIBLE_CLUSTERS_READ_CAPACITY] = static_cast<uint32_t>(m_maxVisibleClusters);
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
         0,
@@ -129,6 +147,10 @@ PassReturn RasterBucketCompactAndArgsPass::Execute(PassExecutionContext& executi
 }
 
 void RasterBucketCompactAndArgsPass::Update(const UpdateExecutionContext& executionContext) {
+    if (m_runWhenComputeSWRasterEnabledOnly && !SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")()) {
+        return;
+    }
+
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
     auto numBuckets = context.materialManager->GetRasterBucketCount();

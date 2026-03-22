@@ -48,6 +48,7 @@ private:
     std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBuffer;
 
     std::shared_ptr<Buffer> m_swVisibleClustersCounterBuffer;
+    std::shared_ptr<Buffer> m_swVisibleClustersCounterBufferPhase2;
     std::shared_ptr<Buffer> m_sortedToUnsortedMappingBuffer;
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
 

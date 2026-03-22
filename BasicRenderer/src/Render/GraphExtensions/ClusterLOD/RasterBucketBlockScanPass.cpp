@@ -2,6 +2,7 @@
 
 #include "Managers/MaterialManager.h"
 #include "Managers/Singletons/PSOManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Render/RenderContext.h"
 #include "BuiltinResources.h"
 #include "../shaders/PerPassRootConstants/clodRootConstants.h"
@@ -9,10 +10,12 @@
 RasterBucketBlockScanPass::RasterBucketBlockScanPass(
     std::shared_ptr<Buffer> histogramBuffer,
     std::shared_ptr<Buffer> offsetsBuffer,
-    std::shared_ptr<Buffer> blockSumsBuffer)
+    std::shared_ptr<Buffer> blockSumsBuffer,
+    bool runWhenComputeSWRasterEnabledOnly)
     : m_histogramBuffer(std::move(histogramBuffer))
     , m_offsetsBuffer(std::move(offsetsBuffer))
-    , m_blockSumsBuffer(std::move(blockSumsBuffer)) {
+    , m_blockSumsBuffer(std::move(blockSumsBuffer))
+    , m_runWhenComputeSWRasterEnabledOnly(runWhenComputeSWRasterEnabledOnly) {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
         L"Shaders/ClusterLOD/clodUtil.hlsl",
@@ -29,6 +32,10 @@ void RasterBucketBlockScanPass::DeclareResourceUsages(ComputePassBuilder* builde
 void RasterBucketBlockScanPass::Setup() {}
 
 PassReturn RasterBucketBlockScanPass::Execute(PassExecutionContext& executionContext) {
+    if (m_runWhenComputeSWRasterEnabledOnly && !SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")()) {
+        return {};
+    }
+
     auto* renderContext = executionContext.hostData->Get<RenderContext>();
     auto& context = *renderContext;
     auto& commandList = executionContext.commandList;
@@ -61,6 +68,10 @@ PassReturn RasterBucketBlockScanPass::Execute(PassExecutionContext& executionCon
 }
 
 void RasterBucketBlockScanPass::Update(const UpdateExecutionContext& executionContext) {
+    if (m_runWhenComputeSWRasterEnabledOnly && !SettingsManager::GetInstance().getSettingGetter<bool>("useComputeSwRaster")()) {
+        return;
+    }
+
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
     auto numBuckets = context.materialManager->GetRasterBucketCount();
