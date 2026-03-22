@@ -80,6 +80,8 @@ struct CullingCameraInfo
     float zNear;
     float errorOverDistanceThreshold; // Threshold for (error * scale) / distance metric
     float pad;
+    row_major matrix viewProjection;
+    float4 viewZ;
 };
 
 struct PerFrameBuffer {

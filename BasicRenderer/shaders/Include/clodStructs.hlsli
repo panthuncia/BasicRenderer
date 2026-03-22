@@ -151,6 +151,10 @@ struct CLodReplayBufferState
     uint meshletWriteCount;
     uint nodeDropped;
     uint meshletDropped;
+    uint visibleClusterCombinedCount;
+    uint pad0;
+    uint pad1;
+    uint pad2;
 };
 
 struct CLodViewDepthSRVIndex
@@ -175,6 +179,19 @@ struct CLodMultiNodeGpuInput
     uint pad0;
     uint64_t nodeInputsAddress;
     uint64_t nodeInputStride;
+};
+
+// Batched work graph record for software rasterization of small clusters.
+// Broadcasting node: ClusterCull accumulates up to SW_BATCH_MAX_CLUSTERS
+// cluster indices per record. SWRaster reads full VisibleCluster data from
+// the visible clusters buffer via indirection.
+#define SW_BATCH_MAX_CLUSTERS 8
+
+struct SWRasterBatchRecord
+{
+    uint3 dispatchGrid : SV_DispatchGrid; // (1 * numClusters, 1, 1)
+    uint numClusters;                       // 1..SW_BATCH_MAX_CLUSTERS
+    uint clusterIndices[SW_BATCH_MAX_CLUSTERS]; // unsorted visible cluster buffer indices
 };
 
 #endif // CLOD_STRUCTS_HLSLI

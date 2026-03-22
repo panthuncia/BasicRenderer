@@ -123,6 +123,21 @@ bool CLodWorkGraphOcclusionEnabled()
     return (CLOD_WORKGRAPH_FLAGS & CLOD_WORKGRAPH_FLAG_OCCLUSION_ENABLED) != 0u;
 }
 
+bool CLodWorkGraphSWRasterEnabled()
+{
+    return (CLOD_WORKGRAPH_FLAGS & CLOD_WORKGRAPH_FLAG_SW_RASTER_ENABLED) != 0u;
+}
+
+bool CLodWorkGraphIsPhase2()
+{
+    return (CLOD_WORKGRAPH_FLAGS & CLOD_WORKGRAPH_FLAG_PHASE2) != 0u;
+}
+
+float CLodSWRasterDiameterThreshold()
+{
+    return float(CLOD_WORKGRAPH_FLAGS >> CLOD_WORKGRAPH_SW_RASTER_THRESHOLD_SHIFT);
+}
+
 uint CLodBitMask(uint key)
 {
     return 1u << (key & 31u);
@@ -303,7 +318,7 @@ bool ReplayTryAppendMeshlet(uint instanceIndex, uint viewId, uint groupId, uint 
     return true;
 }
 
-// ----- records -----
+// Records
 struct ObjectCullRecord
 {
     uint viewDataIndex; // One record per view, times...
@@ -328,13 +343,6 @@ struct MeshletBucketRecord
     uint pageSlabDescriptorIndex;
     uint pageSlabByteOffset;
 };
-
-// struct MeshletWorkRecord
-// {
-//     uint instanceIndex;
-//     uint meshletId;  // absolute meshlet index into the meshlet buffer (after base)
-//     uint fixedRasterBucketOffset;
-// };
 
 // Conservative max-axis scale from a row-vector local->world
 float MaxAxisScale_RowVector(float4x4 M)
@@ -589,7 +597,7 @@ void WG_TraverseNodes(
                     WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
                 }
                 else {
-                    // --- Inlined SegmentEvaluate ---
+                    // Inlined SegmentEvaluate
                     StructuredBuffer<ClusterLODGroupSegment> segments =
                         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Segments)];
                     const uint segGlobalIndex = clodMeshMetadata.segmentsBase + node.range.indexOrOffset;
@@ -770,7 +778,7 @@ void WG_TraverseNodes(
         }
     }
 
-    // Allocate output records — all calls must be uniform across threads.
+    // Allocate output records- all calls must be uniform across threads.
     ThreadNodeOutputRecords<TraverseNodeRecord>  outNodes = TraverseNodes.GetThreadNodeOutputRecords(emitTraverseCount);
     ThreadNodeOutputRecords<MeshletBucketRecord> out64 = ClusterCull64.GetThreadNodeOutputRecords(n64);
     ThreadNodeOutputRecords<MeshletBucketRecord> out32 = ClusterCull32.GetThreadNodeOutputRecords(n32);
@@ -852,11 +860,21 @@ void WG_TraverseNodes(
 }
 #define CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP 32
 
+// SW raster batch accumulator (groupshared, per ClusterCull variant)
+// Worst case: every meshlet across all 32 threads goes SW.
+// CL64 = 32 threads * 64 meshlets = 2048 entries = 8 KB groupshared (within 32 KB limit).
+// Output is deferred to a single group-uniform GetGroupNodeOutputRecords call
+// after the meshlet loop, satisfying the Work Graphs spec requirement that
+// Get*NodeOutputRecords / OutputComplete are not inside varying flow control.
+#define SW_BATCH_ACCUM_CAPACITY (CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 64)
+#define SW_RASTER_GROUPS_PER_CLUSTER 1
+
+groupshared uint gs_swBatchIndices[SW_BATCH_ACCUM_CAPACITY];
 
 // Shared cluster-cull implementation called by each bucket-size variant.
 // FIXED_LOOP_COUNT is the bucket size (1, 2, 4, 8, 16, 32, or 64) - all active lanes
-// in a variant wave process the same number of iterations, eliminating WaveActiveMax divergence.
-void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputCount, uint FIXED_LOOP_COUNT)
+// in a variant wave process the same number of iterations, minimizing WaveActiveMax divergence.
+void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputCount, uint FIXED_LOOP_COUNT, out uint swPendingOut)
 {
     // Telemetry (coalesced launch level)
     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_THREADS, 1);
@@ -968,22 +986,42 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         activeGroupScanCount = runtimeState[0].activeGroupScanCount;
     }
 
-    // Meshlet loop — fixed iteration count eliminates WaveActiveMax divergence.
+    // Meshlet loop - fixed iteration count eliminates WaveActiveMax divergence.
     // Lanes with fewer meshlets (e.g. replay count=1) simply skip inactive iterations.
     const uint meshletCount = hasBucket ? UnpackMeshletCount(b.meshletIndexAndCount) : 0;
 
-    RWStructuredBuffer<VisibleCluster> visibleClusters =
+    globallycoherent RWStructuredBuffer<VisibleCluster> visibleClusters =
         ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     RWStructuredBuffer<uint> visibleClusterCounter =
         ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodReplayBufferState> replayState =
+        ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
     const uint visibleClusterCapacity = CLOD_VISIBLE_CLUSTERS_CAPACITY;
 
+    // Phase 2: read Phase 1's final HW count to offset writes and avoid overwriting Phase 1 entries.
+    // Always bind the resource to avoid DXC ICE with conditional ResourceDescriptorHeap casts.
+    StructuredBuffer<uint> phase1HWBaseCounter = ResourceDescriptorHeap[CLOD_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
+    const uint phase1HWBase = CLodWorkGraphIsPhase2() ? phase1HWBaseCounter.Load(0) : 0u;
+
+    // SW raster classification setup.
+    const bool swRasterEnabled = CLodWorkGraphSWRasterEnabled();
+    const float swDiameterThreshold = CLodSWRasterDiameterThreshold();
+    RWStructuredBuffer<uint> swVisibleClusterCounter =
+        ResourceDescriptorHeap[CLOD_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
+    // Pre-compute screen-space scale: projDiameter = meshletRadiusWorld * swScreenScale / (-viewZ)
+    // swScreenScale = 2 * projY * viewportHeight / 2 = projY * viewportHeight
+    // depthRes.y is the viewport height; cam.projY is projection[1][1].
+    const float swScreenScale = cam.projY * float(depthRes.y);
+
     uint totalSurvivors = 0;
+    uint swPending = 0; // SW batch accumulator count (wave-uniform)
 
     for (uint m = 0; m < FIXED_LOOP_COUNT; m++) {
         const bool active = (m < meshletCount) && pageValid;
         uint localMeshletIndex = 0;
         bool survives = false;
+        float3 meshletCenterViewSpace = float3(0, 0, -1); // default: behind camera
+        float meshletRadiusWorld = 0.0f;
 
         if (active) {
             const uint localMeshlet = UnpackMeshletFirstIndex(b.meshletIndexAndCount) + m;
@@ -995,8 +1033,8 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 CLodMeshletDescriptor desc = LoadMeshletDescriptor(pageSlabDesc, pageSlabOff, pageDescriptorOffset, localMeshlet);
                 const float4 boundsSphere = desc.bounds;
                 const BoundingSphere meshletBounds = { boundsSphere };
-                const float3 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, viewMatrix);
-                const float meshletRadiusWorld = meshletBounds.sphere.w * groupUniformScale;
+                meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, viewMatrix);
+                meshletRadiusWorld = meshletBounds.sphere.w * groupUniformScale;
 
                 survives = replaySource || !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, frustumPlanes);
 
@@ -1058,8 +1096,8 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 
                 if (survives && CLodWorkGraphOcclusionEnabled() && depthMapDescriptorIndex != 0) {
                     bool occlusionCulled = false;
-                    // Lazy-load only the occlusion-specific camera matrices when needed,
-                    // keeping them off the register file during the main frustum/LOD loop.
+                    // Load only the occlusion-specific camera matrices when needed,
+                    // keeping them out of registers during the main frustum/LOD loop.
                     StructuredBuffer<Camera> occCameras =
                         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
                     if (replaySource) {
@@ -1114,49 +1152,120 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 
         WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_MESHLET_ITERATIONS, active ? 1 : 0);
 
-        // Wave-cooperative visible cluster output.
+        // SW/HW classification, tiny meshlets go to software rasterization.
         const bool contributes = active && survives;
-        const uint4 survivingMask = WaveActiveBallot(contributes);
-        const uint survivingCount = CountBits128(survivingMask);
-        totalSurvivors += survivingCount;
+        bool isSW = false;
+        if (contributes && swRasterEnabled) {
+            // Projected diameter in pixels = meshletRadiusWorld * swScreenScale / (-viewZ)
+            // Multiply-compare avoids division: diameter < threshold <-> radius*scale < threshold*(-z)
+            isSW = (meshletRadiusWorld * swScreenScale) < (swDiameterThreshold * (-meshletCenterViewSpace.z));
+        }
 
-        if (survivingCount > 0) {
-            const uint leaderLane = WaveFirstLaneFromMask(survivingMask);
-            const uint laneRank = GetLaneRankInGroup(survivingMask, WaveGetLaneIndex());
+        const bool isHW = contributes && !isSW;
+        const bool outputSW = contributes && isSW;
 
-            uint baseIndex = 0;
-            if (WaveGetLaneIndex() == leaderLane) {
-                InterlockedAdd(visibleClusterCounter[0], survivingCount, baseIndex);
-            }
-            baseIndex = WaveReadLaneAt(baseIndex, leaderLane);
+        // Prepare the VisibleCluster once for either path.
+        VisibleCluster vc = (VisibleCluster)0;
+        if (contributes) {
+            vc.instanceID = b.instanceIndex;
+            vc.localMeshletIndex = localMeshletIndex;
+            vc.viewID = b.viewId;
+            vc.groupID = UnpackGroupId(b.groupIdPacked);
+            vc.pageSlabDescriptorIndex = b.pageSlabDescriptorIndex;
+            vc.pageSlabByteOffset = b.pageSlabByteOffset;
+        }
 
-            const uint availableCount =
-                (baseIndex < visibleClusterCapacity)
-                    ? min(survivingCount, visibleClusterCapacity - baseIndex)
-                    : 0u;
+        // HW path: wave-cooperative bottom-up write
+        {
+            const uint4 hwMask = WaveActiveBallot(isHW);
+            const uint hwCount = CountBits128(hwMask);
+            totalSurvivors += hwCount;
 
-            if (WaveGetLaneIndex() == leaderLane && (baseIndex + survivingCount > visibleClusterCapacity)) {
-                InterlockedMin(visibleClusterCounter[0], visibleClusterCapacity);
-            }
+            if (hwCount > 0) {
+                const uint hwLeader = WaveFirstLaneFromMask(hwMask);
+                const uint hwRank = GetLaneRankInGroup(hwMask, WaveGetLaneIndex());
 
-            if (isWaveLeader) {
-                WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES, availableCount);
-            }
+                uint hwBase = 0;
+                uint hwCombinedBase = 0;
+                if (WaveGetLaneIndex() == hwLeader) {
+                    InterlockedAdd(replayState[0].visibleClusterCombinedCount, hwCount, hwCombinedBase);
+                    InterlockedAdd(visibleClusterCounter[0], hwCount, hwBase);
+                }
+                hwBase = WaveReadLaneAt(hwBase, hwLeader);
+                hwCombinedBase = WaveReadLaneAt(hwCombinedBase, hwLeader);
 
-            if (contributes && (laneRank < availableCount)) {
-                const uint index = baseIndex + laneRank;
+                // Global write position accounts for Phase 1 entries (phase1HWBase == 0 for Phase 1).
+                const uint hwGlobalBase = phase1HWBase + hwBase;
+                const uint hwAvail =
+                    (hwCombinedBase < visibleClusterCapacity)
+                        ? min(hwCount, visibleClusterCapacity - hwCombinedBase)
+                        : 0u;
 
-                VisibleCluster vc = (VisibleCluster)0;
-                vc.instanceID = b.instanceIndex;
-                vc.localMeshletIndex = localMeshletIndex;
-                vc.viewID = b.viewId;
-                vc.groupID = UnpackGroupId(b.groupIdPacked);
-                vc.pageSlabDescriptorIndex = b.pageSlabDescriptorIndex;
-                vc.pageSlabByteOffset = b.pageSlabByteOffset;
-                visibleClusters[index] = vc;
+                if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwCount > visibleClusterCapacity)) {
+                    InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
+                    InterlockedMin(visibleClusterCounter[0], hwBase + hwAvail);
+                }
+
+                if (isWaveLeader) {
+                    WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES, hwAvail);
+                }
+
+                if (isHW && (hwRank < hwAvail)) {
+                    visibleClusters[hwGlobalBase + hwRank] = vc;
+                }
             }
         }
+
+        // SW path: wave-cooperative top-down write + batch accumulate
+        {
+            const uint4 swMask = WaveActiveBallot(outputSW);
+            const uint swIterCount = CountBits128(swMask);
+            totalSurvivors += swIterCount;
+            uint swAvail = 0;
+
+            if (swIterCount > 0) {
+                const uint swLeader = WaveFirstLaneFromMask(swMask);
+                const uint swRank = GetLaneRankInGroup(swMask, WaveGetLaneIndex());
+
+                uint swBase = 0;
+                uint swCombinedBase = 0;
+                if (WaveGetLaneIndex() == swLeader) {
+                    InterlockedAdd(replayState[0].visibleClusterCombinedCount, swIterCount, swCombinedBase);
+                    InterlockedAdd(swVisibleClusterCounter[0], swIterCount, swBase);
+                }
+                swBase = WaveReadLaneAt(swBase, swLeader);
+                swCombinedBase = WaveReadLaneAt(swCombinedBase, swLeader);
+
+                swAvail =
+                    (swCombinedBase < visibleClusterCapacity)
+                        ? min(swIterCount, visibleClusterCapacity - swCombinedBase)
+                        : 0u;
+
+                if (WaveGetLaneIndex() == swLeader && (swCombinedBase + swIterCount > visibleClusterCapacity)) {
+                    InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
+                    InterlockedMin(swVisibleClusterCounter[0], swBase + swAvail);
+                }
+
+                if (outputSW && (swRank < swAvail)) {
+                    // Write visible cluster top-down from the end of the buffer.
+                    const uint swIndex = visibleClusterCapacity - 1 - (swBase + swRank);
+                    visibleClusters[swIndex] = vc;
+
+                    // Accumulate index into batch buffer.
+                    gs_swBatchIndices[swPending + swRank] = swIndex;
+                }
+            }
+            swPending += swAvail; // uniform, swAvail derived from wave-uniform values
+        }
+
     }
+
+    // SWRaster re-reads visibleClusters through UAV indirection in the same work graph.
+    // The Work Graphs spec requires globallycoherent accesses plus a device-scope
+    // barrier before the node invocation request for this producer-consumer pattern.
+    Barrier(visibleClusters, DEVICE_SCOPE | GROUP_SYNC);
+
+    swPendingOut = swPending;
 
     if (isWaveLeader) {
         WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_SURVIVING_LANES, totalSurvivors);
@@ -1176,13 +1285,31 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 [NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
 void WG_ClusterCull1(
     [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
+    [NodeID("SWRaster")] [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 1 / SW_BATCH_MAX_CLUSTERS)] NodeOutput<SWRasterBatchRecord> swRasterOutput,
     uint GI : SV_GroupIndex)
 {
     const uint inputCount = inRecs.Count();
     const bool hasBucket = GI < inputCount;
     MeshletBucketRecord b = (MeshletBucketRecord)0;
     if (hasBucket) b = inRecs[GI];
-    ClusterCullBody(b, hasBucket, GI, inputCount, 1);
+    uint swPending = 0;
+    ClusterCullBody(b, hasBucket, GI, inputCount, 1, swPending);
+
+    GroupMemoryBarrierWithGroupSync();
+    const uint numBatches = (swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS;
+    GroupNodeOutputRecords<SWRasterBatchRecord> swBatchOut = 
+        swRasterOutput.GetGroupNodeOutputRecords(numBatches);
+    if (GI == 0) {
+        for (uint batch = 0; batch < numBatches; batch++) {
+            const uint batchStart = batch * SW_BATCH_MAX_CLUSTERS;
+            const uint batchSize = min(SW_BATCH_MAX_CLUSTERS, swPending - batchStart);
+            swBatchOut[batch].dispatchGrid = uint3(SW_RASTER_GROUPS_PER_CLUSTER * batchSize, 1, 1);
+            swBatchOut[batch].numClusters = batchSize;
+            for (uint i = 0; i < batchSize; i++)
+                swBatchOut[batch].clusterIndices[i] = gs_swBatchIndices[batchStart + i];
+        }
+    }
+    swBatchOut.OutputComplete();
 }
 
 [Shader("node")]
@@ -1191,13 +1318,31 @@ void WG_ClusterCull1(
 [NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
 void WG_ClusterCull2(
     [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
+    [NodeID("SWRaster")] [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 2 / SW_BATCH_MAX_CLUSTERS)] NodeOutput<SWRasterBatchRecord> swRasterOutput,
     uint GI : SV_GroupIndex)
 {
     const uint inputCount = inRecs.Count();
     const bool hasBucket = GI < inputCount;
     MeshletBucketRecord b = (MeshletBucketRecord)0;
     if (hasBucket) b = inRecs[GI];
-    ClusterCullBody(b, hasBucket, GI, inputCount, 2);
+    uint swPending = 0;
+    ClusterCullBody(b, hasBucket, GI, inputCount, 2, swPending);
+
+    GroupMemoryBarrierWithGroupSync();
+    const uint numBatches = (swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS;
+    GroupNodeOutputRecords<SWRasterBatchRecord> swBatchOut =
+        swRasterOutput.GetGroupNodeOutputRecords(numBatches);
+    if (GI == 0) {
+        for (uint batch = 0; batch < numBatches; batch++) {
+            const uint batchStart = batch * SW_BATCH_MAX_CLUSTERS;
+            const uint batchSize = min(SW_BATCH_MAX_CLUSTERS, swPending - batchStart);
+            swBatchOut[batch].dispatchGrid = uint3(SW_RASTER_GROUPS_PER_CLUSTER * batchSize, 1, 1);
+            swBatchOut[batch].numClusters = batchSize;
+            for (uint i = 0; i < batchSize; i++)
+                swBatchOut[batch].clusterIndices[i] = gs_swBatchIndices[batchStart + i];
+        }
+    }
+    swBatchOut.OutputComplete();
 }
 
 [Shader("node")]
@@ -1206,13 +1351,31 @@ void WG_ClusterCull2(
 [NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
 void WG_ClusterCull4(
     [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
+    [NodeID("SWRaster")] [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 4 / SW_BATCH_MAX_CLUSTERS)] NodeOutput<SWRasterBatchRecord> swRasterOutput,
     uint GI : SV_GroupIndex)
 {
     const uint inputCount = inRecs.Count();
     const bool hasBucket = GI < inputCount;
     MeshletBucketRecord b = (MeshletBucketRecord)0;
     if (hasBucket) b = inRecs[GI];
-    ClusterCullBody(b, hasBucket, GI, inputCount, 4);
+    uint swPending = 0;
+    ClusterCullBody(b, hasBucket, GI, inputCount, 4, swPending);
+
+    GroupMemoryBarrierWithGroupSync();
+    const uint numBatches = (swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS;
+    GroupNodeOutputRecords<SWRasterBatchRecord> swBatchOut =
+        swRasterOutput.GetGroupNodeOutputRecords(numBatches);
+    if (GI == 0) {
+        for (uint batch = 0; batch < numBatches; batch++) {
+            const uint batchStart = batch * SW_BATCH_MAX_CLUSTERS;
+            const uint batchSize = min(SW_BATCH_MAX_CLUSTERS, swPending - batchStart);
+            swBatchOut[batch].dispatchGrid = uint3(SW_RASTER_GROUPS_PER_CLUSTER * batchSize, 1, 1);
+            swBatchOut[batch].numClusters = batchSize;
+            for (uint i = 0; i < batchSize; i++)
+                swBatchOut[batch].clusterIndices[i] = gs_swBatchIndices[batchStart + i];
+        }
+    }
+    swBatchOut.OutputComplete();
 }
 
 [Shader("node")]
@@ -1221,13 +1384,31 @@ void WG_ClusterCull4(
 [NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
 void WG_ClusterCull8(
     [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
+    [NodeID("SWRaster")] [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 8 / SW_BATCH_MAX_CLUSTERS)] NodeOutput<SWRasterBatchRecord> swRasterOutput,
     uint GI : SV_GroupIndex)
 {
     const uint inputCount = inRecs.Count();
     const bool hasBucket = GI < inputCount;
     MeshletBucketRecord b = (MeshletBucketRecord)0;
     if (hasBucket) b = inRecs[GI];
-    ClusterCullBody(b, hasBucket, GI, inputCount, 8);
+    uint swPending = 0;
+    ClusterCullBody(b, hasBucket, GI, inputCount, 8, swPending);
+
+    GroupMemoryBarrierWithGroupSync();
+    const uint numBatches = (swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS;
+    GroupNodeOutputRecords<SWRasterBatchRecord> swBatchOut =
+        swRasterOutput.GetGroupNodeOutputRecords(numBatches);
+    if (GI == 0) {
+        for (uint batch = 0; batch < numBatches; batch++) {
+            const uint batchStart = batch * SW_BATCH_MAX_CLUSTERS;
+            const uint batchSize = min(SW_BATCH_MAX_CLUSTERS, swPending - batchStart);
+            swBatchOut[batch].dispatchGrid = uint3(SW_RASTER_GROUPS_PER_CLUSTER * batchSize, 1, 1);
+            swBatchOut[batch].numClusters = batchSize;
+            for (uint i = 0; i < batchSize; i++)
+                swBatchOut[batch].clusterIndices[i] = gs_swBatchIndices[batchStart + i];
+        }
+    }
+    swBatchOut.OutputComplete();
 }
 
 [Shader("node")]
@@ -1236,13 +1417,31 @@ void WG_ClusterCull8(
 [NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
 void WG_ClusterCull16(
     [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
+    [NodeID("SWRaster")] [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 16 / SW_BATCH_MAX_CLUSTERS)] NodeOutput<SWRasterBatchRecord> swRasterOutput,
     uint GI : SV_GroupIndex)
 {
     const uint inputCount = inRecs.Count();
     const bool hasBucket = GI < inputCount;
     MeshletBucketRecord b = (MeshletBucketRecord)0;
     if (hasBucket) b = inRecs[GI];
-    ClusterCullBody(b, hasBucket, GI, inputCount, 16);
+    uint swPending = 0;
+    ClusterCullBody(b, hasBucket, GI, inputCount, 16, swPending);
+
+    GroupMemoryBarrierWithGroupSync();
+    const uint numBatches = (swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS;
+    GroupNodeOutputRecords<SWRasterBatchRecord> swBatchOut =
+        swRasterOutput.GetGroupNodeOutputRecords(numBatches);
+    if (GI == 0) {
+        for (uint batch = 0; batch < numBatches; batch++) {
+            const uint batchStart = batch * SW_BATCH_MAX_CLUSTERS;
+            const uint batchSize = min(SW_BATCH_MAX_CLUSTERS, swPending - batchStart);
+            swBatchOut[batch].dispatchGrid = uint3(SW_RASTER_GROUPS_PER_CLUSTER * batchSize, 1, 1);
+            swBatchOut[batch].numClusters = batchSize;
+            for (uint i = 0; i < batchSize; i++)
+                swBatchOut[batch].clusterIndices[i] = gs_swBatchIndices[batchStart + i];
+        }
+    }
+    swBatchOut.OutputComplete();
 }
 
 [Shader("node")]
@@ -1251,13 +1450,31 @@ void WG_ClusterCull16(
 [NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
 void WG_ClusterCull32(
     [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
+    [NodeID("SWRaster")] [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 32 / SW_BATCH_MAX_CLUSTERS)] NodeOutput<SWRasterBatchRecord> swRasterOutput,
     uint GI : SV_GroupIndex)
 {
     const uint inputCount = inRecs.Count();
     const bool hasBucket = GI < inputCount;
     MeshletBucketRecord b = (MeshletBucketRecord)0;
     if (hasBucket) b = inRecs[GI];
-    ClusterCullBody(b, hasBucket, GI, inputCount, 32);
+    uint swPending = 0;
+    ClusterCullBody(b, hasBucket, GI, inputCount, 32, swPending);
+
+    GroupMemoryBarrierWithGroupSync();
+    const uint numBatches = (swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS;
+    GroupNodeOutputRecords<SWRasterBatchRecord> swBatchOut =
+        swRasterOutput.GetGroupNodeOutputRecords(numBatches);
+    if (GI == 0) {
+        for (uint batch = 0; batch < numBatches; batch++) {
+            const uint batchStart = batch * SW_BATCH_MAX_CLUSTERS;
+            const uint batchSize = min(SW_BATCH_MAX_CLUSTERS, swPending - batchStart);
+            swBatchOut[batch].dispatchGrid = uint3(SW_RASTER_GROUPS_PER_CLUSTER * batchSize, 1, 1);
+            swBatchOut[batch].numClusters = batchSize;
+            for (uint i = 0; i < batchSize; i++)
+                swBatchOut[batch].clusterIndices[i] = gs_swBatchIndices[batchStart + i];
+        }
+    }
+    swBatchOut.OutputComplete();
 }
 
 [Shader("node")]
@@ -1266,11 +1483,31 @@ void WG_ClusterCull32(
 [NumThreads(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP, 1, 1)]
 void WG_ClusterCull64(
     [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
+    [NodeID("SWRaster")] [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 64 / SW_BATCH_MAX_CLUSTERS)] NodeOutput<SWRasterBatchRecord> swRasterOutput,
     uint GI : SV_GroupIndex)
 {
     const uint inputCount = inRecs.Count();
     const bool hasBucket = GI < inputCount;
     MeshletBucketRecord b = (MeshletBucketRecord)0;
     if (hasBucket) b = inRecs[GI];
-    ClusterCullBody(b, hasBucket, GI, inputCount, 64);
+    uint swPending = 0;
+    ClusterCullBody(b, hasBucket, GI, inputCount, 64, swPending);
+
+    GroupMemoryBarrierWithGroupSync();
+    const uint numBatches = (swPending + SW_BATCH_MAX_CLUSTERS - 1) / SW_BATCH_MAX_CLUSTERS;
+    GroupNodeOutputRecords<SWRasterBatchRecord> swBatchOut =
+        swRasterOutput.GetGroupNodeOutputRecords(numBatches);
+    if (GI == 0) {
+        for (uint batch = 0; batch < numBatches; batch++) {
+            const uint batchStart = batch * SW_BATCH_MAX_CLUSTERS;
+            const uint batchSize = min(SW_BATCH_MAX_CLUSTERS, swPending - batchStart);
+            swBatchOut[batch].dispatchGrid = uint3(SW_RASTER_GROUPS_PER_CLUSTER * batchSize, 1, 1);
+            swBatchOut[batch].numClusters = batchSize;
+            for (uint i = 0; i < batchSize; i++)
+                swBatchOut[batch].clusterIndices[i] = gs_swBatchIndices[batchStart + i];
+        }
+    }
+    swBatchOut.OutputComplete();
 }
+
+#include "ClusterLOD/softwareRaster.hlsl"

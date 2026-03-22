@@ -180,6 +180,13 @@ void ViewManager::UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo) {
 	cullInfo.projY = DirectX::XMVectorGetY(cameraInfo.jitteredProjection.r[1]); // [1][1]
 	cullInfo.zNear = cameraInfo.zNear;
     cullInfo.errorOverDistanceThreshold = ComputeErrorOverDistanceThreshold(cameraInfo, kClusterLodErrorPixels);
+    cullInfo.viewProjection = cameraInfo.viewProjection;
+    cullInfo.viewZ = {
+        DirectX::XMVectorGetZ(cameraInfo.view.r[0]),
+        DirectX::XMVectorGetZ(cameraInfo.view.r[1]),
+        DirectX::XMVectorGetZ(cameraInfo.view.r[2]),
+        DirectX::XMVectorGetZ(cameraInfo.view.r[3])
+    };
 	m_cullingCameraBuffer->UpdateView(v->gpu.cullingCameraBufferView.get(), &cullInfo);
     
     if (m_events.onCameraUpdated) {

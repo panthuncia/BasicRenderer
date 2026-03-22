@@ -20,6 +20,7 @@ public:
         std::shared_ptr<Buffer> writeCursorBuffer,
         std::shared_ptr<Buffer> compactedClustersBuffer,
         std::shared_ptr<Buffer> indirectArgsBuffer,
+        std::shared_ptr<Buffer> sortedToUnsortedMappingBuffer,
         uint64_t maxVisibleClusters,
         bool appendToExisting);
 
@@ -42,6 +43,7 @@ private:
     std::shared_ptr<Buffer> m_writeCursorBuffer;
     std::shared_ptr<Buffer> m_compactedClustersBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
+    std::shared_ptr<Buffer> m_sortedToUnsortedMappingBuffer;
 
     uint64_t m_maxVisibleClusters = 0;
     bool m_appendToExisting = false;

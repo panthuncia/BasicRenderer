@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstring>
 #include <queue>
+#include <unordered_map>
 
 #include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"
@@ -285,10 +286,35 @@ private:
 		ImPlot::CreateContext();
     };
 	IDXGISwapChain3* m_pSwapChain = nullptr;
-	
-	flecs::entity selectedNode;
 
-	RenderGraph* m_renderGraph;
+    struct SceneExplorerPendingEdit {
+        bool hasPosition = false;
+        DirectX::XMFLOAT3 position = { 0.0f, 0.0f, 0.0f };
+        bool hasUniformScale = false;
+        float uniformScale = 1.0f;
+    };
+
+    struct SceneExplorerNodeSnapshot {
+        uint64_t stableId = 0;
+        std::string name;
+        bool hasPosition = false;
+        DirectX::XMFLOAT3 position = { 0.0f, 0.0f, 0.0f };
+        bool hasScale = false;
+        float uniformScale = 1.0f;
+        bool hasRotation = false;
+        DirectX::XMFLOAT4 rotation = { 0.0f, 0.0f, 0.0f, 1.0f };
+        bool isRenderable = false;
+        size_t meshCount = 0;
+        bool skinned = false;
+        std::vector<SceneExplorerNodeSnapshot> children;
+    };
+
+    uint64_t m_selectedSceneNodeStableId = 0;
+    bool m_sceneExplorerSnapshotAvailable = false;
+    SceneExplorerNodeSnapshot m_sceneExplorerRootSnapshot{};
+    std::unordered_map<uint64_t, SceneExplorerPendingEdit> m_sceneExplorerPendingEdits;
+
+	RenderGraph* m_renderGraph = nullptr;
 
     struct CLodCaptureStats {
         uint32_t visibleClusterCount = 0;
@@ -352,7 +378,14 @@ private:
     void DrawTonemapTypeDropdown();
     void DrawBrowseButton(const std::wstring& targetDirectory);
     void DrawLoadModelButton();
-    void DisplaySceneNode(flecs::entity node, bool isOnlyChild);
+    SceneExplorerNodeSnapshot BuildSceneExplorerSnapshot(flecs::entity node);
+    const SceneExplorerNodeSnapshot* FindSceneExplorerSnapshotNode(const SceneExplorerNodeSnapshot& node, uint64_t stableId) const;
+    SceneExplorerNodeSnapshot* FindSceneExplorerSnapshotNode(SceneExplorerNodeSnapshot& node, uint64_t stableId);
+    void RefreshSceneExplorerSnapshot();
+    void OverlayPendingSceneExplorerEdits();
+    void QueueSceneNodePositionChange(uint64_t stableId, const DirectX::XMFLOAT3& position);
+    void QueueSceneNodeUniformScaleChange(uint64_t stableId, float uniformScale);
+    void DisplaySceneNode(const SceneExplorerNodeSnapshot& node, bool isOnlyChild);
     void DisplaySceneGraph();
     void DisplaySelectedNode();
     void DrawPassTimingWindow();
@@ -407,6 +440,8 @@ private:
 	std::function<void(bool)> setWireframeEnabled;
 
     std::function<flecs::entity ()> getSceneRoot;
+    std::function<void(uint64_t, DirectX::XMFLOAT3)> queueSceneNodePositionEdit;
+    std::function<void(uint64_t, float)> queueSceneNodeUniformScaleEdit;
 
     bool allowTearing = false;
 	std::function<bool()> getAllowTearing;
@@ -575,6 +610,8 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
 	getTonemapType = settingsManager.getSettingGetter<unsigned int>("tonemapType");
 
     getSceneRoot = settingsManager.getSettingGetter<std::function<flecs::entity()>>("getSceneRoot")();
+    queueSceneNodePositionEdit = settingsManager.getSettingGetter<std::function<void(uint64_t, DirectX::XMFLOAT3)>>("queueSceneNodePositionEdit")();
+    queueSceneNodeUniformScaleEdit = settingsManager.getSettingGetter<std::function<void(uint64_t, float)>>("queueSceneNodeUniformScaleEdit")();
 
 	setMeshShaderEnabled = settingsManager.getSettingSetter<bool>("enableMeshShader");
 	getMeshShaderEnabled = settingsManager.getSettingGetter<bool>("enableMeshShader");
@@ -753,6 +790,7 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     static bool showAutoAliasPlanner = false;
 
     SetCLodWorkGraphTelemetryEnabled(showCLodTelemetry || m_clodTelemetryCapturePending || m_clodCaptureStatsPending);
+    RefreshSceneExplorerSnapshot();
 
 	{
 		static float f = 0.0f;
@@ -1117,14 +1155,169 @@ inline void Menu::DrawLoadModelButton() {
     }
 }
 
-inline void Menu::DisplaySceneNode(flecs::entity node, bool isOnlyChild) {
-    if (!node) return;
+inline Menu::SceneExplorerNodeSnapshot Menu::BuildSceneExplorerSnapshot(flecs::entity node) {
+    SceneExplorerNodeSnapshot snapshot;
+    if (!node.is_alive()) {
+        return snapshot;
+    }
 
-    // Set flags for automatically expanding nodes if they are the only child
+    if (const auto* stableSceneID = node.try_get<Components::StableSceneID>()) {
+        snapshot.stableId = stableSceneID->value;
+    } else {
+        snapshot.stableId = static_cast<uint64_t>(node.id());
+    }
+
+    if (const auto* nameComponent = node.try_get<Components::Name>()) {
+        snapshot.name = nameComponent->name;
+    } else {
+        snapshot.name = "Unnamed Node";
+    }
+
+    if (const auto* position = node.try_get<Components::Position>()) {
+        snapshot.hasPosition = true;
+        XMStoreFloat3(&snapshot.position, position->pos);
+    }
+
+    if (const auto* scale = node.try_get<Components::Scale>()) {
+        DirectX::XMFLOAT3 scaleValue{};
+        snapshot.hasScale = true;
+        XMStoreFloat3(&scaleValue, scale->scale);
+        snapshot.uniformScale = scaleValue.x;
+    }
+
+    if (const auto* rotation = node.try_get<Components::Rotation>()) {
+        snapshot.hasRotation = true;
+        XMStoreFloat4(&snapshot.rotation, rotation->rot);
+    }
+
+    snapshot.isRenderable = node.has<Components::RenderableObject>();
+    if (snapshot.isRenderable) {
+        if (const auto* meshInstances = node.try_get<Components::MeshInstances>()) {
+            snapshot.meshCount = meshInstances->meshInstances.size();
+        }
+        snapshot.skinned = node.has<Components::Skinned>();
+    }
+
+    node.children([&](flecs::entity child) {
+        snapshot.children.push_back(BuildSceneExplorerSnapshot(child));
+    });
+
+    return snapshot;
+}
+
+inline const Menu::SceneExplorerNodeSnapshot* Menu::FindSceneExplorerSnapshotNode(const SceneExplorerNodeSnapshot& node, uint64_t stableId) const {
+    if (node.stableId == stableId) {
+        return &node;
+    }
+
+    for (const auto& child : node.children) {
+        if (const auto* found = FindSceneExplorerSnapshotNode(child, stableId)) {
+            return found;
+        }
+    }
+
+    return nullptr;
+}
+
+inline Menu::SceneExplorerNodeSnapshot* Menu::FindSceneExplorerSnapshotNode(SceneExplorerNodeSnapshot& node, uint64_t stableId) {
+    if (node.stableId == stableId) {
+        return &node;
+    }
+
+    for (auto& child : node.children) {
+        if (auto* found = FindSceneExplorerSnapshotNode(child, stableId)) {
+            return found;
+        }
+    }
+
+    return nullptr;
+}
+
+inline void Menu::OverlayPendingSceneExplorerEdits() {
+    if (!m_sceneExplorerSnapshotAvailable) {
+        return;
+    }
+
+    constexpr float kFloatEpsilon = 1e-4f;
+    for (auto it = m_sceneExplorerPendingEdits.begin(); it != m_sceneExplorerPendingEdits.end();) {
+        auto* node = FindSceneExplorerSnapshotNode(m_sceneExplorerRootSnapshot, it->first);
+        if (!node) {
+            it = m_sceneExplorerPendingEdits.erase(it);
+            continue;
+        }
+
+        bool appliedToScene = true;
+        if (it->second.hasPosition) {
+            appliedToScene = appliedToScene
+                && node->hasPosition
+                && std::fabs(node->position.x - it->second.position.x) <= kFloatEpsilon
+                && std::fabs(node->position.y - it->second.position.y) <= kFloatEpsilon
+                && std::fabs(node->position.z - it->second.position.z) <= kFloatEpsilon;
+            node->hasPosition = true;
+            node->position = it->second.position;
+        }
+
+        if (it->second.hasUniformScale) {
+            appliedToScene = appliedToScene
+                && node->hasScale
+                && std::fabs(node->uniformScale - it->second.uniformScale) <= kFloatEpsilon;
+            node->hasScale = true;
+            node->uniformScale = it->second.uniformScale;
+        }
+
+        if (appliedToScene) {
+            it = m_sceneExplorerPendingEdits.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+inline void Menu::RefreshSceneExplorerSnapshot() {
+    if (m_sceneOverlapStatus.taskInFlight) {
+        return;
+    }
+
+    auto root = getSceneRoot();
+    if (!root) {
+        m_sceneExplorerSnapshotAvailable = false;
+        m_selectedSceneNodeStableId = 0;
+        m_sceneExplorerPendingEdits.clear();
+        return;
+    }
+
+    m_sceneExplorerRootSnapshot = BuildSceneExplorerSnapshot(root);
+    m_sceneExplorerSnapshotAvailable = true;
+    OverlayPendingSceneExplorerEdits();
+
+    if (m_selectedSceneNodeStableId != 0
+        && FindSceneExplorerSnapshotNode(m_sceneExplorerRootSnapshot, m_selectedSceneNodeStableId) == nullptr) {
+        m_selectedSceneNodeStableId = 0;
+    }
+}
+
+inline void Menu::QueueSceneNodePositionChange(uint64_t stableId, const DirectX::XMFLOAT3& position) {
+    auto& pendingEdit = m_sceneExplorerPendingEdits[stableId];
+    pendingEdit.hasPosition = true;
+    pendingEdit.position = position;
+    if (queueSceneNodePositionEdit) {
+        queueSceneNodePositionEdit(stableId, position);
+    }
+}
+
+inline void Menu::QueueSceneNodeUniformScaleChange(uint64_t stableId, float uniformScale) {
+    auto& pendingEdit = m_sceneExplorerPendingEdits[stableId];
+    pendingEdit.hasUniformScale = true;
+    pendingEdit.uniformScale = uniformScale;
+    if (queueSceneNodeUniformScaleEdit) {
+        queueSceneNodeUniformScaleEdit(stableId, uniformScale);
+    }
+}
+
+inline void Menu::DisplaySceneNode(const SceneExplorerNodeSnapshot& node, bool isOnlyChild) {
     ImGuiTreeNodeFlags nodeFlags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
 
-    // If the node is currently selected, add the ImGuiTreeNodeFlags_Selected flag
-    if (node == selectedNode) {
+    if (node.stableId == m_selectedSceneNodeStableId) {
         nodeFlags |= ImGuiTreeNodeFlags_Selected;
     }
 
@@ -1132,115 +1325,88 @@ inline void Menu::DisplaySceneNode(flecs::entity node, bool isOnlyChild) {
         nodeFlags |= ImGuiTreeNodeFlags_DefaultOpen;
     }
 
-    // Check if the node has any children.
-    bool hasChild = false;
-    node.children([&hasChild](flecs::entity child) {
-        hasChild = true;
-        });
-    // If there are no children, mark it as a leaf node.
-    if (!hasChild) {
+    if (node.children.empty()) {
         nodeFlags |= ImGuiTreeNodeFlags_Leaf;
     }
 
-    // Show the node with its name
-	auto nameComponent = node.try_get<Components::Name>();
-	std::string name = nameComponent ? nameComponent->name : "Unnamed Node";
-    void* uniqueId = reinterpret_cast<void*>(static_cast<intptr_t>(node.id()));
-    if (ImGui::TreeNodeEx(uniqueId, nodeFlags, "%s", name.c_str())) {
-        // Detect if the node is clicked to select it
+    void* uniqueId = reinterpret_cast<void*>(static_cast<intptr_t>(node.stableId));
+    if (ImGui::TreeNodeEx(uniqueId, nodeFlags, "%s", node.name.c_str())) {
         if (ImGui::IsItemClicked()) {
-            selectedNode = node;
+            m_selectedSceneNodeStableId = node.stableId;
         }
 
-        // Display information specific to RenderableObject, if the node is of that type.
-		if (node.has<Components::RenderableObject>()) {
-            // Display meshes
-			auto meshInstances = node.try_get<Components::MeshInstances>();
-			if (meshInstances) {
-				ImGui::Text("Meshes: %d", meshInstances->meshInstances.size());
-			}
+        if (node.isRenderable) {
+            ImGui::Text("Meshes: %llu", static_cast<unsigned long long>(node.meshCount));
+            ImGui::Text("Has Skinned: %s", node.skinned ? "Yes" : "No");
+        }
 
-            if (node.has<Components::Skinned>()) {
-                ImGui::Text("Has Skinned: Yes");
-            }
-            else {
-                ImGui::Text("Has Skinned: No");
-            }
-		}
-
-        // Recursively display child nodes
-        // Count children
-        uint64_t num = 0;
-        node.children(([&num](flecs::entity) {
-            num++;
-            }));
-
-        bool childIsOnly = num <= 1;
-		node.children(([&](flecs::entity child) {
-			// Display the child node
-			DisplaySceneNode(child, childIsOnly);
-			}));
+        const bool childIsOnly = node.children.size() <= 1;
+        for (const auto& child : node.children) {
+            DisplaySceneNode(child, childIsOnly);
+        }
 
         ImGui::TreePop();
-    }
-    else {
-        // Allow selection
-        if (ImGui::IsItemClicked()) {
-            selectedNode = node;
-        }
+    } else if (ImGui::IsItemClicked()) {
+        m_selectedSceneNodeStableId = node.stableId;
     }
 }
 
 inline void Menu::DisplaySceneGraph() {
-    if (m_sceneOverlapStatus.taskInFlight) {
-        ImGui::TextDisabled("Scene graph is paused while async scene update is running.");
+    if (!m_sceneExplorerSnapshotAvailable) {
+        ImGui::TextDisabled("No scene snapshot available.");
         return;
     }
 
-    auto root = getSceneRoot();
-    if (!root) {
-        ImGui::TextDisabled("No scene root available.");
-        return;
-    }
-
-    DisplaySceneNode(root, true);
+    DisplaySceneNode(m_sceneExplorerRootSnapshot, true);
 }
 
 inline void Menu::DisplaySelectedNode() {
-    if (m_sceneOverlapStatus.taskInFlight) {
-        selectedNode = {};
+    if (m_selectedSceneNodeStableId == 0 || !m_sceneExplorerSnapshotAvailable) {
         return;
     }
 
-    if (selectedNode) {
-        ImGui::Begin("Selected Node Transform", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-
-        // Display the transform details
-        ImGui::Text("Position:");
-        XMFLOAT3 pos;
-        auto& position = selectedNode.get<Components::Position>();
-        XMStoreFloat3(&pos, position.pos);
-        if (ImGui::InputFloat3("Position", &pos.x)) {
-			selectedNode.set<Components::Position>(XMLoadFloat3(&pos));
-            //selectedNode->transform.isDirty = true;
-        }
-        ImGui::Text("Scale:");
-		XMFLOAT3 scale;
-		XMStoreFloat3(&scale, selectedNode.get<Components::Scale>().scale);
-        if (ImGui::InputFloat("Scale", &scale.x)) {
-            //selectedNode->transform.isDirty = true;
-			scale.y = scale.x;
-			scale.z = scale.x;
-			selectedNode.set<Components::Scale>(XMLoadFloat3(&scale));
-        }
-
-        // Display rotation
-        XMFLOAT4 rotation;
-        XMStoreFloat4(&rotation, selectedNode.get<Components::Rotation>().rot);
-        ImGui::Text("Rotation (quaternion): (%.3f, %.3f, %.3f, %.3f)", rotation.x, rotation.y, rotation.z, rotation.w);
-
-        ImGui::End();
+    auto* selectedNode = FindSceneExplorerSnapshotNode(m_sceneExplorerRootSnapshot, m_selectedSceneNodeStableId);
+    if (!selectedNode) {
+        m_selectedSceneNodeStableId = 0;
+        return;
     }
+
+    ImGui::Begin("Selected Node Transform", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+
+    ImGui::Text("Position:");
+    if (selectedNode->hasPosition) {
+        DirectX::XMFLOAT3 pos = selectedNode->position;
+        if (ImGui::InputFloat3("Position", &pos.x)) {
+            selectedNode->position = pos;
+            QueueSceneNodePositionChange(selectedNode->stableId, pos);
+        }
+    } else {
+        ImGui::TextDisabled("Position unavailable.");
+    }
+
+    ImGui::Text("Scale:");
+    if (selectedNode->hasScale) {
+        float uniformScale = selectedNode->uniformScale;
+        if (ImGui::InputFloat("Scale", &uniformScale)) {
+            selectedNode->uniformScale = uniformScale;
+            QueueSceneNodeUniformScaleChange(selectedNode->stableId, uniformScale);
+        }
+    } else {
+        ImGui::TextDisabled("Scale unavailable.");
+    }
+
+    if (selectedNode->hasRotation) {
+        ImGui::Text(
+            "Rotation (quaternion): (%.3f, %.3f, %.3f, %.3f)",
+            selectedNode->rotation.x,
+            selectedNode->rotation.y,
+            selectedNode->rotation.z,
+            selectedNode->rotation.w);
+    } else {
+        ImGui::TextDisabled("Rotation unavailable.");
+    }
+
+    ImGui::End();
 }
 
 inline void Menu::TryFinalizeCLodCaptureStats(uint64_t captureId) {

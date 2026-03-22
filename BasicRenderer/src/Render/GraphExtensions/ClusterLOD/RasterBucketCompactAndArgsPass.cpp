@@ -22,6 +22,7 @@ RasterBucketCompactAndArgsPass::RasterBucketCompactAndArgsPass(
     std::shared_ptr<Buffer> writeCursorBuffer,
     std::shared_ptr<Buffer> compactedClustersBuffer,
     std::shared_ptr<Buffer> indirectArgsBuffer,
+    std::shared_ptr<Buffer> sortedToUnsortedMappingBuffer,
     uint64_t maxVisibleClusters,
     bool appendToExisting)
     : m_visibleClustersBuffer(std::move(visibleClustersBuffer))
@@ -33,6 +34,7 @@ RasterBucketCompactAndArgsPass::RasterBucketCompactAndArgsPass(
     , m_writeCursorBuffer(std::move(writeCursorBuffer))
     , m_compactedClustersBuffer(std::move(compactedClustersBuffer))
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
+    , m_sortedToUnsortedMappingBuffer(std::move(sortedToUnsortedMappingBuffer))
     , m_maxVisibleClusters(maxVisibleClusters)
     , m_appendToExisting(appendToExisting)
 {
@@ -68,7 +70,8 @@ void RasterBucketCompactAndArgsPass::DeclareResourceUsages(ComputePassBuilder* b
         .WithUnorderedAccess(
             m_writeCursorBuffer,
             m_compactedClustersBuffer,
-            m_indirectArgsBuffer)
+            m_indirectArgsBuffer,
+            m_sortedToUnsortedMappingBuffer)
         .WithIndirectArguments(m_indirectCommand);
 }
 
@@ -104,6 +107,7 @@ PassReturn RasterBucketCompactAndArgsPass::Execute(PassExecutionContext& executi
     rc[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rc[CLOD_RASTER_BUCKETS_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_indirectArgsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rc[CLOD_COMPACTED_APPEND_BASE_COUNTER_DESCRIPTOR_INDEX] = m_compactedBaseCounterBuffer->GetSRVInfo(0).slot.index;
+    rc[CLOD_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = m_sortedToUnsortedMappingBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rc[CLOD_NUM_RASTER_BUCKETS] = numBuckets | (m_appendToExisting ? 0x80000000u : 0u);
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

@@ -45,6 +45,9 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
         case OUTPUT_MOTION_VECTORS:
             color = UnpackDebugFloat3(payload);
             break;
+        case OUTPUT_SW_RASTER:
+            color = float3(1, 0, 0);
+            break;
         case OUTPUT_MESHLETS:
         case OUTPUT_LIGHT_CLUSTER_ID:
             color = HashToColor(UnpackDebugUint(payload));

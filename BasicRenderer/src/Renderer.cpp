@@ -106,6 +106,35 @@ void D3D12DebugCallback(
     }
 }
 
+namespace {
+
+flecs::entity FindSceneEntityByStableSceneID(flecs::entity node, uint64_t stableSceneID) {
+    if (!node.is_alive()) {
+        return {};
+    }
+
+    if (const auto* currentStableSceneID = node.try_get<Components::StableSceneID>()) {
+        if (currentStableSceneID->value == stableSceneID) {
+            return node;
+        }
+    }
+
+    flecs::entity found;
+    node.children([&](flecs::entity child) {
+        if (found.is_alive()) {
+            return;
+        }
+
+        auto candidate = FindSceneEntityByStableSceneID(child, stableSceneID);
+        if (candidate.is_alive()) {
+            found = candidate;
+        }
+    });
+    return found;
+}
+
+} // namespace
+
 void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     auto& settingsManager = SettingsManager::GetInstance();
     settingsManager.registerSetting<uint8_t>("numFramesInFlight", m_numFramesInFlight);
@@ -249,6 +278,65 @@ void Renderer::RunTransformPropagationStage() {
 void Renderer::RunSceneBridgeSyncStage() {
     ZoneScopedN("Renderer::Update::SceneBridgeSync");
     m_sceneRenderBridge.Sync(*currentScene, m_managerInterface);
+}
+
+void Renderer::QueueSceneNodePositionEdit(uint64_t stableSceneID, DirectX::XMFLOAT3 position) {
+    std::scoped_lock lock(m_pendingSceneExplorerEditsMutex);
+    auto& edit = m_pendingSceneExplorerEdits[stableSceneID];
+    edit.hasPosition = true;
+    edit.position = position;
+}
+
+void Renderer::QueueSceneNodeUniformScaleEdit(uint64_t stableSceneID, float uniformScale) {
+    std::scoped_lock lock(m_pendingSceneExplorerEditsMutex);
+    auto& edit = m_pendingSceneExplorerEdits[stableSceneID];
+    edit.hasUniformScale = true;
+    edit.uniformScale = uniformScale;
+}
+
+void Renderer::FlushPendingSceneExplorerEdits() {
+    if (!currentScene || m_sceneTaskInFlight.load()) {
+        return;
+    }
+
+    std::unordered_map<uint64_t, PendingSceneExplorerEdit> pendingEdits;
+    {
+        std::scoped_lock lock(m_pendingSceneExplorerEditsMutex);
+        if (m_pendingSceneExplorerEdits.empty()) {
+            return;
+        }
+        pendingEdits.swap(m_pendingSceneExplorerEdits);
+    }
+
+    bool anyApplied = false;
+    auto root = currentScene->GetRoot();
+    for (const auto& [stableSceneID, edit] : pendingEdits) {
+        auto entity = FindSceneEntityByStableSceneID(root, stableSceneID);
+        if (!entity.is_alive()) {
+            continue;
+        }
+
+        if (edit.hasPosition && entity.has<Components::Position>()) {
+            entity.set<Components::Position>(edit.position);
+            anyApplied = true;
+        }
+
+        if (edit.hasUniformScale && entity.has<Components::Scale>()) {
+            entity.set<Components::Scale>({ edit.uniformScale, edit.uniformScale, edit.uniformScale });
+            anyApplied = true;
+        }
+    }
+
+    if (anyApplied) {
+        currentScene->PropagateTransforms();
+
+        {
+            std::scoped_lock lock(m_sceneSnapshotMutex);
+            m_completedSceneSnapshot.reset();
+        }
+        m_sceneTaskCompleted.store(false);
+        BootstrapCommittedSceneSnapshot();
+    }
 }
 
 void Renderer::BootstrapCommittedSceneSnapshot() {
@@ -698,6 +786,12 @@ void Renderer::SetSettings() {
         }
         return currentScene->GetRoot();
         });
+    settingsManager.registerSetting<std::function<void(uint64_t, DirectX::XMFLOAT3)>>("queueSceneNodePositionEdit", [this](uint64_t stableSceneID, DirectX::XMFLOAT3 position) {
+        QueueSceneNodePositionEdit(stableSceneID, position);
+        });
+    settingsManager.registerSetting<std::function<void(uint64_t, float)>>("queueSceneNodeUniformScaleEdit", [this](uint64_t stableSceneID, float uniformScale) {
+        QueueSceneNodeUniformScaleEdit(stableSceneID, uniformScale);
+        });
     bool meshShaderSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 	settingsManager.registerSetting<bool>("enableMeshShader", meshShaderSupported && m_useMeshShaders);
 	settingsManager.registerSetting<bool>("enableIndirectDraws", meshShaderSupported);
@@ -1115,6 +1209,10 @@ void Renderer::Update(float elapsedSeconds) {
     if (!IsSceneReadyForFrame()) {
         return;
     }
+    runCapturedStage("SceneExplorerEdits", [&]() {
+        ZoneScopedN("Renderer::Update::SceneExplorerEdits");
+        FlushPendingSceneExplorerEdits();
+    });
     if (NeedsSceneSnapshotBootstrap()) {
         runCapturedStage("BootstrapSceneSnapshot", [&]() {
             ZoneScopedN("Renderer::Update::BootstrapSceneSnapshot");

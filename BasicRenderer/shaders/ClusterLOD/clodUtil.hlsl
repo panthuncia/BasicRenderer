@@ -82,11 +82,17 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
     if (linearizedID >= clusterCount) {
         return;
     }
-    
+
+    // Phase 2: offset reads past Phase 1's HW entries.
+    // RC4 holds the descriptor index of Phase 1's HW counter (0 for Phase 1 itself).
+    // When 0, the load returns a garbage value, but we mask it out below.
+    StructuredBuffer<uint> hwBaseCounter = ResourceDescriptorHeap[CLOD_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
+    uint readBase = (CLOD_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX != 0) ? hwBaseCounter.Load(0) : 0;
+
     StructuredBuffer<VisibleCluster> visibleClusters = ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
 
     // TODO: Remove load chain
-    uint instanceIndex = visibleClusters[linearizedID].instanceID;
+    uint instanceIndex = visibleClusters[readBase + linearizedID].instanceID;
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     uint perMeshIndex = perMeshInstance[instanceIndex].perMeshBufferIndex;
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
@@ -315,8 +321,9 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
         RWStructuredBuffer<VisibleCluster> compactedClusters = ResourceDescriptorHeap[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
         StructuredBuffer<uint> offsets = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX];
         RWStructuredBuffer<uint> writeCursor = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_WRITE_CURSOR_DESCRIPTOR_INDEX];
+        RWStructuredBuffer<uint> sortedToUnsortedMapping = ResourceDescriptorHeap[CLOD_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX];
 
-        VisibleCluster cluster = visibleClusters[linearizedID];
+        VisibleCluster cluster = visibleClusters[baseClusterOffset + linearizedID];
         uint bucketIndex = GetRasterBucketIndexFromCluster(cluster);
 
         uint localOffset = 0;
@@ -324,6 +331,7 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
 
         uint dst = baseClusterOffset + offsets[bucketIndex] + localOffset;
         compactedClusters[dst] = cluster;
+        sortedToUnsortedMapping[dst] = baseClusterOffset + linearizedID;
     }
 
     if (linearizedID < numBuckets)

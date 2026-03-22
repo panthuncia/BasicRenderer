@@ -36,11 +36,24 @@
 
 #define CLOD_WORKGRAPH_FLAG_TELEMETRY_ENABLED (1u << 0)
 #define CLOD_WORKGRAPH_FLAG_OCCLUSION_ENABLED (1u << 1)
+#define CLOD_WORKGRAPH_FLAG_SW_RASTER_ENABLED (1u << 2)
+#define CLOD_WORKGRAPH_FLAG_PHASE2             (1u << 3)
+#define CLOD_WORKGRAPH_SW_RASTER_THRESHOLD_SHIFT 16 // upper 16 bits of flags = pixel diameter threshold
+
+// Phase 2: descriptor index of Phase 1's HW counter (aliased with histogram command — not used by WG nodes)
+#define CLOD_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX UintRootConstant4 // aliased
 
 // Work graph occlusion replay resources (hierarchical culling pass)
 #define CLOD_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX UintRootConstant5 // aliased
 #define CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX UintRootConstant6 // aliased
 #define CLOD_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX UintRootConstant7 // aliased
 #define CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX UintRootConstant8 // aliased
+
+// Work graph SW raster resources (aliased — only used by work graph nodes, not histogram command)
+#define CLOD_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX UintRootConstant1 // aliased (RC0/1 free in WG pass)
+#define CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX UintRootConstant0 // aliased (RC0/1 free in WG pass)
+
+// Sorted→unsorted mapping buffer (compaction pass + raster pass)
+#define CLOD_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX UintRootConstant4 // aliased
 
 #endif // CLOD_ROOT_CONSTANTS_H

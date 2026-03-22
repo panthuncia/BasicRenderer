@@ -43,7 +43,9 @@ struct CullingCameraInfo {
     float projY = 0.0f;
 	float zNear = 0.0f;
     float errorOverDistanceThreshold = 0.0f; // Threshold for (error * scale) / distance metric
-	float pad[1];
+    float pad[1];
+    DirectX::XMMATRIX viewProjection;
+    DirectX::XMFLOAT4 viewZ;
 };
 
 struct PerFrameCB {
@@ -317,6 +319,10 @@ struct CLodReplayBufferState {
     uint32_t meshletWriteCount = 0;
     uint32_t nodeDropped = 0;
     uint32_t meshletDropped = 0;
+    uint32_t visibleClusterCombinedCount = 0;
+    uint32_t pad0 = 0;
+    uint32_t pad1 = 0;
+    uint32_t pad2 = 0;
 };
 
 struct CLodViewDepthSRVIndex {

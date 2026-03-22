@@ -18,10 +18,12 @@ ClusterRasterizationPass::ClusterRasterizationPass(
     std::shared_ptr<Buffer> compactedVisibleClustersBuffer,
     std::shared_ptr<Buffer> rasterBucketsHistogramBuffer,
     std::shared_ptr<Buffer> rasterBucketsIndirectArgsBuffer,
+    std::shared_ptr<Buffer> sortedToUnsortedMappingBuffer,
     std::shared_ptr<ResourceGroup> slabResourceGroup)
     : m_compactedVisibleClustersBuffer(std::move(compactedVisibleClustersBuffer))
     , m_rasterBucketsHistogramBuffer(std::move(rasterBucketsHistogramBuffer))
     , m_rasterBucketsIndirectArgsBuffer(std::move(rasterBucketsIndirectArgsBuffer))
+    , m_sortedToUnsortedMappingBuffer(std::move(sortedToUnsortedMappingBuffer))
     , m_slabResourceGroup(std::move(slabResourceGroup)) {
     m_wireframe = inputs.wireframe;
     m_clearGbuffer = inputs.clearGbuffer;
@@ -60,7 +62,8 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
             Builtin::MeshResources::MeshletOffsets,
             m_compactedVisibleClustersBuffer,
             m_rasterBucketsHistogramBuffer,
-            m_viewRasterInfoBuffer)
+            m_viewRasterInfoBuffer,
+            m_sortedToUnsortedMappingBuffer)
         .WithIndirectArguments(m_rasterBucketsIndirectArgsBuffer)
         .IsGeometryPass();
 
@@ -174,6 +177,7 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
     misc[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = m_sortedToUnsortedMappingBuffer->GetSRVInfo(0).slot.index;
     commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
     auto numBuckets = context.materialManager->GetRasterBucketCount();

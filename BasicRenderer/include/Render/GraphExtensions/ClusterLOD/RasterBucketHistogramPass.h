@@ -14,7 +14,8 @@ public:
         std::shared_ptr<Buffer> visibleClustersBuffer,
         std::shared_ptr<Buffer> visibleClustersCounterBuffer,
         std::shared_ptr<Buffer> histogramIndirectCommand,
-        std::shared_ptr<Buffer> histogramBuffer);
+        std::shared_ptr<Buffer> histogramBuffer,
+        std::shared_ptr<Buffer> readBaseCounterBuffer = nullptr);
     ~RasterBucketHistogramPass();
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
@@ -35,4 +36,5 @@ private:
     std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
     std::shared_ptr<Buffer> m_histogramIndirectCommand;
     std::shared_ptr<Buffer> m_histogramBuffer;
+    std::shared_ptr<Buffer> m_readBaseCounterBuffer; // Phase 2 only: Phase 1's HW counter for read offset
 };

@@ -518,16 +518,19 @@ void ClusterLODBucketMSMain(
 
     StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
     StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> sortedToUnsortedMapping = ResourceDescriptorHeap[CLOD_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX];
     uint count = histogram[bucketIndex];
 
     bool draw = linearizedID < count;
     VisibleCluster cluster = (VisibleCluster)0;
     MeshletSetup setup;
     uint visibleClusterIndex = baseOffset + linearizedID;
+    uint unsortedClusterIndex = 0;
 
     if (draw) {   
         StructuredBuffer<VisibleCluster> compactedClusters = ResourceDescriptorHeap[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
         cluster = compactedClusters[visibleClusterIndex];
+        unsortedClusterIndex = sortedToUnsortedMapping[visibleClusterIndex];
         draw = InitializeMeshletFromCompactedCluster(cluster, setup, linearizedID, count);
     } else {
         setup.vertCount = 0;
@@ -537,7 +540,7 @@ void ClusterLODBucketMSMain(
     if (draw)
     {
         ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[setup.viewID];
-        EmitMeshletVisBufferForViewCLod(uGroupThreadID, setup, setup.viewID, visibleClusterIndex, viewRasterInfo, outputVertices, outputTriangles);
+        EmitMeshletVisBufferForViewCLod(uGroupThreadID, setup, setup.viewID, unsortedClusterIndex, viewRasterInfo, outputVertices, outputTriangles);
         EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
     }
 }
