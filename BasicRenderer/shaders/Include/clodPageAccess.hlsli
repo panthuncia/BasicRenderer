@@ -3,6 +3,9 @@
 
 #include "clodStructs.hlsli"
 
+static const uint CLOD_MESHLET_DESCRIPTOR_STRIDE = 64u;
+static const uint CLOD_MESHLET_UV_DESCRIPTOR_STRIDE = 32u;
+
 // Load a CLodPageHeader from a slab ByteAddressBuffer at a given byte offset.
 // The header occupies 16 x uint32 = 64 bytes at the start of each page tile.
 CLodPageHeader LoadPageHeader(uint slabDescriptorIndex, uint pageByteOffset)
@@ -16,20 +19,20 @@ CLodPageHeader LoadPageHeader(uint slabDescriptorIndex, uint pageByteOffset)
     hdr.meshletCount               = d0.x;
     hdr.compressedPositionQuantExp = d0.y;
     hdr.attributeMask              = d0.z;
-    hdr.descriptorOffset           = d0.w;
+    hdr.uvSetCount                 = d0.w;
 
-    hdr.positionBitstreamOffset    = d1.x;
-    hdr.normalArrayOffset          = d1.y;
-    hdr.uvBitstreamOffset          = d1.z;
-    hdr.triangleStreamOffset       = d1.w;
-    hdr.reserved0 = d2.x;
-    hdr.reserved1 = d2.y;
-    hdr.reserved2 = d2.z;
-    hdr.reserved3 = d2.w;
+    hdr.descriptorOffset           = d1.x;
+    hdr.uvDescriptorOffset         = d1.y;
+    hdr.positionBitstreamOffset    = d1.z;
+    hdr.normalArrayOffset          = d1.w;
+    hdr.uvBitstreamDirectoryOffset = d2.x;
+    hdr.triangleStreamOffset       = d2.y;
+    hdr.reserved0 = d2.z;
+    hdr.reserved1 = d2.w;
+    hdr.reserved2 = 0;
+    hdr.reserved3 = 0;
     hdr.reserved4 = 0;
     hdr.reserved5 = 0;
-    hdr.reserved6 = 0;
-    hdr.reserved7 = 0;
 
     return hdr;
 }
@@ -38,33 +41,60 @@ CLodPageHeader LoadPageHeader(uint slabDescriptorIndex, uint pageByteOffset)
 CLodMeshletDescriptor LoadMeshletDescriptor(uint slabDescriptorIndex, uint pageByteOffset, uint descriptorOffset, uint meshletIndex)
 {
     ByteAddressBuffer slab = ResourceDescriptorHeap[slabDescriptorIndex];
-    uint addr = pageByteOffset + descriptorOffset + meshletIndex * 80u;
+    uint addr = pageByteOffset + descriptorOffset + meshletIndex * CLOD_MESHLET_DESCRIPTOR_STRIDE;
     uint4 d0 = slab.Load4(addr +  0);
     uint4 d1 = slab.Load4(addr + 16);
     uint4 d2 = slab.Load4(addr + 32);
     uint4 d3 = slab.Load4(addr + 48);
-    uint4 d4 = slab.Load4(addr + 64);
 
     CLodMeshletDescriptor desc;
     desc.positionBitOffset           = d0.x;
     desc.normalWordOffset            = d0.y;
-    desc.uvBitOffset                 = d0.z;
-    desc.triangleByteOffset          = d0.w;
+    desc.triangleByteOffset          = d0.z;
+    desc.reserved0                   = d0.w;
     desc.minQx                       = asint(d1.x);
     desc.minQy                       = asint(d1.y);
     desc.minQz                       = asint(d1.z);
     desc.bitsAndVertexCount          = d1.w;
     desc.triangleCountAndRefinedGroup = d2.x;
-    desc.uvMinU                      = asfloat(d2.y);
-    desc.uvMinV                      = asfloat(d2.z);
-    desc.uvScaleU                    = asfloat(d2.w);
-    desc.uvScaleV                    = asfloat(d3.x);
-    desc.uvBits                      = d3.y;
-    desc.reserved0                   = d3.z;
-    desc.reserved1                   = d3.w;
-    desc.bounds                      = asfloat(d4);
+    desc.reserved1                   = d2.y;
+    desc.reserved2                   = d2.z;
+    desc.reserved3                   = d2.w;
+    desc.bounds                      = asfloat(d3);
 
     return desc;
+}
+
+CLodMeshletUvDescriptor LoadMeshletUvDescriptor(
+    uint slabDescriptorIndex,
+    uint pageByteOffset,
+    uint uvDescriptorOffset,
+    uint pageUvSetCount,
+    uint meshletIndex,
+    uint uvSetIndex)
+{
+    ByteAddressBuffer slab = ResourceDescriptorHeap[slabDescriptorIndex];
+    uint descriptorIndex = meshletIndex * pageUvSetCount + uvSetIndex;
+    uint addr = pageByteOffset + uvDescriptorOffset + descriptorIndex * CLOD_MESHLET_UV_DESCRIPTOR_STRIDE;
+    uint4 d0 = slab.Load4(addr + 0);
+    uint4 d1 = slab.Load4(addr + 16);
+
+    CLodMeshletUvDescriptor desc;
+    desc.uvBitOffset = d0.x;
+    desc.uvMinU = asfloat(d0.y);
+    desc.uvMinV = asfloat(d0.z);
+    desc.uvScaleU = asfloat(d0.w);
+    desc.uvScaleV = asfloat(d1.x);
+    desc.uvBits = d1.y;
+    desc.reserved0 = d1.z;
+    desc.reserved1 = d1.w;
+    return desc;
+}
+
+uint LoadPageUvBitstreamOffset(uint slabDescriptorIndex, uint pageByteOffset, uint uvBitstreamDirectoryOffset, uint uvSetIndex)
+{
+    ByteAddressBuffer slab = ResourceDescriptorHeap[slabDescriptorIndex];
+    return slab.Load(pageByteOffset + uvBitstreamDirectoryOffset + uvSetIndex * 4u);
 }
 
 // Load only the meshletCount from the page header (first uint32).

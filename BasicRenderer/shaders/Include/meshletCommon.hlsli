@@ -60,18 +60,16 @@ struct MeshletSetup
     int3 minQ;
     uint positionBitOffset;     // bit offset within page position bitstream
     uint normalWordOffset;      // word offset within page normal array
-    uint uvBitOffset;           // bit offset within page UV bitstream
     uint triangleByteOffset;    // byte offset within page triangle stream
-    float2 uvMin;
-    float2 uvScale;
-    uint uvBitsU;
-    uint uvBitsV;
     uint pageAttributeMask;
+    uint uvSetCount;
+    uint uvDescriptorBase;
+    uint uvBitstreamDirectoryBase;
 
     // Page-level stream base byte offsets (absolute in slab)
+    uint pageByteOffset;
     uint positionBitstreamBase;
     uint normalArrayBase;
-    uint uvBitstreamBase;
     uint triangleStreamBase;
 
     // Mesh-wide quantization
@@ -117,16 +115,14 @@ bool InitializeMeshletInternal(
     setup.minQ = int3(0, 0, 0);
     setup.positionBitOffset = 0;
     setup.normalWordOffset = 0;
-    setup.uvBitOffset = 0;
     setup.triangleByteOffset = 0;
-    setup.uvMin = float2(0.0f, 0.0f);
-    setup.uvScale = float2(0.0f, 0.0f);
-    setup.uvBitsU = 0;
-    setup.uvBitsV = 0;
     setup.pageAttributeMask = 0;
+    setup.uvSetCount = 0;
+    setup.uvDescriptorBase = 0;
+    setup.uvBitstreamDirectoryBase = 0;
+    setup.pageByteOffset = 0;
     setup.positionBitstreamBase = 0;
     setup.normalArrayBase = 0;
-    setup.uvBitstreamBase = 0;
     setup.triangleStreamBase = 0;
     setup.compressedPositionQuantExp = 0;
 
@@ -207,18 +203,16 @@ bool InitializeMeshletInternalCLod(
     setup.minQ = int3(desc.minQx, desc.minQy, desc.minQz);
     setup.positionBitOffset = desc.positionBitOffset;
     setup.normalWordOffset = desc.normalWordOffset;
-    setup.uvBitOffset = desc.uvBitOffset;
     setup.triangleByteOffset = desc.triangleByteOffset;
-    setup.uvMin = float2(desc.uvMinU, desc.uvMinV);
-    setup.uvScale = float2(desc.uvScaleU, desc.uvScaleV);
-    setup.uvBitsU = CLodDescUvBitsU(desc);
-    setup.uvBitsV = CLodDescUvBitsV(desc);
     setup.pageAttributeMask = hdr.attributeMask;
+    setup.uvSetCount = hdr.uvSetCount;
 
     // Page-level stream base offsets (absolute in slab)
+    setup.pageByteOffset = pageSlabOff;
     setup.positionBitstreamBase = pageSlabOff + hdr.positionBitstreamOffset;
     setup.normalArrayBase = pageSlabOff + hdr.normalArrayOffset;
-    setup.uvBitstreamBase = pageSlabOff + hdr.uvBitstreamOffset;
+    setup.uvDescriptorBase = pageSlabOff + hdr.uvDescriptorOffset;
+    setup.uvBitstreamDirectoryBase = pageSlabOff + hdr.uvBitstreamDirectoryOffset;
     setup.triangleStreamBase = pageSlabOff + hdr.triangleStreamOffset;
 
     setup.compressedPositionQuantExp = hdr.compressedPositionQuantExp;
@@ -307,6 +301,33 @@ uint3 DecodeTriangle(uint triLocalIndex, MeshletSetup setup)
     }
 
     return uint3(b0, b1, b2);
+}
+
+CLodMeshletUvDescriptor LoadMeshletUvDescriptorAbsolute(MeshletSetup setup, uint uvSetIndex)
+{
+    ByteAddressBuffer slab = ResourceDescriptorHeap[setup.pagePoolSlabDescriptorIndex];
+    uint descriptorIndex = setup.meshletIndex * setup.uvSetCount + uvSetIndex;
+    uint addr = setup.uvDescriptorBase + descriptorIndex * CLOD_MESHLET_UV_DESCRIPTOR_STRIDE;
+    uint4 d0 = slab.Load4(addr + 0u);
+    uint4 d1 = slab.Load4(addr + 16u);
+
+    CLodMeshletUvDescriptor desc;
+    desc.uvBitOffset = d0.x;
+    desc.uvMinU = asfloat(d0.y);
+    desc.uvMinV = asfloat(d0.z);
+    desc.uvScaleU = asfloat(d0.w);
+    desc.uvScaleV = asfloat(d1.x);
+    desc.uvBits = d1.y;
+    desc.reserved0 = d1.z;
+    desc.reserved1 = d1.w;
+    return desc;
+}
+
+uint LoadPageUvBitstreamBaseAbsolute(MeshletSetup setup, uint uvSetIndex)
+{
+    ByteAddressBuffer slab = ResourceDescriptorHeap[setup.pagePoolSlabDescriptorIndex];
+    uint relativeOffset = slab.Load(setup.uvBitstreamDirectoryBase + uvSetIndex * 4u);
+    return setup.pageByteOffset + relativeOffset;
 }
 
 #endif // MESHLET_COMMON_HLSLI

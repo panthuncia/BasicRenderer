@@ -159,18 +159,16 @@ struct MeshletResolveData {
     int3 minQ;
     uint positionBitOffset;     // bit offset within page position bitstream
     uint normalWordOffset;      // word offset within page normal array
-    uint uvBitOffset;           // bit offset within page UV bitstream
     uint triangleByteOffset;    // byte offset within page triangle stream
-    float2 uvMin;
-    float2 uvScale;
-    uint uvBitsU;
-    uint uvBitsV;
     uint pageAttributeMask;
+    uint uvSetCount;
+    uint uvDescriptorBase;
+    uint uvBitstreamDirectoryBase;
 
     // Page-level stream base byte offsets (absolute in slab)
+    uint pageByteOffset;
     uint positionBitstreamBase;
     uint normalArrayBase;
-    uint uvBitstreamBase;
     uint triangleStreamBase;
 
     // Mesh-wide quantization
@@ -266,24 +264,39 @@ float3 DecodeCompressedNormal(uint meshletLocalVertex, MeshletResolveData d)
     return OctDecodeNormal(UnpackSnorm16x2(packed));
 }
 
-float2 DecodeCompressedUV(uint meshletLocalVertex, MeshletResolveData d)
+float2 DecodeCompressedUV(uint meshletLocalVertex, uint uvSetIndex, MeshletResolveData d)
 {
-    if ((d.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_UV0) == 0u)
+    if (uvSetIndex >= d.uvSetCount)
     {
         return float2(0.0f, 0.0f);
     }
 
-    uint bitsPerVertex = d.uvBitsU + d.uvBitsV;
-    uint bitCursor = d.uvBitstreamBase * 8u + d.uvBitOffset + meshletLocalVertex * bitsPerVertex;
+    CLodMeshletUvDescriptor uvDesc = LoadMeshletUvDescriptor(
+        d.pagePoolSlabDescriptorIndex,
+        d.pageByteOffset,
+        d.uvDescriptorBase - d.pageByteOffset,
+        d.uvSetCount,
+        d.drawcallAndMeshlet.y,
+        uvSetIndex);
+    uint uvBitstreamBase = d.pageByteOffset + LoadPageUvBitstreamOffset(
+        d.pagePoolSlabDescriptorIndex,
+        d.pageByteOffset,
+        d.uvBitstreamDirectoryBase - d.pageByteOffset,
+        uvSetIndex);
+    uint uvBitsU = CLodUvDescBitsU(uvDesc);
+    uint uvBitsV = CLodUvDescBitsV(uvDesc);
+
+    uint bitsPerVertex = uvBitsU + uvBitsV;
+    uint bitCursor = uvBitstreamBase * 8u + uvDesc.uvBitOffset + meshletLocalVertex * bitsPerVertex;
 
     ByteAddressBuffer slab = ResourceDescriptorHeap[d.pagePoolSlabDescriptorIndex];
-    uint encodedU = ReadPackedBits32_BA(slab, bitCursor, d.uvBitsU);
-    bitCursor += d.uvBitsU;
-    uint encodedV = ReadPackedBits32_BA(slab, bitCursor, d.uvBitsV);
+    uint encodedU = ReadPackedBits32_BA(slab, bitCursor, uvBitsU);
+    bitCursor += uvBitsU;
+    uint encodedV = ReadPackedBits32_BA(slab, bitCursor, uvBitsV);
 
     return float2(
-        d.uvMin.x + float(encodedU) * d.uvScale.x,
-        d.uvMin.y + float(encodedV) * d.uvScale.y);
+        uvDesc.uvMinU + float(encodedU) * uvDesc.uvScaleU,
+        uvDesc.uvMinV + float(encodedV) * uvDesc.uvScaleV);
 }
 
 MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
@@ -333,18 +346,16 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
         d.minQ = int3(desc.minQx, desc.minQy, desc.minQz);
         d.positionBitOffset = desc.positionBitOffset;
         d.normalWordOffset = desc.normalWordOffset;
-        d.uvBitOffset = desc.uvBitOffset;
         d.triangleByteOffset = desc.triangleByteOffset;
-        d.uvMin = float2(desc.uvMinU, desc.uvMinV);
-        d.uvScale = float2(desc.uvScaleU, desc.uvScaleV);
-        d.uvBitsU = CLodDescUvBitsU(desc);
-        d.uvBitsV = CLodDescUvBitsV(desc);
         d.pageAttributeMask = hdr.attributeMask;
+        d.uvSetCount = hdr.uvSetCount;
 
         // Page-level stream base offsets (absolute in slab)
+        d.pageByteOffset = pageSlabOff;
+        d.uvDescriptorBase = pageSlabOff + hdr.uvDescriptorOffset;
+        d.uvBitstreamDirectoryBase = pageSlabOff + hdr.uvBitstreamDirectoryOffset;
         d.positionBitstreamBase = pageSlabOff + hdr.positionBitstreamOffset;
         d.normalArrayBase = pageSlabOff + hdr.normalArrayOffset;
-        d.uvBitstreamBase = pageSlabOff + hdr.uvBitstreamOffset;
         d.triangleStreamBase = pageSlabOff + hdr.triangleStreamOffset;
 
         d.compressedPositionQuantExp = hdr.compressedPositionQuantExp;
@@ -365,18 +376,14 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
     d.minQ.z = WaveReadLaneAt(d.minQ.z, leader);
     d.positionBitOffset = WaveReadLaneAt(d.positionBitOffset, leader);
     d.normalWordOffset = WaveReadLaneAt(d.normalWordOffset, leader);
-    d.uvBitOffset = WaveReadLaneAt(d.uvBitOffset, leader);
     d.triangleByteOffset = WaveReadLaneAt(d.triangleByteOffset, leader);
-    d.uvMin.x = WaveReadLaneAt(d.uvMin.x, leader);
-    d.uvMin.y = WaveReadLaneAt(d.uvMin.y, leader);
-    d.uvScale.x = WaveReadLaneAt(d.uvScale.x, leader);
-    d.uvScale.y = WaveReadLaneAt(d.uvScale.y, leader);
-    d.uvBitsU = WaveReadLaneAt(d.uvBitsU, leader);
-    d.uvBitsV = WaveReadLaneAt(d.uvBitsV, leader);
     d.pageAttributeMask = WaveReadLaneAt(d.pageAttributeMask, leader);
+    d.uvSetCount = WaveReadLaneAt(d.uvSetCount, leader);
+    d.uvDescriptorBase = WaveReadLaneAt(d.uvDescriptorBase, leader);
+    d.uvBitstreamDirectoryBase = WaveReadLaneAt(d.uvBitstreamDirectoryBase, leader);
+    d.pageByteOffset = WaveReadLaneAt(d.pageByteOffset, leader);
     d.positionBitstreamBase = WaveReadLaneAt(d.positionBitstreamBase, leader);
     d.normalArrayBase = WaveReadLaneAt(d.normalArrayBase, leader);
-    d.uvBitstreamBase = WaveReadLaneAt(d.uvBitstreamBase, leader);
     d.triangleStreamBase = WaveReadLaneAt(d.triangleStreamBase, leader);
     d.compressedPositionQuantExp = WaveReadLaneAt(d.compressedPositionQuantExp, leader);
     d.pagePoolSlabDescriptorIndex = WaveReadLaneAt(d.pagePoolSlabDescriptorIndex, leader);
@@ -477,9 +484,9 @@ void EvaluateGBufferOptimized(uint2 pixel)
     float3 n1 = DecodeCompressedNormal(triIdx.y, md);
     float3 n2 = DecodeCompressedNormal(triIdx.z, md);
 
-    float2 uv0 = DecodeCompressedUV(triIdx.x, md);
-    float2 uv1 = DecodeCompressedUV(triIdx.y, md);
-    float2 uv2 = DecodeCompressedUV(triIdx.z, md);
+    float2 uv0 = DecodeCompressedUV(triIdx.x, 0u, md);
+    float2 uv1 = DecodeCompressedUV(triIdx.y, 0u, md);
+    float2 uv2 = DecodeCompressedUV(triIdx.z, 0u, md);
 
     // Interpolate UV + derivs
     float3 interpU = InterpolateWithDeriv(bary, uv0.x, uv1.x, uv2.x);

@@ -969,10 +969,11 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         [unroll] for (uint p = 0; p < 6; p++)
             frustumPlanes[p] = cameras[b.viewId].clippingPlanes[p].plane;
 
-        // Load meshletCount (uint[0]) and descriptorOffset (uint[3]) from the 64-byte header.
+        // Load the current page header layout through the shared helper.
         ByteAddressBuffer slab = ResourceDescriptorHeap[pageSlabDesc];
-        pageMeshletCount = slab.Load(pageSlabOff);         // meshletCount at offset 0
-        pageDescriptorOffset = slab.Load(pageSlabOff + 12); // descriptorOffset at offset 12
+        CLodPageHeader pageHeader = LoadPageHeader(pageSlabDesc, pageSlabOff);
+        pageMeshletCount = pageHeader.meshletCount;
+        pageDescriptorOffset = pageHeader.descriptorOffset;
 
         if (!cameras[b.viewId].isOrtho) {
             StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =

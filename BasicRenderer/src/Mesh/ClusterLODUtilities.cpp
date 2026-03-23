@@ -94,8 +94,9 @@ namespace
 	size_t ComputePageBlobSize(
 		uint32_t attributeMask,
 		uint32_t meshletCount,
+		uint32_t pageUvSetCount,
 		uint64_t totalPositionBits,
-		uint64_t totalUvBits,
+		const std::vector<uint64_t>& totalUvBitsPerSet,
 		uint32_t totalNormalWords,
 		uint32_t totalTriangleBytes)
 	{
@@ -103,14 +104,23 @@ namespace
 
 		size_t size = CLOD_PAGE_HEADER_SIZE; // 64
 		size = align4(size) + align4(static_cast<size_t>(meshletCount) * sizeof(CLodMeshletDescriptor));
+		if (pageUvSetCount > 0u)
+		{
+			size = align4(size) + align4(static_cast<size_t>(meshletCount) * static_cast<size_t>(pageUvSetCount) * sizeof(CLodMeshletUvDescriptor));
+		}
 		size = align4(size) + align4(static_cast<size_t>((totalPositionBits + 31ull) / 32ull) * sizeof(uint32_t));
 		if ((attributeMask & CLOD_PAGE_ATTRIBUTE_NORMAL) != 0u)
 		{
 			size = align4(size) + align4(static_cast<size_t>(totalNormalWords) * sizeof(uint32_t));
 		}
-		if ((attributeMask & CLOD_PAGE_ATTRIBUTE_UV0) != 0u)
+		if (pageUvSetCount > 0u)
 		{
-			size = align4(size) + align4(static_cast<size_t>((totalUvBits + 31ull) / 32ull) * sizeof(uint32_t));
+			size = align4(size) + align4(static_cast<size_t>(pageUvSetCount) * sizeof(uint32_t));
+			for (uint32_t uvSetIndex = 0; uvSetIndex < pageUvSetCount; ++uvSetIndex)
+			{
+				const uint64_t totalUvBits = uvSetIndex < totalUvBitsPerSet.size() ? totalUvBitsPerSet[uvSetIndex] : 0ull;
+				size = align4(size) + align4(static_cast<size_t>((totalUvBits + 31ull) / 32ull) * sizeof(uint32_t));
+			}
 		}
 		size = align4(size) + align4(static_cast<size_t>(totalTriangleBytes));
 		return align4(size);
@@ -541,6 +551,7 @@ namespace
 	ClusterLODGroupBuildOutput BuildClusterLODGroupOutput(
 		const CapturedClusterLODGroup& capturedGroup,
 		const std::vector<std::byte>& vertices,
+		const std::vector<MeshUvSetData>& uvSets,
 		size_t vertexStrideBytes,
 		const std::vector<std::byte>* skinningVertices,
 		size_t skinningVertexStrideBytes,
@@ -715,19 +726,41 @@ namespace
 			}
 		}
 
-		std::vector<DirectX::XMFLOAT2> groupTexcoords;
-		if (hasTexcoordStream)
+		std::vector<MeshUvSetData> groupUvSets;
+		groupUvSets.reserve(uvSets.size());
+		const size_t sourceVertexCount = vertexStrideBytes > 0 ? (vertices.size() / vertexStrideBytes) : 0u;
+		for (const MeshUvSetData& sourceUvSet : uvSets)
 		{
-			groupTexcoords.resize(groupLocalToGlobal.size());
+			MeshUvSetData groupUvSet;
+			groupUvSet.name = sourceUvSet.name;
+			groupUvSet.values.resize(groupLocalToGlobal.size(), DirectX::XMFLOAT2(0.0f, 0.0f));
+
+			if (sourceUvSet.values.size() == sourceVertexCount)
+			{
+				for (size_t groupVertexIndex = 0; groupVertexIndex < groupLocalToGlobal.size(); ++groupVertexIndex)
+				{
+					groupUvSet.values[groupVertexIndex] = sourceUvSet.values[groupLocalToGlobal[groupVertexIndex]];
+				}
+			}
+
+			groupUvSets.push_back(std::move(groupUvSet));
+		}
+
+		if (groupUvSets.empty() && hasTexcoordStream)
+		{
+			MeshUvSetData legacyUvSet;
+			legacyUvSet.name = "UV0";
+			legacyUvSet.values.resize(groupLocalToGlobal.size());
 			constexpr size_t TexcoordByteOffset = sizeof(float) * 6;
 			for (size_t groupVertexIndex = 0; groupVertexIndex < groupLocalToGlobal.size(); ++groupVertexIndex)
 			{
-				groupTexcoords[groupVertexIndex] = ReadVertexFloat2(
+				legacyUvSet.values[groupVertexIndex] = ReadVertexFloat2(
 					vertices,
 					vertexStrideBytes,
 					groupLocalToGlobal[groupVertexIndex],
 					TexcoordByteOffset);
 			}
+			groupUvSets.push_back(std::move(legacyUvSet));
 		}
 
 		std::vector<std::array<int32_t, 3>> quantizedGroupPositions;
@@ -775,15 +808,10 @@ namespace
 		// Per-meshlet compression + page binning + segment creation + page blob construction
 		{
 			const bool hasNormals = !compressedNormalWords.empty();
-			const bool hasUv0 = !groupTexcoords.empty();
 			auto align4 = [](size_t v) -> size_t { return (v + 3u) & ~size_t(3); };
 
 			// === Per-meshlet compression parameters ===
-			struct PerMeshletCompression {
-				std::array<int32_t, 3> minQ;
-				uint32_t bitsX, bitsY, bitsZ;
-				uint64_t totalPositionBits;
-				uint32_t attributeMask = 0;
+			struct PerUvSetCompression {
 				float uvMinU = 0.0f;
 				float uvMinV = 0.0f;
 				float uvScaleU = 0.0f;
@@ -791,6 +819,14 @@ namespace
 				uint32_t uvBitsU = 0;
 				uint32_t uvBitsV = 0;
 				uint64_t totalUvBits = 0;
+			};
+
+			struct PerMeshletCompression {
+				std::array<int32_t, 3> minQ;
+				uint32_t bitsX, bitsY, bitsZ;
+				uint64_t totalPositionBits;
+				uint32_t attributeMask = 0;
+				std::vector<PerUvSetCompression> uvSets;
 			};
 
 			const uint32_t totalMeshlets = static_cast<uint32_t>(output.meshlets.size());
@@ -830,40 +866,44 @@ namespace
 				{
 					comp.attributeMask |= CLOD_PAGE_ATTRIBUTE_NORMAL;
 				}
-				if (hasUv0)
+				if (!groupUvSets.empty())
 				{
-					float minU = std::numeric_limits<float>::max();
-					float minV = std::numeric_limits<float>::max();
-					float maxU = -std::numeric_limits<float>::max();
-					float maxV = -std::numeric_limits<float>::max();
-
-					for (uint32_t vi = 0; vi < meshlet.vertex_count; ++vi)
+					comp.uvSets.resize(groupUvSets.size());
+					for (size_t uvSetIndex = 0; uvSetIndex < groupUvSets.size(); ++uvSetIndex)
 					{
-						const uint32_t groupLocalVertex = output.meshletVertices[meshlet.vertex_offset + vi];
-						const DirectX::XMFLOAT2 uv = groupTexcoords[groupLocalVertex];
-						minU = std::min(minU, uv.x);
-						minV = std::min(minV, uv.y);
-						maxU = std::max(maxU, uv.x);
-						maxV = std::max(maxV, uv.y);
-					}
+						float minU = std::numeric_limits<float>::max();
+						float minV = std::numeric_limits<float>::max();
+						float maxU = -std::numeric_limits<float>::max();
+						float maxV = -std::numeric_limits<float>::max();
 
-					if (meshlet.vertex_count == 0)
-					{
-						minU = minV = maxU = maxV = 0.0f;
-					}
+						for (uint32_t vi = 0; vi < meshlet.vertex_count; ++vi)
+						{
+							const uint32_t groupLocalVertex = output.meshletVertices[meshlet.vertex_offset + vi];
+							const DirectX::XMFLOAT2 uv = groupUvSets[uvSetIndex].values[groupLocalVertex];
+							minU = std::min(minU, uv.x);
+							minV = std::min(minV, uv.y);
+							maxU = std::max(maxU, uv.x);
+							maxV = std::max(maxV, uv.y);
+						}
 
-					const float rangeU = std::max(0.0f, maxU - minU);
-					const float rangeV = std::max(0.0f, maxV - minV);
-					const uint32_t maxEncodedU = QuantizeUvOffset(rangeU);
-					const uint32_t maxEncodedV = QuantizeUvOffset(rangeV);
-					comp.attributeMask |= CLOD_PAGE_ATTRIBUTE_UV0;
-					comp.uvMinU = minU;
-					comp.uvMinV = minV;
-					comp.uvScaleU = CLOD_UV_QUANTIZATION_INV_SCALE;
-					comp.uvScaleV = CLOD_UV_QUANTIZATION_INV_SCALE;
-					comp.uvBitsU = BitsNeededForRange(maxEncodedU);
-					comp.uvBitsV = BitsNeededForRange(maxEncodedV);
-					comp.totalUvBits = static_cast<uint64_t>(meshlet.vertex_count) * (comp.uvBitsU + comp.uvBitsV);
+						if (meshlet.vertex_count == 0)
+						{
+							minU = minV = maxU = maxV = 0.0f;
+						}
+
+						const float rangeU = std::max(0.0f, maxU - minU);
+						const float rangeV = std::max(0.0f, maxV - minV);
+						const uint32_t maxEncodedU = QuantizeUvOffset(rangeU);
+						const uint32_t maxEncodedV = QuantizeUvOffset(rangeV);
+						PerUvSetCompression& uvComp = comp.uvSets[uvSetIndex];
+						uvComp.uvMinU = minU;
+						uvComp.uvMinV = minV;
+						uvComp.uvScaleU = CLOD_UV_QUANTIZATION_INV_SCALE;
+						uvComp.uvScaleV = CLOD_UV_QUANTIZATION_INV_SCALE;
+						uvComp.uvBitsU = BitsNeededForRange(maxEncodedU);
+						uvComp.uvBitsV = BitsNeededForRange(maxEncodedV);
+						uvComp.totalUvBits = static_cast<uint64_t>(meshlet.vertex_count) * (uvComp.uvBitsU + uvComp.uvBitsV);
+					}
 				}
 			}
 
@@ -872,38 +912,37 @@ namespace
 				return ((pageMask & CLOD_PAGE_ATTRIBUTE_NORMAL) != 0u) ? meshlet.vertex_count : 0u;
 			};
 
-			auto GetMeshletUvBits = [&](uint32_t pageMask, const meshopt_Meshlet& meshlet, const PerMeshletCompression& comp) -> uint64_t
+			auto GetMeshletUvBits = [&](uint32_t pageUvSetIndex, const meshopt_Meshlet& meshlet, const PerMeshletCompression& comp) -> uint64_t
 			{
-				if ((pageMask & CLOD_PAGE_ATTRIBUTE_UV0) == 0u)
+				if (pageUvSetIndex < comp.uvSets.size())
 				{
-					return 0;
+					return comp.uvSets[pageUvSetIndex].totalUvBits;
 				}
 
-				if ((comp.attributeMask & CLOD_PAGE_ATTRIBUTE_UV0) != 0u)
-				{
-					return comp.totalUvBits;
-				}
-
-				// Future mixed-format pages backfill missing UVs with a constant zero stream.
+				// Future mixed-format pages backfill missing UV sets with a constant zero stream.
 				return static_cast<uint64_t>(meshlet.vertex_count) * 2ull;
 			};
 
 			struct PageTotals {
 				uint64_t totalPositionBits = 0;
-				uint64_t totalUvBits = 0;
+				std::vector<uint64_t> totalUvBitsPerSet;
 				uint32_t totalNormalWords = 0;
 				uint32_t totalTriangleBytes = 0;
 			};
 
-			auto ComputePageTotals = [&](const std::vector<uint32_t>& meshletIndices, uint32_t pageMask) -> PageTotals
+			auto ComputePageTotals = [&](const std::vector<uint32_t>& meshletIndices, uint32_t pageMask, uint32_t pageUvSetCount) -> PageTotals
 			{
 				PageTotals totals{};
+				totals.totalUvBitsPerSet.assign(pageUvSetCount, 0ull);
 				for (uint32_t meshletIndex : meshletIndices)
 				{
 					const auto& meshlet = output.meshlets[meshletIndex];
 					const auto& comp = perMeshletComp[meshletIndex];
 					totals.totalPositionBits += comp.totalPositionBits;
-					totals.totalUvBits += GetMeshletUvBits(pageMask, meshlet, comp);
+					for (uint32_t uvSetIndex = 0; uvSetIndex < pageUvSetCount; ++uvSetIndex)
+					{
+						totals.totalUvBitsPerSet[uvSetIndex] += GetMeshletUvBits(uvSetIndex, meshlet, comp);
+					}
 					totals.totalNormalWords += GetMeshletNormalWords(pageMask, meshlet);
 					totals.totalTriangleBytes += meshlet.triangle_count * 3u;
 				}
@@ -914,6 +953,7 @@ namespace
 			struct PageBin {
 				std::vector<uint32_t> meshletIndices;
 				uint32_t attributeMask = 0;
+				uint32_t uvSetCount = 0;
 			};
 
 			std::vector<PageBin> pageBins;
@@ -925,14 +965,16 @@ namespace
 				const auto& comp = perMeshletComp[mi];
 				PageBin& currentPage = pageBins.back();
 				uint32_t candidateMask = currentPage.attributeMask | comp.attributeMask;
+				uint32_t candidateUvSetCount = std::max(currentPage.uvSetCount, static_cast<uint32_t>(comp.uvSets.size()));
 				std::vector<uint32_t> candidateMeshlets = currentPage.meshletIndices;
 				candidateMeshlets.push_back(mi);
-				PageTotals candidateTotals = ComputePageTotals(candidateMeshlets, candidateMask);
+				PageTotals candidateTotals = ComputePageTotals(candidateMeshlets, candidateMask, candidateUvSetCount);
 				const size_t candidateSize = ComputePageBlobSize(
 					candidateMask,
 					static_cast<uint32_t>(candidateMeshlets.size()),
+					candidateUvSetCount,
 					candidateTotals.totalPositionBits,
-					candidateTotals.totalUvBits,
+					candidateTotals.totalUvBitsPerSet,
 					candidateTotals.totalNormalWords,
 					candidateTotals.totalTriangleBytes);
 
@@ -941,11 +983,13 @@ namespace
 					pageBins.emplace_back();
 					PageBin& newPage = pageBins.back();
 					newPage.attributeMask = comp.attributeMask;
+					newPage.uvSetCount = static_cast<uint32_t>(comp.uvSets.size());
 					newPage.meshletIndices.push_back(mi);
 					continue;
 				}
 
 				currentPage.attributeMask = candidateMask;
+				currentPage.uvSetCount = candidateUvSetCount;
 				currentPage.meshletIndices.push_back(mi);
 			}
 
@@ -1031,7 +1075,8 @@ namespace
 			}
 
 			// === Build page blobs: new SoA format ===
-			// Layout: Header(64) | Descriptors(64*N) | PositionBitstream | Optional streams | TriangleStream
+			// Layout: Header | CoreDescriptors | UvDescriptors | PositionBitstream | Optional normal stream |
+			//         UV bitstream directory | UV bitstreams | TriangleStream
 			output.pageBlobs.resize(pageBins.size());
 
 			for (uint32_t pi = 0; pi < static_cast<uint32_t>(pageBins.size()); ++pi)
@@ -1039,26 +1084,41 @@ namespace
 				const PageBin& page = pageBins[pi];
 				const uint32_t pageMeshletCount = static_cast<uint32_t>(page.meshletIndices.size());
 				if (pageMeshletCount == 0) continue;
-				const PageTotals pageTotals = ComputePageTotals(page.meshletIndices, page.attributeMask);
+				const PageTotals pageTotals = ComputePageTotals(page.meshletIndices, page.attributeMask, page.uvSetCount);
 				const bool pageHasNormals = (page.attributeMask & CLOD_PAGE_ATTRIBUTE_NORMAL) != 0u;
-				const bool pageHasUv0 = (page.attributeMask & CLOD_PAGE_ATTRIBUTE_UV0) != 0u;
+				const bool pageHasUvSets = page.uvSetCount > 0u;
 
 				// Compute stream offsets
 				const uint32_t descriptorOffset = static_cast<uint32_t>(align4(CLOD_PAGE_HEADER_SIZE));
 				const size_t descriptorBytes = static_cast<size_t>(pageMeshletCount) * sizeof(CLodMeshletDescriptor);
-				const uint32_t positionBitstreamOffset = static_cast<uint32_t>(align4(descriptorOffset + descriptorBytes));
+				const uint32_t uvDescriptorOffset = pageHasUvSets
+					? static_cast<uint32_t>(align4(descriptorOffset + descriptorBytes))
+					: 0u;
+				const size_t uvDescriptorBytes = pageHasUvSets
+					? static_cast<size_t>(pageMeshletCount) * static_cast<size_t>(page.uvSetCount) * sizeof(CLodMeshletUvDescriptor)
+					: 0u;
+				const uint32_t positionBitstreamOffset = static_cast<uint32_t>(align4(pageHasUvSets ? (uvDescriptorOffset + uvDescriptorBytes) : (descriptorOffset + descriptorBytes)));
 				const size_t positionWords = static_cast<size_t>((pageTotals.totalPositionBits + 31ull) / 32ull);
 				const size_t positionBytes = positionWords * sizeof(uint32_t);
 				const uint32_t normalArrayOffset = pageHasNormals
 					? static_cast<uint32_t>(align4(positionBitstreamOffset + positionBytes))
 					: 0u;
 				const size_t normalBytes = pageHasNormals ? static_cast<size_t>(pageTotals.totalNormalWords) * sizeof(uint32_t) : 0u;
-				const uint32_t uvBitstreamOffset = pageHasUv0
-					? static_cast<uint32_t>(align4((pageHasNormals ? normalArrayOffset : positionBitstreamOffset) + (pageHasNormals ? normalBytes : positionBytes)))
+				const uint32_t uvBitstreamDirectoryOffset = pageHasUvSets
+					? static_cast<uint32_t>(align4(pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes)))
 					: 0u;
-				const size_t uvWords = pageHasUv0 ? static_cast<size_t>((pageTotals.totalUvBits + 31ull) / 32ull) : 0u;
-				const size_t uvBytes = uvWords * sizeof(uint32_t);
-				const uint32_t triangleStreamOffset = static_cast<uint32_t>(align4((pageHasUv0 ? uvBitstreamOffset + uvBytes : (pageHasNormals ? normalArrayOffset + normalBytes : positionBitstreamOffset + positionBytes))));
+				std::vector<uint32_t> uvBitstreamOffsets(page.uvSetCount, 0u);
+				size_t uvBitstreamCursor = pageHasUvSets
+					? align4(static_cast<size_t>(uvBitstreamDirectoryOffset) + static_cast<size_t>(page.uvSetCount) * sizeof(uint32_t))
+					: align4(pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes));
+				for (uint32_t uvSetIndex = 0; uvSetIndex < page.uvSetCount; ++uvSetIndex)
+				{
+					uvBitstreamOffsets[uvSetIndex] = static_cast<uint32_t>(uvBitstreamCursor);
+					const size_t uvWords = static_cast<size_t>((pageTotals.totalUvBitsPerSet[uvSetIndex] + 31ull) / 32ull);
+					const size_t uvBytes = uvWords * sizeof(uint32_t);
+					uvBitstreamCursor = align4(uvBitstreamCursor + uvBytes);
+				}
+				const uint32_t triangleStreamOffset = static_cast<uint32_t>(align4(uvBitstreamCursor));
 
 				const size_t totalBlobSize = align4(triangleStreamOffset + pageTotals.totalTriangleBytes);
 				auto& blob = output.pageBlobs[pi];
@@ -1066,10 +1126,11 @@ namespace
 
 				// Build streams + descriptors in one pass
 				std::vector<CLodMeshletDescriptor> descriptors(pageMeshletCount);
+				std::vector<CLodMeshletUvDescriptor> uvDescriptors(static_cast<size_t>(pageMeshletCount) * static_cast<size_t>(page.uvSetCount));
 				std::vector<uint32_t> pagePosWords;
-				std::vector<uint32_t> pageUvWords;
+				std::vector<std::vector<uint32_t>> pageUvWordsPerSet(page.uvSetCount);
 				uint64_t pageBitCursor = 0;
-				uint64_t pageUvBitCursor = 0;
+				std::vector<uint64_t> pageUvBitCursors(page.uvSetCount, 0ull);
 				uint32_t normalWordCursor = 0;
 				uint32_t triangleByteCursor = 0;
 
@@ -1082,7 +1143,6 @@ namespace
 					CLodMeshletDescriptor& desc = descriptors[li];
 					desc.positionBitOffset = static_cast<uint32_t>(pageBitCursor);
 					desc.normalWordOffset = pageHasNormals ? normalWordCursor : 0u;
-					desc.uvBitOffset = pageHasUv0 ? static_cast<uint32_t>(pageUvBitCursor) : 0u;
 					desc.triangleByteOffset = triangleByteCursor;
 					desc.minQx = comp.minQ[0];
 					desc.minQy = comp.minQ[1];
@@ -1101,21 +1161,30 @@ namespace
 
 					const BoundingSphere& bounds = output.meshletBounds[mi];
 					desc.bounds = bounds.sphere;
-					if ((comp.attributeMask & CLOD_PAGE_ATTRIBUTE_UV0) != 0u)
+					if (pageHasUvSets)
 					{
-						desc.uvMinU = comp.uvMinU;
-						desc.uvMinV = comp.uvMinV;
-						desc.uvScaleU = comp.uvScaleU;
-						desc.uvScaleV = comp.uvScaleV;
-						desc.uvBits = (comp.uvBitsU & 0xFFu) | ((comp.uvBitsV & 0xFFu) << 8u);
-					}
-					else if (pageHasUv0)
-					{
-						desc.uvMinU = 0.0f;
-						desc.uvMinV = 0.0f;
-						desc.uvScaleU = 0.0f;
-						desc.uvScaleV = 0.0f;
-						desc.uvBits = 1u | (1u << 8u);
+						for (uint32_t uvSetIndex = 0; uvSetIndex < page.uvSetCount; ++uvSetIndex)
+						{
+							CLodMeshletUvDescriptor& uvDesc = uvDescriptors[static_cast<size_t>(li) * static_cast<size_t>(page.uvSetCount) + uvSetIndex];
+							uvDesc.uvBitOffset = static_cast<uint32_t>(pageUvBitCursors[uvSetIndex]);
+							if (uvSetIndex < comp.uvSets.size())
+							{
+								const PerUvSetCompression& uvComp = comp.uvSets[uvSetIndex];
+								uvDesc.uvMinU = uvComp.uvMinU;
+								uvDesc.uvMinV = uvComp.uvMinV;
+								uvDesc.uvScaleU = uvComp.uvScaleU;
+								uvDesc.uvScaleV = uvComp.uvScaleV;
+								uvDesc.uvBits = (uvComp.uvBitsU & 0xFFu) | ((uvComp.uvBitsV & 0xFFu) << 8u);
+							}
+							else
+							{
+								uvDesc.uvMinU = 0.0f;
+								uvDesc.uvMinV = 0.0f;
+								uvDesc.uvScaleU = 0.0f;
+								uvDesc.uvScaleV = 0.0f;
+								uvDesc.uvBits = 1u | (1u << 8u);
+							}
+						}
 					}
 
 					// Append per-meshlet compressed positions to page bitstream
@@ -1148,29 +1217,33 @@ namespace
 						}
 					}
 
-					if (pageHasUv0)
+					if (pageHasUvSets)
 					{
-						const bool meshletHasUv = (comp.attributeMask & CLOD_PAGE_ATTRIBUTE_UV0) != 0u;
-						const uint32_t uvBitsU = meshletHasUv ? comp.uvBitsU : 1u;
-						const uint32_t uvBitsV = meshletHasUv ? comp.uvBitsV : 1u;
-						for (uint32_t vi = 0; vi < meshlet.vertex_count; ++vi)
+						for (uint32_t uvSetIndex = 0; uvSetIndex < page.uvSetCount; ++uvSetIndex)
 						{
-							uint32_t encodedU = 0u;
-							uint32_t encodedV = 0u;
-							if (meshletHasUv)
+							const bool meshletHasUv = uvSetIndex < comp.uvSets.size();
+							const uint32_t uvBitsU = meshletHasUv ? comp.uvSets[uvSetIndex].uvBitsU : 1u;
+							const uint32_t uvBitsV = meshletHasUv ? comp.uvSets[uvSetIndex].uvBitsV : 1u;
+							for (uint32_t vi = 0; vi < meshlet.vertex_count; ++vi)
 							{
-								const uint32_t gv = output.meshletVertices[meshlet.vertex_offset + vi];
-								const DirectX::XMFLOAT2 uv = groupTexcoords[gv];
-								const float offsetU = std::max(0.0f, uv.x - comp.uvMinU);
-								const float offsetV = std::max(0.0f, uv.y - comp.uvMinV);
-								const uint32_t maxEncodedU = (uvBitsU >= 32u) ? 0xFFFFFFFFu : ((1u << uvBitsU) - 1u);
-								const uint32_t maxEncodedV = (uvBitsV >= 32u) ? 0xFFFFFFFFu : ((1u << uvBitsV) - 1u);
-								encodedU = std::min(maxEncodedU, QuantizeUvOffset(offsetU));
-								encodedV = std::min(maxEncodedV, QuantizeUvOffset(offsetV));
-							}
+								uint32_t encodedU = 0u;
+								uint32_t encodedV = 0u;
+								if (meshletHasUv)
+								{
+									const uint32_t gv = output.meshletVertices[meshlet.vertex_offset + vi];
+									const DirectX::XMFLOAT2 uv = groupUvSets[uvSetIndex].values[gv];
+									const PerUvSetCompression& uvComp = comp.uvSets[uvSetIndex];
+									const float offsetU = std::max(0.0f, uv.x - uvComp.uvMinU);
+									const float offsetV = std::max(0.0f, uv.y - uvComp.uvMinV);
+									const uint32_t maxEncodedU = (uvBitsU >= 32u) ? 0xFFFFFFFFu : ((1u << uvBitsU) - 1u);
+									const uint32_t maxEncodedV = (uvBitsV >= 32u) ? 0xFFFFFFFFu : ((1u << uvBitsV) - 1u);
+									encodedU = std::min(maxEncodedU, QuantizeUvOffset(offsetU));
+									encodedV = std::min(maxEncodedV, QuantizeUvOffset(offsetV));
+								}
 
-							AppendBits(pageUvWords, pageUvBitCursor, encodedU, uvBitsU);
-							AppendBits(pageUvWords, pageUvBitCursor, encodedV, uvBitsV);
+								AppendBits(pageUvWordsPerSet[uvSetIndex], pageUvBitCursors[uvSetIndex], encodedU, uvBitsU);
+								AppendBits(pageUvWordsPerSet[uvSetIndex], pageUvBitCursors[uvSetIndex], encodedV, uvBitsV);
+							}
 						}
 					}
 
@@ -1184,6 +1257,10 @@ namespace
 
 				// Write descriptors
 				std::memcpy(blob.data() + descriptorOffset, descriptors.data(), descriptorBytes);
+				if (pageHasUvSets && !uvDescriptors.empty())
+				{
+					std::memcpy(blob.data() + uvDescriptorOffset, uvDescriptors.data(), uvDescriptorBytes);
+				}
 
 				// Write position bitstream
 				if (!pagePosWords.empty())
@@ -1192,11 +1269,20 @@ namespace
 						pagePosWords.data(),
 						pagePosWords.size() * sizeof(uint32_t));
 				}
-				if (pageHasUv0 && !pageUvWords.empty())
+				if (pageHasUvSets)
 				{
-					std::memcpy(blob.data() + uvBitstreamOffset,
-						pageUvWords.data(),
-						pageUvWords.size() * sizeof(uint32_t));
+					std::memcpy(blob.data() + uvBitstreamDirectoryOffset,
+						uvBitstreamOffsets.data(),
+						static_cast<size_t>(page.uvSetCount) * sizeof(uint32_t));
+					for (uint32_t uvSetIndex = 0; uvSetIndex < page.uvSetCount; ++uvSetIndex)
+					{
+						if (!pageUvWordsPerSet[uvSetIndex].empty())
+						{
+							std::memcpy(blob.data() + uvBitstreamOffsets[uvSetIndex],
+								pageUvWordsPerSet[uvSetIndex].data(),
+								pageUvWordsPerSet[uvSetIndex].size() * sizeof(uint32_t));
+						}
+					}
 				}
 
 				// Write header
@@ -1204,10 +1290,12 @@ namespace
 				header.meshletCount = pageMeshletCount;
 				header.compressedPositionQuantExp = meshPositionQuantExp;
 				header.attributeMask = page.attributeMask;
+				header.uvSetCount = page.uvSetCount;
 				header.descriptorOffset = descriptorOffset;
+				header.uvDescriptorOffset = uvDescriptorOffset;
 				header.positionBitstreamOffset = positionBitstreamOffset;
 				header.normalArrayOffset = normalArrayOffset;
-				header.uvBitstreamOffset = uvBitstreamOffset;
+				header.uvBitstreamDirectoryOffset = uvBitstreamDirectoryOffset;
 				header.triangleStreamOffset = triangleStreamOffset;
 				std::memcpy(blob.data(), &header, sizeof(CLodPageHeader));
 
@@ -1592,6 +1680,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 	const std::vector<std::byte>* skinningVertices,
 	unsigned int skinningVertexSize,
 	const std::vector<uint32_t>& indices,
+	const std::vector<MeshUvSetData>& uvSets,
 	unsigned int flags,
 	const ClusterLODBuilderSettings& settings)
 {
@@ -1723,6 +1812,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 		struct CaptureOutputContext
 		{
 			const std::vector<std::byte>* vertices = nullptr;
+			const std::vector<MeshUvSetData>* uvSets = nullptr;
 			size_t vertexStrideBytes = 0;
 			const std::vector<std::byte>* skinningVertices = nullptr;
 			size_t skinningVertexStrideBytes = 0;
@@ -1781,6 +1871,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 				ClusterLODGroupBuildOutput output = BuildClusterLODGroupOutput(
 					capturedGroup,
 					*context->vertices,
+					*context->uvSets,
 					context->vertexStrideBytes,
 					context->skinningVertices,
 					context->skinningVertexStrideBytes,
@@ -1845,6 +1936,7 @@ ClusterLODPrebuildArtifacts BuildClusterLODArtifactsFromGeometry(
 
 		CaptureOutputContext captureContext{};
 		captureContext.vertices = &vertices;
+		captureContext.uvSets = &uvSets;
 		captureContext.vertexStrideBytes = vertexStrideBytes;
 		captureContext.skinningVertices = skinningVertices;
 		captureContext.skinningVertexStrideBytes = skinningVertexSize;

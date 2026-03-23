@@ -13,7 +13,6 @@ struct BoundingSphere {
 };
 
 static constexpr uint32_t CLOD_PAGE_ATTRIBUTE_NORMAL = 1u << 0;
-static constexpr uint32_t CLOD_PAGE_ATTRIBUTE_UV0 = 1u << 1;
 
 // Embedded at byte 0 of each page-tile in the page pool.
 // Compression params moved to per-meshlet descriptors.
@@ -22,27 +21,28 @@ struct CLodPageHeader
 {
 	uint32_t meshletCount = 0;            // [0] number of meshlets in this page
 	uint32_t compressedPositionQuantExp = 0; // [1] mesh-wide quantization exponent
-	uint32_t attributeMask = 0;           // [2] page-wide optional attribute mask
-	uint32_t descriptorOffset = 0;        // [3] byte offset to CLodMeshletDescriptor array
+	uint32_t attributeMask = 0;           // [2] page-wide optional non-UV attribute mask
+	uint32_t uvSetCount = 0;              // [3] UV set count packed into this page
 
-	uint32_t positionBitstreamOffset = 0; // [4] byte offset to position bitstream
-	uint32_t normalArrayOffset = 0;       // [5] byte offset to normal array (oct-encoded uint32 per vertex)
-	uint32_t uvBitstreamOffset = 0;       // [6] byte offset to UV bitstream
-	uint32_t triangleStreamOffset = 0;    // [7] byte offset to triangle byte stream
-	uint32_t reserved[8] = {};            // [8-15] pad to 64 bytes
+	uint32_t descriptorOffset = 0;        // [4] byte offset to CLodMeshletDescriptor array
+	uint32_t uvDescriptorOffset = 0;      // [5] byte offset to CLodMeshletUvDescriptor table
+	uint32_t positionBitstreamOffset = 0; // [6] byte offset to position bitstream
+	uint32_t normalArrayOffset = 0;       // [7] byte offset to normal array (oct-encoded uint32 per vertex)
+	uint32_t uvBitstreamDirectoryOffset = 0; // [8] byte offset to UV bitstream offset table
+	uint32_t triangleStreamOffset = 0;    // [9] byte offset to triangle byte stream
+	uint32_t reserved[6] = {};            // [10-15] pad to 64 bytes
 };
 static_assert(sizeof(CLodPageHeader) == 64, "CLodPageHeader must be 64 bytes");
 
 // Per-meshlet descriptor in an SoA page format.
-// Self-contained: each meshlet carries its own compression params, bounds, and LOD metadata.
-// 20 x uint32 = 80 bytes = 5 x Load4 on GPU.
+// Self-contained: each meshlet carries its own non-UV compression params, bounds, and LOD metadata.
 struct CLodMeshletDescriptor
 {
 	// Stream offsets within the page
 	uint32_t positionBitOffset = 0;       // [0] bit offset into page position bitstream
 	uint32_t normalWordOffset = 0;        // [1] word offset into page normal array
-	uint32_t uvBitOffset = 0;             // [2] bit offset into page UV bitstream
-	uint32_t triangleByteOffset = 0;      // [3] byte offset into page triangle stream
+	uint32_t triangleByteOffset = 0;      // [2] byte offset into page triangle stream
+	uint32_t reserved0 = 0;               // [3]
 
 	// Per-meshlet compression parameters
 	int32_t  minQx = 0;                   // [4] quantization offset X
@@ -53,20 +53,29 @@ struct CLodMeshletDescriptor
 	uint32_t bitsAndVertexCount = 0;      // [7]
 	// Packed: triangleCount:16 | refinedGroupId+1:16 (0 = terminal, >0 = groupId+1)
 	uint32_t triangleCountAndRefinedGroup = 0; // [8]
-
-	// UV decode parameters.
-	float    uvMinU = 0.0f;               // [9]
-	float    uvMinV = 0.0f;               // [10]
-	float    uvScaleU = 0.0f;             // [11]
-	float    uvScaleV = 0.0f;             // [12]
-	uint32_t uvBits = 0;                  // [13] bitsU:8 | bitsV:8
-	uint32_t reserved0 = 0;               // [14]
-	uint32_t reserved1 = 0;               // [15]
+	uint32_t reserved1 = 0;               // [9]
+	uint32_t reserved2 = 0;               // [10]
+	uint32_t reserved3 = 0;               // [11]
 
 	// Bounding sphere (object space)
-	DirectX::XMFLOAT4 bounds = {};        // [16-19] {cx, cy, cz, radius}
+	DirectX::XMFLOAT4 bounds = {};        // [12-15] {cx, cy, cz, radius}
 };
-static_assert(sizeof(CLodMeshletDescriptor) == 80, "CLodMeshletDescriptor must be 80 bytes");
+static_assert(sizeof(CLodMeshletDescriptor) == 64, "CLodMeshletDescriptor must be 64 bytes");
+
+// Per-(meshlet, uv-set) descriptor in an SoA page format.
+// 8 x uint32 = 32 bytes = 2 x Load4 on GPU.
+struct CLodMeshletUvDescriptor
+{
+	uint32_t uvBitOffset = 0;             // [0] bit offset into this UV set's page-local bitstream
+	float    uvMinU = 0.0f;               // [1]
+	float    uvMinV = 0.0f;               // [2]
+	float    uvScaleU = 0.0f;             // [3]
+	float    uvScaleV = 0.0f;             // [4]
+	uint32_t uvBits = 0;                  // [5] bitsU:8 | bitsV:8
+	uint32_t reserved0 = 0;               // [6]
+	uint32_t reserved1 = 0;               // [7]
+};
+static_assert(sizeof(CLodMeshletUvDescriptor) == 32, "CLodMeshletUvDescriptor must be 32 bytes");
 
 // Runtime-filled entry mapping a group-local page index to its physical slab location.
 struct GroupPageMapEntry

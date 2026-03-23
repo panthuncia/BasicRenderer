@@ -111,31 +111,30 @@ float3 DecodeCompressedNormal(uint meshletLocalVertex, uint normalArrayBase, uin
 
 float2 DecodeCompressedUV(
     uint meshletLocalVertex,
-    uint pageAttributeMask,
-    uint uvBitstreamBase,
-    uint uvBitOffset,
-    float2 uvMin,
-    float2 uvScale,
-    uint uvBitsU,
-    uint uvBitsV,
-    uint pagePoolSlabDescriptorIndex)
+    uint uvSetIndex,
+    MeshletSetup setup)
 {
-    if ((pageAttributeMask & CLOD_PAGE_ATTRIBUTE_UV0) == 0u)
+    if (uvSetIndex >= setup.uvSetCount)
     {
         return float2(0.0f, 0.0f);
     }
 
-    uint bitsPerVertex = uvBitsU + uvBitsV;
-    uint bitCursor = uvBitstreamBase * 8u + uvBitOffset + meshletLocalVertex * bitsPerVertex;
+    CLodMeshletUvDescriptor uvDesc = LoadMeshletUvDescriptorAbsolute(setup, uvSetIndex);
+    uint uvBitstreamBase = LoadPageUvBitstreamBaseAbsolute(setup, uvSetIndex);
+    uint uvBitsU = CLodUvDescBitsU(uvDesc);
+    uint uvBitsV = CLodUvDescBitsV(uvDesc);
 
-    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
+    uint bitsPerVertex = uvBitsU + uvBitsV;
+    uint bitCursor = uvBitstreamBase * 8u + uvDesc.uvBitOffset + meshletLocalVertex * bitsPerVertex;
+
+    ByteAddressBuffer slab = ResourceDescriptorHeap[setup.pagePoolSlabDescriptorIndex];
     uint encodedU = ReadPackedBits32_BA(slab, bitCursor, uvBitsU);
     bitCursor += uvBitsU;
     uint encodedV = ReadPackedBits32_BA(slab, bitCursor, uvBitsV);
 
     return float2(
-        uvMin.x + float(encodedU) * uvScale.x,
-        uvMin.y + float(encodedV) * uvScale.y);
+        uvDesc.uvMinU + float(encodedU) * uvDesc.uvScaleU,
+        uvDesc.uvMinV + float(encodedV) * uvDesc.uvScaleV);
 }
 
 VisBufferPSInput BuildVisBufferVertexAttributesForView(
@@ -371,16 +370,7 @@ VisBufferPSInput GetVisBufferVertexAttributesForViewCLod(
         setup.normalArrayBase,
         setup.normalWordOffset,
         setup.pagePoolSlabDescriptorIndex);
-    vertex.texcoord = DecodeCompressedUV(
-        meshletLocalVertex,
-        setup.pageAttributeMask,
-        setup.uvBitstreamBase,
-        setup.uvBitOffset,
-        setup.uvMin,
-        setup.uvScale,
-        setup.uvBitsU,
-        setup.uvBitsV,
-        setup.pagePoolSlabDescriptorIndex);
+    vertex.texcoord = DecodeCompressedUV(meshletLocalVertex, 0u, setup);
 
     return BuildVisBufferVertexAttributesForView(
         vertex,
@@ -518,18 +508,16 @@ bool InitializeMeshletFromCompactedCluster(uint3 packedCluster, out MeshletSetup
     setup.minQ = int3(desc.minQx, desc.minQy, desc.minQz);
     setup.positionBitOffset = desc.positionBitOffset;
     setup.normalWordOffset = desc.normalWordOffset;
-    setup.uvBitOffset = desc.uvBitOffset;
     setup.triangleByteOffset = desc.triangleByteOffset;
-    setup.uvMin = float2(desc.uvMinU, desc.uvMinV);
-    setup.uvScale = float2(desc.uvScaleU, desc.uvScaleV);
-    setup.uvBitsU = CLodDescUvBitsU(desc);
-    setup.uvBitsV = CLodDescUvBitsV(desc);
     setup.pageAttributeMask = hdr.attributeMask;
+    setup.uvSetCount = hdr.uvSetCount;
 
     // Page-level stream base offsets (absolute in slab)
+    setup.pageByteOffset = pageSlabOff;
     setup.positionBitstreamBase = pageSlabOff + hdr.positionBitstreamOffset;
     setup.normalArrayBase = pageSlabOff + hdr.normalArrayOffset;
-    setup.uvBitstreamBase = pageSlabOff + hdr.uvBitstreamOffset;
+    setup.uvDescriptorBase = pageSlabOff + hdr.uvDescriptorOffset;
+    setup.uvBitstreamDirectoryBase = pageSlabOff + hdr.uvBitstreamDirectoryOffset;
     setup.triangleStreamBase = pageSlabOff + hdr.triangleStreamOffset;
 
     setup.compressedPositionQuantExp = hdr.compressedPositionQuantExp;

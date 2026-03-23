@@ -137,22 +137,36 @@ bool SWAlphaTestFailed(float2 texcoords, uint materialDataIndex)
 
 float2 SWDecodeCompressedUV(
     uint meshletLocalVertex,
-    uint pageAttributeMask,
-    uint uvBitstreamBase,
-    uint uvBitOffset,
-    float2 uvMin,
-    float2 uvScale,
-    uint uvBitsU,
-    uint uvBitsV,
+    uint uvSetIndex,
+    uint localMeshletIndex,
+    uint pageByteOffset,
+    uint uvSetCount,
+    uint uvDescriptorOffset,
+    uint uvBitstreamDirectoryOffset,
     uint pagePoolSlabDescriptorIndex)
 {
-    if ((pageAttributeMask & CLOD_PAGE_ATTRIBUTE_UV0) == 0u)
+    if (uvSetIndex >= uvSetCount)
     {
         return float2(0.0f, 0.0f);
     }
 
+    CLodMeshletUvDescriptor uvDesc = LoadMeshletUvDescriptor(
+        pagePoolSlabDescriptorIndex,
+        pageByteOffset,
+        uvDescriptorOffset,
+        uvSetCount,
+        localMeshletIndex,
+        uvSetIndex);
+    uint uvBitstreamBase = pageByteOffset + LoadPageUvBitstreamOffset(
+        pagePoolSlabDescriptorIndex,
+        pageByteOffset,
+        uvBitstreamDirectoryOffset,
+        uvSetIndex);
+    uint uvBitsU = CLodUvDescBitsU(uvDesc);
+    uint uvBitsV = CLodUvDescBitsV(uvDesc);
+
     uint bitsPerVertex = uvBitsU + uvBitsV;
-    uint bitCursor = uvBitstreamBase * 8u + uvBitOffset + meshletLocalVertex * bitsPerVertex;
+    uint bitCursor = uvBitstreamBase * 8u + uvDesc.uvBitOffset + meshletLocalVertex * bitsPerVertex;
 
     ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
     uint encodedU = ReadPackedBits32(slab, bitCursor, uvBitsU);
@@ -160,8 +174,8 @@ float2 SWDecodeCompressedUV(
     uint encodedV = ReadPackedBits32(slab, bitCursor, uvBitsV);
 
     return float2(
-        uvMin.x + float(encodedU) * uvScale.x,
-        uvMin.y + float(encodedV) * uvScale.y);
+        uvDesc.uvMinU + float(encodedU) * uvDesc.uvScaleU,
+        uvDesc.uvMinV + float(encodedV) * uvDesc.uvScaleV);
 }
 
 void SWRasterCluster(
@@ -185,8 +199,6 @@ void SWRasterCluster(
 
     const uint vertCount = CLodDescVertexCount(desc);
     const uint triCount  = CLodDescTriangleCount(desc);
-    const uint uvBitsU = CLodDescUvBitsU(desc);
-    const uint uvBitsV = CLodDescUvBitsV(desc);
 
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     StructuredBuffer<PerMeshInstanceBuffer> meshInstBuf =
@@ -212,7 +224,6 @@ void SWRasterCluster(
     const float scissorMinYf = float(rasterInfo.scissorMinY);
 
     const uint positionBitstreamBase = pageSlabByteOffset + hdr.positionBitstreamOffset;
-    const uint uvBitstreamBase = pageSlabByteOffset + hdr.uvBitstreamOffset;
     row_major matrix modelViewProjection = mul(objData.model, cam.viewProjection);
     float4 modelViewZ = mul(objData.model, cam.viewZ);
 
@@ -243,13 +254,12 @@ void SWRasterCluster(
         gs_invClipW[v] = invW;
         gs_texcoord[v] = SWDecodeCompressedUV(
             v,
-            hdr.attributeMask,
-            uvBitstreamBase,
-            desc.uvBitOffset,
-            float2(desc.uvMinU, desc.uvMinV),
-            float2(desc.uvScaleU, desc.uvScaleV),
-            uvBitsU,
-            uvBitsV,
+            0u,
+            localMeshletIndex,
+            pageSlabByteOffset,
+            hdr.uvSetCount,
+            hdr.uvDescriptorOffset,
+            hdr.uvBitstreamDirectoryOffset,
             pageSlabDescriptorIndex);
     }
 
