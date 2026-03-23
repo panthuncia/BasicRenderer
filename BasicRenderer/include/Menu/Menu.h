@@ -394,6 +394,7 @@ private:
     std::chrono::steady_clock::time_point m_startTime = std::chrono::steady_clock::now();
 
 	bool m_meshShadersSupported = false;
+    bool m_menuEnabled = true;
     
     std::filesystem::path environmentsDir;
 
@@ -799,7 +800,39 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     static bool showFrameTaskGraph = false;
     static bool showAutoAliasPlanner = false;
 
-    SetCLodWorkGraphTelemetryEnabled(showCLodTelemetry || m_clodTelemetryCapturePending || m_clodCaptureStatsPending);
+    const float fps = ImGui::GetIO().Framerate;
+    const float msPerFrame = fps > 0.0f ? (1000.0f / fps) : 0.0f;
+
+    SetCLodWorkGraphTelemetryEnabled((m_menuEnabled && showCLodTelemetry) || m_clodTelemetryCapturePending || m_clodCaptureStatsPending);
+
+    if (!m_menuEnabled) {
+        ImGui::SetNextWindowBgAlpha(0.8f);
+        ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_FirstUseEver);
+        ImGui::Begin("Menu", nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize |
+            ImGuiWindowFlags_NoCollapse);
+        ImGui::Checkbox("Enable Menu", &m_menuEnabled);
+        ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", msPerFrame, fps);
+        ImGui::End();
+
+		ImGui::Render();
+
+        commandList.SetDescriptorHeaps(g_pd3dSrvDescHeap->GetHandle(), std::nullopt);
+
+		rhi::PassBeginInfo beginInfo{};
+		rhi::ColorAttachment attchment{};
+        attchment.loadOp = rhi::LoadOp::Load;
+		attchment.rtv = { context.rtvHeap.GetHandle() , context.frameIndex }; // Index into the swapchain RTV heap
+		beginInfo.colors = { &attchment };
+		beginInfo.height = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.y);
+		beginInfo.width = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.x);
+
+		commandList.BeginPass(beginInfo);
+
+		ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), rhi::dx12::get_cmd_list(commandList));
+        return;
+    }
+
     RefreshSceneExplorerSnapshot();
 
 	{
@@ -919,7 +952,8 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 
         ImGui::Text(memoryString.c_str());
         ImGui::Text("Render Resolution: %d x %d | Output Resolution: %d x %d", context.renderResolution.x, context.renderResolution.y, context.outputResolution.x, context.outputResolution.y);
-		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+        ImGui::Checkbox("Enable Menu", &m_menuEnabled);
+        ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", msPerFrame, fps);
 		ImGui::End();
 	}
 	if (showMemoryIntrospection) {
@@ -1633,11 +1667,14 @@ inline void Menu::DrawCLodTelemetryWindow() {
                         return;
                     }
 
-                    const size_t clusterBytes = sizeof(VisibleCluster);
+                    const size_t clusterBytes = PackedVisibleClusterStrideBytes;
                     const size_t count = result.data.size() / clusterBytes;
                     m_clodCapturePendingClusters.resize(count);
                     if (count > 0) {
-                        std::memcpy(m_clodCapturePendingClusters.data(), result.data.data(), count * clusterBytes);
+                        const std::byte* rawClusters = result.data.data();
+                        for (size_t i = 0; i < count; ++i) {
+                            m_clodCapturePendingClusters[i] = DecodePackedVisibleCluster(rawClusters + i * clusterBytes);
+                        }
                     }
 
                     m_clodCaptureHasPendingClusters = true;
@@ -2527,90 +2564,176 @@ inline void Menu::DrawPassTimingWindow() {
     }
 
     static std::vector<bool> pinned;
-    static bool sortEnabled = true;
     if (pinned.size() != names.size()) {
         pinned.assign(names.size(), false);
     }
 
-    // split pinned vs unpinned
-    std::vector<int> pins;
-    std::vector<std::pair<int,double>> unsorted;
+    enum class PassTimingColumn : ImGuiID {
+        Pass = 1,
+        Gpu = 2,
+        Cpu = 3,
+        CpuUpdate = 4,
+        CpuExecute = 5,
+    };
+
+    auto compareDoubles = [](double lhs, double rhs) {
+        if (lhs < rhs) {
+            return -1;
+        }
+        if (lhs > rhs) {
+            return 1;
+        }
+        return 0;
+    };
+
+    auto compareNames = [&](int lhs, int rhs) {
+        const int cmp = std::strcmp(names[lhs].c_str(), names[rhs].c_str());
+        if (cmp < 0) {
+            return -1;
+        }
+        if (cmp > 0) {
+            return 1;
+        }
+        return 0;
+    };
+
+    auto compareRows = [&](int lhs, int rhs, const ImGuiTableColumnSortSpecs* sortSpec) {
+        const ImGuiID sortColumn = sortSpec != nullptr
+            ? sortSpec->ColumnUserID
+            : static_cast<ImGuiID>(PassTimingColumn::Gpu);
+        const ImGuiSortDirection direction = sortSpec != nullptr
+            ? sortSpec->SortDirection
+            : ImGuiSortDirection_Descending;
+
+        int result = 0;
+        switch (static_cast<PassTimingColumn>(sortColumn)) {
+        case PassTimingColumn::Pass:
+            result = compareNames(lhs, rhs);
+            break;
+        case PassTimingColumn::Gpu:
+            result = compareDoubles(stats[lhs].gpuTimeEma, stats[rhs].gpuTimeEma);
+            break;
+        case PassTimingColumn::Cpu:
+            result = compareDoubles(stats[lhs].GetCpuTimeEma(), stats[rhs].GetCpuTimeEma());
+            break;
+        case PassTimingColumn::CpuUpdate:
+            result = compareDoubles(stats[lhs].cpuUpdateTimeEma, stats[rhs].cpuUpdateTimeEma);
+            break;
+        case PassTimingColumn::CpuExecute:
+            result = compareDoubles(stats[lhs].cpuExecuteTimeEma, stats[rhs].cpuExecuteTimeEma);
+            break;
+        default:
+            result = compareDoubles(stats[lhs].gpuTimeEma, stats[rhs].gpuTimeEma);
+            break;
+        }
+
+        if (result == 0) {
+            result = compareNames(lhs, rhs);
+        }
+
+        return direction == ImGuiSortDirection_Ascending ? (result < 0) : (result > 0);
+    };
+
+    std::vector<int> pinnedRows;
+    std::vector<int> unpinnedRows;
+    pinnedRows.reserve(visible.size());
+    unpinnedRows.reserve(visible.size());
     for (unsigned rawIdx : visible) {
-        const int i = static_cast<int>(rawIdx);
-        if (pinned[i]) {
-            pins.push_back(i);
+        if (rawIdx >= names.size() || rawIdx >= stats.size()) {
+            continue;
+        }
+
+        const int idx = static_cast<int>(rawIdx);
+        if (pinned[idx]) {
+            pinnedRows.push_back(idx);
         }
         else {
-            unsorted.emplace_back(i, stats[i].ema);
+            unpinnedRows.push_back(idx);
         }
     }
-    if (sortEnabled) {
-        std::sort(unsorted.begin(), unsorted.end(), [](auto& a, auto& b) { return a.second > b.second; });
-    }
 
-    std::vector<int> order;
-    order.insert(order.end(), pins.begin(), pins.end());
-    for (auto& p : unsorted) {
-        order.push_back(p.first);
-    }
+    constexpr ImGuiTableFlags tableFlags =
+        ImGuiTableFlags_Borders |
+        ImGuiTableFlags_RowBg |
+        ImGuiTableFlags_Resizable |
+        ImGuiTableFlags_Hideable |
+        ImGuiTableFlags_Sortable |
+        ImGuiTableFlags_SizingStretchProp;
 
-    // measure column widths
-    ImGuiStyle& style = ImGui::GetStyle();
-    float wName = ImGui::CalcTextSize("Pass").x;
-    float wNum  = ImGui::CalcTextSize("Avg (ms)").x;
-    char buf[64];
-    for (int idx : order) {
-        std::string label = (pinned[idx] ? "[P] " : "P") + names[idx];
-        wName = std::max(wName, ImGui::CalcTextSize(label.c_str()).x);
-        snprintf(buf, sizeof(buf), "%.3f", stats[idx].ema);
-        wNum  = std::max(wNum, ImGui::CalcTextSize(buf).x);
-    }
-    wName += style.CellPadding.x*2;
-    wNum  += style.CellPadding.x*2 + style.ItemSpacing.x + ImGui::CalcTextSize(sortEnabled?"v":">").x + style.FramePadding.x*2;
+    if (ImGui::BeginTable("PassTimingsTable", 6, tableFlags)) {
+        ImGui::TableSetupColumn("Pin", ImGuiTableColumnFlags_NoSort | ImGuiTableColumnFlags_WidthFixed, 52.0f);
+        ImGui::TableSetupColumn("Pass", ImGuiTableColumnFlags_WidthStretch, 0.0f, static_cast<ImGuiID>(PassTimingColumn::Pass));
+        ImGui::TableSetupColumn("GPU (ms)", ImGuiTableColumnFlags_PreferSortDescending | ImGuiTableColumnFlags_DefaultSort, 0.0f, static_cast<ImGuiID>(PassTimingColumn::Gpu));
+        ImGui::TableSetupColumn("CPU (ms)", ImGuiTableColumnFlags_PreferSortDescending, 0.0f, static_cast<ImGuiID>(PassTimingColumn::Cpu));
+        ImGui::TableSetupColumn("Update (ms)", ImGuiTableColumnFlags_PreferSortDescending, 0.0f, static_cast<ImGuiID>(PassTimingColumn::CpuUpdate));
+        ImGui::TableSetupColumn("Execute (ms)", ImGuiTableColumnFlags_PreferSortDescending, 0.0f, static_cast<ImGuiID>(PassTimingColumn::CpuExecute));
+        ImGui::TableHeadersRow();
 
-    ImGui::Columns(2, nullptr, false);
-    ImGui::SetColumnWidth(0, wName);
-    ImGui::SetColumnWidth(1, wNum);
+        const ImGuiTableSortSpecs* sortSpecs = ImGui::TableGetSortSpecs();
+        const ImGuiTableColumnSortSpecs* primarySort =
+            (sortSpecs != nullptr && sortSpecs->SpecsCount > 0) ? &sortSpecs->Specs[0] : nullptr;
 
-    // header
-    ImGui::TextUnformatted("Pass"); ImGui::NextColumn();
-    ImGui::TextUnformatted("Avg (ms)"); ImGui::SameLine();
-    if (ImGui::SmallButton(sortEnabled ? "v" : ">")) {
-        sortEnabled = !sortEnabled;
-    }
-    ImGui::NextColumn();
-    ImGui::Separator();
+        auto sortRows = [&](std::vector<int>& rows) {
+            std::stable_sort(rows.begin(), rows.end(), [&](int lhs, int rhs) {
+                return compareRows(lhs, rhs, primarySort);
+            });
+        };
 
-    // rows
-    for (int idx : order) {
-        ImGui::PushID(idx);
-        if (pinned[idx]) {
-            if (ImGui::SmallButton(">")) pinned[idx] = false;
-        } else {
-            if (ImGui::SmallButton("Pin")) pinned[idx] = true;
-        }
-        ImGui::SameLine();
-        bool open = ImGui::TreeNodeEx(names[idx].c_str(), ImGuiTreeNodeFlags_SpanFullWidth);
-        ImGui::PopID();
+        sortRows(pinnedRows);
+        sortRows(unpinnedRows);
 
-        ImGui::NextColumn();
-        snprintf(buf, sizeof(buf), "%.3f", stats[idx].ema);
-        ImGui::TextUnformatted(buf);
-        ImGui::NextColumn();
+        auto drawRow = [&](int idx) {
+            const bool hasMeshDetails = idx < static_cast<int>(isGeom.size()) && idx < static_cast<int>(meshStats.size()) && isGeom[idx];
 
-        if (open) {
-            if (isGeom[idx]) {
+            ImGui::PushID(idx);
+            ImGui::TableNextRow();
+
+            ImGui::TableSetColumnIndex(0);
+            if (ImGui::SmallButton(pinned[idx] ? "Unpin" : "Pin")) {
+                pinned[idx] = !pinned[idx];
+            }
+
+            ImGui::TableSetColumnIndex(1);
+            ImGuiTreeNodeFlags treeFlags = ImGuiTreeNodeFlags_SpanFullWidth;
+            if (!hasMeshDetails) {
+                treeFlags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+            }
+            const bool open = ImGui::TreeNodeEx("PassRow", treeFlags, "%s", names[idx].c_str());
+
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%.3f", stats[idx].gpuTimeEma);
+
+            ImGui::TableSetColumnIndex(3);
+            ImGui::Text("%.3f", stats[idx].GetCpuTimeEma());
+
+            ImGui::TableSetColumnIndex(4);
+            ImGui::Text("%.3f", stats[idx].cpuUpdateTimeEma);
+
+            ImGui::TableSetColumnIndex(5);
+            ImGui::Text("%.3f", stats[idx].cpuExecuteTimeEma);
+
+            if (hasMeshDetails && open) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(1);
                 ImGui::Indent();
                 ImGui::Text("Mesh Invocations: %.0f", meshStats[idx].invocationsEma);
                 ImGui::Text("Mesh Primitives:  %.0f", meshStats[idx].primitivesEma);
                 ImGui::Unindent();
+                ImGui::TreePop();
             }
-            ImGui::TreePop();
-            ImGui::Separator();
-        }
-    }
 
-    ImGui::Columns(1);
+            ImGui::PopID();
+        };
+
+        for (int idx : pinnedRows) {
+            drawRow(idx);
+        }
+        for (int idx : unpinnedRows) {
+            drawRow(idx);
+        }
+
+        ImGui::EndTable();
+    }
 
     ImGui::End();
 }

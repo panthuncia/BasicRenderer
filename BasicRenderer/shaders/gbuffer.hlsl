@@ -7,6 +7,7 @@
 #include "include/visibilityPacking.hlsli"
 #include "include/clodStructs.hlsli"
 #include "include/clodPageAccess.hlsli"
+#include "include/visibleClusterPacking.hlsli"
 #include "include/debugPayload.hlsli"
 
 #define CLOD_COMPRESSED_POSITIONS 1u
@@ -268,24 +269,24 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
 
     if (isLeader)
     {
-        StructuredBuffer<VisibleCluster> visibleClusterBuffer =
+        ByteAddressBuffer visibleClusterBuffer =
             ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
         StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
         StructuredBuffer<PerMeshBuffer> perMeshBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
 
-        VisibleCluster clusterData = visibleClusterBuffer[clusterIndex];
-        d.drawcallAndMeshlet.x = clusterData.instanceID;
-        d.drawcallAndMeshlet.y = clusterData.localMeshletIndex;
+        const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusterBuffer, clusterIndex);
+        d.drawcallAndMeshlet.x = CLodVisibleClusterInstanceID(packedCluster);
+        d.drawcallAndMeshlet.y = CLodVisibleClusterLocalMeshletIndex(packedCluster);
 
         PerMeshInstanceBuffer inst = perMeshInstanceBuffer[d.drawcallAndMeshlet.x];
         d.objAndMesh = uint2(inst.perObjectBufferIndex, inst.perMeshBufferIndex);
 
         PerMeshBuffer mesh = perMeshBuffer[d.objAndMesh.y];
 
-        const uint pageSlabDesc = clusterData.pageSlabDescriptorIndex;
-        const uint pageSlabOff  = clusterData.pageSlabByteOffset;
+        const uint pageSlabDesc = CLodVisibleClusterPageSlabDescriptorIndex(packedCluster);
+        const uint pageSlabOff  = CLodVisibleClusterPageSlabByteOffset(packedCluster);
 
         CLodPageHeader hdr = LoadPageHeader(pageSlabDesc, pageSlabOff);
 

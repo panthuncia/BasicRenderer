@@ -46,7 +46,7 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
         break;
     }
 
-    m_visibleClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(static_cast<uint32_t>(maxVisibleClusters), sizeof(VisibleCluster), true, false);
+    m_visibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(maxVisibleClusters * PackedVisibleClusterStrideBytes, true, false);
     m_visibleClustersBuffer->SetName("CLod Visible Clusters Buffer (uncompacted)");
     m_histogramIndirectCommand = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterBucketsHistogramIndirectCommand), true, false);
     m_histogramIndirectCommand->SetName("CLod Raster Buckets Histogram Indirect Command Buffer");
@@ -95,7 +95,7 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
     m_rasterBucketsTotalCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
     m_rasterBucketsTotalCountBuffer->SetName("CLod Raster bucket total count");
 
-    m_compactedVisibleClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(static_cast<uint32_t>(maxVisibleClusters), sizeof(VisibleCluster), true, false);
+    m_compactedVisibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(maxVisibleClusters * PackedVisibleClusterStrideBytes, true, false);
     m_compactedVisibleClustersBuffer->SetName("CLod Compacted Visible Clusters Buffer");
 
     m_visibleClustersBuffer->GetECSEntity()

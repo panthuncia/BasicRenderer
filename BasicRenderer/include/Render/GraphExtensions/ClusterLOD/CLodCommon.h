@@ -119,6 +119,50 @@ inline std::shared_ptr<Buffer> CreateAliasedUnmaterializedStructuredBuffer(
     return buffer;
 }
 
+inline std::shared_ptr<Buffer> CreateAliasedUnmaterializedRawBuffer(
+    uint64_t bufferSizeBytes,
+    bool unorderedAccess = true,
+    bool createNonShaderVisibleUAV = false,
+    bool allowAlias = true)
+{
+    if (bufferSizeBytes == 0 || (bufferSizeBytes % 4u) != 0u) {
+        throw std::runtime_error("Raw buffer requires a non-zero byte size that is divisible by 4");
+    }
+
+    auto buffer = Buffer::CreateSharedUnmaterialized(rhi::HeapType::DeviceLocal, bufferSizeBytes, unorderedAccess);
+
+    BufferBase::DescriptorRequirements requirements{};
+    requirements.createSRV = true;
+    requirements.createUAV = unorderedAccess;
+    requirements.createNonShaderVisibleUAV = unorderedAccess && createNonShaderVisibleUAV;
+    requirements.uavCounterOffset = 0;
+    requirements.srvDesc = rhi::SrvDesc{
+        .dimension = rhi::SrvDim::Buffer,
+        .formatOverride = rhi::Format::R32_Typeless,
+        .buffer = {
+            .kind = rhi::BufferViewKind::Raw,
+            .firstElement = 0,
+            .numElements = static_cast<uint32_t>(bufferSizeBytes / 4u),
+            .structureByteStride = 0,
+        },
+    };
+    requirements.uavDesc = rhi::UavDesc{
+        .dimension = rhi::UavDim::Buffer,
+        .formatOverride = rhi::Format::R32_Typeless,
+        .buffer = {
+            .kind = rhi::BufferViewKind::Raw,
+            .firstElement = 0,
+            .numElements = static_cast<uint32_t>(bufferSizeBytes / 4u),
+            .structureByteStride = 0,
+            .counterOffsetInBytes = 0,
+        },
+    };
+
+    buffer->SetDescriptorRequirements(requirements);
+    buffer->SetAllowAlias(allowAlias);
+    return buffer;
+}
+
 // Returns the number of pages needed for a group.
 // Uses the physical page count set during the build pipeline.
 inline uint32_t CLodEstimatePagesNeeded(

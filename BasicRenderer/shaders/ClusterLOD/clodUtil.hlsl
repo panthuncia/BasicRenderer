@@ -8,6 +8,7 @@
 #include "PerPassRootConstants/clodCompactionRootConstants.h"
 #include "include/indirectCommands.hlsli"
 #include "include/clodStructs.hlsli"
+#include "include/visibleClusterPacking.hlsli"
 
 struct RasterBucketsHistogramIndirectCommand
 {
@@ -121,10 +122,10 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
         return;
     }
 
-    StructuredBuffer<VisibleCluster> visibleClusters = ResourceDescriptorHeap[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+    ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
 
     // TODO: Remove load chain
-    uint instanceIndex = visibleClusters[CLodGetHistogramVisibleClusterReadIndex(linearizedID)].instanceID;
+    uint instanceIndex = CLodVisibleClusterInstanceID(CLodLoadVisibleClusterPacked(visibleClusters, CLodGetHistogramVisibleClusterReadIndex(linearizedID)));
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     uint perMeshIndex = perMeshInstance[instanceIndex].perMeshBufferIndex;
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
@@ -311,13 +312,13 @@ void RasterBucketsBlockOffsetsCS(uint3 groupThreadId : SV_GroupThreadID,
     }
 }
 
-uint GetRasterBucketIndexFromCluster(VisibleCluster cluster)
+uint GetRasterBucketIndexFromInstance(uint instanceID)
 {
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
 
-    PerMeshInstanceBuffer instanceData = perMeshInstance[cluster.instanceID];
+    PerMeshInstanceBuffer instanceData = perMeshInstance[instanceID];
     PerMeshBuffer meshBuffer = perMeshBuffer[instanceData.perMeshBufferIndex];
     MaterialInfo materialInfo = materialDataBuffer[meshBuffer.materialDataIndex];
 
@@ -349,21 +350,21 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
 
     if (linearizedID < clusterCount)
     {
-        StructuredBuffer<VisibleCluster> visibleClusters = ResourceDescriptorHeap[CLOD_COMPACTION_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
-        RWStructuredBuffer<VisibleCluster> compactedClusters = ResourceDescriptorHeap[CLOD_COMPACTION_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
+        ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_COMPACTION_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+        RWByteAddressBuffer compactedClusters = ResourceDescriptorHeap[CLOD_COMPACTION_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
         StructuredBuffer<uint> offsets = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX];
         RWStructuredBuffer<uint> writeCursor = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_WRITE_CURSOR_DESCRIPTOR_INDEX];
         RWStructuredBuffer<uint> sortedToUnsortedMapping = ResourceDescriptorHeap[CLOD_COMPACTION_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX];
 
         const uint sourceClusterIndex = CLodGetCompactionVisibleClusterReadIndex(linearizedID);
-        VisibleCluster cluster = visibleClusters[sourceClusterIndex];
-        uint bucketIndex = GetRasterBucketIndexFromCluster(cluster);
+        const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, sourceClusterIndex);
+        uint bucketIndex = GetRasterBucketIndexFromInstance(CLodVisibleClusterInstanceID(packedCluster));
 
         uint localOffset = 0;
         InterlockedAdd(writeCursor[bucketIndex], 1, localOffset);
 
         uint dst = baseClusterOffset + offsets[bucketIndex] + localOffset;
-        compactedClusters[dst] = cluster;
+        CLodStoreVisibleClusterPackedWordsRW(compactedClusters, dst, packedCluster);
         sortedToUnsortedMapping[dst] = sourceClusterIndex;
     }
 

@@ -2,8 +2,8 @@
 // Compile with DXC target: lib_6_8 (Shader Model 6.8)
 //
 // Broadcasting launch: receives SWRasterBatchRecord from ClusterCull nodes.
-// Each record carries up to 8 cluster indices; each cluster gets 4 thread groups
-// of 32 threads (128 threads per cluster). Vertices are decoded into per-group
+// Each record carries up to 8 cluster indices; each cluster gets one 128-thread group.
+// Vertices are decoded into per-group
 // groupshared, then triangles are rasterized via edge functions + InterlockedMin
 // to the per-view visibility buffer.
 
@@ -14,6 +14,7 @@
 #include "PerPassRootConstants/clodRasterizationRootConstants.h"
 #include "Include/clodStructs.hlsli"
 #include "Include/clodPageAccess.hlsli"
+#include "Include/visibleClusterPacking.hlsli"
 #include "Include/visibilityPacking.hlsli"
 #include "Include/debugPayload.hlsli"
 
@@ -93,17 +94,23 @@ groupshared float2  gs_screenPos[SW_RASTER_MAX_VERTS];
 groupshared float   gs_linearDepth[SW_RASTER_MAX_VERTS];
 
 void SWRasterCluster(
-    VisibleCluster vc,
+    uint3 packedCluster,
     uint unsortedClusterIndex,
     uint GI,
     uint subGroup,
     StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuf)
 {
+    const uint viewID = CLodVisibleClusterViewID(packedCluster);
+    const uint instanceID = CLodVisibleClusterInstanceID(packedCluster);
+    const uint localMeshletIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
+    const uint pageSlabDescriptorIndex = CLodVisibleClusterPageSlabDescriptorIndex(packedCluster);
+    const uint pageSlabByteOffset = CLodVisibleClusterPageSlabByteOffset(packedCluster);
+
     // Load page header + meshlet descriptor
-    CLodPageHeader hdr = LoadPageHeader(vc.pageSlabDescriptorIndex, vc.pageSlabByteOffset);
+    CLodPageHeader hdr = LoadPageHeader(pageSlabDescriptorIndex, pageSlabByteOffset);
     CLodMeshletDescriptor desc = LoadMeshletDescriptor(
-        vc.pageSlabDescriptorIndex, vc.pageSlabByteOffset,
-        hdr.descriptorOffset, vc.localMeshletIndex);
+        pageSlabDescriptorIndex, pageSlabByteOffset,
+        hdr.descriptorOffset, localMeshletIndex);
 
     const uint vertCount = CLodDescVertexCount(desc);
     const uint triCount  = CLodDescTriangleCount(desc);
@@ -111,7 +118,7 @@ void SWRasterCluster(
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     StructuredBuffer<PerMeshInstanceBuffer> meshInstBuf =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-    PerMeshInstanceBuffer meshInst = meshInstBuf[vc.instanceID];
+    PerMeshInstanceBuffer meshInst = meshInstBuf[instanceID];
 
     StructuredBuffer<PerObjectBuffer> objBuf =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
@@ -119,16 +126,16 @@ void SWRasterCluster(
 
     StructuredBuffer<CullingCameraInfo> cullingCameras =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
-    CullingCameraInfo cam = cullingCameras[vc.viewID];
+    CullingCameraInfo cam = cullingCameras[viewID];
 
-    ClodViewRasterInfo rasterInfo = viewRasterInfoBuf[vc.viewID];
+    ClodViewRasterInfo rasterInfo = viewRasterInfoBuf[viewID];
 
     const float visWidth  = float(rasterInfo.scissorMaxX - rasterInfo.scissorMinX);
     const float visHeight = float(rasterInfo.scissorMaxY - rasterInfo.scissorMinY);
     const float scissorMinXf = float(rasterInfo.scissorMinX);
     const float scissorMinYf = float(rasterInfo.scissorMinY);
 
-    const uint positionBitstreamBase = vc.pageSlabByteOffset + hdr.positionBitstreamOffset;
+    const uint positionBitstreamBase = pageSlabByteOffset + hdr.positionBitstreamOffset;
     row_major matrix modelViewProjection = mul(objData.model, cam.viewProjection);
     float4 modelViewZ = mul(objData.model, cam.viewZ);
 
@@ -141,7 +148,7 @@ void SWRasterCluster(
             CLodDescBitsX(desc), CLodDescBitsY(desc), CLodDescBitsZ(desc),
             hdr.compressedPositionQuantExp,
             int3(desc.minQx, desc.minQy, desc.minQz),
-            vc.pageSlabDescriptorIndex);
+            pageSlabDescriptorIndex);
 
         float4 localPos4 = float4(localPos, 1.0f);
         float4 clipPos  = mul(localPos4, modelViewProjection);
@@ -170,14 +177,14 @@ void SWRasterCluster(
 
     const bool reverseWinding = (objData.objectFlags & OBJECT_FLAG_REVERSE_WINDING) != 0u;
 
-    ByteAddressBuffer slab = ResourceDescriptorHeap[vc.pageSlabDescriptorIndex];
+    ByteAddressBuffer slab = ResourceDescriptorHeap[pageSlabDescriptorIndex];
 
     uint globalThread = subGroup * SW_RASTER_THREADS + GI;
     uint totalThreads = SW_RASTER_GROUPS_PER_CLUSTER * SW_RASTER_THREADS;
 
     for (uint t = globalThread; t < triCount; t += totalThreads)
     {
-        uint3 tri = SWDecodeTriangle(slab, vc.pageSlabByteOffset + hdr.triangleStreamOffset, desc.triangleByteOffset, t);
+        uint3 tri = SWDecodeTriangle(slab, pageSlabByteOffset + hdr.triangleStreamOffset, desc.triangleByteOffset, t);
         if (reverseWinding) { uint tmp = tri.y; tri.y = tri.z; tri.z = tmp; }
 
         float2 s0 = gs_screenPos[tri.x];
@@ -281,7 +288,7 @@ void SWRasterCluster(
 [Shader("node")]
 [NodeID("SWRaster")]
 [NodeLaunch("broadcasting")]
-[NodeMaxDispatchGrid(32, 1, 1)]
+[NodeMaxDispatchGrid(SW_BATCH_MAX_CLUSTERS * SW_RASTER_GROUPS_PER_CLUSTER, 1, 1)]
 [NumThreads(SW_RASTER_THREADS, 1, 1)]
 void WG_SWRaster(
     DispatchNodeInputRecord<SWRasterBatchRecord> inputRecord,
@@ -298,13 +305,13 @@ void WG_SWRaster(
 
     // Load VisibleCluster from buffer via indirection
     uint unsortedClusterIndex = batch.clusterIndices[clusterIdx];
-    globallycoherent RWStructuredBuffer<VisibleCluster> visibleClusters =
+    globallycoherent RWByteAddressBuffer visibleClusters =
         ResourceDescriptorHeap[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
-    VisibleCluster vc = visibleClusters[unsortedClusterIndex];
+    const uint3 packedCluster = CLodLoadVisibleClusterPackedGloballyCoherent(visibleClusters, unsortedClusterIndex);
 
     StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuf =
         ResourceDescriptorHeap[CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
-    SWRasterCluster(vc, unsortedClusterIndex, GI, subGroup, viewRasterInfoBuf);
+    SWRasterCluster(packedCluster, unsortedClusterIndex, GI, subGroup, viewRasterInfoBuf);
 }
 
 // Non-WG SW raster
@@ -324,14 +331,14 @@ void SWRasterIndirectCSMain(uint3 dtid : SV_DispatchThreadID, uint GI : SV_Group
     }
 
     const uint sortedClusterIndex = IndirectCommandSignatureRootConstant0 + clusterIdx;
-    StructuredBuffer<VisibleCluster> compactedVisibleClusters =
+    ByteAddressBuffer compactedVisibleClusters =
         ResourceDescriptorHeap[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
     StructuredBuffer<uint> sortedToUnsortedMapping =
         ResourceDescriptorHeap[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX];
     StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuf =
         ResourceDescriptorHeap[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
 
-    const VisibleCluster vc = compactedVisibleClusters[sortedClusterIndex];
+    const uint3 packedCluster = CLodLoadVisibleClusterPacked(compactedVisibleClusters, sortedClusterIndex);
     const uint unsortedClusterIndex = sortedToUnsortedMapping[sortedClusterIndex];
-    SWRasterCluster(vc, unsortedClusterIndex, GI, subGroup, viewRasterInfoBuf);
+    SWRasterCluster(packedCluster, unsortedClusterIndex, GI, subGroup, viewRasterInfoBuf);
 }

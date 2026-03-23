@@ -5,6 +5,7 @@
 #include "include/waveIntrinsicsHelpers.hlsli"
 #include "PerPassRootConstants/visUtilRootConstants.h"
 #include "include/visibilityPacking.hlsli"
+#include "include/visibleClusterPacking.hlsli"
 
 struct PixelRef
 {
@@ -12,12 +13,11 @@ struct PixelRef
 };
 
 uint GetMaterialIdFromCluster(uint clusterIndex,
-                              StructuredBuffer<VisibleCluster> visibleClusterBuffer,
+                              ByteAddressBuffer visibleClusterBuffer,
                               StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance,
                               StructuredBuffer<PerMeshBuffer> perMeshBuffer)
 {
-    VisibleCluster clusterData = visibleClusterBuffer[clusterIndex];
-    uint perMeshInstanceBufferIndex = clusterData.instanceID;
+    uint perMeshInstanceBufferIndex = CLodVisibleClusterInstanceID(CLodLoadVisibleClusterPacked(visibleClusterBuffer, clusterIndex));
     PerMeshInstanceBuffer instanceData = perMeshInstance[perMeshInstanceBufferIndex];
     PerMeshBuffer meshBuffer = perMeshBuffer[instanceData.perMeshBufferIndex];
 
@@ -56,7 +56,7 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
         return;
 
     Texture2D<uint64_t> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
-    StructuredBuffer<VisibleCluster> visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+    ByteAddressBuffer visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
 
@@ -103,7 +103,7 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
     }
 
     Texture2D<uint64_t> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
-    StructuredBuffer<VisibleCluster> visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+    ByteAddressBuffer visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
 

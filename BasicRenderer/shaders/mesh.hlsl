@@ -8,6 +8,7 @@
 #include "Include/meshletCommon.hlsli"
 #include "Include/clodStructs.hlsli"
 #include "Include/clodPageAccess.hlsli"
+#include "Include/visibleClusterPacking.hlsli"
 #include "PerPassRootConstants/clodRasterizationRootConstants.h"
 
 #define CLOD_COMPRESSED_POSITIONS 1u
@@ -433,13 +434,13 @@ void VisibilityBufferMSMain(
     EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
 }
 
-bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSetup setup, in uint bucketMeshletIndex, in uint bucketCount)
+bool InitializeMeshletFromCompactedCluster(uint3 packedCluster, out MeshletSetup setup, in uint bucketMeshletIndex, in uint bucketCount)
 {
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
 
-    setup.meshletIndex = cluster.localMeshletIndex;
-    setup.meshInstanceBuffer = meshInstanceBuffer[cluster.instanceID];
-    setup.viewID = cluster.viewID;
+    setup.meshletIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
+    setup.meshInstanceBuffer = meshInstanceBuffer[CLodVisibleClusterInstanceID(packedCluster)];
+    setup.viewID = CLodVisibleClusterViewID(packedCluster);
 
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
@@ -448,8 +449,8 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
     setup.objectBuffer = perObjectBuffer[setup.meshInstanceBuffer.perObjectBufferIndex];
 
     // Use pre-resolved page address from VisibleCluster
-    const uint pageSlabDesc = cluster.pageSlabDescriptorIndex;
-    const uint pageSlabOff  = cluster.pageSlabByteOffset;
+    const uint pageSlabDesc = CLodVisibleClusterPageSlabDescriptorIndex(packedCluster);
+    const uint pageSlabOff  = CLodVisibleClusterPageSlabByteOffset(packedCluster);
     if (pageSlabDesc == 0)
     {
         return false;
@@ -521,16 +522,16 @@ void ClusterLODBucketMSMain(
     uint count = histogram[bucketIndex];
 
     bool draw = linearizedID < count;
-    VisibleCluster cluster = (VisibleCluster)0;
+    uint3 packedCluster = uint3(0, 0, 0);
     MeshletSetup setup;
     uint visibleClusterIndex = baseOffset + linearizedID;
     uint unsortedClusterIndex = 0;
 
     if (draw) {   
-        StructuredBuffer<VisibleCluster> compactedClusters = ResourceDescriptorHeap[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
-        cluster = compactedClusters[visibleClusterIndex];
+        ByteAddressBuffer compactedClusters = ResourceDescriptorHeap[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
+        packedCluster = CLodLoadVisibleClusterPacked(compactedClusters, visibleClusterIndex);
         unsortedClusterIndex = sortedToUnsortedMapping[visibleClusterIndex];
-        draw = InitializeMeshletFromCompactedCluster(cluster, setup, linearizedID, count);
+        draw = InitializeMeshletFromCompactedCluster(packedCluster, setup, linearizedID, count);
     } else {
         setup.vertCount = 0;
         setup.triCount = 0;

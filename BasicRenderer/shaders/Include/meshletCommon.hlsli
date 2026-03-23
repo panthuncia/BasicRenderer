@@ -8,6 +8,7 @@
 #include "include/vertex.hlsli"
 #include "Include/clodStructs.hlsli"
 #include "Include/clodPageAccess.hlsli"
+#include "Include/visibleClusterPacking.hlsli"
 // Meshlet description
 struct Meshlet
 {
@@ -145,14 +146,14 @@ bool InitializeMeshletInternalCLod(
     out MeshletSetup setup)
 {
 
-    StructuredBuffer<VisibleCluster> visibleClusters =
+    ByteAddressBuffer visibleClusters =
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisibleClusterBuffer)];
-    VisibleCluster cluster = visibleClusters[visibleMeshletIndex];
+    const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, visibleMeshletIndex);
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
 
-    setup.meshletIndex = cluster.localMeshletIndex;
-    setup.meshInstanceBuffer =  meshInstanceBuffer[cluster.instanceID];
-    setup.viewID = cluster.viewID;
+    setup.meshletIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
+    setup.meshInstanceBuffer =  meshInstanceBuffer[CLodVisibleClusterInstanceID(packedCluster)];
+    setup.viewID = CLodVisibleClusterViewID(packedCluster);
 
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
@@ -161,8 +162,8 @@ bool InitializeMeshletInternalCLod(
     setup.objectBuffer = perObjectBuffer[setup.meshInstanceBuffer.perObjectBufferIndex];
 
     // Use pre-resolved page address from VisibleCluster
-    const uint pageSlabDesc = cluster.pageSlabDescriptorIndex;
-    const uint pageSlabOff  = cluster.pageSlabByteOffset;
+    const uint pageSlabDesc = CLodVisibleClusterPageSlabDescriptorIndex(packedCluster);
+    const uint pageSlabOff  = CLodVisibleClusterPageSlabByteOffset(packedCluster);
     if (pageSlabDesc == 0)
     {
         return false;
@@ -230,7 +231,7 @@ bool InitializeMeshletFromDrawCall(uint drawCallID, uint meshletLocalIndex, out 
 // Cluster LOD path:
 bool InitializeMeshletFromVisibleCluster(uint visibleClusterIndex, out MeshletSetup setup)
 {
-    StructuredBuffer<VisibleCluster> visibleClusters =
+    ByteAddressBuffer visibleClusters =
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisibleClusterBuffer)];
     (void)visibleClusters;
     return InitializeMeshletInternalCLod(visibleClusterIndex, setup);

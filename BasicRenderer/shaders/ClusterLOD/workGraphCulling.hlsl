@@ -7,6 +7,7 @@
 #include "PerPassRootConstants/clodWorkGraphRootConstants.h"
 #include "Include/clodStructs.hlsli"
 #include "Include/clodPageAccess.hlsli"
+#include "Include/visibleClusterPacking.hlsli"
 
 #ifndef CLOD_WG_ENABLE_SW_CLASSIFICATION
 #define CLOD_WG_ENABLE_SW_CLASSIFICATION 1
@@ -892,7 +893,7 @@ void WG_TraverseNodes(
 // after the meshlet loop, satisfying the Work Graphs spec requirement that
 // Get*NodeOutputRecords / OutputComplete are not inside varying flow control.
 #define SW_BATCH_ACCUM_CAPACITY (CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 64)
-#define SW_RASTER_GROUPS_PER_CLUSTER 4
+#define SW_RASTER_GROUPS_PER_CLUSTER 1
 
 #if CLOD_WG_ENABLE_SW_NODE_OUTPUT
 groupshared uint gs_swBatchIndices[SW_BATCH_ACCUM_CAPACITY];
@@ -1017,7 +1018,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
     // Lanes with fewer meshlets (e.g. replay count=1) simply skip inactive iterations.
     const uint meshletCount = hasBucket ? UnpackMeshletCount(b.meshletIndexAndCount) : 0;
 
-    globallycoherent RWStructuredBuffer<VisibleCluster> visibleClusters =
+    globallycoherent RWByteAddressBuffer visibleClusters =
         ResourceDescriptorHeap[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     RWStructuredBuffer<uint> visibleClusterCounter =
         ResourceDescriptorHeap[CLOD_WG_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
@@ -1184,18 +1185,9 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_MESHLET_ITERATIONS, active ? 1 : 0);
 
         const bool contributes = active && survives;
+        const uint visibleGroupId = UnpackGroupId(b.groupIdPacked);
 
 #if !CLOD_WG_ENABLE_SW_CLASSIFICATION
-        VisibleCluster hwOnlyVC = (VisibleCluster)0;
-        if (contributes) {
-            hwOnlyVC.instanceID = b.instanceIndex;
-            hwOnlyVC.localMeshletIndex = localMeshletIndex;
-            hwOnlyVC.viewID = b.viewId;
-            hwOnlyVC.groupID = UnpackGroupId(b.groupIdPacked);
-            hwOnlyVC.pageSlabDescriptorIndex = b.pageSlabDescriptorIndex;
-            hwOnlyVC.pageSlabByteOffset = b.pageSlabByteOffset;
-        }
-
         const uint4 hwMask = WaveActiveBallot(contributes);
         const uint hwCount = CountBits128(hwMask);
         totalSurvivors += hwCount;
@@ -1232,7 +1224,15 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
             }
 
             if (contributes && (hwRank < hwAvail)) {
-                visibleClusters[hwGlobalBase + hwRank] = hwOnlyVC;
+                CLodStoreVisibleClusterGloballyCoherent(
+                    visibleClusters,
+                    hwGlobalBase + hwRank,
+                    b.viewId,
+                    b.instanceIndex,
+                    localMeshletIndex,
+                    visibleGroupId,
+                    b.pageSlabDescriptorIndex,
+                    b.pageSlabByteOffset);
             }
         }
 #else
@@ -1240,16 +1240,6 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         // Survivors go straight through the HW path so the work-graph cost excludes
         // the software-raster routing logic itself.
         if (!swRasterEnabled) {
-            VisibleCluster hwOnlyVC = (VisibleCluster)0;
-            if (contributes) {
-                hwOnlyVC.instanceID = b.instanceIndex;
-                hwOnlyVC.localMeshletIndex = localMeshletIndex;
-                hwOnlyVC.viewID = b.viewId;
-                hwOnlyVC.groupID = UnpackGroupId(b.groupIdPacked);
-                hwOnlyVC.pageSlabDescriptorIndex = b.pageSlabDescriptorIndex;
-                hwOnlyVC.pageSlabByteOffset = b.pageSlabByteOffset;
-            }
-
             const uint4 hwMask = WaveActiveBallot(contributes);
             const uint hwCount = CountBits128(hwMask);
             totalSurvivors += hwCount;
@@ -1286,7 +1276,15 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 }
 
                 if (contributes && (hwRank < hwAvail)) {
-                    visibleClusters[hwGlobalBase + hwRank] = hwOnlyVC;
+                    CLodStoreVisibleClusterGloballyCoherent(
+                        visibleClusters,
+                        hwGlobalBase + hwRank,
+                        b.viewId,
+                        b.instanceIndex,
+                        localMeshletIndex,
+                        visibleGroupId,
+                        b.pageSlabDescriptorIndex,
+                        b.pageSlabByteOffset);
                 }
             }
 
@@ -1303,17 +1301,6 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 
         const bool isHW = contributes && !isSW;
         const bool outputSW = contributes && isSW;
-
-        // Prepare the VisibleCluster once for either path.
-        VisibleCluster vc = (VisibleCluster)0;
-        if (contributes) {
-            vc.instanceID = b.instanceIndex;
-            vc.localMeshletIndex = localMeshletIndex;
-            vc.viewID = b.viewId;
-            vc.groupID = UnpackGroupId(b.groupIdPacked);
-            vc.pageSlabDescriptorIndex = b.pageSlabDescriptorIndex;
-            vc.pageSlabByteOffset = b.pageSlabByteOffset;
-        }
 
         // HW path: wave-cooperative bottom-up write
         {
@@ -1354,7 +1341,15 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 }
 
                 if (isHW && (hwRank < hwAvail)) {
-                    visibleClusters[hwGlobalBase + hwRank] = vc;
+                    CLodStoreVisibleClusterGloballyCoherent(
+                        visibleClusters,
+                        hwGlobalBase + hwRank,
+                        b.viewId,
+                        b.instanceIndex,
+                        localMeshletIndex,
+                        visibleGroupId,
+                        b.pageSlabDescriptorIndex,
+                        b.pageSlabByteOffset);
                 }
             }
         }
@@ -1394,7 +1389,15 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 if (outputSW && (swRank < swAvail)) {
                     // Write visible cluster top-down from the end of the buffer.
                     const uint swIndex = visibleClusterCapacity - 1 - (swWriteBase + swBase + swRank);
-                    visibleClusters[swIndex] = vc;
+                    CLodStoreVisibleClusterGloballyCoherent(
+                        visibleClusters,
+                        swIndex,
+                        b.viewId,
+                        b.instanceIndex,
+                        localMeshletIndex,
+                        visibleGroupId,
+                        b.pageSlabDescriptorIndex,
+                        b.pageSlabByteOffset);
 
                     // Accumulate index into batch buffer.
 #if CLOD_WG_ENABLE_SW_NODE_OUTPUT
