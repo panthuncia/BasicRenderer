@@ -32,6 +32,8 @@ using namespace pxr;
 
 namespace {
 
+constexpr size_t kMaxSkinInfluences = 8u;
+
 // Interpolation
 
 enum class InterpolationType {
@@ -248,7 +250,7 @@ static void LoadGeom(
 	vertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3)
 		+ sizeof(DirectX::XMFLOAT2);
 	skinningVertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3)
-		+ sizeof(DirectX::XMUINT4) + sizeof(DirectX::XMFLOAT4);
+		+ sizeof(uint32_t) * kMaxSkinInfluences + sizeof(float) * kMaxSkinInfluences;
 
 	// subset face mask
 	std::vector<uint8_t> useFace(faceVertCounts.size(), 0);
@@ -394,7 +396,7 @@ static void LoadGeom(
 			usdPts.size(), &jointIndices, &jointWeights);
 
 		unsigned int influencesPerPoint = skinQ.value().GetNumInfluencesPerComponent();
-		unsigned short maxInfluencesPerJoint = 4;
+		unsigned short maxInfluencesPerJoint = static_cast<unsigned short>(kMaxSkinInfluences);
 		rawJoints.reserve(usdPts.size() * maxInfluencesPerJoint);
 		rawWeights.reserve(usdPts.size() * maxInfluencesPerJoint);
 
@@ -576,9 +578,9 @@ static void LoadGeom(
 						std::memcpy(skinPtr, outPtr, sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3));
 
 						const size_t jointsOffset = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3);
-						const size_t weightsOffset = jointsOffset + sizeof(DirectX::XMUINT4);
-						copyTupleUInt(skinPtr + jointsOffset, rawJoints, 4, jointInterp, f, fvIndex, vertIdx, warnedJointTupleRange, "jointIndices");
-						copyTupleFloat(skinPtr + weightsOffset, rawWeights, 4, weightInterp, f, fvIndex, vertIdx, warnedWeightTupleRange, "jointWeights");
+						const size_t weightsOffset = jointsOffset + sizeof(uint32_t) * kMaxSkinInfluences;
+						copyTupleUInt(skinPtr + jointsOffset, rawJoints, kMaxSkinInfluences, jointInterp, f, fvIndex, vertIdx, warnedJointTupleRange, "jointIndices");
+						copyTupleFloat(skinPtr + weightsOffset, rawWeights, kMaxSkinInfluences, weightInterp, f, fvIndex, vertIdx, warnedWeightTupleRange, "jointWeights");
 					}
 
 					indices.push_back(static_cast<UINT32>(outVertex));

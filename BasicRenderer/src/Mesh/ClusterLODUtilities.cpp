@@ -29,8 +29,17 @@ namespace
 	constexpr uint32_t CLOD_COMPRESSED_POSITIONS = 1u << 0;
 	constexpr uint32_t CLOD_COMPRESSED_MESHLET_VERTEX_INDICES = 1u << 1;
 	constexpr uint32_t CLOD_COMPRESSED_NORMALS = 1u << 2;
+	constexpr uint32_t kMaxSkinInfluences = 8u;
 	constexpr float CLOD_UV_QUANTIZATION_SCALE = 65535.0f;
 	constexpr float CLOD_UV_QUANTIZATION_INV_SCALE = 1.0f / CLOD_UV_QUANTIZATION_SCALE;
+
+	struct PackedSkinningInfluences
+	{
+		DirectX::XMUINT4 joints0{ 0, 0, 0, 0 };
+		DirectX::XMUINT4 joints1{ 0, 0, 0, 0 };
+		DirectX::XMFLOAT4 weights0{ 0, 0, 0, 0 };
+		DirectX::XMFLOAT4 weights1{ 0, 0, 0, 0 };
+	};
 
 	uint32_t BitsNeededForRange(uint32_t range)
 	{
@@ -117,11 +126,11 @@ namespace
 		}
 		if ((attributeMask & CLOD_PAGE_ATTRIBUTE_JOINTS) != 0u)
 		{
-			size = align4(size) + align4(static_cast<size_t>(totalVertexCount) * sizeof(DirectX::XMUINT4));
+			size = align4(size) + align4(static_cast<size_t>(totalVertexCount) * sizeof(DirectX::XMUINT4) * 2u);
 		}
 		if ((attributeMask & CLOD_PAGE_ATTRIBUTE_WEIGHTS) != 0u)
 		{
-			size = align4(size) + align4(static_cast<size_t>(totalVertexCount) * sizeof(DirectX::XMFLOAT4));
+			size = align4(size) + align4(static_cast<size_t>(totalVertexCount) * sizeof(DirectX::XMFLOAT4) * 2u);
 		}
 		if (pageUvSetCount > 0u)
 		{
@@ -774,20 +783,17 @@ namespace
 			groupUvSets.push_back(std::move(legacyUvSet));
 		}
 
-		std::vector<DirectX::XMUINT4> groupJointIndices;
-		std::vector<DirectX::XMFLOAT4> groupJointWeights;
+		std::vector<PackedSkinningInfluences> groupSkinningInfluences;
 		const bool hasSkinningStream =
 			(skinningVertices != nullptr) &&
-			(skinningVertexStrideBytes >= sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMUINT4) + sizeof(DirectX::XMFLOAT4)) &&
+			(skinningVertexStrideBytes >= sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + sizeof(PackedSkinningInfluences)) &&
 			!skinningVertices->empty();
 		const size_t sourceSkinningVertexCount =
 			(hasSkinningStream && skinningVertexStrideBytes > 0) ? (skinningVertices->size() / skinningVertexStrideBytes) : 0u;
 		if (hasSkinningStream)
 		{
 			constexpr size_t JointByteOffset = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3);
-			constexpr size_t WeightByteOffset = JointByteOffset + sizeof(DirectX::XMUINT4);
-			groupJointIndices.resize(groupLocalToGlobal.size(), DirectX::XMUINT4(0, 0, 0, 0));
-			groupJointWeights.resize(groupLocalToGlobal.size(), DirectX::XMFLOAT4(0, 0, 0, 0));
+			groupSkinningInfluences.resize(groupLocalToGlobal.size(), PackedSkinningInfluences{});
 
 			for (size_t groupVertexIndex = 0; groupVertexIndex < groupLocalToGlobal.size(); ++groupVertexIndex)
 			{
@@ -798,12 +804,9 @@ namespace
 				}
 
 				const size_t sourceByteOffset = static_cast<size_t>(globalVertexIndex) * skinningVertexStrideBytes;
-				std::memcpy(&groupJointIndices[groupVertexIndex],
+				std::memcpy(&groupSkinningInfluences[groupVertexIndex],
 					skinningVertices->data() + sourceByteOffset + JointByteOffset,
-					sizeof(DirectX::XMUINT4));
-				std::memcpy(&groupJointWeights[groupVertexIndex],
-					skinningVertices->data() + sourceByteOffset + WeightByteOffset,
-					sizeof(DirectX::XMFLOAT4));
+					sizeof(PackedSkinningInfluences));
 			}
 		}
 
@@ -918,11 +921,16 @@ namespace
 					for (uint32_t vi = 0; vi < meshlet.vertex_count; ++vi)
 					{
 						const uint32_t groupLocalVertex = output.meshletVertices[meshlet.vertex_offset + vi];
-						const DirectX::XMUINT4& joints = groupJointIndices[groupLocalVertex];
-						const DirectX::XMFLOAT4& weights = groupJointWeights[groupLocalVertex];
-						const uint32_t jointValues[4] = { joints.x, joints.y, joints.z, joints.w };
-						const float weightValues[4] = { weights.x, weights.y, weights.z, weights.w };
-						for (uint32_t influence = 0; influence < 4u; ++influence)
+						const PackedSkinningInfluences& skinning = groupSkinningInfluences[groupLocalVertex];
+						const uint32_t jointValues[kMaxSkinInfluences] = {
+							skinning.joints0.x, skinning.joints0.y, skinning.joints0.z, skinning.joints0.w,
+							skinning.joints1.x, skinning.joints1.y, skinning.joints1.z, skinning.joints1.w
+						};
+						const float weightValues[kMaxSkinInfluences] = {
+							skinning.weights0.x, skinning.weights0.y, skinning.weights0.z, skinning.weights0.w,
+							skinning.weights1.x, skinning.weights1.y, skinning.weights1.z, skinning.weights1.w
+						};
+						for (uint32_t influence = 0; influence < kMaxSkinInfluences; ++influence)
 						{
 							if (weightValues[influence] > 0.0f)
 							{
@@ -1183,11 +1191,11 @@ namespace
 				const uint32_t jointArrayOffset = pageHasJoints
 					? static_cast<uint32_t>(align4(pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes)))
 					: 0u;
-				const size_t jointBytes = pageHasJoints ? static_cast<size_t>(pageTotals.totalVertexCount) * sizeof(DirectX::XMUINT4) : 0u;
+				const size_t jointBytes = pageHasJoints ? static_cast<size_t>(pageTotals.totalVertexCount) * sizeof(DirectX::XMUINT4) * 2u : 0u;
 				const uint32_t weightArrayOffset = pageHasWeights
 					? static_cast<uint32_t>(align4(pageHasJoints ? (jointArrayOffset + jointBytes) : (pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes))))
 					: 0u;
-				const size_t weightBytes = pageHasWeights ? static_cast<size_t>(pageTotals.totalVertexCount) * sizeof(DirectX::XMFLOAT4) : 0u;
+				const size_t weightBytes = pageHasWeights ? static_cast<size_t>(pageTotals.totalVertexCount) * sizeof(DirectX::XMFLOAT4) * 2u : 0u;
 				const uint32_t uvBitstreamDirectoryOffset = pageHasUvSets
 					? static_cast<uint32_t>(align4(
 						pageHasWeights ? (weightArrayOffset + weightBytes) :
@@ -1314,28 +1322,28 @@ namespace
 					{
 						for (uint32_t vi = 0; vi < meshlet.vertex_count; ++vi)
 						{
-							DirectX::XMUINT4 joints(0, 0, 0, 0);
+							PackedSkinningInfluences skinning{};
 							if ((comp.attributeMask & CLOD_PAGE_ATTRIBUTE_JOINTS) != 0u)
 							{
 								const uint32_t gv = output.meshletVertices[meshlet.vertex_offset + vi];
-								joints = groupJointIndices[gv];
+								skinning = groupSkinningInfluences[gv];
 							}
-							std::memcpy(blob.data() + jointArrayOffset + static_cast<size_t>(vertexAttributeCursor + vi) * sizeof(DirectX::XMUINT4),
-								&joints, sizeof(DirectX::XMUINT4));
+							std::memcpy(blob.data() + jointArrayOffset + static_cast<size_t>(vertexAttributeCursor + vi) * sizeof(DirectX::XMUINT4) * 2u,
+								&skinning.joints0, sizeof(DirectX::XMUINT4) * 2u);
 						}
 					}
 					if (pageHasWeights)
 					{
 						for (uint32_t vi = 0; vi < meshlet.vertex_count; ++vi)
 						{
-							DirectX::XMFLOAT4 weights(0, 0, 0, 0);
+							PackedSkinningInfluences skinning{};
 							if ((comp.attributeMask & CLOD_PAGE_ATTRIBUTE_WEIGHTS) != 0u)
 							{
 								const uint32_t gv = output.meshletVertices[meshlet.vertex_offset + vi];
-								weights = groupJointWeights[gv];
+								skinning = groupSkinningInfluences[gv];
 							}
-							std::memcpy(blob.data() + weightArrayOffset + static_cast<size_t>(vertexAttributeCursor + vi) * sizeof(DirectX::XMFLOAT4),
-								&weights, sizeof(DirectX::XMFLOAT4));
+							std::memcpy(blob.data() + weightArrayOffset + static_cast<size_t>(vertexAttributeCursor + vi) * sizeof(DirectX::XMFLOAT4) * 2u,
+								&skinning.weights0, sizeof(DirectX::XMFLOAT4) * 2u);
 						}
 					}
 					if (!comp.boneList.empty())

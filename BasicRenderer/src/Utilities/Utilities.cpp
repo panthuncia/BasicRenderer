@@ -82,8 +82,10 @@ std::shared_ptr<Mesh> MeshFromData(MeshData&& meshData, std::wstring name, std::
             offset += sizeof(XMFLOAT2);
         }
     }
-    // position,       normal            joints,           weights
-    unsigned int skinningVertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3)  + sizeof(XMUINT4) + sizeof(XMFLOAT4);
+    constexpr size_t kMaxSkinInfluences = 8u;
+    // position,       normal            joints[8],        weights[8]
+    unsigned int skinningVertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3)
+        + static_cast<unsigned int>(sizeof(uint32_t) * kMaxSkinInfluences + sizeof(float) * kMaxSkinInfluences);
     std::unique_ptr<std::vector<std::byte>> skinningData = std::make_unique<std::vector<std::byte>>();
     if (hasJoints) {
         skinningData->resize(numVertices * skinningVertexSize);
@@ -93,9 +95,18 @@ std::shared_ptr<Mesh> MeshFromData(MeshData&& meshData, std::wstring name, std::
             size_t offset = sizeof(XMFLOAT3);
             memcpy(skinningData->data() + baseOffset + offset, &meshData.normals[i * 3], sizeof(XMFLOAT3));
             offset += sizeof(XMFLOAT3);
-            memcpy(skinningData->data() + baseOffset + offset, &meshData.joints[i * 4], sizeof(XMUINT4));
-            offset += sizeof(XMUINT4);
-            memcpy(skinningData->data() + baseOffset + offset, &meshData.weights[i * 4], sizeof(XMFLOAT4));
+            const size_t availableJointCount = meshData.joints.size() / numVertices;
+            const size_t availableWeightCount = meshData.weights.size() / numVertices;
+            const size_t influenceCount = std::min({ kMaxSkinInfluences, availableJointCount, availableWeightCount });
+            std::array<uint32_t, kMaxSkinInfluences> joints{};
+            std::array<float, kMaxSkinInfluences> weights{};
+            for (size_t influenceIndex = 0; influenceIndex < influenceCount; ++influenceIndex) {
+                joints[influenceIndex] = meshData.joints[i * availableJointCount + influenceIndex];
+                weights[influenceIndex] = meshData.weights[i * availableWeightCount + influenceIndex];
+            }
+            memcpy(skinningData->data() + baseOffset + offset, joints.data(), sizeof(uint32_t) * kMaxSkinInfluences);
+            offset += sizeof(uint32_t) * kMaxSkinInfluences;
+            memcpy(skinningData->data() + baseOffset + offset, weights.data(), sizeof(float) * kMaxSkinInfluences);
         }
     }
 

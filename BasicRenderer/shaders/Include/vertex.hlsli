@@ -4,12 +4,19 @@
 #include "include/loadingUtils.hlsli"
 
 // Manually assembled from ByteAddressBuffer
+struct SkinningInfluences
+{
+    uint4 joints0;
+    uint4 joints1;
+    float4 weights0;
+    float4 weights1;
+};
+
 struct Vertex {
-    float3 position : POSITION;
-    float3 normal : NORMAL;
-    float2 texcoord : TEXCOORD0;
-    uint4 joints : TEXCOORD1;
-    float4 weights : TEXCOORD2;
+    float3 position;
+    float3 normal;
+    float2 texcoord;
+    SkinningInfluences skinning;
     float3 color;
 };
 
@@ -32,10 +39,19 @@ Vertex LoadVertex(uint byteOffset, ByteAddressBuffer buffer, uint flags) {
     vertex.normal = LoadFloat3(byteOffset, buffer);
     byteOffset += 12;
 
+    vertex.skinning.joints0 = uint4(0, 0, 0, 0);
+    vertex.skinning.joints1 = uint4(0, 0, 0, 0);
+    vertex.skinning.weights0 = float4(0.0, 0.0, 0.0, 0.0);
+    vertex.skinning.weights1 = float4(0.0, 0.0, 0.0, 0.0);
+
     if (flags & VERTEX_TEXCOORDS) {
         // Load texcoord (float2, 8 bytes)
         vertex.texcoord = LoadFloat2(byteOffset, buffer);
         byteOffset += 8;
+    }
+    else
+    {
+        vertex.texcoord = float2(0.0, 0.0);
     }
 
     vertex.color = float3(1.0, 1.0, 1.0);
@@ -55,16 +71,28 @@ Vertex LoadSkinningVertex(uint byteOffset, ByteAddressBuffer buffer, uint flags)
     vertex.normal = LoadFloat3(byteOffset, buffer);
     byteOffset += 12;
 
+    vertex.texcoord = float2(0.0, 0.0);
+    vertex.skinning.joints0 = uint4(0, 0, 0, 0);
+    vertex.skinning.joints1 = uint4(0, 0, 0, 0);
+    vertex.skinning.weights0 = float4(0.0, 0.0, 0.0, 0.0);
+    vertex.skinning.weights1 = float4(0.0, 0.0, 0.0, 0.0);
+
     if (flags & VERTEX_SKINNED) {
-        // Load joints (uint4, 16 bytes)
-        vertex.joints = LoadUint4(byteOffset, buffer);
+        // Load joints (uint4x2, 32 bytes)
+        vertex.skinning.joints0 = LoadUint4(byteOffset, buffer);
+        byteOffset += 16;
+        vertex.skinning.joints1 = LoadUint4(byteOffset, buffer);
         byteOffset += 16;
 
-        // Load weights (float4, 16 bytes)
-        vertex.weights = LoadFloat4(byteOffset, buffer);
+        // Load weights (float4x2, 32 bytes)
+        vertex.skinning.weights0 = LoadFloat4(byteOffset, buffer);
+        byteOffset += 16;
+        vertex.skinning.weights1 = LoadFloat4(byteOffset, buffer);
         byteOffset += 16;
     }
     
+    vertex.color = float3(1.0, 1.0, 1.0);
+
     return vertex;
 }
 

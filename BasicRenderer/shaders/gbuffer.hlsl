@@ -329,28 +329,38 @@ float3 DecodeCompressedNormal(uint meshletLocalVertex, MeshletResolveData d)
     return OctDecodeNormal(UnpackSnorm16x2(packed));
 }
 
-uint4 DecodePackedJoints(uint meshletLocalVertex, MeshletResolveData d)
+SkinningInfluences DecodePackedJoints(uint meshletLocalVertex, MeshletResolveData d)
 {
+    SkinningInfluences skinning;
+    skinning.joints0 = uint4(0, 0, 0, 0);
+    skinning.joints1 = uint4(0, 0, 0, 0);
+    skinning.weights0 = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    skinning.weights1 = float4(0.0f, 0.0f, 0.0f, 0.0f);
+
     if ((d.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_JOINTS) == 0u)
     {
-        return uint4(0, 0, 0, 0);
+        return skinning;
     }
 
     ByteAddressBuffer slab = ResourceDescriptorHeap[d.pagePoolSlabDescriptorIndex];
-    uint addr = d.jointArrayBase + (d.vertexAttributeOffset + meshletLocalVertex) * 16u;
-    return LoadUint4(addr, slab);
+    uint addr = d.jointArrayBase + (d.vertexAttributeOffset + meshletLocalVertex) * 32u;
+    skinning.joints0 = LoadUint4(addr, slab);
+    skinning.joints1 = LoadUint4(addr + 16u, slab);
+    return skinning;
 }
 
-float4 DecodePackedWeights(uint meshletLocalVertex, MeshletResolveData d)
+SkinningInfluences DecodePackedWeights(uint meshletLocalVertex, MeshletResolveData d, SkinningInfluences skinning)
 {
     if ((d.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_WEIGHTS) == 0u)
     {
-        return float4(0.0f, 0.0f, 0.0f, 0.0f);
+        return skinning;
     }
 
     ByteAddressBuffer slab = ResourceDescriptorHeap[d.pagePoolSlabDescriptorIndex];
-    uint addr = d.weightArrayBase + (d.vertexAttributeOffset + meshletLocalVertex) * 16u;
-    return LoadFloat4(addr, slab);
+    uint addr = d.weightArrayBase + (d.vertexAttributeOffset + meshletLocalVertex) * 32u;
+    skinning.weights0 = LoadFloat4(addr, slab);
+    skinning.weights1 = LoadFloat4(addr + 16u, slab);
+    return skinning;
 }
 
 void ApplyClodSkinning(uint meshletLocalVertex, MeshletResolveData d, inout float3 positionOS, inout float3 normalOS)
@@ -360,9 +370,9 @@ void ApplyClodSkinning(uint meshletLocalVertex, MeshletResolveData d, inout floa
         return;
     }
 
-    uint4 joints = DecodePackedJoints(meshletLocalVertex, d);
-    float4 weights = DecodePackedWeights(meshletLocalVertex, d);
-    float4x4 skinMatrix = BuildSkinMatrix(d.skinningInstanceSlot, joints, weights);
+    SkinningInfluences skinning = DecodePackedJoints(meshletLocalVertex, d);
+    skinning = DecodePackedWeights(meshletLocalVertex, d, skinning);
+    float4x4 skinMatrix = BuildSkinMatrix(d.skinningInstanceSlot, skinning);
     positionOS = mul(float4(positionOS, 1.0f), skinMatrix).xyz;
     normalOS = mul(normalOS, (float3x3)skinMatrix);
 }

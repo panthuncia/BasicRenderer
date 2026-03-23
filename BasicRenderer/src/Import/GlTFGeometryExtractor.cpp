@@ -34,6 +34,16 @@ using namespace DirectX;
 
 namespace {
 
+constexpr uint32_t kMaxSkinInfluences = 8u;
+
+struct PackedSkinningInfluences
+{
+	XMUINT4 joints0{ 0, 0, 0, 0 };
+	XMUINT4 joints1{ 0, 0, 0, 0 };
+	XMFLOAT4 weights0{ 0, 0, 0, 0 };
+	XMFLOAT4 weights1{ 0, 0, 0, 0 };
+};
+
 // Internal types
 
 struct GLBHeader {
@@ -905,12 +915,21 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 	if (hasJointIndices != hasJointWeights) {
 		throw std::runtime_error("glTF primitive skinning requires both JOINTS_0 and WEIGHTS_0");
 	}
+	const bool hasJointIndices1 = attributes.contains("JOINTS_1");
+	const bool hasJointWeights1 = attributes.contains("WEIGHTS_1");
+	if (hasJointIndices1 != hasJointWeights1) {
+		throw std::runtime_error("glTF primitive skinning requires both JOINTS_1 and WEIGHTS_1 when using secondary influences");
+	}
 
 	bool hasSkinning = false;
 	size_t jointAccessorIndex = 0;
 	size_t weightAccessorIndex = 0;
+	size_t jointAccessorIndex1 = 0;
+	size_t weightAccessorIndex1 = 0;
 	AccessorInfo jointAccessor;
 	AccessorInfo weightAccessor;
+	AccessorInfo jointAccessor1;
+	AccessorInfo weightAccessor1;
 	if (hasJointIndices && hasJointWeights) {
 		jointAccessorIndex = attributes["JOINTS_0"].get<size_t>();
 		weightAccessorIndex = attributes["WEIGHTS_0"].get<size_t>();
@@ -928,8 +947,20 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 		hasSkinning = true;
 	}
 
-	if (attributes.contains("JOINTS_1") || attributes.contains("WEIGHTS_1")) {
-		spdlog::warn("glTF mesh {} primitive {} uses JOINTS_1/WEIGHTS_1; extra influences beyond 4 are ignored", meshIndex, primitiveIndex);
+	if (hasJointIndices1 && hasJointWeights1) {
+		jointAccessorIndex1 = attributes["JOINTS_1"].get<size_t>();
+		weightAccessorIndex1 = attributes["WEIGHTS_1"].get<size_t>();
+		jointAccessor1 = GetAccessorInfo(doc.gltf, jointAccessorIndex1);
+		weightAccessor1 = GetAccessorInfo(doc.gltf, weightAccessorIndex1);
+		if (jointAccessor1.count != vertexCount || weightAccessor1.count != vertexCount) {
+			throw std::runtime_error("glTF secondary skinning accessor count mismatch");
+		}
+		if (NumComponentsForType(jointAccessor1.type) != 4 || NumComponentsForType(weightAccessor1.type) != 4) {
+			throw std::runtime_error("glTF JOINTS_1 and WEIGHTS_1 accessors must be VEC4");
+		}
+		if (jointAccessor1.componentType != 5121 && jointAccessor1.componentType != 5123) {
+			throw std::runtime_error("glTF JOINTS_1 must use UNSIGNED_BYTE or UNSIGNED_SHORT");
+		}
 	}
 
     std::map<uint32_t, size_t> texcoordAccessorIndices;
@@ -957,7 +988,7 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 
 	const uint8_t vertexSize = static_cast<uint8_t>(sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0));
 	const unsigned int skinningVertexSize = hasSkinning
-		? static_cast<unsigned int>(sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + sizeof(XMUINT4) + sizeof(XMFLOAT4))
+		? static_cast<unsigned int>(sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + sizeof(PackedSkinningInfluences))
 		: 0u;
 
 	CLodCacheLoader::MeshCacheIdentity cacheIdentity{};
@@ -1054,9 +1085,18 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 		int jointComponentType = 0;
 		std::vector<uint8_t> jointBytes;
 		size_t jointComponentBytes = 0;
+		size_t jointStride1 = 0;
+		size_t jointComponents1 = 0;
+		int jointComponentType1 = 0;
+		std::vector<uint8_t> jointBytes1;
+		size_t jointComponentBytes1 = 0;
 		if (hasSkinning) {
 			jointBytes = ReadAccessorRawWindow(doc, jointAccessorIndex, firstVertex, chunkVertexCount, &jointStride, &jointComponents, &jointComponentType);
 			jointComponentBytes = BytesPerComponent(jointComponentType);
+			if (hasJointIndices1 && hasJointWeights1) {
+				jointBytes1 = ReadAccessorRawWindow(doc, jointAccessorIndex1, firstVertex, chunkVertexCount, &jointStride1, &jointComponents1, &jointComponentType1);
+				jointComponentBytes1 = BytesPerComponent(jointComponentType1);
+			}
 		}
 
 		size_t weightStride = 0;
@@ -1064,9 +1104,18 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 		int weightComponentType = 0;
 		std::vector<uint8_t> weightBytes;
 		size_t weightComponentBytes = 0;
+		size_t weightStride1 = 0;
+		size_t weightComponents1 = 0;
+		int weightComponentType1 = 0;
+		std::vector<uint8_t> weightBytes1;
+		size_t weightComponentBytes1 = 0;
 		if (hasSkinning) {
 			weightBytes = ReadAccessorRawWindow(doc, weightAccessorIndex, firstVertex, chunkVertexCount, &weightStride, &weightComponents, &weightComponentType);
 			weightComponentBytes = BytesPerComponent(weightComponentType);
+			if (hasJointIndices1 && hasJointWeights1) {
+				weightBytes1 = ReadAccessorRawWindow(doc, weightAccessorIndex1, firstVertex, chunkVertexCount, &weightStride1, &weightComponents1, &weightComponentType1);
+				weightComponentBytes1 = BytesPerComponent(weightComponentType1);
+			}
 		}
 
 		for (size_t i = 0; i < chunkVertexCount; ++i) {
@@ -1109,47 +1158,67 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 			if (hasSkinning) {
 				const size_t jointBase = i * jointStride;
 				const size_t weightBase = i * weightStride;
+				const size_t jointBase1 = i * jointStride1;
+				const size_t weightBase1 = i * weightStride1;
 
-				XMUINT4 joints{};
-				XMFLOAT4 weights{};
+				uint32_t joints[8] = {};
+				float weights[8] = {};
 				float weightSum = 0.0f;
 				for (size_t componentIndex = 0; componentIndex < 4; ++componentIndex) {
-					reinterpret_cast<uint32_t*>(&joints)[componentIndex] = static_cast<uint32_t>(ReadComponentAsDouble(
+					joints[componentIndex] = static_cast<uint32_t>(ReadComponentAsDouble(
 						jointBytes,
 						jointComponentType,
 						jointBase + jointComponentBytes * componentIndex,
 						jointAccessor.normalized));
-					reinterpret_cast<float*>(&weights)[componentIndex] = static_cast<float>(ReadComponentAsDouble(
+					weights[componentIndex] = static_cast<float>(ReadComponentAsDouble(
 						weightBytes,
 						weightComponentType,
 						weightBase + weightComponentBytes * componentIndex,
 						weightAccessor.normalized));
-					weightSum += reinterpret_cast<float*>(&weights)[componentIndex];
+					weightSum += weights[componentIndex];
+				}
+				if (hasJointIndices1 && hasJointWeights1) {
+					for (size_t componentIndex = 0; componentIndex < 4; ++componentIndex) {
+						joints[componentIndex + 4] = static_cast<uint32_t>(ReadComponentAsDouble(
+							jointBytes1,
+							jointComponentType1,
+							jointBase1 + jointComponentBytes1 * componentIndex,
+							jointAccessor1.normalized));
+						weights[componentIndex + 4] = static_cast<float>(ReadComponentAsDouble(
+							weightBytes1,
+							weightComponentType1,
+							weightBase1 + weightComponentBytes1 * componentIndex,
+							weightAccessor1.normalized));
+						weightSum += weights[componentIndex + 4];
+					}
 				}
 
 				if (weightSum > 0.0f) {
 					const float invWeightSum = 1.0f / weightSum;
-					weights.x *= invWeightSum;
-					weights.y *= invWeightSum;
-					weights.z *= invWeightSum;
-					weights.w *= invWeightSum;
+					for (float& weight : weights) {
+						weight *= invWeightSum;
+					}
 				}
 				else {
 					if (!warnedZeroWeightVertex) {
 						spdlog::warn("glTF mesh {} primitive {} has vertices with zero total skin weight; defaulting the first weight to 1", meshIndex, primitiveIndex);
 						warnedZeroWeightVertex = true;
 					}
-					weights = XMFLOAT4(1.0f, 0.0f, 0.0f, 0.0f);
+					weights[0] = 1.0f;
 				}
 
-				std::array<std::byte, sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + sizeof(XMUINT4) + sizeof(XMFLOAT4)> packedSkinningVertex{};
+				PackedSkinningInfluences packedInfluences;
+				packedInfluences.joints0 = XMUINT4(joints[0], joints[1], joints[2], joints[3]);
+				packedInfluences.joints1 = XMUINT4(joints[4], joints[5], joints[6], joints[7]);
+				packedInfluences.weights0 = XMFLOAT4(weights[0], weights[1], weights[2], weights[3]);
+				packedInfluences.weights1 = XMFLOAT4(weights[4], weights[5], weights[6], weights[7]);
+
+				std::array<std::byte, sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + sizeof(PackedSkinningInfluences)> packedSkinningVertex{};
 				std::memcpy(packedSkinningVertex.data(), &pos, sizeof(XMFLOAT3));
 				size_t skinningOffset = sizeof(XMFLOAT3);
 				std::memcpy(packedSkinningVertex.data() + skinningOffset, &normal, sizeof(XMFLOAT3));
 				skinningOffset += sizeof(XMFLOAT3);
-				std::memcpy(packedSkinningVertex.data() + skinningOffset, &joints, sizeof(XMUINT4));
-				skinningOffset += sizeof(XMUINT4);
-				std::memcpy(packedSkinningVertex.data() + skinningOffset, &weights, sizeof(XMFLOAT4));
+				std::memcpy(packedSkinningVertex.data() + skinningOffset, &packedInfluences, sizeof(PackedSkinningInfluences));
 				ingest.AppendSkinningVertexBytes(packedSkinningVertex.data(), skinningVertexSize);
 			}
 		}

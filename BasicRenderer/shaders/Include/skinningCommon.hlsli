@@ -2,6 +2,7 @@
 #define __SKINNING_COMMON_HLSLI__
 
 #include "structs.hlsli"
+#include "vertex.hlsli"
 
 bool IsValidSkinningInstanceSlot(uint skinningInstanceSlot)
 {
@@ -40,22 +41,31 @@ float4x4 LoadBoneSkinMatrix(uint skinningInstanceSlot, uint jointIndex)
     return transpose(mul(bone, bind));
 }
 
-float4x4 BuildSkinMatrix(uint skinningInstanceSlot, uint4 joints, float4 weights)
+float4x4 IdentitySkinMatrix()
+{
+    return float4x4(
+        1.0f, 0.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 0.0f, 1.0f);
+}
+
+float4x4 BuildSkinMatrix(uint skinningInstanceSlot, SkinningInfluences skinning)
 {
     if (!IsValidSkinningInstanceSlot(skinningInstanceSlot))
     {
-        return float4x4(
-            1.0f, 0.0f, 0.0f, 0.0f,
-            0.0f, 1.0f, 0.0f, 0.0f,
-            0.0f, 0.0f, 1.0f, 0.0f,
-            0.0f, 0.0f, 0.0f, 1.0f);
+        return IdentitySkinMatrix();
     }
 
     return
-        weights.x * LoadBoneSkinMatrix(skinningInstanceSlot, joints.x) +
-        weights.y * LoadBoneSkinMatrix(skinningInstanceSlot, joints.y) +
-        weights.z * LoadBoneSkinMatrix(skinningInstanceSlot, joints.z) +
-        weights.w * LoadBoneSkinMatrix(skinningInstanceSlot, joints.w);
+        skinning.weights0.x * LoadBoneSkinMatrix(skinningInstanceSlot, skinning.joints0.x) +
+        skinning.weights0.y * LoadBoneSkinMatrix(skinningInstanceSlot, skinning.joints0.y) +
+        skinning.weights0.z * LoadBoneSkinMatrix(skinningInstanceSlot, skinning.joints0.z) +
+        skinning.weights0.w * LoadBoneSkinMatrix(skinningInstanceSlot, skinning.joints0.w) +
+        skinning.weights1.x * LoadBoneSkinMatrix(skinningInstanceSlot, skinning.joints1.x) +
+        skinning.weights1.y * LoadBoneSkinMatrix(skinningInstanceSlot, skinning.joints1.y) +
+        skinning.weights1.z * LoadBoneSkinMatrix(skinningInstanceSlot, skinning.joints1.z) +
+        skinning.weights1.w * LoadBoneSkinMatrix(skinningInstanceSlot, skinning.joints1.w);
 }
 
 #endif // __SKINNING_COMMON_HLSLI__

@@ -179,38 +179,49 @@ float2 SWDecodeCompressedUV(
         uvDesc.uvMinV + float(encodedV) * uvDesc.uvScaleV);
 }
 
-uint4 SWDecodePackedJoints(
+SkinningInfluences SWDecodePackedJoints(
     uint meshletLocalVertex,
     CLodPageHeader hdr,
     CLodMeshletDescriptor desc,
     uint pageByteOffset,
     uint pagePoolSlabDescriptorIndex)
 {
+    SkinningInfluences skinning;
+    skinning.joints0 = uint4(0, 0, 0, 0);
+    skinning.joints1 = uint4(0, 0, 0, 0);
+    skinning.weights0 = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    skinning.weights1 = float4(0.0f, 0.0f, 0.0f, 0.0f);
+
     if ((hdr.attributeMask & CLOD_PAGE_ATTRIBUTE_JOINTS) == 0u)
     {
-        return uint4(0, 0, 0, 0);
+        return skinning;
     }
 
     ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
-    uint addr = pageByteOffset + hdr.jointArrayOffset + (desc.vertexAttributeOffset + meshletLocalVertex) * 16u;
-    return LoadUint4(addr, slab);
+    uint addr = pageByteOffset + hdr.jointArrayOffset + (desc.vertexAttributeOffset + meshletLocalVertex) * 32u;
+    skinning.joints0 = LoadUint4(addr, slab);
+    skinning.joints1 = LoadUint4(addr + 16u, slab);
+    return skinning;
 }
 
-float4 SWDecodePackedWeights(
+SkinningInfluences SWDecodePackedWeights(
     uint meshletLocalVertex,
     CLodPageHeader hdr,
     CLodMeshletDescriptor desc,
     uint pageByteOffset,
-    uint pagePoolSlabDescriptorIndex)
+    uint pagePoolSlabDescriptorIndex,
+    SkinningInfluences skinning)
 {
     if ((hdr.attributeMask & CLOD_PAGE_ATTRIBUTE_WEIGHTS) == 0u)
     {
-        return float4(0.0f, 0.0f, 0.0f, 0.0f);
+        return skinning;
     }
 
     ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
-    uint addr = pageByteOffset + hdr.weightArrayOffset + (desc.vertexAttributeOffset + meshletLocalVertex) * 16u;
-    return LoadFloat4(addr, slab);
+    uint addr = pageByteOffset + hdr.weightArrayOffset + (desc.vertexAttributeOffset + meshletLocalVertex) * 32u;
+    skinning.weights0 = LoadFloat4(addr, slab);
+    skinning.weights1 = LoadFloat4(addr + 16u, slab);
+    return skinning;
 }
 
 void SWRasterCluster(
@@ -274,9 +285,9 @@ void SWRasterCluster(
             pageSlabDescriptorIndex);
         if ((perMeshBuffer[meshInst.perMeshBufferIndex].vertexFlags & VERTEX_SKINNED) != 0u)
         {
-            uint4 joints = SWDecodePackedJoints(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex);
-            float4 weights = SWDecodePackedWeights(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex);
-            localPos = mul(float4(localPos, 1.0f), BuildSkinMatrix(meshInst.skinningInstanceSlot, joints, weights)).xyz;
+            SkinningInfluences skinning = SWDecodePackedJoints(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex);
+            skinning = SWDecodePackedWeights(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex, skinning);
+            localPos = mul(float4(localPos, 1.0f), BuildSkinMatrix(meshInst.skinningInstanceSlot, skinning)).xyz;
         }
 
         float4 localPos4 = float4(localPos, 1.0f);

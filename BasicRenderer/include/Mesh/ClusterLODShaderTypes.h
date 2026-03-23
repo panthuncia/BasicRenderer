@@ -30,8 +30,8 @@ struct CLodPageHeader
 	uint32_t uvDescriptorOffset = 0;      // [5] byte offset to CLodMeshletUvDescriptor table
 	uint32_t positionBitstreamOffset = 0; // [6] byte offset to position bitstream
 	uint32_t normalArrayOffset = 0;       // [7] byte offset to normal array (oct-encoded uint32 per vertex)
-	uint32_t jointArrayOffset = 0;        // [8] byte offset to uint4 joint array
-	uint32_t weightArrayOffset = 0;       // [9] byte offset to float4 weight array
+	uint32_t jointArrayOffset = 0;        // [8] byte offset to two-uint4 joint array per vertex
+	uint32_t weightArrayOffset = 0;       // [9] byte offset to two-float4 weight array per vertex
 	uint32_t uvBitstreamDirectoryOffset = 0; // [10] byte offset to UV bitstream offset table
 	uint32_t triangleStreamOffset = 0;    // [11] byte offset to triangle byte stream
 	uint32_t boneIndexStreamOffset = 0;   // [12] byte offset to page-local meshlet bone-index stream

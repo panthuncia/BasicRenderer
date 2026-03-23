@@ -42,8 +42,8 @@ struct CLodPageHeader
     uint uvDescriptorOffset;          // [5] byte offset to CLodMeshletUvDescriptor table
     uint positionBitstreamOffset;     // [6] byte offset to position bitstream
     uint normalArrayOffset;           // [7] byte offset to normal array
-    uint jointArrayOffset;            // [8] byte offset to uint4 joint array
-    uint weightArrayOffset;           // [9] byte offset to float4 weight array
+    uint jointArrayOffset;            // [8] byte offset to two-uint4 joint array per vertex
+    uint weightArrayOffset;           // [9] byte offset to two-float4 weight array per vertex
     uint uvBitstreamDirectoryOffset;  // [10] byte offset to UV bitstream offset table
     uint triangleStreamOffset;        // [11] byte offset to triangle byte stream
     uint boneIndexStreamOffset;       // [12] byte offset to page-local bone-index stream
