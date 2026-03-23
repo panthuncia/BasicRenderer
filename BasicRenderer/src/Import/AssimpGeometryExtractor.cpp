@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <utility>
 
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
@@ -46,6 +47,22 @@ ExtractionResult ExtractAll(const aiScene* pScene, const std::string& sourceFile
 		const bool hasBones = aMesh->HasBones();
 		const bool hasNormals = aMesh->HasNormals();
 		const bool hasTexcoords = aMesh->HasTextureCoords(0);
+        std::vector<MeshUvSetData> uvSets;
+        for (unsigned int uvSetIndex = 0; uvSetIndex < AI_MAX_NUMBER_OF_TEXTURECOORDS; ++uvSetIndex) {
+            if (!aMesh->HasTextureCoords(uvSetIndex)) {
+                continue;
+            }
+
+            MeshUvSetData uvSet;
+            uvSet.name = "UV" + std::to_string(uvSetIndex);
+            uvSet.values.reserve(aMesh->mNumVertices);
+            for (uint32_t v = 0; v < static_cast<uint32_t>(aMesh->mNumVertices); ++v) {
+                uvSet.values.push_back(DirectX::XMFLOAT2{
+                    aMesh->mTextureCoords[uvSetIndex][v].x,
+                    -aMesh->mTextureCoords[uvSetIndex][v].y });
+            }
+            uvSets.push_back(std::move(uvSet));
+        }
 
 		const uint32_t numVertices = static_cast<uint32_t>(aMesh->mNumVertices);
 		const unsigned int vertexSize = static_cast<unsigned int>(
@@ -144,6 +161,7 @@ ExtractionResult ExtractAll(const aiScene* pScene, const std::string& sourceFile
 
 		// Populate MeshIngestBuilder
 		MeshIngestBuilder ingest(vertexSize, hasBones ? skinningVertexSize : 0, meshFlags);
+        ingest.SetUvSets(std::move(uvSets));
 		ingest.ReserveVertices(numVertices);
 		if (hasBones) {
 			ingest.ReserveVertices(numVertices);

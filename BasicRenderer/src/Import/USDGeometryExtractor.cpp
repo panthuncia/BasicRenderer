@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <set>
 #include <algorithm>
 
 #include <pxr/usd/usd/primRange.h>
@@ -188,10 +189,11 @@ static void LoadGeom(
 	unsigned int& skinningVertexSize,
 	std::vector<UINT32>& indices,
 	unsigned int& vertexFlags,
+    std::vector<MeshUvSetData>& uvSets,
 	const UsdGeomMesh& mesh,
 	const std::optional<UsdGeomSubset> subset,
 	double metersPerUnit,
-	const std::string& uvSetName,
+	const std::vector<std::string>& requiredUvSetNames,
 	const std::optional<UsdSkelSkinningQuery>& skinQ,
 	const VtTokenArray& skelJointOrderRaw,
 	const VtTokenArray& skelJointOrderMapped)
@@ -200,6 +202,8 @@ static void LoadGeom(
 	skinningData.reset();
 	indices.clear();
 	vertexFlags = 0;
+    uvSets.clear();
+    (void)requiredUvSetNames;
 
 	// If we have a skeleton, build joint mappings
 	std::unordered_map<unsigned int, unsigned int> jointMapping;
@@ -294,23 +298,63 @@ static void LoadGeom(
 	if (gotNormals && !generatedSmoothNormals)
 		normInterp = GetInterpolationType(mesh.GetNormalsInterpolation());
 
-	// texcoords
-	UsdAttribute tcAttr = mesh.GetPrim().GetAttribute(TfToken("primvars:" + uvSetName));
-	UsdGeomPrimvar uvPrim(tcAttr);
-	VtArray<GfVec2f> usdTC;
-	bool gotTC = (uvPrim && uvPrim.ComputeFlattened(&usdTC));
-	InterpolationType tcInterp = gotTC
-		? GetInterpolationType(uvPrim.GetInterpolation())
-		: InterpolationType::Vertex;
-	std::vector<float> rawTC;
-	if (gotTC) {
-		rawTC.reserve(usdTC.size() * 2);
-		for (auto const& uv : usdTC) {
-			rawTC.push_back(float(uv[0]));
-			rawTC.push_back(1.0f - float(uv[1]));
-		}
-		vertexFlags |= VertexFlags::VERTEX_TEXCOORDS;
-	}
+    std::vector<std::string> uvSetNames;
+    uvSetNames.push_back("st");
+    {
+        std::set<std::string> remainingNames;
+        UsdGeomPrimvarsAPI primvarsAPI(mesh);
+        for (const UsdGeomPrimvar& primvar : primvarsAPI.GetPrimvars()) {
+            if (!primvar) {
+                continue;
+            }
+
+            const auto typeName = primvar.GetTypeName();
+            if (typeName != SdfValueTypeNames->TexCoord2fArray &&
+                typeName != SdfValueTypeNames->Float2Array) {
+                continue;
+            }
+
+            const std::string primvarName = primvar.GetPrimvarName().GetString();
+            if (primvarName == "st") {
+                continue;
+            }
+
+            remainingNames.insert(primvarName);
+        }
+
+        uvSetNames.insert(uvSetNames.end(), remainingNames.begin(), remainingNames.end());
+    }
+
+    struct UvSetBuildData {
+        MeshUvSetData uvSet;
+        bool available = false;
+        InterpolationType interpolation = InterpolationType::Vertex;
+        std::vector<float> rawData;
+    };
+
+    std::vector<UvSetBuildData> uvSetBuildData;
+    uvSetBuildData.reserve(uvSetNames.size());
+    for (const std::string& uvSetName : uvSetNames) {
+        UvSetBuildData uvData;
+        uvData.uvSet.name = uvSetName;
+
+        UsdAttribute tcAttr = mesh.GetPrim().GetAttribute(TfToken("primvars:" + uvSetName));
+        UsdGeomPrimvar uvPrim(tcAttr);
+        VtArray<GfVec2f> usdTC;
+        uvData.available = (uvPrim && uvPrim.ComputeFlattened(&usdTC));
+        uvData.interpolation = uvData.available ? GetInterpolationType(uvPrim.GetInterpolation()) : InterpolationType::Vertex;
+        if (uvData.available) {
+            uvData.rawData.reserve(usdTC.size() * 2);
+            for (auto const& uv : usdTC) {
+                uvData.rawData.push_back(float(uv[0]));
+                uvData.rawData.push_back(1.0f - float(uv[1]));
+            }
+        }
+
+        uvSetBuildData.push_back(std::move(uvData));
+    }
+
+    vertexFlags |= VertexFlags::VERTEX_TEXCOORDS;
 
 	// skinning
 	UsdSkelBindingAPI bindAPI(mesh.GetPrim());
@@ -364,7 +408,7 @@ static void LoadGeom(
 
 	// allocate output buffers
 	vertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3)
-		+ (gotTC ? sizeof(DirectX::XMFLOAT2) : 0);
+		+ sizeof(DirectX::XMFLOAT2);
 	skinningVertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3)
 		+ sizeof(DirectX::XMUINT4) + sizeof(DirectX::XMFLOAT4);
 	rawData->resize(cornerCount * vertexSize);
@@ -432,8 +476,11 @@ static void LoadGeom(
 						std::memcpy(outPtr + offset, &defaultNormal, sizeof(defaultNormal));
 					offset += sizeof(DirectX::XMFLOAT3);
 
-					if (gotTC)
-						copyTupleFloat(outPtr + offset, rawTC, 2, tcInterp, f, fvIndex, vertIdx);
+                    DirectX::XMFLOAT2 packedUv = { 0.0f, 0.0f };
+                    if (!uvSetBuildData.empty() && uvSetBuildData[0].available) {
+                        copyTupleFloat(reinterpret_cast<std::byte*>(&packedUv), uvSetBuildData[0].rawData, 2, uvSetBuildData[0].interpolation, f, fvIndex, vertIdx);
+                    }
+                    std::memcpy(outPtr + offset, &packedUv, sizeof(packedUv));
 
 					if (hasSkinning) {
 						std::byte* skinPtr = skinningData.value()->data() + outVertex * skinningVertexSize;
@@ -447,6 +494,17 @@ static void LoadGeom(
 
 					indices.push_back(static_cast<UINT32>(outVertex));
 					outVertex++;
+                    for (size_t uvSetIndex = 0; uvSetIndex < uvSetBuildData.size(); ++uvSetIndex) {
+                        DirectX::XMFLOAT2 uvValue = { 0.0f, 0.0f };
+                        if (uvSetBuildData[uvSetIndex].available) {
+                            copyTupleFloat(reinterpret_cast<std::byte*>(&uvValue), uvSetBuildData[uvSetIndex].rawData, 2, uvSetBuildData[uvSetIndex].interpolation, f, fvIndex, vertIdx);
+                        }
+                        if (uvSets.size() <= uvSetIndex) {
+                            uvSets.resize(uvSetIndex + 1u);
+                            uvSets[uvSetIndex].name = uvSetBuildData[uvSetIndex].uvSet.name;
+                        }
+                        uvSets[uvSetIndex].values.push_back(uvValue);
+                    }
 				}
 			}
 		}
@@ -493,7 +551,7 @@ MeshPreprocessResult ExtractSubMesh(
 	const std::optional<UsdGeomSubset>& subset,
 	const UsdStageRefPtr& stage,
 	double metersPerUnit,
-	const std::string& uvSetName,
+	const std::vector<std::string>& requiredUvSetNames,
 	const std::optional<UsdSkelSkinningQuery>& skinQ,
 	const VtTokenArray& skelJointOrderRaw,
 	const VtTokenArray& skelJointOrderMapped)
@@ -519,8 +577,9 @@ MeshPreprocessResult ExtractSubMesh(
 	unsigned int skinningVertexSize = 0;
 	std::vector<UINT32> indices;
 	unsigned int vertexFlags = 0;
+    std::vector<MeshUvSetData> uvSets;
 	LoadGeom(rawData, skinningData, vertexSize, skinningVertexSize,
-		indices, vertexFlags, mesh, subset, metersPerUnit, uvSetName,
+		indices, vertexFlags, uvSets, mesh, subset, metersPerUnit, requiredUvSetNames,
 		skinQ, skelJointOrderRaw, skelJointOrderMapped);
 
 	const size_t loadedVertCount = rawData ? (rawData->size() / static_cast<size_t>(vertexSize > 0 ? vertexSize : 1)) : 0;
@@ -531,6 +590,7 @@ MeshPreprocessResult ExtractSubMesh(
 	MeshIngestBuilder ingest(vertexSize,
 		(skinningData && *skinningData) ? skinningVertexSize : 0,
 		vertexFlags);
+    ingest.SetUvSets(std::move(uvSets));
 
 	const size_t vertexCount = rawData->size() / static_cast<size_t>(vertexSize);
 	ingest.ReserveVertices(vertexCount);
@@ -637,18 +697,18 @@ StageExtractionResult ExtractAll(const std::string& filePath) {
 			subsets.size(), prim.GetPath().GetString());
 
 		// Default UV set for CLI
-		const std::string defaultUvSet = "st";
+		const std::vector<std::string> requiredUvSetNames = { "st" };
 
 		if (subsets.empty()) {
 			ExtractSubMesh(mesh, std::nullopt, stage, metersPerUnit,
-				defaultUvSet, skinQ, skelJointOrderRaw, skelJointOrderMapped);
+				requiredUvSetNames, skinQ, skelJointOrderRaw, skelJointOrderMapped);
 			result.submeshesProcessed++;
 			result.cachesBuilt++;
 		}
 		else {
 			for (auto const& subset : subsets) {
 				ExtractSubMesh(mesh, std::make_optional(subset), stage, metersPerUnit,
-					defaultUvSet, skinQ, skelJointOrderRaw, skelJointOrderMapped);
+					requiredUvSetNames, skinQ, skelJointOrderRaw, skelJointOrderMapped);
 				result.submeshesProcessed++;
 				result.cachesBuilt++;
 			}

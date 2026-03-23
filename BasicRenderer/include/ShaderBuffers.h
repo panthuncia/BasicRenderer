@@ -168,6 +168,16 @@ struct PerMaterialCB {
     
     DirectX::XMUINT3 emissiveChannels;
 	unsigned int rasterBuckedIndex;
+
+	unsigned int baseColorUvSetIndex;
+	unsigned int normalUvSetIndex;
+	unsigned int metallicUvSetIndex;
+	unsigned int roughnessUvSetIndex;
+
+	unsigned int emissiveUvSetIndex;
+	unsigned int aoUvSetIndex;
+	unsigned int heightUvSetIndex;
+	unsigned int opacityUvSetIndex;
 };
 
 struct LightInfo {

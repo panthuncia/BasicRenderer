@@ -144,6 +144,14 @@ public:
             desc.metallic.channels,
             desc.roughness.channels,
             desc.emissive.channels,
+            desc.baseColor.uvSetIndex,
+            desc.normal.uvSetIndex,
+            desc.aoMap.uvSetIndex,
+            desc.heightMap.uvSetIndex,
+            desc.metallic.uvSetIndex,
+            desc.roughness.uvSetIndex,
+            desc.emissive.uvSetIndex,
+            desc.opacity.uvSetIndex,
             technique,
             desc.alphaCutoff
         );
@@ -185,6 +193,14 @@ private:
     std::vector<uint32_t> m_metallicChannel;
     std::vector<uint32_t> m_roughnessChannel;
     std::vector<uint32_t> m_emissiveChannels;
+    uint32_t m_baseColorUvSetIndex = 0;
+    uint32_t m_normalUvSetIndex = 0;
+    uint32_t m_aoUvSetIndex = 0;
+    uint32_t m_heightUvSetIndex = 0;
+    uint32_t m_metallicUvSetIndex = 0;
+    uint32_t m_roughnessUvSetIndex = 0;
+    uint32_t m_emissiveUvSetIndex = 0;
+    uint32_t m_opacityUvSetIndex = 0;
     float m_metallicFactor;
     float m_roughnessFactor;
     DirectX::XMFLOAT4 m_baseColorFactor;
@@ -217,6 +233,14 @@ private:
         std::vector<uint32_t> metallicChannel,
         std::vector<uint32_t> roughnessChannel,
         std::vector<uint32_t> emissiveChannels,
+        uint32_t baseColorUvSetIndex,
+        uint32_t normalUvSetIndex,
+        uint32_t aoUvSetIndex,
+        uint32_t heightUvSetIndex,
+        uint32_t metallicUvSetIndex,
+        uint32_t roughnessUvSetIndex,
+        uint32_t emissiveUvSetIndex,
+        uint32_t opacityUvSetIndex,
 		TechniqueDescriptor technique,
         float alphaCutoff);
 
@@ -241,6 +265,14 @@ private:
         std::vector<uint32_t> metallicChannel,
         std::vector<uint32_t> roughnessChannel,
         std::vector<uint32_t> emissiveChannels,
+        uint32_t baseColorUvSetIndex,
+        uint32_t normalUvSetIndex,
+        uint32_t aoUvSetIndex,
+        uint32_t heightUvSetIndex,
+        uint32_t metallicUvSetIndex,
+        uint32_t roughnessUvSetIndex,
+        uint32_t emissiveUvSetIndex,
+        uint32_t opacityUvSetIndex,
         TechniqueDescriptor technique,
         float alphaCutoff) {
         return std::shared_ptr<Material>(new Material(name, materialFlags, psoFlags,
@@ -249,6 +281,8 @@ private:
             metallicFactor, roughnessFactor, baseColorFactor, emissiveFactor,
             baseColorChannels, normalChannels, aoChannel, heightChannel,
             metallicChannel, roughnessChannel, emissiveChannels,
+            baseColorUvSetIndex, normalUvSetIndex, aoUvSetIndex, heightUvSetIndex,
+            metallicUvSetIndex, roughnessUvSetIndex, emissiveUvSetIndex, opacityUvSetIndex,
 			technique,
             alphaCutoff));
     }

@@ -18,6 +18,8 @@ struct TextureAndConstant {
     std::shared_ptr<TextureAsset> texture;  // null if none
     DefaultedOptional<float> factor = DefaultedOptional<float>(1.0f);
 	std::vector<uint32_t> channels; // For swizzling texture channels, e.g. R, G, B, A
+	uint32_t uvSetIndex = 0;
+	std::string uvSetName;
 };
 
 struct MaterialDescription {

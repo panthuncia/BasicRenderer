@@ -62,7 +62,7 @@ void ThrowIfFailed(HRESULT hr) {
 }
 
 std::shared_ptr<Mesh> MeshFromData(MeshData&& meshData, std::wstring name, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD) {
-    bool hasTexcoords = !meshData.texcoords.empty();
+    const bool hasTexcoords = !meshData.uvSets.empty() && !meshData.uvSets[0].values.empty();
     bool hasJoints = !meshData.joints.empty() && !meshData.weights.empty();
 
     std::unique_ptr<std::vector<std::byte>> rawData = std::make_unique<std::vector<std::byte>>();
@@ -78,7 +78,7 @@ std::shared_ptr<Mesh> MeshFromData(MeshData&& meshData, std::wstring name, std::
         memcpy(rawData->data() + baseOffset + offset, &meshData.normals[i * 3], sizeof(XMFLOAT3));
         offset += sizeof(XMFLOAT3);
         if (hasTexcoords) {
-            memcpy(rawData->data() + baseOffset + offset, &meshData.texcoords[i * 2], sizeof(XMFLOAT2));
+            memcpy(rawData->data() + baseOffset + offset, &meshData.uvSets[0].values[i], sizeof(XMFLOAT2));
             offset += sizeof(XMFLOAT2);
         }
     }
@@ -104,7 +104,7 @@ std::shared_ptr<Mesh> MeshFromData(MeshData&& meshData, std::wstring name, std::
 		skinningVertices = std::move(skinningData);
 	}
 
-    return Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningVertices), skinningVertexSize, meshData.indices, meshData.material, meshData.flags, std::move(prebuiltClusterLOD));
+    return Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningVertices), skinningVertexSize, meshData.indices, std::move(meshData.uvSets), meshData.material, meshData.flags, std::move(prebuiltClusterLOD));
 }
 
 XMMATRIX RemoveScalingFromMatrix(const XMMATRIX& initialMatrix) {

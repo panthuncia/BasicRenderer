@@ -63,11 +63,16 @@ namespace USDLoader {
 
 	using namespace pxr;
 
+    struct MaterialTemplateRecord {
+        MaterialDescription desc;
+        std::vector<std::string> referencedUvSetNames;
+    };
+
 	struct LoadingCaches {
-		std::unordered_map<std::string, std::shared_ptr<Material>> materialCache;
+		std::unordered_map<std::string, MaterialTemplateRecord> materialTemplateCache;
+        std::unordered_map<std::string, std::shared_ptr<Material>> resolvedMaterialCache;
 		std::unordered_map<std::string, std::vector<std::shared_ptr<Mesh>>> meshCache;
 		std::unordered_map<std::string, std::shared_ptr<TextureAsset>> textureCache;
-		std::unordered_map<std::string, std::string> uvSetCache;
 		//std::unordered_map<std::string, std::shared_ptr<UsdSkelSkeleton>> unprocessedSkeletons;
 		std::unordered_map<std::string, UsdPrim> primsWithSkeletons;
 		std::unordered_map<std::string, std::shared_ptr<Skeleton>> skeletonMap;
@@ -76,10 +81,10 @@ namespace USDLoader {
 		std::unordered_map<std::string, flecs::entity> nodeMap;
 
 		void Clear() {
-			materialCache.clear();
+			materialTemplateCache.clear();
+            resolvedMaterialCache.clear();
 			meshCache.clear();
 			textureCache.clear();
-			uvSetCache.clear();
 			primsWithSkeletons.clear();
 			skeletonMap.clear();
 			animationMap.clear();
@@ -188,7 +193,7 @@ namespace USDLoader {
 		return std::nullopt;
 	}
 
-	void ProcessUVReader(std::optional<ResolvedProducer>& r, const UsdShadeMaterial& material) {
+	std::string ProcessUVReader(std::optional<ResolvedProducer>& r) {
 		std::string varnameStr;
 		UsdShadeInput varnameInput = r->shader.GetInput(TfToken("varname"));
 		auto attrs = UsdShadeUtils::GetValueProducingAttributes(varnameInput);
@@ -205,15 +210,56 @@ namespace USDLoader {
 				}
 			}
 		}
-
-		//spdlog::info("Found UsdPrimvarReader_float2 node with varname: {}", varnameStr);
-		auto& path = material.GetPrim().GetPath().GetString();
-		if (loadingCache.uvSetCache.contains(path) && loadingCache.uvSetCache[path] != varnameStr) {
-			throw std::runtime_error(
-				"Multiple UV sets found for material, which is not supported yet. ");
-		}
-		loadingCache.uvSetCache[material.GetPrim().GetPath().GetString()] = varnameStr;
+        return varnameStr;
 	}
+
+    TextureAndConstant* GetTextureBindingForInput(MaterialDescription& result, const TfToken& name) {
+        if (name == TfToken("diffuseColor")) {
+            return &result.baseColor;
+        }
+        if (name == TfToken("metallic")) {
+            return &result.metallic;
+        }
+        if (name == TfToken("roughness")) {
+            return &result.roughness;
+        }
+        if (name == TfToken("opacity")) {
+            return &result.opacity;
+        }
+        if (name == TfToken("emissiveColor")) {
+            return &result.emissive;
+        }
+        if (name == TfToken("normal")) {
+            return &result.normal;
+        }
+        if (name == TfToken("displacement")) {
+            return &result.heightMap;
+        }
+        if (name == TfToken("ambientOcclusion")) {
+            return &result.aoMap;
+        }
+        return nullptr;
+    }
+
+    std::vector<std::string> CollectReferencedUvSetNames(const MaterialDescription& desc) {
+        std::vector<std::string> names;
+        auto appendIfValid = [&](const TextureAndConstant& binding) {
+            if (!binding.uvSetName.empty() &&
+                std::find(names.begin(), names.end(), binding.uvSetName) == names.end()) {
+                names.push_back(binding.uvSetName);
+            }
+        };
+
+        appendIfValid(desc.baseColor);
+        appendIfValid(desc.normal);
+        appendIfValid(desc.metallic);
+        appendIfValid(desc.roughness);
+        appendIfValid(desc.emissive);
+        appendIfValid(desc.aoMap);
+        appendIfValid(desc.heightMap);
+        appendIfValid(desc.opacity);
+        return names;
+    }
 
 	void ProcessTexture(MaterialDescription& result, const UsdShadeConnectionSourceInfo& src, const UsdStageRefPtr& stage, const TfToken& name, const UsdShadeMaterial& material) {
 		if (auto srcShader = UsdShadeShader(src.source)) {
@@ -281,7 +327,9 @@ namespace USDLoader {
 						surfSources[0].sourceName,
 						&cache);
 					if (resolvedSurf) {
-						ProcessUVReader(resolvedSurf, material);
+                        if (TextureAndConstant* textureBinding = GetTextureBindingForInput(result, name)) {
+                            textureBinding->uvSetName = ProcessUVReader(resolvedSurf);
+                        }
 					}
 					else {
 						spdlog::warn("Unable to resolve 'st' input for texture shader {}", src.source.GetPrim().GetName().GetString());
@@ -302,59 +350,21 @@ namespace USDLoader {
 
 				auto tex = texIt->second;
 				std::string swizzle = src.sourceName.GetString();
-				if (name == TfToken("diffuseColor")) {
-					result.baseColor.texture = tex;
-					result.baseColor.channels = SwizzleToIndices(swizzle);
-					if (result.baseColor.channels.size() == 3) {
-						// Ensure we have 4 channels
-						result.baseColor.channels.push_back(3); // TODO: Will this break?
-					}
-				}
-				else if (name == TfToken("metallic")) {
-					result.metallic.texture = tex;
-					result.metallic.channels = SwizzleToIndices(swizzle);
-				}
-				else if (name == TfToken("roughness")) {
-					result.roughness.texture = tex;
-					result.roughness.channels = SwizzleToIndices(swizzle);
-				}
-				else if (name == TfToken("opacity")) {
-					result.opacity.texture = tex;
-					result.opacity.channels = SwizzleToIndices(swizzle);
-				}
-				else if (name == TfToken("emissiveColor")) {
-					result.emissive.texture = tex;
-					result.emissive.channels = SwizzleToIndices(swizzle);
-				}
-				else if (name == TfToken("normal")) {
-					result.normal.texture = tex;
-					result.negateNormals = tex->Meta().fileType == ImageFiletype::DDS ? true : false;
-					result.invertNormalGreen = false;
-					result.normal.channels = SwizzleToIndices(swizzle);
-				}
-				else if (name == TfToken("displacement")) {
-					result.heightMap.texture = tex;
-					result.heightMap.channels = SwizzleToIndices(swizzle);
-				}
-				else if (name == TfToken("ambientOcclusion")) {
-					result.aoMap.texture = tex;
-					result.aoMap.channels = SwizzleToIndices(swizzle);
-				}
-				else {
-					spdlog::warn("Unknown texture input: {}", name.GetString());
-				}
+                TextureAndConstant* textureBinding = GetTextureBindingForInput(result, name);
+                if (textureBinding == nullptr) {
+                    spdlog::warn("Unknown texture input: {}", name.GetString());
+                    return;
+                }
 
-				if (name == TfToken("diffuseColor"))      result.baseColor.texture = tex;
-				else if (name == TfToken("metallic"))     result.metallic.texture = tex;
-				else if (name == TfToken("roughness"))    result.roughness.texture = tex;
-				else if (name == TfToken("opacity"))      result.opacity.texture = tex;
-				else if (name == TfToken("emissiveColor"))result.emissive.texture = tex;
-				else if (name == TfToken("normal"))       result.normal.texture = tex;
-				else if (name == TfToken("displacement")) result.heightMap.texture = tex;
-				else if (name == TfToken("ambientOcclusion")) result.aoMap.texture = tex;
-				else {
-					spdlog::warn("Unknown texture input: {}", name.GetString());
-				}
+                textureBinding->texture = tex;
+                textureBinding->channels = SwizzleToIndices(swizzle);
+                if (name == TfToken("diffuseColor") && textureBinding->channels.size() == 3) {
+                    textureBinding->channels.push_back(3);
+                }
+                if (name == TfToken("normal")) {
+                    result.negateNormals = tex->Meta().fileType == ImageFiletype::DDS ? true : false;
+                    result.invertNormalGreen = false;
+                }
 			}
 		}
 	}
@@ -449,7 +459,9 @@ namespace USDLoader {
 					ProcessTexture(result, src, stage, name, material);
 				}
 				else if (prodId == pxr::TfToken("UsdPrimvarReader_float2")) {
-					ProcessUVReader(r, material);
+                    if (TextureAndConstant* textureBinding = GetTextureBindingForInput(result, name)) {
+                        textureBinding->uvSetName = ProcessUVReader(r);
+                    }
 				}
 				else {
 					spdlog::warn("Unsupported shader producer: {} in material {}", prodId.GetString(), material.GetPrim().GetPath().GetString());
@@ -468,7 +480,7 @@ namespace USDLoader {
 	}
 
 	void ProcessMaterial(const pxr::UsdShadeMaterial& material, const pxr::UsdStageRefPtr& stage, bool isUSDZ, const std::string& directory) {
-		if (loadingCache.materialCache.contains(material.GetPrim().GetPath().GetString())) {
+		if (loadingCache.materialTemplateCache.contains(material.GetPrim().GetPath().GetString())) {
 			spdlog::info("Material {} already processed, skipping.", material.GetPrim().GetPath().GetString());
 			return; // Already processed
 		}
@@ -476,18 +488,66 @@ namespace USDLoader {
 		spdlog::info("Processing material: {}", material.GetPrim().GetPath().GetString());
 
 		auto materialDesc = ParseMaterialGraph(material, directory, stage, isUSDZ);
-
-		auto newMaterial = Material::CreateShared(materialDesc);
-
-		loadingCache.materialCache[material.GetPrim().GetPath().GetString()] = newMaterial;
+        MaterialTemplateRecord record;
+        record.desc = std::move(materialDesc);
+        record.referencedUvSetNames = CollectReferencedUvSetNames(record.desc);
+		loadingCache.materialTemplateCache[material.GetPrim().GetPath().GetString()] = std::move(record);
 	}
 
-	std::string& uvSetFor(const UsdShadeMaterial& mat)
-	{
-		auto& materialPath = mat.GetPrim().GetPath().GetString();
-		return loadingCache.uvSetCache[materialPath];
+    uint32_t ResolveUvSetIndexForBinding(const TextureAndConstant& binding, const std::vector<MeshUvSetData>& uvSets, const std::string& materialPath, const char* slotName) {
+        if (binding.uvSetName.empty()) {
+            return binding.uvSetIndex;
+        }
 
-	}
+        for (uint32_t uvSetIndex = 0; uvSetIndex < uvSets.size(); ++uvSetIndex) {
+            if (uvSets[uvSetIndex].name == binding.uvSetName) {
+                return uvSetIndex;
+            }
+        }
+
+        spdlog::error("USD material '{}' references missing UV set '{}' for slot '{}'. Falling back to UV set 0.", materialPath, binding.uvSetName, slotName);
+        return 0;
+    }
+
+    std::string BuildResolvedMaterialCacheKey(const std::string& materialPath, const MaterialDescription& resolvedDesc) {
+        return materialPath + "|" +
+            std::to_string(resolvedDesc.baseColor.uvSetIndex) + "|" +
+            std::to_string(resolvedDesc.normal.uvSetIndex) + "|" +
+            std::to_string(resolvedDesc.metallic.uvSetIndex) + "|" +
+            std::to_string(resolvedDesc.roughness.uvSetIndex) + "|" +
+            std::to_string(resolvedDesc.emissive.uvSetIndex) + "|" +
+            std::to_string(resolvedDesc.aoMap.uvSetIndex) + "|" +
+            std::to_string(resolvedDesc.heightMap.uvSetIndex) + "|" +
+            std::to_string(resolvedDesc.opacity.uvSetIndex);
+    }
+
+    std::shared_ptr<Material> ResolveMaterialForMesh(const UsdShadeMaterial& material, const std::vector<MeshUvSetData>& uvSets) {
+        const std::string materialPath = material.GetPrim().GetPath().GetString();
+        auto templateIt = loadingCache.materialTemplateCache.find(materialPath);
+        if (templateIt == loadingCache.materialTemplateCache.end()) {
+            return nullptr;
+        }
+
+        MaterialDescription resolvedDesc = templateIt->second.desc;
+        resolvedDesc.baseColor.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.baseColor, uvSets, materialPath, "baseColor");
+        resolvedDesc.normal.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.normal, uvSets, materialPath, "normal");
+        resolvedDesc.metallic.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.metallic, uvSets, materialPath, "metallic");
+        resolvedDesc.roughness.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.roughness, uvSets, materialPath, "roughness");
+        resolvedDesc.emissive.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.emissive, uvSets, materialPath, "emissive");
+        resolvedDesc.aoMap.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.aoMap, uvSets, materialPath, "ambientOcclusion");
+        resolvedDesc.heightMap.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.heightMap, uvSets, materialPath, "heightMap");
+        resolvedDesc.opacity.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.opacity, uvSets, materialPath, "opacity");
+
+        const std::string cacheKey = BuildResolvedMaterialCacheKey(materialPath, resolvedDesc);
+        auto resolvedIt = loadingCache.resolvedMaterialCache.find(cacheKey);
+        if (resolvedIt != loadingCache.resolvedMaterialCache.end()) {
+            return resolvedIt->second;
+        }
+
+        auto runtimeMaterial = Material::CreateShared(resolvedDesc);
+        loadingCache.resolvedMaterialCache[cacheKey] = runtimeMaterial;
+        return runtimeMaterial;
+    }
 
 	std::vector<std::shared_ptr<Mesh>> ProcessMesh(
 		const UsdGeomMesh& mesh,
@@ -519,18 +579,19 @@ namespace USDLoader {
 			auto matAPI = UsdShadeMaterialBindingAPI(mesh);
 			auto mat = matAPI.ComputeBoundMaterial();
 			ProcessMaterial(mat, stage, isUSDZ, directory);
+            const auto templateIt = loadingCache.materialTemplateCache.find(mat.GetPrim().GetPath().GetString());
+            const std::vector<std::string> requiredUvSetNames =
+                templateIt != loadingCache.materialTemplateCache.end()
+                ? templateIt->second.referencedUvSetNames
+                : std::vector<std::string>{};
 
 			// Phase 1: geometry extraction + CLod cache
 			auto result = USDGeometryExtractor::ExtractSubMesh(
-				mesh, std::nullopt, stage, metersPerUnit, uvSetFor(mat),
+				mesh, std::nullopt, stage, metersPerUnit, requiredUvSetNames,
 				skinQ, skelJointOrderRaw, skelJointOrderMapped);
 
 			// Phase 2: GPU mesh creation
-			auto mtlPtr = loadingCache.materialCache.find(
-				mat.GetPrim().GetPath().GetString());
-			auto material = mtlPtr != loadingCache.materialCache.end()
-				? mtlPtr->second
-				: nullptr;
+			auto material = ResolveMaterialForMesh(mat, result.ingest.GetUvSets());
 			auto mPtr = result.ingest.Build(material, std::move(result.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
 			outMeshes.push_back(mPtr);
 		}
@@ -539,18 +600,19 @@ namespace USDLoader {
 			for (auto const& subset : subsets) {
 				auto mat = UsdShadeMaterialBindingAPI(subset).ComputeBoundMaterial();
 				ProcessMaterial(mat, stage, isUSDZ, directory);
+                const auto templateIt = loadingCache.materialTemplateCache.find(mat.GetPrim().GetPath().GetString());
+                const std::vector<std::string> requiredUvSetNames =
+                    templateIt != loadingCache.materialTemplateCache.end()
+                    ? templateIt->second.referencedUvSetNames
+                    : std::vector<std::string>{};
 
 				// Phase 1: geometry extraction + CLod cache
 				auto result = USDGeometryExtractor::ExtractSubMesh(
-					mesh, std::make_optional(subset), stage, metersPerUnit, uvSetFor(mat),
+					mesh, std::make_optional(subset), stage, metersPerUnit, requiredUvSetNames,
 					skinQ, skelJointOrderRaw, skelJointOrderMapped);
 
 				// Phase 2: GPU mesh creation
-				auto mtlPtr = loadingCache.materialCache.find(
-					mat.GetPrim().GetPath().GetString());
-				auto material = mtlPtr != loadingCache.materialCache.end()
-					? mtlPtr->second
-					: nullptr;
+				auto material = ResolveMaterialForMesh(mat, result.ingest.GetUvSets());
 				auto mPtr = result.ingest.Build(material, std::move(result.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
 				outMeshes.push_back(mPtr);
 			}

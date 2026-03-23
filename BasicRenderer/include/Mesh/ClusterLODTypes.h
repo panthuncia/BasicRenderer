@@ -18,6 +18,7 @@
 
 #include "Mesh/ClusterLODShaderTypes.h"
 #include "Mesh/VertexFlags.h"
+#include "Import/MeshData.h"
 
 // Forward declarations for GPU-side types only needed by MeshIngestBuilder::Build()
 class Material;
@@ -244,6 +245,14 @@ public:
 		m_indices.insert(m_indices.end(), data, data + count);
 	}
 
+	void SetUvSets(std::vector<MeshUvSetData> uvSets) {
+		m_uvSets = std::move(uvSets);
+	}
+
+	const std::vector<MeshUvSetData>& GetUvSets() const {
+		return m_uvSets;
+	}
+
 	// GPU-side: creates a Mesh object with buffer views.
 	// Only implemented in the renderer (Mesh.cpp); not available in headless builds.
 	std::shared_ptr<Mesh> Build(
@@ -269,5 +278,6 @@ private:
 	std::vector<std::byte> m_vertices;
 	std::vector<std::byte> m_skinningVertices;
 	std::vector<uint32_t> m_indices;
+	std::vector<MeshUvSetData> m_uvSets;
 	ClusterLODBuilderSettings m_clusterLODBuilderSettings{};
 };

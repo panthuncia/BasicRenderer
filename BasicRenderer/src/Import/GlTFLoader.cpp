@@ -578,6 +578,10 @@ DirectX::XMFLOAT3 ReadFloat3(const json& values, const DirectX::XMFLOAT3& fallba
         values[2].get<float>());
 }
 
+uint32_t ReadTextureUvSetIndex(const json& textureInfoNode) {
+    return textureInfoNode.value<uint32_t>("texCoord", 0u);
+}
+
 std::shared_ptr<Material> LoadMaterial(
     const json& gltf,
     const std::filesystem::path& sourcePath,
@@ -631,26 +635,35 @@ std::shared_ptr<Material> LoadMaterial(
             desc.roughness.factor = pbr["roughnessFactor"].get<float>();
         }
         if (pbr.contains("baseColorTexture")) {
-            const size_t textureIndex = pbr["baseColorTexture"].at("index").get<size_t>();
+            const auto& textureInfo = pbr["baseColorTexture"];
+            const size_t textureIndex = textureInfo.at("index").get<size_t>();
             desc.baseColor.texture = LoadTexture(gltf, sourcePath, cache, textureIndex, true);
+            desc.baseColor.uvSetIndex = ReadTextureUvSetIndex(textureInfo);
         }
         if (pbr.contains("metallicRoughnessTexture")) {
-            const size_t textureIndex = pbr["metallicRoughnessTexture"].at("index").get<size_t>();
+            const auto& textureInfo = pbr["metallicRoughnessTexture"];
+            const size_t textureIndex = textureInfo.at("index").get<size_t>();
             auto texture = LoadTexture(gltf, sourcePath, cache, textureIndex, false);
             desc.metallic.texture = texture;
             desc.roughness.texture = texture;
+            const uint32_t uvSetIndex = ReadTextureUvSetIndex(textureInfo);
+            desc.metallic.uvSetIndex = uvSetIndex;
+            desc.roughness.uvSetIndex = uvSetIndex;
         }
     }
 
     if (materialNode.contains("normalTexture")) {
-        const size_t textureIndex = materialNode["normalTexture"].at("index").get<size_t>();
+        const auto& textureInfo = materialNode["normalTexture"];
+        const size_t textureIndex = textureInfo.at("index").get<size_t>();
         desc.normal.texture = LoadTexture(gltf, sourcePath, cache, textureIndex, false);
+        desc.normal.uvSetIndex = ReadTextureUvSetIndex(textureInfo);
     }
 
     if (materialNode.contains("occlusionTexture")) {
         const auto& occlusion = materialNode["occlusionTexture"];
         const size_t textureIndex = occlusion.at("index").get<size_t>();
         desc.aoMap.texture = LoadTexture(gltf, sourcePath, cache, textureIndex, false);
+        desc.aoMap.uvSetIndex = ReadTextureUvSetIndex(occlusion);
         if (occlusion.contains("strength")) {
             desc.aoMap.factor = occlusion["strength"].get<float>();
         }
@@ -661,8 +674,10 @@ std::shared_ptr<Material> LoadMaterial(
         desc.emissiveColor = { emissive.x, emissive.y, emissive.z, 1.0f };
     }
     if (materialNode.contains("emissiveTexture")) {
-        const size_t textureIndex = materialNode["emissiveTexture"].at("index").get<size_t>();
+        const auto& textureInfo = materialNode["emissiveTexture"];
+        const size_t textureIndex = textureInfo.at("index").get<size_t>();
         desc.emissive.texture = LoadTexture(gltf, sourcePath, cache, textureIndex, true);
+        desc.emissive.uvSetIndex = ReadTextureUvSetIndex(textureInfo);
     }
 
     const std::string alphaMode = materialNode.value("alphaMode", std::string("OPAQUE"));
@@ -675,6 +690,7 @@ std::shared_ptr<Material> LoadMaterial(
         desc.opacity.factor = desc.diffuseColor.w;
         if (desc.baseColor.texture != nullptr) {
             desc.opacity.texture = desc.baseColor.texture;
+            desc.opacity.uvSetIndex = desc.baseColor.uvSetIndex;
         }
     }
     else {

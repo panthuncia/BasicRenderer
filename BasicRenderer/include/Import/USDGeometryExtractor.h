@@ -23,7 +23,7 @@ MeshPreprocessResult ExtractSubMesh(
 	const std::optional<pxr::UsdGeomSubset>& subset,
 	const pxr::UsdStageRefPtr& stage,
 	double metersPerUnit,
-	const std::string& uvSetName,
+	const std::vector<std::string>& requiredUvSetNames,
 	const std::optional<pxr::UsdSkelSkinningQuery>& skinQ,
 	const pxr::VtTokenArray& skelJointOrderRaw,
 	const pxr::VtTokenArray& skelJointOrderMapped);

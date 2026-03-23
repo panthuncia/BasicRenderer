@@ -15,6 +15,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <map>
 #include <vector>
 
 #include <DirectXMath.h>
@@ -872,6 +873,21 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 		hasTexcoords = true;
 	}
 
+    std::map<uint32_t, size_t> texcoordAccessorIndices;
+    uint32_t maxTexcoordSetIndex = 0;
+    bool hasAnyTexcoordSet = false;
+    for (auto it = attributes.begin(); it != attributes.end(); ++it) {
+        const std::string& attributeName = it.key();
+        if (attributeName.rfind("TEXCOORD_", 0) != 0) {
+            continue;
+        }
+
+        const uint32_t setIndex = static_cast<uint32_t>(std::stoul(attributeName.substr(strlen("TEXCOORD_"))));
+        texcoordAccessorIndices.emplace(setIndex, it.value().get<size_t>());
+        maxTexcoordSetIndex = std::max(maxTexcoordSetIndex, setIndex);
+        hasAnyTexcoordSet = true;
+    }
+
 	unsigned int meshFlags = VertexFlags::VERTEX_NORMALS; // Always present: authored or generated
 	if (hasTexcoords) {
 		meshFlags |= VertexFlags::VERTEX_TEXCOORDS;
@@ -887,6 +903,39 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 	auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
 
 	MeshIngestBuilder ingest(vertexSize, 0, meshFlags);
+    std::vector<MeshUvSetData> uvSets;
+    if (hasAnyTexcoordSet) {
+        uvSets.resize(static_cast<size_t>(maxTexcoordSetIndex) + 1u);
+        for (uint32_t setIndex = 0; setIndex <= maxTexcoordSetIndex; ++setIndex) {
+            uvSets[setIndex].name = "TEXCOORD_" + std::to_string(setIndex);
+            uvSets[setIndex].values.assign(vertexCount, XMFLOAT2(0.0f, 0.0f));
+        }
+
+        for (const auto& [setIndex, accessorIndex] : texcoordAccessorIndices) {
+            const AccessorInfo accessor = GetAccessorInfo(doc.gltf, accessorIndex);
+            if (accessor.count != vertexCount || NumComponentsForType(accessor.type) != 2) {
+                throw std::runtime_error("TEXCOORD accessor size/type mismatch");
+            }
+
+            constexpr size_t kUvChunkSize = 32768;
+            for (size_t firstVertex = 0; firstVertex < vertexCount; firstVertex += kUvChunkSize) {
+                const size_t chunkVertexCount = std::min(kUvChunkSize, vertexCount - firstVertex);
+                size_t stride = 0;
+                size_t components = 0;
+                int componentType = 0;
+                const auto uvBytes = ReadAccessorRawWindow(doc, accessorIndex, firstVertex, chunkVertexCount, &stride, &components, &componentType);
+                const size_t componentBytes = BytesPerComponent(componentType);
+
+                for (size_t i = 0; i < chunkVertexCount; ++i) {
+                    const size_t uvBase = i * stride;
+                    uvSets[setIndex].values[firstVertex + i] = XMFLOAT2(
+                        static_cast<float>(ReadComponentAsDouble(uvBytes, componentType, uvBase + componentBytes * 0)),
+                        static_cast<float>(ReadComponentAsDouble(uvBytes, componentType, uvBase + componentBytes * 1)));
+                }
+            }
+        }
+    }
+    ingest.SetUvSets(std::move(uvSets));
 	if (prebuiltData.has_value()) {
 		return MeshPreprocessResult(std::move(ingest), std::move(cacheIdentity), std::move(prebuiltData));
 	}

@@ -180,6 +180,16 @@ struct MaterialInfo {
 
     uint3 emissiveChannels;
     uint rasterBucketIndex;
+
+    uint baseColorUvSetIndex;
+    uint normalUvSetIndex;
+    uint metallicUvSetIndex;
+    uint roughnessUvSetIndex;
+
+    uint emissiveUvSetIndex;
+    uint aoUvSetIndex;
+    uint heightUvSetIndex;
+    uint opacityUvSetIndex;
 };
 
 struct SingleMatrix {
