@@ -37,6 +37,7 @@ struct RenderContext {
     UINT rtvDescriptorSize;
 	UINT dsvDescriptorSize;
     UINT frameIndex;
+	uint64_t frameNumber = 0;
 	UINT64 frameFenceValue;
     DirectX::XMUINT2 renderResolution;
 	DirectX::XMUINT2 outputResolution;

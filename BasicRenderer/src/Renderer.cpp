@@ -1417,6 +1417,7 @@ void Renderer::Render() {
         m_context.rtvDescriptorSize = rtvDescriptorSize;
         m_context.dsvDescriptorSize = dsvDescriptorSize;
         m_context.frameIndex = m_frameIndex;
+		m_context.frameNumber = m_totalFramesRendered;
         m_context.frameFenceValue = m_currentFrameFenceValue;
         m_context.renderResolution = { renderRes.x, renderRes.y };
 	    m_context.outputResolution = { outputRes.x, outputRes.y };

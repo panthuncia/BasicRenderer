@@ -101,7 +101,7 @@ public:
     void InitializeAdapter();
 	void ProxyDevice();
     void Setup();
-    void Evaluate(rhi::CommandList& commandList, const Components::Camera* camera, uint8_t frameIndex, double elapsedSeconds, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
+	void Evaluate(rhi::CommandList& commandList, const Components::Camera* camera, uint64_t frameNumber, double elapsedSeconds, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
 	void Shutdown();
 
     bool InitSL();
@@ -115,13 +115,11 @@ public:
 
 private:
     UpscalingManager() = default;
-    void EvaluateDLSS(rhi::CommandList& commandList, const Components::Camera* camera, uint8_t frameIndex, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
+	void EvaluateDLSS(rhi::CommandList& commandList, const Components::Camera* camera, uint64_t frameNumber, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
     void EvaluateFSR3(rhi::CommandList& commandList, const Components::Camera* camera, double elapsedSeconds, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
 	void EvaluateNone(rhi::CommandList& commandList, const Components::Camera* camera, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
 	UpscalingMode m_upscalingMode = UpscalingMode::None;
     UpscaleQualityMode m_upscaleQualityMode = UpscaleQualityMode::DLAA;
-    std::vector<sl::FrameToken*> m_frameTokens; // Frame tokens for each frame in flight
-    uint8_t m_numFramesInFlight;
     std::function<DirectX::XMUINT2()> m_getRenderRes;
 	std::function<DirectX::XMUINT2()> m_getOutputRes;
     bool m_fsrIntialized = false;

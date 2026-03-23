@@ -27,7 +27,7 @@ public:
     PassReturn Execute(PassExecutionContext& executionContext) override {
         auto* renderContext = executionContext.hostData->Get<RenderContext>();
         auto& context = *renderContext;
-        UpscalingManager::GetInstance().Evaluate(executionContext.commandList, &context.primaryCamera, context.frameIndex, context.deltaTime, m_pHDRTarget, m_pUpscaledHDRTarget, m_pDepthTexture, m_pMotionVectors);
+        UpscalingManager::GetInstance().Evaluate(executionContext.commandList, &context.primaryCamera, context.frameNumber, context.deltaTime, m_pHDRTarget, m_pUpscaledHDRTarget, m_pDepthTexture, m_pMotionVectors);
         return {};
     }
 

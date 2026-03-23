@@ -487,7 +487,7 @@ void EvaluateGBufferOptimized(uint2 pixel)
         dpdx, dpdy, dudx, dudy,
         materialInputs);
 
-    // Motion vectors use the previous object transform even for rigid CLod meshes.
+    // Motion vectors use the previous object transform and unjittered view-projection
     float4 clipCur = mul(float4(worldPosition, 1.0f), gs_unjitteredViewProj);
     float3 prevWorldPosition = mul(float4(posOS, 1.0f), obj.prevModel).xyz;
 
