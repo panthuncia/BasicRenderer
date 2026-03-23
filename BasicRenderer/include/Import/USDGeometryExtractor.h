@@ -22,6 +22,7 @@ MeshPreprocessResult ExtractSubMesh(
 	const pxr::UsdGeomMesh& mesh,
 	const std::optional<pxr::UsdGeomSubset>& subset,
 	const pxr::UsdStageRefPtr& stage,
+	pxr::UsdTimeCode geomTimeCode,
 	double metersPerUnit,
 	const std::vector<std::string>& requiredUvSetNames,
 	const std::optional<pxr::UsdSkelSkinningQuery>& skinQ,

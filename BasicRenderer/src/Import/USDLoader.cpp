@@ -113,6 +113,14 @@ namespace USDLoader {
 		}
 	}
 
+	static UsdTimeCode GetUsdGeometrySampleTime(const UsdStageRefPtr& stage) {
+		if (stage && stage->HasAuthoredTimeCodeRange()) {
+			return UsdTimeCode(stage->GetStartTimeCode());
+		}
+
+		return UsdTimeCode::Default();
+	}
+
 	static std::vector<uint32_t> SwizzleToIndices(const std::string& swizzle) {
 		std::vector<uint32_t> indices;
 		// skip leading dot if present
@@ -565,6 +573,8 @@ namespace USDLoader {
 			return loadingCache.meshCache[cacheKey];
 		}
 
+		const UsdTimeCode geomTimeCode = GetUsdGeometrySampleTime(stage);
+
 		// Extract skin once
 		auto skinQ = USDGeometryExtractor::GetSkinningQuery(mesh, skelCache);
 
@@ -587,7 +597,7 @@ namespace USDLoader {
 
 			// Phase 1: geometry extraction + CLod cache
 			auto result = USDGeometryExtractor::ExtractSubMesh(
-				mesh, std::nullopt, stage, metersPerUnit, requiredUvSetNames,
+				mesh, std::nullopt, stage, geomTimeCode, metersPerUnit, requiredUvSetNames,
 				skinQ, skelJointOrderRaw, skelJointOrderMapped);
 
 			// Phase 2: GPU mesh creation
@@ -608,7 +618,7 @@ namespace USDLoader {
 
 				// Phase 1: geometry extraction + CLod cache
 				auto result = USDGeometryExtractor::ExtractSubMesh(
-					mesh, std::make_optional(subset), stage, metersPerUnit, requiredUvSetNames,
+					mesh, std::make_optional(subset), stage, geomTimeCode, metersPerUnit, requiredUvSetNames,
 					skinQ, skelJointOrderRaw, skelJointOrderMapped);
 
 				// Phase 2: GPU mesh creation

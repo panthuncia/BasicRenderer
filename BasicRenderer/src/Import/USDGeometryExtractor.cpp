@@ -177,6 +177,15 @@ static std::vector<float> ComputeSmoothNormals(
 	return normals;
 }
 
+static UsdTimeCode GetUsdGeometrySampleTime(const UsdStageRefPtr& stage)
+{
+	if (stage && stage->HasAuthoredTimeCodeRange()) {
+		return UsdTimeCode(stage->GetStartTimeCode());
+	}
+
+	return UsdTimeCode::Default();
+}
+
 // LoadGeom
 // Extracts raw vertex + index arrays from a UsdGeomMesh (optionally
 // limited to a subset).  Handles face-varying expansion, optional
@@ -192,6 +201,7 @@ static void LoadGeom(
     std::vector<MeshUvSetData>& uvSets,
 	const UsdGeomMesh& mesh,
 	const std::optional<UsdGeomSubset> subset,
+	UsdTimeCode geomTimeCode,
 	double metersPerUnit,
 	const std::vector<std::string>& requiredUvSetNames,
 	const std::optional<UsdSkelSkinningQuery>& skinQ,
@@ -225,15 +235,20 @@ static void LoadGeom(
 
 	// positions
 	VtArray<GfVec3f> usdPts;
-	mesh.GetPointsAttr().Get(&usdPts);
+	mesh.GetPointsAttr().Get(&usdPts, geomTimeCode);
 
 	std::vector<float> ctrlPos;
 	FlattenVecArray<GfVec3f>(usdPts, ctrlPos, static_cast<float>(metersPerUnit));
 
 	// control mesh topology
 	VtArray<int> faceVertCounts, faceVertIndices;
-	mesh.GetFaceVertexCountsAttr().Get(&faceVertCounts);
-	mesh.GetFaceVertexIndicesAttr().Get(&faceVertIndices);
+	mesh.GetFaceVertexCountsAttr().Get(&faceVertCounts, geomTimeCode);
+	mesh.GetFaceVertexIndicesAttr().Get(&faceVertIndices, geomTimeCode);
+
+	vertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3)
+		+ sizeof(DirectX::XMFLOAT2);
+	skinningVertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3)
+		+ sizeof(DirectX::XMUINT4) + sizeof(DirectX::XMFLOAT4);
 
 	// subset face mask
 	std::vector<uint8_t> useFace(faceVertCounts.size(), 0);
@@ -257,14 +272,22 @@ static void LoadGeom(
 			cornerCount += static_cast<size_t>(fvCount - 2) * 3;
 	}
 
+	if (cornerCount > 0 && ctrlPos.empty()) {
+		spdlog::warn(
+			"Mesh '{}' has topology at geometry sample time {} but no readable positions; skipping mesh.",
+			primName,
+			geomTimeCode.IsDefault() ? -1.0 : geomTimeCode.GetValue());
+		return;
+	}
+
 	// normals
 	VtArray<GfVec3f> usdNormals;
-	bool gotNormals = mesh.GetNormalsAttr().Get(&usdNormals);
+	bool gotNormals = mesh.GetNormalsAttr().Get(&usdNormals, geomTimeCode);
 	bool generatedSmoothNormals = false;
 
 	VtIntArray nIdx;
 	UsdAttribute nIdxAttr = mesh.GetPrim().GetAttribute(TfToken("normals:indices"));
-	bool hasNIdx = nIdxAttr && nIdxAttr.Get(&nIdx);
+	bool hasNIdx = nIdxAttr && nIdxAttr.Get(&nIdx, geomTimeCode);
 
 	if (gotNormals && hasNIdx) {
 		VtArray<GfVec3f> deindexed;
@@ -341,7 +364,7 @@ static void LoadGeom(
         UsdAttribute tcAttr = mesh.GetPrim().GetAttribute(TfToken("primvars:" + uvSetName));
         UsdGeomPrimvar uvPrim(tcAttr);
         VtArray<GfVec2f> usdTC;
-        uvData.available = (uvPrim && uvPrim.ComputeFlattened(&usdTC));
+        uvData.available = (uvPrim && uvPrim.ComputeFlattened(&usdTC, geomTimeCode));
         uvData.interpolation = uvData.available ? GetInterpolationType(uvPrim.GetInterpolation()) : InterpolationType::Vertex;
         if (uvData.available) {
             uvData.rawData.reserve(usdTC.size() * 2);
@@ -407,10 +430,6 @@ static void LoadGeom(
 	}
 
 	// allocate output buffers
-	vertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3)
-		+ sizeof(DirectX::XMFLOAT2);
-	skinningVertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3)
-		+ sizeof(DirectX::XMUINT4) + sizeof(DirectX::XMFLOAT4);
 	rawData->resize(cornerCount * vertexSize);
 	indices.reserve(cornerCount);
 
@@ -435,22 +454,54 @@ static void LoadGeom(
 
 	auto copyTupleFloat = [&](std::byte* dst, const std::vector<float>& raw,
 		size_t numComponents, InterpolationType interp,
-		size_t faceIndex, size_t fvIndex, uint32_t vertIndex)
+		size_t faceIndex, size_t fvIndex, uint32_t vertIndex,
+		bool& warned, const char* attributeName)
 	{
 		const size_t base = tupleBase(interp, faceIndex, fvIndex, vertIndex, numComponents);
+		if (base + numComponents > raw.size()) {
+			std::memset(dst, 0, numComponents * sizeof(float));
+			if (!warned) {
+				spdlog::warn(
+					"Mesh '{}' sampled '{}' tuple data out of range at geometry sample time {}; zero-filling missing values.",
+					primName,
+					attributeName,
+					geomTimeCode.IsDefault() ? -1.0 : geomTimeCode.GetValue());
+				warned = true;
+			}
+			return;
+		}
 		std::memcpy(dst, raw.data() + base, numComponents * sizeof(float));
 	};
 
 	auto copyTupleUInt = [&](std::byte* dst, const std::vector<uint32_t>& raw,
 		size_t numComponents, InterpolationType interp,
-		size_t faceIndex, size_t fvIndex, uint32_t vertIndex)
+		size_t faceIndex, size_t fvIndex, uint32_t vertIndex,
+		bool& warned, const char* attributeName)
 	{
 		const size_t base = tupleBase(interp, faceIndex, fvIndex, vertIndex, numComponents);
+		if (base + numComponents > raw.size()) {
+			std::memset(dst, 0, numComponents * sizeof(uint32_t));
+			if (!warned) {
+				spdlog::warn(
+					"Mesh '{}' sampled '{}' tuple data out of range at geometry sample time {}; zero-filling missing values.",
+					primName,
+					attributeName,
+					geomTimeCode.IsDefault() ? -1.0 : geomTimeCode.GetValue());
+				warned = true;
+			}
+			return;
+		}
 		std::memcpy(dst, raw.data() + base, numComponents * sizeof(uint32_t));
 	};
 
 	// emit vertices
 	const DirectX::XMFLOAT3 defaultNormal{ 0.0f, 0.0f, 0.0f };
+	bool warnedInvalidPositionIndex = false;
+	bool warnedInvalidFaceVertexIndex = false;
+	bool warnedNormalTupleRange = false;
+	bool warnedUvTupleRange = false;
+	bool warnedJointTupleRange = false;
+	bool warnedWeightTupleRange = false;
 
 	size_t fvOffset = 0;
 	size_t outVertex = 0;
@@ -459,9 +510,47 @@ static void LoadGeom(
 		if (!subset || useFace[f]) {
 			for (int i = 1; i + 1 < fc; ++i) {
 				int cornerIdxs[3] = { 0, i, i + 1 };
+				uint32_t triVertIdxs[3] = {};
+				bool validTriangle = true;
+				for (int c = 0; c < 3; ++c) {
+					const size_t fvIndex = fvOffset + static_cast<size_t>(cornerIdxs[c]);
+					if (fvIndex >= faceVertIndices.size()) {
+						if (!warnedInvalidFaceVertexIndex) {
+							spdlog::warn(
+								"Mesh '{}' has face-vertex index {} out of range for topology buffer size {}; skipping malformed triangle.",
+								primName,
+								fvIndex,
+								faceVertIndices.size());
+							warnedInvalidFaceVertexIndex = true;
+						}
+						validTriangle = false;
+						break;
+					}
+
+					const uint32_t vertIdx = static_cast<uint32_t>(faceVertIndices[fvIndex]);
+					if (static_cast<size_t>(vertIdx) >= ctrlPos.size() / 3) {
+						if (!warnedInvalidPositionIndex) {
+							spdlog::warn(
+								"Mesh '{}' has position index {} out of range for {} control points at geometry sample time {}; skipping malformed triangle.",
+								primName,
+								vertIdx,
+								ctrlPos.size() / 3,
+								geomTimeCode.IsDefault() ? -1.0 : geomTimeCode.GetValue());
+							warnedInvalidPositionIndex = true;
+						}
+						validTriangle = false;
+						break;
+					}
+					triVertIdxs[c] = vertIdx;
+				}
+
+				if (!validTriangle) {
+					continue;
+				}
+
 				for (int c = 0; c < 3; ++c) {
 					size_t fvIndex = fvOffset + cornerIdxs[c];
-					uint32_t vertIdx = faceVertIndices[fvIndex];
+					uint32_t vertIdx = triVertIdxs[c];
 
 					const size_t outBase = outVertex * vertexSize;
 					std::byte* outPtr = rawData->data() + outBase;
@@ -471,14 +560,14 @@ static void LoadGeom(
 
 					size_t offset = sizeof(DirectX::XMFLOAT3);
 					if (gotNormals)
-						copyTupleFloat(outPtr + offset, rawNormals, 3, normInterp, f, fvIndex, vertIdx);
+						copyTupleFloat(outPtr + offset, rawNormals, 3, normInterp, f, fvIndex, vertIdx, warnedNormalTupleRange, "normals");
 					else
 						std::memcpy(outPtr + offset, &defaultNormal, sizeof(defaultNormal));
 					offset += sizeof(DirectX::XMFLOAT3);
 
                     DirectX::XMFLOAT2 packedUv = { 0.0f, 0.0f };
                     if (!uvSetBuildData.empty() && uvSetBuildData[0].available) {
-                        copyTupleFloat(reinterpret_cast<std::byte*>(&packedUv), uvSetBuildData[0].rawData, 2, uvSetBuildData[0].interpolation, f, fvIndex, vertIdx);
+                        copyTupleFloat(reinterpret_cast<std::byte*>(&packedUv), uvSetBuildData[0].rawData, 2, uvSetBuildData[0].interpolation, f, fvIndex, vertIdx, warnedUvTupleRange, uvSetBuildData[0].uvSet.name.c_str());
                     }
                     std::memcpy(outPtr + offset, &packedUv, sizeof(packedUv));
 
@@ -488,8 +577,8 @@ static void LoadGeom(
 
 						const size_t jointsOffset = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3);
 						const size_t weightsOffset = jointsOffset + sizeof(DirectX::XMUINT4);
-						copyTupleUInt(skinPtr + jointsOffset, rawJoints, 4, jointInterp, f, fvIndex, vertIdx);
-						copyTupleFloat(skinPtr + weightsOffset, rawWeights, 4, weightInterp, f, fvIndex, vertIdx);
+						copyTupleUInt(skinPtr + jointsOffset, rawJoints, 4, jointInterp, f, fvIndex, vertIdx, warnedJointTupleRange, "jointIndices");
+						copyTupleFloat(skinPtr + weightsOffset, rawWeights, 4, weightInterp, f, fvIndex, vertIdx, warnedWeightTupleRange, "jointWeights");
 					}
 
 					indices.push_back(static_cast<UINT32>(outVertex));
@@ -497,7 +586,7 @@ static void LoadGeom(
                     for (size_t uvSetIndex = 0; uvSetIndex < uvSetBuildData.size(); ++uvSetIndex) {
                         DirectX::XMFLOAT2 uvValue = { 0.0f, 0.0f };
                         if (uvSetBuildData[uvSetIndex].available) {
-                            copyTupleFloat(reinterpret_cast<std::byte*>(&uvValue), uvSetBuildData[uvSetIndex].rawData, 2, uvSetBuildData[uvSetIndex].interpolation, f, fvIndex, vertIdx);
+                            copyTupleFloat(reinterpret_cast<std::byte*>(&uvValue), uvSetBuildData[uvSetIndex].rawData, 2, uvSetBuildData[uvSetIndex].interpolation, f, fvIndex, vertIdx, warnedUvTupleRange, uvSetBuildData[uvSetIndex].uvSet.name.c_str());
                         }
                         if (uvSets.size() <= uvSetIndex) {
                             uvSets.resize(uvSetIndex + 1u);
@@ -509,6 +598,11 @@ static void LoadGeom(
 			}
 		}
 		fvOffset += fc;
+	}
+
+	rawData->resize(outVertex * static_cast<size_t>(vertexSize));
+	if (hasSkinning) {
+		skinningData.value()->resize(outVertex * static_cast<size_t>(skinningVertexSize));
 	}
 }
 
@@ -550,6 +644,7 @@ MeshPreprocessResult ExtractSubMesh(
 	const UsdGeomMesh& mesh,
 	const std::optional<UsdGeomSubset>& subset,
 	const UsdStageRefPtr& stage,
+	UsdTimeCode geomTimeCode,
 	double metersPerUnit,
 	const std::vector<std::string>& requiredUvSetNames,
 	const std::optional<UsdSkelSkinningQuery>& skinQ,
@@ -563,6 +658,9 @@ MeshPreprocessResult ExtractSubMesh(
 	auto cacheIdentity = CLodCacheLoader::BuildIdentity(mesh, stage, subsetName);
 	spdlog::info("    ExtractSubMesh: prim='{}' subset='{}' source='{}'",
 		cacheIdentity.primPath, subsetName, cacheIdentity.sourceIdentifier);
+	spdlog::info("    Geometry sample time for prim='{}' is {}",
+		cacheIdentity.primPath,
+		geomTimeCode.IsDefault() ? -1.0 : geomTimeCode.GetValue());
 
 	auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
 	if (prebuiltData.has_value())
@@ -579,7 +677,7 @@ MeshPreprocessResult ExtractSubMesh(
 	unsigned int vertexFlags = 0;
     std::vector<MeshUvSetData> uvSets;
 	LoadGeom(rawData, skinningData, vertexSize, skinningVertexSize,
-		indices, vertexFlags, uvSets, mesh, subset, metersPerUnit, requiredUvSetNames,
+		indices, vertexFlags, uvSets, mesh, subset, geomTimeCode, metersPerUnit, requiredUvSetNames,
 		skinQ, skelJointOrderRaw, skelJointOrderMapped);
 
 	const size_t loadedVertCount = rawData ? (rawData->size() / static_cast<size_t>(vertexSize > 0 ? vertexSize : 1)) : 0;
@@ -698,16 +796,17 @@ StageExtractionResult ExtractAll(const std::string& filePath) {
 
 		// Default UV set for CLI
 		const std::vector<std::string> requiredUvSetNames = { "st" };
+		const UsdTimeCode geomTimeCode = GetUsdGeometrySampleTime(stage);
 
 		if (subsets.empty()) {
-			ExtractSubMesh(mesh, std::nullopt, stage, metersPerUnit,
+			ExtractSubMesh(mesh, std::nullopt, stage, geomTimeCode, metersPerUnit,
 				requiredUvSetNames, skinQ, skelJointOrderRaw, skelJointOrderMapped);
 			result.submeshesProcessed++;
 			result.cachesBuilt++;
 		}
 		else {
 			for (auto const& subset : subsets) {
-				ExtractSubMesh(mesh, std::make_optional(subset), stage, metersPerUnit,
+				ExtractSubMesh(mesh, std::make_optional(subset), stage, geomTimeCode, metersPerUnit,
 					requiredUvSetNames, skinQ, skelJointOrderRaw, skelJointOrderMapped);
 				result.submeshesProcessed++;
 				result.cachesBuilt++;

@@ -10,12 +10,19 @@ AnimationController::AnimationController(const AnimationController& other)
 
 void AnimationController::setAnimationClip(std::shared_ptr<AnimationClip> newAnimationClip) {
     animationClip = newAnimationClip;
+    currentTime = 0.0f;
+    m_lastPositionKeyframeIndex = 0;
+    m_lastRotationKeyframeIndex = 0;
+    m_lastScaleKeyframeIndex = 0;
     //node->ForceUpdate();
     UpdateTransform();
 }
 
 void AnimationController::reset() {
     currentTime = 0.0f;
+    m_lastPositionKeyframeIndex = 0;
+    m_lastRotationKeyframeIndex = 0;
+    m_lastScaleKeyframeIndex = 0;
 }
 
 void AnimationController::pause() {
@@ -36,31 +43,49 @@ Components::Transform& AnimationController::GetUpdatedTransform(float elapsedTim
     return m_transform;
 }
 
-std::pair<unsigned int, unsigned int> findBoundingKeyframes(float currentTime, std::vector<Keyframe>& keyframes, unsigned int& counter) {
-	unsigned int prevKeyframeIndex = 0;
-	unsigned int nextKeyframeIndex = 0;
+std::pair<unsigned int, unsigned int> findBoundingKeyframes(float currentTime, const std::vector<Keyframe>& keyframes, unsigned int& counter) {
+    if (keyframes.empty()) {
+        counter = 0;
+        return std::make_pair(0u, 0u);
+    }
 
-	if (keyframes.size() == 1) {
-		return std::make_pair(prevKeyframeIndex, nextKeyframeIndex);
-	}
+    if (keyframes.size() == 1) {
+        counter = 0;
+        return std::make_pair(0u, 0u);
+    }
 
-    bool found = false;
-    for (uint32_t i = counter; i < keyframes.size() - 1; ++i) {
+    const unsigned int lastKeyframeIndex = static_cast<unsigned int>(keyframes.size() - 1);
+    if (counter >= lastKeyframeIndex) {
+        counter = 0;
+    }
+
+    if (currentTime <= keyframes.front().time) {
+        counter = 0;
+        return std::make_pair(0u, 0u);
+    }
+
+    if (currentTime >= keyframes.back().time) {
+        counter = lastKeyframeIndex;
+        return std::make_pair(lastKeyframeIndex, lastKeyframeIndex);
+    }
+
+    for (unsigned int i = counter; i < lastKeyframeIndex; ++i) {
         if (currentTime >= keyframes[i].time && currentTime < keyframes[i + 1].time) {
-            prevKeyframeIndex = i;
-            nextKeyframeIndex = i + 1;
             counter = i;
-            found = true;
-            break;
+            return std::make_pair(i, i + 1);
         }
     }
-	if (!found) { // We've wrapped around
-        counter = 0;
-        return findBoundingKeyframes(currentTime, keyframes, counter);
+
+    for (unsigned int i = 0; i < counter; ++i) {
+        if (currentTime >= keyframes[i].time && currentTime < keyframes[i + 1].time) {
+            counter = i;
+            return std::make_pair(i, i + 1);
+        }
     }
 
-    return std::make_pair(prevKeyframeIndex, nextKeyframeIndex);
-    };
+    counter = 0;
+    return std::make_pair(0u, 0u);
+}
 
 void AnimationController::UpdateTransform() {
     if (!animationClip) return ;
@@ -88,6 +113,9 @@ void AnimationController::UpdateTransform() {
             //node->transform.setLocalPosition(interpolatedPosition);
 			m_transform.pos = interpolatedPosition;
         }
+        else {
+            m_transform.pos = prevKeyframe->value;
+        }
     }
 
     // Check if rotation keyframes are available
@@ -103,6 +131,9 @@ void AnimationController::UpdateTransform() {
             //node->transform.setLocalRotationFromQuaternion(interpolatedRotation);
 			m_transform.rot = interpolatedRotation;
         }
+        else {
+            m_transform.rot = prevKeyframe->value;
+        }
     }
 
     // Check if scale keyframes are available
@@ -117,6 +148,9 @@ void AnimationController::UpdateTransform() {
             XMVECTOR interpolatedScale = lerpVec3(prevKeyframe->value, nextKeyframe->value, t);
             //node->transform.setLocalScale(interpolatedScale);
 			m_transform.scale = interpolatedScale;
+        }
+        else {
+            m_transform.scale = prevKeyframe->value;
         }
     }
 }

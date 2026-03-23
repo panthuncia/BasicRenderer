@@ -21,7 +21,7 @@ struct MeshData {
     std::vector<float> normals;
     std::vector<uint32_t> indices;
     std::vector<MeshUvSetData> uvSets;
-    std::vector<UINT> joints;
+    std::vector<uint32_t> joints;
     std::vector<float> weights;
     std::shared_ptr<Material> material;
     unsigned int flags = 0;
