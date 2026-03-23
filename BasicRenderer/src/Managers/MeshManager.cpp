@@ -26,7 +26,7 @@ MeshManager::MeshManager() {
 	m_meshletTriangles = DynamicBuffer::CreateShared(1, 4, "meshletTriangles", true);
 
 	m_perMeshBuffers = DynamicBuffer::CreateShared(sizeof(PerMeshCB), 1, "PerMeshBuffers");
-	m_perMeshInstanceBuffers = DynamicBuffer::CreateShared(sizeof(PerMeshCB), 1, "perMeshInstanceBuffers");
+	m_perMeshInstanceBuffers = DynamicBuffer::CreateShared(sizeof(PerMeshInstanceCB), 1, "perMeshInstanceBuffers");
 
 	// Cluster LOD data
 	m_perMeshInstanceClodOffsets = DynamicBuffer::CreateShared(sizeof(MeshInstanceClodOffsets), 10000, "perMeshInstanceClodOffsets");
@@ -489,13 +489,8 @@ void MeshManager::AddMeshInstance(MeshInstance* mesh, bool useMeshletReorderedVe
 	mesh->SetCurrentMeshManager(this);
 	(void)useMeshletReorderedVertices;
 
-	if (mesh->HasSkin()) { // Skinned meshes need unique post-skinning vertex buffers
-		// TODO: CLod skinning
-	}
-	else { // Non-skinned meshes can share post-skinning vertex buffers
-		auto perMeshInstanceBufferView = m_perMeshInstanceBuffers->AddData(&mesh->GetPerMeshInstanceBufferData(), sizeof(PerMeshInstanceCB), sizeof(PerMeshInstanceCB));
-		mesh->SetBufferViewUsingBaseMesh(std::move(perMeshInstanceBufferView));
-	}
+	auto perMeshInstanceBufferView = m_perMeshInstanceBuffers->AddData(&mesh->GetPerMeshInstanceBufferData(), sizeof(PerMeshInstanceCB), sizeof(PerMeshInstanceCB));
+	mesh->SetBufferViewUsingBaseMesh(std::move(perMeshInstanceBufferView));
 
 	uint32_t bitsToAllocate = mesh->GetMesh()->GetCLodMeshletCount();
 	m_activeMeshletCount += bitsToAllocate;

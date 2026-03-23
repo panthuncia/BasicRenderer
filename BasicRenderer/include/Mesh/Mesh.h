@@ -44,6 +44,10 @@ public:
 		return static_cast<uint32_t>(m_clodRuntimeSummary.groupChunkHints.size());
 	}
 
+    bool IsCLodMesh() const {
+        return GetCLodGroupCount() > 0u;
+    }
+
 	PerMeshCB& GetPerMeshCBData() { return m_perMeshBufferData; };
 	uint64_t GetGlobalID() const;
 

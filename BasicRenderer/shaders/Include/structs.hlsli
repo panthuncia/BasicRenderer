@@ -228,6 +228,8 @@ struct PerMeshInstanceBuffer {
     uint perObjectBufferIndex;
     uint skinningInstanceSlot;
     uint postSkinningVertexBufferOffset;
+    float skinnedBoundsScale;
+    uint3 pad0;
 };
 
 #define LIGHTS_PER_PAGE 12

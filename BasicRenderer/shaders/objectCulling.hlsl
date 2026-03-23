@@ -35,12 +35,14 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
     // Meshlets from all drawsets are culled together
     AppendStructuredBuffer<DispatchIndirectCommand> meshletFrustrumCullingIndirectCommandOutputBuffer = ResourceDescriptorHeap[MESHLET_CULLING_INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
     
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     Camera camera = cameras[lightViewIndex]; // In compute root signature, this directly indexes the camera buffer instead of using indirection through light view index buffers
     
     PerMeshBuffer perMesh = perMeshBuffer[command.perMeshBufferIndex];
+    PerMeshInstanceBuffer meshInstance = perMeshInstanceBuffer[command.perMeshInstanceBufferIndex];
     PerObjectBuffer perObject = perObjectBuffer[command.perObjectBufferIndex];
     
     // Culling
@@ -55,7 +57,7 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
     length(perObject.model[2].xyz)
 );
     float maxScale = max(max(scaleFactors.x, scaleFactors.y), scaleFactors.z);
-    float scaledBoundingRadius = perMesh.boundingSphere.sphere.w * maxScale;
+    float scaledBoundingRadius = perMesh.boundingSphere.sphere.w * meshInstance.skinnedBoundsScale * maxScale;
     
 #if defined (OCCLUSION_CULLING)
 
@@ -71,31 +73,26 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
     
     bool fullyInside = true;
     
-    // Disable culling for skinned meshes for now, as the bounding sphere is not updated
-    if (!(perMesh.vertexFlags & VERTEX_SKINNED))
-    { // TODO: Implement skinned mesh culling    
-        for (uint i = 0; i < 6; i++)
+    for (uint i = 0; i < 6; i++)
+    {
+        float4 P = camera.clippingPlanes[i].plane; // plane normal.xyz, plane.w
+        float distance = dot(P.xyz, viewSpaceCenter) + P.w;
+
+        // fully outside?
+        if (distance < -scaledBoundingRadius)
         {
-            float4 P = camera.clippingPlanes[i].plane; // plane normal.xyz, plane.w
-            float distance = dot(P.xyz, viewSpaceCenter) + P.w;
-
-            // fully outside?
-            if (distance < -scaledBoundingRadius)
-            {
-                // Update bitfield
-                ClearBitAtomic(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
-                return; // reject whole object
-            }
             // Update bitfield
-            SetBitAtomic(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
-
-            // does it intersect this plane?
-            if (abs(distance) < scaledBoundingRadius)
-            {
-                fullyInside = false;
-            }
+            ClearBitAtomic(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
+            return; // reject whole object
         }
+        // Update bitfield
+        SetBitAtomic(meshInstanceVisibilityBitfield, command.perMeshInstanceBufferIndex);
 
+        // does it intersect this plane?
+        if (abs(distance) < scaledBoundingRadius)
+        {
+            fullyInside = false;
+        }
     }
 
 #if defined (OCCLUSION_CULLING)

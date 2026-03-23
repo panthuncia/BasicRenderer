@@ -264,6 +264,7 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 				m_managerInterface.GetSkeletonManager()->AcquireSkinningInstance(skinInst);
 				meshInstance->SetSkinningInstanceSlot(skinInst->GetSkinningInstanceSlot());
 				skinInst->SetAnimation(0); // TODO: Animation selection
+				meshInstance->SyncSkinningStateFromSkeleton();
 			}
 
 			// Increment material usage count

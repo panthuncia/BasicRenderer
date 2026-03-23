@@ -128,6 +128,7 @@ namespace Components {
     };
 
     struct Skinned {};
+    struct SkinningPassEligible {};
     struct SkeletonRoot {};
 
     struct Active {};

@@ -9,6 +9,7 @@
 #include "Include/clodStructs.hlsli"
 #include "Include/clodPageAccess.hlsli"
 #include "Include/visibleClusterPacking.hlsli"
+#include "Include/vertex.hlsli"
 
 #ifndef CLOD_WG_ENABLE_SW_CLASSIFICATION
 #define CLOD_WG_ENABLE_SW_CLASSIFICATION 1
@@ -468,7 +469,7 @@ void WG_ObjectCull(
 
         const float3 objectSpaceCenter = perMesh.boundingSphere.sphere.xyz;
         const float3 viewSpaceCenter = ToViewSpace(objectSpaceCenter, objectModelMatrix, camera.view);
-        const float worldRadius = perMesh.boundingSphere.sphere.w * MaxAxisScale_RowVector(objectModelMatrix);
+        const float worldRadius = perMesh.boundingSphere.sphere.w * instanceData.skinnedBoundsScale * MaxAxisScale_RowVector(objectModelMatrix);
 
         const bool culled = SphereOutsideFrustumViewSpace(viewSpaceCenter, worldRadius, camera);
         if (!culled) {
@@ -566,7 +567,12 @@ void WG_TraverseNodes(
         const CLodMeshMetadata clodMeshMetadata = clodMeshMetadataBuffer[off.clodMeshMetadataIndex];
         StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-        const uint objectBufferIndex = perMeshInstanceBuffer[rec.instanceIndex].perObjectBufferIndex;
+        const PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[rec.instanceIndex];
+        const uint objectBufferIndex = instanceData.perObjectBufferIndex;
+        StructuredBuffer<PerMeshBuffer> perMeshBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+        const PerMeshBuffer perMesh = perMeshBuffer[instanceData.perMeshBufferIndex];
+        const bool conservativeSkinnedTraversal = (perMesh.vertexFlags & VERTEX_SKINNED) != 0u;
         StructuredBuffer<PerObjectBuffer> perObjectBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
         const row_major matrix objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
@@ -590,11 +596,11 @@ void WG_TraverseNodes(
             WGTelemetryAdd(WG_COUNTER_TRAVERSE_LEAF_NODE_RECORDS, 1);
         }
 
-        const float nodeUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
+        const float nodeUniformScale = MaxAxisScale_RowVector(objectModelMatrix) * instanceData.skinnedBoundsScale;
         const float3 nodeCenterObjectSpace = node.metric.centerAndRadius.xyz;
         const float3 nodeCenterViewSpace = ToViewSpace(nodeCenterObjectSpace, objectModelMatrix, camera.view);
         const float nodeRadiusWorld = node.metric.centerAndRadius.w * nodeUniformScale;
-        const bool nodeCulled = !replaySource && SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, camera);
+        const bool nodeCulled = !conservativeSkinnedTraversal && !replaySource && SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, camera);
 
         if (nodeCulled) {
             WGTelemetryAdd(WG_COUNTER_TRAVERSE_CULLED_NODE_RECORDS, 1);
@@ -618,7 +624,7 @@ void WG_TraverseNodes(
                     grpWorldCenter, grpWorldRadius,
                     grp.bounds.error, nodeUniformScale,
                     cam.positionWorldSpace.xyz, cam.zNear);
-                const bool nodeWantsTraversal = parentAllowsRefine && (grpEOD >= cam.errorOverDistanceThreshold);
+                const bool nodeWantsTraversal = parentAllowsRefine && (conservativeSkinnedTraversal || (grpEOD >= cam.errorOverDistanceThreshold));
 
                 if (!nodeWantsTraversal) {
                     WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
@@ -709,14 +715,14 @@ void WG_TraverseNodes(
                     nodeUniformScale,
                     cam.positionWorldSpace.xyz,
                     cam.zNear);
-                const bool nodeWantsTraversal = parentAllowsRefine && (nodeErrorOverDistance >= cam.errorOverDistanceThreshold);
+                const bool nodeWantsTraversal = parentAllowsRefine && (conservativeSkinnedTraversal || (nodeErrorOverDistance >= cam.errorOverDistanceThreshold));
 
                 if (!nodeWantsTraversal) {
                     WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
                 }
                 else {
                     bool occlusionCulled = false;
-                    if (CLodWorkGraphOcclusionEnabled() && !camera.isOrtho) {
+                    if (!conservativeSkinnedTraversal && CLodWorkGraphOcclusionEnabled() && !camera.isOrtho) {
                         StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
                             ResourceDescriptorHeap[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
                         const uint depthMapDescriptorIndex = viewDepthSRVIndices[rec.viewId].linearDepthSRVIndex;
@@ -772,7 +778,7 @@ void WG_TraverseNodes(
                             // Frustum cull child.
                             const float3 childCenterVS = ToViewSpace(child.metric.centerAndRadius.xyz, objectModelMatrix, camera.view);
                             const float childRadiusWorld = child.metric.centerAndRadius.w * nodeUniformScale;
-                            if (!replaySource && SphereOutsideFrustumViewSpace(childCenterVS, childRadiusWorld, camera)) {
+                            if (!conservativeSkinnedTraversal && !replaySource && SphereOutsideFrustumViewSpace(childCenterVS, childRadiusWorld, camera)) {
                                 WGTelemetryAdd(WG_COUNTER_CHILD_PREFILTER_FRUSTUM_CULLED, 1);
                                 continue;
                             }
@@ -780,7 +786,7 @@ void WG_TraverseNodes(
                             // LOD pre-filter for internal children only.
                             // Leaf children use the group sphere for LOD (different from node sphere),
                             // so we skip the LOD check here and let the leaf thread handle it.
-                            if (child.range.isLeaf == 0) {
+                            if (!conservativeSkinnedTraversal && child.range.isLeaf == 0) {
                                 const float3 childWorldCenter = mul(float4(child.metric.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
                                 const float childEOD = ErrorOverDistance(
                                     childWorldCenter, childRadiusWorld,
@@ -947,6 +953,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
     uint activeGroupScanCount = 0;
     float ownGroupErrorOverDistance = 0.0f;
     uint objectBufferIndex = 0;
+    bool conservativeSkinnedTraversal = false;
 
     if (hasBucket && b.pageSlabDescriptorIndex != 0) {
         pageValid = true;
@@ -956,7 +963,8 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 
         StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-        objectBufferIndex = perMeshInstanceBuffer[b.instanceIndex].perObjectBufferIndex;
+        const PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[b.instanceIndex];
+        objectBufferIndex = instanceData.perObjectBufferIndex;
         StructuredBuffer<PerObjectBuffer> perObjectBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
         objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
@@ -985,8 +993,12 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         }
 
         // Per-meshlet condition 2 + streaming fallback state
-        groupUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
-        meshBufferIndex = perMeshInstanceBuffer[b.instanceIndex].perMeshBufferIndex;
+        groupUniformScale = MaxAxisScale_RowVector(objectModelMatrix) * instanceData.skinnedBoundsScale;
+        meshBufferIndex = instanceData.perMeshBufferIndex;
+        StructuredBuffer<PerMeshBuffer> perMeshBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+        const PerMeshBuffer perMesh = perMeshBuffer[meshBufferIndex];
+        conservativeSkinnedTraversal = (perMesh.vertexFlags & VERTEX_SKINNED) != 0u;
         StructuredBuffer<CullingCameraInfo> cameraInfos =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
         cam = cameraInfos[b.viewId];
@@ -1069,7 +1081,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, viewMatrix);
                 meshletRadiusWorld = meshletBounds.sphere.w * groupUniformScale;
 
-                survives = replaySource || !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, frustumPlanes);
+                survives = replaySource || conservativeSkinnedTraversal || !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, frustumPlanes);
 
                 if (!survives) {
                     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_FRUSTUM, 1);
@@ -1078,7 +1090,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 // Per-meshlet LOD condition 2: read refined group ID from descriptor.
                 // Terminal meshlets (refinedGroupId < 0) pass automatically.
                 // Non-terminal meshlets check if the child group is acceptable.
-                if (survives) {
+                if (survives && !conservativeSkinnedTraversal) {
                     const int refinedGroupId = CLodDescRefinedGroupId(desc);
                     if (refinedGroupId >= 0) {
                         StructuredBuffer<ClusterLODGroup> groups =
@@ -1127,7 +1139,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                     }
                 }
 
-                if (survives && CLodWorkGraphOcclusionEnabled() && depthMapDescriptorIndex != 0) {
+                if (survives && !conservativeSkinnedTraversal && CLodWorkGraphOcclusionEnabled() && depthMapDescriptorIndex != 0) {
                     bool occlusionCulled = false;
                     // Load only the occlusion-specific camera matrices when needed,
                     // keeping them out of registers during the main frustum/LOD loop.

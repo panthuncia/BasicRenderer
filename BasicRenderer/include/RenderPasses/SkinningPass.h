@@ -13,7 +13,7 @@ public:
 	SkinningPass() {
 		getMeshShadersEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader");
 		auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
-		skinnedQuery = ecsWorld.query_builder<Components::Skinned, Components::ObjectDrawInfo, Components::MeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
+		skinnedQuery = ecsWorld.query_builder<Components::SkinningPassEligible, Components::ObjectDrawInfo, Components::MeshInstances>().cached().cache_kind(flecs::QueryCacheAll).build();
 		CreatePSO();
 	}
 
@@ -63,13 +63,16 @@ public:
 		auto meshShadersEnabled = getMeshShadersEnabled();
 
 		unsigned int perMeshConstants[NumPerMeshRootConstants] = {};
-		skinnedQuery.each([&](flecs::entity e, Components::Skinned s, Components::ObjectDrawInfo drawInfo, Components::MeshInstances meshInstances) {
+		skinnedQuery.each([&](flecs::entity e, Components::SkinningPassEligible s, Components::ObjectDrawInfo drawInfo, Components::MeshInstances meshInstances) {
 			auto& meshes = meshInstances.meshInstances;
 
 			commandList.PushConstants(rhi::ShaderStage::Compute, 0, PerObjectRootSignatureIndex, PerObjectBufferIndex, 1, &drawInfo.perObjectCBIndex);
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
+                if (!pMesh->HasSkin() || mesh.IsCLodMesh()) {
+                    continue;
+                }
 				perMeshConstants[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
 				perMeshConstants[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
 				commandList.PushConstants(rhi::ShaderStage::Compute, 0, PerMeshRootSignatureIndex, PerMeshBufferIndex, NumPerMeshRootConstants, perMeshConstants);
@@ -97,7 +100,7 @@ private:
 			"Skinning CS");
 	}
 
-	flecs::query<Components::Skinned, Components::ObjectDrawInfo, Components::MeshInstances> skinnedQuery;
+	flecs::query<Components::SkinningPassEligible, Components::ObjectDrawInfo, Components::MeshInstances> skinnedQuery;
 	PipelineState m_PSO;
 
 	std::function<bool()> getMeshShadersEnabled;

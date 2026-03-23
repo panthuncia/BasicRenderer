@@ -20,6 +20,7 @@ public:
     void SetBufferViewUsingBaseMesh(std::unique_ptr<BufferView> perMeshInstanceBufferView);
 
     void SetSkeleton(std::shared_ptr<Skeleton> skeleton);
+    void SyncSkinningStateFromSkeleton();
 
     std::shared_ptr<Skeleton> GetSkin() const {
         return m_skeleton;
@@ -47,6 +48,7 @@ public:
 		m_animationSpeed = speed;
 		if (m_skeleton != nullptr) {
 			m_skeleton->SetAnimationSpeed(speed);
+            SyncSkinningStateFromSkeleton();
 		}
 	}
 

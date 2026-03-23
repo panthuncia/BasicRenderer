@@ -121,6 +121,8 @@ struct PerMeshInstanceCB {
     unsigned int perObjectBufferIndex;
     unsigned int skinningInstanceSlot;
     unsigned int postSkinningVertexBufferOffset;
+    float skinnedBoundsScale = 1.0f;
+    unsigned int pad[3] = {};
 };
 
 struct PerMaterialCB {

@@ -70,6 +70,25 @@ RenderableSignature BuildRenderableSignature(const Components::MeshInstances* me
     return signature;
 }
 
+bool HasSkinningPassEligibleMeshes(const Components::MeshInstances* meshInstances) {
+    if (!meshInstances) {
+        return false;
+    }
+
+    for (const auto& meshInstance : meshInstances->meshInstances) {
+        if (!meshInstance || !meshInstance->HasSkin()) {
+            continue;
+        }
+
+        const auto mesh = meshInstance->GetMesh();
+        if (mesh && !mesh->IsCLodMesh()) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 Components::PerPassMeshes BuildPerPassMeshes(const Components::MeshInstances* meshInstances) {
     Components::PerPassMeshes perPassMeshes;
     if (!meshInstances) {
@@ -566,6 +585,11 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
             dst.add<Components::Skinned>();
         } else {
             dst.remove<Components::Skinned>();
+        }
+        if (HasSkinningPassEligibleMeshes(&renderable.meshInstances)) {
+            dst.add<Components::SkinningPassEligible>();
+        } else {
+            dst.remove<Components::SkinningPassEligible>();
         }
         if (renderable.skipShadowPass) {
             dst.add<Components::SkipShadowPass>();
