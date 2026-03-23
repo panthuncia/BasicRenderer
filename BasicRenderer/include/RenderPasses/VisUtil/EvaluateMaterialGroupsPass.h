@@ -58,6 +58,9 @@ public:
             Builtin::CameraBuffer,
             Builtin::PostSkinningVertices,
             Builtin::NormalMatrixBuffer,
+            Builtin::SkeletonResources::InverseBindMatrices,
+            Builtin::SkeletonResources::BoneTransforms,
+            Builtin::SkeletonResources::SkinningInstanceInfo,
             Builtin::PerMaterialDataBuffer,
             Builtin::CLod::Offsets,
 			Builtin::CLod::GroupChunks,
@@ -86,6 +89,9 @@ public:
         RegisterSRV(Builtin::CameraBuffer);
         RegisterSRV(Builtin::PostSkinningVertices);
         RegisterSRV(Builtin::NormalMatrixBuffer);
+        RegisterSRV(Builtin::SkeletonResources::InverseBindMatrices);
+        RegisterSRV(Builtin::SkeletonResources::BoneTransforms);
+        RegisterSRV(Builtin::SkeletonResources::SkinningInstanceInfo);
 		RegisterSRV(Builtin::CLod::Offsets);
         RegisterSRV(Builtin::CLod::GroupChunks);
 		RegisterSRV(Builtin::CLod::Groups);

@@ -52,6 +52,9 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerMaterialDataBuffer,
             Builtin::PostSkinningVertices,
+            Builtin::SkeletonResources::InverseBindMatrices,
+            Builtin::SkeletonResources::BoneTransforms,
+            Builtin::SkeletonResources::SkinningInstanceInfo,
             Builtin::CameraBuffer,
             Builtin::CLod::Offsets,
             Builtin::CLod::GroupChunks,
@@ -90,6 +93,9 @@ void ClusterRasterizationPass::Setup() {
     RegisterSRV(Builtin::PerMeshInstanceBuffer);
     RegisterSRV(Builtin::PerMeshBuffer);
     RegisterSRV(Builtin::PerMaterialDataBuffer);
+    RegisterSRV(Builtin::SkeletonResources::InverseBindMatrices);
+    RegisterSRV(Builtin::SkeletonResources::BoneTransforms);
+    RegisterSRV(Builtin::SkeletonResources::SkinningInstanceInfo);
     RegisterSRV(Builtin::MeshResources::MeshletOffsets);
     RegisterSRV(Builtin::CLod::MeshMetadata);
 }

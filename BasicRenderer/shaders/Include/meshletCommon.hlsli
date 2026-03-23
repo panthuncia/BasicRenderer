@@ -59,8 +59,10 @@ struct MeshletSetup
     uint bitsZ;
     int3 minQ;
     uint positionBitOffset;     // bit offset within page position bitstream
-    uint normalWordOffset;      // word offset within page normal array
+    uint vertexAttributeOffset; // element offset within page vertex-attribute arrays
     uint triangleByteOffset;    // byte offset within page triangle stream
+    uint boneListOffset;        // uint offset within page bone-index stream
+    uint boneCount;
     uint pageAttributeMask;
     uint uvSetCount;
     uint uvDescriptorBase;
@@ -70,7 +72,10 @@ struct MeshletSetup
     uint pageByteOffset;
     uint positionBitstreamBase;
     uint normalArrayBase;
+    uint jointArrayBase;
+    uint weightArrayBase;
     uint triangleStreamBase;
+    uint boneIndexStreamBase;
 
     // Mesh-wide quantization
     uint compressedPositionQuantExp;
@@ -114,8 +119,10 @@ bool InitializeMeshletInternal(
     setup.bitsZ = 0;
     setup.minQ = int3(0, 0, 0);
     setup.positionBitOffset = 0;
-    setup.normalWordOffset = 0;
+    setup.vertexAttributeOffset = 0;
     setup.triangleByteOffset = 0;
+    setup.boneListOffset = 0;
+    setup.boneCount = 0;
     setup.pageAttributeMask = 0;
     setup.uvSetCount = 0;
     setup.uvDescriptorBase = 0;
@@ -123,7 +130,10 @@ bool InitializeMeshletInternal(
     setup.pageByteOffset = 0;
     setup.positionBitstreamBase = 0;
     setup.normalArrayBase = 0;
+    setup.jointArrayBase = 0;
+    setup.weightArrayBase = 0;
     setup.triangleStreamBase = 0;
+    setup.boneIndexStreamBase = 0;
     setup.compressedPositionQuantExp = 0;
 
     // setup.vertexBuffer = vertexBuffer;
@@ -202,8 +212,10 @@ bool InitializeMeshletInternalCLod(
     setup.bitsZ = CLodDescBitsZ(desc);
     setup.minQ = int3(desc.minQx, desc.minQy, desc.minQz);
     setup.positionBitOffset = desc.positionBitOffset;
-    setup.normalWordOffset = desc.normalWordOffset;
+    setup.vertexAttributeOffset = desc.vertexAttributeOffset;
     setup.triangleByteOffset = desc.triangleByteOffset;
+    setup.boneListOffset = desc.boneListOffset;
+    setup.boneCount = CLodDescBoneCount(desc);
     setup.pageAttributeMask = hdr.attributeMask;
     setup.uvSetCount = hdr.uvSetCount;
 
@@ -211,9 +223,12 @@ bool InitializeMeshletInternalCLod(
     setup.pageByteOffset = pageSlabOff;
     setup.positionBitstreamBase = pageSlabOff + hdr.positionBitstreamOffset;
     setup.normalArrayBase = pageSlabOff + hdr.normalArrayOffset;
+    setup.jointArrayBase = pageSlabOff + hdr.jointArrayOffset;
+    setup.weightArrayBase = pageSlabOff + hdr.weightArrayOffset;
     setup.uvDescriptorBase = pageSlabOff + hdr.uvDescriptorOffset;
     setup.uvBitstreamDirectoryBase = pageSlabOff + hdr.uvBitstreamDirectoryOffset;
     setup.triangleStreamBase = pageSlabOff + hdr.triangleStreamOffset;
+    setup.boneIndexStreamBase = pageSlabOff + hdr.boneIndexStreamOffset;
 
     setup.compressedPositionQuantExp = hdr.compressedPositionQuantExp;
     setup.pagePoolSlabDescriptorIndex = pageSlabDesc;

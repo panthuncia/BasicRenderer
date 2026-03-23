@@ -9,6 +9,7 @@
 
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
+#include "include/skinningCommon.hlsli"
 #include "include/vertex.hlsli"
 #include "include/materialFlags.hlsli"
 #include "PerPassRootConstants/clodWorkGraphRootConstants.h"
@@ -178,6 +179,40 @@ float2 SWDecodeCompressedUV(
         uvDesc.uvMinV + float(encodedV) * uvDesc.uvScaleV);
 }
 
+uint4 SWDecodePackedJoints(
+    uint meshletLocalVertex,
+    CLodPageHeader hdr,
+    CLodMeshletDescriptor desc,
+    uint pageByteOffset,
+    uint pagePoolSlabDescriptorIndex)
+{
+    if ((hdr.attributeMask & CLOD_PAGE_ATTRIBUTE_JOINTS) == 0u)
+    {
+        return uint4(0, 0, 0, 0);
+    }
+
+    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
+    uint addr = pageByteOffset + hdr.jointArrayOffset + (desc.vertexAttributeOffset + meshletLocalVertex) * 16u;
+    return LoadUint4(addr, slab);
+}
+
+float4 SWDecodePackedWeights(
+    uint meshletLocalVertex,
+    CLodPageHeader hdr,
+    CLodMeshletDescriptor desc,
+    uint pageByteOffset,
+    uint pagePoolSlabDescriptorIndex)
+{
+    if ((hdr.attributeMask & CLOD_PAGE_ATTRIBUTE_WEIGHTS) == 0u)
+    {
+        return float4(0.0f, 0.0f, 0.0f, 0.0f);
+    }
+
+    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
+    uint addr = pageByteOffset + hdr.weightArrayOffset + (desc.vertexAttributeOffset + meshletLocalVertex) * 16u;
+    return LoadFloat4(addr, slab);
+}
+
 void SWRasterCluster(
     uint3 packedCluster,
     uint unsortedClusterIndex,
@@ -237,6 +272,12 @@ void SWRasterCluster(
             hdr.compressedPositionQuantExp,
             int3(desc.minQx, desc.minQy, desc.minQz),
             pageSlabDescriptorIndex);
+        if ((perMeshBuffer[meshInst.perMeshBufferIndex].vertexFlags & VERTEX_SKINNED) != 0u)
+        {
+            uint4 joints = SWDecodePackedJoints(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex);
+            float4 weights = SWDecodePackedWeights(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex);
+            localPos = mul(float4(localPos, 1.0f), BuildSkinMatrix(meshInst.skinningInstanceSlot, joints, weights)).xyz;
+        }
 
         float4 localPos4 = float4(localPos, 1.0f);
         float4 clipPos  = mul(localPos4, modelViewProjection);

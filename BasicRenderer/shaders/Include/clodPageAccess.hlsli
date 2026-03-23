@@ -25,14 +25,15 @@ CLodPageHeader LoadPageHeader(uint slabDescriptorIndex, uint pageByteOffset)
     hdr.uvDescriptorOffset         = d1.y;
     hdr.positionBitstreamOffset    = d1.z;
     hdr.normalArrayOffset          = d1.w;
-    hdr.uvBitstreamDirectoryOffset = d2.x;
-    hdr.triangleStreamOffset       = d2.y;
-    hdr.reserved0 = d2.z;
-    hdr.reserved1 = d2.w;
-    hdr.reserved2 = 0;
-    hdr.reserved3 = 0;
-    hdr.reserved4 = 0;
-    hdr.reserved5 = 0;
+    hdr.jointArrayOffset           = d2.x;
+    hdr.weightArrayOffset          = d2.y;
+    hdr.uvBitstreamDirectoryOffset = d2.z;
+    hdr.triangleStreamOffset       = d2.w;
+    uint4 d3 = slab.Load4(pageByteOffset + 48);
+    hdr.boneIndexStreamOffset      = d3.x;
+    hdr.reserved0 = d3.y;
+    hdr.reserved1 = d3.z;
+    hdr.reserved2 = d3.w;
 
     return hdr;
 }
@@ -49,15 +50,15 @@ CLodMeshletDescriptor LoadMeshletDescriptor(uint slabDescriptorIndex, uint pageB
 
     CLodMeshletDescriptor desc;
     desc.positionBitOffset           = d0.x;
-    desc.normalWordOffset            = d0.y;
+    desc.vertexAttributeOffset       = d0.y;
     desc.triangleByteOffset          = d0.z;
-    desc.reserved0                   = d0.w;
+    desc.boneListOffset              = d0.w;
     desc.minQx                       = asint(d1.x);
     desc.minQy                       = asint(d1.y);
     desc.minQz                       = asint(d1.z);
     desc.bitsAndVertexCount          = d1.w;
     desc.triangleCountAndRefinedGroup = d2.x;
-    desc.reserved1                   = d2.y;
+    desc.boneCount                   = d2.y;
     desc.reserved2                   = d2.z;
     desc.reserved3                   = d2.w;
     desc.bounds                      = asfloat(d3);

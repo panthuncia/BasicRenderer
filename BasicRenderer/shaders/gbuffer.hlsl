@@ -1,5 +1,6 @@
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
+#include "include/skinningCommon.hlsli"
 #include "include/meshletCommon.hlsli"
 #include "include/vertex.hlsli"
 #include "include/utilities.hlsli"
@@ -158,7 +159,7 @@ struct MeshletResolveData {
     uint bitsZ;
     int3 minQ;
     uint positionBitOffset;     // bit offset within page position bitstream
-    uint normalWordOffset;      // word offset within page normal array
+    uint vertexAttributeOffset; // element offset within page vertex-attribute arrays
     uint triangleByteOffset;    // byte offset within page triangle stream
     uint pageAttributeMask;
     uint uvSetCount;
@@ -169,7 +170,10 @@ struct MeshletResolveData {
     uint pageByteOffset;
     uint positionBitstreamBase;
     uint normalArrayBase;
+    uint jointArrayBase;
+    uint weightArrayBase;
     uint triangleStreamBase;
+    uint skinningInstanceSlot;
 
     // Mesh-wide quantization
     uint compressedPositionQuantExp;
@@ -320,9 +324,47 @@ float3 OctDecodeNormal(float2 e)
 float3 DecodeCompressedNormal(uint meshletLocalVertex, MeshletResolveData d)
 {
     ByteAddressBuffer slab = ResourceDescriptorHeap[d.pagePoolSlabDescriptorIndex];
-    uint addr = d.normalArrayBase + (d.normalWordOffset + meshletLocalVertex) * 4u;
+    uint addr = d.normalArrayBase + (d.vertexAttributeOffset + meshletLocalVertex) * 4u;
     uint packed = slab.Load(addr);
     return OctDecodeNormal(UnpackSnorm16x2(packed));
+}
+
+uint4 DecodePackedJoints(uint meshletLocalVertex, MeshletResolveData d)
+{
+    if ((d.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_JOINTS) == 0u)
+    {
+        return uint4(0, 0, 0, 0);
+    }
+
+    ByteAddressBuffer slab = ResourceDescriptorHeap[d.pagePoolSlabDescriptorIndex];
+    uint addr = d.jointArrayBase + (d.vertexAttributeOffset + meshletLocalVertex) * 16u;
+    return LoadUint4(addr, slab);
+}
+
+float4 DecodePackedWeights(uint meshletLocalVertex, MeshletResolveData d)
+{
+    if ((d.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_WEIGHTS) == 0u)
+    {
+        return float4(0.0f, 0.0f, 0.0f, 0.0f);
+    }
+
+    ByteAddressBuffer slab = ResourceDescriptorHeap[d.pagePoolSlabDescriptorIndex];
+    uint addr = d.weightArrayBase + (d.vertexAttributeOffset + meshletLocalVertex) * 16u;
+    return LoadFloat4(addr, slab);
+}
+
+void ApplyClodSkinning(uint meshletLocalVertex, MeshletResolveData d, inout float3 positionOS, inout float3 normalOS)
+{
+    if ((d.meshInfo.y & VERTEX_SKINNED) == 0u)
+    {
+        return;
+    }
+
+    uint4 joints = DecodePackedJoints(meshletLocalVertex, d);
+    float4 weights = DecodePackedWeights(meshletLocalVertex, d);
+    float4x4 skinMatrix = BuildSkinMatrix(d.skinningInstanceSlot, joints, weights);
+    positionOS = mul(float4(positionOS, 1.0f), skinMatrix).xyz;
+    normalOS = mul(normalOS, (float3x3)skinMatrix);
 }
 
 float2 DecodeCompressedUV(uint meshletLocalVertex, uint uvSetIndex, MeshletResolveData d)
@@ -383,6 +425,7 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
 
         PerMeshInstanceBuffer inst = perMeshInstanceBuffer[d.drawcallAndMeshlet.x];
         d.objAndMesh = uint2(inst.perObjectBufferIndex, inst.perMeshBufferIndex);
+        d.skinningInstanceSlot = inst.skinningInstanceSlot;
 
         PerMeshBuffer mesh = perMeshBuffer[d.objAndMesh.y];
 
@@ -406,7 +449,7 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
         d.bitsZ = CLodDescBitsZ(desc);
         d.minQ = int3(desc.minQx, desc.minQy, desc.minQz);
         d.positionBitOffset = desc.positionBitOffset;
-        d.normalWordOffset = desc.normalWordOffset;
+        d.vertexAttributeOffset = desc.vertexAttributeOffset;
         d.triangleByteOffset = desc.triangleByteOffset;
         d.pageAttributeMask = hdr.attributeMask;
         d.uvSetCount = hdr.uvSetCount;
@@ -417,6 +460,8 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
         d.uvBitstreamDirectoryBase = pageSlabOff + hdr.uvBitstreamDirectoryOffset;
         d.positionBitstreamBase = pageSlabOff + hdr.positionBitstreamOffset;
         d.normalArrayBase = pageSlabOff + hdr.normalArrayOffset;
+        d.jointArrayBase = pageSlabOff + hdr.jointArrayOffset;
+        d.weightArrayBase = pageSlabOff + hdr.weightArrayOffset;
         d.triangleStreamBase = pageSlabOff + hdr.triangleStreamOffset;
 
         d.compressedPositionQuantExp = hdr.compressedPositionQuantExp;
@@ -436,7 +481,7 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
     d.minQ.y = WaveReadLaneAt(d.minQ.y, leader);
     d.minQ.z = WaveReadLaneAt(d.minQ.z, leader);
     d.positionBitOffset = WaveReadLaneAt(d.positionBitOffset, leader);
-    d.normalWordOffset = WaveReadLaneAt(d.normalWordOffset, leader);
+    d.vertexAttributeOffset = WaveReadLaneAt(d.vertexAttributeOffset, leader);
     d.triangleByteOffset = WaveReadLaneAt(d.triangleByteOffset, leader);
     d.pageAttributeMask = WaveReadLaneAt(d.pageAttributeMask, leader);
     d.uvSetCount = WaveReadLaneAt(d.uvSetCount, leader);
@@ -445,9 +490,12 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
     d.pageByteOffset = WaveReadLaneAt(d.pageByteOffset, leader);
     d.positionBitstreamBase = WaveReadLaneAt(d.positionBitstreamBase, leader);
     d.normalArrayBase = WaveReadLaneAt(d.normalArrayBase, leader);
+    d.jointArrayBase = WaveReadLaneAt(d.jointArrayBase, leader);
+    d.weightArrayBase = WaveReadLaneAt(d.weightArrayBase, leader);
     d.triangleStreamBase = WaveReadLaneAt(d.triangleStreamBase, leader);
     d.compressedPositionQuantExp = WaveReadLaneAt(d.compressedPositionQuantExp, leader);
     d.pagePoolSlabDescriptorIndex = WaveReadLaneAt(d.pagePoolSlabDescriptorIndex, leader);
+    d.skinningInstanceSlot = WaveReadLaneAt(d.skinningInstanceSlot, leader);
 
     return d;
 }
@@ -524,6 +572,12 @@ void EvaluateGBufferOptimized(uint2 pixel)
     float3 p0 = DecodeCompressedPosition(triIdx.x, md);
     float3 p1 = DecodeCompressedPosition(triIdx.y, md);
     float3 p2 = DecodeCompressedPosition(triIdx.z, md);
+    float3 n0 = DecodeCompressedNormal(triIdx.x, md);
+    float3 n1 = DecodeCompressedNormal(triIdx.y, md);
+    float3 n2 = DecodeCompressedNormal(triIdx.z, md);
+    ApplyClodSkinning(triIdx.x, md, p0, n0);
+    ApplyClodSkinning(triIdx.y, md, p1, n1);
+    ApplyClodSkinning(triIdx.z, md, p2, n2);
 
     // Object buffer (per-lane; is it worth broadcasting?)
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
@@ -541,11 +595,7 @@ void EvaluateGBufferOptimized(uint2 pixel)
     BarycentricDeriv bary = CalcFullBary(clip0, clip1, clip2, pixelNdc, winSize);
 
     // Attribute-only loads — normals from per-meshlet compressed stream
-    float3 n0 = DecodeCompressedNormal(triIdx.x, md);
-    float3 n1 = DecodeCompressedNormal(triIdx.y, md);
-    float3 n2 = DecodeCompressedNormal(triIdx.z, md);
-
-    // Interpolate position in post-skinning/object space, then transform once
+    // Interpolate position in post-skinning/object space, then transform once.
     float3 interpPosX = InterpolateWithDeriv(bary, p0.x, p1.x, p2.x);
     float3 interpPosY = InterpolateWithDeriv(bary, p0.y, p1.y, p2.y);
     float3 interpPosZ = InterpolateWithDeriv(bary, p0.z, p1.z, p2.z);
@@ -561,10 +611,10 @@ void EvaluateGBufferOptimized(uint2 pixel)
     float3 dpdy = mul(dpdyOS, M);
 
     // Interpolate normal in object space
-    float3 interpNX = InterpolateWithDeriv(bary, n0.x, n1.x, n2.x).x;
-    float3 interpNY = InterpolateWithDeriv(bary, n0.y, n1.y, n2.y).x;
-    float3 interpNZ = InterpolateWithDeriv(bary, n0.z, n1.z, n2.z).x;
-    float3 normalOS = normalize(float3(interpNX.x, interpNY.x, interpNZ.x));
+    float interpNX = InterpolateWithDeriv(bary, n0.x, n1.x, n2.x).x;
+    float interpNY = InterpolateWithDeriv(bary, n0.y, n1.y, n2.y).x;
+    float interpNZ = InterpolateWithDeriv(bary, n0.z, n1.z, n2.z).x;
+    float3 normalOS = normalize(float3(interpNX, interpNY, interpNZ));
 
     StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
     float3x3 normalMatrix = (float3x3) normalMatrixBuffer[obj.normalMatrixBufferIndex];

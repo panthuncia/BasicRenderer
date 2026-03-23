@@ -38,11 +38,7 @@ namespace
 		}
 
 		const ClusterLODTraversalMetric& metric = nodes[rootNodeIndex].traversalMetric;
-		sphere.sphere = DirectX::XMFLOAT4(
-			metric.boundingSphereX,
-			metric.boundingSphereY,
-			metric.boundingSphereZ,
-			metric.boundingSphereRadius);
+		sphere.sphere = metric.cullingSphere;
 		return sphere;
 	}
 

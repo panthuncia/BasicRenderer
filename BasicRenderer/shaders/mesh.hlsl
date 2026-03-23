@@ -2,6 +2,7 @@
 #include "include/utilities.hlsli"
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
+#include "include/skinningCommon.hlsli"
 #include "include/loadingUtils.hlsli"
 #include "Common/defines.h"
 #include "include/meshletPayload.hlsli"
@@ -101,12 +102,52 @@ float3 OctDecodeNormal(float2 e)
     return normalize(v);
 }
 
-float3 DecodeCompressedNormal(uint meshletLocalVertex, uint normalArrayBase, uint normalWordOffset, uint pagePoolSlabDescriptorIndex)
+float3 DecodeCompressedNormal(uint meshletLocalVertex, uint normalArrayBase, uint vertexAttributeOffset, uint pagePoolSlabDescriptorIndex)
 {
     ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
-    uint addr = normalArrayBase + (normalWordOffset + meshletLocalVertex) * 4u;
+    uint addr = normalArrayBase + (vertexAttributeOffset + meshletLocalVertex) * 4u;
     uint packed = slab.Load(addr);
     return OctDecodeNormal(UnpackSnorm16x2(packed));
+}
+
+uint4 DecodePackedJoints(uint meshletLocalVertex, MeshletSetup setup)
+{
+    if ((setup.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_JOINTS) == 0u)
+    {
+        return uint4(0, 0, 0, 0);
+    }
+
+    ByteAddressBuffer slab = ResourceDescriptorHeap[setup.pagePoolSlabDescriptorIndex];
+    uint addr = setup.jointArrayBase + (setup.vertexAttributeOffset + meshletLocalVertex) * 16u;
+    return LoadUint4(addr, slab);
+}
+
+float4 DecodePackedWeights(uint meshletLocalVertex, MeshletSetup setup)
+{
+    if ((setup.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_WEIGHTS) == 0u)
+    {
+        return float4(0.0f, 0.0f, 0.0f, 0.0f);
+    }
+
+    ByteAddressBuffer slab = ResourceDescriptorHeap[setup.pagePoolSlabDescriptorIndex];
+    uint addr = setup.weightArrayBase + (setup.vertexAttributeOffset + meshletLocalVertex) * 16u;
+    return LoadFloat4(addr, slab);
+}
+
+void ApplyClodSkinningToVertex(uint meshletLocalVertex, MeshletSetup setup, inout Vertex vertex)
+{
+    if ((setup.meshBuffer.vertexFlags & VERTEX_SKINNED) == 0u)
+    {
+        return;
+    }
+
+    uint4 joints = DecodePackedJoints(meshletLocalVertex, setup);
+    float4 weights = DecodePackedWeights(meshletLocalVertex, setup);
+    float4x4 skinMatrix = BuildSkinMatrix(setup.meshInstanceBuffer.skinningInstanceSlot, joints, weights);
+    vertex.position = mul(float4(vertex.position, 1.0f), skinMatrix).xyz;
+    vertex.normal = mul(vertex.normal, (float3x3)skinMatrix);
+    vertex.joints = joints;
+    vertex.weights = weights;
 }
 
 float2 DecodeCompressedUV(
@@ -368,9 +409,10 @@ VisBufferPSInput GetVisBufferVertexAttributesForViewCLod(
     vertex.normal = DecodeCompressedNormal(
         meshletLocalVertex,
         setup.normalArrayBase,
-        setup.normalWordOffset,
+        setup.vertexAttributeOffset,
         setup.pagePoolSlabDescriptorIndex);
     vertex.texcoord = DecodeCompressedUV(meshletLocalVertex, 0u, setup);
+    ApplyClodSkinningToVertex(meshletLocalVertex, setup, vertex);
 
     return BuildVisBufferVertexAttributesForView(
         vertex,
@@ -507,8 +549,10 @@ bool InitializeMeshletFromCompactedCluster(uint3 packedCluster, out MeshletSetup
     setup.bitsZ = CLodDescBitsZ(desc);
     setup.minQ = int3(desc.minQx, desc.minQy, desc.minQz);
     setup.positionBitOffset = desc.positionBitOffset;
-    setup.normalWordOffset = desc.normalWordOffset;
+    setup.vertexAttributeOffset = desc.vertexAttributeOffset;
     setup.triangleByteOffset = desc.triangleByteOffset;
+    setup.boneListOffset = desc.boneListOffset;
+    setup.boneCount = CLodDescBoneCount(desc);
     setup.pageAttributeMask = hdr.attributeMask;
     setup.uvSetCount = hdr.uvSetCount;
 
@@ -516,9 +560,12 @@ bool InitializeMeshletFromCompactedCluster(uint3 packedCluster, out MeshletSetup
     setup.pageByteOffset = pageSlabOff;
     setup.positionBitstreamBase = pageSlabOff + hdr.positionBitstreamOffset;
     setup.normalArrayBase = pageSlabOff + hdr.normalArrayOffset;
+    setup.jointArrayBase = pageSlabOff + hdr.jointArrayOffset;
+    setup.weightArrayBase = pageSlabOff + hdr.weightArrayOffset;
     setup.uvDescriptorBase = pageSlabOff + hdr.uvDescriptorOffset;
     setup.uvBitstreamDirectoryBase = pageSlabOff + hdr.uvBitstreamDirectoryOffset;
     setup.triangleStreamBase = pageSlabOff + hdr.triangleStreamOffset;
+    setup.boneIndexStreamBase = pageSlabOff + hdr.boneIndexStreamOffset;
 
     setup.compressedPositionQuantExp = hdr.compressedPositionQuantExp;
     setup.pagePoolSlabDescriptorIndex = pageSlabDesc;

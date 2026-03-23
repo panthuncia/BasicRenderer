@@ -97,7 +97,9 @@ namespace
 		uint32_t pageUvSetCount,
 		uint64_t totalPositionBits,
 		const std::vector<uint64_t>& totalUvBitsPerSet,
+		uint32_t totalVertexCount,
 		uint32_t totalNormalWords,
+		uint32_t totalBoneIndexCount,
 		uint32_t totalTriangleBytes)
 	{
 		auto align4 = [](size_t v) -> size_t { return (v + 3u) & ~size_t(3); };
@@ -113,6 +115,14 @@ namespace
 		{
 			size = align4(size) + align4(static_cast<size_t>(totalNormalWords) * sizeof(uint32_t));
 		}
+		if ((attributeMask & CLOD_PAGE_ATTRIBUTE_JOINTS) != 0u)
+		{
+			size = align4(size) + align4(static_cast<size_t>(totalVertexCount) * sizeof(DirectX::XMUINT4));
+		}
+		if ((attributeMask & CLOD_PAGE_ATTRIBUTE_WEIGHTS) != 0u)
+		{
+			size = align4(size) + align4(static_cast<size_t>(totalVertexCount) * sizeof(DirectX::XMFLOAT4));
+		}
 		if (pageUvSetCount > 0u)
 		{
 			size = align4(size) + align4(static_cast<size_t>(pageUvSetCount) * sizeof(uint32_t));
@@ -122,6 +132,7 @@ namespace
 				size = align4(size) + align4(static_cast<size_t>((totalUvBits + 31ull) / 32ull) * sizeof(uint32_t));
 			}
 		}
+		size = align4(size) + align4(static_cast<size_t>(totalBoneIndexCount) * sizeof(uint32_t));
 		size = align4(size) + align4(static_cast<size_t>(totalTriangleBytes));
 		return align4(size);
 	}
@@ -763,6 +774,39 @@ namespace
 			groupUvSets.push_back(std::move(legacyUvSet));
 		}
 
+		std::vector<DirectX::XMUINT4> groupJointIndices;
+		std::vector<DirectX::XMFLOAT4> groupJointWeights;
+		const bool hasSkinningStream =
+			(skinningVertices != nullptr) &&
+			(skinningVertexStrideBytes >= sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMUINT4) + sizeof(DirectX::XMFLOAT4)) &&
+			!skinningVertices->empty();
+		const size_t sourceSkinningVertexCount =
+			(hasSkinningStream && skinningVertexStrideBytes > 0) ? (skinningVertices->size() / skinningVertexStrideBytes) : 0u;
+		if (hasSkinningStream)
+		{
+			constexpr size_t JointByteOffset = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3);
+			constexpr size_t WeightByteOffset = JointByteOffset + sizeof(DirectX::XMUINT4);
+			groupJointIndices.resize(groupLocalToGlobal.size(), DirectX::XMUINT4(0, 0, 0, 0));
+			groupJointWeights.resize(groupLocalToGlobal.size(), DirectX::XMFLOAT4(0, 0, 0, 0));
+
+			for (size_t groupVertexIndex = 0; groupVertexIndex < groupLocalToGlobal.size(); ++groupVertexIndex)
+			{
+				const uint32_t globalVertexIndex = groupLocalToGlobal[groupVertexIndex];
+				if (globalVertexIndex >= sourceSkinningVertexCount)
+				{
+					continue;
+				}
+
+				const size_t sourceByteOffset = static_cast<size_t>(globalVertexIndex) * skinningVertexStrideBytes;
+				std::memcpy(&groupJointIndices[groupVertexIndex],
+					skinningVertices->data() + sourceByteOffset + JointByteOffset,
+					sizeof(DirectX::XMUINT4));
+				std::memcpy(&groupJointWeights[groupVertexIndex],
+					skinningVertices->data() + sourceByteOffset + WeightByteOffset,
+					sizeof(DirectX::XMFLOAT4));
+			}
+		}
+
 		std::vector<std::array<int32_t, 3>> quantizedGroupPositions;
 		quantizedGroupPositions.reserve(groupLocalToGlobal.size());
 
@@ -826,6 +870,7 @@ namespace
 				uint32_t bitsX, bitsY, bitsZ;
 				uint64_t totalPositionBits;
 				uint32_t attributeMask = 0;
+				std::vector<uint32_t> boneList;
 				std::vector<PerUvSetCompression> uvSets;
 			};
 
@@ -865,6 +910,29 @@ namespace
 				if (hasNormals)
 				{
 					comp.attributeMask |= CLOD_PAGE_ATTRIBUTE_NORMAL;
+				}
+				if (hasSkinningStream)
+				{
+					comp.attributeMask |= (CLOD_PAGE_ATTRIBUTE_JOINTS | CLOD_PAGE_ATTRIBUTE_WEIGHTS);
+					std::unordered_set<uint32_t> uniqueBones;
+					for (uint32_t vi = 0; vi < meshlet.vertex_count; ++vi)
+					{
+						const uint32_t groupLocalVertex = output.meshletVertices[meshlet.vertex_offset + vi];
+						const DirectX::XMUINT4& joints = groupJointIndices[groupLocalVertex];
+						const DirectX::XMFLOAT4& weights = groupJointWeights[groupLocalVertex];
+						const uint32_t jointValues[4] = { joints.x, joints.y, joints.z, joints.w };
+						const float weightValues[4] = { weights.x, weights.y, weights.z, weights.w };
+						for (uint32_t influence = 0; influence < 4u; ++influence)
+						{
+							if (weightValues[influence] > 0.0f)
+							{
+								uniqueBones.insert(jointValues[influence]);
+							}
+						}
+					}
+
+					comp.boneList.assign(uniqueBones.begin(), uniqueBones.end());
+					std::sort(comp.boneList.begin(), comp.boneList.end());
 				}
 				if (!groupUvSets.empty())
 				{
@@ -926,7 +994,9 @@ namespace
 			struct PageTotals {
 				uint64_t totalPositionBits = 0;
 				std::vector<uint64_t> totalUvBitsPerSet;
+				uint32_t totalVertexCount = 0;
 				uint32_t totalNormalWords = 0;
+				uint32_t totalBoneIndexCount = 0;
 				uint32_t totalTriangleBytes = 0;
 			};
 
@@ -939,11 +1009,13 @@ namespace
 					const auto& meshlet = output.meshlets[meshletIndex];
 					const auto& comp = perMeshletComp[meshletIndex];
 					totals.totalPositionBits += comp.totalPositionBits;
+					totals.totalVertexCount += meshlet.vertex_count;
 					for (uint32_t uvSetIndex = 0; uvSetIndex < pageUvSetCount; ++uvSetIndex)
 					{
 						totals.totalUvBitsPerSet[uvSetIndex] += GetMeshletUvBits(uvSetIndex, meshlet, comp);
 					}
 					totals.totalNormalWords += GetMeshletNormalWords(pageMask, meshlet);
+					totals.totalBoneIndexCount += static_cast<uint32_t>(comp.boneList.size());
 					totals.totalTriangleBytes += meshlet.triangle_count * 3u;
 				}
 				return totals;
@@ -975,7 +1047,9 @@ namespace
 					candidateUvSetCount,
 					candidateTotals.totalPositionBits,
 					candidateTotals.totalUvBitsPerSet,
+					candidateTotals.totalVertexCount,
 					candidateTotals.totalNormalWords,
+					candidateTotals.totalBoneIndexCount,
 					candidateTotals.totalTriangleBytes);
 
 				if (candidateSize > CLOD_PAGE_SIZE && !currentPage.meshletIndices.empty())
@@ -1086,6 +1160,8 @@ namespace
 				if (pageMeshletCount == 0) continue;
 				const PageTotals pageTotals = ComputePageTotals(page.meshletIndices, page.attributeMask, page.uvSetCount);
 				const bool pageHasNormals = (page.attributeMask & CLOD_PAGE_ATTRIBUTE_NORMAL) != 0u;
+				const bool pageHasJoints = (page.attributeMask & CLOD_PAGE_ATTRIBUTE_JOINTS) != 0u;
+				const bool pageHasWeights = (page.attributeMask & CLOD_PAGE_ATTRIBUTE_WEIGHTS) != 0u;
 				const bool pageHasUvSets = page.uvSetCount > 0u;
 
 				// Compute stream offsets
@@ -1104,13 +1180,27 @@ namespace
 					? static_cast<uint32_t>(align4(positionBitstreamOffset + positionBytes))
 					: 0u;
 				const size_t normalBytes = pageHasNormals ? static_cast<size_t>(pageTotals.totalNormalWords) * sizeof(uint32_t) : 0u;
-				const uint32_t uvBitstreamDirectoryOffset = pageHasUvSets
+				const uint32_t jointArrayOffset = pageHasJoints
 					? static_cast<uint32_t>(align4(pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes)))
+					: 0u;
+				const size_t jointBytes = pageHasJoints ? static_cast<size_t>(pageTotals.totalVertexCount) * sizeof(DirectX::XMUINT4) : 0u;
+				const uint32_t weightArrayOffset = pageHasWeights
+					? static_cast<uint32_t>(align4(pageHasJoints ? (jointArrayOffset + jointBytes) : (pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes))))
+					: 0u;
+				const size_t weightBytes = pageHasWeights ? static_cast<size_t>(pageTotals.totalVertexCount) * sizeof(DirectX::XMFLOAT4) : 0u;
+				const uint32_t uvBitstreamDirectoryOffset = pageHasUvSets
+					? static_cast<uint32_t>(align4(
+						pageHasWeights ? (weightArrayOffset + weightBytes) :
+						(pageHasJoints ? (jointArrayOffset + jointBytes) :
+						(pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes)))))
 					: 0u;
 				std::vector<uint32_t> uvBitstreamOffsets(page.uvSetCount, 0u);
 				size_t uvBitstreamCursor = pageHasUvSets
 					? align4(static_cast<size_t>(uvBitstreamDirectoryOffset) + static_cast<size_t>(page.uvSetCount) * sizeof(uint32_t))
-					: align4(pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes));
+					: align4(
+						pageHasWeights ? (weightArrayOffset + weightBytes) :
+						(pageHasJoints ? (jointArrayOffset + jointBytes) :
+						(pageHasNormals ? (normalArrayOffset + normalBytes) : (positionBitstreamOffset + positionBytes))));
 				for (uint32_t uvSetIndex = 0; uvSetIndex < page.uvSetCount; ++uvSetIndex)
 				{
 					uvBitstreamOffsets[uvSetIndex] = static_cast<uint32_t>(uvBitstreamCursor);
@@ -1118,7 +1208,9 @@ namespace
 					const size_t uvBytes = uvWords * sizeof(uint32_t);
 					uvBitstreamCursor = align4(uvBitstreamCursor + uvBytes);
 				}
-				const uint32_t triangleStreamOffset = static_cast<uint32_t>(align4(uvBitstreamCursor));
+				const uint32_t boneIndexStreamOffset = static_cast<uint32_t>(align4(uvBitstreamCursor));
+				const size_t boneIndexBytes = static_cast<size_t>(pageTotals.totalBoneIndexCount) * sizeof(uint32_t);
+				const uint32_t triangleStreamOffset = static_cast<uint32_t>(align4(boneIndexStreamOffset + boneIndexBytes));
 
 				const size_t totalBlobSize = align4(triangleStreamOffset + pageTotals.totalTriangleBytes);
 				auto& blob = output.pageBlobs[pi];
@@ -1131,7 +1223,8 @@ namespace
 				std::vector<std::vector<uint32_t>> pageUvWordsPerSet(page.uvSetCount);
 				uint64_t pageBitCursor = 0;
 				std::vector<uint64_t> pageUvBitCursors(page.uvSetCount, 0ull);
-				uint32_t normalWordCursor = 0;
+				uint32_t vertexAttributeCursor = 0;
+				uint32_t boneIndexCursor = 0;
 				uint32_t triangleByteCursor = 0;
 
 				for (uint32_t li = 0; li < pageMeshletCount; ++li)
@@ -1142,8 +1235,9 @@ namespace
 
 					CLodMeshletDescriptor& desc = descriptors[li];
 					desc.positionBitOffset = static_cast<uint32_t>(pageBitCursor);
-					desc.normalWordOffset = pageHasNormals ? normalWordCursor : 0u;
+					desc.vertexAttributeOffset = vertexAttributeCursor;
 					desc.triangleByteOffset = triangleByteCursor;
+					desc.boneListOffset = boneIndexCursor;
 					desc.minQx = comp.minQ[0];
 					desc.minQy = comp.minQ[1];
 					desc.minQz = comp.minQ[2];
@@ -1158,6 +1252,7 @@ namespace
 					desc.triangleCountAndRefinedGroup =
 						(meshlet.triangle_count & 0xFFFFu)
 						| (refinedGroupEncoded << 16u);
+					desc.boneCount = static_cast<uint32_t>(comp.boneList.size());
 
 					const BoundingSphere& bounds = output.meshletBounds[mi];
 					desc.bounds = bounds.sphere;
@@ -1211,11 +1306,46 @@ namespace
 								const uint32_t gv = output.meshletVertices[meshlet.vertex_offset + vi];
 								normalWord = compressedNormalWords[gv];
 							}
-							std::memcpy(blob.data() + normalArrayOffset + static_cast<size_t>(normalWordCursor) * sizeof(uint32_t),
+							std::memcpy(blob.data() + normalArrayOffset + static_cast<size_t>(vertexAttributeCursor + vi) * sizeof(uint32_t),
 								&normalWord, sizeof(uint32_t));
-							++normalWordCursor;
 						}
 					}
+					if (pageHasJoints)
+					{
+						for (uint32_t vi = 0; vi < meshlet.vertex_count; ++vi)
+						{
+							DirectX::XMUINT4 joints(0, 0, 0, 0);
+							if ((comp.attributeMask & CLOD_PAGE_ATTRIBUTE_JOINTS) != 0u)
+							{
+								const uint32_t gv = output.meshletVertices[meshlet.vertex_offset + vi];
+								joints = groupJointIndices[gv];
+							}
+							std::memcpy(blob.data() + jointArrayOffset + static_cast<size_t>(vertexAttributeCursor + vi) * sizeof(DirectX::XMUINT4),
+								&joints, sizeof(DirectX::XMUINT4));
+						}
+					}
+					if (pageHasWeights)
+					{
+						for (uint32_t vi = 0; vi < meshlet.vertex_count; ++vi)
+						{
+							DirectX::XMFLOAT4 weights(0, 0, 0, 0);
+							if ((comp.attributeMask & CLOD_PAGE_ATTRIBUTE_WEIGHTS) != 0u)
+							{
+								const uint32_t gv = output.meshletVertices[meshlet.vertex_offset + vi];
+								weights = groupJointWeights[gv];
+							}
+							std::memcpy(blob.data() + weightArrayOffset + static_cast<size_t>(vertexAttributeCursor + vi) * sizeof(DirectX::XMFLOAT4),
+								&weights, sizeof(DirectX::XMFLOAT4));
+						}
+					}
+					if (!comp.boneList.empty())
+					{
+						std::memcpy(blob.data() + boneIndexStreamOffset + static_cast<size_t>(boneIndexCursor) * sizeof(uint32_t),
+							comp.boneList.data(),
+							comp.boneList.size() * sizeof(uint32_t));
+						boneIndexCursor += static_cast<uint32_t>(comp.boneList.size());
+					}
+					vertexAttributeCursor += meshlet.vertex_count;
 
 					if (pageHasUvSets)
 					{
@@ -1295,8 +1425,11 @@ namespace
 				header.uvDescriptorOffset = uvDescriptorOffset;
 				header.positionBitstreamOffset = positionBitstreamOffset;
 				header.normalArrayOffset = normalArrayOffset;
+				header.jointArrayOffset = jointArrayOffset;
+				header.weightArrayOffset = weightArrayOffset;
 				header.uvBitstreamDirectoryOffset = uvBitstreamDirectoryOffset;
 				header.triangleStreamOffset = triangleStreamOffset;
+				header.boneIndexStreamOffset = boneIndexStreamOffset;
 				std::memcpy(blob.data(), &header, sizeof(CLodPageHeader));
 
 				assert(blob.size() <= CLOD_PAGE_SIZE && "Page blob exceeds CLOD_PAGE_SIZE");
@@ -1314,11 +1447,7 @@ namespace
 		}
 
 		const ClusterLODTraversalMetric& metric = nodes[rootNodeIndex].traversalMetric;
-		sphere.sphere = DirectX::XMFLOAT4(
-			metric.boundingSphereX,
-			metric.boundingSphereY,
-			metric.boundingSphereZ,
-			metric.boundingSphereRadius);
+		sphere.sphere = metric.cullingSphere;
 		return sphere;
 	}
 
@@ -1469,10 +1598,7 @@ namespace
 				node.range.ownerGroupId = info.ownerGroupId;
 
 				if (false) { // Testing
-					node.traversalMetric.boundingSphereX = segBounds.sphere.x;
-					node.traversalMetric.boundingSphereY = segBounds.sphere.y;
-					node.traversalMetric.boundingSphereZ = segBounds.sphere.z;
-					node.traversalMetric.boundingSphereRadius = segBounds.sphere.w;
+					node.traversalMetric.cullingSphere = segBounds.sphere;
 				} else {
 					// Expand the BVH leaf bounding sphere to enclose the owning
 					// group's bounding sphere for conservative frustum culling.
@@ -1503,11 +1629,13 @@ namespace
 					// sphere formula to guarantee strict enclosure.
 					cr *= (1.0f + 1e-5f);
 
-					node.traversalMetric.boundingSphereX = cx;
-					node.traversalMetric.boundingSphereY = cy;
-					node.traversalMetric.boundingSphereZ = cz;
-					node.traversalMetric.boundingSphereRadius = cr;
+					node.traversalMetric.cullingSphere = DirectX::XMFLOAT4(cx, cy, cz, cr);
 				}
+				node.traversalMetric.lodBoundingSphere = DirectX::XMFLOAT4(
+					grp.bounds.center[0],
+					grp.bounds.center[1],
+					grp.bounds.center[2],
+					grp.bounds.radius);
 				// Store the own group's error for propagation to parent BVH
 				// internal nodes.  TraverseNodes loads the actual group for
 				// the leaf-level LOD check, but internal nodes use the
@@ -1532,7 +1660,7 @@ namespace
 				partitioned.resize(lastCount);
 				meshopt_spatialClusterPoints(
 					partitioned.data(),
-					&lastNodes->traversalMetric.boundingSphereX,
+					&lastNodes->traversalMetric.cullingSphere.x,
 					lastCount,
 					sizeof(ClusterLODNode),
 					preferredNodeWidth);
@@ -1565,17 +1693,29 @@ namespace
 						maxErr = std::max(maxErr, children[c].traversalMetric.maxQuadricError);
 					node.traversalMetric.maxQuadricError = maxErr;
 
-					meshopt_Bounds merged = meshopt_computeSphereBounds(
-						&children[0].traversalMetric.boundingSphereX,
+					meshopt_Bounds mergedCull = meshopt_computeSphereBounds(
+						&children[0].traversalMetric.cullingSphere.x,
 						childCount,
 						sizeof(ClusterLODNode),
-						&children[0].traversalMetric.boundingSphereRadius,
+						&children[0].traversalMetric.cullingSphere.w,
+						sizeof(ClusterLODNode));
+					meshopt_Bounds mergedLod = meshopt_computeSphereBounds(
+						&children[0].traversalMetric.lodBoundingSphere.x,
+						childCount,
+						sizeof(ClusterLODNode),
+						&children[0].traversalMetric.lodBoundingSphere.w,
 						sizeof(ClusterLODNode));
 
-					node.traversalMetric.boundingSphereX = merged.center[0];
-					node.traversalMetric.boundingSphereY = merged.center[1];
-					node.traversalMetric.boundingSphereZ = merged.center[2];
-					node.traversalMetric.boundingSphereRadius = merged.radius * (1.0f + 1e-5f);
+					node.traversalMetric.cullingSphere = DirectX::XMFLOAT4(
+						mergedCull.center[0],
+						mergedCull.center[1],
+						mergedCull.center[2],
+						mergedCull.radius * (1.0f + 1e-5f));
+					node.traversalMetric.lodBoundingSphere = DirectX::XMFLOAT4(
+						mergedLod.center[0],
+						mergedLod.center[1],
+						mergedLod.center[2],
+						mergedLod.radius * (1.0f + 1e-5f));
 				}
 
 				lastLayerOffset = writeOffset;
@@ -1605,17 +1745,29 @@ namespace
 					maxErr = std::max(maxErr, children[c].traversalMetric.maxQuadricError);
 				node.traversalMetric.maxQuadricError = maxErr;
 
-				meshopt_Bounds merged = meshopt_computeSphereBounds(
-					&children[0].traversalMetric.boundingSphereX,
+				meshopt_Bounds mergedCull = meshopt_computeSphereBounds(
+					&children[0].traversalMetric.cullingSphere.x,
 					childCount,
 					sizeof(ClusterLODNode),
-					&children[0].traversalMetric.boundingSphereRadius,
+					&children[0].traversalMetric.cullingSphere.w,
+					sizeof(ClusterLODNode));
+				meshopt_Bounds mergedLod = meshopt_computeSphereBounds(
+					&children[0].traversalMetric.lodBoundingSphere.x,
+					childCount,
+					sizeof(ClusterLODNode),
+					&children[0].traversalMetric.lodBoundingSphere.w,
 					sizeof(ClusterLODNode));
 
-				node.traversalMetric.boundingSphereX = merged.center[0];
-				node.traversalMetric.boundingSphereY = merged.center[1];
-				node.traversalMetric.boundingSphereZ = merged.center[2];
-				node.traversalMetric.boundingSphereRadius = merged.radius * (1.0f + 1e-5f);
+				node.traversalMetric.cullingSphere = DirectX::XMFLOAT4(
+					mergedCull.center[0],
+					mergedCull.center[1],
+					mergedCull.center[2],
+					mergedCull.radius * (1.0f + 1e-5f));
+				node.traversalMetric.lodBoundingSphere = DirectX::XMFLOAT4(
+					mergedLod.center[0],
+					mergedLod.center[1],
+					mergedLod.center[2],
+					mergedLod.radius * (1.0f + 1e-5f));
 
 				return node;
 			};

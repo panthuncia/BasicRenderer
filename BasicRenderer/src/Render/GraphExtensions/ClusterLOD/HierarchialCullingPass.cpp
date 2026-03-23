@@ -123,6 +123,9 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
             Builtin::PerObjectBuffer,
             Builtin::CameraBuffer,
             Builtin::PerMeshBuffer,
+            Builtin::SkeletonResources::InverseBindMatrices,
+            Builtin::SkeletonResources::BoneTransforms,
+            Builtin::SkeletonResources::SkinningInstanceInfo,
             Builtin::PrimaryCamera::LinearDepthMap,
             Builtin::Shadows::LinearShadowMaps,
             Builtin::PerMaterialDataBuffer)
@@ -179,6 +182,9 @@ void HierarchialCullingPass::Setup() {
 	RegisterSRV(Builtin::CLod::GroupPageMap);
     RegisterSRV(Builtin::CameraBuffer);
     RegisterSRV(Builtin::PerMeshBuffer);
+    RegisterSRV(Builtin::SkeletonResources::InverseBindMatrices);
+    RegisterSRV(Builtin::SkeletonResources::BoneTransforms);
+    RegisterSRV(Builtin::SkeletonResources::SkinningInstanceInfo);
     RegisterSRV(Builtin::PerMaterialDataBuffer);
 	RegisterUAV(Builtin::DebugVisualization);
 }

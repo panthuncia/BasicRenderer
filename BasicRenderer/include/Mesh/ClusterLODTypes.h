@@ -33,11 +33,8 @@ enum class MeshCpuDataPolicy {
 
 struct ClusterLODTraversalMetric
 {
-	float boundingSphereX = 0;
-	float boundingSphereY = 0;
-	float boundingSphereZ = 0;
-	float boundingSphereRadius = 0;
-
+	DirectX::XMFLOAT4 cullingSphere = {};
+	DirectX::XMFLOAT4 lodBoundingSphere = {};
 	float maxQuadricError = 0;
 	float padding[3] = { 0,0,0 };
 };

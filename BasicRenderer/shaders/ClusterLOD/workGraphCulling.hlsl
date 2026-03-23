@@ -10,6 +10,7 @@
 #include "Include/clodPageAccess.hlsli"
 #include "Include/visibleClusterPacking.hlsli"
 #include "Include/vertex.hlsli"
+#include "include/skinningCommon.hlsli"
 
 #ifndef CLOD_WG_ENABLE_SW_CLASSIFICATION
 #define CLOD_WG_ENABLE_SW_CLASSIFICATION 1
@@ -39,7 +40,8 @@ struct ClusterLODNodeRange
 
 struct ClusterLODTraversalMetric
 {
-    float4 centerAndRadius; // xyz center (mesh space), w radius (mesh space)
+    float4 cullCenterAndRadius; // xyz center (mesh space), w radius (mesh space)
+    float4 lodCenterAndRadius; // xyz center (mesh space), w radius (mesh space)
     float maxQuadricError; // mesh-space conservative error bound for this subtree/leaf
     float pad0[3];
 };
@@ -381,6 +383,70 @@ float MaxAxisScale_RowVector(float4x4 M)
     return max(length(ax), max(length(ay), length(az)));
 }
 
+BoundingSphere ComputeSkinnedMeshletBounds(
+    CLodMeshletDescriptor desc,
+    CLodPageHeader pageHeader,
+    uint pageSlabDescriptorIndex,
+    uint pageSlabByteOffset,
+    uint skinningInstanceSlot)
+{
+    BoundingSphere staticBounds = { desc.bounds };
+    if (!IsValidSkinningInstanceSlot(skinningInstanceSlot) || CLodDescBoneCount(desc) == 0u)
+    {
+        return staticBounds;
+    }
+
+    ByteAddressBuffer slab = ResourceDescriptorHeap[pageSlabDescriptorIndex];
+    const uint boneListBase = pageSlabByteOffset + pageHeader.boneIndexStreamOffset + desc.boneListOffset * 4u;
+
+    float3 mergedCenter = float3(0.0f, 0.0f, 0.0f);
+    float mergedRadius = 0.0f;
+    bool mergedInitialized = false;
+
+    [loop]
+    for (uint boneIndex = 0; boneIndex < CLodDescBoneCount(desc); ++boneIndex)
+    {
+        const uint jointIndex = slab.Load(boneListBase + boneIndex * 4u);
+        const float4x4 boneSkinMatrix = LoadBoneSkinMatrix(skinningInstanceSlot, jointIndex);
+        const float3 transformedCenter = mul(float4(staticBounds.sphere.xyz, 1.0f), boneSkinMatrix).xyz;
+        const float transformedRadius = staticBounds.sphere.w * SkinningMaxAxisScale_RowVector(boneSkinMatrix);
+
+        if (!mergedInitialized)
+        {
+            mergedCenter = transformedCenter;
+            mergedRadius = transformedRadius;
+            mergedInitialized = true;
+            continue;
+        }
+
+        const float3 delta = transformedCenter - mergedCenter;
+        const float dist = length(delta);
+        if (dist + transformedRadius <= mergedRadius)
+        {
+            continue;
+        }
+        if (dist + mergedRadius <= transformedRadius)
+        {
+            mergedCenter = transformedCenter;
+            mergedRadius = transformedRadius;
+            continue;
+        }
+
+        const float newRadius = 0.5f * (dist + mergedRadius + transformedRadius);
+        const float t = (newRadius - mergedRadius) / max(dist, 1e-12f);
+        mergedCenter += delta * t;
+        mergedRadius = newRadius;
+    }
+
+    if (!mergedInitialized)
+    {
+        return staticBounds;
+    }
+
+    BoundingSphere result = { float4(mergedCenter, mergedRadius * (1.0f + 1e-5f)) };
+    return result;
+}
+
 float3 ToViewSpace(float3 objectCenter, row_major matrix objectModelMatrix, row_major matrix viewMatrix)
 {
     float4 worldSpaceCenter = mul(float4(objectCenter, 1.0f), objectModelMatrix);
@@ -572,7 +638,7 @@ void WG_TraverseNodes(
         StructuredBuffer<PerMeshBuffer> perMeshBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
         const PerMeshBuffer perMesh = perMeshBuffer[instanceData.perMeshBufferIndex];
-        const bool conservativeSkinnedTraversal = (perMesh.vertexFlags & VERTEX_SKINNED) != 0u;
+        const bool isSkinned = (perMesh.vertexFlags & VERTEX_SKINNED) != 0u;
         StructuredBuffer<PerObjectBuffer> perObjectBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
         const row_major matrix objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
@@ -596,11 +662,16 @@ void WG_TraverseNodes(
             WGTelemetryAdd(WG_COUNTER_TRAVERSE_LEAF_NODE_RECORDS, 1);
         }
 
-        const float nodeUniformScale = MaxAxisScale_RowVector(objectModelMatrix) * instanceData.skinnedBoundsScale;
-        const float3 nodeCenterObjectSpace = node.metric.centerAndRadius.xyz;
-        const float3 nodeCenterViewSpace = ToViewSpace(nodeCenterObjectSpace, objectModelMatrix, camera.view);
-        const float nodeRadiusWorld = node.metric.centerAndRadius.w * nodeUniformScale;
-        const bool nodeCulled = !conservativeSkinnedTraversal && !replaySource && SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, camera);
+        const float objectUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
+        const float cullUniformScale = objectUniformScale * (isSkinned ? instanceData.skinnedBoundsScale : 1.0f);
+        const float lodUniformScale = objectUniformScale;
+        const float3 nodeCullCenterObjectSpace = isSkinned ? perMesh.boundingSphere.sphere.xyz : node.metric.cullCenterAndRadius.xyz;
+        const float nodeCullRadiusObjectSpace = isSkinned ? perMesh.boundingSphere.sphere.w : node.metric.cullCenterAndRadius.w;
+        const float3 nodeLodCenterObjectSpace = node.metric.lodCenterAndRadius.xyz;
+        const float nodeLodRadiusObjectSpace = node.metric.lodCenterAndRadius.w;
+        const float3 nodeCenterViewSpace = ToViewSpace(nodeCullCenterObjectSpace, objectModelMatrix, camera.view);
+        const float nodeRadiusWorld = nodeCullRadiusObjectSpace * cullUniformScale;
+        const bool nodeCulled = !replaySource && SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, camera);
 
         if (nodeCulled) {
             WGTelemetryAdd(WG_COUNTER_TRAVERSE_CULLED_NODE_RECORDS, 1);
@@ -619,12 +690,12 @@ void WG_TraverseNodes(
                 const ClusterLODGroup grp = groups[groupGlobalIndex];
 
                 const float3 grpWorldCenter = mul(float4(grp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
-                const float grpWorldRadius = grp.bounds.centerAndRadius.w * nodeUniformScale;
+                const float grpWorldRadius = grp.bounds.centerAndRadius.w * lodUniformScale;
                 const float grpEOD = ErrorOverDistance(
                     grpWorldCenter, grpWorldRadius,
-                    grp.bounds.error, nodeUniformScale,
+                    grp.bounds.error, lodUniformScale,
                     cam.positionWorldSpace.xyz, cam.zNear);
-                const bool nodeWantsTraversal = parentAllowsRefine && (conservativeSkinnedTraversal || (grpEOD >= cam.errorOverDistanceThreshold));
+                const bool nodeWantsTraversal = parentAllowsRefine && (grpEOD >= cam.errorOverDistanceThreshold);
 
                 if (!nodeWantsTraversal) {
                     WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
@@ -706,23 +777,23 @@ void WG_TraverseNodes(
             }
             else {
                 // Internal node: LOD check + occlusion + child emission.
-                const float3 lodCheckWorldCenter = mul(float4(nodeCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
-                const float lodCheckWorldRadius = nodeRadiusWorld;
+                const float3 lodCheckWorldCenter = mul(float4(nodeLodCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
+                const float lodCheckWorldRadius = nodeLodRadiusObjectSpace * lodUniformScale;
                 const float nodeErrorOverDistance = ErrorOverDistance(
                     lodCheckWorldCenter,
                     lodCheckWorldRadius,
                     node.metric.maxQuadricError,
-                    nodeUniformScale,
+                    lodUniformScale,
                     cam.positionWorldSpace.xyz,
                     cam.zNear);
-                const bool nodeWantsTraversal = parentAllowsRefine && (conservativeSkinnedTraversal || (nodeErrorOverDistance >= cam.errorOverDistanceThreshold));
+                const bool nodeWantsTraversal = parentAllowsRefine && (nodeErrorOverDistance >= cam.errorOverDistanceThreshold);
 
                 if (!nodeWantsTraversal) {
                     WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
                 }
                 else {
                     bool occlusionCulled = false;
-                    if (!conservativeSkinnedTraversal && CLodWorkGraphOcclusionEnabled() && !camera.isOrtho) {
+                    if (CLodWorkGraphOcclusionEnabled() && !camera.isOrtho) {
                         StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
                             ResourceDescriptorHeap[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
                         const uint depthMapDescriptorIndex = viewDepthSRVIndices[rec.viewId].linearDepthSRVIndex;
@@ -741,9 +812,9 @@ void WG_TraverseNodes(
                                 // Phase 1: HZB is from previous frame's depth,
                                 // so reproject bounding sphere into previous frame's camera space.
                                 const row_major matrix prevModelMatrix = perObjectBuffer[objectBufferIndex].prevModel;
-                                const float prevNodeUniformScale = MaxAxisScale_RowVector(prevModelMatrix);
-                                const float3 prevNodeCenterViewSpace = ToViewSpace(nodeCenterObjectSpace, prevModelMatrix, camera.prevView);
-                                const float prevNodeRadiusWorld = node.metric.centerAndRadius.w * prevNodeUniformScale;
+                                const float prevNodeCullScale = MaxAxisScale_RowVector(prevModelMatrix) * (isSkinned ? instanceData.skinnedBoundsScale : 1.0f);
+                                const float3 prevNodeCenterViewSpace = ToViewSpace(nodeCullCenterObjectSpace, prevModelMatrix, camera.prevView);
+                                const float prevNodeRadiusWorld = nodeCullRadiusObjectSpace * prevNodeCullScale;
                                 OcclusionCullingPerspectiveTexture2D(
                                     occlusionCulled,
                                     camera,
@@ -776,9 +847,11 @@ void WG_TraverseNodes(
                             const ClusterLODNode child = lodNodes[clodMeshMetadata.lodNodesBase + childNodeId];
 
                             // Frustum cull child.
-                            const float3 childCenterVS = ToViewSpace(child.metric.centerAndRadius.xyz, objectModelMatrix, camera.view);
-                            const float childRadiusWorld = child.metric.centerAndRadius.w * nodeUniformScale;
-                            if (!conservativeSkinnedTraversal && !replaySource && SphereOutsideFrustumViewSpace(childCenterVS, childRadiusWorld, camera)) {
+                            const float3 childCullCenterOS = isSkinned ? perMesh.boundingSphere.sphere.xyz : child.metric.cullCenterAndRadius.xyz;
+                            const float childCullRadiusOS = isSkinned ? perMesh.boundingSphere.sphere.w : child.metric.cullCenterAndRadius.w;
+                            const float3 childCenterVS = ToViewSpace(childCullCenterOS, objectModelMatrix, camera.view);
+                            const float childRadiusWorld = childCullRadiusOS * cullUniformScale;
+                            if (!replaySource && SphereOutsideFrustumViewSpace(childCenterVS, childRadiusWorld, camera)) {
                                 WGTelemetryAdd(WG_COUNTER_CHILD_PREFILTER_FRUSTUM_CULLED, 1);
                                 continue;
                             }
@@ -786,11 +859,12 @@ void WG_TraverseNodes(
                             // LOD pre-filter for internal children only.
                             // Leaf children use the group sphere for LOD (different from node sphere),
                             // so we skip the LOD check here and let the leaf thread handle it.
-                            if (!conservativeSkinnedTraversal && child.range.isLeaf == 0) {
-                                const float3 childWorldCenter = mul(float4(child.metric.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+                            if (child.range.isLeaf == 0) {
+                                const float3 childWorldCenter = mul(float4(child.metric.lodCenterAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+                                const float childLodRadiusWorld = child.metric.lodCenterAndRadius.w * lodUniformScale;
                                 const float childEOD = ErrorOverDistance(
-                                    childWorldCenter, childRadiusWorld,
-                                    child.metric.maxQuadricError, nodeUniformScale,
+                                    childWorldCenter, childLodRadiusWorld,
+                                    child.metric.maxQuadricError, lodUniformScale,
                                     cam.positionWorldSpace.xyz, cam.zNear);
                                 if (childEOD < cam.errorOverDistanceThreshold) {
                                     WGTelemetryAdd(WG_COUNTER_CHILD_PREFILTER_LOD_REJECTED, 1);
@@ -942,18 +1016,21 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
     uint pageSlabOff = 0;
     uint pageMeshletCount = 0;
     uint pageDescriptorOffset = 0;
+    CLodPageHeader pageHeader = (CLodPageHeader)0;
     uint depthMapDescriptorIndex = 0;
     uint2 depthRes = uint2(0, 0);
     uint numDepthMips = 0;
     float2 hzbUVScale = float2(0, 0);
-    float groupUniformScale = 0.0f;
+    float cullUniformScale = 0.0f;
+    float lodUniformScale = 0.0f;
     CullingCameraInfo cam = (CullingCameraInfo)0;
     uint groupsBase = 0;
     uint meshBufferIndex = 0;
     uint activeGroupScanCount = 0;
     float ownGroupErrorOverDistance = 0.0f;
     uint objectBufferIndex = 0;
-    bool conservativeSkinnedTraversal = false;
+    bool isSkinned = false;
+    uint skinningInstanceSlot = 0xFFFFFFFFu;
 
     if (hasBucket && b.pageSlabDescriptorIndex != 0) {
         pageValid = true;
@@ -965,6 +1042,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
         const PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[b.instanceIndex];
         objectBufferIndex = instanceData.perObjectBufferIndex;
+        skinningInstanceSlot = instanceData.skinningInstanceSlot;
         StructuredBuffer<PerObjectBuffer> perObjectBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
         objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
@@ -979,7 +1057,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 
         // Load the current page header layout through the shared helper.
         ByteAddressBuffer slab = ResourceDescriptorHeap[pageSlabDesc];
-        CLodPageHeader pageHeader = LoadPageHeader(pageSlabDesc, pageSlabOff);
+        pageHeader = LoadPageHeader(pageSlabDesc, pageSlabOff);
         pageMeshletCount = pageHeader.meshletCount;
         pageDescriptorOffset = pageHeader.descriptorOffset;
 
@@ -993,12 +1071,14 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         }
 
         // Per-meshlet condition 2 + streaming fallback state
-        groupUniformScale = MaxAxisScale_RowVector(objectModelMatrix) * instanceData.skinnedBoundsScale;
+        const float objectUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
+        cullUniformScale = objectUniformScale;
+        lodUniformScale = objectUniformScale;
         meshBufferIndex = instanceData.perMeshBufferIndex;
         StructuredBuffer<PerMeshBuffer> perMeshBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
         const PerMeshBuffer perMesh = perMeshBuffer[meshBufferIndex];
-        conservativeSkinnedTraversal = (perMesh.vertexFlags & VERTEX_SKINNED) != 0u;
+        isSkinned = (perMesh.vertexFlags & VERTEX_SKINNED) != 0u;
         StructuredBuffer<CullingCameraInfo> cameraInfos =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
         cam = cameraInfos[b.viewId];
@@ -1016,9 +1096,9 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
             const ClusterLODGroup ownGrp = groups[groupsBase + UnpackGroupId(b.groupIdPacked)];
             const float3 ownWorldCenter = mul(float4(ownGrp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
-            const float ownWorldRadius = ownGrp.bounds.centerAndRadius.w * groupUniformScale;
+            const float ownWorldRadius = ownGrp.bounds.centerAndRadius.w * lodUniformScale;
             ownGroupErrorOverDistance = ErrorOverDistance(
-                ownWorldCenter, ownWorldRadius, ownGrp.bounds.error, groupUniformScale,
+                ownWorldCenter, ownWorldRadius, ownGrp.bounds.error, lodUniformScale,
                 cam.positionWorldSpace.xyz, cam.zNear);
         }
 
@@ -1076,12 +1156,20 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 
                 // Load per-meshlet descriptor (5 x Load4 = 80 bytes)
                 CLodMeshletDescriptor desc = LoadMeshletDescriptor(pageSlabDesc, pageSlabOff, pageDescriptorOffset, localMeshlet);
-                const float4 boundsSphere = desc.bounds;
-                const BoundingSphere meshletBounds = { boundsSphere };
+                BoundingSphere meshletBounds = { desc.bounds };
+                if (isSkinned)
+                {
+                    meshletBounds = ComputeSkinnedMeshletBounds(
+                        desc,
+                        pageHeader,
+                        pageSlabDesc,
+                        pageSlabOff,
+                        skinningInstanceSlot);
+                }
                 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, viewMatrix);
-                meshletRadiusWorld = meshletBounds.sphere.w * groupUniformScale;
+                meshletRadiusWorld = meshletBounds.sphere.w * cullUniformScale;
 
-                survives = replaySource || conservativeSkinnedTraversal || !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, frustumPlanes);
+                survives = replaySource || !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, frustumPlanes);
 
                 if (!survives) {
                     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_FRUSTUM, 1);
@@ -1090,7 +1178,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 // Per-meshlet LOD condition 2: read refined group ID from descriptor.
                 // Terminal meshlets (refinedGroupId < 0) pass automatically.
                 // Non-terminal meshlets check if the child group is acceptable.
-                if (survives && !conservativeSkinnedTraversal) {
+                if (survives) {
                     const int refinedGroupId = CLodDescRefinedGroupId(desc);
                     if (refinedGroupId >= 0) {
                         StructuredBuffer<ClusterLODGroup> groups =
@@ -1098,10 +1186,10 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                         const uint childGroupGlobalIndex = groupsBase + (uint)refinedGroupId;
                         const ClusterLODGroup childGrp = groups[childGroupGlobalIndex];
                         const float3 childWorldCenter = mul(float4(childGrp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
-                        const float childWorldRadius = childGrp.bounds.centerAndRadius.w * groupUniformScale;
+                        const float childWorldRadius = childGrp.bounds.centerAndRadius.w * lodUniformScale;
                         const float childEOD = ErrorOverDistance(
                             childWorldCenter, childWorldRadius,
-                            childGrp.bounds.error, groupUniformScale,
+                            childGrp.bounds.error, lodUniformScale,
                             cam.positionWorldSpace.xyz, cam.zNear);
 
                         if (childEOD >= cam.errorOverDistanceThreshold) {
@@ -1139,7 +1227,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                     }
                 }
 
-                if (survives && !conservativeSkinnedTraversal && CLodWorkGraphOcclusionEnabled() && depthMapDescriptorIndex != 0) {
+                if (survives && CLodWorkGraphOcclusionEnabled() && depthMapDescriptorIndex != 0) {
                     bool occlusionCulled = false;
                     // Load only the occlusion-specific camera matrices when needed,
                     // keeping them out of registers during the main frustum/LOD loop.
