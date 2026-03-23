@@ -178,6 +178,67 @@ struct MeshletResolveData {
     uint pagePoolSlabDescriptorIndex;
 };
 
+float2 DecodeCompressedUV(uint meshletLocalVertex, uint uvSetIndex, MeshletResolveData d);
+
+void AppendClodMaterialUvSample(
+    inout MaterialUvCache cache,
+    uint uvSetIndex,
+    uint3 triIdx,
+    MeshletResolveData md,
+    BarycentricDeriv bary)
+{
+    if (cache.count >= MATERIAL_MAX_UNIQUE_UV_SETS)
+    {
+        return;
+    }
+
+    float2 uv0 = DecodeCompressedUV(triIdx.x, uvSetIndex, md);
+    float2 uv1 = DecodeCompressedUV(triIdx.y, uvSetIndex, md);
+    float2 uv2 = DecodeCompressedUV(triIdx.z, uvSetIndex, md);
+
+    float3 interpU = InterpolateWithDeriv(bary, uv0.x, uv1.x, uv2.x);
+    float3 interpV = InterpolateWithDeriv(bary, uv0.y, uv1.y, uv2.y);
+
+    MaterialUvSample sample = (MaterialUvSample)0;
+    sample.uvSetIndex = uvSetIndex;
+    sample.uv = float2(interpU.x, interpV.x);
+    sample.dUVdx = float2(interpU.y, interpV.y);
+    sample.dUVdy = float2(interpU.z, interpV.z);
+
+    cache.samples[cache.count] = sample;
+    cache.count++;
+}
+
+MaterialUvCache BuildClodMaterialUvCache(
+    MaterialInfo materialInfo,
+    uint materialFlags,
+    MeshletResolveData md,
+    uint3 triIdx,
+    BarycentricDeriv bary)
+{
+    MaterialUvCache cache = (MaterialUvCache)0;
+
+    [unroll]
+    for (uint slot = 0u; slot < MATERIAL_TEXTURE_SLOT_COUNT; ++slot)
+    {
+        MaterialTextureSlot textureSlot = (MaterialTextureSlot)slot;
+        if (!MaterialSlotEnabled(materialInfo, materialFlags, textureSlot))
+        {
+            continue;
+        }
+
+        uint uvSetIndex = MaterialSlotUvSetIndex(materialInfo, textureSlot);
+        if (FindMaterialUvCacheIndex(cache, uvSetIndex) != MATERIAL_INVALID_UV_CACHE_INDEX)
+        {
+            continue;
+        }
+
+        AppendClodMaterialUvSample(cache, uvSetIndex, triIdx, md, bary);
+    }
+
+    return cache;
+}
+
 uint ReadPackedBits32(StructuredBuffer<uint> words, uint startBit, uint bitCount)
 {
     if (bitCount == 0u)
@@ -484,18 +545,6 @@ void EvaluateGBufferOptimized(uint2 pixel)
     float3 n1 = DecodeCompressedNormal(triIdx.y, md);
     float3 n2 = DecodeCompressedNormal(triIdx.z, md);
 
-    float2 uv0 = DecodeCompressedUV(triIdx.x, 0u, md);
-    float2 uv1 = DecodeCompressedUV(triIdx.y, 0u, md);
-    float2 uv2 = DecodeCompressedUV(triIdx.z, 0u, md);
-
-    // Interpolate UV + derivs
-    float3 interpU = InterpolateWithDeriv(bary, uv0.x, uv1.x, uv2.x);
-    float3 interpV = InterpolateWithDeriv(bary, uv0.y, uv1.y, uv2.y);
-
-    float2 uv = float2(interpU.x, interpV.x);
-    float2 dudx = float2(interpU.y, interpV.y);
-    float2 dudy = float2(interpU.z, interpV.z);
-
     // Interpolate position in post-skinning/object space, then transform once
     float3 interpPosX = InterpolateWithDeriv(bary, p0.x, p1.x, p2.x);
     float3 interpPosY = InterpolateWithDeriv(bary, p0.y, p1.y, p2.y);
@@ -527,13 +576,23 @@ void EvaluateGBufferOptimized(uint2 pixel)
     }
 
     // Material fetch
+    StructuredBuffer<MaterialInfo> materialDataBuffer =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
+    MaterialInfo materialInfo = materialDataBuffer[md.materialDataIndex];
+    uint materialFlags = materialInfo.materialFlags;
+    MaterialUvCache uvCache = BuildClodMaterialUvCache(materialInfo, materialFlags, md, triIdx, bary);
+    MaterialUvBindings uvBindings = BuildMaterialUvBindings(materialInfo, materialFlags, uvCache);
+
     MaterialInputs materialInputs;
-    SampleMaterialCS(
-        uv,
+    SampleMaterialFromUvCache(
+        uvCache,
+        uvBindings,
         worldNormal,
         worldPosition,
-        md.materialDataIndex,
-        dpdx, dpdy, dudx, dudy,
+        materialInfo,
+        materialFlags,
+        dpdx,
+        dpdy,
         materialInputs);
 
     // Motion vectors use the previous object transform and unjittered view-projection
