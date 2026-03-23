@@ -485,6 +485,16 @@ void Skeleton::SetAnimationSpeed(float speed)
     m_poseDirty = true;
 }
 
+size_t Skeleton::GetAnimationCount() const noexcept
+{
+    auto base = GetBaseSkeletonShared();
+    if (!base) {
+        return 0;
+    }
+
+    return base->animations.size();
+}
+
 float Skeleton::GetCurrentAnimationConservativeBoundsScale() const noexcept
 {
     if (m_isBaseSkeleton) {
@@ -515,7 +525,9 @@ void Skeleton::UpdateTransforms(float elapsedSeconds, bool force)
     for (uint32_t idx : base->m_evalOrder) {
         if (idx >= boneCount) continue;
 
-        Components::Transform localTrs = {};// (idx < base->m_restLocalTransforms.size()) ? base->m_restLocalTransforms[idx] : Components::Transform{};
+        Components::Transform localTrs = (idx < base->m_restLocalTransforms.size())
+            ? base->m_restLocalTransforms[idx]
+            : Components::Transform{};
 
         // If a clip is bound, use animated channels
         auto& ctrl = m_controllers[idx];
@@ -541,7 +553,10 @@ void Skeleton::UpdateTransforms(float elapsedSeconds, bool force)
             if (idx < base->m_rootParentGlobals.size()) {
                 rootParent = base->m_rootParentGlobals[idx];
             }
-            m_boneMatrices[idx] = local;//DirectX::XMMatrixMultiply(local, rootParent);
+            // Root joints may live under non-bone scene nodes (common in glTF).
+            // Those ancestors are part of the joint's bind/global space and must
+            // be carried into the runtime bone matrix before inverse binds are applied.
+            m_boneMatrices[idx] = DirectX::XMMatrixMultiply(local, rootParent);
         }
         else {
             m_boneMatrices[idx] = DirectX::XMMatrixMultiply(local, m_boneMatrices[(uint32_t)p]);

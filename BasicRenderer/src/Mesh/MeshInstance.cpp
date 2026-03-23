@@ -1,6 +1,39 @@
 #include "Mesh/MeshInstance.h"
 #include "Managers/MeshManager.h"
+#include "Managers/SkeletonManager.h"
 
+MeshInstance::~MeshInstance() {
+    ReleaseSkinningInstance_();
+}
+
+void MeshInstance::ReleaseSkinningInstance_() {
+    if (m_pCurrentSkeletonManager == nullptr || m_skeleton == nullptr) {
+        return;
+    }
+
+    auto lifetime = m_skeletonManagerLifetime.lock();
+    if (!lifetime || !lifetime->load(std::memory_order_acquire)) {
+        m_pCurrentSkeletonManager = nullptr;
+        m_skeletonManagerLifetime.reset();
+        return;
+    }
+
+    if (m_skeleton->GetSkinningInstanceSlot() == 0xFFFFFFFFu) {
+        return;
+    }
+
+    m_pCurrentSkeletonManager->ReleaseSkinningInstance(m_skeleton.get());
+}
+
+void MeshInstance::SetCurrentSkeletonManager(SkeletonManager* manager) {
+    m_pCurrentSkeletonManager = manager;
+    if (manager != nullptr) {
+        m_skeletonManagerLifetime = manager->GetLifetimeToken();
+    }
+    else {
+        m_skeletonManagerLifetime.reset();
+    }
+}
 
 void MeshInstance::SyncSkinningStateFromSkeleton() {
     if (m_skeleton != nullptr) {
@@ -42,6 +75,12 @@ void MeshInstance::SetBufferViewUsingBaseMesh(std::unique_ptr<BufferView> perMes
 }
 
 void MeshInstance::SetSkeleton(std::shared_ptr<Skeleton> skeleton) {
+    if (m_skeleton == skeleton) {
+        SyncSkinningStateFromSkeleton();
+        return;
+    }
+
+    ReleaseSkinningInstance_();
 	m_skeleton = skeleton;
     SyncSkinningStateFromSkeleton();
 }

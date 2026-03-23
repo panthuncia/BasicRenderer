@@ -14,6 +14,7 @@ static uint32_t BytesToMatrixIndex(size_t byteOffset) {
 }
 
 SkeletonManager::SkeletonManager() {
+    m_lifetimeToken = std::make_shared<std::atomic_bool>(true);
     m_inverseBindMatrices = DynamicBuffer::CreateShared(sizeof(DirectX::XMMATRIX), 1, "InverseBindMatricesPacked");
     m_boneTransforms = DynamicBuffer::CreateShared(sizeof(DirectX::XMMATRIX), 1, "BoneTransformsPacked");
 
@@ -23,6 +24,12 @@ SkeletonManager::SkeletonManager() {
     m_resources[Builtin::SkeletonResources::InverseBindMatrices] = m_inverseBindMatrices;
     m_resources[Builtin::SkeletonResources::BoneTransforms] = m_boneTransforms;
     m_resources[Builtin::SkeletonResources::SkinningInstanceInfo] = m_instanceInfo;
+}
+
+SkeletonManager::~SkeletonManager() {
+    if (m_lifetimeToken) {
+        m_lifetimeToken->store(false, std::memory_order_release);
+    }
 }
 
 SkeletonManager::BaseRecord& SkeletonManager::AcquireBase(const std::shared_ptr<Skeleton>& baseSkeleton) {

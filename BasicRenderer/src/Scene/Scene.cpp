@@ -119,6 +119,18 @@ namespace {
 			}
 		});
 	}
+
+	template <typename Fn>
+	void VisitSceneDescendants(flecs::entity root, Fn&& fn) {
+		root.children([&](flecs::entity child) {
+			if (child.has<Components::SceneRoot>()) {
+				return;
+			}
+
+			fn(child);
+			VisitSceneDescendants(child, fn);
+		});
+	}
 }
 
 std::atomic<uint64_t> Scene::globalSceneCount = 0;
@@ -260,10 +272,13 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 		for (auto& meshInstance : meshInstances->meshInstances) {
 
 			if (meshInstance->HasSkin()) {
+				meshInstance->SetCurrentSkeletonManager(m_managerInterface.GetSkeletonManager());
 				auto skinInst = meshInstance->GetSkin();
 				m_managerInterface.GetSkeletonManager()->AcquireSkinningInstance(skinInst);
 				meshInstance->SetSkinningInstanceSlot(skinInst->GetSkinningInstanceSlot());
-				skinInst->SetAnimation(0); // TODO: Animation selection
+				if (skinInst->GetAnimationCount() > 0u) {
+					skinInst->SetAnimation(0); // TODO: Animation selection
+				}
 				meshInstance->SyncSkinningStateFromSkeleton();
 			}
 
@@ -305,38 +320,39 @@ void Scene::ActivateCamera(flecs::entity& entity) {
 
 void Scene::ProcessEntitySkins(bool overrideExistingSkins) {
 	auto& world = GetSceneWorld();
-	auto query = world.query_builder<>().with<Components::MeshInstances>()
-		.with(flecs::ChildOf, ECSSceneRoot).self().parent()
-		.build();
-	std::vector<std::shared_ptr<Skeleton>> skeletonsToAdd;
+	std::vector<flecs::entity> renderables;
+	VisitSceneDescendants(ECSSceneRoot, [&](flecs::entity entity) {
+		if (entity.has<Components::MeshInstances>()) {
+			renderables.push_back(entity);
+		}
+	});
 	world.defer_begin();
-	query.each([&](flecs::entity entity) {
+	for (auto entity : renderables) {
 		auto oldMeshInstances = entity.try_get<Components::MeshInstances>();
-
-		// Discard old instances and add new ones
-		if (oldMeshInstances) {
-			Components::MeshInstances meshInstances;
-			meshInstances.generation = oldMeshInstances->generation + 1;
-			for (auto& meshInstance : oldMeshInstances->meshInstances) {
-				meshInstances.meshInstances.push_back(std::move(MeshInstance::CreateUnique(meshInstance->GetMesh())));
-			}
-			entity.set<Components::MeshInstances>(meshInstances);
+		if (!oldMeshInstances) {
+			continue;
 		}
 
-		if (oldMeshInstances) {
-			bool addSkin = false;
-			for (auto& meshInstance : oldMeshInstances->meshInstances) {
-				if (meshInstance->GetMesh()->HasBaseSkin() && (!meshInstance->HasSkin() || overrideExistingSkins)) {
-					auto skinInst = meshInstance->GetMesh()->GetBaseSkin()->CopySkeleton();   // runtime instance
-					meshInstance->SetSkeleton(skinInst);
-					addSkin = true;
-				}
+		Components::MeshInstances meshInstances;
+		meshInstances.generation = oldMeshInstances->generation + 1;
+
+		bool addSkin = false;
+		for (const auto& meshInstance : oldMeshInstances->meshInstances) {
+			auto rebuiltInstance = MeshInstance::CreateUnique(meshInstance->GetMesh());
+			if (rebuiltInstance->HasSkin()) {
+				addSkin = true;
 			}
-			if (addSkin) {
-				entity.add<Components::Skinned>();
-			}
+			meshInstances.meshInstances.push_back(std::move(rebuiltInstance));
 		}
-		});
+
+		entity.set<Components::MeshInstances>(meshInstances);
+		if (addSkin) {
+			entity.add<Components::Skinned>();
+		}
+		else if (overrideExistingSkins || entity.has<Components::Skinned>()) {
+			entity.remove<Components::Skinned>();
+		}
+	}
 	world.defer_end();
 }
 
@@ -570,31 +586,31 @@ std::shared_ptr<Scene> Scene::AppendScene(std::shared_ptr<Scene> scene) {
 
 void Scene::MakeResident() {
 	auto& world = GetSceneWorld();
-	world.defer_begin();
-	auto renderableQuery =world.query_builder<>()
-		.with<Components::MeshInstances>()
-		.with(flecs::ChildOf, ECSSceneRoot).self().parent()
-		.build();
-	renderableQuery.each([&](flecs::entity entity) {
+	std::vector<flecs::entity> renderables;
+	std::vector<flecs::entity> cameras;
+	std::vector<flecs::entity> lights;
+
+	VisitSceneDescendants(ECSSceneRoot, [&](flecs::entity entity) {
+		if (entity.has<Components::MeshInstances>()) {
+			renderables.push_back(entity);
+		}
+		if (entity.has<Components::Camera>()) {
+			cameras.push_back(entity);
+		}
+		if (entity.has<Components::Light>()) {
+			lights.push_back(entity);
+		}
+	});
+
+	for (auto& entity : renderables) {
 		ActivateRenderable(entity);
-		});
-
-	auto camQuery = world.query_builder<>()
-		.with<Components::Camera>()
-		.with(flecs::ChildOf, ECSSceneRoot).self().parent()
-		.build();
-	camQuery.each([&](flecs::entity entity) {
+	}
+	for (auto& entity : cameras) {
 		ActivateCamera(entity);
-		});
-
-	auto lightQuery = world.query_builder<>()
-		.with<Components::Light>()
-		.with(flecs::ChildOf, ECSSceneRoot).self().parent()
-		.build();
-	lightQuery.each([&](flecs::entity entity) {
+	}
+	for (auto& entity : lights) {
 		ActivateLight(entity);
-		});
-	world.defer_end();
+	}
 }
 
 void Scene::MakeNonResident() {
@@ -683,13 +699,15 @@ std::shared_ptr<Scene> Scene::Clone() const {
 
 void Scene::DisableShadows() {
 	auto& world = GetSceneWorld();
+	std::vector<flecs::entity> renderables;
+	VisitSceneDescendants(ECSSceneRoot, [&](flecs::entity entity) {
+		if (entity.has<Components::MeshInstances>()) {
+			renderables.push_back(entity);
+		}
+	});
 	world.defer_begin();
-	auto query = world.query_builder<>()
-		.with<Components::MeshInstances>()
-		.with(flecs::ChildOf, ECSSceneRoot).self().parent()
-		.build();
-	query.each([&](flecs::entity entity) {
+	for (auto entity : renderables) {
 		entity.add<Components::SkipShadowPass>();
-		});
+	}
 	world.defer_end();
 }

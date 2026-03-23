@@ -1,6 +1,7 @@
 #include "Import/GlTFLoader.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdint>
 #include <cstring>
@@ -18,9 +19,14 @@
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 
+#include "Animation/Animation.h"
+#include "Animation/AnimationController.h"
+#include "Animation/Skeleton.h"
 #include "Import/GlTFGeometryExtractor.h"
 #include "Materials/Material.h"
 #include "Mesh/Mesh.h"
+#include "Mesh/MeshInstance.h"
+#include "Mesh/VertexFlags.h"
 #include "Resources/Sampler.h"
 #include "Scene/Components.h"
 #include "Scene/Scene.h"
@@ -33,6 +39,49 @@ namespace {
 
 struct PrimitiveData {
     std::shared_ptr<Mesh> mesh;
+};
+
+struct PreparedPrimitiveData {
+    MeshPreprocessResult result;
+    std::shared_ptr<Material> material;
+};
+
+struct BufferViewInfo {
+    size_t bufferIndex = 0;
+    uint64_t byteOffset = 0;
+    uint64_t byteLength = 0;
+    uint64_t byteStride = 0;
+};
+
+struct AccessorInfo {
+    size_t bufferViewIndex = 0;
+    uint64_t byteOffset = 0;
+    size_t count = 0;
+    int componentType = 0;
+    std::string type;
+    bool normalized = false;
+};
+
+struct NodeHierarchyBuildResult {
+    std::vector<flecs::entity> entities;
+    std::vector<int32_t> meshIndices;
+};
+
+struct MeshBindingKey {
+    size_t meshIndex = 0;
+    int skinIndex = -1;
+
+    bool operator==(const MeshBindingKey& other) const noexcept {
+        return meshIndex == other.meshIndex && skinIndex == other.skinIndex;
+    }
+};
+
+struct MeshBindingKeyHasher {
+    size_t operator()(const MeshBindingKey& key) const noexcept {
+        size_t seed = std::hash<size_t>{}(key.meshIndex);
+        seed ^= std::hash<int>{}(key.skinIndex) + 0x9e3779b9u + (seed << 6) + (seed >> 2);
+        return seed;
+    }
 };
 
 enum class BufferBacking {
@@ -385,6 +434,327 @@ std::vector<uint8_t> ReadBufferSlice(const BufferSource& source, uint64_t offset
     return ReadFileRange(source.filePath, source.fileOffset + offset, size);
 }
 
+size_t NumComponentsForType(const std::string& type) {
+    if (type == "SCALAR") return 1;
+    if (type == "VEC2") return 2;
+    if (type == "VEC3") return 3;
+    if (type == "VEC4") return 4;
+    if (type == "MAT4") return 16;
+    throw std::runtime_error("Unsupported glTF accessor type: " + type);
+}
+
+size_t BytesPerComponent(int componentType) {
+    switch (componentType) {
+    case 5120:
+    case 5121:
+        return 1;
+    case 5122:
+    case 5123:
+        return 2;
+    case 5125:
+    case 5126:
+        return 4;
+    default:
+        throw std::runtime_error("Unsupported glTF accessor component type");
+    }
+}
+
+AccessorInfo GetAccessorInfo(const json& gltf, size_t accessorIndex) {
+    const auto& accessors = gltf.at("accessors");
+    if (accessorIndex >= accessors.size()) {
+        throw std::runtime_error("glTF accessor index out of range");
+    }
+
+    const auto& accessor = accessors[accessorIndex];
+    if (!accessor.contains("bufferView")) {
+        throw std::runtime_error("Sparse glTF accessors are not supported in the loader");
+    }
+
+    AccessorInfo info;
+    info.bufferViewIndex = accessor.at("bufferView").get<size_t>();
+    info.byteOffset = accessor.value<uint64_t>("byteOffset", 0);
+    info.count = accessor.at("count").get<size_t>();
+    info.componentType = accessor.at("componentType").get<int>();
+    info.type = accessor.at("type").get<std::string>();
+    info.normalized = accessor.value<bool>("normalized", false);
+    return info;
+}
+
+BufferViewInfo GetBufferViewInfo(const json& gltf, size_t bufferViewIndex) {
+    const auto& bufferViews = gltf.at("bufferViews");
+    if (bufferViewIndex >= bufferViews.size()) {
+        throw std::runtime_error("glTF bufferView index out of range");
+    }
+
+    const auto& bufferView = bufferViews[bufferViewIndex];
+    BufferViewInfo info;
+    info.bufferIndex = bufferView.at("buffer").get<size_t>();
+    info.byteOffset = bufferView.value<uint64_t>("byteOffset", 0);
+    info.byteLength = bufferView.at("byteLength").get<uint64_t>();
+    info.byteStride = bufferView.value<uint64_t>("byteStride", 0);
+    return info;
+}
+
+template <typename T>
+T ReadTyped(const std::vector<uint8_t>& bytes, size_t offset) {
+    if (offset + sizeof(T) > bytes.size()) {
+        throw std::runtime_error("glTF accessor read out of bounds");
+    }
+
+    T value{};
+    std::memcpy(&value, bytes.data() + offset, sizeof(T));
+    return value;
+}
+
+double ReadComponentAsDouble(const std::vector<uint8_t>& bytes, int componentType, bool normalized, size_t offset) {
+    switch (componentType) {
+    case 5120: {
+        const int8_t value = ReadTyped<int8_t>(bytes, offset);
+        if (!normalized) {
+            return static_cast<double>(value);
+        }
+        return std::max(static_cast<double>(value) / 127.0, -1.0);
+    }
+    case 5121: {
+        const uint8_t value = ReadTyped<uint8_t>(bytes, offset);
+        if (!normalized) {
+            return static_cast<double>(value);
+        }
+        return static_cast<double>(value) / 255.0;
+    }
+    case 5122: {
+        const int16_t value = ReadTyped<int16_t>(bytes, offset);
+        if (!normalized) {
+            return static_cast<double>(value);
+        }
+        return std::max(static_cast<double>(value) / 32767.0, -1.0);
+    }
+    case 5123: {
+        const uint16_t value = ReadTyped<uint16_t>(bytes, offset);
+        if (!normalized) {
+            return static_cast<double>(value);
+        }
+        return static_cast<double>(value) / 65535.0;
+    }
+    case 5125:
+        return static_cast<double>(ReadTyped<uint32_t>(bytes, offset));
+    case 5126:
+        return static_cast<double>(ReadTyped<float>(bytes, offset));
+    default:
+        throw std::runtime_error("Unsupported glTF accessor component type");
+    }
+}
+
+std::vector<uint8_t> ReadAccessorRawWindow(
+    const json& gltf,
+    const std::vector<BufferSource>& bufferSources,
+    size_t accessorIndex,
+    size_t firstElement,
+    size_t elementCount,
+    size_t* outStride,
+    size_t* outComponentCount,
+    int* outComponentType,
+    bool* outNormalized)
+{
+    const AccessorInfo accessor = GetAccessorInfo(gltf, accessorIndex);
+    const BufferViewInfo view = GetBufferViewInfo(gltf, accessor.bufferViewIndex);
+
+    if (gltf["bufferViews"][accessor.bufferViewIndex].contains("extensions") &&
+        gltf["bufferViews"][accessor.bufferViewIndex]["extensions"].contains("EXT_meshopt_compression")) {
+        throw std::runtime_error("glTF loader does not yet support EXT_meshopt_compression for skinning or animation accessors");
+    }
+
+    const size_t componentCount = NumComponentsForType(accessor.type);
+    const size_t componentBytes = BytesPerComponent(accessor.componentType);
+    const size_t packedElementSize = componentCount * componentBytes;
+    const size_t stride = view.byteStride == 0 ? packedElementSize : view.byteStride;
+
+    if (firstElement > accessor.count || elementCount > accessor.count - firstElement) {
+        throw std::runtime_error("glTF accessor window out of bounds");
+    }
+
+    *outStride = stride;
+    *outComponentCount = componentCount;
+    *outComponentType = accessor.componentType;
+    *outNormalized = accessor.normalized;
+
+    if (elementCount == 0) {
+        return {};
+    }
+
+    if (view.bufferIndex >= bufferSources.size()) {
+        throw std::runtime_error("glTF accessor buffer index out of range");
+    }
+
+    const uint64_t start = view.byteOffset + accessor.byteOffset + static_cast<uint64_t>(firstElement * stride);
+    const uint64_t byteLength = static_cast<uint64_t>((elementCount - 1) * stride + packedElementSize);
+    if (start + byteLength > view.byteOffset + view.byteLength) {
+        throw std::runtime_error("glTF accessor window exceeds bufferView bounds");
+    }
+
+    return ReadBufferSlice(bufferSources[view.bufferIndex], start, byteLength);
+}
+
+std::vector<float> ReadAccessorScalarsAsFloat(
+    const json& gltf,
+    const std::vector<BufferSource>& bufferSources,
+    size_t accessorIndex)
+{
+    const AccessorInfo accessor = GetAccessorInfo(gltf, accessorIndex);
+    if (NumComponentsForType(accessor.type) != 1) {
+        throw std::runtime_error("glTF accessor must be SCALAR");
+    }
+
+    std::vector<float> values(accessor.count);
+    constexpr size_t kChunkSize = 32768;
+    for (size_t first = 0; first < accessor.count; first += kChunkSize) {
+        const size_t count = std::min(kChunkSize, accessor.count - first);
+        size_t stride = 0;
+        size_t componentCount = 0;
+        int componentType = 0;
+        bool normalized = false;
+        const auto bytes = ReadAccessorRawWindow(gltf, bufferSources, accessorIndex, first, count, &stride, &componentCount, &componentType, &normalized);
+        for (size_t i = 0; i < count; ++i) {
+            values[first + i] = static_cast<float>(ReadComponentAsDouble(bytes, componentType, normalized, i * stride));
+        }
+    }
+
+    return values;
+}
+
+std::vector<XMFLOAT3> ReadAccessorVec3AsFloat(
+    const json& gltf,
+    const std::vector<BufferSource>& bufferSources,
+    size_t accessorIndex)
+{
+    const AccessorInfo accessor = GetAccessorInfo(gltf, accessorIndex);
+    if (NumComponentsForType(accessor.type) != 3) {
+        throw std::runtime_error("glTF accessor must be VEC3");
+    }
+
+    std::vector<XMFLOAT3> values(accessor.count);
+    constexpr size_t kChunkSize = 32768;
+    for (size_t first = 0; first < accessor.count; first += kChunkSize) {
+        const size_t count = std::min(kChunkSize, accessor.count - first);
+        size_t stride = 0;
+        size_t componentCount = 0;
+        int componentType = 0;
+        bool normalized = false;
+        const auto bytes = ReadAccessorRawWindow(gltf, bufferSources, accessorIndex, first, count, &stride, &componentCount, &componentType, &normalized);
+        const size_t componentBytes = BytesPerComponent(componentType);
+        for (size_t i = 0; i < count; ++i) {
+            const size_t base = i * stride;
+            values[first + i] = XMFLOAT3(
+                static_cast<float>(ReadComponentAsDouble(bytes, componentType, normalized, base + componentBytes * 0)),
+                static_cast<float>(ReadComponentAsDouble(bytes, componentType, normalized, base + componentBytes * 1)),
+                static_cast<float>(ReadComponentAsDouble(bytes, componentType, normalized, base + componentBytes * 2)));
+        }
+    }
+
+    return values;
+}
+
+std::vector<XMFLOAT4> ReadAccessorVec4AsFloat(
+    const json& gltf,
+    const std::vector<BufferSource>& bufferSources,
+    size_t accessorIndex)
+{
+    const AccessorInfo accessor = GetAccessorInfo(gltf, accessorIndex);
+    if (NumComponentsForType(accessor.type) != 4) {
+        throw std::runtime_error("glTF accessor must be VEC4");
+    }
+
+    std::vector<XMFLOAT4> values(accessor.count);
+    constexpr size_t kChunkSize = 32768;
+    for (size_t first = 0; first < accessor.count; first += kChunkSize) {
+        const size_t count = std::min(kChunkSize, accessor.count - first);
+        size_t stride = 0;
+        size_t componentCount = 0;
+        int componentType = 0;
+        bool normalized = false;
+        const auto bytes = ReadAccessorRawWindow(gltf, bufferSources, accessorIndex, first, count, &stride, &componentCount, &componentType, &normalized);
+        const size_t componentBytes = BytesPerComponent(componentType);
+        for (size_t i = 0; i < count; ++i) {
+            const size_t base = i * stride;
+            values[first + i] = XMFLOAT4(
+                static_cast<float>(ReadComponentAsDouble(bytes, componentType, normalized, base + componentBytes * 0)),
+                static_cast<float>(ReadComponentAsDouble(bytes, componentType, normalized, base + componentBytes * 1)),
+                static_cast<float>(ReadComponentAsDouble(bytes, componentType, normalized, base + componentBytes * 2)),
+                static_cast<float>(ReadComponentAsDouble(bytes, componentType, normalized, base + componentBytes * 3)));
+        }
+    }
+
+    return values;
+}
+
+std::vector<XMMATRIX> ReadAccessorMat4AsMatrices(
+    const json& gltf,
+    const std::vector<BufferSource>& bufferSources,
+    size_t accessorIndex)
+{
+    const AccessorInfo accessor = GetAccessorInfo(gltf, accessorIndex);
+    if (NumComponentsForType(accessor.type) != 16) {
+        throw std::runtime_error("glTF accessor must be MAT4");
+    }
+
+    std::vector<XMMATRIX> values(accessor.count, XMMatrixIdentity());
+    constexpr size_t kChunkSize = 4096;
+    for (size_t first = 0; first < accessor.count; first += kChunkSize) {
+        const size_t count = std::min(kChunkSize, accessor.count - first);
+        size_t stride = 0;
+        size_t componentCount = 0;
+        int componentType = 0;
+        bool normalized = false;
+        const auto bytes = ReadAccessorRawWindow(gltf, bufferSources, accessorIndex, first, count, &stride, &componentCount, &componentType, &normalized);
+        const size_t componentBytes = BytesPerComponent(componentType);
+        for (size_t i = 0; i < count; ++i) {
+            const size_t base = i * stride;
+            std::array<float, 16> m{};
+            for (size_t componentIndex = 0; componentIndex < 16; ++componentIndex) {
+                m[componentIndex] = static_cast<float>(ReadComponentAsDouble(
+                    bytes,
+                    componentType,
+                    normalized,
+                    base + componentBytes * componentIndex));
+            }
+
+            values[first + i] = XMMatrixSet(
+                m[0], m[1], m[2], m[3],
+                m[4], m[5], m[6], m[7],
+                m[8], m[9], m[10], m[11],
+                m[12], m[13], m[14], m[15]);
+        }
+    }
+
+    return values;
+}
+
+AnimationInterpolationMode ParseInterpolationMode(const std::string& interpolation) {
+    if (interpolation == "LINEAR") {
+        return AnimationInterpolationMode::Linear;
+    }
+    if (interpolation == "STEP") {
+        return AnimationInterpolationMode::Step;
+    }
+
+    throw std::runtime_error("Unsupported glTF interpolation mode: " + interpolation);
+}
+
+std::vector<std::string> BuildNodeAnimationKeys(const json& gltf) {
+    std::vector<std::string> keys;
+    if (!gltf.contains("nodes")) {
+        return keys;
+    }
+
+    const auto& nodes = gltf["nodes"];
+    keys.resize(nodes.size());
+    for (size_t nodeIndex = 0; nodeIndex < nodes.size(); ++nodeIndex) {
+        const std::string nodeName = nodes[nodeIndex].value("name", "glTF_Node_" + std::to_string(nodeIndex));
+        keys[nodeIndex] = nodeName + "#node_" + std::to_string(nodeIndex);
+    }
+    return keys;
+}
+
 std::vector<uint8_t> ReadImageBytes(
     const json& gltf,
     const std::filesystem::path& sourcePath,
@@ -726,8 +1096,6 @@ std::shared_ptr<Material> ResolvePrimitiveMaterial(
     return LoadMaterial(gltf, sourcePath, cache, primitiveNode["material"].get<size_t>());
 }
 
-
-
 void ApplyNodeTransform(const json& gltfNode, flecs::entity entity) {
     XMVECTOR translation = XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
     XMVECTOR rotation = XMQuaternionIdentity();
@@ -772,17 +1140,55 @@ void ApplyNodeTransform(const json& gltfNode, flecs::entity entity) {
     entity.set<Components::Scale>({ scale });
 }
 
-void BuildNodeHierarchy(
+void SetEntityMeshes(flecs::entity entity, const std::vector<std::shared_ptr<Mesh>>& meshes) {
+    const auto* oldMeshInstances = entity.try_get<Components::MeshInstances>();
+
+    Components::MeshInstances meshInstances;
+    if (oldMeshInstances != nullptr) {
+        meshInstances.generation = oldMeshInstances->generation + 1;
+    }
+
+    bool isSkinned = false;
+    for (const auto& mesh : meshes) {
+        if (mesh == nullptr) {
+            continue;
+        }
+
+        auto meshInstance = MeshInstance::CreateUnique(mesh);
+        if (meshInstance->HasSkin()) {
+            isSkinned = true;
+        }
+        meshInstances.meshInstances.push_back(std::move(meshInstance));
+    }
+
+    if (!meshInstances.meshInstances.empty()) {
+        entity.set<Components::MeshInstances>(meshInstances);
+    }
+    else if (oldMeshInstances != nullptr) {
+        entity.remove<Components::MeshInstances>();
+    }
+
+    if (isSkinned) {
+        entity.add<Components::Skinned>();
+    }
+    else if (entity.has<Components::Skinned>()) {
+        entity.remove<Components::Skinned>();
+    }
+}
+
+NodeHierarchyBuildResult BuildNodeHierarchy(
     std::shared_ptr<Scene> scene,
     const json& gltf,
     const std::vector<std::vector<PrimitiveData>>& meshes)
 {
+    NodeHierarchyBuildResult result;
     if (!gltf.contains("nodes")) {
-        return;
+        return result;
     }
 
     const auto& nodeArray = gltf["nodes"];
-    std::vector<flecs::entity> entities(nodeArray.size());
+    result.entities.resize(nodeArray.size());
+    result.meshIndices.assign(nodeArray.size(), -1);
     std::vector<bool> hasParent(nodeArray.size(), false);
 
     for (size_t nodeIndex = 0; nodeIndex < nodeArray.size(); ++nodeIndex) {
@@ -803,13 +1209,14 @@ void BuildNodeHierarchy(
                 }
             }
 
-            entities[nodeIndex] = scene->CreateRenderableEntityECS(nodeMeshes, s2ws(nodeName));
+            result.entities[nodeIndex] = scene->CreateRenderableEntityECS(nodeMeshes, s2ws(nodeName));
+            result.meshIndices[nodeIndex] = static_cast<int32_t>(meshIndex);
         }
         else {
-            entities[nodeIndex] = scene->CreateNodeECS(s2ws(nodeName));
+            result.entities[nodeIndex] = scene->CreateNodeECS(s2ws(nodeName));
         }
 
-        ApplyNodeTransform(gltfNode, entities[nodeIndex]);
+        ApplyNodeTransform(gltfNode, result.entities[nodeIndex]);
     }
 
     for (size_t nodeIndex = 0; nodeIndex < nodeArray.size(); ++nodeIndex) {
@@ -820,11 +1227,11 @@ void BuildNodeHierarchy(
 
         for (const auto& childIndexValue : gltfNode["children"]) {
             const size_t childIndex = childIndexValue.get<size_t>();
-            if (childIndex >= entities.size()) {
+            if (childIndex >= result.entities.size()) {
                 throw std::runtime_error("Node child index out of range");
             }
 
-            entities[childIndex].child_of(entities[nodeIndex]);
+            result.entities[childIndex].child_of(result.entities[nodeIndex]);
             hasParent[childIndex] = true;
         }
     }
@@ -841,7 +1248,7 @@ void BuildNodeHierarchy(
             rootNodes.reserve(selectedScene["nodes"].size());
             for (const auto& nodeValue : selectedScene["nodes"]) {
                 const size_t rootIndex = nodeValue.get<size_t>();
-                if (rootIndex >= entities.size()) {
+                if (rootIndex >= result.entities.size()) {
                     throw std::runtime_error("Scene root node index out of range");
                 }
                 rootNodes.push_back(rootIndex);
@@ -850,7 +1257,7 @@ void BuildNodeHierarchy(
     }
 
     if (rootNodes.empty()) {
-        for (size_t nodeIndex = 0; nodeIndex < entities.size(); ++nodeIndex) {
+        for (size_t nodeIndex = 0; nodeIndex < result.entities.size(); ++nodeIndex) {
             if (!hasParent[nodeIndex]) {
                 rootNodes.push_back(nodeIndex);
             }
@@ -859,8 +1266,208 @@ void BuildNodeHierarchy(
 
     flecs::entity sceneRoot = scene->GetRoot();
     for (const size_t rootIndex : rootNodes) {
-        entities[rootIndex].child_of(sceneRoot);
+        result.entities[rootIndex].child_of(sceneRoot);
     }
+
+    return result;
+}
+
+std::vector<std::shared_ptr<Animation>> ParseAnimations(
+    const json& gltf,
+    const std::vector<BufferSource>& bufferSources,
+    const std::vector<std::string>& nodeAnimationKeys)
+{
+    std::vector<std::shared_ptr<Animation>> animations;
+    if (!gltf.contains("animations") || !gltf["animations"].is_array()) {
+        return animations;
+    }
+
+    const auto& animationArray = gltf["animations"];
+    animations.reserve(animationArray.size());
+    for (size_t animationIndex = 0; animationIndex < animationArray.size(); ++animationIndex) {
+        const auto& animationNode = animationArray[animationIndex];
+        const std::string animationName = animationNode.value("name", "glTF_Animation_" + std::to_string(animationIndex));
+        auto animation = std::make_shared<Animation>(animationName);
+
+        if (!animationNode.contains("samplers") || !animationNode["samplers"].is_array() ||
+            !animationNode.contains("channels") || !animationNode["channels"].is_array()) {
+            animations.push_back(animation);
+            continue;
+        }
+
+        const auto& samplers = animationNode["samplers"];
+        for (size_t channelIndex = 0; channelIndex < animationNode["channels"].size(); ++channelIndex) {
+            const auto& channel = animationNode["channels"][channelIndex];
+            if (!channel.contains("sampler") || !channel.contains("target")) {
+                continue;
+            }
+
+            const size_t samplerIndex = channel["sampler"].get<size_t>();
+            if (samplerIndex >= samplers.size()) {
+                throw std::runtime_error("glTF animation sampler index out of range");
+            }
+
+            const auto& target = channel["target"];
+            if (!target.contains("node") || !target.contains("path")) {
+                continue;
+            }
+
+            const size_t nodeIndex = target["node"].get<size_t>();
+            if (nodeIndex >= nodeAnimationKeys.size()) {
+                throw std::runtime_error("glTF animation node target index out of range");
+            }
+
+            const auto& sampler = samplers[samplerIndex];
+            const std::string interpolation = sampler.value("interpolation", std::string("LINEAR"));
+            if (interpolation == "CUBICSPLINE") {
+                spdlog::warn("glTF animation '{}' channel {} uses unsupported CUBICSPLINE interpolation; skipping channel", animationName, channelIndex);
+                continue;
+            }
+
+            AnimationInterpolationMode interpolationMode = AnimationInterpolationMode::Linear;
+            try {
+                interpolationMode = ParseInterpolationMode(interpolation);
+            }
+            catch (const std::exception&) {
+                spdlog::warn("glTF animation '{}' channel {} uses unsupported interpolation '{}'; skipping channel", animationName, channelIndex, interpolation);
+                continue;
+            }
+
+            const size_t inputAccessorIndex = sampler.at("input").get<size_t>();
+            const size_t outputAccessorIndex = sampler.at("output").get<size_t>();
+            auto times = ReadAccessorScalarsAsFloat(gltf, bufferSources, inputAccessorIndex);
+            if (times.empty()) {
+                continue;
+            }
+
+            const std::string nodeKey = nodeAnimationKeys[nodeIndex];
+            auto& clip = animation->nodesMap[nodeKey];
+            if (!clip) {
+                clip = std::make_shared<AnimationClip>();
+            }
+
+            const std::string path = target["path"].get<std::string>();
+            if (path == "translation") {
+                auto values = ReadAccessorVec3AsFloat(gltf, bufferSources, outputAccessorIndex);
+                if (values.size() != times.size()) {
+                    spdlog::warn("glTF animation '{}' translation channel {} has mismatched input/output counts; skipping channel", animationName, channelIndex);
+                    continue;
+                }
+                for (size_t keyIndex = 0; keyIndex < times.size(); ++keyIndex) {
+                    clip->addPositionKeyframe(times[keyIndex], values[keyIndex], interpolationMode);
+                }
+            }
+            else if (path == "rotation") {
+                auto values = ReadAccessorVec4AsFloat(gltf, bufferSources, outputAccessorIndex);
+                if (values.size() != times.size()) {
+                    spdlog::warn("glTF animation '{}' rotation channel {} has mismatched input/output counts; skipping channel", animationName, channelIndex);
+                    continue;
+                }
+                for (size_t keyIndex = 0; keyIndex < times.size(); ++keyIndex) {
+                    clip->addRotationKeyframe(times[keyIndex], XMVectorSet(values[keyIndex].x, values[keyIndex].y, values[keyIndex].z, values[keyIndex].w), interpolationMode);
+                }
+            }
+            else if (path == "scale") {
+                auto values = ReadAccessorVec3AsFloat(gltf, bufferSources, outputAccessorIndex);
+                if (values.size() != times.size()) {
+                    spdlog::warn("glTF animation '{}' scale channel {} has mismatched input/output counts; skipping channel", animationName, channelIndex);
+                    continue;
+                }
+                for (size_t keyIndex = 0; keyIndex < times.size(); ++keyIndex) {
+                    clip->addScaleKeyframe(times[keyIndex], values[keyIndex], interpolationMode);
+                }
+            }
+            else if (path == "weights") {
+                spdlog::warn("glTF animation '{}' channel {} targets morph weights, which are not supported yet; skipping channel", animationName, channelIndex);
+            }
+        }
+
+        animations.push_back(animation);
+    }
+
+    return animations;
+}
+
+std::vector<std::shared_ptr<Skeleton>> BuildSkins(
+    const json& gltf,
+    const std::vector<BufferSource>& bufferSources,
+    const std::vector<flecs::entity>& nodeEntities,
+    const std::vector<std::string>& nodeAnimationKeys,
+    const std::vector<std::shared_ptr<Animation>>& animations)
+{
+    std::vector<std::shared_ptr<Skeleton>> skeletons;
+    if (!gltf.contains("skins") || !gltf["skins"].is_array()) {
+        return skeletons;
+    }
+
+    const auto& skins = gltf["skins"];
+    skeletons.resize(skins.size());
+    for (size_t skinIndex = 0; skinIndex < skins.size(); ++skinIndex) {
+        const auto& skinNode = skins[skinIndex];
+        if (!skinNode.contains("joints") || !skinNode["joints"].is_array() || skinNode["joints"].empty()) {
+            spdlog::warn("glTF skin {} has no joints; skipping skin", skinIndex);
+            continue;
+        }
+
+        std::vector<flecs::entity> jointNodes;
+        jointNodes.reserve(skinNode["joints"].size());
+        std::vector<XMMATRIX> inverseBindMatrices(skinNode["joints"].size(), XMMatrixIdentity());
+        std::vector<std::string> jointAnimationKeys;
+        jointAnimationKeys.reserve(skinNode["joints"].size());
+
+        if (skinNode.contains("inverseBindMatrices")) {
+            auto loadedMatrices = ReadAccessorMat4AsMatrices(gltf, bufferSources, skinNode["inverseBindMatrices"].get<size_t>());
+            if (loadedMatrices.size() != inverseBindMatrices.size()) {
+                spdlog::warn("glTF skin {} inverse bind matrix count ({}) does not match joint count ({}); missing entries default to identity",
+                    skinIndex,
+                    loadedMatrices.size(),
+                    inverseBindMatrices.size());
+            }
+
+            const size_t matrixCount = std::min(loadedMatrices.size(), inverseBindMatrices.size());
+            for (size_t matrixIndex = 0; matrixIndex < matrixCount; ++matrixIndex) {
+                inverseBindMatrices[matrixIndex] = loadedMatrices[matrixIndex];
+            }
+        }
+
+        for (const auto& jointValue : skinNode["joints"]) {
+            const size_t jointNodeIndex = jointValue.get<size_t>();
+            if (jointNodeIndex >= nodeEntities.size()) {
+                throw std::runtime_error("glTF skin joint node index out of range");
+            }
+
+            flecs::entity jointEntity = nodeEntities[jointNodeIndex];
+            if (!jointEntity.is_alive()) {
+                throw std::runtime_error("glTF skin references an invalid joint entity");
+            }
+
+            if (!jointEntity.has<AnimationController>()) {
+                jointEntity.add<AnimationController>();
+            }
+            jointEntity.set<Components::AnimationName>({ nodeAnimationKeys[jointNodeIndex] });
+            jointNodes.push_back(jointEntity);
+            jointAnimationKeys.push_back(nodeAnimationKeys[jointNodeIndex]);
+        }
+
+        auto skeleton = std::make_shared<Skeleton>(jointNodes, inverseBindMatrices);
+        for (const auto& animation : animations) {
+            bool usesSkeleton = false;
+            for (const auto& jointKey : jointAnimationKeys) {
+                if (animation->nodesMap.contains(jointKey)) {
+                    usesSkeleton = true;
+                    break;
+                }
+            }
+
+            if (usesSkeleton) {
+                skeleton->AddAnimation(animation);
+            }
+        }
+
+        skeletons[skinIndex] = skeleton;
+    }
+
+    return skeletons;
 }
 
 } // namespace
@@ -884,10 +1491,13 @@ std::shared_ptr<Scene> LoadModel(std::string filePath) {
         // Build mesh/primitive structure from glTF JSON
         const size_t meshCount = extraction.gltf.contains("meshes") ? extraction.gltf["meshes"].size() : 0;
         std::vector<std::vector<PrimitiveData>> allMeshes(meshCount);
+        std::vector<std::vector<std::shared_ptr<Mesh>>> sharedMeshLists(meshCount);
+        std::vector<std::vector<std::optional<PreparedPrimitiveData>>> preparedPrimitives(meshCount);
         for (size_t mi = 0; mi < meshCount; ++mi) {
             const auto& meshNode = extraction.gltf["meshes"][mi];
             if (meshNode.contains("primitives")) {
                 allMeshes[mi].resize(meshNode["primitives"].size());
+                preparedPrimitives[mi].resize(meshNode["primitives"].size());
             }
         }
 
@@ -900,20 +1510,116 @@ std::shared_ptr<Scene> LoadModel(std::string filePath) {
                 materialCache,
                 primitiveNode,
                 defaultMaterial);
-            auto mesh = ep.result.ingest.Build(
+            PreparedPrimitiveData preparedPrimitive{
+                std::move(ep.result),
+                material
+            };
+
+            MeshPreprocessResult buildResult = preparedPrimitive.result;
+            auto mesh = buildResult.ingest.Build(
                 material,
-                std::move(ep.result.prebuiltData),
+                std::move(buildResult.prebuiltData),
                 MeshCpuDataPolicy::ReleaseAfterUpload);
             allMeshes[ep.meshIndex][ep.primitiveIndex].mesh = mesh;
+            preparedPrimitives[ep.meshIndex][ep.primitiveIndex] = std::move(preparedPrimitive);
         }
 
-        BuildNodeHierarchy(scene, extraction.gltf, allMeshes);
-
-        if (extraction.gltf.contains("animations")) {
-            spdlog::warn("glTF animations are not enabled yet in custom loader: {}", filePath);
+        for (size_t meshIndex = 0; meshIndex < meshCount; ++meshIndex) {
+            sharedMeshLists[meshIndex].reserve(allMeshes[meshIndex].size());
+            for (const auto& primitive : allMeshes[meshIndex]) {
+                if (primitive.mesh != nullptr) {
+                    sharedMeshLists[meshIndex].push_back(primitive.mesh);
+                }
+            }
         }
-        if (extraction.gltf.contains("skins")) {
-            spdlog::warn("glTF skinning is not enabled yet in custom loader: {}", filePath);
+
+        const auto nodeAnimationKeys = BuildNodeAnimationKeys(extraction.gltf);
+        const auto hierarchy = BuildNodeHierarchy(scene, extraction.gltf, allMeshes);
+        const auto animations = ParseAnimations(extraction.gltf, materialCache.bufferSources, nodeAnimationKeys);
+        const auto skeletons = BuildSkins(extraction.gltf, materialCache.bufferSources, hierarchy.entities, nodeAnimationKeys, animations);
+
+        std::unordered_map<MeshBindingKey, std::vector<std::shared_ptr<Mesh>>, MeshBindingKeyHasher> skinnedMeshCache;
+        auto getMeshesForBinding = [&](size_t meshIndex, int skinIndex) -> const std::vector<std::shared_ptr<Mesh>>& {
+            if (meshIndex >= sharedMeshLists.size()) {
+                throw std::runtime_error("glTF mesh binding index out of range");
+            }
+
+            if (skinIndex < 0) {
+                return sharedMeshLists[meshIndex];
+            }
+
+            MeshBindingKey bindingKey{ meshIndex, skinIndex };
+            auto existing = skinnedMeshCache.find(bindingKey);
+            if (existing != skinnedMeshCache.end()) {
+                return existing->second;
+            }
+
+            if (static_cast<size_t>(skinIndex) >= skeletons.size() || skeletons[skinIndex] == nullptr) {
+                spdlog::warn("glTF node references missing skin {}; using static mesh binding instead", skinIndex);
+                return skinnedMeshCache.emplace(bindingKey, sharedMeshLists[meshIndex]).first->second;
+            }
+
+            std::vector<std::shared_ptr<Mesh>> boundMeshes;
+            boundMeshes.reserve(preparedPrimitives[meshIndex].size());
+            for (size_t primitiveIndex = 0; primitiveIndex < preparedPrimitives[meshIndex].size(); ++primitiveIndex) {
+                const auto& preparedPrimitive = preparedPrimitives[meshIndex][primitiveIndex];
+                if (!preparedPrimitive.has_value()) {
+                    continue;
+                }
+
+                MeshPreprocessResult buildResult = preparedPrimitive->result;
+                auto mesh = buildResult.ingest.Build(
+                    preparedPrimitive->material,
+                    std::move(buildResult.prebuiltData),
+                    MeshCpuDataPolicy::ReleaseAfterUpload);
+
+                if ((mesh->GetPerMeshCBData().vertexFlags & VertexFlags::VERTEX_SKINNED) != 0u) {
+                    mesh->SetBaseSkin(skeletons[skinIndex]);
+                }
+                else {
+                    spdlog::warn(
+                        "glTF node binds skin {} to mesh {} primitive {} without JOINTS_0/WEIGHTS_0 data; leaving that primitive static",
+                        skinIndex,
+                        meshIndex,
+                        primitiveIndex);
+                }
+
+                boundMeshes.push_back(mesh);
+            }
+
+            return skinnedMeshCache.emplace(bindingKey, std::move(boundMeshes)).first->second;
+        };
+
+        bool importedSkins = false;
+        if (extraction.gltf.contains("nodes") && extraction.gltf["nodes"].is_array()) {
+            const auto& nodes = extraction.gltf["nodes"];
+            for (size_t nodeIndex = 0; nodeIndex < nodes.size(); ++nodeIndex) {
+                const auto& node = nodes[nodeIndex];
+                if (!node.contains("skin") || !node.contains("mesh")) {
+                    continue;
+                }
+
+                if (nodeIndex >= hierarchy.entities.size() || !hierarchy.entities[nodeIndex].is_alive()) {
+                    continue;
+                }
+
+                const size_t skinIndex = node["skin"].get<size_t>();
+                if (skinIndex >= skeletons.size()) {
+                    throw std::runtime_error("glTF node skin index out of range");
+                }
+
+                const int32_t meshIndex = hierarchy.meshIndices[nodeIndex];
+                if (meshIndex < 0) {
+                    continue;
+                }
+
+                SetEntityMeshes(hierarchy.entities[nodeIndex], getMeshesForBinding(static_cast<size_t>(meshIndex), static_cast<int>(skinIndex)));
+                importedSkins = true;
+            }
+        }
+
+        if (importedSkins) {
+            scene->ProcessEntitySkins(true);
         }
 
         return scene;

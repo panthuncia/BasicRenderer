@@ -36,8 +36,13 @@ void AnimationController::unpause() {
 Components::Transform& AnimationController::GetUpdatedTransform(float elapsedTime, bool force) {
     if (!force && (!isPlaying || !animationClip)) return m_transform;
 
-    currentTime += elapsedTime * m_animationSpeed;
-    currentTime = fmod(currentTime, animationClip->duration);
+    if (animationClip->duration > 0.0f) {
+        currentTime += elapsedTime * m_animationSpeed;
+        currentTime = fmod(currentTime, animationClip->duration);
+    }
+    else {
+        currentTime = 0.0f;
+    }
 
     UpdateTransform();
     return m_transform;
@@ -105,7 +110,10 @@ void AnimationController::UpdateTransform() {
         auto boundingPositionFrames = findBoundingKeyframes(currentTime, animationClip->positionKeyframes, m_lastPositionKeyframeIndex);
 		Keyframe* prevKeyframe = &animationClip->positionKeyframes[boundingPositionFrames.first];
 		Keyframe* nextKeyframe = &animationClip->positionKeyframes[boundingPositionFrames.second];
-        if (prevKeyframe->time != nextKeyframe->time) {
+        if (animationClip->positionInterpolation == AnimationInterpolationMode::Step) {
+            m_transform.pos = prevKeyframe->value;
+        }
+        else if (prevKeyframe->time != nextKeyframe->time) {
             float timeElapsed = currentTime - prevKeyframe->time;
             float diff = nextKeyframe->time - prevKeyframe->time;
             float t = diff > 0 ? timeElapsed / diff : 0;
@@ -123,7 +131,10 @@ void AnimationController::UpdateTransform() {
         auto boundingRotationFrames = findBoundingKeyframes(currentTime, animationClip->rotationKeyframes, m_lastRotationKeyframeIndex);
 		Keyframe* prevKeyframe = &animationClip->rotationKeyframes[boundingRotationFrames.first];
 		Keyframe* nextKeyframe = &animationClip->rotationKeyframes[boundingRotationFrames.second];
-        if (prevKeyframe->time != nextKeyframe->time) {
+        if (animationClip->rotationInterpolation == AnimationInterpolationMode::Step) {
+            m_transform.rot = prevKeyframe->value;
+        }
+        else if (prevKeyframe->time != nextKeyframe->time) {
             float timeElapsed = currentTime - prevKeyframe->time;
             float diff = nextKeyframe->time - prevKeyframe->time;
             float t = diff > 0 ? timeElapsed / diff : 0;
@@ -141,7 +152,10 @@ void AnimationController::UpdateTransform() {
         auto boundingScaleFrames = findBoundingKeyframes(currentTime, animationClip->scaleKeyframes, m_lastScaleKeyframeIndex);
 		Keyframe* prevKeyframe = &animationClip->scaleKeyframes[boundingScaleFrames.first];
 		Keyframe* nextKeyframe = &animationClip->scaleKeyframes[boundingScaleFrames.second];
-        if (prevKeyframe->time != nextKeyframe->time) {
+        if (animationClip->scaleInterpolation == AnimationInterpolationMode::Step) {
+            m_transform.scale = prevKeyframe->value;
+        }
+        else if (prevKeyframe->time != nextKeyframe->time) {
             float timeElapsed = currentTime - prevKeyframe->time;
             float diff = nextKeyframe->time - prevKeyframe->time;
             float t = diff > 0 ? timeElapsed / diff : 0;

@@ -328,9 +328,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     auto baseScene = std::make_shared<Scene>();
 
-    //auto dragonScene = LoadModel("models/dragon.glb");
-    //dragonScene->GetRoot().set<Components::Scale>({ 1, 1, 1 });
-    //dragonScene->GetRoot().set<Components::Position>({ 0.0, 1, 1.0 });
+    auto dragonScene = LoadModel("models/dragon.glb");
+    dragonScene->GetRoot().set<Components::Scale>({ 100, 100, 100 });
+    dragonScene->GetRoot().set<Components::Position>({ 0.0, 1, 1.0 });
 
     //auto carScene = LoadModel("models/porche.glb");
     //carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
@@ -354,7 +354,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto wine = LoadModel("models/bistroInterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
-    //auto robot = LoadModel("models/robot.usdz");
+    auto robot = LoadModel("models/robot.usdz");
 
 	//auto zorah = LoadModel("models/zorahv2/zorah_main_public.v2.gltf");
 
@@ -379,7 +379,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //mountainScene->GetRoot().set<Components::Position>({ 0.0, -10.0, 0.0 });
 	//renderer.GetCurrentScene()->AppendScene(mountainScene->Clone());
 
+	renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
+    
 	renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
+
+	renderer.GetCurrentScene()->AppendScene(robot->Clone());
 
     //renderer.GetCurrentScene()->AppendScene(bistro->Clone());
 

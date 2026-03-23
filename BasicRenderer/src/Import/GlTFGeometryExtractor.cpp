@@ -61,6 +61,7 @@ struct AccessorInfo {
 	size_t count = 0;
 	int componentType = 0;
 	std::string type;
+	bool normalized = false;
 };
 
 enum class BufferBacking {
@@ -292,6 +293,7 @@ AccessorInfo GetAccessorInfo(const json& gltf, size_t accessorIndex) {
 	info.count = accessor.at("count").get<size_t>();
 	info.componentType = accessor.at("componentType").get<int>();
 	info.type = accessor.at("type").get<std::string>();
+	info.normalized = accessor.value<bool>("normalized", false);
 	return info;
 }
 
@@ -321,12 +323,36 @@ T ReadTyped(const std::vector<uint8_t>& buffer, size_t byteOffset) {
 	return value;
 }
 
-double ReadComponentAsDouble(const std::vector<uint8_t>& source, int componentType, size_t byteOffset) {
+double ReadComponentAsDouble(const std::vector<uint8_t>& source, int componentType, size_t byteOffset, bool normalized = false) {
 	switch (componentType) {
-	case 5120: return static_cast<double>(ReadTyped<int8_t>(source, byteOffset));
-	case 5121: return static_cast<double>(ReadTyped<uint8_t>(source, byteOffset));
-	case 5122: return static_cast<double>(ReadTyped<int16_t>(source, byteOffset));
-	case 5123: return static_cast<double>(ReadTyped<uint16_t>(source, byteOffset));
+	case 5120: {
+		const int8_t value = ReadTyped<int8_t>(source, byteOffset);
+		if (!normalized) {
+			return static_cast<double>(value);
+		}
+		return std::max(static_cast<double>(value) / 127.0, -1.0);
+	}
+	case 5121: {
+		const uint8_t value = ReadTyped<uint8_t>(source, byteOffset);
+		if (!normalized) {
+			return static_cast<double>(value);
+		}
+		return static_cast<double>(value) / 255.0;
+	}
+	case 5122: {
+		const int16_t value = ReadTyped<int16_t>(source, byteOffset);
+		if (!normalized) {
+			return static_cast<double>(value);
+		}
+		return std::max(static_cast<double>(value) / 32767.0, -1.0);
+	}
+	case 5123: {
+		const uint16_t value = ReadTyped<uint16_t>(source, byteOffset);
+		if (!normalized) {
+			return static_cast<double>(value);
+		}
+		return static_cast<double>(value) / 65535.0;
+	}
 	case 5125: return static_cast<double>(ReadTyped<uint32_t>(source, byteOffset));
 	case 5126: return static_cast<double>(ReadTyped<float>(source, byteOffset));
 	default:
@@ -759,6 +785,7 @@ std::vector<XMFLOAT3> ComputeSmoothNormals(
 	const std::vector<uint32_t>& indices)
 {
 	// Read all positions
+	const AccessorInfo positionAccessor = GetAccessorInfo(doc.gltf, positionAccessorIndex);
 	std::vector<XMFLOAT3> positions(vertexCount);
 	constexpr size_t kChunkSize = 32768;
 	for (size_t first = 0; first < vertexCount; first += kChunkSize) {
@@ -770,9 +797,9 @@ std::vector<XMFLOAT3> ComputeSmoothNormals(
 		for (size_t i = 0; i < count; ++i) {
 			const size_t base = i * stride;
 			positions[first + i] = XMFLOAT3(
-				static_cast<float>(ReadComponentAsDouble(bytes, componentType, base + componentBytes * 0)),
-				static_cast<float>(ReadComponentAsDouble(bytes, componentType, base + componentBytes * 1)),
-				static_cast<float>(ReadComponentAsDouble(bytes, componentType, base + componentBytes * 2)));
+				static_cast<float>(ReadComponentAsDouble(bytes, componentType, base + componentBytes * 0, positionAccessor.normalized)),
+				static_cast<float>(ReadComponentAsDouble(bytes, componentType, base + componentBytes * 1, positionAccessor.normalized)),
+				static_cast<float>(ReadComponentAsDouble(bytes, componentType, base + componentBytes * 2, positionAccessor.normalized)));
 		}
 	}
 
@@ -873,6 +900,38 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 		hasTexcoords = true;
 	}
 
+	const bool hasJointIndices = attributes.contains("JOINTS_0");
+	const bool hasJointWeights = attributes.contains("WEIGHTS_0");
+	if (hasJointIndices != hasJointWeights) {
+		throw std::runtime_error("glTF primitive skinning requires both JOINTS_0 and WEIGHTS_0");
+	}
+
+	bool hasSkinning = false;
+	size_t jointAccessorIndex = 0;
+	size_t weightAccessorIndex = 0;
+	AccessorInfo jointAccessor;
+	AccessorInfo weightAccessor;
+	if (hasJointIndices && hasJointWeights) {
+		jointAccessorIndex = attributes["JOINTS_0"].get<size_t>();
+		weightAccessorIndex = attributes["WEIGHTS_0"].get<size_t>();
+		jointAccessor = GetAccessorInfo(doc.gltf, jointAccessorIndex);
+		weightAccessor = GetAccessorInfo(doc.gltf, weightAccessorIndex);
+		if (jointAccessor.count != vertexCount || weightAccessor.count != vertexCount) {
+			throw std::runtime_error("glTF skinning accessor count mismatch");
+		}
+		if (NumComponentsForType(jointAccessor.type) != 4 || NumComponentsForType(weightAccessor.type) != 4) {
+			throw std::runtime_error("glTF JOINTS_0 and WEIGHTS_0 accessors must be VEC4");
+		}
+		if (jointAccessor.componentType != 5121 && jointAccessor.componentType != 5123) {
+			throw std::runtime_error("glTF JOINTS_0 must use UNSIGNED_BYTE or UNSIGNED_SHORT");
+		}
+		hasSkinning = true;
+	}
+
+	if (attributes.contains("JOINTS_1") || attributes.contains("WEIGHTS_1")) {
+		spdlog::warn("glTF mesh {} primitive {} uses JOINTS_1/WEIGHTS_1; extra influences beyond 4 are ignored", meshIndex, primitiveIndex);
+	}
+
     std::map<uint32_t, size_t> texcoordAccessorIndices;
     uint32_t maxTexcoordSetIndex = 0;
     bool hasAnyTexcoordSet = false;
@@ -892,8 +951,14 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 	if (hasTexcoords) {
 		meshFlags |= VertexFlags::VERTEX_TEXCOORDS;
 	}
+	if (hasSkinning) {
+		meshFlags |= VertexFlags::VERTEX_SKINNED;
+	}
 
 	const uint8_t vertexSize = static_cast<uint8_t>(sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0));
+	const unsigned int skinningVertexSize = hasSkinning
+		? static_cast<unsigned int>(sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + sizeof(XMUINT4) + sizeof(XMFLOAT4))
+		: 0u;
 
 	CLodCacheLoader::MeshCacheIdentity cacheIdentity{};
 	cacheIdentity.sourceIdentifier = NormalizeCacheSourcePath(sourceFilePath);
@@ -902,7 +967,7 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 
 	auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
 
-	MeshIngestBuilder ingest(vertexSize, 0, meshFlags);
+	MeshIngestBuilder ingest(vertexSize, skinningVertexSize, meshFlags);
     std::vector<MeshUvSetData> uvSets;
     if (hasAnyTexcoordSet) {
         uvSets.resize(static_cast<size_t>(maxTexcoordSetIndex) + 1u);
@@ -929,8 +994,8 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
                 for (size_t i = 0; i < chunkVertexCount; ++i) {
                     const size_t uvBase = i * stride;
                     uvSets[setIndex].values[firstVertex + i] = XMFLOAT2(
-                        static_cast<float>(ReadComponentAsDouble(uvBytes, componentType, uvBase + componentBytes * 0)),
-                        static_cast<float>(ReadComponentAsDouble(uvBytes, componentType, uvBase + componentBytes * 1)));
+                        static_cast<float>(ReadComponentAsDouble(uvBytes, componentType, uvBase + componentBytes * 0, accessor.normalized)),
+                        static_cast<float>(ReadComponentAsDouble(uvBytes, componentType, uvBase + componentBytes * 1, accessor.normalized)));
                 }
             }
         }
@@ -954,6 +1019,7 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 	ingest.ReserveVertices(vertexCount);
 
 	constexpr size_t kVertexChunkSize = 32768;
+	bool warnedZeroWeightVertex = false;
 	for (size_t firstVertex = 0; firstVertex < vertexCount; firstVertex += kVertexChunkSize) {
 		const size_t chunkVertexCount = std::min(kVertexChunkSize, vertexCount - firstVertex);
 
@@ -983,20 +1049,40 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 			texcoordComponentBytes = BytesPerComponent(texcoordComponentType);
 		}
 
+		size_t jointStride = 0;
+		size_t jointComponents = 0;
+		int jointComponentType = 0;
+		std::vector<uint8_t> jointBytes;
+		size_t jointComponentBytes = 0;
+		if (hasSkinning) {
+			jointBytes = ReadAccessorRawWindow(doc, jointAccessorIndex, firstVertex, chunkVertexCount, &jointStride, &jointComponents, &jointComponentType);
+			jointComponentBytes = BytesPerComponent(jointComponentType);
+		}
+
+		size_t weightStride = 0;
+		size_t weightComponents = 0;
+		int weightComponentType = 0;
+		std::vector<uint8_t> weightBytes;
+		size_t weightComponentBytes = 0;
+		if (hasSkinning) {
+			weightBytes = ReadAccessorRawWindow(doc, weightAccessorIndex, firstVertex, chunkVertexCount, &weightStride, &weightComponents, &weightComponentType);
+			weightComponentBytes = BytesPerComponent(weightComponentType);
+		}
+
 		for (size_t i = 0; i < chunkVertexCount; ++i) {
 			const size_t positionBase = i * positionStride;
 			const XMFLOAT3 pos(
-				static_cast<float>(ReadComponentAsDouble(positionBytes, positionComponentType, positionBase + positionComponentBytes * 0)),
-				static_cast<float>(ReadComponentAsDouble(positionBytes, positionComponentType, positionBase + positionComponentBytes * 1)),
-				static_cast<float>(ReadComponentAsDouble(positionBytes, positionComponentType, positionBase + positionComponentBytes * 2)));
+				static_cast<float>(ReadComponentAsDouble(positionBytes, positionComponentType, positionBase + positionComponentBytes * 0, positionAccessor.normalized)),
+				static_cast<float>(ReadComponentAsDouble(positionBytes, positionComponentType, positionBase + positionComponentBytes * 1, positionAccessor.normalized)),
+				static_cast<float>(ReadComponentAsDouble(positionBytes, positionComponentType, positionBase + positionComponentBytes * 2, positionAccessor.normalized)));
 
 			XMFLOAT3 normal;
 			if (hasNormals) {
 				const size_t normalBase = i * normalStride;
 				normal = XMFLOAT3(
-					static_cast<float>(ReadComponentAsDouble(normalBytes, normalComponentType, normalBase + normalComponentBytes * 0)),
-					static_cast<float>(ReadComponentAsDouble(normalBytes, normalComponentType, normalBase + normalComponentBytes * 1)),
-					static_cast<float>(ReadComponentAsDouble(normalBytes, normalComponentType, normalBase + normalComponentBytes * 2))
+					static_cast<float>(ReadComponentAsDouble(normalBytes, normalComponentType, normalBase + normalComponentBytes * 0, normalAccessor.normalized)),
+					static_cast<float>(ReadComponentAsDouble(normalBytes, normalComponentType, normalBase + normalComponentBytes * 1, normalAccessor.normalized)),
+					static_cast<float>(ReadComponentAsDouble(normalBytes, normalComponentType, normalBase + normalComponentBytes * 2, normalAccessor.normalized))
 				);
 			}
 			else {
@@ -1012,13 +1098,60 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 			if (hasTexcoords) {
 				const size_t texcoordBase = i * texcoordStride;
 				const XMFLOAT2 uv(
-					static_cast<float>(ReadComponentAsDouble(texcoordBytes, texcoordComponentType, texcoordBase + texcoordComponentBytes * 0)),
-					static_cast<float>(ReadComponentAsDouble(texcoordBytes, texcoordComponentType, texcoordBase + texcoordComponentBytes * 1))
+					static_cast<float>(ReadComponentAsDouble(texcoordBytes, texcoordComponentType, texcoordBase + texcoordComponentBytes * 0, texcoordAccessor.normalized)),
+					static_cast<float>(ReadComponentAsDouble(texcoordBytes, texcoordComponentType, texcoordBase + texcoordComponentBytes * 1, texcoordAccessor.normalized))
 				);
 				std::memcpy(packedVertex.data() + offset, &uv, sizeof(XMFLOAT2));
 			}
 
 			ingest.AppendVertexBytes(packedVertex.data(), vertexSize);
+
+			if (hasSkinning) {
+				const size_t jointBase = i * jointStride;
+				const size_t weightBase = i * weightStride;
+
+				XMUINT4 joints{};
+				XMFLOAT4 weights{};
+				float weightSum = 0.0f;
+				for (size_t componentIndex = 0; componentIndex < 4; ++componentIndex) {
+					reinterpret_cast<uint32_t*>(&joints)[componentIndex] = static_cast<uint32_t>(ReadComponentAsDouble(
+						jointBytes,
+						jointComponentType,
+						jointBase + jointComponentBytes * componentIndex,
+						jointAccessor.normalized));
+					reinterpret_cast<float*>(&weights)[componentIndex] = static_cast<float>(ReadComponentAsDouble(
+						weightBytes,
+						weightComponentType,
+						weightBase + weightComponentBytes * componentIndex,
+						weightAccessor.normalized));
+					weightSum += reinterpret_cast<float*>(&weights)[componentIndex];
+				}
+
+				if (weightSum > 0.0f) {
+					const float invWeightSum = 1.0f / weightSum;
+					weights.x *= invWeightSum;
+					weights.y *= invWeightSum;
+					weights.z *= invWeightSum;
+					weights.w *= invWeightSum;
+				}
+				else {
+					if (!warnedZeroWeightVertex) {
+						spdlog::warn("glTF mesh {} primitive {} has vertices with zero total skin weight; defaulting the first weight to 1", meshIndex, primitiveIndex);
+						warnedZeroWeightVertex = true;
+					}
+					weights = XMFLOAT4(1.0f, 0.0f, 0.0f, 0.0f);
+				}
+
+				std::array<std::byte, sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + sizeof(XMUINT4) + sizeof(XMFLOAT4)> packedSkinningVertex{};
+				std::memcpy(packedSkinningVertex.data(), &pos, sizeof(XMFLOAT3));
+				size_t skinningOffset = sizeof(XMFLOAT3);
+				std::memcpy(packedSkinningVertex.data() + skinningOffset, &normal, sizeof(XMFLOAT3));
+				skinningOffset += sizeof(XMFLOAT3);
+				std::memcpy(packedSkinningVertex.data() + skinningOffset, &joints, sizeof(XMUINT4));
+				skinningOffset += sizeof(XMUINT4);
+				std::memcpy(packedSkinningVertex.data() + skinningOffset, &weights, sizeof(XMFLOAT4));
+				ingest.AppendSkinningVertexBytes(packedSkinningVertex.data(), skinningVertexSize);
+			}
 		}
 	}
 

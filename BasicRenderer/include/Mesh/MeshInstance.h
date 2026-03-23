@@ -1,8 +1,11 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include "Mesh/Mesh.h"
 #include "Animation/Skeleton.h"
+
+class SkeletonManager;
 
 class MeshInstance {
 public:
@@ -13,6 +16,8 @@ public:
     static std::unique_ptr<MeshInstance> CreateUnique(std::shared_ptr<Mesh> mesh) {
         return std::unique_ptr<MeshInstance>(new MeshInstance(mesh));
     }
+
+    ~MeshInstance();
 
 	BufferView* GetPerMeshInstanceBufferView() { return m_perMeshInstanceBufferView.get(); }
 
@@ -40,6 +45,8 @@ public:
         m_pCurrentMeshManager = manager;
     }
 
+    void SetCurrentSkeletonManager(SkeletonManager* manager);
+
 	const PerMeshInstanceCB& GetPerMeshInstanceBufferData() const {
 		return m_perMeshInstanceBufferData;
 	}
@@ -66,6 +73,8 @@ public:
     }
 
 private:
+    void ReleaseSkinningInstance_();
+
     MeshInstance(std::shared_ptr<Mesh> mesh)
         : m_mesh(mesh) {
         if (mesh->HasBaseSkin()) {
@@ -76,6 +85,8 @@ private:
     std::shared_ptr<Mesh> m_mesh;
     std::shared_ptr<Skeleton> m_skeleton; // Instance-specific skeleton
     MeshManager* m_pCurrentMeshManager = nullptr;
+    SkeletonManager* m_pCurrentSkeletonManager = nullptr;
+    std::weak_ptr<std::atomic_bool> m_skeletonManagerLifetime;
     std::unique_ptr<BufferView> m_perMeshInstanceBufferView;
 
     std::unique_ptr<BufferView> m_perMeshInstanceClodOffsetsView = nullptr;

@@ -52,6 +52,7 @@ public:
     // If called on a BASE skeleton, it logs a warning and does nothing.
     void SetAnimation(size_t index);
     void SetAnimationSpeed(float speed);
+    size_t GetAnimationCount() const noexcept;
     float GetCurrentAnimationConservativeBoundsScale() const noexcept;
 
     // Tick/evaluate pose into the instance-owned pose buffer.
@@ -98,7 +99,7 @@ public:
     std::vector<float> m_animationConservativeBoundsScales;
 
 private:
-    // --- Per-instance (INSTANCE) data ---
+    // Per-instance data
     std::shared_ptr<Skeleton> m_baseSkeleton;          // null for base skeleton
     std::vector<AnimationController> m_controllers;    // one per bone
     std::vector<Matrix> m_boneMatrices;                // final global pose
