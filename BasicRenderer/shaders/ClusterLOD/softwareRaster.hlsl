@@ -92,6 +92,36 @@ uint3 SWDecodeTriangle(ByteAddressBuffer slab, uint triStreamBase, uint triByteO
 
 groupshared float2  gs_screenPos[SW_RASTER_MAX_VERTS];
 groupshared float   gs_linearDepth[SW_RASTER_MAX_VERTS];
+groupshared float2  gs_texcoord[SW_RASTER_MAX_VERTS];
+
+float2 SWDecodeCompressedUV(
+    uint meshletLocalVertex,
+    uint pageAttributeMask,
+    uint uvBitstreamBase,
+    uint uvBitOffset,
+    float2 uvMin,
+    float2 uvScale,
+    uint uvBitsU,
+    uint uvBitsV,
+    uint pagePoolSlabDescriptorIndex)
+{
+    if ((pageAttributeMask & CLOD_PAGE_ATTRIBUTE_UV0) == 0u)
+    {
+        return float2(0.0f, 0.0f);
+    }
+
+    uint bitsPerVertex = uvBitsU + uvBitsV;
+    uint bitCursor = uvBitstreamBase * 8u + uvBitOffset + meshletLocalVertex * bitsPerVertex;
+
+    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
+    uint encodedU = ReadPackedBits32(slab, bitCursor, uvBitsU);
+    bitCursor += uvBitsU;
+    uint encodedV = ReadPackedBits32(slab, bitCursor, uvBitsV);
+
+    return float2(
+        uvMin.x + float(encodedU) * uvScale.x,
+        uvMin.y + float(encodedV) * uvScale.y);
+}
 
 void SWRasterCluster(
     uint3 packedCluster,
@@ -114,6 +144,8 @@ void SWRasterCluster(
 
     const uint vertCount = CLodDescVertexCount(desc);
     const uint triCount  = CLodDescTriangleCount(desc);
+    const uint uvBitsU = CLodDescUvBitsU(desc);
+    const uint uvBitsV = CLodDescUvBitsV(desc);
 
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
     StructuredBuffer<PerMeshInstanceBuffer> meshInstBuf =
@@ -136,6 +168,7 @@ void SWRasterCluster(
     const float scissorMinYf = float(rasterInfo.scissorMinY);
 
     const uint positionBitstreamBase = pageSlabByteOffset + hdr.positionBitstreamOffset;
+    const uint uvBitstreamBase = pageSlabByteOffset + hdr.uvBitstreamOffset;
     row_major matrix modelViewProjection = mul(objData.model, cam.viewProjection);
     float4 modelViewZ = mul(objData.model, cam.viewZ);
 
@@ -163,6 +196,16 @@ void SWRasterCluster(
 
         gs_screenPos[v] = screen;
         gs_linearDepth[v] = -viewZ;
+        gs_texcoord[v] = SWDecodeCompressedUV(
+            v,
+            hdr.attributeMask,
+            uvBitstreamBase,
+            desc.uvBitOffset,
+            float2(desc.uvMinU, desc.uvMinV),
+            float2(desc.uvScaleU, desc.uvScaleV),
+            uvBitsU,
+            uvBitsV,
+            pageSlabDescriptorIndex);
     }
 
     GroupMemoryBarrierWithGroupSync();

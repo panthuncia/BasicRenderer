@@ -78,8 +78,12 @@ public:
     static std::shared_ptr<Material> CreateShared(const MaterialDescription& desc) {
         uint32_t materialFlags = 0;
         uint32_t psoFlags = 0;
+        const auto transparency = PickTransparency(desc);
         materialFlags |= MaterialFlags::MATERIAL_PBR; // TODO: Non-PBR materials
         BlendState blendState = BlendState::BLEND_STATE_OPAQUE; // Default blend state
+        if (transparency.masked) {
+            materialFlags |= MaterialFlags::MATERIAL_ALPHA_TEST;
+        }
         if (desc.baseColor.texture) {
             if (!desc.baseColor.texture->Meta().alphaIsAllOpaque) {
                 materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;

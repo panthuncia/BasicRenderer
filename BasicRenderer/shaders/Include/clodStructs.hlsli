@@ -25,17 +25,22 @@ struct PageTableEntry
     uint slabByteOffset; // Byte offset of the page start within that slab.
 };
 
+static const uint CLOD_PAGE_ATTRIBUTE_NORMAL = 1u << 0;
+static const uint CLOD_PAGE_ATTRIBUTE_UV0    = 1u << 1;
+
 // Embedded at byte 0 of each page-tile. Simplified header.
 // 16 x uint32 = 64 bytes.
 struct CLodPageHeader
 {
     uint meshletCount;                // [0]
     uint compressedPositionQuantExp;  // [1] mesh-wide quantization exponent
-    uint descriptorOffset;            // [2] byte offset to CLodMeshletDescriptor array
-    uint positionBitstreamOffset;     // [3] byte offset to position bitstream
+    uint attributeMask;               // [2] page-wide optional attribute mask
+    uint descriptorOffset;            // [3] byte offset to CLodMeshletDescriptor array
 
-    uint normalArrayOffset;           // [4] byte offset to normal array
-    uint triangleStreamOffset;        // [5] byte offset to triangle byte stream
+    uint positionBitstreamOffset;     // [4] byte offset to position bitstream
+    uint normalArrayOffset;           // [5] byte offset to normal array
+    uint uvBitstreamOffset;           // [6] byte offset to UV bitstream
+    uint triangleStreamOffset;        // [7] byte offset to triangle byte stream
     uint reserved0;
     uint reserved1;
     uint reserved2;
@@ -44,26 +49,33 @@ struct CLodPageHeader
     uint reserved5;
     uint reserved6;
     uint reserved7;
-    uint reserved8;
-    uint reserved9;
 };
 
 // Per-meshlet descriptor. Self-contained: compression params, bounds, LOD metadata.
-// 12 x uint32 = 48 bytes = 3 x Load4.
+// 20 x uint32 = 80 bytes = 5 x Load4.
 struct CLodMeshletDescriptor
 {
     uint positionBitOffset;           // [0] bit offset into page position bitstream
     uint normalWordOffset;            // [1] word offset into page normal array
-    uint triangleByteOffset;          // [2] byte offset into page triangle stream
+    uint uvBitOffset;                 // [2] bit offset into page UV bitstream
+    uint triangleByteOffset;          // [3] byte offset into page triangle stream
 
-    int  minQx;                       // [3] per-meshlet quantization offset X
-    int  minQy;                       // [4] per-meshlet quantization offset Y
-    int  minQz;                       // [5] per-meshlet quantization offset Z
+    int  minQx;                       // [4] per-meshlet quantization offset X
+    int  minQy;                       // [5] per-meshlet quantization offset Y
+    int  minQz;                       // [6] per-meshlet quantization offset Z
 
-    uint bitsAndVertexCount;          // [6] bitsX:8 | bitsY:8 | bitsZ:8 | vertexCount:8
-    uint triangleCountAndRefinedGroup; // [7] triangleCount:16 | (refinedGroupId+1):16
+    uint bitsAndVertexCount;          // [7] bitsX:8 | bitsY:8 | bitsZ:8 | vertexCount:8
+    uint triangleCountAndRefinedGroup; // [8] triangleCount:16 | (refinedGroupId+1):16
 
-    float4 bounds;                    // [8-11] bounding sphere {cx, cy, cz, radius}
+    float uvMinU;                     // [9]
+    float uvMinV;                     // [10]
+    float uvScaleU;                   // [11]
+    float uvScaleV;                   // [12]
+    uint uvBits;                      // [13] bitsU:8 | bitsV:8
+    uint reserved0;                   // [14]
+    uint reserved1;                   // [15]
+
+    float4 bounds;                    // [16-19] bounding sphere {cx, cy, cz, radius}
 };
 
 // Helper functions to unpack CLodMeshletDescriptor fields
@@ -73,6 +85,8 @@ uint CLodDescBitsZ(CLodMeshletDescriptor desc) { return (desc.bitsAndVertexCount
 uint CLodDescVertexCount(CLodMeshletDescriptor desc) { return (desc.bitsAndVertexCount >> 24u) & 0xFFu; }
 uint CLodDescTriangleCount(CLodMeshletDescriptor desc) { return desc.triangleCountAndRefinedGroup & 0xFFFFu; }
 int  CLodDescRefinedGroupId(CLodMeshletDescriptor desc) { return (int)(desc.triangleCountAndRefinedGroup >> 16u) - 1; }
+uint CLodDescUvBitsU(CLodMeshletDescriptor desc) { return desc.uvBits & 0xFFu; }
+uint CLodDescUvBitsV(CLodMeshletDescriptor desc) { return (desc.uvBits >> 8u) & 0xFFu; }
 
 // Runtime-filled entry: maps group-local page index to physical slab location.
 struct GroupPageMapEntry

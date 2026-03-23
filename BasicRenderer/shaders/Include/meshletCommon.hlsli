@@ -60,11 +60,18 @@ struct MeshletSetup
     int3 minQ;
     uint positionBitOffset;     // bit offset within page position bitstream
     uint normalWordOffset;      // word offset within page normal array
+    uint uvBitOffset;           // bit offset within page UV bitstream
     uint triangleByteOffset;    // byte offset within page triangle stream
+    float2 uvMin;
+    float2 uvScale;
+    uint uvBitsU;
+    uint uvBitsV;
+    uint pageAttributeMask;
 
     // Page-level stream base byte offsets (absolute in slab)
     uint positionBitstreamBase;
     uint normalArrayBase;
+    uint uvBitstreamBase;
     uint triangleStreamBase;
 
     // Mesh-wide quantization
@@ -110,9 +117,16 @@ bool InitializeMeshletInternal(
     setup.minQ = int3(0, 0, 0);
     setup.positionBitOffset = 0;
     setup.normalWordOffset = 0;
+    setup.uvBitOffset = 0;
     setup.triangleByteOffset = 0;
+    setup.uvMin = float2(0.0f, 0.0f);
+    setup.uvScale = float2(0.0f, 0.0f);
+    setup.uvBitsU = 0;
+    setup.uvBitsV = 0;
+    setup.pageAttributeMask = 0;
     setup.positionBitstreamBase = 0;
     setup.normalArrayBase = 0;
+    setup.uvBitstreamBase = 0;
     setup.triangleStreamBase = 0;
     setup.compressedPositionQuantExp = 0;
 
@@ -193,11 +207,18 @@ bool InitializeMeshletInternalCLod(
     setup.minQ = int3(desc.minQx, desc.minQy, desc.minQz);
     setup.positionBitOffset = desc.positionBitOffset;
     setup.normalWordOffset = desc.normalWordOffset;
+    setup.uvBitOffset = desc.uvBitOffset;
     setup.triangleByteOffset = desc.triangleByteOffset;
+    setup.uvMin = float2(desc.uvMinU, desc.uvMinV);
+    setup.uvScale = float2(desc.uvScaleU, desc.uvScaleV);
+    setup.uvBitsU = CLodDescUvBitsU(desc);
+    setup.uvBitsV = CLodDescUvBitsV(desc);
+    setup.pageAttributeMask = hdr.attributeMask;
 
     // Page-level stream base offsets (absolute in slab)
     setup.positionBitstreamBase = pageSlabOff + hdr.positionBitstreamOffset;
     setup.normalArrayBase = pageSlabOff + hdr.normalArrayOffset;
+    setup.uvBitstreamBase = pageSlabOff + hdr.uvBitstreamOffset;
     setup.triangleStreamBase = pageSlabOff + hdr.triangleStreamOffset;
 
     setup.compressedPositionQuantExp = hdr.compressedPositionQuantExp;

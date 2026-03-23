@@ -124,7 +124,8 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
             Builtin::CameraBuffer,
             Builtin::PerMeshBuffer,
             Builtin::PrimaryCamera::LinearDepthMap,
-            Builtin::Shadows::LinearShadowMaps)
+            Builtin::Shadows::LinearShadowMaps,
+            Builtin::PerMaterialDataBuffer)
         .WithShaderResource(ECSResourceResolver(drawSetIndicesQuery));
 
     if (UsesSWClassification(m_workGraphMode)) {
@@ -178,6 +179,7 @@ void HierarchialCullingPass::Setup() {
 	RegisterSRV(Builtin::CLod::GroupPageMap);
     RegisterSRV(Builtin::CameraBuffer);
     RegisterSRV(Builtin::PerMeshBuffer);
+    RegisterSRV(Builtin::PerMaterialDataBuffer);
 	RegisterUAV(Builtin::DebugVisualization);
 }
 

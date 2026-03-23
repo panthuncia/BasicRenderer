@@ -12,46 +12,61 @@ struct BoundingSphere {
 	DirectX::XMFLOAT4 sphere;
 };
 
+static constexpr uint32_t CLOD_PAGE_ATTRIBUTE_NORMAL = 1u << 0;
+static constexpr uint32_t CLOD_PAGE_ATTRIBUTE_UV0 = 1u << 1;
+
 // Embedded at byte 0 of each page-tile in the page pool.
-// Simplified: compression params moved to per-meshlet descriptors.
+// Compression params moved to per-meshlet descriptors.
 // 16 x uint32 = 64 bytes.
 struct CLodPageHeader
 {
 	uint32_t meshletCount = 0;            // [0] number of meshlets in this page
 	uint32_t compressedPositionQuantExp = 0; // [1] mesh-wide quantization exponent
-	uint32_t descriptorOffset = 0;        // [2] byte offset to CLodMeshletDescriptor array
-	uint32_t positionBitstreamOffset = 0; // [3] byte offset to position bitstream
+	uint32_t attributeMask = 0;           // [2] page-wide optional attribute mask
+	uint32_t descriptorOffset = 0;        // [3] byte offset to CLodMeshletDescriptor array
 
-	uint32_t normalArrayOffset = 0;       // [4] byte offset to normal array (oct-encoded uint32 per vertex)
-	uint32_t triangleStreamOffset = 0;    // [5] byte offset to triangle byte stream
-	uint32_t reserved[10] = {};            // [6-15] pad to 64 bytes
+	uint32_t positionBitstreamOffset = 0; // [4] byte offset to position bitstream
+	uint32_t normalArrayOffset = 0;       // [5] byte offset to normal array (oct-encoded uint32 per vertex)
+	uint32_t uvBitstreamOffset = 0;       // [6] byte offset to UV bitstream
+	uint32_t triangleStreamOffset = 0;    // [7] byte offset to triangle byte stream
+	uint32_t reserved[8] = {};            // [8-15] pad to 64 bytes
 };
 static_assert(sizeof(CLodPageHeader) == 64, "CLodPageHeader must be 64 bytes");
 
-// Per-meshlet descriptor in the new SoA page format.
+// Per-meshlet descriptor in an SoA page format.
 // Self-contained: each meshlet carries its own compression params, bounds, and LOD metadata.
-// 12 x uint32 = 48 bytes = 3 x Load4 on GPU.
+// 20 x uint32 = 80 bytes = 5 x Load4 on GPU.
 struct CLodMeshletDescriptor
 {
 	// Stream offsets within the page
 	uint32_t positionBitOffset = 0;       // [0] bit offset into page position bitstream
 	uint32_t normalWordOffset = 0;        // [1] word offset into page normal array
-	uint32_t triangleByteOffset = 0;      // [2] byte offset into page triangle stream
+	uint32_t uvBitOffset = 0;             // [2] bit offset into page UV bitstream
+	uint32_t triangleByteOffset = 0;      // [3] byte offset into page triangle stream
 
 	// Per-meshlet compression parameters
-	int32_t  minQx = 0;                   // [3] quantization offset X
-	int32_t  minQy = 0;                   // [4] quantization offset Y
-	int32_t  minQz = 0;                   // [5] quantization offset Z
+	int32_t  minQx = 0;                   // [4] quantization offset X
+	int32_t  minQy = 0;                   // [5] quantization offset Y
+	int32_t  minQz = 0;                   // [6] quantization offset Z
 
 	// Packed: bitsX:8 | bitsY:8 | bitsZ:8 | vertexCount:8
-	uint32_t bitsAndVertexCount = 0;      // [6]
+	uint32_t bitsAndVertexCount = 0;      // [7]
 	// Packed: triangleCount:16 | refinedGroupId+1:16 (0 = terminal, >0 = groupId+1)
-	uint32_t triangleCountAndRefinedGroup = 0; // [7]
+	uint32_t triangleCountAndRefinedGroup = 0; // [8]
+
+	// UV decode parameters.
+	float    uvMinU = 0.0f;               // [9]
+	float    uvMinV = 0.0f;               // [10]
+	float    uvScaleU = 0.0f;             // [11]
+	float    uvScaleV = 0.0f;             // [12]
+	uint32_t uvBits = 0;                  // [13] bitsU:8 | bitsV:8
+	uint32_t reserved0 = 0;               // [14]
+	uint32_t reserved1 = 0;               // [15]
 
 	// Bounding sphere (object space)
-	DirectX::XMFLOAT4 bounds = {};        // [8-11] {cx, cy, cz, radius}
+	DirectX::XMFLOAT4 bounds = {};        // [16-19] {cx, cy, cz, radius}
 };
-static_assert(sizeof(CLodMeshletDescriptor) == 48, "CLodMeshletDescriptor must be 48 bytes");
+static_assert(sizeof(CLodMeshletDescriptor) == 80, "CLodMeshletDescriptor must be 80 bytes");
 
 // Runtime-filled entry mapping a group-local page index to its physical slab location.
 struct GroupPageMapEntry

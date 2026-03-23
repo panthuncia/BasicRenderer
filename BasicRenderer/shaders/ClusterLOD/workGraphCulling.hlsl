@@ -4,6 +4,7 @@
 #include "include/indirectCommands.hlsli"
 #include "include/waveIntrinsicsHelpers.hlsli"
 #include "include/occlusionCulling.hlsli"
+#include "include/materialFlags.hlsli"
 #include "PerPassRootConstants/clodWorkGraphRootConstants.h"
 #include "Include/clodStructs.hlsli"
 #include "Include/clodPageAccess.hlsli"
@@ -946,6 +947,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
     uint activeGroupScanCount = 0;
     float ownGroupErrorOverDistance = 0.0f;
     uint objectBufferIndex = 0;
+    bool materialAlphaTested = false;
 
     if (hasBucket && b.pageSlabDescriptorIndex != 0) {
         pageValid = true;
@@ -968,10 +970,10 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         [unroll] for (uint p = 0; p < 6; p++)
             frustumPlanes[p] = cameras[b.viewId].clippingPlanes[p].plane;
 
-        // Load meshletCount (uint[0]) and descriptorOffset (uint[2]) from new 64-byte header
+        // Load meshletCount (uint[0]) and descriptorOffset (uint[3]) from the 64-byte header.
         ByteAddressBuffer slab = ResourceDescriptorHeap[pageSlabDesc];
         pageMeshletCount = slab.Load(pageSlabOff);         // meshletCount at offset 0
-        pageDescriptorOffset = slab.Load(pageSlabOff + 8); // descriptorOffset at offset 8
+        pageDescriptorOffset = slab.Load(pageSlabOff + 12); // descriptorOffset at offset 12
 
         if (!cameras[b.viewId].isOrtho) {
             StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
@@ -985,6 +987,11 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         // Per-meshlet condition 2 + streaming fallback state
         groupUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
         meshBufferIndex = perMeshInstanceBuffer[b.instanceIndex].perMeshBufferIndex;
+        StructuredBuffer<PerMeshBuffer> perMeshBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+        StructuredBuffer<MaterialInfo> materialDataBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
+        materialAlphaTested = (materialDataBuffer[perMeshBuffer[meshBufferIndex].materialDataIndex].materialFlags & MATERIAL_ALPHA_TEST) != 0u;
 
         StructuredBuffer<CullingCameraInfo> cameraInfos =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
@@ -1061,7 +1068,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
             if (localMeshlet < pageMeshletCount) {
                 localMeshletIndex = localMeshlet;
 
-                // Load per-meshlet descriptor (3 x Load4 = 48 bytes)
+                // Load per-meshlet descriptor (5 x Load4 = 80 bytes)
                 CLodMeshletDescriptor desc = LoadMeshletDescriptor(pageSlabDesc, pageSlabOff, pageDescriptorOffset, localMeshlet);
                 const float4 boundsSphere = desc.bounds;
                 const BoundingSphere meshletBounds = { boundsSphere };
@@ -1296,7 +1303,8 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         if (contributes && swRasterEnabled) {
             // Projected diameter in pixels = meshletRadiusWorld * swScreenScale / (-viewZ)
             // Multiply-compare avoids division: diameter < threshold <-> radius*scale < threshold*(-z)
-            isSW = (meshletRadiusWorld * swScreenScale) < (swDiameterThreshold * (-meshletCenterViewSpace.z));
+            isSW = !materialAlphaTested &&
+                (meshletRadiusWorld * swScreenScale) < (swDiameterThreshold * (-meshletCenterViewSpace.z));
         }
 
         const bool isHW = contributes && !isSW;
