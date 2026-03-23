@@ -24,6 +24,7 @@
 #include "Import/AssimpGeometryExtractor.h"
 
 namespace AssimpLoader {
+    constexpr uint32_t kMaterialTextureMaxAnisotropy = 16;
 
     rhi::AddressMode aiTextureMapModeToRHI(aiTextureMapMode mode) {
         switch (mode) {
@@ -197,7 +198,7 @@ namespace AssimpLoader {
 							samplerDesc.addressV = aiTextureMapModeToRHI(mapmode[1]);
 							samplerDesc.addressW = rhi::AddressMode::Wrap; // 3D textures not supported
 							samplerDesc.mipLodBias = 0.0f;
-							samplerDesc.maxAnisotropy = 1;
+							samplerDesc.maxAnisotropy = kMaterialTextureMaxAnisotropy;
 							samplerDesc.compareEnable = false;
 							samplerDesc.compareOp = rhi::CompareOp::Never;
 							samplerDesc.borderPreset = rhi::BorderPreset::OpaqueWhite;

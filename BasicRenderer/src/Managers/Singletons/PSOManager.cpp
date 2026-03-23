@@ -46,6 +46,8 @@ void PSOManager::Cleanup() {
     m_visibilityBufferPSOCache.clear();
     m_visibilityBufferMeshPSOCache.clear();
     m_deferredPSOCache.clear();
+    m_clusterLODRasterPSOCache.clear();
+    m_clusterLODSoftwareRasterPSOCache.clear();
 
     debugPSO.Reset();
     environmentConversionPSO.Reset();
@@ -143,6 +145,14 @@ const PipelineState& PSOManager::GetClusterLODRasterPSO(MaterialRasterFlags mate
         m_clusterLODRasterPSOCache[key] = CreateClusterLODRasterPSO(materialRasterFlags, wireframe);
     }
     return m_clusterLODRasterPSOCache[key];
+}
+
+const PipelineState& PSOManager::GetClusterLODSoftwareRasterPSO(MaterialRasterFlags materialRasterFlags) {
+    const uint32_t key = static_cast<uint32_t>(materialRasterFlags);
+    if (m_clusterLODSoftwareRasterPSOCache.find(key) == m_clusterLODSoftwareRasterPSOCache.end()) {
+        m_clusterLODSoftwareRasterPSOCache[key] = CreateClusterLODSoftwareRasterPSO(materialRasterFlags);
+    }
+    return m_clusterLODSoftwareRasterPSOCache[key];
 }
 
 const PipelineState& PSOManager::GetDeferredPSO(UINT psoFlags) {
@@ -537,6 +547,16 @@ PipelineState PSOManager::CreateClusterLODRasterPSO(
     }
 
     return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+}
+
+PipelineState PSOManager::CreateClusterLODSoftwareRasterPSO(MaterialRasterFlags materialRasterFlags) {
+    auto defines = GetRasterShaderDefines(materialRasterFlags);
+    return MakeComputePipeline(
+        GetComputeRootSignature().GetHandle(),
+        L"Shaders/ClusterLOD/softwareRaster.hlsl",
+        L"SWRasterIndirectCSMain",
+        defines,
+        "CLod_SoftwareRasterIndirectPSO");
 }
 
 PipelineState PSOManager::CreatePPLLPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
@@ -1597,6 +1617,7 @@ void PSOManager::ReloadShaders() {
 	m_shadowMeshPSOCache.clear();
     m_prePassPSOCache.clear();
     m_clusterLODRasterPSOCache.clear();
+    m_clusterLODSoftwareRasterPSOCache.clear();
 }
 
 rhi::BlendState PSOManager::GetBlendDesc(MaterialCompileFlags materialCompileFlags) {

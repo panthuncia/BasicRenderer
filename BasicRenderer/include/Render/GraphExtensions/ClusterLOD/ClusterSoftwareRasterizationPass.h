@@ -32,7 +32,6 @@ public:
     void Cleanup() override;
 
 private:
-    PipelineState m_pso;
     rhi::CommandSignaturePtr m_rasterizationCommandSignature;
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsHistogramBuffer;

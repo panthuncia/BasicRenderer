@@ -28,13 +28,6 @@ ClusterSoftwareRasterizationPass::ClusterSoftwareRasterizationPass(
     , m_viewRasterInfoBuffer(std::move(viewRasterInfoBuffer))
     , m_slabResourceGroup(std::move(slabResourceGroup))
     , m_runWhenComputeSWRasterEnabledOnly(runWhenComputeSWRasterEnabledOnly) {
-    m_pso = PSOManager::GetInstance().MakeComputePipeline(
-        PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
-        L"Shaders/ClusterLOD/softwareRaster.hlsl",
-        L"SWRasterIndirectCSMain",
-        {},
-        "CLod_SoftwareRasterIndirectPSO");
-
     rhi::IndirectArg args[] = {
         {.kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { IndirectCommandSignatureRootSignatureIndex, 0, 3 } } },
         {.kind = rhi::IndirectArgKind::Dispatch }
@@ -51,6 +44,8 @@ ClusterSoftwareRasterizationPass::~ClusterSoftwareRasterizationPass() = default;
 
 void ClusterSoftwareRasterizationPass::DeclareResourceUsages(ComputePassBuilder* builder) {
     builder->WithShaderResource(
+            Builtin::PerMeshBuffer,
+            Builtin::PerMaterialDataBuffer,
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerObjectBuffer,
             Builtin::CullingCameraBuffer,
@@ -71,6 +66,8 @@ void ClusterSoftwareRasterizationPass::DeclareResourceUsages(ComputePassBuilder*
 }
 
 void ClusterSoftwareRasterizationPass::Setup() {
+    RegisterSRV(Builtin::PerMeshBuffer);
+    RegisterSRV(Builtin::PerMaterialDataBuffer);
     RegisterSRV(Builtin::PerMeshInstanceBuffer);
     RegisterSRV(Builtin::PerObjectBuffer);
     RegisterSRV(Builtin::CullingCameraBuffer);
@@ -121,12 +118,15 @@ PassReturn ClusterSoftwareRasterizationPass::Execute(PassExecutionContext& execu
         return {};
     }
 
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-
     auto apiResource = m_rasterBucketsIndirectArgsBuffer->GetAPIResource();
     auto stride = sizeof(RasterizeClustersCommand);
     for (uint32_t i = 0; i < numBuckets; ++i) {
+        auto flags = context.materialManager->GetRasterFlagsForBucket(i);
+        auto& pso = PSOManager::GetInstance().GetClusterLODSoftwareRasterPSO(flags);
+
+        BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
+        commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
+
         const uint64_t argOffset = static_cast<uint64_t>(i) * stride;
         commandList.ExecuteIndirect(
             m_rasterizationCommandSignature->GetHandle(),

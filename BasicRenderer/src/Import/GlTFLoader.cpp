@@ -75,6 +75,7 @@ std::unordered_map<std::string, SharedMaterialCacheEntry> g_sharedMaterialCache;
 constexpr uint32_t kGlbMagic = 0x46546C67;
 constexpr uint32_t kGlbJsonChunkType = 0x4E4F534A;
 constexpr uint32_t kGlbBinChunkType = 0x004E4942;
+constexpr uint32_t kMaterialTextureMaxAnisotropy = 16;
 
 std::string NormalizeSourceKey(const std::filesystem::path& path) {
     std::error_code ec;
@@ -440,8 +441,24 @@ rhi::AddressMode ConvertWrapMode(int wrapMode) {
 }
 
 std::shared_ptr<Sampler> CreateTextureSampler(const json& gltf, const json& textureNode) {
+    rhi::SamplerDesc samplerDesc = {};
+    samplerDesc.addressU = rhi::AddressMode::Wrap;
+    samplerDesc.addressV = rhi::AddressMode::Wrap;
+    samplerDesc.addressW = rhi::AddressMode::Wrap;
+    samplerDesc.mipLodBias = 0.0f;
+    samplerDesc.minLod = 0.0f;
+    samplerDesc.maxLod = (std::numeric_limits<float>::max)();
+    samplerDesc.maxAnisotropy = kMaterialTextureMaxAnisotropy;
+    samplerDesc.compareEnable = false;
+    samplerDesc.compareOp = rhi::CompareOp::Always;
+    samplerDesc.reduction = rhi::ReductionMode::Standard;
+    samplerDesc.borderPreset = rhi::BorderPreset::TransparentBlack;
+    samplerDesc.minFilter = rhi::Filter::Linear;
+    samplerDesc.magFilter = rhi::Filter::Linear;
+    samplerDesc.mipFilter = rhi::MipFilter::Linear;
+
     if (!textureNode.contains("sampler")) {
-        return Sampler::GetDefaultSampler();
+        return Sampler::CreateSampler(samplerDesc);
     }
 
     const auto& samplers = gltf.contains("samplers") ? gltf["samplers"] : json::array();
@@ -451,18 +468,8 @@ std::shared_ptr<Sampler> CreateTextureSampler(const json& gltf, const json& text
     }
 
     const auto& samplerNode = samplers[samplerIndex];
-    rhi::SamplerDesc samplerDesc = {};
     samplerDesc.addressU = ConvertWrapMode(samplerNode.value<int>("wrapS", 10497));
     samplerDesc.addressV = ConvertWrapMode(samplerNode.value<int>("wrapT", 10497));
-    samplerDesc.addressW = rhi::AddressMode::Wrap;
-    samplerDesc.mipLodBias = 0.0f;
-    samplerDesc.minLod = 0.0f;
-    samplerDesc.maxLod = (std::numeric_limits<float>::max)();
-    samplerDesc.maxAnisotropy = 1;
-    samplerDesc.compareEnable = false;
-    samplerDesc.compareOp = rhi::CompareOp::Always;
-    samplerDesc.reduction = rhi::ReductionMode::Standard;
-    samplerDesc.borderPreset = rhi::BorderPreset::TransparentBlack;
 
     const int minFilter = samplerNode.value<int>("minFilter", 9987);
     const int magFilter = samplerNode.value<int>("magFilter", 9729);

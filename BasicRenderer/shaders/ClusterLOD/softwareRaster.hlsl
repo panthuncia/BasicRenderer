@@ -10,6 +10,7 @@
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
 #include "include/vertex.hlsli"
+#include "include/materialFlags.hlsli"
 #include "PerPassRootConstants/clodWorkGraphRootConstants.h"
 #include "PerPassRootConstants/clodRasterizationRootConstants.h"
 #include "Include/clodStructs.hlsli"
@@ -92,7 +93,47 @@ uint3 SWDecodeTriangle(ByteAddressBuffer slab, uint triStreamBase, uint triByteO
 
 groupshared float2  gs_screenPos[SW_RASTER_MAX_VERTS];
 groupshared float   gs_linearDepth[SW_RASTER_MAX_VERTS];
+groupshared float   gs_invClipW[SW_RASTER_MAX_VERTS];
 groupshared float2  gs_texcoord[SW_RASTER_MAX_VERTS];
+
+#if defined(PSO_ALPHA_TEST) || defined(CLOD_SW_RASTER_DYNAMIC_ALPHA_TEST)
+bool SWAlphaTestFailed(float2 texcoords, uint materialDataIndex)
+{
+    StructuredBuffer<MaterialInfo> materialDataBuffer =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
+    MaterialInfo materialInfo = materialDataBuffer[materialDataIndex];
+    uint materialFlags = materialInfo.materialFlags;
+
+#if defined(CLOD_SW_RASTER_DYNAMIC_ALPHA_TEST) && !defined(PSO_ALPHA_TEST)
+    if ((materialFlags & MATERIAL_ALPHA_TEST) == 0u)
+    {
+        return false;
+    }
+#endif
+
+    float alpha = materialInfo.baseColorFactor.a;
+
+    if ((materialFlags & MATERIAL_BASE_COLOR_TEXTURE) != 0u)
+    {
+        Texture2D<float4> baseColorTexture =
+            ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.baseColorTextureIndex)];
+        SamplerState baseColorSamplerState =
+            SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.baseColorSamplerIndex)];
+        alpha *= baseColorTexture.SampleLevel(baseColorSamplerState, texcoords, 0.0f).a;
+    }
+
+    if ((materialFlags & MATERIAL_OPACITY_TEXTURE) != 0u)
+    {
+        Texture2D<float4> opacityTexture =
+            ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.opacityTextureIndex)];
+        SamplerState opacitySamplerState =
+            SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.opacitySamplerIndex)];
+        alpha *= opacityTexture.SampleLevel(opacitySamplerState, texcoords, 0.0f).a;
+    }
+
+    return alpha < materialInfo.alphaCutoff;
+}
+#endif
 
 float2 SWDecodeCompressedUV(
     uint meshletLocalVertex,
@@ -151,6 +192,9 @@ void SWRasterCluster(
     StructuredBuffer<PerMeshInstanceBuffer> meshInstBuf =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     PerMeshInstanceBuffer meshInst = meshInstBuf[instanceID];
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+    const uint materialDataIndex = perMeshBuffer[meshInst.perMeshBufferIndex].materialDataIndex;
 
     StructuredBuffer<PerObjectBuffer> objBuf =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
@@ -196,6 +240,7 @@ void SWRasterCluster(
 
         gs_screenPos[v] = screen;
         gs_linearDepth[v] = -viewZ;
+        gs_invClipW[v] = invW;
         gs_texcoord[v] = SWDecodeCompressedUV(
             v,
             hdr.attributeMask,
@@ -237,6 +282,9 @@ void SWRasterCluster(
         float depth0 = gs_linearDepth[tri.x];
         float depth1 = gs_linearDepth[tri.y];
         float depth2 = gs_linearDepth[tri.z];
+        float invW0 = gs_invClipW[tri.x];
+        float invW1 = gs_invClipW[tri.y];
+        float invW2 = gs_invClipW[tri.z];
 
         if (depth0 <= 0.0f || depth1 <= 0.0f || depth2 <= 0.0f) continue;
 
@@ -306,6 +354,20 @@ void SWRasterCluster(
 
                 if (b0 >= 0.0f && b1 >= 0.0f && b2 >= 0.0f)
                 {
+#if defined(PSO_ALPHA_TEST) || defined(CLOD_SW_RASTER_DYNAMIC_ALPHA_TEST)
+                    const float pc0 = b0 * invW0;
+                    const float pc1 = b1 * invW1;
+                    const float pc2 = b2 * invW2;
+                    const float invSum = rcp(pc0 + pc1 + pc2);
+                    const float2 texcoord =
+                        (gs_texcoord[tri.x] * pc0 + gs_texcoord[tri.y] * pc1 + gs_texcoord[tri.z] * pc2) * invSum;
+                    if (SWAlphaTestFailed(texcoord, materialDataIndex))
+                    {
+                        b0 += dx_b0;
+                        b1 += dx_b1;
+                        continue;
+                    }
+#endif
                     if (swRasterDebugMode)
                     {
                         WriteDebugPixel(debugVisTex, uint2(px, py), PackDebugUint(1u));

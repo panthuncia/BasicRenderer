@@ -947,7 +947,6 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
     uint activeGroupScanCount = 0;
     float ownGroupErrorOverDistance = 0.0f;
     uint objectBufferIndex = 0;
-    bool materialAlphaTested = false;
 
     if (hasBucket && b.pageSlabDescriptorIndex != 0) {
         pageValid = true;
@@ -987,12 +986,6 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         // Per-meshlet condition 2 + streaming fallback state
         groupUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
         meshBufferIndex = perMeshInstanceBuffer[b.instanceIndex].perMeshBufferIndex;
-        StructuredBuffer<PerMeshBuffer> perMeshBuffer =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
-        StructuredBuffer<MaterialInfo> materialDataBuffer =
-            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
-        materialAlphaTested = (materialDataBuffer[perMeshBuffer[meshBufferIndex].materialDataIndex].materialFlags & MATERIAL_ALPHA_TEST) != 0u;
-
         StructuredBuffer<CullingCameraInfo> cameraInfos =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
         cam = cameraInfos[b.viewId];
@@ -1303,8 +1296,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         if (contributes && swRasterEnabled) {
             // Projected diameter in pixels = meshletRadiusWorld * swScreenScale / (-viewZ)
             // Multiply-compare avoids division: diameter < threshold <-> radius*scale < threshold*(-z)
-            isSW = !materialAlphaTested &&
-                (meshletRadiusWorld * swScreenScale) < (swDiameterThreshold * (-meshletCenterViewSpace.z));
+            isSW = (meshletRadiusWorld * swScreenScale) < (swDiameterThreshold * (-meshletCenterViewSpace.z));
         }
 
         const bool isHW = contributes && !isSW;
@@ -1594,5 +1586,7 @@ void WG_ClusterCull64(
 }
 
 #if CLOD_WG_ENABLE_SW_NODE_OUTPUT
+#define CLOD_SW_RASTER_DYNAMIC_ALPHA_TEST 1
 #include "ClusterLOD/softwareRaster.hlsl"
+#undef CLOD_SW_RASTER_DYNAMIC_ALPHA_TEST
 #endif
