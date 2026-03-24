@@ -48,9 +48,13 @@ inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) { // TODO
 			tech.compileFlags |= MaterialCompileFlags::MaterialCompileDoubleSided;
 			tech.rasterFlags |= MaterialRasterFlags::MaterialRasterFlagsAlphaTest;
 			tech.rasterFlags |= MaterialRasterFlags::MaterialRasterFlagsDoubleSided;
-        }
+		}
 		tech.passes.insert(Engine::Primary::GBufferPass);
     }
+	if (d.forceDoubleSided) {
+		tech.compileFlags |= MaterialCompileFlags::MaterialCompileDoubleSided;
+		tech.rasterFlags |= MaterialRasterFlags::MaterialRasterFlagsDoubleSided;
+	}
 	if (d.baseColor.texture) {
 		tech.compileFlags |= MaterialCompileFlags::MaterialCompileBaseColorTexture;
 	}
@@ -112,6 +116,9 @@ public:
             materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
             diffuseColor.w = desc.opacity.factor.Get(); // Use opacity factor as alpha
             blendState = BlendState::BLEND_STATE_BLEND; // Use blend state for opacity
+        }
+        if (desc.forceDoubleSided) {
+            materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
         }
         if (desc.negateNormals) {
             materialFlags |= MaterialFlags::MATERIAL_NEGATE_NORMALS;

@@ -15,13 +15,16 @@ struct MeshPreprocessResult {
 	MeshIngestBuilder ingest;
 	CLodCacheLoader::MeshCacheIdentity cacheIdentity;
 	std::optional<ClusterLODPrebuiltData> prebuiltData;
+	bool forceDoubleSidedPreview = false;
 
 	MeshPreprocessResult(
 		MeshIngestBuilder&& ingestData,
 		CLodCacheLoader::MeshCacheIdentity&& identity,
-		std::optional<ClusterLODPrebuiltData>&& prebuilt)
+		std::optional<ClusterLODPrebuiltData>&& prebuilt,
+		bool forceDoubleSidedPreviewMaterial = false)
 		: ingest(std::move(ingestData))
 		, cacheIdentity(std::move(identity))
-		, prebuiltData(std::move(prebuilt)) {
+		, prebuiltData(std::move(prebuilt))
+		, forceDoubleSidedPreview(forceDoubleSidedPreviewMaterial) {
 	}
 };

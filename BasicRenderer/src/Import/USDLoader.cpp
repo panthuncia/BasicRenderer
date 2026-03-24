@@ -488,6 +488,10 @@ namespace USDLoader {
 	}
 
 	void ProcessMaterial(const pxr::UsdShadeMaterial& material, const pxr::UsdStageRefPtr& stage, bool isUSDZ, const std::string& directory) {
+		if (!material) {
+			return;
+		}
+
 		if (loadingCache.materialTemplateCache.contains(material.GetPrim().GetPath().GetString())) {
 			spdlog::info("Material {} already processed, skipping.", material.GetPrim().GetPath().GetString());
 			return; // Already processed
@@ -526,14 +530,34 @@ namespace USDLoader {
             std::to_string(resolvedDesc.emissive.uvSetIndex) + "|" +
             std::to_string(resolvedDesc.aoMap.uvSetIndex) + "|" +
             std::to_string(resolvedDesc.heightMap.uvSetIndex) + "|" +
-            std::to_string(resolvedDesc.opacity.uvSetIndex);
+            std::to_string(resolvedDesc.opacity.uvSetIndex) + "|" +
+            std::to_string(resolvedDesc.forceDoubleSided ? 1 : 0);
     }
 
-    std::shared_ptr<Material> ResolveMaterialForMesh(const UsdShadeMaterial& material, const std::vector<MeshUvSetData>& uvSets) {
+    std::shared_ptr<Material> ResolveDefaultUsdMaterial(bool forceDoubleSidedPreview) {
+        MaterialDescription desc = {};
+        desc.name = forceDoubleSidedPreview ? "UsdDefaultPreviewMaterial" : "UsdDefaultMaterial";
+        desc.forceDoubleSided = forceDoubleSidedPreview;
+        const std::string cacheKey = BuildResolvedMaterialCacheKey(desc.name, desc);
+        auto resolvedIt = loadingCache.resolvedMaterialCache.find(cacheKey);
+        if (resolvedIt != loadingCache.resolvedMaterialCache.end()) {
+            return resolvedIt->second;
+        }
+
+        auto runtimeMaterial = Material::CreateShared(desc);
+        loadingCache.resolvedMaterialCache[cacheKey] = runtimeMaterial;
+        return runtimeMaterial;
+    }
+
+    std::shared_ptr<Material> ResolveMaterialForMesh(const UsdShadeMaterial& material, const std::vector<MeshUvSetData>& uvSets, bool forceDoubleSidedPreview = false) {
+        if (!material) {
+            return ResolveDefaultUsdMaterial(forceDoubleSidedPreview);
+        }
+
         const std::string materialPath = material.GetPrim().GetPath().GetString();
         auto templateIt = loadingCache.materialTemplateCache.find(materialPath);
         if (templateIt == loadingCache.materialTemplateCache.end()) {
-            return nullptr;
+            return ResolveDefaultUsdMaterial(forceDoubleSidedPreview);
         }
 
         MaterialDescription resolvedDesc = templateIt->second.desc;
@@ -545,6 +569,7 @@ namespace USDLoader {
         resolvedDesc.aoMap.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.aoMap, uvSets, materialPath, "ambientOcclusion");
         resolvedDesc.heightMap.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.heightMap, uvSets, materialPath, "heightMap");
         resolvedDesc.opacity.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.opacity, uvSets, materialPath, "opacity");
+        resolvedDesc.forceDoubleSided = forceDoubleSidedPreview;
 
         const std::string cacheKey = BuildResolvedMaterialCacheKey(materialPath, resolvedDesc);
         auto resolvedIt = loadingCache.resolvedMaterialCache.find(cacheKey);
@@ -601,7 +626,7 @@ namespace USDLoader {
 				skinQ, skelJointOrderRaw, skelJointOrderMapped);
 
 			// Phase 2: GPU mesh creation
-			auto material = ResolveMaterialForMesh(mat, result.ingest.GetUvSets());
+			auto material = ResolveMaterialForMesh(mat, result.ingest.GetUvSets(), result.forceDoubleSidedPreview);
 			auto mPtr = result.ingest.Build(material, std::move(result.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
 			outMeshes.push_back(mPtr);
 		}
@@ -622,7 +647,7 @@ namespace USDLoader {
 					skinQ, skelJointOrderRaw, skelJointOrderMapped);
 
 				// Phase 2: GPU mesh creation
-				auto material = ResolveMaterialForMesh(mat, result.ingest.GetUvSets());
+				auto material = ResolveMaterialForMesh(mat, result.ingest.GetUvSets(), result.forceDoubleSidedPreview);
 				auto mPtr = result.ingest.Build(material, std::move(result.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
 				outMeshes.push_back(mPtr);
 			}

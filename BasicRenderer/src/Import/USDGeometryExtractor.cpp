@@ -173,6 +173,20 @@ static UsdTimeCode GetUsdGeometrySampleTime(const UsdStageRefPtr& stage)
 	return UsdTimeCode::Default();
 }
 
+static bool HasMultipleAuthoredTimeSamples(const UsdAttribute& attr)
+{
+	if (!attr) {
+		return false;
+	}
+
+	std::vector<double> timeSamples;
+	if (!attr.GetTimeSamples(&timeSamples)) {
+		return false;
+	}
+
+	return timeSamples.size() > 1;
+}
+
 // LoadGeom
 // Extracts raw vertex + index arrays from a UsdGeomMesh (optionally
 // limited to a subset).  Handles face-varying expansion, optional
@@ -239,6 +253,11 @@ static void LoadGeom(
 	TfToken subdivisionScheme = UsdGeomTokens->catmullClark;
 	mesh.GetSubdivisionSchemeAttr().Get(&subdivisionScheme);
 	const bool isPolygonalMesh = (subdivisionScheme == UsdGeomTokens->none);
+	const bool previewSubdiv = !isPolygonalMesh;
+	const bool previewTopology =
+		HasMultipleAuthoredTimeSamples(mesh.GetFaceVertexCountsAttr()) ||
+		HasMultipleAuthoredTimeSamples(mesh.GetFaceVertexIndicesAttr()) ||
+		HasMultipleAuthoredTimeSamples(mesh.GetHoleIndicesAttr());
 
 	vertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3)
 		+ sizeof(DirectX::XMFLOAT2);
@@ -256,11 +275,43 @@ static void LoadGeom(
 
 	std::string primName = mesh.GetPrim().GetName().GetString();
 	UsdGeomPrimvarsAPI primvarsAPI(mesh);
+	if (previewSubdiv) {
+		spdlog::info(
+			"Mesh '{}' uses subdivision scheme '{}' at sample time {}; rendering control cage as a static preview mesh.",
+			primName,
+			subdivisionScheme.GetString(),
+			geomTimeCode.IsDefault() ? -1.0 : geomTimeCode.GetValue());
+	}
+	if (previewTopology) {
+		spdlog::info(
+			"Mesh '{}' has time-varying topology or hole data; freezing extraction to sample time {} for static preview rendering.",
+			primName,
+			geomTimeCode.IsDefault() ? -1.0 : geomTimeCode.GetValue());
+	}
+
+	VtArray<int> holeIndices;
+	if (mesh.GetHoleIndicesAttr()) {
+		mesh.GetHoleIndicesAttr().Get(&holeIndices, geomTimeCode);
+	}
+
+	std::vector<uint8_t> holedFaces(faceVertCounts.size(), 0);
+	for (int holeFaceIndex : holeIndices) {
+		if (holeFaceIndex >= 0 && static_cast<size_t>(holeFaceIndex) < holedFaces.size()) {
+			holedFaces[holeFaceIndex] = 1;
+		}
+		else {
+			spdlog::warn(
+				"Mesh '{}' authored hole face index {} outside the face range {}; ignoring it for preview extraction.",
+				primName,
+				holeFaceIndex,
+				faceVertCounts.size());
+		}
+	}
 
 	// Count output corners
 	size_t cornerCount = 0;
 	for (size_t faceIndex = 0; faceIndex < faceVertCounts.size(); ++faceIndex) {
-		if (subset && !useFace[faceIndex]) continue;
+		if ((subset && !useFace[faceIndex]) || holedFaces[faceIndex]) continue;
 		const int fvCount = faceVertCounts[faceIndex];
 		if (fvCount == 3)
 			cornerCount += 3;
@@ -308,20 +359,22 @@ static void LoadGeom(
 		}
 	}
 
-	if (!gotNormals && isPolygonalMesh) {
+	if (!gotNormals && (isPolygonalMesh || previewSubdiv || previewTopology)) {
 		rawNormals = ComputeFacetedNormals(ctrlPos, faceVertCounts, faceVertIndices, reverseMeshWinding);
 		if (!rawNormals.empty()) {
 			gotNormals = true;
 			normInterp = InterpolationType::Uniform;
 			vertexFlags |= VertexFlags::VERTEX_NORMALS;
-			spdlog::info("Generated faceted normals for polygon mesh '{}' because no normals attribute was authored.", primName);
+			if (previewSubdiv) {
+				spdlog::info("Generated faceted preview normals for subdivision control cage '{}'.", primName);
+			}
+			else if (previewTopology) {
+				spdlog::info("Generated faceted preview normals for frozen topology mesh '{}'.", primName);
+			}
+			else {
+				spdlog::info("Generated faceted normals for polygon mesh '{}' because no normals attribute was authored.", primName);
+			}
 		}
-	}
-	else if (!gotNormals && !isPolygonalMesh) {
-		spdlog::info(
-			"Mesh '{}' uses subdivision scheme '{}' with no authored normals; skipping polygon-cage normal generation.",
-			primName,
-			subdivisionScheme.GetString());
 	}
 
     std::vector<std::string> uvSetNames;
@@ -509,7 +562,7 @@ static void LoadGeom(
 	size_t outVertex = 0;
 	for (size_t f = 0; f < faceVertCounts.size(); ++f) {
 		int fc = faceVertCounts[f];
-		if (!subset || useFace[f]) {
+		if ((!subset || useFace[f]) && !holedFaces[f]) {
 			for (int i = 1; i + 1 < fc; ++i) {
 				int cornerIdxs[3] = { 0, reverseMeshWinding ? (i + 1) : i, reverseMeshWinding ? i : (i + 1) };
 				uint32_t triVertIdxs[3] = {};
@@ -735,10 +788,19 @@ MeshPreprocessResult ExtractSubMesh(
 		}
 	}
 
+	TfToken subdivisionScheme = UsdGeomTokens->catmullClark;
+	mesh.GetSubdivisionSchemeAttr().Get(&subdivisionScheme);
+	const bool previewSubdiv = (subdivisionScheme != UsdGeomTokens->none);
+	const bool previewTopology =
+		HasMultipleAuthoredTimeSamples(mesh.GetFaceVertexCountsAttr()) ||
+		HasMultipleAuthoredTimeSamples(mesh.GetFaceVertexIndicesAttr()) ||
+		HasMultipleAuthoredTimeSamples(mesh.GetHoleIndicesAttr());
+
 	return MeshPreprocessResult(
 		std::move(ingest),
 		std::move(cacheIdentity),
-		std::move(prebuiltData));
+		std::move(prebuiltData),
+		previewSubdiv || previewTopology);
 }
 
 StageExtractionResult ExtractAll(const std::string& filePath) {
