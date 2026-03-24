@@ -29,6 +29,8 @@ struct VisBufferPSInput
 struct ClodViewRasterInfo
 {
     uint visibilityUAVDescriptorIndex;
+    uint opaqueVisibilitySRVDescriptorIndex;
+    uint deepVisibilityHeadPointerUAVDescriptorIndex;
     uint scissorMinX;
     uint scissorMinY;
     uint scissorMaxX;
@@ -36,6 +38,15 @@ struct ClodViewRasterInfo
     float viewportScaleX;
     float viewportScaleY;
     uint pad0;
+    uint pad1;
+    uint pad2;
+};
+
+struct CLodDeepVisibilityNode
+{
+    uint64_t visKey;
+    uint next;
+    uint flags;
 };
 
 struct ClippingPlane {

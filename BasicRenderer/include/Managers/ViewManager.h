@@ -59,6 +59,7 @@ struct ViewResources {
     std::shared_ptr<PixelBuffer> linearDepthMap = nullptr;
     std::shared_ptr<PixelBuffer> lastFrameLinearDepthMap = nullptr;
     std::shared_ptr<PixelBuffer> visibilityBuffer = nullptr;
+    std::shared_ptr<PixelBuffer> clodDeepVisibilityHeadPointers = nullptr;
 };
 
 struct View {
@@ -137,6 +138,7 @@ public:
         std::shared_ptr<PixelBuffer> linearDepth);
 
 	void AttachVisibilityBuffer(uint64_t viewID, std::shared_ptr<PixelBuffer> visibilityBuffer);
+    std::shared_ptr<PixelBuffer> EnsureCLodDeepVisibilityHeadPointers(uint64_t viewID);
 
     // Update camera matrices/params
     void UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo);

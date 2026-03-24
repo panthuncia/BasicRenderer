@@ -44,6 +44,9 @@ public:
         std::shared_ptr<Buffer> rasterBucketsHistogramBuffer,
         std::shared_ptr<Buffer> rasterBucketsIndirectArgsBuffer,
         std::shared_ptr<Buffer> sortedToUnsortedMappingBuffer,
+        std::shared_ptr<Buffer> deepVisibilityNodesBuffer = nullptr,
+        std::shared_ptr<Buffer> deepVisibilityCounterBuffer = nullptr,
+        std::shared_ptr<Buffer> deepVisibilityOverflowCounterBuffer = nullptr,
         std::shared_ptr<ResourceGroup> slabResourceGroup = nullptr);
     ~ClusterRasterizationPass();
 
@@ -62,11 +65,15 @@ private:
 
     std::vector<CLodViewRasterInfo> m_viewRasterInfos;
     std::vector<std::shared_ptr<PixelBuffer>> m_visibilityBuffers;
+    std::vector<std::shared_ptr<PixelBuffer>> m_deepVisibilityHeadPointerBuffers;
 
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsHistogramBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBuffer;
     std::shared_ptr<Buffer> m_sortedToUnsortedMappingBuffer;
+    std::shared_ptr<Buffer> m_deepVisibilityNodesBuffer;
+    std::shared_ptr<Buffer> m_deepVisibilityCounterBuffer;
+    std::shared_ptr<Buffer> m_deepVisibilityOverflowCounterBuffer;
 
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
 
@@ -75,6 +82,7 @@ private:
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
     uint32_t m_passWidth = 1;
     uint32_t m_passHeight = 1;
+    uint32_t m_deepVisibilityNodeCapacity = 1;
     bool m_declaredResourcesChanged = true;
 
     RenderPhase m_renderPhase;

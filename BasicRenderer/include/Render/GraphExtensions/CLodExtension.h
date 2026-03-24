@@ -55,6 +55,9 @@ private:
     std::shared_ptr<Buffer> m_swVisibleClustersCounterBufferPhase2;
     std::shared_ptr<Buffer> m_sortedToUnsortedMappingBuffer;
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
+    std::shared_ptr<Buffer> m_deepVisibilityNodesBuffer;
+    std::shared_ptr<Buffer> m_deepVisibilityCounterBuffer;
+    std::shared_ptr<Buffer> m_deepVisibilityOverflowCounterBuffer;
 
     std::unique_ptr<CLodStreamingSystem> m_streamingSystem;
 };

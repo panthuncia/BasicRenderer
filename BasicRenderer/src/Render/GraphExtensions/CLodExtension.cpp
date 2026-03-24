@@ -14,6 +14,7 @@
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
+#include "Render/GraphExtensions/ClusterLOD/ClearDeepVisibilityPass.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodStreamingSystem.h"
 #include "Render/GraphExtensions/ClusterLOD/ClusterRasterizationPass.h"
 #include "Render/GraphExtensions/ClusterLOD/ClusterSoftwareRasterizationPass.h"
@@ -62,7 +63,8 @@ flecs::entity EnsureShadowTag(flecs::world& ecsWorld)
 struct CLodVariantTraits {
     enum class ScheduleMode : uint8_t {
         TwoPassVisibility,
-        SinglePassCullOnly
+        SinglePassCullOnly,
+        SinglePassDeepVisibility
     };
 
     CLodExtensionType type;
@@ -101,7 +103,7 @@ const CLodVariantTraits& GetVariantTraits(CLodExtensionType type)
             "CLod[Alpha] ",
             Engine::Primary::CLodTransparentPass,
             CLodRasterOutputKind::DeepVisibility,
-            CLodVariantTraits::ScheduleMode::SinglePassCullOnly,
+            CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility,
             false,
             false,
             false,
@@ -277,6 +279,23 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
 
     m_viewRasterInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodViewRasterInfo), false, false, false, false);
     m_viewRasterInfoBuffer->SetName(MakeVariantResourceName(traits, "View Raster Info Buffer"));
+
+    if (traits.rasterOutputKind == CLodRasterOutputKind::DeepVisibility) {
+        m_deepVisibilityNodesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+            1,
+            sizeof(CLodDeepVisibilityNode),
+            true,
+            false,
+            false,
+            false);
+        m_deepVisibilityNodesBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Nodes Buffer"));
+
+        m_deepVisibilityCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, true, false);
+        m_deepVisibilityCounterBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Counter Buffer"));
+
+        m_deepVisibilityOverflowCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, true, false);
+        m_deepVisibilityOverflowCounterBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Overflow Counter Buffer"));
+    }
 }
 
 void CLodExtension::Initialize(RenderGraph& rg)
@@ -306,7 +325,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
 
     const auto softwareRasterMode =
         SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)();
-    const bool forceHardwareOnly = traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly;
+    const bool forceHardwareOnly =
+        traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly ||
+        traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility;
     const bool useComputeSWRaster = !forceHardwareOnly && CLodSoftwareRasterUsesCompute(softwareRasterMode);
     const auto workGraphMode = forceHardwareOnly
         ? HierarchialCullingWorkGraphMode::HardwareOnly
@@ -339,7 +360,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_viewDepthSrvIndicesBuffer,
         m_viewRasterInfoBuffer,
         slabGroup);
-    if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly) {
+    if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly ||
+        traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility) {
         cullPassDesc.where = RenderGraph::ExternalInsertPoint::After("CLodOpaque::LinearDepthDownsamplePass2");
     }
     else {
@@ -398,6 +420,38 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         return;
     }
 
+    if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility) {
+        RenderGraph::ExternalPassDesc clearDeepVisibilityPassDesc;
+        clearDeepVisibilityPassDesc.type = RenderGraph::PassType::Render;
+        clearDeepVisibilityPassDesc.name = MakeVariantPassName(traits, "ClearDeepVisibilityPass");
+        clearDeepVisibilityPassDesc.pass = std::make_shared<ClearDeepVisibilityPass>(
+            m_deepVisibilityCounterBuffer,
+            m_deepVisibilityOverflowCounterBuffer);
+        outPasses.push_back(std::move(clearDeepVisibilityPassDesc));
+
+        RenderGraph::ExternalPassDesc rasterizeDeepVisibilityPassDesc;
+        rasterizeDeepVisibilityPassDesc.type = RenderGraph::PassType::Render;
+        rasterizeDeepVisibilityPassDesc.name = MakeVariantPassName(traits, "RasterizeClustersPass1");
+        ClusterRasterizationPassInputs rasterizePassInputs;
+        rasterizePassInputs.clearGbuffer = false;
+        rasterizePassInputs.wireframe = false;
+        rasterizePassInputs.renderPhase = renderPhase;
+        rasterizePassInputs.outputKind = traits.rasterOutputKind;
+        rasterizeDeepVisibilityPassDesc.pass = std::make_shared<ClusterRasterizationPass>(
+            rasterizePassInputs,
+            m_compactedVisibleClustersBuffer,
+            m_rasterBucketsHistogramBuffer,
+            m_rasterBucketsIndirectArgsBuffer,
+            m_sortedToUnsortedMappingBuffer,
+            m_deepVisibilityNodesBuffer,
+            m_deepVisibilityCounterBuffer,
+            m_deepVisibilityOverflowCounterBuffer,
+            slabGroup);
+        rasterizeDeepVisibilityPassDesc.isGeometryPass = true;
+        outPasses.push_back(std::move(rasterizeDeepVisibilityPassDesc));
+        return;
+    }
+
     RenderGraph::ExternalPassDesc rasterizePassDesc;
     rasterizePassDesc.type = RenderGraph::PassType::Render;
     rasterizePassDesc.name = MakeVariantPassName(traits, "RasterizeClustersPass1");
@@ -412,6 +466,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_rasterBucketsHistogramBuffer,
         m_rasterBucketsIndirectArgsBuffer,
         m_sortedToUnsortedMappingBuffer,
+        nullptr,
+        nullptr,
+        nullptr,
         slabGroup);
     rasterizePassDesc.isGeometryPass = true;
     outPasses.push_back(std::move(rasterizePassDesc));
@@ -607,6 +664,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_rasterBucketsHistogramBufferPhase2,
         m_rasterBucketsIndirectArgsBuffer,
         m_sortedToUnsortedMappingBuffer,
+        nullptr,
+        nullptr,
+        nullptr,
         slabGroup);
     rasterizePassDesc2.isGeometryPass = true;
     outPasses.push_back(std::move(rasterizePassDesc2));

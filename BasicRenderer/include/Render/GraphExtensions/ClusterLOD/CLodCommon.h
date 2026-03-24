@@ -68,7 +68,9 @@ struct RasterizeClustersCommand
 
 struct CLodViewRasterInfo
 {
-    uint32_t visibilityUAVDescriptorIndex;
+    uint32_t visibilityUAVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t opaqueVisibilitySRVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t deepVisibilityHeadPointerUAVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t scissorMinX;
     uint32_t scissorMinY;
     uint32_t scissorMaxX;
@@ -76,9 +78,22 @@ struct CLodViewRasterInfo
     float viewportScaleX;
     float viewportScaleY;
     uint32_t pad0;
+    uint32_t pad1;
+    uint32_t pad2;
 
     friend bool operator==(const CLodViewRasterInfo&, const CLodViewRasterInfo&) = default;
 };
+
+static_assert(sizeof(CLodViewRasterInfo) == 48u, "CLodViewRasterInfo size must match HLSL");
+
+struct CLodDeepVisibilityNode
+{
+    uint64_t visKey;
+    uint32_t next;
+    uint32_t flags;
+};
+
+static_assert(sizeof(CLodDeepVisibilityNode) == 16u, "CLodDeepVisibilityNode size must match HLSL");
 
 inline constexpr uint32_t CLodReplayBufferSizeBytes = 200u * 1024u * 1024u; // 200 MB physical, GPU uses first 100 MB
 inline constexpr uint32_t CLodReplayNodeRegionSizeBytes = 50u * 1024u * 1024u;    // must match HLSL CLOD_REPLAY_NODE_REGION_SIZE_BYTES
