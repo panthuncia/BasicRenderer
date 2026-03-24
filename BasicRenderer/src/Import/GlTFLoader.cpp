@@ -984,7 +984,7 @@ std::shared_ptr<Material> LoadMaterial(
     MaterialDescription desc;
     desc.name = materialNode.value("name", "glTF_Material_" + std::to_string(materialIndex));
     desc.baseColor = { nullptr, 1.0f, { 0, 1, 2, 3 } };
-    desc.metallic = { nullptr, 0.0f, { 2 } };
+    desc.metallic = { nullptr, 1.0f, { 2 } };
     desc.roughness = { nullptr, 1.0f, { 1 } };
     desc.emissive = { nullptr, 1.0f, { 0, 1, 2 } };
     desc.opacity = { nullptr, 1.0f, { 3 } };

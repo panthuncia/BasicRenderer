@@ -255,6 +255,28 @@ static DXGI_FORMAT ToLinearIfSRGB(DXGI_FORMAT fmt) {
     }
 }
 
+static bool IsWICBGRFormat(DXGI_FORMAT fmt) {
+    switch (fmt) {
+    case DXGI_FORMAT_B8G8R8A8_UNORM:
+    case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+    case DXGI_FORMAT_B8G8R8X8_UNORM:
+    case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static DXGI_FORMAT ToRGBAEquivalent(DXGI_FORMAT fmt) {
+    switch (fmt) {
+    case DXGI_FORMAT_B8G8R8A8_UNORM: return DXGI_FORMAT_R8G8B8A8_UNORM;
+    case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+    case DXGI_FORMAT_B8G8R8X8_UNORM: return DXGI_FORMAT_R8G8B8A8_UNORM;
+    case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB: return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+    default: return fmt;
+    }
+}
+
 static RawImage RawFromDXT(
     const DirectX::ScratchImage& image,
     const DirectX::TexMetadata& meta,
@@ -431,6 +453,25 @@ LoadTextureFromMemory(const void* bytes,
         if (FAILED(wicHr)) throw std::runtime_error("Failed to load WIC image from memory");
 
         DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(wicMeta.format) : ToLinearIfSRGB(wicMeta.format);
+
+        if (IsWICBGRFormat(chosen)) {
+            DirectX::ScratchImage convertedImg;
+            const DXGI_FORMAT convertedFormat = ToRGBAEquivalent(chosen);
+            HRESULT convertHr = DirectX::Convert(
+                wicImg.GetImages(),
+                wicImg.GetImageCount(),
+                wicImg.GetMetadata(),
+                convertedFormat,
+                DirectX::TEX_FILTER_DEFAULT,
+                0.0f,
+                convertedImg);
+            if (FAILED(convertHr)) {
+                throw std::runtime_error("Failed to convert WIC texture to RGBA");
+            }
+
+            auto raw = RawFromDXT(convertedImg, convertedImg.GetMetadata(), "", ImageFiletype::WIC, convertedFormat);
+            return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
+        }
 
         auto raw = RawFromDXT(wicImg, wicMeta, "", ImageFiletype::WIC, chosen);
         return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);

@@ -4,7 +4,7 @@
 #include "include/outputTypes.hlsli"
 #include "include/debugPayload.hlsli"
 #include "include/clodResolveCommon.hlsli"
-#include "fullscreenVS.hlsli"
+#include "include/waveIntrinsicsHelpers.hlsli"
 #include "PerPassRootConstants/visUtilRootConstants.h"
 #include "PerPassRootConstants/clodDeepVisibilityResolveRootConstants.h"
 
@@ -66,19 +66,79 @@ uint2 MakeTransparentDebugPayload(uint outputType, uint rawNodeCount, uint resol
     }
 }
 
-float4 CLodDeepVisibilityResolvePS(FULLSCREEN_VS_OUTPUT input) : SV_Target
+void CommitDeepVisibilityStatsWave(
+    RWStructuredBuffer<CLodDeepVisibilityStats> statsBuffer,
+    uint truncatedPixelContribution,
+    uint truncatedNodeContribution,
+    uint resolvedSampleContribution,
+    uint rawNodeCount,
+    uint resolvedSampleCount)
+{
+    uint waveTruncatedPixels = WaveActiveSum(truncatedPixelContribution);
+    uint waveTruncatedNodes = WaveActiveSum(truncatedNodeContribution);
+    uint waveResolvedSamples = WaveActiveSum(resolvedSampleContribution);
+    uint waveMaxRawNodeCount = WaveActiveMax(rawNodeCount);
+    uint waveMaxResolvedSamples = WaveActiveMax(resolvedSampleCount);
+
+    if (!WaveIsFirstLane())
+    {
+        return;
+    }
+
+    if (waveTruncatedPixels > 0u)
+    {
+        InterlockedAdd(statsBuffer[0].truncatedPixelCount, waveTruncatedPixels);
+    }
+    if (waveTruncatedNodes > 0u)
+    {
+        InterlockedAdd(statsBuffer[0].truncatedNodeCount, waveTruncatedNodes);
+    }
+    if (waveResolvedSamples > 0u)
+    {
+        InterlockedAdd(statsBuffer[0].totalResolvedSamples, waveResolvedSamples);
+    }
+    if (waveMaxRawNodeCount > 0u)
+    {
+        InterlockedMax(statsBuffer[0].maxRawNodeCount, waveMaxRawNodeCount);
+    }
+    if (waveMaxResolvedSamples > 0u)
+    {
+        InterlockedMax(statsBuffer[0].maxResolvedSamples, waveMaxResolvedSamples);
+    }
+}
+
+[shader("compute")]
+[numthreads(8, 8, 1)]
+void CLodDeepVisibilityResolveCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
-    Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
-
-    uint2 pixel = uint2(input.position.xy);
 
     Texture2D<uint> headPointers = ResourceDescriptorHeap[CLOD_DEEP_VISIBILITY_RESOLVE_HEAD_POINTER_DESCRIPTOR_INDEX];
+    RWTexture2D<float4> hdrTarget = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Color::HDRColorTarget)];
+    uint width, height;
+    hdrTarget.GetDimensions(width, height);
+
+    if (dispatchThreadId.x >= width || dispatchThreadId.y >= height)
+    {
+        return;
+    }
+
+    uint2 pixel = dispatchThreadId.xy;
+    uint outputType = perFrameBuffer.outputType;
+    bool transparentDebugOutput = IsTransparentDebugOutput(outputType);
+    uint head = headPointers[pixel];
+    if (head == CLOD_DEEP_VISIBILITY_LIST_NULL)
+    {
+        if (transparentDebugOutput)
+        {
+            RWTexture2D<uint2> debugVisTex = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::DebugVisualization)];
+            WriteDebugPixel(debugVisTex, pixel, MakeTransparentDebugPayload(outputType, 0u, 0u));
+        }
+        return;
+    }
+
     StructuredBuffer<CLodDeepVisibilityNode> nodeBuffer = ResourceDescriptorHeap[CLOD_DEEP_VISIBILITY_RESOLVE_NODE_BUFFER_DESCRIPTOR_INDEX];
     RWStructuredBuffer<CLodDeepVisibilityStats> statsBuffer = ResourceDescriptorHeap[CLOD_DEEP_VISIBILITY_RESOLVE_STATS_DESCRIPTOR_INDEX];
-
-    uint head = headPointers[pixel];
     uint rawNodeCount = 0u;
     uint gatheredCount = 0u;
     DeepVisibilityResolveSample gathered[CLOD_DEEP_VISIBILITY_MAX_SAMPLES];
@@ -105,12 +165,8 @@ float4 CLodDeepVisibilityResolvePS(FULLSCREEN_VS_OUTPUT input) : SV_Target
         current = node.next;
     }
 
-    if (rawNodeCount > CLOD_DEEP_VISIBILITY_MAX_SAMPLES)
-    {
-        InterlockedAdd(statsBuffer[0].truncatedPixelCount, 1u);
-        InterlockedAdd(statsBuffer[0].truncatedNodeCount, rawNodeCount - CLOD_DEEP_VISIBILITY_MAX_SAMPLES);
-    }
-    InterlockedMax(statsBuffer[0].maxRawNodeCount, rawNodeCount);
+    uint truncatedPixelContribution = rawNodeCount > CLOD_DEEP_VISIBILITY_MAX_SAMPLES ? 1u : 0u;
+    uint truncatedNodeContribution = rawNodeCount > CLOD_DEEP_VISIBILITY_MAX_SAMPLES ? (rawNodeCount - CLOD_DEEP_VISIBILITY_MAX_SAMPLES) : 0u;
 
     uint resolvedSampleCount = 0u;
     float3 accumulatedPremultiplied = 0.0f.xxx;
@@ -118,6 +174,9 @@ float4 CLodDeepVisibilityResolvePS(FULLSCREEN_VS_OUTPUT input) : SV_Target
 
     if (gatheredCount > 0u)
     {
+        StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+        Camera mainCamera = cameras[perFrameBuffer.mainCameraIndex];
+
         SortDeepVisibilitySamples(gathered, gatheredCount);
 
         [loop]
@@ -166,20 +225,28 @@ float4 CLodDeepVisibilityResolvePS(FULLSCREEN_VS_OUTPUT input) : SV_Target
         }
     }
 
-    InterlockedAdd(statsBuffer[0].totalResolvedSamples, resolvedSampleCount);
-    InterlockedMax(statsBuffer[0].maxResolvedSamples, resolvedSampleCount);
+    CommitDeepVisibilityStatsWave(
+        statsBuffer,
+        truncatedPixelContribution,
+        truncatedNodeContribution,
+        resolvedSampleCount,
+        rawNodeCount,
+        resolvedSampleCount);
 
-    if (IsTransparentDebugOutput(perFrameBuffer.outputType))
+    if (transparentDebugOutput)
     {
         RWTexture2D<uint2> debugVisTex = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::DebugVisualization)];
-        WriteDebugPixel(debugVisTex, pixel, MakeTransparentDebugPayload(perFrameBuffer.outputType, rawNodeCount, resolvedSampleCount));
+        WriteDebugPixel(debugVisTex, pixel, MakeTransparentDebugPayload(outputType, rawNodeCount, resolvedSampleCount));
     }
 
     if (accumulatedAlpha <= 0.0f)
     {
-        return float4(0.0f, 0.0f, 0.0f, 0.0f);
+        return;
     }
 
-    float3 compositeColor = accumulatedPremultiplied / max(accumulatedAlpha, 1e-5f);
-    return float4(compositeColor, accumulatedAlpha);
+    float4 existingHdr = hdrTarget[pixel];
+    float oneMinusAlpha = 1.0f - accumulatedAlpha;
+    float3 compositeRgb = accumulatedPremultiplied + existingHdr.rgb * oneMinusAlpha;
+    float compositeAlpha = accumulatedAlpha + existingHdr.a * oneMinusAlpha;
+    hdrTarget[pixel] = float4(compositeRgb, compositeAlpha);
 }

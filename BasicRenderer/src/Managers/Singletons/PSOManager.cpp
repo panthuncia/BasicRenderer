@@ -1002,74 +1002,13 @@ PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags)
 PipelineState PSOManager::CreateClusterLODDeepVisibilityResolvePSO(UINT psoFlags)
 {
     auto defines = GetShaderDefines(psoFlags, MaterialCompileFlags::MaterialCompileNone);
-
-    ShaderInfoBundle sib;
-    sib.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6" };
-    sib.pixelShader = { L"shaders/ClusterLOD/DeepVisibilityResolve.hlsl", L"CLodDeepVisibilityResolvePS", L"ps_6_6" };
-    sib.defines = defines;
-
-    auto compiled = CompileShaders(sib);
-
-    auto& layout = GetRootSignature();
-    rhi::SubobjLayout soLayout{ layout.GetHandle() };
-    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()), "FullscreenVSMain" };
-    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(compiled.pixelShader.Get()), "CLodDeepVisibilityResolvePS" };
-
-    rhi::RasterState rs{};
-    rs.fill = rhi::FillMode::Solid;
-    rs.cull = rhi::CullMode::None;
-    rs.frontCCW = false;
-    rhi::SubobjRaster soRaster{ rs };
-
-    rhi::BlendState bs{};
-    bs.alphaToCoverage = false;
-    bs.independentBlend = false;
-    bs.numAttachments = 1;
-    auto& a0 = bs.attachments[0];
-    a0.enable = true;
-    a0.srcColor = rhi::BlendFactor::SrcAlpha;
-    a0.dstColor = rhi::BlendFactor::InvSrcAlpha;
-    a0.colorOp = rhi::BlendOp::Add;
-    a0.srcAlpha = rhi::BlendFactor::One;
-    a0.dstAlpha = rhi::BlendFactor::InvSrcAlpha;
-    a0.alphaOp = rhi::BlendOp::Add;
-    a0.writeMask = rhi::ColorWriteEnable::All;
-    rhi::SubobjBlend soBlend{ bs };
-
-    rhi::DepthStencilState ds{};
-    ds.depthEnable = false;
-    ds.depthFunc = rhi::CompareOp::Less;
-    rhi::SubobjDepth soDepth{ ds };
-
-    rhi::RenderTargets rts{};
-    rts.count = 1;
-    rts.formats[0] = rhi::Format::R16G16B16A16_Float;
-    rhi::SubobjRTVs soRTV{ rts };
-
-    rhi::SubobjSample soSmp{ rhi::SampleDesc{ 1, 0 } };
-    rhi::SubobjPrimitiveTopology soTopo{ rhi::PrimitiveTopology::TriangleStrip };
-
-    const rhi::PipelineStreamItem items[] = {
-        rhi::Make(soLayout),
-        rhi::Make(soVS),
-        rhi::Make(soPS),
-        rhi::Make(soRaster),
-        rhi::Make(soBlend),
-        rhi::Make(soDepth),
-        rhi::Make(soRTV),
-        rhi::Make(soSmp),
-        rhi::Make(soTopo)
-    };
-
-    auto dev = DeviceManager::GetInstance().GetDevice();
-    rhi::PipelinePtr pso;
-    auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
-    if (Failed(result)) {
-        throw std::runtime_error("Failed to create CLod deep visibility resolve PSO");
-    }
-    pso->SetName("CLod.DeepVisibilityResolve.PSO");
-
-    return { std::move(pso), compiled.resourceIDsHash, compiled.resourceDescriptorSlots };
+    PipelineState pso = MakeComputePipeline(
+        GetComputeRootSignature().GetHandle(),
+        L"shaders/ClusterLOD/DeepVisibilityResolve.hlsl",
+        L"CLodDeepVisibilityResolveCS",
+        defines,
+        "CLod.DeepVisibilityResolve.PSO");
+    return pso;
 }
 
 PipelineState PSOManager::MakeComputePipeline(rhi::PipelineLayoutHandle layout,

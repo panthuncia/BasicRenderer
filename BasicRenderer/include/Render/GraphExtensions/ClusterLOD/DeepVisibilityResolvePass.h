@@ -4,12 +4,12 @@
 #include <memory>
 
 #include "Interfaces/IDynamicDeclaredResources.h"
-#include "RenderPasses/Base/RenderPass.h"
+#include "RenderPasses/Base/ComputePass.h"
 
 class Buffer;
 class PixelBuffer;
 
-class DeepVisibilityResolvePass final : public RenderPass, public IDynamicDeclaredResources {
+class DeepVisibilityResolvePass final : public ComputePass, public IDynamicDeclaredResources {
 public:
     DeepVisibilityResolvePass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
@@ -18,7 +18,7 @@ public:
         std::shared_ptr<Buffer> deepVisibilityOverflowCounterBuffer,
         std::shared_ptr<Buffer> deepVisibilityStatsBuffer);
 
-    void DeclareResourceUsages(RenderPassBuilder* builder) override;
+    void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;

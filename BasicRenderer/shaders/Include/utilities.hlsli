@@ -525,7 +525,8 @@ void SampleMaterialFromUvCache(
         aoDUdx = parallaxDUdx;
         aoDUdy = parallaxDUdy;
     }
-    ao = Sample2DGrad(aoTexture, aoSamplerState, aoSampleUv, aoDUdx, aoDUdy).r;
+    float4 aoSample = Sample2DGrad(aoTexture, aoSamplerState, aoSampleUv, aoDUdx, aoDUdy);
+    ao = DynamicSwizzle(aoSample, materialInfo.aoChannel);
 #endif
 
     float3 emissive = materialInfo.emissiveFactor.rgb;
@@ -725,7 +726,8 @@ void SampleMaterialFromUvCacheRuntime(
             aoDUdx = parallaxDUdx;
             aoDUdy = parallaxDUdy;
         }
-        ao = Sample2DGrad(aoTexture, aoSamplerState, aoSampleUv, aoDUdx, aoDUdy).r;
+        float4 aoSample = Sample2DGrad(aoTexture, aoSamplerState, aoSampleUv, aoDUdx, aoDUdy);
+        ao = DynamicSwizzle(aoSample, materialInfo.aoChannel);
     }
 
     float3 emissive = materialInfo.emissiveFactor.rgb;
@@ -863,7 +865,8 @@ void SampleMaterialCorePrecompiled(
 #if defined(PSO_AO_TEXTURE)
     Texture2D<float4> aoTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.aoMapIndex)];
     SamplerState aoSamplerState = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.aoSamplerIndex)];
-    ao = Sample2DGrad(aoTexture, aoSamplerState, localUV, localDUdx, localDUdy).r;
+    float4 aoSample = Sample2DGrad(aoTexture, aoSamplerState, localUV, localDUdx, localDUdy);
+    ao = DynamicSwizzle(aoSample, materialInfo.aoChannel);
 #endif
 
     // Emissive

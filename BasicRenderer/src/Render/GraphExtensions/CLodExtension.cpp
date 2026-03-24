@@ -360,7 +360,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
 
     RenderGraph::ExternalPassDesc cullPassDesc;
     cullPassDesc.type = RenderGraph::PassType::Compute;
-    cullPassDesc.computeQueueSelection = ComputeQueueSelection::Graphics;
+    //cullPassDesc.computeQueueSelection = ComputeQueueSelection::Graphics;
     cullPassDesc.name = MakeVariantPassName(traits, "HierarchialCullingPass1");
     HierarchialCullingPassInputs cullPassInputs;
     cullPassInputs.isFirstPass = true;
@@ -474,7 +474,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         outPasses.push_back(std::move(rasterizeDeepVisibilityPassDesc));
 
         RenderGraph::ExternalPassDesc resolveDeepVisibilityPassDesc;
-        resolveDeepVisibilityPassDesc.type = RenderGraph::PassType::Render;
+        resolveDeepVisibilityPassDesc.type = RenderGraph::PassType::Compute;
         resolveDeepVisibilityPassDesc.name = MakeVariantPassName(traits, "DeepVisibilityResolvePass");
         resolveDeepVisibilityPassDesc.where = RenderGraph::ExternalInsertPoint::Before("PPLLResolvePass");
         resolveDeepVisibilityPassDesc.pass = std::make_shared<DeepVisibilityResolvePass>(
@@ -610,7 +610,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
 
     RenderGraph::ExternalPassDesc cullPassDesc2;
     cullPassDesc2.type = RenderGraph::PassType::Compute;
-    cullPassDesc2.computeQueueSelection = ComputeQueueSelection::Graphics;
+    //cullPassDesc2.computeQueueSelection = ComputeQueueSelection::Graphics;
     cullPassDesc2.name = MakeVariantPassName(traits, "HierarchialCullingPass2");
     HierarchialCullingPassInputs cullPassInputs2;
     cullPassInputs2.isFirstPass = false;

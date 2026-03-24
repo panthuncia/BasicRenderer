@@ -28,7 +28,7 @@ DeepVisibilityResolvePass::DeepVisibilityResolvePass(
     m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
 }
 
-void DeepVisibilityResolvePass::DeclareResourceUsages(RenderPassBuilder* builder)
+void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
     builder->WithShaderResource(
             Builtin::Light::BufferGroup,
@@ -63,7 +63,7 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(RenderPassBuilder* builder
             m_deepVisibilityNodesBuffer,
             m_deepVisibilityCounterBuffer,
             m_deepVisibilityOverflowCounterBuffer)
-        .WithRenderTarget(Builtin::Color::HDRColorTarget)
+        .WithUnorderedAccess(Builtin::Color::HDRColorTarget)
         .WithUnorderedAccess(Builtin::DebugVisualization)
         .WithUnorderedAccess(m_deepVisibilityStatsBuffer);
 
@@ -103,6 +103,7 @@ void DeepVisibilityResolvePass::Setup()
     RegisterSRV(Builtin::SkeletonResources::BoneTransforms);
     RegisterSRV(Builtin::SkeletonResources::SkinningInstanceInfo);
 
+    RegisterUAV(Builtin::Color::HDRColorTarget);
     RegisterUAV(Builtin::DebugVisualization);
 }
 
@@ -139,20 +140,7 @@ PassReturn DeepVisibilityResolvePass::Execute(PassExecutionContext& executionCon
     auto& psoManager = PSOManager::GetInstance();
 
     commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-
-    rhi::PassBeginInfo passInfo{};
-    rhi::ColorAttachment colorAttachment{};
-    colorAttachment.rtv = m_pHDRTarget->GetRTVInfo(0).slot;
-    colorAttachment.loadOp = rhi::LoadOp::Load;
-    colorAttachment.storeOp = rhi::StoreOp::Store;
-    passInfo.colors = { &colorAttachment };
-    passInfo.width = context.renderResolution.x;
-    passInfo.height = context.renderResolution.y;
-    passInfo.debugName = "CLod alpha deep visibility resolve";
-    commandList.BeginPass(passInfo);
-
-    commandList.SetPrimitiveTopology(rhi::PrimitiveTopology::TriangleStrip);
-    commandList.BindLayout(psoManager.GetRootSignature().GetHandle());
+    commandList.BindLayout(psoManager.GetComputeRootSignature().GetHandle());
 
     const auto& pso = psoManager.GetClusterLODDeepVisibilityResolvePSO(context.globalPSOFlags);
     commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
@@ -163,7 +151,7 @@ PassReturn DeepVisibilityResolvePass::Execute(PassExecutionContext& executionCon
     settings[EnablePunctualLights] = m_getPunctualLightingEnabled();
     settings[EnableGTAO] = m_gtaoEnabled;
     commandList.PushConstants(
-        rhi::ShaderStage::AllGraphics,
+        rhi::ShaderStage::Compute,
         0,
         SettingsRootSignatureIndex,
         0,
@@ -178,14 +166,17 @@ PassReturn DeepVisibilityResolvePass::Execute(PassExecutionContext& executionCon
     misc[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_DEEP_VISIBILITY_RESOLVE_STATS_DESCRIPTOR_INDEX] = m_deepVisibilityStatsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     commandList.PushConstants(
-        rhi::ShaderStage::AllGraphics,
+        rhi::ShaderStage::Compute,
         0,
         MiscUintRootSignatureIndex,
         0,
         NumMiscUintRootConstants,
         misc);
 
-    commandList.Draw(3, 1, 0, 0);
+    constexpr uint32_t kThreadGroupSize = 8u;
+    const uint32_t groupCountX = (context.renderResolution.x + kThreadGroupSize - 1u) / kThreadGroupSize;
+    const uint32_t groupCountY = (context.renderResolution.y + kThreadGroupSize - 1u) / kThreadGroupSize;
+    commandList.Dispatch(groupCountX, groupCountY, 1);
     return {};
 }
 
