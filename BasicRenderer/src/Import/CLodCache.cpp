@@ -609,7 +609,7 @@ namespace CLodCache {
 		boost::hash_combine(seed, static_cast<uint32_t>(1));  // compressed meshlet vertex index bitstream enabled
 		boost::hash_combine(seed, static_cast<uint32_t>(1));  // mesh quantization heuristic version
 		boost::hash_combine(seed, static_cast<uint32_t>(1));  // UV quantization heuristic version
-		boost::hash_combine(seed, static_cast<uint32_t>(2));  // dual traversal bounds + skinned meshlet bound remap version
+		boost::hash_combine(seed, static_cast<uint32_t>(3));  // USD orientation + faceted-normal import semantics version
 		return static_cast<uint64_t>(seed);
 	}
 

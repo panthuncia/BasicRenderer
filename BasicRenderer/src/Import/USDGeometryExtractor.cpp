@@ -95,14 +95,13 @@ static void FlattenVecArray(
 	}
 }
 
-static std::vector<float> ComputeSmoothNormals(
+static std::vector<float> ComputeFacetedNormals(
 	const std::vector<float>& ctrlPos,
 	const VtArray<int>& faceVertCounts,
 	const VtArray<int>& faceVertIndices,
-	const std::vector<uint8_t>* useFaceMask)
+	bool reverseMeshWinding)
 {
-	const size_t controlPointCount = ctrlPos.size() / 3;
-	std::vector<GfVec3f> accumulated(controlPointCount, GfVec3f(0.0f));
+	std::vector<float> normals(faceVertCounts.size() * 3, 0.0f);
 
 	size_t fvOffset = 0;
 	for (size_t faceIndex = 0; faceIndex < faceVertCounts.size(); ++faceIndex) {
@@ -112,14 +111,27 @@ static std::vector<float> ComputeSmoothNormals(
 			continue;
 		}
 
-		if (useFaceMask && !useFaceMask->empty() && !(*useFaceMask)[faceIndex]) {
+		const size_t i0Fv = fvOffset;
+		const size_t i1Fv = fvOffset + (reverseMeshWinding ? 2u : 1u);
+		const size_t i2Fv = fvOffset + (reverseMeshWinding ? 1u : 2u);
+
+		if (i2Fv >= faceVertIndices.size()) {
+			spdlog::warn("Invalid face-vertex topology while computing faceted normals for face {}.", faceIndex);
 			fvOffset += fvCount;
 			continue;
 		}
 
-		const uint32_t i0 = static_cast<uint32_t>(faceVertIndices[fvOffset]);
+		const uint32_t i0 = static_cast<uint32_t>(faceVertIndices[i0Fv]);
+		const uint32_t i1 = static_cast<uint32_t>(faceVertIndices[i1Fv]);
+		const uint32_t i2 = static_cast<uint32_t>(faceVertIndices[i2Fv]);
+		const size_t controlPointCount = ctrlPos.size() / 3;
 		if (i0 >= controlPointCount) {
-			spdlog::warn("Invalid position index {} while computing smooth normals.", i0);
+			spdlog::warn("Invalid position index {} while computing faceted normals.", i0);
+			fvOffset += fvCount;
+			continue;
+		}
+		if (i1 >= controlPointCount || i2 >= controlPointCount) {
+			spdlog::warn("Invalid position index ({}, {}) while computing faceted normals.", i1, i2);
 			fvOffset += fvCount;
 			continue;
 		}
@@ -128,52 +140,25 @@ static std::vector<float> ComputeSmoothNormals(
 			ctrlPos[i0 * 3 + 0],
 			ctrlPos[i0 * 3 + 1],
 			ctrlPos[i0 * 3 + 2]);
+		const GfVec3f p1(
+			ctrlPos[i1 * 3 + 0],
+			ctrlPos[i1 * 3 + 1],
+			ctrlPos[i1 * 3 + 2]);
+		const GfVec3f p2(
+			ctrlPos[i2 * 3 + 0],
+			ctrlPos[i2 * 3 + 1],
+			ctrlPos[i2 * 3 + 2]);
 
-		for (int corner = 1; corner + 1 < fvCount; ++corner) {
-			const uint32_t i1 = static_cast<uint32_t>(faceVertIndices[fvOffset + corner]);
-			const uint32_t i2 = static_cast<uint32_t>(faceVertIndices[fvOffset + corner + 1]);
-
-			if (i1 >= controlPointCount || i2 >= controlPointCount) {
-				spdlog::warn("Invalid position index ({}, {}) while computing smooth normals.", i1, i2);
-				continue;
-			}
-
-			const GfVec3f p1(
-				ctrlPos[i1 * 3 + 0],
-				ctrlPos[i1 * 3 + 1],
-				ctrlPos[i1 * 3 + 2]);
-			const GfVec3f p2(
-				ctrlPos[i2 * 3 + 0],
-				ctrlPos[i2 * 3 + 1],
-				ctrlPos[i2 * 3 + 2]);
-
-			const GfVec3f e1 = p1 - p0;
-			const GfVec3f e2 = p2 - p0;
-			const GfVec3f faceNormal = GfCross(e1, e2);
-
-			if (GfDot(faceNormal, faceNormal) <= 1e-20f) {
-				continue;
-			}
-
-			accumulated[i0] += faceNormal;
-			accumulated[i1] += faceNormal;
-			accumulated[i2] += faceNormal;
+		GfVec3f faceNormal = GfCross(p1 - p0, p2 - p0);
+		const float len2 = GfDot(faceNormal, faceNormal);
+		if (len2 > 1e-20f) {
+			faceNormal *= (1.0f / std::sqrt(len2));
+			normals[faceIndex * 3 + 0] = faceNormal[0];
+			normals[faceIndex * 3 + 1] = faceNormal[1];
+			normals[faceIndex * 3 + 2] = faceNormal[2];
 		}
 
 		fvOffset += fvCount;
-	}
-
-	std::vector<float> normals;
-	normals.resize(controlPointCount * 3, 0.0f);
-	for (size_t i = 0; i < controlPointCount; ++i) {
-		GfVec3f n = accumulated[i];
-		const float len2 = GfDot(n, n);
-		if (len2 > 1e-20f) {
-			n *= (1.0f / std::sqrt(len2));
-		}
-		normals[i * 3 + 0] = n[0];
-		normals[i * 3 + 1] = n[1];
-		normals[i * 3 + 2] = n[2];
 	}
 
 	return normals;
@@ -247,6 +232,14 @@ static void LoadGeom(
 	mesh.GetFaceVertexCountsAttr().Get(&faceVertCounts, geomTimeCode);
 	mesh.GetFaceVertexIndicesAttr().Get(&faceVertIndices, geomTimeCode);
 
+	TfToken orientation = UsdGeomTokens->rightHanded;
+	mesh.GetOrientationAttr().Get(&orientation);
+	const bool reverseMeshWinding = (orientation == UsdGeomTokens->leftHanded);
+
+	TfToken subdivisionScheme = UsdGeomTokens->catmullClark;
+	mesh.GetSubdivisionSchemeAttr().Get(&subdivisionScheme);
+	const bool isPolygonalMesh = (subdivisionScheme == UsdGeomTokens->none);
+
 	vertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3)
 		+ sizeof(DirectX::XMFLOAT2);
 	skinningVertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3)
@@ -262,6 +255,7 @@ static void LoadGeom(
 	}
 
 	std::string primName = mesh.GetPrim().GetName().GetString();
+	UsdGeomPrimvarsAPI primvarsAPI(mesh);
 
 	// Count output corners
 	size_t cornerCount = 0;
@@ -283,51 +277,57 @@ static void LoadGeom(
 	}
 
 	// normals
-	VtArray<GfVec3f> usdNormals;
-	bool gotNormals = mesh.GetNormalsAttr().Get(&usdNormals, geomTimeCode);
-	bool generatedSmoothNormals = false;
-
-	VtIntArray nIdx;
-	UsdAttribute nIdxAttr = mesh.GetPrim().GetAttribute(TfToken("normals:indices"));
-	bool hasNIdx = nIdxAttr && nIdxAttr.Get(&nIdx, geomTimeCode);
-
-	if (gotNormals && hasNIdx) {
-		VtArray<GfVec3f> deindexed;
-		deindexed.resize(nIdx.size());
-		for (size_t i = 0; i < nIdx.size(); ++i) {
-			int src = nIdx[i];
-			if (src >= 0 && (size_t)src < usdNormals.size())
-				deindexed[i] = usdNormals[src];
-			else
-				spdlog::warn("Invalid normal index {} in 'normals:indices' for prim '{}'", src, primName);
-		}
-		usdNormals.swap(deindexed);
-	}
-
+	bool gotNormals = false;
+	InterpolationType normInterp = InterpolationType::Vertex;
 	std::vector<float> rawNormals;
-	if (gotNormals) {
-		FlattenVecArray<GfVec3f>(usdNormals, rawNormals, 1.0f);
-		vertexFlags |= VertexFlags::VERTEX_NORMALS;
+
+	UsdGeomPrimvar normalPrimvar = primvarsAPI.GetPrimvar(TfToken("normals"));
+	if (normalPrimvar) {
+		VtArray<GfVec3f> usdPrimvarNormals;
+		if (normalPrimvar.ComputeFlattened(&usdPrimvarNormals, geomTimeCode)) {
+			FlattenVecArray<GfVec3f>(usdPrimvarNormals, rawNormals, 1.0f);
+			normInterp = GetInterpolationType(normalPrimvar.GetInterpolation());
+			gotNormals = true;
+			vertexFlags |= VertexFlags::VERTEX_NORMALS;
+		}
+		else {
+			spdlog::warn(
+				"Mesh '{}' authored primvars:normals but it could not be flattened at geometry sample time {}; falling back to legacy normals attribute if present.",
+				primName,
+				geomTimeCode.IsDefault() ? -1.0 : geomTimeCode.GetValue());
+		}
 	}
-	else {
-		rawNormals = ComputeSmoothNormals(ctrlPos, faceVertCounts, faceVertIndices, subset ? &useFace : nullptr);
+
+	if (!gotNormals) {
+		VtArray<GfVec3f> usdNormals;
+		if (mesh.GetNormalsAttr().Get(&usdNormals, geomTimeCode)) {
+			FlattenVecArray<GfVec3f>(usdNormals, rawNormals, 1.0f);
+			normInterp = GetInterpolationType(mesh.GetNormalsInterpolation());
+			gotNormals = true;
+			vertexFlags |= VertexFlags::VERTEX_NORMALS;
+		}
+	}
+
+	if (!gotNormals && isPolygonalMesh) {
+		rawNormals = ComputeFacetedNormals(ctrlPos, faceVertCounts, faceVertIndices, reverseMeshWinding);
 		if (!rawNormals.empty()) {
 			gotNormals = true;
-			generatedSmoothNormals = true;
+			normInterp = InterpolationType::Uniform;
 			vertexFlags |= VertexFlags::VERTEX_NORMALS;
-			spdlog::info("Generated smooth normals for mesh '{}' because no normals attribute was authored.", primName);
+			spdlog::info("Generated faceted normals for polygon mesh '{}' because no normals attribute was authored.", primName);
 		}
 	}
-
-	InterpolationType normInterp = InterpolationType::Vertex;
-	if (gotNormals && !generatedSmoothNormals)
-		normInterp = GetInterpolationType(mesh.GetNormalsInterpolation());
+	else if (!gotNormals && !isPolygonalMesh) {
+		spdlog::info(
+			"Mesh '{}' uses subdivision scheme '{}' with no authored normals; skipping polygon-cage normal generation.",
+			primName,
+			subdivisionScheme.GetString());
+	}
 
     std::vector<std::string> uvSetNames;
     uvSetNames.push_back("st");
     {
         std::set<std::string> remainingNames;
-        UsdGeomPrimvarsAPI primvarsAPI(mesh);
         for (const UsdGeomPrimvar& primvar : primvarsAPI.GetPrimvars()) {
             if (!primvar) {
                 continue;
@@ -511,7 +511,7 @@ static void LoadGeom(
 		int fc = faceVertCounts[f];
 		if (!subset || useFace[f]) {
 			for (int i = 1; i + 1 < fc; ++i) {
-				int cornerIdxs[3] = { 0, i, i + 1 };
+				int cornerIdxs[3] = { 0, reverseMeshWinding ? (i + 1) : i, reverseMeshWinding ? i : (i + 1) };
 				uint32_t triVertIdxs[3] = {};
 				bool validTriangle = true;
 				for (int c = 0; c < 3; ++c) {
