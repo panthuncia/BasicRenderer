@@ -56,7 +56,7 @@ namespace Components {
     struct IndirectDrawInfo {
         std::vector<unsigned int> indices;
         std::vector<std::shared_ptr<BufferView>> views;
-        std::vector<MaterialCompileFlags> materialTechniques;
+        std::vector<std::vector<DrawWorkloadKey>> drawWorkloadKeysPerDraw;
     };
 
     struct ObjectDrawInfo {

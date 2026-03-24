@@ -24,6 +24,7 @@
 #include "Resources/Sampler.h"
 #include "Resources/components.h"
 #include "Resources/PixelBuffer.h"
+#include "Render/DrawWorkload.h"
 
 namespace {
 	std::atomic<uint64_t> globalStableSceneId = 0;
@@ -295,17 +296,20 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 			}
 			m_managerInterface.GetMeshManager()->AddMeshInstance(meshInstance.get(), useMeshletReorderedVertices);
 
-			// Update draw stats
-			auto& technique = meshInstance->GetMesh()->material->Technique();
-			if (drawStats.numDrawsPerTechnique.find(technique.compileFlags) == drawStats.numDrawsPerTechnique.end()) {
-				drawStats.numDrawsPerTechnique[technique.compileFlags] = 0;
-			}
-			drawStats.numDrawsPerTechnique[technique.compileFlags]++; // TODO: Make a better system for managing things that depend on which material objects use, as they may change
-			drawStats.numDrawsInScene++;
+			// Update draw stats and indirect workload counts
+            auto& mesh = *meshInstance->GetMesh();
+            ForEachMeshDrawWorkload(mesh, [&](const DrawWorkloadKey& workloadKey) {
+                if (drawStats.numDrawsPerTechnique.find(workloadKey) == drawStats.numDrawsPerTechnique.end()) {
+                    drawStats.numDrawsPerTechnique[workloadKey] = 0;
+                }
+                drawStats.numDrawsPerTechnique[workloadKey]++;
 
-			// Update indirect draw counts
-			m_managerInterface.GetIndirectCommandBufferManager()->RegisterTechnique(technique); // Ensure technique is registered
-			m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForTechnique(technique, drawStats.numDrawsPerTechnique[technique.compileFlags]);
+                m_managerInterface.GetIndirectCommandBufferManager()->RegisterWorkload(workloadKey);
+                m_managerInterface.GetIndirectCommandBufferManager()->UpdateBuffersForWorkload(
+                    workloadKey,
+                    drawStats.numDrawsPerTechnique[workloadKey]);
+            });
+			drawStats.numDrawsInScene++;
 		
 		}
 	}

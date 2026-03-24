@@ -1892,13 +1892,23 @@ void Renderer::CreateRenderGraph() {
             rg::memory::CreateECSMemorySnapshotProvider());
         Menu::GetInstance().SetRenderGraph(currentRenderGraph.get());
 
+        RendererECSManager::GetInstance().CreateRenderPhaseEntity(Engine::Primary::CLodTransparentPass);
+
         currentRenderGraph->RegisterExtension(std::make_unique<RenderGraphIOExtension>(
             m_managerInterface.GetTextureFactory(),
             currentRenderGraph->GetUploadService(),
             m_pReadbackManager.get()));
         currentRenderGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>(
             currentRenderGraph->GetReadbackService()));
-        currentRenderGraph->RegisterExtension(std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint32_t>(pow(2, 25))));
+        currentRenderGraph->RegisterExtension(
+            std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint32_t>(pow(2, 25))),
+            "CLodOpaque");
+        constexpr bool kEnableAlphaBlendCLodVariant = true;
+        if (kEnableAlphaBlendCLodVariant) {
+            currentRenderGraph->RegisterExtension(
+                std::make_unique<CLodExtension>(CLodExtensionType::AlphaBlend, static_cast<uint32_t>(pow(2, 25))),
+                "CLodAlpha");
+        }
 		m_renderGraphRuntimeInitialized = true;
     }
 

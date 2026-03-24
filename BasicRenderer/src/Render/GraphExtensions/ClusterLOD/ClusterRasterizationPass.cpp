@@ -27,6 +27,8 @@ ClusterRasterizationPass::ClusterRasterizationPass(
     , m_slabResourceGroup(std::move(slabResourceGroup)) {
     m_wireframe = inputs.wireframe;
     m_clearGbuffer = inputs.clearGbuffer;
+    m_renderPhase = std::move(inputs.renderPhase);
+    m_outputKind = inputs.outputKind;
 
     m_viewRasterInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodViewRasterInfo), false, false, false, false);
     m_viewRasterInfoBuffer->SetName("CLodViewRasterInfoBuffer");
@@ -70,8 +72,10 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
         .WithIndirectArguments(m_rasterBucketsIndirectArgsBuffer)
         .IsGeometryPass();
 
-    for (auto& vb : m_visibilityBuffers) {
-        builder->WithUnorderedAccess(vb);
+    if (m_outputKind == CLodRasterOutputKind::VisibilityBuffer) {
+        for (auto& vb : m_visibilityBuffers) {
+            builder->WithUnorderedAccess(vb);
+        }
     }
 
     // Declare page pool slabs for bindless access (auto-invalidates when new slabs are added).
@@ -103,6 +107,16 @@ void ClusterRasterizationPass::Setup() {
 void ClusterRasterizationPass::Update(const UpdateExecutionContext& executionContext) {
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
+
+    if (m_outputKind != CLodRasterOutputKind::VisibilityBuffer) {
+        const bool hadDynamicVisibilityState = !m_visibilityBuffers.empty() || !m_viewRasterInfos.empty();
+        m_visibilityBuffers.clear();
+        m_viewRasterInfos.clear();
+        m_passWidth = 1;
+        m_passHeight = 1;
+        m_declaredResourcesChanged = hadDynamicVisibilityState;
+        return;
+    }
 
     auto numViews = context.viewManager->GetCameraBufferSize();
 
@@ -162,6 +176,11 @@ bool ClusterRasterizationPass::DeclaredResourcesChanged() const {
 }
 
 PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionContext) {
+    if (m_outputKind != CLodRasterOutputKind::VisibilityBuffer) {
+        // Deep-visibility output is introduced in a later phase; keep the branch dormant for now.
+        return {};
+    }
+
     auto* renderContext = executionContext.hostData->Get<RenderContext>();
     auto& context = *renderContext;
     auto& commandList = executionContext.commandList;

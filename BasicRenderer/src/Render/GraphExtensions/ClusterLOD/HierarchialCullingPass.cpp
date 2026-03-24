@@ -36,6 +36,11 @@ bool UsesWorkGraphSWRaster(HierarchialCullingWorkGraphMode mode)
 {
     return mode == HierarchialCullingWorkGraphMode::SoftwareRasterWorkGraph;
 }
+
+bool UsesVisibilityBufferOutput(CLodRasterOutputKind outputKind)
+{
+    return outputKind == CLodRasterOutputKind::VisibilityBuffer;
+}
 }
 
 HierarchialCullingPass::HierarchialCullingPass(
@@ -80,16 +85,25 @@ HierarchialCullingPass::HierarchialCullingPass(
     m_phase1VisibleClustersCounterBuffer = std::move(phase1VisibleClustersCounterBuffer);
     m_swWriteBaseCounterBuffer = std::move(swWriteBaseCounterBuffer);
     m_maxVisibleClusters = inputs.maxVisibleClusters;
+    m_renderPhase = std::move(inputs.renderPhase);
+    m_clodOnlyWorkloads = inputs.clodOnlyWorkloads;
+    m_rasterOutputKind = inputs.rasterOutputKind;
 }
 
 HierarchialCullingPass::~HierarchialCullingPass() = default;
 
 void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) {
     auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
-    flecs::query<> drawSetIndicesQuery = ecsWorld.query_builder<>()
+    auto queryBuilder = ecsWorld.query_builder<>()
         .with<Components::IsActiveDrawSetIndices>()
-        .with<Components::ParticipatesInPass>(flecs::Wildcard)
-        .build();
+        .with<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(m_renderPhase));
+    if (m_clodOnlyWorkloads) {
+        queryBuilder.with<Components::CLodOnlyDrawWorkload>();
+    }
+    else {
+        queryBuilder.with<Components::GeneralDrawWorkload>();
+    }
+    flecs::query<> drawSetIndicesQuery = queryBuilder.build();
     builder->WithUnorderedAccess(
             m_scratchBuffer,
             m_visibleClustersBuffer,
@@ -134,7 +148,7 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
     if (UsesSWClassification(m_workGraphMode)) {
         builder->WithUnorderedAccess(m_swVisibleClustersCounterBuffer);
     }
-    if (UsesWorkGraphSWRaster(m_workGraphMode)) {
+    if (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVisibilityBufferOutput(m_rasterOutputKind)) {
         builder->WithShaderResource(m_viewRasterInfoBuffer);
     }
 
@@ -147,7 +161,7 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
     }
 
     // Declare visibility buffer UAVs for SW raster render graph tracking.
-    if (UsesWorkGraphSWRaster(m_workGraphMode)) {
+    if (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVisibilityBufferOutput(m_rasterOutputKind)) {
         for (auto& vb : m_visibilityBuffers) {
             builder->WithUnorderedAccess(vb);
         }
@@ -206,7 +220,7 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     uintRootConstants[CLOD_WG_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_swVisibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_WG_TELEMETRY_DESCRIPTOR_INDEX] = m_workGraphTelemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    if (UsesWorkGraphSWRaster(m_workGraphMode)) {
+    if (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVisibilityBufferOutput(m_rasterOutputKind)) {
         uintRootConstants[CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
     }
     uint32_t workGraphFlags = 0u;
@@ -262,7 +276,10 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
         context.viewManager->ForEachFiltered(filter, [&](uint64_t view) {
             auto viewInfo = context.viewManager->Get(view);
             auto cameraBufferIndex = viewInfo->gpu.cameraBufferIndex;
-            auto workloads = context.indirectCommandBufferManager->GetViewIndirectBuffersForRenderPhase(view, m_renderPhase);
+            auto workloads = context.indirectCommandBufferManager->GetViewIndirectBuffersForRenderPhase(
+                view,
+                m_renderPhase,
+                m_clodOnlyWorkloads);
             for (auto& wl : workloads) {
                 auto count = wl.workload.count;
                 if (count == 0) {
@@ -270,7 +287,7 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
                 }
                 ObjectCullRecord record{};
                 record.viewDataIndex = cameraBufferIndex;
-                record.activeDrawSetIndicesSRVIndex = context.objectManager->GetActiveDrawSetIndices(wl.flags)->GetSRVInfo(0).slot.index;
+                record.activeDrawSetIndicesSRVIndex = context.objectManager->GetActiveDrawSetIndices(wl.key)->GetSRVInfo(0).slot.index;
                 record.activeDrawCount = count;
                 record.dispatchGridX = static_cast<uint>((count + 63) / 64);
                 record.dispatchGridY = 1;
@@ -385,7 +402,7 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
     }
 
     // Collect per-view raster info for software raster modes, and visibility buffer tracking for WG SW raster.
-    if (UsesSWClassification(m_workGraphMode)) {
+    if (UsesSWClassification(m_workGraphMode) && UsesVisibilityBufferOutput(m_rasterOutputKind)) {
         m_visibilityBuffers.clear();
         auto numViews = context.viewManager->GetCameraBufferSize();
         std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
@@ -420,6 +437,7 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
     }
     else {
         m_visibilityBuffers.clear();
+        m_declaredResourcesChanged = false;
     }
 
     if (!m_isFirstPass) {

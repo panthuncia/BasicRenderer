@@ -86,7 +86,7 @@ public:
 		bool shadows = getShadowsEnabled();
 		
 		context.indirectCommandBufferManager->ForEachIndirectBuffer([&](uint64_t view,
-			MaterialCompileFlags flags,
+			const DrawWorkloadKey& key,
 			const IndirectWorkload& wl)
 			{
 				if (wl.count == 0) {
@@ -95,7 +95,7 @@ public:
 
 				// Set the compute pipeline state
 
-				auto& pso = (flags & MaterialCompileBlend) ? m_blendPSO : m_PSO;
+				auto& pso = (key.compileFlags & MaterialCompileBlend) ? m_blendPSO : m_PSO;
 
 				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
@@ -120,7 +120,7 @@ public:
 				//miscRootConstants[MESH_INSTANCE_OCCLUSION_CULLING_BUFFER_UAV_DESCRIPTOR_INDEX] = viewInfo->gpu.meshInstanceOcclusionCullingBitfieldBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 				miscRootConstants[MESHLET_CULLING_INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = viewInfo->gpu.indirectCommandBuffers.meshletCullingIndirectCommandBuffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
 				miscRootConstants[INDIRECT_COMMAND_BUFFER_UAV_DESCRIPTOR_INDEX] = wl.buffer->GetResource()->GetUAVShaderVisibleInfo(0).slot.index;
-				miscRootConstants[ACTIVE_DRAW_SET_INDICES_BUFFER_SRV_DESCRIPTOR_INDEX] = context.objectManager->GetActiveDrawSetIndices(flags)->GetSRVInfo(0).slot.index;
+				miscRootConstants[ACTIVE_DRAW_SET_INDICES_BUFFER_SRV_DESCRIPTOR_INDEX] = context.objectManager->GetActiveDrawSetIndices(key)->GetSRVInfo(0).slot.index;
 				miscRootConstants[MAX_DRAW_INDEX] = wl.count - 1;
 				commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
 

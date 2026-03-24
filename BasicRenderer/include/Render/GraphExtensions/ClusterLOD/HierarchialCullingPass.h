@@ -28,6 +28,9 @@ struct HierarchialCullingPassInputs {
     bool isFirstPass;
     unsigned int maxVisibleClusters;
     HierarchialCullingWorkGraphMode workGraphMode = HierarchialCullingWorkGraphMode::SoftwareRasterWorkGraph;
+    RenderPhase renderPhase;
+    bool clodOnlyWorkloads = false;
+    CLodRasterOutputKind rasterOutputKind = CLodRasterOutputKind::VisibilityBuffer;
 
     friend bool operator==(const HierarchialCullingPassInputs&, const HierarchialCullingPassInputs&) = default;
 };
@@ -38,6 +41,9 @@ inline rg::Hash64 HashValue(const HierarchialCullingPassInputs& i) {
     boost::hash_combine(seed, i.isFirstPass);
     boost::hash_combine(seed, i.maxVisibleClusters);
     boost::hash_combine(seed, static_cast<uint8_t>(i.workGraphMode));
+    boost::hash_combine(seed, i.renderPhase.hash);
+    boost::hash_combine(seed, i.clodOnlyWorkloads);
+    boost::hash_combine(seed, static_cast<uint8_t>(i.rasterOutputKind));
     return seed;
 }
 
@@ -106,5 +112,7 @@ private:
     bool m_declaredResourcesChanged = true;
     unsigned int m_maxVisibleClusters = 0u;
     HierarchialCullingWorkGraphMode m_workGraphMode = HierarchialCullingWorkGraphMode::SoftwareRasterWorkGraph;
-    RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
+    CLodRasterOutputKind m_rasterOutputKind = CLodRasterOutputKind::VisibilityBuffer;
+    RenderPhase m_renderPhase;
+    bool m_clodOnlyWorkloads = false;
 };

@@ -23,6 +23,11 @@ enum class CLodSoftwareRasterMode : uint8_t {
     WorkGraph,
 };
 
+enum class CLodRasterOutputKind : uint8_t {
+    VisibilityBuffer,
+    DeepVisibility,
+};
+
 inline constexpr const char* CLodSoftwareRasterModeSettingName = "clodSoftwareRasterMode";
 inline constexpr const char* CLodSoftwareRasterModeNames[] = {
     "Disabled",

@@ -20,6 +20,8 @@ class ResourceGroup;
 struct ClusterRasterizationPassInputs {
     bool wireframe;
     bool clearGbuffer;
+    RenderPhase renderPhase;
+    CLodRasterOutputKind outputKind = CLodRasterOutputKind::VisibilityBuffer;
 
     friend bool operator==(const ClusterRasterizationPassInputs&, const ClusterRasterizationPassInputs&) = default;
 };
@@ -29,6 +31,8 @@ inline rg::Hash64 HashValue(const ClusterRasterizationPassInputs& i) {
 
     boost::hash_combine(seed, i.wireframe);
     boost::hash_combine(seed, i.clearGbuffer);
+    boost::hash_combine(seed, i.renderPhase.hash);
+    boost::hash_combine(seed, static_cast<uint8_t>(i.outputKind));
     return seed;
 }
 
@@ -54,6 +58,7 @@ private:
     bool m_wireframe = false;
     bool m_meshShaders = false;
     bool m_clearGbuffer = true;
+    CLodRasterOutputKind m_outputKind = CLodRasterOutputKind::VisibilityBuffer;
 
     std::vector<CLodViewRasterInfo> m_viewRasterInfos;
     std::vector<std::shared_ptr<PixelBuffer>> m_visibilityBuffers;
@@ -72,5 +77,5 @@ private:
     uint32_t m_passHeight = 1;
     bool m_declaredResourcesChanged = true;
 
-    RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
+    RenderPhase m_renderPhase;
 };

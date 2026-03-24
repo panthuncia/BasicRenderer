@@ -1051,7 +1051,7 @@ std::shared_ptr<Material> LoadMaterial(
     }
 
     const std::string alphaMode = materialNode.value("alphaMode", std::string("OPAQUE"));
-    if (alphaMode == "MASK" || alphaMode == "BLEND") {
+    if (alphaMode == "MASK") {
         desc.blendState = BlendState::BLEND_STATE_MASK;
         desc.alphaCutoff = materialNode.value("alphaCutoff", 0.5f);
     }

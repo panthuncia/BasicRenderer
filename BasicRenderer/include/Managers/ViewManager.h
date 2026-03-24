@@ -166,10 +166,10 @@ public:
     void ForEachIndirectWorkload(F&& f) {
         if (!m_indirectManager) return;
         m_indirectManager->ForEachIndirectBuffer(
-            [&](uint64_t viewID, MaterialCompileFlags flags, const IndirectWorkload& wl) {
+            [&](uint64_t viewID, const DrawWorkloadKey& key, const IndirectWorkload& wl) {
                 auto it = m_views.find(viewID);
                 if (it == m_views.end()) return;
-                std::forward<F>(f)(it->second, flags, wl);
+                std::forward<F>(f)(it->second, key, wl);
             });
     }
 

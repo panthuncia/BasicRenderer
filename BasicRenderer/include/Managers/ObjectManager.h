@@ -38,14 +38,17 @@ public:
 
 	std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
 	std::vector<ResourceIdentifier> GetSupportedKeys() override;
-	std::shared_ptr<SortedUnsignedIntBuffer> GetActiveDrawSetIndices(MaterialCompileFlags flags) {
-		auto it = m_activeDrawSetIndices.find(flags);
+	std::shared_ptr<SortedUnsignedIntBuffer> GetActiveDrawSetIndices(const DrawWorkloadKey& workloadKey) {
+		auto it = m_activeDrawSetIndices.find(workloadKey);
 		if (it != m_activeDrawSetIndices.end()) {
 			return it->second;
 		} else {
 			throw std::runtime_error("Active draw set indices for given flags not found");
 		}
 	}
+    std::shared_ptr<SortedUnsignedIntBuffer> GetActiveDrawSetIndices(MaterialCompileFlags flags, const RenderPhase& renderPhase, bool clodOnly = false) {
+        return GetActiveDrawSetIndices(DrawWorkloadKey { flags, renderPhase, clodOnly });
+    }
 
 private:
 	ObjectManager();
@@ -53,7 +56,7 @@ private:
 	std::shared_ptr<DynamicBuffer> m_perObjectBuffers; // Per object constant buffer
 	std::shared_ptr<DynamicBuffer> m_masterIndirectCommandsBuffer; // Indirect draw command buffer
 	std::shared_ptr<LazyDynamicStructuredBuffer<DirectX::XMFLOAT4X4>> m_normalMatrixBuffer; // Normal matrices for each object
-	std::unordered_map<MaterialCompileFlags, std::shared_ptr<SortedUnsignedIntBuffer>> m_activeDrawSetIndices; // Indices into m_drawSetCommandsBuffer for active objects per flags
+	std::unordered_map<DrawWorkloadKey, std::shared_ptr<SortedUnsignedIntBuffer>, DrawWorkloadKey::Hasher> m_activeDrawSetIndices; // Indices into m_drawSetCommandsBuffer for active objects per workload
 	std::shared_ptr<LazyDynamicStructuredBuffer<PerMeshInstanceCB>> m_perMeshInstanceBuffers; // Indices into m_perObjectBuffers for each mesh instance in each object
 	std::mutex m_objectUpdateMutex; // Mutex for thread safety
 	std::mutex m_normalMatrixUpdateMutex; // Mutex for thread safety

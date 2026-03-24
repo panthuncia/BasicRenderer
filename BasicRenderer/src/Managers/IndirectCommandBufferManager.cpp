@@ -26,17 +26,12 @@ IndirectCommandBufferManager::~IndirectCommandBufferManager() {
     }
 }
 
-void IndirectCommandBufferManager::RegisterTechnique(const TechniqueDescriptor& tech) {
-    // Record flags capacity entry (starts at 0 until UpdateBuffersForFlags is called)
-    EnsureTechniqueRegistered(tech);
+void IndirectCommandBufferManager::RegisterWorkload(const DrawWorkloadKey& workloadKey) {
+    EnsureWorkloadRegistered(workloadKey);
 
-    // Build inverted index: phase -> flags
-    for (auto const& phase : tech.passes) {
-        auto& list = m_phaseToFlags[phase];
-        // Insert unique flags (avoid duplicates)
-        if (std::find(list.begin(), list.end(), tech.compileFlags) == list.end()) {
-            list.push_back(tech.compileFlags);
-        }
+    auto& list = m_phaseToFlags[workloadKey.renderPhase];
+    if (std::find(list.begin(), list.end(), workloadKey) == list.end()) {
+        list.push_back(workloadKey);
     }
 }
 
@@ -54,14 +49,17 @@ Components::IndirectCommandBuffers
 IndirectCommandBufferManager::CreateBuffersForView(uint64_t viewID) {
     PerViewBuffers perView;
 
-    // Create one buffer per flags value with current capacity (may be 0 if not yet sized)
-    for (auto const& [technique, cap] : m_flagsToCapacity) {
+    // Create one buffer per workload with current capacity (may be 0 if not yet sized)
+    for (auto const& [workloadKey, cap] : m_workloadToCapacity) {
         unsigned int size = cap;
         if (size == 0) continue; // not yet sized, will be created on first UpdateBuffersForFlags
 
         auto res = CreateIndexedStructuredBuffer(size, sizeof(DispatchMeshIndirectCommand), true, true);
-        res->SetName("IndirectCommandBuffer(flags=" + GetDebugNameForTechnique(technique) +
-            ", view=" + std::to_string(viewID) + ")");
+        res->SetName(
+            "IndirectCommandBuffer(flags=" + std::string(GetDebugNameForTechnique(TechniqueDescriptor { {}, workloadKey.compileFlags }))
+            + ", phase=" + std::to_string(workloadKey.renderPhase.hash)
+            + ", clodOnly=" + std::to_string(workloadKey.clodOnly ? 1 : 0)
+            + ", view=" + std::to_string(viewID) + ")");
         rg::memory::SetResourceUsageHint(*res, "Indirect command buffers");
         auto dyn = std::make_shared<DynamicGloballyIndexedResource>(res);
         auto entity = dyn->GetECSEntity();
@@ -70,18 +68,22 @@ IndirectCommandBufferManager::CreateBuffersForView(uint64_t viewID) {
         entity.set<Components::Resource>({ dyn });
 
         // Tag participation and kind
-        for (auto& pass : technique.passes) {
-            entity.add<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(pass));
-        }
+        entity.add<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(workloadKey.renderPhase));
         entity.add<Components::IsIndirectArguments>();
+        if (workloadKey.clodOnly) {
+            entity.add<Components::CLodOnlyDrawWorkload>();
+        }
+        else {
+            entity.add<Components::GeneralDrawWorkload>();
+        }
 
         m_indirectCommandsResourceGroup->AddResource(dyn);
-        perView.buffersByFlags[technique.compileFlags] = { dyn, 0 };
+        perView.buffersByWorkload[workloadKey] = { dyn, 0 };
 
-        // Set the workload count to the last known value for this flags combo
-        auto itCount = m_flagsToLastCount.find(technique);
-        if (itCount != m_flagsToLastCount.end()) {
-            perView.buffersByFlags[technique.compileFlags].count = itCount->second;
+        // Set the workload count to the last known value for this workload
+        auto itCount = m_workloadToLastCount.find(workloadKey);
+        if (itCount != m_workloadToLastCount.end()) {
+            perView.buffersByWorkload[workloadKey].count = itCount->second;
         }
     }
 
@@ -113,29 +115,29 @@ void IndirectCommandBufferManager::UnregisterBuffers(uint64_t viewID) {
     auto& perView = it->second;
     auto& deletion = DeletionManager::GetInstance();
 
-    for (auto& [flags, dyn] : perView.buffersByFlags) {
+    for (auto& [_, dyn] : perView.buffersByWorkload) {
         m_indirectCommandsResourceGroup->RemoveResource(dyn.buffer->GetResource().get());
     }
 
     m_viewIDToBuffers.erase(it);
 }
 
-void IndirectCommandBufferManager::UpdateBuffersForTechnique(TechniqueDescriptor technique, unsigned int numDraws) {
-    EnsureTechniqueRegistered(technique);
+void IndirectCommandBufferManager::UpdateBuffersForWorkload(const DrawWorkloadKey& workloadKey, unsigned int numDraws) {
+    EnsureWorkloadRegistered(workloadKey);
 
-    // Remember the last exact draw count for this flags combo
-    m_flagsToLastCount[technique] = numDraws;
+    // Remember the last exact draw count for this workload
+    m_workloadToLastCount[workloadKey] = numDraws;
 
     unsigned int newSize = RoundUp(numDraws);
-    unsigned int& curr = m_flagsToCapacity[technique];
+    unsigned int& curr = m_workloadToCapacity[workloadKey];
     if (newSize <= curr) { // no grow, just update count
         for (auto& [viewID, perView] : m_viewIDToBuffers) {
-            auto it = perView.buffersByFlags.find(technique.compileFlags);
-            if (it != perView.buffersByFlags.end()) {
+            auto it = perView.buffersByWorkload.find(workloadKey);
+            if (it != perView.buffersByWorkload.end()) {
                 it->second.count = numDraws;
             }
             else {
-                throw std::runtime_error("IndirectCommandBufferManager: missing buffer for flags on existing view");
+                throw std::runtime_error("IndirectCommandBufferManager: missing buffer for workload on existing view");
             }
         }
         return;
@@ -148,12 +150,15 @@ void IndirectCommandBufferManager::UpdateBuffersForTechnique(TechniqueDescriptor
 
     // Grow this flags buffer for every view
     for (auto& [viewID, perView] : m_viewIDToBuffers) {
-        auto it = perView.buffersByFlags.find(technique.compileFlags);
-        if (it != perView.buffersByFlags.end()) {
+        auto it = perView.buffersByWorkload.find(workloadKey);
+        if (it != perView.buffersByWorkload.end()) {
             // Replace existing
             auto res = CreateIndexedStructuredBuffer(curr, sizeof(DispatchMeshIndirectCommand), true, true);
-            res->SetName("IndirectCommandBuffer(flags=" + GetDebugNameForTechnique(technique) +
-                ", view=" + std::to_string(viewID) + ")");
+            res->SetName(
+                "IndirectCommandBuffer(flags=" + std::string(GetDebugNameForTechnique(TechniqueDescriptor { {}, workloadKey.compileFlags }))
+                + ", phase=" + std::to_string(workloadKey.renderPhase.hash)
+                + ", clodOnly=" + std::to_string(workloadKey.clodOnly ? 1 : 0)
+                + ", view=" + std::to_string(viewID) + ")");
             rg::memory::SetResourceUsageHint(*res, "Indirect command buffers");
             it->second.buffer->SetResource(res);
             it->second.count = numDraws;
@@ -161,22 +166,28 @@ void IndirectCommandBufferManager::UpdateBuffersForTechnique(TechniqueDescriptor
         else {
             // Create new buffer for this view (this flags appeared after the view was created)
             auto res = CreateIndexedStructuredBuffer(curr, sizeof(DispatchMeshIndirectCommand), true, true);
-			std::string techniqueName = GetDebugNameForTechnique(technique);
+            std::string techniqueName = GetDebugNameForTechnique(TechniqueDescriptor { {}, workloadKey.compileFlags });
             res->SetName("IndirectCommandBuffer(flags=" + techniqueName +
+                ", phase=" + std::to_string(workloadKey.renderPhase.hash) +
+                ", clodOnly=" + std::to_string(workloadKey.clodOnly ? 1 : 0) +
                 ", view=" + std::to_string(viewID) + ")");
             rg::memory::SetResourceUsageHint(*res, "Indirect command buffers");
             auto dyn = std::make_shared<DynamicGloballyIndexedResource>(res);
-            perView.buffersByFlags.emplace(technique.compileFlags, dyn);
+            perView.buffersByWorkload.emplace(workloadKey, IndirectWorkload { dyn, 0 });
             m_indirectCommandsResourceGroup->AddResource(dyn);
 
             auto entity = dyn->GetECSEntity();
             entity.set<Components::Resource>({ dyn });
-            for (auto& pass : technique.passes) {
-                entity.add<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(pass));
-            }
+            entity.add<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(workloadKey.renderPhase));
             entity.add<Components::IsIndirectArguments>();
+            if (workloadKey.clodOnly) {
+                entity.add<Components::CLodOnlyDrawWorkload>();
+            }
+            else {
+                entity.add<Components::GeneralDrawWorkload>();
+            }
 
-            perView.buffersByFlags[technique.compileFlags].count = numDraws;
+            perView.buffersByWorkload[workloadKey].count = numDraws;
         }
     }
 
@@ -189,21 +200,16 @@ void IndirectCommandBufferManager::SetIncrementSize(unsigned int incrementSize) 
 }
 
 std::vector<std::pair<MaterialCompileFlags, IndirectWorkload>>
-IndirectCommandBufferManager::GetBuffersForRenderPhase(uint64_t viewID, const RenderPhase& phase) const {
+IndirectCommandBufferManager::GetBuffersForRenderPhase(uint64_t viewID, const RenderPhase& phase, bool clodOnly) const {
     std::vector<std::pair<MaterialCompileFlags, IndirectWorkload>> out;
 
     auto vIt = m_viewIDToBuffers.find(viewID);
     if (vIt == m_viewIDToBuffers.end()) return out;
     auto const& perView = vIt->second;
 
-    auto pIt = m_phaseToFlags.find(phase);
-    if (pIt == m_phaseToFlags.end()) return out;
-
-    out.reserve(pIt->second.size());
-    for (auto flags : pIt->second) {
-        auto fIt = perView.buffersByFlags.find(flags);
-        if (fIt != perView.buffersByFlags.end()) {
-            out.push_back(*fIt);
+    for (auto const& [key, wl] : perView.buffersByWorkload) {
+        if (key.renderPhase == phase && key.clodOnly == clodOnly) {
+            out.emplace_back(key.compileFlags, wl);
         }
     }
     return out;
@@ -213,34 +219,25 @@ std::vector<IndirectBufferEntry>
 IndirectCommandBufferManager::GetAllIndirectBuffers() const {
     std::vector<IndirectBufferEntry> out;
     size_t total = 0;
-    for (auto const& [_, perView] : m_viewIDToBuffers) total += perView.buffersByFlags.size();
+    for (auto const& [_, perView] : m_viewIDToBuffers) total += perView.buffersByWorkload.size();
     out.reserve(total);
 
     for (auto const& [viewID, perView] : m_viewIDToBuffers) {
-        for (auto const& [flags, wl] : perView.buffersByFlags) {
-            out.push_back(IndirectBufferEntry{ viewID, flags, wl });
+        for (auto const& [key, wl] : perView.buffersByWorkload) {
+            out.push_back(IndirectBufferEntry{ viewID, key, wl });
         }
     }
     return out;
 }
 
 std::vector<IndirectBufferEntry>
-IndirectCommandBufferManager::GetIndirectBuffersForRenderPhase(const RenderPhase& phase) const {
+IndirectCommandBufferManager::GetIndirectBuffersForRenderPhase(const RenderPhase& phase, bool clodOnly) const {
     std::vector<IndirectBufferEntry> out;
 
-    auto pit = m_phaseToFlags.find(phase);
-    if (pit == m_phaseToFlags.end()) return out;
-
-    // Build a set for lookup of relevant flags
-    std::unordered_set<MaterialCompileFlags, MaterialCompileFlagsHash> include(
-        pit->second.begin(), pit->second.end());
-
-    out.reserve(m_viewIDToBuffers.size() * include.size());
-
     for (auto const& [viewID, perView] : m_viewIDToBuffers) {
-        for (auto const& [flags, wl] : perView.buffersByFlags) {
-            if (include.count(flags)) {
-                out.push_back(IndirectBufferEntry{ viewID, flags, wl });
+        for (auto const& [key, wl] : perView.buffersByWorkload) {
+            if (key.renderPhase == phase && key.clodOnly == clodOnly) {
+                out.push_back(IndirectBufferEntry{ viewID, key, wl });
             }
         }
     }
@@ -248,22 +245,16 @@ IndirectCommandBufferManager::GetIndirectBuffersForRenderPhase(const RenderPhase
 }
 
 std::vector<IndirectBufferEntry>
-IndirectCommandBufferManager::GetViewIndirectBuffersForRenderPhase(uint64_t viewID, const RenderPhase& phase) const {
+IndirectCommandBufferManager::GetViewIndirectBuffersForRenderPhase(uint64_t viewID, const RenderPhase& phase, bool clodOnly) const {
     std::vector<IndirectBufferEntry> out;
 
     auto vit = m_viewIDToBuffers.find(viewID);
     if (vit == m_viewIDToBuffers.end()) return out;
 
-    auto pit = m_phaseToFlags.find(phase);
-    if (pit == m_phaseToFlags.end()) return out;
-
-    std::unordered_set<MaterialCompileFlags, MaterialCompileFlagsHash> include(
-        pit->second.begin(), pit->second.end());
-
     auto const& perView = vit->second;
-    for (auto const& [flags, wl] : perView.buffersByFlags) {
-        if (include.count(flags)) {
-            out.push_back(IndirectBufferEntry{ viewID, flags, wl });
+    for (auto const& [key, wl] : perView.buffersByWorkload) {
+        if (key.renderPhase == phase && key.clodOnly == clodOnly) {
+            out.push_back(IndirectBufferEntry{ viewID, key, wl });
         }
     }
     return out;
@@ -301,7 +292,7 @@ std::shared_ptr<IResourceResolver> IndirectCommandBufferManager::ProvideResolver
 
 void IndirectCommandBufferManager::RecomputeTotal() {
     unsigned int sum = 0;
-    for (auto const& [flags, cap] : m_flagsToCapacity) sum += cap;
+    for (auto const& [_, cap] : m_workloadToCapacity) sum += cap;
     m_totalIndirectCommands = sum;
 }
 
@@ -337,39 +328,45 @@ void IndirectCommandBufferManager::EnsurePerViewFlagsBuffers(uint64_t viewID) {
     if (it == m_viewIDToBuffers.end()) return;
     auto& perView = it->second;
 
-    for (auto const& [technique, cap] : m_flagsToCapacity) {
+    for (auto const& [workloadKey, cap] : m_workloadToCapacity) {
         if (cap == 0) continue;
-        if (perView.buffersByFlags.count(technique.compileFlags)) continue;
+        if (perView.buffersByWorkload.count(workloadKey)) continue;
 
         auto res = CreateIndexedStructuredBuffer(cap, sizeof(DispatchMeshIndirectCommand), true, true);
-        res->SetName("IndirectCommandBuffer(flags=" + std::to_string(static_cast<uint64_t>(technique.compileFlags)) +
+        res->SetName("IndirectCommandBuffer(flags=" + std::to_string(static_cast<uint64_t>(workloadKey.compileFlags)) +
+            ", phase=" + std::to_string(workloadKey.renderPhase.hash) +
+            ", clodOnly=" + std::to_string(workloadKey.clodOnly ? 1 : 0) +
             ", view=" + std::to_string(viewID) + ")");
         rg::memory::SetResourceUsageHint(*res, "Indirect command buffers");
 
         auto dyn = std::make_shared<DynamicGloballyIndexedResource>(res);
-        perView.buffersByFlags.emplace(technique.compileFlags, dyn);
+        perView.buffersByWorkload.emplace(workloadKey, IndirectWorkload { dyn, 0 });
         m_indirectCommandsResourceGroup->AddResource(dyn);
 
         auto entity = dyn->GetECSEntity();
         entity.set<Components::Resource>({ dyn });
-        for (auto& pass : technique.passes) {
-            entity.add<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(pass));
-        }
+        entity.add<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(workloadKey.renderPhase));
         entity.add<Components::IsIndirectArguments>();
+        if (workloadKey.clodOnly) {
+            entity.add<Components::CLodOnlyDrawWorkload>();
+        }
+        else {
+            entity.add<Components::GeneralDrawWorkload>();
+        }
 
         // Initialize count from last known value
-        auto itCount = m_flagsToLastCount.find(technique);
-        if (itCount != m_flagsToLastCount.end()) {
-            perView.buffersByFlags[technique.compileFlags].count = itCount->second;
+        auto itCount = m_workloadToLastCount.find(workloadKey);
+        if (itCount != m_workloadToLastCount.end()) {
+            perView.buffersByWorkload[workloadKey].count = itCount->second;
         }
     }
 }
 
-void IndirectCommandBufferManager::EnsureTechniqueRegistered(TechniqueDescriptor technique) {
-    if (!m_flagsToCapacity.count(technique)) {
-        m_flagsToCapacity[technique] = 0;
+void IndirectCommandBufferManager::EnsureWorkloadRegistered(const DrawWorkloadKey& workloadKey) {
+    if (!m_workloadToCapacity.count(workloadKey)) {
+        m_workloadToCapacity[workloadKey] = 0;
     }
-    if (!m_flagsToLastCount.count(technique)) {
-        m_flagsToLastCount[technique] = 0;
+    if (!m_workloadToLastCount.count(workloadKey)) {
+        m_workloadToLastCount[workloadKey] = 0;
     }
 }

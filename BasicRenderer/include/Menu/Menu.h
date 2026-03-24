@@ -748,17 +748,21 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_meshShadersSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 
     // CLod queries
+    const auto visBufferTag = RendererECSManager::GetInstance().GetWorld().component<CLodExtensionVisibilityBufferTag>();
     m_telemetryQuery = RendererECSManager::GetInstance().GetWorld()
         .query_builder<const Components::Resource>()
         .with<CLodWorkGraphTelemetryBufferTag>()
+        .with<CLodExtensionTypeTag>(visBufferTag)
         .build();
     m_visibleClustersQuery = RendererECSManager::GetInstance().GetWorld()
         .query_builder<const Components::Resource>()
         .with<VisibleClustersBufferTag>()
+        .with<CLodExtensionTypeTag>(visBufferTag)
         .build();
     m_visibleCounterQuery = RendererECSManager::GetInstance().GetWorld()
         .query_builder<const Components::Resource>()
         .with<VisibleClustersCounterTag>()
+        .with<CLodExtensionTypeTag>(visBufferTag)
         .build();
 }
 
@@ -1585,7 +1589,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
         if (readbackService) {
             readbackService->RequestReadbackCapture(
-                "CLod::HierarchialCullingPass2",
+                "CLodOpaque::HierarchialCullingPass2",
                 clodTelemetryResource,
                 RangeSpec{},
                 [this](ReadbackCaptureResult&& result) {
@@ -1639,7 +1643,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
             if (readbackService) {
                 readbackService->RequestReadbackCapture(
-                    "CLod::HierarchialCullingPass2",
+                    "CLodOpaque::HierarchialCullingPass2",
                     clodVisibleCounterResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {
@@ -1659,7 +1663,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     });
 
                 readbackService->RequestReadbackCapture(
-                    "CLod::HierarchialCullingPass2",
+                    "CLodOpaque::HierarchialCullingPass2",
                     clodVisibleClustersResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {

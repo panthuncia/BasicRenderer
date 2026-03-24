@@ -332,10 +332,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //dragonScene->GetRoot().set<Components::Scale>({ 100, 100, 100 });
     //dragonScene->GetRoot().set<Components::Position>({ 0.0, 1, 1.0 });
 
-    //auto carScene = LoadModel("models/porche.glb");
-    //carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
-    //carScene->GetRoot().set<Components::Position>({ 1.0, 0.0, 1.0 });
-    //auto sphereScene = LoadModel("models/sphere.glb");
+    auto carScene = LoadModel("models/porche.glb");
+    carScene->GetRoot().set<Components::Scale>({ 0.6, 0.6, 0.6 });
+    carScene->GetRoot().set<Components::Position>({ 1.0, 0.0, 1.0 });
+    auto sphereScene = LoadModel("models/sphere.glb");
 
 
 	//auto mountainScene = LoadModel("models/terrain.glb");
@@ -367,6 +367,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     renderer.SetCurrentScene(baseScene);
 
 	renderer.GetCurrentScene()->AppendScene(cubes->Clone());
+
+	renderer.GetCurrentScene()->AppendScene(carScene->Clone());
 
 	//renderer.GetCurrentScene()->AppendScene(quad->Clone());
 

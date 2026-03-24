@@ -10,6 +10,7 @@
 #include "Managers/Singletons/RendererECSManager.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Materials/Material.h"
+#include "Render/DrawWorkload.h"
 #include "Mesh/MeshInstance.h"
 #include "Resources/Sampler.h"
 #include "Scene/Components.h"
@@ -97,9 +98,9 @@ Components::PerPassMeshes BuildPerPassMeshes(const Components::MeshInstances* me
 
     for (const auto& meshInstance : meshInstances->meshInstances) {
         const auto mesh = meshInstance->GetMesh();
-        for (const auto& pass : mesh->material->Technique().passes) {
+        ForEachMeshRenderPhase(*mesh, [&](const RenderPhase& pass) {
             perPassMeshes.meshesByPass[pass.hash].push_back(meshInstance);
-        }
+        });
     }
 
     return perPassMeshes;
@@ -168,9 +169,9 @@ void SyncPassMembership(flecs::entity dst, const Components::MeshInstances* mesh
     const auto& renderPhaseEntities = RendererECSManager::GetInstance().GetRenderPhaseEntities();
     std::unordered_set<uint64_t> passHashes;
     for (const auto& meshInstance : meshInstances->meshInstances) {
-        for (const auto& pass : meshInstance->GetMesh()->material->Technique().passes) {
+        ForEachMeshRenderPhase(*meshInstance->GetMesh(), [&](const RenderPhase& pass) {
             passHashes.insert(pass.hash);
-        }
+        });
     }
 
     for (const auto& [phase, phaseEntity] : renderPhaseEntities) {

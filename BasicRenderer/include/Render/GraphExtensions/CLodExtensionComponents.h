@@ -2,10 +2,12 @@
 
 enum class CLodExtensionType {
     VisiblityBuffer,
+    AlphaBlend,
     Shadow,
 };
 
 struct CLodExtensionVisibilityBufferTag {};
+struct CLodExtensionAlphaBlendTag {};
 struct CLodExtensionShadowTag {};
 
 struct CLodExtensionTypeTag {
