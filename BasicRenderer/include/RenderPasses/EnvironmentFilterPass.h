@@ -105,10 +105,11 @@ public:
 
                 float roughness = (maxMipLevels > 1) ? (float)mip / float(maxMipLevels - 1) : 0.0f;
 
-                const uint32_t dstUavIndex =
-                    j.dstPrefilteredCubemap->GetUAVShaderVisibleInfo(mip, 0).slot.index;
                 for (uint32_t face = 0; face < 6; ++face)
                 {
+                    const uint32_t dstUavIndex =
+                        j.dstPrefilteredCubemap->GetUAVShaderVisibleInfo(mip, face).slot.index;
+
                     // Push constants: [srcSrv, dstUav, face, size, roughnessBits]
                     uint32_t pc[5] = {
                         srcSrvIndex,

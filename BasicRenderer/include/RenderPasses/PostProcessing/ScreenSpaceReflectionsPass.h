@@ -49,26 +49,20 @@ public:
         auto* renderContext = executionContext.hostData->Get<RenderContext>();
         auto& context = *renderContext;
 
-		// Clear the render target of the SSSR output
-        //context.commandList.ClearRenderTargetView( m_pSSSROutput->GetRTVInfo(0).slot, m_pSSSROutput->GetClearColor());
-
         executionContext.commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-		// Transition SSSR output to UAV state
-  //      CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-  //          m_pSSSROutput->GetAPIResource(),
-  //          D3D12_RESOURCE_STATE_COMMON,
-  //          D3D12_RESOURCE_STATE_UNORDERED_ACCESS
-		//);
-		//context.commandList->ResourceBarrier(1, &barrier);
+        rhi::UavClearInfo clearInfo{};
+        clearInfo.cpuVisible = m_pSSSROutput->GetUAVNonShaderVisibleInfo(0).slot;
+        clearInfo.shaderVisible = m_pSSSROutput->GetUAVShaderVisibleInfo(0).slot;
+        clearInfo.resource = m_pSSSROutput->GetAPIResource();
 
-        // Clear as UAV
-  //      context.commandList.ClearUavFloat(
-  //          { m_pSSSROutput->GetUAVShaderVisibleInfo(0).slot,
-  //            m_pSSSROutput->GetUAVNonShaderVisibleInfo(0).slot,
-  //            m_pSSSROutput->GetAPIResource() },
-		//	m_pSSSROutput->GetClearColor().rgba
-		//);
+        rhi::UavClearFloat clearValue{};
+        clearValue.v[0] = 0.0f;
+        clearValue.v[1] = 0.0f;
+        clearValue.v[2] = 0.0f;
+        clearValue.v[3] = 0.0f;
+
+        executionContext.commandList.ClearUavFloat(clearInfo, clearValue);
 
 
         FFXManager::GetInstance().EvaluateSSSR(
@@ -83,17 +77,6 @@ public:
 			m_pBRDFLUT,
             m_pSSSROutput
 		);
-
-		// All resources must exit in COMMON state for legacy interop
-
-		//barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-  //          m_pSSSROutput->GetAPIResource(),
-  //          D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-  //          D3D12_RESOURCE_STATE_COMMON
-  //      );
-
-		//context.commandList->ResourceBarrier(1, &barrier);
-
         return {};
     }
 

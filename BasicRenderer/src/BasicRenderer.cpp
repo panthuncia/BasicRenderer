@@ -342,8 +342,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 	//mountainScene->GetRoot().set<Components::Scale>({ 50.0, 50.0, 50.0 });
 	//mountainScene->GetRoot().set<Components::Position>({ 0.0, -2.0, 0.0 });
 
-    //auto tigerScene = LoadModel("models/tiger.glb");
-    //tigerScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
+    auto tigerScene = LoadModel("models/tiger.glb");
+    tigerScene->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
 	//auto shiba = LoadModel("models/shiba.glb");
 
@@ -383,7 +383,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	//renderer.GetCurrentScene()->AppendScene(dragonScene->Clone());
     
-	//renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
+	renderer.GetCurrentScene()->AppendScene(tigerScene->Clone());
 
 	//renderer.GetCurrentScene()->AppendScene(robot->Clone());
 

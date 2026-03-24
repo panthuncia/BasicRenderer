@@ -1068,9 +1068,7 @@ std::shared_ptr<Material> LoadMaterial(
         desc.opacity.factor = 1.0f;
     }
 
-    if (materialNode.value("doubleSided", false)) {
-        spdlog::debug("glTF material '{}' is marked doubleSided; current material descriptor only applies this indirectly through technique heuristics.", desc.name);
-    }
+    desc.forceDoubleSided = materialNode.value("doubleSided", false);
 
     cache.materialCache[materialIndex] = Material::CreateShared(desc);
 

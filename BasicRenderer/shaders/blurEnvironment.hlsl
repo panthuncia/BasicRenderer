@@ -88,7 +88,7 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     float3 V = N;
 
     TextureCube<float4> srcCube = ResourceDescriptorHeap[SrcCubeSrvIndex];
-    RWTexture2DArray<float4> dstCube = ResourceDescriptorHeap[DstCubeUavIndex];
+    RWTexture2D<float4> dstCube = ResourceDescriptorHeap[DstCubeUavIndex];
 
     const uint SAMPLE_COUNT = 16u;
     float3 prefiltered = 0.0;
@@ -111,5 +111,5 @@ void CSMain(uint3 tid : SV_DispatchThreadID)
     }
 
     prefiltered = (totalWeight > 0.0) ? prefiltered / totalWeight : 0.0;
-    dstCube[uint3(tid.x, tid.y, Face)] = float4(prefiltered, 1.0);
+    dstCube[tid.xy] = float4(prefiltered, 1.0);
 }
