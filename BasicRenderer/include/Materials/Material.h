@@ -108,6 +108,7 @@ public:
             materialFlags |= MaterialFlags::MATERIAL_NORMAL_MAP | MaterialFlags::MATERIAL_TEXTURED;
         }
         auto diffuseColor = desc.diffuseColor;
+        auto emissiveColor = desc.emissiveColor;
         if (desc.opacity.texture) { // TODO: How can we tell if this should be used as a mask or as a blend?
             materialFlags |= MaterialFlags::MATERIAL_OPACITY_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
             blendState = BlendState::BLEND_STATE_BLEND; // Use blend state for opacity
@@ -126,6 +127,10 @@ public:
         if (desc.invertNormalGreen) {
             materialFlags |= MaterialFlags::MATERIAL_INVERT_NORMAL_GREEN;
         }
+        const float emissiveScalar = desc.emissive.factor.Get();
+        emissiveColor.x *= emissiveScalar;
+        emissiveColor.y *= emissiveScalar;
+        emissiveColor.z *= emissiveScalar;
 		TechniqueDescriptor technique = PickTechnique(desc);
 
         return CreateShared(
@@ -143,7 +148,7 @@ public:
             desc.metallic.factor.Get(),
             desc.roughness.factor.Get(),
             diffuseColor,
-            desc.emissiveColor,
+            emissiveColor,
             desc.baseColor.channels,
             desc.normal.channels,
             desc.aoMap.channels,

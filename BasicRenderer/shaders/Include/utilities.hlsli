@@ -531,7 +531,11 @@ void SampleMaterialFromUvCache(
         emissiveDUdx = parallaxDUdx;
         emissiveDUdy = parallaxDUdy;
     }
-    emissive = Sample2DGrad(emissiveTexture, emissiveSamplerState, emissiveSampleUv, emissiveDUdx, emissiveDUdy).rgb * materialInfo.emissiveFactor.rgb;
+    float4 emissiveSample = Sample2DGrad(emissiveTexture, emissiveSamplerState, emissiveSampleUv, emissiveDUdx, emissiveDUdy);
+    emissive = float3(
+        DynamicSwizzle(emissiveSample, materialInfo.emissiveChannels.x),
+        DynamicSwizzle(emissiveSample, materialInfo.emissiveChannels.y),
+        DynamicSwizzle(emissiveSample, materialInfo.emissiveChannels.z)) * materialInfo.emissiveFactor.rgb;
 #endif
 
     ret.albedo = baseColor.rgb * vertexColorMultiplier;
