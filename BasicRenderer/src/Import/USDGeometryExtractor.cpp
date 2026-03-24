@@ -26,6 +26,7 @@
 
 #include "Import/CLodCacheLoader.h"
 #include "Mesh/ClusterLODTypes.h"
+#include "Mesh/VertexLayout.h"
 #include "Mesh/VertexFlags.h"
 
 using namespace pxr;
@@ -214,7 +215,6 @@ static void LoadGeom(
 	indices.clear();
 	vertexFlags = 0;
     uvSets.clear();
-    (void)requiredUvSetNames;
 
 	// If we have a skeleton, build joint mappings
 	std::unordered_map<unsigned int, unsigned int> jointMapping;
@@ -259,8 +259,6 @@ static void LoadGeom(
 		HasMultipleAuthoredTimeSamples(mesh.GetFaceVertexIndicesAttr()) ||
 		HasMultipleAuthoredTimeSamples(mesh.GetHoleIndicesAttr());
 
-	vertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3)
-		+ sizeof(DirectX::XMFLOAT2);
 	skinningVertexSize = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3)
 		+ sizeof(uint32_t) * kMaxSkinInfluences + sizeof(float) * kMaxSkinInfluences;
 
@@ -377,8 +375,35 @@ static void LoadGeom(
 		}
 	}
 
+	bool gotColors = false;
+	InterpolationType colorInterp = InterpolationType::Vertex;
+	std::vector<float> rawColors;
+	UsdGeomPrimvar displayColorPrimvar = mesh.GetDisplayColorPrimvar();
+	if (displayColorPrimvar) {
+		VtArray<GfVec3f> usdColors;
+		if (displayColorPrimvar.ComputeFlattened(&usdColors, geomTimeCode)) {
+			FlattenVecArray<GfVec3f>(usdColors, rawColors, 1.0f);
+			colorInterp = GetInterpolationType(displayColorPrimvar.GetInterpolation());
+			gotColors = true;
+			vertexFlags |= VertexFlags::VERTEX_COLORS;
+		}
+		else {
+			spdlog::warn(
+				"Mesh '{}' authored primvars:displayColor but it could not be flattened at geometry sample time {}; ignoring vertex colors for preview extraction.",
+				primName,
+				geomTimeCode.IsDefault() ? -1.0 : geomTimeCode.GetValue());
+		}
+	}
+
     std::vector<std::string> uvSetNames;
-    uvSetNames.push_back("st");
+    for (const std::string& requiredUvSetName : requiredUvSetNames) {
+        if (!requiredUvSetName.empty()) {
+            uvSetNames.push_back(requiredUvSetName);
+        }
+    }
+    if (std::find(uvSetNames.begin(), uvSetNames.end(), "st") == uvSetNames.end()) {
+        uvSetNames.push_back("st");
+    }
     {
         std::set<std::string> remainingNames;
         for (const UsdGeomPrimvar& primvar : primvarsAPI.GetPrimvars()) {
@@ -400,7 +425,11 @@ static void LoadGeom(
             remainingNames.insert(primvarName);
         }
 
-        uvSetNames.insert(uvSetNames.end(), remainingNames.begin(), remainingNames.end());
+        for (const std::string& remainingName : remainingNames) {
+            if (std::find(uvSetNames.begin(), uvSetNames.end(), remainingName) == uvSetNames.end()) {
+                uvSetNames.push_back(remainingName);
+            }
+        }
     }
 
     struct UvSetBuildData {
@@ -432,7 +461,16 @@ static void LoadGeom(
         uvSetBuildData.push_back(std::move(uvData));
     }
 
-    vertexFlags |= VertexFlags::VERTEX_TEXCOORDS;
+    size_t primaryUvSetIndex = uvSetBuildData.size();
+    for (size_t uvSetIndex = 0; uvSetIndex < uvSetBuildData.size(); ++uvSetIndex) {
+        if (uvSetBuildData[uvSetIndex].available) {
+            primaryUvSetIndex = uvSetIndex;
+            vertexFlags |= VertexFlags::VERTEX_TEXCOORDS;
+            break;
+        }
+    }
+
+	vertexSize = MeshVertexLayout::VertexSize(vertexFlags);
 
 	// skinning
 	UsdSkelBindingAPI bindAPI(mesh.GetPrim());
@@ -555,6 +593,7 @@ static void LoadGeom(
 	bool warnedInvalidFaceVertexIndex = false;
 	bool warnedNormalTupleRange = false;
 	bool warnedUvTupleRange = false;
+	bool warnedColorTupleRange = false;
 	bool warnedJointTupleRange = false;
 	bool warnedWeightTupleRange = false;
 
@@ -613,18 +652,20 @@ static void LoadGeom(
 					const size_t posBase = static_cast<size_t>(vertIdx) * 3;
 					std::memcpy(outPtr, ctrlPos.data() + posBase, sizeof(DirectX::XMFLOAT3));
 
-					size_t offset = sizeof(DirectX::XMFLOAT3);
 					if (gotNormals)
-						copyTupleFloat(outPtr + offset, rawNormals, 3, normInterp, f, fvIndex, vertIdx, warnedNormalTupleRange, "normals");
+						copyTupleFloat(outPtr + MeshVertexLayout::NormalOffset, rawNormals, 3, normInterp, f, fvIndex, vertIdx, warnedNormalTupleRange, "normals");
 					else
-						std::memcpy(outPtr + offset, &defaultNormal, sizeof(defaultNormal));
-					offset += sizeof(DirectX::XMFLOAT3);
+						std::memcpy(outPtr + MeshVertexLayout::NormalOffset, &defaultNormal, sizeof(defaultNormal));
 
-                    DirectX::XMFLOAT2 packedUv = { 0.0f, 0.0f };
-                    if (!uvSetBuildData.empty() && uvSetBuildData[0].available) {
-                        copyTupleFloat(reinterpret_cast<std::byte*>(&packedUv), uvSetBuildData[0].rawData, 2, uvSetBuildData[0].interpolation, f, fvIndex, vertIdx, warnedUvTupleRange, uvSetBuildData[0].uvSet.name.c_str());
+                    if (primaryUvSetIndex < uvSetBuildData.size()) {
+                        DirectX::XMFLOAT2 packedUv = { 0.0f, 0.0f };
+                        copyTupleFloat(reinterpret_cast<std::byte*>(&packedUv), uvSetBuildData[primaryUvSetIndex].rawData, 2, uvSetBuildData[primaryUvSetIndex].interpolation, f, fvIndex, vertIdx, warnedUvTupleRange, uvSetBuildData[primaryUvSetIndex].uvSet.name.c_str());
+                        std::memcpy(outPtr + MeshVertexLayout::TexcoordOffset(vertexFlags), &packedUv, sizeof(packedUv));
                     }
-                    std::memcpy(outPtr + offset, &packedUv, sizeof(packedUv));
+
+					if (gotColors) {
+						copyTupleFloat(outPtr + MeshVertexLayout::ColorOffset(vertexFlags), rawColors, 3, colorInterp, f, fvIndex, vertIdx, warnedColorTupleRange, "displayColor");
+					}
 
 					if (hasSkinning) {
 						std::byte* skinPtr = skinningData.value()->data() + outVertex * skinningVertexSize;

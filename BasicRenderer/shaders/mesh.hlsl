@@ -110,6 +110,17 @@ float3 DecodeCompressedNormal(uint meshletLocalVertex, uint normalArrayBase, uin
     return OctDecodeNormal(UnpackSnorm16x2(packed));
 }
 
+float3 DecodeCompressedColor(uint meshletLocalVertex, uint colorArrayBase, uint vertexAttributeOffset, uint pagePoolSlabDescriptorIndex)
+{
+    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
+    uint addr = colorArrayBase + (vertexAttributeOffset + meshletLocalVertex) * 4u;
+    uint packed = slab.Load(addr);
+    return float3(
+        float(packed & 0xFFu) / 255.0f,
+        float((packed >> 8u) & 0xFFu) / 255.0f,
+        float((packed >> 16u) & 0xFFu) / 255.0f);
+}
+
 SkinningInfluences DecodePackedJoints(uint meshletLocalVertex, MeshletSetup setup)
 {
     SkinningInfluences skinning;
@@ -302,9 +313,7 @@ PSInput GetVertexAttributes(uint blockByteOffset, uint prevBlockByteOffset, uint
         result.normalWorldSpace = normalize(mul(vertex.normal, normalMatrix));
     }
     
-    if (flags & VERTEX_COLORS) {
-        result.color = vertex.color;
-    };
+    result.color = vertex.color;
     
     result.meshletIndex = vGroupID.x;
     
@@ -421,6 +430,9 @@ VisBufferPSInput GetVisBufferVertexAttributesForViewCLod(
         setup.vertexAttributeOffset,
         setup.pagePoolSlabDescriptorIndex);
     vertex.texcoord = DecodeCompressedUV(meshletLocalVertex, 0u, setup);
+    vertex.color = ((setup.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_COLOR) != 0u)
+        ? DecodeCompressedColor(meshletLocalVertex, setup.colorArrayBase, setup.vertexAttributeOffset, setup.pagePoolSlabDescriptorIndex)
+        : float3(1.0f, 1.0f, 1.0f);
     ApplyClodSkinningToVertex(meshletLocalVertex, setup, vertex);
 
     return BuildVisBufferVertexAttributesForView(
@@ -569,6 +581,7 @@ bool InitializeMeshletFromCompactedCluster(uint3 packedCluster, out MeshletSetup
     setup.pageByteOffset = pageSlabOff;
     setup.positionBitstreamBase = pageSlabOff + hdr.positionBitstreamOffset;
     setup.normalArrayBase = pageSlabOff + hdr.normalArrayOffset;
+    setup.colorArrayBase = pageSlabOff + hdr.colorArrayOffset;
     setup.jointArrayBase = pageSlabOff + hdr.jointArrayOffset;
     setup.weightArrayBase = pageSlabOff + hdr.weightArrayOffset;
     setup.uvDescriptorBase = pageSlabOff + hdr.uvDescriptorOffset;

@@ -72,6 +72,7 @@ struct MeshletSetup
     uint pageByteOffset;
     uint positionBitstreamBase;
     uint normalArrayBase;
+    uint colorArrayBase;
     uint jointArrayBase;
     uint weightArrayBase;
     uint triangleStreamBase;
@@ -130,6 +131,7 @@ bool InitializeMeshletInternal(
     setup.pageByteOffset = 0;
     setup.positionBitstreamBase = 0;
     setup.normalArrayBase = 0;
+    setup.colorArrayBase = 0;
     setup.jointArrayBase = 0;
     setup.weightArrayBase = 0;
     setup.triangleStreamBase = 0;
@@ -223,6 +225,7 @@ bool InitializeMeshletInternalCLod(
     setup.pageByteOffset = pageSlabOff;
     setup.positionBitstreamBase = pageSlabOff + hdr.positionBitstreamOffset;
     setup.normalArrayBase = pageSlabOff + hdr.normalArrayOffset;
+    setup.colorArrayBase = pageSlabOff + hdr.colorArrayOffset;
     setup.jointArrayBase = pageSlabOff + hdr.jointArrayOffset;
     setup.weightArrayBase = pageSlabOff + hdr.weightArrayOffset;
     setup.uvDescriptorBase = pageSlabOff + hdr.uvDescriptorOffset;

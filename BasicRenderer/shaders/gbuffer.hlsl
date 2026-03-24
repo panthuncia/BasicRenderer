@@ -10,6 +10,7 @@
 #include "include/clodPageAccess.hlsli"
 #include "include/visibleClusterPacking.hlsli"
 #include "include/debugPayload.hlsli"
+#include "include/vertexLayout.hlsli"
 
 #define CLOD_COMPRESSED_POSITIONS 1u
 #define CLOD_COMPRESSED_NORMALS 4u
@@ -80,13 +81,13 @@ float3 LoadPositionOnly(uint baseByteOffset, ByteAddressBuffer buffer)
 
 float3 LoadNormalOnly(uint baseByteOffset, ByteAddressBuffer buffer)
 {
-    return LoadFloat3(baseByteOffset + 12u, buffer); // normal after position
+    return LoadFloat3(baseByteOffset + VERTEX_LAYOUT_NORMAL_OFFSET, buffer); // normal after position
 }
 
 float2 LoadTexcoordOnly(uint baseByteOffset, ByteAddressBuffer buffer, uint flags)
 {
     if (flags & VERTEX_TEXCOORDS)
-        return LoadFloat2(baseByteOffset + 24u, buffer); // texcoord after pos+normal
+        return LoadFloat2(baseByteOffset + VertexLayoutTexcoordOffset(flags), buffer);
 
     return float2(0.0, 0.0);
 }
@@ -170,6 +171,7 @@ struct MeshletResolveData {
     uint pageByteOffset;
     uint positionBitstreamBase;
     uint normalArrayBase;
+    uint colorArrayBase;
     uint jointArrayBase;
     uint weightArrayBase;
     uint triangleStreamBase;
@@ -329,6 +331,17 @@ float3 DecodeCompressedNormal(uint meshletLocalVertex, MeshletResolveData d)
     return OctDecodeNormal(UnpackSnorm16x2(packed));
 }
 
+float3 DecodeCompressedColor(uint meshletLocalVertex, MeshletResolveData d)
+{
+    ByteAddressBuffer slab = ResourceDescriptorHeap[d.pagePoolSlabDescriptorIndex];
+    uint addr = d.colorArrayBase + (d.vertexAttributeOffset + meshletLocalVertex) * 4u;
+    uint packed = slab.Load(addr);
+    return float3(
+        float(packed & 0xFFu) / 255.0f,
+        float((packed >> 8u) & 0xFFu) / 255.0f,
+        float((packed >> 16u) & 0xFFu) / 255.0f);
+}
+
 SkinningInfluences DecodePackedJoints(uint meshletLocalVertex, MeshletResolveData d)
 {
     SkinningInfluences skinning;
@@ -470,6 +483,7 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
         d.uvBitstreamDirectoryBase = pageSlabOff + hdr.uvBitstreamDirectoryOffset;
         d.positionBitstreamBase = pageSlabOff + hdr.positionBitstreamOffset;
         d.normalArrayBase = pageSlabOff + hdr.normalArrayOffset;
+        d.colorArrayBase = pageSlabOff + hdr.colorArrayOffset;
         d.jointArrayBase = pageSlabOff + hdr.jointArrayOffset;
         d.weightArrayBase = pageSlabOff + hdr.weightArrayOffset;
         d.triangleStreamBase = pageSlabOff + hdr.triangleStreamOffset;
@@ -500,6 +514,7 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
     d.pageByteOffset = WaveReadLaneAt(d.pageByteOffset, leader);
     d.positionBitstreamBase = WaveReadLaneAt(d.positionBitstreamBase, leader);
     d.normalArrayBase = WaveReadLaneAt(d.normalArrayBase, leader);
+    d.colorArrayBase = WaveReadLaneAt(d.colorArrayBase, leader);
     d.jointArrayBase = WaveReadLaneAt(d.jointArrayBase, leader);
     d.weightArrayBase = WaveReadLaneAt(d.weightArrayBase, leader);
     d.triangleStreamBase = WaveReadLaneAt(d.triangleStreamBase, leader);
@@ -585,6 +600,9 @@ void EvaluateGBufferOptimized(uint2 pixel)
     float3 n0 = DecodeCompressedNormal(triIdx.x, md);
     float3 n1 = DecodeCompressedNormal(triIdx.y, md);
     float3 n2 = DecodeCompressedNormal(triIdx.z, md);
+    float3 c0 = ((md.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_COLOR) != 0u) ? DecodeCompressedColor(triIdx.x, md) : float3(1.0f, 1.0f, 1.0f);
+    float3 c1 = ((md.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_COLOR) != 0u) ? DecodeCompressedColor(triIdx.y, md) : float3(1.0f, 1.0f, 1.0f);
+    float3 c2 = ((md.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_COLOR) != 0u) ? DecodeCompressedColor(triIdx.z, md) : float3(1.0f, 1.0f, 1.0f);
     ApplyClodSkinning(triIdx.x, md, p0, n0);
     ApplyClodSkinning(triIdx.y, md, p1, n1);
     ApplyClodSkinning(triIdx.z, md, p2, n2);
@@ -625,6 +643,10 @@ void EvaluateGBufferOptimized(uint2 pixel)
     float interpNY = InterpolateWithDeriv(bary, n0.y, n1.y, n2.y).x;
     float interpNZ = InterpolateWithDeriv(bary, n0.z, n1.z, n2.z).x;
     float3 normalOS = normalize(float3(interpNX, interpNY, interpNZ));
+    float3 vertexColor = float3(
+        InterpolateWithDeriv(bary, c0.x, c1.x, c2.x).x,
+        InterpolateWithDeriv(bary, c0.y, c1.y, c2.y).x,
+        InterpolateWithDeriv(bary, c0.z, c1.z, c2.z).x);
 
     StructuredBuffer<float4x4> normalMatrixBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::NormalMatrixBuffer)];
     float3x3 normalMatrix = (float3x3) normalMatrixBuffer[obj.normalMatrixBufferIndex];
@@ -649,6 +671,7 @@ void EvaluateGBufferOptimized(uint2 pixel)
         uvBindings,
         worldNormal,
         worldPosition,
+        vertexColor,
         materialInfo,
         materialFlags,
         dpdx,

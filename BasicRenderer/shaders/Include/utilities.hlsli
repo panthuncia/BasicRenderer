@@ -347,6 +347,7 @@ void SampleMaterialFromUvCache(
     in MaterialUvBindings uvBindings,
     in float3 normalWSBase,
     in float3 posWS,
+    in float3 vertexColorMultiplier,
     in MaterialInfo materialInfo,
     in uint materialFlags,
     in float3 dpdx,
@@ -533,7 +534,7 @@ void SampleMaterialFromUvCache(
     emissive = Sample2DGrad(emissiveTexture, emissiveSamplerState, emissiveSampleUv, emissiveDUdx, emissiveDUdy).rgb * materialInfo.emissiveFactor.rgb;
 #endif
 
-    ret.albedo = baseColor.rgb;
+    ret.albedo = baseColor.rgb * vertexColorMultiplier;
     ret.normalWS = normalWS;
     ret.emissive = emissive;
     ret.metallic = metallic;
@@ -554,7 +555,7 @@ void SampleMaterialCorePrecompiled(
 {
     MaterialUvCache uvCache = BuildSingleUvCache(uv, dUVdx, dUVdy);
     MaterialUvBindings uvBindings = BuildMaterialUvBindings(materialInfo, materialFlags, uvCache);
-    SampleMaterialFromUvCache(uvCache, uvBindings, normalWSBase, posWS, materialInfo, materialFlags, ddx(posWS), ddy(posWS), ret);
+    SampleMaterialFromUvCache(uvCache, uvBindings, normalWSBase, posWS, float3(1.0f, 1.0f, 1.0f), materialInfo, materialFlags, ddx(posWS), ddy(posWS), ret);
     return;
 #if 0
     float2 localUV = uv;
@@ -715,7 +716,12 @@ void GetMaterialInfoForFragment(in const PSInput input, out MaterialInputs ret)
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     uint meshBufferIndexLocal = perMeshBufferIndex;
     PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndexLocal];
-    SampleMaterial(input.texcoord, input.normalWorldSpace, input.positionWorldSpace.xyz, meshBuffer.materialDataIndex, ret);
+    StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
+    MaterialInfo materialInfo = materialDataBuffer[meshBuffer.materialDataIndex];
+    uint materialFlags = materialInfo.materialFlags;
+    MaterialUvCache uvCache = BuildSingleUvCache(input.texcoord, ddx(input.texcoord), ddy(input.texcoord));
+    MaterialUvBindings uvBindings = BuildMaterialUvBindings(materialInfo, materialFlags, uvCache);
+    SampleMaterialFromUvCache(uvCache, uvBindings, input.normalWorldSpace, input.positionWorldSpace.xyz, input.color, materialInfo, materialFlags, ddx(input.positionWorldSpace.xyz), ddy(input.positionWorldSpace.xyz), ret);
 }
 
 void GetMaterialInfoForFragmentPrecompiled(in const PSInput input, out MaterialInputs ret)
@@ -723,7 +729,22 @@ void GetMaterialInfoForFragmentPrecompiled(in const PSInput input, out MaterialI
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     uint meshBufferIndexLocal = perMeshBufferIndex;
     PerMeshBuffer meshBuffer = perMeshBuffer[meshBufferIndexLocal];
-    SampleMaterialPrecompiled(input.texcoord, input.normalWorldSpace, input.positionWorldSpace.xyz, meshBuffer.materialDataIndex, ret);
+    StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
+    MaterialInfo materialInfo = materialDataBuffer[meshBuffer.materialDataIndex];
+    uint materialFlags = materialInfo.materialFlags;
+    MaterialUvCache uvCache = BuildSingleUvCache(input.texcoord, ddx(input.texcoord), ddy(input.texcoord));
+    MaterialUvBindings uvBindings = BuildMaterialUvBindings(materialInfo, materialFlags, uvCache);
+    SampleMaterialFromUvCache(
+        uvCache,
+        uvBindings,
+        input.normalWorldSpace,
+        input.positionWorldSpace.xyz,
+        input.color,
+        materialInfo,
+        materialFlags,
+        ddx(input.positionWorldSpace.xyz),
+        ddy(input.positionWorldSpace.xyz),
+        ret);
 }
 
 void SampleMaterialCS(
@@ -743,7 +764,7 @@ void SampleMaterialCS(
     uint materialFlags = materialInfo.materialFlags;
     MaterialUvCache uvCache = BuildSingleUvCache(uv, dUVdx, dUVdy);
     MaterialUvBindings uvBindings = BuildMaterialUvBindings(materialInfo, materialFlags, uvCache);
-    SampleMaterialFromUvCache(uvCache, uvBindings, normalWSBase, posWS, materialInfo, materialFlags, dpdx, dpdy, ret);
+    SampleMaterialFromUvCache(uvCache, uvBindings, normalWSBase, posWS, float3(1.0f, 1.0f, 1.0f), materialInfo, materialFlags, dpdx, dpdy, ret);
 }
 
 float PerceptualRoughnessToRoughness(float perceptualRoughness)

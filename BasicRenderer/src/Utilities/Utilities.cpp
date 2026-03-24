@@ -19,6 +19,7 @@
 #include "Render/DescriptorHeap.h"
 #include "Materials/Material.h"
 #include "Mesh/Mesh.h"
+#include "Mesh/VertexLayout.h"
 #include "Scene/Components.h"
 #include "NsightAftermathHelpers.h"
 #include "Resources/PixelBuffer.h"
@@ -63,23 +64,34 @@ void ThrowIfFailed(HRESULT hr) {
 
 std::shared_ptr<Mesh> MeshFromData(MeshData&& meshData, std::wstring name, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD) {
     const bool hasTexcoords = !meshData.uvSets.empty() && !meshData.uvSets[0].values.empty();
+    const bool hasColors = meshData.colors.size() == (meshData.positions.size() / 3u);
     bool hasJoints = !meshData.joints.empty() && !meshData.weights.empty();
 
     std::unique_ptr<std::vector<std::byte>> rawData = std::make_unique<std::vector<std::byte>>();
     uint32_t numVertices = static_cast<uint32_t>(meshData.positions.size()) / 3;
-    // position,        normal,            texcoord
-    uint8_t vertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0);
+    uint32_t vertexFlags = meshData.flags;
+    if (hasTexcoords) {
+        vertexFlags |= VertexFlags::VERTEX_TEXCOORDS;
+    }
+    if (hasColors) {
+        vertexFlags |= VertexFlags::VERTEX_COLORS;
+    }
+
+    const uint8_t vertexSize = static_cast<uint8_t>(MeshVertexLayout::VertexSize(vertexFlags));
     rawData->resize(numVertices * vertexSize);
 
     for (unsigned int i = 0; i < numVertices; i++) {
         size_t baseOffset = i * vertexSize;
         memcpy(rawData->data() + baseOffset, &meshData.positions[i * 3], sizeof(XMFLOAT3));
-        size_t offset = sizeof(XMFLOAT3);
+        size_t offset = MeshVertexLayout::NormalOffset;
         memcpy(rawData->data() + baseOffset + offset, &meshData.normals[i * 3], sizeof(XMFLOAT3));
-        offset += sizeof(XMFLOAT3);
         if (hasTexcoords) {
+            offset = MeshVertexLayout::TexcoordOffset(vertexFlags);
             memcpy(rawData->data() + baseOffset + offset, &meshData.uvSets[0].values[i], sizeof(XMFLOAT2));
-            offset += sizeof(XMFLOAT2);
+        }
+        if (hasColors) {
+            offset = MeshVertexLayout::ColorOffset(vertexFlags);
+            memcpy(rawData->data() + baseOffset + offset, &meshData.colors[i], sizeof(XMFLOAT3));
         }
     }
     constexpr size_t kMaxSkinInfluences = 8u;
@@ -115,7 +127,7 @@ std::shared_ptr<Mesh> MeshFromData(MeshData&& meshData, std::wstring name, std::
 		skinningVertices = std::move(skinningData);
 	}
 
-    return Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningVertices), skinningVertexSize, meshData.indices, std::move(meshData.uvSets), meshData.material, meshData.flags, std::move(prebuiltClusterLOD));
+    return Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningVertices), skinningVertexSize, meshData.indices, std::move(meshData.uvSets), meshData.material, vertexFlags, std::move(prebuiltClusterLOD));
 }
 
 XMMATRIX RemoveScalingFromMatrix(const XMMATRIX& initialMatrix) {

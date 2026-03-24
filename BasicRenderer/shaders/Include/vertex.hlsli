@@ -2,6 +2,7 @@
 #define __VERTEX_HLSL__
 
 #include "include/loadingUtils.hlsli"
+#include "include/vertexLayout.hlsli"
 
 // Manually assembled from ByteAddressBuffer
 struct SkinningInfluences
@@ -33,11 +34,11 @@ Vertex LoadVertex(uint byteOffset, ByteAddressBuffer buffer, uint flags) {
 
     // Load position (float3, 12 bytes)
     vertex.position = LoadFloat3(byteOffset, buffer);
-    byteOffset += 12;
+    byteOffset += VERTEX_LAYOUT_POSITION_SIZE;
 
     // Load normal (float3, 12 bytes)
     vertex.normal = LoadFloat3(byteOffset, buffer);
-    byteOffset += 12;
+    byteOffset += VERTEX_LAYOUT_NORMAL_SIZE;
 
     vertex.skinning.joints0 = uint4(0, 0, 0, 0);
     vertex.skinning.joints1 = uint4(0, 0, 0, 0);
@@ -45,9 +46,8 @@ Vertex LoadVertex(uint byteOffset, ByteAddressBuffer buffer, uint flags) {
     vertex.skinning.weights1 = float4(0.0, 0.0, 0.0, 0.0);
 
     if (flags & VERTEX_TEXCOORDS) {
-        // Load texcoord (float2, 8 bytes)
         vertex.texcoord = LoadFloat2(byteOffset, buffer);
-        byteOffset += 8;
+        byteOffset += VERTEX_LAYOUT_TEXCOORD_SIZE;
     }
     else
     {
@@ -55,6 +55,9 @@ Vertex LoadVertex(uint byteOffset, ByteAddressBuffer buffer, uint flags) {
     }
 
     vertex.color = float3(1.0, 1.0, 1.0);
+    if (flags & VERTEX_COLORS) {
+        vertex.color = LoadFloat3(byteOffset, buffer);
+    }
 
     return vertex;
 }

@@ -15,6 +15,7 @@ struct BoundingSphere {
 static constexpr uint32_t CLOD_PAGE_ATTRIBUTE_NORMAL = 1u << 0;
 static constexpr uint32_t CLOD_PAGE_ATTRIBUTE_JOINTS = 1u << 1;
 static constexpr uint32_t CLOD_PAGE_ATTRIBUTE_WEIGHTS = 1u << 2;
+static constexpr uint32_t CLOD_PAGE_ATTRIBUTE_COLOR = 1u << 3;
 
 // Embedded at byte 0 of each page-tile in the page pool.
 // Compression params moved to per-meshlet descriptors.
@@ -30,12 +31,13 @@ struct CLodPageHeader
 	uint32_t uvDescriptorOffset = 0;      // [5] byte offset to CLodMeshletUvDescriptor table
 	uint32_t positionBitstreamOffset = 0; // [6] byte offset to position bitstream
 	uint32_t normalArrayOffset = 0;       // [7] byte offset to normal array (oct-encoded uint32 per vertex)
-	uint32_t jointArrayOffset = 0;        // [8] byte offset to two-uint4 joint array per vertex
-	uint32_t weightArrayOffset = 0;       // [9] byte offset to two-float4 weight array per vertex
-	uint32_t uvBitstreamDirectoryOffset = 0; // [10] byte offset to UV bitstream offset table
-	uint32_t triangleStreamOffset = 0;    // [11] byte offset to triangle byte stream
-	uint32_t boneIndexStreamOffset = 0;   // [12] byte offset to page-local meshlet bone-index stream
-	uint32_t reserved[3] = {};            // [13-15] pad to 64 bytes
+	uint32_t colorArrayOffset = 0;        // [8] byte offset to RGBA8_UNORM color array per vertex
+	uint32_t jointArrayOffset = 0;        // [9] byte offset to two-uint4 joint array per vertex
+	uint32_t weightArrayOffset = 0;       // [10] byte offset to two-float4 weight array per vertex
+	uint32_t uvBitstreamDirectoryOffset = 0; // [11] byte offset to UV bitstream offset table
+	uint32_t triangleStreamOffset = 0;    // [12] byte offset to triangle byte stream
+	uint32_t boneIndexStreamOffset = 0;   // [13] byte offset to page-local meshlet bone-index stream
+	uint32_t reserved[2] = {};            // [14-15] pad to 64 bytes
 };
 static_assert(sizeof(CLodPageHeader) == 64, "CLodPageHeader must be 64 bytes");
 

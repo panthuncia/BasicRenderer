@@ -28,6 +28,7 @@ struct PageTableEntry
 static const uint CLOD_PAGE_ATTRIBUTE_NORMAL = 1u << 0;
 static const uint CLOD_PAGE_ATTRIBUTE_JOINTS = 1u << 1;
 static const uint CLOD_PAGE_ATTRIBUTE_WEIGHTS = 1u << 2;
+static const uint CLOD_PAGE_ATTRIBUTE_COLOR = 1u << 3;
 
 // Embedded at byte 0 of each page-tile. Simplified header.
 // 16 x uint32 = 64 bytes.
@@ -42,14 +43,14 @@ struct CLodPageHeader
     uint uvDescriptorOffset;          // [5] byte offset to CLodMeshletUvDescriptor table
     uint positionBitstreamOffset;     // [6] byte offset to position bitstream
     uint normalArrayOffset;           // [7] byte offset to normal array
-    uint jointArrayOffset;            // [8] byte offset to two-uint4 joint array per vertex
-    uint weightArrayOffset;           // [9] byte offset to two-float4 weight array per vertex
-    uint uvBitstreamDirectoryOffset;  // [10] byte offset to UV bitstream offset table
-    uint triangleStreamOffset;        // [11] byte offset to triangle byte stream
-    uint boneIndexStreamOffset;       // [12] byte offset to page-local bone-index stream
+    uint colorArrayOffset;            // [8] byte offset to RGBA8_UNORM color array per vertex
+    uint jointArrayOffset;            // [9] byte offset to two-uint4 joint array per vertex
+    uint weightArrayOffset;           // [10] byte offset to two-float4 weight array per vertex
+    uint uvBitstreamDirectoryOffset;  // [11] byte offset to UV bitstream offset table
+    uint triangleStreamOffset;        // [12] byte offset to triangle byte stream
+    uint boneIndexStreamOffset;       // [13] byte offset to page-local bone-index stream
     uint reserved0;
     uint reserved1;
-    uint reserved2;
 };
 
 // Per-meshlet descriptor. Self-contained: non-UV compression params, bounds, LOD metadata.

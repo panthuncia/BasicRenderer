@@ -25,15 +25,15 @@ CLodPageHeader LoadPageHeader(uint slabDescriptorIndex, uint pageByteOffset)
     hdr.uvDescriptorOffset         = d1.y;
     hdr.positionBitstreamOffset    = d1.z;
     hdr.normalArrayOffset          = d1.w;
-    hdr.jointArrayOffset           = d2.x;
-    hdr.weightArrayOffset          = d2.y;
-    hdr.uvBitstreamDirectoryOffset = d2.z;
-    hdr.triangleStreamOffset       = d2.w;
+    hdr.colorArrayOffset           = d2.x;
+    hdr.jointArrayOffset           = d2.y;
+    hdr.weightArrayOffset          = d2.z;
+    hdr.uvBitstreamDirectoryOffset = d2.w;
     uint4 d3 = slab.Load4(pageByteOffset + 48);
-    hdr.boneIndexStreamOffset      = d3.x;
-    hdr.reserved0 = d3.y;
-    hdr.reserved1 = d3.z;
-    hdr.reserved2 = d3.w;
+    hdr.triangleStreamOffset       = d3.x;
+    hdr.boneIndexStreamOffset      = d3.y;
+    hdr.reserved0 = d3.z;
+    hdr.reserved1 = d3.w;
 
     return hdr;
 }

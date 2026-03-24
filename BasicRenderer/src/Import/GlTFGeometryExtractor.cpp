@@ -26,6 +26,7 @@
 #include "Import/CLodCacheLoader.h"
 #include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Mesh/ClusterLODTypes.h"
+#include "Mesh/VertexLayout.h"
 #include "Mesh/VertexFlags.h"
 #include "Utilities/CachePathUtilities.h"
 
@@ -910,6 +911,19 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 		hasTexcoords = true;
 	}
 
+	bool hasColors = false;
+	size_t colorAccessorIndex = 0;
+	AccessorInfo colorAccessor;
+	if (attributes.contains("COLOR_0")) {
+		colorAccessorIndex = attributes["COLOR_0"].get<size_t>();
+		colorAccessor = GetAccessorInfo(doc.gltf, colorAccessorIndex);
+		const size_t colorComponents = NumComponentsForType(colorAccessor.type);
+		if (colorAccessor.count != vertexCount || (colorComponents != 3 && colorComponents != 4)) {
+			throw std::runtime_error("COLOR_0 accessor size/type mismatch");
+		}
+		hasColors = true;
+	}
+
 	const bool hasJointIndices = attributes.contains("JOINTS_0");
 	const bool hasJointWeights = attributes.contains("WEIGHTS_0");
 	if (hasJointIndices != hasJointWeights) {
@@ -982,11 +996,14 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 	if (hasTexcoords) {
 		meshFlags |= VertexFlags::VERTEX_TEXCOORDS;
 	}
+	if (hasColors) {
+		meshFlags |= VertexFlags::VERTEX_COLORS;
+	}
 	if (hasSkinning) {
 		meshFlags |= VertexFlags::VERTEX_SKINNED;
 	}
 
-	const uint8_t vertexSize = static_cast<uint8_t>(sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0));
+	const uint8_t vertexSize = static_cast<uint8_t>(MeshVertexLayout::VertexSize(meshFlags));
 	const unsigned int skinningVertexSize = hasSkinning
 		? static_cast<unsigned int>(sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + sizeof(PackedSkinningInfluences))
 		: 0u;
@@ -1080,6 +1097,16 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 			texcoordComponentBytes = BytesPerComponent(texcoordComponentType);
 		}
 
+		size_t colorStride = 0;
+		size_t colorComponents = 0;
+		int colorComponentType = 0;
+		std::vector<uint8_t> colorBytes;
+		size_t colorComponentBytes = 0;
+		if (hasColors) {
+			colorBytes = ReadAccessorRawWindow(doc, colorAccessorIndex, firstVertex, chunkVertexCount, &colorStride, &colorComponents, &colorComponentType);
+			colorComponentBytes = BytesPerComponent(colorComponentType);
+		}
+
 		size_t jointStride = 0;
 		size_t jointComponents = 0;
 		int jointComponentType = 0;
@@ -1138,11 +1165,9 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 				normal = generatedNormals[firstVertex + i];
 			}
 
-			std::array<std::byte, sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + sizeof(XMFLOAT2)> packedVertex{};
+			std::array<std::byte, MeshVertexLayout::MaxVertexSize> packedVertex{};
 			std::memcpy(packedVertex.data(), &pos, sizeof(XMFLOAT3));
-			size_t offset = sizeof(XMFLOAT3);
-			std::memcpy(packedVertex.data() + offset, &normal, sizeof(XMFLOAT3));
-			offset += sizeof(XMFLOAT3);
+			std::memcpy(packedVertex.data() + MeshVertexLayout::NormalOffset, &normal, sizeof(XMFLOAT3));
 
 			if (hasTexcoords) {
 				const size_t texcoordBase = i * texcoordStride;
@@ -1150,7 +1175,17 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 					static_cast<float>(ReadComponentAsDouble(texcoordBytes, texcoordComponentType, texcoordBase + texcoordComponentBytes * 0, texcoordAccessor.normalized)),
 					static_cast<float>(ReadComponentAsDouble(texcoordBytes, texcoordComponentType, texcoordBase + texcoordComponentBytes * 1, texcoordAccessor.normalized))
 				);
-				std::memcpy(packedVertex.data() + offset, &uv, sizeof(XMFLOAT2));
+				std::memcpy(packedVertex.data() + MeshVertexLayout::TexcoordOffset(meshFlags), &uv, sizeof(XMFLOAT2));
+			}
+
+			if (hasColors) {
+				const size_t colorBase = i * colorStride;
+				const XMFLOAT3 color(
+					static_cast<float>(ReadComponentAsDouble(colorBytes, colorComponentType, colorBase + colorComponentBytes * 0, colorAccessor.normalized)),
+					static_cast<float>(ReadComponentAsDouble(colorBytes, colorComponentType, colorBase + colorComponentBytes * 1, colorAccessor.normalized)),
+					static_cast<float>(ReadComponentAsDouble(colorBytes, colorComponentType, colorBase + colorComponentBytes * 2, colorAccessor.normalized))
+				);
+				std::memcpy(packedVertex.data() + MeshVertexLayout::ColorOffset(meshFlags), &color, sizeof(XMFLOAT3));
 			}
 
 			ingest.AppendVertexBytes(packedVertex.data(), vertexSize);

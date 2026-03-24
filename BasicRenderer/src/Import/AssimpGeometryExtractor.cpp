@@ -16,6 +16,7 @@
 
 #include "Import/CLodCacheLoader.h"
 #include "Mesh/ClusterLODTypes.h"
+#include "Mesh/VertexLayout.h"
 #include "Mesh/VertexFlags.h"
 #include "Utilities/CachePathUtilities.h"
 
@@ -59,6 +60,7 @@ ExtractionResult ExtractAll(const aiScene* pScene, const std::string& sourceFile
 		const bool hasBones = aMesh->HasBones();
 		const bool hasNormals = aMesh->HasNormals();
 		const bool hasTexcoords = aMesh->HasTextureCoords(0);
+		const bool hasColors = aMesh->HasVertexColors(0);
         std::vector<MeshUvSetData> uvSets;
         for (unsigned int uvSetIndex = 0; uvSetIndex < AI_MAX_NUMBER_OF_TEXTURECOORDS; ++uvSetIndex) {
             if (!aMesh->HasTextureCoords(uvSetIndex)) {
@@ -76,9 +78,22 @@ ExtractionResult ExtractAll(const aiScene* pScene, const std::string& sourceFile
             uvSets.push_back(std::move(uvSet));
         }
 
+		unsigned int meshFlags = 0;
+		if (hasNormals) {
+			meshFlags |= VertexFlags::VERTEX_NORMALS;
+		}
+		if (hasTexcoords) {
+			meshFlags |= VertexFlags::VERTEX_TEXCOORDS;
+		}
+		if (hasColors) {
+			meshFlags |= VertexFlags::VERTEX_COLORS;
+		}
+		if (hasBones) {
+			meshFlags |= VertexFlags::VERTEX_SKINNED;
+		}
+
 		const uint32_t numVertices = static_cast<uint32_t>(aMesh->mNumVertices);
-		const unsigned int vertexSize = static_cast<unsigned int>(
-			sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + (hasTexcoords ? sizeof(DirectX::XMFLOAT2) : 0));
+		const unsigned int vertexSize = MeshVertexLayout::VertexSize(meshFlags);
 		const unsigned int skinningVertexSize =
 			sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + sizeof(PackedSkinningInfluences);
 
@@ -99,13 +114,17 @@ ExtractionResult ExtractAll(const aiScene* pScene, const std::string& sourceFile
 
 			const size_t baseOffset = static_cast<size_t>(v) * vertexSize;
 			std::memcpy(rawData.data() + baseOffset, &position, sizeof(position));
-			size_t offset = sizeof(DirectX::XMFLOAT3);
-			std::memcpy(rawData.data() + baseOffset + offset, &normal, sizeof(normal));
-			offset += sizeof(DirectX::XMFLOAT3);
+			std::memcpy(rawData.data() + baseOffset + MeshVertexLayout::NormalOffset, &normal, sizeof(normal));
 
 			if (hasTexcoords) {
 				const DirectX::XMFLOAT2 texcoord{ aMesh->mTextureCoords[0][v].x, -aMesh->mTextureCoords[0][v].y };
-				std::memcpy(rawData.data() + baseOffset + offset, &texcoord, sizeof(texcoord));
+				std::memcpy(rawData.data() + baseOffset + MeshVertexLayout::TexcoordOffset(meshFlags), &texcoord, sizeof(texcoord));
+			}
+
+			if (hasColors) {
+				const aiColor4D& color = aMesh->mColors[0][v];
+				const DirectX::XMFLOAT3 packedColor{ color.r, color.g, color.b };
+				std::memcpy(rawData.data() + baseOffset + MeshVertexLayout::ColorOffset(meshFlags), &packedColor, sizeof(packedColor));
 			}
 
 			if (hasBones) {
@@ -129,17 +148,7 @@ ExtractionResult ExtractAll(const aiScene* pScene, const std::string& sourceFile
 			}
 		}
 
-		unsigned int meshFlags = 0;
-		if (hasNormals) {
-			meshFlags |= VertexFlags::VERTEX_NORMALS;
-		}
-		if (hasTexcoords) {
-			meshFlags |= VertexFlags::VERTEX_TEXCOORDS;
-		}
-
 		if (hasBones) {
-			meshFlags |= VertexFlags::VERTEX_SKINNED;
-
 			struct VertexInfluence
 			{
 				uint32_t joint = 0;
