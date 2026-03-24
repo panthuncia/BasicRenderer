@@ -18,6 +18,7 @@
 #include "Render/GraphExtensions/ClusterLOD/CLodStreamingSystem.h"
 #include "Render/GraphExtensions/ClusterLOD/ClusterRasterizationPass.h"
 #include "Render/GraphExtensions/ClusterLOD/ClusterSoftwareRasterizationPass.h"
+#include "Render/GraphExtensions/ClusterLOD/DeepVisibilityResolvePass.h"
 #include "Render/GraphExtensions/ClusterLOD/HierarchialCullingPass.h"
 #include "Render/GraphExtensions/ClusterLOD/PerViewLinearDepthCopyPass.h"
 #include "Render/GraphExtensions/ClusterLOD/RasterBucketBlockOffsetsPass.h"
@@ -292,9 +293,30 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
 
         m_deepVisibilityCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, true, false);
         m_deepVisibilityCounterBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Counter Buffer"));
+        m_deepVisibilityCounterBuffer->GetECSEntity()
+            .set<Components::Resource>({ m_deepVisibilityCounterBuffer })
+            .add<CLodDeepVisibilityCounterTag>()
+            .add<CLodExtensionTypeTag>(typeEntity);
 
         m_deepVisibilityOverflowCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, true, false);
         m_deepVisibilityOverflowCounterBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Overflow Counter Buffer"));
+        m_deepVisibilityOverflowCounterBuffer->GetECSEntity()
+            .set<Components::Resource>({ m_deepVisibilityOverflowCounterBuffer })
+            .add<CLodDeepVisibilityOverflowCounterTag>()
+            .add<CLodExtensionTypeTag>(typeEntity);
+
+        m_deepVisibilityStatsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+            1,
+            sizeof(CLodDeepVisibilityStats),
+            true,
+            false,
+            true,
+            false);
+        m_deepVisibilityStatsBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Stats Buffer"));
+        m_deepVisibilityStatsBuffer->GetECSEntity()
+            .set<Components::Resource>({ m_deepVisibilityStatsBuffer })
+            .add<CLodDeepVisibilityStatsTag>()
+            .add<CLodExtensionTypeTag>(typeEntity);
     }
 }
 
@@ -426,7 +448,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         clearDeepVisibilityPassDesc.name = MakeVariantPassName(traits, "ClearDeepVisibilityPass");
         clearDeepVisibilityPassDesc.pass = std::make_shared<ClearDeepVisibilityPass>(
             m_deepVisibilityCounterBuffer,
-            m_deepVisibilityOverflowCounterBuffer);
+            m_deepVisibilityOverflowCounterBuffer,
+            m_deepVisibilityStatsBuffer);
         outPasses.push_back(std::move(clearDeepVisibilityPassDesc));
 
         RenderGraph::ExternalPassDesc rasterizeDeepVisibilityPassDesc;
@@ -449,6 +472,18 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             slabGroup);
         rasterizeDeepVisibilityPassDesc.isGeometryPass = true;
         outPasses.push_back(std::move(rasterizeDeepVisibilityPassDesc));
+
+        RenderGraph::ExternalPassDesc resolveDeepVisibilityPassDesc;
+        resolveDeepVisibilityPassDesc.type = RenderGraph::PassType::Render;
+        resolveDeepVisibilityPassDesc.name = MakeVariantPassName(traits, "DeepVisibilityResolvePass");
+        resolveDeepVisibilityPassDesc.where = RenderGraph::ExternalInsertPoint::Before("PPLLResolvePass");
+        resolveDeepVisibilityPassDesc.pass = std::make_shared<DeepVisibilityResolvePass>(
+            m_visibleClustersBuffer,
+            m_deepVisibilityNodesBuffer,
+            m_deepVisibilityCounterBuffer,
+            m_deepVisibilityOverflowCounterBuffer,
+            m_deepVisibilityStatsBuffer);
+        outPasses.push_back(std::move(resolveDeepVisibilityPassDesc));
         return;
     }
 

@@ -1,6 +1,7 @@
 #ifndef __VERTEX_HLSL__
 #define __VERTEX_HLSL__
 
+#include "include/vertexFlags.hlsli"
 #include "include/loadingUtils.hlsli"
 #include "include/vertexLayout.hlsli"
 
@@ -20,11 +21,6 @@ struct Vertex {
     SkinningInfluences skinning;
     float3 color;
 };
-
-#define VERTEX_COLORS 1 << 0
-#define VERTEX_NORMAL 1 << 1
-#define VERTEX_TEXCOORDS 1 << 2
-#define VERTEX_SKINNED 1 << 3
 
 // Per-object flags (mirrors OBJECT_FLAG_* in ShaderBuffers.h)
 #define OBJECT_FLAG_REVERSE_WINDING (1u << 0)

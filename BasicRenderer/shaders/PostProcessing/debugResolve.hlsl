@@ -43,10 +43,15 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
         case OUTPUT_SPECULAR_IBL:
         case OUTPUT_MODEL_NORMALS:
         case OUTPUT_MOTION_VECTORS:
+        case OUTPUT_TRANSPARENT_DEPTH_COMPLEXITY:
             color = UnpackDebugFloat3(payload);
             break;
         case OUTPUT_SW_RASTER:
             color = float3(1, 0, 0);
+            break;
+        case OUTPUT_TRANSPARENT_NODE_COUNT:
+        case OUTPUT_TRANSPARENT_RESOLVED_SAMPLE_COUNT:
+            color = saturate(float(UnpackDebugUint(payload)) / 16.0f).xxx;
             break;
         case OUTPUT_MESHLETS:
         case OUTPUT_LIGHT_CLUSTER_ID:

@@ -112,11 +112,13 @@ target_link_libraries(resource_codegen
 
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "src/*.cpp")
 add_executable (${PROJECT_NAME} WIN32  ${SOURCES})
+add_executable(ShaderPreprocessTests "tests/ShaderPreprocessTests.cpp")
 
 target_precompile_headers(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/pch.h")
 
 if (CMAKE_VERSION VERSION_GREATER 3.14)
   set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 23)
+  set_property(TARGET ShaderPreprocessTests PROPERTY CXX_STANDARD 23)
 endif()
 
 # br_generate_header(
@@ -553,6 +555,8 @@ add_symlink_or_copy_per_config(
 if (MSVC)
   target_compile_options(${PROJECT_NAME} PRIVATE /Zc:preprocessor)
   target_compile_options(${PROJECT_NAME} PRIVATE /WX)
+  target_compile_options(ShaderPreprocessTests PRIVATE /Zc:preprocessor)
+  target_compile_options(ShaderPreprocessTests PRIVATE /WX)
   target_compile_options(${PROJECT_NAME} PRIVATE 
       /wd4828 
       /wd4514 
@@ -598,13 +602,58 @@ if (MSVC)
       -Wno-error=self-assign-field
       -Wno-error=unused-lambda-capture
   >)
+  target_compile_options(ShaderPreprocessTests PRIVATE
+      /wd4828
+      /wd4514
+      /wd5038
+      /wd4100
+      /wd5219
+      /wd4625
+      /wd4626
+      /wd4820
+      /wd4365
+      /wd4464
+      /wd4062
+      /wd5026
+      /wd5027
+      /wd5246
+      /wd4191
+      /wd4061
+      /wd4623
+      /wd4710
+      /wd4324
+      /wd5267
+      /wd5045
+  )
+  target_compile_options(ShaderPreprocessTests PRIVATE /external:anglebrackets /external:W0)
+  target_compile_options(ShaderPreprocessTests PRIVATE $<$<CXX_COMPILER_ID:Clang>:
+      -Wno-unused-command-line-argument
+      -Wno-error=switch
+      -Wno-error=reorder-ctor
+      -Wno-error=unused-variable
+      -Wno-error=unused-but-set-variable
+      -Wno-error=unused-function
+      -Wno-error=unused-private-field
+      -Wno-error=misleading-indentation
+      -Wno-error=nonportable-include-path
+      -Wno-error=inconsistent-missing-override
+      -Wno-error=format
+      -Wno-error=implicit-float-conversion
+      -Wno-error=missing-braces
+      -Wno-error=braced-scalar-init
+      -Wno-error=pessimizing-move
+      -Wno-error=self-assign-field
+      -Wno-error=unused-lambda-capture
+  >)
 endif()
 
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC Microsoft.GSL::GSL)
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC ${DIRECTX_HEADERS_INCLUDE_DIR} include/ refl-cpp::refl-cpp)
 target_include_directories(${PROJECT_NAME} BEFORE PUBLIC "${BASICRENDERER_USD_ROOT}/usd_$<IF:$<CONFIG:Debug>,dbg,rel>/include/")
+target_include_directories(ShaderPreprocessTests BEFORE PRIVATE "${BASICRENDERER_SOURCE_ROOT}" "${BASICRENDERER_SOURCE_ROOT}/src" include/)
 # Heck off Microsoft
 add_compile_definitions(NOMINMAX)
+target_compile_definitions(ShaderPreprocessTests PRIVATE NOMINMAX)
 
 # Disable warnings for signed/unsigned mismatch
 add_compile_options("/wd4267")
@@ -627,6 +676,9 @@ endif()
 target_link_options(${PROJECT_NAME} PRIVATE
   $<$<AND:$<CONFIG:RelWithDebInfo>>:/DEBUG>
 )
+target_link_options(ShaderPreprocessTests PRIVATE
+  $<$<AND:$<CONFIG:RelWithDebInfo>>:/DEBUG>
+)
 
 if (ENABLE_NSIGHT_AFTERMATH)
   # This will pass -DENABLE_NSIGHT_AFTERMATH to the compiler
@@ -640,6 +692,14 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
   BUILD_TYPE_RELEASE_DEBUG=2
 
   # then set BUILD_TYPE to one of those codes based on CMAKE_BUILD_TYPE:
+  $<$<CONFIG:Debug>:BUILD_TYPE=BUILD_TYPE_DEBUG>
+  $<$<CONFIG:Release>:BUILD_TYPE=BUILD_TYPE_RELEASE>
+  $<$<CONFIG:RelWithDebInfo>:BUILD_TYPE=BUILD_TYPE_RELEASE_DEBUG>
+)
+target_compile_definitions(ShaderPreprocessTests PRIVATE
+  BUILD_TYPE_DEBUG=0
+  BUILD_TYPE_RELEASE=1
+  BUILD_TYPE_RELEASE_DEBUG=2
   $<$<CONFIG:Debug>:BUILD_TYPE=BUILD_TYPE_DEBUG>
   $<$<CONFIG:Release>:BUILD_TYPE=BUILD_TYPE_RELEASE>
   $<$<CONFIG:RelWithDebInfo>:BUILD_TYPE=BUILD_TYPE_RELEASE_DEBUG>
@@ -683,3 +743,12 @@ PRIVATE
     "${BASICRENDERER_SOURCE_ROOT}/ffx_sssr_x64drel.lib"
     "${BASICRENDERER_SOURCE_ROOT}/hlsl_parser.lib"
 )
+
+target_link_libraries(ShaderPreprocessTests
+PRIVATE
+    unofficial::tree-sitter::tree-sitter
+    "${BASICRENDERER_SOURCE_ROOT}/hlsl_parser.lib"
+)
+
+enable_testing()
+add_test(NAME ShaderPreprocessTests COMMAND ShaderPreprocessTests)

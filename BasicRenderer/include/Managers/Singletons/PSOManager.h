@@ -142,6 +142,7 @@ public:
     const PipelineState& GetClusterLODRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     const PipelineState& GetClusterLODDeepVisibilityRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     const PipelineState& GetClusterLODSoftwareRasterPSO(MaterialRasterFlags materialRasterFlags);
+    const PipelineState& GetClusterLODDeepVisibilityResolvePSO(UINT psoFlags);
 
 
     const PipelineState& GetDeferredPSO(UINT psoFlags);
@@ -205,6 +206,7 @@ private:
     std::unordered_map<RasterPSOKey, PipelineState> m_clusterLODRasterPSOCache;
     std::unordered_map<RasterPSOKey, PipelineState> m_clusterLODDeepVisibilityRasterPSOCache;
     std::unordered_map<uint32_t, PipelineState> m_clusterLODSoftwareRasterPSOCache;
+    std::unordered_map<unsigned int, PipelineState> m_clusterLODDeepVisibilityResolvePSOCache;
 
 	std::unordered_map<unsigned int, PipelineState> m_deferredPSOCache;
 
@@ -230,6 +232,7 @@ private:
     PipelineState CreateClusterLODRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     PipelineState CreateClusterLODDeepVisibilityRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     PipelineState CreateClusterLODSoftwareRasterPSO(MaterialRasterFlags materialRasterFlags);
+    PipelineState CreateClusterLODDeepVisibilityResolvePSO(UINT psoFlags);
 
     PipelineState CreateDeferredPSO(UINT psoFlags);
 

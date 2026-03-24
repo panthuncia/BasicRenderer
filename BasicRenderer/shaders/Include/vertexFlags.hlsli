@@ -1,0 +1,9 @@
+#ifndef VERTEX_FLAGS_HLSLI
+#define VERTEX_FLAGS_HLSLI
+
+#define VERTEX_COLORS 1 << 0
+#define VERTEX_NORMAL 1 << 1
+#define VERTEX_TEXCOORDS 1 << 2
+#define VERTEX_SKINNED 1 << 3
+
+#endif // VERTEX_FLAGS_HLSLI

@@ -6,10 +6,10 @@
 #include "include/loadingUtils.hlsli"
 #include "Common/defines.h"
 #include "include/meshletPayload.hlsli"
-#include "Include/meshletCommon.hlsli"
-#include "Include/clodStructs.hlsli"
-#include "Include/clodPageAccess.hlsli"
-#include "Include/visibleClusterPacking.hlsli"
+#include "include/meshletCommon.hlsli"
+#include "include/clodStructs.hlsli"
+#include "include/clodPageAccess.hlsli"
+#include "include/visibleClusterPacking.hlsli"
 #include "PerPassRootConstants/clodRasterizationRootConstants.h"
 
 #define CLOD_COMPRESSED_POSITIONS 1u

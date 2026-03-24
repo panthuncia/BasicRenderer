@@ -14,11 +14,11 @@
 #include "include/materialFlags.hlsli"
 #include "PerPassRootConstants/clodWorkGraphRootConstants.h"
 #include "PerPassRootConstants/clodRasterizationRootConstants.h"
-#include "Include/clodStructs.hlsli"
-#include "Include/clodPageAccess.hlsli"
-#include "Include/visibleClusterPacking.hlsli"
-#include "Include/visibilityPacking.hlsli"
-#include "Include/debugPayload.hlsli"
+#include "include/clodStructs.hlsli"
+#include "include/clodPageAccess.hlsli"
+#include "include/visibleClusterPacking.hlsli"
+#include "include/visibilityPacking.hlsli"
+#include "include/debugPayload.hlsli"
 
 // Bit-packed position decode (mirrors mesh.hlsl / gbuffer.hlsl)
 

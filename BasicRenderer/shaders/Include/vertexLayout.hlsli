@@ -1,6 +1,8 @@
 #ifndef VERTEX_LAYOUT_HLSLI
 #define VERTEX_LAYOUT_HLSLI
 
+#include "include/vertexFlags.hlsli"
+
 static const uint VERTEX_LAYOUT_POSITION_OFFSET = 0u;
 static const uint VERTEX_LAYOUT_POSITION_SIZE = 12u;
 static const uint VERTEX_LAYOUT_NORMAL_OFFSET = VERTEX_LAYOUT_POSITION_OFFSET + VERTEX_LAYOUT_POSITION_SIZE;

@@ -49,6 +49,7 @@ void PSOManager::Cleanup() {
     m_clusterLODRasterPSOCache.clear();
     m_clusterLODDeepVisibilityRasterPSOCache.clear();
     m_clusterLODSoftwareRasterPSOCache.clear();
+    m_clusterLODDeepVisibilityResolvePSOCache.clear();
 
     debugPSO.Reset();
     environmentConversionPSO.Reset();
@@ -169,6 +170,13 @@ const PipelineState& PSOManager::GetDeferredPSO(UINT psoFlags) {
         m_deferredPSOCache[psoFlags] = CreateDeferredPSO(psoFlags);
     }
     return m_deferredPSOCache[psoFlags];
+}
+
+const PipelineState& PSOManager::GetClusterLODDeepVisibilityResolvePSO(UINT psoFlags) {
+    if (m_clusterLODDeepVisibilityResolvePSOCache.find(psoFlags) == m_clusterLODDeepVisibilityResolvePSOCache.end()) {
+        m_clusterLODDeepVisibilityResolvePSOCache[psoFlags] = CreateClusterLODDeepVisibilityResolvePSO(psoFlags);
+    }
+    return m_clusterLODDeepVisibilityResolvePSOCache[psoFlags];
 }
 
 PipelineState PSOManager::CreatePSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe)
@@ -991,6 +999,79 @@ PipelineState PSOManager::CreateDeferredPSO(UINT psoFlags)
     return pso;
 }
 
+PipelineState PSOManager::CreateClusterLODDeepVisibilityResolvePSO(UINT psoFlags)
+{
+    auto defines = GetShaderDefines(psoFlags, MaterialCompileFlags::MaterialCompileNone);
+
+    ShaderInfoBundle sib;
+    sib.vertexShader = { L"shaders/fullscreenVS.hlsli", L"FullscreenVSMain", L"vs_6_6" };
+    sib.pixelShader = { L"shaders/ClusterLOD/DeepVisibilityResolve.hlsl", L"CLodDeepVisibilityResolvePS", L"ps_6_6" };
+    sib.defines = defines;
+
+    auto compiled = CompileShaders(sib);
+
+    auto& layout = GetRootSignature();
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
+    rhi::SubobjShader soVS{ rhi::ShaderStage::Vertex, rhi::DXIL(compiled.vertexShader.Get()), "FullscreenVSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(compiled.pixelShader.Get()), "CLodDeepVisibilityResolvePS" };
+
+    rhi::RasterState rs{};
+    rs.fill = rhi::FillMode::Solid;
+    rs.cull = rhi::CullMode::None;
+    rs.frontCCW = false;
+    rhi::SubobjRaster soRaster{ rs };
+
+    rhi::BlendState bs{};
+    bs.alphaToCoverage = false;
+    bs.independentBlend = false;
+    bs.numAttachments = 1;
+    auto& a0 = bs.attachments[0];
+    a0.enable = true;
+    a0.srcColor = rhi::BlendFactor::SrcAlpha;
+    a0.dstColor = rhi::BlendFactor::InvSrcAlpha;
+    a0.colorOp = rhi::BlendOp::Add;
+    a0.srcAlpha = rhi::BlendFactor::One;
+    a0.dstAlpha = rhi::BlendFactor::InvSrcAlpha;
+    a0.alphaOp = rhi::BlendOp::Add;
+    a0.writeMask = rhi::ColorWriteEnable::All;
+    rhi::SubobjBlend soBlend{ bs };
+
+    rhi::DepthStencilState ds{};
+    ds.depthEnable = false;
+    ds.depthFunc = rhi::CompareOp::Less;
+    rhi::SubobjDepth soDepth{ ds };
+
+    rhi::RenderTargets rts{};
+    rts.count = 1;
+    rts.formats[0] = rhi::Format::R16G16B16A16_Float;
+    rhi::SubobjRTVs soRTV{ rts };
+
+    rhi::SubobjSample soSmp{ rhi::SampleDesc{ 1, 0 } };
+    rhi::SubobjPrimitiveTopology soTopo{ rhi::PrimitiveTopology::TriangleStrip };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soVS),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+        rhi::Make(soBlend),
+        rhi::Make(soDepth),
+        rhi::Make(soRTV),
+        rhi::Make(soSmp),
+        rhi::Make(soTopo)
+    };
+
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso;
+    auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
+        throw std::runtime_error("Failed to create CLod deep visibility resolve PSO");
+    }
+    pso->SetName("CLod.DeepVisibilityResolve.PSO");
+
+    return { std::move(pso), compiled.resourceIDsHash, compiled.resourceDescriptorSlots };
+}
+
 PipelineState PSOManager::MakeComputePipeline(rhi::PipelineLayoutHandle layout,
     const wchar_t* shaderPath,
     const wchar_t* entryPoint,
@@ -1260,6 +1341,21 @@ ShaderLibraryBundle PSOManager::CompileShaderLibrary(const ShaderLibraryInfo& li
 
     // Compile BRSL info
     PreprocessedLibraryResult libPP = PreprocessShaderLibrary(dxcPreprocessBuff);
+    if (libPP.diagnostics.usedFallbackRewrite) {
+        spdlog::warn(
+            "Shader preprocess fallback used for library {}: {}",
+            ws2s(libraryInfo.filename),
+            FormatShaderPreprocessDiagnostics(libPP.diagnostics));
+    }
+
+    const size_t descriptorSlotCount = libPP.mandatoryIDs.size() + libPP.optionalIDs.size();
+    if (descriptorSlotCount > rg::shaderapi::kNumResourceDescriptorIndicesRootConstants) {
+        throw std::runtime_error(
+            "Shader library preprocessing requires " + std::to_string(descriptorSlotCount) +
+            " descriptor index root constants, but only " +
+            std::to_string(rg::shaderapi::kNumResourceDescriptorIndicesRootConstants) +
+            " are available.");
+    }
 
     DxcBuffer finalBuf = dxcPreprocessBuff;
     finalBuf.Ptr = libPP.finalSource.data();
@@ -1308,43 +1404,89 @@ ShaderBundle PSOManager::CompileShaders(const ShaderInfoBundle& info) {
     PreprocessShaderSlot(info.vertexShader, info.defines, preprocessedVertexShader, vertexBuffer);
     PreprocessShaderSlot(info.computeShader, info.defines, preprocessedComputeShader, computeBuffer);
 
-	std::unordered_set<std::string> usedMandatoryIDs;
-	std::unordered_set<std::string> usedOptionalIDs;
-    parseBRSLResourceIdentifiersForSlot(info.amplificationShader, info.defines, &amplificationBuffer, usedMandatoryIDs, usedOptionalIDs);
-	parseBRSLResourceIdentifiersForSlot(info.meshShader, info.defines, &meshBuffer, usedMandatoryIDs, usedOptionalIDs);
-    parseBRSLResourceIdentifiersForSlot(info.pixelShader, info.defines, &pixelBuffer, usedMandatoryIDs, usedOptionalIDs);
-    parseBRSLResourceIdentifiersForSlot(info.vertexShader, info.defines, &vertexBuffer, usedMandatoryIDs, usedOptionalIDs);
-    parseBRSLResourceIdentifiersForSlot(info.computeShader, info.defines, &computeBuffer, usedMandatoryIDs, usedOptionalIDs);
+    auto prepareSlot = [&](const std::optional<ShaderInfo>& slot, const DxcBuffer& buffer)
+        -> std::optional<PreparedShaderSource>
+        {
+            if (!slot) {
+                return std::nullopt;
+            }
+
+            return PrepareShaderSourceForEntryPoint(buffer, ws2s(slot->entryPoint));
+        };
+
+    std::optional<PreparedShaderSource> preparedAmplification = prepareSlot(info.amplificationShader, amplificationBuffer);
+    std::optional<PreparedShaderSource> preparedMesh = prepareSlot(info.meshShader, meshBuffer);
+    std::optional<PreparedShaderSource> preparedPixel = prepareSlot(info.pixelShader, pixelBuffer);
+    std::optional<PreparedShaderSource> preparedVertex = prepareSlot(info.vertexShader, vertexBuffer);
+    std::optional<PreparedShaderSource> preparedCompute = prepareSlot(info.computeShader, computeBuffer);
+
+    std::unordered_set<std::string> usedMandatoryIDs;
+    std::unordered_set<std::string> usedOptionalIDs;
+    auto collectPreparedIDs = [&](const std::optional<PreparedShaderSource>& prepared) {
+        if (!prepared.has_value()) {
+            return;
+        }
+
+        usedMandatoryIDs.insert(prepared->mandatoryIDs.begin(), prepared->mandatoryIDs.end());
+        usedOptionalIDs.insert(prepared->optionalIDs.begin(), prepared->optionalIDs.end());
+        };
+
+    collectPreparedIDs(preparedAmplification);
+    collectPreparedIDs(preparedMesh);
+    collectPreparedIDs(preparedPixel);
+    collectPreparedIDs(preparedVertex);
+    collectPreparedIDs(preparedCompute);
 
 	std::unordered_map<std::string, std::string> replacementMap;
 	uint32_t nextIndex = 0;
     ShaderBundle bundle = {};
-    std::vector<std::string> usedMandatoryResourceIDsVec;
-    for (std::string entry : usedMandatoryIDs) {
-		bundle.resourceDescriptorSlots.mandatoryResourceDescriptorSlots.push_back(entry);
+    std::vector<std::string> usedMandatoryResourceIDsVec(usedMandatoryIDs.begin(), usedMandatoryIDs.end());
+    std::vector<std::string> usedOptionalResourceIDsVec(usedOptionalIDs.begin(), usedOptionalIDs.end());
+    std::sort(usedMandatoryResourceIDsVec.begin(), usedMandatoryResourceIDsVec.end());
+    std::sort(usedOptionalResourceIDsVec.begin(), usedOptionalResourceIDsVec.end());
+
+    const size_t descriptorSlotCount = usedMandatoryResourceIDsVec.size() + usedOptionalResourceIDsVec.size();
+    if (descriptorSlotCount > rg::shaderapi::kNumResourceDescriptorIndicesRootConstants) {
+        throw std::runtime_error(
+            "Shader preprocessing requires " + std::to_string(descriptorSlotCount) +
+            " descriptor index root constants, but only " +
+            std::to_string(rg::shaderapi::kNumResourceDescriptorIndicesRootConstants) +
+            " are available.");
+    }
+
+    for (const std::string& entry : usedMandatoryResourceIDsVec) {
+		bundle.resourceDescriptorSlots.mandatoryResourceDescriptorSlots.push_back(ResourceIdentifier{ entry });
 		replacementMap[entry] = "ResourceDescriptorIndex" + std::to_string(nextIndex++);
-        usedMandatoryResourceIDsVec.push_back(entry);
     }
 
-	std::vector<std::string> usedOptionalResourceIDsVec;
-    for (std::string entry : usedOptionalIDs) {
-        bundle.resourceDescriptorSlots.optionalResourceDescriptorSlots.push_back(entry);
+    for (const std::string& entry : usedOptionalResourceIDsVec) {
+        bundle.resourceDescriptorSlots.optionalResourceDescriptorSlots.push_back(ResourceIdentifier{ entry });
         replacementMap[entry] = "ResourceDescriptorIndex" + std::to_string(nextIndex++);
-        usedOptionalResourceIDsVec.push_back(entry);
     }
 
+    auto finalizePreparedSource = [&](
+        const std::optional<ShaderInfo>& slot,
+        std::optional<PreparedShaderSource>& prepared) -> std::string {
+        if (!slot || !prepared.has_value()) {
+            return {};
+        }
 
-	auto newAmplification = rewriteResourceDescriptorIndexCallsForSlot(info.amplificationShader, info.defines, preprocessedAmplificationShader, amplificationBuffer, replacementMap);
-    auto newMesh = rewriteResourceDescriptorIndexCallsForSlot(info.meshShader, info.defines, preprocessedMeshShader, meshBuffer, replacementMap);
-    auto newPixel = rewriteResourceDescriptorIndexCallsForSlot(info.pixelShader, info.defines, preprocessedPixelShader, pixelBuffer, replacementMap);
-    auto newVertex = rewriteResourceDescriptorIndexCallsForSlot(info.vertexShader, info.defines, preprocessedVertexShader, vertexBuffer, replacementMap);
-	auto newCompute = rewriteResourceDescriptorIndexCallsForSlot(info.computeShader, info.defines, preprocessedComputeShader, computeBuffer, replacementMap);
+        std::string finalSource = FinalizePreparedShaderSource(*prepared, replacementMap);
+        if (prepared->diagnostics.usedFallbackRewrite) {
+            spdlog::warn(
+                "Shader preprocess fallback used for {} ({}): {}",
+                ws2s(slot->entryPoint),
+                ws2s(slot->filename),
+                FormatShaderPreprocessDiagnostics(prepared->diagnostics));
+        }
+        return finalSource;
+        };
 
-	pruneUnusedCodeForSlot(newAmplification, info.amplificationShader);
-	pruneUnusedCodeForSlot(newMesh, info.meshShader);
-	pruneUnusedCodeForSlot(newPixel, info.pixelShader);
-	pruneUnusedCodeForSlot(newVertex, info.vertexShader);
-	pruneUnusedCodeForSlot(newCompute, info.computeShader);
+	auto newAmplification = finalizePreparedSource(info.amplificationShader, preparedAmplification);
+    auto newMesh = finalizePreparedSource(info.meshShader, preparedMesh);
+    auto newPixel = finalizePreparedSource(info.pixelShader, preparedPixel);
+    auto newVertex = finalizePreparedSource(info.vertexShader, preparedVertex);
+	auto newCompute = finalizePreparedSource(info.computeShader, preparedCompute);
 
     if (!newAmplification.empty()) {
         amplificationBuffer.Ptr = newAmplification.data();
@@ -1447,6 +1589,13 @@ void PSOManager::LoadSource(const std::filesystem::path& path, PSOManager::Sourc
     ThrowIfFailed(pUtils->LoadFile(
         path.c_str(), &codePage, &sd.blob
     ));
+
+    ValidateUtf8OrThrow(
+        std::string_view(
+            static_cast<const char*>(sd.blob->GetBufferPointer()),
+            sd.blob->GetBufferSize()),
+        "Shader source file");
+
     sd.buffer.Ptr = sd.blob->GetBufferPointer();
     sd.buffer.Size = sd.blob->GetBufferSize();
     sd.buffer.Encoding = 0; // see below
@@ -1672,6 +1821,7 @@ void PSOManager::ReloadShaders() {
     m_clusterLODRasterPSOCache.clear();
     m_clusterLODDeepVisibilityRasterPSOCache.clear();
     m_clusterLODSoftwareRasterPSOCache.clear();
+    m_clusterLODDeepVisibilityResolvePSOCache.clear();
 }
 
 rhi::BlendState PSOManager::GetBlendDesc(MaterialCompileFlags materialCompileFlags) {

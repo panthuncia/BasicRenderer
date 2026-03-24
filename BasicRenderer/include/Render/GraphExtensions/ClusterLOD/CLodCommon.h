@@ -95,6 +95,20 @@ struct CLodDeepVisibilityNode
 
 static_assert(sizeof(CLodDeepVisibilityNode) == 16u, "CLodDeepVisibilityNode size must match HLSL");
 
+struct CLodDeepVisibilityStats
+{
+    uint32_t truncatedPixelCount = 0u;
+    uint32_t truncatedNodeCount = 0u;
+    uint32_t totalResolvedSamples = 0u;
+    uint32_t maxRawNodeCount = 0u;
+    uint32_t maxResolvedSamples = 0u;
+    uint32_t pad0 = 0u;
+    uint32_t pad1 = 0u;
+    uint32_t pad2 = 0u;
+};
+
+static_assert(sizeof(CLodDeepVisibilityStats) == 32u, "CLodDeepVisibilityStats size must match HLSL");
+
 inline constexpr uint32_t CLodReplayBufferSizeBytes = 200u * 1024u * 1024u; // 200 MB physical, GPU uses first 100 MB
 inline constexpr uint32_t CLodReplayNodeRegionSizeBytes = 50u * 1024u * 1024u;    // must match HLSL CLOD_REPLAY_NODE_REGION_SIZE_BYTES
 inline constexpr uint32_t CLodReplayMeshletRegionOffset = CLodReplayNodeRegionSizeBytes;

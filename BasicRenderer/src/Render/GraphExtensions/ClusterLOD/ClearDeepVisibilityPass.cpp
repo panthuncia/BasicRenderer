@@ -9,16 +9,19 @@
 
 ClearDeepVisibilityPass::ClearDeepVisibilityPass(
     std::shared_ptr<Buffer> deepVisibilityCounterBuffer,
-    std::shared_ptr<Buffer> deepVisibilityOverflowCounterBuffer)
+    std::shared_ptr<Buffer> deepVisibilityOverflowCounterBuffer,
+    std::shared_ptr<Buffer> deepVisibilityStatsBuffer)
     : m_deepVisibilityCounterBuffer(std::move(deepVisibilityCounterBuffer))
-    , m_deepVisibilityOverflowCounterBuffer(std::move(deepVisibilityOverflowCounterBuffer)) {
+    , m_deepVisibilityOverflowCounterBuffer(std::move(deepVisibilityOverflowCounterBuffer))
+    , m_deepVisibilityStatsBuffer(std::move(deepVisibilityStatsBuffer)) {
 }
 
 void ClearDeepVisibilityPass::DeclareResourceUsages(RenderPassBuilder* builder)
 {
     builder->WithUnorderedAccess(
         m_deepVisibilityCounterBuffer,
-        m_deepVisibilityOverflowCounterBuffer);
+        m_deepVisibilityOverflowCounterBuffer,
+        m_deepVisibilityStatsBuffer);
     for (auto& texture : m_headPointerTextures) {
         builder->WithUnorderedAccess(texture);
     }
@@ -84,6 +87,7 @@ PassReturn ClearDeepVisibilityPass::Execute(PassExecutionContext& executionConte
 
     clearBuffer(m_deepVisibilityCounterBuffer);
     clearBuffer(m_deepVisibilityOverflowCounterBuffer);
+    clearBuffer(m_deepVisibilityStatsBuffer);
 
     for (auto& texture : m_headPointerTextures) {
         rhi::UavClearInfo clearInfo{};

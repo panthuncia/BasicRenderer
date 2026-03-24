@@ -6,10 +6,10 @@
 #include "include/occlusionCulling.hlsli"
 #include "include/materialFlags.hlsli"
 #include "PerPassRootConstants/clodWorkGraphRootConstants.h"
-#include "Include/clodStructs.hlsli"
-#include "Include/clodPageAccess.hlsli"
-#include "Include/visibleClusterPacking.hlsli"
-#include "Include/vertex.hlsli"
+#include "include/clodStructs.hlsli"
+#include "include/clodPageAccess.hlsli"
+#include "include/visibleClusterPacking.hlsli"
+#include "include/vertex.hlsli"
 #include "include/skinningCommon.hlsli"
 
 #ifndef CLOD_WG_ENABLE_SW_CLASSIFICATION

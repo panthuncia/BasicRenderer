@@ -41,7 +41,7 @@
 #define CLOD_WORKGRAPH_FLAG_COMPUTE_SW_RASTER  (1u << 4)
 #define CLOD_WORKGRAPH_SW_RASTER_THRESHOLD_SHIFT 16 // upper 16 bits of flags = pixel diameter threshold
 
-// Phase 2: descriptor index of Phase 1's HW counter (aliased with histogram command — not used by WG nodes)
+// Phase 2: descriptor index of Phase 1's HW counter (aliased with histogram command - not used by WG nodes)
 #define CLOD_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX UintRootConstant4 // aliased
 
 // Work graph occlusion replay resources (hierarchical culling pass)
@@ -50,7 +50,7 @@
 #define CLOD_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX UintRootConstant7 // aliased
 #define CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX UintRootConstant8 // aliased
 
-// Work graph SW raster resources (aliased — only used by work graph nodes)
+// Work graph SW raster resources (aliased - only used by work graph nodes)
 #define CLOD_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX UintRootConstant1 // aliased (RC0/1 free in WG pass)
 #define CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX UintRootConstant0 // aliased (RC0/1 free in WG pass)
 

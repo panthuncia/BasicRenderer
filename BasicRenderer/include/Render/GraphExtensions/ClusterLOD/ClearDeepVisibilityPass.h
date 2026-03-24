@@ -13,7 +13,8 @@ class ClearDeepVisibilityPass final : public RenderPass, public IDynamicDeclared
 public:
     ClearDeepVisibilityPass(
         std::shared_ptr<Buffer> deepVisibilityCounterBuffer,
-        std::shared_ptr<Buffer> deepVisibilityOverflowCounterBuffer);
+        std::shared_ptr<Buffer> deepVisibilityOverflowCounterBuffer,
+        std::shared_ptr<Buffer> deepVisibilityStatsBuffer);
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override;
     void Setup() override;
@@ -25,6 +26,7 @@ public:
 private:
     std::shared_ptr<Buffer> m_deepVisibilityCounterBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityOverflowCounterBuffer;
+    std::shared_ptr<Buffer> m_deepVisibilityStatsBuffer;
     std::vector<std::shared_ptr<PixelBuffer>> m_headPointerTextures;
     bool m_declaredResourcesChanged = true;
 };

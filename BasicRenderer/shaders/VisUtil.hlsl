@@ -1,16 +1,10 @@
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
-#include "include/utilities.hlsli"
-#include "include/meshletCommon.hlsli"
 #include "include/waveIntrinsicsHelpers.hlsli"
+#include "include/visUtilCommon.hlsli"
 #include "PerPassRootConstants/visUtilRootConstants.h"
 #include "include/visibilityPacking.hlsli"
 #include "include/visibleClusterPacking.hlsli"
-
-struct PixelRef
-{
-    uint pixelXY;
-};
 
 uint GetMaterialIdFromCluster(uint clusterIndex,
                               ByteAddressBuffer visibleClusterBuffer,
@@ -169,8 +163,6 @@ struct MaterialEvaluationIndirectArgs {
     uint dispatchZ; // D3D12_DISPATCH_ARGUMENTS.z
 };
 
-#define MATERIAL_EXECUTION_GROUP_SIZE 64u
-
 // Build per-material indirect compute args.
 // Inputs:
 //  - counts[m] = number of pixels for material m
@@ -236,41 +228,3 @@ void BuildEvaluateIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
     outArgs[materialId] = args;
 }
 
-#include "gbuffer.hlsl"
-
-// Root constants (via ExecuteIndirect / command signature):
-//   UintRootConstant0 = materialId
-//   UintRootConstant1 = baseOffset into PixelListBuffer
-//   UintRootConstant2 = count (number of pixels for this material)
-//
-[shader("compute")]
-[numthreads(MATERIAL_EXECUTION_GROUP_SIZE, 1, 1)]
-void EvaluateMaterialGroupCS(
-    uint3 dispatchThreadId : SV_DispatchThreadID,
-    uint groupIndex : SV_GroupIndex
-)
-{
-    uint materialId = UintRootConstant0; // Not needed?
-    uint baseOffset = UintRootConstant1;
-    uint count = UintRootConstant2;
-    uint dispatchXDimension = UintRootConstant3;
-
-    // This is a 2D dispatch; linearize to get pixel index
-    uint idx = dispatchThreadId.y * dispatchXDimension + dispatchThreadId.x;
-    if (idx >= count)
-        return;
-
-    StructuredBuffer<PixelRef> pixelList = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisUtil::PixelListBuffer)];
-
-    // Look up this thread's pixel
-    PixelRef ref = pixelList[baseOffset + idx];
-
-    // Unpack to xy
-    uint2 pixel;
-    pixel.x = ref.pixelXY & 0xFFFFu;
-    pixel.y = ref.pixelXY >> 16;
-
-    InitGroupConstants(groupIndex);
-    
-    EvaluateGBufferOptimized(pixel);
-}

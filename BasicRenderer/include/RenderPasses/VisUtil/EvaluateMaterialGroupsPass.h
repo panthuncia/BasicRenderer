@@ -147,7 +147,7 @@ public:
                     flags,
                     psoMgr.MakeComputePipeline(
                         psoMgr.GetComputeRootSignature().GetHandle(),
-                        L"shaders/VisUtil.hlsl",
+                        L"shaders/VisUtilEvaluate.hlsl",
                         L"EvaluateMaterialGroupCS",
                         psoMgr.GetShaderDefines(0, flags),
                         "VisUtil_EvaluateMaterialGroupPSO"));

@@ -49,6 +49,18 @@ struct CLodDeepVisibilityNode
     uint flags;
 };
 
+struct CLodDeepVisibilityStats
+{
+    uint truncatedPixelCount;
+    uint truncatedNodeCount;
+    uint totalResolvedSamples;
+    uint maxRawNodeCount;
+    uint maxResolvedSamples;
+    uint pad0;
+    uint pad1;
+    uint pad2;
+};
+
 struct ClippingPlane {
     float4 plane;
 };

@@ -17,6 +17,9 @@ enum OutputType {
 	CLUSTERED_LIGHT_COUNT = 13,
 	MOTION_VECTORS = 14,
 	SW_RASTER = 15,
+	TRANSPARENT_NODE_COUNT = 16,
+	TRANSPARENT_DEPTH_COMPLEXITY = 17,
+	TRANSPARENT_RESOLVED_SAMPLE_COUNT = 18,
 };
 
 inline std::vector<std::string> OutputTypeNames = {
@@ -36,4 +39,7 @@ inline std::vector<std::string> OutputTypeNames = {
 	"Clustered Light Count",
 	"Motion Vectors",
 	"SW Raster",
+	"Transparent Node Count",
+	"Transparent Depth Complexity",
+	"Transparent Resolved Sample Count",
 };

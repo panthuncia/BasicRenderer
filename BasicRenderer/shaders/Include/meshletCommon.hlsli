@@ -6,9 +6,9 @@
 #include "include/cbuffers.hlsli"
 #include "include/loadingUtils.hlsli"
 #include "include/vertex.hlsli"
-#include "Include/clodStructs.hlsli"
-#include "Include/clodPageAccess.hlsli"
-#include "Include/visibleClusterPacking.hlsli"
+#include "include/clodStructs.hlsli"
+#include "include/clodPageAccess.hlsli"
+#include "include/visibleClusterPacking.hlsli"
 // Meshlet description
 struct Meshlet
 {

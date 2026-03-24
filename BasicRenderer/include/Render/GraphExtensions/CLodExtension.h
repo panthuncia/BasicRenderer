@@ -58,6 +58,7 @@ private:
     std::shared_ptr<Buffer> m_deepVisibilityNodesBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityCounterBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityOverflowCounterBuffer;
+    std::shared_ptr<Buffer> m_deepVisibilityStatsBuffer;
 
     std::unique_ptr<CLodStreamingSystem> m_streamingSystem;
 };

@@ -1,6 +1,7 @@
 #ifndef __SKINNING_COMMON_HLSLI__
 #define __SKINNING_COMMON_HLSLI__
 
+#include "cbuffers.hlsli"
 #include "structs.hlsli"
 #include "vertex.hlsli"
 

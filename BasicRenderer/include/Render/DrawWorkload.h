@@ -22,8 +22,13 @@ void ForEachMeshDrawWorkload(const Mesh& mesh, F&& callback) {
     const bool isClodMesh = mesh.IsCLodMesh();
     const bool alphaBlend = IsAlphaBlendTechnique(technique);
     const bool alphaTest = IsAlphaTestTechnique(technique);
+    const bool clodAlphaBlend = isClodMesh && alphaBlend && !alphaTest;
 
     for (const auto& pass : technique.passes) {
+        if (clodAlphaBlend && pass == Engine::Primary::OITAccumulationPass) {
+            continue;
+        }
+
         const bool clodOnly =
             isClodMesh
             && pass == Engine::Primary::GBufferPass
@@ -35,7 +40,7 @@ void ForEachMeshDrawWorkload(const Mesh& mesh, F&& callback) {
         });
     }
 
-    if (isClodMesh && alphaBlend && !alphaTest) {
+    if (clodAlphaBlend) {
         callback(DrawWorkloadKey {
             technique.compileFlags,
             Engine::Primary::CLodTransparentPass,

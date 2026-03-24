@@ -246,6 +246,9 @@ public:
 		m_telemetryQuery = {};
 		m_visibleClustersQuery = {};
 		m_visibleCounterQuery = {};
+        m_alphaDeepVisibilityCounterQuery = {};
+        m_alphaDeepVisibilityOverflowQuery = {};
+        m_alphaDeepVisibilityStatsQuery = {};
     }
 
     // ImGui descriptor heap allocator for user textures (slot 0 reserved for font atlas).
@@ -362,15 +365,33 @@ private:
     bool m_clodCaptureStatsAvailable = false;
     CLodCaptureStats m_clodCaptureStats{};
 
+    bool m_clodAlphaTelemetryHasData = false;
+    bool m_clodAlphaTelemetryCapturePending = false;
+    uint64_t m_clodAlphaTelemetryCaptureId = 0;
+    bool m_clodAlphaTelemetryHasPendingNodeCount = false;
+    bool m_clodAlphaTelemetryHasPendingOverflow = false;
+    bool m_clodAlphaTelemetryHasPendingStats = false;
+    uint32_t m_clodAlphaTelemetryPendingNodeCount = 0;
+    uint32_t m_clodAlphaTelemetryPendingOverflow = 0;
+    uint32_t m_clodAlphaNodeCount = 0;
+    uint32_t m_clodAlphaOverflowCount = 0;
+    CLodDeepVisibilityStats m_clodAlphaTelemetryPendingStats{};
+    CLodDeepVisibilityStats m_clodAlphaStats{};
+    std::string m_clodAlphaTelemetryStatus = "No alpha captures yet.";
+
     flecs::query<const Components::Resource> m_telemetryQuery;
 	flecs::query<const Components::Resource> m_visibleClustersQuery;
 	flecs::query<const Components::Resource> m_visibleCounterQuery;
+    flecs::query<const Components::Resource> m_alphaDeepVisibilityCounterQuery;
+    flecs::query<const Components::Resource> m_alphaDeepVisibilityOverflowQuery;
+    flecs::query<const Components::Resource> m_alphaDeepVisibilityStatsQuery;
 
     int FindFileIndex(const std::vector<std::string>& hdrFiles, const std::string& existingFile);
     void DrawCLodTelemetryWindow();
     void DrawFrameTaskGraphWindow();
     void DrawAutoAliasPlannerWindow();
     void TryFinalizeCLodCaptureStats(uint64_t captureId);
+    void TryFinalizeCLodAlphaTelemetryCapture(uint64_t captureId);
 
     void DrawEnvironmentsDropdown();
 	void DrawOutputTypeDropdown();
@@ -763,6 +784,23 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
         .query_builder<const Components::Resource>()
         .with<VisibleClustersCounterTag>()
         .with<CLodExtensionTypeTag>(visBufferTag)
+        .build();
+
+    const auto alphaTag = RendererECSManager::GetInstance().GetWorld().component<CLodExtensionAlphaBlendTag>();
+    m_alphaDeepVisibilityCounterQuery = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<CLodDeepVisibilityCounterTag>()
+        .with<CLodExtensionTypeTag>(alphaTag)
+        .build();
+    m_alphaDeepVisibilityOverflowQuery = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<CLodDeepVisibilityOverflowCounterTag>()
+        .with<CLodExtensionTypeTag>(alphaTag)
+        .build();
+    m_alphaDeepVisibilityStatsQuery = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<CLodDeepVisibilityStatsTag>()
+        .with<CLodExtensionTypeTag>(alphaTag)
         .build();
 }
 
@@ -1530,12 +1568,44 @@ inline void Menu::TryFinalizeCLodCaptureStats(uint64_t captureId) {
         stats.maxClustersPerInstance);
 }
 
+inline void Menu::TryFinalizeCLodAlphaTelemetryCapture(uint64_t captureId) {
+    if (!m_clodAlphaTelemetryCapturePending || m_clodAlphaTelemetryCaptureId != captureId) {
+        return;
+    }
+
+    if (!m_clodAlphaTelemetryHasPendingNodeCount ||
+        !m_clodAlphaTelemetryHasPendingOverflow ||
+        !m_clodAlphaTelemetryHasPendingStats) {
+        return;
+    }
+
+    m_clodAlphaNodeCount = m_clodAlphaTelemetryPendingNodeCount;
+    m_clodAlphaOverflowCount = m_clodAlphaTelemetryPendingOverflow;
+    m_clodAlphaStats = m_clodAlphaTelemetryPendingStats;
+    m_clodAlphaTelemetryHasData = true;
+    m_clodAlphaTelemetryCapturePending = false;
+    m_clodAlphaTelemetryStatus = "Alpha capture completed.";
+
+    spdlog::info(
+        "CLod alpha telemetry: nodes={}, overflow={}, truncatedPixels={}, truncatedNodes={}, resolvedSamples={}, maxRaw={}, maxResolved={}",
+        m_clodAlphaNodeCount,
+        m_clodAlphaOverflowCount,
+        m_clodAlphaStats.truncatedPixelCount,
+        m_clodAlphaStats.truncatedNodeCount,
+        m_clodAlphaStats.totalResolvedSamples,
+        m_clodAlphaStats.maxRawNodeCount,
+        m_clodAlphaStats.maxResolvedSamples);
+}
+
 inline void Menu::DrawCLodTelemetryWindow() {
     ImGui::Begin("CLod Work Graph Telemetry", nullptr);
 
     Resource* clodTelemetryResource = nullptr;
     Resource* clodVisibleClustersResource = nullptr;
     Resource* clodVisibleCounterResource = nullptr;
+    Resource* alphaNodeCounterResource = nullptr;
+    Resource* alphaOverflowCounterResource = nullptr;
+    Resource* alphaStatsResource = nullptr;
     {
         m_telemetryQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
             if (clodTelemetryResource == nullptr) {
@@ -1560,11 +1630,40 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 }
             }
             });
+
+        m_alphaDeepVisibilityCounterQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (alphaNodeCounterResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    alphaNodeCounterResource = resource.get();
+                }
+            }
+            });
+
+        m_alphaDeepVisibilityOverflowQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (alphaOverflowCounterResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    alphaOverflowCounterResource = resource.get();
+                }
+            }
+            });
+
+        m_alphaDeepVisibilityStatsQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (alphaStatsResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    alphaStatsResource = resource.get();
+                }
+            }
+            });
     }
 
     const bool captureStatsResourcesReady = (clodVisibleClustersResource != nullptr) && (clodVisibleCounterResource != nullptr);
+    const bool alphaCaptureResourcesReady =
+        (alphaNodeCounterResource != nullptr) &&
+        (alphaOverflowCounterResource != nullptr) &&
+        (alphaStatsResource != nullptr);
     auto* readbackService = m_renderGraph ? m_renderGraph->GetReadbackService() : nullptr;
     const bool canCapture = (clodTelemetryResource != nullptr) && (readbackService != nullptr) && (!m_clodTelemetryCapturePending) && (!m_clodCaptureStatsPending);
+    const bool canCaptureAlpha = alphaCaptureResourcesReady && (readbackService != nullptr) && (!m_clodAlphaTelemetryCapturePending);
 
     if (!captureStatsResourcesReady) {
         ImGui::TextDisabled("Extended stats unavailable: visible cluster resources not found.");
@@ -1695,6 +1794,92 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
     ImGui::SameLine();
     ImGui::Text("Status: %s", m_clodTelemetryStatus.c_str());
+
+    if (!alphaCaptureResourcesReady) {
+        ImGui::TextDisabled("Alpha deep-visibility metrics unavailable: required resources not found.");
+    }
+
+    if (!canCaptureAlpha) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Capture CLod Alpha Metrics")) {
+        m_clodAlphaTelemetryCapturePending = true;
+        m_clodAlphaTelemetryCaptureId++;
+        m_clodAlphaTelemetryHasPendingNodeCount = false;
+        m_clodAlphaTelemetryHasPendingOverflow = false;
+        m_clodAlphaTelemetryHasPendingStats = false;
+        m_clodAlphaTelemetryPendingNodeCount = 0;
+        m_clodAlphaTelemetryPendingOverflow = 0;
+        m_clodAlphaTelemetryPendingStats = {};
+        m_clodAlphaTelemetryStatus = "Alpha capture requested.";
+
+        const uint64_t captureId = m_clodAlphaTelemetryCaptureId;
+        readbackService->RequestReadbackCapture(
+            "CLodAlpha::DeepVisibilityResolvePass",
+            alphaNodeCounterResource,
+            RangeSpec{},
+            [this, captureId](ReadbackCaptureResult&& result) {
+                if (!m_clodAlphaTelemetryCapturePending || m_clodAlphaTelemetryCaptureId != captureId) {
+                    return;
+                }
+
+                if (result.data.size() < sizeof(uint32_t)) {
+                    m_clodAlphaTelemetryStatus = "Alpha capture failed: node counter payload too small.";
+                    m_clodAlphaTelemetryCapturePending = false;
+                    return;
+                }
+
+                std::memcpy(&m_clodAlphaTelemetryPendingNodeCount, result.data.data(), sizeof(uint32_t));
+                m_clodAlphaTelemetryHasPendingNodeCount = true;
+                TryFinalizeCLodAlphaTelemetryCapture(captureId);
+            });
+
+        readbackService->RequestReadbackCapture(
+            "CLodAlpha::DeepVisibilityResolvePass",
+            alphaOverflowCounterResource,
+            RangeSpec{},
+            [this, captureId](ReadbackCaptureResult&& result) {
+                if (!m_clodAlphaTelemetryCapturePending || m_clodAlphaTelemetryCaptureId != captureId) {
+                    return;
+                }
+
+                if (result.data.size() < sizeof(uint32_t)) {
+                    m_clodAlphaTelemetryStatus = "Alpha capture failed: overflow payload too small.";
+                    m_clodAlphaTelemetryCapturePending = false;
+                    return;
+                }
+
+                std::memcpy(&m_clodAlphaTelemetryPendingOverflow, result.data.data(), sizeof(uint32_t));
+                m_clodAlphaTelemetryHasPendingOverflow = true;
+                TryFinalizeCLodAlphaTelemetryCapture(captureId);
+            });
+
+        readbackService->RequestReadbackCapture(
+            "CLodAlpha::DeepVisibilityResolvePass",
+            alphaStatsResource,
+            RangeSpec{},
+            [this, captureId](ReadbackCaptureResult&& result) {
+                if (!m_clodAlphaTelemetryCapturePending || m_clodAlphaTelemetryCaptureId != captureId) {
+                    return;
+                }
+
+                if (result.data.size() < sizeof(CLodDeepVisibilityStats)) {
+                    m_clodAlphaTelemetryStatus = "Alpha capture failed: stats payload too small.";
+                    m_clodAlphaTelemetryCapturePending = false;
+                    return;
+                }
+
+                std::memcpy(&m_clodAlphaTelemetryPendingStats, result.data.data(), sizeof(CLodDeepVisibilityStats));
+                m_clodAlphaTelemetryHasPendingStats = true;
+                TryFinalizeCLodAlphaTelemetryCapture(captureId);
+            });
+    }
+    if (!canCaptureAlpha) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine();
+    ImGui::Text("Alpha Status: %s", m_clodAlphaTelemetryStatus.c_str());
 
     {
         CLodStreamingOperationStats latestOps{};
@@ -1970,6 +2155,25 @@ inline void Menu::DrawCLodTelemetryWindow() {
         ImGui::Text("Max clusters/instance: %u (%.1f%% of total)",
             m_clodCaptureStats.maxClustersPerInstance,
             m_clodCaptureStats.dominantInstancePercent);
+    }
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Alpha Deep Visibility");
+    if (m_clodAlphaTelemetryCapturePending) {
+        ImGui::Text("Alpha capture status: pending...");
+    }
+    else if (!m_clodAlphaTelemetryHasData) {
+        ImGui::TextDisabled("No alpha deep-visibility capture results yet.");
+    }
+    else {
+        ImGui::Text("Allocated nodes: %u", m_clodAlphaNodeCount);
+        ImGui::Text("Overflowed allocations: %u", m_clodAlphaOverflowCount);
+        ImGui::Text("Truncated pixels: %u | Truncated nodes: %u",
+            m_clodAlphaStats.truncatedPixelCount,
+            m_clodAlphaStats.truncatedNodeCount);
+        ImGui::Text("Resolved samples: %u", m_clodAlphaStats.totalResolvedSamples);
+        ImGui::Text("Max raw node count/pixel: %u", m_clodAlphaStats.maxRawNodeCount);
+        ImGui::Text("Max resolved samples/pixel: %u", m_clodAlphaStats.maxResolvedSamples);
     }
 
     ImGui::End();
