@@ -378,7 +378,7 @@ static void LoadGeom(
 	bool gotColors = false;
 	InterpolationType colorInterp = InterpolationType::Vertex;
 	std::vector<float> rawColors;
-	UsdGeomPrimvar displayColorPrimvar = mesh.GetDisplayColorPrimvar();
+	UsdGeomPrimvar displayColorPrimvar = primvarsAPI.FindPrimvarWithInheritance(TfToken("displayColor"));
 	if (displayColorPrimvar) {
 		VtArray<GfVec3f> usdColors;
 		if (displayColorPrimvar.ComputeFlattened(&usdColors, geomTimeCode)) {

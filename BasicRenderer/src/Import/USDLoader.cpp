@@ -15,6 +15,7 @@
 
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usd/primRange.h>
+#include <pxr/usd/usd/primFlags.h>
 #include <pxr/usd/usdShade/material.h>
 #include <pxr/usd/usdShade/shader.h>
 #include <pxr/usd/usdShade/connectableAPI.h>
@@ -23,6 +24,8 @@
 #include <pxr/usd/usdShade/utils.h>
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/usd/usdGeom/xformable.h>
+#include <pxr/usd/usdGeom/imageable.h>
+#include <pxr/usd/usdGeom/gprim.h>
 #include <pxr/usd/usdGeom/metrics.h>
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/usd/usdGeom/primvarsAPI.h>
@@ -413,6 +416,7 @@ namespace USDLoader {
 		result.name = material.GetPrim().GetName().GetString();
 		result.invertNormalGreen = true; // TODO: What is the best way to deal with this?
 		result.negateNormals = false;
+        result.alphaCutoff = 0.0f;
 
 		for (auto const& input : surfaceShader.GetInputs()) {
 			const auto name = input.GetBaseName();
@@ -534,10 +538,10 @@ namespace USDLoader {
             std::to_string(resolvedDesc.forceDoubleSided ? 1 : 0);
     }
 
-    std::shared_ptr<Material> ResolveDefaultUsdMaterial(bool forceDoubleSidedPreview) {
+    std::shared_ptr<Material> ResolveDefaultUsdMaterial(bool forceDoubleSided) {
         MaterialDescription desc = {};
-        desc.name = forceDoubleSidedPreview ? "UsdDefaultPreviewMaterial" : "UsdDefaultMaterial";
-        desc.forceDoubleSided = forceDoubleSidedPreview;
+        desc.name = forceDoubleSided ? "UsdDefaultPreviewMaterial" : "UsdDefaultMaterial";
+        desc.forceDoubleSided = forceDoubleSided;
         const std::string cacheKey = BuildResolvedMaterialCacheKey(desc.name, desc);
         auto resolvedIt = loadingCache.resolvedMaterialCache.find(cacheKey);
         if (resolvedIt != loadingCache.resolvedMaterialCache.end()) {
@@ -549,15 +553,15 @@ namespace USDLoader {
         return runtimeMaterial;
     }
 
-    std::shared_ptr<Material> ResolveMaterialForMesh(const UsdShadeMaterial& material, const std::vector<MeshUvSetData>& uvSets, bool forceDoubleSidedPreview = false) {
+    std::shared_ptr<Material> ResolveMaterialForMesh(const UsdShadeMaterial& material, const std::vector<MeshUvSetData>& uvSets, bool forceDoubleSided = false) {
         if (!material) {
-            return ResolveDefaultUsdMaterial(forceDoubleSidedPreview);
+            return ResolveDefaultUsdMaterial(forceDoubleSided);
         }
 
         const std::string materialPath = material.GetPrim().GetPath().GetString();
         auto templateIt = loadingCache.materialTemplateCache.find(materialPath);
         if (templateIt == loadingCache.materialTemplateCache.end()) {
-            return ResolveDefaultUsdMaterial(forceDoubleSidedPreview);
+            return ResolveDefaultUsdMaterial(forceDoubleSided);
         }
 
         MaterialDescription resolvedDesc = templateIt->second.desc;
@@ -569,7 +573,7 @@ namespace USDLoader {
         resolvedDesc.aoMap.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.aoMap, uvSets, materialPath, "ambientOcclusion");
         resolvedDesc.heightMap.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.heightMap, uvSets, materialPath, "heightMap");
         resolvedDesc.opacity.uvSetIndex = ResolveUvSetIndexForBinding(resolvedDesc.opacity, uvSets, materialPath, "opacity");
-        resolvedDesc.forceDoubleSided = forceDoubleSidedPreview;
+        resolvedDesc.forceDoubleSided = forceDoubleSided;
 
         const std::string cacheKey = BuildResolvedMaterialCacheKey(materialPath, resolvedDesc);
         auto resolvedIt = loadingCache.resolvedMaterialCache.find(cacheKey);
@@ -606,6 +610,11 @@ namespace USDLoader {
 		// Gather subsets
 		UsdShadeMaterialBindingAPI  bindAPI(mesh);
 		auto                        subsets = bindAPI.GetMaterialBindSubsets();
+        bool authoredDoubleSided = false;
+        UsdGeomGprim gprim(mesh.GetPrim());
+        if (gprim) {
+            gprim.GetDoubleSidedAttr().Get(&authoredDoubleSided, geomTimeCode);
+        }
 
 		std::vector<std::shared_ptr<Mesh>> outMeshes;
 
@@ -626,7 +635,7 @@ namespace USDLoader {
 				skinQ, skelJointOrderRaw, skelJointOrderMapped);
 
 			// Phase 2: GPU mesh creation
-			auto material = ResolveMaterialForMesh(mat, result.ingest.GetUvSets(), result.forceDoubleSidedPreview);
+			auto material = ResolveMaterialForMesh(mat, result.ingest.GetUvSets(), authoredDoubleSided || result.forceDoubleSidedPreview);
 			auto mPtr = result.ingest.Build(material, std::move(result.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
 			outMeshes.push_back(mPtr);
 		}
@@ -647,7 +656,7 @@ namespace USDLoader {
 					skinQ, skelJointOrderRaw, skelJointOrderMapped);
 
 				// Phase 2: GPU mesh creation
-				auto material = ResolveMaterialForMesh(mat, result.ingest.GetUvSets(), result.forceDoubleSidedPreview);
+				auto material = ResolveMaterialForMesh(mat, result.ingest.GetUvSets(), authoredDoubleSided || result.forceDoubleSidedPreview);
 				auto mPtr = result.ingest.Build(material, std::move(result.prebuiltData), MeshCpuDataPolicy::ReleaseAfterUpload);
 				outMeshes.push_back(mPtr);
 			}
@@ -1016,6 +1025,7 @@ namespace USDLoader {
 		UsdSkelCache& skelCache,
 		bool isUSDZ) {
 		std::unordered_set<std::string> prototypeRootsToSkip;
+        const UsdTimeCode geomTimeCode = GetUsdGeometrySampleTime(stage);
 
 		std::function<void(const UsdPrim& prim,
 			flecs::entity parent, bool hasCorrectedAxis)> RecurseHierarchy = [&](const UsdPrim& prim, flecs::entity parent, bool hasCorrectedAxis) {
@@ -1024,21 +1034,25 @@ namespace USDLoader {
 					return;
 				}
 
+                if (prim.IsA<UsdGeomImageable>()) {
+                    UsdGeomImageable imageable(prim);
+                    if (imageable.ComputeVisibility(geomTimeCode) == UsdGeomTokens->invisible) {
+                        spdlog::info("Skipping invisible prim subtree '{}'.", prim.GetPath().GetString());
+                        return;
+                    }
+                }
+
 				spdlog::info("Prim: {}", prim.GetName().GetString());
 
 				GfVec3d translation = { 0, 0, 0 };
 				GfQuaternion rot = GfQuaternion(1);
 				GfVec3d scale = { 1, 1, 1 };
+                bool resetsXformStack = false;
 				// If this node has a transform, get it
 				if (prim.IsA<UsdGeomXformable>()) {
 					UsdGeomXformable xform(prim);
-					UsdGeomXformable xformable(prim);
-					UsdGeomXformable::XformQuery query(xformable);
-
 					GfMatrix4d mat;
-
-					query.GetLocalTransformation(&mat, UsdTimeCode::Default());
-					//bool resets = query.GetResetXformStack(); // TODO: Handle reset xform stack
+                    xform.GetLocalTransformation(&mat, &resetsXformStack, geomTimeCode);
 
 					// Serialize mat
 					std::string matStr;
@@ -1051,7 +1065,7 @@ namespace USDLoader {
 
 					spdlog::info("Xformable has transform: {}", matStr);
 
-					if (!hasCorrectedAxis) { // Apply axis correction only on root transforms
+					if (!hasCorrectedAxis || resetsXformStack) { // Apply axis correction on detached transform roots too
 						GfMatrix4d rotMat(upRot, GfVec3d(0.0));
 						mat = mat * rotMat;
 						hasCorrectedAxis = true;
@@ -1067,7 +1081,7 @@ namespace USDLoader {
 
 
 				std::vector<UsdPrim> childrenToRecurse;
-				for (auto child : prim.GetAllChildren()) {
+				for (auto child : prim.GetFilteredChildren(UsdTraverseInstanceProxies())) {
 					childrenToRecurse.push_back(child);
 				}
 
@@ -1090,10 +1104,10 @@ namespace USDLoader {
 				entity.set<Components::Rotation>({ DirectX::XMFLOAT4(static_cast<float>(rot.GetImaginary()[0]), static_cast<float>(rot.GetImaginary()[1]), static_cast<float>(rot.GetImaginary()[2]), static_cast<float>(rot.GetReal())) });
 				entity.set<Components::Scale>({ DirectX::XMFLOAT3(static_cast<float>(scale[0]), static_cast<float>(scale[1]), static_cast<float>(scale[2])) });
 
-				if (parent) {
+				if (parent && !resetsXformStack) {
 					entity.child_of(parent);
 				}
-				else {
+				else if (!prim.IsPseudoRoot() && !resetsXformStack) {
 					spdlog::warn("Node {} has no parent", entity.name().c_str());
 				}
 
