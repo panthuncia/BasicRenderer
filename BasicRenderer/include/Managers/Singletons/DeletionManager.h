@@ -46,6 +46,18 @@ public:
 		}
 	}
 
+	void DrainAll() {
+		for (auto& queue : m_deletionQueue) {
+			queue.clear();
+		}
+		for (auto& queue : m_allocationDeletionQueue) {
+			queue.clear();
+		}
+		for (auto& queue : m_trackedAllocationDeletionQueue) {
+			queue.clear();
+		}
+	}
+
     void Cleanup() {
 		m_deletionQueue.clear();
 		m_deletionQueue.resize(m_numFramesInFlight);

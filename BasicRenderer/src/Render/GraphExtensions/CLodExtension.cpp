@@ -329,6 +329,44 @@ void CLodExtension::Initialize(RenderGraph& rg)
 
 void CLodExtension::OnRegistryReset(ResourceRegistry* reg)
 {
+    auto releaseBufferBacking = [](const std::shared_ptr<Buffer>& buffer) {
+        if (buffer) {
+            buffer->Dematerialize();
+        }
+    };
+
+    releaseBufferBacking(m_visibleClustersBuffer);
+    releaseBufferBacking(m_visibleClustersCounterBuffer);
+    releaseBufferBacking(m_workGraphTelemetryBuffer);
+    releaseBufferBacking(m_occlusionReplayBuffer);
+    releaseBufferBacking(m_occlusionReplayStateBuffer);
+    releaseBufferBacking(m_occlusionNodeGpuInputsBuffer);
+    releaseBufferBacking(m_viewDepthSrvIndicesBuffer);
+    releaseBufferBacking(m_histogramIndirectCommand);
+    releaseBufferBacking(m_rasterBucketsHistogramBuffer);
+    releaseBufferBacking(m_rasterBucketsOffsetsBuffer);
+    releaseBufferBacking(m_rasterBucketsBlockSumsBuffer);
+    releaseBufferBacking(m_rasterBucketsScannedBlockSumsBuffer);
+    releaseBufferBacking(m_rasterBucketsTotalCountBuffer);
+    releaseBufferBacking(m_visibleClustersCounterBufferPhase2);
+    releaseBufferBacking(m_rasterBucketsHistogramBufferPhase2);
+    releaseBufferBacking(m_rasterBucketsWriteCursorBufferPhase2);
+    releaseBufferBacking(m_rasterBucketsHistogramBufferSw);
+    releaseBufferBacking(m_rasterBucketsHistogramBufferPhase2Sw);
+    releaseBufferBacking(m_rasterBucketsWriteCursorBufferSw);
+    releaseBufferBacking(m_rasterBucketsWriteCursorBufferPhase2Sw);
+    releaseBufferBacking(m_compactedVisibleClustersBuffer);
+    releaseBufferBacking(m_rasterBucketsWriteCursorBuffer);
+    releaseBufferBacking(m_rasterBucketsIndirectArgsBuffer);
+    releaseBufferBacking(m_swVisibleClustersCounterBuffer);
+    releaseBufferBacking(m_swVisibleClustersCounterBufferPhase2);
+    releaseBufferBacking(m_sortedToUnsortedMappingBuffer);
+    releaseBufferBacking(m_viewRasterInfoBuffer);
+    releaseBufferBacking(m_deepVisibilityNodesBuffer);
+    releaseBufferBacking(m_deepVisibilityCounterBuffer);
+    releaseBufferBacking(m_deepVisibilityOverflowCounterBuffer);
+    releaseBufferBacking(m_deepVisibilityStatsBuffer);
+
     if (m_streamingSystem) {
         m_streamingSystem->OnRegistryReset(reg);
     }

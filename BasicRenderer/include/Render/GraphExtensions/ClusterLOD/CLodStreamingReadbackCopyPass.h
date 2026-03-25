@@ -59,6 +59,10 @@ public:
         builder->WithCopySource(inputs.requestsSource);
         builder->WithCopySource(inputs.usedGroupsCounterSource);
         builder->WithCopySource(inputs.usedGroupsBufferSource);
+        builder->WithCopyDest(m_counterStaging);
+        builder->WithCopyDest(m_requestsStaging);
+        builder->WithCopyDest(m_usedGroupsCounterStaging);
+        builder->WithCopyDest(m_usedGroupsBufferStaging);
         builder->PreferCopyQueue();
     }
 

@@ -136,6 +136,23 @@ CLodStreamingSystem::~CLodStreamingSystem() {
 void CLodStreamingSystem::OnRegistryReset(ResourceRegistry* reg) {
     (void)reg;
 
+    auto releaseBufferBacking = [](const std::shared_ptr<Buffer>& buffer) {
+        if (buffer) {
+            buffer->Dematerialize();
+        }
+    };
+
+    releaseBufferBacking(m_streamingNonResidentBits);
+    releaseBufferBacking(m_streamingActiveGroupsBits);
+    releaseBufferBacking(m_streamingLoadRequests);
+    releaseBufferBacking(m_streamingLoadCounter);
+    releaseBufferBacking(m_streamingRuntimeState);
+    releaseBufferBacking(m_usedGroupsCounter);
+    releaseBufferBacking(m_usedGroupsBuffer);
+    if (m_uploadInstance) {
+        m_uploadInstance->Cleanup();
+    }
+
     MeshManager* meshManager = nullptr;
     if (m_getMeshManager) {
         meshManager = m_getMeshManager();
@@ -197,6 +214,7 @@ void CLodStreamingSystem::OnRegistryReset(ResourceRegistry* reg) {
     // Clear in-flight flags so the worker thread doesn't process stale readback data.
     for (auto& slot : m_readbackStagingSlots) {
         slot.inFlight = false;
+        slot.fenceValue = 0;
     }
     m_readbackStagingCursor = 0;
 }

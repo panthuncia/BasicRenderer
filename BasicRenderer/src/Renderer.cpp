@@ -1597,21 +1597,34 @@ void Renderer::AdvanceFrameIndex() {
 }
 
 void Renderer::FlushCommandQueue() {
-    // Create a fence and an event to wait on
-
 	auto device = DeviceManager::GetInstance().GetDevice();
-    rhi::TimelinePtr flushFence; 
-	auto result = device.CreateTimeline(flushFence);
+    auto flushQueue = [&](rhi::Queue queue, const char* debugName) {
+        rhi::TimelinePtr flushFence;
+        auto result = device.CreateTimeline(flushFence, 0, debugName);
+        if (result != rhi::Result::Ok || !flushFence) {
+            throw std::runtime_error("Failed to create queue flush timeline");
+        }
 
-	auto graphicsQueue = DeviceManager::GetInstance().GetGraphicsQueue();
-    auto computeQueue = DeviceManager::GetInstance().GetComputeQueue();
+        queue.Signal({ flushFence->GetHandle(), 1 });
+        flushFence->HostWait(1);
+    };
 
-    // Signal the fence and wait
-    graphicsQueue.Signal({ flushFence->GetHandle(), 1 });
-	computeQueue.Signal({ flushFence->GetHandle(), 2 });
-    
-	flushFence->HostWait(1);
-    flushFence->HostWait(2);
+    auto& deviceManager = DeviceManager::GetInstance();
+    flushQueue(deviceManager.GetGraphicsQueue(), "RendererFlushGraphics");
+    flushQueue(deviceManager.GetComputeQueue(), "RendererFlushCompute");
+    flushQueue(deviceManager.GetCopyQueue(), "RendererFlushCopy");
+
+    if (currentRenderGraph) {
+        auto& registry = currentRenderGraph->GetQueueRegistry();
+        for (size_t i = 0; i < registry.SlotCount(); ++i) {
+            auto slot = static_cast<QueueSlotIndex>(static_cast<uint8_t>(i));
+            auto queue = registry.GetQueue(slot);
+            auto& fence = registry.GetFence(slot);
+            const uint64_t fenceValue = registry.GetNextFenceValue(slot);
+            queue.Signal({ fence.GetHandle(), fenceValue });
+            fence.HostWait(fenceValue);
+        }
+    }
 }
 
 void Renderer::StallPipeline() {
@@ -1915,6 +1928,7 @@ void Renderer::CreateRenderGraph() {
     auto& newGraph = currentRenderGraph;
 
     newGraph->ResetForRebuild();
+    DeletionManager::GetInstance().DrainAll();
 
     newGraph->RegisterProvider(m_pMeshManager.get());
     newGraph->RegisterProvider(m_pObjectManager.get());
