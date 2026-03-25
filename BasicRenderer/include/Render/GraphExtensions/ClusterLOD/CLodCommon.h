@@ -109,6 +109,94 @@ struct CLodDeepVisibilityStats
 
 static_assert(sizeof(CLodDeepVisibilityStats) == 32u, "CLodDeepVisibilityStats size must match HLSL");
 
+inline constexpr uint32_t CLodReyesMaxSplitPassCount = 4u;
+inline constexpr uint32_t CLodReyesMaxVisibilityMicroTrianglesPerPatch = 128u;
+
+constexpr uint32_t CLodReyesPatchVisibilityIndexBase(uint32_t maxVisibleClusters)
+{
+    return maxVisibleClusters;
+}
+
+struct CLodReyesFullClusterOutput
+{
+    uint32_t visibleClusterIndex = 0u;
+    uint32_t instanceID = 0u;
+    uint32_t materialIndex = 0u;
+    uint32_t flags = 0u;
+};
+
+static_assert(sizeof(CLodReyesFullClusterOutput) == 16u, "CLodReyesFullClusterOutput size must remain compact");
+
+struct CLodReyesSplitQueueEntry
+{
+    uint32_t visibleClusterIndex = 0u;
+    uint32_t instanceID = 0u;
+    uint32_t localMeshletIndex = 0u;
+    uint32_t materialIndex = 0u;
+    uint32_t viewID = 0u;
+    uint32_t splitLevel = 0u;
+    uint32_t quantizedTessFactor = 0u;
+    uint32_t flags = 0u;
+    uint32_t sourcePrimitiveAndSplitConfig = 0u;
+    uint32_t domainVertex0Encoded = 0u;
+    uint32_t domainVertex1Encoded = 0u;
+    uint32_t domainVertex2Encoded = 0u;
+};
+
+static_assert(sizeof(CLodReyesSplitQueueEntry) == 48u, "CLodReyesSplitQueueEntry size must remain compact");
+
+struct CLodReyesDiceQueueEntry
+{
+    uint32_t visibleClusterIndex = 0u;
+    uint32_t instanceID = 0u;
+    uint32_t localMeshletIndex = 0u;
+    uint32_t materialIndex = 0u;
+    uint32_t viewID = 0u;
+    uint32_t splitLevel = 0u;
+    uint32_t quantizedTessFactor = 0u;
+    uint32_t flags = 0u;
+    uint32_t sourcePrimitiveAndSplitConfig = 0u;
+    uint32_t domainVertex0Encoded = 0u;
+    uint32_t domainVertex1Encoded = 0u;
+    uint32_t domainVertex2Encoded = 0u;
+    uint32_t tessTableConfigIndex = 0u;
+    uint32_t reserved = 0u;
+};
+
+static_assert(sizeof(CLodReyesDiceQueueEntry) == 56u, "CLodReyesDiceQueueEntry size must remain compact");
+
+struct CLodReyesDispatchIndirectCommand
+{
+    uint32_t dispatchX = 0u;
+    uint32_t dispatchY = 1u;
+    uint32_t dispatchZ = 1u;
+};
+
+static_assert(sizeof(CLodReyesDispatchIndirectCommand) == 12u, "CLodReyesDispatchIndirectCommand size must match HLSL");
+
+struct CLodReyesTelemetry
+{
+    uint32_t visibleClusterInputCount = 0u;
+    uint32_t fullClusterOutputCount = 0u;
+    uint32_t immediateDiceQueueEntryCount = 0u;
+    uint32_t finalDiceQueueEntryCount = 0u;
+    uint32_t phaseIndex = 0u;
+    uint32_t deepestSplitLevelReached = 0u;
+    uint32_t configuredMaxSplitPassCount = 0u;
+    uint32_t reserved0 = 0u;
+    uint32_t dicedPatchCount = 0u;
+    uint32_t dicedTriangleEstimateCount = 0u;
+    uint32_t dicedVertexEstimateCount = 0u;
+    uint32_t reserved1 = 0u;
+    uint32_t splitInputCounts[CLodReyesMaxSplitPassCount] = {};
+    uint32_t splitChildOutputCounts[CLodReyesMaxSplitPassCount] = {};
+    uint32_t splitDiceOutputCounts[CLodReyesMaxSplitPassCount] = {};
+    uint32_t splitQueueOverflowCounts[CLodReyesMaxSplitPassCount] = {};
+    uint32_t diceQueueOverflowCounts[CLodReyesMaxSplitPassCount] = {};
+};
+
+static_assert(sizeof(CLodReyesTelemetry) == 128u, "CLodReyesTelemetry size must remain compact");
+
 inline constexpr uint32_t CLodReplayBufferSizeBytes = 200u * 1024u * 1024u; // 200 MB physical, GPU uses first 100 MB
 inline constexpr uint32_t CLodReplayNodeRegionSizeBytes = 50u * 1024u * 1024u;    // must match HLSL CLOD_REPLAY_NODE_REGION_SIZE_BYTES
 inline constexpr uint32_t CLodReplayMeshletRegionOffset = CLodReplayNodeRegionSizeBytes;

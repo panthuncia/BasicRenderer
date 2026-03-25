@@ -30,6 +30,12 @@ public:
             .with<VisibleClustersBufferTag>()
             .build();
 
+        m_reyesDiceQueueQuery =
+            ecsWorld.query_builder<>()
+            .with<CLodExtensionTypeTag>(visBufferTag)
+            .with<CLodReyesDiceQueueTag>()
+            .build();
+
         // Retrieve the page pool slab ResourceGroup for render graph tracking.
         try {
             auto getter = SettingsManager::GetInstance().getSettingGetter<std::function<MeshManager*()>>(CLodStreamingMeshManagerGetterSettingName);
@@ -43,6 +49,7 @@ public:
 
     void DeclareResourceUsages(ComputePassBuilder* b) override {
         b->WithShaderResource(ECSResourceResolver(m_visibleClustersQuery));
+        b->WithShaderResource(ECSResourceResolver(m_reyesDiceQueueQuery));
 
         if (m_slabResourceGroup) {
             b->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
@@ -111,6 +118,8 @@ public:
             if (test) {
                 visibleClusterResources.push_back(test.get());
             }
+            const auto capacity = e.get<CLodVisibleClusterCapacity>();
+            m_patchVisibilityIndexBase = CLodReyesPatchVisibilityIndexBase(capacity.maxVisibleClusters);
             });
 
         if (visibleClusterResources.size() != 1) {
@@ -118,6 +127,18 @@ public:
         }
 
         m_visibleClusterBufferSRVIndex = visibleClusterResources[0]->GetSRVInfo(0).slot.index;
+
+        std::vector<GloballyIndexedResource*> reyesDiceQueueResources;
+        m_reyesDiceQueueQuery.each([&](flecs::entity e) {
+            auto& res = e.get<Components::Resource>();
+            auto test = std::static_pointer_cast<GloballyIndexedResource>(res.resource.lock());
+            if (test) {
+                reyesDiceQueueResources.push_back(test.get());
+            }
+            });
+        if (reyesDiceQueueResources.size() == 1) {
+            m_reyesDiceQueueBufferSRVIndex = reyesDiceQueueResources[0]->GetSRVInfo(0).slot.index;
+        }
 
         m_materialEvalCmds = m_resourceRegistryView->RequestPtr<Resource>("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }
@@ -162,6 +183,8 @@ public:
             // Set per-pass root constants
             unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
             miscRootConstants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterBufferSRVIndex;
+            miscRootConstants[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_reyesDiceQueueBufferSRVIndex;
+            miscRootConstants[VISBUF_REYES_PATCH_INDEX_BASE] = m_patchVisibilityIndexBase;
             cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
 
             const uint64_t argOffset = static_cast<uint64_t>(slot) * stride;
@@ -182,6 +205,9 @@ private:
     std::unordered_map<MaterialCompileFlags, PipelineState> m_psoCache;
     Resource* m_materialEvalCmds;
     flecs::query<> m_visibleClustersQuery;
+    flecs::query<> m_reyesDiceQueueQuery;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     uint32_t m_visibleClusterBufferSRVIndex = 0;
+    uint32_t m_reyesDiceQueueBufferSRVIndex = 0xFFFFFFFFu;
+    uint32_t m_patchVisibilityIndexBase = 0u;
 };

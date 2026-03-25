@@ -51,6 +51,25 @@ private:
     std::shared_ptr<Buffer> m_rasterBucketsWriteCursorBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBuffer;
 
+    std::shared_ptr<Buffer> m_reyesFullClusterOutputsBuffer;
+    std::shared_ptr<Buffer> m_reyesFullClusterOutputsCounterBuffer;
+    std::shared_ptr<Buffer> m_reyesClassifyIndirectArgsBuffer;
+    std::shared_ptr<Buffer> m_reyesClassifyIndirectArgsBufferPhase2;
+    std::shared_ptr<Buffer> m_reyesSplitIndirectArgsBuffer;
+    std::shared_ptr<Buffer> m_reyesSplitIndirectArgsBufferPhase2;
+    std::shared_ptr<Buffer> m_reyesSplitQueueBufferA;
+    std::shared_ptr<Buffer> m_reyesSplitQueueCounterBufferA;
+    std::shared_ptr<Buffer> m_reyesSplitQueueOverflowBufferA;
+    std::shared_ptr<Buffer> m_reyesSplitQueueBufferB;
+    std::shared_ptr<Buffer> m_reyesSplitQueueCounterBufferB;
+    std::shared_ptr<Buffer> m_reyesSplitQueueOverflowBufferB;
+    std::shared_ptr<Buffer> m_reyesDiceQueueBuffer;
+    std::shared_ptr<Buffer> m_reyesDiceQueueCounterBuffer;
+    std::shared_ptr<Buffer> m_reyesDiceQueueOverflowBuffer;
+    std::shared_ptr<Buffer> m_reyesDiceIndirectArgsBuffer;
+    std::shared_ptr<Buffer> m_reyesDiceIndirectArgsBufferPhase2;
+    std::shared_ptr<Buffer> m_reyesTelemetryBuffer;
+
     std::shared_ptr<Buffer> m_swVisibleClustersCounterBuffer;
     std::shared_ptr<Buffer> m_swVisibleClustersCounterBufferPhase2;
     std::shared_ptr<Buffer> m_sortedToUnsortedMappingBuffer;

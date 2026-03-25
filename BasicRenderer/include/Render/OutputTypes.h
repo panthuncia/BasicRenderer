@@ -20,6 +20,7 @@ enum OutputType {
 	TRANSPARENT_NODE_COUNT = 16,
 	TRANSPARENT_DEPTH_COMPLEXITY = 17,
 	TRANSPARENT_RESOLVED_SAMPLE_COUNT = 18,
+	REYES_GEOMETRY_PATH = 19,
 };
 
 inline std::vector<std::string> OutputTypeNames = {
@@ -42,4 +43,5 @@ inline std::vector<std::string> OutputTypeNames = {
 	"Transparent Node Count",
 	"Transparent Depth Complexity",
 	"Transparent Resolved Sample Count",
+	"Reyes Geometry Path",
 };

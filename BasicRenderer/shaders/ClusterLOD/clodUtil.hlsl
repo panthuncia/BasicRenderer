@@ -6,6 +6,7 @@
 #include "PerPassRootConstants/clodPrefixScanRootConstants.h"
 #include "PerPassRootConstants/clodPrefixOffsetsRootConstants.h"
 #include "PerPassRootConstants/clodCompactionRootConstants.h"
+#include "PerPassRootConstants/clodReyesCreateDispatchArgsRootConstants.h"
 #include "include/indirectCommands.hlsli"
 #include "include/clodStructs.hlsli"
 #include "include/visibleClusterPacking.hlsli"
@@ -16,6 +17,21 @@ struct RasterBucketsHistogramIndirectCommand
     uint xDim;
     uint dispatchX, dispatchY, dispatchZ;
 };
+
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void BuildReyesDispatchArgsCSMain()
+{
+    StructuredBuffer<uint> sourceCounterBuffer = ResourceDescriptorHeap[CLOD_REYES_CREATE_DISPATCH_ARGS_SOURCE_COUNTER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodReyesDispatchIndirectCommand> indirectArgsBuffer = ResourceDescriptorHeap[CLOD_REYES_CREATE_DISPATCH_ARGS_OUTPUT_DESCRIPTOR_INDEX];
+
+    const uint workItemCount = sourceCounterBuffer.Load(0);
+    const uint threadsPerGroup = max(CLOD_REYES_CREATE_DISPATCH_ARGS_THREADS_PER_GROUP, 1u);
+
+    indirectArgsBuffer[0].dispatchX = (workItemCount + threadsPerGroup - 1u) / threadsPerGroup;
+    indirectArgsBuffer[0].dispatchY = 1u;
+    indirectArgsBuffer[0].dispatchZ = 1u;
+}
 
 uint CLodGetHistogramVisibleClusterReadIndex(uint linearizedID)
 {

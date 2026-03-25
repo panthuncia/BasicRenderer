@@ -71,7 +71,13 @@ inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) { // TODO
 		tech.compileFlags |= MaterialCompileFlags::MaterialCompileEmissiveTexture;
 	}
 	if (d.heightMap.texture) {
-		tech.compileFlags |= MaterialCompileFlags::MaterialCompileParallax;
+        if (d.enableGeometricDisplacement) {
+            tech.compileFlags |= MaterialCompileFlags::MaterialCompileGeometricDisplacement;
+            tech.rasterFlags |= MaterialRasterFlags::MaterialRasterFlagsGeometricDisplacement;
+        }
+        else {
+            tech.compileFlags |= MaterialCompileFlags::MaterialCompileParallax;
+        }
 	}
 
     return tech;

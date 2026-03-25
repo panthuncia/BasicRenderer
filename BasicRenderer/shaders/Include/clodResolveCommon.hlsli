@@ -483,6 +483,33 @@ float2 ComputeClodMotionVector(float3 posOS, float3 worldPosition, float4x4 prev
     return ndcCur - ndcPrev;
 }
 
+static const float REYES_BARYCENTRIC_COORD_SCALE = 65535.0f;
+
+float3 ReyesDecodeBarycentrics(uint encoded)
+{
+    float u = (float)(encoded & 0xFFFFu) / REYES_BARYCENTRIC_COORD_SCALE;
+    float v = (float)(encoded >> 16u) / REYES_BARYCENTRIC_COORD_SCALE;
+    return float3(saturate(1.0f - u - v), u, v);
+}
+
+BarycentricDeriv ReyesComposeSourceBarycentrics(BarycentricDeriv patchBary, float3 domain0, float3 domain1, float3 domain2)
+{
+    BarycentricDeriv sourceBary = (BarycentricDeriv)0;
+    sourceBary.m_lambda =
+        domain0 * patchBary.m_lambda.x +
+        domain1 * patchBary.m_lambda.y +
+        domain2 * patchBary.m_lambda.z;
+    sourceBary.m_ddx =
+        domain0 * patchBary.m_ddx.x +
+        domain1 * patchBary.m_ddx.y +
+        domain2 * patchBary.m_ddx.z;
+    sourceBary.m_ddy =
+        domain0 * patchBary.m_ddy.x +
+        domain1 * patchBary.m_ddy.y +
+        domain2 * patchBary.m_ddy.z;
+    return sourceBary;
+}
+
 bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackface, out ClodResolvedSample sample)
 {
     sample = (ClodResolvedSample)0;
@@ -500,6 +527,22 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
     uint clusterIndex;
     uint meshletTriangleIndex;
     UnpackVisKey(vis, depth, clusterIndex, meshletTriangleIndex);
+
+    bool isReyesPatch = false;
+    float3 patchDomain0 = float3(1.0f, 0.0f, 0.0f);
+    float3 patchDomain1 = float3(0.0f, 1.0f, 0.0f);
+    float3 patchDomain2 = float3(0.0f, 0.0f, 1.0f);
+    if (clusterIndex >= VISBUF_REYES_PATCH_INDEX_BASE && VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
+    {
+        StructuredBuffer<CLodReyesDiceQueueEntry> diceQueue = ResourceDescriptorHeap[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX];
+        CLodReyesDiceQueueEntry diceEntry = diceQueue[clusterIndex - VISBUF_REYES_PATCH_INDEX_BASE];
+        clusterIndex = diceEntry.visibleClusterIndex;
+        meshletTriangleIndex = diceEntry.sourcePrimitiveAndSplitConfig & 0xFFFFu;
+        patchDomain0 = ReyesDecodeBarycentrics(diceEntry.domainVertex0Encoded);
+        patchDomain1 = ReyesDecodeBarycentrics(diceEntry.domainVertex1Encoded);
+        patchDomain2 = ReyesDecodeBarycentrics(diceEntry.domainVertex2Encoded);
+        isReyesPatch = true;
+    }
 
     MeshletResolveData md = LoadMeshletResolveData_Wave(clusterIndex);
     if (meshletTriangleIndex >= md.triangleCount)
@@ -531,11 +574,25 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
     float4 clip1 = mul(float4(p1, 1.0f), objectToClip);
     float4 clip2 = mul(float4(p2, 1.0f), objectToClip);
 
+    if (isReyesPatch)
+    {
+        const float3 patchPos0 = p0 * patchDomain0.x + p1 * patchDomain0.y + p2 * patchDomain0.z;
+        const float3 patchPos1 = p0 * patchDomain1.x + p1 * patchDomain1.y + p2 * patchDomain1.z;
+        const float3 patchPos2 = p0 * patchDomain2.x + p1 * patchDomain2.y + p2 * patchDomain2.z;
+        clip0 = mul(float4(patchPos0, 1.0f), objectToClip);
+        clip1 = mul(float4(patchPos1, 1.0f), objectToClip);
+        clip2 = mul(float4(patchPos2, 1.0f), objectToClip);
+    }
+
     float2 winSize = float2(perFrame.screenResX, perFrame.screenResY);
     float2 pixelUv = (float2(pixel) + 0.5f) / winSize;
     float2 pixelNdc = float2(pixelUv.x * 2.0f - 1.0f, (1.0f - pixelUv.y) * 2.0f - 1.0f);
 
     BarycentricDeriv bary = CalcFullBary(clip0, clip1, clip2, pixelNdc, winSize);
+    if (isReyesPatch)
+    {
+        bary = ReyesComposeSourceBarycentrics(bary, patchDomain0, patchDomain1, patchDomain2);
+    }
 
     float3 interpPosX = InterpolateWithDeriv(bary, p0.x, p1.x, p2.x);
     float3 interpPosY = InterpolateWithDeriv(bary, p0.y, p1.y, p2.y);

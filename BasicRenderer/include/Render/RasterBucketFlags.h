@@ -8,6 +8,7 @@ enum MaterialRasterFlags : uint32_t {
 	MaterialRasterFlagsNone = 0,
 	MaterialRasterFlagsAlphaTest = 1 << 0,
 	MaterialRasterFlagsDoubleSided = 1 << 1,
+	MaterialRasterFlagsGeometricDisplacement = 1 << 2,
 };
 
 // operators

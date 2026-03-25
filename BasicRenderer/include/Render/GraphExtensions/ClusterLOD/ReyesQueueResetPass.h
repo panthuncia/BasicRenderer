@@ -1,0 +1,35 @@
+#pragma once
+
+#include <memory>
+#include <vector>
+
+#include "RenderPasses/Base/ComputePass.h"
+
+class Buffer;
+
+class ReyesQueueResetPass final : public ComputePass {
+public:
+    ReyesQueueResetPass(
+        std::shared_ptr<Buffer> fullClusterCounter,
+        std::vector<std::shared_ptr<Buffer>> splitQueueCounters,
+        std::vector<std::shared_ptr<Buffer>> splitQueueOverflowCounters,
+        std::shared_ptr<Buffer> diceQueueCounter,
+        std::shared_ptr<Buffer> diceQueueOverflowCounter,
+        std::shared_ptr<Buffer> telemetryBuffer,
+        uint32_t phaseIndex);
+
+    void DeclareResourceUsages(ComputePassBuilder* builder) override;
+    void Setup() override;
+    PassReturn Execute(PassExecutionContext& executionContext) override;
+    void Update(const UpdateExecutionContext& executionContext) override;
+    void Cleanup() override;
+
+private:
+    std::shared_ptr<Buffer> m_fullClusterCounter;
+    std::vector<std::shared_ptr<Buffer>> m_splitQueueCounters;
+    std::vector<std::shared_ptr<Buffer>> m_splitQueueOverflowCounters;
+    std::shared_ptr<Buffer> m_diceQueueCounter;
+    std::shared_ptr<Buffer> m_diceQueueOverflowCounter;
+    std::shared_ptr<Buffer> m_telemetryBuffer;
+    uint32_t m_phaseIndex = 0u;
+};

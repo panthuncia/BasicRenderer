@@ -6,6 +6,18 @@ void EvaluateGBufferOptimized(uint2 pixel)
     Texture2D<uint64_t> visibilityTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
     uint64_t vis = visibilityTexture[pixel];
 
+    bool isReyesPatch = false;
+    if (vis != 0xFFFFFFFFFFFFFFFF)
+    {
+        float visDepth;
+        uint visClusterIndex;
+        uint visPrimitiveIndex;
+        UnpackVisKey(vis, visDepth, visClusterIndex, visPrimitiveIndex);
+        isReyesPatch =
+            visClusterIndex >= VISBUF_REYES_PATCH_INDEX_BASE &&
+            VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX != 0xFFFFFFFFu;
+    }
+
     ClodResolvedSample sample;
     if (!ResolveClodSampleFromVisKey(vis, pixel, sample))
     {
@@ -56,6 +68,9 @@ void EvaluateGBufferOptimized(uint2 pixel)
                 break;
             case OUTPUT_MOTION_VECTORS:
                 payload = PackDebugFloat3(float3(sample.motionVector * 0.5 + 0.5, 0.5));
+                break;
+            case OUTPUT_REYES_GEOMETRY_PATH:
+                payload = PackDebugFloat3(isReyesPatch ? float3(0.10, 0.95, 0.20) : float3(0.95, 0.15, 0.15));
                 break;
         }
         if (payload.x != DEBUG_SENTINEL) {

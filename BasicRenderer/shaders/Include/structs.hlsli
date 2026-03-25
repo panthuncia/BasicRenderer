@@ -398,4 +398,74 @@ struct VisibleCluster
     unsigned int pageSlabByteOffset;      // pre-resolved page slab byte offset
 };
 
+struct CLodReyesFullClusterOutput
+{
+    uint visibleClusterIndex;
+    uint instanceID;
+    uint materialIndex;
+    uint flags;
+};
+
+struct CLodReyesSplitQueueEntry
+{
+    uint visibleClusterIndex;
+    uint instanceID;
+    uint localMeshletIndex;
+    uint materialIndex;
+    uint viewID;
+    uint splitLevel;
+    uint quantizedTessFactor;
+    uint flags;
+    uint sourcePrimitiveAndSplitConfig;
+    uint domainVertex0Encoded;
+    uint domainVertex1Encoded;
+    uint domainVertex2Encoded;
+};
+
+struct CLodReyesDiceQueueEntry
+{
+    uint visibleClusterIndex;
+    uint instanceID;
+    uint localMeshletIndex;
+    uint materialIndex;
+    uint viewID;
+    uint splitLevel;
+    uint quantizedTessFactor;
+    uint flags;
+    uint sourcePrimitiveAndSplitConfig;
+    uint domainVertex0Encoded;
+    uint domainVertex1Encoded;
+    uint domainVertex2Encoded;
+    uint tessTableConfigIndex;
+    uint reserved;
+};
+
+struct CLodReyesDispatchIndirectCommand
+{
+    uint dispatchX;
+    uint dispatchY;
+    uint dispatchZ;
+};
+
+struct CLodReyesTelemetry
+{
+    uint visibleClusterInputCount;
+    uint fullClusterOutputCount;
+    uint immediateDiceQueueEntryCount;
+    uint finalDiceQueueEntryCount;
+    uint phaseIndex;
+    uint deepestSplitLevelReached;
+    uint configuredMaxSplitPassCount;
+    uint reserved0;
+    uint dicedPatchCount;
+    uint dicedTriangleEstimateCount;
+    uint dicedVertexEstimateCount;
+    uint reserved1;
+    uint splitInputCounts[4];
+    uint splitChildOutputCounts[4];
+    uint splitDiceOutputCounts[4];
+    uint splitQueueOverflowCounts[4];
+    uint diceQueueOverflowCounts[4];
+};
+
 #endif // __STRUCTS_HLSL__
