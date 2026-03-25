@@ -249,6 +249,8 @@ public:
         m_alphaDeepVisibilityCounterQuery = {};
         m_alphaDeepVisibilityOverflowQuery = {};
         m_alphaDeepVisibilityStatsQuery = {};
+		m_reyesTelemetryPhase1Query = {};
+		m_reyesTelemetryPhase2Query = {};
     }
 
     // ImGui descriptor heap allocator for user textures (slot 0 reserved for font atlas).

@@ -50,6 +50,7 @@ private:
     uint32_t m_splitPassIndex = 0u;
     uint32_t m_maxSplitPassCount = 0u;
     uint32_t m_phaseIndex = 0u;
+    PipelineState m_clearCountersPso;
     PipelineState m_pso;
     rhi::CommandSignaturePtr m_commandSignature;
 };

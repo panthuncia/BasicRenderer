@@ -406,6 +406,14 @@ struct CLodReyesFullClusterOutput
     uint flags;
 };
 
+struct CLodReyesOwnedClusterEntry
+{
+    uint visibleClusterIndex;
+    uint instanceID;
+    uint materialIndex;
+    uint flags;
+};
+
 struct CLodReyesSplitQueueEntry
 {
     uint visibleClusterIndex;

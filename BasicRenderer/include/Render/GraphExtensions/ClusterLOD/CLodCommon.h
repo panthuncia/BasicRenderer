@@ -127,6 +127,16 @@ struct CLodReyesFullClusterOutput
 
 static_assert(sizeof(CLodReyesFullClusterOutput) == 16u, "CLodReyesFullClusterOutput size must remain compact");
 
+struct CLodReyesOwnedClusterEntry
+{
+    uint32_t visibleClusterIndex = 0u;
+    uint32_t instanceID = 0u;
+    uint32_t materialIndex = 0u;
+    uint32_t flags = 0u;
+};
+
+static_assert(sizeof(CLodReyesOwnedClusterEntry) == 16u, "CLodReyesOwnedClusterEntry size must remain compact");
+
 struct CLodReyesSplitQueueEntry
 {
     uint32_t visibleClusterIndex = 0u;

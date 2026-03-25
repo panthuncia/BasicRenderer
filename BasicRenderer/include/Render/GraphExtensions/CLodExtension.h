@@ -53,6 +53,8 @@ private:
 
     std::shared_ptr<Buffer> m_reyesFullClusterOutputsBuffer;
     std::shared_ptr<Buffer> m_reyesFullClusterOutputsCounterBuffer;
+    std::shared_ptr<Buffer> m_reyesOwnedClustersBuffer;
+    std::shared_ptr<Buffer> m_reyesOwnedClustersCounterBuffer;
     std::shared_ptr<Buffer> m_reyesOwnershipBitsetBuffer;
     std::shared_ptr<Buffer> m_reyesOwnershipBitsetBufferPhase2;
     std::shared_ptr<Buffer> m_reyesClassifyIndirectArgsBuffer;

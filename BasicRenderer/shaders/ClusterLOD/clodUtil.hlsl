@@ -8,6 +8,7 @@
 #include "PerPassRootConstants/clodCompactionRootConstants.h"
 #include "PerPassRootConstants/clodReyesCreateDispatchArgsRootConstants.h"
 #include "PerPassRootConstants/clodReyesResetRootConstants.h"
+#include "PerPassRootConstants/clodReyesSplitRootConstants.h"
 #include "include/indirectCommands.hlsli"
 #include "include/clodStructs.hlsli"
 #include "include/visibleClusterPacking.hlsli"
@@ -38,6 +39,40 @@ void ClearReyesOwnershipBitsetCSMain(uint3 dispatchThreadId : SV_DispatchThreadI
 
     RWStructuredBuffer<uint> ownershipWords = ResourceDescriptorHeap[CLOD_REYES_RESET_OWNERSHIP_BITSET_DESCRIPTOR_INDEX];
     ownershipWords[wordIndex] = 0u;
+}
+
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void ClearReyesQueueCountersCSMain()
+{
+    RWStructuredBuffer<uint> fullClusterCounter = ResourceDescriptorHeap[CLOD_REYES_RESET_FULL_CLUSTER_COUNTER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> ownedClusterCounter = ResourceDescriptorHeap[CLOD_REYES_RESET_OWNED_CLUSTER_COUNTER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> splitQueueCounterA = ResourceDescriptorHeap[CLOD_REYES_RESET_SPLIT_QUEUE_COUNTER_A_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> splitQueueOverflowA = ResourceDescriptorHeap[CLOD_REYES_RESET_SPLIT_QUEUE_OVERFLOW_A_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> splitQueueCounterB = ResourceDescriptorHeap[CLOD_REYES_RESET_SPLIT_QUEUE_COUNTER_B_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> splitQueueOverflowB = ResourceDescriptorHeap[CLOD_REYES_RESET_SPLIT_QUEUE_OVERFLOW_B_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> diceQueueCounter = ResourceDescriptorHeap[CLOD_REYES_RESET_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> diceQueueOverflow = ResourceDescriptorHeap[CLOD_REYES_RESET_DICE_QUEUE_OVERFLOW_DESCRIPTOR_INDEX];
+
+    fullClusterCounter[0] = 0u;
+    ownedClusterCounter[0] = 0u;
+    splitQueueCounterA[0] = 0u;
+    splitQueueOverflowA[0] = 0u;
+    splitQueueCounterB[0] = 0u;
+    splitQueueOverflowB[0] = 0u;
+    diceQueueCounter[0] = 0u;
+    diceQueueOverflow[0] = 0u;
+}
+
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void ClearReyesSplitOutputCountersCSMain()
+{
+    RWStructuredBuffer<uint> outputSplitQueueCounter = ResourceDescriptorHeap[CLOD_REYES_SPLIT_OUTPUT_SPLIT_QUEUE_COUNTER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> outputSplitQueueOverflowCounter = ResourceDescriptorHeap[CLOD_REYES_SPLIT_OUTPUT_SPLIT_QUEUE_OVERFLOW_DESCRIPTOR_INDEX];
+
+    outputSplitQueueCounter[0] = 0u;
+    outputSplitQueueOverflowCounter[0] = 0u;
 }
 
 [shader("compute")]

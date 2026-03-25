@@ -12,6 +12,7 @@ class ReyesQueueResetPass final : public ComputePass {
 public:
     ReyesQueueResetPass(
         std::shared_ptr<Buffer> fullClusterCounter,
+        std::shared_ptr<Buffer> ownedClusterCounter,
         std::vector<std::shared_ptr<Buffer>> splitQueueCounters,
         std::vector<std::shared_ptr<Buffer>> splitQueueOverflowCounters,
         std::shared_ptr<Buffer> diceQueueCounter,
@@ -28,6 +29,7 @@ public:
 
 private:
     std::shared_ptr<Buffer> m_fullClusterCounter;
+    std::shared_ptr<Buffer> m_ownedClusterCounter;
     std::vector<std::shared_ptr<Buffer>> m_splitQueueCounters;
     std::vector<std::shared_ptr<Buffer>> m_splitQueueOverflowCounters;
     std::shared_ptr<Buffer> m_diceQueueCounter;
@@ -36,5 +38,6 @@ private:
     std::shared_ptr<Buffer> m_telemetryBuffer;
     uint32_t m_phaseIndex = 0u;
     uint32_t m_ownershipBitsetWordCount = 0u;
+    PipelineState m_clearCountersPso;
     PipelineState m_clearOwnershipBitsetPso;
 };

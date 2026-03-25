@@ -40,6 +40,13 @@ ReyesSplitPass::ReyesSplitPass(
     , m_splitPassIndex(splitPassIndex)
     , m_maxSplitPassCount(maxSplitPassCount)
     , m_phaseIndex(phaseIndex) {
+    m_clearCountersPso = PSOManager::GetInstance().MakeComputePipeline(
+        PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
+        L"Shaders/ClusterLOD/clodUtil.hlsl",
+        L"ClearReyesSplitOutputCountersCSMain",
+        {},
+        "CLod.ReyesSplit.ClearCounters.PSO");
+
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
         L"Shaders/ClusterLOD/reyesSplit.hlsl",
@@ -91,9 +98,6 @@ PassReturn ReyesSplitPass::Execute(PassExecutionContext& executionContext)
     auto& commandList = executionContext.commandList;
 
     commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
-    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
 
     uint32_t uintRootConstants[NumMiscUintRootConstants] = {};
     uintRootConstants[CLOD_REYES_SPLIT_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
@@ -111,6 +115,21 @@ PassReturn ReyesSplitPass::Execute(PassExecutionContext& executionContext)
     uintRootConstants[CLOD_REYES_SPLIT_QUEUE_CAPACITY] = m_maxSplitQueueEntries;
     uintRootConstants[CLOD_REYES_SPLIT_PASS_INDEX] = m_splitPassIndex;
 
+    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
+    commandList.BindPipeline(m_clearCountersPso.GetAPIPipelineState().GetHandle());
+    BindResourceDescriptorIndices(commandList, m_clearCountersPso.GetResourceDescriptorSlots());
+    commandList.PushConstants(
+        rhi::ShaderStage::Compute,
+        0,
+        MiscUintRootSignatureIndex,
+        0,
+        NumMiscUintRootConstants,
+        uintRootConstants);
+    commandList.Dispatch(1, 1, 1);
+
+    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
+    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
         0,
@@ -126,9 +145,7 @@ PassReturn ReyesSplitPass::Execute(PassExecutionContext& executionContext)
 
 void ReyesSplitPass::Update(const UpdateExecutionContext& executionContext)
 {
-    const uint32_t zero = 0u;
-    BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_outputSplitQueueCounterBuffer), 0);
-    BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_outputSplitQueueOverflowBuffer), 0);
+    (void)executionContext;
 }
 
 void ReyesSplitPass::Cleanup() {}

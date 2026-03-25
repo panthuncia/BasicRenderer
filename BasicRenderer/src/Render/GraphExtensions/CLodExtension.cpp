@@ -31,6 +31,7 @@
 #include "Render/GraphExtensions/ClusterLOD/ReyesDicePass.h"
 #include "Render/GraphExtensions/ClusterLOD/ReyesPatchRasterizationPass.h"
 #include "Render/GraphExtensions/ClusterLOD/ReyesQueueResetPass.h"
+#include "Render/GraphExtensions/ClusterLOD/ReyesSeedPatchesPass.h"
 #include "Render/GraphExtensions/ClusterLOD/ReyesSplitPass.h"
 #include "Render/RenderPhase.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
@@ -265,6 +266,12 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
         .add<CLodReyesFullClustersCounterTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
+    m_reyesOwnedClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(maxVisibleClusters, sizeof(CLodReyesOwnedClusterEntry), true, false);
+    m_reyesOwnedClustersBuffer->SetName(MakeVariantResourceName(traits, "Reyes Owned Clusters Buffer"));
+
+    m_reyesOwnedClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_reyesOwnedClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "Reyes Owned Clusters Counter Buffer"));
+
     const uint32_t reyesOwnershipWordCount = CLodBitsetWordCount(maxVisibleClusters);
     m_reyesOwnershipBitsetBuffer = CreateAliasedUnmaterializedStructuredBuffer(reyesOwnershipWordCount, sizeof(uint32_t), true, false, false, false);
     m_reyesOwnershipBitsetBuffer->SetName(MakeVariantResourceName(traits, "Reyes Ownership Bitset Buffer"));
@@ -471,6 +478,8 @@ void CLodExtension::OnRegistryReset(ResourceRegistry* reg)
     releaseBufferBacking(m_rasterBucketsIndirectArgsBuffer);
     releaseBufferBacking(m_reyesFullClusterOutputsBuffer);
     releaseBufferBacking(m_reyesFullClusterOutputsCounterBuffer);
+    releaseBufferBacking(m_reyesOwnedClustersBuffer);
+    releaseBufferBacking(m_reyesOwnedClustersCounterBuffer);
     releaseBufferBacking(m_reyesOwnershipBitsetBuffer);
     releaseBufferBacking(m_reyesOwnershipBitsetBufferPhase2);
     releaseBufferBacking(m_reyesClassifyIndirectArgsBuffer);
@@ -567,6 +576,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             reyesResetPassDesc.name = MakeVariantPassName(traits, "ReyesQueueResetPass1");
             reyesResetPassDesc.pass = std::make_shared<ReyesQueueResetPass>(
                 m_reyesFullClusterOutputsCounterBuffer,
+                m_reyesOwnedClustersCounterBuffer,
                 std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueCounterBufferA, m_reyesSplitQueueCounterBufferB },
                 std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueOverflowBufferA, m_reyesSplitQueueOverflowBufferB },
                 m_reyesDiceQueueCounterBuffer,
@@ -593,15 +603,36 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 nullptr,
                 m_reyesFullClusterOutputsBuffer,
                 m_reyesFullClusterOutputsCounterBuffer,
-                m_reyesSplitQueueBufferA,
-                m_reyesSplitQueueCounterBufferA,
-                m_reyesDiceQueueBuffer,
-                m_reyesDiceQueueCounterBuffer,
+                m_reyesOwnedClustersBuffer,
+                m_reyesOwnedClustersCounterBuffer,
                 m_reyesOwnershipBitsetBuffer,
                 m_reyesClassifyIndirectArgsBuffer,
                 m_reyesTelemetryBufferPhase1,
                 1u);
             outPasses.push_back(std::move(reyesClassifyPassDesc));
+
+            RenderGraph::ExternalPassDesc reyesCreateSeedArgsPassDesc;
+            reyesCreateSeedArgsPassDesc.type = RenderGraph::PassType::Compute;
+            reyesCreateSeedArgsPassDesc.name = MakeVariantPassName(traits, "ReyesCreateSeedDispatchArgsPass1");
+            reyesCreateSeedArgsPassDesc.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
+                m_reyesOwnedClustersCounterBuffer,
+                m_reyesSplitIndirectArgsBuffer);
+            outPasses.push_back(std::move(reyesCreateSeedArgsPassDesc));
+
+            RenderGraph::ExternalPassDesc reyesSeedPassDesc;
+            reyesSeedPassDesc.type = RenderGraph::PassType::Compute;
+            reyesSeedPassDesc.name = MakeVariantPassName(traits, "ReyesSeedPatchesPass1");
+            reyesSeedPassDesc.pass = std::make_shared<ReyesSeedPatchesPass>(
+                m_visibleClustersBuffer,
+                m_reyesOwnedClustersBuffer,
+                m_reyesOwnedClustersCounterBuffer,
+                m_reyesSplitQueueBufferA,
+                m_reyesSplitQueueCounterBufferA,
+                m_reyesSplitQueueOverflowBufferA,
+                m_reyesSplitIndirectArgsBuffer,
+                m_maxVisibleClusters,
+                1u);
+            outPasses.push_back(std::move(reyesSeedPassDesc));
 
             const std::shared_ptr<Buffer> reyesSplitBuffers[] = { m_reyesSplitQueueBufferA, m_reyesSplitQueueBufferB };
             const std::shared_ptr<Buffer> reyesSplitCounters[] = { m_reyesSplitQueueCounterBufferA, m_reyesSplitQueueCounterBufferB };
@@ -934,6 +965,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     reyesResetPassDesc2.name = MakeVariantPassName(traits, "ReyesQueueResetPass2");
     reyesResetPassDesc2.pass = std::make_shared<ReyesQueueResetPass>(
         m_reyesFullClusterOutputsCounterBuffer,
+        m_reyesOwnedClustersCounterBuffer,
         std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueCounterBufferA, m_reyesSplitQueueCounterBufferB },
         std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueOverflowBufferA, m_reyesSplitQueueOverflowBufferB },
         m_reyesDiceQueueCounterBuffer,
@@ -960,15 +992,36 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_visibleClustersCounterBuffer,
         m_reyesFullClusterOutputsBuffer,
         m_reyesFullClusterOutputsCounterBuffer,
-        m_reyesSplitQueueBufferA,
-        m_reyesSplitQueueCounterBufferA,
-        m_reyesDiceQueueBuffer,
-        m_reyesDiceQueueCounterBuffer,
+        m_reyesOwnedClustersBuffer,
+        m_reyesOwnedClustersCounterBuffer,
         m_reyesOwnershipBitsetBufferPhase2,
         m_reyesClassifyIndirectArgsBufferPhase2,
         m_reyesTelemetryBufferPhase2,
         2u);
     outPasses.push_back(std::move(reyesClassifyPassDesc2));
+
+    RenderGraph::ExternalPassDesc reyesCreateSeedArgsPassDesc2;
+    reyesCreateSeedArgsPassDesc2.type = RenderGraph::PassType::Compute;
+    reyesCreateSeedArgsPassDesc2.name = MakeVariantPassName(traits, "ReyesCreateSeedDispatchArgsPass2");
+    reyesCreateSeedArgsPassDesc2.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
+        m_reyesOwnedClustersCounterBuffer,
+        m_reyesSplitIndirectArgsBufferPhase2);
+    outPasses.push_back(std::move(reyesCreateSeedArgsPassDesc2));
+
+    RenderGraph::ExternalPassDesc reyesSeedPassDesc2;
+    reyesSeedPassDesc2.type = RenderGraph::PassType::Compute;
+    reyesSeedPassDesc2.name = MakeVariantPassName(traits, "ReyesSeedPatchesPass2");
+    reyesSeedPassDesc2.pass = std::make_shared<ReyesSeedPatchesPass>(
+        m_visibleClustersBuffer,
+        m_reyesOwnedClustersBuffer,
+        m_reyesOwnedClustersCounterBuffer,
+        m_reyesSplitQueueBufferA,
+        m_reyesSplitQueueCounterBufferA,
+        m_reyesSplitQueueOverflowBufferA,
+        m_reyesSplitIndirectArgsBufferPhase2,
+        m_maxVisibleClusters,
+        2u);
+    outPasses.push_back(std::move(reyesSeedPassDesc2));
 
     const std::shared_ptr<Buffer> reyesSplitBuffers[] = { m_reyesSplitQueueBufferA, m_reyesSplitQueueBufferB };
     const std::shared_ptr<Buffer> reyesSplitCounters[] = { m_reyesSplitQueueCounterBufferA, m_reyesSplitQueueCounterBufferB };
