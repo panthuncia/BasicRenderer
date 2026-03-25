@@ -5,11 +5,11 @@
 #include "include/visibleClusterPacking.hlsli"
 #include "include/clodPageAccess.hlsli"
 #include "include/clodStructs.hlsli"
+#include "include/reyesPatchCommon.hlsli"
 #include "include/visibilityPacking.hlsli"
 #include "PerPassRootConstants/clodReyesPatchRasterRootConstants.h"
 
 static const uint REYES_PATCH_RASTER_GROUP_SIZE = 64u;
-static const float REYES_PATCH_BARYCENTRIC_COORD_SCALE = 65535.0f;
 
 uint ReadPackedBits32(ByteAddressBuffer buf, uint startBit, uint bitCount)
 {
@@ -25,13 +25,6 @@ uint ReadPackedBits32(ByteAddressBuffer buf, uint startBit, uint bitCount)
 
     uint mask = (bitCount >= 32u) ? 0xffffffffu : ((1u << bitCount) - 1u);
     return packed & mask;
-}
-
-float3 DecodeReyesPatchBarycentrics(uint encoded)
-{
-    float u = (float)(encoded & 0xFFFFu) / REYES_PATCH_BARYCENTRIC_COORD_SCALE;
-    float v = (float)(encoded >> 16u) / REYES_PATCH_BARYCENTRIC_COORD_SCALE;
-    return float3(saturate(1.0f - u - v), u, v);
 }
 
 float3 DecodeCompressedPosition(
@@ -160,70 +153,24 @@ float3 DecodeSkinnedPosition(
     return localPos;
 }
 
-[shader("compute")]
-[numthreads(REYES_PATCH_RASTER_GROUP_SIZE, 1, 1)]
-void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+float3 ReyesInterpolatePosition(float3 p0, float3 p1, float3 p2, float3 bary)
 {
-    StructuredBuffer<uint> diceQueueCounter = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX];
-    const uint diceCount = diceQueueCounter[0];
-    const uint diceIndex = dispatchThreadId.x;
-    if (diceIndex >= diceCount)
-    {
-        return;
-    }
+    return p0 * bary.x + p1 * bary.y + p2 * bary.z;
+}
 
-    StructuredBuffer<CLodReyesDiceQueueEntry> diceQueue = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_DICE_QUEUE_DESCRIPTOR_INDEX];
-    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_VIEW_RASTER_INFO_DESCRIPTOR_INDEX];
-    ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
-    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstances = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-    StructuredBuffer<PerMeshBuffer> perMeshes = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
-    StructuredBuffer<PerObjectBuffer> perObjects = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
-    StructuredBuffer<CullingCameraInfo> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
-
-    const CLodReyesDiceQueueEntry diceEntry = diceQueue[diceIndex];
-    const ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[diceEntry.viewID];
-    if (viewRasterInfo.visibilityUAVDescriptorIndex == 0xFFFFFFFFu)
-    {
-        return;
-    }
-
-    const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, diceEntry.visibleClusterIndex);
-    const uint localMeshletIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
-    const uint pageSlabDescriptorIndex = CLodVisibleClusterPageSlabDescriptorIndex(packedCluster);
-    const uint pageSlabByteOffset = CLodVisibleClusterPageSlabByteOffset(packedCluster);
-    const CLodPageHeader hdr = LoadPageHeader(pageSlabDescriptorIndex, pageSlabByteOffset);
-    const CLodMeshletDescriptor meshletDesc = LoadMeshletDescriptor(pageSlabDescriptorIndex, pageSlabByteOffset, hdr.descriptorOffset, localMeshletIndex);
-
-    const PerMeshInstanceBuffer meshInstance = perMeshInstances[diceEntry.instanceID];
-    const PerMeshBuffer perMesh = perMeshes[meshInstance.perMeshBufferIndex];
-    const PerObjectBuffer objectData = perObjects[meshInstance.perObjectBufferIndex];
-    const CullingCameraInfo camera = cameras[diceEntry.viewID];
-
-    ByteAddressBuffer slab = ResourceDescriptorHeap[pageSlabDescriptorIndex];
-    const uint sourceTriangleIndex = diceEntry.sourcePrimitiveAndSplitConfig & 0xFFFFu;
-    if (sourceTriangleIndex >= CLodDescTriangleCount(meshletDesc))
-    {
-        return;
-    }
-
-    const uint3 sourceTriangle = DecodeTriangle(slab, pageSlabByteOffset + hdr.triangleStreamOffset, meshletDesc.triangleByteOffset, sourceTriangleIndex);
-    const float3 sourcePosition0 = DecodeSkinnedPosition(sourceTriangle.x, hdr, meshletDesc, pageSlabByteOffset, pageSlabDescriptorIndex, perMesh.vertexFlags, meshInstance.skinningInstanceSlot);
-    const float3 sourcePosition1 = DecodeSkinnedPosition(sourceTriangle.y, hdr, meshletDesc, pageSlabByteOffset, pageSlabDescriptorIndex, perMesh.vertexFlags, meshInstance.skinningInstanceSlot);
-    const float3 sourcePosition2 = DecodeSkinnedPosition(sourceTriangle.z, hdr, meshletDesc, pageSlabByteOffset, pageSlabDescriptorIndex, perMesh.vertexFlags, meshInstance.skinningInstanceSlot);
-
-    const float3 domain0 = DecodeReyesPatchBarycentrics(diceEntry.domainVertex0Encoded);
-    const float3 domain1 = DecodeReyesPatchBarycentrics(diceEntry.domainVertex1Encoded);
-    const float3 domain2 = DecodeReyesPatchBarycentrics(diceEntry.domainVertex2Encoded);
-
-    const float3 patchPosition0 = sourcePosition0 * domain0.x + sourcePosition1 * domain0.y + sourcePosition2 * domain0.z;
-    const float3 patchPosition1 = sourcePosition0 * domain1.x + sourcePosition1 * domain1.y + sourcePosition2 * domain1.z;
-    const float3 patchPosition2 = sourcePosition0 * domain2.x + sourcePosition1 * domain2.y + sourcePosition2 * domain2.z;
-
-    row_major matrix modelViewProjection = mul(objectData.model, camera.viewProjection);
-    float4 modelViewZ = mul(objectData.model, camera.viewZ);
-    const float4 clip0 = mul(float4(patchPosition0, 1.0f), modelViewProjection);
-    const float4 clip1 = mul(float4(patchPosition1, 1.0f), modelViewProjection);
-    const float4 clip2 = mul(float4(patchPosition2, 1.0f), modelViewProjection);
+void ReyesRasterizeMicroTriangle(
+    RWTexture2D<uint64_t> visBuffer,
+    uint2 visDims,
+    ClodViewRasterInfo viewRasterInfo,
+    float4 clip0,
+    float4 clip1,
+    float4 clip2,
+    float depth0,
+    float depth1,
+    float depth2,
+    uint patchVisibilityIndex,
+    uint microTriangleIndex)
+{
     if (clip0.w <= 0.0f || clip1.w <= 0.0f || clip2.w <= 0.0f)
     {
         return;
@@ -240,15 +187,6 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     float2 s0 = float2((ndc0.x + 1.0f) * 0.5f * visWidth + scissorMinXf, (1.0f - ndc0.y) * 0.5f * visHeight + scissorMinYf);
     float2 s1 = float2((ndc1.x + 1.0f) * 0.5f * visWidth + scissorMinXf, (1.0f - ndc1.y) * 0.5f * visHeight + scissorMinYf);
     float2 s2 = float2((ndc2.x + 1.0f) * 0.5f * visWidth + scissorMinXf, (1.0f - ndc2.y) * 0.5f * visHeight + scissorMinYf);
-    float depth0 = -dot(float4(patchPosition0, 1.0f), modelViewZ);
-    float depth1 = -dot(float4(patchPosition1, 1.0f), modelViewZ);
-    float depth2 = -dot(float4(patchPosition2, 1.0f), modelViewZ);
-
-    const uint patchVisibilityIndex = CLOD_REYES_PATCH_RASTER_PATCH_INDEX_BASE + diceIndex;
-    const uint visibilityDescriptorIndex = viewRasterInfo.visibilityUAVDescriptorIndex;
-    RWTexture2D<uint64_t> visBuffer = ResourceDescriptorHeap[visibilityDescriptorIndex];
-    uint2 visDims;
-    visBuffer.GetDimensions(visDims.x, visDims.y);
 
     float2 e01 = s1 - s0;
     float2 e02 = s2 - s0;
@@ -303,17 +241,19 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float scanline_b0 = row_b0;
     float scanline_b1 = row_b1;
+    [loop]
     for (int py = minPx.y; py <= maxPx.y; ++py)
     {
         float b0 = scanline_b0;
         float b1 = scanline_b1;
+        [loop]
         for (int px = minPx.x; px <= maxPx.x; ++px)
         {
             const float b2 = 1.0f - b0 - b1;
             if (b0 >= 0.0f && b1 >= 0.0f && b2 >= 0.0f)
             {
                 const float depth = b0 * depth0 + b1 * depth1 + b2 * depth2;
-                const uint64_t visKey = PackVisKey(depth, patchVisibilityIndex, 0u);
+                const uint64_t visKey = PackVisKey(depth, patchVisibilityIndex, microTriangleIndex);
                 InterlockedMin(visBuffer[uint2(px, py)], visKey);
             }
 
@@ -323,5 +263,117 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
         scanline_b0 += dy_b0;
         scanline_b1 += dy_b1;
+    }
+}
+
+[shader("compute")]
+[numthreads(REYES_PATCH_RASTER_GROUP_SIZE, 1, 1)]
+void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    StructuredBuffer<uint> diceQueueCounter = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX];
+    const uint diceCount = diceQueueCounter[0];
+    const uint diceIndex = dispatchThreadId.x;
+    if (diceIndex >= diceCount)
+    {
+        return;
+    }
+
+    StructuredBuffer<CLodReyesDiceQueueEntry> diceQueue = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_DICE_QUEUE_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodReyesTelemetry> telemetryBuffer = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_TELEMETRY_DESCRIPTOR_INDEX];
+    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_VIEW_RASTER_INFO_DESCRIPTOR_INDEX];
+    ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstances = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+    StructuredBuffer<PerMeshBuffer> perMeshes = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+    StructuredBuffer<PerObjectBuffer> perObjects = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
+    StructuredBuffer<CullingCameraInfo> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
+
+    const CLodReyesDiceQueueEntry diceEntry = diceQueue[diceIndex];
+    const ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[diceEntry.viewID];
+    if (viewRasterInfo.visibilityUAVDescriptorIndex == 0xFFFFFFFFu)
+    {
+        return;
+    }
+
+    const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, diceEntry.visibleClusterIndex);
+    const uint localMeshletIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
+    const uint pageSlabDescriptorIndex = CLodVisibleClusterPageSlabDescriptorIndex(packedCluster);
+    const uint pageSlabByteOffset = CLodVisibleClusterPageSlabByteOffset(packedCluster);
+    const CLodPageHeader hdr = LoadPageHeader(pageSlabDescriptorIndex, pageSlabByteOffset);
+    const CLodMeshletDescriptor meshletDesc = LoadMeshletDescriptor(pageSlabDescriptorIndex, pageSlabByteOffset, hdr.descriptorOffset, localMeshletIndex);
+
+    const PerMeshInstanceBuffer meshInstance = perMeshInstances[diceEntry.instanceID];
+    const PerMeshBuffer perMesh = perMeshes[meshInstance.perMeshBufferIndex];
+    const PerObjectBuffer objectData = perObjects[meshInstance.perObjectBufferIndex];
+    const CullingCameraInfo camera = cameras[diceEntry.viewID];
+
+    ByteAddressBuffer slab = ResourceDescriptorHeap[pageSlabDescriptorIndex];
+    const uint sourceTriangleIndex = diceEntry.sourcePrimitiveAndSplitConfig & 0xFFFFu;
+    if (sourceTriangleIndex >= CLodDescTriangleCount(meshletDesc))
+    {
+        return;
+    }
+
+    const uint3 sourceTriangle = DecodeTriangle(slab, pageSlabByteOffset + hdr.triangleStreamOffset, meshletDesc.triangleByteOffset, sourceTriangleIndex);
+    const float3 sourcePosition0 = DecodeSkinnedPosition(sourceTriangle.x, hdr, meshletDesc, pageSlabByteOffset, pageSlabDescriptorIndex, perMesh.vertexFlags, meshInstance.skinningInstanceSlot);
+    const float3 sourcePosition1 = DecodeSkinnedPosition(sourceTriangle.y, hdr, meshletDesc, pageSlabByteOffset, pageSlabDescriptorIndex, perMesh.vertexFlags, meshInstance.skinningInstanceSlot);
+    const float3 sourcePosition2 = DecodeSkinnedPosition(sourceTriangle.z, hdr, meshletDesc, pageSlabByteOffset, pageSlabDescriptorIndex, perMesh.vertexFlags, meshInstance.skinningInstanceSlot);
+
+    const float3 domain0 = ReyesDecodePatchBarycentrics(diceEntry.domainVertex0Encoded);
+    const float3 domain1 = ReyesDecodePatchBarycentrics(diceEntry.domainVertex1Encoded);
+    const float3 domain2 = ReyesDecodePatchBarycentrics(diceEntry.domainVertex2Encoded);
+    const uint tessSegments = ReyesGetDicePatchSegments(diceEntry);
+    const uint microTriangleCount = tessSegments * tessSegments;
+    if (microTriangleCount == 0u || microTriangleCount > 128u)
+    {
+        return;
+    }
+
+    InterlockedAdd(telemetryBuffer[0].patchRasterizedPatchCount, 1u);
+    InterlockedAdd(telemetryBuffer[0].patchRasterizedMicroTriangleCount, microTriangleCount);
+
+    row_major matrix modelViewProjection = mul(objectData.model, camera.viewProjection);
+    float4 modelViewZ = mul(objectData.model, camera.viewZ);
+
+    const uint patchVisibilityIndex = CLOD_REYES_PATCH_RASTER_PATCH_INDEX_BASE + diceIndex;
+    const uint visibilityDescriptorIndex = viewRasterInfo.visibilityUAVDescriptorIndex;
+    RWTexture2D<uint64_t> visBuffer = ResourceDescriptorHeap[visibilityDescriptorIndex];
+    uint2 visDims;
+    visBuffer.GetDimensions(visDims.x, visDims.y);
+
+    [loop]
+    for (uint microTriangleIndex = 0u; microTriangleIndex < microTriangleCount; ++microTriangleIndex)
+    {
+        float3 patchBary0;
+        float3 patchBary1;
+        float3 patchBary2;
+        ReyesDecodeMicroTrianglePatchDomain(microTriangleIndex, tessSegments, patchBary0, patchBary1, patchBary2);
+
+        const float3 sourceBary0 = ReyesComposeSourceBarycentricsPoint(patchBary0, domain0, domain1, domain2);
+        const float3 sourceBary1 = ReyesComposeSourceBarycentricsPoint(patchBary1, domain0, domain1, domain2);
+        const float3 sourceBary2 = ReyesComposeSourceBarycentricsPoint(patchBary2, domain0, domain1, domain2);
+
+        const float3 patchPosition0 = ReyesInterpolatePosition(sourcePosition0, sourcePosition1, sourcePosition2, sourceBary0);
+        const float3 patchPosition1 = ReyesInterpolatePosition(sourcePosition0, sourcePosition1, sourcePosition2, sourceBary1);
+        const float3 patchPosition2 = ReyesInterpolatePosition(sourcePosition0, sourcePosition1, sourcePosition2, sourceBary2);
+
+        const float4 clip0 = mul(float4(patchPosition0, 1.0f), modelViewProjection);
+        const float4 clip1 = mul(float4(patchPosition1, 1.0f), modelViewProjection);
+        const float4 clip2 = mul(float4(patchPosition2, 1.0f), modelViewProjection);
+        const float depth0 = -dot(float4(patchPosition0, 1.0f), modelViewZ);
+        const float depth1 = -dot(float4(patchPosition1, 1.0f), modelViewZ);
+        const float depth2 = -dot(float4(patchPosition2, 1.0f), modelViewZ);
+
+        ReyesRasterizeMicroTriangle(
+            visBuffer,
+            visDims,
+            viewRasterInfo,
+            clip0,
+            clip1,
+            clip2,
+            depth0,
+            depth1,
+            depth2,
+            patchVisibilityIndex,
+            microTriangleIndex);
     }
 }

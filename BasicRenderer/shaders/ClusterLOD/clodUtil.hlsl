@@ -7,6 +7,7 @@
 #include "PerPassRootConstants/clodPrefixOffsetsRootConstants.h"
 #include "PerPassRootConstants/clodCompactionRootConstants.h"
 #include "PerPassRootConstants/clodReyesCreateDispatchArgsRootConstants.h"
+#include "PerPassRootConstants/clodReyesResetRootConstants.h"
 #include "include/indirectCommands.hlsli"
 #include "include/clodStructs.hlsli"
 #include "include/visibleClusterPacking.hlsli"
@@ -17,6 +18,27 @@ struct RasterBucketsHistogramIndirectCommand
     uint xDim;
     uint dispatchX, dispatchY, dispatchZ;
 };
+
+bool CLodIsVisibleClusterOwnedByReyes(uint visibleClusterIndex, uint ownershipDescriptorIndex)
+{
+    StructuredBuffer<uint> ownershipWords = ResourceDescriptorHeap[ownershipDescriptorIndex];
+    const uint ownershipWord = ownershipWords[visibleClusterIndex >> 5u];
+    return ((ownershipWord >> (visibleClusterIndex & 31u)) & 1u) != 0u;
+}
+
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void ClearReyesOwnershipBitsetCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    const uint wordIndex = dispatchThreadId.x;
+    if (wordIndex >= CLOD_REYES_RESET_OWNERSHIP_BITSET_WORD_COUNT)
+    {
+        return;
+    }
+
+    RWStructuredBuffer<uint> ownershipWords = ResourceDescriptorHeap[CLOD_REYES_RESET_OWNERSHIP_BITSET_DESCRIPTOR_INDEX];
+    ownershipWords[wordIndex] = 0u;
+}
 
 [shader("compute")]
 [numthreads(1, 1, 1)]
@@ -138,10 +160,16 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
         return;
     }
 
+    const uint visibleClusterReadIndex = CLodGetHistogramVisibleClusterReadIndex(linearizedID);
+    if ((CLOD_HISTOGRAM_READ_MODE_FLAGS & CLOD_HISTOGRAM_READ_FLAG_SKIP_REYES_OWNED) != 0u &&
+        CLodIsVisibleClusterOwnedByReyes(visibleClusterReadIndex, CLOD_HISTOGRAM_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX)) {
+        return;
+    }
+
     ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
 
     // TODO: Remove load chain
-    uint instanceIndex = CLodVisibleClusterInstanceID(CLodLoadVisibleClusterPacked(visibleClusters, CLodGetHistogramVisibleClusterReadIndex(linearizedID)));
+    uint instanceIndex = CLodVisibleClusterInstanceID(CLodLoadVisibleClusterPacked(visibleClusters, visibleClusterReadIndex));
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     uint perMeshIndex = perMeshInstance[instanceIndex].perMeshBufferIndex;
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
@@ -366,13 +394,19 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
 
     if (linearizedID < clusterCount)
     {
+        const uint sourceClusterIndex = CLodGetCompactionVisibleClusterReadIndex(linearizedID);
+        if ((CLOD_COMPACTION_READ_MODE_FLAGS & CLOD_COMPACTION_READ_FLAG_SKIP_REYES_OWNED) != 0u &&
+            CLodIsVisibleClusterOwnedByReyes(sourceClusterIndex, CLOD_COMPACTION_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX))
+        {
+            return;
+        }
+
         ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_COMPACTION_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
         RWByteAddressBuffer compactedClusters = ResourceDescriptorHeap[CLOD_COMPACTION_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
         StructuredBuffer<uint> offsets = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX];
         RWStructuredBuffer<uint> writeCursor = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_WRITE_CURSOR_DESCRIPTOR_INDEX];
         RWStructuredBuffer<uint> sortedToUnsortedMapping = ResourceDescriptorHeap[CLOD_COMPACTION_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX];
 
-        const uint sourceClusterIndex = CLodGetCompactionVisibleClusterReadIndex(linearizedID);
         const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, sourceClusterIndex);
         uint bucketIndex = GetRasterBucketIndexFromInstance(CLodVisibleClusterInstanceID(packedCluster));
 

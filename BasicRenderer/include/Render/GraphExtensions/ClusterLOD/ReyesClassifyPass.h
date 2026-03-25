@@ -14,12 +14,14 @@ public:
     ReyesClassifyPass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
         std::shared_ptr<Buffer> visibleClustersCounterBuffer,
+        std::shared_ptr<Buffer> visibleClustersReadBaseCounterBuffer,
         std::shared_ptr<Buffer> fullClusterOutputsBuffer,
         std::shared_ptr<Buffer> fullClusterCounterBuffer,
         std::shared_ptr<Buffer> splitQueueBuffer,
         std::shared_ptr<Buffer> splitQueueCounterBuffer,
         std::shared_ptr<Buffer> diceQueueBuffer,
         std::shared_ptr<Buffer> diceQueueCounterBuffer,
+        std::shared_ptr<Buffer> ownershipBitsetBuffer,
         std::shared_ptr<Buffer> indirectArgsBuffer,
         std::shared_ptr<Buffer> telemetryBuffer,
         uint32_t phaseIndex);
@@ -33,12 +35,14 @@ public:
 private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
+    std::shared_ptr<Buffer> m_visibleClustersReadBaseCounterBuffer;
     std::shared_ptr<Buffer> m_fullClusterOutputsBuffer;
     std::shared_ptr<Buffer> m_fullClusterCounterBuffer;
     std::shared_ptr<Buffer> m_splitQueueBuffer;
     std::shared_ptr<Buffer> m_splitQueueCounterBuffer;
     std::shared_ptr<Buffer> m_diceQueueBuffer;
     std::shared_ptr<Buffer> m_diceQueueCounterBuffer;
+    std::shared_ptr<Buffer> m_ownershipBitsetBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
     std::shared_ptr<Buffer> m_telemetryBuffer;
     uint32_t m_phaseIndex = 0u;

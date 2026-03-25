@@ -456,11 +456,11 @@ struct CLodReyesTelemetry
     uint phaseIndex;
     uint deepestSplitLevelReached;
     uint configuredMaxSplitPassCount;
-    uint reserved0;
+    uint patchRasterizedPatchCount;
     uint dicedPatchCount;
     uint dicedTriangleEstimateCount;
     uint dicedVertexEstimateCount;
-    uint reserved1;
+    uint patchRasterizedMicroTriangleCount;
     uint splitInputCounts[4];
     uint splitChildOutputCounts[4];
     uint splitDiceOutputCounts[4];

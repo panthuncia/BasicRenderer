@@ -21,6 +21,7 @@ public:
         std::shared_ptr<Buffer> compactedClustersBuffer,
         std::shared_ptr<Buffer> indirectArgsBuffer,
         std::shared_ptr<Buffer> sortedToUnsortedMappingBuffer,
+        std::shared_ptr<Buffer> reyesOwnershipBitsetBuffer,
         uint64_t maxVisibleClusters,
         bool appendToExisting,
         bool readReverse = false,
@@ -47,6 +48,7 @@ private:
     std::shared_ptr<Buffer> m_compactedClustersBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
     std::shared_ptr<Buffer> m_sortedToUnsortedMappingBuffer;
+    std::shared_ptr<Buffer> m_reyesOwnershipBitsetBuffer;
 
     uint64_t m_maxVisibleClusters = 0;
     bool m_appendToExisting = false;

@@ -53,6 +53,8 @@ private:
 
     std::shared_ptr<Buffer> m_reyesFullClusterOutputsBuffer;
     std::shared_ptr<Buffer> m_reyesFullClusterOutputsCounterBuffer;
+    std::shared_ptr<Buffer> m_reyesOwnershipBitsetBuffer;
+    std::shared_ptr<Buffer> m_reyesOwnershipBitsetBufferPhase2;
     std::shared_ptr<Buffer> m_reyesClassifyIndirectArgsBuffer;
     std::shared_ptr<Buffer> m_reyesClassifyIndirectArgsBufferPhase2;
     std::shared_ptr<Buffer> m_reyesSplitIndirectArgsBuffer;
@@ -68,7 +70,8 @@ private:
     std::shared_ptr<Buffer> m_reyesDiceQueueOverflowBuffer;
     std::shared_ptr<Buffer> m_reyesDiceIndirectArgsBuffer;
     std::shared_ptr<Buffer> m_reyesDiceIndirectArgsBufferPhase2;
-    std::shared_ptr<Buffer> m_reyesTelemetryBuffer;
+    std::shared_ptr<Buffer> m_reyesTelemetryBufferPhase1;
+    std::shared_ptr<Buffer> m_reyesTelemetryBufferPhase2;
 
     std::shared_ptr<Buffer> m_swVisibleClustersCounterBuffer;
     std::shared_ptr<Buffer> m_swVisibleClustersCounterBufferPhase2;

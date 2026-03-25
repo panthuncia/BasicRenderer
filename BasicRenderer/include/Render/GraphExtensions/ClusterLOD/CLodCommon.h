@@ -183,11 +183,11 @@ struct CLodReyesTelemetry
     uint32_t phaseIndex = 0u;
     uint32_t deepestSplitLevelReached = 0u;
     uint32_t configuredMaxSplitPassCount = 0u;
-    uint32_t reserved0 = 0u;
+    uint32_t patchRasterizedPatchCount = 0u;
     uint32_t dicedPatchCount = 0u;
     uint32_t dicedTriangleEstimateCount = 0u;
     uint32_t dicedVertexEstimateCount = 0u;
-    uint32_t reserved1 = 0u;
+    uint32_t patchRasterizedMicroTriangleCount = 0u;
     uint32_t splitInputCounts[CLodReyesMaxSplitPassCount] = {};
     uint32_t splitChildOutputCounts[CLodReyesMaxSplitPassCount] = {};
     uint32_t splitDiceOutputCounts[CLodReyesMaxSplitPassCount] = {};

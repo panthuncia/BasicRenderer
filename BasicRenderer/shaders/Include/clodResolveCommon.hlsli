@@ -10,6 +10,7 @@
 #include "include/visibilityPacking.hlsli"
 #include "include/clodStructs.hlsli"
 #include "include/clodPageAccess.hlsli"
+#include "include/reyesPatchCommon.hlsli"
 #include "include/visibleClusterPacking.hlsli"
 #include "include/vertexLayout.hlsli"
 #include "PerPassRootConstants/visUtilRootConstants.h"
@@ -483,13 +484,9 @@ float2 ComputeClodMotionVector(float3 posOS, float3 worldPosition, float4x4 prev
     return ndcCur - ndcPrev;
 }
 
-static const float REYES_BARYCENTRIC_COORD_SCALE = 65535.0f;
-
 float3 ReyesDecodeBarycentrics(uint encoded)
 {
-    float u = (float)(encoded & 0xFFFFu) / REYES_BARYCENTRIC_COORD_SCALE;
-    float v = (float)(encoded >> 16u) / REYES_BARYCENTRIC_COORD_SCALE;
-    return float3(saturate(1.0f - u - v), u, v);
+    return ReyesDecodePatchBarycentrics(encoded);
 }
 
 BarycentricDeriv ReyesComposeSourceBarycentrics(BarycentricDeriv patchBary, float3 domain0, float3 domain1, float3 domain2)
@@ -532,6 +529,10 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
     float3 patchDomain0 = float3(1.0f, 0.0f, 0.0f);
     float3 patchDomain1 = float3(0.0f, 1.0f, 0.0f);
     float3 patchDomain2 = float3(0.0f, 0.0f, 1.0f);
+    float3 microTrianglePatchDomain0 = patchDomain0;
+    float3 microTrianglePatchDomain1 = patchDomain1;
+    float3 microTrianglePatchDomain2 = patchDomain2;
+    uint reyesMicroTriangleIndex = meshletTriangleIndex;
     if (clusterIndex >= VISBUF_REYES_PATCH_INDEX_BASE && VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
     {
         StructuredBuffer<CLodReyesDiceQueueEntry> diceQueue = ResourceDescriptorHeap[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX];
@@ -541,6 +542,15 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
         patchDomain0 = ReyesDecodeBarycentrics(diceEntry.domainVertex0Encoded);
         patchDomain1 = ReyesDecodeBarycentrics(diceEntry.domainVertex1Encoded);
         patchDomain2 = ReyesDecodeBarycentrics(diceEntry.domainVertex2Encoded);
+
+        const uint tessSegments = ReyesGetDicePatchSegments(diceEntry);
+        const uint microTriangleCount = tessSegments * tessSegments;
+        if (reyesMicroTriangleIndex >= microTriangleCount)
+        {
+            return false;
+        }
+
+        ReyesDecodeMicroTrianglePatchDomain(reyesMicroTriangleIndex, tessSegments, microTrianglePatchDomain0, microTrianglePatchDomain1, microTrianglePatchDomain2);
         isReyesPatch = true;
     }
 
@@ -576,9 +586,13 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
 
     if (isReyesPatch)
     {
-        const float3 patchPos0 = p0 * patchDomain0.x + p1 * patchDomain0.y + p2 * patchDomain0.z;
-        const float3 patchPos1 = p0 * patchDomain1.x + p1 * patchDomain1.y + p2 * patchDomain1.z;
-        const float3 patchPos2 = p0 * patchDomain2.x + p1 * patchDomain2.y + p2 * patchDomain2.z;
+        const float3 sourcePatchBary0 = ReyesComposeSourceBarycentricsPoint(microTrianglePatchDomain0, patchDomain0, patchDomain1, patchDomain2);
+        const float3 sourcePatchBary1 = ReyesComposeSourceBarycentricsPoint(microTrianglePatchDomain1, patchDomain0, patchDomain1, patchDomain2);
+        const float3 sourcePatchBary2 = ReyesComposeSourceBarycentricsPoint(microTrianglePatchDomain2, patchDomain0, patchDomain1, patchDomain2);
+
+        const float3 patchPos0 = p0 * sourcePatchBary0.x + p1 * sourcePatchBary0.y + p2 * sourcePatchBary0.z;
+        const float3 patchPos1 = p0 * sourcePatchBary1.x + p1 * sourcePatchBary1.y + p2 * sourcePatchBary1.z;
+        const float3 patchPos2 = p0 * sourcePatchBary2.x + p1 * sourcePatchBary2.y + p2 * sourcePatchBary2.z;
         clip0 = mul(float4(patchPos0, 1.0f), objectToClip);
         clip1 = mul(float4(patchPos1, 1.0f), objectToClip);
         clip2 = mul(float4(patchPos2, 1.0f), objectToClip);
@@ -591,7 +605,10 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
     BarycentricDeriv bary = CalcFullBary(clip0, clip1, clip2, pixelNdc, winSize);
     if (isReyesPatch)
     {
-        bary = ReyesComposeSourceBarycentrics(bary, patchDomain0, patchDomain1, patchDomain2);
+        const float3 sourcePatchBary0 = ReyesComposeSourceBarycentricsPoint(microTrianglePatchDomain0, patchDomain0, patchDomain1, patchDomain2);
+        const float3 sourcePatchBary1 = ReyesComposeSourceBarycentricsPoint(microTrianglePatchDomain1, patchDomain0, patchDomain1, patchDomain2);
+        const float3 sourcePatchBary2 = ReyesComposeSourceBarycentricsPoint(microTrianglePatchDomain2, patchDomain0, patchDomain1, patchDomain2);
+        bary = ReyesComposeSourceBarycentrics(bary, sourcePatchBary0, sourcePatchBary1, sourcePatchBary2);
     }
 
     float3 interpPosX = InterpolateWithDeriv(bary, p0.x, p1.x, p2.x);

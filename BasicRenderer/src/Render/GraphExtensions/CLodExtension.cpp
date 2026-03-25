@@ -265,6 +265,13 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
         .add<CLodReyesFullClustersCounterTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
+    const uint32_t reyesOwnershipWordCount = CLodBitsetWordCount(maxVisibleClusters);
+    m_reyesOwnershipBitsetBuffer = CreateAliasedUnmaterializedStructuredBuffer(reyesOwnershipWordCount, sizeof(uint32_t), true, false, false, false);
+    m_reyesOwnershipBitsetBuffer->SetName(MakeVariantResourceName(traits, "Reyes Ownership Bitset Buffer"));
+
+    m_reyesOwnershipBitsetBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(reyesOwnershipWordCount, sizeof(uint32_t), true, false, false, false);
+    m_reyesOwnershipBitsetBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Ownership Bitset Buffer Phase2"));
+
     m_reyesClassifyIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false, false);
     m_reyesClassifyIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Reyes Classify Indirect Args Buffer"));
 
@@ -338,11 +345,18 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
     m_reyesDiceIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false, false);
     m_reyesDiceIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Dice Indirect Args Buffer Phase2"));
 
-    m_reyesTelemetryBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesTelemetry), true, false, false, false);
-    m_reyesTelemetryBuffer->SetName(MakeVariantResourceName(traits, "Reyes Telemetry Buffer"));
-    m_reyesTelemetryBuffer->GetECSEntity()
-        .set<Components::Resource>({ m_reyesTelemetryBuffer })
-        .add<CLodReyesTelemetryBufferTag>()
+    m_reyesTelemetryBufferPhase1 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesTelemetry), true, false, false, false);
+    m_reyesTelemetryBufferPhase1->SetName(MakeVariantResourceName(traits, "Reyes Telemetry Buffer Phase1"));
+    m_reyesTelemetryBufferPhase1->GetECSEntity()
+        .set<Components::Resource>({ m_reyesTelemetryBufferPhase1 })
+        .add<CLodReyesTelemetryBufferPhase1Tag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_reyesTelemetryBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesTelemetry), true, false, false, false);
+    m_reyesTelemetryBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Telemetry Buffer Phase2"));
+    m_reyesTelemetryBufferPhase2->GetECSEntity()
+        .set<Components::Resource>({ m_reyesTelemetryBufferPhase2 })
+        .add<CLodReyesTelemetryBufferPhase2Tag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
     m_visibleClustersCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
@@ -457,6 +471,8 @@ void CLodExtension::OnRegistryReset(ResourceRegistry* reg)
     releaseBufferBacking(m_rasterBucketsIndirectArgsBuffer);
     releaseBufferBacking(m_reyesFullClusterOutputsBuffer);
     releaseBufferBacking(m_reyesFullClusterOutputsCounterBuffer);
+    releaseBufferBacking(m_reyesOwnershipBitsetBuffer);
+    releaseBufferBacking(m_reyesOwnershipBitsetBufferPhase2);
     releaseBufferBacking(m_reyesClassifyIndirectArgsBuffer);
     releaseBufferBacking(m_reyesClassifyIndirectArgsBufferPhase2);
     releaseBufferBacking(m_reyesSplitIndirectArgsBuffer);
@@ -472,7 +488,8 @@ void CLodExtension::OnRegistryReset(ResourceRegistry* reg)
     releaseBufferBacking(m_reyesDiceQueueOverflowBuffer);
     releaseBufferBacking(m_reyesDiceIndirectArgsBuffer);
     releaseBufferBacking(m_reyesDiceIndirectArgsBufferPhase2);
-    releaseBufferBacking(m_reyesTelemetryBuffer);
+    releaseBufferBacking(m_reyesTelemetryBufferPhase1);
+    releaseBufferBacking(m_reyesTelemetryBufferPhase2);
     releaseBufferBacking(m_swVisibleClustersCounterBuffer);
     releaseBufferBacking(m_swVisibleClustersCounterBufferPhase2);
     releaseBufferBacking(m_sortedToUnsortedMappingBuffer);
@@ -554,7 +571,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueOverflowBufferA, m_reyesSplitQueueOverflowBufferB },
                 m_reyesDiceQueueCounterBuffer,
                 m_reyesDiceQueueOverflowBuffer,
-                m_reyesTelemetryBuffer,
+                m_reyesOwnershipBitsetBuffer,
+                m_reyesTelemetryBufferPhase1,
                 1u);
             outPasses.push_back(std::move(reyesResetPassDesc));
 
@@ -572,14 +590,16 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             reyesClassifyPassDesc.pass = std::make_shared<ReyesClassifyPass>(
                 m_visibleClustersBuffer,
                 m_visibleClustersCounterBuffer,
+                nullptr,
                 m_reyesFullClusterOutputsBuffer,
                 m_reyesFullClusterOutputsCounterBuffer,
                 m_reyesSplitQueueBufferA,
                 m_reyesSplitQueueCounterBufferA,
                 m_reyesDiceQueueBuffer,
                 m_reyesDiceQueueCounterBuffer,
+                m_reyesOwnershipBitsetBuffer,
                 m_reyesClassifyIndirectArgsBuffer,
-                m_reyesTelemetryBuffer,
+                m_reyesTelemetryBufferPhase1,
                 1u);
             outPasses.push_back(std::move(reyesClassifyPassDesc));
 
@@ -612,7 +632,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_reyesDiceQueueCounterBuffer,
                     m_reyesDiceQueueOverflowBuffer,
                     m_reyesSplitIndirectArgsBuffer,
-                    m_reyesTelemetryBuffer,
+                    m_reyesTelemetryBufferPhase1,
                     m_maxVisibleClusters,
                     splitPassIndex,
                     CLodReyesMaxSplitPassCount,
@@ -635,7 +655,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_reyesDiceQueueBuffer,
                 m_reyesDiceQueueCounterBuffer,
                 m_reyesDiceIndirectArgsBuffer,
-                m_reyesTelemetryBuffer,
+                m_reyesTelemetryBufferPhase1,
                 m_maxVisibleClusters,
                 1u);
             outPasses.push_back(std::move(reyesDicePassDesc));
@@ -650,7 +670,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_reyesDiceQueueCounterBuffer,
                     m_viewRasterInfoBuffer,
                     m_reyesDiceIndirectArgsBuffer,
-                    m_reyesTelemetryBuffer,
+                    m_reyesTelemetryBufferPhase1,
                     m_maxVisibleClusters,
                     1u,
                     CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters));
@@ -665,7 +685,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_visibleClustersBuffer,
         m_visibleClustersCounterBuffer,
         m_histogramIndirectCommand,
-        m_rasterBucketsHistogramBuffer);
+        m_rasterBucketsHistogramBuffer,
+        m_reyesOwnershipBitsetBuffer);
     outPasses.push_back(std::move(histogramPassDesc));
 
     RenderGraph::ExternalPassDesc prefixScanPassDesc;
@@ -701,6 +722,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_compactedVisibleClustersBuffer,
         m_rasterBucketsIndirectArgsBuffer,
         m_sortedToUnsortedMappingBuffer,
+        m_reyesOwnershipBitsetBuffer,
         m_maxVisibleClusters,
         false);
     outPasses.push_back(std::move(compactPassDesc));
@@ -797,6 +819,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_swVisibleClustersCounterBuffer,
             m_histogramIndirectCommand,
             m_rasterBucketsHistogramBufferSw,
+            m_reyesOwnershipBitsetBuffer,
             nullptr,
             true,
             m_maxVisibleClusters,
@@ -838,6 +861,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_compactedVisibleClustersBuffer,
             m_rasterBucketsIndirectArgsBuffer,
             m_sortedToUnsortedMappingBuffer,
+            m_reyesOwnershipBitsetBuffer,
             m_maxVisibleClusters,
             false,
             true,
@@ -914,7 +938,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueOverflowBufferA, m_reyesSplitQueueOverflowBufferB },
         m_reyesDiceQueueCounterBuffer,
         m_reyesDiceQueueOverflowBuffer,
-        m_reyesTelemetryBuffer,
+        m_reyesOwnershipBitsetBufferPhase2,
+        m_reyesTelemetryBufferPhase2,
         2u);
     outPasses.push_back(std::move(reyesResetPassDesc2));
 
@@ -932,14 +957,16 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     reyesClassifyPassDesc2.pass = std::make_shared<ReyesClassifyPass>(
         m_visibleClustersBuffer,
         m_visibleClustersCounterBufferPhase2,
+        m_visibleClustersCounterBuffer,
         m_reyesFullClusterOutputsBuffer,
         m_reyesFullClusterOutputsCounterBuffer,
         m_reyesSplitQueueBufferA,
         m_reyesSplitQueueCounterBufferA,
         m_reyesDiceQueueBuffer,
         m_reyesDiceQueueCounterBuffer,
+        m_reyesOwnershipBitsetBufferPhase2,
         m_reyesClassifyIndirectArgsBufferPhase2,
-        m_reyesTelemetryBuffer,
+        m_reyesTelemetryBufferPhase2,
         2u);
     outPasses.push_back(std::move(reyesClassifyPassDesc2));
 
@@ -972,7 +999,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_reyesDiceQueueCounterBuffer,
             m_reyesDiceQueueOverflowBuffer,
             m_reyesSplitIndirectArgsBufferPhase2,
-            m_reyesTelemetryBuffer,
+            m_reyesTelemetryBufferPhase2,
             m_maxVisibleClusters,
             splitPassIndex,
             CLodReyesMaxSplitPassCount,
@@ -995,7 +1022,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_reyesDiceQueueBuffer,
         m_reyesDiceQueueCounterBuffer,
         m_reyesDiceIndirectArgsBufferPhase2,
-        m_reyesTelemetryBuffer,
+        m_reyesTelemetryBufferPhase2,
         m_maxVisibleClusters,
         2u);
     outPasses.push_back(std::move(reyesDicePassDesc2));
@@ -1010,7 +1037,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_reyesDiceQueueCounterBuffer,
             m_viewRasterInfoBuffer,
             m_reyesDiceIndirectArgsBufferPhase2,
-            m_reyesTelemetryBuffer,
+            m_reyesTelemetryBufferPhase2,
             m_maxVisibleClusters,
             2u,
             CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters));
@@ -1025,6 +1052,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_visibleClustersCounterBufferPhase2,
         m_histogramIndirectCommand,
         m_rasterBucketsHistogramBufferPhase2,
+        m_reyesOwnershipBitsetBufferPhase2,
         m_visibleClustersCounterBuffer);
     outPasses.push_back(std::move(histogramPassDesc2));
 
@@ -1061,6 +1089,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_compactedVisibleClustersBuffer,
         m_rasterBucketsIndirectArgsBuffer,
         m_sortedToUnsortedMappingBuffer,
+        m_reyesOwnershipBitsetBufferPhase2,
         m_maxVisibleClusters,
         true);
     outPasses.push_back(std::move(compactPassDesc2));
@@ -1107,6 +1136,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_swVisibleClustersCounterBufferPhase2,
             m_histogramIndirectCommand,
             m_rasterBucketsHistogramBufferPhase2Sw,
+            m_reyesOwnershipBitsetBufferPhase2,
             m_swVisibleClustersCounterBuffer,
             true,
             m_maxVisibleClusters,
@@ -1148,6 +1178,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_compactedVisibleClustersBuffer,
             m_rasterBucketsIndirectArgsBuffer,
             m_sortedToUnsortedMappingBuffer,
+            m_reyesOwnershipBitsetBufferPhase2,
             m_maxVisibleClusters,
             true,
             true,

@@ -3,6 +3,7 @@
 #include <memory>
 #include <vector>
 
+#include "Render/PipelineState.h"
 #include "RenderPasses/Base/ComputePass.h"
 
 class Buffer;
@@ -15,6 +16,7 @@ public:
         std::vector<std::shared_ptr<Buffer>> splitQueueOverflowCounters,
         std::shared_ptr<Buffer> diceQueueCounter,
         std::shared_ptr<Buffer> diceQueueOverflowCounter,
+        std::shared_ptr<Buffer> ownershipBitsetBuffer,
         std::shared_ptr<Buffer> telemetryBuffer,
         uint32_t phaseIndex);
 
@@ -30,6 +32,9 @@ private:
     std::vector<std::shared_ptr<Buffer>> m_splitQueueOverflowCounters;
     std::shared_ptr<Buffer> m_diceQueueCounter;
     std::shared_ptr<Buffer> m_diceQueueOverflowCounter;
+    std::shared_ptr<Buffer> m_ownershipBitsetBuffer;
     std::shared_ptr<Buffer> m_telemetryBuffer;
     uint32_t m_phaseIndex = 0u;
+    uint32_t m_ownershipBitsetWordCount = 0u;
+    PipelineState m_clearOwnershipBitsetPso;
 };

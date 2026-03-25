@@ -24,6 +24,7 @@ RasterBucketCompactAndArgsPass::RasterBucketCompactAndArgsPass(
     std::shared_ptr<Buffer> compactedClustersBuffer,
     std::shared_ptr<Buffer> indirectArgsBuffer,
     std::shared_ptr<Buffer> sortedToUnsortedMappingBuffer,
+    std::shared_ptr<Buffer> reyesOwnershipBitsetBuffer,
     uint64_t maxVisibleClusters,
     bool appendToExisting,
     bool readReverse,
@@ -39,6 +40,7 @@ RasterBucketCompactAndArgsPass::RasterBucketCompactAndArgsPass(
     , m_compactedClustersBuffer(std::move(compactedClustersBuffer))
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
     , m_sortedToUnsortedMappingBuffer(std::move(sortedToUnsortedMappingBuffer))
+    , m_reyesOwnershipBitsetBuffer(std::move(reyesOwnershipBitsetBuffer))
     , m_maxVisibleClusters(maxVisibleClusters)
     , m_appendToExisting(appendToExisting)
     , m_readReverse(readReverse)
@@ -80,6 +82,9 @@ void RasterBucketCompactAndArgsPass::DeclareResourceUsages(ComputePassBuilder* b
             m_indirectArgsBuffer,
             m_sortedToUnsortedMappingBuffer)
         .WithIndirectArguments(m_indirectCommand);
+    if (m_reyesOwnershipBitsetBuffer) {
+        builder->WithShaderResource(m_reyesOwnershipBitsetBuffer);
+    }
 }
 
 void RasterBucketCompactAndArgsPass::Setup() {
@@ -119,13 +124,17 @@ PassReturn RasterBucketCompactAndArgsPass::Execute(PassExecutionContext& executi
     rc[CLOD_COMPACTION_RASTER_BUCKETS_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_indirectArgsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rc[CLOD_COMPACTION_APPEND_BASE_COUNTER_DESCRIPTOR_INDEX] = m_compactedBaseCounterBuffer->GetSRVInfo(0).slot.index;
     rc[CLOD_COMPACTION_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = m_sortedToUnsortedMappingBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    if (m_reyesOwnershipBitsetBuffer) {
+        rc[CLOD_COMPACTION_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = m_reyesOwnershipBitsetBuffer->GetSRVInfo(0).slot.index;
+    }
     rc[CLOD_COMPACTION_NUM_RASTER_BUCKETS] = numBuckets | (m_appendToExisting ? 0x80000000u : 0u);
     if (m_appendToExisting) {
         rc[CLOD_COMPACTION_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = m_compactedBaseCounterBuffer->GetSRVInfo(0).slot.index;
     }
     rc[CLOD_COMPACTION_READ_MODE_FLAGS] =
         (m_readReverse ? CLOD_COMPACTION_READ_FLAG_REVERSED : 0u) |
-        (m_buildSoftwareRasterDispatch ? CLOD_COMPACTION_READ_FLAG_BUILD_SW_DISPATCH : 0u);
+        (m_buildSoftwareRasterDispatch ? CLOD_COMPACTION_READ_FLAG_BUILD_SW_DISPATCH : 0u) |
+        (m_reyesOwnershipBitsetBuffer ? CLOD_COMPACTION_READ_FLAG_SKIP_REYES_OWNED : 0u);
     rc[CLOD_COMPACTION_READ_CAPACITY] = static_cast<uint32_t>(m_maxVisibleClusters);
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

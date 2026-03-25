@@ -12,23 +12,27 @@
 ReyesClassifyPass::ReyesClassifyPass(
     std::shared_ptr<Buffer> visibleClustersBuffer,
     std::shared_ptr<Buffer> visibleClustersCounterBuffer,
+    std::shared_ptr<Buffer> visibleClustersReadBaseCounterBuffer,
     std::shared_ptr<Buffer> fullClusterOutputsBuffer,
     std::shared_ptr<Buffer> fullClusterCounterBuffer,
     std::shared_ptr<Buffer> splitQueueBuffer,
     std::shared_ptr<Buffer> splitQueueCounterBuffer,
     std::shared_ptr<Buffer> diceQueueBuffer,
     std::shared_ptr<Buffer> diceQueueCounterBuffer,
+    std::shared_ptr<Buffer> ownershipBitsetBuffer,
     std::shared_ptr<Buffer> indirectArgsBuffer,
     std::shared_ptr<Buffer> telemetryBuffer,
     uint32_t phaseIndex)
     : m_visibleClustersBuffer(std::move(visibleClustersBuffer))
     , m_visibleClustersCounterBuffer(std::move(visibleClustersCounterBuffer))
+    , m_visibleClustersReadBaseCounterBuffer(std::move(visibleClustersReadBaseCounterBuffer))
     , m_fullClusterOutputsBuffer(std::move(fullClusterOutputsBuffer))
     , m_fullClusterCounterBuffer(std::move(fullClusterCounterBuffer))
     , m_splitQueueBuffer(std::move(splitQueueBuffer))
     , m_splitQueueCounterBuffer(std::move(splitQueueCounterBuffer))
     , m_diceQueueBuffer(std::move(diceQueueBuffer))
     , m_diceQueueCounterBuffer(std::move(diceQueueCounterBuffer))
+    , m_ownershipBitsetBuffer(std::move(ownershipBitsetBuffer))
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
     , m_telemetryBuffer(std::move(telemetryBuffer))
     , m_phaseIndex(phaseIndex) {
@@ -67,7 +71,11 @@ void ReyesClassifyPass::DeclareResourceUsages(ComputePassBuilder* builder)
             m_splitQueueCounterBuffer,
             m_diceQueueBuffer,
             m_diceQueueCounterBuffer,
+            m_ownershipBitsetBuffer,
             m_telemetryBuffer);
+    if (m_visibleClustersReadBaseCounterBuffer) {
+        builder->WithShaderResource(m_visibleClustersReadBaseCounterBuffer);
+    }
 }
 
 void ReyesClassifyPass::Setup() {
@@ -92,6 +100,9 @@ PassReturn ReyesClassifyPass::Execute(PassExecutionContext& executionContext)
     uint32_t uintRootConstants[NumMiscUintRootConstants] = {};
     uintRootConstants[CLOD_REYES_CLASSIFY_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_CLASSIFY_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
+    if (m_visibleClustersReadBaseCounterBuffer) {
+        uintRootConstants[CLOD_REYES_CLASSIFY_VISIBLE_CLUSTERS_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersReadBaseCounterBuffer->GetSRVInfo(0).slot.index;
+    }
     uintRootConstants[CLOD_REYES_CLASSIFY_FULL_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_fullClusterOutputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_CLASSIFY_FULL_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_fullClusterCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_CLASSIFY_SPLIT_QUEUE_DESCRIPTOR_INDEX] = m_splitQueueBuffer->GetUAVShaderVisibleInfo(0).slot.index;
@@ -100,6 +111,7 @@ PassReturn ReyesClassifyPass::Execute(PassExecutionContext& executionContext)
     uintRootConstants[CLOD_REYES_CLASSIFY_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_diceQueueCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_CLASSIFY_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_CLASSIFY_PHASE_INDEX] = m_phaseIndex;
+    uintRootConstants[CLOD_REYES_CLASSIFY_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = m_ownershipBitsetBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

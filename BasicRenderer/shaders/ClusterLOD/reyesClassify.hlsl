@@ -18,6 +18,26 @@ static const uint REYES_SPLIT_CONFIG_EDGE20 = 3u;
 static const float REYES_IMMEDIATE_DICE_TESS_THRESHOLD = 8.0f;
 static const float REYES_SCREEN_SCALE_REFERENCE = 1080.0f;
 
+uint GetReyesClassifyVisibleClusterReadIndex(uint linearizedID)
+{
+    uint readBase = 0u;
+    if (CLOD_REYES_CLASSIFY_VISIBLE_CLUSTERS_READ_BASE_COUNTER_DESCRIPTOR_INDEX != 0u)
+    {
+        StructuredBuffer<uint> readBaseCounter = ResourceDescriptorHeap[CLOD_REYES_CLASSIFY_VISIBLE_CLUSTERS_READ_BASE_COUNTER_DESCRIPTOR_INDEX];
+        readBase = readBaseCounter.Load(0);
+    }
+
+    return readBase + linearizedID;
+}
+
+void MarkVisibleClusterOwnedByReyes(uint visibleClusterReadIndex)
+{
+    RWStructuredBuffer<uint> ownershipWords = ResourceDescriptorHeap[CLOD_REYES_CLASSIFY_OWNERSHIP_BITSET_DESCRIPTOR_INDEX];
+    const uint ownershipWordIndex = visibleClusterReadIndex >> 5u;
+    const uint ownershipBitMask = 1u << (visibleClusterReadIndex & 31u);
+    InterlockedOr(ownershipWords[ownershipWordIndex], ownershipBitMask);
+}
+
 uint EncodeReyesBarycentrics(float3 barycentrics)
 {
     uint u = min(REYES_BARYCENTRIC_COORD_MAX, (uint)round(saturate(barycentrics.y) * REYES_BARYCENTRIC_COORD_MAX));
@@ -135,11 +155,13 @@ void ReyesClassifyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     StructuredBuffer<uint> visibleClusterCounter = ResourceDescriptorHeap[CLOD_REYES_CLASSIFY_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
     const uint clusterCount = visibleClusterCounter[0];
-    const uint clusterIndex = dispatchThreadId.x;
-    if (clusterIndex >= clusterCount)
+    const uint clusterLinearIndex = dispatchThreadId.x;
+    if (clusterLinearIndex >= clusterCount)
     {
         return;
     }
+
+    const uint clusterIndex = GetReyesClassifyVisibleClusterReadIndex(clusterLinearIndex);
 
     ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_REYES_CLASSIFY_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, clusterIndex);
@@ -219,6 +241,7 @@ void ReyesClassifyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
         uint dst = 0u;
         InterlockedAdd(diceCounter[0], 1u, dst);
+        MarkVisibleClusterOwnedByReyes(clusterIndex);
         diceQueue[dst].visibleClusterIndex = clusterIndex;
         diceQueue[dst].instanceID = instanceID;
         diceQueue[dst].localMeshletIndex = localMeshletIndex;
@@ -243,6 +266,7 @@ void ReyesClassifyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     uint dst = 0u;
     InterlockedAdd(splitCounter[0], 1u, dst);
+    MarkVisibleClusterOwnedByReyes(clusterIndex);
     splitQueue[dst].visibleClusterIndex = clusterIndex;
     splitQueue[dst].instanceID = instanceID;
     splitQueue[dst].localMeshletIndex = localMeshletIndex;
