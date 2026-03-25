@@ -1,6 +1,8 @@
 #ifndef __REYES_PATCH_COMMON_HLSLI__
 #define __REYES_PATCH_COMMON_HLSLI__
 
+#include "include/dynamicSwizzle.hlsli"
+
 static const float REYES_PATCH_BARYCENTRIC_COORD_SCALE = 65535.0f;
 static const float REYES_BARYCENTRIC_COORD_SCALE = REYES_PATCH_BARYCENTRIC_COORD_SCALE;
 
@@ -30,6 +32,26 @@ float3 ReyesComposeSourceBarycentricsPoint(float3 patchBary, float3 domain0, flo
         domain0 * patchBary.x +
         domain1 * patchBary.y +
         domain2 * patchBary.z;
+}
+
+float ReyesSampleDisplacementOffset(MaterialInfo materialInfo, float2 uv)
+{
+    if (materialInfo.geometricDisplacementEnabled == 0u)
+    {
+        return 0.0f;
+    }
+
+    Texture2D<float4> heightTexture = ResourceDescriptorHeap[NonUniformResourceIndex(materialInfo.heightMapIndex)];
+    SamplerState heightSampler = SamplerDescriptorHeap[NonUniformResourceIndex(materialInfo.heightSamplerIndex)];
+    const float4 heightSample = heightTexture.SampleLevel(heightSampler, uv, 0.0f);
+    const float heightValue = saturate(DynamicSwizzle(heightSample, materialInfo.heightChannel));
+    return lerp(materialInfo.geometricDisplacementMin, materialInfo.geometricDisplacementMax, heightValue);
+}
+
+float3 ReyesApplyGeometricDisplacement(MaterialInfo materialInfo, float3 positionOS, float3 normalOS, float2 uv)
+{
+    const float displacementOffset = ReyesSampleDisplacementOffset(materialInfo, uv);
+    return positionOS + normalize(normalOS) * displacementOffset;
 }
 
 void ReyesDecodeMicroTrianglePatchDomain(uint triIndex, uint tessSegments, out float3 bary0, out float3 bary1, out float3 bary2)

@@ -3,7 +3,9 @@
 #include <vector>
 
 #include "Managers/ViewManager.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
+#include "Render/Runtime/UploadServiceAccess.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/PixelBuffer.h"
 
@@ -36,6 +38,18 @@ void ClearDeepVisibilityPass::Update(const UpdateExecutionContext& executionCont
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
 
+    const uint32_t zero = 0u;
+    if (m_deepVisibilityCounterBuffer) {
+        BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_deepVisibilityCounterBuffer), 0);
+    }
+    if (m_deepVisibilityOverflowCounterBuffer) {
+        BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_deepVisibilityOverflowCounterBuffer), 0);
+    }
+    if (m_deepVisibilityStatsBuffer) {
+        const CLodDeepVisibilityStats zeroStats{};
+        BUFFER_UPLOAD(&zeroStats, sizeof(CLodDeepVisibilityStats), rg::runtime::UploadTarget::FromShared(m_deepVisibilityStatsBuffer), 0);
+    }
+
     std::vector<std::shared_ptr<PixelBuffer>> headPointerTextures;
     context.viewManager->ForEachView([&](uint64_t viewID) {
         auto* view = context.viewManager->Get(viewID);
@@ -66,28 +80,11 @@ PassReturn ClearDeepVisibilityPass::Execute(PassExecutionContext& executionConte
 
     commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-    rhi::UavClearUint zeroClearValue{};
     rhi::UavClearUint headPointerClearValue{};
     headPointerClearValue.v[0] = 0xFFFFFFFFu;
     headPointerClearValue.v[1] = 0xFFFFFFFFu;
     headPointerClearValue.v[2] = 0xFFFFFFFFu;
     headPointerClearValue.v[3] = 0xFFFFFFFFu;
-
-    auto clearBuffer = [&](const std::shared_ptr<Buffer>& buffer) {
-        if (!buffer) {
-            return;
-        }
-
-        rhi::UavClearInfo clearInfo{};
-        clearInfo.cpuVisible = buffer->GetUAVNonShaderVisibleInfo(0).slot;
-        clearInfo.shaderVisible = buffer->GetUAVShaderVisibleInfo(0).slot;
-        clearInfo.resource = buffer->GetAPIResource();
-        commandList.ClearUavUint(clearInfo, zeroClearValue);
-    };
-
-    clearBuffer(m_deepVisibilityCounterBuffer);
-    clearBuffer(m_deepVisibilityOverflowCounterBuffer);
-    clearBuffer(m_deepVisibilityStatsBuffer);
 
     for (auto& texture : m_headPointerTextures) {
         rhi::UavClearInfo clearInfo{};

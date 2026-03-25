@@ -11,6 +11,7 @@
 
 inline constexpr const char* CLodStreamingMeshManagerGetterSettingName = "getMeshManager";
 inline constexpr const char* CLodStreamingCpuUploadBudgetSettingName = "clodStreamingCpuUploadBudgetRequests";
+inline constexpr const char* CLodDisableReyesRasterizationSettingName = "clodDisableReyesRasterization";
 
 enum class CLodPriorityMode : uint8_t {
     Max, // Duplicate group requests keep the maximum reported priority

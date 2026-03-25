@@ -1030,6 +1030,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
     float ownGroupErrorOverDistance = 0.0f;
     uint objectBufferIndex = 0;
     bool isSkinned = false;
+    bool reyesDisplacementCandidate = false;
     uint skinningInstanceSlot = 0xFFFFFFFFu;
 
     if (hasBucket && b.pageSlabDescriptorIndex != 0) {
@@ -1079,6 +1080,12 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
         const PerMeshBuffer perMesh = perMeshBuffer[meshBufferIndex];
         isSkinned = (perMesh.vertexFlags & VERTEX_SKINNED) != 0u;
+        StructuredBuffer<MaterialInfo> materialDataBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
+        const MaterialInfo materialInfo = materialDataBuffer[perMesh.materialDataIndex];
+        const bool displacementEnabled = materialInfo.geometricDisplacementEnabled != 0u;
+        const float displacementSpan = max(0.0f, materialInfo.geometricDisplacementMax - materialInfo.geometricDisplacementMin);
+        reyesDisplacementCandidate = displacementEnabled && displacementSpan > 1e-5f;
         StructuredBuffer<CullingCameraInfo> cameraInfos =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
         cam = cameraInfos[b.viewId];
@@ -1394,7 +1401,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 
         // SW/HW classification, tiny meshlets go to software rasterization.
         bool isSW = false;
-        if (contributes && swRasterEnabled) {
+        if (contributes && swRasterEnabled && !reyesDisplacementCandidate) {
             // Projected diameter in pixels = meshletRadiusWorld * swScreenScale / (-viewZ)
             // Multiply-compare avoids division: diameter < threshold <-> radius*scale < threshold*(-z)
             isSW = (meshletRadiusWorld * swScreenScale) < (swDiameterThreshold * (-meshletCenterViewSpace.z));

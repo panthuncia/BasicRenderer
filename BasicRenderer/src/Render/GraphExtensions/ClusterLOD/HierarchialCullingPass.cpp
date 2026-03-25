@@ -302,7 +302,12 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
         dispatchDesc.nodeCpuInput.pRecords = cullRecords.data();
         dispatchDesc.nodeCpuInput.numRecords = static_cast<uint32_t>(cullRecords.size());
         dispatchDesc.nodeCpuInput.recordByteStride = sizeof(ObjectCullRecord);
-        commandList.DispatchWorkGraph(dispatchDesc);
+        
+        // Dispatching a zero-record work graph seems to break the driver on some platforms
+        // It was reusing old dispatch records from a previous graph dispatch
+		if (!cullRecords.empty()) {
+            commandList.DispatchWorkGraph(dispatchDesc);
+        }
 
         rhi::BufferBarrier postWorkGraphBarriers[3] = {};
         postWorkGraphBarriers[0].buffer = m_visibleClustersCounterBuffer->GetAPIResource().GetHandle();

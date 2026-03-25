@@ -38,6 +38,8 @@ private:
     std::shared_ptr<Buffer> m_rasterBucketsBlockSumsBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsScannedBlockSumsBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsTotalCountBuffer;
+    std::shared_ptr<Buffer> m_rasterBucketsTotalCountBufferPhase1;
+    std::shared_ptr<Buffer> m_rasterBucketsTotalCountBufferPhase1Sw;
 
     std::shared_ptr<Buffer> m_visibleClustersCounterBufferPhase2;
     std::shared_ptr<Buffer> m_rasterBucketsHistogramBufferPhase2;

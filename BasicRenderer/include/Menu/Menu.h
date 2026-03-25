@@ -479,6 +479,10 @@ private:
     std::function<CLodSoftwareRasterMode()> getCLodSoftwareRasterMode;
     std::function<void(CLodSoftwareRasterMode)> setCLodSoftwareRasterMode;
 
+    bool m_clodDisableReyesRasterization = false;
+    std::function<bool()> getCLodDisableReyesRasterization;
+    std::function<void(bool)> setCLodDisableReyesRasterization;
+
     bool wireframeEnabled = false;
 	std::function<bool()> getWireframeEnabled;
 	std::function<void(bool)> setWireframeEnabled;
@@ -681,6 +685,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     setCLodSoftwareRasterMode = settingsManager.getSettingSetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName);
     m_clodSoftwareRasterMode = getCLodSoftwareRasterMode();
     observerSetting(m_clodSoftwareRasterMode, CLodSoftwareRasterModeSettingName);
+
+    getCLodDisableReyesRasterization = settingsManager.getSettingGetter<bool>(CLodDisableReyesRasterizationSettingName);
+    setCLodDisableReyesRasterization = settingsManager.getSettingSetter<bool>(CLodDisableReyesRasterizationSettingName);
+    m_clodDisableReyesRasterization = getCLodDisableReyesRasterization();
+    observerSetting(m_clodDisableReyesRasterization, CLodDisableReyesRasterizationSettingName);
 
 	setWireframeEnabled = settingsManager.getSettingSetter<bool>("enableWireframe");
 	getWireframeEnabled = settingsManager.getSettingGetter<bool>("enableWireframe");
@@ -941,6 +950,9 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             clodSoftwareRasterModeIndex = std::clamp(clodSoftwareRasterModeIndex, 0, CLodSoftwareRasterModeCount - 1);
             m_clodSoftwareRasterMode = static_cast<CLodSoftwareRasterMode>(clodSoftwareRasterModeIndex);
             setCLodSoftwareRasterMode(m_clodSoftwareRasterMode);
+        }
+        if (ImGui::Checkbox("Disable Reyes Patch Rasterization", &m_clodDisableReyesRasterization)) {
+            setCLodDisableReyesRasterization(m_clodDisableReyesRasterization);
         }
 		if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
 			setWireframeEnabled(wireframeEnabled);

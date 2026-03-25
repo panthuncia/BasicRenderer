@@ -58,6 +58,7 @@ void ReyesPatchRasterizationPass::DeclareResourceUsages(ComputePassBuilder* buil
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerObjectBuffer,
             Builtin::CullingCameraBuffer,
+			Builtin::PerMaterialDataBuffer,
             Builtin::SkeletonResources::InverseBindMatrices,
             Builtin::SkeletonResources::BoneTransforms,
             Builtin::SkeletonResources::SkinningInstanceInfo)
@@ -74,6 +75,7 @@ void ReyesPatchRasterizationPass::Setup() {
     RegisterSRV(Builtin::PerMeshInstanceBuffer);
     RegisterSRV(Builtin::PerObjectBuffer);
     RegisterSRV(Builtin::CullingCameraBuffer);
+	RegisterSRV(Builtin::PerMaterialDataBuffer);
     RegisterSRV(Builtin::SkeletonResources::InverseBindMatrices);
     RegisterSRV(Builtin::SkeletonResources::BoneTransforms);
     RegisterSRV(Builtin::SkeletonResources::SkinningInstanceInfo);

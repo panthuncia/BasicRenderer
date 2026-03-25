@@ -241,6 +241,12 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
     m_rasterBucketsTotalCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
     m_rasterBucketsTotalCountBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket total count"));
 
+    m_rasterBucketsTotalCountBufferPhase1 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsTotalCountBufferPhase1->SetName(MakeVariantResourceName(traits, "Raster bucket total count phase1"));
+
+    m_rasterBucketsTotalCountBufferPhase1Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsTotalCountBufferPhase1Sw->SetName(MakeVariantResourceName(traits, "Raster bucket total count phase1 SW"));
+
     m_compactedVisibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(maxVisibleClusters * PackedVisibleClusterStrideBytes, true, false);
     m_compactedVisibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Compacted Visible Clusters Buffer"));
 
@@ -466,6 +472,8 @@ void CLodExtension::OnRegistryReset(ResourceRegistry* reg)
     releaseBufferBacking(m_rasterBucketsBlockSumsBuffer);
     releaseBufferBacking(m_rasterBucketsScannedBlockSumsBuffer);
     releaseBufferBacking(m_rasterBucketsTotalCountBuffer);
+    releaseBufferBacking(m_rasterBucketsTotalCountBufferPhase1);
+    releaseBufferBacking(m_rasterBucketsTotalCountBufferPhase1Sw);
     releaseBufferBacking(m_visibleClustersCounterBufferPhase2);
     releaseBufferBacking(m_rasterBucketsHistogramBufferPhase2);
     releaseBufferBacking(m_rasterBucketsWriteCursorBufferPhase2);
@@ -526,6 +534,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
 
     const auto softwareRasterMode =
         SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)();
+    const bool disableReyesPatchRasterization =
+        SettingsManager::GetInstance().getSettingGetter<bool>(CLodDisableReyesRasterizationSettingName)();
     const bool forceHardwareOnly =
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly ||
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility;
@@ -691,7 +701,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 1u);
             outPasses.push_back(std::move(reyesDicePassDesc));
 
-            if (traits.type == CLodExtensionType::VisiblityBuffer) {
+            if (traits.type == CLodExtensionType::VisiblityBuffer && !disableReyesPatchRasterization) {
                 RenderGraph::ExternalPassDesc reyesPatchRasterPassDesc;
                 reyesPatchRasterPassDesc.type = RenderGraph::PassType::Compute;
                 reyesPatchRasterPassDesc.name = MakeVariantPassName(traits, "ReyesPatchRasterPass1");
@@ -736,7 +746,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_rasterBucketsOffsetsBuffer,
         m_rasterBucketsBlockSumsBuffer,
         m_rasterBucketsScannedBlockSumsBuffer,
-        m_rasterBucketsTotalCountBuffer);
+        m_rasterBucketsTotalCountBufferPhase1);
     outPasses.push_back(std::move(prefixOffsetsPassDesc));
 
     RenderGraph::ExternalPassDesc compactPassDesc;
@@ -874,7 +884,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_rasterBucketsOffsetsBuffer,
             m_rasterBucketsBlockSumsBuffer,
             m_rasterBucketsScannedBlockSumsBuffer,
-            m_rasterBucketsTotalCountBuffer,
+            m_rasterBucketsTotalCountBufferPhase1Sw,
             true);
         outPasses.push_back(std::move(swPrefixOffsetsPassDesc));
 
@@ -1080,7 +1090,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         2u);
     outPasses.push_back(std::move(reyesDicePassDesc2));
 
-    if (traits.type == CLodExtensionType::VisiblityBuffer) {
+    if (traits.type == CLodExtensionType::VisiblityBuffer && !disableReyesPatchRasterization) {
         RenderGraph::ExternalPassDesc reyesPatchRasterPassDesc2;
         reyesPatchRasterPassDesc2.type = RenderGraph::PassType::Compute;
         reyesPatchRasterPassDesc2.name = MakeVariantPassName(traits, "ReyesPatchRasterPass2");
@@ -1134,7 +1144,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     compactPassDesc2.pass = std::make_shared<RasterBucketCompactAndArgsPass>(
         m_visibleClustersBuffer,
         m_visibleClustersCounterBufferPhase2,
-        m_visibleClustersCounterBuffer,
+        m_rasterBucketsTotalCountBufferPhase1,
         m_histogramIndirectCommand,
         m_rasterBucketsHistogramBufferPhase2,
         m_rasterBucketsOffsetsBuffer,
@@ -1223,7 +1233,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         swCompactPassDesc2.pass = std::make_shared<RasterBucketCompactAndArgsPass>(
             m_visibleClustersBuffer,
             m_swVisibleClustersCounterBufferPhase2,
-            m_swVisibleClustersCounterBuffer,
+            m_rasterBucketsTotalCountBufferPhase1Sw,
             m_histogramIndirectCommand,
             m_rasterBucketsHistogramBufferPhase2Sw,
             m_rasterBucketsOffsetsBuffer,

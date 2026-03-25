@@ -153,6 +153,99 @@ float3 DecodeSkinnedPosition(
     return localPos;
 }
 
+float2 UnpackSnorm16x2(uint packed)
+{
+    int signedPacked = asint(packed);
+    int x = (signedPacked << 16) >> 16;
+    int y = signedPacked >> 16;
+    float sx = max(-1.0f, (float)x / 32767.0f);
+    float sy = max(-1.0f, (float)y / 32767.0f);
+    return float2(sx, sy);
+}
+
+float3 OctDecodeNormal(float2 e)
+{
+    float3 v = float3(e.x, e.y, 1.0f - abs(e.x) - abs(e.y));
+    if (v.z < 0.0f)
+    {
+        float2 folded = (1.0f - abs(v.yx)) * float2(v.x >= 0.0f ? 1.0f : -1.0f, v.y >= 0.0f ? 1.0f : -1.0f);
+        v.x = folded.x;
+        v.y = folded.y;
+    }
+    return normalize(v);
+}
+
+float3 DecodeCompressedNormal(
+    uint meshletLocalVertex,
+    CLodPageHeader hdr,
+    CLodMeshletDescriptor desc,
+    uint pageByteOffset,
+    uint pagePoolSlabDescriptorIndex)
+{
+    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
+    uint addr = pageByteOffset + hdr.normalArrayOffset + (desc.vertexAttributeOffset + meshletLocalVertex) * 4u;
+    uint packed = slab.Load(addr);
+    return OctDecodeNormal(UnpackSnorm16x2(packed));
+}
+
+float3 DecodeSkinnedNormal(
+    uint meshletLocalVertex,
+    CLodPageHeader hdr,
+    CLodMeshletDescriptor desc,
+    uint pageByteOffset,
+    uint pagePoolSlabDescriptorIndex,
+    uint vertexFlags,
+    uint skinningInstanceSlot)
+{
+    float3 localNormal = DecodeCompressedNormal(meshletLocalVertex, hdr, desc, pageByteOffset, pagePoolSlabDescriptorIndex);
+
+    if ((vertexFlags & VERTEX_SKINNED) != 0u)
+    {
+        SkinningInfluences skinning = DecodePackedJoints(meshletLocalVertex, hdr, desc, pageByteOffset, pagePoolSlabDescriptorIndex);
+        skinning = DecodePackedWeights(meshletLocalVertex, hdr, desc, pageByteOffset, pagePoolSlabDescriptorIndex, skinning);
+        localNormal = mul(localNormal, (float3x3)BuildSkinMatrix(skinningInstanceSlot, skinning));
+    }
+
+    return normalize(localNormal);
+}
+
+float2 DecodeCompressedUV(
+    uint meshletLocalVertex,
+    uint uvSetIndex,
+    CLodPageHeader hdr,
+    CLodMeshletDescriptor desc,
+    uint localMeshletIndex,
+    uint pageByteOffset,
+    uint pagePoolSlabDescriptorIndex)
+{
+    CLodMeshletUvDescriptor uvDesc = LoadMeshletUvDescriptor(
+        pagePoolSlabDescriptorIndex,
+        pageByteOffset,
+        hdr.uvDescriptorOffset,
+        hdr.uvSetCount,
+        localMeshletIndex,
+        uvSetIndex);
+
+    uint uvBitstreamBase = pageByteOffset + LoadPageUvBitstreamOffset(
+        pagePoolSlabDescriptorIndex,
+        pageByteOffset,
+        hdr.uvBitstreamDirectoryOffset,
+        uvSetIndex);
+
+    uint bitsU = CLodUvDescBitsU(uvDesc);
+    uint bitsV = CLodUvDescBitsV(uvDesc);
+    uint bitsPerVertex = bitsU + bitsV;
+    uint bitCursor = uvBitstreamBase * 8u + uvDesc.uvBitOffset + (desc.vertexAttributeOffset + meshletLocalVertex) * bitsPerVertex;
+    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
+    uint encodedU = ReadPackedBits32(slab, bitCursor, bitsU);
+    bitCursor += bitsU;
+    uint encodedV = ReadPackedBits32(slab, bitCursor, bitsV);
+
+    return float2(
+        uvDesc.uvMinU + float(encodedU) * uvDesc.uvScaleU,
+        uvDesc.uvMinV + float(encodedV) * uvDesc.uvScaleV);
+}
+
 float3 ReyesInterpolatePosition(float3 p0, float3 p1, float3 p2, float3 bary)
 {
     return p0 * bary.x + p1 * bary.y + p2 * bary.z;
@@ -286,6 +379,7 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     StructuredBuffer<PerMeshBuffer> perMeshes = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjects = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
     StructuredBuffer<CullingCameraInfo> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
+    StructuredBuffer<MaterialInfo> materials = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
 
     const CLodReyesDiceQueueEntry diceEntry = diceQueue[diceIndex];
     const ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[diceEntry.viewID];
@@ -305,6 +399,7 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     const PerMeshBuffer perMesh = perMeshes[meshInstance.perMeshBufferIndex];
     const PerObjectBuffer objectData = perObjects[meshInstance.perObjectBufferIndex];
     const CullingCameraInfo camera = cameras[diceEntry.viewID];
+    const MaterialInfo materialInfo = materials[perMesh.materialDataIndex];
 
     ByteAddressBuffer slab = ResourceDescriptorHeap[pageSlabDescriptorIndex];
     const uint sourceTriangleIndex = diceEntry.sourcePrimitiveAndSplitConfig & 0xFFFFu;
@@ -317,6 +412,22 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     const float3 sourcePosition0 = DecodeSkinnedPosition(sourceTriangle.x, hdr, meshletDesc, pageSlabByteOffset, pageSlabDescriptorIndex, perMesh.vertexFlags, meshInstance.skinningInstanceSlot);
     const float3 sourcePosition1 = DecodeSkinnedPosition(sourceTriangle.y, hdr, meshletDesc, pageSlabByteOffset, pageSlabDescriptorIndex, perMesh.vertexFlags, meshInstance.skinningInstanceSlot);
     const float3 sourcePosition2 = DecodeSkinnedPosition(sourceTriangle.z, hdr, meshletDesc, pageSlabByteOffset, pageSlabDescriptorIndex, perMesh.vertexFlags, meshInstance.skinningInstanceSlot);
+    const bool displacementEnabled = materialInfo.geometricDisplacementEnabled != 0u;
+    float3 sourceNormal0 = float3(0.0f, 0.0f, 1.0f);
+    float3 sourceNormal1 = float3(0.0f, 0.0f, 1.0f);
+    float3 sourceNormal2 = float3(0.0f, 0.0f, 1.0f);
+    float2 sourceUv0 = float2(0.0f, 0.0f);
+    float2 sourceUv1 = float2(0.0f, 0.0f);
+    float2 sourceUv2 = float2(0.0f, 0.0f);
+    if (displacementEnabled)
+    {
+        sourceNormal0 = DecodeSkinnedNormal(sourceTriangle.x, hdr, meshletDesc, pageSlabByteOffset, pageSlabDescriptorIndex, perMesh.vertexFlags, meshInstance.skinningInstanceSlot);
+        sourceNormal1 = DecodeSkinnedNormal(sourceTriangle.y, hdr, meshletDesc, pageSlabByteOffset, pageSlabDescriptorIndex, perMesh.vertexFlags, meshInstance.skinningInstanceSlot);
+        sourceNormal2 = DecodeSkinnedNormal(sourceTriangle.z, hdr, meshletDesc, pageSlabByteOffset, pageSlabDescriptorIndex, perMesh.vertexFlags, meshInstance.skinningInstanceSlot);
+        sourceUv0 = DecodeCompressedUV(sourceTriangle.x, materialInfo.heightUvSetIndex, hdr, meshletDesc, localMeshletIndex, pageSlabByteOffset, pageSlabDescriptorIndex);
+        sourceUv1 = DecodeCompressedUV(sourceTriangle.y, materialInfo.heightUvSetIndex, hdr, meshletDesc, localMeshletIndex, pageSlabByteOffset, pageSlabDescriptorIndex);
+        sourceUv2 = DecodeCompressedUV(sourceTriangle.z, materialInfo.heightUvSetIndex, hdr, meshletDesc, localMeshletIndex, pageSlabByteOffset, pageSlabDescriptorIndex);
+    }
 
     const float3 domain0 = ReyesDecodePatchBarycentrics(diceEntry.domainVertex0Encoded);
     const float3 domain1 = ReyesDecodePatchBarycentrics(diceEntry.domainVertex1Encoded);
@@ -352,9 +463,21 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         const float3 sourceBary1 = ReyesComposeSourceBarycentricsPoint(patchBary1, domain0, domain1, domain2);
         const float3 sourceBary2 = ReyesComposeSourceBarycentricsPoint(patchBary2, domain0, domain1, domain2);
 
-        const float3 patchPosition0 = ReyesInterpolatePosition(sourcePosition0, sourcePosition1, sourcePosition2, sourceBary0);
-        const float3 patchPosition1 = ReyesInterpolatePosition(sourcePosition0, sourcePosition1, sourcePosition2, sourceBary1);
-        const float3 patchPosition2 = ReyesInterpolatePosition(sourcePosition0, sourcePosition1, sourcePosition2, sourceBary2);
+        float3 patchPosition0 = ReyesInterpolatePosition(sourcePosition0, sourcePosition1, sourcePosition2, sourceBary0);
+        float3 patchPosition1 = ReyesInterpolatePosition(sourcePosition0, sourcePosition1, sourcePosition2, sourceBary1);
+        float3 patchPosition2 = ReyesInterpolatePosition(sourcePosition0, sourcePosition1, sourcePosition2, sourceBary2);
+        if (displacementEnabled)
+        {
+            const float3 patchNormal0 = normalize(sourceNormal0 * sourceBary0.x + sourceNormal1 * sourceBary0.y + sourceNormal2 * sourceBary0.z);
+            const float3 patchNormal1 = normalize(sourceNormal0 * sourceBary1.x + sourceNormal1 * sourceBary1.y + sourceNormal2 * sourceBary1.z);
+            const float3 patchNormal2 = normalize(sourceNormal0 * sourceBary2.x + sourceNormal1 * sourceBary2.y + sourceNormal2 * sourceBary2.z);
+            const float2 patchUv0 = sourceUv0 * sourceBary0.x + sourceUv1 * sourceBary0.y + sourceUv2 * sourceBary0.z;
+            const float2 patchUv1 = sourceUv0 * sourceBary1.x + sourceUv1 * sourceBary1.y + sourceUv2 * sourceBary1.z;
+            const float2 patchUv2 = sourceUv0 * sourceBary2.x + sourceUv1 * sourceBary2.y + sourceUv2 * sourceBary2.z;
+            patchPosition0 = ReyesApplyGeometricDisplacement(materialInfo, patchPosition0, patchNormal0, patchUv0);
+            patchPosition1 = ReyesApplyGeometricDisplacement(materialInfo, patchPosition1, patchNormal1, patchUv1);
+            patchPosition2 = ReyesApplyGeometricDisplacement(materialInfo, patchPosition2, patchNormal2, patchUv2);
+        }
 
         const float4 clip0 = mul(float4(patchPosition0, 1.0f), modelViewProjection);
         const float4 clip1 = mul(float4(patchPosition1, 1.0f), modelViewProjection);
