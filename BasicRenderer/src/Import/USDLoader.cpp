@@ -448,6 +448,13 @@ namespace USDLoader {
 					float v; input.Get(&v);
 					result.alphaCutoff = v;
 				}
+				else if (texName == TfToken("displacement") && input.GetConnectedSources().empty()) {
+					float v; input.Get(&v);
+					result.heightMapScale = v;
+					result.enableGeometricDisplacement = (v != 0.0f);
+					result.geometricDisplacementMin = std::min(0.0f, v);
+					result.geometricDisplacementMax = std::max(0.0f, v);
+				}
 				else {
 					spdlog::warn("Unknown input '{}' with no connections in UsdPreviewSurface", name.GetString());
 				}
@@ -468,6 +475,11 @@ namespace USDLoader {
 				r->shader.GetIdAttr().Get(&prodId);
 
 				if (prodId == pxr::TfToken("UsdUVTexture")) {
+					if (name == TfToken("displacement")) {
+						result.enableGeometricDisplacement = true;
+						result.geometricDisplacementMin = std::min(result.geometricDisplacementMin, 0.0f);
+						result.geometricDisplacementMax = std::max(result.geometricDisplacementMax, result.heightMapScale);
+					}
 					ProcessTexture(result, src, stage, name, material);
 				}
 				else if (prodId == pxr::TfToken("UsdPrimvarReader_float2")) {

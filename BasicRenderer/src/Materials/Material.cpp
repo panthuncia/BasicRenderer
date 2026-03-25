@@ -42,6 +42,10 @@ Material::Material(const std::string& name,
     uint32_t roughnessUvSetIndex,
     uint32_t emissiveUvSetIndex,
     uint32_t opacityUvSetIndex,
+	float heightMapScale,
+	float geometricDisplacementMin,
+	float geometricDisplacementMax,
+	bool geometricDisplacementEnabled,
     TechniqueDescriptor technique,
     float alphaCutoff)
     : m_name(name),
@@ -71,8 +75,11 @@ Material::Material(const std::string& name,
     m_materialData.materialFlags = materialFlags;
     m_materialData.ambientStrength = 0.5f;
     m_materialData.specularStrength = 2.0f;
-    m_materialData.heightMapScale = 0.05f;
+    m_materialData.heightMapScale = heightMapScale;
     m_materialData.textureScale = 1.0f;
+    m_materialData.geometricDisplacementMin = geometricDisplacementMin;
+    m_materialData.geometricDisplacementMax = geometricDisplacementMax;
+    m_materialData.geometricDisplacementEnabled = geometricDisplacementEnabled ? 1u : 0u;
     m_materialData.baseColorFactor = baseColorFactor;
     m_materialData.emissiveFactor = emissiveFactor;
     m_materialData.metallicFactor = metallicFactor;

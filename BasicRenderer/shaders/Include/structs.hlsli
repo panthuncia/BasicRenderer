@@ -187,6 +187,11 @@ struct MaterialInfo {
     float textureScale;
     float heightMapScale;
     float alphaCutoff;
+
+    float geometricDisplacementMin;
+    float geometricDisplacementMax;
+    uint geometricDisplacementEnabled;
+    uint perMaterialPad0;
     
     float4 baseColorFactor;
     float4 emissiveFactor;

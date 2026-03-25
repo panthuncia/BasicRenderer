@@ -383,6 +383,11 @@ namespace AssimpLoader {
 			desc.blendState = blendMode;
 			desc.negateNormals = negateNormals; // TODO: How to handle this properly?
 			desc.invertNormalGreen = false;
+            desc.enableGeometricDisplacement = materialTextures.find(aiTextureType_DISPLACEMENT) != materialTextures.end();
+            if (desc.enableGeometricDisplacement) {
+                desc.geometricDisplacementMin = 0.0f;
+                desc.geometricDisplacementMax = desc.heightMapScale;
+            }
             desc.aoMap = { aoMap, { 1 }, { 0 } };
 			desc.baseColor = { baseColorTexture, { 1 }, { 0, 1, 2, 3 } };
 			desc.normal = { normalTexture, { 1 }, { 0, 1, 2 } };

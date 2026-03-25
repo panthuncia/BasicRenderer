@@ -14,4 +14,5 @@ enum MaterialFlags {
 	MATERIAL_INVERT_NORMAL_GREEN = 1 << 10, // Some normal textures have inverted green channel
 	MATERIAL_OPACITY_TEXTURE = 1 << 11,
 	MATERIAL_ALPHA_TEST = 1 << 12,
+    MATERIAL_GEOMETRIC_DISPLACEMENT = 1 << 13,
 };

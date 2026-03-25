@@ -155,6 +155,10 @@ struct PerMaterialCB {
     float textureScale;
     float heightMapScale;
     float alphaCutoff;
+	float geometricDisplacementMin;
+	float geometricDisplacementMax;
+    unsigned int geometricDisplacementEnabled;
+    unsigned int perMaterialPad0;
 
     DirectX::XMFLOAT4 baseColorFactor;
     DirectX::XMFLOAT4 emissiveFactor;

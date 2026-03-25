@@ -107,6 +107,9 @@ public:
         if (desc.normal.texture) {
             materialFlags |= MaterialFlags::MATERIAL_NORMAL_MAP | MaterialFlags::MATERIAL_TEXTURED;
         }
+        if (desc.enableGeometricDisplacement && desc.heightMap.texture) {
+            materialFlags |= MaterialFlags::MATERIAL_GEOMETRIC_DISPLACEMENT;
+        }
         auto diffuseColor = desc.diffuseColor;
         auto emissiveColor = desc.emissiveColor;
         if (desc.opacity.texture) { // TODO: How can we tell if this should be used as a mask or as a blend?
@@ -164,6 +167,10 @@ public:
             desc.roughness.uvSetIndex,
             desc.emissive.uvSetIndex,
             desc.opacity.uvSetIndex,
+			desc.heightMapScale,
+			desc.geometricDisplacementMin,
+			desc.geometricDisplacementMax,
+			desc.enableGeometricDisplacement,
             technique,
             desc.alphaCutoff
         );
@@ -253,6 +260,10 @@ private:
         uint32_t roughnessUvSetIndex,
         uint32_t emissiveUvSetIndex,
         uint32_t opacityUvSetIndex,
+		float heightMapScale,
+		float geometricDisplacementMin,
+		float geometricDisplacementMax,
+		bool geometricDisplacementEnabled,
 		TechniqueDescriptor technique,
         float alphaCutoff);
 
@@ -285,6 +296,10 @@ private:
         uint32_t roughnessUvSetIndex,
         uint32_t emissiveUvSetIndex,
         uint32_t opacityUvSetIndex,
+		float heightMapScale,
+		float geometricDisplacementMin,
+		float geometricDisplacementMax,
+		bool geometricDisplacementEnabled,
         TechniqueDescriptor technique,
         float alphaCutoff) {
         return std::shared_ptr<Material>(new Material(name, materialFlags, psoFlags,
@@ -294,7 +309,8 @@ private:
             baseColorChannels, normalChannels, aoChannel, heightChannel,
             metallicChannel, roughnessChannel, emissiveChannels,
             baseColorUvSetIndex, normalUvSetIndex, aoUvSetIndex, heightUvSetIndex,
-            metallicUvSetIndex, roughnessUvSetIndex, emissiveUvSetIndex, opacityUvSetIndex,
+			metallicUvSetIndex, roughnessUvSetIndex, emissiveUvSetIndex, opacityUvSetIndex,
+			heightMapScale, geometricDisplacementMin, geometricDisplacementMax, geometricDisplacementEnabled,
 			technique,
             alphaCutoff));
     }
