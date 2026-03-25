@@ -1,9 +1,14 @@
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
 #include "include/waveIntrinsicsHelpers.hlsli"
-#include "PerPassRootConstants/clodRootConstants.h"
+#include "PerPassRootConstants/clodCreateCommandRootConstants.h"
+#include "PerPassRootConstants/clodHistogramRootConstants.h"
+#include "PerPassRootConstants/clodPrefixScanRootConstants.h"
+#include "PerPassRootConstants/clodPrefixOffsetsRootConstants.h"
+#include "PerPassRootConstants/clodCompactionRootConstants.h"
 #include "include/indirectCommands.hlsli"
 #include "include/clodStructs.hlsli"
+#include "include/visibleClusterPacking.hlsli"
 
 struct RasterBucketsHistogramIndirectCommand
 {
@@ -12,6 +17,40 @@ struct RasterBucketsHistogramIndirectCommand
     uint dispatchX, dispatchY, dispatchZ;
 };
 
+uint CLodGetHistogramVisibleClusterReadIndex(uint linearizedID)
+{
+    uint readBase = 0u;
+    if (CLOD_HISTOGRAM_READ_BASE_COUNTER_DESCRIPTOR_INDEX != 0)
+    {
+        StructuredBuffer<uint> readBaseCounter = ResourceDescriptorHeap[CLOD_HISTOGRAM_READ_BASE_COUNTER_DESCRIPTOR_INDEX];
+        readBase = readBaseCounter.Load(0);
+    }
+
+    if ((CLOD_HISTOGRAM_READ_MODE_FLAGS & CLOD_HISTOGRAM_READ_FLAG_REVERSED) != 0u)
+    {
+        return CLOD_HISTOGRAM_READ_CAPACITY - 1u - (readBase + linearizedID);
+    }
+
+    return readBase + linearizedID;
+}
+
+uint CLodGetCompactionVisibleClusterReadIndex(uint linearizedID)
+{
+    uint readBase = 0u;
+    if (CLOD_COMPACTION_READ_BASE_COUNTER_DESCRIPTOR_INDEX != 0)
+    {
+        StructuredBuffer<uint> readBaseCounter = ResourceDescriptorHeap[CLOD_COMPACTION_READ_BASE_COUNTER_DESCRIPTOR_INDEX];
+        readBase = readBaseCounter.Load(0);
+    }
+
+    if ((CLOD_COMPACTION_READ_MODE_FLAGS & CLOD_COMPACTION_READ_FLAG_REVERSED) != 0u)
+    {
+        return CLOD_COMPACTION_READ_CAPACITY - 1u - (readBase + linearizedID);
+    }
+
+    return readBase + linearizedID;
+}
+
 #define CLUSTER_HISTOGRAM_GROUP_SIZE 8
 
 // Single-thread shader to create a command for histogram eval
@@ -19,12 +58,12 @@ struct RasterBucketsHistogramIndirectCommand
 [numthreads(1, 1, 1)]
 void CreateRasterBucketsHistogramCommandCSMain()
 {
-    RWStructuredBuffer<RasterBucketsHistogramIndirectCommand> outCommand = ResourceDescriptorHeap[CLOD_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX];
-    StructuredBuffer<uint> clusterCountBuffer = ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<RasterBucketsHistogramIndirectCommand> outCommand = ResourceDescriptorHeap[CLOD_CREATE_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> clusterCountBuffer = ResourceDescriptorHeap[CLOD_CREATE_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
 
     // Given the cluster count, find dispatch dimensions that minimizes wasted threads
     uint clusterCount = clusterCountBuffer.Load(0);
-    uint numBuckets = CLOD_NUM_RASTER_BUCKETS;
+    uint numBuckets = CLOD_CREATE_NUM_RASTER_BUCKETS;
     uint totalItems = max(clusterCount, numBuckets);
 
     uint groupsNeeded = (totalItems + CLUSTER_HISTOGRAM_GROUP_SIZE - 1u) / CLUSTER_HISTOGRAM_GROUP_SIZE;
@@ -48,20 +87,22 @@ void CreateRasterBucketsHistogramCommandCSMain()
     outCommand[0].dispatchY = dispatchY;
     outCommand[0].dispatchZ = 1;
 
-    StructuredBuffer<CLodReplayBufferState> replayStateBuffer = ResourceDescriptorHeap[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
-    RWStructuredBuffer<CLodNodeGpuInput> nodeInputs = ResourceDescriptorHeap[CLOD_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX];
+    StructuredBuffer<CLodReplayBufferState> replayStateBuffer = ResourceDescriptorHeap[CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodNodeGpuInput> nodeInputs = ResourceDescriptorHeap[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX];
 
     const CLodReplayBufferState replayState = replayStateBuffer[0];
 
-    const uint replayRecordCount = min(replayState.totalWriteCount, CLOD_REPLAY_SLOT_CAPACITY);
+    const uint nodeReplayCount = min(replayState.nodeWriteCount, CLOD_NODE_REPLAY_CAPACITY);
+    const uint meshletReplayCount = min(replayState.meshletWriteCount, CLOD_MESHLET_REPLAY_CAPACITY);
 
     // Slot 0 is CLodMultiNodeGpuInput (CPU initialized); slot 1+ are CLodNodeGpuInput records.
-    // Both entry points must use the unified slot stride because all replay record types
-    // (node/group and meshlet) share the same fixed-stride buffer.
-    nodeInputs[1].numRecords = replayRecordCount;
-    nodeInputs[1].recordStride = CLOD_REPLAY_SLOT_STRIDE_BYTES;
-    nodeInputs[2].numRecords = replayRecordCount;
-    nodeInputs[2].recordStride = CLOD_REPLAY_SLOT_STRIDE_BYTES;
+    // Entry point 1 = TraverseNodes (node replay region, 12-byte stride).
+    // Entry point 2 = ClusterCull1  (meshlet replay region, 24-byte stride).
+    // recordsAddress for meshlet region is patched by C++ to include CLOD_REPLAY_MESHLET_REGION_OFFSET.
+    nodeInputs[1].numRecords = nodeReplayCount;
+    nodeInputs[1].recordStride = CLOD_NODE_REPLAY_STRIDE_BYTES;
+    nodeInputs[2].numRecords = meshletReplayCount;
+    nodeInputs[2].recordStride = CLOD_MESHLET_REPLAY_STRIDE_BYTES;
 }
 
 // IndirectCommandSignatureRootConstant0 = cluster count
@@ -74,17 +115,17 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
     // Root constant is dispatchX in groups, convert to thread width.
     uint xDimThreads = IndirectCommandSignatureRootConstant1 * CLUSTER_HISTOGRAM_GROUP_SIZE;
     uint linearizedID = DTid.x + DTid.y * xDimThreads;
-    StructuredBuffer<uint> clusterCountBuffer = ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> clusterCountBuffer = ResourceDescriptorHeap[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
     uint clusterCount = clusterCountBuffer.Load(0);
     
     if (linearizedID >= clusterCount) {
         return;
     }
-    
-    StructuredBuffer<VisibleCluster> visibleClusters = ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+
+    ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
 
     // TODO: Remove load chain
-    uint instanceIndex = visibleClusters[linearizedID].instanceID;
+    uint instanceIndex = CLodVisibleClusterInstanceID(CLodLoadVisibleClusterPacked(visibleClusters, CLodGetHistogramVisibleClusterReadIndex(linearizedID)));
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     uint perMeshIndex = perMeshInstance[instanceIndex].perMeshBufferIndex;
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
@@ -98,7 +139,7 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
     if (IsWaveGroupLeader(mask))
     {
         uint groupSize = CountBits128(mask);
-        RWStructuredBuffer<uint> histogramBuffer = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
+        RWStructuredBuffer<uint> histogramBuffer = ResourceDescriptorHeap[CLOD_HISTOGRAM_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
         InterlockedAdd(histogramBuffer[rasterBucketIndex], groupSize);
     }
 }
@@ -173,11 +214,11 @@ void CLODExclusiveScanBlock(uint Nblock, uint threadId)
 void RasterBucketsBlockScanCS(uint3 groupThreadId : SV_GroupThreadID,
                               uint3 groupId : SV_GroupID)
 {
-    StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
-    RWStructuredBuffer<uint> offsets = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX];
-    RWStructuredBuffer<uint> blockSums = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_BLOCK_SUMS_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_PREFIX_SCAN_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> offsets = ResourceDescriptorHeap[CLOD_PREFIX_SCAN_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> blockSums = ResourceDescriptorHeap[CLOD_PREFIX_SCAN_RASTER_BUCKETS_BLOCK_SUMS_DESCRIPTOR_INDEX];
 
-    uint N = UintRootConstant0;
+    uint N = CLOD_PREFIX_SCAN_NUM_BUCKETS;
     uint blockId = groupId.x;
     uint localTid = groupThreadId.x;
     uint base = blockId * CLOD_BUCKET_BLOCK_SIZE;
@@ -233,13 +274,13 @@ void RasterBucketsBlockOffsetsCS(uint3 groupThreadId : SV_GroupThreadID,
     if (groupId.x != 0 || groupId.y != 0 || groupId.z != 0)
         return;
 
-    RWStructuredBuffer<uint> offsets = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX];
-    StructuredBuffer<uint> blockSums = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_BLOCK_SUMS_DESCRIPTOR_INDEX];
-    RWStructuredBuffer<uint> scannedBlockSums = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_SCANNED_BLOCK_SUMS_DESCRIPTOR_INDEX];
-    RWStructuredBuffer<uint> totalOut = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_TOTAL_COUNT_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> offsets = ResourceDescriptorHeap[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> blockSums = ResourceDescriptorHeap[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_BLOCK_SUMS_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> scannedBlockSums = ResourceDescriptorHeap[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_SCANNED_BLOCK_SUMS_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> totalOut = ResourceDescriptorHeap[CLOD_PREFIX_OFFSETS_RASTER_BUCKETS_TOTAL_COUNT_DESCRIPTOR_INDEX];
 
-    uint N = UintRootConstant0;
-    uint B = UintRootConstant1;
+    uint N = CLOD_PREFIX_OFFSETS_NUM_BUCKETS;
+    uint B = CLOD_PREFIX_OFFSETS_NUM_BLOCKS;
 
     uint localTid = groupThreadId.x;
 
@@ -271,13 +312,13 @@ void RasterBucketsBlockOffsetsCS(uint3 groupThreadId : SV_GroupThreadID,
     }
 }
 
-uint GetRasterBucketIndexFromCluster(VisibleCluster cluster)
+uint GetRasterBucketIndexFromInstance(uint instanceID)
 {
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
 
-    PerMeshInstanceBuffer instanceData = perMeshInstance[cluster.instanceID];
+    PerMeshInstanceBuffer instanceData = perMeshInstance[instanceID];
     PerMeshBuffer meshBuffer = perMeshBuffer[instanceData.perMeshBufferIndex];
     MaterialInfo materialInfo = materialDataBuffer[meshBuffer.materialDataIndex];
 
@@ -295,39 +336,42 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
 
     uint clusterCount = IndirectCommandSignatureRootConstant0;
 
-    StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
-    const uint numBucketsPacked = CLOD_NUM_RASTER_BUCKETS;
+    StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
+    const uint numBucketsPacked = CLOD_COMPACTION_NUM_RASTER_BUCKETS;
     const bool appendToExisting = ((numBucketsPacked & 0x80000000u) != 0u);
     const uint numBuckets = (numBucketsPacked & 0x7FFFFFFFu);
 
     uint baseClusterOffset = 0u;
     if (appendToExisting)
     {
-        StructuredBuffer<uint> appendBaseCounter = ResourceDescriptorHeap[CLOD_COMPACTED_APPEND_BASE_COUNTER_DESCRIPTOR_INDEX];
+        StructuredBuffer<uint> appendBaseCounter = ResourceDescriptorHeap[CLOD_COMPACTION_APPEND_BASE_COUNTER_DESCRIPTOR_INDEX];
         baseClusterOffset = appendBaseCounter.Load(0);
     }
 
     if (linearizedID < clusterCount)
     {
-        StructuredBuffer<VisibleCluster> visibleClusters = ResourceDescriptorHeap[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
-        RWStructuredBuffer<VisibleCluster> compactedClusters = ResourceDescriptorHeap[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
-        StructuredBuffer<uint> offsets = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX];
-        RWStructuredBuffer<uint> writeCursor = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_WRITE_CURSOR_DESCRIPTOR_INDEX];
+        ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_COMPACTION_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+        RWByteAddressBuffer compactedClusters = ResourceDescriptorHeap[CLOD_COMPACTION_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
+        StructuredBuffer<uint> offsets = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX];
+        RWStructuredBuffer<uint> writeCursor = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_WRITE_CURSOR_DESCRIPTOR_INDEX];
+        RWStructuredBuffer<uint> sortedToUnsortedMapping = ResourceDescriptorHeap[CLOD_COMPACTION_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX];
 
-        VisibleCluster cluster = visibleClusters[linearizedID];
-        uint bucketIndex = GetRasterBucketIndexFromCluster(cluster);
+        const uint sourceClusterIndex = CLodGetCompactionVisibleClusterReadIndex(linearizedID);
+        const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, sourceClusterIndex);
+        uint bucketIndex = GetRasterBucketIndexFromInstance(CLodVisibleClusterInstanceID(packedCluster));
 
         uint localOffset = 0;
         InterlockedAdd(writeCursor[bucketIndex], 1, localOffset);
 
         uint dst = baseClusterOffset + offsets[bucketIndex] + localOffset;
-        compactedClusters[dst] = cluster;
+        CLodStoreVisibleClusterPackedWordsRW(compactedClusters, dst, packedCluster);
+        sortedToUnsortedMapping[dst] = sourceClusterIndex;
     }
 
     if (linearizedID < numBuckets)
     {
-        StructuredBuffer<uint> offsets = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX];
-        RWStructuredBuffer<RasterizeClustersCommand> outArgs = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_INDIRECT_ARGS_DESCRIPTOR_INDEX];
+        StructuredBuffer<uint> offsets = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX];
+        RWStructuredBuffer<RasterizeClustersCommand> outArgs = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_INDIRECT_ARGS_DESCRIPTOR_INDEX];
 
         uint count = histogram[linearizedID];
 
@@ -335,12 +379,18 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
         if (count > 0)
         {
             const uint kMaxDim = 65535u;
-            uint dispatchX = (uint) ceil(sqrt((float) count));
+            uint dispatchItemCount = count;
+            if ((CLOD_COMPACTION_READ_MODE_FLAGS & CLOD_COMPACTION_READ_FLAG_BUILD_SW_DISPATCH) != 0u)
+            {
+                dispatchItemCount *= SW_RASTER_GROUPS_PER_CLUSTER;
+            }
+
+            uint dispatchX = (uint) ceil(sqrt((float) dispatchItemCount));
             if (dispatchX > kMaxDim)
             {
                 dispatchX = kMaxDim;
             }
-            uint dispatchY = (count + dispatchX - 1u) / dispatchX;
+            uint dispatchY = (dispatchItemCount + dispatchX - 1u) / dispatchX;
             if (dispatchY > kMaxDim)
             {
                 dispatchY = kMaxDim;

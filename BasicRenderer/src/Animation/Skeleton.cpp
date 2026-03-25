@@ -5,6 +5,7 @@
 #include <unordered_set>
 #include <queue>
 #include <algorithm>
+#include <cmath>
 
 #include "Scene/Components.h"
 
@@ -86,6 +87,7 @@ Skeleton::Skeleton(const Skeleton& other)
 
         animations = other.animations;
         animationsByName = other.animationsByName;
+        m_animationConservativeBoundsScales = other.m_animationConservativeBoundsScales;
 
         m_poseDirty = true;
         return;
@@ -95,6 +97,7 @@ Skeleton::Skeleton(const Skeleton& other)
     m_baseSkeleton = other.GetBaseSkeletonShared();
     m_animationSpeed = other.m_animationSpeed;
     m_activeAnimationIndex = other.m_activeAnimationIndex;
+    m_currentAnimationConservativeBoundsScale = other.m_currentAnimationConservativeBoundsScale;
 
     EnsureInstanceBuffersSized_();
 
@@ -356,6 +359,7 @@ void Skeleton::AddAnimation(const std::shared_ptr<Animation>& animation)
 
     base->animations.push_back(animation);
     base->animationsByName[animation->name] = animation;
+    base->m_animationConservativeBoundsScales.push_back(ComputeAnimationConservativeBoundsScale_(*animation));
 }
 
 void Skeleton::DeleteAllAnimations()
@@ -365,6 +369,7 @@ void Skeleton::DeleteAllAnimations()
 
     base->animations.clear();
     base->animationsByName.clear();
+    base->m_animationConservativeBoundsScales.clear();
 }
 
 uint32_t Skeleton::GetBoneCount() const noexcept
@@ -455,6 +460,12 @@ void Skeleton::SetAnimation(size_t index)
     }
 
     m_activeAnimationIndex = index;
+    if (index < base->m_animationConservativeBoundsScales.size()) {
+        m_currentAnimationConservativeBoundsScale = base->m_animationConservativeBoundsScales[index];
+    }
+    else {
+        m_currentAnimationConservativeBoundsScale = ComputeAnimationConservativeBoundsScale_(*anim);
+    }
     m_poseDirty = true;
 }
 
@@ -472,6 +483,25 @@ void Skeleton::SetAnimationSpeed(float speed)
         c.SetAnimationSpeed(speed);
     }
     m_poseDirty = true;
+}
+
+size_t Skeleton::GetAnimationCount() const noexcept
+{
+    auto base = GetBaseSkeletonShared();
+    if (!base) {
+        return 0;
+    }
+
+    return base->animations.size();
+}
+
+float Skeleton::GetCurrentAnimationConservativeBoundsScale() const noexcept
+{
+    if (m_isBaseSkeleton) {
+        return 1.0f;
+    }
+
+    return m_currentAnimationConservativeBoundsScale;
 }
 
 void Skeleton::UpdateTransforms(float elapsedSeconds, bool force)
@@ -495,7 +525,9 @@ void Skeleton::UpdateTransforms(float elapsedSeconds, bool force)
     for (uint32_t idx : base->m_evalOrder) {
         if (idx >= boneCount) continue;
 
-        Components::Transform localTrs = {};// (idx < base->m_restLocalTransforms.size()) ? base->m_restLocalTransforms[idx] : Components::Transform{};
+        Components::Transform localTrs = (idx < base->m_restLocalTransforms.size())
+            ? base->m_restLocalTransforms[idx]
+            : Components::Transform{};
 
         // If a clip is bound, use animated channels
         auto& ctrl = m_controllers[idx];
@@ -521,7 +553,10 @@ void Skeleton::UpdateTransforms(float elapsedSeconds, bool force)
             if (idx < base->m_rootParentGlobals.size()) {
                 rootParent = base->m_rootParentGlobals[idx];
             }
-            m_boneMatrices[idx] = local;//DirectX::XMMatrixMultiply(local, rootParent);
+            // Root joints may live under non-bone scene nodes (common in glTF).
+            // Those ancestors are part of the joint's bind/global space and must
+            // be carried into the runtime bone matrix before inverse binds are applied.
+            m_boneMatrices[idx] = DirectX::XMMatrixMultiply(local, rootParent);
         }
         else {
             m_boneMatrices[idx] = DirectX::XMMatrixMultiply(local, m_boneMatrices[(uint32_t)p]);
@@ -529,4 +564,30 @@ void Skeleton::UpdateTransforms(float elapsedSeconds, bool force)
     }
 
     m_poseDirty = true;
+}
+
+float Skeleton::ComputeAnimationConservativeBoundsScale_(const Animation& animation)
+{
+    float conservativeScale = 1.0f;
+    bool foundScaleKey = false;
+
+    for (const auto& [_, clip] : animation.nodesMap) {
+        if (!clip) {
+            continue;
+        }
+
+        for (const auto& keyframe : clip->scaleKeyframes) {
+            const float maxAxisScale = std::max({
+                std::abs(DirectX::XMVectorGetX(keyframe.value)),
+                std::abs(DirectX::XMVectorGetY(keyframe.value)),
+                std::abs(DirectX::XMVectorGetZ(keyframe.value))
+                });
+            if (!foundScaleKey || maxAxisScale > conservativeScale) {
+                conservativeScale = maxAxisScale;
+                foundScaleKey = true;
+            }
+        }
+    }
+
+    return foundScaleKey ? conservativeScale : 1.0f;
 }

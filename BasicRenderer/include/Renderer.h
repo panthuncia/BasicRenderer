@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <functional>
+#include <unordered_map>
 #include <flecs.h>
 
 #include <rhi.h>
@@ -183,6 +184,9 @@ private:
     void RunTransformPropagationStage();
     void RunSceneBridgeSyncStage();
     void RunRenderResourceSyncStage();
+    void FlushPendingSceneExplorerEdits();
+    void QueueSceneNodePositionEdit(uint64_t stableSceneID, DirectX::XMFLOAT3 position);
+    void QueueSceneNodeUniformScaleEdit(uint64_t stableSceneID, float uniformScale);
     void BeginFrameTaskGraphCapture();
     void RecordFrameTaskStage(
         const char* stageName,
@@ -257,6 +261,16 @@ private:
     uint64_t m_lastCompletedSceneSnapshotSequence = 0;
     uint64_t m_lastCommittedSceneSourceFrame = 0;
     double m_lastSceneTaskDurationMs = 0.0;
+
+    struct PendingSceneExplorerEdit {
+        bool hasPosition = false;
+        DirectX::XMFLOAT3 position = { 0.0f, 0.0f, 0.0f };
+        bool hasUniformScale = false;
+        float uniformScale = 1.0f;
+    };
+
+    std::mutex m_pendingSceneExplorerEditsMutex;
+    std::unordered_map<uint64_t, PendingSceneExplorerEdit> m_pendingSceneExplorerEdits;
 
     std::shared_ptr<rg::runtime::IUploadPolicyService> m_uploadPolicyService = nullptr;
 

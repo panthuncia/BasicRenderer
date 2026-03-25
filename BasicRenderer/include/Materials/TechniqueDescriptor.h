@@ -41,3 +41,24 @@ struct TechniqueDescriptor {
 	}
 
 };
+
+struct DrawWorkloadKey {
+    MaterialCompileFlags compileFlags = MaterialCompileFlags::MaterialCompileNone;
+    RenderPhase renderPhase;
+    bool clodOnly = false;
+
+    bool operator==(const DrawWorkloadKey& other) const noexcept {
+        return compileFlags == other.compileFlags
+            && renderPhase == other.renderPhase
+            && clodOnly == other.clodOnly;
+    }
+
+    struct Hasher {
+        size_t operator()(const DrawWorkloadKey& key) const noexcept {
+            size_t seed = std::hash<uint64_t>()(static_cast<uint64_t>(key.compileFlags));
+            seed ^= RenderPhase::Hasher{}(key.renderPhase) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+            seed ^= std::hash<bool>()(key.clodOnly) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+            return seed;
+        }
+    };
+};

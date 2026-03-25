@@ -14,6 +14,7 @@ public:
     explicit CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters);
     ~CLodExtension();
 
+    void Initialize(RenderGraph& rg) override;
     void OnRegistryReset(ResourceRegistry* reg) override;
     void GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override;
     void GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override;
@@ -41,10 +42,23 @@ private:
     std::shared_ptr<Buffer> m_visibleClustersCounterBufferPhase2;
     std::shared_ptr<Buffer> m_rasterBucketsHistogramBufferPhase2;
     std::shared_ptr<Buffer> m_rasterBucketsWriteCursorBufferPhase2;
+    std::shared_ptr<Buffer> m_rasterBucketsHistogramBufferSw;
+    std::shared_ptr<Buffer> m_rasterBucketsHistogramBufferPhase2Sw;
+    std::shared_ptr<Buffer> m_rasterBucketsWriteCursorBufferSw;
+    std::shared_ptr<Buffer> m_rasterBucketsWriteCursorBufferPhase2Sw;
 
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsWriteCursorBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBuffer;
+
+    std::shared_ptr<Buffer> m_swVisibleClustersCounterBuffer;
+    std::shared_ptr<Buffer> m_swVisibleClustersCounterBufferPhase2;
+    std::shared_ptr<Buffer> m_sortedToUnsortedMappingBuffer;
+    std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
+    std::shared_ptr<Buffer> m_deepVisibilityNodesBuffer;
+    std::shared_ptr<Buffer> m_deepVisibilityCounterBuffer;
+    std::shared_ptr<Buffer> m_deepVisibilityOverflowCounterBuffer;
+    std::shared_ptr<Buffer> m_deepVisibilityStatsBuffer;
 
     std::unique_ptr<CLodStreamingSystem> m_streamingSystem;
 };

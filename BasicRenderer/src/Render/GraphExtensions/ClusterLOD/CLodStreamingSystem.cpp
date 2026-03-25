@@ -12,7 +12,10 @@
 #include "Managers/ViewManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodStreamingBeginFramePass.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodStreamingReadbackCopyPass.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodAsyncUploadPass.h"
 #include "Render/Runtime/UploadServiceAccess.h"
+#include "Managers/UploadInstance.h"
+#include "Render/Runtime/OpenRenderGraphSettings.h"
 #include "RenderPasses/StreamingUploadPass.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "BuiltinResources.h"
@@ -133,6 +136,23 @@ CLodStreamingSystem::~CLodStreamingSystem() {
 void CLodStreamingSystem::OnRegistryReset(ResourceRegistry* reg) {
     (void)reg;
 
+    auto releaseBufferBacking = [](const std::shared_ptr<Buffer>& buffer) {
+        if (buffer) {
+            buffer->Dematerialize();
+        }
+    };
+
+    releaseBufferBacking(m_streamingNonResidentBits);
+    releaseBufferBacking(m_streamingActiveGroupsBits);
+    releaseBufferBacking(m_streamingLoadRequests);
+    releaseBufferBacking(m_streamingLoadCounter);
+    releaseBufferBacking(m_streamingRuntimeState);
+    releaseBufferBacking(m_usedGroupsCounter);
+    releaseBufferBacking(m_usedGroupsBuffer);
+    if (m_uploadInstance) {
+        m_uploadInstance->Cleanup();
+    }
+
     MeshManager* meshManager = nullptr;
     if (m_getMeshManager) {
         meshManager = m_getMeshManager();
@@ -194,8 +214,19 @@ void CLodStreamingSystem::OnRegistryReset(ResourceRegistry* reg) {
     // Clear in-flight flags so the worker thread doesn't process stale readback data.
     for (auto& slot : m_readbackStagingSlots) {
         slot.inFlight = false;
+        slot.fenceValue = 0;
     }
     m_readbackStagingCursor = 0;
+}
+
+void CLodStreamingSystem::Initialize(RenderGraph& rg) {
+    // Create a dedicated copy queue for async CLod streaming uploads.
+    m_uploadQueueSlot = rg.CreateQueue(QueueKind::Copy, "CLodAsyncUpload");
+
+    // Create the upload instance for CLod-specific uploads, using the same
+    // number of frames in flight as the global settings.
+    const uint8_t numFramesInFlight = rg::runtime::GetOpenRenderGraphSettings().numFramesInFlight;
+    m_uploadInstance = std::make_unique<UploadInstance>(numFramesInFlight);
 }
 
 void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) {
@@ -213,6 +244,7 @@ void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<Re
     streamingBeginPassDesc.where = RenderGraph::ExternalInsertPoint::After("SkinningPass");
 
     streamingBeginPassDesc.pass = std::make_shared<CLodStreamingBeginFramePass>(
+        [this]() -> UploadInstance* { return m_uploadInstance.get(); },
         m_streamingLoadCounter,
         m_usedGroupsCounter,
         m_streamingNonResidentBits,
@@ -279,6 +311,32 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
         uploadDesc.copyQueueSelection = CopyQueueSelection::Copy;
         uploadDesc.pass = std::make_shared<StreamingUploadPass>(std::move(inputs));
         outPasses.push_back(std::move(uploadDesc));
+    }
+
+    // Drain our dedicated UploadInstance on the async copy queue.
+    if (m_uploadInstance && m_uploadInstance->HasPendingWork()) {
+        CLodAsyncUploadInputs asyncInputs;
+        asyncInputs.uploadInstance = m_uploadInstance.get();
+
+        MeshManager* mm = m_getMeshManager ? m_getMeshManager() : nullptr;
+        if (mm) {
+            if (PagePool* pool = mm->GetCLodPagePool()) {
+                auto slabGroup = pool->GetSlabResourceGroup();
+                if (auto pt = pool->GetPageTableBuffer()) {
+                    slabGroup->AddResource(pt);
+                }
+                asyncInputs.poolResolver = std::make_unique<ResourceGroupResolver>(slabGroup);
+            }
+        }
+
+        RenderGraph::ExternalPassDesc asyncDesc{};
+        asyncDesc.type = RenderGraph::PassType::Copy;
+        asyncDesc.name = "CLod::AsyncUpload";
+        asyncDesc.where = RenderGraph::ExternalInsertPoint::After("EvaluateMaterialGroupsPass");
+        asyncDesc.copyQueueSelection = CopyQueueSelection::Copy;
+        asyncDesc.queueSlotOverride = m_uploadQueueSlot;
+        asyncDesc.pass = std::make_shared<CLodAsyncUploadPass>(std::move(asyncInputs));
+        outPasses.push_back(std::move(asyncDesc));
     }
 
     // Schedule a readback copy pass to capture the load counter + load requests
@@ -481,6 +539,16 @@ void CLodStreamingSystem::InitializePageLru(MeshManager* meshManager) {
     }
 
     m_pageLruInitialized = true;
+
+    // Route PagePool uploads through our dedicated UploadInstance.
+    if (m_uploadInstance) {
+        pool->SetUploadFunction([inst = m_uploadInstance.get()](
+            const void* data, size_t size,
+            rg::runtime::UploadTarget target, size_t offset) {
+            inst->UploadData(data, size, target, offset);
+        });
+    }
+
     spdlog::info("CLodPageLRU initialized with {} general pages", generalPages);
 }
 

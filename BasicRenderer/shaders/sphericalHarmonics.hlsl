@@ -2,7 +2,7 @@
 #include "include/structs.hlsli"
 #include "include/constants.hlsli"
 
-// Thread-group size: 16×16 threads per face, dispatch Z=6 for the 6 faces
+// Thread-group size: 16x16 threads per face, dispatch Z=6 for the 6 faces
 [numthreads(16, 16, 1)]
 void CSMain(uint3 DTid : SV_DispatchThreadID) {
 	uint x = DTid.x;
@@ -33,18 +33,18 @@ void CSMain(uint3 DTid : SV_DispatchThreadID) {
 			break; // +X
 		case 1:
 			dir = float3(-1, -v, +u);
-			break; // –X
+			break; // +X
 		case 2:
 			dir = float3(+u, +1, +v);
 			break; // +Y
 		case 3:
 			dir = float3(+u, -1, -v);
-			break; // –Y
+			break; // +Y
 		case 4:
 			dir = float3(+u, -v, +1);
 			break; // +Z
 		default:
-			dir = float3(-u, -v, -1); // –Z
+			dir = float3(-u, -v, -1); // -Z
 	}
 	dir = normalize(dir);
 

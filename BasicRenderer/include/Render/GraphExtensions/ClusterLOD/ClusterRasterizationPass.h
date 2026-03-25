@@ -20,6 +20,8 @@ class ResourceGroup;
 struct ClusterRasterizationPassInputs {
     bool wireframe;
     bool clearGbuffer;
+    RenderPhase renderPhase;
+    CLodRasterOutputKind outputKind = CLodRasterOutputKind::VisibilityBuffer;
 
     friend bool operator==(const ClusterRasterizationPassInputs&, const ClusterRasterizationPassInputs&) = default;
 };
@@ -29,6 +31,8 @@ inline rg::Hash64 HashValue(const ClusterRasterizationPassInputs& i) {
 
     boost::hash_combine(seed, i.wireframe);
     boost::hash_combine(seed, i.clearGbuffer);
+    boost::hash_combine(seed, i.renderPhase.hash);
+    boost::hash_combine(seed, static_cast<uint8_t>(i.outputKind));
     return seed;
 }
 
@@ -39,6 +43,10 @@ public:
         std::shared_ptr<Buffer> compactedVisibleClustersBuffer,
         std::shared_ptr<Buffer> rasterBucketsHistogramBuffer,
         std::shared_ptr<Buffer> rasterBucketsIndirectArgsBuffer,
+        std::shared_ptr<Buffer> sortedToUnsortedMappingBuffer,
+        std::shared_ptr<Buffer> deepVisibilityNodesBuffer = nullptr,
+        std::shared_ptr<Buffer> deepVisibilityCounterBuffer = nullptr,
+        std::shared_ptr<Buffer> deepVisibilityOverflowCounterBuffer = nullptr,
         std::shared_ptr<ResourceGroup> slabResourceGroup = nullptr);
     ~ClusterRasterizationPass();
 
@@ -53,13 +61,19 @@ private:
     bool m_wireframe = false;
     bool m_meshShaders = false;
     bool m_clearGbuffer = true;
+    CLodRasterOutputKind m_outputKind = CLodRasterOutputKind::VisibilityBuffer;
 
     std::vector<CLodViewRasterInfo> m_viewRasterInfos;
     std::vector<std::shared_ptr<PixelBuffer>> m_visibilityBuffers;
+    std::vector<std::shared_ptr<PixelBuffer>> m_deepVisibilityHeadPointerBuffers;
 
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsHistogramBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBuffer;
+    std::shared_ptr<Buffer> m_sortedToUnsortedMappingBuffer;
+    std::shared_ptr<Buffer> m_deepVisibilityNodesBuffer;
+    std::shared_ptr<Buffer> m_deepVisibilityCounterBuffer;
+    std::shared_ptr<Buffer> m_deepVisibilityOverflowCounterBuffer;
 
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
 
@@ -68,7 +82,8 @@ private:
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
     uint32_t m_passWidth = 1;
     uint32_t m_passHeight = 1;
+    uint32_t m_deepVisibilityNodeCapacity = 1;
     bool m_declaredResourcesChanged = true;
 
-    RenderPhase m_renderPhase = Engine::Primary::GBufferPass;
+    RenderPhase m_renderPhase;
 };

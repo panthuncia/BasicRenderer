@@ -38,11 +38,7 @@ namespace
 		}
 
 		const ClusterLODTraversalMetric& metric = nodes[rootNodeIndex].traversalMetric;
-		sphere.sphere = DirectX::XMFLOAT4(
-			metric.boundingSphereX,
-			metric.boundingSphereY,
-			metric.boundingSphereZ,
-			metric.boundingSphereRadius);
+		sphere.sphere = metric.cullingSphere;
 		return sphere;
 	}
 
@@ -136,6 +132,7 @@ std::shared_ptr<Mesh> MeshIngestBuilder::Build(
 	std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD,
 	MeshCpuDataPolicy cpuDataPolicy) {
 	auto vertices = std::make_unique<std::vector<std::byte>>(std::move(m_vertices));
+	auto uvSets = std::move(m_uvSets);
 
 	std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices;
 	if (!m_skinningVertices.empty()) {
@@ -148,16 +145,18 @@ std::shared_ptr<Mesh> MeshIngestBuilder::Build(
 		std::move(skinningVertices),
 		m_skinningVertexSize,
 		std::move(m_indices),
+		std::move(uvSets),
 		material,
 		m_flags,
 		std::move(prebuiltClusterLOD),
 		cpuDataPolicy);
 }
 
-Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, const std::shared_ptr<Material> material, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD, MeshCpuDataPolicy cpuDataPolicy, bool deferResourceCreation) {
+Mesh::Mesh(std::unique_ptr<std::vector<std::byte>> vertices, unsigned int vertexSize, std::optional<std::unique_ptr<std::vector<std::byte>>> skinningVertices, unsigned int skinningVertexSize, const std::vector<UINT32>& indices, std::vector<MeshUvSetData>&& uvSets, const std::shared_ptr<Material> material, unsigned int flags, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD, MeshCpuDataPolicy cpuDataPolicy, bool deferResourceCreation) {
 	if (prebuiltClusterLOD.has_value()) {
 		m_prebuiltClusterLOD = std::move(prebuiltClusterLOD);
 	}
+	m_uvSets = std::move(uvSets);
 	m_perMeshBufferData.vertexFlags = flags;
 	m_perMeshBufferData.vertexByteSize = vertexSize;
 	m_perMeshBufferData.numVertices = 0; //static_cast<uint32_t>(m_vertices->size() / vertexSize);

@@ -52,6 +52,8 @@ public:
     // If called on a BASE skeleton, it logs a warning and does nothing.
     void SetAnimation(size_t index);
     void SetAnimationSpeed(float speed);
+    size_t GetAnimationCount() const noexcept;
+    float GetCurrentAnimationConservativeBoundsScale() const noexcept;
 
     // Tick/evaluate pose into the instance-owned pose buffer.
     // Writes directly into m_boneMatrices.
@@ -94,9 +96,10 @@ private:
 public:
     std::vector<std::shared_ptr<Animation>> animations;
     std::unordered_map<std::string, std::shared_ptr<Animation>> animationsByName;
+    std::vector<float> m_animationConservativeBoundsScales;
 
 private:
-    // --- Per-instance (INSTANCE) data ---
+    // Per-instance data
     std::shared_ptr<Skeleton> m_baseSkeleton;          // null for base skeleton
     std::vector<AnimationController> m_controllers;    // one per bone
     std::vector<Matrix> m_boneMatrices;                // final global pose
@@ -104,6 +107,7 @@ private:
 
     float  m_animationSpeed = 1.0f;
     size_t m_activeAnimationIndex = size_t(-1);
+    float m_currentAnimationConservativeBoundsScale = 1.0f;
 
     uint32_t m_skinningInstanceSlot = 0xFFFFFFFF;
 
@@ -120,4 +124,5 @@ private:
         const Components::Scale& s);
 
     static Matrix ComposeTRS_(const Components::Transform& t);
+    static float ComputeAnimationConservativeBoundsScale_(const Animation& animation);
 };

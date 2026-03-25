@@ -1,8 +1,11 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include "Mesh/Mesh.h"
 #include "Animation/Skeleton.h"
+
+class SkeletonManager;
 
 class MeshInstance {
 public:
@@ -14,12 +17,15 @@ public:
         return std::unique_ptr<MeshInstance>(new MeshInstance(mesh));
     }
 
+    ~MeshInstance();
+
 	BufferView* GetPerMeshInstanceBufferView() { return m_perMeshInstanceBufferView.get(); }
 
 	void SetBufferViews(std::unique_ptr<BufferView> perMeshInstanceBufferView);
     void SetBufferViewUsingBaseMesh(std::unique_ptr<BufferView> perMeshInstanceBufferView);
 
     void SetSkeleton(std::shared_ptr<Skeleton> skeleton);
+    void SyncSkinningStateFromSkeleton();
 
     std::shared_ptr<Skeleton> GetSkin() const {
         return m_skeleton;
@@ -39,6 +45,8 @@ public:
         m_pCurrentMeshManager = manager;
     }
 
+    void SetCurrentSkeletonManager(SkeletonManager* manager);
+
 	const PerMeshInstanceCB& GetPerMeshInstanceBufferData() const {
 		return m_perMeshInstanceBufferData;
 	}
@@ -47,6 +55,7 @@ public:
 		m_animationSpeed = speed;
 		if (m_skeleton != nullptr) {
 			m_skeleton->SetAnimationSpeed(speed);
+            SyncSkinningStateFromSkeleton();
 		}
 	}
 
@@ -64,6 +73,8 @@ public:
     }
 
 private:
+    void ReleaseSkinningInstance_();
+
     MeshInstance(std::shared_ptr<Mesh> mesh)
         : m_mesh(mesh) {
         if (mesh->HasBaseSkin()) {
@@ -74,6 +85,8 @@ private:
     std::shared_ptr<Mesh> m_mesh;
     std::shared_ptr<Skeleton> m_skeleton; // Instance-specific skeleton
     MeshManager* m_pCurrentMeshManager = nullptr;
+    SkeletonManager* m_pCurrentSkeletonManager = nullptr;
+    std::weak_ptr<std::atomic_bool> m_skeletonManagerLifetime;
     std::unique_ptr<BufferView> m_perMeshInstanceBufferView;
 
     std::unique_ptr<BufferView> m_perMeshInstanceClodOffsetsView = nullptr;

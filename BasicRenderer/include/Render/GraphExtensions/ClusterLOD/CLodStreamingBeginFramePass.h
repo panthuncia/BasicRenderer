@@ -7,10 +7,12 @@
 #include "RenderPasses/Base/ComputePass.h"
 
 class Buffer;
+class UploadInstance;
 
 class CLodStreamingBeginFramePass : public ComputePass {
 public:
     CLodStreamingBeginFramePass(
+        std::function<UploadInstance*()> getUploadInstance,
         std::shared_ptr<Buffer> loadCounter,
         std::shared_ptr<Buffer> usedGroupsCounter,
         std::shared_ptr<Buffer> nonResidentBits,
@@ -37,4 +39,5 @@ private:
     std::function<void(std::vector<uint32_t>&, uint32_t&)> m_getActiveGroupsBitsUpload;
     std::function<void()> m_scheduleStreamingReadbacks;
     std::function<void()> m_processStreamingRequests;
+    std::function<UploadInstance*()> m_getUploadInstance;
 };

@@ -17,6 +17,40 @@ enum class CLodPriorityMode : uint8_t {
     Sum, // Duplicate group requests accumulate (sum) their priorities
 };
 
+enum class CLodSoftwareRasterMode : uint8_t {
+    Disabled,
+    Compute,
+    WorkGraph,
+};
+
+enum class CLodRasterOutputKind : uint8_t {
+    VisibilityBuffer,
+    DeepVisibility,
+};
+
+inline constexpr const char* CLodSoftwareRasterModeSettingName = "clodSoftwareRasterMode";
+inline constexpr const char* CLodSoftwareRasterModeNames[] = {
+    "Disabled",
+    "Compute",
+    "Work Graph",
+};
+inline constexpr int CLodSoftwareRasterModeCount = static_cast<int>(sizeof(CLodSoftwareRasterModeNames) / sizeof(CLodSoftwareRasterModeNames[0]));
+
+constexpr bool CLodSoftwareRasterEnabled(CLodSoftwareRasterMode mode)
+{
+    return mode != CLodSoftwareRasterMode::Disabled;
+}
+
+constexpr bool CLodSoftwareRasterUsesCompute(CLodSoftwareRasterMode mode)
+{
+    return mode == CLodSoftwareRasterMode::Compute;
+}
+
+constexpr bool CLodSoftwareRasterUsesWorkGraph(CLodSoftwareRasterMode mode)
+{
+    return mode == CLodSoftwareRasterMode::WorkGraph;
+}
+
 struct RasterBucketsHistogramIndirectCommand
 {
     unsigned int clusterCount;
@@ -34,7 +68,9 @@ struct RasterizeClustersCommand
 
 struct CLodViewRasterInfo
 {
-    uint32_t visibilityUAVDescriptorIndex;
+    uint32_t visibilityUAVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t opaqueVisibilitySRVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t deepVisibilityHeadPointerUAVDescriptorIndex = 0xFFFFFFFFu;
     uint32_t scissorMinX;
     uint32_t scissorMinY;
     uint32_t scissorMaxX;
@@ -42,11 +78,42 @@ struct CLodViewRasterInfo
     float viewportScaleX;
     float viewportScaleY;
     uint32_t pad0;
+    uint32_t pad1;
+    uint32_t pad2;
 
     friend bool operator==(const CLodViewRasterInfo&, const CLodViewRasterInfo&) = default;
 };
 
-inline constexpr uint32_t CLodReplayBufferSizeBytes = 200u * 1024u * 1024u; // 100 MB
+static_assert(sizeof(CLodViewRasterInfo) == 48u, "CLodViewRasterInfo size must match HLSL");
+
+struct CLodDeepVisibilityNode
+{
+    uint64_t visKey;
+    uint32_t next;
+    uint32_t flags;
+};
+
+static_assert(sizeof(CLodDeepVisibilityNode) == 16u, "CLodDeepVisibilityNode size must match HLSL");
+
+struct CLodDeepVisibilityStats
+{
+    uint32_t truncatedPixelCount = 0u;
+    uint32_t truncatedNodeCount = 0u;
+    uint32_t totalResolvedSamples = 0u;
+    uint32_t maxRawNodeCount = 0u;
+    uint32_t maxResolvedSamples = 0u;
+    uint32_t pad0 = 0u;
+    uint32_t pad1 = 0u;
+    uint32_t pad2 = 0u;
+};
+
+static_assert(sizeof(CLodDeepVisibilityStats) == 32u, "CLodDeepVisibilityStats size must match HLSL");
+
+inline constexpr uint32_t CLodReplayBufferSizeBytes = 200u * 1024u * 1024u; // 200 MB physical, GPU uses first 100 MB
+inline constexpr uint32_t CLodReplayNodeRegionSizeBytes = 50u * 1024u * 1024u;    // must match HLSL CLOD_REPLAY_NODE_REGION_SIZE_BYTES
+inline constexpr uint32_t CLodReplayMeshletRegionOffset = CLodReplayNodeRegionSizeBytes;
+inline constexpr uint32_t CLodNodeReplayStrideBytes = 12u;   // sizeof(TraverseNodeRecord): 3 uints
+inline constexpr uint32_t CLodMeshletReplayStrideBytes = 24u; // sizeof(MeshletBucketRecord): 6 uints
 inline constexpr uint32_t CLodReplayBufferNumUints = CLodReplayBufferSizeBytes / sizeof(uint32_t);
 inline constexpr uint32_t CLodMaxViewDepthIndices = 512u;
 inline constexpr uint32_t CLodStreamingInitialGroupCapacity = 1024u;
@@ -82,6 +149,50 @@ inline std::shared_ptr<Buffer> CreateAliasedUnmaterializedStructuredBuffer(
         unorderedAccessCounter,
         createNonShaderVisibleUAV,
         rhi::HeapType::DeviceLocal);
+    buffer->SetAllowAlias(allowAlias);
+    return buffer;
+}
+
+inline std::shared_ptr<Buffer> CreateAliasedUnmaterializedRawBuffer(
+    uint64_t bufferSizeBytes,
+    bool unorderedAccess = true,
+    bool createNonShaderVisibleUAV = false,
+    bool allowAlias = true)
+{
+    if (bufferSizeBytes == 0 || (bufferSizeBytes % 4u) != 0u) {
+        throw std::runtime_error("Raw buffer requires a non-zero byte size that is divisible by 4");
+    }
+
+    auto buffer = Buffer::CreateSharedUnmaterialized(rhi::HeapType::DeviceLocal, bufferSizeBytes, unorderedAccess);
+
+    BufferBase::DescriptorRequirements requirements{};
+    requirements.createSRV = true;
+    requirements.createUAV = unorderedAccess;
+    requirements.createNonShaderVisibleUAV = unorderedAccess && createNonShaderVisibleUAV;
+    requirements.uavCounterOffset = 0;
+    requirements.srvDesc = rhi::SrvDesc{
+        .dimension = rhi::SrvDim::Buffer,
+        .formatOverride = rhi::Format::R32_Typeless,
+        .buffer = {
+            .kind = rhi::BufferViewKind::Raw,
+            .firstElement = 0,
+            .numElements = static_cast<uint32_t>(bufferSizeBytes / 4u),
+            .structureByteStride = 0,
+        },
+    };
+    requirements.uavDesc = rhi::UavDesc{
+        .dimension = rhi::UavDim::Buffer,
+        .formatOverride = rhi::Format::R32_Typeless,
+        .buffer = {
+            .kind = rhi::BufferViewKind::Raw,
+            .firstElement = 0,
+            .numElements = static_cast<uint32_t>(bufferSizeBytes / 4u),
+            .structureByteStride = 0,
+            .counterOffsetInBytes = 0,
+        },
+    };
+
+    buffer->SetDescriptorRequirements(requirements);
     buffer->SetAllowAlias(allowAlias);
     return buffer;
 }

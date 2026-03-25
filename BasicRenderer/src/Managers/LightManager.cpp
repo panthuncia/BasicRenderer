@@ -172,6 +172,9 @@ LightManager::CreatePointLightViewInfo(const LightInfo& info, uint64_t entityId)
 		camera.view = cubemapMatrices[i];
 		camera.unjitteredProjection = projection;
 		camera.jitteredProjection = projection; // lights don't use jittering.
+		camera.prevView = camera.view;
+		camera.prevJitteredProjection = camera.jitteredProjection;
+		camera.prevUnjitteredProjection = camera.unjitteredProjection;
 		camera.viewProjection = XMMatrixMultiply(cubemapMatrices[i], camera.unjitteredProjection);
 
 		auto renderView = m_pViewManager->CreateView(camera, ViewFlags::ShadowFace());
@@ -198,6 +201,9 @@ LightManager::CreateSpotLightViewInfo(const LightInfo& info, uint64_t entityId) 
 	camera.view = DirectX::XMMatrixLookToRH(info.posWorldSpace, info.dirWorldSpace, DirectX::XMLoadFloat3(&up));
 	camera.unjitteredProjection = GetProjectionMatrixForLight(info);
 	camera.jitteredProjection = camera.unjitteredProjection; // lights don't use jittering.
+	camera.prevView = camera.view;
+	camera.prevJitteredProjection = camera.jitteredProjection;
+	camera.prevUnjitteredProjection = camera.unjitteredProjection;
 	camera.viewProjection = DirectX::XMMatrixMultiply(camera.view, camera.unjitteredProjection);
 
 	auto renderView = m_pViewManager->CreateView(camera, ViewFlags::ShadowFace());
@@ -245,6 +251,9 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 		cameraInfo.view = cascades[i].viewMatrix;
 		cameraInfo.unjitteredProjection = cascades[i].orthoMatrix;
 		cameraInfo.jitteredProjection = cameraInfo.unjitteredProjection; // lights don't use jittering.
+		cameraInfo.prevView = cameraInfo.view;
+		cameraInfo.prevJitteredProjection = cameraInfo.jitteredProjection;
+		cameraInfo.prevUnjitteredProjection = cameraInfo.unjitteredProjection;
 		cameraInfo.viewProjection = DirectX::XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
 		cameraInfo.aspectRatio = camera.aspect;
 		cameraInfo.clippingPlanes[0] = cascades[i].frustumPlanes[0];
@@ -289,6 +298,9 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			info.view = cubemapMatrices[i];
 			info.unjitteredProjection = viewInfo.projectionMatrix.matrix;
 			info.jitteredProjection = info.unjitteredProjection; // lights don't use jittering.
+			info.prevView = info.view;
+			info.prevJitteredProjection = info.jitteredProjection;
+			info.prevUnjitteredProjection = info.unjitteredProjection;
 			info.viewProjection = XMMatrixMultiply(cubemapMatrices[i], viewInfo.projectionMatrix.matrix);
 			info.clippingPlanes[0] = planes[i][0];
 			info.clippingPlanes[1] = planes[i][1];
@@ -315,6 +327,9 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 		camera.view = DirectX::XMMatrixLookToRH(DirectX::XMLoadFloat3(&globalPos), DirectX::XMVector3Normalize(lightMatrix.matrix.r[2]), XMLoadFloat3(&up));
 		camera.unjitteredProjection = viewInfo.projectionMatrix.matrix;
 		camera.jitteredProjection = camera.unjitteredProjection; // lights don't use jittering.
+		camera.prevView = camera.view;
+		camera.prevJitteredProjection = camera.jitteredProjection;
+		camera.prevUnjitteredProjection = camera.unjitteredProjection;
 		camera.viewProjection = DirectX::XMMatrixMultiply(camera.view, viewInfo.projectionMatrix.matrix);
 		camera.clippingPlanes[0] = planes[0][0];
 		camera.clippingPlanes[1] = planes[0][1];
@@ -351,6 +366,9 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			info.view = cascades[i].viewMatrix;
 			info.unjitteredProjection = cascades[i].orthoMatrix;
 			info.jitteredProjection = info.unjitteredProjection; // lights don't use jittering.
+			info.prevView = info.view;
+			info.prevJitteredProjection = info.jitteredProjection;
+			info.prevUnjitteredProjection = info.unjitteredProjection;
 			info.viewProjection = DirectX::XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
 			info.clippingPlanes[0] = cascades[i].frustumPlanes[0];
 			info.clippingPlanes[1] = cascades[i].frustumPlanes[1];

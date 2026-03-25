@@ -24,6 +24,7 @@
 #include "Import/AssimpGeometryExtractor.h"
 
 namespace AssimpLoader {
+    constexpr uint32_t kMaterialTextureMaxAnisotropy = 16;
 
     rhi::AddressMode aiTextureMapModeToRHI(aiTextureMapMode mode) {
         switch (mode) {
@@ -165,6 +166,10 @@ namespace AssimpLoader {
                 aiTextureType_DISPLACEMENT,
             };
             std::unordered_map<aiTextureType, std::shared_ptr<TextureAsset>> materialTextures;
+            auto textureFor = [&](aiTextureType type) -> std::shared_ptr<TextureAsset> {
+                auto it = materialTextures.find(type);
+                return it != materialTextures.end() ? it->second : nullptr;
+            };
 
             for (aiTextureType tType : textureTypes)
             {
@@ -179,8 +184,9 @@ namespace AssimpLoader {
                     aiTextureOp op = {};
                     aiTextureMapMode mapmode[2] = {};
                     aiString aiTexPath = {};
+                    unsigned int uvIndex = 0;
 
-                    if (aiGetMaterialTexture(mat, tType, tIndex, &aiTexPath, &mapping, nullptr, &blend, &op, mapmode, nullptr) == AI_SUCCESS)
+                    if (aiGetMaterialTexture(mat, tType, tIndex, &aiTexPath, &mapping, &uvIndex, &blend, &op, mapmode, nullptr) == AI_SUCCESS)
                     {
                         std::string texPath = aiTexPath.C_Str(); // e.g. "*0" or "texture.png"
                         // Check if we already loaded it:
@@ -197,7 +203,7 @@ namespace AssimpLoader {
 							samplerDesc.addressV = aiTextureMapModeToRHI(mapmode[1]);
 							samplerDesc.addressW = rhi::AddressMode::Wrap; // 3D textures not supported
 							samplerDesc.mipLodBias = 0.0f;
-							samplerDesc.maxAnisotropy = 1;
+							samplerDesc.maxAnisotropy = kMaterialTextureMaxAnisotropy;
 							samplerDesc.compareEnable = false;
 							samplerDesc.compareOp = rhi::CompareOp::Never;
 							samplerDesc.borderPreset = rhi::BorderPreset::OpaqueWhite;
@@ -377,6 +383,11 @@ namespace AssimpLoader {
 			desc.blendState = blendMode;
 			desc.negateNormals = negateNormals; // TODO: How to handle this properly?
 			desc.invertNormalGreen = false;
+            desc.enableGeometricDisplacement = materialTextures.find(aiTextureType_DISPLACEMENT) != materialTextures.end();
+            if (desc.enableGeometricDisplacement) {
+                desc.geometricDisplacementMin = 0.0f;
+                desc.geometricDisplacementMax = desc.heightMapScale;
+            }
             desc.aoMap = { aoMap, { 1 }, { 0 } };
 			desc.baseColor = { baseColorTexture, { 1 }, { 0, 1, 2, 3 } };
 			desc.normal = { normalTexture, { 1 }, { 0, 1, 2 } };
@@ -384,6 +395,36 @@ namespace AssimpLoader {
 			desc.metallic = { metallicTex, { metallicFactor }, { 2 } };
 			desc.roughness = { roughnessTex, { roughnessFactor }, { 1 } };
 			desc.emissive = { emissiveTexture, { 1 }, { 0, 1, 2 } };
+
+            auto setUvSetIndex = [&](TextureAndConstant& target, aiTextureType textureType) {
+                if (target.texture == nullptr) {
+                    return;
+                }
+
+                unsigned int uvIndex = 0;
+                if (mat->GetTextureCount(textureType) > 0) {
+                    aiTextureMapping mapping = {};
+                    ai_real blend = {};
+                    aiTextureOp op = {};
+                    aiTextureMapMode mapmode[2] = {};
+                    aiString aiTexPath = {};
+                    aiGetMaterialTexture(mat, textureType, 0, &aiTexPath, &mapping, &uvIndex, &blend, &op, mapmode, nullptr);
+                }
+                target.uvSetIndex = uvIndex;
+            };
+
+            setUvSetIndex(desc.baseColor, baseColorTexture == textureFor(aiTextureType_BASE_COLOR) ? aiTextureType_BASE_COLOR : aiTextureType_DIFFUSE);
+            setUvSetIndex(desc.normal, aiTextureType_NORMALS);
+            setUvSetIndex(desc.metallic, aiTextureType_METALNESS);
+            setUvSetIndex(desc.roughness, aiTextureType_DIFFUSE_ROUGHNESS);
+            setUvSetIndex(desc.emissive, emissiveTexture == textureFor(aiTextureType_EMISSION_COLOR) ? aiTextureType_EMISSION_COLOR : aiTextureType_EMISSIVE);
+            setUvSetIndex(desc.heightMap, heightMap == textureFor(aiTextureType_DISPLACEMENT) ? aiTextureType_DISPLACEMENT : aiTextureType_HEIGHT);
+            if (aoMap == textureFor(aiTextureType_LIGHTMAP)) {
+                setUvSetIndex(desc.aoMap, aiTextureType_LIGHTMAP);
+            }
+            else {
+                setUvSetIndex(desc.aoMap, aiTextureType_AMBIENT_OCCLUSION);
+            }
 
             auto newMaterial = Material::CreateShared(desc);
             

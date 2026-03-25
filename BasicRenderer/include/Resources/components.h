@@ -15,6 +15,8 @@ namespace Components {
 	
 	struct IsIndirectArguments {};
 	struct IsActiveDrawSetIndices {};
+    struct CLodOnlyDrawWorkload {};
+    struct GeneralDrawWorkload {};
 
 	struct BelongsToView {};
 	struct ParticipatesInPass {};

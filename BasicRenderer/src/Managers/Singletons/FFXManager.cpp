@@ -44,6 +44,7 @@ bool FFXManager::InitFFX() {
 
 	FfxSssrContextDescription sssrDesc{};
 	sssrDesc.backendInterface = m_backendInterface;
+    sssrDesc.flags = FFX_SSSR_ENABLE_DEPTH_INVERTED;
     sssrDesc.normalsHistoryBufferFormat = FFX_SURFACE_FORMAT_R32G32B32A32_TYPELESS;
 	sssrDesc.renderSize = { renderRes.x, renderRes.y };
 
@@ -73,7 +74,7 @@ void FFXManager::EvaluateSSSR(rhi::CommandList& commandList,
 
 	FfxSssrDispatchDescription sssrDesc{};
 	sssrDesc.brdfTexture = getFFXResource(pBRDFLUT, L"BRDFLUT", FFX_RESOURCE_STATE_COMMON);
-	sssrDesc.color = getFFXResource(pHDRTarget, L"Depth", FFX_RESOURCE_STATE_COMMON);
+	sssrDesc.color = getFFXResource(pHDRTarget, L"HDRColor", FFX_RESOURCE_STATE_COMMON);
 	sssrDesc.depth = getFFXResource(pDepthTexture, L"Depth", FFX_RESOURCE_STATE_COMMON);
 	sssrDesc.environmentMap = getFFXResource(pEnvironmentCubemap, L"EnvironmentMap", FFX_RESOURCE_STATE_COMMON);
 	sssrDesc.materialParameters = getFFXResource(pMetallicRoughness, L"MaterialParameters", FFX_RESOURCE_STATE_COMMON);
@@ -94,7 +95,7 @@ void FFXManager::EvaluateSSSR(rhi::CommandList& commandList,
     sssrDesc.commandList = rhi::dx12::get_cmd_list(commandList);
     auto renderSize = m_getRenderRes();
     sssrDesc.renderSize = { renderSize.x, renderSize.y };
-	sssrDesc.motionVectorScale = { -1.f, 1.f }; // TODO: I think these should be -.5f, .5f, but that produces black fringing in motion
+	sssrDesc.motionVectorScale = { -0.5f, 0.5f };
     sssrDesc.normalUnPackMul = 1.0f;
 	sssrDesc.normalUnPackAdd = 0.0f;
 	sssrDesc.roughnessChannel = 1; // metallic roughness texture, roughness is in channel 1

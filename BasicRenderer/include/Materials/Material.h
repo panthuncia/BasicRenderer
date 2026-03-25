@@ -48,9 +48,13 @@ inline TechniqueDescriptor PickTechnique(const MaterialDescription& d) { // TODO
 			tech.compileFlags |= MaterialCompileFlags::MaterialCompileDoubleSided;
 			tech.rasterFlags |= MaterialRasterFlags::MaterialRasterFlagsAlphaTest;
 			tech.rasterFlags |= MaterialRasterFlags::MaterialRasterFlagsDoubleSided;
-        }
+		}
 		tech.passes.insert(Engine::Primary::GBufferPass);
     }
+	if (d.forceDoubleSided) {
+		tech.compileFlags |= MaterialCompileFlags::MaterialCompileDoubleSided;
+		tech.rasterFlags |= MaterialRasterFlags::MaterialRasterFlagsDoubleSided;
+	}
 	if (d.baseColor.texture) {
 		tech.compileFlags |= MaterialCompileFlags::MaterialCompileBaseColorTexture;
 	}
@@ -78,8 +82,12 @@ public:
     static std::shared_ptr<Material> CreateShared(const MaterialDescription& desc) {
         uint32_t materialFlags = 0;
         uint32_t psoFlags = 0;
+        const auto transparency = PickTransparency(desc);
         materialFlags |= MaterialFlags::MATERIAL_PBR; // TODO: Non-PBR materials
         BlendState blendState = BlendState::BLEND_STATE_OPAQUE; // Default blend state
+        if (transparency.masked) {
+            materialFlags |= MaterialFlags::MATERIAL_ALPHA_TEST;
+        }
         if (desc.baseColor.texture) {
             if (!desc.baseColor.texture->Meta().alphaIsAllOpaque) {
                 materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
@@ -99,7 +107,11 @@ public:
         if (desc.normal.texture) {
             materialFlags |= MaterialFlags::MATERIAL_NORMAL_MAP | MaterialFlags::MATERIAL_TEXTURED;
         }
+        if (desc.enableGeometricDisplacement && desc.heightMap.texture) {
+            materialFlags |= MaterialFlags::MATERIAL_GEOMETRIC_DISPLACEMENT;
+        }
         auto diffuseColor = desc.diffuseColor;
+        auto emissiveColor = desc.emissiveColor;
         if (desc.opacity.texture) { // TODO: How can we tell if this should be used as a mask or as a blend?
             materialFlags |= MaterialFlags::MATERIAL_OPACITY_TEXTURE | MaterialFlags::MATERIAL_TEXTURED;
             blendState = BlendState::BLEND_STATE_BLEND; // Use blend state for opacity
@@ -109,12 +121,19 @@ public:
             diffuseColor.w = desc.opacity.factor.Get(); // Use opacity factor as alpha
             blendState = BlendState::BLEND_STATE_BLEND; // Use blend state for opacity
         }
+        if (desc.forceDoubleSided) {
+            materialFlags |= MaterialFlags::MATERIAL_DOUBLE_SIDED;
+        }
         if (desc.negateNormals) {
             materialFlags |= MaterialFlags::MATERIAL_NEGATE_NORMALS;
         }
         if (desc.invertNormalGreen) {
             materialFlags |= MaterialFlags::MATERIAL_INVERT_NORMAL_GREEN;
         }
+        const float emissiveScalar = desc.emissive.factor.Get();
+        emissiveColor.x *= emissiveScalar;
+        emissiveColor.y *= emissiveScalar;
+        emissiveColor.z *= emissiveScalar;
 		TechniqueDescriptor technique = PickTechnique(desc);
 
         return CreateShared(
@@ -132,7 +151,7 @@ public:
             desc.metallic.factor.Get(),
             desc.roughness.factor.Get(),
             diffuseColor,
-            desc.emissiveColor,
+            emissiveColor,
             desc.baseColor.channels,
             desc.normal.channels,
             desc.aoMap.channels,
@@ -140,6 +159,18 @@ public:
             desc.metallic.channels,
             desc.roughness.channels,
             desc.emissive.channels,
+            desc.baseColor.uvSetIndex,
+            desc.normal.uvSetIndex,
+            desc.aoMap.uvSetIndex,
+            desc.heightMap.uvSetIndex,
+            desc.metallic.uvSetIndex,
+            desc.roughness.uvSetIndex,
+            desc.emissive.uvSetIndex,
+            desc.opacity.uvSetIndex,
+			desc.heightMapScale,
+			desc.geometricDisplacementMin,
+			desc.geometricDisplacementMax,
+			desc.enableGeometricDisplacement,
             technique,
             desc.alphaCutoff
         );
@@ -181,6 +212,14 @@ private:
     std::vector<uint32_t> m_metallicChannel;
     std::vector<uint32_t> m_roughnessChannel;
     std::vector<uint32_t> m_emissiveChannels;
+    uint32_t m_baseColorUvSetIndex = 0;
+    uint32_t m_normalUvSetIndex = 0;
+    uint32_t m_aoUvSetIndex = 0;
+    uint32_t m_heightUvSetIndex = 0;
+    uint32_t m_metallicUvSetIndex = 0;
+    uint32_t m_roughnessUvSetIndex = 0;
+    uint32_t m_emissiveUvSetIndex = 0;
+    uint32_t m_opacityUvSetIndex = 0;
     float m_metallicFactor;
     float m_roughnessFactor;
     DirectX::XMFLOAT4 m_baseColorFactor;
@@ -213,6 +252,18 @@ private:
         std::vector<uint32_t> metallicChannel,
         std::vector<uint32_t> roughnessChannel,
         std::vector<uint32_t> emissiveChannels,
+        uint32_t baseColorUvSetIndex,
+        uint32_t normalUvSetIndex,
+        uint32_t aoUvSetIndex,
+        uint32_t heightUvSetIndex,
+        uint32_t metallicUvSetIndex,
+        uint32_t roughnessUvSetIndex,
+        uint32_t emissiveUvSetIndex,
+        uint32_t opacityUvSetIndex,
+		float heightMapScale,
+		float geometricDisplacementMin,
+		float geometricDisplacementMax,
+		bool geometricDisplacementEnabled,
 		TechniqueDescriptor technique,
         float alphaCutoff);
 
@@ -237,6 +288,18 @@ private:
         std::vector<uint32_t> metallicChannel,
         std::vector<uint32_t> roughnessChannel,
         std::vector<uint32_t> emissiveChannels,
+        uint32_t baseColorUvSetIndex,
+        uint32_t normalUvSetIndex,
+        uint32_t aoUvSetIndex,
+        uint32_t heightUvSetIndex,
+        uint32_t metallicUvSetIndex,
+        uint32_t roughnessUvSetIndex,
+        uint32_t emissiveUvSetIndex,
+        uint32_t opacityUvSetIndex,
+		float heightMapScale,
+		float geometricDisplacementMin,
+		float geometricDisplacementMax,
+		bool geometricDisplacementEnabled,
         TechniqueDescriptor technique,
         float alphaCutoff) {
         return std::shared_ptr<Material>(new Material(name, materialFlags, psoFlags,
@@ -245,6 +308,9 @@ private:
             metallicFactor, roughnessFactor, baseColorFactor, emissiveFactor,
             baseColorChannels, normalChannels, aoChannel, heightChannel,
             metallicChannel, roughnessChannel, emissiveChannels,
+            baseColorUvSetIndex, normalUvSetIndex, aoUvSetIndex, heightUvSetIndex,
+			metallicUvSetIndex, roughnessUvSetIndex, emissiveUvSetIndex, opacityUvSetIndex,
+			heightMapScale, geometricDisplacementMin, geometricDisplacementMax, geometricDisplacementEnabled,
 			technique,
             alphaCutoff));
     }

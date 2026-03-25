@@ -274,14 +274,14 @@ private:
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
-				auto& pso = psoManager.GetPPLLPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->Technique().compileFlags, m_wireframe);
-				BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
+				//auto& pso = psoManager.GetPPLLPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->Technique().compileFlags, m_wireframe);
+				//BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
+				//commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
-				unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-				perMeshIndices[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
-				perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
+				//unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
+				//perMeshIndices[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
+				//perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
+				//commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
 
 				//commandList.SetIndexBuffer(mesh.GetIndexBufferView());
 
@@ -300,14 +300,14 @@ private:
 
 			for (auto& pMesh : meshes) {
 				auto& mesh = *pMesh->GetMesh();
-				auto& pso = psoManager.GetMeshPPLLPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->Technique().compileFlags, m_wireframe);
-				BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
-				commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
+				//auto& pso = psoManager.GetMeshPPLLPSO(context.globalPSOFlags | mesh.material->GetPSOFlags(), mesh.material->Technique().compileFlags, m_wireframe);
+				//BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
+				//commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
-				unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
-				perMeshIndices[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
-				perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
-				commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
+				//unsigned int perMeshIndices[NumPerMeshRootConstants] = {};
+				//perMeshIndices[PerMeshBufferIndex] = static_cast<unsigned int>(mesh.GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
+				//perMeshIndices[PerMeshInstanceBufferIndex] = static_cast<uint32_t>(pMesh->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
+				//commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, PerMeshRootSignatureIndex, 0, NumPerMeshRootConstants, perMeshIndices);
 
 				//commandList.DispatchMesh(mesh.GetMeshletCount(), 1, 1);
 			}
@@ -324,19 +324,19 @@ private:
 			Engine::Primary::OITAccumulationPass);
 
 		for (auto& workload : workloads) {
-			auto& pso = psoManager.GetMeshPPLLPSO(context.globalPSOFlags, workload.first, m_wireframe);
-			commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
+			//auto& pso = psoManager.GetMeshPPLLPSO(context.globalPSOFlags, workload.first, m_wireframe);
+			//commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
 
-			BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
+			//BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
 
-			auto apiResource = workload.second.buffer->GetAPIResource();
-			commandList.ExecuteIndirect(
-				commandSignature.GetHandle(),
-				apiResource.GetHandle(),
-				0,
-				apiResource.GetHandle(),
-				workload.second.buffer->GetResource()->GetUAVCounterOffset(),
-				workload.second.count);
+			//auto apiResource = workload.second.buffer->GetAPIResource();
+			//commandList.ExecuteIndirect(
+			//	commandSignature.GetHandle(),
+			//	apiResource.GetHandle(),
+			//	0,
+			//	apiResource.GetHandle(),
+			//	workload.second.buffer->GetResource()->GetUAVCounterOffset(),
+			//	workload.second.count);
 		}
 	}
 

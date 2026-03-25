@@ -23,19 +23,42 @@
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "BuiltinResources.h"
 #include "ShaderBuffers.h"
-#include "../shaders/PerPassRootConstants/clodRootConstants.h"
+#include "../shaders/PerPassRootConstants/clodCreateCommandRootConstants.h"
+#include "../shaders/PerPassRootConstants/clodWorkGraphRootConstants.h"
+
+namespace {
+bool UsesSWClassification(HierarchialCullingWorkGraphMode mode)
+{
+    return mode != HierarchialCullingWorkGraphMode::HardwareOnly;
+}
+
+bool UsesWorkGraphSWRaster(HierarchialCullingWorkGraphMode mode)
+{
+    return mode == HierarchialCullingWorkGraphMode::SoftwareRasterWorkGraph;
+}
+
+bool UsesVisibilityBufferOutput(CLodRasterOutputKind outputKind)
+{
+    return outputKind == CLodRasterOutputKind::VisibilityBuffer;
+}
+}
 
 HierarchialCullingPass::HierarchialCullingPass(
     HierarchialCullingPassInputs inputs,
     std::shared_ptr<Buffer> visibleClustersBuffer,
     std::shared_ptr<Buffer> visibleClustersCounterBuffer,
+    std::shared_ptr<Buffer> swVisibleClustersCounterBuffer,
     std::shared_ptr<Buffer> histogramIndirectCommand,
     std::shared_ptr<Buffer> workGraphTelemetryBuffer,
     std::shared_ptr<Buffer> occlusionReplayBuffer,
     std::shared_ptr<Buffer> occlusionReplayStateBuffer,
     std::shared_ptr<Buffer> occlusionNodeGpuInputsBuffer,
     std::shared_ptr<Buffer> viewDepthSrvIndicesBuffer,
-    std::shared_ptr<ResourceGroup> slabResourceGroup) {
+    std::shared_ptr<Buffer> viewRasterInfoBuffer,
+    std::shared_ptr<ResourceGroup> slabResourceGroup,
+    std::shared_ptr<Buffer> phase1VisibleClustersCounterBuffer,
+    std::shared_ptr<Buffer> swWriteBaseCounterBuffer) {
+    m_workGraphMode = inputs.workGraphMode;
     CreatePipelines(
         DeviceManager::GetInstance().GetDevice(),
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -50,24 +73,37 @@ HierarchialCullingPass::HierarchialCullingPass(
     m_scratchBuffer->SetMemoryUsageHint("Work graph scratch buffer");
     m_visibleClustersBuffer = std::move(visibleClustersBuffer);
     m_visibleClustersCounterBuffer = std::move(visibleClustersCounterBuffer);
+    m_swVisibleClustersCounterBuffer = std::move(swVisibleClustersCounterBuffer);
     m_histogramIndirectCommand = std::move(histogramIndirectCommand);
     m_workGraphTelemetryBuffer = std::move(workGraphTelemetryBuffer);
     m_occlusionReplayBuffer = std::move(occlusionReplayBuffer);
     m_occlusionReplayStateBuffer = std::move(occlusionReplayStateBuffer);
     m_occlusionNodeGpuInputsBuffer = std::move(occlusionNodeGpuInputsBuffer);
     m_viewDepthSrvIndicesBuffer = std::move(viewDepthSrvIndicesBuffer);
+    m_viewRasterInfoBuffer = std::move(viewRasterInfoBuffer);
     m_slabResourceGroup = std::move(slabResourceGroup);
+    m_phase1VisibleClustersCounterBuffer = std::move(phase1VisibleClustersCounterBuffer);
+    m_swWriteBaseCounterBuffer = std::move(swWriteBaseCounterBuffer);
     m_maxVisibleClusters = inputs.maxVisibleClusters;
+    m_renderPhase = std::move(inputs.renderPhase);
+    m_clodOnlyWorkloads = inputs.clodOnlyWorkloads;
+    m_rasterOutputKind = inputs.rasterOutputKind;
 }
 
 HierarchialCullingPass::~HierarchialCullingPass() = default;
 
 void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) {
     auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
-    flecs::query<> drawSetIndicesQuery = ecsWorld.query_builder<>()
+    auto queryBuilder = ecsWorld.query_builder<>()
         .with<Components::IsActiveDrawSetIndices>()
-        .with<Components::ParticipatesInPass>(flecs::Wildcard)
-        .build();
+        .with<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(m_renderPhase));
+    if (m_clodOnlyWorkloads) {
+        queryBuilder.with<Components::CLodOnlyDrawWorkload>();
+    }
+    else {
+        queryBuilder.with<Components::GeneralDrawWorkload>();
+    }
+    flecs::query<> drawSetIndicesQuery = queryBuilder.build();
     builder->WithUnorderedAccess(
             m_scratchBuffer,
             m_visibleClustersBuffer,
@@ -101,9 +137,36 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
             Builtin::PerObjectBuffer,
             Builtin::CameraBuffer,
             Builtin::PerMeshBuffer,
+            Builtin::SkeletonResources::InverseBindMatrices,
+            Builtin::SkeletonResources::BoneTransforms,
+            Builtin::SkeletonResources::SkinningInstanceInfo,
             Builtin::PrimaryCamera::LinearDepthMap,
-            Builtin::Shadows::LinearShadowMaps)
+            Builtin::Shadows::LinearShadowMaps,
+            Builtin::PerMaterialDataBuffer)
         .WithShaderResource(ECSResourceResolver(drawSetIndicesQuery));
+
+    if (UsesSWClassification(m_workGraphMode)) {
+        builder->WithUnorderedAccess(m_swVisibleClustersCounterBuffer);
+    }
+    if (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVisibilityBufferOutput(m_rasterOutputKind)) {
+        builder->WithShaderResource(m_viewRasterInfoBuffer);
+    }
+
+    // Phase 2 reads Phase 1's HW counter to offset writes in the visible clusters buffer.
+    if (m_phase1VisibleClustersCounterBuffer) {
+        builder->WithShaderResource(m_phase1VisibleClustersCounterBuffer);
+    }
+    if (UsesSWClassification(m_workGraphMode) && m_swWriteBaseCounterBuffer) {
+        builder->WithShaderResource(m_swWriteBaseCounterBuffer);
+    }
+
+    // Declare visibility buffer UAVs for SW raster render graph tracking.
+    if (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVisibilityBufferOutput(m_rasterOutputKind)) {
+        for (auto& vb : m_visibilityBuffers) {
+            builder->WithUnorderedAccess(vb);
+        }
+    }
+    builder->WithUnorderedAccess(Builtin::DebugVisualization);
 
     // Declare page pool slabs for bindless access (auto-invalidates when new slabs are added).
     if (m_slabResourceGroup) {
@@ -133,6 +196,11 @@ void HierarchialCullingPass::Setup() {
 	RegisterSRV(Builtin::CLod::GroupPageMap);
     RegisterSRV(Builtin::CameraBuffer);
     RegisterSRV(Builtin::PerMeshBuffer);
+    RegisterSRV(Builtin::SkeletonResources::InverseBindMatrices);
+    RegisterSRV(Builtin::SkeletonResources::BoneTransforms);
+    RegisterSRV(Builtin::SkeletonResources::SkinningInstanceInfo);
+    RegisterSRV(Builtin::PerMaterialDataBuffer);
+	RegisterUAV(Builtin::DebugVisualization);
 }
 
 PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContext) {
@@ -147,23 +215,51 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     BindResourceDescriptorIndices(commandList, m_pipelineResources);
 
     uint32_t uintRootConstants[NumMiscUintRootConstants] = {};
-    uintRootConstants[CLOD_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_WORKGRAPH_TELEMETRY_DESCRIPTOR_INDEX] = m_workGraphTelemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_swVisibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_TELEMETRY_DESCRIPTOR_INDEX] = m_workGraphTelemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    if (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVisibilityBufferOutput(m_rasterOutputKind)) {
+        uintRootConstants[CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
+    }
     uint32_t workGraphFlags = 0u;
     if (IsCLodWorkGraphTelemetryEnabled()) {
-        workGraphFlags |= CLOD_WORKGRAPH_FLAG_TELEMETRY_ENABLED;
+        workGraphFlags |= CLOD_WG_FLAG_TELEMETRY_ENABLED;
     }
     if (SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")()) {
-        workGraphFlags |= CLOD_WORKGRAPH_FLAG_OCCLUSION_ENABLED;
+        workGraphFlags |= CLOD_WG_FLAG_OCCLUSION_ENABLED;
     }
-    uintRootConstants[CLOD_WORKGRAPH_FLAGS] = workGraphFlags;
-    uintRootConstants[CLOD_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX] = m_occlusionReplayBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX] = m_viewDepthSrvIndicesBuffer->GetSRVInfo(0).slot.index;
-    uintRootConstants[CLOD_VISIBLE_CLUSTERS_CAPACITY] = static_cast<uint32_t>(m_maxVisibleClusters);
+    const bool enableSoftwareRaster = UsesSWClassification(m_workGraphMode);
+    if (enableSoftwareRaster) {
+        workGraphFlags |= CLOD_WG_FLAG_SW_RASTER_ENABLED;
+    }
+    if (m_workGraphMode == HierarchialCullingWorkGraphMode::SoftwareRasterCompute) {
+        workGraphFlags |= CLOD_WG_FLAG_COMPUTE_SW_RASTER;
+    }
+    constexpr uint32_t swRasterThreshold = 16; // pixel diameter threshold
+    workGraphFlags |= (swRasterThreshold << CLOD_WG_SW_RASTER_THRESHOLD_SHIFT);
+    if (!m_isFirstPass) {
+        workGraphFlags |= CLOD_WG_FLAG_PHASE2;
+    }
+    uintRootConstants[CLOD_WG_FLAGS] = workGraphFlags;
+    uintRootConstants[CLOD_WG_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX] = m_occlusionReplayBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX] = m_viewDepthSrvIndicesBuffer->GetSRVInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_VISIBLE_CLUSTERS_CAPACITY] = static_cast<uint32_t>(m_maxVisibleClusters);
+
+    // Always bind valid SRV descriptors for the aliased write-base slots.
+    // Phase 1 does not read these counters, but the shader still forms StructuredBuffer
+    // views from the aliased root constants before branching on the phase flag.
+    uintRootConstants[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] =
+        (m_phase1VisibleClustersCounterBuffer ? m_phase1VisibleClustersCounterBuffer : m_visibleClustersCounterBuffer)
+            ->GetSRVInfo(0)
+            .slot.index;
+    uintRootConstants[CLOD_WG_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] =
+        (m_swWriteBaseCounterBuffer ? m_swWriteBaseCounterBuffer : m_swVisibleClustersCounterBuffer)
+            ->GetSRVInfo(0)
+            .slot.index;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
@@ -180,7 +276,10 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
         context.viewManager->ForEachFiltered(filter, [&](uint64_t view) {
             auto viewInfo = context.viewManager->Get(view);
             auto cameraBufferIndex = viewInfo->gpu.cameraBufferIndex;
-            auto workloads = context.indirectCommandBufferManager->GetViewIndirectBuffersForRenderPhase(view, m_renderPhase);
+            auto workloads = context.indirectCommandBufferManager->GetViewIndirectBuffersForRenderPhase(
+                view,
+                m_renderPhase,
+                m_clodOnlyWorkloads);
             for (auto& wl : workloads) {
                 auto count = wl.workload.count;
                 if (count == 0) {
@@ -188,7 +287,7 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
                 }
                 ObjectCullRecord record{};
                 record.viewDataIndex = cameraBufferIndex;
-                record.activeDrawSetIndicesSRVIndex = context.objectManager->GetActiveDrawSetIndices(wl.flags)->GetSRVInfo(0).slot.index;
+                record.activeDrawSetIndicesSRVIndex = context.objectManager->GetActiveDrawSetIndices(wl.key)->GetSRVInfo(0).slot.index;
                 record.activeDrawCount = count;
                 record.dispatchGridX = static_cast<uint>((count + 63) / 64);
                 record.dispatchGridY = 1;
@@ -250,18 +349,30 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
         commandList.DispatchWorkGraph(replayDispatchDesc);
     }
 
-    rhi::BufferBarrier counterBarrier{};
-    counterBarrier.buffer = m_visibleClustersCounterBuffer->GetAPIResource().GetHandle();
-    counterBarrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
-    counterBarrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
-    counterBarrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
-    counterBarrier.afterSync = rhi::ResourceSyncState::ComputeShading;
+    std::array<rhi::BufferBarrier, 2> counterBarriers{};
+    counterBarriers[0].buffer = m_visibleClustersCounterBuffer->GetAPIResource().GetHandle();
+    counterBarriers[0].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+    counterBarriers[0].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+    counterBarriers[0].beforeSync = rhi::ResourceSyncState::ComputeShading;
+    counterBarriers[0].afterSync = rhi::ResourceSyncState::ComputeShading;
+    uint32_t counterBarrierCount = 1;
+    if (UsesSWClassification(m_workGraphMode)) {
+        counterBarriers[1].buffer = m_swVisibleClustersCounterBuffer->GetAPIResource().GetHandle();
+        counterBarriers[1].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+        counterBarriers[1].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+        counterBarriers[1].beforeSync = rhi::ResourceSyncState::ComputeShading;
+        counterBarriers[1].afterSync = rhi::ResourceSyncState::ComputeShading;
+        counterBarrierCount = 2;
+    }
     rhi::BarrierBatch counterBarrierBatch{};
-    counterBarrierBatch.buffers = rhi::Span<rhi::BufferBarrier>(&counterBarrier, 1);
+    counterBarrierBatch.buffers = rhi::Span<rhi::BufferBarrier>(counterBarriers.data(), counterBarrierCount);
     commandList.Barriers(counterBarrierBatch);
 
     BindResourceDescriptorIndices(commandList, m_createCommandPipelineState.GetResourceDescriptorSlots());
-    uintRootConstants[CLOD_NUM_RASTER_BUCKETS] = context.materialManager->GetRasterBucketCount();
+    // Reset aliased slots for CreateRasterBucketsHistogramCommandCSMain
+    uintRootConstants[CLOD_CREATE_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_CREATE_NUM_RASTER_BUCKETS] = context.materialManager->GetRasterBucketCount();
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
         0,
@@ -286,14 +397,59 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
 
     uint32_t zero = 0u;
     BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_visibleClustersCounterBuffer), 0);
+    if (UsesSWClassification(m_workGraphMode)) {
+        BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_swVisibleClustersCounterBuffer), 0);
+    }
+
+    // Collect per-view raster info for software raster modes, and visibility buffer tracking for WG SW raster.
+    if (UsesSWClassification(m_workGraphMode) && UsesVisibilityBufferOutput(m_rasterOutputKind)) {
+        m_visibilityBuffers.clear();
+        auto numViews = context.viewManager->GetCameraBufferSize();
+        std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
+        context.viewManager->ForEachView([&](uint64_t v) {
+            auto viewInfo = context.viewManager->Get(v);
+            if (viewInfo->gpu.visibilityBuffer != nullptr) {
+                auto cameraIndex = viewInfo->gpu.cameraBufferIndex;
+                CLodViewRasterInfo info{};
+                info.visibilityUAVDescriptorIndex = viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+                info.scissorMinX = 0;
+                info.scissorMinY = 0;
+                info.scissorMaxX = viewInfo->gpu.visibilityBuffer->GetWidth();
+                info.scissorMaxY = viewInfo->gpu.visibilityBuffer->GetHeight();
+                info.viewportScaleX = 1.0f;
+                info.viewportScaleY = 1.0f;
+                viewRasterInfo[cameraIndex] = info;
+                if (UsesWorkGraphSWRaster(m_workGraphMode)) {
+                    m_visibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
+                }
+            }
+        });
+
+        m_viewRasterInfoBuffer->ResizeStructured(static_cast<uint32_t>(viewRasterInfo.size()));
+        BUFFER_UPLOAD(
+            viewRasterInfo.data(),
+            static_cast<uint32_t>(viewRasterInfo.size() * sizeof(CLodViewRasterInfo)),
+            rg::runtime::UploadTarget::FromShared(m_viewRasterInfoBuffer),
+            0);
+        if (UsesWorkGraphSWRaster(m_workGraphMode)) {
+            m_declaredResourcesChanged = true;
+        }
+    }
+    else {
+        m_visibilityBuffers.clear();
+        m_declaredResourcesChanged = false;
+    }
 
     if (!m_isFirstPass) {
         return;
     }
 
     CLodReplayBufferState replayState{};
-    replayState.totalWriteCount = 0;
-    replayState.droppedRecords = 0;
+    replayState.nodeWriteCount = 0;
+    replayState.meshletWriteCount = 0;
+    replayState.nodeDropped = 0;
+    replayState.meshletDropped = 0;
+    replayState.visibleClusterCombinedCount = 0;
     BUFFER_UPLOAD(
         &replayState,
         sizeof(CLodReplayBufferState),
@@ -352,15 +508,18 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
 
     if (ID3D12Resource* replayResource = rhi::dx12::get_resource(m_occlusionReplayBuffer->GetAPIResource())) {
         const uint64_t replayAddress = replayResource->GetGPUVirtualAddress();
-        nodeGpuInputs[1].entrypointIndex = 1;
-        nodeGpuInputs[1].numRecords = 0;
-        nodeGpuInputs[1].recordsAddress = replayAddress;
-        nodeGpuInputs[1].recordStride = sizeof(CLodMeshletReplayRecord); // must match CLOD_REPLAY_SLOT_STRIDE_BYTES (unified slot stride)
 
+        // Entry point 1 = TraverseNodes — node replay region at offset 0
+        nodeGpuInputs[1].entrypointIndex = 1;
+        nodeGpuInputs[1].numRecords = 0; // patched by GPU in CreateRasterBucketsHistogramCommandCSMain
+        nodeGpuInputs[1].recordsAddress = replayAddress;
+        nodeGpuInputs[1].recordStride = CLodNodeReplayStrideBytes;
+
+        // Entry point 2 = ClusterCull1 — meshlet replay region at midpoint offset
         nodeGpuInputs[2].entrypointIndex = 2;
-        nodeGpuInputs[2].numRecords = 0;
-        nodeGpuInputs[2].recordsAddress = replayAddress;
-        nodeGpuInputs[2].recordStride = sizeof(CLodMeshletReplayRecord);
+        nodeGpuInputs[2].numRecords = 0; // patched by GPU in CreateRasterBucketsHistogramCommandCSMain
+        nodeGpuInputs[2].recordsAddress = replayAddress + CLodReplayMeshletRegionOffset;
+        nodeGpuInputs[2].recordStride = CLodMeshletReplayStrideBytes;
     }
 
     static_assert(sizeof(CLodMultiNodeGpuInput) == sizeof(CLodNodeGpuInput));
@@ -396,7 +555,11 @@ void HierarchialCullingPass::CreatePipelines(
     PipelineState& outCreateCommandPipeline)
 {
     ShaderLibraryInfo libInfo(L"shaders/ClusterLOD/workGraphCulling.hlsl", L"lib_6_8");
-    auto compiled = PSOManager::GetInstance().CompileShaderLibrary(libInfo);
+    std::vector<DxcDefine> defines = {
+        { L"CLOD_WG_ENABLE_SW_CLASSIFICATION", UsesSWClassification(m_workGraphMode) ? L"1" : L"0" },
+        { L"CLOD_WG_ENABLE_SW_NODE_OUTPUT", UsesWorkGraphSWRaster(m_workGraphMode) ? L"1" : L"0" },
+    };
+    auto compiled = PSOManager::GetInstance().CompileShaderLibrary(libInfo, defines);
     m_pipelineResources = compiled.resourceDescriptorSlots;
 
     rhi::ShaderBinary libDxil{
@@ -404,34 +567,49 @@ void HierarchialCullingPass::CreatePipelines(
         static_cast<uint32_t>(compiled.libraryBlob->GetBufferSize())
     };
 
-    std::array<rhi::ShaderExportDesc, 6> exports = {{
+    std::vector<rhi::ShaderExportDesc> exports = {
         { "WG_ObjectCull", nullptr },
-        { "WG_ReplayNodeGroup", nullptr },
-        { "WG_ReplayMeshlet", nullptr },
         { "WG_TraverseNodes", nullptr },
-        { "WG_SegmentEvaluate", nullptr },
-        { "WG_ClusterCullBuckets", nullptr },
-    }};
+        { "WG_ClusterCull1", nullptr },
+        { "WG_ClusterCull2", nullptr },
+        { "WG_ClusterCull4", nullptr },
+        { "WG_ClusterCull8", nullptr },
+        { "WG_ClusterCull16", nullptr },
+        { "WG_ClusterCull32", nullptr },
+        { "WG_ClusterCull64", nullptr },
+    };
+    if (UsesWorkGraphSWRaster(m_workGraphMode)) {
+        exports.push_back({ "WG_SWRaster", nullptr });
+    }
 
     rhi::ShaderLibraryDesc library{};
     library.dxil = libDxil;
     library.exports = rhi::Span<rhi::ShaderExportDesc>(exports.data(), static_cast<uint32_t>(exports.size()));
 
-    std::array<rhi::ShaderLibraryDesc, 1> libraries = { library };
     std::array<rhi::NodeIDDesc, 3> entrypoints = {{
         { "ObjectCull", 0 },
-        { "ReplayNodeGroup", 0 },
-        { "ReplayMeshlet", 0 }
+        { "TraverseNodes", 0 },
+        { "ClusterCull1", 0 }
     }};
 
     rhi::WorkGraphDesc wg{};
     wg.programName = "HierarchialCulling";
     wg.flags = rhi::WorkGraphFlags::WorkGraphFlagsIncludeAllAvailableNodes;
     wg.globalRootSignature = globalRootSignature;
-    wg.libraries = rhi::Span<rhi::ShaderLibraryDesc>(libraries.data(), static_cast<uint32_t>(libraries.size()));
+    wg.libraries = rhi::Span<rhi::ShaderLibraryDesc>(&library, 1);
     wg.entrypoints = rhi::Span<rhi::NodeIDDesc>(entrypoints.data(), static_cast<uint32_t>(entrypoints.size()));
     wg.allowStateObjectAdditions = false;
-    wg.debugName = "HierarchialCullingWG";
+    switch (m_workGraphMode) {
+    case HierarchialCullingWorkGraphMode::HardwareOnly:
+        wg.debugName = "HierarchialCullingWG.HW";
+        break;
+    case HierarchialCullingWorkGraphMode::SoftwareRasterCompute:
+        wg.debugName = "HierarchialCullingWG.ComputeSW";
+        break;
+    case HierarchialCullingWorkGraphMode::SoftwareRasterWorkGraph:
+        wg.debugName = "HierarchialCullingWG.WorkGraphSW";
+        break;
+    }
 
     device.CreateWorkGraph(wg, outGraph);
 

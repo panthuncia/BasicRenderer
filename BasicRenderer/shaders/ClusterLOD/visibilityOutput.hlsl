@@ -1,14 +1,14 @@
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
 #include "include/utilities.hlsli"
-#include "PerPassRootConstants/clodRootConstants.h"
+#include "PerPassRootConstants/clodRasterizationRootConstants.h"
 #include "include/visibilityPacking.hlsli"
 
 [shader("pixel")]
 void VisibilityBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsFrontFace, uint primID : SV_PrimitiveID) : SV_TARGET
 {
     // Fetch view-specific output buffer + manual scissor rect
-    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
+    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
     ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[input.viewID];
 
     uint2 pixel = input.position.xy;

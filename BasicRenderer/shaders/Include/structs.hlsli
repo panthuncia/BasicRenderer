@@ -29,6 +29,8 @@ struct VisBufferPSInput
 struct ClodViewRasterInfo
 {
     uint visibilityUAVDescriptorIndex;
+    uint opaqueVisibilitySRVDescriptorIndex;
+    uint deepVisibilityHeadPointerUAVDescriptorIndex;
     uint scissorMinX;
     uint scissorMinY;
     uint scissorMaxX;
@@ -36,6 +38,27 @@ struct ClodViewRasterInfo
     float viewportScaleX;
     float viewportScaleY;
     uint pad0;
+    uint pad1;
+    uint pad2;
+};
+
+struct CLodDeepVisibilityNode
+{
+    uint64_t visKey;
+    uint next;
+    uint flags;
+};
+
+struct CLodDeepVisibilityStats
+{
+    uint truncatedPixelCount;
+    uint truncatedNodeCount;
+    uint totalResolvedSamples;
+    uint maxRawNodeCount;
+    uint maxResolvedSamples;
+    uint pad0;
+    uint pad1;
+    uint pad2;
 };
 
 struct ClippingPlane {
@@ -52,6 +75,7 @@ struct Camera {
     
     row_major matrix prevView;
     row_major matrix prevJitteredProjection;
+    row_major matrix prevUnjitteredProjection;
     
     row_major matrix unjitteredProjection;
 
@@ -79,6 +103,8 @@ struct CullingCameraInfo
     float zNear;
     float errorOverDistanceThreshold; // Threshold for (error * scale) / distance metric
     float pad;
+    row_major matrix viewProjection;
+    float4 viewZ;
 };
 
 struct PerFrameBuffer {
@@ -161,6 +187,11 @@ struct MaterialInfo {
     float textureScale;
     float heightMapScale;
     float alphaCutoff;
+
+    float geometricDisplacementMin;
+    float geometricDisplacementMax;
+    uint geometricDisplacementEnabled;
+    uint perMaterialPad0;
     
     float4 baseColorFactor;
     float4 emissiveFactor;
@@ -177,6 +208,16 @@ struct MaterialInfo {
 
     uint3 emissiveChannels;
     uint rasterBucketIndex;
+
+    uint baseColorUvSetIndex;
+    uint normalUvSetIndex;
+    uint metallicUvSetIndex;
+    uint roughnessUvSetIndex;
+
+    uint emissiveUvSetIndex;
+    uint aoUvSetIndex;
+    uint heightUvSetIndex;
+    uint opacityUvSetIndex;
 };
 
 struct SingleMatrix {
@@ -215,6 +256,8 @@ struct PerMeshInstanceBuffer {
     uint perObjectBufferIndex;
     uint skinningInstanceSlot;
     uint postSkinningVertexBufferOffset;
+    float skinnedBoundsScale;
+    uint3 pad0;
 };
 
 #define LIGHTS_PER_PAGE 12

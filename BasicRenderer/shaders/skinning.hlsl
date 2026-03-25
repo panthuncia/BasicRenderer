@@ -1,6 +1,7 @@
 #include "include/vertex.hlsli"
 #include "include/structs.hlsli"
 #include "include/cbuffers.hlsli"
+#include "include/skinningCommon.hlsli"
 
 [numthreads(64, 1, 1)]
 void CSMain(uint3 dtid : SV_DispatchThreadID) {
@@ -32,27 +33,7 @@ void CSMain(uint3 dtid : SV_DispatchThreadID) {
     
     float4 pos = float4(input.position.xyz, 1.0f);
     
-    //StructuredBuffer<float4x4> boneTransformsBuffer = ResourceDescriptorHeap[meshInstanceBuffer.boneTransformBufferIndex];
-    //StructuredBuffer<float4x4> inverseBindMatricesBuffer = ResourceDescriptorHeap[meshBuffer.inverseBindMatricesBufferIndex];
-	StructuredBuffer<SkinningInstanceGPUInfo> skinningInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::SkeletonResources::SkinningInstanceInfo)];
-	SkinningInstanceGPUInfo skinningInfo = skinningInstanceBuffer[meshInstanceBuffer.skinningInstanceSlot];
-	StructuredBuffer<float4x4> boneTransformsBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::SkeletonResources::BoneTransforms)];
-    StructuredBuffer<float4x4> inverseBindMatricesBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::SkeletonResources::InverseBindMatrices)];
-
-    matrix bone1 = (boneTransformsBuffer[skinningInfo.transformOffsetMatrices+input.joints.x]);
-    matrix bone2 = (boneTransformsBuffer[skinningInfo.transformOffsetMatrices+input.joints.y]);
-    matrix bone3 = (boneTransformsBuffer[skinningInfo.transformOffsetMatrices+input.joints.z]);
-    matrix bone4 = (boneTransformsBuffer[skinningInfo.transformOffsetMatrices+input.joints.w]);
-
-    matrix bindMatrix1 = (inverseBindMatricesBuffer[skinningInfo.invBindOffsetMatrices+input.joints.x]);
-    matrix bindMatrix2 = (inverseBindMatricesBuffer[skinningInfo.invBindOffsetMatrices+input.joints.y]);
-    matrix bindMatrix3 = (inverseBindMatricesBuffer[skinningInfo.invBindOffsetMatrices+input.joints.z]);
-    matrix bindMatrix4 = (inverseBindMatricesBuffer[skinningInfo.invBindOffsetMatrices+input.joints.w]);
-
-    float4x4 skinMatrix = transpose(input.weights.x * mul(bone1, bindMatrix1) +
-                         input.weights.y * mul(bone2, bindMatrix2) +
-                         input.weights.z * mul(bone3, bindMatrix3) +
-                         input.weights.w * mul(bone4, bindMatrix4));
+    float4x4 skinMatrix = BuildSkinMatrix(meshInstanceBuffer.skinningInstanceSlot, input.skinning);
     
     float3x3 normalMatrix = (float3x3)mul(normalMatrixBuffer[objectBuffer.normalMatrixBufferIndex], skinMatrix);
     

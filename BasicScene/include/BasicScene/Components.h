@@ -124,10 +124,11 @@ namespace Components {
 
     struct DrawStats {
         uint32_t numDrawsInScene = 0;
-        std::unordered_map<MaterialCompileFlags, uint32_t> numDrawsPerTechnique;
+        std::unordered_map<DrawWorkloadKey, uint32_t, DrawWorkloadKey::Hasher> numDrawsPerTechnique;
     };
 
     struct Skinned {};
+    struct SkinningPassEligible {};
     struct SkeletonRoot {};
 
     struct Active {};

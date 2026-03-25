@@ -111,4 +111,104 @@ void OcclusionCullingPerspectiveTexture2D(
     fullyCulled = fMaxOcclusionDepth < boundingSphereDepth - scaledBoundingRadius;
 }
 
+// Overload that uses an explicit projection matrix for screen-extent computation
+// (e.g. previous frame's projection for temporal reprojection against an older HZB).
+void OcclusionCullingPerspectiveTexture2D(
+    out bool fullyCulled,
+    in const Camera camera,
+    float3 viewSpaceCenter,
+    float boundingSphereDepth,
+    float scaledBoundingRadius,
+    uint depthMapDescriptorIndex,
+    row_major matrix occlusionProjection)
+{
+    const float2 viewRes = float2(camera.depthResX, camera.depthResY);
+    const float3 vHZB = float3(viewRes.x, viewRes.y, camera.numDepthMips);
+
+    viewSpaceCenter.y = -viewSpaceCenter.y;
+    float4 vLBRT = sphere_screen_extents(viewSpaceCenter.xyz, scaledBoundingRadius, occlusionProjection);
+    vLBRT.x = -vLBRT.x;
+    vLBRT.z = -vLBRT.z;
+
+    const float4 vToUV = float4(0.5f, -0.5f, 0.5f, -0.5f);
+    float4 vUV = saturate(vLBRT.xwzy * vToUV + 0.5f);
+
+    float4 vAABB = vUV * vHZB.xyxy;
+    float2 vExtents = vAABB.zw - vAABB.xy;
+
+    float fMipLevel = ceil(log2(max(vExtents.x, vExtents.y)));
+    fMipLevel = clamp(fMipLevel, 0.0f, vHZB.z - 1.0f);
+
+    Texture2D<float> depthBuffer = ResourceDescriptorHeap[depthMapDescriptorIndex];
+
+    float4 vUVPadded = vUV * camera.UVScaleToNextPowerOf2.xyxy;
+
+    const float2 safeScale = max(camera.UVScaleToNextPowerOf2, float2(1e-6f, 1e-6f));
+    const uint mipLevel = (uint)fMipLevel;
+    const uint2 hzbRes = max(uint2(1, 1), (uint2)round(viewRes / safeScale));
+    const uint2 mipRes = max(uint2(1, 1), hzbRes >> mipLevel);
+    const uint4 maxCoord = uint4(mipRes.xy - 1, mipRes.xy - 1);
+    const uint4 pixelCoords = min((uint4)floor(vUVPadded * float4(mipRes.xy, mipRes.xy)), maxCoord);
+
+    float4 occlusionDepth = float4(
+        depthBuffer.Load(int3(pixelCoords.xy, (int)mipLevel)),
+        depthBuffer.Load(int3(pixelCoords.zy, (int)mipLevel)),
+        depthBuffer.Load(int3(pixelCoords.zw, (int)mipLevel)),
+        depthBuffer.Load(int3(pixelCoords.xw, (int)mipLevel)));
+
+    const float fMaxOcclusionDepth = max(max(occlusionDepth.x, occlusionDepth.y), max(occlusionDepth.z, occlusionDepth.w));
+    fullyCulled = fMaxOcclusionDepth < boundingSphereDepth - scaledBoundingRadius;
+}
+
+// Overload: takes individual HZB parameters and explicit projection matrix
+// instead of the full Camera struct, to reduce register pressure at call sites.
+void OcclusionCullingPerspectiveTexture2D(
+    out bool fullyCulled,
+    uint2 depthRes,
+    uint numDepthMips,
+    float2 uvScaleToNextPow2,
+    row_major matrix projMatrix,
+    float3 viewSpaceCenter,
+    float boundingSphereDepth,
+    float scaledBoundingRadius,
+    uint depthMapDescriptorIndex)
+{
+    const float2 viewRes = float2(depthRes);
+    const float3 vHZB = float3(viewRes.x, viewRes.y, numDepthMips);
+
+    viewSpaceCenter.y = -viewSpaceCenter.y;
+    float4 vLBRT = sphere_screen_extents(viewSpaceCenter.xyz, scaledBoundingRadius, projMatrix);
+    vLBRT.x = -vLBRT.x;
+    vLBRT.z = -vLBRT.z;
+
+    const float4 vToUV = float4(0.5f, -0.5f, 0.5f, -0.5f);
+    float4 vUV = saturate(vLBRT.xwzy * vToUV + 0.5f);
+
+    float4 vAABB = vUV * vHZB.xyxy;
+    float2 vExtents = vAABB.zw - vAABB.xy;
+
+    float fMipLevel = ceil(log2(max(vExtents.x, vExtents.y)));
+    fMipLevel = clamp(fMipLevel, 0.0f, vHZB.z - 1.0f);
+
+    Texture2D<float> depthBuffer = ResourceDescriptorHeap[depthMapDescriptorIndex];
+
+    float4 vUVPadded = vUV * uvScaleToNextPow2.xyxy;
+
+    const float2 safeScale = max(uvScaleToNextPow2, float2(1e-6f, 1e-6f));
+    const uint mipLevel = (uint)fMipLevel;
+    const uint2 hzbRes = max(uint2(1, 1), (uint2)round(viewRes / safeScale));
+    const uint2 mipRes = max(uint2(1, 1), hzbRes >> mipLevel);
+    const uint4 maxCoord = uint4(mipRes.xy - 1, mipRes.xy - 1);
+    const uint4 pixelCoords = min((uint4)floor(vUVPadded * float4(mipRes.xy, mipRes.xy)), maxCoord);
+
+    float4 occlusionDepth = float4(
+        depthBuffer.Load(int3(pixelCoords.xy, (int)mipLevel)),
+        depthBuffer.Load(int3(pixelCoords.zy, (int)mipLevel)),
+        depthBuffer.Load(int3(pixelCoords.zw, (int)mipLevel)),
+        depthBuffer.Load(int3(pixelCoords.xw, (int)mipLevel)));
+
+    const float fMaxOcclusionDepth = max(max(occlusionDepth.x, occlusionDepth.y), max(occlusionDepth.z, occlusionDepth.w));
+    fullyCulled = fMaxOcclusionDepth < boundingSphereDepth - scaledBoundingRadius;
+}
+
 #endif // OCCLUSION_CULLING_HLSLI

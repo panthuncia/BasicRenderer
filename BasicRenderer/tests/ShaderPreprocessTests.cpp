@@ -1,0 +1,284 @@
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
+
+#include "Managers/Singletons/brslHelpers.h"
+
+namespace
+{
+    DxcBuffer MakeBuffer(const std::string& source)
+    {
+        DxcBuffer buffer = {};
+        buffer.Ptr = source.data();
+        buffer.Size = source.size();
+        buffer.Encoding = 0;
+        return buffer;
+    }
+
+    void Require(bool condition, const std::string& message)
+    {
+        if (!condition) {
+            throw std::runtime_error(message);
+        }
+    }
+
+    bool Contains(std::string_view haystack, std::string_view needle)
+    {
+        return haystack.find(needle) != std::string_view::npos;
+    }
+
+    void RunTest(
+        const char* name,
+        const std::function<void()>& fn,
+        int& failureCount)
+    {
+        try {
+            fn();
+            std::cout << "[PASS] " << name << '\n';
+        }
+        catch (const std::exception& ex) {
+            ++failureCount;
+            std::cerr << "[FAIL] " << name << ": " << ex.what() << '\n';
+        }
+    }
+}
+
+int main()
+{
+    int failureCount = 0;
+
+    RunTest("catalog handles attributes semantics prototypes and overload names", []() {
+        const std::string source = R"(
+[numthreads(8, 8, 1)]
+void DecoratedCS(uint3 tid : SV_DispatchThreadID)
+{
+}
+
+float ForwardDeclared(float value);
+
+float ForwardDeclared(float value) : SV_Target
+{
+    return value;
+}
+
+float Overload(float value)
+{
+    return value;
+}
+
+float Overload(int value)
+{
+    return (float)value;
+}
+)";
+
+        ShaderPreprocessDiagnostics diagnostics =
+            AnalyzeShaderSourceCatalog(source.c_str(), source.size());
+
+        Require(diagnostics.parseSucceeded, "tree-sitter failed to parse representative HLSL");
+        Require(diagnostics.safeToPrune, "representative HLSL should be safe to prune");
+        Require(Contains(JoinStrings(diagnostics.discoveredFunctionDefinitions, ","), "DecoratedCS"),
+            "expected DecoratedCS in discovered definitions");
+        Require(Contains(JoinStrings(diagnostics.discoveredFunctionDefinitions, ","), "ForwardDeclared"),
+            "expected ForwardDeclared in discovered definitions");
+        Require(Contains(JoinStrings(diagnostics.discoveredFunctionDefinitions, ","), "Overload"),
+            "expected Overload in discovered definitions");
+        }, failureCount);
+
+    RunTest("per-view depth copy drops unreachable helper chain", []() {
+        const std::string source = R"(
+float UsedHelper()
+{
+    return 1.0f;
+}
+
+float DeadLeaf()
+{
+    return 2.0f;
+}
+
+float ResolveClodSampleFromVisKeyWithFace()
+{
+    return DeadLeaf();
+}
+
+[numthreads(8, 8, 1)]
+void PerViewPrimaryDepthCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint cameraBufferIndex = ResourceDescriptorIndex(Builtin::CameraBuffer);
+    float value = UsedHelper();
+}
+)";
+
+        PreparedShaderSource prepared =
+            PrepareShaderSourceForEntryPoint(MakeBuffer(source), "PerViewPrimaryDepthCopyCS");
+
+        Require(prepared.diagnostics.safeToPrune, "expected pruning to be safe");
+        Require(!Contains(prepared.sourceBeforeRewrite, "ResolveClodSampleFromVisKeyWithFace"),
+            "unreachable ResolveClodSampleFromVisKeyWithFace should be pruned");
+        Require(!Contains(prepared.sourceBeforeRewrite, "DeadLeaf"),
+            "unreachable leaf helper should be pruned");
+        Require(Contains(prepared.sourceBeforeRewrite, "UsedHelper"),
+            "reachable helper should remain");
+
+        std::unordered_map<std::string, std::string> replacementMap = {
+            {"Builtin::CameraBuffer", "ResourceDescriptorIndex0"},
+        };
+        std::string finalized = FinalizePreparedShaderSource(prepared, replacementMap);
+        Require(!Contains(finalized, "Builtin::"), "finalized shader should not contain Builtin::");
+        Require(CollectResourceDescriptorCallsFromText(finalized).empty(),
+            "finalized shader should not contain unresolved descriptor calls");
+        }, failureCount);
+
+    RunTest("gbuffer-like root keeps full helper chain and rewrites builtins", []() {
+        const std::string source = R"(
+float DecodeCompressedPosition()
+{
+    return 1.0f;
+}
+
+float BuildClodMaterialUvCache()
+{
+    return DecodeCompressedPosition();
+}
+
+float ResolveClodSampleFromVisKeyWithFace()
+{
+    uint cameraIndex = ResourceDescriptorIndex(Builtin::CameraBuffer);
+    uint materialIndex = ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer);
+    return BuildClodMaterialUvCache() + (float)cameraIndex + (float)materialIndex;
+}
+
+float ResolveClodSampleFromVisKey()
+{
+    return ResolveClodSampleFromVisKeyWithFace();
+}
+
+[numthreads(8, 8, 1)]
+void GBufferMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    float value = ResolveClodSampleFromVisKey();
+}
+)";
+
+        PreparedShaderSource prepared =
+            PrepareShaderSourceForEntryPoint(MakeBuffer(source), "GBufferMain");
+
+        Require(Contains(prepared.sourceBeforeRewrite, "ResolveClodSampleFromVisKeyWithFace"),
+            "reachable resolve helper should remain");
+        Require(Contains(prepared.sourceBeforeRewrite, "BuildClodMaterialUvCache"),
+            "reachable material helper should remain");
+        Require(Contains(prepared.sourceBeforeRewrite, "DecodeCompressedPosition"),
+            "reachable decode helper should remain");
+
+        std::unordered_map<std::string, std::string> replacementMap = {
+            {"Builtin::CameraBuffer", "ResourceDescriptorIndex0"},
+            {"Builtin::PerMaterialDataBuffer", "ResourceDescriptorIndex1"},
+        };
+        std::string finalized = FinalizePreparedShaderSource(prepared, replacementMap);
+        Require(!Contains(finalized, "Builtin::"), "finalized shader should not contain Builtin::");
+        Require(CollectResourceDescriptorCallsFromText(finalized).empty(),
+            "finalized shader should not contain unresolved descriptor calls");
+        }, failureCount);
+
+    RunTest("parse degradation triggers fallback but rewrite still completes", []() {
+        const std::string source = R"(
+float BrokenFunction(
+
+[numthreads(8, 8, 1)]
+void PerViewPrimaryDepthCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint cameraBufferIndex = ResourceDescriptorIndex(Builtin::CameraBuffer);
+}
+)";
+
+        PreparedShaderSource prepared =
+            PrepareShaderSourceForEntryPoint(MakeBuffer(source), "PerViewPrimaryDepthCopyCS");
+
+        Require(prepared.diagnostics.usedFallbackRewrite,
+            "parse degradation should disable pruning and use fallback rewriting");
+        Require(Contains(prepared.sourceBeforeRewrite, "PerViewPrimaryDepthCopyCS"),
+            "fallback path should keep the original source");
+
+        std::unordered_map<std::string, std::string> replacementMap = {
+            {"Builtin::CameraBuffer", "ResourceDescriptorIndex0"},
+        };
+        std::string finalized = FinalizePreparedShaderSource(prepared, replacementMap);
+        Require(!Contains(finalized, "Builtin::"), "fallback rewritten shader should not contain Builtin::");
+        Require(CollectResourceDescriptorCallsFromText(finalized).empty(),
+            "fallback rewritten shader should not contain unresolved descriptor calls");
+        }, failureCount);
+
+    RunTest("invalid utf8 is rejected", []() {
+        const std::string invalidUtf8("\xC3\x28", 2);
+        bool threw = false;
+        try {
+            auto unusedPrepared = PrepareShaderSourceForEntryPoint(MakeBuffer(invalidUtf8), "Main");
+            (void)unusedPrepared;
+        }
+        catch (const std::runtime_error&) {
+            threw = true;
+        }
+
+        Require(threw, "invalid UTF-8 should throw");
+        }, failureCount);
+
+    RunTest("descriptor overflow is detectable", []() {
+        std::string source = R"(
+[numthreads(8, 8, 1)]
+void OverflowCS(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+)";
+
+        for (int i = 0; i < 33; ++i) {
+            source += "    uint v" + std::to_string(i) + " = ResourceDescriptorIndex(Builtin::ID" + std::to_string(i) + ");\n";
+        }
+        source += "}\n";
+
+        PreparedShaderSource prepared =
+            PrepareShaderSourceForEntryPoint(MakeBuffer(source), "OverflowCS");
+        Require(prepared.mandatoryIDs.size() == 33, "expected 33 collected descriptor identifiers");
+        Require(prepared.mandatoryIDs.size() > 32, "overflow case should exceed the root constant budget");
+        }, failureCount);
+
+    RunTest("shader repository files are valid utf8", []() {
+        const std::filesystem::path repoRoot = std::filesystem::path(__FILE__).parent_path().parent_path();
+        const std::filesystem::path shaderRoot = repoRoot / "shaders";
+
+        std::vector<std::filesystem::path> invalidFiles;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(shaderRoot)) {
+            if (!entry.is_regular_file()) {
+                continue;
+            }
+
+            const std::string extension = entry.path().extension().string();
+            if (extension != ".hlsl" && extension != ".hlsli" && extension != ".h") {
+                continue;
+            }
+
+            std::ifstream input(entry.path(), std::ios::binary);
+            std::string bytes((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+            if (!IsValidUtf8(bytes)) {
+                invalidFiles.push_back(entry.path());
+            }
+        }
+
+        Require(invalidFiles.empty(),
+            "found non-UTF-8 shader files under " + shaderRoot.string());
+        }, failureCount);
+
+    if (failureCount != 0) {
+        std::cerr << failureCount << " shader preprocessing test(s) failed\n";
+        return 1;
+    }
+
+    std::cout << "All shader preprocessing tests passed\n";
+    return 0;
+}

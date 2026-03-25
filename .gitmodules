@@ -7,3 +7,6 @@
 [submodule "OpenRenderGraph"]
 	path = OpenRenderGraph
 	url = git@github.com:panthuncia/OpenRenderGraph.git
+[submodule "tree-sitter-hlsl"]
+	path = tree-sitter-hlsl
+	url = git@github.com:panthuncia/tree-sitter-hlsl.git

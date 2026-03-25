@@ -17,6 +17,13 @@ A_STATIC void LpmSetupOut(AU1 i, inAU4 v)
     }
 }
 
+uint4 LpmFilterCtl(uint i)
+{
+    StructuredBuffer<LPMConstants> lpmConstants = ResourceDescriptorHeap[ResourceDescriptorIndex(FFX::LPMConstants)];
+    LPMConstants constants = lpmConstants[0];
+    return constants.u_ctl[i];
+}
+
 #include "FidelityFX/ffx_lpm.h"
 
 struct ColorSpace
@@ -73,7 +80,7 @@ void CSMain(
     // Only one thread needs to compute and store the final exposure
     if (localIndex == 0)
     {
-        // weighted log-average, normalized to [0..1], then offset by –1
+        // weighted log-average, normalized to [0..1], then offset by -1
         float weightedLogAverage = (histogramShared[0] / max(NUM_PIXELS - countForThisBin, 1.0)) - 1.0;
 
         // map back to luminance domain

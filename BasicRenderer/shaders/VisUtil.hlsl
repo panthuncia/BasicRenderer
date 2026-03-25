@@ -1,23 +1,17 @@
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
-#include "include/utilities.hlsli"
-#include "include/meshletCommon.hlsli"
 #include "include/waveIntrinsicsHelpers.hlsli"
+#include "include/visUtilCommon.hlsli"
 #include "PerPassRootConstants/visUtilRootConstants.h"
 #include "include/visibilityPacking.hlsli"
-
-struct PixelRef
-{
-    uint pixelXY;
-};
+#include "include/visibleClusterPacking.hlsli"
 
 uint GetMaterialIdFromCluster(uint clusterIndex,
-                              StructuredBuffer<VisibleCluster> visibleClusterBuffer,
+                              ByteAddressBuffer visibleClusterBuffer,
                               StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance,
                               StructuredBuffer<PerMeshBuffer> perMeshBuffer)
 {
-    VisibleCluster clusterData = visibleClusterBuffer[clusterIndex];
-    uint perMeshInstanceBufferIndex = clusterData.instanceID;
+    uint perMeshInstanceBufferIndex = CLodVisibleClusterInstanceID(CLodLoadVisibleClusterPacked(visibleClusterBuffer, clusterIndex));
     PerMeshInstanceBuffer instanceData = perMeshInstance[perMeshInstanceBufferIndex];
     PerMeshBuffer meshBuffer = perMeshBuffer[instanceData.perMeshBufferIndex];
 
@@ -56,7 +50,7 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
         return;
 
     Texture2D<uint64_t> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
-    StructuredBuffer<VisibleCluster> visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+    ByteAddressBuffer visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
 
@@ -103,7 +97,7 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
     }
 
     Texture2D<uint64_t> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
-    StructuredBuffer<VisibleCluster> visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+    ByteAddressBuffer visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
 
@@ -168,8 +162,6 @@ struct MaterialEvaluationIndirectArgs {
     uint dispatchY; // D3D12_DISPATCH_ARGUMENTS.y
     uint dispatchZ; // D3D12_DISPATCH_ARGUMENTS.z
 };
-
-#define MATERIAL_EXECUTION_GROUP_SIZE 64u
 
 // Build per-material indirect compute args.
 // Inputs:
@@ -236,41 +228,3 @@ void BuildEvaluateIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
     outArgs[materialId] = args;
 }
 
-#include "gbuffer.hlsl"
-
-// Root constants (via ExecuteIndirect / command signature):
-//   UintRootConstant0 = materialId
-//   UintRootConstant1 = baseOffset into PixelListBuffer
-//   UintRootConstant2 = count (number of pixels for this material)
-//
-[shader("compute")]
-[numthreads(MATERIAL_EXECUTION_GROUP_SIZE, 1, 1)]
-void EvaluateMaterialGroupCS(
-    uint3 dispatchThreadId : SV_DispatchThreadID,
-    uint groupIndex : SV_GroupIndex
-)
-{
-    uint materialId = UintRootConstant0; // Not needed?
-    uint baseOffset = UintRootConstant1;
-    uint count = UintRootConstant2;
-    uint dispatchXDimension = UintRootConstant3;
-
-    // This is a 2D dispatch; linearize to get pixel index
-    uint idx = dispatchThreadId.y * dispatchXDimension + dispatchThreadId.x;
-    if (idx >= count)
-        return;
-
-    StructuredBuffer<PixelRef> pixelList = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisUtil::PixelListBuffer)];
-
-    // Look up this thread's pixel
-    PixelRef ref = pixelList[baseOffset + idx];
-
-    // Unpack to xy
-    uint2 pixel;
-    pixel.x = ref.pixelXY & 0xFFFFu;
-    pixel.y = ref.pixelXY >> 16;
-
-    InitGroupConstants(groupIndex);
-    
-    EvaluateGBufferOptimized(pixel);
-}

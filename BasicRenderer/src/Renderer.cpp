@@ -67,6 +67,7 @@
 #include "Render/Runtime/OpenRenderGraphSettings.h"
 #include "Render/GraphExtensions/IOExtension.h"
 #include "Render/GraphExtensions/CLodExtension.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "RenderPasses/DebugGridPass.h"
 #include "Render/GraphExtensions/ReadbackCaptureExtension.h"
 #include "Resources/Resource.h"
@@ -106,12 +107,42 @@ void D3D12DebugCallback(
     }
 }
 
+namespace {
+
+flecs::entity FindSceneEntityByStableSceneID(flecs::entity node, uint64_t stableSceneID) {
+    if (!node.is_alive()) {
+        return {};
+    }
+
+    if (const auto* currentStableSceneID = node.try_get<Components::StableSceneID>()) {
+        if (currentStableSceneID->value == stableSceneID) {
+            return node;
+        }
+    }
+
+    flecs::entity found;
+    node.children([&](flecs::entity child) {
+        if (found.is_alive()) {
+            return;
+        }
+
+        auto candidate = FindSceneEntityByStableSceneID(child, stableSceneID);
+        if (candidate.is_alive()) {
+            found = candidate;
+        }
+    });
+    return found;
+}
+
+} // namespace
+
 void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     auto& settingsManager = SettingsManager::GetInstance();
     settingsManager.registerSetting<uint8_t>("numFramesInFlight", m_numFramesInFlight);
     getNumFramesInFlight = settingsManager.getSettingGetter<uint8_t>("numFramesInFlight");
     settingsManager.registerSetting<DirectX::XMUINT2>("renderResolution", { x_res, y_res });
     settingsManager.registerSetting<DirectX::XMUINT2>("outputResolution", { x_res, y_res });
+    settingsManager.registerSetting<bool>("enableVisibilityRendering", m_visibilityRendering);
     LoadPipeline(hwnd, x_res, y_res);
     UpscalingManager::GetInstance().InitSL();
     UpscalingManager::GetInstance().InitFFX(); // Needs device
@@ -248,6 +279,65 @@ void Renderer::RunTransformPropagationStage() {
 void Renderer::RunSceneBridgeSyncStage() {
     ZoneScopedN("Renderer::Update::SceneBridgeSync");
     m_sceneRenderBridge.Sync(*currentScene, m_managerInterface);
+}
+
+void Renderer::QueueSceneNodePositionEdit(uint64_t stableSceneID, DirectX::XMFLOAT3 position) {
+    std::scoped_lock lock(m_pendingSceneExplorerEditsMutex);
+    auto& edit = m_pendingSceneExplorerEdits[stableSceneID];
+    edit.hasPosition = true;
+    edit.position = position;
+}
+
+void Renderer::QueueSceneNodeUniformScaleEdit(uint64_t stableSceneID, float uniformScale) {
+    std::scoped_lock lock(m_pendingSceneExplorerEditsMutex);
+    auto& edit = m_pendingSceneExplorerEdits[stableSceneID];
+    edit.hasUniformScale = true;
+    edit.uniformScale = uniformScale;
+}
+
+void Renderer::FlushPendingSceneExplorerEdits() {
+    if (!currentScene || m_sceneTaskInFlight.load()) {
+        return;
+    }
+
+    std::unordered_map<uint64_t, PendingSceneExplorerEdit> pendingEdits;
+    {
+        std::scoped_lock lock(m_pendingSceneExplorerEditsMutex);
+        if (m_pendingSceneExplorerEdits.empty()) {
+            return;
+        }
+        pendingEdits.swap(m_pendingSceneExplorerEdits);
+    }
+
+    bool anyApplied = false;
+    auto root = currentScene->GetRoot();
+    for (const auto& [stableSceneID, edit] : pendingEdits) {
+        auto entity = FindSceneEntityByStableSceneID(root, stableSceneID);
+        if (!entity.is_alive()) {
+            continue;
+        }
+
+        if (edit.hasPosition && entity.has<Components::Position>()) {
+            entity.set<Components::Position>(edit.position);
+            anyApplied = true;
+        }
+
+        if (edit.hasUniformScale && entity.has<Components::Scale>()) {
+            entity.set<Components::Scale>({ edit.uniformScale, edit.uniformScale, edit.uniformScale });
+            anyApplied = true;
+        }
+    }
+
+    if (anyApplied) {
+        currentScene->PropagateTransforms();
+
+        {
+            std::scoped_lock lock(m_sceneSnapshotMutex);
+            m_completedSceneSnapshot.reset();
+        }
+        m_sceneTaskCompleted.store(false);
+        BootstrapCommittedSceneSnapshot();
+    }
 }
 
 void Renderer::BootstrapCommittedSceneSnapshot() {
@@ -475,6 +565,7 @@ void Renderer::RunRenderResourceSyncStage() {
         const XMMATRIX view = XMMatrixInverse(nullptr, cameraModel);
         DirectX::XMMATRIX projection = camera.info.unjitteredProjection;
         camera.info.prevJitteredProjection = camera.info.jitteredProjection;
+        camera.info.prevUnjitteredProjection = camera.info.unjitteredProjection;
         if (m_jitter && entity.has<Components::PrimaryCamera>()) {
             const auto jitterPixelSpace = UpscalingManager::GetInstance().GetJitter(m_totalFramesRendered);
             camera.jitterPixelSpace = jitterPixelSpace;
@@ -688,7 +779,6 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("drawBoundingSpheres", false);
     settingsManager.registerSetting<bool>("enableClusteredLighting", m_clusteredLighting);
     settingsManager.registerSetting<DirectX::XMUINT3>("lightClusterSize", m_lightClusterSize);
-	settingsManager.registerSetting<bool>("enableVisibilityRendering", m_visibilityRendering);
     settingsManager.registerSetting<bool>("collectPipelineStatistics", false);
 	// This feels like abuse of the settings manager, but it's the easiest way to get the renderable objects to the menu
     settingsManager.registerSetting<std::function<flecs::entity()>>("getSceneRoot", [this]() -> flecs::entity {
@@ -697,12 +787,19 @@ void Renderer::SetSettings() {
         }
         return currentScene->GetRoot();
         });
+    settingsManager.registerSetting<std::function<void(uint64_t, DirectX::XMFLOAT3)>>("queueSceneNodePositionEdit", [this](uint64_t stableSceneID, DirectX::XMFLOAT3 position) {
+        QueueSceneNodePositionEdit(stableSceneID, position);
+        });
+    settingsManager.registerSetting<std::function<void(uint64_t, float)>>("queueSceneNodeUniformScaleEdit", [this](uint64_t stableSceneID, float uniformScale) {
+        QueueSceneNodeUniformScaleEdit(stableSceneID, uniformScale);
+        });
     bool meshShaderSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 	settingsManager.registerSetting<bool>("enableMeshShader", meshShaderSupported && m_useMeshShaders);
 	settingsManager.registerSetting<bool>("enableIndirectDraws", meshShaderSupported);
 	settingsManager.registerSetting<bool>("enableGTAO", m_gtaoEnabled);
 	settingsManager.registerSetting<bool>("enableOcclusionCulling", m_occlusionCulling);
 	settingsManager.registerSetting<bool>("enableMeshletCulling", m_meshletCulling);
+    settingsManager.registerSetting<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName, CLodSoftwareRasterMode::WorkGraph);
     settingsManager.registerSetting<bool>("enableBloom", m_bloom);
     settingsManager.registerSetting<bool>("enableJitter", m_jitter);
     settingsManager.registerSetting<std::function<std::shared_ptr<Scene>(std::shared_ptr<Scene>)>>("appendScene", [this](std::shared_ptr<Scene> scene) -> std::shared_ptr<Scene> {
@@ -786,6 +883,10 @@ void Renderer::SetSettings() {
 		m_occlusionCulling = newValue;
 		rebuildRenderGraph = true;
 		}));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName, [this](const CLodSoftwareRasterMode& newValue) {
+        (void)newValue;
+        rebuildRenderGraph = true;
+        }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableMeshletCulling", [this](const bool& newValue) {
 		m_meshletCulling = newValue;
 		rebuildRenderGraph = true;
@@ -1114,6 +1215,10 @@ void Renderer::Update(float elapsedSeconds) {
     if (!IsSceneReadyForFrame()) {
         return;
     }
+    runCapturedStage("SceneExplorerEdits", [&]() {
+        ZoneScopedN("Renderer::Update::SceneExplorerEdits");
+        FlushPendingSceneExplorerEdits();
+    });
     if (NeedsSceneSnapshotBootstrap()) {
         runCapturedStage("BootstrapSceneSnapshot", [&]() {
             ZoneScopedN("Renderer::Update::BootstrapSceneSnapshot");
@@ -1312,6 +1417,7 @@ void Renderer::Render() {
         m_context.rtvDescriptorSize = rtvDescriptorSize;
         m_context.dsvDescriptorSize = dsvDescriptorSize;
         m_context.frameIndex = m_frameIndex;
+		m_context.frameNumber = m_totalFramesRendered;
         m_context.frameFenceValue = m_currentFrameFenceValue;
         m_context.renderResolution = { renderRes.x, renderRes.y };
 	    m_context.outputResolution = { outputRes.x, outputRes.y };
@@ -1491,21 +1597,34 @@ void Renderer::AdvanceFrameIndex() {
 }
 
 void Renderer::FlushCommandQueue() {
-    // Create a fence and an event to wait on
-
 	auto device = DeviceManager::GetInstance().GetDevice();
-    rhi::TimelinePtr flushFence; 
-	auto result = device.CreateTimeline(flushFence);
+    auto flushQueue = [&](rhi::Queue queue, const char* debugName) {
+        rhi::TimelinePtr flushFence;
+        auto result = device.CreateTimeline(flushFence, 0, debugName);
+        if (result != rhi::Result::Ok || !flushFence) {
+            throw std::runtime_error("Failed to create queue flush timeline");
+        }
 
-	auto graphicsQueue = DeviceManager::GetInstance().GetGraphicsQueue();
-    auto computeQueue = DeviceManager::GetInstance().GetComputeQueue();
+        queue.Signal({ flushFence->GetHandle(), 1 });
+        flushFence->HostWait(1);
+    };
 
-    // Signal the fence and wait
-    graphicsQueue.Signal({ flushFence->GetHandle(), 1 });
-	computeQueue.Signal({ flushFence->GetHandle(), 2 });
-    
-	flushFence->HostWait(1);
-    flushFence->HostWait(2);
+    auto& deviceManager = DeviceManager::GetInstance();
+    flushQueue(deviceManager.GetGraphicsQueue(), "RendererFlushGraphics");
+    flushQueue(deviceManager.GetComputeQueue(), "RendererFlushCompute");
+    flushQueue(deviceManager.GetCopyQueue(), "RendererFlushCopy");
+
+    if (currentRenderGraph) {
+        auto& registry = currentRenderGraph->GetQueueRegistry();
+        for (size_t i = 0; i < registry.SlotCount(); ++i) {
+            auto slot = static_cast<QueueSlotIndex>(static_cast<uint8_t>(i));
+            auto queue = registry.GetQueue(slot);
+            auto& fence = registry.GetFence(slot);
+            const uint64_t fenceValue = registry.GetNextFenceValue(slot);
+            queue.Signal({ fence.GetHandle(), fenceValue });
+            fence.HostWait(fenceValue);
+        }
+    }
 }
 
 void Renderer::StallPipeline() {
@@ -1786,19 +1905,30 @@ void Renderer::CreateRenderGraph() {
             rg::memory::CreateECSMemorySnapshotProvider());
         Menu::GetInstance().SetRenderGraph(currentRenderGraph.get());
 
+        RendererECSManager::GetInstance().CreateRenderPhaseEntity(Engine::Primary::CLodTransparentPass);
+
         currentRenderGraph->RegisterExtension(std::make_unique<RenderGraphIOExtension>(
             m_managerInterface.GetTextureFactory(),
             currentRenderGraph->GetUploadService(),
             m_pReadbackManager.get()));
         currentRenderGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>(
             currentRenderGraph->GetReadbackService()));
-        currentRenderGraph->RegisterExtension(std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint32_t>(pow(2, 25))));
+        currentRenderGraph->RegisterExtension(
+            std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint32_t>(pow(2, 25))),
+            "CLodOpaque");
+        constexpr bool kEnableAlphaBlendCLodVariant = true;
+        if (kEnableAlphaBlendCLodVariant) {
+            currentRenderGraph->RegisterExtension(
+                std::make_unique<CLodExtension>(CLodExtensionType::AlphaBlend, static_cast<uint32_t>(pow(2, 25))),
+                "CLodAlpha");
+        }
 		m_renderGraphRuntimeInitialized = true;
     }
 
     auto& newGraph = currentRenderGraph;
 
     newGraph->ResetForRebuild();
+    DeletionManager::GetInstance().DrainAll();
 
     newGraph->RegisterProvider(m_pMeshManager.get());
     newGraph->RegisterProvider(m_pObjectManager.get());

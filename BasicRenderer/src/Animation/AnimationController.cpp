@@ -10,12 +10,19 @@ AnimationController::AnimationController(const AnimationController& other)
 
 void AnimationController::setAnimationClip(std::shared_ptr<AnimationClip> newAnimationClip) {
     animationClip = newAnimationClip;
+    currentTime = 0.0f;
+    m_lastPositionKeyframeIndex = 0;
+    m_lastRotationKeyframeIndex = 0;
+    m_lastScaleKeyframeIndex = 0;
     //node->ForceUpdate();
     UpdateTransform();
 }
 
 void AnimationController::reset() {
     currentTime = 0.0f;
+    m_lastPositionKeyframeIndex = 0;
+    m_lastRotationKeyframeIndex = 0;
+    m_lastScaleKeyframeIndex = 0;
 }
 
 void AnimationController::pause() {
@@ -29,38 +36,61 @@ void AnimationController::unpause() {
 Components::Transform& AnimationController::GetUpdatedTransform(float elapsedTime, bool force) {
     if (!force && (!isPlaying || !animationClip)) return m_transform;
 
-    currentTime += elapsedTime * m_animationSpeed;
-    currentTime = fmod(currentTime, animationClip->duration);
+    if (animationClip->duration > 0.0f) {
+        currentTime += elapsedTime * m_animationSpeed;
+        currentTime = fmod(currentTime, animationClip->duration);
+    }
+    else {
+        currentTime = 0.0f;
+    }
 
     UpdateTransform();
     return m_transform;
 }
 
-std::pair<unsigned int, unsigned int> findBoundingKeyframes(float currentTime, std::vector<Keyframe>& keyframes, unsigned int& counter) {
-	unsigned int prevKeyframeIndex = 0;
-	unsigned int nextKeyframeIndex = 0;
+std::pair<unsigned int, unsigned int> findBoundingKeyframes(float currentTime, const std::vector<Keyframe>& keyframes, unsigned int& counter) {
+    if (keyframes.empty()) {
+        counter = 0;
+        return std::make_pair(0u, 0u);
+    }
 
-	if (keyframes.size() == 1) {
-		return std::make_pair(prevKeyframeIndex, nextKeyframeIndex);
-	}
+    if (keyframes.size() == 1) {
+        counter = 0;
+        return std::make_pair(0u, 0u);
+    }
 
-    bool found = false;
-    for (uint32_t i = counter; i < keyframes.size() - 1; ++i) {
+    const unsigned int lastKeyframeIndex = static_cast<unsigned int>(keyframes.size() - 1);
+    if (counter >= lastKeyframeIndex) {
+        counter = 0;
+    }
+
+    if (currentTime <= keyframes.front().time) {
+        counter = 0;
+        return std::make_pair(0u, 0u);
+    }
+
+    if (currentTime >= keyframes.back().time) {
+        counter = lastKeyframeIndex;
+        return std::make_pair(lastKeyframeIndex, lastKeyframeIndex);
+    }
+
+    for (unsigned int i = counter; i < lastKeyframeIndex; ++i) {
         if (currentTime >= keyframes[i].time && currentTime < keyframes[i + 1].time) {
-            prevKeyframeIndex = i;
-            nextKeyframeIndex = i + 1;
             counter = i;
-            found = true;
-            break;
+            return std::make_pair(i, i + 1);
         }
     }
-	if (!found) { // We've wrapped around
-        counter = 0;
-        return findBoundingKeyframes(currentTime, keyframes, counter);
+
+    for (unsigned int i = 0; i < counter; ++i) {
+        if (currentTime >= keyframes[i].time && currentTime < keyframes[i + 1].time) {
+            counter = i;
+            return std::make_pair(i, i + 1);
+        }
     }
 
-    return std::make_pair(prevKeyframeIndex, nextKeyframeIndex);
-    };
+    counter = 0;
+    return std::make_pair(0u, 0u);
+}
 
 void AnimationController::UpdateTransform() {
     if (!animationClip) return ;
@@ -80,13 +110,19 @@ void AnimationController::UpdateTransform() {
         auto boundingPositionFrames = findBoundingKeyframes(currentTime, animationClip->positionKeyframes, m_lastPositionKeyframeIndex);
 		Keyframe* prevKeyframe = &animationClip->positionKeyframes[boundingPositionFrames.first];
 		Keyframe* nextKeyframe = &animationClip->positionKeyframes[boundingPositionFrames.second];
-        if (prevKeyframe->time != nextKeyframe->time) {
+        if (animationClip->positionInterpolation == AnimationInterpolationMode::Step) {
+            m_transform.pos = prevKeyframe->value;
+        }
+        else if (prevKeyframe->time != nextKeyframe->time) {
             float timeElapsed = currentTime - prevKeyframe->time;
             float diff = nextKeyframe->time - prevKeyframe->time;
             float t = diff > 0 ? timeElapsed / diff : 0;
             XMVECTOR interpolatedPosition = lerpVec3(prevKeyframe->value, nextKeyframe->value, t);
             //node->transform.setLocalPosition(interpolatedPosition);
 			m_transform.pos = interpolatedPosition;
+        }
+        else {
+            m_transform.pos = prevKeyframe->value;
         }
     }
 
@@ -95,13 +131,19 @@ void AnimationController::UpdateTransform() {
         auto boundingRotationFrames = findBoundingKeyframes(currentTime, animationClip->rotationKeyframes, m_lastRotationKeyframeIndex);
 		Keyframe* prevKeyframe = &animationClip->rotationKeyframes[boundingRotationFrames.first];
 		Keyframe* nextKeyframe = &animationClip->rotationKeyframes[boundingRotationFrames.second];
-        if (prevKeyframe->time != nextKeyframe->time) {
+        if (animationClip->rotationInterpolation == AnimationInterpolationMode::Step) {
+            m_transform.rot = prevKeyframe->value;
+        }
+        else if (prevKeyframe->time != nextKeyframe->time) {
             float timeElapsed = currentTime - prevKeyframe->time;
             float diff = nextKeyframe->time - prevKeyframe->time;
             float t = diff > 0 ? timeElapsed / diff : 0;
             XMVECTOR interpolatedRotation = lerpRotation(prevKeyframe->value, nextKeyframe->value, t);
             //node->transform.setLocalRotationFromQuaternion(interpolatedRotation);
 			m_transform.rot = interpolatedRotation;
+        }
+        else {
+            m_transform.rot = prevKeyframe->value;
         }
     }
 
@@ -110,13 +152,19 @@ void AnimationController::UpdateTransform() {
         auto boundingScaleFrames = findBoundingKeyframes(currentTime, animationClip->scaleKeyframes, m_lastScaleKeyframeIndex);
 		Keyframe* prevKeyframe = &animationClip->scaleKeyframes[boundingScaleFrames.first];
 		Keyframe* nextKeyframe = &animationClip->scaleKeyframes[boundingScaleFrames.second];
-        if (prevKeyframe->time != nextKeyframe->time) {
+        if (animationClip->scaleInterpolation == AnimationInterpolationMode::Step) {
+            m_transform.scale = prevKeyframe->value;
+        }
+        else if (prevKeyframe->time != nextKeyframe->time) {
             float timeElapsed = currentTime - prevKeyframe->time;
             float diff = nextKeyframe->time - prevKeyframe->time;
             float t = diff > 0 ? timeElapsed / diff : 0;
             XMVECTOR interpolatedScale = lerpVec3(prevKeyframe->value, nextKeyframe->value, t);
             //node->transform.setLocalScale(interpolatedScale);
 			m_transform.scale = interpolatedScale;
+        }
+        else {
+            m_transform.scale = prevKeyframe->value;
         }
     }
 }

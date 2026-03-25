@@ -18,6 +18,8 @@ struct TextureAndConstant {
     std::shared_ptr<TextureAsset> texture;  // null if none
     DefaultedOptional<float> factor = DefaultedOptional<float>(1.0f);
 	std::vector<uint32_t> channels; // For swizzling texture channels, e.g. R, G, B, A
+	uint32_t uvSetIndex = 0;
+	std::string uvSetName;
 };
 
 struct MaterialDescription {
@@ -25,8 +27,13 @@ struct MaterialDescription {
     DirectX::XMFLOAT4   diffuseColor = { 1,1,1,1 };
     DirectX::XMFLOAT4   emissiveColor = { 0,0,0,1 };
 	float alphaCutoff = 0.5f;
+    float heightMapScale = 0.05f;
+    float geometricDisplacementMin = 0.0f;
+    float geometricDisplacementMax = 0.0f;
 	bool negateNormals = false; // Some materials may require this
 	bool invertNormalGreen = false; // For OpenGL compatibility
+	bool forceDoubleSided = false;
+    bool enableGeometricDisplacement = false;
 	BlendState blendState = BlendState::BLEND_STATE_UNKNOWN; // By default, infer from other properties
     TextureAndConstant  baseColor = {};
     TextureAndConstant  metallic = { nullptr, 0.0f };

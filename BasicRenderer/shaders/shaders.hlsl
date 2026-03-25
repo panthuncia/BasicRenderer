@@ -106,9 +106,9 @@ PSInput VSMain(uint vertexID : SV_VertexID) {
     output.position = mul(viewPosition, mainCamera.projection);
     output.clipPosition = mul(viewPosition, mainCamera.unjitteredProjection);
         
-    float4 prevPosition = mul(prevPos, objectBuffer.model);
+    float4 prevPosition = mul(prevPos, objectBuffer.prevModel);
     prevPosition = mul(prevPosition, mainCamera.prevView);
-    output.prevClipPosition = mul(prevPosition, mainCamera.unjitteredProjection);
+    output.prevClipPosition = mul(prevPosition, mainCamera.prevUnjitteredProjection);
     
     if (vertexFlags & VERTEX_SKINNED) {
         output.normalWorldSpace = normalize(input.normal);
@@ -279,6 +279,13 @@ PSMain(PSInput input, bool isFrontFace : SV_IsFrontFace) : SV_TARGET
             case OUTPUT_MODEL_NORMALS:
                 payload = PackDebugFloat3(input.normalModelSpace * 0.5 + 0.5);
                 break;
+            case OUTPUT_MOTION_VECTORS: {
+                float3 ndc = (input.clipPosition / input.clipPosition.w).xyz;
+                float3 prevNdc = (input.prevClipPosition / input.prevClipPosition.w).xyz;
+                float2 mv = (ndc - prevNdc).xy;
+                payload = PackDebugFloat3(float3(mv * 0.5 + 0.5, 0.5));
+                break;
+            }
         }
         if (payload.x != DEBUG_SENTINEL) {
             WriteDebugPixel(debugVisTex, pixel, payload);

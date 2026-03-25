@@ -1,4 +1,8 @@
 #pragma once
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+
 #include <DirectXMath.h>
 #include "ThirdParty/meshoptimizer/clusterlod.h"
 #include "Mesh/ClusterLODShaderTypes.h"
@@ -17,6 +21,7 @@ struct CameraInfo {
 
     DirectX::XMMATRIX prevView;
 	DirectX::XMMATRIX prevJitteredProjection;
+    DirectX::XMMATRIX prevUnjitteredProjection;
 
     DirectX::XMMATRIX unjitteredProjection;
 
@@ -42,7 +47,9 @@ struct CullingCameraInfo {
     float projY = 0.0f;
 	float zNear = 0.0f;
     float errorOverDistanceThreshold = 0.0f; // Threshold for (error * scale) / distance metric
-	float pad[1];
+    float pad[1];
+    DirectX::XMMATRIX viewProjection;
+    DirectX::XMFLOAT4 viewZ;
 };
 
 struct PerFrameCB {
@@ -114,6 +121,8 @@ struct PerMeshInstanceCB {
     unsigned int perObjectBufferIndex;
     unsigned int skinningInstanceSlot;
     unsigned int postSkinningVertexBufferOffset;
+    float skinnedBoundsScale = 1.0f;
+    unsigned int pad[3] = {};
 };
 
 struct PerMaterialCB {
@@ -146,6 +155,10 @@ struct PerMaterialCB {
     float textureScale;
     float heightMapScale;
     float alphaCutoff;
+	float geometricDisplacementMin;
+	float geometricDisplacementMax;
+    unsigned int geometricDisplacementEnabled;
+    unsigned int perMaterialPad0;
 
     DirectX::XMFLOAT4 baseColorFactor;
     DirectX::XMFLOAT4 emissiveFactor;
@@ -161,6 +174,16 @@ struct PerMaterialCB {
     
     DirectX::XMUINT3 emissiveChannels;
 	unsigned int rasterBuckedIndex;
+
+	unsigned int baseColorUvSetIndex;
+	unsigned int normalUvSetIndex;
+	unsigned int metallicUvSetIndex;
+	unsigned int roughnessUvSetIndex;
+
+	unsigned int emissiveUvSetIndex;
+	unsigned int aoUvSetIndex;
+	unsigned int heightUvSetIndex;
+	unsigned int opacityUvSetIndex;
 };
 
 struct LightInfo {
@@ -311,36 +334,15 @@ struct CLodStreamingRuntimeState
     uint32_t pad2 = 0;
 };
 
-enum class CLodReplayRecordType : uint32_t {
-    Node = 0,
-    Group = 1,
-    Meshlet = 2,
-};
-
-struct CLodNodeGroupReplayRecord {
-    uint32_t type = 0; // CLodReplayRecordType
-    uint32_t instanceIndex = 0;
-    uint32_t viewId = 0;
-    uint32_t nodeOrGroupId = 0;
-    uint32_t pad0 = 0;
-};
-
-struct CLodMeshletReplayRecord {
-    uint32_t type = 0; // CLodReplayRecordType
-    uint32_t instanceIndex = 0;
-    uint32_t viewId = 0;
-    uint32_t groupId = 0;
-    uint32_t localMeshletIndex = 0;       // page-local meshlet index
-    uint32_t pageSlabDescriptorIndex = 0; // pre-resolved page slab descriptor
-    uint32_t pageSlabByteOffset = 0;      // pre-resolved page slab byte offset
-    uint32_t pad = 0;
-};
-
 struct CLodReplayBufferState {
-    uint32_t totalWriteCount = 0;
-    uint32_t droppedRecords = 0;
+    uint32_t nodeWriteCount = 0;
+    uint32_t meshletWriteCount = 0;
+    uint32_t nodeDropped = 0;
+    uint32_t meshletDropped = 0;
+    uint32_t visibleClusterCombinedCount = 0;
     uint32_t pad0 = 0;
     uint32_t pad1 = 0;
+    uint32_t pad2 = 0;
 };
 
 struct CLodViewDepthSRVIndex {
@@ -372,6 +374,35 @@ struct VisibleCluster {
     unsigned int pageSlabDescriptorIndex; // pre-resolved page slab descriptor
     unsigned int pageSlabByteOffset;      // pre-resolved page slab byte offset
 };
+
+inline constexpr uint32_t PackedVisibleClusterViewBits = 8u;
+inline constexpr uint32_t PackedVisibleClusterInstanceBits = 24u;
+inline constexpr uint32_t PackedVisibleClusterLocalMeshletBits = 14u;
+inline constexpr uint32_t PackedVisibleClusterGroupBits = 20u;
+inline constexpr uint32_t PackedVisibleClusterPageDescriptorBits = 20u;
+inline constexpr uint32_t PackedVisibleClusterPageIndexBits = 10u;
+inline constexpr uint32_t PackedVisibleClusterPageShift = 18u;
+inline constexpr uint32_t PackedVisibleClusterPageSizeBytes = 1u << PackedVisibleClusterPageShift;
+inline constexpr uint32_t PackedVisibleClusterStrideBytes = 12u;
+
+inline VisibleCluster DecodePackedVisibleCluster(const std::byte* data)
+{
+    uint32_t word0 = 0;
+    uint32_t word1 = 0;
+    uint32_t word2 = 0;
+    std::memcpy(&word0, data + 0, sizeof(uint32_t));
+    std::memcpy(&word1, data + 4, sizeof(uint32_t));
+    std::memcpy(&word2, data + 8, sizeof(uint32_t));
+
+    VisibleCluster cluster{};
+    cluster.viewID = word0 & 0xFFu;
+    cluster.instanceID = (word0 >> PackedVisibleClusterViewBits) & 0xFFFFFFu;
+    cluster.localMeshletIndex = word1 & 0x3FFFu;
+    cluster.groupID = ((word1 >> PackedVisibleClusterLocalMeshletBits) & 0x3FFFFu) | ((word2 & 0x3u) << 18u);
+    cluster.pageSlabDescriptorIndex = (word2 >> 2u) & 0xFFFFFu;
+    cluster.pageSlabByteOffset = ((word2 >> 22u) & 0x3FFu) << PackedVisibleClusterPageShift;
+    return cluster;
+}
 
 
 enum RootSignatureLayout {
@@ -421,8 +452,10 @@ enum MiscUintRootConstants { // Used for pass-specific one-off constants
 	UintRootConstant7,
 	UintRootConstant8,
 	UintRootConstant9,
-	UintRootConstant10,
+	UintRootConstant10, 
     UintRootConstant11,
+    UintRootConstant12,
+    UintRootConstant13,
 	NumMiscUintRootConstants
 };
 
@@ -469,9 +502,6 @@ enum ResourceDescriptorIndicesRootConstants { // Auto-assigned, do not set manua
 	ResourceDescriptorIndex29,
 	ResourceDescriptorIndex30,
 	ResourceDescriptorIndex31,
-	ResourceDescriptorIndex32,
-	ResourceDescriptorIndex33,
-	ResourceDescriptorIndex34,
     NumResourceDescriptorIndicesRootConstants
 };
 

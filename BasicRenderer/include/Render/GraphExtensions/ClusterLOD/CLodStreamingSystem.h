@@ -19,6 +19,8 @@
 #include "Render/GraphExtensions/ClusterLOD/CLodPageLRU.h"
 #include "Resources/Buffers/Buffer.h"
 
+class UploadInstance;
+
 class CLodStreamingSystem {
 public:
     CLodStreamingSystem();
@@ -27,6 +29,7 @@ public:
     void SetPriorityMode(CLodPriorityMode mode) { m_priorityMode = mode; }
     CLodPriorityMode GetPriorityMode() const { return m_priorityMode; }
 
+    void Initialize(RenderGraph& rg);
     void OnRegistryReset(ResourceRegistry* reg);
     void GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses);
     void GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses);
@@ -157,4 +160,8 @@ private:
     std::vector<std::pair<uint32_t, uint32_t>> m_decodedReadbackBatch;
     // Deduplicated group indices from the GPU used-groups buffer, consumed by the main thread to touch LRU.
     std::vector<uint32_t> m_decodedUsedGroupsBatch;
+
+    // Dedicated upload instance + copy queue for async CLod streaming uploads.
+    std::unique_ptr<UploadInstance> m_uploadInstance;
+    QueueSlotIndex m_uploadQueueSlot{};
 };

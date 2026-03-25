@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <string>
 
 #include "Managers/Singletons/ResourceManager.h"
 #include "Managers/IndirectCommandBufferManager.h"
@@ -14,7 +15,7 @@
 
 namespace
 {
-    constexpr float kClusterLodErrorPixels = 6.0f;
+    constexpr float kClusterLodErrorPixels = 1.0f;
 
     float ComputeErrorOverDistanceThreshold(const CameraInfo& cameraInfo, float errorPixels)
     {
@@ -25,6 +26,30 @@ namespace
             return std::numeric_limits<float>::max();
         }
         return errorPixels / denom;
+    }
+
+    TextureDescription CreateCLodDeepVisibilityHeadPointerDesc(const PixelBuffer& visibilityBuffer)
+    {
+        TextureDescription desc;
+        ImageDimensions dims;
+        dims.width = visibilityBuffer.GetWidth();
+        dims.height = visibilityBuffer.GetHeight();
+        desc.imageDimensions.push_back(dims);
+        desc.format = rhi::Format::R32_UInt;
+        desc.channels = 1;
+        desc.hasSRV = true;
+        desc.srvFormat = rhi::Format::R32_UInt;
+        desc.hasUAV = true;
+        desc.uavFormat = rhi::Format::R32_UInt;
+        desc.hasNonShaderVisibleUAV = true;
+        desc.generateMipMaps = false;
+        return desc;
+    }
+
+    bool CLodHeadPointerMatchesVisibility(const PixelBuffer& headPointers, const PixelBuffer& visibilityBuffer)
+    {
+        return headPointers.GetWidth() == visibilityBuffer.GetWidth() &&
+            headPointers.GetHeight() == visibilityBuffer.GetHeight();
     }
 }
 
@@ -164,9 +189,37 @@ void ViewManager::AttachVisibilityBuffer(uint64_t viewID, std::shared_ptr<PixelB
     auto* v = Get(viewID);
     if (!v) return;
     v->gpu.visibilityBuffer = visibilityBuffer;
+    v->gpu.clodDeepVisibilityHeadPointers.reset();
     if (m_events.onVisibilityBufferAttached) {
         m_events.onVisibilityBufferAttached(*v);
     }
+}
+
+std::shared_ptr<PixelBuffer> ViewManager::EnsureCLodDeepVisibilityHeadPointers(uint64_t viewID)
+{
+    auto* v = Get(viewID);
+    if (!v || !v->gpu.visibilityBuffer) {
+        return nullptr;
+    }
+
+    const bool needsCreate =
+        !v->gpu.clodDeepVisibilityHeadPointers ||
+        !CLodHeadPointerMatchesVisibility(*v->gpu.clodDeepVisibilityHeadPointers, *v->gpu.visibilityBuffer);
+
+    if (!needsCreate) {
+        v->gpu.clodDeepVisibilityHeadPointers->EnsureVirtualDescriptorSlotsAllocated();
+        return v->gpu.clodDeepVisibilityHeadPointers;
+    }
+
+    auto headPointerTexture = PixelBuffer::CreateSharedUnmaterialized(
+        CreateCLodDeepVisibilityHeadPointerDesc(*v->gpu.visibilityBuffer));
+    headPointerTexture->SetName("CLod Deep Visibility Head Pointers " + std::to_string(viewID));
+    // These textures are created outside of RenderGraph::AddResource(), but later update code
+    // immediately queries bindless UAV indices from them. Reserve descriptor slots up front so
+    // GetUAVShaderVisibleInfo()/GetUAVNonShaderVisibleInfo() are valid before graph materialization.
+    headPointerTexture->EnsureVirtualDescriptorSlotsAllocated();
+    v->gpu.clodDeepVisibilityHeadPointers = std::move(headPointerTexture);
+    return v->gpu.clodDeepVisibilityHeadPointers;
 }
 
 void ViewManager::UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo) {
@@ -180,6 +233,13 @@ void ViewManager::UpdateCamera(uint64_t viewID, const CameraInfo& cameraInfo) {
 	cullInfo.projY = DirectX::XMVectorGetY(cameraInfo.jitteredProjection.r[1]); // [1][1]
 	cullInfo.zNear = cameraInfo.zNear;
     cullInfo.errorOverDistanceThreshold = ComputeErrorOverDistanceThreshold(cameraInfo, kClusterLodErrorPixels);
+    cullInfo.viewProjection = cameraInfo.viewProjection;
+    cullInfo.viewZ = {
+        DirectX::XMVectorGetZ(cameraInfo.view.r[0]),
+        DirectX::XMVectorGetZ(cameraInfo.view.r[1]),
+        DirectX::XMVectorGetZ(cameraInfo.view.r[2]),
+        DirectX::XMVectorGetZ(cameraInfo.view.r[3])
+    };
 	m_cullingCameraBuffer->UpdateView(v->gpu.cullingCameraBufferView.get(), &cullInfo);
     
     if (m_events.onCameraUpdated) {

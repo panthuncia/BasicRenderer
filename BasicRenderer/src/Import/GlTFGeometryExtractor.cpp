@@ -15,15 +15,18 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <map>
 #include <vector>
 
 #include <DirectXMath.h>
+#include <meshoptimizer.h>
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 
 #include "Import/CLodCacheLoader.h"
 #include "Managers/Singletons/TaskSchedulerManager.h"
 #include "Mesh/ClusterLODTypes.h"
+#include "Mesh/VertexLayout.h"
 #include "Mesh/VertexFlags.h"
 #include "Utilities/CachePathUtilities.h"
 
@@ -31,6 +34,16 @@ using nlohmann::json;
 using namespace DirectX;
 
 namespace {
+
+constexpr uint32_t kMaxSkinInfluences = 8u;
+
+struct PackedSkinningInfluences
+{
+	XMUINT4 joints0{ 0, 0, 0, 0 };
+	XMUINT4 joints1{ 0, 0, 0, 0 };
+	XMFLOAT4 weights0{ 0, 0, 0, 0 };
+	XMFLOAT4 weights1{ 0, 0, 0, 0 };
+};
 
 // Internal types
 
@@ -59,11 +72,13 @@ struct AccessorInfo {
 	size_t count = 0;
 	int componentType = 0;
 	std::string type;
+	bool normalized = false;
 };
 
 enum class BufferBacking {
 	FileSpan,
 	DataUri,
+	Fallback, // URI-less buffer used by EXT_meshopt_compression; not directly readable
 };
 
 struct BufferSource {
@@ -77,6 +92,12 @@ struct BufferSource {
 struct ParsedDocument {
 	json gltf;
 	std::vector<BufferSource> buffers;
+	bool hasMeshoptCompression = false;
+
+	// Cache of decompressed bufferView data for EXT_meshopt_compression.
+	// Keyed by bufferView index. Protected by mutex for parallel access.
+	std::unordered_map<size_t, std::vector<uint8_t>> decompressedBufferViews;
+	std::unique_ptr<std::mutex> decompressedViewsMutex = std::make_unique<std::mutex>();
 };
 
 // Constants
@@ -283,6 +304,7 @@ AccessorInfo GetAccessorInfo(const json& gltf, size_t accessorIndex) {
 	info.count = accessor.at("count").get<size_t>();
 	info.componentType = accessor.at("componentType").get<int>();
 	info.type = accessor.at("type").get<std::string>();
+	info.normalized = accessor.value<bool>("normalized", false);
 	return info;
 }
 
@@ -312,12 +334,36 @@ T ReadTyped(const std::vector<uint8_t>& buffer, size_t byteOffset) {
 	return value;
 }
 
-double ReadComponentAsDouble(const std::vector<uint8_t>& source, int componentType, size_t byteOffset) {
+double ReadComponentAsDouble(const std::vector<uint8_t>& source, int componentType, size_t byteOffset, bool normalized = false) {
 	switch (componentType) {
-	case 5120: return static_cast<double>(ReadTyped<int8_t>(source, byteOffset));
-	case 5121: return static_cast<double>(ReadTyped<uint8_t>(source, byteOffset));
-	case 5122: return static_cast<double>(ReadTyped<int16_t>(source, byteOffset));
-	case 5123: return static_cast<double>(ReadTyped<uint16_t>(source, byteOffset));
+	case 5120: {
+		const int8_t value = ReadTyped<int8_t>(source, byteOffset);
+		if (!normalized) {
+			return static_cast<double>(value);
+		}
+		return std::max(static_cast<double>(value) / 127.0, -1.0);
+	}
+	case 5121: {
+		const uint8_t value = ReadTyped<uint8_t>(source, byteOffset);
+		if (!normalized) {
+			return static_cast<double>(value);
+		}
+		return static_cast<double>(value) / 255.0;
+	}
+	case 5122: {
+		const int16_t value = ReadTyped<int16_t>(source, byteOffset);
+		if (!normalized) {
+			return static_cast<double>(value);
+		}
+		return std::max(static_cast<double>(value) / 32767.0, -1.0);
+	}
+	case 5123: {
+		const uint16_t value = ReadTyped<uint16_t>(source, byteOffset);
+		if (!normalized) {
+			return static_cast<double>(value);
+		}
+		return static_cast<double>(value) / 65535.0;
+	}
 	case 5125: return static_cast<double>(ReadTyped<uint32_t>(source, byteOffset));
 	case 5126: return static_cast<double>(ReadTyped<float>(source, byteOffset));
 	default:
@@ -328,6 +374,12 @@ double ReadComponentAsDouble(const std::vector<uint8_t>& source, int componentTy
 // Buffer reading
 
 std::vector<uint8_t> ReadFromSource(const BufferSource& source, uint64_t offset, uint64_t size) {
+	if (source.backing == BufferBacking::Fallback) {
+		throw std::runtime_error(
+			"Attempted to read from a fallback buffer (no URI). "
+			"This buffer is only used by EXT_meshopt_compression and should not be read directly.");
+	}
+
 	if (source.backing == BufferBacking::DataUri) {
 		const auto bytes = DecodeDataUri(source.dataUri);
 		if (offset > bytes.size() || size > bytes.size() - offset) {
@@ -348,17 +400,98 @@ std::vector<uint8_t> ReadFromSource(const BufferSource& source, uint64_t offset,
 	return ReadFileRange(source.filePath, source.fileOffset + offset, size);
 }
 
-std::vector<uint8_t> ReadAccessorRawWindow(const ParsedDocument& doc, size_t accessorIndex, size_t firstElement, size_t elementCount, size_t* outStride, size_t* outComponentCount, int* outComponentType) {
+// EXT_meshopt_compression: check if a bufferView is meshopt-compressed.
+bool IsMeshoptCompressedView(const json& gltf, size_t bufferViewIndex) {
+	const auto& bvArray = gltf.at("bufferViews");
+	if (bufferViewIndex >= bvArray.size()) return false;
+	const auto& bv = bvArray[bufferViewIndex];
+	return bv.contains("extensions") &&
+	       bv["extensions"].contains("EXT_meshopt_compression");
+}
+
+// EXT_meshopt_compression: decompress a bufferView and cache the result.
+// Returns a pointer to the decompressed data vector (stable because it's in an unordered_map).
+const std::vector<uint8_t>& GetDecompressedBufferView(ParsedDocument& doc, size_t bufferViewIndex) {
+	// Fast path: check cache under lock.
+	{
+		std::lock_guard<std::mutex> lock(*doc.decompressedViewsMutex);
+		auto it = doc.decompressedBufferViews.find(bufferViewIndex);
+		if (it != doc.decompressedBufferViews.end()) {
+			return it->second;
+		}
+	}
+
+	const auto& bv = doc.gltf["bufferViews"][bufferViewIndex];
+	const auto& ext = bv["extensions"]["EXT_meshopt_compression"];
+
+	const size_t compBufferIndex = ext.at("buffer").get<size_t>();
+	const size_t compByteOffset = ext.value<size_t>("byteOffset", static_cast<size_t>(0));
+	const size_t compByteLength = ext.at("byteLength").get<size_t>();
+	const size_t count = ext.at("count").get<size_t>();
+	const size_t stride = ext.at("byteStride").get<size_t>();
+	const std::string mode = ext.at("mode").get<std::string>();
+	const std::string filter = ext.value<std::string>("filter", "NONE");
+
+	if (compBufferIndex >= doc.buffers.size()) {
+		throw std::runtime_error("EXT_meshopt_compression: buffer index " +
+			std::to_string(compBufferIndex) + " out of range");
+	}
+
+	// Read compressed data from the source buffer.
+	auto compressedData = ReadFromSource(doc.buffers[compBufferIndex], compByteOffset, compByteLength);
+
+	// Decompress.
+	std::vector<uint8_t> decompressed(count * stride);
+	int rc = -1;
+	if (mode == "ATTRIBUTES") {
+		rc = meshopt_decodeVertexBuffer(decompressed.data(), count, stride,
+			compressedData.data(), compressedData.size());
+	} else if (mode == "TRIANGLES") {
+		rc = meshopt_decodeIndexBuffer(decompressed.data(), count, stride,
+			compressedData.data(), compressedData.size());
+	} else if (mode == "INDICES") {
+		rc = meshopt_decodeIndexSequence(decompressed.data(), count, stride,
+			compressedData.data(), compressedData.size());
+	} else {
+		throw std::runtime_error("EXT_meshopt_compression: unsupported mode '" + mode + "'");
+	}
+
+	if (rc != 0) {
+		throw std::runtime_error("EXT_meshopt_compression: meshopt decode failed for bufferView " +
+			std::to_string(bufferViewIndex) + " (mode=" + mode + ")");
+	}
+
+	// Apply optional decode filter.
+	if (filter == "OCTAHEDRAL") {
+		meshopt_decodeFilterOct(decompressed.data(), count, stride);
+	} else if (filter == "QUATERNION") {
+		meshopt_decodeFilterQuat(decompressed.data(), count, stride);
+	} else if (filter == "EXPONENTIAL") {
+		meshopt_decodeFilterExp(decompressed.data(), count, stride);
+	} else if (filter != "NONE") {
+		throw std::runtime_error("EXT_meshopt_compression: unsupported filter '" + filter + "'");
+	}
+
+	spdlog::debug("EXT_meshopt_compression: decompressed bufferView {} (mode={}, filter={}, count={}, stride={})",
+		bufferViewIndex, mode, filter, count, stride);
+
+	// Cache under lock.
+	std::lock_guard<std::mutex> lock(*doc.decompressedViewsMutex);
+	auto [it, inserted] = doc.decompressedBufferViews.emplace(bufferViewIndex, std::move(decompressed));
+	return it->second;
+}
+
+std::vector<uint8_t> ReadAccessorRawWindow(ParsedDocument& doc, size_t accessorIndex, size_t firstElement, size_t elementCount, size_t* outStride, size_t* outComponentCount, int* outComponentType) {
 	const AccessorInfo accessor = GetAccessorInfo(doc.gltf, accessorIndex);
 	const BufferViewInfo view = GetBufferViewInfo(doc.gltf, accessor.bufferViewIndex);
-
-	if (view.bufferIndex >= doc.buffers.size()) {
-		throw std::runtime_error("Buffer index out of range");
-	}
 
 	const size_t componentCount = NumComponentsForType(accessor.type);
 	const size_t componentBytes = BytesPerComponent(accessor.componentType);
 	const size_t packedElementSize = componentCount * componentBytes;
+
+	// For meshopt-compressed views, the stride comes from the extension, not the bufferView.
+	const bool isMeshoptView = doc.hasMeshoptCompression &&
+		IsMeshoptCompressedView(doc.gltf, accessor.bufferViewIndex);
 	const size_t stride = view.byteStride == 0 ? packedElementSize : view.byteStride;
 
 	if (elementCount == 0) {
@@ -372,6 +505,31 @@ std::vector<uint8_t> ReadAccessorRawWindow(const ParsedDocument& doc, size_t acc
 		throw std::runtime_error("Accessor window out of bounds");
 	}
 
+	*outStride = stride;
+	*outComponentCount = componentCount;
+	*outComponentType = accessor.componentType;
+
+	if (isMeshoptView) {
+		// Read from the decompressed bufferView cache. The decompressed data
+		// represents the full bufferView contents starting at byte 0, so we
+		// offset from the accessor's byteOffset only (bufferView.byteOffset
+		// was already accounted for during decompression).
+		const auto& decompressed = GetDecompressedBufferView(doc, accessor.bufferViewIndex);
+		const size_t relativeStart = accessor.byteOffset + firstElement * stride;
+		const size_t bytesNeeded = (elementCount - 1) * stride + packedElementSize;
+
+		if (relativeStart + bytesNeeded > decompressed.size()) {
+			throw std::runtime_error("Accessor range exceeds decompressed bufferView bounds");
+		}
+
+		return std::vector<uint8_t>(decompressed.begin() + relativeStart,
+			decompressed.begin() + relativeStart + bytesNeeded);
+	}
+
+	if (view.bufferIndex >= doc.buffers.size()) {
+		throw std::runtime_error("Buffer index out of range");
+	}
+
 	const uint64_t relativeStart = static_cast<uint64_t>(view.byteOffset + accessor.byteOffset + firstElement * stride);
 	const uint64_t relativeEnd = relativeStart + static_cast<uint64_t>((elementCount - 1) * stride + packedElementSize);
 	const uint64_t viewEnd = static_cast<uint64_t>(view.byteOffset + view.byteLength);
@@ -379,10 +537,6 @@ std::vector<uint8_t> ReadAccessorRawWindow(const ParsedDocument& doc, size_t acc
 	if (relativeEnd > viewEnd) {
 		throw std::runtime_error("Accessor range exceeds bufferView bounds");
 	}
-
-	*outStride = stride;
-	*outComponentCount = componentCount;
-	*outComponentType = accessor.componentType;
 
 	return ReadFromSource(doc.buffers[view.bufferIndex], relativeStart, relativeEnd - relativeStart);
 }
@@ -449,12 +603,14 @@ ParsedDocument ParseDocument(const std::string& filePath) {
 	}
 
 	ParsedDocument doc;
-	const std::string extension = path.extension().string();
+	std::string extension = path.extension().string();
+	std::transform(extension.begin(), extension.end(), extension.begin(),
+		[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
 	std::optional<GLBChunkSpan> glbJsonChunk;
 	std::optional<GLBChunkSpan> glbBinChunk;
 
-	if (extension == ".glb" || extension == ".GLB") {
+	if (extension == ".glb") {
 		const uint64_t fileSize = GetFileSize(path);
 		const GLBHeader header = ReadGLBHeader(path);
 		if (header.length != fileSize) {
@@ -491,6 +647,17 @@ ParsedDocument ParseDocument(const std::string& filePath) {
 		throw std::runtime_error("glTF contains no buffers");
 	}
 
+	// Detect EXT_meshopt_compression usage.
+	if (doc.gltf.contains("extensionsUsed") && doc.gltf["extensionsUsed"].is_array()) {
+		for (const auto& ext : doc.gltf["extensionsUsed"]) {
+			if (ext.is_string() && ext.get<std::string>() == "EXT_meshopt_compression") {
+				doc.hasMeshoptCompression = true;
+				spdlog::info("glTF: EXT_meshopt_compression detected in {}", filePath);
+				break;
+			}
+		}
+	}
+
 	const std::filesystem::path parent = path.parent_path();
 
 	for (size_t bufferIndex = 0; bufferIndex < doc.gltf["buffers"].size(); ++bufferIndex) {
@@ -519,8 +686,45 @@ ParsedDocument ParseDocument(const std::string& filePath) {
 			}
 		}
 		else {
-			if (!(extension == ".glb" || extension == ".GLB")) {
-				throw std::runtime_error("Non-GLB buffer missing URI");
+			if (extension != ".glb") {
+				if (doc.hasMeshoptCompression) {
+					// EXT_meshopt_compression: URI-less buffers are fallback placeholders.
+					// The actual data is stored on bufferViews via the extension and will
+					// be decompressed on demand, but we still need this buffer entry for
+					// the extension's compressed data references.
+					source.backing = BufferBacking::Fallback;
+					source.fileLength = buffer.value<uint64_t>("byteLength", static_cast<uint64_t>(0));
+					spdlog::debug("glTF: buffer[{}] is a meshopt fallback (no URI, byteLength={})",
+						bufferIndex, source.fileLength);
+					doc.buffers.push_back(std::move(source));
+					continue;
+				}
+				// Dump buffer object and top-level extensions for diagnostics.
+				std::string bufferDump = buffer.dump(2);
+				std::string extensionsUsed;
+				if (doc.gltf.contains("extensionsUsed")) {
+					extensionsUsed = doc.gltf["extensionsUsed"].dump();
+				}
+				std::string extensionsRequired;
+				if (doc.gltf.contains("extensionsRequired")) {
+					extensionsRequired = doc.gltf["extensionsRequired"].dump();
+				}
+				std::string bufferExtensions;
+				if (buffer.contains("extensions")) {
+					bufferExtensions = buffer["extensions"].dump(2);
+				}
+				spdlog::error("Buffer [{}] has no 'uri' field in non-GLB file: {}", bufferIndex, filePath);
+				spdlog::error("  Buffer object: {}", bufferDump);
+				if (!bufferExtensions.empty())
+					spdlog::error("  Buffer extensions: {}", bufferExtensions);
+				if (!extensionsUsed.empty())
+					spdlog::error("  extensionsUsed: {}", extensionsUsed);
+				if (!extensionsRequired.empty())
+					spdlog::error("  extensionsRequired: {}", extensionsRequired);
+				spdlog::error("  Total buffers in file: {}", doc.gltf["buffers"].size());
+				throw std::runtime_error(
+					"Non-GLB buffer[" + std::to_string(bufferIndex) + "] missing URI in " + filePath
+					+ (extensionsRequired.empty() ? "" : " (extensionsRequired: " + extensionsRequired + ")"));
 			}
 			if (!glbBinChunk.has_value()) {
 				throw std::runtime_error("GLB binary chunk not found");
@@ -547,7 +751,7 @@ ParsedDocument ParseDocument(const std::string& filePath) {
 
 // Index reading
 
-std::vector<uint32_t> ReadAllIndices(const ParsedDocument& doc, const json& primitive, size_t vertexCount) {
+std::vector<uint32_t> ReadAllIndices(ParsedDocument& doc, const json& primitive, size_t vertexCount) {
 	std::vector<uint32_t> indices;
 	if (primitive.contains("indices")) {
 		const size_t accessorIndex = primitive["indices"].get<size_t>();
@@ -586,12 +790,13 @@ std::vector<uint32_t> ReadAllIndices(const ParsedDocument& doc, const json& prim
 // Normal generation
 
 std::vector<XMFLOAT3> ComputeSmoothNormals(
-	const ParsedDocument& doc,
+	ParsedDocument& doc,
 	size_t positionAccessorIndex,
 	size_t vertexCount,
 	const std::vector<uint32_t>& indices)
 {
 	// Read all positions
+	const AccessorInfo positionAccessor = GetAccessorInfo(doc.gltf, positionAccessorIndex);
 	std::vector<XMFLOAT3> positions(vertexCount);
 	constexpr size_t kChunkSize = 32768;
 	for (size_t first = 0; first < vertexCount; first += kChunkSize) {
@@ -603,9 +808,9 @@ std::vector<XMFLOAT3> ComputeSmoothNormals(
 		for (size_t i = 0; i < count; ++i) {
 			const size_t base = i * stride;
 			positions[first + i] = XMFLOAT3(
-				static_cast<float>(ReadComponentAsDouble(bytes, componentType, base + componentBytes * 0)),
-				static_cast<float>(ReadComponentAsDouble(bytes, componentType, base + componentBytes * 1)),
-				static_cast<float>(ReadComponentAsDouble(bytes, componentType, base + componentBytes * 2)));
+				static_cast<float>(ReadComponentAsDouble(bytes, componentType, base + componentBytes * 0, positionAccessor.normalized)),
+				static_cast<float>(ReadComponentAsDouble(bytes, componentType, base + componentBytes * 1, positionAccessor.normalized)),
+				static_cast<float>(ReadComponentAsDouble(bytes, componentType, base + componentBytes * 2, positionAccessor.normalized)));
 		}
 	}
 
@@ -657,7 +862,7 @@ std::vector<XMFLOAT3> ComputeSmoothNormals(
 // Per-primitive Preprocessing
 
 MeshPreprocessResult BuildPrimitivePreprocessData(
-	const ParsedDocument& doc,
+	ParsedDocument& doc,
 	const json& primitive,
 	const std::string& sourceFilePath,
 	size_t meshIndex,
@@ -706,12 +911,102 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 		hasTexcoords = true;
 	}
 
+	bool hasColors = false;
+	size_t colorAccessorIndex = 0;
+	AccessorInfo colorAccessor;
+	if (attributes.contains("COLOR_0")) {
+		colorAccessorIndex = attributes["COLOR_0"].get<size_t>();
+		colorAccessor = GetAccessorInfo(doc.gltf, colorAccessorIndex);
+		const size_t colorComponents = NumComponentsForType(colorAccessor.type);
+		if (colorAccessor.count != vertexCount || (colorComponents != 3 && colorComponents != 4)) {
+			throw std::runtime_error("COLOR_0 accessor size/type mismatch");
+		}
+		hasColors = true;
+	}
+
+	const bool hasJointIndices = attributes.contains("JOINTS_0");
+	const bool hasJointWeights = attributes.contains("WEIGHTS_0");
+	if (hasJointIndices != hasJointWeights) {
+		throw std::runtime_error("glTF primitive skinning requires both JOINTS_0 and WEIGHTS_0");
+	}
+	const bool hasJointIndices1 = attributes.contains("JOINTS_1");
+	const bool hasJointWeights1 = attributes.contains("WEIGHTS_1");
+	if (hasJointIndices1 != hasJointWeights1) {
+		throw std::runtime_error("glTF primitive skinning requires both JOINTS_1 and WEIGHTS_1 when using secondary influences");
+	}
+
+	bool hasSkinning = false;
+	size_t jointAccessorIndex = 0;
+	size_t weightAccessorIndex = 0;
+	size_t jointAccessorIndex1 = 0;
+	size_t weightAccessorIndex1 = 0;
+	AccessorInfo jointAccessor;
+	AccessorInfo weightAccessor;
+	AccessorInfo jointAccessor1;
+	AccessorInfo weightAccessor1;
+	if (hasJointIndices && hasJointWeights) {
+		jointAccessorIndex = attributes["JOINTS_0"].get<size_t>();
+		weightAccessorIndex = attributes["WEIGHTS_0"].get<size_t>();
+		jointAccessor = GetAccessorInfo(doc.gltf, jointAccessorIndex);
+		weightAccessor = GetAccessorInfo(doc.gltf, weightAccessorIndex);
+		if (jointAccessor.count != vertexCount || weightAccessor.count != vertexCount) {
+			throw std::runtime_error("glTF skinning accessor count mismatch");
+		}
+		if (NumComponentsForType(jointAccessor.type) != 4 || NumComponentsForType(weightAccessor.type) != 4) {
+			throw std::runtime_error("glTF JOINTS_0 and WEIGHTS_0 accessors must be VEC4");
+		}
+		if (jointAccessor.componentType != 5121 && jointAccessor.componentType != 5123) {
+			throw std::runtime_error("glTF JOINTS_0 must use UNSIGNED_BYTE or UNSIGNED_SHORT");
+		}
+		hasSkinning = true;
+	}
+
+	if (hasJointIndices1 && hasJointWeights1) {
+		jointAccessorIndex1 = attributes["JOINTS_1"].get<size_t>();
+		weightAccessorIndex1 = attributes["WEIGHTS_1"].get<size_t>();
+		jointAccessor1 = GetAccessorInfo(doc.gltf, jointAccessorIndex1);
+		weightAccessor1 = GetAccessorInfo(doc.gltf, weightAccessorIndex1);
+		if (jointAccessor1.count != vertexCount || weightAccessor1.count != vertexCount) {
+			throw std::runtime_error("glTF secondary skinning accessor count mismatch");
+		}
+		if (NumComponentsForType(jointAccessor1.type) != 4 || NumComponentsForType(weightAccessor1.type) != 4) {
+			throw std::runtime_error("glTF JOINTS_1 and WEIGHTS_1 accessors must be VEC4");
+		}
+		if (jointAccessor1.componentType != 5121 && jointAccessor1.componentType != 5123) {
+			throw std::runtime_error("glTF JOINTS_1 must use UNSIGNED_BYTE or UNSIGNED_SHORT");
+		}
+	}
+
+    std::map<uint32_t, size_t> texcoordAccessorIndices;
+    uint32_t maxTexcoordSetIndex = 0;
+    bool hasAnyTexcoordSet = false;
+    for (auto it = attributes.begin(); it != attributes.end(); ++it) {
+        const std::string& attributeName = it.key();
+        if (attributeName.rfind("TEXCOORD_", 0) != 0) {
+            continue;
+        }
+
+        const uint32_t setIndex = static_cast<uint32_t>(std::stoul(attributeName.substr(strlen("TEXCOORD_"))));
+        texcoordAccessorIndices.emplace(setIndex, it.value().get<size_t>());
+        maxTexcoordSetIndex = std::max(maxTexcoordSetIndex, setIndex);
+        hasAnyTexcoordSet = true;
+    }
+
 	unsigned int meshFlags = VertexFlags::VERTEX_NORMALS; // Always present: authored or generated
 	if (hasTexcoords) {
 		meshFlags |= VertexFlags::VERTEX_TEXCOORDS;
 	}
+	if (hasColors) {
+		meshFlags |= VertexFlags::VERTEX_COLORS;
+	}
+	if (hasSkinning) {
+		meshFlags |= VertexFlags::VERTEX_SKINNED;
+	}
 
-	const uint8_t vertexSize = static_cast<uint8_t>(sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0));
+	const uint8_t vertexSize = static_cast<uint8_t>(MeshVertexLayout::VertexSize(meshFlags));
+	const unsigned int skinningVertexSize = hasSkinning
+		? static_cast<unsigned int>(sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + sizeof(PackedSkinningInfluences))
+		: 0u;
 
 	CLodCacheLoader::MeshCacheIdentity cacheIdentity{};
 	cacheIdentity.sourceIdentifier = NormalizeCacheSourcePath(sourceFilePath);
@@ -720,7 +1015,40 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 
 	auto prebuiltData = CLodCacheLoader::TryLoadPrebuilt(cacheIdentity);
 
-	MeshIngestBuilder ingest(vertexSize, 0, meshFlags);
+	MeshIngestBuilder ingest(vertexSize, skinningVertexSize, meshFlags);
+    std::vector<MeshUvSetData> uvSets;
+    if (hasAnyTexcoordSet) {
+        uvSets.resize(static_cast<size_t>(maxTexcoordSetIndex) + 1u);
+        for (uint32_t setIndex = 0; setIndex <= maxTexcoordSetIndex; ++setIndex) {
+            uvSets[setIndex].name = "TEXCOORD_" + std::to_string(setIndex);
+            uvSets[setIndex].values.assign(vertexCount, XMFLOAT2(0.0f, 0.0f));
+        }
+
+        for (const auto& [setIndex, accessorIndex] : texcoordAccessorIndices) {
+            const AccessorInfo accessor = GetAccessorInfo(doc.gltf, accessorIndex);
+            if (accessor.count != vertexCount || NumComponentsForType(accessor.type) != 2) {
+                throw std::runtime_error("TEXCOORD accessor size/type mismatch");
+            }
+
+            constexpr size_t kUvChunkSize = 32768;
+            for (size_t firstVertex = 0; firstVertex < vertexCount; firstVertex += kUvChunkSize) {
+                const size_t chunkVertexCount = std::min(kUvChunkSize, vertexCount - firstVertex);
+                size_t stride = 0;
+                size_t components = 0;
+                int componentType = 0;
+                const auto uvBytes = ReadAccessorRawWindow(doc, accessorIndex, firstVertex, chunkVertexCount, &stride, &components, &componentType);
+                const size_t componentBytes = BytesPerComponent(componentType);
+
+                for (size_t i = 0; i < chunkVertexCount; ++i) {
+                    const size_t uvBase = i * stride;
+                    uvSets[setIndex].values[firstVertex + i] = XMFLOAT2(
+                        static_cast<float>(ReadComponentAsDouble(uvBytes, componentType, uvBase + componentBytes * 0, accessor.normalized)),
+                        static_cast<float>(ReadComponentAsDouble(uvBytes, componentType, uvBase + componentBytes * 1, accessor.normalized)));
+                }
+            }
+        }
+    }
+    ingest.SetUvSets(std::move(uvSets));
 	if (prebuiltData.has_value()) {
 		return MeshPreprocessResult(std::move(ingest), std::move(cacheIdentity), std::move(prebuiltData));
 	}
@@ -739,6 +1067,7 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 	ingest.ReserveVertices(vertexCount);
 
 	constexpr size_t kVertexChunkSize = 32768;
+	bool warnedZeroWeightVertex = false;
 	for (size_t firstVertex = 0; firstVertex < vertexCount; firstVertex += kVertexChunkSize) {
 		const size_t chunkVertexCount = std::min(kVertexChunkSize, vertexCount - firstVertex);
 
@@ -768,42 +1097,165 @@ MeshPreprocessResult BuildPrimitivePreprocessData(
 			texcoordComponentBytes = BytesPerComponent(texcoordComponentType);
 		}
 
+		size_t colorStride = 0;
+		size_t colorComponents = 0;
+		int colorComponentType = 0;
+		std::vector<uint8_t> colorBytes;
+		size_t colorComponentBytes = 0;
+		if (hasColors) {
+			colorBytes = ReadAccessorRawWindow(doc, colorAccessorIndex, firstVertex, chunkVertexCount, &colorStride, &colorComponents, &colorComponentType);
+			colorComponentBytes = BytesPerComponent(colorComponentType);
+		}
+
+		size_t jointStride = 0;
+		size_t jointComponents = 0;
+		int jointComponentType = 0;
+		std::vector<uint8_t> jointBytes;
+		size_t jointComponentBytes = 0;
+		size_t jointStride1 = 0;
+		size_t jointComponents1 = 0;
+		int jointComponentType1 = 0;
+		std::vector<uint8_t> jointBytes1;
+		size_t jointComponentBytes1 = 0;
+		if (hasSkinning) {
+			jointBytes = ReadAccessorRawWindow(doc, jointAccessorIndex, firstVertex, chunkVertexCount, &jointStride, &jointComponents, &jointComponentType);
+			jointComponentBytes = BytesPerComponent(jointComponentType);
+			if (hasJointIndices1 && hasJointWeights1) {
+				jointBytes1 = ReadAccessorRawWindow(doc, jointAccessorIndex1, firstVertex, chunkVertexCount, &jointStride1, &jointComponents1, &jointComponentType1);
+				jointComponentBytes1 = BytesPerComponent(jointComponentType1);
+			}
+		}
+
+		size_t weightStride = 0;
+		size_t weightComponents = 0;
+		int weightComponentType = 0;
+		std::vector<uint8_t> weightBytes;
+		size_t weightComponentBytes = 0;
+		size_t weightStride1 = 0;
+		size_t weightComponents1 = 0;
+		int weightComponentType1 = 0;
+		std::vector<uint8_t> weightBytes1;
+		size_t weightComponentBytes1 = 0;
+		if (hasSkinning) {
+			weightBytes = ReadAccessorRawWindow(doc, weightAccessorIndex, firstVertex, chunkVertexCount, &weightStride, &weightComponents, &weightComponentType);
+			weightComponentBytes = BytesPerComponent(weightComponentType);
+			if (hasJointIndices1 && hasJointWeights1) {
+				weightBytes1 = ReadAccessorRawWindow(doc, weightAccessorIndex1, firstVertex, chunkVertexCount, &weightStride1, &weightComponents1, &weightComponentType1);
+				weightComponentBytes1 = BytesPerComponent(weightComponentType1);
+			}
+		}
+
 		for (size_t i = 0; i < chunkVertexCount; ++i) {
 			const size_t positionBase = i * positionStride;
 			const XMFLOAT3 pos(
-				static_cast<float>(ReadComponentAsDouble(positionBytes, positionComponentType, positionBase + positionComponentBytes * 0)),
-				static_cast<float>(ReadComponentAsDouble(positionBytes, positionComponentType, positionBase + positionComponentBytes * 1)),
-				static_cast<float>(ReadComponentAsDouble(positionBytes, positionComponentType, positionBase + positionComponentBytes * 2)));
+				static_cast<float>(ReadComponentAsDouble(positionBytes, positionComponentType, positionBase + positionComponentBytes * 0, positionAccessor.normalized)),
+				static_cast<float>(ReadComponentAsDouble(positionBytes, positionComponentType, positionBase + positionComponentBytes * 1, positionAccessor.normalized)),
+				static_cast<float>(ReadComponentAsDouble(positionBytes, positionComponentType, positionBase + positionComponentBytes * 2, positionAccessor.normalized)));
 
 			XMFLOAT3 normal;
 			if (hasNormals) {
 				const size_t normalBase = i * normalStride;
 				normal = XMFLOAT3(
-					static_cast<float>(ReadComponentAsDouble(normalBytes, normalComponentType, normalBase + normalComponentBytes * 0)),
-					static_cast<float>(ReadComponentAsDouble(normalBytes, normalComponentType, normalBase + normalComponentBytes * 1)),
-					static_cast<float>(ReadComponentAsDouble(normalBytes, normalComponentType, normalBase + normalComponentBytes * 2))
+					static_cast<float>(ReadComponentAsDouble(normalBytes, normalComponentType, normalBase + normalComponentBytes * 0, normalAccessor.normalized)),
+					static_cast<float>(ReadComponentAsDouble(normalBytes, normalComponentType, normalBase + normalComponentBytes * 1, normalAccessor.normalized)),
+					static_cast<float>(ReadComponentAsDouble(normalBytes, normalComponentType, normalBase + normalComponentBytes * 2, normalAccessor.normalized))
 				);
 			}
 			else {
 				normal = generatedNormals[firstVertex + i];
 			}
 
-			std::array<std::byte, sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + sizeof(XMFLOAT2)> packedVertex{};
+			std::array<std::byte, MeshVertexLayout::MaxVertexSize> packedVertex{};
 			std::memcpy(packedVertex.data(), &pos, sizeof(XMFLOAT3));
-			size_t offset = sizeof(XMFLOAT3);
-			std::memcpy(packedVertex.data() + offset, &normal, sizeof(XMFLOAT3));
-			offset += sizeof(XMFLOAT3);
+			std::memcpy(packedVertex.data() + MeshVertexLayout::NormalOffset, &normal, sizeof(XMFLOAT3));
 
 			if (hasTexcoords) {
 				const size_t texcoordBase = i * texcoordStride;
 				const XMFLOAT2 uv(
-					static_cast<float>(ReadComponentAsDouble(texcoordBytes, texcoordComponentType, texcoordBase + texcoordComponentBytes * 0)),
-					static_cast<float>(ReadComponentAsDouble(texcoordBytes, texcoordComponentType, texcoordBase + texcoordComponentBytes * 1))
+					static_cast<float>(ReadComponentAsDouble(texcoordBytes, texcoordComponentType, texcoordBase + texcoordComponentBytes * 0, texcoordAccessor.normalized)),
+					static_cast<float>(ReadComponentAsDouble(texcoordBytes, texcoordComponentType, texcoordBase + texcoordComponentBytes * 1, texcoordAccessor.normalized))
 				);
-				std::memcpy(packedVertex.data() + offset, &uv, sizeof(XMFLOAT2));
+				std::memcpy(packedVertex.data() + MeshVertexLayout::TexcoordOffset(meshFlags), &uv, sizeof(XMFLOAT2));
+			}
+
+			if (hasColors) {
+				const size_t colorBase = i * colorStride;
+				const XMFLOAT3 color(
+					static_cast<float>(ReadComponentAsDouble(colorBytes, colorComponentType, colorBase + colorComponentBytes * 0, colorAccessor.normalized)),
+					static_cast<float>(ReadComponentAsDouble(colorBytes, colorComponentType, colorBase + colorComponentBytes * 1, colorAccessor.normalized)),
+					static_cast<float>(ReadComponentAsDouble(colorBytes, colorComponentType, colorBase + colorComponentBytes * 2, colorAccessor.normalized))
+				);
+				std::memcpy(packedVertex.data() + MeshVertexLayout::ColorOffset(meshFlags), &color, sizeof(XMFLOAT3));
 			}
 
 			ingest.AppendVertexBytes(packedVertex.data(), vertexSize);
+
+			if (hasSkinning) {
+				const size_t jointBase = i * jointStride;
+				const size_t weightBase = i * weightStride;
+				const size_t jointBase1 = i * jointStride1;
+				const size_t weightBase1 = i * weightStride1;
+
+				uint32_t joints[8] = {};
+				float weights[8] = {};
+				float weightSum = 0.0f;
+				for (size_t componentIndex = 0; componentIndex < 4; ++componentIndex) {
+					joints[componentIndex] = static_cast<uint32_t>(ReadComponentAsDouble(
+						jointBytes,
+						jointComponentType,
+						jointBase + jointComponentBytes * componentIndex,
+						jointAccessor.normalized));
+					weights[componentIndex] = static_cast<float>(ReadComponentAsDouble(
+						weightBytes,
+						weightComponentType,
+						weightBase + weightComponentBytes * componentIndex,
+						weightAccessor.normalized));
+					weightSum += weights[componentIndex];
+				}
+				if (hasJointIndices1 && hasJointWeights1) {
+					for (size_t componentIndex = 0; componentIndex < 4; ++componentIndex) {
+						joints[componentIndex + 4] = static_cast<uint32_t>(ReadComponentAsDouble(
+							jointBytes1,
+							jointComponentType1,
+							jointBase1 + jointComponentBytes1 * componentIndex,
+							jointAccessor1.normalized));
+						weights[componentIndex + 4] = static_cast<float>(ReadComponentAsDouble(
+							weightBytes1,
+							weightComponentType1,
+							weightBase1 + weightComponentBytes1 * componentIndex,
+							weightAccessor1.normalized));
+						weightSum += weights[componentIndex + 4];
+					}
+				}
+
+				if (weightSum > 0.0f) {
+					const float invWeightSum = 1.0f / weightSum;
+					for (float& weight : weights) {
+						weight *= invWeightSum;
+					}
+				}
+				else {
+					if (!warnedZeroWeightVertex) {
+						spdlog::warn("glTF mesh {} primitive {} has vertices with zero total skin weight; defaulting the first weight to 1", meshIndex, primitiveIndex);
+						warnedZeroWeightVertex = true;
+					}
+					weights[0] = 1.0f;
+				}
+
+				PackedSkinningInfluences packedInfluences;
+				packedInfluences.joints0 = XMUINT4(joints[0], joints[1], joints[2], joints[3]);
+				packedInfluences.joints1 = XMUINT4(joints[4], joints[5], joints[6], joints[7]);
+				packedInfluences.weights0 = XMFLOAT4(weights[0], weights[1], weights[2], weights[3]);
+				packedInfluences.weights1 = XMFLOAT4(weights[4], weights[5], weights[6], weights[7]);
+
+				std::array<std::byte, sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + sizeof(PackedSkinningInfluences)> packedSkinningVertex{};
+				std::memcpy(packedSkinningVertex.data(), &pos, sizeof(XMFLOAT3));
+				size_t skinningOffset = sizeof(XMFLOAT3);
+				std::memcpy(packedSkinningVertex.data() + skinningOffset, &normal, sizeof(XMFLOAT3));
+				skinningOffset += sizeof(XMFLOAT3);
+				std::memcpy(packedSkinningVertex.data() + skinningOffset, &packedInfluences, sizeof(PackedSkinningInfluences));
+				ingest.AppendSkinningVertexBytes(packedSkinningVertex.data(), skinningVertexSize);
+			}
 		}
 	}
 

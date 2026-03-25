@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -9,6 +10,7 @@
 #include "Resources/Resource.h"
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "Resources/ResourceGroup.h"
+#include "Render/Runtime/UploadTypes.h"
 #include "ShaderBuffers.h"
 
 class GpuBufferBacking;
@@ -114,6 +116,13 @@ public:
 	// Return pinned pages to the dedicated pinned-slab free list.
 	void FreePinnedPages(const std::vector<uint32_t>& pageIDs);
 
+	// Upload callback signature: (data, dataSize, target, dstOffset).
+	using UploadFn = std::function<void(const void*, size_t, rg::runtime::UploadTarget, size_t)>;
+
+	// Override the upload function used by UploadToPage / FlushPageTableUpdates.
+	// When not set, the default BUFFER_UPLOAD macro path is used.
+	void SetUploadFunction(UploadFn fn) { m_uploadFn = std::move(fn); }
+
 private:
 	enum class SlabRole : uint8_t {
 		General,
@@ -142,6 +151,9 @@ private:
 
 	// ResourceGroup tracking all slab buffers for render graph auto-invalidation.
 	std::shared_ptr<ResourceGroup> m_slabResourceGroup;
+
+	// Optional upload function override; when empty, falls back to BUFFER_UPLOAD.
+	UploadFn m_uploadFn;
 
 	// Allocate a new slab. Streaming slabs are capped by numStreamingSlabs.
 	bool AllocateNewSlab(SlabRole role);

@@ -179,13 +179,6 @@ DirectX::XMFLOAT2 UpscalingManager::GetJitter(uint64_t frameNumber) {
 }
 
 bool UpscalingManager::InitSL() {
-
-    m_numFramesInFlight = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numFramesInFlight")();
-    m_frameTokens.resize(m_numFramesInFlight);
-    for (uint32_t i = 0; i < m_numFramesInFlight; i++) {
-        slGetNewFrameToken(m_frameTokens[i], &i);
-    }
-
     return true;
 }
 
@@ -259,8 +252,15 @@ void UpscalingManager::Setup() {
     }
 }
 
-void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Components::Camera* camera, uint8_t frameIndex, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
-    auto frameToken = m_frameTokens[frameIndex];
+void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Components::Camera* camera, uint64_t frameNumber, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
+    sl::FrameToken* frameToken = nullptr;
+    const uint32_t streamlineFrameIndex = static_cast<uint32_t>(frameNumber);
+    if (SL_FAILED(result, slGetNewFrameToken(frameToken, &streamlineFrameIndex)) || frameToken == nullptr)
+    {
+        spdlog::error("Failed to get Streamline frame token for frame {}", frameNumber);
+        return;
+    }
+
     auto myViewport = sl::ViewportHandle(0); // 0 is the default viewport
     auto renderRes = m_getRenderRes();
     auto outputRes = m_getOutputRes();
@@ -283,14 +283,13 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
     sl::matrixMul(clipToPrevCameraView, consts.clipToCameraView, cameraViewToPrevCameraView);
 
     sl::float4x4 cameraViewToClipPrev;
-    StoreFloat4x4(camera->info.unjitteredProjection, cameraViewToClipPrev); // TODO: should we store the actual previous prjection matrix?
+    StoreFloat4x4(camera->info.prevUnjitteredProjection, cameraViewToClipPrev);
     sl::matrixMul(consts.clipToPrevClip, clipToPrevCameraView, cameraViewToClipPrev); // Transform between current and previous clip space
     sl::matrixFullInvert(consts.prevClipToClip, consts.clipToPrevClip); // Transform between previous and current clip space
 	consts.jitterOffset.x = camera->jitterPixelSpace.x;
     consts.jitterOffset.y = camera->jitterPixelSpace.y;
 
-    // Motion vectors are curNDC - prevNDC; DLSS expects prevNDC - curNDC, so negate both.
-    consts.mvecScale = { -1.0f, -1.0f };
+    consts.mvecScale = { -1.0f , 1.0f };
 
     consts.cameraPinholeOffset = { 0, 0 };
     consts.cameraPos = { camera->info.positionWorldSpace.x, camera->info.positionWorldSpace.y, camera->info.positionWorldSpace.z };
@@ -419,14 +418,14 @@ void UpscalingManager::EvaluateNone(rhi::CommandList& commandList, const Compone
     commandList.CopyTextureRegion(dst, src);
 }
 
-void UpscalingManager::Evaluate(rhi::CommandList& commandList, const Components::Camera* camera, uint8_t frameIndex, double elapsedSeconds, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
+void UpscalingManager::Evaluate(rhi::CommandList& commandList, const Components::Camera* camera, uint64_t frameNumber, double elapsedSeconds, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors) {
     switch (m_upscalingMode)
     {
 	    case UpscalingMode::None:
             EvaluateNone(commandList, camera, pHDRTarget, pUpscaledHDRTarget, pDepthTexture, pMotionVectors);
 			break;
         case UpscalingMode::DLSS:
-			EvaluateDLSS(commandList, camera, frameIndex, pHDRTarget, pUpscaledHDRTarget, pDepthTexture, pMotionVectors);
+			EvaluateDLSS(commandList, camera, frameNumber, pHDRTarget, pUpscaledHDRTarget, pDepthTexture, pMotionVectors);
             break;
         case UpscalingMode::FSR3:
 			EvaluateFSR3(commandList, camera, elapsedSeconds, pHDRTarget, pUpscaledHDRTarget, pDepthTexture, pMotionVectors);

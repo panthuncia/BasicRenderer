@@ -1,6 +1,7 @@
 #include "Render/GraphExtensions/ClusterLOD/ClusterRasterizationPass.h"
 
 #include <algorithm>
+#include <limits>
 
 #include "Managers/MaterialManager.h"
 #include "Managers/Singletons/DeviceManager.h"
@@ -11,20 +12,34 @@
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "BuiltinResources.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
-#include "../shaders/PerPassRootConstants/clodRootConstants.h"
+#include "../shaders/PerPassRootConstants/clodRasterizationRootConstants.h"
+
+namespace {
+constexpr uint32_t kDeepVisibilityAverageFragmentsPerPixel = 5u;
+}
 
 ClusterRasterizationPass::ClusterRasterizationPass(
     ClusterRasterizationPassInputs inputs,
     std::shared_ptr<Buffer> compactedVisibleClustersBuffer,
     std::shared_ptr<Buffer> rasterBucketsHistogramBuffer,
     std::shared_ptr<Buffer> rasterBucketsIndirectArgsBuffer,
+    std::shared_ptr<Buffer> sortedToUnsortedMappingBuffer,
+    std::shared_ptr<Buffer> deepVisibilityNodesBuffer,
+    std::shared_ptr<Buffer> deepVisibilityCounterBuffer,
+    std::shared_ptr<Buffer> deepVisibilityOverflowCounterBuffer,
     std::shared_ptr<ResourceGroup> slabResourceGroup)
     : m_compactedVisibleClustersBuffer(std::move(compactedVisibleClustersBuffer))
     , m_rasterBucketsHistogramBuffer(std::move(rasterBucketsHistogramBuffer))
     , m_rasterBucketsIndirectArgsBuffer(std::move(rasterBucketsIndirectArgsBuffer))
+    , m_sortedToUnsortedMappingBuffer(std::move(sortedToUnsortedMappingBuffer))
+    , m_deepVisibilityNodesBuffer(std::move(deepVisibilityNodesBuffer))
+    , m_deepVisibilityCounterBuffer(std::move(deepVisibilityCounterBuffer))
+    , m_deepVisibilityOverflowCounterBuffer(std::move(deepVisibilityOverflowCounterBuffer))
     , m_slabResourceGroup(std::move(slabResourceGroup)) {
     m_wireframe = inputs.wireframe;
     m_clearGbuffer = inputs.clearGbuffer;
+    m_renderPhase = std::move(inputs.renderPhase);
+    m_outputKind = inputs.outputKind;
 
     m_viewRasterInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodViewRasterInfo), false, false, false, false);
     m_viewRasterInfoBuffer->SetName("CLodViewRasterInfoBuffer");
@@ -50,6 +65,9 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerMaterialDataBuffer,
             Builtin::PostSkinningVertices,
+            Builtin::SkeletonResources::InverseBindMatrices,
+            Builtin::SkeletonResources::BoneTransforms,
+            Builtin::SkeletonResources::SkinningInstanceInfo,
             Builtin::CameraBuffer,
             Builtin::CLod::Offsets,
             Builtin::CLod::GroupChunks,
@@ -60,12 +78,27 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
             Builtin::MeshResources::MeshletOffsets,
             m_compactedVisibleClustersBuffer,
             m_rasterBucketsHistogramBuffer,
-            m_viewRasterInfoBuffer)
+            m_viewRasterInfoBuffer,
+            m_sortedToUnsortedMappingBuffer)
         .WithIndirectArguments(m_rasterBucketsIndirectArgsBuffer)
         .IsGeometryPass();
 
-    for (auto& vb : m_visibilityBuffers) {
-        builder->WithUnorderedAccess(vb);
+    if (m_outputKind == CLodRasterOutputKind::VisibilityBuffer) {
+        for (auto& vb : m_visibilityBuffers) {
+            builder->WithUnorderedAccess(vb);
+        }
+    }
+    else if (m_outputKind == CLodRasterOutputKind::DeepVisibility) {
+        for (auto& vb : m_visibilityBuffers) {
+            builder->WithShaderResource(vb);
+        }
+        for (auto& headPointers : m_deepVisibilityHeadPointerBuffers) {
+            builder->WithUnorderedAccess(headPointers);
+        }
+        builder->WithUnorderedAccess(
+            m_deepVisibilityNodesBuffer,
+            m_deepVisibilityCounterBuffer,
+            m_deepVisibilityOverflowCounterBuffer);
     }
 
     // Declare page pool slabs for bindless access (auto-invalidates when new slabs are added).
@@ -87,6 +120,9 @@ void ClusterRasterizationPass::Setup() {
     RegisterSRV(Builtin::PerMeshInstanceBuffer);
     RegisterSRV(Builtin::PerMeshBuffer);
     RegisterSRV(Builtin::PerMaterialDataBuffer);
+    RegisterSRV(Builtin::SkeletonResources::InverseBindMatrices);
+    RegisterSRV(Builtin::SkeletonResources::BoneTransforms);
+    RegisterSRV(Builtin::SkeletonResources::SkinningInstanceInfo);
     RegisterSRV(Builtin::MeshResources::MeshletOffsets);
     RegisterSRV(Builtin::CLod::MeshMetadata);
 }
@@ -96,44 +132,97 @@ void ClusterRasterizationPass::Update(const UpdateExecutionContext& executionCon
     auto& context = *updateContext;
 
     auto numViews = context.viewManager->GetCameraBufferSize();
-
-    m_visibilityBuffers.clear();
+    std::vector<std::shared_ptr<PixelBuffer>> visibilityBuffers;
+    std::vector<std::shared_ptr<PixelBuffer>> deepVisibilityHeadPointerBuffers;
 
     uint32_t maxViewWidth = 1;
     uint32_t maxViewHeight = 1;
+    uint64_t totalViewPixels = 0;
 
     context.viewManager->ForEachView([&](uint64_t v) {
         auto viewInfo = context.viewManager->Get(v);
-        if (viewInfo->gpu.visibilityBuffer != nullptr) {
+        if (!viewInfo || !viewInfo->gpu.visibilityBuffer) {
+            return;
+        }
+
+        if (m_outputKind == CLodRasterOutputKind::VisibilityBuffer) {
             maxViewWidth = std::max(maxViewWidth, viewInfo->gpu.visibilityBuffer->GetWidth());
             maxViewHeight = std::max(maxViewHeight, viewInfo->gpu.visibilityBuffer->GetHeight());
+        }
+        else {
+            auto headPointers = context.viewManager->EnsureCLodDeepVisibilityHeadPointers(v);
+            if (!headPointers) {
+                return;
+            }
+
+            maxViewWidth = std::max(maxViewWidth, headPointers->GetWidth());
+            maxViewHeight = std::max(maxViewHeight, headPointers->GetHeight());
+            totalViewPixels += static_cast<uint64_t>(headPointers->GetWidth()) *
+                static_cast<uint64_t>(headPointers->GetHeight());
         }
     });
 
     std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
     context.viewManager->ForEachView([&](uint64_t v) {
         auto viewInfo = context.viewManager->Get(v);
-        if (viewInfo->gpu.visibilityBuffer != nullptr) {
-            auto cameraIndex = viewInfo->gpu.cameraBufferIndex;
+        if (!viewInfo || !viewInfo->gpu.visibilityBuffer) {
+            return;
+        }
 
-            CLodViewRasterInfo info{};
+        auto cameraIndex = viewInfo->gpu.cameraBufferIndex;
+        CLodViewRasterInfo info{};
+        info.scissorMinX = 0;
+        info.scissorMinY = 0;
+
+        if (m_outputKind == CLodRasterOutputKind::VisibilityBuffer) {
             info.visibilityUAVDescriptorIndex = viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-            info.scissorMinX = 0;
-            info.scissorMinY = 0;
             info.scissorMaxX = viewInfo->gpu.visibilityBuffer->GetWidth();
             info.scissorMaxY = viewInfo->gpu.visibilityBuffer->GetHeight();
-            info.viewportScaleX = static_cast<float>(info.scissorMaxX) / static_cast<float>(maxViewWidth);
-            info.viewportScaleY = static_cast<float>(info.scissorMaxY) / static_cast<float>(maxViewHeight);
-            viewRasterInfo[cameraIndex] = info;
-
-            m_visibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
+            visibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
         }
+        else {
+            auto headPointers = context.viewManager->EnsureCLodDeepVisibilityHeadPointers(v);
+            if (!headPointers) {
+                viewRasterInfo[cameraIndex] = info;
+                return;
+            }
+
+            info.opaqueVisibilitySRVDescriptorIndex = viewInfo->gpu.visibilityBuffer->GetSRVInfo(0).slot.index;
+            info.deepVisibilityHeadPointerUAVDescriptorIndex = headPointers->GetUAVShaderVisibleInfo(0).slot.index;
+            info.scissorMaxX = headPointers->GetWidth();
+            info.scissorMaxY = headPointers->GetHeight();
+            visibilityBuffers.push_back(viewInfo->gpu.visibilityBuffer);
+            deepVisibilityHeadPointerBuffers.push_back(std::move(headPointers));
+        }
+
+        info.viewportScaleX = static_cast<float>(info.scissorMaxX) / static_cast<float>(maxViewWidth);
+        info.viewportScaleY = static_cast<float>(info.scissorMaxY) / static_cast<float>(maxViewHeight);
+        viewRasterInfo[cameraIndex] = info;
     });
 
     m_passWidth = maxViewWidth;
     m_passHeight = maxViewHeight;
+    if (m_outputKind == CLodRasterOutputKind::DeepVisibility) {
+        const uint64_t maxNodes = totalViewPixels * kDeepVisibilityAverageFragmentsPerPixel;
+        m_deepVisibilityNodeCapacity = std::max<uint32_t>(
+            1u,
+            static_cast<uint32_t>(std::min<uint64_t>(maxNodes, std::numeric_limits<uint32_t>::max())));
+        if (m_deepVisibilityNodesBuffer) {
+            m_deepVisibilityNodesBuffer->ResizeStructured(m_deepVisibilityNodeCapacity);
+        }
+    }
+    else {
+        m_deepVisibilityNodeCapacity = 1u;
+    }
 
-    if (m_viewRasterInfos != viewRasterInfo) {
+    const bool resourcesChanged =
+        (m_visibilityBuffers != visibilityBuffers) ||
+        (m_deepVisibilityHeadPointerBuffers != deepVisibilityHeadPointerBuffers);
+
+    m_visibilityBuffers = std::move(visibilityBuffers);
+    m_deepVisibilityHeadPointerBuffers = std::move(deepVisibilityHeadPointerBuffers);
+
+    if (m_viewRasterInfos != viewRasterInfo || resourcesChanged) {
         m_viewRasterInfos = std::move(viewRasterInfo);
         m_viewRasterInfoBuffer->ResizeStructured(static_cast<uint32_t>(m_viewRasterInfos.size()));
         BUFFER_UPLOAD(
@@ -171,9 +260,16 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
     auto& psoManager = PSOManager::GetInstance();
 
     uint32_t misc[NumMiscUintRootConstants] = {};
-    misc[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
-    misc[CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
+    misc[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = m_sortedToUnsortedMappingBuffer->GetSRVInfo(0).slot.index;
+    if (m_outputKind == CLodRasterOutputKind::DeepVisibility) {
+        misc[CLOD_RASTER_DEEP_VISIBILITY_NODE_BUFFER_DESCRIPTOR_INDEX] = m_deepVisibilityNodesBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        misc[CLOD_RASTER_DEEP_VISIBILITY_NODE_COUNTER_DESCRIPTOR_INDEX] = m_deepVisibilityCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        misc[CLOD_RASTER_DEEP_VISIBILITY_OVERFLOW_COUNTER_DESCRIPTOR_INDEX] = m_deepVisibilityOverflowCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        misc[CLOD_RASTER_DEEP_VISIBILITY_NODE_CAPACITY] = m_deepVisibilityNodeCapacity;
+    }
     commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
     auto numBuckets = context.materialManager->GetRasterBucketCount();
@@ -185,9 +281,9 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
     auto stride = sizeof(RasterizeClustersCommand);
     for (uint32_t i = 0; i < numBuckets; ++i) {
         auto flags = context.materialManager->GetRasterFlagsForBucket(i);
-        auto& pso = psoManager.GetClusterLODRasterPSO(
-            flags,
-            m_wireframe);
+        const auto& pso = (m_outputKind == CLodRasterOutputKind::VisibilityBuffer)
+            ? psoManager.GetClusterLODRasterPSO(flags, m_wireframe)
+            : psoManager.GetClusterLODDeepVisibilityRasterPSO(flags, m_wireframe);
 
         BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
         commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());

@@ -2,18 +2,21 @@
 
 AnimationClip::AnimationClip() : duration(0.0f) {}
 
-void AnimationClip::addPositionKeyframe(float time, const XMFLOAT3& position) {
+void AnimationClip::addPositionKeyframe(float time, const XMFLOAT3& position, AnimationInterpolationMode interpolation) {
     positionKeyframes.emplace_back(time, XMLoadFloat3(&position));
+    positionInterpolation = interpolation;
     updateDuration(time);
 }
 
-void AnimationClip::addRotationKeyframe(float time, const XMVECTOR& rotation) {
+void AnimationClip::addRotationKeyframe(float time, const XMVECTOR& rotation, AnimationInterpolationMode interpolation) {
     rotationKeyframes.emplace_back(time, rotation);
+    rotationInterpolation = interpolation;
     updateDuration(time);
 }
 
-void AnimationClip::addScaleKeyframe(float time, const XMFLOAT3& scale) {
+void AnimationClip::addScaleKeyframe(float time, const XMFLOAT3& scale, AnimationInterpolationMode interpolation) {
     scaleKeyframes.emplace_back(time, XMLoadFloat3(&scale));
+    scaleInterpolation = interpolation;
     updateDuration(time);
 }
 

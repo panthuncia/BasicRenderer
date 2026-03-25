@@ -1,9 +1,12 @@
 #include "Import/AssimpGeometryExtractor.h"
 
+#include <algorithm>
 #include <cstring>
+#include <array>
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <utility>
 
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
@@ -13,10 +16,21 @@
 
 #include "Import/CLodCacheLoader.h"
 #include "Mesh/ClusterLODTypes.h"
+#include "Mesh/VertexLayout.h"
 #include "Mesh/VertexFlags.h"
 #include "Utilities/CachePathUtilities.h"
 
 namespace {
+
+constexpr uint32_t kMaxSkinInfluences = 8u;
+
+struct PackedSkinningInfluences
+{
+	DirectX::XMUINT4 joints0{ 0, 0, 0, 0 };
+	DirectX::XMUINT4 joints1{ 0, 0, 0, 0 };
+	DirectX::XMFLOAT4 weights0{ 0, 0, 0, 0 };
+	DirectX::XMFLOAT4 weights1{ 0, 0, 0, 0 };
+};
 
 CLodCacheLoader::MeshCacheIdentity BuildAssimpCacheIdentity(
 	const std::string& sourceFilePath,
@@ -46,12 +60,42 @@ ExtractionResult ExtractAll(const aiScene* pScene, const std::string& sourceFile
 		const bool hasBones = aMesh->HasBones();
 		const bool hasNormals = aMesh->HasNormals();
 		const bool hasTexcoords = aMesh->HasTextureCoords(0);
+		const bool hasColors = aMesh->HasVertexColors(0);
+        std::vector<MeshUvSetData> uvSets;
+        for (unsigned int uvSetIndex = 0; uvSetIndex < AI_MAX_NUMBER_OF_TEXTURECOORDS; ++uvSetIndex) {
+            if (!aMesh->HasTextureCoords(uvSetIndex)) {
+                continue;
+            }
+
+            MeshUvSetData uvSet;
+            uvSet.name = "UV" + std::to_string(uvSetIndex);
+            uvSet.values.reserve(aMesh->mNumVertices);
+            for (uint32_t v = 0; v < static_cast<uint32_t>(aMesh->mNumVertices); ++v) {
+                uvSet.values.push_back(DirectX::XMFLOAT2{
+                    aMesh->mTextureCoords[uvSetIndex][v].x,
+                    -aMesh->mTextureCoords[uvSetIndex][v].y });
+            }
+            uvSets.push_back(std::move(uvSet));
+        }
+
+		unsigned int meshFlags = 0;
+		if (hasNormals) {
+			meshFlags |= VertexFlags::VERTEX_NORMALS;
+		}
+		if (hasTexcoords) {
+			meshFlags |= VertexFlags::VERTEX_TEXCOORDS;
+		}
+		if (hasColors) {
+			meshFlags |= VertexFlags::VERTEX_COLORS;
+		}
+		if (hasBones) {
+			meshFlags |= VertexFlags::VERTEX_SKINNED;
+		}
 
 		const uint32_t numVertices = static_cast<uint32_t>(aMesh->mNumVertices);
-		const unsigned int vertexSize = static_cast<unsigned int>(
-			sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + (hasTexcoords ? sizeof(DirectX::XMFLOAT2) : 0));
+		const unsigned int vertexSize = MeshVertexLayout::VertexSize(meshFlags);
 		const unsigned int skinningVertexSize =
-			sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMUINT4) + sizeof(DirectX::XMFLOAT4);
+			sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3) + sizeof(PackedSkinningInfluences);
 
 		// Pack vertex data
 		std::vector<std::byte> rawData(static_cast<size_t>(numVertices) * vertexSize);
@@ -70,13 +114,17 @@ ExtractionResult ExtractAll(const aiScene* pScene, const std::string& sourceFile
 
 			const size_t baseOffset = static_cast<size_t>(v) * vertexSize;
 			std::memcpy(rawData.data() + baseOffset, &position, sizeof(position));
-			size_t offset = sizeof(DirectX::XMFLOAT3);
-			std::memcpy(rawData.data() + baseOffset + offset, &normal, sizeof(normal));
-			offset += sizeof(DirectX::XMFLOAT3);
+			std::memcpy(rawData.data() + baseOffset + MeshVertexLayout::NormalOffset, &normal, sizeof(normal));
 
 			if (hasTexcoords) {
 				const DirectX::XMFLOAT2 texcoord{ aMesh->mTextureCoords[0][v].x, -aMesh->mTextureCoords[0][v].y };
-				std::memcpy(rawData.data() + baseOffset + offset, &texcoord, sizeof(texcoord));
+				std::memcpy(rawData.data() + baseOffset + MeshVertexLayout::TexcoordOffset(meshFlags), &texcoord, sizeof(texcoord));
+			}
+
+			if (hasColors) {
+				const aiColor4D& color = aMesh->mColors[0][v];
+				const DirectX::XMFLOAT3 packedColor{ color.r, color.g, color.b };
+				std::memcpy(rawData.data() + baseOffset + MeshVertexLayout::ColorOffset(meshFlags), &packedColor, sizeof(packedColor));
 			}
 
 			if (hasBones) {
@@ -100,18 +148,15 @@ ExtractionResult ExtractAll(const aiScene* pScene, const std::string& sourceFile
 			}
 		}
 
-		unsigned int meshFlags = 0;
-		if (hasNormals) {
-			meshFlags |= VertexFlags::VERTEX_NORMALS;
-		}
-		if (hasTexcoords) {
-			meshFlags |= VertexFlags::VERTEX_TEXCOORDS;
-		}
-
 		if (hasBones) {
-			meshFlags |= VertexFlags::VERTEX_SKINNED;
+			struct VertexInfluence
+			{
+				uint32_t joint = 0;
+				float weight = 0.0f;
+			};
 
-			std::vector<unsigned int> jointCount(aMesh->mNumVertices, 0);
+			std::vector<std::array<VertexInfluence, kMaxSkinInfluences>> vertexInfluences(aMesh->mNumVertices);
+			std::vector<uint32_t> influenceCount(aMesh->mNumVertices, 0u);
 			for (unsigned int b = 0; b < aMesh->mNumBones; b++) {
 				aiBone* bone = aMesh->mBones[b];
 				for (unsigned int w = 0; w < bone->mNumWeights; w++) {
@@ -119,22 +164,57 @@ ExtractionResult ExtractAll(const aiScene* pScene, const std::string& sourceFile
 					unsigned int vertexID = vw.mVertexId;
 					float weight = vw.mWeight;
 
-					unsigned int& count = jointCount[vertexID];
-					if (count < 4 && weight > 0.0f) {
-						const size_t vertexBase = static_cast<size_t>(vertexID) * skinningVertexSize;
-						const size_t jointsOffset = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3);
-						const size_t weightsOffset = jointsOffset + sizeof(DirectX::XMUINT4);
-
-						auto* joints = reinterpret_cast<uint32_t*>(skinningData.data() + vertexBase + jointsOffset);
-						auto* weights = reinterpret_cast<float*>(skinningData.data() + vertexBase + weightsOffset);
-						joints[count] = b;
-						weights[count] = weight;
-						count++;
+					if (weight <= 0.0f) {
+						continue;
 					}
-					else if (weight > 0.0f) {
-						throw std::runtime_error("Vertex has more than 4 non-zero bone influences");
+
+					auto& influences = vertexInfluences[vertexID];
+					uint32_t& count = influenceCount[vertexID];
+					if (count < kMaxSkinInfluences) {
+						influences[count++] = VertexInfluence{ b, weight };
+						continue;
+					}
+
+					uint32_t smallestIndex = 0u;
+					for (uint32_t influenceIndex = 1; influenceIndex < kMaxSkinInfluences; ++influenceIndex) {
+						if (influences[influenceIndex].weight < influences[smallestIndex].weight) {
+							smallestIndex = influenceIndex;
+						}
+					}
+					if (weight > influences[smallestIndex].weight) {
+						influences[smallestIndex] = VertexInfluence{ b, weight };
 					}
 				}
+			}
+
+			for (uint32_t vertexID = 0; vertexID < numVertices; ++vertexID) {
+				auto influences = vertexInfluences[vertexID];
+				const uint32_t count = influenceCount[vertexID];
+				std::sort(influences.begin(), influences.begin() + count, [](const VertexInfluence& lhs, const VertexInfluence& rhs) {
+					return lhs.weight > rhs.weight;
+				});
+
+				float weightSum = 0.0f;
+				for (uint32_t influenceIndex = 0; influenceIndex < count; ++influenceIndex) {
+					weightSum += influences[influenceIndex].weight;
+				}
+				const float invWeightSum = weightSum > 0.0f ? (1.0f / weightSum) : 0.0f;
+
+				PackedSkinningInfluences packed{};
+				uint32_t jointValues[kMaxSkinInfluences] = {};
+				float weightValues[kMaxSkinInfluences] = {};
+				for (uint32_t influenceIndex = 0; influenceIndex < count; ++influenceIndex) {
+					jointValues[influenceIndex] = influences[influenceIndex].joint;
+					weightValues[influenceIndex] = influences[influenceIndex].weight * invWeightSum;
+				}
+				packed.joints0 = DirectX::XMUINT4(jointValues[0], jointValues[1], jointValues[2], jointValues[3]);
+				packed.joints1 = DirectX::XMUINT4(jointValues[4], jointValues[5], jointValues[6], jointValues[7]);
+				packed.weights0 = DirectX::XMFLOAT4(weightValues[0], weightValues[1], weightValues[2], weightValues[3]);
+				packed.weights1 = DirectX::XMFLOAT4(weightValues[4], weightValues[5], weightValues[6], weightValues[7]);
+
+				const size_t vertexBase = static_cast<size_t>(vertexID) * skinningVertexSize;
+				const size_t influencesOffset = sizeof(DirectX::XMFLOAT3) + sizeof(DirectX::XMFLOAT3);
+				std::memcpy(skinningData.data() + vertexBase + influencesOffset, &packed, sizeof(PackedSkinningInfluences));
 			}
 		}
 
@@ -144,6 +224,7 @@ ExtractionResult ExtractAll(const aiScene* pScene, const std::string& sourceFile
 
 		// Populate MeshIngestBuilder
 		MeshIngestBuilder ingest(vertexSize, hasBones ? skinningVertexSize : 0, meshFlags);
+        ingest.SetUvSets(std::move(uvSets));
 		ingest.ReserveVertices(numVertices);
 		if (hasBones) {
 			ingest.ReserveVertices(numVertices);

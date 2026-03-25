@@ -32,7 +32,7 @@ struct IndirectWorkload {
 
 struct IndirectBufferEntry {
     uint64_t viewID;
-    MaterialCompileFlags flags;
+    DrawWorkloadKey key;
     IndirectWorkload workload;
 };
 
@@ -47,9 +47,9 @@ public:
         return std::shared_ptr<IndirectCommandBufferManager>(new IndirectCommandBufferManager());
     }
 
-    // Tell the manager about a technique once. This builds the inverted index:
-    // RenderPhase -> [compileFlags].
-    void RegisterTechnique(const TechniqueDescriptor& tech);
+    // Tell the manager about a draw workload once. This builds the inverted index:
+    // RenderPhase -> [workloadKey].
+    void RegisterWorkload(const DrawWorkloadKey& workloadKey);
 
     // Ensure we have buffers for all known flags combinations for this view.
     // Returns a light-weight struct mapping flags->buffers plus the meshlet pair.
@@ -58,10 +58,10 @@ public:
     // Remove buffers associated with a view
     void UnregisterBuffers(uint64_t viewID);
 
-    // Update the buffer associated with 'flags' to accommodate numDraws.
-    // Rounds up to increment size. Triggers per-view reallocation for that flags,
+    // Update the buffer associated with the workload to accommodate numDraws.
+    // Rounds up to increment size. Triggers per-view reallocation for that workload,
     // and resizes meshlet buffers (sum of all flags sizes).
-    void UpdateBuffersForTechnique(TechniqueDescriptor technique, unsigned int numDraws);
+    void UpdateBuffersForWorkload(const DrawWorkloadKey& workloadKey, unsigned int numDraws);
 
     // Set growth granularity
     void SetIncrementSize(unsigned int incrementSize);
@@ -69,40 +69,34 @@ public:
     // Query: which (per-view) indirect command buffers participate in a render pass?
     // Order is unspecified; returns empty if none registered.
     std::vector<std::pair<MaterialCompileFlags, IndirectWorkload>>
-        GetBuffersForRenderPhase(uint64_t viewID, const RenderPhase& phase) const;
+        GetBuffersForRenderPhase(uint64_t viewID, const RenderPhase& phase, bool clodOnly = false) const;
 
     // Get every per-view indirect buffer (all views, all flags)
     std::vector<IndirectBufferEntry> GetAllIndirectBuffers() const;
 
     // Filtered: all buffers that participate in a phase (across all views)
-    std::vector<IndirectBufferEntry> GetIndirectBuffersForRenderPhase(const RenderPhase& phase) const;
+    std::vector<IndirectBufferEntry> GetIndirectBuffersForRenderPhase(const RenderPhase& phase, bool clodOnly = false) const;
 
     // per-view version of phase query, but returning viewID too
-    std::vector<IndirectBufferEntry> GetViewIndirectBuffersForRenderPhase(uint64_t viewID, const RenderPhase& phase) const;
+    std::vector<IndirectBufferEntry> GetViewIndirectBuffersForRenderPhase(uint64_t viewID, const RenderPhase& phase, bool clodOnly = false) const;
 
 	// Iterate over all indirect buffers (all views, all flags):
     template<class F>
     void ForEachIndirectBuffer(F&& f) const {
         for (auto const& [viewID, perView] : m_viewIDToBuffers) {
-            for (auto const& [flags, wl] : perView.buffersByFlags) {
-                std::forward<F>(f)(viewID, flags, wl);
+            for (auto const& [key, wl] : perView.buffersByWorkload) {
+                std::forward<F>(f)(viewID, key, wl);
             }
         }
     }
 
     // Filtered across all views:
     template<class F>
-    void ForEachIndirectBufferInPhase(const RenderPhase& phase, F&& f) const {
-        auto pit = m_phaseToFlags.find(phase);
-        if (pit == m_phaseToFlags.end()) return;
-
-        std::unordered_set<MaterialCompileFlags, MaterialCompileFlagsHash> include(
-            pit->second.begin(), pit->second.end());
-
+    void ForEachIndirectBufferInPhase(const RenderPhase& phase, bool clodOnly, F&& f) const {
         for (auto const& [viewID, perView] : m_viewIDToBuffers) {
-            for (auto const& [flags, wl] : perView.buffersByFlags) {
-                if (include.count(flags)) {
-                    std::forward<F>(f)(viewID, flags, wl);
+            for (auto const& [key, wl] : perView.buffersByWorkload) {
+                if (key.renderPhase == phase && key.clodOnly == clodOnly) {
+                    std::forward<F>(f)(viewID, key, wl);
                 }
             }
         }
@@ -120,25 +114,25 @@ private:
 
     // Per-view buffer set
     struct PerViewBuffers {
-        // One buffer per unique flags value
-        std::unordered_map<MaterialCompileFlags,
+        // One buffer per unique draw workload
+        std::unordered_map<DrawWorkloadKey,
             IndirectWorkload,
-            MaterialCompileFlagsHash> buffersByFlags;
+            DrawWorkloadKey::Hasher> buffersByWorkload;
 
         std::shared_ptr<DynamicGloballyIndexedResource> meshletCullingIndirectCommandBuffer;
         std::shared_ptr<DynamicGloballyIndexedResource> meshletCullingResetIndirectCommandBuffer;
     };
 
-    // RenderPhase -> list of flags that participate in that phase (inverted index)
+    // RenderPhase -> list of draw workloads that participate in that phase (inverted index)
     std::unordered_map<RenderPhase,
-        std::vector<MaterialCompileFlags>,
+        std::vector<DrawWorkloadKey>,
         RenderPhase::Hasher> m_phaseToFlags;
 
-    // Per-flags current capacity (rounded to increment)
-    std::unordered_map<TechniqueDescriptor, unsigned int, TechniqueDescriptor::Hasher> m_flagsToCapacity;
+    // Per-workload current capacity (rounded to increment)
+    std::unordered_map<DrawWorkloadKey, unsigned int, DrawWorkloadKey::Hasher> m_workloadToCapacity;
 
-    // Per-flags last known draw count (unrounded)
-    std::unordered_map<TechniqueDescriptor, unsigned int, TechniqueDescriptor::Hasher> m_flagsToLastCount;
+    // Per-workload last known draw count (unrounded)
+    std::unordered_map<DrawWorkloadKey, unsigned int, DrawWorkloadKey::Hasher> m_workloadToLastCount;
 
     // Single group that owns all indirect command buffers (regardless of flags)
     std::shared_ptr<ResourceGroup> m_indirectCommandsResourceGroup;
@@ -164,5 +158,5 @@ private:
     void RecomputeTotal();
     void RecreateMeshletBuffersForAllViews();
     void EnsurePerViewFlagsBuffers(uint64_t viewID);
-    void EnsureTechniqueRegistered(TechniqueDescriptor technique);
+    void EnsureWorkloadRegistered(const DrawWorkloadKey& workloadKey);
 };

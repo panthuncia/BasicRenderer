@@ -12,6 +12,7 @@
 #include "../shaders/Common/defines.h"
 #include "../../generated/BuiltinResources.h"
 #include "Materials/Material.h"
+#include "Render/DrawWorkload.h"
 #include "Resources/components.h"
 #include "Managers/Singletons/RendererECSManager.h"
 #include "Render/MemoryIntrospectionAPI.h"
@@ -49,7 +50,7 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 	if (meshInstances != nullptr) {
 		std::vector<unsigned int> indices;
 		std::vector<std::shared_ptr<BufferView>> views;
-		std::vector<MaterialCompileFlags> materialTechniques;
+		std::vector<std::vector<DrawWorkloadKey>> drawWorkloadKeysPerDraw;
 		// For each mesh, add an indirect command to the draw set buffer
 		for (auto& meshInstance : meshInstances->meshInstances) {
 			auto& mesh = meshInstance->GetMesh();
@@ -64,25 +65,37 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 			views.push_back(view);
 			unsigned int index = static_cast<uint32_t>(view->GetOffset() / sizeof(DispatchMeshIndirectCommand));
 			indices.push_back(index);
-			auto materialFlags = meshInstance->GetMesh()->material->Technique().compileFlags;
-			if (!m_activeDrawSetIndices.contains(materialFlags)) {
-				m_activeDrawSetIndices[materialFlags] = SortedUnsignedIntBuffer::CreateShared(1, "activeDrawSetIndices(flags=" + std::to_string(static_cast<uint64_t>(materialFlags)) + ")");
-				rg::memory::SetResourceUsageHint(*m_activeDrawSetIndices[materialFlags], "PerMesh, PerMeshInstance, PerObject");
-				auto& buf = m_activeDrawSetIndices[materialFlags];
-				buf->GetECSEntity().add<Components::IsActiveDrawSetIndices>();
-				buf->GetECSEntity().set<Components::Resource>({ buf });
-				for (auto& phase : meshInstance->GetMesh()->material->Technique().passes) {
-					buf->GetECSEntity().add<Components::ParticipatesInPass>(RendererECSManager::GetInstance().GetRenderPhaseEntity(phase));
-				}
-			}
-			m_activeDrawSetIndices[materialFlags]->Insert(index);
-			materialTechniques.push_back(materialFlags);
+            std::vector<DrawWorkloadKey> workloadKeysForDraw;
+            ForEachMeshDrawWorkload(*mesh, [&](const DrawWorkloadKey& workloadKey) {
+                if (!m_activeDrawSetIndices.contains(workloadKey)) {
+                    auto debugName =
+                        "activeDrawSetIndices(flags=" + std::to_string(static_cast<uint64_t>(workloadKey.compileFlags))
+                        + ", phase=" + std::to_string(workloadKey.renderPhase.hash)
+                        + ", clodOnly=" + std::to_string(workloadKey.clodOnly ? 1 : 0) + ")";
+                    m_activeDrawSetIndices[workloadKey] = SortedUnsignedIntBuffer::CreateShared(1, debugName);
+                    rg::memory::SetResourceUsageHint(*m_activeDrawSetIndices[workloadKey], "PerMesh, PerMeshInstance, PerObject");
+                    auto& buf = m_activeDrawSetIndices[workloadKey];
+                    buf->GetECSEntity().add<Components::IsActiveDrawSetIndices>();
+                    buf->GetECSEntity().set<Components::Resource>({ buf });
+                    buf->GetECSEntity().add<Components::ParticipatesInPass>(
+                        RendererECSManager::GetInstance().GetRenderPhaseEntity(workloadKey.renderPhase));
+                    if (workloadKey.clodOnly) {
+                        buf->GetECSEntity().add<Components::CLodOnlyDrawWorkload>();
+                    }
+                    else {
+                        buf->GetECSEntity().add<Components::GeneralDrawWorkload>();
+                    }
+                }
+                m_activeDrawSetIndices[workloadKey]->Insert(index);
+                workloadKeysForDraw.push_back(workloadKey);
+            });
+            drawWorkloadKeysPerDraw.push_back(std::move(workloadKeysForDraw));
 		}
 
 		Components::IndirectDrawInfo info;
 		info.indices = indices;
 		info.views = views;
-		info.materialTechniques = materialTechniques;
+		info.drawWorkloadKeysPerDraw = drawWorkloadKeysPerDraw;
 		drawInfo.drawInfo = info;
 	}
 
@@ -110,8 +123,10 @@ void ObjectManager::RemoveObject(const Components::ObjectDrawInfo* drawInfo) {
 	for (auto view : views->drawInfo.views) {
 		m_masterIndirectCommandsBuffer->Deallocate(view.get());
 		unsigned int index = static_cast<uint32_t>(view->GetOffset() / sizeof(DispatchMeshIndirectCommand));
-		m_activeDrawSetIndices[views->drawInfo.materialTechniques[i]]->Remove(index);
-		i++;
+        for (const auto& workloadKey : views->drawInfo.drawWorkloadKeysPerDraw[i]) {
+		    m_activeDrawSetIndices[workloadKey]->Remove(index);
+        }
+		++i;
 	}
 
 	m_normalMatrixBuffer->Remove(drawInfo->normalMatrixView.get());

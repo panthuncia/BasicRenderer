@@ -29,6 +29,7 @@ struct Engine {
     inline static constexpr std::string_view UpscalePass = "Engine::PostProcessing::UpscalePass";
   };
   struct Primary {
+    inline static constexpr std::string_view CLodTransparentPass = "Engine::Primary::CLodTransparentPass";
     inline static constexpr std::string_view DeferredShadingPass = "Engine::Primary::DeferredShadingPass";
     inline static constexpr std::string_view ForwardPass = "Engine::Primary::ForwardPass";
     inline static constexpr std::string_view GBufferPass = "Engine::Primary::GBufferPass";

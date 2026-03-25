@@ -25,45 +25,67 @@ struct PageTableEntry
     uint slabByteOffset; // Byte offset of the page start within that slab.
 };
 
+static const uint CLOD_PAGE_ATTRIBUTE_NORMAL = 1u << 0;
+static const uint CLOD_PAGE_ATTRIBUTE_JOINTS = 1u << 1;
+static const uint CLOD_PAGE_ATTRIBUTE_WEIGHTS = 1u << 2;
+static const uint CLOD_PAGE_ATTRIBUTE_COLOR = 1u << 3;
+
 // Embedded at byte 0 of each page-tile. Simplified header.
 // 16 x uint32 = 64 bytes.
 struct CLodPageHeader
 {
     uint meshletCount;                // [0]
     uint compressedPositionQuantExp;  // [1] mesh-wide quantization exponent
-    uint descriptorOffset;            // [2] byte offset to CLodMeshletDescriptor array
-    uint positionBitstreamOffset;     // [3] byte offset to position bitstream
+    uint attributeMask;               // [2] page-wide optional non-UV attribute mask
+    uint uvSetCount;                  // [3] UV set count packed into this page
 
-    uint normalArrayOffset;           // [4] byte offset to normal array
-    uint triangleStreamOffset;        // [5] byte offset to triangle byte stream
+    uint descriptorOffset;            // [4] byte offset to CLodMeshletDescriptor array
+    uint uvDescriptorOffset;          // [5] byte offset to CLodMeshletUvDescriptor table
+    uint positionBitstreamOffset;     // [6] byte offset to position bitstream
+    uint normalArrayOffset;           // [7] byte offset to normal array
+    uint colorArrayOffset;            // [8] byte offset to RGBA8_UNORM color array per vertex
+    uint jointArrayOffset;            // [9] byte offset to two-uint4 joint array per vertex
+    uint weightArrayOffset;           // [10] byte offset to two-float4 weight array per vertex
+    uint uvBitstreamDirectoryOffset;  // [11] byte offset to UV bitstream offset table
+    uint triangleStreamOffset;        // [12] byte offset to triangle byte stream
+    uint boneIndexStreamOffset;       // [13] byte offset to page-local bone-index stream
     uint reserved0;
     uint reserved1;
-    uint reserved2;
-    uint reserved3;
-    uint reserved4;
-    uint reserved5;
-    uint reserved6;
-    uint reserved7;
-    uint reserved8;
-    uint reserved9;
 };
 
-// Per-meshlet descriptor. Self-contained: compression params, bounds, LOD metadata.
-// 12 x uint32 = 48 bytes = 3 x Load4.
+// Per-meshlet descriptor. Self-contained: non-UV compression params, bounds, LOD metadata.
+// 16 x uint32 = 64 bytes = 4 x Load4.
 struct CLodMeshletDescriptor
 {
     uint positionBitOffset;           // [0] bit offset into page position bitstream
-    uint normalWordOffset;            // [1] word offset into page normal array
+    uint vertexAttributeOffset;       // [1] element offset into page vertex-attribute arrays
     uint triangleByteOffset;          // [2] byte offset into page triangle stream
+    uint boneListOffset;              // [3] uint offset into page bone-index stream
 
-    int  minQx;                       // [3] per-meshlet quantization offset X
-    int  minQy;                       // [4] per-meshlet quantization offset Y
-    int  minQz;                       // [5] per-meshlet quantization offset Z
+    int  minQx;                       // [4] per-meshlet quantization offset X
+    int  minQy;                       // [5] per-meshlet quantization offset Y
+    int  minQz;                       // [6] per-meshlet quantization offset Z
 
-    uint bitsAndVertexCount;          // [6] bitsX:8 | bitsY:8 | bitsZ:8 | vertexCount:8
-    uint triangleCountAndRefinedGroup; // [7] triangleCount:16 | (refinedGroupId+1):16
+    uint bitsAndVertexCount;          // [7] bitsX:8 | bitsY:8 | bitsZ:8 | vertexCount:8
+    uint triangleCountAndRefinedGroup; // [8] triangleCount:16 | (refinedGroupId+1):16
+    uint boneCount;                   // [9]
+    uint reserved2;                   // [10]
+    uint reserved3;                   // [11]
 
-    float4 bounds;                    // [8-11] bounding sphere {cx, cy, cz, radius}
+    float4 bounds;                    // [12-15] bounding sphere {cx, cy, cz, radius}
+};
+
+// Per-(meshlet, uv-set) descriptor. 8 x uint32 = 32 bytes = 2 x Load4.
+struct CLodMeshletUvDescriptor
+{
+    uint uvBitOffset;                 // [0] bit offset into this UV set's page-local bitstream
+    float uvMinU;                     // [1]
+    float uvMinV;                     // [2]
+    float uvScaleU;                   // [3]
+    float uvScaleV;                   // [4]
+    uint uvBits;                      // [5] bitsU:8 | bitsV:8
+    uint reserved0;                   // [6]
+    uint reserved1;                   // [7]
 };
 
 // Helper functions to unpack CLodMeshletDescriptor fields
@@ -73,6 +95,9 @@ uint CLodDescBitsZ(CLodMeshletDescriptor desc) { return (desc.bitsAndVertexCount
 uint CLodDescVertexCount(CLodMeshletDescriptor desc) { return (desc.bitsAndVertexCount >> 24u) & 0xFFu; }
 uint CLodDescTriangleCount(CLodMeshletDescriptor desc) { return desc.triangleCountAndRefinedGroup & 0xFFFFu; }
 int  CLodDescRefinedGroupId(CLodMeshletDescriptor desc) { return (int)(desc.triangleCountAndRefinedGroup >> 16u) - 1; }
+uint CLodDescBoneCount(CLodMeshletDescriptor desc) { return desc.boneCount; }
+uint CLodUvDescBitsU(CLodMeshletUvDescriptor desc) { return desc.uvBits & 0xFFu; }
+uint CLodUvDescBitsV(CLodMeshletUvDescriptor desc) { return (desc.uvBits >> 8u) & 0xFFu; }
 
 // Runtime-filled entry: maps group-local page index to physical slab location.
 struct GroupPageMapEntry
@@ -132,40 +157,29 @@ struct ClusterLODGroup
 
 static const uint CLOD_GROUP_FLAG_IS_VOXEL = 1u << 0;
 
-static const uint CLOD_REPLAY_RECORD_TYPE_NODE = 0;
-static const uint CLOD_REPLAY_RECORD_TYPE_MESHLET = 1;
-static const uint CLOD_REPLAY_BUFFER_SIZE_BYTES = 100u * 1024u * 1024u;
+// Replay buffer: single physical buffer split into two regions.
+// Node region stores TraverseNodeRecord (12 bytes), meshlet region stores MeshletBucketRecord (24 bytes).
+static const uint CLOD_REPLAY_BUFFER_SIZE_BYTES       = 100u * 1024u * 1024u;
+static const uint CLOD_REPLAY_NODE_REGION_SIZE_BYTES   = CLOD_REPLAY_BUFFER_SIZE_BYTES / 2;
+static const uint CLOD_REPLAY_MESHLET_REGION_OFFSET    = CLOD_REPLAY_NODE_REGION_SIZE_BYTES;
+static const uint CLOD_REPLAY_MESHLET_REGION_SIZE_BYTES = CLOD_REPLAY_BUFFER_SIZE_BYTES - CLOD_REPLAY_NODE_REGION_SIZE_BYTES;
 
-struct CLodNodeGroupReplayRecord
-{
-    uint type;
-    uint instanceIndex;
-    uint viewId;
-    uint nodeOrGroupId;
-    uint pad0;
-};
+static const uint CLOD_NODE_REPLAY_STRIDE_BYTES    = 12u;  // 3 uints (TraverseNodeRecord)
+static const uint CLOD_MESHLET_REPLAY_STRIDE_BYTES = 24u;  // 6 uints (MeshletBucketRecord)
 
-struct CLodMeshletReplayRecord
-{
-    uint type;
-    uint instanceIndex;
-    uint viewId;
-    uint groupId;
-    uint localMeshletIndex;       // page-local meshlet index
-    uint pageSlabDescriptorIndex; // pre-resolved page slab descriptor
-    uint pageSlabByteOffset;      // pre-resolved page slab byte offset
-    uint pad;
-};
-
-static const uint CLOD_REPLAY_SLOT_STRIDE_BYTES = sizeof(CLodMeshletReplayRecord);
-static const uint CLOD_REPLAY_SLOT_CAPACITY = CLOD_REPLAY_BUFFER_SIZE_BYTES / CLOD_REPLAY_SLOT_STRIDE_BYTES;
+static const uint CLOD_NODE_REPLAY_CAPACITY    = CLOD_REPLAY_NODE_REGION_SIZE_BYTES / CLOD_NODE_REPLAY_STRIDE_BYTES;
+static const uint CLOD_MESHLET_REPLAY_CAPACITY = CLOD_REPLAY_MESHLET_REGION_SIZE_BYTES / CLOD_MESHLET_REPLAY_STRIDE_BYTES;
 
 struct CLodReplayBufferState
 {
-    uint totalWriteCount;
-    uint droppedRecords;
+    uint nodeWriteCount;
+    uint meshletWriteCount;
+    uint nodeDropped;
+    uint meshletDropped;
+    uint visibleClusterCombinedCount;
     uint pad0;
     uint pad1;
+    uint pad2;
 };
 
 struct CLodViewDepthSRVIndex
@@ -190,6 +204,25 @@ struct CLodMultiNodeGpuInput
     uint pad0;
     uint64_t nodeInputsAddress;
     uint64_t nodeInputStride;
+};
+
+// Shared software-raster launch constants.
+// Both compute and work-graph paths use one 128-thread group per cluster.
+#define SW_RASTER_THREADS            128
+#define SW_RASTER_GROUPS_PER_CLUSTER 1
+#define SW_RASTER_MAX_VERTS          128
+
+// Batched work graph record for software rasterization of small clusters.
+// Broadcasting node: ClusterCull accumulates up to SW_BATCH_MAX_CLUSTERS
+// cluster indices per record. SWRaster reads full VisibleCluster data from
+// the visible clusters buffer via indirection.
+#define SW_BATCH_MAX_CLUSTERS 8
+
+struct SWRasterBatchRecord
+{
+    uint3 dispatchGrid : SV_DispatchGrid; // (numClusters, 1, 1)
+    uint numClusters;                       // 1..SW_BATCH_MAX_CLUSTERS
+    uint clusterIndices[SW_BATCH_MAX_CLUSTERS]; // unsorted visible cluster buffer indices
 };
 
 #endif // CLOD_STRUCTS_HLSLI

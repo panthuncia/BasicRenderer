@@ -2,12 +2,15 @@
 #include "include/utilities.hlsli"
 #include "include/cbuffers.hlsli"
 #include "include/structs.hlsli"
+#include "include/skinningCommon.hlsli"
 #include "include/loadingUtils.hlsli"
 #include "Common/defines.h"
 #include "include/meshletPayload.hlsli"
-#include "Include/meshletCommon.hlsli"
-#include "Include/clodStructs.hlsli"
-#include "Include/clodPageAccess.hlsli"
+#include "include/meshletCommon.hlsli"
+#include "include/clodStructs.hlsli"
+#include "include/clodPageAccess.hlsli"
+#include "include/visibleClusterPacking.hlsli"
+#include "PerPassRootConstants/clodRasterizationRootConstants.h"
 
 #define CLOD_COMPRESSED_POSITIONS 1u
 #define CLOD_COMPRESSED_NORMALS 4u
@@ -99,12 +102,100 @@ float3 OctDecodeNormal(float2 e)
     return normalize(v);
 }
 
-float3 DecodeCompressedNormal(uint meshletLocalVertex, uint normalArrayBase, uint normalWordOffset, uint pagePoolSlabDescriptorIndex)
+float3 DecodeCompressedNormal(uint meshletLocalVertex, uint normalArrayBase, uint vertexAttributeOffset, uint pagePoolSlabDescriptorIndex)
 {
     ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
-    uint addr = normalArrayBase + (normalWordOffset + meshletLocalVertex) * 4u;
+    uint addr = normalArrayBase + (vertexAttributeOffset + meshletLocalVertex) * 4u;
     uint packed = slab.Load(addr);
     return OctDecodeNormal(UnpackSnorm16x2(packed));
+}
+
+float3 DecodeCompressedColor(uint meshletLocalVertex, uint colorArrayBase, uint vertexAttributeOffset, uint pagePoolSlabDescriptorIndex)
+{
+    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
+    uint addr = colorArrayBase + (vertexAttributeOffset + meshletLocalVertex) * 4u;
+    uint packed = slab.Load(addr);
+    return float3(
+        float(packed & 0xFFu) / 255.0f,
+        float((packed >> 8u) & 0xFFu) / 255.0f,
+        float((packed >> 16u) & 0xFFu) / 255.0f);
+}
+
+SkinningInfluences DecodePackedJoints(uint meshletLocalVertex, MeshletSetup setup)
+{
+    SkinningInfluences skinning;
+    skinning.joints0 = uint4(0, 0, 0, 0);
+    skinning.joints1 = uint4(0, 0, 0, 0);
+    skinning.weights0 = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    skinning.weights1 = float4(0.0f, 0.0f, 0.0f, 0.0f);
+
+    if ((setup.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_JOINTS) == 0u)
+    {
+        return skinning;
+    }
+
+    ByteAddressBuffer slab = ResourceDescriptorHeap[setup.pagePoolSlabDescriptorIndex];
+    uint addr = setup.jointArrayBase + (setup.vertexAttributeOffset + meshletLocalVertex) * 32u;
+    skinning.joints0 = LoadUint4(addr, slab);
+    skinning.joints1 = LoadUint4(addr + 16u, slab);
+    return skinning;
+}
+
+SkinningInfluences DecodePackedWeights(uint meshletLocalVertex, MeshletSetup setup, SkinningInfluences skinning)
+{
+    if ((setup.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_WEIGHTS) == 0u)
+    {
+        return skinning;
+    }
+
+    ByteAddressBuffer slab = ResourceDescriptorHeap[setup.pagePoolSlabDescriptorIndex];
+    uint addr = setup.weightArrayBase + (setup.vertexAttributeOffset + meshletLocalVertex) * 32u;
+    skinning.weights0 = LoadFloat4(addr, slab);
+    skinning.weights1 = LoadFloat4(addr + 16u, slab);
+    return skinning;
+}
+
+void ApplyClodSkinningToVertex(uint meshletLocalVertex, MeshletSetup setup, inout Vertex vertex)
+{
+    if ((setup.meshBuffer.vertexFlags & VERTEX_SKINNED) == 0u)
+    {
+        return;
+    }
+
+    SkinningInfluences skinning = DecodePackedJoints(meshletLocalVertex, setup);
+    skinning = DecodePackedWeights(meshletLocalVertex, setup, skinning);
+    float4x4 skinMatrix = BuildSkinMatrix(setup.meshInstanceBuffer.skinningInstanceSlot, skinning);
+    vertex.position = mul(float4(vertex.position, 1.0f), skinMatrix).xyz;
+    vertex.normal = mul(vertex.normal, (float3x3)skinMatrix);
+    vertex.skinning = skinning;
+}
+
+float2 DecodeCompressedUV(
+    uint meshletLocalVertex,
+    uint uvSetIndex,
+    MeshletSetup setup)
+{
+    if (uvSetIndex >= setup.uvSetCount)
+    {
+        return float2(0.0f, 0.0f);
+    }
+
+    CLodMeshletUvDescriptor uvDesc = LoadMeshletUvDescriptorAbsolute(setup, uvSetIndex);
+    uint uvBitstreamBase = LoadPageUvBitstreamBaseAbsolute(setup, uvSetIndex);
+    uint uvBitsU = CLodUvDescBitsU(uvDesc);
+    uint uvBitsV = CLodUvDescBitsV(uvDesc);
+
+    uint bitsPerVertex = uvBitsU + uvBitsV;
+    uint bitCursor = uvBitstreamBase * 8u + uvDesc.uvBitOffset + meshletLocalVertex * bitsPerVertex;
+
+    ByteAddressBuffer slab = ResourceDescriptorHeap[setup.pagePoolSlabDescriptorIndex];
+    uint encodedU = ReadPackedBits32_BA(slab, bitCursor, uvBitsU);
+    bitCursor += uvBitsU;
+    uint encodedV = ReadPackedBits32_BA(slab, bitCursor, uvBitsV);
+
+    return float2(
+        uvDesc.uvMinU + float(encodedU) * uvDesc.uvScaleU,
+        uvDesc.uvMinV + float(encodedV) * uvDesc.uvScaleV);
 }
 
 VisBufferPSInput BuildVisBufferVertexAttributesForView(
@@ -209,9 +300,9 @@ PSInput GetVertexAttributes(uint blockByteOffset, uint prevBlockByteOffset, uint
     result.position = mul(viewPosition, mainCamera.projection);
     result.clipPosition = mul(viewPosition, mainCamera.unjitteredProjection);
     
-    float4 prevPosition = mul(prevPos, objectBuffer.model);
+    float4 prevPosition = mul(prevPos, objectBuffer.prevModel);
     prevPosition = mul(prevPosition, mainCamera.prevView);
-    result.prevClipPosition = mul(prevPosition, mainCamera.unjitteredProjection);
+    result.prevClipPosition = mul(prevPosition, mainCamera.prevUnjitteredProjection);
     
     if (flags & VERTEX_SKINNED) {
         result.normalWorldSpace = normalize(vertex.normal);
@@ -222,9 +313,7 @@ PSInput GetVertexAttributes(uint blockByteOffset, uint prevBlockByteOffset, uint
         result.normalWorldSpace = normalize(mul(vertex.normal, normalMatrix));
     }
     
-    if (flags & VERTEX_COLORS) {
-        result.color = vertex.color;
-    };
+    result.color = vertex.color;
     
     result.meshletIndex = vGroupID.x;
     
@@ -338,9 +427,13 @@ VisBufferPSInput GetVisBufferVertexAttributesForViewCLod(
     vertex.normal = DecodeCompressedNormal(
         meshletLocalVertex,
         setup.normalArrayBase,
-        setup.normalWordOffset,
+        setup.vertexAttributeOffset,
         setup.pagePoolSlabDescriptorIndex);
-    // TODO: texcoord stream not yet in per-meshlet format
+    vertex.texcoord = DecodeCompressedUV(meshletLocalVertex, 0u, setup);
+    vertex.color = ((setup.pageAttributeMask & CLOD_PAGE_ATTRIBUTE_COLOR) != 0u)
+        ? DecodeCompressedColor(meshletLocalVertex, setup.colorArrayBase, setup.vertexAttributeOffset, setup.pagePoolSlabDescriptorIndex)
+        : float3(1.0f, 1.0f, 1.0f);
+    ApplyClodSkinningToVertex(meshletLocalVertex, setup, vertex);
 
     return BuildVisBufferVertexAttributesForView(
         vertex,
@@ -426,21 +519,19 @@ void VisibilityBufferMSMain(
     {
         return;
     }
-    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
+    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
     ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[setup.viewID];
     EmitMeshletVisBufferForView(uGroupThreadID, setup, setup.viewID, 0, viewRasterInfo, outputVertices, outputTriangles);
     EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
 }
 
-#include "PerPassRootConstants/clodRootConstants.h"
-
-bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSetup setup, in uint bucketMeshletIndex, in uint bucketCount)
+bool InitializeMeshletFromCompactedCluster(uint3 packedCluster, out MeshletSetup setup, in uint bucketMeshletIndex, in uint bucketCount)
 {
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
 
-    setup.meshletIndex = cluster.localMeshletIndex;
-    setup.meshInstanceBuffer = meshInstanceBuffer[cluster.instanceID];
-    setup.viewID = cluster.viewID;
+    setup.meshletIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
+    setup.meshInstanceBuffer = meshInstanceBuffer[CLodVisibleClusterInstanceID(packedCluster)];
+    setup.viewID = CLodVisibleClusterViewID(packedCluster);
 
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
@@ -449,8 +540,8 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
     setup.objectBuffer = perObjectBuffer[setup.meshInstanceBuffer.perObjectBufferIndex];
 
     // Use pre-resolved page address from VisibleCluster
-    const uint pageSlabDesc = cluster.pageSlabDescriptorIndex;
-    const uint pageSlabOff  = cluster.pageSlabByteOffset;
+    const uint pageSlabDesc = CLodVisibleClusterPageSlabDescriptorIndex(packedCluster);
+    const uint pageSlabOff  = CLodVisibleClusterPageSlabByteOffset(packedCluster);
     if (pageSlabDesc == 0)
     {
         return false;
@@ -479,13 +570,24 @@ bool InitializeMeshletFromCompactedCluster(VisibleCluster cluster, out MeshletSe
     setup.bitsZ = CLodDescBitsZ(desc);
     setup.minQ = int3(desc.minQx, desc.minQy, desc.minQz);
     setup.positionBitOffset = desc.positionBitOffset;
-    setup.normalWordOffset = desc.normalWordOffset;
+    setup.vertexAttributeOffset = desc.vertexAttributeOffset;
     setup.triangleByteOffset = desc.triangleByteOffset;
+    setup.boneListOffset = desc.boneListOffset;
+    setup.boneCount = CLodDescBoneCount(desc);
+    setup.pageAttributeMask = hdr.attributeMask;
+    setup.uvSetCount = hdr.uvSetCount;
 
     // Page-level stream base offsets (absolute in slab)
+    setup.pageByteOffset = pageSlabOff;
     setup.positionBitstreamBase = pageSlabOff + hdr.positionBitstreamOffset;
     setup.normalArrayBase = pageSlabOff + hdr.normalArrayOffset;
+    setup.colorArrayBase = pageSlabOff + hdr.colorArrayOffset;
+    setup.jointArrayBase = pageSlabOff + hdr.jointArrayOffset;
+    setup.weightArrayBase = pageSlabOff + hdr.weightArrayOffset;
+    setup.uvDescriptorBase = pageSlabOff + hdr.uvDescriptorOffset;
+    setup.uvBitstreamDirectoryBase = pageSlabOff + hdr.uvBitstreamDirectoryOffset;
     setup.triangleStreamBase = pageSlabOff + hdr.triangleStreamOffset;
+    setup.boneIndexStreamBase = pageSlabOff + hdr.boneIndexStreamOffset;
 
     setup.compressedPositionQuantExp = hdr.compressedPositionQuantExp;
     setup.pagePoolSlabDescriptorIndex = pageSlabDesc;
@@ -516,19 +618,22 @@ void ClusterLODBucketMSMain(
 
     uint linearizedID = vGroupID.x + vGroupID.y * dispatchX;
 
-    StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
-    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
+    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> sortedToUnsortedMapping = ResourceDescriptorHeap[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX];
     uint count = histogram[bucketIndex];
 
     bool draw = linearizedID < count;
-    VisibleCluster cluster = (VisibleCluster)0;
+    uint3 packedCluster = uint3(0, 0, 0);
     MeshletSetup setup;
     uint visibleClusterIndex = baseOffset + linearizedID;
+    uint unsortedClusterIndex = 0;
 
     if (draw) {   
-        StructuredBuffer<VisibleCluster> compactedClusters = ResourceDescriptorHeap[CLOD_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
-        cluster = compactedClusters[visibleClusterIndex];
-        draw = InitializeMeshletFromCompactedCluster(cluster, setup, linearizedID, count);
+        ByteAddressBuffer compactedClusters = ResourceDescriptorHeap[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
+        packedCluster = CLodLoadVisibleClusterPacked(compactedClusters, visibleClusterIndex);
+        unsortedClusterIndex = sortedToUnsortedMapping[visibleClusterIndex];
+        draw = InitializeMeshletFromCompactedCluster(packedCluster, setup, linearizedID, count);
     } else {
         setup.vertCount = 0;
         setup.triCount = 0;
@@ -537,7 +642,7 @@ void ClusterLODBucketMSMain(
     if (draw)
     {
         ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[setup.viewID];
-        EmitMeshletVisBufferForViewCLod(uGroupThreadID, setup, setup.viewID, visibleClusterIndex, viewRasterInfo, outputVertices, outputTriangles);
+        EmitMeshletVisBufferForViewCLod(uGroupThreadID, setup, setup.viewID, unsortedClusterIndex, viewRasterInfo, outputVertices, outputTriangles);
         EmitPrimitiveIDs(uGroupThreadID, setup, primitiveInfo);
     }
 }

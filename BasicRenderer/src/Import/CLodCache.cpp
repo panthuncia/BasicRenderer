@@ -605,8 +605,11 @@ namespace CLodCache {
 		boost::hash_combine(seed, static_cast<uint32_t>(4));  // traversal node fanout
 		boost::hash_combine(seed, static_cast<uint32_t>(1));  // compressed group position bitstream enabled
 		boost::hash_combine(seed, static_cast<uint32_t>(1));  // compressed group normal stream enabled
+		boost::hash_combine(seed, static_cast<uint32_t>(6));  // multi-UV + 8-influence skinned CLod page stream format version
 		boost::hash_combine(seed, static_cast<uint32_t>(1));  // compressed meshlet vertex index bitstream enabled
 		boost::hash_combine(seed, static_cast<uint32_t>(1));  // mesh quantization heuristic version
+		boost::hash_combine(seed, static_cast<uint32_t>(1));  // UV quantization heuristic version
+		boost::hash_combine(seed, static_cast<uint32_t>(7));  // USD compliance layout + inherited primvar card isolation
 		return static_cast<uint64_t>(seed);
 	}
 

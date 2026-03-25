@@ -19,6 +19,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <queue>
+#include <unordered_map>
 
 #include "Render/RenderContext.h"
 #include "Utilities/Utilities.h"
@@ -35,6 +37,7 @@
 #include "Render/MemoryIntrospectionAPI.h"
 #include "ShaderBuffers.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
 #include "Telemetry/FrameTaskGraphTelemetry.h"
 #include "Managers/Singletons/RendererECSManager.h"
@@ -243,19 +246,79 @@ public:
 		m_telemetryQuery = {};
 		m_visibleClustersQuery = {};
 		m_visibleCounterQuery = {};
+        m_alphaDeepVisibilityCounterQuery = {};
+        m_alphaDeepVisibilityOverflowQuery = {};
+        m_alphaDeepVisibilityStatsQuery = {};
+    }
+
+    // ImGui descriptor heap allocator for user textures (slot 0 reserved for font atlas).
+    uint32_t AllocateImGuiDescriptor() {
+        std::lock_guard lock(imguiHeapMutex_);
+        if (!imguiHeapFreeSlots_.empty()) {
+            uint32_t idx = imguiHeapFreeSlots_.front();
+            imguiHeapFreeSlots_.pop();
+            return idx;
+        }
+        if (imguiHeapNextSlot_ < kImGuiHeapCapacity) {
+            return imguiHeapNextSlot_++;
+        }
+        throw std::runtime_error("ImGui descriptor heap exhausted");
+    }
+    void FreeImGuiDescriptor(uint32_t index) {
+        if (index == 0) return; // never free the font atlas slot
+        std::lock_guard lock(imguiHeapMutex_);
+        imguiHeapFreeSlots_.push(index);
+    }
+    ImTextureID GetImGuiGpuDescriptorHandle(uint32_t index) const {
+        return static_cast<ImTextureID>(imguiHeapGpuStart_ + static_cast<uint64_t>(index) * imguiHeapIncrementSize_);
+    }
+    rhi::DescriptorHeapHandle GetImGuiHeapHandle() const {
+        return g_pd3dSrvDescHeap->GetHandle();
     }
 
 private:
+    static constexpr uint32_t kImGuiHeapCapacity = 64;
     rhi::DescriptorHeapPtr g_pd3dSrvDescHeap;
+    uint64_t imguiHeapGpuStart_ = 0;
+    uint32_t imguiHeapIncrementSize_ = 0;
+    uint32_t imguiHeapNextSlot_ = 1; // slot 0 = font atlas
+    std::queue<uint32_t> imguiHeapFreeSlots_;
+    std::mutex imguiHeapMutex_;
+
     Menu() { 
         ImGui::CreateContext();
 		ImPlot::CreateContext();
     };
 	IDXGISwapChain3* m_pSwapChain = nullptr;
-	
-	flecs::entity selectedNode;
 
-	RenderGraph* m_renderGraph;
+    struct SceneExplorerPendingEdit {
+        bool hasPosition = false;
+        DirectX::XMFLOAT3 position = { 0.0f, 0.0f, 0.0f };
+        bool hasUniformScale = false;
+        float uniformScale = 1.0f;
+    };
+
+    struct SceneExplorerNodeSnapshot {
+        uint64_t stableId = 0;
+        std::string name;
+        bool hasPosition = false;
+        DirectX::XMFLOAT3 position = { 0.0f, 0.0f, 0.0f };
+        bool hasScale = false;
+        float uniformScale = 1.0f;
+        bool hasRotation = false;
+        DirectX::XMFLOAT4 rotation = { 0.0f, 0.0f, 0.0f, 1.0f };
+        bool isRenderable = false;
+        size_t meshCount = 0;
+        bool skinned = false;
+        std::vector<SceneExplorerNodeSnapshot> children;
+    };
+
+    uint64_t m_selectedSceneNodeStableId = 0;
+    bool m_sceneExplorerSnapshotAvailable = false;
+    SceneExplorerNodeSnapshot m_sceneExplorerRootSnapshot{};
+    std::unordered_map<uint64_t, SceneExplorerPendingEdit> m_sceneExplorerPendingEdits;
+
+	RenderGraph* m_renderGraph = nullptr;
 
     struct CLodCaptureStats {
         uint32_t visibleClusterCount = 0;
@@ -302,15 +365,33 @@ private:
     bool m_clodCaptureStatsAvailable = false;
     CLodCaptureStats m_clodCaptureStats{};
 
+    bool m_clodAlphaTelemetryHasData = false;
+    bool m_clodAlphaTelemetryCapturePending = false;
+    uint64_t m_clodAlphaTelemetryCaptureId = 0;
+    bool m_clodAlphaTelemetryHasPendingNodeCount = false;
+    bool m_clodAlphaTelemetryHasPendingOverflow = false;
+    bool m_clodAlphaTelemetryHasPendingStats = false;
+    uint32_t m_clodAlphaTelemetryPendingNodeCount = 0;
+    uint32_t m_clodAlphaTelemetryPendingOverflow = 0;
+    uint32_t m_clodAlphaNodeCount = 0;
+    uint32_t m_clodAlphaOverflowCount = 0;
+    CLodDeepVisibilityStats m_clodAlphaTelemetryPendingStats{};
+    CLodDeepVisibilityStats m_clodAlphaStats{};
+    std::string m_clodAlphaTelemetryStatus = "No alpha captures yet.";
+
     flecs::query<const Components::Resource> m_telemetryQuery;
 	flecs::query<const Components::Resource> m_visibleClustersQuery;
 	flecs::query<const Components::Resource> m_visibleCounterQuery;
+    flecs::query<const Components::Resource> m_alphaDeepVisibilityCounterQuery;
+    flecs::query<const Components::Resource> m_alphaDeepVisibilityOverflowQuery;
+    flecs::query<const Components::Resource> m_alphaDeepVisibilityStatsQuery;
 
     int FindFileIndex(const std::vector<std::string>& hdrFiles, const std::string& existingFile);
     void DrawCLodTelemetryWindow();
     void DrawFrameTaskGraphWindow();
     void DrawAutoAliasPlannerWindow();
     void TryFinalizeCLodCaptureStats(uint64_t captureId);
+    void TryFinalizeCLodAlphaTelemetryCapture(uint64_t captureId);
 
     void DrawEnvironmentsDropdown();
 	void DrawOutputTypeDropdown();
@@ -319,7 +400,14 @@ private:
     void DrawTonemapTypeDropdown();
     void DrawBrowseButton(const std::wstring& targetDirectory);
     void DrawLoadModelButton();
-    void DisplaySceneNode(flecs::entity node, bool isOnlyChild);
+    SceneExplorerNodeSnapshot BuildSceneExplorerSnapshot(flecs::entity node);
+    const SceneExplorerNodeSnapshot* FindSceneExplorerSnapshotNode(const SceneExplorerNodeSnapshot& node, uint64_t stableId) const;
+    SceneExplorerNodeSnapshot* FindSceneExplorerSnapshotNode(SceneExplorerNodeSnapshot& node, uint64_t stableId);
+    void RefreshSceneExplorerSnapshot();
+    void OverlayPendingSceneExplorerEdits();
+    void QueueSceneNodePositionChange(uint64_t stableId, const DirectX::XMFLOAT3& position);
+    void QueueSceneNodeUniformScaleChange(uint64_t stableId, float uniformScale);
+    void DisplaySceneNode(const SceneExplorerNodeSnapshot& node, bool isOnlyChild);
     void DisplaySceneGraph();
     void DisplaySelectedNode();
     void DrawPassTimingWindow();
@@ -327,6 +415,7 @@ private:
     std::chrono::steady_clock::time_point m_startTime = std::chrono::steady_clock::now();
 
 	bool m_meshShadersSupported = false;
+    bool m_menuEnabled = true;
     
     std::filesystem::path environmentsDir;
 
@@ -369,11 +458,17 @@ private:
 	std::function<bool()> getMeshletCullingEnabled;
 	std::function<void(bool)> setMeshletCullingEnabled;
 
+    CLodSoftwareRasterMode m_clodSoftwareRasterMode = CLodSoftwareRasterMode::Disabled;
+    std::function<CLodSoftwareRasterMode()> getCLodSoftwareRasterMode;
+    std::function<void(CLodSoftwareRasterMode)> setCLodSoftwareRasterMode;
+
     bool wireframeEnabled = false;
 	std::function<bool()> getWireframeEnabled;
 	std::function<void(bool)> setWireframeEnabled;
 
     std::function<flecs::entity ()> getSceneRoot;
+    std::function<void(uint64_t, DirectX::XMFLOAT3)> queueSceneNodePositionEdit;
+    std::function<void(uint64_t, float)> queueSceneNodeUniformScaleEdit;
 
     bool allowTearing = false;
 	std::function<bool()> getAllowTearing;
@@ -471,7 +566,7 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     environmentsDir = std::filesystem::path(GetExePath()) / "textures" / "environment";
 
 	auto device = DeviceManager::GetInstance().GetDevice();
-	auto result = device.CreateDescriptorHeap({ rhi::DescriptorHeapType::CbvSrvUav, 1, true }, g_pd3dSrvDescHeap);
+	auto result = device.CreateDescriptorHeap({ rhi::DescriptorHeapType::CbvSrvUav, kImGuiHeapCapacity, true }, g_pd3dSrvDescHeap);
 
     // Setup Platform/Renderer backends
     ImGui_ImplWin32_Init(hwnd);
@@ -481,6 +576,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
         rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get()),
         rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetCPUDescriptorHandleForHeapStart(),
         rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetGPUDescriptorHandleForHeapStart());
+
+    // Cache GPU start and increment size for user-texture descriptor allocation.
+    imguiHeapGpuStart_ = rhi::dx12::get_descriptor_heap(g_pd3dSrvDescHeap.Get())->GetGPUDescriptorHandleForHeapStart().ptr;
+    imguiHeapIncrementSize_ = device.GetDescriptorHandleIncrementSize(rhi::DescriptorHeapType::CbvSrvUav);
+
     ImGui_ImplWin32_EnableDpiAwareness();
 
 
@@ -537,6 +637,8 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
 	getTonemapType = settingsManager.getSettingGetter<unsigned int>("tonemapType");
 
     getSceneRoot = settingsManager.getSettingGetter<std::function<flecs::entity()>>("getSceneRoot")();
+    queueSceneNodePositionEdit = settingsManager.getSettingGetter<std::function<void(uint64_t, DirectX::XMFLOAT3)>>("queueSceneNodePositionEdit")();
+    queueSceneNodeUniformScaleEdit = settingsManager.getSettingGetter<std::function<void(uint64_t, float)>>("queueSceneNodeUniformScaleEdit")();
 
 	setMeshShaderEnabled = settingsManager.getSettingSetter<bool>("enableMeshShader");
 	getMeshShaderEnabled = settingsManager.getSettingGetter<bool>("enableMeshShader");
@@ -557,6 +659,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
 	setMeshletCullingEnabled = settingsManager.getSettingSetter<bool>("enableMeshletCulling");
 	meshletCulling = getMeshletCullingEnabled();
 	observerSetting(meshletCulling, "enableMeshletCulling");
+
+    getCLodSoftwareRasterMode = settingsManager.getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName);
+    setCLodSoftwareRasterMode = settingsManager.getSettingSetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName);
+    m_clodSoftwareRasterMode = getCLodSoftwareRasterMode();
+    observerSetting(m_clodSoftwareRasterMode, CLodSoftwareRasterModeSettingName);
 
 	setWireframeEnabled = settingsManager.getSettingSetter<bool>("enableWireframe");
 	getWireframeEnabled = settingsManager.getSettingGetter<bool>("enableWireframe");
@@ -662,40 +769,63 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_meshShadersSupported = DeviceManager::GetInstance().GetMeshShadersSupported();
 
     // CLod queries
+    const auto visBufferTag = RendererECSManager::GetInstance().GetWorld().component<CLodExtensionVisibilityBufferTag>();
     m_telemetryQuery = RendererECSManager::GetInstance().GetWorld()
         .query_builder<const Components::Resource>()
         .with<CLodWorkGraphTelemetryBufferTag>()
+        .with<CLodExtensionTypeTag>(visBufferTag)
         .build();
     m_visibleClustersQuery = RendererECSManager::GetInstance().GetWorld()
         .query_builder<const Components::Resource>()
         .with<VisibleClustersBufferTag>()
+        .with<CLodExtensionTypeTag>(visBufferTag)
         .build();
     m_visibleCounterQuery = RendererECSManager::GetInstance().GetWorld()
         .query_builder<const Components::Resource>()
         .with<VisibleClustersCounterTag>()
+        .with<CLodExtensionTypeTag>(visBufferTag)
+        .build();
+
+    const auto alphaTag = RendererECSManager::GetInstance().GetWorld().component<CLodExtensionAlphaBlendTag>();
+    m_alphaDeepVisibilityCounterQuery = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<CLodDeepVisibilityCounterTag>()
+        .with<CLodExtensionTypeTag>(alphaTag)
+        .build();
+    m_alphaDeepVisibilityOverflowQuery = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<CLodDeepVisibilityOverflowCounterTag>()
+        .with<CLodExtensionTypeTag>(alphaTag)
+        .build();
+    m_alphaDeepVisibilityStatsQuery = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<CLodDeepVisibilityStatsTag>()
+        .with<CLodExtensionTypeTag>(alphaTag)
         .build();
 }
 
-static bool PassUsesResourceAdapter(const void* passAndRes, uint64_t resourceId, bool isCompute) {
-    if (isCompute) {
+static bool PassUsesResourceAdapter(const void* passAndRes, uint64_t resourceId, int passKind) {
+    auto checkRequirements = [&](const auto& requirements) {
+        for (const auto& req : requirements) {
+            if (req.resourceHandleAndRange.resource.GetGlobalResourceID() == resourceId) {
+                return true;
+            }
+        }
+        return false;
+    };
+    switch (passKind) {
+    case 1: { // Compute
         auto& pr = *reinterpret_cast<const RenderGraph::ComputePassAndResources*>(passAndRes);
-		bool found = false;
-        for (const auto& req : pr.resources.frameResourceRequirements) {
-            if (req.resourceHandleAndRange.resource.GetGlobalResourceID() == resourceId) {
-				found = true;
-            }
-        }
-		return found;
+        return checkRequirements(pr.resources.frameResourceRequirements);
     }
-    else {
+    case 2: { // Copy
+        auto& pr = *reinterpret_cast<const RenderGraph::CopyPassAndResources*>(passAndRes);
+        return checkRequirements(pr.resources.frameResourceRequirements);
+    }
+    default: { // Render (0)
         auto& pr = *reinterpret_cast<const RenderGraph::RenderPassAndResources*>(passAndRes);
-        bool found = false;
-        for (const auto& req : pr.resources.frameResourceRequirements) {
-            if (req.resourceHandleAndRange.resource.GetGlobalResourceID() == resourceId) {
-                found = true;
-            }
-        }
-        return found;
+        return checkRequirements(pr.resources.frameResourceRequirements);
+    }
     }
 }
 
@@ -712,7 +842,40 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     static bool showFrameTaskGraph = false;
     static bool showAutoAliasPlanner = false;
 
-    SetCLodWorkGraphTelemetryEnabled(showCLodTelemetry || m_clodTelemetryCapturePending || m_clodCaptureStatsPending);
+    const float fps = ImGui::GetIO().Framerate;
+    const float msPerFrame = fps > 0.0f ? (1000.0f / fps) : 0.0f;
+
+    SetCLodWorkGraphTelemetryEnabled((m_menuEnabled && showCLodTelemetry) || m_clodTelemetryCapturePending || m_clodCaptureStatsPending);
+
+    if (!m_menuEnabled) {
+        ImGui::SetNextWindowBgAlpha(0.8f);
+        ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_FirstUseEver);
+        ImGui::Begin("Menu", nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize |
+            ImGuiWindowFlags_NoCollapse);
+        ImGui::Checkbox("Enable Menu", &m_menuEnabled);
+        ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", msPerFrame, fps);
+        ImGui::End();
+
+		ImGui::Render();
+
+        commandList.SetDescriptorHeaps(g_pd3dSrvDescHeap->GetHandle(), std::nullopt);
+
+		rhi::PassBeginInfo beginInfo{};
+		rhi::ColorAttachment attchment{};
+        attchment.loadOp = rhi::LoadOp::Load;
+		attchment.rtv = { context.rtvHeap.GetHandle() , context.frameIndex }; // Index into the swapchain RTV heap
+		beginInfo.colors = { &attchment };
+		beginInfo.height = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.y);
+		beginInfo.width = static_cast<uint32_t>(ImGui::GetIO().DisplaySize.x);
+
+		commandList.BeginPass(beginInfo);
+
+		ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), rhi::dx12::get_cmd_list(commandList));
+        return;
+    }
+
+    RefreshSceneExplorerSnapshot();
 
 	{
 		static float f = 0.0f;
@@ -746,6 +909,12 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 		if (ImGui::Checkbox("Meshlet Culling", &meshletCulling)) {
 			setMeshletCullingEnabled(meshletCulling);
 		}
+        int clodSoftwareRasterModeIndex = static_cast<int>(m_clodSoftwareRasterMode);
+        if (ImGui::Combo("Software Raster Mode", &clodSoftwareRasterModeIndex, CLodSoftwareRasterModeNames, CLodSoftwareRasterModeCount)) {
+            clodSoftwareRasterModeIndex = std::clamp(clodSoftwareRasterModeIndex, 0, CLodSoftwareRasterModeCount - 1);
+            m_clodSoftwareRasterMode = static_cast<CLodSoftwareRasterMode>(clodSoftwareRasterModeIndex);
+            setCLodSoftwareRasterMode(m_clodSoftwareRasterMode);
+        }
 		if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
 			setWireframeEnabled(wireframeEnabled);
 		}
@@ -825,7 +994,8 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
 
         ImGui::Text(memoryString.c_str());
         ImGui::Text("Render Resolution: %d x %d | Output Resolution: %d x %d", context.renderResolution.x, context.renderResolution.y, context.outputResolution.x, context.outputResolution.y);
-		ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+        ImGui::Checkbox("Enable Menu", &m_menuEnabled);
+        ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", msPerFrame, fps);
 		ImGui::End();
 	}
 	if (showMemoryIntrospection) {
@@ -871,7 +1041,12 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     if (showRG) {
 		ImGui::Begin("Render Graph Inspector", nullptr);
         RGInspectorOptions opts;
+        opts.imguiAllocDescriptor = [this]() { return AllocateImGuiDescriptor(); };
+        opts.imguiFreeDescriptor = [this](uint32_t idx) { FreeImGuiDescriptor(idx); };
+        opts.imguiGpuHandle = [this](uint32_t idx) { return GetImGuiGpuDescriptorHandle(idx); };
+        opts.imguiHeapHandle = GetImGuiHeapHandle();
         RGInspector::Show(m_renderGraph->GetBatches(),
+            m_renderGraph->GetQueueRegistry(),
             PassUsesResourceAdapter,
             [this](uint64_t resourceId) -> std::string {
                 if (!m_renderGraph) return {};
@@ -1072,14 +1247,169 @@ inline void Menu::DrawLoadModelButton() {
     }
 }
 
-inline void Menu::DisplaySceneNode(flecs::entity node, bool isOnlyChild) {
-    if (!node) return;
+inline Menu::SceneExplorerNodeSnapshot Menu::BuildSceneExplorerSnapshot(flecs::entity node) {
+    SceneExplorerNodeSnapshot snapshot;
+    if (!node.is_alive()) {
+        return snapshot;
+    }
 
-    // Set flags for automatically expanding nodes if they are the only child
+    if (const auto* stableSceneID = node.try_get<Components::StableSceneID>()) {
+        snapshot.stableId = stableSceneID->value;
+    } else {
+        snapshot.stableId = static_cast<uint64_t>(node.id());
+    }
+
+    if (const auto* nameComponent = node.try_get<Components::Name>()) {
+        snapshot.name = nameComponent->name;
+    } else {
+        snapshot.name = "Unnamed Node";
+    }
+
+    if (const auto* position = node.try_get<Components::Position>()) {
+        snapshot.hasPosition = true;
+        XMStoreFloat3(&snapshot.position, position->pos);
+    }
+
+    if (const auto* scale = node.try_get<Components::Scale>()) {
+        DirectX::XMFLOAT3 scaleValue{};
+        snapshot.hasScale = true;
+        XMStoreFloat3(&scaleValue, scale->scale);
+        snapshot.uniformScale = scaleValue.x;
+    }
+
+    if (const auto* rotation = node.try_get<Components::Rotation>()) {
+        snapshot.hasRotation = true;
+        XMStoreFloat4(&snapshot.rotation, rotation->rot);
+    }
+
+    snapshot.isRenderable = node.has<Components::RenderableObject>();
+    if (snapshot.isRenderable) {
+        if (const auto* meshInstances = node.try_get<Components::MeshInstances>()) {
+            snapshot.meshCount = meshInstances->meshInstances.size();
+        }
+        snapshot.skinned = node.has<Components::Skinned>();
+    }
+
+    node.children([&](flecs::entity child) {
+        snapshot.children.push_back(BuildSceneExplorerSnapshot(child));
+    });
+
+    return snapshot;
+}
+
+inline const Menu::SceneExplorerNodeSnapshot* Menu::FindSceneExplorerSnapshotNode(const SceneExplorerNodeSnapshot& node, uint64_t stableId) const {
+    if (node.stableId == stableId) {
+        return &node;
+    }
+
+    for (const auto& child : node.children) {
+        if (const auto* found = FindSceneExplorerSnapshotNode(child, stableId)) {
+            return found;
+        }
+    }
+
+    return nullptr;
+}
+
+inline Menu::SceneExplorerNodeSnapshot* Menu::FindSceneExplorerSnapshotNode(SceneExplorerNodeSnapshot& node, uint64_t stableId) {
+    if (node.stableId == stableId) {
+        return &node;
+    }
+
+    for (auto& child : node.children) {
+        if (auto* found = FindSceneExplorerSnapshotNode(child, stableId)) {
+            return found;
+        }
+    }
+
+    return nullptr;
+}
+
+inline void Menu::OverlayPendingSceneExplorerEdits() {
+    if (!m_sceneExplorerSnapshotAvailable) {
+        return;
+    }
+
+    constexpr float kFloatEpsilon = 1e-4f;
+    for (auto it = m_sceneExplorerPendingEdits.begin(); it != m_sceneExplorerPendingEdits.end();) {
+        auto* node = FindSceneExplorerSnapshotNode(m_sceneExplorerRootSnapshot, it->first);
+        if (!node) {
+            it = m_sceneExplorerPendingEdits.erase(it);
+            continue;
+        }
+
+        bool appliedToScene = true;
+        if (it->second.hasPosition) {
+            appliedToScene = appliedToScene
+                && node->hasPosition
+                && std::fabs(node->position.x - it->second.position.x) <= kFloatEpsilon
+                && std::fabs(node->position.y - it->second.position.y) <= kFloatEpsilon
+                && std::fabs(node->position.z - it->second.position.z) <= kFloatEpsilon;
+            node->hasPosition = true;
+            node->position = it->second.position;
+        }
+
+        if (it->second.hasUniformScale) {
+            appliedToScene = appliedToScene
+                && node->hasScale
+                && std::fabs(node->uniformScale - it->second.uniformScale) <= kFloatEpsilon;
+            node->hasScale = true;
+            node->uniformScale = it->second.uniformScale;
+        }
+
+        if (appliedToScene) {
+            it = m_sceneExplorerPendingEdits.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+inline void Menu::RefreshSceneExplorerSnapshot() {
+    if (m_sceneOverlapStatus.taskInFlight) {
+        return;
+    }
+
+    auto root = getSceneRoot();
+    if (!root) {
+        m_sceneExplorerSnapshotAvailable = false;
+        m_selectedSceneNodeStableId = 0;
+        m_sceneExplorerPendingEdits.clear();
+        return;
+    }
+
+    m_sceneExplorerRootSnapshot = BuildSceneExplorerSnapshot(root);
+    m_sceneExplorerSnapshotAvailable = true;
+    OverlayPendingSceneExplorerEdits();
+
+    if (m_selectedSceneNodeStableId != 0
+        && FindSceneExplorerSnapshotNode(m_sceneExplorerRootSnapshot, m_selectedSceneNodeStableId) == nullptr) {
+        m_selectedSceneNodeStableId = 0;
+    }
+}
+
+inline void Menu::QueueSceneNodePositionChange(uint64_t stableId, const DirectX::XMFLOAT3& position) {
+    auto& pendingEdit = m_sceneExplorerPendingEdits[stableId];
+    pendingEdit.hasPosition = true;
+    pendingEdit.position = position;
+    if (queueSceneNodePositionEdit) {
+        queueSceneNodePositionEdit(stableId, position);
+    }
+}
+
+inline void Menu::QueueSceneNodeUniformScaleChange(uint64_t stableId, float uniformScale) {
+    auto& pendingEdit = m_sceneExplorerPendingEdits[stableId];
+    pendingEdit.hasUniformScale = true;
+    pendingEdit.uniformScale = uniformScale;
+    if (queueSceneNodeUniformScaleEdit) {
+        queueSceneNodeUniformScaleEdit(stableId, uniformScale);
+    }
+}
+
+inline void Menu::DisplaySceneNode(const SceneExplorerNodeSnapshot& node, bool isOnlyChild) {
     ImGuiTreeNodeFlags nodeFlags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
 
-    // If the node is currently selected, add the ImGuiTreeNodeFlags_Selected flag
-    if (node == selectedNode) {
+    if (node.stableId == m_selectedSceneNodeStableId) {
         nodeFlags |= ImGuiTreeNodeFlags_Selected;
     }
 
@@ -1087,115 +1417,88 @@ inline void Menu::DisplaySceneNode(flecs::entity node, bool isOnlyChild) {
         nodeFlags |= ImGuiTreeNodeFlags_DefaultOpen;
     }
 
-    // Check if the node has any children.
-    bool hasChild = false;
-    node.children([&hasChild](flecs::entity child) {
-        hasChild = true;
-        });
-    // If there are no children, mark it as a leaf node.
-    if (!hasChild) {
+    if (node.children.empty()) {
         nodeFlags |= ImGuiTreeNodeFlags_Leaf;
     }
 
-    // Show the node with its name
-	auto nameComponent = node.try_get<Components::Name>();
-	std::string name = nameComponent ? nameComponent->name : "Unnamed Node";
-    void* uniqueId = reinterpret_cast<void*>(static_cast<intptr_t>(node.id()));
-    if (ImGui::TreeNodeEx(uniqueId, nodeFlags, "%s", name.c_str())) {
-        // Detect if the node is clicked to select it
+    void* uniqueId = reinterpret_cast<void*>(static_cast<intptr_t>(node.stableId));
+    if (ImGui::TreeNodeEx(uniqueId, nodeFlags, "%s", node.name.c_str())) {
         if (ImGui::IsItemClicked()) {
-            selectedNode = node;
+            m_selectedSceneNodeStableId = node.stableId;
         }
 
-        // Display information specific to RenderableObject, if the node is of that type.
-		if (node.has<Components::RenderableObject>()) {
-            // Display meshes
-			auto meshInstances = node.try_get<Components::MeshInstances>();
-			if (meshInstances) {
-				ImGui::Text("Meshes: %d", meshInstances->meshInstances.size());
-			}
+        if (node.isRenderable) {
+            ImGui::Text("Meshes: %llu", static_cast<unsigned long long>(node.meshCount));
+            ImGui::Text("Has Skinned: %s", node.skinned ? "Yes" : "No");
+        }
 
-            if (node.has<Components::Skinned>()) {
-                ImGui::Text("Has Skinned: Yes");
-            }
-            else {
-                ImGui::Text("Has Skinned: No");
-            }
-		}
-
-        // Recursively display child nodes
-        // Count children
-        uint64_t num = 0;
-        node.children(([&num](flecs::entity) {
-            num++;
-            }));
-
-        bool childIsOnly = num <= 1;
-		node.children(([&](flecs::entity child) {
-			// Display the child node
-			DisplaySceneNode(child, childIsOnly);
-			}));
+        const bool childIsOnly = node.children.size() <= 1;
+        for (const auto& child : node.children) {
+            DisplaySceneNode(child, childIsOnly);
+        }
 
         ImGui::TreePop();
-    }
-    else {
-        // Allow selection
-        if (ImGui::IsItemClicked()) {
-            selectedNode = node;
-        }
+    } else if (ImGui::IsItemClicked()) {
+        m_selectedSceneNodeStableId = node.stableId;
     }
 }
 
 inline void Menu::DisplaySceneGraph() {
-    if (m_sceneOverlapStatus.taskInFlight) {
-        ImGui::TextDisabled("Scene graph is paused while async scene update is running.");
+    if (!m_sceneExplorerSnapshotAvailable) {
+        ImGui::TextDisabled("No scene snapshot available.");
         return;
     }
 
-    auto root = getSceneRoot();
-    if (!root) {
-        ImGui::TextDisabled("No scene root available.");
-        return;
-    }
-
-    DisplaySceneNode(root, true);
+    DisplaySceneNode(m_sceneExplorerRootSnapshot, true);
 }
 
 inline void Menu::DisplaySelectedNode() {
-    if (m_sceneOverlapStatus.taskInFlight) {
-        selectedNode = {};
+    if (m_selectedSceneNodeStableId == 0 || !m_sceneExplorerSnapshotAvailable) {
         return;
     }
 
-    if (selectedNode) {
-        ImGui::Begin("Selected Node Transform", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-
-        // Display the transform details
-        ImGui::Text("Position:");
-        XMFLOAT3 pos;
-        auto& position = selectedNode.get<Components::Position>();
-        XMStoreFloat3(&pos, position.pos);
-        if (ImGui::InputFloat3("Position", &pos.x)) {
-			selectedNode.set<Components::Position>(XMLoadFloat3(&pos));
-            //selectedNode->transform.isDirty = true;
-        }
-        ImGui::Text("Scale:");
-		XMFLOAT3 scale;
-		XMStoreFloat3(&scale, selectedNode.get<Components::Scale>().scale);
-        if (ImGui::InputFloat("Scale", &scale.x)) {
-            //selectedNode->transform.isDirty = true;
-			scale.y = scale.x;
-			scale.z = scale.x;
-			selectedNode.set<Components::Scale>(XMLoadFloat3(&scale));
-        }
-
-        // Display rotation
-        XMFLOAT4 rotation;
-        XMStoreFloat4(&rotation, selectedNode.get<Components::Rotation>().rot);
-        ImGui::Text("Rotation (quaternion): (%.3f, %.3f, %.3f, %.3f)", rotation.x, rotation.y, rotation.z, rotation.w);
-
-        ImGui::End();
+    auto* selectedNode = FindSceneExplorerSnapshotNode(m_sceneExplorerRootSnapshot, m_selectedSceneNodeStableId);
+    if (!selectedNode) {
+        m_selectedSceneNodeStableId = 0;
+        return;
     }
+
+    ImGui::Begin("Selected Node Transform", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+
+    ImGui::Text("Position:");
+    if (selectedNode->hasPosition) {
+        DirectX::XMFLOAT3 pos = selectedNode->position;
+        if (ImGui::InputFloat3("Position", &pos.x)) {
+            selectedNode->position = pos;
+            QueueSceneNodePositionChange(selectedNode->stableId, pos);
+        }
+    } else {
+        ImGui::TextDisabled("Position unavailable.");
+    }
+
+    ImGui::Text("Scale:");
+    if (selectedNode->hasScale) {
+        float uniformScale = selectedNode->uniformScale;
+        if (ImGui::InputFloat("Scale", &uniformScale)) {
+            selectedNode->uniformScale = uniformScale;
+            QueueSceneNodeUniformScaleChange(selectedNode->stableId, uniformScale);
+        }
+    } else {
+        ImGui::TextDisabled("Scale unavailable.");
+    }
+
+    if (selectedNode->hasRotation) {
+        ImGui::Text(
+            "Rotation (quaternion): (%.3f, %.3f, %.3f, %.3f)",
+            selectedNode->rotation.x,
+            selectedNode->rotation.y,
+            selectedNode->rotation.z,
+            selectedNode->rotation.w);
+    } else {
+        ImGui::TextDisabled("Rotation unavailable.");
+    }
+
+    ImGui::End();
 }
 
 inline void Menu::TryFinalizeCLodCaptureStats(uint64_t captureId) {
@@ -1265,12 +1568,44 @@ inline void Menu::TryFinalizeCLodCaptureStats(uint64_t captureId) {
         stats.maxClustersPerInstance);
 }
 
+inline void Menu::TryFinalizeCLodAlphaTelemetryCapture(uint64_t captureId) {
+    if (!m_clodAlphaTelemetryCapturePending || m_clodAlphaTelemetryCaptureId != captureId) {
+        return;
+    }
+
+    if (!m_clodAlphaTelemetryHasPendingNodeCount ||
+        !m_clodAlphaTelemetryHasPendingOverflow ||
+        !m_clodAlphaTelemetryHasPendingStats) {
+        return;
+    }
+
+    m_clodAlphaNodeCount = m_clodAlphaTelemetryPendingNodeCount;
+    m_clodAlphaOverflowCount = m_clodAlphaTelemetryPendingOverflow;
+    m_clodAlphaStats = m_clodAlphaTelemetryPendingStats;
+    m_clodAlphaTelemetryHasData = true;
+    m_clodAlphaTelemetryCapturePending = false;
+    m_clodAlphaTelemetryStatus = "Alpha capture completed.";
+
+    spdlog::info(
+        "CLod alpha telemetry: nodes={}, overflow={}, truncatedPixels={}, truncatedNodes={}, resolvedSamples={}, maxRaw={}, maxResolved={}",
+        m_clodAlphaNodeCount,
+        m_clodAlphaOverflowCount,
+        m_clodAlphaStats.truncatedPixelCount,
+        m_clodAlphaStats.truncatedNodeCount,
+        m_clodAlphaStats.totalResolvedSamples,
+        m_clodAlphaStats.maxRawNodeCount,
+        m_clodAlphaStats.maxResolvedSamples);
+}
+
 inline void Menu::DrawCLodTelemetryWindow() {
     ImGui::Begin("CLod Work Graph Telemetry", nullptr);
 
     Resource* clodTelemetryResource = nullptr;
     Resource* clodVisibleClustersResource = nullptr;
     Resource* clodVisibleCounterResource = nullptr;
+    Resource* alphaNodeCounterResource = nullptr;
+    Resource* alphaOverflowCounterResource = nullptr;
+    Resource* alphaStatsResource = nullptr;
     {
         m_telemetryQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
             if (clodTelemetryResource == nullptr) {
@@ -1295,11 +1630,40 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 }
             }
             });
+
+        m_alphaDeepVisibilityCounterQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (alphaNodeCounterResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    alphaNodeCounterResource = resource.get();
+                }
+            }
+            });
+
+        m_alphaDeepVisibilityOverflowQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (alphaOverflowCounterResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    alphaOverflowCounterResource = resource.get();
+                }
+            }
+            });
+
+        m_alphaDeepVisibilityStatsQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (alphaStatsResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    alphaStatsResource = resource.get();
+                }
+            }
+            });
     }
 
     const bool captureStatsResourcesReady = (clodVisibleClustersResource != nullptr) && (clodVisibleCounterResource != nullptr);
+    const bool alphaCaptureResourcesReady =
+        (alphaNodeCounterResource != nullptr) &&
+        (alphaOverflowCounterResource != nullptr) &&
+        (alphaStatsResource != nullptr);
     auto* readbackService = m_renderGraph ? m_renderGraph->GetReadbackService() : nullptr;
     const bool canCapture = (clodTelemetryResource != nullptr) && (readbackService != nullptr) && (!m_clodTelemetryCapturePending) && (!m_clodCaptureStatsPending);
+    const bool canCaptureAlpha = alphaCaptureResourcesReady && (readbackService != nullptr) && (!m_clodAlphaTelemetryCapturePending);
 
     if (!captureStatsResourcesReady) {
         ImGui::TextDisabled("Extended stats unavailable: visible cluster resources not found.");
@@ -1324,7 +1688,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
         if (readbackService) {
             readbackService->RequestReadbackCapture(
-                "CLod::HierarchialCullingPass2",
+                "CLodOpaque::HierarchialCullingPass2",
                 clodTelemetryResource,
                 RangeSpec{},
                 [this](ReadbackCaptureResult&& result) {
@@ -1378,7 +1742,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
             if (readbackService) {
                 readbackService->RequestReadbackCapture(
-                    "CLod::HierarchialCullingPass2",
+                    "CLodOpaque::HierarchialCullingPass2",
                     clodVisibleCounterResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {
@@ -1398,7 +1762,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     });
 
                 readbackService->RequestReadbackCapture(
-                    "CLod::HierarchialCullingPass2",
+                    "CLodOpaque::HierarchialCullingPass2",
                     clodVisibleClustersResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {
@@ -1406,11 +1770,14 @@ inline void Menu::DrawCLodTelemetryWindow() {
                         return;
                     }
 
-                    const size_t clusterBytes = sizeof(VisibleCluster);
+                    const size_t clusterBytes = PackedVisibleClusterStrideBytes;
                     const size_t count = result.data.size() / clusterBytes;
                     m_clodCapturePendingClusters.resize(count);
                     if (count > 0) {
-                        std::memcpy(m_clodCapturePendingClusters.data(), result.data.data(), count * clusterBytes);
+                        const std::byte* rawClusters = result.data.data();
+                        for (size_t i = 0; i < count; ++i) {
+                            m_clodCapturePendingClusters[i] = DecodePackedVisibleCluster(rawClusters + i * clusterBytes);
+                        }
                     }
 
                     m_clodCaptureHasPendingClusters = true;
@@ -1427,6 +1794,92 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
     ImGui::SameLine();
     ImGui::Text("Status: %s", m_clodTelemetryStatus.c_str());
+
+    if (!alphaCaptureResourcesReady) {
+        ImGui::TextDisabled("Alpha deep-visibility metrics unavailable: required resources not found.");
+    }
+
+    if (!canCaptureAlpha) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Capture CLod Alpha Metrics")) {
+        m_clodAlphaTelemetryCapturePending = true;
+        m_clodAlphaTelemetryCaptureId++;
+        m_clodAlphaTelemetryHasPendingNodeCount = false;
+        m_clodAlphaTelemetryHasPendingOverflow = false;
+        m_clodAlphaTelemetryHasPendingStats = false;
+        m_clodAlphaTelemetryPendingNodeCount = 0;
+        m_clodAlphaTelemetryPendingOverflow = 0;
+        m_clodAlphaTelemetryPendingStats = {};
+        m_clodAlphaTelemetryStatus = "Alpha capture requested.";
+
+        const uint64_t captureId = m_clodAlphaTelemetryCaptureId;
+        readbackService->RequestReadbackCapture(
+            "CLodAlpha::DeepVisibilityResolvePass",
+            alphaNodeCounterResource,
+            RangeSpec{},
+            [this, captureId](ReadbackCaptureResult&& result) {
+                if (!m_clodAlphaTelemetryCapturePending || m_clodAlphaTelemetryCaptureId != captureId) {
+                    return;
+                }
+
+                if (result.data.size() < sizeof(uint32_t)) {
+                    m_clodAlphaTelemetryStatus = "Alpha capture failed: node counter payload too small.";
+                    m_clodAlphaTelemetryCapturePending = false;
+                    return;
+                }
+
+                std::memcpy(&m_clodAlphaTelemetryPendingNodeCount, result.data.data(), sizeof(uint32_t));
+                m_clodAlphaTelemetryHasPendingNodeCount = true;
+                TryFinalizeCLodAlphaTelemetryCapture(captureId);
+            });
+
+        readbackService->RequestReadbackCapture(
+            "CLodAlpha::DeepVisibilityResolvePass",
+            alphaOverflowCounterResource,
+            RangeSpec{},
+            [this, captureId](ReadbackCaptureResult&& result) {
+                if (!m_clodAlphaTelemetryCapturePending || m_clodAlphaTelemetryCaptureId != captureId) {
+                    return;
+                }
+
+                if (result.data.size() < sizeof(uint32_t)) {
+                    m_clodAlphaTelemetryStatus = "Alpha capture failed: overflow payload too small.";
+                    m_clodAlphaTelemetryCapturePending = false;
+                    return;
+                }
+
+                std::memcpy(&m_clodAlphaTelemetryPendingOverflow, result.data.data(), sizeof(uint32_t));
+                m_clodAlphaTelemetryHasPendingOverflow = true;
+                TryFinalizeCLodAlphaTelemetryCapture(captureId);
+            });
+
+        readbackService->RequestReadbackCapture(
+            "CLodAlpha::DeepVisibilityResolvePass",
+            alphaStatsResource,
+            RangeSpec{},
+            [this, captureId](ReadbackCaptureResult&& result) {
+                if (!m_clodAlphaTelemetryCapturePending || m_clodAlphaTelemetryCaptureId != captureId) {
+                    return;
+                }
+
+                if (result.data.size() < sizeof(CLodDeepVisibilityStats)) {
+                    m_clodAlphaTelemetryStatus = "Alpha capture failed: stats payload too small.";
+                    m_clodAlphaTelemetryCapturePending = false;
+                    return;
+                }
+
+                std::memcpy(&m_clodAlphaTelemetryPendingStats, result.data.data(), sizeof(CLodDeepVisibilityStats));
+                m_clodAlphaTelemetryHasPendingStats = true;
+                TryFinalizeCLodAlphaTelemetryCapture(captureId);
+            });
+    }
+    if (!canCaptureAlpha) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine();
+    ImGui::Text("Alpha Status: %s", m_clodAlphaTelemetryStatus.c_str());
 
     {
         CLodStreamingOperationStats latestOps{};
@@ -1627,6 +2080,35 @@ inline void Menu::DrawCLodTelemetryWindow() {
         ImGui::Text("Visible cluster writes: %u", counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites));
 
         ImGui::Separator();
+        ImGui::TextUnformatted("ClusterCull meshlet rejection breakdown");
+        {
+            const uint32_t meshletIter = counter(CLodWorkGraphCounterIndex::ClusterCullMeshletIterations);
+            const uint32_t rejFrustum = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedFrustum);
+            const uint32_t rejCond2 = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedCondition2);
+            const uint32_t rejOccl = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedOcclusion);
+            const uint32_t rejOOR = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedOutOfRange);
+            const uint32_t rejPageBounds = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedPageBounds);
+            const uint32_t survived = counter(CLodWorkGraphCounterIndex::ClusterCullSurvivingLanes);
+            const uint32_t totalRejected = rejFrustum + rejCond2 + rejOccl + rejOOR + rejPageBounds;
+
+            ImGui::Text("Meshlet iterations evaluated: %u", meshletIter);
+            ImGui::Text("Survived: %u", survived);
+            ImGui::Text("Rejected total: %u", totalRejected);
+
+            auto rejectionRow = [](const char* label, uint32_t count, uint32_t total) {
+                const float pct = (total > 0)
+                    ? (100.0f * static_cast<float>(count) / static_cast<float>(total))
+                    : 0.0f;
+                ImGui::Text("  %s: %u (%.1f%%)", label, count, pct);
+            };
+            rejectionRow("Frustum cull", rejFrustum, totalRejected);
+            rejectionRow("Condition 2 (child group refinement)", rejCond2, totalRejected);
+            rejectionRow("Occlusion cull", rejOccl, totalRejected);
+            rejectionRow("WaveActiveMax padding (inactive iterations)", rejOOR, totalRejected);
+            rejectionRow("Page bounds overflow", rejPageBounds, totalRejected);
+        }
+
+        ImGui::Separator();
         ImGui::TextUnformatted("Occlusion -> Phase 2 enqueue attempts");
         ImGui::Text("Node attempts: %u | Cluster attempts: %u",
             counter(CLodWorkGraphCounterIndex::Phase1OcclusionNodeReplayEnqueueAttempts),
@@ -1673,6 +2155,25 @@ inline void Menu::DrawCLodTelemetryWindow() {
         ImGui::Text("Max clusters/instance: %u (%.1f%% of total)",
             m_clodCaptureStats.maxClustersPerInstance,
             m_clodCaptureStats.dominantInstancePercent);
+    }
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Alpha Deep Visibility");
+    if (m_clodAlphaTelemetryCapturePending) {
+        ImGui::Text("Alpha capture status: pending...");
+    }
+    else if (!m_clodAlphaTelemetryHasData) {
+        ImGui::TextDisabled("No alpha deep-visibility capture results yet.");
+    }
+    else {
+        ImGui::Text("Allocated nodes: %u", m_clodAlphaNodeCount);
+        ImGui::Text("Overflowed allocations: %u", m_clodAlphaOverflowCount);
+        ImGui::Text("Truncated pixels: %u | Truncated nodes: %u",
+            m_clodAlphaStats.truncatedPixelCount,
+            m_clodAlphaStats.truncatedNodeCount);
+        ImGui::Text("Resolved samples: %u", m_clodAlphaStats.totalResolvedSamples);
+        ImGui::Text("Max raw node count/pixel: %u", m_clodAlphaStats.maxRawNodeCount);
+        ImGui::Text("Max resolved samples/pixel: %u", m_clodAlphaStats.maxResolvedSamples);
     }
 
     ImGui::End();
@@ -2271,90 +2772,176 @@ inline void Menu::DrawPassTimingWindow() {
     }
 
     static std::vector<bool> pinned;
-    static bool sortEnabled = true;
     if (pinned.size() != names.size()) {
         pinned.assign(names.size(), false);
     }
 
-    // split pinned vs unpinned
-    std::vector<int> pins;
-    std::vector<std::pair<int,double>> unsorted;
+    enum class PassTimingColumn : ImGuiID {
+        Pass = 1,
+        Gpu = 2,
+        Cpu = 3,
+        CpuUpdate = 4,
+        CpuExecute = 5,
+    };
+
+    auto compareDoubles = [](double lhs, double rhs) {
+        if (lhs < rhs) {
+            return -1;
+        }
+        if (lhs > rhs) {
+            return 1;
+        }
+        return 0;
+    };
+
+    auto compareNames = [&](int lhs, int rhs) {
+        const int cmp = std::strcmp(names[lhs].c_str(), names[rhs].c_str());
+        if (cmp < 0) {
+            return -1;
+        }
+        if (cmp > 0) {
+            return 1;
+        }
+        return 0;
+    };
+
+    auto compareRows = [&](int lhs, int rhs, const ImGuiTableColumnSortSpecs* sortSpec) {
+        const ImGuiID sortColumn = sortSpec != nullptr
+            ? sortSpec->ColumnUserID
+            : static_cast<ImGuiID>(PassTimingColumn::Gpu);
+        const ImGuiSortDirection direction = sortSpec != nullptr
+            ? sortSpec->SortDirection
+            : ImGuiSortDirection_Descending;
+
+        int result = 0;
+        switch (static_cast<PassTimingColumn>(sortColumn)) {
+        case PassTimingColumn::Pass:
+            result = compareNames(lhs, rhs);
+            break;
+        case PassTimingColumn::Gpu:
+            result = compareDoubles(stats[lhs].gpuTimeEma, stats[rhs].gpuTimeEma);
+            break;
+        case PassTimingColumn::Cpu:
+            result = compareDoubles(stats[lhs].GetCpuTimeEma(), stats[rhs].GetCpuTimeEma());
+            break;
+        case PassTimingColumn::CpuUpdate:
+            result = compareDoubles(stats[lhs].cpuUpdateTimeEma, stats[rhs].cpuUpdateTimeEma);
+            break;
+        case PassTimingColumn::CpuExecute:
+            result = compareDoubles(stats[lhs].cpuExecuteTimeEma, stats[rhs].cpuExecuteTimeEma);
+            break;
+        default:
+            result = compareDoubles(stats[lhs].gpuTimeEma, stats[rhs].gpuTimeEma);
+            break;
+        }
+
+        if (result == 0) {
+            result = compareNames(lhs, rhs);
+        }
+
+        return direction == ImGuiSortDirection_Ascending ? (result < 0) : (result > 0);
+    };
+
+    std::vector<int> pinnedRows;
+    std::vector<int> unpinnedRows;
+    pinnedRows.reserve(visible.size());
+    unpinnedRows.reserve(visible.size());
     for (unsigned rawIdx : visible) {
-        const int i = static_cast<int>(rawIdx);
-        if (pinned[i]) {
-            pins.push_back(i);
+        if (rawIdx >= names.size() || rawIdx >= stats.size()) {
+            continue;
+        }
+
+        const int idx = static_cast<int>(rawIdx);
+        if (pinned[idx]) {
+            pinnedRows.push_back(idx);
         }
         else {
-            unsorted.emplace_back(i, stats[i].ema);
+            unpinnedRows.push_back(idx);
         }
     }
-    if (sortEnabled) {
-        std::sort(unsorted.begin(), unsorted.end(), [](auto& a, auto& b) { return a.second > b.second; });
-    }
 
-    std::vector<int> order;
-    order.insert(order.end(), pins.begin(), pins.end());
-    for (auto& p : unsorted) {
-        order.push_back(p.first);
-    }
+    constexpr ImGuiTableFlags tableFlags =
+        ImGuiTableFlags_Borders |
+        ImGuiTableFlags_RowBg |
+        ImGuiTableFlags_Resizable |
+        ImGuiTableFlags_Hideable |
+        ImGuiTableFlags_Sortable |
+        ImGuiTableFlags_SizingStretchProp;
 
-    // measure column widths
-    ImGuiStyle& style = ImGui::GetStyle();
-    float wName = ImGui::CalcTextSize("Pass").x;
-    float wNum  = ImGui::CalcTextSize("Avg (ms)").x;
-    char buf[64];
-    for (int idx : order) {
-        std::string label = (pinned[idx] ? "[P] " : "P") + names[idx];
-        wName = std::max(wName, ImGui::CalcTextSize(label.c_str()).x);
-        snprintf(buf, sizeof(buf), "%.3f", stats[idx].ema);
-        wNum  = std::max(wNum, ImGui::CalcTextSize(buf).x);
-    }
-    wName += style.CellPadding.x*2;
-    wNum  += style.CellPadding.x*2 + style.ItemSpacing.x + ImGui::CalcTextSize(sortEnabled?"v":">").x + style.FramePadding.x*2;
+    if (ImGui::BeginTable("PassTimingsTable", 6, tableFlags)) {
+        ImGui::TableSetupColumn("Pin", ImGuiTableColumnFlags_NoSort | ImGuiTableColumnFlags_WidthFixed, 52.0f);
+        ImGui::TableSetupColumn("Pass", ImGuiTableColumnFlags_WidthStretch, 0.0f, static_cast<ImGuiID>(PassTimingColumn::Pass));
+        ImGui::TableSetupColumn("GPU (ms)", ImGuiTableColumnFlags_PreferSortDescending | ImGuiTableColumnFlags_DefaultSort, 0.0f, static_cast<ImGuiID>(PassTimingColumn::Gpu));
+        ImGui::TableSetupColumn("CPU (ms)", ImGuiTableColumnFlags_PreferSortDescending, 0.0f, static_cast<ImGuiID>(PassTimingColumn::Cpu));
+        ImGui::TableSetupColumn("Update (ms)", ImGuiTableColumnFlags_PreferSortDescending, 0.0f, static_cast<ImGuiID>(PassTimingColumn::CpuUpdate));
+        ImGui::TableSetupColumn("Execute (ms)", ImGuiTableColumnFlags_PreferSortDescending, 0.0f, static_cast<ImGuiID>(PassTimingColumn::CpuExecute));
+        ImGui::TableHeadersRow();
 
-    ImGui::Columns(2, nullptr, false);
-    ImGui::SetColumnWidth(0, wName);
-    ImGui::SetColumnWidth(1, wNum);
+        const ImGuiTableSortSpecs* sortSpecs = ImGui::TableGetSortSpecs();
+        const ImGuiTableColumnSortSpecs* primarySort =
+            (sortSpecs != nullptr && sortSpecs->SpecsCount > 0) ? &sortSpecs->Specs[0] : nullptr;
 
-    // header
-    ImGui::TextUnformatted("Pass"); ImGui::NextColumn();
-    ImGui::TextUnformatted("Avg (ms)"); ImGui::SameLine();
-    if (ImGui::SmallButton(sortEnabled ? "v" : ">")) {
-        sortEnabled = !sortEnabled;
-    }
-    ImGui::NextColumn();
-    ImGui::Separator();
+        auto sortRows = [&](std::vector<int>& rows) {
+            std::stable_sort(rows.begin(), rows.end(), [&](int lhs, int rhs) {
+                return compareRows(lhs, rhs, primarySort);
+            });
+        };
 
-    // rows
-    for (int idx : order) {
-        ImGui::PushID(idx);
-        if (pinned[idx]) {
-            if (ImGui::SmallButton(">")) pinned[idx] = false;
-        } else {
-            if (ImGui::SmallButton("Pin")) pinned[idx] = true;
-        }
-        ImGui::SameLine();
-        bool open = ImGui::TreeNodeEx(names[idx].c_str(), ImGuiTreeNodeFlags_SpanFullWidth);
-        ImGui::PopID();
+        sortRows(pinnedRows);
+        sortRows(unpinnedRows);
 
-        ImGui::NextColumn();
-        snprintf(buf, sizeof(buf), "%.3f", stats[idx].ema);
-        ImGui::TextUnformatted(buf);
-        ImGui::NextColumn();
+        auto drawRow = [&](int idx) {
+            const bool hasMeshDetails = idx < static_cast<int>(isGeom.size()) && idx < static_cast<int>(meshStats.size()) && isGeom[idx];
 
-        if (open) {
-            if (isGeom[idx]) {
+            ImGui::PushID(idx);
+            ImGui::TableNextRow();
+
+            ImGui::TableSetColumnIndex(0);
+            if (ImGui::SmallButton(pinned[idx] ? "Unpin" : "Pin")) {
+                pinned[idx] = !pinned[idx];
+            }
+
+            ImGui::TableSetColumnIndex(1);
+            ImGuiTreeNodeFlags treeFlags = ImGuiTreeNodeFlags_SpanFullWidth;
+            if (!hasMeshDetails) {
+                treeFlags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+            }
+            const bool open = ImGui::TreeNodeEx("PassRow", treeFlags, "%s", names[idx].c_str());
+
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%.3f", stats[idx].gpuTimeEma);
+
+            ImGui::TableSetColumnIndex(3);
+            ImGui::Text("%.3f", stats[idx].GetCpuTimeEma());
+
+            ImGui::TableSetColumnIndex(4);
+            ImGui::Text("%.3f", stats[idx].cpuUpdateTimeEma);
+
+            ImGui::TableSetColumnIndex(5);
+            ImGui::Text("%.3f", stats[idx].cpuExecuteTimeEma);
+
+            if (hasMeshDetails && open) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(1);
                 ImGui::Indent();
                 ImGui::Text("Mesh Invocations: %.0f", meshStats[idx].invocationsEma);
                 ImGui::Text("Mesh Primitives:  %.0f", meshStats[idx].primitivesEma);
                 ImGui::Unindent();
+                ImGui::TreePop();
             }
-            ImGui::TreePop();
-            ImGui::Separator();
-        }
-    }
 
-    ImGui::Columns(1);
+            ImGui::PopID();
+        };
+
+        for (int idx : pinnedRows) {
+            drawRow(idx);
+        }
+        for (int idx : unpinnedRows) {
+            drawRow(idx);
+        }
+
+        ImGui::EndTable();
+    }
 
     ImGui::End();
 }

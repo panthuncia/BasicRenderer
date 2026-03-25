@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -17,11 +18,13 @@ public:
     static std::unique_ptr<SkeletonManager> CreateUnique() {
         return std::unique_ptr<SkeletonManager>(new SkeletonManager());
     }
+    ~SkeletonManager();
 
     // Called when a renderable becomes active/inactive and references a skinning instance.
     // Multiple renderables may call Acquire/Release for the same instance.
     uint32_t AcquireSkinningInstance(const std::shared_ptr<Skeleton>& skinningInstance);
     void     ReleaseSkinningInstance(Skeleton* skinningInstance);
+    std::weak_ptr<std::atomic_bool> GetLifetimeToken() const noexcept { return m_lifetimeToken; }
 
     // Tick animations for all active skeletons
     void TickAnimations(float elapsedSeconds);
@@ -69,6 +72,7 @@ private:
 
     // Resource provider map
     std::unordered_map<ResourceIdentifier, std::shared_ptr<Resource>, ResourceIdentifier::Hasher> m_resources;
+    std::shared_ptr<std::atomic_bool> m_lifetimeToken;
 
     // Records
     std::unordered_map<const Skeleton*, BaseRecord>    m_bases;

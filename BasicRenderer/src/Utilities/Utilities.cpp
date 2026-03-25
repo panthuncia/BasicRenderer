@@ -19,6 +19,7 @@
 #include "Render/DescriptorHeap.h"
 #include "Materials/Material.h"
 #include "Mesh/Mesh.h"
+#include "Mesh/VertexLayout.h"
 #include "Scene/Components.h"
 #include "NsightAftermathHelpers.h"
 #include "Resources/PixelBuffer.h"
@@ -62,28 +63,41 @@ void ThrowIfFailed(HRESULT hr) {
 }
 
 std::shared_ptr<Mesh> MeshFromData(MeshData&& meshData, std::wstring name, std::optional<ClusterLODPrebuiltData>&& prebuiltClusterLOD) {
-    bool hasTexcoords = !meshData.texcoords.empty();
+    const bool hasTexcoords = !meshData.uvSets.empty() && !meshData.uvSets[0].values.empty();
+    const bool hasColors = meshData.colors.size() == (meshData.positions.size() / 3u);
     bool hasJoints = !meshData.joints.empty() && !meshData.weights.empty();
 
     std::unique_ptr<std::vector<std::byte>> rawData = std::make_unique<std::vector<std::byte>>();
     uint32_t numVertices = static_cast<uint32_t>(meshData.positions.size()) / 3;
-    // position,        normal,            texcoord
-    uint8_t vertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3) + (hasTexcoords ? sizeof(XMFLOAT2) : 0);
+    uint32_t vertexFlags = meshData.flags;
+    if (hasTexcoords) {
+        vertexFlags |= VertexFlags::VERTEX_TEXCOORDS;
+    }
+    if (hasColors) {
+        vertexFlags |= VertexFlags::VERTEX_COLORS;
+    }
+
+    const uint8_t vertexSize = static_cast<uint8_t>(MeshVertexLayout::VertexSize(vertexFlags));
     rawData->resize(numVertices * vertexSize);
 
     for (unsigned int i = 0; i < numVertices; i++) {
         size_t baseOffset = i * vertexSize;
         memcpy(rawData->data() + baseOffset, &meshData.positions[i * 3], sizeof(XMFLOAT3));
-        size_t offset = sizeof(XMFLOAT3);
+        size_t offset = MeshVertexLayout::NormalOffset;
         memcpy(rawData->data() + baseOffset + offset, &meshData.normals[i * 3], sizeof(XMFLOAT3));
-        offset += sizeof(XMFLOAT3);
         if (hasTexcoords) {
-            memcpy(rawData->data() + baseOffset + offset, &meshData.texcoords[i * 2], sizeof(XMFLOAT2));
-            offset += sizeof(XMFLOAT2);
+            offset = MeshVertexLayout::TexcoordOffset(vertexFlags);
+            memcpy(rawData->data() + baseOffset + offset, &meshData.uvSets[0].values[i], sizeof(XMFLOAT2));
+        }
+        if (hasColors) {
+            offset = MeshVertexLayout::ColorOffset(vertexFlags);
+            memcpy(rawData->data() + baseOffset + offset, &meshData.colors[i], sizeof(XMFLOAT3));
         }
     }
-    // position,       normal            joints,           weights
-    unsigned int skinningVertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3)  + sizeof(XMUINT4) + sizeof(XMFLOAT4);
+    constexpr size_t kMaxSkinInfluences = 8u;
+    // position,       normal            joints[8],        weights[8]
+    unsigned int skinningVertexSize = sizeof(XMFLOAT3) + sizeof(XMFLOAT3)
+        + static_cast<unsigned int>(sizeof(uint32_t) * kMaxSkinInfluences + sizeof(float) * kMaxSkinInfluences);
     std::unique_ptr<std::vector<std::byte>> skinningData = std::make_unique<std::vector<std::byte>>();
     if (hasJoints) {
         skinningData->resize(numVertices * skinningVertexSize);
@@ -93,9 +107,18 @@ std::shared_ptr<Mesh> MeshFromData(MeshData&& meshData, std::wstring name, std::
             size_t offset = sizeof(XMFLOAT3);
             memcpy(skinningData->data() + baseOffset + offset, &meshData.normals[i * 3], sizeof(XMFLOAT3));
             offset += sizeof(XMFLOAT3);
-            memcpy(skinningData->data() + baseOffset + offset, &meshData.joints[i * 4], sizeof(XMUINT4));
-            offset += sizeof(XMUINT4);
-            memcpy(skinningData->data() + baseOffset + offset, &meshData.weights[i * 4], sizeof(XMFLOAT4));
+            const size_t availableJointCount = meshData.joints.size() / numVertices;
+            const size_t availableWeightCount = meshData.weights.size() / numVertices;
+            const size_t influenceCount = std::min({ kMaxSkinInfluences, availableJointCount, availableWeightCount });
+            std::array<uint32_t, kMaxSkinInfluences> joints{};
+            std::array<float, kMaxSkinInfluences> weights{};
+            for (size_t influenceIndex = 0; influenceIndex < influenceCount; ++influenceIndex) {
+                joints[influenceIndex] = meshData.joints[i * availableJointCount + influenceIndex];
+                weights[influenceIndex] = meshData.weights[i * availableWeightCount + influenceIndex];
+            }
+            memcpy(skinningData->data() + baseOffset + offset, joints.data(), sizeof(uint32_t) * kMaxSkinInfluences);
+            offset += sizeof(uint32_t) * kMaxSkinInfluences;
+            memcpy(skinningData->data() + baseOffset + offset, weights.data(), sizeof(float) * kMaxSkinInfluences);
         }
     }
 
@@ -104,7 +127,7 @@ std::shared_ptr<Mesh> MeshFromData(MeshData&& meshData, std::wstring name, std::
 		skinningVertices = std::move(skinningData);
 	}
 
-    return Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningVertices), skinningVertexSize, meshData.indices, meshData.material, meshData.flags, std::move(prebuiltClusterLOD));
+    return Mesh::CreateShared(std::move(rawData), vertexSize, std::move(skinningVertices), skinningVertexSize, meshData.indices, std::move(meshData.uvSets), meshData.material, vertexFlags, std::move(prebuiltClusterLOD));
 }
 
 XMMATRIX RemoveScalingFromMatrix(const XMMATRIX& initialMatrix) {
@@ -228,6 +251,28 @@ static DXGI_FORMAT ToLinearIfSRGB(DXGI_FORMAT fmt) {
     case DXGI_FORMAT_BC2_UNORM_SRGB:      return DXGI_FORMAT_BC2_UNORM;
     case DXGI_FORMAT_BC3_UNORM_SRGB:      return DXGI_FORMAT_BC3_UNORM;
     case DXGI_FORMAT_BC7_UNORM_SRGB:      return DXGI_FORMAT_BC7_UNORM;
+    default: return fmt;
+    }
+}
+
+static bool IsWICBGRFormat(DXGI_FORMAT fmt) {
+    switch (fmt) {
+    case DXGI_FORMAT_B8G8R8A8_UNORM:
+    case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+    case DXGI_FORMAT_B8G8R8X8_UNORM:
+    case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static DXGI_FORMAT ToRGBAEquivalent(DXGI_FORMAT fmt) {
+    switch (fmt) {
+    case DXGI_FORMAT_B8G8R8A8_UNORM: return DXGI_FORMAT_R8G8B8A8_UNORM;
+    case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+    case DXGI_FORMAT_B8G8R8X8_UNORM: return DXGI_FORMAT_R8G8B8A8_UNORM;
+    case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB: return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
     default: return fmt;
     }
 }
@@ -408,6 +453,25 @@ LoadTextureFromMemory(const void* bytes,
         if (FAILED(wicHr)) throw std::runtime_error("Failed to load WIC image from memory");
 
         DXGI_FORMAT chosen = preferSRGB ? DirectX::MakeSRGB(wicMeta.format) : ToLinearIfSRGB(wicMeta.format);
+
+        if (IsWICBGRFormat(chosen)) {
+            DirectX::ScratchImage convertedImg;
+            const DXGI_FORMAT convertedFormat = ToRGBAEquivalent(chosen);
+            HRESULT convertHr = DirectX::Convert(
+                wicImg.GetImages(),
+                wicImg.GetImageCount(),
+                wicImg.GetMetadata(),
+                convertedFormat,
+                DirectX::TEX_FILTER_DEFAULT,
+                0.0f,
+                convertedImg);
+            if (FAILED(convertHr)) {
+                throw std::runtime_error("Failed to convert WIC texture to RGBA");
+            }
+
+            auto raw = RawFromDXT(convertedImg, convertedImg.GetMetadata(), "", ImageFiletype::WIC, convertedFormat);
+            return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);
+        }
 
         auto raw = RawFromDXT(wicImg, wicMeta, "", ImageFiletype::WIC, chosen);
         return CreateTextureFromRaw(raw, sampler, allowRTV, allowUAV);

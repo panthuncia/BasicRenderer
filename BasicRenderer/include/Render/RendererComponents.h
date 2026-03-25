@@ -41,7 +41,14 @@ namespace Components {
     };
 
     struct RenderableObject {
-        RenderableObject() = default;
+        RenderableObject() {
+            perObjectCB.modelMatrix = DirectX::XMMatrixIdentity();
+            perObjectCB.prevModelMatrix = DirectX::XMMatrixIdentity();
+            perObjectCB.normalMatrixBufferIndex = 0;
+            perObjectCB.objectFlags = 0;
+            perObjectCB.pad[0] = 0;
+            perObjectCB.pad[1] = 0;
+        }
         RenderableObject(PerObjectCB cb) : perObjectCB(cb) {}
         PerObjectCB perObjectCB;
     };
@@ -49,7 +56,7 @@ namespace Components {
     struct IndirectDrawInfo {
         std::vector<unsigned int> indices;
         std::vector<std::shared_ptr<BufferView>> views;
-        std::vector<MaterialCompileFlags> materialTechniques;
+        std::vector<std::vector<DrawWorkloadKey>> drawWorkloadKeysPerDraw;
     };
 
     struct ObjectDrawInfo {

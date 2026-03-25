@@ -1,5 +1,23 @@
 #pragma once
+#include <algorithm>
+#include <cctype>
+#include <cstdint>
+#include <cstring>
+#include <functional>
+#include <optional>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+#include <ObjIdl.h>
+#include <Unknwn.h>
+#include <wtypes.h>
 #include <tree_sitter/api.h>
+#include "ThirdParty/DirectX/dxcapi.h"
 
 extern "C" const TSLanguage* tree_sitter_hlsl();
 
@@ -9,56 +27,153 @@ struct Replacement {
     std::string replacement;
 };
 
-void BuildFunctionDefs(std::unordered_map<std::string, std::vector<TSNode>>& functionDefs, const char* preprocessedSource, const TSNode& root) {
-    // Search through all children of root to find function_definition nodes
-    uint32_t childCount = ts_node_child_count(root);
-    for (uint32_t i = 0; i < childCount; ++i) {
-        TSNode node = ts_node_child(root, i);
-        if (std::string(ts_node_type(node)) == "function_definition") {
-            // In tree-sitter-hlsl grammar, child #1 is the identifier
-            TSNode topDecl = ts_node_child_by_field_name(node, "declarator", static_cast<uint32_t>(strlen("declarator")));
-            if (ts_node_is_null(topDecl)) continue;
+struct ShaderPreprocessDiagnostics
+{
+    bool parseSucceeded = false;
+    uint32_t errorNodeCount = 0;
+    std::vector<std::string> parseErrorSummaries;
+    std::vector<std::string> discoveredFunctionDefinitions;
+    std::vector<std::string> unnamedFunctionDefinitions;
+    std::vector<std::string> unresolvedInternalCalls;
+    bool safeToPrune = false;
+    bool usedFallbackRewrite = false;
+    bool pruningApplied = false;
+    bool finalSourceValid = false;
+    std::vector<std::string> notes;
+};
 
-            // From that, get the inner declarator
-            TSNode innerDecl = ts_node_child_by_field_name(topDecl, "declarator", static_cast<uint32_t>(strlen("declarator")));
-            if (ts_node_is_null(innerDecl)) continue;
+struct PreparedShaderSource
+{
+    std::string sourceBeforeRewrite;
+    std::vector<std::string> mandatoryIDs;
+    std::vector<std::string> optionalIDs;
+    std::unordered_set<std::string> originalDefinedFunctionNames;
+    ShaderPreprocessDiagnostics diagnostics;
+};
 
-            // Now, find the actual identifier inside 'innerDecl'
-            TSNode nameNode = {};
-            // If this declarator *is* a bare identifier, use it directly:
-            if (std::string(ts_node_type(innerDecl)) == "identifier") {
-                nameNode = innerDecl;
-            }
-            // Otherwise, it's some sort of qualified or templated thing:
-            else {
-                nameNode = ts_node_child_by_field_name(
-                    innerDecl,
-                    "name",
-                    static_cast<uint32_t>(strlen("name"))
-                );
-            }
+static inline void SortAndUniqueStrings(std::vector<std::string>& values)
+{
+    std::sort(values.begin(), values.end());
+    values.erase(std::unique(values.begin(), values.end()), values.end());
+}
 
-            if (ts_node_is_null(nameNode)) {
-                continue;
-            }
+static inline size_t GetNormalizedShaderSourceSize(const char* source, size_t sourceSize)
+{
+    if (!source) {
+        return 0;
+    }
 
-            // Extract the text out of the source buffer:
-            uint32_t start = ts_node_start_byte(nameNode);
-            uint32_t end = ts_node_end_byte(nameNode);
-            std::string fnName(preprocessedSource + start, end - start);
-
-            TSNode bodyNode = ts_node_child_by_field_name(node, "body", 4);
-            if (!functionDefs.contains(fnName)) {
-                functionDefs[fnName] = std::vector<TSNode>();
-            }
-            functionDefs[fnName].push_back(bodyNode);
+    while (sourceSize > 0) {
+        const unsigned char trailing = static_cast<unsigned char>(source[sourceSize - 1]);
+        if (trailing == 0u || trailing == 0x1Au) {
+            --sourceSize;
+            continue;
         }
+        break;
+    }
+
+    return sourceSize;
+}
+
+static inline TSNode FindFunctionNameNodeInDeclarator(TSNode node)
+{
+    if (ts_node_is_null(node)) {
+        return TSNode{};
+    }
+
+    const char* type = ts_node_type(node);
+    if (strcmp(type, "identifier") == 0 ||
+        strcmp(type, "field_identifier") == 0 ||
+        strcmp(type, "type_identifier") == 0)
+    {
+        return node;
+    }
+
+    TSNode nameField = ts_node_child_by_field_name(node, "name", static_cast<uint32_t>(strlen("name")));
+    if (!ts_node_is_null(nameField)) {
+        TSNode found = FindFunctionNameNodeInDeclarator(nameField);
+        if (!ts_node_is_null(found)) {
+            return found;
+        }
+    }
+
+    TSNode declaratorField = ts_node_child_by_field_name(node, "declarator", static_cast<uint32_t>(strlen("declarator")));
+    if (!ts_node_is_null(declaratorField)) {
+        TSNode found = FindFunctionNameNodeInDeclarator(declaratorField);
+        if (!ts_node_is_null(found)) {
+            return found;
+        }
+    }
+
+    uint32_t namedChildCount = ts_node_named_child_count(node);
+    for (uint32_t i = 0; i < namedChildCount; ++i) {
+        TSNode found = FindFunctionNameNodeInDeclarator(ts_node_named_child(node, i));
+        if (!ts_node_is_null(found)) {
+            return found;
+        }
+    }
+
+    return TSNode{};
+}
+
+static inline std::optional<std::string> ExtractFunctionNameFromDefinition(
+    const char* preprocessedSource,
+    const TSNode& functionDefNode)
+{
+    TSNode topDecl = ts_node_child_by_field_name(
+        functionDefNode,
+        "declarator",
+        static_cast<uint32_t>(strlen("declarator")));
+    if (ts_node_is_null(topDecl)) {
+        return std::nullopt;
+    }
+
+    TSNode nameNode = FindFunctionNameNodeInDeclarator(topDecl);
+    if (ts_node_is_null(nameNode)) {
+        return std::nullopt;
+    }
+
+    uint32_t start = ts_node_start_byte(nameNode);
+    uint32_t end = ts_node_end_byte(nameNode);
+    return std::string(preprocessedSource + start, end - start);
+}
+
+void CollectFunctionDefinitions(const TSNode& node, std::vector<TSNode>& outDefinitions) {
+    if (ts_node_is_null(node)) {
+        return;
+    }
+
+    if (std::string(ts_node_type(node)) == "function_definition") {
+        outDefinitions.push_back(node);
+    }
+
+    uint32_t childCount = ts_node_child_count(node);
+    for (uint32_t i = 0; i < childCount; ++i) {
+        CollectFunctionDefinitions(ts_node_child(node, i), outDefinitions);
+    }
+}
+
+void BuildFunctionDefs(std::unordered_map<std::string, std::vector<TSNode>>& functionDefs, const char* preprocessedSource, const TSNode& root) {
+    std::vector<TSNode> functionDefinitions;
+    CollectFunctionDefinitions(root, functionDefinitions);
+
+    for (const TSNode& node : functionDefinitions) {
+        auto fnName = ExtractFunctionNameFromDefinition(preprocessedSource, node);
+        if (!fnName.has_value()) {
+            continue;
+        }
+
+        TSNode bodyNode = ts_node_child_by_field_name(node, "body", 4);
+        if (!functionDefs.contains(*fnName)) {
+            functionDefs[*fnName] = std::vector<TSNode>();
+        }
+        functionDefs[*fnName].push_back(bodyNode);
     }
 }
 
 void ParseBRSLResourceIdentifiers(std::unordered_set<std::string>& outMandatoryIdentifiers, std::unordered_set<std::string>& outOptionalIdentifiers, const DxcBuffer* pBuffer, const std::string& entryPointName) {
     const char* preprocessedSource = static_cast<const char*>(pBuffer->Ptr);
-    size_t sourceSize = pBuffer->Size;
+    size_t sourceSize = GetNormalizedShaderSourceSize(preprocessedSource, pBuffer->Size);
 
     TSParser* parser = ts_parser_new();
     ts_parser_set_language(parser, tree_sitter_hlsl());
@@ -190,6 +305,7 @@ rewriteResourceDescriptorCalls(const char* preprocessedSource,
     const std::string& entryPointName,
     const std::unordered_map<std::string, std::string>& replacementMap)
 {
+    sourceSize = GetNormalizedShaderSourceSize(preprocessedSource, sourceSize);
     TSParser* parser = ts_parser_new();
     ts_parser_set_language(parser, tree_sitter_hlsl());
     TSTree* tree = ts_parser_parse_string(
@@ -366,47 +482,33 @@ pruneUnusedCode(const char* preprocessedSource,
     const std::string& entryPointName,
     const std::unordered_map<std::string, std::string>& replacementMap)
 {
+    sourceSize = GetNormalizedShaderSourceSize(preprocessedSource, sourceSize);
     TSParser* parser = ts_parser_new();
     ts_parser_set_language(parser, tree_sitter_hlsl());
     TSTree* tree = ts_parser_parse_string(parser, nullptr, preprocessedSource, static_cast<uint32_t>(sourceSize));
     TSNode root = ts_tree_root_node(tree);
 
     std::unordered_map<std::string, std::vector<TSNode>> bodyMap, defMap;
-    uint32_t topCount = ts_node_child_count(root);
-    for (uint32_t i = 0; i < topCount; ++i) {
-        TSNode node = ts_node_child(root, i);
-        if (std::string(ts_node_type(node)) != "function_definition") continue;
-
-        // extract the function name
-        TSNode decl1 = ts_node_child_by_field_name(node, "declarator", static_cast<uint32_t>(strlen("declarator")));
-        TSNode decl2 = !ts_node_is_null(decl1)
-            ? ts_node_child_by_field_name(decl1, "declarator", static_cast<uint32_t>(strlen("declarator")))
-            : TSNode{};
-        TSNode nameNode = {};
-        if (!ts_node_is_null(decl2) && std::string(ts_node_type(decl2)) == "identifier") {
-            nameNode = decl2;
+    std::vector<TSNode> functionDefinitions;
+    CollectFunctionDefinitions(root, functionDefinitions);
+    for (const TSNode& node : functionDefinitions) {
+        auto fnName = ExtractFunctionNameFromDefinition(preprocessedSource, node);
+        if (!fnName.has_value()) {
+            continue;
         }
-        else if (!ts_node_is_null(decl2)) {
-            nameNode = ts_node_child_by_field_name(decl2, "name", static_cast<uint32_t>(strlen("name")));
-        }
-        if (ts_node_is_null(nameNode)) continue;
-
-        auto s = ts_node_start_byte(nameNode);
-        auto e = ts_node_end_byte(nameNode);
-        std::string fnName(preprocessedSource + s, e - s);
 
         // store the full def node and its body
 
-        if (!defMap.contains(fnName)) {
-            defMap[fnName] = {};
+        if (!defMap.contains(*fnName)) {
+            defMap[*fnName] = {};
         }
 
-        if (!bodyMap.contains(fnName)) {
-            bodyMap[fnName] = {};
+        if (!bodyMap.contains(*fnName)) {
+            bodyMap[*fnName] = {};
         }
 
-        defMap[fnName].push_back(node);
-        bodyMap[fnName].push_back(ts_node_child_by_field_name(node, "body", static_cast<uint32_t>(strlen("body"))));
+        defMap[*fnName].push_back(node);
+        bodyMap[*fnName].push_back(ts_node_child_by_field_name(node, "body", static_cast<uint32_t>(strlen("body"))));
     }
 
     // BFS from entryPointName to find reachable functions
@@ -581,33 +683,7 @@ static std::optional<std::string> ExtractFunctionName(
     const char* preprocessedSource,
     const TSNode& functionDefNode)
 {
-    TSNode topDecl = ts_node_child_by_field_name(
-        functionDefNode, "declarator",
-        static_cast<uint32_t>(strlen("declarator")));
-    if (ts_node_is_null(topDecl)) return std::nullopt;
-
-    TSNode innerDecl = ts_node_child_by_field_name(
-        topDecl, "declarator",
-        static_cast<uint32_t>(strlen("declarator")));
-    if (ts_node_is_null(innerDecl)) return std::nullopt;
-
-    TSNode nameNode = {};
-    if (std::string(ts_node_type(innerDecl)) == "identifier")
-    {
-        nameNode = innerDecl;
-    }
-    else
-    {
-        nameNode = ts_node_child_by_field_name(
-            innerDecl, "name",
-            static_cast<uint32_t>(strlen("name")));
-    }
-
-    if (ts_node_is_null(nameNode)) return std::nullopt;
-
-    uint32_t start = ts_node_start_byte(nameNode);
-    uint32_t end = ts_node_end_byte(nameNode);
-    return std::string(preprocessedSource + start, end - start);
+    return ExtractFunctionNameFromDefinition(preprocessedSource, functionDefNode);
 }
 
 // Returns the string inside Shader("...") if present; otherwise nullopt.
@@ -656,7 +732,7 @@ static std::optional<std::string> TryParseShaderDecorator(std::string_view decor
             value.push_back(c);
         }
 
-        // We don’t strictly need to verify closing ) and ] here.
+        // We don't strictly need to verify closing ) and ] here.
         if (!value.empty())
             return value;
 
@@ -673,15 +749,12 @@ static std::vector<ShaderEntryPointDesc> ExtractShaderLibraryEntryPoints(
 {
     std::vector<ShaderEntryPointDesc> out;
 
-    uint32_t topCount = ts_node_child_count(root);
-    out.reserve(topCount / 4);
+    std::vector<TSNode> functionDefinitions;
+    CollectFunctionDefinitions(root, functionDefinitions);
+    out.reserve(functionDefinitions.size());
 
-    for (uint32_t i = 0; i < topCount; ++i)
+    for (const TSNode& node : functionDefinitions)
     {
-        TSNode node = ts_node_child(root, i);
-        if (std::string(ts_node_type(node)) != "function_definition") {
-            continue;
-        }
 
         auto nameOpt = ExtractFunctionName(preprocessedSource, node);
         if (!nameOpt.has_value()) {
@@ -747,7 +820,7 @@ static void CollectBRSLIdentifiersFromRoots(
 
             std::string raw(preprocessedSource + start, end - start);
 
-            // strip quotes if it’s a string literal
+            // strip quotes if it's a string literal
             if (raw.size() >= 2 && raw.front() == '"' && raw.back() == '"')
                 raw = raw.substr(1, raw.size() - 2);
 
@@ -828,7 +901,7 @@ ShaderLibraryBRSLAnalysis AnalyzePreprocessedShaderLibrary(
     const DxcBuffer* pPreprocessedBuffer)
 {
     const char* preprocessedSource = static_cast<const char*>(pPreprocessedBuffer->Ptr);
-    size_t sourceSize = pPreprocessedBuffer->Size;
+    size_t sourceSize = GetNormalizedShaderSourceSize(preprocessedSource, pPreprocessedBuffer->Size);
 
     TSParser* parser = ts_parser_new();
     ts_parser_set_language(parser, tree_sitter_hlsl());
@@ -874,6 +947,964 @@ static inline void TrimInPlace(std::string& s)
     s = s.substr(l, r - l + 1);
 }
 
+struct ResourceDescriptorCallSite
+{
+    uint32_t startByte = 0;
+    uint32_t endByte = 0;
+    bool isOptional = false;
+    std::string identifier;
+};
+
+static inline bool IsValidUtf8(std::string_view bytes)
+{
+    size_t i = 0;
+    while (i < bytes.size()) {
+        const uint8_t c0 = static_cast<uint8_t>(bytes[i]);
+        if (c0 <= 0x7F) {
+            ++i;
+            continue;
+        }
+
+        auto isContinuation = [&](size_t idx) -> bool {
+            return idx < bytes.size() && (static_cast<uint8_t>(bytes[idx]) & 0xC0u) == 0x80u;
+            };
+
+        if (c0 >= 0xC2 && c0 <= 0xDF) {
+            if (!isContinuation(i + 1)) {
+                return false;
+            }
+            i += 2;
+            continue;
+        }
+
+        if (c0 == 0xE0) {
+            if (i + 2 >= bytes.size()) {
+                return false;
+            }
+            const uint8_t c1 = static_cast<uint8_t>(bytes[i + 1]);
+            if (!(c1 >= 0xA0 && c1 <= 0xBF) || !isContinuation(i + 2)) {
+                return false;
+            }
+            i += 3;
+            continue;
+        }
+
+        if ((c0 >= 0xE1 && c0 <= 0xEC) || (c0 >= 0xEE && c0 <= 0xEF)) {
+            if (!isContinuation(i + 1) || !isContinuation(i + 2)) {
+                return false;
+            }
+            i += 3;
+            continue;
+        }
+
+        if (c0 == 0xED) {
+            if (i + 2 >= bytes.size()) {
+                return false;
+            }
+            const uint8_t c1 = static_cast<uint8_t>(bytes[i + 1]);
+            if (!(c1 >= 0x80 && c1 <= 0x9F) || !isContinuation(i + 2)) {
+                return false;
+            }
+            i += 3;
+            continue;
+        }
+
+        if (c0 == 0xF0) {
+            if (i + 3 >= bytes.size()) {
+                return false;
+            }
+            const uint8_t c1 = static_cast<uint8_t>(bytes[i + 1]);
+            if (!(c1 >= 0x90 && c1 <= 0xBF) || !isContinuation(i + 2) || !isContinuation(i + 3)) {
+                return false;
+            }
+            i += 4;
+            continue;
+        }
+
+        if (c0 >= 0xF1 && c0 <= 0xF3) {
+            if (!isContinuation(i + 1) || !isContinuation(i + 2) || !isContinuation(i + 3)) {
+                return false;
+            }
+            i += 4;
+            continue;
+        }
+
+        if (c0 == 0xF4) {
+            if (i + 3 >= bytes.size()) {
+                return false;
+            }
+            const uint8_t c1 = static_cast<uint8_t>(bytes[i + 1]);
+            if (!(c1 >= 0x80 && c1 <= 0x8F) || !isContinuation(i + 2) || !isContinuation(i + 3)) {
+                return false;
+            }
+            i += 4;
+            continue;
+        }
+
+        return false;
+    }
+
+    return true;
+}
+
+static inline void ValidateUtf8OrThrow(std::string_view bytes, std::string_view label)
+{
+    if (!IsValidUtf8(bytes)) {
+        throw std::runtime_error(std::string(label) + " is not valid UTF-8");
+    }
+}
+
+static inline bool IsIdentifierLikeChar(char c)
+{
+    return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_';
+}
+
+static inline size_t SkipQuotedLiteral(std::string_view source, size_t index, char quote)
+{
+    ++index;
+    while (index < source.size()) {
+        const char c = source[index];
+        if (c == '\\') {
+            index += 2;
+            continue;
+        }
+        ++index;
+        if (c == quote) {
+            break;
+        }
+    }
+    return index;
+}
+
+static inline void SkipWhitespaceAndComments(std::string_view source, size_t& index)
+{
+    while (index < source.size()) {
+        const char c = source[index];
+        if (std::isspace(static_cast<unsigned char>(c)) != 0) {
+            ++index;
+            continue;
+        }
+
+        if (c == '/' && index + 1 < source.size()) {
+            if (source[index + 1] == '/') {
+                index += 2;
+                while (index < source.size() && source[index] != '\n') {
+                    ++index;
+                }
+                continue;
+            }
+
+            if (source[index + 1] == '*') {
+                index += 2;
+                while (index + 1 < source.size() && !(source[index] == '*' && source[index + 1] == '/')) {
+                    ++index;
+                }
+                if (index + 1 < source.size()) {
+                    index += 2;
+                }
+                continue;
+            }
+        }
+
+        break;
+    }
+}
+
+static inline bool StartsWithTokenAtBoundary(
+    std::string_view source,
+    size_t offset,
+    std::string_view token)
+{
+    if (offset + token.size() > source.size()) {
+        return false;
+    }
+
+    if (source.substr(offset, token.size()) != token) {
+        return false;
+    }
+
+    if (offset > 0 && IsIdentifierLikeChar(source[offset - 1])) {
+        return false;
+    }
+
+    const size_t end = offset + token.size();
+    if (end < source.size() && IsIdentifierLikeChar(source[end])) {
+        return false;
+    }
+
+    return true;
+}
+
+static inline std::optional<ResourceDescriptorCallSite> TryParseResourceDescriptorCallAt(
+    std::string_view source,
+    size_t functionStart)
+{
+    static constexpr std::string_view optionalName = "OptionalResourceDescriptorIndex";
+    static constexpr std::string_view mandatoryName = "ResourceDescriptorIndex";
+
+    std::string_view functionName;
+    bool isOptional = false;
+
+    if (StartsWithTokenAtBoundary(source, functionStart, optionalName)) {
+        functionName = optionalName;
+        isOptional = true;
+    }
+    else if (StartsWithTokenAtBoundary(source, functionStart, mandatoryName)) {
+        functionName = mandatoryName;
+    }
+    else {
+        return std::nullopt;
+    }
+
+    size_t cursor = functionStart + functionName.size();
+    SkipWhitespaceAndComments(source, cursor);
+    if (cursor >= source.size() || source[cursor] != '(') {
+        return std::nullopt;
+    }
+
+    const size_t argumentStart = cursor + 1;
+    size_t argumentEnd = argumentStart;
+    bool sawTopLevelComma = false;
+    int depth = 1;
+    ++cursor;
+
+    while (cursor < source.size()) {
+        const char c = source[cursor];
+
+        if (c == '"' || c == '\'') {
+            cursor = SkipQuotedLiteral(source, cursor, c);
+            continue;
+        }
+
+        if (c == '/' && cursor + 1 < source.size()) {
+            if (source[cursor + 1] == '/') {
+                cursor += 2;
+                while (cursor < source.size() && source[cursor] != '\n') {
+                    ++cursor;
+                }
+                continue;
+            }
+
+            if (source[cursor + 1] == '*') {
+                cursor += 2;
+                while (cursor + 1 < source.size() && !(source[cursor] == '*' && source[cursor + 1] == '/')) {
+                    ++cursor;
+                }
+                if (cursor + 1 < source.size()) {
+                    cursor += 2;
+                }
+                continue;
+            }
+        }
+
+        if (c == '(') {
+            ++depth;
+            ++cursor;
+            continue;
+        }
+
+        if (c == ')') {
+            --depth;
+            if (depth == 0) {
+                argumentEnd = cursor;
+                ++cursor;
+                break;
+            }
+            ++cursor;
+            continue;
+        }
+
+        if (c == ',' && depth == 1) {
+            sawTopLevelComma = true;
+        }
+
+        ++cursor;
+    }
+
+    if (depth != 0) {
+        throw std::runtime_error("Unterminated ResourceDescriptorIndex call in shader source");
+    }
+
+    if (sawTopLevelComma) {
+        throw std::runtime_error("ResourceDescriptorIndex requires exactly one argument");
+    }
+
+    std::string identifier(source.substr(argumentStart, argumentEnd - argumentStart));
+    TrimInPlace(identifier);
+
+    if (identifier.size() >= 2 && identifier.front() == '"' && identifier.back() == '"') {
+        identifier = identifier.substr(1, identifier.size() - 2);
+    }
+
+    ResourceDescriptorCallSite callSite;
+    callSite.startByte = static_cast<uint32_t>(functionStart);
+    callSite.endByte = static_cast<uint32_t>(cursor);
+    callSite.isOptional = isOptional;
+    callSite.identifier = std::move(identifier);
+    return callSite;
+}
+
+static inline std::vector<ResourceDescriptorCallSite> CollectResourceDescriptorCallsFromText(
+    std::string_view source)
+{
+    std::vector<ResourceDescriptorCallSite> callSites;
+    for (size_t i = 0; i < source.size();) {
+        const char c = source[i];
+        if (c == '"' || c == '\'') {
+            i = SkipQuotedLiteral(source, i, c);
+            continue;
+        }
+
+        if (c == '/' && i + 1 < source.size()) {
+            if (source[i + 1] == '/') {
+                i += 2;
+                while (i < source.size() && source[i] != '\n') {
+                    ++i;
+                }
+                continue;
+            }
+
+            if (source[i + 1] == '*') {
+                i += 2;
+                while (i + 1 < source.size() && !(source[i] == '*' && source[i + 1] == '/')) {
+                    ++i;
+                }
+                if (i + 1 < source.size()) {
+                    i += 2;
+                }
+                continue;
+            }
+        }
+
+        auto callSite = TryParseResourceDescriptorCallAt(source, i);
+        if (callSite.has_value()) {
+            callSites.push_back(*callSite);
+            i = callSite->endByte;
+            continue;
+        }
+
+        ++i;
+    }
+
+    return callSites;
+}
+
+static inline void CollectResourceDescriptorIdentifiersFromText(
+    std::unordered_set<std::string>& outMandatory,
+    std::unordered_set<std::string>& outOptional,
+    std::string_view source)
+{
+    const auto callSites = CollectResourceDescriptorCallsFromText(source);
+    for (const auto& callSite : callSites) {
+        if (callSite.isOptional) {
+            outOptional.insert(callSite.identifier);
+        }
+        else {
+            outMandatory.insert(callSite.identifier);
+        }
+    }
+}
+
+static inline std::string RewriteResourceDescriptorCallsInText(
+    std::string_view source,
+    const std::unordered_map<std::string, std::string>& replacementMap)
+{
+    const auto callSites = CollectResourceDescriptorCallsFromText(source);
+    if (callSites.empty()) {
+        return std::string(source);
+    }
+
+    std::string out;
+    out.reserve(source.size() + callSites.size() * 8);
+
+    size_t cursor = 0;
+    for (const auto& callSite : callSites) {
+        out.append(source.substr(cursor, callSite.startByte - cursor));
+
+        auto replacementIt = replacementMap.find(callSite.identifier);
+        if (replacementIt == replacementMap.end()) {
+            throw std::runtime_error(
+                "ResourceDescriptorIndex identifier does not have mapped replacement: " + callSite.identifier);
+        }
+
+        out += replacementIt->second;
+        cursor = callSite.endByte;
+    }
+
+    out.append(source.substr(cursor));
+    return out;
+}
+
+static inline bool ContainsTokenOutsideCommentsAndStrings(
+    std::string_view source,
+    std::string_view token)
+{
+    for (size_t i = 0; i < source.size();) {
+        const char c = source[i];
+        if (c == '"' || c == '\'') {
+            i = SkipQuotedLiteral(source, i, c);
+            continue;
+        }
+
+        if (c == '/' && i + 1 < source.size()) {
+            if (source[i + 1] == '/') {
+                i += 2;
+                while (i < source.size() && source[i] != '\n') {
+                    ++i;
+                }
+                continue;
+            }
+
+            if (source[i + 1] == '*') {
+                i += 2;
+                while (i + 1 < source.size() && !(source[i] == '*' && source[i + 1] == '/')) {
+                    ++i;
+                }
+                if (i + 1 < source.size()) {
+                    i += 2;
+                }
+                continue;
+            }
+        }
+
+        if (i + token.size() <= source.size() && source.substr(i, token.size()) == token) {
+            return true;
+        }
+
+        ++i;
+    }
+
+    return false;
+}
+
+static inline std::string SanitizeSourceSnippet(std::string_view snippet)
+{
+    std::string sanitized;
+    sanitized.reserve((std::min)(snippet.size(), size_t(160)));
+
+    bool previousWasSpace = false;
+    for (char c : snippet) {
+        if (c == '\r' || c == '\n' || c == '\t') {
+            c = ' ';
+        }
+
+        if (std::isspace(static_cast<unsigned char>(c)) != 0) {
+            if (!previousWasSpace && !sanitized.empty()) {
+                sanitized.push_back(' ');
+            }
+            previousWasSpace = true;
+            continue;
+        }
+
+        previousWasSpace = false;
+        sanitized.push_back(c);
+        if (sanitized.size() >= 160) {
+            sanitized += "...";
+            break;
+        }
+    }
+
+    if (!sanitized.empty() && sanitized.back() == ' ') {
+        sanitized.pop_back();
+    }
+
+    return sanitized;
+}
+
+static inline std::string BuildParseErrorSummary(const char* source, size_t sourceSize, const TSNode& errorNode)
+{
+    const TSPoint startPoint = ts_node_start_point(errorNode);
+    const TSPoint endPoint = ts_node_end_point(errorNode);
+    const uint32_t startByte = ts_node_start_byte(errorNode);
+    const uint32_t endByte = ts_node_end_byte(errorNode);
+
+    const size_t contextStart = startByte > 48u ? startByte - 48u : 0u;
+    const size_t contextEnd = (std::min)(sourceSize, static_cast<size_t>(endByte) + 48u);
+    std::string snippet = SanitizeSourceSnippet(
+        std::string_view(source + contextStart, contextEnd - contextStart));
+
+    std::ostringstream stream;
+    stream << "ERROR@" << (startPoint.row + 1) << ":" << (startPoint.column + 1)
+           << "-" << (endPoint.row + 1) << ":" << (endPoint.column + 1);
+
+    TSNode parentNode = ts_node_parent(errorNode);
+    if (!ts_node_is_null(parentNode)) {
+        stream << " parent=" << ts_node_type(parentNode);
+    }
+
+    TSNode previousSibling = ts_node_prev_sibling(errorNode);
+    if (!ts_node_is_null(previousSibling)) {
+        stream << " prev=" << ts_node_type(previousSibling);
+    }
+
+    TSNode nextSibling = ts_node_next_sibling(errorNode);
+    if (!ts_node_is_null(nextSibling)) {
+        stream << " next=" << ts_node_type(nextSibling);
+    }
+
+    stream << " snippet=\"" << snippet << "\"";
+    return stream.str();
+}
+
+static inline void CollectParseErrorSummaries(
+    const char* source,
+    size_t sourceSize,
+    const TSNode& node,
+    std::vector<std::string>& outSummaries,
+    size_t maxSummaries)
+{
+    if (ts_node_is_null(node) || outSummaries.size() >= maxSummaries) {
+        return;
+    }
+
+    if (strcmp(ts_node_type(node), "ERROR") == 0) {
+        outSummaries.push_back(BuildParseErrorSummary(source, sourceSize, node));
+        if (outSummaries.size() >= maxSummaries) {
+            return;
+        }
+    }
+
+    const uint32_t childCount = ts_node_child_count(node);
+    for (uint32_t i = 0; i < childCount; ++i) {
+        CollectParseErrorSummaries(source, sourceSize, ts_node_child(node, i), outSummaries, maxSummaries);
+        if (outSummaries.size() >= maxSummaries) {
+            return;
+        }
+    }
+}
+
+static inline void CountParseErrorNodes(const TSNode& node, uint32_t& errorNodeCount)
+{
+    if (ts_node_is_null(node)) {
+        return;
+    }
+
+    if (strcmp(ts_node_type(node), "ERROR") == 0) {
+        ++errorNodeCount;
+    }
+
+    const uint32_t childCount = ts_node_child_count(node);
+    for (uint32_t i = 0; i < childCount; ++i) {
+        CountParseErrorNodes(ts_node_child(node, i), errorNodeCount);
+    }
+}
+
+static inline void BuildFunctionCatalogDetailed(
+    const char* source,
+    const TSNode& root,
+    std::unordered_map<std::string, std::vector<TSNode>>& outDefinitionNodes,
+    std::unordered_map<std::string, std::vector<TSNode>>& outBodyNodes,
+    std::unordered_set<std::string>& outDefinedFunctionNames,
+    ShaderPreprocessDiagnostics& diagnostics)
+{
+    std::vector<TSNode> functionDefinitions;
+    CollectFunctionDefinitions(root, functionDefinitions);
+    diagnostics.discoveredFunctionDefinitions.reserve(functionDefinitions.size());
+
+    for (const TSNode& definitionNode : functionDefinitions) {
+        auto functionName = ExtractFunctionNameFromDefinition(source, definitionNode);
+        if (!functionName.has_value()) {
+            diagnostics.unnamedFunctionDefinitions.push_back(
+                "function_definition@" + std::to_string(ts_node_start_byte(definitionNode)));
+            continue;
+        }
+
+        diagnostics.discoveredFunctionDefinitions.push_back(*functionName);
+        outDefinedFunctionNames.insert(*functionName);
+        outDefinitionNodes[*functionName].push_back(definitionNode);
+
+        TSNode bodyNode = ts_node_child_by_field_name(
+            definitionNode,
+            "body",
+            static_cast<uint32_t>(strlen("body")));
+        if (!ts_node_is_null(bodyNode)) {
+            outBodyNodes[*functionName].push_back(bodyNode);
+        }
+    }
+
+    SortAndUniqueStrings(diagnostics.discoveredFunctionDefinitions);
+    SortAndUniqueStrings(diagnostics.unnamedFunctionDefinitions);
+}
+
+static inline std::vector<std::string> CollectUndefinedInternalCalls(
+    const char* source,
+    const TSNode& root,
+    const std::unordered_set<std::string>& originalDefinedFunctionNames)
+{
+    std::unordered_map<std::string, std::vector<TSNode>> definitionNodes;
+    std::unordered_map<std::string, std::vector<TSNode>> bodyNodes;
+    std::unordered_set<std::string> currentlyDefinedFunctionNames;
+    ShaderPreprocessDiagnostics ignoredDiagnostics;
+    BuildFunctionCatalogDetailed(
+        source,
+        root,
+        definitionNodes,
+        bodyNodes,
+        currentlyDefinedFunctionNames,
+        ignoredDiagnostics);
+
+    std::vector<std::string> unresolved;
+
+    std::function<void(TSNode)> walk = [&](TSNode node) {
+        if (ts_node_is_null(node)) {
+            return;
+        }
+
+        if (strcmp(ts_node_type(node), "call_expression") == 0) {
+            TSNode functionNode = ts_node_child_by_field_name(
+                node,
+                "function",
+                static_cast<uint32_t>(strlen("function")));
+            if (!ts_node_is_null(functionNode)) {
+                uint32_t start = ts_node_start_byte(functionNode);
+                uint32_t end = ts_node_end_byte(functionNode);
+                std::string functionName(source + start, end - start);
+                TrimInPlace(functionName);
+
+                if (originalDefinedFunctionNames.contains(functionName) &&
+                    !currentlyDefinedFunctionNames.contains(functionName))
+                {
+                    unresolved.push_back(functionName);
+                }
+            }
+        }
+
+        const uint32_t childCount = ts_node_child_count(node);
+        for (uint32_t i = 0; i < childCount; ++i) {
+            walk(ts_node_child(node, i));
+        }
+        };
+
+    walk(root);
+
+    SortAndUniqueStrings(unresolved);
+    return unresolved;
+}
+
+static inline ShaderPreprocessDiagnostics AnalyzeShaderSourceCatalog(
+    const char* source,
+    size_t sourceSize)
+{
+    sourceSize = GetNormalizedShaderSourceSize(source, sourceSize);
+    ValidateUtf8OrThrow(std::string_view(source, sourceSize), "Shader source");
+
+    TSParser* parser = ts_parser_new();
+    ts_parser_set_language(parser, tree_sitter_hlsl());
+
+    TSTree* tree = ts_parser_parse_string(
+        parser,
+        nullptr,
+        source,
+        static_cast<uint32_t>(sourceSize));
+    TSNode root = ts_tree_root_node(tree);
+
+    ShaderPreprocessDiagnostics diagnostics;
+    diagnostics.parseSucceeded = !ts_node_is_null(root);
+    if (diagnostics.parseSucceeded) {
+        std::unordered_map<std::string, std::vector<TSNode>> definitionNodes;
+        std::unordered_map<std::string, std::vector<TSNode>> bodyNodes;
+        std::unordered_set<std::string> definedFunctionNames;
+
+        CountParseErrorNodes(root, diagnostics.errorNodeCount);
+        CollectParseErrorSummaries(source, sourceSize, root, diagnostics.parseErrorSummaries, 6);
+        if (diagnostics.errorNodeCount > diagnostics.parseErrorSummaries.size()) {
+            diagnostics.notes.push_back(
+                "Captured " + std::to_string(diagnostics.parseErrorSummaries.size()) +
+                " of " + std::to_string(diagnostics.errorNodeCount) + " parse errors.");
+        }
+        BuildFunctionCatalogDetailed(
+            source,
+            root,
+            definitionNodes,
+            bodyNodes,
+            definedFunctionNames,
+            diagnostics);
+        diagnostics.safeToPrune =
+            diagnostics.errorNodeCount == 0 &&
+            diagnostics.unnamedFunctionDefinitions.empty();
+    }
+
+    ts_tree_delete(tree);
+    ts_parser_delete(parser);
+    return diagnostics;
+}
+
+static inline bool ValidatePrunedShaderSource(
+    const std::string& prunedSource,
+    const std::unordered_set<std::string>& originalDefinedFunctionNames,
+    ShaderPreprocessDiagnostics& inOutDiagnostics)
+{
+    ValidateUtf8OrThrow(prunedSource, "Pruned shader source");
+
+    TSParser* parser = ts_parser_new();
+    ts_parser_set_language(parser, tree_sitter_hlsl());
+
+    TSTree* tree = ts_parser_parse_string(
+        parser,
+        nullptr,
+        prunedSource.c_str(),
+        static_cast<uint32_t>(prunedSource.size()));
+    TSNode root = ts_tree_root_node(tree);
+
+    uint32_t prunedErrorNodeCount = 0;
+    CountParseErrorNodes(root, prunedErrorNodeCount);
+
+    std::vector<std::string> unresolvedInternalCalls =
+        CollectUndefinedInternalCalls(prunedSource.c_str(), root, originalDefinedFunctionNames);
+
+    ts_tree_delete(tree);
+    ts_parser_delete(parser);
+
+    if (prunedErrorNodeCount != 0) {
+        inOutDiagnostics.notes.push_back(
+            "Pruned source contained parse errors; falling back to unpruned source.");
+        return false;
+    }
+
+    if (!unresolvedInternalCalls.empty()) {
+        inOutDiagnostics.unresolvedInternalCalls = unresolvedInternalCalls;
+        inOutDiagnostics.notes.push_back(
+            "Pruned source retained calls to definitions that were removed; falling back to unpruned source.");
+        return false;
+    }
+
+    return true;
+}
+
+std::string rewriteResourceDescriptorCallsMultiRoots(
+    const char* preprocessedSource,
+    size_t sourceSize,
+    const std::vector<std::string>& rootFunctionNames,
+    const std::unordered_map<std::string, std::string>& replacementMap);
+
+std::string pruneUnusedCodeMultiRoots(
+    const char* preprocessedSource,
+    size_t sourceSize,
+    const std::vector<std::string>& rootFunctionNames);
+
+static inline PreparedShaderSource PrepareShaderSourceForRoots(
+    const DxcBuffer& preprocessedBuffer,
+    const std::vector<std::string>& rootFunctionNames)
+{
+    const char* source = static_cast<const char*>(preprocessedBuffer.Ptr);
+    const size_t sourceSize = GetNormalizedShaderSourceSize(source, preprocessedBuffer.Size);
+
+    if (!source || sourceSize == 0) {
+        throw std::runtime_error("PrepareShaderSourceForRoots: empty preprocessed buffer");
+    }
+
+    if (rootFunctionNames.empty()) {
+        throw std::runtime_error("PrepareShaderSourceForRoots: no root functions provided");
+    }
+
+    ValidateUtf8OrThrow(std::string_view(source, sourceSize), "Preprocessed shader source");
+
+    TSParser* parser = ts_parser_new();
+    ts_parser_set_language(parser, tree_sitter_hlsl());
+
+    TSTree* tree = ts_parser_parse_string(
+        parser,
+        nullptr,
+        source,
+        static_cast<uint32_t>(sourceSize));
+    TSNode root = ts_tree_root_node(tree);
+
+    PreparedShaderSource prepared;
+    prepared.diagnostics.parseSucceeded = !ts_node_is_null(root);
+
+    std::unordered_map<std::string, std::vector<TSNode>> definitionNodes;
+    std::unordered_map<std::string, std::vector<TSNode>> bodyNodes;
+
+    if (prepared.diagnostics.parseSucceeded) {
+        CountParseErrorNodes(root, prepared.diagnostics.errorNodeCount);
+        CollectParseErrorSummaries(source, sourceSize, root, prepared.diagnostics.parseErrorSummaries, 6);
+        if (prepared.diagnostics.errorNodeCount > prepared.diagnostics.parseErrorSummaries.size()) {
+            prepared.diagnostics.notes.push_back(
+                "Captured " + std::to_string(prepared.diagnostics.parseErrorSummaries.size()) +
+                " of " + std::to_string(prepared.diagnostics.errorNodeCount) + " parse errors.");
+        }
+        BuildFunctionCatalogDetailed(
+            source,
+            root,
+            definitionNodes,
+            bodyNodes,
+            prepared.originalDefinedFunctionNames,
+            prepared.diagnostics);
+
+        prepared.diagnostics.safeToPrune =
+            prepared.diagnostics.errorNodeCount == 0 &&
+            prepared.diagnostics.unnamedFunctionDefinitions.empty();
+    }
+    else {
+        prepared.diagnostics.notes.push_back("Tree-sitter failed to produce a root node; pruning disabled.");
+    }
+
+    for (const std::string& rootFunctionName : rootFunctionNames) {
+        if (!prepared.originalDefinedFunctionNames.contains(rootFunctionName)) {
+            prepared.diagnostics.safeToPrune = false;
+            prepared.diagnostics.notes.push_back(
+                "Root function '" + rootFunctionName + "' was not found in the parsed definition catalog.");
+        }
+    }
+
+    ts_tree_delete(tree);
+    ts_parser_delete(parser);
+
+    prepared.sourceBeforeRewrite.assign(source, sourceSize);
+
+    if (prepared.diagnostics.safeToPrune) {
+        std::string prunedSource = pruneUnusedCodeMultiRoots(
+            prepared.sourceBeforeRewrite.c_str(),
+            prepared.sourceBeforeRewrite.size(),
+            rootFunctionNames);
+
+        if (ValidatePrunedShaderSource(
+            prunedSource,
+            prepared.originalDefinedFunctionNames,
+            prepared.diagnostics))
+        {
+            prepared.diagnostics.pruningApplied = prunedSource != prepared.sourceBeforeRewrite;
+            prepared.sourceBeforeRewrite = std::move(prunedSource);
+        }
+        else {
+            prepared.diagnostics.usedFallbackRewrite = true;
+            prepared.diagnostics.pruningApplied = false;
+        }
+    }
+    else {
+        prepared.diagnostics.usedFallbackRewrite = true;
+    }
+
+    std::unordered_set<std::string> mandatoryIdentifiers;
+    std::unordered_set<std::string> optionalIdentifiers;
+    CollectResourceDescriptorIdentifiersFromText(
+        mandatoryIdentifiers,
+        optionalIdentifiers,
+        prepared.sourceBeforeRewrite);
+
+    prepared.mandatoryIDs.assign(mandatoryIdentifiers.begin(), mandatoryIdentifiers.end());
+    prepared.optionalIDs.assign(optionalIdentifiers.begin(), optionalIdentifiers.end());
+    SortAndUniqueStrings(prepared.mandatoryIDs);
+    SortAndUniqueStrings(prepared.optionalIDs);
+
+    return prepared;
+}
+
+static inline PreparedShaderSource PrepareShaderSourceForEntryPoint(
+    const DxcBuffer& preprocessedBuffer,
+    const std::string& entryPointName)
+{
+    return PrepareShaderSourceForRoots(preprocessedBuffer, std::vector<std::string>{ entryPointName });
+}
+
+static inline std::string JoinStrings(
+    const std::vector<std::string>& values,
+    std::string_view separator)
+{
+    std::ostringstream stream;
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) {
+            stream << separator;
+        }
+        stream << values[i];
+    }
+    return stream.str();
+}
+
+static inline std::string FormatShaderPreprocessDiagnostics(
+    const ShaderPreprocessDiagnostics& diagnostics)
+{
+    std::ostringstream stream;
+    stream << "parseSucceeded=" << (diagnostics.parseSucceeded ? "true" : "false")
+           << ", errorNodeCount=" << diagnostics.errorNodeCount
+           << ", safeToPrune=" << (diagnostics.safeToPrune ? "true" : "false")
+           << ", usedFallbackRewrite=" << (diagnostics.usedFallbackRewrite ? "true" : "false")
+           << ", pruningApplied=" << (diagnostics.pruningApplied ? "true" : "false")
+           << ", finalSourceValid=" << (diagnostics.finalSourceValid ? "true" : "false");
+
+    if (!diagnostics.parseErrorSummaries.empty()) {
+        stream << ", parseErrors=[" << JoinStrings(diagnostics.parseErrorSummaries, " || ") << "]";
+    }
+
+    if (!diagnostics.unnamedFunctionDefinitions.empty()) {
+        stream << ", unnamedFunctionDefinitions=[" << JoinStrings(diagnostics.unnamedFunctionDefinitions, ", ") << "]";
+    }
+
+    if (!diagnostics.unresolvedInternalCalls.empty()) {
+        stream << ", unresolvedInternalCalls=[" << JoinStrings(diagnostics.unresolvedInternalCalls, ", ") << "]";
+    }
+
+    if (!diagnostics.notes.empty()) {
+        stream << ", notes=[" << JoinStrings(diagnostics.notes, " | ") << "]";
+    }
+
+    return stream.str();
+}
+
+static inline std::string FinalizePreparedShaderSource(
+    PreparedShaderSource& prepared,
+    const std::unordered_map<std::string, std::string>& replacementMap)
+{
+    for (const std::string& identifier : prepared.mandatoryIDs) {
+        if (!replacementMap.contains(identifier)) {
+            throw std::runtime_error(
+                "Missing descriptor replacement for mandatory identifier: " + identifier);
+        }
+    }
+
+    for (const std::string& identifier : prepared.optionalIDs) {
+        if (!replacementMap.contains(identifier)) {
+            throw std::runtime_error(
+                "Missing descriptor replacement for optional identifier: " + identifier);
+        }
+    }
+
+    std::string finalSource = RewriteResourceDescriptorCallsInText(
+        prepared.sourceBeforeRewrite,
+        replacementMap);
+
+    ValidateUtf8OrThrow(finalSource, "Final rewritten shader source");
+
+    const auto remainingDescriptorCalls = CollectResourceDescriptorCallsFromText(finalSource);
+    if (!remainingDescriptorCalls.empty()) {
+        throw std::runtime_error(
+            "Final rewritten shader source still contains unresolved ResourceDescriptorIndex calls");
+    }
+
+    if (ContainsTokenOutsideCommentsAndStrings(finalSource, "Builtin::")) {
+        throw std::runtime_error(
+            "Final rewritten shader source still contains symbolic Builtin:: references");
+    }
+
+    if (prepared.diagnostics.pruningApplied) {
+        TSParser* parser = ts_parser_new();
+        ts_parser_set_language(parser, tree_sitter_hlsl());
+
+        TSTree* tree = ts_parser_parse_string(
+            parser,
+            nullptr,
+            finalSource.c_str(),
+            static_cast<uint32_t>(finalSource.size()));
+        TSNode root = ts_tree_root_node(tree);
+
+        std::vector<std::string> unresolvedInternalCalls =
+            CollectUndefinedInternalCalls(finalSource.c_str(), root, prepared.originalDefinedFunctionNames);
+
+        ts_tree_delete(tree);
+        ts_parser_delete(parser);
+
+        if (!unresolvedInternalCalls.empty()) {
+            prepared.diagnostics.unresolvedInternalCalls = unresolvedInternalCalls;
+            throw std::runtime_error(
+                "Final rewritten shader source still contains calls to removed helper functions: " +
+                JoinStrings(unresolvedInternalCalls, ", "));
+        }
+    }
+
+    prepared.diagnostics.finalSourceValid = true;
+    return finalSource;
+}
+
 static std::string ParseSingleStringArgOrThrow(const char* src, TSNode callExprNode)
 {
     TSNode argList = ts_node_child_by_field_name(
@@ -903,6 +1934,7 @@ std::string rewriteResourceDescriptorCallsMultiRoots(
     const std::vector<std::string>& rootFunctionNames,
     const std::unordered_map<std::string, std::string>& replacementMap)
 {
+    sourceSize = GetNormalizedShaderSourceSize(preprocessedSource, sourceSize);
     if (!preprocessedSource || sourceSize == 0)
         return {};
     if (rootFunctionNames.empty())
@@ -1038,6 +2070,7 @@ std::string pruneUnusedCodeMultiRoots(
     size_t sourceSize,
     const std::vector<std::string>& rootFunctionNames)
 {
+    sourceSize = GetNormalizedShaderSourceSize(preprocessedSource, sourceSize);
     if (!preprocessedSource || sourceSize == 0)
         return {};
     if (rootFunctionNames.empty())
@@ -1054,48 +2087,21 @@ std::string pruneUnusedCodeMultiRoots(
     std::unordered_map<std::string, std::vector<TSNode>> defMap;
     std::unordered_map<std::string, std::vector<TSNode>> bodyMap;
 
-    uint32_t topCount = ts_node_child_count(root);
-    for (uint32_t i = 0; i < topCount; ++i)
+    std::vector<TSNode> functionDefinitions;
+    CollectFunctionDefinitions(root, functionDefinitions);
+    for (const TSNode& node : functionDefinitions)
     {
-        TSNode node = ts_node_child(root, i);
-        if (std::string(ts_node_type(node)) != "function_definition")
+        auto fnName = ExtractFunctionNameFromDefinition(preprocessedSource, node);
+        if (!fnName.has_value()) {
             continue;
-
-        // Extract function name (same pattern you used)
-        TSNode decl1 = ts_node_child_by_field_name(
-            node, "declarator",
-            static_cast<uint32_t>(strlen("declarator")));
-        TSNode decl2 = !ts_node_is_null(decl1)
-            ? ts_node_child_by_field_name(
-                decl1, "declarator",
-                static_cast<uint32_t>(strlen("declarator")))
-            : TSNode{};
-
-        TSNode nameNode = {};
-        if (!ts_node_is_null(decl2) && std::string(ts_node_type(decl2)) == "identifier")
-        {
-            nameNode = decl2;
-        }
-        else if (!ts_node_is_null(decl2))
-        {
-            nameNode = ts_node_child_by_field_name(
-                decl2, "name",
-                static_cast<uint32_t>(strlen("name")));
         }
 
-        if (ts_node_is_null(nameNode))
-            continue;
-
-        uint32_t s = ts_node_start_byte(nameNode);
-        uint32_t e = ts_node_end_byte(nameNode);
-        std::string fnName(preprocessedSource + s, e - s);
-
-        defMap[fnName].push_back(node);
+        defMap[*fnName].push_back(node);
 
         TSNode body = ts_node_child_by_field_name(
             node, "body",
             static_cast<uint32_t>(strlen("body")));
-        bodyMap[fnName].push_back(body);
+        bodyMap[*fnName].push_back(body);
     }
 
     // Multi-root BFS/DFS over the call graph
@@ -1243,6 +2249,8 @@ struct PreprocessedLibraryResult
 
     // Final transformed source (rewritten + pruned)
     std::string finalSource;
+
+    ShaderPreprocessDiagnostics diagnostics;
 };
 
 static inline bool StartsWith(std::string_view s, std::string_view prefix)
@@ -1273,10 +2281,7 @@ uint64_t hash_list(const std::vector<std::string>& list) {
 PreprocessedLibraryResult PreprocessShaderLibrary(
     const DxcBuffer& preprocessedBuffer)
 {
-    const char* src = static_cast<const char*>(preprocessedBuffer.Ptr);
-    const size_t srcSize = preprocessedBuffer.Size;
-
-    if (!src || srcSize == 0)
+    if (!preprocessedBuffer.Ptr || GetNormalizedShaderSourceSize(static_cast<const char*>(preprocessedBuffer.Ptr), preprocessedBuffer.Size) == 0)
         throw std::runtime_error("PreprocessShaderLibrary: empty preprocessed buffer");
 
     // Parse library once to find [Shader("...")] entrypoints + union of BRSL ids (mandatory/optional)
@@ -1289,33 +2294,6 @@ PreprocessedLibraryResult PreprocessShaderLibrary(
     PreprocessedLibraryResult out = {};
     out.entryPoints = std::move(analysis.entryPoints);
 
-    // Deterministic ordering for indices/hash (unordered_set iteration is nondeterministic)
-    out.mandatoryIDs.assign(analysis.mandatoryIdentifiers.begin(), analysis.mandatoryIdentifiers.end());
-    out.optionalIDs.assign(analysis.optionalIdentifiers.begin(), analysis.optionalIdentifiers.end());
-    std::sort(out.mandatoryIDs.begin(), out.mandatoryIDs.end());
-    std::sort(out.optionalIDs.begin(), out.optionalIDs.end());
-
-    // Build replacement map with stable indices: mandatory first, then optional
-    out.replacementMap.reserve(out.mandatoryIDs.size() + out.optionalIDs.size());
-
-    uint32_t nextIndex = 0;
-    for (const auto& id : out.mandatoryIDs) {
-        out.replacementMap[id] = "ResourceDescriptorIndex" + std::to_string(nextIndex++);
-    }
-
-    for (const auto& id : out.optionalIDs) {
-        out.replacementMap[id] = "ResourceDescriptorIndex" + std::to_string(nextIndex++);
-    }
-
-    // Hash IDs deterministically
-    {
-        std::vector<std::string> combined;
-        combined.reserve(out.mandatoryIDs.size() + out.optionalIDs.size());
-        combined.insert(combined.end(), out.mandatoryIDs.begin(), out.mandatoryIDs.end());
-        combined.insert(combined.end(), out.optionalIDs.begin(), out.optionalIDs.end());
-        out.resourceIDsHash = hash_list(combined);
-    }
-
     // Roots = function names of decorated entry points
     std::vector<std::string> roots;
     roots.reserve(out.entryPoints.size());
@@ -1323,12 +2301,27 @@ PreprocessedLibraryResult PreprocessShaderLibrary(
         roots.push_back(ep.functionName);
     }
 
-    // Rewrite calls from all roots (multi-root rewrite)
-    std::string rewritten = rewriteResourceDescriptorCallsMultiRoots(src, srcSize, roots, out.replacementMap);
+    PreparedShaderSource prepared = PrepareShaderSourceForRoots(preprocessedBuffer, roots);
+    out.diagnostics = prepared.diagnostics;
+    out.mandatoryIDs = prepared.mandatoryIDs;
+    out.optionalIDs = prepared.optionalIDs;
 
-    // Prune unreachable functions from all roots (multi-root prune)
-    std::string pruned = pruneUnusedCodeMultiRoots(rewritten.c_str(), rewritten.size(), roots);
+    out.replacementMap.reserve(out.mandatoryIDs.size() + out.optionalIDs.size());
+    uint32_t nextIndex = 0;
+    for (const auto& id : out.mandatoryIDs) {
+        out.replacementMap[id] = "ResourceDescriptorIndex" + std::to_string(nextIndex++);
+    }
+    for (const auto& id : out.optionalIDs) {
+        out.replacementMap[id] = "ResourceDescriptorIndex" + std::to_string(nextIndex++);
+    }
 
-    out.finalSource = std::move(pruned);
+    std::vector<std::string> combined;
+    combined.reserve(out.mandatoryIDs.size() + out.optionalIDs.size());
+    combined.insert(combined.end(), out.mandatoryIDs.begin(), out.mandatoryIDs.end());
+    combined.insert(combined.end(), out.optionalIDs.begin(), out.optionalIDs.end());
+    out.resourceIDsHash = hash_list(combined);
+
+    out.finalSource = FinalizePreparedShaderSource(prepared, out.replacementMap);
+    out.diagnostics = prepared.diagnostics;
     return out;
 }
