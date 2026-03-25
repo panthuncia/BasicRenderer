@@ -3,10 +3,9 @@
 
 ![Zorah AO example](images/zorah_ao.png)
 
-An advanced DX12 research renderer, written to experiment with real-time rendering- particularly with regard to advanced geometry rendering techniques
+An advanced DX12 research renderer, written to experiment with real-time rendering, built entirely around virtualized geometry
 
 Feature development is driven purely by what I'm interested in at the moment.
-
 
 ## Graphical features
 
