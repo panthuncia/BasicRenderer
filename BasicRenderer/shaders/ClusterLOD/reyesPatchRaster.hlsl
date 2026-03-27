@@ -11,6 +11,12 @@
 
 static const uint REYES_PATCH_RASTER_GROUP_SIZE = 64u;
 
+#define REYES_PATCH_RASTER_ENABLE_NEAR_PLANE_CLIPPING 1 // TODO: Looks nicer, but might be more expensive. Maybe have a separate dispatch for these?
+
+#ifndef REYES_PATCH_RASTER_ENABLE_NEAR_PLANE_CLIPPING
+#define REYES_PATCH_RASTER_ENABLE_NEAR_PLANE_CLIPPING 0
+#endif
+
 uint ReadPackedBits32(ByteAddressBuffer buf, uint startBit, uint bitCount)
 {
     if (bitCount == 0u) return 0u;
@@ -252,7 +258,15 @@ bool ReyesIsTopLeftEdge(float2 a, float2 b)
     return edge.y > 0.0f || (edge.y == 0.0f && edge.x < 0.0f);
 }
 
-void ReyesRasterizeMicroTriangle(
+#if REYES_PATCH_RASTER_ENABLE_NEAR_PLANE_CLIPPING
+struct ReyesRasterVertex
+{
+    float4 clip;
+    float depth;
+};
+#endif
+
+void ReyesRasterizeProjectedMicroTriangle(
     RWTexture2D<uint64_t> visBuffer,
     uint2 visDims,
     RWStructuredBuffer<CLodReyesTelemetry> telemetryBuffer,
@@ -266,8 +280,10 @@ void ReyesRasterizeMicroTriangle(
     uint patchVisibilityIndex,
     uint microTriangleIndex)
 {
-    if (clip0.w <= 0.0f || clip1.w <= 0.0f || clip2.w <= 0.0f)
+    const float clipWEpsilon = 1e-6f;
+    if (clip0.w <= clipWEpsilon || clip1.w <= clipWEpsilon || clip2.w <= clipWEpsilon)
     {
+        InterlockedAdd(telemetryBuffer[0].rasterClipCullCount, 1u);
         return;
     }
 
@@ -288,11 +304,13 @@ void ReyesRasterizeMicroTriangle(
     float twiceArea = e01.x * e02.y - e01.y * e02.x;
     if (abs(twiceArea) <= 1e-8f)
     {
+        InterlockedAdd(telemetryBuffer[0].rasterPreAreaCullCount, 1u);
         return;
     }
 
     if (twiceArea > 0.0f)
     {
+        InterlockedAdd(telemetryBuffer[0].rasterWindingSwapCount, 1u);
         float2 tmpPos = s1;
         s1 = s2;
         s2 = tmpPos;
@@ -307,6 +325,7 @@ void ReyesRasterizeMicroTriangle(
     }
     else if (twiceArea >= 0.0f)
     {
+        InterlockedAdd(telemetryBuffer[0].rasterPostSwapNonNegativeAreaCount, 1u);
         return;
     }
 
@@ -321,6 +340,7 @@ void ReyesRasterizeMicroTriangle(
     maxPx = min(maxPx, int2(int(visDims.x) - 1, int(visDims.y) - 1));
     if (minPx.x > maxPx.x || minPx.y > maxPx.y)
     {
+        InterlockedAdd(telemetryBuffer[0].rasterEmptyBoundsCullCount, 1u);
         return;
     }
 
@@ -365,6 +385,118 @@ void ReyesRasterizeMicroTriangle(
         scanline_b0 += dy_b0;
         scanline_b1 += dy_b1;
     }
+}
+
+void ReyesRasterizeMicroTriangle(
+    RWTexture2D<uint64_t> visBuffer,
+    uint2 visDims,
+    RWStructuredBuffer<CLodReyesTelemetry> telemetryBuffer,
+    ClodViewRasterInfo viewRasterInfo,
+    float4 clip0,
+    float4 clip1,
+    float4 clip2,
+    float depth0,
+    float depth1,
+    float depth2,
+    float nearDepth,
+    uint patchVisibilityIndex,
+    uint microTriangleIndex)
+{
+#if REYES_PATCH_RASTER_ENABLE_NEAR_PLANE_CLIPPING
+    ReyesRasterVertex inputVertices[3];
+    inputVertices[0].clip = clip0;
+    inputVertices[0].depth = depth0;
+    inputVertices[1].clip = clip1;
+    inputVertices[1].depth = depth1;
+    inputVertices[2].clip = clip2;
+    inputVertices[2].depth = depth2;
+
+    ReyesRasterVertex clippedVertices[4];
+    uint clippedCount = 0u;
+
+    [unroll]
+    for (uint edgeIndex = 0u; edgeIndex < 3u; ++edgeIndex)
+    {
+        const ReyesRasterVertex currentVertex = inputVertices[edgeIndex];
+        const ReyesRasterVertex nextVertex = inputVertices[(edgeIndex + 1u) % 3u];
+        const bool currentInside = currentVertex.depth >= nearDepth;
+        const bool nextInside = nextVertex.depth >= nearDepth;
+
+        if (currentInside)
+        {
+            clippedVertices[clippedCount++] = currentVertex;
+        }
+
+        if (currentInside != nextInside)
+        {
+            const float depthDelta = nextVertex.depth - currentVertex.depth;
+            const float t = saturate((nearDepth - currentVertex.depth) / depthDelta);
+
+            ReyesRasterVertex clippedVertex;
+            clippedVertex.clip = lerp(currentVertex.clip, nextVertex.clip, t);
+            clippedVertex.depth = nearDepth;
+            clippedVertices[clippedCount++] = clippedVertex;
+        }
+    }
+
+    if (clippedCount < 3u)
+    {
+        InterlockedAdd(telemetryBuffer[0].rasterClipCullCount, 1u);
+        return;
+    }
+
+    ReyesRasterizeProjectedMicroTriangle(
+        visBuffer,
+        visDims,
+        telemetryBuffer,
+        viewRasterInfo,
+        clippedVertices[0].clip,
+        clippedVertices[1].clip,
+        clippedVertices[2].clip,
+        clippedVertices[0].depth,
+        clippedVertices[1].depth,
+        clippedVertices[2].depth,
+        patchVisibilityIndex,
+        microTriangleIndex);
+
+    if (clippedCount == 4u)
+    {
+        InterlockedAdd(telemetryBuffer[0].rasterNearPlaneClippedQuadCount, 1u);
+        ReyesRasterizeProjectedMicroTriangle(
+            visBuffer,
+            visDims,
+            telemetryBuffer,
+            viewRasterInfo,
+            clippedVertices[0].clip,
+            clippedVertices[2].clip,
+            clippedVertices[3].clip,
+            clippedVertices[0].depth,
+            clippedVertices[2].depth,
+            clippedVertices[3].depth,
+            patchVisibilityIndex,
+            microTriangleIndex);
+    }
+#else
+    if (depth0 < nearDepth || depth1 < nearDepth || depth2 < nearDepth)
+    {
+        InterlockedAdd(telemetryBuffer[0].rasterClipCullCount, 1u);
+        return;
+    }
+
+    ReyesRasterizeProjectedMicroTriangle(
+        visBuffer,
+        visDims,
+        telemetryBuffer,
+        viewRasterInfo,
+        clip0,
+        clip1,
+        clip2,
+        depth0,
+        depth1,
+        depth2,
+        patchVisibilityIndex,
+        microTriangleIndex);
+#endif
 }
 
 [shader("compute")]
@@ -440,8 +572,15 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     const float3 domain1 = ReyesDecodePatchBarycentrics(diceEntry.domainVertex1Encoded);
     const float3 domain2 = ReyesDecodePatchBarycentrics(diceEntry.domainVertex2Encoded);
     const uint microTriangleCount = ReyesGetDicePatchMicroTriangleCount(tessTableConfigs, diceEntry);
-    if (microTriangleCount == 0u || microTriangleCount > 128u)
+    if (microTriangleCount == 0u)
     {
+        InterlockedAdd(telemetryBuffer[0].rasterZeroMicroTriangleCount, 1u);
+        return;
+    }
+
+    if (microTriangleCount > 128u)
+    {
+        InterlockedAdd(telemetryBuffer[0].rasterMicroTriangleOverflowCount, 1u);
         return;
     }
 
@@ -512,6 +651,7 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
             depth0,
             depth1,
             depth2,
+            camera.zNear,
             patchVisibilityIndex,
             microTriangleIndex);
     }

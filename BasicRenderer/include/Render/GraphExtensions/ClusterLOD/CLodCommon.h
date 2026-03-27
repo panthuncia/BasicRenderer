@@ -242,6 +242,9 @@ struct CLodReyesTelemetry
     uint32_t diceQueueOverflowCounts[CLodReyesMaxSplitPassCount] = {};
     uint32_t invalidSplitPatchDomainCount = 0u;
     uint32_t invalidDicePatchDomainCount = 0u;
+    uint32_t splitCollapseFallbackDiceCount = 0u;
+    uint32_t rasterWorkOverflowPatchCount = 0u;
+    uint32_t rasterWorkOverflowBatchCount = 0u;
     uint32_t canonicalFactorTieCount = 0u;
     uint32_t flippedTessTableConfigCount = 0u;
     uint32_t splitConfigTieCount = 0u;
@@ -254,9 +257,12 @@ struct CLodReyesTelemetry
     uint32_t rasterWindingSwapCount = 0u;
     uint32_t rasterPostSwapNonNegativeAreaCount = 0u;
     uint32_t rasterEmptyBoundsCullCount = 0u;
+    uint32_t rasterZeroMicroTriangleCount = 0u;
+    uint32_t rasterMicroTriangleOverflowCount = 0u;
+    uint32_t rasterNearPlaneClippedQuadCount = 0u;
 };
 
-static_assert(sizeof(CLodReyesTelemetry) == 204u, "CLodReyesTelemetry size must remain compact");
+static_assert(sizeof(CLodReyesTelemetry) == 228u, "CLodReyesTelemetry size must remain compact");
 
 inline constexpr uint32_t CLodReplayBufferSizeBytes = 200u * 1024u * 1024u; // 200 MB physical, GPU uses first 100 MB
 inline constexpr uint32_t CLodReplayNodeRegionSizeBytes = 50u * 1024u * 1024u;    // must match HLSL CLOD_REPLAY_NODE_REGION_SIZE_BYTES

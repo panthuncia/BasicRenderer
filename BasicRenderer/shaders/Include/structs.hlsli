@@ -490,6 +490,26 @@ struct CLodReyesTelemetry
     uint splitDiceOutputCounts[4];
     uint splitQueueOverflowCounts[4];
     uint diceQueueOverflowCounts[4];
+    uint invalidSplitPatchDomainCount;
+    uint invalidDicePatchDomainCount;
+    uint splitCollapseFallbackDiceCount;
+    uint rasterWorkOverflowPatchCount;
+    uint rasterWorkOverflowBatchCount;
+    uint canonicalFactorTieCount;
+    uint flippedTessTableConfigCount;
+    uint splitConfigTieCount;
+    uint splitConfigSelectionCounts[4];
+    uint canonicalRotationCounts[3];
+    uint siblingSharedEdgeCheckCount;
+    uint siblingSharedEdgeMismatchCount;
+    uint rasterClipCullCount;
+    uint rasterPreAreaCullCount;
+    uint rasterWindingSwapCount;
+    uint rasterPostSwapNonNegativeAreaCount;
+    uint rasterEmptyBoundsCullCount;
+    uint rasterZeroMicroTriangleCount;
+    uint rasterMicroTriangleOverflowCount;
+    uint rasterNearPlaneClippedQuadCount;
 };
 
 #endif // __STRUCTS_HLSL__

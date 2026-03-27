@@ -41,6 +41,7 @@ void ReyesDiceCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     const bool validPatch = abs(signedArea2) > (1.0f / REYES_BARYCENTRIC_COORD_SCALE);
     if (!validPatch)
     {
+        InterlockedAdd(telemetryBuffer[0].invalidDicePatchDomainCount, 1u);
         return;
     }
 

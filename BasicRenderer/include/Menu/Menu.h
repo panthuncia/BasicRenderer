@@ -2338,14 +2338,27 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 telemetry.deepestSplitLevelReached,
                 telemetry.configuredMaxSplitPassCount,
                 telemetry.finalDiceQueueEntryCount);
-            ImGui::Text("Dice: total queue inputs=%u valid patches=%u est triangles=%u est vertices=%u",
+            ImGui::Text("Split rejects: invalid domains=%u fallback-to-dice=%u",
+                telemetry.invalidSplitPatchDomainCount,
+                telemetry.splitCollapseFallbackDiceCount);
+            ImGui::Text("Dice: total queue inputs=%u valid patches=%u invalid domains=%u est triangles=%u est vertices=%u",
                 totalDiceInputs,
                 telemetry.dicedPatchCount,
+                telemetry.invalidDicePatchDomainCount,
                 telemetry.dicedTriangleEstimateCount,
                 telemetry.dicedVertexEstimateCount);
-            ImGui::Text("Patch raster: rasterized patches=%u rasterized microtriangles=%u",
+            ImGui::Text("Raster work: emitted patches=%u emitted microtriangles=%u overflow patches=%u overflow batches=%u",
                 telemetry.patchRasterizedPatchCount,
-                telemetry.patchRasterizedMicroTriangleCount);
+                telemetry.patchRasterizedMicroTriangleCount,
+                telemetry.rasterWorkOverflowPatchCount,
+                telemetry.rasterWorkOverflowBatchCount);
+            ImGui::Text("Patch raster rejects: zeroCount=%u overflow=%u clip=%u area=%u bounds=%u clippedQuad=%u",
+                telemetry.rasterZeroMicroTriangleCount,
+                telemetry.rasterMicroTriangleOverflowCount,
+                telemetry.rasterClipCullCount,
+                telemetry.rasterPreAreaCullCount,
+                telemetry.rasterEmptyBoundsCullCount,
+                telemetry.rasterNearPlaneClippedQuadCount);
 
             ImGui::TextUnformatted("Per split pass");
             for (uint32_t splitPassIndex = 0; splitPassIndex < CLodReyesMaxSplitPassCount; ++splitPassIndex) {

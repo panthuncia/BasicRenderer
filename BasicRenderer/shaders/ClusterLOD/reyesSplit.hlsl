@@ -8,6 +8,7 @@
 #include "PerPassRootConstants/clodReyesSplitRootConstants.h"
 
 static const uint REYES_SPLIT_GROUP_SIZE = 64u;
+static const uint REYES_SPLIT_TELEMETRY_PASS_COUNT = 4u;
 
 float3 ReyesInterpolateTriangle(float3 p0, float3 p1, float3 p2, float3 barycentrics)
 {
@@ -64,11 +65,15 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     RWStructuredBuffer<uint> diceQueueCounter = ResourceDescriptorHeap[CLOD_REYES_SPLIT_OUTPUT_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX];
     RWStructuredBuffer<uint> diceQueueOverflowCounter = ResourceDescriptorHeap[CLOD_REYES_SPLIT_OUTPUT_DICE_QUEUE_OVERFLOW_DESCRIPTOR_INDEX];
     RWStructuredBuffer<CLodReyesDiceQueueEntry> diceQueue = ResourceDescriptorHeap[CLOD_REYES_SPLIT_OUTPUT_DICE_QUEUE_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodReyesTelemetry> telemetryBuffer = ResourceDescriptorHeap[CLOD_REYES_SPLIT_TELEMETRY_DESCRIPTOR_INDEX];
     StructuredBuffer<CLodReyesTessTableConfigEntry> tessTableConfigs = ResourceDescriptorHeap[CLOD_REYES_SPLIT_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX];
     StructuredBuffer<uint> tessTableVertices = ResourceDescriptorHeap[CLOD_REYES_SPLIT_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX];
     StructuredBuffer<uint> tessTableTriangles = ResourceDescriptorHeap[CLOD_REYES_SPLIT_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX];
 
     const CLodReyesSplitQueueEntry splitEntry = splitQueue[splitIndex];
+    const uint splitPassTelemetryIndex = min(splitEntry.splitLevel, REYES_SPLIT_TELEMETRY_PASS_COUNT - 1u);
+    InterlockedAdd(telemetryBuffer[0].splitInputCounts[splitPassTelemetryIndex], 1u);
+    InterlockedMax(telemetryBuffer[0].deepestSplitLevelReached, splitEntry.splitLevel);
 
     const uint sourceTriangleIndex = splitEntry.sourcePrimitiveAndSplitConfig & 0xFFFFu;
     const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, splitEntry.visibleClusterIndex);
@@ -116,6 +121,7 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     const float3 bary2 = ReyesDecodeBarycentrics(splitEntry.domainVertex2Encoded);
     if (!ReyesPatchDomainHasValidSimplex(bary0, bary1, bary2))
     {
+        InterlockedAdd(telemetryBuffer[0].invalidSplitPatchDomainCount, 1u);
         return;
     }
 
@@ -132,9 +138,15 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     const uint nextSplitLevel = splitEntry.splitLevel + 1u;
     const uint nextQuantizedTessFactor = (uint)min(65535.0f, ceil(maxEdgeFactor * 256.0f));
+    InterlockedMax(telemetryBuffer[0].deepestSplitLevelReached, nextSplitLevel);
+
+    const uint originalDomainVertex0Encoded = splitEntry.domainVertex0Encoded;
+    const uint originalDomainVertex1Encoded = splitEntry.domainVertex1Encoded;
+    const uint originalDomainVertex2Encoded = splitEntry.domainVertex2Encoded;
 
     // Route to dice if edge factors fit within the tess table, or we've exhausted split passes.
-    const bool routeToDice = (nextSplitLevel >= maxSplitPassCount) || (maxEdgeFactor <= float(REYES_TESS_TABLE_MAX_SEGMENTS));
+    bool routeToDice = (nextSplitLevel >= maxSplitPassCount) || (maxEdgeFactor <= float(REYES_TESS_TABLE_MAX_SEGMENTS));
+    bool collapseFallbackToDice = false;
 
     if (routeToDice)
     {
@@ -143,12 +155,13 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         if (diceIndex >= queueCapacity)
         {
             InterlockedAdd(diceQueueOverflowCounter[0], 1u);
+            InterlockedAdd(telemetryBuffer[0].diceQueueOverflowCounts[splitPassTelemetryIndex], 1u);
             return;
         }
 
-        uint domainVertex0Encoded = splitEntry.domainVertex0Encoded;
-        uint domainVertex1Encoded = splitEntry.domainVertex1Encoded;
-        uint domainVertex2Encoded = splitEntry.domainVertex2Encoded;
+    uint domainVertex0Encoded = originalDomainVertex0Encoded;
+    uint domainVertex1Encoded = originalDomainVertex1Encoded;
+    uint domainVertex2Encoded = originalDomainVertex2Encoded;
         const uint tessTableConfigIndex = ReyesEncodeCanonicalTessTableConfig(edgeFactors, domainVertex0Encoded, domainVertex1Encoded, domainVertex2Encoded);
 
         CLodReyesDiceQueueEntry diceEntry;
@@ -167,6 +180,8 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         diceEntry.tessTableConfigIndex = tessTableConfigIndex;
         diceEntry.reserved = 0u;
         diceQueue[diceIndex] = diceEntry;
+        InterlockedAdd(telemetryBuffer[0].splitDiceOutputCounts[splitPassTelemetryIndex], 1u);
+        InterlockedAdd(telemetryBuffer[0].finalDiceQueueEntryCount, 1u);
         return;
     }
 
@@ -187,17 +202,85 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     const CLodReyesTessTableConfigEntry splitConfig = ReyesGetTessTableConfigEntry(tessTableConfigs, splitConfigIndex);
     const uint childCount = splitConfig.numTriangles;
+    InterlockedAdd(telemetryBuffer[0].splitChildOutputCounts[splitPassTelemetryIndex], childCount);
 
     // Decode the parent's (potentially rotated/flipped) domain vertices for rebasing.
     const float3 parentDomain0 = ReyesDecodeBarycentrics(domainVertex0Encoded);
     const float3 parentDomain1 = ReyesDecodeBarycentrics(domainVertex1Encoded);
     const float3 parentDomain2 = ReyesDecodeBarycentrics(domainVertex2Encoded);
 
+    [loop]
+    for (uint childIndex = 0u; childIndex < childCount; ++childIndex)
+    {
+        const uint3 triIndices = ReyesGetTessTableConfigTriangleVertexIndices(tessTableConfigs, tessTableTriangles, splitConfigIndex, childIndex);
+
+        const float3 microBary0 = ReyesGetTessTableConfigVertexBarycentrics(tessTableConfigs, tessTableVertices, splitConfigIndex, triIndices.x);
+        const float3 microBary1 = ReyesGetTessTableConfigVertexBarycentrics(tessTableConfigs, tessTableVertices, splitConfigIndex, triIndices.y);
+        const float3 microBary2 = ReyesGetTessTableConfigVertexBarycentrics(tessTableConfigs, tessTableVertices, splitConfigIndex, triIndices.z);
+
+        precise float3 childDomain0 = parentDomain0 * microBary0.x + parentDomain1 * microBary0.y + parentDomain2 * microBary0.z;
+        precise float3 childDomain1 = parentDomain0 * microBary1.x + parentDomain1 * microBary1.y + parentDomain2 * microBary1.z;
+        precise float3 childDomain2 = parentDomain0 * microBary2.x + parentDomain1 * microBary2.y + parentDomain2 * microBary2.z;
+
+        const uint childDomain0Encoded = ReyesEncodePatchBarycentrics(childDomain0);
+        const uint childDomain1Encoded = ReyesEncodePatchBarycentrics(childDomain1);
+        const uint childDomain2Encoded = ReyesEncodePatchBarycentrics(childDomain2);
+        if (!ReyesPatchDomainHasValidSimplexEncoded(childDomain0Encoded, childDomain1Encoded, childDomain2Encoded))
+        {
+            collapseFallbackToDice = true;
+            routeToDice = true;
+            break;
+        }
+    }
+
+    if (routeToDice)
+    {
+        if (collapseFallbackToDice)
+        {
+            InterlockedAdd(telemetryBuffer[0].splitCollapseFallbackDiceCount, 1u);
+        }
+
+        uint diceIndex = 0u;
+        InterlockedAdd(diceQueueCounter[0], 1u, diceIndex);
+        if (diceIndex >= queueCapacity)
+        {
+            InterlockedAdd(diceQueueOverflowCounter[0], 1u);
+            InterlockedAdd(telemetryBuffer[0].diceQueueOverflowCounts[splitPassTelemetryIndex], 1u);
+            return;
+        }
+
+        domainVertex0Encoded = originalDomainVertex0Encoded;
+        domainVertex1Encoded = originalDomainVertex1Encoded;
+        domainVertex2Encoded = originalDomainVertex2Encoded;
+        const uint tessTableConfigIndex = ReyesEncodeCanonicalTessTableConfig(edgeFactors, domainVertex0Encoded, domainVertex1Encoded, domainVertex2Encoded);
+
+        CLodReyesDiceQueueEntry diceEntry;
+        diceEntry.visibleClusterIndex = splitEntry.visibleClusterIndex;
+        diceEntry.instanceID = splitEntry.instanceID;
+        diceEntry.localMeshletIndex = splitEntry.localMeshletIndex;
+        diceEntry.materialIndex = splitEntry.materialIndex;
+        diceEntry.viewID = splitEntry.viewID;
+        diceEntry.splitLevel = nextSplitLevel;
+        diceEntry.quantizedTessFactor = nextQuantizedTessFactor;
+        diceEntry.flags = splitEntry.flags;
+        diceEntry.sourcePrimitiveAndSplitConfig = (sourceTriangleIndex & 0xFFFFu) | ((tessTableConfigIndex & 0xFFFFu) << 16u);
+        diceEntry.domainVertex0Encoded = domainVertex0Encoded;
+        diceEntry.domainVertex1Encoded = domainVertex1Encoded;
+        diceEntry.domainVertex2Encoded = domainVertex2Encoded;
+        diceEntry.tessTableConfigIndex = tessTableConfigIndex;
+        diceEntry.reserved = 0u;
+        diceQueue[diceIndex] = diceEntry;
+        InterlockedAdd(telemetryBuffer[0].splitDiceOutputCounts[splitPassTelemetryIndex], 1u);
+        InterlockedAdd(telemetryBuffer[0].finalDiceQueueEntryCount, 1u);
+        return;
+    }
+
     uint outputSplitBaseIndex = 0u;
     InterlockedAdd(outputSplitQueueCounter[0], childCount, outputSplitBaseIndex);
     if (outputSplitBaseIndex >= queueCapacity)
     {
         InterlockedAdd(outputSplitQueueOverflowCounter[0], childCount);
+        InterlockedAdd(telemetryBuffer[0].splitQueueOverflowCounts[splitPassTelemetryIndex], childCount);
         return;
     }
 
@@ -240,5 +323,6 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         const uint overflowCount = childCount - maxWritableChildren;
         InterlockedAdd(outputSplitQueueOverflowCounter[0], overflowCount);
+        InterlockedAdd(telemetryBuffer[0].splitQueueOverflowCounts[splitPassTelemetryIndex], overflowCount);
     }
 }

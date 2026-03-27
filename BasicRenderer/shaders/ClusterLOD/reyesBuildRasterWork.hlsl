@@ -27,11 +27,9 @@ void BuildReyesRasterWorkCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     const uint microTriangleCount = ReyesGetDicePatchMicroTriangleCount(tessTableConfigs, diceEntry);
     if (microTriangleCount == 0u)
     {
+        InterlockedAdd(telemetryBuffer[0].rasterZeroMicroTriangleCount, 1u);
         return;
     }
-
-    InterlockedAdd(telemetryBuffer[0].patchRasterizedPatchCount, 1u);
-    InterlockedAdd(telemetryBuffer[0].patchRasterizedMicroTriangleCount, microTriangleCount);
 
     const uint rasterBatchCount = (microTriangleCount + CLodReyesRasterBatchMicroTriangleCount - 1u) / CLodReyesRasterBatchMicroTriangleCount;
     uint firstRasterWorkIndex = 0u;
@@ -39,10 +37,19 @@ void BuildReyesRasterWorkCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     if (firstRasterWorkIndex >= CLOD_REYES_BUILD_RASTER_WORK_CAPACITY)
     {
+        InterlockedAdd(telemetryBuffer[0].rasterWorkOverflowPatchCount, 1u);
+        InterlockedAdd(telemetryBuffer[0].rasterWorkOverflowBatchCount, rasterBatchCount);
         return;
     }
 
     const uint availableRasterWorkCount = min(rasterBatchCount, CLOD_REYES_BUILD_RASTER_WORK_CAPACITY - firstRasterWorkIndex);
+    if (availableRasterWorkCount < rasterBatchCount)
+    {
+        InterlockedAdd(telemetryBuffer[0].rasterWorkOverflowPatchCount, 1u);
+        InterlockedAdd(telemetryBuffer[0].rasterWorkOverflowBatchCount, rasterBatchCount - availableRasterWorkCount);
+    }
+
+    uint emittedMicroTriangleCount = 0u;
     [loop]
     for (uint batchIndex = 0u; batchIndex < availableRasterWorkCount; ++batchIndex)
     {
@@ -52,5 +59,12 @@ void BuildReyesRasterWorkCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         workEntry.microTriangleCount = min(CLodReyesRasterBatchMicroTriangleCount, microTriangleCount - workEntry.microTriangleOffset);
         workEntry.reserved = 0u;
         rasterWorkBuffer[firstRasterWorkIndex + batchIndex] = workEntry;
+        emittedMicroTriangleCount += workEntry.microTriangleCount;
+    }
+
+    if (availableRasterWorkCount > 0u)
+    {
+        InterlockedAdd(telemetryBuffer[0].patchRasterizedPatchCount, 1u);
+        InterlockedAdd(telemetryBuffer[0].patchRasterizedMicroTriangleCount, emittedMicroTriangleCount);
     }
 }
