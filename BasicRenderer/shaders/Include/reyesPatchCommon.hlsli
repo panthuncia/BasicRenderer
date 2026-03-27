@@ -7,7 +7,7 @@ static const uint REYES_PATCH_BARYCENTRIC_COORD_MAX = (1u << 15u);
 static const float REYES_PATCH_BARYCENTRIC_COORD_SCALE = float(REYES_PATCH_BARYCENTRIC_COORD_MAX);
 static const float REYES_BARYCENTRIC_COORD_SCALE = REYES_PATCH_BARYCENTRIC_COORD_SCALE;
 static const float REYES_SCREEN_SCALE_REFERENCE = 1080.0f;
-static const float REYES_DICE_RATE_PIXELS = 2.0f;
+static const float REYES_DICE_RATE_PIXELS = 1.0f;
 static const float REYES_PROJECTED_PIXEL_TO_TESS_FACTOR_SCALE = 0.5f / REYES_DICE_RATE_PIXELS;
 static const uint REYES_TESS_TABLE_LOOKUP_SIZE = 16u;
 static const uint REYES_TESS_TABLE_MAX_SEGMENTS = 11u;
@@ -17,8 +17,8 @@ static const uint CLodReyesRasterBatchMicroTriangleCount = 16u;
 
 float3 ReyesDecodePatchBarycentrics(uint encoded)
 {
-    float u = (float)(encoded & 0xFFFFu) / REYES_PATCH_BARYCENTRIC_COORD_SCALE;
-    float v = (float)(encoded >> 16u) / REYES_PATCH_BARYCENTRIC_COORD_SCALE;
+    float u = (float) (encoded & 0xFFFFu) / REYES_PATCH_BARYCENTRIC_COORD_SCALE;
+    float v = (float) (encoded >> 16u) / REYES_PATCH_BARYCENTRIC_COORD_SCALE;
     return float3(1.0f - u - v, u, v);
 }
 
@@ -137,9 +137,9 @@ bool ReyesPatchDomainHasValidSimplexEncoded(uint encoded0, uint encoded1, uint e
 uint3 ReyesQuantizeTessTableFactors(float3 edgeFactors)
 {
     return uint3(
-        ReyesClampTessTableFactor((uint)ceil(max(edgeFactors.x, 1.0f))),
-        ReyesClampTessTableFactor((uint)ceil(max(edgeFactors.y, 1.0f))),
-        ReyesClampTessTableFactor((uint)ceil(max(edgeFactors.z, 1.0f))));
+        ReyesClampTessTableFactor((uint) ceil(max(edgeFactors.x, 1.0f))),
+        ReyesClampTessTableFactor((uint) ceil(max(edgeFactors.y, 1.0f))),
+        ReyesClampTessTableFactor((uint) ceil(max(edgeFactors.z, 1.0f))));
 }
 
 void ReyesRotatePatchDomainYZX(inout uint domainVertex0Encoded, inout uint domainVertex1Encoded, inout uint domainVertex2Encoded)

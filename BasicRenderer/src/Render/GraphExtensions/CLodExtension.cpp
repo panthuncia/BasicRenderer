@@ -395,14 +395,7 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
         .add<CLodReyesDiceQueueOverflowTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    const uint64_t uncappedReyesRasterWorkCapacity =
-        static_cast<uint64_t>(maxVisibleClusters) *
-        (CLodReyesMaxVisibilityMicroTrianglesPerPatch / CLodReyesRasterBatchMicroTriangleCount);
-    const uint64_t maxReyesRasterWorkCapacity = CLodReyesRasterWorkBufferByteBudget / sizeof(CLodReyesRasterWorkEntry);
-    const uint32_t reyesRasterWorkCapacity = static_cast<uint32_t>(
-        uncappedReyesRasterWorkCapacity < maxReyesRasterWorkCapacity
-            ? uncappedReyesRasterWorkCapacity
-            : maxReyesRasterWorkCapacity);
+    const uint32_t reyesRasterWorkCapacity = CLodReyesRasterWorkCapacity(maxVisibleClusters);
     m_reyesRasterWorkBuffer = CreateAliasedUnmaterializedStructuredBuffer(reyesRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry), true, false, false, false);
     m_reyesRasterWorkBuffer->SetName(MakeVariantResourceName(traits, "Reyes Raster Work Buffer"));
 
@@ -618,14 +611,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly ||
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility;
     const bool useComputeSWRaster = !forceHardwareOnly && CLodSoftwareRasterUsesCompute(softwareRasterMode);
-    const uint64_t uncappedReyesRasterWorkCapacity =
-        static_cast<uint64_t>(m_maxVisibleClusters) *
-        (CLodReyesMaxVisibilityMicroTrianglesPerPatch / CLodReyesRasterBatchMicroTriangleCount);
-    const uint64_t maxReyesRasterWorkCapacity = CLodReyesRasterWorkBufferByteBudget / sizeof(CLodReyesRasterWorkEntry);
-    const uint32_t reyesRasterWorkCapacity = static_cast<uint32_t>(
-        uncappedReyesRasterWorkCapacity < maxReyesRasterWorkCapacity
-            ? uncappedReyesRasterWorkCapacity
-            : maxReyesRasterWorkCapacity);
+    const uint32_t reyesRasterWorkCapacity = CLodReyesRasterWorkCapacity(m_maxVisibleClusters);
     const auto workGraphMode = forceHardwareOnly
         ? HierarchialCullingWorkGraphMode::HardwareOnly
         : GetCullingWorkGraphMode(softwareRasterMode);

@@ -28,6 +28,7 @@ void ReyesDiceCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     RWStructuredBuffer<CLodReyesTelemetry> telemetryBuffer = ResourceDescriptorHeap[CLOD_REYES_DICE_TELEMETRY_DESCRIPTOR_INDEX];
 
     const CLodReyesDiceQueueEntry diceEntry = diceQueue[diceIndex];
+    const uint tessSegments = ReyesGetDicePatchSegments(diceEntry);
     const uint estimatedTriangles = ReyesGetDicePatchMicroTriangleCount(tessTableConfigs, diceEntry);
     const uint estimatedVertices = ReyesGetDicePatchVertexCount(tessTableConfigs, diceEntry);
 

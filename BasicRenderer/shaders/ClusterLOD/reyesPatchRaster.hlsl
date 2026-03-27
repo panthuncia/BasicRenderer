@@ -304,10 +304,6 @@ void ReyesRasterizeMicroTriangle(
         e01 = s1 - s0;
         e02 = s2 - s0;
         twiceArea = e01.x * e02.y - e01.y * e02.x;
-        if (twiceArea >= 0.0f)
-        {
-            return;
-        }
     }
     else if (twiceArea >= 0.0f)
     {

@@ -47,10 +47,10 @@ private:
     std::shared_ptr<Buffer> m_diceQueueBuffer;
     std::shared_ptr<Buffer> m_diceQueueCounterBuffer;
     std::shared_ptr<Buffer> m_diceQueueOverflowBuffer;
+    std::shared_ptr<Buffer> m_indirectArgsBuffer;
     std::shared_ptr<Buffer> m_tessTableConfigsBuffer;
     std::shared_ptr<Buffer> m_tessTableVerticesBuffer;
     std::shared_ptr<Buffer> m_tessTableTrianglesBuffer;
-    std::shared_ptr<Buffer> m_indirectArgsBuffer;
     std::shared_ptr<Buffer> m_telemetryBuffer;
     uint32_t m_maxSplitQueueEntries = 0u;
     uint32_t m_splitPassIndex = 0u;
