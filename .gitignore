@@ -17,4 +17,4 @@ models/
 textures/
 /ThirdParty/
 cmake-build-*
-#vk_tessellated_clusters/
+vk_tessellated_clusters/
