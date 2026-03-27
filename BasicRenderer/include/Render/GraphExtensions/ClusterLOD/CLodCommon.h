@@ -138,6 +138,16 @@ struct CLodReyesOwnedClusterEntry
 
 static_assert(sizeof(CLodReyesOwnedClusterEntry) == 16u, "CLodReyesOwnedClusterEntry size must remain compact");
 
+struct CLodReyesTessTableConfigEntry
+{
+    uint32_t firstTriangle = 0u;
+    uint32_t firstVertex = 0u;
+    uint32_t numTriangles = 0u;
+    uint32_t numVertices = 0u;
+};
+
+static_assert(sizeof(CLodReyesTessTableConfigEntry) == 16u, "CLodReyesTessTableConfigEntry size must remain compact");
+
 struct CLodReyesSplitQueueEntry
 {
     uint32_t visibleClusterIndex = 0u;

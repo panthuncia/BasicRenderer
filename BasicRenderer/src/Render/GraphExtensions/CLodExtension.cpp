@@ -33,6 +33,8 @@
 #include "Render/GraphExtensions/ClusterLOD/ReyesQueueResetPass.h"
 #include "Render/GraphExtensions/ClusterLOD/ReyesSeedPatchesPass.h"
 #include "Render/GraphExtensions/ClusterLOD/ReyesSplitPass.h"
+#include "Render/GraphExtensions/ClusterLOD/ReyesTessellationTable.h"
+#include "Render/GraphExtensions/ClusterLOD/ReyesTessellationTableUploadPass.h"
 #include "Render/RenderPhase.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
 #include "Resources/Buffers/PagePool.h"
@@ -338,6 +340,46 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
         .add<CLodReyesDiceQueueTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
+    const ReyesTessellationTableData& reyesTessellationTableData = GetReyesTessellationTableData();
+    m_reyesTessTableConfigsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        static_cast<uint32_t>(reyesTessellationTableData.configs.size()),
+        sizeof(CLodReyesTessTableConfigEntry),
+        false,
+        false,
+        false,
+        false);
+    m_reyesTessTableConfigsBuffer->SetName(MakeVariantResourceName(traits, "Reyes Tess Table Configs Buffer"));
+    m_reyesTessTableConfigsBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_reyesTessTableConfigsBuffer })
+        .add<CLodReyesTessTableConfigsTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_reyesTessTableVerticesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        static_cast<uint32_t>(reyesTessellationTableData.vertices.size()),
+        sizeof(uint32_t),
+        false,
+        false,
+        false,
+        false);
+    m_reyesTessTableVerticesBuffer->SetName(MakeVariantResourceName(traits, "Reyes Tess Table Vertices Buffer"));
+    m_reyesTessTableVerticesBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_reyesTessTableVerticesBuffer })
+        .add<CLodReyesTessTableVerticesTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_reyesTessTableTrianglesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        static_cast<uint32_t>(reyesTessellationTableData.triangles.size()),
+        sizeof(uint32_t),
+        false,
+        false,
+        false,
+        false);
+    m_reyesTessTableTrianglesBuffer->SetName(MakeVariantResourceName(traits, "Reyes Tess Table Triangles Buffer"));
+    m_reyesTessTableTrianglesBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_reyesTessTableTrianglesBuffer })
+        .add<CLodReyesTessTableTrianglesTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
     m_reyesDiceQueueCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
     m_reyesDiceQueueCounterBuffer->SetName(MakeVariantResourceName(traits, "Reyes Dice Queue Counter Buffer"));
     m_reyesDiceQueueCounterBuffer->GetECSEntity()
@@ -503,6 +545,9 @@ void CLodExtension::OnRegistryReset(ResourceRegistry* reg)
     releaseBufferBacking(m_reyesDiceQueueBuffer);
     releaseBufferBacking(m_reyesDiceQueueCounterBuffer);
     releaseBufferBacking(m_reyesDiceQueueOverflowBuffer);
+    releaseBufferBacking(m_reyesTessTableConfigsBuffer);
+    releaseBufferBacking(m_reyesTessTableVerticesBuffer);
+    releaseBufferBacking(m_reyesTessTableTrianglesBuffer);
     releaseBufferBacking(m_reyesDiceIndirectArgsBuffer);
     releaseBufferBacking(m_reyesDiceIndirectArgsBufferPhase2);
     releaseBufferBacking(m_reyesTelemetryBufferPhase1);
@@ -581,6 +626,15 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     outPasses.push_back(std::move(cullPassDesc));
 
         if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::TwoPassVisibility) {
+            RenderGraph::ExternalPassDesc reyesTessellationTableUploadPassDesc;
+            reyesTessellationTableUploadPassDesc.type = RenderGraph::PassType::Compute;
+            reyesTessellationTableUploadPassDesc.name = MakeVariantPassName(traits, "ReyesTessellationTableUploadPass");
+            reyesTessellationTableUploadPassDesc.pass = std::make_shared<ReyesTessellationTableUploadPass>(
+                m_reyesTessTableConfigsBuffer,
+                m_reyesTessTableVerticesBuffer,
+                m_reyesTessTableTrianglesBuffer);
+            outPasses.push_back(std::move(reyesTessellationTableUploadPassDesc));
+
             RenderGraph::ExternalPassDesc reyesResetPassDesc;
             reyesResetPassDesc.type = RenderGraph::PassType::Compute;
             reyesResetPassDesc.name = MakeVariantPassName(traits, "ReyesQueueResetPass1");
@@ -695,6 +749,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             reyesDicePassDesc.pass = std::make_shared<ReyesDicePass>(
                 m_reyesDiceQueueBuffer,
                 m_reyesDiceQueueCounterBuffer,
+                m_reyesTessTableConfigsBuffer,
                 m_reyesDiceIndirectArgsBuffer,
                 m_reyesTelemetryBufferPhase1,
                 m_maxVisibleClusters,
@@ -709,6 +764,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_visibleClustersBuffer,
                     m_reyesDiceQueueBuffer,
                     m_reyesDiceQueueCounterBuffer,
+                    m_reyesTessTableConfigsBuffer,
+                    m_reyesTessTableVerticesBuffer,
+                    m_reyesTessTableTrianglesBuffer,
                     m_viewRasterInfoBuffer,
                     m_reyesDiceIndirectArgsBuffer,
                     m_reyesTelemetryBufferPhase1,
@@ -1084,6 +1142,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     reyesDicePassDesc2.pass = std::make_shared<ReyesDicePass>(
         m_reyesDiceQueueBuffer,
         m_reyesDiceQueueCounterBuffer,
+        m_reyesTessTableConfigsBuffer,
         m_reyesDiceIndirectArgsBufferPhase2,
         m_reyesTelemetryBufferPhase2,
         m_maxVisibleClusters,
@@ -1098,6 +1157,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_visibleClustersBuffer,
             m_reyesDiceQueueBuffer,
             m_reyesDiceQueueCounterBuffer,
+            m_reyesTessTableConfigsBuffer,
+            m_reyesTessTableVerticesBuffer,
+            m_reyesTessTableTrianglesBuffer,
             m_viewRasterInfoBuffer,
             m_reyesDiceIndirectArgsBufferPhase2,
             m_reyesTelemetryBufferPhase2,

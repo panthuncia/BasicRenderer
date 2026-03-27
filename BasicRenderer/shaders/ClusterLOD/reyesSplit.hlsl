@@ -9,10 +9,77 @@
 static const uint REYES_SPLIT_GROUP_SIZE = 64u;
 static const uint REYES_MIN_QUANTIZED_TESS_FACTOR = 256u;
 static const uint REYES_SPLIT_TERMINAL_TESS_FACTOR = 2048u;
+static const uint REYES_TESS_TABLE_LOOKUP_SIZE = 16u;
+static const uint REYES_TESS_TABLE_MAX_EDGE_SEGMENTS = 11u;
 static const uint REYES_SPLIT_CONFIG_UNIFORM4 = 0u;
 static const uint REYES_SPLIT_CONFIG_EDGE01 = 1u;
 static const uint REYES_SPLIT_CONFIG_EDGE12 = 2u;
 static const uint REYES_SPLIT_CONFIG_EDGE20 = 3u;
+
+uint3 ReyesRotateYZX(uint3 values)
+{
+    return uint3(values.y, values.z, values.x);
+}
+
+uint3 ReyesRotateZXY(uint3 values)
+{
+    return uint3(values.z, values.x, values.y);
+}
+
+void ReyesRotateDomainVerticesYZX(inout uint domainVertex0Encoded, inout uint domainVertex1Encoded, inout uint domainVertex2Encoded)
+{
+    const uint rotatedVertex0 = domainVertex1Encoded;
+    const uint rotatedVertex1 = domainVertex2Encoded;
+    const uint rotatedVertex2 = domainVertex0Encoded;
+    domainVertex0Encoded = rotatedVertex0;
+    domainVertex1Encoded = rotatedVertex1;
+    domainVertex2Encoded = rotatedVertex2;
+}
+
+void ReyesRotateDomainVerticesZXY(inout uint domainVertex0Encoded, inout uint domainVertex1Encoded, inout uint domainVertex2Encoded)
+{
+    const uint rotatedVertex0 = domainVertex2Encoded;
+    const uint rotatedVertex1 = domainVertex0Encoded;
+    const uint rotatedVertex2 = domainVertex1Encoded;
+    domainVertex0Encoded = rotatedVertex0;
+    domainVertex1Encoded = rotatedVertex1;
+    domainVertex2Encoded = rotatedVertex2;
+}
+
+uint3 ReyesQuantizeEdgeFactors(float3 edgeFactors)
+{
+    return uint3(
+        clamp((uint)ceil(edgeFactors.x), 1u, REYES_TESS_TABLE_MAX_EDGE_SEGMENTS),
+        clamp((uint)ceil(edgeFactors.y), 1u, REYES_TESS_TABLE_MAX_EDGE_SEGMENTS),
+        clamp((uint)ceil(edgeFactors.z), 1u, REYES_TESS_TABLE_MAX_EDGE_SEGMENTS));
+}
+
+uint ReyesEncodeTessTableConfig(
+    float3 edgeFactors,
+    inout uint domainVertex0Encoded,
+    inout uint domainVertex1Encoded,
+    inout uint domainVertex2Encoded)
+{
+    uint3 factors = ReyesQuantizeEdgeFactors(edgeFactors);
+    if (factors.y > factors.x && factors.y >= factors.z)
+    {
+        factors = ReyesRotateYZX(factors);
+        ReyesRotateDomainVerticesYZX(domainVertex0Encoded, domainVertex1Encoded, domainVertex2Encoded);
+    }
+    else if (factors.z > factors.x && factors.z > factors.y)
+    {
+        factors = ReyesRotateZXY(factors);
+        ReyesRotateDomainVerticesZXY(domainVertex0Encoded, domainVertex1Encoded, domainVertex2Encoded);
+    }
+
+    uint configIndex = factors.x + factors.y * REYES_TESS_TABLE_LOOKUP_SIZE + factors.z * REYES_TESS_TABLE_LOOKUP_SIZE * REYES_TESS_TABLE_LOOKUP_SIZE;
+    if (factors.z > factors.y)
+    {
+        configIndex |= REYES_TESS_TABLE_FLIP_BIT;
+    }
+
+    return configIndex;
+}
 
 uint ReyesEncodeBarycentrics(float3 barycentrics)
 {
@@ -262,6 +329,14 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         }
 
         CLodReyesDiceQueueEntry diceEntry;
+        uint diceDomainVertex0Encoded = splitEntry.domainVertex0Encoded;
+        uint diceDomainVertex1Encoded = splitEntry.domainVertex1Encoded;
+        uint diceDomainVertex2Encoded = splitEntry.domainVertex2Encoded;
+        const uint tessTableConfigIndex = ReyesEncodeTessTableConfig(
+            edgeFactors,
+            diceDomainVertex0Encoded,
+            diceDomainVertex1Encoded,
+            diceDomainVertex2Encoded);
         diceEntry.visibleClusterIndex = splitEntry.visibleClusterIndex;
         diceEntry.instanceID = splitEntry.instanceID;
         diceEntry.localMeshletIndex = splitEntry.localMeshletIndex;
@@ -270,11 +345,11 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         diceEntry.splitLevel = nextSplitLevel;
         diceEntry.quantizedTessFactor = nextQuantizedTessFactor;
         diceEntry.flags = splitEntry.flags;
-        diceEntry.sourcePrimitiveAndSplitConfig = (sourceTriangleIndex & 0xFFFFu) | ((selectedSplitConfig & 0xFFFFu) << 16u);
-        diceEntry.domainVertex0Encoded = splitEntry.domainVertex0Encoded;
-        diceEntry.domainVertex1Encoded = splitEntry.domainVertex1Encoded;
-        diceEntry.domainVertex2Encoded = splitEntry.domainVertex2Encoded;
-        diceEntry.tessTableConfigIndex = selectedSplitConfig;
+        diceEntry.sourcePrimitiveAndSplitConfig = sourceTriangleIndex & 0xFFFFu;
+        diceEntry.domainVertex0Encoded = diceDomainVertex0Encoded;
+        diceEntry.domainVertex1Encoded = diceDomainVertex1Encoded;
+        diceEntry.domainVertex2Encoded = diceDomainVertex2Encoded;
+        diceEntry.tessTableConfigIndex = tessTableConfigIndex;
         diceEntry.reserved = 0u;
         diceQueue[diceIndex] = diceEntry;
 

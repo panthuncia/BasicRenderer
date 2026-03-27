@@ -432,9 +432,11 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     const float3 domain0 = ReyesDecodePatchBarycentrics(diceEntry.domainVertex0Encoded);
     const float3 domain1 = ReyesDecodePatchBarycentrics(diceEntry.domainVertex1Encoded);
     const float3 domain2 = ReyesDecodePatchBarycentrics(diceEntry.domainVertex2Encoded);
-    const uint tessSegments = ReyesGetDicePatchSegments(diceEntry);
-    const uint microTriangleCount = tessSegments * tessSegments;
-    if (microTriangleCount == 0u || microTriangleCount > 128u)
+    StructuredBuffer<CLodReyesTessTableConfigEntry> tessTableConfigs = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> tessTableVertices = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> tessTableTriangles = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX];
+    const uint microTriangleCount = ReyesGetDicePatchMicroTriangleCount(tessTableConfigs, diceEntry);
+    if (microTriangleCount == 0u || microTriangleCount > REYES_MAX_VISIBILITY_MICRO_TRIANGLES_PER_PATCH)
     {
         return;
     }
@@ -457,7 +459,15 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         float3 patchBary0;
         float3 patchBary1;
         float3 patchBary2;
-        ReyesDecodeMicroTrianglePatchDomain(microTriangleIndex, tessSegments, patchBary0, patchBary1, patchBary2);
+        ReyesDecodeMicroTrianglePatchDomain(
+            tessTableConfigs,
+            tessTableVertices,
+            tessTableTriangles,
+            diceEntry,
+            microTriangleIndex,
+            patchBary0,
+            patchBary1,
+            patchBary2);
 
         const float3 sourceBary0 = ReyesComposeSourceBarycentricsPoint(patchBary0, domain0, domain1, domain2);
         const float3 sourceBary1 = ReyesComposeSourceBarycentricsPoint(patchBary1, domain0, domain1, domain2);

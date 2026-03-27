@@ -5,6 +5,9 @@
 
 static const float REYES_PATCH_BARYCENTRIC_COORD_SCALE = 65535.0f;
 static const float REYES_BARYCENTRIC_COORD_SCALE = REYES_PATCH_BARYCENTRIC_COORD_SCALE;
+static const uint REYES_MAX_VISIBILITY_MICRO_TRIANGLES_PER_PATCH = 128u;
+static const uint REYES_TESS_TABLE_LOOKUP_INDEX_MASK = 0x7FFFu;
+static const uint REYES_TESS_TABLE_FLIP_BIT = 1u << 15u;
 
 float3 ReyesDecodePatchBarycentrics(uint encoded)
 {
@@ -13,17 +16,61 @@ float3 ReyesDecodePatchBarycentrics(uint encoded)
     return float3(saturate(1.0f - u - v), u, v);
 }
 
-uint ReyesGetDicePatchSegments(CLodReyesDiceQueueEntry diceEntry)
+CLodReyesTessTableConfigEntry ReyesGetDicePatchConfig(
+    StructuredBuffer<CLodReyesTessTableConfigEntry> tessTableConfigs,
+    CLodReyesDiceQueueEntry diceEntry)
 {
-    return max(1u, (diceEntry.quantizedTessFactor + 255u) >> 8u);
+    return tessTableConfigs[diceEntry.tessTableConfigIndex & REYES_TESS_TABLE_LOOKUP_INDEX_MASK];
 }
 
-float3 ReyesMakePatchGridBarycentrics(uint col, uint row, uint tessSegments)
+uint ReyesGetDicePatchMicroTriangleCount(
+    StructuredBuffer<CLodReyesTessTableConfigEntry> tessTableConfigs,
+    CLodReyesDiceQueueEntry diceEntry)
 {
-    const float invSegments = 1.0f / float(max(tessSegments, 1u));
-    const float u = float(col) * invSegments;
-    const float v = float(row) * invSegments;
-    return float3(saturate(1.0f - u - v), u, v);
+    return ReyesGetDicePatchConfig(tessTableConfigs, diceEntry).numTriangles;
+}
+
+uint ReyesGetDicePatchVertexCount(
+    StructuredBuffer<CLodReyesTessTableConfigEntry> tessTableConfigs,
+    CLodReyesDiceQueueEntry diceEntry)
+{
+    return ReyesGetDicePatchConfig(tessTableConfigs, diceEntry).numVertices;
+}
+
+float3 ReyesDecodeDicePatchVertexBarycentrics(
+    StructuredBuffer<CLodReyesTessTableConfigEntry> tessTableConfigs,
+    StructuredBuffer<uint> tessTableVertices,
+    CLodReyesDiceQueueEntry diceEntry,
+    uint vertexIndex)
+{
+    const CLodReyesTessTableConfigEntry configEntry = ReyesGetDicePatchConfig(tessTableConfigs, diceEntry);
+    float3 barycentrics = ReyesDecodePatchBarycentrics(tessTableVertices[configEntry.firstVertex + vertexIndex]);
+    if ((diceEntry.tessTableConfigIndex & REYES_TESS_TABLE_FLIP_BIT) != 0u)
+    {
+        barycentrics = barycentrics.yxz;
+    }
+
+    return barycentrics;
+}
+
+uint3 ReyesDecodeDicePatchTriangleIndices(
+    StructuredBuffer<CLodReyesTessTableConfigEntry> tessTableConfigs,
+    StructuredBuffer<uint> tessTableTriangles,
+    CLodReyesDiceQueueEntry diceEntry,
+    uint triangleIndex)
+{
+    const CLodReyesTessTableConfigEntry configEntry = ReyesGetDicePatchConfig(tessTableConfigs, diceEntry);
+    const uint packedTriangle = tessTableTriangles[configEntry.firstTriangle + triangleIndex];
+    uint3 indices = uint3(
+        packedTriangle & 0xFFu,
+        (packedTriangle >> 8u) & 0xFFu,
+        (packedTriangle >> 16u) & 0xFFu);
+    if ((diceEntry.tessTableConfigIndex & REYES_TESS_TABLE_FLIP_BIT) != 0u)
+    {
+        indices = indices.xzy;
+    }
+
+    return indices;
 }
 
 float3 ReyesComposeSourceBarycentricsPoint(float3 patchBary, float3 domain0, float3 domain1, float3 domain2)
@@ -55,35 +102,22 @@ float3 ReyesApplyGeometricDisplacement(MaterialInfo materialInfo, float3 positio
 }
 
 void ReyesDecodeMicroTrianglePatchDomain(uint triIndex, uint tessSegments, out float3 bary0, out float3 bary1, out float3 bary2)
+;
+
+void ReyesDecodeMicroTrianglePatchDomain(
+    StructuredBuffer<CLodReyesTessTableConfigEntry> tessTableConfigs,
+    StructuredBuffer<uint> tessTableVertices,
+    StructuredBuffer<uint> tessTableTriangles,
+    CLodReyesDiceQueueEntry diceEntry,
+    uint triIndex,
+    out float3 bary0,
+    out float3 bary1,
+    out float3 bary2)
 {
-    uint remaining = triIndex;
-    uint row = 0u;
-    [loop]
-    for (; row < tessSegments; ++row)
-    {
-        const uint rowTriangleCount = 2u * (tessSegments - row) - 1u;
-        if (remaining < rowTriangleCount)
-        {
-            break;
-        }
-
-        remaining -= rowTriangleCount;
-    }
-
-    const uint col = remaining >> 1u;
-    const bool isDownTriangle = (remaining & 1u) != 0u;
-
-    if (!isDownTriangle)
-    {
-        bary0 = ReyesMakePatchGridBarycentrics(col, row, tessSegments);
-        bary1 = ReyesMakePatchGridBarycentrics(col + 1u, row, tessSegments);
-        bary2 = ReyesMakePatchGridBarycentrics(col, row + 1u, tessSegments);
-        return;
-    }
-
-    bary0 = ReyesMakePatchGridBarycentrics(col + 1u, row, tessSegments);
-    bary1 = ReyesMakePatchGridBarycentrics(col + 1u, row + 1u, tessSegments);
-    bary2 = ReyesMakePatchGridBarycentrics(col, row + 1u, tessSegments);
+    const uint3 localTriangleIndices = ReyesDecodeDicePatchTriangleIndices(tessTableConfigs, tessTableTriangles, diceEntry, triIndex);
+    bary0 = ReyesDecodeDicePatchVertexBarycentrics(tessTableConfigs, tessTableVertices, diceEntry, localTriangleIndices.x);
+    bary1 = ReyesDecodeDicePatchVertexBarycentrics(tessTableConfigs, tessTableVertices, diceEntry, localTriangleIndices.y);
+    bary2 = ReyesDecodeDicePatchVertexBarycentrics(tessTableConfigs, tessTableVertices, diceEntry, localTriangleIndices.z);
 }
 
 #endif // __REYES_PATCH_COMMON_HLSLI__

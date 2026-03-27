@@ -14,6 +14,9 @@ ReyesPatchRasterizationPass::ReyesPatchRasterizationPass(
     std::shared_ptr<Buffer> visibleClustersBuffer,
     std::shared_ptr<Buffer> diceQueueBuffer,
     std::shared_ptr<Buffer> diceQueueCounterBuffer,
+    std::shared_ptr<Buffer> tessTableConfigsBuffer,
+    std::shared_ptr<Buffer> tessTableVerticesBuffer,
+    std::shared_ptr<Buffer> tessTableTrianglesBuffer,
     std::shared_ptr<Buffer> viewRasterInfoBuffer,
     std::shared_ptr<Buffer> indirectArgsBuffer,
     std::shared_ptr<Buffer> telemetryBuffer,
@@ -23,6 +26,9 @@ ReyesPatchRasterizationPass::ReyesPatchRasterizationPass(
     : m_visibleClustersBuffer(std::move(visibleClustersBuffer))
     , m_diceQueueBuffer(std::move(diceQueueBuffer))
     , m_diceQueueCounterBuffer(std::move(diceQueueCounterBuffer))
+    , m_tessTableConfigsBuffer(std::move(tessTableConfigsBuffer))
+    , m_tessTableVerticesBuffer(std::move(tessTableVerticesBuffer))
+    , m_tessTableTrianglesBuffer(std::move(tessTableTrianglesBuffer))
     , m_viewRasterInfoBuffer(std::move(viewRasterInfoBuffer))
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
     , m_telemetryBuffer(std::move(telemetryBuffer))
@@ -53,6 +59,9 @@ void ReyesPatchRasterizationPass::DeclareResourceUsages(ComputePassBuilder* buil
             m_visibleClustersBuffer,
             m_diceQueueBuffer,
             m_diceQueueCounterBuffer,
+            m_tessTableConfigsBuffer,
+            m_tessTableVerticesBuffer,
+            m_tessTableTrianglesBuffer,
             m_viewRasterInfoBuffer,
             Builtin::PerMeshBuffer,
             Builtin::PerMeshInstanceBuffer,
@@ -123,6 +132,9 @@ PassReturn ReyesPatchRasterizationPass::Execute(PassExecutionContext& executionC
     uintRootConstants[CLOD_REYES_PATCH_RASTER_PHASE_INDEX] = m_phaseIndex;
     uintRootConstants[CLOD_REYES_PATCH_RASTER_QUEUE_CAPACITY] = m_maxDiceQueueEntries;
     uintRootConstants[CLOD_REYES_PATCH_RASTER_PATCH_INDEX_BASE] = m_patchVisibilityIndexBase;
+    uintRootConstants[CLOD_REYES_PATCH_RASTER_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_tessTableConfigsBuffer->GetSRVInfo(0).slot.index;
+    uintRootConstants[CLOD_REYES_PATCH_RASTER_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = m_tessTableVerticesBuffer->GetSRVInfo(0).slot.index;
+    uintRootConstants[CLOD_REYES_PATCH_RASTER_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_tessTableTrianglesBuffer->GetSRVInfo(0).slot.index;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

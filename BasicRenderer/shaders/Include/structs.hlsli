@@ -414,6 +414,14 @@ struct CLodReyesOwnedClusterEntry
     uint flags;
 };
 
+struct CLodReyesTessTableConfigEntry
+{
+    uint firstTriangle;
+    uint firstVertex;
+    uint numTriangles;
+    uint numVertices;
+};
+
 struct CLodReyesSplitQueueEntry
 {
     uint visibleClusterIndex;

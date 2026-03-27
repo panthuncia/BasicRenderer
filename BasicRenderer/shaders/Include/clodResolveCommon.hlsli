@@ -536,6 +536,16 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
     if (clusterIndex >= VISBUF_REYES_PATCH_INDEX_BASE && VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
     {
         StructuredBuffer<CLodReyesDiceQueueEntry> diceQueue = ResourceDescriptorHeap[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX];
+        if (VISBUF_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX == 0xFFFFFFFFu ||
+            VISBUF_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX == 0xFFFFFFFFu ||
+            VISBUF_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX == 0xFFFFFFFFu)
+        {
+            return false;
+        }
+
+        StructuredBuffer<CLodReyesTessTableConfigEntry> tessTableConfigs = ResourceDescriptorHeap[VISBUF_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX];
+        StructuredBuffer<uint> tessTableVertices = ResourceDescriptorHeap[VISBUF_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX];
+        StructuredBuffer<uint> tessTableTriangles = ResourceDescriptorHeap[VISBUF_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX];
         CLodReyesDiceQueueEntry diceEntry = diceQueue[clusterIndex - VISBUF_REYES_PATCH_INDEX_BASE];
         clusterIndex = diceEntry.visibleClusterIndex;
         meshletTriangleIndex = diceEntry.sourcePrimitiveAndSplitConfig & 0xFFFFu;
@@ -543,14 +553,21 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
         patchDomain1 = ReyesDecodeBarycentrics(diceEntry.domainVertex1Encoded);
         patchDomain2 = ReyesDecodeBarycentrics(diceEntry.domainVertex2Encoded);
 
-        const uint tessSegments = ReyesGetDicePatchSegments(diceEntry);
-        const uint microTriangleCount = tessSegments * tessSegments;
+        const uint microTriangleCount = ReyesGetDicePatchMicroTriangleCount(tessTableConfigs, diceEntry);
         if (reyesMicroTriangleIndex >= microTriangleCount)
         {
             return false;
         }
 
-        ReyesDecodeMicroTrianglePatchDomain(reyesMicroTriangleIndex, tessSegments, microTrianglePatchDomain0, microTrianglePatchDomain1, microTrianglePatchDomain2);
+        ReyesDecodeMicroTrianglePatchDomain(
+            tessTableConfigs,
+            tessTableVertices,
+            tessTableTriangles,
+            diceEntry,
+            reyesMicroTriangleIndex,
+            microTrianglePatchDomain0,
+            microTrianglePatchDomain1,
+            microTrianglePatchDomain2);
         isReyesPatch = true;
     }
 
