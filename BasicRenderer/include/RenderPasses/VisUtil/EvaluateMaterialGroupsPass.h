@@ -259,7 +259,15 @@ public:
         return {};
     }
 
-    void Cleanup() override {}
+    void Cleanup() override {
+        m_visibleClustersQuery = {};
+        m_reyesDiceQueueQuery = {};
+        m_reyesTessTableConfigsQuery = {};
+        m_reyesTessTableVerticesQuery = {};
+        m_reyesTessTableTrianglesQuery = {};
+        m_slabResourceGroup.reset();
+        m_materialEvalCmds = nullptr;
+    }
 
 private:
     std::unordered_map<MaterialCompileFlags, PipelineState> m_psoCache;

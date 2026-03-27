@@ -117,7 +117,10 @@ public:
         return {};
     }
 
-    void Cleanup() override {}
+    void Cleanup() override {
+        m_visibleClustersQuery = {};
+        m_reyesDiceQueueQuery = {};
+    }
 
 private:
     PipelineState m_pso;

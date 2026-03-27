@@ -85,7 +85,11 @@ public:
 	}
 
 	void Cleanup() override {
-
+		lightQuery = {};
+		m_nonBlendQuery = ECSResourceResolver();
+		m_blendQuery = ECSResourceResolver();
+		m_nonBlendIndirectCommandBuffers.clear();
+		m_blendIndirectCommandBuffers.clear();
 	}
 
 private:

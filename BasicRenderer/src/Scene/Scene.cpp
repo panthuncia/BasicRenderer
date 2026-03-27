@@ -622,6 +622,9 @@ void Scene::MakeNonResident() {
 }
 
 Scene::~Scene() {
+	m_updatedCleanupQuery = {};
+	m_dirtyQuery = {};
+	m_propagateQueriesBuilt = false;
 	MakeNonResident();
 }
 
