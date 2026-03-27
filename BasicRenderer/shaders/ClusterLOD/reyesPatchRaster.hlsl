@@ -246,14 +246,16 @@ float2 DecodeCompressedUV(
         uvDesc.uvMinV + float(encodedV) * uvDesc.uvScaleV);
 }
 
-float3 ReyesInterpolatePosition(float3 p0, float3 p1, float3 p2, float3 bary)
+bool ReyesIsTopLeftEdge(float2 a, float2 b)
 {
-    return p0 * bary.x + p1 * bary.y + p2 * bary.z;
+    float2 edge = b - a;
+    return edge.y > 0.0f || (edge.y == 0.0f && edge.x < 0.0f);
 }
 
 void ReyesRasterizeMicroTriangle(
     RWTexture2D<uint64_t> visBuffer,
     uint2 visDims,
+    RWStructuredBuffer<CLodReyesTelemetry> telemetryBuffer,
     ClodViewRasterInfo viewRasterInfo,
     float4 clip0,
     float4 clip1,
@@ -302,6 +304,10 @@ void ReyesRasterizeMicroTriangle(
         e01 = s1 - s0;
         e02 = s2 - s0;
         twiceArea = e01.x * e02.y - e01.y * e02.x;
+        if (twiceArea >= 0.0f)
+        {
+            return;
+        }
     }
     else if (twiceArea >= 0.0f)
     {
@@ -325,6 +331,9 @@ void ReyesRasterizeMicroTriangle(
     const float2 origin = float2(float(minPx.x) + 0.5f, float(minPx.y) + 0.5f);
     const float2 e12 = s2 - s1;
     const float2 e20 = s0 - s2;
+    const bool edge12TopLeft = ReyesIsTopLeftEdge(s1, s2);
+    const bool edge20TopLeft = ReyesIsTopLeftEdge(s2, s0);
+    const bool edge01TopLeft = ReyesIsTopLeftEdge(s0, s1);
     const float row_b0 = ((origin.x - s1.x) * e12.y - (origin.y - s1.y) * e12.x) * invTwiceArea;
     const float row_b1 = ((origin.x - s2.x) * e20.y - (origin.y - s2.y) * e20.x) * invTwiceArea;
     const float dx_b0 = e12.y * invTwiceArea;
@@ -343,7 +352,10 @@ void ReyesRasterizeMicroTriangle(
         for (int px = minPx.x; px <= maxPx.x; ++px)
         {
             const float b2 = 1.0f - b0 - b1;
-            if (b0 >= 0.0f && b1 >= 0.0f && b2 >= 0.0f)
+            const bool inside0 = (b0 > 0.0f) || (b0 == 0.0f && edge12TopLeft);
+            const bool inside1 = (b1 > 0.0f) || (b1 == 0.0f && edge20TopLeft);
+            const bool inside2 = (b2 > 0.0f) || (b2 == 0.0f && edge01TopLeft);
+            if (inside0 && inside1 && inside2)
             {
                 const float depth = b0 * depth0 + b1 * depth1 + b2 * depth2;
                 const uint64_t visKey = PackVisKey(depth, patchVisibilityIndex, microTriangleIndex);
@@ -363,15 +375,12 @@ void ReyesRasterizeMicroTriangle(
 [numthreads(REYES_PATCH_RASTER_GROUP_SIZE, 1, 1)]
 void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    StructuredBuffer<uint> diceQueueCounter = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX];
-    const uint diceCount = diceQueueCounter[0];
-    const uint diceIndex = dispatchThreadId.x;
-    if (diceIndex >= diceCount)
-    {
-        return;
-    }
-
+    const uint rasterWorkIndex = dispatchThreadId.x;
     StructuredBuffer<CLodReyesDiceQueueEntry> diceQueue = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_DICE_QUEUE_DESCRIPTOR_INDEX];
+    StructuredBuffer<CLodReyesRasterWorkEntry> rasterWorkBuffer = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_WORK_BUFFER_DESCRIPTOR_INDEX];
+    StructuredBuffer<CLodReyesTessTableConfigEntry> tessTableConfigs = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> tessTableVertices = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> tessTableTriangles = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX];
     RWStructuredBuffer<CLodReyesTelemetry> telemetryBuffer = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_TELEMETRY_DESCRIPTOR_INDEX];
     StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_VIEW_RASTER_INFO_DESCRIPTOR_INDEX];
     ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
@@ -381,6 +390,8 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     StructuredBuffer<CullingCameraInfo> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
     StructuredBuffer<MaterialInfo> materials = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
 
+    const CLodReyesRasterWorkEntry rasterWorkEntry = rasterWorkBuffer[rasterWorkIndex];
+    const uint diceIndex = rasterWorkEntry.diceQueueIndex;
     const CLodReyesDiceQueueEntry diceEntry = diceQueue[diceIndex];
     const ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[diceEntry.viewID];
     if (viewRasterInfo.visibilityUAVDescriptorIndex == 0xFFFFFFFFu)
@@ -432,17 +443,11 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     const float3 domain0 = ReyesDecodePatchBarycentrics(diceEntry.domainVertex0Encoded);
     const float3 domain1 = ReyesDecodePatchBarycentrics(diceEntry.domainVertex1Encoded);
     const float3 domain2 = ReyesDecodePatchBarycentrics(diceEntry.domainVertex2Encoded);
-    StructuredBuffer<CLodReyesTessTableConfigEntry> tessTableConfigs = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX];
-    StructuredBuffer<uint> tessTableVertices = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX];
-    StructuredBuffer<uint> tessTableTriangles = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX];
     const uint microTriangleCount = ReyesGetDicePatchMicroTriangleCount(tessTableConfigs, diceEntry);
-    if (microTriangleCount == 0u || microTriangleCount > REYES_MAX_VISIBILITY_MICRO_TRIANGLES_PER_PATCH)
+    if (microTriangleCount == 0u || microTriangleCount > 128u)
     {
         return;
     }
-
-    InterlockedAdd(telemetryBuffer[0].patchRasterizedPatchCount, 1u);
-    InterlockedAdd(telemetryBuffer[0].patchRasterizedMicroTriangleCount, microTriangleCount);
 
     row_major matrix modelViewProjection = mul(objectData.model, camera.viewProjection);
     float4 modelViewZ = mul(objectData.model, camera.viewZ);
@@ -453,41 +458,45 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     uint2 visDims;
     visBuffer.GetDimensions(visDims.x, visDims.y);
 
+    const uint rasterMicroTriangleEnd = min(rasterWorkEntry.microTriangleOffset + rasterWorkEntry.microTriangleCount, microTriangleCount);
     [loop]
-    for (uint microTriangleIndex = 0u; microTriangleIndex < microTriangleCount; ++microTriangleIndex)
+    for (uint microTriangleIndex = rasterWorkEntry.microTriangleOffset; microTriangleIndex < rasterMicroTriangleEnd; ++microTriangleIndex)
     {
         float3 patchBary0;
         float3 patchBary1;
         float3 patchBary2;
-        ReyesDecodeMicroTrianglePatchDomain(
-            tessTableConfigs,
-            tessTableVertices,
-            tessTableTriangles,
-            diceEntry,
-            microTriangleIndex,
+        ReyesDecodeMicroTrianglePatchDomain(tessTableConfigs, tessTableVertices, tessTableTriangles, microTriangleIndex, diceEntry, patchBary0, patchBary1, patchBary2);
+
+        float3 sourceBary0;
+        float3 sourceBary1;
+        float3 sourceBary2;
+        float3 patchPosition0;
+        float3 patchPosition1;
+        float3 patchPosition2;
+        ReyesEvaluateDisplacedPatchTriangle(
+            materialInfo,
+            displacementEnabled,
+            sourcePosition0,
+            sourcePosition1,
+            sourcePosition2,
+            sourceNormal0,
+            sourceNormal1,
+            sourceNormal2,
+            sourceUv0,
+            sourceUv1,
+            sourceUv2,
+            domain0,
+            domain1,
+            domain2,
             patchBary0,
             patchBary1,
-            patchBary2);
-
-        const float3 sourceBary0 = ReyesComposeSourceBarycentricsPoint(patchBary0, domain0, domain1, domain2);
-        const float3 sourceBary1 = ReyesComposeSourceBarycentricsPoint(patchBary1, domain0, domain1, domain2);
-        const float3 sourceBary2 = ReyesComposeSourceBarycentricsPoint(patchBary2, domain0, domain1, domain2);
-
-        float3 patchPosition0 = ReyesInterpolatePosition(sourcePosition0, sourcePosition1, sourcePosition2, sourceBary0);
-        float3 patchPosition1 = ReyesInterpolatePosition(sourcePosition0, sourcePosition1, sourcePosition2, sourceBary1);
-        float3 patchPosition2 = ReyesInterpolatePosition(sourcePosition0, sourcePosition1, sourcePosition2, sourceBary2);
-        if (displacementEnabled)
-        {
-            const float3 patchNormal0 = normalize(sourceNormal0 * sourceBary0.x + sourceNormal1 * sourceBary0.y + sourceNormal2 * sourceBary0.z);
-            const float3 patchNormal1 = normalize(sourceNormal0 * sourceBary1.x + sourceNormal1 * sourceBary1.y + sourceNormal2 * sourceBary1.z);
-            const float3 patchNormal2 = normalize(sourceNormal0 * sourceBary2.x + sourceNormal1 * sourceBary2.y + sourceNormal2 * sourceBary2.z);
-            const float2 patchUv0 = sourceUv0 * sourceBary0.x + sourceUv1 * sourceBary0.y + sourceUv2 * sourceBary0.z;
-            const float2 patchUv1 = sourceUv0 * sourceBary1.x + sourceUv1 * sourceBary1.y + sourceUv2 * sourceBary1.z;
-            const float2 patchUv2 = sourceUv0 * sourceBary2.x + sourceUv1 * sourceBary2.y + sourceUv2 * sourceBary2.z;
-            patchPosition0 = ReyesApplyGeometricDisplacement(materialInfo, patchPosition0, patchNormal0, patchUv0);
-            patchPosition1 = ReyesApplyGeometricDisplacement(materialInfo, patchPosition1, patchNormal1, patchUv1);
-            patchPosition2 = ReyesApplyGeometricDisplacement(materialInfo, patchPosition2, patchNormal2, patchUv2);
-        }
+            patchBary2,
+            sourceBary0,
+            sourceBary1,
+            sourceBary2,
+            patchPosition0,
+            patchPosition1,
+            patchPosition2);
 
         const float4 clip0 = mul(float4(patchPosition0, 1.0f), modelViewProjection);
         const float4 clip1 = mul(float4(patchPosition1, 1.0f), modelViewProjection);
@@ -499,6 +508,7 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         ReyesRasterizeMicroTriangle(
             visBuffer,
             visDims,
+            telemetryBuffer,
             viewRasterInfo,
             clip0,
             clip1,

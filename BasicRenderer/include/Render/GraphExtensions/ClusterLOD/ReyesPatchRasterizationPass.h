@@ -18,6 +18,7 @@ public:
         std::shared_ptr<Buffer> visibleClustersBuffer,
         std::shared_ptr<Buffer> diceQueueBuffer,
         std::shared_ptr<Buffer> diceQueueCounterBuffer,
+        std::shared_ptr<Buffer> rasterWorkBuffer,
         std::shared_ptr<Buffer> tessTableConfigsBuffer,
         std::shared_ptr<Buffer> tessTableVerticesBuffer,
         std::shared_ptr<Buffer> tessTableTrianglesBuffer,
@@ -39,6 +40,7 @@ private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_diceQueueBuffer;
     std::shared_ptr<Buffer> m_diceQueueCounterBuffer;
+    std::shared_ptr<Buffer> m_rasterWorkBuffer;
     std::shared_ptr<Buffer> m_tessTableConfigsBuffer;
     std::shared_ptr<Buffer> m_tessTableVerticesBuffer;
     std::shared_ptr<Buffer> m_tessTableTrianglesBuffer;

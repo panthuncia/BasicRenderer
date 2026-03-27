@@ -7,9 +7,8 @@ static const uint REYES_DICE_GROUP_SIZE = 64u;
 
 float2 DecodeReyesBarycentricsUV(uint encoded)
 {
-    float u = (float)(encoded & 0xFFFFu) / REYES_BARYCENTRIC_COORD_SCALE;
-    float v = (float)(encoded >> 16u) / REYES_BARYCENTRIC_COORD_SCALE;
-    return float2(u, v);
+    const float3 barycentrics = ReyesDecodePatchBarycentrics(encoded);
+    return barycentrics.yz;
 }
 
 [shader("compute")]
@@ -31,10 +30,6 @@ void ReyesDiceCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     const CLodReyesDiceQueueEntry diceEntry = diceQueue[diceIndex];
     const uint estimatedTriangles = ReyesGetDicePatchMicroTriangleCount(tessTableConfigs, diceEntry);
     const uint estimatedVertices = ReyesGetDicePatchVertexCount(tessTableConfigs, diceEntry);
-    if (estimatedTriangles == 0u || estimatedVertices == 0u)
-    {
-        return;
-    }
 
     const float2 baryUV0 = DecodeReyesBarycentricsUV(diceEntry.domainVertex0Encoded);
     const float2 baryUV1 = DecodeReyesBarycentricsUV(diceEntry.domainVertex1Encoded);

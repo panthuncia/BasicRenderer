@@ -14,6 +14,7 @@ ReyesPatchRasterizationPass::ReyesPatchRasterizationPass(
     std::shared_ptr<Buffer> visibleClustersBuffer,
     std::shared_ptr<Buffer> diceQueueBuffer,
     std::shared_ptr<Buffer> diceQueueCounterBuffer,
+    std::shared_ptr<Buffer> rasterWorkBuffer,
     std::shared_ptr<Buffer> tessTableConfigsBuffer,
     std::shared_ptr<Buffer> tessTableVerticesBuffer,
     std::shared_ptr<Buffer> tessTableTrianglesBuffer,
@@ -26,6 +27,7 @@ ReyesPatchRasterizationPass::ReyesPatchRasterizationPass(
     : m_visibleClustersBuffer(std::move(visibleClustersBuffer))
     , m_diceQueueBuffer(std::move(diceQueueBuffer))
     , m_diceQueueCounterBuffer(std::move(diceQueueCounterBuffer))
+    , m_rasterWorkBuffer(std::move(rasterWorkBuffer))
     , m_tessTableConfigsBuffer(std::move(tessTableConfigsBuffer))
     , m_tessTableVerticesBuffer(std::move(tessTableVerticesBuffer))
     , m_tessTableTrianglesBuffer(std::move(tessTableTrianglesBuffer))
@@ -59,6 +61,7 @@ void ReyesPatchRasterizationPass::DeclareResourceUsages(ComputePassBuilder* buil
             m_visibleClustersBuffer,
             m_diceQueueBuffer,
             m_diceQueueCounterBuffer,
+            m_rasterWorkBuffer,
             m_tessTableConfigsBuffer,
             m_tessTableVerticesBuffer,
             m_tessTableTrianglesBuffer,
@@ -125,6 +128,7 @@ PassReturn ReyesPatchRasterizationPass::Execute(PassExecutionContext& executionC
 
     uint32_t uintRootConstants[NumMiscUintRootConstants] = {};
     uintRootConstants[CLOD_REYES_PATCH_RASTER_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
+    uintRootConstants[CLOD_REYES_PATCH_RASTER_WORK_BUFFER_DESCRIPTOR_INDEX] = m_rasterWorkBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_PATCH_RASTER_DICE_QUEUE_DESCRIPTOR_INDEX] = m_diceQueueBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_PATCH_RASTER_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_diceQueueCounterBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_PATCH_RASTER_VIEW_RASTER_INFO_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;

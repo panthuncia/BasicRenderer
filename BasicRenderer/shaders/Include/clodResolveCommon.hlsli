@@ -563,8 +563,8 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
             tessTableConfigs,
             tessTableVertices,
             tessTableTriangles,
-            diceEntry,
             reyesMicroTriangleIndex,
+            diceEntry,
             microTrianglePatchDomain0,
             microTrianglePatchDomain1,
             microTrianglePatchDomain2);

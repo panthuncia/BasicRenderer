@@ -5,13 +5,13 @@
 #include "include/clodPageAccess.hlsli"
 #include "include/clodStructs.hlsli"
 #include "include/clodResolveCommon.hlsli"
+#include "include/reyesPatchCommon.hlsli"
 #include "PerPassRootConstants/clodReyesRootConstants.h"
 
 static const uint REYES_CLASSIFY_GROUP_SIZE = 64u;
 static const uint REYES_OUTCOME_FLAG_SKINNED = 1u << 0;
 static const uint REYES_OUTCOME_FLAG_DISPLACEMENT_ENABLED = 1u << 1;
 static const uint REYES_BARYCENTRIC_COORD_MAX = 0xFFFFu;
-static const float REYES_SCREEN_SCALE_REFERENCE = 1080.0f;
 
 uint GetReyesClassifyVisibleClusterReadIndex(uint linearizedID)
 {
@@ -58,7 +58,7 @@ float ComputeReyesTessFactor(
     const float projectedRadius = (worldRadius * camera.projY * REYES_SCREEN_SCALE_REFERENCE) / max(denom, 1e-4f);
     const float triangleFactor = sqrt(max(1.0f, (float)triangleCount));
     const float displacementFactor = max(1.0f, displacementSpan * 64.0f);
-    return max(1.0f, projectedRadius * triangleFactor * displacementFactor * 0.03125f);
+    return max(1.0f, projectedRadius * triangleFactor * displacementFactor * REYES_PROJECTED_PIXEL_TO_TESS_FACTOR_SCALE);
 }
 
 [shader("compute")]

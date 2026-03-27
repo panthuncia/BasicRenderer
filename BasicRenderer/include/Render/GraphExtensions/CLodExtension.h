@@ -72,11 +72,17 @@ private:
     std::shared_ptr<Buffer> m_reyesDiceQueueBuffer;
     std::shared_ptr<Buffer> m_reyesDiceQueueCounterBuffer;
     std::shared_ptr<Buffer> m_reyesDiceQueueOverflowBuffer;
+    std::shared_ptr<Buffer> m_reyesRasterWorkBuffer;
+    std::shared_ptr<Buffer> m_reyesRasterWorkCounterBuffer;
+    std::shared_ptr<Buffer> m_reyesRasterWorkIndirectArgsBuffer;
     std::shared_ptr<Buffer> m_reyesTessTableConfigsBuffer;
     std::shared_ptr<Buffer> m_reyesTessTableVerticesBuffer;
     std::shared_ptr<Buffer> m_reyesTessTableTrianglesBuffer;
     std::shared_ptr<Buffer> m_reyesDiceIndirectArgsBuffer;
     std::shared_ptr<Buffer> m_reyesDiceIndirectArgsBufferPhase2;
+    std::shared_ptr<Buffer> m_reyesRasterWorkBufferPhase2;
+    std::shared_ptr<Buffer> m_reyesRasterWorkCounterBufferPhase2;
+    std::shared_ptr<Buffer> m_reyesRasterWorkIndirectArgsBufferPhase2;
     std::shared_ptr<Buffer> m_reyesTelemetryBufferPhase1;
     std::shared_ptr<Buffer> m_reyesTelemetryBufferPhase2;
 

@@ -19,6 +19,9 @@ ReyesSplitPass::ReyesSplitPass(
     std::shared_ptr<Buffer> diceQueueBuffer,
     std::shared_ptr<Buffer> diceQueueCounterBuffer,
     std::shared_ptr<Buffer> diceQueueOverflowBuffer,
+    std::shared_ptr<Buffer> tessTableConfigsBuffer,
+    std::shared_ptr<Buffer> tessTableVerticesBuffer,
+    std::shared_ptr<Buffer> tessTableTrianglesBuffer,
     std::shared_ptr<Buffer> indirectArgsBuffer,
     std::shared_ptr<Buffer> telemetryBuffer,
     uint32_t maxSplitQueueEntries,
@@ -34,6 +37,9 @@ ReyesSplitPass::ReyesSplitPass(
     , m_diceQueueBuffer(std::move(diceQueueBuffer))
     , m_diceQueueCounterBuffer(std::move(diceQueueCounterBuffer))
     , m_diceQueueOverflowBuffer(std::move(diceQueueOverflowBuffer))
+    , m_tessTableConfigsBuffer(std::move(tessTableConfigsBuffer))
+    , m_tessTableVerticesBuffer(std::move(tessTableVerticesBuffer))
+    , m_tessTableTrianglesBuffer(std::move(tessTableTrianglesBuffer))
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
     , m_telemetryBuffer(std::move(telemetryBuffer))
     , m_maxSplitQueueEntries(maxSplitQueueEntries)
@@ -71,6 +77,9 @@ void ReyesSplitPass::DeclareResourceUsages(ComputePassBuilder* builder)
             m_visibleClustersBuffer,
             m_inputSplitQueueBuffer,
             m_inputSplitQueueCounterBuffer,
+            m_tessTableConfigsBuffer,
+            m_tessTableVerticesBuffer,
+            m_tessTableTrianglesBuffer,
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerObjectBuffer,
             Builtin::CullingCameraBuffer)
@@ -110,10 +119,10 @@ PassReturn ReyesSplitPass::Execute(PassExecutionContext& executionContext)
     uintRootConstants[CLOD_REYES_SPLIT_OUTPUT_DICE_QUEUE_DESCRIPTOR_INDEX] = m_diceQueueBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_SPLIT_OUTPUT_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_diceQueueCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_SPLIT_OUTPUT_DICE_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_diceQueueOverflowBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_SPLIT_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_SPLIT_PHASE_INDEX] = m_phaseIndex;
+    uintRootConstants[CLOD_REYES_SPLIT_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_tessTableConfigsBuffer->GetSRVInfo(0).slot.index;
+    uintRootConstants[CLOD_REYES_SPLIT_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = m_tessTableVerticesBuffer->GetSRVInfo(0).slot.index;
+    uintRootConstants[CLOD_REYES_SPLIT_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_tessTableTrianglesBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_SPLIT_QUEUE_CAPACITY] = m_maxSplitQueueEntries;
-    uintRootConstants[CLOD_REYES_SPLIT_PASS_INDEX] = m_splitPassIndex;
 
     commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
     commandList.BindPipeline(m_clearCountersPso.GetAPIPipelineState().GetHandle());

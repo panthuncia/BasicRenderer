@@ -7,7 +7,7 @@
 
 namespace {
 
-constexpr uint32_t kLookupSize = 16u;
+constexpr uint32_t kLookupSize = CLodReyesTessTableLookupSize;
 
 struct PackedConfigEntry
 {
@@ -33,6 +33,10 @@ uint32_t GetLookupIndex(uint32_t edge01Segments, uint32_t edge12Segments, uint32
 ReyesTessellationTableData BuildReferenceReyesTessellationTableData()
 {
     const ReyesPackedTessellationTableSource& source = GetReferenceReyesPackedTessellationTableSource();
+    if (source.maxEdgeSegments != CLodReyesTessTableMaxSegments) {
+        throw std::runtime_error("Reyes tessellation table source max-edge-segment count drifted from the shader contract.");
+    }
+
     if (source.maxEdgeSegments >= kLookupSize) {
         throw std::runtime_error("Reyes tessellation table source exceeds the fixed lookup size.");
     }

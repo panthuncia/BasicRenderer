@@ -463,6 +463,14 @@ struct CLodReyesDispatchIndirectCommand
     uint dispatchZ;
 };
 
+struct CLodReyesRasterWorkEntry
+{
+    uint diceQueueIndex;
+    uint microTriangleOffset;
+    uint microTriangleCount;
+    uint reserved;
+};
+
 struct CLodReyesTelemetry
 {
     uint visibleClusterInputCount;

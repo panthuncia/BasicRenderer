@@ -3,17 +3,10 @@
 #include "include/visibleClusterPacking.hlsli"
 #include "include/clodPageAccess.hlsli"
 #include "include/clodStructs.hlsli"
+#include "include/reyesPatchCommon.hlsli"
 #include "PerPassRootConstants/clodReyesSeedRootConstants.h"
 
 static const uint REYES_SEED_GROUP_SIZE = 64u;
-static const uint REYES_BARYCENTRIC_COORD_MAX = 0xFFFFu;
-
-uint EncodeReyesSeedBarycentrics(float3 barycentrics)
-{
-    uint u = min(REYES_BARYCENTRIC_COORD_MAX, (uint)round(saturate(barycentrics.y) * REYES_BARYCENTRIC_COORD_MAX));
-    uint v = min(REYES_BARYCENTRIC_COORD_MAX, (uint)round(saturate(barycentrics.z) * REYES_BARYCENTRIC_COORD_MAX));
-    return u | (v << 16u);
-}
 
 [shader("compute")]
 [numthreads(REYES_SEED_GROUP_SIZE, 1, 1)]
@@ -71,9 +64,9 @@ void ReyesSeedPatchesCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         splitEntry.quantizedTessFactor = 0u;
         splitEntry.flags = ownedCluster.flags;
         splitEntry.sourcePrimitiveAndSplitConfig = triangleIndex & 0xFFFFu;
-        splitEntry.domainVertex0Encoded = EncodeReyesSeedBarycentrics(float3(1.0f, 0.0f, 0.0f));
-        splitEntry.domainVertex1Encoded = EncodeReyesSeedBarycentrics(float3(0.0f, 1.0f, 0.0f));
-        splitEntry.domainVertex2Encoded = EncodeReyesSeedBarycentrics(float3(0.0f, 0.0f, 1.0f));
+        splitEntry.domainVertex0Encoded = ReyesEncodePatchBarycentrics(float3(1.0f, 0.0f, 0.0f));
+        splitEntry.domainVertex1Encoded = ReyesEncodePatchBarycentrics(float3(0.0f, 1.0f, 0.0f));
+        splitEntry.domainVertex2Encoded = ReyesEncodePatchBarycentrics(float3(0.0f, 0.0f, 1.0f));
         splitQueue[outputBaseIndex + triangleIndex] = splitEntry;
     }
 
