@@ -433,9 +433,9 @@ struct CLodReyesSplitQueueEntry
     uint quantizedTessFactor;
     uint flags;
     uint sourcePrimitiveAndSplitConfig;
-    uint domainVertex0Encoded;
-    uint domainVertex1Encoded;
-    uint domainVertex2Encoded;
+    float2 domainVertex0UV;
+    float2 domainVertex1UV;
+    float2 domainVertex2UV;
 };
 
 struct CLodReyesDiceQueueEntry
@@ -449,9 +449,9 @@ struct CLodReyesDiceQueueEntry
     uint quantizedTessFactor;
     uint flags;
     uint sourcePrimitiveAndSplitConfig;
-    uint domainVertex0Encoded;
-    uint domainVertex1Encoded;
-    uint domainVertex2Encoded;
+    float2 domainVertex0UV;
+    float2 domainVertex1UV;
+    float2 domainVertex2UV;
     uint tessTableConfigIndex;
     uint reserved;
 };
@@ -510,6 +510,7 @@ struct CLodReyesTelemetry
     uint rasterZeroMicroTriangleCount;
     uint rasterMicroTriangleOverflowCount;
     uint rasterNearPlaneClippedQuadCount;
+    uint rasterTinyTriangleFallbackCount;
 };
 
 #endif // __STRUCTS_HLSL__

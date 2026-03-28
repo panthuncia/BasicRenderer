@@ -64,9 +64,9 @@ void ReyesSeedPatchesCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         splitEntry.quantizedTessFactor = 0u;
         splitEntry.flags = ownedCluster.flags;
         splitEntry.sourcePrimitiveAndSplitConfig = triangleIndex & 0xFFFFu;
-        splitEntry.domainVertex0Encoded = ReyesEncodePatchBarycentrics(float3(1.0f, 0.0f, 0.0f));
-        splitEntry.domainVertex1Encoded = ReyesEncodePatchBarycentrics(float3(0.0f, 1.0f, 0.0f));
-        splitEntry.domainVertex2Encoded = ReyesEncodePatchBarycentrics(float3(0.0f, 0.0f, 1.0f));
+        splitEntry.domainVertex0UV = float2(0.0f, 0.0f);
+        splitEntry.domainVertex1UV = float2(1.0f, 0.0f);
+        splitEntry.domainVertex2UV = float2(0.0f, 1.0f);
         splitQueue[outputBaseIndex + triangleIndex] = splitEntry;
     }
 

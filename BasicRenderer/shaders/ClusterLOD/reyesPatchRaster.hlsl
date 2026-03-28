@@ -10,11 +10,20 @@
 #include "PerPassRootConstants/clodReyesPatchRasterRootConstants.h"
 
 static const uint REYES_PATCH_RASTER_GROUP_SIZE = 64u;
+static const float REYES_PATCH_RASTER_TINY_TRIANGLE_AREA_EPSILON = 1e-8f;
 
 #define REYES_PATCH_RASTER_ENABLE_NEAR_PLANE_CLIPPING 1 // TODO: Looks nicer, but might be more expensive. Maybe have a separate dispatch for these?
 
 #ifndef REYES_PATCH_RASTER_ENABLE_NEAR_PLANE_CLIPPING
 #define REYES_PATCH_RASTER_ENABLE_NEAR_PLANE_CLIPPING 0
+#endif
+
+#ifndef REYES_PATCH_RASTER_ENABLE_TINY_TRIANGLE_FALLBACK
+#define REYES_PATCH_RASTER_ENABLE_TINY_TRIANGLE_FALLBACK 0
+#endif
+
+#if REYES_PATCH_RASTER_ENABLE_TINY_TRIANGLE_FALLBACK
+static const float REYES_PATCH_RASTER_TINY_TRIANGLE_MAX_EXTENT = 1.5f;
 #endif
 
 uint ReadPackedBits32(ByteAddressBuffer buf, uint startBit, uint bitCount)
@@ -252,18 +261,79 @@ float2 DecodeCompressedUV(
         uvDesc.uvMinV + float(encodedV) * uvDesc.uvScaleV);
 }
 
-bool ReyesIsTopLeftEdge(float2 a, float2 b)
-{
-    float2 edge = b - a;
-    return edge.y > 0.0f || (edge.y == 0.0f && edge.x < 0.0f);
-}
-
 #if REYES_PATCH_RASTER_ENABLE_NEAR_PLANE_CLIPPING
 struct ReyesRasterVertex
 {
     float4 clip;
     float depth;
 };
+#endif
+
+#if REYES_PATCH_RASTER_ENABLE_TINY_TRIANGLE_FALLBACK
+// Extremely small projected micro-triangles can numerically collapse to zero area or an empty
+// pixel bounds even when the patch still covers a real sample. In that case we conservatively
+// stamp the tiny screen-space extent, or its centroid as a last resort, so those subpixel hits
+// survive rasterization instead of disappearing as view-dependent pinholes.
+bool ReyesTryRasterizeTinyProjectedMicroTriangle(
+    RWTexture2D<uint64_t> visBuffer,
+    uint2 visDims,
+    ClodViewRasterInfo viewRasterInfo,
+    float2 s0,
+    float2 s1,
+    float2 s2,
+    float depth0,
+    float depth1,
+    float depth2,
+    uint patchVisibilityIndex,
+    uint microTriangleIndex)
+{
+    const float2 bbMinF = min(min(s0, s1), s2);
+    const float2 bbMaxF = max(max(s0, s1), s2);
+    const float2 bbExtent = bbMaxF - bbMinF;
+    if (bbExtent.x > REYES_PATCH_RASTER_TINY_TRIANGLE_MAX_EXTENT ||
+        bbExtent.y > REYES_PATCH_RASTER_TINY_TRIANGLE_MAX_EXTENT)
+    {
+        return false;
+    }
+
+    const float fallbackDepth = min(depth0, min(depth1, depth2));
+    const uint64_t visKey = PackVisKey(fallbackDepth, patchVisibilityIndex, microTriangleIndex);
+
+    int2 minPx = int2(floor(bbMinF));
+    int2 maxPx = int2(floor(bbMaxF));
+    minPx = max(minPx, int2(viewRasterInfo.scissorMinX, viewRasterInfo.scissorMinY));
+    maxPx = min(maxPx, int2(int(viewRasterInfo.scissorMaxX) - 1, int(viewRasterInfo.scissorMaxY) - 1));
+    minPx = max(minPx, int2(0, 0));
+    maxPx = min(maxPx, int2(int(visDims.x) - 1, int(visDims.y) - 1));
+
+    if (minPx.x > maxPx.x || minPx.y > maxPx.y)
+    {
+        const float2 centroidPosition = (s0 + s1 + s2) * (1.0f / 3.0f);
+        const int2 centroidPx = int2(floor(centroidPosition));
+        if (centroidPx.x < int(viewRasterInfo.scissorMinX) || centroidPx.y < int(viewRasterInfo.scissorMinY) ||
+            centroidPx.x >= int(viewRasterInfo.scissorMaxX) || centroidPx.y >= int(viewRasterInfo.scissorMaxY) ||
+            centroidPx.x < 0 || centroidPx.y < 0 ||
+            centroidPx.x >= int(visDims.x) || centroidPx.y >= int(visDims.y))
+        {
+            return false;
+        }
+
+        InterlockedMin(visBuffer[uint2(centroidPx)], visKey);
+        return true;
+    }
+
+    [loop]
+    for (int py = minPx.y; py <= maxPx.y; ++py)
+    {
+        [loop]
+        for (int px = minPx.x; px <= maxPx.x; ++px)
+        {
+            InterlockedMin(visBuffer[uint2(px, py)], visKey);
+        }
+    }
+
+    return true;
+}
 #endif
 
 void ReyesRasterizeProjectedMicroTriangle(
@@ -302,8 +372,27 @@ void ReyesRasterizeProjectedMicroTriangle(
     float2 e01 = s1 - s0;
     float2 e02 = s2 - s0;
     float twiceArea = e01.x * e02.y - e01.y * e02.x;
-    if (abs(twiceArea) <= 1e-8f)
+    if (abs(twiceArea) <= REYES_PATCH_RASTER_TINY_TRIANGLE_AREA_EPSILON)
     {
+#if REYES_PATCH_RASTER_ENABLE_TINY_TRIANGLE_FALLBACK
+        if (ReyesTryRasterizeTinyProjectedMicroTriangle(
+            visBuffer,
+            visDims,
+            viewRasterInfo,
+            s0,
+            s1,
+            s2,
+            depth0,
+            depth1,
+            depth2,
+            patchVisibilityIndex,
+            microTriangleIndex))
+        {
+            InterlockedAdd(telemetryBuffer[0].rasterTinyTriangleFallbackCount, 1u);
+            return;
+        }
+#endif
+
         InterlockedAdd(telemetryBuffer[0].rasterPreAreaCullCount, 1u);
         return;
     }
@@ -325,6 +414,25 @@ void ReyesRasterizeProjectedMicroTriangle(
     }
     else if (twiceArea >= 0.0f)
     {
+#if REYES_PATCH_RASTER_ENABLE_TINY_TRIANGLE_FALLBACK
+        if (ReyesTryRasterizeTinyProjectedMicroTriangle(
+            visBuffer,
+            visDims,
+            viewRasterInfo,
+            s0,
+            s1,
+            s2,
+            depth0,
+            depth1,
+            depth2,
+            patchVisibilityIndex,
+            microTriangleIndex))
+        {
+            InterlockedAdd(telemetryBuffer[0].rasterTinyTriangleFallbackCount, 1u);
+            return;
+        }
+#endif
+
         InterlockedAdd(telemetryBuffer[0].rasterPostSwapNonNegativeAreaCount, 1u);
         return;
     }
@@ -340,6 +448,25 @@ void ReyesRasterizeProjectedMicroTriangle(
     maxPx = min(maxPx, int2(int(visDims.x) - 1, int(visDims.y) - 1));
     if (minPx.x > maxPx.x || minPx.y > maxPx.y)
     {
+#if REYES_PATCH_RASTER_ENABLE_TINY_TRIANGLE_FALLBACK
+        if (ReyesTryRasterizeTinyProjectedMicroTriangle(
+            visBuffer,
+            visDims,
+            viewRasterInfo,
+            s0,
+            s1,
+            s2,
+            depth0,
+            depth1,
+            depth2,
+            patchVisibilityIndex,
+            microTriangleIndex))
+        {
+            InterlockedAdd(telemetryBuffer[0].rasterTinyTriangleFallbackCount, 1u);
+            return;
+        }
+#endif
+
         InterlockedAdd(telemetryBuffer[0].rasterEmptyBoundsCullCount, 1u);
         return;
     }
@@ -347,9 +474,6 @@ void ReyesRasterizeProjectedMicroTriangle(
     const float2 origin = float2(float(minPx.x) + 0.5f, float(minPx.y) + 0.5f);
     const float2 e12 = s2 - s1;
     const float2 e20 = s0 - s2;
-    const bool edge12TopLeft = ReyesIsTopLeftEdge(s1, s2);
-    const bool edge20TopLeft = ReyesIsTopLeftEdge(s2, s0);
-    const bool edge01TopLeft = ReyesIsTopLeftEdge(s0, s1);
     const float row_b0 = ((origin.x - s1.x) * e12.y - (origin.y - s1.y) * e12.x) * invTwiceArea;
     const float row_b1 = ((origin.x - s2.x) * e20.y - (origin.y - s2.y) * e20.x) * invTwiceArea;
     const float dx_b0 = e12.y * invTwiceArea;
@@ -368,10 +492,12 @@ void ReyesRasterizeProjectedMicroTriangle(
         for (int px = minPx.x; px <= maxPx.x; ++px)
         {
             const float b2 = 1.0f - b0 - b1;
-            const bool inside0 = (b0 > 0.0f) || (b0 == 0.0f && edge12TopLeft);
-            const bool inside1 = (b1 > 0.0f) || (b1 == 0.0f && edge20TopLeft);
-            const bool inside2 = (b2 > 0.0f) || (b2 == 0.0f && edge01TopLeft);
-            if (inside0 && inside1 && inside2)
+
+            // Incremental float edge stepping does not hit exact shared-edge zeros reliably.
+            // Using a strict top-left equality test here can leave tiny uncovered seams between
+            // adjacent micro-triangles at certain view angles. Match the existing SW raster path
+            // and accept all non-negative edge coordinates instead.
+            if (b0 >= 0.0f && b1 >= 0.0f && b2 >= 0.0f)
             {
                 const float depth = b0 * depth0 + b1 * depth1 + b2 * depth2;
                 const uint64_t visKey = PackVisKey(depth, patchVisibilityIndex, microTriangleIndex);
@@ -568,9 +694,9 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         sourceUv2 = DecodeCompressedUV(sourceTriangle.z, materialInfo.heightUvSetIndex, hdr, meshletDesc, localMeshletIndex, pageSlabByteOffset, pageSlabDescriptorIndex);
     }
 
-    const float3 domain0 = ReyesDecodePatchBarycentrics(diceEntry.domainVertex0Encoded);
-    const float3 domain1 = ReyesDecodePatchBarycentrics(diceEntry.domainVertex1Encoded);
-    const float3 domain2 = ReyesDecodePatchBarycentrics(diceEntry.domainVertex2Encoded);
+    const float3 domain0 = ReyesPatchDomainUVToBarycentrics(diceEntry.domainVertex0UV);
+    const float3 domain1 = ReyesPatchDomainUVToBarycentrics(diceEntry.domainVertex1UV);
+    const float3 domain2 = ReyesPatchDomainUVToBarycentrics(diceEntry.domainVertex2UV);
     const uint microTriangleCount = ReyesGetDicePatchMicroTriangleCount(tessTableConfigs, diceEntry);
     if (microTriangleCount == 0u)
     {

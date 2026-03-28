@@ -484,9 +484,9 @@ float2 ComputeClodMotionVector(float3 posOS, float3 worldPosition, float4x4 prev
     return ndcCur - ndcPrev;
 }
 
-float3 ReyesDecodeBarycentrics(uint encoded)
+float3 ReyesDecodeBarycentrics(float2 barycentricsUV)
 {
-    return ReyesDecodePatchBarycentrics(encoded);
+    return ReyesPatchDomainUVToBarycentrics(barycentricsUV);
 }
 
 BarycentricDeriv ReyesComposeSourceBarycentrics(BarycentricDeriv patchBary, float3 domain0, float3 domain1, float3 domain2)
@@ -549,9 +549,9 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
         CLodReyesDiceQueueEntry diceEntry = diceQueue[clusterIndex - VISBUF_REYES_PATCH_INDEX_BASE];
         clusterIndex = diceEntry.visibleClusterIndex;
         meshletTriangleIndex = diceEntry.sourcePrimitiveAndSplitConfig & 0xFFFFu;
-        patchDomain0 = ReyesDecodeBarycentrics(diceEntry.domainVertex0Encoded);
-        patchDomain1 = ReyesDecodeBarycentrics(diceEntry.domainVertex1Encoded);
-        patchDomain2 = ReyesDecodeBarycentrics(diceEntry.domainVertex2Encoded);
+        patchDomain0 = ReyesDecodeBarycentrics(diceEntry.domainVertex0UV);
+        patchDomain1 = ReyesDecodeBarycentrics(diceEntry.domainVertex1UV);
+        patchDomain2 = ReyesDecodeBarycentrics(diceEntry.domainVertex2UV);
 
         const uint microTriangleCount = ReyesGetDicePatchMicroTriangleCount(tessTableConfigs, diceEntry);
         if (reyesMicroTriangleIndex >= microTriangleCount)

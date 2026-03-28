@@ -46,7 +46,7 @@ uint32_t GetLookupIndex(uint32_t edge01Segments, uint32_t edge12Segments, uint32
 
 ReyesTessellationTableData BuildReferenceReyesTessellationTableData()
 {
-    const ReyesPackedTessellationTableSource& source = GetReferenceReyesPackedTessellationTableSource();
+    const ReyesPackedTessellationTableSource& source = GetGeneratedReyesPackedTessellationTableSource();
     if (source.maxEdgeSegments != kMaxEdgeSegments) {
         throw std::runtime_error("Reyes tessellation table source max-edge-segment count drifted from the shader contract.");
     }
@@ -103,6 +103,6 @@ ReyesTessellationTableData BuildReferenceReyesTessellationTableData()
 
 const ReyesTessellationTableData& GetReyesTessellationTableData()
 {
-    static const ReyesTessellationTableData tableData = BuildReferenceReyesTessellationTableData();
-    return tableData;
+    static const ReyesTessellationTableData generatedTableData = BuildReferenceReyesTessellationTableData();
+    return generatedTableData;
 }

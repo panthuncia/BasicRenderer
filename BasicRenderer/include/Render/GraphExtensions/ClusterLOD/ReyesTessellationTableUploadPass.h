@@ -2,6 +2,8 @@
 
 #include <memory>
 
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
+
 #include "RenderPasses/Base/ComputePass.h"
 
 class Buffer;

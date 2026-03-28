@@ -5,12 +5,6 @@
 
 static const uint REYES_DICE_GROUP_SIZE = 64u;
 
-float2 DecodeReyesBarycentricsUV(uint encoded)
-{
-    const float3 barycentrics = ReyesDecodePatchBarycentrics(encoded);
-    return barycentrics.yz;
-}
-
 [shader("compute")]
 [numthreads(REYES_DICE_GROUP_SIZE, 1, 1)]
 void ReyesDiceCS(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -32,13 +26,10 @@ void ReyesDiceCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     const uint estimatedTriangles = ReyesGetDicePatchMicroTriangleCount(tessTableConfigs, diceEntry);
     const uint estimatedVertices = ReyesGetDicePatchVertexCount(tessTableConfigs, diceEntry);
 
-    const float2 baryUV0 = DecodeReyesBarycentricsUV(diceEntry.domainVertex0Encoded);
-    const float2 baryUV1 = DecodeReyesBarycentricsUV(diceEntry.domainVertex1Encoded);
-    const float2 baryUV2 = DecodeReyesBarycentricsUV(diceEntry.domainVertex2Encoded);
-    const float signedArea2 =
-        (baryUV1.x - baryUV0.x) * (baryUV2.y - baryUV0.y) -
-        (baryUV1.y - baryUV0.y) * (baryUV2.x - baryUV0.x);
-    const bool validPatch = abs(signedArea2) > (1.0f / REYES_BARYCENTRIC_COORD_SCALE);
+    const bool validPatch = ReyesPatchDomainHasValidSimplex(
+        diceEntry.domainVertex0UV,
+        diceEntry.domainVertex1UV,
+        diceEntry.domainVertex2UV);
     if (!validPatch)
     {
         InterlockedAdd(telemetryBuffer[0].invalidDicePatchDomainCount, 1u);

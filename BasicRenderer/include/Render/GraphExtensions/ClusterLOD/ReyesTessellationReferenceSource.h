@@ -13,4 +13,4 @@ struct ReyesPackedTessellationTableSource
     const uint16_t* configs = nullptr;
 };
 
-const ReyesPackedTessellationTableSource& GetReferenceReyesPackedTessellationTableSource();
+const ReyesPackedTessellationTableSource& GetGeneratedReyesPackedTessellationTableSource();

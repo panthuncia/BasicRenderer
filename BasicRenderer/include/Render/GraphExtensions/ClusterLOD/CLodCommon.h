@@ -113,6 +113,7 @@ static_assert(sizeof(CLodDeepVisibilityStats) == 32u, "CLodDeepVisibilityStats s
 inline constexpr uint32_t CLodReyesMaxSplitPassCount = 4u;
 inline constexpr uint32_t CLodReyesMaxVisibilityMicroTrianglesPerPatch = 128u;
 inline constexpr uint32_t CLodReyesRasterBatchMicroTriangleCount = 16u;
+inline constexpr uint32_t CLodReyesMaxSourceTrianglesPerVisibleCluster = 128u;
 inline constexpr uint32_t CLodReyesMaxRasterWorkItemsPerPatch =
     (CLodReyesMaxVisibilityMicroTrianglesPerPatch + CLodReyesRasterBatchMicroTriangleCount - 1u) / CLodReyesRasterBatchMicroTriangleCount;
 
@@ -143,6 +144,12 @@ static_assert(sizeof(CLodReyesOwnedClusterEntry) == 16u, "CLodReyesOwnedClusterE
 
 struct CLodReyesSplitQueueEntry
 {
+    struct DomainVertexUV
+    {
+        float u = 0.0f;
+        float v = 0.0f;
+    };
+
     uint32_t visibleClusterIndex = 0u;
     uint32_t instanceID = 0u;
     uint32_t localMeshletIndex = 0u;
@@ -152,12 +159,13 @@ struct CLodReyesSplitQueueEntry
     uint32_t quantizedTessFactor = 0u;
     uint32_t flags = 0u;
     uint32_t sourcePrimitiveAndSplitConfig = 0u;
-    uint32_t domainVertex0Encoded = 0u;
-    uint32_t domainVertex1Encoded = 0u;
-    uint32_t domainVertex2Encoded = 0u;
+    DomainVertexUV domainVertex0UV;
+    DomainVertexUV domainVertex1UV;
+    DomainVertexUV domainVertex2UV;
 };
 
-static_assert(sizeof(CLodReyesSplitQueueEntry) == 48u, "CLodReyesSplitQueueEntry size must remain compact");
+static_assert(sizeof(CLodReyesSplitQueueEntry::DomainVertexUV) == 8u, "CLodReyesSplitQueueEntry::DomainVertexUV must match HLSL float2 layout");
+static_assert(sizeof(CLodReyesSplitQueueEntry) == 60u, "CLodReyesSplitQueueEntry size must remain compact");
 
 struct CLodReyesDiceQueueEntry
 {
@@ -170,14 +178,14 @@ struct CLodReyesDiceQueueEntry
     uint32_t quantizedTessFactor = 0u;
     uint32_t flags = 0u;
     uint32_t sourcePrimitiveAndSplitConfig = 0u;
-    uint32_t domainVertex0Encoded = 0u;
-    uint32_t domainVertex1Encoded = 0u;
-    uint32_t domainVertex2Encoded = 0u;
+    CLodReyesSplitQueueEntry::DomainVertexUV domainVertex0UV;
+    CLodReyesSplitQueueEntry::DomainVertexUV domainVertex1UV;
+    CLodReyesSplitQueueEntry::DomainVertexUV domainVertex2UV;
     uint32_t tessTableConfigIndex = 0u;
     uint32_t reserved = 0u;
 };
 
-static_assert(sizeof(CLodReyesDiceQueueEntry) == 56u, "CLodReyesDiceQueueEntry size must remain compact");
+static_assert(sizeof(CLodReyesDiceQueueEntry) == 68u, "CLodReyesDiceQueueEntry size must remain compact");
 
 struct CLodReyesTessTableConfigEntry
 {
@@ -198,6 +206,32 @@ struct CLodReyesRasterWorkEntry
 };
 
 static_assert(sizeof(CLodReyesRasterWorkEntry) == 16u, "CLodReyesRasterWorkEntry size must match HLSL");
+
+inline constexpr uint64_t CLodReyesSplitQueueBufferTestCapBytes = 256ull * 1024ull * 1024ull;
+inline constexpr uint32_t CLodReyesMaxSplitQueueEntriesForTesting =
+    static_cast<uint32_t>(CLodReyesSplitQueueBufferTestCapBytes / sizeof(CLodReyesSplitQueueEntry));
+
+constexpr uint32_t CLodReyesSplitQueueCapacity(uint32_t maxVisibleClusters)
+{
+    const uint64_t requestedCapacity =
+        static_cast<uint64_t>(maxVisibleClusters) * static_cast<uint64_t>(CLodReyesMaxSourceTrianglesPerVisibleCluster);
+    return requestedCapacity > static_cast<uint64_t>(CLodReyesMaxSplitQueueEntriesForTesting)
+        ? CLodReyesMaxSplitQueueEntriesForTesting
+        : static_cast<uint32_t>(requestedCapacity);
+}
+
+inline constexpr uint64_t CLodReyesDiceQueueBufferTestCapBytes = 256ull * 1024ull * 1024ull;
+inline constexpr uint32_t CLodReyesMaxDiceQueueEntriesForTesting =
+    static_cast<uint32_t>(CLodReyesDiceQueueBufferTestCapBytes / sizeof(CLodReyesDiceQueueEntry));
+
+constexpr uint32_t CLodReyesDiceQueueCapacity(uint32_t maxVisibleClusters)
+{
+    const uint64_t requestedCapacity =
+        static_cast<uint64_t>(maxVisibleClusters) * static_cast<uint64_t>(CLodReyesMaxSourceTrianglesPerVisibleCluster);
+    return requestedCapacity > static_cast<uint64_t>(CLodReyesMaxDiceQueueEntriesForTesting)
+        ? CLodReyesMaxDiceQueueEntriesForTesting
+        : static_cast<uint32_t>(requestedCapacity);
+}
 
 inline constexpr uint64_t CLodReyesRasterWorkBufferTestCapBytes = 1024ull * 1024ull * 1024ull;
 inline constexpr uint32_t CLodReyesMaxRasterWorkEntriesForTesting =
@@ -260,9 +294,10 @@ struct CLodReyesTelemetry
     uint32_t rasterZeroMicroTriangleCount = 0u;
     uint32_t rasterMicroTriangleOverflowCount = 0u;
     uint32_t rasterNearPlaneClippedQuadCount = 0u;
+    uint32_t rasterTinyTriangleFallbackCount = 0u;
 };
 
-static_assert(sizeof(CLodReyesTelemetry) == 228u, "CLodReyesTelemetry size must remain compact");
+static_assert(sizeof(CLodReyesTelemetry) == 232u, "CLodReyesTelemetry size must remain compact");
 
 inline constexpr uint32_t CLodReplayBufferSizeBytes = 200u * 1024u * 1024u; // 200 MB physical, GPU uses first 100 MB
 inline constexpr uint32_t CLodReplayNodeRegionSizeBytes = 50u * 1024u * 1024u;    // must match HLSL CLOD_REPLAY_NODE_REGION_SIZE_BYTES

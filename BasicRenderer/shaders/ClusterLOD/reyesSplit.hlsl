@@ -116,9 +116,9 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     const float3 sourcePosition1OS = DecodeCompressedPosition(sourceTriangle.y, md);
     const float3 sourcePosition2OS = DecodeCompressedPosition(sourceTriangle.z, md);
 
-    const float3 bary0 = ReyesDecodeBarycentrics(splitEntry.domainVertex0Encoded);
-    const float3 bary1 = ReyesDecodeBarycentrics(splitEntry.domainVertex1Encoded);
-    const float3 bary2 = ReyesDecodeBarycentrics(splitEntry.domainVertex2Encoded);
+    const float3 bary0 = ReyesPatchDomainUVToBarycentrics(splitEntry.domainVertex0UV);
+    const float3 bary1 = ReyesPatchDomainUVToBarycentrics(splitEntry.domainVertex1UV);
+    const float3 bary2 = ReyesPatchDomainUVToBarycentrics(splitEntry.domainVertex2UV);
     if (!ReyesPatchDomainHasValidSimplex(bary0, bary1, bary2))
     {
         InterlockedAdd(telemetryBuffer[0].invalidSplitPatchDomainCount, 1u);
@@ -140,9 +140,9 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     const uint nextQuantizedTessFactor = (uint)min(65535.0f, ceil(maxEdgeFactor * 256.0f));
     InterlockedMax(telemetryBuffer[0].deepestSplitLevelReached, nextSplitLevel);
 
-    const uint originalDomainVertex0Encoded = splitEntry.domainVertex0Encoded;
-    const uint originalDomainVertex1Encoded = splitEntry.domainVertex1Encoded;
-    const uint originalDomainVertex2Encoded = splitEntry.domainVertex2Encoded;
+    const float2 originalDomainVertex0UV = splitEntry.domainVertex0UV;
+    const float2 originalDomainVertex1UV = splitEntry.domainVertex1UV;
+    const float2 originalDomainVertex2UV = splitEntry.domainVertex2UV;
 
     // Route to dice if edge factors fit within the tess table, or we've exhausted split passes.
     bool routeToDice = (nextSplitLevel >= maxSplitPassCount) || (maxEdgeFactor <= float(REYES_TESS_TABLE_MAX_SEGMENTS));
@@ -159,10 +159,10 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
             return;
         }
 
-    uint domainVertex0Encoded = originalDomainVertex0Encoded;
-    uint domainVertex1Encoded = originalDomainVertex1Encoded;
-    uint domainVertex2Encoded = originalDomainVertex2Encoded;
-        const uint tessTableConfigIndex = ReyesEncodeCanonicalTessTableConfig(edgeFactors, domainVertex0Encoded, domainVertex1Encoded, domainVertex2Encoded);
+        float2 domainVertex0UV = originalDomainVertex0UV;
+        float2 domainVertex1UV = originalDomainVertex1UV;
+        float2 domainVertex2UV = originalDomainVertex2UV;
+        const uint tessTableConfigIndex = ReyesEncodeCanonicalTessTableConfig(edgeFactors, domainVertex0UV, domainVertex1UV, domainVertex2UV);
 
         CLodReyesDiceQueueEntry diceEntry;
         diceEntry.visibleClusterIndex = splitEntry.visibleClusterIndex;
@@ -174,9 +174,9 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         diceEntry.quantizedTessFactor = nextQuantizedTessFactor;
         diceEntry.flags = splitEntry.flags;
         diceEntry.sourcePrimitiveAndSplitConfig = (sourceTriangleIndex & 0xFFFFu) | ((tessTableConfigIndex & 0xFFFFu) << 16u);
-        diceEntry.domainVertex0Encoded = domainVertex0Encoded;
-        diceEntry.domainVertex1Encoded = domainVertex1Encoded;
-        diceEntry.domainVertex2Encoded = domainVertex2Encoded;
+        diceEntry.domainVertex0UV = domainVertex0UV;
+        diceEntry.domainVertex1UV = domainVertex1UV;
+        diceEntry.domainVertex2UV = domainVertex2UV;
         diceEntry.tessTableConfigIndex = tessTableConfigIndex;
         diceEntry.reserved = 0u;
         diceQueue[diceIndex] = diceEntry;
@@ -194,20 +194,20 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     // Look up the tess table config for these split factors against the current domain.
     // This canonicalizes the factors (rotates so largest is first) and applies the flip bit.
-    uint domainVertex0Encoded = splitEntry.domainVertex0Encoded;
-    uint domainVertex1Encoded = splitEntry.domainVertex1Encoded;
-    uint domainVertex2Encoded = splitEntry.domainVertex2Encoded;
+    float2 domainVertex0UV = splitEntry.domainVertex0UV;
+    float2 domainVertex1UV = splitEntry.domainVertex1UV;
+    float2 domainVertex2UV = splitEntry.domainVertex2UV;
     const uint splitConfigIndex = ReyesEncodeCanonicalTessTableConfig(
-        float3(splitFactors), domainVertex0Encoded, domainVertex1Encoded, domainVertex2Encoded);
+        float3(splitFactors), domainVertex0UV, domainVertex1UV, domainVertex2UV);
 
     const CLodReyesTessTableConfigEntry splitConfig = ReyesGetTessTableConfigEntry(tessTableConfigs, splitConfigIndex);
     const uint childCount = splitConfig.numTriangles;
     InterlockedAdd(telemetryBuffer[0].splitChildOutputCounts[splitPassTelemetryIndex], childCount);
 
     // Decode the parent's (potentially rotated/flipped) domain vertices for rebasing.
-    const float3 parentDomain0 = ReyesDecodeBarycentrics(domainVertex0Encoded);
-    const float3 parentDomain1 = ReyesDecodeBarycentrics(domainVertex1Encoded);
-    const float3 parentDomain2 = ReyesDecodeBarycentrics(domainVertex2Encoded);
+    const float3 parentDomain0 = ReyesPatchDomainUVToBarycentrics(domainVertex0UV);
+    const float3 parentDomain1 = ReyesPatchDomainUVToBarycentrics(domainVertex1UV);
+    const float3 parentDomain2 = ReyesPatchDomainUVToBarycentrics(domainVertex2UV);
 
     [loop]
     for (uint childIndex = 0u; childIndex < childCount; ++childIndex)
@@ -222,10 +222,7 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         precise float3 childDomain1 = parentDomain0 * microBary1.x + parentDomain1 * microBary1.y + parentDomain2 * microBary1.z;
         precise float3 childDomain2 = parentDomain0 * microBary2.x + parentDomain1 * microBary2.y + parentDomain2 * microBary2.z;
 
-        const uint childDomain0Encoded = ReyesEncodePatchBarycentrics(childDomain0);
-        const uint childDomain1Encoded = ReyesEncodePatchBarycentrics(childDomain1);
-        const uint childDomain2Encoded = ReyesEncodePatchBarycentrics(childDomain2);
-        if (!ReyesPatchDomainHasValidSimplexEncoded(childDomain0Encoded, childDomain1Encoded, childDomain2Encoded))
+        if (!ReyesPatchDomainHasValidSimplex(childDomain0, childDomain1, childDomain2))
         {
             collapseFallbackToDice = true;
             routeToDice = true;
@@ -249,10 +246,10 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
             return;
         }
 
-        domainVertex0Encoded = originalDomainVertex0Encoded;
-        domainVertex1Encoded = originalDomainVertex1Encoded;
-        domainVertex2Encoded = originalDomainVertex2Encoded;
-        const uint tessTableConfigIndex = ReyesEncodeCanonicalTessTableConfig(edgeFactors, domainVertex0Encoded, domainVertex1Encoded, domainVertex2Encoded);
+        domainVertex0UV = originalDomainVertex0UV;
+        domainVertex1UV = originalDomainVertex1UV;
+        domainVertex2UV = originalDomainVertex2UV;
+        const uint tessTableConfigIndex = ReyesEncodeCanonicalTessTableConfig(edgeFactors, domainVertex0UV, domainVertex1UV, domainVertex2UV);
 
         CLodReyesDiceQueueEntry diceEntry;
         diceEntry.visibleClusterIndex = splitEntry.visibleClusterIndex;
@@ -264,9 +261,9 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         diceEntry.quantizedTessFactor = nextQuantizedTessFactor;
         diceEntry.flags = splitEntry.flags;
         diceEntry.sourcePrimitiveAndSplitConfig = (sourceTriangleIndex & 0xFFFFu) | ((tessTableConfigIndex & 0xFFFFu) << 16u);
-        diceEntry.domainVertex0Encoded = domainVertex0Encoded;
-        diceEntry.domainVertex1Encoded = domainVertex1Encoded;
-        diceEntry.domainVertex2Encoded = domainVertex2Encoded;
+        diceEntry.domainVertex0UV = domainVertex0UV;
+        diceEntry.domainVertex1UV = domainVertex1UV;
+        diceEntry.domainVertex2UV = domainVertex2UV;
         diceEntry.tessTableConfigIndex = tessTableConfigIndex;
         diceEntry.reserved = 0u;
         diceQueue[diceIndex] = diceEntry;
@@ -312,9 +309,9 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         childEntry.quantizedTessFactor = nextQuantizedTessFactor;
         childEntry.flags = splitEntry.flags;
         childEntry.sourcePrimitiveAndSplitConfig = (sourceTriangleIndex & 0xFFFFu);
-        childEntry.domainVertex0Encoded = ReyesEncodePatchBarycentrics(childDomain0);
-        childEntry.domainVertex1Encoded = ReyesEncodePatchBarycentrics(childDomain1);
-        childEntry.domainVertex2Encoded = ReyesEncodePatchBarycentrics(childDomain2);
+        childEntry.domainVertex0UV = ReyesPatchBarycentricsToUV(childDomain0);
+        childEntry.domainVertex1UV = ReyesPatchBarycentricsToUV(childDomain1);
+        childEntry.domainVertex2UV = ReyesPatchBarycentricsToUV(childDomain2);
 
         outputSplitQueue[outputSplitBaseIndex + childIndex] = childEntry;
     }

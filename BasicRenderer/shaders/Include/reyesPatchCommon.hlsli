@@ -22,6 +22,16 @@ float3 ReyesDecodePatchBarycentrics(uint encoded)
     return float3(1.0f - u - v, u, v);
 }
 
+float3 ReyesPatchDomainUVToBarycentrics(float2 barycentricsUV)
+{
+    return float3(1.0f - barycentricsUV.x - barycentricsUV.y, barycentricsUV.x, barycentricsUV.y);
+}
+
+float2 ReyesPatchBarycentricsToUV(float3 barycentrics)
+{
+    return barycentrics.yz;
+}
+
 uint ReyesEncodePatchBarycentrics(float3 barycentrics)
 {
     uint3 quantized = uint3(saturate(barycentrics) * REYES_PATCH_BARYCENTRIC_COORD_SCALE + 0.5f);
@@ -57,6 +67,17 @@ bool ReyesDomainTupleLexicographicallyLess(uint lhs0, uint lhs1, uint lhs2, uint
         return lhs1 < rhs1;
     }
     return lhs2 < rhs2;
+}
+
+bool ReyesDomainTupleLexicographicallyLess(float2 lhs0, float2 lhs1, float2 lhs2, float2 rhs0, float2 rhs1, float2 rhs2)
+{
+    return ReyesDomainTupleLexicographicallyLess(
+        ReyesEncodePatchBarycentrics(ReyesPatchDomainUVToBarycentrics(lhs0)),
+        ReyesEncodePatchBarycentrics(ReyesPatchDomainUVToBarycentrics(lhs1)),
+        ReyesEncodePatchBarycentrics(ReyesPatchDomainUVToBarycentrics(lhs2)),
+        ReyesEncodePatchBarycentrics(ReyesPatchDomainUVToBarycentrics(rhs0)),
+        ReyesEncodePatchBarycentrics(ReyesPatchDomainUVToBarycentrics(rhs1)),
+        ReyesEncodePatchBarycentrics(ReyesPatchDomainUVToBarycentrics(rhs2)));
 }
 
 bool ReyesHasCanonicalFactorMaxTie(uint3 factors)
@@ -106,14 +127,54 @@ uint ReyesSelectCanonicalFactorRotation(uint3 factors, uint domainVertex0Encoded
 
     return bestRotation;
 }
-float ReyesPatchDomainSignedArea2(float3 bary0, float3 bary1, float3 bary2)
+
+uint ReyesSelectCanonicalFactorRotation(uint3 factors, float2 domainVertex0UV, float2 domainVertex1UV, float2 domainVertex2UV)
 {
-    const float2 baryUv0 = bary0.yz;
-    const float2 baryUv1 = bary1.yz;
-    const float2 baryUv2 = bary2.yz;
+    const uint maxFactor = max(factors.x, max(factors.y, factors.z));
+
+    uint bestRotation = 0u;
+    bool hasBest = false;
+    float2 bestDomain0 = float2(0.0f, 0.0f);
+    float2 bestDomain1 = float2(0.0f, 0.0f);
+    float2 bestDomain2 = float2(0.0f, 0.0f);
+
+    if (factors.x == maxFactor)
+    {
+        bestRotation = 0u;
+        bestDomain0 = domainVertex0UV;
+        bestDomain1 = domainVertex1UV;
+        bestDomain2 = domainVertex2UV;
+        hasBest = true;
+    }
+
+    if (factors.y == maxFactor &&
+        (!hasBest || ReyesDomainTupleLexicographicallyLess(domainVertex1UV, domainVertex2UV, domainVertex0UV, bestDomain0, bestDomain1, bestDomain2)))
+    {
+        bestRotation = 1u;
+        bestDomain0 = domainVertex1UV;
+        bestDomain1 = domainVertex2UV;
+        bestDomain2 = domainVertex0UV;
+        hasBest = true;
+    }
+
+    if (factors.z == maxFactor &&
+        (!hasBest || ReyesDomainTupleLexicographicallyLess(domainVertex2UV, domainVertex0UV, domainVertex1UV, bestDomain0, bestDomain1, bestDomain2)))
+    {
+        bestRotation = 2u;
+    }
+
+    return bestRotation;
+}
+
+float ReyesPatchDomainSignedArea2(float2 baryUv0, float2 baryUv1, float2 baryUv2)
+{
     return
         (baryUv1.x - baryUv0.x) * (baryUv2.y - baryUv0.y) -
         (baryUv1.y - baryUv0.y) * (baryUv2.x - baryUv0.x);
+}
+float ReyesPatchDomainSignedArea2(float3 bary0, float3 bary1, float3 bary2)
+{
+    return ReyesPatchDomainSignedArea2(bary0.yz, bary1.yz, bary2.yz);
 }
 
 float ReyesPatchDomainSignedArea2Encoded(uint encoded0, uint encoded1, uint encoded2)
@@ -127,6 +188,11 @@ float ReyesPatchDomainSignedArea2Encoded(uint encoded0, uint encoded1, uint enco
 bool ReyesPatchDomainHasValidSimplex(float3 bary0, float3 bary1, float3 bary2)
 {
     return abs(ReyesPatchDomainSignedArea2(bary0, bary1, bary2)) > (1.0f / REYES_PATCH_BARYCENTRIC_COORD_SCALE);
+}
+
+bool ReyesPatchDomainHasValidSimplex(float2 baryUv0, float2 baryUv1, float2 baryUv2)
+{
+    return abs(ReyesPatchDomainSignedArea2(baryUv0, baryUv1, baryUv2)) > (1.0f / REYES_PATCH_BARYCENTRIC_COORD_SCALE);
 }
 
 bool ReyesPatchDomainHasValidSimplexEncoded(uint encoded0, uint encoded1, uint encoded2)
@@ -150,12 +216,28 @@ void ReyesRotatePatchDomainYZX(inout uint domainVertex0Encoded, inout uint domai
     domainVertex2Encoded = original0;
 }
 
+void ReyesRotatePatchDomainYZX(inout float2 domainVertex0UV, inout float2 domainVertex1UV, inout float2 domainVertex2UV)
+{
+    const float2 original0 = domainVertex0UV;
+    domainVertex0UV = domainVertex1UV;
+    domainVertex1UV = domainVertex2UV;
+    domainVertex2UV = original0;
+}
+
 void ReyesRotatePatchDomainZXY(inout uint domainVertex0Encoded, inout uint domainVertex1Encoded, inout uint domainVertex2Encoded)
 {
     const uint original0 = domainVertex0Encoded;
     domainVertex0Encoded = domainVertex2Encoded;
     domainVertex2Encoded = domainVertex1Encoded;
     domainVertex1Encoded = original0;
+}
+
+void ReyesRotatePatchDomainZXY(inout float2 domainVertex0UV, inout float2 domainVertex1UV, inout float2 domainVertex2UV)
+{
+    const float2 original0 = domainVertex0UV;
+    domainVertex0UV = domainVertex2UV;
+    domainVertex2UV = domainVertex1UV;
+    domainVertex1UV = original0;
 }
 
 void ReyesCanonicalizeTessTableFactorsAndPatchDomain(inout uint3 factors, inout uint domainVertex0Encoded, inout uint domainVertex1Encoded, inout uint domainVertex2Encoded)
@@ -170,6 +252,21 @@ void ReyesCanonicalizeTessTableFactorsAndPatchDomain(inout uint3 factors, inout 
     {
         factors = factors.zxy;
         ReyesRotatePatchDomainZXY(domainVertex0Encoded, domainVertex1Encoded, domainVertex2Encoded);
+    }
+}
+
+void ReyesCanonicalizeTessTableFactorsAndPatchDomain(inout uint3 factors, inout float2 domainVertex0UV, inout float2 domainVertex1UV, inout float2 domainVertex2UV)
+{
+    const uint rotation = ReyesSelectCanonicalFactorRotation(factors, domainVertex0UV, domainVertex1UV, domainVertex2UV);
+    if (rotation == 1u)
+    {
+        factors = factors.yzx;
+        ReyesRotatePatchDomainYZX(domainVertex0UV, domainVertex1UV, domainVertex2UV);
+    }
+    else if (rotation == 2u)
+    {
+        factors = factors.zxy;
+        ReyesRotatePatchDomainZXY(domainVertex0UV, domainVertex1UV, domainVertex2UV);
     }
 }
 
@@ -208,6 +305,25 @@ uint ReyesEncodeCanonicalTessTableConfig(float3 edgeFactors, inout uint domainVe
 {
     uint3 factors = ReyesQuantizeTessTableFactors(edgeFactors);
     ReyesCanonicalizeTessTableFactorsAndPatchDomain(factors, domainVertex0Encoded, domainVertex1Encoded, domainVertex2Encoded);
+
+    uint index =
+        factors.x +
+        factors.y * REYES_TESS_TABLE_LOOKUP_SIZE +
+        factors.z * (REYES_TESS_TABLE_LOOKUP_SIZE * REYES_TESS_TABLE_LOOKUP_SIZE) -
+        (1u + REYES_TESS_TABLE_LOOKUP_SIZE + REYES_TESS_TABLE_LOOKUP_SIZE * REYES_TESS_TABLE_LOOKUP_SIZE);
+
+    if (factors.z > factors.y)
+    {
+        index |= REYES_TESS_TABLE_FLIP_BIT;
+    }
+
+    return index;
+}
+
+uint ReyesEncodeCanonicalTessTableConfig(float3 edgeFactors, inout float2 domainVertex0UV, inout float2 domainVertex1UV, inout float2 domainVertex2UV)
+{
+    uint3 factors = ReyesQuantizeTessTableFactors(edgeFactors);
+    ReyesCanonicalizeTessTableFactorsAndPatchDomain(factors, domainVertex0UV, domainVertex1UV, domainVertex2UV);
 
     uint index =
         factors.x +

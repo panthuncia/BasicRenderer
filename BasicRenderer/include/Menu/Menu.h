@@ -2359,6 +2359,11 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 telemetry.rasterPreAreaCullCount,
                 telemetry.rasterEmptyBoundsCullCount,
                 telemetry.rasterNearPlaneClippedQuadCount);
+            ImGui::Text("Patch raster projected-triangles: windingSwaps=%u postSwapDegenerate=%u",
+                telemetry.rasterWindingSwapCount,
+                telemetry.rasterPostSwapNonNegativeAreaCount);
+            ImGui::Text("Patch raster tiny-triangle fallback=%u",
+                telemetry.rasterTinyTriangleFallbackCount);
 
             ImGui::TextUnformatted("Per split pass");
             for (uint32_t splitPassIndex = 0; splitPassIndex < CLodReyesMaxSplitPassCount; ++splitPassIndex) {

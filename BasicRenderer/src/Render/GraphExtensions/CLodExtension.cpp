@@ -300,7 +300,10 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
     m_reyesSplitIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false, false);
     m_reyesSplitIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Split Indirect Args Buffer Phase2"));
 
-    m_reyesSplitQueueBufferA = CreateAliasedUnmaterializedStructuredBuffer(maxVisibleClusters, sizeof(CLodReyesSplitQueueEntry), true, false);
+    const uint32_t reyesSplitQueueCapacity = CLodReyesSplitQueueCapacity(maxVisibleClusters);
+    const uint32_t reyesDiceQueueCapacity = CLodReyesDiceQueueCapacity(maxVisibleClusters);
+
+    m_reyesSplitQueueBufferA = CreateAliasedUnmaterializedStructuredBuffer(reyesSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry), true, false);
     m_reyesSplitQueueBufferA->SetName(MakeVariantResourceName(traits, "Reyes Split Queue Buffer A"));
 
     m_reyesSplitQueueCounterBufferA = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
@@ -317,7 +320,7 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
         .add<CLodReyesSplitQueueOverflowATag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesSplitQueueBufferB = CreateAliasedUnmaterializedStructuredBuffer(maxVisibleClusters, sizeof(CLodReyesSplitQueueEntry), true, false);
+    m_reyesSplitQueueBufferB = CreateAliasedUnmaterializedStructuredBuffer(reyesSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry), true, false);
     m_reyesSplitQueueBufferB->SetName(MakeVariantResourceName(traits, "Reyes Split Queue Buffer B"));
 
     m_reyesSplitQueueCounterBufferB = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
@@ -334,7 +337,7 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
         .add<CLodReyesSplitQueueOverflowBTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesDiceQueueBuffer = CreateAliasedUnmaterializedStructuredBuffer(maxVisibleClusters, sizeof(CLodReyesDiceQueueEntry), true, false);
+    m_reyesDiceQueueBuffer = CreateAliasedUnmaterializedStructuredBuffer(reyesDiceQueueCapacity, sizeof(CLodReyesDiceQueueEntry), true, false);
     m_reyesDiceQueueBuffer->SetName(MakeVariantResourceName(traits, "Reyes Dice Queue Buffer"));
     m_reyesDiceQueueBuffer->GetECSEntity()
         .set<Components::Resource>({ m_reyesDiceQueueBuffer })
@@ -611,6 +614,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly ||
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility;
     const bool useComputeSWRaster = !forceHardwareOnly && CLodSoftwareRasterUsesCompute(softwareRasterMode);
+    const uint32_t reyesSplitQueueCapacity = CLodReyesSplitQueueCapacity(m_maxVisibleClusters);
+    const uint32_t reyesDiceQueueCapacity = CLodReyesDiceQueueCapacity(m_maxVisibleClusters);
     const uint32_t reyesRasterWorkCapacity = CLodReyesRasterWorkCapacity(m_maxVisibleClusters);
     const auto workGraphMode = forceHardwareOnly
         ? HierarchialCullingWorkGraphMode::HardwareOnly
@@ -721,7 +726,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_reyesSplitQueueCounterBufferA,
                 m_reyesSplitQueueOverflowBufferA,
                 m_reyesSplitIndirectArgsBuffer,
-                m_maxVisibleClusters,
+                reyesSplitQueueCapacity,
                 1u);
             outPasses.push_back(std::move(reyesSeedPassDesc));
 
@@ -758,7 +763,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_reyesTessTableTrianglesBuffer,
                     m_reyesSplitIndirectArgsBuffer,
                     m_reyesTelemetryBufferPhase1,
-                    m_maxVisibleClusters,
+                    reyesSplitQueueCapacity,
                     splitPassIndex,
                     CLodReyesMaxSplitPassCount,
                     1u);
@@ -782,7 +787,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_reyesTessTableConfigsBuffer,
                 m_reyesDiceIndirectArgsBuffer,
                 m_reyesTelemetryBufferPhase1,
-                m_maxVisibleClusters,
+                reyesDiceQueueCapacity,
                 1u);
             outPasses.push_back(std::move(reyesDicePassDesc));
 
@@ -1140,7 +1145,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_reyesSplitQueueCounterBufferA,
         m_reyesSplitQueueOverflowBufferA,
         m_reyesSplitIndirectArgsBufferPhase2,
-        m_maxVisibleClusters,
+        reyesSplitQueueCapacity,
         2u);
     outPasses.push_back(std::move(reyesSeedPassDesc2));
 
@@ -1177,7 +1182,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_reyesTessTableTrianglesBuffer,
             m_reyesSplitIndirectArgsBufferPhase2,
             m_reyesTelemetryBufferPhase2,
-            m_maxVisibleClusters,
+            reyesSplitQueueCapacity,
             splitPassIndex,
             CLodReyesMaxSplitPassCount,
             2u);
@@ -1201,7 +1206,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_reyesTessTableConfigsBuffer,
         m_reyesDiceIndirectArgsBufferPhase2,
         m_reyesTelemetryBufferPhase2,
-        m_maxVisibleClusters,
+        reyesDiceQueueCapacity,
         2u);
     outPasses.push_back(std::move(reyesDicePassDesc2));
 
