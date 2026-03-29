@@ -233,7 +233,7 @@ constexpr uint32_t CLodReyesDiceQueueCapacity(uint32_t maxVisibleClusters)
         : static_cast<uint32_t>(requestedCapacity);
 }
 
-inline constexpr uint64_t CLodReyesRasterWorkBufferTestCapBytes = 1024ull * 1024ull * 1024ull;
+inline constexpr uint64_t CLodReyesRasterWorkBufferTestCapBytes = 1024ull * 1024ull * 512ull; // 512 MB for testing
 inline constexpr uint32_t CLodReyesMaxRasterWorkEntriesForTesting =
     static_cast<uint32_t>(CLodReyesRasterWorkBufferTestCapBytes / sizeof(CLodReyesRasterWorkEntry));
 

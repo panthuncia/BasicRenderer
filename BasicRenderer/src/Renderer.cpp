@@ -816,6 +816,12 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<AutoAliasPackingStrategy>("autoAliasPackingStrategy", AutoAliasPackingStrategy::GreedySweepLine);
     settingsManager.registerSetting<bool>("autoAliasEnableLogging", false);
     settingsManager.registerSetting<bool>("autoAliasLogExclusionReasons", false);
+    settingsManager.registerSetting<bool>("queueSchedulingEnableLogging", true);
+    settingsManager.registerSetting<float>("queueSchedulingWidthScale", 1.0f);
+    settingsManager.registerSetting<float>("queueSchedulingPenaltyBias", 0.0f);
+    settingsManager.registerSetting<float>("queueSchedulingMinPenalty", 1.0f);
+    settingsManager.registerSetting<float>("queueSchedulingResourcePressureWeight", 1.0f);
+    settingsManager.registerSetting<float>("queueSchedulingUavPressureWeight", 0.5f);
 	settingsManager.registerSetting<uint32_t>("autoAliasPoolRetireIdleFrames", 120u);
 	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
     settingsManager.registerSetting<bool>("heavyDebug", false);
@@ -1509,6 +1515,12 @@ void Renderer::Render() {
         orgSettings.autoAliasPackingStrategy  = static_cast<uint8_t>(sm.getSettingGetter<AutoAliasPackingStrategy>("autoAliasPackingStrategy")());
         orgSettings.autoAliasEnableLogging    = sm.getSettingGetter<bool>("autoAliasEnableLogging")();
         orgSettings.autoAliasLogExclusionReasons = sm.getSettingGetter<bool>("autoAliasLogExclusionReasons")();
+        orgSettings.queueSchedulingEnableLogging = sm.getSettingGetter<bool>("queueSchedulingEnableLogging")();
+        orgSettings.queueSchedulingWidthScale = sm.getSettingGetter<float>("queueSchedulingWidthScale")();
+        orgSettings.queueSchedulingPenaltyBias = sm.getSettingGetter<float>("queueSchedulingPenaltyBias")();
+        orgSettings.queueSchedulingMinPenalty = sm.getSettingGetter<float>("queueSchedulingMinPenalty")();
+        orgSettings.queueSchedulingResourcePressureWeight = sm.getSettingGetter<float>("queueSchedulingResourcePressureWeight")();
+        orgSettings.queueSchedulingUavPressureWeight = sm.getSettingGetter<float>("queueSchedulingUavPressureWeight")();
         orgSettings.autoAliasPoolRetireIdleFrames = sm.getSettingGetter<uint32_t>("autoAliasPoolRetireIdleFrames")();
         orgSettings.autoAliasPoolGrowthHeadroom   = sm.getSettingGetter<float>("autoAliasPoolGrowthHeadroom")();
         orgSettings.heavyDebug                = sm.getSettingGetter<bool>("heavyDebug")();
@@ -1914,13 +1926,14 @@ void Renderer::CreateRenderGraph() {
             m_pReadbackManager.get()));
         currentRenderGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>(
             currentRenderGraph->GetReadbackService()));
+        uint maxClusters = 100000; // TODO: make this configurable based on scene content   
         currentRenderGraph->RegisterExtension(
-            std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint32_t>(pow(2, 25))),
+            std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint32_t>(maxClusters)),
             "CLodOpaque");
         constexpr bool kEnableAlphaBlendCLodVariant = true;
         if (kEnableAlphaBlendCLodVariant) {
             currentRenderGraph->RegisterExtension(
-                std::make_unique<CLodExtension>(CLodExtensionType::AlphaBlend, static_cast<uint32_t>(pow(2, 25))),
+                std::make_unique<CLodExtension>(CLodExtensionType::AlphaBlend, static_cast<uint32_t>(maxClusters)),
                 "CLodAlpha");
         }
 		m_renderGraphRuntimeInitialized = true;
@@ -2115,6 +2128,8 @@ void Renderer::CreateRenderGraph() {
     }
 
 	BuildLinearDepthHistoryCopyPass(newGraph.get());
+
+    newGraph->SetMinimumAutomaticSchedulingQueues(QueueKind::Compute, 3);
 
     newGraph->CompileStructural();
     newGraph->Setup();

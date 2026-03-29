@@ -55,6 +55,14 @@ MeshManager::MeshManager() {
 
 	rg::memory::SetResourceUsageHint(*m_perMeshBuffers, "PerMesh, PerMeshInstance, PerObject");
 	rg::memory::SetResourceUsageHint(*m_perMeshInstanceBuffers, "PerMesh, PerMeshInstance, PerObject");
+	rg::memory::SetResourceUsageHint(*m_perMeshInstanceClodOffsets, "Cluster LOD data");
+	rg::memory::SetResourceUsageHint(*m_clodSharedGroupChunks, "Cluster LOD data");
+	rg::memory::SetResourceUsageHint(*m_clodMeshMetadata, "Cluster LOD data");
+	rg::memory::SetResourceUsageHint(*m_clusterLODGroups, "Cluster LOD data");
+	rg::memory::SetResourceUsageHint(*m_clusterLODSegments, "Cluster LOD data");
+	rg::memory::SetResourceUsageHint(*m_clusterLODMeshletBounds, "Cluster LOD data");
+	rg::memory::SetResourceUsageHint(*m_clusterLODNodes, "Cluster LOD data");
+	rg::memory::SetResourceUsageHint(*m_clodGroupPageMap, "Cluster LOD streaming");
 
 
 	m_resources[Builtin::PreSkinningVertices] = m_preSkinningVertices;
@@ -79,10 +87,11 @@ MeshManager::MeshManager() {
 		PagePool::Config ppConfig;
 		ppConfig.pageSize     = 256 * 1024;         // 256 KB
 		ppConfig.slabSize     = 256 * 1024 * 1024;  // 256 MB
-		ppConfig.numStreamingSlabs = 16;
+		ppConfig.numStreamingSlabs = 4;
 		ppConfig.debugName    = "CLodPagePool";
 		m_clodPagePool = std::make_unique<PagePool>(ppConfig);
 	}
+	rg::memory::SetResourceUsageHint(*m_clodPagePool->GetPageTableBuffer(), "Cluster LOD streaming");
 	m_resources[Builtin::CLod::PageTable] = m_clodPagePool->GetPageTableBuffer();
 	// Slab buffers are registered dynamically as they're allocated.
 	// The PagePoolSlabBase descriptor is resolved per-pass from the first slab.

@@ -3,6 +3,7 @@
 #include <cassert>
 #include <spdlog/spdlog.h>
 
+#include "Render/MemoryIntrospectionAPI.h"
 #include "Resources/Buffers/DynamicBuffer.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 
@@ -23,6 +24,7 @@ PagePool::PagePool(const Config& config)
 		/*capacity=*/m_pagesPerSlab, // start with room for one slab
 		m_config.debugName + "::PageTable");
 	m_pageTableBuffer->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
+	rg::memory::SetResourceUsageHint(*m_pageTableBuffer, "Cluster LOD page table");
 
 	// Resource group for slab buffers (render graph auto-invalidation).
 	m_slabResourceGroup = std::make_shared<ResourceGroup>(m_config.debugName + "::Slabs");
@@ -57,6 +59,7 @@ bool PagePool::AllocateNewSlab(SlabRole role) {
 		/*byteAddress=*/true,
 		/*UAV=*/false);
 	slab.buffer->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
+	rg::memory::SetResourceUsageHint(*slab.buffer, role == SlabRole::Pinned ? "Cluster LOD pinned page slabs" : "Cluster LOD page slabs");
 
 	m_slabs.push_back(std::move(slab));
 	m_totalPageCapacity += m_pagesPerSlab;
@@ -135,6 +138,7 @@ void PagePool::FlushPageTableUpdates() {
 			m_pageTableCpu.size(),
 			m_config.debugName + "::PageTable");
 		m_pageTableBuffer->SetUploadPolicyTag(rg::runtime::UploadPolicyTag::Immediate);
+		rg::memory::SetResourceUsageHint(*m_pageTableBuffer, "Cluster LOD page table");
 	}
 
 	auto target = rg::runtime::UploadTarget::FromShared(m_pageTableBuffer);

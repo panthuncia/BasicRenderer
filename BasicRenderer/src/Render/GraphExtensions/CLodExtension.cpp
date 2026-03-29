@@ -36,6 +36,7 @@
 #include "Render/GraphExtensions/ClusterLOD/ReyesSplitPass.h"
 #include "Render/GraphExtensions/ClusterLOD/ReyesTessellationTable.h"
 #include "Render/GraphExtensions/ClusterLOD/ReyesTessellationTableUploadPass.h"
+#include "Render/MemoryIntrospectionAPI.h"
 #include "Render/RenderPhase.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
 #include "Resources/Buffers/PagePool.h"
@@ -189,6 +190,12 @@ CLodExtension::~CLodExtension() = default;
 CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters)
     : m_type(type)
     , m_maxVisibleClusters(maxVisibleClusters) {
+    auto tagBufferUsage = [](const std::shared_ptr<Buffer>& buffer, std::string_view usage) {
+        if (buffer) {
+            rg::memory::SetResourceUsageHint(*buffer, std::string(usage));
+        }
+    };
+
     const auto& traits = GetVariantTraits(type);
     auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
     const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
@@ -470,6 +477,68 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
     m_viewRasterInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodViewRasterInfo), false, false, false, false);
     m_viewRasterInfoBuffer->SetName(MakeVariantResourceName(traits, "View Raster Info Buffer"));
 
+    tagBufferUsage(m_visibleClustersBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_histogramIndirectCommand, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsHistogramBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_visibleClustersCounterBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_workGraphTelemetryBuffer, "Cluster LOD telemetry");
+    tagBufferUsage(m_occlusionReplayBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_occlusionReplayStateBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_occlusionNodeGpuInputsBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_viewDepthSrvIndicesBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_rasterBucketsOffsetsBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsBlockSumsBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsScannedBlockSumsBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsTotalCountBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsTotalCountBufferPhase1, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsTotalCountBufferPhase1Sw, "Cluster LOD rasterization");
+    tagBufferUsage(m_compactedVisibleClustersBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_rasterBucketsWriteCursorBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsIndirectArgsBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_reyesFullClusterOutputsBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesFullClusterOutputsCounterBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesOwnedClustersBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesOwnedClustersCounterBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesOwnershipBitsetBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesOwnershipBitsetBufferPhase2, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesClassifyIndirectArgsBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesClassifyIndirectArgsBufferPhase2, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesSplitIndirectArgsBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesSplitIndirectArgsBufferPhase2, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesSplitQueueBufferA, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesSplitQueueCounterBufferA, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesSplitQueueOverflowBufferA, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesSplitQueueBufferB, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesSplitQueueCounterBufferB, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesSplitQueueOverflowBufferB, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesDiceQueueBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesTessTableConfigsBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesTessTableVerticesBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesTessTableTrianglesBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesDiceQueueCounterBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesDiceQueueOverflowBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesRasterWorkBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesRasterWorkCounterBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesRasterWorkIndirectArgsBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesRasterWorkBufferPhase2, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesRasterWorkCounterBufferPhase2, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesRasterWorkIndirectArgsBufferPhase2, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesDiceIndirectArgsBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesDiceIndirectArgsBufferPhase2, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesTelemetryBufferPhase1, "Cluster LOD telemetry");
+    tagBufferUsage(m_reyesTelemetryBufferPhase2, "Cluster LOD telemetry");
+    tagBufferUsage(m_visibleClustersCounterBufferPhase2, "Cluster LOD visibility");
+    tagBufferUsage(m_rasterBucketsHistogramBufferPhase2, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsHistogramBufferSw, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsHistogramBufferPhase2Sw, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsWriteCursorBufferPhase2, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsWriteCursorBufferSw, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsWriteCursorBufferPhase2Sw, "Cluster LOD rasterization");
+    tagBufferUsage(m_swVisibleClustersCounterBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_swVisibleClustersCounterBufferPhase2, "Cluster LOD visibility");
+    tagBufferUsage(m_sortedToUnsortedMappingBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_viewRasterInfoBuffer, "Cluster LOD rasterization");
+
     if (traits.rasterOutputKind == CLodRasterOutputKind::DeepVisibility) {
         m_deepVisibilityNodesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
             1,
@@ -506,6 +575,11 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
             .set<Components::Resource>({ m_deepVisibilityStatsBuffer })
             .add<CLodDeepVisibilityStatsTag>()
             .add<CLodExtensionTypeTag>(typeEntity);
+
+        tagBufferUsage(m_deepVisibilityNodesBuffer, "Cluster LOD deep visibility");
+        tagBufferUsage(m_deepVisibilityCounterBuffer, "Cluster LOD deep visibility");
+        tagBufferUsage(m_deepVisibilityOverflowCounterBuffer, "Cluster LOD deep visibility");
+        tagBufferUsage(m_deepVisibilityStatsBuffer, "Cluster LOD deep visibility");
     }
 }
 

@@ -15,12 +15,19 @@
 #include "Render/GraphExtensions/ClusterLOD/CLodAsyncUploadPass.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "Managers/UploadInstance.h"
+#include "Render/MemoryIntrospectionAPI.h"
 #include "Render/Runtime/OpenRenderGraphSettings.h"
 #include "RenderPasses/StreamingUploadPass.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "BuiltinResources.h"
 
 CLodStreamingSystem::CLodStreamingSystem() {
+    auto tagBufferUsage = [](const std::shared_ptr<Buffer>& buffer, std::string_view usage) {
+        if (buffer) {
+            rg::memory::SetResourceUsageHint(*buffer, std::string(usage));
+        }
+    };
+
     m_streamingNonResidentBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
     m_streamingActiveGroupsBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
     m_streamingPinnedGroupsBitsCpu.assign(CLodBitsetWordCount(m_streamingStorageGroupCapacity), 0u);
@@ -58,6 +65,7 @@ CLodStreamingSystem::CLodStreamingSystem() {
         false,
         false);
     m_streamingNonResidentBits->SetName("CLod Streaming NonResident Bits");
+    tagBufferUsage(m_streamingNonResidentBits, "Cluster LOD streaming");
 
     m_streamingActiveGroupsBits = CreateAliasedUnmaterializedStructuredBuffer(
         CLodBitsetWordCount(m_streamingStorageGroupCapacity),
@@ -67,6 +75,7 @@ CLodStreamingSystem::CLodStreamingSystem() {
         false,
         false);
     m_streamingActiveGroupsBits->SetName("CLod Streaming Active Groups Bits");
+    tagBufferUsage(m_streamingActiveGroupsBits, "Cluster LOD streaming");
 
     m_streamingLoadRequests = CreateAliasedUnmaterializedStructuredBuffer(
         CLodStreamingRequestCapacity,
@@ -76,15 +85,19 @@ CLodStreamingSystem::CLodStreamingSystem() {
         false,
         false);
     m_streamingLoadRequests->SetName("CLod Streaming Load Requests");
+    tagBufferUsage(m_streamingLoadRequests, "Cluster LOD streaming");
 
     m_streamingLoadCounter = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
     m_streamingLoadCounter->SetName("CLod Streaming Load Counter");
+    tagBufferUsage(m_streamingLoadCounter, "Cluster LOD streaming");
 
     m_streamingRuntimeState = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodStreamingRuntimeState), true, false, false, false);
     m_streamingRuntimeState->SetName("CLod Streaming Runtime State");
+    tagBufferUsage(m_streamingRuntimeState, "Cluster LOD streaming");
 
     m_usedGroupsCounter = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
     m_usedGroupsCounter->SetName("CLod Used Groups Counter");
+    tagBufferUsage(m_usedGroupsCounter, "Cluster LOD streaming");
 
     m_usedGroupsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         CLodUsedGroupsCapacity,
@@ -94,6 +107,7 @@ CLodStreamingSystem::CLodStreamingSystem() {
         false,
         false);
     m_usedGroupsBuffer->SetName("CLod Used Groups Buffer");
+    tagBufferUsage(m_usedGroupsBuffer, "Cluster LOD streaming");
 
     // Self-managed readback pipeline
     {
@@ -113,12 +127,16 @@ CLodStreamingSystem::CLodStreamingSystem() {
         auto& slot = m_readbackStagingSlots[i];
         slot.counterStaging = Buffer::CreateShared(rhi::HeapType::Readback, counterStagingBytes);
         slot.counterStaging->SetName(("CLodReadbackCounter_" + std::to_string(i)).c_str());
+        tagBufferUsage(slot.counterStaging, "Cluster LOD streaming readback");
         slot.requestsStaging = Buffer::CreateShared(rhi::HeapType::Readback, requestsStagingBytes);
         slot.requestsStaging->SetName(("CLodReadbackRequests_" + std::to_string(i)).c_str());
+        tagBufferUsage(slot.requestsStaging, "Cluster LOD streaming readback");
         slot.usedGroupsCounterStaging = Buffer::CreateShared(rhi::HeapType::Readback, usedGroupsCounterStagingBytes);
         slot.usedGroupsCounterStaging->SetName(("CLodReadbackUsedGroupsCounter_" + std::to_string(i)).c_str());
+        tagBufferUsage(slot.usedGroupsCounterStaging, "Cluster LOD streaming readback");
         slot.usedGroupsBufferStaging = Buffer::CreateShared(rhi::HeapType::Readback, usedGroupsBufferStagingBytes);
         slot.usedGroupsBufferStaging->SetName(("CLodReadbackUsedGroupsBuffer_" + std::to_string(i)).c_str());
+        tagBufferUsage(slot.usedGroupsBufferStaging, "Cluster LOD streaming readback");
     }
 
     // Start the background streaming worker thread.
@@ -221,7 +239,10 @@ void CLodStreamingSystem::OnRegistryReset(ResourceRegistry* reg) {
 
 void CLodStreamingSystem::Initialize(RenderGraph& rg) {
     // Create a dedicated copy queue for async CLod streaming uploads.
-    m_uploadQueueSlot = rg.CreateQueue(QueueKind::Copy, "CLodAsyncUpload");
+    m_uploadQueueSlot = rg.CreateQueue(
+        QueueKind::Copy,
+        "CLodAsyncUpload",
+        QueueAutoAssignmentPolicy::ManualOnly);
 
     // Create the upload instance for CLod-specific uploads, using the same
     // number of frames in flight as the global settings.
