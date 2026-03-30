@@ -1982,8 +1982,7 @@ void Renderer::CreateRenderGraph() {
     BuildEnvironmentPipeline(newGraph.get());
 
     // Skinning comes before Z prepass
-    newGraph->BuildComputePass("SkinningPass")
-        .Build<SkinningPass>();
+    newGraph->BuildComputePass<SkinningPass>("SkinningPass");
     
     bool indirect = getIndirectDrawsEnabled();
     if (!useMeshShaders) { // Indirect draws only supported with mesh shaders
@@ -2012,8 +2011,7 @@ void Renderer::CreateRenderGraph() {
     CreateDebugVisualizationResources(newGraph.get());
 
     if (m_visibilityRendering) {
-        newGraph->BuildRenderPass("ClearVisibilityBufferPass")
-            .Build<ClearVisibilityBufferPass>();
+        newGraph->BuildRenderPass<ClearVisibilityBufferPass>("ClearVisibilityBufferPass");
     }
 
 	// Either visibility or standard GBuffer pass
@@ -2029,7 +2027,7 @@ void Renderer::CreateRenderGraph() {
         BuildLightClusteringPipeline(newGraph.get());
     }
 
-    auto& debugPassBuilder = newGraph->BuildRenderPass("DebugPass");
+    auto& debugPassBuilder = newGraph->BuildRenderPass<DebugRenderPass>("DebugPass");
 
     auto drawShadows = getShadowsEnabled();
     if (drawShadows) {
@@ -2058,8 +2056,7 @@ void Renderer::CreateRenderGraph() {
     newGraph->RegisterResource(Builtin::Environment::CurrentPrefilteredCubemap, currentEnvironmentPrefilteredCubemap);
 
     if (m_currentEnvironment != nullptr) {
-        newGraph->BuildComputePass("SkyboxPass")
-            .Build<SkyboxRenderPass>();
+        newGraph->BuildComputePass<SkyboxRenderPass>("SkyboxPass");
     }
 
     BuildPrimaryPass(newGraph.get(), m_currentEnvironment.get());
@@ -2081,13 +2078,10 @@ void Renderer::CreateRenderGraph() {
     rg::memory::SetResourceUsageHint(*histogramBuffer, "Post-Processing resources");
 	newGraph->RegisterResource(Builtin::PostProcessing::LuminanceHistogram, histogramBuffer);
 
-    newGraph->BuildComputePass("luminanceHistogramPass")
-        .Build<LuminanceHistogramPass>();
-    newGraph->BuildComputePass("LuminanceAveragePass")
-		.Build<LuminanceHistogramAveragePass>();
+        newGraph->BuildComputePass<LuminanceHistogramPass>("luminanceHistogramPass");
+        newGraph->BuildComputePass<LuminanceHistogramAveragePass>("LuminanceAveragePass");
 
-    newGraph->BuildRenderPass("UpscalingPass")
-		.Build<UpscalingPass>();
+        newGraph->BuildRenderPass<UpscalingPass>("UpscalingPass");
 
     if (m_bloom) {
         BuildBloomPipeline(newGraph.get());
@@ -2105,19 +2099,13 @@ void Renderer::CreateRenderGraph() {
 	params.axisOpacity = 0.85f;
     params.overallOpacity = 1.0f;
 
-	newGraph->BuildComputePass("DebugGridPass")
-		.Build<DebugGridPass>(params);
+	newGraph->BuildComputePass<DebugGridPass>("DebugGridPass", params);
 
-    newGraph->BuildRenderPass("TonemappingPass")
-        .Build<TonemappingPass>();
+    newGraph->BuildRenderPass<TonemappingPass>("TonemappingPass");
 
-    newGraph->BuildRenderPass("DebugResolvePass")
-        .Build<DebugResolvePass>();
+    newGraph->BuildRenderPass<DebugResolvePass>("DebugResolvePass");
 
-    newGraph->BuildRenderPass("MenuRenderPass")
-        .Build<MenuRenderPass>();
-
-    debugPassBuilder.Build<DebugRenderPass>();
+    newGraph->BuildRenderPass<MenuRenderPass>("MenuRenderPass");
 	if (m_coreResourceProvider.m_currentDebugTexture != nullptr) {
 		auto debugRenderPass = newGraph->GetRenderPassByName("DebugPass");
 		std::shared_ptr<DebugRenderPass> debugPass = std::dynamic_pointer_cast<DebugRenderPass>(debugRenderPass);
@@ -2127,8 +2115,7 @@ void Renderer::CreateRenderGraph() {
 	}
 
     if (getDrawBoundingSpheres()) {
-		newGraph->BuildRenderPass("DebugSpherePass")
-			.Build<DebugSpherePass>();
+        newGraph->BuildRenderPass<DebugSpherePass>("DebugSpherePass");
     }
 
 	BuildLinearDepthHistoryCopyPass(newGraph.get());
