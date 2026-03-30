@@ -27,6 +27,15 @@ public:
         uint32_t localIndex = 0;
 
         for (auto& capture : captures) {
+            QueueKind preferredQueueKind = capture.preferredQueueKind;
+            if (preferredQueueKind != QueueKind::Graphics && preferredQueueKind != QueueKind::Copy) {
+                spdlog::warn(
+                    "ReadbackCaptureExtension: capture for pass '{}' requested unsupported queue kind {}; falling back to graphics.",
+                    capture.passName,
+                    static_cast<int>(preferredQueueKind));
+                preferredQueueKind = QueueKind::Graphics;
+            }
+
             auto resource = capture.resource.lock();
             if (!resource && capture.resourceId != 0) {
                 resource = rg.GetResourceByID(capture.resourceId);
@@ -53,10 +62,10 @@ public:
             desc.where = RenderGraph::ExternalInsertPoint::After(capture.passName);
             desc.registerName = false;
 
-            if (capture.preferCopyQueue) {
+            if (preferredQueueKind == QueueKind::Copy) {
                 // Route through copy-queue CopyPass for lower latency
                 desc.type = RenderGraph::PassType::Copy;
-                desc.copyQueueSelection = CopyQueueSelection::Copy;
+                desc.preferredQueueKind = QueueKind::Copy;
 
                 ReadbackCopyCaptureInputs inputs{};
                 inputs.target = ResourceHandleAndRange(handle, capture.range);

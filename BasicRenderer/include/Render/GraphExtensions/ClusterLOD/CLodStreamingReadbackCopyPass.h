@@ -63,7 +63,7 @@ public:
         builder->WithCopyDest(m_requestsStaging);
         builder->WithCopyDest(m_usedGroupsCounterStaging);
         builder->WithCopyDest(m_usedGroupsBufferStaging);
-        builder->PreferCopyQueue();
+        builder->PreferQueue(QueueKind::Copy);
     }
 
     void Setup() override {}
