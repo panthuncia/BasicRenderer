@@ -259,12 +259,9 @@ void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<Re
     rg.RegisterResource(Builtin::CLod::StreamingTouchedGroupsCounter, m_usedGroupsCounter);
     rg.RegisterResource(Builtin::CLod::StreamingTouchedGroups, m_usedGroupsBuffer);
 
-    RenderGraph::ExternalPassDesc streamingBeginPassDesc;
-    streamingBeginPassDesc.type = RenderGraph::PassType::Compute;
-    streamingBeginPassDesc.name = "CLod::StreamingBeginFramePass";
-    streamingBeginPassDesc.where = RenderGraph::ExternalInsertPoint::After("SkinningPass");
-
-    streamingBeginPassDesc.pass = std::make_shared<CLodStreamingBeginFramePass>(
+    auto streamingBeginPassDesc = RenderGraph::ExternalPassDesc::Compute(
+        "CLod::StreamingBeginFramePass",
+        std::make_shared<CLodStreamingBeginFramePass>(
         [this]() -> UploadInstance* { return m_uploadInstance.get(); },
         m_streamingLoadCounter,
         m_usedGroupsCounter,
@@ -289,7 +286,8 @@ void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<Re
         },
         [this]() {
             ProcessStreamingRequestsBudgeted();
-        });
+        }));
+    streamingBeginPassDesc.At(RenderGraph::ExternalInsertPoint::After("SkinningPass"));
     outPasses.push_back(std::move(streamingBeginPassDesc));
 }
 
@@ -325,13 +323,12 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
             }
         }
 
-        RenderGraph::ExternalPassDesc uploadDesc{};
-        uploadDesc.type = RenderGraph::PassType::Copy;
-        uploadDesc.name = "CLod::StreamingUpload";
-        uploadDesc.where = RenderGraph::ExternalInsertPoint::After("EvaluateMaterialGroupsPass");
-        uploadDesc.preferredQueueKind = QueueKind::Copy;
-        uploadDesc.pass = std::make_shared<StreamingUploadPass>(std::move(inputs));
-        outPasses.push_back(std::move(uploadDesc));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Copy(
+                "CLod::StreamingUpload",
+                std::make_shared<StreamingUploadPass>(std::move(inputs)))
+                .At(RenderGraph::ExternalInsertPoint::After("EvaluateMaterialGroupsPass"))
+                .PreferQueue(QueueKind::Copy));
     }
 
     // Drain our dedicated UploadInstance on the async copy queue.
@@ -350,14 +347,13 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
             }
         }
 
-        RenderGraph::ExternalPassDesc asyncDesc{};
-        asyncDesc.type = RenderGraph::PassType::Copy;
-        asyncDesc.name = "CLod::AsyncUpload";
-        asyncDesc.where = RenderGraph::ExternalInsertPoint::After("EvaluateMaterialGroupsPass");
-        asyncDesc.preferredQueueKind = QueueKind::Copy;
-        asyncDesc.pinnedQueueSlot = m_uploadQueueSlot;
-        asyncDesc.pass = std::make_shared<CLodAsyncUploadPass>(std::move(asyncInputs));
-        outPasses.push_back(std::move(asyncDesc));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Copy(
+                "CLod::AsyncUpload",
+                std::make_shared<CLodAsyncUploadPass>(std::move(asyncInputs)))
+                .At(RenderGraph::ExternalInsertPoint::After("EvaluateMaterialGroupsPass"))
+                .PreferQueue(QueueKind::Copy)
+                .PinToQueue(m_uploadQueueSlot));
     }
 
     // Schedule a readback copy pass to capture the load counter + load requests
@@ -394,20 +390,19 @@ void CLodStreamingSystem::GatherFramePasses(RenderGraph& rg, std::vector<RenderG
             readbackInputs.usedGroupsCounterSource = m_usedGroupsCounter;
             readbackInputs.usedGroupsBufferSource = m_usedGroupsBuffer;
 
-            RenderGraph::ExternalPassDesc readbackDesc{};
-            readbackDesc.type = RenderGraph::PassType::Copy;
-            readbackDesc.name = "CLod::StreamingReadbackCopy";
-            readbackDesc.where = RenderGraph::ExternalInsertPoint::After("EvaluateMaterialGroupsPass");
-            readbackDesc.preferredQueueKind = QueueKind::Copy;
-            readbackDesc.pass = std::make_shared<CLodStreamingReadbackCopyPass>(
-                std::move(readbackInputs),
-                slot.counterStaging,
-                slot.requestsStaging,
-                slot.usedGroupsCounterStaging,
-                slot.usedGroupsBufferStaging,
-                m_streamingReadbackFenceHandle,
-                fv);
-            outPasses.push_back(std::move(readbackDesc));
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Copy(
+                    "CLod::StreamingReadbackCopy",
+                    std::make_shared<CLodStreamingReadbackCopyPass>(
+                        std::move(readbackInputs),
+                        slot.counterStaging,
+                        slot.requestsStaging,
+                        slot.usedGroupsCounterStaging,
+                        slot.usedGroupsBufferStaging,
+                        m_streamingReadbackFenceHandle,
+                        fv))
+                    .At(RenderGraph::ExternalInsertPoint::After("EvaluateMaterialGroupsPass"))
+                    .PreferQueue(QueueKind::Copy));
 
             // Wake the background worker so it can HostWait for the new fence value.
             m_streamingWorkerCV.notify_one();

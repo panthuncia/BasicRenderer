@@ -776,10 +776,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
 
     std::shared_ptr<ResourceGroup> slabGroup = GetSlabResourceGroup();
 
-    RenderGraph::ExternalPassDesc cullPassDesc;
-    cullPassDesc.type = RenderGraph::PassType::Compute;
-    //cullPassDesc.preferredQueueKind = QueueKind::Graphics;
-    cullPassDesc.name = MakeVariantPassName(traits, "HierarchialCullingPass1");
     HierarchialCullingPassInputs cullPassInputs;
     cullPassInputs.isFirstPass = true;
     cullPassInputs.maxVisibleClusters = m_maxVisibleClusters;
@@ -787,100 +783,96 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     cullPassInputs.renderPhase = renderPhase;
     cullPassInputs.clodOnlyWorkloads = true;
     cullPassInputs.rasterOutputKind = traits.rasterOutputKind;
-    cullPassDesc.pass = std::make_shared<HierarchialCullingPass>(
-        cullPassInputs,
-        m_visibleClustersBuffer,
-        m_visibleClustersCounterBuffer,
-        m_swVisibleClustersCounterBuffer,
-        m_histogramIndirectCommand,
-        m_workGraphTelemetryBuffer,
-        m_occlusionReplayBuffer,
-        m_occlusionReplayStateBuffer,
-        m_occlusionNodeGpuInputsBuffer,
-        m_viewDepthSrvIndicesBuffer,
-        m_viewRasterInfoBuffer,
-        slabGroup);
+    auto cullPassDesc = RenderGraph::ExternalPassDesc::Compute(
+        MakeVariantPassName(traits, "HierarchialCullingPass1"),
+        std::make_shared<HierarchialCullingPass>(
+            cullPassInputs,
+            m_visibleClustersBuffer,
+            m_visibleClustersCounterBuffer,
+            m_swVisibleClustersCounterBuffer,
+            m_histogramIndirectCommand,
+            m_workGraphTelemetryBuffer,
+            m_occlusionReplayBuffer,
+            m_occlusionReplayStateBuffer,
+            m_occlusionNodeGpuInputsBuffer,
+            m_viewDepthSrvIndicesBuffer,
+            m_viewRasterInfoBuffer,
+            slabGroup));
     if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly ||
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility) {
-        cullPassDesc.where = RenderGraph::ExternalInsertPoint::After("CLodOpaque::LinearDepthDownsamplePass2");
+        cullPassDesc.At(RenderGraph::ExternalInsertPoint::After("CLodOpaque::LinearDepthDownsamplePass2"));
     }
     else {
-        cullPassDesc.where = RenderGraph::ExternalInsertPoint::After("CLod::StreamingBeginFramePass");
+        cullPassDesc.At(RenderGraph::ExternalInsertPoint::After("CLod::StreamingBeginFramePass"));
     }
     outPasses.push_back(std::move(cullPassDesc));
 
         if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::TwoPassVisibility && !disableReyesTessellation) {
-            RenderGraph::ExternalPassDesc reyesTessellationTableUploadPassDesc;
-            reyesTessellationTableUploadPassDesc.type = RenderGraph::PassType::Compute;
-            reyesTessellationTableUploadPassDesc.name = MakeVariantPassName(traits, "ReyesTessellationTableUploadPass");
-            reyesTessellationTableUploadPassDesc.pass = std::make_shared<ReyesTessellationTableUploadPass>(
-                m_reyesTessTableConfigsBuffer,
-                m_reyesTessTableVerticesBuffer,
-                m_reyesTessTableTrianglesBuffer);
-            outPasses.push_back(std::move(reyesTessellationTableUploadPassDesc));
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "ReyesTessellationTableUploadPass"),
+                    std::make_shared<ReyesTessellationTableUploadPass>(
+                        m_reyesTessTableConfigsBuffer,
+                        m_reyesTessTableVerticesBuffer,
+                        m_reyesTessTableTrianglesBuffer)));
 
-            RenderGraph::ExternalPassDesc reyesResetPassDesc;
-            reyesResetPassDesc.type = RenderGraph::PassType::Compute;
-            reyesResetPassDesc.name = MakeVariantPassName(traits, "ReyesQueueResetPass1");
-            reyesResetPassDesc.pass = std::make_shared<ReyesQueueResetPass>(
-                m_reyesFullClusterOutputsCounterBuffer,
-                m_reyesOwnedClustersCounterBuffer,
-                std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueCounterBufferA, m_reyesSplitQueueCounterBufferB },
-                std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueOverflowBufferA, m_reyesSplitQueueOverflowBufferB },
-                m_reyesDiceQueueCounterBuffer,
-                m_reyesDiceQueueOverflowBuffer,
-                reyesOwnershipBitsetBuffer,
-                m_reyesTelemetryBufferPhase1,
-                1u);
-            outPasses.push_back(std::move(reyesResetPassDesc));
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "ReyesQueueResetPass1"),
+                    std::make_shared<ReyesQueueResetPass>(
+                        m_reyesFullClusterOutputsCounterBuffer,
+                        m_reyesOwnedClustersCounterBuffer,
+                        std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueCounterBufferA, m_reyesSplitQueueCounterBufferB },
+                        std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueOverflowBufferA, m_reyesSplitQueueOverflowBufferB },
+                        m_reyesDiceQueueCounterBuffer,
+                        m_reyesDiceQueueOverflowBuffer,
+                        reyesOwnershipBitsetBuffer,
+                        m_reyesTelemetryBufferPhase1,
+                        1u)));
 
-            RenderGraph::ExternalPassDesc reyesCreateClassifyArgsPassDesc;
-            reyesCreateClassifyArgsPassDesc.type = RenderGraph::PassType::Compute;
-            reyesCreateClassifyArgsPassDesc.name = MakeVariantPassName(traits, "ReyesCreateClassifyDispatchArgsPass1");
-            reyesCreateClassifyArgsPassDesc.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
-                m_visibleClustersCounterBuffer,
-                m_reyesClassifyIndirectArgsBuffer);
-            outPasses.push_back(std::move(reyesCreateClassifyArgsPassDesc));
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "ReyesCreateClassifyDispatchArgsPass1"),
+                    std::make_shared<ReyesCreateDispatchArgsPass>(
+                        m_visibleClustersCounterBuffer,
+                        m_reyesClassifyIndirectArgsBuffer)));
 
-            RenderGraph::ExternalPassDesc reyesClassifyPassDesc;
-            reyesClassifyPassDesc.type = RenderGraph::PassType::Compute;
-            reyesClassifyPassDesc.name = MakeVariantPassName(traits, "ReyesClassifyPass1");
-            reyesClassifyPassDesc.pass = std::make_shared<ReyesClassifyPass>(
-                m_visibleClustersBuffer,
-                m_visibleClustersCounterBuffer,
-                nullptr,
-                m_reyesFullClusterOutputsBuffer,
-                m_reyesFullClusterOutputsCounterBuffer,
-                m_reyesOwnedClustersBuffer,
-                m_reyesOwnedClustersCounterBuffer,
-                reyesOwnershipBitsetBuffer,
-                m_reyesClassifyIndirectArgsBuffer,
-                m_reyesTelemetryBufferPhase1,
-                1u);
-            outPasses.push_back(std::move(reyesClassifyPassDesc));
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "ReyesClassifyPass1"),
+                    std::make_shared<ReyesClassifyPass>(
+                        m_visibleClustersBuffer,
+                        m_visibleClustersCounterBuffer,
+                        nullptr,
+                        m_reyesFullClusterOutputsBuffer,
+                        m_reyesFullClusterOutputsCounterBuffer,
+                        m_reyesOwnedClustersBuffer,
+                        m_reyesOwnedClustersCounterBuffer,
+                        reyesOwnershipBitsetBuffer,
+                        m_reyesClassifyIndirectArgsBuffer,
+                        m_reyesTelemetryBufferPhase1,
+                        1u)));
 
-            RenderGraph::ExternalPassDesc reyesCreateSeedArgsPassDesc;
-            reyesCreateSeedArgsPassDesc.type = RenderGraph::PassType::Compute;
-            reyesCreateSeedArgsPassDesc.name = MakeVariantPassName(traits, "ReyesCreateSeedDispatchArgsPass1");
-            reyesCreateSeedArgsPassDesc.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
-                m_reyesOwnedClustersCounterBuffer,
-                m_reyesSplitIndirectArgsBuffer);
-            outPasses.push_back(std::move(reyesCreateSeedArgsPassDesc));
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "ReyesCreateSeedDispatchArgsPass1"),
+                    std::make_shared<ReyesCreateDispatchArgsPass>(
+                        m_reyesOwnedClustersCounterBuffer,
+                        m_reyesSplitIndirectArgsBuffer)));
 
-            RenderGraph::ExternalPassDesc reyesSeedPassDesc;
-            reyesSeedPassDesc.type = RenderGraph::PassType::Compute;
-            reyesSeedPassDesc.name = MakeVariantPassName(traits, "ReyesSeedPatchesPass1");
-            reyesSeedPassDesc.pass = std::make_shared<ReyesSeedPatchesPass>(
-                m_visibleClustersBuffer,
-                m_reyesOwnedClustersBuffer,
-                m_reyesOwnedClustersCounterBuffer,
-                m_reyesSplitQueueBufferA,
-                m_reyesSplitQueueCounterBufferA,
-                m_reyesSplitQueueOverflowBufferA,
-                m_reyesSplitIndirectArgsBuffer,
-                reyesSplitQueueCapacity,
-                1u);
-            outPasses.push_back(std::move(reyesSeedPassDesc));
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "ReyesSeedPatchesPass1"),
+                    std::make_shared<ReyesSeedPatchesPass>(
+                        m_visibleClustersBuffer,
+                        m_reyesOwnedClustersBuffer,
+                        m_reyesOwnedClustersCounterBuffer,
+                        m_reyesSplitQueueBufferA,
+                        m_reyesSplitQueueCounterBufferA,
+                        m_reyesSplitQueueOverflowBufferA,
+                        m_reyesSplitIndirectArgsBuffer,
+                        reyesSplitQueueCapacity,
+                        1u)));
 
             const std::shared_ptr<Buffer> reyesSplitBuffers[] = { m_reyesSplitQueueBufferA, m_reyesSplitQueueBufferB };
             const std::shared_ptr<Buffer> reyesSplitCounters[] = { m_reyesSplitQueueCounterBufferA, m_reyesSplitQueueCounterBufferB };
@@ -889,331 +881,304 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 const uint32_t inputIndex = splitPassIndex & 1u;
                 const uint32_t outputIndex = inputIndex ^ 1u;
 
-                RenderGraph::ExternalPassDesc reyesCreateSplitArgsPassDesc;
-                reyesCreateSplitArgsPassDesc.type = RenderGraph::PassType::Compute;
-                reyesCreateSplitArgsPassDesc.name = MakeVariantPassName(traits, "ReyesCreateSplitDispatchArgsPass1_" + std::to_string(splitPassIndex));
-                reyesCreateSplitArgsPassDesc.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
-                    reyesSplitCounters[inputIndex],
-                    m_reyesSplitIndirectArgsBuffer);
-                outPasses.push_back(std::move(reyesCreateSplitArgsPassDesc));
+                outPasses.push_back(
+                    RenderGraph::ExternalPassDesc::Compute(
+                        MakeVariantPassName(traits, "ReyesCreateSplitDispatchArgsPass1_" + std::to_string(splitPassIndex)),
+                        std::make_shared<ReyesCreateDispatchArgsPass>(
+                            reyesSplitCounters[inputIndex],
+                            m_reyesSplitIndirectArgsBuffer)));
 
-                RenderGraph::ExternalPassDesc reyesSplitPassDesc;
-                reyesSplitPassDesc.type = RenderGraph::PassType::Compute;
-                reyesSplitPassDesc.name = MakeVariantPassName(traits, "ReyesSplitPass1_" + std::to_string(splitPassIndex));
-                reyesSplitPassDesc.pass = std::make_shared<ReyesSplitPass>(
-                    m_visibleClustersBuffer,
-                    reyesSplitBuffers[inputIndex],
-                    reyesSplitCounters[inputIndex],
-                    reyesSplitBuffers[outputIndex],
-                    reyesSplitCounters[outputIndex],
-                    reyesSplitOverflows[outputIndex],
-                    m_reyesDiceQueueBuffer,
-                    m_reyesDiceQueueCounterBuffer,
-                    m_reyesDiceQueueOverflowBuffer,
-                    m_reyesTessTableConfigsBuffer,
-                    m_reyesTessTableVerticesBuffer,
-                    m_reyesTessTableTrianglesBuffer,
-                    m_reyesSplitIndirectArgsBuffer,
-                    m_reyesTelemetryBufferPhase1,
-                    reyesSplitQueueCapacity,
-                    splitPassIndex,
-                    CLodReyesMaxSplitPassCount,
-                    1u);
-                outPasses.push_back(std::move(reyesSplitPassDesc));
+                outPasses.push_back(
+                    RenderGraph::ExternalPassDesc::Compute(
+                        MakeVariantPassName(traits, "ReyesSplitPass1_" + std::to_string(splitPassIndex)),
+                        std::make_shared<ReyesSplitPass>(
+                            m_visibleClustersBuffer,
+                            reyesSplitBuffers[inputIndex],
+                            reyesSplitCounters[inputIndex],
+                            reyesSplitBuffers[outputIndex],
+                            reyesSplitCounters[outputIndex],
+                            reyesSplitOverflows[outputIndex],
+                            m_reyesDiceQueueBuffer,
+                            m_reyesDiceQueueCounterBuffer,
+                            m_reyesDiceQueueOverflowBuffer,
+                            m_reyesTessTableConfigsBuffer,
+                            m_reyesTessTableVerticesBuffer,
+                            m_reyesTessTableTrianglesBuffer,
+                            m_reyesSplitIndirectArgsBuffer,
+                            m_reyesTelemetryBufferPhase1,
+                            reyesSplitQueueCapacity,
+                            splitPassIndex,
+                            CLodReyesMaxSplitPassCount,
+                            1u)));
             }
 
-            RenderGraph::ExternalPassDesc reyesCreateDiceArgsPassDesc;
-            reyesCreateDiceArgsPassDesc.type = RenderGraph::PassType::Compute;
-            reyesCreateDiceArgsPassDesc.name = MakeVariantPassName(traits, "ReyesCreateDiceDispatchArgsPass1");
-            reyesCreateDiceArgsPassDesc.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
-                m_reyesDiceQueueCounterBuffer,
-                m_reyesDiceIndirectArgsBuffer);
-            outPasses.push_back(std::move(reyesCreateDiceArgsPassDesc));
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "ReyesCreateDiceDispatchArgsPass1"),
+                    std::make_shared<ReyesCreateDispatchArgsPass>(
+                        m_reyesDiceQueueCounterBuffer,
+                        m_reyesDiceIndirectArgsBuffer)));
 
-            RenderGraph::ExternalPassDesc reyesDicePassDesc;
-            reyesDicePassDesc.type = RenderGraph::PassType::Compute;
-            reyesDicePassDesc.name = MakeVariantPassName(traits, "ReyesDicePass1");
-            reyesDicePassDesc.pass = std::make_shared<ReyesDicePass>(
-                m_reyesDiceQueueBuffer,
-                m_reyesDiceQueueCounterBuffer,
-                m_reyesTessTableConfigsBuffer,
-                m_reyesDiceIndirectArgsBuffer,
-                m_reyesTelemetryBufferPhase1,
-                reyesDiceQueueCapacity,
-                1u);
-            outPasses.push_back(std::move(reyesDicePassDesc));
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "ReyesDicePass1"),
+                    std::make_shared<ReyesDicePass>(
+                        m_reyesDiceQueueBuffer,
+                        m_reyesDiceQueueCounterBuffer,
+                        m_reyesTessTableConfigsBuffer,
+                        m_reyesDiceIndirectArgsBuffer,
+                        m_reyesTelemetryBufferPhase1,
+                        reyesDiceQueueCapacity,
+                        1u)));
 
             if (traits.type == CLodExtensionType::VisiblityBuffer) {
-                RenderGraph::ExternalPassDesc reyesBuildRasterWorkPassDesc;
-                reyesBuildRasterWorkPassDesc.type = RenderGraph::PassType::Compute;
-                reyesBuildRasterWorkPassDesc.name = MakeVariantPassName(traits, "ReyesBuildRasterWorkPass1");
-                reyesBuildRasterWorkPassDesc.pass = std::make_shared<ReyesBuildRasterWorkPass>(
-                    m_reyesDiceQueueBuffer,
-                    m_reyesDiceQueueCounterBuffer,
-                    m_reyesTessTableConfigsBuffer,
-                    m_reyesRasterWorkBuffer,
-                    m_reyesRasterWorkCounterBuffer,
-                    m_reyesDiceIndirectArgsBuffer,
-                    m_reyesTelemetryBufferPhase1,
-                    reyesRasterWorkCapacity);
-                outPasses.push_back(std::move(reyesBuildRasterWorkPassDesc));
+                outPasses.push_back(
+                    RenderGraph::ExternalPassDesc::Compute(
+                        MakeVariantPassName(traits, "ReyesBuildRasterWorkPass1"),
+                        std::make_shared<ReyesBuildRasterWorkPass>(
+                            m_reyesDiceQueueBuffer,
+                            m_reyesDiceQueueCounterBuffer,
+                            m_reyesTessTableConfigsBuffer,
+                            m_reyesRasterWorkBuffer,
+                            m_reyesRasterWorkCounterBuffer,
+                            m_reyesDiceIndirectArgsBuffer,
+                            m_reyesTelemetryBufferPhase1,
+                            reyesRasterWorkCapacity)));
 
-                RenderGraph::ExternalPassDesc reyesCreateRasterWorkArgsPassDesc;
-                reyesCreateRasterWorkArgsPassDesc.type = RenderGraph::PassType::Compute;
-                reyesCreateRasterWorkArgsPassDesc.name = MakeVariantPassName(traits, "ReyesCreateRasterWorkDispatchArgsPass1");
-                reyesCreateRasterWorkArgsPassDesc.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
-                    m_reyesRasterWorkCounterBuffer,
-                    m_reyesRasterWorkIndirectArgsBuffer);
-                outPasses.push_back(std::move(reyesCreateRasterWorkArgsPassDesc));
+                outPasses.push_back(
+                    RenderGraph::ExternalPassDesc::Compute(
+                        MakeVariantPassName(traits, "ReyesCreateRasterWorkDispatchArgsPass1"),
+                        std::make_shared<ReyesCreateDispatchArgsPass>(
+                            m_reyesRasterWorkCounterBuffer,
+                            m_reyesRasterWorkIndirectArgsBuffer)));
 
-                RenderGraph::ExternalPassDesc reyesPatchRasterPassDesc;
-                reyesPatchRasterPassDesc.type = RenderGraph::PassType::Compute;
-                reyesPatchRasterPassDesc.name = MakeVariantPassName(traits, "ReyesPatchRasterPass1");
-                reyesPatchRasterPassDesc.pass = std::make_shared<ReyesPatchRasterizationPass>(
-                    m_visibleClustersBuffer,
-                    m_reyesDiceQueueBuffer,
-                    m_reyesDiceQueueCounterBuffer,
-                    m_reyesRasterWorkBuffer,
-                    m_reyesTessTableConfigsBuffer,
-                    m_reyesTessTableVerticesBuffer,
-                    m_reyesTessTableTrianglesBuffer,
-                    m_viewRasterInfoBuffer,
-                    m_reyesRasterWorkIndirectArgsBuffer,
-                    m_reyesTelemetryBufferPhase1,
-                    m_maxVisibleClusters,
-                    1u,
-                    CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters));
-                outPasses.push_back(std::move(reyesPatchRasterPassDesc));
+                outPasses.push_back(
+                    RenderGraph::ExternalPassDesc::Compute(
+                        MakeVariantPassName(traits, "ReyesPatchRasterPass1"),
+                        std::make_shared<ReyesPatchRasterizationPass>(
+                            m_visibleClustersBuffer,
+                            m_reyesDiceQueueBuffer,
+                            m_reyesDiceQueueCounterBuffer,
+                            m_reyesRasterWorkBuffer,
+                            m_reyesTessTableConfigsBuffer,
+                            m_reyesTessTableVerticesBuffer,
+                            m_reyesTessTableTrianglesBuffer,
+                            m_viewRasterInfoBuffer,
+                            m_reyesRasterWorkIndirectArgsBuffer,
+                            m_reyesTelemetryBufferPhase1,
+                            m_maxVisibleClusters,
+                            1u,
+                            CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters))));
             }
         }
 
-    RenderGraph::ExternalPassDesc histogramPassDesc;
-    histogramPassDesc.type = RenderGraph::PassType::Compute;
-    histogramPassDesc.name = MakeVariantPassName(traits, "RasterBucketsHistogramPass1");
-    histogramPassDesc.pass = std::make_shared<RasterBucketHistogramPass>(
-        m_visibleClustersBuffer,
-        m_visibleClustersCounterBuffer,
-        m_histogramIndirectCommand,
-        m_rasterBucketsHistogramBuffer,
-        reyesOwnershipBitsetBuffer);
-    outPasses.push_back(std::move(histogramPassDesc));
+    outPasses.push_back(
+        RenderGraph::ExternalPassDesc::Compute(
+            MakeVariantPassName(traits, "RasterBucketsHistogramPass1"),
+            std::make_shared<RasterBucketHistogramPass>(
+                m_visibleClustersBuffer,
+                m_visibleClustersCounterBuffer,
+                m_histogramIndirectCommand,
+                m_rasterBucketsHistogramBuffer,
+                reyesOwnershipBitsetBuffer)));
 
-    RenderGraph::ExternalPassDesc prefixScanPassDesc;
-    prefixScanPassDesc.type = RenderGraph::PassType::Compute;
-    prefixScanPassDesc.name = MakeVariantPassName(traits, "RasterBucketsPrefixScanPass1");
-    prefixScanPassDesc.pass = std::make_shared<RasterBucketBlockScanPass>(
-        m_rasterBucketsHistogramBuffer,
-        m_rasterBucketsOffsetsBuffer,
-        m_rasterBucketsBlockSumsBuffer);
-    outPasses.push_back(std::move(prefixScanPassDesc));
+    outPasses.push_back(
+        RenderGraph::ExternalPassDesc::Compute(
+            MakeVariantPassName(traits, "RasterBucketsPrefixScanPass1"),
+            std::make_shared<RasterBucketBlockScanPass>(
+                m_rasterBucketsHistogramBuffer,
+                m_rasterBucketsOffsetsBuffer,
+                m_rasterBucketsBlockSumsBuffer)));
 
-    RenderGraph::ExternalPassDesc prefixOffsetsPassDesc;
-    prefixOffsetsPassDesc.type = RenderGraph::PassType::Compute;
-    prefixOffsetsPassDesc.name = MakeVariantPassName(traits, "RasterBucketsPrefixOffsetsPass1");
-    prefixOffsetsPassDesc.pass = std::make_shared<RasterBucketBlockOffsetsPass>(
-        m_rasterBucketsOffsetsBuffer,
-        m_rasterBucketsBlockSumsBuffer,
-        m_rasterBucketsScannedBlockSumsBuffer,
-        m_rasterBucketsTotalCountBufferPhase1);
-    outPasses.push_back(std::move(prefixOffsetsPassDesc));
+    outPasses.push_back(
+        RenderGraph::ExternalPassDesc::Compute(
+            MakeVariantPassName(traits, "RasterBucketsPrefixOffsetsPass1"),
+            std::make_shared<RasterBucketBlockOffsetsPass>(
+                m_rasterBucketsOffsetsBuffer,
+                m_rasterBucketsBlockSumsBuffer,
+                m_rasterBucketsScannedBlockSumsBuffer,
+                m_rasterBucketsTotalCountBufferPhase1)));
 
-    RenderGraph::ExternalPassDesc compactPassDesc;
-    compactPassDesc.type = RenderGraph::PassType::Compute;
-    compactPassDesc.name = MakeVariantPassName(traits, "RasterBucketsCompactAndArgsPass1");
-    compactPassDesc.pass = std::make_shared<RasterBucketCompactAndArgsPass>(
-        m_visibleClustersBuffer,
-        m_visibleClustersCounterBuffer,
-        m_visibleClustersCounterBuffer,
-        m_histogramIndirectCommand,
-        m_rasterBucketsHistogramBuffer,
-        m_rasterBucketsOffsetsBuffer,
-        m_rasterBucketsWriteCursorBuffer,
-        m_compactedVisibleClustersBuffer,
-        m_rasterBucketsIndirectArgsBuffer,
-        m_sortedToUnsortedMappingBuffer,
-        reyesOwnershipBitsetBuffer,
-        m_maxVisibleClusters,
-        false);
-    outPasses.push_back(std::move(compactPassDesc));
+    outPasses.push_back(
+        RenderGraph::ExternalPassDesc::Compute(
+            MakeVariantPassName(traits, "RasterBucketsCompactAndArgsPass1"),
+            std::make_shared<RasterBucketCompactAndArgsPass>(
+                m_visibleClustersBuffer,
+                m_visibleClustersCounterBuffer,
+                m_visibleClustersCounterBuffer,
+                m_histogramIndirectCommand,
+                m_rasterBucketsHistogramBuffer,
+                m_rasterBucketsOffsetsBuffer,
+                m_rasterBucketsWriteCursorBuffer,
+                m_compactedVisibleClustersBuffer,
+                m_rasterBucketsIndirectArgsBuffer,
+                m_sortedToUnsortedMappingBuffer,
+                reyesOwnershipBitsetBuffer,
+                m_maxVisibleClusters,
+                false)));
 
     if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly) {
         return;
     }
 
     if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility) {
-        RenderGraph::ExternalPassDesc clearDeepVisibilityPassDesc;
-        clearDeepVisibilityPassDesc.type = RenderGraph::PassType::Render;
-        clearDeepVisibilityPassDesc.name = MakeVariantPassName(traits, "ClearDeepVisibilityPass");
-        clearDeepVisibilityPassDesc.pass = std::make_shared<ClearDeepVisibilityPass>(
-            m_deepVisibilityCounterBuffer,
-            m_deepVisibilityOverflowCounterBuffer,
-            m_deepVisibilityStatsBuffer);
-        outPasses.push_back(std::move(clearDeepVisibilityPassDesc));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Render(
+                MakeVariantPassName(traits, "ClearDeepVisibilityPass"),
+                std::make_shared<ClearDeepVisibilityPass>(
+                    m_deepVisibilityCounterBuffer,
+                    m_deepVisibilityOverflowCounterBuffer,
+                    m_deepVisibilityStatsBuffer)));
 
-        RenderGraph::ExternalPassDesc rasterizeDeepVisibilityPassDesc;
-        rasterizeDeepVisibilityPassDesc.type = RenderGraph::PassType::Render;
-        rasterizeDeepVisibilityPassDesc.name = MakeVariantPassName(traits, "RasterizeClustersPass1");
         ClusterRasterizationPassInputs rasterizePassInputs;
         rasterizePassInputs.clearGbuffer = false;
         rasterizePassInputs.wireframe = false;
         rasterizePassInputs.renderPhase = renderPhase;
         rasterizePassInputs.outputKind = traits.rasterOutputKind;
-        rasterizeDeepVisibilityPassDesc.pass = std::make_shared<ClusterRasterizationPass>(
-            rasterizePassInputs,
-            m_compactedVisibleClustersBuffer,
-            m_rasterBucketsHistogramBuffer,
-            m_rasterBucketsIndirectArgsBuffer,
-            m_sortedToUnsortedMappingBuffer,
-            m_deepVisibilityNodesBuffer,
-            m_deepVisibilityCounterBuffer,
-            m_deepVisibilityOverflowCounterBuffer,
-            slabGroup);
-        rasterizeDeepVisibilityPassDesc.isGeometryPass = true;
+        auto rasterizeDeepVisibilityPassDesc = RenderGraph::ExternalPassDesc::Render(
+            MakeVariantPassName(traits, "RasterizeClustersPass1"),
+            std::make_shared<ClusterRasterizationPass>(
+                rasterizePassInputs,
+                m_compactedVisibleClustersBuffer,
+                m_rasterBucketsHistogramBuffer,
+                m_rasterBucketsIndirectArgsBuffer,
+                m_sortedToUnsortedMappingBuffer,
+                m_deepVisibilityNodesBuffer,
+                m_deepVisibilityCounterBuffer,
+                m_deepVisibilityOverflowCounterBuffer,
+                slabGroup));
+        rasterizeDeepVisibilityPassDesc.GeometryPass();
         outPasses.push_back(std::move(rasterizeDeepVisibilityPassDesc));
 
-        RenderGraph::ExternalPassDesc resolveDeepVisibilityPassDesc;
-        resolveDeepVisibilityPassDesc.type = RenderGraph::PassType::Compute;
-        resolveDeepVisibilityPassDesc.name = MakeVariantPassName(traits, "DeepVisibilityResolvePass");
-        resolveDeepVisibilityPassDesc.where = RenderGraph::ExternalInsertPoint::Before("PPLLResolvePass");
-        resolveDeepVisibilityPassDesc.pass = std::make_shared<DeepVisibilityResolvePass>(
-            m_visibleClustersBuffer,
-            nullptr,
-            m_deepVisibilityNodesBuffer,
-            m_deepVisibilityCounterBuffer,
-            m_deepVisibilityOverflowCounterBuffer,
-            m_deepVisibilityStatsBuffer,
-            CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters));
+        auto resolveDeepVisibilityPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            MakeVariantPassName(traits, "DeepVisibilityResolvePass"),
+            std::make_shared<DeepVisibilityResolvePass>(
+                m_visibleClustersBuffer,
+                nullptr,
+                m_deepVisibilityNodesBuffer,
+                m_deepVisibilityCounterBuffer,
+                m_deepVisibilityOverflowCounterBuffer,
+                m_deepVisibilityStatsBuffer,
+                CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters)));
+        resolveDeepVisibilityPassDesc.At(RenderGraph::ExternalInsertPoint::Before("PPLLResolvePass"));
         outPasses.push_back(std::move(resolveDeepVisibilityPassDesc));
         return;
     }
 
-    RenderGraph::ExternalPassDesc rasterizePassDesc;
-    rasterizePassDesc.type = RenderGraph::PassType::Render;
-    rasterizePassDesc.name = MakeVariantPassName(traits, "RasterizeClustersPass1");
     ClusterRasterizationPassInputs rasterizePassInputs;
     rasterizePassInputs.clearGbuffer = true;
     rasterizePassInputs.wireframe = false;
     rasterizePassInputs.renderPhase = renderPhase;
     rasterizePassInputs.outputKind = traits.rasterOutputKind;
-    rasterizePassDesc.pass = std::make_shared<ClusterRasterizationPass>(
-        rasterizePassInputs,
-        m_compactedVisibleClustersBuffer,
-        m_rasterBucketsHistogramBuffer,
-        m_rasterBucketsIndirectArgsBuffer,
-        m_sortedToUnsortedMappingBuffer,
-        nullptr,
-        nullptr,
-        nullptr,
-        slabGroup);
-    rasterizePassDesc.isGeometryPass = true;
+    auto rasterizePassDesc = RenderGraph::ExternalPassDesc::Render(
+        MakeVariantPassName(traits, "RasterizeClustersPass1"),
+        std::make_shared<ClusterRasterizationPass>(
+            rasterizePassInputs,
+            m_compactedVisibleClustersBuffer,
+            m_rasterBucketsHistogramBuffer,
+            m_rasterBucketsIndirectArgsBuffer,
+            m_sortedToUnsortedMappingBuffer,
+            nullptr,
+            nullptr,
+            nullptr,
+            slabGroup));
+    rasterizePassDesc.GeometryPass();
     outPasses.push_back(std::move(rasterizePassDesc));
 
     if (useComputeSWRaster) {
-        RenderGraph::ExternalPassDesc swCreateCommandPassDesc;
-        swCreateCommandPassDesc.type = RenderGraph::PassType::Compute;
-        swCreateCommandPassDesc.name = MakeVariantPassName(traits, "RasterBucketsCreateCommandPassSW1");
-        swCreateCommandPassDesc.pass = std::make_shared<RasterBucketCreateCommandPass>(
-            m_swVisibleClustersCounterBuffer,
-            m_histogramIndirectCommand,
-            m_occlusionReplayStateBuffer,
-            m_occlusionNodeGpuInputsBuffer,
-            true);
-        outPasses.push_back(std::move(swCreateCommandPassDesc));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "RasterBucketsCreateCommandPassSW1"),
+                std::make_shared<RasterBucketCreateCommandPass>(
+                    m_swVisibleClustersCounterBuffer,
+                    m_histogramIndirectCommand,
+                    m_occlusionReplayStateBuffer,
+                    m_occlusionNodeGpuInputsBuffer,
+                    true)));
 
-        RenderGraph::ExternalPassDesc swHistogramPassDesc;
-        swHistogramPassDesc.type = RenderGraph::PassType::Compute;
-        swHistogramPassDesc.name = MakeVariantPassName(traits, "RasterBucketsHistogramPassSW1");
-        swHistogramPassDesc.pass = std::make_shared<RasterBucketHistogramPass>(
-            m_visibleClustersBuffer,
-            m_swVisibleClustersCounterBuffer,
-            m_histogramIndirectCommand,
-            m_rasterBucketsHistogramBufferSw,
-            reyesOwnershipBitsetBuffer,
-            nullptr,
-            true,
-            m_maxVisibleClusters,
-            true);
-        outPasses.push_back(std::move(swHistogramPassDesc));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "RasterBucketsHistogramPassSW1"),
+                std::make_shared<RasterBucketHistogramPass>(
+                    m_visibleClustersBuffer,
+                    m_swVisibleClustersCounterBuffer,
+                    m_histogramIndirectCommand,
+                    m_rasterBucketsHistogramBufferSw,
+                    reyesOwnershipBitsetBuffer,
+                    nullptr,
+                    true,
+                    m_maxVisibleClusters,
+                    true)));
 
-        RenderGraph::ExternalPassDesc swPrefixScanPassDesc;
-        swPrefixScanPassDesc.type = RenderGraph::PassType::Compute;
-        swPrefixScanPassDesc.name = MakeVariantPassName(traits, "RasterBucketsPrefixScanPassSW1");
-        swPrefixScanPassDesc.pass = std::make_shared<RasterBucketBlockScanPass>(
-            m_rasterBucketsHistogramBufferSw,
-            m_rasterBucketsOffsetsBuffer,
-            m_rasterBucketsBlockSumsBuffer,
-            true);
-        outPasses.push_back(std::move(swPrefixScanPassDesc));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "RasterBucketsPrefixScanPassSW1"),
+                std::make_shared<RasterBucketBlockScanPass>(
+                    m_rasterBucketsHistogramBufferSw,
+                    m_rasterBucketsOffsetsBuffer,
+                    m_rasterBucketsBlockSumsBuffer,
+                    true)));
 
-        RenderGraph::ExternalPassDesc swPrefixOffsetsPassDesc;
-        swPrefixOffsetsPassDesc.type = RenderGraph::PassType::Compute;
-        swPrefixOffsetsPassDesc.name = MakeVariantPassName(traits, "RasterBucketsPrefixOffsetsPassSW1");
-        swPrefixOffsetsPassDesc.pass = std::make_shared<RasterBucketBlockOffsetsPass>(
-            m_rasterBucketsOffsetsBuffer,
-            m_rasterBucketsBlockSumsBuffer,
-            m_rasterBucketsScannedBlockSumsBuffer,
-            m_rasterBucketsTotalCountBufferPhase1Sw,
-            true);
-        outPasses.push_back(std::move(swPrefixOffsetsPassDesc));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "RasterBucketsPrefixOffsetsPassSW1"),
+                std::make_shared<RasterBucketBlockOffsetsPass>(
+                    m_rasterBucketsOffsetsBuffer,
+                    m_rasterBucketsBlockSumsBuffer,
+                    m_rasterBucketsScannedBlockSumsBuffer,
+                    m_rasterBucketsTotalCountBufferPhase1Sw,
+                    true)));
 
-        RenderGraph::ExternalPassDesc swCompactPassDesc;
-        swCompactPassDesc.type = RenderGraph::PassType::Compute;
-        swCompactPassDesc.name = MakeVariantPassName(traits, "RasterBucketsCompactAndArgsPassSW1");
-        swCompactPassDesc.pass = std::make_shared<RasterBucketCompactAndArgsPass>(
-            m_visibleClustersBuffer,
-            m_swVisibleClustersCounterBuffer,
-            m_swVisibleClustersCounterBuffer,
-            m_histogramIndirectCommand,
-            m_rasterBucketsHistogramBufferSw,
-            m_rasterBucketsOffsetsBuffer,
-            m_rasterBucketsWriteCursorBufferSw,
-            m_compactedVisibleClustersBuffer,
-            m_rasterBucketsIndirectArgsBuffer,
-            m_sortedToUnsortedMappingBuffer,
-            reyesOwnershipBitsetBuffer,
-            m_maxVisibleClusters,
-            false,
-            true,
-            true,
-            true);
-        outPasses.push_back(std::move(swCompactPassDesc));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "RasterBucketsCompactAndArgsPassSW1"),
+                std::make_shared<RasterBucketCompactAndArgsPass>(
+                    m_visibleClustersBuffer,
+                    m_swVisibleClustersCounterBuffer,
+                    m_swVisibleClustersCounterBuffer,
+                    m_histogramIndirectCommand,
+                    m_rasterBucketsHistogramBufferSw,
+                    m_rasterBucketsOffsetsBuffer,
+                    m_rasterBucketsWriteCursorBufferSw,
+                    m_compactedVisibleClustersBuffer,
+                    m_rasterBucketsIndirectArgsBuffer,
+                    m_sortedToUnsortedMappingBuffer,
+                    reyesOwnershipBitsetBuffer,
+                    m_maxVisibleClusters,
+                    false,
+                    true,
+                    true,
+                    true)));
 
-        RenderGraph::ExternalPassDesc swRasterizePassDesc;
-        swRasterizePassDesc.type = RenderGraph::PassType::Compute;
-        swRasterizePassDesc.name = MakeVariantPassName(traits, "SoftwareRasterizeClustersPass1");
-        swRasterizePassDesc.pass = std::make_shared<ClusterSoftwareRasterizationPass>(
-            m_compactedVisibleClustersBuffer,
-            m_rasterBucketsHistogramBufferSw,
-            m_rasterBucketsIndirectArgsBuffer,
-            m_sortedToUnsortedMappingBuffer,
-            m_viewRasterInfoBuffer,
-            slabGroup,
-            true);
-        outPasses.push_back(std::move(swRasterizePassDesc));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "SoftwareRasterizeClustersPass1"),
+                std::make_shared<ClusterSoftwareRasterizationPass>(
+                    m_compactedVisibleClustersBuffer,
+                    m_rasterBucketsHistogramBufferSw,
+                    m_rasterBucketsIndirectArgsBuffer,
+                    m_sortedToUnsortedMappingBuffer,
+                    m_viewRasterInfoBuffer,
+                    slabGroup,
+                    true)));
     }
 
     if (traits.schedulesPerViewDepthCopy) {
-        RenderGraph::ExternalPassDesc depthCopyPassDesc;
-        depthCopyPassDesc.type = RenderGraph::PassType::Compute;
-        depthCopyPassDesc.name = MakeVariantPassName(traits, "LinearDepthCopyPass1");
-        depthCopyPassDesc.pass = std::make_shared<PerViewLinearDepthCopyPass>();
-        outPasses.push_back(std::move(depthCopyPassDesc));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "LinearDepthCopyPass1"),
+                std::make_shared<PerViewLinearDepthCopyPass>()));
     }
 
-    RenderGraph::ExternalPassDesc downsamplePassDesc;
-    downsamplePassDesc.type = RenderGraph::PassType::Compute;
-    downsamplePassDesc.name = MakeVariantPassName(traits, "LinearDepthDownsamplePass1");
-    downsamplePassDesc.pass = std::make_shared<DownsamplePass>();
-    outPasses.push_back(std::move(downsamplePassDesc));
+    outPasses.push_back(
+        RenderGraph::ExternalPassDesc::Compute(
+            MakeVariantPassName(traits, "LinearDepthDownsamplePass1"),
+            std::make_shared<DownsamplePass>()));
 
     if (!traits.usesPhase2OcclusionReplay) {
         return;
     }
 
-    RenderGraph::ExternalPassDesc cullPassDesc2;
-    cullPassDesc2.type = RenderGraph::PassType::Compute;
-    //cullPassDesc2.preferredQueueKind = QueueKind::Graphics;
-    cullPassDesc2.name = MakeVariantPassName(traits, "HierarchialCullingPass2");
     HierarchialCullingPassInputs cullPassInputs2;
     cullPassInputs2.isFirstPass = false;
     cullPassInputs2.maxVisibleClusters = m_maxVisibleClusters;
@@ -1221,86 +1186,83 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     cullPassInputs2.renderPhase = renderPhase;
     cullPassInputs2.clodOnlyWorkloads = true;
     cullPassInputs2.rasterOutputKind = traits.rasterOutputKind;
-    cullPassDesc2.pass = std::make_shared<HierarchialCullingPass>(
-        cullPassInputs2,
-        m_visibleClustersBuffer,
-        m_visibleClustersCounterBufferPhase2,
-        m_swVisibleClustersCounterBufferPhase2,
-        m_histogramIndirectCommand,
-        m_workGraphTelemetryBuffer,
-        m_occlusionReplayBuffer,
-        m_occlusionReplayStateBuffer,
-        m_occlusionNodeGpuInputsBuffer,
-        m_viewDepthSrvIndicesBuffer,
-        m_viewRasterInfoBuffer,
-        slabGroup,
-        m_visibleClustersCounterBuffer,
-        m_swVisibleClustersCounterBuffer);
+    auto cullPassDesc2 = RenderGraph::ExternalPassDesc::Compute(
+        MakeVariantPassName(traits, "HierarchialCullingPass2"),
+        std::make_shared<HierarchialCullingPass>(
+            cullPassInputs2,
+            m_visibleClustersBuffer,
+            m_visibleClustersCounterBufferPhase2,
+            m_swVisibleClustersCounterBufferPhase2,
+            m_histogramIndirectCommand,
+            m_workGraphTelemetryBuffer,
+            m_occlusionReplayBuffer,
+            m_occlusionReplayStateBuffer,
+            m_occlusionNodeGpuInputsBuffer,
+            m_viewDepthSrvIndicesBuffer,
+            m_viewRasterInfoBuffer,
+            slabGroup,
+            m_visibleClustersCounterBuffer,
+            m_swVisibleClustersCounterBuffer));
     outPasses.push_back(std::move(cullPassDesc2));
 
     if (!disableReyesTessellation) {
-        RenderGraph::ExternalPassDesc reyesResetPassDesc2;
-        reyesResetPassDesc2.type = RenderGraph::PassType::Compute;
-        reyesResetPassDesc2.name = MakeVariantPassName(traits, "ReyesQueueResetPass2");
-        reyesResetPassDesc2.pass = std::make_shared<ReyesQueueResetPass>(
-            m_reyesFullClusterOutputsCounterBuffer,
-            m_reyesOwnedClustersCounterBuffer,
-            std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueCounterBufferA, m_reyesSplitQueueCounterBufferB },
-            std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueOverflowBufferA, m_reyesSplitQueueOverflowBufferB },
-            m_reyesDiceQueueCounterBuffer,
-            m_reyesDiceQueueOverflowBuffer,
-            reyesOwnershipBitsetBufferPhase2,
-            m_reyesTelemetryBufferPhase2,
-            2u);
-        outPasses.push_back(std::move(reyesResetPassDesc2));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "ReyesQueueResetPass2"),
+                std::make_shared<ReyesQueueResetPass>(
+                    m_reyesFullClusterOutputsCounterBuffer,
+                    m_reyesOwnedClustersCounterBuffer,
+                    std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueCounterBufferA, m_reyesSplitQueueCounterBufferB },
+                    std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueOverflowBufferA, m_reyesSplitQueueOverflowBufferB },
+                    m_reyesDiceQueueCounterBuffer,
+                    m_reyesDiceQueueOverflowBuffer,
+                    reyesOwnershipBitsetBufferPhase2,
+                    m_reyesTelemetryBufferPhase2,
+                    2u)));
 
-        RenderGraph::ExternalPassDesc reyesCreateClassifyArgsPassDesc2;
-        reyesCreateClassifyArgsPassDesc2.type = RenderGraph::PassType::Compute;
-        reyesCreateClassifyArgsPassDesc2.name = MakeVariantPassName(traits, "ReyesCreateClassifyDispatchArgsPass2");
-        reyesCreateClassifyArgsPassDesc2.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
-            m_visibleClustersCounterBufferPhase2,
-            m_reyesClassifyIndirectArgsBufferPhase2);
-        outPasses.push_back(std::move(reyesCreateClassifyArgsPassDesc2));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "ReyesCreateClassifyDispatchArgsPass2"),
+                std::make_shared<ReyesCreateDispatchArgsPass>(
+                    m_visibleClustersCounterBufferPhase2,
+                    m_reyesClassifyIndirectArgsBufferPhase2)));
 
-        RenderGraph::ExternalPassDesc reyesClassifyPassDesc2;
-        reyesClassifyPassDesc2.type = RenderGraph::PassType::Compute;
-        reyesClassifyPassDesc2.name = MakeVariantPassName(traits, "ReyesClassifyPass2");
-        reyesClassifyPassDesc2.pass = std::make_shared<ReyesClassifyPass>(
-            m_visibleClustersBuffer,
-            m_visibleClustersCounterBufferPhase2,
-            m_visibleClustersCounterBuffer,
-            m_reyesFullClusterOutputsBuffer,
-            m_reyesFullClusterOutputsCounterBuffer,
-            m_reyesOwnedClustersBuffer,
-            m_reyesOwnedClustersCounterBuffer,
-            reyesOwnershipBitsetBufferPhase2,
-            m_reyesClassifyIndirectArgsBufferPhase2,
-            m_reyesTelemetryBufferPhase2,
-            2u);
-        outPasses.push_back(std::move(reyesClassifyPassDesc2));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "ReyesClassifyPass2"),
+                std::make_shared<ReyesClassifyPass>(
+                    m_visibleClustersBuffer,
+                    m_visibleClustersCounterBufferPhase2,
+                    m_visibleClustersCounterBuffer,
+                    m_reyesFullClusterOutputsBuffer,
+                    m_reyesFullClusterOutputsCounterBuffer,
+                    m_reyesOwnedClustersBuffer,
+                    m_reyesOwnedClustersCounterBuffer,
+                    reyesOwnershipBitsetBufferPhase2,
+                    m_reyesClassifyIndirectArgsBufferPhase2,
+                    m_reyesTelemetryBufferPhase2,
+                    2u)));
 
-        RenderGraph::ExternalPassDesc reyesCreateSeedArgsPassDesc2;
-        reyesCreateSeedArgsPassDesc2.type = RenderGraph::PassType::Compute;
-        reyesCreateSeedArgsPassDesc2.name = MakeVariantPassName(traits, "ReyesCreateSeedDispatchArgsPass2");
-        reyesCreateSeedArgsPassDesc2.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
-            m_reyesOwnedClustersCounterBuffer,
-            m_reyesSplitIndirectArgsBufferPhase2);
-        outPasses.push_back(std::move(reyesCreateSeedArgsPassDesc2));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "ReyesCreateSeedDispatchArgsPass2"),
+                std::make_shared<ReyesCreateDispatchArgsPass>(
+                    m_reyesOwnedClustersCounterBuffer,
+                    m_reyesSplitIndirectArgsBufferPhase2)));
 
-        RenderGraph::ExternalPassDesc reyesSeedPassDesc2;
-        reyesSeedPassDesc2.type = RenderGraph::PassType::Compute;
-        reyesSeedPassDesc2.name = MakeVariantPassName(traits, "ReyesSeedPatchesPass2");
-        reyesSeedPassDesc2.pass = std::make_shared<ReyesSeedPatchesPass>(
-            m_visibleClustersBuffer,
-            m_reyesOwnedClustersBuffer,
-            m_reyesOwnedClustersCounterBuffer,
-            m_reyesSplitQueueBufferA,
-            m_reyesSplitQueueCounterBufferA,
-            m_reyesSplitQueueOverflowBufferA,
-            m_reyesSplitIndirectArgsBufferPhase2,
-            reyesSplitQueueCapacity,
-            2u);
-        outPasses.push_back(std::move(reyesSeedPassDesc2));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "ReyesSeedPatchesPass2"),
+                std::make_shared<ReyesSeedPatchesPass>(
+                    m_visibleClustersBuffer,
+                    m_reyesOwnedClustersBuffer,
+                    m_reyesOwnedClustersCounterBuffer,
+                    m_reyesSplitQueueBufferA,
+                    m_reyesSplitQueueCounterBufferA,
+                    m_reyesSplitQueueOverflowBufferA,
+                    m_reyesSplitIndirectArgsBufferPhase2,
+                    reyesSplitQueueCapacity,
+                    2u)));
 
         const std::shared_ptr<Buffer> reyesSplitBuffers[] = { m_reyesSplitQueueBufferA, m_reyesSplitQueueBufferB };
         const std::shared_ptr<Buffer> reyesSplitCounters[] = { m_reyesSplitQueueCounterBufferA, m_reyesSplitQueueCounterBufferB };
@@ -1309,274 +1271,254 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             const uint32_t inputIndex = splitPassIndex & 1u;
             const uint32_t outputIndex = inputIndex ^ 1u;
 
-            RenderGraph::ExternalPassDesc reyesCreateSplitArgsPassDesc2;
-            reyesCreateSplitArgsPassDesc2.type = RenderGraph::PassType::Compute;
-            reyesCreateSplitArgsPassDesc2.name = MakeVariantPassName(traits, "ReyesCreateSplitDispatchArgsPass2_" + std::to_string(splitPassIndex));
-            reyesCreateSplitArgsPassDesc2.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
-                reyesSplitCounters[inputIndex],
-                m_reyesSplitIndirectArgsBufferPhase2);
-            outPasses.push_back(std::move(reyesCreateSplitArgsPassDesc2));
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "ReyesCreateSplitDispatchArgsPass2_" + std::to_string(splitPassIndex)),
+                    std::make_shared<ReyesCreateDispatchArgsPass>(
+                        reyesSplitCounters[inputIndex],
+                        m_reyesSplitIndirectArgsBufferPhase2)));
 
-            RenderGraph::ExternalPassDesc reyesSplitPassDesc2;
-            reyesSplitPassDesc2.type = RenderGraph::PassType::Compute;
-            reyesSplitPassDesc2.name = MakeVariantPassName(traits, "ReyesSplitPass2_" + std::to_string(splitPassIndex));
-            reyesSplitPassDesc2.pass = std::make_shared<ReyesSplitPass>(
-                m_visibleClustersBuffer,
-                reyesSplitBuffers[inputIndex],
-                reyesSplitCounters[inputIndex],
-                reyesSplitBuffers[outputIndex],
-                reyesSplitCounters[outputIndex],
-                reyesSplitOverflows[outputIndex],
-                m_reyesDiceQueueBuffer,
-                m_reyesDiceQueueCounterBuffer,
-                m_reyesDiceQueueOverflowBuffer,
-                m_reyesTessTableConfigsBuffer,
-                m_reyesTessTableVerticesBuffer,
-                m_reyesTessTableTrianglesBuffer,
-                m_reyesSplitIndirectArgsBufferPhase2,
-                m_reyesTelemetryBufferPhase2,
-                reyesSplitQueueCapacity,
-                splitPassIndex,
-                CLodReyesMaxSplitPassCount,
-                2u);
-            outPasses.push_back(std::move(reyesSplitPassDesc2));
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "ReyesSplitPass2_" + std::to_string(splitPassIndex)),
+                    std::make_shared<ReyesSplitPass>(
+                        m_visibleClustersBuffer,
+                        reyesSplitBuffers[inputIndex],
+                        reyesSplitCounters[inputIndex],
+                        reyesSplitBuffers[outputIndex],
+                        reyesSplitCounters[outputIndex],
+                        reyesSplitOverflows[outputIndex],
+                        m_reyesDiceQueueBuffer,
+                        m_reyesDiceQueueCounterBuffer,
+                        m_reyesDiceQueueOverflowBuffer,
+                        m_reyesTessTableConfigsBuffer,
+                        m_reyesTessTableVerticesBuffer,
+                        m_reyesTessTableTrianglesBuffer,
+                        m_reyesSplitIndirectArgsBufferPhase2,
+                        m_reyesTelemetryBufferPhase2,
+                        reyesSplitQueueCapacity,
+                        splitPassIndex,
+                        CLodReyesMaxSplitPassCount,
+                        2u)));
         }
 
-        RenderGraph::ExternalPassDesc reyesCreateDiceArgsPassDesc2;
-        reyesCreateDiceArgsPassDesc2.type = RenderGraph::PassType::Compute;
-        reyesCreateDiceArgsPassDesc2.name = MakeVariantPassName(traits, "ReyesCreateDiceDispatchArgsPass2");
-        reyesCreateDiceArgsPassDesc2.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
-            m_reyesDiceQueueCounterBuffer,
-            m_reyesDiceIndirectArgsBufferPhase2);
-        outPasses.push_back(std::move(reyesCreateDiceArgsPassDesc2));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "ReyesCreateDiceDispatchArgsPass2"),
+                std::make_shared<ReyesCreateDispatchArgsPass>(
+                    m_reyesDiceQueueCounterBuffer,
+                    m_reyesDiceIndirectArgsBufferPhase2)));
 
-        RenderGraph::ExternalPassDesc reyesDicePassDesc2;
-        reyesDicePassDesc2.type = RenderGraph::PassType::Compute;
-        reyesDicePassDesc2.name = MakeVariantPassName(traits, "ReyesDicePass2");
-        reyesDicePassDesc2.pass = std::make_shared<ReyesDicePass>(
-            m_reyesDiceQueueBuffer,
-            m_reyesDiceQueueCounterBuffer,
-            m_reyesTessTableConfigsBuffer,
-            m_reyesDiceIndirectArgsBufferPhase2,
-            m_reyesTelemetryBufferPhase2,
-            reyesDiceQueueCapacity,
-            2u);
-        outPasses.push_back(std::move(reyesDicePassDesc2));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "ReyesDicePass2"),
+                std::make_shared<ReyesDicePass>(
+                    m_reyesDiceQueueBuffer,
+                    m_reyesDiceQueueCounterBuffer,
+                    m_reyesTessTableConfigsBuffer,
+                    m_reyesDiceIndirectArgsBufferPhase2,
+                    m_reyesTelemetryBufferPhase2,
+                    reyesDiceQueueCapacity,
+                    2u)));
 
         if (traits.type == CLodExtensionType::VisiblityBuffer) {
-            RenderGraph::ExternalPassDesc reyesBuildRasterWorkPassDesc2;
-            reyesBuildRasterWorkPassDesc2.type = RenderGraph::PassType::Compute;
-            reyesBuildRasterWorkPassDesc2.name = MakeVariantPassName(traits, "ReyesBuildRasterWorkPass2");
-            reyesBuildRasterWorkPassDesc2.pass = std::make_shared<ReyesBuildRasterWorkPass>(
-                m_reyesDiceQueueBuffer,
-                m_reyesDiceQueueCounterBuffer,
-                m_reyesTessTableConfigsBuffer,
-                m_reyesRasterWorkBufferPhase2,
-                m_reyesRasterWorkCounterBufferPhase2,
-                m_reyesDiceIndirectArgsBufferPhase2,
-                m_reyesTelemetryBufferPhase2,
-                reyesRasterWorkCapacity);
-            outPasses.push_back(std::move(reyesBuildRasterWorkPassDesc2));
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "ReyesBuildRasterWorkPass2"),
+                    std::make_shared<ReyesBuildRasterWorkPass>(
+                        m_reyesDiceQueueBuffer,
+                        m_reyesDiceQueueCounterBuffer,
+                        m_reyesTessTableConfigsBuffer,
+                        m_reyesRasterWorkBufferPhase2,
+                        m_reyesRasterWorkCounterBufferPhase2,
+                        m_reyesDiceIndirectArgsBufferPhase2,
+                        m_reyesTelemetryBufferPhase2,
+                        reyesRasterWorkCapacity)));
 
-            RenderGraph::ExternalPassDesc reyesCreateRasterWorkArgsPassDesc2;
-            reyesCreateRasterWorkArgsPassDesc2.type = RenderGraph::PassType::Compute;
-            reyesCreateRasterWorkArgsPassDesc2.name = MakeVariantPassName(traits, "ReyesCreateRasterWorkDispatchArgsPass2");
-            reyesCreateRasterWorkArgsPassDesc2.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
-                m_reyesRasterWorkCounterBufferPhase2,
-                m_reyesRasterWorkIndirectArgsBufferPhase2);
-            outPasses.push_back(std::move(reyesCreateRasterWorkArgsPassDesc2));
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "ReyesCreateRasterWorkDispatchArgsPass2"),
+                    std::make_shared<ReyesCreateDispatchArgsPass>(
+                        m_reyesRasterWorkCounterBufferPhase2,
+                        m_reyesRasterWorkIndirectArgsBufferPhase2)));
 
-            RenderGraph::ExternalPassDesc reyesPatchRasterPassDesc2;
-            reyesPatchRasterPassDesc2.type = RenderGraph::PassType::Compute;
-            reyesPatchRasterPassDesc2.name = MakeVariantPassName(traits, "ReyesPatchRasterPass2");
-            reyesPatchRasterPassDesc2.pass = std::make_shared<ReyesPatchRasterizationPass>(
-                m_visibleClustersBuffer,
-                m_reyesDiceQueueBuffer,
-                m_reyesDiceQueueCounterBuffer,
-                m_reyesRasterWorkBufferPhase2,
-                m_reyesTessTableConfigsBuffer,
-                m_reyesTessTableVerticesBuffer,
-                m_reyesTessTableTrianglesBuffer,
-                m_viewRasterInfoBuffer,
-                m_reyesRasterWorkIndirectArgsBufferPhase2,
-                m_reyesTelemetryBufferPhase2,
-                m_maxVisibleClusters,
-                2u,
-                CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters));
-            outPasses.push_back(std::move(reyesPatchRasterPassDesc2));
+            outPasses.push_back(
+                RenderGraph::ExternalPassDesc::Compute(
+                    MakeVariantPassName(traits, "ReyesPatchRasterPass2"),
+                    std::make_shared<ReyesPatchRasterizationPass>(
+                        m_visibleClustersBuffer,
+                        m_reyesDiceQueueBuffer,
+                        m_reyesDiceQueueCounterBuffer,
+                        m_reyesRasterWorkBufferPhase2,
+                        m_reyesTessTableConfigsBuffer,
+                        m_reyesTessTableVerticesBuffer,
+                        m_reyesTessTableTrianglesBuffer,
+                        m_viewRasterInfoBuffer,
+                        m_reyesRasterWorkIndirectArgsBufferPhase2,
+                        m_reyesTelemetryBufferPhase2,
+                        m_maxVisibleClusters,
+                        2u,
+                        CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters))));
         }
     }
 
-    RenderGraph::ExternalPassDesc histogramPassDesc2;
-    histogramPassDesc2.type = RenderGraph::PassType::Compute;
-    histogramPassDesc2.name = MakeVariantPassName(traits, "RasterBucketsHistogramPass2");
-    histogramPassDesc2.pass = std::make_shared<RasterBucketHistogramPass>(
-        m_visibleClustersBuffer,
-        m_visibleClustersCounterBufferPhase2,
-        m_histogramIndirectCommand,
-        m_rasterBucketsHistogramBufferPhase2,
-        reyesOwnershipBitsetBufferPhase2,
-        m_visibleClustersCounterBuffer);
-    outPasses.push_back(std::move(histogramPassDesc2));
+    outPasses.push_back(
+        RenderGraph::ExternalPassDesc::Compute(
+            MakeVariantPassName(traits, "RasterBucketsHistogramPass2"),
+            std::make_shared<RasterBucketHistogramPass>(
+                m_visibleClustersBuffer,
+                m_visibleClustersCounterBufferPhase2,
+                m_histogramIndirectCommand,
+                m_rasterBucketsHistogramBufferPhase2,
+                reyesOwnershipBitsetBufferPhase2,
+                m_visibleClustersCounterBuffer)));
 
-    RenderGraph::ExternalPassDesc prefixScanPassDesc2;
-    prefixScanPassDesc2.type = RenderGraph::PassType::Compute;
-    prefixScanPassDesc2.name = MakeVariantPassName(traits, "RasterBucketsPrefixScanPass2");
-    prefixScanPassDesc2.pass = std::make_shared<RasterBucketBlockScanPass>(
-        m_rasterBucketsHistogramBufferPhase2,
-        m_rasterBucketsOffsetsBuffer,
-        m_rasterBucketsBlockSumsBuffer);
-    outPasses.push_back(std::move(prefixScanPassDesc2));
+    outPasses.push_back(
+        RenderGraph::ExternalPassDesc::Compute(
+            MakeVariantPassName(traits, "RasterBucketsPrefixScanPass2"),
+            std::make_shared<RasterBucketBlockScanPass>(
+                m_rasterBucketsHistogramBufferPhase2,
+                m_rasterBucketsOffsetsBuffer,
+                m_rasterBucketsBlockSumsBuffer)));
 
-    RenderGraph::ExternalPassDesc prefixOffsetsPassDesc2;
-    prefixOffsetsPassDesc2.type = RenderGraph::PassType::Compute;
-    prefixOffsetsPassDesc2.name = MakeVariantPassName(traits, "RasterBucketsPrefixOffsetsPass2");
-    prefixOffsetsPassDesc2.pass = std::make_shared<RasterBucketBlockOffsetsPass>(
-        m_rasterBucketsOffsetsBuffer,
-        m_rasterBucketsBlockSumsBuffer,
-        m_rasterBucketsScannedBlockSumsBuffer,
-        m_rasterBucketsTotalCountBuffer);
-    outPasses.push_back(std::move(prefixOffsetsPassDesc2));
+    outPasses.push_back(
+        RenderGraph::ExternalPassDesc::Compute(
+            MakeVariantPassName(traits, "RasterBucketsPrefixOffsetsPass2"),
+            std::make_shared<RasterBucketBlockOffsetsPass>(
+                m_rasterBucketsOffsetsBuffer,
+                m_rasterBucketsBlockSumsBuffer,
+                m_rasterBucketsScannedBlockSumsBuffer,
+                m_rasterBucketsTotalCountBuffer)));
 
-    RenderGraph::ExternalPassDesc compactPassDesc2;
-    compactPassDesc2.type = RenderGraph::PassType::Compute;
-    compactPassDesc2.name = MakeVariantPassName(traits, "RasterBucketsCompactAndArgsPass2");
-    compactPassDesc2.pass = std::make_shared<RasterBucketCompactAndArgsPass>(
-        m_visibleClustersBuffer,
-        m_visibleClustersCounterBufferPhase2,
-        m_rasterBucketsTotalCountBufferPhase1,
-        m_histogramIndirectCommand,
-        m_rasterBucketsHistogramBufferPhase2,
-        m_rasterBucketsOffsetsBuffer,
-        m_rasterBucketsWriteCursorBufferPhase2,
-        m_compactedVisibleClustersBuffer,
-        m_rasterBucketsIndirectArgsBuffer,
-        m_sortedToUnsortedMappingBuffer,
-        reyesOwnershipBitsetBufferPhase2,
-        m_maxVisibleClusters,
-        true);
-    outPasses.push_back(std::move(compactPassDesc2));
+    outPasses.push_back(
+        RenderGraph::ExternalPassDesc::Compute(
+            MakeVariantPassName(traits, "RasterBucketsCompactAndArgsPass2"),
+            std::make_shared<RasterBucketCompactAndArgsPass>(
+                m_visibleClustersBuffer,
+                m_visibleClustersCounterBufferPhase2,
+                m_rasterBucketsTotalCountBufferPhase1,
+                m_histogramIndirectCommand,
+                m_rasterBucketsHistogramBufferPhase2,
+                m_rasterBucketsOffsetsBuffer,
+                m_rasterBucketsWriteCursorBufferPhase2,
+                m_compactedVisibleClustersBuffer,
+                m_rasterBucketsIndirectArgsBuffer,
+                m_sortedToUnsortedMappingBuffer,
+                reyesOwnershipBitsetBufferPhase2,
+                m_maxVisibleClusters,
+                true)));
 
-    RenderGraph::ExternalPassDesc rasterizePassDesc2;
-    rasterizePassDesc2.type = RenderGraph::PassType::Render;
-    rasterizePassDesc2.name = MakeVariantPassName(traits, "RasterizeClustersPass2");
-    rasterizePassDesc2.where = RenderGraph::ExternalInsertPoint::Before("MaterialHistogramPass");
     ClusterRasterizationPassInputs rasterizePassInputs2;
     rasterizePassInputs2.clearGbuffer = false;
     rasterizePassInputs2.wireframe = false;
     rasterizePassInputs2.renderPhase = renderPhase;
     rasterizePassInputs2.outputKind = traits.rasterOutputKind;
-    rasterizePassDesc2.pass = std::make_shared<ClusterRasterizationPass>(
-        rasterizePassInputs2,
-        m_compactedVisibleClustersBuffer,
-        m_rasterBucketsHistogramBufferPhase2,
-        m_rasterBucketsIndirectArgsBuffer,
-        m_sortedToUnsortedMappingBuffer,
-        nullptr,
-        nullptr,
-        nullptr,
-        slabGroup);
-    rasterizePassDesc2.isGeometryPass = true;
+    auto rasterizePassDesc2 = RenderGraph::ExternalPassDesc::Render(
+        MakeVariantPassName(traits, "RasterizeClustersPass2"),
+        std::make_shared<ClusterRasterizationPass>(
+            rasterizePassInputs2,
+            m_compactedVisibleClustersBuffer,
+            m_rasterBucketsHistogramBufferPhase2,
+            m_rasterBucketsIndirectArgsBuffer,
+            m_sortedToUnsortedMappingBuffer,
+            nullptr,
+            nullptr,
+            nullptr,
+            slabGroup));
+    rasterizePassDesc2.At(RenderGraph::ExternalInsertPoint::Before("MaterialHistogramPass"));
+    rasterizePassDesc2.GeometryPass();
     outPasses.push_back(std::move(rasterizePassDesc2));
 
     if (useComputeSWRaster) {
-        RenderGraph::ExternalPassDesc swCreateCommandPassDesc2;
-        swCreateCommandPassDesc2.type = RenderGraph::PassType::Compute;
-        swCreateCommandPassDesc2.name = MakeVariantPassName(traits, "RasterBucketsCreateCommandPassSW2");
-        swCreateCommandPassDesc2.pass = std::make_shared<RasterBucketCreateCommandPass>(
-            m_swVisibleClustersCounterBufferPhase2,
-            m_histogramIndirectCommand,
-            m_occlusionReplayStateBuffer,
-            m_occlusionNodeGpuInputsBuffer,
-            true);
-        outPasses.push_back(std::move(swCreateCommandPassDesc2));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "RasterBucketsCreateCommandPassSW2"),
+                std::make_shared<RasterBucketCreateCommandPass>(
+                    m_swVisibleClustersCounterBufferPhase2,
+                    m_histogramIndirectCommand,
+                    m_occlusionReplayStateBuffer,
+                    m_occlusionNodeGpuInputsBuffer,
+                    true)));
 
-        RenderGraph::ExternalPassDesc swHistogramPassDesc2;
-        swHistogramPassDesc2.type = RenderGraph::PassType::Compute;
-        swHistogramPassDesc2.name = MakeVariantPassName(traits, "RasterBucketsHistogramPassSW2");
-        swHistogramPassDesc2.pass = std::make_shared<RasterBucketHistogramPass>(
-            m_visibleClustersBuffer,
-            m_swVisibleClustersCounterBufferPhase2,
-            m_histogramIndirectCommand,
-            m_rasterBucketsHistogramBufferPhase2Sw,
-            reyesOwnershipBitsetBufferPhase2,
-            m_swVisibleClustersCounterBuffer,
-            true,
-            m_maxVisibleClusters,
-            true);
-        outPasses.push_back(std::move(swHistogramPassDesc2));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "RasterBucketsHistogramPassSW2"),
+                std::make_shared<RasterBucketHistogramPass>(
+                    m_visibleClustersBuffer,
+                    m_swVisibleClustersCounterBufferPhase2,
+                    m_histogramIndirectCommand,
+                    m_rasterBucketsHistogramBufferPhase2Sw,
+                    reyesOwnershipBitsetBufferPhase2,
+                    m_swVisibleClustersCounterBuffer,
+                    true,
+                    m_maxVisibleClusters,
+                    true)));
 
-        RenderGraph::ExternalPassDesc swPrefixScanPassDesc2;
-        swPrefixScanPassDesc2.type = RenderGraph::PassType::Compute;
-        swPrefixScanPassDesc2.name = MakeVariantPassName(traits, "RasterBucketsPrefixScanPassSW2");
-        swPrefixScanPassDesc2.pass = std::make_shared<RasterBucketBlockScanPass>(
-            m_rasterBucketsHistogramBufferPhase2Sw,
-            m_rasterBucketsOffsetsBuffer,
-            m_rasterBucketsBlockSumsBuffer,
-            true);
-        outPasses.push_back(std::move(swPrefixScanPassDesc2));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "RasterBucketsPrefixScanPassSW2"),
+                std::make_shared<RasterBucketBlockScanPass>(
+                    m_rasterBucketsHistogramBufferPhase2Sw,
+                    m_rasterBucketsOffsetsBuffer,
+                    m_rasterBucketsBlockSumsBuffer,
+                    true)));
 
-        RenderGraph::ExternalPassDesc swPrefixOffsetsPassDesc2;
-        swPrefixOffsetsPassDesc2.type = RenderGraph::PassType::Compute;
-        swPrefixOffsetsPassDesc2.name = MakeVariantPassName(traits, "RasterBucketsPrefixOffsetsPassSW2");
-        swPrefixOffsetsPassDesc2.pass = std::make_shared<RasterBucketBlockOffsetsPass>(
-            m_rasterBucketsOffsetsBuffer,
-            m_rasterBucketsBlockSumsBuffer,
-            m_rasterBucketsScannedBlockSumsBuffer,
-            m_rasterBucketsTotalCountBuffer,
-            true);
-        outPasses.push_back(std::move(swPrefixOffsetsPassDesc2));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "RasterBucketsPrefixOffsetsPassSW2"),
+                std::make_shared<RasterBucketBlockOffsetsPass>(
+                    m_rasterBucketsOffsetsBuffer,
+                    m_rasterBucketsBlockSumsBuffer,
+                    m_rasterBucketsScannedBlockSumsBuffer,
+                    m_rasterBucketsTotalCountBuffer,
+                    true)));
 
-        RenderGraph::ExternalPassDesc swCompactPassDesc2;
-        swCompactPassDesc2.type = RenderGraph::PassType::Compute;
-        swCompactPassDesc2.name = MakeVariantPassName(traits, "RasterBucketsCompactAndArgsPassSW2");
-        swCompactPassDesc2.pass = std::make_shared<RasterBucketCompactAndArgsPass>(
-            m_visibleClustersBuffer,
-            m_swVisibleClustersCounterBufferPhase2,
-            m_rasterBucketsTotalCountBufferPhase1Sw,
-            m_histogramIndirectCommand,
-            m_rasterBucketsHistogramBufferPhase2Sw,
-            m_rasterBucketsOffsetsBuffer,
-            m_rasterBucketsWriteCursorBufferPhase2Sw,
-            m_compactedVisibleClustersBuffer,
-            m_rasterBucketsIndirectArgsBuffer,
-            m_sortedToUnsortedMappingBuffer,
-            reyesOwnershipBitsetBufferPhase2,
-            m_maxVisibleClusters,
-            true,
-            true,
-            true,
-            true);
-        outPasses.push_back(std::move(swCompactPassDesc2));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "RasterBucketsCompactAndArgsPassSW2"),
+                std::make_shared<RasterBucketCompactAndArgsPass>(
+                    m_visibleClustersBuffer,
+                    m_swVisibleClustersCounterBufferPhase2,
+                    m_rasterBucketsTotalCountBufferPhase1Sw,
+                    m_histogramIndirectCommand,
+                    m_rasterBucketsHistogramBufferPhase2Sw,
+                    m_rasterBucketsOffsetsBuffer,
+                    m_rasterBucketsWriteCursorBufferPhase2Sw,
+                    m_compactedVisibleClustersBuffer,
+                    m_rasterBucketsIndirectArgsBuffer,
+                    m_sortedToUnsortedMappingBuffer,
+                    reyesOwnershipBitsetBufferPhase2,
+                    m_maxVisibleClusters,
+                    true,
+                    true,
+                    true,
+                    true)));
 
-        RenderGraph::ExternalPassDesc swRasterizePassDesc2;
-        swRasterizePassDesc2.type = RenderGraph::PassType::Compute;
-        swRasterizePassDesc2.name = MakeVariantPassName(traits, "SoftwareRasterizeClustersPass2");
-        swRasterizePassDesc2.pass = std::make_shared<ClusterSoftwareRasterizationPass>(
-            m_compactedVisibleClustersBuffer,
-            m_rasterBucketsHistogramBufferPhase2Sw,
-            m_rasterBucketsIndirectArgsBuffer,
-            m_sortedToUnsortedMappingBuffer,
-            m_viewRasterInfoBuffer,
-            slabGroup,
-            true);
-        outPasses.push_back(std::move(swRasterizePassDesc2));
+        outPasses.push_back(
+            RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "SoftwareRasterizeClustersPass2"),
+                std::make_shared<ClusterSoftwareRasterizationPass>(
+                    m_compactedVisibleClustersBuffer,
+                    m_rasterBucketsHistogramBufferPhase2Sw,
+                    m_rasterBucketsIndirectArgsBuffer,
+                    m_sortedToUnsortedMappingBuffer,
+                    m_viewRasterInfoBuffer,
+                    slabGroup,
+                    true)));
     }
 
     if (traits.schedulesPerViewDepthCopy) {
-        RenderGraph::ExternalPassDesc depthCopyPassDesc2;
-        depthCopyPassDesc2.type = RenderGraph::PassType::Compute;
-        depthCopyPassDesc2.name = MakeVariantPassName(traits, "LinearDepthCopyPass2");
-        depthCopyPassDesc2.where = RenderGraph::ExternalInsertPoint::Before("DeferredShadingPass");
-        depthCopyPassDesc2.pass = std::make_shared<PerViewLinearDepthCopyPass>();
+        auto depthCopyPassDesc2 = RenderGraph::ExternalPassDesc::Compute(
+            MakeVariantPassName(traits, "LinearDepthCopyPass2"),
+            std::make_shared<PerViewLinearDepthCopyPass>());
+        depthCopyPassDesc2.At(RenderGraph::ExternalInsertPoint::Before("DeferredShadingPass"));
         outPasses.push_back(std::move(depthCopyPassDesc2));
     }
 
-    RenderGraph::ExternalPassDesc downsamplePassDesc2;
-    downsamplePassDesc2.type = RenderGraph::PassType::Compute;
-    downsamplePassDesc2.name = MakeVariantPassName(traits, "LinearDepthDownsamplePass2");
-    downsamplePassDesc2.pass = std::make_shared<DownsamplePass>();
-    outPasses.push_back(std::move(downsamplePassDesc2));
+    outPasses.push_back(
+        RenderGraph::ExternalPassDesc::Compute(
+            MakeVariantPassName(traits, "LinearDepthDownsamplePass2"),
+            std::make_shared<DownsamplePass>()));
 }
 
 void CLodExtension::GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses)

@@ -39,36 +39,27 @@ public:
 		// Upload pass: first
 		if (m_uploadService) {
 			if (auto upload = m_uploadService->GetUploadPass()) {
-			RenderGraph::ExternalPassDesc d;
-			d.type = RenderGraph::PassType::Render;
-			d.name = "Builtin::Uploads";
-			d.where = RenderGraph::ExternalInsertPoint::Begin(/*prio*/0);
-			d.pass = upload;
-			outPasses.push_back(std::move(d));
+				outPasses.push_back(
+					RenderGraph::ExternalPassDesc::Render("Builtin::Uploads", upload)
+						.At(RenderGraph::ExternalInsertPoint::Begin(/*prio*/0)));
 			}
 		}
 
 		// Mipmapping pass: immediately after uploads
 		if (m_textureFactory) {
 			if (auto mip = m_textureFactory->GetMipmappingPass()) {
-				RenderGraph::ExternalPassDesc d;
-				d.type = RenderGraph::PassType::Compute;
-				d.name = "Builtin::Mipmapping";
-				d.where = RenderGraph::ExternalInsertPoint::Begin(/*prio*/1);
-				d.pass = mip;
-				outPasses.push_back(std::move(d));
+				outPasses.push_back(
+					RenderGraph::ExternalPassDesc::Compute("Builtin::Mipmapping", mip)
+						.At(RenderGraph::ExternalInsertPoint::Begin(/*prio*/1)));
 			}
 		}
 
 		// Readback pass: last
 		if (m_readbackManager) {
 			if (auto rb = m_readbackManager->GetReadbackPass()) {
-				RenderGraph::ExternalPassDesc d;
-				d.type = RenderGraph::PassType::Render;
-				d.name = "Builtin::Readbacks";
-				d.where = RenderGraph::ExternalInsertPoint::End(/*prio*/0);
-				d.pass = rb;
-				outPasses.push_back(std::move(d));
+				outPasses.push_back(
+					RenderGraph::ExternalPassDesc::Render("Builtin::Readbacks", rb)
+						.At(RenderGraph::ExternalInsertPoint::End(/*prio*/0)));
 			}
 		}
 	}
@@ -82,12 +73,9 @@ public:
 		// the frame pass stage so newly queued uploads are visible this frame.
 		if (auto* uploadService = rg.GetUploadService()) {
 			if (auto upload = uploadService->GetUploadPass()) {
-				RenderGraph::ExternalPassDesc d;
-				d.type = RenderGraph::PassType::Render;
-				d.name = "Builtin::LateUploads";
-				d.where = RenderGraph::ExternalInsertPoint::After("Builtin::Uploads");
-				d.pass = upload;
-				outPasses.push_back(std::move(d));
+				outPasses.push_back(
+					RenderGraph::ExternalPassDesc::Render("Builtin::LateUploads", upload)
+						.At(RenderGraph::ExternalInsertPoint::After("Builtin::Uploads")));
 			}
 		}
 	}
