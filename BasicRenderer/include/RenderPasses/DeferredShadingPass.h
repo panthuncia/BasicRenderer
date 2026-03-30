@@ -48,31 +48,6 @@ public:
 	}
 
 	void Setup() override {
-		
-		if (m_clusteredLightingEnabled) {
-			RegisterSRV(Builtin::Light::ClusterBuffer);
-			RegisterSRV(Builtin::Light::PagesBuffer);
-		}
-
-		RegisterSRV(Builtin::Light::ActiveLightIndices);
-		RegisterSRV(Builtin::Light::InfoBuffer);
-		RegisterSRV(Builtin::Light::PointLightCubemapBuffer);
-		RegisterSRV(Builtin::Light::SpotLightMatrixBuffer);
-		RegisterSRV(Builtin::Light::DirectionalLightCascadeBuffer);
-		RegisterSRV(Builtin::Environment::InfoBuffer);
-		RegisterSRV(Builtin::CameraBuffer);
-
-		if (m_gtaoEnabled)
-			RegisterSRV(Builtin::GTAO::OutputAOTerm);
-
-		RegisterSRV(Builtin::GBuffer::Normals);
-		RegisterSRV(Builtin::GBuffer::Albedo);
-		RegisterSRV(Builtin::GBuffer::Emissive);
-		RegisterSRV(Builtin::GBuffer::MetallicRoughness);
-		RegisterSRV(Builtin::PrimaryCamera::LinearDepthMap);
-
-		RegisterUAV(Builtin::Color::HDRColorTarget);
-		RegisterUAV(Builtin::DebugVisualization);
 	}
 
 	PassReturn Execute(PassExecutionContext& executionContext) override {

@@ -83,14 +83,6 @@ void ReyesPatchRasterizationPass::DeclareResourceUsages(ComputePassBuilder* buil
 }
 
 void ReyesPatchRasterizationPass::Setup() {
-    RegisterSRV(Builtin::PerMeshBuffer);
-    RegisterSRV(Builtin::PerMeshInstanceBuffer);
-    RegisterSRV(Builtin::PerObjectBuffer);
-    RegisterSRV(Builtin::CullingCameraBuffer);
-	RegisterSRV(Builtin::PerMaterialDataBuffer);
-    RegisterSRV(Builtin::SkeletonResources::InverseBindMatrices);
-    RegisterSRV(Builtin::SkeletonResources::BoneTransforms);
-    RegisterSRV(Builtin::SkeletonResources::SkinningInstanceInfo);
 }
 
 void ReyesPatchRasterizationPass::Update(const UpdateExecutionContext& executionContext)

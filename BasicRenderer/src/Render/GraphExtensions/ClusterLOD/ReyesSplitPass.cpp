@@ -95,9 +95,6 @@ void ReyesSplitPass::DeclareResourceUsages(ComputePassBuilder* builder)
 }
 
 void ReyesSplitPass::Setup() {
-    RegisterSRV(Builtin::PerMeshInstanceBuffer);
-    RegisterSRV(Builtin::PerObjectBuffer);
-    RegisterSRV(Builtin::CullingCameraBuffer);
 }
 
 PassReturn ReyesSplitPass::Execute(PassExecutionContext& executionContext)

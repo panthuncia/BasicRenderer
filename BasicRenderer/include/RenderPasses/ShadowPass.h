@@ -87,25 +87,6 @@ public:
     }
 
     void Setup() override {
-
-        RegisterSRV(Builtin::NormalMatrixBuffer);
-        RegisterSRV(Builtin::PostSkinningVertices);
-        RegisterSRV(Builtin::PerObjectBuffer);
-        RegisterSRV(Builtin::CameraBuffer);
-        RegisterSRV(Builtin::PerMeshInstanceBuffer);
-        RegisterSRV(Builtin::PerMeshBuffer);
-        RegisterSRV(Builtin::PerMaterialDataBuffer);
-
-        RegisterSRV(Builtin::Light::InfoBuffer);
-        RegisterSRV(Builtin::Light::PointLightCubemapBuffer);
-        RegisterSRV(Builtin::Light::SpotLightMatrixBuffer);
-        RegisterSRV(Builtin::Light::DirectionalLightCascadeBuffer);
-
-        if (m_meshShaders) {
-            RegisterSRV(Builtin::MeshResources::MeshletOffsets);
-            RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
-            RegisterSRV(Builtin::MeshResources::MeshletTriangles);
-        }
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override {

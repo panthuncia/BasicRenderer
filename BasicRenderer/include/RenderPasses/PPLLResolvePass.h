@@ -27,10 +27,6 @@ public:
 	void Setup() override {
 
 		m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
-
-		RegisterSRV(Builtin::PPLL::HeadPointerTexture);
-		RegisterSRV(Builtin::PPLL::DataBuffer);
-		RegisterSRV(Builtin::CameraBuffer);
 	}
 
 	PassReturn Execute(PassExecutionContext& executionContext) override {

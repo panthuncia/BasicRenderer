@@ -69,15 +69,6 @@ void ClusterSoftwareRasterizationPass::DeclareResourceUsages(ComputePassBuilder*
 }
 
 void ClusterSoftwareRasterizationPass::Setup() {
-    RegisterSRV(Builtin::PerMeshBuffer);
-    RegisterSRV(Builtin::PerMaterialDataBuffer);
-    RegisterSRV(Builtin::PerMeshInstanceBuffer);
-    RegisterSRV(Builtin::PerObjectBuffer);
-    RegisterSRV(Builtin::CullingCameraBuffer);
-    RegisterSRV(Builtin::SkeletonResources::InverseBindMatrices);
-    RegisterSRV(Builtin::SkeletonResources::BoneTransforms);
-    RegisterSRV(Builtin::SkeletonResources::SkinningInstanceInfo);
-    RegisterUAV(Builtin::DebugVisualization);
 }
 
 void ClusterSoftwareRasterizationPass::Update(const UpdateExecutionContext& executionContext) {

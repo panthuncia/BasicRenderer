@@ -88,9 +88,6 @@ void RasterBucketCompactAndArgsPass::DeclareResourceUsages(ComputePassBuilder* b
 }
 
 void RasterBucketCompactAndArgsPass::Setup() {
-    RegisterSRV(Builtin::PerMeshInstanceBuffer);
-    RegisterSRV(Builtin::PerMeshBuffer);
-    RegisterSRV(Builtin::PerMaterialDataBuffer);
 }
 
 PassReturn RasterBucketCompactAndArgsPass::Execute(PassExecutionContext& executionContext) {

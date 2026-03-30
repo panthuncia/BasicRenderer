@@ -46,7 +46,6 @@ public:
 	}
 
 	void Setup() override {
-		RegisterUAV(Builtin::Environment::InfoBuffer, 0);
 	}
 
 	void Update(const UpdateExecutionContext& context) override {

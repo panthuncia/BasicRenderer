@@ -59,10 +59,6 @@ public:
         // Rest will be filled in by the luminanceHistogramAverage shader
 
         BUFFER_UPLOAD(&lpmConstants, sizeof(LPMConstants), rg::runtime::UploadTarget::FromShared(m_pLPMConstants), 0);
-
-        RegisterSRV(Builtin::PostProcessing::UpscaledHDR);
-		RegisterSRV(Builtin::CameraBuffer);
-		RegisterSRV("FFX::LPMConstants");
     }
 
 	PassReturn Execute(PassExecutionContext& executionContext) override {

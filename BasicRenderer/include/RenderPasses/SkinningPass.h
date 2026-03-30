@@ -34,17 +34,6 @@ public:
 	}
 
 	void Setup() override {
-
-		RegisterSRV(Builtin::PreSkinningVertices);
-		RegisterSRV(Builtin::NormalMatrixBuffer);
-		RegisterSRV(Builtin::PerObjectBuffer);
-		RegisterSRV(Builtin::PerMeshInstanceBuffer);
-		RegisterSRV(Builtin::PerMeshBuffer);
-		RegisterSRV(Builtin::SkeletonResources::InverseBindMatrices);
-		RegisterSRV(Builtin::SkeletonResources::BoneTransforms);
-		RegisterSRV(Builtin::SkeletonResources::SkinningInstanceInfo);
-
-		RegisterUAV(Builtin::PostSkinningVertices);
 	}
 
 	PassReturn Execute(PassExecutionContext& executionContext) override {

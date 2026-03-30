@@ -175,32 +175,6 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
 }
 
 void HierarchialCullingPass::Setup() {
-    RegisterSRV(Builtin::IndirectCommandBuffers::Master);
-    RegisterSRV(Builtin::CLod::Offsets);
-    RegisterSRV(Builtin::CLod::GroupChunks);
-    RegisterSRV(Builtin::CLod::Groups);
-    RegisterSRV(Builtin::CLod::Segments);
-    RegisterSRV(Builtin::CLod::StreamingActiveGroupsBits);
-    RegisterSRV(Builtin::CLod::StreamingNonResidentBits);
-    RegisterSRV(Builtin::CLod::StreamingLoadRequests);
-    RegisterSRV(Builtin::CLod::StreamingLoadCounter);
-    RegisterSRV(Builtin::CLod::StreamingRuntimeState);
-    RegisterSRV(Builtin::CLod::StreamingTouchedGroupsCounter);
-    RegisterSRV(Builtin::CLod::StreamingTouchedGroups);
-    RegisterSRV(Builtin::CLod::MeshMetadata);
-    RegisterSRV(Builtin::CullingCameraBuffer);
-    RegisterSRV(Builtin::PerMeshInstanceBuffer);
-    RegisterSRV(Builtin::PerObjectBuffer);
-    RegisterSRV(Builtin::CLod::Nodes);
-    RegisterSRV(Builtin::CLod::MeshletBounds);
-	RegisterSRV(Builtin::CLod::GroupPageMap);
-    RegisterSRV(Builtin::CameraBuffer);
-    RegisterSRV(Builtin::PerMeshBuffer);
-    RegisterSRV(Builtin::SkeletonResources::InverseBindMatrices);
-    RegisterSRV(Builtin::SkeletonResources::BoneTransforms);
-    RegisterSRV(Builtin::SkeletonResources::SkinningInstanceInfo);
-    RegisterSRV(Builtin::PerMaterialDataBuffer);
-	RegisterUAV(Builtin::DebugVisualization);
 }
 
 PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContext) {

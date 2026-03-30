@@ -93,21 +93,6 @@ public:
         if (m_meshShaders) {
             //m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
         }
-
-        if (m_meshShaders) {
-            RegisterSRV(Builtin::MeshResources::MeshletOffsets);
-            RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
-            RegisterSRV(Builtin::MeshResources::MeshletTriangles);
-        }
-
-        RegisterSRV(Builtin::NormalMatrixBuffer);
-        RegisterSRV(Builtin::PostSkinningVertices);
-        RegisterSRV(Builtin::PerObjectBuffer);
-        RegisterSRV(Builtin::CameraBuffer);
-        RegisterSRV(Builtin::PerMeshInstanceBuffer);
-        RegisterSRV(Builtin::PerMeshBuffer);
-        RegisterSRV(Builtin::PerMaterialDataBuffer);
-        //RegisterSRV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override {

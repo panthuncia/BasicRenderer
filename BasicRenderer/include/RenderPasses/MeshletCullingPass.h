@@ -79,12 +79,6 @@ public:
 	}
 
 	void Setup() override {
-		RegisterSRV(Builtin::PerObjectBuffer);
-		RegisterSRV(Builtin::CameraBuffer);
-		RegisterSRV(Builtin::PerMeshBuffer);
-		RegisterSRV(Builtin::PerMeshInstanceBuffer);
-		RegisterSRV(Builtin::MeshResources::MeshletBounds);
-
 		//RegisterUAV(Builtin::PrimaryCamera::VisibleClusterTable);
 		//RegisterUAV(Builtin::PrimaryCamera::VisibleClusterTableCounter);
 		//RegisterUAV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);

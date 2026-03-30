@@ -73,11 +73,6 @@ void ReyesClassifyPass::DeclareResourceUsages(ComputePassBuilder* builder)
 }
 
 void ReyesClassifyPass::Setup() {
-    RegisterSRV(Builtin::PerMeshBuffer);
-    RegisterSRV(Builtin::PerMeshInstanceBuffer);
-    RegisterSRV(Builtin::PerMaterialDataBuffer);
-    RegisterSRV(Builtin::PerObjectBuffer);
-    RegisterSRV(Builtin::CullingCameraBuffer);
 }
 
 PassReturn ReyesClassifyPass::Execute(PassExecutionContext& executionContext)

@@ -83,36 +83,6 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
 void DeepVisibilityResolvePass::Setup()
 {
     m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
-
-    RegisterSRV(Builtin::Light::ActiveLightIndices);
-    RegisterSRV(Builtin::Light::InfoBuffer);
-    RegisterSRV(Builtin::Light::PointLightCubemapBuffer);
-    RegisterSRV(Builtin::Light::SpotLightMatrixBuffer);
-    RegisterSRV(Builtin::Light::DirectionalLightCascadeBuffer);
-    RegisterSRV(Builtin::Light::ClusterBuffer);
-    RegisterSRV(Builtin::Light::PagesBuffer);
-    RegisterSRV(Builtin::Environment::InfoBuffer);
-    RegisterSRV(Builtin::CameraBuffer);
-    //RegisterSRV(Builtin::Shadows::ShadowMaps);
-    RegisterSRV(Builtin::PostSkinningVertices);
-    RegisterSRV(Builtin::PerObjectBuffer);
-    RegisterSRV(Builtin::NormalMatrixBuffer);
-    RegisterSRV(Builtin::PerMeshBuffer);
-    RegisterSRV(Builtin::PerMeshInstanceBuffer);
-    RegisterSRV(Builtin::PerMaterialDataBuffer);
-    RegisterSRV(Builtin::CLod::Offsets);
-    RegisterSRV(Builtin::CLod::GroupChunks);
-    RegisterSRV(Builtin::CLod::Groups);
-    RegisterSRV(Builtin::CLod::MeshMetadata);
-    RegisterSRV(Builtin::MeshResources::MeshletTriangles);
-    RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
-    RegisterSRV(Builtin::MeshResources::MeshletOffsets);
-    RegisterSRV(Builtin::SkeletonResources::InverseBindMatrices);
-    RegisterSRV(Builtin::SkeletonResources::BoneTransforms);
-    RegisterSRV(Builtin::SkeletonResources::SkinningInstanceInfo);
-
-    RegisterUAV(Builtin::Color::HDRColorTarget);
-    RegisterUAV(Builtin::DebugVisualization);
 }
 
 void DeepVisibilityResolvePass::Update(const UpdateExecutionContext& executionContext)

@@ -68,9 +68,6 @@ void RasterBucketHistogramPass::DeclareResourceUsages(ComputePassBuilder* builde
 }
 
 void RasterBucketHistogramPass::Setup() {
-    RegisterSRV(Builtin::PerMeshBuffer);
-    RegisterSRV(Builtin::PerMeshInstanceBuffer);
-    RegisterSRV(Builtin::PerMaterialDataBuffer);
 }
 
 PassReturn RasterBucketHistogramPass::Execute(PassExecutionContext& executionContext) {

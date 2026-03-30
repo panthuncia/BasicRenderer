@@ -112,33 +112,6 @@ public:
         m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
         m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
 
-        RegisterSRV(Builtin::NormalMatrixBuffer);
-        RegisterSRV(Builtin::PostSkinningVertices);
-        RegisterSRV(Builtin::PerObjectBuffer);
-        RegisterSRV(Builtin::CameraBuffer);
-        RegisterSRV(Builtin::PerMeshInstanceBuffer);
-        RegisterSRV(Builtin::PerMeshBuffer);
-
-        if (m_clusteredLightingEnabled) {
-            RegisterSRV(Builtin::Light::ClusterBuffer);
-            RegisterSRV(Builtin::Light::PagesBuffer);
-        }
-
-        if (m_meshShaders) {
-            RegisterSRV(Builtin::MeshResources::MeshletOffsets);
-            RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
-            RegisterSRV(Builtin::MeshResources::MeshletTriangles);
-        }
-
-        RegisterSRV(Builtin::Light::ActiveLightIndices);
-        RegisterSRV(Builtin::Light::InfoBuffer);
-        RegisterSRV(Builtin::Light::PointLightCubemapBuffer);
-        RegisterSRV(Builtin::Light::SpotLightMatrixBuffer);
-        RegisterSRV(Builtin::Light::DirectionalLightCascadeBuffer);
-        RegisterSRV(Builtin::Environment::InfoBuffer);
-
-        RegisterUAV(Builtin::DebugVisualization);
-
         //if (m_meshShaders)
             //m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
     }

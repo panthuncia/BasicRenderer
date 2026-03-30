@@ -19,9 +19,6 @@ public:
 	}
 
 	void Setup() override {
-		RegisterSRV(Builtin::PrimaryCamera::VisibilityTexture);
-
-		RegisterUAV(Builtin::PrimaryCamera::LinearDepthMap);
 	}
 
 	PassReturn Execute(PassExecutionContext& executionContext) override {

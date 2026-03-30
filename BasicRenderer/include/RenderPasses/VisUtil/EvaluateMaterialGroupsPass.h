@@ -104,34 +104,6 @@ public:
     }
 
     void Setup() override {
-        RegisterSRV("Builtin::VisUtil::PixelListBuffer");
-        RegisterSRV(Builtin::MeshResources::MeshletOffsets);
-        RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
-        RegisterSRV(Builtin::MeshResources::MeshletTriangles);
-        RegisterSRV(Builtin::PerMeshInstanceBuffer);
-        RegisterSRV(Builtin::PerObjectBuffer);
-        RegisterSRV(Builtin::PerMeshBuffer);
-        RegisterSRV(Builtin::PerMaterialDataBuffer);
-        RegisterSRV(Builtin::PrimaryCamera::VisibilityTexture);
-        //RegisterSRV(Builtin::PrimaryCamera::VisibleClusterTable);
-        RegisterSRV(Builtin::CameraBuffer);
-        RegisterSRV(Builtin::PostSkinningVertices);
-        RegisterSRV(Builtin::NormalMatrixBuffer);
-        RegisterSRV(Builtin::SkeletonResources::InverseBindMatrices);
-        RegisterSRV(Builtin::SkeletonResources::BoneTransforms);
-        RegisterSRV(Builtin::SkeletonResources::SkinningInstanceInfo);
-		RegisterSRV(Builtin::CLod::Offsets);
-        RegisterSRV(Builtin::CLod::GroupChunks);
-		RegisterSRV(Builtin::CLod::Groups);
-		RegisterSRV(Builtin::CLod::MeshMetadata);
-
-        RegisterUAV(Builtin::GBuffer::Normals);
-        RegisterUAV(Builtin::GBuffer::Albedo);
-        RegisterUAV(Builtin::GBuffer::Emissive);
-        RegisterUAV(Builtin::GBuffer::MetallicRoughness);
-		RegisterUAV(Builtin::GBuffer::MotionVectors);
-        RegisterUAV(Builtin::DebugVisualization);
-
         std::vector<GloballyIndexedResource*> visibleClusterResources;
         m_visibleClustersQuery.each([&](flecs::entity e) {
             auto& res = e.get<Components::Resource>();

@@ -28,11 +28,6 @@ public:
     }
 
     void Setup() override {
-
-        // Register SRVs and UAVs
-        RegisterSRV("Builtin::VisUtil::MaterialPixelCountBuffer");
-        RegisterSRV("Builtin::VisUtil::MaterialOffsetBuffer");
-        RegisterUAV("Builtin::IndirectCommandBuffers::MaterialEvaluationCommandBuffer");
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override {

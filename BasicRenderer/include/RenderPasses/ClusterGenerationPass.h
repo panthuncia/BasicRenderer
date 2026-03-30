@@ -22,8 +22,6 @@ public:
 	}
 
 	void Setup() override {
-		RegisterSRV(Builtin::CameraBuffer);
-		RegisterUAV(Builtin::Light::ClusterBuffer);
 	}
 
 	PassReturn Execute(PassExecutionContext& executionContext) override {

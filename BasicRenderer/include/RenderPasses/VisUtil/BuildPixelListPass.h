@@ -51,16 +51,6 @@ public:
     }
 
     void Setup() override {
-        RegisterSRV(Builtin::PrimaryCamera::VisibilityTexture);
-        //RegisterSRV(Builtin::PrimaryCamera::VisibleClusterTable);
-        RegisterSRV(Builtin::PerMeshInstanceBuffer);
-        RegisterSRV(Builtin::PerMeshBuffer);
-        RegisterSRV(Builtin::PerMaterialDataBuffer);
-        RegisterSRV("Builtin::VisUtil::MaterialOffsetBuffer");
-
-        RegisterUAV("Builtin::VisUtil::MaterialWriteCursorBuffer");
-        RegisterUAV("Builtin::VisUtil::PixelListBuffer");
-
 		std::vector<GloballyIndexedResource*> visibleClusterResources;
         m_visibleClustersQuery.each([&](flecs::entity e) {
 			auto& res = e.get<Components::Resource>();

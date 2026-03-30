@@ -65,10 +65,6 @@ public:
 	}
 
 	void Setup() override {
-		RegisterSRV(Builtin::PerObjectBuffer);
-		RegisterSRV(Builtin::CameraBuffer);
-		RegisterSRV(Builtin::PerMeshBuffer);
-		RegisterSRV(Builtin::IndirectCommandBuffers::Master);
 	}
 
 	PassReturn Execute(PassExecutionContext& executionContext) override {

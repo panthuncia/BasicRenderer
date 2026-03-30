@@ -20,8 +20,6 @@ public:
     }
 
     void Setup() override {
-        RegisterUAV("Builtin::VisUtil::MaterialPixelCountBuffer");
-		RegisterUAV("Builtin::VisUtil::MaterialWriteCursorBuffer");
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override {
