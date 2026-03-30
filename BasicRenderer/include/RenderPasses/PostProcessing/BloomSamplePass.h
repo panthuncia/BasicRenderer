@@ -10,16 +10,9 @@
 struct BloomSamplePassInputs {
     unsigned int mipIndex;
     bool isUpsample;
-    friend bool operator==(const BloomSamplePassInputs&, const BloomSamplePassInputs&) = default;
+
+    RG_DEFINE_PASS_INPUTS(BloomSamplePassInputs, &BloomSamplePassInputs::mipIndex, &BloomSamplePassInputs::isUpsample);
 };
-
-inline rg::Hash64 HashValue(const BloomSamplePassInputs& i) {
-    std::size_t seed = 0;
-
-    boost::hash_combine(seed, i.mipIndex);
-    boost::hash_combine(seed, i.isUpsample);
-    return seed;
-}
 
 class BloomSamplePass : public RenderPass {
 public:

@@ -22,18 +22,8 @@ struct VisibilityBufferPassInputs {
     bool indirect;
     bool clearGbuffer;
 
-    friend bool operator==(const VisibilityBufferPassInputs&, const VisibilityBufferPassInputs&) = default;
+    RG_DEFINE_PASS_INPUTS(VisibilityBufferPassInputs, &VisibilityBufferPassInputs::wireframe, &VisibilityBufferPassInputs::meshShaders, &VisibilityBufferPassInputs::indirect, &VisibilityBufferPassInputs::clearGbuffer);
 };
-
-inline rg::Hash64 HashValue(const VisibilityBufferPassInputs& i) {
-    std::size_t seed = 0;
-
-    boost::hash_combine(seed, i.wireframe);
-    boost::hash_combine(seed, i.meshShaders);
-    boost::hash_combine(seed, i.indirect);
-    boost::hash_combine(seed, i.clearGbuffer);
-    return seed;
-}
 
 class VisibilityBufferPass : public RenderPass {
 public:

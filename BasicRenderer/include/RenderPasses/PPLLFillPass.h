@@ -21,18 +21,8 @@ struct PPLLFillPassInputs {
 	bool meshShaders;
 	bool indirect;
 
-	friend bool operator==(const PPLLFillPassInputs&, const PPLLFillPassInputs&) = default;
+	RG_DEFINE_PASS_INPUTS(PPLLFillPassInputs, &PPLLFillPassInputs::wireframe, &PPLLFillPassInputs::numPPLLNodes, &PPLLFillPassInputs::meshShaders, &PPLLFillPassInputs::indirect);
 };
-
-inline rg::Hash64 HashValue(const PPLLFillPassInputs& i) {
-	std::size_t seed = 0;
-
-	boost::hash_combine(seed, i.wireframe);
-	boost::hash_combine(seed, i.meshShaders);
-	boost::hash_combine(seed, i.indirect);
-	boost::hash_combine(seed, i.numPPLLNodes);
-	return seed;
-}
 
 class PPLLFillPass : public RenderPass {
 public:

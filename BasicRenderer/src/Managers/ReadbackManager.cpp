@@ -171,7 +171,7 @@ void ReadbackManager::Cleanup() {
     m_readbackPass.reset();
 }
 
-void ReadbackManager::ReadbackPass::ExecuteImmediate(ImmediateExecutionContext& context) {
+void ReadbackManager::ReadbackPass::RecordImmediateCommands(ImmediateExecutionContext& context) {
     std::vector<ReadbackInfo> readbacks;
     {
         std::scoped_lock lock(m_owner.m_mutex);

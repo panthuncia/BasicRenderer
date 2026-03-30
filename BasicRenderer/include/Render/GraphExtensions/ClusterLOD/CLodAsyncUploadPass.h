@@ -45,7 +45,7 @@ public:
 
     void Setup() override {}
 
-    void ExecuteImmediate(ImmediateExecutionContext& context) override {
+    void RecordImmediateCommands(ImmediateExecutionContext& context) override {
         const auto& inputs = Inputs<CLodAsyncUploadInputs>();
         if (inputs.uploadInstance) {
             inputs.uploadInstance->ProcessUploads(

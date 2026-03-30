@@ -22,18 +22,8 @@ struct GBufferPassInputs {
     bool indirect;
     bool clearGbuffer;
 
-    friend bool operator==(const GBufferPassInputs&, const GBufferPassInputs&) = default;
+    RG_DEFINE_PASS_INPUTS(GBufferPassInputs, &GBufferPassInputs::wireframe, &GBufferPassInputs::meshShaders, &GBufferPassInputs::indirect, &GBufferPassInputs::clearGbuffer);
 };
-
-inline rg::Hash64 HashValue(const GBufferPassInputs& i) {
-    std::size_t seed = 0;
-
-    boost::hash_combine(seed, i.wireframe);
-    boost::hash_combine(seed, i.meshShaders);
-    boost::hash_combine(seed, i.indirect);
-    boost::hash_combine(seed, i.clearGbuffer);
-    return seed;
-}
 
 // TODO: Prepass for forward-rendered geometry, requires better object and indirect workload queries
 class GBufferPass : public RenderPass {

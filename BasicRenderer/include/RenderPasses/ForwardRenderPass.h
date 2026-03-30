@@ -24,17 +24,8 @@ struct ForwardRenderPassInputs {
     bool meshShaders;
     bool indirect;
 
-    friend bool operator==(const ForwardRenderPassInputs&, const ForwardRenderPassInputs&) = default;
+    RG_DEFINE_PASS_INPUTS(ForwardRenderPassInputs, &ForwardRenderPassInputs::wireframe, &ForwardRenderPassInputs::meshShaders, &ForwardRenderPassInputs::indirect);
 };
-
-inline rg::Hash64 HashValue(const ForwardRenderPassInputs& i) {
-    std::size_t seed = 0;
-
-    boost::hash_combine(seed, i.wireframe);
-    boost::hash_combine(seed, i.meshShaders);
-    boost::hash_combine(seed, i.indirect);
-    return seed;
-}
 
 
 class ForwardRenderPass : public RenderPass {

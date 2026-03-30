@@ -16,16 +16,8 @@ struct ObjectCullingPassInputs {
 	bool isOccludersPass;
 	bool enableOcclusion;
 
-	friend bool operator==(const ObjectCullingPassInputs&, const ObjectCullingPassInputs&) = default;
+	RG_DEFINE_PASS_INPUTS(ObjectCullingPassInputs, &ObjectCullingPassInputs::isOccludersPass, &ObjectCullingPassInputs::enableOcclusion);
 };
-
-inline rg::Hash64 HashValue(const ObjectCullingPassInputs& i) {
-	std::size_t seed = 0;
-
-	boost::hash_combine(seed, i.isOccludersPass);
-	boost::hash_combine(seed, i.enableOcclusion);
-	return seed;
-}
 
 class ObjectCullingPass : public ComputePass {
 public:
