@@ -15,6 +15,9 @@ public:
     DeepVisibilityResolvePass(
         std::shared_ptr<Buffer> visibleClustersBuffer,
         std::shared_ptr<Buffer> reyesDiceQueueBuffer,
+        std::shared_ptr<Buffer> reyesTessTableConfigsBuffer,
+        std::shared_ptr<Buffer> reyesTessTableVerticesBuffer,
+        std::shared_ptr<Buffer> reyesTessTableTrianglesBuffer,
         std::shared_ptr<Buffer> deepVisibilityNodesBuffer,
         std::shared_ptr<Buffer> deepVisibilityCounterBuffer,
         std::shared_ptr<Buffer> deepVisibilityOverflowCounterBuffer,
@@ -31,6 +34,9 @@ public:
 private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_reyesDiceQueueBuffer;
+    std::shared_ptr<Buffer> m_reyesTessTableConfigsBuffer;
+    std::shared_ptr<Buffer> m_reyesTessTableVerticesBuffer;
+    std::shared_ptr<Buffer> m_reyesTessTableTrianglesBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityNodesBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityCounterBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityOverflowCounterBuffer;

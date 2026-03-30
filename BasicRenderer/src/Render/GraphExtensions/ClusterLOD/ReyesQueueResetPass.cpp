@@ -16,7 +16,8 @@ ReyesQueueResetPass::ReyesQueueResetPass(
     std::shared_ptr<Buffer> diceQueueOverflowCounter,
     std::shared_ptr<Buffer> ownershipBitsetBuffer,
     std::shared_ptr<Buffer> telemetryBuffer,
-    uint32_t phaseIndex)
+    uint32_t phaseIndex,
+    bool clearDiceQueueCounter)
     : m_fullClusterCounter(std::move(fullClusterCounter))
     , m_ownedClusterCounter(std::move(ownedClusterCounter))
     , m_splitQueueCounters(std::move(splitQueueCounters))
@@ -26,6 +27,7 @@ ReyesQueueResetPass::ReyesQueueResetPass(
     , m_ownershipBitsetBuffer(std::move(ownershipBitsetBuffer))
     , m_telemetryBuffer(std::move(telemetryBuffer))
     , m_phaseIndex(phaseIndex) {
+    m_clearDiceQueueCounter = clearDiceQueueCounter;
     m_clearCountersPso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
         L"Shaders/ClusterLOD/clodUtil.hlsl",
@@ -78,6 +80,7 @@ PassReturn ReyesQueueResetPass::Execute(PassExecutionContext& executionContext)
     uintRootConstants[CLOD_REYES_RESET_SPLIT_QUEUE_OVERFLOW_B_DESCRIPTOR_INDEX] = m_splitQueueOverflowCounters[1]->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_RESET_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_diceQueueCounter->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_RESET_DICE_QUEUE_OVERFLOW_DESCRIPTOR_INDEX] = m_diceQueueOverflowCounter->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_REYES_RESET_CLEAR_DICE_QUEUE_COUNTER] = m_clearDiceQueueCounter ? 1u : 0u;
 
     commandList.BindPipeline(m_clearCountersPso.GetAPIPipelineState().GetHandle());
     BindResourceDescriptorIndices(commandList, m_clearCountersPso.GetResourceDescriptorSlots());

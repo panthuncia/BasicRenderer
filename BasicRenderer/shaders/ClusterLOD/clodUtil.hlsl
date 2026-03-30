@@ -60,7 +60,10 @@ void ClearReyesQueueCountersCSMain()
     splitQueueOverflowA[0] = 0u;
     splitQueueCounterB[0] = 0u;
     splitQueueOverflowB[0] = 0u;
-    diceQueueCounter[0] = 0u;
+    if (CLOD_REYES_RESET_CLEAR_DICE_QUEUE_COUNTER != 0u)
+    {
+        diceQueueCounter[0] = 0u;
+    }
     diceQueueOverflow[0] = 0u;
 }
 
@@ -82,7 +85,13 @@ void BuildReyesDispatchArgsCSMain()
     StructuredBuffer<uint> sourceCounterBuffer = ResourceDescriptorHeap[CLOD_REYES_CREATE_DISPATCH_ARGS_SOURCE_COUNTER_DESCRIPTOR_INDEX];
     RWStructuredBuffer<CLodReyesDispatchIndirectCommand> indirectArgsBuffer = ResourceDescriptorHeap[CLOD_REYES_CREATE_DISPATCH_ARGS_OUTPUT_DESCRIPTOR_INDEX];
 
-    const uint workItemCount = sourceCounterBuffer.Load(0);
+    uint workItemCount = sourceCounterBuffer.Load(0);
+    if (CLOD_REYES_CREATE_DISPATCH_ARGS_SOURCE_BASE_COUNTER_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
+    {
+        StructuredBuffer<uint> sourceBaseCounterBuffer = ResourceDescriptorHeap[CLOD_REYES_CREATE_DISPATCH_ARGS_SOURCE_BASE_COUNTER_DESCRIPTOR_INDEX];
+        const uint baseWorkItemCount = sourceBaseCounterBuffer.Load(0);
+        workItemCount = (workItemCount > baseWorkItemCount) ? (workItemCount - baseWorkItemCount) : 0u;
+    }
     const uint threadsPerGroup = max(CLOD_REYES_CREATE_DISPATCH_ARGS_THREADS_PER_GROUP, 1u);
 
     indirectArgsBuffer[0].dispatchX = (workItemCount + threadsPerGroup - 1u) / threadsPerGroup;
@@ -93,7 +102,7 @@ void BuildReyesDispatchArgsCSMain()
 uint CLodGetHistogramVisibleClusterReadIndex(uint linearizedID)
 {
     uint readBase = 0u;
-    if (CLOD_HISTOGRAM_READ_BASE_COUNTER_DESCRIPTOR_INDEX != 0)
+    if (CLOD_HISTOGRAM_READ_BASE_COUNTER_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
     {
         StructuredBuffer<uint> readBaseCounter = ResourceDescriptorHeap[CLOD_HISTOGRAM_READ_BASE_COUNTER_DESCRIPTOR_INDEX];
         readBase = readBaseCounter.Load(0);
@@ -110,7 +119,7 @@ uint CLodGetHistogramVisibleClusterReadIndex(uint linearizedID)
 uint CLodGetCompactionVisibleClusterReadIndex(uint linearizedID)
 {
     uint readBase = 0u;
-    if (CLOD_COMPACTION_READ_BASE_COUNTER_DESCRIPTOR_INDEX != 0)
+    if (CLOD_COMPACTION_READ_BASE_COUNTER_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
     {
         StructuredBuffer<uint> readBaseCounter = ResourceDescriptorHeap[CLOD_COMPACTION_READ_BASE_COUNTER_DESCRIPTOR_INDEX];
         readBase = readBaseCounter.Load(0);

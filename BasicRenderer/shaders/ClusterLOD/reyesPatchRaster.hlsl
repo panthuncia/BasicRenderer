@@ -56,7 +56,7 @@ float3 DecodeCompressedPosition(
     uint bitsPerVertex = bitsX + bitsY + bitsZ;
     uint bitCursor = positionBitstreamBase * 8u + positionBitOffset + meshletLocalVertex * bitsPerVertex;
 
-    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
+    ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(pagePoolSlabDescriptorIndex)];
     uint px = ReadPackedBits32(slab, bitCursor, bitsX); bitCursor += bitsX;
     uint py = ReadPackedBits32(slab, bitCursor, bitsY); bitCursor += bitsY;
     uint pz = ReadPackedBits32(slab, bitCursor, bitsZ);
@@ -111,7 +111,7 @@ SkinningInfluences DecodePackedJoints(
         return skinning;
     }
 
-    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
+    ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(pagePoolSlabDescriptorIndex)];
     uint addr = pageByteOffset + hdr.jointArrayOffset + (desc.vertexAttributeOffset + meshletLocalVertex) * 32u;
     skinning.joints0 = LoadUint4(addr, slab);
     skinning.joints1 = LoadUint4(addr + 16u, slab);
@@ -131,7 +131,7 @@ SkinningInfluences DecodePackedWeights(
         return skinning;
     }
 
-    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
+    ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(pagePoolSlabDescriptorIndex)];
     uint addr = pageByteOffset + hdr.weightArrayOffset + (desc.vertexAttributeOffset + meshletLocalVertex) * 32u;
     skinning.weights0 = LoadFloat4(addr, slab);
     skinning.weights1 = LoadFloat4(addr + 16u, slab);
@@ -197,7 +197,7 @@ float3 DecodeCompressedNormal(
     uint pageByteOffset,
     uint pagePoolSlabDescriptorIndex)
 {
-    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
+    ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(pagePoolSlabDescriptorIndex)];
     uint addr = pageByteOffset + hdr.normalArrayOffset + (desc.vertexAttributeOffset + meshletLocalVertex) * 4u;
     uint packed = slab.Load(addr);
     return OctDecodeNormal(UnpackSnorm16x2(packed));
@@ -251,7 +251,7 @@ float2 DecodeCompressedUV(
     uint bitsV = CLodUvDescBitsV(uvDesc);
     uint bitsPerVertex = bitsU + bitsV;
     uint bitCursor = uvBitstreamBase * 8u + uvDesc.uvBitOffset + (desc.vertexAttributeOffset + meshletLocalVertex) * bitsPerVertex;
-    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
+    ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(pagePoolSlabDescriptorIndex)];
     uint encodedU = ReadPackedBits32(slab, bitCursor, bitsU);
     bitCursor += bitsU;
     uint encodedV = ReadPackedBits32(slab, bitCursor, bitsV);
@@ -631,7 +631,9 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     const uint rasterWorkIndex = dispatchThreadId.x;
     StructuredBuffer<CLodReyesDiceQueueEntry> diceQueue = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_DICE_QUEUE_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> diceQueueCounter = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX];
     StructuredBuffer<CLodReyesRasterWorkEntry> rasterWorkBuffer = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_WORK_BUFFER_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> rasterWorkCounter = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_WORK_COUNTER_DESCRIPTOR_INDEX];
     StructuredBuffer<CLodReyesTessTableConfigEntry> tessTableConfigs = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX];
     StructuredBuffer<uint> tessTableVertices = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX];
     StructuredBuffer<uint> tessTableTriangles = ResourceDescriptorHeap[CLOD_REYES_PATCH_RASTER_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX];
@@ -644,9 +646,29 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     StructuredBuffer<CullingCameraInfo> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
     StructuredBuffer<MaterialInfo> materials = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
 
+    const uint rasterWorkCount = rasterWorkCounter[0];
+    if (rasterWorkIndex >= rasterWorkCount)
+    {
+        return;
+    }
+
     const CLodReyesRasterWorkEntry rasterWorkEntry = rasterWorkBuffer[rasterWorkIndex];
     const uint diceIndex = rasterWorkEntry.diceQueueIndex;
+    const uint diceCount = diceQueueCounter[0];
+    if (diceIndex >= diceCount)
+    {
+        return;
+    }
+
     const CLodReyesDiceQueueEntry diceEntry = diceQueue[diceIndex];
+    uint viewRasterInfoCount = 0u;
+    uint viewRasterInfoStride = 0u;
+    viewRasterInfoBuffer.GetDimensions(viewRasterInfoCount, viewRasterInfoStride);
+    if (diceEntry.viewID >= viewRasterInfoCount)
+    {
+        return;
+    }
+
     const ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[diceEntry.viewID];
     if (viewRasterInfo.visibilityUAVDescriptorIndex == 0xFFFFFFFFu)
     {
@@ -666,7 +688,7 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     const CullingCameraInfo camera = cameras[diceEntry.viewID];
     const MaterialInfo materialInfo = materials[perMesh.materialDataIndex];
 
-    ByteAddressBuffer slab = ResourceDescriptorHeap[pageSlabDescriptorIndex];
+    ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(pageSlabDescriptorIndex)];
     const uint sourceTriangleIndex = diceEntry.sourcePrimitiveAndSplitConfig & 0xFFFFu;
     if (sourceTriangleIndex >= CLodDescTriangleCount(meshletDesc))
     {
@@ -715,7 +737,7 @@ void ReyesPatchRasterCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     const uint patchVisibilityIndex = CLOD_REYES_PATCH_RASTER_PATCH_INDEX_BASE + diceIndex;
     const uint visibilityDescriptorIndex = viewRasterInfo.visibilityUAVDescriptorIndex;
-    RWTexture2D<uint64_t> visBuffer = ResourceDescriptorHeap[visibilityDescriptorIndex];
+    RWTexture2D<uint64_t> visBuffer = ResourceDescriptorHeap[NonUniformResourceIndex(visibilityDescriptorIndex)];
     uint2 visDims;
     visBuffer.GetDimensions(visDims.x, visDims.y);
 

@@ -10,7 +10,7 @@ static const uint CLOD_MESHLET_UV_DESCRIPTOR_STRIDE = 32u;
 // The header occupies 16 x uint32 = 64 bytes at the start of each page tile.
 CLodPageHeader LoadPageHeader(uint slabDescriptorIndex, uint pageByteOffset)
 {
-    ByteAddressBuffer slab = ResourceDescriptorHeap[slabDescriptorIndex];
+    ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(slabDescriptorIndex)];
     uint4 d0 = slab.Load4(pageByteOffset +  0);
     uint4 d1 = slab.Load4(pageByteOffset + 16);
     uint4 d2 = slab.Load4(pageByteOffset + 32);
@@ -41,7 +41,7 @@ CLodPageHeader LoadPageHeader(uint slabDescriptorIndex, uint pageByteOffset)
 // Load a CLodMeshletDescriptor from a slab ByteAddressBuffer.
 CLodMeshletDescriptor LoadMeshletDescriptor(uint slabDescriptorIndex, uint pageByteOffset, uint descriptorOffset, uint meshletIndex)
 {
-    ByteAddressBuffer slab = ResourceDescriptorHeap[slabDescriptorIndex];
+    ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(slabDescriptorIndex)];
     uint addr = pageByteOffset + descriptorOffset + meshletIndex * CLOD_MESHLET_DESCRIPTOR_STRIDE;
     uint4 d0 = slab.Load4(addr +  0);
     uint4 d1 = slab.Load4(addr + 16);
@@ -74,7 +74,7 @@ CLodMeshletUvDescriptor LoadMeshletUvDescriptor(
     uint meshletIndex,
     uint uvSetIndex)
 {
-    ByteAddressBuffer slab = ResourceDescriptorHeap[slabDescriptorIndex];
+    ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(slabDescriptorIndex)];
     uint descriptorIndex = meshletIndex * pageUvSetCount + uvSetIndex;
     uint addr = pageByteOffset + uvDescriptorOffset + descriptorIndex * CLOD_MESHLET_UV_DESCRIPTOR_STRIDE;
     uint4 d0 = slab.Load4(addr + 0);
@@ -94,14 +94,14 @@ CLodMeshletUvDescriptor LoadMeshletUvDescriptor(
 
 uint LoadPageUvBitstreamOffset(uint slabDescriptorIndex, uint pageByteOffset, uint uvBitstreamDirectoryOffset, uint uvSetIndex)
 {
-    ByteAddressBuffer slab = ResourceDescriptorHeap[slabDescriptorIndex];
+    ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(slabDescriptorIndex)];
     return slab.Load(pageByteOffset + uvBitstreamDirectoryOffset + uvSetIndex * 4u);
 }
 
 // Load only the meshletCount from the page header (first uint32).
 uint LoadPageMeshletCount(uint slabDescriptorIndex, uint pageByteOffset)
 {
-    ByteAddressBuffer slab = ResourceDescriptorHeap[slabDescriptorIndex];
+    ByteAddressBuffer slab = ResourceDescriptorHeap[NonUniformResourceIndex(slabDescriptorIndex)];
     return slab.Load(pageByteOffset); // meshletCount is uint[0]
 }
 

@@ -380,8 +380,9 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
         BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_swVisibleClustersCounterBuffer), 0);
     }
 
-    // Collect per-view raster info for software raster modes, and visibility buffer tracking for WG SW raster.
-    if (UsesSWClassification(m_workGraphMode) && UsesVisibilityBufferOutput(m_rasterOutputKind)) {
+    // Keep the shared per-view visibility UAV table valid for any visibility-buffer path.
+    // Reyes patch raster consumes this buffer even when the primary CLod path is not using SW classification.
+    if (UsesVisibilityBufferOutput(m_rasterOutputKind)) {
         m_visibilityBuffers.clear();
         auto numViews = context.viewManager->GetCameraBufferSize();
         std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);

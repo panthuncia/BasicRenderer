@@ -12,6 +12,7 @@
 ReyesBuildRasterWorkPass::ReyesBuildRasterWorkPass(
     std::shared_ptr<Buffer> diceQueueBuffer,
     std::shared_ptr<Buffer> diceQueueCounterBuffer,
+    std::shared_ptr<Buffer> diceQueueReadOffsetBuffer,
     std::shared_ptr<Buffer> tessTableConfigsBuffer,
     std::shared_ptr<Buffer> rasterWorkBuffer,
     std::shared_ptr<Buffer> rasterWorkCounterBuffer,
@@ -20,6 +21,7 @@ ReyesBuildRasterWorkPass::ReyesBuildRasterWorkPass(
     uint32_t rasterWorkCapacity)
     : m_diceQueueBuffer(std::move(diceQueueBuffer))
     , m_diceQueueCounterBuffer(std::move(diceQueueCounterBuffer))
+    , m_diceQueueReadOffsetBuffer(std::move(diceQueueReadOffsetBuffer))
     , m_tessTableConfigsBuffer(std::move(tessTableConfigsBuffer))
     , m_rasterWorkBuffer(std::move(rasterWorkBuffer))
     , m_rasterWorkCounterBuffer(std::move(rasterWorkCounterBuffer))
@@ -55,6 +57,9 @@ void ReyesBuildRasterWorkPass::DeclareResourceUsages(ComputePassBuilder* builder
             m_rasterWorkBuffer,
             m_rasterWorkCounterBuffer,
             m_telemetryBuffer);
+    if (m_diceQueueReadOffsetBuffer) {
+        builder->WithShaderResource(m_diceQueueReadOffsetBuffer);
+    }
 }
 
 void ReyesBuildRasterWorkPass::Setup() {}
@@ -80,6 +85,9 @@ PassReturn ReyesBuildRasterWorkPass::Execute(PassExecutionContext& executionCont
     uint32_t uintRootConstants[NumMiscUintRootConstants] = {};
     uintRootConstants[CLOD_REYES_BUILD_RASTER_WORK_DICE_QUEUE_DESCRIPTOR_INDEX] = m_diceQueueBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_BUILD_RASTER_WORK_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_diceQueueCounterBuffer->GetSRVInfo(0).slot.index;
+    uintRootConstants[CLOD_REYES_BUILD_RASTER_WORK_DICE_QUEUE_READ_OFFSET_DESCRIPTOR_INDEX] = m_diceQueueReadOffsetBuffer
+        ? m_diceQueueReadOffsetBuffer->GetSRVInfo(0).slot.index
+        : 0xFFFFFFFFu;
     uintRootConstants[CLOD_REYES_BUILD_RASTER_WORK_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_tessTableConfigsBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_BUILD_RASTER_WORK_OUTPUT_DESCRIPTOR_INDEX] = m_rasterWorkBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_BUILD_RASTER_WORK_OUTPUT_COUNTER_DESCRIPTOR_INDEX] = m_rasterWorkCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;

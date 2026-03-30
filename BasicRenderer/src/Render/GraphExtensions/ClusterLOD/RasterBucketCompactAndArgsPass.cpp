@@ -112,6 +112,7 @@ PassReturn RasterBucketCompactAndArgsPass::Execute(PassExecutionContext& executi
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
 
     unsigned int rc[NumMiscUintRootConstants] = {};
+    rc[CLOD_COMPACTION_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
     rc[CLOD_COMPACTION_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
     rc[CLOD_COMPACTION_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
     rc[CLOD_COMPACTION_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetSRVInfo(0).slot.index;

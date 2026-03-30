@@ -14,6 +14,7 @@ public:
     ReyesBuildRasterWorkPass(
         std::shared_ptr<Buffer> diceQueueBuffer,
         std::shared_ptr<Buffer> diceQueueCounterBuffer,
+        std::shared_ptr<Buffer> diceQueueReadOffsetBuffer,
         std::shared_ptr<Buffer> tessTableConfigsBuffer,
         std::shared_ptr<Buffer> rasterWorkBuffer,
         std::shared_ptr<Buffer> rasterWorkCounterBuffer,
@@ -30,6 +31,7 @@ public:
 private:
     std::shared_ptr<Buffer> m_diceQueueBuffer;
     std::shared_ptr<Buffer> m_diceQueueCounterBuffer;
+    std::shared_ptr<Buffer> m_diceQueueReadOffsetBuffer;
     std::shared_ptr<Buffer> m_tessTableConfigsBuffer;
     std::shared_ptr<Buffer> m_rasterWorkBuffer;
     std::shared_ptr<Buffer> m_rasterWorkCounterBuffer;

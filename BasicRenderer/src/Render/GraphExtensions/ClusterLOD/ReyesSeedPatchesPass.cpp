@@ -4,6 +4,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
+#include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "ShaderBuffers.h"
 #include "../shaders/PerPassRootConstants/clodReyesSeedRootConstants.h"
 #include "Resources/Buffers/Buffer.h"
@@ -16,6 +17,7 @@ ReyesSeedPatchesPass::ReyesSeedPatchesPass(
     std::shared_ptr<Buffer> splitQueueCounterBuffer,
     std::shared_ptr<Buffer> splitQueueOverflowBuffer,
     std::shared_ptr<Buffer> indirectArgsBuffer,
+    std::shared_ptr<ResourceGroup> slabResourceGroup,
     uint32_t maxSplitQueueEntries,
     uint32_t phaseIndex)
     : m_visibleClustersBuffer(std::move(visibleClustersBuffer))
@@ -25,6 +27,7 @@ ReyesSeedPatchesPass::ReyesSeedPatchesPass(
     , m_splitQueueCounterBuffer(std::move(splitQueueCounterBuffer))
     , m_splitQueueOverflowBuffer(std::move(splitQueueOverflowBuffer))
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
+    , m_slabResourceGroup(std::move(slabResourceGroup))
     , m_maxSplitQueueEntries(maxSplitQueueEntries)
     , m_phaseIndex(phaseIndex) {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
@@ -50,6 +53,9 @@ void ReyesSeedPatchesPass::DeclareResourceUsages(ComputePassBuilder* builder)
     builder->WithShaderResource(m_visibleClustersBuffer, m_ownedClustersBuffer, m_ownedClustersCounterBuffer)
         .WithIndirectArguments(m_indirectArgsBuffer)
         .WithUnorderedAccess(m_splitQueueBuffer, m_splitQueueCounterBuffer, m_splitQueueOverflowBuffer);
+    if (m_slabResourceGroup) {
+        builder->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
+    }
 }
 
 void ReyesSeedPatchesPass::Setup() {}

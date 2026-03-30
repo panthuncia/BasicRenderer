@@ -11,7 +11,14 @@ void BuildReyesRasterWorkCS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     StructuredBuffer<uint> diceQueueCounter = ResourceDescriptorHeap[CLOD_REYES_BUILD_RASTER_WORK_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX];
     const uint diceCount = diceQueueCounter[0];
-    const uint diceIndex = dispatchThreadId.x;
+    uint queueReadOffset = 0u;
+    if (CLOD_REYES_BUILD_RASTER_WORK_DICE_QUEUE_READ_OFFSET_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
+    {
+        StructuredBuffer<uint> readOffsetBuffer = ResourceDescriptorHeap[CLOD_REYES_BUILD_RASTER_WORK_DICE_QUEUE_READ_OFFSET_DESCRIPTOR_INDEX];
+        queueReadOffset = readOffsetBuffer.Load(0);
+    }
+
+    const uint diceIndex = queueReadOffset + dispatchThreadId.x;
     if (diceIndex >= diceCount)
     {
         return;

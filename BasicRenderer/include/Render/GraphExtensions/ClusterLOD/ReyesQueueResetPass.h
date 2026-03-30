@@ -19,7 +19,8 @@ public:
         std::shared_ptr<Buffer> diceQueueOverflowCounter,
         std::shared_ptr<Buffer> ownershipBitsetBuffer,
         std::shared_ptr<Buffer> telemetryBuffer,
-        uint32_t phaseIndex);
+        uint32_t phaseIndex,
+        bool clearDiceQueueCounter = true);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
@@ -37,6 +38,7 @@ private:
     std::shared_ptr<Buffer> m_ownershipBitsetBuffer;
     std::shared_ptr<Buffer> m_telemetryBuffer;
     uint32_t m_phaseIndex = 0u;
+    bool m_clearDiceQueueCounter = true;
     uint32_t m_ownershipBitsetWordCount = 0u;
     PipelineState m_clearCountersPso;
     PipelineState m_clearOwnershipBitsetPso;

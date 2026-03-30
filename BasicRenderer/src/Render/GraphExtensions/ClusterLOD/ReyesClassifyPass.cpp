@@ -87,6 +87,7 @@ PassReturn ReyesClassifyPass::Execute(PassExecutionContext& executionContext)
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
 
     uint32_t uintRootConstants[NumMiscUintRootConstants] = {};
+    uintRootConstants[CLOD_REYES_CLASSIFY_VISIBLE_CLUSTERS_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
     uintRootConstants[CLOD_REYES_CLASSIFY_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_CLASSIFY_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
     if (m_visibleClustersReadBaseCounterBuffer) {

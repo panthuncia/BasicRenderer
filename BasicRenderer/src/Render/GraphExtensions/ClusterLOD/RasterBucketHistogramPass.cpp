@@ -86,6 +86,7 @@ PassReturn RasterBucketHistogramPass::Execute(PassExecutionContext& executionCon
     BindResourceDescriptorIndices(commandList, m_histogramPipeline.GetResourceDescriptorSlots());
 
     uint32_t uintRootConstants[NumMiscUintRootConstants] = {};
+    uintRootConstants[CLOD_HISTOGRAM_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = 0xFFFFFFFFu;
     uintRootConstants[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_HISTOGRAM_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_histogramBuffer->GetUAVShaderVisibleInfo(0).slot.index;

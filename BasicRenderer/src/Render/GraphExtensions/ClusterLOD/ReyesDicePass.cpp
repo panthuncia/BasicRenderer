@@ -11,6 +11,7 @@
 ReyesDicePass::ReyesDicePass(
     std::shared_ptr<Buffer> diceQueueBuffer,
     std::shared_ptr<Buffer> diceQueueCounterBuffer,
+    std::shared_ptr<Buffer> diceQueueReadOffsetBuffer,
     std::shared_ptr<Buffer> tessTableConfigsBuffer,
     std::shared_ptr<Buffer> indirectArgsBuffer,
     std::shared_ptr<Buffer> telemetryBuffer,
@@ -18,6 +19,7 @@ ReyesDicePass::ReyesDicePass(
     uint32_t phaseIndex)
     : m_diceQueueBuffer(std::move(diceQueueBuffer))
     , m_diceQueueCounterBuffer(std::move(diceQueueCounterBuffer))
+    , m_diceQueueReadOffsetBuffer(std::move(diceQueueReadOffsetBuffer))
     , m_tessTableConfigsBuffer(std::move(tessTableConfigsBuffer))
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
     , m_telemetryBuffer(std::move(telemetryBuffer))
@@ -46,6 +48,9 @@ void ReyesDicePass::DeclareResourceUsages(ComputePassBuilder* builder)
     builder->WithShaderResource(m_diceQueueBuffer, m_diceQueueCounterBuffer, m_tessTableConfigsBuffer)
         .WithIndirectArguments(m_indirectArgsBuffer)
         .WithUnorderedAccess(m_telemetryBuffer);
+    if (m_diceQueueReadOffsetBuffer) {
+        builder->WithShaderResource(m_diceQueueReadOffsetBuffer);
+    }
 }
 
 void ReyesDicePass::Setup() {}
@@ -62,6 +67,9 @@ PassReturn ReyesDicePass::Execute(PassExecutionContext& executionContext)
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
 
     uint32_t uintRootConstants[NumMiscUintRootConstants] = {};
+    uintRootConstants[CLOD_REYES_DICE_QUEUE_READ_OFFSET_DESCRIPTOR_INDEX] = m_diceQueueReadOffsetBuffer
+        ? m_diceQueueReadOffsetBuffer->GetSRVInfo(0).slot.index
+        : 0xFFFFFFFFu;
     uintRootConstants[CLOD_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_diceQueueBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX] = m_diceQueueCounterBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_DICE_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
