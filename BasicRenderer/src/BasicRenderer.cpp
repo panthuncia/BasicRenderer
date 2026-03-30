@@ -362,7 +362,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	//auto quad = LoadModel("models/quad.usdz");
 
-	auto cubes = LoadModel("models/cubes/single_displacement_cube.usda");
+	auto cubes = LoadModel("models/cubes/suspicious_cubes.usda");
 
     renderer.SetCurrentScene(baseScene);
 

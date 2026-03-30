@@ -951,7 +951,7 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             m_clodSoftwareRasterMode = static_cast<CLodSoftwareRasterMode>(clodSoftwareRasterModeIndex);
             setCLodSoftwareRasterMode(m_clodSoftwareRasterMode);
         }
-        if (ImGui::Checkbox("Disable Reyes Patch Rasterization", &m_clodDisableReyesRasterization)) {
+        if (ImGui::Checkbox("Disable Reyes Tessellation/Displacement", &m_clodDisableReyesRasterization)) {
             setCLodDisableReyesRasterization(m_clodDisableReyesRasterization);
         }
 		if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {

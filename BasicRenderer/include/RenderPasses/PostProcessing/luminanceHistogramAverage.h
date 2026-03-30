@@ -16,9 +16,7 @@ public:
     }
 
     void Setup() override {
-		RegisterUAV(Builtin::PostProcessing::AdaptedLuminance);
-        RegisterUAV(Builtin::PostProcessing::LuminanceHistogram);
-		RegisterSRV("FFX::LPMConstants");
+		// Removed redundant Register calls now covered by declared-resource auto descriptor registration
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override {

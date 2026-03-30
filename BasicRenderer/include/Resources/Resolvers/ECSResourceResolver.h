@@ -22,9 +22,11 @@ public:
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
                 assert(e.has<Components::Resource>() && "Entity does not have Resource component");
 #endif
-                auto& res = e.get<Components::Resource>();
-                auto shared = res.resource.lock();
-                out.push_back(shared);
+                if (const auto res = e.try_get<Components::Resource>(); res) {
+                    if (const auto shared = res->resource.lock(); shared) {
+                        out.push_back(shared);
+                    }
+                }
             });
         };
     }

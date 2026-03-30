@@ -183,96 +183,80 @@ std::shared_ptr<ResourceGroup> GetSlabResourceGroup()
     return nullptr;
 }
 
+template<typename... Tags>
+void SyncTaggedBufferEntity(const std::shared_ptr<Buffer>& buffer, const flecs::entity& typeEntity, bool enabled)
+{
+    if (!buffer) {
+        return;
+    }
+
+    auto entity = buffer->GetECSEntity();
+    if (enabled) {
+        entity.set<Components::Resource>({ buffer });
+        entity.add<CLodExtensionTypeTag>(typeEntity);
+        (entity.add<Tags>(), ...);
+    }
+    else if (entity.has<Components::Resource>()) {
+        entity.remove<Components::Resource>();
+    }
+}
+
 } // namespace
 
 CLodExtension::~CLodExtension() = default;
 
-CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters)
-    : m_type(type)
-    , m_maxVisibleClusters(maxVisibleClusters) {
+bool CLodExtension::IsReyesTessellationDisabled() const
+{
+    return SettingsManager::GetInstance().getSettingGetter<bool>(CLodDisableReyesRasterizationSettingName)();
+}
+
+void CLodExtension::SyncReyesResourceEntities(bool enabled)
+{
+    if (!m_reyesFullClusterOutputsBuffer) {
+        return;
+    }
+
+    const auto& traits = GetVariantTraits(m_type);
+    auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
+    const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
+
+    SyncTaggedBufferEntity<CLodReyesFullClustersCounterTag>(m_reyesFullClusterOutputsCounterBuffer, typeEntity, enabled);
+    SyncTaggedBufferEntity<CLodReyesSplitQueueCounterATag>(m_reyesSplitQueueCounterBufferA, typeEntity, enabled);
+    SyncTaggedBufferEntity<CLodReyesSplitQueueOverflowATag>(m_reyesSplitQueueOverflowBufferA, typeEntity, enabled);
+    SyncTaggedBufferEntity<CLodReyesSplitQueueCounterBTag>(m_reyesSplitQueueCounterBufferB, typeEntity, enabled);
+    SyncTaggedBufferEntity<CLodReyesSplitQueueOverflowBTag>(m_reyesSplitQueueOverflowBufferB, typeEntity, enabled);
+    SyncTaggedBufferEntity<CLodReyesDiceQueueTag>(m_reyesDiceQueueBuffer, typeEntity, enabled);
+    SyncTaggedBufferEntity<CLodReyesTessTableConfigsTag>(m_reyesTessTableConfigsBuffer, typeEntity, enabled);
+    SyncTaggedBufferEntity<CLodReyesTessTableVerticesTag>(m_reyesTessTableVerticesBuffer, typeEntity, enabled);
+    SyncTaggedBufferEntity<CLodReyesTessTableTrianglesTag>(m_reyesTessTableTrianglesBuffer, typeEntity, enabled);
+    SyncTaggedBufferEntity<CLodReyesDiceQueueCounterTag>(m_reyesDiceQueueCounterBuffer, typeEntity, enabled);
+    SyncTaggedBufferEntity<CLodReyesDiceQueueOverflowTag>(m_reyesDiceQueueOverflowBuffer, typeEntity, enabled);
+    SyncTaggedBufferEntity<CLodReyesTelemetryBufferPhase1Tag>(m_reyesTelemetryBufferPhase1, typeEntity, enabled);
+    SyncTaggedBufferEntity<CLodReyesTelemetryBufferPhase2Tag>(m_reyesTelemetryBufferPhase2, typeEntity, enabled);
+}
+
+void CLodExtension::EnsureReyesResourcesInitialized()
+{
+    if (m_reyesFullClusterOutputsBuffer) {
+        SyncReyesResourceEntities(true);
+        return;
+    }
+
     auto tagBufferUsage = [](const std::shared_ptr<Buffer>& buffer, std::string_view usage) {
         if (buffer) {
             rg::memory::SetResourceUsageHint(*buffer, std::string(usage));
         }
     };
 
-    const auto& traits = GetVariantTraits(type);
+    const auto& traits = GetVariantTraits(m_type);
     auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
     const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
+    const uint32_t reyesOwnershipWordCount = CLodBitsetWordCount(m_maxVisibleClusters);
+    const uint32_t reyesSplitQueueCapacity = CLodReyesSplitQueueCapacity(m_maxVisibleClusters);
+    const uint32_t reyesDiceQueueCapacity = CLodReyesDiceQueueCapacity(m_maxVisibleClusters);
+    const uint32_t reyesRasterWorkCapacity = CLodReyesRasterWorkCapacity(m_maxVisibleClusters);
 
-    if (traits.ownsStreaming) {
-        m_streamingSystem = std::make_unique<CLodStreamingSystem>();
-    }
-
-    m_visibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(maxVisibleClusters * PackedVisibleClusterStrideBytes, true, false);
-    m_visibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Visible Clusters Buffer (uncompacted)"));
-
-    m_histogramIndirectCommand = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterBucketsHistogramIndirectCommand), true, false);
-    m_histogramIndirectCommand->SetName(MakeVariantResourceName(traits, "Raster Buckets Histogram Indirect Command Buffer"));
-
-    m_rasterBucketsHistogramBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-    m_rasterBucketsHistogramBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket histogram"));
-
-    m_visibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
-    m_visibleClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "Visible Clusters Counter Buffer"));
-    m_visibleClustersCounterBuffer->GetECSEntity()
-        .set<Components::Resource>({ m_visibleClustersCounterBuffer })
-        .add<VisibleClustersCounterTag>()
-        .add<CLodExtensionTypeTag>(typeEntity);
-
-    m_workGraphTelemetryBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodWorkGraphCounterCount, sizeof(uint32_t), true, false, false, false);
-    m_workGraphTelemetryBuffer->SetName(MakeVariantResourceName(traits, "Work Graph Telemetry Buffer"));
-    m_workGraphTelemetryBuffer->GetECSEntity()
-        .set<Components::Resource>({ m_workGraphTelemetryBuffer })
-        .add<CLodWorkGraphTelemetryBufferTag>()
-        .add<CLodExtensionTypeTag>(typeEntity);
-
-    m_occlusionReplayBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodReplayBufferNumUints, sizeof(uint32_t), true, false, false, false);
-    m_occlusionReplayBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Replay Buffer"));
-
-    m_occlusionReplayStateBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReplayBufferState), true, false, false, false);
-    m_occlusionReplayStateBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Replay State Buffer"));
-
-    m_occlusionNodeGpuInputsBuffer = CreateAliasedUnmaterializedStructuredBuffer(3, sizeof(CLodNodeGpuInput), true, false, false, false);
-    m_occlusionNodeGpuInputsBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Node GPU Inputs Buffer"));
-
-    m_viewDepthSrvIndicesBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodMaxViewDepthIndices, sizeof(CLodViewDepthSRVIndex), true, false, false, false);
-    m_viewDepthSrvIndicesBuffer->SetName(MakeVariantResourceName(traits, "View Depth SRV Indices Buffer"));
-
-    m_rasterBucketsOffsetsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    m_rasterBucketsOffsetsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket offsets"));
-
-    m_rasterBucketsBlockSumsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    m_rasterBucketsBlockSumsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket block sums"));
-
-    m_rasterBucketsScannedBlockSumsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    m_rasterBucketsScannedBlockSumsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket scanned block sums"));
-
-    m_rasterBucketsTotalCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    m_rasterBucketsTotalCountBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket total count"));
-
-    m_rasterBucketsTotalCountBufferPhase1 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    m_rasterBucketsTotalCountBufferPhase1->SetName(MakeVariantResourceName(traits, "Raster bucket total count phase1"));
-
-    m_rasterBucketsTotalCountBufferPhase1Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    m_rasterBucketsTotalCountBufferPhase1Sw->SetName(MakeVariantResourceName(traits, "Raster bucket total count phase1 SW"));
-
-    m_compactedVisibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(maxVisibleClusters * PackedVisibleClusterStrideBytes, true, false);
-    m_compactedVisibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Compacted Visible Clusters Buffer"));
-
-    m_visibleClustersBuffer->GetECSEntity()
-        .set<Components::Resource>({ m_visibleClustersBuffer })
-        .set<CLodVisibleClusterCapacity>({ maxVisibleClusters })
-        .add<VisibleClustersBufferTag>()
-        .add<CLodExtensionTypeTag>(typeEntity);
-
-    m_rasterBucketsWriteCursorBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-    m_rasterBucketsWriteCursorBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor"));
-
-    m_rasterBucketsIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
-    m_rasterBucketsIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args"));
-
-    m_reyesFullClusterOutputsBuffer = CreateAliasedUnmaterializedStructuredBuffer(maxVisibleClusters, sizeof(CLodReyesFullClusterOutput), true, false);
+    m_reyesFullClusterOutputsBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_maxVisibleClusters, sizeof(CLodReyesFullClusterOutput), true, false);
     m_reyesFullClusterOutputsBuffer->SetName(MakeVariantResourceName(traits, "Reyes Full Cluster Outputs Buffer"));
 
     m_reyesFullClusterOutputsCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
@@ -282,13 +266,12 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
         .add<CLodReyesFullClustersCounterTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesOwnedClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(maxVisibleClusters, sizeof(CLodReyesOwnedClusterEntry), true, false);
+    m_reyesOwnedClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_maxVisibleClusters, sizeof(CLodReyesOwnedClusterEntry), true, false);
     m_reyesOwnedClustersBuffer->SetName(MakeVariantResourceName(traits, "Reyes Owned Clusters Buffer"));
 
     m_reyesOwnedClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
     m_reyesOwnedClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "Reyes Owned Clusters Counter Buffer"));
 
-    const uint32_t reyesOwnershipWordCount = CLodBitsetWordCount(maxVisibleClusters);
     m_reyesOwnershipBitsetBuffer = CreateAliasedUnmaterializedStructuredBuffer(reyesOwnershipWordCount, sizeof(uint32_t), true, false, false, false);
     m_reyesOwnershipBitsetBuffer->SetName(MakeVariantResourceName(traits, "Reyes Ownership Bitset Buffer"));
 
@@ -306,9 +289,6 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
 
     m_reyesSplitIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false, false);
     m_reyesSplitIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Split Indirect Args Buffer Phase2"));
-
-    const uint32_t reyesSplitQueueCapacity = CLodReyesSplitQueueCapacity(maxVisibleClusters);
-    const uint32_t reyesDiceQueueCapacity = CLodReyesDiceQueueCapacity(maxVisibleClusters);
 
     m_reyesSplitQueueBufferA = CreateAliasedUnmaterializedStructuredBuffer(reyesSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry), true, false);
     m_reyesSplitQueueBufferA->SetName(MakeVariantResourceName(traits, "Reyes Split Queue Buffer A"));
@@ -405,7 +385,6 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
         .add<CLodReyesDiceQueueOverflowTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    const uint32_t reyesRasterWorkCapacity = CLodReyesRasterWorkCapacity(maxVisibleClusters);
     m_reyesRasterWorkBuffer = CreateAliasedUnmaterializedStructuredBuffer(reyesRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry), true, false, false, false);
     m_reyesRasterWorkBuffer->SetName(MakeVariantResourceName(traits, "Reyes Raster Work Buffer"));
 
@@ -443,6 +422,129 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
         .set<Components::Resource>({ m_reyesTelemetryBufferPhase2 })
         .add<CLodReyesTelemetryBufferPhase2Tag>()
         .add<CLodExtensionTypeTag>(typeEntity);
+
+    tagBufferUsage(m_reyesFullClusterOutputsBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesFullClusterOutputsCounterBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesOwnedClustersBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesOwnedClustersCounterBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesOwnershipBitsetBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesOwnershipBitsetBufferPhase2, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesClassifyIndirectArgsBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesClassifyIndirectArgsBufferPhase2, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesSplitIndirectArgsBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesSplitIndirectArgsBufferPhase2, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesSplitQueueBufferA, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesSplitQueueCounterBufferA, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesSplitQueueOverflowBufferA, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesSplitQueueBufferB, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesSplitQueueCounterBufferB, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesSplitQueueOverflowBufferB, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesDiceQueueBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesTessTableConfigsBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesTessTableVerticesBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesTessTableTrianglesBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesDiceQueueCounterBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesDiceQueueOverflowBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesRasterWorkBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesRasterWorkCounterBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesRasterWorkIndirectArgsBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesRasterWorkBufferPhase2, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesRasterWorkCounterBufferPhase2, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesRasterWorkIndirectArgsBufferPhase2, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesDiceIndirectArgsBuffer, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesDiceIndirectArgsBufferPhase2, "Cluster LOD Reyes");
+    tagBufferUsage(m_reyesTelemetryBufferPhase1, "Cluster LOD telemetry");
+    tagBufferUsage(m_reyesTelemetryBufferPhase2, "Cluster LOD telemetry");
+}
+
+CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters)
+    : m_type(type)
+    , m_maxVisibleClusters(maxVisibleClusters) {
+    auto tagBufferUsage = [](const std::shared_ptr<Buffer>& buffer, std::string_view usage) {
+        if (buffer) {
+            rg::memory::SetResourceUsageHint(*buffer, std::string(usage));
+        }
+    };
+
+    const auto& traits = GetVariantTraits(type);
+    auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
+    const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
+
+    if (traits.ownsStreaming) {
+        m_streamingSystem = std::make_unique<CLodStreamingSystem>();
+    }
+
+    m_visibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(maxVisibleClusters * PackedVisibleClusterStrideBytes, true, false);
+    m_visibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Visible Clusters Buffer (uncompacted)"));
+
+    m_histogramIndirectCommand = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterBucketsHistogramIndirectCommand), true, false);
+    m_histogramIndirectCommand->SetName(MakeVariantResourceName(traits, "Raster Buckets Histogram Indirect Command Buffer"));
+
+    m_rasterBucketsHistogramBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_rasterBucketsHistogramBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket histogram"));
+
+    m_visibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
+    m_visibleClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "Visible Clusters Counter Buffer"));
+    m_visibleClustersCounterBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_visibleClustersCounterBuffer })
+        .add<VisibleClustersCounterTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_workGraphTelemetryBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodWorkGraphCounterCount, sizeof(uint32_t), true, false, false, false);
+    m_workGraphTelemetryBuffer->SetName(MakeVariantResourceName(traits, "Work Graph Telemetry Buffer"));
+    m_workGraphTelemetryBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_workGraphTelemetryBuffer })
+        .add<CLodWorkGraphTelemetryBufferTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_occlusionReplayBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodReplayBufferNumUints, sizeof(uint32_t), true, false, false, false);
+    m_occlusionReplayBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Replay Buffer"));
+
+    m_occlusionReplayStateBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReplayBufferState), true, false, false, false);
+    m_occlusionReplayStateBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Replay State Buffer"));
+
+    m_occlusionNodeGpuInputsBuffer = CreateAliasedUnmaterializedStructuredBuffer(3, sizeof(CLodNodeGpuInput), true, false, false, false);
+    m_occlusionNodeGpuInputsBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Node GPU Inputs Buffer"));
+
+    m_viewDepthSrvIndicesBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodMaxViewDepthIndices, sizeof(CLodViewDepthSRVIndex), true, false, false, false);
+    m_viewDepthSrvIndicesBuffer->SetName(MakeVariantResourceName(traits, "View Depth SRV Indices Buffer"));
+
+    m_rasterBucketsOffsetsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsOffsetsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket offsets"));
+
+    m_rasterBucketsBlockSumsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsBlockSumsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket block sums"));
+
+    m_rasterBucketsScannedBlockSumsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsScannedBlockSumsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket scanned block sums"));
+
+    m_rasterBucketsTotalCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsTotalCountBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket total count"));
+
+    m_rasterBucketsTotalCountBufferPhase1 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsTotalCountBufferPhase1->SetName(MakeVariantResourceName(traits, "Raster bucket total count phase1"));
+
+    m_rasterBucketsTotalCountBufferPhase1Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsTotalCountBufferPhase1Sw->SetName(MakeVariantResourceName(traits, "Raster bucket total count phase1 SW"));
+
+    m_compactedVisibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(maxVisibleClusters * PackedVisibleClusterStrideBytes, true, false);
+    m_compactedVisibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Compacted Visible Clusters Buffer"));
+
+    m_visibleClustersBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_visibleClustersBuffer })
+        .set<CLodVisibleClusterCapacity>({ maxVisibleClusters })
+        .add<VisibleClustersBufferTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_rasterBucketsWriteCursorBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_rasterBucketsWriteCursorBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor"));
+
+    m_rasterBucketsIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
+    m_rasterBucketsIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args"));
+
+    if (!IsReyesTessellationDisabled()) {
+        EnsureReyesResourcesInitialized();
+    }
 
     m_visibleClustersCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
     m_visibleClustersCounterBufferPhase2->SetName(MakeVariantResourceName(traits, "Visible Clusters Counter Buffer Phase2"));
@@ -495,38 +597,6 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
     tagBufferUsage(m_compactedVisibleClustersBuffer, "Cluster LOD visibility");
     tagBufferUsage(m_rasterBucketsWriteCursorBuffer, "Cluster LOD rasterization");
     tagBufferUsage(m_rasterBucketsIndirectArgsBuffer, "Cluster LOD rasterization");
-    tagBufferUsage(m_reyesFullClusterOutputsBuffer, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesFullClusterOutputsCounterBuffer, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesOwnedClustersBuffer, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesOwnedClustersCounterBuffer, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesOwnershipBitsetBuffer, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesOwnershipBitsetBufferPhase2, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesClassifyIndirectArgsBuffer, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesClassifyIndirectArgsBufferPhase2, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesSplitIndirectArgsBuffer, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesSplitIndirectArgsBufferPhase2, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesSplitQueueBufferA, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesSplitQueueCounterBufferA, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesSplitQueueOverflowBufferA, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesSplitQueueBufferB, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesSplitQueueCounterBufferB, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesSplitQueueOverflowBufferB, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesDiceQueueBuffer, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesTessTableConfigsBuffer, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesTessTableVerticesBuffer, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesTessTableTrianglesBuffer, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesDiceQueueCounterBuffer, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesDiceQueueOverflowBuffer, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesRasterWorkBuffer, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesRasterWorkCounterBuffer, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesRasterWorkIndirectArgsBuffer, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesRasterWorkBufferPhase2, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesRasterWorkCounterBufferPhase2, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesRasterWorkIndirectArgsBufferPhase2, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesDiceIndirectArgsBuffer, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesDiceIndirectArgsBufferPhase2, "Cluster LOD Reyes");
-    tagBufferUsage(m_reyesTelemetryBufferPhase1, "Cluster LOD telemetry");
-    tagBufferUsage(m_reyesTelemetryBufferPhase2, "Cluster LOD telemetry");
     tagBufferUsage(m_visibleClustersCounterBufferPhase2, "Cluster LOD visibility");
     tagBufferUsage(m_rasterBucketsHistogramBufferPhase2, "Cluster LOD rasterization");
     tagBufferUsage(m_rasterBucketsHistogramBufferSw, "Cluster LOD rasterization");
@@ -664,6 +734,8 @@ void CLodExtension::OnRegistryReset(ResourceRegistry* reg)
     releaseBufferBacking(m_deepVisibilityOverflowCounterBuffer);
     releaseBufferBacking(m_deepVisibilityStatsBuffer);
 
+    SyncReyesResourceEntities(!IsReyesTessellationDisabled());
+
     if (m_streamingSystem) {
         m_streamingSystem->OnRegistryReset(reg);
     }
@@ -682,8 +754,12 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
 
     const auto softwareRasterMode =
         SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)();
-    const bool disableReyesPatchRasterization =
+    const bool disableReyesTessellation =
         SettingsManager::GetInstance().getSettingGetter<bool>(CLodDisableReyesRasterizationSettingName)();
+    if (!disableReyesTessellation) {
+        EnsureReyesResourcesInitialized();
+    }
+    SyncReyesResourceEntities(!disableReyesTessellation);
     const bool forceHardwareOnly =
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly ||
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility;
@@ -695,6 +771,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         ? HierarchialCullingWorkGraphMode::HardwareOnly
         : GetCullingWorkGraphMode(softwareRasterMode);
     const auto renderPhase = RenderPhase(traits.renderPhaseName.data());
+    const std::shared_ptr<Buffer> reyesOwnershipBitsetBuffer = disableReyesTessellation ? nullptr : m_reyesOwnershipBitsetBuffer;
+    const std::shared_ptr<Buffer> reyesOwnershipBitsetBufferPhase2 = disableReyesTessellation ? nullptr : m_reyesOwnershipBitsetBufferPhase2;
 
     std::shared_ptr<ResourceGroup> slabGroup = GetSlabResourceGroup();
 
@@ -731,7 +809,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     }
     outPasses.push_back(std::move(cullPassDesc));
 
-        if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::TwoPassVisibility) {
+        if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::TwoPassVisibility && !disableReyesTessellation) {
             RenderGraph::ExternalPassDesc reyesTessellationTableUploadPassDesc;
             reyesTessellationTableUploadPassDesc.type = RenderGraph::PassType::Compute;
             reyesTessellationTableUploadPassDesc.name = MakeVariantPassName(traits, "ReyesTessellationTableUploadPass");
@@ -751,7 +829,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueOverflowBufferA, m_reyesSplitQueueOverflowBufferB },
                 m_reyesDiceQueueCounterBuffer,
                 m_reyesDiceQueueOverflowBuffer,
-                m_reyesOwnershipBitsetBuffer,
+                reyesOwnershipBitsetBuffer,
                 m_reyesTelemetryBufferPhase1,
                 1u);
             outPasses.push_back(std::move(reyesResetPassDesc));
@@ -775,7 +853,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_reyesFullClusterOutputsCounterBuffer,
                 m_reyesOwnedClustersBuffer,
                 m_reyesOwnedClustersCounterBuffer,
-                m_reyesOwnershipBitsetBuffer,
+                reyesOwnershipBitsetBuffer,
                 m_reyesClassifyIndirectArgsBuffer,
                 m_reyesTelemetryBufferPhase1,
                 1u);
@@ -865,7 +943,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 1u);
             outPasses.push_back(std::move(reyesDicePassDesc));
 
-            if (traits.type == CLodExtensionType::VisiblityBuffer && !disableReyesPatchRasterization) {
+            if (traits.type == CLodExtensionType::VisiblityBuffer) {
                 RenderGraph::ExternalPassDesc reyesBuildRasterWorkPassDesc;
                 reyesBuildRasterWorkPassDesc.type = RenderGraph::PassType::Compute;
                 reyesBuildRasterWorkPassDesc.name = MakeVariantPassName(traits, "ReyesBuildRasterWorkPass1");
@@ -917,7 +995,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_visibleClustersCounterBuffer,
         m_histogramIndirectCommand,
         m_rasterBucketsHistogramBuffer,
-        m_reyesOwnershipBitsetBuffer);
+        reyesOwnershipBitsetBuffer);
     outPasses.push_back(std::move(histogramPassDesc));
 
     RenderGraph::ExternalPassDesc prefixScanPassDesc;
@@ -953,7 +1031,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_compactedVisibleClustersBuffer,
         m_rasterBucketsIndirectArgsBuffer,
         m_sortedToUnsortedMappingBuffer,
-        m_reyesOwnershipBitsetBuffer,
+        reyesOwnershipBitsetBuffer,
         m_maxVisibleClusters,
         false);
     outPasses.push_back(std::move(compactPassDesc));
@@ -1050,7 +1128,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_swVisibleClustersCounterBuffer,
             m_histogramIndirectCommand,
             m_rasterBucketsHistogramBufferSw,
-            m_reyesOwnershipBitsetBuffer,
+            reyesOwnershipBitsetBuffer,
             nullptr,
             true,
             m_maxVisibleClusters,
@@ -1092,7 +1170,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_compactedVisibleClustersBuffer,
             m_rasterBucketsIndirectArgsBuffer,
             m_sortedToUnsortedMappingBuffer,
-            m_reyesOwnershipBitsetBuffer,
+            reyesOwnershipBitsetBuffer,
             m_maxVisibleClusters,
             false,
             true,
@@ -1160,171 +1238,173 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_swVisibleClustersCounterBuffer);
     outPasses.push_back(std::move(cullPassDesc2));
 
-    RenderGraph::ExternalPassDesc reyesResetPassDesc2;
-    reyesResetPassDesc2.type = RenderGraph::PassType::Compute;
-    reyesResetPassDesc2.name = MakeVariantPassName(traits, "ReyesQueueResetPass2");
-    reyesResetPassDesc2.pass = std::make_shared<ReyesQueueResetPass>(
-        m_reyesFullClusterOutputsCounterBuffer,
-        m_reyesOwnedClustersCounterBuffer,
-        std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueCounterBufferA, m_reyesSplitQueueCounterBufferB },
-        std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueOverflowBufferA, m_reyesSplitQueueOverflowBufferB },
-        m_reyesDiceQueueCounterBuffer,
-        m_reyesDiceQueueOverflowBuffer,
-        m_reyesOwnershipBitsetBufferPhase2,
-        m_reyesTelemetryBufferPhase2,
-        2u);
-    outPasses.push_back(std::move(reyesResetPassDesc2));
-
-    RenderGraph::ExternalPassDesc reyesCreateClassifyArgsPassDesc2;
-    reyesCreateClassifyArgsPassDesc2.type = RenderGraph::PassType::Compute;
-    reyesCreateClassifyArgsPassDesc2.name = MakeVariantPassName(traits, "ReyesCreateClassifyDispatchArgsPass2");
-    reyesCreateClassifyArgsPassDesc2.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
-        m_visibleClustersCounterBufferPhase2,
-        m_reyesClassifyIndirectArgsBufferPhase2);
-    outPasses.push_back(std::move(reyesCreateClassifyArgsPassDesc2));
-
-    RenderGraph::ExternalPassDesc reyesClassifyPassDesc2;
-    reyesClassifyPassDesc2.type = RenderGraph::PassType::Compute;
-    reyesClassifyPassDesc2.name = MakeVariantPassName(traits, "ReyesClassifyPass2");
-    reyesClassifyPassDesc2.pass = std::make_shared<ReyesClassifyPass>(
-        m_visibleClustersBuffer,
-        m_visibleClustersCounterBufferPhase2,
-        m_visibleClustersCounterBuffer,
-        m_reyesFullClusterOutputsBuffer,
-        m_reyesFullClusterOutputsCounterBuffer,
-        m_reyesOwnedClustersBuffer,
-        m_reyesOwnedClustersCounterBuffer,
-        m_reyesOwnershipBitsetBufferPhase2,
-        m_reyesClassifyIndirectArgsBufferPhase2,
-        m_reyesTelemetryBufferPhase2,
-        2u);
-    outPasses.push_back(std::move(reyesClassifyPassDesc2));
-
-    RenderGraph::ExternalPassDesc reyesCreateSeedArgsPassDesc2;
-    reyesCreateSeedArgsPassDesc2.type = RenderGraph::PassType::Compute;
-    reyesCreateSeedArgsPassDesc2.name = MakeVariantPassName(traits, "ReyesCreateSeedDispatchArgsPass2");
-    reyesCreateSeedArgsPassDesc2.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
-        m_reyesOwnedClustersCounterBuffer,
-        m_reyesSplitIndirectArgsBufferPhase2);
-    outPasses.push_back(std::move(reyesCreateSeedArgsPassDesc2));
-
-    RenderGraph::ExternalPassDesc reyesSeedPassDesc2;
-    reyesSeedPassDesc2.type = RenderGraph::PassType::Compute;
-    reyesSeedPassDesc2.name = MakeVariantPassName(traits, "ReyesSeedPatchesPass2");
-    reyesSeedPassDesc2.pass = std::make_shared<ReyesSeedPatchesPass>(
-        m_visibleClustersBuffer,
-        m_reyesOwnedClustersBuffer,
-        m_reyesOwnedClustersCounterBuffer,
-        m_reyesSplitQueueBufferA,
-        m_reyesSplitQueueCounterBufferA,
-        m_reyesSplitQueueOverflowBufferA,
-        m_reyesSplitIndirectArgsBufferPhase2,
-        reyesSplitQueueCapacity,
-        2u);
-    outPasses.push_back(std::move(reyesSeedPassDesc2));
-
-    const std::shared_ptr<Buffer> reyesSplitBuffers[] = { m_reyesSplitQueueBufferA, m_reyesSplitQueueBufferB };
-    const std::shared_ptr<Buffer> reyesSplitCounters[] = { m_reyesSplitQueueCounterBufferA, m_reyesSplitQueueCounterBufferB };
-    const std::shared_ptr<Buffer> reyesSplitOverflows[] = { m_reyesSplitQueueOverflowBufferA, m_reyesSplitQueueOverflowBufferB };
-    for (uint32_t splitPassIndex = 0; splitPassIndex < CLodReyesMaxSplitPassCount; ++splitPassIndex) {
-        const uint32_t inputIndex = splitPassIndex & 1u;
-        const uint32_t outputIndex = inputIndex ^ 1u;
-
-        RenderGraph::ExternalPassDesc reyesCreateSplitArgsPassDesc2;
-        reyesCreateSplitArgsPassDesc2.type = RenderGraph::PassType::Compute;
-        reyesCreateSplitArgsPassDesc2.name = MakeVariantPassName(traits, "ReyesCreateSplitDispatchArgsPass2_" + std::to_string(splitPassIndex));
-        reyesCreateSplitArgsPassDesc2.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
-            reyesSplitCounters[inputIndex],
-            m_reyesSplitIndirectArgsBufferPhase2);
-        outPasses.push_back(std::move(reyesCreateSplitArgsPassDesc2));
-
-        RenderGraph::ExternalPassDesc reyesSplitPassDesc2;
-        reyesSplitPassDesc2.type = RenderGraph::PassType::Compute;
-        reyesSplitPassDesc2.name = MakeVariantPassName(traits, "ReyesSplitPass2_" + std::to_string(splitPassIndex));
-        reyesSplitPassDesc2.pass = std::make_shared<ReyesSplitPass>(
-            m_visibleClustersBuffer,
-            reyesSplitBuffers[inputIndex],
-            reyesSplitCounters[inputIndex],
-            reyesSplitBuffers[outputIndex],
-            reyesSplitCounters[outputIndex],
-            reyesSplitOverflows[outputIndex],
-            m_reyesDiceQueueBuffer,
+    if (!disableReyesTessellation) {
+        RenderGraph::ExternalPassDesc reyesResetPassDesc2;
+        reyesResetPassDesc2.type = RenderGraph::PassType::Compute;
+        reyesResetPassDesc2.name = MakeVariantPassName(traits, "ReyesQueueResetPass2");
+        reyesResetPassDesc2.pass = std::make_shared<ReyesQueueResetPass>(
+            m_reyesFullClusterOutputsCounterBuffer,
+            m_reyesOwnedClustersCounterBuffer,
+            std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueCounterBufferA, m_reyesSplitQueueCounterBufferB },
+            std::vector<std::shared_ptr<Buffer>>{ m_reyesSplitQueueOverflowBufferA, m_reyesSplitQueueOverflowBufferB },
             m_reyesDiceQueueCounterBuffer,
             m_reyesDiceQueueOverflowBuffer,
-            m_reyesTessTableConfigsBuffer,
-            m_reyesTessTableVerticesBuffer,
-            m_reyesTessTableTrianglesBuffer,
-            m_reyesSplitIndirectArgsBufferPhase2,
+            reyesOwnershipBitsetBufferPhase2,
             m_reyesTelemetryBufferPhase2,
-            reyesSplitQueueCapacity,
-            splitPassIndex,
-            CLodReyesMaxSplitPassCount,
             2u);
-        outPasses.push_back(std::move(reyesSplitPassDesc2));
-    }
+        outPasses.push_back(std::move(reyesResetPassDesc2));
 
-    RenderGraph::ExternalPassDesc reyesCreateDiceArgsPassDesc2;
-    reyesCreateDiceArgsPassDesc2.type = RenderGraph::PassType::Compute;
-    reyesCreateDiceArgsPassDesc2.name = MakeVariantPassName(traits, "ReyesCreateDiceDispatchArgsPass2");
-    reyesCreateDiceArgsPassDesc2.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
-        m_reyesDiceQueueCounterBuffer,
-        m_reyesDiceIndirectArgsBufferPhase2);
-    outPasses.push_back(std::move(reyesCreateDiceArgsPassDesc2));
+        RenderGraph::ExternalPassDesc reyesCreateClassifyArgsPassDesc2;
+        reyesCreateClassifyArgsPassDesc2.type = RenderGraph::PassType::Compute;
+        reyesCreateClassifyArgsPassDesc2.name = MakeVariantPassName(traits, "ReyesCreateClassifyDispatchArgsPass2");
+        reyesCreateClassifyArgsPassDesc2.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
+            m_visibleClustersCounterBufferPhase2,
+            m_reyesClassifyIndirectArgsBufferPhase2);
+        outPasses.push_back(std::move(reyesCreateClassifyArgsPassDesc2));
 
-    RenderGraph::ExternalPassDesc reyesDicePassDesc2;
-    reyesDicePassDesc2.type = RenderGraph::PassType::Compute;
-    reyesDicePassDesc2.name = MakeVariantPassName(traits, "ReyesDicePass2");
-    reyesDicePassDesc2.pass = std::make_shared<ReyesDicePass>(
-        m_reyesDiceQueueBuffer,
-        m_reyesDiceQueueCounterBuffer,
-        m_reyesTessTableConfigsBuffer,
-        m_reyesDiceIndirectArgsBufferPhase2,
-        m_reyesTelemetryBufferPhase2,
-        reyesDiceQueueCapacity,
-        2u);
-    outPasses.push_back(std::move(reyesDicePassDesc2));
+        RenderGraph::ExternalPassDesc reyesClassifyPassDesc2;
+        reyesClassifyPassDesc2.type = RenderGraph::PassType::Compute;
+        reyesClassifyPassDesc2.name = MakeVariantPassName(traits, "ReyesClassifyPass2");
+        reyesClassifyPassDesc2.pass = std::make_shared<ReyesClassifyPass>(
+            m_visibleClustersBuffer,
+            m_visibleClustersCounterBufferPhase2,
+            m_visibleClustersCounterBuffer,
+            m_reyesFullClusterOutputsBuffer,
+            m_reyesFullClusterOutputsCounterBuffer,
+            m_reyesOwnedClustersBuffer,
+            m_reyesOwnedClustersCounterBuffer,
+            reyesOwnershipBitsetBufferPhase2,
+            m_reyesClassifyIndirectArgsBufferPhase2,
+            m_reyesTelemetryBufferPhase2,
+            2u);
+        outPasses.push_back(std::move(reyesClassifyPassDesc2));
 
-    if (traits.type == CLodExtensionType::VisiblityBuffer && !disableReyesPatchRasterization) {
-        RenderGraph::ExternalPassDesc reyesBuildRasterWorkPassDesc2;
-        reyesBuildRasterWorkPassDesc2.type = RenderGraph::PassType::Compute;
-        reyesBuildRasterWorkPassDesc2.name = MakeVariantPassName(traits, "ReyesBuildRasterWorkPass2");
-        reyesBuildRasterWorkPassDesc2.pass = std::make_shared<ReyesBuildRasterWorkPass>(
+        RenderGraph::ExternalPassDesc reyesCreateSeedArgsPassDesc2;
+        reyesCreateSeedArgsPassDesc2.type = RenderGraph::PassType::Compute;
+        reyesCreateSeedArgsPassDesc2.name = MakeVariantPassName(traits, "ReyesCreateSeedDispatchArgsPass2");
+        reyesCreateSeedArgsPassDesc2.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
+            m_reyesOwnedClustersCounterBuffer,
+            m_reyesSplitIndirectArgsBufferPhase2);
+        outPasses.push_back(std::move(reyesCreateSeedArgsPassDesc2));
+
+        RenderGraph::ExternalPassDesc reyesSeedPassDesc2;
+        reyesSeedPassDesc2.type = RenderGraph::PassType::Compute;
+        reyesSeedPassDesc2.name = MakeVariantPassName(traits, "ReyesSeedPatchesPass2");
+        reyesSeedPassDesc2.pass = std::make_shared<ReyesSeedPatchesPass>(
+            m_visibleClustersBuffer,
+            m_reyesOwnedClustersBuffer,
+            m_reyesOwnedClustersCounterBuffer,
+            m_reyesSplitQueueBufferA,
+            m_reyesSplitQueueCounterBufferA,
+            m_reyesSplitQueueOverflowBufferA,
+            m_reyesSplitIndirectArgsBufferPhase2,
+            reyesSplitQueueCapacity,
+            2u);
+        outPasses.push_back(std::move(reyesSeedPassDesc2));
+
+        const std::shared_ptr<Buffer> reyesSplitBuffers[] = { m_reyesSplitQueueBufferA, m_reyesSplitQueueBufferB };
+        const std::shared_ptr<Buffer> reyesSplitCounters[] = { m_reyesSplitQueueCounterBufferA, m_reyesSplitQueueCounterBufferB };
+        const std::shared_ptr<Buffer> reyesSplitOverflows[] = { m_reyesSplitQueueOverflowBufferA, m_reyesSplitQueueOverflowBufferB };
+        for (uint32_t splitPassIndex = 0; splitPassIndex < CLodReyesMaxSplitPassCount; ++splitPassIndex) {
+            const uint32_t inputIndex = splitPassIndex & 1u;
+            const uint32_t outputIndex = inputIndex ^ 1u;
+
+            RenderGraph::ExternalPassDesc reyesCreateSplitArgsPassDesc2;
+            reyesCreateSplitArgsPassDesc2.type = RenderGraph::PassType::Compute;
+            reyesCreateSplitArgsPassDesc2.name = MakeVariantPassName(traits, "ReyesCreateSplitDispatchArgsPass2_" + std::to_string(splitPassIndex));
+            reyesCreateSplitArgsPassDesc2.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
+                reyesSplitCounters[inputIndex],
+                m_reyesSplitIndirectArgsBufferPhase2);
+            outPasses.push_back(std::move(reyesCreateSplitArgsPassDesc2));
+
+            RenderGraph::ExternalPassDesc reyesSplitPassDesc2;
+            reyesSplitPassDesc2.type = RenderGraph::PassType::Compute;
+            reyesSplitPassDesc2.name = MakeVariantPassName(traits, "ReyesSplitPass2_" + std::to_string(splitPassIndex));
+            reyesSplitPassDesc2.pass = std::make_shared<ReyesSplitPass>(
+                m_visibleClustersBuffer,
+                reyesSplitBuffers[inputIndex],
+                reyesSplitCounters[inputIndex],
+                reyesSplitBuffers[outputIndex],
+                reyesSplitCounters[outputIndex],
+                reyesSplitOverflows[outputIndex],
+                m_reyesDiceQueueBuffer,
+                m_reyesDiceQueueCounterBuffer,
+                m_reyesDiceQueueOverflowBuffer,
+                m_reyesTessTableConfigsBuffer,
+                m_reyesTessTableVerticesBuffer,
+                m_reyesTessTableTrianglesBuffer,
+                m_reyesSplitIndirectArgsBufferPhase2,
+                m_reyesTelemetryBufferPhase2,
+                reyesSplitQueueCapacity,
+                splitPassIndex,
+                CLodReyesMaxSplitPassCount,
+                2u);
+            outPasses.push_back(std::move(reyesSplitPassDesc2));
+        }
+
+        RenderGraph::ExternalPassDesc reyesCreateDiceArgsPassDesc2;
+        reyesCreateDiceArgsPassDesc2.type = RenderGraph::PassType::Compute;
+        reyesCreateDiceArgsPassDesc2.name = MakeVariantPassName(traits, "ReyesCreateDiceDispatchArgsPass2");
+        reyesCreateDiceArgsPassDesc2.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
+            m_reyesDiceQueueCounterBuffer,
+            m_reyesDiceIndirectArgsBufferPhase2);
+        outPasses.push_back(std::move(reyesCreateDiceArgsPassDesc2));
+
+        RenderGraph::ExternalPassDesc reyesDicePassDesc2;
+        reyesDicePassDesc2.type = RenderGraph::PassType::Compute;
+        reyesDicePassDesc2.name = MakeVariantPassName(traits, "ReyesDicePass2");
+        reyesDicePassDesc2.pass = std::make_shared<ReyesDicePass>(
             m_reyesDiceQueueBuffer,
             m_reyesDiceQueueCounterBuffer,
             m_reyesTessTableConfigsBuffer,
-            m_reyesRasterWorkBufferPhase2,
-            m_reyesRasterWorkCounterBufferPhase2,
             m_reyesDiceIndirectArgsBufferPhase2,
             m_reyesTelemetryBufferPhase2,
-            reyesRasterWorkCapacity);
-        outPasses.push_back(std::move(reyesBuildRasterWorkPassDesc2));
+            reyesDiceQueueCapacity,
+            2u);
+        outPasses.push_back(std::move(reyesDicePassDesc2));
 
-        RenderGraph::ExternalPassDesc reyesCreateRasterWorkArgsPassDesc2;
-        reyesCreateRasterWorkArgsPassDesc2.type = RenderGraph::PassType::Compute;
-        reyesCreateRasterWorkArgsPassDesc2.name = MakeVariantPassName(traits, "ReyesCreateRasterWorkDispatchArgsPass2");
-        reyesCreateRasterWorkArgsPassDesc2.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
-            m_reyesRasterWorkCounterBufferPhase2,
-            m_reyesRasterWorkIndirectArgsBufferPhase2);
-        outPasses.push_back(std::move(reyesCreateRasterWorkArgsPassDesc2));
+        if (traits.type == CLodExtensionType::VisiblityBuffer) {
+            RenderGraph::ExternalPassDesc reyesBuildRasterWorkPassDesc2;
+            reyesBuildRasterWorkPassDesc2.type = RenderGraph::PassType::Compute;
+            reyesBuildRasterWorkPassDesc2.name = MakeVariantPassName(traits, "ReyesBuildRasterWorkPass2");
+            reyesBuildRasterWorkPassDesc2.pass = std::make_shared<ReyesBuildRasterWorkPass>(
+                m_reyesDiceQueueBuffer,
+                m_reyesDiceQueueCounterBuffer,
+                m_reyesTessTableConfigsBuffer,
+                m_reyesRasterWorkBufferPhase2,
+                m_reyesRasterWorkCounterBufferPhase2,
+                m_reyesDiceIndirectArgsBufferPhase2,
+                m_reyesTelemetryBufferPhase2,
+                reyesRasterWorkCapacity);
+            outPasses.push_back(std::move(reyesBuildRasterWorkPassDesc2));
 
-        RenderGraph::ExternalPassDesc reyesPatchRasterPassDesc2;
-        reyesPatchRasterPassDesc2.type = RenderGraph::PassType::Compute;
-        reyesPatchRasterPassDesc2.name = MakeVariantPassName(traits, "ReyesPatchRasterPass2");
-        reyesPatchRasterPassDesc2.pass = std::make_shared<ReyesPatchRasterizationPass>(
-            m_visibleClustersBuffer,
-            m_reyesDiceQueueBuffer,
-            m_reyesDiceQueueCounterBuffer,
-            m_reyesRasterWorkBufferPhase2,
-            m_reyesTessTableConfigsBuffer,
-            m_reyesTessTableVerticesBuffer,
-            m_reyesTessTableTrianglesBuffer,
-            m_viewRasterInfoBuffer,
-            m_reyesRasterWorkIndirectArgsBufferPhase2,
-            m_reyesTelemetryBufferPhase2,
-            m_maxVisibleClusters,
-            2u,
-            CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters));
-        outPasses.push_back(std::move(reyesPatchRasterPassDesc2));
+            RenderGraph::ExternalPassDesc reyesCreateRasterWorkArgsPassDesc2;
+            reyesCreateRasterWorkArgsPassDesc2.type = RenderGraph::PassType::Compute;
+            reyesCreateRasterWorkArgsPassDesc2.name = MakeVariantPassName(traits, "ReyesCreateRasterWorkDispatchArgsPass2");
+            reyesCreateRasterWorkArgsPassDesc2.pass = std::make_shared<ReyesCreateDispatchArgsPass>(
+                m_reyesRasterWorkCounterBufferPhase2,
+                m_reyesRasterWorkIndirectArgsBufferPhase2);
+            outPasses.push_back(std::move(reyesCreateRasterWorkArgsPassDesc2));
+
+            RenderGraph::ExternalPassDesc reyesPatchRasterPassDesc2;
+            reyesPatchRasterPassDesc2.type = RenderGraph::PassType::Compute;
+            reyesPatchRasterPassDesc2.name = MakeVariantPassName(traits, "ReyesPatchRasterPass2");
+            reyesPatchRasterPassDesc2.pass = std::make_shared<ReyesPatchRasterizationPass>(
+                m_visibleClustersBuffer,
+                m_reyesDiceQueueBuffer,
+                m_reyesDiceQueueCounterBuffer,
+                m_reyesRasterWorkBufferPhase2,
+                m_reyesTessTableConfigsBuffer,
+                m_reyesTessTableVerticesBuffer,
+                m_reyesTessTableTrianglesBuffer,
+                m_viewRasterInfoBuffer,
+                m_reyesRasterWorkIndirectArgsBufferPhase2,
+                m_reyesTelemetryBufferPhase2,
+                m_maxVisibleClusters,
+                2u,
+                CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters));
+            outPasses.push_back(std::move(reyesPatchRasterPassDesc2));
+        }
     }
 
     RenderGraph::ExternalPassDesc histogramPassDesc2;
@@ -1335,7 +1415,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_visibleClustersCounterBufferPhase2,
         m_histogramIndirectCommand,
         m_rasterBucketsHistogramBufferPhase2,
-        m_reyesOwnershipBitsetBufferPhase2,
+        reyesOwnershipBitsetBufferPhase2,
         m_visibleClustersCounterBuffer);
     outPasses.push_back(std::move(histogramPassDesc2));
 
@@ -1372,7 +1452,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         m_compactedVisibleClustersBuffer,
         m_rasterBucketsIndirectArgsBuffer,
         m_sortedToUnsortedMappingBuffer,
-        m_reyesOwnershipBitsetBufferPhase2,
+        reyesOwnershipBitsetBufferPhase2,
         m_maxVisibleClusters,
         true);
     outPasses.push_back(std::move(compactPassDesc2));
@@ -1419,7 +1499,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_swVisibleClustersCounterBufferPhase2,
             m_histogramIndirectCommand,
             m_rasterBucketsHistogramBufferPhase2Sw,
-            m_reyesOwnershipBitsetBufferPhase2,
+            reyesOwnershipBitsetBufferPhase2,
             m_swVisibleClustersCounterBuffer,
             true,
             m_maxVisibleClusters,
@@ -1461,7 +1541,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_compactedVisibleClustersBuffer,
             m_rasterBucketsIndirectArgsBuffer,
             m_sortedToUnsortedMappingBuffer,
-            m_reyesOwnershipBitsetBufferPhase2,
+            reyesOwnershipBitsetBufferPhase2,
             m_maxVisibleClusters,
             true,
             true,

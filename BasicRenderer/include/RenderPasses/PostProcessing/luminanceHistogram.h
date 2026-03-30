@@ -17,8 +17,7 @@ public:
     }
 
     void Setup() override {
-		RegisterSRV(Builtin::Color::HDRColorTarget);
-        RegisterUAV(Builtin::PostProcessing::LuminanceHistogram);
+		// Removed redundant Register calls now covered by declared-resource auto descriptor registration
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override {

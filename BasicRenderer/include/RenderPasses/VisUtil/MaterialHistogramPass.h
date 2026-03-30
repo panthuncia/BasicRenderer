@@ -36,8 +36,8 @@ public:
     }
     void DeclareResourceUsages(ComputePassBuilder* b) override {
 
-        b->WithShaderResource(ECSResourceResolver(m_visibleClustersQuery));
-        b->WithShaderResource(ECSResourceResolver(m_reyesDiceQueueQuery));
+        b->WithShaderResource(ECSResourceResolver(m_visibleClustersQuery)); 
+    	b->WithShaderResource(ECSResourceResolver(m_reyesDiceQueueQuery));
         b->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
                               Builtin::PrimaryCamera::VisibilityTexture,
                               //Builtin::PrimaryCamera::VisibleClusterTable,
@@ -72,13 +72,14 @@ public:
         }
 
         m_visibleClusterBufferSRVIndex = visibleClusterResources[0]->GetSRVInfo(0).slot.index;
+        m_reyesDiceQueueBufferSRVIndex = 0xFFFFFFFFu;
 
         std::vector<GloballyIndexedResource*> reyesDiceQueueResources;
         m_reyesDiceQueueQuery.each([&](flecs::entity e) {
-            auto& res = e.get<Components::Resource>();
-            auto test = std::static_pointer_cast<GloballyIndexedResource>(res.resource.lock());
-            if (test) {
-                reyesDiceQueueResources.push_back(test.get());
+            if (const auto res = e.try_get<Components::Resource>(); res) {
+                if (const auto test = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); test) {
+                    reyesDiceQueueResources.push_back(test.get());
+                }
             }
             });
         if (reyesDiceQueueResources.size() == 1) {

@@ -20,6 +20,10 @@ public:
     void GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override;
 
 private:
+    bool IsReyesTessellationDisabled() const;
+    void EnsureReyesResourcesInitialized();
+    void SyncReyesResourceEntities(bool enabled);
+
     CLodExtensionType m_type;
     uint32_t m_maxVisibleClusters = 0u;
 

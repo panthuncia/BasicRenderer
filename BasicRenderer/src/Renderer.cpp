@@ -894,6 +894,10 @@ void Renderer::SetSettings() {
         (void)newValue;
         rebuildRenderGraph = true;
         }));
+        m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>(CLodDisableReyesRasterizationSettingName, [this](const bool& newValue) {
+            (void)newValue;
+            rebuildRenderGraph = true;
+            }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableMeshletCulling", [this](const bool& newValue) {
 		m_meshletCulling = newValue;
 		rebuildRenderGraph = true;
