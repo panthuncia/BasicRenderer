@@ -20,7 +20,6 @@ ReyesClassifyPass::ReyesClassifyPass(
     std::shared_ptr<Buffer> ownershipBitsetBuffer,
     std::shared_ptr<Buffer> indirectArgsBuffer,
     std::shared_ptr<Buffer> telemetryBuffer,
-    uint32_t visibleClustersCapacity,
     uint32_t phaseIndex)
     : m_visibleClustersBuffer(std::move(visibleClustersBuffer))
     , m_visibleClustersCounterBuffer(std::move(visibleClustersCounterBuffer))
@@ -32,7 +31,6 @@ ReyesClassifyPass::ReyesClassifyPass(
     , m_ownershipBitsetBuffer(std::move(ownershipBitsetBuffer))
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
     , m_telemetryBuffer(std::move(telemetryBuffer))
-    , m_visibleClustersCapacity(visibleClustersCapacity)
     , m_phaseIndex(phaseIndex) {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -102,7 +100,6 @@ PassReturn ReyesClassifyPass::Execute(PassExecutionContext& executionContext)
     uintRootConstants[CLOD_REYES_CLASSIFY_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_CLASSIFY_PHASE_INDEX] = m_phaseIndex;
     uintRootConstants[CLOD_REYES_CLASSIFY_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = m_ownershipBitsetBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_REYES_CLASSIFY_VISIBLE_CLUSTERS_CAPACITY] = m_visibleClustersCapacity;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

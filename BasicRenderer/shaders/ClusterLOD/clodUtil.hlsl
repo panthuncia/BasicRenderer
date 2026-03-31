@@ -20,18 +20,11 @@ struct RasterBucketsHistogramIndirectCommand
     uint dispatchX, dispatchY, dispatchZ;
 };
 
-static const uint REYES_TELEMETRY_UNSET_INDEX = 0xFFFFFFFFu;
-
-uint CLodLoadVisibleClusterOwnedByReyesBit(uint visibleClusterIndex, uint ownershipDescriptorIndex)
+bool CLodIsVisibleClusterOwnedByReyes(uint visibleClusterIndex, uint ownershipDescriptorIndex)
 {
     StructuredBuffer<uint> ownershipWords = ResourceDescriptorHeap[ownershipDescriptorIndex];
     const uint ownershipWord = ownershipWords[visibleClusterIndex >> 5u];
-    return (ownershipWord >> (visibleClusterIndex & 31u)) & 1u;
-}
-
-bool CLodIsVisibleClusterOwnedByReyes(uint visibleClusterIndex, uint ownershipDescriptorIndex)
-{
-    return CLodLoadVisibleClusterOwnedByReyesBit(visibleClusterIndex, ownershipDescriptorIndex) != 0u;
+    return ((ownershipWord >> (visibleClusterIndex & 31u)) & 1u) != 0u;
 }
 
 [shader("compute")]
@@ -206,24 +199,17 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
     uint linearizedID = DTid.x + DTid.y * xDimThreads;
     StructuredBuffer<uint> clusterCountBuffer = ResourceDescriptorHeap[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
     uint clusterCount = clusterCountBuffer.Load(0);
-
-    if (CLOD_HISTOGRAM_REYES_TELEMETRY_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
-    {
-        RWStructuredBuffer<CLodReyesTelemetry> telemetryBuffer = ResourceDescriptorHeap[CLOD_HISTOGRAM_REYES_TELEMETRY_DESCRIPTOR_INDEX];
-        InterlockedAdd(telemetryBuffer[0].histogramInvocationCount, 1u);
-        uint previousObservedClusterCount = REYES_TELEMETRY_UNSET_INDEX;
-        InterlockedCompareExchange(
-            telemetryBuffer[0].histogramObservedClusterCount,
-            REYES_TELEMETRY_UNSET_INDEX,
-            clusterCount,
-            previousObservedClusterCount);
-    }
     
     if (linearizedID >= clusterCount) {
         return;
     }
 
     const uint visibleClusterReadIndex = CLodGetHistogramVisibleClusterReadIndex(linearizedID);
+    if ((CLOD_HISTOGRAM_READ_MODE_FLAGS & CLOD_HISTOGRAM_READ_FLAG_SKIP_REYES_OWNED) != 0u &&
+        CLodIsVisibleClusterOwnedByReyes(visibleClusterReadIndex, CLOD_HISTOGRAM_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX)) {
+        return;
+    }
+
     ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
 
     // TODO: Remove load chain
@@ -233,60 +219,6 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     uint materialDataIndex = perMeshBuffer[perMeshIndex].materialDataIndex;
     StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
-    uint ownershipBit = 0u;
-    const bool shouldCheckReyesOwnership = (CLOD_HISTOGRAM_READ_MODE_FLAGS & CLOD_HISTOGRAM_READ_FLAG_SKIP_REYES_OWNED) != 0u;
-    if (shouldCheckReyesOwnership)
-    {
-        ownershipBit = CLodLoadVisibleClusterOwnedByReyesBit(visibleClusterReadIndex, CLOD_HISTOGRAM_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX);
-    }
-
-    if (CLOD_HISTOGRAM_REYES_TELEMETRY_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
-    {
-        RWStructuredBuffer<CLodReyesTelemetry> telemetryBuffer = ResourceDescriptorHeap[CLOD_HISTOGRAM_REYES_TELEMETRY_DESCRIPTOR_INDEX];
-
-        uint previousFirstHistogramRead = REYES_TELEMETRY_UNSET_INDEX;
-        InterlockedCompareExchange(
-            telemetryBuffer[0].firstHistogramReadVisibleClusterIndex,
-            REYES_TELEMETRY_UNSET_INDEX,
-            visibleClusterReadIndex,
-            previousFirstHistogramRead);
-        if (previousFirstHistogramRead == REYES_TELEMETRY_UNSET_INDEX)
-        {
-            telemetryBuffer[0].firstHistogramReadInstanceID = instanceIndex;
-            telemetryBuffer[0].firstHistogramReadMaterialIndex = materialDataIndex;
-        }
-
-        if (visibleClusterReadIndex == telemetryBuffer[0].firstOwnedVisibleClusterIndex)
-        {
-            InterlockedAdd(telemetryBuffer[0].histogramReadOwnedClusterMatchCount, 1u);
-            InterlockedCompareExchange(
-                telemetryBuffer[0].histogramOwnedClusterBitValue,
-                REYES_TELEMETRY_UNSET_INDEX,
-                ownershipBit,
-                previousFirstHistogramRead);
-        }
-    }
-
-    if (shouldCheckReyesOwnership && ownershipBit != 0u) {
-        if (CLOD_HISTOGRAM_REYES_TELEMETRY_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
-        {
-            RWStructuredBuffer<CLodReyesTelemetry> telemetryBuffer = ResourceDescriptorHeap[CLOD_HISTOGRAM_REYES_TELEMETRY_DESCRIPTOR_INDEX];
-            InterlockedAdd(telemetryBuffer[0].histogramReyesOwnedSkipCount, 1u);
-
-            uint previousFirstHistogramSkip = REYES_TELEMETRY_UNSET_INDEX;
-            InterlockedCompareExchange(
-                telemetryBuffer[0].firstHistogramSkippedVisibleClusterIndex,
-                REYES_TELEMETRY_UNSET_INDEX,
-                visibleClusterReadIndex,
-                previousFirstHistogramSkip);
-            if (previousFirstHistogramSkip == REYES_TELEMETRY_UNSET_INDEX)
-            {
-                telemetryBuffer[0].firstHistogramSkippedInstanceID = instanceIndex;
-                telemetryBuffer[0].firstHistogramSkippedMaterialIndex = materialDataIndex;
-            }
-        }
-        return;
-    }
 
     uint rasterBucketIndex = materialDataBuffer[materialDataIndex].rasterBucketIndex;
 
@@ -493,18 +425,6 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
 
     uint clusterCount = IndirectCommandSignatureRootConstant0;
 
-    if (CLOD_COMPACTION_REYES_TELEMETRY_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
-    {
-        RWStructuredBuffer<CLodReyesTelemetry> telemetryBuffer = ResourceDescriptorHeap[CLOD_COMPACTION_REYES_TELEMETRY_DESCRIPTOR_INDEX];
-        InterlockedAdd(telemetryBuffer[0].compactionInvocationCount, 1u);
-        uint previousObservedClusterCount = REYES_TELEMETRY_UNSET_INDEX;
-        InterlockedCompareExchange(
-            telemetryBuffer[0].compactionObservedClusterCount,
-            REYES_TELEMETRY_UNSET_INDEX,
-            clusterCount,
-            previousObservedClusterCount);
-    }
-
     StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
     const uint numBucketsPacked = CLOD_COMPACTION_NUM_RASTER_BUCKETS;
     const bool appendToExisting = ((numBucketsPacked & 0x80000000u) != 0u);
@@ -520,73 +440,18 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
     if (linearizedID < clusterCount)
     {
         const uint sourceClusterIndex = CLodGetCompactionVisibleClusterReadIndex(linearizedID);
-        ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_COMPACTION_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
-        const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, sourceClusterIndex);
-        const uint instanceIndex = CLodVisibleClusterInstanceID(packedCluster);
-        StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-        const uint perMeshIndex = perMeshInstance[instanceIndex].perMeshBufferIndex;
-        StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
-        const uint materialDataIndex = perMeshBuffer[perMeshIndex].materialDataIndex;
-        uint ownershipBit = 0u;
-        const bool shouldCheckReyesOwnership = (CLOD_COMPACTION_READ_MODE_FLAGS & CLOD_COMPACTION_READ_FLAG_SKIP_REYES_OWNED) != 0u;
-        if (shouldCheckReyesOwnership)
+        if ((CLOD_COMPACTION_READ_MODE_FLAGS & CLOD_COMPACTION_READ_FLAG_SKIP_REYES_OWNED) != 0u &&
+            CLodIsVisibleClusterOwnedByReyes(sourceClusterIndex, CLOD_COMPACTION_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX))
         {
-            ownershipBit = CLodLoadVisibleClusterOwnedByReyesBit(sourceClusterIndex, CLOD_COMPACTION_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX);
-        }
-
-        if (CLOD_COMPACTION_REYES_TELEMETRY_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
-        {
-            RWStructuredBuffer<CLodReyesTelemetry> telemetryBuffer = ResourceDescriptorHeap[CLOD_COMPACTION_REYES_TELEMETRY_DESCRIPTOR_INDEX];
-
-            uint previousFirstCompactionRead = REYES_TELEMETRY_UNSET_INDEX;
-            InterlockedCompareExchange(
-                telemetryBuffer[0].firstCompactionReadVisibleClusterIndex,
-                REYES_TELEMETRY_UNSET_INDEX,
-                sourceClusterIndex,
-                previousFirstCompactionRead);
-            if (previousFirstCompactionRead == REYES_TELEMETRY_UNSET_INDEX)
-            {
-                telemetryBuffer[0].firstCompactionReadInstanceID = instanceIndex;
-                telemetryBuffer[0].firstCompactionReadMaterialIndex = materialDataIndex;
-            }
-
-            if (sourceClusterIndex == telemetryBuffer[0].firstOwnedVisibleClusterIndex)
-            {
-                InterlockedAdd(telemetryBuffer[0].compactionReadOwnedClusterMatchCount, 1u);
-                InterlockedCompareExchange(
-                    telemetryBuffer[0].compactionOwnedClusterBitValue,
-                    REYES_TELEMETRY_UNSET_INDEX,
-                    ownershipBit,
-                    previousFirstCompactionRead);
-            }
-        }
-
-        if (shouldCheckReyesOwnership && ownershipBit != 0u)
-        {
-            if (CLOD_COMPACTION_REYES_TELEMETRY_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
-            {
-                RWStructuredBuffer<CLodReyesTelemetry> telemetryBuffer = ResourceDescriptorHeap[CLOD_COMPACTION_REYES_TELEMETRY_DESCRIPTOR_INDEX];
-                InterlockedAdd(telemetryBuffer[0].compactionReyesOwnedSkipCount, 1u);
-
-                uint previousFirstCompactionSkip = REYES_TELEMETRY_UNSET_INDEX;
-                InterlockedCompareExchange(
-                    telemetryBuffer[0].firstCompactionSkippedVisibleClusterIndex,
-                    REYES_TELEMETRY_UNSET_INDEX,
-                    sourceClusterIndex,
-                    previousFirstCompactionSkip);
-                if (previousFirstCompactionSkip == REYES_TELEMETRY_UNSET_INDEX)
-                {
-                    telemetryBuffer[0].firstCompactionSkippedInstanceID = instanceIndex;
-                    telemetryBuffer[0].firstCompactionSkippedMaterialIndex = materialDataIndex;
-                }
-            }
             return;
         }
 
+        ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_COMPACTION_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
         RWByteAddressBuffer compactedClusters = ResourceDescriptorHeap[CLOD_COMPACTION_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
         StructuredBuffer<uint> offsets = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX];
         RWStructuredBuffer<uint> writeCursor = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_WRITE_CURSOR_DESCRIPTOR_INDEX];
         RWStructuredBuffer<uint> sortedToUnsortedMapping = ResourceDescriptorHeap[CLOD_COMPACTION_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX];
+        const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, sourceClusterIndex);
         uint bucketIndex = GetRasterBucketIndexFromInstance(CLodVisibleClusterInstanceID(packedCluster));
 
         uint localOffset = 0;

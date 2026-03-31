@@ -863,7 +863,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                         reyesOwnershipBitsetBuffer,
                         m_reyesClassifyIndirectArgsBuffer,
                         m_reyesTelemetryBufferPhase1,
-                        m_maxVisibleClusters,
                         1u)));
 
             outPasses.push_back(
@@ -1005,8 +1004,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_visibleClustersCounterBuffer,
                 m_histogramIndirectCommand,
                 m_rasterBucketsHistogramBuffer,
-                reyesOwnershipBitsetBuffer,
-                m_reyesTelemetryBufferPhase1)));
+                reyesOwnershipBitsetBuffer)));
 
     outPasses.push_back(
         RenderGraph::ExternalPassDesc::Compute(
@@ -1040,7 +1038,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_rasterBucketsIndirectArgsBuffer,
                 m_sortedToUnsortedMappingBuffer,
                 reyesOwnershipBitsetBuffer,
-                m_reyesTelemetryBufferPhase1,
                 m_maxVisibleClusters,
                 false)));
 
@@ -1136,7 +1133,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_rasterBucketsHistogramBufferSw,
                     reyesOwnershipBitsetBuffer,
                     nullptr,
-                    nullptr,
                     true,
                     m_maxVisibleClusters,
                     true)));
@@ -1175,7 +1171,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_rasterBucketsIndirectArgsBuffer,
                     m_sortedToUnsortedMappingBuffer,
                     reyesOwnershipBitsetBuffer,
-                    nullptr,
                     m_maxVisibleClusters,
                     false,
                     true,
@@ -1274,7 +1269,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     reyesOwnershipBitsetBufferPhase2,
                     m_reyesClassifyIndirectArgsBufferPhase2,
                     m_reyesTelemetryBufferPhase2,
-                    m_maxVisibleClusters,
                     2u)));
 
         outPasses.push_back(
@@ -1411,7 +1405,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_histogramIndirectCommand,
                 m_rasterBucketsHistogramBufferPhase2,
                 reyesOwnershipBitsetBufferPhase2,
-                m_reyesTelemetryBufferPhase2,
                 m_visibleClustersCounterBuffer)));
 
     outPasses.push_back(
@@ -1446,7 +1439,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_rasterBucketsIndirectArgsBufferPhase2,
                 m_sortedToUnsortedMappingBuffer,
                 reyesOwnershipBitsetBufferPhase2,
-                m_reyesTelemetryBufferPhase2,
                 m_maxVisibleClusters,
                 true)));
 
@@ -1491,7 +1483,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_histogramIndirectCommand,
                     m_rasterBucketsHistogramBufferPhase2Sw,
                     reyesOwnershipBitsetBufferPhase2,
-                    nullptr,
                     m_swVisibleClustersCounterBuffer,
                     true,
                     m_maxVisibleClusters,
@@ -1531,7 +1522,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_rasterBucketsIndirectArgsBufferPhase2,
                     m_sortedToUnsortedMappingBuffer,
                     reyesOwnershipBitsetBufferPhase2,
-                    nullptr,
                     m_maxVisibleClusters,
                     true,
                     true,

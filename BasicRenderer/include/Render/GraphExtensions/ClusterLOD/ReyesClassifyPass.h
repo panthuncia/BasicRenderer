@@ -22,7 +22,6 @@ public:
         std::shared_ptr<Buffer> ownershipBitsetBuffer,
         std::shared_ptr<Buffer> indirectArgsBuffer,
         std::shared_ptr<Buffer> telemetryBuffer,
-        uint32_t visibleClustersCapacity,
         uint32_t phaseIndex);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
@@ -42,7 +41,6 @@ private:
     std::shared_ptr<Buffer> m_ownershipBitsetBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
     std::shared_ptr<Buffer> m_telemetryBuffer;
-    uint32_t m_visibleClustersCapacity = 0u;
     uint32_t m_phaseIndex = 0u;
     PipelineState m_pso;
     rhi::CommandSignaturePtr m_commandSignature;

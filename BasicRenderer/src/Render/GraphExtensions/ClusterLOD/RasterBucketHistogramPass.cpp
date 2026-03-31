@@ -18,7 +18,6 @@ RasterBucketHistogramPass::RasterBucketHistogramPass(
     std::shared_ptr<Buffer> histogramIndirectCommand,
     std::shared_ptr<Buffer> histogramBuffer,
     std::shared_ptr<Buffer> reyesOwnershipBitsetBuffer,
-    std::shared_ptr<Buffer> reyesTelemetryBuffer,
     std::shared_ptr<Buffer> readBaseCounterBuffer,
     bool readReverse,
     uint32_t visibleClustersCapacity,
@@ -43,7 +42,6 @@ RasterBucketHistogramPass::RasterBucketHistogramPass(
     m_histogramIndirectCommand = std::move(histogramIndirectCommand);
     m_histogramBuffer = std::move(histogramBuffer);
     m_reyesOwnershipBitsetBuffer = std::move(reyesOwnershipBitsetBuffer);
-    m_reyesTelemetryBuffer = std::move(reyesTelemetryBuffer);
     m_readBaseCounterBuffer = std::move(readBaseCounterBuffer);
     m_readReverse = readReverse;
     m_visibleClustersCapacity = visibleClustersCapacity;
@@ -63,9 +61,6 @@ void RasterBucketHistogramPass::DeclareResourceUsages(ComputePassBuilder* builde
         .WithUnorderedAccess(m_histogramBuffer);
     if (m_reyesOwnershipBitsetBuffer) {
         builder->WithShaderResource(m_reyesOwnershipBitsetBuffer);
-    }
-    if (m_reyesTelemetryBuffer) {
-        builder->WithUnorderedAccess(m_reyesTelemetryBuffer);
     }
     if (m_readBaseCounterBuffer) {
         builder->WithShaderResource(m_readBaseCounterBuffer);
@@ -98,9 +93,6 @@ PassReturn RasterBucketHistogramPass::Execute(PassExecutionContext& executionCon
     if (m_reyesOwnershipBitsetBuffer) {
         uintRootConstants[CLOD_HISTOGRAM_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = m_reyesOwnershipBitsetBuffer->GetSRVInfo(0).slot.index;
     }
-    uintRootConstants[CLOD_HISTOGRAM_REYES_TELEMETRY_DESCRIPTOR_INDEX] = m_reyesTelemetryBuffer
-        ? m_reyesTelemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index
-        : 0xFFFFFFFFu;
     if (m_readBaseCounterBuffer) {
         uintRootConstants[CLOD_HISTOGRAM_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = m_readBaseCounterBuffer->GetSRVInfo(0).slot.index;
     }
