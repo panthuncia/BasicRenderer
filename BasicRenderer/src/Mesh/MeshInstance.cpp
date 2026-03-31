@@ -6,6 +6,13 @@ MeshInstance::~MeshInstance() {
     ReleaseSkinningInstance_();
 }
 
+void MeshInstance::InitializeBoundsFromMesh_()
+{
+    if (m_mesh != nullptr) {
+        m_perMeshInstanceBufferData.boundingSphere = m_mesh->GetPerMeshCBData().boundingSphere;
+    }
+}
+
 void MeshInstance::ReleaseSkinningInstance_() {
     if (m_pCurrentSkeletonManager == nullptr || m_skeleton == nullptr) {
         return;
@@ -39,10 +46,13 @@ void MeshInstance::SyncSkinningStateFromSkeleton() {
     if (m_skeleton != nullptr) {
         m_perMeshInstanceBufferData.skinningInstanceSlot = m_skeleton->GetSkinningInstanceSlot();
         m_perMeshInstanceBufferData.skinnedBoundsScale = m_skeleton->GetCurrentAnimationConservativeBoundsScale();
+        m_perMeshInstanceBufferData.boundingSphere =
+            m_mesh->GetAnimatedBoundingSphere(m_skeleton->GetActiveAnimationIndex());
     }
     else {
         m_perMeshInstanceBufferData.skinningInstanceSlot = 0xFFFFFFFF;
         m_perMeshInstanceBufferData.skinnedBoundsScale = 1.0f;
+        m_perMeshInstanceBufferData.boundingSphere = m_mesh->GetPerMeshCBData().boundingSphere;
     }
 
     if (m_pCurrentMeshManager != nullptr && m_perMeshInstanceBufferView != nullptr) {
@@ -52,6 +62,7 @@ void MeshInstance::SyncSkinningStateFromSkeleton() {
 
 void MeshInstance::SetBufferViews(std::unique_ptr<BufferView> perMeshInstanceBufferView) {
 	m_perMeshInstanceBufferView = std::move(perMeshInstanceBufferView);
+    InitializeBoundsFromMesh_();
 
 	if (m_pCurrentMeshManager != nullptr) {
 		m_pCurrentMeshManager->UpdatePerMeshInstanceBuffer(m_perMeshInstanceBufferView, m_perMeshInstanceBufferData);
@@ -60,6 +71,7 @@ void MeshInstance::SetBufferViews(std::unique_ptr<BufferView> perMeshInstanceBuf
 
 void MeshInstance::SetBufferViewUsingBaseMesh(std::unique_ptr<BufferView> perMeshInstanceBufferView) {
 	m_perMeshInstanceBufferView = std::move(perMeshInstanceBufferView);
+    InitializeBoundsFromMesh_();
 	//Skinning
 	auto postSkinningView = m_mesh->GetPostSkinningVertexBufferView();
 	if (m_perMeshInstanceBufferView == nullptr) {

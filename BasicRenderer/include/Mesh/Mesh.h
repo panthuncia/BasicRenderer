@@ -85,6 +85,8 @@ public:
 		return m_skinningVertexSize;
 	}
 
+	BoundingSphere GetAnimatedBoundingSphere(size_t animationIndex) const;
+
 	void SetMaterialDataIndex(unsigned int index);
 
 	void SetCLodBufferViews(
@@ -293,6 +295,7 @@ private:
     void CreateBuffers(const std::vector<UINT32>& indices);
 	void ApplyPrebuiltClusterLODData(const ClusterLODPrebuiltData& data);
 	void ClearCLodCacheBuildChunkData(bool shrinkToFit);
+	void EnsureAnimatedBoundingSpheresBuilt_() const;
 	static SparseChunkViewTable ToSparseChunkViewTable(std::vector<std::unique_ptr<BufferView>>&& denseViews) {
 		SparseChunkViewTable sparseViews;
 		sparseViews.reserve(denseViews.size());
@@ -363,6 +366,7 @@ private:
     PerMeshCB m_perMeshBufferData = { 0 };
 	unsigned int m_skinningVertexSize = 0;
 	std::vector<MeshUvSetData> m_uvSets;
+	mutable std::vector<BoundingSphere> m_animationBoundingSpheres;
 	std::unique_ptr<BufferView> m_perMeshBufferView;
 	MeshManager* m_pCurrentMeshManager = nullptr;
 

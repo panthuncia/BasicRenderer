@@ -74,9 +74,11 @@ public:
 
 private:
     void ReleaseSkinningInstance_();
+    void InitializeBoundsFromMesh_();
 
     MeshInstance(std::shared_ptr<Mesh> mesh)
         : m_mesh(mesh) {
+        InitializeBoundsFromMesh_();
         if (mesh->HasBaseSkin()) {
             SetSkeleton(mesh->GetBaseSkin()->CopySkeleton());
         }

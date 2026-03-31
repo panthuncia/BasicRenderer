@@ -44,9 +44,8 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
     PerMeshBuffer perMesh = perMeshBuffer[command.perMeshBufferIndex];
     PerMeshInstanceBuffer meshInstance = perMeshInstanceBuffer[command.perMeshInstanceBufferIndex];
     PerObjectBuffer perObject = perObjectBuffer[command.perObjectBufferIndex];
-    
     // Culling
-    float4 objectSpaceCenter = float4(perMesh.boundingSphere.sphere.xyz, 1.0);
+    float4 objectSpaceCenter = float4(meshInstance.boundingSphere.sphere.xyz, 1.0);
     float4 worldSpaceCenter = mul(objectSpaceCenter, perObject.model);
     float3 viewSpaceCenter = mul(worldSpaceCenter, camera.view).xyz;
     
@@ -57,7 +56,7 @@ void ObjectCullingCSMain(uint dispatchID : SV_DispatchThreadID)
     length(perObject.model[2].xyz)
 );
     float maxScale = max(max(scaleFactors.x, scaleFactors.y), scaleFactors.z);
-    float scaledBoundingRadius = perMesh.boundingSphere.sphere.w * meshInstance.skinnedBoundsScale * maxScale;
+    float scaledBoundingRadius = meshInstance.boundingSphere.sphere.w * maxScale;
     
 #if defined (OCCLUSION_CULLING)
 

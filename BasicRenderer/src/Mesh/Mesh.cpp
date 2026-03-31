@@ -13,6 +13,7 @@
 #include <cstring>
 #include <mutex>
 #include <cassert>
+#include <set>
 
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
@@ -30,6 +31,114 @@ std::atomic<uint32_t> Mesh::globalMeshCount = 0;
 
 namespace
 {
+	constexpr float kAnimatedBoundsPaddingScale = 1.0001f;
+	constexpr float kAnimationBoundsMaxUniformSampleStep = 1.0f / 30.0f;
+	constexpr uint32_t kAnimationBoundsMaxUniformSamples = 256u;
+
+	float MaxAxisScale_RowVector(const DirectX::XMMATRIX& matrix)
+	{
+		using namespace DirectX;
+
+		const float sx = XMVectorGetX(XMVector3Length(matrix.r[0]));
+		const float sy = XMVectorGetX(XMVector3Length(matrix.r[1]));
+		const float sz = XMVectorGetX(XMVector3Length(matrix.r[2]));
+		return std::max(sx, std::max(sy, sz));
+	}
+
+	BoundingSphere TransformBoundingSphere(const BoundingSphere& sphere, const DirectX::XMMATRIX& matrix)
+	{
+		using namespace DirectX;
+
+		BoundingSphere transformed = sphere;
+		const XMVECTOR center = XMVectorSet(sphere.sphere.x, sphere.sphere.y, sphere.sphere.z, 1.0f);
+		const XMVECTOR transformedCenter = XMVector3TransformCoord(center, matrix);
+		XMStoreFloat3(reinterpret_cast<DirectX::XMFLOAT3*>(&transformed.sphere), transformedCenter);
+		transformed.sphere.w = sphere.sphere.w * MaxAxisScale_RowVector(matrix);
+		return transformed;
+	}
+
+	BoundingSphere MergeBoundingSpheres(const BoundingSphere& lhs, const BoundingSphere& rhs)
+	{
+		using namespace DirectX;
+
+		const XMVECTOR lhsCenter = XMVectorSet(lhs.sphere.x, lhs.sphere.y, lhs.sphere.z, 1.0f);
+		const XMVECTOR rhsCenter = XMVectorSet(rhs.sphere.x, rhs.sphere.y, rhs.sphere.z, 1.0f);
+		const float lhsRadius = lhs.sphere.w;
+		const float rhsRadius = rhs.sphere.w;
+
+		const XMVECTOR delta = XMVectorSubtract(rhsCenter, lhsCenter);
+		const float dist = XMVectorGetX(XMVector3Length(delta));
+
+		if (dist + rhsRadius <= lhsRadius) {
+			return lhs;
+		}
+		if (dist + lhsRadius <= rhsRadius) {
+			return rhs;
+		}
+
+		BoundingSphere merged{};
+		const float newRadius = 0.5f * (dist + lhsRadius + rhsRadius);
+		const float t = (dist > 1e-12f) ? ((newRadius - lhsRadius) / dist) : 0.0f;
+		const XMVECTOR mergedCenter = XMVectorAdd(lhsCenter, XMVectorScale(delta, t));
+		XMStoreFloat3(reinterpret_cast<DirectX::XMFLOAT3*>(&merged.sphere), mergedCenter);
+		merged.sphere.w = newRadius;
+		return merged;
+	}
+
+	void AppendClipKeyframeTimes(const std::shared_ptr<AnimationClip>& clip, std::vector<float>& sampleTimes)
+	{
+		if (!clip) {
+			return;
+		}
+
+		auto appendKeyframes = [&sampleTimes](const std::vector<Keyframe>& keyframes) {
+			for (const auto& keyframe : keyframes) {
+				sampleTimes.push_back(keyframe.time);
+			}
+		};
+
+		appendKeyframes(clip->positionKeyframes);
+		appendKeyframes(clip->rotationKeyframes);
+		appendKeyframes(clip->scaleKeyframes);
+	}
+
+	std::vector<float> BuildAnimationSampleTimes(const Animation& animation)
+	{
+		std::vector<float> sampleTimes;
+		sampleTimes.push_back(0.0f);
+
+		float duration = 0.0f;
+		for (const auto& [_, clip] : animation.nodesMap) {
+			AppendClipKeyframeTimes(clip, sampleTimes);
+			if (clip) {
+				duration = std::max(duration, clip->duration);
+			}
+		}
+
+		if (duration > 0.0f) {
+			sampleTimes.push_back(duration);
+			const uint32_t uniformSampleCount = std::min<uint32_t>(
+				kAnimationBoundsMaxUniformSamples,
+				std::max<uint32_t>(1u, static_cast<uint32_t>(std::ceil(duration / kAnimationBoundsMaxUniformSampleStep))));
+			for (uint32_t sampleIndex = 1; sampleIndex < uniformSampleCount; ++sampleIndex) {
+				sampleTimes.push_back((duration * static_cast<float>(sampleIndex)) / static_cast<float>(uniformSampleCount));
+			}
+		}
+
+		std::sort(sampleTimes.begin(), sampleTimes.end());
+		sampleTimes.erase(
+			std::unique(sampleTimes.begin(), sampleTimes.end(), [](float lhs, float rhs) {
+				return std::abs(lhs - rhs) <= 1e-4f;
+			}),
+			sampleTimes.end());
+
+		if (sampleTimes.empty()) {
+			sampleTimes.push_back(0.0f);
+		}
+
+		return sampleTimes;
+	}
+
 	BoundingSphere BuildObjectBoundingSphereFromRootNode(const std::vector<ClusterLODNode>& nodes, uint32_t rootNodeIndex)
 	{
 		BoundingSphere sphere{};
@@ -410,6 +519,108 @@ void Mesh::SetCLodBufferViews(
 
 void Mesh::SetBaseSkin(std::shared_ptr<Skeleton> skeleton) {
 	m_baseSkeleton = skeleton;
+	m_animationBoundingSpheres.clear();
+	EnsureAnimatedBoundingSpheresBuilt_();
+}
+
+BoundingSphere Mesh::GetAnimatedBoundingSphere(size_t animationIndex) const
+{
+	EnsureAnimatedBoundingSpheresBuilt_();
+	if (animationIndex >= m_animationBoundingSpheres.size()) {
+		return m_perMeshBufferData.boundingSphere;
+	}
+
+	return m_animationBoundingSpheres[animationIndex];
+}
+
+void Mesh::EnsureAnimatedBoundingSpheresBuilt_() const
+{
+	if (!m_baseSkeleton) {
+		m_animationBoundingSpheres.clear();
+		return;
+	}
+
+	const size_t animationCount = m_baseSkeleton->animations.size();
+	if (m_animationBoundingSpheres.size() == animationCount) {
+		return;
+	}
+
+	m_animationBoundingSpheres.clear();
+	m_animationBoundingSpheres.reserve(animationCount);
+
+	if (animationCount == 0) {
+		return;
+	}
+
+	const BoundingSphere staticSphere = m_perMeshBufferData.boundingSphere;
+	if (staticSphere.sphere.w <= 0.0f) {
+		m_animationBoundingSpheres.assign(animationCount, staticSphere);
+		return;
+	}
+
+	auto samplingSkeleton = m_baseSkeleton->CopySkeleton();
+	if (!samplingSkeleton) {
+		m_animationBoundingSpheres.assign(animationCount, staticSphere);
+		return;
+	}
+
+	const auto inverseBindMatrices = m_baseSkeleton->GetInverseBindMatrices();
+	const size_t boneCount = m_baseSkeleton->GetBoneCount();
+	if (boneCount == 0 || inverseBindMatrices.size() < boneCount) {
+		m_animationBoundingSpheres.assign(animationCount, staticSphere);
+		return;
+	}
+
+	for (size_t animationIndex = 0; animationIndex < animationCount; ++animationIndex) {
+		const auto& animation = m_baseSkeleton->animations[animationIndex];
+		if (!animation) {
+			m_animationBoundingSpheres.push_back(staticSphere);
+			continue;
+		}
+
+		samplingSkeleton->SetAnimation(animationIndex);
+		const std::vector<float> sampleTimes = BuildAnimationSampleTimes(*animation);
+		BoundingSphere animationSphere = staticSphere;
+		float previousSampleTime = 0.0f;
+		bool initialized = false;
+
+		for (float sampleTime : sampleTimes) {
+			const float deltaTime = sampleTime - previousSampleTime;
+			samplingSkeleton->UpdateTransforms(deltaTime, true);
+			previousSampleTime = sampleTime;
+
+			const auto boneMatrices = samplingSkeleton->GetBoneMatrices();
+			if (boneMatrices.size() < boneCount) {
+				continue;
+			}
+
+			BoundingSphere sampledSphere{};
+			for (size_t boneIndex = 0; boneIndex < boneCount; ++boneIndex) {
+				const DirectX::XMMATRIX skinMatrix = DirectX::XMMatrixMultiply(boneMatrices[boneIndex], inverseBindMatrices[boneIndex]);
+				const BoundingSphere transformedSphere = TransformBoundingSphere(staticSphere, skinMatrix);
+				if (!initialized && boneIndex == 0) {
+					sampledSphere = transformedSphere;
+				}
+				else {
+					sampledSphere = MergeBoundingSpheres(sampledSphere, transformedSphere);
+				}
+			}
+
+			if (!initialized) {
+				animationSphere = sampledSphere;
+				initialized = true;
+			}
+			else {
+				animationSphere = MergeBoundingSpheres(animationSphere, sampledSphere);
+			}
+		}
+
+		if (!initialized) {
+			animationSphere = staticSphere;
+		}
+		animationSphere.sphere.w *= kAnimatedBoundsPaddingScale;
+		m_animationBoundingSpheres.push_back(animationSphere);
+	}
 }
 
 void Mesh::SetMaterialDataIndex(unsigned int index) {
