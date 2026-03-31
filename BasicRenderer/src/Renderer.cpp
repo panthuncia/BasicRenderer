@@ -1945,6 +1945,12 @@ void Renderer::CreateRenderGraph() {
                 std::make_unique<CLodExtension>(CLodExtensionType::AlphaBlend, static_cast<uint32_t>(maxClusters)),
                 "CLodAlpha");
         }
+        constexpr bool kEnableShadowCLodVariant = false;
+        if (kEnableShadowCLodVariant) {
+            currentRenderGraph->RegisterExtension(
+                std::make_unique<CLodExtension>(CLodExtensionType::Shadow, static_cast<uint32_t>(maxClusters)),
+                "CLodShadow");
+        }
 		m_renderGraphRuntimeInitialized = true;
     }
 

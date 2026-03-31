@@ -129,7 +129,7 @@ const CLodVariantTraits& GetVariantTraits(CLodExtensionType type)
             &EnsureShadowTag,
             "CLodShadow::",
             "CLod[Shadow] ",
-            Engine::Primary::GBufferPass,
+            Engine::Primary::ShadowMapsPass,
             CLodRasterOutputKind::VisibilityBuffer,
             CLodVariantTraits::ScheduleMode::TwoPassVisibility,
             false,
@@ -355,6 +355,285 @@ CLodExtension::~CLodExtension() = default;
 bool CLodExtension::IsReyesTessellationDisabled() const
 {
     return SettingsManager::GetInstance().getSettingGetter<bool>(CLodDisableReyesRasterizationSettingName)();
+}
+
+void CLodExtension::InitializeCoreResources()
+{
+    const auto& traits = GetVariantTraits(m_type);
+    auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
+    const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
+
+    m_visibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(m_maxVisibleClusters * PackedVisibleClusterStrideBytes, true, false);
+    m_visibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Visible Clusters Buffer (uncompacted)"));
+
+    m_histogramIndirectCommand = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterBucketsHistogramIndirectCommand), true, false);
+    m_histogramIndirectCommand->SetName(MakeVariantResourceName(traits, "Raster Buckets Histogram Indirect Command Buffer"));
+
+    m_rasterBucketsHistogramBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_rasterBucketsHistogramBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket histogram"));
+
+    m_visibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
+    m_visibleClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "Visible Clusters Counter Buffer"));
+    m_visibleClustersCounterBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_visibleClustersCounterBuffer })
+        .add<VisibleClustersCounterTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_workGraphTelemetryBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodWorkGraphCounterCount, sizeof(uint32_t), true, false, false, false);
+    m_workGraphTelemetryBuffer->SetName(MakeVariantResourceName(traits, "Work Graph Telemetry Buffer"));
+    m_workGraphTelemetryBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_workGraphTelemetryBuffer })
+        .add<CLodWorkGraphTelemetryBufferTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_occlusionReplayBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodReplayBufferNumUints, sizeof(uint32_t), true, false, false, false);
+    m_occlusionReplayBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Replay Buffer"));
+
+    m_occlusionReplayStateBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReplayBufferState), true, false, false, false);
+    m_occlusionReplayStateBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Replay State Buffer"));
+
+    m_occlusionNodeGpuInputsBuffer = CreateAliasedUnmaterializedStructuredBuffer(3, sizeof(CLodNodeGpuInput), true, false, false, false);
+    m_occlusionNodeGpuInputsBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Node GPU Inputs Buffer"));
+
+    m_viewDepthSrvIndicesBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodMaxViewDepthIndices, sizeof(CLodViewDepthSRVIndex), true, false, false, false);
+    m_viewDepthSrvIndicesBuffer->SetName(MakeVariantResourceName(traits, "View Depth SRV Indices Buffer"));
+
+    m_rasterBucketsOffsetsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsOffsetsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket offsets"));
+
+    m_rasterBucketsBlockSumsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsBlockSumsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket block sums"));
+
+    m_rasterBucketsScannedBlockSumsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsScannedBlockSumsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket scanned block sums"));
+
+    m_rasterBucketsTotalCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsTotalCountBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket total count"));
+
+    m_rasterBucketsTotalCountBufferPhase1 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsTotalCountBufferPhase1->SetName(MakeVariantResourceName(traits, "Raster bucket total count phase1"));
+
+    m_rasterBucketsTotalCountBufferPhase1Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsTotalCountBufferPhase1Sw->SetName(MakeVariantResourceName(traits, "Raster bucket total count phase1 SW"));
+
+    m_compactedVisibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(m_maxVisibleClusters * PackedVisibleClusterStrideBytes, true, false);
+    m_compactedVisibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Compacted Visible Clusters Buffer"));
+
+    m_visibleClustersBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_visibleClustersBuffer })
+        .set<CLodVisibleClusterCapacity>({ m_maxVisibleClusters })
+        .add<VisibleClustersBufferTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_rasterBucketsWriteCursorBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_rasterBucketsWriteCursorBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor"));
+
+    m_rasterBucketsIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
+    m_rasterBucketsIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args phase1"));
+
+    m_rasterBucketsIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
+    m_rasterBucketsIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args phase2"));
+
+    m_visibleClustersCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
+    m_visibleClustersCounterBufferPhase2->SetName(MakeVariantResourceName(traits, "Visible Clusters Counter Buffer Phase2"));
+
+    m_rasterBucketsHistogramBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_rasterBucketsHistogramBufferPhase2->SetName(MakeVariantResourceName(traits, "Raster bucket histogram phase2"));
+
+    m_rasterBucketsHistogramBufferSw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_rasterBucketsHistogramBufferSw->SetName(MakeVariantResourceName(traits, "Raster bucket histogram SW phase1"));
+
+    m_rasterBucketsHistogramBufferPhase2Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_rasterBucketsHistogramBufferPhase2Sw->SetName(MakeVariantResourceName(traits, "Raster bucket histogram SW phase2"));
+
+    m_rasterBucketsWriteCursorBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_rasterBucketsWriteCursorBufferPhase2->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor phase2"));
+
+    m_rasterBucketsWriteCursorBufferSw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_rasterBucketsWriteCursorBufferSw->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor SW phase1"));
+
+    m_rasterBucketsWriteCursorBufferPhase2Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_rasterBucketsWriteCursorBufferPhase2Sw->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor SW phase2"));
+
+    m_swVisibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
+    m_swVisibleClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "SW Visible Clusters Counter Buffer Phase1"));
+
+    m_swVisibleClustersCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
+    m_swVisibleClustersCounterBufferPhase2->SetName(MakeVariantResourceName(traits, "SW Visible Clusters Counter Buffer Phase2"));
+
+    m_sortedToUnsortedMappingBuffer = CreateAliasedUnmaterializedStructuredBuffer(static_cast<uint32_t>(m_maxVisibleClusters), sizeof(uint32_t), true, false);
+    m_sortedToUnsortedMappingBuffer->SetName(MakeVariantResourceName(traits, "Sorted-to-Unsorted Mapping Buffer"));
+
+    m_viewRasterInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodViewRasterInfo), false, false, false, false);
+    m_viewRasterInfoBuffer->SetName(MakeVariantResourceName(traits, "View Raster Info Buffer"));
+}
+
+void CLodExtension::InitializeDeepVisibilityResources()
+{
+    const auto& traits = GetVariantTraits(m_type);
+    if (traits.rasterOutputKind != CLodRasterOutputKind::DeepVisibility) {
+        return;
+    }
+
+    auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
+    const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
+
+    m_deepVisibilityNodesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        1,
+        sizeof(CLodDeepVisibilityNode),
+        true,
+        false,
+        false,
+        false);
+    m_deepVisibilityNodesBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Nodes Buffer"));
+
+    m_deepVisibilityCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, true, false);
+    m_deepVisibilityCounterBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Counter Buffer"));
+    m_deepVisibilityCounterBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_deepVisibilityCounterBuffer })
+        .add<CLodDeepVisibilityCounterTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_deepVisibilityOverflowCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, true, false);
+    m_deepVisibilityOverflowCounterBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Overflow Counter Buffer"));
+    m_deepVisibilityOverflowCounterBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_deepVisibilityOverflowCounterBuffer })
+        .add<CLodDeepVisibilityOverflowCounterTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
+    m_deepVisibilityStatsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        1,
+        sizeof(CLodDeepVisibilityStats),
+        true,
+        false,
+        true,
+        false);
+    m_deepVisibilityStatsBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Stats Buffer"));
+    m_deepVisibilityStatsBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_deepVisibilityStatsBuffer })
+        .add<CLodDeepVisibilityStatsTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+}
+
+void CLodExtension::TagCoreResourceUsages()
+{
+    auto tagBufferUsage = [](const std::shared_ptr<Buffer>& buffer, std::string_view usage) {
+        if (buffer) {
+            rg::memory::SetResourceUsageHint(*buffer, std::string(usage));
+        }
+    };
+
+    tagBufferUsage(m_visibleClustersBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_histogramIndirectCommand, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsHistogramBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_visibleClustersCounterBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_workGraphTelemetryBuffer, "Cluster LOD telemetry");
+    tagBufferUsage(m_occlusionReplayBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_occlusionReplayStateBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_occlusionNodeGpuInputsBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_viewDepthSrvIndicesBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_rasterBucketsOffsetsBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsBlockSumsBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsScannedBlockSumsBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsTotalCountBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsTotalCountBufferPhase1, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsTotalCountBufferPhase1Sw, "Cluster LOD rasterization");
+    tagBufferUsage(m_compactedVisibleClustersBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_rasterBucketsWriteCursorBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsIndirectArgsBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsIndirectArgsBufferPhase2, "Cluster LOD rasterization");
+    tagBufferUsage(m_visibleClustersCounterBufferPhase2, "Cluster LOD visibility");
+    tagBufferUsage(m_rasterBucketsHistogramBufferPhase2, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsHistogramBufferSw, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsHistogramBufferPhase2Sw, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsWriteCursorBufferPhase2, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsWriteCursorBufferSw, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsWriteCursorBufferPhase2Sw, "Cluster LOD rasterization");
+    tagBufferUsage(m_swVisibleClustersCounterBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_swVisibleClustersCounterBufferPhase2, "Cluster LOD visibility");
+    tagBufferUsage(m_sortedToUnsortedMappingBuffer, "Cluster LOD visibility");
+    tagBufferUsage(m_viewRasterInfoBuffer, "Cluster LOD rasterization");
+    tagBufferUsage(m_deepVisibilityNodesBuffer, "Cluster LOD deep visibility");
+    tagBufferUsage(m_deepVisibilityCounterBuffer, "Cluster LOD deep visibility");
+    tagBufferUsage(m_deepVisibilityOverflowCounterBuffer, "Cluster LOD deep visibility");
+    tagBufferUsage(m_deepVisibilityStatsBuffer, "Cluster LOD deep visibility");
+}
+
+void CLodExtension::ReleaseBufferBackings()
+{
+    auto releaseBufferBacking = [](const std::shared_ptr<Buffer>& buffer) {
+        if (buffer) {
+            buffer->Dematerialize();
+        }
+    };
+
+    releaseBufferBacking(m_visibleClustersBuffer);
+    releaseBufferBacking(m_visibleClustersCounterBuffer);
+    releaseBufferBacking(m_workGraphTelemetryBuffer);
+    releaseBufferBacking(m_occlusionReplayBuffer);
+    releaseBufferBacking(m_occlusionReplayStateBuffer);
+    releaseBufferBacking(m_occlusionNodeGpuInputsBuffer);
+    releaseBufferBacking(m_viewDepthSrvIndicesBuffer);
+    releaseBufferBacking(m_histogramIndirectCommand);
+    releaseBufferBacking(m_rasterBucketsHistogramBuffer);
+    releaseBufferBacking(m_rasterBucketsOffsetsBuffer);
+    releaseBufferBacking(m_rasterBucketsBlockSumsBuffer);
+    releaseBufferBacking(m_rasterBucketsScannedBlockSumsBuffer);
+    releaseBufferBacking(m_rasterBucketsTotalCountBuffer);
+    releaseBufferBacking(m_rasterBucketsTotalCountBufferPhase1);
+    releaseBufferBacking(m_rasterBucketsTotalCountBufferPhase1Sw);
+    releaseBufferBacking(m_visibleClustersCounterBufferPhase2);
+    releaseBufferBacking(m_rasterBucketsHistogramBufferPhase2);
+    releaseBufferBacking(m_rasterBucketsWriteCursorBufferPhase2);
+    releaseBufferBacking(m_rasterBucketsHistogramBufferSw);
+    releaseBufferBacking(m_rasterBucketsHistogramBufferPhase2Sw);
+    releaseBufferBacking(m_rasterBucketsWriteCursorBufferSw);
+    releaseBufferBacking(m_rasterBucketsWriteCursorBufferPhase2Sw);
+    releaseBufferBacking(m_compactedVisibleClustersBuffer);
+    releaseBufferBacking(m_rasterBucketsWriteCursorBuffer);
+    releaseBufferBacking(m_rasterBucketsIndirectArgsBuffer);
+    releaseBufferBacking(m_rasterBucketsIndirectArgsBufferPhase2);
+    releaseBufferBacking(m_reyesFullClusterOutputsBuffer);
+    releaseBufferBacking(m_reyesFullClusterOutputsCounterBuffer);
+    releaseBufferBacking(m_reyesOwnedClustersBuffer);
+    releaseBufferBacking(m_reyesOwnedClustersCounterBuffer);
+    releaseBufferBacking(m_reyesOwnershipBitsetBuffer);
+    releaseBufferBacking(m_reyesOwnershipBitsetBufferPhase2);
+    releaseBufferBacking(m_reyesClassifyIndirectArgsBuffer);
+    releaseBufferBacking(m_reyesClassifyIndirectArgsBufferPhase2);
+    releaseBufferBacking(m_reyesSplitIndirectArgsBuffer);
+    releaseBufferBacking(m_reyesSplitIndirectArgsBufferPhase2);
+    releaseBufferBacking(m_reyesSplitQueueBufferA);
+    releaseBufferBacking(m_reyesSplitQueueCounterBufferA);
+    releaseBufferBacking(m_reyesSplitQueueOverflowBufferA);
+    releaseBufferBacking(m_reyesSplitQueueBufferB);
+    releaseBufferBacking(m_reyesSplitQueueCounterBufferB);
+    releaseBufferBacking(m_reyesSplitQueueOverflowBufferB);
+    releaseBufferBacking(m_reyesDiceQueueBuffer);
+    releaseBufferBacking(m_reyesDiceQueueCounterBuffer);
+    releaseBufferBacking(m_reyesDiceQueuePhase1CountBuffer);
+    releaseBufferBacking(m_reyesDiceQueueOverflowBuffer);
+    releaseBufferBacking(m_reyesRasterWorkBuffer);
+    releaseBufferBacking(m_reyesRasterWorkCounterBuffer);
+    releaseBufferBacking(m_reyesRasterWorkIndirectArgsBuffer);
+    releaseBufferBacking(m_reyesTessTableConfigsBuffer);
+    releaseBufferBacking(m_reyesTessTableVerticesBuffer);
+    releaseBufferBacking(m_reyesTessTableTrianglesBuffer);
+    releaseBufferBacking(m_reyesDiceIndirectArgsBuffer);
+    releaseBufferBacking(m_reyesDiceIndirectArgsBufferPhase2);
+    releaseBufferBacking(m_reyesRasterWorkBufferPhase2);
+    releaseBufferBacking(m_reyesRasterWorkCounterBufferPhase2);
+    releaseBufferBacking(m_reyesRasterWorkIndirectArgsBufferPhase2);
+    releaseBufferBacking(m_reyesTelemetryBufferPhase1);
+    releaseBufferBacking(m_reyesTelemetryBufferPhase2);
+    releaseBufferBacking(m_swVisibleClustersCounterBuffer);
+    releaseBufferBacking(m_swVisibleClustersCounterBufferPhase2);
+    releaseBufferBacking(m_sortedToUnsortedMappingBuffer);
+    releaseBufferBacking(m_viewRasterInfoBuffer);
+    releaseBufferBacking(m_deepVisibilityNodesBuffer);
+    releaseBufferBacking(m_deepVisibilityCounterBuffer);
+    releaseBufferBacking(m_deepVisibilityOverflowCounterBuffer);
+    releaseBufferBacking(m_deepVisibilityStatsBuffer);
 }
 
 void CLodExtension::SyncReyesResourceEntities(bool enabled)
@@ -633,201 +912,20 @@ void CLodExtension::EnsureReyesResourcesInitialized()
 CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters)
     : m_type(type)
     , m_maxVisibleClusters(maxVisibleClusters) {
-    auto tagBufferUsage = [](const std::shared_ptr<Buffer>& buffer, std::string_view usage) {
-        if (buffer) {
-            rg::memory::SetResourceUsageHint(*buffer, std::string(usage));
-        }
-    };
-
     const auto& traits = GetVariantTraits(type);
-    auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
-    const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
 
     if (traits.ownsStreaming) {
         m_streamingSystem = std::make_unique<CLodStreamingSystem>();
     }
 
-    m_visibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(maxVisibleClusters * PackedVisibleClusterStrideBytes, true, false);
-    m_visibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Visible Clusters Buffer (uncompacted)"));
-
-    m_histogramIndirectCommand = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterBucketsHistogramIndirectCommand), true, false);
-    m_histogramIndirectCommand->SetName(MakeVariantResourceName(traits, "Raster Buckets Histogram Indirect Command Buffer"));
-
-    m_rasterBucketsHistogramBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-    m_rasterBucketsHistogramBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket histogram"));
-
-    m_visibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
-    m_visibleClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "Visible Clusters Counter Buffer"));
-    m_visibleClustersCounterBuffer->GetECSEntity()
-        .set<Components::Resource>({ m_visibleClustersCounterBuffer })
-        .add<VisibleClustersCounterTag>()
-        .add<CLodExtensionTypeTag>(typeEntity);
-
-    m_workGraphTelemetryBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodWorkGraphCounterCount, sizeof(uint32_t), true, false, false, false);
-    m_workGraphTelemetryBuffer->SetName(MakeVariantResourceName(traits, "Work Graph Telemetry Buffer"));
-    m_workGraphTelemetryBuffer->GetECSEntity()
-        .set<Components::Resource>({ m_workGraphTelemetryBuffer })
-        .add<CLodWorkGraphTelemetryBufferTag>()
-        .add<CLodExtensionTypeTag>(typeEntity);
-
-    m_occlusionReplayBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodReplayBufferNumUints, sizeof(uint32_t), true, false, false, false);
-    m_occlusionReplayBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Replay Buffer"));
-
-    m_occlusionReplayStateBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReplayBufferState), true, false, false, false);
-    m_occlusionReplayStateBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Replay State Buffer"));
-
-    m_occlusionNodeGpuInputsBuffer = CreateAliasedUnmaterializedStructuredBuffer(3, sizeof(CLodNodeGpuInput), true, false, false, false);
-    m_occlusionNodeGpuInputsBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Node GPU Inputs Buffer"));
-
-    m_viewDepthSrvIndicesBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodMaxViewDepthIndices, sizeof(CLodViewDepthSRVIndex), true, false, false, false);
-    m_viewDepthSrvIndicesBuffer->SetName(MakeVariantResourceName(traits, "View Depth SRV Indices Buffer"));
-
-    m_rasterBucketsOffsetsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    m_rasterBucketsOffsetsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket offsets"));
-
-    m_rasterBucketsBlockSumsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    m_rasterBucketsBlockSumsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket block sums"));
-
-    m_rasterBucketsScannedBlockSumsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    m_rasterBucketsScannedBlockSumsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket scanned block sums"));
-
-    m_rasterBucketsTotalCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    m_rasterBucketsTotalCountBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket total count"));
-
-    m_rasterBucketsTotalCountBufferPhase1 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    m_rasterBucketsTotalCountBufferPhase1->SetName(MakeVariantResourceName(traits, "Raster bucket total count phase1"));
-
-    m_rasterBucketsTotalCountBufferPhase1Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false);
-    m_rasterBucketsTotalCountBufferPhase1Sw->SetName(MakeVariantResourceName(traits, "Raster bucket total count phase1 SW"));
-
-    m_compactedVisibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(maxVisibleClusters * PackedVisibleClusterStrideBytes, true, false);
-    m_compactedVisibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Compacted Visible Clusters Buffer"));
-
-    m_visibleClustersBuffer->GetECSEntity()
-        .set<Components::Resource>({ m_visibleClustersBuffer })
-        .set<CLodVisibleClusterCapacity>({ maxVisibleClusters })
-        .add<VisibleClustersBufferTag>()
-        .add<CLodExtensionTypeTag>(typeEntity);
-
-    m_rasterBucketsWriteCursorBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-    m_rasterBucketsWriteCursorBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor"));
-
-    m_rasterBucketsIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
-    m_rasterBucketsIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args phase1"));
-
-    m_rasterBucketsIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
-    m_rasterBucketsIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args phase2"));
+    InitializeCoreResources();
 
     if (!IsReyesTessellationDisabled()) {
         EnsureReyesResourcesInitialized();
     }
 
-    m_visibleClustersCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
-    m_visibleClustersCounterBufferPhase2->SetName(MakeVariantResourceName(traits, "Visible Clusters Counter Buffer Phase2"));
-
-    m_rasterBucketsHistogramBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-    m_rasterBucketsHistogramBufferPhase2->SetName(MakeVariantResourceName(traits, "Raster bucket histogram phase2"));
-
-    m_rasterBucketsHistogramBufferSw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-    m_rasterBucketsHistogramBufferSw->SetName(MakeVariantResourceName(traits, "Raster bucket histogram SW phase1"));
-
-    m_rasterBucketsHistogramBufferPhase2Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-    m_rasterBucketsHistogramBufferPhase2Sw->SetName(MakeVariantResourceName(traits, "Raster bucket histogram SW phase2"));
-
-    m_rasterBucketsWriteCursorBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-    m_rasterBucketsWriteCursorBufferPhase2->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor phase2"));
-
-    m_rasterBucketsWriteCursorBufferSw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-    m_rasterBucketsWriteCursorBufferSw->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor SW phase1"));
-
-    m_rasterBucketsWriteCursorBufferPhase2Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
-    m_rasterBucketsWriteCursorBufferPhase2Sw->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor SW phase2"));
-
-    m_swVisibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
-    m_swVisibleClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "SW Visible Clusters Counter Buffer Phase1"));
-
-    m_swVisibleClustersCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
-    m_swVisibleClustersCounterBufferPhase2->SetName(MakeVariantResourceName(traits, "SW Visible Clusters Counter Buffer Phase2"));
-
-    m_sortedToUnsortedMappingBuffer = CreateAliasedUnmaterializedStructuredBuffer(static_cast<uint32_t>(maxVisibleClusters), sizeof(uint32_t), true, false);
-    m_sortedToUnsortedMappingBuffer->SetName(MakeVariantResourceName(traits, "Sorted-to-Unsorted Mapping Buffer"));
-
-    m_viewRasterInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodViewRasterInfo), false, false, false, false);
-    m_viewRasterInfoBuffer->SetName(MakeVariantResourceName(traits, "View Raster Info Buffer"));
-
-    tagBufferUsage(m_visibleClustersBuffer, "Cluster LOD visibility");
-    tagBufferUsage(m_histogramIndirectCommand, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsHistogramBuffer, "Cluster LOD rasterization");
-    tagBufferUsage(m_visibleClustersCounterBuffer, "Cluster LOD visibility");
-    tagBufferUsage(m_workGraphTelemetryBuffer, "Cluster LOD telemetry");
-    tagBufferUsage(m_occlusionReplayBuffer, "Cluster LOD visibility");
-    tagBufferUsage(m_occlusionReplayStateBuffer, "Cluster LOD visibility");
-    tagBufferUsage(m_occlusionNodeGpuInputsBuffer, "Cluster LOD visibility");
-    tagBufferUsage(m_viewDepthSrvIndicesBuffer, "Cluster LOD visibility");
-    tagBufferUsage(m_rasterBucketsOffsetsBuffer, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsBlockSumsBuffer, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsScannedBlockSumsBuffer, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsTotalCountBuffer, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsTotalCountBufferPhase1, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsTotalCountBufferPhase1Sw, "Cluster LOD rasterization");
-    tagBufferUsage(m_compactedVisibleClustersBuffer, "Cluster LOD visibility");
-    tagBufferUsage(m_rasterBucketsWriteCursorBuffer, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsIndirectArgsBuffer, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsIndirectArgsBufferPhase2, "Cluster LOD rasterization");
-    tagBufferUsage(m_visibleClustersCounterBufferPhase2, "Cluster LOD visibility");
-    tagBufferUsage(m_rasterBucketsHistogramBufferPhase2, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsHistogramBufferSw, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsHistogramBufferPhase2Sw, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsWriteCursorBufferPhase2, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsWriteCursorBufferSw, "Cluster LOD rasterization");
-    tagBufferUsage(m_rasterBucketsWriteCursorBufferPhase2Sw, "Cluster LOD rasterization");
-    tagBufferUsage(m_swVisibleClustersCounterBuffer, "Cluster LOD visibility");
-    tagBufferUsage(m_swVisibleClustersCounterBufferPhase2, "Cluster LOD visibility");
-    tagBufferUsage(m_sortedToUnsortedMappingBuffer, "Cluster LOD visibility");
-    tagBufferUsage(m_viewRasterInfoBuffer, "Cluster LOD rasterization");
-
-    if (traits.rasterOutputKind == CLodRasterOutputKind::DeepVisibility) {
-        m_deepVisibilityNodesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-            1,
-            sizeof(CLodDeepVisibilityNode),
-            true,
-            false,
-            false,
-            false);
-        m_deepVisibilityNodesBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Nodes Buffer"));
-
-        m_deepVisibilityCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, true, false);
-        m_deepVisibilityCounterBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Counter Buffer"));
-        m_deepVisibilityCounterBuffer->GetECSEntity()
-            .set<Components::Resource>({ m_deepVisibilityCounterBuffer })
-            .add<CLodDeepVisibilityCounterTag>()
-            .add<CLodExtensionTypeTag>(typeEntity);
-
-        m_deepVisibilityOverflowCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, true, false);
-        m_deepVisibilityOverflowCounterBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Overflow Counter Buffer"));
-        m_deepVisibilityOverflowCounterBuffer->GetECSEntity()
-            .set<Components::Resource>({ m_deepVisibilityOverflowCounterBuffer })
-            .add<CLodDeepVisibilityOverflowCounterTag>()
-            .add<CLodExtensionTypeTag>(typeEntity);
-
-        m_deepVisibilityStatsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-            1,
-            sizeof(CLodDeepVisibilityStats),
-            true,
-            false,
-            true,
-            false);
-        m_deepVisibilityStatsBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Stats Buffer"));
-        m_deepVisibilityStatsBuffer->GetECSEntity()
-            .set<Components::Resource>({ m_deepVisibilityStatsBuffer })
-            .add<CLodDeepVisibilityStatsTag>()
-            .add<CLodExtensionTypeTag>(typeEntity);
-
-        tagBufferUsage(m_deepVisibilityNodesBuffer, "Cluster LOD deep visibility");
-        tagBufferUsage(m_deepVisibilityCounterBuffer, "Cluster LOD deep visibility");
-        tagBufferUsage(m_deepVisibilityOverflowCounterBuffer, "Cluster LOD deep visibility");
-        tagBufferUsage(m_deepVisibilityStatsBuffer, "Cluster LOD deep visibility");
-    }
+    InitializeDeepVisibilityResources();
+    TagCoreResourceUsages();
 }
 
 void CLodExtension::Initialize(RenderGraph& rg)
@@ -839,79 +937,7 @@ void CLodExtension::Initialize(RenderGraph& rg)
 
 void CLodExtension::OnRegistryReset(ResourceRegistry* reg)
 {
-    auto releaseBufferBacking = [](const std::shared_ptr<Buffer>& buffer) {
-        if (buffer) {
-            buffer->Dematerialize();
-        }
-    };
-
-    releaseBufferBacking(m_visibleClustersBuffer);
-    releaseBufferBacking(m_visibleClustersCounterBuffer);
-    releaseBufferBacking(m_workGraphTelemetryBuffer);
-    releaseBufferBacking(m_occlusionReplayBuffer);
-    releaseBufferBacking(m_occlusionReplayStateBuffer);
-    releaseBufferBacking(m_occlusionNodeGpuInputsBuffer);
-    releaseBufferBacking(m_viewDepthSrvIndicesBuffer);
-    releaseBufferBacking(m_histogramIndirectCommand);
-    releaseBufferBacking(m_rasterBucketsHistogramBuffer);
-    releaseBufferBacking(m_rasterBucketsOffsetsBuffer);
-    releaseBufferBacking(m_rasterBucketsBlockSumsBuffer);
-    releaseBufferBacking(m_rasterBucketsScannedBlockSumsBuffer);
-    releaseBufferBacking(m_rasterBucketsTotalCountBuffer);
-    releaseBufferBacking(m_rasterBucketsTotalCountBufferPhase1);
-    releaseBufferBacking(m_rasterBucketsTotalCountBufferPhase1Sw);
-    releaseBufferBacking(m_visibleClustersCounterBufferPhase2);
-    releaseBufferBacking(m_rasterBucketsHistogramBufferPhase2);
-    releaseBufferBacking(m_rasterBucketsWriteCursorBufferPhase2);
-    releaseBufferBacking(m_rasterBucketsHistogramBufferSw);
-    releaseBufferBacking(m_rasterBucketsHistogramBufferPhase2Sw);
-    releaseBufferBacking(m_rasterBucketsWriteCursorBufferSw);
-    releaseBufferBacking(m_rasterBucketsWriteCursorBufferPhase2Sw);
-    releaseBufferBacking(m_compactedVisibleClustersBuffer);
-    releaseBufferBacking(m_rasterBucketsWriteCursorBuffer);
-    releaseBufferBacking(m_rasterBucketsIndirectArgsBuffer);
-    releaseBufferBacking(m_rasterBucketsIndirectArgsBufferPhase2);
-    releaseBufferBacking(m_reyesFullClusterOutputsBuffer);
-    releaseBufferBacking(m_reyesFullClusterOutputsCounterBuffer);
-    releaseBufferBacking(m_reyesOwnedClustersBuffer);
-    releaseBufferBacking(m_reyesOwnedClustersCounterBuffer);
-    releaseBufferBacking(m_reyesOwnershipBitsetBuffer);
-    releaseBufferBacking(m_reyesOwnershipBitsetBufferPhase2);
-    releaseBufferBacking(m_reyesClassifyIndirectArgsBuffer);
-    releaseBufferBacking(m_reyesClassifyIndirectArgsBufferPhase2);
-    releaseBufferBacking(m_reyesSplitIndirectArgsBuffer);
-    releaseBufferBacking(m_reyesSplitIndirectArgsBufferPhase2);
-    releaseBufferBacking(m_reyesSplitQueueBufferA);
-    releaseBufferBacking(m_reyesSplitQueueCounterBufferA);
-    releaseBufferBacking(m_reyesSplitQueueOverflowBufferA);
-    releaseBufferBacking(m_reyesSplitQueueBufferB);
-    releaseBufferBacking(m_reyesSplitQueueCounterBufferB);
-    releaseBufferBacking(m_reyesSplitQueueOverflowBufferB);
-    releaseBufferBacking(m_reyesDiceQueueBuffer);
-    releaseBufferBacking(m_reyesDiceQueueCounterBuffer);
-    releaseBufferBacking(m_reyesDiceQueuePhase1CountBuffer);
-    releaseBufferBacking(m_reyesDiceQueueOverflowBuffer);
-    releaseBufferBacking(m_reyesRasterWorkBuffer);
-    releaseBufferBacking(m_reyesRasterWorkCounterBuffer);
-    releaseBufferBacking(m_reyesRasterWorkIndirectArgsBuffer);
-    releaseBufferBacking(m_reyesTessTableConfigsBuffer);
-    releaseBufferBacking(m_reyesTessTableVerticesBuffer);
-    releaseBufferBacking(m_reyesTessTableTrianglesBuffer);
-    releaseBufferBacking(m_reyesDiceIndirectArgsBuffer);
-    releaseBufferBacking(m_reyesDiceIndirectArgsBufferPhase2);
-    releaseBufferBacking(m_reyesRasterWorkBufferPhase2);
-    releaseBufferBacking(m_reyesRasterWorkCounterBufferPhase2);
-    releaseBufferBacking(m_reyesRasterWorkIndirectArgsBufferPhase2);
-    releaseBufferBacking(m_reyesTelemetryBufferPhase1);
-    releaseBufferBacking(m_reyesTelemetryBufferPhase2);
-    releaseBufferBacking(m_swVisibleClustersCounterBuffer);
-    releaseBufferBacking(m_swVisibleClustersCounterBufferPhase2);
-    releaseBufferBacking(m_sortedToUnsortedMappingBuffer);
-    releaseBufferBacking(m_viewRasterInfoBuffer);
-    releaseBufferBacking(m_deepVisibilityNodesBuffer);
-    releaseBufferBacking(m_deepVisibilityCounterBuffer);
-    releaseBufferBacking(m_deepVisibilityOverflowCounterBuffer);
-    releaseBufferBacking(m_deepVisibilityStatsBuffer);
+    ReleaseBufferBackings();
 
     SyncReyesResourceEntities(!IsReyesTessellationDisabled());
 

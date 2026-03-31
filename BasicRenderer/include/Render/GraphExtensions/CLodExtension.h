@@ -21,6 +21,10 @@ public:
 
 private:
     bool IsReyesTessellationDisabled() const;
+    void InitializeCoreResources();
+    void InitializeDeepVisibilityResources();
+    void TagCoreResourceUsages();
+    void ReleaseBufferBackings();
     void EnsureReyesResourcesInitialized();
     void SyncReyesResourceEntities(bool enabled);
 
