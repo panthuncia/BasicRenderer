@@ -816,7 +816,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<AutoAliasPackingStrategy>("autoAliasPackingStrategy", AutoAliasPackingStrategy::GreedySweepLine);
     settingsManager.registerSetting<bool>("autoAliasEnableLogging", false);
     settingsManager.registerSetting<bool>("autoAliasLogExclusionReasons", false);
-    settingsManager.registerSetting<bool>("queueSchedulingEnableLogging", true);
+    settingsManager.registerSetting<bool>("queueSchedulingEnableLogging", false);
     settingsManager.registerSetting<float>("queueSchedulingWidthScale", 1.0f);
     settingsManager.registerSetting<float>("queueSchedulingPenaltyBias", 0.0f);
     settingsManager.registerSetting<float>("queueSchedulingMinPenalty", 1.0f);

@@ -142,6 +142,8 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
             Builtin::SkeletonResources::SkinningInstanceInfo,
             Builtin::PrimaryCamera::LinearDepthMap,
             Builtin::Shadows::LinearShadowMaps,
+            m_visibleClustersCounterBuffer,
+            m_occlusionReplayStateBuffer,
             Builtin::PerMaterialDataBuffer)
         .WithShaderResource(ECSResourceResolver(drawSetIndicesQuery));
 
@@ -348,8 +350,12 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     commandList.Barriers(counterBarrierBatch);
 
     BindResourceDescriptorIndices(commandList, m_createCommandPipelineState.GetResourceDescriptorSlots());
-    // Reset aliased slots for CreateRasterBucketsHistogramCommandCSMain
+    // Reset aliased slots for CreateRasterBucketsHistogramCommandCSMain.
+    // The work-graph dispatch binds slot 3/6 as UAV-facing descriptors, but the create-command
+    // shader reads them as SRVs when building the indirect dispatch arguments.
+    uintRootConstants[CLOD_CREATE_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_CREATE_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_CREATE_NUM_RASTER_BUCKETS] = context.materialManager->GetRasterBucketCount();
     commandList.PushConstants(

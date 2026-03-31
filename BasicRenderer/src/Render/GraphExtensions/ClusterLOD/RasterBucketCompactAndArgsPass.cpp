@@ -25,6 +25,7 @@ RasterBucketCompactAndArgsPass::RasterBucketCompactAndArgsPass(
     std::shared_ptr<Buffer> indirectArgsBuffer,
     std::shared_ptr<Buffer> sortedToUnsortedMappingBuffer,
     std::shared_ptr<Buffer> reyesOwnershipBitsetBuffer,
+    std::shared_ptr<Buffer> reyesTelemetryBuffer,
     uint64_t maxVisibleClusters,
     bool appendToExisting,
     bool readReverse,
@@ -41,6 +42,7 @@ RasterBucketCompactAndArgsPass::RasterBucketCompactAndArgsPass(
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
     , m_sortedToUnsortedMappingBuffer(std::move(sortedToUnsortedMappingBuffer))
     , m_reyesOwnershipBitsetBuffer(std::move(reyesOwnershipBitsetBuffer))
+    , m_reyesTelemetryBuffer(std::move(reyesTelemetryBuffer))
     , m_maxVisibleClusters(maxVisibleClusters)
     , m_appendToExisting(appendToExisting)
     , m_readReverse(readReverse)
@@ -85,6 +87,9 @@ void RasterBucketCompactAndArgsPass::DeclareResourceUsages(ComputePassBuilder* b
     if (m_reyesOwnershipBitsetBuffer) {
         builder->WithShaderResource(m_reyesOwnershipBitsetBuffer);
     }
+    if (m_reyesTelemetryBuffer) {
+        builder->WithUnorderedAccess(m_reyesTelemetryBuffer);
+    }
 }
 
 void RasterBucketCompactAndArgsPass::Setup() {
@@ -125,6 +130,9 @@ PassReturn RasterBucketCompactAndArgsPass::Execute(PassExecutionContext& executi
     if (m_reyesOwnershipBitsetBuffer) {
         rc[CLOD_COMPACTION_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = m_reyesOwnershipBitsetBuffer->GetSRVInfo(0).slot.index;
     }
+    rc[CLOD_COMPACTION_REYES_TELEMETRY_DESCRIPTOR_INDEX] = m_reyesTelemetryBuffer
+        ? m_reyesTelemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index
+        : 0xFFFFFFFFu;
     rc[CLOD_COMPACTION_NUM_RASTER_BUCKETS] = numBuckets | (m_appendToExisting ? 0x80000000u : 0u);
     if (m_appendToExisting) {
         rc[CLOD_COMPACTION_READ_BASE_COUNTER_DESCRIPTOR_INDEX] = m_compactedBaseCounterBuffer->GetSRVInfo(0).slot.index;

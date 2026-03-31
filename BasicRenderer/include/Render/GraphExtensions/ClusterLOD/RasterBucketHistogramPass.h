@@ -16,6 +16,7 @@ public:
         std::shared_ptr<Buffer> histogramIndirectCommand,
         std::shared_ptr<Buffer> histogramBuffer,
         std::shared_ptr<Buffer> reyesOwnershipBitsetBuffer = nullptr,
+        std::shared_ptr<Buffer> reyesTelemetryBuffer = nullptr,
         std::shared_ptr<Buffer> readBaseCounterBuffer = nullptr,
         bool readReverse = false,
         uint32_t visibleClustersCapacity = 0u,
@@ -41,6 +42,7 @@ private:
     std::shared_ptr<Buffer> m_histogramIndirectCommand;
     std::shared_ptr<Buffer> m_histogramBuffer;
     std::shared_ptr<Buffer> m_reyesOwnershipBitsetBuffer;
+    std::shared_ptr<Buffer> m_reyesTelemetryBuffer;
     std::shared_ptr<Buffer> m_readBaseCounterBuffer; // Phase 2 only: Phase 1's HW counter for read offset
     bool m_readReverse = false;
     uint32_t m_visibleClustersCapacity = 0u;

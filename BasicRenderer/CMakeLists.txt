@@ -658,8 +658,6 @@ target_compile_definitions(ShaderPreprocessTests PRIVATE NOMINMAX)
 # Disable warnings for signed/unsigned mismatch
 add_compile_options("/wd4267")
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /bigobj")
-
 # Compile‐only: debug info on RelWithDebInfo
 # Native MSVC uses /Zi (PDB); clang-cl cross-compile uses /Z7 (embedded CodeView)
 if(CMAKE_CROSSCOMPILING)

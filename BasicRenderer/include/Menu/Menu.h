@@ -2245,10 +2245,16 @@ inline void Menu::DrawCLodTelemetryWindow() {
             const uint32_t rejPageBounds = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedPageBounds);
             const uint32_t survived = counter(CLodWorkGraphCounterIndex::ClusterCullSurvivingLanes);
             const uint32_t totalRejected = rejFrustum + rejCond2 + rejOccl + rejOOR + rejPageBounds;
+            const uint32_t childPrefilterFrustum = counter(CLodWorkGraphCounterIndex::ChildPrefilterFrustumCulled);
+            const uint32_t childPrefilterLod = counter(CLodWorkGraphCounterIndex::ChildPrefilterLodRejected);
 
             ImGui::Text("Meshlet iterations evaluated: %u", meshletIter);
             ImGui::Text("Survived: %u", survived);
             ImGui::Text("Rejected total: %u", totalRejected);
+            ImGui::Text(
+                "Child prefilter rejects: frustum %u | LOD %u",
+                childPrefilterFrustum,
+                childPrefilterLod);
 
             auto rejectionRow = [](const char* label, uint32_t count, uint32_t total) {
                 const float pct = (total > 0)
@@ -2330,10 +2336,51 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
             const uint32_t totalDiceInputs = telemetry.immediateDiceQueueEntryCount + telemetry.finalDiceQueueEntryCount;
             ImGui::Text("Phase index: %u", telemetry.phaseIndex);
-            ImGui::Text("Classify: visible input=%u full output=%u immediate dice=%u",
+            ImGui::Text("Classify: visible input=%u full output=%u owned output=%u immediate dice=%u",
                 telemetry.visibleClusterInputCount,
                 telemetry.fullClusterOutputCount,
+                telemetry.ownedClusterOutputCount,
                 telemetry.immediateDiceQueueEntryCount);
+            ImGui::Text("Ownership bitset: unique=%u duplicate=%u outOfRange=%u maxIndex=%u",
+                telemetry.ownershipBitSetUniqueCount,
+                telemetry.ownershipBitSetDuplicateCount,
+                telemetry.ownershipBitSetOutOfRangeCount,
+                telemetry.ownershipBitSetMaxIndex);
+            ImGui::Text("Ownership skips: histogram=%u compaction=%u",
+                telemetry.histogramReyesOwnedSkipCount,
+                telemetry.compactionReyesOwnedSkipCount);
+            ImGui::Text("First owned: cluster=%u instance=%u material=%u",
+                telemetry.firstOwnedVisibleClusterIndex,
+                telemetry.firstOwnedInstanceID,
+                telemetry.firstOwnedMaterialIndex);
+            ImGui::Text("First histogram read: cluster=%u instance=%u material=%u",
+                telemetry.firstHistogramReadVisibleClusterIndex,
+                telemetry.firstHistogramReadInstanceID,
+                telemetry.firstHistogramReadMaterialIndex);
+            ImGui::Text("Histogram dispatch: invocations=%u clusterCount=%u",
+                telemetry.histogramInvocationCount,
+                telemetry.histogramObservedClusterCount);
+            ImGui::Text("Histogram vs owned: matches=%u bit=%u",
+                telemetry.histogramReadOwnedClusterMatchCount,
+                telemetry.histogramOwnedClusterBitValue);
+            ImGui::Text("First histogram skip: cluster=%u instance=%u material=%u",
+                telemetry.firstHistogramSkippedVisibleClusterIndex,
+                telemetry.firstHistogramSkippedInstanceID,
+                telemetry.firstHistogramSkippedMaterialIndex);
+            ImGui::Text("First compaction read: cluster=%u instance=%u material=%u",
+                telemetry.firstCompactionReadVisibleClusterIndex,
+                telemetry.firstCompactionReadInstanceID,
+                telemetry.firstCompactionReadMaterialIndex);
+            ImGui::Text("Compaction dispatch: invocations=%u clusterCount=%u",
+                telemetry.compactionInvocationCount,
+                telemetry.compactionObservedClusterCount);
+            ImGui::Text("Compaction vs owned: matches=%u bit=%u",
+                telemetry.compactionReadOwnedClusterMatchCount,
+                telemetry.compactionOwnedClusterBitValue);
+            ImGui::Text("First compaction skip: cluster=%u instance=%u material=%u",
+                telemetry.firstCompactionSkippedVisibleClusterIndex,
+                telemetry.firstCompactionSkippedInstanceID,
+                telemetry.firstCompactionSkippedMaterialIndex);
             ImGui::Text("Split: deepest level=%u max configured=%u split-routed dice=%u",
                 telemetry.deepestSplitLevelReached,
                 telemetry.configuredMaxSplitPassCount,

@@ -259,6 +259,36 @@ struct CLodReyesTelemetry
 {
     uint32_t visibleClusterInputCount = 0u;
     uint32_t fullClusterOutputCount = 0u;
+    uint32_t ownedClusterOutputCount = 0u;
+    uint32_t firstOwnedVisibleClusterIndex = 0xFFFFFFFFu;
+    uint32_t firstOwnedInstanceID = 0xFFFFFFFFu;
+    uint32_t firstOwnedMaterialIndex = 0xFFFFFFFFu;
+    uint32_t firstHistogramReadVisibleClusterIndex = 0xFFFFFFFFu;
+    uint32_t firstHistogramReadInstanceID = 0xFFFFFFFFu;
+    uint32_t firstHistogramReadMaterialIndex = 0xFFFFFFFFu;
+    uint32_t histogramInvocationCount = 0u;
+    uint32_t histogramObservedClusterCount = 0xFFFFFFFFu;
+    uint32_t histogramReadOwnedClusterMatchCount = 0u;
+    uint32_t histogramOwnedClusterBitValue = 0xFFFFFFFFu;
+    uint32_t firstCompactionReadVisibleClusterIndex = 0xFFFFFFFFu;
+    uint32_t firstCompactionReadInstanceID = 0xFFFFFFFFu;
+    uint32_t firstCompactionReadMaterialIndex = 0xFFFFFFFFu;
+    uint32_t compactionInvocationCount = 0u;
+    uint32_t compactionObservedClusterCount = 0xFFFFFFFFu;
+    uint32_t compactionReadOwnedClusterMatchCount = 0u;
+    uint32_t compactionOwnedClusterBitValue = 0xFFFFFFFFu;
+    uint32_t ownershipBitSetUniqueCount = 0u;
+    uint32_t ownershipBitSetDuplicateCount = 0u;
+    uint32_t ownershipBitSetOutOfRangeCount = 0u;
+    uint32_t ownershipBitSetMaxIndex = 0u;
+    uint32_t histogramReyesOwnedSkipCount = 0u;
+    uint32_t compactionReyesOwnedSkipCount = 0u;
+    uint32_t firstHistogramSkippedVisibleClusterIndex = 0xFFFFFFFFu;
+    uint32_t firstHistogramSkippedInstanceID = 0xFFFFFFFFu;
+    uint32_t firstHistogramSkippedMaterialIndex = 0xFFFFFFFFu;
+    uint32_t firstCompactionSkippedVisibleClusterIndex = 0xFFFFFFFFu;
+    uint32_t firstCompactionSkippedInstanceID = 0xFFFFFFFFu;
+    uint32_t firstCompactionSkippedMaterialIndex = 0xFFFFFFFFu;
     uint32_t immediateDiceQueueEntryCount = 0u;
     uint32_t finalDiceQueueEntryCount = 0u;
     uint32_t phaseIndex = 0u;
@@ -296,8 +326,6 @@ struct CLodReyesTelemetry
     uint32_t rasterNearPlaneClippedQuadCount = 0u;
     uint32_t rasterTinyTriangleFallbackCount = 0u;
 };
-
-static_assert(sizeof(CLodReyesTelemetry) == 232u, "CLodReyesTelemetry size must remain compact");
 
 inline constexpr uint32_t CLodReplayBufferSizeBytes = 200u * 1024u * 1024u; // 200 MB physical, GPU uses first 100 MB
 inline constexpr uint32_t CLodReplayNodeRegionSizeBytes = 50u * 1024u * 1024u;    // must match HLSL CLOD_REPLAY_NODE_REGION_SIZE_BYTES
