@@ -44,6 +44,7 @@
 #include "Resources/Buffers/PagePool.h"
 #include "Resources/components.h"
 #include "ShaderBuffers.h"
+#include "Utilities/ProportionalBudgetAllocator.h"
 
 namespace {
 
@@ -203,6 +204,150 @@ void SyncTaggedBufferEntity(const std::shared_ptr<Buffer>& buffer, const flecs::
     }
 }
 
+struct ReyesResourceSizing {
+    uint32_t fullClusterOutputCapacity = 0u;
+    uint32_t ownedClusterCapacity = 0u;
+    uint32_t splitQueueCapacity = 0u;
+    uint32_t diceQueueCapacity = 0u;
+    uint32_t diceQueuePhysicalCapacity = 0u;
+    uint32_t rasterWorkCapacity = 0u;
+    uint32_t ownershipBitsetWordCount = 0u;
+    uint64_t requestedBudgetBytes = 0u;
+    uint64_t allocatedBudgetBytes = 0u;
+    bool budgetLimited = false;
+};
+
+uint64_t BufferBytes(uint32_t elementCount, size_t elementSize)
+{
+    return static_cast<uint64_t>(elementCount) * static_cast<uint64_t>(elementSize);
+}
+
+uint32_t BytesToElementCount(uint64_t allocatedBytes, size_t elementSize)
+{
+    if (elementSize == 0u) {
+        throw std::runtime_error("Element size must be non-zero when converting budgeted bytes to element count.");
+    }
+
+    return static_cast<uint32_t>(allocatedBytes / static_cast<uint64_t>(elementSize));
+}
+
+ReyesResourceSizing BuildReyesResourceSizing(const CLodVariantTraits& traits, uint32_t maxVisibleClusters)
+{
+    const bool usesPhase2ReyesResources = traits.usesPhase2OcclusionReplay;
+    const uint32_t ownershipBitsetWordCount = CLodBitsetWordCount(maxVisibleClusters);
+    const uint32_t idealFullClusterOutputCapacity = maxVisibleClusters;
+    const uint32_t idealOwnedClusterCapacity = maxVisibleClusters;
+    const uint32_t idealSplitQueueCapacity = CLodReyesSplitQueueCapacity(maxVisibleClusters);
+    const uint32_t idealDiceQueueCapacity = CLodReyesDiceQueueCapacity(maxVisibleClusters);
+    const uint32_t idealRasterWorkCapacity = CLodReyesRasterWorkCapacity(maxVisibleClusters);
+    const uint32_t diceQueuePhaseMultiplier = usesPhase2ReyesResources ? 2u : 1u;
+    const ReyesTessellationTableData& reyesTessellationTableData = GetReyesTessellationTableData();
+
+    std::vector<budget::ProportionalBudgetItem> budgetItems;
+    budgetItems.reserve(24);
+
+    auto addFixedItem = [&budgetItems](std::string_view id, uint64_t bytes) {
+        budgetItems.push_back(budget::ProportionalBudgetItem{
+            .id = id,
+            .idealBytes = bytes,
+            .minBytes = bytes,
+            .maxBytes = bytes,
+            .quantumBytes = 1u,
+        });
+    };
+
+    auto addFlexibleItem = [&budgetItems](std::string_view id, uint64_t idealBytes, uint64_t quantumBytes) {
+        budgetItems.push_back(budget::ProportionalBudgetItem{
+            .id = id,
+            .idealBytes = idealBytes,
+            .minBytes = quantumBytes,
+            .maxBytes = idealBytes,
+            .quantumBytes = quantumBytes,
+        });
+    };
+
+    addFlexibleItem("fullClusterOutputs", BufferBytes(idealFullClusterOutputCapacity, sizeof(CLodReyesFullClusterOutput)), sizeof(CLodReyesFullClusterOutput));
+    addFixedItem("fullClusterOutputCounter", sizeof(uint32_t));
+    addFlexibleItem("ownedClusters", BufferBytes(idealOwnedClusterCapacity, sizeof(CLodReyesOwnedClusterEntry)), sizeof(CLodReyesOwnedClusterEntry));
+    addFixedItem("ownedClusterCounter", sizeof(uint32_t));
+    addFixedItem("ownershipBitset", BufferBytes(ownershipBitsetWordCount, sizeof(uint32_t)));
+    if (usesPhase2ReyesResources) {
+        addFixedItem("ownershipBitsetPhase2", BufferBytes(ownershipBitsetWordCount, sizeof(uint32_t)));
+    }
+
+    addFixedItem("classifyIndirectArgs", sizeof(CLodReyesDispatchIndirectCommand));
+    if (usesPhase2ReyesResources) {
+        addFixedItem("classifyIndirectArgsPhase2", sizeof(CLodReyesDispatchIndirectCommand));
+    }
+
+    addFixedItem("splitIndirectArgs", sizeof(CLodReyesDispatchIndirectCommand));
+    if (usesPhase2ReyesResources) {
+        addFixedItem("splitIndirectArgsPhase2", sizeof(CLodReyesDispatchIndirectCommand));
+    }
+
+    addFlexibleItem("splitQueueA", BufferBytes(idealSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry)), sizeof(CLodReyesSplitQueueEntry));
+    addFixedItem("splitQueueCounterA", sizeof(uint32_t));
+    addFixedItem("splitQueueOverflowA", sizeof(uint32_t));
+    addFlexibleItem("splitQueueB", BufferBytes(idealSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry)), sizeof(CLodReyesSplitQueueEntry));
+    addFixedItem("splitQueueCounterB", sizeof(uint32_t));
+    addFixedItem("splitQueueOverflowB", sizeof(uint32_t));
+
+    addFlexibleItem(
+        "diceQueue",
+        BufferBytes(idealDiceQueueCapacity * diceQueuePhaseMultiplier, sizeof(CLodReyesDiceQueueEntry)),
+        static_cast<uint64_t>(sizeof(CLodReyesDiceQueueEntry)) * static_cast<uint64_t>(diceQueuePhaseMultiplier));
+    addFixedItem("diceQueueCounter", sizeof(uint32_t));
+    if (usesPhase2ReyesResources) {
+        addFixedItem("diceQueuePhase1Count", sizeof(uint32_t));
+    }
+    addFixedItem("diceQueueOverflow", sizeof(uint32_t));
+
+    addFlexibleItem("rasterWorkPhase1", BufferBytes(idealRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry)), sizeof(CLodReyesRasterWorkEntry));
+    addFixedItem("rasterWorkCounterPhase1", sizeof(uint32_t));
+    addFixedItem("rasterWorkIndirectArgsPhase1", sizeof(CLodReyesDispatchIndirectCommand));
+    if (usesPhase2ReyesResources) {
+        addFlexibleItem("rasterWorkPhase2", BufferBytes(idealRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry)), sizeof(CLodReyesRasterWorkEntry));
+        addFixedItem("rasterWorkCounterPhase2", sizeof(uint32_t));
+        addFixedItem("rasterWorkIndirectArgsPhase2", sizeof(CLodReyesDispatchIndirectCommand));
+    }
+
+    addFixedItem("tessTableConfigs", BufferBytes(static_cast<uint32_t>(reyesTessellationTableData.configs.size()), sizeof(CLodReyesTessTableConfigEntry)));
+    addFixedItem("tessTableVertices", BufferBytes(static_cast<uint32_t>(reyesTessellationTableData.vertices.size()), sizeof(uint32_t)));
+    addFixedItem("tessTableTriangles", BufferBytes(static_cast<uint32_t>(reyesTessellationTableData.triangles.size()), sizeof(uint32_t)));
+    addFixedItem("diceIndirectArgsPhase1", sizeof(CLodReyesDispatchIndirectCommand));
+    if (usesPhase2ReyesResources) {
+        addFixedItem("diceIndirectArgsPhase2", sizeof(CLodReyesDispatchIndirectCommand));
+    }
+    addFixedItem("telemetryPhase1", sizeof(CLodReyesTelemetry));
+    if (usesPhase2ReyesResources) {
+        addFixedItem("telemetryPhase2", sizeof(CLodReyesTelemetry));
+    }
+
+    uint64_t idealBudgetBytes = 0u;
+    for (const budget::ProportionalBudgetItem& item : budgetItems) {
+        idealBudgetBytes += item.idealBytes;
+    }
+
+    const uint64_t configuredBudgetBytes = static_cast<uint64_t>(SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodReyesResourceBudgetBytesSettingName)());
+    const uint64_t effectiveBudgetBytes = configuredBudgetBytes == 0u ? idealBudgetBytes : configuredBudgetBytes;
+    const budget::ProportionalBudgetResult budgetResult = budget::AllocateProportionalBudget(budgetItems, effectiveBudgetBytes);
+
+    ReyesResourceSizing sizing{};
+    sizing.fullClusterOutputCapacity = BytesToElementCount(budgetResult.Find("fullClusterOutputs").allocatedBytes, sizeof(CLodReyesFullClusterOutput));
+    sizing.ownedClusterCapacity = BytesToElementCount(budgetResult.Find("ownedClusters").allocatedBytes, sizeof(CLodReyesOwnedClusterEntry));
+    sizing.splitQueueCapacity = BytesToElementCount(budgetResult.Find("splitQueueA").allocatedBytes, sizeof(CLodReyesSplitQueueEntry));
+    sizing.diceQueueCapacity = static_cast<uint32_t>(
+        budgetResult.Find("diceQueue").allocatedBytes /
+        (static_cast<uint64_t>(sizeof(CLodReyesDiceQueueEntry)) * static_cast<uint64_t>(diceQueuePhaseMultiplier)));
+    sizing.diceQueuePhysicalCapacity = sizing.diceQueueCapacity * diceQueuePhaseMultiplier;
+    sizing.rasterWorkCapacity = BytesToElementCount(budgetResult.Find("rasterWorkPhase1").allocatedBytes, sizeof(CLodReyesRasterWorkEntry));
+    sizing.ownershipBitsetWordCount = ownershipBitsetWordCount;
+    sizing.requestedBudgetBytes = budgetResult.requestedTotalBytes;
+    sizing.allocatedBudgetBytes = budgetResult.allocatedTotalBytes;
+    sizing.budgetLimited = budgetResult.allocatedTotalBytes < budgetResult.requestedTotalBytes;
+    return sizing;
+}
+
 } // namespace
 
 CLodExtension::~CLodExtension() = default;
@@ -253,13 +398,20 @@ void CLodExtension::EnsureReyesResourcesInitialized()
     const auto& traits = GetVariantTraits(m_type);
     auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
     const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
+    const ReyesResourceSizing reyesResourceSizing = BuildReyesResourceSizing(traits, m_maxVisibleClusters);
     const bool usesPhase2ReyesResources = traits.usesPhase2OcclusionReplay;
-    const uint32_t reyesOwnershipWordCount = CLodBitsetWordCount(m_maxVisibleClusters);
-    const uint32_t reyesSplitQueueCapacity = CLodReyesSplitQueueCapacity(m_maxVisibleClusters);
-    const uint32_t reyesDiceQueueCapacity = CLodReyesDiceQueueCapacity(m_maxVisibleClusters) * (usesPhase2ReyesResources ? 2u : 1u);
-    const uint32_t reyesRasterWorkCapacity = CLodReyesRasterWorkCapacity(m_maxVisibleClusters);
+    m_reyesFullClusterOutputCapacity = reyesResourceSizing.fullClusterOutputCapacity;
+    m_reyesOwnedClusterCapacity = reyesResourceSizing.ownedClusterCapacity;
+    m_reyesSplitQueueCapacity = reyesResourceSizing.splitQueueCapacity;
+    m_reyesDiceQueueCapacity = reyesResourceSizing.diceQueueCapacity;
+    m_reyesDiceQueuePhysicalCapacity = reyesResourceSizing.diceQueuePhysicalCapacity;
+    m_reyesRasterWorkCapacity = reyesResourceSizing.rasterWorkCapacity;
+    m_reyesOwnershipBitsetWordCount = reyesResourceSizing.ownershipBitsetWordCount;
+    m_reyesRequestedBudgetBytes = reyesResourceSizing.requestedBudgetBytes;
+    m_reyesAllocatedBudgetBytes = reyesResourceSizing.allocatedBudgetBytes;
+    m_reyesBudgetLimited = reyesResourceSizing.budgetLimited;
 
-    m_reyesFullClusterOutputsBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_maxVisibleClusters, sizeof(CLodReyesFullClusterOutput), true, false, false, false);
+    m_reyesFullClusterOutputsBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_reyesFullClusterOutputCapacity, sizeof(CLodReyesFullClusterOutput), true, false, false, false);
     m_reyesFullClusterOutputsBuffer->SetName(MakeVariantResourceName(traits, "Reyes Full Cluster Outputs Buffer"));
 
     m_reyesFullClusterOutputsCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
@@ -269,17 +421,17 @@ void CLodExtension::EnsureReyesResourcesInitialized()
         .add<CLodReyesFullClustersCounterTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesOwnedClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_maxVisibleClusters, sizeof(CLodReyesOwnedClusterEntry), true, false, false, false);
+    m_reyesOwnedClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_reyesOwnedClusterCapacity, sizeof(CLodReyesOwnedClusterEntry), true, false, false, false);
     m_reyesOwnedClustersBuffer->SetName(MakeVariantResourceName(traits, "Reyes Owned Clusters Buffer"));
 
     m_reyesOwnedClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
     m_reyesOwnedClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "Reyes Owned Clusters Counter Buffer"));
 
-    m_reyesOwnershipBitsetBuffer = CreateAliasedUnmaterializedStructuredBuffer(reyesOwnershipWordCount, sizeof(uint32_t), true, false, false, false);
+    m_reyesOwnershipBitsetBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_reyesOwnershipBitsetWordCount, sizeof(uint32_t), true, false, false, false);
     m_reyesOwnershipBitsetBuffer->SetName(MakeVariantResourceName(traits, "Reyes Ownership Bitset Buffer"));
 
     if (usesPhase2ReyesResources) {
-        m_reyesOwnershipBitsetBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(reyesOwnershipWordCount, sizeof(uint32_t), true, false, false, false);
+        m_reyesOwnershipBitsetBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(m_reyesOwnershipBitsetWordCount, sizeof(uint32_t), true, false, false, false);
         m_reyesOwnershipBitsetBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Ownership Bitset Buffer Phase2"));
     }
 
@@ -299,7 +451,7 @@ void CLodExtension::EnsureReyesResourcesInitialized()
         m_reyesSplitIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Split Indirect Args Buffer Phase2"));
     }
 
-    m_reyesSplitQueueBufferA = CreateAliasedUnmaterializedStructuredBuffer(reyesSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry), true, false);
+    m_reyesSplitQueueBufferA = CreateAliasedUnmaterializedStructuredBuffer(m_reyesSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry), true, false);
     m_reyesSplitQueueBufferA->SetName(MakeVariantResourceName(traits, "Reyes Split Queue Buffer A"));
 
     m_reyesSplitQueueCounterBufferA = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
@@ -316,7 +468,7 @@ void CLodExtension::EnsureReyesResourcesInitialized()
         .add<CLodReyesSplitQueueOverflowATag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesSplitQueueBufferB = CreateAliasedUnmaterializedStructuredBuffer(reyesSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry), true, false);
+    m_reyesSplitQueueBufferB = CreateAliasedUnmaterializedStructuredBuffer(m_reyesSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry), true, false);
     m_reyesSplitQueueBufferB->SetName(MakeVariantResourceName(traits, "Reyes Split Queue Buffer B"));
 
     m_reyesSplitQueueCounterBufferB = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
@@ -333,7 +485,7 @@ void CLodExtension::EnsureReyesResourcesInitialized()
         .add<CLodReyesSplitQueueOverflowBTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesDiceQueueBuffer = CreateAliasedUnmaterializedStructuredBuffer(reyesDiceQueueCapacity, sizeof(CLodReyesDiceQueueEntry), true, false);
+    m_reyesDiceQueueBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_reyesDiceQueuePhysicalCapacity, sizeof(CLodReyesDiceQueueEntry), true, false);
     m_reyesDiceQueueBuffer->SetName(MakeVariantResourceName(traits, "Reyes Dice Queue Buffer"));
     m_reyesDiceQueueBuffer->GetECSEntity()
         .set<Components::Resource>({ m_reyesDiceQueueBuffer })
@@ -399,7 +551,7 @@ void CLodExtension::EnsureReyesResourcesInitialized()
         .add<CLodReyesDiceQueueOverflowTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesRasterWorkBuffer = CreateAliasedUnmaterializedStructuredBuffer(reyesRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry), true, false, false, false);
+    m_reyesRasterWorkBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_reyesRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry), true, false, false, false);
     m_reyesRasterWorkBuffer->SetName(MakeVariantResourceName(traits, "Reyes Raster Work Buffer"));
 
     m_reyesRasterWorkCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
@@ -409,7 +561,7 @@ void CLodExtension::EnsureReyesResourcesInitialized()
     m_reyesRasterWorkIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Reyes Raster Work Indirect Args Buffer"));
 
     if (usesPhase2ReyesResources) {
-        m_reyesRasterWorkBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(reyesRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry), true, false, false, false);
+        m_reyesRasterWorkBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(m_reyesRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry), true, false, false, false);
         m_reyesRasterWorkBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Raster Work Buffer Phase2"));
 
         m_reyesRasterWorkCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
@@ -791,9 +943,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly ||
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility;
     const bool useComputeSWRaster = !forceHardwareOnly && CLodSoftwareRasterUsesCompute(softwareRasterMode);
-    const uint32_t reyesSplitQueueCapacity = CLodReyesSplitQueueCapacity(m_maxVisibleClusters);
-    const uint32_t reyesDiceQueueCapacity = CLodReyesDiceQueueCapacity(m_maxVisibleClusters);
-    const uint32_t reyesRasterWorkCapacity = CLodReyesRasterWorkCapacity(m_maxVisibleClusters);
+    const uint32_t reyesSplitQueueCapacity = m_reyesSplitQueueCapacity;
+    const uint32_t reyesDiceQueueCapacity = m_reyesDiceQueueCapacity;
+    const uint32_t reyesRasterWorkCapacity = m_reyesRasterWorkCapacity;
     const auto workGraphMode = forceHardwareOnly
         ? HierarchialCullingWorkGraphMode::HardwareOnly
         : GetCullingWorkGraphMode(softwareRasterMode);
@@ -874,8 +1026,10 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                         nullptr,
                         m_reyesFullClusterOutputsBuffer,
                         m_reyesFullClusterOutputsCounterBuffer,
+                        m_reyesFullClusterOutputCapacity,
                         m_reyesOwnedClustersBuffer,
                         m_reyesOwnedClustersCounterBuffer,
+                        m_reyesOwnedClusterCapacity,
                         reyesOwnershipBitsetBuffer,
                         m_reyesClassifyIndirectArgsBuffer,
                         m_reyesTelemetryBufferPhase1,
@@ -1307,8 +1461,10 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_visibleClustersCounterBuffer,
                     m_reyesFullClusterOutputsBuffer,
                     m_reyesFullClusterOutputsCounterBuffer,
+                    m_reyesFullClusterOutputCapacity,
                     m_reyesOwnedClustersBuffer,
                     m_reyesOwnedClustersCounterBuffer,
+                    m_reyesOwnedClusterCapacity,
                     reyesOwnershipBitsetBufferPhase2,
                     m_reyesClassifyIndirectArgsBufferPhase2,
                     m_reyesTelemetryBufferPhase2,

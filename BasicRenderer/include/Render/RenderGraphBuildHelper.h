@@ -421,67 +421,67 @@ void BuildPPLLPipeline(RenderGraph* graph) {
     desc.hasUAV = true;
     desc.hasNonShaderVisibleUAV = true;
     desc.allowAlias = true;
-    auto PPLLHeadPointerTexture = PixelBuffer::CreateSharedUnmaterialized(desc);
-    PPLLHeadPointerTexture->SetName("PPLLHeadPointerTexture");
-    rg::memory::SetResourceUsageHint(*PPLLHeadPointerTexture, "OIT resources");
-    auto PPLLBuffer = Buffer::CreateUnmaterializedStructuredBuffer(
-        static_cast<uint32_t>(numPPLLNodes),
-        static_cast<uint32_t>(PPLLNodeSize),
-        true,
-        false,
-        false,
-        rhi::HeapType::DeviceLocal);
-    PPLLBuffer->SetAllowAlias(true);
-    PPLLBuffer->SetName("PPLLBuffer");
-    rg::memory::SetResourceUsageHint(*PPLLBuffer, "OIT resources");
-    auto PPLLCounter = Buffer::CreateSharedUnmaterialized(rhi::HeapType::DeviceLocal, sizeof(uint32_t), true);
-    {
-        BufferBase::DescriptorRequirements descReq{};
-        descReq.createCBV = false;
-        descReq.createSRV = true;
-        descReq.createUAV = true;
-        descReq.createNonShaderVisibleUAV = true;
-        descReq.uavCounterOffset = 0;
+    //auto PPLLHeadPointerTexture = PixelBuffer::CreateSharedUnmaterialized(desc);
+    //PPLLHeadPointerTexture->SetName("PPLLHeadPointerTexture");
+    //rg::memory::SetResourceUsageHint(*PPLLHeadPointerTexture, "OIT resources");
+    //auto PPLLBuffer = Buffer::CreateUnmaterializedStructuredBuffer(
+    //    static_cast<uint32_t>(numPPLLNodes),
+    //    static_cast<uint32_t>(PPLLNodeSize),
+    //    true,
+    //    false,
+    //    false,
+    //    rhi::HeapType::DeviceLocal);
+    //PPLLBuffer->SetAllowAlias(true);
+    //PPLLBuffer->SetName("PPLLBuffer");
+    //rg::memory::SetResourceUsageHint(*PPLLBuffer, "OIT resources");
+    //auto PPLLCounter = Buffer::CreateSharedUnmaterialized(rhi::HeapType::DeviceLocal, sizeof(uint32_t), true);
+    //{
+    //    BufferBase::DescriptorRequirements descReq{};
+    //    descReq.createCBV = false;
+    //    descReq.createSRV = true;
+    //    descReq.createUAV = true;
+    //    descReq.createNonShaderVisibleUAV = true;
+    //    descReq.uavCounterOffset = 0;
 
-        descReq.srvDesc = rhi::SrvDesc{
-            .dimension = rhi::SrvDim::Buffer,
-            .formatOverride = rhi::Format::R32_UInt,
-            .buffer = {
-                .kind = rhi::BufferViewKind::Typed,
-                .firstElement = 0,
-                .numElements = 1,
-                .structureByteStride = 0,
-            },
-        };
+    //    descReq.srvDesc = rhi::SrvDesc{
+    //        .dimension = rhi::SrvDim::Buffer,
+    //        .formatOverride = rhi::Format::R32_UInt,
+    //        .buffer = {
+    //            .kind = rhi::BufferViewKind::Typed,
+    //            .firstElement = 0,
+    //            .numElements = 1,
+    //            .structureByteStride = 0,
+    //        },
+    //    };
 
-        descReq.uavDesc = rhi::UavDesc{
-            .dimension = rhi::UavDim::Buffer,
-            .formatOverride = rhi::Format::R32_UInt,
-            .buffer = {
-                .kind = rhi::BufferViewKind::Typed,
-                .firstElement = 0,
-                .numElements = 1,
-                .structureByteStride = 0,
-                .counterOffsetInBytes = 0,
-            },
-        };
+    //    descReq.uavDesc = rhi::UavDesc{
+    //        .dimension = rhi::UavDim::Buffer,
+    //        .formatOverride = rhi::Format::R32_UInt,
+    //        .buffer = {
+    //            .kind = rhi::BufferViewKind::Typed,
+    //            .firstElement = 0,
+    //            .numElements = 1,
+    //            .structureByteStride = 0,
+    //            .counterOffsetInBytes = 0,
+    //        },
+    //    };
 
-        PPLLCounter->SetDescriptorRequirements(descReq);
-    }
-    PPLLCounter->SetName("PPLLCounter");
-    rg::memory::SetResourceUsageHint(*PPLLCounter, "OIT resources");
+    //    PPLLCounter->SetDescriptorRequirements(descReq);
+    //}
+    //PPLLCounter->SetName("PPLLCounter");
+    //rg::memory::SetResourceUsageHint(*PPLLCounter, "OIT resources");
 
-    graph->RegisterResource(Builtin::PPLL::HeadPointerTexture, PPLLHeadPointerTexture);
-    graph->RegisterResource(Builtin::PPLL::DataBuffer, PPLLBuffer);
-    graph->RegisterResource(Builtin::PPLL::Counter, PPLLCounter);
+    //graph->RegisterResource(Builtin::PPLL::HeadPointerTexture, PPLLHeadPointerTexture);
+    //graph->RegisterResource(Builtin::PPLL::DataBuffer, PPLLBuffer);
+    //graph->RegisterResource(Builtin::PPLL::Counter, PPLLCounter);
 
-    graph->BuildRenderPass<PPLLFillPass>("PPFillPass", PPLLFillPassInputs{
-        wireframe,
-        numPPLLNodes,
-        useMeshShaders,
-        indirect });
+    //graph->BuildRenderPass<PPLLFillPass>("PPFillPass", PPLLFillPassInputs{
+    //    wireframe,
+    //    numPPLLNodes,
+    //    useMeshShaders,
+    //    indirect });
 
-    graph->BuildRenderPass<PPLLResolvePass>("PPLLResolvePass");
+    //graph->BuildRenderPass<PPLLResolvePass>("PPLLResolvePass");
 }
 
 void BuildBloomPipeline(RenderGraph* graph) {

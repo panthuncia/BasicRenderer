@@ -15,8 +15,10 @@ ReyesClassifyPass::ReyesClassifyPass(
     std::shared_ptr<Buffer> visibleClustersReadBaseCounterBuffer,
     std::shared_ptr<Buffer> fullClusterOutputsBuffer,
     std::shared_ptr<Buffer> fullClusterCounterBuffer,
+    uint32_t fullClusterOutputCapacity,
     std::shared_ptr<Buffer> ownedClustersBuffer,
     std::shared_ptr<Buffer> ownedClustersCounterBuffer,
+    uint32_t ownedClusterCapacity,
     std::shared_ptr<Buffer> ownershipBitsetBuffer,
     std::shared_ptr<Buffer> indirectArgsBuffer,
     std::shared_ptr<Buffer> telemetryBuffer,
@@ -26,8 +28,10 @@ ReyesClassifyPass::ReyesClassifyPass(
     , m_visibleClustersReadBaseCounterBuffer(std::move(visibleClustersReadBaseCounterBuffer))
     , m_fullClusterOutputsBuffer(std::move(fullClusterOutputsBuffer))
     , m_fullClusterCounterBuffer(std::move(fullClusterCounterBuffer))
+    , m_fullClusterOutputCapacity(fullClusterOutputCapacity)
     , m_ownedClustersBuffer(std::move(ownedClustersBuffer))
     , m_ownedClustersCounterBuffer(std::move(ownedClustersCounterBuffer))
+    , m_ownedClusterCapacity(ownedClusterCapacity)
     , m_ownershipBitsetBuffer(std::move(ownershipBitsetBuffer))
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
     , m_telemetryBuffer(std::move(telemetryBuffer))
@@ -95,8 +99,10 @@ PassReturn ReyesClassifyPass::Execute(PassExecutionContext& executionContext)
     }
     uintRootConstants[CLOD_REYES_CLASSIFY_FULL_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_fullClusterOutputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_CLASSIFY_FULL_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_fullClusterCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_REYES_CLASSIFY_FULL_CLUSTERS_CAPACITY] = m_fullClusterOutputCapacity;
     uintRootConstants[CLOD_REYES_CLASSIFY_OWNED_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_ownedClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_CLASSIFY_OWNED_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_ownedClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_REYES_CLASSIFY_OWNED_CLUSTERS_CAPACITY] = m_ownedClusterCapacity;
     uintRootConstants[CLOD_REYES_CLASSIFY_TELEMETRY_DESCRIPTOR_INDEX] = m_telemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_REYES_CLASSIFY_PHASE_INDEX] = m_phaseIndex;
     uintRootConstants[CLOD_REYES_CLASSIFY_OWNERSHIP_BITSET_DESCRIPTOR_INDEX] = m_ownershipBitsetBuffer->GetUAVShaderVisibleInfo(0).slot.index;

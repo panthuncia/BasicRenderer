@@ -10,6 +10,19 @@ static const uint REYES_OUTCOME_FLAG_SKINNED = 1u << 0;
 static const uint REYES_OUTCOME_FLAG_DISPLACEMENT_ENABLED = 1u << 1;
 static const uint REYES_BARYCENTRIC_COORD_MAX = 0xFFFFu;
 
+bool TryAppendBudgetedEntry(RWStructuredBuffer<uint> counterBuffer, uint capacity, out uint dst)
+{
+    InterlockedAdd(counterBuffer[0], 1u, dst);
+    if (dst < capacity)
+    {
+        return true;
+    }
+
+    InterlockedAdd(counterBuffer[0], 0xFFFFFFFFu);
+    dst = 0u;
+    return false;
+}
+
 uint GetReyesClassifyVisibleClusterReadIndex(uint linearizedID)
 {
     uint readBase = 0u;
@@ -76,7 +89,11 @@ void ReyesClassifyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         RWStructuredBuffer<CLodReyesTelemetry> telemetryBuffer = ResourceDescriptorHeap[CLOD_REYES_CLASSIFY_TELEMETRY_DESCRIPTOR_INDEX];
 
         uint dst = 0u;
-        InterlockedAdd(fullCounter[0], 1u, dst);
+        if (!TryAppendBudgetedEntry(fullCounter, CLOD_REYES_CLASSIFY_FULL_CLUSTERS_CAPACITY, dst))
+        {
+            return;
+        }
+
         fullClusters[dst].visibleClusterIndex = clusterIndex;
         fullClusters[dst].instanceID = instanceID;
         fullClusters[dst].materialIndex = materialIndex;
@@ -89,7 +106,11 @@ void ReyesClassifyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     RWStructuredBuffer<CLodReyesOwnedClusterEntry> ownedClusters = ResourceDescriptorHeap[CLOD_REYES_CLASSIFY_OWNED_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
 
     uint dst = 0u;
-    InterlockedAdd(ownedClusterCounter[0], 1u, dst);
+    if (!TryAppendBudgetedEntry(ownedClusterCounter, CLOD_REYES_CLASSIFY_OWNED_CLUSTERS_CAPACITY, dst))
+    {
+        return;
+    }
+
     MarkVisibleClusterOwnedByReyes(clusterIndex);
     ownedClusters[dst].visibleClusterIndex = clusterIndex;
     ownedClusters[dst].instanceID = instanceID;

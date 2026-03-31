@@ -26,6 +26,16 @@ private:
 
     CLodExtensionType m_type;
     uint32_t m_maxVisibleClusters = 0u;
+    uint32_t m_reyesFullClusterOutputCapacity = 0u;
+    uint32_t m_reyesOwnedClusterCapacity = 0u;
+    uint32_t m_reyesSplitQueueCapacity = 0u;
+    uint32_t m_reyesDiceQueueCapacity = 0u;
+    uint32_t m_reyesDiceQueuePhysicalCapacity = 0u;
+    uint32_t m_reyesRasterWorkCapacity = 0u;
+    uint32_t m_reyesOwnershipBitsetWordCount = 0u;
+    uint64_t m_reyesRequestedBudgetBytes = 0u;
+    uint64_t m_reyesAllocatedBudgetBytes = 0u;
+    bool m_reyesBudgetLimited = false;
 
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
