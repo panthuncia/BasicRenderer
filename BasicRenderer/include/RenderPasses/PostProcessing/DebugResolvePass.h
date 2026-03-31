@@ -17,8 +17,6 @@ public:
 	}
 
 	void Setup() override {
-		RegisterSRV(Builtin::DebugVisualization);
-		RegisterSRV(Builtin::CameraBuffer);
 	}
 
 	PassReturn Execute(PassExecutionContext& executionContext) override {

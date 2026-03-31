@@ -249,6 +249,8 @@ public:
         m_alphaDeepVisibilityCounterQuery = {};
         m_alphaDeepVisibilityOverflowQuery = {};
         m_alphaDeepVisibilityStatsQuery = {};
+		m_reyesTelemetryPhase1Query = {};
+		m_reyesTelemetryPhase2Query = {};
     }
 
     // ImGui descriptor heap allocator for user textures (slot 0 reserved for font atlas).
@@ -339,6 +341,18 @@ private:
     uint64_t m_clodTelemetryCaptureCount = 0;
     std::string m_clodTelemetryStatus = "No captures yet.";
 
+    bool m_clodReyesTelemetryHasData = false;
+    bool m_clodReyesTelemetryCapturePending = false;
+    uint64_t m_clodReyesTelemetryCaptureId = 0;
+    uint64_t m_clodReyesTelemetryCaptureCount = 0;
+    bool m_clodReyesTelemetryHasPendingPhase1 = false;
+    bool m_clodReyesTelemetryHasPendingPhase2 = false;
+    CLodReyesTelemetry m_clodReyesTelemetryPendingPhase1{};
+    CLodReyesTelemetry m_clodReyesTelemetryPendingPhase2{};
+    CLodReyesTelemetry m_clodReyesTelemetryPhase1{};
+    CLodReyesTelemetry m_clodReyesTelemetryPhase2{};
+    std::string m_clodReyesTelemetryStatus = "No Reyes captures yet.";
+
     struct CLodStreamingOpsHistorySample {
         std::chrono::steady_clock::time_point timestamp;
         CLodStreamingOperationStats stats{};
@@ -380,8 +394,10 @@ private:
     std::string m_clodAlphaTelemetryStatus = "No alpha captures yet.";
 
     flecs::query<const Components::Resource> m_telemetryQuery;
-	flecs::query<const Components::Resource> m_visibleClustersQuery;
-	flecs::query<const Components::Resource> m_visibleCounterQuery;
+    flecs::query<const Components::Resource> m_reyesTelemetryPhase1Query;
+    flecs::query<const Components::Resource> m_reyesTelemetryPhase2Query;
+    flecs::query<const Components::Resource> m_visibleClustersQuery;
+    flecs::query<const Components::Resource> m_visibleCounterQuery;
     flecs::query<const Components::Resource> m_alphaDeepVisibilityCounterQuery;
     flecs::query<const Components::Resource> m_alphaDeepVisibilityOverflowQuery;
     flecs::query<const Components::Resource> m_alphaDeepVisibilityStatsQuery;
@@ -391,6 +407,7 @@ private:
     void DrawFrameTaskGraphWindow();
     void DrawAutoAliasPlannerWindow();
     void TryFinalizeCLodCaptureStats(uint64_t captureId);
+    void TryFinalizeCLodReyesTelemetryCapture(uint64_t captureId);
     void TryFinalizeCLodAlphaTelemetryCapture(uint64_t captureId);
 
     void DrawEnvironmentsDropdown();
@@ -461,6 +478,10 @@ private:
     CLodSoftwareRasterMode m_clodSoftwareRasterMode = CLodSoftwareRasterMode::Disabled;
     std::function<CLodSoftwareRasterMode()> getCLodSoftwareRasterMode;
     std::function<void(CLodSoftwareRasterMode)> setCLodSoftwareRasterMode;
+
+    bool m_clodDisableReyesRasterization = false;
+    std::function<bool()> getCLodDisableReyesRasterization;
+    std::function<void(bool)> setCLodDisableReyesRasterization;
 
     bool wireframeEnabled = false;
 	std::function<bool()> getWireframeEnabled;
@@ -665,6 +686,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_clodSoftwareRasterMode = getCLodSoftwareRasterMode();
     observerSetting(m_clodSoftwareRasterMode, CLodSoftwareRasterModeSettingName);
 
+    getCLodDisableReyesRasterization = settingsManager.getSettingGetter<bool>(CLodDisableReyesRasterizationSettingName);
+    setCLodDisableReyesRasterization = settingsManager.getSettingSetter<bool>(CLodDisableReyesRasterizationSettingName);
+    m_clodDisableReyesRasterization = getCLodDisableReyesRasterization();
+    observerSetting(m_clodDisableReyesRasterization, CLodDisableReyesRasterizationSettingName);
+
 	setWireframeEnabled = settingsManager.getSettingSetter<bool>("enableWireframe");
 	getWireframeEnabled = settingsManager.getSettingGetter<bool>("enableWireframe");
 	wireframeEnabled = getWireframeEnabled();
@@ -773,6 +799,16 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_telemetryQuery = RendererECSManager::GetInstance().GetWorld()
         .query_builder<const Components::Resource>()
         .with<CLodWorkGraphTelemetryBufferTag>()
+        .with<CLodExtensionTypeTag>(visBufferTag)
+        .build();
+    m_reyesTelemetryPhase1Query = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<CLodReyesTelemetryBufferPhase1Tag>()
+        .with<CLodExtensionTypeTag>(visBufferTag)
+        .build();
+    m_reyesTelemetryPhase2Query = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<CLodReyesTelemetryBufferPhase2Tag>()
         .with<CLodExtensionTypeTag>(visBufferTag)
         .build();
     m_visibleClustersQuery = RendererECSManager::GetInstance().GetWorld()
@@ -914,6 +950,9 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             clodSoftwareRasterModeIndex = std::clamp(clodSoftwareRasterModeIndex, 0, CLodSoftwareRasterModeCount - 1);
             m_clodSoftwareRasterMode = static_cast<CLodSoftwareRasterMode>(clodSoftwareRasterModeIndex);
             setCLodSoftwareRasterMode(m_clodSoftwareRasterMode);
+        }
+        if (ImGui::Checkbox("Disable Reyes Tessellation/Displacement", &m_clodDisableReyesRasterization)) {
+            setCLodDisableReyesRasterization(m_clodDisableReyesRasterization);
         }
 		if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
 			setWireframeEnabled(wireframeEnabled);
@@ -1597,10 +1636,42 @@ inline void Menu::TryFinalizeCLodAlphaTelemetryCapture(uint64_t captureId) {
         m_clodAlphaStats.maxResolvedSamples);
 }
 
+inline void Menu::TryFinalizeCLodReyesTelemetryCapture(uint64_t captureId) {
+    if (!m_clodReyesTelemetryCapturePending || m_clodReyesTelemetryCaptureId != captureId) {
+        return;
+    }
+
+    if (!m_clodReyesTelemetryHasPendingPhase1 || !m_clodReyesTelemetryHasPendingPhase2) {
+        return;
+    }
+
+    m_clodReyesTelemetryPhase1 = m_clodReyesTelemetryPendingPhase1;
+    m_clodReyesTelemetryPhase2 = m_clodReyesTelemetryPendingPhase2;
+    m_clodReyesTelemetryHasData = true;
+    m_clodReyesTelemetryCapturePending = false;
+    m_clodReyesTelemetryCaptureCount++;
+    m_clodReyesTelemetryStatus = "Reyes capture completed.";
+
+    spdlog::info(
+        "Reyes telemetry capture: phase1 input={} totalDice={} splitDepth={} rasterizedPatches={} rasterizedMicros={} | phase2 input={} totalDice={} splitDepth={} rasterizedPatches={} rasterizedMicros={}",
+        m_clodReyesTelemetryPhase1.visibleClusterInputCount,
+        m_clodReyesTelemetryPhase1.immediateDiceQueueEntryCount + m_clodReyesTelemetryPhase1.finalDiceQueueEntryCount,
+        m_clodReyesTelemetryPhase1.deepestSplitLevelReached,
+        m_clodReyesTelemetryPhase1.patchRasterizedPatchCount,
+        m_clodReyesTelemetryPhase1.patchRasterizedMicroTriangleCount,
+        m_clodReyesTelemetryPhase2.visibleClusterInputCount,
+        m_clodReyesTelemetryPhase2.immediateDiceQueueEntryCount + m_clodReyesTelemetryPhase2.finalDiceQueueEntryCount,
+        m_clodReyesTelemetryPhase2.deepestSplitLevelReached,
+        m_clodReyesTelemetryPhase2.patchRasterizedPatchCount,
+        m_clodReyesTelemetryPhase2.patchRasterizedMicroTriangleCount);
+}
+
 inline void Menu::DrawCLodTelemetryWindow() {
     ImGui::Begin("CLod Work Graph Telemetry", nullptr);
 
     Resource* clodTelemetryResource = nullptr;
+    Resource* reyesTelemetryPhase1Resource = nullptr;
+    Resource* reyesTelemetryPhase2Resource = nullptr;
     Resource* clodVisibleClustersResource = nullptr;
     Resource* clodVisibleCounterResource = nullptr;
     Resource* alphaNodeCounterResource = nullptr;
@@ -1611,6 +1682,22 @@ inline void Menu::DrawCLodTelemetryWindow() {
             if (clodTelemetryResource == nullptr) {
                 if (auto resource = resourceComponent.resource.lock()) {
                     clodTelemetryResource = resource.get();
+                }
+            }
+            });
+
+        m_reyesTelemetryPhase1Query.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (reyesTelemetryPhase1Resource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    reyesTelemetryPhase1Resource = resource.get();
+                }
+            }
+            });
+
+        m_reyesTelemetryPhase2Query.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (reyesTelemetryPhase2Resource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    reyesTelemetryPhase2Resource = resource.get();
                 }
             }
             });
@@ -1661,8 +1748,12 @@ inline void Menu::DrawCLodTelemetryWindow() {
         (alphaNodeCounterResource != nullptr) &&
         (alphaOverflowCounterResource != nullptr) &&
         (alphaStatsResource != nullptr);
+    const bool reyesCaptureResourcesReady =
+        (reyesTelemetryPhase1Resource != nullptr) &&
+        (reyesTelemetryPhase2Resource != nullptr);
     auto* readbackService = m_renderGraph ? m_renderGraph->GetReadbackService() : nullptr;
     const bool canCapture = (clodTelemetryResource != nullptr) && (readbackService != nullptr) && (!m_clodTelemetryCapturePending) && (!m_clodCaptureStatsPending);
+    const bool canCaptureReyes = reyesCaptureResourcesReady && (readbackService != nullptr) && (!m_clodReyesTelemetryCapturePending);
     const bool canCaptureAlpha = alphaCaptureResourcesReady && (readbackService != nullptr) && (!m_clodAlphaTelemetryCapturePending);
 
     if (!captureStatsResourcesReady) {
@@ -1794,6 +1885,70 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
     ImGui::SameLine();
     ImGui::Text("Status: %s", m_clodTelemetryStatus.c_str());
+
+    if (!reyesCaptureResourcesReady) {
+        ImGui::TextDisabled("Reyes metrics unavailable: phase telemetry resources not found.");
+    }
+
+    if (!canCaptureReyes) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Capture Reyes Metrics")) {
+        m_clodReyesTelemetryCapturePending = true;
+        m_clodReyesTelemetryCaptureId++;
+        m_clodReyesTelemetryHasPendingPhase1 = false;
+        m_clodReyesTelemetryHasPendingPhase2 = false;
+        m_clodReyesTelemetryPendingPhase1 = {};
+        m_clodReyesTelemetryPendingPhase2 = {};
+        m_clodReyesTelemetryStatus = "Reyes capture requested.";
+
+        const uint64_t captureId = m_clodReyesTelemetryCaptureId;
+        readbackService->RequestReadbackCapture(
+            "CLodOpaque::ReyesPatchRasterPass1",
+            reyesTelemetryPhase1Resource,
+            RangeSpec{},
+            [this, captureId](ReadbackCaptureResult&& result) {
+                if (!m_clodReyesTelemetryCapturePending || m_clodReyesTelemetryCaptureId != captureId) {
+                    return;
+                }
+
+                if (result.data.size() < sizeof(CLodReyesTelemetry)) {
+                    m_clodReyesTelemetryStatus = "Reyes capture failed: phase 1 payload too small.";
+                    m_clodReyesTelemetryCapturePending = false;
+                    return;
+                }
+
+                std::memcpy(&m_clodReyesTelemetryPendingPhase1, result.data.data(), sizeof(CLodReyesTelemetry));
+                m_clodReyesTelemetryHasPendingPhase1 = true;
+                TryFinalizeCLodReyesTelemetryCapture(captureId);
+            });
+
+        readbackService->RequestReadbackCapture(
+            "CLodOpaque::ReyesPatchRasterPass2",
+            reyesTelemetryPhase2Resource,
+            RangeSpec{},
+            [this, captureId](ReadbackCaptureResult&& result) {
+                if (!m_clodReyesTelemetryCapturePending || m_clodReyesTelemetryCaptureId != captureId) {
+                    return;
+                }
+
+                if (result.data.size() < sizeof(CLodReyesTelemetry)) {
+                    m_clodReyesTelemetryStatus = "Reyes capture failed: phase 2 payload too small.";
+                    m_clodReyesTelemetryCapturePending = false;
+                    return;
+                }
+
+                std::memcpy(&m_clodReyesTelemetryPendingPhase2, result.data.data(), sizeof(CLodReyesTelemetry));
+                m_clodReyesTelemetryHasPendingPhase2 = true;
+                TryFinalizeCLodReyesTelemetryCapture(captureId);
+            });
+    }
+    if (!canCaptureReyes) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine();
+    ImGui::Text("Reyes Status: %s", m_clodReyesTelemetryStatus.c_str());
 
     if (!alphaCaptureResourcesReady) {
         ImGui::TextDisabled("Alpha deep-visibility metrics unavailable: required resources not found.");
@@ -2155,6 +2310,76 @@ inline void Menu::DrawCLodTelemetryWindow() {
         ImGui::Text("Max clusters/instance: %u (%.1f%% of total)",
             m_clodCaptureStats.maxClustersPerInstance,
             m_clodCaptureStats.dominantInstancePercent);
+    }
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Reyes Pipeline");
+    if (m_clodReyesTelemetryCapturePending) {
+        ImGui::Text("Reyes capture status: pending...");
+    }
+    else if (!m_clodReyesTelemetryHasData) {
+        ImGui::TextDisabled("No Reyes telemetry capture results yet.");
+    }
+    else {
+        ImGui::Text("Reyes telemetry captures: %llu", static_cast<unsigned long long>(m_clodReyesTelemetryCaptureCount));
+
+        const auto drawReyesPhase = [](const char* label, const CLodReyesTelemetry& telemetry) {
+            if (!ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen)) {
+                return;
+            }
+
+            const uint32_t totalDiceInputs = telemetry.immediateDiceQueueEntryCount + telemetry.finalDiceQueueEntryCount;
+            ImGui::Text("Phase index: %u", telemetry.phaseIndex);
+            ImGui::Text("Classify: visible input=%u full output=%u immediate dice=%u",
+                telemetry.visibleClusterInputCount,
+                telemetry.fullClusterOutputCount,
+                telemetry.immediateDiceQueueEntryCount);
+            ImGui::Text("Split: deepest level=%u max configured=%u split-routed dice=%u",
+                telemetry.deepestSplitLevelReached,
+                telemetry.configuredMaxSplitPassCount,
+                telemetry.finalDiceQueueEntryCount);
+            ImGui::Text("Split rejects: invalid domains=%u fallback-to-dice=%u",
+                telemetry.invalidSplitPatchDomainCount,
+                telemetry.splitCollapseFallbackDiceCount);
+            ImGui::Text("Dice: total queue inputs=%u valid patches=%u invalid domains=%u est triangles=%u est vertices=%u",
+                totalDiceInputs,
+                telemetry.dicedPatchCount,
+                telemetry.invalidDicePatchDomainCount,
+                telemetry.dicedTriangleEstimateCount,
+                telemetry.dicedVertexEstimateCount);
+            ImGui::Text("Raster work: emitted patches=%u emitted microtriangles=%u overflow patches=%u overflow batches=%u",
+                telemetry.patchRasterizedPatchCount,
+                telemetry.patchRasterizedMicroTriangleCount,
+                telemetry.rasterWorkOverflowPatchCount,
+                telemetry.rasterWorkOverflowBatchCount);
+            ImGui::Text("Patch raster rejects: zeroCount=%u overflow=%u clip=%u area=%u bounds=%u clippedQuad=%u",
+                telemetry.rasterZeroMicroTriangleCount,
+                telemetry.rasterMicroTriangleOverflowCount,
+                telemetry.rasterClipCullCount,
+                telemetry.rasterPreAreaCullCount,
+                telemetry.rasterEmptyBoundsCullCount,
+                telemetry.rasterNearPlaneClippedQuadCount);
+            ImGui::Text("Patch raster projected-triangles: windingSwaps=%u postSwapDegenerate=%u",
+                telemetry.rasterWindingSwapCount,
+                telemetry.rasterPostSwapNonNegativeAreaCount);
+            ImGui::Text("Patch raster tiny-triangle fallback=%u",
+                telemetry.rasterTinyTriangleFallbackCount);
+
+            ImGui::TextUnformatted("Per split pass");
+            for (uint32_t splitPassIndex = 0; splitPassIndex < CLodReyesMaxSplitPassCount; ++splitPassIndex) {
+                ImGui::Text(
+                    "  Split %u: input=%u children=%u diced=%u splitOverflow=%u diceOverflow=%u",
+                    splitPassIndex,
+                    telemetry.splitInputCounts[splitPassIndex],
+                    telemetry.splitChildOutputCounts[splitPassIndex],
+                    telemetry.splitDiceOutputCounts[splitPassIndex],
+                    telemetry.splitQueueOverflowCounts[splitPassIndex],
+                    telemetry.diceQueueOverflowCounts[splitPassIndex]);
+            }
+        };
+
+        drawReyesPhase("Reyes Phase 1", m_clodReyesTelemetryPhase1);
+        drawReyesPhase("Reyes Phase 2", m_clodReyesTelemetryPhase2);
     }
 
     ImGui::Separator();

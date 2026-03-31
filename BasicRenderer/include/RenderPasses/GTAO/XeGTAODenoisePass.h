@@ -20,7 +20,7 @@ public:
     }
 
     void Setup() override {
-        RegisterCBV("Builtin::GTAO::ConstantsBuffer");
+        // Removed redundant Register calls now covered by declared-resource auto descriptor registration
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override {

@@ -12,15 +12,25 @@
 
 DeepVisibilityResolvePass::DeepVisibilityResolvePass(
     std::shared_ptr<Buffer> visibleClustersBuffer,
+    std::shared_ptr<Buffer> reyesDiceQueueBuffer,
+    std::shared_ptr<Buffer> reyesTessTableConfigsBuffer,
+    std::shared_ptr<Buffer> reyesTessTableVerticesBuffer,
+    std::shared_ptr<Buffer> reyesTessTableTrianglesBuffer,
     std::shared_ptr<Buffer> deepVisibilityNodesBuffer,
     std::shared_ptr<Buffer> deepVisibilityCounterBuffer,
     std::shared_ptr<Buffer> deepVisibilityOverflowCounterBuffer,
-    std::shared_ptr<Buffer> deepVisibilityStatsBuffer)
+    std::shared_ptr<Buffer> deepVisibilityStatsBuffer,
+    uint32_t patchVisibilityIndexBase)
     : m_visibleClustersBuffer(std::move(visibleClustersBuffer))
+    , m_reyesDiceQueueBuffer(std::move(reyesDiceQueueBuffer))
+    , m_reyesTessTableConfigsBuffer(std::move(reyesTessTableConfigsBuffer))
+    , m_reyesTessTableVerticesBuffer(std::move(reyesTessTableVerticesBuffer))
+    , m_reyesTessTableTrianglesBuffer(std::move(reyesTessTableTrianglesBuffer))
     , m_deepVisibilityNodesBuffer(std::move(deepVisibilityNodesBuffer))
     , m_deepVisibilityCounterBuffer(std::move(deepVisibilityCounterBuffer))
     , m_deepVisibilityOverflowCounterBuffer(std::move(deepVisibilityOverflowCounterBuffer))
     , m_deepVisibilityStatsBuffer(std::move(deepVisibilityStatsBuffer))
+    , m_patchVisibilityIndexBase(patchVisibilityIndexBase)
 {
     auto& settingsManager = SettingsManager::GetInstance();
     m_getPunctualLightingEnabled = settingsManager.getSettingGetter<bool>("enablePunctualLighting");
@@ -67,6 +77,17 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
         .WithUnorderedAccess(Builtin::DebugVisualization)
         .WithUnorderedAccess(m_deepVisibilityStatsBuffer);
 
+    if (m_reyesDiceQueueBuffer) {
+        builder->WithShaderResource(m_reyesDiceQueueBuffer);
+    }
+
+    if (m_reyesTessTableConfigsBuffer && m_reyesTessTableVerticesBuffer && m_reyesTessTableTrianglesBuffer) {
+        builder->WithShaderResource(
+            m_reyesTessTableConfigsBuffer,
+            m_reyesTessTableVerticesBuffer,
+            m_reyesTessTableTrianglesBuffer);
+    }
+
     if (m_primaryHeadPointerTexture) {
         builder->WithShaderResource(m_primaryHeadPointerTexture);
     }
@@ -75,36 +96,6 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
 void DeepVisibilityResolvePass::Setup()
 {
     m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
-
-    RegisterSRV(Builtin::Light::ActiveLightIndices);
-    RegisterSRV(Builtin::Light::InfoBuffer);
-    RegisterSRV(Builtin::Light::PointLightCubemapBuffer);
-    RegisterSRV(Builtin::Light::SpotLightMatrixBuffer);
-    RegisterSRV(Builtin::Light::DirectionalLightCascadeBuffer);
-    RegisterSRV(Builtin::Light::ClusterBuffer);
-    RegisterSRV(Builtin::Light::PagesBuffer);
-    RegisterSRV(Builtin::Environment::InfoBuffer);
-    RegisterSRV(Builtin::CameraBuffer);
-    //RegisterSRV(Builtin::Shadows::ShadowMaps);
-    RegisterSRV(Builtin::PostSkinningVertices);
-    RegisterSRV(Builtin::PerObjectBuffer);
-    RegisterSRV(Builtin::NormalMatrixBuffer);
-    RegisterSRV(Builtin::PerMeshBuffer);
-    RegisterSRV(Builtin::PerMeshInstanceBuffer);
-    RegisterSRV(Builtin::PerMaterialDataBuffer);
-    RegisterSRV(Builtin::CLod::Offsets);
-    RegisterSRV(Builtin::CLod::GroupChunks);
-    RegisterSRV(Builtin::CLod::Groups);
-    RegisterSRV(Builtin::CLod::MeshMetadata);
-    RegisterSRV(Builtin::MeshResources::MeshletTriangles);
-    RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
-    RegisterSRV(Builtin::MeshResources::MeshletOffsets);
-    RegisterSRV(Builtin::SkeletonResources::InverseBindMatrices);
-    RegisterSRV(Builtin::SkeletonResources::BoneTransforms);
-    RegisterSRV(Builtin::SkeletonResources::SkinningInstanceInfo);
-
-    RegisterUAV(Builtin::Color::HDRColorTarget);
-    RegisterUAV(Builtin::DebugVisualization);
 }
 
 void DeepVisibilityResolvePass::Update(const UpdateExecutionContext& executionContext)
@@ -165,6 +156,19 @@ PassReturn DeepVisibilityResolvePass::Execute(PassExecutionContext& executionCon
     misc[CLOD_DEEP_VISIBILITY_RESOLVE_OVERFLOW_COUNTER_DESCRIPTOR_INDEX] = m_deepVisibilityOverflowCounterBuffer->GetSRVInfo(0).slot.index;
     misc[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClustersBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_DEEP_VISIBILITY_RESOLVE_STATS_DESCRIPTOR_INDEX] = m_deepVisibilityStatsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    misc[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_reyesDiceQueueBuffer
+        ? m_reyesDiceQueueBuffer->GetSRVInfo(0).slot.index
+        : 0xFFFFFFFFu;
+    misc[VISBUF_REYES_PATCH_INDEX_BASE] = m_patchVisibilityIndexBase;
+    misc[VISBUF_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX] = m_reyesTessTableConfigsBuffer
+        ? m_reyesTessTableConfigsBuffer->GetSRVInfo(0).slot.index
+        : 0xFFFFFFFFu;
+    misc[VISBUF_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX] = m_reyesTessTableVerticesBuffer
+        ? m_reyesTessTableVerticesBuffer->GetSRVInfo(0).slot.index
+        : 0xFFFFFFFFu;
+    misc[VISBUF_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX] = m_reyesTessTableTrianglesBuffer
+        ? m_reyesTessTableTrianglesBuffer->GetSRVInfo(0).slot.index
+        : 0xFFFFFFFFu;
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
         0,

@@ -23,10 +23,7 @@ public:
     }
 
     void Setup() override {
-
-        RegisterSRV("Builtin::VisUtil::MaterialPixelCountBuffer");
-        RegisterUAV("Builtin::VisUtil::MaterialOffsetBuffer");
-        RegisterUAV("Builtin::VisUtil::BlockSumsBuffer");
+        // Removed redundant Register calls now covered by declared-resource auto descriptor registration
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override {

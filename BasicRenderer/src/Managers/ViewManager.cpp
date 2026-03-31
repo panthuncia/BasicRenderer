@@ -9,6 +9,7 @@
 #include "Resources/ResourceGroup.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
+#include "Render/MemoryIntrospectionAPI.h"
 #include "../../generated/BuiltinResources.h"
 #include "Resources/DynamicResource.h"
 #include "Resources/MemoryStatisticsComponents.h"
@@ -57,6 +58,8 @@ ViewManager::ViewManager() {
     auto& resourceManager = ResourceManager::GetInstance();
     m_cameraBuffer = LazyDynamicStructuredBuffer<CameraInfo>::CreateShared(1, "cameraBuffer<ViewManager>");
 	m_cullingCameraBuffer = LazyDynamicStructuredBuffer<CullingCameraInfo>::CreateShared(1, "cullingCameraBuffer<ViewManager>");
+    rg::memory::SetResourceUsageHint(*m_cameraBuffer, "Camera and view buffers");
+	rg::memory::SetResourceUsageHint(*m_cullingCameraBuffer, "Camera and view buffers");
     m_lastFrameLinearDepthGroup = std::make_shared<ResourceGroup>("LastFrameLinearDepthMaps");
 
     // Register provided resources

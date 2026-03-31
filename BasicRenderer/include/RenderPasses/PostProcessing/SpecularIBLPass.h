@@ -36,20 +36,6 @@ public:
 
     void Setup() override {
         m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::Color::HDRColorTarget);
-        
-        RegisterSRV(Builtin::Environment::InfoBuffer);
-
-        if (m_gtaoEnabled)
-			RegisterSRV(Builtin::GTAO::OutputAOTerm);
-
-		RegisterSRV(Builtin::GBuffer::Normals);
-		RegisterSRV(Builtin::GBuffer::Albedo);
-		RegisterSRV(Builtin::GBuffer::Emissive);
-		RegisterSRV(Builtin::GBuffer::MetallicRoughness);
-		RegisterSRV(Builtin::PrimaryCamera::DepthTexture);
-		RegisterSRV(Builtin::CameraBuffer);
-		RegisterSRV(Builtin::PostProcessing::ScreenSpaceReflections);
-		RegisterUAV(Builtin::DebugVisualization);
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override {

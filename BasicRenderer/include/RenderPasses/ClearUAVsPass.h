@@ -12,16 +12,8 @@
 struct ClearIndirectDrawCommandUAVPassInputs {
 	bool clearBlend;
 
-	friend bool operator==(const ClearIndirectDrawCommandUAVPassInputs&, const ClearIndirectDrawCommandUAVPassInputs&) = default;
+	RG_DEFINE_PASS_INPUTS(ClearIndirectDrawCommandUAVPassInputs, &ClearIndirectDrawCommandUAVPassInputs::clearBlend);
 };
-
-inline rg::Hash64 HashValue(const ClearIndirectDrawCommandUAVPassInputs& i) {
-	std::size_t seed = 0;
-
-	boost::hash_combine(seed, i.clearBlend);
-	return seed;
-}
-
 
 class ClearIndirectDrawCommandUAVsPass : public RenderPass {
 public:
@@ -85,7 +77,11 @@ public:
 	}
 
 	void Cleanup() override {
-
+		lightQuery = {};
+		m_nonBlendQuery = ECSResourceResolver();
+		m_blendQuery = ECSResourceResolver();
+		m_nonBlendIndirectCommandBuffers.clear();
+		m_blendIndirectCommandBuffers.clear();
 	}
 
 private:

@@ -495,6 +495,15 @@ size_t Skeleton::GetAnimationCount() const noexcept
     return base->animations.size();
 }
 
+size_t Skeleton::GetActiveAnimationIndex() const noexcept
+{
+    if (m_isBaseSkeleton) {
+        return size_t(-1);
+    }
+
+    return m_activeAnimationIndex;
+}
+
 float Skeleton::GetCurrentAnimationConservativeBoundsScale() const noexcept
 {
     if (m_isBaseSkeleton) {

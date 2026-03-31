@@ -3,6 +3,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "../shaders/PerPassRootConstants/visUtilRootConstants.h"
 
 class MaterialHistogramPass : public ComputePass {
@@ -26,10 +27,17 @@ public:
             .with<CLodExtensionTypeTag>(visBufferTag)
             .with<VisibleClustersBufferTag>()
             .build();
+
+        m_reyesDiceQueueQuery =
+            ecsWorld.query_builder<>()
+            .with<CLodExtensionTypeTag>(visBufferTag)
+            .with<CLodReyesDiceQueueTag>()
+            .build();
     }
     void DeclareResourceUsages(ComputePassBuilder* b) override {
 
-        b->WithShaderResource(ECSResourceResolver(m_visibleClustersQuery));
+        b->WithShaderResource(ECSResourceResolver(m_visibleClustersQuery)); 
+    	b->WithShaderResource(ECSResourceResolver(m_reyesDiceQueueQuery));
         b->WithShaderResource(MESH_RESOURCE_IDFENTIFIERS,
                               Builtin::PrimaryCamera::VisibilityTexture,
                               //Builtin::PrimaryCamera::VisibleClusterTable,
@@ -40,14 +48,6 @@ public:
     }
 
     void Setup() override {
-
-        RegisterSRV(Builtin::PrimaryCamera::VisibilityTexture);
-        //RegisterSRV(Builtin::PrimaryCamera::VisibleClusterTable);
-        RegisterSRV(Builtin::PerMeshInstanceBuffer);
-        RegisterSRV(Builtin::PerMeshBuffer);
-        RegisterSRV(Builtin::PerMaterialDataBuffer);
-        RegisterUAV("Builtin::VisUtil::MaterialPixelCountBuffer");
-
         std::vector<GloballyIndexedResource*> visibleClusterResources;
         m_visibleClustersQuery.each([&](flecs::entity e) {
             auto& res = e.get<Components::Resource>();
@@ -55,6 +55,8 @@ public:
             if (test) {
                 visibleClusterResources.push_back(test.get());
             }
+            const auto capacity = e.get<CLodVisibleClusterCapacity>();
+            m_patchVisibilityIndexBase = CLodReyesPatchVisibilityIndexBase(capacity.maxVisibleClusters);
             });
 
         if (visibleClusterResources.size() != 1) {
@@ -62,6 +64,19 @@ public:
         }
 
         m_visibleClusterBufferSRVIndex = visibleClusterResources[0]->GetSRVInfo(0).slot.index;
+        m_reyesDiceQueueBufferSRVIndex = 0xFFFFFFFFu;
+
+        std::vector<GloballyIndexedResource*> reyesDiceQueueResources;
+        m_reyesDiceQueueQuery.each([&](flecs::entity e) {
+            if (const auto res = e.try_get<Components::Resource>(); res) {
+                if (const auto test = std::static_pointer_cast<GloballyIndexedResource>(res->resource.lock()); test) {
+                    reyesDiceQueueResources.push_back(test.get());
+                }
+            }
+            });
+        if (reyesDiceQueueResources.size() == 1) {
+            m_reyesDiceQueueBufferSRVIndex = reyesDiceQueueResources[0]->GetSRVInfo(0).slot.index;
+        }
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override {
@@ -78,6 +93,8 @@ public:
         // Set per-pass root constants
         unsigned int miscRootConstants[NumMiscUintRootConstants] = {};
         miscRootConstants[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX] = m_visibleClusterBufferSRVIndex;
+        miscRootConstants[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX] = m_reyesDiceQueueBufferSRVIndex;
+        miscRootConstants[VISBUF_REYES_PATCH_INDEX_BASE] = m_patchVisibilityIndexBase;
         cl.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, miscRootConstants);
 
         const uint32_t groupSizeX = 8, groupSizeY = 8;
@@ -87,10 +104,16 @@ public:
         return {};
     }
 
-    void Cleanup() override {}
+    void Cleanup() override {
+        m_visibleClustersQuery = {};
+        m_reyesDiceQueueQuery = {};
+    }
 
 private:
     PipelineState m_pso;
 	flecs::query<> m_visibleClustersQuery;
+    flecs::query<> m_reyesDiceQueueQuery;
     uint32_t m_visibleClusterBufferSRVIndex = 0;
+    uint32_t m_reyesDiceQueueBufferSRVIndex = 0xFFFFFFFFu;
+    uint32_t m_patchVisibilityIndexBase = 0u;
 };

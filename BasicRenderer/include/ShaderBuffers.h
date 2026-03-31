@@ -122,7 +122,7 @@ struct PerMeshInstanceCB {
     unsigned int skinningInstanceSlot;
     unsigned int postSkinningVertexBufferOffset;
     float skinnedBoundsScale = 1.0f;
-    unsigned int pad[3] = {};
+    BoundingSphere boundingSphere = {};
 };
 
 struct PerMaterialCB {
@@ -456,6 +456,7 @@ enum MiscUintRootConstants { // Used for pass-specific one-off constants
     UintRootConstant11,
     UintRootConstant12,
     UintRootConstant13,
+	UintRootConstant14,
 	NumMiscUintRootConstants
 };
 
@@ -501,7 +502,6 @@ enum ResourceDescriptorIndicesRootConstants { // Auto-assigned, do not set manua
 	ResourceDescriptorIndex28,
 	ResourceDescriptorIndex29,
 	ResourceDescriptorIndex30,
-	ResourceDescriptorIndex31,
     NumResourceDescriptorIndicesRootConstants
 };
 

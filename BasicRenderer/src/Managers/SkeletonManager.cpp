@@ -3,6 +3,7 @@
 #include "Animation/Skeleton.h"
 #include "Resources/Buffers/BufferView.h"
 #include "Render/Runtime/UploadServiceAccess.h"
+#include "Render/MemoryIntrospectionAPI.h"
 #include "../../generated/BuiltinResources.h"
 #include "Resources/Buffers/DynamicStructuredBuffer.h"
 #include "Managers/Singletons/TaskSchedulerManager.h"
@@ -19,6 +20,10 @@ SkeletonManager::SkeletonManager() {
     m_boneTransforms = DynamicBuffer::CreateShared(sizeof(DirectX::XMMATRIX), 1, "BoneTransformsPacked");
 
     m_instanceInfo = DynamicStructuredBuffer<SkinningInstanceGPUInfo>::CreateShared(64, "SkinningInstanceInfo");
+
+    rg::memory::SetResourceUsageHint(*m_inverseBindMatrices, "Skinning data");
+    rg::memory::SetResourceUsageHint(*m_boneTransforms, "Skinning data");
+    rg::memory::SetResourceUsageHint(*m_instanceInfo, "Skinning data");
 
     // Expose via resource provider keys
     m_resources[Builtin::SkeletonResources::InverseBindMatrices] = m_inverseBindMatrices;

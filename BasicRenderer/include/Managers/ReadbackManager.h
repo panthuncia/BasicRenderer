@@ -52,7 +52,7 @@ private:
         void Setup() override {
         }
 
-        void ExecuteImmediate(ImmediateExecutionContext& context) override;
+        void RecordImmediateCommands(ImmediateExecutionContext& context) override;
 
         PassReturn Execute(PassExecutionContext& context) override;
 

@@ -8,9 +8,15 @@
 
 uint GetMaterialIdFromCluster(uint clusterIndex,
                               ByteAddressBuffer visibleClusterBuffer,
+                              StructuredBuffer<CLodReyesDiceQueueEntry> diceQueue,
                               StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance,
                               StructuredBuffer<PerMeshBuffer> perMeshBuffer)
 {
+    if (clusterIndex >= VISBUF_REYES_PATCH_INDEX_BASE && VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
+    {
+        clusterIndex = diceQueue[clusterIndex - VISBUF_REYES_PATCH_INDEX_BASE].visibleClusterIndex;
+    }
+
     uint perMeshInstanceBufferIndex = CLodVisibleClusterInstanceID(CLodLoadVisibleClusterPacked(visibleClusterBuffer, clusterIndex));
     PerMeshInstanceBuffer instanceData = perMeshInstance[perMeshInstanceBufferIndex];
     PerMeshBuffer meshBuffer = perMeshBuffer[instanceData.perMeshBufferIndex];
@@ -51,6 +57,7 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
 
     Texture2D<uint64_t> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
     ByteAddressBuffer visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+    StructuredBuffer<CLodReyesDiceQueueEntry> diceQueue = ResourceDescriptorHeap[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX];
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
 
@@ -69,7 +76,7 @@ void MaterialHistogramCS(uint3 dtid : SV_DispatchThreadID)
     UnpackVisKey(vis, depth, clusterIndex, primID);
 
     // Derive material ID
-    uint matId = GetMaterialIdFromCluster(clusterIndex, visibleClusterBuffer, perMeshInstance, perMeshBuffer);
+    uint matId = GetMaterialIdFromCluster(clusterIndex, visibleClusterBuffer, diceQueue, perMeshInstance, perMeshBuffer);
     
     // Group threads in the wave by matId
     uint4 mask = WaveMatch(matId);
@@ -98,6 +105,7 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
 
     Texture2D<uint64_t> visibility = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::VisibilityTexture)];
     ByteAddressBuffer visibleClusterBuffer = ResourceDescriptorHeap[VISBUF_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+    StructuredBuffer<CLodReyesDiceQueueEntry> diceQueue = ResourceDescriptorHeap[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX];
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
 
@@ -119,7 +127,7 @@ void BuildPixelListCS(uint3 dtid : SV_DispatchThreadID)
     uint primID;
     UnpackVisKey(vis, depth, clusterIndex, primID);
     
-    uint matId = GetMaterialIdFromCluster(clusterIndex, visibleClusterBuffer, perMeshInstance, perMeshBuffer);
+    uint matId = GetMaterialIdFromCluster(clusterIndex, visibleClusterBuffer, diceQueue, perMeshInstance, perMeshBuffer);
 
     // Group threads in this wave by matId
     uint4 groupMask = WaveMatch(matId);

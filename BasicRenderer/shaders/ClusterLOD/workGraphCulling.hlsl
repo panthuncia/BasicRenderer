@@ -533,9 +533,9 @@ void WG_ObjectCull(
                     ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
         const Camera camera = cameras[hdr.viewDataIndex];
 
-        const float3 objectSpaceCenter = perMesh.boundingSphere.sphere.xyz;
+        const float3 objectSpaceCenter = instanceData.boundingSphere.sphere.xyz;
         const float3 viewSpaceCenter = ToViewSpace(objectSpaceCenter, objectModelMatrix, camera.view);
-        const float worldRadius = perMesh.boundingSphere.sphere.w * instanceData.skinnedBoundsScale * MaxAxisScale_RowVector(objectModelMatrix);
+        const float worldRadius = instanceData.boundingSphere.sphere.w * MaxAxisScale_RowVector(objectModelMatrix);
 
         const bool culled = SphereOutsideFrustumViewSpace(viewSpaceCenter, worldRadius, camera);
         if (!culled) {
@@ -663,10 +663,10 @@ void WG_TraverseNodes(
         }
 
         const float objectUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
-        const float cullUniformScale = objectUniformScale * (isSkinned ? instanceData.skinnedBoundsScale : 1.0f);
+        const float cullUniformScale = objectUniformScale;
         const float lodUniformScale = objectUniformScale;
-        const float3 nodeCullCenterObjectSpace = isSkinned ? perMesh.boundingSphere.sphere.xyz : node.metric.cullCenterAndRadius.xyz;
-        const float nodeCullRadiusObjectSpace = isSkinned ? perMesh.boundingSphere.sphere.w : node.metric.cullCenterAndRadius.w;
+        const float3 nodeCullCenterObjectSpace = isSkinned ? instanceData.boundingSphere.sphere.xyz : node.metric.cullCenterAndRadius.xyz;
+        const float nodeCullRadiusObjectSpace = isSkinned ? instanceData.boundingSphere.sphere.w : node.metric.cullCenterAndRadius.w;
         const float3 nodeLodCenterObjectSpace = node.metric.lodCenterAndRadius.xyz;
         const float nodeLodRadiusObjectSpace = node.metric.lodCenterAndRadius.w;
         const float3 nodeCenterViewSpace = ToViewSpace(nodeCullCenterObjectSpace, objectModelMatrix, camera.view);
@@ -812,7 +812,7 @@ void WG_TraverseNodes(
                                 // Phase 1: HZB is from previous frame's depth,
                                 // so reproject bounding sphere into previous frame's camera space.
                                 const row_major matrix prevModelMatrix = perObjectBuffer[objectBufferIndex].prevModel;
-                                const float prevNodeCullScale = MaxAxisScale_RowVector(prevModelMatrix) * (isSkinned ? instanceData.skinnedBoundsScale : 1.0f);
+                                const float prevNodeCullScale = MaxAxisScale_RowVector(prevModelMatrix);
                                 const float3 prevNodeCenterViewSpace = ToViewSpace(nodeCullCenterObjectSpace, prevModelMatrix, camera.prevView);
                                 const float prevNodeRadiusWorld = nodeCullRadiusObjectSpace * prevNodeCullScale;
                                 OcclusionCullingPerspectiveTexture2D(
@@ -847,8 +847,8 @@ void WG_TraverseNodes(
                             const ClusterLODNode child = lodNodes[clodMeshMetadata.lodNodesBase + childNodeId];
 
                             // Frustum cull child.
-                            const float3 childCullCenterOS = isSkinned ? perMesh.boundingSphere.sphere.xyz : child.metric.cullCenterAndRadius.xyz;
-                            const float childCullRadiusOS = isSkinned ? perMesh.boundingSphere.sphere.w : child.metric.cullCenterAndRadius.w;
+                            const float3 childCullCenterOS = isSkinned ? instanceData.boundingSphere.sphere.xyz : child.metric.cullCenterAndRadius.xyz;
+                            const float childCullRadiusOS = isSkinned ? instanceData.boundingSphere.sphere.w : child.metric.cullCenterAndRadius.w;
                             const float3 childCenterVS = ToViewSpace(childCullCenterOS, objectModelMatrix, camera.view);
                             const float childRadiusWorld = childCullRadiusOS * cullUniformScale;
                             if (!replaySource && SphereOutsideFrustumViewSpace(childCenterVS, childRadiusWorld, camera)) {
@@ -1030,6 +1030,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
     float ownGroupErrorOverDistance = 0.0f;
     uint objectBufferIndex = 0;
     bool isSkinned = false;
+    bool reyesDisplacementCandidate = false;
     uint skinningInstanceSlot = 0xFFFFFFFFu;
 
     if (hasBucket && b.pageSlabDescriptorIndex != 0) {
@@ -1079,6 +1080,12 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
         const PerMeshBuffer perMesh = perMeshBuffer[meshBufferIndex];
         isSkinned = (perMesh.vertexFlags & VERTEX_SKINNED) != 0u;
+        StructuredBuffer<MaterialInfo> materialDataBuffer =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
+        const MaterialInfo materialInfo = materialDataBuffer[perMesh.materialDataIndex];
+        const bool displacementEnabled = materialInfo.geometricDisplacementEnabled != 0u;
+        const float displacementSpan = max(0.0f, materialInfo.geometricDisplacementMax - materialInfo.geometricDisplacementMin);
+        reyesDisplacementCandidate = displacementEnabled && displacementSpan > 1e-5f;
         StructuredBuffer<CullingCameraInfo> cameraInfos =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
         cam = cameraInfos[b.viewId];
@@ -1394,7 +1401,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 
         // SW/HW classification, tiny meshlets go to software rasterization.
         bool isSW = false;
-        if (contributes && swRasterEnabled) {
+        if (contributes && swRasterEnabled && !reyesDisplacementCandidate) {
             // Projected diameter in pixels = meshletRadiusWorld * swScreenScale / (-viewZ)
             // Multiply-compare avoids division: diameter < threshold <-> radius*scale < threshold*(-z)
             isSW = (meshletRadiusWorld * swScreenScale) < (swDiameterThreshold * (-meshletCenterViewSpace.z));

@@ -20,20 +20,8 @@
 struct ShadowPassInputs {
     bool wireframe, meshShaders, indirect, drawBlendShadows, clearDepths;
 
-    friend bool operator==(const ShadowPassInputs&, const ShadowPassInputs&) = default;
+    RG_DEFINE_PASS_INPUTS(ShadowPassInputs, &ShadowPassInputs::wireframe, &ShadowPassInputs::meshShaders, &ShadowPassInputs::indirect, &ShadowPassInputs::drawBlendShadows, &ShadowPassInputs::clearDepths);
 };
-
-inline rg::Hash64 HashValue(const ShadowPassInputs& i) {
-    std::size_t seed = 0;
-
-    boost::hash_combine(seed, i.wireframe);
-    boost::hash_combine(seed, i.meshShaders);
-    boost::hash_combine(seed, i.indirect);
-    boost::hash_combine(seed, i.drawBlendShadows);
-    boost::hash_combine(seed, i.clearDepths);
-    return seed;
-}
-
 
 class ShadowPass : public RenderPass {
 public:
@@ -87,25 +75,6 @@ public:
     }
 
     void Setup() override {
-
-        RegisterSRV(Builtin::NormalMatrixBuffer);
-        RegisterSRV(Builtin::PostSkinningVertices);
-        RegisterSRV(Builtin::PerObjectBuffer);
-        RegisterSRV(Builtin::CameraBuffer);
-        RegisterSRV(Builtin::PerMeshInstanceBuffer);
-        RegisterSRV(Builtin::PerMeshBuffer);
-        RegisterSRV(Builtin::PerMaterialDataBuffer);
-
-        RegisterSRV(Builtin::Light::InfoBuffer);
-        RegisterSRV(Builtin::Light::PointLightCubemapBuffer);
-        RegisterSRV(Builtin::Light::SpotLightMatrixBuffer);
-        RegisterSRV(Builtin::Light::DirectionalLightCascadeBuffer);
-
-        if (m_meshShaders) {
-            RegisterSRV(Builtin::MeshResources::MeshletOffsets);
-            RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
-            RegisterSRV(Builtin::MeshResources::MeshletTriangles);
-        }
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override {

@@ -146,8 +146,7 @@ void BuildBRDFIntegrationPass(RenderGraph* graph) {
     brdfIntegrationTexture->EnableIdleDematerialization(120);
 	graph->RegisterResource(Builtin::BRDFLUT, brdfIntegrationTexture);
 
-    graph->BuildRenderPass("BRDF Integration Pass")
-		.Build<BRDFIntegrationPass>();
+        graph->BuildRenderPass<BRDFIntegrationPass>("BRDF Integration Pass");
 }
 
 void BuildOcclusionCullingPipeline(RenderGraph* graph) {
@@ -217,8 +216,7 @@ void BuildGBufferPipeline(RenderGraph* graph) {
     }
 
     if (!visibilityRendering) {
-        graph->BuildRenderPass("newObjectsPrepass") // Do another prepass for any objects that aren't occluded
-            .Build<GBufferPass>(GBufferPassInputs{
+        graph->BuildRenderPass<GBufferPass>("newObjectsPrepass", GBufferPassInputs{
                 enableWireframe,
                 useMeshShaders,
                 indirect,
@@ -227,31 +225,24 @@ void BuildGBufferPipeline(RenderGraph* graph) {
     else {
 
         // Reset material counters
-        graph->BuildComputePass("MaterialPixelCounterResetPass")
-            .Build<MaterialUAVResetPass>();
+        graph->BuildComputePass<MaterialUAVResetPass>("MaterialPixelCounterResetPass");
 
         // Build material histogram
-        graph->BuildComputePass("MaterialHistogramPass")
-            .Build<MaterialHistogramPass>();
+        graph->BuildComputePass<MaterialHistogramPass>("MaterialHistogramPass");
 
         // Prefix sum material histogram
-        graph->BuildComputePass("MaterialBlockScanPass")
-            .Build<MaterialBlockScanPass>();
+        graph->BuildComputePass<MaterialBlockScanPass>("MaterialBlockScanPass");
 
-        graph->BuildComputePass("MaterialBlockOffsetsPass")
-            .Build<MaterialBlockOffsetsPass>();
+        graph->BuildComputePass<MaterialBlockOffsetsPass>("MaterialBlockOffsetsPass");
 
         // Build pixel list
-        graph->BuildComputePass("BuildPixelListPass")
-            .Build<BuildPixelListPass>();
+        graph->BuildComputePass<BuildPixelListPass>("BuildPixelListPass");
 
         // Build indirect command buffer for material passes
-        graph->BuildComputePass("BuildMaterialIndirectCommandBufferPass")
-            .Build<BuildMaterialIndirectCommandBufferPass>();
+        graph->BuildComputePass<BuildMaterialIndirectCommandBufferPass>("BuildMaterialIndirectCommandBufferPass");
 
         // Evaluate material groups
-        graph->BuildComputePass("EvaluateMaterialGroupsPass")
-            .Build<EvaluateMaterialGroupsPass>();
+        graph->BuildComputePass<EvaluateMaterialGroupsPass>("EvaluateMaterialGroupsPass");
 
         // PrimaryDepthCopyPass is disabled for CLod two-phase path.
     }
@@ -332,14 +323,11 @@ void BuildGTAOPipeline(RenderGraph* graph, const Components::Camera* currentCame
 
     graph->RegisterResource("Builtin::GTAO::ConstantsBuffer", GTAOConstantBuffer);
 
-    graph->BuildComputePass("GTAOFilterPass") // Depth filter pass
-        .Build<GTAOFilterPass>();
+    graph->BuildComputePass<GTAOFilterPass>("GTAOFilterPass"); // Depth filter pass
 
-    graph->BuildComputePass("GTAOMainPass") // Main pass
-        .Build<GTAOMainPass>();
+    graph->BuildComputePass<GTAOMainPass>("GTAOMainPass"); // Main pass
 
-    graph->BuildComputePass("GTAODenoisePass") // Denoise pass
-        .Build<GTAODenoisePass>();
+    graph->BuildComputePass<GTAODenoisePass>("GTAODenoisePass"); // Denoise pass
 }
 
 void BuildLightClusteringPipeline(RenderGraph* graph) {
@@ -354,22 +342,17 @@ void BuildLightClusteringPipeline(RenderGraph* graph) {
     lightPagesCounter->SetName("Light Pages Counter");
     graph->RegisterResource(Builtin::Light::PagesCounter, lightPagesCounter);
 
-    graph->BuildComputePass("ClusterGenerationPass")
-        .Build<ClusterGenerationPass>();
+    graph->BuildComputePass<ClusterGenerationPass>("ClusterGenerationPass");
 
-    graph->BuildComputePass("LightCullingPass")
-        .Build<LightCullingPass>();
+    graph->BuildComputePass<LightCullingPass>("LightCullingPass");
 }
 
 void BuildEnvironmentPipeline(RenderGraph* graph) {
-    graph->BuildComputePass("Environment Conversion Pass")
-        .Build<EnvironmentConversionPass>();
+    graph->BuildComputePass<EnvironmentConversionPass>("Environment Conversion Pass");
 
-    graph->BuildComputePass("Environment Spherical Harmonics Pass")
-        .Build<EnvironmentSHPass>();
+    graph->BuildComputePass<EnvironmentSHPass>("Environment Spherical Harmonics Pass");
 
-    graph->BuildRenderPass("Environment Prefilter Pass")
-        .Build<EnvironmentFilterPass>();
+    graph->BuildRenderPass<EnvironmentFilterPass>("Environment Prefilter Pass");
 }
 
 void BuildMainShadowPass(RenderGraph* graph) {
@@ -385,18 +368,15 @@ void BuildMainShadowPass(RenderGraph* graph) {
         clearRTVs = true; // We will not run an earlier pass
     }
 
-    graph->BuildRenderPass("ShadowPass")
-        .Build<ShadowPass>(ShadowPassInputs{ wireframe, useMeshShaders, indirect, true, clearRTVs });
+    graph->BuildRenderPass<ShadowPass>("ShadowPass", ShadowPassInputs{ wireframe, useMeshShaders, indirect, true, clearRTVs });
 }
 
 void BuildLinearDepthDownsamplePass(RenderGraph* graph) {
-    graph->BuildComputePass("LinearDepthDownsamplePass")
-        .Build<DownsamplePass>();
+    graph->BuildComputePass<DownsamplePass>("LinearDepthDownsamplePass");
 }
 
 void BuildLinearDepthHistoryCopyPass(RenderGraph* graph) {
-    graph->BuildRenderPass("LinearDepthHistoryCopyPass")
-        .Build<LinearDepthHistoryCopyPass>();
+    graph->BuildRenderPass<LinearDepthHistoryCopyPass>("LinearDepthHistoryCopyPass");
 }
 
 void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
@@ -407,10 +387,10 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
 	bool wireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
 
 	// Uses existing GBuffer resources
-    graph->BuildComputePass("DeferredShadingPass").Build<DeferredShadingPass>();
+    graph->BuildComputePass<DeferredShadingPass>("DeferredShadingPass");
 
 	// Forward pass for materials incompatible with deferred rendering
-    graph->BuildRenderPass("Forward render pass").Build<ForwardRenderPass>(ForwardRenderPassInputs{
+    graph->BuildRenderPass<ForwardRenderPass>("Forward render pass", ForwardRenderPassInputs{
         wireframe,
         meshShaders,
         indirect});
@@ -495,16 +475,13 @@ void BuildPPLLPipeline(RenderGraph* graph) {
     graph->RegisterResource(Builtin::PPLL::DataBuffer, PPLLBuffer);
     graph->RegisterResource(Builtin::PPLL::Counter, PPLLCounter);
 
-    auto& PPLLFillBuilder = graph->BuildRenderPass("PPFillPass");
-
-    PPLLFillBuilder.Build<PPLLFillPass>(PPLLFillPassInputs{
+    graph->BuildRenderPass<PPLLFillPass>("PPFillPass", PPLLFillPassInputs{
         wireframe,
         numPPLLNodes,
         useMeshShaders,
         indirect });
 
-    graph->BuildRenderPass("PPLLResolvePass")
-        .Build<PPLLResolvePass>();
+    graph->BuildRenderPass<PPLLResolvePass>("PPLLResolvePass");
 }
 
 void BuildBloomPipeline(RenderGraph* graph) {
@@ -518,19 +495,16 @@ void BuildBloomPipeline(RenderGraph* graph) {
 
 	// Downsample numBloomMips mips of the HDR color target
     for (unsigned int i = 0; i < numBloomMips; i++) {
-        graph->BuildRenderPass("BloomDownsamplePass" + std::to_string(i))
-			.Build<BloomSamplePass>(BloomSamplePassInputs{ i, false });
+        graph->BuildRenderPass<BloomSamplePass>("BloomDownsamplePass" + std::to_string(i), BloomSamplePassInputs{ i, false });
     }
 
 	// Upsample numBloomMips - 1 mips of the HDR color target, starting from the last mip
     for (unsigned int i = numBloomMips-1; i > 0; i--) {
-        graph->BuildRenderPass("BloomUpsamplePass" + std::to_string(i))
-            .Build<BloomSamplePass>(BloomSamplePassInputs{ i, true });
+        graph->BuildRenderPass<BloomSamplePass>("BloomUpsamplePass" + std::to_string(i), BloomSamplePassInputs{ i, true });
     }
     
     // Upsample and blend the first mip with the HDR color target
-	graph->BuildRenderPass("BloomUpsampleAndBlendPass")
-		.Build<BloomBlendPass>();
+    graph->BuildRenderPass<BloomBlendPass>("BloomUpsampleAndBlendPass");
 }
 
 void BuildSSRPasses(RenderGraph* graph) {
@@ -556,9 +530,7 @@ void BuildSSRPasses(RenderGraph* graph) {
     rg::memory::SetResourceUsageHint(*ssrTexture, "Post-Processing resources");
 	graph->RegisterResource(Builtin::PostProcessing::ScreenSpaceReflections, ssrTexture);
 
-    graph->BuildComputePass("Screen-Space Reflections Pass")
-		.Build<ScreenSpaceReflectionsPass>();
+        graph->BuildComputePass<ScreenSpaceReflectionsPass>("Screen-Space Reflections Pass");
 
-    graph->BuildRenderPass("Specular IBL & SSR Composite Pass")
-		.Build<SpecularIBLPass>();
+        graph->BuildRenderPass<SpecularIBLPass>("Specular IBL & SSR Composite Pass");
 }

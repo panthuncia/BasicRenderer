@@ -10,16 +10,9 @@
 struct BloomSamplePassInputs {
     unsigned int mipIndex;
     bool isUpsample;
-    friend bool operator==(const BloomSamplePassInputs&, const BloomSamplePassInputs&) = default;
+
+    RG_DEFINE_PASS_INPUTS(BloomSamplePassInputs, &BloomSamplePassInputs::mipIndex, &BloomSamplePassInputs::isUpsample);
 };
-
-inline rg::Hash64 HashValue(const BloomSamplePassInputs& i) {
-    std::size_t seed = 0;
-
-    boost::hash_combine(seed, i.mipIndex);
-    boost::hash_combine(seed, i.isUpsample);
-    return seed;
-}
 
 class BloomSamplePass : public RenderPass {
 public:
@@ -47,8 +40,6 @@ public:
 
     void Setup() override {
         m_pHDRTarget = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PostProcessing::UpscaledHDR);
-
-        RegisterSRV(Builtin::PostProcessing::UpscaledHDR, m_mipIndex + (m_isUpsample ? 1 : 0));
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override {

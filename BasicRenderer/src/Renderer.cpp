@@ -816,10 +816,17 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<AutoAliasPackingStrategy>("autoAliasPackingStrategy", AutoAliasPackingStrategy::GreedySweepLine);
     settingsManager.registerSetting<bool>("autoAliasEnableLogging", false);
     settingsManager.registerSetting<bool>("autoAliasLogExclusionReasons", false);
+    settingsManager.registerSetting<bool>("queueSchedulingEnableLogging", false);
+    settingsManager.registerSetting<float>("queueSchedulingWidthScale", 1.0f);
+    settingsManager.registerSetting<float>("queueSchedulingPenaltyBias", 0.0f);
+    settingsManager.registerSetting<float>("queueSchedulingMinPenalty", 1.0f);
+    settingsManager.registerSetting<float>("queueSchedulingResourcePressureWeight", 1.0f);
+    settingsManager.registerSetting<float>("queueSchedulingUavPressureWeight", 0.5f);
 	settingsManager.registerSetting<uint32_t>("autoAliasPoolRetireIdleFrames", 120u);
 	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
     settingsManager.registerSetting<bool>("heavyDebug", false);
     settingsManager.registerSetting<uint32_t>("clodStreamingCpuUploadBudgetRequests", 50u);
+    settingsManager.registerSetting<bool>(CLodDisableReyesRasterizationSettingName, false);
 	settingsManager.registerSetting<uint32_t>("usdPointInstancerMaxInstances", 10000u);
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
     setCameraSpeed = settingsManager.getSettingSetter<float>("cameraSpeed");
@@ -887,6 +894,10 @@ void Renderer::SetSettings() {
         (void)newValue;
         rebuildRenderGraph = true;
         }));
+        m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>(CLodDisableReyesRasterizationSettingName, [this](const bool& newValue) {
+            (void)newValue;
+            rebuildRenderGraph = true;
+            }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableMeshletCulling", [this](const bool& newValue) {
 		m_meshletCulling = newValue;
 		rebuildRenderGraph = true;
@@ -1508,6 +1519,12 @@ void Renderer::Render() {
         orgSettings.autoAliasPackingStrategy  = static_cast<uint8_t>(sm.getSettingGetter<AutoAliasPackingStrategy>("autoAliasPackingStrategy")());
         orgSettings.autoAliasEnableLogging    = sm.getSettingGetter<bool>("autoAliasEnableLogging")();
         orgSettings.autoAliasLogExclusionReasons = sm.getSettingGetter<bool>("autoAliasLogExclusionReasons")();
+        orgSettings.queueSchedulingEnableLogging = sm.getSettingGetter<bool>("queueSchedulingEnableLogging")();
+        orgSettings.queueSchedulingWidthScale = sm.getSettingGetter<float>("queueSchedulingWidthScale")();
+        orgSettings.queueSchedulingPenaltyBias = sm.getSettingGetter<float>("queueSchedulingPenaltyBias")();
+        orgSettings.queueSchedulingMinPenalty = sm.getSettingGetter<float>("queueSchedulingMinPenalty")();
+        orgSettings.queueSchedulingResourcePressureWeight = sm.getSettingGetter<float>("queueSchedulingResourcePressureWeight")();
+        orgSettings.queueSchedulingUavPressureWeight = sm.getSettingGetter<float>("queueSchedulingUavPressureWeight")();
         orgSettings.autoAliasPoolRetireIdleFrames = sm.getSettingGetter<uint32_t>("autoAliasPoolRetireIdleFrames")();
         orgSettings.autoAliasPoolGrowthHeadroom   = sm.getSettingGetter<float>("autoAliasPoolGrowthHeadroom")();
         orgSettings.heavyDebug                = sm.getSettingGetter<bool>("heavyDebug")();
@@ -1913,13 +1930,14 @@ void Renderer::CreateRenderGraph() {
             m_pReadbackManager.get()));
         currentRenderGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>(
             currentRenderGraph->GetReadbackService()));
+        uint maxClusters = 100000; // TODO: make this configurable based on scene content   
         currentRenderGraph->RegisterExtension(
-            std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint32_t>(pow(2, 25))),
+            std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint32_t>(maxClusters)),
             "CLodOpaque");
         constexpr bool kEnableAlphaBlendCLodVariant = true;
         if (kEnableAlphaBlendCLodVariant) {
             currentRenderGraph->RegisterExtension(
-                std::make_unique<CLodExtension>(CLodExtensionType::AlphaBlend, static_cast<uint32_t>(pow(2, 25))),
+                std::make_unique<CLodExtension>(CLodExtensionType::AlphaBlend, static_cast<uint32_t>(maxClusters)),
                 "CLodAlpha");
         }
 		m_renderGraphRuntimeInitialized = true;
@@ -1964,8 +1982,7 @@ void Renderer::CreateRenderGraph() {
     BuildEnvironmentPipeline(newGraph.get());
 
     // Skinning comes before Z prepass
-    newGraph->BuildComputePass("SkinningPass")
-        .Build<SkinningPass>();
+    newGraph->BuildComputePass<SkinningPass>("SkinningPass");
     
     bool indirect = getIndirectDrawsEnabled();
     if (!useMeshShaders) { // Indirect draws only supported with mesh shaders
@@ -1994,8 +2011,7 @@ void Renderer::CreateRenderGraph() {
     CreateDebugVisualizationResources(newGraph.get());
 
     if (m_visibilityRendering) {
-        newGraph->BuildRenderPass("ClearVisibilityBufferPass")
-            .Build<ClearVisibilityBufferPass>();
+        newGraph->BuildRenderPass<ClearVisibilityBufferPass>("ClearVisibilityBufferPass");
     }
 
 	// Either visibility or standard GBuffer pass
@@ -2011,7 +2027,7 @@ void Renderer::CreateRenderGraph() {
         BuildLightClusteringPipeline(newGraph.get());
     }
 
-    auto& debugPassBuilder = newGraph->BuildRenderPass("DebugPass");
+    auto& debugPassBuilder = newGraph->BuildRenderPass<DebugRenderPass>("DebugPass");
 
     auto drawShadows = getShadowsEnabled();
     if (drawShadows) {
@@ -2040,8 +2056,7 @@ void Renderer::CreateRenderGraph() {
     newGraph->RegisterResource(Builtin::Environment::CurrentPrefilteredCubemap, currentEnvironmentPrefilteredCubemap);
 
     if (m_currentEnvironment != nullptr) {
-        newGraph->BuildComputePass("SkyboxPass")
-            .Build<SkyboxRenderPass>();
+        newGraph->BuildComputePass<SkyboxRenderPass>("SkyboxPass");
     }
 
     BuildPrimaryPass(newGraph.get(), m_currentEnvironment.get());
@@ -2063,13 +2078,10 @@ void Renderer::CreateRenderGraph() {
     rg::memory::SetResourceUsageHint(*histogramBuffer, "Post-Processing resources");
 	newGraph->RegisterResource(Builtin::PostProcessing::LuminanceHistogram, histogramBuffer);
 
-    newGraph->BuildComputePass("luminanceHistogramPass")
-        .Build<LuminanceHistogramPass>();
-    newGraph->BuildComputePass("LuminanceAveragePass")
-		.Build<LuminanceHistogramAveragePass>();
+        newGraph->BuildComputePass<LuminanceHistogramPass>("luminanceHistogramPass");
+        newGraph->BuildComputePass<LuminanceHistogramAveragePass>("LuminanceAveragePass");
 
-    newGraph->BuildRenderPass("UpscalingPass")
-		.Build<UpscalingPass>();
+        newGraph->BuildRenderPass<UpscalingPass>("UpscalingPass");
 
     if (m_bloom) {
         BuildBloomPipeline(newGraph.get());
@@ -2087,19 +2099,13 @@ void Renderer::CreateRenderGraph() {
 	params.axisOpacity = 0.85f;
     params.overallOpacity = 1.0f;
 
-	newGraph->BuildComputePass("DebugGridPass")
-		.Build<DebugGridPass>(params);
+	newGraph->BuildComputePass<DebugGridPass>("DebugGridPass", params);
 
-    newGraph->BuildRenderPass("TonemappingPass")
-        .Build<TonemappingPass>();
+    newGraph->BuildRenderPass<TonemappingPass>("TonemappingPass");
 
-    newGraph->BuildRenderPass("DebugResolvePass")
-        .Build<DebugResolvePass>();
+    newGraph->BuildRenderPass<DebugResolvePass>("DebugResolvePass");
 
-    newGraph->BuildRenderPass("MenuRenderPass")
-        .Build<MenuRenderPass>();
-
-    debugPassBuilder.Build<DebugRenderPass>();
+    newGraph->BuildRenderPass<MenuRenderPass>("MenuRenderPass");
 	if (m_coreResourceProvider.m_currentDebugTexture != nullptr) {
 		auto debugRenderPass = newGraph->GetRenderPassByName("DebugPass");
 		std::shared_ptr<DebugRenderPass> debugPass = std::dynamic_pointer_cast<DebugRenderPass>(debugRenderPass);
@@ -2109,11 +2115,12 @@ void Renderer::CreateRenderGraph() {
 	}
 
     if (getDrawBoundingSpheres()) {
-		newGraph->BuildRenderPass("DebugSpherePass")
-			.Build<DebugSpherePass>();
+        newGraph->BuildRenderPass<DebugSpherePass>("DebugSpherePass");
     }
 
 	BuildLinearDepthHistoryCopyPass(newGraph.get());
+
+    newGraph->SetMinimumAutomaticSchedulingQueues(QueueKind::Compute, 3);
 
     newGraph->CompileStructural();
     newGraph->Setup();

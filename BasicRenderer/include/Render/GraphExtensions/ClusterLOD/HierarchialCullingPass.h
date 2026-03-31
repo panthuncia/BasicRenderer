@@ -32,20 +32,8 @@ struct HierarchialCullingPassInputs {
     bool clodOnlyWorkloads = false;
     CLodRasterOutputKind rasterOutputKind = CLodRasterOutputKind::VisibilityBuffer;
 
-    friend bool operator==(const HierarchialCullingPassInputs&, const HierarchialCullingPassInputs&) = default;
+    RG_DEFINE_PASS_INPUTS(HierarchialCullingPassInputs, &HierarchialCullingPassInputs::isFirstPass, &HierarchialCullingPassInputs::maxVisibleClusters, &HierarchialCullingPassInputs::workGraphMode, &HierarchialCullingPassInputs::renderPhase, &HierarchialCullingPassInputs::clodOnlyWorkloads, &HierarchialCullingPassInputs::rasterOutputKind);
 };
-
-inline rg::Hash64 HashValue(const HierarchialCullingPassInputs& i) {
-    std::size_t seed = 0;
-
-    boost::hash_combine(seed, i.isFirstPass);
-    boost::hash_combine(seed, i.maxVisibleClusters);
-    boost::hash_combine(seed, static_cast<uint8_t>(i.workGraphMode));
-    boost::hash_combine(seed, i.renderPhase.hash);
-    boost::hash_combine(seed, i.clodOnlyWorkloads);
-    boost::hash_combine(seed, static_cast<uint8_t>(i.rasterOutputKind));
-    return seed;
-}
 
 class HierarchialCullingPass : public ComputePass, public IDynamicDeclaredResources {
 public:

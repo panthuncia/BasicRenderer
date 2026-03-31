@@ -26,14 +26,6 @@ public:
 
 		m_lightPagesCounterHandle = m_resourceRegistryView->RequestHandle(Builtin::Light::PagesCounter);
 		m_pLightPagesCounter = m_resourceRegistryView->Resolve<Buffer>(m_lightPagesCounterHandle);
-
-		RegisterSRV(Builtin::CameraBuffer);
-		RegisterSRV(Builtin::Light::ActiveLightIndices);
-		RegisterSRV(Builtin::Light::InfoBuffer);
-
-		RegisterUAV(Builtin::Light::ClusterBuffer);
-		RegisterUAV(Builtin::Light::PagesCounter);
-		RegisterUAV(Builtin::Light::PagesBuffer);
 	}
 
 	PassReturn Execute(PassExecutionContext& executionContext) override {

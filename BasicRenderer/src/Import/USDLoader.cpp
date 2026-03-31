@@ -272,6 +272,14 @@ namespace USDLoader {
         return names;
     }
 
+	void MarkDisplacementEnabled(MaterialDescription& result, float displacementScale)
+	{
+		result.enableGeometricDisplacement = true;
+		result.heightMapScale = displacementScale;
+		result.geometricDisplacementMin = std::min(result.geometricDisplacementMin, 0.0f);
+		result.geometricDisplacementMax = std::max(result.geometricDisplacementMax, displacementScale);
+	}
+
 	void ProcessTexture(MaterialDescription& result, const UsdShadeConnectionSourceInfo& src, const UsdStageRefPtr& stage, const TfToken& name, const UsdShadeMaterial& material) {
 		if (auto srcShader = UsdShadeShader(src.source)) {
 			TfToken srcId;
@@ -380,6 +388,78 @@ namespace USDLoader {
 		}
 	}
 
+	void ProcessDisplacementTerminal(
+		MaterialDescription& result,
+		const pxr::UsdShadeMaterial& material,
+		const UsdStageRefPtr& stage,
+		std::unordered_map<ResolveCacheKey, ResolvedProducer, ResolveCacheKeyHash>& cache)
+	{
+		pxr::UsdShadeOutput displacementOut = material.GetDisplacementOutput(pxr::UsdShadeTokens->universalRenderContext);
+		if (!displacementOut) {
+			return;
+		}
+
+		auto displacementSources = displacementOut.GetConnectedSources();
+		if (displacementSources.empty()) {
+			return;
+		}
+
+		for (auto const& src : displacementSources) {
+			auto resolved = ResolveToShaderOutput(
+				pxr::UsdShadeConnectableAPI(src.source.GetPrim()),
+				src.sourceName,
+				&cache);
+
+			if (!resolved) {
+				continue;
+			}
+
+			pxr::TfToken prodId;
+			resolved->shader.GetIdAttr().Get(&prodId);
+
+			if (prodId == pxr::TfToken("UsdUVTexture")) {
+				MarkDisplacementEnabled(result, result.heightMapScale);
+				ProcessTexture(result, src, stage, TfToken("displacement"), material);
+				continue;
+			}
+
+			for (auto const& input : resolved->shader.GetInputs()) {
+				const pxr::TfToken inputName = input.GetBaseName();
+
+				if ((inputName == pxr::TfToken("scale") || inputName == pxr::TfToken("displacement")) &&
+					input.GetConnectedSources().empty()) {
+					float scale = result.heightMapScale;
+					if (input.Get(&scale)) {
+						MarkDisplacementEnabled(result, scale);
+					}
+					continue;
+				}
+
+				if (inputName != pxr::TfToken("displacement") && inputName != pxr::TfToken("in") && inputName != pxr::TfToken("texture")) {
+					continue;
+				}
+
+				for (auto const& inputSource : input.GetConnectedSources()) {
+					auto resolvedInput = ResolveToShaderOutput(
+						pxr::UsdShadeConnectableAPI(inputSource.source.GetPrim()),
+						inputSource.sourceName,
+						&cache);
+
+					if (!resolvedInput) {
+						continue;
+					}
+
+					pxr::TfToken inputProdId;
+					resolvedInput->shader.GetIdAttr().Get(&inputProdId);
+					if (inputProdId == pxr::TfToken("UsdUVTexture")) {
+						MarkDisplacementEnabled(result, result.heightMapScale);
+						ProcessTexture(result, inputSource, stage, pxr::TfToken("displacement"), material);
+					}
+				}
+			}
+		}
+	}
+
 	MaterialDescription ParseMaterialGraph(
 		const pxr::UsdShadeMaterial& material,
 		const std::string& directory,
@@ -450,10 +530,9 @@ namespace USDLoader {
 				}
 				else if (texName == TfToken("displacement") && input.GetConnectedSources().empty()) {
 					float v; input.Get(&v);
-					result.heightMapScale = v;
-					result.enableGeometricDisplacement = (v != 0.0f);
-					result.geometricDisplacementMin = std::min(0.0f, v);
-					result.geometricDisplacementMax = std::max(0.0f, v);
+					if (v != 0.0f) {
+						MarkDisplacementEnabled(result, v);
+					}
 				}
 				else {
 					spdlog::warn("Unknown input '{}' with no connections in UsdPreviewSurface", name.GetString());
@@ -476,9 +555,7 @@ namespace USDLoader {
 
 				if (prodId == pxr::TfToken("UsdUVTexture")) {
 					if (name == TfToken("displacement")) {
-						result.enableGeometricDisplacement = true;
-						result.geometricDisplacementMin = std::min(result.geometricDisplacementMin, 0.0f);
-						result.geometricDisplacementMax = std::max(result.geometricDisplacementMax, result.heightMapScale);
+						MarkDisplacementEnabled(result, result.heightMapScale);
 					}
 					ProcessTexture(result, src, stage, name, material);
 				}
@@ -493,12 +570,23 @@ namespace USDLoader {
 			}
 		}
 
+        ProcessDisplacementTerminal(result, material, stage, cache);
+
 		//Post-process to assign 1.0 to undefined factors with a valid texture
 		for (auto& tex : { &result.baseColor, &result.metallic, &result.roughness, &result.opacity, &result.emissive, &result.normal, &result.heightMap, &result.aoMap }) {
 			if (tex->texture && !tex->factor.HasValue()) {
 				tex->factor = 1.0f; // Unlike glTF, USD does not require a factor to be set if a texture is present
 			}
 		}
+
+        spdlog::info(
+            "USD material '{}' displacement: enabled={}, hasHeightMap={}, scale={}, range=[{}, {}]",
+            result.name,
+            result.enableGeometricDisplacement,
+            result.heightMap.texture != nullptr,
+            result.heightMapScale,
+            result.geometricDisplacementMin,
+            result.geometricDisplacementMax);
 
 		return result;
 	}

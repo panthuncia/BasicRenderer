@@ -53,6 +53,7 @@ public:
     void SetAnimation(size_t index);
     void SetAnimationSpeed(float speed);
     size_t GetAnimationCount() const noexcept;
+    size_t GetActiveAnimationIndex() const noexcept;
     float GetCurrentAnimationConservativeBoundsScale() const noexcept;
 
     // Tick/evaluate pose into the instance-owned pose buffer.

@@ -36,6 +36,7 @@ endif()
 if (MSVC)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/EHsc>)
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/bigobj>)
 endif()
 
 #set(CMAKE_VS_JUST_MY_CODE_DEBUGGING ON) # Skip external code in the debugger.

@@ -6,6 +6,9 @@
 #include "PerPassRootConstants/clodPrefixScanRootConstants.h"
 #include "PerPassRootConstants/clodPrefixOffsetsRootConstants.h"
 #include "PerPassRootConstants/clodCompactionRootConstants.h"
+#include "PerPassRootConstants/clodReyesCreateDispatchArgsRootConstants.h"
+#include "PerPassRootConstants/clodReyesResetRootConstants.h"
+#include "PerPassRootConstants/clodReyesSplitRootConstants.h"
 #include "include/indirectCommands.hlsli"
 #include "include/clodStructs.hlsli"
 #include "include/visibleClusterPacking.hlsli"
@@ -17,10 +20,89 @@ struct RasterBucketsHistogramIndirectCommand
     uint dispatchX, dispatchY, dispatchZ;
 };
 
+bool CLodIsVisibleClusterOwnedByReyes(uint visibleClusterIndex, uint ownershipDescriptorIndex)
+{
+    StructuredBuffer<uint> ownershipWords = ResourceDescriptorHeap[ownershipDescriptorIndex];
+    const uint ownershipWord = ownershipWords[visibleClusterIndex >> 5u];
+    return ((ownershipWord >> (visibleClusterIndex & 31u)) & 1u) != 0u;
+}
+
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void ClearReyesOwnershipBitsetCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    const uint wordIndex = dispatchThreadId.x;
+    if (wordIndex >= CLOD_REYES_RESET_OWNERSHIP_BITSET_WORD_COUNT)
+    {
+        return;
+    }
+
+    RWStructuredBuffer<uint> ownershipWords = ResourceDescriptorHeap[CLOD_REYES_RESET_OWNERSHIP_BITSET_DESCRIPTOR_INDEX];
+    ownershipWords[wordIndex] = 0u;
+}
+
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void ClearReyesQueueCountersCSMain()
+{
+    RWStructuredBuffer<uint> fullClusterCounter = ResourceDescriptorHeap[CLOD_REYES_RESET_FULL_CLUSTER_COUNTER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> ownedClusterCounter = ResourceDescriptorHeap[CLOD_REYES_RESET_OWNED_CLUSTER_COUNTER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> splitQueueCounterA = ResourceDescriptorHeap[CLOD_REYES_RESET_SPLIT_QUEUE_COUNTER_A_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> splitQueueOverflowA = ResourceDescriptorHeap[CLOD_REYES_RESET_SPLIT_QUEUE_OVERFLOW_A_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> splitQueueCounterB = ResourceDescriptorHeap[CLOD_REYES_RESET_SPLIT_QUEUE_COUNTER_B_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> splitQueueOverflowB = ResourceDescriptorHeap[CLOD_REYES_RESET_SPLIT_QUEUE_OVERFLOW_B_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> diceQueueCounter = ResourceDescriptorHeap[CLOD_REYES_RESET_DICE_QUEUE_COUNTER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> diceQueueOverflow = ResourceDescriptorHeap[CLOD_REYES_RESET_DICE_QUEUE_OVERFLOW_DESCRIPTOR_INDEX];
+
+    fullClusterCounter[0] = 0u;
+    ownedClusterCounter[0] = 0u;
+    splitQueueCounterA[0] = 0u;
+    splitQueueOverflowA[0] = 0u;
+    splitQueueCounterB[0] = 0u;
+    splitQueueOverflowB[0] = 0u;
+    if (CLOD_REYES_RESET_CLEAR_DICE_QUEUE_COUNTER != 0u)
+    {
+        diceQueueCounter[0] = 0u;
+    }
+    diceQueueOverflow[0] = 0u;
+}
+
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void ClearReyesSplitOutputCountersCSMain()
+{
+    RWStructuredBuffer<uint> outputSplitQueueCounter = ResourceDescriptorHeap[CLOD_REYES_SPLIT_OUTPUT_SPLIT_QUEUE_COUNTER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> outputSplitQueueOverflowCounter = ResourceDescriptorHeap[CLOD_REYES_SPLIT_OUTPUT_SPLIT_QUEUE_OVERFLOW_DESCRIPTOR_INDEX];
+
+    outputSplitQueueCounter[0] = 0u;
+    outputSplitQueueOverflowCounter[0] = 0u;
+}
+
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void BuildReyesDispatchArgsCSMain()
+{
+    StructuredBuffer<uint> sourceCounterBuffer = ResourceDescriptorHeap[CLOD_REYES_CREATE_DISPATCH_ARGS_SOURCE_COUNTER_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodReyesDispatchIndirectCommand> indirectArgsBuffer = ResourceDescriptorHeap[CLOD_REYES_CREATE_DISPATCH_ARGS_OUTPUT_DESCRIPTOR_INDEX];
+
+    uint workItemCount = sourceCounterBuffer.Load(0);
+    if (CLOD_REYES_CREATE_DISPATCH_ARGS_SOURCE_BASE_COUNTER_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
+    {
+        StructuredBuffer<uint> sourceBaseCounterBuffer = ResourceDescriptorHeap[CLOD_REYES_CREATE_DISPATCH_ARGS_SOURCE_BASE_COUNTER_DESCRIPTOR_INDEX];
+        const uint baseWorkItemCount = sourceBaseCounterBuffer.Load(0);
+        workItemCount = (workItemCount > baseWorkItemCount) ? (workItemCount - baseWorkItemCount) : 0u;
+    }
+    const uint threadsPerGroup = max(CLOD_REYES_CREATE_DISPATCH_ARGS_THREADS_PER_GROUP, 1u);
+
+    indirectArgsBuffer[0].dispatchX = (workItemCount + threadsPerGroup - 1u) / threadsPerGroup;
+    indirectArgsBuffer[0].dispatchY = 1u;
+    indirectArgsBuffer[0].dispatchZ = 1u;
+}
+
 uint CLodGetHistogramVisibleClusterReadIndex(uint linearizedID)
 {
     uint readBase = 0u;
-    if (CLOD_HISTOGRAM_READ_BASE_COUNTER_DESCRIPTOR_INDEX != 0)
+    if (CLOD_HISTOGRAM_READ_BASE_COUNTER_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
     {
         StructuredBuffer<uint> readBaseCounter = ResourceDescriptorHeap[CLOD_HISTOGRAM_READ_BASE_COUNTER_DESCRIPTOR_INDEX];
         readBase = readBaseCounter.Load(0);
@@ -37,7 +119,7 @@ uint CLodGetHistogramVisibleClusterReadIndex(uint linearizedID)
 uint CLodGetCompactionVisibleClusterReadIndex(uint linearizedID)
 {
     uint readBase = 0u;
-    if (CLOD_COMPACTION_READ_BASE_COUNTER_DESCRIPTOR_INDEX != 0)
+    if (CLOD_COMPACTION_READ_BASE_COUNTER_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
     {
         StructuredBuffer<uint> readBaseCounter = ResourceDescriptorHeap[CLOD_COMPACTION_READ_BASE_COUNTER_DESCRIPTOR_INDEX];
         readBase = readBaseCounter.Load(0);
@@ -122,15 +204,22 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
         return;
     }
 
+    const uint visibleClusterReadIndex = CLodGetHistogramVisibleClusterReadIndex(linearizedID);
+    if ((CLOD_HISTOGRAM_READ_MODE_FLAGS & CLOD_HISTOGRAM_READ_FLAG_SKIP_REYES_OWNED) != 0u &&
+        CLodIsVisibleClusterOwnedByReyes(visibleClusterReadIndex, CLOD_HISTOGRAM_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX)) {
+        return;
+    }
+
     ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_HISTOGRAM_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
 
     // TODO: Remove load chain
-    uint instanceIndex = CLodVisibleClusterInstanceID(CLodLoadVisibleClusterPacked(visibleClusters, CLodGetHistogramVisibleClusterReadIndex(linearizedID)));
+    uint instanceIndex = CLodVisibleClusterInstanceID(CLodLoadVisibleClusterPacked(visibleClusters, visibleClusterReadIndex));
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     uint perMeshIndex = perMeshInstance[instanceIndex].perMeshBufferIndex;
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     uint materialDataIndex = perMeshBuffer[perMeshIndex].materialDataIndex;
     StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
+
     uint rasterBucketIndex = materialDataBuffer[materialDataIndex].rasterBucketIndex;
 
     // Group threads in the wave by matId
@@ -350,13 +439,18 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
 
     if (linearizedID < clusterCount)
     {
+        const uint sourceClusterIndex = CLodGetCompactionVisibleClusterReadIndex(linearizedID);
+        if ((CLOD_COMPACTION_READ_MODE_FLAGS & CLOD_COMPACTION_READ_FLAG_SKIP_REYES_OWNED) != 0u &&
+            CLodIsVisibleClusterOwnedByReyes(sourceClusterIndex, CLOD_COMPACTION_REYES_OWNERSHIP_BITSET_DESCRIPTOR_INDEX))
+        {
+            return;
+        }
+
         ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_COMPACTION_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
         RWByteAddressBuffer compactedClusters = ResourceDescriptorHeap[CLOD_COMPACTION_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
         StructuredBuffer<uint> offsets = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX];
         RWStructuredBuffer<uint> writeCursor = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_WRITE_CURSOR_DESCRIPTOR_INDEX];
         RWStructuredBuffer<uint> sortedToUnsortedMapping = ResourceDescriptorHeap[CLOD_COMPACTION_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX];
-
-        const uint sourceClusterIndex = CLodGetCompactionVisibleClusterReadIndex(linearizedID);
         const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, sourceClusterIndex);
         uint bucketIndex = GetRasterBucketIndexFromInstance(CLodVisibleClusterInstanceID(packedCluster));
 

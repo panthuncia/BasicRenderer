@@ -27,6 +27,15 @@ public:
         uint32_t localIndex = 0;
 
         for (auto& capture : captures) {
+            QueueKind preferredQueueKind = capture.preferredQueueKind;
+            if (preferredQueueKind != QueueKind::Graphics && preferredQueueKind != QueueKind::Copy) {
+                spdlog::warn(
+                    "ReadbackCaptureExtension: capture for pass '{}' requested unsupported queue kind {}; falling back to graphics.",
+                    capture.passName,
+                    static_cast<int>(preferredQueueKind));
+                preferredQueueKind = QueueKind::Graphics;
+            }
+
             auto resource = capture.resource.lock();
             if (!resource && capture.resourceId != 0) {
                 resource = rg.GetResourceByID(capture.resourceId);
@@ -49,34 +58,33 @@ public:
                 continue;
             }
 
-            RenderGraph::ExternalPassDesc desc{};
-            desc.where = RenderGraph::ExternalInsertPoint::After(capture.passName);
-            desc.registerName = false;
-
-            if (capture.preferCopyQueue) {
+            if (preferredQueueKind == QueueKind::Copy) {
                 // Route through copy-queue CopyPass for lower latency
-                desc.type = RenderGraph::PassType::Copy;
-                desc.copyQueueSelection = CopyQueueSelection::Copy;
-
                 ReadbackCopyCaptureInputs inputs{};
                 inputs.target = ResourceHandleAndRange(handle, capture.range);
 
                 auto pass = std::make_shared<ReadbackCopyCapturePass>(inputs, std::move(capture.callback), m_readbackService);
-                desc.pass = pass;
+                out.push_back(
+                    RenderGraph::ExternalPassDesc::Copy(
+                        "ReadbackCapture::" + capture.passName + "::" + std::to_string(handle.GetGlobalResourceID()) + "::" + std::to_string(localIndex++),
+                        std::move(pass))
+                        .At(RenderGraph::ExternalInsertPoint::After(capture.passName))
+                        .PreferQueue(QueueKind::Copy)
+                        .RegisterByName(false));
             }
             else {
                 // Default: graphics-queue RenderPass (existing path)
-                desc.type = RenderGraph::PassType::Render;
-
                 ReadbackCaptureInputs inputs{};
                 inputs.target = ResourceHandleAndRange(handle, capture.range);
 
                 auto pass = std::make_shared<ReadbackCapturePass>(inputs, std::move(capture.callback), m_readbackService);
-                desc.pass = pass;
+                out.push_back(
+                    RenderGraph::ExternalPassDesc::Render(
+                        "ReadbackCapture::" + capture.passName + "::" + std::to_string(handle.GetGlobalResourceID()) + "::" + std::to_string(localIndex++),
+                        std::move(pass))
+                        .At(RenderGraph::ExternalInsertPoint::After(capture.passName))
+                        .RegisterByName(false));
             }
-
-            desc.name = "ReadbackCapture::" + capture.passName + "::" + std::to_string(handle.GetGlobalResourceID()) + "::" + std::to_string(localIndex++);
-            out.push_back(std::move(desc));
         }
     }
 

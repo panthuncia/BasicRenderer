@@ -21,18 +21,8 @@ struct PPLLFillPassInputs {
 	bool meshShaders;
 	bool indirect;
 
-	friend bool operator==(const PPLLFillPassInputs&, const PPLLFillPassInputs&) = default;
+	RG_DEFINE_PASS_INPUTS(PPLLFillPassInputs, &PPLLFillPassInputs::wireframe, &PPLLFillPassInputs::numPPLLNodes, &PPLLFillPassInputs::meshShaders, &PPLLFillPassInputs::indirect);
 };
-
-inline rg::Hash64 HashValue(const PPLLFillPassInputs& i) {
-	std::size_t seed = 0;
-
-	boost::hash_combine(seed, i.wireframe);
-	boost::hash_combine(seed, i.meshShaders);
-	boost::hash_combine(seed, i.indirect);
-	boost::hash_combine(seed, i.numPPLLNodes);
-	return seed;
-}
 
 class PPLLFillPass : public RenderPass {
 public:
@@ -107,8 +97,6 @@ public:
 		
 		m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 		m_PPLLHeadPointerTexture = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PPLL::HeadPointerTexture);
-		
-		RegisterUAV(Builtin::PPLL::HeadPointerTexture);
 
 		if (m_meshShaders) {
 			//m_primaryCameraMeshletBitfield = m_resourceRegistryView->RequestPtr<DynamicGloballyIndexedResource>(Builtin::PrimaryCamera::MeshletBitfield);
@@ -116,35 +104,6 @@ public:
 
 		m_PPLLCounterHandle = m_resourceRegistryView->RequestHandle(Builtin::PPLL::Counter);
 		m_PPLLCounter = m_resourceRegistryView->Resolve<Buffer>(m_PPLLCounterHandle);
-		RegisterUAV(Builtin::PPLL::Counter);
-		
-		RegisterUAV(Builtin::PPLL::DataBuffer);
-		RegisterSRV(Builtin::NormalMatrixBuffer);
-		RegisterSRV(Builtin::PostSkinningVertices);
-		RegisterSRV(Builtin::PerObjectBuffer);
-		RegisterSRV(Builtin::CameraBuffer);
-		RegisterSRV(Builtin::PerMeshInstanceBuffer);
-		RegisterSRV(Builtin::PerMeshBuffer);
-		RegisterSRV(Builtin::PerMaterialDataBuffer);
-		RegisterSRV(Builtin::GBuffer::Normals);
-
-		if (m_clusteredLightingEnabled) {
-			RegisterSRV(Builtin::Light::ClusterBuffer);
-			RegisterSRV(Builtin::Light::PagesBuffer);
-		}
-
-		if (m_meshShaders) {
-			RegisterSRV(Builtin::MeshResources::MeshletOffsets);
-			RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
-			RegisterSRV(Builtin::MeshResources::MeshletTriangles);
-		}
-
-		RegisterSRV(Builtin::Light::ActiveLightIndices);
-		RegisterSRV(Builtin::Light::InfoBuffer);
-		RegisterSRV(Builtin::Light::PointLightCubemapBuffer);
-		RegisterSRV(Builtin::Light::SpotLightMatrixBuffer);
-		RegisterSRV(Builtin::Light::DirectionalLightCascadeBuffer);
-		RegisterSRV(Builtin::Environment::InfoBuffer);
 	
 	}
 

@@ -257,7 +257,7 @@ struct PerMeshInstanceBuffer {
     uint skinningInstanceSlot;
     uint postSkinningVertexBufferOffset;
     float skinnedBoundsScale;
-    uint3 pad0;
+    BoundingSphere boundingSphere;
 };
 
 #define LIGHTS_PER_PAGE 12
@@ -396,6 +396,121 @@ struct VisibleCluster
     unsigned int groupID;
     unsigned int pageSlabDescriptorIndex; // pre-resolved page slab descriptor
     unsigned int pageSlabByteOffset;      // pre-resolved page slab byte offset
+};
+
+struct CLodReyesFullClusterOutput
+{
+    uint visibleClusterIndex;
+    uint instanceID;
+    uint materialIndex;
+    uint flags;
+};
+
+struct CLodReyesOwnedClusterEntry
+{
+    uint visibleClusterIndex;
+    uint instanceID;
+    uint materialIndex;
+    uint flags;
+};
+
+struct CLodReyesTessTableConfigEntry
+{
+    uint firstTriangle;
+    uint firstVertex;
+    uint numTriangles;
+    uint numVertices;
+};
+
+struct CLodReyesSplitQueueEntry
+{
+    uint visibleClusterIndex;
+    uint instanceID;
+    uint localMeshletIndex;
+    uint materialIndex;
+    uint viewID;
+    uint splitLevel;
+    uint quantizedTessFactor;
+    uint flags;
+    uint sourcePrimitiveAndSplitConfig;
+    float2 domainVertex0UV;
+    float2 domainVertex1UV;
+    float2 domainVertex2UV;
+};
+
+struct CLodReyesDiceQueueEntry
+{
+    uint visibleClusterIndex;
+    uint instanceID;
+    uint localMeshletIndex;
+    uint materialIndex;
+    uint viewID;
+    uint splitLevel;
+    uint quantizedTessFactor;
+    uint flags;
+    uint sourcePrimitiveAndSplitConfig;
+    float2 domainVertex0UV;
+    float2 domainVertex1UV;
+    float2 domainVertex2UV;
+    uint tessTableConfigIndex;
+    uint reserved;
+};
+
+struct CLodReyesDispatchIndirectCommand
+{
+    uint dispatchX;
+    uint dispatchY;
+    uint dispatchZ;
+};
+
+struct CLodReyesRasterWorkEntry
+{
+    uint diceQueueIndex;
+    uint microTriangleOffset;
+    uint microTriangleCount;
+    uint reserved;
+};
+
+struct CLodReyesTelemetry
+{
+    uint visibleClusterInputCount;
+    uint fullClusterOutputCount;
+    uint immediateDiceQueueEntryCount;
+    uint finalDiceQueueEntryCount;
+    uint phaseIndex;
+    uint deepestSplitLevelReached;
+    uint configuredMaxSplitPassCount;
+    uint patchRasterizedPatchCount;
+    uint dicedPatchCount;
+    uint dicedTriangleEstimateCount;
+    uint dicedVertexEstimateCount;
+    uint patchRasterizedMicroTriangleCount;
+    uint splitInputCounts[4];
+    uint splitChildOutputCounts[4];
+    uint splitDiceOutputCounts[4];
+    uint splitQueueOverflowCounts[4];
+    uint diceQueueOverflowCounts[4];
+    uint invalidSplitPatchDomainCount;
+    uint invalidDicePatchDomainCount;
+    uint splitCollapseFallbackDiceCount;
+    uint rasterWorkOverflowPatchCount;
+    uint rasterWorkOverflowBatchCount;
+    uint canonicalFactorTieCount;
+    uint flippedTessTableConfigCount;
+    uint splitConfigTieCount;
+    uint splitConfigSelectionCounts[4];
+    uint canonicalRotationCounts[3];
+    uint siblingSharedEdgeCheckCount;
+    uint siblingSharedEdgeMismatchCount;
+    uint rasterClipCullCount;
+    uint rasterPreAreaCullCount;
+    uint rasterWindingSwapCount;
+    uint rasterPostSwapNonNegativeAreaCount;
+    uint rasterEmptyBoundsCullCount;
+    uint rasterZeroMicroTriangleCount;
+    uint rasterMicroTriangleOverflowCount;
+    uint rasterNearPlaneClippedQuadCount;
+    uint rasterTinyTriangleFallbackCount;
 };
 
 #endif // __STRUCTS_HLSL__

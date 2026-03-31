@@ -39,24 +39,6 @@ public:
 	}
 
 	void Setup() override {
-
-		RegisterSRV(Builtin::MeshResources::MeshletOffsets);
-		RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
-		RegisterSRV(Builtin::MeshResources::MeshletTriangles);
-		RegisterSRV(Builtin::PerMeshInstanceBuffer);
-		RegisterSRV(Builtin::PerObjectBuffer);
-		RegisterSRV(Builtin::PerMeshBuffer);
-		RegisterSRV(Builtin::PrimaryCamera::VisibilityTexture);
-		//RegisterSRV(Builtin::PrimaryCamera::VisibleClusterTable);
-		RegisterSRV(Builtin::CameraBuffer);
-		RegisterSRV(Builtin::PostSkinningVertices);
-		RegisterSRV(Builtin::NormalMatrixBuffer);
-
-		RegisterUAV(Builtin::GBuffer::Normals);
-		RegisterUAV(Builtin::GBuffer::Albedo);
-		RegisterUAV(Builtin::GBuffer::Emissive);
-		RegisterUAV(Builtin::GBuffer::MetallicRoughness);
-
 		//m_table = m_resourceRegistryView->RequestPtr<Resource>(Builtin::PrimaryCamera::VisibleClusterTable);
 	}
 

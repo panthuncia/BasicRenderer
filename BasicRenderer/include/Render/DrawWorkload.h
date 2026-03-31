@@ -16,6 +16,11 @@ inline bool IsAlphaTestTechnique(const TechniqueDescriptor& technique) {
     return (technique.compileFlags & MaterialCompileAlphaTest) != 0;
 }
 
+inline bool ShouldSkipSourcePassForCLodAlphaBlend(const RenderPhase& pass) {
+    return pass == Engine::Primary::OITAccumulationPass
+        || pass == Engine::Primary::GBufferPass;
+}
+
 template<class F>
 void ForEachMeshDrawWorkload(const Mesh& mesh, F&& callback) {
     const auto& technique = mesh.material->Technique();
@@ -25,7 +30,7 @@ void ForEachMeshDrawWorkload(const Mesh& mesh, F&& callback) {
     const bool clodAlphaBlend = isClodMesh && alphaBlend && !alphaTest;
 
     for (const auto& pass : technique.passes) {
-        if (clodAlphaBlend && pass == Engine::Primary::OITAccumulationPass) {
+        if (clodAlphaBlend && ShouldSkipSourcePassForCLodAlphaBlend(pass)) {
             continue;
         }
 

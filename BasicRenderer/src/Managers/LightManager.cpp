@@ -9,6 +9,7 @@
 #include "Managers/ViewManager.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "Utilities/MathUtils.h"
+#include "Render/MemoryIntrospectionAPI.h"
 #include "ShaderBuffers.h"
 #include "Resources/PixelBuffer.h"
 #include "../../generated/BuiltinResources.h"
@@ -21,6 +22,12 @@ LightManager::LightManager() {
     m_spotViewInfo = DynamicStructuredBuffer<unsigned int>::CreateShared(1, "spotViewInfo<uint>");
     m_pointViewInfo = DynamicStructuredBuffer<unsigned int>::CreateShared(1, "pointViewInfo<uint>");
     m_directionalViewInfo = DynamicStructuredBuffer<unsigned int>::CreateShared(1, "direcitonalViewInfo<uint>");
+
+	rg::memory::SetResourceUsageHint(*m_activeLightIndices, "Lighting buffers");
+	rg::memory::SetResourceUsageHint(*m_lightBuffer, "Lighting buffers");
+	rg::memory::SetResourceUsageHint(*m_spotViewInfo, "Lighting buffers");
+	rg::memory::SetResourceUsageHint(*m_pointViewInfo, "Lighting buffers");
+	rg::memory::SetResourceUsageHint(*m_directionalViewInfo, "Lighting buffers");
 
 	getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");
@@ -40,6 +47,7 @@ LightManager::LightManager() {
 	auto numClusters = lightClusterSize.x * lightClusterSize.y * lightClusterSize.z;
 	m_pClusterBuffer = CreateIndexedStructuredBuffer(numClusters, sizeof(Cluster), true, false);
 	m_pClusterBuffer->SetName("lightingClusterBuffer");
+	rg::memory::SetResourceUsageHint(*m_pClusterBuffer, "Lighting buffers");
 
 	static const size_t avgPagesPerCluster = 10;
 	m_lightPagePoolSize = numClusters * avgPagesPerCluster;
@@ -52,6 +60,7 @@ LightManager::LightManager() {
 		rhi::HeapType::DeviceLocal);
 	m_pLightPagesBuffer->SetAllowAlias(true);
 	m_pLightPagesBuffer->SetName("lightPagesBuffer");
+	rg::memory::SetResourceUsageHint(*m_pLightPagesBuffer, "Lighting buffers");
 
 	m_resources[Builtin::Light::ClusterBuffer] = m_pClusterBuffer;
 	m_resources[Builtin::Light::PagesBuffer] = m_pLightPagesBuffer;

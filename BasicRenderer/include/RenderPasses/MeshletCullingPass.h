@@ -48,16 +48,8 @@ private:
 struct MeshletCullingPassInputs {
 	bool isRemaindersPass, doResets;
 
-	friend bool operator==(const MeshletCullingPassInputs&, const MeshletCullingPassInputs&) = default;
+	RG_DEFINE_PASS_INPUTS(MeshletCullingPassInputs, &MeshletCullingPassInputs::isRemaindersPass, &MeshletCullingPassInputs::doResets);
 };
-
-inline rg::Hash64 HashValue(const MeshletCullingPassInputs& i) {
-	std::size_t seed = 0;
-
-	boost::hash_combine(seed, i.isRemaindersPass);
-	boost::hash_combine(seed, i.doResets);
-	return seed;
-}
 
 class MeshletCullingPass : public ComputePass {
 public:
@@ -79,12 +71,6 @@ public:
 	}
 
 	void Setup() override {
-		RegisterSRV(Builtin::PerObjectBuffer);
-		RegisterSRV(Builtin::CameraBuffer);
-		RegisterSRV(Builtin::PerMeshBuffer);
-		RegisterSRV(Builtin::PerMeshInstanceBuffer);
-		RegisterSRV(Builtin::MeshResources::MeshletBounds);
-
 		//RegisterUAV(Builtin::PrimaryCamera::VisibleClusterTable);
 		//RegisterUAV(Builtin::PrimaryCamera::VisibleClusterTableCounter);
 		//RegisterUAV(Builtin::MeshResources::ClusterToVisibleClusterTableIndexBuffer);

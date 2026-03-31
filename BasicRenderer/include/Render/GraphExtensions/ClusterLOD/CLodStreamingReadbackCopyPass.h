@@ -12,23 +12,9 @@ struct CLodStreamingReadbackCopyInputs {
     std::shared_ptr<Buffer> requestsSource;      // GPU load requests (N × CLodStreamingRequest)
     std::shared_ptr<Buffer> usedGroupsCounterSource; // GPU used-groups counter (1 × uint32)
     std::shared_ptr<Buffer> usedGroupsBufferSource;  // GPU used-groups buffer (N × uint32)
+
+    RG_DEFINE_PASS_INPUTS(CLodStreamingReadbackCopyInputs, &CLodStreamingReadbackCopyInputs::counterSource, &CLodStreamingReadbackCopyInputs::requestsSource, &CLodStreamingReadbackCopyInputs::usedGroupsCounterSource, &CLodStreamingReadbackCopyInputs::usedGroupsBufferSource);
 };
-
-inline rg::Hash64 HashValue(const CLodStreamingReadbackCopyInputs& i) {
-    // Structural pass re-used every frame; counter/request buffers are stable.
-    std::size_t seed = 0;
-    if (i.counterSource) seed ^= i.counterSource->GetGlobalResourceID();
-    if (i.requestsSource) seed ^= (i.requestsSource->GetGlobalResourceID() * 0x9e3779b97f4a7c15ULL);
-    if (i.usedGroupsCounterSource) seed ^= (i.usedGroupsCounterSource->GetGlobalResourceID() * 0x517cc1b727220a95ULL);
-    if (i.usedGroupsBufferSource) seed ^= (i.usedGroupsBufferSource->GetGlobalResourceID() * 0x6c62272e07bb0142ULL);
-    return static_cast<rg::Hash64>(seed);
-}
-
-inline bool operator==(const CLodStreamingReadbackCopyInputs& a, const CLodStreamingReadbackCopyInputs& b) {
-    return a.counterSource == b.counterSource && a.requestsSource == b.requestsSource
-        && a.usedGroupsCounterSource == b.usedGroupsCounterSource
-        && a.usedGroupsBufferSource == b.usedGroupsBufferSource;
-}
 
 // CopyPass that copies the GPU streaming load counter + load request buffer
 // to pre-allocated readback staging buffers, then returns a fence signal so
@@ -63,12 +49,12 @@ public:
         builder->WithCopyDest(m_requestsStaging);
         builder->WithCopyDest(m_usedGroupsCounterStaging);
         builder->WithCopyDest(m_usedGroupsBufferStaging);
-        builder->PreferCopyQueue();
+        builder->PreferQueue(QueueKind::Copy);
     }
 
     void Setup() override {}
 
-    void ExecuteImmediate(ImmediateExecutionContext& context) override {
+    void RecordImmediateCommands(ImmediateExecutionContext& context) override {
         const auto& inputs = Inputs<CLodStreamingReadbackCopyInputs>();
 
         auto* counterResource = inputs.counterSource.get();

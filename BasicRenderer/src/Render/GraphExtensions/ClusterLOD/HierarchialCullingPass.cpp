@@ -142,6 +142,8 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
             Builtin::SkeletonResources::SkinningInstanceInfo,
             Builtin::PrimaryCamera::LinearDepthMap,
             Builtin::Shadows::LinearShadowMaps,
+            m_visibleClustersCounterBuffer,
+            m_occlusionReplayStateBuffer,
             Builtin::PerMaterialDataBuffer)
         .WithShaderResource(ECSResourceResolver(drawSetIndicesQuery));
 
@@ -175,32 +177,6 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
 }
 
 void HierarchialCullingPass::Setup() {
-    RegisterSRV(Builtin::IndirectCommandBuffers::Master);
-    RegisterSRV(Builtin::CLod::Offsets);
-    RegisterSRV(Builtin::CLod::GroupChunks);
-    RegisterSRV(Builtin::CLod::Groups);
-    RegisterSRV(Builtin::CLod::Segments);
-    RegisterSRV(Builtin::CLod::StreamingActiveGroupsBits);
-    RegisterSRV(Builtin::CLod::StreamingNonResidentBits);
-    RegisterSRV(Builtin::CLod::StreamingLoadRequests);
-    RegisterSRV(Builtin::CLod::StreamingLoadCounter);
-    RegisterSRV(Builtin::CLod::StreamingRuntimeState);
-    RegisterSRV(Builtin::CLod::StreamingTouchedGroupsCounter);
-    RegisterSRV(Builtin::CLod::StreamingTouchedGroups);
-    RegisterSRV(Builtin::CLod::MeshMetadata);
-    RegisterSRV(Builtin::CullingCameraBuffer);
-    RegisterSRV(Builtin::PerMeshInstanceBuffer);
-    RegisterSRV(Builtin::PerObjectBuffer);
-    RegisterSRV(Builtin::CLod::Nodes);
-    RegisterSRV(Builtin::CLod::MeshletBounds);
-	RegisterSRV(Builtin::CLod::GroupPageMap);
-    RegisterSRV(Builtin::CameraBuffer);
-    RegisterSRV(Builtin::PerMeshBuffer);
-    RegisterSRV(Builtin::SkeletonResources::InverseBindMatrices);
-    RegisterSRV(Builtin::SkeletonResources::BoneTransforms);
-    RegisterSRV(Builtin::SkeletonResources::SkinningInstanceInfo);
-    RegisterSRV(Builtin::PerMaterialDataBuffer);
-	RegisterUAV(Builtin::DebugVisualization);
 }
 
 PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContext) {
@@ -302,7 +278,12 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
         dispatchDesc.nodeCpuInput.pRecords = cullRecords.data();
         dispatchDesc.nodeCpuInput.numRecords = static_cast<uint32_t>(cullRecords.size());
         dispatchDesc.nodeCpuInput.recordByteStride = sizeof(ObjectCullRecord);
-        commandList.DispatchWorkGraph(dispatchDesc);
+        
+        // Dispatching a zero-record work graph seems to break the driver on some platforms
+        // It was reusing old dispatch records from a previous graph dispatch
+		if (!cullRecords.empty()) {
+            commandList.DispatchWorkGraph(dispatchDesc);
+        }
 
         rhi::BufferBarrier postWorkGraphBarriers[3] = {};
         postWorkGraphBarriers[0].buffer = m_visibleClustersCounterBuffer->GetAPIResource().GetHandle();
@@ -369,8 +350,12 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     commandList.Barriers(counterBarrierBatch);
 
     BindResourceDescriptorIndices(commandList, m_createCommandPipelineState.GetResourceDescriptorSlots());
-    // Reset aliased slots for CreateRasterBucketsHistogramCommandCSMain
+    // Reset aliased slots for CreateRasterBucketsHistogramCommandCSMain.
+    // The work-graph dispatch binds slot 3/6 as UAV-facing descriptors, but the create-command
+    // shader reads them as SRVs when building the indirect dispatch arguments.
+    uintRootConstants[CLOD_CREATE_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_visibleClustersCounterBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_CREATE_RASTER_BUCKET_HISTOGRAM_COMMAND_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
+    uintRootConstants[CLOD_CREATE_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_CREATE_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_CREATE_NUM_RASTER_BUCKETS] = context.materialManager->GetRasterBucketCount();
     commandList.PushConstants(
@@ -401,8 +386,9 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
         BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_swVisibleClustersCounterBuffer), 0);
     }
 
-    // Collect per-view raster info for software raster modes, and visibility buffer tracking for WG SW raster.
-    if (UsesSWClassification(m_workGraphMode) && UsesVisibilityBufferOutput(m_rasterOutputKind)) {
+    // Keep the shared per-view visibility UAV table valid for any visibility-buffer path.
+    // Reyes patch raster consumes this buffer even when the primary CLod path is not using SW classification.
+    if (UsesVisibilityBufferOutput(m_rasterOutputKind)) {
         m_visibilityBuffers.clear();
         auto numViews = context.viewManager->GetCameraBufferSize();
         std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);

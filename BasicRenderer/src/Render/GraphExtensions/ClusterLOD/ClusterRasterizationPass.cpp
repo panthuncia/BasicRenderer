@@ -9,6 +9,7 @@
 #include "Managers/ViewManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
+#include "Render/MemoryIntrospectionAPI.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 #include "BuiltinResources.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
@@ -43,6 +44,7 @@ ClusterRasterizationPass::ClusterRasterizationPass(
 
     m_viewRasterInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodViewRasterInfo), false, false, false, false);
     m_viewRasterInfoBuffer->SetName("CLodViewRasterInfoBuffer");
+    rg::memory::SetResourceUsageHint(*m_viewRasterInfoBuffer, "Cluster LOD rasterization");
 
     rhi::IndirectArg args[] = {
         {.kind = rhi::IndirectArgKind::Constant, .u = {.rootConstants = { IndirectCommandSignatureRootSignatureIndex, 0, 3 } } },
@@ -108,23 +110,6 @@ void ClusterRasterizationPass::DeclareResourceUsages(RenderPassBuilder* builder)
 }
 
 void ClusterRasterizationPass::Setup() {
-    RegisterSRV(Builtin::MeshResources::MeshletVertexIndices);
-    RegisterSRV(Builtin::MeshResources::MeshletTriangles);
-    RegisterSRV(Builtin::CLod::Offsets);
-    RegisterSRV(Builtin::CLod::GroupChunks);
-    RegisterSRV(Builtin::CLod::Groups);
-    RegisterSRV(Builtin::NormalMatrixBuffer);
-    RegisterSRV(Builtin::PostSkinningVertices);
-    RegisterSRV(Builtin::PerObjectBuffer);
-    RegisterSRV(Builtin::CameraBuffer);
-    RegisterSRV(Builtin::PerMeshInstanceBuffer);
-    RegisterSRV(Builtin::PerMeshBuffer);
-    RegisterSRV(Builtin::PerMaterialDataBuffer);
-    RegisterSRV(Builtin::SkeletonResources::InverseBindMatrices);
-    RegisterSRV(Builtin::SkeletonResources::BoneTransforms);
-    RegisterSRV(Builtin::SkeletonResources::SkinningInstanceInfo);
-    RegisterSRV(Builtin::MeshResources::MeshletOffsets);
-    RegisterSRV(Builtin::CLod::MeshMetadata);
 }
 
 void ClusterRasterizationPass::Update(const UpdateExecutionContext& executionContext) {

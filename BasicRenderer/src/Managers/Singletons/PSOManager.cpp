@@ -1060,6 +1060,12 @@ std::vector<DxcDefine> PSOManager::GetRasterShaderDefines(MaterialRasterFlags ra
         macro.Name = L"PSO_DOUBLE_SIDED";
 		defines.insert(defines.begin(), macro);
     }
+    if (rasterFlags & MaterialRasterFlags::MaterialRasterFlagsGeometricDisplacement) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_GEOMETRIC_DISPLACEMENT";
+        defines.insert(defines.begin(), macro);
+    }
     return defines;
 }
 
@@ -1093,6 +1099,12 @@ std::vector<DxcDefine> PSOManager::GetShaderDefines(UINT psoFlags, MaterialCompi
         DxcDefine macro;
         macro.Value = L"1";
         macro.Name = L"PSO_PARALLAX";
+        defines.insert(defines.begin(), macro);
+	}
+    if (materialFlags & MaterialCompileFlags::MaterialCompileGeometricDisplacement) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_GEOMETRIC_DISPLACEMENT";
         defines.insert(defines.begin(), macro);
 	}
     if (materialFlags & MaterialCompileFlags::MaterialCompileNormalMap) {

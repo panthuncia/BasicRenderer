@@ -16,6 +16,7 @@ enum MaterialCompileFlags : uint64_t {
 	MaterialCompileAOTexture = 1 << 6,
 	MaterialCompileEmissiveTexture = 1 << 7,
 	MaterialCompileParallax = 1 << 8,
+	MaterialCompileGeometricDisplacement = 1 << 9,
 };
 
 // |= operator for MaterialCompileFlags

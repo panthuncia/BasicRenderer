@@ -23,18 +23,8 @@ struct ClusterRasterizationPassInputs {
     RenderPhase renderPhase;
     CLodRasterOutputKind outputKind = CLodRasterOutputKind::VisibilityBuffer;
 
-    friend bool operator==(const ClusterRasterizationPassInputs&, const ClusterRasterizationPassInputs&) = default;
+    RG_DEFINE_PASS_INPUTS(ClusterRasterizationPassInputs, &ClusterRasterizationPassInputs::wireframe, &ClusterRasterizationPassInputs::clearGbuffer, &ClusterRasterizationPassInputs::renderPhase, &ClusterRasterizationPassInputs::outputKind);
 };
-
-inline rg::Hash64 HashValue(const ClusterRasterizationPassInputs& i) {
-    std::size_t seed = 0;
-
-    boost::hash_combine(seed, i.wireframe);
-    boost::hash_combine(seed, i.clearGbuffer);
-    boost::hash_combine(seed, i.renderPhase.hash);
-    boost::hash_combine(seed, static_cast<uint8_t>(i.outputKind));
-    return seed;
-}
 
 class ClusterRasterizationPass : public RenderPass, public IDynamicDeclaredResources {
 public:

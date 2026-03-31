@@ -43,6 +43,7 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
         case OUTPUT_SPECULAR_IBL:
         case OUTPUT_MODEL_NORMALS:
         case OUTPUT_MOTION_VECTORS:
+        case OUTPUT_REYES_GEOMETRY_PATH:
         case OUTPUT_TRANSPARENT_DEPTH_COMPLEXITY:
             color = UnpackDebugFloat3(payload);
             break;

@@ -25,12 +25,6 @@ public:
     }
 
     void Setup() override {
-
-        RegisterSRV("Builtin::VisUtil::MaterialPixelCountBuffer");
-        RegisterSRV("Builtin::VisUtil::BlockSumsBuffer");
-        RegisterUAV("Builtin::VisUtil::MaterialOffsetBuffer");
-        RegisterUAV("Builtin::VisUtil::ScannedBlockSumsBuffer");
-        RegisterUAV("Builtin::VisUtil::TotalPixelCountBuffer");
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override {

@@ -10,6 +10,7 @@
 #include "include/visibilityPacking.hlsli"
 #include "include/clodStructs.hlsli"
 #include "include/clodPageAccess.hlsli"
+#include "include/reyesPatchCommon.hlsli"
 #include "include/visibleClusterPacking.hlsli"
 #include "include/vertexLayout.hlsli"
 #include "PerPassRootConstants/visUtilRootConstants.h"
@@ -483,6 +484,29 @@ float2 ComputeClodMotionVector(float3 posOS, float3 worldPosition, float4x4 prev
     return ndcCur - ndcPrev;
 }
 
+float3 ReyesDecodeBarycentrics(float2 barycentricsUV)
+{
+    return ReyesPatchDomainUVToBarycentrics(barycentricsUV);
+}
+
+BarycentricDeriv ReyesComposeSourceBarycentrics(BarycentricDeriv patchBary, float3 domain0, float3 domain1, float3 domain2)
+{
+    BarycentricDeriv sourceBary = (BarycentricDeriv)0;
+    sourceBary.m_lambda =
+        domain0 * patchBary.m_lambda.x +
+        domain1 * patchBary.m_lambda.y +
+        domain2 * patchBary.m_lambda.z;
+    sourceBary.m_ddx =
+        domain0 * patchBary.m_ddx.x +
+        domain1 * patchBary.m_ddx.y +
+        domain2 * patchBary.m_ddx.z;
+    sourceBary.m_ddy =
+        domain0 * patchBary.m_ddy.x +
+        domain1 * patchBary.m_ddy.y +
+        domain2 * patchBary.m_ddy.z;
+    return sourceBary;
+}
+
 bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackface, out ClodResolvedSample sample)
 {
     sample = (ClodResolvedSample)0;
@@ -500,6 +524,52 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
     uint clusterIndex;
     uint meshletTriangleIndex;
     UnpackVisKey(vis, depth, clusterIndex, meshletTriangleIndex);
+
+    bool isReyesPatch = false;
+    float3 patchDomain0 = float3(1.0f, 0.0f, 0.0f);
+    float3 patchDomain1 = float3(0.0f, 1.0f, 0.0f);
+    float3 patchDomain2 = float3(0.0f, 0.0f, 1.0f);
+    float3 microTrianglePatchDomain0 = patchDomain0;
+    float3 microTrianglePatchDomain1 = patchDomain1;
+    float3 microTrianglePatchDomain2 = patchDomain2;
+    uint reyesMicroTriangleIndex = meshletTriangleIndex;
+    if (clusterIndex >= VISBUF_REYES_PATCH_INDEX_BASE && VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX != 0xFFFFFFFFu)
+    {
+        StructuredBuffer<CLodReyesDiceQueueEntry> diceQueue = ResourceDescriptorHeap[VISBUF_REYES_DICE_QUEUE_DESCRIPTOR_INDEX];
+        if (VISBUF_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX == 0xFFFFFFFFu ||
+            VISBUF_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX == 0xFFFFFFFFu ||
+            VISBUF_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX == 0xFFFFFFFFu)
+        {
+            return false;
+        }
+
+        StructuredBuffer<CLodReyesTessTableConfigEntry> tessTableConfigs = ResourceDescriptorHeap[VISBUF_REYES_TESS_TABLE_CONFIGS_DESCRIPTOR_INDEX];
+        StructuredBuffer<uint> tessTableVertices = ResourceDescriptorHeap[VISBUF_REYES_TESS_TABLE_VERTICES_DESCRIPTOR_INDEX];
+        StructuredBuffer<uint> tessTableTriangles = ResourceDescriptorHeap[VISBUF_REYES_TESS_TABLE_TRIANGLES_DESCRIPTOR_INDEX];
+        CLodReyesDiceQueueEntry diceEntry = diceQueue[clusterIndex - VISBUF_REYES_PATCH_INDEX_BASE];
+        clusterIndex = diceEntry.visibleClusterIndex;
+        meshletTriangleIndex = diceEntry.sourcePrimitiveAndSplitConfig & 0xFFFFu;
+        patchDomain0 = ReyesDecodeBarycentrics(diceEntry.domainVertex0UV);
+        patchDomain1 = ReyesDecodeBarycentrics(diceEntry.domainVertex1UV);
+        patchDomain2 = ReyesDecodeBarycentrics(diceEntry.domainVertex2UV);
+
+        const uint microTriangleCount = ReyesGetDicePatchMicroTriangleCount(tessTableConfigs, diceEntry);
+        if (reyesMicroTriangleIndex >= microTriangleCount)
+        {
+            return false;
+        }
+
+        ReyesDecodeMicroTrianglePatchDomain(
+            tessTableConfigs,
+            tessTableVertices,
+            tessTableTriangles,
+            reyesMicroTriangleIndex,
+            diceEntry,
+            microTrianglePatchDomain0,
+            microTrianglePatchDomain1,
+            microTrianglePatchDomain2);
+        isReyesPatch = true;
+    }
 
     MeshletResolveData md = LoadMeshletResolveData_Wave(clusterIndex);
     if (meshletTriangleIndex >= md.triangleCount)
@@ -524,22 +594,69 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
 
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
     PerObjectBuffer obj = perObjectBuffer[md.objAndMesh.x];
+    StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
+    MaterialInfo materialInfo = materialDataBuffer[md.materialDataIndex];
+    uint materialFlags = materialInfo.materialFlags;
 
     float4x4 viewProj = mul(cam.view, cam.projection);
     float4x4 objectToClip = mul(obj.model, viewProj);
     float4 clip0 = mul(float4(p0, 1.0f), objectToClip);
     float4 clip1 = mul(float4(p1, 1.0f), objectToClip);
     float4 clip2 = mul(float4(p2, 1.0f), objectToClip);
+    float3 evalPos0 = p0;
+    float3 evalPos1 = p1;
+    float3 evalPos2 = p2;
+
+    if (isReyesPatch)
+    {
+        const float3 sourcePatchBary0 = ReyesComposeSourceBarycentricsPoint(microTrianglePatchDomain0, patchDomain0, patchDomain1, patchDomain2);
+        const float3 sourcePatchBary1 = ReyesComposeSourceBarycentricsPoint(microTrianglePatchDomain1, patchDomain0, patchDomain1, patchDomain2);
+        const float3 sourcePatchBary2 = ReyesComposeSourceBarycentricsPoint(microTrianglePatchDomain2, patchDomain0, patchDomain1, patchDomain2);
+
+        float3 patchPos0 = p0 * sourcePatchBary0.x + p1 * sourcePatchBary0.y + p2 * sourcePatchBary0.z;
+        float3 patchPos1 = p0 * sourcePatchBary1.x + p1 * sourcePatchBary1.y + p2 * sourcePatchBary1.z;
+        float3 patchPos2 = p0 * sourcePatchBary2.x + p1 * sourcePatchBary2.y + p2 * sourcePatchBary2.z;
+
+        if (materialInfo.geometricDisplacementEnabled != 0u)
+        {
+            const float2 heightUv0 = DecodeCompressedUV(triIdx.x, materialInfo.heightUvSetIndex, md);
+            const float2 heightUv1 = DecodeCompressedUV(triIdx.y, materialInfo.heightUvSetIndex, md);
+            const float2 heightUv2 = DecodeCompressedUV(triIdx.z, materialInfo.heightUvSetIndex, md);
+            const float3 patchNormal0 = normalize(n0 * sourcePatchBary0.x + n1 * sourcePatchBary0.y + n2 * sourcePatchBary0.z);
+            const float3 patchNormal1 = normalize(n0 * sourcePatchBary1.x + n1 * sourcePatchBary1.y + n2 * sourcePatchBary1.z);
+            const float3 patchNormal2 = normalize(n0 * sourcePatchBary2.x + n1 * sourcePatchBary2.y + n2 * sourcePatchBary2.z);
+            const float2 patchUv0 = heightUv0 * sourcePatchBary0.x + heightUv1 * sourcePatchBary0.y + heightUv2 * sourcePatchBary0.z;
+            const float2 patchUv1 = heightUv0 * sourcePatchBary1.x + heightUv1 * sourcePatchBary1.y + heightUv2 * sourcePatchBary1.z;
+            const float2 patchUv2 = heightUv0 * sourcePatchBary2.x + heightUv1 * sourcePatchBary2.y + heightUv2 * sourcePatchBary2.z;
+            patchPos0 = ReyesApplyGeometricDisplacement(materialInfo, patchPos0, patchNormal0, patchUv0);
+            patchPos1 = ReyesApplyGeometricDisplacement(materialInfo, patchPos1, patchNormal1, patchUv1);
+            patchPos2 = ReyesApplyGeometricDisplacement(materialInfo, patchPos2, patchNormal2, patchUv2);
+        }
+
+        evalPos0 = patchPos0;
+        evalPos1 = patchPos1;
+        evalPos2 = patchPos2;
+        clip0 = mul(float4(evalPos0, 1.0f), objectToClip);
+        clip1 = mul(float4(evalPos1, 1.0f), objectToClip);
+        clip2 = mul(float4(evalPos2, 1.0f), objectToClip);
+    }
 
     float2 winSize = float2(perFrame.screenResX, perFrame.screenResY);
     float2 pixelUv = (float2(pixel) + 0.5f) / winSize;
     float2 pixelNdc = float2(pixelUv.x * 2.0f - 1.0f, (1.0f - pixelUv.y) * 2.0f - 1.0f);
 
     BarycentricDeriv bary = CalcFullBary(clip0, clip1, clip2, pixelNdc, winSize);
+    if (isReyesPatch)
+    {
+        const float3 sourcePatchBary0 = ReyesComposeSourceBarycentricsPoint(microTrianglePatchDomain0, patchDomain0, patchDomain1, patchDomain2);
+        const float3 sourcePatchBary1 = ReyesComposeSourceBarycentricsPoint(microTrianglePatchDomain1, patchDomain0, patchDomain1, patchDomain2);
+        const float3 sourcePatchBary2 = ReyesComposeSourceBarycentricsPoint(microTrianglePatchDomain2, patchDomain0, patchDomain1, patchDomain2);
+        bary = ReyesComposeSourceBarycentrics(bary, sourcePatchBary0, sourcePatchBary1, sourcePatchBary2);
+    }
 
-    float3 interpPosX = InterpolateWithDeriv(bary, p0.x, p1.x, p2.x);
-    float3 interpPosY = InterpolateWithDeriv(bary, p0.y, p1.y, p2.y);
-    float3 interpPosZ = InterpolateWithDeriv(bary, p0.z, p1.z, p2.z);
+    float3 interpPosX = InterpolateWithDeriv(bary, evalPos0.x, evalPos1.x, evalPos2.x);
+    float3 interpPosY = InterpolateWithDeriv(bary, evalPos0.y, evalPos1.y, evalPos2.y);
+    float3 interpPosZ = InterpolateWithDeriv(bary, evalPos0.z, evalPos1.z, evalPos2.z);
 
     float3 posOS = float3(interpPosX.x, interpPosY.x, interpPosZ.x);
     float3 dpdxOS = float3(interpPosX.y, interpPosY.y, interpPosZ.y);
@@ -556,6 +673,18 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
     float interpNY = InterpolateWithDeriv(bary, n0.y, n1.y, n2.y).x;
     float interpNZ = InterpolateWithDeriv(bary, n0.z, n1.z, n2.z).x;
     float3 normalOS = normalize(float3(interpNX, interpNY, interpNZ));
+    if (isReyesPatch && materialInfo.geometricDisplacementEnabled != 0u)
+    {
+        const float3 geometricNormalOS = normalize(cross(evalPos1 - evalPos0, evalPos2 - evalPos0));
+        if (all(isfinite(geometricNormalOS)) && dot(geometricNormalOS, normalOS) < 0.0f)
+        {
+            normalOS = -geometricNormalOS;
+        }
+        else if (all(isfinite(geometricNormalOS)))
+        {
+            normalOS = geometricNormalOS;
+        }
+    }
     float3 vertexColor = float3(
         InterpolateWithDeriv(bary, c0.x, c1.x, c2.x).x,
         InterpolateWithDeriv(bary, c0.y, c1.y, c2.y).x,
@@ -565,9 +694,6 @@ bool ResolveClodSampleFromVisKeyWithFace(uint64_t vis, uint2 pixel, bool isBackf
     float3x3 normalMatrix = (float3x3)normalMatrixBuffer[obj.normalMatrixBufferIndex];
     float3 worldNormal = normalize(mul(normalOS, normalMatrix));
 
-    StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
-    MaterialInfo materialInfo = materialDataBuffer[md.materialDataIndex];
-    uint materialFlags = materialInfo.materialFlags;
     MaterialUvCache uvCache = BuildClodMaterialUvCache(materialInfo, materialFlags, md, triIdx, bary);
     MaterialUvBindings uvBindings = BuildMaterialUvBindings(materialInfo, materialFlags, uvCache);
 
