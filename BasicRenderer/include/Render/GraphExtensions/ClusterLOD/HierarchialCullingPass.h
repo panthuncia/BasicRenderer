@@ -30,9 +30,10 @@ struct HierarchialCullingPassInputs {
     HierarchialCullingWorkGraphMode workGraphMode = HierarchialCullingWorkGraphMode::SoftwareRasterWorkGraph;
     RenderPhase renderPhase;
     bool clodOnlyWorkloads = false;
+    bool useShadowCascadeViews = false;
     CLodRasterOutputKind rasterOutputKind = CLodRasterOutputKind::VisibilityBuffer;
 
-    RG_DEFINE_PASS_INPUTS(HierarchialCullingPassInputs, &HierarchialCullingPassInputs::isFirstPass, &HierarchialCullingPassInputs::maxVisibleClusters, &HierarchialCullingPassInputs::workGraphMode, &HierarchialCullingPassInputs::renderPhase, &HierarchialCullingPassInputs::clodOnlyWorkloads, &HierarchialCullingPassInputs::rasterOutputKind);
+    RG_DEFINE_PASS_INPUTS(HierarchialCullingPassInputs, &HierarchialCullingPassInputs::isFirstPass, &HierarchialCullingPassInputs::maxVisibleClusters, &HierarchialCullingPassInputs::workGraphMode, &HierarchialCullingPassInputs::renderPhase, &HierarchialCullingPassInputs::clodOnlyWorkloads, &HierarchialCullingPassInputs::useShadowCascadeViews, &HierarchialCullingPassInputs::rasterOutputKind);
 };
 
 class HierarchialCullingPass : public ComputePass, public IDynamicDeclaredResources {
@@ -103,4 +104,5 @@ private:
     CLodRasterOutputKind m_rasterOutputKind = CLodRasterOutputKind::VisibilityBuffer;
     RenderPhase m_renderPhase;
     bool m_clodOnlyWorkloads = false;
+    bool m_useShadowCascadeViews = false;
 };

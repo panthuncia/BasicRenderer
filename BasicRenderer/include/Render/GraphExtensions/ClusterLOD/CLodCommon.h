@@ -27,6 +27,7 @@ enum class CLodSoftwareRasterMode : uint8_t {
 
 enum class CLodRasterOutputKind : uint8_t {
     VisibilityBuffer,
+    VirtualShadow,
     DeepVisibility,
 };
 
@@ -110,6 +111,71 @@ struct CLodDeepVisibilityStats
 };
 
 static_assert(sizeof(CLodDeepVisibilityStats) == 32u, "CLodDeepVisibilityStats size must match HLSL");
+
+inline constexpr uint32_t CLodVirtualShadowDefaultClipmapCount = 6u;
+inline constexpr uint32_t CLodVirtualShadowDefaultPageTableResolution = 2048u;
+inline constexpr uint32_t CLodVirtualShadowPhysicalPageSize = 128u;
+inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalPagesPerAxis = 64u;
+inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalPageCount =
+    CLodVirtualShadowDefaultPhysicalPagesPerAxis * CLodVirtualShadowDefaultPhysicalPagesPerAxis;
+inline constexpr uint32_t CLodVirtualShadowMaxAllocationRequests = 1u << 16;
+inline constexpr uint32_t CLodVirtualShadowClipmapValidFlag = 0x1u;
+inline constexpr uint32_t CLodVirtualShadowPageAllocatedMask = 0x80000000u;
+inline constexpr uint32_t CLodVirtualShadowPageDirtyMask = 0x40000000u;
+inline constexpr uint32_t CLodVirtualShadowPhysicalPageIndexMask = 0x3FFFFFFFu;
+
+constexpr uint32_t CLodVirtualShadowDirtyWordCount(uint32_t physicalPageCount)
+{
+    return (physicalPageCount + 31u) / 32u;
+}
+
+struct CLodVirtualShadowClipmapInfo
+{
+    float worldOriginX = 0.0f;
+    float worldOriginY = 0.0f;
+    float worldOriginZ = 0.0f;
+    float texelWorldSize = 0.0f;
+    uint32_t pageOffsetX = 0u;
+    uint32_t pageOffsetY = 0u;
+    uint32_t pageTableLayer = 0u;
+    uint32_t shadowCameraBufferIndex = 0xFFFFFFFFu;
+    uint32_t flags = 0u;
+    uint32_t pad0 = 0u;
+    uint32_t pad1 = 0u;
+    uint32_t pad2 = 0u;
+};
+
+static_assert(sizeof(CLodVirtualShadowClipmapInfo) == 48u, "CLodVirtualShadowClipmapInfo size must match HLSL");
+
+struct CLodVirtualShadowPageAllocationRequest
+{
+    uint32_t virtualAddress = 0u;
+    uint32_t clipmapIndex = 0u;
+    uint32_t priority = 0u;
+    uint32_t flags = 0u;
+};
+
+static_assert(sizeof(CLodVirtualShadowPageAllocationRequest) == 16u, "CLodVirtualShadowPageAllocationRequest size must match HLSL");
+
+struct CLodVirtualShadowPhysicalPageMeta
+{
+    uint32_t ownerVirtualAddress = 0u;
+    uint32_t lastTouchedFrame = 0u;
+    uint32_t flags = 0u;
+    uint32_t reserved = 0u;
+};
+
+static_assert(sizeof(CLodVirtualShadowPhysicalPageMeta) == 16u, "CLodVirtualShadowPhysicalPageMeta size must match HLSL");
+
+struct CLodVirtualShadowRuntimeState
+{
+    uint32_t clipmapCount = 0u;
+    uint32_t pageTableResolution = 0u;
+    uint32_t physicalPageCount = 0u;
+    uint32_t maxAllocationRequests = 0u;
+};
+
+static_assert(sizeof(CLodVirtualShadowRuntimeState) == 16u, "CLodVirtualShadowRuntimeState size must match HLSL");
 
 inline constexpr uint32_t CLodReyesMaxSplitPassCount = 4u;
 inline constexpr uint32_t CLodReyesMaxVisibilityMicroTrianglesPerPatch = 128u;

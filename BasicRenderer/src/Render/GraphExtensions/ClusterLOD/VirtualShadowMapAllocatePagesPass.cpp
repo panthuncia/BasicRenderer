@@ -1,0 +1,87 @@
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapAllocatePagesPass.h"
+
+#include "Managers/Singletons/DeviceManager.h"
+#include "Managers/Singletons/PSOManager.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
+#include "Render/RenderContext.h"
+#include "Resources/Buffers/Buffer.h"
+#include "Resources/PixelBuffer.h"
+#include "ShaderBuffers.h"
+#include "../shaders/PerPassRootConstants/clodVirtualShadowAllocateRootConstants.h"
+
+VirtualShadowMapAllocatePagesPass::VirtualShadowMapAllocatePagesPass(
+    std::shared_ptr<Buffer> allocationRequestsBuffer,
+    std::shared_ptr<Buffer> allocationCountBuffer,
+    std::shared_ptr<Buffer> indirectArgsBuffer,
+    std::shared_ptr<PixelBuffer> pageTableTexture,
+    std::shared_ptr<Buffer> pageMetadataBuffer,
+    std::shared_ptr<Buffer> dirtyPageFlagsBuffer)
+    : m_allocationRequestsBuffer(std::move(allocationRequestsBuffer))
+    , m_allocationCountBuffer(std::move(allocationCountBuffer))
+    , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
+    , m_pageTableTexture(std::move(pageTableTexture))
+    , m_pageMetadataBuffer(std::move(pageMetadataBuffer))
+    , m_dirtyPageFlagsBuffer(std::move(dirtyPageFlagsBuffer))
+{
+    m_pso = PSOManager::GetInstance().MakeComputePipeline(
+        PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
+        L"Shaders/ClusterLOD/clodUtil.hlsl",
+        L"CLodVirtualShadowAllocatePagesCSMain",
+        {},
+        "CLod.VirtualShadow.AllocatePages.PSO");
+
+    rhi::IndirectArg dispatchArgs[] = {
+        {.kind = rhi::IndirectArgKind::Dispatch }
+    };
+
+    auto device = DeviceManager::GetInstance().GetDevice();
+    device.CreateCommandSignature(
+        rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(dispatchArgs, 1), sizeof(CLodReyesDispatchIndirectCommand) },
+        PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
+        m_commandSignature);
+}
+
+void VirtualShadowMapAllocatePagesPass::DeclareResourceUsages(ComputePassBuilder* builder)
+{
+    builder->WithShaderResource(m_allocationRequestsBuffer, m_allocationCountBuffer)
+        .WithIndirectArguments(m_indirectArgsBuffer)
+        .WithUnorderedAccess(m_pageTableTexture, m_pageMetadataBuffer, m_dirtyPageFlagsBuffer);
+}
+
+void VirtualShadowMapAllocatePagesPass::Setup() {}
+
+PassReturn VirtualShadowMapAllocatePagesPass::Execute(PassExecutionContext& executionContext)
+{
+    auto* renderContext = executionContext.hostData->Get<RenderContext>();
+    auto& context = *renderContext;
+    auto& commandList = executionContext.commandList;
+
+    commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
+    commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
+    commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
+    BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+
+    uint32_t rootConstants[NumMiscUintRootConstants] = {};
+    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_REQUESTS_DESCRIPTOR_INDEX] = m_allocationRequestsBuffer->GetSRVInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_REQUEST_COUNT_DESCRIPTOR_INDEX] = m_allocationCountBuffer->GetSRVInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PAGE_TABLE_RESOLUTION] = CLodVirtualShadowDefaultPageTableResolution;
+    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_CLIPMAP_COUNT] = CLodVirtualShadowDefaultClipmapCount;
+    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PHYSICAL_PAGE_COUNT] = CLodVirtualShadowDefaultPhysicalPageCount;
+
+    commandList.PushConstants(
+        rhi::ShaderStage::Compute,
+        0,
+        MiscUintRootSignatureIndex,
+        0,
+        NumMiscUintRootConstants,
+        rootConstants);
+
+    commandList.ExecuteIndirect(m_commandSignature->GetHandle(), m_indirectArgsBuffer->GetAPIResource().GetHandle(), 0, {}, 0, 1);
+
+    return {};
+}
+
+void VirtualShadowMapAllocatePagesPass::Cleanup() {}

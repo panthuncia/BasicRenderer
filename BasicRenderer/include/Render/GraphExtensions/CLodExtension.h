@@ -8,6 +8,7 @@
 
 class Buffer;
 class CLodStreamingSystem;
+class PixelBuffer;
 
 class CLodExtension final : public RenderGraph::IRenderGraphExtension {
 public:
@@ -23,8 +24,11 @@ private:
     bool IsReyesTessellationDisabled() const;
     void InitializeCoreResources();
     void InitializeDeepVisibilityResources();
+    void InitializeShadowResources();
     void TagCoreResourceUsages();
+    void TagShadowResourceUsages();
     void ReleaseBufferBackings();
+    void ReleaseShadowResourceBackings();
     void EnsureReyesResourcesInitialized();
     void SyncReyesResourceEntities(bool enabled);
 
@@ -123,6 +127,16 @@ private:
     std::shared_ptr<Buffer> m_deepVisibilityCounterBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityOverflowCounterBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityStatsBuffer;
+    std::shared_ptr<PixelBuffer> m_shadowPageTableTexture;
+    std::shared_ptr<PixelBuffer> m_shadowPhysicalPagesTexture;
+    std::shared_ptr<Buffer> m_shadowPageMetadataBuffer;
+    std::shared_ptr<Buffer> m_shadowAllocationRequestsBuffer;
+    std::shared_ptr<Buffer> m_shadowAllocationCountBuffer;
+    std::shared_ptr<Buffer> m_shadowAllocationIndirectArgsBuffer;
+    std::shared_ptr<Buffer> m_shadowDirtyPageFlagsBuffer;
+    std::shared_ptr<PixelBuffer> m_shadowDirtyPageHierarchyTexture;
+    std::shared_ptr<Buffer> m_shadowClipmapInfoBuffer;
+    std::shared_ptr<Buffer> m_shadowRuntimeStateBuffer;
 
     std::unique_ptr<CLodStreamingSystem> m_streamingSystem;
 };

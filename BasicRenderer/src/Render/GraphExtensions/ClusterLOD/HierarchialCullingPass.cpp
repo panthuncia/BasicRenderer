@@ -41,6 +41,19 @@ bool UsesVisibilityBufferOutput(CLodRasterOutputKind outputKind)
 {
     return outputKind == CLodRasterOutputKind::VisibilityBuffer;
 }
+
+ViewFilter GetCullViewFilter(bool useShadowCascadeViews)
+{
+    if (!useShadowCascadeViews) {
+        return ViewFilter::PrimaryCameras();
+    }
+
+    ViewFilter filter = ViewFilter::Shadows();
+    filter.requireCascade = true;
+    filter.requireLightType = true;
+    filter.lightType = Components::LightType::Directional;
+    return filter;
+}
 }
 
 HierarchialCullingPass::HierarchialCullingPass(
@@ -87,6 +100,7 @@ HierarchialCullingPass::HierarchialCullingPass(
     m_maxVisibleClusters = inputs.maxVisibleClusters;
     m_renderPhase = std::move(inputs.renderPhase);
     m_clodOnlyWorkloads = inputs.clodOnlyWorkloads;
+    m_useShadowCascadeViews = inputs.useShadowCascadeViews;
     m_rasterOutputKind = inputs.rasterOutputKind;
 }
 
@@ -248,7 +262,7 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     if (m_isFirstPass) {
         std::vector<ObjectCullRecord> cullRecords;
 
-        ViewFilter filter = ViewFilter::PrimaryCameras();
+        ViewFilter filter = GetCullViewFilter(m_useShadowCascadeViews);
         context.viewManager->ForEachFiltered(filter, [&](uint64_t view) {
             auto viewInfo = context.viewManager->Get(view);
             auto cameraBufferIndex = viewInfo->gpu.cameraBufferIndex;

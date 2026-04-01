@@ -9,11 +9,13 @@ ReyesCreateDispatchArgsPass::ReyesCreateDispatchArgsPass(
     std::shared_ptr<Buffer> sourceCounterBuffer,
     std::shared_ptr<Buffer> indirectArgsBuffer,
     std::shared_ptr<Buffer> sourceBaseCounterBuffer,
-    uint32_t threadsPerGroup)
+    uint32_t threadsPerGroup,
+    uint32_t maxWorkItemCount)
     : m_sourceCounterBuffer(std::move(sourceCounterBuffer))
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
     , m_sourceBaseCounterBuffer(std::move(sourceBaseCounterBuffer))
     , m_threadsPerGroup(threadsPerGroup)
+    , m_maxWorkItemCount(maxWorkItemCount)
 {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -54,6 +56,7 @@ PassReturn ReyesCreateDispatchArgsPass::Execute(PassExecutionContext& executionC
     uintRootConstants[CLOD_REYES_CREATE_DISPATCH_ARGS_SOURCE_BASE_COUNTER_DESCRIPTOR_INDEX] = m_sourceBaseCounterBuffer
         ? m_sourceBaseCounterBuffer->GetSRVInfo(0).slot.index
         : 0xFFFFFFFFu;
+    uintRootConstants[CLOD_REYES_CREATE_DISPATCH_ARGS_MAX_WORK_ITEM_COUNT] = m_maxWorkItemCount;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

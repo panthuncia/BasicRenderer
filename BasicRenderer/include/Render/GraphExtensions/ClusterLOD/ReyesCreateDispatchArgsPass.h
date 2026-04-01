@@ -13,7 +13,8 @@ public:
         std::shared_ptr<Buffer> sourceCounterBuffer,
         std::shared_ptr<Buffer> indirectArgsBuffer,
         std::shared_ptr<Buffer> sourceBaseCounterBuffer = nullptr,
-        uint32_t threadsPerGroup = 64u);
+        uint32_t threadsPerGroup = 64u,
+        uint32_t maxWorkItemCount = 0xFFFFFFFFu);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
@@ -27,4 +28,5 @@ private:
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
     std::shared_ptr<Buffer> m_sourceBaseCounterBuffer;
     uint32_t m_threadsPerGroup = 64u;
+    uint32_t m_maxWorkItemCount = 0xFFFFFFFFu;
 };
