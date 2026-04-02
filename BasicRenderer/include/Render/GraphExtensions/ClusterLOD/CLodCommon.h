@@ -177,6 +177,7 @@ struct CLodVirtualShadowRuntimeState
 
 static_assert(sizeof(CLodVirtualShadowRuntimeState) == 16u, "CLodVirtualShadowRuntimeState size must match HLSL");
 
+
 inline constexpr uint32_t CLodReyesMaxSplitPassCount = 4u;
 inline constexpr uint32_t CLodReyesMaxVisibilityMicroTrianglesPerPatch = 128u;
 inline constexpr uint32_t CLodReyesRasterBatchMicroTriangleCount = 16u;

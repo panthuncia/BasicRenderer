@@ -110,6 +110,9 @@ struct Builtin {
     inline static constexpr std::string_view VisibilityTexture = "Builtin::PrimaryCamera::VisibilityTexture";
   };
   struct Shadows {
+    inline static constexpr std::string_view CLodClipmapInfo = "Builtin::Shadows::CLodClipmapInfo";
+    inline static constexpr std::string_view CLodPageTable = "Builtin::Shadows::CLodPageTable";
+    inline static constexpr std::string_view CLodPhysicalPages = "Builtin::Shadows::CLodPhysicalPages";
     inline static constexpr std::string_view LinearShadowMaps = "Builtin::Shadows::LinearShadowMaps";
     inline static constexpr std::string_view ShadowMaps = "Builtin::Shadows::ShadowMaps";
   };

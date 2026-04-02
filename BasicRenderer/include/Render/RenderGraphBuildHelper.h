@@ -356,19 +356,7 @@ void BuildEnvironmentPipeline(RenderGraph* graph) {
 }
 
 void BuildMainShadowPass(RenderGraph* graph) {
-	bool useMeshShaders = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
-	bool indirect = SettingsManager::GetInstance().getSettingGetter<bool>("enableIndirectDraws")();
-	bool wireframe = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
-	bool occlusionCulling = SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")();
-	// TODO: Make a better way of evaluating dependencies between settings. Maybe a graph?
-	indirect = indirect && useMeshShaders; // Mesh shader pipelines are required for indirect draws
-
-    bool clearRTVs = false;
-    if (!occlusionCulling || !indirect) {
-        clearRTVs = true; // We will not run an earlier pass
-    }
-
-    graph->BuildRenderPass<ShadowPass>("ShadowPass", ShadowPassInputs{ wireframe, useMeshShaders, indirect, true, clearRTVs });
+    (void)graph;
 }
 
 void BuildLinearDepthDownsamplePass(RenderGraph* graph) {

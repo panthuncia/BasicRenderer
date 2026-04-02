@@ -29,6 +29,7 @@ static const uint kCLodVirtualShadowAllocatedMask = 0x80000000u;
 static const uint kCLodVirtualShadowDirtyMask = 0x40000000u;
 static const uint kCLodVirtualShadowPhysicalPageIndexMask = 0x3FFFFFFFu;
 static const uint kCLodVirtualShadowClipmapValidFlag = 0x1u;
+static const uint kCLodVirtualShadowDefaultClipmapCount = 6u;
 
 struct CLodVirtualShadowClipmapInfoGpu
 {

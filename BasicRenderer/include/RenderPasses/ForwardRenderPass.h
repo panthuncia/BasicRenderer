@@ -65,6 +65,9 @@ public:
             Builtin::PerMeshBuffer,
             Builtin::PerMeshInstanceBuffer,
             Builtin::PostSkinningVertices,
+            Builtin::Shadows::CLodClipmapInfo,
+            Builtin::Shadows::CLodPageTable,
+            Builtin::Shadows::CLodPhysicalPages,
             Builtin::Shadows::ShadowMaps)
             .WithRenderTarget(Builtin::Color::HDRColorTarget)
             .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)

@@ -51,6 +51,7 @@
 #include "Resources/components.h"
 #include "ShaderBuffers.h"
 #include "Utilities/ProportionalBudgetAllocator.h"
+#include "BuiltinResources.h"
 
 namespace {
 
@@ -1141,8 +1142,18 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
     TagShadowResourceUsages();
 }
 
+void CLodExtension::PrepareForBuild(RenderGraph& rg)
+{
+    if (m_type == CLodExtensionType::Shadow && !m_providerRegisteredForCurrentRegistry) {
+        rg.RegisterProvider(this);
+        m_providerRegisteredForCurrentRegistry = true;
+    }
+}
+
 void CLodExtension::Initialize(RenderGraph& rg)
 {
+    PrepareForBuild(rg);
+
     if (m_streamingSystem) {
         m_streamingSystem->Initialize(rg);
     }
@@ -1150,6 +1161,7 @@ void CLodExtension::Initialize(RenderGraph& rg)
 
 void CLodExtension::OnRegistryReset(ResourceRegistry* reg)
 {
+    m_providerRegisteredForCurrentRegistry = false;
     ReleaseBufferBackings();
     ReleaseShadowResourceBackings();
 
@@ -1160,8 +1172,44 @@ void CLodExtension::OnRegistryReset(ResourceRegistry* reg)
     }
 }
 
+std::shared_ptr<Resource> CLodExtension::ProvideResource(ResourceIdentifier const& key)
+{
+    if (m_type != CLodExtensionType::Shadow) {
+        return nullptr;
+    }
+
+    if (key == Builtin::Shadows::CLodPageTable) {
+        return m_shadowPageTableTexture;
+    }
+
+    if (key == Builtin::Shadows::CLodPhysicalPages) {
+        return m_shadowPhysicalPagesTexture;
+    }
+
+    if (key == Builtin::Shadows::CLodClipmapInfo) {
+        return m_shadowClipmapInfoBuffer;
+    }
+
+    return nullptr;
+}
+
+std::vector<ResourceIdentifier> CLodExtension::GetSupportedKeys()
+{
+    if (m_type != CLodExtensionType::Shadow) {
+        return {};
+    }
+
+    return {
+        Builtin::Shadows::CLodPageTable,
+        Builtin::Shadows::CLodPhysicalPages,
+        Builtin::Shadows::CLodClipmapInfo,
+    };
+}
+
 void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses)
 {
+    PrepareForBuild(rg);
+
     const auto& traits = GetVariantTraits(m_type);
     if (m_streamingSystem) {
         m_streamingSystem->GatherStructuralPasses(rg, outPasses);
@@ -1259,6 +1307,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_shadowDirtyPageHierarchyTexture));
         shadowDirtyHierarchyPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowClearPagesPassName));
         outPasses.push_back(std::move(shadowDirtyHierarchyPassDesc));
+
     }
 
     std::shared_ptr<ResourceGroup> slabGroup = GetSlabResourceGroup();
@@ -1598,7 +1647,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_deepVisibilityOverflowCounterBuffer,
                 m_deepVisibilityStatsBuffer,
                 CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters)));
-        resolveDeepVisibilityPassDesc.At(RenderGraph::ExternalInsertPoint::Before("PPLLResolvePass"));
+            auto resolveInsertPoint = RenderGraph::ExternalInsertPoint::After("LightCullingPass");
+            resolveInsertPoint.before.push_back("PPLLResolvePass");
+            resolveDeepVisibilityPassDesc.At(std::move(resolveInsertPoint));
         outPasses.push_back(std::move(resolveDeepVisibilityPassDesc));
         return;
     }
@@ -1608,6 +1659,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
     rasterizePassInputs.wireframe = false;
     rasterizePassInputs.renderPhase = renderPhase;
     rasterizePassInputs.outputKind = traits.rasterOutputKind;
+    auto shadowPageTable = traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_shadowPageTableTexture : nullptr;
+    auto shadowPhysicalPages = traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_shadowPhysicalPagesTexture : nullptr;
+    auto shadowClipmapInfo = traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_shadowClipmapInfoBuffer : nullptr;
     auto rasterizePassDesc = RenderGraph::ExternalPassDesc::Render(
         MakeVariantPassName(traits, "RasterizeClustersPass1"),
         std::make_shared<ClusterRasterizationPass>(
@@ -1619,7 +1673,10 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             nullptr,
             nullptr,
             nullptr,
-            slabGroup));
+            slabGroup,
+            shadowPageTable,
+            shadowPhysicalPages,
+            shadowClipmapInfo));
     rasterizePassDesc.GeometryPass();
     outPasses.push_back(std::move(rasterizePassDesc));
 
@@ -1972,7 +2029,10 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             nullptr,
             nullptr,
             nullptr,
-            slabGroup));
+            slabGroup,
+            shadowPageTable,
+            shadowPhysicalPages,
+            shadowClipmapInfo));
     rasterizePassDesc2.At(RenderGraph::ExternalInsertPoint::Before("MaterialHistogramPass"));
     rasterizePassDesc2.GeometryPass();
     outPasses.push_back(std::move(rasterizePassDesc2));

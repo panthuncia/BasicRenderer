@@ -140,6 +140,7 @@ public:
 	const PipelineState& GetVisibilityBufferMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
 
     const PipelineState& GetClusterLODRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
+    const PipelineState& GetClusterLODVirtualShadowRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     const PipelineState& GetClusterLODDeepVisibilityRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     const PipelineState& GetClusterLODSoftwareRasterPSO(MaterialRasterFlags materialRasterFlags);
     const PipelineState& GetClusterLODDeepVisibilityResolvePSO(UINT psoFlags);
@@ -204,6 +205,7 @@ private:
     std::unordered_map<PSOKey, PipelineState> m_visibilityBufferMeshPSOCache;
 
     std::unordered_map<RasterPSOKey, PipelineState> m_clusterLODRasterPSOCache;
+    std::unordered_map<RasterPSOKey, PipelineState> m_clusterLODVirtualShadowRasterPSOCache;
     std::unordered_map<RasterPSOKey, PipelineState> m_clusterLODDeepVisibilityRasterPSOCache;
     std::unordered_map<uint32_t, PipelineState> m_clusterLODSoftwareRasterPSOCache;
     std::unordered_map<unsigned int, PipelineState> m_clusterLODDeepVisibilityResolvePSOCache;
@@ -230,6 +232,7 @@ private:
 	PipelineState CreateVisibilityBufferMeshPSO(UINT psoFlags, MaterialCompileFlags materialCompileFlags, bool wireframe = false);
 
     PipelineState CreateClusterLODRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
+    PipelineState CreateClusterLODVirtualShadowRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     PipelineState CreateClusterLODDeepVisibilityRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe = false);
     PipelineState CreateClusterLODSoftwareRasterPSO(MaterialRasterFlags materialRasterFlags);
     PipelineState CreateClusterLODDeepVisibilityResolvePSO(UINT psoFlags);

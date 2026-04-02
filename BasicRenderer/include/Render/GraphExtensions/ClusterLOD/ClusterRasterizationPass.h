@@ -37,7 +37,10 @@ public:
         std::shared_ptr<Buffer> deepVisibilityNodesBuffer = nullptr,
         std::shared_ptr<Buffer> deepVisibilityCounterBuffer = nullptr,
         std::shared_ptr<Buffer> deepVisibilityOverflowCounterBuffer = nullptr,
-        std::shared_ptr<ResourceGroup> slabResourceGroup = nullptr);
+        std::shared_ptr<ResourceGroup> slabResourceGroup = nullptr,
+        std::shared_ptr<PixelBuffer> virtualShadowPageTableTexture = nullptr,
+        std::shared_ptr<PixelBuffer> virtualShadowPhysicalPagesTexture = nullptr,
+        std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer = nullptr);
     ~ClusterRasterizationPass();
 
     void DeclareResourceUsages(RenderPassBuilder* builder) override;
@@ -64,6 +67,9 @@ private:
     std::shared_ptr<Buffer> m_deepVisibilityNodesBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityCounterBuffer;
     std::shared_ptr<Buffer> m_deepVisibilityOverflowCounterBuffer;
+    std::shared_ptr<PixelBuffer> m_virtualShadowPageTableTexture;
+    std::shared_ptr<PixelBuffer> m_virtualShadowPhysicalPagesTexture;
+    std::shared_ptr<Buffer> m_virtualShadowClipmapInfoBuffer;
 
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
 

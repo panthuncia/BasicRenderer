@@ -826,7 +826,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<float>("autoAliasPoolGrowthHeadroom", 1.5f);
     settingsManager.registerSetting<bool>("heavyDebug", false);
     settingsManager.registerSetting<uint32_t>("clodStreamingCpuUploadBudgetRequests", 50u);
-    settingsManager.registerSetting<bool>(CLodDisableReyesRasterizationSettingName, false);
+    settingsManager.registerSetting<bool>(CLodDisableReyesRasterizationSettingName, true);
 	settingsManager.registerSetting<uint32_t>(CLodReyesResourceBudgetBytesSettingName, 512u*1024u*1024u); // 500 MB for reyes
 	settingsManager.registerSetting<uint32_t>("usdPointInstancerMaxInstances", 10000u);
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
@@ -1285,7 +1285,9 @@ void Renderer::Update(float elapsedSeconds) {
 
     auto camera = GetValidatedPrimaryRenderCamera(false);
     if (!camera) {
-        rebuildRenderGraph = true;
+        camera = GetValidatedPrimaryRenderCamera(true);
+    }
+    if (!camera) {
         spdlog::warn("Renderer: bridged primary camera is unavailable after scene sync. Skipping frame update work.");
         return;
     }
@@ -1945,7 +1947,7 @@ void Renderer::CreateRenderGraph() {
                 std::make_unique<CLodExtension>(CLodExtensionType::AlphaBlend, static_cast<uint32_t>(maxClusters)),
                 "CLodAlpha");
         }
-        constexpr bool kEnableShadowCLodVariant = false;
+        constexpr bool kEnableShadowCLodVariant = true;
         if (kEnableShadowCLodVariant) {
             currentRenderGraph->RegisterExtension(
                 std::make_unique<CLodExtension>(CLodExtensionType::Shadow, static_cast<uint32_t>(maxClusters)),
@@ -1968,6 +1970,7 @@ void Renderer::CreateRenderGraph() {
 	newGraph->RegisterProvider(m_pMaterialManager.get());
 	newGraph->RegisterProvider(m_pSkeletonManager.get());
     newGraph->RegisterProvider(&m_coreResourceProvider);
+    newGraph->PrepareExtensionsForBuild();
 
     auto& depth = primaryCameraEntity.get<Components::DepthMap>();
     std::shared_ptr<PixelBuffer> depthTexture = depth.depthMap;

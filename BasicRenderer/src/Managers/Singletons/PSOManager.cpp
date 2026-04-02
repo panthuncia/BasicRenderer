@@ -1,16 +1,280 @@
 #include "Managers/Singletons/PSOManager.h"
 
 #include <fstream>
+#include <filesystem>
 #include <spdlog/spdlog.h>
 #include <tree_sitter/api.h>
 
+#include "ShaderArtifactCache.h"
 #include "Utilities/Utilities.h"
+#include "Utilities/HashMix.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Materials/TechniqueDescriptor.h"
 #include "brslHelpers.h"
 #include "Render/ShaderAPI.h"
 
 #pragma comment(lib, "dxcompiler.lib")
+
+namespace {
+
+uint64_t HashBytesStable(const void* data, size_t size)
+{
+    const uint64_t kOffset = 14695981039346656037ull;
+    const uint64_t kPrime = 1099511628211ull;
+    uint64_t hash = kOffset;
+    const uint8_t* bytes = static_cast<const uint8_t*>(data);
+    for (size_t i = 0; i < size; ++i) {
+        hash ^= bytes[i];
+        hash *= kPrime;
+    }
+    hash ^= static_cast<uint64_t>(size);
+    hash *= kPrime;
+    return hash;
+}
+
+uint64_t HashStringStable(std::string_view value)
+{
+    return HashBytesStable(value.data(), value.size());
+}
+
+uint64_t HashPreprocessedBuffer(const DxcBuffer& buffer)
+{
+    const char* source = static_cast<const char*>(buffer.Ptr);
+    const size_t sourceSize = GetNormalizedShaderSourceSize(source, buffer.Size);
+    return HashBytesStable(source, sourceSize);
+}
+
+std::string NormalizePathUtf8(const std::filesystem::path& path)
+{
+    return NormalizeCacheSourcePath(ws2s(path.wstring()));
+}
+
+uint64_t BuildBundleIdentityHash(
+    const ShaderInfoBundle& info,
+    const DxcBuffer& amplificationBuffer,
+    const DxcBuffer& meshBuffer,
+    const DxcBuffer& pixelBuffer,
+    const DxcBuffer& vertexBuffer,
+    const DxcBuffer& computeBuffer)
+{
+    uint64_t seed = 0;
+    util::hash_combine_u64(seed, info.enableDebugInfo ? 1u : 0u);
+    util::hash_combine_u64(seed, info.warningsAsErrors ? 1u : 0u);
+
+    auto hashSlot = [&](shadercache::BlobKind blobKind, const std::optional<ShaderInfo>& slot, const DxcBuffer& buffer) {
+        util::hash_combine_u64(seed, static_cast<uint8_t>(blobKind));
+        util::hash_combine_u64(seed, slot.has_value() ? 1u : 0u);
+        if (!slot) {
+            return;
+        }
+
+        util::hash_combine_u64(seed, HashPreprocessedBuffer(buffer));
+        util::hash_combine_u64(seed, GetNormalizedShaderSourceSize(static_cast<const char*>(buffer.Ptr), buffer.Size));
+        util::hash_combine_u64(seed, HashStringStable(ws2s(slot->entryPoint)));
+        util::hash_combine_u64(seed, HashStringStable(ws2s(slot->target)));
+    };
+
+    hashSlot(shadercache::BlobKind::Amplification, info.amplificationShader, amplificationBuffer);
+    hashSlot(shadercache::BlobKind::Mesh, info.meshShader, meshBuffer);
+    hashSlot(shadercache::BlobKind::Vertex, info.vertexShader, vertexBuffer);
+    hashSlot(shadercache::BlobKind::Pixel, info.pixelShader, pixelBuffer);
+    hashSlot(shadercache::BlobKind::Compute, info.computeShader, computeBuffer);
+    return seed;
+}
+
+uint64_t BuildLibraryIdentityHash(
+    const ShaderLibraryInfo& info,
+    const DxcBuffer& preprocessedBuffer)
+{
+    uint64_t seed = 0;
+    util::hash_combine_u64(seed, HashPreprocessedBuffer(preprocessedBuffer));
+    util::hash_combine_u64(seed, GetNormalizedShaderSourceSize(static_cast<const char*>(preprocessedBuffer.Ptr), preprocessedBuffer.Size));
+    util::hash_combine_u64(seed, HashStringStable(ws2s(info.target)));
+    return seed;
+}
+
+uint64_t ComputeShaderCacheBuildConfigHash()
+{
+    uint64_t seed = 0;
+    util::hash_combine_u64(seed, shadercache::kSchemaVersion);
+    util::hash_combine_u64(seed, kBRSLPreprocessVersion);
+#if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
+    util::hash_combine_u64(seed, 1u);
+#else
+    util::hash_combine_u64(seed, 0u);
+#endif
+    util::hash_combine_u64(seed, 1u); // warnings-as-errors is always enabled in the current DXC path
+
+    wchar_t modulePath[MAX_PATH] = {};
+    HMODULE dxcompilerModule = GetModuleHandleW(L"dxcompiler.dll");
+    if (dxcompilerModule != nullptr && GetModuleFileNameW(dxcompilerModule, modulePath, MAX_PATH) > 0) {
+        const std::filesystem::path path(modulePath);
+        util::hash_combine_u64(seed, HashStringStable(NormalizePathUtf8(path)));
+
+        std::error_code ec;
+        const auto fileSize = std::filesystem::file_size(path, ec);
+        if (!ec) {
+            util::hash_combine_u64(seed, fileSize);
+        }
+        const auto lastWrite = std::filesystem::last_write_time(path, ec);
+        if (!ec) {
+            util::hash_combine_u64(seed, lastWrite.time_since_epoch().count());
+        }
+    }
+
+    return seed;
+}
+
+bool CreateBlobFromBytes(
+    IDxcUtils* utils,
+    const std::vector<std::byte>& bytes,
+    Microsoft::WRL::ComPtr<ID3DBlob>& outBlob)
+{
+    if (!utils) {
+        return false;
+    }
+
+    ComPtr<IDxcBlobEncoding> blobEncoding;
+    HRESULT hr = utils->CreateBlob(
+        bytes.empty() ? nullptr : bytes.data(),
+        static_cast<UINT32>(bytes.size()),
+        0,
+        blobEncoding.GetAddressOf());
+    if (FAILED(hr) || !blobEncoding) {
+        return false;
+    }
+
+    outBlob.Attach(reinterpret_cast<ID3DBlob*>(blobEncoding.Detach()));
+    return true;
+}
+
+std::vector<std::byte> CopyBlobBytes(ID3DBlob* blob)
+{
+    if (!blob) {
+        return {};
+    }
+    const std::byte* begin = static_cast<const std::byte*>(blob->GetBufferPointer());
+    return std::vector<std::byte>(begin, begin + blob->GetBufferSize());
+}
+
+void AppendBundleBlob(
+    shadercache::CacheData& cacheData,
+    shadercache::BlobKind kind,
+    const std::wstring& entryPoint,
+    const std::wstring& target,
+    ID3DBlob* blob)
+{
+    if (!blob) {
+        return;
+    }
+    cacheData.blobs.push_back(shadercache::CachedShaderBlob{
+        .kind = kind,
+        .entryPoint = ws2s(entryPoint),
+        .target = ws2s(target),
+        .dxil = CopyBlobBytes(blob),
+    });
+}
+
+std::optional<ShaderBundle> TryLoadShaderBundleFromCache(
+    const shadercache::CacheKey& cacheKey,
+    uint64_t buildConfigHash,
+    IDxcUtils* utils)
+{
+    std::optional<shadercache::CacheData> cacheData = shadercache::TryLoad(cacheKey, buildConfigHash);
+    if (!cacheData.has_value()) {
+        return std::nullopt;
+    }
+
+    ShaderBundle bundle;
+    bundle.resourceDescriptorSlots = cacheData->resourceDescriptorSlots;
+    bundle.resourceIDsHash = cacheData->resourceIDsHash;
+
+    for (const shadercache::CachedShaderBlob& blob : cacheData->blobs) {
+        Microsoft::WRL::ComPtr<ID3DBlob> reconstructedBlob;
+        if (!CreateBlobFromBytes(utils, blob.dxil, reconstructedBlob)) {
+            spdlog::warn("Shader cache blob reconstruction failed; treating as miss.");
+            return std::nullopt;
+        }
+
+        switch (blob.kind) {
+        case shadercache::BlobKind::Vertex:
+            bundle.vertexShader = std::move(reconstructedBlob);
+            break;
+        case shadercache::BlobKind::Pixel:
+            bundle.pixelShader = std::move(reconstructedBlob);
+            break;
+        case shadercache::BlobKind::Amplification:
+            bundle.amplificationShader = std::move(reconstructedBlob);
+            break;
+        case shadercache::BlobKind::Mesh:
+            bundle.meshShader = std::move(reconstructedBlob);
+            break;
+        case shadercache::BlobKind::Compute:
+            bundle.computeShader = std::move(reconstructedBlob);
+            break;
+        default:
+            spdlog::warn("Unexpected shader cache blob kind {} in bundle cache.", static_cast<uint32_t>(blob.kind));
+            return std::nullopt;
+        }
+    }
+
+    return bundle;
+}
+
+std::optional<ShaderLibraryBundle> TryLoadShaderLibraryFromCache(
+    const shadercache::CacheKey& cacheKey,
+    uint64_t buildConfigHash,
+    IDxcUtils* utils)
+{
+    std::optional<shadercache::CacheData> cacheData = shadercache::TryLoad(cacheKey, buildConfigHash);
+    if (!cacheData.has_value()) {
+        return std::nullopt;
+    }
+
+    if (cacheData->blobs.size() != 1 || cacheData->blobs.front().kind != shadercache::BlobKind::Library) {
+        spdlog::warn("Shader library cache entry is malformed; treating as miss.");
+        return std::nullopt;
+    }
+
+    ShaderLibraryBundle bundle;
+    bundle.resourceDescriptorSlots = cacheData->resourceDescriptorSlots;
+    bundle.resourceIDsHash = cacheData->resourceIDsHash;
+    if (!CreateBlobFromBytes(utils, cacheData->blobs.front().dxil, bundle.libraryBlob)) {
+        spdlog::warn("Shader library cache blob reconstruction failed; treating as miss.");
+        return std::nullopt;
+    }
+
+    return bundle;
+}
+
+shadercache::CacheData BuildBundleCacheData(const ShaderInfoBundle& info, const ShaderBundle& bundle, uint64_t buildConfigHash)
+{
+    shadercache::CacheData cacheData;
+    cacheData.buildConfigHash = buildConfigHash;
+    cacheData.artifactKind = shadercache::ArtifactKind::Bundle;
+    cacheData.resourceDescriptorSlots = bundle.resourceDescriptorSlots;
+    cacheData.resourceIDsHash = bundle.resourceIDsHash;
+
+    AppendBundleBlob(cacheData, shadercache::BlobKind::Vertex, info.vertexShader ? info.vertexShader->entryPoint : L"", info.vertexShader ? info.vertexShader->target : L"", bundle.vertexShader.Get());
+    AppendBundleBlob(cacheData, shadercache::BlobKind::Pixel, info.pixelShader ? info.pixelShader->entryPoint : L"", info.pixelShader ? info.pixelShader->target : L"", bundle.pixelShader.Get());
+    AppendBundleBlob(cacheData, shadercache::BlobKind::Amplification, info.amplificationShader ? info.amplificationShader->entryPoint : L"", info.amplificationShader ? info.amplificationShader->target : L"", bundle.amplificationShader.Get());
+    AppendBundleBlob(cacheData, shadercache::BlobKind::Mesh, info.meshShader ? info.meshShader->entryPoint : L"", info.meshShader ? info.meshShader->target : L"", bundle.meshShader.Get());
+    AppendBundleBlob(cacheData, shadercache::BlobKind::Compute, info.computeShader ? info.computeShader->entryPoint : L"", info.computeShader ? info.computeShader->target : L"", bundle.computeShader.Get());
+    return cacheData;
+}
+
+shadercache::CacheData BuildLibraryCacheData(const ShaderLibraryInfo& info, const ShaderLibraryBundle& bundle, uint64_t buildConfigHash)
+{
+    shadercache::CacheData cacheData;
+    cacheData.buildConfigHash = buildConfigHash;
+    cacheData.artifactKind = shadercache::ArtifactKind::Library;
+    cacheData.resourceDescriptorSlots = bundle.resourceDescriptorSlots;
+    cacheData.resourceIDsHash = bundle.resourceIDsHash;
+    AppendBundleBlob(cacheData, shadercache::BlobKind::Library, L"", info.target, bundle.libraryBlob.Get());
+    return cacheData;
+}
+
+} // namespace
 
 void PSOManager::initialize() {
     createRootSignature();
@@ -47,6 +311,7 @@ void PSOManager::Cleanup() {
     m_visibilityBufferMeshPSOCache.clear();
     m_deferredPSOCache.clear();
     m_clusterLODRasterPSOCache.clear();
+    m_clusterLODVirtualShadowRasterPSOCache.clear();
     m_clusterLODDeepVisibilityRasterPSOCache.clear();
     m_clusterLODSoftwareRasterPSOCache.clear();
     m_clusterLODDeepVisibilityResolvePSOCache.clear();
@@ -147,6 +412,14 @@ const PipelineState& PSOManager::GetClusterLODRasterPSO(MaterialRasterFlags mate
         m_clusterLODRasterPSOCache[key] = CreateClusterLODRasterPSO(materialRasterFlags, wireframe);
     }
     return m_clusterLODRasterPSOCache[key];
+}
+
+const PipelineState& PSOManager::GetClusterLODVirtualShadowRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    RasterPSOKey key(materialRasterFlags, wireframe);
+    if (m_clusterLODVirtualShadowRasterPSOCache.find(key) == m_clusterLODVirtualShadowRasterPSOCache.end()) {
+        m_clusterLODVirtualShadowRasterPSOCache[key] = CreateClusterLODVirtualShadowRasterPSO(materialRasterFlags, wireframe);
+    }
+    return m_clusterLODVirtualShadowRasterPSOCache[key];
 }
 
 const PipelineState& PSOManager::GetClusterLODDeepVisibilityRasterPSO(MaterialRasterFlags materialRasterFlags, bool wireframe) {
@@ -561,6 +834,50 @@ PipelineState PSOManager::CreateClusterLODRasterPSO(
     auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
     if (Failed(result)) {
         throw std::runtime_error("Failed to create Mesh PrePass PSO");
+    }
+
+    return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
+}
+
+PipelineState PSOManager::CreateClusterLODVirtualShadowRasterPSO(
+    MaterialRasterFlags materialRasterFlags, bool wireframe) {
+    auto defines = GetRasterShaderDefines(materialRasterFlags);
+
+    Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
+    Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
+
+    ShaderInfoBundle shaderInfoBundle;
+    shaderInfoBundle.meshShader = { L"shaders/mesh.hlsl", L"ClusterLODBucketMSMain", L"ms_6_6" };
+    shaderInfoBundle.pixelShader = { L"shaders/ClusterLOD/VirtualShadowOutput.hlsl", L"VirtualShadowBufferPSMain", L"ps_6_6" };
+    shaderInfoBundle.defines = defines;
+
+    auto compiledBundle = CompileShaders(shaderInfoBundle);
+    msBlob = compiledBundle.meshShader;
+    psBlob = compiledBundle.pixelShader;
+
+    auto& layout = GetRootSignature();
+    rhi::SubobjLayout soLayout{ layout.GetHandle() };
+    rhi::SubobjShader soMesh{ rhi::ShaderStage::Mesh, rhi::DXIL(msBlob.Get()), "ClusterLODBucketMSMain" };
+    rhi::SubobjShader soPS{ rhi::ShaderStage::Pixel, rhi::DXIL(psBlob.Get()), "VirtualShadowBufferPSMain" };
+
+    rhi::RasterState rs{};
+    rs.fill = wireframe ? rhi::FillMode::Wireframe : rhi::FillMode::Solid;
+    rs.cull = (materialRasterFlags & MaterialRasterFlags::MaterialRasterFlagsDoubleSided) ? rhi::CullMode::None : rhi::CullMode::Back;
+    rs.frontCCW = true;
+    rhi::SubobjRaster soRaster{ rs };
+
+    const rhi::PipelineStreamItem items[] = {
+        rhi::Make(soLayout),
+        rhi::Make(soMesh),
+        rhi::Make(soPS),
+        rhi::Make(soRaster),
+    };
+
+    auto dev = DeviceManager::GetInstance().GetDevice();
+    rhi::PipelinePtr pso;
+    auto result = dev.CreatePipeline(items, (uint32_t)std::size(items), pso);
+    if (Failed(result)) {
+        throw std::runtime_error("Failed to create CLod virtual shadow raster PSO");
     }
 
     return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
@@ -1290,6 +1607,15 @@ ShaderLibraryBundle PSOManager::CompileShaderLibrary(const ShaderLibraryInfo& li
     dxcPreprocessBuff.Size = outBlob->GetBufferSize();
     dxcPreprocessBuff.Encoding = 0;
 
+    const uint64_t buildConfigHash = ComputeShaderCacheBuildConfigHash();
+    const shadercache::CacheKey cacheKey{
+        .artifactKind = shadercache::ArtifactKind::Library,
+        .identityHash = BuildLibraryIdentityHash(libraryInfo, dxcPreprocessBuff),
+    };
+    if (std::optional<ShaderLibraryBundle> cachedBundle = TryLoadShaderLibraryFromCache(cacheKey, buildConfigHash, pUtils.Get()); cachedBundle.has_value()) {
+        return *cachedBundle;
+    }
+
     // Compile BRSL info
     PreprocessedLibraryResult libPP = PreprocessShaderLibrary(dxcPreprocessBuff);
     if (libPP.diagnostics.usedFallbackRewrite) {
@@ -1328,6 +1654,9 @@ ShaderLibraryBundle PSOManager::CompileShaderLibrary(const ShaderLibraryInfo& li
 	bundle.libraryBlob = outBlob;
     bundle.resourceDescriptorSlots = {mandatoryResourceDescriptors, optionalResourceDescriptors};
 	bundle.resourceIDsHash = libPP.resourceIDsHash;
+
+    const shadercache::CacheData cacheData = BuildLibraryCacheData(libraryInfo, bundle, buildConfigHash);
+    shadercache::Save(cacheKey, cacheData);
 	return bundle;
 
 }
@@ -1354,6 +1683,21 @@ ShaderBundle PSOManager::CompileShaders(const ShaderInfoBundle& info) {
     PreprocessShaderSlot(info.pixelShader, info.defines, preprocessedPixelShader, pixelBuffer);
     PreprocessShaderSlot(info.vertexShader, info.defines, preprocessedVertexShader, vertexBuffer);
     PreprocessShaderSlot(info.computeShader, info.defines, preprocessedComputeShader, computeBuffer);
+
+    const uint64_t buildConfigHash = ComputeShaderCacheBuildConfigHash();
+    const shadercache::CacheKey cacheKey{
+        .artifactKind = shadercache::ArtifactKind::Bundle,
+        .identityHash = BuildBundleIdentityHash(
+            info,
+            amplificationBuffer,
+            meshBuffer,
+            pixelBuffer,
+            vertexBuffer,
+            computeBuffer),
+    };
+    if (std::optional<ShaderBundle> cachedBundle = TryLoadShaderBundleFromCache(cacheKey, buildConfigHash, pUtils.Get()); cachedBundle.has_value()) {
+        return *cachedBundle;
+    }
 
     auto prepareSlot = [&](const std::optional<ShaderInfo>& slot, const DxcBuffer& buffer)
         -> std::optional<PreparedShaderSource>
@@ -1471,6 +1815,9 @@ ShaderBundle PSOManager::CompileShaders(const ShaderInfoBundle& info) {
 	combinedIds.insert(combinedIds.end(), usedOptionalResourceIDsVec.begin(), usedOptionalResourceIDsVec.end());
 
 	bundle.resourceIDsHash = hash_list(combinedIds);
+
+    const shadercache::CacheData cacheData = BuildBundleCacheData(info, bundle, buildConfigHash);
+    shadercache::Save(cacheKey, cacheData);
 
 	return bundle;
 }
@@ -1770,6 +2117,7 @@ void PSOManager::ReloadShaders() {
     m_shadowMeshPSOCache.clear();
     m_prePassPSOCache.clear();
     m_clusterLODRasterPSOCache.clear();
+    m_clusterLODVirtualShadowRasterPSOCache.clear();
     m_clusterLODDeepVisibilityRasterPSOCache.clear();
     m_clusterLODSoftwareRasterPSOCache.clear();
     m_clusterLODDeepVisibilityResolvePSOCache.clear();

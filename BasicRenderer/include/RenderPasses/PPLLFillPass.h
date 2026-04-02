@@ -68,6 +68,9 @@ public:
 				Builtin::Light::PointLightCubemapBuffer,
 				Builtin::Light::SpotLightMatrixBuffer,
 				Builtin::Light::DirectionalLightCascadeBuffer,
+				Builtin::Shadows::CLodClipmapInfo,
+				Builtin::Shadows::CLodPageTable,
+				Builtin::Shadows::CLodPhysicalPages,
 				Builtin::Shadows::ShadowMaps)
 			.WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
 			.IsGeometryPass();

@@ -98,6 +98,9 @@
       "OutputAOTerm": {}
     },
     "Shadows": {
+      "CLodClipmapInfo": {},
+      "CLodPhysicalPages": {},
+      "CLodPageTable": {},
       "ShadowMaps": {},
       "LinearShadowMaps": {}
     },

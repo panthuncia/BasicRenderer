@@ -3,6 +3,7 @@
 #include <memory>
 #include <vector>
 
+#include "Interfaces/IResourceProvider.h"
 #include "Render/RenderGraph/RenderGraph.h"
 #include "Render/GraphExtensions/CLodExtensionComponents.h"
 
@@ -10,15 +11,18 @@ class Buffer;
 class CLodStreamingSystem;
 class PixelBuffer;
 
-class CLodExtension final : public RenderGraph::IRenderGraphExtension {
+class CLodExtension final : public RenderGraph::IRenderGraphExtension, public IResourceProvider {
 public:
     explicit CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters);
     ~CLodExtension();
 
+    void PrepareForBuild(RenderGraph& rg) override;
     void Initialize(RenderGraph& rg) override;
     void OnRegistryReset(ResourceRegistry* reg) override;
     void GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override;
     void GatherFramePasses(RenderGraph& rg, std::vector<RenderGraph::ExternalPassDesc>& outPasses) override;
+    std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
+    std::vector<ResourceIdentifier> GetSupportedKeys() override;
 
 private:
     bool IsReyesTessellationDisabled() const;
@@ -139,4 +143,5 @@ private:
     std::shared_ptr<Buffer> m_shadowRuntimeStateBuffer;
 
     std::unique_ptr<CLodStreamingSystem> m_streamingSystem;
+    bool m_providerRegisteredForCurrentRegistry = false;
 };

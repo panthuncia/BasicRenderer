@@ -63,31 +63,72 @@ int calculateShadowCascadeIndex(float depth, uint numCascadeSplits, float4 casca
     return numCascadeSplits - 1;
 }
 
+float calculateDirectionalVSMShadow(float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numCascades, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
+    static const uint kCLodVirtualShadowAllocatedMask = 0x80000000u;
+    static const uint kCLodVirtualShadowDirtyMask = 0x40000000u;
+    static const uint kCLodVirtualShadowPhysicalPageIndexMask = 0x3FFFFFFFu;
+    static const uint kCLodVirtualShadowPhysicalPageSize = 128u;
+    static const uint kCLodVirtualShadowPhysicalPagesPerAxis = 64u;
+    static const uint kCLodVirtualShadowPageTableResolution = 2048u;
+    static const uint kInvalidShadowCameraIndex = 0xFFFFFFFFu;
 
-float calculateCascadedShadow(float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numCascades, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
-    
     float depth = abs(fragPosViewSpace.z);
     int cascadeIndex = calculateShadowCascadeIndex(depth, numCascades, cascadeSplits);
-
     int infoIndex = numCascades * light.shadowViewInfoIndex + cascadeIndex;
-    
+
+    StructuredBuffer<uint4> clipmapInfosRaw = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodClipmapInfo)];
+    Texture2DArray<uint> pageTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPageTable)];
+    Texture2D<uint> physicalPages = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPhysicalPages)];
+
+    uint4 clipmapInfo0 = clipmapInfosRaw[cascadeIndex * 3 + 0];
+    uint4 clipmapInfo1 = clipmapInfosRaw[cascadeIndex * 3 + 1];
+    uint shadowCameraBufferIndex = clipmapInfo1.w;
+    if (shadowCameraBufferIndex == kInvalidShadowCameraIndex) {
+        return 0.0;
+    }
+
     Camera lightCamera = cameraBuffer[cascadeCameraIndexBuffer[infoIndex]];
-    
     float4 fragPosLightSpace = mul(float4(fragPosWorldSpace, 1.0), lightCamera.viewProjection);
     float3 uv = fragPosLightSpace.xyz / fragPosLightSpace.w;
-    uv.xy = uv.xy * 0.5 + 0.5; // Map to [0, 1] // In OpenGL this would include z, DirectX doesn't need it
+    uv.xy = uv.xy * 0.5 + 0.5;
     uv.y = 1.0 - uv.y;
-    
-    Texture2DArray<float> shadowMap = ResourceDescriptorHeap[light.shadowMapIndex];
-    SamplerState shadowSampler = SamplerDescriptorHeap[light.shadowSamplerIndex];
-    float closestDepth = shadowMap.SampleLevel(shadowSampler, float3(uv.xy, cascadeIndex), 0).r;
 
-    float currentDepth = uv.z;
-    
-    float bias = 0.0008;
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || uv.z < 0.0 || uv.z > 1.0) {
+        return 0.0;
+    }
 
-    float shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
-    return shadow;
+    const uint pageTableResolution = kCLodVirtualShadowPageTableResolution;
+    const uint pageX = min((uint)(uv.x * pageTableResolution), pageTableResolution - 1u);
+    const uint pageY = min((uint)(uv.y * pageTableResolution), pageTableResolution - 1u);
+    const uint pageTableLayer = clipmapInfo1.z;
+
+    const uint pageEntry = pageTable.Load(int4(pageX, pageY, pageTableLayer, 0));
+    if ((pageEntry & (kCLodVirtualShadowAllocatedMask | kCLodVirtualShadowDirtyMask)) != (kCLodVirtualShadowAllocatedMask | kCLodVirtualShadowDirtyMask)) {
+        return 0.0;
+    }
+
+    const uint physicalPageIndex = pageEntry & kCLodVirtualShadowPhysicalPageIndexMask;
+    const uint atlasPageX = physicalPageIndex % kCLodVirtualShadowPhysicalPagesPerAxis;
+    const uint atlasPageY = physicalPageIndex / kCLodVirtualShadowPhysicalPagesPerAxis;
+    const uint virtualTexelX = min((uint)(uv.x * pageTableResolution * kCLodVirtualShadowPhysicalPageSize), pageTableResolution * kCLodVirtualShadowPhysicalPageSize - 1u);
+    const uint virtualTexelY = min((uint)(uv.y * pageTableResolution * kCLodVirtualShadowPhysicalPageSize), pageTableResolution * kCLodVirtualShadowPhysicalPageSize - 1u);
+    const uint2 atlasPixel = uint2(
+        atlasPageX * kCLodVirtualShadowPhysicalPageSize + (virtualTexelX % kCLodVirtualShadowPhysicalPageSize),
+        atlasPageY * kCLodVirtualShadowPhysicalPageSize + (virtualTexelY % kCLodVirtualShadowPhysicalPageSize));
+
+    const uint storedDepthBits = physicalPages.Load(int3(atlasPixel, 0));
+    if (storedDepthBits == 0xFFFFFFFFu) {
+        return 0.0;
+    }
+
+    const float closestDepth = asfloat(storedDepthBits);
+    const float bias = 0.0008;
+    return uv.z - bias > closestDepth ? 1.0 : 0.0;
+}
+
+
+float calculateCascadedShadow(float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numCascades, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
+    return calculateDirectionalVSMShadow(fragPosWorldSpace, fragPosViewSpace, normal, light, numCascades, cascadeSplits, cascadeCameraIndexBuffer, cameraBuffer);
 }
 
 float calculateSpotShadow(float3 fragPosWorldSpace, float3 normal, LightInfo light, matrix lightMatrix, float near, float far) {

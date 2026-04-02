@@ -34,6 +34,9 @@ public:
 			Builtin::GBuffer::MetallicRoughness,
 			Builtin::PrimaryCamera::LinearDepthMap,
 			Builtin::Environment::CurrentCubemap,
+			Builtin::Shadows::CLodClipmapInfo,
+			Builtin::Shadows::CLodPageTable,
+			Builtin::Shadows::CLodPhysicalPages,
 			Builtin::Shadows::ShadowMaps)
 			.WithUnorderedAccess(Builtin::Color::HDRColorTarget,
 				Builtin::DebugVisualization);

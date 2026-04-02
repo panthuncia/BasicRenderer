@@ -186,7 +186,10 @@ LightManager::CreatePointLightViewInfo(const LightInfo& info, uint64_t entityId)
 		camera.prevUnjitteredProjection = camera.unjitteredProjection;
 		camera.viewProjection = XMMatrixMultiply(cubemapMatrices[i], camera.unjitteredProjection);
 
-		auto renderView = m_pViewManager->CreateView(camera, ViewFlags::ShadowFace());
+		ViewCreationParams viewParams{};
+		viewParams.parentEntityID = entityId;
+		viewParams.lightType = Components::LightType::Point;
+		auto renderView = m_pViewManager->CreateView(camera, ViewFlags::ShadowFace(), viewParams);
 		m_pointViewInfo->Add(m_pViewManager->Get(renderView)->gpu.cameraBufferIndex);
 		viewInfo.viewIDs.push_back(renderView);
 	}	
@@ -215,7 +218,10 @@ LightManager::CreateSpotLightViewInfo(const LightInfo& info, uint64_t entityId) 
 	camera.prevUnjitteredProjection = camera.unjitteredProjection;
 	camera.viewProjection = DirectX::XMMatrixMultiply(camera.view, camera.unjitteredProjection);
 
-	auto renderView = m_pViewManager->CreateView(camera, ViewFlags::ShadowFace());
+	ViewCreationParams viewParams{};
+	viewParams.parentEntityID = entityId;
+	viewParams.lightType = Components::LightType::Spot;
+	auto renderView = m_pViewManager->CreateView(camera, ViewFlags::ShadowFace(), viewParams);
 	m_spotViewInfo->Add(m_pViewManager->Get(renderView)->gpu.cameraBufferIndex);
 	viewInfo.viewIDs.push_back(renderView);
 
@@ -281,7 +287,11 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 		cameraInfo.numDepthMips = CalculateMipLevels(static_cast<uint16_t>(cameraInfo.depthResX), static_cast<uint16_t>(cameraInfo.depthResY));
 		cameraInfo.isOrtho = true; // Directional lights use orthographic projection for shadows.
 		// TODO: Needs near and far for depth unprojection
-		auto renderView = m_pViewManager->CreateView(cameraInfo, ViewFlags::ShadowFace());
+		ViewCreationParams viewParams{};
+		viewParams.parentEntityID = entityId;
+		viewParams.lightType = Components::LightType::Directional;
+		viewParams.cascadeIndex = i;
+		auto renderView = m_pViewManager->CreateView(cameraInfo, ViewFlags::ShadowCascade(), viewParams);
 		m_directionalViewInfo->Add(m_pViewManager->Get(renderView)->gpu.cameraBufferIndex);
 		viewInfo.viewIDs.push_back(renderView);
 	}
@@ -371,7 +381,9 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 		auto cascades = setupCascades(numCascades, lightInfo.lightInfo.dirWorldSpace, DirectX::XMLoadFloat3(&posFloats), GetForwardFromMatrix(matrix), GetUpFromMatrix(matrix), camera.zNear, camera.fov, camera.aspect, getDirectionalLightCascadeSplits());
 		for (int i = 0; i < numCascades; i++) {
 			CameraInfo info = {};
-			info.positionWorldSpace = { globalPos.x, globalPos.y, globalPos.z, 1.0 };
+			// Directional shadow clipmaps refine against the primary camera position,
+			// not the directional light entity's transform.
+			info.positionWorldSpace = { posFloats.x, posFloats.y, posFloats.z, 1.0f };
 			info.view = cascades[i].viewMatrix;
 			info.unjitteredProjection = cascades[i].orthoMatrix;
 			info.jitteredProjection = info.unjitteredProjection; // lights don't use jittering.
@@ -379,6 +391,8 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			info.prevJitteredProjection = info.jitteredProjection;
 			info.prevUnjitteredProjection = info.unjitteredProjection;
 			info.viewProjection = DirectX::XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
+			info.zNear = camera.zNear;
+			info.aspectRatio = camera.aspect;
 			info.clippingPlanes[0] = cascades[i].frustumPlanes[0];
 			info.clippingPlanes[1] = cascades[i].frustumPlanes[1];
 			info.clippingPlanes[2] = cascades[i].frustumPlanes[2];
