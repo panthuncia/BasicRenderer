@@ -5,14 +5,11 @@
 #include "Render/PipelineState.h"
 #include "RenderPasses/Base/ComputePass.h"
 
-class Buffer;
 class PixelBuffer;
 
-class VirtualShadowMapClearPagesPass final : public ComputePass {
+class VirtualShadowMapClearDirtyBitsPass final : public ComputePass {
 public:
-    VirtualShadowMapClearPagesPass(
-        std::shared_ptr<PixelBuffer> physicalPagesTexture,
-        std::shared_ptr<Buffer> dirtyPageFlagsBuffer);
+    explicit VirtualShadowMapClearDirtyBitsPass(std::shared_ptr<PixelBuffer> pageTableTexture);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
@@ -21,6 +18,5 @@ public:
 
 private:
     PipelineState m_pso;
-    std::shared_ptr<PixelBuffer> m_physicalPagesTexture;
-    std::shared_ptr<Buffer> m_dirtyPageFlagsBuffer;
+    std::shared_ptr<PixelBuffer> m_pageTableTexture;
 };

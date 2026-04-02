@@ -8,6 +8,7 @@
 // to the per-view visibility buffer.
 
 #include "include/cbuffers.hlsli"
+#include "include/clodVirtualShadowClipmap.hlsli"
 #include "include/structs.hlsli"
 #include "include/skinningCommon.hlsli"
 #include "include/vertex.hlsli"
@@ -102,32 +103,6 @@ groupshared float   gs_invClipW[SW_RASTER_MAX_VERTS];
 groupshared float2  gs_texcoord[SW_RASTER_MAX_VERTS];
 
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
-static const uint kCLodVirtualShadowClipmapValidFlag = 0x1u;
-static const uint kCLodVirtualShadowAllocatedMask = 0x80000000u;
-static const uint kCLodVirtualShadowDirtyMask = 0x40000000u;
-static const uint kCLodVirtualShadowPhysicalPageIndexMask = 0x3FFFFFFFu;
-static const uint kCLodVirtualShadowClipmapCount = 6u;
-static const uint kCLodVirtualShadowVirtualResolution = 4096u;
-static const uint kCLodVirtualShadowPhysicalPageSize = 128u;
-static const uint kCLodVirtualShadowPhysicalPagesPerAxis = 64u;
-static const uint kCLodVirtualShadowPageTableResolution = kCLodVirtualShadowVirtualResolution / kCLodVirtualShadowPhysicalPageSize;
-
-struct CLodVirtualShadowClipmapInfo
-{
-    float worldOriginX;
-    float worldOriginY;
-    float worldOriginZ;
-    float texelWorldSize;
-    uint pageOffsetX;
-    uint pageOffsetY;
-    uint pageTableLayer;
-    uint shadowCameraBufferIndex;
-    uint flags;
-    uint pad0;
-    uint pad1;
-    uint pad2;
-};
-
 bool SWRasterWriteVirtualShadow(uint2 pixel, uint viewID, float linearDepth)
 {
     StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos =
@@ -139,7 +114,7 @@ bool SWRasterWriteVirtualShadow(uint2 pixel, uint viewID, float linearDepth)
     for (uint candidateIndex = 0u; candidateIndex < kCLodVirtualShadowClipmapCount; ++candidateIndex)
     {
         const CLodVirtualShadowClipmapInfo candidate = clipmapInfos[candidateIndex];
-        if ((candidate.flags & kCLodVirtualShadowClipmapValidFlag) == 0u)
+        if (!CLodVirtualShadowClipmapIsValid(candidate))
         {
             continue;
         }
@@ -157,13 +132,12 @@ bool SWRasterWriteVirtualShadow(uint2 pixel, uint viewID, float linearDepth)
         return false;
     }
 
-    const float virtualResolution = float(kCLodVirtualShadowVirtualResolution);
-    const float2 shadowUv = saturate((float2(pixel) + 0.5f) / virtualResolution);
-    const uint pageX = min((uint)(shadowUv.x * kCLodVirtualShadowPageTableResolution), kCLodVirtualShadowPageTableResolution - 1u);
-    const uint pageY = min((uint)(shadowUv.y * kCLodVirtualShadowPageTableResolution), kCLodVirtualShadowPageTableResolution - 1u);
+    const float2 shadowUv = saturate((float2(pixel) + 0.5f) / float(kCLodVirtualShadowVirtualResolution));
+    const uint2 virtualPageCoords = CLodVirtualShadowVirtualPageCoordsFromUv(shadowUv);
+    const uint2 wrappedPageCoords = CLodVirtualShadowWrappedPageCoords(virtualPageCoords, clipmapInfo);
 
     Texture2DArray<uint> pageTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPageTable)];
-    const uint pageEntry = pageTable.Load(int4(pageX, pageY, clipmapInfo.pageTableLayer, 0));
+    const uint pageEntry = pageTable.Load(int4(wrappedPageCoords, clipmapInfo.pageTableLayer, 0));
     if ((pageEntry & (kCLodVirtualShadowAllocatedMask | kCLodVirtualShadowDirtyMask)) !=
         (kCLodVirtualShadowAllocatedMask | kCLodVirtualShadowDirtyMask))
     {
@@ -171,13 +145,8 @@ bool SWRasterWriteVirtualShadow(uint2 pixel, uint viewID, float linearDepth)
     }
 
     const uint physicalPageIndex = pageEntry & kCLodVirtualShadowPhysicalPageIndexMask;
-    const uint atlasPageX = physicalPageIndex % kCLodVirtualShadowPhysicalPagesPerAxis;
-    const uint atlasPageY = physicalPageIndex / kCLodVirtualShadowPhysicalPagesPerAxis;
-    const uint virtualTexelX = min((uint)(shadowUv.x * virtualResolution), uint(virtualResolution) - 1u);
-    const uint virtualTexelY = min((uint)(shadowUv.y * virtualResolution), uint(virtualResolution) - 1u);
-    const uint2 atlasPixel = uint2(
-        atlasPageX * kCLodVirtualShadowPhysicalPageSize + (virtualTexelX % kCLodVirtualShadowPhysicalPageSize),
-        atlasPageY * kCLodVirtualShadowPhysicalPageSize + (virtualTexelY % kCLodVirtualShadowPhysicalPageSize));
+    const uint2 virtualTexelCoords = CLodVirtualShadowVirtualTexelCoordsFromUv(shadowUv);
+    const uint2 atlasPixel = CLodVirtualShadowPhysicalAtlasPixel(physicalPageIndex, virtualTexelCoords);
 
     RWTexture2D<uint> physicalPages = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPhysicalPages)];
     InterlockedMin(physicalPages[atlasPixel], asuint(linearDepth));

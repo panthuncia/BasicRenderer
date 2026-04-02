@@ -14,7 +14,9 @@ public:
         std::shared_ptr<Buffer> allocationRequestsBuffer,
         std::shared_ptr<Buffer> allocationCountBuffer,
         std::shared_ptr<Buffer> clipmapInfoBuffer,
-        std::shared_ptr<PixelBuffer> pageTableTexture);
+        std::shared_ptr<PixelBuffer> pageTableTexture,
+        std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
+        std::shared_ptr<Buffer> pageMetadataBuffer);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
@@ -28,4 +30,6 @@ private:
     std::shared_ptr<Buffer> m_allocationCountBuffer;
     std::shared_ptr<Buffer> m_clipmapInfoBuffer;
     std::shared_ptr<PixelBuffer> m_pageTableTexture;
+    std::shared_ptr<Buffer> m_dirtyPageFlagsBuffer;
+    std::shared_ptr<Buffer> m_pageMetadataBuffer;
 };

@@ -2,23 +2,15 @@
 
 #include <memory>
 
-#include <rhi.h>
-
 #include "Render/PipelineState.h"
 #include "RenderPasses/Base/ComputePass.h"
 
 class Buffer;
-class PixelBuffer;
 
-class VirtualShadowMapAllocatePagesPass final : public ComputePass {
+class VirtualShadowMapBuildPageListsPass final : public ComputePass {
 public:
-    VirtualShadowMapAllocatePagesPass(
-        std::shared_ptr<Buffer> allocationRequestsBuffer,
-        std::shared_ptr<Buffer> allocationCountBuffer,
-        std::shared_ptr<Buffer> indirectArgsBuffer,
-        std::shared_ptr<PixelBuffer> pageTableTexture,
+    VirtualShadowMapBuildPageListsPass(
         std::shared_ptr<Buffer> pageMetadataBuffer,
-        std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
         std::shared_ptr<Buffer> freePhysicalPagesBuffer,
         std::shared_ptr<Buffer> reusablePhysicalPagesBuffer,
         std::shared_ptr<Buffer> pageListHeaderBuffer);
@@ -30,13 +22,7 @@ public:
 
 private:
     PipelineState m_pso;
-    rhi::CommandSignaturePtr m_commandSignature;
-    std::shared_ptr<Buffer> m_allocationRequestsBuffer;
-    std::shared_ptr<Buffer> m_allocationCountBuffer;
-    std::shared_ptr<Buffer> m_indirectArgsBuffer;
-    std::shared_ptr<PixelBuffer> m_pageTableTexture;
     std::shared_ptr<Buffer> m_pageMetadataBuffer;
-    std::shared_ptr<Buffer> m_dirtyPageFlagsBuffer;
     std::shared_ptr<Buffer> m_freePhysicalPagesBuffer;
     std::shared_ptr<Buffer> m_reusablePhysicalPagesBuffer;
     std::shared_ptr<Buffer> m_pageListHeaderBuffer;

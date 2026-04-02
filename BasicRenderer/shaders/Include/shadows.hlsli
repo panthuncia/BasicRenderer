@@ -1,6 +1,7 @@
 #ifndef __SHADOWS_HLSLI__
 #define __SHADOWS_HLSLI__
 
+#include "include/clodVirtualShadowClipmap.hlsli"
 #include "include/structs.hlsli"
 #include "include/utilities.hlsli"
 
@@ -63,50 +64,31 @@ int calculateShadowCascadeIndex(float depth, uint numCascadeSplits, float4 casca
     return numCascadeSplits - 1;
 }
 
-struct CLodVirtualShadowClipmapInfo
-{
-    float worldOriginX;
-    float worldOriginY;
-    float worldOriginZ;
-    float texelWorldSize;
-    uint pageOffsetX;
-    uint pageOffsetY;
-    uint pageTableLayer;
-    uint shadowCameraBufferIndex;
-    uint flags;
-    uint pad0;
-    uint pad1;
-    uint pad2;
-};
-
 float calculateDirectionalVSMShadow(float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numCascades, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
-    (void)fragPosViewSpace;
     (void)normal;
     (void)light;
-    (void)numCascades;
-    (void)cascadeSplits;
     (void)cascadeCameraIndexBuffer;
-
-    static const uint kCLodVirtualShadowClipmapValidFlag = 0x1u;
-    static const uint kCLodVirtualShadowAllocatedMask = 0x80000000u;
-    static const uint kCLodVirtualShadowPhysicalPageIndexMask = 0x3FFFFFFFu;
-    static const uint kCLodVirtualShadowClipmapCount = 6u;
-    static const uint kCLodVirtualShadowVirtualResolution = 4096u;
-    static const uint kCLodVirtualShadowPhysicalPageSize = 128u;
-    static const uint kCLodVirtualShadowPhysicalPagesPerAxis = 64u;
-    static const uint kCLodVirtualShadowPageTableResolution = kCLodVirtualShadowVirtualResolution / kCLodVirtualShadowPhysicalPageSize;
-    static const uint kInvalidShadowCameraIndex = 0xFFFFFFFFu;
 
     StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodClipmapInfo)];
     Texture2DArray<uint> pageTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPageTable)];
     Texture2D<uint> physicalPages = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPhysicalPages)];
 
-    [loop]
-    for (uint clipmapIndex = 0u; clipmapIndex < kCLodVirtualShadowClipmapCount; ++clipmapIndex)
+    const uint activeClipmapCount = min(numCascades, kCLodVirtualShadowClipmapCount);
+    if (activeClipmapCount == 0u)
     {
+        return 0.0f;
+    }
+
+    const uint preferredClipmapIndex = min(
+        (uint)calculateShadowCascadeIndex(abs(fragPosViewSpace.z), activeClipmapCount, cascadeSplits),
+        activeClipmapCount - 1u);
+
+    [loop]
+    for (uint candidateOffset = 0u; candidateOffset < activeClipmapCount; ++candidateOffset)
+    {
+        const uint clipmapIndex = min(preferredClipmapIndex + candidateOffset, activeClipmapCount - 1u);
         const CLodVirtualShadowClipmapInfo clipmapInfo = clipmapInfos[clipmapIndex];
-        if ((clipmapInfo.flags & kCLodVirtualShadowClipmapValidFlag) == 0u ||
-            clipmapInfo.shadowCameraBufferIndex == kInvalidShadowCameraIndex)
+        if (!CLodVirtualShadowClipmapIsValid(clipmapInfo))
         {
             continue;
         }
@@ -129,21 +111,16 @@ float calculateDirectionalVSMShadow(float3 fragPosWorldSpace, float3 fragPosView
             continue;
         }
 
-        const uint pageX = min((uint)(uv.x * kCLodVirtualShadowPageTableResolution), kCLodVirtualShadowPageTableResolution - 1u);
-        const uint pageY = min((uint)(uv.y * kCLodVirtualShadowPageTableResolution), kCLodVirtualShadowPageTableResolution - 1u);
-        const uint pageEntry = pageTable.Load(int4(pageX, pageY, clipmapInfo.pageTableLayer, 0));
+        const uint2 virtualPageCoords = CLodVirtualShadowVirtualPageCoordsFromUv(uv.xy);
+        const uint2 wrappedPageCoords = CLodVirtualShadowWrappedPageCoords(virtualPageCoords, clipmapInfo);
+        const uint pageEntry = pageTable.Load(int4(wrappedPageCoords, clipmapInfo.pageTableLayer, 0));
         if ((pageEntry & kCLodVirtualShadowAllocatedMask) == 0u) {
             continue;
         }
 
         const uint physicalPageIndex = pageEntry & kCLodVirtualShadowPhysicalPageIndexMask;
-        const uint atlasPageX = physicalPageIndex % kCLodVirtualShadowPhysicalPagesPerAxis;
-        const uint atlasPageY = physicalPageIndex / kCLodVirtualShadowPhysicalPagesPerAxis;
-        const uint virtualTexelX = min((uint)(uv.x * kCLodVirtualShadowVirtualResolution), kCLodVirtualShadowVirtualResolution - 1u);
-        const uint virtualTexelY = min((uint)(uv.y * kCLodVirtualShadowVirtualResolution), kCLodVirtualShadowVirtualResolution - 1u);
-        const uint2 atlasPixel = uint2(
-            atlasPageX * kCLodVirtualShadowPhysicalPageSize + (virtualTexelX % kCLodVirtualShadowPhysicalPageSize),
-            atlasPageY * kCLodVirtualShadowPhysicalPageSize + (virtualTexelY % kCLodVirtualShadowPhysicalPageSize));
+        const uint2 virtualTexelCoords = CLodVirtualShadowVirtualTexelCoordsFromUv(uv.xy);
+        const uint2 atlasPixel = CLodVirtualShadowPhysicalAtlasPixel(physicalPageIndex, virtualTexelCoords);
 
         const uint storedDepthBits = physicalPages.Load(int3(atlasPixel, 0));
         if (storedDepthBits == 0xFFFFFFFFu) {

@@ -16,7 +16,8 @@ public:
         std::shared_ptr<Buffer> allocationCountBuffer,
         std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
         std::shared_ptr<Buffer> clipmapInfoBuffer,
-        std::shared_ptr<Buffer> runtimeStateBuffer);
+        std::shared_ptr<Buffer> runtimeStateBuffer,
+        bool forceResetResources);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
@@ -32,4 +33,6 @@ private:
     std::shared_ptr<Buffer> m_dirtyPageFlagsBuffer;
     std::shared_ptr<Buffer> m_clipmapInfoBuffer;
     std::shared_ptr<Buffer> m_runtimeStateBuffer;
+    bool m_forceResetResources = false;
+    bool m_resetResources = false;
 };

@@ -137,6 +137,9 @@ private:
     std::shared_ptr<Buffer> m_shadowAllocationRequestsBuffer;
     std::shared_ptr<Buffer> m_shadowAllocationCountBuffer;
     std::shared_ptr<Buffer> m_shadowAllocationIndirectArgsBuffer;
+    std::shared_ptr<Buffer> m_shadowFreePhysicalPagesBuffer;
+    std::shared_ptr<Buffer> m_shadowReusablePhysicalPagesBuffer;
+    std::shared_ptr<Buffer> m_shadowPageListHeaderBuffer;
     std::shared_ptr<Buffer> m_shadowDirtyPageFlagsBuffer;
     std::shared_ptr<PixelBuffer> m_shadowDirtyPageHierarchyTexture;
     std::shared_ptr<Buffer> m_shadowClipmapInfoBuffer;
@@ -144,4 +147,5 @@ private:
 
     std::unique_ptr<CLodStreamingSystem> m_streamingSystem;
     bool m_providerRegisteredForCurrentRegistry = false;
+    bool m_shadowVirtualResourcesNeedReset = true;
 };

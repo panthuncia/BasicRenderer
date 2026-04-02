@@ -1,13 +1,18 @@
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapClearPagesPass.h"
 
 #include "Managers/Singletons/PSOManager.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
+#include "Resources/Buffers/Buffer.h"
 #include "Resources/Texture.h"
 
 #include "../shaders/PerPassRootConstants/clodVirtualShadowClearRootConstants.h"
 
-VirtualShadowMapClearPagesPass::VirtualShadowMapClearPagesPass(std::shared_ptr<PixelBuffer> physicalPagesTexture)
+VirtualShadowMapClearPagesPass::VirtualShadowMapClearPagesPass(
+    std::shared_ptr<PixelBuffer> physicalPagesTexture,
+    std::shared_ptr<Buffer> dirtyPageFlagsBuffer)
     : m_physicalPagesTexture(std::move(physicalPagesTexture))
+    , m_dirtyPageFlagsBuffer(std::move(dirtyPageFlagsBuffer))
 {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -19,7 +24,7 @@ VirtualShadowMapClearPagesPass::VirtualShadowMapClearPagesPass(std::shared_ptr<P
 
 void VirtualShadowMapClearPagesPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
-    builder->WithUnorderedAccess(m_physicalPagesTexture);
+    builder->WithUnorderedAccess(m_physicalPagesTexture, m_dirtyPageFlagsBuffer);
 }
 
 void VirtualShadowMapClearPagesPass::Setup()
@@ -39,8 +44,7 @@ PassReturn VirtualShadowMapClearPagesPass::Execute(PassExecutionContext& executi
 
     uint32_t rootConstants[NumMiscUintRootConstants] = {};
     rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_PHYSICAL_PAGES_DESCRIPTOR_INDEX] = m_physicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_WIDTH] = m_physicalPagesTexture->GetWidth();
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_HEIGHT] = m_physicalPagesTexture->GetHeight();
+    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
@@ -50,9 +54,7 @@ PassReturn VirtualShadowMapClearPagesPass::Execute(PassExecutionContext& executi
         NumMiscUintRootConstants,
         rootConstants);
 
-    const uint32_t groupsX = (m_physicalPagesTexture->GetWidth() + 7u) / 8u;
-    const uint32_t groupsY = (m_physicalPagesTexture->GetHeight() + 7u) / 8u;
-    commandList.Dispatch(groupsX, groupsY, 1u);
+    commandList.Dispatch(CLodVirtualShadowDefaultPhysicalPageCount, 1u, 1u);
     return {};
 }
 

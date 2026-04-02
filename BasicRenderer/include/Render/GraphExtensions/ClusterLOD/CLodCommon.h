@@ -145,10 +145,10 @@ struct CLodVirtualShadowClipmapInfo
     uint32_t pageOffsetY = 0u;
     uint32_t pageTableLayer = 0u;
     uint32_t shadowCameraBufferIndex = 0xFFFFFFFFu;
+    uint32_t clipLevel = 0u;
     uint32_t flags = 0u;
     uint32_t pad0 = 0u;
     uint32_t pad1 = 0u;
-    uint32_t pad2 = 0u;
 };
 
 static_assert(sizeof(CLodVirtualShadowClipmapInfo) == 48u, "CLodVirtualShadowClipmapInfo size must match HLSL");
@@ -168,10 +168,20 @@ struct CLodVirtualShadowPhysicalPageMeta
     uint32_t ownerVirtualAddress = 0u;
     uint32_t lastTouchedFrame = 0u;
     uint32_t flags = 0u;
-    uint32_t reserved = 0u;
+    uint32_t ownerClipmapIndex = 0u;
 };
 
 static_assert(sizeof(CLodVirtualShadowPhysicalPageMeta) == 16u, "CLodVirtualShadowPhysicalPageMeta size must match HLSL");
+
+struct CLodVirtualShadowPageListHeader
+{
+    uint32_t freePageCount = 0u;
+    uint32_t reusablePageCount = 0u;
+    uint32_t pad0 = 0u;
+    uint32_t pad1 = 0u;
+};
+
+static_assert(sizeof(CLodVirtualShadowPageListHeader) == 16u, "CLodVirtualShadowPageListHeader size must match HLSL");
 
 struct CLodVirtualShadowRuntimeState
 {

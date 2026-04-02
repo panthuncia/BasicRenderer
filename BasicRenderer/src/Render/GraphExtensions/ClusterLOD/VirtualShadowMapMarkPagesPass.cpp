@@ -12,11 +12,15 @@ VirtualShadowMapMarkPagesPass::VirtualShadowMapMarkPagesPass(
     std::shared_ptr<Buffer> allocationRequestsBuffer,
     std::shared_ptr<Buffer> allocationCountBuffer,
     std::shared_ptr<Buffer> clipmapInfoBuffer,
-    std::shared_ptr<PixelBuffer> pageTableTexture)
+    std::shared_ptr<PixelBuffer> pageTableTexture,
+    std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
+    std::shared_ptr<Buffer> pageMetadataBuffer)
     : m_allocationRequestsBuffer(std::move(allocationRequestsBuffer))
     , m_allocationCountBuffer(std::move(allocationCountBuffer))
     , m_clipmapInfoBuffer(std::move(clipmapInfoBuffer))
     , m_pageTableTexture(std::move(pageTableTexture))
+    , m_dirtyPageFlagsBuffer(std::move(dirtyPageFlagsBuffer))
+    , m_pageMetadataBuffer(std::move(pageMetadataBuffer))
 {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -30,12 +34,15 @@ void VirtualShadowMapMarkPagesPass::DeclareResourceUsages(ComputePassBuilder* bu
 {
     builder->WithShaderResource(
             Builtin::PrimaryCamera::LinearDepthMap,
+            Builtin::GBuffer::Normals,
             Builtin::CameraBuffer,
             m_clipmapInfoBuffer)
         .WithUnorderedAccess(
             m_allocationRequestsBuffer,
             m_allocationCountBuffer,
-            m_pageTableTexture);
+            m_pageTableTexture,
+            m_dirtyPageFlagsBuffer,
+            m_pageMetadataBuffer);
 }
 
 void VirtualShadowMapMarkPagesPass::Setup() {}
@@ -66,6 +73,8 @@ PassReturn VirtualShadowMapMarkPagesPass::Execute(PassExecutionContext& executio
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_CLIPMAP_COUNT] = CLodVirtualShadowDefaultClipmapCount;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_PAGE_TABLE_RESOLUTION] = CLodVirtualShadowDefaultPageTableResolution;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_MAX_REQUEST_COUNT] = (std::min)(CLodVirtualShadowDefaultPhysicalPageCount, CLodVirtualShadowMaxAllocationRequests);
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

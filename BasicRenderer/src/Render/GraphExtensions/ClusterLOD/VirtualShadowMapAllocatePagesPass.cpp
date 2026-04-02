@@ -15,13 +15,19 @@ VirtualShadowMapAllocatePagesPass::VirtualShadowMapAllocatePagesPass(
     std::shared_ptr<Buffer> indirectArgsBuffer,
     std::shared_ptr<PixelBuffer> pageTableTexture,
     std::shared_ptr<Buffer> pageMetadataBuffer,
-    std::shared_ptr<Buffer> dirtyPageFlagsBuffer)
+    std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
+    std::shared_ptr<Buffer> freePhysicalPagesBuffer,
+    std::shared_ptr<Buffer> reusablePhysicalPagesBuffer,
+    std::shared_ptr<Buffer> pageListHeaderBuffer)
     : m_allocationRequestsBuffer(std::move(allocationRequestsBuffer))
     , m_allocationCountBuffer(std::move(allocationCountBuffer))
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
     , m_pageTableTexture(std::move(pageTableTexture))
     , m_pageMetadataBuffer(std::move(pageMetadataBuffer))
     , m_dirtyPageFlagsBuffer(std::move(dirtyPageFlagsBuffer))
+    , m_freePhysicalPagesBuffer(std::move(freePhysicalPagesBuffer))
+    , m_reusablePhysicalPagesBuffer(std::move(reusablePhysicalPagesBuffer))
+    , m_pageListHeaderBuffer(std::move(pageListHeaderBuffer))
 {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -43,7 +49,12 @@ VirtualShadowMapAllocatePagesPass::VirtualShadowMapAllocatePagesPass(
 
 void VirtualShadowMapAllocatePagesPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
-    builder->WithShaderResource(m_allocationRequestsBuffer, m_allocationCountBuffer)
+    builder->WithShaderResource(
+            m_allocationRequestsBuffer,
+            m_allocationCountBuffer,
+            m_freePhysicalPagesBuffer,
+            m_reusablePhysicalPagesBuffer,
+            m_pageListHeaderBuffer)
         .WithIndirectArguments(m_indirectArgsBuffer)
         .WithUnorderedAccess(m_pageTableTexture, m_pageMetadataBuffer, m_dirtyPageFlagsBuffer);
 }
@@ -67,6 +78,9 @@ PassReturn VirtualShadowMapAllocatePagesPass::Execute(PassExecutionContext& exec
     rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_FREE_PAGES_DESCRIPTOR_INDEX] = m_freePhysicalPagesBuffer->GetSRVInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_REUSABLE_PAGES_DESCRIPTOR_INDEX] = m_reusablePhysicalPagesBuffer->GetSRVInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PAGE_LIST_HEADER_DESCRIPTOR_INDEX] = m_pageListHeaderBuffer->GetSRVInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PAGE_TABLE_RESOLUTION] = CLodVirtualShadowDefaultPageTableResolution;
     rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_CLIPMAP_COUNT] = CLodVirtualShadowDefaultClipmapCount;
     rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PHYSICAL_PAGE_COUNT] = CLodVirtualShadowDefaultPhysicalPageCount;
