@@ -2,9 +2,11 @@
 #define __CLOD_VIRTUAL_SHADOW_CLIPMAP_HLSLI__
 
 static const uint kCLodVirtualShadowClipmapValidFlag = 0x1u;
+static const uint kCLodVirtualShadowClipmapInvalidateFlag = 0x2u;
 static const uint kCLodVirtualShadowAllocatedMask = 0x80000000u;
 static const uint kCLodVirtualShadowDirtyMask = 0x40000000u;
 static const uint kCLodVirtualShadowPhysicalPageIndexMask = 0x3FFFFFFFu;
+static const uint kCLodVirtualShadowPhysicalPageResidentFlag = 0x1u;
 static const uint kCLodVirtualShadowClipmapCount = 6u;
 static const uint kCLodVirtualShadowVirtualResolution = 4096u;
 static const uint kCLodVirtualShadowPhysicalPageSize = 128u;
@@ -25,8 +27,8 @@ struct CLodVirtualShadowClipmapInfo
     uint shadowCameraBufferIndex;
     uint clipLevel;
     uint flags;
-    uint pad0;
-    uint pad1;
+    int clearOffsetX;
+    int clearOffsetY;
 };
 
 struct CLodVirtualShadowStats

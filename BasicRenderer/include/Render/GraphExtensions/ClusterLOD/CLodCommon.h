@@ -122,9 +122,11 @@ inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalPageCount =
     CLodVirtualShadowDefaultPhysicalPagesPerAxis * CLodVirtualShadowDefaultPhysicalPagesPerAxis;
 inline constexpr uint32_t CLodVirtualShadowMaxAllocationRequests = 1u << 16;
 inline constexpr uint32_t CLodVirtualShadowClipmapValidFlag = 0x1u;
+inline constexpr uint32_t CLodVirtualShadowClipmapInvalidateFlag = 0x2u;
 inline constexpr uint32_t CLodVirtualShadowPageAllocatedMask = 0x80000000u;
 inline constexpr uint32_t CLodVirtualShadowPageDirtyMask = 0x40000000u;
 inline constexpr uint32_t CLodVirtualShadowPhysicalPageIndexMask = 0x3FFFFFFFu;
+inline constexpr uint32_t CLodVirtualShadowPhysicalPageResidentFlag = 0x1u;
 
 constexpr uint32_t CLodVirtualShadowDirtyWordCount(uint32_t physicalPageCount)
 {
@@ -147,8 +149,8 @@ struct CLodVirtualShadowClipmapInfo
     uint32_t shadowCameraBufferIndex = 0xFFFFFFFFu;
     uint32_t clipLevel = 0u;
     uint32_t flags = 0u;
-    uint32_t pad0 = 0u;
-    uint32_t pad1 = 0u;
+    int32_t clearOffsetX = 0;
+    int32_t clearOffsetY = 0;
 };
 
 static_assert(sizeof(CLodVirtualShadowClipmapInfo) == 48u, "CLodVirtualShadowClipmapInfo size must match HLSL");

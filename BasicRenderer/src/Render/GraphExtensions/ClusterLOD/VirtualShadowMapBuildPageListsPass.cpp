@@ -63,8 +63,7 @@ PassReturn VirtualShadowMapBuildPageListsPass::Execute(PassExecutionContext& exe
         NumMiscUintRootConstants,
         rootConstants);
 
-    const uint32_t groupsX = (CLodVirtualShadowDefaultPhysicalPageCount + 63u) / 64u;
-    commandList.Dispatch(groupsX, 1u, 1u);
+    commandList.Dispatch(1u, 1u, 1u);
     return {};
 }
 
