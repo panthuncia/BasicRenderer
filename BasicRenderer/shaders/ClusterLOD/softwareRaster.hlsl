@@ -108,9 +108,10 @@ static const uint kCLodVirtualShadowAllocatedMask = 0x80000000u;
 static const uint kCLodVirtualShadowDirtyMask = 0x40000000u;
 static const uint kCLodVirtualShadowPhysicalPageIndexMask = 0x3FFFFFFFu;
 static const uint kCLodVirtualShadowClipmapCount = 6u;
+static const uint kCLodVirtualShadowVirtualResolution = 4096u;
 static const uint kCLodVirtualShadowPhysicalPageSize = 128u;
 static const uint kCLodVirtualShadowPhysicalPagesPerAxis = 64u;
-static const uint kCLodVirtualShadowPageTableResolution = 2048u;
+static const uint kCLodVirtualShadowPageTableResolution = kCLodVirtualShadowVirtualResolution / kCLodVirtualShadowPhysicalPageSize;
 
 struct CLodVirtualShadowClipmapInfo
 {
@@ -157,7 +158,7 @@ bool SWRasterWriteVirtualShadow(uint2 pixel, uint viewID, float depth)
         return false;
     }
 
-    const float virtualResolution = float(kCLodVirtualShadowPageTableResolution * kCLodVirtualShadowPhysicalPageSize);
+    const float virtualResolution = float(kCLodVirtualShadowVirtualResolution);
     const float2 shadowUv = saturate((float2(pixel) + 0.5f) / virtualResolution);
     const uint pageX = min((uint)(shadowUv.x * kCLodVirtualShadowPageTableResolution), kCLodVirtualShadowPageTableResolution - 1u);
     const uint pageY = min((uint)(shadowUv.y * kCLodVirtualShadowPageTableResolution), kCLodVirtualShadowPageTableResolution - 1u);

@@ -8,6 +8,7 @@ static const uint kCLodVirtualShadowAllocatedMask = 0x80000000u;
 static const uint kCLodVirtualShadowDirtyMask = 0x40000000u;
 static const uint kCLodVirtualShadowPhysicalPageIndexMask = 0x3FFFFFFFu;
 static const uint kCLodVirtualShadowClipmapCount = 6u;
+static const uint kCLodVirtualShadowVirtualResolution = 4096u;
 static const uint kCLodVirtualShadowPhysicalPageSize = 128u;
 static const uint kCLodVirtualShadowPhysicalPagesPerAxis = 64u;
 
@@ -92,8 +93,8 @@ void VirtualShadowBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsF
     const uint physicalPageIndex = pageEntry & kCLodVirtualShadowPhysicalPageIndexMask;
     const uint atlasPageX = physicalPageIndex % kCLodVirtualShadowPhysicalPagesPerAxis;
     const uint atlasPageY = physicalPageIndex / kCLodVirtualShadowPhysicalPagesPerAxis;
-    const uint virtualTexelX = min((uint)(shadowUv.x * pageTableResolution * kCLodVirtualShadowPhysicalPageSize), pageTableResolution * kCLodVirtualShadowPhysicalPageSize - 1u);
-    const uint virtualTexelY = min((uint)(shadowUv.y * pageTableResolution * kCLodVirtualShadowPhysicalPageSize), pageTableResolution * kCLodVirtualShadowPhysicalPageSize - 1u);
+    const uint virtualTexelX = min((uint)(shadowUv.x * kCLodVirtualShadowVirtualResolution), kCLodVirtualShadowVirtualResolution - 1u);
+    const uint virtualTexelY = min((uint)(shadowUv.y * kCLodVirtualShadowVirtualResolution), kCLodVirtualShadowVirtualResolution - 1u);
     const uint2 atlasPixel = uint2(
         atlasPageX * kCLodVirtualShadowPhysicalPageSize + (virtualTexelX % kCLodVirtualShadowPhysicalPageSize),
         atlasPageY * kCLodVirtualShadowPhysicalPageSize + (virtualTexelY % kCLodVirtualShadowPhysicalPageSize));

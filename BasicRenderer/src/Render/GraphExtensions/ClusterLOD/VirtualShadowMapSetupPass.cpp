@@ -99,7 +99,7 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
 
                 const float orthoWidth = ExtractOrthographicWidth(view->cameraInfo.unjitteredProjection);
                 const float orthoHeight = ExtractOrthographicHeight(view->cameraInfo.unjitteredProjection);
-                const float virtualShadowResolution = static_cast<float>(CLodVirtualShadowDefaultPageTableResolution * CLodVirtualShadowPhysicalPageSize);
+                const float virtualShadowResolution = static_cast<float>(CLodVirtualShadowDefaultVirtualResolution);
 
                 auto& clipmapInfo = clipmapInfos[clipmapIndex];
                 clipmapInfo.worldOriginX = view->cameraInfo.positionWorldSpace.x;

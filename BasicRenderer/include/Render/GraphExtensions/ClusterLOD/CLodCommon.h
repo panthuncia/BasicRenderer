@@ -113,8 +113,10 @@ struct CLodDeepVisibilityStats
 static_assert(sizeof(CLodDeepVisibilityStats) == 32u, "CLodDeepVisibilityStats size must match HLSL");
 
 inline constexpr uint32_t CLodVirtualShadowDefaultClipmapCount = 6u;
-inline constexpr uint32_t CLodVirtualShadowDefaultPageTableResolution = 2048u;
+inline constexpr uint32_t CLodVirtualShadowDefaultVirtualResolution = 4096u;
 inline constexpr uint32_t CLodVirtualShadowPhysicalPageSize = 128u;
+inline constexpr uint32_t CLodVirtualShadowDefaultPageTableResolution =
+    CLodVirtualShadowDefaultVirtualResolution / CLodVirtualShadowPhysicalPageSize;
 inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalPagesPerAxis = 64u;
 inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalPageCount =
     CLodVirtualShadowDefaultPhysicalPagesPerAxis * CLodVirtualShadowDefaultPhysicalPagesPerAxis;
@@ -128,6 +130,10 @@ constexpr uint32_t CLodVirtualShadowDirtyWordCount(uint32_t physicalPageCount)
 {
     return (physicalPageCount + 31u) / 32u;
 }
+
+static_assert(
+    (CLodVirtualShadowDefaultVirtualResolution % CLodVirtualShadowPhysicalPageSize) == 0u,
+    "CLod virtual shadow resolution must be divisible by the page size");
 
 struct CLodVirtualShadowClipmapInfo
 {

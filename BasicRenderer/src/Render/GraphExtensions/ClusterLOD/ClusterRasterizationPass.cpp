@@ -135,7 +135,7 @@ void ClusterRasterizationPass::Update(const UpdateExecutionContext& executionCon
     uint64_t totalViewPixels = 0;
 
     if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
-        maxViewWidth = CLodVirtualShadowDefaultPageTableResolution * CLodVirtualShadowPhysicalPageSize;
+        maxViewWidth = CLodVirtualShadowDefaultVirtualResolution;
         maxViewHeight = maxViewWidth;
     }
 
@@ -296,7 +296,7 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
         misc[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX] = m_virtualShadowPhysicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
         misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_RESOLUTION] = CLodVirtualShadowDefaultPageTableResolution;
         misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_COUNT] = CLodVirtualShadowDefaultClipmapCount;
-        misc[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = CLodVirtualShadowDefaultPageTableResolution * CLodVirtualShadowPhysicalPageSize;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = CLodVirtualShadowDefaultVirtualResolution;
     }
     if (m_outputKind == CLodRasterOutputKind::DeepVisibility) {
         misc[CLOD_RASTER_DEEP_VISIBILITY_NODE_BUFFER_DESCRIPTOR_INDEX] = m_deepVisibilityNodesBuffer->GetUAVShaderVisibleInfo(0).slot.index;

@@ -67,9 +67,10 @@ float calculateDirectionalVSMShadow(float3 fragPosWorldSpace, float3 fragPosView
     static const uint kCLodVirtualShadowAllocatedMask = 0x80000000u;
     static const uint kCLodVirtualShadowDirtyMask = 0x40000000u;
     static const uint kCLodVirtualShadowPhysicalPageIndexMask = 0x3FFFFFFFu;
+    static const uint kCLodVirtualShadowVirtualResolution = 4096u;
     static const uint kCLodVirtualShadowPhysicalPageSize = 128u;
     static const uint kCLodVirtualShadowPhysicalPagesPerAxis = 64u;
-    static const uint kCLodVirtualShadowPageTableResolution = 2048u;
+    static const uint kCLodVirtualShadowPageTableResolution = kCLodVirtualShadowVirtualResolution / kCLodVirtualShadowPhysicalPageSize;
     static const uint kInvalidShadowCameraIndex = 0xFFFFFFFFu;
 
     float depth = abs(fragPosViewSpace.z);
@@ -110,8 +111,8 @@ float calculateDirectionalVSMShadow(float3 fragPosWorldSpace, float3 fragPosView
     const uint physicalPageIndex = pageEntry & kCLodVirtualShadowPhysicalPageIndexMask;
     const uint atlasPageX = physicalPageIndex % kCLodVirtualShadowPhysicalPagesPerAxis;
     const uint atlasPageY = physicalPageIndex / kCLodVirtualShadowPhysicalPagesPerAxis;
-    const uint virtualTexelX = min((uint)(uv.x * pageTableResolution * kCLodVirtualShadowPhysicalPageSize), pageTableResolution * kCLodVirtualShadowPhysicalPageSize - 1u);
-    const uint virtualTexelY = min((uint)(uv.y * pageTableResolution * kCLodVirtualShadowPhysicalPageSize), pageTableResolution * kCLodVirtualShadowPhysicalPageSize - 1u);
+    const uint virtualTexelX = min((uint)(uv.x * kCLodVirtualShadowVirtualResolution), kCLodVirtualShadowVirtualResolution - 1u);
+    const uint virtualTexelY = min((uint)(uv.y * kCLodVirtualShadowVirtualResolution), kCLodVirtualShadowVirtualResolution - 1u);
     const uint2 atlasPixel = uint2(
         atlasPageX * kCLodVirtualShadowPhysicalPageSize + (virtualTexelX % kCLodVirtualShadowPhysicalPageSize),
         atlasPageY * kCLodVirtualShadowPhysicalPageSize + (virtualTexelY % kCLodVirtualShadowPhysicalPageSize));

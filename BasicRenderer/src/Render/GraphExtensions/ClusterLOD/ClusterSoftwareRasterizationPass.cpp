@@ -104,8 +104,8 @@ void ClusterSoftwareRasterizationPass::Update(const UpdateExecutionContext& exec
 
         if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
             if (viewInfo->flags.shadow && viewInfo->lightType == Components::LightType::Directional) {
-                info.scissorMaxX = CLodVirtualShadowDefaultPageTableResolution * CLodVirtualShadowPhysicalPageSize;
-                info.scissorMaxY = CLodVirtualShadowDefaultPageTableResolution * CLodVirtualShadowPhysicalPageSize;
+                info.scissorMaxX = CLodVirtualShadowDefaultVirtualResolution;
+                info.scissorMaxY = CLodVirtualShadowDefaultVirtualResolution;
                 info.viewportScaleX = 1.0f;
                 info.viewportScaleY = 1.0f;
             }
