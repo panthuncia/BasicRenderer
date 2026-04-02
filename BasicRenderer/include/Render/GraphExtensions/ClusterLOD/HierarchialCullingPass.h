@@ -50,6 +50,7 @@ public:
         std::shared_ptr<Buffer> occlusionNodeGpuInputsBuffer,
         std::shared_ptr<Buffer> viewDepthSrvIndicesBuffer,
         std::shared_ptr<Buffer> viewRasterInfoBuffer,
+        std::shared_ptr<PixelBuffer> shadowDirtyHierarchyTexture = nullptr,
         std::shared_ptr<ResourceGroup> slabResourceGroup = nullptr,
         std::shared_ptr<Buffer> phase1VisibleClustersCounterBuffer = nullptr,
         std::shared_ptr<Buffer> swWriteBaseCounterBuffer = nullptr);
@@ -93,6 +94,7 @@ private:
     std::shared_ptr<Buffer> m_occlusionNodeGpuInputsBuffer;
     std::shared_ptr<Buffer> m_viewDepthSrvIndicesBuffer;
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
+    std::shared_ptr<PixelBuffer> m_shadowDirtyHierarchyTexture;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     std::shared_ptr<Buffer> m_phase1VisibleClustersCounterBuffer; // Phase 2 only: Phase 1's HW counter for write offset
     std::shared_ptr<Buffer> m_swWriteBaseCounterBuffer; // Phase 2 only: Phase 1's SW counter for top-down write offset

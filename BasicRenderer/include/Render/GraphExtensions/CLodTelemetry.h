@@ -67,6 +67,7 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     ClusterCullRejectedOcclusion,
     ClusterCullRejectedOutOfRange,
     ClusterCullRejectedPageBounds,
+    ClusterCullRejectedCleanPages,
 
     Count
 };

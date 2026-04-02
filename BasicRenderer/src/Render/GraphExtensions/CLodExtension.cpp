@@ -1440,6 +1440,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_occlusionNodeGpuInputsBuffer,
             m_viewDepthSrvIndicesBuffer,
             m_viewRasterInfoBuffer,
+            traits.type == CLodExtensionType::Shadow ? m_shadowDirtyPageHierarchyTexture : nullptr,
             slabGroup));
     if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly ||
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility) {
@@ -1905,6 +1906,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_occlusionNodeGpuInputsBuffer,
             m_viewDepthSrvIndicesBuffer,
             m_viewRasterInfoBuffer,
+            traits.type == CLodExtensionType::Shadow ? m_shadowDirtyPageHierarchyTexture : nullptr,
             slabGroup,
             m_visibleClustersCounterBuffer,
             m_swVisibleClustersCounterBuffer));

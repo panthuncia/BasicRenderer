@@ -2519,8 +2519,9 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 const uint32_t rejOccl = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedOcclusion);
                 const uint32_t rejOOR = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedOutOfRange);
                 const uint32_t rejPageBounds = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedPageBounds);
+                const uint32_t rejCleanPages = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedCleanPages);
                 const uint32_t survived = counter(CLodWorkGraphCounterIndex::ClusterCullSurvivingLanes);
-                const uint32_t totalRejected = rejFrustum + rejCond2 + rejOccl + rejOOR + rejPageBounds;
+                const uint32_t totalRejected = rejFrustum + rejCond2 + rejOccl + rejOOR + rejPageBounds + rejCleanPages;
 
                 ImGui::Text("Meshlet iterations evaluated: %u", meshletIter);
                 ImGui::Text("Survived: %u", survived);
@@ -2537,6 +2538,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 rejectionRow("Occlusion cull", rejOccl, totalRejected);
                 rejectionRow("WaveActiveMax padding (inactive iterations)", rejOOR, totalRejected);
                 rejectionRow("Page bounds overflow", rejPageBounds, totalRejected);
+                rejectionRow("Clean shadow pages", rejCleanPages, totalRejected);
             }
 
             ImGui::Separator();

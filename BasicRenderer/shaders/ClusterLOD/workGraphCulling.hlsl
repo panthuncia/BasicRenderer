@@ -6,6 +6,7 @@
 #include "include/occlusionCulling.hlsli"
 #include "include/materialFlags.hlsli"
 #include "PerPassRootConstants/clodWorkGraphRootConstants.h"
+#include "include/clodVirtualShadowClipmap.hlsli"
 #include "include/clodStructs.hlsli"
 #include "include/clodPageAccess.hlsli"
 #include "include/visibleClusterPacking.hlsli"
@@ -114,9 +115,10 @@ static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_CONDITION2 = 48;
 static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_OCCLUSION = 49;
 static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_OUT_OF_RANGE = 50;
 static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_PAGE_BOUNDS = 51;
+static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_CLEAN_PAGES = 52;
 
-static const uint WG_COUNTER_CHILD_PREFILTER_FRUSTUM_CULLED = 52;
-static const uint WG_COUNTER_CHILD_PREFILTER_LOD_REJECTED = 53;
+static const uint WG_COUNTER_CHILD_PREFILTER_FRUSTUM_CULLED = 53;
+static const uint WG_COUNTER_CHILD_PREFILTER_LOD_REJECTED = 54;
 
 static const uint CLOD_STREAM_REQUEST_CAPACITY = (1u << 16);
 static const uint CLOD_USED_GROUPS_CAPACITY = (1u << 17);
@@ -183,6 +185,145 @@ bool CLodReadBit(ByteAddressBuffer bits, uint key)
     const uint packed = bits.Load(CLodBitWordAddress(key));
     return (packed & CLodBitMask(key)) != 0u;
 }
+
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+bool CLodVirtualShadowFindClipmapForView(uint viewId, out CLodVirtualShadowClipmapInfo outClipmapInfo)
+{
+    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodClipmapInfo)];
+
+    [unroll]
+    for (uint clipmapIndex = 0u; clipmapIndex < kCLodVirtualShadowClipmapCount; ++clipmapIndex)
+    {
+        const CLodVirtualShadowClipmapInfo clipmapInfo = clipmapInfos[clipmapIndex];
+        if (CLodVirtualShadowClipmapIsValid(clipmapInfo) && clipmapInfo.shadowCameraBufferIndex == viewId)
+        {
+            outClipmapInfo = clipmapInfo;
+            return true;
+        }
+    }
+
+    outClipmapInfo = (CLodVirtualShadowClipmapInfo)0;
+    return false;
+}
+
+void CLodVirtualShadowBuildWrappedRanges(
+    uint pageMin,
+    uint pageMax,
+    uint pageOffset,
+    out uint2 range0,
+    out uint2 range1,
+    out uint rangeCount)
+{
+    const uint wrappedMin = CLodVirtualShadowWrapPageCoord(pageMin, pageOffset, kCLodVirtualShadowPageTableResolution);
+    const uint wrappedMax = CLodVirtualShadowWrapPageCoord(pageMax, pageOffset, kCLodVirtualShadowPageTableResolution);
+    if (wrappedMin <= wrappedMax)
+    {
+        range0 = uint2(wrappedMin, wrappedMax);
+        range1 = uint2(0u, 0u);
+        rangeCount = 1u;
+        return;
+    }
+
+    range0 = uint2(0u, wrappedMax);
+    range1 = uint2(wrappedMin, kCLodVirtualShadowPageTableResolution - 1u);
+    rangeCount = 2u;
+}
+
+bool CLodVirtualShadowRectTouchesDirtyPages(Texture2DArray<uint> dirtyHierarchy, uint layer, uint2 pageMin, uint2 pageMax)
+{
+    const uint2 extent = (pageMax - pageMin) + 1u;
+    const uint maxExtent = max(extent.x, extent.y);
+    const uint mipLevel = min(maxExtent > 1u ? firstbithigh(maxExtent) : 0u, 5u);
+    const uint2 mipMin = pageMin >> mipLevel;
+    const uint2 mipMax = pageMax >> mipLevel;
+
+    [loop]
+    for (uint y = mipMin.y; y <= mipMax.y; ++y)
+    {
+        [loop]
+        for (uint x = mipMin.x; x <= mipMax.x; ++x)
+        {
+            if (dirtyHierarchy.Load(int4(x, y, layer, mipLevel)) != 0u)
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool CLodVirtualShadowMeshletTouchesDirtyPages(float3 worldCenter, float radiusWorld, uint viewId)
+{
+    CLodVirtualShadowClipmapInfo clipmapInfo;
+    if (!CLodVirtualShadowFindClipmapForView(viewId, clipmapInfo))
+    {
+        return true;
+    }
+
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+    const Camera shadowCamera = cameras[viewId];
+    const float4 shadowClip = mul(float4(worldCenter, 1.0f), shadowCamera.viewProjection);
+    const float safeW = max(abs(shadowClip.w), 1.0e-6f);
+    const float2 shadowNdc = shadowClip.xy / safeW;
+
+    float2 shadowUvCenter = shadowNdc * 0.5f + 0.5f;
+    shadowUvCenter.y = 1.0f - shadowUvCenter.y;
+
+    const float2 uvRadius = float2(
+        radiusWorld * abs(shadowCamera.projection[0][0]) * 0.5f,
+        radiusWorld * abs(shadowCamera.projection[1][1]) * 0.5f) + rcp((float2)kCLodVirtualShadowPageTableResolution);
+
+    const float2 uvMin = saturate(shadowUvCenter - uvRadius);
+    const float2 uvMax = saturate(shadowUvCenter + uvRadius);
+    const uint2 virtualPageMin = CLodVirtualShadowVirtualPageCoordsFromUv(uvMin);
+    const uint2 virtualPageMax = CLodVirtualShadowVirtualPageCoordsFromUv(uvMax);
+
+    uint2 xRange0;
+    uint2 xRange1;
+    uint xRangeCount = 0u;
+    CLodVirtualShadowBuildWrappedRanges(virtualPageMin.x, virtualPageMax.x, clipmapInfo.pageOffsetX, xRange0, xRange1, xRangeCount);
+
+    uint2 yRange0;
+    uint2 yRange1;
+    uint yRangeCount = 0u;
+    CLodVirtualShadowBuildWrappedRanges(virtualPageMin.y, virtualPageMax.y, clipmapInfo.pageOffsetY, yRange0, yRange1, yRangeCount);
+
+    Texture2DArray<uint> dirtyHierarchy = ResourceDescriptorHeap[CLOD_WG_SHADOW_DIRTY_HIERARCHY_DESCRIPTOR_INDEX];
+    const uint2 xRanges[2] = { xRange0, xRange1 };
+    const uint2 yRanges[2] = { yRange0, yRange1 };
+
+    [unroll]
+    for (uint xRangeIndex = 0u; xRangeIndex < 2u; ++xRangeIndex)
+    {
+        if (xRangeIndex >= xRangeCount)
+        {
+            break;
+        }
+
+        [unroll]
+        for (uint yRangeIndex = 0u; yRangeIndex < 2u; ++yRangeIndex)
+        {
+            if (yRangeIndex >= yRangeCount)
+            {
+                break;
+            }
+
+            if (CLodVirtualShadowRectTouchesDirtyPages(
+                    dirtyHierarchy,
+                    clipmapInfo.pageTableLayer,
+                    uint2(xRanges[xRangeIndex].x, yRanges[yRangeIndex].x),
+                    uint2(xRanges[xRangeIndex].y, yRanges[yRangeIndex].y)))
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+#endif
 
 bool CLodTrySetBit(RWByteAddressBuffer bits, uint key)
 {
@@ -1181,6 +1322,18 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 if (!survives) {
                     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_FRUSTUM, 1);
                 }
+
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+                if (survives)
+                {
+                    const float3 meshletCenterWorld = mul(float4(meshletBounds.sphere.xyz, 1.0f), objectModelMatrix).xyz;
+                    if (!CLodVirtualShadowMeshletTouchesDirtyPages(meshletCenterWorld, meshletRadiusWorld, b.viewId))
+                    {
+                        survives = false;
+                        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CLEAN_PAGES, 1);
+                    }
+                }
+#endif
 
                 // Per-meshlet LOD condition 2: read refined group ID from descriptor.
                 // Terminal meshlets (refinedGroupId < 0) pass automatically.

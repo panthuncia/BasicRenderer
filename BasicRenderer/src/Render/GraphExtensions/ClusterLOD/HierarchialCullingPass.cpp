@@ -73,6 +73,7 @@ HierarchialCullingPass::HierarchialCullingPass(
     std::shared_ptr<Buffer> occlusionNodeGpuInputsBuffer,
     std::shared_ptr<Buffer> viewDepthSrvIndicesBuffer,
     std::shared_ptr<Buffer> viewRasterInfoBuffer,
+    std::shared_ptr<PixelBuffer> shadowDirtyHierarchyTexture,
     std::shared_ptr<ResourceGroup> slabResourceGroup,
     std::shared_ptr<Buffer> phase1VisibleClustersCounterBuffer,
     std::shared_ptr<Buffer> swWriteBaseCounterBuffer) {
@@ -99,6 +100,7 @@ HierarchialCullingPass::HierarchialCullingPass(
     m_occlusionNodeGpuInputsBuffer = std::move(occlusionNodeGpuInputsBuffer);
     m_viewDepthSrvIndicesBuffer = std::move(viewDepthSrvIndicesBuffer);
     m_viewRasterInfoBuffer = std::move(viewRasterInfoBuffer);
+    m_shadowDirtyHierarchyTexture = std::move(shadowDirtyHierarchyTexture);
     m_slabResourceGroup = std::move(slabResourceGroup);
     m_phase1VisibleClustersCounterBuffer = std::move(phase1VisibleClustersCounterBuffer);
     m_swWriteBaseCounterBuffer = std::move(swWriteBaseCounterBuffer);
@@ -175,7 +177,8 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
     if (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVirtualShadowOutput(m_rasterOutputKind)) {
         builder->WithShaderResource(
                 Builtin::Shadows::CLodPageTable,
-                Builtin::Shadows::CLodClipmapInfo)
+                Builtin::Shadows::CLodClipmapInfo,
+                m_shadowDirtyHierarchyTexture)
             .WithUnorderedAccess(Builtin::Shadows::CLodPhysicalPages);
     }
 
@@ -252,6 +255,10 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     uintRootConstants[CLOD_WG_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX] = m_viewDepthSrvIndicesBuffer->GetSRVInfo(0).slot.index;
     uintRootConstants[CLOD_WG_VISIBLE_CLUSTERS_CAPACITY] = static_cast<uint32_t>(m_maxVisibleClusters);
+    uintRootConstants[CLOD_WG_SHADOW_DIRTY_HIERARCHY_DESCRIPTOR_INDEX] =
+        m_shadowDirtyHierarchyTexture
+            ? m_shadowDirtyHierarchyTexture->GetSRVInfo(SRVViewType::Texture2DArrayFull, 0).slot.index
+            : 0u;
 
     // Always bind valid SRV descriptors for the aliased write-base slots.
     // Phase 1 does not read these counters, but the shader still forms StructuredBuffer
