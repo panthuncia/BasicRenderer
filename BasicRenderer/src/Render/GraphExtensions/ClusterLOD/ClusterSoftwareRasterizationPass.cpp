@@ -81,6 +81,9 @@ void ClusterSoftwareRasterizationPass::DeclareResourceUsages(ComputePassBuilder*
 }
 
 void ClusterSoftwareRasterizationPass::Setup() {
+    if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
+        RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
+    }
 }
 
 void ClusterSoftwareRasterizationPass::Update(const UpdateExecutionContext& executionContext) {

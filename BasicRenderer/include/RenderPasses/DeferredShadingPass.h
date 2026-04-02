@@ -51,6 +51,7 @@ public:
 	}
 
 	void Setup() override {
+		RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
 	}
 
 	PassReturn Execute(PassExecutionContext& executionContext) override {

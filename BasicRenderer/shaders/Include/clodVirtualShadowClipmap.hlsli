@@ -29,6 +29,26 @@ struct CLodVirtualShadowClipmapInfo
     uint pad1;
 };
 
+struct CLodVirtualShadowStats
+{
+    uint activeClipmapCount;
+    uint validClipmapCount;
+    uint allocationRequestCount;
+    uint allocationDispatchGroupCount;
+    uint freePhysicalPageCount;
+    uint reusablePhysicalPageCount;
+    uint pad0;
+    uint pad1;
+    uint preAllocateNonZeroPageTableEntries[kCLodVirtualShadowClipmapCount];
+    uint preAllocateDirtyPageTableEntries[kCLodVirtualShadowClipmapCount];
+    uint selectedPixels[kCLodVirtualShadowClipmapCount];
+    uint projectionRejectedPixels[kCLodVirtualShadowClipmapCount];
+    uint requestedPages[kCLodVirtualShadowClipmapCount];
+    uint nonZeroPageTableEntries[kCLodVirtualShadowClipmapCount];
+    uint allocatedPageTableEntries[kCLodVirtualShadowClipmapCount];
+    uint dirtyPageTableEntries[kCLodVirtualShadowClipmapCount];
+};
+
 bool CLodVirtualShadowClipmapIsValid(CLodVirtualShadowClipmapInfo clipmapInfo)
 {
     return (clipmapInfo.flags & kCLodVirtualShadowClipmapValidFlag) != 0u &&

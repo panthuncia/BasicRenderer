@@ -818,6 +818,144 @@ std::vector<Cascade> setupCascades(
     return cascades;
 }
 
+std::vector<Cascade> setupDirectionalClipmaps(
+    int numClipmaps,
+    const DirectX::XMVECTOR& lightDir,
+    const DirectX::XMVECTOR& camPos,
+    const DirectX::XMVECTOR& camDir,
+    const DirectX::XMVECTOR& camUp,
+    float nearPlane,
+    float fovY,
+    float aspectRatio,
+    const std::vector<float>& clipFarPlanes)
+{
+    using namespace DirectX;
+    std::vector<Cascade> clipmaps;
+    clipmaps.reserve(numClipmaps);
+
+    XMVECTOR camRight = XMVector3Normalize(XMVector3Cross(XMVector3Normalize(camDir), XMVector3Normalize(camUp)));
+
+    for (int i = 0; i < numClipmaps; ++i)
+    {
+        const float clipNear = nearPlane;
+        const float clipFar = clipFarPlanes[i];
+
+        XMVECTOR nearCenter = camPos + camDir * clipNear;
+        XMVECTOR farCenter = camPos + camDir * clipFar;
+
+        float tanFov = tanf(fovY * 0.5f);
+        float nearHeight = tanFov * clipNear;
+        float nearWidth = nearHeight * aspectRatio;
+        float farHeight = tanFov * clipFar;
+        float farWidth = farHeight * aspectRatio;
+
+        XMVECTOR nearTopLeft = nearCenter + camUp * nearHeight - camRight * nearWidth;
+        XMVECTOR nearTopRight = nearCenter + camUp * nearHeight + camRight * nearWidth;
+        XMVECTOR nearBottomLeft = nearCenter - camUp * nearHeight - camRight * nearWidth;
+        XMVECTOR nearBottomRight = nearCenter - camUp * nearHeight + camRight * nearWidth;
+        XMVECTOR farTopLeft = farCenter + camUp * farHeight - camRight * farWidth;
+        XMVECTOR farTopRight = farCenter + camUp * farHeight + camRight * farWidth;
+        XMVECTOR farBottomLeft = farCenter - camUp * farHeight - camRight * farWidth;
+        XMVECTOR farBottomRight = farCenter - camUp * farHeight + camRight * farWidth;
+
+        XMVECTOR frustumCorners[8] = {
+            nearTopLeft, nearTopRight, nearBottomLeft, nearBottomRight,
+            farTopLeft, farTopRight, farBottomLeft, farBottomRight
+        };
+
+        XMVECTOR frustumCenter = XMVectorZero();
+        for (int j = 0; j < 8; ++j)
+        {
+            frustumCenter = XMVectorAdd(frustumCenter, frustumCorners[j]);
+        }
+        frustumCenter = XMVectorScale(frustumCenter, 1.0f / 8.0f);
+
+        float radius = 0.0f;
+        for (int j = 0; j < 8; ++j)
+        {
+            float distance = XMVectorGetX(XMVector3Length(XMVectorSubtract(frustumCorners[j], frustumCenter)));
+            radius = std::max(radius, distance);
+        }
+        radius = ceilf(radius * 16.0f) / 16.0f;
+
+        XMVECTOR lightPos = frustumCenter - lightDir * radius * 2.0f;
+        XMVECTOR lightUp = (fabs(XMVectorGetY(lightDir)) > 0.99f) ? XMVectorSet(0, 0, -1, 0) : XMVectorSet(0, 1, 0, 0);
+        XMMATRIX lightView = XMMatrixLookAtRH(lightPos, frustumCenter, lightUp);
+
+        XMVECTOR lightSpaceCorners[8];
+        for (int j = 0; j < 8; ++j)
+        {
+            lightSpaceCorners[j] = XMVector3TransformCoord(frustumCorners[j], lightView);
+        }
+
+        XMVECTOR mins = lightSpaceCorners[0];
+        XMVECTOR maxs = lightSpaceCorners[0];
+        for (int j = 1; j < 8; ++j)
+        {
+            mins = XMVectorMin(mins, lightSpaceCorners[j]);
+            maxs = XMVectorMax(maxs, lightSpaceCorners[j]);
+        }
+
+        float l = XMVectorGetX(mins);
+        float r = XMVectorGetX(maxs);
+        float b = XMVectorGetY(mins);
+        float t = XMVectorGetY(maxs);
+        float n = (std::min)(XMVectorGetZ(maxs), -20.0f);
+        float f = -XMVectorGetZ(mins);
+
+        XMMATRIX lightOrtho = XMMatrixOrthographicOffCenterRH(l, r, b, t, n, f);
+
+        Cascade clipmap;
+        clipmap.size = radius * 2;
+        clipmap.viewMatrix = lightView;
+        clipmap.orthoMatrix = lightOrtho;
+
+        XMMATRIX comboMatrix = lightOrtho;
+
+        auto ExtractPlane = [&comboMatrix](int planeIndex) -> ClippingPlane {
+            XMFLOAT4X4 m;
+            XMStoreFloat4x4(&m, comboMatrix);
+            XMVECTOR planeVec;
+            switch (planeIndex) {
+            case 0:
+                planeVec = XMVectorSet(m._14 + m._11, m._24 + m._21, m._34 + m._31, m._44 + m._41);
+                break;
+            case 1:
+                planeVec = XMVectorSet(m._14 - m._11, m._24 - m._21, m._34 - m._31, m._44 - m._41);
+                break;
+            case 2:
+                planeVec = XMVectorSet(m._14 + m._12, m._24 + m._22, m._34 + m._32, m._44 + m._42);
+                break;
+            case 3:
+                planeVec = XMVectorSet(m._14 - m._12, m._24 - m._22, m._34 - m._32, m._44 - m._42);
+                break;
+            case 4:
+                planeVec = XMVectorSet(m._13, m._23, m._33, m._43);
+                break;
+            case 5:
+                planeVec = XMVectorSet(m._14 - m._13, m._24 - m._23, m._34 - m._33, m._44 - m._43);
+                break;
+            default:
+                planeVec = XMVectorZero();
+                break;
+            }
+            planeVec = XMPlaneNormalize(planeVec);
+            ClippingPlane result;
+            XMStoreFloat4(&result.plane, planeVec);
+            return result;
+        };
+
+        for (int p = 0; p < 6; ++p)
+        {
+            clipmap.frustumPlanes[p] = ExtractPlane(p);
+        }
+
+        clipmaps.push_back(clipmap);
+    }
+
+    return clipmaps;
+}
+
 std::vector<float> calculateCascadeSplits(int numCascades, float zNear, float zFar, float maxDist, float lambda) {
     std::vector<float> splits(numCascades);
     float end = (std::min)(zFar, maxDist);

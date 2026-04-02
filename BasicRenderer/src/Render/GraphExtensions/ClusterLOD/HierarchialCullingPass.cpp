@@ -202,6 +202,9 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
 }
 
 void HierarchialCullingPass::Setup() {
+    if (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVirtualShadowOutput(m_rasterOutputKind)) {
+        RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
+    }
 }
 
 PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContext) {

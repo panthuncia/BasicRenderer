@@ -97,6 +97,7 @@ public:
 	}
 
 	void Setup() override {
+		RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
 		
 		m_pPrimaryDepthBuffer = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PrimaryCamera::DepthTexture);
 		m_PPLLHeadPointerTexture = m_resourceRegistryView->RequestPtr<PixelBuffer>(Builtin::PPLL::HeadPointerTexture);

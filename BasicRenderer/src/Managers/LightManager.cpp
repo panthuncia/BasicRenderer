@@ -245,8 +245,8 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 	auto& matrix = m_currentCamera.get<Components::Matrix>().matrix;
 	auto posFloats = GetGlobalPositionFromMatrix(matrix);
 
-	// Compute cascades (each cascade carries its own view and ortho projection matrix).
-	auto cascades = setupCascades(numCascades, info.dirWorldSpace,
+	// Virtual shadow clip levels are nested around the primary camera.
+	auto cascades = setupDirectionalClipmaps(numCascades, info.dirWorldSpace,
 		DirectX::XMLoadFloat3(&posFloats), 
 		GetForwardFromMatrix(matrix),
 		GetUpFromMatrix(matrix),
@@ -378,7 +378,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 		auto& camera = m_currentCamera.get<Components::Camera>();
 		auto& matrix = m_currentCamera.get<Components::Matrix>().matrix;
 		auto posFloats = GetGlobalPositionFromMatrix(matrix);
-		auto cascades = setupCascades(numCascades, lightInfo.lightInfo.dirWorldSpace, DirectX::XMLoadFloat3(&posFloats), GetForwardFromMatrix(matrix), GetUpFromMatrix(matrix), camera.zNear, camera.fov, camera.aspect, getDirectionalLightCascadeSplits());
+		auto cascades = setupDirectionalClipmaps(numCascades, lightInfo.lightInfo.dirWorldSpace, DirectX::XMLoadFloat3(&posFloats), GetForwardFromMatrix(matrix), GetUpFromMatrix(matrix), camera.zNear, camera.fov, camera.aspect, getDirectionalLightCascadeSplits());
 		for (int i = 0; i < numCascades; i++) {
 			CameraInfo info = {};
 			// Directional shadow clipmaps refine against the primary camera position,

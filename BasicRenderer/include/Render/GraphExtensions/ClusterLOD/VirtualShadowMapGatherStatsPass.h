@@ -8,33 +8,29 @@
 class Buffer;
 class PixelBuffer;
 
-class VirtualShadowMapSetupPass final : public ComputePass {
+class VirtualShadowMapGatherStatsPass final : public ComputePass {
 public:
-    VirtualShadowMapSetupPass(
+    VirtualShadowMapGatherStatsPass(
         std::shared_ptr<PixelBuffer> pageTableTexture,
-        std::shared_ptr<Buffer> pageMetadataBuffer,
         std::shared_ptr<Buffer> allocationCountBuffer,
-        std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
+        std::shared_ptr<Buffer> allocationIndirectArgsBuffer,
+        std::shared_ptr<Buffer> pageListHeaderBuffer,
         std::shared_ptr<Buffer> clipmapInfoBuffer,
         std::shared_ptr<Buffer> statsBuffer,
-        std::shared_ptr<Buffer> runtimeStateBuffer,
-        bool forceResetResources);
+        bool capturePreAllocateState);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
     void Setup() override;
-    void Update(const UpdateExecutionContext& executionContext) override;
     PassReturn Execute(PassExecutionContext& executionContext) override;
     void Cleanup() override;
 
 private:
     PipelineState m_pso;
     std::shared_ptr<PixelBuffer> m_pageTableTexture;
-    std::shared_ptr<Buffer> m_pageMetadataBuffer;
     std::shared_ptr<Buffer> m_allocationCountBuffer;
-    std::shared_ptr<Buffer> m_dirtyPageFlagsBuffer;
+    std::shared_ptr<Buffer> m_allocationIndirectArgsBuffer;
+    std::shared_ptr<Buffer> m_pageListHeaderBuffer;
     std::shared_ptr<Buffer> m_clipmapInfoBuffer;
     std::shared_ptr<Buffer> m_statsBuffer;
-    std::shared_ptr<Buffer> m_runtimeStateBuffer;
-    bool m_forceResetResources = false;
-    bool m_resetResources = false;
+    bool m_capturePreAllocateState = false;
 };

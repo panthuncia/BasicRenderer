@@ -66,6 +66,7 @@ VirtualShadowMapSetupPass::VirtualShadowMapSetupPass(
     std::shared_ptr<Buffer> allocationCountBuffer,
     std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
     std::shared_ptr<Buffer> clipmapInfoBuffer,
+    std::shared_ptr<Buffer> statsBuffer,
     std::shared_ptr<Buffer> runtimeStateBuffer,
     bool forceResetResources)
     : m_pageTableTexture(std::move(pageTableTexture))
@@ -73,6 +74,7 @@ VirtualShadowMapSetupPass::VirtualShadowMapSetupPass(
     , m_allocationCountBuffer(std::move(allocationCountBuffer))
     , m_dirtyPageFlagsBuffer(std::move(dirtyPageFlagsBuffer))
     , m_clipmapInfoBuffer(std::move(clipmapInfoBuffer))
+    , m_statsBuffer(std::move(statsBuffer))
     , m_runtimeStateBuffer(std::move(runtimeStateBuffer))
     , m_forceResetResources(forceResetResources)
 {
@@ -89,8 +91,9 @@ void VirtualShadowMapSetupPass::DeclareResourceUsages(ComputePassBuilder* builde
     builder->WithUnorderedAccess(
         m_pageTableTexture,
         m_pageMetadataBuffer,
-    m_allocationCountBuffer,
-        m_dirtyPageFlagsBuffer);
+        m_allocationCountBuffer,
+        m_dirtyPageFlagsBuffer,
+        m_statsBuffer);
 }
 
 void VirtualShadowMapSetupPass::Setup() {}
@@ -203,7 +206,7 @@ PassReturn VirtualShadowMapSetupPass::Execute(PassExecutionContext& executionCon
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
 
     uint32_t rootConstants[NumMiscUintRootConstants] = {};
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_ALLOCATION_COUNT_DESCRIPTOR_INDEX] = m_allocationCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
@@ -212,6 +215,7 @@ PassReturn VirtualShadowMapSetupPass::Execute(PassExecutionContext& executionCon
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PHYSICAL_PAGE_COUNT] = CLodVirtualShadowDefaultPhysicalPageCount;
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_DIRTY_WORD_COUNT] = CLodVirtualShadowDirtyWordCount(CLodVirtualShadowDefaultPhysicalPageCount);
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RESET_RESOURCES] = m_resetResources ? 1u : 0u;
+    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

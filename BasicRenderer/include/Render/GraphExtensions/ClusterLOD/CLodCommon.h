@@ -193,6 +193,28 @@ struct CLodVirtualShadowRuntimeState
 
 static_assert(sizeof(CLodVirtualShadowRuntimeState) == 16u, "CLodVirtualShadowRuntimeState size must match HLSL");
 
+struct CLodVirtualShadowStats
+{
+    uint32_t activeClipmapCount = 0u;
+    uint32_t validClipmapCount = 0u;
+    uint32_t allocationRequestCount = 0u;
+    uint32_t allocationDispatchGroupCount = 0u;
+    uint32_t freePhysicalPageCount = 0u;
+    uint32_t reusablePhysicalPageCount = 0u;
+    uint32_t pad0 = 0u;
+    uint32_t pad1 = 0u;
+    uint32_t preAllocateNonZeroPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
+    uint32_t preAllocateDirtyPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
+    uint32_t selectedPixels[CLodVirtualShadowDefaultClipmapCount] = {};
+    uint32_t projectionRejectedPixels[CLodVirtualShadowDefaultClipmapCount] = {};
+    uint32_t requestedPages[CLodVirtualShadowDefaultClipmapCount] = {};
+    uint32_t nonZeroPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
+    uint32_t allocatedPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
+    uint32_t dirtyPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
+};
+
+static_assert(sizeof(CLodVirtualShadowStats) == 224u, "CLodVirtualShadowStats size must match HLSL");
+
 
 inline constexpr uint32_t CLodReyesMaxSplitPassCount = 4u;
 inline constexpr uint32_t CLodReyesMaxVisibilityMicroTrianglesPerPatch = 128u;

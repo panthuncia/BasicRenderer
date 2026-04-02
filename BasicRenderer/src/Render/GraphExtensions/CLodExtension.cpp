@@ -42,6 +42,7 @@
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapBuildPageListsPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapClearDirtyBitsPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapClearPagesPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapGatherStatsPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapDirtyHierarchyPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapMarkPagesPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapSetupPass.h"
@@ -716,6 +717,13 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodVirtualShadowRuntimeStateTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
+    m_shadowStatsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodVirtualShadowStats), true, false, false, false);
+    m_shadowStatsBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Stats Buffer"));
+    m_shadowStatsBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowStatsBuffer })
+        .add<CLodVirtualShadowStatsTag>()
+        .add<CLodExtensionTypeTag>(typeEntity);
+
     m_shadowVirtualResourcesNeedReset = true;
 }
 
@@ -789,6 +797,7 @@ void CLodExtension::TagShadowResourceUsages()
     tagBufferUsage(m_shadowDirtyPageFlagsBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowClipmapInfoBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowRuntimeStateBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowStatsBuffer, "Cluster LOD virtual shadow maps");
 }
 
 void CLodExtension::ReleaseBufferBackings()
@@ -876,6 +885,7 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_shadowDirtyPageFlagsBuffer);
     releaseBufferBacking(m_shadowClipmapInfoBuffer);
     releaseBufferBacking(m_shadowRuntimeStateBuffer);
+    releaseBufferBacking(m_shadowStatsBuffer);
 }
 
 void CLodExtension::ReleaseShadowResourceBackings()
@@ -1298,6 +1308,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_shadowAllocationCountBuffer,
                 m_shadowDirtyPageFlagsBuffer,
                 m_shadowClipmapInfoBuffer,
+                m_shadowStatsBuffer,
                 m_shadowRuntimeStateBuffer,
                 m_shadowVirtualResourcesNeedReset));
         shadowSetupPassDesc.At(RenderGraph::ExternalInsertPoint::After("CLod::StreamingBeginFramePass"));
@@ -1313,7 +1324,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_shadowClipmapInfoBuffer,
                 m_shadowPageTableTexture,
                 m_shadowDirtyPageFlagsBuffer,
-                m_shadowPageMetadataBuffer));
+                m_shadowPageMetadataBuffer,
+                m_shadowStatsBuffer));
         shadowMarkPagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowSetupPassName));
         outPasses.push_back(std::move(shadowMarkPagesPassDesc));
 
@@ -1340,6 +1352,20 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         shadowBuildDispatchArgsPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowBuildPageListsPassName));
         outPasses.push_back(std::move(shadowBuildDispatchArgsPassDesc));
 
+        const std::string shadowPreAllocateStatsPassName = MakeVariantPassName(traits, "VirtualShadowPreAllocateStatsPass");
+        auto shadowPreAllocateStatsPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowPreAllocateStatsPassName,
+            std::make_shared<VirtualShadowMapGatherStatsPass>(
+                m_shadowPageTableTexture,
+                m_shadowAllocationCountBuffer,
+                m_shadowAllocationIndirectArgsBuffer,
+                m_shadowPageListHeaderBuffer,
+                m_shadowClipmapInfoBuffer,
+                m_shadowStatsBuffer,
+                true));
+        shadowPreAllocateStatsPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowBuildDispatchArgsPassName));
+        outPasses.push_back(std::move(shadowPreAllocateStatsPassDesc));
+
         shadowAllocationPassName = MakeVariantPassName(traits, "VirtualShadowAllocatePagesPass");
         auto shadowAllocationPassDesc = RenderGraph::ExternalPassDesc::Compute(
             shadowAllocationPassName,
@@ -1353,8 +1379,22 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_shadowFreePhysicalPagesBuffer,
                 m_shadowReusablePhysicalPagesBuffer,
                 m_shadowPageListHeaderBuffer));
-        shadowAllocationPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowBuildDispatchArgsPassName));
+            shadowAllocationPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowPreAllocateStatsPassName));
         outPasses.push_back(std::move(shadowAllocationPassDesc));
+
+        const std::string shadowGatherStatsPassName = MakeVariantPassName(traits, "VirtualShadowGatherStatsPass");
+        auto shadowGatherStatsPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowGatherStatsPassName,
+            std::make_shared<VirtualShadowMapGatherStatsPass>(
+                m_shadowPageTableTexture,
+                m_shadowAllocationCountBuffer,
+                m_shadowAllocationIndirectArgsBuffer,
+                m_shadowPageListHeaderBuffer,
+                m_shadowClipmapInfoBuffer,
+                m_shadowStatsBuffer,
+                false));
+        shadowGatherStatsPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowAllocationPassName));
+        outPasses.push_back(std::move(shadowGatherStatsPassDesc));
 
         const std::string shadowClearPagesPassName = MakeVariantPassName(traits, "VirtualShadowClearPagesPass");
         auto shadowClearPagesPassDesc = RenderGraph::ExternalPassDesc::Compute(
@@ -1362,7 +1402,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             std::make_shared<VirtualShadowMapClearPagesPass>(
                 m_shadowPhysicalPagesTexture,
                 m_shadowDirtyPageFlagsBuffer));
-        shadowClearPagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowAllocationPassName));
+        shadowClearPagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowGatherStatsPassName));
         outPasses.push_back(std::move(shadowClearPagesPassDesc));
 
         const std::string shadowDirtyHierarchyPassName = MakeVariantPassName(traits, "VirtualShadowDirtyHierarchyPass");

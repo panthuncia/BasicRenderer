@@ -144,6 +144,7 @@ private:
     std::shared_ptr<PixelBuffer> m_shadowDirtyPageHierarchyTexture;
     std::shared_ptr<Buffer> m_shadowClipmapInfoBuffer;
     std::shared_ptr<Buffer> m_shadowRuntimeStateBuffer;
+    std::shared_ptr<Buffer> m_shadowStatsBuffer;
 
     std::unique_ptr<CLodStreamingSystem> m_streamingSystem;
     bool m_providerRegisteredForCurrentRegistry = false;

@@ -50,3 +50,4 @@ struct CLodVirtualShadowDirtyPageFlagsTag {};
 struct CLodVirtualShadowDirtyHierarchyTag {};
 struct CLodVirtualShadowClipmapInfoTag {};
 struct CLodVirtualShadowRuntimeStateTag {};
+struct CLodVirtualShadowStatsTag {};

@@ -254,7 +254,7 @@ public:
         m_shadowVisibleCounterQuery = {};
         m_shadowVisibleClustersQuery = {};
 		m_shadowTelemetryQuery = {};
-
+        m_shadowVirtualShadowStatsQuery = {};
     }
 
     // ImGui descriptor heap allocator for user textures (slot 0 reserved for font atlas).
@@ -359,6 +359,16 @@ private:
     CLodWorkGraphCaptureState m_clodTelemetry;
     CLodWorkGraphCaptureState m_shadowClodTelemetry;
 
+    struct CLodVirtualShadowCaptureState {
+        CLodVirtualShadowStats stats{};
+        bool hasData = false;
+        bool capturePending = false;
+        uint64_t captureCount = 0;
+        std::string status = "No VSM captures yet.";
+    };
+
+    CLodVirtualShadowCaptureState m_shadowVirtualShadowTelemetry;
+
     bool m_clodReyesTelemetryHasData = false;
     bool m_clodReyesTelemetryCapturePending = false;
     uint64_t m_clodReyesTelemetryCaptureId = 0;
@@ -410,6 +420,7 @@ private:
     flecs::query<const Components::Resource> m_visibleCounterQuery;
     flecs::query<const Components::Resource> m_shadowVisibleClustersQuery;
     flecs::query<const Components::Resource> m_shadowVisibleCounterQuery;
+    flecs::query<const Components::Resource> m_shadowVirtualShadowStatsQuery;
     flecs::query<const Components::Resource> m_alphaDeepVisibilityCounterQuery;
     flecs::query<const Components::Resource> m_alphaDeepVisibilityOverflowQuery;
     flecs::query<const Components::Resource> m_alphaDeepVisibilityStatsQuery;
@@ -847,6 +858,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_shadowVisibleCounterQuery = RendererECSManager::GetInstance().GetWorld()
         .query_builder<const Components::Resource>()
         .with<VisibleClustersCounterTag>()
+        .with<CLodExtensionTypeTag>(shadowTag)
+        .build();
+    m_shadowVirtualShadowStatsQuery = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<CLodVirtualShadowStatsTag>()
         .with<CLodExtensionTypeTag>(shadowTag)
         .build();
 
@@ -1711,6 +1727,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
     Resource* clodVisibleCounterResource = nullptr;
     Resource* shadowClodVisibleClustersResource = nullptr;
     Resource* shadowClodVisibleCounterResource = nullptr;
+    Resource* shadowVirtualShadowStatsResource = nullptr;
     Resource* alphaNodeCounterResource = nullptr;
     Resource* alphaOverflowCounterResource = nullptr;
     Resource* alphaStatsResource = nullptr;
@@ -1779,6 +1796,14 @@ inline void Menu::DrawCLodTelemetryWindow() {
             }
             });
 
+        m_shadowVirtualShadowStatsQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (shadowVirtualShadowStatsResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    shadowVirtualShadowStatsResource = resource.get();
+                }
+            }
+            });
+
         m_alphaDeepVisibilityCounterQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
             if (alphaNodeCounterResource == nullptr) {
                 if (auto resource = resourceComponent.resource.lock()) {
@@ -1824,6 +1849,10 @@ inline void Menu::DrawCLodTelemetryWindow() {
         (readbackService != nullptr) &&
         (!m_shadowClodTelemetry.capturePending) &&
         (!m_shadowClodTelemetry.captureStatsPending);
+    const bool canCaptureVirtualShadow =
+        (shadowVirtualShadowStatsResource != nullptr) &&
+        (readbackService != nullptr) &&
+        (!m_shadowVirtualShadowTelemetry.capturePending);
     const bool canCaptureReyes = reyesCaptureResourcesReady && (readbackService != nullptr) && (!m_clodReyesTelemetryCapturePending);
     const bool canCaptureAlpha = alphaCaptureResourcesReady && (readbackService != nullptr) && (!m_clodAlphaTelemetryCapturePending);
 
@@ -2085,6 +2114,42 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
     ImGui::SameLine();
     ImGui::Text("Shadow Status: %s", m_shadowClodTelemetry.status.c_str());
+
+    if (!shadowVirtualShadowStatsResource) {
+        ImGui::TextDisabled("VSM stats unavailable: shadow stats resource not found.");
+    }
+
+    if (!canCaptureVirtualShadow) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Capture Virtual Shadow Metrics")) {
+        m_shadowVirtualShadowTelemetry.capturePending = true;
+        m_shadowVirtualShadowTelemetry.status = "Capture requested.";
+
+        readbackService->RequestReadbackCapture(
+            "CLodShadow::VirtualShadowGatherStatsPass",
+            shadowVirtualShadowStatsResource,
+            RangeSpec{},
+            [this](ReadbackCaptureResult&& result) {
+                m_shadowVirtualShadowTelemetry.capturePending = false;
+
+                if (result.data.size() < sizeof(CLodVirtualShadowStats)) {
+                    m_shadowVirtualShadowTelemetry.status = "Capture failed: VSM stats payload too small.";
+                    return;
+                }
+
+                std::memcpy(&m_shadowVirtualShadowTelemetry.stats, result.data.data(), sizeof(CLodVirtualShadowStats));
+                m_shadowVirtualShadowTelemetry.hasData = true;
+                m_shadowVirtualShadowTelemetry.captureCount++;
+                m_shadowVirtualShadowTelemetry.status = "Capture completed.";
+            });
+    }
+    if (!canCaptureVirtualShadow) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine();
+    ImGui::Text("VSM Status: %s", m_shadowVirtualShadowTelemetry.status.c_str());
 
     if (!reyesCaptureResourcesReady) {
         ImGui::TextDisabled("Reyes metrics unavailable: phase telemetry resources not found.");
@@ -2526,6 +2591,62 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
     drawWorkGraphCaptureSection("Primary CLod WG", m_clodTelemetry);
     drawWorkGraphCaptureSection("Shadow CLod WG", m_shadowClodTelemetry);
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Virtual Shadow Map");
+    if (m_shadowVirtualShadowTelemetry.capturePending) {
+        ImGui::Text("VSM capture status: pending...");
+    }
+    else if (!m_shadowVirtualShadowTelemetry.hasData) {
+        ImGui::TextDisabled("No VSM capture results yet.");
+    }
+    else {
+        const CLodVirtualShadowStats& stats = m_shadowVirtualShadowTelemetry.stats;
+        ImGui::Text("Captures: %llu", static_cast<unsigned long long>(m_shadowVirtualShadowTelemetry.captureCount));
+        ImGui::Text("Clipmaps: active=%u valid=%u", stats.activeClipmapCount, stats.validClipmapCount);
+        ImGui::Text("Allocator: requests=%u dispatchGroups=%u freePages=%u reusablePages=%u",
+            stats.allocationRequestCount,
+            stats.allocationDispatchGroupCount,
+            stats.freePhysicalPageCount,
+            stats.reusablePhysicalPageCount);
+
+        if (ImGui::BeginTable("##VirtualShadowStatsTable", 9, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+            ImGui::TableSetupColumn("Clip");
+            ImGui::TableSetupColumn("Selected");
+            ImGui::TableSetupColumn("Proj Reject");
+            ImGui::TableSetupColumn("Requests");
+            ImGui::TableSetupColumn("Pre NZ PT");
+            ImGui::TableSetupColumn("Pre Dirty PT");
+            ImGui::TableSetupColumn("NonZero PT");
+            ImGui::TableSetupColumn("Allocated PT");
+            ImGui::TableSetupColumn("Dirty PT");
+            ImGui::TableHeadersRow();
+
+            for (uint32_t clipmapIndex = 0u; clipmapIndex < CLodVirtualShadowDefaultClipmapCount; ++clipmapIndex) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::Text("%u", clipmapIndex);
+                ImGui::TableSetColumnIndex(1);
+                ImGui::Text("%u", stats.selectedPixels[clipmapIndex]);
+                ImGui::TableSetColumnIndex(2);
+                ImGui::Text("%u", stats.projectionRejectedPixels[clipmapIndex]);
+                ImGui::TableSetColumnIndex(3);
+                ImGui::Text("%u", stats.requestedPages[clipmapIndex]);
+                ImGui::TableSetColumnIndex(4);
+                ImGui::Text("%u", stats.preAllocateNonZeroPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(5);
+                ImGui::Text("%u", stats.preAllocateDirtyPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(6);
+                ImGui::Text("%u", stats.nonZeroPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(7);
+                ImGui::Text("%u", stats.allocatedPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(8);
+                ImGui::Text("%u", stats.dirtyPageTableEntries[clipmapIndex]);
+            }
+
+            ImGui::EndTable();
+        }
+    }
 
     ImGui::Separator();
     ImGui::TextUnformatted("Reyes Pipeline");
