@@ -1754,6 +1754,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_rasterBucketsIndirectArgsBuffer,
                     m_sortedToUnsortedMappingBuffer,
                     m_viewRasterInfoBuffer,
+                    traits.rasterOutputKind,
                     slabGroup,
                     true)));
     }
@@ -2111,6 +2112,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_rasterBucketsIndirectArgsBufferPhase2,
                     m_sortedToUnsortedMappingBuffer,
                     m_viewRasterInfoBuffer,
+                    traits.rasterOutputKind,
                     slabGroup,
                     true)));
     }

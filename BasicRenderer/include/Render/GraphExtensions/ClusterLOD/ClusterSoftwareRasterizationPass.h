@@ -6,6 +6,7 @@
 #include <rhi.h>
 
 #include "Interfaces/IDynamicDeclaredResources.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "RenderPasses/Base/ComputePass.h"
 #include "Resources/PixelBuffer.h"
 
@@ -20,6 +21,7 @@ public:
         std::shared_ptr<Buffer> rasterBucketsIndirectArgsBuffer,
         std::shared_ptr<Buffer> sortedToUnsortedMappingBuffer,
         std::shared_ptr<Buffer> viewRasterInfoBuffer,
+        CLodRasterOutputKind outputKind,
         std::shared_ptr<ResourceGroup> slabResourceGroup = nullptr,
         bool runWhenComputeSWRasterEnabledOnly = false);
     ~ClusterSoftwareRasterizationPass();
@@ -39,6 +41,7 @@ private:
     std::shared_ptr<Buffer> m_sortedToUnsortedMappingBuffer;
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
+    CLodRasterOutputKind m_outputKind = CLodRasterOutputKind::VisibilityBuffer;
     std::vector<std::shared_ptr<PixelBuffer>> m_visibilityBuffers;
     bool m_declaredResourcesChanged = true;
     bool m_runWhenComputeSWRasterEnabledOnly = false;

@@ -430,10 +430,11 @@ const PipelineState& PSOManager::GetClusterLODDeepVisibilityRasterPSO(MaterialRa
     return m_clusterLODDeepVisibilityRasterPSOCache[key];
 }
 
-const PipelineState& PSOManager::GetClusterLODSoftwareRasterPSO(MaterialRasterFlags materialRasterFlags) {
-    const uint32_t key = static_cast<uint32_t>(materialRasterFlags);
+const PipelineState& PSOManager::GetClusterLODSoftwareRasterPSO(MaterialRasterFlags materialRasterFlags, CLodRasterOutputKind outputKind) {
+    const uint64_t key = static_cast<uint64_t>(materialRasterFlags) |
+        (static_cast<uint64_t>(outputKind) << 32u);
     if (m_clusterLODSoftwareRasterPSOCache.find(key) == m_clusterLODSoftwareRasterPSOCache.end()) {
-        m_clusterLODSoftwareRasterPSOCache[key] = CreateClusterLODSoftwareRasterPSO(materialRasterFlags);
+        m_clusterLODSoftwareRasterPSOCache[key] = CreateClusterLODSoftwareRasterPSO(materialRasterFlags, outputKind);
     }
     return m_clusterLODSoftwareRasterPSOCache[key];
 }
@@ -927,8 +928,11 @@ PipelineState PSOManager::CreateClusterLODDeepVisibilityRasterPSO(
     return { std::move(pso), compiledBundle.resourceIDsHash, compiledBundle.resourceDescriptorSlots };
 }
 
-PipelineState PSOManager::CreateClusterLODSoftwareRasterPSO(MaterialRasterFlags materialRasterFlags) {
+PipelineState PSOManager::CreateClusterLODSoftwareRasterPSO(MaterialRasterFlags materialRasterFlags, CLodRasterOutputKind outputKind) {
     auto defines = GetRasterShaderDefines(materialRasterFlags);
+    if (outputKind == CLodRasterOutputKind::VirtualShadow) {
+        defines.push_back({ L"CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW", L"1" });
+    }
     return MakeComputePipeline(
         GetComputeRootSignature().GetHandle(),
         L"Shaders/ClusterLOD/softwareRaster.hlsl",

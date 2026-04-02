@@ -42,6 +42,11 @@ bool UsesVisibilityBufferOutput(CLodRasterOutputKind outputKind)
     return outputKind == CLodRasterOutputKind::VisibilityBuffer;
 }
 
+bool UsesVirtualShadowOutput(CLodRasterOutputKind outputKind)
+{
+    return outputKind == CLodRasterOutputKind::VirtualShadow;
+}
+
 ViewFilter GetCullViewFilter(bool useShadowCascadeViews)
 {
     if (!useShadowCascadeViews) {
@@ -164,8 +169,14 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
     if (UsesSWClassification(m_workGraphMode)) {
         builder->WithUnorderedAccess(m_swVisibleClustersCounterBuffer);
     }
-    if (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVisibilityBufferOutput(m_rasterOutputKind)) {
+    if (UsesWorkGraphSWRaster(m_workGraphMode)) {
         builder->WithShaderResource(m_viewRasterInfoBuffer);
+    }
+    if (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVirtualShadowOutput(m_rasterOutputKind)) {
+        builder->WithShaderResource(
+                Builtin::Shadows::CLodPageTable,
+                Builtin::Shadows::CLodClipmapInfo)
+            .WithUnorderedAccess(Builtin::Shadows::CLodPhysicalPages);
     }
 
     // Phase 2 reads Phase 1's HW counter to offset writes in the visible clusters buffer.
@@ -210,7 +221,7 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     uintRootConstants[CLOD_WG_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_swVisibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_WG_TELEMETRY_DESCRIPTOR_INDEX] = m_workGraphTelemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    if (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVisibilityBufferOutput(m_rasterOutputKind)) {
+    if (UsesWorkGraphSWRaster(m_workGraphMode)) {
         uintRootConstants[CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
     }
     uint32_t workGraphFlags = 0u;
@@ -402,18 +413,35 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
 
     // Keep the shared per-view visibility UAV table valid for any visibility-buffer path.
     // Reyes patch raster consumes this buffer even when the primary CLod path is not using SW classification.
-    if (UsesVisibilityBufferOutput(m_rasterOutputKind)) {
+    if (UsesVisibilityBufferOutput(m_rasterOutputKind) ||
+        (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVirtualShadowOutput(m_rasterOutputKind))) {
         m_visibilityBuffers.clear();
         auto numViews = context.viewManager->GetCameraBufferSize();
         std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
         context.viewManager->ForEachView([&](uint64_t v) {
             auto viewInfo = context.viewManager->Get(v);
+            if (!viewInfo) {
+                return;
+            }
+
+            auto cameraIndex = viewInfo->gpu.cameraBufferIndex;
+            CLodViewRasterInfo info{};
+            info.scissorMinX = 0;
+            info.scissorMinY = 0;
+
+            if (UsesVirtualShadowOutput(m_rasterOutputKind)) {
+                if (viewInfo->flags.shadow && viewInfo->lightType == Components::LightType::Directional) {
+                    info.scissorMaxX = CLodVirtualShadowDefaultPageTableResolution * CLodVirtualShadowPhysicalPageSize;
+                    info.scissorMaxY = CLodVirtualShadowDefaultPageTableResolution * CLodVirtualShadowPhysicalPageSize;
+                    info.viewportScaleX = 1.0f;
+                    info.viewportScaleY = 1.0f;
+                }
+                viewRasterInfo[cameraIndex] = info;
+                return;
+            }
+
             if (viewInfo->gpu.visibilityBuffer != nullptr) {
-                auto cameraIndex = viewInfo->gpu.cameraBufferIndex;
-                CLodViewRasterInfo info{};
                 info.visibilityUAVDescriptorIndex = viewInfo->gpu.visibilityBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-                info.scissorMinX = 0;
-                info.scissorMinY = 0;
                 info.scissorMaxX = viewInfo->gpu.visibilityBuffer->GetWidth();
                 info.scissorMaxY = viewInfo->gpu.visibilityBuffer->GetHeight();
                 info.viewportScaleX = 1.0f;
@@ -558,6 +586,7 @@ void HierarchialCullingPass::CreatePipelines(
     std::vector<DxcDefine> defines = {
         { L"CLOD_WG_ENABLE_SW_CLASSIFICATION", UsesSWClassification(m_workGraphMode) ? L"1" : L"0" },
         { L"CLOD_WG_ENABLE_SW_NODE_OUTPUT", UsesWorkGraphSWRaster(m_workGraphMode) ? L"1" : L"0" },
+        { L"CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW", UsesVirtualShadowOutput(m_rasterOutputKind) ? L"1" : L"0" },
     };
     auto compiled = PSOManager::GetInstance().CompileShaderLibrary(libInfo, defines);
     m_pipelineResources = compiled.resourceDescriptorSlots;
