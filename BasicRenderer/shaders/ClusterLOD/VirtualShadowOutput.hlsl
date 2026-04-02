@@ -100,6 +100,5 @@ void VirtualShadowBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsF
         atlasPageY * kCLodVirtualShadowPhysicalPageSize + (virtualTexelY % kCLodVirtualShadowPhysicalPageSize));
 
     RWTexture2D<uint> physicalPages = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX];
-    const float depth = saturate(input.position.z / max(input.position.w, 1.0e-6f));
-    InterlockedMin(physicalPages[atlasPixel], asuint(depth));
+    InterlockedMin(physicalPages[atlasPixel], asuint(input.linearDepth));
 }

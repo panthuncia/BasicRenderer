@@ -98,7 +98,6 @@ uint3 SWDecodeTriangle(ByteAddressBuffer slab, uint triStreamBase, uint triByteO
 
 groupshared float2  gs_screenPos[SW_RASTER_MAX_VERTS];
 groupshared float   gs_linearDepth[SW_RASTER_MAX_VERTS];
-groupshared float   gs_ndcDepth[SW_RASTER_MAX_VERTS];
 groupshared float   gs_invClipW[SW_RASTER_MAX_VERTS];
 groupshared float2  gs_texcoord[SW_RASTER_MAX_VERTS];
 
@@ -129,7 +128,7 @@ struct CLodVirtualShadowClipmapInfo
     uint pad2;
 };
 
-bool SWRasterWriteVirtualShadow(uint2 pixel, uint viewID, float depth)
+bool SWRasterWriteVirtualShadow(uint2 pixel, uint viewID, float linearDepth)
 {
     StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodClipmapInfo)];
@@ -181,7 +180,7 @@ bool SWRasterWriteVirtualShadow(uint2 pixel, uint viewID, float depth)
         atlasPageY * kCLodVirtualShadowPhysicalPageSize + (virtualTexelY % kCLodVirtualShadowPhysicalPageSize));
 
     RWTexture2D<uint> physicalPages = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPhysicalPages)];
-    InterlockedMin(physicalPages[atlasPixel], asuint(saturate(depth)));
+    InterlockedMin(physicalPages[atlasPixel], asuint(linearDepth));
     return true;
 }
 #endif
@@ -392,7 +391,6 @@ void SWRasterCluster(
 
         gs_screenPos[v] = screen;
         gs_linearDepth[v] = -viewZ;
-        gs_ndcDepth[v] = clipPos.z * invW;
         gs_invClipW[v] = invW;
         gs_texcoord[v] = SWDecodeCompressedUV(
             v,
@@ -438,9 +436,6 @@ void SWRasterCluster(
         float depth0 = gs_linearDepth[tri.x];
         float depth1 = gs_linearDepth[tri.y];
         float depth2 = gs_linearDepth[tri.z];
-        float ndcDepth0 = gs_ndcDepth[tri.x];
-        float ndcDepth1 = gs_ndcDepth[tri.y];
-        float ndcDepth2 = gs_ndcDepth[tri.z];
         float invW0 = gs_invClipW[tri.x];
         float invW1 = gs_invClipW[tri.y];
         float invW2 = gs_invClipW[tri.z];
@@ -533,7 +528,7 @@ void SWRasterCluster(
                     }
 
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
-                    float depth = b0 * ndcDepth0 + b1 * ndcDepth1 + b2 * ndcDepth2;
+                    float depth = b0 * depth0 + b1 * depth1 + b2 * depth2;
                     SWRasterWriteVirtualShadow(uint2(px, py), viewID, depth);
 #else
                     float depth = b0 * depth0 + b1 * depth1 + b2 * depth2;

@@ -767,7 +767,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<uint16_t>("shadowResolution", 2048);
     settingsManager.registerSetting<float>("cameraSpeed", 10);
 	settingsManager.registerSetting<bool>("enableWireframe", false);
-	settingsManager.registerSetting<bool>("enableShadows", false);
+	settingsManager.registerSetting<bool>("enableShadows", true);
 	settingsManager.registerSetting<uint16_t>("skyboxResolution", 2048);
     settingsManager.registerSetting<uint16_t>("reflectionCubemapResolution", 512);
 	settingsManager.registerSetting<bool>("enableImageBasedLighting", true);
