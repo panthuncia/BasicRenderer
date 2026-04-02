@@ -251,6 +251,10 @@ public:
         m_alphaDeepVisibilityStatsQuery = {};
 		m_reyesTelemetryPhase1Query = {};
 		m_reyesTelemetryPhase2Query = {};
+        m_shadowVisibleCounterQuery = {};
+        m_shadowVisibleClustersQuery = {};
+		m_shadowTelemetryQuery = {};
+
     }
 
     // ImGui descriptor heap allocator for user textures (slot 0 reserved for font atlas).
@@ -335,11 +339,25 @@ private:
         float dominantInstancePercent = 0.0f;
     };
 
-    CLodWorkGraphTelemetryCounters m_clodTelemetryCounters{};
-    bool m_clodTelemetryHasData = false;
-    bool m_clodTelemetryCapturePending = false;
-    uint64_t m_clodTelemetryCaptureCount = 0;
-    std::string m_clodTelemetryStatus = "No captures yet.";
+    struct CLodWorkGraphCaptureState {
+        CLodWorkGraphTelemetryCounters counters{};
+        bool hasData = false;
+        bool capturePending = false;
+        uint64_t captureCount = 0;
+        std::string status = "No captures yet.";
+
+        bool captureStatsPending = false;
+        uint64_t captureStatsId = 0;
+        bool captureHasPendingCounter = false;
+        bool captureHasPendingClusters = false;
+        uint32_t capturePendingVisibleCount = 0;
+        std::vector<VisibleCluster> capturePendingClusters;
+        bool captureStatsAvailable = false;
+        CLodCaptureStats captureStats{};
+    };
+
+    CLodWorkGraphCaptureState m_clodTelemetry;
+    CLodWorkGraphCaptureState m_shadowClodTelemetry;
 
     bool m_clodReyesTelemetryHasData = false;
     bool m_clodReyesTelemetryCapturePending = false;
@@ -370,15 +388,6 @@ private:
     bool m_frameTaskGraphPaused = false;
     br::render::SceneOverlapStatus m_sceneOverlapStatus{};
 
-    bool m_clodCaptureStatsPending = false;
-    uint64_t m_clodCaptureStatsId = 0;
-    bool m_clodCaptureHasPendingCounter = false;
-    bool m_clodCaptureHasPendingClusters = false;
-    uint32_t m_clodCapturePendingVisibleCount = 0;
-    std::vector<VisibleCluster> m_clodCapturePendingClusters;
-    bool m_clodCaptureStatsAvailable = false;
-    CLodCaptureStats m_clodCaptureStats{};
-
     bool m_clodAlphaTelemetryHasData = false;
     bool m_clodAlphaTelemetryCapturePending = false;
     uint64_t m_clodAlphaTelemetryCaptureId = 0;
@@ -394,10 +403,13 @@ private:
     std::string m_clodAlphaTelemetryStatus = "No alpha captures yet.";
 
     flecs::query<const Components::Resource> m_telemetryQuery;
+    flecs::query<const Components::Resource> m_shadowTelemetryQuery;
     flecs::query<const Components::Resource> m_reyesTelemetryPhase1Query;
     flecs::query<const Components::Resource> m_reyesTelemetryPhase2Query;
     flecs::query<const Components::Resource> m_visibleClustersQuery;
     flecs::query<const Components::Resource> m_visibleCounterQuery;
+    flecs::query<const Components::Resource> m_shadowVisibleClustersQuery;
+    flecs::query<const Components::Resource> m_shadowVisibleCounterQuery;
     flecs::query<const Components::Resource> m_alphaDeepVisibilityCounterQuery;
     flecs::query<const Components::Resource> m_alphaDeepVisibilityOverflowQuery;
     flecs::query<const Components::Resource> m_alphaDeepVisibilityStatsQuery;
@@ -406,7 +418,7 @@ private:
     void DrawCLodTelemetryWindow();
     void DrawFrameTaskGraphWindow();
     void DrawAutoAliasPlannerWindow();
-    void TryFinalizeCLodCaptureStats(uint64_t captureId);
+    void TryFinalizeCLodCaptureStats(CLodWorkGraphCaptureState& captureState, uint64_t captureId, const char* captureLabel);
     void TryFinalizeCLodReyesTelemetryCapture(uint64_t captureId);
     void TryFinalizeCLodAlphaTelemetryCapture(uint64_t captureId);
 
@@ -801,6 +813,12 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
         .with<CLodWorkGraphTelemetryBufferTag>()
         .with<CLodExtensionTypeTag>(visBufferTag)
         .build();
+    const auto shadowTag = RendererECSManager::GetInstance().GetWorld().component<CLodExtensionShadowTag>();
+    m_shadowTelemetryQuery = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<CLodWorkGraphTelemetryBufferTag>()
+        .with<CLodExtensionTypeTag>(shadowTag)
+        .build();
     m_reyesTelemetryPhase1Query = RendererECSManager::GetInstance().GetWorld()
         .query_builder<const Components::Resource>()
         .with<CLodReyesTelemetryBufferPhase1Tag>()
@@ -820,6 +838,16 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
         .query_builder<const Components::Resource>()
         .with<VisibleClustersCounterTag>()
         .with<CLodExtensionTypeTag>(visBufferTag)
+        .build();
+    m_shadowVisibleClustersQuery = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<VisibleClustersBufferTag>()
+        .with<CLodExtensionTypeTag>(shadowTag)
+        .build();
+    m_shadowVisibleCounterQuery = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<VisibleClustersCounterTag>()
+        .with<CLodExtensionTypeTag>(shadowTag)
         .build();
 
     const auto alphaTag = RendererECSManager::GetInstance().GetWorld().component<CLodExtensionAlphaBlendTag>();
@@ -881,7 +909,12 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
     const float fps = ImGui::GetIO().Framerate;
     const float msPerFrame = fps > 0.0f ? (1000.0f / fps) : 0.0f;
 
-    SetCLodWorkGraphTelemetryEnabled((m_menuEnabled && showCLodTelemetry) || m_clodTelemetryCapturePending || m_clodCaptureStatsPending);
+    SetCLodWorkGraphTelemetryEnabled(
+        (m_menuEnabled && showCLodTelemetry) ||
+        m_clodTelemetry.capturePending ||
+        m_clodTelemetry.captureStatsPending ||
+        m_shadowClodTelemetry.capturePending ||
+        m_shadowClodTelemetry.captureStatsPending);
 
     if (!m_menuEnabled) {
         ImGui::SetNextWindowBgAlpha(0.8f);
@@ -1540,17 +1573,17 @@ inline void Menu::DisplaySelectedNode() {
     ImGui::End();
 }
 
-inline void Menu::TryFinalizeCLodCaptureStats(uint64_t captureId) {
-    if (!m_clodCaptureStatsPending || m_clodCaptureStatsId != captureId) {
+inline void Menu::TryFinalizeCLodCaptureStats(CLodWorkGraphCaptureState& captureState, uint64_t captureId, const char* captureLabel) {
+    if (!captureState.captureStatsPending || captureState.captureStatsId != captureId) {
         return;
     }
 
-    if (!m_clodCaptureHasPendingCounter || !m_clodCaptureHasPendingClusters) {
+    if (!captureState.captureHasPendingCounter || !captureState.captureHasPendingClusters) {
         return;
     }
 
-    const uint32_t requestedCount = m_clodCapturePendingVisibleCount;
-    const uint32_t availableCount = static_cast<uint32_t>(m_clodCapturePendingClusters.size());
+    const uint32_t requestedCount = captureState.capturePendingVisibleCount;
+    const uint32_t availableCount = static_cast<uint32_t>(captureState.capturePendingClusters.size());
     const uint32_t decodeCount = (std::min)(requestedCount, availableCount);
 
     std::unordered_map<uint32_t, uint32_t> viewHistogram;
@@ -1562,7 +1595,7 @@ inline void Menu::TryFinalizeCLodCaptureStats(uint64_t captureId) {
     uniqueMeshlets.reserve(decodeCount > 0 ? decodeCount : 1);
 
     for (uint32_t i = 0; i < decodeCount; ++i) {
-        const VisibleCluster& cluster = m_clodCapturePendingClusters[i];
+        const VisibleCluster& cluster = captureState.capturePendingClusters[i];
         viewHistogram[cluster.viewID]++;
         instanceHistogram[cluster.instanceID]++;
         const uint64_t key = (static_cast<uint64_t>(cluster.instanceID) << 32ull) | (static_cast<uint64_t>(cluster.groupID) << 16ull) | static_cast<uint64_t>(cluster.localMeshletIndex);
@@ -1593,12 +1626,13 @@ inline void Menu::TryFinalizeCLodCaptureStats(uint64_t captureId) {
         stats.dominantInstancePercent = 100.0f * static_cast<float>(stats.maxClustersPerInstance) / static_cast<float>(decodeCount);
     }
 
-    m_clodCaptureStats = stats;
-    m_clodCaptureStatsAvailable = true;
-    m_clodCaptureStatsPending = false;
+    captureState.captureStats = stats;
+    captureState.captureStatsAvailable = true;
+    captureState.captureStatsPending = false;
 
     spdlog::info(
-        "CLod WG stats capture: visible={}, views={}, instances={}, uniqueMeshlets={}, maxPerView={}, maxPerInstance={}",
+        "{} stats capture: visible={}, views={}, instances={}, uniqueMeshlets={}, maxPerView={}, maxPerInstance={}",
+        captureLabel,
         stats.visibleClusterCount,
         stats.uniqueViews,
         stats.uniqueInstances,
@@ -1670,10 +1704,13 @@ inline void Menu::DrawCLodTelemetryWindow() {
     ImGui::Begin("CLod Work Graph Telemetry", nullptr);
 
     Resource* clodTelemetryResource = nullptr;
+    Resource* shadowClodTelemetryResource = nullptr;
     Resource* reyesTelemetryPhase1Resource = nullptr;
     Resource* reyesTelemetryPhase2Resource = nullptr;
     Resource* clodVisibleClustersResource = nullptr;
     Resource* clodVisibleCounterResource = nullptr;
+    Resource* shadowClodVisibleClustersResource = nullptr;
+    Resource* shadowClodVisibleCounterResource = nullptr;
     Resource* alphaNodeCounterResource = nullptr;
     Resource* alphaOverflowCounterResource = nullptr;
     Resource* alphaStatsResource = nullptr;
@@ -1682,6 +1719,14 @@ inline void Menu::DrawCLodTelemetryWindow() {
             if (clodTelemetryResource == nullptr) {
                 if (auto resource = resourceComponent.resource.lock()) {
                     clodTelemetryResource = resource.get();
+                }
+            }
+            });
+
+        m_shadowTelemetryQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (shadowClodTelemetryResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    shadowClodTelemetryResource = resource.get();
                 }
             }
             });
@@ -1718,6 +1763,22 @@ inline void Menu::DrawCLodTelemetryWindow() {
             }
             });
 
+        m_shadowVisibleClustersQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (shadowClodVisibleClustersResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    shadowClodVisibleClustersResource = resource.get();
+                }
+            }
+            });
+
+        m_shadowVisibleCounterQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (shadowClodVisibleCounterResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    shadowClodVisibleCounterResource = resource.get();
+                }
+            }
+            });
+
         m_alphaDeepVisibilityCounterQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
             if (alphaNodeCounterResource == nullptr) {
                 if (auto resource = resourceComponent.resource.lock()) {
@@ -1744,6 +1805,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
     }
 
     const bool captureStatsResourcesReady = (clodVisibleClustersResource != nullptr) && (clodVisibleCounterResource != nullptr);
+    const bool shadowCaptureStatsResourcesReady = (shadowClodVisibleClustersResource != nullptr) && (shadowClodVisibleCounterResource != nullptr);
     const bool alphaCaptureResourcesReady =
         (alphaNodeCounterResource != nullptr) &&
         (alphaOverflowCounterResource != nullptr) &&
@@ -1752,29 +1814,41 @@ inline void Menu::DrawCLodTelemetryWindow() {
         (reyesTelemetryPhase1Resource != nullptr) &&
         (reyesTelemetryPhase2Resource != nullptr);
     auto* readbackService = m_renderGraph ? m_renderGraph->GetReadbackService() : nullptr;
-    const bool canCapture = (clodTelemetryResource != nullptr) && (readbackService != nullptr) && (!m_clodTelemetryCapturePending) && (!m_clodCaptureStatsPending);
+    const bool canCapture =
+        (clodTelemetryResource != nullptr) &&
+        (readbackService != nullptr) &&
+        (!m_clodTelemetry.capturePending) &&
+        (!m_clodTelemetry.captureStatsPending);
+    const bool canCaptureShadow =
+        (shadowClodTelemetryResource != nullptr) &&
+        (readbackService != nullptr) &&
+        (!m_shadowClodTelemetry.capturePending) &&
+        (!m_shadowClodTelemetry.captureStatsPending);
     const bool canCaptureReyes = reyesCaptureResourcesReady && (readbackService != nullptr) && (!m_clodReyesTelemetryCapturePending);
     const bool canCaptureAlpha = alphaCaptureResourcesReady && (readbackService != nullptr) && (!m_clodAlphaTelemetryCapturePending);
 
     if (!captureStatsResourcesReady) {
-        ImGui::TextDisabled("Extended stats unavailable: visible cluster resources not found.");
+        ImGui::TextDisabled("Primary extended stats unavailable: visible cluster resources not found.");
+    }
+    if (!shadowCaptureStatsResourcesReady) {
+        ImGui::TextDisabled("Shadow extended stats unavailable: visible cluster resources not found.");
     }
 
     if (!canCapture) {
         ImGui::BeginDisabled();
     }
-    if (ImGui::Button("Capture CLod WG Metrics")) {
-        m_clodTelemetryCapturePending = true;
-        m_clodTelemetryStatus = "Capture requested.";
+    if (ImGui::Button("Capture CLod Primary Metrics")) {
+        m_clodTelemetry.capturePending = true;
+        m_clodTelemetry.status = "Capture requested.";
 
         const bool requestCaptureStats = captureStatsResourcesReady;
         if (requestCaptureStats) {
-            m_clodCaptureStatsPending = true;
-            m_clodCaptureStatsId++;
-            m_clodCaptureHasPendingCounter = false;
-            m_clodCaptureHasPendingClusters = false;
-            m_clodCapturePendingVisibleCount = 0;
-            m_clodCapturePendingClusters.clear();
+            m_clodTelemetry.captureStatsPending = true;
+            m_clodTelemetry.captureStatsId++;
+            m_clodTelemetry.captureHasPendingCounter = false;
+            m_clodTelemetry.captureHasPendingClusters = false;
+            m_clodTelemetry.capturePendingVisibleCount = 0;
+            m_clodTelemetry.capturePendingClusters.clear();
         }
 
         if (readbackService) {
@@ -1783,11 +1857,11 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 clodTelemetryResource,
                 RangeSpec{},
                 [this](ReadbackCaptureResult&& result) {
-                m_clodTelemetryCapturePending = false;
+                m_clodTelemetry.capturePending = false;
 
                 constexpr size_t telemetryBytes = sizeof(uint32_t) * static_cast<size_t>(CLodWorkGraphCounterCount);
                 if (result.data.size() < telemetryBytes) {
-                    m_clodTelemetryStatus = "Capture failed: telemetry payload too small.";
+                    m_clodTelemetry.status = "Capture failed: telemetry payload too small.";
                     spdlog::warn("CLod telemetry capture payload too small ({} bytes).", result.data.size());
                     return;
                 }
@@ -1795,10 +1869,10 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 CLodWorkGraphTelemetryCounters decoded{};
                 std::memcpy(decoded.counters.data(), result.data.data(), telemetryBytes);
 
-                m_clodTelemetryCounters = decoded;
-                m_clodTelemetryHasData = true;
-                m_clodTelemetryCaptureCount++;
-                m_clodTelemetryStatus = "Capture completed.";
+                m_clodTelemetry.counters = decoded;
+                m_clodTelemetry.hasData = true;
+                m_clodTelemetry.captureCount++;
+                m_clodTelemetry.status = "Capture completed.";
 
                 auto counter = [&](CLodWorkGraphCounterIndex idx) -> uint32_t {
                     return decoded.counters[static_cast<size_t>(idx)];
@@ -1829,7 +1903,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
         }
 
         if (requestCaptureStats) {
-            const uint64_t captureId = m_clodCaptureStatsId;
+            const uint64_t captureId = m_clodTelemetry.captureStatsId;
 
             if (readbackService) {
                 readbackService->RequestReadbackCapture(
@@ -1837,19 +1911,19 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     clodVisibleCounterResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {
-                    if (!m_clodCaptureStatsPending || m_clodCaptureStatsId != captureId) {
+                    if (!m_clodTelemetry.captureStatsPending || m_clodTelemetry.captureStatsId != captureId) {
                         return;
                     }
 
                     if (result.data.size() < sizeof(uint32_t)) {
-                        m_clodTelemetryStatus = "Capture failed: visible counter payload too small.";
-                        m_clodCaptureStatsPending = false;
+                        m_clodTelemetry.status = "Capture failed: visible counter payload too small.";
+                        m_clodTelemetry.captureStatsPending = false;
                         return;
                     }
 
-                    std::memcpy(&m_clodCapturePendingVisibleCount, result.data.data(), sizeof(uint32_t));
-                    m_clodCaptureHasPendingCounter = true;
-                    TryFinalizeCLodCaptureStats(captureId);
+                    std::memcpy(&m_clodTelemetry.capturePendingVisibleCount, result.data.data(), sizeof(uint32_t));
+                    m_clodTelemetry.captureHasPendingCounter = true;
+                    TryFinalizeCLodCaptureStats(m_clodTelemetry, captureId, "CLod primary WG");
                     });
 
                 readbackService->RequestReadbackCapture(
@@ -1857,26 +1931,26 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     clodVisibleClustersResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {
-                    if (!m_clodCaptureStatsPending || m_clodCaptureStatsId != captureId) {
+                    if (!m_clodTelemetry.captureStatsPending || m_clodTelemetry.captureStatsId != captureId) {
                         return;
                     }
 
                     const size_t clusterBytes = PackedVisibleClusterStrideBytes;
                     const size_t count = result.data.size() / clusterBytes;
-                    m_clodCapturePendingClusters.resize(count);
+                    m_clodTelemetry.capturePendingClusters.resize(count);
                     if (count > 0) {
                         const std::byte* rawClusters = result.data.data();
                         for (size_t i = 0; i < count; ++i) {
-                            m_clodCapturePendingClusters[i] = DecodePackedVisibleCluster(rawClusters + i * clusterBytes);
+                            m_clodTelemetry.capturePendingClusters[i] = DecodePackedVisibleCluster(rawClusters + i * clusterBytes);
                         }
                     }
 
-                    m_clodCaptureHasPendingClusters = true;
-                    TryFinalizeCLodCaptureStats(captureId);
+                    m_clodTelemetry.captureHasPendingClusters = true;
+                    TryFinalizeCLodCaptureStats(m_clodTelemetry, captureId, "CLod primary WG");
                     });
             }
 
-            m_clodTelemetryStatus = "Capture requested (extended stats).";
+            m_clodTelemetry.status = "Capture requested (extended stats).";
         }
     }
     if (!canCapture) {
@@ -1884,7 +1958,133 @@ inline void Menu::DrawCLodTelemetryWindow() {
     }
 
     ImGui::SameLine();
-    ImGui::Text("Status: %s", m_clodTelemetryStatus.c_str());
+    ImGui::Text("Primary Status: %s", m_clodTelemetry.status.c_str());
+
+    if (!canCaptureShadow) {
+        ImGui::BeginDisabled();
+    }
+    if (ImGui::Button("Capture CLod Shadow Metrics")) {
+        m_shadowClodTelemetry.capturePending = true;
+        m_shadowClodTelemetry.status = "Capture requested.";
+
+        const bool requestCaptureStats = shadowCaptureStatsResourcesReady;
+        if (requestCaptureStats) {
+            m_shadowClodTelemetry.captureStatsPending = true;
+            m_shadowClodTelemetry.captureStatsId++;
+            m_shadowClodTelemetry.captureHasPendingCounter = false;
+            m_shadowClodTelemetry.captureHasPendingClusters = false;
+            m_shadowClodTelemetry.capturePendingVisibleCount = 0;
+            m_shadowClodTelemetry.capturePendingClusters.clear();
+        }
+
+        if (readbackService) {
+            readbackService->RequestReadbackCapture(
+                "CLodShadow::HierarchialCullingPass2",
+                shadowClodTelemetryResource,
+                RangeSpec{},
+                [this](ReadbackCaptureResult&& result) {
+                m_shadowClodTelemetry.capturePending = false;
+
+                constexpr size_t telemetryBytes = sizeof(uint32_t) * static_cast<size_t>(CLodWorkGraphCounterCount);
+                if (result.data.size() < telemetryBytes) {
+                    m_shadowClodTelemetry.status = "Capture failed: telemetry payload too small.";
+                    spdlog::warn("CLod shadow telemetry capture payload too small ({} bytes).", result.data.size());
+                    return;
+                }
+
+                CLodWorkGraphTelemetryCounters decoded{};
+                std::memcpy(decoded.counters.data(), result.data.data(), telemetryBytes);
+
+                m_shadowClodTelemetry.counters = decoded;
+                m_shadowClodTelemetry.hasData = true;
+                m_shadowClodTelemetry.captureCount++;
+                m_shadowClodTelemetry.status = "Capture completed.";
+
+                auto counter = [&](CLodWorkGraphCounterIndex idx) -> uint32_t {
+                    return decoded.counters[static_cast<size_t>(idx)];
+                    };
+
+                const uint32_t objectThreads = counter(CLodWorkGraphCounterIndex::ObjectCullThreads);
+                const uint32_t objectActive = counter(CLodWorkGraphCounterIndex::ObjectCullInRangeThreads);
+                const uint32_t traverseThreads = counter(CLodWorkGraphCounterIndex::TraverseNodesThreads);
+                const uint32_t traverseActive = counter(CLodWorkGraphCounterIndex::TraverseNodesActiveChildThreads);
+                const uint32_t clusterThreads = counter(CLodWorkGraphCounterIndex::ClusterCullThreads);
+                const uint32_t clusterActive = counter(CLodWorkGraphCounterIndex::ClusterCullInRangeThreads);
+                const uint32_t visibleWrites = counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites);
+                const uint32_t replayNodeInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeInputRecords);
+                const uint32_t replayMeshletInput = counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords);
+
+                spdlog::info(
+                    "CLod shadow WG telemetry: ObjectCull {}/{} active, Traverse {}/{} active-child, ClusterCull {}/{} in-range, visible writes {}, replay(node={}, meshlet={})",
+                    objectActive,
+                    objectThreads,
+                    traverseActive,
+                    traverseThreads,
+                    clusterActive,
+                    clusterThreads,
+                    visibleWrites,
+                    replayNodeInput,
+                    replayMeshletInput);
+                });
+        }
+
+        if (requestCaptureStats) {
+            const uint64_t captureId = m_shadowClodTelemetry.captureStatsId;
+
+            if (readbackService) {
+                readbackService->RequestReadbackCapture(
+                    "CLodShadow::HierarchialCullingPass2",
+                    shadowClodVisibleCounterResource,
+                    RangeSpec{},
+                    [this, captureId](ReadbackCaptureResult&& result) {
+                    if (!m_shadowClodTelemetry.captureStatsPending || m_shadowClodTelemetry.captureStatsId != captureId) {
+                        return;
+                    }
+
+                    if (result.data.size() < sizeof(uint32_t)) {
+                        m_shadowClodTelemetry.status = "Capture failed: visible counter payload too small.";
+                        m_shadowClodTelemetry.captureStatsPending = false;
+                        return;
+                    }
+
+                    std::memcpy(&m_shadowClodTelemetry.capturePendingVisibleCount, result.data.data(), sizeof(uint32_t));
+                    m_shadowClodTelemetry.captureHasPendingCounter = true;
+                    TryFinalizeCLodCaptureStats(m_shadowClodTelemetry, captureId, "CLod shadow WG");
+                    });
+
+                readbackService->RequestReadbackCapture(
+                    "CLodShadow::HierarchialCullingPass2",
+                    shadowClodVisibleClustersResource,
+                    RangeSpec{},
+                    [this, captureId](ReadbackCaptureResult&& result) {
+                    if (!m_shadowClodTelemetry.captureStatsPending || m_shadowClodTelemetry.captureStatsId != captureId) {
+                        return;
+                    }
+
+                    const size_t clusterBytes = PackedVisibleClusterStrideBytes;
+                    const size_t count = result.data.size() / clusterBytes;
+                    m_shadowClodTelemetry.capturePendingClusters.resize(count);
+                    if (count > 0) {
+                        const std::byte* rawClusters = result.data.data();
+                        for (size_t i = 0; i < count; ++i) {
+                            m_shadowClodTelemetry.capturePendingClusters[i] = DecodePackedVisibleCluster(rawClusters + i * clusterBytes);
+                        }
+                    }
+
+                    m_shadowClodTelemetry.captureHasPendingClusters = true;
+                    TryFinalizeCLodCaptureStats(m_shadowClodTelemetry, captureId, "CLod shadow WG");
+                    });
+            }
+
+            m_shadowClodTelemetry.status = "Capture requested (extended stats).";
+        }
+    }
+    if (!canCaptureShadow) {
+        ImGui::EndDisabled();
+    }
+
+    ImGui::SameLine();
+    ImGui::Text("Shadow Status: %s", m_shadowClodTelemetry.status.c_str());
 
     if (!reyesCaptureResourcesReady) {
         ImGui::TextDisabled("Reyes metrics unavailable: phase telemetry resources not found.");
@@ -2151,166 +2351,181 @@ inline void Menu::DrawCLodTelemetryWindow() {
         }
     }
 
-    if (m_clodTelemetryHasData) {
-        auto counter = [&](CLodWorkGraphCounterIndex idx) -> uint32_t {
-            return m_clodTelemetryCounters.counters[static_cast<size_t>(idx)];
-            };
-
-        auto drawUtilizationRow = [&](const char* label, uint32_t active, uint32_t total) {
-            const float efficiency = (total > 0)
-                ? (100.0f * static_cast<float>(active) / static_cast<float>(total))
-                : 0.0f;
-            ImGui::Text("%s: %u / %u (%.1f%%)", label, active, total, efficiency);
-            };
-
-        ImGui::Text("Telemetry captures: %llu", static_cast<unsigned long long>(m_clodTelemetryCaptureCount));
-        drawUtilizationRow(
-            "ObjectCull active draw threads",
-            counter(CLodWorkGraphCounterIndex::ObjectCullInRangeThreads),
-            counter(CLodWorkGraphCounterIndex::ObjectCullThreads));
-        drawUtilizationRow(
-            "TraverseNodes active child threads",
-            counter(CLodWorkGraphCounterIndex::TraverseNodesActiveChildThreads),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesThreads));
-        drawUtilizationRow(
-            "ClusterCull in-range threads",
-            counter(CLodWorkGraphCounterIndex::ClusterCullInRangeThreads),
-            counter(CLodWorkGraphCounterIndex::ClusterCullThreads));
-
-        const uint32_t clusterActiveLanes = counter(CLodWorkGraphCounterIndex::ClusterCullActiveLanes);
-        const uint32_t clusterSurvivingLanes = counter(CLodWorkGraphCounterIndex::ClusterCullSurvivingLanes);
-        drawUtilizationRow("ClusterCull surviving lanes", clusterSurvivingLanes, clusterActiveLanes);
-
-        ImGui::Text("Traverse node records: internal=%u leaf=%u culled=%u rejectedByError=%u",
-            counter(CLodWorkGraphCounterIndex::TraverseNodesInternalNodeRecords),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesLeafNodeRecords),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesCulledNodeRecords),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesRejectedByErrorRecords));
-
-        const uint32_t traverseCoalescedLaunches = counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedLaunches);
-        const uint32_t traverseCoalescedInputRecords = counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputRecords);
-        const float avgRecordsPerLaunch = (traverseCoalescedLaunches > 0)
-            ? (static_cast<float>(traverseCoalescedInputRecords) / static_cast<float>(traverseCoalescedLaunches))
-            : 0.0f;
-        const float packingPercent = 100.0f * avgRecordsPerLaunch / 8.0f;
-
-        ImGui::Text("Traverse coalesced launches: %u | input records: %u | avg records/launch: %.2f (%.1f%% of 8)",
-            traverseCoalescedLaunches,
-            traverseCoalescedInputRecords,
-            avgRecordsPerLaunch,
-            packingPercent);
-
-        std::array<uint32_t, 8> traverseInputHistogram = {
-            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount1),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount2),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount3),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount4),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount5),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount6),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount7),
-            counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount8)
-        };
-
-        ImGui::TextUnformatted("Traverse coalesced input histogram (records per launch):");
-        float histogramValues[8] = {};
-        for (size_t i = 0; i < traverseInputHistogram.size(); ++i) {
-            histogramValues[i] = static_cast<float>(traverseInputHistogram[i]);
-        }
-
-        static const char* kHistogramLabels[8] = { "1", "2", "3", "4", "5", "6", "7", "8" };
-        if (ImPlot::BeginPlot("##TraverseCoalescedInputHistogram", ImVec2(-1.0f, 150.0f), ImPlotFlags_NoLegend)) {
-            ImPlot::SetupAxes("Records", "Launches", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-            ImPlot::SetupAxisTicks(ImAxis_X1, 0.0, 7.0, 8, kHistogramLabels);
-            ImPlot::PlotBars("Launches", histogramValues, 8, 0.6f, 0.0f);
-            ImPlot::EndPlot();
-        }
-
-        const uint32_t clusterWaves = counter(CLodWorkGraphCounterIndex::ClusterCullWaves);
-        const uint32_t zeroSurvivorWaves = counter(CLodWorkGraphCounterIndex::ClusterCullZeroSurvivorWaves);
-        const uint32_t survivingWaves = (clusterWaves > zeroSurvivorWaves)
-            ? (clusterWaves - zeroSurvivorWaves)
-            : 0u;
-        drawUtilizationRow("ClusterCull waves with survivors", survivingWaves, clusterWaves);
-
-        ImGui::Text("Visible cluster writes: %u", counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites));
-
+    const auto drawWorkGraphCaptureSection = [&](const char* title, const CLodWorkGraphCaptureState& captureState) {
         ImGui::Separator();
-        ImGui::TextUnformatted("ClusterCull meshlet rejection breakdown");
-        {
-            const uint32_t meshletIter = counter(CLodWorkGraphCounterIndex::ClusterCullMeshletIterations);
-            const uint32_t rejFrustum = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedFrustum);
-            const uint32_t rejCond2 = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedCondition2);
-            const uint32_t rejOccl = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedOcclusion);
-            const uint32_t rejOOR = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedOutOfRange);
-            const uint32_t rejPageBounds = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedPageBounds);
-            const uint32_t survived = counter(CLodWorkGraphCounterIndex::ClusterCullSurvivingLanes);
-            const uint32_t totalRejected = rejFrustum + rejCond2 + rejOccl + rejOOR + rejPageBounds;
+        ImGui::TextUnformatted(title);
 
-            ImGui::Text("Meshlet iterations evaluated: %u", meshletIter);
-            ImGui::Text("Survived: %u", survived);
-            ImGui::Text("Rejected total: %u", totalRejected);
+        if (captureState.capturePending) {
+            ImGui::Text("Telemetry capture status: pending...");
+        }
+        else if (!captureState.hasData) {
+            ImGui::TextDisabled("No telemetry capture results yet.");
+        }
+        else {
+            auto counter = [&](CLodWorkGraphCounterIndex idx) -> uint32_t {
+                return captureState.counters.counters[static_cast<size_t>(idx)];
+            };
 
-            auto rejectionRow = [](const char* label, uint32_t count, uint32_t total) {
-                const float pct = (total > 0)
-                    ? (100.0f * static_cast<float>(count) / static_cast<float>(total))
+            auto drawUtilizationRow = [&](const char* label, uint32_t active, uint32_t total) {
+                const float efficiency = (total > 0)
+                    ? (100.0f * static_cast<float>(active) / static_cast<float>(total))
                     : 0.0f;
-                ImGui::Text("  %s: %u (%.1f%%)", label, count, pct);
+                ImGui::Text("%s: %u / %u (%.1f%%)", label, active, total, efficiency);
             };
-            rejectionRow("Frustum cull", rejFrustum, totalRejected);
-            rejectionRow("Condition 2 (child group refinement)", rejCond2, totalRejected);
-            rejectionRow("Occlusion cull", rejOccl, totalRejected);
-            rejectionRow("WaveActiveMax padding (inactive iterations)", rejOOR, totalRejected);
-            rejectionRow("Page bounds overflow", rejPageBounds, totalRejected);
+
+            ImGui::Text("Telemetry captures: %llu", static_cast<unsigned long long>(captureState.captureCount));
+            drawUtilizationRow(
+                "ObjectCull active draw threads",
+                counter(CLodWorkGraphCounterIndex::ObjectCullInRangeThreads),
+                counter(CLodWorkGraphCounterIndex::ObjectCullThreads));
+            drawUtilizationRow(
+                "TraverseNodes active child threads",
+                counter(CLodWorkGraphCounterIndex::TraverseNodesActiveChildThreads),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesThreads));
+            drawUtilizationRow(
+                "ClusterCull in-range threads",
+                counter(CLodWorkGraphCounterIndex::ClusterCullInRangeThreads),
+                counter(CLodWorkGraphCounterIndex::ClusterCullThreads));
+
+            const uint32_t clusterActiveLanes = counter(CLodWorkGraphCounterIndex::ClusterCullActiveLanes);
+            const uint32_t clusterSurvivingLanes = counter(CLodWorkGraphCounterIndex::ClusterCullSurvivingLanes);
+            drawUtilizationRow("ClusterCull surviving lanes", clusterSurvivingLanes, clusterActiveLanes);
+
+            ImGui::Text("Traverse node records: internal=%u leaf=%u culled=%u rejectedByError=%u",
+                counter(CLodWorkGraphCounterIndex::TraverseNodesInternalNodeRecords),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesLeafNodeRecords),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesCulledNodeRecords),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesRejectedByErrorRecords));
+
+            const uint32_t traverseCoalescedLaunches = counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedLaunches);
+            const uint32_t traverseCoalescedInputRecords = counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputRecords);
+            const float avgRecordsPerLaunch = (traverseCoalescedLaunches > 0)
+                ? (static_cast<float>(traverseCoalescedInputRecords) / static_cast<float>(traverseCoalescedLaunches))
+                : 0.0f;
+            const float packingPercent = 100.0f * avgRecordsPerLaunch / 8.0f;
+
+            ImGui::Text("Traverse coalesced launches: %u | input records: %u | avg records/launch: %.2f (%.1f%% of 8)",
+                traverseCoalescedLaunches,
+                traverseCoalescedInputRecords,
+                avgRecordsPerLaunch,
+                packingPercent);
+
+            std::array<uint32_t, 8> traverseInputHistogram = {
+                counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount1),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount2),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount3),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount4),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount5),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount6),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount7),
+                counter(CLodWorkGraphCounterIndex::TraverseNodesCoalescedInputCount8)
+            };
+
+            ImGui::TextUnformatted("Traverse coalesced input histogram (records per launch):");
+            float histogramValues[8] = {};
+            for (size_t i = 0; i < traverseInputHistogram.size(); ++i) {
+                histogramValues[i] = static_cast<float>(traverseInputHistogram[i]);
+            }
+
+            static const char* kHistogramLabels[8] = { "1", "2", "3", "4", "5", "6", "7", "8" };
+            const std::string histogramId = std::string("##TraverseCoalescedInputHistogram") + title;
+            if (ImPlot::BeginPlot(histogramId.c_str(), ImVec2(-1.0f, 150.0f), ImPlotFlags_NoLegend)) {
+                ImPlot::SetupAxes("Records", "Launches", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+                ImPlot::SetupAxisTicks(ImAxis_X1, 0.0, 7.0, 8, kHistogramLabels);
+                ImPlot::PlotBars("Launches", histogramValues, 8, 0.6f, 0.0f);
+                ImPlot::EndPlot();
+            }
+
+            const uint32_t clusterWaves = counter(CLodWorkGraphCounterIndex::ClusterCullWaves);
+            const uint32_t zeroSurvivorWaves = counter(CLodWorkGraphCounterIndex::ClusterCullZeroSurvivorWaves);
+            const uint32_t survivingWaves = (clusterWaves > zeroSurvivorWaves)
+                ? (clusterWaves - zeroSurvivorWaves)
+                : 0u;
+            drawUtilizationRow("ClusterCull waves with survivors", survivingWaves, clusterWaves);
+
+            ImGui::Text("Visible cluster writes: %u", counter(CLodWorkGraphCounterIndex::ClusterCullVisibleClusterWrites));
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("ClusterCull meshlet rejection breakdown");
+            {
+                const uint32_t meshletIter = counter(CLodWorkGraphCounterIndex::ClusterCullMeshletIterations);
+                const uint32_t rejFrustum = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedFrustum);
+                const uint32_t rejCond2 = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedCondition2);
+                const uint32_t rejOccl = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedOcclusion);
+                const uint32_t rejOOR = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedOutOfRange);
+                const uint32_t rejPageBounds = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedPageBounds);
+                const uint32_t survived = counter(CLodWorkGraphCounterIndex::ClusterCullSurvivingLanes);
+                const uint32_t totalRejected = rejFrustum + rejCond2 + rejOccl + rejOOR + rejPageBounds;
+
+                ImGui::Text("Meshlet iterations evaluated: %u", meshletIter);
+                ImGui::Text("Survived: %u", survived);
+                ImGui::Text("Rejected total: %u", totalRejected);
+
+                auto rejectionRow = [](const char* label, uint32_t count, uint32_t total) {
+                    const float pct = (total > 0)
+                        ? (100.0f * static_cast<float>(count) / static_cast<float>(total))
+                        : 0.0f;
+                    ImGui::Text("  %s: %u (%.1f%%)", label, count, pct);
+                };
+                rejectionRow("Frustum cull", rejFrustum, totalRejected);
+                rejectionRow("Condition 2 (child group refinement)", rejCond2, totalRejected);
+                rejectionRow("Occlusion cull", rejOccl, totalRejected);
+                rejectionRow("WaveActiveMax padding (inactive iterations)", rejOOR, totalRejected);
+                rejectionRow("Page bounds overflow", rejPageBounds, totalRejected);
+            }
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("Occlusion -> Phase 2 enqueue attempts");
+            ImGui::Text("Node attempts: %u | Cluster attempts: %u",
+                counter(CLodWorkGraphCounterIndex::Phase1OcclusionNodeReplayEnqueueAttempts),
+                counter(CLodWorkGraphCounterIndex::Phase1OcclusionClusterReplayEnqueueAttempts));
+
+            ImGui::TextUnformatted("Phase 2 replay launch validation");
+            ImGui::Text("ReplayNode launches: %u | input records: %u",
+                counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeLaunches),
+                counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeInputRecords));
+            ImGui::Text("ReplayNode emitted traverse records: %u",
+                counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeRecordsEmitted));
+            ImGui::Text("ReplayMeshlet launches: %u | input records: %u | emitted bucket records: %u",
+                counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletLaunches),
+                counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords),
+                counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletBucketRecordsEmitted));
+
+            ImGui::TextUnformatted("Phase 2 downstream consumption");
+            ImGui::Text("Replay Traverse records consumed: %u",
+                counter(CLodWorkGraphCounterIndex::Phase2ReplayTraverseRecordsConsumed));
+            ImGui::Text("Replay ClusterCull bucket records consumed: %u",
+                counter(CLodWorkGraphCounterIndex::Phase2ReplayClusterBucketRecordsConsumed));
         }
 
         ImGui::Separator();
-        ImGui::TextUnformatted("Occlusion -> Phase 2 enqueue attempts");
-        ImGui::Text("Node attempts: %u | Cluster attempts: %u",
-            counter(CLodWorkGraphCounterIndex::Phase1OcclusionNodeReplayEnqueueAttempts),
-            counter(CLodWorkGraphCounterIndex::Phase1OcclusionClusterReplayEnqueueAttempts));
+        ImGui::TextUnformatted("Extended capture statistics");
+        if (captureState.captureStatsPending) {
+            ImGui::Text("Capture stats status: pending...");
+        }
+        else if (!captureState.captureStatsAvailable) {
+            ImGui::TextDisabled("No extended capture results yet.");
+        }
+        else {
+            ImGui::Text("Visible clusters: %u", captureState.captureStats.visibleClusterCount);
+            ImGui::Text("Unique views: %u | Unique instances: %u | Unique meshlets: %u",
+                captureState.captureStats.uniqueViews,
+                captureState.captureStats.uniqueInstances,
+                captureState.captureStats.uniqueMeshlets);
+            ImGui::Text("Avg clusters/view: %.2f | Avg clusters/instance: %.2f",
+                captureState.captureStats.avgClustersPerView,
+                captureState.captureStats.avgClustersPerInstance);
+            ImGui::Text("Max clusters/view: %u (%.1f%% of total)",
+                captureState.captureStats.maxClustersPerView,
+                captureState.captureStats.dominantViewPercent);
+            ImGui::Text("Max clusters/instance: %u (%.1f%% of total)",
+                captureState.captureStats.maxClustersPerInstance,
+                captureState.captureStats.dominantInstancePercent);
+        }
+    };
 
-        ImGui::TextUnformatted("Phase 2 replay launch validation");
-        ImGui::Text("ReplayNode launches: %u | input records: %u",
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeLaunches),
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeInputRecords));
-        ImGui::Text("ReplayNode emitted traverse records: %u",
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayNodeRecordsEmitted));
-        ImGui::Text("ReplayMeshlet launches: %u | input records: %u | emitted bucket records: %u",
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletLaunches),
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletInputRecords),
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayMeshletBucketRecordsEmitted));
-
-        ImGui::TextUnformatted("Phase 2 downstream consumption");
-        ImGui::Text("Replay Traverse records consumed: %u",
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayTraverseRecordsConsumed));
-        ImGui::Text("Replay ClusterCull bucket records consumed: %u",
-            counter(CLodWorkGraphCounterIndex::Phase2ReplayClusterBucketRecordsConsumed));
-    }
-
-    ImGui::Separator();
-    ImGui::TextUnformatted("Extended capture statistics");
-    if (m_clodCaptureStatsPending) {
-        ImGui::Text("Capture stats status: pending...");
-    }
-    else if (!m_clodCaptureStatsAvailable) {
-        ImGui::TextDisabled("No extended capture results yet.");
-    }
-    else {
-        ImGui::Text("Visible clusters: %u", m_clodCaptureStats.visibleClusterCount);
-        ImGui::Text("Unique views: %u | Unique instances: %u | Unique meshlets: %u",
-            m_clodCaptureStats.uniqueViews,
-            m_clodCaptureStats.uniqueInstances,
-            m_clodCaptureStats.uniqueMeshlets);
-        ImGui::Text("Avg clusters/view: %.2f | Avg clusters/instance: %.2f",
-            m_clodCaptureStats.avgClustersPerView,
-            m_clodCaptureStats.avgClustersPerInstance);
-        ImGui::Text("Max clusters/view: %u (%.1f%% of total)",
-            m_clodCaptureStats.maxClustersPerView,
-            m_clodCaptureStats.dominantViewPercent);
-        ImGui::Text("Max clusters/instance: %u (%.1f%% of total)",
-            m_clodCaptureStats.maxClustersPerInstance,
-            m_clodCaptureStats.dominantInstancePercent);
-    }
+    drawWorkGraphCaptureSection("Primary CLod WG", m_clodTelemetry);
+    drawWorkGraphCaptureSection("Shadow CLod WG", m_shadowClodTelemetry);
 
     ImGui::Separator();
     ImGui::TextUnformatted("Reyes Pipeline");
