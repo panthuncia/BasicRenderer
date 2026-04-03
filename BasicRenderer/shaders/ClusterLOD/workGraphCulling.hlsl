@@ -170,6 +170,18 @@ float CLodSWRasterDiameterThreshold()
 #endif
 }
 
+float CLodProjectedDiameterPixels(float radiusWorld, float projY, float viewportHeightPixels, float viewSpaceZ, float zNear, bool isOrtho)
+{
+    const float diameterScale = 2.0f * abs(projY) * max(viewportHeightPixels, 1.0f);
+    const float projectedDiameter = radiusWorld * diameterScale;
+
+    if (isOrtho) {
+        return projectedDiameter;
+    }
+
+    return projectedDiameter / max(-viewSpaceZ, zNear);
+}
+
 uint CLodBitMask(uint key)
 {
     return 1u << (key & 31u);
@@ -710,14 +722,28 @@ void WG_ObjectCull(
     outRecs.OutputComplete();
 }
 
-// NVIDIA-style error-over-distance metric:
-// errorOverDistance = (error * scale) / max(dist - radius, znear)
-float ErrorOverDistance(float3 worldCenter, float worldRadius, float errorMeshSpace, float errorScale, float3 cameraPos, float zNear) {
+// Perspective views attenuate projected geometric error by distance.
+// Orthographic views keep a constant world-to-screen scale, so the projected
+// error reduces to the world-space error directly.
+float ProjectedGeometricError(
+    float3 worldCenter,
+    float worldRadius,
+    float errorMeshSpace,
+    float errorScale,
+    float3 cameraPos,
+    float zNear,
+    bool isOrtho)
+{
+    const float worldSpaceError = errorMeshSpace * errorScale;
+    if (isOrtho) {
+        return worldSpaceError;
+    }
+
     // Conservative "distance to sphere surface"
     float dist = length(worldCenter - cameraPos);
     float denom = max(dist - worldRadius, zNear);
 
-    return (errorMeshSpace * errorScale) / denom;
+    return worldSpaceError / denom;
 }
 
 // Node: TraverseNodes (recursive, BVH-only)
@@ -832,10 +858,11 @@ void WG_TraverseNodes(
 
                 const float3 grpWorldCenter = mul(float4(grp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
                 const float grpWorldRadius = grp.bounds.centerAndRadius.w * lodUniformScale;
-                const float grpEOD = ErrorOverDistance(
+                const float grpEOD = ProjectedGeometricError(
                     grpWorldCenter, grpWorldRadius,
                     grp.bounds.error, lodUniformScale,
-                    cam.positionWorldSpace.xyz, cam.zNear);
+                    cam.positionWorldSpace.xyz, cam.zNear,
+                    camera.isOrtho);
                 const bool nodeWantsTraversal = parentAllowsRefine && (grpEOD >= cam.errorOverDistanceThreshold);
 
                 if (!nodeWantsTraversal) {
@@ -920,13 +947,14 @@ void WG_TraverseNodes(
                 // Internal node: LOD check + occlusion + child emission.
                 const float3 lodCheckWorldCenter = mul(float4(nodeLodCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
                 const float lodCheckWorldRadius = nodeLodRadiusObjectSpace * lodUniformScale;
-                const float nodeErrorOverDistance = ErrorOverDistance(
+                const float nodeErrorOverDistance = ProjectedGeometricError(
                     lodCheckWorldCenter,
                     lodCheckWorldRadius,
                     node.metric.maxQuadricError,
                     lodUniformScale,
                     cam.positionWorldSpace.xyz,
-                    cam.zNear);
+                    cam.zNear,
+                    camera.isOrtho);
                 const bool nodeWantsTraversal = parentAllowsRefine && (nodeErrorOverDistance >= cam.errorOverDistanceThreshold);
 
                 if (!nodeWantsTraversal) {
@@ -1003,10 +1031,11 @@ void WG_TraverseNodes(
                             if (child.range.isLeaf == 0) {
                                 const float3 childWorldCenter = mul(float4(child.metric.lodCenterAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
                                 const float childLodRadiusWorld = child.metric.lodCenterAndRadius.w * lodUniformScale;
-                                const float childEOD = ErrorOverDistance(
+                                const float childEOD = ProjectedGeometricError(
                                     childWorldCenter, childLodRadiusWorld,
                                     child.metric.maxQuadricError, lodUniformScale,
-                                    cam.positionWorldSpace.xyz, cam.zNear);
+                                    cam.positionWorldSpace.xyz, cam.zNear,
+                                    camera.isOrtho);
                                 if (childEOD < cam.errorOverDistanceThreshold) {
                                     WGTelemetryAdd(WG_COUNTER_CHILD_PREFILTER_LOD_REJECTED, 1);
                                     continue;
@@ -1162,9 +1191,11 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
     uint2 depthRes = uint2(0, 0);
     uint numDepthMips = 0;
     float2 hzbUVScale = float2(0, 0);
+    float viewHeightPixels = 0.0f;
     float cullUniformScale = 0.0f;
     float lodUniformScale = 0.0f;
     CullingCameraInfo cam = (CullingCameraInfo)0;
+    bool cameraIsOrtho = false;
     uint groupsBase = 0;
     uint meshBufferIndex = 0;
     uint activeGroupScanCount = 0;
@@ -1194,8 +1225,14 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         StructuredBuffer<Camera> cameras =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
         viewMatrix = cameras[b.viewId].view;
+        cameraIsOrtho = cameras[b.viewId].isOrtho;
         [unroll] for (uint p = 0; p < 6; p++)
             frustumPlanes[p] = cameras[b.viewId].clippingPlanes[p].plane;
+
+        StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuffer =
+            ResourceDescriptorHeap[CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
+        const ClodViewRasterInfo viewRasterInfo = viewRasterInfoBuffer[b.viewId];
+        viewHeightPixels = float(viewRasterInfo.scissorMaxY - viewRasterInfo.scissorMinY);
 
         // Load the current page header layout through the shared helper.
         ByteAddressBuffer slab = ResourceDescriptorHeap[pageSlabDesc];
@@ -1203,7 +1240,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         pageMeshletCount = pageHeader.meshletCount;
         pageDescriptorOffset = pageHeader.descriptorOffset;
 
-        if (!cameras[b.viewId].isOrtho) {
+        if (!cameraIsOrtho) {
             StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
                 ResourceDescriptorHeap[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
             depthMapDescriptorIndex = viewDepthSRVIndices[b.viewId].linearDepthSRVIndex;
@@ -1245,9 +1282,10 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
             const ClusterLODGroup ownGrp = groups[groupsBase + UnpackGroupId(b.groupIdPacked)];
             const float3 ownWorldCenter = mul(float4(ownGrp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
             const float ownWorldRadius = ownGrp.bounds.centerAndRadius.w * lodUniformScale;
-            ownGroupErrorOverDistance = ErrorOverDistance(
+            ownGroupErrorOverDistance = ProjectedGeometricError(
                 ownWorldCenter, ownWorldRadius, ownGrp.bounds.error, lodUniformScale,
-                cam.positionWorldSpace.xyz, cam.zNear);
+                cam.positionWorldSpace.xyz, cam.zNear,
+                cameraIsOrtho);
         }
 
         StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
@@ -1280,10 +1318,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         ResourceDescriptorHeap[CLOD_WG_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
     StructuredBuffer<uint> swWriteBaseCounter = ResourceDescriptorHeap[CLOD_WG_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
     const uint swWriteBase = CLodWorkGraphIsPhase2() ? swWriteBaseCounter.Load(0) : 0u;
-    // Pre-compute screen-space scale: projDiameter = meshletRadiusWorld * swScreenScale / (-viewZ)
-    // swScreenScale = 2 * projY * viewportHeight / 2 = projY * viewportHeight
-    // depthRes.y is the viewport height; cam.projY is projection[1][1].
-    const float swScreenScale = cam.projY * float(depthRes.y);
+    // Software-raster classification uses projected meshlet diameter in pixels.
 #endif
 
     uint totalSurvivors = 0;
@@ -1347,10 +1382,11 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                         const ClusterLODGroup childGrp = groups[childGroupGlobalIndex];
                         const float3 childWorldCenter = mul(float4(childGrp.bounds.centerAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
                         const float childWorldRadius = childGrp.bounds.centerAndRadius.w * lodUniformScale;
-                        const float childEOD = ErrorOverDistance(
+                        const float childEOD = ProjectedGeometricError(
                             childWorldCenter, childWorldRadius,
                             childGrp.bounds.error, lodUniformScale,
-                            cam.positionWorldSpace.xyz, cam.zNear);
+                            cam.positionWorldSpace.xyz, cam.zNear,
+                            cameraIsOrtho);
 
                         if (childEOD >= cam.errorOverDistanceThreshold) {
                             // Child exceeds the threshold; check residency.
@@ -1555,9 +1591,14 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         // SW/HW classification, tiny meshlets go to software rasterization.
         bool isSW = false;
         if (contributes && swRasterEnabled && !reyesDisplacementCandidate) {
-            // Projected diameter in pixels = meshletRadiusWorld * swScreenScale / (-viewZ)
-            // Multiply-compare avoids division: diameter < threshold <-> radius*scale < threshold*(-z)
-            isSW = (meshletRadiusWorld * swScreenScale) < (swDiameterThreshold * (-meshletCenterViewSpace.z));
+            const float projectedDiameter = CLodProjectedDiameterPixels(
+                meshletRadiusWorld,
+                cam.projY,
+                viewHeightPixels,
+                meshletCenterViewSpace.z,
+                cam.zNear,
+                cameraIsOrtho);
+            isSW = projectedDiameter < swDiameterThreshold;
         }
 
         const bool isHW = contributes && !isSW;

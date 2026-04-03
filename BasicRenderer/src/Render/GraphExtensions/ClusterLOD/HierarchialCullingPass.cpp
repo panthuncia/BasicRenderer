@@ -171,7 +171,7 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
     if (UsesSWClassification(m_workGraphMode)) {
         builder->WithUnorderedAccess(m_swVisibleClustersCounterBuffer);
     }
-    if (UsesWorkGraphSWRaster(m_workGraphMode)) {
+    if (UsesSWClassification(m_workGraphMode)) {
         builder->WithShaderResource(m_viewRasterInfoBuffer);
     }
     if (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVirtualShadowOutput(m_rasterOutputKind)) {
@@ -227,7 +227,7 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     uintRootConstants[CLOD_WG_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX] = m_swVisibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_WG_HW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX] = m_histogramIndirectCommand->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_WG_TELEMETRY_DESCRIPTOR_INDEX] = m_workGraphTelemetryBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    if (UsesWorkGraphSWRaster(m_workGraphMode)) {
+    if (UsesSWClassification(m_workGraphMode)) {
         uintRootConstants[CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
     }
     uint32_t workGraphFlags = 0u;
@@ -423,8 +423,7 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
 
     // Keep the shared per-view visibility UAV table valid for any visibility-buffer path.
     // Reyes patch raster consumes this buffer even when the primary CLod path is not using SW classification.
-    if (UsesVisibilityBufferOutput(m_rasterOutputKind) ||
-        (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVirtualShadowOutput(m_rasterOutputKind))) {
+    if (UsesVisibilityBufferOutput(m_rasterOutputKind) || UsesSWClassification(m_workGraphMode)) {
         m_visibilityBuffers.clear();
         auto numViews = context.viewManager->GetCameraBufferSize();
         std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
