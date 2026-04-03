@@ -35,6 +35,7 @@ public:
 			Builtin::PrimaryCamera::LinearDepthMap,
 			Builtin::Environment::CurrentCubemap,
 			Builtin::Shadows::CLodClipmapInfo,
+			Builtin::Shadows::CLodDirectionalPageViewInfo,
 			Builtin::Shadows::CLodPageTable,
 			Builtin::Shadows::CLodPhysicalPages,
 			Builtin::Shadows::ShadowMaps)

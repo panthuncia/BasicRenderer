@@ -17,6 +17,7 @@
 #include "DefaultDirection.h"
 #include "Resources/Sampler.h"
 #include "Render/DescriptorHeap.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Materials/Material.h"
 #include "Mesh/Mesh.h"
 #include "Mesh/VertexLayout.h"
@@ -833,121 +834,86 @@ std::vector<Cascade> setupDirectionalClipmaps(
     std::vector<Cascade> clipmaps;
     clipmaps.reserve(numClipmaps);
 
-    XMVECTOR camRight = XMVector3Normalize(XMVector3Cross(XMVector3Normalize(camDir), XMVector3Normalize(camUp)));
+    (void)camDir;
+    (void)camUp;
+    XMVECTOR lightUp = (fabs(XMVectorGetY(lightDir)) > 0.99f) ? XMVectorSet(0, 0, -1, 0) : XMVectorSet(0, 1, 0, 0);
+    const XMVECTOR normalizedLightDir = XMVector3Normalize(lightDir);
+    const XMMATRIX defaultLightView = XMMatrixLookToRH(
+        XMVectorZero(),
+        normalizedLightDir,
+        lightUp);
+    const XMMATRIX defaultLightViewInverse = XMMatrixInverse(nullptr, defaultLightView);
+
+    const float clipZeroFar = !clipFarPlanes.empty()
+        ? std::max(clipFarPlanes.front(), nearPlane)
+        : std::max(nearPlane * 2.0f, 1.0f);
+    const float tanHalfFov = tanf(fovY * 0.5f);
+    const float clipZeroHalfHeight = clipZeroFar * tanHalfFov;
+    const float clipZeroHalfWidth = clipZeroHalfHeight * aspectRatio;
+    const float clipZeroScale = std::max(
+        std::sqrt(clipZeroHalfWidth * clipZeroHalfWidth + clipZeroHalfHeight * clipZeroHalfHeight),
+        1.0f);
+    const float ndcPageSize = 2.0f / std::max(static_cast<float>(CLodVirtualShadowDefaultPageTableResolution), 1.0f);
+    const float clipHeightOffsetScale = 5.0f;
+    const float clipNearScale = 0.01f;
+    const float clipFarScale = 10.0f;
 
     for (int i = 0; i < numClipmaps; ++i)
     {
-        const float clipNear = nearPlane;
-        const float clipFar = clipFarPlanes[i];
+        const float clipScale = clipZeroScale * std::pow(2.0f, static_cast<float>(i));
+        const float nearDistance = std::max(clipNearScale * clipScale, 0.01f);
+        const float farDistance = std::max(clipFarScale * clipScale, nearDistance + 1.0f);
+        const XMMATRIX lightOrtho = XMMatrixOrthographicOffCenterRH(
+            -clipScale,
+            clipScale,
+            -clipScale,
+            clipScale,
+            nearDistance,
+            farDistance);
 
-        XMVECTOR nearCenter = camPos + camDir * clipNear;
-        XMVECTOR farCenter = camPos + camDir * clipFar;
+        const float pageWorldSize = clipScale * ndcPageSize;
+        const XMVECTOR targetLightView = XMVector3TransformCoord(camPos, defaultLightView);
+        const float targetLightViewX = XMVectorGetX(targetLightView);
+        const float targetLightViewY = XMVectorGetY(targetLightView);
+        const float targetLightViewZ = XMVectorGetZ(targetLightView);
 
-        float tanFov = tanf(fovY * 0.5f);
-        float nearHeight = tanFov * clipNear;
-        float nearWidth = nearHeight * aspectRatio;
-        float farHeight = tanFov * clipFar;
-        float farWidth = farHeight * aspectRatio;
+        const int64_t pageOffsetX = -static_cast<int64_t>(std::ceil(targetLightViewX / pageWorldSize));
+        const int64_t pageOffsetY = -static_cast<int64_t>(std::ceil(-targetLightViewY / pageWorldSize));
 
-        XMVECTOR nearTopLeft = nearCenter + camUp * nearHeight - camRight * nearWidth;
-        XMVECTOR nearTopRight = nearCenter + camUp * nearHeight + camRight * nearWidth;
-        XMVECTOR nearBottomLeft = nearCenter - camUp * nearHeight - camRight * nearWidth;
-        XMVECTOR nearBottomRight = nearCenter - camUp * nearHeight + camRight * nearWidth;
-        XMVECTOR farTopLeft = farCenter + camUp * farHeight - camRight * farWidth;
-        XMVECTOR farTopRight = farCenter + camUp * farHeight + camRight * farWidth;
-        XMVECTOR farBottomLeft = farCenter - camUp * farHeight - camRight * farWidth;
-        XMVECTOR farBottomRight = farCenter - camUp * farHeight + camRight * farWidth;
+        const XMVECTOR alignedTargetLightView = XMVectorSet(
+            static_cast<float>(-pageOffsetX) * pageWorldSize,
+            static_cast<float>(pageOffsetY) * pageWorldSize,
+            targetLightViewZ,
+            1.0f);
+        const XMVECTOR alignedTargetWorld = XMVector3TransformCoord(alignedTargetLightView, defaultLightViewInverse);
 
-        XMVECTOR frustumCorners[8] = {
-            nearTopLeft, nearTopRight, nearBottomLeft, nearBottomRight,
-            farTopLeft, farTopRight, farBottomLeft, farBottomRight
-        };
-
-        XMVECTOR frustumCenter = XMVectorZero();
-        for (int j = 0; j < 8; ++j)
-        {
-            frustumCenter = XMVectorAdd(frustumCenter, frustumCorners[j]);
-        }
-        frustumCenter = XMVectorScale(frustumCenter, 1.0f / 8.0f);
-
-        float radius = 0.0f;
-        for (int j = 0; j < 8; ++j)
-        {
-            float distance = XMVectorGetX(XMVector3Length(XMVectorSubtract(frustumCorners[j], frustumCenter)));
-            radius = std::max(radius, distance);
-        }
-        radius = ceilf(radius * 16.0f) / 16.0f;
-
-        XMVECTOR lightPos = frustumCenter - lightDir * radius * 2.0f;
-        XMVECTOR lightUp = (fabs(XMVectorGetY(lightDir)) > 0.99f) ? XMVectorSet(0, 0, -1, 0) : XMVectorSet(0, 1, 0, 0);
-        XMMATRIX lightView = XMMatrixLookAtRH(lightPos, frustumCenter, lightUp);
-
-        XMVECTOR lightSpaceCorners[8];
-        for (int j = 0; j < 8; ++j)
-        {
-            lightSpaceCorners[j] = XMVector3TransformCoord(frustumCorners[j], lightView);
-        }
-
-        XMVECTOR mins = lightSpaceCorners[0];
-        XMVECTOR maxs = lightSpaceCorners[0];
-        for (int j = 1; j < 8; ++j)
-        {
-            mins = XMVectorMin(mins, lightSpaceCorners[j]);
-            maxs = XMVectorMax(maxs, lightSpaceCorners[j]);
-        }
-
-        float l = XMVectorGetX(mins);
-        float r = XMVectorGetX(maxs);
-        float b = XMVectorGetY(mins);
-        float t = XMVectorGetY(maxs);
-        float n = (std::min)(XMVectorGetZ(maxs), -20.0f);
-        float f = -XMVectorGetZ(mins);
-
-        XMMATRIX lightOrtho = XMMatrixOrthographicOffCenterRH(l, r, b, t, n, f);
-
+        const float lightDistance = clipHeightOffsetScale * clipScale;
+        const XMVECTOR lightPos = alignedTargetWorld - normalizedLightDir * lightDistance;
+        const XMMATRIX lightView = XMMatrixLookToRH(lightPos, normalizedLightDir, lightUp);
         Cascade clipmap;
-        clipmap.size = radius * 2;
+        clipmap.size = clipScale * 2.0f;
+        XMStoreFloat4(&clipmap.worldCenter, lightPos);
+        clipmap.pageOffsetX = pageOffsetX;
+        clipmap.pageOffsetY = pageOffsetY;
+        clipmap.nearPlane = nearDistance;
+        clipmap.farPlane = farDistance;
         clipmap.viewMatrix = lightView;
         clipmap.orthoMatrix = lightOrtho;
 
-        XMMATRIX comboMatrix = lightOrtho;
-
-        auto ExtractPlane = [&comboMatrix](int planeIndex) -> ClippingPlane {
-            XMFLOAT4X4 m;
-            XMStoreFloat4x4(&m, comboMatrix);
-            XMVECTOR planeVec;
-            switch (planeIndex) {
-            case 0:
-                planeVec = XMVectorSet(m._14 + m._11, m._24 + m._21, m._34 + m._31, m._44 + m._41);
-                break;
-            case 1:
-                planeVec = XMVectorSet(m._14 - m._11, m._24 - m._21, m._34 - m._31, m._44 - m._41);
-                break;
-            case 2:
-                planeVec = XMVectorSet(m._14 + m._12, m._24 + m._22, m._34 + m._32, m._44 + m._42);
-                break;
-            case 3:
-                planeVec = XMVectorSet(m._14 - m._12, m._24 - m._22, m._34 - m._32, m._44 - m._42);
-                break;
-            case 4:
-                planeVec = XMVectorSet(m._13, m._23, m._33, m._43);
-                break;
-            case 5:
-                planeVec = XMVectorSet(m._14 - m._13, m._24 - m._23, m._34 - m._33, m._44 - m._43);
-                break;
-            default:
-                planeVec = XMVectorZero();
-                break;
-            }
-            planeVec = XMPlaneNormalize(planeVec);
-            ClippingPlane result;
-            XMStoreFloat4(&result.plane, planeVec);
-            return result;
+        const std::array<XMVECTOR, 6> viewSpacePlanes = {
+            XMVectorSet(1.0f, 0.0f, 0.0f, clipScale),
+            XMVectorSet(-1.0f, 0.0f, 0.0f, clipScale),
+            XMVectorSet(0.0f, 1.0f, 0.0f, clipScale),
+            XMVectorSet(0.0f, -1.0f, 0.0f, clipScale),
+            XMVectorSet(0.0f, 0.0f, -1.0f, -nearDistance),
+            XMVectorSet(0.0f, 0.0f, 1.0f, farDistance),
         };
 
-        for (int p = 0; p < 6; ++p)
+        for (size_t planeIndex = 0; planeIndex < viewSpacePlanes.size(); ++planeIndex)
         {
-            clipmap.frustumPlanes[p] = ExtractPlane(p);
+            ClippingPlane plane{};
+            XMStoreFloat4(&plane.plane, XMPlaneNormalize(viewSpacePlanes[planeIndex]));
+            clipmap.frustumPlanes[planeIndex] = plane;
         }
 
         clipmaps.push_back(clipmap);

@@ -69,6 +69,21 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     ClusterCullRejectedPageBounds,
     ClusterCullRejectedCleanPages,
 
+    ChildPrefilterFrustumCulled,
+    ChildPrefilterLodRejected,
+
+    ClusterCullShadowClipmapMisses,
+    ClusterCullShadowDirtyRegionHits,
+
+    ObjectCullRejectedFrustum,
+    ObjectCullRejectedPlaneLeft,
+    ObjectCullRejectedPlaneRight,
+    ObjectCullRejectedPlaneBottom,
+    ObjectCullRejectedPlaneTop,
+    ObjectCullRejectedPlaneNear,
+    ObjectCullRejectedPlaneFar,
+    ObjectCullInvalidBounds,
+
     Count
 };
 
@@ -79,6 +94,23 @@ struct CLodWorkGraphTelemetryCounters {
     std::array<uint32_t, CLodWorkGraphCounterCount> counters{};
 };
 
+inline constexpr uint32_t CLodDirectionalShadowDebugMaxClipmaps = 6u;
+
+struct CLodDirectionalShadowClipmapDebugEntry {
+    uint32_t valid = 0;
+    float clipDiameter = 0.0f;
+    float nearPlane = 0.0f;
+    float farPlane = 0.0f;
+    int64_t pageOffsetX = 0;
+    int64_t pageOffsetY = 0;
+    std::array<float, 4> positionWorldSpace{};
+};
+
+struct CLodDirectionalShadowDebugSnapshot {
+    uint32_t clipmapCount = 0;
+    std::array<CLodDirectionalShadowClipmapDebugEntry, CLodDirectionalShadowDebugMaxClipmaps> clipmaps{};
+};
+
 inline std::atomic<uint32_t> g_clodWorkGraphTelemetryEnabled = 0u;
 
 inline void SetCLodWorkGraphTelemetryEnabled(bool enabled) {
@@ -87,6 +119,25 @@ inline void SetCLodWorkGraphTelemetryEnabled(bool enabled) {
 
 inline bool IsCLodWorkGraphTelemetryEnabled() {
     return g_clodWorkGraphTelemetryEnabled.load(std::memory_order_relaxed) != 0u;
+}
+
+inline std::atomic<uint64_t> g_clodDirectionalShadowDebugSequence = 0;
+inline CLodDirectionalShadowDebugSnapshot g_clodDirectionalShadowDebugSnapshot{};
+
+inline void PublishCLodDirectionalShadowDebugSnapshot(const CLodDirectionalShadowDebugSnapshot& snapshot) {
+    g_clodDirectionalShadowDebugSnapshot = snapshot;
+    g_clodDirectionalShadowDebugSequence.fetch_add(1u, std::memory_order_relaxed);
+}
+
+inline bool TryReadCLodDirectionalShadowDebugSnapshot(uint64_t& inOutSequence, CLodDirectionalShadowDebugSnapshot& outSnapshot) {
+    const uint64_t sequence = g_clodDirectionalShadowDebugSequence.load(std::memory_order_relaxed);
+    if (sequence == inOutSequence) {
+        return false;
+    }
+
+    outSnapshot = g_clodDirectionalShadowDebugSnapshot;
+    inOutSequence = sequence;
+    return true;
 }
 
 struct CLodStreamingOperationStats {

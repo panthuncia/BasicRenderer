@@ -16,11 +16,13 @@ public:
         std::shared_ptr<Buffer> allocationRequestsBuffer,
         std::shared_ptr<Buffer> allocationCountBuffer,
         std::shared_ptr<Buffer> indirectArgsBuffer,
+        std::shared_ptr<Buffer> clipmapInfoBuffer,
         std::shared_ptr<PixelBuffer> pageTableTexture,
         std::shared_ptr<Buffer> pageMetadataBuffer,
         std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
         std::shared_ptr<Buffer> freePhysicalPagesBuffer,
         std::shared_ptr<Buffer> reusablePhysicalPagesBuffer,
+        std::shared_ptr<Buffer> directionalPageViewInfoBuffer,
         std::shared_ptr<Buffer> pageListHeaderBuffer);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
@@ -34,10 +36,12 @@ private:
     std::shared_ptr<Buffer> m_allocationRequestsBuffer;
     std::shared_ptr<Buffer> m_allocationCountBuffer;
     std::shared_ptr<Buffer> m_indirectArgsBuffer;
+    std::shared_ptr<Buffer> m_clipmapInfoBuffer;
     std::shared_ptr<PixelBuffer> m_pageTableTexture;
     std::shared_ptr<Buffer> m_pageMetadataBuffer;
     std::shared_ptr<Buffer> m_dirtyPageFlagsBuffer;
     std::shared_ptr<Buffer> m_freePhysicalPagesBuffer;
     std::shared_ptr<Buffer> m_reusablePhysicalPagesBuffer;
+    std::shared_ptr<Buffer> m_directionalPageViewInfoBuffer;
     std::shared_ptr<Buffer> m_pageListHeaderBuffer;
 };

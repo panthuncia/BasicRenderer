@@ -119,6 +119,16 @@ static const uint WG_COUNTER_CLUSTER_CULL_REJECTED_CLEAN_PAGES = 52;
 
 static const uint WG_COUNTER_CHILD_PREFILTER_FRUSTUM_CULLED = 53;
 static const uint WG_COUNTER_CHILD_PREFILTER_LOD_REJECTED = 54;
+static const uint WG_COUNTER_CLUSTER_CULL_SHADOW_CLIPMAP_MISSES = 55;
+static const uint WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_REGION_HITS = 56;
+static const uint WG_COUNTER_OBJECT_CULL_REJECTED_FRUSTUM = 57;
+static const uint WG_COUNTER_OBJECT_CULL_REJECTED_LEFT = 58;
+static const uint WG_COUNTER_OBJECT_CULL_REJECTED_RIGHT = 59;
+static const uint WG_COUNTER_OBJECT_CULL_REJECTED_BOTTOM = 60;
+static const uint WG_COUNTER_OBJECT_CULL_REJECTED_TOP = 61;
+static const uint WG_COUNTER_OBJECT_CULL_REJECTED_NEAR = 62;
+static const uint WG_COUNTER_OBJECT_CULL_REJECTED_FAR = 63;
+static const uint WG_COUNTER_OBJECT_CULL_INVALID_BOUNDS = 64;
 
 static const uint CLOD_STREAM_REQUEST_CAPACITY = (1u << 16);
 static const uint CLOD_USED_GROUPS_CAPACITY = (1u << 17);
@@ -181,6 +191,8 @@ float CLodProjectedDiameterPixels(float radiusWorld, float projY, float viewport
 
     return projectedDiameter / max(-viewSpaceZ, zNear);
 }
+
+void WGTelemetryAdd(uint counterIndex, uint value);
 
 uint CLodBitMask(uint key)
 {
@@ -271,6 +283,7 @@ bool CLodVirtualShadowMeshletTouchesDirtyPages(float3 worldCenter, float radiusW
     CLodVirtualShadowClipmapInfo clipmapInfo;
     if (!CLodVirtualShadowFindClipmapForView(viewId, clipmapInfo))
     {
+        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_SHADOW_CLIPMAP_MISSES, 1);
         return true;
     }
 
@@ -328,6 +341,7 @@ bool CLodVirtualShadowMeshletTouchesDirtyPages(float3 worldCenter, float radiusW
                     uint2(xRanges[xRangeIndex].x, yRanges[yRangeIndex].x),
                     uint2(xRanges[xRangeIndex].y, yRanges[yRangeIndex].y)))
             {
+                WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_REGION_HITS, 1);
                 return true;
             }
         }
@@ -637,6 +651,19 @@ bool SphereOutsideFrustumViewSpace(float3 viewSpaceCenter, float radius, float4 
     return false;
 }
 
+void WGTelemetryAddObjectCullPlaneReject(uint planeIndex)
+{
+    switch (planeIndex)
+    {
+    case 0u: WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_REJECTED_LEFT, 1); break;
+    case 1u: WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_REJECTED_RIGHT, 1); break;
+    case 2u: WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_REJECTED_BOTTOM, 1); break;
+    case 3u: WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_REJECTED_TOP, 1); break;
+    case 4u: WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_REJECTED_NEAR, 1); break;
+    case 5u: WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_REJECTED_FAR, 1); break;
+    }
+}
+
 // Node: ObjectCull (entry)
 [Shader("node")]
 [NodeID("ObjectCull")]
@@ -690,7 +717,26 @@ void WG_ObjectCull(
         const float3 viewSpaceCenter = ToViewSpace(objectSpaceCenter, objectModelMatrix, camera.view);
         const float worldRadius = instanceData.boundingSphere.sphere.w * MaxAxisScale_RowVector(objectModelMatrix);
 
-        const bool culled = SphereOutsideFrustumViewSpace(viewSpaceCenter, worldRadius, camera);
+        bool culled = false;
+        if (any(isnan(viewSpaceCenter)) || any(isinf(viewSpaceCenter)) || isnan(worldRadius) || isinf(worldRadius)) {
+            WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_INVALID_BOUNDS, 1);
+            culled = true;
+        }
+        else {
+            [unroll]
+            for (uint planeIndex = 0u; planeIndex < 6u; ++planeIndex)
+            {
+                const float4 plane = camera.clippingPlanes[planeIndex].plane;
+                const float distanceToPlane = dot(plane.xyz, viewSpaceCenter) + plane.w;
+                if (distanceToPlane < -worldRadius)
+                {
+                    WGTelemetryAdd(WG_COUNTER_OBJECT_CULL_REJECTED_FRUSTUM, 1);
+                    WGTelemetryAddObjectCullPlaneReject(planeIndex);
+                    culled = true;
+                    break;
+                }
+            }
+        }
         if (!culled) {
             StructuredBuffer<MeshInstanceClodOffsets> meshInstanceClodOffsets =
                             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];

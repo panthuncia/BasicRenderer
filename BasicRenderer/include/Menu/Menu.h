@@ -358,6 +358,8 @@ private:
 
     CLodWorkGraphCaptureState m_clodTelemetry;
     CLodWorkGraphCaptureState m_shadowClodTelemetry;
+    uint64_t m_directionalShadowDebugLastSequence = 0;
+    CLodDirectionalShadowDebugSnapshot m_directionalShadowDebugLatest{};
 
     struct CLodVirtualShadowCaptureState {
         CLodVirtualShadowStats stats{};
@@ -505,6 +507,10 @@ private:
     bool m_clodDisableReyesRasterization = false;
     std::function<bool()> getCLodDisableReyesRasterization;
     std::function<void(bool)> setCLodDisableReyesRasterization;
+
+    bool m_clodDisableVirtualShadowPageCaching = false;
+    std::function<bool()> getCLodDisableVirtualShadowPageCaching;
+    std::function<void(bool)> setCLodDisableVirtualShadowPageCaching;
 
     bool wireframeEnabled = false;
 	std::function<bool()> getWireframeEnabled;
@@ -713,6 +719,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     setCLodDisableReyesRasterization = settingsManager.getSettingSetter<bool>(CLodDisableReyesRasterizationSettingName);
     m_clodDisableReyesRasterization = getCLodDisableReyesRasterization();
     observerSetting(m_clodDisableReyesRasterization, CLodDisableReyesRasterizationSettingName);
+
+    getCLodDisableVirtualShadowPageCaching = settingsManager.getSettingGetter<bool>(CLodDisableVirtualShadowPageCachingSettingName);
+    setCLodDisableVirtualShadowPageCaching = settingsManager.getSettingSetter<bool>(CLodDisableVirtualShadowPageCachingSettingName);
+    m_clodDisableVirtualShadowPageCaching = getCLodDisableVirtualShadowPageCaching();
+    observerSetting(m_clodDisableVirtualShadowPageCaching, CLodDisableVirtualShadowPageCachingSettingName);
 
 	setWireframeEnabled = settingsManager.getSettingSetter<bool>("enableWireframe");
 	getWireframeEnabled = settingsManager.getSettingGetter<bool>("enableWireframe");
@@ -1002,6 +1013,9 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         }
         if (ImGui::Checkbox("Disable Reyes Tessellation/Displacement", &m_clodDisableReyesRasterization)) {
             setCLodDisableReyesRasterization(m_clodDisableReyesRasterization);
+        }
+        if (ImGui::Checkbox("Disable VSM Page Caching", &m_clodDisableVirtualShadowPageCaching)) {
+            setCLodDisableVirtualShadowPageCaching(m_clodDisableVirtualShadowPageCaching);
         }
 		if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
 			setWireframeEnabled(wireframeEnabled);
@@ -2308,6 +2322,11 @@ inline void Menu::DrawCLodTelemetryWindow() {
             m_clodStreamingOpsHistory.push_back({ std::chrono::steady_clock::now(), latestOps });
         }
 
+        CLodDirectionalShadowDebugSnapshot latestShadowDebug{};
+        if (TryReadCLodDirectionalShadowDebugSnapshot(m_directionalShadowDebugLastSequence, latestShadowDebug)) {
+            m_directionalShadowDebugLatest = latestShadowDebug;
+        }
+
         const auto now = std::chrono::steady_clock::now();
         const auto horizon = std::chrono::seconds(5);
         m_clodStreamingOpsHistory.erase(
@@ -2444,6 +2463,31 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 counter(CLodWorkGraphCounterIndex::ObjectCullInRangeThreads),
                 counter(CLodWorkGraphCounterIndex::ObjectCullThreads));
             drawUtilizationRow(
+                "ObjectCull visible threads",
+                counter(CLodWorkGraphCounterIndex::ObjectCullVisibleThreads),
+                counter(CLodWorkGraphCounterIndex::ObjectCullInRangeThreads));
+
+            const uint32_t objectCullRejectedFrustum = counter(CLodWorkGraphCounterIndex::ObjectCullRejectedFrustum);
+            const uint32_t objectCullInvalidBounds = counter(CLodWorkGraphCounterIndex::ObjectCullInvalidBounds);
+            const uint32_t objectCullRejectedTotal = objectCullRejectedFrustum + objectCullInvalidBounds;
+            ImGui::Text("ObjectCull rejected: %u", objectCullRejectedTotal);
+            if (objectCullRejectedTotal > 0u) {
+                auto rejectionRow = [](const char* label, uint32_t count, uint32_t total) {
+                    const float pct = (total > 0)
+                        ? (100.0f * static_cast<float>(count) / static_cast<float>(total))
+                        : 0.0f;
+                    ImGui::Text("  %s: %u (%.1f%%)", label, count, pct);
+                };
+                rejectionRow("Invalid bounds", objectCullInvalidBounds, objectCullRejectedTotal);
+                rejectionRow("Frustum reject", objectCullRejectedFrustum, objectCullRejectedTotal);
+                rejectionRow("Left plane", counter(CLodWorkGraphCounterIndex::ObjectCullRejectedPlaneLeft), objectCullRejectedFrustum);
+                rejectionRow("Right plane", counter(CLodWorkGraphCounterIndex::ObjectCullRejectedPlaneRight), objectCullRejectedFrustum);
+                rejectionRow("Bottom plane", counter(CLodWorkGraphCounterIndex::ObjectCullRejectedPlaneBottom), objectCullRejectedFrustum);
+                rejectionRow("Top plane", counter(CLodWorkGraphCounterIndex::ObjectCullRejectedPlaneTop), objectCullRejectedFrustum);
+                rejectionRow("Near plane", counter(CLodWorkGraphCounterIndex::ObjectCullRejectedPlaneNear), objectCullRejectedFrustum);
+                rejectionRow("Far plane", counter(CLodWorkGraphCounterIndex::ObjectCullRejectedPlaneFar), objectCullRejectedFrustum);
+            }
+            drawUtilizationRow(
                 "TraverseNodes active child threads",
                 counter(CLodWorkGraphCounterIndex::TraverseNodesActiveChildThreads),
                 counter(CLodWorkGraphCounterIndex::TraverseNodesThreads));
@@ -2520,6 +2564,8 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 const uint32_t rejOOR = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedOutOfRange);
                 const uint32_t rejPageBounds = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedPageBounds);
                 const uint32_t rejCleanPages = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedCleanPages);
+                const uint32_t shadowClipmapMisses = counter(CLodWorkGraphCounterIndex::ClusterCullShadowClipmapMisses);
+                const uint32_t shadowDirtyRegionHits = counter(CLodWorkGraphCounterIndex::ClusterCullShadowDirtyRegionHits);
                 const uint32_t survived = counter(CLodWorkGraphCounterIndex::ClusterCullSurvivingLanes);
                 const uint32_t totalRejected = rejFrustum + rejCond2 + rejOccl + rejOOR + rejPageBounds + rejCleanPages;
 
@@ -2539,6 +2585,8 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 rejectionRow("WaveActiveMax padding (inactive iterations)", rejOOR, totalRejected);
                 rejectionRow("Page bounds overflow", rejPageBounds, totalRejected);
                 rejectionRow("Clean shadow pages", rejCleanPages, totalRejected);
+                ImGui::Text("  Shadow clipmap misses: %u", shadowClipmapMisses);
+                ImGui::Text("  Shadow dirty-region hits: %u", shadowDirtyRegionHits);
             }
 
             ImGui::Separator();
@@ -2595,6 +2643,28 @@ inline void Menu::DrawCLodTelemetryWindow() {
     drawWorkGraphCaptureSection("Shadow CLod WG", m_shadowClodTelemetry);
 
     ImGui::Separator();
+    ImGui::TextUnformatted("Directional shadow clipmap snapshot");
+    ImGui::Text("Clipmaps published: %u", m_directionalShadowDebugLatest.clipmapCount);
+    for (uint32_t clipmapIndex = 0; clipmapIndex < m_directionalShadowDebugLatest.clipmapCount; ++clipmapIndex) {
+        const auto& clipmap = m_directionalShadowDebugLatest.clipmaps[clipmapIndex];
+        if (clipmap.valid == 0u) {
+            continue;
+        }
+
+        ImGui::Text(
+            "Clip %u: pos=(%.2f, %.2f, %.2f) size=%.2f near=%.3f far=%.3f pageOffset=(%lld, %lld)",
+            clipmapIndex,
+            clipmap.positionWorldSpace[0],
+            clipmap.positionWorldSpace[1],
+            clipmap.positionWorldSpace[2],
+            clipmap.clipDiameter,
+            clipmap.nearPlane,
+            clipmap.farPlane,
+            static_cast<long long>(clipmap.pageOffsetX),
+            static_cast<long long>(clipmap.pageOffsetY));
+    }
+
+    ImGui::Separator();
     ImGui::TextUnformatted("Virtual Shadow Map");
     if (m_shadowVirtualShadowTelemetry.capturePending) {
         ImGui::Text("VSM capture status: pending...");
@@ -2611,12 +2681,23 @@ inline void Menu::DrawCLodTelemetryWindow() {
             stats.allocationDispatchGroupCount,
             stats.freePhysicalPageCount,
             stats.reusablePhysicalPageCount);
+        ImGui::Text("Dirty diagnostics: setupReset=%u requestOverflow=%u",
+            stats.setupResetApplied,
+            stats.markRequestOverflowCount);
+        ImGui::Text("Setup reset reasons: forced=%u noPrev=%u structureMismatch=%u",
+            stats.setupResetForced,
+            stats.setupResetNoPreviousState,
+            stats.setupResetStructureMismatch);
 
-        if (ImGui::BeginTable("##VirtualShadowStatsTable", 9, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+        if (ImGui::BeginTable("##VirtualShadowStatsTable", 13, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
             ImGui::TableSetupColumn("Clip");
             ImGui::TableSetupColumn("Selected");
             ImGui::TableSetupColumn("Proj Reject");
             ImGui::TableSetupColumn("Requests");
+            ImGui::TableSetupColumn("Resident Clean");
+            ImGui::TableSetupColumn("Resident Dirty");
+            ImGui::TableSetupColumn("Setup WrapClr");
+            ImGui::TableSetupColumn("Setup DirtyClr");
             ImGui::TableSetupColumn("Pre NZ PT");
             ImGui::TableSetupColumn("Pre Dirty PT");
             ImGui::TableSetupColumn("NonZero PT");
@@ -2635,14 +2716,22 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 ImGui::TableSetColumnIndex(3);
                 ImGui::Text("%u", stats.requestedPages[clipmapIndex]);
                 ImGui::TableSetColumnIndex(4);
-                ImGui::Text("%u", stats.preAllocateNonZeroPageTableEntries[clipmapIndex]);
+                ImGui::Text("%u", stats.markResidentCleanHits[clipmapIndex]);
                 ImGui::TableSetColumnIndex(5);
-                ImGui::Text("%u", stats.preAllocateDirtyPageTableEntries[clipmapIndex]);
+                ImGui::Text("%u", stats.markResidentDirtyHits[clipmapIndex]);
                 ImGui::TableSetColumnIndex(6);
-                ImGui::Text("%u", stats.nonZeroPageTableEntries[clipmapIndex]);
+                ImGui::Text("%u", stats.setupWrappedClearedPageTableEntries[clipmapIndex]);
                 ImGui::TableSetColumnIndex(7);
-                ImGui::Text("%u", stats.allocatedPageTableEntries[clipmapIndex]);
+                ImGui::Text("%u", stats.setupStaleDirtyClearedPageTableEntries[clipmapIndex]);
                 ImGui::TableSetColumnIndex(8);
+                ImGui::Text("%u", stats.preAllocateNonZeroPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(9);
+                ImGui::Text("%u", stats.preAllocateDirtyPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(10);
+                ImGui::Text("%u", stats.nonZeroPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(11);
+                ImGui::Text("%u", stats.allocatedPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(12);
                 ImGui::Text("%u", stats.dirtyPageTableEntries[clipmapIndex]);
             }
 

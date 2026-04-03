@@ -57,6 +57,7 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
             Builtin::Light::SpotLightMatrixBuffer,
             Builtin::Light::DirectionalLightCascadeBuffer,
             Builtin::Shadows::CLodClipmapInfo,
+            Builtin::Shadows::CLodDirectionalPageViewInfo,
             Builtin::Shadows::CLodPageTable,
             Builtin::Shadows::CLodPhysicalPages,
             Builtin::Light::ClusterBuffer,

@@ -39,8 +39,16 @@ struct CLodVirtualShadowStats
     uint allocationDispatchGroupCount;
     uint freePhysicalPageCount;
     uint reusablePhysicalPageCount;
+    uint setupResetApplied;
+    uint markRequestOverflowCount;
+    uint setupResetForced;
+    uint setupResetNoPreviousState;
+    uint setupResetStructureMismatch;
     uint pad0;
-    uint pad1;
+    uint setupWrappedClearedPageTableEntries[kCLodVirtualShadowClipmapCount];
+    uint setupStaleDirtyClearedPageTableEntries[kCLodVirtualShadowClipmapCount];
+    uint markResidentCleanHits[kCLodVirtualShadowClipmapCount];
+    uint markResidentDirtyHits[kCLodVirtualShadowClipmapCount];
     uint preAllocateNonZeroPageTableEntries[kCLodVirtualShadowClipmapCount];
     uint preAllocateDirtyPageTableEntries[kCLodVirtualShadowClipmapCount];
     uint selectedPixels[kCLodVirtualShadowClipmapCount];

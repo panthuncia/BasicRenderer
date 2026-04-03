@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include <windows.h>
 #include <iostream>
 #include <ThirdParty/stb/stb_image.h>
@@ -101,6 +103,11 @@ void CombineMaps(std::unordered_map<T1, T2>& dest, const std::unordered_map<T1, 
 
 struct Cascade {
 	float size;
+	DirectX::XMFLOAT4 worldCenter;
+	int64_t pageOffsetX = 0;
+	int64_t pageOffsetY = 0;
+	float nearPlane = 0.0f;
+	float farPlane = 0.0f;
 	DirectX::XMMATRIX orthoMatrix;
 	DirectX::XMMATRIX viewMatrix;
 	std::array<ClippingPlane, 6> frustumPlanes;

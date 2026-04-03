@@ -1,5 +1,6 @@
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapAllocatePagesPass.h"
 
+#include "BuiltinResources.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
@@ -13,20 +14,24 @@ VirtualShadowMapAllocatePagesPass::VirtualShadowMapAllocatePagesPass(
     std::shared_ptr<Buffer> allocationRequestsBuffer,
     std::shared_ptr<Buffer> allocationCountBuffer,
     std::shared_ptr<Buffer> indirectArgsBuffer,
+    std::shared_ptr<Buffer> clipmapInfoBuffer,
     std::shared_ptr<PixelBuffer> pageTableTexture,
     std::shared_ptr<Buffer> pageMetadataBuffer,
     std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
     std::shared_ptr<Buffer> freePhysicalPagesBuffer,
     std::shared_ptr<Buffer> reusablePhysicalPagesBuffer,
+    std::shared_ptr<Buffer> directionalPageViewInfoBuffer,
     std::shared_ptr<Buffer> pageListHeaderBuffer)
     : m_allocationRequestsBuffer(std::move(allocationRequestsBuffer))
     , m_allocationCountBuffer(std::move(allocationCountBuffer))
     , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
+    , m_clipmapInfoBuffer(std::move(clipmapInfoBuffer))
     , m_pageTableTexture(std::move(pageTableTexture))
     , m_pageMetadataBuffer(std::move(pageMetadataBuffer))
     , m_dirtyPageFlagsBuffer(std::move(dirtyPageFlagsBuffer))
     , m_freePhysicalPagesBuffer(std::move(freePhysicalPagesBuffer))
     , m_reusablePhysicalPagesBuffer(std::move(reusablePhysicalPagesBuffer))
+    , m_directionalPageViewInfoBuffer(std::move(directionalPageViewInfoBuffer))
     , m_pageListHeaderBuffer(std::move(pageListHeaderBuffer))
 {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
@@ -50,13 +55,15 @@ VirtualShadowMapAllocatePagesPass::VirtualShadowMapAllocatePagesPass(
 void VirtualShadowMapAllocatePagesPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
     builder->WithShaderResource(
+            Builtin::CameraBuffer,
             m_allocationRequestsBuffer,
             m_allocationCountBuffer,
+            m_clipmapInfoBuffer,
             m_freePhysicalPagesBuffer,
             m_reusablePhysicalPagesBuffer,
             m_pageListHeaderBuffer)
         .WithIndirectArguments(m_indirectArgsBuffer)
-        .WithUnorderedAccess(m_pageTableTexture, m_pageMetadataBuffer, m_dirtyPageFlagsBuffer);
+        .WithUnorderedAccess(m_pageTableTexture, m_pageMetadataBuffer, m_dirtyPageFlagsBuffer, m_directionalPageViewInfoBuffer);
 }
 
 void VirtualShadowMapAllocatePagesPass::Setup() {}
@@ -81,9 +88,11 @@ PassReturn VirtualShadowMapAllocatePagesPass::Execute(PassExecutionContext& exec
     rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_FREE_PAGES_DESCRIPTOR_INDEX] = m_freePhysicalPagesBuffer->GetSRVInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_REUSABLE_PAGES_DESCRIPTOR_INDEX] = m_reusablePhysicalPagesBuffer->GetSRVInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PAGE_LIST_HEADER_DESCRIPTOR_INDEX] = m_pageListHeaderBuffer->GetSRVInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_clipmapInfoBuffer->GetSRVInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PAGE_TABLE_RESOLUTION] = CLodVirtualShadowDefaultPageTableResolution;
     rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_CLIPMAP_COUNT] = CLodVirtualShadowDefaultClipmapCount;
     rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PHYSICAL_PAGE_COUNT] = CLodVirtualShadowDefaultPhysicalPageCount;
+    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PAGE_VIEW_INFO_DESCRIPTOR_INDEX] = m_directionalPageViewInfoBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

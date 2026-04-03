@@ -37,4 +37,7 @@ private:
     std::shared_ptr<Buffer> m_runtimeStateBuffer;
     bool m_forceResetResources = false;
     bool m_resetResources = false;
+    bool m_resetReasonForced = false;
+    bool m_resetReasonNoPreviousState = false;
+    bool m_resetReasonStructureMismatch = false;
 };

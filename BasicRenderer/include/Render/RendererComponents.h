@@ -3,6 +3,7 @@
 #include <BasicScene/Components.h>
 
 #include <memory>
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 
@@ -30,6 +31,8 @@ namespace Components {
 
     struct LightViewInfo {
         std::vector<uint64_t> viewIDs;
+        std::vector<int64_t> virtualShadowUnwrappedPageOffsetX;
+        std::vector<int64_t> virtualShadowUnwrappedPageOffsetY;
         std::shared_ptr<BufferView> lightBufferView;
         uint32_t lightBufferIndex = 0;
         uint32_t viewInfoBufferIndex = 0;

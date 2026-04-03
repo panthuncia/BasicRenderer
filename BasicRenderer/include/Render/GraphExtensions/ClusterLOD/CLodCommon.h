@@ -13,6 +13,7 @@ inline constexpr const char* CLodStreamingMeshManagerGetterSettingName = "getMes
 inline constexpr const char* CLodStreamingCpuUploadBudgetSettingName = "clodStreamingCpuUploadBudgetRequests";
 inline constexpr const char* CLodDisableReyesRasterizationSettingName = "clodDisableReyesRasterization";
 inline constexpr const char* CLodReyesResourceBudgetBytesSettingName = "clodReyesResourceBudgetBytes";
+inline constexpr const char* CLodDisableVirtualShadowPageCachingSettingName = "clodDisableVirtualShadowPageCaching";
 
 enum class CLodPriorityMode : uint8_t {
     Max, // Duplicate group requests keep the maximum reported priority
@@ -203,8 +204,16 @@ struct CLodVirtualShadowStats
     uint32_t allocationDispatchGroupCount = 0u;
     uint32_t freePhysicalPageCount = 0u;
     uint32_t reusablePhysicalPageCount = 0u;
+    uint32_t setupResetApplied = 0u;
+    uint32_t markRequestOverflowCount = 0u;
+    uint32_t setupResetForced = 0u;
+    uint32_t setupResetNoPreviousState = 0u;
+    uint32_t setupResetStructureMismatch = 0u;
     uint32_t pad0 = 0u;
-    uint32_t pad1 = 0u;
+    uint32_t setupWrappedClearedPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
+    uint32_t setupStaleDirtyClearedPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
+    uint32_t markResidentCleanHits[CLodVirtualShadowDefaultClipmapCount] = {};
+    uint32_t markResidentDirtyHits[CLodVirtualShadowDefaultClipmapCount] = {};
     uint32_t preAllocateNonZeroPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
     uint32_t preAllocateDirtyPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
     uint32_t selectedPixels[CLodVirtualShadowDefaultClipmapCount] = {};
@@ -215,7 +224,7 @@ struct CLodVirtualShadowStats
     uint32_t dirtyPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
 };
 
-static_assert(sizeof(CLodVirtualShadowStats) == 224u, "CLodVirtualShadowStats size must match HLSL");
+static_assert(sizeof(CLodVirtualShadowStats) == 336u, "CLodVirtualShadowStats size must match HLSL");
 
 
 inline constexpr uint32_t CLodReyesMaxSplitPassCount = 4u;

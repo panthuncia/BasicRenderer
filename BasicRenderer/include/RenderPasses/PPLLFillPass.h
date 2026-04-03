@@ -69,6 +69,7 @@ public:
 				Builtin::Light::SpotLightMatrixBuffer,
 				Builtin::Light::DirectionalLightCascadeBuffer,
 				Builtin::Shadows::CLodClipmapInfo,
+				Builtin::Shadows::CLodDirectionalPageViewInfo,
 				Builtin::Shadows::CLodPageTable,
 				Builtin::Shadows::CLodPhysicalPages,
 				Builtin::Shadows::ShadowMaps)

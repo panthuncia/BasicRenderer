@@ -8,6 +8,7 @@
 #include "Managers/Singletons/DeletionManager.h"
 #include "Managers/ViewManager.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
+#include "Render/GraphExtensions/CLodTelemetry.h"
 #include "Utilities/MathUtils.h"
 #include "Render/MemoryIntrospectionAPI.h"
 #include "ShaderBuffers.h"
@@ -85,6 +86,32 @@ LightManager::LightManager() {
 
 LightManager::~LightManager() {
 	auto& deletionManager = DeletionManager::GetInstance();
+}
+
+namespace {
+void PublishDirectionalShadowDebug(const std::vector<Cascade>& cascades)
+{
+	CLodDirectionalShadowDebugSnapshot snapshot{};
+	snapshot.clipmapCount = static_cast<uint32_t>((std::min)(cascades.size(), static_cast<size_t>(CLodDirectionalShadowDebugMaxClipmaps)));
+	for (uint32_t clipmapIndex = 0; clipmapIndex < snapshot.clipmapCount; ++clipmapIndex) {
+		const Cascade& cascade = cascades[clipmapIndex];
+		auto& entry = snapshot.clipmaps[clipmapIndex];
+		entry.valid = 1u;
+		entry.clipDiameter = cascade.size;
+		entry.nearPlane = cascade.nearPlane;
+		entry.farPlane = cascade.farPlane;
+		entry.pageOffsetX = cascade.pageOffsetX;
+		entry.pageOffsetY = cascade.pageOffsetY;
+		entry.positionWorldSpace = {
+			cascade.worldCenter.x,
+			cascade.worldCenter.y,
+			cascade.worldCenter.z,
+			cascade.worldCenter.w
+		};
+	}
+
+	PublishCLodDirectionalShadowDebugSnapshot(snapshot);
+}
 }
 
 AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
@@ -258,19 +285,28 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 	for (const auto& cascade : cascades) {
 		cascadePlanes->frustumPlanes.push_back(cascade.frustumPlanes);
 	}
+	PublishDirectionalShadowDebug(cascades);
 
 	// Create a camera and command buffers for each cascade.
+	viewInfo.virtualShadowUnwrappedPageOffsetX.resize(numCascades);
+	viewInfo.virtualShadowUnwrappedPageOffsetY.resize(numCascades);
 	for (int i = 0; i < numCascades; i++) {
+		viewInfo.virtualShadowUnwrappedPageOffsetX[i] = cascades[i].pageOffsetX;
+		viewInfo.virtualShadowUnwrappedPageOffsetY[i] = cascades[i].pageOffsetY;
 		CameraInfo cameraInfo = {};
-		cameraInfo.positionWorldSpace = { posFloats.x, posFloats.y, posFloats.z, 1.0f };
+		cameraInfo.positionWorldSpace = cascades[i].worldCenter;
 		cameraInfo.view = cascades[i].viewMatrix;
+		cameraInfo.viewInverse = DirectX::XMMatrixInverse(nullptr, cameraInfo.view);
 		cameraInfo.unjitteredProjection = cascades[i].orthoMatrix;
 		cameraInfo.jitteredProjection = cameraInfo.unjitteredProjection; // lights don't use jittering.
+		cameraInfo.projectionInverse = DirectX::XMMatrixInverse(nullptr, cameraInfo.unjitteredProjection);
 		cameraInfo.prevView = cameraInfo.view;
 		cameraInfo.prevJitteredProjection = cameraInfo.jitteredProjection;
 		cameraInfo.prevUnjitteredProjection = cameraInfo.unjitteredProjection;
 		cameraInfo.viewProjection = DirectX::XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
 		cameraInfo.aspectRatio = camera.aspect;
+		cameraInfo.zNear = cascades[i].nearPlane;
+		cameraInfo.zFar = cascades[i].farPlane;
 		cameraInfo.clippingPlanes[0] = cascades[i].frustumPlanes[0];
 		cameraInfo.clippingPlanes[1] = cascades[i].frustumPlanes[1];
 		cameraInfo.clippingPlanes[2] = cascades[i].frustumPlanes[2];
@@ -301,8 +337,9 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 
 void LightManager::UpdateLightViewInfo(flecs::entity light) {
 	//auto projectionMatrix = light.get<Components::ProjectionMatrix>();
-	auto& viewInfo = light.get<Components::LightViewInfo>();
+	auto viewInfo = light.get<Components::LightViewInfo>();
 	auto& renderViewIds = viewInfo.viewIDs;
+	bool lightViewInfoChanged = false;
 	auto& lightInfo = light.get<Components::Light>();
 	auto& lightMatrix = light.get<Components::Matrix>();
 	auto& planes = light.get<Components::FrustumPlanes>().frustumPlanes;
@@ -374,25 +411,32 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			return;
 		}
 		auto numCascades = getNumDirectionalLightCascades();
-		auto dir = DirectX::XMVector3Normalize(lightMatrix.matrix.r[2]);
 		auto& camera = m_currentCamera.get<Components::Camera>();
 		auto& matrix = m_currentCamera.get<Components::Matrix>().matrix;
 		auto posFloats = GetGlobalPositionFromMatrix(matrix);
 		auto cascades = setupDirectionalClipmaps(numCascades, lightInfo.lightInfo.dirWorldSpace, DirectX::XMLoadFloat3(&posFloats), GetForwardFromMatrix(matrix), GetUpFromMatrix(matrix), camera.zNear, camera.fov, camera.aspect, getDirectionalLightCascadeSplits());
+		PublishDirectionalShadowDebug(cascades);
+		viewInfo.virtualShadowUnwrappedPageOffsetX.resize(numCascades);
+		viewInfo.virtualShadowUnwrappedPageOffsetY.resize(numCascades);
 		for (int i = 0; i < numCascades; i++) {
+			viewInfo.virtualShadowUnwrappedPageOffsetX[i] = cascades[i].pageOffsetX;
+			viewInfo.virtualShadowUnwrappedPageOffsetY[i] = cascades[i].pageOffsetY;
 			CameraInfo info = {};
-			// Directional shadow clipmaps refine against the primary camera position,
-			// not the directional light entity's transform.
-			info.positionWorldSpace = { posFloats.x, posFloats.y, posFloats.z, 1.0f };
+			// Match Timberdoodle's model: the shadow camera is derived from a page-aligned
+			// projection of the primary camera into a fixed light-space basis.
+			info.positionWorldSpace = cascades[i].worldCenter;
 			info.view = cascades[i].viewMatrix;
+			info.viewInverse = DirectX::XMMatrixInverse(nullptr, info.view);
 			info.unjitteredProjection = cascades[i].orthoMatrix;
 			info.jitteredProjection = info.unjitteredProjection; // lights don't use jittering.
+			info.projectionInverse = DirectX::XMMatrixInverse(nullptr, info.unjitteredProjection);
 			info.prevView = info.view;
 			info.prevJitteredProjection = info.jitteredProjection;
 			info.prevUnjitteredProjection = info.unjitteredProjection;
 			info.viewProjection = DirectX::XMMatrixMultiply(cascades[i].viewMatrix, cascades[i].orthoMatrix);
-			info.zNear = camera.zNear;
 			info.aspectRatio = camera.aspect;
+			info.zNear = cascades[i].nearPlane;
+			info.zFar = cascades[i].farPlane;
 			info.clippingPlanes[0] = cascades[i].frustumPlanes[0];
 			info.clippingPlanes[1] = cascades[i].frustumPlanes[1];
 			info.clippingPlanes[2] = cascades[i].frustumPlanes[2];
@@ -412,10 +456,15 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			info.isOrtho = true; // Directional lights use orthographic projection for shadows.
 			m_pViewManager->UpdateCamera(renderViewIds[i], info);
 		}
+		lightViewInfoChanged = true;
 		break;
 	}
 	default:
 		spdlog::warn("Light type not recognized");
+	}
+
+	if (lightViewInfoChanged) {
+		light.set<Components::LightViewInfo>(viewInfo);
 	}
 }
 

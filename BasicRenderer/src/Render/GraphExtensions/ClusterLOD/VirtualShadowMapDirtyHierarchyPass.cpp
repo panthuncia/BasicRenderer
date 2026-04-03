@@ -43,16 +43,21 @@ PassReturn VirtualShadowMapDirtyHierarchyPass::Execute(PassExecutionContext& exe
 
     const uint32_t mipCount = m_dirtyHierarchyTexture->GetNumUAVMipLevels();
     for (uint32_t mipIndex = 0; mipIndex < mipCount; ++mipIndex) {
-        const uint32_t srcResolution = (CLodVirtualShadowDefaultPageTableResolution >> mipIndex);
-        const uint32_t dstResolution = (srcResolution > 1u) ? (srcResolution >> 1u) : 1u;
+        const bool sourceIsPageTable = (mipIndex == 0u);
+        const uint32_t srcResolution = sourceIsPageTable
+            ? CLodVirtualShadowDefaultPageTableResolution
+            : (CLodVirtualShadowDefaultPageTableResolution >> (mipIndex - 1u));
+        const uint32_t dstResolution = sourceIsPageTable
+            ? srcResolution
+            : ((srcResolution > 1u) ? (srcResolution >> 1u) : 1u);
 
         uint32_t rootConstants[NumMiscUintRootConstants] = {};
         rootConstants[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_SOURCE_DESCRIPTOR_INDEX] =
-            (mipIndex == 0u)
+            sourceIsPageTable
             ? m_pageTableTexture->GetSRVInfo(SRVViewType::Texture2DArrayFull, 0).slot.index
             : m_dirtyHierarchyTexture->GetSRVInfo(SRVViewType::Texture2DArrayFull, mipIndex - 1u).slot.index;
         rootConstants[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_DEST_DESCRIPTOR_INDEX] = m_dirtyHierarchyTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, mipIndex).slot.index;
-        rootConstants[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_SOURCE_IS_PAGE_TABLE] = (mipIndex == 0u) ? 1u : 0u;
+        rootConstants[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_SOURCE_IS_PAGE_TABLE] = sourceIsPageTable ? 1u : 0u;
         rootConstants[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_SOURCE_RESOLUTION] = srcResolution;
         rootConstants[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_CLIPMAP_COUNT] = CLodVirtualShadowDefaultClipmapCount;
 

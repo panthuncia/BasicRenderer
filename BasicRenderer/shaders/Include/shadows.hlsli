@@ -70,6 +70,7 @@ float calculateDirectionalVSMShadow(float3 fragPosWorldSpace, float3 fragPosView
     (void)cascadeCameraIndexBuffer;
 
     StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodClipmapInfo)];
+    StructuredBuffer<float4> directionalPageViewInfo = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodDirectionalPageViewInfo)];
     Texture2DArray<uint> pageTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPageTable)];
     Texture2D<uint> physicalPages = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPhysicalPages)];
 
@@ -104,13 +105,6 @@ float calculateDirectionalVSMShadow(float3 fragPosWorldSpace, float3 fragPosView
             continue;
         }
 
-        const float4 fragPosLightView = mul(float4(fragPosWorldSpace, 1.0f), lightCamera.view);
-        const float linearLightDepth = -fragPosLightView.z;
-        if (linearLightDepth <= 0.0f)
-        {
-            continue;
-        }
-
         const uint2 virtualPageCoords = CLodVirtualShadowVirtualPageCoordsFromUv(uv.xy);
         const uint2 wrappedPageCoords = CLodVirtualShadowWrappedPageCoords(virtualPageCoords, clipmapInfo);
         const uint pageEntry = pageTable.Load(int4(wrappedPageCoords, clipmapInfo.pageTableLayer, 0));
@@ -119,6 +113,23 @@ float calculateDirectionalVSMShadow(float3 fragPosWorldSpace, float3 fragPosView
         }
 
         const uint physicalPageIndex = pageEntry & kCLodVirtualShadowPhysicalPageIndexMask;
+        row_major matrix cachedPageView = lightCamera.view;
+        const uint pageViewInfoIndex =
+            clipmapInfo.pageTableLayer * (kCLodVirtualShadowPageTableResolution * kCLodVirtualShadowPageTableResolution) +
+            wrappedPageCoords.y * kCLodVirtualShadowPageTableResolution +
+            wrappedPageCoords.x;
+        const float4 cachedPageViewRow = directionalPageViewInfo[pageViewInfoIndex];
+        cachedPageView[3][0] = cachedPageViewRow.x;
+        cachedPageView[3][1] = cachedPageViewRow.y;
+        cachedPageView[3][2] = cachedPageViewRow.z;
+        cachedPageView[3][3] = cachedPageViewRow.w;
+        const float4 fragPosCachedPageLightView = mul(float4(fragPosWorldSpace, 1.0f), cachedPageView);
+        const float linearLightDepth = -fragPosCachedPageLightView.z;
+        if (linearLightDepth <= 0.0f)
+        {
+            continue;
+        }
+
         const uint2 virtualTexelCoords = CLodVirtualShadowVirtualTexelCoordsFromUv(uv.xy);
         const uint2 atlasPixel = CLodVirtualShadowPhysicalAtlasPixel(physicalPageIndex, virtualTexelCoords);
 

@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "Managers/Singletons/RendererECSManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/ViewManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
@@ -49,11 +50,15 @@ float ExtractOrthographicHeight(const DirectX::XMMATRIX& projection)
     return std::abs(m22) > 1.0e-6f ? (2.0f / std::abs(m22)) : 0.0f;
 }
 
+bool NearlyEqualFloat(float lhs, float rhs, float epsilon = 1.0e-5f)
+{
+    return std::abs(lhs - rhs) <= epsilon * std::max(std::max(std::abs(lhs), std::abs(rhs)), 1.0f);
+}
+
 bool ClipmapStructureEquals(const CLodVirtualShadowClipmapInfo& lhs, const CLodVirtualShadowClipmapInfo& rhs)
 {
-    return lhs.texelWorldSize == rhs.texelWorldSize &&
+    return NearlyEqualFloat(lhs.texelWorldSize, rhs.texelWorldSize) &&
         lhs.pageTableLayer == rhs.pageTableLayer &&
-        lhs.shadowCameraBufferIndex == rhs.shadowCameraBufferIndex &&
         lhs.clipLevel == rhs.clipLevel &&
     ((lhs.flags & CLodVirtualShadowClipmapValidFlag) == (rhs.flags & CLodVirtualShadowClipmapValidFlag));
 }
@@ -124,7 +129,15 @@ void VirtualShadowMapSetupPass::Setup() {}
 
 void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionContext)
 {
-    m_resetResources = m_forceResetResources || !g_previousClipmapInfosValid;
+    const bool disableVirtualShadowPageCaching =
+        SettingsManager::GetInstance().getSettingGetter<bool>(CLodDisableVirtualShadowPageCachingSettingName)();
+    const bool forceResetResources = m_forceResetResources || disableVirtualShadowPageCaching;
+    m_forceResetResources = false;
+
+    m_resetReasonForced = forceResetResources;
+    m_resetReasonNoPreviousState = !g_previousClipmapInfosValid;
+    m_resetReasonStructureMismatch = false;
+    m_resetResources = m_resetReasonForced || m_resetReasonNoPreviousState;
 
     CLodVirtualShadowRuntimeState runtimeState{};
     runtimeState.clipmapCount = CLodVirtualShadowDefaultClipmapCount;
@@ -160,25 +173,15 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
                 const float orthoWidth = ExtractOrthographicWidth(view->cameraInfo.unjitteredProjection);
                 const float orthoHeight = ExtractOrthographicHeight(view->cameraInfo.unjitteredProjection);
                 const float virtualShadowResolution = static_cast<float>(CLodVirtualShadowDefaultVirtualResolution);
-                const float pageWorldSize =
-                    std::max(orthoWidth, orthoHeight) /
-                    std::max(static_cast<float>(CLodVirtualShadowDefaultPageTableResolution), 1.0f);
-
-                const DirectX::XMVECTOR clipAnchorWorld = DirectX::XMVectorSet(
-                    view->cameraInfo.positionWorldSpace.x,
-                    view->cameraInfo.positionWorldSpace.y,
-                    view->cameraInfo.positionWorldSpace.z,
-                    1.0f);
-                const DirectX::XMVECTOR clipAnchorLightView = DirectX::XMVector4Transform(clipAnchorWorld, view->cameraInfo.view);
-                const float clipAnchorLightViewX = DirectX::XMVectorGetX(clipAnchorLightView);
-                const float clipAnchorLightViewY = DirectX::XMVectorGetY(clipAnchorLightView);
 
                 auto& clipmapInfo = clipmapInfos[clipmapIndex];
-                const int64_t pageOffsetX = pageWorldSize > 1.0e-6f
-                    ? static_cast<int64_t>(std::floor(clipAnchorLightViewX / pageWorldSize))
+                const int64_t pageOffsetX =
+                    clipmapIndex < lightViewInfo.virtualShadowUnwrappedPageOffsetX.size()
+                    ? lightViewInfo.virtualShadowUnwrappedPageOffsetX[clipmapIndex]
                     : 0;
-                const int64_t pageOffsetY = pageWorldSize > 1.0e-6f
-                    ? static_cast<int64_t>(std::floor(-clipAnchorLightViewY / pageWorldSize))
+                const int64_t pageOffsetY =
+                    clipmapIndex < lightViewInfo.virtualShadowUnwrappedPageOffsetY.size()
+                    ? lightViewInfo.virtualShadowUnwrappedPageOffsetY[clipmapIndex]
                     : 0;
                 clipmapInfo.worldOriginX = view->cameraInfo.positionWorldSpace.x;
                 clipmapInfo.worldOriginY = view->cameraInfo.positionWorldSpace.y;
@@ -212,6 +215,7 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
         }
 
         if (!m_resetResources && !ClipmapStructureEquals(info, g_previousClipmapInfos[clipmapIndex])) {
+            m_resetReasonStructureMismatch = true;
             m_resetResources = true;
         }
     }
@@ -249,6 +253,9 @@ PassReturn VirtualShadowMapSetupPass::Execute(PassExecutionContext& executionCon
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RESET_RESOURCES] = m_resetResources ? 1u : 0u;
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_clipmapInfoBuffer->GetSRVInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_FORCED] = m_resetReasonForced ? 1u : 0u;
+    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_NO_PREVIOUS_STATE] = m_resetReasonNoPreviousState ? 1u : 0u;
+    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_STRUCTURE_MISMATCH] = m_resetReasonStructureMismatch ? 1u : 0u;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

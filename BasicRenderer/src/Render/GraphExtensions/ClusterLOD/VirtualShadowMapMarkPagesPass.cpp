@@ -15,6 +15,7 @@ VirtualShadowMapMarkPagesPass::VirtualShadowMapMarkPagesPass(
     std::shared_ptr<PixelBuffer> pageTableTexture,
     std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
     std::shared_ptr<Buffer> pageMetadataBuffer,
+    std::shared_ptr<Buffer> directionalPageViewInfoBuffer,
     std::shared_ptr<Buffer> statsBuffer)
     : m_allocationRequestsBuffer(std::move(allocationRequestsBuffer))
     , m_allocationCountBuffer(std::move(allocationCountBuffer))
@@ -22,6 +23,7 @@ VirtualShadowMapMarkPagesPass::VirtualShadowMapMarkPagesPass(
     , m_pageTableTexture(std::move(pageTableTexture))
     , m_dirtyPageFlagsBuffer(std::move(dirtyPageFlagsBuffer))
     , m_pageMetadataBuffer(std::move(pageMetadataBuffer))
+    , m_directionalPageViewInfoBuffer(std::move(directionalPageViewInfoBuffer))
     , m_statsBuffer(std::move(statsBuffer))
 {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
@@ -35,9 +37,9 @@ VirtualShadowMapMarkPagesPass::VirtualShadowMapMarkPagesPass(
 void VirtualShadowMapMarkPagesPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
     builder->WithShaderResource(
+            Builtin::CameraBuffer,
             Builtin::PrimaryCamera::LinearDepthMap,
             Builtin::GBuffer::Normals,
-            Builtin::CameraBuffer,
             m_clipmapInfoBuffer)
         .WithUnorderedAccess(
             m_allocationRequestsBuffer,
@@ -45,6 +47,7 @@ void VirtualShadowMapMarkPagesPass::DeclareResourceUsages(ComputePassBuilder* bu
             m_pageTableTexture,
             m_dirtyPageFlagsBuffer,
             m_pageMetadataBuffer,
+            m_directionalPageViewInfoBuffer,
             m_statsBuffer);
 }
 
@@ -78,6 +81,7 @@ PassReturn VirtualShadowMapMarkPagesPass::Execute(PassExecutionContext& executio
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_MAX_REQUEST_COUNT] = (std::min)(CLodVirtualShadowDefaultPhysicalPageCount, CLodVirtualShadowMaxAllocationRequests);
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_PAGE_VIEW_INFO_DESCRIPTOR_INDEX] = m_directionalPageViewInfoBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 
     commandList.PushConstants(

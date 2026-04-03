@@ -49,5 +49,6 @@ struct CLodVirtualShadowPageListHeaderTag {};
 struct CLodVirtualShadowDirtyPageFlagsTag {};
 struct CLodVirtualShadowDirtyHierarchyTag {};
 struct CLodVirtualShadowClipmapInfoTag {};
+struct CLodVirtualShadowDirectionalPageViewInfoTag {};
 struct CLodVirtualShadowRuntimeStateTag {};
 struct CLodVirtualShadowStatsTag {};

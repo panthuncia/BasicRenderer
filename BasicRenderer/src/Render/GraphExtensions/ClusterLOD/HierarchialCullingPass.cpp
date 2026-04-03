@@ -78,6 +78,7 @@ HierarchialCullingPass::HierarchialCullingPass(
     std::shared_ptr<Buffer> phase1VisibleClustersCounterBuffer,
     std::shared_ptr<Buffer> swWriteBaseCounterBuffer) {
     m_workGraphMode = inputs.workGraphMode;
+        m_rasterOutputKind = inputs.rasterOutputKind;
     CreatePipelines(
         DeviceManager::GetInstance().GetDevice(),
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -108,7 +109,6 @@ HierarchialCullingPass::HierarchialCullingPass(
     m_renderPhase = std::move(inputs.renderPhase);
     m_clodOnlyWorkloads = inputs.clodOnlyWorkloads;
     m_useShadowCascadeViews = inputs.useShadowCascadeViews;
-    m_rasterOutputKind = inputs.rasterOutputKind;
 }
 
 HierarchialCullingPass::~HierarchialCullingPass() = default;
@@ -174,11 +174,14 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
     if (UsesSWClassification(m_workGraphMode)) {
         builder->WithShaderResource(m_viewRasterInfoBuffer);
     }
+    if (UsesVirtualShadowOutput(m_rasterOutputKind)) {
+        builder->WithShaderResource(
+            Builtin::Shadows::CLodClipmapInfo,
+            m_shadowDirtyHierarchyTexture);
+    }
     if (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVirtualShadowOutput(m_rasterOutputKind)) {
         builder->WithShaderResource(
-                Builtin::Shadows::CLodPageTable,
-                Builtin::Shadows::CLodClipmapInfo,
-                m_shadowDirtyHierarchyTexture)
+                Builtin::Shadows::CLodPageTable)
             .WithUnorderedAccess(Builtin::Shadows::CLodPhysicalPages);
     }
 
