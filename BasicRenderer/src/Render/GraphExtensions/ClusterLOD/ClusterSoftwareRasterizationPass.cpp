@@ -22,6 +22,9 @@ ClusterSoftwareRasterizationPass::ClusterSoftwareRasterizationPass(
     std::shared_ptr<Buffer> sortedToUnsortedMappingBuffer,
     std::shared_ptr<Buffer> viewRasterInfoBuffer,
     CLodRasterOutputKind outputKind,
+    std::shared_ptr<PixelBuffer> virtualShadowPageTableTexture,
+    std::shared_ptr<PixelBuffer> virtualShadowPhysicalPagesTexture,
+    std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer,
     std::shared_ptr<ResourceGroup> slabResourceGroup,
     bool runWhenComputeSWRasterEnabledOnly)
     : m_compactedVisibleClustersBuffer(std::move(compactedVisibleClustersBuffer))
@@ -29,6 +32,9 @@ ClusterSoftwareRasterizationPass::ClusterSoftwareRasterizationPass(
     , m_rasterBucketsIndirectArgsBuffer(std::move(rasterBucketsIndirectArgsBuffer))
     , m_sortedToUnsortedMappingBuffer(std::move(sortedToUnsortedMappingBuffer))
     , m_viewRasterInfoBuffer(std::move(viewRasterInfoBuffer))
+    , m_virtualShadowPageTableTexture(std::move(virtualShadowPageTableTexture))
+    , m_virtualShadowPhysicalPagesTexture(std::move(virtualShadowPhysicalPagesTexture))
+    , m_virtualShadowClipmapInfoBuffer(std::move(virtualShadowClipmapInfoBuffer))
     , m_slabResourceGroup(std::move(slabResourceGroup))
     , m_outputKind(outputKind)
     , m_runWhenComputeSWRasterEnabledOnly(runWhenComputeSWRasterEnabledOnly) {
@@ -69,10 +75,8 @@ void ClusterSoftwareRasterizationPass::DeclareResourceUsages(ComputePassBuilder*
         }
     }
     else if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
-        builder->WithShaderResource(
-                Builtin::Shadows::CLodPageTable,
-                Builtin::Shadows::CLodClipmapInfo)
-            .WithUnorderedAccess(Builtin::Shadows::CLodPhysicalPages);
+        builder->WithShaderResource(m_virtualShadowClipmapInfoBuffer)
+            .WithUnorderedAccess(m_virtualShadowPageTableTexture, m_virtualShadowPhysicalPagesTexture);
     }
 
     if (m_slabResourceGroup) {
@@ -81,9 +85,6 @@ void ClusterSoftwareRasterizationPass::DeclareResourceUsages(ComputePassBuilder*
 }
 
 void ClusterSoftwareRasterizationPass::Setup() {
-    if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
-        RegisterSRV(SRVViewType::Texture2DArrayFull, Builtin::Shadows::CLodPageTable);
-    }
 }
 
 void ClusterSoftwareRasterizationPass::Update(const UpdateExecutionContext& executionContext) {
@@ -161,6 +162,14 @@ PassReturn ClusterSoftwareRasterizationPass::Execute(PassExecutionContext& execu
     misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = m_sortedToUnsortedMappingBuffer->GetSRVInfo(0).slot.index;
+    if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] = m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX] = m_virtualShadowPhysicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_RESOLUTION] = CLodVirtualShadowDefaultPageTableResolution;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_COUNT] = CLodVirtualShadowDefaultClipmapCount;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = CLodVirtualShadowDefaultVirtualResolution;
+    }
     commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
     auto numBuckets = context.materialManager->GetRasterBucketCount();

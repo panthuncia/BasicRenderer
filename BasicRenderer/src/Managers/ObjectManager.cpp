@@ -54,10 +54,11 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 		// For each mesh, add an indirect command to the draw set buffer
 		for (auto& meshInstance : meshInstances->meshInstances) {
 			auto& mesh = meshInstance->GetMesh();
+			const uint32_t perMeshInstanceBufferIndex = static_cast<uint32_t>(meshInstance->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
 			DispatchMeshIndirectCommand command = {};
 			command.perObjectBufferIndex = static_cast<uint32_t>(perObjectCBview->GetOffset() / sizeof(PerObjectCB));
 			command.perMeshBufferIndex = static_cast<uint32_t>(mesh->GetPerMeshBufferView()->GetOffset() / sizeof(PerMeshCB));
-			command.perMeshInstanceBufferIndex = static_cast<uint32_t>(meshInstance->GetPerMeshInstanceBufferOffset() / sizeof(PerMeshInstanceCB));
+			command.perMeshInstanceBufferIndex = perMeshInstanceBufferIndex;
 			command.dispatchMeshArguments.ThreadGroupCountX = 0; //DivRoundUp(mesh->GetMeshletCount(), AS_GROUP_SIZE);
 			command.dispatchMeshArguments.ThreadGroupCountY = 1;
 			command.dispatchMeshArguments.ThreadGroupCountZ = 1;
@@ -65,6 +66,7 @@ Components::ObjectDrawInfo ObjectManager::AddObject(const PerObjectCB& perObject
 			views.push_back(view);
 			unsigned int index = static_cast<uint32_t>(view->GetOffset() / sizeof(DispatchMeshIndirectCommand));
 			indices.push_back(index);
+			drawInfo.perMeshInstanceBufferIndices.push_back(perMeshInstanceBufferIndex);
             std::vector<DrawWorkloadKey> workloadKeysForDraw;
             ForEachMeshDrawWorkload(*mesh, [&](const DrawWorkloadKey& workloadKey) {
                 if (!m_activeDrawSetIndices.contains(workloadKey)) {

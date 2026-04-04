@@ -134,6 +134,8 @@ private:
     std::shared_ptr<PixelBuffer> m_shadowPageTableTexture;
     std::shared_ptr<PixelBuffer> m_shadowPhysicalPagesTexture;
     std::shared_ptr<Buffer> m_shadowPageMetadataBuffer;
+    std::shared_ptr<Buffer> m_shadowInvalidationInputsBuffer;
+    std::shared_ptr<Buffer> m_shadowInvalidationCountBuffer;
     std::shared_ptr<Buffer> m_shadowAllocationRequestsBuffer;
     std::shared_ptr<Buffer> m_shadowAllocationCountBuffer;
     std::shared_ptr<Buffer> m_shadowAllocationIndirectArgsBuffer;

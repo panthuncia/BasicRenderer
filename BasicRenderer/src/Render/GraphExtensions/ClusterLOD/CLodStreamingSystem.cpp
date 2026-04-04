@@ -1185,6 +1185,35 @@ void CLodStreamingSystem::ApplyDiskStreamingCompletions(MeshManager* meshManager
                     m_readbackGapPinnedGroups[groupIndex] = m_readbackGeneration;
                 }
             }
+
+            if (wasNonResident) {
+                bool visibleAncestorWasUsed = false;
+                int32_t parentGroup = (groupIndex < m_streamingParentGroupByGlobal.size())
+                    ? m_streamingParentGroupByGlobal[groupIndex]
+                    : -1;
+                for (size_t hop = 0; hop < m_streamingParentGroupByGlobal.size() && parentGroup >= 0; ++hop) {
+                    const uint32_t parentGroupIndex = static_cast<uint32_t>(parentGroup);
+                    const uint32_t usedWordAddress = BitWordAddress(parentGroupIndex);
+                    if (usedWordAddress < m_usedGroupsBitsCpu.size() &&
+                        (m_usedGroupsBitsCpu[usedWordAddress] & BitMask(parentGroupIndex)) != 0u) {
+                        visibleAncestorWasUsed = true;
+                        break;
+                    }
+
+                    const int32_t nextParent = (parentGroupIndex < m_streamingParentGroupByGlobal.size())
+                        ? m_streamingParentGroupByGlobal[parentGroupIndex]
+                        : -1;
+                    if (nextParent == parentGroup) {
+                        break;
+                    }
+                    parentGroup = nextParent;
+                }
+
+                if (visibleAncestorWasUsed) {
+                    meshManager->QueueCLodShadowLodUpgradeInvalidationForGroup(groupIndex);
+                }
+            }
+
             TouchGroupPages(groupIndex);
         }
         else {

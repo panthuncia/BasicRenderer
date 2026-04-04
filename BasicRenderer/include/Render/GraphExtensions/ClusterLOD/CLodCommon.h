@@ -122,12 +122,16 @@ inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalPagesPerAxis = 64u;
 inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalPageCount =
     CLodVirtualShadowDefaultPhysicalPagesPerAxis * CLodVirtualShadowDefaultPhysicalPagesPerAxis;
 inline constexpr uint32_t CLodVirtualShadowMaxAllocationRequests = 1u << 16;
+inline constexpr uint32_t CLodVirtualShadowMaxInvalidationInputs = 1u << 16;
 inline constexpr uint32_t CLodVirtualShadowClipmapValidFlag = 0x1u;
 inline constexpr uint32_t CLodVirtualShadowClipmapInvalidateFlag = 0x2u;
 inline constexpr uint32_t CLodVirtualShadowPageAllocatedMask = 0x80000000u;
 inline constexpr uint32_t CLodVirtualShadowPageDirtyMask = 0x40000000u;
 inline constexpr uint32_t CLodVirtualShadowPhysicalPageIndexMask = 0x3FFFFFFFu;
 inline constexpr uint32_t CLodVirtualShadowPhysicalPageResidentFlag = 0x1u;
+inline constexpr uint32_t CLodVirtualShadowInvalidationFlagUsePreviousBounds = 0x1u;
+inline constexpr uint32_t CLodVirtualShadowInvalidationFlagUseCurrentBounds = 0x2u;
+inline constexpr uint32_t CLodVirtualShadowInvalidationFlagSkinned = 0x4u;
 
 constexpr uint32_t CLodVirtualShadowDirtyWordCount(uint32_t physicalPageCount)
 {
@@ -165,6 +169,16 @@ struct CLodVirtualShadowPageAllocationRequest
 };
 
 static_assert(sizeof(CLodVirtualShadowPageAllocationRequest) == 16u, "CLodVirtualShadowPageAllocationRequest size must match HLSL");
+
+struct CLodVirtualShadowInvalidationInput
+{
+    uint32_t perMeshInstanceBufferIndex = 0u;
+    uint32_t flags = 0u;
+    uint32_t pad0 = 0u;
+    uint32_t pad1 = 0u;
+};
+
+static_assert(sizeof(CLodVirtualShadowInvalidationInput) == 16u, "CLodVirtualShadowInvalidationInput size must match HLSL");
 
 struct CLodVirtualShadowPhysicalPageMeta
 {
@@ -222,9 +236,10 @@ struct CLodVirtualShadowStats
     uint32_t nonZeroPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
     uint32_t allocatedPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
     uint32_t dirtyPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
+    uint32_t clearedUnwrittenDirtyPages[CLodVirtualShadowDefaultClipmapCount] = {};
 };
 
-static_assert(sizeof(CLodVirtualShadowStats) == 336u, "CLodVirtualShadowStats size must match HLSL");
+static_assert(sizeof(CLodVirtualShadowStats) == 360u, "CLodVirtualShadowStats size must match HLSL");
 
 
 inline constexpr uint32_t CLodReyesMaxSplitPassCount = 4u;

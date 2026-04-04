@@ -11,6 +11,8 @@
 #include "include/shadows.hlsli"
 #include "include/constants.hlsli"
 #include "include/IBL.hlsli"
+#include "include/outputTypes.hlsli"
+#include "include/debugPayload.hlsli"
 
 struct LightFragmentData {
     uint lightType;
@@ -35,6 +37,7 @@ struct LightingParameters {
 
 struct LightingOutput { // Lighting + debug info
     float3 lighting;
+    uint2 shadowDebugPayload;
 #if defined(PSO_IMAGE_BASED_LIGHTING)
     float3 diffuseIBL;
     float3 specularIBL;
@@ -150,6 +153,7 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
     float3 debugSpecular = float3(0, 0, 0);
 
     LightingOutput output;
+    output.shadowDebugPayload = uint2(DEBUG_SENTINEL, DEBUG_SENTINEL);
 
 #if defined(PSO_IMAGE_BASED_LIGHTING)
     evaluateIBL(lighting,
@@ -261,7 +265,36 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
                             break;
                         }
                     case 2:{// Directional light
-                            shadow = calculateCascadedShadow(fragmentInfo.fragPosWorldSpace, fragmentInfo.fragPosViewSpace, fragmentInfo.normalWS, light, perFrameBuffer.numShadowCascades, perFrameBuffer.shadowCascadeSplits, directionalShadowViewInfoIndexBuffer, cameraBuffer);
+                            CLodVirtualShadowDebugInfo shadowDebugInfo;
+                            shadow = calculateDirectionalVSMShadowDetailed(
+                                fragmentInfo.fragPosWorldSpace,
+                                fragmentInfo.fragPosViewSpace,
+                                fragmentInfo.normalWS,
+                                light,
+                                perFrameBuffer.numShadowCascades,
+                                perFrameBuffer.shadowCascadeSplits,
+                                directionalShadowViewInfoIndexBuffer,
+                                cameraBuffer,
+                                shadowDebugInfo);
+
+                            if (output.shadowDebugPayload.x == DEBUG_SENTINEL)
+                            {
+                                switch (perFrameBuffer.outputType)
+                                {
+                                case OUTPUT_VSM_PREFERRED_CLIPMAP:
+                                    output.shadowDebugPayload = PackDebugFloat3(CLodVirtualShadowDebugClipmapColor(shadowDebugInfo.preferredClipmapIndex));
+                                    break;
+                                case OUTPUT_VSM_SAMPLED_CLIPMAP:
+                                    output.shadowDebugPayload = PackDebugFloat3(CLodVirtualShadowDebugClipmapColor(shadowDebugInfo.sampledClipmapIndex));
+                                    break;
+                                case OUTPUT_VSM_PAGE_STATE:
+                                    output.shadowDebugPayload = PackDebugFloat3(CLodVirtualShadowDebugPageStateColor(shadowDebugInfo));
+                                    break;
+                                case OUTPUT_VSM_PHYSICAL_PAGE:
+                                    output.shadowDebugPayload = PackDebugUint(shadowDebugInfo.sampledPhysicalPageIndex == 0xFFFFFFFFu ? 0u : (shadowDebugInfo.sampledPhysicalPageIndex + 1u));
+                                    break;
+                                }
+                            }
                             break;
                         }
                     }

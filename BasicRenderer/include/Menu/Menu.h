@@ -2689,7 +2689,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
             stats.setupResetNoPreviousState,
             stats.setupResetStructureMismatch);
 
-        if (ImGui::BeginTable("##VirtualShadowStatsTable", 13, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+        if (ImGui::BeginTable("##VirtualShadowStatsTable", 14, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
             ImGui::TableSetupColumn("Clip");
             ImGui::TableSetupColumn("Selected");
             ImGui::TableSetupColumn("Proj Reject");
@@ -2703,6 +2703,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
             ImGui::TableSetupColumn("NonZero PT");
             ImGui::TableSetupColumn("Allocated PT");
             ImGui::TableSetupColumn("Dirty PT");
+            ImGui::TableSetupColumn("UnwrittenClr");
             ImGui::TableHeadersRow();
 
             for (uint32_t clipmapIndex = 0u; clipmapIndex < CLodVirtualShadowDefaultClipmapCount; ++clipmapIndex) {
@@ -2733,6 +2734,8 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 ImGui::Text("%u", stats.allocatedPageTableEntries[clipmapIndex]);
                 ImGui::TableSetColumnIndex(12);
                 ImGui::Text("%u", stats.dirtyPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(13);
+                ImGui::Text("%u", stats.clearedUnwrittenDirtyPages[clipmapIndex]);
             }
 
             ImGui::EndTable();

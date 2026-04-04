@@ -44,6 +44,9 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
         case OUTPUT_MODEL_NORMALS:
         case OUTPUT_MOTION_VECTORS:
         case OUTPUT_REYES_GEOMETRY_PATH:
+        case OUTPUT_VSM_PREFERRED_CLIPMAP:
+        case OUTPUT_VSM_SAMPLED_CLIPMAP:
+        case OUTPUT_VSM_PAGE_STATE:
         case OUTPUT_TRANSPARENT_DEPTH_COMPLEXITY:
             color = UnpackDebugFloat3(payload);
             break;
@@ -56,6 +59,7 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
             break;
         case OUTPUT_MESHLETS:
         case OUTPUT_LIGHT_CLUSTER_ID:
+        case OUTPUT_VSM_PHYSICAL_PAGE:
             color = HashToColor(UnpackDebugUint(payload));
             break;
         case OUTPUT_LIGHT_CLUSTER_LIGHT_COUNT:

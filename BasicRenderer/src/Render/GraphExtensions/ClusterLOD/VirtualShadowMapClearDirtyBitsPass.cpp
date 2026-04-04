@@ -3,12 +3,14 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
+#include "Resources/Buffers/Buffer.h"
 #include "Resources/Texture.h"
 
 #include "../shaders/PerPassRootConstants/clodVirtualShadowClearDirtyBitsRootConstants.h"
 
-VirtualShadowMapClearDirtyBitsPass::VirtualShadowMapClearDirtyBitsPass(std::shared_ptr<PixelBuffer> pageTableTexture)
+VirtualShadowMapClearDirtyBitsPass::VirtualShadowMapClearDirtyBitsPass(std::shared_ptr<PixelBuffer> pageTableTexture, std::shared_ptr<Buffer> statsBuffer)
     : m_pageTableTexture(std::move(pageTableTexture))
+    , m_statsBuffer(std::move(statsBuffer))
 {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -20,7 +22,8 @@ VirtualShadowMapClearDirtyBitsPass::VirtualShadowMapClearDirtyBitsPass(std::shar
 
 void VirtualShadowMapClearDirtyBitsPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
-    builder->WithUnorderedAccess(m_pageTableTexture);
+    builder->WithUnorderedAccess(m_pageTableTexture)
+        .WithUnorderedAccess(m_statsBuffer);
 }
 
 void VirtualShadowMapClearDirtyBitsPass::Setup()
@@ -42,6 +45,7 @@ PassReturn VirtualShadowMapClearDirtyBitsPass::Execute(PassExecutionContext& exe
     rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_RESOLUTION] = CLodVirtualShadowDefaultPageTableResolution;
     rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_CLIPMAP_COUNT] = CLodVirtualShadowDefaultClipmapCount;
+    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

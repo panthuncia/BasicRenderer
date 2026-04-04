@@ -15,6 +15,7 @@
 #include "PerPassRootConstants/clodVirtualShadowClearRootConstants.h"
 #include "PerPassRootConstants/clodVirtualShadowGatherStatsRootConstants.h"
 #include "PerPassRootConstants/clodVirtualShadowDirtyHierarchyRootConstants.h"
+#include "PerPassRootConstants/clodVirtualShadowInvalidateRootConstants.h"
 #include "PerPassRootConstants/clodVirtualShadowMarkRootConstants.h"
 #include "PerPassRootConstants/clodVirtualShadowSetupRootConstants.h"
 #include "PerPassRootConstants/clodReyesSplitRootConstants.h"
@@ -29,8 +30,27 @@ struct RasterBucketsHistogramIndirectCommand
     uint dispatchX, dispatchY, dispatchZ;
 };
 
+struct CLodVirtualShadowInvalidationInput
+{
+    uint perMeshInstanceBufferIndex;
+    uint flags;
+    uint pad0;
+    uint pad1;
+};
+
 static const uint kCLodVirtualShadowDefaultClipmapCount = 6u;
+static const uint kCLodVirtualShadowInvalidationFlagUsePreviousBounds = 0x1u;
+static const uint kCLodVirtualShadowInvalidationFlagUseCurrentBounds = 0x2u;
+static const uint kCLodVirtualShadowInvalidationFlagSkinned = 0x4u;
 groupshared uint gCLodVirtualShadowShouldClearPage;
+
+float CLodMaxAxisScale_RowVector(float4x4 M)
+{
+    float3 ax = float3(M[0][0], M[0][1], M[0][2]);
+    float3 ay = float3(M[1][0], M[1][1], M[1][2]);
+    float3 az = float3(M[2][0], M[2][1], M[2][2]);
+    return max(length(ax), max(length(ay), length(az)));
+}
 
 bool CLodVirtualShadowShouldClearWrappedPage(int2 wrappedPageCoords, int clearOffsetX, int clearOffsetY, uint pageTableResolution)
 {
@@ -165,6 +185,19 @@ void CLodVirtualShadowStatsIncrementPreAllocateDirty(RWStructuredBuffer<CLodVirt
     case 3u: InterlockedAdd(statsBuffer[0].preAllocateDirtyPageTableEntries[3], 1u); break;
     case 4u: InterlockedAdd(statsBuffer[0].preAllocateDirtyPageTableEntries[4], 1u); break;
     case 5u: InterlockedAdd(statsBuffer[0].preAllocateDirtyPageTableEntries[5], 1u); break;
+    }
+}
+
+void CLodVirtualShadowStatsIncrementClearedUnwrittenDirty(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
+{
+    switch (clipmapIndex)
+    {
+    case 0u: InterlockedAdd(statsBuffer[0].clearedUnwrittenDirtyPages[0], 1u); break;
+    case 1u: InterlockedAdd(statsBuffer[0].clearedUnwrittenDirtyPages[1], 1u); break;
+    case 2u: InterlockedAdd(statsBuffer[0].clearedUnwrittenDirtyPages[2], 1u); break;
+    case 3u: InterlockedAdd(statsBuffer[0].clearedUnwrittenDirtyPages[3], 1u); break;
+    case 4u: InterlockedAdd(statsBuffer[0].clearedUnwrittenDirtyPages[4], 1u); break;
+    case 5u: InterlockedAdd(statsBuffer[0].clearedUnwrittenDirtyPages[5], 1u); break;
     }
 }
 
@@ -317,10 +350,16 @@ void CLodMarkVirtualShadowWrappedPage(
     {
         const uint physicalPageIndex = currentPageState & kCLodVirtualShadowPhysicalPageIndexMask;
         pageMetadata[physicalPageIndex].y = frameIndex;
-        if ((currentPageState & kCLodVirtualShadowDirtyMask) != 0u)
+        const bool pageNeedsPopulate = (currentPageState & kCLodVirtualShadowContentValidMask) == 0u;
+        if ((currentPageState & kCLodVirtualShadowDirtyMask) != 0u || pageNeedsPopulate)
         {
             CLodVirtualShadowStatsIncrementMarkResidentDirtyHit(statsBuffer, clipmapIndex);
             directionalPageViewInfo[pageViewInfoIndex] = directionalPageViewRow;
+            if ((currentPageState & kCLodVirtualShadowDirtyMask) == 0u)
+            {
+                uint ignored = 0u;
+                InterlockedOr(pageTable[pageCoords], kCLodVirtualShadowDirtyMask, ignored);
+            }
             InterlockedOr(dirtyFlags[physicalPageIndex >> 5u], 1u << (physicalPageIndex & 31u));
         }
         else
@@ -372,6 +411,129 @@ void CLodMarkVirtualShadowWrappedPage(
         activeClipmapCount - clipmapIndex,
         0u);
     CLodVirtualShadowStatsIncrementRequestedPages(statsBuffer, clipmapIndex);
+}
+
+void CLodInvalidateVirtualShadowWrappedPage(
+    uint2 wrappedPageCoords,
+    uint clipmapIndex,
+    uint frameIndex,
+    float4 directionalPageViewRow,
+    RWTexture2DArray<uint> pageTable,
+    RWStructuredBuffer<uint> dirtyFlags,
+    RWStructuredBuffer<uint4> pageMetadata,
+    RWStructuredBuffer<float4> directionalPageViewInfo)
+{
+    const uint3 pageCoords = uint3(wrappedPageCoords, clipmapIndex);
+    uint previousPageState = 0u;
+    InterlockedOr(pageTable[pageCoords], kCLodVirtualShadowDirtyMask, previousPageState);
+    if ((previousPageState & kCLodVirtualShadowAllocatedMask) == 0u)
+    {
+        return;
+    }
+
+    const uint physicalPageIndex = previousPageState & kCLodVirtualShadowPhysicalPageIndexMask;
+    pageMetadata[physicalPageIndex].y = frameIndex;
+    directionalPageViewInfo[CLodDirectionalShadowPageViewInfoIndex(wrappedPageCoords, clipmapIndex)] = directionalPageViewRow;
+    InterlockedOr(dirtyFlags[physicalPageIndex >> 5u], 1u << (physicalPageIndex & 31u));
+}
+
+bool CLodProjectSphereToShadowUvBounds(float3 centerWS, float radiusWS, Camera shadowCamera, out float2 uvMin, out float2 uvMax)
+{
+    const float4 shadowViewCenter = mul(float4(centerWS, 1.0f), shadowCamera.view);
+    const float4 shadowClipCenter = mul(shadowViewCenter, shadowCamera.projection);
+    const float2 ndcCenter = shadowClipCenter.xy;
+    const float2 ndcExtent = abs(float2(
+        radiusWS * shadowCamera.projection[0][0],
+        radiusWS * shadowCamera.projection[1][1]));
+    const float2 ndcMin = ndcCenter - ndcExtent;
+    const float2 ndcMax = ndcCenter + ndcExtent;
+
+    if (ndcMax.x < -1.0f || ndcMin.x > 1.0f ||
+        ndcMax.y < -1.0f || ndcMin.y > 1.0f)
+    {
+        uvMin = 0.0f.xx;
+        uvMax = 0.0f.xx;
+        return false;
+    }
+
+    uvMin = float2(ndcMin.x * 0.5f + 0.5f, 1.0f - (ndcMax.y * 0.5f + 0.5f));
+    uvMax = float2(ndcMax.x * 0.5f + 0.5f, 1.0f - (ndcMin.y * 0.5f + 0.5f));
+    return true;
+}
+
+void CLodInvalidateVirtualShadowSphere(
+    float3 centerWS,
+    float radiusWS,
+    uint clipmapCount,
+    uint frameIndex,
+    StructuredBuffer<Camera> cameras,
+    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos,
+    RWTexture2DArray<uint> pageTable,
+    RWStructuredBuffer<uint> dirtyFlags,
+    RWStructuredBuffer<uint4> pageMetadata,
+    RWStructuredBuffer<float4> directionalPageViewInfo,
+    RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer)
+{
+    [loop]
+    for (uint clipmapIndex = 0u; clipmapIndex < clipmapCount; ++clipmapIndex)
+    {
+        const CLodVirtualShadowClipmapInfo clipmapInfo = clipmapInfos[clipmapIndex];
+        if (!CLodVirtualShadowClipmapIsValid(clipmapInfo))
+        {
+            continue;
+        }
+
+        const Camera shadowCamera = cameras[clipmapInfo.shadowCameraBufferIndex];
+        float2 uvMin;
+        float2 uvMax;
+        if (!CLodProjectSphereToShadowUvBounds(centerWS, radiusWS, shadowCamera, uvMin, uvMax))
+        {
+            continue;
+        }
+
+        const uint2 pageMin = CLodVirtualShadowWrappedPageCoords(CLodVirtualShadowVirtualPageCoordsFromUv(uvMin), clipmapInfo);
+        const uint2 pageMax = CLodVirtualShadowWrappedPageCoords(CLodVirtualShadowVirtualPageCoordsFromUv(uvMax), clipmapInfo);
+        const float4 directionalPageViewRow = CLodDirectionalShadowPageViewRow(shadowCamera);
+
+        CLodVirtualShadowStatsIncrementDirty(statsBuffer, clipmapIndex);
+
+        const bool wrapsX = pageMin.x > pageMax.x;
+        const bool wrapsY = pageMin.y > pageMax.y;
+        const uint segmentCountX = wrapsX ? 2u : 1u;
+        const uint segmentCountY = wrapsY ? 2u : 1u;
+
+        [loop]
+        for (uint segmentY = 0u; segmentY < segmentCountY; ++segmentY)
+        {
+            const uint yStart = (segmentY == 0u) ? pageMin.y : 0u;
+            const uint yEnd = (!wrapsY || segmentY == 0u) ? pageMax.y : (CLOD_VIRTUAL_SHADOW_INVALIDATE_PAGE_TABLE_RESOLUTION - 1u);
+
+            [loop]
+            for (uint segmentX = 0u; segmentX < segmentCountX; ++segmentX)
+            {
+                const uint xStart = (segmentX == 0u) ? pageMin.x : 0u;
+                const uint xEnd = (!wrapsX || segmentX == 0u) ? pageMax.x : (CLOD_VIRTUAL_SHADOW_INVALIDATE_PAGE_TABLE_RESOLUTION - 1u);
+
+                [loop]
+                for (uint pageY = yStart; pageY <= yEnd; ++pageY)
+                {
+                    [loop]
+                    for (uint pageX = xStart; pageX <= xEnd; ++pageX)
+                    {
+                        CLodInvalidateVirtualShadowWrappedPage(
+                            uint2(pageX, pageY),
+                            clipmapInfo.pageTableLayer,
+                            frameIndex,
+                            directionalPageViewRow,
+                            pageTable,
+                            dirtyFlags,
+                            pageMetadata,
+                            directionalPageViewInfo);
+                    }
+                }
+            }
+        }
+    }
 }
 
 bool CLodIsVisibleClusterOwnedByReyes(uint visibleClusterIndex, uint ownershipDescriptorIndex)
@@ -498,7 +660,7 @@ void CLodVirtualShadowClearPhysicalPagesCSMain(
     {
         for (uint localX = groupThreadId.x; localX < kCLodVirtualShadowPhysicalPageSize; localX += 8u)
         {
-            physicalPages[atlasBasePixel + uint2(localX, localY)] = 0xFFFFFFFFu;
+            physicalPages[atlasBasePixel + uint2(localX, localY)] = 0x7F7FFFFFu;
         }
     }
 }
@@ -682,19 +844,11 @@ void CLodVirtualShadowMarkPagesCSMain(uint3 dispatchThreadId : SV_DispatchThread
         return;
     }
 
-    const float footprintWidth = length(footprintBR - footprintBL);
-    const float footprintHeight = length(footprintTR - footprintTL);
-    const float footprintDiameter = max(max(footprintWidth, footprintHeight), 1.0e-5f);
-    const float baseTexelWorldSize = max(clipmapInfos[0].texelWorldSize, 1.0e-5f);
-    const float footprintScale = max(footprintDiameter / baseTexelWorldSize, 1.0f);
-    const uint footprintClipmapIndex = min(
-        (uint)ceil(log2(footprintScale)),
-        activeClipmapCount - 1u);
-
-    const uint cascadeClipmapIndex = min(
-        CLodCalculateShadowCascadeIndex(linearDepth, activeClipmapCount, perFrameBuffer.shadowCascadeSplits),
-        activeClipmapCount - 1u);
-    const uint clipmapIndex = max(cascadeClipmapIndex, footprintClipmapIndex);
+    const uint clipmapIndex = CLodVirtualShadowSelectClipmapIndex(
+        positionWS,
+        mainCamera.positionWorldSpace.xyz,
+        clipmapInfos[0].texelWorldSize,
+        activeClipmapCount);
 
     const CLodVirtualShadowClipmapInfo clipmapInfo = clipmapInfos[clipmapIndex];
     if (!CLodVirtualShadowClipmapIsValid(clipmapInfo))
@@ -772,6 +926,76 @@ void CLodVirtualShadowMarkPagesCSMain(uint3 dispatchThreadId : SV_DispatchThread
 
 #undef CLOD_MARK_FOOTPRINT_PAGE
 
+}
+
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void CLodVirtualShadowInvalidatePagesCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+    StructuredBuffer<PerMeshInstanceBuffer> perMeshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+    StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
+    StructuredBuffer<CLodVirtualShadowInvalidationInput> invalidationInputs = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_INVALIDATE_INPUTS_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> invalidationCountBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_INVALIDATE_INPUT_COUNT_DESCRIPTOR_INDEX];
+    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_INVALIDATE_CLIPMAP_INFO_DESCRIPTOR_INDEX];
+    RWTexture2DArray<uint> pageTable = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_INVALIDATE_PAGE_TABLE_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> dirtyFlags = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_INVALIDATE_DIRTY_FLAGS_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint4> pageMetadata = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_INVALIDATE_PAGE_METADATA_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<float4> directionalPageViewInfo = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_INVALIDATE_PAGE_VIEW_INFO_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_INVALIDATE_STATS_DESCRIPTOR_INDEX];
+
+    const uint inputIndex = dispatchThreadId.x;
+    const uint inputCount = invalidationCountBuffer.Load(0);
+    if (inputIndex >= inputCount)
+    {
+        return;
+    }
+
+    const CLodVirtualShadowInvalidationInput input = invalidationInputs[inputIndex];
+    const PerMeshInstanceBuffer instanceData = perMeshInstanceBuffer[input.perMeshInstanceBufferIndex];
+    const PerObjectBuffer objectData = perObjectBuffer[instanceData.perObjectBufferIndex];
+    const float baseRadius = instanceData.boundingSphere.sphere.w;
+    const float skinnedScale = ((input.flags & kCLodVirtualShadowInvalidationFlagSkinned) != 0u)
+        ? max(instanceData.skinnedBoundsScale, 1.0f)
+        : 1.0f;
+    const uint clipmapCount = min(CLOD_VIRTUAL_SHADOW_INVALIDATE_CLIPMAP_COUNT, kCLodVirtualShadowClipmapCount);
+
+    if ((input.flags & kCLodVirtualShadowInvalidationFlagUseCurrentBounds) != 0u)
+    {
+        const float currentScale = CLodMaxAxisScale_RowVector(objectData.model) * skinnedScale;
+        const float3 currentCenter = mul(float4(instanceData.boundingSphere.sphere.xyz, 1.0f), objectData.model).xyz;
+        CLodInvalidateVirtualShadowSphere(
+            currentCenter,
+            baseRadius * currentScale,
+            clipmapCount,
+            perFrameBuffer.frameIndex,
+            cameras,
+            clipmapInfos,
+            pageTable,
+            dirtyFlags,
+            pageMetadata,
+            directionalPageViewInfo,
+            statsBuffer);
+    }
+
+    if ((input.flags & kCLodVirtualShadowInvalidationFlagUsePreviousBounds) != 0u)
+    {
+        const float previousScale = CLodMaxAxisScale_RowVector(objectData.prevModel) * skinnedScale;
+        const float3 previousCenter = mul(float4(instanceData.boundingSphere.sphere.xyz, 1.0f), objectData.prevModel).xyz;
+        CLodInvalidateVirtualShadowSphere(
+            previousCenter,
+            baseRadius * previousScale,
+            clipmapCount,
+            perFrameBuffer.frameIndex,
+            cameras,
+            clipmapInfos,
+            pageTable,
+            dirtyFlags,
+            pageMetadata,
+            directionalPageViewInfo,
+            statsBuffer);
+    }
 }
 
 [shader("compute")]
@@ -963,6 +1187,12 @@ void CLodVirtualShadowClearDirtyBitsCSMain(uint3 dispatchThreadId : SV_DispatchT
 
     RWTexture2DArray<uint> pageTable = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_DESCRIPTOR_INDEX];
     const uint pageEntry = pageTable[dispatchThreadId];
+    if ((pageEntry & (kCLodVirtualShadowAllocatedMask | kCLodVirtualShadowDirtyMask | kCLodVirtualShadowContentValidMask)) ==
+        (kCLodVirtualShadowAllocatedMask | kCLodVirtualShadowDirtyMask))
+    {
+        RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_STATS_DESCRIPTOR_INDEX];
+        CLodVirtualShadowStatsIncrementClearedUnwrittenDirty(statsBuffer, dispatchThreadId.z);
+    }
     pageTable[dispatchThreadId] = pageEntry & ~kCLodVirtualShadowDirtyMask;
 }
 

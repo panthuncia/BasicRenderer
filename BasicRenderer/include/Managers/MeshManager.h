@@ -85,6 +85,14 @@ public:
 	void ProcessCLodDiskStreamingIO(
 		uint32_t maxCompletedRequests = 64u);
 
+	// Queues conservative virtual-shadow invalidation for all active mesh instances
+	// sharing the asset that owns the given global CLod group.
+	void QueueCLodShadowLodUpgradeInvalidationForGroup(uint32_t groupGlobalIndex);
+
+	// Consumes pending per-mesh-instance invalidation records produced by CLod
+	// streaming residency upgrades.
+	void ConsumeCLodShadowLodUpgradeInvalidationMeshInstances(std::vector<uint32_t>& outMeshInstanceIndices);
+
 	// Drains groups that completed disk streaming since the last call.
 	// The extension uses this to learn which groups became resident (or failed)
 	// so it can update the GPU-visible non-resident bitset accordingly.
@@ -224,6 +232,7 @@ private:
 	std::atomic<uint32_t> m_debugResidentGroups{0};
 	std::atomic<uint32_t> m_debugResidentAllocations{0};
 	std::atomic<uint64_t> m_debugTotalStreamedBytes{0};
+	std::unordered_set<uint32_t> m_pendingShadowLodUpgradeInvalidationMeshInstances;
 
 	struct CLodDiskStreamingRequest {
 		uint32_t groupGlobalIndex = 0;

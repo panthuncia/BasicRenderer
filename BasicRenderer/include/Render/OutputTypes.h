@@ -21,6 +21,10 @@ enum OutputType {
 	TRANSPARENT_DEPTH_COMPLEXITY = 17,
 	TRANSPARENT_RESOLVED_SAMPLE_COUNT = 18,
 	REYES_GEOMETRY_PATH = 19,
+	VSM_PREFERRED_CLIPMAP = 20,
+	VSM_SAMPLED_CLIPMAP = 21,
+	VSM_PAGE_STATE = 22,
+	VSM_PHYSICAL_PAGE = 23,
 };
 
 inline std::vector<std::string> OutputTypeNames = {
@@ -44,4 +48,8 @@ inline std::vector<std::string> OutputTypeNames = {
 	"Transparent Depth Complexity",
 	"Transparent Resolved Sample Count",
 	"Reyes Geometry Path",
+	"VSM Preferred Clipmap",
+	"VSM Sampled Clipmap",
+	"VSM Page State",
+	"VSM Physical Page",
 };

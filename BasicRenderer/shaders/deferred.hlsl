@@ -90,6 +90,12 @@ void DeferredCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             case OUTPUT_LIGHT_CLUSTER_LIGHT_COUNT:
                 payload = PackDebugUint(lightingOutput.clusterLightCount);
                 break;
+            case OUTPUT_VSM_PREFERRED_CLIPMAP:
+            case OUTPUT_VSM_SAMPLED_CLIPMAP:
+            case OUTPUT_VSM_PAGE_STATE:
+            case OUTPUT_VSM_PHYSICAL_PAGE:
+                payload = lightingOutput.shadowDebugPayload;
+                break;
 #endif
         }
         if (payload.x != DEBUG_SENTINEL) {

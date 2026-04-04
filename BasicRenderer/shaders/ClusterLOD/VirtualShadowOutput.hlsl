@@ -57,8 +57,9 @@ void VirtualShadowBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsF
     const uint2 virtualPageCoords = CLodVirtualShadowVirtualPageCoordsFromUv(shadowUv);
     const uint2 wrappedPageCoords = CLodVirtualShadowWrappedPageCoords(virtualPageCoords, clipmapInfo);
 
-    Texture2DArray<uint> pageTable = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX];
-    const uint pageEntry = pageTable.Load(int4(wrappedPageCoords, clipmapInfo.pageTableLayer, 0));
+    RWTexture2DArray<uint> pageTable = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX];
+    const uint3 pageCoords = uint3(wrappedPageCoords, clipmapInfo.pageTableLayer);
+    const uint pageEntry = pageTable[pageCoords];
     if ((pageEntry & (kCLodVirtualShadowAllocatedMask | kCLodVirtualShadowDirtyMask)) !=
         (kCLodVirtualShadowAllocatedMask | kCLodVirtualShadowDirtyMask))
     {
@@ -71,4 +72,6 @@ void VirtualShadowBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsF
 
     RWTexture2D<uint> physicalPages = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX];
     InterlockedMin(physicalPages[atlasPixel], asuint(input.linearDepth));
+    uint ignored = 0u;
+    InterlockedOr(pageTable[pageCoords], kCLodVirtualShadowContentValidMask, ignored);
 }

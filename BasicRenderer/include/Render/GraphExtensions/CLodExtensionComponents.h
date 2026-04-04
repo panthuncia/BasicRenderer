@@ -41,6 +41,8 @@ struct CLodDeepVisibilityStatsTag {};
 struct CLodVirtualShadowPageTableTag {};
 struct CLodVirtualShadowPhysicalPagesTag {};
 struct CLodVirtualShadowPageMetadataTag {};
+struct CLodVirtualShadowInvalidationInputsTag {};
+struct CLodVirtualShadowInvalidationCountTag {};
 struct CLodVirtualShadowAllocationRequestsTag {};
 struct CLodVirtualShadowAllocationCountTag {};
 struct CLodVirtualShadowFreePhysicalPagesTag {};

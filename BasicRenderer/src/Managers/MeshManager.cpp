@@ -222,6 +222,29 @@ void MeshManager::DispatchCLodDiskStreamingBatch() {
 	}
 }
 
+void MeshManager::QueueCLodShadowLodUpgradeInvalidationForGroup(uint32_t groupGlobalIndex) {
+	uint32_t groupLocalIndex = 0u;
+	auto sharedState = FindCLodSharedStreamingStateByGlobalGroup(groupGlobalIndex, groupLocalIndex);
+	if (!sharedState) {
+		return;
+	}
+
+	for (const auto& [meshInstanceIndex, instanceState] : m_clodStreamingStateByInstanceIndex) {
+		if (instanceState.sharedMeshState == sharedState) {
+			m_pendingShadowLodUpgradeInvalidationMeshInstances.insert(meshInstanceIndex);
+		}
+	}
+}
+
+void MeshManager::ConsumeCLodShadowLodUpgradeInvalidationMeshInstances(std::vector<uint32_t>& outMeshInstanceIndices) {
+	outMeshInstanceIndices.clear();
+	outMeshInstanceIndices.reserve(m_pendingShadowLodUpgradeInvalidationMeshInstances.size());
+	for (uint32_t meshInstanceIndex : m_pendingShadowLodUpgradeInvalidationMeshInstances) {
+		outMeshInstanceIndices.push_back(meshInstanceIndex);
+	}
+	m_pendingShadowLodUpgradeInvalidationMeshInstances.clear();
+}
+
 void MeshManager::AddMesh(std::shared_ptr<Mesh>& mesh, bool useMeshletReorderedVertices) {
 	mesh->SetCurrentMeshManager(this);
 	if (mesh->GetPreSkinningVertexBufferView() != nullptr) {
