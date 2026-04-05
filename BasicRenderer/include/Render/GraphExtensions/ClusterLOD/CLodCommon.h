@@ -123,6 +123,7 @@ inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalPageCount =
     CLodVirtualShadowDefaultPhysicalPagesPerAxis * CLodVirtualShadowDefaultPhysicalPagesPerAxis;
 inline constexpr uint32_t CLodVirtualShadowMaxAllocationRequests = 1u << 16;
 inline constexpr uint32_t CLodVirtualShadowMaxInvalidationInputs = 1u << 16;
+inline constexpr uint32_t CLodVirtualShadowMovedInstanceBitCapacity = 1u << 20;
 inline constexpr uint32_t CLodVirtualShadowClipmapValidFlag = 0x1u;
 inline constexpr uint32_t CLodVirtualShadowClipmapInvalidateFlag = 0x2u;
 inline constexpr uint32_t CLodVirtualShadowPageAllocatedMask = 0x80000000u;
@@ -136,6 +137,11 @@ inline constexpr uint32_t CLodVirtualShadowInvalidationFlagSkinned = 0x4u;
 constexpr uint32_t CLodVirtualShadowDirtyWordCount(uint32_t physicalPageCount)
 {
     return (physicalPageCount + 31u) / 32u;
+}
+
+constexpr uint32_t CLodVirtualShadowMovedInstanceBitWordCount()
+{
+    return (CLodVirtualShadowMovedInstanceBitCapacity + 31u) / 32u;
 }
 
 static_assert(

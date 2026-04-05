@@ -14,6 +14,9 @@ static const uint kCLodVirtualShadowPhysicalPageSize = 128u;
 static const uint kCLodVirtualShadowPhysicalPagesPerAxis = 64u;
 static const uint kCLodVirtualShadowPageTableResolution =
     kCLodVirtualShadowVirtualResolution / kCLodVirtualShadowPhysicalPageSize;
+static const uint kCLodVirtualShadowMovedInstanceBitCapacity = 1u << 20;
+static const uint kCLodVirtualShadowMovedInstanceBitWordCount =
+    (kCLodVirtualShadowMovedInstanceBitCapacity + 31u) / 32u;
 static const uint kInvalidShadowCameraIndex = 0xFFFFFFFFu;
 
 struct CLodVirtualShadowClipmapInfo

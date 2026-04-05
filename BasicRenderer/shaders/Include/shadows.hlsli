@@ -10,6 +10,7 @@ static const uint kCLodVirtualShadowDebugFlagPreferredAllocated = 0x1u;
 static const uint kCLodVirtualShadowDebugFlagPreferredDirty = 0x2u;
 static const uint kCLodVirtualShadowDebugFlagSampledDepthMissing = 0x4u;
 static const uint kCLodVirtualShadowDebugFlagSampledPageUnwritten = 0x8u;
+static const uint kCLodVirtualShadowDebugFlagSampledTexelCleared = 0x10u;
 
 struct CLodVirtualShadowDebugInfo
 {
@@ -57,6 +58,11 @@ float3 CLodVirtualShadowDebugPageStateColor(CLodVirtualShadowDebugInfo debugInfo
     if ((debugInfo.flags & kCLodVirtualShadowDebugFlagSampledPageUnwritten) != 0u)
     {
         return float3(0.0f, 0.85f, 0.95f);
+    }
+
+    if ((debugInfo.flags & kCLodVirtualShadowDebugFlagSampledTexelCleared) != 0u)
+    {
+        return float3(1.0f, 1.0f, 1.0f);
     }
 
     if ((debugInfo.flags & kCLodVirtualShadowDebugFlagPreferredAllocated) == 0u)
@@ -228,6 +234,12 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
     const uint2 atlasPixel = CLodVirtualShadowPhysicalAtlasPixel(physicalPageIndex, virtualTexelCoords);
 
     const uint storedDepthBits = physicalPages.Load(int3(atlasPixel, 0));
+    if (storedDepthBits == 0x7F7FFFFFu)
+    {
+        debugInfo.flags |= kCLodVirtualShadowDebugFlagSampledTexelCleared;
+        return 0.0f;
+    }
+
     if (storedDepthBits == 0xFFFFFFFFu)
     {
         debugInfo.flags |= kCLodVirtualShadowDebugFlagSampledDepthMissing;

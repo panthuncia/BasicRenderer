@@ -18,6 +18,7 @@
 VirtualShadowMapInvalidatePagesPass::VirtualShadowMapInvalidatePagesPass(
     std::shared_ptr<Buffer> invalidationInputsBuffer,
     std::shared_ptr<Buffer> invalidationCountBuffer,
+    std::shared_ptr<Buffer> invalidatedInstancesBitsetBuffer,
     std::shared_ptr<Buffer> clipmapInfoBuffer,
     std::shared_ptr<PixelBuffer> pageTableTexture,
     std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
@@ -26,6 +27,7 @@ VirtualShadowMapInvalidatePagesPass::VirtualShadowMapInvalidatePagesPass(
     std::shared_ptr<Buffer> statsBuffer)
     : m_invalidationInputsBuffer(std::move(invalidationInputsBuffer))
     , m_invalidationCountBuffer(std::move(invalidationCountBuffer))
+    , m_invalidatedInstancesBitsetBuffer(std::move(invalidatedInstancesBitsetBuffer))
     , m_clipmapInfoBuffer(std::move(clipmapInfoBuffer))
     , m_pageTableTexture(std::move(pageTableTexture))
     , m_dirtyPageFlagsBuffer(std::move(dirtyPageFlagsBuffer))
@@ -39,6 +41,18 @@ VirtualShadowMapInvalidatePagesPass::VirtualShadowMapInvalidatePagesPass(
         L"CLodVirtualShadowInvalidatePagesCSMain",
         {},
         "CLod.VirtualShadow.InvalidatePages.PSO");
+    auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
+
+    m_transformChangedQuery = ecsWorld.query_builder<const Components::ObjectDrawInfo>()
+        .with<Components::Active>()
+        .with<Components::RenderTransformUpdated>()
+        .without<Components::SkipShadowPass>()
+        .without<Components::Skinned>()
+        .build();
+    m_skinnedObjectsQuery = ecsWorld.query_builder<const Components::ObjectDrawInfo>()
+        .with<Components::Active>()
+        .with<Components::Skinned>()
+        .build();
 }
 
 void VirtualShadowMapInvalidatePagesPass::DeclareResourceUsages(ComputePassBuilder* builder)
@@ -66,6 +80,15 @@ void VirtualShadowMapInvalidatePagesPass::Update(const UpdateExecutionContext& e
 
     std::vector<CLodVirtualShadowInvalidationInput> inputs;
     inputs.reserve(1024);
+    std::vector<uint32_t> invalidatedInstancesBitset(CLodVirtualShadowMovedInstanceBitWordCount(), 0u);
+
+    auto markInvalidatedInstance = [&invalidatedInstancesBitset](uint32_t perMeshInstanceBufferIndex) {
+        if (perMeshInstanceBufferIndex >= CLodVirtualShadowMovedInstanceBitCapacity) {
+            return;
+        }
+
+        invalidatedInstancesBitset[perMeshInstanceBufferIndex >> 5u] |= 1u << (perMeshInstanceBufferIndex & 31u);
+    };
 
     MeshManager* meshManager = nullptr;
     try {
@@ -87,32 +110,14 @@ void VirtualShadowMapInvalidatePagesPass::Update(const UpdateExecutionContext& e
             input.perMeshInstanceBufferIndex = perMeshInstanceBufferIndex;
             input.flags = CLodVirtualShadowInvalidationFlagUseCurrentBounds;
             inputs.push_back(input);
+            markInvalidatedInstance(perMeshInstanceBufferIndex);
         }
     }
 
-    auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
-    auto renderableQuery = ecsWorld.query_builder<const Components::ObjectDrawInfo>()
-        .with<Components::Active>()
-        .build();
-
-    renderableQuery.each([&](flecs::entity entity, const Components::ObjectDrawInfo& drawInfo) {
-        if (entity.has<Components::SkipShadowPass>()) {
-            return;
-        }
-
+    m_transformChangedQuery.each([&](flecs::entity entity, const Components::ObjectDrawInfo& drawInfo) {
         uint32_t flags = 0u;
-        if (entity.has<Components::RenderTransformUpdated>()) {
-            flags |= CLodVirtualShadowInvalidationFlagUsePreviousBounds;
-            flags |= CLodVirtualShadowInvalidationFlagUseCurrentBounds;
-        }
-        if (entity.has<Components::Skinned>()) {
-            flags |= CLodVirtualShadowInvalidationFlagUseCurrentBounds;
-            flags |= CLodVirtualShadowInvalidationFlagSkinned;
-        }
-
-        if (flags == 0u) {
-            return;
-        }
+        flags |= CLodVirtualShadowInvalidationFlagUsePreviousBounds;
+        flags |= CLodVirtualShadowInvalidationFlagUseCurrentBounds;
 
         for (uint32_t perMeshInstanceBufferIndex : drawInfo.perMeshInstanceBufferIndices) {
             if (inputs.size() >= CLodVirtualShadowMaxInvalidationInputs) {
@@ -123,6 +128,20 @@ void VirtualShadowMapInvalidatePagesPass::Update(const UpdateExecutionContext& e
             input.perMeshInstanceBufferIndex = perMeshInstanceBufferIndex;
             input.flags = flags;
             inputs.push_back(input);
+            markInvalidatedInstance(perMeshInstanceBufferIndex);
+        }
+    });
+
+    m_skinnedObjectsQuery.each([&](flecs::entity entity, const Components::ObjectDrawInfo& drawInfo) {
+        for (uint32_t perMeshInstanceBufferIndex : drawInfo.perMeshInstanceBufferIndices) {
+            if (inputs.size() >= CLodVirtualShadowMaxInvalidationInputs) {
+                break;
+            }
+            CLodVirtualShadowInvalidationInput input{};
+            input.perMeshInstanceBufferIndex = perMeshInstanceBufferIndex;
+            input.flags = CLodVirtualShadowInvalidationFlagUseCurrentBounds | CLodVirtualShadowInvalidationFlagSkinned;
+            inputs.push_back(input);
+            markInvalidatedInstance(perMeshInstanceBufferIndex);
         }
     });
 
@@ -139,6 +158,12 @@ void VirtualShadowMapInvalidatePagesPass::Update(const UpdateExecutionContext& e
         &m_pendingInputCount,
         sizeof(m_pendingInputCount),
         rg::runtime::UploadTarget::FromShared(m_invalidationCountBuffer),
+        0);
+
+    BUFFER_UPLOAD(
+        invalidatedInstancesBitset.data(),
+        static_cast<uint32_t>(invalidatedInstancesBitset.size() * sizeof(uint32_t)),
+        rg::runtime::UploadTarget::FromShared(m_invalidatedInstancesBitsetBuffer),
         0);
 }
 

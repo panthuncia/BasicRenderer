@@ -423,18 +423,21 @@ void CLodInvalidateVirtualShadowWrappedPage(
     RWStructuredBuffer<uint4> pageMetadata,
     RWStructuredBuffer<float4> directionalPageViewInfo)
 {
+    (void)frameIndex;
+    (void)directionalPageViewRow;
+    (void)dirtyFlags;
+
     const uint3 pageCoords = uint3(wrappedPageCoords, clipmapIndex);
     uint previousPageState = 0u;
-    InterlockedOr(pageTable[pageCoords], kCLodVirtualShadowDirtyMask, previousPageState);
+    InterlockedAnd(pageTable[pageCoords], 0u, previousPageState);
     if ((previousPageState & kCLodVirtualShadowAllocatedMask) == 0u)
     {
         return;
     }
 
     const uint physicalPageIndex = previousPageState & kCLodVirtualShadowPhysicalPageIndexMask;
-    pageMetadata[physicalPageIndex].y = frameIndex;
-    directionalPageViewInfo[CLodDirectionalShadowPageViewInfoIndex(wrappedPageCoords, clipmapIndex)] = directionalPageViewRow;
-    InterlockedOr(dirtyFlags[physicalPageIndex >> 5u], 1u << (physicalPageIndex & 31u));
+    pageMetadata[physicalPageIndex] = uint4(0u, 0u, 0u, 0u);
+    directionalPageViewInfo[CLodDirectionalShadowPageViewInfoIndex(wrappedPageCoords, clipmapIndex)] = 0.0f.xxxx;
 }
 
 bool CLodProjectSphereToShadowUvBounds(float3 centerWS, float radiusWS, Camera shadowCamera, out float2 uvMin, out float2 uvMax)
@@ -494,8 +497,6 @@ void CLodInvalidateVirtualShadowSphere(
         const uint2 pageMin = CLodVirtualShadowWrappedPageCoords(CLodVirtualShadowVirtualPageCoordsFromUv(uvMin), clipmapInfo);
         const uint2 pageMax = CLodVirtualShadowWrappedPageCoords(CLodVirtualShadowVirtualPageCoordsFromUv(uvMax), clipmapInfo);
         const float4 directionalPageViewRow = CLodDirectionalShadowPageViewRow(shadowCamera);
-
-        CLodVirtualShadowStatsIncrementDirty(statsBuffer, clipmapIndex);
 
         const bool wrapsX = pageMin.x > pageMax.x;
         const bool wrapsY = pageMin.y > pageMax.y;

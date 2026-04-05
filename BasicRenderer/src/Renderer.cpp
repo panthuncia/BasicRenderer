@@ -622,13 +622,6 @@ void Renderer::RunRenderResourceSyncStage() {
         }
     });
 
-    // Clean up RenderTransformUpdated tags so they're fresh for next frame's IngestSnapshot.
-    // Defer structural changes to avoid modifying tables while the query has them locked.
-    world.defer_begin();
-    m_renderTransformUpdatedCleanupQuery.each([](flecs::entity e) {
-        e.remove<Components::RenderTransformUpdated>();
-    });
-    world.defer_end();
 }
 
 void Renderer::BeginFrameTaskGraphCapture() {
@@ -1355,6 +1348,14 @@ void Renderer::Update(float elapsedSeconds) {
         ZoneScopedN("Renderer::Update::RenderGraphUpdate");
         currentRenderGraph->Update(context, deviceManager.GetDevice());
     });
+
+    // Clear transform-update tags only after render-graph update so passes such as
+    // virtual shadow invalidation can still consume same-frame movement signals.
+    world.defer_begin();
+    m_renderTransformUpdatedCleanupQuery.each([](flecs::entity e) {
+        e.remove<Components::RenderTransformUpdated>();
+    });
+    world.defer_end();
 
     runCapturedStage("ScheduleSceneUpdate", [&]() {
         ZoneScopedN("Renderer::Update::ScheduleSceneUpdate");

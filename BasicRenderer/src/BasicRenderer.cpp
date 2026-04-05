@@ -350,7 +350,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     //auto usdScene = LoadModel("models/sponza.usdz");
     
     //auto bistro = LoadModel("models/bistroExteriorNoMats.usdz");
-    //auto bistro = LoadModel("models/bistroExterior.glb");
+    auto bistro = LoadModel("models/bistroExterior.glb");
     //auto wine = LoadModel("models/bistroInterior.usdz");
     //bistro->GetRoot().set<Components::Scale>({ 0.01, 0.01, 0.01 });
 
@@ -370,7 +370,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     
 	//renderer.GetCurrentScene()->AppendScene(carScene->Clone());
 
-	renderer.GetCurrentScene()->AppendScene(quad->Clone());
+	//renderer.GetCurrentScene()->AppendScene(quad->Clone());
 
 	//renderer.GetCurrentScene()->AppendScene(island->Clone());
 
@@ -387,9 +387,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 	//renderer.GetCurrentScene()->AppendScene(robot->Clone());
 
-    //renderer.GetCurrentScene()->AppendScene(bistro->Clone());
+    renderer.GetCurrentScene()->AppendScene(bistro->Clone());
 
-    renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
+    //renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());
 
     //for (int i = 0; i < 5; i++) {
     //    auto sphereInstance = renderer.GetCurrentScene()->AppendScene(sphereScene->Clone());

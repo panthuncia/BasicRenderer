@@ -349,6 +349,24 @@ bool CLodVirtualShadowMeshletTouchesDirtyPages(float3 worldCenter, float radiusW
 
     return false;
 }
+
+bool CLodVirtualShadowInstanceInvalidatedThisFrame(uint instanceIndex)
+{
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+    if (instanceIndex >= kCLodVirtualShadowMovedInstanceBitCapacity)
+    {
+        return false;
+    }
+
+    StructuredBuffer<uint> invalidatedInstancesBitset =
+        ResourceDescriptorHeap[CLOD_WG_SHADOW_INVALIDATED_INSTANCES_DESCRIPTOR_INDEX];
+    const uint word = invalidatedInstancesBitset[instanceIndex >> 5u];
+    return ((word >> (instanceIndex & 31u)) & 1u) != 0u;
+#else
+    (void)instanceIndex;
+    return false;
+#endif
+}
 #endif
 
 bool CLodTrySetBit(RWByteAddressBuffer bits, uint key)
@@ -1250,6 +1268,9 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
     bool isSkinned = false;
     bool reyesDisplacementCandidate = false;
     uint skinningInstanceSlot = 0xFFFFFFFFu;
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+    bool objectInvalidatedThisFrame = false;
+#endif
 
     if (hasBucket && b.pageSlabDescriptorIndex != 0) {
         pageValid = true;
@@ -1265,6 +1286,9 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         StructuredBuffer<PerObjectBuffer> perObjectBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
         objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+        objectInvalidatedThisFrame = CLodVirtualShadowInstanceInvalidatedThisFrame(b.instanceIndex);
+#endif
 
         // Load only the camera fields needed for the hot culling loop.
         // Occlusion matrices are deferred to the occlusion branch.
@@ -1405,10 +1429,12 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 }
 
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
-                if (survives)
+                if (survives && !objectInvalidatedThisFrame)
                 {
                     const float3 meshletCenterWorld = mul(float4(meshletBounds.sphere.xyz, 1.0f), objectModelMatrix).xyz;
-                    if (!CLodVirtualShadowMeshletTouchesDirtyPages(meshletCenterWorld, meshletRadiusWorld, b.viewId))
+                    bool touchesDirtyPages = CLodVirtualShadowMeshletTouchesDirtyPages(meshletCenterWorld, meshletRadiusWorld, b.viewId);
+
+                    if (!touchesDirtyPages)
                     {
                         survives = false;
                         WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CLEAN_PAGES, 1);

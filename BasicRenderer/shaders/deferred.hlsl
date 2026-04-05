@@ -98,6 +98,15 @@ void DeferredCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
                 break;
 #endif
         }
+        if (perFrameBuffer.outputType == OUTPUT_VSM_PAGE_STATE)
+        {
+            const uint2 previousPayload = debugVisTex[pixel];
+                const uint2 stickyGreenPayload = PackDebugFloat3(float3(0.10f, 0.85f, 0.20f));
+                if (all(previousPayload == stickyGreenPayload))
+            {
+                payload = previousPayload;
+            }
+        }
         if (payload.x != DEBUG_SENTINEL) {
             WriteDebugPixel(debugVisTex, pixel, payload);
         }
