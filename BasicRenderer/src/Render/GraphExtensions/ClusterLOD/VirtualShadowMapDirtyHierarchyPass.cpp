@@ -3,6 +3,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
+#include "BuiltinResources.h"
 #include "Resources/Texture.h"
 #include "../shaders/PerPassRootConstants/clodVirtualShadowDirtyHierarchyRootConstants.h"
 
@@ -24,6 +25,8 @@ void VirtualShadowMapDirtyHierarchyPass::DeclareResourceUsages(ComputePassBuilde
 {
     builder->WithShaderResource(m_pageTableTexture, m_dirtyHierarchyTexture)
         .WithUnorderedAccess(m_dirtyHierarchyTexture);
+
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void VirtualShadowMapDirtyHierarchyPass::Setup()

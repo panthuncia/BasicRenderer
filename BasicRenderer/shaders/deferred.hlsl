@@ -12,7 +12,7 @@
 void DeferredCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
 
     uint screenW = perFrameBuffer.screenResX;
     uint screenH = perFrameBuffer.screenResY;

@@ -43,6 +43,7 @@ public:
     void DeclareResourceUsages(RenderPassBuilder* builder) {
         builder->WithShaderResource(Builtin::PostProcessing::UpscaledHDR, Builtin::CameraBuffer, "FFX::LPMConstants")
             .WithRenderTarget(Builtin::Backbuffer);
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
     }
 
 	void Setup() override {

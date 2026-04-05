@@ -65,6 +65,8 @@ void RasterBucketHistogramPass::DeclareResourceUsages(ComputePassBuilder* builde
     if (m_readBaseCounterBuffer) {
         builder->WithShaderResource(m_readBaseCounterBuffer);
     }
+
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void RasterBucketHistogramPass::Setup() {

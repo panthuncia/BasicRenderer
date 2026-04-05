@@ -1987,6 +1987,7 @@ void Renderer::CreateRenderGraph() {
         newGraph->RegisterResource(Builtin::PrimaryCamera::ProjectedDepthTexture, depthTexture);
     }
     newGraph->RegisterResource(Builtin::Backbuffer, m_dynamicBackbuffer);
+    newGraph->RegisterResource(Builtin::PerFrameBuffer, ResourceManager::GetInstance().GetPerFrameBuffer());
 
     bool useMeshShaders = getMeshShadersEnabled();
     if (!DeviceManager::GetInstance().GetMeshShadersSupported()) {

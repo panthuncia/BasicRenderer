@@ -95,6 +95,8 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
     if (m_primaryHeadPointerTexture) {
         builder->WithShaderResource(m_primaryHeadPointerTexture);
     }
+
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void DeepVisibilityResolvePass::Setup()

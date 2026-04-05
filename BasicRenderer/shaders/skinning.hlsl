@@ -25,7 +25,7 @@ void CSMain(uint3 dtid : SV_DispatchThreadID) {
     uint preSkinnedByteOffset = meshBuffer.vertexBufferOffset + vertexOffsetInMesh * meshBuffer.skinningVertexByteSize;
     uint postSkinnedByteOffset = meshInstanceBuffer.postSkinningVertexBufferOffset;
     
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
     postSkinnedByteOffset += meshBuffer.vertexByteSize * meshBuffer.numVertices * (perFrameBuffer.frameIndex % 2); // ping-pong for motion vectors
     postSkinnedByteOffset += vertexOffsetInMesh * meshBuffer.vertexByteSize;
     

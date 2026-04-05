@@ -16,7 +16,7 @@ public:
         m_gtaoEnabled = settingsManager.getSettingGetter<bool>("enableGTAO")();
     }
 
-    void DeclareResourceUsages(RenderPassBuilder* builder) {
+    void DeclareResourceUsages(RenderPassBuilder* builder) override {
         builder->WithShaderResource(Builtin::PostProcessing::ScreenSpaceReflections, 
             Builtin::Environment::InfoBuffer,
             Builtin::GBuffer::Normals,
@@ -25,7 +25,8 @@ public:
             Builtin::GBuffer::MetallicRoughness,
             Builtin::PrimaryCamera::DepthTexture,
             Builtin::CameraBuffer)
-            .WithRenderTarget(Builtin::Color::HDRColorTarget);
+            .WithRenderTarget(Builtin::Color::HDRColorTarget)
+            .WithConstantBuffer(Builtin::PerFrameBuffer);
 
         builder->WithUnorderedAccess(Builtin::DebugVisualization);
 

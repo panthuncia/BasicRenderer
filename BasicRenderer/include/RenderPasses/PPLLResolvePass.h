@@ -22,6 +22,7 @@ public:
 	void DeclareResourceUsages(RenderPassBuilder* builder) {
 		builder->WithShaderResource(Builtin::PPLL::HeadPointerTexture, Builtin::PPLL::DataBuffer, Builtin::CameraBuffer)
 			.WithRenderTarget(Builtin::Color::HDRColorTarget);
+        builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 	}
 
 	void Setup() override {

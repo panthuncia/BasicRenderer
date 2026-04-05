@@ -31,7 +31,7 @@ float3 screenToView(float3 screenCoord, float2 screenRes, matrix inverseProjecti
 [numthreads(1, 1, 1)]
 void CSMain(uint3 groupID : SV_GroupID) {
 	
-    ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[0];
+    ConstantBuffer<PerFrameBuffer> perFrame = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
     float2 screenDimensions = float2(perFrame.screenResX, perFrame.screenResY);
 
     if (groupID.x >= perFrame.lightClusterGridSizeX ||

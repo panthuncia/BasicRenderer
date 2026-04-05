@@ -30,6 +30,7 @@ RasterBucketBlockOffsetsPass::RasterBucketBlockOffsetsPass(
 void RasterBucketBlockOffsetsPass::DeclareResourceUsages(ComputePassBuilder* builder) {
     builder->WithShaderResource(m_blockSumsBuffer)
         .WithUnorderedAccess(m_offsetsBuffer, m_scannedBlockSumsBuffer, m_totalCountBuffer);
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void RasterBucketBlockOffsetsPass::Setup() {}

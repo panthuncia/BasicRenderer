@@ -3,6 +3,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
+#include "BuiltinResources.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Texture.h"
 
@@ -24,6 +25,8 @@ void VirtualShadowMapClearDirtyBitsPass::DeclareResourceUsages(ComputePassBuilde
 {
     builder->WithUnorderedAccess(m_pageTableTexture)
         .WithUnorderedAccess(m_statsBuffer);
+
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void VirtualShadowMapClearDirtyBitsPass::Setup()

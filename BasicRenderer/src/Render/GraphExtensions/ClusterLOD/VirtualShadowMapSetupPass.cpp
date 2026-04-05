@@ -11,6 +11,7 @@
 #include "Render/RenderContext.h"
 #include "Render/RendererComponents.h"
 #include "Render/Runtime/UploadServiceAccess.h"
+#include "BuiltinResources.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/PixelBuffer.h"
 #include "ShaderBuffers.h"
@@ -123,6 +124,8 @@ void VirtualShadowMapSetupPass::DeclareResourceUsages(ComputePassBuilder* builde
         m_allocationCountBuffer,
         m_dirtyPageFlagsBuffer,
         m_statsBuffer);
+
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void VirtualShadowMapSetupPass::Setup() {}

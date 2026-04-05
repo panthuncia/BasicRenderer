@@ -92,6 +92,8 @@ void ReyesSplitPass::DeclareResourceUsages(ComputePassBuilder* builder)
             m_diceQueueCounterBuffer,
             m_diceQueueOverflowBuffer,
             m_telemetryBuffer);
+
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void ReyesSplitPass::Setup() {

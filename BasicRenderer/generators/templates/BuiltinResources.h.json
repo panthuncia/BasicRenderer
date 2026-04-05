@@ -12,6 +12,7 @@
         "Primary": {}
       }
     },
+      "PerFrameBuffer": {},
     "CLod": {
       "Offsets": {},
       "Groups": {},

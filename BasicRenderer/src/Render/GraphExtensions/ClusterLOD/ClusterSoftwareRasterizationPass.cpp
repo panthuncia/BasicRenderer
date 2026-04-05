@@ -82,6 +82,8 @@ void ClusterSoftwareRasterizationPass::DeclareResourceUsages(ComputePassBuilder*
     if (m_slabResourceGroup) {
         builder->WithShaderResource(ResourceGroupResolver(m_slabResourceGroup));
     }
+
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void ClusterSoftwareRasterizationPass::Setup() {

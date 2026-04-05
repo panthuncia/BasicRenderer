@@ -80,6 +80,7 @@ public:
                 builder->WithIndirectArguments(ECSResourceResolver(indirectQuery));
             }
         }
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
     }
 
     void Setup() override {

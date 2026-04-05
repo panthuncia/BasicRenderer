@@ -3,6 +3,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
+#include "BuiltinResources.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/PixelBuffer.h"
 
@@ -41,6 +42,8 @@ void VirtualShadowMapGatherStatsPass::DeclareResourceUsages(ComputePassBuilder* 
             m_pageListHeaderBuffer,
             m_clipmapInfoBuffer)
         .WithUnorderedAccess(m_statsBuffer);
+
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void VirtualShadowMapGatherStatsPass::Setup() {}

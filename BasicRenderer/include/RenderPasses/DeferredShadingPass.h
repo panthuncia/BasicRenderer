@@ -49,6 +49,8 @@ public:
 		if (m_gtaoEnabled) {
 			builder->WithShaderResource(Builtin::GTAO::OutputAOTerm);
 		}
+
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 	}
 
 	void Setup() override {

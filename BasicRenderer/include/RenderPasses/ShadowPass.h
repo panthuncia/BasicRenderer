@@ -72,6 +72,7 @@ public:
                     Builtin::MeshResources::MeshletVertexIndices,
                     Builtin::MeshResources::MeshletTriangles);
         }
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
     }
 
     void Setup() override {

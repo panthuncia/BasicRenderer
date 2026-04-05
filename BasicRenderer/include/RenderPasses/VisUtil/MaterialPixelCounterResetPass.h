@@ -17,6 +17,7 @@ public:
     void DeclareResourceUsages(ComputePassBuilder* builder) override {
         builder->WithUnorderedAccess("Builtin::VisUtil::MaterialPixelCountBuffer",
             "Builtin::VisUtil::MaterialWriteCursorBuffer");
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
     }
 
     void Setup() override {

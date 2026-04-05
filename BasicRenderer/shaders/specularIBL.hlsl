@@ -11,7 +11,7 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
 {
     float2 texCoord = input.uv;
     
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
     uint2 screenRes = float2(perFrameBuffer.screenResX, perFrameBuffer.screenResY);
     texCoord.y = 1.0f - texCoord.y;
 

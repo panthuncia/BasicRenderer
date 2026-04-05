@@ -7,7 +7,7 @@
 
 float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
 {
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
 
     // The fullscreen triangle covers the output resolution.
     // Map the UV back to render-resolution pixel coordinates.

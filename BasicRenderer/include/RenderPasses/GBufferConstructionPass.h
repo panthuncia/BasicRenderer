@@ -36,6 +36,7 @@ public:
 				Builtin::GBuffer::Albedo,
 				Builtin::GBuffer::Emissive,
 				Builtin::GBuffer::MetallicRoughness);
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 	}
 
 	void Setup() override {

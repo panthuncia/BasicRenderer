@@ -3,6 +3,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
+#include "BuiltinResources.h"
 #include "Resources/Buffers/Buffer.h"
 #include "ShaderBuffers.h"
 
@@ -33,6 +34,8 @@ void VirtualShadowMapBuildPageListsPass::DeclareResourceUsages(ComputePassBuilde
             m_freePhysicalPagesBuffer,
             m_reusablePhysicalPagesBuffer,
             m_pageListHeaderBuffer);
+
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void VirtualShadowMapBuildPageListsPass::Setup() {}

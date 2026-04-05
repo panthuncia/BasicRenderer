@@ -28,6 +28,7 @@ RasterBucketBlockScanPass::RasterBucketBlockScanPass(
 void RasterBucketBlockScanPass::DeclareResourceUsages(ComputePassBuilder* builder) {
     builder->WithShaderResource(m_histogramBuffer)
         .WithUnorderedAccess(m_offsetsBuffer, m_blockSumsBuffer);
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void RasterBucketBlockScanPass::Setup() {}

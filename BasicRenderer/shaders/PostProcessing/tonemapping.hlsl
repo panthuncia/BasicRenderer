@@ -112,7 +112,7 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
     float2 uv = input.uv;
     uv.y = 1.0f - uv.y; // Why is this necessary only here?
     float4 color = float4(hdrSource.SampleLevel(g_pointClamp, uv, 0).rgb, 1.0);
-	ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+	ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
 	// Apply tone mapping based on the selected method
     switch (TONEMAP_TYPE)
     {

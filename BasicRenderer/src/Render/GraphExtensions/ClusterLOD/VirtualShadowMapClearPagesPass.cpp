@@ -3,6 +3,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
+#include "BuiltinResources.h"
 #include "Resources/Buffers/Buffer.h"
 #include "Resources/Texture.h"
 
@@ -25,6 +26,8 @@ VirtualShadowMapClearPagesPass::VirtualShadowMapClearPagesPass(
 void VirtualShadowMapClearPagesPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
     builder->WithUnorderedAccess(m_physicalPagesTexture, m_dirtyPageFlagsBuffer);
+
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void VirtualShadowMapClearPagesPass::Setup()

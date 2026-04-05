@@ -41,6 +41,7 @@ public:
 		}
 
 		builder->WithUnorderedAccess(Builtin::Environment::InfoBuffer);
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 
 		m_declaredResourcesChanged = false;
 	}

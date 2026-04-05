@@ -16,6 +16,7 @@ public:
 		builder->WithShaderResource(
 			Builtin::PrimaryCamera::VisibilityTexture)
 			.WithUnorderedAccess(Builtin::PrimaryCamera::LinearDepthMap);
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 	}
 
 	void Setup() override {

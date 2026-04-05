@@ -64,6 +64,8 @@ void VirtualShadowMapAllocatePagesPass::DeclareResourceUsages(ComputePassBuilder
             m_pageListHeaderBuffer)
         .WithIndirectArguments(m_indirectArgsBuffer)
         .WithUnorderedAccess(m_pageTableTexture, m_pageMetadataBuffer, m_dirtyPageFlagsBuffer, m_directionalPageViewInfoBuffer);
+
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void VirtualShadowMapAllocatePagesPass::Setup() {}

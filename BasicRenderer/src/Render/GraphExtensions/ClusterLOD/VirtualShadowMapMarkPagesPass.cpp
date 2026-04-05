@@ -49,6 +49,8 @@ void VirtualShadowMapMarkPagesPass::DeclareResourceUsages(ComputePassBuilder* bu
             m_pageMetadataBuffer,
             m_directionalPageViewInfoBuffer,
             m_statsBuffer);
+
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void VirtualShadowMapMarkPagesPass::Setup() {}

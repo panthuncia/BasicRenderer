@@ -2,6 +2,7 @@
 
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
+#include "BuiltinResources.h"
 #include "Resources/Buffers/Buffer.h"
 #include "../shaders/PerPassRootConstants/clodReyesCreateDispatchArgsRootConstants.h"
 
@@ -32,6 +33,8 @@ void ReyesCreateDispatchArgsPass::DeclareResourceUsages(ComputePassBuilder* buil
     if (m_sourceBaseCounterBuffer) {
         builder->WithShaderResource(m_sourceBaseCounterBuffer);
     }
+
+    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void ReyesCreateDispatchArgsPass::Setup()

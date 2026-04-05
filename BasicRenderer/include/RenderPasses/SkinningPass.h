@@ -31,6 +31,7 @@ public:
 			Builtin::SkeletonResources::BoneTransforms,
 			Builtin::SkeletonResources::SkinningInstanceInfo)
 			.WithUnorderedAccess(Builtin::PostSkinningVertices);
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 	}
 
 	void Setup() override {

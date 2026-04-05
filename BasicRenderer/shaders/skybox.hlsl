@@ -11,7 +11,7 @@ void SkyboxCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     const uint hdrTargetUAVIndex = UintRootConstant3;
     const uint motionVectorsUAVIndex = UintRootConstant4;
 
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
 
     const uint screenW = perFrameBuffer.screenResX;
     const uint screenH = perFrameBuffer.screenResY;

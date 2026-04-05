@@ -95,6 +95,7 @@ public:
 					.build();
 			}
 		}
+		builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 	}
 
 	void Setup() override {
