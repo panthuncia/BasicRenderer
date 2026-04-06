@@ -251,9 +251,9 @@ public:
         m_alphaDeepVisibilityStatsQuery = {};
 		m_reyesTelemetryPhase1Query = {};
 		m_reyesTelemetryPhase2Query = {};
+        m_shadowTelemetryQuery = {};
         m_shadowVisibleCounterQuery = {};
         m_shadowVisibleClustersQuery = {};
-		m_shadowTelemetryQuery = {};
         m_shadowVirtualShadowStatsQuery = {};
     }
 
@@ -1943,6 +1943,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     replayNodeInput,
                     replayMeshletInput);
                 });
+
         }
 
         if (requestCaptureStats) {
@@ -2069,6 +2070,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     replayNodeInput,
                     replayMeshletInput);
                 });
+
         }
 
         if (requestCaptureStats) {
@@ -2566,6 +2568,9 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 const uint32_t rejCleanPages = counter(CLodWorkGraphCounterIndex::ClusterCullRejectedCleanPages);
                 const uint32_t shadowClipmapMisses = counter(CLodWorkGraphCounterIndex::ClusterCullShadowClipmapMisses);
                 const uint32_t shadowDirtyRegionHits = counter(CLodWorkGraphCounterIndex::ClusterCullShadowDirtyRegionHits);
+                const uint32_t shadowDirtyQueries = counter(CLodWorkGraphCounterIndex::ClusterCullShadowDirtyQueries);
+                const uint32_t shadowDirtyClipped = counter(CLodWorkGraphCounterIndex::ClusterCullShadowDirtyQueriesClipped);
+                const uint32_t shadowDirtyCoarseMipChecks = counter(CLodWorkGraphCounterIndex::ClusterCullShadowDirtyRegionCoarseMipChecks);
                 const uint32_t survived = counter(CLodWorkGraphCounterIndex::ClusterCullSurvivingLanes);
                 const uint32_t totalRejected = rejFrustum + rejCond2 + rejOccl + rejOOR + rejPageBounds + rejCleanPages;
 
@@ -2586,7 +2591,13 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 rejectionRow("Page bounds overflow", rejPageBounds, totalRejected);
                 rejectionRow("Clean shadow pages", rejCleanPages, totalRejected);
                 ImGui::Text("  Shadow clipmap misses: %u", shadowClipmapMisses);
-                ImGui::Text("  Shadow dirty-region hits: %u", shadowDirtyRegionHits);
+                ImGui::Text("  Shadow dirty queries: %u | clipped: %u | coarse-mip checks: %u",
+                    shadowDirtyQueries,
+                    shadowDirtyClipped,
+                    shadowDirtyCoarseMipChecks);
+                ImGui::Text("  Shadow dirty hits: %u | clean-page rejects: %u",
+                    shadowDirtyRegionHits,
+                    rejCleanPages);
             }
 
             ImGui::Separator();
@@ -2681,29 +2692,56 @@ inline void Menu::DrawCLodTelemetryWindow() {
             stats.allocationDispatchGroupCount,
             stats.freePhysicalPageCount,
             stats.reusablePhysicalPageCount);
-        ImGui::Text("Dirty diagnostics: setupReset=%u requestOverflow=%u",
+        ImGui::Text("Lifecycle diagnostics: setupReset=%u requestOverflow=%u unwrittenClears=%u",
             stats.setupResetApplied,
-            stats.markRequestOverflowCount);
-        ImGui::Text("Setup reset reasons: forced=%u noPrev=%u structureMismatch=%u",
+            stats.markRequestOverflowCount,
+            std::accumulate(
+                std::begin(stats.clearedUnwrittenDirtyPages),
+                std::end(stats.clearedUnwrittenDirtyPages),
+                0u));
+        ImGui::Text("Setup reset reasons: forced=%u noPrev=%u structureMismatch=%u lightDirChanged=%u",
             stats.setupResetForced,
             stats.setupResetNoPreviousState,
-            stats.setupResetStructureMismatch);
-
-        if (ImGui::BeginTable("##VirtualShadowStatsTable", 14, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+            stats.setupResetStructureMismatch,
+            stats.setupResetLightDirectionChanged);
+        uint32_t totalVisitedPageTableEntries = 0u;
+        uint32_t totalVisitedDirtyPageTableEntries = 0u;
+        uint32_t totalResidentCleanHits = 0u;
+        uint32_t totalResidentDirtyHits = 0u;
+        uint32_t totalRequestedPages = 0u;
+        uint32_t totalDirtyPageTableEntries = 0u;
+        for (uint32_t clipmapIndex = 0u; clipmapIndex < CLodVirtualShadowDefaultClipmapCount; ++clipmapIndex) {
+            totalVisitedPageTableEntries += stats.visitedPageTableEntries[clipmapIndex];
+            totalVisitedDirtyPageTableEntries += stats.visitedDirtyPageTableEntries[clipmapIndex];
+            totalResidentCleanHits += stats.markResidentCleanHits[clipmapIndex];
+            totalResidentDirtyHits += stats.markResidentDirtyHits[clipmapIndex];
+            totalRequestedPages += stats.requestedPages[clipmapIndex];
+            totalDirtyPageTableEntries += stats.dirtyPageTableEntries[clipmapIndex];
+        }
+        ImGui::Text("Cache lifecycle: cleanHits=%u dirtyHits=%u requests=%u visitedPT=%u visitedDirtyPT=%u dirtyPT=%u",
+            totalResidentCleanHits,
+            totalResidentDirtyHits,
+            totalRequestedPages,
+            totalVisitedPageTableEntries,
+            totalVisitedDirtyPageTableEntries,
+            totalDirtyPageTableEntries);
+        if (ImGui::BeginTable("##VirtualShadowStatsTable", 16, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
             ImGui::TableSetupColumn("Clip");
             ImGui::TableSetupColumn("Selected");
             ImGui::TableSetupColumn("Proj Reject");
             ImGui::TableSetupColumn("Requests");
-            ImGui::TableSetupColumn("Resident Clean");
-            ImGui::TableSetupColumn("Resident Dirty");
-            ImGui::TableSetupColumn("Setup WrapClr");
-            ImGui::TableSetupColumn("Setup DirtyClr");
+            ImGui::TableSetupColumn("Clean Hits");
+            ImGui::TableSetupColumn("Dirty Hits");
+            ImGui::TableSetupColumn("Wrap Clr");
+            ImGui::TableSetupColumn("Stale Clr");
             ImGui::TableSetupColumn("Pre NZ PT");
             ImGui::TableSetupColumn("Pre Dirty PT");
             ImGui::TableSetupColumn("NonZero PT");
             ImGui::TableSetupColumn("Allocated PT");
+            ImGui::TableSetupColumn("Visited PT");
+            ImGui::TableSetupColumn("Visited Dirty");
             ImGui::TableSetupColumn("Dirty PT");
-            ImGui::TableSetupColumn("UnwrittenClr");
+            ImGui::TableSetupColumn("NoWrite Clr");
             ImGui::TableHeadersRow();
 
             for (uint32_t clipmapIndex = 0u; clipmapIndex < CLodVirtualShadowDefaultClipmapCount; ++clipmapIndex) {
@@ -2733,8 +2771,12 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 ImGui::TableSetColumnIndex(11);
                 ImGui::Text("%u", stats.allocatedPageTableEntries[clipmapIndex]);
                 ImGui::TableSetColumnIndex(12);
-                ImGui::Text("%u", stats.dirtyPageTableEntries[clipmapIndex]);
+                ImGui::Text("%u", stats.visitedPageTableEntries[clipmapIndex]);
                 ImGui::TableSetColumnIndex(13);
+                ImGui::Text("%u", stats.visitedDirtyPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(14);
+                ImGui::Text("%u", stats.dirtyPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(15);
                 ImGui::Text("%u", stats.clearedUnwrittenDirtyPages[clipmapIndex]);
             }
 

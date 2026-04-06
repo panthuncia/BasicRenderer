@@ -128,7 +128,9 @@ inline constexpr uint32_t CLodVirtualShadowClipmapValidFlag = 0x1u;
 inline constexpr uint32_t CLodVirtualShadowClipmapInvalidateFlag = 0x2u;
 inline constexpr uint32_t CLodVirtualShadowPageAllocatedMask = 0x80000000u;
 inline constexpr uint32_t CLodVirtualShadowPageDirtyMask = 0x40000000u;
-inline constexpr uint32_t CLodVirtualShadowPhysicalPageIndexMask = 0x3FFFFFFFu;
+inline constexpr uint32_t CLodVirtualShadowPageContentValidMask = 0x20000000u;
+inline constexpr uint32_t CLodVirtualShadowPageVisitedMask = 0x10000000u;
+inline constexpr uint32_t CLodVirtualShadowPhysicalPageIndexMask = 0x0FFFFFFFu;
 inline constexpr uint32_t CLodVirtualShadowPhysicalPageResidentFlag = 0x1u;
 inline constexpr uint32_t CLodVirtualShadowInvalidationFlagUsePreviousBounds = 0x1u;
 inline constexpr uint32_t CLodVirtualShadowInvalidationFlagUseCurrentBounds = 0x2u;
@@ -229,7 +231,7 @@ struct CLodVirtualShadowStats
     uint32_t setupResetForced = 0u;
     uint32_t setupResetNoPreviousState = 0u;
     uint32_t setupResetStructureMismatch = 0u;
-    uint32_t pad0 = 0u;
+    uint32_t setupResetLightDirectionChanged = 0u;
     uint32_t setupWrappedClearedPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
     uint32_t setupStaleDirtyClearedPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
     uint32_t markResidentCleanHits[CLodVirtualShadowDefaultClipmapCount] = {};
@@ -243,9 +245,11 @@ struct CLodVirtualShadowStats
     uint32_t allocatedPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
     uint32_t dirtyPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
     uint32_t clearedUnwrittenDirtyPages[CLodVirtualShadowDefaultClipmapCount] = {};
+    uint32_t visitedPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
+    uint32_t visitedDirtyPageTableEntries[CLodVirtualShadowDefaultClipmapCount] = {};
 };
 
-static_assert(sizeof(CLodVirtualShadowStats) == 360u, "CLodVirtualShadowStats size must match HLSL");
+static_assert(sizeof(CLodVirtualShadowStats) == 408u, "CLodVirtualShadowStats size must match HLSL");
 
 
 inline constexpr uint32_t CLodReyesMaxSplitPassCount = 4u;

@@ -810,7 +810,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<bool>("autoAliasEnableLogging", false);
     settingsManager.registerSetting<bool>("autoAliasLogExclusionReasons", false);
     settingsManager.registerSetting<bool>("queueSchedulingEnableLogging", false);
-    settingsManager.registerSetting<float>("queueSchedulingWidthScale", 1.0f);
+    settingsManager.registerSetting<float>("queueSchedulingWidthScale", 0.0f); // Disable multi-queue scheduling
     settingsManager.registerSetting<float>("queueSchedulingPenaltyBias", 0.0f);
     settingsManager.registerSetting<float>("queueSchedulingMinPenalty", 1.0f);
     settingsManager.registerSetting<float>("queueSchedulingResourcePressureWeight", 1.0f);

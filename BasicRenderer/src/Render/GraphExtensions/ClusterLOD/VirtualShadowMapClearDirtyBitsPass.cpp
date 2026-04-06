@@ -9,7 +9,9 @@
 
 #include "../shaders/PerPassRootConstants/clodVirtualShadowClearDirtyBitsRootConstants.h"
 
-VirtualShadowMapClearDirtyBitsPass::VirtualShadowMapClearDirtyBitsPass(std::shared_ptr<PixelBuffer> pageTableTexture, std::shared_ptr<Buffer> statsBuffer)
+VirtualShadowMapClearDirtyBitsPass::VirtualShadowMapClearDirtyBitsPass(
+    std::shared_ptr<PixelBuffer> pageTableTexture,
+    std::shared_ptr<Buffer> statsBuffer)
     : m_pageTableTexture(std::move(pageTableTexture))
     , m_statsBuffer(std::move(statsBuffer))
 {
@@ -46,8 +48,6 @@ PassReturn VirtualShadowMapClearDirtyBitsPass::Execute(PassExecutionContext& exe
 
     uint32_t rootConstants[NumMiscUintRootConstants] = {};
     rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_RESOLUTION] = CLodVirtualShadowDefaultPageTableResolution;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_CLIPMAP_COUNT] = CLodVirtualShadowDefaultClipmapCount;
     rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 
     commandList.PushConstants(
@@ -58,8 +58,9 @@ PassReturn VirtualShadowMapClearDirtyBitsPass::Execute(PassExecutionContext& exe
         NumMiscUintRootConstants,
         rootConstants);
 
-    const uint32_t groupsX = (CLodVirtualShadowDefaultPageTableResolution + 7u) / 8u;
-    const uint32_t groupsY = (CLodVirtualShadowDefaultPageTableResolution + 7u) / 8u;
+    constexpr uint32_t kThreadsPerDimension = 8u;
+    const uint32_t groupsX = (CLodVirtualShadowDefaultPageTableResolution + kThreadsPerDimension - 1u) / kThreadsPerDimension;
+    const uint32_t groupsY = (CLodVirtualShadowDefaultPageTableResolution + kThreadsPerDimension - 1u) / kThreadsPerDimension;
     commandList.Dispatch(groupsX, groupsY, CLodVirtualShadowDefaultClipmapCount);
     return {};
 }

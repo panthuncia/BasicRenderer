@@ -5,16 +5,19 @@
 #include "Render/RenderContext.h"
 #include "BuiltinResources.h"
 #include "Resources/Buffers/Buffer.h"
+#include "Resources/PixelBuffer.h"
 #include "ShaderBuffers.h"
 
 #include "../shaders/PerPassRootConstants/clodVirtualShadowBuildPageListsRootConstants.h"
 
 VirtualShadowMapBuildPageListsPass::VirtualShadowMapBuildPageListsPass(
+    std::shared_ptr<PixelBuffer> pageTableTexture,
     std::shared_ptr<Buffer> pageMetadataBuffer,
     std::shared_ptr<Buffer> freePhysicalPagesBuffer,
     std::shared_ptr<Buffer> reusablePhysicalPagesBuffer,
     std::shared_ptr<Buffer> pageListHeaderBuffer)
-    : m_pageMetadataBuffer(std::move(pageMetadataBuffer))
+    : m_pageTableTexture(std::move(pageTableTexture))
+    , m_pageMetadataBuffer(std::move(pageMetadataBuffer))
     , m_freePhysicalPagesBuffer(std::move(freePhysicalPagesBuffer))
     , m_reusablePhysicalPagesBuffer(std::move(reusablePhysicalPagesBuffer))
     , m_pageListHeaderBuffer(std::move(pageListHeaderBuffer))
@@ -29,7 +32,7 @@ VirtualShadowMapBuildPageListsPass::VirtualShadowMapBuildPageListsPass(
 
 void VirtualShadowMapBuildPageListsPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
-    builder->WithShaderResource(m_pageMetadataBuffer)
+    builder->WithShaderResource(m_pageTableTexture, m_pageMetadataBuffer)
         .WithUnorderedAccess(
             m_freePhysicalPagesBuffer,
             m_reusablePhysicalPagesBuffer,
@@ -52,6 +55,7 @@ PassReturn VirtualShadowMapBuildPageListsPass::Execute(PassExecutionContext& exe
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
 
     uint32_t rootConstants[NumMiscUintRootConstants] = {};
+    rootConstants[CLOD_VIRTUAL_SHADOW_BUILD_PAGE_LISTS_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetSRVInfo(SRVViewType::Texture2DArrayFull, 0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_BUILD_PAGE_LISTS_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetSRVInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_BUILD_PAGE_LISTS_FREE_PAGES_DESCRIPTOR_INDEX] = m_freePhysicalPagesBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_BUILD_PAGE_LISTS_REUSABLE_PAGES_DESCRIPTOR_INDEX] = m_reusablePhysicalPagesBuffer->GetUAVShaderVisibleInfo(0).slot.index;

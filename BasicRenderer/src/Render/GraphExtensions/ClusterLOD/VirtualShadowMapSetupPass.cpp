@@ -23,6 +23,8 @@ std::array<CLodVirtualShadowClipmapInfo, CLodVirtualShadowDefaultClipmapCount> g
 std::array<int64_t, CLodVirtualShadowDefaultClipmapCount> g_previousClipmapPageOffsetX{};
 std::array<int64_t, CLodVirtualShadowDefaultClipmapCount> g_previousClipmapPageOffsetY{};
 bool g_previousClipmapInfosValid = false;
+DirectX::XMFLOAT3 g_previousDirectionalLightDirection{};
+bool g_previousDirectionalLightDirectionValid = false;
 
 uint32_t WrapPageOffset(int64_t pageCoord, uint32_t pageTableResolution)
 {
@@ -54,6 +56,12 @@ float ExtractOrthographicHeight(const DirectX::XMMATRIX& projection)
 bool NearlyEqualFloat(float lhs, float rhs, float epsilon = 1.0e-5f)
 {
     return std::abs(lhs - rhs) <= epsilon * std::max(std::max(std::abs(lhs), std::abs(rhs)), 1.0f);
+}
+
+bool NearlyEqualDirection(const DirectX::XMFLOAT3& lhs, const DirectX::XMFLOAT3& rhs, float cosineThreshold = 0.9999f)
+{
+    const float dot = lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
+    return dot >= cosineThreshold;
 }
 
 bool ClipmapStructureEquals(const CLodVirtualShadowClipmapInfo& lhs, const CLodVirtualShadowClipmapInfo& rhs)
@@ -140,6 +148,7 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
     m_resetReasonForced = forceResetResources;
     m_resetReasonNoPreviousState = !g_previousClipmapInfosValid;
     m_resetReasonStructureMismatch = false;
+    m_resetReasonLightDirectionChanged = false;
     m_resetResources = m_resetReasonForced || m_resetReasonNoPreviousState;
 
     CLodVirtualShadowRuntimeState runtimeState{};
@@ -150,6 +159,8 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
     BUFFER_UPLOAD(&runtimeState, sizeof(runtimeState), rg::runtime::UploadTarget::FromShared(m_runtimeStateBuffer), 0);
 
     std::array<CLodVirtualShadowClipmapInfo, CLodVirtualShadowDefaultClipmapCount> clipmapInfos{};
+    DirectX::XMFLOAT3 currentDirectionalLightDirection{};
+    bool currentDirectionalLightDirectionValid = false;
 
     auto* updateContext = executionContext.hostData ? executionContext.hostData->Get<UpdateContext>() : nullptr;
     if (updateContext && updateContext->viewManager) {
@@ -163,6 +174,10 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
             }
 
             foundDirectionalShadow = true;
+            DirectX::XMStoreFloat3(
+                &currentDirectionalLightDirection,
+                DirectX::XMVector3Normalize(light.lightInfo.dirWorldSpace));
+            currentDirectionalLightDirectionValid = true;
             const uint32_t clipmapCount = std::min<uint32_t>(
                 static_cast<uint32_t>(lightViewInfo.viewIDs.size()),
                 CLodVirtualShadowDefaultClipmapCount);
@@ -210,6 +225,13 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
         });
     }
 
+    if (currentDirectionalLightDirectionValid &&
+        g_previousDirectionalLightDirectionValid &&
+        !NearlyEqualDirection(currentDirectionalLightDirection, g_previousDirectionalLightDirection)) {
+        m_resetReasonLightDirectionChanged = true;
+        m_resetResources = true;
+    }
+
     for (uint32_t clipmapIndex = 0; clipmapIndex < CLodVirtualShadowDefaultClipmapCount; ++clipmapIndex) {
         auto& info = clipmapInfos[clipmapIndex];
         info.pageTableLayer = clipmapIndex;
@@ -225,6 +247,8 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
 
     g_previousClipmapInfos = clipmapInfos;
     g_previousClipmapInfosValid = true;
+    g_previousDirectionalLightDirection = currentDirectionalLightDirection;
+    g_previousDirectionalLightDirectionValid = currentDirectionalLightDirectionValid;
 
     BUFFER_UPLOAD(
         clipmapInfos.data(),
@@ -259,6 +283,7 @@ PassReturn VirtualShadowMapSetupPass::Execute(PassExecutionContext& executionCon
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_FORCED] = m_resetReasonForced ? 1u : 0u;
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_NO_PREVIOUS_STATE] = m_resetReasonNoPreviousState ? 1u : 0u;
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_STRUCTURE_MISMATCH] = m_resetReasonStructureMismatch ? 1u : 0u;
+    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_LIGHT_DIRECTION_CHANGED] = m_resetReasonLightDirectionChanged ? 1u : 0u;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

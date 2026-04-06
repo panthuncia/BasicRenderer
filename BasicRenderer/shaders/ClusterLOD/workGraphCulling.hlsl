@@ -129,6 +129,9 @@ static const uint WG_COUNTER_OBJECT_CULL_REJECTED_TOP = 61;
 static const uint WG_COUNTER_OBJECT_CULL_REJECTED_NEAR = 62;
 static const uint WG_COUNTER_OBJECT_CULL_REJECTED_FAR = 63;
 static const uint WG_COUNTER_OBJECT_CULL_INVALID_BOUNDS = 64;
+static const uint WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_QUERIES = 65;
+static const uint WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_QUERIES_CLIPPED = 66;
+static const uint WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_REGION_COARSE_MIP_CHECKS = 67;
 
 static const uint CLOD_STREAM_REQUEST_CAPACITY = (1u << 16);
 static const uint CLOD_USED_GROUPS_CAPACITY = (1u << 17);
@@ -166,6 +169,15 @@ bool CLodWorkGraphUseComputeSWRaster()
 {
 #if CLOD_WG_ENABLE_SW_CLASSIFICATION
     return (CLOD_WG_FLAGS & CLOD_WG_FLAG_COMPUTE_SW_RASTER) != 0u;
+#else
+    return false;
+#endif
+}
+
+bool CLodWorkGraphShadowDirtyPageCullingEnabled()
+{
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+    return (CLOD_WG_FLAGS & CLOD_WG_FLAG_DISABLE_SHADOW_DIRTY_PAGE_CULLING) == 0u;
 #else
     return false;
 #endif
@@ -211,7 +223,7 @@ bool CLodReadBit(ByteAddressBuffer bits, uint key)
 }
 
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
-bool CLodVirtualShadowFindClipmapForView(uint viewId, out CLodVirtualShadowClipmapInfo outClipmapInfo)
+bool CLodVirtualShadowFindClipmapForView(uint viewId, out uint outClipmapIndex, out CLodVirtualShadowClipmapInfo outClipmapInfo)
 {
     StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodClipmapInfo)];
@@ -222,66 +234,24 @@ bool CLodVirtualShadowFindClipmapForView(uint viewId, out CLodVirtualShadowClipm
         const CLodVirtualShadowClipmapInfo clipmapInfo = clipmapInfos[clipmapIndex];
         if (CLodVirtualShadowClipmapIsValid(clipmapInfo) && clipmapInfo.shadowCameraBufferIndex == viewId)
         {
+            outClipmapIndex = clipmapIndex;
             outClipmapInfo = clipmapInfo;
             return true;
         }
     }
 
+    outClipmapIndex = 0u;
     outClipmapInfo = (CLodVirtualShadowClipmapInfo)0;
-    return false;
-}
-
-void CLodVirtualShadowBuildWrappedRanges(
-    uint pageMin,
-    uint pageMax,
-    uint pageOffset,
-    out uint2 range0,
-    out uint2 range1,
-    out uint rangeCount)
-{
-    const uint wrappedMin = CLodVirtualShadowWrapPageCoord(pageMin, pageOffset, kCLodVirtualShadowPageTableResolution);
-    const uint wrappedMax = CLodVirtualShadowWrapPageCoord(pageMax, pageOffset, kCLodVirtualShadowPageTableResolution);
-    if (wrappedMin <= wrappedMax)
-    {
-        range0 = uint2(wrappedMin, wrappedMax);
-        range1 = uint2(0u, 0u);
-        rangeCount = 1u;
-        return;
-    }
-
-    range0 = uint2(0u, wrappedMax);
-    range1 = uint2(wrappedMin, kCLodVirtualShadowPageTableResolution - 1u);
-    rangeCount = 2u;
-}
-
-bool CLodVirtualShadowRectTouchesDirtyPages(Texture2DArray<uint> dirtyHierarchy, uint layer, uint2 pageMin, uint2 pageMax)
-{
-    const uint2 extent = (pageMax - pageMin) + 1u;
-    const uint maxExtent = max(extent.x, extent.y);
-    const uint mipLevel = min(maxExtent > 1u ? firstbithigh(maxExtent) : 0u, 5u);
-    const uint2 mipMin = pageMin >> mipLevel;
-    const uint2 mipMax = pageMax >> mipLevel;
-
-    [loop]
-    for (uint y = mipMin.y; y <= mipMax.y; ++y)
-    {
-        [loop]
-        for (uint x = mipMin.x; x <= mipMax.x; ++x)
-        {
-            if (dirtyHierarchy.Load(int4(x, y, layer, mipLevel)) != 0u)
-            {
-                return true;
-            }
-        }
-    }
-
     return false;
 }
 
 bool CLodVirtualShadowMeshletTouchesDirtyPages(float3 worldCenter, float radiusWorld, uint viewId)
 {
+    WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_QUERIES, 1);
+
+    uint clipmapIndex = 0u;
     CLodVirtualShadowClipmapInfo clipmapInfo;
-    if (!CLodVirtualShadowFindClipmapForView(viewId, clipmapInfo))
+    if (!CLodVirtualShadowFindClipmapForView(viewId, clipmapIndex, clipmapInfo))
     {
         WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_SHADOW_CLIPMAP_MISSES, 1);
         return true;
@@ -289,70 +259,39 @@ bool CLodVirtualShadowMeshletTouchesDirtyPages(float3 worldCenter, float radiusW
 
     StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
     const Camera shadowCamera = cameras[viewId];
-    const float4 shadowClip = mul(float4(worldCenter, 1.0f), shadowCamera.viewProjection);
-    const float safeW = max(abs(shadowClip.w), 1.0e-6f);
-    const float2 shadowNdc = shadowClip.xy / safeW;
-
-    float2 shadowUvCenter = shadowNdc * 0.5f + 0.5f;
-    shadowUvCenter.y = 1.0f - shadowUvCenter.y;
-
-    const float2 uvRadius = float2(
-        radiusWorld * abs(shadowCamera.projection[0][0]) * 0.5f,
-        radiusWorld * abs(shadowCamera.projection[1][1]) * 0.5f) + rcp((float2)kCLodVirtualShadowPageTableResolution);
-
-    const float2 uvMin = saturate(shadowUvCenter - uvRadius);
-    const float2 uvMax = saturate(shadowUvCenter + uvRadius);
-    const uint2 virtualPageMin = CLodVirtualShadowVirtualPageCoordsFromUv(uvMin);
-    const uint2 virtualPageMax = CLodVirtualShadowVirtualPageCoordsFromUv(uvMax);
-
-    uint2 xRange0;
-    uint2 xRange1;
-    uint xRangeCount = 0u;
-    CLodVirtualShadowBuildWrappedRanges(virtualPageMin.x, virtualPageMax.x, clipmapInfo.pageOffsetX, xRange0, xRange1, xRangeCount);
-
-    uint2 yRange0;
-    uint2 yRange1;
-    uint yRangeCount = 0u;
-    CLodVirtualShadowBuildWrappedRanges(virtualPageMin.y, virtualPageMax.y, clipmapInfo.pageOffsetY, yRange0, yRange1, yRangeCount);
-
     Texture2DArray<uint> dirtyHierarchy = ResourceDescriptorHeap[CLOD_WG_SHADOW_DIRTY_HIERARCHY_DESCRIPTOR_INDEX];
-    const uint2 xRanges[2] = { xRange0, xRange1 };
-    const uint2 yRanges[2] = { yRange0, yRange1 };
 
-    [unroll]
-    for (uint xRangeIndex = 0u; xRangeIndex < 2u; ++xRangeIndex)
+    uint sampledMipLevel = 0u;
+    bool queryClipped = false;
+    const float3 shadowViewCenter = mul(float4(worldCenter, 1.0f), shadowCamera.view).xyz;
+    const bool touchesDirtyPages = ConservativeAnyHitTexture2DArraySphereQuery(
+        dirtyHierarchy,
+        clipmapInfo.pageTableLayer,
+        uint2(kCLodVirtualShadowPageTableResolution, kCLodVirtualShadowPageTableResolution),
+        shadowCamera,
+        shadowViewCenter,
+        radiusWorld,
+        sampledMipLevel,
+        queryClipped);
+
+    if (queryClipped)
     {
-        if (xRangeIndex >= xRangeCount)
-        {
-            break;
-        }
-
-        [unroll]
-        for (uint yRangeIndex = 0u; yRangeIndex < 2u; ++yRangeIndex)
-        {
-            if (yRangeIndex >= yRangeCount)
-            {
-                break;
-            }
-
-            if (CLodVirtualShadowRectTouchesDirtyPages(
-                    dirtyHierarchy,
-                    clipmapInfo.pageTableLayer,
-                    uint2(xRanges[xRangeIndex].x, yRanges[yRangeIndex].x),
-                    uint2(xRanges[xRangeIndex].y, yRanges[yRangeIndex].y)))
-            {
-                WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_REGION_HITS, 1);
-                return true;
-            }
-        }
+        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_QUERIES_CLIPPED, 1);
+    }
+    if (sampledMipLevel > 0u)
+    {
+        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_REGION_COARSE_MIP_CHECKS, 1);
+    }
+    if (touchesDirtyPages)
+    {
+        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_REGION_HITS, 1);
     }
 
-    return false;
+    return touchesDirtyPages;
 }
 
 bool CLodVirtualShadowInstanceInvalidatedThisFrame(uint instanceIndex)
 {
-#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
     if (instanceIndex >= kCLodVirtualShadowMovedInstanceBitCapacity)
     {
         return false;
@@ -362,10 +301,12 @@ bool CLodVirtualShadowInstanceInvalidatedThisFrame(uint instanceIndex)
         ResourceDescriptorHeap[CLOD_WG_SHADOW_INVALIDATED_INSTANCES_DESCRIPTOR_INDEX];
     const uint word = invalidatedInstancesBitset[instanceIndex >> 5u];
     return ((word >> (instanceIndex & 31u)) & 1u) != 0u;
+}
 #else
+bool CLodVirtualShadowInstanceInvalidatedThisFrame(uint instanceIndex)
+{
     (void)instanceIndex;
     return false;
-#endif
 }
 #endif
 
@@ -404,7 +345,6 @@ void WGTelemetryAdd(uint counterIndex, uint value)
     InterlockedAdd(telemetryCounters[counterIndex], value);
 }
 
-// Wave-cooperative slot reservation for the node replay region.
 void ReplayReserveNodeSlotsWave(
     RWStructuredBuffer<CLodReplayBufferState> replayState,
     uint capacity,
@@ -417,7 +357,8 @@ void ReplayReserveNodeSlotsWave(
     const uint laneRank = GetLaneRankInGroup(activeMask, WaveGetLaneIndex());
 
     uint baseSlot = 0;
-    if (WaveGetLaneIndex() == leaderLane) {
+    if (WaveGetLaneIndex() == leaderLane)
+    {
         InterlockedAdd(replayState[0].nodeWriteCount, activeCount, baseSlot);
     }
 
@@ -426,12 +367,12 @@ void ReplayReserveNodeSlotsWave(
     valid = slot < capacity;
 
     const uint droppedCount = CountBits128(WaveActiveBallot(!valid));
-    if (WaveGetLaneIndex() == leaderLane && droppedCount > 0) {
+    if (WaveGetLaneIndex() == leaderLane && droppedCount > 0)
+    {
         InterlockedAdd(replayState[0].nodeDropped, droppedCount);
     }
 }
 
-// Wave-cooperative slot reservation for the meshlet replay region.
 void ReplayReserveMeshletSlotsWave(
     RWStructuredBuffer<CLodReplayBufferState> replayState,
     uint capacity,
@@ -444,7 +385,8 @@ void ReplayReserveMeshletSlotsWave(
     const uint laneRank = GetLaneRankInGroup(activeMask, WaveGetLaneIndex());
 
     uint baseSlot = 0;
-    if (WaveGetLaneIndex() == leaderLane) {
+    if (WaveGetLaneIndex() == leaderLane)
+    {
         InterlockedAdd(replayState[0].meshletWriteCount, activeCount, baseSlot);
     }
 
@@ -453,32 +395,34 @@ void ReplayReserveMeshletSlotsWave(
     valid = slot < capacity;
 
     const uint droppedCount = CountBits128(WaveActiveBallot(!valid));
-    if (WaveGetLaneIndex() == leaderLane && droppedCount > 0) {
+    if (WaveGetLaneIndex() == leaderLane && droppedCount > 0)
+    {
         InterlockedAdd(replayState[0].meshletDropped, droppedCount);
     }
 }
 
-// Pack/unpack helpers for compressed TraverseNodeRecord (3 uints = 12 bytes).
-// nodeIdPacked: [31]=sourceTag, [30]=allowRefine, [29:0]=nodeId
-uint PackTraverseNodeId(uint nodeId, uint sourceTag, uint allowRefine) {
+uint PackTraverseNodeId(uint nodeId, uint sourceTag, uint allowRefine)
+{
     return (sourceTag << 31u) | (allowRefine << 30u) | (nodeId & 0x3FFFFFFFu);
 }
-uint UnpackNodeId(uint packed)       { return packed & 0x3FFFFFFFu; }
-uint UnpackSourceTag(uint packed)    { return packed >> 31u; }
-uint UnpackAllowRefine(uint packed)  { return (packed >> 30u) & 1u; }
 
-// Pack/unpack helpers for compressed MeshletBucketRecord (6 uints = 24 bytes).
-// groupIdPacked: [31]=sourceTag, [30:0]=groupId
-uint PackGroupId(uint groupId, uint sourceTag) {
+uint UnpackNodeId(uint packed)      { return packed & 0x3FFFFFFFu; }
+uint UnpackSourceTag(uint packed)   { return packed >> 31u; }
+uint UnpackAllowRefine(uint packed) { return (packed >> 30u) & 1u; }
+
+uint PackGroupId(uint groupId, uint sourceTag)
+{
     return (sourceTag << 31u) | (groupId & 0x7FFFFFFFu);
 }
+
 uint UnpackGroupId(uint packed)        { return packed & 0x7FFFFFFFu; }
 uint UnpackGroupSourceTag(uint packed) { return packed >> 31u; }
 
-// meshletIndexAndCount: [31:16]=count, [15:0]=firstLocalMeshletIndex
-uint PackMeshletIndexAndCount(uint firstIndex, uint count) {
+uint PackMeshletIndexAndCount(uint firstIndex, uint count)
+{
     return (count << 16u) | (firstIndex & 0xFFFFu);
 }
+
 uint UnpackMeshletFirstIndex(uint packed) { return packed & 0xFFFFu; }
 uint UnpackMeshletCount(uint packed)      { return packed >> 16u; }
 
@@ -1431,8 +1375,12 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
                 if (survives && !objectInvalidatedThisFrame)
                 {
-                    const float3 meshletCenterWorld = mul(float4(meshletBounds.sphere.xyz, 1.0f), objectModelMatrix).xyz;
-                    bool touchesDirtyPages = CLodVirtualShadowMeshletTouchesDirtyPages(meshletCenterWorld, meshletRadiusWorld, b.viewId);
+                    bool touchesDirtyPages = true;
+                    if (CLodWorkGraphShadowDirtyPageCullingEnabled())
+                    {
+                        const float3 meshletCenterWorld = mul(float4(meshletBounds.sphere.xyz, 1.0f), objectModelMatrix).xyz;
+                        touchesDirtyPages = CLodVirtualShadowMeshletTouchesDirtyPages(meshletCenterWorld, meshletRadiusWorld, b.viewId);
+                    }
 
                     if (!touchesDirtyPages)
                     {

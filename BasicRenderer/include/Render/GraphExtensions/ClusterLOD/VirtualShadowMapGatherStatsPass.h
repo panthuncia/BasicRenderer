@@ -15,6 +15,7 @@ public:
         std::shared_ptr<Buffer> allocationCountBuffer,
         std::shared_ptr<Buffer> allocationIndirectArgsBuffer,
         std::shared_ptr<Buffer> pageListHeaderBuffer,
+        std::shared_ptr<Buffer> pageMetadataBuffer,
         std::shared_ptr<Buffer> clipmapInfoBuffer,
         std::shared_ptr<Buffer> statsBuffer,
         bool capturePreAllocateState);
@@ -30,6 +31,7 @@ private:
     std::shared_ptr<Buffer> m_allocationCountBuffer;
     std::shared_ptr<Buffer> m_allocationIndirectArgsBuffer;
     std::shared_ptr<Buffer> m_pageListHeaderBuffer;
+    std::shared_ptr<Buffer> m_pageMetadataBuffer;
     std::shared_ptr<Buffer> m_clipmapInfoBuffer;
     std::shared_ptr<Buffer> m_statsBuffer;
     bool m_capturePreAllocateState = false;

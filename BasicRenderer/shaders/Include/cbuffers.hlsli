@@ -53,7 +53,6 @@ cbuffer MiscFloatRootConstants : register(b5) { // Used for pass-specific one-of
     float FloatRootConstant2;
     float FloatRootConstant3;
     float FloatRootConstant4;
-    float FloatRootConstant5;
 }
 
 cbuffer ResourceDescriptorIndices : register(b6) {

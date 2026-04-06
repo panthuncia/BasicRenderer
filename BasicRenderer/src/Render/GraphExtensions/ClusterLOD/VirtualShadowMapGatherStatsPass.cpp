@@ -14,6 +14,7 @@ VirtualShadowMapGatherStatsPass::VirtualShadowMapGatherStatsPass(
     std::shared_ptr<Buffer> allocationCountBuffer,
     std::shared_ptr<Buffer> allocationIndirectArgsBuffer,
     std::shared_ptr<Buffer> pageListHeaderBuffer,
+    std::shared_ptr<Buffer> pageMetadataBuffer,
     std::shared_ptr<Buffer> clipmapInfoBuffer,
     std::shared_ptr<Buffer> statsBuffer,
     bool capturePreAllocateState)
@@ -21,6 +22,7 @@ VirtualShadowMapGatherStatsPass::VirtualShadowMapGatherStatsPass(
     , m_allocationCountBuffer(std::move(allocationCountBuffer))
     , m_allocationIndirectArgsBuffer(std::move(allocationIndirectArgsBuffer))
     , m_pageListHeaderBuffer(std::move(pageListHeaderBuffer))
+    , m_pageMetadataBuffer(std::move(pageMetadataBuffer))
     , m_clipmapInfoBuffer(std::move(clipmapInfoBuffer))
     , m_statsBuffer(std::move(statsBuffer))
     , m_capturePreAllocateState(capturePreAllocateState)
@@ -40,6 +42,7 @@ void VirtualShadowMapGatherStatsPass::DeclareResourceUsages(ComputePassBuilder* 
             m_allocationCountBuffer,
             m_allocationIndirectArgsBuffer,
             m_pageListHeaderBuffer,
+            m_pageMetadataBuffer,
             m_clipmapInfoBuffer)
         .WithUnorderedAccess(m_statsBuffer);
 
@@ -65,6 +68,7 @@ PassReturn VirtualShadowMapGatherStatsPass::Execute(PassExecutionContext& execut
     rootConstants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_ALLOCATION_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_allocationIndirectArgsBuffer->GetSRVInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_PAGE_LIST_HEADER_DESCRIPTOR_INDEX] = m_pageListHeaderBuffer->GetSRVInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_clipmapInfoBuffer->GetSRVInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetSRVInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_PAGE_TABLE_RESOLUTION] = CLodVirtualShadowDefaultPageTableResolution;
     rootConstants[CLOD_VIRTUAL_SHADOW_GATHER_STATS_CLIPMAP_COUNT] = CLodVirtualShadowDefaultClipmapCount;

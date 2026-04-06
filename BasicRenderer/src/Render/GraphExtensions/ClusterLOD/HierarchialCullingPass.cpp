@@ -27,6 +27,9 @@
 #include "../shaders/PerPassRootConstants/clodWorkGraphRootConstants.h"
 
 namespace {
+
+constexpr bool kDisableVirtualShadowDirtyPageCulling = false;
+
 bool UsesSWClassification(HierarchialCullingWorkGraphMode mode)
 {
     return mode != HierarchialCullingWorkGraphMode::HardwareOnly;
@@ -253,6 +256,9 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     }
     if (m_workGraphMode == HierarchialCullingWorkGraphMode::SoftwareRasterCompute) {
         workGraphFlags |= CLOD_WG_FLAG_COMPUTE_SW_RASTER;
+    }
+    if (kDisableVirtualShadowDirtyPageCulling && UsesVirtualShadowOutput(m_rasterOutputKind)) {
+        workGraphFlags |= CLOD_WG_FLAG_DISABLE_SHADOW_DIRTY_PAGE_CULLING;
     }
     constexpr uint32_t swRasterThreshold = 16; // pixel diameter threshold
     workGraphFlags |= (swRasterThreshold << CLOD_WG_SW_RASTER_THRESHOLD_SHIFT);

@@ -207,11 +207,6 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
     debugInfo.sampledClipmapIndex = preferredClipmapIndex;
     debugInfo.sampledPageEntry = pageEntry;
     debugInfo.sampledPhysicalPageIndex = physicalPageIndex;
-    if ((pageEntry & kCLodVirtualShadowContentValidMask) == 0u)
-    {
-        debugInfo.flags |= kCLodVirtualShadowDebugFlagSampledPageUnwritten;
-        return 0.0f;
-    }
 
     row_major matrix cachedPageView = lightCamera.view;
     const uint pageViewInfoIndex =

@@ -8,10 +8,12 @@
 class Buffer;
 class PixelBuffer;
 
-class VirtualShadowMapClearDirtyBitsPass final : public ComputePass {
+class VirtualShadowMapFreeWrappedPagesPass final : public ComputePass {
 public:
-    VirtualShadowMapClearDirtyBitsPass(
+    VirtualShadowMapFreeWrappedPagesPass(
         std::shared_ptr<PixelBuffer> pageTableTexture,
+        std::shared_ptr<Buffer> pageMetadataBuffer,
+        std::shared_ptr<Buffer> clipmapInfoBuffer,
         std::shared_ptr<Buffer> statsBuffer);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
@@ -22,5 +24,7 @@ public:
 private:
     PipelineState m_pso;
     std::shared_ptr<PixelBuffer> m_pageTableTexture;
+    std::shared_ptr<Buffer> m_pageMetadataBuffer;
+    std::shared_ptr<Buffer> m_clipmapInfoBuffer;
     std::shared_ptr<Buffer> m_statsBuffer;
 };

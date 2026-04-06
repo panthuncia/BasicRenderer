@@ -23,9 +23,9 @@ VirtualShadowMapDirtyHierarchyPass::VirtualShadowMapDirtyHierarchyPass(
 
 void VirtualShadowMapDirtyHierarchyPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
-    builder->WithShaderResource(m_pageTableTexture, m_dirtyHierarchyTexture)
-        .WithUnorderedAccess(m_dirtyHierarchyTexture);
-
+    builder->WithShaderResource(m_pageTableTexture, Subresources(m_pageTableTexture, Mip{0, 1}))
+        .WithUnorderedAccess(Subresources(m_dirtyHierarchyTexture, FromMip{0}));
+    
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 

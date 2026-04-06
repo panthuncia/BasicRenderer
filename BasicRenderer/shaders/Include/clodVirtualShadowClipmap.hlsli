@@ -6,7 +6,8 @@ static const uint kCLodVirtualShadowClipmapInvalidateFlag = 0x2u;
 static const uint kCLodVirtualShadowAllocatedMask = 0x80000000u;
 static const uint kCLodVirtualShadowDirtyMask = 0x40000000u;
 static const uint kCLodVirtualShadowContentValidMask = 0x20000000u;
-static const uint kCLodVirtualShadowPhysicalPageIndexMask = 0x1FFFFFFFu;
+static const uint kCLodVirtualShadowVisitedMask = 0x10000000u;
+static const uint kCLodVirtualShadowPhysicalPageIndexMask = 0x0FFFFFFFu;
 static const uint kCLodVirtualShadowPhysicalPageResidentFlag = 0x1u;
 static const uint kCLodVirtualShadowClipmapCount = 6u;
 static const uint kCLodVirtualShadowVirtualResolution = 4096u;
@@ -48,7 +49,7 @@ struct CLodVirtualShadowStats
     uint setupResetForced;
     uint setupResetNoPreviousState;
     uint setupResetStructureMismatch;
-    uint pad0;
+    uint setupResetLightDirectionChanged;
     uint setupWrappedClearedPageTableEntries[kCLodVirtualShadowClipmapCount];
     uint setupStaleDirtyClearedPageTableEntries[kCLodVirtualShadowClipmapCount];
     uint markResidentCleanHits[kCLodVirtualShadowClipmapCount];
@@ -62,6 +63,8 @@ struct CLodVirtualShadowStats
     uint allocatedPageTableEntries[kCLodVirtualShadowClipmapCount];
     uint dirtyPageTableEntries[kCLodVirtualShadowClipmapCount];
     uint clearedUnwrittenDirtyPages[kCLodVirtualShadowClipmapCount];
+    uint visitedPageTableEntries[kCLodVirtualShadowClipmapCount];
+    uint visitedDirtyPageTableEntries[kCLodVirtualShadowClipmapCount];
 };
 
 bool CLodVirtualShadowClipmapIsValid(CLodVirtualShadowClipmapInfo clipmapInfo)

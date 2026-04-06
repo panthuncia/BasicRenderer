@@ -40,4 +40,5 @@ private:
     bool m_resetReasonForced = false;
     bool m_resetReasonNoPreviousState = false;
     bool m_resetReasonStructureMismatch = false;
+    bool m_resetReasonLightDirectionChanged = false;
 };

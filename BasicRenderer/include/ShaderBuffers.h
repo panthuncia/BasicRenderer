@@ -466,7 +466,6 @@ enum MiscFloatRootConstants { // Used for pass-specific one-off constants
 	FloatRootConstant2,
 	FloatRootConstant3,
 	FloatRootConstant4,
-	FloatRootConstant5,
 	NumMiscFloatRootConstants
 };
 
