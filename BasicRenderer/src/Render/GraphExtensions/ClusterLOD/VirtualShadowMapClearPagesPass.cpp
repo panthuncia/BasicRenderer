@@ -11,9 +11,13 @@
 
 VirtualShadowMapClearPagesPass::VirtualShadowMapClearPagesPass(
     std::shared_ptr<PixelBuffer> physicalPagesTexture,
-    std::shared_ptr<Buffer> dirtyPageFlagsBuffer)
+    std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
+    std::shared_ptr<PixelBuffer> pageTableTexture,
+    std::shared_ptr<Buffer> pageMetadataBuffer)
     : m_physicalPagesTexture(std::move(physicalPagesTexture))
     , m_dirtyPageFlagsBuffer(std::move(dirtyPageFlagsBuffer))
+    , m_pageTableTexture(std::move(pageTableTexture))
+    , m_pageMetadataBuffer(std::move(pageMetadataBuffer))
 {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -25,7 +29,8 @@ VirtualShadowMapClearPagesPass::VirtualShadowMapClearPagesPass(
 
 void VirtualShadowMapClearPagesPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
-    builder->WithUnorderedAccess(m_physicalPagesTexture, m_dirtyPageFlagsBuffer);
+    builder->WithUnorderedAccess(m_physicalPagesTexture, m_dirtyPageFlagsBuffer, m_pageTableTexture);
+    builder->WithShaderResource(m_pageMetadataBuffer);
 
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
@@ -48,6 +53,8 @@ PassReturn VirtualShadowMapClearPagesPass::Execute(PassExecutionContext& executi
     uint32_t rootConstants[NumMiscUintRootConstants] = {};
     rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_PHYSICAL_PAGES_DESCRIPTOR_INDEX] = m_physicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetSRVInfo(0).slot.index;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

@@ -653,6 +653,8 @@ void CLodVirtualShadowClearPhysicalPagesCSMain(
 
     RWTexture2D<uint> physicalPages = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CLEAR_PHYSICAL_PAGES_DESCRIPTOR_INDEX];
     RWStructuredBuffer<uint> dirtyFlags = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_FLAGS_DESCRIPTOR_INDEX];
+    RWTexture2DArray<uint> pageTable = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_TABLE_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint4> pageMetadata = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_METADATA_DESCRIPTOR_INDEX];
 
     if (groupThreadId.x == 0u && groupThreadId.y == 0u)
     {
@@ -665,6 +667,20 @@ void CLodVirtualShadowClearPhysicalPagesCSMain(
         {
             uint ignored = 0u;
             InterlockedAnd(dirtyFlags[dirtyWordIndex], ~dirtyBitMask, ignored);
+
+            // Set Dirty on the page table entry so the dirty hierarchy picks it up.
+            // This mirrors Timberdoodle's clear_pages.hlsl where Dirty is set only
+            // after physical memory has been zeroed.
+            const uint4 meta = pageMetadata[physicalPageIndex];
+            if ((meta.z & kCLodVirtualShadowPhysicalPageResidentFlag) != 0u)
+            {
+                const uint virtualAddress = meta.x;
+                const uint clipmapIndex = meta.w;
+                const uint pageX = virtualAddress % kCLodVirtualShadowPageTableResolution;
+                const uint pageY = virtualAddress / kCLodVirtualShadowPageTableResolution;
+                uint ignoredOr = 0u;
+                InterlockedOr(pageTable[uint3(pageX, pageY, clipmapIndex)], kCLodVirtualShadowDirtyMask, ignoredOr);
+            }
         }
     }
     GroupMemoryBarrierWithGroupSync();
@@ -766,13 +782,11 @@ void CLodVirtualShadowSetupCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         pageTable[dispatchThreadId] = 0u;
     }
-    else if ((existingPageEntry & (kCLodVirtualShadowDirtyMask | kCLodVirtualShadowVisitedMask)) != 0u)
+    else if ((existingPageEntry & kCLodVirtualShadowVisitedMask) != 0u)
     {
-        if ((existingPageEntry & kCLodVirtualShadowDirtyMask) != 0u)
-        {
-            CLodVirtualShadowStatsIncrementSetupStaleDirtyClear(statsBuffer, dispatchThreadId.z);
-        }
-        pageTable[dispatchThreadId] = existingPageEntry & ~(kCLodVirtualShadowDirtyMask | kCLodVirtualShadowVisitedMask);
+        // Only clear Visited — Dirty is managed by ClearPages (set) and
+        // ClearDirtyBits (clear) which both iterate the allocation request list.
+        pageTable[dispatchThreadId] = existingPageEntry & ~kCLodVirtualShadowVisitedMask;
     }
 
     if (dispatchThreadId.z != 0u)
@@ -1212,7 +1226,6 @@ void CLodVirtualShadowAllocatePagesCSMain(uint3 dispatchThreadId : SV_DispatchTh
 
     const uint pageEntry = selectedPhysicalPageIndex |
         kCLodVirtualShadowAllocatedMask |
-        kCLodVirtualShadowDirtyMask |
         kCLodVirtualShadowVisitedMask;
     pageTable[uint3(pageX, pageY, clipmapIndex)] = pageEntry;
     pageMetadata[selectedPhysicalPageIndex] = uint4(
@@ -1248,7 +1261,16 @@ void CLodVirtualShadowBuildDirtyHierarchyCSMain(uint3 dispatchThreadId : SV_Disp
 
     if (CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_SOURCE_IS_PAGE_TABLE != 0u)
     {
-        const uint srcValue = sourceTexture.Load(int4(dispatchThreadId.xy, dispatchThreadId.z, 0));
+        // The page table is stored in wrapped (toroidal) coordinate space, but the
+        // dirty hierarchy must be in logical (camera-projected) space so that the
+        // sphere-vs-hierarchy culling query, which uses camera-derived UVs, samples
+        // the correct texels.  Map the logical thread position to wrapped page coords
+        // before reading the page table (matching Timberdoodle's gen_dirty_bit_hiz).
+        StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos =
+            ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_CLIPMAP_INFO_DESCRIPTOR_INDEX];
+        const CLodVirtualShadowClipmapInfo clipmapInfo = clipmapInfos[dispatchThreadId.z];
+        const uint2 wrappedCoords = CLodVirtualShadowWrappedPageCoords(dispatchThreadId.xy, clipmapInfo);
+        const uint srcValue = sourceTexture.Load(int4(wrappedCoords, dispatchThreadId.z, 0));
         dirtyValue = ((srcValue & kCLodVirtualShadowDirtyMask) != 0u) ? 1u : 0u;
     }
     else
@@ -1272,35 +1294,37 @@ void CLodVirtualShadowBuildDirtyHierarchyCSMain(uint3 dispatchThreadId : SV_Disp
 }
 
 [shader("compute")]
-[numthreads(8, 8, 1)]
+[numthreads(64, 1, 1)]
 void CLodVirtualShadowClearDirtyBitsCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    if (dispatchThreadId.z >= kCLodVirtualShadowClipmapCount ||
-        dispatchThreadId.x >= kCLodVirtualShadowPageTableResolution ||
-        dispatchThreadId.y >= kCLodVirtualShadowPageTableResolution)
+    StructuredBuffer<uint> allocationCountBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_REQUEST_COUNT_DESCRIPTOR_INDEX];
+    const uint requestCount = allocationCountBuffer.Load(0);
+    const uint requestIndex = dispatchThreadId.x;
+    if (requestIndex >= requestCount)
     {
         return;
     }
 
+    StructuredBuffer<uint4> allocationRequests = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_REQUESTS_DESCRIPTOR_INDEX];
     RWTexture2DArray<uint> pageTable = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_DESCRIPTOR_INDEX];
-    const uint3 pageCoords = dispatchThreadId;
-    const uint pageEntry = pageTable[pageCoords];
-    const uint clearMask =
-        kCLodVirtualShadowAllocatedMask |
-        kCLodVirtualShadowDirtyMask |
-        kCLodVirtualShadowVisitedMask;
-    if ((pageEntry & clearMask) != clearMask)
+
+    const uint4 request = allocationRequests[requestIndex];
+    const uint virtualAddress = request.x;
+    const uint clipmapIndex = request.y;
+    if (clipmapIndex >= kCLodVirtualShadowClipmapCount)
     {
         return;
     }
 
-    RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_STATS_DESCRIPTOR_INDEX];
-    if ((pageEntry & kCLodVirtualShadowContentValidMask) == 0u)
+    const uint pageX = virtualAddress % kCLodVirtualShadowPageTableResolution;
+    const uint pageY = virtualAddress / kCLodVirtualShadowPageTableResolution;
+    if (pageY >= kCLodVirtualShadowPageTableResolution)
     {
-        CLodVirtualShadowStatsIncrementClearedUnwrittenDirty(statsBuffer, dispatchThreadId.z);
+        return;
     }
 
-    pageTable[pageCoords] = pageEntry & ~kCLodVirtualShadowDirtyMask;
+    uint ignoredPrev = 0u;
+    InterlockedAnd(pageTable[uint3(pageX, pageY, clipmapIndex)], ~kCLodVirtualShadowDirtyMask, ignoredPrev);
 }
 
 uint CLodGetHistogramVisibleClusterReadIndex(uint linearizedID)

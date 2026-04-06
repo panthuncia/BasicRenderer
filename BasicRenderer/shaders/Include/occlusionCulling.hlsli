@@ -226,6 +226,7 @@ bool ConservativeAnyHitTexture2DArraySphereQuery(
     float4 vLBRT;
     if (camera.isOrtho)
     {
+        viewSpaceCenter.y = -viewSpaceCenter.y; // Un-invert for ortho (matches OcclusionCulling)
         vLBRT = sphere_screen_extents_ortho(viewSpaceCenter.xyz, scaledBoundingRadius, camera.projection);
     }
     else

@@ -1491,7 +1491,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             shadowClearPagesPassName,
             std::make_shared<VirtualShadowMapClearPagesPass>(
                 m_shadowPhysicalPagesTexture,
-                m_shadowDirtyPageFlagsBuffer));
+                m_shadowDirtyPageFlagsBuffer,
+                m_shadowPageTableTexture,
+                m_shadowPageMetadataBuffer));
             shadowClearPagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowGatherStatsPassName));
         outPasses.push_back(std::move(shadowClearPagesPassDesc));
 
@@ -1500,7 +1502,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             shadowDirtyHierarchyPassName,
             std::make_shared<VirtualShadowMapDirtyHierarchyPass>(
                 m_shadowPageTableTexture,
-                m_shadowDirtyPageHierarchyTexture));
+                m_shadowDirtyPageHierarchyTexture,
+                m_shadowClipmapInfoBuffer));
         shadowDirtyHierarchyPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowClearPagesPassName));
         outPasses.push_back(std::move(shadowDirtyHierarchyPassDesc));
 
@@ -2343,7 +2346,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             shadowClearDirtyBitsPassName,
             std::make_shared<VirtualShadowMapClearDirtyBitsPass>(
                 m_shadowPageTableTexture,
-                m_shadowStatsBuffer));
+                m_shadowAllocationRequestsBuffer,
+                m_shadowAllocationCountBuffer,
+                m_shadowAllocationIndirectArgsBuffer));
         shadowClearDirtyBitsPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowClearDirtyBitsAfterPassName));
         outPasses.push_back(std::move(shadowClearDirtyBitsPassDesc));
     }

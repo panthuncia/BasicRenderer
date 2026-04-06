@@ -245,6 +245,20 @@ bool CLodVirtualShadowFindClipmapForView(uint viewId, out uint outClipmapIndex, 
     return false;
 }
 
+uint CLodResolveLodViewId(uint cullViewId)
+{
+    uint clipmapIndex = 0u;
+    CLodVirtualShadowClipmapInfo clipmapInfo;
+    if (!CLodVirtualShadowFindClipmapForView(cullViewId, clipmapIndex, clipmapInfo))
+    {
+        return cullViewId;
+    }
+
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
+    return perFrameBuffer.mainCameraIndex;
+}
+
 bool CLodVirtualShadowMeshletTouchesDirtyPages(float3 worldCenter, float radiusWorld, uint viewId)
 {
     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_QUERIES, 1);
@@ -303,6 +317,11 @@ bool CLodVirtualShadowInstanceInvalidatedThisFrame(uint instanceIndex)
     return ((word >> (instanceIndex & 31u)) & 1u) != 0u;
 }
 #else
+uint CLodResolveLodViewId(uint cullViewId)
+{
+    return cullViewId;
+}
+
 bool CLodVirtualShadowInstanceInvalidatedThisFrame(uint instanceIndex)
 {
     (void)instanceIndex;
@@ -819,10 +838,13 @@ void WG_TraverseNodes(
         const row_major matrix objectModelMatrix = perObjectBuffer[objectBufferIndex].model;
         StructuredBuffer<Camera> cameras =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
-        const Camera camera = cameras[rec.viewId];
+        const uint cullViewId = rec.viewId;
+        const uint lodViewId = CLodResolveLodViewId(cullViewId);
+        const Camera cullCamera = cameras[cullViewId];
+        const Camera lodCamera = cameras[lodViewId];
         StructuredBuffer<CullingCameraInfo> cameraInfos =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
-        const CullingCameraInfo cam = cameraInfos[rec.viewId];
+        const CullingCameraInfo lodCam = cameraInfos[lodViewId];
         StructuredBuffer<ClusterLODGroup> groups =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Groups)];
         StructuredBuffer<ClusterLODNode> lodNodes =
@@ -844,9 +866,9 @@ void WG_TraverseNodes(
         const float nodeCullRadiusObjectSpace = isSkinned ? instanceData.boundingSphere.sphere.w : node.metric.cullCenterAndRadius.w;
         const float3 nodeLodCenterObjectSpace = node.metric.lodCenterAndRadius.xyz;
         const float nodeLodRadiusObjectSpace = node.metric.lodCenterAndRadius.w;
-        const float3 nodeCenterViewSpace = ToViewSpace(nodeCullCenterObjectSpace, objectModelMatrix, camera.view);
+        const float3 nodeCenterViewSpace = ToViewSpace(nodeCullCenterObjectSpace, objectModelMatrix, cullCamera.view);
         const float nodeRadiusWorld = nodeCullRadiusObjectSpace * cullUniformScale;
-        const bool nodeCulled = !replaySource && SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, camera);
+        const bool nodeCulled = !replaySource && SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, cullCamera);
 
         if (nodeCulled) {
             WGTelemetryAdd(WG_COUNTER_TRAVERSE_CULLED_NODE_RECORDS, 1);
@@ -869,9 +891,9 @@ void WG_TraverseNodes(
                 const float grpEOD = ProjectedGeometricError(
                     grpWorldCenter, grpWorldRadius,
                     grp.bounds.error, lodUniformScale,
-                    cam.positionWorldSpace.xyz, cam.zNear,
-                    camera.isOrtho);
-                const bool nodeWantsTraversal = parentAllowsRefine && (grpEOD >= cam.errorOverDistanceThreshold);
+                    lodCam.positionWorldSpace.xyz, lodCam.zNear,
+                    lodCamera.isOrtho);
+                const bool nodeWantsTraversal = parentAllowsRefine && (grpEOD >= lodCam.errorOverDistanceThreshold);
 
                 if (!nodeWantsTraversal) {
                     WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
@@ -960,27 +982,27 @@ void WG_TraverseNodes(
                     lodCheckWorldRadius,
                     node.metric.maxQuadricError,
                     lodUniformScale,
-                    cam.positionWorldSpace.xyz,
-                    cam.zNear,
-                    camera.isOrtho);
-                const bool nodeWantsTraversal = parentAllowsRefine && (nodeErrorOverDistance >= cam.errorOverDistanceThreshold);
+                    lodCam.positionWorldSpace.xyz,
+                    lodCam.zNear,
+                    lodCamera.isOrtho);
+                const bool nodeWantsTraversal = parentAllowsRefine && (nodeErrorOverDistance >= lodCam.errorOverDistanceThreshold);
 
                 if (!nodeWantsTraversal) {
                     WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
                 }
                 else {
                     bool occlusionCulled = false;
-                    if (CLodWorkGraphOcclusionEnabled() && !camera.isOrtho) {
+                    if (CLodWorkGraphOcclusionEnabled() && !cullCamera.isOrtho) {
                         StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
                             ResourceDescriptorHeap[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
-                        const uint depthMapDescriptorIndex = viewDepthSRVIndices[rec.viewId].linearDepthSRVIndex;
+                        const uint depthMapDescriptorIndex = viewDepthSRVIndices[cullViewId].linearDepthSRVIndex;
                         if (depthMapDescriptorIndex != 0) {
                             if (replaySource) {
                                 // Phase 2 replay: HZB is from this frame's Phase 1 depth,
                                 // so test current-frame bounding spheres.
                                 OcclusionCullingPerspectiveTexture2D(
                                     occlusionCulled,
-                                    camera,
+                                    cullCamera,
                                     nodeCenterViewSpace,
                                     -nodeCenterViewSpace.z,
                                     nodeRadiusWorld,
@@ -990,16 +1012,16 @@ void WG_TraverseNodes(
                                 // so reproject bounding sphere into previous frame's camera space.
                                 const row_major matrix prevModelMatrix = perObjectBuffer[objectBufferIndex].prevModel;
                                 const float prevNodeCullScale = MaxAxisScale_RowVector(prevModelMatrix);
-                                const float3 prevNodeCenterViewSpace = ToViewSpace(nodeCullCenterObjectSpace, prevModelMatrix, camera.prevView);
+                                const float3 prevNodeCenterViewSpace = ToViewSpace(nodeCullCenterObjectSpace, prevModelMatrix, cullCamera.prevView);
                                 const float prevNodeRadiusWorld = nodeCullRadiusObjectSpace * prevNodeCullScale;
                                 OcclusionCullingPerspectiveTexture2D(
                                     occlusionCulled,
-                                    camera,
+                                    cullCamera,
                                     prevNodeCenterViewSpace,
                                     -prevNodeCenterViewSpace.z,
                                     prevNodeRadiusWorld,
                                     depthMapDescriptorIndex,
-                                    camera.prevUnjitteredProjection);
+                                    cullCamera.prevUnjitteredProjection);
                             }
                         }
                     }
@@ -1026,9 +1048,9 @@ void WG_TraverseNodes(
                             // Frustum cull child.
                             const float3 childCullCenterOS = isSkinned ? instanceData.boundingSphere.sphere.xyz : child.metric.cullCenterAndRadius.xyz;
                             const float childCullRadiusOS = isSkinned ? instanceData.boundingSphere.sphere.w : child.metric.cullCenterAndRadius.w;
-                            const float3 childCenterVS = ToViewSpace(childCullCenterOS, objectModelMatrix, camera.view);
+                            const float3 childCenterVS = ToViewSpace(childCullCenterOS, objectModelMatrix, cullCamera.view);
                             const float childRadiusWorld = childCullRadiusOS * cullUniformScale;
-                            if (!replaySource && SphereOutsideFrustumViewSpace(childCenterVS, childRadiusWorld, camera)) {
+                            if (!replaySource && SphereOutsideFrustumViewSpace(childCenterVS, childRadiusWorld, cullCamera)) {
                                 WGTelemetryAdd(WG_COUNTER_CHILD_PREFILTER_FRUSTUM_CULLED, 1);
                                 continue;
                             }
@@ -1042,9 +1064,9 @@ void WG_TraverseNodes(
                                 const float childEOD = ProjectedGeometricError(
                                     childWorldCenter, childLodRadiusWorld,
                                     child.metric.maxQuadricError, lodUniformScale,
-                                    cam.positionWorldSpace.xyz, cam.zNear,
-                                    camera.isOrtho);
-                                if (childEOD < cam.errorOverDistanceThreshold) {
+                                    lodCam.positionWorldSpace.xyz, lodCam.zNear,
+                                    lodCamera.isOrtho);
+                                if (childEOD < lodCam.errorOverDistanceThreshold) {
                                     WGTelemetryAdd(WG_COUNTER_CHILD_PREFILTER_LOD_REJECTED, 1);
                                     continue;
                                 }
@@ -1202,8 +1224,10 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
     float viewHeightPixels = 0.0f;
     float cullUniformScale = 0.0f;
     float lodUniformScale = 0.0f;
-    CullingCameraInfo cam = (CullingCameraInfo)0;
-    bool cameraIsOrtho = false;
+    CullingCameraInfo cullCam = (CullingCameraInfo)0;
+    CullingCameraInfo lodCam = (CullingCameraInfo)0;
+    bool cullCameraIsOrtho = false;
+    bool lodCameraIsOrtho = false;
     uint groupsBase = 0;
     uint meshBufferIndex = 0;
     uint activeGroupScanCount = 0;
@@ -1238,8 +1262,10 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         // Occlusion matrices are deferred to the occlusion branch.
         StructuredBuffer<Camera> cameras =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
+        const uint lodViewId = CLodResolveLodViewId(b.viewId);
         viewMatrix = cameras[b.viewId].view;
-        cameraIsOrtho = cameras[b.viewId].isOrtho;
+        cullCameraIsOrtho = cameras[b.viewId].isOrtho;
+        lodCameraIsOrtho = cameras[lodViewId].isOrtho;
         [unroll] for (uint p = 0; p < 6; p++)
             frustumPlanes[p] = cameras[b.viewId].clippingPlanes[p].plane;
 
@@ -1254,7 +1280,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         pageMeshletCount = pageHeader.meshletCount;
         pageDescriptorOffset = pageHeader.descriptorOffset;
 
-        if (!cameraIsOrtho) {
+        if (!cullCameraIsOrtho) {
             StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
                 ResourceDescriptorHeap[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
             depthMapDescriptorIndex = viewDepthSRVIndices[b.viewId].linearDepthSRVIndex;
@@ -1280,7 +1306,8 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         reyesDisplacementCandidate = displacementEnabled && displacementSpan > 1e-5f;
         StructuredBuffer<CullingCameraInfo> cameraInfos =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
-        cam = cameraInfos[b.viewId];
+        cullCam = cameraInfos[b.viewId];
+        lodCam = cameraInfos[lodViewId];
 
         StructuredBuffer<MeshInstanceClodOffsets> clodOffsets =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Offsets)];
@@ -1298,8 +1325,8 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
             const float ownWorldRadius = ownGrp.bounds.centerAndRadius.w * lodUniformScale;
             ownGroupErrorOverDistance = ProjectedGeometricError(
                 ownWorldCenter, ownWorldRadius, ownGrp.bounds.error, lodUniformScale,
-                cam.positionWorldSpace.xyz, cam.zNear,
-                cameraIsOrtho);
+                lodCam.positionWorldSpace.xyz, lodCam.zNear,
+                lodCameraIsOrtho);
         }
 
         StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
@@ -1405,10 +1432,10 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                         const float childEOD = ProjectedGeometricError(
                             childWorldCenter, childWorldRadius,
                             childGrp.bounds.error, lodUniformScale,
-                            cam.positionWorldSpace.xyz, cam.zNear,
-                            cameraIsOrtho);
+                            lodCam.positionWorldSpace.xyz, lodCam.zNear,
+                            lodCameraIsOrtho);
 
-                        if (childEOD >= cam.errorOverDistanceThreshold) {
+                        if (childEOD >= lodCam.errorOverDistanceThreshold) {
                             // Child exceeds the threshold; check residency.
                             ByteAddressBuffer nonResidentBits =
                                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
@@ -1613,11 +1640,11 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         if (contributes && swRasterEnabled && !reyesDisplacementCandidate) {
             const float projectedDiameter = CLodProjectedDiameterPixels(
                 meshletRadiusWorld,
-                cam.projY,
+                cullCam.projY,
                 viewHeightPixels,
                 meshletCenterViewSpace.z,
-                cam.zNear,
-                cameraIsOrtho);
+                cullCam.zNear,
+                cullCameraIsOrtho);
             isSW = projectedDiameter < swDiameterThreshold;
         }
 
