@@ -271,7 +271,7 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
                                 fragmentInfo.fragPosViewSpace,
                                 fragmentInfo.normalWS,
                                 light,
-                                perFrameBuffer.numShadowCascades,
+                                perFrameBuffer.numDirectionalClipmaps,
                                 perFrameBuffer.shadowCascadeSplits,
                                 directionalShadowViewInfoIndexBuffer,
                                 cameraBuffer,

@@ -828,7 +828,9 @@ std::vector<Cascade> setupDirectionalClipmaps(
     float nearPlane,
     float fovY,
     float aspectRatio,
-    const std::vector<float>& clipFarPlanes)
+    const std::vector<float>& clipFarPlanes,
+    uint32_t virtualShadowPageTableResolution,
+    float clipVerticalExtent)
 {
     using namespace DirectX;
     std::vector<Cascade> clipmaps;
@@ -853,16 +855,15 @@ std::vector<Cascade> setupDirectionalClipmaps(
     const float clipZeroScale = std::max(
         std::sqrt(clipZeroHalfWidth * clipZeroHalfWidth + clipZeroHalfHeight * clipZeroHalfHeight),
         1.0f);
-    const float ndcPageSize = 2.0f / std::max(static_cast<float>(CLodVirtualShadowDefaultPageTableResolution), 1.0f);
-    const float clipHeightOffsetScale = 5.0f;
-    const float clipNearScale = 0.01f;
-    const float clipFarScale = 10.0f;
+    const float ndcPageSize = 2.0f / std::max(static_cast<float>(virtualShadowPageTableResolution), 1.0f);
+    const float clampedClipVerticalExtent = std::max(clipVerticalExtent, 1.0f);
+    const float nearDistance = std::max(clampedClipVerticalExtent * 0.001f, 0.01f);
+    const float farDistance = std::max(clampedClipVerticalExtent, nearDistance + 1.0f);
+    const float lightDistance = farDistance * 0.5f;
 
     for (int i = 0; i < numClipmaps; ++i)
     {
         const float clipScale = clipZeroScale * std::pow(2.0f, static_cast<float>(i));
-        const float nearDistance = std::max(clipNearScale * clipScale, 0.01f);
-        const float farDistance = std::max(clipFarScale * clipScale, nearDistance + 1.0f);
         const XMMATRIX lightOrtho = XMMatrixOrthographicOffCenterRH(
             -clipScale,
             clipScale,
@@ -887,7 +888,6 @@ std::vector<Cascade> setupDirectionalClipmaps(
             1.0f);
         const XMVECTOR alignedTargetWorld = XMVector3TransformCoord(alignedTargetLightView, defaultLightViewInverse);
 
-        const float lightDistance = clipHeightOffsetScale * clipScale;
         const XMVECTOR lightPos = alignedTargetWorld - normalizedLightDir * lightDistance;
         const XMMATRIX lightView = XMMatrixLookToRH(lightPos, normalizedLightDir, lightUp);
         Cascade clipmap;

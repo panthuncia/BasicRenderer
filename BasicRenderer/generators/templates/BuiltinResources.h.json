@@ -104,7 +104,9 @@
       "CLodPageTable": {},
       "ShadowMaps": {},
       "LinearShadowMaps": {},
-      "CLodDirectionalPageViewInfo": {}
+      "CLodDirectionalPageViewInfo": {},
+      "CLodCompactMainCamera": {},
+      "CLodCompactShadowCameras": {}
     },
     "PPLL": {
       "HeadPointerTexture": {},

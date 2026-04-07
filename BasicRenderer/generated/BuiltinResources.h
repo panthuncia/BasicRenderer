@@ -1,7 +1,7 @@
 #pragma once
 
 #include <string_view>
-// GENERATED CODE ï¿½ DO NOT EDIT
+// GENERATED CODE — DO NOT EDIT
 
 struct Builtin {
   inline static constexpr std::string_view ActiveDrawSetIndices = "Builtin::ActiveDrawSetIndices";

@@ -175,8 +175,8 @@ TextureDescription CreateVirtualShadowPageTableDescription()
 {
     TextureDescription desc;
     ImageDimensions dims;
-    dims.width = CLodVirtualShadowDefaultPageTableResolution;
-    dims.height = CLodVirtualShadowDefaultPageTableResolution;
+    dims.width = CLodVirtualShadowMaxPageTableResolution;
+    dims.height = CLodVirtualShadowMaxPageTableResolution;
     dims.rowPitch = static_cast<uint64_t>(dims.width) * sizeof(uint32_t);
     dims.slicePitch = dims.rowPitch * static_cast<uint64_t>(dims.height);
     desc.imageDimensions.push_back(dims);
@@ -187,7 +187,7 @@ TextureDescription CreateVirtualShadowPageTableDescription()
     desc.hasUAV = true;
     desc.uavFormat = rhi::Format::R32_UInt;
     desc.isArray = true;
-    desc.arraySize = CLodVirtualShadowDefaultClipmapCount;
+    desc.arraySize = CLodVirtualShadowMaxSupportedClipmapCount;
     return desc;
 }
 
@@ -195,8 +195,8 @@ TextureDescription CreateVirtualShadowPhysicalPagesDescription()
 {
     TextureDescription desc;
     ImageDimensions dims;
-    dims.width = CLodVirtualShadowDefaultPhysicalPagesPerAxis * CLodVirtualShadowPhysicalPageSize;
-    dims.height = CLodVirtualShadowDefaultPhysicalPagesPerAxis * CLodVirtualShadowPhysicalPageSize;
+    dims.width = CLodVirtualShadowMaxPhysicalPagesPerAxis * CLodVirtualShadowPhysicalPageSize;
+    dims.height = CLodVirtualShadowMaxPhysicalPagesPerAxis * CLodVirtualShadowPhysicalPageSize;
     dims.rowPitch = static_cast<uint64_t>(dims.width) * sizeof(uint32_t);
     dims.slicePitch = dims.rowPitch * static_cast<uint64_t>(dims.height);
     desc.imageDimensions.push_back(dims);
@@ -213,8 +213,8 @@ TextureDescription CreateVirtualShadowDirtyHierarchyDescription()
 {
     TextureDescription desc;
     ImageDimensions dims;
-    dims.width = CLodVirtualShadowDefaultPageTableResolution;
-    dims.height = CLodVirtualShadowDefaultPageTableResolution;
+    dims.width = CLodVirtualShadowMaxPageTableResolution;
+    dims.height = CLodVirtualShadowMaxPageTableResolution;
     dims.rowPitch = static_cast<uint64_t>(dims.width) * sizeof(uint32_t);
     dims.slicePitch = dims.rowPitch * static_cast<uint64_t>(dims.height);
     desc.imageDimensions.push_back(dims);
@@ -225,7 +225,7 @@ TextureDescription CreateVirtualShadowDirtyHierarchyDescription()
     desc.hasUAV = true;
     desc.uavFormat = rhi::Format::R32_UInt;
     desc.isArray = true;
-    desc.arraySize = CLodVirtualShadowDefaultClipmapCount;
+    desc.arraySize = CLodVirtualShadowMaxSupportedClipmapCount;
     desc.generateMipMaps = true;
     return desc;
 }
@@ -612,7 +612,7 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodExtensionTypeTag>(typeEntity);
 
     m_shadowPageMetadataBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-        CLodVirtualShadowDefaultPhysicalPageCount,
+        CLodVirtualShadowMaxPhysicalPageCount,
         sizeof(CLodVirtualShadowPhysicalPageMeta),
         true,
         false,
@@ -692,7 +692,7 @@ void CLodExtension::InitializeShadowResources()
     m_shadowMarkTileIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Mark Tile Indirect Args Buffer"));
 
     m_shadowFreePhysicalPagesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-        CLodVirtualShadowDefaultPhysicalPageCount,
+        CLodVirtualShadowMaxPhysicalPageCount,
         sizeof(uint32_t),
         true,
         false,
@@ -705,7 +705,7 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodExtensionTypeTag>(typeEntity);
 
     m_shadowReusablePhysicalPagesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-        CLodVirtualShadowDefaultPhysicalPageCount,
+        CLodVirtualShadowMaxPhysicalPageCount,
         sizeof(uint32_t),
         true,
         false,
@@ -725,7 +725,7 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodExtensionTypeTag>(typeEntity);
 
     m_shadowDirtyPageFlagsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-        CLodVirtualShadowDirtyWordCount(CLodVirtualShadowDefaultPhysicalPageCount),
+        CLodVirtualShadowDirtyWordCount(CLodVirtualShadowMaxPhysicalPageCount),
         sizeof(uint32_t),
         true,
         false,
@@ -745,7 +745,7 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodExtensionTypeTag>(typeEntity);
 
     m_shadowClipmapInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-        CLodVirtualShadowDefaultClipmapCount,
+        CLodVirtualShadowMaxSupportedClipmapCount,
         sizeof(CLodVirtualShadowClipmapInfo),
         false,
         false,
@@ -758,7 +758,7 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodExtensionTypeTag>(typeEntity);
 
     m_shadowMarkClipmapDataBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-        CLodVirtualShadowDefaultClipmapCount,
+        CLodVirtualShadowMaxSupportedClipmapCount,
         sizeof(CLodVirtualShadowMarkClipmapData),
         true,
         false,
@@ -779,7 +779,7 @@ void CLodExtension::InitializeShadowResources()
     m_shadowCompactMainCameraBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Compact Main Camera Buffer"));
 
     m_shadowCompactShadowCameraBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-        CLodVirtualShadowDefaultClipmapCount,
+        CLodVirtualShadowMaxSupportedClipmapCount,
         sizeof(CLodVirtualShadowCompactShadowCameraInfo),
         true,
         false,
@@ -788,7 +788,7 @@ void CLodExtension::InitializeShadowResources()
     m_shadowCompactShadowCameraBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Compact Shadow Camera Buffer"));
 
     m_shadowDirectionalPageViewInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-        CLodVirtualShadowDefaultClipmapCount * CLodVirtualShadowDefaultPageTableResolution * CLodVirtualShadowDefaultPageTableResolution,
+        CLodVirtualShadowMaxDirectionalPageViewInfoEntryCount(),
         sizeof(float) * 4u,
         true,
         false,
@@ -1530,7 +1530,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_shadowAllocationIndirectArgsBuffer,
                 nullptr,
                 64u,
-                CLodVirtualShadowDefaultPhysicalPageCount));
+                CLodVirtualShadowMaxPhysicalPageCount));
         shadowBuildDispatchArgsPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowBuildPageListsPassName));
         outPasses.push_back(std::move(shadowBuildDispatchArgsPassDesc));
 

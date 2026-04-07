@@ -53,6 +53,11 @@ private:
     mutable size_t m_lastChangedRenderableCount = 0;
     mutable size_t m_lastCameraCount = 0;
     mutable size_t m_lastLightCount = 0;
+    uint16_t m_lastShadowResolution = 0;
+    uint8_t m_lastDirectionalCascadeCount = 0;
+    float m_lastDirectionalShadowVerticalExtent = 0.0f;
+    bool m_lastHasPrimaryCamera = false;
+    bool m_hasLightResourceSettings = false;
 };
 
 } // namespace br::render

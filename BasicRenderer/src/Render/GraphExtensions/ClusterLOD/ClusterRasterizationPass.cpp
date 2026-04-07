@@ -6,6 +6,7 @@
 #include "Managers/MaterialManager.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/ViewManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
@@ -127,6 +128,8 @@ void ClusterRasterizationPass::Setup() {
 void ClusterRasterizationPass::Update(const UpdateExecutionContext& executionContext) {
     auto* updateContext = executionContext.hostData->Get<UpdateContext>();
     auto& context = *updateContext;
+    const uint32_t virtualShadowResolution = CLodVirtualShadowSanitizeVirtualResolution(
+        SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName)());
 
     auto numViews = context.viewManager->GetCameraBufferSize();
     std::vector<std::shared_ptr<PixelBuffer>> visibilityBuffers;
@@ -137,7 +140,7 @@ void ClusterRasterizationPass::Update(const UpdateExecutionContext& executionCon
     uint64_t totalViewPixels = 0;
 
     if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
-        maxViewWidth = CLodVirtualShadowDefaultVirtualResolution;
+        maxViewWidth = virtualShadowResolution;
         maxViewHeight = maxViewWidth;
     }
 
@@ -293,12 +296,14 @@ PassReturn ClusterRasterizationPass::Execute(PassExecutionContext& executionCont
     misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
     misc[CLOD_RASTER_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX] = m_sortedToUnsortedMappingBuffer->GetSRVInfo(0).slot.index;
     if (m_outputKind == CLodRasterOutputKind::VirtualShadow) {
+        const uint32_t virtualShadowResolution = CLodVirtualShadowSanitizeVirtualResolution(
+            SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName)());
         misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] = m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
         misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
         misc[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX] = m_virtualShadowPhysicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
-        misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_RESOLUTION] = CLodVirtualShadowDefaultPageTableResolution;
-        misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_COUNT] = CLodVirtualShadowDefaultClipmapCount;
-        misc[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = CLodVirtualShadowDefaultVirtualResolution;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_RESOLUTION] = CLodVirtualShadowPageTableResolutionFromVirtualResolution(virtualShadowResolution);
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION] = virtualShadowResolution;
     }
     if (m_outputKind == CLodRasterOutputKind::DeepVisibility) {
         misc[CLOD_RASTER_DEEP_VISIBILITY_NODE_BUFFER_DESCRIPTOR_INDEX] = m_deepVisibilityNodesBuffer->GetUAVShaderVisibleInfo(0).slot.index;

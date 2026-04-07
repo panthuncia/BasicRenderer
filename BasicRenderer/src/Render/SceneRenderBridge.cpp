@@ -124,9 +124,7 @@ void DestroyRendererCamera(flecs::entity entity, ViewManager& viewManager) {
 void DestroyRendererLight(flecs::entity entity, LightManager& lightManager) {
     if (entity.has<Components::LightViewInfo>()) {
         lightManager.RemoveLight(entity);
-        entity.remove<Components::LightViewInfo>();
     }
-    entity.remove<Components::DepthMap>();
 }
 
 void CopyCommonComponents(flecs::entity dst, flecs::entity src) {
@@ -557,6 +555,13 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
     const auto renderResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
     const auto shadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution")();
     const auto directionalCascadeCount = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
+    const auto directionalShadowVerticalExtent = SettingsManager::GetInstance().getSettingGetter<float>("directionalShadowVerticalExtent")();
+    const bool lightResourceSettingsChanged =
+        !m_hasLightResourceSettings ||
+        m_lastShadowResolution != shadowResolution ||
+        m_lastDirectionalCascadeCount != directionalCascadeCount ||
+        m_lastDirectionalShadowVerticalExtent != directionalShadowVerticalExtent ||
+        m_lastHasPrimaryCamera != snapshot.hasPrimaryCamera;
 
     ++m_currentIngestionFrame;
     m_primaryCameraEntityId = 0;
@@ -627,6 +632,31 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
             dst.remove<Components::SkipShadowPass>();
         }
     }
+
+    if (lightResourceSettingsChanged) {
+        auto resyncQuery = renderWorld.query_builder<Components::Light>()
+            .with<Components::LightViewInfo>()
+            .with<BridgedSceneEntity>()
+            .with<Components::Active>()
+            .build();
+        resyncQuery.each([&](flecs::entity entity, Components::Light& light) {
+            const auto* frustumPlanes = entity.try_get<Components::FrustumPlanes>();
+            SyncLightDerivedState(
+                entity,
+                light,
+                frustumPlanes,
+                *lightManager,
+                shadowResolution,
+                directionalCascadeCount,
+                m_primaryCameraEntityId != 0);
+        });
+    }
+
+    m_lastShadowResolution = shadowResolution;
+    m_lastDirectionalCascadeCount = directionalCascadeCount;
+    m_lastDirectionalShadowVerticalExtent = directionalShadowVerticalExtent;
+    m_lastHasPrimaryCamera = snapshot.hasPrimaryCamera;
+    m_hasLightResourceSettings = true;
 
     // Remove stale entities using alive sets from the snapshot
     std::vector<uint64_t> staleStableSceneIDs;

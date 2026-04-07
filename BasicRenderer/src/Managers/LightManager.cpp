@@ -6,6 +6,7 @@
 #include "Resources/ShadowMaps.h"
 #include "Managers/IndirectCommandBufferManager.h"
 #include "Managers/Singletons/DeletionManager.h"
+#include "Managers/Singletons/RendererECSManager.h"
 #include "Managers/ViewManager.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
@@ -273,12 +274,20 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 	auto posFloats = GetGlobalPositionFromMatrix(matrix);
 
 	// Virtual shadow clip levels are nested around the primary camera.
+	const uint32_t virtualShadowPageTableResolution = CLodVirtualShadowPageTableResolutionFromVirtualResolution(
+		CLodVirtualShadowSanitizeVirtualResolution(
+			SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName)()));
+	const float clipVerticalExtent = std::max(
+		SettingsManager::GetInstance().getSettingGetter<float>("directionalShadowVerticalExtent")(),
+		1.0f);
 	auto cascades = setupDirectionalClipmaps(numCascades, info.dirWorldSpace,
 		DirectX::XMLoadFloat3(&posFloats), 
 		GetForwardFromMatrix(matrix),
 		GetUpFromMatrix(matrix),
 		camera.zNear, camera.fov, camera.aspect,
-		getDirectionalLightCascadeSplits());
+		getDirectionalLightCascadeSplits(),
+		virtualShadowPageTableResolution,
+		clipVerticalExtent);
 
 	// Collect the frustum planes from each cascade.
 	cascadePlanes = Components::FrustumPlanes();
@@ -332,6 +341,37 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 		viewInfo.viewIDs.push_back(renderView);
 	}
 	return { viewInfo, cascadePlanes };
+}
+
+void LightManager::RebuildDirectionalLightViewInfoBuffer(std::optional<uint64_t> excludedLightEntityId) {
+	while (m_directionalViewInfo->Size() > 0) {
+		m_directionalViewInfo->RemoveAt(m_directionalViewInfo->Size() - 1);
+	}
+
+	auto& world = RendererECSManager::GetInstance().GetWorld();
+	auto query = world.query_builder<Components::Light, Components::LightViewInfo>().build();
+	query.each([&](flecs::entity entity, Components::Light& light, Components::LightViewInfo& viewInfo) {
+		if (excludedLightEntityId.has_value() && entity.id() == excludedLightEntityId.value()) {
+			return;
+		}
+
+		if (light.type != Components::LightType::Directional || !light.lightInfo.shadowCaster) {
+			return;
+		}
+
+		viewInfo.viewInfoBufferIndex = m_directionalViewInfo->Size();
+		for (uint64_t viewId : viewInfo.viewIDs) {
+			const View* view = m_pViewManager->Get(viewId);
+			if (!view) {
+				continue;
+			}
+
+			m_directionalViewInfo->Add(view->gpu.cameraBufferIndex);
+		}
+
+		light.lightInfo.shadowViewInfoIndex = static_cast<int>(viewInfo.viewInfoBufferIndex);
+		UpdateLightBufferView(viewInfo.lightBufferView.get(), light.lightInfo);
+	});
 }
 
 
@@ -411,10 +451,22 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			return;
 		}
 		auto numCascades = getNumDirectionalLightCascades();
+		if (renderViewIds.size() != static_cast<size_t>(numCascades)) {
+			numCascades = static_cast<uint8_t>((std::min)(renderViewIds.size(), static_cast<size_t>(numCascades)));
+			viewInfo.virtualShadowUnwrappedPageOffsetX.resize(numCascades);
+			viewInfo.virtualShadowUnwrappedPageOffsetY.resize(numCascades);
+			lightViewInfoChanged = true;
+		}
 		auto& camera = m_currentCamera.get<Components::Camera>();
 		auto& matrix = m_currentCamera.get<Components::Matrix>().matrix;
 		auto posFloats = GetGlobalPositionFromMatrix(matrix);
-		auto cascades = setupDirectionalClipmaps(numCascades, lightInfo.lightInfo.dirWorldSpace, DirectX::XMLoadFloat3(&posFloats), GetForwardFromMatrix(matrix), GetUpFromMatrix(matrix), camera.zNear, camera.fov, camera.aspect, getDirectionalLightCascadeSplits());
+		const uint32_t virtualShadowPageTableResolution = CLodVirtualShadowPageTableResolutionFromVirtualResolution(
+			CLodVirtualShadowSanitizeVirtualResolution(
+				SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName)()));
+		const float clipVerticalExtent = std::max(
+			SettingsManager::GetInstance().getSettingGetter<float>("directionalShadowVerticalExtent")(),
+			1.0f);
+		auto cascades = setupDirectionalClipmaps(numCascades, lightInfo.lightInfo.dirWorldSpace, DirectX::XMLoadFloat3(&posFloats), GetForwardFromMatrix(matrix), GetUpFromMatrix(matrix), camera.zNear, camera.fov, camera.aspect, getDirectionalLightCascadeSplits(), virtualShadowPageTableResolution, clipVerticalExtent);
 		PublishDirectionalShadowDebug(cascades);
 		viewInfo.virtualShadowUnwrappedPageOffsetX.resize(numCascades);
 		viewInfo.virtualShadowUnwrappedPageOffsetY.resize(numCascades);
@@ -487,9 +539,10 @@ void LightManager::RemoveLightViewInfo(flecs::entity light) {
 	}
 	case Components::LightType::Directional: {
 		auto& views = viewInfo.viewIDs;
-		for (int i = 0; i < getNumDirectionalLightCascades(); i++) {
+		for (size_t i = 0; i < views.size(); i++) {
 			m_pViewManager->DestroyView(views[i]);
 		}
+		RebuildDirectionalLightViewInfoBuffer(light.id());
 		break;
 	}
 	default:

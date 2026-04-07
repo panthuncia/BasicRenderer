@@ -255,6 +255,7 @@ public:
         m_shadowVisibleCounterQuery = {};
         m_shadowVisibleClustersQuery = {};
         m_shadowVirtualShadowStatsQuery = {};
+		m_shadowVirtualShadowRuntimeStateQuery = {};
     }
 
     // ImGui descriptor heap allocator for user textures (slot 0 reserved for font atlas).
@@ -363,8 +364,12 @@ private:
 
     struct CLodVirtualShadowCaptureState {
         CLodVirtualShadowStats stats{};
+        CLodVirtualShadowRuntimeState runtimeState{};
         bool hasData = false;
         bool capturePending = false;
+        bool captureHasPendingStats = false;
+        bool captureHasPendingRuntimeState = false;
+        uint64_t captureId = 0;
         uint64_t captureCount = 0;
         std::string status = "No VSM captures yet.";
     };
@@ -423,6 +428,7 @@ private:
     flecs::query<const Components::Resource> m_shadowVisibleClustersQuery;
     flecs::query<const Components::Resource> m_shadowVisibleCounterQuery;
     flecs::query<const Components::Resource> m_shadowVirtualShadowStatsQuery;
+    flecs::query<const Components::Resource> m_shadowVirtualShadowRuntimeStateQuery;
     flecs::query<const Components::Resource> m_alphaDeepVisibilityCounterQuery;
     flecs::query<const Components::Resource> m_alphaDeepVisibilityOverflowQuery;
     flecs::query<const Components::Resource> m_alphaDeepVisibilityStatsQuery;
@@ -432,6 +438,7 @@ private:
     void DrawFrameTaskGraphWindow();
     void DrawAutoAliasPlannerWindow();
     void TryFinalizeCLodCaptureStats(CLodWorkGraphCaptureState& captureState, uint64_t captureId, const char* captureLabel);
+    void TryFinalizeCLodVirtualShadowCapture(uint64_t captureId);
     void TryFinalizeCLodReyesTelemetryCapture(uint64_t captureId);
     void TryFinalizeCLodAlphaTelemetryCapture(uint64_t captureId);
 
@@ -511,6 +518,26 @@ private:
     bool m_clodDisableVirtualShadowPageCaching = false;
     std::function<bool()> getCLodDisableVirtualShadowPageCaching;
     std::function<void(bool)> setCLodDisableVirtualShadowPageCaching;
+
+    uint8_t m_numDirectionalLightCascades = 0u;
+    std::function<uint8_t()> getNumDirectionalLightCascades;
+    std::function<void(uint8_t)> setNumDirectionalLightCascades;
+
+    uint32_t m_clodVirtualShadowVirtualResolution = CLodVirtualShadowDefaultVirtualResolution;
+    std::function<uint32_t()> getCLodVirtualShadowVirtualResolution;
+    std::function<void(uint32_t)> setCLodVirtualShadowVirtualResolution;
+
+    uint32_t m_clodVirtualShadowPhysicalPagesPerAxis = CLodVirtualShadowDefaultPhysicalPagesPerAxis;
+    std::function<uint32_t()> getCLodVirtualShadowPhysicalPagesPerAxis;
+    std::function<void(uint32_t)> setCLodVirtualShadowPhysicalPagesPerAxis;
+
+    float m_maxShadowDistance = 0.0f;
+    std::function<float()> getMaxShadowDistance;
+    std::function<void(float)> setMaxShadowDistance;
+
+    float m_directionalShadowVerticalExtent = 0.0f;
+    std::function<float()> getDirectionalShadowVerticalExtent;
+    std::function<void(float)> setDirectionalShadowVerticalExtent;
 
     bool wireframeEnabled = false;
 	std::function<bool()> getWireframeEnabled;
@@ -725,6 +752,31 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_clodDisableVirtualShadowPageCaching = getCLodDisableVirtualShadowPageCaching();
     observerSetting(m_clodDisableVirtualShadowPageCaching, CLodDisableVirtualShadowPageCachingSettingName);
 
+    getNumDirectionalLightCascades = settingsManager.getSettingGetter<uint8_t>("numDirectionalLightCascades");
+    setNumDirectionalLightCascades = settingsManager.getSettingSetter<uint8_t>("numDirectionalLightCascades");
+    m_numDirectionalLightCascades = getNumDirectionalLightCascades();
+    observerSetting(m_numDirectionalLightCascades, "numDirectionalLightCascades");
+
+    getCLodVirtualShadowVirtualResolution = settingsManager.getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName);
+    setCLodVirtualShadowVirtualResolution = settingsManager.getSettingSetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName);
+    m_clodVirtualShadowVirtualResolution = getCLodVirtualShadowVirtualResolution();
+    observerSetting(m_clodVirtualShadowVirtualResolution, CLodVirtualShadowVirtualResolutionSettingName);
+
+    getCLodVirtualShadowPhysicalPagesPerAxis = settingsManager.getSettingGetter<uint32_t>(CLodVirtualShadowPhysicalPagesPerAxisSettingName);
+    setCLodVirtualShadowPhysicalPagesPerAxis = settingsManager.getSettingSetter<uint32_t>(CLodVirtualShadowPhysicalPagesPerAxisSettingName);
+    m_clodVirtualShadowPhysicalPagesPerAxis = getCLodVirtualShadowPhysicalPagesPerAxis();
+    observerSetting(m_clodVirtualShadowPhysicalPagesPerAxis, CLodVirtualShadowPhysicalPagesPerAxisSettingName);
+
+    getMaxShadowDistance = settingsManager.getSettingGetter<float>("maxShadowDistance");
+    setMaxShadowDistance = settingsManager.getSettingSetter<float>("maxShadowDistance");
+    m_maxShadowDistance = getMaxShadowDistance();
+    observerSetting(m_maxShadowDistance, "maxShadowDistance");
+
+    getDirectionalShadowVerticalExtent = settingsManager.getSettingGetter<float>("directionalShadowVerticalExtent");
+    setDirectionalShadowVerticalExtent = settingsManager.getSettingSetter<float>("directionalShadowVerticalExtent");
+    m_directionalShadowVerticalExtent = getDirectionalShadowVerticalExtent();
+    observerSetting(m_directionalShadowVerticalExtent, "directionalShadowVerticalExtent");
+
 	setWireframeEnabled = settingsManager.getSettingSetter<bool>("enableWireframe");
 	getWireframeEnabled = settingsManager.getSettingGetter<bool>("enableWireframe");
 	wireframeEnabled = getWireframeEnabled();
@@ -876,6 +928,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
         .with<CLodVirtualShadowStatsTag>()
         .with<CLodExtensionTypeTag>(shadowTag)
         .build();
+    m_shadowVirtualShadowRuntimeStateQuery = RendererECSManager::GetInstance().GetWorld()
+        .query_builder<const Components::Resource>()
+        .with<CLodVirtualShadowRuntimeStateTag>()
+        .with<CLodExtensionTypeTag>(shadowTag)
+        .build();
 
     const auto alphaTag = RendererECSManager::GetInstance().GetWorld().component<CLodExtensionAlphaBlendTag>();
     m_alphaDeepVisibilityCounterQuery = RendererECSManager::GetInstance().GetWorld()
@@ -1016,6 +1073,32 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         }
         if (ImGui::Checkbox("Disable VSM Page Caching", &m_clodDisableVirtualShadowPageCaching)) {
             setCLodDisableVirtualShadowPageCaching(m_clodDisableVirtualShadowPageCaching);
+        }
+        int directionalLightClipmaps = static_cast<int>(m_numDirectionalLightCascades);
+        if (ImGui::SliderInt("Directional VSM Clipmaps", &directionalLightClipmaps, 1, static_cast<int>(CLodVirtualShadowMaxSupportedClipmapCount))) {
+            directionalLightClipmaps = std::clamp(directionalLightClipmaps, 1, static_cast<int>(CLodVirtualShadowMaxSupportedClipmapCount));
+            m_numDirectionalLightCascades = static_cast<uint8_t>(directionalLightClipmaps);
+            setNumDirectionalLightCascades(m_numDirectionalLightCascades);
+        }
+        int virtualShadowResolutionIndex = CLodVirtualShadowVirtualResolutionOptionIndex(m_clodVirtualShadowVirtualResolution);
+        if (ImGui::Combo("Directional VSM Resolution", &virtualShadowResolutionIndex, CLodVirtualShadowVirtualResolutionOptionNames, CLodVirtualShadowVirtualResolutionOptionCount)) {
+            virtualShadowResolutionIndex = std::clamp(virtualShadowResolutionIndex, 0, CLodVirtualShadowVirtualResolutionOptionCount - 1);
+            m_clodVirtualShadowVirtualResolution = CLodVirtualShadowVirtualResolutionOptions[virtualShadowResolutionIndex];
+            setCLodVirtualShadowVirtualResolution(m_clodVirtualShadowVirtualResolution);
+        }
+        int virtualShadowPhysicalPagesIndex = CLodVirtualShadowPhysicalPagesPerAxisOptionIndex(m_clodVirtualShadowPhysicalPagesPerAxis);
+        if (ImGui::Combo("Directional VSM Cache Budget", &virtualShadowPhysicalPagesIndex, CLodVirtualShadowPhysicalPagesPerAxisOptionNames, CLodVirtualShadowPhysicalPagesPerAxisOptionCount)) {
+            virtualShadowPhysicalPagesIndex = std::clamp(virtualShadowPhysicalPagesIndex, 0, CLodVirtualShadowPhysicalPagesPerAxisOptionCount - 1);
+            m_clodVirtualShadowPhysicalPagesPerAxis = CLodVirtualShadowPhysicalPagesPerAxisOptions[virtualShadowPhysicalPagesIndex];
+            setCLodVirtualShadowPhysicalPagesPerAxis(m_clodVirtualShadowPhysicalPagesPerAxis);
+        }
+        if (ImGui::SliderFloat("Directional Shadow Distance", &m_maxShadowDistance, 1.0f, 1000.0f, "%.1f")) {
+            m_maxShadowDistance = std::max(m_maxShadowDistance, 1.0f);
+            setMaxShadowDistance(m_maxShadowDistance);
+        }
+        if (ImGui::SliderFloat("Directional Shadow Vertical Extent", &m_directionalShadowVerticalExtent, 1.0f, 1000.0f, "%.1f")) {
+            m_directionalShadowVerticalExtent = std::max(m_directionalShadowVerticalExtent, 1.0f);
+            setDirectionalShadowVerticalExtent(m_directionalShadowVerticalExtent);
         }
 		if (ImGui::Checkbox("Wireframe", &wireframeEnabled)) {
 			setWireframeEnabled(wireframeEnabled);
@@ -1730,6 +1813,21 @@ inline void Menu::TryFinalizeCLodReyesTelemetryCapture(uint64_t captureId) {
         m_clodReyesTelemetryPhase2.patchRasterizedMicroTriangleCount);
 }
 
+inline void Menu::TryFinalizeCLodVirtualShadowCapture(uint64_t captureId) {
+    if (!m_shadowVirtualShadowTelemetry.capturePending || m_shadowVirtualShadowTelemetry.captureId != captureId) {
+        return;
+    }
+
+    if (!m_shadowVirtualShadowTelemetry.captureHasPendingStats || !m_shadowVirtualShadowTelemetry.captureHasPendingRuntimeState) {
+        return;
+    }
+
+    m_shadowVirtualShadowTelemetry.capturePending = false;
+    m_shadowVirtualShadowTelemetry.hasData = true;
+    m_shadowVirtualShadowTelemetry.captureCount++;
+    m_shadowVirtualShadowTelemetry.status = "Capture completed.";
+}
+
 inline void Menu::DrawCLodTelemetryWindow() {
     ImGui::Begin("CLod Work Graph Telemetry", nullptr);
 
@@ -1742,6 +1840,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
     Resource* shadowClodVisibleClustersResource = nullptr;
     Resource* shadowClodVisibleCounterResource = nullptr;
     Resource* shadowVirtualShadowStatsResource = nullptr;
+    Resource* shadowVirtualShadowRuntimeStateResource = nullptr;
     Resource* alphaNodeCounterResource = nullptr;
     Resource* alphaOverflowCounterResource = nullptr;
     Resource* alphaStatsResource = nullptr;
@@ -1818,6 +1917,14 @@ inline void Menu::DrawCLodTelemetryWindow() {
             }
             });
 
+        m_shadowVirtualShadowRuntimeStateQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
+            if (shadowVirtualShadowRuntimeStateResource == nullptr) {
+                if (auto resource = resourceComponent.resource.lock()) {
+                    shadowVirtualShadowRuntimeStateResource = resource.get();
+                }
+            }
+            });
+
         m_alphaDeepVisibilityCounterQuery.each([&](flecs::entity, const Components::Resource& resourceComponent) {
             if (alphaNodeCounterResource == nullptr) {
                 if (auto resource = resourceComponent.resource.lock()) {
@@ -1865,6 +1972,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
         (!m_shadowClodTelemetry.captureStatsPending);
     const bool canCaptureVirtualShadow =
         (shadowVirtualShadowStatsResource != nullptr) &&
+        (shadowVirtualShadowRuntimeStateResource != nullptr) &&
         (readbackService != nullptr) &&
         (!m_shadowVirtualShadowTelemetry.capturePending);
     const bool canCaptureReyes = reyesCaptureResourcesReady && (readbackService != nullptr) && (!m_clodReyesTelemetryCapturePending);
@@ -2131,8 +2239,8 @@ inline void Menu::DrawCLodTelemetryWindow() {
     ImGui::SameLine();
     ImGui::Text("Shadow Status: %s", m_shadowClodTelemetry.status.c_str());
 
-    if (!shadowVirtualShadowStatsResource) {
-        ImGui::TextDisabled("VSM stats unavailable: shadow stats resource not found.");
+    if (!shadowVirtualShadowStatsResource || !shadowVirtualShadowRuntimeStateResource) {
+        ImGui::TextDisabled("VSM stats unavailable: required stats/runtime-state resources not found.");
     }
 
     if (!canCaptureVirtualShadow) {
@@ -2140,24 +2248,51 @@ inline void Menu::DrawCLodTelemetryWindow() {
     }
     if (ImGui::Button("Capture Virtual Shadow Metrics")) {
         m_shadowVirtualShadowTelemetry.capturePending = true;
+        m_shadowVirtualShadowTelemetry.captureHasPendingStats = false;
+        m_shadowVirtualShadowTelemetry.captureHasPendingRuntimeState = false;
+        m_shadowVirtualShadowTelemetry.captureId++;
         m_shadowVirtualShadowTelemetry.status = "Capture requested.";
+
+        const uint64_t captureId = m_shadowVirtualShadowTelemetry.captureId;
 
         readbackService->RequestReadbackCapture(
             "CLodShadow::VirtualShadowGatherStatsPass",
             shadowVirtualShadowStatsResource,
             RangeSpec{},
-            [this](ReadbackCaptureResult&& result) {
-                m_shadowVirtualShadowTelemetry.capturePending = false;
+            [this, captureId](ReadbackCaptureResult&& result) {
+                if (!m_shadowVirtualShadowTelemetry.capturePending || m_shadowVirtualShadowTelemetry.captureId != captureId) {
+                    return;
+                }
 
                 if (result.data.size() < sizeof(CLodVirtualShadowStats)) {
+                    m_shadowVirtualShadowTelemetry.capturePending = false;
                     m_shadowVirtualShadowTelemetry.status = "Capture failed: VSM stats payload too small.";
                     return;
                 }
 
                 std::memcpy(&m_shadowVirtualShadowTelemetry.stats, result.data.data(), sizeof(CLodVirtualShadowStats));
-                m_shadowVirtualShadowTelemetry.hasData = true;
-                m_shadowVirtualShadowTelemetry.captureCount++;
-                m_shadowVirtualShadowTelemetry.status = "Capture completed.";
+                m_shadowVirtualShadowTelemetry.captureHasPendingStats = true;
+                TryFinalizeCLodVirtualShadowCapture(captureId);
+            });
+
+        readbackService->RequestReadbackCapture(
+            "CLodShadow::VirtualShadowSetupPass",
+            shadowVirtualShadowRuntimeStateResource,
+            RangeSpec{},
+            [this, captureId](ReadbackCaptureResult&& result) {
+                if (!m_shadowVirtualShadowTelemetry.capturePending || m_shadowVirtualShadowTelemetry.captureId != captureId) {
+                    return;
+                }
+
+                if (result.data.size() < sizeof(CLodVirtualShadowRuntimeState)) {
+                    m_shadowVirtualShadowTelemetry.capturePending = false;
+                    m_shadowVirtualShadowTelemetry.status = "Capture failed: VSM runtime-state payload too small.";
+                    return;
+                }
+
+                std::memcpy(&m_shadowVirtualShadowTelemetry.runtimeState, result.data.data(), sizeof(CLodVirtualShadowRuntimeState));
+                m_shadowVirtualShadowTelemetry.captureHasPendingRuntimeState = true;
+                TryFinalizeCLodVirtualShadowCapture(captureId);
             });
     }
     if (!canCaptureVirtualShadow) {
@@ -2685,8 +2820,21 @@ inline void Menu::DrawCLodTelemetryWindow() {
     }
     else {
         const CLodVirtualShadowStats& stats = m_shadowVirtualShadowTelemetry.stats;
+        const CLodVirtualShadowRuntimeState& runtimeState = m_shadowVirtualShadowTelemetry.runtimeState;
+        const uint32_t displayedClipmapCount = (std::min)(
+            (std::max)((std::max)(stats.activeClipmapCount, stats.validClipmapCount), runtimeState.clipmapCount),
+            CLodVirtualShadowMaxSupportedClipmapCount);
         ImGui::Text("Captures: %llu", static_cast<unsigned long long>(m_shadowVirtualShadowTelemetry.captureCount));
-        ImGui::Text("Clipmaps: active=%u valid=%u", stats.activeClipmapCount, stats.validClipmapCount);
+        ImGui::Text("Clipmaps: active=%u valid=%u supportedMax=%u", stats.activeClipmapCount, stats.validClipmapCount, CLodVirtualShadowMaxSupportedClipmapCount);
+        ImGui::Text(
+            "Runtime: publishedActive=%u supported=%u virtualRes=%u pageTable=%u physicalPagesPerAxis=%u physicalPages=%u maxRequests=%u",
+            runtimeState.clipmapCount,
+            runtimeState.supportedClipmapCount,
+            runtimeState.virtualResolution,
+            runtimeState.pageTableResolution,
+            runtimeState.physicalPagesPerAxis,
+            runtimeState.physicalPageCount,
+            runtimeState.maxAllocationRequests);
         ImGui::Text("Allocator: requests=%u dispatchGroups=%u freePages=%u reusablePages=%u",
             stats.allocationRequestCount,
             stats.allocationDispatchGroupCount,
@@ -2710,7 +2858,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
         uint32_t totalResidentDirtyHits = 0u;
         uint32_t totalRequestedPages = 0u;
         uint32_t totalDirtyPageTableEntries = 0u;
-        for (uint32_t clipmapIndex = 0u; clipmapIndex < CLodVirtualShadowDefaultClipmapCount; ++clipmapIndex) {
+        for (uint32_t clipmapIndex = 0u; clipmapIndex < displayedClipmapCount; ++clipmapIndex) {
             totalVisitedPageTableEntries += stats.visitedPageTableEntries[clipmapIndex];
             totalVisitedDirtyPageTableEntries += stats.visitedDirtyPageTableEntries[clipmapIndex];
             totalResidentCleanHits += stats.markResidentCleanHits[clipmapIndex];
@@ -2744,7 +2892,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
             ImGui::TableSetupColumn("NoWrite Clr");
             ImGui::TableHeadersRow();
 
-            for (uint32_t clipmapIndex = 0u; clipmapIndex < CLodVirtualShadowDefaultClipmapCount; ++clipmapIndex) {
+            for (uint32_t clipmapIndex = 0u; clipmapIndex < displayedClipmapCount; ++clipmapIndex) {
                 ImGui::TableNextRow();
                 ImGui::TableSetColumnIndex(0);
                 ImGui::Text("%u", clipmapIndex);

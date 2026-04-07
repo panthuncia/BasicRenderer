@@ -8,6 +8,33 @@
 #include "Managers/Singletons/SettingsManager.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 
+namespace
+{
+	void UpdateDirectionalShadowConstants(PerFrameCB& perFrameCBData)
+	{
+		perFrameCBData.numDirectionalClipmaps = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
+		auto shadowCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits")();
+		switch (perFrameCBData.numDirectionalClipmaps) {
+		case 1:
+			perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(shadowCascadeSplits[0], 0, 0, 0);
+			break;
+		case 2:
+			perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(shadowCascadeSplits[0], shadowCascadeSplits[1], 0, 0);
+			break;
+		case 3:
+			perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(shadowCascadeSplits[0], shadowCascadeSplits[1], shadowCascadeSplits[2], 0);
+			break;
+		default:
+			perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(
+				shadowCascadeSplits.size() > 0 ? shadowCascadeSplits[0] : 0.0f,
+				shadowCascadeSplits.size() > 1 ? shadowCascadeSplits[1] : 0.0f,
+				shadowCascadeSplits.size() > 2 ? shadowCascadeSplits[2] : 0.0f,
+				shadowCascadeSplits.size() > 3 ? shadowCascadeSplits[3] : 0.0f);
+			break;
+		}
+	}
+}
+
 void ResourceManager::Initialize() {
 
 	auto device = DeviceManager::GetInstance().GetDevice();
@@ -15,21 +42,7 @@ void ResourceManager::Initialize() {
 	m_perFrameBuffer = CreateIndexedConstantBuffer(sizeof(PerFrameCB), "PerFrameCB");
 
 	perFrameCBData.ambientLighting = DirectX::XMVectorSet(0.1f, 0.1f, 0.1f, 1.0f);
-	perFrameCBData.numShadowCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
-	auto shadowCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits")();
-	switch (perFrameCBData.numShadowCascades) {
-	case 1:
-		perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(shadowCascadeSplits[0], 0, 0, 0);
-		break;
-	case 2:
-		perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(shadowCascadeSplits[0], shadowCascadeSplits[1], 0, 0);
-		break;
-	case 3:
-		perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(shadowCascadeSplits[0], shadowCascadeSplits[1], shadowCascadeSplits[2], 0);
-		break;
-	case 4:
-		perFrameCBData.shadowCascadeSplits = DirectX::XMVectorSet(shadowCascadeSplits[0], shadowCascadeSplits[1], shadowCascadeSplits[2], shadowCascadeSplits[3]);
-	}
+	UpdateDirectionalShadowConstants(perFrameCBData);
 
 	auto result = device.CreateCommittedResource(rhi::helpers::ResourceDesc::Buffer(sizeof(UINT), rhi::HeapType::Upload), m_uavCounterReset);
 
@@ -41,6 +54,7 @@ void ResourceManager::Initialize() {
 }
 
 void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, DirectX::XMUINT2 screenRes, DirectX::XMUINT3 clusterSizes, unsigned int frameIndex) {
+	UpdateDirectionalShadowConstants(perFrameCBData);
 	perFrameCBData.mainCameraIndex = cameraIndex;
 	perFrameCBData.numLights = numLights;
 	perFrameCBData.screenResX = screenRes.x;

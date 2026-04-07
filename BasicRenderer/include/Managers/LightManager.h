@@ -86,6 +86,7 @@ private:
 		CreateSpotLightViewInfo(const LightInfo& info, uint64_t entityId);
 	std::pair<Components::LightViewInfo, std::optional<Components::FrustumPlanes>>
 		CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t entityId);
+	void RebuildDirectionalLightViewInfoBuffer(std::optional<uint64_t> excludedLightEntityId = std::nullopt);
 
 	void RemoveLightViewInfo(flecs::entity light);
 };

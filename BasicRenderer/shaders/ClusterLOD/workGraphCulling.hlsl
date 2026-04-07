@@ -507,7 +507,7 @@ bool CLodVirtualShadowBoundsTouchDirtyPages(float3 worldCenter, float radiusWorl
         ? CLodVirtualShadowDirtyHierarchyAnyHit(
             dirtyHierarchy,
             clipmapInfo.pageTableLayer,
-            uint2(kCLodVirtualShadowPageTableResolution, kCLodVirtualShadowPageTableResolution),
+            uint2(clipmapInfo.pageTableResolution, clipmapInfo.pageTableResolution),
             uvMin,
             uvMax,
             sampledMipLevel)
@@ -517,7 +517,7 @@ bool CLodVirtualShadowBoundsTouchDirtyPages(float3 worldCenter, float radiusWorl
     const bool touchesDirtyPages = CLodVirtualShadowConservativeAnyHitTexture2DArraySphereQuery(
         dirtyHierarchy,
         clipmapInfo.pageTableLayer,
-        uint2(kCLodVirtualShadowPageTableResolution, kCLodVirtualShadowPageTableResolution),
+        uint2(clipmapInfo.pageTableResolution, clipmapInfo.pageTableResolution),
         shadowCamera,
         meshletCenterViewSpace,
         radiusWorld,

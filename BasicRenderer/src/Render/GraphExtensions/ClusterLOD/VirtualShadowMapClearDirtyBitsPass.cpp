@@ -2,6 +2,7 @@
 
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
 #include "BuiltinResources.h"
@@ -61,11 +62,14 @@ PassReturn VirtualShadowMapClearDirtyBitsPass::Execute(PassExecutionContext& exe
     commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
     commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+    const uint32_t virtualShadowResolution = CLodVirtualShadowSanitizeVirtualResolution(
+        SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName)());
 
     uint32_t rootConstants[NumMiscUintRootConstants] = {};
     rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_REQUESTS_DESCRIPTOR_INDEX] = m_allocationRequestsBuffer->GetSRVInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_REQUEST_COUNT_DESCRIPTOR_INDEX] = m_allocationCountBuffer->GetSRVInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_RESOLUTION] = CLodVirtualShadowPageTableResolutionFromVirtualResolution(virtualShadowResolution);
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

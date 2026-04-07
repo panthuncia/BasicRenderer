@@ -12,6 +12,7 @@
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/RendererECSManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/ViewManager.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
@@ -448,6 +449,8 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
         m_visibilityBuffers.clear();
         auto numViews = context.viewManager->GetCameraBufferSize();
         std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
+        const uint32_t virtualShadowResolution = CLodVirtualShadowSanitizeVirtualResolution(
+            SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName)());
         context.viewManager->ForEachView([&](uint64_t v) {
             auto viewInfo = context.viewManager->Get(v);
             if (!viewInfo) {
@@ -461,8 +464,8 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
 
             if (UsesVirtualShadowOutput(m_rasterOutputKind)) {
                 if (viewInfo->flags.shadow && viewInfo->lightType == Components::LightType::Directional) {
-                    info.scissorMaxX = CLodVirtualShadowDefaultVirtualResolution;
-                    info.scissorMaxY = CLodVirtualShadowDefaultVirtualResolution;
+                    info.scissorMaxX = virtualShadowResolution;
+                    info.scissorMaxY = virtualShadowResolution;
                     info.viewportScaleX = 1.0f;
                     info.viewportScaleY = 1.0f;
                 }

@@ -64,7 +64,7 @@ struct PerFrameCB {
     //unsigned int pointLightCubemapBufferIndex;
     //unsigned int spotLightMatrixBufferIndex;
     //unsigned int directionalLightCascadeBufferIndex;
-	unsigned int numShadowCascades;
+    unsigned int numDirectionalClipmaps;
 
     unsigned int activeEnvironmentIndex;
     //unsigned int environmentBufferDescriptorIndex;

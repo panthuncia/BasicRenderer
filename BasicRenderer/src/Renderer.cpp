@@ -752,10 +752,12 @@ flecs::entity Renderer::GetValidatedPrimaryRenderCamera(bool attemptResync) {
 void Renderer::SetSettings() {
 	auto& settingsManager = SettingsManager::GetInstance();
 
-    uint8_t numDirectionalCascades = 4;
-	float maxShadowDistance = 30.0f;
+    uint8_t numDirectionalCascades = 8;
+	float maxShadowDistance = 100.0f;
+    float directionalShadowVerticalExtent = maxShadowDistance;
 	settingsManager.registerSetting<uint8_t>("numDirectionalLightCascades", numDirectionalCascades);
     settingsManager.registerSetting<float>("maxShadowDistance", maxShadowDistance);
+    settingsManager.registerSetting<float>("directionalShadowVerticalExtent", directionalShadowVerticalExtent);
     settingsManager.registerSetting<std::vector<float>>("directionalLightCascadeSplits", calculateCascadeSplits(numDirectionalCascades, 0.1f, 100, maxShadowDistance));
     settingsManager.registerSetting<uint16_t>("shadowResolution", 2048);
     settingsManager.registerSetting<float>("cameraSpeed", 10);
@@ -821,6 +823,8 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<uint32_t>("clodStreamingCpuUploadBudgetRequests", 50u);
     settingsManager.registerSetting<bool>(CLodDisableReyesRasterizationSettingName, true);
 	settingsManager.registerSetting<bool>(CLodDisableVirtualShadowPageCachingSettingName, false);
+    settingsManager.registerSetting<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName, CLodVirtualShadowDefaultVirtualResolution);
+    settingsManager.registerSetting<uint32_t>(CLodVirtualShadowPhysicalPagesPerAxisSettingName, CLodVirtualShadowDefaultPhysicalPagesPerAxis);
 	settingsManager.registerSetting<uint32_t>(CLodReyesResourceBudgetBytesSettingName, 512u*1024u*1024u); // 500 MB for reyes
 	settingsManager.registerSetting<uint32_t>("usdPointInstancerMaxInstances", 10000u);
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");
@@ -907,6 +911,11 @@ void Renderer::SetSettings() {
         }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<bool>("enableJitter", [this](const bool& newValue) {
         m_jitter = newValue;
+        }));
+    m_settingsSubscriptions.push_back(settingsManager.addObserver<uint8_t>("numDirectionalLightCascades", [](const uint8_t& newValue) {
+		auto& settingsManager = SettingsManager::GetInstance();
+		auto maxShadowDistance = settingsManager.getSettingGetter<float>("maxShadowDistance")();
+        settingsManager.getSettingSetter<std::vector<float>>("directionalLightCascadeSplits")(calculateCascadeSplits(newValue, 0.1f, 100, maxShadowDistance));
         }));
     m_settingsSubscriptions.push_back(settingsManager.addObserver<float>("maxShadowDistance", [](const float& newValue) {
 		auto& settingsManager = SettingsManager::GetInstance();

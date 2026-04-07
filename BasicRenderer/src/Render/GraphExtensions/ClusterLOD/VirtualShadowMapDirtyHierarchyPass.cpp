@@ -1,5 +1,6 @@
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapDirtyHierarchyPass.h"
 
+#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
@@ -47,13 +48,16 @@ PassReturn VirtualShadowMapDirtyHierarchyPass::Execute(PassExecutionContext& exe
     commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
     commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+    const uint32_t virtualShadowResolution = CLodVirtualShadowSanitizeVirtualResolution(
+        SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName)());
+    const uint32_t virtualShadowPageTableResolution = CLodVirtualShadowPageTableResolutionFromVirtualResolution(virtualShadowResolution);
 
     const uint32_t mipCount = m_dirtyHierarchyTexture->GetNumUAVMipLevels();
     for (uint32_t mipIndex = 0; mipIndex < mipCount; ++mipIndex) {
         const bool sourceIsPageTable = (mipIndex == 0u);
         const uint32_t srcResolution = sourceIsPageTable
-            ? CLodVirtualShadowDefaultPageTableResolution
-            : (CLodVirtualShadowDefaultPageTableResolution >> (mipIndex - 1u));
+            ? virtualShadowPageTableResolution
+            : (std::max)(virtualShadowPageTableResolution >> (mipIndex - 1u), 1u);
         const uint32_t dstResolution = sourceIsPageTable
             ? srcResolution
             : ((srcResolution > 1u) ? (srcResolution >> 1u) : 1u);
@@ -79,7 +83,7 @@ PassReturn VirtualShadowMapDirtyHierarchyPass::Execute(PassExecutionContext& exe
         rootConstants[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_DEST_DESCRIPTOR_INDEX] = m_dirtyHierarchyTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, mipIndex).slot.index;
         rootConstants[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_SOURCE_IS_PAGE_TABLE] = sourceIsPageTable ? 1u : 0u;
         rootConstants[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_SOURCE_RESOLUTION] = srcResolution;
-        rootConstants[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_CLIPMAP_COUNT] = CLodVirtualShadowDefaultClipmapCount;
+        rootConstants[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
         rootConstants[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_clipmapInfoBuffer->GetSRVInfo(0).slot.index;
 
         commandList.PushConstants(
@@ -92,7 +96,7 @@ PassReturn VirtualShadowMapDirtyHierarchyPass::Execute(PassExecutionContext& exe
 
         const uint32_t groupsX = (dstResolution + 7u) / 8u;
         const uint32_t groupsY = (dstResolution + 7u) / 8u;
-        commandList.Dispatch(groupsX, groupsY, CLodVirtualShadowDefaultClipmapCount);
+        commandList.Dispatch(groupsX, groupsY, CLodVirtualShadowMaxSupportedClipmapCount);
     }
 
     return {};

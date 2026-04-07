@@ -1,5 +1,6 @@
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapClearPagesPass.h"
 
+#include "Managers/Singletons/SettingsManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
@@ -49,12 +50,20 @@ PassReturn VirtualShadowMapClearPagesPass::Execute(PassExecutionContext& executi
     commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
     commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+    const uint32_t virtualShadowResolution = CLodVirtualShadowSanitizeVirtualResolution(
+        SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName)());
+    const uint32_t virtualShadowPhysicalPagesPerAxis = CLodVirtualShadowSanitizePhysicalPagesPerAxis(
+        SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowPhysicalPagesPerAxisSettingName)());
+    const uint32_t virtualShadowPhysicalPageCount = CLodVirtualShadowPhysicalPageCountFromPagesPerAxis(virtualShadowPhysicalPagesPerAxis);
 
     uint32_t rootConstants[NumMiscUintRootConstants] = {};
     rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_PHYSICAL_PAGES_DESCRIPTOR_INDEX] = m_physicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetSRVInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_TABLE_RESOLUTION] = CLodVirtualShadowPageTableResolutionFromVirtualResolution(virtualShadowResolution);
+    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_PHYSICAL_PAGE_COUNT] = virtualShadowPhysicalPageCount;
+    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_PHYSICAL_PAGES_PER_AXIS] = virtualShadowPhysicalPagesPerAxis;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
@@ -64,7 +73,7 @@ PassReturn VirtualShadowMapClearPagesPass::Execute(PassExecutionContext& executi
         NumMiscUintRootConstants,
         rootConstants);
 
-    commandList.Dispatch(CLodVirtualShadowDefaultPhysicalPageCount, 1u, 1u);
+    commandList.Dispatch(virtualShadowPhysicalPageCount, 1u, 1u);
     return {};
 }
 

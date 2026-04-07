@@ -40,7 +40,6 @@ struct CLodVirtualShadowInvalidationInput
     uint pad1;
 };
 
-static const uint kCLodVirtualShadowDefaultClipmapCount = 6u;
 static const uint kCLodVirtualShadowInvalidationFlagUsePreviousBounds = 0x1u;
 static const uint kCLodVirtualShadowInvalidationFlagUseCurrentBounds = 0x2u;
 static const uint kCLodVirtualShadowInvalidationFlagSkinned = 0x4u;
@@ -85,73 +84,55 @@ uint2 CLodVirtualShadowUnwrappedPageCoords(
     CLodVirtualShadowClipmapInfo clipmapInfo)
 {
     return uint2(
-        CLodVirtualShadowUnwrapPageCoord(wrappedPageCoords.x, clipmapInfo.pageOffsetX, kCLodVirtualShadowPageTableResolution),
-        CLodVirtualShadowUnwrapPageCoord(wrappedPageCoords.y, clipmapInfo.pageOffsetY, kCLodVirtualShadowPageTableResolution));
+        CLodVirtualShadowUnwrapPageCoord(wrappedPageCoords.x, clipmapInfo.pageOffsetX, clipmapInfo.pageTableResolution),
+        CLodVirtualShadowUnwrapPageCoord(wrappedPageCoords.y, clipmapInfo.pageOffsetY, clipmapInfo.pageTableResolution));
 }
+
+#define CLOD_VSM_STATS_INCREMENT(field, clipmapIndex) \
+    switch (clipmapIndex) \
+    { \
+    case 0u: InterlockedAdd(statsBuffer[0].field[0], 1u); break; \
+    case 1u: InterlockedAdd(statsBuffer[0].field[1], 1u); break; \
+    case 2u: InterlockedAdd(statsBuffer[0].field[2], 1u); break; \
+    case 3u: InterlockedAdd(statsBuffer[0].field[3], 1u); break; \
+    case 4u: InterlockedAdd(statsBuffer[0].field[4], 1u); break; \
+    case 5u: InterlockedAdd(statsBuffer[0].field[5], 1u); break; \
+    case 6u: InterlockedAdd(statsBuffer[0].field[6], 1u); break; \
+    case 7u: InterlockedAdd(statsBuffer[0].field[7], 1u); break; \
+    case 8u: InterlockedAdd(statsBuffer[0].field[8], 1u); break; \
+    case 9u: InterlockedAdd(statsBuffer[0].field[9], 1u); break; \
+    case 10u: InterlockedAdd(statsBuffer[0].field[10], 1u); break; \
+    case 11u: InterlockedAdd(statsBuffer[0].field[11], 1u); break; \
+    case 12u: InterlockedAdd(statsBuffer[0].field[12], 1u); break; \
+    case 13u: InterlockedAdd(statsBuffer[0].field[13], 1u); break; \
+    case 14u: InterlockedAdd(statsBuffer[0].field[14], 1u); break; \
+    case 15u: InterlockedAdd(statsBuffer[0].field[15], 1u); break; \
+    default: break; \
+    }
 
 void CLodVirtualShadowStatsIncrementSelected(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
 {
-    switch (clipmapIndex)
-    {
-    case 0u: InterlockedAdd(statsBuffer[0].selectedPixels[0], 1u); break;
-    case 1u: InterlockedAdd(statsBuffer[0].selectedPixels[1], 1u); break;
-    case 2u: InterlockedAdd(statsBuffer[0].selectedPixels[2], 1u); break;
-    case 3u: InterlockedAdd(statsBuffer[0].selectedPixels[3], 1u); break;
-    case 4u: InterlockedAdd(statsBuffer[0].selectedPixels[4], 1u); break;
-    case 5u: InterlockedAdd(statsBuffer[0].selectedPixels[5], 1u); break;
-    }
+    CLOD_VSM_STATS_INCREMENT(selectedPixels, clipmapIndex);
 }
 
 void CLodVirtualShadowStatsIncrementProjectionRejected(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
 {
-    switch (clipmapIndex)
-    {
-    case 0u: InterlockedAdd(statsBuffer[0].projectionRejectedPixels[0], 1u); break;
-    case 1u: InterlockedAdd(statsBuffer[0].projectionRejectedPixels[1], 1u); break;
-    case 2u: InterlockedAdd(statsBuffer[0].projectionRejectedPixels[2], 1u); break;
-    case 3u: InterlockedAdd(statsBuffer[0].projectionRejectedPixels[3], 1u); break;
-    case 4u: InterlockedAdd(statsBuffer[0].projectionRejectedPixels[4], 1u); break;
-    case 5u: InterlockedAdd(statsBuffer[0].projectionRejectedPixels[5], 1u); break;
-    }
+    CLOD_VSM_STATS_INCREMENT(projectionRejectedPixels, clipmapIndex);
 }
 
 void CLodVirtualShadowStatsIncrementRequestedPages(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
 {
-    switch (clipmapIndex)
-    {
-    case 0u: InterlockedAdd(statsBuffer[0].requestedPages[0], 1u); break;
-    case 1u: InterlockedAdd(statsBuffer[0].requestedPages[1], 1u); break;
-    case 2u: InterlockedAdd(statsBuffer[0].requestedPages[2], 1u); break;
-    case 3u: InterlockedAdd(statsBuffer[0].requestedPages[3], 1u); break;
-    case 4u: InterlockedAdd(statsBuffer[0].requestedPages[4], 1u); break;
-    case 5u: InterlockedAdd(statsBuffer[0].requestedPages[5], 1u); break;
-    }
+    CLOD_VSM_STATS_INCREMENT(requestedPages, clipmapIndex);
 }
 
 void CLodVirtualShadowStatsIncrementNonZero(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
 {
-    switch (clipmapIndex)
-    {
-    case 0u: InterlockedAdd(statsBuffer[0].nonZeroPageTableEntries[0], 1u); break;
-    case 1u: InterlockedAdd(statsBuffer[0].nonZeroPageTableEntries[1], 1u); break;
-    case 2u: InterlockedAdd(statsBuffer[0].nonZeroPageTableEntries[2], 1u); break;
-    case 3u: InterlockedAdd(statsBuffer[0].nonZeroPageTableEntries[3], 1u); break;
-    case 4u: InterlockedAdd(statsBuffer[0].nonZeroPageTableEntries[4], 1u); break;
-    case 5u: InterlockedAdd(statsBuffer[0].nonZeroPageTableEntries[5], 1u); break;
-    }
+    CLOD_VSM_STATS_INCREMENT(nonZeroPageTableEntries, clipmapIndex);
 }
 
 void CLodVirtualShadowStatsIncrementPreAllocateNonZero(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
 {
-    switch (clipmapIndex)
-    {
-    case 0u: InterlockedAdd(statsBuffer[0].preAllocateNonZeroPageTableEntries[0], 1u); break;
-    case 1u: InterlockedAdd(statsBuffer[0].preAllocateNonZeroPageTableEntries[1], 1u); break;
-    case 2u: InterlockedAdd(statsBuffer[0].preAllocateNonZeroPageTableEntries[2], 1u); break;
-    case 3u: InterlockedAdd(statsBuffer[0].preAllocateNonZeroPageTableEntries[3], 1u); break;
-    case 4u: InterlockedAdd(statsBuffer[0].preAllocateNonZeroPageTableEntries[4], 1u); break;
-    case 5u: InterlockedAdd(statsBuffer[0].preAllocateNonZeroPageTableEntries[5], 1u); break;
-    }
+    CLOD_VSM_STATS_INCREMENT(preAllocateNonZeroPageTableEntries, clipmapIndex);
 }
 
 void CLodVirtualShadowStatsIncrementAllocated(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
@@ -242,67 +223,27 @@ void CLodVirtualShadowWaveReservePageListSlot(
 
 void CLodVirtualShadowStatsIncrementDirty(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
 {
-    switch (clipmapIndex)
-    {
-    case 0u: InterlockedAdd(statsBuffer[0].dirtyPageTableEntries[0], 1u); break;
-    case 1u: InterlockedAdd(statsBuffer[0].dirtyPageTableEntries[1], 1u); break;
-    case 2u: InterlockedAdd(statsBuffer[0].dirtyPageTableEntries[2], 1u); break;
-    case 3u: InterlockedAdd(statsBuffer[0].dirtyPageTableEntries[3], 1u); break;
-    case 4u: InterlockedAdd(statsBuffer[0].dirtyPageTableEntries[4], 1u); break;
-    case 5u: InterlockedAdd(statsBuffer[0].dirtyPageTableEntries[5], 1u); break;
-    }
+    CLOD_VSM_STATS_INCREMENT(dirtyPageTableEntries, clipmapIndex);
 }
 
 void CLodVirtualShadowStatsIncrementPreAllocateDirty(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
 {
-    switch (clipmapIndex)
-    {
-    case 0u: InterlockedAdd(statsBuffer[0].preAllocateDirtyPageTableEntries[0], 1u); break;
-    case 1u: InterlockedAdd(statsBuffer[0].preAllocateDirtyPageTableEntries[1], 1u); break;
-    case 2u: InterlockedAdd(statsBuffer[0].preAllocateDirtyPageTableEntries[2], 1u); break;
-    case 3u: InterlockedAdd(statsBuffer[0].preAllocateDirtyPageTableEntries[3], 1u); break;
-    case 4u: InterlockedAdd(statsBuffer[0].preAllocateDirtyPageTableEntries[4], 1u); break;
-    case 5u: InterlockedAdd(statsBuffer[0].preAllocateDirtyPageTableEntries[5], 1u); break;
-    }
+    CLOD_VSM_STATS_INCREMENT(preAllocateDirtyPageTableEntries, clipmapIndex);
 }
 
 void CLodVirtualShadowStatsIncrementClearedUnwrittenDirty(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
 {
-    switch (clipmapIndex)
-    {
-    case 0u: InterlockedAdd(statsBuffer[0].clearedUnwrittenDirtyPages[0], 1u); break;
-    case 1u: InterlockedAdd(statsBuffer[0].clearedUnwrittenDirtyPages[1], 1u); break;
-    case 2u: InterlockedAdd(statsBuffer[0].clearedUnwrittenDirtyPages[2], 1u); break;
-    case 3u: InterlockedAdd(statsBuffer[0].clearedUnwrittenDirtyPages[3], 1u); break;
-    case 4u: InterlockedAdd(statsBuffer[0].clearedUnwrittenDirtyPages[4], 1u); break;
-    case 5u: InterlockedAdd(statsBuffer[0].clearedUnwrittenDirtyPages[5], 1u); break;
-    }
+    CLOD_VSM_STATS_INCREMENT(clearedUnwrittenDirtyPages, clipmapIndex);
 }
 
 void CLodVirtualShadowStatsIncrementVisited(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
 {
-    switch (clipmapIndex)
-    {
-    case 0u: InterlockedAdd(statsBuffer[0].visitedPageTableEntries[0], 1u); break;
-    case 1u: InterlockedAdd(statsBuffer[0].visitedPageTableEntries[1], 1u); break;
-    case 2u: InterlockedAdd(statsBuffer[0].visitedPageTableEntries[2], 1u); break;
-    case 3u: InterlockedAdd(statsBuffer[0].visitedPageTableEntries[3], 1u); break;
-    case 4u: InterlockedAdd(statsBuffer[0].visitedPageTableEntries[4], 1u); break;
-    case 5u: InterlockedAdd(statsBuffer[0].visitedPageTableEntries[5], 1u); break;
-    }
+    CLOD_VSM_STATS_INCREMENT(visitedPageTableEntries, clipmapIndex);
 }
 
 void CLodVirtualShadowStatsIncrementVisitedDirty(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
 {
-    switch (clipmapIndex)
-    {
-    case 0u: InterlockedAdd(statsBuffer[0].visitedDirtyPageTableEntries[0], 1u); break;
-    case 1u: InterlockedAdd(statsBuffer[0].visitedDirtyPageTableEntries[1], 1u); break;
-    case 2u: InterlockedAdd(statsBuffer[0].visitedDirtyPageTableEntries[2], 1u); break;
-    case 3u: InterlockedAdd(statsBuffer[0].visitedDirtyPageTableEntries[3], 1u); break;
-    case 4u: InterlockedAdd(statsBuffer[0].visitedDirtyPageTableEntries[4], 1u); break;
-    case 5u: InterlockedAdd(statsBuffer[0].visitedDirtyPageTableEntries[5], 1u); break;
-    }
+    CLOD_VSM_STATS_INCREMENT(visitedDirtyPageTableEntries, clipmapIndex);
 }
 
 bool CLodProjectWorldToShadowUv(float3 positionWS, CLodVirtualShadowCompactShadowCameraInfo shadowCamera, out float2 shadowUv);
@@ -311,55 +252,25 @@ float3 CLodProjectWorldToShadowProjected(float3 positionWS, row_major matrix sha
 
 void CLodVirtualShadowStatsIncrementSetupWrappedClear(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
 {
-    switch (clipmapIndex)
-    {
-    case 0u: InterlockedAdd(statsBuffer[0].setupWrappedClearedPageTableEntries[0], 1u); break;
-    case 1u: InterlockedAdd(statsBuffer[0].setupWrappedClearedPageTableEntries[1], 1u); break;
-    case 2u: InterlockedAdd(statsBuffer[0].setupWrappedClearedPageTableEntries[2], 1u); break;
-    case 3u: InterlockedAdd(statsBuffer[0].setupWrappedClearedPageTableEntries[3], 1u); break;
-    case 4u: InterlockedAdd(statsBuffer[0].setupWrappedClearedPageTableEntries[4], 1u); break;
-    case 5u: InterlockedAdd(statsBuffer[0].setupWrappedClearedPageTableEntries[5], 1u); break;
-    }
+    CLOD_VSM_STATS_INCREMENT(setupWrappedClearedPageTableEntries, clipmapIndex);
 }
 
 void CLodVirtualShadowStatsIncrementSetupStaleDirtyClear(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
 {
-    switch (clipmapIndex)
-    {
-    case 0u: InterlockedAdd(statsBuffer[0].setupStaleDirtyClearedPageTableEntries[0], 1u); break;
-    case 1u: InterlockedAdd(statsBuffer[0].setupStaleDirtyClearedPageTableEntries[1], 1u); break;
-    case 2u: InterlockedAdd(statsBuffer[0].setupStaleDirtyClearedPageTableEntries[2], 1u); break;
-    case 3u: InterlockedAdd(statsBuffer[0].setupStaleDirtyClearedPageTableEntries[3], 1u); break;
-    case 4u: InterlockedAdd(statsBuffer[0].setupStaleDirtyClearedPageTableEntries[4], 1u); break;
-    case 5u: InterlockedAdd(statsBuffer[0].setupStaleDirtyClearedPageTableEntries[5], 1u); break;
-    }
+    CLOD_VSM_STATS_INCREMENT(setupStaleDirtyClearedPageTableEntries, clipmapIndex);
 }
 
 void CLodVirtualShadowStatsIncrementMarkResidentCleanHit(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
 {
-    switch (clipmapIndex)
-    {
-    case 0u: InterlockedAdd(statsBuffer[0].markResidentCleanHits[0], 1u); break;
-    case 1u: InterlockedAdd(statsBuffer[0].markResidentCleanHits[1], 1u); break;
-    case 2u: InterlockedAdd(statsBuffer[0].markResidentCleanHits[2], 1u); break;
-    case 3u: InterlockedAdd(statsBuffer[0].markResidentCleanHits[3], 1u); break;
-    case 4u: InterlockedAdd(statsBuffer[0].markResidentCleanHits[4], 1u); break;
-    case 5u: InterlockedAdd(statsBuffer[0].markResidentCleanHits[5], 1u); break;
-    }
+    CLOD_VSM_STATS_INCREMENT(markResidentCleanHits, clipmapIndex);
 }
 
 void CLodVirtualShadowStatsIncrementMarkResidentDirtyHit(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
 {
-    switch (clipmapIndex)
-    {
-    case 0u: InterlockedAdd(statsBuffer[0].markResidentDirtyHits[0], 1u); break;
-    case 1u: InterlockedAdd(statsBuffer[0].markResidentDirtyHits[1], 1u); break;
-    case 2u: InterlockedAdd(statsBuffer[0].markResidentDirtyHits[2], 1u); break;
-    case 3u: InterlockedAdd(statsBuffer[0].markResidentDirtyHits[3], 1u); break;
-    case 4u: InterlockedAdd(statsBuffer[0].markResidentDirtyHits[4], 1u); break;
-    case 5u: InterlockedAdd(statsBuffer[0].markResidentDirtyHits[5], 1u); break;
-    }
+    CLOD_VSM_STATS_INCREMENT(markResidentDirtyHits, clipmapIndex);
 }
+
+#undef CLOD_VSM_STATS_INCREMENT
 
 uint CLodCalculateShadowCascadeIndex(float depth, uint numCascadeSplits, float4 cascadeSplits)
 {
@@ -455,16 +366,17 @@ float4 CLodDirectionalShadowPageViewRow(CLodVirtualShadowCompactShadowCameraInfo
         shadowCamera.view[3][3]);
 }
 
-    uint CLodDirectionalShadowPageViewInfoIndex(uint2 wrappedPageCoords, uint clipmapIndex)
-    {
-        return clipmapIndex * (kCLodVirtualShadowPageTableResolution * kCLodVirtualShadowPageTableResolution) +
-        wrappedPageCoords.y * kCLodVirtualShadowPageTableResolution +
+uint CLodDirectionalShadowPageViewInfoIndex(uint2 wrappedPageCoords, uint clipmapIndex, uint pageTableResolution)
+{
+    return clipmapIndex * (pageTableResolution * pageTableResolution) +
+        wrappedPageCoords.y * pageTableResolution +
         wrappedPageCoords.x;
-    }
+}
 
 void CLodMarkVirtualShadowWrappedPage(
     uint2 wrappedPageCoords,
     uint clipmapIndex,
+    uint pageTableResolution,
     uint activeClipmapCount,
     float4 directionalPageViewRow,
     RWStructuredBuffer<uint4> allocationRequests,
@@ -475,7 +387,7 @@ void CLodMarkVirtualShadowWrappedPage(
     RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer)
 {
     const uint3 pageCoords = uint3(wrappedPageCoords, clipmapIndex);
-    const uint pageViewInfoIndex = CLodDirectionalShadowPageViewInfoIndex(wrappedPageCoords, clipmapIndex);
+    const uint pageViewInfoIndex = CLodDirectionalShadowPageViewInfoIndex(wrappedPageCoords, clipmapIndex, pageTableResolution);
     const uint virtualAddress =
         wrappedPageCoords.y * CLOD_VIRTUAL_SHADOW_MARK_PAGE_TABLE_RESOLUTION + wrappedPageCoords.x;
 
@@ -559,6 +471,7 @@ void CLodMarkVirtualShadowWrappedPage(
 bool CLodInvalidateVirtualShadowWrappedPage(
     uint2 wrappedPageCoords,
     uint clipmapIndex,
+    uint pageTableResolution,
     uint frameIndex,
     float4 directionalPageViewRow,
     RWTexture2DArray<uint> pageTable,
@@ -580,7 +493,7 @@ bool CLodInvalidateVirtualShadowWrappedPage(
 
     const uint physicalPageIndex = previousPageState & kCLodVirtualShadowPhysicalPageIndexMask;
     pageMetadata[physicalPageIndex] = uint4(0u, 0u, 0u, 0u);
-    directionalPageViewInfo[CLodDirectionalShadowPageViewInfoIndex(wrappedPageCoords, clipmapIndex)] = 0.0f.xxxx;
+    directionalPageViewInfo[CLodDirectionalShadowPageViewInfoIndex(wrappedPageCoords, clipmapIndex, pageTableResolution)] = 0.0f.xxxx;
     return true;
 }
 
@@ -638,8 +551,8 @@ void CLodInvalidateVirtualShadowSphere(
             continue;
         }
 
-        const uint2 logicalPageMin = CLodVirtualShadowVirtualPageCoordsFromUv(uvMin);
-        const uint2 logicalPageMax = CLodVirtualShadowVirtualPageCoordsFromUv(uvMax);
+        const uint2 logicalPageMin = CLodVirtualShadowVirtualPageCoordsFromUv(uvMin, clipmapInfo);
+        const uint2 logicalPageMax = CLodVirtualShadowVirtualPageCoordsFromUv(uvMax, clipmapInfo);
         const uint2 pageMin = CLodVirtualShadowWrappedPageCoords(logicalPageMin, clipmapInfo);
         const uint2 pageMax = CLodVirtualShadowWrappedPageCoords(logicalPageMax, clipmapInfo);
         const float4 directionalPageViewRow = CLodDirectionalShadowPageViewRow(shadowCamera);
@@ -670,6 +583,7 @@ void CLodInvalidateVirtualShadowSphere(
                         CLodInvalidateVirtualShadowWrappedPage(
                             uint2(pageX, pageY),
                             clipmapInfo.pageTableLayer,
+                            clipmapInfo.pageTableResolution,
                             frameIndex,
                             directionalPageViewRow,
                             pageTable,
@@ -769,7 +683,7 @@ void CLodVirtualShadowClearPhysicalPagesCSMain(
     uint3 groupId : SV_GroupID,
     uint3 groupThreadId : SV_GroupThreadID)
 {
-    if (groupId.x >= kCLodVirtualShadowPhysicalPagesPerAxis * kCLodVirtualShadowPhysicalPagesPerAxis)
+    if (groupId.x >= CLOD_VIRTUAL_SHADOW_CLEAR_PHYSICAL_PAGE_COUNT)
     {
         return;
     }
@@ -799,8 +713,8 @@ void CLodVirtualShadowClearPhysicalPagesCSMain(
             {
                 const uint virtualAddress = meta.x;
                 const uint clipmapIndex = meta.w;
-                const uint pageX = virtualAddress % kCLodVirtualShadowPageTableResolution;
-                const uint pageY = virtualAddress / kCLodVirtualShadowPageTableResolution;
+                const uint pageX = virtualAddress % CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_TABLE_RESOLUTION;
+                const uint pageY = virtualAddress / CLOD_VIRTUAL_SHADOW_CLEAR_PAGE_TABLE_RESOLUTION;
                 uint ignoredOr = 0u;
                 InterlockedOr(pageTable[uint3(pageX, pageY, clipmapIndex)], kCLodVirtualShadowDirtyMask, ignoredOr);
             }
@@ -813,8 +727,8 @@ void CLodVirtualShadowClearPhysicalPagesCSMain(
         return;
     }
 
-    const uint atlasPageX = groupId.x % kCLodVirtualShadowPhysicalPagesPerAxis;
-    const uint atlasPageY = groupId.x / kCLodVirtualShadowPhysicalPagesPerAxis;
+    const uint atlasPageX = groupId.x % CLOD_VIRTUAL_SHADOW_CLEAR_PHYSICAL_PAGES_PER_AXIS;
+    const uint atlasPageY = groupId.x / CLOD_VIRTUAL_SHADOW_CLEAR_PHYSICAL_PAGES_PER_AXIS;
     const uint2 atlasBasePixel = uint2(
         atlasPageX * kCLodVirtualShadowPhysicalPageSize,
         atlasPageY * kCLodVirtualShadowPhysicalPageSize);
@@ -1029,6 +943,8 @@ void CLodVirtualShadowAccumulateTileClipmapRange(
     float depth,
     CLodVirtualShadowMainCameraInfo mainCamera,
     float clip0TexelWorldSize,
+    uint pageTableResolution,
+    uint virtualResolution,
     uint activeClipmapCount,
     inout uint minClipmapIndex,
     inout uint maxClipmapIndex)
@@ -1038,6 +954,8 @@ void CLodVirtualShadowAccumulateTileClipmapRange(
         positionWS,
         mainCamera.positionWorldSpace.xyz,
         clip0TexelWorldSize,
+        pageTableResolution,
+        virtualResolution,
         activeClipmapCount);
     minClipmapIndex = min(minClipmapIndex, clipmapIndex);
     maxClipmapIndex = max(maxClipmapIndex, clipmapIndex);
@@ -1120,6 +1038,8 @@ void CLodVirtualShadowMarkPagesCSMain(uint3 dispatchThreadId : SV_DispatchThread
         depthValue, \
         mainCamera, \
         markClipmapDataBuffer[0].texelWorldSize, \
+        markClipmapDataBuffer[0].pageTableResolution, \
+        markClipmapDataBuffer[0].virtualResolution, \
         activeClipmapCount, \
         minClipmapIndex, \
         maxClipmapIndex)
@@ -1180,12 +1100,12 @@ void CLodVirtualShadowMarkPagesCSMain(uint3 dispatchThreadId : SV_DispatchThread
             continue;
         }
 
-        const float2 pagePaddingUv = 0.5f / (float)kCLodVirtualShadowPageTableResolution;
+        const float2 pagePaddingUv = 0.5f / max((float)clipmapData.pageTableResolution, 1.0f);
         shadowUvMin = saturate(shadowUvMin - pagePaddingUv);
         shadowUvMax = saturate(shadowUvMax + pagePaddingUv);
 
-        const uint2 logicalPageMin = CLodVirtualShadowVirtualPageCoordsFromUv(shadowUvMin);
-        const uint2 logicalPageMax = CLodVirtualShadowVirtualPageCoordsFromUv(shadowUvMax);
+        const uint2 logicalPageMin = CLodVirtualShadowVirtualPageCoordsFromUv(shadowUvMin, clipmapData);
+        const uint2 logicalPageMax = CLodVirtualShadowVirtualPageCoordsFromUv(shadowUvMax, clipmapData);
         const float4 directionalPageViewRow = clipmapData.directionalPageViewRow;
 
         for (uint pageY = logicalPageMin.y; pageY <= logicalPageMax.y; ++pageY)
@@ -1195,6 +1115,7 @@ void CLodVirtualShadowMarkPagesCSMain(uint3 dispatchThreadId : SV_DispatchThread
                 CLodMarkVirtualShadowWrappedPage(
                     CLodVirtualShadowWrappedPageCoords(uint2(pageX, pageY), clipmapData),
                     clipmapData.pageTableLayer,
+                    clipmapData.pageTableResolution,
                     activeClipmapCount,
                     directionalPageViewRow,
                     allocationRequests,
@@ -1322,11 +1243,11 @@ void CLodVirtualShadowBuildPageListsCSMain(uint3 dispatchThreadId : SV_DispatchT
 
         const uint ownerVirtualAddress = meta.x;
         const uint ownerClipmapIndex = meta.w;
-        const uint ownerPageX = ownerVirtualAddress % kCLodVirtualShadowPageTableResolution;
-        const uint ownerPageY = ownerVirtualAddress / kCLodVirtualShadowPageTableResolution;
+        const uint ownerPageX = ownerVirtualAddress % CLOD_VIRTUAL_SHADOW_BUILD_PAGE_LISTS_PAGE_TABLE_RESOLUTION;
+        const uint ownerPageY = ownerVirtualAddress / CLOD_VIRTUAL_SHADOW_BUILD_PAGE_LISTS_PAGE_TABLE_RESOLUTION;
         bool visitedThisFrame = false;
         if (ownerClipmapIndex < kCLodVirtualShadowClipmapCount &&
-            ownerPageY < kCLodVirtualShadowPageTableResolution)
+            ownerPageY < CLOD_VIRTUAL_SHADOW_BUILD_PAGE_LISTS_PAGE_TABLE_RESOLUTION)
         {
             const uint pageEntry = pageTable.Load(int4(ownerPageX, ownerPageY, ownerClipmapIndex, 0));
             visitedThisFrame =
@@ -1437,7 +1358,7 @@ void CLodVirtualShadowAllocatePagesCSMain(uint3 dispatchThreadId : SV_DispatchTh
         kCLodVirtualShadowPhysicalPageResidentFlag,
         clipmapIndex);
     const CLodVirtualShadowCompactShadowCameraInfo shadowCamera = compactShadowCameraBuffer[clipmapIndex];
-    directionalPageViewInfo[CLodDirectionalShadowPageViewInfoIndex(uint2(pageX, pageY), clipmapIndex)] = CLodDirectionalShadowPageViewRow(shadowCamera);
+    directionalPageViewInfo[CLodDirectionalShadowPageViewInfoIndex(uint2(pageX, pageY), clipmapIndex, clipmapInfos[clipmapIndex].pageTableResolution)] = CLodDirectionalShadowPageViewRow(shadowCamera);
     InterlockedOr(dirtyFlags[selectedPhysicalPageIndex >> 5u], 1u << (selectedPhysicalPageIndex & 31u));
 }
 
@@ -1520,9 +1441,9 @@ void CLodVirtualShadowClearDirtyBitsCSMain(uint3 dispatchThreadId : SV_DispatchT
         return;
     }
 
-    const uint pageX = virtualAddress % kCLodVirtualShadowPageTableResolution;
-    const uint pageY = virtualAddress / kCLodVirtualShadowPageTableResolution;
-    if (pageY >= kCLodVirtualShadowPageTableResolution)
+    const uint pageX = virtualAddress % CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_RESOLUTION;
+    const uint pageY = virtualAddress / CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_RESOLUTION;
+    if (pageY >= CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_RESOLUTION)
     {
         return;
     }
@@ -1951,7 +1872,7 @@ void CLodVirtualShadowGatherStatsCSMain(uint3 dispatchThreadId : SV_DispatchThre
     {
         if (capturePreAllocateState)
         {
-            statsBuffer[0].activeClipmapCount = min(perFrameBuffer.numShadowCascades, CLOD_VIRTUAL_SHADOW_GATHER_STATS_CLIPMAP_COUNT);
+            statsBuffer[0].activeClipmapCount = min(perFrameBuffer.numDirectionalClipmaps, CLOD_VIRTUAL_SHADOW_GATHER_STATS_CLIPMAP_COUNT);
             statsBuffer[0].allocationRequestCount = allocationCountBuffer.Load(0);
             statsBuffer[0].allocationDispatchGroupCount = allocationIndirectArgsBuffer[0].dispatchX;
 

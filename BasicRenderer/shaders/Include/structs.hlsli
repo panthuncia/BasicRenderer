@@ -113,7 +113,7 @@ struct PerFrameBuffer {
     
     uint mainCameraIndex;
     uint numLights;
-    uint numShadowCascades;
+    uint numDirectionalClipmaps;
     
     unsigned int activeEnvironmentIndex;
     

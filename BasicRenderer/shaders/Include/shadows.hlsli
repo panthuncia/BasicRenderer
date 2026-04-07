@@ -172,9 +172,10 @@ int calculateShadowCascadeIndex(float depth, uint numCascadeSplits, float4 casca
     return numCascadeSplits - 1;
 }
 
-float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numCascades, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer, out CLodVirtualShadowDebugInfo debugInfo) {
+float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numDirectionalClipmaps, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer, out CLodVirtualShadowDebugInfo debugInfo) {
     (void)cascadeCameraIndexBuffer;
     (void)cameraBuffer;
+    (void)cascadeSplits;
 
     StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodClipmapInfo)];
     StructuredBuffer<CLodVirtualShadowMainCameraInfo> compactMainCameraBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodCompactMainCamera)];
@@ -183,7 +184,7 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
     Texture2DArray<uint> pageTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPageTable)];
     Texture2D<uint> physicalPages = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPhysicalPages)];
 
-    const uint activeClipmapCount = min(numCascades, kCLodVirtualShadowClipmapCount);
+    const uint activeClipmapCount = min(numDirectionalClipmaps, kCLodVirtualShadowClipmapCount);
     if (activeClipmapCount == 0u)
     {
         debugInfo = CLodVirtualShadowInitDebugInfo(0u);
@@ -195,6 +196,8 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
         fragPosWorldSpace,
         mainCamera.positionWorldSpace.xyz,
         clipmapInfos[0].texelWorldSize,
+        clipmapInfos[0].pageTableResolution,
+        clipmapInfos[0].virtualResolution,
         activeClipmapCount);
     debugInfo = CLodVirtualShadowInitDebugInfo(preferredClipmapIndex);
 
@@ -231,7 +234,7 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
         return 0.0f;
     }
 
-    const uint2 virtualPageCoords = CLodVirtualShadowVirtualPageCoordsFromUv(uv.xy);
+    const uint2 virtualPageCoords = CLodVirtualShadowVirtualPageCoordsFromUv(uv.xy, clipmapInfo);
     const uint2 wrappedPageCoords = CLodVirtualShadowWrappedPageCoords(virtualPageCoords, clipmapInfo);
     const uint pageEntry = pageTable.Load(int4(wrappedPageCoords, clipmapInfo.pageTableLayer, 0));
     debugInfo.preferredPageEntry = pageEntry;
@@ -255,8 +258,8 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
 
     row_major matrix cachedPageView = lightCamera.view;
     const uint pageViewInfoIndex =
-        clipmapInfo.pageTableLayer * (kCLodVirtualShadowPageTableResolution * kCLodVirtualShadowPageTableResolution) +
-        wrappedPageCoords.y * kCLodVirtualShadowPageTableResolution +
+        clipmapInfo.pageTableLayer * (clipmapInfo.pageTableResolution * clipmapInfo.pageTableResolution) +
+        wrappedPageCoords.y * clipmapInfo.pageTableResolution +
         wrappedPageCoords.x;
     const float4 cachedPageViewRow = directionalPageViewInfo[pageViewInfoIndex];
     cachedPageView[3][0] = cachedPageViewRow.x;
@@ -270,8 +273,8 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
         return 0.0f;
     }
 
-    const uint2 virtualTexelCoords = CLodVirtualShadowVirtualTexelCoordsFromUv(uv.xy);
-    const uint2 atlasPixel = CLodVirtualShadowPhysicalAtlasPixel(physicalPageIndex, virtualTexelCoords);
+    const uint2 virtualTexelCoords = CLodVirtualShadowVirtualTexelCoordsFromUv(uv.xy, clipmapInfo);
+    const uint2 atlasPixel = CLodVirtualShadowPhysicalAtlasPixel(physicalPageIndex, virtualTexelCoords, clipmapInfo);
 
     const uint storedDepthBits = physicalPages.Load(int3(atlasPixel, 0));
     if (storedDepthBits == 0x7F7FFFFFu)
@@ -292,14 +295,14 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
     return 0.0f;
 }
 
-float calculateDirectionalVSMShadow(float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numCascades, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
+float calculateDirectionalVSMShadow(float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numDirectionalClipmaps, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
     CLodVirtualShadowDebugInfo debugInfo;
-    return calculateDirectionalVSMShadowDetailed(fragPosWorldSpace, fragPosViewSpace, normal, light, numCascades, cascadeSplits, cascadeCameraIndexBuffer, cameraBuffer, debugInfo);
+    return calculateDirectionalVSMShadowDetailed(fragPosWorldSpace, fragPosViewSpace, normal, light, numDirectionalClipmaps, cascadeSplits, cascadeCameraIndexBuffer, cameraBuffer, debugInfo);
 }
 
 
-float calculateCascadedShadow(float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numCascades, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
-    return calculateDirectionalVSMShadow(fragPosWorldSpace, fragPosViewSpace, normal, light, numCascades, cascadeSplits, cascadeCameraIndexBuffer, cameraBuffer);
+float calculateCascadedShadow(float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numDirectionalClipmaps, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
+    return calculateDirectionalVSMShadow(fragPosWorldSpace, fragPosViewSpace, normal, light, numDirectionalClipmaps, cascadeSplits, cascadeCameraIndexBuffer, cameraBuffer);
 }
 
 float calculateSpotShadow(float3 fragPosWorldSpace, float3 normal, LightInfo light, matrix lightMatrix, float near, float far) {

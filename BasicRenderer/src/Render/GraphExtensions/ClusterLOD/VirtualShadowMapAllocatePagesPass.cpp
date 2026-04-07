@@ -3,6 +3,7 @@
 #include "BuiltinResources.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
 #include "Resources/Buffers/Buffer.h"
@@ -80,6 +81,11 @@ PassReturn VirtualShadowMapAllocatePagesPass::Execute(PassExecutionContext& exec
     commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
     commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+    const uint32_t virtualShadowResolution = CLodVirtualShadowSanitizeVirtualResolution(
+        SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName)());
+    const uint32_t virtualShadowPhysicalPageCount = CLodVirtualShadowPhysicalPageCountFromPagesPerAxis(
+        CLodVirtualShadowSanitizePhysicalPagesPerAxis(
+            SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowPhysicalPagesPerAxisSettingName)()));
 
     uint32_t rootConstants[NumMiscUintRootConstants] = {};
     rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_REQUESTS_DESCRIPTOR_INDEX] = m_allocationRequestsBuffer->GetSRVInfo(0).slot.index;
@@ -91,9 +97,9 @@ PassReturn VirtualShadowMapAllocatePagesPass::Execute(PassExecutionContext& exec
     rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_REUSABLE_PAGES_DESCRIPTOR_INDEX] = m_reusablePhysicalPagesBuffer->GetSRVInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PAGE_LIST_HEADER_DESCRIPTOR_INDEX] = m_pageListHeaderBuffer->GetSRVInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_clipmapInfoBuffer->GetSRVInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PAGE_TABLE_RESOLUTION] = CLodVirtualShadowDefaultPageTableResolution;
-    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_CLIPMAP_COUNT] = CLodVirtualShadowDefaultClipmapCount;
-    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PHYSICAL_PAGE_COUNT] = CLodVirtualShadowDefaultPhysicalPageCount;
+    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PAGE_TABLE_RESOLUTION] = CLodVirtualShadowPageTableResolutionFromVirtualResolution(virtualShadowResolution);
+    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
+    rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PHYSICAL_PAGE_COUNT] = virtualShadowPhysicalPageCount;
     rootConstants[CLOD_VIRTUAL_SHADOW_ALLOCATE_PAGE_VIEW_INFO_DESCRIPTOR_INDEX] = m_directionalPageViewInfoBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 
     commandList.PushConstants(

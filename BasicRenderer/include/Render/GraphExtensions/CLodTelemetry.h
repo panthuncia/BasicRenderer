@@ -98,7 +98,7 @@ struct CLodWorkGraphTelemetryCounters {
     std::array<uint32_t, CLodWorkGraphCounterCount> counters{};
 };
 
-inline constexpr uint32_t CLodDirectionalShadowDebugMaxClipmaps = 6u;
+inline constexpr uint32_t CLodDirectionalShadowDebugMaxClipmaps = 16u;
 
 struct CLodDirectionalShadowClipmapDebugEntry {
     uint32_t valid = 0;

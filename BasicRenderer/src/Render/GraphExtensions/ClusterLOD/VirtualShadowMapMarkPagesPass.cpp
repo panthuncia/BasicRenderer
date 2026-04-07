@@ -74,7 +74,7 @@ void VirtualShadowMapMarkPagesPass::Update(const UpdateExecutionContext& executi
     (void)executionContext;
     m_activeClipmapCount = (std::min)(
         static_cast<uint32_t>(SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")()),
-        CLodVirtualShadowDefaultClipmapCount);
+    CLodVirtualShadowMaxSupportedClipmapCount);
 }
 
 PassReturn VirtualShadowMapMarkPagesPass::Execute(PassExecutionContext& executionContext)
@@ -87,6 +87,11 @@ PassReturn VirtualShadowMapMarkPagesPass::Execute(PassExecutionContext& executio
     commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
     commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+    const uint32_t virtualShadowResolution = CLodVirtualShadowSanitizeVirtualResolution(
+        SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName)());
+    const uint32_t virtualShadowPhysicalPageCount = CLodVirtualShadowPhysicalPageCountFromPagesPerAxis(
+        CLodVirtualShadowSanitizePhysicalPagesPerAxis(
+            SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowPhysicalPagesPerAxisSettingName)()));
 
     uint32_t rootConstants[NumMiscUintRootConstants] = {};
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_REQUESTS_DESCRIPTOR_INDEX] = m_allocationRequestsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
@@ -97,9 +102,9 @@ PassReturn VirtualShadowMapMarkPagesPass::Execute(PassExecutionContext& executio
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_CLIPMAP_DATA_DESCRIPTOR_INDEX] = m_markClipmapDataBuffer->GetSRVInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_SCREEN_WIDTH] = context.renderResolution.x;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_SCREEN_HEIGHT] = context.renderResolution.y;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_CLIPMAP_COUNT] = CLodVirtualShadowDefaultClipmapCount;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_PAGE_TABLE_RESOLUTION] = CLodVirtualShadowDefaultPageTableResolution;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_MAX_REQUEST_COUNT] = (std::min)(CLodVirtualShadowDefaultPhysicalPageCount, CLodVirtualShadowMaxAllocationRequests);
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_PAGE_TABLE_RESOLUTION] = CLodVirtualShadowPageTableResolutionFromVirtualResolution(virtualShadowResolution);
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_MAX_REQUEST_COUNT] = (std::min)(virtualShadowPhysicalPageCount, CLodVirtualShadowMaxAllocationRequests);
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_PAGE_VIEW_INFO_DESCRIPTOR_INDEX] = m_directionalPageViewInfoBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
