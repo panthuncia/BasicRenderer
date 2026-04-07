@@ -89,9 +89,8 @@ PassReturn VirtualShadowMapMarkPagesPass::Execute(PassExecutionContext& executio
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
     const uint32_t virtualShadowResolution = CLodVirtualShadowSanitizeVirtualResolution(
         SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName)());
-    const uint32_t virtualShadowPhysicalPageCount = CLodVirtualShadowPhysicalPageCountFromPagesPerAxis(
-        CLodVirtualShadowSanitizePhysicalPagesPerAxis(
-            SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowPhysicalPagesPerAxisSettingName)()));
+    const uint32_t virtualShadowPhysicalPageCount =
+        CLodVirtualShadowPhysicalPageCountFromVirtualResolution(virtualShadowResolution);
 
     uint32_t rootConstants[NumMiscUintRootConstants] = {};
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_REQUESTS_DESCRIPTOR_INDEX] = m_allocationRequestsBuffer->GetUAVShaderVisibleInfo(0).slot.index;

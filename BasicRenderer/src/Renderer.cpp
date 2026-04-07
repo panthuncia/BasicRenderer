@@ -824,7 +824,6 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<bool>(CLodDisableReyesRasterizationSettingName, true);
 	settingsManager.registerSetting<bool>(CLodDisableVirtualShadowPageCachingSettingName, false);
     settingsManager.registerSetting<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName, CLodVirtualShadowDefaultVirtualResolution);
-    settingsManager.registerSetting<uint32_t>(CLodVirtualShadowPhysicalPagesPerAxisSettingName, CLodVirtualShadowDefaultPhysicalPagesPerAxis);
 	settingsManager.registerSetting<uint32_t>(CLodReyesResourceBudgetBytesSettingName, 512u*1024u*1024u); // 500 MB for reyes
 	settingsManager.registerSetting<uint32_t>("usdPointInstancerMaxInstances", 10000u);
     getShadowResolution = settingsManager.getSettingGetter<uint16_t>("shadowResolution");

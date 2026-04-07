@@ -527,10 +527,6 @@ private:
     std::function<uint32_t()> getCLodVirtualShadowVirtualResolution;
     std::function<void(uint32_t)> setCLodVirtualShadowVirtualResolution;
 
-    uint32_t m_clodVirtualShadowPhysicalPagesPerAxis = CLodVirtualShadowDefaultPhysicalPagesPerAxis;
-    std::function<uint32_t()> getCLodVirtualShadowPhysicalPagesPerAxis;
-    std::function<void(uint32_t)> setCLodVirtualShadowPhysicalPagesPerAxis;
-
     float m_maxShadowDistance = 0.0f;
     std::function<float()> getMaxShadowDistance;
     std::function<void(float)> setMaxShadowDistance;
@@ -761,11 +757,6 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     setCLodVirtualShadowVirtualResolution = settingsManager.getSettingSetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName);
     m_clodVirtualShadowVirtualResolution = getCLodVirtualShadowVirtualResolution();
     observerSetting(m_clodVirtualShadowVirtualResolution, CLodVirtualShadowVirtualResolutionSettingName);
-
-    getCLodVirtualShadowPhysicalPagesPerAxis = settingsManager.getSettingGetter<uint32_t>(CLodVirtualShadowPhysicalPagesPerAxisSettingName);
-    setCLodVirtualShadowPhysicalPagesPerAxis = settingsManager.getSettingSetter<uint32_t>(CLodVirtualShadowPhysicalPagesPerAxisSettingName);
-    m_clodVirtualShadowPhysicalPagesPerAxis = getCLodVirtualShadowPhysicalPagesPerAxis();
-    observerSetting(m_clodVirtualShadowPhysicalPagesPerAxis, CLodVirtualShadowPhysicalPagesPerAxisSettingName);
 
     getMaxShadowDistance = settingsManager.getSettingGetter<float>("maxShadowDistance");
     setMaxShadowDistance = settingsManager.getSettingSetter<float>("maxShadowDistance");
@@ -1086,12 +1077,9 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             m_clodVirtualShadowVirtualResolution = CLodVirtualShadowVirtualResolutionOptions[virtualShadowResolutionIndex];
             setCLodVirtualShadowVirtualResolution(m_clodVirtualShadowVirtualResolution);
         }
-        int virtualShadowPhysicalPagesIndex = CLodVirtualShadowPhysicalPagesPerAxisOptionIndex(m_clodVirtualShadowPhysicalPagesPerAxis);
-        if (ImGui::Combo("Directional VSM Cache Budget", &virtualShadowPhysicalPagesIndex, CLodVirtualShadowPhysicalPagesPerAxisOptionNames, CLodVirtualShadowPhysicalPagesPerAxisOptionCount)) {
-            virtualShadowPhysicalPagesIndex = std::clamp(virtualShadowPhysicalPagesIndex, 0, CLodVirtualShadowPhysicalPagesPerAxisOptionCount - 1);
-            m_clodVirtualShadowPhysicalPagesPerAxis = CLodVirtualShadowPhysicalPagesPerAxisOptions[virtualShadowPhysicalPagesIndex];
-            setCLodVirtualShadowPhysicalPagesPerAxis(m_clodVirtualShadowPhysicalPagesPerAxis);
-        }
+        const uint32_t derivedVirtualShadowPhysicalPagesPerAxis =
+            CLodVirtualShadowPhysicalPagesPerAxisFromVirtualResolution(m_clodVirtualShadowVirtualResolution);
+        ImGui::Text("Directional VSM Physical Pages: %u x %u (full atlas)", derivedVirtualShadowPhysicalPagesPerAxis, derivedVirtualShadowPhysicalPagesPerAxis);
         if (ImGui::SliderFloat("Directional Shadow Distance", &m_maxShadowDistance, 1.0f, 1000.0f, "%.1f")) {
             m_maxShadowDistance = std::max(m_maxShadowDistance, 1.0f);
             setMaxShadowDistance(m_maxShadowDistance);

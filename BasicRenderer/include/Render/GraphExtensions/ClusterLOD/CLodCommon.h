@@ -15,7 +15,6 @@ inline constexpr const char* CLodDisableReyesRasterizationSettingName = "clodDis
 inline constexpr const char* CLodReyesResourceBudgetBytesSettingName = "clodReyesResourceBudgetBytes";
 inline constexpr const char* CLodDisableVirtualShadowPageCachingSettingName = "clodDisableVirtualShadowPageCaching";
 inline constexpr const char* CLodVirtualShadowVirtualResolutionSettingName = "clodVirtualShadowVirtualResolution";
-inline constexpr const char* CLodVirtualShadowPhysicalPagesPerAxisSettingName = "clodVirtualShadowPhysicalPagesPerAxis";
 
 enum class CLodPriorityMode : uint8_t {
     Max, // Duplicate group requests keep the maximum reported priority
@@ -124,8 +123,10 @@ inline constexpr uint32_t CLodVirtualShadowDefaultPageTableResolution =
     CLodVirtualShadowDefaultVirtualResolution / CLodVirtualShadowPhysicalPageSize;
 inline constexpr uint32_t CLodVirtualShadowMaxPageTableResolution =
     CLodVirtualShadowMaxVirtualResolution / CLodVirtualShadowPhysicalPageSize;
-inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalPagesPerAxis = 64u;
-inline constexpr uint32_t CLodVirtualShadowMaxPhysicalPagesPerAxis = 96u;
+inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalPagesPerAxis =
+    CLodVirtualShadowMaxPageTableResolution;
+inline constexpr uint32_t CLodVirtualShadowMaxPhysicalPagesPerAxis =
+    CLodVirtualShadowMaxPageTableResolution;
 inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalPageCount =
     CLodVirtualShadowDefaultPhysicalPagesPerAxis * CLodVirtualShadowDefaultPhysicalPagesPerAxis;
 inline constexpr uint32_t CLodVirtualShadowMaxPhysicalPageCount =
@@ -138,14 +139,6 @@ inline constexpr const char* CLodVirtualShadowVirtualResolutionOptionNames[] = {
 };
 inline constexpr int CLodVirtualShadowVirtualResolutionOptionCount =
     static_cast<int>(sizeof(CLodVirtualShadowVirtualResolutionOptions) / sizeof(CLodVirtualShadowVirtualResolutionOptions[0]));
-inline constexpr uint32_t CLodVirtualShadowPhysicalPagesPerAxisOptions[] = { 64u, 80u, 96u };
-inline constexpr const char* CLodVirtualShadowPhysicalPagesPerAxisOptionNames[] = {
-    "64 x 64 pages",
-    "80 x 80 pages",
-    "96 x 96 pages",
-};
-inline constexpr int CLodVirtualShadowPhysicalPagesPerAxisOptionCount =
-    static_cast<int>(sizeof(CLodVirtualShadowPhysicalPagesPerAxisOptions) / sizeof(CLodVirtualShadowPhysicalPagesPerAxisOptions[0]));
 inline constexpr uint32_t CLodVirtualShadowMarkTileSize = 16u;
 inline constexpr uint32_t CLodVirtualShadowMaxMarkTileGridDimension = 512u;
 inline constexpr uint32_t CLodVirtualShadowMaxMarkTileCount =
@@ -205,6 +198,12 @@ constexpr uint32_t CLodVirtualShadowPageTableResolutionFromVirtualResolution(uin
     return CLodVirtualShadowSanitizeVirtualResolution(virtualResolution) / CLodVirtualShadowPhysicalPageSize;
 }
 
+constexpr uint32_t CLodVirtualShadowPhysicalPagesPerAxisFromVirtualResolution(uint32_t virtualResolution)
+{
+    (void)virtualResolution;
+    return CLodVirtualShadowMaxPhysicalPagesPerAxis;
+}
+
 constexpr int CLodVirtualShadowVirtualResolutionOptionIndex(uint32_t virtualResolution)
 {
     const uint32_t sanitizedVirtualResolution = CLodVirtualShadowSanitizeVirtualResolution(virtualResolution);
@@ -217,33 +216,15 @@ constexpr int CLodVirtualShadowVirtualResolutionOptionIndex(uint32_t virtualReso
     return 0;
 }
 
-constexpr uint32_t CLodVirtualShadowSanitizePhysicalPagesPerAxis(uint32_t physicalPagesPerAxis)
-{
-    for (int optionIndex = 0; optionIndex < CLodVirtualShadowPhysicalPagesPerAxisOptionCount; ++optionIndex) {
-        if (CLodVirtualShadowPhysicalPagesPerAxisOptions[optionIndex] == physicalPagesPerAxis) {
-            return physicalPagesPerAxis;
-        }
-    }
-
-    return CLodVirtualShadowDefaultPhysicalPagesPerAxis;
-}
-
 constexpr uint32_t CLodVirtualShadowPhysicalPageCountFromPagesPerAxis(uint32_t physicalPagesPerAxis)
 {
-    const uint32_t sanitizedPhysicalPagesPerAxis = CLodVirtualShadowSanitizePhysicalPagesPerAxis(physicalPagesPerAxis);
-    return sanitizedPhysicalPagesPerAxis * sanitizedPhysicalPagesPerAxis;
+    return physicalPagesPerAxis * physicalPagesPerAxis;
 }
 
-constexpr int CLodVirtualShadowPhysicalPagesPerAxisOptionIndex(uint32_t physicalPagesPerAxis)
+constexpr uint32_t CLodVirtualShadowPhysicalPageCountFromVirtualResolution(uint32_t virtualResolution)
 {
-    const uint32_t sanitizedPhysicalPagesPerAxis = CLodVirtualShadowSanitizePhysicalPagesPerAxis(physicalPagesPerAxis);
-    for (int optionIndex = 0; optionIndex < CLodVirtualShadowPhysicalPagesPerAxisOptionCount; ++optionIndex) {
-        if (CLodVirtualShadowPhysicalPagesPerAxisOptions[optionIndex] == sanitizedPhysicalPagesPerAxis) {
-            return optionIndex;
-        }
-    }
-
-    return 0;
+    return CLodVirtualShadowPhysicalPageCountFromPagesPerAxis(
+        CLodVirtualShadowPhysicalPagesPerAxisFromVirtualResolution(virtualResolution));
 }
 
 constexpr uint32_t CLodVirtualShadowMaxDirectionalPageViewInfoEntryCount()

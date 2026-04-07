@@ -39,13 +39,12 @@ uint32_t GetVirtualShadowPageTableResolution()
 
 uint32_t GetVirtualShadowPhysicalPagesPerAxis()
 {
-    return CLodVirtualShadowSanitizePhysicalPagesPerAxis(
-        SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowPhysicalPagesPerAxisSettingName)());
+    return CLodVirtualShadowPhysicalPagesPerAxisFromVirtualResolution(GetVirtualShadowVirtualResolution());
 }
 
 uint32_t GetVirtualShadowPhysicalPageCount()
 {
-    return CLodVirtualShadowPhysicalPageCountFromPagesPerAxis(GetVirtualShadowPhysicalPagesPerAxis());
+    return CLodVirtualShadowPhysicalPageCountFromVirtualResolution(GetVirtualShadowVirtualResolution());
 }
 
 uint32_t WrapPageOffset(int64_t pageCoord, uint32_t pageTableResolution)

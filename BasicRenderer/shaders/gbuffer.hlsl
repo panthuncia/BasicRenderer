@@ -119,8 +119,8 @@ void PerViewPrimaryDepthCopyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
         }
         else
         {
-            float M22 = asfloat(UintRootConstant19);
-            float M32 = asfloat(UintRootConstant20);
+            float M22 = asfloat(UintRootConstant5);
+            float M32 = asfloat(UintRootConstant6);
             projectedDepth = -M22 + M32 / depth;
         }
         RWTexture2D<float> projectedDepthTexture = ResourceDescriptorHeap[projectedDepthUAVIndex];

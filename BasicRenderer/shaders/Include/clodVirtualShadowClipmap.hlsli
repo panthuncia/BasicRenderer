@@ -16,12 +16,12 @@ static const uint CLodVirtualShadowMaxSupportedClipmapCount = kCLodVirtualShadow
 static const uint kCLodVirtualShadowDefaultVirtualResolution = 4096u;
 static const uint kCLodVirtualShadowMaxVirtualResolution = 16384u;
 static const uint kCLodVirtualShadowPhysicalPageSize = 128u;
-static const uint kCLodVirtualShadowDefaultPhysicalPagesPerAxis = 64u;
-static const uint kCLodVirtualShadowMaxPhysicalPagesPerAxis = 96u;
 static const uint kCLodVirtualShadowDefaultPageTableResolution =
     kCLodVirtualShadowDefaultVirtualResolution / kCLodVirtualShadowPhysicalPageSize;
 static const uint kCLodVirtualShadowMaxPageTableResolution =
     kCLodVirtualShadowMaxVirtualResolution / kCLodVirtualShadowPhysicalPageSize;
+static const uint kCLodVirtualShadowDefaultPhysicalPagesPerAxis = kCLodVirtualShadowMaxPageTableResolution;
+static const uint kCLodVirtualShadowMaxPhysicalPagesPerAxis = kCLodVirtualShadowMaxPageTableResolution;
 static const uint kCLodVirtualShadowMovedInstanceBitCapacity = 1u << 20;
 static const uint kCLodVirtualShadowMovedInstanceBitWordCount =
     (kCLodVirtualShadowMovedInstanceBitCapacity + 31u) / 32u;
