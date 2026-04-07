@@ -149,6 +149,9 @@ static const uint CLOD_STREAM_REQUEST_CAPACITY = (1u << 16);
 static const uint CLOD_USED_GROUPS_CAPACITY = (1u << 17);
 static const uint CLOD_STREAM_VIEWID_MASK = 0xFFFFu;
 static const uint CLOD_STREAM_PRIORITY_SHIFT = 16u;
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+static const uint CLOD_VIRTUAL_SHADOW_PREDICTIVE_CANDIDATE_CAPACITY = (1u << 16);
+#endif
 
 static const uint CLOD_RECORD_SOURCE_PASS1 = 0;
 static const uint CLOD_RECORD_SOURCE_REPLAY = 1;
@@ -773,6 +776,38 @@ struct MeshletBucketRecord
     uint pageSlabDescriptorIndex;
     uint pageSlabByteOffset;
 };
+
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+struct CLodVirtualShadowPredictiveInvalidationCandidate
+{
+    float4 worldCenterAndRadius;
+    uint shadowViewId;
+    uint pad0;
+    uint pad1;
+    uint pad2;
+};
+
+void CLodAppendVirtualShadowPredictiveInvalidationCandidate(float3 worldCenter, float radiusWorld, uint shadowViewId)
+{
+    RWStructuredBuffer<CLodVirtualShadowPredictiveInvalidationCandidate> candidateBuffer =
+        ResourceDescriptorHeap[CLOD_WG_SHADOW_PREDICTIVE_INVALIDATION_CANDIDATES_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> candidateCount =
+        ResourceDescriptorHeap[CLOD_WG_SHADOW_PREDICTIVE_INVALIDATION_CANDIDATE_COUNT_DESCRIPTOR_INDEX];
+
+    uint candidateIndex = 0u;
+    InterlockedAdd(candidateCount[0], 1u, candidateIndex);
+    if (candidateIndex < CLOD_VIRTUAL_SHADOW_PREDICTIVE_CANDIDATE_CAPACITY)
+    {
+        CLodVirtualShadowPredictiveInvalidationCandidate candidate;
+        candidate.worldCenterAndRadius = float4(worldCenter, radiusWorld);
+        candidate.shadowViewId = shadowViewId;
+        candidate.pad0 = 0u;
+        candidate.pad1 = 0u;
+        candidate.pad2 = 0u;
+        candidateBuffer[candidateIndex] = candidate;
+    }
+}
+#endif
 
 // Conservative max-axis scale from a row-vector local->world
 float MaxAxisScale_RowVector(float4x4 M)
@@ -1760,6 +1795,13 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                                         req.meshBufferIndex = meshBufferIndex;
                                         req.viewId = CLodPackViewPriority(b.viewId, ownGroupErrorOverDistance);
                                         loadRequests[requestIndex] = req;
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+                                        const float3 meshletCenterWorld = mul(float4(meshletBounds.sphere.xyz, 1.0f), objectModelMatrix).xyz;
+                                        CLodAppendVirtualShadowPredictiveInvalidationCandidate(
+                                            meshletCenterWorld,
+                                            meshletRadiusWorld,
+                                            b.viewId);
+#endif
                                     }
                                 }
                             }

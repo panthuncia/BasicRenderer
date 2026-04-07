@@ -153,6 +153,8 @@ inline constexpr uint32_t CLodVirtualShadowMaxMarkTileCount =
 inline constexpr uint32_t CLodVirtualShadowMaxAllocationRequests = 1u << 16;
 inline constexpr uint32_t CLodVirtualShadowMaxInvalidationInputs = 1u << 16;
 inline constexpr uint32_t CLodVirtualShadowMovedInstanceBitCapacity = 1u << 20;
+inline constexpr uint32_t CLodVirtualShadowPredictiveCandidateCapacity = 1u << 16;
+inline constexpr uint32_t CLodVirtualShadowPredictiveRawPageCapacity = 1u << 20;
 inline constexpr uint32_t CLodVirtualShadowClipmapValidFlag = 0x1u;
 inline constexpr uint32_t CLodVirtualShadowClipmapInvalidateFlag = 0x2u;
 inline constexpr uint32_t CLodVirtualShadowPageAllocatedMask = 0x80000000u;
@@ -173,6 +175,18 @@ constexpr uint32_t CLodVirtualShadowDirtyWordCount(uint32_t physicalPageCount)
 constexpr uint32_t CLodVirtualShadowMovedInstanceBitWordCount()
 {
     return (CLodVirtualShadowMovedInstanceBitCapacity + 31u) / 32u;
+}
+
+constexpr uint32_t CLodVirtualShadowPredictedPageListCapacity()
+{
+    return CLodVirtualShadowMaxSupportedClipmapCount *
+        CLodVirtualShadowMaxPageTableResolution *
+        CLodVirtualShadowMaxPageTableResolution;
+}
+
+constexpr uint32_t CLodVirtualShadowPredictedPageBitsetWordCount()
+{
+    return (CLodVirtualShadowPredictedPageListCapacity() + 31u) / 32u;
 }
 
 constexpr uint32_t CLodVirtualShadowSanitizeVirtualResolution(uint32_t virtualResolution)
@@ -338,6 +352,37 @@ struct CLodVirtualShadowInvalidationInput
 };
 
 static_assert(sizeof(CLodVirtualShadowInvalidationInput) == 16u, "CLodVirtualShadowInvalidationInput size must match HLSL");
+
+struct CLodVirtualShadowPredictiveInvalidationCandidate
+{
+    DirectX::XMFLOAT4 worldCenterAndRadius{};
+    uint32_t shadowViewId = 0xFFFFFFFFu;
+    uint32_t pad0 = 0u;
+    uint32_t pad1 = 0u;
+    uint32_t pad2 = 0u;
+};
+
+static_assert(sizeof(CLodVirtualShadowPredictiveInvalidationCandidate) == 32u, "CLodVirtualShadowPredictiveInvalidationCandidate size must match HLSL");
+
+struct CLodVirtualShadowPredictedRawPage
+{
+    uint32_t virtualAddress = 0u;
+    uint32_t clipmapIndex = 0u;
+    uint32_t pad0 = 0u;
+    uint32_t pad1 = 0u;
+};
+
+static_assert(sizeof(CLodVirtualShadowPredictedRawPage) == 16u, "CLodVirtualShadowPredictedRawPage size must match HLSL");
+
+struct CLodVirtualShadowPredictedPage
+{
+    uint32_t virtualAddress = 0u;
+    uint32_t clipmapIndex = 0u;
+    uint32_t pad0 = 0u;
+    uint32_t pad1 = 0u;
+};
+
+static_assert(sizeof(CLodVirtualShadowPredictedPage) == 16u, "CLodVirtualShadowPredictedPage size must match HLSL");
 
 struct CLodVirtualShadowPhysicalPageMeta
 {

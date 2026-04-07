@@ -1,4 +1,4 @@
-#include "bloomFilterAndAspectConstants.h"
+#include "rootConstantEncoding.h"
 
 #ifndef __BLOOM_DOWNSAMPLE_ROOT_CONSTANTS_H__
 #define __BLOOM_DOWNSAMPLE_ROOT_CONSTANTS_H__
@@ -7,7 +7,10 @@
 #define MIP_WIDTH UintRootConstant1
 #define MIP_HEIGHT UintRootConstant2
 
-#define SRC_TEXEL_SIZE_X FloatRootConstant0
-#define SRC_TEXEL_SIZE_Y FloatRootConstant1
+#define SRC_TEXEL_SIZE_X ROOT_CONSTANT_AS_FLOAT(UintRootConstant3)
+#define SRC_TEXEL_SIZE_Y ROOT_CONSTANT_AS_FLOAT(UintRootConstant4)
+
+#define BLOOM_SAMPLE_FILTER_RADIUS ROOT_CONSTANT_AS_FLOAT(UintRootConstant3)
+#define BLOOM_SAMPLE_ASPECT_RATIO ROOT_CONSTANT_AS_FLOAT(UintRootConstant4)
 
 #endif // __BLOOM_DOWNSAMPLE_ROOT_CONSTANTS_H__

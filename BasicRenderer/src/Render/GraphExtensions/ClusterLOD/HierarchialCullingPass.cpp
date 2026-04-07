@@ -81,6 +81,8 @@ HierarchialCullingPass::HierarchialCullingPass(
     std::shared_ptr<ResourceGroup> slabResourceGroup,
     std::shared_ptr<Buffer> phase1VisibleClustersCounterBuffer,
     std::shared_ptr<Buffer> swWriteBaseCounterBuffer,
+    std::shared_ptr<Buffer> shadowPredictiveInvalidationCandidatesBuffer,
+    std::shared_ptr<Buffer> shadowPredictiveInvalidationCandidateCountBuffer,
     std::shared_ptr<Buffer> shadowInvalidatedInstancesBitsetBuffer) {
     m_workGraphMode = inputs.workGraphMode;
     m_rasterOutputKind = inputs.rasterOutputKind;
@@ -106,6 +108,8 @@ HierarchialCullingPass::HierarchialCullingPass(
     m_occlusionNodeGpuInputsBuffer = std::move(occlusionNodeGpuInputsBuffer);
     m_viewDepthSrvIndicesBuffer = std::move(viewDepthSrvIndicesBuffer);
     m_viewRasterInfoBuffer = std::move(viewRasterInfoBuffer);
+    m_shadowPredictiveInvalidationCandidatesBuffer = std::move(shadowPredictiveInvalidationCandidatesBuffer);
+    m_shadowPredictiveInvalidationCandidateCountBuffer = std::move(shadowPredictiveInvalidationCandidateCountBuffer);
     m_shadowInvalidatedInstancesBitsetBuffer = std::move(shadowInvalidatedInstancesBitsetBuffer);
     m_shadowDirtyHierarchyTexture = std::move(shadowDirtyHierarchyTexture);
     m_slabResourceGroup = std::move(slabResourceGroup);
@@ -181,6 +185,11 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
         builder->WithShaderResource(m_viewRasterInfoBuffer);
     }
     if (UsesVirtualShadowOutput(m_rasterOutputKind)) {
+        if (m_shadowPredictiveInvalidationCandidatesBuffer && m_shadowPredictiveInvalidationCandidateCountBuffer) {
+            builder->WithUnorderedAccess(
+                m_shadowPredictiveInvalidationCandidatesBuffer,
+                m_shadowPredictiveInvalidationCandidateCountBuffer);
+        }
         builder->WithShaderResource(
             Builtin::Shadows::CLodClipmapInfo,
             Builtin::Shadows::CLodCompactShadowCameras,
@@ -280,6 +289,14 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     uintRootConstants[CLOD_WG_SHADOW_INVALIDATED_INSTANCES_DESCRIPTOR_INDEX] =
         m_shadowInvalidatedInstancesBitsetBuffer
             ? m_shadowInvalidatedInstancesBitsetBuffer->GetSRVInfo(0).slot.index
+            : 0u;
+    uintRootConstants[CLOD_WG_SHADOW_PREDICTIVE_INVALIDATION_CANDIDATES_DESCRIPTOR_INDEX] =
+        m_shadowPredictiveInvalidationCandidatesBuffer
+            ? m_shadowPredictiveInvalidationCandidatesBuffer->GetUAVShaderVisibleInfo(0).slot.index
+            : 0u;
+    uintRootConstants[CLOD_WG_SHADOW_PREDICTIVE_INVALIDATION_CANDIDATE_COUNT_DESCRIPTOR_INDEX] =
+        m_shadowPredictiveInvalidationCandidateCountBuffer
+            ? m_shadowPredictiveInvalidationCandidateCountBuffer->GetUAVShaderVisibleInfo(0).slot.index
             : 0u;
 
     // Always bind valid SRV descriptors for the aliased write-base slots.

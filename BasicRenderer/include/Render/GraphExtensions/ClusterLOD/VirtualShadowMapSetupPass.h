@@ -21,6 +21,9 @@ public:
         std::shared_ptr<Buffer> compactShadowCameraBuffer,
         std::shared_ptr<Buffer> statsBuffer,
         std::shared_ptr<Buffer> runtimeStateBuffer,
+        std::shared_ptr<Buffer> predictiveCandidateCountBuffer,
+        std::shared_ptr<Buffer> predictiveRawPageCountBuffer,
+        std::shared_ptr<Buffer> predictedPageCountBuffer,
         bool forceResetResources);
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
@@ -41,6 +44,9 @@ private:
     std::shared_ptr<Buffer> m_compactShadowCameraBuffer;
     std::shared_ptr<Buffer> m_statsBuffer;
     std::shared_ptr<Buffer> m_runtimeStateBuffer;
+    std::shared_ptr<Buffer> m_predictiveCandidateCountBuffer;
+    std::shared_ptr<Buffer> m_predictiveRawPageCountBuffer;
+    std::shared_ptr<Buffer> m_predictedPageCountBuffer;
     bool m_forceResetResources = false;
     bool m_resetResources = false;
     bool m_resetReasonForced = false;

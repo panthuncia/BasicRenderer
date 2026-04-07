@@ -54,6 +54,8 @@ public:
         std::shared_ptr<ResourceGroup> slabResourceGroup = nullptr,
         std::shared_ptr<Buffer> phase1VisibleClustersCounterBuffer = nullptr,
         std::shared_ptr<Buffer> swWriteBaseCounterBuffer = nullptr,
+        std::shared_ptr<Buffer> shadowPredictiveInvalidationCandidatesBuffer = nullptr,
+        std::shared_ptr<Buffer> shadowPredictiveInvalidationCandidateCountBuffer = nullptr,
         std::shared_ptr<Buffer> shadowInvalidatedInstancesBitsetBuffer = nullptr);
     ~HierarchialCullingPass();
 
@@ -95,6 +97,8 @@ private:
     std::shared_ptr<Buffer> m_occlusionNodeGpuInputsBuffer;
     std::shared_ptr<Buffer> m_viewDepthSrvIndicesBuffer;
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
+    std::shared_ptr<Buffer> m_shadowPredictiveInvalidationCandidatesBuffer;
+    std::shared_ptr<Buffer> m_shadowPredictiveInvalidationCandidateCountBuffer;
     std::shared_ptr<Buffer> m_shadowInvalidatedInstancesBitsetBuffer;
     std::shared_ptr<PixelBuffer> m_shadowDirtyHierarchyTexture;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;

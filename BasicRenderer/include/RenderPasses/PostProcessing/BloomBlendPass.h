@@ -5,6 +5,7 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
 #include "Scene/Scene.h"
+#include "Utilities/Utilities.h"
 #include "../shaders/PerPassRootConstants/bloomBlendRootConstants.h"
 #include "Resources/PixelBuffer.h"
 
@@ -49,14 +50,9 @@ public:
 		misc[BLOOM_SOURCE_SRV_DESCRIPTOR_INDEX] = m_pHDRTarget->GetSRVInfo(1).slot.index; // Bloom texture index
         misc[DST_WIDTH] = m_pHDRTarget->GetWidth();
         misc[DST_HEIGHT] = m_pHDRTarget->GetHeight();
+        misc[BLOOM_BLEND_FILTER_RADIUS] = as_uint(0.001f); // Kernel size
+        misc[BLOOM_BLEND_ASPECT_RATIO] = as_uint(misc[DST_WIDTH] / static_cast<float>(misc[DST_HEIGHT]));
 		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
-
-        float miscFloats[NumMiscFloatRootConstants] = {};
-
-        miscFloats[FloatRootConstant0] = 0.001f; // Kernel size
-        miscFloats[FloatRootConstant1] = misc[UintRootConstant2] / (float) misc[UintRootConstant3]; // Aspect ratio
-
-		commandList.PushConstants(rhi::ShaderStage::AllGraphics, 0, MiscFloatRootSignatureIndex, 0, NumMiscFloatRootConstants, miscFloats);
 
         commandList.Draw(3, 1, 0, 0); // Fullscreen triangle
         return {};

@@ -3,6 +3,7 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Render/RenderContext.h"
+#include "Utilities/Utilities.h"
 #include "../shaders/PerPassRootConstants/luminanceHistogramRootConstants.h"
 
 class LuminanceHistogramPass : public ComputePass {
@@ -32,11 +33,11 @@ public:
 		commandList.BindLayout(psoManager.GetComputeRootSignature().GetHandle());
 		commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
 
-        float passConstants[NumMiscFloatRootConstants] = {};
-		passConstants[MIN_LOG_LUMINANCE] = 0.001f; // Minimum log luminance value
-		passConstants[INVERSE_LOG_LUM_RANGE] = 1.0f / (log2(10.0f) - log2(0.1f)); // Inverse range for log luminance
+        uint32_t passConstants[NumMiscUintRootConstants] = {};
+        passConstants[MIN_LOG_LUMINANCE] = as_uint(0.001f); // Minimum log luminance value
+        passConstants[INVERSE_LOG_LUM_RANGE] = as_uint(1.0f / (log2(10.0f) - log2(0.1f))); // Inverse range for log luminance
 
-		commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscFloatRootSignatureIndex, 0, NumMiscFloatRootConstants, passConstants);
+        commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, passConstants);
 
 		BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
 

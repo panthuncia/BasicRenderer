@@ -1,7 +1,9 @@
+#include "rootConstantEncoding.h"
+
 #ifndef __LUMINANCE_HISTOGRAM_ROOT_CONSTANTS_H__
 #define __LUMINANCE_HISTOGRAM_ROOT_CONSTANTS_H__
 
-#define MIN_LOG_LUMINANCE FloatRootConstant0
-#define INVERSE_LOG_LUM_RANGE FloatRootConstant1
+#define MIN_LOG_LUMINANCE ROOT_CONSTANT_AS_FLOAT(UintRootConstant0)
+#define INVERSE_LOG_LUM_RANGE ROOT_CONSTANT_AS_FLOAT(UintRootConstant1)
 
 #endif // __LUMINANCE_HISTOGRAM_ROOT_CONSTANTS_H__

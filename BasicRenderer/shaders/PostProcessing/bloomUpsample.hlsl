@@ -28,14 +28,13 @@ float3 sample_for_upsample(Texture2D<float4> source, float2 texCoord, float x, f
 // UintRootConstant2 is src res x
 // UintRootConstant3 is src res y
 
-// FloatRootConstant0 is filter radius
-// FloatRootConstant1 is aspect ratio
+// UintRootConstant3/4 carry filter radius and aspect ratio as float bit patterns
 
 float4 upsample(FULLSCREEN_VS_OUTPUT input) : SV_Target
 {
-    float filterRadius = FILTER_RADIUS;
+    float filterRadius = BLOOM_SAMPLE_FILTER_RADIUS;
     float x = filterRadius;
-    float y = filterRadius * ASPECT_RATIO;
+    float y = filterRadius * BLOOM_SAMPLE_ASPECT_RATIO;
     
     Texture2D<float4> source = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PostProcessing::UpscaledHDR)];
     float2 texCoord = input.uv;

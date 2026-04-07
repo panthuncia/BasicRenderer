@@ -1,4 +1,4 @@
-#include "bloomFilterAndAspectConstants.h"
+#include "rootConstantEncoding.h"
 
 #ifndef __BLOOM_BLEND_ROOT_CONSTANTS_H__
 #define __BLOOM_BLEND_ROOT_CONSTANTS_H__
@@ -7,5 +7,8 @@
 #define BLOOM_SOURCE_SRV_DESCRIPTOR_INDEX UintRootConstant1
 #define DST_WIDTH UintRootConstant2
 #define DST_HEIGHT UintRootConstant3
+
+#define BLOOM_BLEND_FILTER_RADIUS ROOT_CONSTANT_AS_FLOAT(UintRootConstant4)
+#define BLOOM_BLEND_ASPECT_RATIO ROOT_CONSTANT_AS_FLOAT(UintRootConstant5)
 
 #endif // __BLOOM_BLEND_ROOT_CONSTANTS_H__

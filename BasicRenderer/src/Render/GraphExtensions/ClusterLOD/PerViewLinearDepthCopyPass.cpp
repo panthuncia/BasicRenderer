@@ -5,6 +5,7 @@
 #include "Render/RenderContext.h"
 #include "BuiltinResources.h"
 #include "Resources/PixelBuffer.h"
+#include "Utilities/Utilities.h"
 
 PerViewLinearDepthCopyPass::PerViewLinearDepthCopyPass() {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
@@ -48,13 +49,12 @@ PassReturn PerViewLinearDepthCopyPass::Execute(PassExecutionContext& executionCo
         rootConstants[UintRootConstant3] = view->gpu.visibilityBuffer->GetHeight();
 
         // Only write projected depth for the primary camera view
-        float floatConstants[NumMiscFloatRootConstants] = {};
         if (view->flags.primaryCamera && m_pProjectedDepthTexture) {
             rootConstants[UintRootConstant4] = m_pProjectedDepthTexture->GetUAVShaderVisibleInfo(0).slot.index;
             // Extract M[2][2] and M[3][2] from the unjittered projection matrix (row-major)
             const auto& proj = view->cameraInfo.unjitteredProjection;
-            floatConstants[FloatRootConstant0] = DirectX::XMVectorGetZ(proj.r[2]); // M[2][2]
-            floatConstants[FloatRootConstant1] = DirectX::XMVectorGetZ(proj.r[3]); // M[3][2]
+            rootConstants[UintRootConstant5] = as_uint(DirectX::XMVectorGetZ(proj.r[2])); // M[2][2]
+            rootConstants[UintRootConstant6] = as_uint(DirectX::XMVectorGetZ(proj.r[3])); // M[3][2]
         } else {
             rootConstants[UintRootConstant4] = 0xFFFFFFFF; // sentinel: skip projected depth write
         }
@@ -66,14 +66,6 @@ PassReturn PerViewLinearDepthCopyPass::Execute(PassExecutionContext& executionCo
             0,
             NumMiscUintRootConstants,
             rootConstants);
-
-        commandList.PushConstants(
-            rhi::ShaderStage::Compute,
-            0,
-            MiscFloatRootSignatureIndex,
-            0,
-            NumMiscFloatRootConstants,
-            floatConstants);
 
         const uint32_t groupsX = (rootConstants[UintRootConstant2] + 7u) / 8u;
         const uint32_t groupsY = (rootConstants[UintRootConstant3] + 7u) / 8u;

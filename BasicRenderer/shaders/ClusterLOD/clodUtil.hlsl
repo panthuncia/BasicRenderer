@@ -13,9 +13,12 @@
 #include "PerPassRootConstants/clodVirtualShadowBuildPageListsRootConstants.h"
 #include "PerPassRootConstants/clodVirtualShadowClearDirtyBitsRootConstants.h"
 #include "PerPassRootConstants/clodVirtualShadowClearRootConstants.h"
+#include "PerPassRootConstants/clodVirtualShadowConsumePredictedPagesRootConstants.h"
 #include "PerPassRootConstants/clodVirtualShadowFreeWrappedRootConstants.h"
 #include "PerPassRootConstants/clodVirtualShadowGatherStatsRootConstants.h"
 #include "PerPassRootConstants/clodVirtualShadowDirtyHierarchyRootConstants.h"
+#include "PerPassRootConstants/clodVirtualShadowDeduplicatePredictedPagesRootConstants.h"
+#include "PerPassRootConstants/clodVirtualShadowExpandPredictedPagesRootConstants.h"
 #include "PerPassRootConstants/clodVirtualShadowInvalidateRootConstants.h"
 #include "PerPassRootConstants/clodVirtualShadowBuildMarkTilesRootConstants.h"
 #include "PerPassRootConstants/clodVirtualShadowMarkRootConstants.h"
@@ -40,9 +43,42 @@ struct CLodVirtualShadowInvalidationInput
     uint pad1;
 };
 
+struct CLodVirtualShadowPredictiveInvalidationCandidate
+{
+    float4 worldCenterAndRadius;
+    uint shadowViewId;
+    uint pad0;
+    uint pad1;
+    uint pad2;
+};
+
+struct CLodVirtualShadowPredictedRawPage
+{
+    uint virtualAddress;
+    uint clipmapIndex;
+    uint pad0;
+    uint pad1;
+};
+
+struct CLodVirtualShadowPredictedPage
+{
+    uint virtualAddress;
+    uint clipmapIndex;
+    uint pad0;
+    uint pad1;
+};
+
 static const uint kCLodVirtualShadowInvalidationFlagUsePreviousBounds = 0x1u;
 static const uint kCLodVirtualShadowInvalidationFlagUseCurrentBounds = 0x2u;
 static const uint kCLodVirtualShadowInvalidationFlagSkinned = 0x4u;
+static const uint kCLodVirtualShadowPredictiveCandidateCapacity = (1u << 16);
+static const uint kCLodVirtualShadowPredictiveRawPageCapacity = (1u << 20);
+static const uint kCLodVirtualShadowPredictedPageEntriesPerClipmap =
+    kCLodVirtualShadowMaxPageTableResolution * kCLodVirtualShadowMaxPageTableResolution;
+static const uint kCLodVirtualShadowPredictedPageListCapacity =
+    kCLodVirtualShadowClipmapCount * kCLodVirtualShadowPredictedPageEntriesPerClipmap;
+static const uint kCLodVirtualShadowPredictedPageBitsetWordCount =
+    (kCLodVirtualShadowPredictedPageListCapacity + 31u) / 32u;
 groupshared uint gCLodVirtualShadowShouldClearPage;
 groupshared uint gCLodVirtualShadowMarkTileHasGeometry;
 groupshared uint gCLodVirtualShadowMarkTileMinDepthBits;
@@ -521,6 +557,67 @@ bool CLodProjectSphereToShadowUvBounds(float3 centerWS, float radiusWS, CLodVirt
     return true;
 }
 
+bool CLodFindVirtualShadowClipmapByShadowView(
+    uint shadowViewId,
+    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos,
+    out uint outClipmapIndex,
+    out CLodVirtualShadowClipmapInfo outClipmapInfo)
+{
+    [unroll]
+    for (uint clipmapIndex = 0u; clipmapIndex < CLodVirtualShadowMaxSupportedClipmapCount; ++clipmapIndex)
+    {
+        const CLodVirtualShadowClipmapInfo clipmapInfo = clipmapInfos[clipmapIndex];
+        if (CLodVirtualShadowClipmapIsValid(clipmapInfo) && clipmapInfo.shadowCameraBufferIndex == shadowViewId)
+        {
+            outClipmapIndex = clipmapIndex;
+            outClipmapInfo = clipmapInfo;
+            return true;
+        }
+    }
+
+    outClipmapIndex = 0u;
+    outClipmapInfo = (CLodVirtualShadowClipmapInfo)0;
+    return false;
+}
+
+uint CLodVirtualShadowWrappedVirtualAddress(uint2 wrappedPageCoords, uint pageTableResolution)
+{
+    return wrappedPageCoords.x + wrappedPageCoords.y * pageTableResolution;
+}
+
+void CLodAppendVirtualShadowPredictedRawPage(
+    uint2 wrappedPageCoords,
+    CLodVirtualShadowClipmapInfo clipmapInfo,
+    RWStructuredBuffer<CLodVirtualShadowPredictedRawPage> rawPages,
+    RWStructuredBuffer<uint> rawPageCount)
+{
+    uint rawPageIndex = 0u;
+    InterlockedAdd(rawPageCount[0], 1u, rawPageIndex);
+    if (rawPageIndex < kCLodVirtualShadowPredictiveRawPageCapacity)
+    {
+        CLodVirtualShadowPredictedRawPage rawPage;
+        rawPage.virtualAddress = CLodVirtualShadowWrappedVirtualAddress(wrappedPageCoords, clipmapInfo.pageTableResolution);
+        rawPage.clipmapIndex = clipmapInfo.pageTableLayer;
+        rawPage.pad0 = 0u;
+        rawPage.pad1 = 0u;
+        rawPages[rawPageIndex] = rawPage;
+    }
+}
+
+uint CLodVirtualShadowPredictedPageKey(CLodVirtualShadowPredictedRawPage rawPage)
+{
+    return rawPage.clipmapIndex * kCLodVirtualShadowPredictedPageEntriesPerClipmap + rawPage.virtualAddress;
+}
+
+bool CLodTrySetPredictedPageBit(RWStructuredBuffer<uint> bitsetWords, uint key)
+{
+    const uint wordIndex = key >> 5u;
+    const uint bitMask = 1u << (key & 31u);
+    uint previousWord = 0u;
+    InterlockedOr(bitsetWords[wordIndex], bitMask, previousWord);
+    return (previousWord & bitMask) == 0u;
+}
+
 void CLodInvalidateVirtualShadowSphere(
     float3 centerWS,
     float radiusWS,
@@ -811,6 +908,9 @@ void CLodVirtualShadowSetupCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     RWStructuredBuffer<uint> allocationCount = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_SETUP_ALLOCATION_COUNT_DESCRIPTOR_INDEX];
     RWStructuredBuffer<uint> dirtyFlags = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_SETUP_DIRTY_FLAGS_DESCRIPTOR_INDEX];
     RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_SETUP_STATS_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> predictiveCandidateCount = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_SETUP_PREDICTIVE_CANDIDATE_COUNT_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> predictiveRawPageCount = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_SETUP_PREDICTIVE_RAW_PAGE_COUNT_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> predictedPageCount = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_SETUP_PREDICTED_PAGE_COUNT_DESCRIPTOR_INDEX];
     StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_SETUP_CLIPMAP_INFO_DESCRIPTOR_INDEX];
 
     const uint existingPageEntry = pageTable[dispatchThreadId];
@@ -884,6 +984,227 @@ void CLodVirtualShadowSetupCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (linearIndex == 0u)
     {
         allocationCount[0] = 0u;
+        predictiveCandidateCount[0] = 0u;
+        predictiveRawPageCount[0] = 0u;
+        if (CLOD_VIRTUAL_SHADOW_SETUP_RESET_RESOURCES != 0u)
+        {
+            predictedPageCount[0] = 0u;
+        }
+    }
+}
+
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void CLodVirtualShadowClearPredictedPageDedupStateCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    RWStructuredBuffer<uint> scratchBitset =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_SCRATCH_BITSET_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> outputPageCount =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_OUTPUT_PAGE_COUNT_DESCRIPTOR_INDEX];
+
+    const uint wordIndex = dispatchThreadId.x;
+    if (wordIndex == 0u)
+    {
+        outputPageCount[0] = 0u;
+    }
+
+    if (wordIndex < kCLodVirtualShadowPredictedPageBitsetWordCount)
+    {
+        scratchBitset[wordIndex] = 0u;
+    }
+}
+
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void CLodVirtualShadowConsumePredictedPagesCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    StructuredBuffer<CLodVirtualShadowPredictedPage> predictedPages =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CONSUME_PREDICTED_PAGES_INPUT_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> predictedPageCountBuffer =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CONSUME_PREDICTED_PAGE_COUNT_INPUT_DESCRIPTOR_INDEX];
+    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CONSUME_PREDICTED_CLIPMAP_INFO_DESCRIPTOR_INDEX];
+    RWTexture2DArray<uint> pageTable =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CONSUME_PREDICTED_PAGE_TABLE_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> dirtyFlags =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CONSUME_PREDICTED_DIRTY_FLAGS_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint4> pageMetadata =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CONSUME_PREDICTED_PAGE_METADATA_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<float4> directionalPageViewInfo =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CONSUME_PREDICTED_PAGE_VIEW_INFO_DESCRIPTOR_INDEX];
+
+    const uint predictedPageCount = min(predictedPageCountBuffer[0], kCLodVirtualShadowPredictedPageListCapacity);
+    const uint predictedPageIndex = dispatchThreadId.x;
+    if (predictedPageIndex >= predictedPageCount)
+    {
+        return;
+    }
+
+    const CLodVirtualShadowPredictedPage predictedPage = predictedPages[predictedPageIndex];
+    if (predictedPage.clipmapIndex >= kCLodVirtualShadowClipmapCount)
+    {
+        return;
+    }
+
+    const CLodVirtualShadowClipmapInfo clipmapInfo = clipmapInfos[predictedPage.clipmapIndex];
+    if (!CLodVirtualShadowClipmapIsValid(clipmapInfo))
+    {
+        return;
+    }
+
+    const uint clipmapPageCapacity = clipmapInfo.pageTableResolution * clipmapInfo.pageTableResolution;
+    if (predictedPage.virtualAddress >= clipmapPageCapacity)
+    {
+        return;
+    }
+
+    const uint2 wrappedPageCoords = uint2(
+        predictedPage.virtualAddress % clipmapInfo.pageTableResolution,
+        predictedPage.virtualAddress / clipmapInfo.pageTableResolution);
+    CLodInvalidateVirtualShadowWrappedPage(
+        wrappedPageCoords,
+        clipmapInfo.pageTableLayer,
+        clipmapInfo.pageTableResolution,
+        0u,
+        0.0f.xxxx,
+        pageTable,
+        dirtyFlags,
+        pageMetadata,
+        directionalPageViewInfo);
+}
+
+[shader("compute")]
+[numthreads(1, 1, 1)]
+void CLodVirtualShadowClearConsumedPredictedPageCountCSMain()
+{
+    RWStructuredBuffer<uint> predictedPageCountBuffer =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CONSUME_PREDICTED_PAGE_COUNT_CLEAR_DESCRIPTOR_INDEX];
+    predictedPageCountBuffer[0] = 0u;
+}
+
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void CLodVirtualShadowDeduplicatePredictedPagesCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    StructuredBuffer<CLodVirtualShadowPredictedRawPage> rawPages =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_RAW_PAGES_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> rawPageCountBuffer =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_RAW_PAGE_COUNT_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> scratchBitset =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_SCRATCH_BITSET_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodVirtualShadowPredictedPage> outputPages =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_OUTPUT_PAGES_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> outputPageCount =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_DEDUPLICATE_OUTPUT_PAGE_COUNT_DESCRIPTOR_INDEX];
+
+    const uint rawPageCount = min(rawPageCountBuffer[0], kCLodVirtualShadowPredictiveRawPageCapacity);
+    const uint rawPageIndex = dispatchThreadId.x;
+    if (rawPageIndex >= rawPageCount)
+    {
+        return;
+    }
+
+    const CLodVirtualShadowPredictedRawPage rawPage = rawPages[rawPageIndex];
+    if (rawPage.clipmapIndex >= kCLodVirtualShadowClipmapCount ||
+        rawPage.virtualAddress >= kCLodVirtualShadowPredictedPageEntriesPerClipmap)
+    {
+        return;
+    }
+
+    const uint key = CLodVirtualShadowPredictedPageKey(rawPage);
+    if (!CLodTrySetPredictedPageBit(scratchBitset, key))
+    {
+        return;
+    }
+
+    uint outputPageIndex = 0u;
+    InterlockedAdd(outputPageCount[0], 1u, outputPageIndex);
+    if (outputPageIndex >= kCLodVirtualShadowPredictedPageListCapacity)
+    {
+        return;
+    }
+
+    CLodVirtualShadowPredictedPage outputPage;
+    outputPage.virtualAddress = rawPage.virtualAddress;
+    outputPage.clipmapIndex = rawPage.clipmapIndex;
+    outputPage.pad0 = 0u;
+    outputPage.pad1 = 0u;
+    outputPages[outputPageIndex] = outputPage;
+}
+
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void CLodVirtualShadowExpandPredictedPagesCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    StructuredBuffer<CLodVirtualShadowPredictiveInvalidationCandidate> candidates =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_EXPAND_PREDICTED_PAGES_CANDIDATES_DESCRIPTOR_INDEX];
+    StructuredBuffer<uint> candidateCountBuffer =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_EXPAND_PREDICTED_PAGES_CANDIDATE_COUNT_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodVirtualShadowPredictedRawPage> rawPages =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_EXPAND_PREDICTED_PAGES_RAW_PAGES_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<uint> rawPageCount =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_EXPAND_PREDICTED_PAGES_RAW_PAGE_COUNT_DESCRIPTOR_INDEX];
+    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_EXPAND_PREDICTED_PAGES_CLIPMAP_INFO_DESCRIPTOR_INDEX];
+
+    const uint candidateCount = min(candidateCountBuffer[0], kCLodVirtualShadowPredictiveCandidateCapacity);
+    const uint candidateIndex = dispatchThreadId.x;
+    if (candidateIndex >= candidateCount)
+    {
+        return;
+    }
+
+    const CLodVirtualShadowPredictiveInvalidationCandidate candidate = candidates[candidateIndex];
+    uint clipmapIndex = 0u;
+    CLodVirtualShadowClipmapInfo clipmapInfo;
+    if (!CLodFindVirtualShadowClipmapByShadowView(candidate.shadowViewId, clipmapInfos, clipmapIndex, clipmapInfo))
+    {
+        return;
+    }
+
+    StructuredBuffer<CLodVirtualShadowCompactShadowCameraInfo> shadowCameras =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodCompactShadowCameras)];
+    const CLodVirtualShadowCompactShadowCameraInfo shadowCamera = shadowCameras[clipmapIndex];
+
+    float2 uvMin;
+    float2 uvMax;
+    if (!CLodProjectSphereToShadowUvBounds(candidate.worldCenterAndRadius.xyz, candidate.worldCenterAndRadius.w, shadowCamera, uvMin, uvMax))
+    {
+        return;
+    }
+
+    const uint2 logicalPageMin = CLodVirtualShadowVirtualPageCoordsFromUv(uvMin, clipmapInfo);
+    const uint2 logicalPageMax = CLodVirtualShadowVirtualPageCoordsFromUv(uvMax, clipmapInfo);
+    const uint2 pageMin = CLodVirtualShadowWrappedPageCoords(logicalPageMin, clipmapInfo);
+    const uint2 pageMax = CLodVirtualShadowWrappedPageCoords(logicalPageMax, clipmapInfo);
+
+    const bool wrapsX = pageMin.x > pageMax.x;
+    const bool wrapsY = pageMin.y > pageMax.y;
+    const uint segmentCountX = wrapsX ? 2u : 1u;
+    const uint segmentCountY = wrapsY ? 2u : 1u;
+
+    [loop]
+    for (uint segmentY = 0u; segmentY < segmentCountY; ++segmentY)
+    {
+        const uint yStart = (segmentY == 0u) ? pageMin.y : 0u;
+        const uint yEnd = (!wrapsY || segmentY == 0u) ? pageMax.y : (clipmapInfo.pageTableResolution - 1u);
+
+        [loop]
+        for (uint segmentX = 0u; segmentX < segmentCountX; ++segmentX)
+        {
+            const uint xStart = (segmentX == 0u) ? pageMin.x : 0u;
+            const uint xEnd = (!wrapsX || segmentX == 0u) ? pageMax.x : (clipmapInfo.pageTableResolution - 1u);
+
+            [loop]
+            for (uint pageY = yStart; pageY <= yEnd; ++pageY)
+            {
+                [loop]
+                for (uint pageX = xStart; pageX <= xEnd; ++pageX)
+                {
+                    CLodAppendVirtualShadowPredictedRawPage(uint2(pageX, pageY), clipmapInfo, rawPages, rawPageCount);
+                }
+            }
+        }
     }
 }
 

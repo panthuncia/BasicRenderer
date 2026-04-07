@@ -133,6 +133,9 @@ VirtualShadowMapSetupPass::VirtualShadowMapSetupPass(
     std::shared_ptr<Buffer> compactShadowCameraBuffer,
     std::shared_ptr<Buffer> statsBuffer,
     std::shared_ptr<Buffer> runtimeStateBuffer,
+    std::shared_ptr<Buffer> predictiveCandidateCountBuffer,
+    std::shared_ptr<Buffer> predictiveRawPageCountBuffer,
+    std::shared_ptr<Buffer> predictedPageCountBuffer,
     bool forceResetResources)
     : m_pageTableTexture(std::move(pageTableTexture))
     , m_pageMetadataBuffer(std::move(pageMetadataBuffer))
@@ -144,6 +147,9 @@ VirtualShadowMapSetupPass::VirtualShadowMapSetupPass(
     , m_compactShadowCameraBuffer(std::move(compactShadowCameraBuffer))
     , m_statsBuffer(std::move(statsBuffer))
     , m_runtimeStateBuffer(std::move(runtimeStateBuffer))
+    , m_predictiveCandidateCountBuffer(std::move(predictiveCandidateCountBuffer))
+    , m_predictiveRawPageCountBuffer(std::move(predictiveRawPageCountBuffer))
+    , m_predictedPageCountBuffer(std::move(predictedPageCountBuffer))
     , m_forceResetResources(forceResetResources)
 {
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
@@ -165,7 +171,10 @@ void VirtualShadowMapSetupPass::DeclareResourceUsages(ComputePassBuilder* builde
         m_markClipmapDataBuffer,
         m_compactMainCameraBuffer,
         m_compactShadowCameraBuffer,
-        m_statsBuffer);
+        m_statsBuffer,
+        m_predictiveCandidateCountBuffer,
+        m_predictiveRawPageCountBuffer,
+        m_predictedPageCountBuffer);
 
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
@@ -404,6 +413,9 @@ PassReturn VirtualShadowMapSetupPass::Execute(PassExecutionContext& executionCon
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_NO_PREVIOUS_STATE] = m_resetReasonNoPreviousState ? 1u : 0u;
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_STRUCTURE_MISMATCH] = m_resetReasonStructureMismatch ? 1u : 0u;
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_LIGHT_DIRECTION_CHANGED] = m_resetReasonLightDirectionChanged ? 1u : 0u;
+    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PREDICTIVE_CANDIDATE_COUNT_DESCRIPTOR_INDEX] = m_predictiveCandidateCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PREDICTIVE_RAW_PAGE_COUNT_DESCRIPTOR_INDEX] = m_predictiveRawPageCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PREDICTED_PAGE_COUNT_DESCRIPTOR_INDEX] = m_predictedPageCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

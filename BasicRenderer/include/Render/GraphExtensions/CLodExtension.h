@@ -137,6 +137,13 @@ private:
     std::shared_ptr<Buffer> m_shadowInvalidationInputsBuffer;
     std::shared_ptr<Buffer> m_shadowInvalidationCountBuffer;
     std::shared_ptr<Buffer> m_shadowInvalidatedInstancesBitsetBuffer;
+    std::shared_ptr<Buffer> m_shadowPredictiveInvalidationCandidatesBuffer;
+    std::shared_ptr<Buffer> m_shadowPredictiveInvalidationCandidateCountBuffer;
+    std::shared_ptr<Buffer> m_shadowPredictiveRawPagesBuffer;
+    std::shared_ptr<Buffer> m_shadowPredictiveRawPageCountBuffer;
+    std::shared_ptr<Buffer> m_shadowPredictedInvalidationScratchBitsetBuffer;
+    std::shared_ptr<Buffer> m_shadowPredictedInvalidationPagesBufferA;
+    std::shared_ptr<Buffer> m_shadowPredictedInvalidationPageCountBufferA;
     std::shared_ptr<Buffer> m_shadowAllocationRequestsBuffer;
     std::shared_ptr<Buffer> m_shadowAllocationCountBuffer;
     std::shared_ptr<Buffer> m_shadowAllocationIndirectArgsBuffer;

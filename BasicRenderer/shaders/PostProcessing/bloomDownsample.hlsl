@@ -9,8 +9,7 @@
 // UintRootConstant2 is src res x
 // UintRootConstant3 is src res y
 
-// FloatRootConstant0 is src texel size x
-// FloatRootConstant1 is src texel size y
+// UintRootConstant3/4 carry texel size as float bit patterns
 float4 downsample(FULLSCREEN_VS_OUTPUT input) : SV_Target
 {
     float x = SRC_TEXEL_SIZE_X;

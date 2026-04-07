@@ -2054,7 +2054,6 @@ void PSOManager::createRootSignature() {
     { rhi::ShaderStage::All, NumViewRootConstants,      0, 2 },
     { rhi::ShaderStage::All, NumSettingsRootConstants,  0, 3 },
     { rhi::ShaderStage::All, NumMiscUintRootConstants,          0, 4 },
-    { rhi::ShaderStage::All, NumMiscFloatRootConstants,         0, 5 },
     { rhi::ShaderStage::All, rg::shaderapi::kNumResourceDescriptorIndicesRootConstants, 0, rg::shaderapi::kResourceDescriptorIndicesRootParameter },
     { rhi::ShaderStage::All, rg::shaderapi::kNumIndirectCommandSignatureRootConstants, 0, rg::shaderapi::kIndirectCommandSignatureRootParameter },
     };

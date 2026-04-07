@@ -411,7 +411,6 @@ enum RootSignatureLayout {
 	ViewRootSignatureIndex,
 	SettingsRootSignatureIndex,
 	MiscUintRootSignatureIndex,
-	MiscFloatRootSignatureIndex,
 	ResourceDescriptorIndicesRootSignatureIndex,
 	IndirectCommandSignatureRootSignatureIndex,
 	NumRootSignatureParameters
@@ -441,7 +440,7 @@ enum SettingsRootConstants {
 	NumSettingsRootConstants
 };
 
-enum MiscUintRootConstants { // Used for pass-specific one-off constants
+enum MiscUintRootConstants { // Used for pass-specific one-off constants, including float payloads bit-cast on the shader side via asfloat()
     UintRootConstant0,
     UintRootConstant1,
     UintRootConstant2,
@@ -457,16 +456,12 @@ enum MiscUintRootConstants { // Used for pass-specific one-off constants
     UintRootConstant12,
     UintRootConstant13,
 	UintRootConstant14,
+    UintRootConstant15,
+    UintRootConstant16,
+    UintRootConstant17,
+    UintRootConstant18,
+    UintRootConstant19,
 	NumMiscUintRootConstants
-};
-
-enum MiscFloatRootConstants { // Used for pass-specific one-off constants
-	FloatRootConstant0,
-	FloatRootConstant1,
-	FloatRootConstant2,
-	FloatRootConstant3,
-	FloatRootConstant4,
-	NumMiscFloatRootConstants
 };
 
 enum ResourceDescriptorIndicesRootConstants { // Auto-assigned, do not set manually
