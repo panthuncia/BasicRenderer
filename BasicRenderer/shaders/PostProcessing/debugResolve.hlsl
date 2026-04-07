@@ -47,6 +47,7 @@ float4 PSMain(FULLSCREEN_VS_OUTPUT input) : SV_Target
         case OUTPUT_VSM_PREFERRED_CLIPMAP:
         case OUTPUT_VSM_SAMPLED_CLIPMAP:
         case OUTPUT_VSM_PAGE_STATE:
+        case OUTPUT_VSM_RERENDERED_THIS_FRAME:
         case OUTPUT_TRANSPARENT_DEPTH_COMPLEXITY:
             color = UnpackDebugFloat3(payload);
             break;

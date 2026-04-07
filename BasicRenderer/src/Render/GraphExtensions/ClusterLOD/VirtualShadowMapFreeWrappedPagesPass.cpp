@@ -48,11 +48,7 @@ PassReturn VirtualShadowMapFreeWrappedPagesPass::Execute(PassExecutionContext& e
     commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
     commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-    const uint32_t virtualShadowResolution = CLodVirtualShadowSanitizeVirtualResolution(
-        SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName)());
-    const uint32_t virtualShadowPageTableResolution = CLodVirtualShadowPageTableResolutionFromVirtualResolution(virtualShadowResolution);
-    const uint32_t virtualShadowPhysicalPageCount =
-        CLodVirtualShadowPhysicalPageCountFromVirtualResolution(virtualShadowResolution);
+    const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
 
     uint32_t rootConstants[NumMiscUintRootConstants] = {};
     rootConstants[CLOD_VIRTUAL_SHADOW_FREE_WRAPPED_PAGE_TABLE_DESCRIPTOR_INDEX] =
@@ -63,9 +59,9 @@ PassReturn VirtualShadowMapFreeWrappedPagesPass::Execute(PassExecutionContext& e
         m_clipmapInfoBuffer->GetSRVInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_FREE_WRAPPED_STATS_DESCRIPTOR_INDEX] =
         m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_FREE_WRAPPED_PAGE_TABLE_RESOLUTION] = virtualShadowPageTableResolution;
+    rootConstants[CLOD_VIRTUAL_SHADOW_FREE_WRAPPED_PAGE_TABLE_RESOLUTION] = virtualShadowConfig.pageTableResolution;
     rootConstants[CLOD_VIRTUAL_SHADOW_FREE_WRAPPED_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
-    rootConstants[CLOD_VIRTUAL_SHADOW_FREE_WRAPPED_PHYSICAL_PAGE_COUNT] = virtualShadowPhysicalPageCount;
+    rootConstants[CLOD_VIRTUAL_SHADOW_FREE_WRAPPED_PHYSICAL_PAGE_COUNT] = virtualShadowConfig.maxPhysicalPages;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
@@ -75,8 +71,8 @@ PassReturn VirtualShadowMapFreeWrappedPagesPass::Execute(PassExecutionContext& e
         NumMiscUintRootConstants,
         rootConstants);
 
-    const uint32_t groupsX = (virtualShadowPageTableResolution + 7u) / 8u;
-    const uint32_t groupsY = (virtualShadowPageTableResolution + 7u) / 8u;
+    const uint32_t groupsX = (virtualShadowConfig.pageTableResolution + 7u) / 8u;
+    const uint32_t groupsY = (virtualShadowConfig.pageTableResolution + 7u) / 8u;
     commandList.Dispatch(groupsX, groupsY, CLodVirtualShadowMaxSupportedClipmapCount);
     return {};
 }

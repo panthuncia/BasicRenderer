@@ -152,7 +152,10 @@ bool SWRasterWriteVirtualShadow(uint2 pixel, uint viewID, float linearDepth)
     RWTexture2D<uint> physicalPages = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX];
     InterlockedMin(physicalPages[atlasPixel], asuint(linearDepth));
     uint ignored = 0u;
-    InterlockedOr(pageTable[pageCoords], kCLodVirtualShadowContentValidMask, ignored);
+    InterlockedOr(
+        pageTable[pageCoords],
+        kCLodVirtualShadowContentValidMask | kCLodVirtualShadowRerenderedThisFrameMask,
+        ignored);
     return true;
 }
 #endif

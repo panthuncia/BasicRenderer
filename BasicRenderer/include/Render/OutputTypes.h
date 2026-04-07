@@ -25,6 +25,7 @@ enum OutputType {
 	VSM_SAMPLED_CLIPMAP = 21,
 	VSM_PAGE_STATE = 22,
 	VSM_PHYSICAL_PAGE = 23,
+	VSM_RERENDERED_THIS_FRAME = 24,
 };
 
 inline std::vector<std::string> OutputTypeNames = {
@@ -52,4 +53,5 @@ inline std::vector<std::string> OutputTypeNames = {
 	"VSM Sampled Clipmap",
 	"VSM Page State",
 	"VSM Physical Page",
+	"VSM Re-rendered This Frame",
 };

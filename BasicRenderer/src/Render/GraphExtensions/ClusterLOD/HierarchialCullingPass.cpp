@@ -466,8 +466,7 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
         m_visibilityBuffers.clear();
         auto numViews = context.viewManager->GetCameraBufferSize();
         std::vector<CLodViewRasterInfo> viewRasterInfo(numViews);
-        const uint32_t virtualShadowResolution = CLodVirtualShadowSanitizeVirtualResolution(
-            SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName)());
+        const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
         context.viewManager->ForEachView([&](uint64_t v) {
             auto viewInfo = context.viewManager->Get(v);
             if (!viewInfo) {
@@ -481,8 +480,8 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
 
             if (UsesVirtualShadowOutput(m_rasterOutputKind)) {
                 if (viewInfo->flags.shadow && viewInfo->lightType == Components::LightType::Directional) {
-                    info.scissorMaxX = virtualShadowResolution;
-                    info.scissorMaxY = virtualShadowResolution;
+                    info.scissorMaxX = virtualShadowConfig.virtualResolution;
+                    info.scissorMaxY = virtualShadowConfig.virtualResolution;
                     info.viewportScaleX = 1.0f;
                     info.viewportScaleY = 1.0f;
                 }

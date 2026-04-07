@@ -1,6 +1,7 @@
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapSetupPass.h"
 
 #include <array>
+#include <bit>
 #include <cmath>
 
 #include "Managers/Singletons/RendererECSManager.h"
@@ -28,23 +29,12 @@ bool g_previousDirectionalLightDirectionValid = false;
 
 uint32_t GetVirtualShadowVirtualResolution()
 {
-    return CLodVirtualShadowSanitizeVirtualResolution(
-        SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName)());
+    return CLodVirtualShadowBuildRuntimeResolutionConfig().virtualResolution;
 }
 
-uint32_t GetVirtualShadowPageTableResolution()
+CLodVirtualShadowResolutionConfig GetVirtualShadowResolutionConfig()
 {
-    return CLodVirtualShadowPageTableResolutionFromVirtualResolution(GetVirtualShadowVirtualResolution());
-}
-
-uint32_t GetVirtualShadowPhysicalPagesPerAxis()
-{
-    return CLodVirtualShadowPhysicalPagesPerAxisFromVirtualResolution(GetVirtualShadowVirtualResolution());
-}
-
-uint32_t GetVirtualShadowPhysicalPageCount()
-{
-    return CLodVirtualShadowPhysicalPageCountFromVirtualResolution(GetVirtualShadowVirtualResolution());
+    return CLodVirtualShadowBuildRuntimeResolutionConfig();
 }
 
 uint32_t WrapPageOffset(int64_t pageCoord, uint32_t pageTableResolution)
@@ -88,11 +78,13 @@ bool NearlyEqualDirection(const DirectX::XMFLOAT3& lhs, const DirectX::XMFLOAT3&
 bool ClipmapStructureEquals(const CLodVirtualShadowClipmapInfo& lhs, const CLodVirtualShadowClipmapInfo& rhs)
 {
     return NearlyEqualFloat(lhs.texelWorldSize, rhs.texelWorldSize) &&
+        NearlyEqualFloat(lhs.directionalLodBias, rhs.directionalLodBias) &&
         lhs.pageTableLayer == rhs.pageTableLayer &&
         lhs.clipLevel == rhs.clipLevel &&
         lhs.virtualResolution == rhs.virtualResolution &&
         lhs.pageTableResolution == rhs.pageTableResolution &&
-        lhs.physicalPagesPerAxis == rhs.physicalPagesPerAxis &&
+        lhs.physicalAtlasPagesWide == rhs.physicalAtlasPagesWide &&
+        lhs.physicalAtlasPagesHigh == rhs.physicalAtlasPagesHigh &&
     ((lhs.flags & CLodVirtualShadowClipmapValidFlag) == (rhs.flags & CLodVirtualShadowClipmapValidFlag));
 }
 
@@ -161,8 +153,8 @@ VirtualShadowMapSetupPass::VirtualShadowMapSetupPass(
 
 void VirtualShadowMapSetupPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
-    builder->WithShaderResource(m_clipmapInfoBuffer)
-        .WithUnorderedAccess(
+    builder->WithUnorderedAccess(
+        m_clipmapInfoBuffer,
         m_pageTableTexture,
         m_pageMetadataBuffer,
         m_allocationCountBuffer,
@@ -171,6 +163,7 @@ void VirtualShadowMapSetupPass::DeclareResourceUsages(ComputePassBuilder* builde
         m_compactMainCameraBuffer,
         m_compactShadowCameraBuffer,
         m_statsBuffer,
+        m_runtimeStateBuffer,
         m_predictiveCandidateCountBuffer,
         m_predictiveRawPageCountBuffer,
         m_predictedPageCountBuffer);
@@ -186,10 +179,12 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
         SettingsManager::GetInstance().getSettingGetter<bool>(CLodDisableVirtualShadowPageCachingSettingName)();
     const bool forceResetResources = m_forceResetResources || disableVirtualShadowPageCaching;
     m_forceResetResources = false;
-    const uint32_t virtualShadowResolution = GetVirtualShadowVirtualResolution();
-    const uint32_t virtualShadowPageTableResolution = GetVirtualShadowPageTableResolution();
-    const uint32_t virtualShadowPhysicalPagesPerAxis = GetVirtualShadowPhysicalPagesPerAxis();
-    const uint32_t virtualShadowPhysicalPageCount = GetVirtualShadowPhysicalPageCount();
+    const CLodVirtualShadowResolutionConfig virtualShadowConfig = GetVirtualShadowResolutionConfig();
+    const uint32_t virtualShadowResolution = virtualShadowConfig.virtualResolution;
+    const uint32_t virtualShadowPageTableResolution = virtualShadowConfig.pageTableResolution;
+    const uint32_t virtualShadowPhysicalPageCount = virtualShadowConfig.maxPhysicalPages;
+    const uint32_t virtualShadowPhysicalAtlasPagesWide = virtualShadowConfig.physicalAtlasPagesWide;
+    const uint32_t virtualShadowPhysicalAtlasPagesHigh = virtualShadowConfig.physicalAtlasPagesHigh;
 
     m_resetReasonForced = forceResetResources;
     m_resetReasonNoPreviousState = !g_previousClipmapInfosValid;
@@ -273,9 +268,11 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
                 clipmapInfo.shadowCameraBufferIndex = view->gpu.cameraBufferIndex;
                 clipmapInfo.clipLevel = clipmapIndex;
                 clipmapInfo.flags = CLodVirtualShadowClipmapValidFlag;
+                clipmapInfo.directionalLodBias = virtualShadowConfig.directionalLodBias;
                 clipmapInfo.virtualResolution = virtualShadowResolution;
                 clipmapInfo.pageTableResolution = virtualShadowPageTableResolution;
-                clipmapInfo.physicalPagesPerAxis = virtualShadowPhysicalPagesPerAxis;
+                clipmapInfo.physicalAtlasPagesWide = virtualShadowPhysicalAtlasPagesWide;
+                clipmapInfo.physicalAtlasPagesHigh = virtualShadowPhysicalAtlasPagesHigh;
 
                 auto& markData = markClipmapData[clipmapIndex];
                 markData.texelWorldSize = clipmapInfo.texelWorldSize;
@@ -283,9 +280,11 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
                 markData.pageOffsetY = clipmapInfo.pageOffsetY;
                 markData.pageTableLayer = clipmapInfo.pageTableLayer;
                 markData.flags = clipmapInfo.flags;
+                markData.directionalLodBias = clipmapInfo.directionalLodBias;
                 markData.virtualResolution = clipmapInfo.virtualResolution;
                 markData.pageTableResolution = clipmapInfo.pageTableResolution;
-                markData.physicalPagesPerAxis = clipmapInfo.physicalPagesPerAxis;
+                markData.physicalAtlasPagesWide = clipmapInfo.physicalAtlasPagesWide;
+                markData.physicalAtlasPagesHigh = clipmapInfo.physicalAtlasPagesHigh;
                 markData.directionalPageViewRow = DirectX::XMFLOAT4(
                     view->cameraInfo.view.r[3].m128_f32[0],
                     view->cameraInfo.view.r[3].m128_f32[1],
@@ -322,9 +321,11 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
         auto& info = clipmapInfos[clipmapIndex];
         auto& markData = markClipmapData[clipmapIndex];
         info.pageTableLayer = clipmapIndex;
+        info.directionalLodBias = virtualShadowConfig.directionalLodBias;
         info.virtualResolution = virtualShadowResolution;
         info.pageTableResolution = virtualShadowPageTableResolution;
-        info.physicalPagesPerAxis = virtualShadowPhysicalPagesPerAxis;
+        info.physicalAtlasPagesWide = virtualShadowPhysicalAtlasPagesWide;
+        info.physicalAtlasPagesHigh = virtualShadowPhysicalAtlasPagesHigh;
         if (info.shadowCameraBufferIndex == 0xFFFFFFFFu) {
             info.texelWorldSize = static_cast<float>(CLodVirtualShadowPhysicalPageSize << clipmapIndex);
         }
@@ -334,9 +335,11 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
         markData.pageOffsetY = info.pageOffsetY;
         markData.pageTableLayer = info.pageTableLayer;
         markData.flags = info.flags;
+        markData.directionalLodBias = info.directionalLodBias;
         markData.virtualResolution = info.virtualResolution;
         markData.pageTableResolution = info.pageTableResolution;
-        markData.physicalPagesPerAxis = info.physicalPagesPerAxis;
+        markData.physicalAtlasPagesWide = info.physicalAtlasPagesWide;
+        markData.physicalAtlasPagesHigh = info.physicalAtlasPagesHigh;
 
         if (!m_resetResources && !ClipmapStructureEquals(info, g_previousClipmapInfos[clipmapIndex])) {
             m_resetReasonStructureMismatch = true;
@@ -353,9 +356,11 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
     runtimeState.supportedClipmapCount = CLodVirtualShadowMaxSupportedClipmapCount;
     runtimeState.virtualResolution = virtualShadowResolution;
     runtimeState.pageTableResolution = virtualShadowPageTableResolution;
-    runtimeState.physicalPagesPerAxis = virtualShadowPhysicalPagesPerAxis;
-    runtimeState.physicalPageCount = virtualShadowPhysicalPageCount;
-    runtimeState.maxAllocationRequests = (std::min)(virtualShadowPhysicalPageCount, CLodVirtualShadowMaxAllocationRequests);
+    runtimeState.physicalAtlasPagesWide = virtualShadowPhysicalAtlasPagesWide;
+    runtimeState.physicalAtlasPagesHigh = virtualShadowPhysicalAtlasPagesHigh;
+    runtimeState.maxPhysicalPages = virtualShadowPhysicalPageCount;
+    runtimeState.maxAllocationRequests = virtualShadowConfig.maxAllocationRequests;
+    runtimeState.directionalLodBias = virtualShadowConfig.directionalLodBias;
     BUFFER_UPLOAD(&runtimeState, sizeof(runtimeState), rg::runtime::UploadTarget::FromShared(m_runtimeStateBuffer), 0);
 
     BUFFER_UPLOAD(
@@ -388,8 +393,7 @@ PassReturn VirtualShadowMapSetupPass::Execute(PassExecutionContext& executionCon
     auto* renderContext = executionContext.hostData->Get<RenderContext>();
     auto& context = *renderContext;
     auto& commandList = executionContext.commandList;
-    const uint32_t virtualShadowPageTableResolution = GetVirtualShadowPageTableResolution();
-    const uint32_t virtualShadowPhysicalPageCount = GetVirtualShadowPhysicalPageCount();
+    const CLodVirtualShadowResolutionConfig virtualShadowConfig = GetVirtualShadowResolutionConfig();
 
     commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
     commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
@@ -397,24 +401,42 @@ PassReturn VirtualShadowMapSetupPass::Execute(PassExecutionContext& executionCon
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
 
     uint32_t rootConstants[NumMiscUintRootConstants] = {};
+    const uint32_t packedConfig0 =
+        ((virtualShadowConfig.pageTableResolution & CLOD_VIRTUAL_SHADOW_SETUP_PAGE_TABLE_RESOLUTION_MASK)
+            << CLOD_VIRTUAL_SHADOW_SETUP_PAGE_TABLE_RESOLUTION_SHIFT) |
+        ((CLodVirtualShadowMaxSupportedClipmapCount & CLOD_VIRTUAL_SHADOW_SETUP_CLIPMAP_COUNT_MASK)
+            << CLOD_VIRTUAL_SHADOW_SETUP_CLIPMAP_COUNT_SHIFT) |
+        ((virtualShadowConfig.maxPhysicalPages & CLOD_VIRTUAL_SHADOW_SETUP_PHYSICAL_PAGE_COUNT_MASK)
+            << CLOD_VIRTUAL_SHADOW_SETUP_PHYSICAL_PAGE_COUNT_SHIFT);
+    const uint32_t packedConfig1 =
+        (CLodVirtualShadowDirtyWordCount(virtualShadowConfig.maxPhysicalPages) & CLOD_VIRTUAL_SHADOW_SETUP_DIRTY_WORD_COUNT_MASK)
+        << CLOD_VIRTUAL_SHADOW_SETUP_DIRTY_WORD_COUNT_SHIFT;
+    const uint32_t packedFlags =
+        ((m_resetResources ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_RESOURCES_BIT) |
+        ((m_resetReasonForced ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_FORCED_BIT) |
+        ((m_resetReasonNoPreviousState ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_NO_PREVIOUS_STATE_BIT) |
+        ((m_resetReasonStructureMismatch ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_STRUCTURE_MISMATCH_BIT) |
+        ((m_resetReasonLightDirectionChanged ? 1u : 0u) << CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_LIGHT_DIRECTION_CHANGED_BIT) |
+        ((SettingsManager::GetInstance().getSettingGetter<bool>(CLodDirectionalVirtualShadowAutoLodBiasSettingName)() ? 1u : 0u)
+            << CLOD_VIRTUAL_SHADOW_SETUP_AUTO_BIAS_ENABLED_BIT);
+
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_ALLOCATION_COUNT_DESCRIPTOR_INDEX] = m_allocationCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PAGE_TABLE_RESOLUTION] = virtualShadowPageTableResolution;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_CLIPMAP_COUNT] = CLodVirtualShadowMaxSupportedClipmapCount;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PHYSICAL_PAGE_COUNT] = virtualShadowPhysicalPageCount;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_DIRTY_WORD_COUNT] = CLodVirtualShadowDirtyWordCount(virtualShadowPhysicalPageCount);
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RESET_RESOURCES] = m_resetResources ? 1u : 0u;
+    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PACKED_CONFIG0] = packedConfig0;
+    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PACKED_CONFIG1] = packedConfig1;
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_clipmapInfoBuffer->GetSRVInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_FORCED] = m_resetReasonForced ? 1u : 0u;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_NO_PREVIOUS_STATE] = m_resetReasonNoPreviousState ? 1u : 0u;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_STRUCTURE_MISMATCH] = m_resetReasonStructureMismatch ? 1u : 0u;
-    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_LIGHT_DIRECTION_CHANGED] = m_resetReasonLightDirectionChanged ? 1u : 0u;
+    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_clipmapInfoBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PACKED_FLAGS] = packedFlags;
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PREDICTIVE_CANDIDATE_COUNT_DESCRIPTOR_INDEX] = m_predictiveCandidateCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PREDICTIVE_RAW_PAGE_COUNT_DESCRIPTOR_INDEX] = m_predictiveRawPageCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_PREDICTED_PAGE_COUNT_DESCRIPTOR_INDEX] = m_predictedPageCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_MARK_CLIPMAP_DATA_DESCRIPTOR_INDEX] = m_markClipmapDataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_RUNTIME_STATE_DESCRIPTOR_INDEX] = m_runtimeStateBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_SETUP_AUTO_BIAS_SCALE_AS_UINT] =
+        std::bit_cast<uint32_t>(
+            SettingsManager::GetInstance().getSettingGetter<float>(CLodDirectionalVirtualShadowAutoLodBiasScaleSettingName)());
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,
@@ -425,8 +447,8 @@ PassReturn VirtualShadowMapSetupPass::Execute(PassExecutionContext& executionCon
         rootConstants);
 
     constexpr uint32_t kThreadsPerDimension = 8u;
-    const uint32_t groupCountX = (virtualShadowPageTableResolution + kThreadsPerDimension - 1u) / kThreadsPerDimension;
-    const uint32_t groupCountY = (virtualShadowPageTableResolution + kThreadsPerDimension - 1u) / kThreadsPerDimension;
+    const uint32_t groupCountX = (virtualShadowConfig.pageTableResolution + kThreadsPerDimension - 1u) / kThreadsPerDimension;
+    const uint32_t groupCountY = (virtualShadowConfig.pageTableResolution + kThreadsPerDimension - 1u) / kThreadsPerDimension;
     commandList.Dispatch(groupCountX, groupCountY, CLodVirtualShadowMaxSupportedClipmapCount);
 
     return {};

@@ -293,6 +293,9 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
                                 case OUTPUT_VSM_PHYSICAL_PAGE:
                                     output.shadowDebugPayload = PackDebugUint(shadowDebugInfo.sampledPhysicalPageIndex == 0xFFFFFFFFu ? 0u : (shadowDebugInfo.sampledPhysicalPageIndex + 1u));
                                     break;
+                                case OUTPUT_VSM_RERENDERED_THIS_FRAME:
+                                    output.shadowDebugPayload = PackDebugFloat3(CLodVirtualShadowDebugRerenderedThisFrameColor(shadowDebugInfo));
+                                    break;
                                 }
                             }
                             break;

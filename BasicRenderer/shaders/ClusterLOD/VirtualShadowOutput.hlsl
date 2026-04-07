@@ -73,5 +73,8 @@ void VirtualShadowBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsF
     RWTexture2D<uint> physicalPages = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX];
     InterlockedMin(physicalPages[atlasPixel], asuint(input.linearDepth));
     uint ignored = 0u;
-    InterlockedOr(pageTable[pageCoords], kCLodVirtualShadowContentValidMask, ignored);
+    InterlockedOr(
+        pageTable[pageCoords],
+        kCLodVirtualShadowContentValidMask | kCLodVirtualShadowRerenderedThisFrameMask,
+        ignored);
 }

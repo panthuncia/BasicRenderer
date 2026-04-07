@@ -274,9 +274,6 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 	auto posFloats = GetGlobalPositionFromMatrix(matrix);
 
 	// Virtual shadow clip levels are nested around the primary camera.
-	const uint32_t virtualShadowPageTableResolution = CLodVirtualShadowPageTableResolutionFromVirtualResolution(
-		CLodVirtualShadowSanitizeVirtualResolution(
-			SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName)()));
 	const float clipVerticalExtent = std::max(
 		SettingsManager::GetInstance().getSettingGetter<float>("directionalShadowVerticalExtent")(),
 		1.0f);
@@ -286,7 +283,6 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 		GetUpFromMatrix(matrix),
 		camera.zNear, camera.fov, camera.aspect,
 		getDirectionalLightCascadeSplits(),
-		virtualShadowPageTableResolution,
 		clipVerticalExtent);
 
 	// Collect the frustum planes from each cascade.
@@ -460,13 +456,10 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 		auto& camera = m_currentCamera.get<Components::Camera>();
 		auto& matrix = m_currentCamera.get<Components::Matrix>().matrix;
 		auto posFloats = GetGlobalPositionFromMatrix(matrix);
-		const uint32_t virtualShadowPageTableResolution = CLodVirtualShadowPageTableResolutionFromVirtualResolution(
-			CLodVirtualShadowSanitizeVirtualResolution(
-				SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName)()));
 		const float clipVerticalExtent = std::max(
 			SettingsManager::GetInstance().getSettingGetter<float>("directionalShadowVerticalExtent")(),
 			1.0f);
-		auto cascades = setupDirectionalClipmaps(numCascades, lightInfo.lightInfo.dirWorldSpace, DirectX::XMLoadFloat3(&posFloats), GetForwardFromMatrix(matrix), GetUpFromMatrix(matrix), camera.zNear, camera.fov, camera.aspect, getDirectionalLightCascadeSplits(), virtualShadowPageTableResolution, clipVerticalExtent);
+		auto cascades = setupDirectionalClipmaps(numCascades, lightInfo.lightInfo.dirWorldSpace, DirectX::XMLoadFloat3(&posFloats), GetForwardFromMatrix(matrix), GetUpFromMatrix(matrix), camera.zNear, camera.fov, camera.aspect, getDirectionalLightCascadeSplits(), clipVerticalExtent);
 		PublishDirectionalShadowDebug(cascades);
 		viewInfo.virtualShadowUnwrappedPageOffsetX.resize(numCascades);
 		viewInfo.virtualShadowUnwrappedPageOffsetY.resize(numCascades);

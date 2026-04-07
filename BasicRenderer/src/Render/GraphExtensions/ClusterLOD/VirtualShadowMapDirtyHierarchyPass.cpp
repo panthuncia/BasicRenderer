@@ -48,16 +48,14 @@ PassReturn VirtualShadowMapDirtyHierarchyPass::Execute(PassExecutionContext& exe
     commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
     commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
     BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-    const uint32_t virtualShadowResolution = CLodVirtualShadowSanitizeVirtualResolution(
-        SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName)());
-    const uint32_t virtualShadowPageTableResolution = CLodVirtualShadowPageTableResolutionFromVirtualResolution(virtualShadowResolution);
+    const CLodVirtualShadowResolutionConfig virtualShadowConfig = CLodVirtualShadowBuildRuntimeResolutionConfig();
 
     const uint32_t mipCount = m_dirtyHierarchyTexture->GetNumUAVMipLevels();
     for (uint32_t mipIndex = 0; mipIndex < mipCount; ++mipIndex) {
         const bool sourceIsPageTable = (mipIndex == 0u);
         const uint32_t srcResolution = sourceIsPageTable
-            ? virtualShadowPageTableResolution
-            : (std::max)(virtualShadowPageTableResolution >> (mipIndex - 1u), 1u);
+            ? virtualShadowConfig.pageTableResolution
+            : (std::max)(virtualShadowConfig.pageTableResolution >> (mipIndex - 1u), 1u);
         const uint32_t dstResolution = sourceIsPageTable
             ? srcResolution
             : ((srcResolution > 1u) ? (srcResolution >> 1u) : 1u);

@@ -94,6 +94,7 @@ void DeferredCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
             case OUTPUT_VSM_SAMPLED_CLIPMAP:
             case OUTPUT_VSM_PAGE_STATE:
             case OUTPUT_VSM_PHYSICAL_PAGE:
+            case OUTPUT_VSM_RERENDERED_THIS_FRAME:
                 payload = lightingOutput.shadowDebugPayload;
                 break;
 #endif

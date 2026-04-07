@@ -306,6 +306,60 @@ void CLodVirtualShadowStatsIncrementMarkResidentDirtyHit(RWStructuredBuffer<CLod
     CLOD_VSM_STATS_INCREMENT(markResidentDirtyHits, clipmapIndex);
 }
 
+float CLodVirtualShadowAllocationPercentage(CLodVirtualShadowStats previousStats, uint physicalPageCount)
+{
+    const float safePhysicalPageCount = max((float)physicalPageCount, 1.0f);
+    const float availablePageCount = min(
+        (float)(previousStats.freePhysicalPageCount + previousStats.reusablePhysicalPageCount),
+        safePhysicalPageCount);
+    const float allocatedPageCount = max(safePhysicalPageCount - availablePageCount, 0.0f);
+    return saturate(allocatedPageCount / safePhysicalPageCount);
+}
+
+float CLodVirtualShadowPressureFeedbackLodBias(float allocationPercentage, float autoLodBiasScale)
+{
+    const float positiveScale = max(autoLodBiasScale, 0.0f);
+    if (positiveScale <= 0.0f)
+    {
+        return 0.0f;
+    }
+
+    const float targetAllocationPercentage = 0.8f;
+    const float allocationRatio = max(allocationPercentage / targetAllocationPercentage, 0.0001f);
+    return max(log2(allocationRatio), 0.0f) * positiveScale;
+}
+
+float CLodVirtualShadowSmoothPressureLodBias(
+    float previousSmoothedPressureLodBias,
+    float targetPressureLodBias,
+    uint framesSinceOverBudget)
+{
+    const float previousBias = max(previousSmoothedPressureLodBias, 0.0f);
+    const float targetBias = max(targetPressureLodBias, 0.0f);
+    const float delta = targetBias - previousBias;
+    const float deadZone = 0.02f;
+    if (abs(delta) <= deadZone)
+    {
+        return previousBias;
+    }
+
+    const float rampUpAlpha = 0.55f;
+    const float rampDownAlpha = 0.08f;
+    const uint rampDownHoldFrames = 6u;
+
+    if (targetBias > previousBias)
+    {
+        return clamp(lerp(previousBias, targetBias, rampUpAlpha), 0.0f, 8.0f);
+    }
+
+    if (framesSinceOverBudget < rampDownHoldFrames)
+    {
+        return previousBias;
+    }
+
+    return clamp(lerp(previousBias, targetBias, rampDownAlpha), 0.0f, 8.0f);
+}
+
 #undef CLOD_VSM_STATS_INCREMENT
 
 uint CLodCalculateShadowCascadeIndex(float depth, uint numCascadeSplits, float4 cascadeSplits)
@@ -824,8 +878,8 @@ void CLodVirtualShadowClearPhysicalPagesCSMain(
         return;
     }
 
-    const uint atlasPageX = groupId.x % CLOD_VIRTUAL_SHADOW_CLEAR_PHYSICAL_PAGES_PER_AXIS;
-    const uint atlasPageY = groupId.x / CLOD_VIRTUAL_SHADOW_CLEAR_PHYSICAL_PAGES_PER_AXIS;
+    const uint atlasPageX = groupId.x % CLOD_VIRTUAL_SHADOW_CLEAR_PHYSICAL_ATLAS_PAGES_WIDE;
+    const uint atlasPageY = groupId.x / CLOD_VIRTUAL_SHADOW_CLEAR_PHYSICAL_ATLAS_PAGES_WIDE;
     const uint2 atlasBasePixel = uint2(
         atlasPageX * kCLodVirtualShadowPhysicalPageSize,
         atlasPageY * kCLodVirtualShadowPhysicalPageSize);
@@ -908,10 +962,12 @@ void CLodVirtualShadowSetupCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     RWStructuredBuffer<uint> allocationCount = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_SETUP_ALLOCATION_COUNT_DESCRIPTOR_INDEX];
     RWStructuredBuffer<uint> dirtyFlags = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_SETUP_DIRTY_FLAGS_DESCRIPTOR_INDEX];
     RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_SETUP_STATS_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_SETUP_CLIPMAP_INFO_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodVirtualShadowMarkClipmapData> markClipmapDataBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_SETUP_MARK_CLIPMAP_DATA_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodVirtualShadowRuntimeState> runtimeStateBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_SETUP_RUNTIME_STATE_DESCRIPTOR_INDEX];
     RWStructuredBuffer<uint> predictiveCandidateCount = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_SETUP_PREDICTIVE_CANDIDATE_COUNT_DESCRIPTOR_INDEX];
     RWStructuredBuffer<uint> predictiveRawPageCount = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_SETUP_PREDICTIVE_RAW_PAGE_COUNT_DESCRIPTOR_INDEX];
     RWStructuredBuffer<uint> predictedPageCount = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_SETUP_PREDICTED_PAGE_COUNT_DESCRIPTOR_INDEX];
-    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_SETUP_CLIPMAP_INFO_DESCRIPTOR_INDEX];
 
     const uint existingPageEntry = pageTable[dispatchThreadId];
 
@@ -919,11 +975,12 @@ void CLodVirtualShadowSetupCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         pageTable[dispatchThreadId] = 0u;
     }
-    else if ((existingPageEntry & kCLodVirtualShadowVisitedMask) != 0u)
+    else if ((existingPageEntry & (kCLodVirtualShadowVisitedMask | kCLodVirtualShadowRerenderedThisFrameMask)) != 0u)
     {
         // Only clear Visited — Dirty is managed by ClearPages (set) and
         // ClearDirtyBits (clear) which both iterate the allocation request list.
-        pageTable[dispatchThreadId] = existingPageEntry & ~kCLodVirtualShadowVisitedMask;
+        pageTable[dispatchThreadId] =
+            existingPageEntry & ~(kCLodVirtualShadowVisitedMask | kCLodVirtualShadowRerenderedThisFrameMask);
     }
 
     if (dispatchThreadId.z != 0u)
@@ -934,6 +991,49 @@ void CLodVirtualShadowSetupCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     const uint linearIndex = dispatchThreadId.y * CLOD_VIRTUAL_SHADOW_SETUP_PAGE_TABLE_RESOLUTION + dispatchThreadId.x;
     if (linearIndex == 0u)
     {
+        const CLodVirtualShadowStats previousStats = statsBuffer[0];
+        const float baseDirectionalLodBias = clipmapInfos[0].directionalLodBias;
+        const float currentAllocationPercentage = CLodVirtualShadowAllocationPercentage(
+            previousStats,
+            CLOD_VIRTUAL_SHADOW_SETUP_PHYSICAL_PAGE_COUNT);
+        const float targetPressureLodBias = CLOD_VIRTUAL_SHADOW_SETUP_AUTO_BIAS_ENABLED != 0u
+            ? CLodVirtualShadowPressureFeedbackLodBias(
+                currentAllocationPercentage,
+                asfloat(CLOD_VIRTUAL_SHADOW_SETUP_AUTO_BIAS_SCALE_AS_UINT))
+            : 0.0f;
+        const float previousSmoothedPressureLodBias = CLOD_VIRTUAL_SHADOW_SETUP_RESET_RESOURCES != 0u
+            ? 0.0f
+            : previousStats.smoothedPressureLodBias;
+        const uint previousFramesSinceOverBudget = CLOD_VIRTUAL_SHADOW_SETUP_RESET_RESOURCES != 0u
+            ? 0u
+            : previousStats.framesSinceOverBudget;
+        const uint framesSinceOverBudget = targetPressureLodBias > 0.0f
+            ? 0u
+            : min(previousFramesSinceOverBudget + 1u, 0xFFFFFFFFu);
+        const float smoothedPressureLodBias = CLOD_VIRTUAL_SHADOW_SETUP_AUTO_BIAS_ENABLED != 0u
+            ? CLodVirtualShadowSmoothPressureLodBias(
+                previousSmoothedPressureLodBias,
+                targetPressureLodBias,
+                framesSinceOverBudget)
+            : 0.0f;
+        const float effectiveDirectionalLodBias = baseDirectionalLodBias + smoothedPressureLodBias;
+
+        [unroll]
+        for (uint clipmapIndex = 0u; clipmapIndex < CLOD_VIRTUAL_SHADOW_SETUP_CLIPMAP_COUNT; ++clipmapIndex)
+        {
+            CLodVirtualShadowClipmapInfo clipmapInfo = clipmapInfos[clipmapIndex];
+            clipmapInfo.directionalLodBias = effectiveDirectionalLodBias;
+            clipmapInfos[clipmapIndex] = clipmapInfo;
+
+            CLodVirtualShadowMarkClipmapData markClipmapData = markClipmapDataBuffer[clipmapIndex];
+            markClipmapData.directionalLodBias = effectiveDirectionalLodBias;
+            markClipmapDataBuffer[clipmapIndex] = markClipmapData;
+        }
+
+        CLodVirtualShadowRuntimeState runtimeState = runtimeStateBuffer[0];
+        runtimeState.directionalLodBias = effectiveDirectionalLodBias;
+        runtimeStateBuffer[0] = runtimeState;
+
         statsBuffer[0] = (CLodVirtualShadowStats)0;
         if (CLOD_VIRTUAL_SHADOW_SETUP_RESET_RESOURCES != 0u)
         {
@@ -943,6 +1043,10 @@ void CLodVirtualShadowSetupCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         statsBuffer[0].setupResetNoPreviousState = CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_NO_PREVIOUS_STATE;
         statsBuffer[0].setupResetStructureMismatch = CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_STRUCTURE_MISMATCH;
         statsBuffer[0].setupResetLightDirectionChanged = CLOD_VIRTUAL_SHADOW_SETUP_RESET_REASON_LIGHT_DIRECTION_CHANGED;
+        statsBuffer[0].currentAllocationPercentage = currentAllocationPercentage;
+        statsBuffer[0].targetPressureLodBias = targetPressureLodBias;
+        statsBuffer[0].smoothedPressureLodBias = smoothedPressureLodBias;
+        statsBuffer[0].framesSinceOverBudget = framesSinceOverBudget;
     }
     if (linearIndex < CLOD_VIRTUAL_SHADOW_SETUP_PHYSICAL_PAGE_COUNT)
     {
@@ -1264,8 +1368,7 @@ void CLodVirtualShadowAccumulateTileClipmapRange(
     float depth,
     CLodVirtualShadowMainCameraInfo mainCamera,
     float clip0TexelWorldSize,
-    uint pageTableResolution,
-    uint virtualResolution,
+    float directionalLodBias,
     uint activeClipmapCount,
     inout uint minClipmapIndex,
     inout uint maxClipmapIndex)
@@ -1275,8 +1378,7 @@ void CLodVirtualShadowAccumulateTileClipmapRange(
         positionWS,
         mainCamera.positionWorldSpace.xyz,
         clip0TexelWorldSize,
-        pageTableResolution,
-        virtualResolution,
+        directionalLodBias,
         activeClipmapCount);
     minClipmapIndex = min(minClipmapIndex, clipmapIndex);
     maxClipmapIndex = max(maxClipmapIndex, clipmapIndex);
@@ -1359,8 +1461,7 @@ void CLodVirtualShadowMarkPagesCSMain(uint3 dispatchThreadId : SV_DispatchThread
         depthValue, \
         mainCamera, \
         markClipmapDataBuffer[0].texelWorldSize, \
-        markClipmapDataBuffer[0].pageTableResolution, \
-        markClipmapDataBuffer[0].virtualResolution, \
+        markClipmapDataBuffer[0].directionalLodBias, \
         activeClipmapCount, \
         minClipmapIndex, \
         maxClipmapIndex)

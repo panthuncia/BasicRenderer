@@ -7,21 +7,32 @@ static const uint kCLodVirtualShadowAllocatedMask = 0x80000000u;
 static const uint kCLodVirtualShadowDirtyMask = 0x40000000u;
 static const uint kCLodVirtualShadowContentValidMask = 0x20000000u;
 static const uint kCLodVirtualShadowVisitedMask = 0x10000000u;
-static const uint kCLodVirtualShadowPhysicalPageIndexMask = 0x0FFFFFFFu;
+static const uint kCLodVirtualShadowRerenderedThisFrameMask = 0x08000000u;
+static const uint kCLodVirtualShadowPhysicalPageIndexMask = 0x07FFFFFFu;
 static const uint kCLodVirtualShadowPhysicalPageResidentFlag = 0x1u;
 static const uint kCLodVirtualShadowDefaultClipmapCount = 6u;
 static const uint kCLodVirtualShadowClipmapCount = 16u;
 static const uint CLodVirtualShadowDefaultClipmapCount = kCLodVirtualShadowDefaultClipmapCount;
 static const uint CLodVirtualShadowMaxSupportedClipmapCount = kCLodVirtualShadowClipmapCount;
-static const uint kCLodVirtualShadowDefaultVirtualResolution = 4096u;
-static const uint kCLodVirtualShadowMaxVirtualResolution = 16384u;
 static const uint kCLodVirtualShadowPhysicalPageSize = 128u;
+static const uint kCLodVirtualShadowFixedVirtualPageCountPerAxis = 128u;
+static const uint kCLodVirtualShadowFixedVirtualResolution =
+    kCLodVirtualShadowFixedVirtualPageCountPerAxis * kCLodVirtualShadowPhysicalPageSize;
+static const uint kCLodVirtualShadowDefaultVirtualResolution = kCLodVirtualShadowFixedVirtualResolution;
+static const uint kCLodVirtualShadowMaxVirtualResolution = kCLodVirtualShadowFixedVirtualResolution;
 static const uint kCLodVirtualShadowDefaultPageTableResolution =
     kCLodVirtualShadowDefaultVirtualResolution / kCLodVirtualShadowPhysicalPageSize;
 static const uint kCLodVirtualShadowMaxPageTableResolution =
     kCLodVirtualShadowMaxVirtualResolution / kCLodVirtualShadowPhysicalPageSize;
-static const uint kCLodVirtualShadowDefaultPhysicalPagesPerAxis = kCLodVirtualShadowMaxPageTableResolution;
-static const uint kCLodVirtualShadowMaxPhysicalPagesPerAxis = kCLodVirtualShadowMaxPageTableResolution;
+static const uint kCLodVirtualShadowDefaultPhysicalAtlasPagesWide = kCLodVirtualShadowMaxPageTableResolution;
+static const uint kCLodVirtualShadowDefaultPhysicalAtlasPagesHigh = kCLodVirtualShadowMaxPageTableResolution;
+static const uint kCLodVirtualShadowMaxPhysicalAtlasPagesWide = kCLodVirtualShadowMaxPageTableResolution;
+static const uint kCLodVirtualShadowMaxPhysicalAtlasPagesHigh = kCLodVirtualShadowMaxPageTableResolution;
+static const uint kCLodVirtualShadowDefaultPhysicalPageCount =
+    kCLodVirtualShadowDefaultPhysicalAtlasPagesWide * kCLodVirtualShadowDefaultPhysicalAtlasPagesHigh;
+static const uint kCLodVirtualShadowMaxPhysicalPageCount =
+    kCLodVirtualShadowMaxPhysicalAtlasPagesWide * kCLodVirtualShadowMaxPhysicalAtlasPagesHigh;
+static const float kCLodVirtualShadowDefaultDirectionalLodBias = 0.0f;
 static const uint kCLodVirtualShadowMovedInstanceBitCapacity = 1u << 20;
 static const uint kCLodVirtualShadowMovedInstanceBitWordCount =
     (kCLodVirtualShadowMovedInstanceBitCapacity + 31u) / 32u;
@@ -42,10 +53,11 @@ struct CLodVirtualShadowClipmapInfo
     uint flags;
     int clearOffsetX;
     int clearOffsetY;
+    float directionalLodBias;
     uint virtualResolution;
     uint pageTableResolution;
-    uint physicalPagesPerAxis;
-    uint pad0;
+    uint physicalAtlasPagesWide;
+    uint physicalAtlasPagesHigh;
 };
 
 struct CLodVirtualShadowMainCameraInfo
@@ -73,7 +85,10 @@ struct CLodVirtualShadowMarkClipmapData
     uint flags;
     uint virtualResolution;
     uint pageTableResolution;
-    uint physicalPagesPerAxis;
+    uint physicalAtlasPagesWide;
+    uint physicalAtlasPagesHigh;
+    float directionalLodBias;
+    uint2 pad0;
     float4 directionalPageViewRow;
     row_major matrix shadowViewProjection;
 };
@@ -84,6 +99,19 @@ struct CLodVirtualShadowMarkTileWorkItem
     uint tileCoordY;
     uint minDepthBits;
     uint maxDepthBits;
+};
+
+struct CLodVirtualShadowRuntimeState
+{
+    uint clipmapCount;
+    uint supportedClipmapCount;
+    uint virtualResolution;
+    uint pageTableResolution;
+    uint physicalAtlasPagesWide;
+    uint physicalAtlasPagesHigh;
+    uint maxPhysicalPages;
+    uint maxAllocationRequests;
+    float directionalLodBias;
 };
 
 bool CLodVirtualShadowCompactCameraIsOrtho(CLodVirtualShadowCompactShadowCameraInfo cameraInfo)
@@ -110,6 +138,10 @@ struct CLodVirtualShadowStats
     uint setupResetNoPreviousState;
     uint setupResetStructureMismatch;
     uint setupResetLightDirectionChanged;
+    float currentAllocationPercentage;
+    float targetPressureLodBias;
+    float smoothedPressureLodBias;
+    uint framesSinceOverBudget;
     uint setupWrappedClearedPageTableEntries[kCLodVirtualShadowClipmapCount];
     uint setupStaleDirtyClearedPageTableEntries[kCLodVirtualShadowClipmapCount];
     uint markResidentCleanHits[kCLodVirtualShadowClipmapCount];
@@ -195,10 +227,10 @@ uint2 CLodVirtualShadowVirtualTexelCoordsFromUv(float2 shadowUv, CLodVirtualShad
     return CLodVirtualShadowVirtualTexelCoordsFromUv(shadowUv, clipmapData.virtualResolution);
 }
 
-uint2 CLodVirtualShadowPhysicalAtlasPixel(uint physicalPageIndex, uint2 virtualTexelCoords, uint physicalPagesPerAxis)
+uint2 CLodVirtualShadowPhysicalAtlasPixel(uint physicalPageIndex, uint2 virtualTexelCoords, uint physicalAtlasPagesWide)
 {
-    const uint atlasPageX = physicalPageIndex % physicalPagesPerAxis;
-    const uint atlasPageY = physicalPageIndex / physicalPagesPerAxis;
+    const uint atlasPageX = physicalAtlasPagesWide > 0u ? (physicalPageIndex % physicalAtlasPagesWide) : 0u;
+    const uint atlasPageY = physicalAtlasPagesWide > 0u ? (physicalPageIndex / physicalAtlasPagesWide) : 0u;
     return uint2(
         atlasPageX * kCLodVirtualShadowPhysicalPageSize + (virtualTexelCoords.x % kCLodVirtualShadowPhysicalPageSize),
         atlasPageY * kCLodVirtualShadowPhysicalPageSize + (virtualTexelCoords.y % kCLodVirtualShadowPhysicalPageSize));
@@ -206,20 +238,19 @@ uint2 CLodVirtualShadowPhysicalAtlasPixel(uint physicalPageIndex, uint2 virtualT
 
 uint2 CLodVirtualShadowPhysicalAtlasPixel(uint physicalPageIndex, uint2 virtualTexelCoords, CLodVirtualShadowClipmapInfo clipmapInfo)
 {
-    return CLodVirtualShadowPhysicalAtlasPixel(physicalPageIndex, virtualTexelCoords, clipmapInfo.physicalPagesPerAxis);
+    return CLodVirtualShadowPhysicalAtlasPixel(physicalPageIndex, virtualTexelCoords, clipmapInfo.physicalAtlasPagesWide);
 }
 
 uint2 CLodVirtualShadowPhysicalAtlasPixel(uint physicalPageIndex, uint2 virtualTexelCoords, CLodVirtualShadowMarkClipmapData clipmapData)
 {
-    return CLodVirtualShadowPhysicalAtlasPixel(physicalPageIndex, virtualTexelCoords, clipmapData.physicalPagesPerAxis);
+    return CLodVirtualShadowPhysicalAtlasPixel(physicalPageIndex, virtualTexelCoords, clipmapData.physicalAtlasPagesWide);
 }
 
 uint CLodVirtualShadowSelectClipmapIndex(
     float3 positionWS,
     float3 cameraPositionWS,
     float clip0TexelWorldSize,
-    uint pageTableResolution,
-    uint virtualResolution,
+    float directionalLodBias,
     uint activeClipmapCount)
 {
     if (activeClipmapCount == 0u)
@@ -227,12 +258,12 @@ uint CLodVirtualShadowSelectClipmapIndex(
         return 0u;
     }
 
-    const float pageCount = (float)pageTableResolution;
+    const float pageCount = (float)kCLodVirtualShadowFixedVirtualPageCountPerAxis;
     const float scaleRatio = pageCount > 0.0f ? max((pageCount - 2.0f) / pageCount, 0.0f) : 1.0f;
-    const float clip0FrustumScale = 0.5f * max(clip0TexelWorldSize, 1.0e-5f) * (float)virtualResolution;
+    const float clip0FrustumScale = 0.5f * max(clip0TexelWorldSize, 1.0e-5f) * (float)kCLodVirtualShadowFixedVirtualResolution;
     const float baseScale = max(clip0FrustumScale * scaleRatio, 1.0e-5f);
     const float distanceFromCamera = length(positionWS - cameraPositionWS);
-    const float clipLevel = ceil(log2(max(distanceFromCamera / baseScale, 1.0f)));
+    const float clipLevel = ceil(log2(max(distanceFromCamera / baseScale, 1.0f))) + directionalLodBias;
     return min((uint)max(clipLevel, 0.0f), activeClipmapCount - 1u);
 }
 

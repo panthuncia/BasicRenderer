@@ -519,13 +519,25 @@ private:
     std::function<bool()> getCLodDisableVirtualShadowPageCaching;
     std::function<void(bool)> setCLodDisableVirtualShadowPageCaching;
 
+    uint32_t m_clodDirectionalVirtualShadowMaxPhysicalPages = CLodVirtualShadowDefaultPhysicalPageCount;
+    std::function<uint32_t()> getCLodDirectionalVirtualShadowMaxPhysicalPages;
+    std::function<void(uint32_t)> setCLodDirectionalVirtualShadowMaxPhysicalPages;
+
+    float m_clodDirectionalVirtualShadowLodBias = CLodVirtualShadowDefaultDirectionalLodBias;
+    std::function<float()> getCLodDirectionalVirtualShadowLodBias;
+    std::function<void(float)> setCLodDirectionalVirtualShadowLodBias;
+
+    bool m_clodDirectionalVirtualShadowAutoLodBias = true;
+    std::function<bool()> getCLodDirectionalVirtualShadowAutoLodBias;
+    std::function<void(bool)> setCLodDirectionalVirtualShadowAutoLodBias;
+
+    float m_clodDirectionalVirtualShadowAutoLodBiasScale = 1.0f;
+    std::function<float()> getCLodDirectionalVirtualShadowAutoLodBiasScale;
+    std::function<void(float)> setCLodDirectionalVirtualShadowAutoLodBiasScale;
+
     uint8_t m_numDirectionalLightCascades = 0u;
     std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<void(uint8_t)> setNumDirectionalLightCascades;
-
-    uint32_t m_clodVirtualShadowVirtualResolution = CLodVirtualShadowDefaultVirtualResolution;
-    std::function<uint32_t()> getCLodVirtualShadowVirtualResolution;
-    std::function<void(uint32_t)> setCLodVirtualShadowVirtualResolution;
 
     float m_maxShadowDistance = 0.0f;
     std::function<float()> getMaxShadowDistance;
@@ -748,15 +760,30 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     m_clodDisableVirtualShadowPageCaching = getCLodDisableVirtualShadowPageCaching();
     observerSetting(m_clodDisableVirtualShadowPageCaching, CLodDisableVirtualShadowPageCachingSettingName);
 
+    getCLodDirectionalVirtualShadowMaxPhysicalPages = settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowMaxPhysicalPagesSettingName);
+    setCLodDirectionalVirtualShadowMaxPhysicalPages = settingsManager.getSettingSetter<uint32_t>(CLodDirectionalVirtualShadowMaxPhysicalPagesSettingName);
+    m_clodDirectionalVirtualShadowMaxPhysicalPages = getCLodDirectionalVirtualShadowMaxPhysicalPages();
+    observerSetting(m_clodDirectionalVirtualShadowMaxPhysicalPages, CLodDirectionalVirtualShadowMaxPhysicalPagesSettingName);
+
+    getCLodDirectionalVirtualShadowLodBias = settingsManager.getSettingGetter<float>(CLodDirectionalVirtualShadowLodBiasSettingName);
+    setCLodDirectionalVirtualShadowLodBias = settingsManager.getSettingSetter<float>(CLodDirectionalVirtualShadowLodBiasSettingName);
+    m_clodDirectionalVirtualShadowLodBias = getCLodDirectionalVirtualShadowLodBias();
+    observerSetting(m_clodDirectionalVirtualShadowLodBias, CLodDirectionalVirtualShadowLodBiasSettingName);
+
+    getCLodDirectionalVirtualShadowAutoLodBias = settingsManager.getSettingGetter<bool>(CLodDirectionalVirtualShadowAutoLodBiasSettingName);
+    setCLodDirectionalVirtualShadowAutoLodBias = settingsManager.getSettingSetter<bool>(CLodDirectionalVirtualShadowAutoLodBiasSettingName);
+    m_clodDirectionalVirtualShadowAutoLodBias = getCLodDirectionalVirtualShadowAutoLodBias();
+    observerSetting(m_clodDirectionalVirtualShadowAutoLodBias, CLodDirectionalVirtualShadowAutoLodBiasSettingName);
+
+    getCLodDirectionalVirtualShadowAutoLodBiasScale = settingsManager.getSettingGetter<float>(CLodDirectionalVirtualShadowAutoLodBiasScaleSettingName);
+    setCLodDirectionalVirtualShadowAutoLodBiasScale = settingsManager.getSettingSetter<float>(CLodDirectionalVirtualShadowAutoLodBiasScaleSettingName);
+    m_clodDirectionalVirtualShadowAutoLodBiasScale = getCLodDirectionalVirtualShadowAutoLodBiasScale();
+    observerSetting(m_clodDirectionalVirtualShadowAutoLodBiasScale, CLodDirectionalVirtualShadowAutoLodBiasScaleSettingName);
+
     getNumDirectionalLightCascades = settingsManager.getSettingGetter<uint8_t>("numDirectionalLightCascades");
     setNumDirectionalLightCascades = settingsManager.getSettingSetter<uint8_t>("numDirectionalLightCascades");
     m_numDirectionalLightCascades = getNumDirectionalLightCascades();
     observerSetting(m_numDirectionalLightCascades, "numDirectionalLightCascades");
-
-    getCLodVirtualShadowVirtualResolution = settingsManager.getSettingGetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName);
-    setCLodVirtualShadowVirtualResolution = settingsManager.getSettingSetter<uint32_t>(CLodVirtualShadowVirtualResolutionSettingName);
-    m_clodVirtualShadowVirtualResolution = getCLodVirtualShadowVirtualResolution();
-    observerSetting(m_clodVirtualShadowVirtualResolution, CLodVirtualShadowVirtualResolutionSettingName);
 
     getMaxShadowDistance = settingsManager.getSettingGetter<float>("maxShadowDistance");
     setMaxShadowDistance = settingsManager.getSettingSetter<float>("maxShadowDistance");
@@ -1071,15 +1098,44 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             m_numDirectionalLightCascades = static_cast<uint8_t>(directionalLightClipmaps);
             setNumDirectionalLightCascades(m_numDirectionalLightCascades);
         }
-        int virtualShadowResolutionIndex = CLodVirtualShadowVirtualResolutionOptionIndex(m_clodVirtualShadowVirtualResolution);
-        if (ImGui::Combo("Directional VSM Resolution", &virtualShadowResolutionIndex, CLodVirtualShadowVirtualResolutionOptionNames, CLodVirtualShadowVirtualResolutionOptionCount)) {
-            virtualShadowResolutionIndex = std::clamp(virtualShadowResolutionIndex, 0, CLodVirtualShadowVirtualResolutionOptionCount - 1);
-            m_clodVirtualShadowVirtualResolution = CLodVirtualShadowVirtualResolutionOptions[virtualShadowResolutionIndex];
-            setCLodVirtualShadowVirtualResolution(m_clodVirtualShadowVirtualResolution);
+        int maxPhysicalPages = static_cast<int>(m_clodDirectionalVirtualShadowMaxPhysicalPages);
+        if (ImGui::SliderInt("Directional VSM Physical Pages", &maxPhysicalPages, 1, static_cast<int>(CLodVirtualShadowMaxPhysicalPageCount))) {
+            maxPhysicalPages = std::clamp(maxPhysicalPages, 1, static_cast<int>(CLodVirtualShadowMaxPhysicalPageCount));
+            m_clodDirectionalVirtualShadowMaxPhysicalPages = static_cast<uint32_t>(maxPhysicalPages);
+            setCLodDirectionalVirtualShadowMaxPhysicalPages(m_clodDirectionalVirtualShadowMaxPhysicalPages);
         }
-        const uint32_t derivedVirtualShadowPhysicalPagesPerAxis =
-            CLodVirtualShadowPhysicalPagesPerAxisFromVirtualResolution(m_clodVirtualShadowVirtualResolution);
-        ImGui::Text("Directional VSM Physical Pages: %u x %u (full atlas)", derivedVirtualShadowPhysicalPagesPerAxis, derivedVirtualShadowPhysicalPagesPerAxis);
+        if (ImGui::Checkbox("Auto Directional VSM LOD Bias", &m_clodDirectionalVirtualShadowAutoLodBias)) {
+            setCLodDirectionalVirtualShadowAutoLodBias(m_clodDirectionalVirtualShadowAutoLodBias);
+        }
+        if (ImGui::SliderFloat("Directional VSM Manual LOD Bias", &m_clodDirectionalVirtualShadowLodBias, -4.0f, 4.0f, "%.2f")) {
+            setCLodDirectionalVirtualShadowLodBias(m_clodDirectionalVirtualShadowLodBias);
+        }
+        if (ImGui::SliderFloat("Directional VSM Auto Bias Scale", &m_clodDirectionalVirtualShadowAutoLodBiasScale, 0.0f, 4.0f, "%.2f")) {
+            m_clodDirectionalVirtualShadowAutoLodBiasScale = std::max(m_clodDirectionalVirtualShadowAutoLodBiasScale, 0.0f);
+            setCLodDirectionalVirtualShadowAutoLodBiasScale(m_clodDirectionalVirtualShadowAutoLodBiasScale);
+        }
+        const CLodVirtualShadowResolutionConfig virtualShadowConfig =
+            CLodVirtualShadowBuildRuntimeResolutionConfig();
+        const float budgetDirectionalLodBias = m_clodDirectionalVirtualShadowAutoLodBias
+            ? CLodVirtualShadowAutomaticDirectionalLodBiasFromBudget(
+                virtualShadowConfig.maxPhysicalPages,
+                m_clodDirectionalVirtualShadowAutoLodBiasScale)
+            : 0.0f;
+        ImGui::Text(
+            "Directional VSM Virtual Space: %u x %u pages (%u texels/page, fixed 16K)",
+            CLodVirtualShadowFixedVirtualPageCountPerAxis,
+            CLodVirtualShadowFixedVirtualPageCountPerAxis,
+            CLodVirtualShadowPhysicalPageSize);
+        ImGui::Text(
+            "Directional VSM Physical Atlas: %u x %u pages (%u total)",
+            virtualShadowConfig.physicalAtlasPagesWide,
+            virtualShadowConfig.physicalAtlasPagesHigh,
+            virtualShadowConfig.maxPhysicalPages);
+        ImGui::Text(
+            "Directional VSM Bias: manual=%.2f budgetBase=%.2f configured=%.2f",
+            m_clodDirectionalVirtualShadowLodBias,
+            budgetDirectionalLodBias,
+            virtualShadowConfig.directionalLodBias);
         if (ImGui::SliderFloat("Directional Shadow Distance", &m_maxShadowDistance, 1.0f, 1000.0f, "%.1f")) {
             m_maxShadowDistance = std::max(m_maxShadowDistance, 1.0f);
             setMaxShadowDistance(m_maxShadowDistance);
@@ -2815,19 +2871,27 @@ inline void Menu::DrawCLodTelemetryWindow() {
         ImGui::Text("Captures: %llu", static_cast<unsigned long long>(m_shadowVirtualShadowTelemetry.captureCount));
         ImGui::Text("Clipmaps: active=%u valid=%u supportedMax=%u", stats.activeClipmapCount, stats.validClipmapCount, CLodVirtualShadowMaxSupportedClipmapCount);
         ImGui::Text(
-            "Runtime: publishedActive=%u supported=%u virtualRes=%u pageTable=%u physicalPagesPerAxis=%u physicalPages=%u maxRequests=%u",
+            "Runtime: publishedActive=%u supported=%u virtualRes=%u pageTable=%u physicalAtlas=%ux%u maxPhysicalPages=%u maxRequests=%u lodBias=%.2f",
             runtimeState.clipmapCount,
             runtimeState.supportedClipmapCount,
             runtimeState.virtualResolution,
             runtimeState.pageTableResolution,
-            runtimeState.physicalPagesPerAxis,
-            runtimeState.physicalPageCount,
-            runtimeState.maxAllocationRequests);
+            runtimeState.physicalAtlasPagesWide,
+            runtimeState.physicalAtlasPagesHigh,
+            runtimeState.maxPhysicalPages,
+            runtimeState.maxAllocationRequests,
+            runtimeState.directionalLodBias);
         ImGui::Text("Allocator: requests=%u dispatchGroups=%u freePages=%u reusablePages=%u",
             stats.allocationRequestCount,
             stats.allocationDispatchGroupCount,
             stats.freePhysicalPageCount,
             stats.reusablePhysicalPageCount);
+        ImGui::Text(
+            "Controller: allocation=%.1f%% targetBias=%.2f smoothedBias=%.2f framesSinceOverBudget=%u",
+            stats.currentAllocationPercentage * 100.0f,
+            stats.targetPressureLodBias,
+            stats.smoothedPressureLodBias,
+            stats.framesSinceOverBudget);
         ImGui::Text("Lifecycle diagnostics: setupReset=%u requestOverflow=%u unwrittenClears=%u",
             stats.setupResetApplied,
             stats.markRequestOverflowCount,

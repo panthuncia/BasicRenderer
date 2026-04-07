@@ -11,6 +11,7 @@ static const uint kCLodVirtualShadowDebugFlagPreferredDirty = 0x2u;
 static const uint kCLodVirtualShadowDebugFlagSampledDepthMissing = 0x4u;
 static const uint kCLodVirtualShadowDebugFlagSampledPageUnwritten = 0x8u;
 static const uint kCLodVirtualShadowDebugFlagSampledTexelCleared = 0x10u;
+static const uint kCLodVirtualShadowDebugFlagSampledRerenderedThisFrame = 0x20u;
 
 struct CLodVirtualShadowDebugInfo
 {
@@ -81,6 +82,41 @@ float3 CLodVirtualShadowDebugPageStateColor(CLodVirtualShadowDebugInfo debugInfo
     }
 
     return float3(0.10f, 0.85f, 0.20f);
+}
+
+float3 CLodVirtualShadowDebugRerenderedThisFrameColor(CLodVirtualShadowDebugInfo debugInfo)
+{
+    if ((debugInfo.flags & kCLodVirtualShadowDebugFlagSampledDepthMissing) != 0u)
+    {
+        return float3(1.0f, 0.0f, 1.0f);
+    }
+
+    if ((debugInfo.flags & kCLodVirtualShadowDebugFlagSampledPageUnwritten) != 0u)
+    {
+        return float3(0.0f, 0.85f, 0.95f);
+    }
+
+    if ((debugInfo.flags & kCLodVirtualShadowDebugFlagSampledTexelCleared) != 0u)
+    {
+        return float3(1.0f, 1.0f, 1.0f);
+    }
+
+    if ((debugInfo.flags & kCLodVirtualShadowDebugFlagPreferredAllocated) == 0u)
+    {
+        return float3(0.05f, 0.10f, 0.55f);
+    }
+
+    if (debugInfo.sampledClipmapIndex == 0xFFFFFFFFu)
+    {
+        return float3(0.65f, 0.0f, 0.0f);
+    }
+
+    if ((debugInfo.flags & kCLodVirtualShadowDebugFlagSampledRerenderedThisFrame) != 0u)
+    {
+        return float3(1.0f, 0.45f, 0.05f);
+    }
+
+    return float3(0.08f, 0.08f, 0.08f);
 }
 
 float2 CLodVirtualShadowDirectionalNormalOffsetUv(
@@ -196,8 +232,7 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
         fragPosWorldSpace,
         mainCamera.positionWorldSpace.xyz,
         clipmapInfos[0].texelWorldSize,
-        clipmapInfos[0].pageTableResolution,
-        clipmapInfos[0].virtualResolution,
+        clipmapInfos[0].directionalLodBias,
         activeClipmapCount);
     debugInfo = CLodVirtualShadowInitDebugInfo(preferredClipmapIndex);
 
@@ -255,6 +290,10 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
     debugInfo.sampledClipmapIndex = preferredClipmapIndex;
     debugInfo.sampledPageEntry = pageEntry;
     debugInfo.sampledPhysicalPageIndex = physicalPageIndex;
+    if ((pageEntry & kCLodVirtualShadowRerenderedThisFrameMask) != 0u)
+    {
+        debugInfo.flags |= kCLodVirtualShadowDebugFlagSampledRerenderedThisFrame;
+    }
 
     row_major matrix cachedPageView = lightCamera.view;
     const uint pageViewInfoIndex =

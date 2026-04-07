@@ -829,7 +829,6 @@ std::vector<Cascade> setupDirectionalClipmaps(
     float fovY,
     float aspectRatio,
     const std::vector<float>& clipFarPlanes,
-    uint32_t virtualShadowPageTableResolution,
     float clipVerticalExtent)
 {
     using namespace DirectX;
@@ -855,7 +854,7 @@ std::vector<Cascade> setupDirectionalClipmaps(
     const float clipZeroScale = std::max(
         std::sqrt(clipZeroHalfWidth * clipZeroHalfWidth + clipZeroHalfHeight * clipZeroHalfHeight),
         1.0f);
-    const float ndcPageSize = 2.0f / std::max(static_cast<float>(virtualShadowPageTableResolution), 1.0f);
+    const float ndcPageSize = 2.0f / static_cast<float>(CLodVirtualShadowFixedVirtualPageCountPerAxis);
     const float clampedClipVerticalExtent = std::max(clipVerticalExtent, 1.0f);
     const float nearDistance = std::max(clampedClipVerticalExtent * 0.001f, 0.01f);
     const float farDistance = std::max(clampedClipVerticalExtent, nearDistance + 1.0f);

@@ -199,8 +199,11 @@ TextureDescription CreateVirtualShadowPhysicalPagesDescription()
 {
     TextureDescription desc;
     ImageDimensions dims;
-    dims.width = CLodVirtualShadowMaxPhysicalPagesPerAxis * CLodVirtualShadowPhysicalPageSize;
-    dims.height = CLodVirtualShadowMaxPhysicalPagesPerAxis * CLodVirtualShadowPhysicalPageSize;
+    const uint32_t maxPhysicalPages = CLodVirtualShadowMaxPhysicalPageCount;
+    const uint32_t atlasPagesWide = CLodVirtualShadowPhysicalAtlasPagesWideFromPageCount(maxPhysicalPages);
+    const uint32_t atlasPagesHigh = CLodVirtualShadowPhysicalAtlasPagesHighFromPageCount(maxPhysicalPages, atlasPagesWide);
+    dims.width = atlasPagesWide * CLodVirtualShadowPhysicalPageSize;
+    dims.height = atlasPagesHigh * CLodVirtualShadowPhysicalPageSize;
     dims.rowPitch = static_cast<uint64_t>(dims.width) * sizeof(uint32_t);
     dims.slicePitch = dims.rowPitch * static_cast<uint64_t>(dims.height);
     desc.imageDimensions.push_back(dims);
@@ -600,6 +603,7 @@ void CLodExtension::InitializeShadowResources()
 
     auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
     const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
+    const uint32_t maxShadowPhysicalPageCount = CLodVirtualShadowMaxPhysicalPageCount;
 
     m_shadowPageTableTexture = PixelBuffer::CreateSharedUnmaterialized(CreateVirtualShadowPageTableDescription());
     m_shadowPageTableTexture->SetName(MakeVariantResourceName(traits, "Virtual Shadow Page Table"));
@@ -616,7 +620,7 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodExtensionTypeTag>(typeEntity);
 
     m_shadowPageMetadataBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-        CLodVirtualShadowMaxPhysicalPageCount,
+        maxShadowPhysicalPageCount,
         sizeof(CLodVirtualShadowPhysicalPageMeta),
         true,
         false,
@@ -759,7 +763,7 @@ void CLodExtension::InitializeShadowResources()
     m_shadowMarkTileIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Mark Tile Indirect Args Buffer"));
 
     m_shadowFreePhysicalPagesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-        CLodVirtualShadowMaxPhysicalPageCount,
+        maxShadowPhysicalPageCount,
         sizeof(uint32_t),
         true,
         false,
@@ -772,7 +776,7 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodExtensionTypeTag>(typeEntity);
 
     m_shadowReusablePhysicalPagesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-        CLodVirtualShadowMaxPhysicalPageCount,
+        maxShadowPhysicalPageCount,
         sizeof(uint32_t),
         true,
         false,
@@ -792,7 +796,7 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodExtensionTypeTag>(typeEntity);
 
     m_shadowDirtyPageFlagsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
-        CLodVirtualShadowDirtyWordCount(CLodVirtualShadowMaxPhysicalPageCount),
+        CLodVirtualShadowDirtyWordCount(maxShadowPhysicalPageCount),
         sizeof(uint32_t),
         true,
         false,
@@ -814,7 +818,7 @@ void CLodExtension::InitializeShadowResources()
     m_shadowClipmapInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         CLodVirtualShadowMaxSupportedClipmapCount,
         sizeof(CLodVirtualShadowClipmapInfo),
-        false,
+        true,
         false,
         false,
         false);
