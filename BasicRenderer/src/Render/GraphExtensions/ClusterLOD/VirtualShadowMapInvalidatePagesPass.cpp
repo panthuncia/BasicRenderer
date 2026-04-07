@@ -2,7 +2,6 @@
 
 #include <vector>
 
-#include "Managers/MeshManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/RendererECSManager.h"
 #include "Managers/Singletons/SettingsManager.h"
@@ -91,30 +90,6 @@ void VirtualShadowMapInvalidatePagesPass::Update(const UpdateExecutionContext& e
 
         invalidatedInstancesBitset[perMeshInstanceBufferIndex >> 5u] |= 1u << (perMeshInstanceBufferIndex & 31u);
     };
-
-    MeshManager* meshManager = nullptr;
-    try {
-        auto getter = SettingsManager::GetInstance().getSettingGetter<std::function<MeshManager*()>>(CLodStreamingMeshManagerGetterSettingName);
-        meshManager = getter()();
-    }
-    catch (...) {
-    }
-
-    if (meshManager != nullptr) {
-        std::vector<uint32_t> upgradeInvalidationMeshInstances;
-        meshManager->ConsumeCLodShadowLodUpgradeInvalidationMeshInstances(upgradeInvalidationMeshInstances);
-        for (uint32_t perMeshInstanceBufferIndex : upgradeInvalidationMeshInstances) {
-            if (inputs.size() >= CLodVirtualShadowMaxInvalidationInputs) {
-                break;
-            }
-
-            CLodVirtualShadowInvalidationInput input{};
-            input.perMeshInstanceBufferIndex = perMeshInstanceBufferIndex;
-            input.flags = CLodVirtualShadowInvalidationFlagUseCurrentBounds;
-            inputs.push_back(input);
-            markInvalidatedInstance(perMeshInstanceBufferIndex);
-        }
-    }
 
     m_transformChangedQuery.each([&](flecs::entity entity, const Components::ObjectDrawInfo& drawInfo) {
         uint32_t flags = 0u;

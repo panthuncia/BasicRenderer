@@ -27,6 +27,12 @@
 #define CLOD_VSM_OCCLUSION_CULLING 0
 #endif
 
+// Set to 1 to reuse the current primary camera for VSM LOD decisions.
+// Defaults to 0 so shadow views use their own camera for both culling and LOD.
+#ifndef CLOD_VSM_USE_PRIMARY_CAMERA_FOR_LOD
+#define CLOD_VSM_USE_PRIMARY_CAMERA_FOR_LOD 0
+#endif
+
 // meshopt_Meshlet layout on GPU
 struct Meshlet
 {
@@ -253,6 +259,9 @@ bool CLodVirtualShadowFindClipmapForView(uint viewId, out uint outClipmapIndex, 
 
 uint CLodResolveLodViewId(uint cullViewId)
 {
+#if !CLOD_VSM_USE_PRIMARY_CAMERA_FOR_LOD
+    return cullViewId;
+#else
     uint clipmapIndex = 0u;
     CLodVirtualShadowClipmapInfo clipmapInfo;
     if (!CLodVirtualShadowFindClipmapForView(cullViewId, clipmapIndex, clipmapInfo))
@@ -263,6 +272,7 @@ uint CLodResolveLodViewId(uint cullViewId)
     ConstantBuffer<PerFrameBuffer> perFrameBuffer =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
     return perFrameBuffer.mainCameraIndex;
+#endif
 }
 
 bool CLodVirtualShadowComputeSphereAabbUvBounds(

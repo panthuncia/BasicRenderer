@@ -95,7 +95,7 @@ float2 CLodVirtualShadowDirectionalNormalOffsetUv(
     const float normalDotLight = saturate(dot(surfaceNormal, normalizedLightToFrag));
     const float angleScale = 1.0f - normalDotLight;
 
-    const float normalOffsetWorld = clipmapInfo.texelWorldSize * (10.25f + 0.15f * angleScale);
+    const float normalOffsetWorld = clipmapInfo.texelWorldSize * (15.0f + 0.1f * angleScale);
     const float3 offsetWorldPosition = fragPosWorldSpace - surfaceNormal * normalOffsetWorld;
 
     const float4 offsetLightSpace = mul(float4(offsetWorldPosition, 1.0f), lightCamera.viewProjection);
