@@ -52,9 +52,26 @@ struct CLodVirtualShadowCompactShadowCameraInfo
     uint3 pad;
 };
 
+struct CLodVirtualShadowMarkClipmapData
+{
+    float texelWorldSize;
+    uint pageOffsetX;
+    uint pageOffsetY;
+    uint pageTableLayer;
+    uint flags;
+    uint3 pad0;
+    float4 directionalPageViewRow;
+    row_major matrix shadowViewProjection;
+};
+
 bool CLodVirtualShadowCompactCameraIsOrtho(CLodVirtualShadowCompactShadowCameraInfo cameraInfo)
 {
     return cameraInfo.isOrtho != 0u;
+}
+
+bool CLodVirtualShadowMarkClipmapIsValid(CLodVirtualShadowMarkClipmapData clipmapData)
+{
+    return (clipmapData.flags & kCLodVirtualShadowClipmapValidFlag) != 0u;
 }
 
 struct CLodVirtualShadowStats
@@ -117,6 +134,15 @@ uint2 CLodVirtualShadowWrappedPageCoords(
     return uint2(
         CLodVirtualShadowWrapPageCoord(virtualPageCoords.x, clipmapInfo.pageOffsetX, kCLodVirtualShadowPageTableResolution),
         CLodVirtualShadowWrapPageCoord(virtualPageCoords.y, clipmapInfo.pageOffsetY, kCLodVirtualShadowPageTableResolution));
+}
+
+uint2 CLodVirtualShadowWrappedPageCoords(
+    uint2 virtualPageCoords,
+    CLodVirtualShadowMarkClipmapData clipmapData)
+{
+    return uint2(
+        CLodVirtualShadowWrapPageCoord(virtualPageCoords.x, clipmapData.pageOffsetX, kCLodVirtualShadowPageTableResolution),
+        CLodVirtualShadowWrapPageCoord(virtualPageCoords.y, clipmapData.pageOffsetY, kCLodVirtualShadowPageTableResolution));
 }
 
 uint2 CLodVirtualShadowVirtualTexelCoordsFromUv(float2 shadowUv)

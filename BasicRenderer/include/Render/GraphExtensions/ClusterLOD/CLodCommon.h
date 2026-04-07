@@ -188,6 +188,20 @@ struct CLodVirtualShadowCompactShadowCameraInfo
 
 static_assert(sizeof(CLodVirtualShadowCompactShadowCameraInfo) == 208u, "CLodVirtualShadowCompactShadowCameraInfo size must match HLSL");
 
+struct CLodVirtualShadowMarkClipmapData
+{
+    float texelWorldSize = 0.0f;
+    uint32_t pageOffsetX = 0u;
+    uint32_t pageOffsetY = 0u;
+    uint32_t pageTableLayer = 0u;
+    uint32_t flags = 0u;
+    uint32_t pad0[3] = {};
+    DirectX::XMFLOAT4 directionalPageViewRow{};
+    DirectX::XMMATRIX shadowViewProjection{};
+};
+
+static_assert(sizeof(CLodVirtualShadowMarkClipmapData) == 112u, "CLodVirtualShadowMarkClipmapData size must match HLSL");
+
 struct CLodVirtualShadowPageAllocationRequest
 {
     uint32_t virtualAddress = 0u;

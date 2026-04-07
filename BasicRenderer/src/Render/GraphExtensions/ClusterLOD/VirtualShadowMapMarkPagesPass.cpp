@@ -1,6 +1,7 @@
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapMarkPagesPass.h"
 
 #include "Managers/Singletons/PSOManager.h"
+#include "Managers/Singletons/SettingsManager.h"
 #include "BuiltinResources.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/RenderContext.h"
@@ -11,14 +12,14 @@
 VirtualShadowMapMarkPagesPass::VirtualShadowMapMarkPagesPass(
     std::shared_ptr<Buffer> allocationRequestsBuffer,
     std::shared_ptr<Buffer> allocationCountBuffer,
-    std::shared_ptr<Buffer> clipmapInfoBuffer,
+    std::shared_ptr<Buffer> markClipmapDataBuffer,
     std::shared_ptr<PixelBuffer> pageTableTexture,
     std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
     std::shared_ptr<Buffer> directionalPageViewInfoBuffer,
     std::shared_ptr<Buffer> statsBuffer)
     : m_allocationRequestsBuffer(std::move(allocationRequestsBuffer))
     , m_allocationCountBuffer(std::move(allocationCountBuffer))
-    , m_clipmapInfoBuffer(std::move(clipmapInfoBuffer))
+    , m_markClipmapDataBuffer(std::move(markClipmapDataBuffer))
     , m_pageTableTexture(std::move(pageTableTexture))
     , m_dirtyPageFlagsBuffer(std::move(dirtyPageFlagsBuffer))
     , m_directionalPageViewInfoBuffer(std::move(directionalPageViewInfoBuffer))
@@ -36,10 +37,9 @@ void VirtualShadowMapMarkPagesPass::DeclareResourceUsages(ComputePassBuilder* bu
 {
     builder->WithShaderResource(
             Builtin::Shadows::CLodCompactMainCamera,
-            Builtin::Shadows::CLodCompactShadowCameras,
             Builtin::PrimaryCamera::LinearDepthMap,
             Builtin::GBuffer::Normals,
-            m_clipmapInfoBuffer)
+            m_markClipmapDataBuffer)
         .WithUnorderedAccess(
             m_allocationRequestsBuffer,
             m_allocationCountBuffer,
@@ -47,8 +47,6 @@ void VirtualShadowMapMarkPagesPass::DeclareResourceUsages(ComputePassBuilder* bu
             m_dirtyPageFlagsBuffer,
             m_directionalPageViewInfoBuffer,
             m_statsBuffer);
-
-    builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 
 void VirtualShadowMapMarkPagesPass::Setup() {}
@@ -56,6 +54,9 @@ void VirtualShadowMapMarkPagesPass::Setup() {}
 void VirtualShadowMapMarkPagesPass::Update(const UpdateExecutionContext& executionContext)
 {
     (void)executionContext;
+    m_activeClipmapCount = (std::min)(
+        static_cast<uint32_t>(SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")()),
+        CLodVirtualShadowDefaultClipmapCount);
 }
 
 PassReturn VirtualShadowMapMarkPagesPass::Execute(PassExecutionContext& executionContext)
@@ -73,7 +74,7 @@ PassReturn VirtualShadowMapMarkPagesPass::Execute(PassExecutionContext& executio
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_REQUESTS_DESCRIPTOR_INDEX] = m_allocationRequestsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_REQUEST_COUNT_DESCRIPTOR_INDEX] = m_allocationCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_clipmapInfoBuffer->GetSRVInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_CLIPMAP_DATA_DESCRIPTOR_INDEX] = m_markClipmapDataBuffer->GetSRVInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_SCREEN_WIDTH] = context.renderResolution.x;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_SCREEN_HEIGHT] = context.renderResolution.y;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_CLIPMAP_COUNT] = CLodVirtualShadowDefaultClipmapCount;
@@ -82,6 +83,7 @@ PassReturn VirtualShadowMapMarkPagesPass::Execute(PassExecutionContext& executio
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_PAGE_VIEW_INFO_DESCRIPTOR_INDEX] = m_directionalPageViewInfoBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_ACTIVE_CLIPMAP_COUNT] = m_activeClipmapCount;
 
     commandList.PushConstants(
         rhi::ShaderStage::Compute,

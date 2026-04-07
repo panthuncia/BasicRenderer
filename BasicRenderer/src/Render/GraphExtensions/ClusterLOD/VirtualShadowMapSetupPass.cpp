@@ -103,6 +103,7 @@ VirtualShadowMapSetupPass::VirtualShadowMapSetupPass(
     std::shared_ptr<Buffer> allocationCountBuffer,
     std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
     std::shared_ptr<Buffer> clipmapInfoBuffer,
+    std::shared_ptr<Buffer> markClipmapDataBuffer,
     std::shared_ptr<Buffer> compactMainCameraBuffer,
     std::shared_ptr<Buffer> compactShadowCameraBuffer,
     std::shared_ptr<Buffer> statsBuffer,
@@ -113,6 +114,7 @@ VirtualShadowMapSetupPass::VirtualShadowMapSetupPass(
     , m_allocationCountBuffer(std::move(allocationCountBuffer))
     , m_dirtyPageFlagsBuffer(std::move(dirtyPageFlagsBuffer))
     , m_clipmapInfoBuffer(std::move(clipmapInfoBuffer))
+    , m_markClipmapDataBuffer(std::move(markClipmapDataBuffer))
     , m_compactMainCameraBuffer(std::move(compactMainCameraBuffer))
     , m_compactShadowCameraBuffer(std::move(compactShadowCameraBuffer))
     , m_statsBuffer(std::move(statsBuffer))
@@ -135,6 +137,7 @@ void VirtualShadowMapSetupPass::DeclareResourceUsages(ComputePassBuilder* builde
         m_pageMetadataBuffer,
         m_allocationCountBuffer,
         m_dirtyPageFlagsBuffer,
+        m_markClipmapDataBuffer,
         m_compactMainCameraBuffer,
         m_compactShadowCameraBuffer,
         m_statsBuffer);
@@ -165,6 +168,7 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
     BUFFER_UPLOAD(&runtimeState, sizeof(runtimeState), rg::runtime::UploadTarget::FromShared(m_runtimeStateBuffer), 0);
 
     std::array<CLodVirtualShadowClipmapInfo, CLodVirtualShadowDefaultClipmapCount> clipmapInfos{};
+    std::array<CLodVirtualShadowMarkClipmapData, CLodVirtualShadowDefaultClipmapCount> markClipmapData{};
     std::array<CLodVirtualShadowCompactShadowCameraInfo, CLodVirtualShadowDefaultClipmapCount> compactShadowCameras{};
     CLodVirtualShadowMainCameraInfo compactMainCamera{};
     DirectX::XMFLOAT3 currentDirectionalLightDirection{};
@@ -236,6 +240,20 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
                 clipmapInfo.shadowCameraBufferIndex = view->gpu.cameraBufferIndex;
                 clipmapInfo.clipLevel = clipmapIndex;
                 clipmapInfo.flags = CLodVirtualShadowClipmapValidFlag;
+
+                auto& markData = markClipmapData[clipmapIndex];
+                markData.texelWorldSize = clipmapInfo.texelWorldSize;
+                markData.pageOffsetX = clipmapInfo.pageOffsetX;
+                markData.pageOffsetY = clipmapInfo.pageOffsetY;
+                markData.pageTableLayer = clipmapInfo.pageTableLayer;
+                markData.flags = clipmapInfo.flags;
+                markData.directionalPageViewRow = DirectX::XMFLOAT4(
+                    view->cameraInfo.view.r[3].m128_f32[0],
+                    view->cameraInfo.view.r[3].m128_f32[1],
+                    view->cameraInfo.view.r[3].m128_f32[2],
+                    view->cameraInfo.view.r[3].m128_f32[3]);
+                markData.shadowViewProjection = view->cameraInfo.viewProjection;
+
                 compactShadowCameras[clipmapIndex].view = view->cameraInfo.view;
                 compactShadowCameras[clipmapIndex].projection = view->cameraInfo.jitteredProjection;
                 compactShadowCameras[clipmapIndex].viewProjection = view->cameraInfo.viewProjection;
@@ -263,10 +281,17 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
 
     for (uint32_t clipmapIndex = 0; clipmapIndex < CLodVirtualShadowDefaultClipmapCount; ++clipmapIndex) {
         auto& info = clipmapInfos[clipmapIndex];
+        auto& markData = markClipmapData[clipmapIndex];
         info.pageTableLayer = clipmapIndex;
         if (info.shadowCameraBufferIndex == 0xFFFFFFFFu) {
             info.texelWorldSize = static_cast<float>(CLodVirtualShadowPhysicalPageSize << clipmapIndex);
         }
+
+        markData.texelWorldSize = info.texelWorldSize;
+        markData.pageOffsetX = info.pageOffsetX;
+        markData.pageOffsetY = info.pageOffsetY;
+        markData.pageTableLayer = info.pageTableLayer;
+        markData.flags = info.flags;
 
         if (!m_resetResources && !ClipmapStructureEquals(info, g_previousClipmapInfos[clipmapIndex])) {
             m_resetReasonStructureMismatch = true;
@@ -283,6 +308,12 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
         clipmapInfos.data(),
         static_cast<uint32_t>(clipmapInfos.size() * sizeof(CLodVirtualShadowClipmapInfo)),
         rg::runtime::UploadTarget::FromShared(m_clipmapInfoBuffer),
+        0);
+
+    BUFFER_UPLOAD(
+        markClipmapData.data(),
+        static_cast<uint32_t>(markClipmapData.size() * sizeof(CLodVirtualShadowMarkClipmapData)),
+        rg::runtime::UploadTarget::FromShared(m_markClipmapDataBuffer),
         0);
 
     BUFFER_UPLOAD(

@@ -146,6 +146,7 @@ private:
     std::shared_ptr<Buffer> m_shadowDirtyPageFlagsBuffer;
     std::shared_ptr<PixelBuffer> m_shadowDirtyPageHierarchyTexture;
     std::shared_ptr<Buffer> m_shadowClipmapInfoBuffer;
+    std::shared_ptr<Buffer> m_shadowMarkClipmapDataBuffer;
     std::shared_ptr<Buffer> m_shadowCompactMainCameraBuffer;
     std::shared_ptr<Buffer> m_shadowCompactShadowCameraBuffer;
     std::shared_ptr<Buffer> m_shadowDirectionalPageViewInfoBuffer;

@@ -741,6 +741,18 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodVirtualShadowClipmapInfoTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
+    m_shadowMarkClipmapDataBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodVirtualShadowDefaultClipmapCount,
+        sizeof(CLodVirtualShadowMarkClipmapData),
+        true,
+        false,
+        false,
+        false);
+    m_shadowMarkClipmapDataBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Mark Clipmap Data Buffer"));
+    m_shadowMarkClipmapDataBuffer->GetECSEntity()
+        .set<Components::Resource>({ m_shadowMarkClipmapDataBuffer })
+        .add<CLodExtensionTypeTag>(typeEntity);
+
     m_shadowCompactMainCameraBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         1,
         sizeof(CLodVirtualShadowMainCameraInfo),
@@ -861,6 +873,7 @@ void CLodExtension::TagShadowResourceUsages()
     tagBufferUsage(m_shadowPageListHeaderBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowDirtyPageFlagsBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowClipmapInfoBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowMarkClipmapDataBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowCompactMainCameraBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowCompactShadowCameraBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowDirectionalPageViewInfoBuffer, "Cluster LOD virtual shadow maps");
@@ -955,6 +968,7 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_shadowPageListHeaderBuffer);
     releaseBufferBacking(m_shadowDirtyPageFlagsBuffer);
     releaseBufferBacking(m_shadowClipmapInfoBuffer);
+    releaseBufferBacking(m_shadowMarkClipmapDataBuffer);
     releaseBufferBacking(m_shadowCompactMainCameraBuffer);
     releaseBufferBacking(m_shadowCompactShadowCameraBuffer);
     releaseBufferBacking(m_shadowDirectionalPageViewInfoBuffer);
@@ -1398,6 +1412,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_shadowAllocationCountBuffer,
                 m_shadowDirtyPageFlagsBuffer,
                 m_shadowClipmapInfoBuffer,
+                m_shadowMarkClipmapDataBuffer,
                 m_shadowCompactMainCameraBuffer,
                 m_shadowCompactShadowCameraBuffer,
                 m_shadowStatsBuffer,
@@ -1440,12 +1455,13 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             std::make_shared<VirtualShadowMapMarkPagesPass>(
                 m_shadowAllocationRequestsBuffer,
                 m_shadowAllocationCountBuffer,
-                m_shadowClipmapInfoBuffer,
+                m_shadowMarkClipmapDataBuffer,
                 m_shadowPageTableTexture,
                 m_shadowDirtyPageFlagsBuffer,
                 m_shadowDirectionalPageViewInfoBuffer,
                 m_shadowStatsBuffer));
             shadowMarkPagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowInvalidatePagesPassName));
+			shadowMarkPagesPassDesc.preferredQueueKind = QueueKind::Graphics;
         outPasses.push_back(std::move(shadowMarkPagesPassDesc));
 
         const std::string shadowBuildPageListsPassName = MakeVariantPassName(traits, "VirtualShadowBuildPageListsPass");

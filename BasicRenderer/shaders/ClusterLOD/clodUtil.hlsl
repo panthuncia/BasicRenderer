@@ -302,6 +302,7 @@ void CLodVirtualShadowStatsIncrementVisitedDirty(RWStructuredBuffer<CLodVirtualS
 }
 
 bool CLodProjectWorldToShadowUv(float3 positionWS, CLodVirtualShadowCompactShadowCameraInfo shadowCamera, out float2 shadowUv);
+bool CLodProjectWorldToShadowUv(float3 positionWS, row_major matrix shadowViewProjection, out float2 shadowUv);
 
 void CLodVirtualShadowStatsIncrementSetupWrappedClear(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
 {
@@ -398,6 +399,25 @@ float3 CLodRayPlaneIntersection(float3 rayDirection, float3 rayOrigin, float3 pl
 bool CLodProjectWorldToShadowUv(float3 positionWS, CLodVirtualShadowCompactShadowCameraInfo shadowCamera, out float2 shadowUv)
 {
     const float4 shadowClip = mul(float4(positionWS, 1.0f), shadowCamera.viewProjection);
+    const float safeW = max(abs(shadowClip.w), 1.0e-6f);
+    const float3 projected = shadowClip.xyz / safeW;
+
+    if (projected.x < -1.0f || projected.x > 1.0f ||
+        projected.y < -1.0f || projected.y > 1.0f ||
+        projected.z < 0.0f || projected.z > 1.0f)
+    {
+        shadowUv = 0.0f.xx;
+        return false;
+    }
+
+    shadowUv = projected.xy * 0.5f + 0.5f;
+    shadowUv.y = 1.0f - shadowUv.y;
+    return true;
+}
+
+bool CLodProjectWorldToShadowUv(float3 positionWS, row_major matrix shadowViewProjection, out float2 shadowUv)
+{
+    const float4 shadowClip = mul(float4(positionWS, 1.0f), shadowViewProjection);
     const float safeW = max(abs(shadowClip.w), 1.0e-6f);
     const float3 projected = shadowClip.xyz / safeW;
 
@@ -951,12 +971,10 @@ void CLodVirtualShadowMarkPagesCSMain(uint3 dispatchThreadId : SV_DispatchThread
         return;
     }
 
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerFrameBuffer)];
     StructuredBuffer<CLodVirtualShadowMainCameraInfo> compactMainCameraBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodCompactMainCamera)];
-    StructuredBuffer<CLodVirtualShadowCompactShadowCameraInfo> compactShadowCameraBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodCompactShadowCameras)];
+    StructuredBuffer<CLodVirtualShadowMarkClipmapData> markClipmapDataBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_MARK_CLIPMAP_DATA_DESCRIPTOR_INDEX];
     Texture2D<float> depthTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PrimaryCamera::LinearDepthMap)];
     Texture2D<float4> normalsTexture = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::GBuffer::Normals)];
-    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_MARK_CLIPMAP_INFO_DESCRIPTOR_INDEX];
     RWStructuredBuffer<uint4> allocationRequests = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_MARK_REQUESTS_DESCRIPTOR_INDEX];
     RWStructuredBuffer<uint> allocationCountBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_MARK_REQUEST_COUNT_DESCRIPTOR_INDEX];
     RWTexture2DArray<uint> pageTable = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_MARK_PAGE_TABLE_DESCRIPTOR_INDEX];
@@ -988,24 +1006,7 @@ void CLodVirtualShadowMarkPagesCSMain(uint3 dispatchThreadId : SV_DispatchThread
         normalWS = normalize(normalWS);
     }
 
-    const float2 uvOffset = 0.5f * invScreenSize;
-    const float2 sampleUvBR = saturate(uv + float2(uvOffset.x, uvOffset.y));
-    const float2 sampleUvBL = saturate(uv + float2(-uvOffset.x, uvOffset.y));
-    const float2 sampleUvTR = saturate(uv + float2(uvOffset.x, -uvOffset.y));
-    const float2 sampleUvTL = saturate(uv + float2(-uvOffset.x, -uvOffset.y));
-
-    const float3 sampleWsBR = CLodWorldSpaceFromScreenUv(sampleUvBR, linearDepth, mainCamera);
-    const float3 sampleWsBL = CLodWorldSpaceFromScreenUv(sampleUvBL, linearDepth, mainCamera);
-    const float3 sampleWsTR = CLodWorldSpaceFromScreenUv(sampleUvTR, linearDepth, mainCamera);
-    const float3 sampleWsTL = CLodWorldSpaceFromScreenUv(sampleUvTL, linearDepth, mainCamera);
-
-    const float3 rayOrigin = mainCamera.positionWorldSpace.xyz;
-    const float3 footprintBR = CLodRayPlaneIntersection(normalize(sampleWsBR - rayOrigin), rayOrigin, normalWS, positionWS);
-    const float3 footprintBL = CLodRayPlaneIntersection(normalize(sampleWsBL - rayOrigin), rayOrigin, normalWS, positionWS);
-    const float3 footprintTR = CLodRayPlaneIntersection(normalize(sampleWsTR - rayOrigin), rayOrigin, normalWS, positionWS);
-    const float3 footprintTL = CLodRayPlaneIntersection(normalize(sampleWsTL - rayOrigin), rayOrigin, normalWS, positionWS);
-
-    const uint activeClipmapCount = min(perFrameBuffer.numShadowCascades, CLOD_VIRTUAL_SHADOW_MARK_CLIPMAP_COUNT);
+    const uint activeClipmapCount = CLOD_VIRTUAL_SHADOW_MARK_ACTIVE_CLIPMAP_COUNT;
     if (activeClipmapCount == 0u)
     {
         return;
@@ -1014,35 +1015,18 @@ void CLodVirtualShadowMarkPagesCSMain(uint3 dispatchThreadId : SV_DispatchThread
     const uint clipmapIndex = CLodVirtualShadowSelectClipmapIndex(
         positionWS,
         mainCamera.positionWorldSpace.xyz,
-        clipmapInfos[0].texelWorldSize,
+        markClipmapDataBuffer[0].texelWorldSize,
         activeClipmapCount);
 
-    const CLodVirtualShadowClipmapInfo clipmapInfo = clipmapInfos[clipmapIndex];
-    if (!CLodVirtualShadowClipmapIsValid(clipmapInfo))
+    const CLodVirtualShadowMarkClipmapData clipmapData = markClipmapDataBuffer[clipmapIndex];
+    if (!CLodVirtualShadowMarkClipmapIsValid(clipmapData))
     {
         return;
     }
 
     CLodVirtualShadowStatsIncrementSelected(statsBuffer, clipmapIndex);
 
-    const CLodVirtualShadowCompactShadowCameraInfo shadowCamera = compactShadowCameraBuffer[clipmapIndex];
-    const float4 directionalPageViewRow = CLodDirectionalShadowPageViewRow(shadowCamera);
-    float2 shadowUvCenter;
-    bool validCenter = CLodProjectWorldToShadowUv(positionWS, shadowCamera, shadowUvCenter);
-    float2 shadowUvBR;
-    bool validBR = CLodProjectWorldToShadowUv(footprintBR, shadowCamera, shadowUvBR);
-    float2 shadowUvBL;
-    bool validBL = CLodProjectWorldToShadowUv(footprintBL, shadowCamera, shadowUvBL);
-    float2 shadowUvTR;
-    bool validTR = CLodProjectWorldToShadowUv(footprintTR, shadowCamera, shadowUvTR);
-    float2 shadowUvTL;
-    bool validTL = CLodProjectWorldToShadowUv(footprintTL, shadowCamera, shadowUvTL);
-
-    if (!validCenter && !validBR && !validBL && !validTR && !validTL)
-    {
-        CLodVirtualShadowStatsIncrementProjectionRejected(statsBuffer, clipmapIndex);
-        return;
-    }
+    const float4 directionalPageViewRow = clipmapData.directionalPageViewRow;
 
     uint2 markedPages[5];
     [unroll]
@@ -1051,32 +1035,16 @@ void CLodVirtualShadowMarkPagesCSMain(uint3 dispatchThreadId : SV_DispatchThread
         markedPages[initIndex] = uint2(0xFFFFFFFFu, 0xFFFFFFFFu);
     }
     uint markedPageCount = 0u;
+    bool anyValidProjection = false;
 
-    uint2 logicalPages[5];
-    [unroll]
-    for (uint initIndex = 0u; initIndex < 5u; ++initIndex)
-    {
-        logicalPages[initIndex] = uint2(0xFFFFFFFFu, 0xFFFFFFFFu);
-    }
-
-#define CLOD_STORE_LOGICAL_PAGE(pageIndex, validFlag, uvValue) \
-    if (validFlag) { \
-        logicalPages[pageIndex] = CLodVirtualShadowVirtualPageCoordsFromUv(uvValue); \
-    }
-
-    CLOD_STORE_LOGICAL_PAGE(0u, validCenter, shadowUvCenter);
-    CLOD_STORE_LOGICAL_PAGE(1u, validBR, shadowUvBR);
-    CLOD_STORE_LOGICAL_PAGE(2u, validBL, shadowUvBL);
-    CLOD_STORE_LOGICAL_PAGE(3u, validTR, shadowUvTR);
-    CLOD_STORE_LOGICAL_PAGE(4u, validTL, shadowUvTL);
-
-#undef CLOD_STORE_LOGICAL_PAGE
-
-#define CLOD_MARK_FOOTPRINT_PAGE(validFlag, uvValue) \
-    if (validFlag) { \
+#define CLOD_MARK_PROJECTED_PAGE(positionValue) \
+    { \
+        float2 shadowUv = 0.0f.xx; \
+        if (CLodProjectWorldToShadowUv(positionValue, clipmapData.shadowViewProjection, shadowUv)) { \
+            anyValidProjection = true; \
         const uint2 wrappedPageCoords = CLodVirtualShadowWrappedPageCoords( \
-            CLodVirtualShadowVirtualPageCoordsFromUv(uvValue), \
-            clipmapInfo); \
+                CLodVirtualShadowVirtualPageCoordsFromUv(shadowUv), \
+                clipmapData); \
         bool alreadyMarked = false; \
         [unroll] \
         for (uint markedIndex = 0u; markedIndex < 5u; ++markedIndex) { \
@@ -1091,7 +1059,7 @@ void CLodVirtualShadowMarkPagesCSMain(uint3 dispatchThreadId : SV_DispatchThread
             markedPageCount += 1u; \
             CLodMarkVirtualShadowWrappedPage( \
                 wrappedPageCoords, \
-                clipmapInfo.pageTableLayer, \
+                    clipmapData.pageTableLayer, \
                 activeClipmapCount, \
                 directionalPageViewRow, \
                 allocationRequests, \
@@ -1101,15 +1069,40 @@ void CLodVirtualShadowMarkPagesCSMain(uint3 dispatchThreadId : SV_DispatchThread
                 directionalPageViewInfo, \
                 statsBuffer); \
         } \
+        } \
     }
 
-    CLOD_MARK_FOOTPRINT_PAGE(validCenter, shadowUvCenter);
-    CLOD_MARK_FOOTPRINT_PAGE(validBR, shadowUvBR);
-    CLOD_MARK_FOOTPRINT_PAGE(validBL, shadowUvBL);
-    CLOD_MARK_FOOTPRINT_PAGE(validTR, shadowUvTR);
-    CLOD_MARK_FOOTPRINT_PAGE(validTL, shadowUvTL);
+    CLOD_MARK_PROJECTED_PAGE(positionWS);
 
-#undef CLOD_MARK_FOOTPRINT_PAGE
+    const float2 uvOffset = 0.5f * invScreenSize;
+    const float3 rayOrigin = mainCamera.positionWorldSpace.xyz;
+
+    const float2 sampleUvBR = saturate(uv + float2(uvOffset.x, uvOffset.y));
+    const float3 sampleWsBR = CLodWorldSpaceFromScreenUv(sampleUvBR, linearDepth, mainCamera);
+    const float3 footprintBR = CLodRayPlaneIntersection(normalize(sampleWsBR - rayOrigin), rayOrigin, normalWS, positionWS);
+    CLOD_MARK_PROJECTED_PAGE(footprintBR);
+
+    const float2 sampleUvBL = saturate(uv + float2(-uvOffset.x, uvOffset.y));
+    const float3 sampleWsBL = CLodWorldSpaceFromScreenUv(sampleUvBL, linearDepth, mainCamera);
+    const float3 footprintBL = CLodRayPlaneIntersection(normalize(sampleWsBL - rayOrigin), rayOrigin, normalWS, positionWS);
+    CLOD_MARK_PROJECTED_PAGE(footprintBL);
+
+    const float2 sampleUvTR = saturate(uv + float2(uvOffset.x, -uvOffset.y));
+    const float3 sampleWsTR = CLodWorldSpaceFromScreenUv(sampleUvTR, linearDepth, mainCamera);
+    const float3 footprintTR = CLodRayPlaneIntersection(normalize(sampleWsTR - rayOrigin), rayOrigin, normalWS, positionWS);
+    CLOD_MARK_PROJECTED_PAGE(footprintTR);
+
+    const float2 sampleUvTL = saturate(uv + float2(-uvOffset.x, -uvOffset.y));
+    const float3 sampleWsTL = CLodWorldSpaceFromScreenUv(sampleUvTL, linearDepth, mainCamera);
+    const float3 footprintTL = CLodRayPlaneIntersection(normalize(sampleWsTL - rayOrigin), rayOrigin, normalWS, positionWS);
+    CLOD_MARK_PROJECTED_PAGE(footprintTL);
+
+    if (!anyValidProjection)
+    {
+        CLodVirtualShadowStatsIncrementProjectionRejected(statsBuffer, clipmapIndex);
+    }
+
+#undef CLOD_MARK_PROJECTED_PAGE
 
 }
 

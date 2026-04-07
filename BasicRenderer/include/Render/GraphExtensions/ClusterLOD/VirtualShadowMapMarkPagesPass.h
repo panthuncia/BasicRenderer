@@ -13,7 +13,7 @@ public:
     VirtualShadowMapMarkPagesPass(
         std::shared_ptr<Buffer> allocationRequestsBuffer,
         std::shared_ptr<Buffer> allocationCountBuffer,
-        std::shared_ptr<Buffer> clipmapInfoBuffer,
+        std::shared_ptr<Buffer> markClipmapDataBuffer,
         std::shared_ptr<PixelBuffer> pageTableTexture,
         std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
         std::shared_ptr<Buffer> directionalPageViewInfoBuffer,
@@ -29,9 +29,10 @@ private:
     PipelineState m_pso;
     std::shared_ptr<Buffer> m_allocationRequestsBuffer;
     std::shared_ptr<Buffer> m_allocationCountBuffer;
-    std::shared_ptr<Buffer> m_clipmapInfoBuffer;
+    std::shared_ptr<Buffer> m_markClipmapDataBuffer;
     std::shared_ptr<PixelBuffer> m_pageTableTexture;
     std::shared_ptr<Buffer> m_dirtyPageFlagsBuffer;
     std::shared_ptr<Buffer> m_directionalPageViewInfoBuffer;
     std::shared_ptr<Buffer> m_statsBuffer;
+    uint32_t m_activeClipmapCount = 0u;
 };
