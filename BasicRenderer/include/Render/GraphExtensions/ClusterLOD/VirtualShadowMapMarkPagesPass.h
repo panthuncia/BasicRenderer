@@ -2,6 +2,8 @@
 
 #include <memory>
 
+#include <rhi.h>
+
 #include "Render/PipelineState.h"
 #include "RenderPasses/Base/ComputePass.h"
 
@@ -11,6 +13,9 @@ class PixelBuffer;
 class VirtualShadowMapMarkPagesPass final : public ComputePass {
 public:
     VirtualShadowMapMarkPagesPass(
+        std::shared_ptr<Buffer> tileWorkBuffer,
+        std::shared_ptr<Buffer> tileCountBuffer,
+        std::shared_ptr<Buffer> indirectArgsBuffer,
         std::shared_ptr<Buffer> allocationRequestsBuffer,
         std::shared_ptr<Buffer> allocationCountBuffer,
         std::shared_ptr<Buffer> markClipmapDataBuffer,
@@ -27,6 +32,10 @@ public:
 
 private:
     PipelineState m_pso;
+    rhi::CommandSignaturePtr m_commandSignature;
+    std::shared_ptr<Buffer> m_tileWorkBuffer;
+    std::shared_ptr<Buffer> m_tileCountBuffer;
+    std::shared_ptr<Buffer> m_indirectArgsBuffer;
     std::shared_ptr<Buffer> m_allocationRequestsBuffer;
     std::shared_ptr<Buffer> m_allocationCountBuffer;
     std::shared_ptr<Buffer> m_markClipmapDataBuffer;

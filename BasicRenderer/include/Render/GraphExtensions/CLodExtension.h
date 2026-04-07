@@ -140,6 +140,9 @@ private:
     std::shared_ptr<Buffer> m_shadowAllocationRequestsBuffer;
     std::shared_ptr<Buffer> m_shadowAllocationCountBuffer;
     std::shared_ptr<Buffer> m_shadowAllocationIndirectArgsBuffer;
+    std::shared_ptr<Buffer> m_shadowMarkTileWorkBuffer;
+    std::shared_ptr<Buffer> m_shadowMarkTileCountBuffer;
+    std::shared_ptr<Buffer> m_shadowMarkTileIndirectArgsBuffer;
     std::shared_ptr<Buffer> m_shadowFreePhysicalPagesBuffer;
     std::shared_ptr<Buffer> m_shadowReusablePhysicalPagesBuffer;
     std::shared_ptr<Buffer> m_shadowPageListHeaderBuffer;

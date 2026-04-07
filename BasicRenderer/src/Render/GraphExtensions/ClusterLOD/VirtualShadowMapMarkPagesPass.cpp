@@ -1,5 +1,6 @@
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapMarkPagesPass.h"
 
+#include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "BuiltinResources.h"
@@ -10,6 +11,9 @@
 #include "../shaders/PerPassRootConstants/clodVirtualShadowMarkRootConstants.h"
 
 VirtualShadowMapMarkPagesPass::VirtualShadowMapMarkPagesPass(
+    std::shared_ptr<Buffer> tileWorkBuffer,
+    std::shared_ptr<Buffer> tileCountBuffer,
+    std::shared_ptr<Buffer> indirectArgsBuffer,
     std::shared_ptr<Buffer> allocationRequestsBuffer,
     std::shared_ptr<Buffer> allocationCountBuffer,
     std::shared_ptr<Buffer> markClipmapDataBuffer,
@@ -17,7 +21,10 @@ VirtualShadowMapMarkPagesPass::VirtualShadowMapMarkPagesPass(
     std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
     std::shared_ptr<Buffer> directionalPageViewInfoBuffer,
     std::shared_ptr<Buffer> statsBuffer)
-    : m_allocationRequestsBuffer(std::move(allocationRequestsBuffer))
+    : m_tileWorkBuffer(std::move(tileWorkBuffer))
+    , m_tileCountBuffer(std::move(tileCountBuffer))
+    , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
+    , m_allocationRequestsBuffer(std::move(allocationRequestsBuffer))
     , m_allocationCountBuffer(std::move(allocationCountBuffer))
     , m_markClipmapDataBuffer(std::move(markClipmapDataBuffer))
     , m_pageTableTexture(std::move(pageTableTexture))
@@ -31,18 +38,29 @@ VirtualShadowMapMarkPagesPass::VirtualShadowMapMarkPagesPass(
         L"CLodVirtualShadowMarkPagesCSMain",
         {},
         "CLod.VirtualShadow.MarkPages.PSO");
+
+    rhi::IndirectArg dispatchArgs[] = {
+        {.kind = rhi::IndirectArgKind::Dispatch }
+    };
+
+    auto device = DeviceManager::GetInstance().GetDevice();
+    device.CreateCommandSignature(
+        rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(dispatchArgs, 1), sizeof(CLodReyesDispatchIndirectCommand) },
+        PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
+        m_commandSignature);
 }
 
 void VirtualShadowMapMarkPagesPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
     builder->WithShaderResource(
             Builtin::Shadows::CLodCompactMainCamera,
-            Builtin::PrimaryCamera::LinearDepthMap,
-            Builtin::GBuffer::Normals,
+            m_tileWorkBuffer,
+            m_tileCountBuffer,
             m_markClipmapDataBuffer)
+        .WithIndirectArguments(m_indirectArgsBuffer)
         .WithUnorderedAccess(
-            m_allocationRequestsBuffer,
             m_allocationCountBuffer,
+            m_allocationRequestsBuffer,
             m_pageTableTexture,
             m_dirtyPageFlagsBuffer,
             m_directionalPageViewInfoBuffer,
@@ -73,6 +91,8 @@ PassReturn VirtualShadowMapMarkPagesPass::Execute(PassExecutionContext& executio
     uint32_t rootConstants[NumMiscUintRootConstants] = {};
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_REQUESTS_DESCRIPTOR_INDEX] = m_allocationRequestsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_REQUEST_COUNT_DESCRIPTOR_INDEX] = m_allocationCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_TILE_WORK_DESCRIPTOR_INDEX] = m_tileWorkBuffer->GetSRVInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_MARK_TILE_COUNT_DESCRIPTOR_INDEX] = m_tileCountBuffer->GetSRVInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_CLIPMAP_DATA_DESCRIPTOR_INDEX] = m_markClipmapDataBuffer->GetSRVInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_MARK_SCREEN_WIDTH] = context.renderResolution.x;
@@ -93,10 +113,7 @@ PassReturn VirtualShadowMapMarkPagesPass::Execute(PassExecutionContext& executio
         NumMiscUintRootConstants,
         rootConstants);
 
-    constexpr uint32_t kThreadsPerDimension = 16u;
-    const uint32_t groupCountX = (context.renderResolution.x + kThreadsPerDimension - 1u) / kThreadsPerDimension;
-    const uint32_t groupCountY = (context.renderResolution.y + kThreadsPerDimension - 1u) / kThreadsPerDimension;
-    commandList.Dispatch(groupCountX, groupCountY, 1u);
+    commandList.ExecuteIndirect(m_commandSignature->GetHandle(), m_indirectArgsBuffer->GetAPIResource().GetHandle(), 0, {}, 0, 1);
 
     return {};
 }

@@ -121,6 +121,10 @@ inline constexpr uint32_t CLodVirtualShadowDefaultPageTableResolution =
 inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalPagesPerAxis = 64u;
 inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalPageCount =
     CLodVirtualShadowDefaultPhysicalPagesPerAxis * CLodVirtualShadowDefaultPhysicalPagesPerAxis;
+inline constexpr uint32_t CLodVirtualShadowMarkTileSize = 16u;
+inline constexpr uint32_t CLodVirtualShadowMaxMarkTileGridDimension = 512u;
+inline constexpr uint32_t CLodVirtualShadowMaxMarkTileCount =
+    CLodVirtualShadowMaxMarkTileGridDimension * CLodVirtualShadowMaxMarkTileGridDimension;
 inline constexpr uint32_t CLodVirtualShadowMaxAllocationRequests = 1u << 16;
 inline constexpr uint32_t CLodVirtualShadowMaxInvalidationInputs = 1u << 16;
 inline constexpr uint32_t CLodVirtualShadowMovedInstanceBitCapacity = 1u << 20;
@@ -201,6 +205,16 @@ struct CLodVirtualShadowMarkClipmapData
 };
 
 static_assert(sizeof(CLodVirtualShadowMarkClipmapData) == 112u, "CLodVirtualShadowMarkClipmapData size must match HLSL");
+
+struct CLodVirtualShadowMarkTileWorkItem
+{
+    uint32_t tileCoordX = 0u;
+    uint32_t tileCoordY = 0u;
+    uint32_t minDepthBits = 0x7F7FFFFFu;
+    uint32_t maxDepthBits = 0u;
+};
+
+static_assert(sizeof(CLodVirtualShadowMarkTileWorkItem) == 16u, "CLodVirtualShadowMarkTileWorkItem size must match HLSL");
 
 struct CLodVirtualShadowPageAllocationRequest
 {

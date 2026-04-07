@@ -40,6 +40,7 @@
 #include "Render/GraphExtensions/ClusterLOD/ReyesTessellationTableUploadPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapAllocatePagesPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapBuildPageListsPass.h"
+#include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapBuildMarkTilesPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapClearDirtyBitsPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapClearPagesPass.h"
 #include "Render/GraphExtensions/ClusterLOD/VirtualShadowMapFreeWrappedPagesPass.h"
@@ -675,6 +676,21 @@ void CLodExtension::InitializeShadowResources()
     m_shadowAllocationIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false, false);
     m_shadowAllocationIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Allocation Indirect Args Buffer"));
 
+    m_shadowMarkTileWorkBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodVirtualShadowMaxMarkTileCount,
+        sizeof(CLodVirtualShadowMarkTileWorkItem),
+        true,
+        false,
+        false,
+        false);
+    m_shadowMarkTileWorkBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Mark Tile Work Buffer"));
+
+    m_shadowMarkTileCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_shadowMarkTileCountBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Mark Tile Count Buffer"));
+
+    m_shadowMarkTileIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false, false);
+    m_shadowMarkTileIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Mark Tile Indirect Args Buffer"));
+
     m_shadowFreePhysicalPagesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         CLodVirtualShadowDefaultPhysicalPageCount,
         sizeof(uint32_t),
@@ -868,6 +884,9 @@ void CLodExtension::TagShadowResourceUsages()
     tagBufferUsage(m_shadowAllocationRequestsBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowAllocationCountBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowAllocationIndirectArgsBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowMarkTileWorkBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowMarkTileCountBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowMarkTileIndirectArgsBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowFreePhysicalPagesBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowReusablePhysicalPagesBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowPageListHeaderBuffer, "Cluster LOD virtual shadow maps");
@@ -963,6 +982,9 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_shadowAllocationRequestsBuffer);
     releaseBufferBacking(m_shadowAllocationCountBuffer);
     releaseBufferBacking(m_shadowAllocationIndirectArgsBuffer);
+    releaseBufferBacking(m_shadowMarkTileWorkBuffer);
+    releaseBufferBacking(m_shadowMarkTileCountBuffer);
+    releaseBufferBacking(m_shadowMarkTileIndirectArgsBuffer);
     releaseBufferBacking(m_shadowFreePhysicalPagesBuffer);
     releaseBufferBacking(m_shadowReusablePhysicalPagesBuffer);
     releaseBufferBacking(m_shadowPageListHeaderBuffer);
@@ -1450,9 +1472,34 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         outPasses.push_back(std::move(shadowInvalidatePagesPassDesc));
 
         const std::string shadowMarkPagesPassName = MakeVariantPassName(traits, "VirtualShadowMarkPagesPass");
+        const std::string shadowBuildMarkTilesPassName = MakeVariantPassName(traits, "VirtualShadowBuildMarkTilesPass");
+        auto shadowBuildMarkTilesPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowBuildMarkTilesPassName,
+            std::make_shared<VirtualShadowMapBuildMarkTilesPass>(
+                m_shadowMarkTileWorkBuffer,
+                m_shadowMarkTileCountBuffer));
+            shadowBuildMarkTilesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowInvalidatePagesPassName));
+            shadowBuildMarkTilesPassDesc.preferredQueueKind = QueueKind::Graphics;
+        outPasses.push_back(std::move(shadowBuildMarkTilesPassDesc));
+
+        const std::string shadowBuildMarkTileDispatchArgsPassName = MakeVariantPassName(traits, "VirtualShadowBuildMarkTileDispatchArgsPass");
+        auto shadowBuildMarkTileDispatchArgsPassDesc = RenderGraph::ExternalPassDesc::Compute(
+            shadowBuildMarkTileDispatchArgsPassName,
+            std::make_shared<ReyesCreateDispatchArgsPass>(
+                m_shadowMarkTileCountBuffer,
+                m_shadowMarkTileIndirectArgsBuffer,
+                nullptr,
+                64u,
+                CLodVirtualShadowMaxMarkTileCount));
+        shadowBuildMarkTileDispatchArgsPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowBuildMarkTilesPassName));
+        outPasses.push_back(std::move(shadowBuildMarkTileDispatchArgsPassDesc));
+
         auto shadowMarkPagesPassDesc = RenderGraph::ExternalPassDesc::Compute(
             shadowMarkPagesPassName,
             std::make_shared<VirtualShadowMapMarkPagesPass>(
+                m_shadowMarkTileWorkBuffer,
+                m_shadowMarkTileCountBuffer,
+                m_shadowMarkTileIndirectArgsBuffer,
                 m_shadowAllocationRequestsBuffer,
                 m_shadowAllocationCountBuffer,
                 m_shadowMarkClipmapDataBuffer,
@@ -1460,7 +1507,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_shadowDirtyPageFlagsBuffer,
                 m_shadowDirectionalPageViewInfoBuffer,
                 m_shadowStatsBuffer));
-            shadowMarkPagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowInvalidatePagesPassName));
+            shadowMarkPagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowBuildMarkTileDispatchArgsPassName));
 			shadowMarkPagesPassDesc.preferredQueueKind = QueueKind::Graphics;
         outPasses.push_back(std::move(shadowMarkPagesPassDesc));
 

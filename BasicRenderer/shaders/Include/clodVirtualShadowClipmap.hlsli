@@ -19,6 +19,7 @@ static const uint kCLodVirtualShadowMovedInstanceBitCapacity = 1u << 20;
 static const uint kCLodVirtualShadowMovedInstanceBitWordCount =
     (kCLodVirtualShadowMovedInstanceBitCapacity + 31u) / 32u;
 static const uint kInvalidShadowCameraIndex = 0xFFFFFFFFu;
+static const uint kCLodVirtualShadowMarkTileSize = 16u;
 
 struct CLodVirtualShadowClipmapInfo
 {
@@ -62,6 +63,14 @@ struct CLodVirtualShadowMarkClipmapData
     uint3 pad0;
     float4 directionalPageViewRow;
     row_major matrix shadowViewProjection;
+};
+
+struct CLodVirtualShadowMarkTileWorkItem
+{
+    uint tileCoordX;
+    uint tileCoordY;
+    uint minDepthBits;
+    uint maxDepthBits;
 };
 
 bool CLodVirtualShadowCompactCameraIsOrtho(CLodVirtualShadowCompactShadowCameraInfo cameraInfo)
