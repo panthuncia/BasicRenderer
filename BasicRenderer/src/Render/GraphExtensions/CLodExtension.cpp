@@ -1479,7 +1479,6 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_shadowMarkTileWorkBuffer,
                 m_shadowMarkTileCountBuffer));
             shadowBuildMarkTilesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowInvalidatePagesPassName));
-            shadowBuildMarkTilesPassDesc.preferredQueueKind = QueueKind::Graphics;
         outPasses.push_back(std::move(shadowBuildMarkTilesPassDesc));
 
         const std::string shadowBuildMarkTileDispatchArgsPassName = MakeVariantPassName(traits, "VirtualShadowBuildMarkTileDispatchArgsPass");
@@ -1489,7 +1488,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_shadowMarkTileCountBuffer,
                 m_shadowMarkTileIndirectArgsBuffer,
                 nullptr,
-                64u,
+                128u,
                 CLodVirtualShadowMaxMarkTileCount));
         shadowBuildMarkTileDispatchArgsPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowBuildMarkTilesPassName));
         outPasses.push_back(std::move(shadowBuildMarkTileDispatchArgsPassDesc));

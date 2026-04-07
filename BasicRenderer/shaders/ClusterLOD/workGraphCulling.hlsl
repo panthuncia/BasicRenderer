@@ -468,11 +468,12 @@ bool CLodVirtualShadowDirtyHierarchyAnyHit(
 
 // Set to 1 to use AABB-from-sphere projection for the dirty page query,
 // 0 to use the original projected bounding sphere footprint directly.
+#define CLOD_VSM_USE_AABB_DIRTY_QUERY 1
 #ifndef CLOD_VSM_USE_AABB_DIRTY_QUERY
 #define CLOD_VSM_USE_AABB_DIRTY_QUERY 0
 #endif
 
-bool CLodVirtualShadowMeshletTouchesDirtyPages(float3 worldCenter, float radiusWorld, uint viewId)
+bool CLodVirtualShadowBoundsTouchDirtyPages(float3 worldCenter, float radiusWorld, uint viewId)
 {
     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_QUERIES, 1);
 
@@ -538,6 +539,11 @@ bool CLodVirtualShadowMeshletTouchesDirtyPages(float3 worldCenter, float radiusW
     }
 
     return touchesDirtyPages;
+}
+
+bool CLodVirtualShadowMeshletTouchesDirtyPages(float3 worldCenter, float radiusWorld, uint viewId)
+{
+    return CLodVirtualShadowBoundsTouchDirtyPages(worldCenter, radiusWorld, viewId);
 }
 
 bool CLodVirtualShadowInstanceInvalidatedThisFrame(uint instanceIndex)
@@ -1105,6 +1111,10 @@ void WG_TraverseNodes(
         const float3 nodeCenterViewSpace = ToViewSpace(nodeCullCenterObjectSpace, objectModelMatrix, cullCamera.view);
         const float nodeRadiusWorld = nodeCullRadiusObjectSpace * cullUniformScale;
         const bool nodeCulled = !replaySource && SphereOutsideFrustumViewSpace(nodeCenterViewSpace, nodeRadiusWorld, cullCamera);
+    #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+        const bool objectInvalidatedThisFrame = CLodVirtualShadowInstanceInvalidatedThisFrame(rec.instanceIndex);
+        const bool dirtyPageCullingEnabled = CLodWorkGraphShadowDirtyPageCullingEnabled() && !objectInvalidatedThisFrame;
+    #endif
 
         if (nodeCulled) {
             WGTelemetryAdd(WG_COUNTER_TRAVERSE_CULLED_NODE_RECORDS, 1);
@@ -1135,77 +1145,94 @@ void WG_TraverseNodes(
                     WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
                 }
                 else {
-                    // Inlined SegmentEvaluate
-                    StructuredBuffer<ClusterLODGroupSegment> segments =
-                        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Segments)];
-                    const uint segGlobalIndex = clodMeshMetadata.segmentsBase + node.range.indexOrOffset;
-                    const ClusterLODGroupSegment seg = segments[segGlobalIndex];
-
-                    // Used-groups tracking: mark the owning group as touched for streaming protection
+                    bool nodeTouchesDirtyPages = true;
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+                    if (dirtyPageCullingEnabled)
                     {
-                        RWStructuredBuffer<uint> usedGroupsCounter =
-                            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroupsCounter)];
-                        RWStructuredBuffer<uint> usedGroupsBuffer =
-                            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroups)];
-                        uint usedSlot = 0;
-                        InterlockedAdd(usedGroupsCounter[0], 1u, usedSlot);
-                        if (usedSlot < CLOD_USED_GROUPS_CAPACITY) {
-                            usedGroupsBuffer[usedSlot] = groupGlobalIndex;
-                        }
+                        const float3 nodeCullCenterWorld = mul(float4(nodeCullCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
+                        nodeTouchesDirtyPages = CLodVirtualShadowBoundsTouchDirtyPages(nodeCullCenterWorld, nodeRadiusWorld, rec.viewId);
                     }
+#endif
 
-                    // LOD condition 1 already confirmed by nodeWantsTraversal.
-                    bool shouldEmit = (seg.meshletCount != 0);
-
-                    // Suppress emission when own group's pages are non-resident.
+                    if (!nodeTouchesDirtyPages)
                     {
-                        StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
-                            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
-                        const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
-                        ByteAddressBuffer nonResidentBits =
-                            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
-                        if (shouldEmit && groupGlobalIndex < activeGroupScanCount) {
-                            if (CLodReadBit(nonResidentBits, groupGlobalIndex)) {
-                                shouldEmit = false;
+                        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CLEAN_PAGES, 1);
+                    }
+                    else
+                    {
+
+                        // Inlined SegmentEvaluate
+                        StructuredBuffer<ClusterLODGroupSegment> segments =
+                            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::Segments)];
+                        const uint segGlobalIndex = clodMeshMetadata.segmentsBase + node.range.indexOrOffset;
+                        const ClusterLODGroupSegment seg = segments[segGlobalIndex];
+
+                        // Used-groups tracking: mark the owning group as touched for streaming protection
+                        {
+                            RWStructuredBuffer<uint> usedGroupsCounter =
+                                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroupsCounter)];
+                            RWStructuredBuffer<uint> usedGroupsBuffer =
+                                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingTouchedGroups)];
+                            uint usedSlot = 0;
+                            InterlockedAdd(usedGroupsCounter[0], 1u, usedSlot);
+                            if (usedSlot < CLOD_USED_GROUPS_CAPACITY) {
+                                usedGroupsBuffer[usedSlot] = groupGlobalIndex;
                             }
                         }
-                    }
 
-                    emitBucket = shouldEmit;
+                        // LOD condition 1 already confirmed by nodeWantsTraversal.
+                        bool shouldEmit = (seg.meshletCount != 0);
 
-                    if (emitBucket) {
-                        WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_EMIT_BUCKET_THREADS, 1);
+                        // Suppress emission when own group's pages are non-resident.
+                        {
+                            StructuredBuffer<CLodStreamingRuntimeState> runtimeState =
+                                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingRuntimeState)];
+                            const uint activeGroupScanCount = runtimeState[0].activeGroupScanCount;
+                            ByteAddressBuffer nonResidentBits =
+                                ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CLod::StreamingNonResidentBits)];
+                            if (shouldEmit && groupGlobalIndex < activeGroupScanCount) {
+                                if (CLodReadBit(nonResidentBits, groupGlobalIndex)) {
+                                    shouldEmit = false;
+                                }
+                            }
+                        }
 
-                        const GroupPageMapEntry pageEntry = LoadGroupPageMapEntry(clodMeshMetadata.pageMapBase + grp.pageMapBase, seg.pageIndex);
+                        emitBucket = shouldEmit;
 
-                        bucketRecord.instanceIndex = rec.instanceIndex;
-                        bucketRecord.viewId = rec.viewId;
-                        bucketRecord.groupIdPacked = PackGroupId(node.range.ownerGroupId, UnpackSourceTag(rec.nodeIdPacked));
-                        bucketRecord.meshletIndexAndCount = PackMeshletIndexAndCount(seg.firstMeshletInPage, 0); // count set per-record below
-                        bucketRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
-                        bucketRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
+                        if (emitBucket) {
+                            WGTelemetryAdd(WG_COUNTER_SEGMENT_EVALUATE_EMIT_BUCKET_THREADS, 1);
 
-                        // Decompose meshlet count into bucket-sized records (max 8 records)
-                        uint tail = seg.meshletCount;
-                        uint budget = MAX_RECORDS_PER_SEGMENT;
+                            const GroupPageMapEntry pageEntry = LoadGroupPageMapEntry(clodMeshMetadata.pageMapBase + grp.pageMapBase, seg.pageIndex);
 
-                        n64 = min(tail / 64, budget);
-                        tail -= n64 * 64;
-                        budget -= n64;
+                            bucketRecord.instanceIndex = rec.instanceIndex;
+                            bucketRecord.viewId = rec.viewId;
+                            bucketRecord.groupIdPacked = PackGroupId(node.range.ownerGroupId, UnpackSourceTag(rec.nodeIdPacked));
+                            bucketRecord.meshletIndexAndCount = PackMeshletIndexAndCount(seg.firstMeshletInPage, 0); // count set per-record below
+                            bucketRecord.pageSlabDescriptorIndex = pageEntry.slabDescriptorIndex;
+                            bucketRecord.pageSlabByteOffset = pageEntry.slabByteOffset;
 
-                        if (tail >= 32 && budget >= 2) { n32 = 1; tail -= 32; budget--; }
-                        if (tail >= 16 && budget >= 2) { n16 = 1; tail -= 16; budget--; }
-                        if (tail >= 8  && budget >= 2) { n8  = 1; tail -= 8;  budget--; }
-                        if (tail >= 4  && budget >= 2) { n4  = 1; tail -= 4;  budget--; }
-                        if (tail >= 2  && budget >= 2) { n2  = 1; tail -= 2;  budget--; }
+                            // Decompose meshlet count into bucket-sized records (max 8 records)
+                            uint tail = seg.meshletCount;
+                            uint budget = MAX_RECORDS_PER_SEGMENT;
 
-                        if      (tail > 32) { n64++; }
-                        else if (tail > 16) { n32++; }
-                        else if (tail > 8)  { n16++; }
-                        else if (tail > 4)  { n8++;  }
-                        else if (tail > 2)  { n4++;  }
-                        else if (tail > 1)  { n2++;  }
-                        else if (tail > 0)  { n1 = 1; }
+                            n64 = min(tail / 64, budget);
+                            tail -= n64 * 64;
+                            budget -= n64;
+
+                            if (tail >= 32 && budget >= 2) { n32 = 1; tail -= 32; budget--; }
+                            if (tail >= 16 && budget >= 2) { n16 = 1; tail -= 16; budget--; }
+                            if (tail >= 8  && budget >= 2) { n8  = 1; tail -= 8;  budget--; }
+                            if (tail >= 4  && budget >= 2) { n4  = 1; tail -= 4;  budget--; }
+                            if (tail >= 2  && budget >= 2) { n2  = 1; tail -= 2;  budget--; }
+
+                            if      (tail > 32) { n64++; }
+                            else if (tail > 16) { n32++; }
+                            else if (tail > 8)  { n16++; }
+                            else if (tail > 4)  { n8++;  }
+                            else if (tail > 2)  { n4++;  }
+                            else if (tail > 1)  { n2++;  }
+                            else if (tail > 0)  { n1 = 1; }
+                        }
                     }
                 }
             }
@@ -1227,93 +1254,118 @@ void WG_TraverseNodes(
                     WGTelemetryAdd(WG_COUNTER_TRAVERSE_REJECTED_BY_ERROR_RECORDS, 1);
                 }
                 else {
-                    bool occlusionCulled = false;
-                    if (CLodWorkGraphOcclusionEnabled() && (!cullCamera.isOrtho || CLOD_VSM_OCCLUSION_CULLING)) {
-                        StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
-                            ResourceDescriptorHeap[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
-                        const uint depthMapDescriptorIndex = viewDepthSRVIndices[cullViewId].linearDepthSRVIndex;
-                        if (depthMapDescriptorIndex != 0) {
-                            if (replaySource) {
-                                // Phase 2 replay: HZB is from this frame's Phase 1 depth,
-                                // so test current-frame bounding spheres.
-                                OcclusionCullingPerspectiveTexture2D(
-                                    occlusionCulled,
-                                    cullCamera,
-                                    nodeCenterViewSpace,
-                                    -nodeCenterViewSpace.z,
-                                    nodeRadiusWorld,
-                                    depthMapDescriptorIndex);
-                            } else {
-                                // Phase 1: HZB is from previous frame's depth,
-                                // so reproject bounding sphere into previous frame's camera space.
-                                const row_major matrix prevModelMatrix = perObjectBuffer[objectBufferIndex].prevModel;
-                                const float prevNodeCullScale = MaxAxisScale_RowVector(prevModelMatrix);
-                                const float3 prevNodeCenterViewSpace = ToViewSpace(nodeCullCenterObjectSpace, prevModelMatrix, cullCamera.prevView);
-                                const float prevNodeRadiusWorld = nodeCullRadiusObjectSpace * prevNodeCullScale;
-                                OcclusionCullingPerspectiveTexture2D(
-                                    occlusionCulled,
-                                    cullCamera,
-                                    prevNodeCenterViewSpace,
-                                    -prevNodeCenterViewSpace.z,
-                                    prevNodeRadiusWorld,
-                                    depthMapDescriptorIndex,
-                                    cullCamera.prevUnjitteredProjection);
-                            }
-                        }
+                    bool nodeTouchesDirtyPages = true;
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+                    if (dirtyPageCullingEnabled)
+                    {
+                        const float3 nodeCullCenterWorld = mul(float4(nodeCullCenterObjectSpace, 1.0f), objectModelMatrix).xyz;
+                        nodeTouchesDirtyPages = CLodVirtualShadowBoundsTouchDirtyPages(nodeCullCenterWorld, nodeRadiusWorld, rec.viewId);
                     }
+#endif
 
-                    if (occlusionCulled) {
-                        if (!replaySource) {
-                            ReplayTryAppendNode(
-                                rec.instanceIndex,
-                                rec.viewId,
-                                UnpackNodeId(rec.nodeIdPacked));
-                        }
+                    if (!nodeTouchesDirtyPages)
+                    {
+                        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CLEAN_PAGES, 1);
                     }
                     else {
-                        const uint childCount = min(node.range.countMinusOne + 1u, BVH_MAX_CHILDREN);
-                        const uint sourceTag = UnpackSourceTag(rec.nodeIdPacked);
-
-                        // Pre-filter children: load each child, frustum cull + LOD check,
-                        // and only emit records for survivors.
-                        [loop]
-                        for (uint childIndex = 0; childIndex < childCount; ++childIndex) {
-                            const uint childNodeId = node.range.indexOrOffset + childIndex;
-                            const ClusterLODNode child = lodNodes[clodMeshMetadata.lodNodesBase + childNodeId];
-
-                            // Frustum cull child.
-                            const float3 childCullCenterOS = isSkinned ? instanceData.boundingSphere.sphere.xyz : child.metric.cullCenterAndRadius.xyz;
-                            const float childCullRadiusOS = isSkinned ? instanceData.boundingSphere.sphere.w : child.metric.cullCenterAndRadius.w;
-                            const float3 childCenterVS = ToViewSpace(childCullCenterOS, objectModelMatrix, cullCamera.view);
-                            const float childRadiusWorld = childCullRadiusOS * cullUniformScale;
-                            if (!replaySource && SphereOutsideFrustumViewSpace(childCenterVS, childRadiusWorld, cullCamera)) {
-                                WGTelemetryAdd(WG_COUNTER_CHILD_PREFILTER_FRUSTUM_CULLED, 1);
-                                continue;
-                            }
-
-                            // LOD pre-filter for internal children only.
-                            // Leaf children use the group sphere for LOD (different from node sphere),
-                            // so we skip the LOD check here and let the leaf thread handle it.
-                            if (child.range.isLeaf == 0) {
-                                const float3 childWorldCenter = mul(float4(child.metric.lodCenterAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
-                                const float childLodRadiusWorld = child.metric.lodCenterAndRadius.w * lodUniformScale;
-                                const float childEOD = ProjectedGeometricError(
-                                    childWorldCenter, childLodRadiusWorld,
-                                    child.metric.maxQuadricError, lodUniformScale,
-                                    lodCam.positionWorldSpace.xyz, lodCam.zNear,
-                                    lodCamera.isOrtho);
-                                if (childEOD < lodCam.errorOverDistanceThreshold) {
-                                    WGTelemetryAdd(WG_COUNTER_CHILD_PREFILTER_LOD_REJECTED, 1);
-                                    continue;
+                        bool occlusionCulled = false;
+                        if (CLodWorkGraphOcclusionEnabled() && (!cullCamera.isOrtho || CLOD_VSM_OCCLUSION_CULLING)) {
+                            StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
+                                ResourceDescriptorHeap[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
+                            const uint depthMapDescriptorIndex = viewDepthSRVIndices[cullViewId].linearDepthSRVIndex;
+                            if (depthMapDescriptorIndex != 0) {
+                                if (replaySource) {
+                                    // Phase 2 replay: HZB is from this frame's Phase 1 depth,
+                                    // so test current-frame bounding spheres.
+                                    OcclusionCullingPerspectiveTexture2D(
+                                        occlusionCulled,
+                                        cullCamera,
+                                        nodeCenterViewSpace,
+                                        -nodeCenterViewSpace.z,
+                                        nodeRadiusWorld,
+                                        depthMapDescriptorIndex);
+                                } else {
+                                    // Phase 1: HZB is from previous frame's depth,
+                                    // so reproject bounding sphere into previous frame's camera space.
+                                    const row_major matrix prevModelMatrix = perObjectBuffer[objectBufferIndex].prevModel;
+                                    const float prevNodeCullScale = MaxAxisScale_RowVector(prevModelMatrix);
+                                    const float3 prevNodeCenterViewSpace = ToViewSpace(nodeCullCenterObjectSpace, prevModelMatrix, cullCamera.prevView);
+                                    const float prevNodeRadiusWorld = nodeCullRadiusObjectSpace * prevNodeCullScale;
+                                    OcclusionCullingPerspectiveTexture2D(
+                                        occlusionCulled,
+                                        cullCamera,
+                                        prevNodeCenterViewSpace,
+                                        -prevNodeCenterViewSpace.z,
+                                        prevNodeRadiusWorld,
+                                        depthMapDescriptorIndex,
+                                        cullCamera.prevUnjitteredProjection);
                                 }
                             }
+                        }
 
-                            TraverseNodeRecord childRecord = (TraverseNodeRecord)0;
-                            childRecord.instanceIndex = rec.instanceIndex;
-                            childRecord.viewId = rec.viewId;
-                            childRecord.nodeIdPacked = PackTraverseNodeId(childNodeId, sourceTag, 1u);
-                            childRecords[emitTraverseCount] = childRecord;
-                            emitTraverseCount++;
+                        if (occlusionCulled) {
+                            if (!replaySource) {
+                                ReplayTryAppendNode(
+                                    rec.instanceIndex,
+                                    rec.viewId,
+                                    UnpackNodeId(rec.nodeIdPacked));
+                            }
+                        }
+                        else {
+                            const uint childCount = min(node.range.countMinusOne + 1u, BVH_MAX_CHILDREN);
+                            const uint sourceTag = UnpackSourceTag(rec.nodeIdPacked);
+
+                            // Pre-filter children: load each child, frustum cull + LOD check,
+                            // and only emit records for survivors.
+                            [loop]
+                            for (uint childIndex = 0; childIndex < childCount; ++childIndex) {
+                                const uint childNodeId = node.range.indexOrOffset + childIndex;
+                                const ClusterLODNode child = lodNodes[clodMeshMetadata.lodNodesBase + childNodeId];
+
+                                // Frustum cull child.
+                                const float3 childCullCenterOS = isSkinned ? instanceData.boundingSphere.sphere.xyz : child.metric.cullCenterAndRadius.xyz;
+                                const float childCullRadiusOS = isSkinned ? instanceData.boundingSphere.sphere.w : child.metric.cullCenterAndRadius.w;
+                                const float3 childCenterVS = ToViewSpace(childCullCenterOS, objectModelMatrix, cullCamera.view);
+                                const float childRadiusWorld = childCullRadiusOS * cullUniformScale;
+                                if (!replaySource && SphereOutsideFrustumViewSpace(childCenterVS, childRadiusWorld, cullCamera)) {
+                                    WGTelemetryAdd(WG_COUNTER_CHILD_PREFILTER_FRUSTUM_CULLED, 1);
+                                    continue;
+                                }
+
+                                // LOD pre-filter for internal children only.
+                                // Leaf children use the group sphere for LOD (different from node sphere),
+                                // so we skip the LOD check here and let the leaf thread handle it.
+                                if (child.range.isLeaf == 0) {
+                                    const float3 childWorldCenter = mul(float4(child.metric.lodCenterAndRadius.xyz, 1.0f), objectModelMatrix).xyz;
+                                    const float childLodRadiusWorld = child.metric.lodCenterAndRadius.w * lodUniformScale;
+                                    const float childEOD = ProjectedGeometricError(
+                                        childWorldCenter, childLodRadiusWorld,
+                                        child.metric.maxQuadricError, lodUniformScale,
+                                        lodCam.positionWorldSpace.xyz, lodCam.zNear,
+                                        lodCamera.isOrtho);
+                                    if (childEOD < lodCam.errorOverDistanceThreshold) {
+                                        WGTelemetryAdd(WG_COUNTER_CHILD_PREFILTER_LOD_REJECTED, 1);
+                                        continue;
+                                    }
+                                }
+
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+                                if (dirtyPageCullingEnabled) {
+                                    const float3 childCullCenterWorld = mul(float4(childCullCenterOS, 1.0f), objectModelMatrix).xyz;
+                                    if (!CLodVirtualShadowBoundsTouchDirtyPages(childCullCenterWorld, childRadiusWorld, rec.viewId)) {
+                                        WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_CLEAN_PAGES, 1);
+                                        continue;
+                                    }
+                                }
+#endif
+
+                                TraverseNodeRecord childRecord = (TraverseNodeRecord)0;
+                                childRecord.instanceIndex = rec.instanceIndex;
+                                childRecord.viewId = rec.viewId;
+                                childRecord.nodeIdPacked = PackTraverseNodeId(childNodeId, sourceTag, 1u);
+                                childRecords[emitTraverseCount] = childRecord;
+                                emitTraverseCount++;
+                            }
                         }
                     }
                 }

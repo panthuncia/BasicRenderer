@@ -83,6 +83,36 @@ float3 CLodVirtualShadowDebugPageStateColor(CLodVirtualShadowDebugInfo debugInfo
     return float3(0.10f, 0.85f, 0.20f);
 }
 
+float2 CLodVirtualShadowDirectionalNormalOffsetUv(
+    float3 fragPosWorldSpace,
+    float3 normal,
+    float3 lightToFrag,
+    CLodVirtualShadowClipmapInfo clipmapInfo,
+    CLodVirtualShadowCompactShadowCameraInfo lightCamera)
+{
+    const float3 surfaceNormal = -normalize(normal);
+    const float3 normalizedLightToFrag = normalize(lightToFrag);
+    const float normalDotLight = saturate(dot(surfaceNormal, normalizedLightToFrag));
+    const float angleScale = 1.0f - normalDotLight;
+
+    const float normalOffsetWorld = clipmapInfo.texelWorldSize * (10.25f + 0.15f * angleScale);
+    const float3 offsetWorldPosition = fragPosWorldSpace - surfaceNormal * normalOffsetWorld;
+
+    const float4 offsetLightSpace = mul(float4(offsetWorldPosition, 1.0f), lightCamera.viewProjection);
+    const float safeOffsetW = max(abs(offsetLightSpace.w), 1.0e-6f);
+    float2 offsetUv = offsetLightSpace.xy / safeOffsetW;
+    offsetUv = offsetUv * 0.5f + 0.5f;
+    offsetUv.y = 1.0f - offsetUv.y;
+
+    const float4 baseLightSpace = mul(float4(fragPosWorldSpace, 1.0f), lightCamera.viewProjection);
+    const float safeBaseW = max(abs(baseLightSpace.w), 1.0e-6f);
+    float2 baseUv = baseLightSpace.xy / safeBaseW;
+    baseUv = baseUv * 0.5f + 0.5f;
+    baseUv.y = 1.0f - baseUv.y;
+
+    return offsetUv - baseUv;
+}
+
 float calculatePointShadow(float3 fragPosWorldSpace, float3 normal, LightInfo light, StructuredBuffer<unsigned int> pointShadowCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
     float3 lightToFrag = fragPosWorldSpace.xyz - light.posWorldSpace.xyz;
     lightToFrag.z = -lightToFrag.z;
@@ -143,8 +173,6 @@ int calculateShadowCascadeIndex(float depth, uint numCascadeSplits, float4 casca
 }
 
 float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numCascades, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer, out CLodVirtualShadowDebugInfo debugInfo) {
-    (void)normal;
-    (void)light;
     (void)cascadeCameraIndexBuffer;
     (void)cameraBuffer;
 
@@ -182,6 +210,21 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
     float3 uv = fragPosLightSpace.xyz / safeW;
     uv.xy = uv.xy * 0.5f + 0.5f;
     uv.y = 1.0f - uv.y;
+
+    const float3 lightToFrag = -light.dirWorldSpace.xyz;
+    const float2 biasedUv = uv.xy + CLodVirtualShadowDirectionalNormalOffsetUv(
+        fragPosWorldSpace,
+        normal,
+        lightToFrag,
+        clipmapInfo,
+        lightCamera);
+
+    if (biasedUv.x < 0.0f || biasedUv.x > 1.0f || biasedUv.y < 0.0f || biasedUv.y > 1.0f)
+    {
+        return 0.0f;
+    }
+
+    uv.xy = biasedUv;
 
     if (uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f || uv.z < 0.0f || uv.z > 1.0f)
     {
@@ -244,8 +287,7 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
     }
 
     const float closestDepth = asfloat(storedDepthBits);
-    const float bias = 0.0008f;
-    return linearLightDepth - bias > closestDepth ? 1.0f : 0.0f;
+    return linearLightDepth > closestDepth ? 1.0f : 0.0f;
 
     return 0.0f;
 }

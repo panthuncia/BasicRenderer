@@ -1065,7 +1065,7 @@ void CLodVirtualShadowAccumulateTileProjectedBounds(
 }
 
 [shader("compute")]
-[numthreads(64, 1, 1)]
+[numthreads(128, 1, 1)]
 void CLodVirtualShadowMarkPagesCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     StructuredBuffer<uint> tileCountBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_MARK_TILE_COUNT_DESCRIPTOR_INDEX];
