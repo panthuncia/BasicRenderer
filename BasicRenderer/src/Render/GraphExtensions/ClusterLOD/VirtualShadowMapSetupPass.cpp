@@ -103,6 +103,8 @@ VirtualShadowMapSetupPass::VirtualShadowMapSetupPass(
     std::shared_ptr<Buffer> allocationCountBuffer,
     std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
     std::shared_ptr<Buffer> clipmapInfoBuffer,
+    std::shared_ptr<Buffer> compactMainCameraBuffer,
+    std::shared_ptr<Buffer> compactShadowCameraBuffer,
     std::shared_ptr<Buffer> statsBuffer,
     std::shared_ptr<Buffer> runtimeStateBuffer,
     bool forceResetResources)
@@ -111,6 +113,8 @@ VirtualShadowMapSetupPass::VirtualShadowMapSetupPass(
     , m_allocationCountBuffer(std::move(allocationCountBuffer))
     , m_dirtyPageFlagsBuffer(std::move(dirtyPageFlagsBuffer))
     , m_clipmapInfoBuffer(std::move(clipmapInfoBuffer))
+    , m_compactMainCameraBuffer(std::move(compactMainCameraBuffer))
+    , m_compactShadowCameraBuffer(std::move(compactShadowCameraBuffer))
     , m_statsBuffer(std::move(statsBuffer))
     , m_runtimeStateBuffer(std::move(runtimeStateBuffer))
     , m_forceResetResources(forceResetResources)
@@ -131,6 +135,8 @@ void VirtualShadowMapSetupPass::DeclareResourceUsages(ComputePassBuilder* builde
         m_pageMetadataBuffer,
         m_allocationCountBuffer,
         m_dirtyPageFlagsBuffer,
+        m_compactMainCameraBuffer,
+        m_compactShadowCameraBuffer,
         m_statsBuffer);
 
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
@@ -159,11 +165,30 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
     BUFFER_UPLOAD(&runtimeState, sizeof(runtimeState), rg::runtime::UploadTarget::FromShared(m_runtimeStateBuffer), 0);
 
     std::array<CLodVirtualShadowClipmapInfo, CLodVirtualShadowDefaultClipmapCount> clipmapInfos{};
+    std::array<CLodVirtualShadowCompactShadowCameraInfo, CLodVirtualShadowDefaultClipmapCount> compactShadowCameras{};
+    CLodVirtualShadowMainCameraInfo compactMainCamera{};
     DirectX::XMFLOAT3 currentDirectionalLightDirection{};
     bool currentDirectionalLightDirectionValid = false;
 
     auto* updateContext = executionContext.hostData ? executionContext.hostData->Get<UpdateContext>() : nullptr;
     if (updateContext && updateContext->viewManager) {
+        bool foundPrimaryCamera = false;
+        updateContext->viewManager->ForEachFiltered(ViewFilter::PrimaryCameras(), [&](uint64_t viewId) {
+            if (foundPrimaryCamera) {
+                return;
+            }
+
+            const View* view = updateContext->viewManager->Get(viewId);
+            if (!view) {
+                return;
+            }
+
+            foundPrimaryCamera = true;
+            compactMainCamera.positionWorldSpace = view->cameraInfo.positionWorldSpace;
+            compactMainCamera.viewInverse = view->cameraInfo.viewInverse;
+            compactMainCamera.projectionInverse = view->cameraInfo.projectionInverse;
+        });
+
         auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
         auto lightQuery = ecsWorld.query_builder<const Components::Light, const Components::LightViewInfo>().build();
 
@@ -211,6 +236,10 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
                 clipmapInfo.shadowCameraBufferIndex = view->gpu.cameraBufferIndex;
                 clipmapInfo.clipLevel = clipmapIndex;
                 clipmapInfo.flags = CLodVirtualShadowClipmapValidFlag;
+                compactShadowCameras[clipmapIndex].view = view->cameraInfo.view;
+                compactShadowCameras[clipmapIndex].projection = view->cameraInfo.jitteredProjection;
+                compactShadowCameras[clipmapIndex].viewProjection = view->cameraInfo.viewProjection;
+                compactShadowCameras[clipmapIndex].isOrtho = view->cameraInfo.isOrtho;
                 if (g_previousClipmapInfosValid && IsClipmapValid(g_previousClipmapInfos[clipmapIndex])) {
                     clipmapInfo.clearOffsetX = ClampClearOffset(
                         pageOffsetX - g_previousClipmapPageOffsetX[clipmapIndex],
@@ -254,6 +283,18 @@ void VirtualShadowMapSetupPass::Update(const UpdateExecutionContext& executionCo
         clipmapInfos.data(),
         static_cast<uint32_t>(clipmapInfos.size() * sizeof(CLodVirtualShadowClipmapInfo)),
         rg::runtime::UploadTarget::FromShared(m_clipmapInfoBuffer),
+        0);
+
+    BUFFER_UPLOAD(
+        &compactMainCamera,
+        sizeof(compactMainCamera),
+        rg::runtime::UploadTarget::FromShared(m_compactMainCameraBuffer),
+        0);
+
+    BUFFER_UPLOAD(
+        compactShadowCameras.data(),
+        static_cast<uint32_t>(compactShadowCameras.size() * sizeof(CLodVirtualShadowCompactShadowCameraInfo)),
+        rg::runtime::UploadTarget::FromShared(m_compactShadowCameraBuffer),
         0);
 }
 

@@ -741,6 +741,24 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodVirtualShadowClipmapInfoTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
+    m_shadowCompactMainCameraBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        1,
+        sizeof(CLodVirtualShadowMainCameraInfo),
+        true,
+        false,
+        false,
+        false);
+    m_shadowCompactMainCameraBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Compact Main Camera Buffer"));
+
+    m_shadowCompactShadowCameraBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        CLodVirtualShadowDefaultClipmapCount,
+        sizeof(CLodVirtualShadowCompactShadowCameraInfo),
+        true,
+        false,
+        false,
+        false);
+    m_shadowCompactShadowCameraBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Compact Shadow Camera Buffer"));
+
     m_shadowDirectionalPageViewInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         CLodVirtualShadowDefaultClipmapCount * CLodVirtualShadowDefaultPageTableResolution * CLodVirtualShadowDefaultPageTableResolution,
         sizeof(float) * 4u,
@@ -843,6 +861,8 @@ void CLodExtension::TagShadowResourceUsages()
     tagBufferUsage(m_shadowPageListHeaderBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowDirtyPageFlagsBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowClipmapInfoBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowCompactMainCameraBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_shadowCompactShadowCameraBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowDirectionalPageViewInfoBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowRuntimeStateBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_shadowStatsBuffer, "Cluster LOD virtual shadow maps");
@@ -935,6 +955,8 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_shadowPageListHeaderBuffer);
     releaseBufferBacking(m_shadowDirtyPageFlagsBuffer);
     releaseBufferBacking(m_shadowClipmapInfoBuffer);
+    releaseBufferBacking(m_shadowCompactMainCameraBuffer);
+    releaseBufferBacking(m_shadowCompactShadowCameraBuffer);
     releaseBufferBacking(m_shadowDirectionalPageViewInfoBuffer);
     releaseBufferBacking(m_shadowRuntimeStateBuffer);
     releaseBufferBacking(m_shadowStatsBuffer);
@@ -1297,6 +1319,14 @@ std::shared_ptr<Resource> CLodExtension::ProvideResource(ResourceIdentifier cons
         return m_shadowClipmapInfoBuffer;
     }
 
+    if (key == Builtin::Shadows::CLodCompactMainCamera) {
+        return m_shadowCompactMainCameraBuffer;
+    }
+
+    if (key == Builtin::Shadows::CLodCompactShadowCameras) {
+        return m_shadowCompactShadowCameraBuffer;
+    }
+
     if (key == Builtin::Shadows::CLodDirectionalPageViewInfo) {
         return m_shadowDirectionalPageViewInfoBuffer;
     }
@@ -1314,6 +1344,8 @@ std::vector<ResourceIdentifier> CLodExtension::GetSupportedKeys()
         Builtin::Shadows::CLodPageTable,
         Builtin::Shadows::CLodPhysicalPages,
         Builtin::Shadows::CLodClipmapInfo,
+        Builtin::Shadows::CLodCompactMainCamera,
+        Builtin::Shadows::CLodCompactShadowCameras,
         Builtin::Shadows::CLodDirectionalPageViewInfo,
     };
 }
@@ -1366,6 +1398,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_shadowAllocationCountBuffer,
                 m_shadowDirtyPageFlagsBuffer,
                 m_shadowClipmapInfoBuffer,
+                m_shadowCompactMainCameraBuffer,
+                m_shadowCompactShadowCameraBuffer,
                 m_shadowStatsBuffer,
                 m_shadowRuntimeStateBuffer,
                 m_shadowVirtualResourcesNeedReset));

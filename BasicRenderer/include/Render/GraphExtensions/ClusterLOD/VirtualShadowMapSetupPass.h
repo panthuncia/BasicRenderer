@@ -16,6 +16,8 @@ public:
         std::shared_ptr<Buffer> allocationCountBuffer,
         std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
         std::shared_ptr<Buffer> clipmapInfoBuffer,
+        std::shared_ptr<Buffer> compactMainCameraBuffer,
+        std::shared_ptr<Buffer> compactShadowCameraBuffer,
         std::shared_ptr<Buffer> statsBuffer,
         std::shared_ptr<Buffer> runtimeStateBuffer,
         bool forceResetResources);
@@ -33,6 +35,8 @@ private:
     std::shared_ptr<Buffer> m_allocationCountBuffer;
     std::shared_ptr<Buffer> m_dirtyPageFlagsBuffer;
     std::shared_ptr<Buffer> m_clipmapInfoBuffer;
+    std::shared_ptr<Buffer> m_compactMainCameraBuffer;
+    std::shared_ptr<Buffer> m_compactShadowCameraBuffer;
     std::shared_ptr<Buffer> m_statsBuffer;
     std::shared_ptr<Buffer> m_runtimeStateBuffer;
     bool m_forceResetResources = false;

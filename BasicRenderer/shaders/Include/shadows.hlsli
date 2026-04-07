@@ -146,8 +146,11 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
     (void)normal;
     (void)light;
     (void)cascadeCameraIndexBuffer;
+    (void)cameraBuffer;
 
     StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodClipmapInfo)];
+    StructuredBuffer<CLodVirtualShadowMainCameraInfo> compactMainCameraBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodCompactMainCamera)];
+    StructuredBuffer<CLodVirtualShadowCompactShadowCameraInfo> compactShadowCameraBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodCompactShadowCameras)];
     StructuredBuffer<float4> directionalPageViewInfo = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodDirectionalPageViewInfo)];
     Texture2DArray<uint> pageTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPageTable)];
     Texture2D<uint> physicalPages = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPhysicalPages)];
@@ -159,8 +162,7 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
         return 0.0f;
     }
 
-    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
-    const Camera mainCamera = cameraBuffer[perFrameBuffer.mainCameraIndex];
+    const CLodVirtualShadowMainCameraInfo mainCamera = compactMainCameraBuffer[0];
     const uint preferredClipmapIndex = CLodVirtualShadowSelectClipmapIndex(
         fragPosWorldSpace,
         mainCamera.positionWorldSpace.xyz,
@@ -174,7 +176,7 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
         return 0.0f;
     }
 
-    const Camera lightCamera = cameraBuffer[clipmapInfo.shadowCameraBufferIndex];
+    const CLodVirtualShadowCompactShadowCameraInfo lightCamera = compactShadowCameraBuffer[preferredClipmapIndex];
     const float4 fragPosLightSpace = mul(float4(fragPosWorldSpace, 1.0f), lightCamera.viewProjection);
     const float safeW = max(abs(fragPosLightSpace.w), 1.0e-6f);
     float3 uv = fragPosLightSpace.xyz / safeW;

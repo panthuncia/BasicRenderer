@@ -58,7 +58,7 @@ VirtualShadowMapInvalidatePagesPass::VirtualShadowMapInvalidatePagesPass(
 void VirtualShadowMapInvalidatePagesPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
     builder->WithShaderResource(
-            Builtin::CameraBuffer,
+            Builtin::Shadows::CLodCompactShadowCameras,
             Builtin::PerMeshInstanceBuffer,
             Builtin::PerObjectBuffer,
             m_invalidationInputsBuffer,

@@ -1939,7 +1939,7 @@ void Renderer::CreateRenderGraph() {
             m_pReadbackManager.get()));
         currentRenderGraph->RegisterExtension(std::make_unique<ReadbackCaptureExtension>(
             currentRenderGraph->GetReadbackService()));
-        uint maxClusters = 100000; // TODO: make this configurable based on scene content   
+        uint maxClusters = 1000000; // TODO: make this configurable based on scene content   
         currentRenderGraph->RegisterExtension(
             std::make_unique<CLodExtension>(CLodExtensionType::VisiblityBuffer, static_cast<uint32_t>(maxClusters)),
             "CLodOpaque");
@@ -2137,7 +2137,7 @@ void Renderer::CreateRenderGraph() {
 
 	BuildLinearDepthHistoryCopyPass(newGraph.get());
 
-    newGraph->SetMinimumAutomaticSchedulingQueues(QueueKind::Compute, 3);
+    //newGraph->SetMinimumAutomaticSchedulingQueues(QueueKind::Compute, 3);
 
     newGraph->CompileStructural();
     newGraph->Setup();

@@ -21,6 +21,12 @@
 #define CLOD_WG_ENABLE_SW_NODE_OUTPUT CLOD_WG_ENABLE_SW_CLASSIFICATION
 #endif
 
+// Set to 1 to enable occlusion culling for VSM / shadow cameras (ortho).
+// Defaults to 0 (off) — ortho cameras skip occlusion culling entirely.
+#ifndef CLOD_VSM_OCCLUSION_CULLING
+#define CLOD_VSM_OCCLUSION_CULLING 0
+#endif
+
 // meshopt_Meshlet layout on GPU
 struct Meshlet
 {
@@ -259,6 +265,213 @@ uint CLodResolveLodViewId(uint cullViewId)
     return perFrameBuffer.mainCameraIndex;
 }
 
+bool CLodVirtualShadowComputeSphereAabbUvBounds(
+    float3 worldCenter,
+    float radiusWorld,
+    CLodVirtualShadowCompactShadowCameraInfo shadowCamera,
+    out float2 uvMin,
+    out float2 uvMax,
+    out bool queryClipped)
+{
+    float2 ndcMin = float2(1.0e30f, 1.0e30f);
+    float2 ndcMax = float2(-1.0e30f, -1.0e30f);
+    bool failOpen = false;
+
+    [unroll]
+    for (uint cornerIndex = 0u; cornerIndex < 8u; ++cornerIndex)
+    {
+        const float3 cornerOffset = float3(
+            (cornerIndex & 0x1u) != 0u ? radiusWorld : -radiusWorld,
+            (cornerIndex & 0x2u) != 0u ? radiusWorld : -radiusWorld,
+            (cornerIndex & 0x4u) != 0u ? radiusWorld : -radiusWorld);
+        const float4 clipCorner = mul(float4(worldCenter + cornerOffset, 1.0f), shadowCamera.viewProjection);
+
+        float3 ndcCorner = 0.0f.xxx;
+        if (CLodVirtualShadowCompactCameraIsOrtho(shadowCamera))
+        {
+            ndcCorner = clipCorner.xyz;
+        }
+        else
+        {
+            const float safeW = abs(clipCorner.w);
+            if (safeW <= 1.0e-6f || clipCorner.w <= 0.0f || clipCorner.z < 0.0f || clipCorner.z > clipCorner.w)
+            {
+                failOpen = true;
+                break;
+            }
+
+            ndcCorner = clipCorner.xyz / clipCorner.w;
+        }
+
+        ndcMin = min(ndcMin, ndcCorner.xy);
+        ndcMax = max(ndcMax, ndcCorner.xy);
+    }
+
+    if (failOpen)
+    {
+        uvMin = 0.0f.xx;
+        uvMax = 1.0f.xx;
+        queryClipped = true;
+        return true;
+    }
+
+    if (ndcMax.x < -1.0f || ndcMin.x > 1.0f ||
+        ndcMax.y < -1.0f || ndcMin.y > 1.0f)
+    {
+        uvMin = 0.0f.xx;
+        uvMax = 0.0f.xx;
+        queryClipped = false;
+        return false;
+    }
+
+    queryClipped =
+        ndcMin.x < -1.0f || ndcMax.x > 1.0f ||
+        ndcMin.y < -1.0f || ndcMax.y > 1.0f;
+
+    ndcMin = clamp(ndcMin, -1.0f.xx, 1.0f.xx);
+    ndcMax = clamp(ndcMax, -1.0f.xx, 1.0f.xx);
+
+    uvMin = float2(ndcMin.x * 0.5f + 0.5f, 1.0f - (ndcMax.y * 0.5f + 0.5f));
+    uvMax = float2(ndcMax.x * 0.5f + 0.5f, 1.0f - (ndcMin.y * 0.5f + 0.5f));
+    return true;
+}
+
+bool CLodVirtualShadowConservativeAnyHitTexture2DArraySphereQuery(
+    Texture2DArray<uint> queryTexture,
+    uint arrayLayer,
+    uint2 baseResolution,
+    in const CLodVirtualShadowCompactShadowCameraInfo camera,
+    float3 viewSpaceCenter,
+    float scaledBoundingRadius,
+    out uint sampledMipLevel,
+    out bool queryClipped)
+{
+    viewSpaceCenter.y = -viewSpaceCenter.y;
+
+    float4 vLBRT;
+    if (CLodVirtualShadowCompactCameraIsOrtho(camera))
+    {
+        viewSpaceCenter.y = -viewSpaceCenter.y;
+        vLBRT = sphere_screen_extents_ortho(viewSpaceCenter.xyz, scaledBoundingRadius, camera.projection);
+    }
+    else
+    {
+        vLBRT = sphere_screen_extents(viewSpaceCenter.xyz, scaledBoundingRadius, camera.projection);
+        vLBRT.x = -vLBRT.x;
+        vLBRT.z = -vLBRT.z;
+    }
+
+    const float4 vToUV = float4(0.5f, -0.5f, 0.5f, -0.5f);
+    const float4 vUV = vLBRT.xwzy * vToUV + 0.5f;
+    const float2 uvMin = vUV.xy;
+    const float2 uvMax = vUV.zw;
+
+    if (uvMax.x < 0.0f || uvMin.x > 1.0f ||
+        uvMax.y < 0.0f || uvMin.y > 1.0f)
+    {
+        sampledMipLevel = 0u;
+        queryClipped = false;
+        return false;
+    }
+
+    queryClipped = any(uvMin < 0.0f.xx) || any(uvMax > 1.0f.xx);
+
+    const float2 clampedUvMin = saturate(uvMin);
+    const float2 clampedUvMax = saturate(uvMax);
+    const float2 baseResolutionF = float2(baseResolution);
+    const float2 minTexel = clamp(baseResolutionF * clampedUvMin, 0.0f.xx, baseResolutionF - 1.0f.xx);
+    const float2 maxTexel = clamp(baseResolutionF * clampedUvMax, 0.0f.xx, baseResolutionF - 1.0f.xx);
+    const float pixelWidth = max(maxTexel.x - minTexel.x, maxTexel.y - minTexel.y);
+    const uint sampleWidth = 2u;
+    const uint maxMipLevel = firstbithigh(max(baseResolution.x, baseResolution.y));
+
+    sampledMipLevel = min(
+        (uint)clamp(ceil(log2(max(pixelWidth, 1.0f))) - log2((float)sampleWidth), 0.0f, (float)maxMipLevel),
+        maxMipLevel);
+
+    const int2 quadCornerTexel = int2(minTexel) >> sampledMipLevel;
+    const int2 minCornerTexel = int2(minTexel) >> sampledMipLevel;
+    const int2 maxCornerTexel = int2(maxTexel) >> sampledMipLevel;
+    const int2 atMipPixelWidth = maxCornerTexel - minCornerTexel + 1;
+    const int2 texelBounds = max(int2(0, 0), (int2(baseResolution) >> sampledMipLevel) - 1);
+
+    [loop]
+    for (uint x = 0u; x <= sampleWidth; ++x)
+    {
+        [loop]
+        for (uint y = 0u; y <= sampleWidth; ++y)
+        {
+            if ((int)x >= atMipPixelWidth.x || (int)y >= atMipPixelWidth.y)
+            {
+                continue;
+            }
+
+            const int2 sampleTexel = clamp(quadCornerTexel + int2(x, y), int2(0, 0), texelBounds);
+            if (queryTexture.Load(int4(sampleTexel, arrayLayer, sampledMipLevel)) != 0u)
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool CLodVirtualShadowDirtyHierarchyAnyHit(
+    Texture2DArray<uint> queryTexture,
+    uint arrayLayer,
+    uint2 baseResolution,
+    float2 uvMin,
+    float2 uvMax,
+    out uint sampledMipLevel)
+{
+    const float2 clampedUvMin = saturate(uvMin);
+    const float2 clampedUvMax = saturate(uvMax);
+    const float2 baseResolutionF = float2(baseResolution);
+    const float2 minTexel = clamp(baseResolutionF * clampedUvMin, 0.0f.xx, baseResolutionF - 1.0f.xx);
+    const float2 maxTexel = clamp(baseResolutionF * clampedUvMax, 0.0f.xx, baseResolutionF - 1.0f.xx);
+    const float pixelWidth = max(maxTexel.x - minTexel.x, maxTexel.y - minTexel.y);
+    const uint sampleWidth = 2u;
+    const uint maxMipLevel = firstbithigh(max(baseResolution.x, baseResolution.y));
+
+    sampledMipLevel = min(
+        (uint)clamp(ceil(log2(max(pixelWidth, 1.0f))) - log2((float)sampleWidth), 0.0f, (float)maxMipLevel),
+        maxMipLevel);
+
+    const int2 quadCornerTexel = int2(minTexel) >> sampledMipLevel;
+    const int2 minCornerTexel = int2(minTexel) >> sampledMipLevel;
+    const int2 maxCornerTexel = int2(maxTexel) >> sampledMipLevel;
+    const int2 atMipPixelWidth = maxCornerTexel - minCornerTexel + 1;
+    const int2 texelBounds = max(int2(0, 0), (int2(baseResolution) >> sampledMipLevel) - 1);
+
+    [loop]
+    for (uint x = 0u; x <= sampleWidth; ++x)
+    {
+        [loop]
+        for (uint y = 0u; y <= sampleWidth; ++y)
+        {
+            if ((int)x >= atMipPixelWidth.x || (int)y >= atMipPixelWidth.y)
+            {
+                continue;
+            }
+
+            const int2 sampleTexel = clamp(quadCornerTexel + int2(x, y), int2(0, 0), texelBounds);
+            if (queryTexture.Load(int4(sampleTexel, arrayLayer, sampledMipLevel)) != 0u)
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+// Set to 1 to use AABB-from-sphere projection for the dirty page query,
+// 0 to use the original projected bounding sphere footprint directly.
+#ifndef CLOD_VSM_USE_AABB_DIRTY_QUERY
+#define CLOD_VSM_USE_AABB_DIRTY_QUERY 0
+#endif
+
 bool CLodVirtualShadowMeshletTouchesDirtyPages(float3 worldCenter, float radiusWorld, uint viewId)
 {
     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_QUERIES, 1);
@@ -271,22 +484,45 @@ bool CLodVirtualShadowMeshletTouchesDirtyPages(float3 worldCenter, float radiusW
         return true;
     }
 
-    StructuredBuffer<Camera> cameras = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CameraBuffer)];
-    const Camera shadowCamera = cameras[viewId];
+    StructuredBuffer<CLodVirtualShadowCompactShadowCameraInfo> shadowCameras =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodCompactShadowCameras)];
+    const CLodVirtualShadowCompactShadowCameraInfo shadowCamera = shadowCameras[clipmapIndex];
     Texture2DArray<uint> dirtyHierarchy = ResourceDescriptorHeap[CLOD_WG_SHADOW_DIRTY_HIERARCHY_DESCRIPTOR_INDEX];
 
     uint sampledMipLevel = 0u;
     bool queryClipped = false;
-    const float3 shadowViewCenter = mul(float4(worldCenter, 1.0f), shadowCamera.view).xyz;
-    const bool touchesDirtyPages = ConservativeAnyHitTexture2DArraySphereQuery(
+
+#if CLOD_VSM_USE_AABB_DIRTY_QUERY
+    float2 uvMin = 0.0f.xx;
+    float2 uvMax = 0.0f.xx;
+    const bool queryValid = CLodVirtualShadowComputeSphereAabbUvBounds(
+        worldCenter,
+        radiusWorld,
+        shadowCamera,
+        uvMin,
+        uvMax,
+        queryClipped);
+    const bool touchesDirtyPages = queryValid
+        ? CLodVirtualShadowDirtyHierarchyAnyHit(
+            dirtyHierarchy,
+            clipmapInfo.pageTableLayer,
+            uint2(kCLodVirtualShadowPageTableResolution, kCLodVirtualShadowPageTableResolution),
+            uvMin,
+            uvMax,
+            sampledMipLevel)
+        : false;
+#else
+    const float3 meshletCenterViewSpace = mul(float4(worldCenter, 1.0f), shadowCamera.view).xyz;
+    const bool touchesDirtyPages = CLodVirtualShadowConservativeAnyHitTexture2DArraySphereQuery(
         dirtyHierarchy,
         clipmapInfo.pageTableLayer,
         uint2(kCLodVirtualShadowPageTableResolution, kCLodVirtualShadowPageTableResolution),
         shadowCamera,
-        shadowViewCenter,
+        meshletCenterViewSpace,
         radiusWorld,
         sampledMipLevel,
         queryClipped);
+#endif
 
     if (queryClipped)
     {
@@ -992,7 +1228,7 @@ void WG_TraverseNodes(
                 }
                 else {
                     bool occlusionCulled = false;
-                    if (CLodWorkGraphOcclusionEnabled() && !cullCamera.isOrtho) {
+                    if (CLodWorkGraphOcclusionEnabled() && (!cullCamera.isOrtho || CLOD_VSM_OCCLUSION_CULLING)) {
                         StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
                             ResourceDescriptorHeap[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
                         const uint depthMapDescriptorIndex = viewDepthSRVIndices[cullViewId].linearDepthSRVIndex;
@@ -1280,7 +1516,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         pageMeshletCount = pageHeader.meshletCount;
         pageDescriptorOffset = pageHeader.descriptorOffset;
 
-        if (!cullCameraIsOrtho) {
+        if (!cullCameraIsOrtho || CLOD_VSM_OCCLUSION_CULLING) {
             StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
                 ResourceDescriptorHeap[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
             depthMapDescriptorIndex = viewDepthSRVIndices[b.viewId].linearDepthSRVIndex;
@@ -1392,9 +1628,8 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 }
                 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, viewMatrix);
                 meshletRadiusWorld = meshletBounds.sphere.w * cullUniformScale;
-
                 survives = replaySource || !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, frustumPlanes);
-
+                
                 if (!survives) {
                     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_FRUSTUM, 1);
                 }

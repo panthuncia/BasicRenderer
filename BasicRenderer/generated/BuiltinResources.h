@@ -1,7 +1,7 @@
 #pragma once
 
 #include <string_view>
-// GENERATED CODE — DO NOT EDIT
+// GENERATED CODE ï¿½ DO NOT EDIT
 
 struct Builtin {
   inline static constexpr std::string_view ActiveDrawSetIndices = "Builtin::ActiveDrawSetIndices";
@@ -112,6 +112,8 @@ struct Builtin {
   };
   struct Shadows {
     inline static constexpr std::string_view CLodClipmapInfo = "Builtin::Shadows::CLodClipmapInfo";
+    inline static constexpr std::string_view CLodCompactMainCamera = "Builtin::Shadows::CLodCompactMainCamera";
+    inline static constexpr std::string_view CLodCompactShadowCameras = "Builtin::Shadows::CLodCompactShadowCameras";
     inline static constexpr std::string_view CLodDirectionalPageViewInfo = "Builtin::Shadows::CLodDirectionalPageViewInfo";
     inline static constexpr std::string_view CLodPageTable = "Builtin::Shadows::CLodPageTable";
     inline static constexpr std::string_view CLodPhysicalPages = "Builtin::Shadows::CLodPhysicalPages";

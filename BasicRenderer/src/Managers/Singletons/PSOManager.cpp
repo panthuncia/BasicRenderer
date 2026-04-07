@@ -1513,7 +1513,7 @@ void PSOManager::GetPreprocessedBlob(
     opts.target = target;
     opts.defines = std::move(defines);
 #if BUILD_TYPE == BUILD_TYPE_DEBUG || BUILD_TYPE == BUILD_TYPE_RELEASE_DEBUG
-    opts.enableDebugInfo = true;
+    opts.enableDebugInfo = false;
 #endif
     opts.warningsAsErrors = true;
 

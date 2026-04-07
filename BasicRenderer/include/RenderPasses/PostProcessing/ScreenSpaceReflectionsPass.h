@@ -51,18 +51,18 @@ public:
 
         executionContext.commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
 
-        rhi::UavClearInfo clearInfo{};
-        clearInfo.cpuVisible = m_pSSSROutput->GetUAVNonShaderVisibleInfo(0).slot;
-        clearInfo.shaderVisible = m_pSSSROutput->GetUAVShaderVisibleInfo(0).slot;
-        clearInfo.resource = m_pSSSROutput->GetAPIResource();
+        //rhi::UavClearInfo clearInfo{};
+        //clearInfo.cpuVisible = m_pSSSROutput->GetUAVNonShaderVisibleInfo(0).slot;
+        //clearInfo.shaderVisible = m_pSSSROutput->GetUAVShaderVisibleInfo(0).slot;
+        //clearInfo.resource = m_pSSSROutput->GetAPIResource();
 
-        rhi::UavClearFloat clearValue{};
-        clearValue.v[0] = 0.0f;
-        clearValue.v[1] = 0.0f;
-        clearValue.v[2] = 0.0f;
-        clearValue.v[3] = 0.0f;
+        //rhi::UavClearFloat clearValue{};
+        //clearValue.v[0] = 0.0f;
+        //clearValue.v[1] = 0.0f;
+        //clearValue.v[2] = 0.0f;
+        //clearValue.v[3] = 0.0f;
 
-        executionContext.commandList.ClearUavFloat(clearInfo, clearValue);
+        //executionContext.commandList.ClearUavFloat(clearInfo, clearValue);
 
 
         FFXManager::GetInstance().EvaluateSSSR(

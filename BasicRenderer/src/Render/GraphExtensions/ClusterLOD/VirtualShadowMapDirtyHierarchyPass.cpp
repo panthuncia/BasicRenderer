@@ -58,11 +58,24 @@ PassReturn VirtualShadowMapDirtyHierarchyPass::Execute(PassExecutionContext& exe
             ? srcResolution
             : ((srcResolution > 1u) ? (srcResolution >> 1u) : 1u);
 
+        // Each mip > 0 reads the previous mip of the dirty hierarchy texture.
+        // Insert a UAV barrier so the previous dispatch's writes are visible.
+        if (!sourceIsPageTable) {
+            rhi::GlobalBarrier gb{};
+            gb.beforeSync = rhi::ResourceSyncState::ComputeShading;
+            gb.afterSync = rhi::ResourceSyncState::ComputeShading;
+            gb.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+            gb.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+            rhi::BarrierBatch batch{};
+            batch.globals = rhi::Span<rhi::GlobalBarrier>(&gb, 1);
+            commandList.Barriers(batch);
+        }
+
         uint32_t rootConstants[NumMiscUintRootConstants] = {};
         rootConstants[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_SOURCE_DESCRIPTOR_INDEX] =
             sourceIsPageTable
             ? m_pageTableTexture->GetSRVInfo(SRVViewType::Texture2DArrayFull, 0).slot.index
-            : m_dirtyHierarchyTexture->GetSRVInfo(SRVViewType::Texture2DArrayFull, mipIndex - 1u).slot.index;
+            : m_dirtyHierarchyTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, mipIndex - 1u).slot.index;
         rootConstants[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_DEST_DESCRIPTOR_INDEX] = m_dirtyHierarchyTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, mipIndex).slot.index;
         rootConstants[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_SOURCE_IS_PAGE_TABLE] = sourceIsPageTable ? 1u : 0u;
         rootConstants[CLOD_VIRTUAL_SHADOW_DIRTY_HIERARCHY_SOURCE_RESOLUTION] = srcResolution;

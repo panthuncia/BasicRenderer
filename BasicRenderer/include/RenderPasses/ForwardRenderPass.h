@@ -66,6 +66,8 @@ public:
             Builtin::PerMeshInstanceBuffer,
             Builtin::PostSkinningVertices,
             Builtin::Shadows::CLodClipmapInfo,
+            Builtin::Shadows::CLodCompactMainCamera,
+            Builtin::Shadows::CLodCompactShadowCameras,
             Builtin::Shadows::CLodDirectionalPageViewInfo,
             Builtin::Shadows::CLodPageTable,
             Builtin::Shadows::CLodPhysicalPages,

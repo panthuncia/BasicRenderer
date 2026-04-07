@@ -35,7 +35,8 @@ VirtualShadowMapMarkPagesPass::VirtualShadowMapMarkPagesPass(
 void VirtualShadowMapMarkPagesPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
     builder->WithShaderResource(
-            Builtin::CameraBuffer,
+            Builtin::Shadows::CLodCompactMainCamera,
+            Builtin::Shadows::CLodCompactShadowCameras,
             Builtin::PrimaryCamera::LinearDepthMap,
             Builtin::GBuffer::Normals,
             m_clipmapInfoBuffer)
@@ -90,7 +91,7 @@ PassReturn VirtualShadowMapMarkPagesPass::Execute(PassExecutionContext& executio
         NumMiscUintRootConstants,
         rootConstants);
 
-    constexpr uint32_t kThreadsPerDimension = 8u;
+    constexpr uint32_t kThreadsPerDimension = 16u;
     const uint32_t groupCountX = (context.renderResolution.x + kThreadsPerDimension - 1u) / kThreadsPerDimension;
     const uint32_t groupCountY = (context.renderResolution.y + kThreadsPerDimension - 1u) / kThreadsPerDimension;
     commandList.Dispatch(groupCountX, groupCountY, 1u);

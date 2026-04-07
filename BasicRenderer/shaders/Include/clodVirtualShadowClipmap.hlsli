@@ -36,6 +36,27 @@ struct CLodVirtualShadowClipmapInfo
     int clearOffsetY;
 };
 
+struct CLodVirtualShadowMainCameraInfo
+{
+    float4 positionWorldSpace;
+    row_major matrix viewInverse;
+    row_major matrix projectionInverse;
+};
+
+struct CLodVirtualShadowCompactShadowCameraInfo
+{
+    row_major matrix view;
+    row_major matrix projection;
+    row_major matrix viewProjection;
+    uint isOrtho;
+    uint3 pad;
+};
+
+bool CLodVirtualShadowCompactCameraIsOrtho(CLodVirtualShadowCompactShadowCameraInfo cameraInfo)
+{
+    return cameraInfo.isOrtho != 0u;
+}
+
 struct CLodVirtualShadowStats
 {
     uint activeClipmapCount;
