@@ -361,7 +361,7 @@ MeshletResolveData LoadMeshletResolveData_Wave(uint clusterIndex)
         StructuredBuffer<PerMeshBuffer> perMeshBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
 
-        const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusterBuffer, clusterIndex);
+        const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusterBuffer, clusterIndex);
         d.drawcallAndMeshlet.x = CLodVisibleClusterInstanceID(packedCluster);
         d.drawcallAndMeshlet.y = CLodVisibleClusterLocalMeshletIndex(packedCluster);
 

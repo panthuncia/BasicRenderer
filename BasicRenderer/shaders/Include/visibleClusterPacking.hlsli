@@ -1,96 +1,109 @@
 #ifndef CLOD_VISIBLE_CLUSTER_PACKING_HLSLI
 #define CLOD_VISIBLE_CLUSTER_PACKING_HLSLI
 
-static const uint CLOD_PACKED_VISIBLE_CLUSTER_STRIDE = 12u;
+static const uint CLOD_PACKED_VISIBLE_CLUSTER_STRIDE = 16u;
 static const uint CLOD_PACKED_VISIBLE_CLUSTER_PAGE_SHIFT = 18u;
 static const uint CLOD_PACKED_VISIBLE_CLUSTER_PAGE_MASK = 0x3FFu;
+static const uint CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX = 0xFFFFFFFFu;
 
-uint3 CLodLoadVisibleClusterPacked(ByteAddressBuffer buffer, uint clusterIndex)
+uint4 CLodLoadVisibleClusterPacked(ByteAddressBuffer buffer, uint clusterIndex)
 {
     const uint byteOffset = clusterIndex * CLOD_PACKED_VISIBLE_CLUSTER_STRIDE;
-    return uint3(
+    return uint4(
         buffer.Load(byteOffset + 0u),
         buffer.Load(byteOffset + 4u),
-        buffer.Load(byteOffset + 8u));
+        buffer.Load(byteOffset + 8u),
+        buffer.Load(byteOffset + 12u));
 }
 
-uint3 CLodLoadVisibleClusterPackedRW(RWByteAddressBuffer buffer, uint clusterIndex)
+uint4 CLodLoadVisibleClusterPackedRW(RWByteAddressBuffer buffer, uint clusterIndex)
 {
     const uint byteOffset = clusterIndex * CLOD_PACKED_VISIBLE_CLUSTER_STRIDE;
-    return uint3(
+    return uint4(
         buffer.Load(byteOffset + 0u),
         buffer.Load(byteOffset + 4u),
-        buffer.Load(byteOffset + 8u));
+        buffer.Load(byteOffset + 8u),
+        buffer.Load(byteOffset + 12u));
 }
 
-uint3 CLodLoadVisibleClusterPackedGloballyCoherent(globallycoherent RWByteAddressBuffer buffer, uint clusterIndex)
+uint4 CLodLoadVisibleClusterPackedGloballyCoherent(globallycoherent RWByteAddressBuffer buffer, uint clusterIndex)
 {
     const uint byteOffset = clusterIndex * CLOD_PACKED_VISIBLE_CLUSTER_STRIDE;
-    return uint3(
+    return uint4(
         buffer.Load(byteOffset + 0u),
         buffer.Load(byteOffset + 4u),
-        buffer.Load(byteOffset + 8u));
+        buffer.Load(byteOffset + 8u),
+        buffer.Load(byteOffset + 12u));
 }
 
-void CLodStoreVisibleClusterPackedWordsRW(RWByteAddressBuffer buffer, uint clusterIndex, uint3 packedCluster)
+void CLodStoreVisibleClusterPackedWordsRW(RWByteAddressBuffer buffer, uint clusterIndex, uint4 packedCluster)
 {
     const uint byteOffset = clusterIndex * CLOD_PACKED_VISIBLE_CLUSTER_STRIDE;
     buffer.Store(byteOffset + 0u, packedCluster.x);
     buffer.Store(byteOffset + 4u, packedCluster.y);
     buffer.Store(byteOffset + 8u, packedCluster.z);
+    buffer.Store(byteOffset + 12u, packedCluster.w);
 }
 
-void CLodStoreVisibleClusterPackedWordsGloballyCoherent(globallycoherent RWByteAddressBuffer buffer, uint clusterIndex, uint3 packedCluster)
+void CLodStoreVisibleClusterPackedWordsGloballyCoherent(globallycoherent RWByteAddressBuffer buffer, uint clusterIndex, uint4 packedCluster)
 {
     const uint byteOffset = clusterIndex * CLOD_PACKED_VISIBLE_CLUSTER_STRIDE;
     buffer.Store(byteOffset + 0u, packedCluster.x);
     buffer.Store(byteOffset + 4u, packedCluster.y);
     buffer.Store(byteOffset + 8u, packedCluster.z);
+    buffer.Store(byteOffset + 12u, packedCluster.w);
 }
 
-uint CLodVisibleClusterViewID(uint3 packedCluster)
+uint CLodVisibleClusterViewID(uint4 packedCluster)
 {
     return packedCluster.x & 0xFFu;
 }
 
-uint CLodVisibleClusterInstanceID(uint3 packedCluster)
+uint CLodVisibleClusterInstanceID(uint4 packedCluster)
 {
     return (packedCluster.x >> 8u) & 0xFFFFFFu;
 }
 
-uint CLodVisibleClusterLocalMeshletIndex(uint3 packedCluster)
+uint CLodVisibleClusterLocalMeshletIndex(uint4 packedCluster)
 {
     return packedCluster.y & 0x3FFFu;
 }
 
-uint CLodVisibleClusterGroupID(uint3 packedCluster)
+uint CLodVisibleClusterGroupID(uint4 packedCluster)
 {
     return ((packedCluster.y >> 14u) & 0x3FFFFu) | ((packedCluster.z & 0x3u) << 18u);
 }
 
-uint CLodVisibleClusterPageSlabDescriptorIndex(uint3 packedCluster)
+uint CLodVisibleClusterPageSlabDescriptorIndex(uint4 packedCluster)
 {
     return (packedCluster.z >> 2u) & 0xFFFFFu;
 }
 
-uint CLodVisibleClusterPageSlabByteOffset(uint3 packedCluster)
+uint CLodVisibleClusterPageSlabByteOffset(uint4 packedCluster)
 {
     return ((packedCluster.z >> 22u) & CLOD_PACKED_VISIBLE_CLUSTER_PAGE_MASK) << CLOD_PACKED_VISIBLE_CLUSTER_PAGE_SHIFT;
 }
 
-uint3 CLodPackVisibleCluster(
+uint CLodVisibleClusterShadowClipmapIndex(uint4 packedCluster)
+{
+    return packedCluster.w;
+}
+
+uint4 CLodPackVisibleCluster(
     uint viewID,
     uint instanceID,
     uint localMeshletIndex,
     uint groupID,
     uint pageSlabDescriptorIndex,
-    uint pageSlabByteOffset)
+    uint pageSlabByteOffset,
+    uint shadowClipmapIndex)
 {
     const uint pageIndex = pageSlabByteOffset >> CLOD_PACKED_VISIBLE_CLUSTER_PAGE_SHIFT;
-    return uint3(
+    return uint4(
         (viewID & 0xFFu) | ((instanceID & 0xFFFFFFu) << 8u),
         (localMeshletIndex & 0x3FFFu) | ((groupID & 0x3FFFFu) << 14u),
-        ((groupID >> 18u) & 0x3u) | ((pageSlabDescriptorIndex & 0xFFFFFu) << 2u) | ((pageIndex & CLOD_PACKED_VISIBLE_CLUSTER_PAGE_MASK) << 22u));
+        ((groupID >> 18u) & 0x3u) | ((pageSlabDescriptorIndex & 0xFFFFFu) << 2u) | ((pageIndex & CLOD_PACKED_VISIBLE_CLUSTER_PAGE_MASK) << 22u),
+        shadowClipmapIndex);
 }
 
 void CLodStoreVisibleClusterRW(
@@ -101,7 +114,8 @@ void CLodStoreVisibleClusterRW(
     uint localMeshletIndex,
     uint groupID,
     uint pageSlabDescriptorIndex,
-    uint pageSlabByteOffset)
+    uint pageSlabByteOffset,
+    uint shadowClipmapIndex)
 {
     CLodStoreVisibleClusterPackedWordsRW(
         buffer,
@@ -112,7 +126,8 @@ void CLodStoreVisibleClusterRW(
             localMeshletIndex,
             groupID,
             pageSlabDescriptorIndex,
-            pageSlabByteOffset));
+            pageSlabByteOffset,
+            shadowClipmapIndex));
 }
 
 void CLodStoreVisibleClusterGloballyCoherent(
@@ -123,7 +138,8 @@ void CLodStoreVisibleClusterGloballyCoherent(
     uint localMeshletIndex,
     uint groupID,
     uint pageSlabDescriptorIndex,
-    uint pageSlabByteOffset)
+    uint pageSlabByteOffset,
+    uint shadowClipmapIndex)
 {
     CLodStoreVisibleClusterPackedWordsGloballyCoherent(
         buffer,
@@ -134,7 +150,8 @@ void CLodStoreVisibleClusterGloballyCoherent(
             localMeshletIndex,
             groupID,
             pageSlabDescriptorIndex,
-            pageSlabByteOffset));
+            pageSlabByteOffset,
+            shadowClipmapIndex));
 }
 
 #endif

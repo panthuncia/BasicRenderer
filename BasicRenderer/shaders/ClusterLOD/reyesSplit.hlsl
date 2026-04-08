@@ -76,7 +76,7 @@ void ReyesSplitCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     InterlockedMax(telemetryBuffer[0].deepestSplitLevelReached, splitEntry.splitLevel);
 
     const uint sourceTriangleIndex = splitEntry.sourcePrimitiveAndSplitConfig & 0xFFFFu;
-    const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, splitEntry.visibleClusterIndex);
+    const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, splitEntry.visibleClusterIndex);
     const uint pageSlabDescriptorIndex = CLodVisibleClusterPageSlabDescriptorIndex(packedCluster);
     const uint pageSlabByteOffset = CLodVisibleClusterPageSlabByteOffset(packedCluster);
     const CLodPageHeader hdr = LoadPageHeader(pageSlabDescriptorIndex, pageSlabByteOffset);

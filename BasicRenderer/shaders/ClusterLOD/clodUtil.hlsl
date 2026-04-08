@@ -2237,7 +2237,7 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
         StructuredBuffer<uint> offsets = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_OFFSETS_DESCRIPTOR_INDEX];
         RWStructuredBuffer<uint> writeCursor = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_WRITE_CURSOR_DESCRIPTOR_INDEX];
         RWStructuredBuffer<uint> sortedToUnsortedMapping = ResourceDescriptorHeap[CLOD_COMPACTION_SORTED_TO_UNSORTED_MAPPING_DESCRIPTOR_INDEX];
-        const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, sourceClusterIndex);
+        const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, sourceClusterIndex);
         uint bucketIndex = GetRasterBucketIndexFromInstance(CLodVisibleClusterInstanceID(packedCluster));
 
         uint localOffset = 0;

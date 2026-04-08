@@ -269,7 +269,7 @@ SkinningInfluences SWDecodePackedWeights(
 }
 
 void SWRasterCluster(
-    uint3 packedCluster,
+    uint4 packedCluster,
     uint unsortedClusterIndex,
     uint GI,
     uint subGroup,
@@ -547,7 +547,7 @@ void WG_SWRaster(
     uint unsortedClusterIndex = batch.clusterIndices[clusterIdx];
     globallycoherent RWByteAddressBuffer visibleClusters =
         ResourceDescriptorHeap[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
-    const uint3 packedCluster = CLodLoadVisibleClusterPackedGloballyCoherent(visibleClusters, unsortedClusterIndex);
+    const uint4 packedCluster = CLodLoadVisibleClusterPackedGloballyCoherent(visibleClusters, unsortedClusterIndex);
 
     StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuf =
         ResourceDescriptorHeap[CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
@@ -578,7 +578,7 @@ void SWRasterIndirectCSMain(uint3 dtid : SV_DispatchThreadID, uint GI : SV_Group
     StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuf =
         ResourceDescriptorHeap[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
 
-    const uint3 packedCluster = CLodLoadVisibleClusterPacked(compactedVisibleClusters, sortedClusterIndex);
+    const uint4 packedCluster = CLodLoadVisibleClusterPacked(compactedVisibleClusters, sortedClusterIndex);
     const uint unsortedClusterIndex = sortedToUnsortedMapping[sortedClusterIndex];
     SWRasterCluster(packedCluster, unsortedClusterIndex, GI, subGroup, viewRasterInfoBuf);
 }

@@ -24,6 +24,7 @@ struct VisBufferPSInput
 #endif
     nointerpolation uint visibleClusterIndex : TEXCOORD3;
     nointerpolation uint viewID : TEXCOORD4;
+    nointerpolation uint shadowClipmapIndex : TEXCOORD5;
 };
 
 struct ClodViewRasterInfo
@@ -396,6 +397,7 @@ struct VisibleCluster
     unsigned int groupID;
     unsigned int pageSlabDescriptorIndex; // pre-resolved page slab descriptor
     unsigned int pageSlabByteOffset;      // pre-resolved page slab byte offset
+    unsigned int shadowClipmapIndex;
 };
 
 struct CLodReyesFullClusterOutput

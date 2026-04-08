@@ -540,7 +540,7 @@ void ReyesPatchDeepVisibilityRasterCS(uint3 dispatchThreadId : SV_DispatchThread
     uint2 headPointerDims;
     deepVisibilityHeadPointers.GetDimensions(headPointerDims.x, headPointerDims.y);
 
-    const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, diceEntry.visibleClusterIndex);
+    const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, diceEntry.visibleClusterIndex);
     const uint localMeshletIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
     const uint pageSlabDescriptorIndex = CLodVisibleClusterPageSlabDescriptorIndex(packedCluster);
     const uint pageSlabByteOffset = CLodVisibleClusterPageSlabByteOffset(packedCluster);

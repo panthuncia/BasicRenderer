@@ -27,7 +27,7 @@ void ReyesSeedPatchesCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     RWStructuredBuffer<uint> splitQueueOverflowCounter = ResourceDescriptorHeap[CLOD_REYES_SEED_OUTPUT_SPLIT_QUEUE_OVERFLOW_DESCRIPTOR_INDEX];
 
     const CLodReyesOwnedClusterEntry ownedCluster = ownedClusters[ownedClusterIndex];
-    const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, ownedCluster.visibleClusterIndex);
+    const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, ownedCluster.visibleClusterIndex);
     const uint localMeshletIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
     const uint viewID = CLodVisibleClusterViewID(packedCluster);
     const uint pageSlabDescriptorIndex = CLodVisibleClusterPageSlabDescriptorIndex(packedCluster);

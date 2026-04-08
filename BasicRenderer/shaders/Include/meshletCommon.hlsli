@@ -39,6 +39,7 @@ Meshlet LoadMeshletFromSlab(uint slabDescriptorIndex, uint meshletByteAddr)
 struct MeshletSetup
 {
     uint viewID; // Which view this meshlet is being rendered for (for CLod path)
+    uint shadowClipmapIndex;
     uint meshletIndex;
     Meshlet meshlet; // Used by non-CLod path
     PerMeshBuffer meshBuffer;
@@ -94,6 +95,7 @@ bool InitializeMeshletInternal(
     setup.meshletIndex = meshletLocalIndex;
     setup.meshInstanceBuffer = meshInstance;
     setup.viewID = 0; // Unused
+    setup.shadowClipmapIndex = CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX;
 
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
@@ -170,12 +172,13 @@ bool InitializeMeshletInternalCLod(
 
     ByteAddressBuffer visibleClusters =
                 ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::VisibleClusterBuffer)];
-    const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, visibleMeshletIndex);
+    const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, visibleMeshletIndex);
     StructuredBuffer<PerMeshInstanceBuffer> meshInstanceBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
 
     setup.meshletIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
     setup.meshInstanceBuffer =  meshInstanceBuffer[CLodVisibleClusterInstanceID(packedCluster)];
     setup.viewID = CLodVisibleClusterViewID(packedCluster);
+    setup.shadowClipmapIndex = CLodVisibleClusterShadowClipmapIndex(packedCluster);
 
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];

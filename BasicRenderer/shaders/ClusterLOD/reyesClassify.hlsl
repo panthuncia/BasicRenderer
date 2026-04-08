@@ -58,7 +58,7 @@ void ReyesClassifyCS(uint3 dispatchThreadId : SV_DispatchThreadID)
     const uint clusterIndex = GetReyesClassifyVisibleClusterReadIndex(clusterLinearIndex);
 
     ByteAddressBuffer visibleClusters = ResourceDescriptorHeap[CLOD_REYES_CLASSIFY_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
-    const uint3 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, clusterIndex);
+    const uint4 packedCluster = CLodLoadVisibleClusterPacked(visibleClusters, clusterIndex);
     const uint instanceID = CLodVisibleClusterInstanceID(packedCluster);
 
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstances = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];

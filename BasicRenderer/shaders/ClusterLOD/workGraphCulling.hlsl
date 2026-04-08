@@ -1869,6 +1869,17 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 
         const bool contributes = active && survives;
         const uint visibleGroupId = UnpackGroupId(b.groupIdPacked);
+        uint shadowClipmapIndex = CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX;
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+        if (contributes)
+        {
+            CLodVirtualShadowClipmapInfo shadowClipmapInfo = (CLodVirtualShadowClipmapInfo)0;
+            if (!CLodVirtualShadowFindClipmapForView(b.viewId, shadowClipmapIndex, shadowClipmapInfo))
+            {
+                shadowClipmapIndex = CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX;
+            }
+        }
+#endif
 
 #if !CLOD_WG_ENABLE_SW_CLASSIFICATION
         const uint4 hwMask = WaveActiveBallot(contributes);
@@ -1915,7 +1926,8 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                     localMeshletIndex,
                     visibleGroupId,
                     b.pageSlabDescriptorIndex,
-                    b.pageSlabByteOffset);
+                    b.pageSlabByteOffset,
+                    shadowClipmapIndex);
             }
         }
 #else
@@ -1967,7 +1979,8 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                         localMeshletIndex,
                         visibleGroupId,
                         b.pageSlabDescriptorIndex,
-                        b.pageSlabByteOffset);
+                        b.pageSlabByteOffset,
+                        shadowClipmapIndex);
                 }
             }
 
@@ -2037,7 +2050,8 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                         localMeshletIndex,
                         visibleGroupId,
                         b.pageSlabDescriptorIndex,
-                        b.pageSlabByteOffset);
+                        b.pageSlabByteOffset,
+                        shadowClipmapIndex);
                 }
             }
         }
@@ -2085,7 +2099,8 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                         localMeshletIndex,
                         visibleGroupId,
                         b.pageSlabDescriptorIndex,
-                        b.pageSlabByteOffset);
+                        b.pageSlabByteOffset,
+                        shadowClipmapIndex);
 
                     // Accumulate index into batch buffer.
 #if CLOD_WG_ENABLE_SW_NODE_OUTPUT

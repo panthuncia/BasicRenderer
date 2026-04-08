@@ -373,6 +373,7 @@ struct VisibleCluster {
     unsigned int groupID;
     unsigned int pageSlabDescriptorIndex; // pre-resolved page slab descriptor
     unsigned int pageSlabByteOffset;      // pre-resolved page slab byte offset
+    unsigned int shadowClipmapIndex;      // Virtual shadow clipmap index, or 0xFFFFFFFF when not applicable
 };
 
 inline constexpr uint32_t PackedVisibleClusterViewBits = 8u;
@@ -383,16 +384,19 @@ inline constexpr uint32_t PackedVisibleClusterPageDescriptorBits = 20u;
 inline constexpr uint32_t PackedVisibleClusterPageIndexBits = 10u;
 inline constexpr uint32_t PackedVisibleClusterPageShift = 18u;
 inline constexpr uint32_t PackedVisibleClusterPageSizeBytes = 1u << PackedVisibleClusterPageShift;
-inline constexpr uint32_t PackedVisibleClusterStrideBytes = 12u;
+inline constexpr uint32_t PackedVisibleClusterInvalidShadowClipmapIndex = 0xFFFFFFFFu;
+inline constexpr uint32_t PackedVisibleClusterStrideBytes = 16u;
 
 inline VisibleCluster DecodePackedVisibleCluster(const std::byte* data)
 {
     uint32_t word0 = 0;
     uint32_t word1 = 0;
     uint32_t word2 = 0;
+    uint32_t word3 = 0;
     std::memcpy(&word0, data + 0, sizeof(uint32_t));
     std::memcpy(&word1, data + 4, sizeof(uint32_t));
     std::memcpy(&word2, data + 8, sizeof(uint32_t));
+    std::memcpy(&word3, data + 12, sizeof(uint32_t));
 
     VisibleCluster cluster{};
     cluster.viewID = word0 & 0xFFu;
@@ -401,6 +405,7 @@ inline VisibleCluster DecodePackedVisibleCluster(const std::byte* data)
     cluster.groupID = ((word1 >> PackedVisibleClusterLocalMeshletBits) & 0x3FFFFu) | ((word2 & 0x3u) << 18u);
     cluster.pageSlabDescriptorIndex = (word2 >> 2u) & 0xFFFFFu;
     cluster.pageSlabByteOffset = ((word2 >> 22u) & 0x3FFu) << PackedVisibleClusterPageShift;
+    cluster.shadowClipmapIndex = word3;
     return cluster;
 }
 
