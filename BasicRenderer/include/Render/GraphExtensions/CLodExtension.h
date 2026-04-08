@@ -29,6 +29,7 @@ private:
     void InitializeCoreResources();
     void InitializeDeepVisibilityResources();
     void InitializeShadowResources();
+    void RefreshShadowResourcesForCurrentSettings();
     void TagCoreResourceUsages();
     void TagShadowResourceUsages();
     void ReleaseBufferBackings();
@@ -166,4 +167,6 @@ private:
     std::unique_ptr<CLodStreamingSystem> m_streamingSystem;
     bool m_providerRegisteredForCurrentRegistry = false;
     bool m_shadowVirtualResourcesNeedReset = true;
+    uint32_t m_shadowConfiguredBackingResolution = 0u;
+    uint32_t m_shadowConfiguredMaxPhysicalPageCount = 0u;
 };

@@ -165,6 +165,38 @@ bool CLodVirtualShadowClipmapIsValid(CLodVirtualShadowClipmapInfo clipmapInfo)
         clipmapInfo.shadowCameraBufferIndex != kInvalidShadowCameraIndex;
 }
 
+bool CLodVirtualShadowTryGetClipmapInfoForView(
+    uint viewID,
+    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos,
+    out CLodVirtualShadowClipmapInfo clipmapInfo)
+{
+    clipmapInfo = (CLodVirtualShadowClipmapInfo)0;
+
+    [unroll]
+    for (uint candidateIndex = 0u; candidateIndex < kCLodVirtualShadowClipmapCount; ++candidateIndex)
+    {
+        const CLodVirtualShadowClipmapInfo candidate = clipmapInfos[candidateIndex];
+        if (!CLodVirtualShadowClipmapIsValid(candidate))
+        {
+            continue;
+        }
+
+        if (candidate.shadowCameraBufferIndex == viewID)
+        {
+            clipmapInfo = candidate;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool CLodVirtualShadowPageEntryCanRaster(uint pageEntry)
+{
+    return (pageEntry & (kCLodVirtualShadowAllocatedMask | kCLodVirtualShadowDirtyMask)) ==
+        (kCLodVirtualShadowAllocatedMask | kCLodVirtualShadowDirtyMask);
+}
+
 uint CLodVirtualShadowWrapPageCoord(uint coord, uint offset, uint pageTableResolution)
 {
     const uint wrappedOffset = pageTableResolution > 0u ? (offset % pageTableResolution) : 0u;
@@ -225,6 +257,53 @@ uint2 CLodVirtualShadowVirtualTexelCoordsFromUv(float2 shadowUv, CLodVirtualShad
 uint2 CLodVirtualShadowVirtualTexelCoordsFromUv(float2 shadowUv, CLodVirtualShadowMarkClipmapData clipmapData)
 {
     return CLodVirtualShadowVirtualTexelCoordsFromUv(shadowUv, clipmapData.virtualResolution);
+}
+
+uint2 CLodVirtualShadowVirtualPageCoordsFromPixel(uint2 pixel, CLodVirtualShadowClipmapInfo clipmapInfo)
+{
+    const uint clampedResolution = max(clipmapInfo.virtualResolution, 1u);
+    const uint clampedPageTableResolution = max(clipmapInfo.pageTableResolution, 1u);
+    const uint2 clampedPixel = min(pixel, clampedResolution - 1u);
+    return min(
+        clampedPixel / kCLodVirtualShadowPhysicalPageSize,
+        clampedPageTableResolution - 1u);
+}
+
+bool CLodVirtualShadowAnyRenderablePageInPixelRect(
+    uint2 minPixel,
+    uint2 maxPixel,
+    CLodVirtualShadowClipmapInfo clipmapInfo,
+    RWTexture2DArray<uint> pageTable)
+{
+    if (!CLodVirtualShadowClipmapIsValid(clipmapInfo))
+    {
+        return false;
+    }
+
+    if (minPixel.x > maxPixel.x || minPixel.y > maxPixel.y)
+    {
+        return false;
+    }
+
+    const uint2 minPageCoords = CLodVirtualShadowVirtualPageCoordsFromPixel(minPixel, clipmapInfo);
+    const uint2 maxPageCoords = CLodVirtualShadowVirtualPageCoordsFromPixel(maxPixel, clipmapInfo);
+
+    [loop]
+    for (uint pageY = minPageCoords.y; pageY <= maxPageCoords.y; ++pageY)
+    {
+        [loop]
+        for (uint pageX = minPageCoords.x; pageX <= maxPageCoords.x; ++pageX)
+        {
+            const uint2 wrappedPageCoords = CLodVirtualShadowWrappedPageCoords(uint2(pageX, pageY), clipmapInfo);
+            const uint pageEntry = pageTable[uint3(wrappedPageCoords, clipmapInfo.pageTableLayer)];
+            if (CLodVirtualShadowPageEntryCanRaster(pageEntry))
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 uint2 CLodVirtualShadowPhysicalAtlasPixel(uint physicalPageIndex, uint2 virtualTexelCoords, uint physicalAtlasPagesWide)

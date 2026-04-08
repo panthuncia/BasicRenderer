@@ -519,6 +519,10 @@ private:
     std::function<bool()> getCLodDisableVirtualShadowPageCaching;
     std::function<void(bool)> setCLodDisableVirtualShadowPageCaching;
 
+    uint32_t m_clodDirectionalVirtualShadowMaxBackingResolution = CLodVirtualShadowDefaultBackingResolution;
+    std::function<uint32_t()> getCLodDirectionalVirtualShadowMaxBackingResolution;
+    std::function<void(uint32_t)> setCLodDirectionalVirtualShadowMaxBackingResolution;
+
     uint32_t m_clodDirectionalVirtualShadowMaxPhysicalPages = CLodVirtualShadowDefaultPhysicalPageCount;
     std::function<uint32_t()> getCLodDirectionalVirtualShadowMaxPhysicalPages;
     std::function<void(uint32_t)> setCLodDirectionalVirtualShadowMaxPhysicalPages;
@@ -759,6 +763,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     setCLodDisableVirtualShadowPageCaching = settingsManager.getSettingSetter<bool>(CLodDisableVirtualShadowPageCachingSettingName);
     m_clodDisableVirtualShadowPageCaching = getCLodDisableVirtualShadowPageCaching();
     observerSetting(m_clodDisableVirtualShadowPageCaching, CLodDisableVirtualShadowPageCachingSettingName);
+
+    getCLodDirectionalVirtualShadowMaxBackingResolution = settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName);
+    setCLodDirectionalVirtualShadowMaxBackingResolution = settingsManager.getSettingSetter<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName);
+    m_clodDirectionalVirtualShadowMaxBackingResolution = getCLodDirectionalVirtualShadowMaxBackingResolution();
+    observerSetting(m_clodDirectionalVirtualShadowMaxBackingResolution, CLodDirectionalVirtualShadowMaxBackingResolutionSettingName);
 
     getCLodDirectionalVirtualShadowMaxPhysicalPages = settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowMaxPhysicalPagesSettingName);
     setCLodDirectionalVirtualShadowMaxPhysicalPages = settingsManager.getSettingSetter<uint32_t>(CLodDirectionalVirtualShadowMaxPhysicalPagesSettingName);
@@ -1098,9 +1107,49 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             m_numDirectionalLightCascades = static_cast<uint8_t>(directionalLightClipmaps);
             setNumDirectionalLightCascades(m_numDirectionalLightCascades);
         }
+        static constexpr uint32_t kDirectionalVsmBackingResolutionOptions[] = {
+            CLodVirtualShadowMinBackingResolution,
+            CLodVirtualShadowMediumBackingResolution,
+            CLodVirtualShadowMaxBackingResolution,
+        };
+        static constexpr const char* kDirectionalVsmBackingResolutionLabels[] = {
+            "4K",
+            "8K",
+            "16K",
+        };
+        int directionalVsmBackingResolutionIndex = 0;
+        for (int optionIndex = 0; optionIndex < static_cast<int>(std::size(kDirectionalVsmBackingResolutionOptions)); ++optionIndex) {
+            if (CLodVirtualShadowSanitizeBackingResolution(m_clodDirectionalVirtualShadowMaxBackingResolution) ==
+                kDirectionalVsmBackingResolutionOptions[optionIndex]) {
+                directionalVsmBackingResolutionIndex = optionIndex;
+                break;
+            }
+        }
+        if (ImGui::Combo(
+                "Directional VSM Backing Size",
+                &directionalVsmBackingResolutionIndex,
+                kDirectionalVsmBackingResolutionLabels,
+                static_cast<int>(std::size(kDirectionalVsmBackingResolutionLabels)))) {
+            directionalVsmBackingResolutionIndex = std::clamp(
+                directionalVsmBackingResolutionIndex,
+                0,
+                static_cast<int>(std::size(kDirectionalVsmBackingResolutionOptions)) - 1);
+            m_clodDirectionalVirtualShadowMaxBackingResolution =
+                kDirectionalVsmBackingResolutionOptions[directionalVsmBackingResolutionIndex];
+            setCLodDirectionalVirtualShadowMaxBackingResolution(m_clodDirectionalVirtualShadowMaxBackingResolution);
+
+            const uint32_t backingMaxPhysicalPages = CLodVirtualShadowMaxPhysicalPageCountFromBackingResolution(
+                m_clodDirectionalVirtualShadowMaxBackingResolution);
+            if (m_clodDirectionalVirtualShadowMaxPhysicalPages > backingMaxPhysicalPages) {
+                m_clodDirectionalVirtualShadowMaxPhysicalPages = backingMaxPhysicalPages;
+                setCLodDirectionalVirtualShadowMaxPhysicalPages(m_clodDirectionalVirtualShadowMaxPhysicalPages);
+            }
+        }
+        const uint32_t backingMaxPhysicalPages = CLodVirtualShadowMaxPhysicalPageCountFromBackingResolution(
+            m_clodDirectionalVirtualShadowMaxBackingResolution);
         int maxPhysicalPages = static_cast<int>(m_clodDirectionalVirtualShadowMaxPhysicalPages);
-        if (ImGui::SliderInt("Directional VSM Physical Pages", &maxPhysicalPages, 1, static_cast<int>(CLodVirtualShadowMaxPhysicalPageCount))) {
-            maxPhysicalPages = std::clamp(maxPhysicalPages, 1, static_cast<int>(CLodVirtualShadowMaxPhysicalPageCount));
+        if (ImGui::SliderInt("Directional VSM Physical Pages", &maxPhysicalPages, 1, static_cast<int>(backingMaxPhysicalPages))) {
+            maxPhysicalPages = std::clamp(maxPhysicalPages, 1, static_cast<int>(backingMaxPhysicalPages));
             m_clodDirectionalVirtualShadowMaxPhysicalPages = static_cast<uint32_t>(maxPhysicalPages);
             setCLodDirectionalVirtualShadowMaxPhysicalPages(m_clodDirectionalVirtualShadowMaxPhysicalPages);
         }
@@ -1126,6 +1175,11 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             CLodVirtualShadowFixedVirtualPageCountPerAxis,
             CLodVirtualShadowFixedVirtualPageCountPerAxis,
             CLodVirtualShadowPhysicalPageSize);
+        ImGui::Text(
+            "Directional VSM Backing Cap: %u x %u texels (%u pages max)",
+            CLodVirtualShadowSanitizeBackingResolution(m_clodDirectionalVirtualShadowMaxBackingResolution),
+            CLodVirtualShadowSanitizeBackingResolution(m_clodDirectionalVirtualShadowMaxBackingResolution),
+            backingMaxPhysicalPages);
         ImGui::Text(
             "Directional VSM Physical Atlas: %u x %u pages (%u total)",
             virtualShadowConfig.physicalAtlasPagesWide,
@@ -2887,7 +2941,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
             stats.freePhysicalPageCount,
             stats.reusablePhysicalPageCount);
         ImGui::Text(
-            "Controller: allocation=%.1f%% targetBias=%.2f smoothedBias=%.2f framesSinceOverBudget=%u",
+            "Controller: requestAllocation=%.1f%% targetBias=%.2f smoothedBias=%.2f recoveryStableFrames=%u",
             stats.currentAllocationPercentage * 100.0f,
             stats.targetPressureLodBias,
             stats.smoothedPressureLodBias,

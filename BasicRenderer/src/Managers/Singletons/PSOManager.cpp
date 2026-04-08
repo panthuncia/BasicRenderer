@@ -843,6 +843,7 @@ PipelineState PSOManager::CreateClusterLODRasterPSO(
 PipelineState PSOManager::CreateClusterLODVirtualShadowRasterPSO(
     MaterialRasterFlags materialRasterFlags, bool wireframe) {
     auto defines = GetRasterShaderDefines(materialRasterFlags);
+    defines.push_back({ L"CLOD_RASTER_OUTPUT_VIRTUAL_SHADOW", L"1" });
 
     Microsoft::WRL::ComPtr<ID3DBlob> msBlob;
     Microsoft::WRL::ComPtr<ID3DBlob> psBlob;

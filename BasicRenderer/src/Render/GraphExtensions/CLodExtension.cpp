@@ -195,15 +195,13 @@ TextureDescription CreateVirtualShadowPageTableDescription()
     return desc;
 }
 
-TextureDescription CreateVirtualShadowPhysicalPagesDescription()
+TextureDescription CreateVirtualShadowPhysicalPagesDescription(uint32_t backingResolution)
 {
     TextureDescription desc;
     ImageDimensions dims;
-    const uint32_t maxPhysicalPages = CLodVirtualShadowMaxPhysicalPageCount;
-    const uint32_t atlasPagesWide = CLodVirtualShadowPhysicalAtlasPagesWideFromPageCount(maxPhysicalPages);
-    const uint32_t atlasPagesHigh = CLodVirtualShadowPhysicalAtlasPagesHighFromPageCount(maxPhysicalPages, atlasPagesWide);
-    dims.width = atlasPagesWide * CLodVirtualShadowPhysicalPageSize;
-    dims.height = atlasPagesHigh * CLodVirtualShadowPhysicalPageSize;
+    const uint32_t sanitizedBackingResolution = CLodVirtualShadowSanitizeBackingResolution(backingResolution);
+    dims.width = sanitizedBackingResolution;
+    dims.height = sanitizedBackingResolution;
     dims.rowPitch = static_cast<uint64_t>(dims.width) * sizeof(uint32_t);
     dims.slicePitch = dims.rowPitch * static_cast<uint64_t>(dims.height);
     desc.imageDimensions.push_back(dims);
@@ -603,7 +601,9 @@ void CLodExtension::InitializeShadowResources()
 
     auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
     const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
-    const uint32_t maxShadowPhysicalPageCount = CLodVirtualShadowMaxPhysicalPageCount;
+    m_shadowConfiguredBackingResolution = CLodVirtualShadowGetConfiguredMaxBackingResolution();
+    m_shadowConfiguredMaxPhysicalPageCount = CLodVirtualShadowGetConfiguredMaxPhysicalPageCapacity();
+    const uint32_t maxShadowPhysicalPageCount = m_shadowConfiguredMaxPhysicalPageCount;
 
     m_shadowPageTableTexture = PixelBuffer::CreateSharedUnmaterialized(CreateVirtualShadowPageTableDescription());
     m_shadowPageTableTexture->SetName(MakeVariantResourceName(traits, "Virtual Shadow Page Table"));
@@ -612,7 +612,8 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodVirtualShadowPageTableTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowPhysicalPagesTexture = PixelBuffer::CreateSharedUnmaterialized(CreateVirtualShadowPhysicalPagesDescription());
+    m_shadowPhysicalPagesTexture = PixelBuffer::CreateSharedUnmaterialized(
+        CreateVirtualShadowPhysicalPagesDescription(m_shadowConfiguredBackingResolution));
     m_shadowPhysicalPagesTexture->SetName(MakeVariantResourceName(traits, "Virtual Shadow Physical Pages"));
     m_shadowPhysicalPagesTexture->GetECSEntity()
         .set<Components::Resource>({ m_shadowPhysicalPagesTexture })
@@ -1391,8 +1392,30 @@ CLodExtension::CLodExtension(CLodExtensionType type, uint32_t maxVisibleClusters
     TagShadowResourceUsages();
 }
 
+void CLodExtension::RefreshShadowResourcesForCurrentSettings()
+{
+    if (m_type != CLodExtensionType::Shadow) {
+        return;
+    }
+
+    const uint32_t desiredBackingResolution = CLodVirtualShadowGetConfiguredMaxBackingResolution();
+    const uint32_t desiredMaxPhysicalPageCount = CLodVirtualShadowGetConfiguredMaxPhysicalPageCapacity();
+    if (m_shadowPhysicalPagesTexture &&
+        m_shadowConfiguredBackingResolution == desiredBackingResolution &&
+        m_shadowConfiguredMaxPhysicalPageCount == desiredMaxPhysicalPageCount) {
+        return;
+    }
+
+    ReleaseShadowResourceBackings();
+    InitializeShadowResources();
+    TagShadowResourceUsages();
+    m_shadowVirtualResourcesNeedReset = true;
+}
+
 void CLodExtension::PrepareForBuild(RenderGraph& rg)
 {
+    RefreshShadowResourcesForCurrentSettings();
+
     if (m_type == CLodExtensionType::Shadow && !m_providerRegisteredForCurrentRegistry) {
         rg.RegisterProvider(this);
         m_providerRegisteredForCurrentRegistry = true;
@@ -1632,7 +1655,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_shadowAllocationIndirectArgsBuffer,
                 nullptr,
                 64u,
-                CLodVirtualShadowMaxPhysicalPageCount));
+                m_shadowConfiguredMaxPhysicalPageCount));
         shadowBuildDispatchArgsPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowBuildPageListsPassName));
         outPasses.push_back(std::move(shadowBuildDispatchArgsPassDesc));
 

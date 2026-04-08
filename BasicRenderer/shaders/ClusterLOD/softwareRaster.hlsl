@@ -108,26 +108,8 @@ bool SWRasterWriteVirtualShadow(uint2 pixel, uint viewID, float linearDepth)
     StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos =
         ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX];
 
-    uint clipmapIndex = 0xFFFFFFFFu;
     CLodVirtualShadowClipmapInfo clipmapInfo = (CLodVirtualShadowClipmapInfo)0;
-    [unroll]
-    for (uint candidateIndex = 0u; candidateIndex < kCLodVirtualShadowClipmapCount; ++candidateIndex)
-    {
-        const CLodVirtualShadowClipmapInfo candidate = clipmapInfos[candidateIndex];
-        if (!CLodVirtualShadowClipmapIsValid(candidate))
-        {
-            continue;
-        }
-
-        if (candidate.shadowCameraBufferIndex == viewID)
-        {
-            clipmapIndex = candidateIndex;
-            clipmapInfo = candidate;
-            break;
-        }
-    }
-
-    if (clipmapIndex == 0xFFFFFFFFu)
+    if (!CLodVirtualShadowTryGetClipmapInfoForView(viewID, clipmapInfos, clipmapInfo))
     {
         return false;
     }
@@ -139,8 +121,7 @@ bool SWRasterWriteVirtualShadow(uint2 pixel, uint viewID, float linearDepth)
     RWTexture2DArray<uint> pageTable = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX];
     const uint3 pageCoords = uint3(wrappedPageCoords, clipmapInfo.pageTableLayer);
     const uint pageEntry = pageTable[pageCoords];
-    if ((pageEntry & (kCLodVirtualShadowAllocatedMask | kCLodVirtualShadowDirtyMask)) !=
-        (kCLodVirtualShadowAllocatedMask | kCLodVirtualShadowDirtyMask))
+    if (!CLodVirtualShadowPageEntryCanRaster(pageEntry))
     {
         return false;
     }
@@ -396,6 +377,14 @@ void SWRasterCluster(
 
     ByteAddressBuffer slab = ResourceDescriptorHeap[pageSlabDescriptorIndex];
 
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos =
+        ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX];
+    CLodVirtualShadowClipmapInfo clipmapInfo = (CLodVirtualShadowClipmapInfo)0;
+    const bool hasClipmapInfo = CLodVirtualShadowTryGetClipmapInfoForView(viewID, clipmapInfos, clipmapInfo);
+    RWTexture2DArray<uint> pageTable = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX];
+#endif
+
     uint globalThread = subGroup * SW_RASTER_THREADS + GI;
     uint totalThreads = SW_RASTER_GROUPS_PER_CLUSTER * SW_RASTER_THREADS;
 
@@ -454,6 +443,18 @@ void SWRasterCluster(
         minPx = max(minPx, int2(0, 0));
         maxPx = min(maxPx, int2(int(visDims.x) - 1, int(visDims.y) - 1));
         if (minPx.x > maxPx.x || minPx.y > maxPx.y) continue;
+
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+        if (!hasClipmapInfo ||
+            !CLodVirtualShadowAnyRenderablePageInPixelRect(
+                uint2(minPx),
+                uint2(maxPx),
+                clipmapInfo,
+                pageTable))
+        {
+            continue;
+        }
+#endif
 
         float2 origin = float2(float(minPx.x) + 0.5f, float(minPx.y) + 0.5f);
 

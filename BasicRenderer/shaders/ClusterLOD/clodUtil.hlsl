@@ -309,11 +309,8 @@ void CLodVirtualShadowStatsIncrementMarkResidentDirtyHit(RWStructuredBuffer<CLod
 float CLodVirtualShadowAllocationPercentage(CLodVirtualShadowStats previousStats, uint physicalPageCount)
 {
     const float safePhysicalPageCount = max((float)physicalPageCount, 1.0f);
-    const float availablePageCount = min(
-        (float)(previousStats.freePhysicalPageCount + previousStats.reusablePhysicalPageCount),
-        safePhysicalPageCount);
-    const float allocatedPageCount = max(safePhysicalPageCount - availablePageCount, 0.0f);
-    return saturate(allocatedPageCount / safePhysicalPageCount);
+    const float requestCount = (float)previousStats.allocationRequestCount;
+    return requestCount / safePhysicalPageCount;
 }
 
 float CLodVirtualShadowPressureFeedbackLodBias(float allocationPercentage, float autoLodBiasScale)
@@ -326,12 +323,14 @@ float CLodVirtualShadowPressureFeedbackLodBias(float allocationPercentage, float
 
     const float targetAllocationPercentage = 0.8f;
     const float allocationRatio = max(allocationPercentage / targetAllocationPercentage, 0.0001f);
-    return max(log2(allocationRatio), 0.0f) * positiveScale;
+    return min(max(log2(allocationRatio), 0.0f) * positiveScale, 8.0f);
 }
 
 float CLodVirtualShadowSmoothPressureLodBias(
     float previousSmoothedPressureLodBias,
     float targetPressureLodBias,
+    float allocationPercentage,
+    uint markRequestOverflowCount,
     uint framesSinceOverBudget)
 {
     const float previousBias = max(previousSmoothedPressureLodBias, 0.0f);
@@ -343,16 +342,23 @@ float CLodVirtualShadowSmoothPressureLodBias(
         return previousBias;
     }
 
-    const float rampUpAlpha = 0.55f;
-    const float rampDownAlpha = 0.08f;
-    const uint rampDownHoldFrames = 6u;
+    const float targetAllocationPercentage = 0.8f;
+    const float recoveryAllocationPercentage = 0.5f;
+    const float hardPressureAllocationPercentage = 1.0f;
+    const float rampUpAlpha = 0.6f;
+    const float rampDownAlpha = 0.02f;
+    const uint rampDownHoldFrames = 32u;
+    const bool overflowed = markRequestOverflowCount > 0u;
+    const bool hardPressured = allocationPercentage >= hardPressureAllocationPercentage;
+    const bool overBudget = overflowed || allocationPercentage >= targetAllocationPercentage;
+    const bool recoverySafe = !overflowed && allocationPercentage <= recoveryAllocationPercentage;
 
-    if (targetBias > previousBias)
+    if (targetBias > previousBias || hardPressured)
     {
         return clamp(lerp(previousBias, targetBias, rampUpAlpha), 0.0f, 8.0f);
     }
 
-    if (framesSinceOverBudget < rampDownHoldFrames)
+    if (overBudget || !recoverySafe || framesSinceOverBudget < rampDownHoldFrames)
     {
         return previousBias;
     }
@@ -1007,13 +1013,18 @@ void CLodVirtualShadowSetupCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         const uint previousFramesSinceOverBudget = CLOD_VIRTUAL_SHADOW_SETUP_RESET_RESOURCES != 0u
             ? 0u
             : previousStats.framesSinceOverBudget;
-        const uint framesSinceOverBudget = targetPressureLodBias > 0.0f
-            ? 0u
-            : min(previousFramesSinceOverBudget + 1u, 0xFFFFFFFFu);
+        const bool recoverySafe =
+            currentAllocationPercentage <= 0.5f &&
+            previousStats.markRequestOverflowCount == 0u;
+        const uint framesSinceOverBudget = recoverySafe
+            ? min(previousFramesSinceOverBudget + 1u, 0xFFFFFFFFu)
+            : 0u;
         const float smoothedPressureLodBias = CLOD_VIRTUAL_SHADOW_SETUP_AUTO_BIAS_ENABLED != 0u
             ? CLodVirtualShadowSmoothPressureLodBias(
                 previousSmoothedPressureLodBias,
                 targetPressureLodBias,
+                currentAllocationPercentage,
+                previousStats.markRequestOverflowCount,
                 framesSinceOverBudget)
             : 0.0f;
         const float effectiveDirectionalLodBias = baseDirectionalLodBias + smoothedPressureLodBias;
