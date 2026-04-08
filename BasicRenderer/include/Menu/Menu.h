@@ -519,6 +519,26 @@ private:
     std::function<bool()> getCLodDisableVirtualShadowPageCaching;
     std::function<void(bool)> setCLodDisableVirtualShadowPageCaching;
 
+    bool m_clodEnablePageJobVSM = false;
+    std::function<bool()> getCLodEnablePageJobVSM;
+    std::function<void(bool)> setCLodEnablePageJobVSM;
+
+    uint32_t m_clodPageJobDiameterThreshold = 64u;
+    std::function<uint32_t()> getCLodPageJobDiameterThreshold;
+    std::function<void(uint32_t)> setCLodPageJobDiameterThreshold;
+
+    float m_clodPageJobSparseRatio = 0.5f;
+    std::function<float()> getCLodPageJobSparseRatio;
+    std::function<void(float)> setCLodPageJobSparseRatio;
+
+    uint32_t m_clodPageJobMaxPagesPerCluster = 32u;
+    std::function<uint32_t()> getCLodPageJobMaxPagesPerCluster;
+    std::function<void(uint32_t)> setCLodPageJobMaxPagesPerCluster;
+
+    bool m_clodPageJobForceAll = false;
+    std::function<bool()> getCLodPageJobForceAll;
+    std::function<void(bool)> setCLodPageJobForceAll;
+
     uint32_t m_clodDirectionalVirtualShadowMaxBackingResolution = CLodVirtualShadowDefaultBackingResolution;
     std::function<uint32_t()> getCLodDirectionalVirtualShadowMaxBackingResolution;
     std::function<void(uint32_t)> setCLodDirectionalVirtualShadowMaxBackingResolution;
@@ -763,6 +783,31 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     setCLodDisableVirtualShadowPageCaching = settingsManager.getSettingSetter<bool>(CLodDisableVirtualShadowPageCachingSettingName);
     m_clodDisableVirtualShadowPageCaching = getCLodDisableVirtualShadowPageCaching();
     observerSetting(m_clodDisableVirtualShadowPageCaching, CLodDisableVirtualShadowPageCachingSettingName);
+
+    getCLodEnablePageJobVSM = settingsManager.getSettingGetter<bool>(CLodEnablePageJobVSMSettingName);
+    setCLodEnablePageJobVSM = settingsManager.getSettingSetter<bool>(CLodEnablePageJobVSMSettingName);
+    m_clodEnablePageJobVSM = getCLodEnablePageJobVSM();
+    observerSetting(m_clodEnablePageJobVSM, CLodEnablePageJobVSMSettingName);
+
+    getCLodPageJobDiameterThreshold = settingsManager.getSettingGetter<uint32_t>(CLodPageJobDiameterThresholdSettingName);
+    setCLodPageJobDiameterThreshold = settingsManager.getSettingSetter<uint32_t>(CLodPageJobDiameterThresholdSettingName);
+    m_clodPageJobDiameterThreshold = getCLodPageJobDiameterThreshold();
+    observerSetting(m_clodPageJobDiameterThreshold, CLodPageJobDiameterThresholdSettingName);
+
+    getCLodPageJobSparseRatio = settingsManager.getSettingGetter<float>(CLodPageJobSparseRatioSettingName);
+    setCLodPageJobSparseRatio = settingsManager.getSettingSetter<float>(CLodPageJobSparseRatioSettingName);
+    m_clodPageJobSparseRatio = getCLodPageJobSparseRatio();
+    observerSetting(m_clodPageJobSparseRatio, CLodPageJobSparseRatioSettingName);
+
+    getCLodPageJobMaxPagesPerCluster = settingsManager.getSettingGetter<uint32_t>(CLodPageJobMaxPagesPerClusterSettingName);
+    setCLodPageJobMaxPagesPerCluster = settingsManager.getSettingSetter<uint32_t>(CLodPageJobMaxPagesPerClusterSettingName);
+    m_clodPageJobMaxPagesPerCluster = getCLodPageJobMaxPagesPerCluster();
+    observerSetting(m_clodPageJobMaxPagesPerCluster, CLodPageJobMaxPagesPerClusterSettingName);
+
+    getCLodPageJobForceAll = settingsManager.getSettingGetter<bool>(CLodPageJobForceAllSettingName);
+    setCLodPageJobForceAll = settingsManager.getSettingSetter<bool>(CLodPageJobForceAllSettingName);
+    m_clodPageJobForceAll = getCLodPageJobForceAll();
+    observerSetting(m_clodPageJobForceAll, CLodPageJobForceAllSettingName);
 
     getCLodDirectionalVirtualShadowMaxBackingResolution = settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName);
     setCLodDirectionalVirtualShadowMaxBackingResolution = settingsManager.getSettingSetter<uint32_t>(CLodDirectionalVirtualShadowMaxBackingResolutionSettingName);
@@ -1100,6 +1145,27 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
         }
         if (ImGui::Checkbox("Disable VSM Page Caching", &m_clodDisableVirtualShadowPageCaching)) {
             setCLodDisableVirtualShadowPageCaching(m_clodDisableVirtualShadowPageCaching);
+        }
+        if (ImGui::Checkbox("Enable Page-Job VSM Raster", &m_clodEnablePageJobVSM)) {
+            setCLodEnablePageJobVSM(m_clodEnablePageJobVSM);
+        }
+        if (m_clodEnablePageJobVSM) {
+            int diameterThreshold = static_cast<int>(m_clodPageJobDiameterThreshold);
+            if (ImGui::SliderInt("Page-Job Diameter Threshold", &diameterThreshold, 1, 255)) {
+                m_clodPageJobDiameterThreshold = static_cast<uint32_t>(std::clamp(diameterThreshold, 1, 255));
+                setCLodPageJobDiameterThreshold(m_clodPageJobDiameterThreshold);
+            }
+            if (ImGui::SliderFloat("Page-Job Sparse Ratio", &m_clodPageJobSparseRatio, 0.0f, 1.0f, "%.2f")) {
+                setCLodPageJobSparseRatio(m_clodPageJobSparseRatio);
+            }
+            int maxPages = static_cast<int>(m_clodPageJobMaxPagesPerCluster);
+            if (ImGui::SliderInt("Page-Job Max Pages/Cluster", &maxPages, 1, 255)) {
+                m_clodPageJobMaxPagesPerCluster = static_cast<uint32_t>(std::clamp(maxPages, 1, 255));
+                setCLodPageJobMaxPagesPerCluster(m_clodPageJobMaxPagesPerCluster);
+            }
+            if (ImGui::Checkbox("Force All Opaque VSM -> Page-Job", &m_clodPageJobForceAll)) {
+                setCLodPageJobForceAll(m_clodPageJobForceAll);
+            }
         }
         int directionalLightClipmaps = static_cast<int>(m_numDirectionalLightCascades);
         if (ImGui::SliderInt("Directional VSM Clipmaps", &directionalLightClipmaps, 1, static_cast<int>(CLodVirtualShadowMaxSupportedClipmapCount))) {

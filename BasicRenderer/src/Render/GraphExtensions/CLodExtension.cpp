@@ -1760,7 +1760,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             nullptr,
             traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidatesBuffer : nullptr,
             traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidateCountBuffer : nullptr,
-            traits.type == CLodExtensionType::Shadow ? m_shadowInvalidatedInstancesBitsetBuffer : nullptr));
+            traits.type == CLodExtensionType::Shadow ? m_shadowInvalidatedInstancesBitsetBuffer : nullptr,
+            traits.type == CLodExtensionType::Shadow ? m_shadowPageTableTexture : nullptr,
+            traits.type == CLodExtensionType::Shadow ? m_shadowPhysicalPagesTexture : nullptr));
     if (traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassCullOnly ||
         traits.scheduleMode == CLodVariantTraits::ScheduleMode::SinglePassDeepVisibility) {
         cullPassDesc.At(RenderGraph::ExternalInsertPoint::After("CLodOpaque::LinearDepthDownsamplePass2"));
@@ -2234,7 +2236,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             m_swVisibleClustersCounterBuffer,
                 traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidatesBuffer : nullptr,
                 traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidateCountBuffer : nullptr,
-            traits.type == CLodExtensionType::Shadow ? m_shadowInvalidatedInstancesBitsetBuffer : nullptr));
+            traits.type == CLodExtensionType::Shadow ? m_shadowInvalidatedInstancesBitsetBuffer : nullptr,
+            traits.type == CLodExtensionType::Shadow ? m_shadowPageTableTexture : nullptr,
+            traits.type == CLodExtensionType::Shadow ? m_shadowPhysicalPagesTexture : nullptr));
     outPasses.push_back(std::move(cullPassDesc2));
 
     if (!disableReyesTessellation) {

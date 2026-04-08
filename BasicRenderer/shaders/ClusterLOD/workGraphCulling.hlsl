@@ -145,6 +145,13 @@ static const uint WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_QUERIES = 65;
 static const uint WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_QUERIES_CLIPPED = 66;
 static const uint WG_COUNTER_CLUSTER_CULL_SHADOW_DIRTY_REGION_COARSE_MIP_CHECKS = 67;
 
+static const uint WG_COUNTER_PAGEJOB_BUILD_CLUSTERS_PROCESSED = 68;
+static const uint WG_COUNTER_PAGEJOB_BUILD_PAGES_EMITTED = 69;
+static const uint WG_COUNTER_PAGEJOB_BUILD_FALLBACK_TO_HW = 70;
+static const uint WG_COUNTER_PAGEJOB_RASTER_TRIANGLES_CLIPPED = 71;
+static const uint WG_COUNTER_PAGEJOB_RASTER_PIXELS_WRITTEN = 72;
+static const uint WG_COUNTER_PAGEJOB_RASTER_FLAG_WRITES = 73;
+
 static const uint CLOD_STREAM_REQUEST_CAPACITY = (1u << 16);
 static const uint CLOD_USED_GROUPS_CAPACITY = (1u << 17);
 static const uint CLOD_STREAM_VIEWID_MASK = 0xFFFFu;
@@ -204,6 +211,53 @@ float CLodSWRasterDiameterThreshold()
     return float(CLOD_WG_FLAGS >> CLOD_WG_SW_RASTER_THRESHOLD_SHIFT);
 #else
     return 0.0f;
+#endif
+}
+
+// Page-job VSM flags helpers — decode from CLOD_WG_PAGE_JOB_FLAGS root constant.
+bool CLodPageJobEnabled()
+{
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+    return (CLOD_WG_PAGE_JOB_FLAGS & CLOD_WG_PAGE_JOB_FLAG_ENABLED) != 0u;
+#else
+    return false;
+#endif
+}
+
+bool CLodPageJobForceAll()
+{
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+    return (CLOD_WG_PAGE_JOB_FLAGS & CLOD_WG_PAGE_JOB_FLAG_FORCE_ALL) != 0u;
+#else
+    return false;
+#endif
+}
+
+float CLodPageJobDiameterThreshold()
+{
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+    return float((CLOD_WG_PAGE_JOB_FLAGS & CLOD_WG_PAGE_JOB_DIAMETER_THRESHOLD_MASK) >> CLOD_WG_PAGE_JOB_DIAMETER_THRESHOLD_SHIFT);
+#else
+    return 0.0f;
+#endif
+}
+
+float CLodPageJobSparseRatio()
+{
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+    return float((CLOD_WG_PAGE_JOB_FLAGS & CLOD_WG_PAGE_JOB_SPARSE_RATIO_MASK) >> CLOD_WG_PAGE_JOB_SPARSE_RATIO_SHIFT) / 255.0f;
+#else
+    return 0.0f;
+#endif
+}
+
+uint CLodPageJobMaxPagesPerCluster()
+{
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+    uint v = (CLOD_WG_PAGE_JOB_FLAGS & CLOD_WG_PAGE_JOB_MAX_PAGES_MASK) >> CLOD_WG_PAGE_JOB_MAX_PAGES_SHIFT;
+    return v == 0u ? PAGEJOB_MAX_PAGES_PER_CLUSTER : v;
+#else
+    return PAGEJOB_MAX_PAGES_PER_CLUSTER;
 #endif
 }
 
@@ -1513,10 +1567,16 @@ void WG_TraverseNodes(
 groupshared uint gs_swBatchIndices[SW_BATCH_ACCUM_CAPACITY];
 #endif
 
+// Page-job batch accumulator (same capacity — worst case identical).
+#define PAGEJOB_BATCH_ACCUM_CAPACITY SW_BATCH_ACCUM_CAPACITY
+#if CLOD_WG_ENABLE_SW_NODE_OUTPUT
+groupshared uint gs_pageJobBatchIndices[PAGEJOB_BATCH_ACCUM_CAPACITY];
+#endif
+
 // Shared cluster-cull implementation called by each bucket-size variant.
 // FIXED_LOOP_COUNT is the bucket size (1, 2, 4, 8, 16, 32, or 64) - all active lanes
 // in a variant wave process the same number of iterations, minimizing WaveActiveMax divergence.
-void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputCount, uint FIXED_LOOP_COUNT, out uint swPendingOut)
+void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputCount, uint FIXED_LOOP_COUNT, out uint swPendingOut, out uint pageJobPendingOut)
 {
     // Telemetry (coalesced launch level)
     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_THREADS, 1);
@@ -1568,6 +1628,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
     uint objectBufferIndex = 0;
     bool isSkinned = false;
     bool reyesDisplacementCandidate = false;
+    bool isAlphaTestedMaterial = false;
     uint skinningInstanceSlot = 0xFFFFFFFFu;
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
     bool objectInvalidatedThisFrame = false;
@@ -1634,6 +1695,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         StructuredBuffer<MaterialInfo> materialDataBuffer =
             ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
         const MaterialInfo materialInfo = materialDataBuffer[perMesh.materialDataIndex];
+        isAlphaTestedMaterial = (materialInfo.materialFlags & MATERIAL_ALPHA_TEST) != 0u;
         const bool displacementEnabled = materialInfo.geometricDisplacementEnabled != 0u;
         const float displacementSpan = max(0.0f, materialInfo.geometricDisplacementMax - materialInfo.geometricDisplacementMin);
         reyesDisplacementCandidate = displacementEnabled && displacementSpan > 1e-5f;
@@ -1692,11 +1754,15 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         ResourceDescriptorHeap[CLOD_WG_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
     StructuredBuffer<uint> swWriteBaseCounter = ResourceDescriptorHeap[CLOD_WG_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
     const uint swWriteBase = CLodWorkGraphIsPhase2() ? swWriteBaseCounter.Load(0) : 0u;
-    // Software-raster classification uses projected meshlet diameter in pixels.
+    // Page-job classification setup.
+    const bool pageJobEnabled = CLodPageJobEnabled();
+    const float pageJobDiameterThreshold = (float)CLodPageJobDiameterThreshold();
+    const bool pageJobForceAll = CLodPageJobForceAll();
 #endif
 
     uint totalSurvivors = 0;
     uint swPending = 0; // SW batch accumulator count (wave-uniform)
+    uint pageJobPending = 0; // Page-job batch accumulator count (wave-uniform)
 
     for (uint m = 0; m < FIXED_LOOP_COUNT; m++) {
         const bool active = (m < meshletCount) && pageValid;
@@ -1987,9 +2053,10 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
             continue;
         }
 
-        // SW/HW classification, tiny meshlets go to software rasterization.
+        // SW/HW/PageJob three-way classification.
         bool isSW = false;
-        if (contributes && swRasterEnabled && !reyesDisplacementCandidate) {
+        bool isPageJob = false;
+        if (contributes && !reyesDisplacementCandidate && (swRasterEnabled || pageJobEnabled)) {
             const float projectedDiameter = CLodProjectedDiameterPixels(
                 meshletRadiusWorld,
                 cullCam.projY,
@@ -1997,11 +2064,18 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 meshletCenterViewSpace.z,
                 cullCam.zNear,
                 cullCameraIsOrtho);
-            isSW = projectedDiameter < swDiameterThreshold;
+            if (swRasterEnabled) {
+                isSW = projectedDiameter < swDiameterThreshold;
+            }
+            if (!isSW && pageJobEnabled && !isAlphaTestedMaterial
+                && shadowClipmapIndex != CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX) {
+                isPageJob = (projectedDiameter >= pageJobDiameterThreshold) || pageJobForceAll;
+            }
         }
 
-        const bool isHW = contributes && !isSW;
+        const bool isHW = contributes && !isSW && !isPageJob;
         const bool outputSW = contributes && isSW;
+        const bool outputPageJob = contributes && isPageJob;
 
         // HW path: wave-cooperative bottom-up write
         {
@@ -2112,6 +2186,61 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
             swPending += swAvail; // uniform, swAvail derived from wave-uniform values
 #endif
         }
+
+        // Page-job path: wave-cooperative top-down write + batch accumulate
+        {
+            const uint4 pjMask = WaveActiveBallot(outputPageJob);
+            const uint pjIterCount = CountBits128(pjMask);
+            totalSurvivors += pjIterCount;
+            uint pjAvail = 0;
+
+            if (pjIterCount > 0) {
+                const uint pjLeader = WaveFirstLaneFromMask(pjMask);
+                const uint pjRank = GetLaneRankInGroup(pjMask, WaveGetLaneIndex());
+
+                uint pjBase = 0;
+                uint pjCombinedBase = 0;
+                if (WaveGetLaneIndex() == pjLeader) {
+                    InterlockedAdd(replayState[0].visibleClusterCombinedCount, pjIterCount, pjCombinedBase);
+                }
+                pjCombinedBase = WaveReadLaneAt(pjCombinedBase, pjLeader);
+
+                pjAvail =
+                    (pjCombinedBase < visibleClusterCapacity)
+                        ? min(pjIterCount, visibleClusterCapacity - pjCombinedBase)
+                        : 0u;
+
+                if (WaveGetLaneIndex() == pjLeader) {
+                    InterlockedAdd(swVisibleClusterCounter[0], pjAvail, pjBase);
+                }
+                pjBase = WaveReadLaneAt(pjBase, pjLeader);
+
+                if (WaveGetLaneIndex() == pjLeader && (pjCombinedBase + pjIterCount > visibleClusterCapacity)) {
+                    InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
+                }
+
+                if (outputPageJob && (pjRank < pjAvail)) {
+                    const uint pjIndex = visibleClusterCapacity - 1 - (swWriteBase + pjBase + pjRank);
+                    CLodStoreVisibleClusterGloballyCoherent(
+                        visibleClusters,
+                        pjIndex,
+                        b.viewId,
+                        b.instanceIndex,
+                        localMeshletIndex,
+                        visibleGroupId,
+                        b.pageSlabDescriptorIndex,
+                        b.pageSlabByteOffset,
+                        shadowClipmapIndex);
+
+#if CLOD_WG_ENABLE_SW_NODE_OUTPUT
+                    gs_pageJobBatchIndices[pageJobPending + pjRank] = pjIndex;
+#endif
+                }
+            }
+#if CLOD_WG_ENABLE_SW_NODE_OUTPUT
+            pageJobPending += pjAvail;
+#endif
+        }
 #endif
 
     }
@@ -2124,6 +2253,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 #endif
 
     swPendingOut = swPending;
+    pageJobPendingOut = pageJobPending;
 
     if (isWaveLeader) {
         WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_SURVIVING_LANES, totalSurvivors);
@@ -2158,6 +2288,31 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 #define CLOD_CLUSTER_CULL_SW_EPILOGUE()
 #endif
 
+#if CLOD_WG_ENABLE_SW_NODE_OUTPUT
+#define CLOD_CLUSTER_CULL_PAGEJOB_PARAM(MAX_RECORDS) \
+    [NodeID("PageJobBuild")] [AllowSparseNodes] [MaxRecordsSharedWith(swRasterOutput)] NodeOutput<PageJobBuildBatchRecord> pageJobOutput,
+
+#define CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE() \
+    GroupMemoryBarrierWithGroupSync(); \
+    const uint pjNumBatches = (pageJobPending + PAGEJOB_BUILD_MAX_CLUSTERS - 1) / PAGEJOB_BUILD_MAX_CLUSTERS; \
+    GroupNodeOutputRecords<PageJobBuildBatchRecord> pjBatchOut = \
+        pageJobOutput.GetGroupNodeOutputRecords(pjNumBatches); \
+    if (GI == 0) { \
+        for (uint pjBatch = 0; pjBatch < pjNumBatches; pjBatch++) { \
+            const uint pjBatchStart = pjBatch * PAGEJOB_BUILD_MAX_CLUSTERS; \
+            const uint pjBatchSize = min(PAGEJOB_BUILD_MAX_CLUSTERS, pageJobPending - pjBatchStart); \
+            pjBatchOut[pjBatch].dispatchGrid = uint3(pjBatchSize, 1, 1); \
+            pjBatchOut[pjBatch].numClusters = pjBatchSize; \
+            for (uint pji = 0; pji < pjBatchSize; pji++) \
+                pjBatchOut[pjBatch].clusterIndices[pji] = gs_pageJobBatchIndices[pjBatchStart + pji]; \
+        } \
+    } \
+    pjBatchOut.OutputComplete()
+#else
+#define CLOD_CLUSTER_CULL_PAGEJOB_PARAM(MAX_RECORDS)
+#define CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE()
+#endif
+
 // ClusterCull variant entry points - one per bucket size.
 // Each variant processes a fixed number of meshlets per lane, eliminating wave divergence.
 
@@ -2169,6 +2324,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 void WG_ClusterCull1(
     [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
     CLOD_CLUSTER_CULL_SW_PARAM(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 1 / SW_BATCH_MAX_CLUSTERS)
+    CLOD_CLUSTER_CULL_PAGEJOB_PARAM(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 1 / PAGEJOB_BUILD_MAX_CLUSTERS)
     uint GI : SV_GroupIndex)
 {
     const uint inputCount = inRecs.Count();
@@ -2176,8 +2332,10 @@ void WG_ClusterCull1(
     MeshletBucketRecord b = (MeshletBucketRecord)0;
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 1, swPending);
+    uint pageJobPending = 0;
+    ClusterCullBody(b, hasBucket, GI, inputCount, 1, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
+    CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
 
 [Shader("node")]
@@ -2187,6 +2345,7 @@ void WG_ClusterCull1(
 void WG_ClusterCull2(
     [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
     CLOD_CLUSTER_CULL_SW_PARAM(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 2 / SW_BATCH_MAX_CLUSTERS)
+    CLOD_CLUSTER_CULL_PAGEJOB_PARAM(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 2 / PAGEJOB_BUILD_MAX_CLUSTERS)
     uint GI : SV_GroupIndex)
 {
     const uint inputCount = inRecs.Count();
@@ -2194,8 +2353,10 @@ void WG_ClusterCull2(
     MeshletBucketRecord b = (MeshletBucketRecord)0;
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 2, swPending);
+    uint pageJobPending = 0;
+    ClusterCullBody(b, hasBucket, GI, inputCount, 2, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
+    CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
 
 [Shader("node")]
@@ -2205,6 +2366,7 @@ void WG_ClusterCull2(
 void WG_ClusterCull4(
     [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
     CLOD_CLUSTER_CULL_SW_PARAM(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 4 / SW_BATCH_MAX_CLUSTERS)
+    CLOD_CLUSTER_CULL_PAGEJOB_PARAM(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 4 / PAGEJOB_BUILD_MAX_CLUSTERS)
     uint GI : SV_GroupIndex)
 {
     const uint inputCount = inRecs.Count();
@@ -2212,8 +2374,10 @@ void WG_ClusterCull4(
     MeshletBucketRecord b = (MeshletBucketRecord)0;
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 4, swPending);
+    uint pageJobPending = 0;
+    ClusterCullBody(b, hasBucket, GI, inputCount, 4, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
+    CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
 
 [Shader("node")]
@@ -2223,6 +2387,7 @@ void WG_ClusterCull4(
 void WG_ClusterCull8(
     [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
     CLOD_CLUSTER_CULL_SW_PARAM(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 8 / SW_BATCH_MAX_CLUSTERS)
+    CLOD_CLUSTER_CULL_PAGEJOB_PARAM(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 8 / PAGEJOB_BUILD_MAX_CLUSTERS)
     uint GI : SV_GroupIndex)
 {
     const uint inputCount = inRecs.Count();
@@ -2230,8 +2395,10 @@ void WG_ClusterCull8(
     MeshletBucketRecord b = (MeshletBucketRecord)0;
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 8, swPending);
+    uint pageJobPending = 0;
+    ClusterCullBody(b, hasBucket, GI, inputCount, 8, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
+    CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
 
 [Shader("node")]
@@ -2241,6 +2408,7 @@ void WG_ClusterCull8(
 void WG_ClusterCull16(
     [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
     CLOD_CLUSTER_CULL_SW_PARAM(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 16 / SW_BATCH_MAX_CLUSTERS)
+    CLOD_CLUSTER_CULL_PAGEJOB_PARAM(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 16 / PAGEJOB_BUILD_MAX_CLUSTERS)
     uint GI : SV_GroupIndex)
 {
     const uint inputCount = inRecs.Count();
@@ -2248,8 +2416,10 @@ void WG_ClusterCull16(
     MeshletBucketRecord b = (MeshletBucketRecord)0;
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 16, swPending);
+    uint pageJobPending = 0;
+    ClusterCullBody(b, hasBucket, GI, inputCount, 16, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
+    CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
 
 [Shader("node")]
@@ -2259,6 +2429,7 @@ void WG_ClusterCull16(
 void WG_ClusterCull32(
     [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
     CLOD_CLUSTER_CULL_SW_PARAM(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 32 / SW_BATCH_MAX_CLUSTERS)
+    CLOD_CLUSTER_CULL_PAGEJOB_PARAM(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 32 / PAGEJOB_BUILD_MAX_CLUSTERS)
     uint GI : SV_GroupIndex)
 {
     const uint inputCount = inRecs.Count();
@@ -2266,8 +2437,10 @@ void WG_ClusterCull32(
     MeshletBucketRecord b = (MeshletBucketRecord)0;
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 32, swPending);
+    uint pageJobPending = 0;
+    ClusterCullBody(b, hasBucket, GI, inputCount, 32, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
+    CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
 
 [Shader("node")]
@@ -2277,6 +2450,7 @@ void WG_ClusterCull32(
 void WG_ClusterCull64(
     [MaxRecords(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP)] GroupNodeInputRecords<MeshletBucketRecord> inRecs,
     CLOD_CLUSTER_CULL_SW_PARAM(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 64 / SW_BATCH_MAX_CLUSTERS)
+    CLOD_CLUSTER_CULL_PAGEJOB_PARAM(CLUSTER_CULL_BUCKETS_THREADS_PER_GROUP * 64 / PAGEJOB_BUILD_MAX_CLUSTERS)
     uint GI : SV_GroupIndex)
 {
     const uint inputCount = inRecs.Count();
@@ -2284,8 +2458,10 @@ void WG_ClusterCull64(
     MeshletBucketRecord b = (MeshletBucketRecord)0;
     if (hasBucket) b = inRecs[GI];
     uint swPending = 0;
-    ClusterCullBody(b, hasBucket, GI, inputCount, 64, swPending);
+    uint pageJobPending = 0;
+    ClusterCullBody(b, hasBucket, GI, inputCount, 64, swPending, pageJobPending);
     CLOD_CLUSTER_CULL_SW_EPILOGUE();
+    CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE();
 }
 
 #if CLOD_WG_ENABLE_SW_NODE_OUTPUT

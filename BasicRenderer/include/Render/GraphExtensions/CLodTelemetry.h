@@ -88,6 +88,13 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     ClusterCullShadowDirtyQueriesClipped,
     ClusterCullShadowDirtyRegionCoarseMipChecks,
 
+    PageJobBuildClustersProcessed,
+    PageJobBuildPagesEmitted,
+    PageJobBuildFallbackToHW,
+    PageJobRasterTrianglesClipped,
+    PageJobRasterPixelsWritten,
+    PageJobRasterFlagWrites,
+
     Count
 };
 

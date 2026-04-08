@@ -83,7 +83,9 @@ HierarchialCullingPass::HierarchialCullingPass(
     std::shared_ptr<Buffer> swWriteBaseCounterBuffer,
     std::shared_ptr<Buffer> shadowPredictiveInvalidationCandidatesBuffer,
     std::shared_ptr<Buffer> shadowPredictiveInvalidationCandidateCountBuffer,
-    std::shared_ptr<Buffer> shadowInvalidatedInstancesBitsetBuffer) {
+    std::shared_ptr<Buffer> shadowInvalidatedInstancesBitsetBuffer,
+    std::shared_ptr<PixelBuffer> shadowPageTableTexture,
+    std::shared_ptr<PixelBuffer> shadowPhysicalPagesTexture) {
     m_workGraphMode = inputs.workGraphMode;
     m_rasterOutputKind = inputs.rasterOutputKind;
     CreatePipelines(
@@ -112,6 +114,8 @@ HierarchialCullingPass::HierarchialCullingPass(
     m_shadowPredictiveInvalidationCandidateCountBuffer = std::move(shadowPredictiveInvalidationCandidateCountBuffer);
     m_shadowInvalidatedInstancesBitsetBuffer = std::move(shadowInvalidatedInstancesBitsetBuffer);
     m_shadowDirtyHierarchyTexture = std::move(shadowDirtyHierarchyTexture);
+    m_shadowPageTableTexture = std::move(shadowPageTableTexture);
+    m_shadowPhysicalPagesTexture = std::move(shadowPhysicalPagesTexture);
     m_slabResourceGroup = std::move(slabResourceGroup);
     m_phase1VisibleClustersCounterBuffer = std::move(phase1VisibleClustersCounterBuffer);
     m_swWriteBaseCounterBuffer = std::move(swWriteBaseCounterBuffer);
@@ -201,7 +205,8 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
     if (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVirtualShadowOutput(m_rasterOutputKind)) {
         builder->WithShaderResource(
                 Builtin::Shadows::CLodPageTable)
-            .WithUnorderedAccess(Builtin::Shadows::CLodPhysicalPages);
+            .WithUnorderedAccess(Builtin::Shadows::CLodPhysicalPages)
+            .WithUnorderedAccess(Builtin::Shadows::CLodPageTable);
     }
 
     // Phase 2 reads Phase 1's HW counter to offset writes in the visible clusters buffer.
@@ -277,6 +282,36 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
         workGraphFlags |= CLOD_WG_FLAG_PHASE2;
     }
     uintRootConstants[CLOD_WG_FLAGS] = workGraphFlags;
+
+    // Pack page-job VSM flags
+    uint32_t pageJobFlags = 0;
+    {
+        auto& settings = SettingsManager::GetInstance();
+        const bool pageJobEnabled = settings.getSettingGetter<bool>(CLodEnablePageJobVSMSettingName)();
+        if (pageJobEnabled && UsesVirtualShadowOutput(m_rasterOutputKind)) {
+            pageJobFlags |= CLOD_WG_PAGE_JOB_FLAG_ENABLED;
+        }
+        const bool pageJobForceAll = settings.getSettingGetter<bool>(CLodPageJobForceAllSettingName)();
+        if (pageJobForceAll) {
+            pageJobFlags |= CLOD_WG_PAGE_JOB_FLAG_FORCE_ALL;
+        }
+        const uint32_t diameterThreshold = std::min(settings.getSettingGetter<uint32_t>(CLodPageJobDiameterThresholdSettingName)(), 255u);
+        pageJobFlags |= (diameterThreshold << CLOD_WG_PAGE_JOB_DIAMETER_THRESHOLD_SHIFT);
+        const float sparseRatio = settings.getSettingGetter<float>(CLodPageJobSparseRatioSettingName)();
+        const uint32_t sparseRatioEncoded = std::min(static_cast<uint32_t>(sparseRatio * 255.0f + 0.5f), 255u);
+        pageJobFlags |= (sparseRatioEncoded << CLOD_WG_PAGE_JOB_SPARSE_RATIO_SHIFT);
+        const uint32_t maxPages = std::min(settings.getSettingGetter<uint32_t>(CLodPageJobMaxPagesPerClusterSettingName)(), 255u);
+        pageJobFlags |= (maxPages << CLOD_WG_PAGE_JOB_MAX_PAGES_SHIFT);
+    }
+    uintRootConstants[CLOD_WG_PAGE_JOB_FLAGS] = pageJobFlags;
+    if (m_shadowPageTableTexture) {
+        uintRootConstants[CLOD_WG_VIRTUAL_SHADOW_PAGE_TABLE_UAV_DESCRIPTOR_INDEX] =
+            m_shadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
+    }
+    if (m_shadowPhysicalPagesTexture) {
+        uintRootConstants[CLOD_WG_VIRTUAL_SHADOW_PHYSICAL_PAGES_UAV_DESCRIPTOR_INDEX] =
+            m_shadowPhysicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
+    }
     uintRootConstants[CLOD_WG_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX] = m_occlusionReplayBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_WG_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_WG_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
@@ -658,6 +693,10 @@ void HierarchialCullingPass::CreatePipelines(
     };
     if (UsesWorkGraphSWRaster(m_workGraphMode)) {
         exports.push_back({ "WG_SWRaster", nullptr });
+        if (UsesVirtualShadowOutput(m_rasterOutputKind)) {
+            exports.push_back({ "WG_PageJobBuild", nullptr });
+            exports.push_back({ "WG_PageJobRaster", nullptr });
+        }
     }
 
     rhi::ShaderLibraryDesc library{};

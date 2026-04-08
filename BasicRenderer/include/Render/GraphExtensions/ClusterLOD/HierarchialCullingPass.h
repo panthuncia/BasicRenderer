@@ -56,7 +56,9 @@ public:
         std::shared_ptr<Buffer> swWriteBaseCounterBuffer = nullptr,
         std::shared_ptr<Buffer> shadowPredictiveInvalidationCandidatesBuffer = nullptr,
         std::shared_ptr<Buffer> shadowPredictiveInvalidationCandidateCountBuffer = nullptr,
-        std::shared_ptr<Buffer> shadowInvalidatedInstancesBitsetBuffer = nullptr);
+        std::shared_ptr<Buffer> shadowInvalidatedInstancesBitsetBuffer = nullptr,
+        std::shared_ptr<PixelBuffer> shadowPageTableTexture = nullptr,
+        std::shared_ptr<PixelBuffer> shadowPhysicalPagesTexture = nullptr);
     ~HierarchialCullingPass();
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override;
@@ -101,6 +103,8 @@ private:
     std::shared_ptr<Buffer> m_shadowPredictiveInvalidationCandidateCountBuffer;
     std::shared_ptr<Buffer> m_shadowInvalidatedInstancesBitsetBuffer;
     std::shared_ptr<PixelBuffer> m_shadowDirtyHierarchyTexture;
+    std::shared_ptr<PixelBuffer> m_shadowPageTableTexture;
+    std::shared_ptr<PixelBuffer> m_shadowPhysicalPagesTexture;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     std::shared_ptr<Buffer> m_phase1VisibleClustersCounterBuffer; // Phase 2 only: Phase 1's HW counter for write offset
     std::shared_ptr<Buffer> m_swWriteBaseCounterBuffer; // Phase 2 only: Phase 1's SW counter for top-down write offset

@@ -225,4 +225,30 @@ struct SWRasterBatchRecord
     uint clusterIndices[SW_BATCH_MAX_CLUSTERS]; // unsorted visible cluster buffer indices
 };
 
+// ---------------------------------------------------------------------------
+// Page-job VSM software rasterization records.
+// Two-node pipeline: ClusterCull → PageJobBuild → PageJobRaster.
+// ---------------------------------------------------------------------------
+#define PAGEJOB_BUILD_THREADS            128
+#define PAGEJOB_BUILD_MAX_CLUSTERS       8
+#define PAGEJOB_RASTER_THREADS           128
+#define PAGEJOB_MAX_PAGES_PER_CLUSTER    32
+
+// Build-stage input: batch of cluster indices (same shape as SWRasterBatchRecord).
+struct PageJobBuildBatchRecord
+{
+    uint3 dispatchGrid : SV_DispatchGrid; // (1, 1, 1) — single group per batch
+    uint numClusters;                       // 1..PAGEJOB_BUILD_MAX_CLUSTERS
+    uint clusterIndices[PAGEJOB_BUILD_MAX_CLUSTERS];
+};
+
+// Raster-stage input: one (cluster, dirty-page) pair.
+struct PageJobRasterRecord
+{
+    uint3 dispatchGrid : SV_DispatchGrid; // (1, 1, 1)
+    uint clusterIndex;                      // visible-cluster-buffer index
+    uint packedPageAndClipmap;              // physicalPageIndex:27 | clipmapLayer:5
+    uint packedPageVirtual;                 // virtualPageX:16 | virtualPageY:16
+};
+
 #endif // CLOD_STRUCTS_HLSLI

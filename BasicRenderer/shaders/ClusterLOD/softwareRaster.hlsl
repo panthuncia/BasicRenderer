@@ -582,3 +582,376 @@ void SWRasterIndirectCSMain(uint3 dtid : SV_DispatchThreadID, uint GI : SV_Group
     const uint unsortedClusterIndex = sortedToUnsortedMapping[sortedClusterIndex];
     SWRasterCluster(packedCluster, unsortedClusterIndex, GI, subGroup, viewRasterInfoBuf);
 }
+
+// ---------------------------------------------------------------------------
+// Page-job VSM rasterization: two-node pipeline
+// ---------------------------------------------------------------------------
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+
+groupshared uint gs_pageJobDirtyCount;
+groupshared uint gs_pageJobDirtyPhysIdx[PAGEJOB_MAX_PAGES_PER_CLUSTER];
+groupshared uint gs_pageJobDirtyVirtX[PAGEJOB_MAX_PAGES_PER_CLUSTER];
+groupshared uint gs_pageJobDirtyVirtY[PAGEJOB_MAX_PAGES_PER_CLUSTER];
+
+// PageJobBuild: broadcasting node — enumerates dirty VSM pages touched by a cluster.
+// Input: PageJobBuildBatchRecord (up to PAGEJOB_BUILD_MAX_CLUSTERS clusters).
+// Output: one PageJobRasterRecord per dirty page per cluster.
+
+[Shader("node")]
+[NodeID("PageJobBuild")]
+[NodeLaunch("broadcasting")]
+[NodeMaxDispatchGrid(PAGEJOB_BUILD_MAX_CLUSTERS, 1, 1)]
+[NumThreads(PAGEJOB_BUILD_THREADS, 1, 1)]
+void WG_PageJobBuild(
+    DispatchNodeInputRecord<PageJobBuildBatchRecord> inputRecord,
+    [NodeID("PageJobRaster")] [MaxRecords(PAGEJOB_MAX_PAGES_PER_CLUSTER)] NodeOutput<PageJobRasterRecord> pageJobRasterOutput,
+    uint GI : SV_GroupIndex,
+    uint3 groupId : SV_GroupID)
+{
+    PageJobBuildBatchRecord batch = inputRecord.Get();
+    const uint clusterSlot = groupId.x;
+    if (clusterSlot >= batch.numClusters) return;
+
+    const uint unsortedClusterIndex = batch.clusterIndices[clusterSlot];
+    globallycoherent RWByteAddressBuffer visibleClusters =
+        ResourceDescriptorHeap[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+    const uint4 packedCluster = CLodLoadVisibleClusterPackedGloballyCoherent(visibleClusters, unsortedClusterIndex);
+
+    const uint viewID = CLodVisibleClusterViewID(packedCluster);
+    const uint instanceID = CLodVisibleClusterInstanceID(packedCluster);
+    const uint localMeshletIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
+    const uint pageSlabDescriptorIndex = CLodVisibleClusterPageSlabDescriptorIndex(packedCluster);
+    const uint pageSlabByteOffset = CLodVisibleClusterPageSlabByteOffset(packedCluster);
+
+    // Resolve clipmap info for this shadow view.
+    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodClipmapInfo)];
+    CLodVirtualShadowClipmapInfo clipmapInfo = (CLodVirtualShadowClipmapInfo)0;
+    bool hasClipmapInfo = CLodVirtualShadowTryGetClipmapInfoForView(viewID, clipmapInfos, clipmapInfo);
+    if (!hasClipmapInfo) {
+        GroupNodeOutputRecords<PageJobRasterRecord> emptyOut = pageJobRasterOutput.GetGroupNodeOutputRecords(0);
+        emptyOut.OutputComplete();
+        return;
+    }
+
+    // Load page header + meshlet descriptor.
+    CLodPageHeader hdr = LoadPageHeader(pageSlabDescriptorIndex, pageSlabByteOffset);
+    CLodMeshletDescriptor desc = LoadMeshletDescriptor(
+        pageSlabDescriptorIndex, pageSlabByteOffset,
+        hdr.descriptorOffset, localMeshletIndex);
+    const uint vertCount = CLodDescVertexCount(desc);
+
+    // Load transforms.
+    StructuredBuffer<PerMeshInstanceBuffer> meshInstBuf =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+    PerMeshInstanceBuffer meshInst = meshInstBuf[instanceID];
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+    StructuredBuffer<PerObjectBuffer> objBuf =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
+    PerObjectBuffer objData = objBuf[meshInst.perObjectBufferIndex];
+
+    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuf =
+        ResourceDescriptorHeap[CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
+    ClodViewRasterInfo rasterInfo = viewRasterInfoBuf[viewID];
+
+    const float visWidth  = float(rasterInfo.scissorMaxX - rasterInfo.scissorMinX);
+    const float visHeight = float(rasterInfo.scissorMaxY - rasterInfo.scissorMinY);
+    const float scissorMinXf = float(rasterInfo.scissorMinX);
+    const float scissorMinYf = float(rasterInfo.scissorMinY);
+
+    StructuredBuffer<CullingCameraInfo> cullingCameras =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
+    CullingCameraInfo cam = cullingCameras[viewID];
+
+    const uint positionBitstreamBase = pageSlabByteOffset + hdr.positionBitstreamOffset;
+    row_major matrix modelViewProjection = mul(objData.model, cam.viewProjection);
+
+    // Cooperative vertex position decode → gs_screenPos.
+    for (uint v = GI; v < vertCount; v += PAGEJOB_BUILD_THREADS) {
+        float3 localPos = SWDecodeCompressedPosition(
+            v, positionBitstreamBase, desc.positionBitOffset,
+            CLodDescBitsX(desc), CLodDescBitsY(desc), CLodDescBitsZ(desc),
+            hdr.compressedPositionQuantExp,
+            int3(desc.minQx, desc.minQy, desc.minQz),
+            pageSlabDescriptorIndex);
+        if ((perMeshBuffer[meshInst.perMeshBufferIndex].vertexFlags & VERTEX_SKINNED) != 0u) {
+            SkinningInfluences skinning = SWDecodePackedJoints(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex);
+            skinning = SWDecodePackedWeights(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex, skinning);
+            localPos = mul(float4(localPos, 1.0f), BuildSkinMatrix(meshInst.skinningInstanceSlot, skinning)).xyz;
+        }
+        float4 clipPos = mul(float4(localPos, 1.0f), modelViewProjection);
+        float invW = 1.0f / clipPos.w;
+        float2 ndc = clipPos.xy * invW;
+        float2 screen;
+        screen.x = (ndc.x + 1.0f) * 0.5f * visWidth  + scissorMinXf;
+        screen.y = (1.0f - ndc.y) * 0.5f * visHeight + scissorMinYf;
+        gs_screenPos[v] = screen;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    // Thread 0 computes screen-space AABB → page footprint → enumerate dirty pages.
+    if (GI == 0) {
+        gs_pageJobDirtyCount = 0;
+
+        float2 ssMin = float2(1e30f, 1e30f);
+        float2 ssMax = float2(-1e30f, -1e30f);
+        for (uint i = 0; i < vertCount; i++) {
+            ssMin = min(ssMin, gs_screenPos[i]);
+            ssMax = max(ssMax, gs_screenPos[i]);
+        }
+
+        // Clamp to virtual resolution.
+        const float vRes = (float)max(clipmapInfo.virtualResolution, 1u);
+        ssMin = clamp(ssMin, float2(0, 0), float2(vRes - 1.0f, vRes - 1.0f));
+        ssMax = clamp(ssMax, float2(0, 0), float2(vRes - 1.0f, vRes - 1.0f));
+
+        // Convert pixel range to page range.
+        const uint pageRes = max(clipmapInfo.pageTableResolution, 1u);
+        const uint2 minPageCoord = CLodVirtualShadowVirtualPageCoordsFromPixel(uint2(ssMin), clipmapInfo);
+        const uint2 maxPageCoord = CLodVirtualShadowVirtualPageCoordsFromPixel(uint2(ssMax), clipmapInfo);
+
+        // Read page table (as SRV for read-only dirty check).
+        Texture2DArray<uint> pageTableSRV =
+            ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPageTable)];
+
+        const uint maxPages = min(CLodPageJobMaxPagesPerCluster(), PAGEJOB_MAX_PAGES_PER_CLUSTER);
+        uint count = 0;
+
+        for (uint py = minPageCoord.y; py <= maxPageCoord.y && count < maxPages; py++) {
+            for (uint px = minPageCoord.x; px <= maxPageCoord.x && count < maxPages; px++) {
+                const uint2 wrappedCoords = CLodVirtualShadowWrappedPageCoords(uint2(px, py), clipmapInfo);
+                const uint pageEntry = pageTableSRV[uint3(wrappedCoords, clipmapInfo.pageTableLayer)];
+                if (CLodVirtualShadowPageEntryCanRaster(pageEntry)) {
+                    const uint physIdx = pageEntry & kCLodVirtualShadowPhysicalPageIndexMask;
+                    gs_pageJobDirtyPhysIdx[count] = physIdx;
+                    gs_pageJobDirtyVirtX[count] = px;
+                    gs_pageJobDirtyVirtY[count] = py;
+                    count++;
+                }
+            }
+        }
+
+        gs_pageJobDirtyCount = count;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    // Broadcast dirty page count to all threads (required for group-uniform GetGroupNodeOutputRecords).
+    const uint dirtyPageCount = gs_pageJobDirtyCount;
+
+    // Emit PageJobRasterRecords — only thread 0 writes but all threads must participate in the call.
+    GroupNodeOutputRecords<PageJobRasterRecord> pjOut =
+        pageJobRasterOutput.GetGroupNodeOutputRecords(dirtyPageCount);
+    if (GI == 0) {
+        for (uint d = 0; d < dirtyPageCount; d++) {
+            pjOut[d].dispatchGrid = uint3(1, 1, 1);
+            pjOut[d].clusterIndex = unsortedClusterIndex;
+            pjOut[d].packedPageAndClipmap =
+                (gs_pageJobDirtyPhysIdx[d] & 0x07FFFFFFu) | (clipmapInfo.pageTableLayer << 27);
+            pjOut[d].packedPageVirtual =
+                (gs_pageJobDirtyVirtX[d] & 0xFFFFu) | (gs_pageJobDirtyVirtY[d] << 16);
+        }
+    }
+    pjOut.OutputComplete();
+}
+
+// PageJobRaster: broadcasting node — rasterizes one cluster onto one physical page.
+// Avoids per-pixel page-table lookups since the target page is known a priori.
+
+[Shader("node")]
+[NodeID("PageJobRaster")]
+[NodeLaunch("broadcasting")]
+[NodeMaxDispatchGrid(1, 1, 1)]
+[NumThreads(PAGEJOB_RASTER_THREADS, 1, 1)]
+void WG_PageJobRaster(
+    DispatchNodeInputRecord<PageJobRasterRecord> inputRecord,
+    uint GI : SV_GroupIndex)
+{
+    PageJobRasterRecord rec = inputRecord.Get();
+
+    const uint unsortedClusterIndex = rec.clusterIndex;
+    const uint physicalPageIndex = rec.packedPageAndClipmap & 0x07FFFFFFu;
+    const uint clipmapLayer = rec.packedPageAndClipmap >> 27;
+    const uint virtualPageX = rec.packedPageVirtual & 0xFFFFu;
+    const uint virtualPageY = rec.packedPageVirtual >> 16;
+
+    globallycoherent RWByteAddressBuffer visibleClusters =
+        ResourceDescriptorHeap[CLOD_WG_VISIBLE_CLUSTERS_BUFFER_DESCRIPTOR_INDEX];
+    const uint4 packedCluster = CLodLoadVisibleClusterPackedGloballyCoherent(visibleClusters, unsortedClusterIndex);
+
+    const uint viewID = CLodVisibleClusterViewID(packedCluster);
+    const uint instanceID = CLodVisibleClusterInstanceID(packedCluster);
+    const uint localMeshletIndex = CLodVisibleClusterLocalMeshletIndex(packedCluster);
+    const uint pageSlabDescriptorIndex = CLodVisibleClusterPageSlabDescriptorIndex(packedCluster);
+    const uint pageSlabByteOffset = CLodVisibleClusterPageSlabByteOffset(packedCluster);
+
+    CLodPageHeader hdr = LoadPageHeader(pageSlabDescriptorIndex, pageSlabByteOffset);
+    CLodMeshletDescriptor desc = LoadMeshletDescriptor(
+        pageSlabDescriptorIndex, pageSlabByteOffset,
+        hdr.descriptorOffset, localMeshletIndex);
+    const uint vertCount = CLodDescVertexCount(desc);
+    const uint triCount = CLodDescTriangleCount(desc);
+
+    StructuredBuffer<PerMeshInstanceBuffer> meshInstBuf =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
+    PerMeshInstanceBuffer meshInst = meshInstBuf[instanceID];
+    StructuredBuffer<PerMeshBuffer> perMeshBuffer =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+    StructuredBuffer<PerObjectBuffer> objBuf =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
+    PerObjectBuffer objData = objBuf[meshInst.perObjectBufferIndex];
+
+    StructuredBuffer<CullingCameraInfo> cullingCameras =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
+    CullingCameraInfo cam = cullingCameras[viewID];
+
+    StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuf =
+        ResourceDescriptorHeap[CLOD_WG_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
+    ClodViewRasterInfo rasterInfo = viewRasterInfoBuf[viewID];
+
+    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodClipmapInfo)];
+    CLodVirtualShadowClipmapInfo clipmapInfo = clipmapInfos[clipmapLayer];
+
+    const float visWidth  = float(rasterInfo.scissorMaxX - rasterInfo.scissorMinX);
+    const float visHeight = float(rasterInfo.scissorMaxY - rasterInfo.scissorMinY);
+    const float scissorMinXf = float(rasterInfo.scissorMinX);
+    const float scissorMinYf = float(rasterInfo.scissorMinY);
+
+    const uint positionBitstreamBase = pageSlabByteOffset + hdr.positionBitstreamOffset;
+    row_major matrix modelViewProjection = mul(objData.model, cam.viewProjection);
+    float4 modelViewZ = mul(objData.model, cam.viewZ);
+
+    // Cooperative vertex decode → groupshared.
+    for (uint v = GI; v < vertCount; v += PAGEJOB_RASTER_THREADS) {
+        float3 localPos = SWDecodeCompressedPosition(
+            v, positionBitstreamBase, desc.positionBitOffset,
+            CLodDescBitsX(desc), CLodDescBitsY(desc), CLodDescBitsZ(desc),
+            hdr.compressedPositionQuantExp,
+            int3(desc.minQx, desc.minQy, desc.minQz),
+            pageSlabDescriptorIndex);
+        if ((perMeshBuffer[meshInst.perMeshBufferIndex].vertexFlags & VERTEX_SKINNED) != 0u) {
+            SkinningInfluences skinning = SWDecodePackedJoints(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex);
+            skinning = SWDecodePackedWeights(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex, skinning);
+            localPos = mul(float4(localPos, 1.0f), BuildSkinMatrix(meshInst.skinningInstanceSlot, skinning)).xyz;
+        }
+        float4 localPos4 = float4(localPos, 1.0f);
+        float4 clipPos = mul(localPos4, modelViewProjection);
+        float viewZ = dot(localPos4, modelViewZ);
+        float invW = 1.0f / clipPos.w;
+        float2 ndc = clipPos.xy * invW;
+        float2 screen;
+        screen.x = (ndc.x + 1.0f) * 0.5f * visWidth  + scissorMinXf;
+        screen.y = (1.0f - ndc.y) * 0.5f * visHeight + scissorMinYf;
+        gs_screenPos[v] = screen;
+        gs_linearDepth[v] = -viewZ;
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    // Compute page pixel scissor: rasterize ONLY within this page's virtual texel range.
+    const uint pagePixelMinX = virtualPageX * kCLodVirtualShadowPhysicalPageSize;
+    const uint pagePixelMinY = virtualPageY * kCLodVirtualShadowPhysicalPageSize;
+    const uint pagePixelMaxX = pagePixelMinX + kCLodVirtualShadowPhysicalPageSize - 1;
+    const uint pagePixelMaxY = pagePixelMinY + kCLodVirtualShadowPhysicalPageSize - 1;
+
+    // Physical atlas base for this page.
+    const uint physicalAtlasPagesWide = max(clipmapInfo.physicalAtlasPagesWide, 1u);
+    const uint atlasBaseX = (physicalPageIndex % physicalAtlasPagesWide) * kCLodVirtualShadowPhysicalPageSize;
+    const uint atlasBaseY = (physicalPageIndex / physicalAtlasPagesWide) * kCLodVirtualShadowPhysicalPageSize;
+
+    RWTexture2D<uint> physicalPages =
+        ResourceDescriptorHeap[CLOD_WG_VIRTUAL_SHADOW_PHYSICAL_PAGES_UAV_DESCRIPTOR_INDEX];
+
+    const bool reverseWinding = (objData.objectFlags & OBJECT_FLAG_REVERSE_WINDING) != 0u;
+    ByteAddressBuffer slab = ResourceDescriptorHeap[pageSlabDescriptorIndex];
+
+    bool anyPixelWritten = false;
+
+    for (uint t = GI; t < triCount; t += PAGEJOB_RASTER_THREADS) {
+        uint3 tri = SWDecodeTriangle(slab, pageSlabByteOffset + hdr.triangleStreamOffset, desc.triangleByteOffset, t);
+        if (reverseWinding) { uint tmp = tri.y; tri.y = tri.z; tri.z = tmp; }
+
+        float2 s0 = gs_screenPos[tri.x];
+        float2 s1 = gs_screenPos[tri.y];
+        float2 s2 = gs_screenPos[tri.z];
+
+        float depth0 = gs_linearDepth[tri.x];
+        float depth1 = gs_linearDepth[tri.y];
+        float depth2 = gs_linearDepth[tri.z];
+
+        if (depth0 <= 0.0f || depth1 <= 0.0f || depth2 <= 0.0f) continue;
+
+        float2 e01 = s1 - s0;
+        float2 e02 = s2 - s0;
+        float twiceArea = e01.x * e02.y - e01.y * e02.x;
+        if (twiceArea >= 0.0f) continue; // back-face cull (shadow maps use CW)
+
+        float invTwiceArea = -1.0f / twiceArea;
+
+        // Intersect triangle AABB with page pixel range.
+        float2 bbMinF = min(min(s0, s1), s2);
+        float2 bbMaxF = max(max(s0, s1), s2);
+
+        int2 minPx = max(int2(floor(bbMinF)), int2(pagePixelMinX, pagePixelMinY));
+        int2 maxPx = min(int2(floor(bbMaxF)), int2(pagePixelMaxX, pagePixelMaxY));
+        if (minPx.x > maxPx.x || minPx.y > maxPx.y) continue;
+
+        float2 origin = float2(float(minPx.x) + 0.5f, float(minPx.y) + 0.5f);
+
+        float2 e12 = s2 - s1;
+        float2 e20 = s0 - s2;
+
+        float row_b0 = ((origin.x - s1.x) * e12.y - (origin.y - s1.y) * e12.x) * invTwiceArea;
+        float row_b1 = ((origin.x - s2.x) * e20.y - (origin.y - s2.y) * e20.x) * invTwiceArea;
+
+        float dx_b0 =  e12.y * invTwiceArea;
+        float dx_b1 =  e20.y * invTwiceArea;
+        float dy_b0 = -e12.x * invTwiceArea;
+        float dy_b1 = -e20.x * invTwiceArea;
+
+        float scanline_b0 = row_b0;
+        float scanline_b1 = row_b1;
+
+        for (int py = minPx.y; py <= maxPx.y; py++) {
+            float b0 = scanline_b0;
+            float b1 = scanline_b1;
+
+            for (int px = minPx.x; px <= maxPx.x; px++) {
+                float b2 = 1.0f - b0 - b1;
+
+                if (b0 >= 0.0f && b1 >= 0.0f && b2 >= 0.0f) {
+                    float depth = b0 * depth0 + b1 * depth1 + b2 * depth2;
+
+                    // Direct physical atlas write — no page-table lookup.
+                    uint2 localPixel = uint2(px - pagePixelMinX, py - pagePixelMinY);
+                    uint2 atlasPixel = uint2(atlasBaseX + localPixel.x, atlasBaseY + localPixel.y);
+                    InterlockedMin(physicalPages[atlasPixel], asuint(depth));
+                    anyPixelWritten = true;
+                }
+
+                b0 += dx_b0;
+                b1 += dx_b1;
+            }
+
+            scanline_b0 += dy_b0;
+            scanline_b1 += dy_b1;
+        }
+    }
+
+    // One flag write per job (not per pixel): mark page as ContentValid + Rerendered.
+    if (WaveActiveAnyTrue(anyPixelWritten)) {
+        if (WaveIsFirstLane()) {
+            RWTexture2DArray<uint> pageTableUAV =
+                ResourceDescriptorHeap[CLOD_WG_VIRTUAL_SHADOW_PAGE_TABLE_UAV_DESCRIPTOR_INDEX];
+            const uint2 wrappedCoords = CLodVirtualShadowWrappedPageCoords(
+                uint2(virtualPageX, virtualPageY), clipmapInfo);
+            uint ignored = 0u;
+            InterlockedOr(
+                pageTableUAV[uint3(wrappedCoords, clipmapInfo.pageTableLayer)],
+                kCLodVirtualShadowContentValidMask | kCLodVirtualShadowRerenderedThisFrameMask,
+                ignored);
+        }
+    }
+}
+
+#endif // CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
