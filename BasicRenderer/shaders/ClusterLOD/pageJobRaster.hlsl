@@ -13,105 +13,8 @@
 #include "include/clodStructs.hlsli"
 #include "include/clodPageAccess.hlsli"
 #include "include/clodPageJobCommon.hlsli"
+#include "include/clodPageJobRasterShared.hlsli"
 #include "include/visibleClusterPacking.hlsli"
-
-// ---------------------------------------------------------------------------
-// Vertex decode helpers (duplicated from softwareRaster.hlsl to avoid pulling
-// in the full file and its file-scope groupshared).
-// ---------------------------------------------------------------------------
-
-uint PJ_ReadPackedBits32(ByteAddressBuffer buf, uint startBit, uint bitCount)
-{
-    if (bitCount == 0u) return 0u;
-    uint wordIndex = startBit >> 5;
-    uint bitOffset = startBit & 31u;
-    uint packed = buf.Load(wordIndex * 4u) >> bitOffset;
-    if (bitOffset + bitCount > 32u)
-    {
-        packed |= buf.Load((wordIndex + 1u) * 4u) << (32u - bitOffset);
-    }
-    uint mask = (bitCount >= 32u) ? 0xffffffffu : ((1u << bitCount) - 1u);
-    return packed & mask;
-}
-
-float3 PJ_DecodeCompressedPosition(
-    uint meshletLocalVertex,
-    uint positionBitstreamBase,
-    uint positionBitOffset,
-    uint bitsX, uint bitsY, uint bitsZ,
-    uint quantExp,
-    int3 minQ,
-    uint pagePoolSlabDescriptorIndex)
-{
-    uint bitsPerVertex = bitsX + bitsY + bitsZ;
-    uint bitCursor = positionBitstreamBase * 8u + positionBitOffset + meshletLocalVertex * bitsPerVertex;
-    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
-    uint px = PJ_ReadPackedBits32(slab, bitCursor, bitsX); bitCursor += bitsX;
-    uint py = PJ_ReadPackedBits32(slab, bitCursor, bitsY); bitCursor += bitsY;
-    uint pz = PJ_ReadPackedBits32(slab, bitCursor, bitsZ);
-    int3 q = int3(px, py, pz) + minQ;
-    float invScale = 1.0f / float(1u << quantExp);
-    return float3(q) * invScale;
-}
-
-uint3 PJ_DecodeTriangle(ByteAddressBuffer slab, uint triStreamBase, uint triByteOffset, uint triLocalIndex)
-{
-    uint triOffset = triStreamBase + triByteOffset + triLocalIndex * 3u;
-    uint alignedOffset = (triOffset / 4u) * 4u;
-    uint firstWord = slab.Load(alignedOffset);
-    uint byteOff = triOffset % 4u;
-    uint i0 = (firstWord >> (byteOff * 8u)) & 0xFFu;
-    uint i1, i2;
-    if (byteOff <= 1u) {
-        i1 = (firstWord >> ((byteOff + 1u) * 8u)) & 0xFFu;
-        i2 = (firstWord >> ((byteOff + 2u) * 8u)) & 0xFFu;
-    } else if (byteOff == 2u) {
-        i1 = (firstWord >> 24u) & 0xFFu;
-        uint secondWord = slab.Load(alignedOffset + 4u);
-        i2 = secondWord & 0xFFu;
-    } else {
-        uint secondWord = slab.Load(alignedOffset + 4u);
-        i1 = secondWord & 0xFFu;
-        i2 = (secondWord >> 8u) & 0xFFu;
-    }
-    return uint3(i0, i1, i2);
-}
-
-SkinningInfluences PJ_DecodePackedJoints(
-    uint meshletLocalVertex,
-    CLodPageHeader hdr,
-    CLodMeshletDescriptor desc,
-    uint pageByteOffset,
-    uint pagePoolSlabDescriptorIndex)
-{
-    SkinningInfluences skinning;
-    skinning.joints0 = uint4(0, 0, 0, 0);
-    skinning.joints1 = uint4(0, 0, 0, 0);
-    skinning.weights0 = float4(0, 0, 0, 0);
-    skinning.weights1 = float4(0, 0, 0, 0);
-    if ((hdr.attributeMask & CLOD_PAGE_ATTRIBUTE_JOINTS) == 0u) return skinning;
-    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
-    uint addr = pageByteOffset + hdr.jointArrayOffset + (desc.vertexAttributeOffset + meshletLocalVertex) * 32u;
-    skinning.joints0 = LoadUint4(addr, slab);
-    skinning.joints1 = LoadUint4(addr + 16u, slab);
-    return skinning;
-}
-
-SkinningInfluences PJ_DecodePackedWeights(
-    uint meshletLocalVertex,
-    CLodPageHeader hdr,
-    CLodMeshletDescriptor desc,
-    uint pageByteOffset,
-    uint pagePoolSlabDescriptorIndex,
-    SkinningInfluences skinning)
-{
-    if ((hdr.attributeMask & CLOD_PAGE_ATTRIBUTE_WEIGHTS) == 0u) return skinning;
-    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
-    uint addr = pageByteOffset + hdr.weightArrayOffset + (desc.vertexAttributeOffset + meshletLocalVertex) * 32u;
-    skinning.weights0 = LoadFloat4(addr, slab);
-    skinning.weights1 = LoadFloat4(addr + 16u, slab);
-    return skinning;
-}
 
 // ---------------------------------------------------------------------------
 // Telemetry
@@ -248,20 +151,24 @@ void WG_PageJobBuild(
 
     // Thread 0: screen-space AABB → page footprint → tile job count.
     if (GI == 0) {
-        float2 ssMin = float2(1e30f, 1e30f);
-        float2 ssMax = float2(-1e30f, -1e30f);
-        for (uint i = 0; i < vertCount; i++) {
-            ssMin = min(ssMin, gs_pjBuildScreenPos[i]);
-            ssMax = max(ssMax, gs_pjBuildScreenPos[i]);
-        }
-        const float vRes = (float)max(clipmapInfo.virtualResolution, 1u);
-        ssMin = clamp(ssMin, float2(0, 0), float2(vRes - 1.0f, vRes - 1.0f));
-        ssMax = clamp(ssMax, float2(0, 0), float2(vRes - 1.0f, vRes - 1.0f));
+        float2 ssMin;
+        float2 ssMax;
+        PJ_ComputeScreenBounds(gs_pjBuildScreenPos, vertCount, ssMin, ssMax);
 
-        const uint2 minPageCoord = CLodVirtualShadowVirtualPageCoordsFromPixel(uint2(ssMin), clipmapInfo);
-        const uint2 maxPageCoord = CLodVirtualShadowVirtualPageCoordsFromPixel(uint2(ssMax), clipmapInfo);
-        const uint2 minTileCoord = PageJobTileCoordFromPageCoord(minPageCoord);
-        const uint2 maxTileCoord = PageJobTileCoordFromPageCoord(maxPageCoord);
+        uint2 minPageCoord;
+        uint2 maxPageCoord;
+        uint2 minTileCoord;
+        uint2 tileCount;
+        uint tileJobCount;
+        PJ_ComputeTileCoverage(
+            ssMin,
+            ssMax,
+            clipmapInfo,
+            minPageCoord,
+            maxPageCoord,
+            minTileCoord,
+            tileCount,
+            tileJobCount);
 
         gs_pjBuildMinPageX  = minPageCoord.x;
         gs_pjBuildMinPageY  = minPageCoord.y;
@@ -269,11 +176,9 @@ void WG_PageJobBuild(
         gs_pjBuildMaxPageY  = maxPageCoord.y;
         gs_pjBuildMinTileX  = minTileCoord.x;
         gs_pjBuildMinTileY  = minTileCoord.y;
-        gs_pjBuildTileCountX = maxTileCoord.x - minTileCoord.x + 1u;
-        gs_pjBuildTileCountY = maxTileCoord.y - minTileCoord.y + 1u;
-        gs_pjBuildTileJobCount = min(
-            gs_pjBuildTileCountX * gs_pjBuildTileCountY,
-            PAGEJOB_MAX_TILE_JOBS_PER_CLUSTER);
+        gs_pjBuildTileCountX = tileCount.x;
+        gs_pjBuildTileCountY = tileCount.y;
+        gs_pjBuildTileJobCount = tileJobCount;
 
         PJTelemetryAdd(PJ_COUNTER_BUILD_CLUSTERS_PROCESSED, 1);
         PJTelemetryAdd(PJ_COUNTER_BUILD_TILES_EMITTED, gs_pjBuildTileJobCount);
@@ -287,16 +192,21 @@ void WG_PageJobBuild(
         const uint2 minPageCoord = uint2(gs_pjBuildMinPageX, gs_pjBuildMinPageY);
         const uint2 maxPageCoord = uint2(gs_pjBuildMaxPageX, gs_pjBuildMaxPageY);
         const uint2 minTileCoord = uint2(gs_pjBuildMinTileX, gs_pjBuildMinTileY);
+        const uint2 tileCount = uint2(gs_pjBuildTileCountX, gs_pjBuildTileCountY);
 
         for (uint tileJobIndex = 0; tileJobIndex < tileJobCount; ++tileJobIndex) {
-            const uint tileOffsetX = tileJobIndex % gs_pjBuildTileCountX;
-            const uint tileOffsetY = tileJobIndex / gs_pjBuildTileCountX;
-            const uint2 tileCoord = minTileCoord + uint2(tileOffsetX, tileOffsetY);
-            const uint2 tileMinPageCoord = PageJobTileOriginFromTileCoord(tileCoord);
-            const uint2 tileMaxPageCoord = min(
-                tileMinPageCoord + uint2(PAGEJOB_TILE_PAGES_X - 1u, PAGEJOB_TILE_PAGES_Y - 1u),
-                maxPageCoord);
-            const uint2 scanMinPageCoord = max(tileMinPageCoord, minPageCoord);
+            uint2 tileMinPageCoord;
+            uint2 scanMinPageCoord;
+            uint2 tileMaxPageCoord;
+            PJ_ComputeTilePageBounds(
+                tileJobIndex,
+                minPageCoord,
+                maxPageCoord,
+                minTileCoord,
+                tileCount,
+                tileMinPageCoord,
+                scanMinPageCoord,
+                tileMaxPageCoord);
 
             pjOut[tileJobIndex].dispatchGrid = uint3(1, 1, 1);
             pjOut[tileJobIndex].clusterIndex = unsortedClusterIndex;

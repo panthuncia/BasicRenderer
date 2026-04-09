@@ -119,67 +119,67 @@ public:
 
     PassReturn Execute(PassExecutionContext& executionContext) override
     {
-        // if (m_runWhenComputeSWRasterEnabledOnly &&
-        //     !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
-        //     return {};
-        // }
+        if (m_runWhenComputeSWRasterEnabledOnly &&
+            !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
+            return {};
+        }
 
-        // auto& settings = SettingsManager::GetInstance();
-        // if (!settings.getSettingGetter<bool>(CLodEnablePageJobVSMSettingName)()) {
-        //     return {};
-        // }
+        auto& settings = SettingsManager::GetInstance();
+        if (!settings.getSettingGetter<bool>(CLodEnablePageJobVSMSettingName)()) {
+            return {};
+        }
 
-        // auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        // auto& context = *renderContext;
-        // auto& commandList = executionContext.commandList;
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
+        auto& commandList = executionContext.commandList;
 
-        // commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-        // commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
+        commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
+        commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
 
-        // uint32_t misc[NumMiscUintRootConstants] = {};
-        // misc[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
-        // misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
-        // misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
-        // misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] = m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-        // misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
-        // misc[CLOD_RASTER_PAGE_JOB_RECORDS_DESCRIPTOR_INDEX] = m_pageJobRecordsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-        // misc[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] = m_pageJobCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-        // misc[CLOD_RASTER_PAGE_JOB_CLUSTER_TAGS_DESCRIPTOR_INDEX] = m_pageJobClusterTagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-        // misc[CLOD_RASTER_PAGE_JOB_RECORD_CAPACITY] = m_pageJobRecordCapacity;
+        uint32_t misc[NumMiscUintRootConstants] = {};
+        misc[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
+        misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
+        misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] = m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
+        misc[CLOD_RASTER_PAGE_JOB_RECORDS_DESCRIPTOR_INDEX] = m_pageJobRecordsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        misc[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] = m_pageJobCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        misc[CLOD_RASTER_PAGE_JOB_CLUSTER_TAGS_DESCRIPTOR_INDEX] = m_pageJobClusterTagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        misc[CLOD_RASTER_PAGE_JOB_RECORD_CAPACITY] = m_pageJobRecordCapacity;
 
-        // uint32_t pageJobFlags = 0u;
-        // pageJobFlags |= CLOD_WG_PAGE_JOB_FLAG_ENABLED;
-        // if (settings.getSettingGetter<bool>(CLodPageJobForceAllSettingName)()) {
-        //     pageJobFlags |= CLOD_WG_PAGE_JOB_FLAG_FORCE_ALL;
-        // }
-        // const uint32_t diameterThreshold = std::min(settings.getSettingGetter<uint32_t>(CLodPageJobDiameterThresholdSettingName)(), 255u);
-        // pageJobFlags |= (diameterThreshold << CLOD_WG_PAGE_JOB_DIAMETER_THRESHOLD_SHIFT);
-        // const uint32_t maxPages = std::min(settings.getSettingGetter<uint32_t>(CLodPageJobMaxPagesPerClusterSettingName)(), 255u);
-        // pageJobFlags |= (maxPages << CLOD_WG_PAGE_JOB_MAX_PAGES_SHIFT);
-        // misc[CLOD_RASTER_PAGE_JOB_FLAGS] = pageJobFlags;
+        uint32_t pageJobFlags = 0u;
+        pageJobFlags |= CLOD_WG_PAGE_JOB_FLAG_ENABLED;
+        if (settings.getSettingGetter<bool>(CLodPageJobForceAllSettingName)()) {
+            pageJobFlags |= CLOD_WG_PAGE_JOB_FLAG_FORCE_ALL;
+        }
+        const uint32_t diameterThreshold = std::min(settings.getSettingGetter<uint32_t>(CLodPageJobDiameterThresholdSettingName)(), 255u);
+        pageJobFlags |= (diameterThreshold << CLOD_WG_PAGE_JOB_DIAMETER_THRESHOLD_SHIFT);
+        const uint32_t maxPages = std::min(settings.getSettingGetter<uint32_t>(CLodPageJobMaxPagesPerClusterSettingName)(), 255u);
+        pageJobFlags |= (maxPages << CLOD_WG_PAGE_JOB_MAX_PAGES_SHIFT);
+        misc[CLOD_RASTER_PAGE_JOB_FLAGS] = pageJobFlags;
 
-        // commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
+        commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
 
-        // BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-        // commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
+        BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+        commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
 
-        // const uint32_t numBuckets = context.materialManager->GetRasterBucketCount();
-        // if (numBuckets == 0) {
-        //     return {};
-        // }
+        const uint32_t numBuckets = context.materialManager->GetRasterBucketCount();
+        if (numBuckets == 0) {
+            return {};
+        }
 
-        // auto apiResource = m_rasterBucketsIndirectArgsBuffer->GetAPIResource();
-        // const uint64_t stride = sizeof(RasterizeClustersCommand);
-        // for (uint32_t i = 0; i < numBuckets; ++i) {
-        //     const uint64_t argOffset = static_cast<uint64_t>(i) * stride;
-        //     commandList.ExecuteIndirect(
-        //         m_commandSignature->GetHandle(),
-        //         apiResource.GetHandle(),
-        //         argOffset,
-        //         {},
-        //         0,
-        //         1);
-        // }
+        auto apiResource = m_rasterBucketsIndirectArgsBuffer->GetAPIResource();
+        const uint64_t stride = sizeof(RasterizeClustersCommand);
+        for (uint32_t i = 0; i < numBuckets; ++i) {
+            const uint64_t argOffset = static_cast<uint64_t>(i) * stride;
+            commandList.ExecuteIndirect(
+                m_commandSignature->GetHandle(),
+                apiResource.GetHandle(),
+                argOffset,
+                {},
+                0,
+                1);
+        }
 
         return {};
     }

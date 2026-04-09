@@ -78,17 +78,15 @@ private:
 
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsWriteCursorBuffer;
-    // TODO: There was a strange bug here where CLod raster indirect command buffers ended up with invalid data, even immediately
-    // after the data was written, if that buffer was shared between phase 1 and phase 2 of the CLod rasterization process. 
-    // The root cause is currently unknown, but it may be related to synchronization issues around indirect command consumption 
-    // or an underlying issue with shared CLod raster resources. For now, the workaround is to duplicate the raster indirect args 
-    // buffer for phase 1 and phase 2, even though they should be mutually-exclusive with correct synchronization
-    //
-    // Further testing is required to determine whether the root cause is a CLod usage bug, a synchronization bug
-    // specific to indirect command consumption, or a larger underlying issue affecting resources that are explicitly reused 
-    // within the same frame (though no other passes exhibit similar behavior)
+    // TODO: Raster-bucket indirect args have exhibited invalid data when reused across otherwise separate
+    // CLod rasterization paths. Until the root cause is understood, keep HW, compute SW, and SW page-job
+    // indirect command streams on dedicated resources for each phase.
     std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBufferPhase2;
+    std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBufferSw;
+    std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBufferPhase2Sw;
+    std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBufferPageJob;
+    std::shared_ptr<Buffer> m_rasterBucketsIndirectArgsBufferPhase2PageJob;
 
     std::shared_ptr<Buffer> m_reyesFullClusterOutputsBuffer;
     std::shared_ptr<Buffer> m_reyesFullClusterOutputsCounterBuffer;
@@ -168,6 +166,7 @@ private:
     std::shared_ptr<Buffer> m_swPageJobRecordsBuffer;
     std::shared_ptr<Buffer> m_swPageJobCountBuffer;
     std::shared_ptr<Buffer> m_swPageJobIndirectArgsBuffer;
+    std::shared_ptr<Buffer> m_swPageJobIndirectArgsBufferPhase2;
     std::shared_ptr<Buffer> m_swPageJobClusterTagsBuffer;
 
     std::unique_ptr<CLodStreamingSystem> m_streamingSystem;

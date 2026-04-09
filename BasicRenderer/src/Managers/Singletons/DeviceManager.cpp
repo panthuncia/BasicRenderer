@@ -17,7 +17,7 @@ void DeviceManager::Initialize() {
 
     bool enableDebug = false;
 #if BUILD_TYPE == BUILD_DEBUG
-    enableDebug = true;
+    enableDebug = false;
 #endif
 
     rhi::CreateD3D12Device(

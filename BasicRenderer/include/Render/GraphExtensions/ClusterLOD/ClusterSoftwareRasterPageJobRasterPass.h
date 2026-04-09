@@ -89,42 +89,42 @@ public:
 
     PassReturn Execute(PassExecutionContext& executionContext) override
     {
-        // if (m_runWhenComputeSWRasterEnabledOnly &&
-        //     !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
-        //     return {};
-        // }
+        if (m_runWhenComputeSWRasterEnabledOnly &&
+            !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
+            return {};
+        }
 
-        // auto& settings = SettingsManager::GetInstance();
-        // if (!settings.getSettingGetter<bool>(CLodEnablePageJobVSMSettingName)()) {
-        //     return {};
-        // }
+        auto& settings = SettingsManager::GetInstance();
+        if (!settings.getSettingGetter<bool>(CLodEnablePageJobVSMSettingName)()) {
+            return {};
+        }
 
-        // auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        // auto& context = *renderContext;
-        // auto& commandList = executionContext.commandList;
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
+        auto& commandList = executionContext.commandList;
 
-        // commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-        // commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
+        commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
+        commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
 
-        // uint32_t misc[NumMiscUintRootConstants] = {};
-        // misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
-        // misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
-        // misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] = m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-        // misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
-        // misc[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX] = m_virtualShadowPhysicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
-        // misc[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] = m_pageJobCountBuffer->GetSRVInfo(0).slot.index;
-        // misc[CLOD_RASTER_PAGE_JOB_RECORDS_DESCRIPTOR_INDEX] = m_pageJobRecordsBuffer->GetSRVInfo(0).slot.index;
+        uint32_t misc[NumMiscUintRootConstants] = {};
+        misc[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_compactedVisibleClustersBuffer->GetSRVInfo(0).slot.index;
+        misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] = m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
+        misc[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX] = m_virtualShadowPhysicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
+        misc[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] = m_pageJobCountBuffer->GetSRVInfo(0).slot.index;
+        misc[CLOD_RASTER_PAGE_JOB_RECORDS_DESCRIPTOR_INDEX] = m_pageJobRecordsBuffer->GetSRVInfo(0).slot.index;
 
-        // commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
-        // BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-        // commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-        // commandList.ExecuteIndirect(
-        //     m_commandSignature->GetHandle(),
-        //     m_pageJobIndirectArgsBuffer->GetAPIResource().GetHandle(),
-        //     0,
-        //     {},
-        //     0,
-        //     1);
+        commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
+        BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+        commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
+        commandList.ExecuteIndirect(
+            m_commandSignature->GetHandle(),
+            m_pageJobIndirectArgsBuffer->GetAPIResource().GetHandle(),
+            0,
+            {},
+            0,
+            1);
         return {};
     }
 

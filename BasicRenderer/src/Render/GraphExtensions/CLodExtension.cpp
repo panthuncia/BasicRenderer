@@ -509,10 +509,22 @@ void CLodExtension::InitializeCoreResources()
     m_rasterBucketsWriteCursorBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor"));
 
     m_rasterBucketsIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
-    m_rasterBucketsIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args phase1"));
+    m_rasterBucketsIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args HW phase1"));
 
     m_rasterBucketsIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
-    m_rasterBucketsIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args phase2"));
+    m_rasterBucketsIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args HW phase2"));
+
+    m_rasterBucketsIndirectArgsBufferSw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
+    m_rasterBucketsIndirectArgsBufferSw->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args SW phase1"));
+
+    m_rasterBucketsIndirectArgsBufferPhase2Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
+    m_rasterBucketsIndirectArgsBufferPhase2Sw->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args SW phase2"));
+
+    m_rasterBucketsIndirectArgsBufferPageJob = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
+    m_rasterBucketsIndirectArgsBufferPageJob->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args Page Job phase1"));
+
+    m_rasterBucketsIndirectArgsBufferPhase2PageJob = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
+    m_rasterBucketsIndirectArgsBufferPhase2PageJob->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args Page Job phase2"));
 
     m_visibleClustersCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, false);
     m_visibleClustersCounterBufferPhase2->SetName(MakeVariantResourceName(traits, "Visible Clusters Counter Buffer Phase2"));
@@ -914,7 +926,10 @@ void CLodExtension::InitializeShadowResources()
     m_swPageJobCountBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Count Buffer"));
 
     m_swPageJobIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, false);
-    m_swPageJobIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Indirect Args Buffer"));
+    m_swPageJobIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Indirect Args Buffer Phase1"));
+
+    m_swPageJobIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, false);
+    m_swPageJobIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Indirect Args Buffer Phase2"));
 
     m_swPageJobClusterTagsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         m_maxVisibleClusters,
@@ -955,6 +970,10 @@ void CLodExtension::TagCoreResourceUsages()
     tagBufferUsage(m_rasterBucketsWriteCursorBuffer, "Cluster LOD rasterization");
     tagBufferUsage(m_rasterBucketsIndirectArgsBuffer, "Cluster LOD rasterization");
     tagBufferUsage(m_rasterBucketsIndirectArgsBufferPhase2, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsIndirectArgsBufferSw, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsIndirectArgsBufferPhase2Sw, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsIndirectArgsBufferPageJob, "Cluster LOD rasterization");
+    tagBufferUsage(m_rasterBucketsIndirectArgsBufferPhase2PageJob, "Cluster LOD rasterization");
     tagBufferUsage(m_visibleClustersCounterBufferPhase2, "Cluster LOD visibility");
     tagBufferUsage(m_rasterBucketsHistogramBufferPhase2, "Cluster LOD rasterization");
     tagBufferUsage(m_rasterBucketsHistogramBufferSw, "Cluster LOD rasterization");
@@ -1021,6 +1040,7 @@ void CLodExtension::TagShadowResourceUsages()
     tagBufferUsage(m_swPageJobRecordsBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_swPageJobCountBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_swPageJobIndirectArgsBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobIndirectArgsBufferPhase2, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_swPageJobClusterTagsBuffer, "Cluster LOD virtual shadow maps");
 }
 
@@ -1058,6 +1078,10 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_rasterBucketsWriteCursorBuffer);
     releaseBufferBacking(m_rasterBucketsIndirectArgsBuffer);
     releaseBufferBacking(m_rasterBucketsIndirectArgsBufferPhase2);
+    releaseBufferBacking(m_rasterBucketsIndirectArgsBufferSw);
+    releaseBufferBacking(m_rasterBucketsIndirectArgsBufferPhase2Sw);
+    releaseBufferBacking(m_rasterBucketsIndirectArgsBufferPageJob);
+    releaseBufferBacking(m_rasterBucketsIndirectArgsBufferPhase2PageJob);
     releaseBufferBacking(m_reyesFullClusterOutputsBuffer);
     releaseBufferBacking(m_reyesFullClusterOutputsCounterBuffer);
     releaseBufferBacking(m_reyesOwnedClustersBuffer);
@@ -1132,6 +1156,7 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_swPageJobRecordsBuffer);
     releaseBufferBacking(m_swPageJobCountBuffer);
     releaseBufferBacking(m_swPageJobIndirectArgsBuffer);
+    releaseBufferBacking(m_swPageJobIndirectArgsBufferPhase2);
     releaseBufferBacking(m_swPageJobClusterTagsBuffer);
 }
 
@@ -1156,6 +1181,7 @@ void CLodExtension::ReleaseShadowResourceBackings()
     releaseBufferBacking(m_swPageJobRecordsBuffer);
     releaseBufferBacking(m_swPageJobCountBuffer);
     releaseBufferBacking(m_swPageJobIndirectArgsBuffer);
+    releaseBufferBacking(m_swPageJobIndirectArgsBufferPhase2);
     releaseBufferBacking(m_swPageJobClusterTagsBuffer);
     m_shadowVirtualResourcesNeedReset = true;
 }
@@ -2235,7 +2261,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_rasterBucketsOffsetsBuffer,
                     m_rasterBucketsWriteCursorBufferSw,
                     m_compactedVisibleClustersBuffer,
-                    m_rasterBucketsIndirectArgsBuffer,
+                    m_rasterBucketsIndirectArgsBufferSw,
                     m_sortedToUnsortedMappingBuffer,
                     reyesOwnershipBitsetBuffer,
                     m_maxVisibleClusters,
@@ -2250,7 +2276,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 std::make_shared<ClusterSoftwareRasterizationPass>(
                     m_compactedVisibleClustersBuffer,
                     m_rasterBucketsHistogramBufferSw,
-                    m_rasterBucketsIndirectArgsBuffer,
+                    m_rasterBucketsIndirectArgsBufferSw,
                     m_sortedToUnsortedMappingBuffer,
                     m_viewRasterInfoBuffer,
                     traits.rasterOutputKind,
@@ -2316,7 +2342,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                         m_rasterBucketsOffsetsBuffer,
                         m_rasterBucketsWriteCursorBufferSw,
                         m_compactedVisibleClustersBuffer,
-                        m_rasterBucketsIndirectArgsBuffer,
+                        m_rasterBucketsIndirectArgsBufferPageJob,
                         m_sortedToUnsortedMappingBuffer,
                         nullptr,
                         m_maxVisibleClusters,
@@ -2331,7 +2357,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     std::make_shared<ClusterSoftwareRasterPageJobExpandPass>(
                         m_compactedVisibleClustersBuffer,
                         m_rasterBucketsHistogramBufferSw,
-                        m_rasterBucketsIndirectArgsBuffer,
+                        m_rasterBucketsIndirectArgsBufferPageJob,
                         m_viewRasterInfoBuffer,
                         m_shadowPageTableTexture,
                         m_shadowClipmapInfoBuffer,
@@ -2715,7 +2741,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     m_rasterBucketsOffsetsBuffer,
                     m_rasterBucketsWriteCursorBufferPhase2Sw,
                     m_compactedVisibleClustersBuffer,
-                    m_rasterBucketsIndirectArgsBufferPhase2,
+                    m_rasterBucketsIndirectArgsBufferPhase2Sw,
                     m_sortedToUnsortedMappingBuffer,
                     reyesOwnershipBitsetBufferPhase2,
                     m_maxVisibleClusters,
@@ -2730,7 +2756,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 std::make_shared<ClusterSoftwareRasterizationPass>(
                     m_compactedVisibleClustersBuffer,
                     m_rasterBucketsHistogramBufferPhase2Sw,
-                    m_rasterBucketsIndirectArgsBufferPhase2,
+                    m_rasterBucketsIndirectArgsBufferPhase2Sw,
                     m_sortedToUnsortedMappingBuffer,
                     m_viewRasterInfoBuffer,
                     traits.rasterOutputKind,
@@ -2796,7 +2822,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                         m_rasterBucketsOffsetsBuffer,
                         m_rasterBucketsWriteCursorBufferPhase2Sw,
                         m_compactedVisibleClustersBuffer,
-                        m_rasterBucketsIndirectArgsBufferPhase2,
+                        m_rasterBucketsIndirectArgsBufferPhase2PageJob,
                         m_sortedToUnsortedMappingBuffer,
                         nullptr,
                         m_maxVisibleClusters,
@@ -2811,7 +2837,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     std::make_shared<ClusterSoftwareRasterPageJobExpandPass>(
                         m_compactedVisibleClustersBuffer,
                         m_rasterBucketsHistogramBufferPhase2Sw,
-                        m_rasterBucketsIndirectArgsBufferPhase2,
+                        m_rasterBucketsIndirectArgsBufferPhase2PageJob,
                         m_viewRasterInfoBuffer,
                         m_shadowPageTableTexture,
                         m_shadowClipmapInfoBuffer,
@@ -2827,7 +2853,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     MakeVariantPassName(traits, "SoftwareRasterPageJobBuildArgsPass2"),
                     std::make_shared<ClusterSoftwareRasterPageJobBuildArgsPass>(
                         m_swPageJobCountBuffer,
-                        m_swPageJobIndirectArgsBuffer,
+                        m_swPageJobIndirectArgsBufferPhase2,
                         true)));
 
             outPasses.push_back(
@@ -2841,7 +2867,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                         m_shadowClipmapInfoBuffer,
                         m_swPageJobCountBuffer,
                         m_swPageJobRecordsBuffer,
-                        m_swPageJobIndirectArgsBuffer,
+                        m_swPageJobIndirectArgsBufferPhase2,
                         slabGroup,
                         true)));
             shadowClearDirtyBitsAfterPassName = MakeVariantPassName(traits, "SoftwareRasterPageJobRasterPass2");

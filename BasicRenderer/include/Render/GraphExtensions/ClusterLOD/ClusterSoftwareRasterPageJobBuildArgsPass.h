@@ -45,26 +45,26 @@ public:
 
     PassReturn Execute(PassExecutionContext& executionContext) override
     {
-        // if (m_runWhenComputeSWRasterEnabledOnly &&
-        //     !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
-        //     return {};
-        // }
+        if (m_runWhenComputeSWRasterEnabledOnly &&
+            !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
+            return {};
+        }
 
-        // auto* renderContext = executionContext.hostData->Get<RenderContext>();
-        // auto& context = *renderContext;
-        // auto& commandList = executionContext.commandList;
+        auto* renderContext = executionContext.hostData->Get<RenderContext>();
+        auto& context = *renderContext;
+        auto& commandList = executionContext.commandList;
 
-        // commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
-        // commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
+        commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
+        commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
 
-        // uint32_t misc[NumMiscUintRootConstants] = {};
-        // misc[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] = m_pageJobCountBuffer->GetSRVInfo(0).slot.index;
-        // misc[CLOD_RASTER_PAGE_JOB_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_pageJobIndirectArgsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        uint32_t misc[NumMiscUintRootConstants] = {};
+        misc[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] = m_pageJobCountBuffer->GetSRVInfo(0).slot.index;
+        misc[CLOD_RASTER_PAGE_JOB_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_pageJobIndirectArgsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 
-        // commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
-        // BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-        // commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-        // commandList.Dispatch(1, 1, 1);
+        commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
+        BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
+        commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
+        commandList.Dispatch(1, 1, 1);
         return {};
     }
 

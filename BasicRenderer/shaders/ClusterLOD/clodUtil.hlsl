@@ -2209,7 +2209,8 @@ void CompactClustersAndBuildIndirectArgsCS(uint3 dtid : SV_DispatchThreadID)
     uint xDimThreads = IndirectCommandSignatureRootConstant1 * CLOD_COMPACTION_GROUP_SIZE;
     uint linearizedID = dtid.x + dtid.y * xDimThreads;
 
-    uint clusterCount = IndirectCommandSignatureRootConstant0;
+    StructuredBuffer<uint> visibleClusterCountBuffer = ResourceDescriptorHeap[CLOD_COMPACTION_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
+    const uint clusterCount = visibleClusterCountBuffer.Load(0);
 
     StructuredBuffer<uint> histogram = ResourceDescriptorHeap[CLOD_COMPACTION_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX];
     const uint numBucketsPacked = CLOD_COMPACTION_NUM_RASTER_BUCKETS;
