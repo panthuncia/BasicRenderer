@@ -559,6 +559,26 @@ private:
     std::function<float()> getCLodDirectionalVirtualShadowAutoLodBiasScale;
     std::function<void(float)> setCLodDirectionalVirtualShadowAutoLodBiasScale;
 
+    float m_clodDirectionalVirtualShadowSourceAngleDegrees = CLodVirtualShadowDefaultDirectionalSourceAngleDegrees;
+    std::function<float()> getCLodDirectionalVirtualShadowSourceAngleDegrees;
+    std::function<void(float)> setCLodDirectionalVirtualShadowSourceAngleDegrees;
+
+    uint32_t m_clodDirectionalVirtualShadowSmrtRayCountDirectional = CLodVirtualShadowDefaultSmrtRayCountDirectional;
+    std::function<uint32_t()> getCLodDirectionalVirtualShadowSmrtRayCountDirectional;
+    std::function<void(uint32_t)> setCLodDirectionalVirtualShadowSmrtRayCountDirectional;
+
+    uint32_t m_clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional = CLodVirtualShadowDefaultSmrtSamplesPerRayDirectional;
+    std::function<uint32_t()> getCLodDirectionalVirtualShadowSmrtSamplesPerRayDirectional;
+    std::function<void(uint32_t)> setCLodDirectionalVirtualShadowSmrtSamplesPerRayDirectional;
+
+    float m_clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees = CLodVirtualShadowDefaultSmrtMaxRayAngleFromLightDegrees;
+    std::function<float()> getCLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees;
+    std::function<void(float)> setCLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees;
+
+    float m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional = CLodVirtualShadowDefaultSmrtRayLengthScaleDirectional;
+    std::function<float()> getCLodDirectionalVirtualShadowSmrtRayLengthScaleDirectional;
+    std::function<void(float)> setCLodDirectionalVirtualShadowSmrtRayLengthScaleDirectional;
+
     uint8_t m_numDirectionalLightCascades = 0u;
     std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<void(uint8_t)> setNumDirectionalLightCascades;
@@ -833,6 +853,31 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     setCLodDirectionalVirtualShadowAutoLodBiasScale = settingsManager.getSettingSetter<float>(CLodDirectionalVirtualShadowAutoLodBiasScaleSettingName);
     m_clodDirectionalVirtualShadowAutoLodBiasScale = getCLodDirectionalVirtualShadowAutoLodBiasScale();
     observerSetting(m_clodDirectionalVirtualShadowAutoLodBiasScale, CLodDirectionalVirtualShadowAutoLodBiasScaleSettingName);
+
+    getCLodDirectionalVirtualShadowSourceAngleDegrees = settingsManager.getSettingGetter<float>(CLodDirectionalVirtualShadowSourceAngleDegreesSettingName);
+    setCLodDirectionalVirtualShadowSourceAngleDegrees = settingsManager.getSettingSetter<float>(CLodDirectionalVirtualShadowSourceAngleDegreesSettingName);
+    m_clodDirectionalVirtualShadowSourceAngleDegrees = getCLodDirectionalVirtualShadowSourceAngleDegrees();
+    observerSetting(m_clodDirectionalVirtualShadowSourceAngleDegrees, CLodDirectionalVirtualShadowSourceAngleDegreesSettingName);
+
+    getCLodDirectionalVirtualShadowSmrtRayCountDirectional = settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowSmrtRayCountDirectionalSettingName);
+    setCLodDirectionalVirtualShadowSmrtRayCountDirectional = settingsManager.getSettingSetter<uint32_t>(CLodDirectionalVirtualShadowSmrtRayCountDirectionalSettingName);
+    m_clodDirectionalVirtualShadowSmrtRayCountDirectional = getCLodDirectionalVirtualShadowSmrtRayCountDirectional();
+    observerSetting(m_clodDirectionalVirtualShadowSmrtRayCountDirectional, CLodDirectionalVirtualShadowSmrtRayCountDirectionalSettingName);
+
+    getCLodDirectionalVirtualShadowSmrtSamplesPerRayDirectional = settingsManager.getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowSmrtSamplesPerRayDirectionalSettingName);
+    setCLodDirectionalVirtualShadowSmrtSamplesPerRayDirectional = settingsManager.getSettingSetter<uint32_t>(CLodDirectionalVirtualShadowSmrtSamplesPerRayDirectionalSettingName);
+    m_clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional = getCLodDirectionalVirtualShadowSmrtSamplesPerRayDirectional();
+    observerSetting(m_clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional, CLodDirectionalVirtualShadowSmrtSamplesPerRayDirectionalSettingName);
+
+    getCLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees = settingsManager.getSettingGetter<float>(CLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegreesSettingName);
+    setCLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees = settingsManager.getSettingSetter<float>(CLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegreesSettingName);
+    m_clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees = getCLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees();
+    observerSetting(m_clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees, CLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegreesSettingName);
+
+    getCLodDirectionalVirtualShadowSmrtRayLengthScaleDirectional = settingsManager.getSettingGetter<float>(CLodDirectionalVirtualShadowSmrtRayLengthScaleDirectionalSettingName);
+    setCLodDirectionalVirtualShadowSmrtRayLengthScaleDirectional = settingsManager.getSettingSetter<float>(CLodDirectionalVirtualShadowSmrtRayLengthScaleDirectionalSettingName);
+    m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional = getCLodDirectionalVirtualShadowSmrtRayLengthScaleDirectional();
+    observerSetting(m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional, CLodDirectionalVirtualShadowSmrtRayLengthScaleDirectionalSettingName);
 
     getNumDirectionalLightCascades = settingsManager.getSettingGetter<uint8_t>("numDirectionalLightCascades");
     setNumDirectionalLightCascades = settingsManager.getSettingSetter<uint8_t>("numDirectionalLightCascades");
@@ -1229,6 +1274,42 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             m_clodDirectionalVirtualShadowAutoLodBiasScale = std::max(m_clodDirectionalVirtualShadowAutoLodBiasScale, 0.0f);
             setCLodDirectionalVirtualShadowAutoLodBiasScale(m_clodDirectionalVirtualShadowAutoLodBiasScale);
         }
+        if (ImGui::SliderFloat("Directional VSM Source Angle", &m_clodDirectionalVirtualShadowSourceAngleDegrees, 0.0f, 10.0f, "%.2f deg")) {
+            m_clodDirectionalVirtualShadowSourceAngleDegrees = std::max(m_clodDirectionalVirtualShadowSourceAngleDegrees, 0.0f);
+            setCLodDirectionalVirtualShadowSourceAngleDegrees(m_clodDirectionalVirtualShadowSourceAngleDegrees);
+        }
+        int smrtRayCountDirectional = static_cast<int>(m_clodDirectionalVirtualShadowSmrtRayCountDirectional);
+        if (ImGui::SliderInt("Directional VSM SMRT Rays", &smrtRayCountDirectional, 0, 32)) {
+            m_clodDirectionalVirtualShadowSmrtRayCountDirectional = static_cast<uint32_t>(std::max(smrtRayCountDirectional, 0));
+            setCLodDirectionalVirtualShadowSmrtRayCountDirectional(m_clodDirectionalVirtualShadowSmrtRayCountDirectional);
+        }
+        int smrtSamplesPerRayDirectional = static_cast<int>(m_clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional);
+        if (ImGui::SliderInt("Directional VSM SMRT Samples/Ray", &smrtSamplesPerRayDirectional, 0, 16)) {
+            m_clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional = static_cast<uint32_t>(std::max(smrtSamplesPerRayDirectional, 0));
+            setCLodDirectionalVirtualShadowSmrtSamplesPerRayDirectional(m_clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional);
+        }
+        if (ImGui::SliderFloat(
+                "Directional VSM SMRT Max Ray Angle",
+                &m_clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees,
+                0.0f,
+                15.0f,
+                "%.2f deg")) {
+            m_clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees =
+                std::max(m_clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees, 0.0f);
+            setCLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees(
+                m_clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees);
+        }
+        if (ImGui::SliderFloat(
+                "Directional VSM SMRT Ray Length Scale",
+                &m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional,
+                0.0f,
+                4.0f,
+                "%.2f")) {
+            m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional =
+                std::max(m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional, 0.0f);
+            setCLodDirectionalVirtualShadowSmrtRayLengthScaleDirectional(
+                m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional);
+        }
         const CLodVirtualShadowResolutionConfig virtualShadowConfig =
             CLodVirtualShadowBuildRuntimeResolutionConfig();
         const float budgetDirectionalLodBias = m_clodDirectionalVirtualShadowAutoLodBias
@@ -1256,6 +1337,13 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             m_clodDirectionalVirtualShadowLodBias,
             budgetDirectionalLodBias,
             virtualShadowConfig.directionalLodBias);
+        ImGui::Text(
+            "Directional VSM SMRT: angle=%.2f deg rays=%u samples/ray=%u maxRayAngle=%.2f deg rayLengthScale=%.2f",
+            m_clodDirectionalVirtualShadowSourceAngleDegrees,
+            m_clodDirectionalVirtualShadowSmrtRayCountDirectional,
+            m_clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional,
+            m_clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees,
+            m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional);
         if (ImGui::SliderFloat("Directional Shadow Distance", &m_maxShadowDistance, 1.0f, 1000.0f, "%.1f")) {
             m_maxShadowDistance = std::max(m_maxShadowDistance, 1.0f);
             setMaxShadowDistance(m_maxShadowDistance);

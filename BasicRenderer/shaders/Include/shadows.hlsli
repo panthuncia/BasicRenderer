@@ -12,6 +12,9 @@ static const uint kCLodVirtualShadowDebugFlagSampledDepthMissing = 0x4u;
 static const uint kCLodVirtualShadowDebugFlagSampledPageUnwritten = 0x8u;
 static const uint kCLodVirtualShadowDebugFlagSampledTexelCleared = 0x10u;
 static const uint kCLodVirtualShadowDebugFlagSampledRerenderedThisFrame = 0x20u;
+static const float kCLodVirtualShadowPi = 3.14159265359f;
+static const float kCLodVirtualShadowTwoPi = 6.28318530718f;
+static const float kCLodVirtualShadowDegreesToRadians = kCLodVirtualShadowPi / 180.0f;
 
 struct CLodVirtualShadowDebugInfo
 {
@@ -21,6 +24,13 @@ struct CLodVirtualShadowDebugInfo
     uint sampledPageEntry;
     uint sampledPhysicalPageIndex;
     uint flags;
+};
+
+struct CLodVirtualShadowLookupResult
+{
+    uint valid;
+    uint occluded;
+    CLodVirtualShadowClipmapInfo clipmapInfo;
 };
 
 CLodVirtualShadowDebugInfo CLodVirtualShadowInitDebugInfo(uint preferredClipmapIndex)
@@ -33,6 +43,73 @@ CLodVirtualShadowDebugInfo CLodVirtualShadowInitDebugInfo(uint preferredClipmapI
     debugInfo.sampledPhysicalPageIndex = 0xFFFFFFFFu;
     debugInfo.flags = 0u;
     return debugInfo;
+}
+
+CLodVirtualShadowLookupResult CLodVirtualShadowInitLookupResult()
+{
+    CLodVirtualShadowLookupResult result;
+    result.valid = 0u;
+    result.occluded = 0u;
+    result.clipmapInfo = (CLodVirtualShadowClipmapInfo)0;
+    return result;
+}
+
+uint CLodVirtualShadowSmrtRayCountDirectional(uint packedCounts)
+{
+    return packedCounts & 0xFFFFu;
+}
+
+uint CLodVirtualShadowSmrtSamplesPerRayDirectional(uint packedCounts)
+{
+    return packedCounts >> 16u;
+}
+
+float CLodVirtualShadowRadiansFromDegrees(float degrees)
+{
+    return degrees * kCLodVirtualShadowDegreesToRadians;
+}
+
+float CLodVirtualShadowRadicalInverseVdC(uint bits)
+{
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return (float)bits * 2.3283064365386963e-10f;
+}
+
+float2 CLodVirtualShadowHammersley2D(uint sampleIndex, uint sampleCount)
+{
+    const float safeSampleCount = max((float)sampleCount, 1.0f);
+    return float2(((float)sampleIndex + 0.5f) / safeSampleCount, CLodVirtualShadowRadicalInverseVdC(sampleIndex));
+}
+
+uint CLodVirtualShadowHash(uint2 pixelCoords, uint frameIndex)
+{
+    uint hash = pixelCoords.x * 0x1F123BB5u + pixelCoords.y * 0x05491333u + frameIndex * 0x9E3779B9u + 0x68BC21EBu;
+    hash ^= hash >> 16u;
+    hash *= 0x7FEB352Du;
+    hash ^= hash >> 15u;
+    hash *= 0x846CA68Bu;
+    hash ^= hash >> 16u;
+    return hash;
+}
+
+float2 CLodVirtualShadowSmrtRotation(uint2 pixelCoords, uint frameIndex)
+{
+    const uint hash0 = CLodVirtualShadowHash(pixelCoords, frameIndex);
+    const uint hash1 = hash0 * 1664525u + 1013904223u;
+    return float2(
+        (float)(hash0 & 0x00FFFFFFu) / 16777216.0f,
+        (float)(hash1 & 0x00FFFFFFu) / 16777216.0f);
+}
+
+void CLodVirtualShadowBuildOrthonormalBasis(float3 direction, out float3 tangent, out float3 bitangent)
+{
+    const float3 helper = abs(direction.z) < 0.999f ? float3(0.0f, 0.0f, 1.0f) : float3(0.0f, 1.0f, 0.0f);
+    tangent = normalize(cross(helper, direction));
+    bitangent = cross(direction, tangent);
 }
 
 float3 CLodVirtualShadowDebugClipmapColor(uint clipmapIndex)
@@ -208,28 +285,46 @@ int calculateShadowCascadeIndex(float depth, uint numCascadeSplits, float4 casca
     return numCascadeSplits - 1;
 }
 
+float calculateDirectionalVSMShadowDetailed(float2 pixelCoords, float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numDirectionalClipmaps, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer, out CLodVirtualShadowDebugInfo debugInfo);
+
 float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numDirectionalClipmaps, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer, out CLodVirtualShadowDebugInfo debugInfo) {
-    (void)cascadeCameraIndexBuffer;
-    (void)cameraBuffer;
-    (void)cascadeSplits;
+    return calculateDirectionalVSMShadowDetailed(
+        float2(0.0f, 0.0f),
+        fragPosWorldSpace,
+        fragPosViewSpace,
+        normal,
+        light,
+        numDirectionalClipmaps,
+        cascadeSplits,
+        cascadeCameraIndexBuffer,
+        cameraBuffer,
+        debugInfo);
+}
 
-    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodClipmapInfo)];
-    StructuredBuffer<CLodVirtualShadowMainCameraInfo> compactMainCameraBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodCompactMainCamera)];
-    StructuredBuffer<CLodVirtualShadowCompactShadowCameraInfo> compactShadowCameraBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodCompactShadowCameras)];
-    StructuredBuffer<float4> directionalPageViewInfo = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodDirectionalPageViewInfo)];
-    Texture2DArray<uint> pageTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPageTable)];
-    Texture2D<uint> physicalPages = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPhysicalPages)];
-
-    const uint activeClipmapCount = min(numDirectionalClipmaps, kCLodVirtualShadowClipmapCount);
+CLodVirtualShadowLookupResult CLodVirtualShadowLookupDirectionalOcclusion(
+    float3 samplePosWorldSpace,
+    float3 normal,
+    float3 lightToFrag,
+    uint activeClipmapCount,
+    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos,
+    StructuredBuffer<CLodVirtualShadowMainCameraInfo> compactMainCameraBuffer,
+    StructuredBuffer<CLodVirtualShadowCompactShadowCameraInfo> compactShadowCameraBuffer,
+    StructuredBuffer<float4> directionalPageViewInfo,
+    Texture2DArray<uint> pageTable,
+    Texture2D<uint> physicalPages,
+    uint applyReceiverBias,
+    out CLodVirtualShadowDebugInfo debugInfo)
+{
+    CLodVirtualShadowLookupResult result = CLodVirtualShadowInitLookupResult();
     if (activeClipmapCount == 0u)
     {
         debugInfo = CLodVirtualShadowInitDebugInfo(0u);
-        return 0.0f;
+        return result;
     }
 
     const CLodVirtualShadowMainCameraInfo mainCamera = compactMainCameraBuffer[0];
     const uint preferredClipmapIndex = CLodVirtualShadowSelectClipmapIndex(
-        fragPosWorldSpace,
+        samplePosWorldSpace,
         mainCamera.positionWorldSpace.xyz,
         clipmapInfos[0].texelWorldSize,
         clipmapInfos[0].directionalLodBias,
@@ -237,36 +332,38 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
     debugInfo = CLodVirtualShadowInitDebugInfo(preferredClipmapIndex);
 
     const CLodVirtualShadowClipmapInfo clipmapInfo = clipmapInfos[preferredClipmapIndex];
+    result.clipmapInfo = clipmapInfo;
     if (!CLodVirtualShadowClipmapIsValid(clipmapInfo))
     {
-        return 0.0f;
+        return result;
     }
 
     const CLodVirtualShadowCompactShadowCameraInfo lightCamera = compactShadowCameraBuffer[preferredClipmapIndex];
-    const float4 fragPosLightSpace = mul(float4(fragPosWorldSpace, 1.0f), lightCamera.viewProjection);
-    const float safeW = max(abs(fragPosLightSpace.w), 1.0e-6f);
-    float3 uv = fragPosLightSpace.xyz / safeW;
+    const float4 samplePosLightSpace = mul(float4(samplePosWorldSpace, 1.0f), lightCamera.viewProjection);
+    const float safeW = max(abs(samplePosLightSpace.w), 1.0e-6f);
+    float3 uv = samplePosLightSpace.xyz / safeW;
     uv.xy = uv.xy * 0.5f + 0.5f;
     uv.y = 1.0f - uv.y;
 
-    const float3 lightToFrag = -light.dirWorldSpace.xyz;
-    const float2 biasedUv = uv.xy + CLodVirtualShadowDirectionalNormalOffsetUv(
-        fragPosWorldSpace,
-        normal,
-        lightToFrag,
-        clipmapInfo,
-        lightCamera);
-
-    if (biasedUv.x < 0.0f || biasedUv.x > 1.0f || biasedUv.y < 0.0f || biasedUv.y > 1.0f)
+    if (applyReceiverBias != 0u)
     {
-        return 0.0f;
-    }
+        const float2 biasedUv = uv.xy + CLodVirtualShadowDirectionalNormalOffsetUv(
+            samplePosWorldSpace,
+            normal,
+            lightToFrag,
+            clipmapInfo,
+            lightCamera);
+        if (biasedUv.x < 0.0f || biasedUv.x > 1.0f || biasedUv.y < 0.0f || biasedUv.y > 1.0f)
+        {
+            return result;
+        }
 
-    uv.xy = biasedUv;
+        uv.xy = biasedUv;
+    }
 
     if (uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f || uv.z < 0.0f || uv.z > 1.0f)
     {
-        return 0.0f;
+        return result;
     }
 
     const uint2 virtualPageCoords = CLodVirtualShadowVirtualPageCoordsFromUv(uv.xy, clipmapInfo);
@@ -283,7 +380,12 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
     }
     if ((pageEntry & kCLodVirtualShadowAllocatedMask) == 0u)
     {
-        return 0.0f;
+        return result;
+    }
+    if ((pageEntry & kCLodVirtualShadowContentValidMask) == 0u)
+    {
+        debugInfo.flags |= kCLodVirtualShadowDebugFlagSampledPageUnwritten;
+        return result;
     }
 
     const uint physicalPageIndex = pageEntry & kCLodVirtualShadowPhysicalPageIndexMask;
@@ -305,11 +407,11 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
     cachedPageView[3][1] = cachedPageViewRow.y;
     cachedPageView[3][2] = cachedPageViewRow.z;
     cachedPageView[3][3] = cachedPageViewRow.w;
-    const float4 fragPosCachedPageLightView = mul(float4(fragPosWorldSpace, 1.0f), cachedPageView);
-    const float linearLightDepth = -fragPosCachedPageLightView.z;
+    const float4 samplePosCachedPageLightView = mul(float4(samplePosWorldSpace, 1.0f), cachedPageView);
+    const float linearLightDepth = -samplePosCachedPageLightView.z;
     if (linearLightDepth <= 0.0f)
     {
-        return 0.0f;
+        return result;
     }
 
     const uint2 virtualTexelCoords = CLodVirtualShadowVirtualTexelCoordsFromUv(uv.xy, clipmapInfo);
@@ -319,29 +421,151 @@ float calculateDirectionalVSMShadowDetailed(float3 fragPosWorldSpace, float3 fra
     if (storedDepthBits == 0x7F7FFFFFu)
     {
         debugInfo.flags |= kCLodVirtualShadowDebugFlagSampledTexelCleared;
-        return 0.0f;
+        return result;
     }
 
     if (storedDepthBits == 0xFFFFFFFFu)
     {
         debugInfo.flags |= kCLodVirtualShadowDebugFlagSampledDepthMissing;
-        return 0.0f;
+        return result;
     }
 
     const float closestDepth = asfloat(storedDepthBits);
-    return linearLightDepth > closestDepth ? 1.0f : 0.0f;
-
-    return 0.0f;
+    result.valid = 1u;
+    result.occluded = linearLightDepth > closestDepth ? 1u : 0u;
+    return result;
 }
 
-float calculateDirectionalVSMShadow(float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numDirectionalClipmaps, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
+float calculateDirectionalVSMShadowDetailed(float2 pixelCoords, float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numDirectionalClipmaps, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer, out CLodVirtualShadowDebugInfo debugInfo) {
+    (void)fragPosViewSpace;
+    (void)cascadeCameraIndexBuffer;
+    (void)cameraBuffer;
+    (void)cascadeSplits;
+
+    ConstantBuffer<PerFrameBuffer> perFrameBuffer = ResourceDescriptorHeap[0];
+    StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodClipmapInfo)];
+    StructuredBuffer<CLodVirtualShadowMainCameraInfo> compactMainCameraBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodCompactMainCamera)];
+    StructuredBuffer<CLodVirtualShadowCompactShadowCameraInfo> compactShadowCameraBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodCompactShadowCameras)];
+    StructuredBuffer<float4> directionalPageViewInfo = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodDirectionalPageViewInfo)];
+    Texture2DArray<uint> pageTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPageTable)];
+    Texture2D<uint> physicalPages = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPhysicalPages)];
+
+    const uint activeClipmapCount = min(numDirectionalClipmaps, kCLodVirtualShadowClipmapCount);
+    const float3 lightToFrag = -light.dirWorldSpace.xyz;
+    const CLodVirtualShadowLookupResult receiverLookup = CLodVirtualShadowLookupDirectionalOcclusion(
+        fragPosWorldSpace,
+        normal,
+        lightToFrag,
+        activeClipmapCount,
+        clipmapInfos,
+        compactMainCameraBuffer,
+        compactShadowCameraBuffer,
+        directionalPageViewInfo,
+        pageTable,
+        physicalPages,
+        1u,
+        debugInfo);
+    const float hardShadow = receiverLookup.occluded != 0u ? 1.0f : 0.0f;
+
+    const uint packedCounts = perFrameBuffer.shadowVirtualSmrtDirectionalCountsPacked;
+    const uint rayCount = CLodVirtualShadowSmrtRayCountDirectional(packedCounts);
+    const uint samplesPerRay = CLodVirtualShadowSmrtSamplesPerRayDirectional(packedCounts);
+    if (rayCount == 0u || samplesPerRay == 0u || light.shadowSourceAngleDegrees <= 0.0f || receiverLookup.valid == 0u)
+    {
+        return hardShadow;
+    }
+
+    const float clampedRayAngleDegrees = min(
+        light.shadowSourceAngleDegrees,
+        perFrameBuffer.shadowVirtualSmrtMaxRayAngleFromLightDegrees);
+    const float coneAngleRadians = CLodVirtualShadowRadiansFromDegrees(clampedRayAngleDegrees);
+    if (coneAngleRadians <= 0.0f)
+    {
+        return hardShadow;
+    }
+
+    const float maxTraceDistance =
+        receiverLookup.clipmapInfo.texelWorldSize *
+        (float)receiverLookup.clipmapInfo.virtualResolution *
+        perFrameBuffer.shadowVirtualSmrtRayLengthScaleDirectional;
+    if (maxTraceDistance <= 1.0e-5f)
+    {
+        return hardShadow;
+    }
+
+    const float3 baseFragToLight = normalize(lightToFrag);
+    float3 tangent;
+    float3 bitangent;
+    CLodVirtualShadowBuildOrthonormalBasis(baseFragToLight, tangent, bitangent);
+
+    const uint2 pixelCoordsInt = uint2(pixelCoords);
+    const float2 rotation = CLodVirtualShadowSmrtRotation(pixelCoordsInt, perFrameBuffer.frameIndex);
+    const float rayConeSlope = tan(coneAngleRadians);
+    const float stepLength = maxTraceDistance / max((float)samplesPerRay, 1.0f);
+
+    float visibleRayCount = 0.0f;
+    [loop]
+    for (uint rayIndex = 0u; rayIndex < rayCount; ++rayIndex)
+    {
+        float3 rayDirection = baseFragToLight;
+        if (rayIndex > 0u && rayCount > 1u)
+        {
+            float2 xi = CLodVirtualShadowHammersley2D(rayIndex - 1u, rayCount - 1u);
+            xi = frac(xi + rotation);
+            const float diskRadius = sqrt(xi.x);
+            const float diskAngle = kCLodVirtualShadowTwoPi * xi.y;
+            const float2 diskSample = diskRadius * float2(cos(diskAngle), sin(diskAngle));
+            rayDirection = normalize(
+                baseFragToLight +
+                tangent * (diskSample.x * rayConeSlope) +
+                bitangent * (diskSample.y * rayConeSlope));
+        }
+
+        bool rayBlocked = false;
+        [loop]
+        for (uint sampleIndex = 0u; sampleIndex < samplesPerRay; ++sampleIndex)
+        {
+            const float sampleDistance = ((float)sampleIndex + 0.5f) * stepLength;
+            const float3 samplePosWorldSpace = fragPosWorldSpace + rayDirection * sampleDistance;
+            CLodVirtualShadowDebugInfo unusedDebugInfo;
+            const CLodVirtualShadowLookupResult raySample = CLodVirtualShadowLookupDirectionalOcclusion(
+                samplePosWorldSpace,
+                normal,
+                lightToFrag,
+                activeClipmapCount,
+                clipmapInfos,
+                compactMainCameraBuffer,
+                compactShadowCameraBuffer,
+                directionalPageViewInfo,
+                pageTable,
+                physicalPages,
+                0u,
+                unusedDebugInfo);
+            if (raySample.occluded != 0u)
+            {
+                rayBlocked = true;
+                break;
+            }
+        }
+
+        if (!rayBlocked)
+        {
+            visibleRayCount += 1.0f;
+        }
+    }
+
+    const float visibility = visibleRayCount / max((float)rayCount, 1.0f);
+    return 1.0f - visibility;
+}
+
+float calculateDirectionalVSMShadow(float2 pixelCoords, float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numDirectionalClipmaps, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
     CLodVirtualShadowDebugInfo debugInfo;
-    return calculateDirectionalVSMShadowDetailed(fragPosWorldSpace, fragPosViewSpace, normal, light, numDirectionalClipmaps, cascadeSplits, cascadeCameraIndexBuffer, cameraBuffer, debugInfo);
+    return calculateDirectionalVSMShadowDetailed(pixelCoords, fragPosWorldSpace, fragPosViewSpace, normal, light, numDirectionalClipmaps, cascadeSplits, cascadeCameraIndexBuffer, cameraBuffer, debugInfo);
 }
 
 
-float calculateCascadedShadow(float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numDirectionalClipmaps, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
-    return calculateDirectionalVSMShadow(fragPosWorldSpace, fragPosViewSpace, normal, light, numDirectionalClipmaps, cascadeSplits, cascadeCameraIndexBuffer, cameraBuffer);
+float calculateCascadedShadow(float2 pixelCoords, float3 fragPosWorldSpace, float3 fragPosViewSpace, float3 normal, LightInfo light, uint numDirectionalClipmaps, float4 cascadeSplits, StructuredBuffer<unsigned int> cascadeCameraIndexBuffer, StructuredBuffer<Camera> cameraBuffer) {
+    return calculateDirectionalVSMShadow(pixelCoords, fragPosWorldSpace, fragPosViewSpace, normal, light, numDirectionalClipmaps, cascadeSplits, cascadeCameraIndexBuffer, cameraBuffer);
 }
 
 float calculateSpotShadow(float3 fragPosWorldSpace, float3 normal, LightInfo light, matrix lightMatrix, float near, float far) {

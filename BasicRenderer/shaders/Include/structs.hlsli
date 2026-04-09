@@ -129,7 +129,9 @@ struct PerFrameBuffer {
     float clusterZSplitDepth; // view-space depth to switch to log
     
     uint frameIndex; // 0 to 64
-    uint pad[3];
+    uint shadowVirtualSmrtDirectionalCountsPacked;
+    float shadowVirtualSmrtMaxRayAngleFromLightDegrees;
+    float shadowVirtualSmrtRayLengthScaleDirectional;
 };
 
 struct BoundingSphere {
@@ -155,7 +157,8 @@ struct LightInfo {
     bool shadowCaster;
     BoundingSphere boundingSphere;
     float maxRange;
-    uint pad[2];
+    float shadowSourceRadius;
+    float shadowSourceAngleDegrees;
 };
 
 struct MaterialInfo {

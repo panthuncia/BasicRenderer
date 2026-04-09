@@ -267,6 +267,7 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
                     case 2:{// Directional light
                             CLodVirtualShadowDebugInfo shadowDebugInfo;
                             shadow = calculateDirectionalVSMShadowDetailed(
+                                fragmentInfo.pixelCoords,
                                 fragmentInfo.fragPosWorldSpace,
                                 fragmentInfo.fragPosViewSpace,
                                 fragmentInfo.normalWS,

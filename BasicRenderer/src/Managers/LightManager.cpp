@@ -10,6 +10,7 @@
 #include "Managers/ViewManager.h"
 #include "Resources/Buffers/SortedUnsignedIntBuffer.h"
 #include "Render/GraphExtensions/CLodTelemetry.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Utilities/MathUtils.h"
 #include "Render/MemoryIntrospectionAPI.h"
 #include "ShaderBuffers.h"
@@ -34,6 +35,8 @@ LightManager::LightManager() {
 	getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");
 	getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
+	getDirectionalVirtualShadowSourceAngleDegrees = SettingsManager::GetInstance().getSettingGetter<float>(
+		CLodDirectionalVirtualShadowSourceAngleDegreesSettingName);
 
 	m_pLightViewInfoResourceGroup = std::make_shared<ResourceGroup>("LightViewInfo");
 	m_pLightViewInfoResourceGroup->AddResource(m_spotViewInfo);
@@ -376,10 +379,13 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 	auto viewInfo = light.get<Components::LightViewInfo>();
 	auto& renderViewIds = viewInfo.viewIDs;
 	bool lightViewInfoChanged = false;
-	auto& lightInfo = light.get<Components::Light>();
+	auto& lightInfo = light.get_mut<Components::Light>();
 	auto& lightMatrix = light.get<Components::Matrix>();
 	auto& planes = light.get<Components::FrustumPlanes>().frustumPlanes;
 	auto globalPos = GetGlobalPositionFromMatrix(lightMatrix.matrix);
+	if (lightInfo.type == Components::LightType::Directional) {
+		lightInfo.lightInfo.shadowSourceAngleDegrees = getDirectionalVirtualShadowSourceAngleDegrees();
+	}
 	switch (lightInfo.type) {
 	case Components::LightType::Point: {
 		auto cubemapMatrices = GetCubemapViewMatrices(globalPos);
@@ -502,6 +508,7 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 			m_pViewManager->UpdateCamera(renderViewIds[i], info);
 		}
 		lightViewInfoChanged = true;
+		UpdateLightBufferView(viewInfo.lightBufferView.get(), lightInfo.lightInfo);
 		break;
 	}
 	default:
@@ -552,7 +559,7 @@ void LightManager::SetViewManager(ViewManager* viewManager) {
 	m_pViewManager = viewManager;
 }
 
-void LightManager::UpdateLightBufferView(BufferView* view, LightInfo& data) {
+void LightManager::UpdateLightBufferView(BufferView* view, const LightInfo& data) {
 	std::lock_guard<std::mutex> lock(m_lightUpdateMutex);
 	m_lightBuffer->UpdateView(view, &data);
 }

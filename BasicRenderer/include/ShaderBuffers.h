@@ -83,7 +83,9 @@ struct PerFrameCB {
     float clusterZSplitDepth; // view-space depth to switch to log
 
     unsigned int frameIndex; // 0 to 63
-    unsigned int pad[3];
+    unsigned int shadowVirtualSmrtDirectionalCountsPacked = 0u;
+    float shadowVirtualSmrtMaxRayAngleFromLightDegrees = 0.0f;
+    float shadowVirtualSmrtRayLengthScaleDirectional = 0.0f;
 };
 
 // Object flags (shared with HLSL OBJECT_FLAG_* defines)
@@ -209,7 +211,8 @@ struct LightInfo {
     bool shadowCaster;
 	BoundingSphere boundingSphere;
     float maxRange;
-	unsigned int pad[2];
+    float shadowSourceRadius = 0.0f;
+    float shadowSourceAngleDegrees = 0.0f;
 };
 
 #define LIGHTS_PER_PAGE 12

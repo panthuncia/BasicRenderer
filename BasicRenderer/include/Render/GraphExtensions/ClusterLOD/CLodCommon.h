@@ -28,6 +28,11 @@ inline constexpr const char* CLodDirectionalVirtualShadowMaxPhysicalPagesSetting
 inline constexpr const char* CLodDirectionalVirtualShadowLodBiasSettingName = "clodDirectionalVirtualShadowLodBias";
 inline constexpr const char* CLodDirectionalVirtualShadowAutoLodBiasSettingName = "clodDirectionalVirtualShadowAutoLodBias";
 inline constexpr const char* CLodDirectionalVirtualShadowAutoLodBiasScaleSettingName = "clodDirectionalVirtualShadowAutoLodBiasScale";
+inline constexpr const char* CLodDirectionalVirtualShadowSourceAngleDegreesSettingName = "clodDirectionalVirtualShadowSourceAngleDegrees";
+inline constexpr const char* CLodDirectionalVirtualShadowSmrtRayCountDirectionalSettingName = "clodDirectionalVirtualShadowSmrtRayCountDirectional";
+inline constexpr const char* CLodDirectionalVirtualShadowSmrtSamplesPerRayDirectionalSettingName = "clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional";
+inline constexpr const char* CLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegreesSettingName = "clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees";
+inline constexpr const char* CLodDirectionalVirtualShadowSmrtRayLengthScaleDirectionalSettingName = "clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional";
 enum class CLodPriorityMode : uint8_t {
     Max, // Duplicate group requests keep the maximum reported priority
     Sum, // Duplicate group requests accumulate (sum) their priorities
@@ -150,7 +155,7 @@ struct CLodDeepVisibilityStats
 static_assert(sizeof(CLodDeepVisibilityStats) == 32u, "CLodDeepVisibilityStats size must match HLSL");
 
 inline constexpr uint32_t CLodVirtualShadowMaxSupportedClipmapCount = 16u;
-inline constexpr uint32_t CLodVirtualShadowDefaultClipmapCount = 6u;
+inline constexpr uint32_t CLodVirtualShadowDefaultClipmapCount = 16u;
 inline constexpr uint32_t CLodVirtualShadowPhysicalPageSize = 128u;
 inline constexpr uint32_t CLodVirtualShadowFixedVirtualPageCountPerAxis = 128u;
 inline constexpr uint32_t CLodVirtualShadowFixedVirtualResolution =
@@ -177,7 +182,12 @@ inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalPageCount =
     CLodVirtualShadowDefaultPhysicalAtlasPagesWide * CLodVirtualShadowDefaultPhysicalAtlasPagesHigh;
 inline constexpr uint32_t CLodVirtualShadowMaxPhysicalPageCount =
     CLodVirtualShadowMaxPhysicalAtlasPagesWide * CLodVirtualShadowMaxPhysicalAtlasPagesHigh;
-inline constexpr float CLodVirtualShadowDefaultDirectionalLodBias = 0.0f;
+inline constexpr float CLodVirtualShadowDefaultDirectionalLodBias = 3.0f;
+inline constexpr float CLodVirtualShadowDefaultDirectionalSourceAngleDegrees = 0.5f;
+inline constexpr uint32_t CLodVirtualShadowDefaultSmrtRayCountDirectional = 8u;
+inline constexpr uint32_t CLodVirtualShadowDefaultSmrtSamplesPerRayDirectional = 8u;
+inline constexpr float CLodVirtualShadowDefaultSmrtMaxRayAngleFromLightDegrees = 5.0f;
+inline constexpr float CLodVirtualShadowDefaultSmrtRayLengthScaleDirectional = 1.0f;
 inline constexpr uint32_t CLodVirtualShadowMarkTileSize = 16u;
 inline constexpr uint32_t CLodVirtualShadowMaxMarkTileGridDimension = 512u;
 inline constexpr uint32_t CLodVirtualShadowMaxMarkTileCount =

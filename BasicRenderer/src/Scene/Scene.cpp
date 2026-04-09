@@ -26,6 +26,7 @@
 #include "Resources/components.h"
 #include "Resources/PixelBuffer.h"
 #include "Render/DrawWorkload.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 
 namespace {
 	std::atomic<uint64_t> globalStableSceneId = 0;
@@ -204,12 +205,18 @@ flecs::entity Scene::CreateLightECS(std::wstring name, Components::LightType typ
 	lightInfo.farPlane = farPlane;
 	lightInfo.shadowCaster = shadowCasting;
 	lightInfo.maxRange = maxRange;
+	lightInfo.shadowSourceRadius = 0.0f;
+	lightInfo.shadowSourceAngleDegrees = 0.0f;
 	switch(type){
 	case Components::LightType::Spot:
 		lightInfo.boundingSphere = ComputeConeBoundingSphere(XMLoadFloat3(&position), XMLoadFloat3(&direction), maxRange, outerConeAngle);
 		break;
 	case Components::LightType::Point:
 		lightInfo.boundingSphere = { { position.x, position.y, position.z, maxRange } };
+		break;
+	case Components::LightType::Directional:
+		lightInfo.shadowSourceAngleDegrees = CLodVirtualShadowDefaultDirectionalSourceAngleDegrees;
+		break;
 	}
 
 	flecs::entity entity = world.entity();

@@ -6,6 +6,7 @@
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/DeviceManager.h"
 #include "Managers/Singletons/SettingsManager.h"
+#include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
 #include "Render/Runtime/UploadServiceAccess.h"
 
 namespace
@@ -33,6 +34,13 @@ namespace
 			break;
 		}
 	}
+
+    uint32_t PackDirectionalVirtualShadowSmrtCounts(uint32_t rayCount, uint32_t samplesPerRay)
+    {
+        const uint32_t clampedRayCount = (std::min)(rayCount, 0xFFFFu);
+        const uint32_t clampedSamplesPerRay = (std::min)(samplesPerRay, 0xFFFFu);
+        return clampedRayCount | (clampedSamplesPerRay << 16u);
+    }
 }
 
 void ResourceManager::Initialize() {
@@ -65,6 +73,13 @@ void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, Dir
 	perFrameCBData.nearClusterCount = 4;
 	perFrameCBData.clusterZSplitDepth = 6.0f;
 	perFrameCBData.frameIndex = frameIndex;
+    perFrameCBData.shadowVirtualSmrtDirectionalCountsPacked = PackDirectionalVirtualShadowSmrtCounts(
+        SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowSmrtRayCountDirectionalSettingName)(),
+        SettingsManager::GetInstance().getSettingGetter<uint32_t>(CLodDirectionalVirtualShadowSmrtSamplesPerRayDirectionalSettingName)());
+    perFrameCBData.shadowVirtualSmrtMaxRayAngleFromLightDegrees =
+        SettingsManager::GetInstance().getSettingGetter<float>(CLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegreesSettingName)();
+    perFrameCBData.shadowVirtualSmrtRayLengthScaleDirectional =
+        SettingsManager::GetInstance().getSettingGetter<float>(CLodDirectionalVirtualShadowSmrtRayLengthScaleDirectionalSettingName)();
 
 	BUFFER_UPLOAD(&perFrameCBData, sizeof(PerFrameCB), rg::runtime::UploadTarget::FromShared(m_perFrameBuffer), 0);
 }
