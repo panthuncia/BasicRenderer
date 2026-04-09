@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include <rhi_interop_dx12.h>
@@ -70,6 +71,8 @@ HierarchialCullingPass::HierarchialCullingPass(
     std::shared_ptr<Buffer> visibleClustersBuffer,
     std::shared_ptr<Buffer> visibleClustersCounterBuffer,
     std::shared_ptr<Buffer> swVisibleClustersCounterBuffer,
+    std::shared_ptr<Buffer> pageJobVisibleClustersBuffer,
+    std::shared_ptr<Buffer> pageJobVisibleClustersCounterBuffer,
     std::shared_ptr<Buffer> histogramIndirectCommand,
     std::shared_ptr<Buffer> workGraphTelemetryBuffer,
     std::shared_ptr<Buffer> occlusionReplayBuffer,
@@ -88,12 +91,14 @@ HierarchialCullingPass::HierarchialCullingPass(
     std::shared_ptr<PixelBuffer> shadowPhysicalPagesTexture) {
     m_workGraphMode = inputs.workGraphMode;
     m_rasterOutputKind = inputs.rasterOutputKind;
+    m_isFirstPass = inputs.isFirstPass;
+    m_workGraphComputePageJobDescriptorResourceId =
+        std::string(CLodWorkGraphComputePageJobDescriptorBufferId) + "." + std::to_string(reinterpret_cast<uintptr_t>(this));
     CreatePipelines(
         DeviceManager::GetInstance().GetDevice(),
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
         m_workGraph,
         m_createCommandPipelineState);
-    m_isFirstPass = inputs.isFirstPass;
     auto memSize = m_workGraph->GetRequiredScratchMemorySize();
     m_scratchBuffer = Buffer::CreateShared(
         rhi::HeapType::DeviceLocal,
@@ -103,6 +108,16 @@ HierarchialCullingPass::HierarchialCullingPass(
     m_visibleClustersBuffer = std::move(visibleClustersBuffer);
     m_visibleClustersCounterBuffer = std::move(visibleClustersCounterBuffer);
     m_swVisibleClustersCounterBuffer = std::move(swVisibleClustersCounterBuffer);
+    m_pageJobVisibleClustersBuffer = std::move(pageJobVisibleClustersBuffer);
+    m_pageJobVisibleClustersCounterBuffer = std::move(pageJobVisibleClustersCounterBuffer);
+    m_workGraphComputePageJobDescriptorsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+        1,
+        sizeof(CLodWorkGraphComputePageJobDescriptors),
+        false,
+        false,
+        false,
+        false);
+    m_workGraphComputePageJobDescriptorsBuffer->SetName("CLod Work Graph Compute Page Job Descriptors");
     m_histogramIndirectCommand = std::move(histogramIndirectCommand);
     m_workGraphTelemetryBuffer = std::move(workGraphTelemetryBuffer);
     m_occlusionReplayBuffer = std::move(occlusionReplayBuffer);
@@ -179,11 +194,15 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
             Builtin::Shadows::LinearShadowMaps,
             m_visibleClustersCounterBuffer,
             m_occlusionReplayStateBuffer,
-            Builtin::PerMaterialDataBuffer)
+            Builtin::PerMaterialDataBuffer,
+            m_workGraphComputePageJobDescriptorResourceId.c_str())
         .WithShaderResource(ECSResourceResolver(drawSetIndicesQuery));
 
     if (UsesSWClassification(m_workGraphMode)) {
         builder->WithUnorderedAccess(m_swVisibleClustersCounterBuffer);
+    }
+    if (m_pageJobVisibleClustersBuffer && m_pageJobVisibleClustersCounterBuffer) {
+        builder->WithUnorderedAccess(m_pageJobVisibleClustersBuffer, m_pageJobVisibleClustersCounterBuffer);
     }
     if (UsesSWClassification(m_workGraphMode)) {
         builder->WithShaderResource(m_viewRasterInfoBuffer);
@@ -494,6 +513,20 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
     if (UsesSWClassification(m_workGraphMode)) {
         BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_swVisibleClustersCounterBuffer), 0);
     }
+    if (m_pageJobVisibleClustersCounterBuffer) {
+        BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_pageJobVisibleClustersCounterBuffer), 0);
+    }
+
+    CLodWorkGraphComputePageJobDescriptors pageJobDescriptors{};
+    if (m_pageJobVisibleClustersBuffer && m_pageJobVisibleClustersCounterBuffer) {
+        pageJobDescriptors.visibleClustersUAVDescriptorIndex = m_pageJobVisibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        pageJobDescriptors.visibleClustersCounterUAVDescriptorIndex = m_pageJobVisibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    }
+    BUFFER_UPLOAD(
+        &pageJobDescriptors,
+        sizeof(CLodWorkGraphComputePageJobDescriptors),
+        rg::runtime::UploadTarget::FromShared(m_workGraphComputePageJobDescriptorsBuffer),
+        0);
 
     // Keep the shared per-view visibility UAV table valid for any visibility-buffer path.
     // Reyes patch raster consumes this buffer even when the primary CLod path is not using SW classification.
@@ -657,6 +690,20 @@ bool HierarchialCullingPass::DeclaredResourcesChanged() const {
     return m_declaredResourcesChanged;
 }
 
+std::shared_ptr<Resource> HierarchialCullingPass::ProvideResource(ResourceIdentifier const& key)
+{
+    if (key == m_workGraphComputePageJobDescriptorResourceId) {
+        return m_workGraphComputePageJobDescriptorsBuffer;
+    }
+
+    return nullptr;
+}
+
+std::vector<ResourceIdentifier> HierarchialCullingPass::GetSupportedKeys()
+{
+    return { ResourceIdentifier{ m_workGraphComputePageJobDescriptorResourceId } };
+}
+
 void HierarchialCullingPass::Cleanup() {
 }
 
@@ -667,10 +714,15 @@ void HierarchialCullingPass::CreatePipelines(
     PipelineState& outCreateCommandPipeline)
 {
     ShaderLibraryInfo libInfo(L"shaders/ClusterLOD/workGraphCulling.hlsl", L"lib_6_8");
+    std::wstring pageJobDescriptorResourceIdWide(
+        m_workGraphComputePageJobDescriptorResourceId.begin(),
+        m_workGraphComputePageJobDescriptorResourceId.end());
+    std::wstring pageJobDescriptorResourceIdDefine = L"\"" + pageJobDescriptorResourceIdWide + L"\"";
     std::vector<DxcDefine> defines = {
         { L"CLOD_WG_ENABLE_SW_CLASSIFICATION", UsesSWClassification(m_workGraphMode) ? L"1" : L"0" },
         { L"CLOD_WG_ENABLE_SW_NODE_OUTPUT", UsesWorkGraphSWRaster(m_workGraphMode) ? L"1" : L"0" },
         { L"CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW", UsesVirtualShadowOutput(m_rasterOutputKind) ? L"1" : L"0" },
+        { L"CLOD_WG_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER_ID", pageJobDescriptorResourceIdDefine.c_str() },
     };
     auto compiled = PSOManager::GetInstance().CompileShaderLibrary(libInfo, defines);
     m_pipelineResources = compiled.resourceDescriptorSlots;
@@ -695,7 +747,8 @@ void HierarchialCullingPass::CreatePipelines(
         exports.push_back({ "WG_SWRaster", nullptr });
         if (UsesVirtualShadowOutput(m_rasterOutputKind)) {
             exports.push_back({ "WG_PageJobBuild", nullptr });
-            exports.push_back({ "WG_PageJobRaster", nullptr });
+            exports.push_back({ "WG_PageJobExpand", nullptr });
+            exports.push_back({ "WG_PageJobRasterPage", nullptr });
         }
     }
 

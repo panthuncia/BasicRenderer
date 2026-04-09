@@ -2900,6 +2900,53 @@ inline void Menu::DrawCLodTelemetryWindow() {
             }
 
             ImGui::Separator();
+            ImGui::TextUnformatted("SW/HW/PageJob classification breakdown");
+            {
+                const uint32_t contributing = counter(CLodWorkGraphCounterIndex::ClassifyContributing);
+                const uint32_t routedHW = counter(CLodWorkGraphCounterIndex::ClassifyRoutedHW);
+                const uint32_t routedSW = counter(CLodWorkGraphCounterIndex::ClassifyRoutedSW);
+                const uint32_t routedPJ = counter(CLodWorkGraphCounterIndex::ClassifyRoutedPageJob);
+                ImGui::Text("Contributing (survived cull): %u", contributing);
+                ImGui::Text("Routed -> HW: %u | SW: %u | PageJob: %u", routedHW, routedSW, routedPJ);
+                if (contributing > 0) {
+                    ImGui::Text("  HW: %.1f%% | SW: %.1f%% | PJ: %.1f%%",
+                        100.0f * routedHW / (float)contributing,
+                        100.0f * routedSW / (float)contributing,
+                        100.0f * routedPJ / (float)contributing);
+                }
+
+                const uint32_t pjRejectReyes = counter(CLodWorkGraphCounterIndex::ClassifyPJRejectReyesDisplacement);
+                const uint32_t pjRejectAlpha = counter(CLodWorkGraphCounterIndex::ClassifyPJRejectAlphaTested);
+                const uint32_t pjRejectNoClipmap = counter(CLodWorkGraphCounterIndex::ClassifyPJRejectNoClipmapIndex);
+                const uint32_t pjRejectThreshold = counter(CLodWorkGraphCounterIndex::ClassifyPJRejectBelowThreshold);
+                const uint32_t pjRejectDisabled = counter(CLodWorkGraphCounterIndex::ClassifyPJRejectDisabled);
+                const uint32_t pjRejectAlreadySW = counter(CLodWorkGraphCounterIndex::ClassifyPJRejectAlreadySW);
+                const uint32_t swDisabled = counter(CLodWorkGraphCounterIndex::ClassifySwDisabled);
+                const uint32_t totalPJRejects = pjRejectReyes + pjRejectAlpha + pjRejectNoClipmap
+                    + pjRejectThreshold + pjRejectDisabled + pjRejectAlreadySW;
+
+                ImGui::Text("PageJob rejections (total: %u):", totalPJRejects);
+                ImGui::Text("  Disabled: %u | AlreadySW: %u | ReyesDisplacement: %u",
+                    pjRejectDisabled, pjRejectAlreadySW, pjRejectReyes);
+                ImGui::Text("  AlphaTested: %u | NoClipmapIdx: %u | BelowThreshold: %u",
+                    pjRejectAlpha, pjRejectNoClipmap, pjRejectThreshold);
+                ImGui::Text("  SW classification disabled (contributes but !swRasterEnabled): %u", swDisabled);
+            }
+
+            ImGui::Separator();
+            ImGui::TextUnformatted("PageJob WG pipeline");
+            {
+                const uint32_t buildProcessed = counter(CLodWorkGraphCounterIndex::PageJobBuildClustersProcessed);
+                const uint32_t buildEmitted = counter(CLodWorkGraphCounterIndex::PageJobBuildPagesEmitted);
+                ImGui::Text("Build: processed=%u emitted=%u", buildProcessed, buildEmitted);
+
+                const uint32_t rasterJobs = counter(CLodWorkGraphCounterIndex::PageJobRasterJobsLaunched);
+                const uint32_t pixWritten = counter(CLodWorkGraphCounterIndex::PageJobRasterPixelsWritten);
+                const uint32_t flagWrites = counter(CLodWorkGraphCounterIndex::PageJobRasterFlagWrites);
+                ImGui::Text("Raster: jobs=%u pixWritten=%u flagWrites=%u", rasterJobs, pixWritten, flagWrites);
+            }
+
+            ImGui::Separator();
             ImGui::TextUnformatted("Occlusion -> Phase 2 enqueue attempts");
             ImGui::Text("Node attempts: %u | Cluster attempts: %u",
                 counter(CLodWorkGraphCounterIndex::Phase1OcclusionNodeReplayEnqueueAttempts),

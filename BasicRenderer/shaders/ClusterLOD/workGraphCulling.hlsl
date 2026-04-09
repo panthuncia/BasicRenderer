@@ -13,6 +13,10 @@
 #include "include/vertex.hlsli"
 #include "include/skinningCommon.hlsli"
 
+#ifndef CLOD_WG_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER_ID
+#define CLOD_WG_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER_ID "CLod::WorkGraphComputePageJobDescriptors"
+#endif
+
 #ifndef CLOD_WG_ENABLE_SW_CLASSIFICATION
 #define CLOD_WG_ENABLE_SW_CLASSIFICATION 1
 #endif
@@ -152,6 +156,36 @@ static const uint WG_COUNTER_PAGEJOB_RASTER_TRIANGLES_CLIPPED = 71;
 static const uint WG_COUNTER_PAGEJOB_RASTER_PIXELS_WRITTEN = 72;
 static const uint WG_COUNTER_PAGEJOB_RASTER_FLAG_WRITES = 73;
 
+static const uint WG_COUNTER_CLASSIFY_CONTRIBUTING = 74;
+static const uint WG_COUNTER_CLASSIFY_ROUTED_HW = 75;
+static const uint WG_COUNTER_CLASSIFY_ROUTED_SW = 76;
+static const uint WG_COUNTER_CLASSIFY_ROUTED_PAGEJOB = 77;
+static const uint WG_COUNTER_CLASSIFY_PJ_REJECT_REYES_DISPLACEMENT = 78;
+static const uint WG_COUNTER_CLASSIFY_PJ_REJECT_ALPHA_TESTED = 79;
+static const uint WG_COUNTER_CLASSIFY_PJ_REJECT_NO_CLIPMAP_INDEX = 80;
+static const uint WG_COUNTER_CLASSIFY_PJ_REJECT_BELOW_THRESHOLD = 81;
+static const uint WG_COUNTER_CLASSIFY_PJ_REJECT_DISABLED = 82;
+static const uint WG_COUNTER_CLASSIFY_PJ_REJECT_ALREADY_SW = 83;
+static const uint WG_COUNTER_CLASSIFY_SW_DISABLED = 84;
+
+static const uint WG_COUNTER_PAGEJOB_BUILD_GROUPS_LAUNCHED = 85;
+static const uint WG_COUNTER_PAGEJOB_BUILD_NO_CLIPMAP = 86;
+static const uint WG_COUNTER_PAGEJOB_BUILD_PAGES_SCANNED = 87;
+static const uint WG_COUNTER_PAGEJOB_BUILD_ZERO_DIRTY_PAGES = 88;
+static const uint WG_COUNTER_PAGEJOB_RASTER_JOBS_LAUNCHED = 89;
+static const uint WG_COUNTER_PAGEJOB_RASTER_TOTAL_TRIS = 90;
+static const uint WG_COUNTER_PAGEJOB_RASTER_TRIS_DEPTH_REJECT = 91;
+static const uint WG_COUNTER_PAGEJOB_RASTER_TRIS_BACKFACE_CULL = 92;
+static const uint WG_COUNTER_PAGEJOB_RASTER_TRIS_AABB_EMPTY = 93;
+static const uint WG_COUNTER_PAGEJOB_RASTER_TRIS_RASTERIZED = 94;
+static const uint WG_COUNTER_PAGEJOB_RASTER_PIXELS_TESTED = 95;
+static const uint WG_COUNTER_PAGEJOB_RASTER_JOBS_WITH_PIXELS = 96;
+
+static const uint WG_COUNTER_PAGEJOB_DBG_PHYS_DESCRIPTOR = 97;
+static const uint WG_COUNTER_PAGEJOB_DBG_ATLAS_WIDTH = 98;
+static const uint WG_COUNTER_PAGEJOB_DBG_ATLAS_HEIGHT = 99;
+static const uint WG_COUNTER_PAGEJOB_DBG_OOB_PIXELS = 100;
+
 static const uint CLOD_STREAM_REQUEST_CAPACITY = (1u << 16);
 static const uint CLOD_USED_GROUPS_CAPACITY = (1u << 17);
 static const uint CLOD_STREAM_VIEWID_MASK = 0xFFFFu;
@@ -191,6 +225,21 @@ bool CLodWorkGraphUseComputeSWRaster()
 {
 #if CLOD_WG_ENABLE_SW_CLASSIFICATION
     return (CLOD_WG_FLAGS & CLOD_WG_FLAG_COMPUTE_SW_RASTER) != 0u;
+#else
+    return false;
+#endif
+}
+
+bool CLodWorkGraphUseDedicatedComputePageJobBuffer()
+{
+#if CLOD_WG_ENABLE_SW_CLASSIFICATION
+    StructuredBuffer<uint4> pageJobDescriptorBuffer =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(CLOD_WG_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER_ID)];
+    const uint2 descriptorPair = pageJobDescriptorBuffer[0].xy;
+    return
+        CLodWorkGraphUseComputeSWRaster() &&
+        descriptorPair.x != 0xFFFFFFFFu &&
+        descriptorPair.y != 0xFFFFFFFFu;
 #else
     return false;
 #endif
@@ -255,9 +304,9 @@ uint CLodPageJobMaxPagesPerCluster()
 {
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
     uint v = (CLOD_WG_PAGE_JOB_FLAGS & CLOD_WG_PAGE_JOB_MAX_PAGES_MASK) >> CLOD_WG_PAGE_JOB_MAX_PAGES_SHIFT;
-    return v == 0u ? PAGEJOB_MAX_PAGES_PER_CLUSTER : v;
+    return v == 0u ? PAGEJOB_MAX_TILE_JOBS_PER_CLUSTER : v;
 #else
-    return PAGEJOB_MAX_PAGES_PER_CLUSTER;
+    return PAGEJOB_MAX_TILE_JOBS_PER_CLUSTER;
 #endif
 }
 
@@ -1754,6 +1803,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         ResourceDescriptorHeap[CLOD_WG_SW_VISIBLE_CLUSTERS_COUNTER_DESCRIPTOR_INDEX];
     StructuredBuffer<uint> swWriteBaseCounter = ResourceDescriptorHeap[CLOD_WG_SW_WRITE_BASE_COUNTER_DESCRIPTOR_INDEX];
     const uint swWriteBase = CLodWorkGraphIsPhase2() ? swWriteBaseCounter.Load(0) : 0u;
+    const bool useDedicatedComputePageJobBuffer = CLodWorkGraphUseDedicatedComputePageJobBuffer();
     // Page-job classification setup.
     const bool pageJobEnabled = CLodPageJobEnabled();
     const float pageJobDiameterThreshold = (float)CLodPageJobDiameterThreshold();
@@ -2056,6 +2106,9 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         // SW/HW/PageJob three-way classification.
         bool isSW = false;
         bool isPageJob = false;
+        if (contributes) {
+            WGTelemetryAdd(WG_COUNTER_CLASSIFY_CONTRIBUTING, 1);
+        }
         if (contributes && !reyesDisplacementCandidate && (swRasterEnabled || pageJobEnabled)) {
             const float projectedDiameter = CLodProjectedDiameterPixels(
                 meshletRadiusWorld,
@@ -2066,16 +2119,39 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 cullCameraIsOrtho);
             if (swRasterEnabled) {
                 isSW = projectedDiameter < swDiameterThreshold;
+            } else if (contributes) {
+                WGTelemetryAdd(WG_COUNTER_CLASSIFY_SW_DISABLED, 1);
             }
             if (!isSW && pageJobEnabled && !isAlphaTestedMaterial
                 && shadowClipmapIndex != CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX) {
-                isPageJob = (projectedDiameter >= pageJobDiameterThreshold) || pageJobForceAll;
+                if ((projectedDiameter >= pageJobDiameterThreshold) || pageJobForceAll) {
+                    isPageJob = true;
+                } else {
+                    WGTelemetryAdd(WG_COUNTER_CLASSIFY_PJ_REJECT_BELOW_THRESHOLD, 1);
+                }
+            } else if (!isSW && contributes) {
+                // Diagnose why we didn't enter the page-job gate.
+                if (!pageJobEnabled) {
+                    WGTelemetryAdd(WG_COUNTER_CLASSIFY_PJ_REJECT_DISABLED, 1);
+                } else if (isAlphaTestedMaterial) {
+                    WGTelemetryAdd(WG_COUNTER_CLASSIFY_PJ_REJECT_ALPHA_TESTED, 1);
+                } else if (shadowClipmapIndex == CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX) {
+                    WGTelemetryAdd(WG_COUNTER_CLASSIFY_PJ_REJECT_NO_CLIPMAP_INDEX, 1);
+                }
+            } else if (isSW && contributes) {
+                WGTelemetryAdd(WG_COUNTER_CLASSIFY_PJ_REJECT_ALREADY_SW, 1);
             }
+        } else if (contributes && reyesDisplacementCandidate) {
+            WGTelemetryAdd(WG_COUNTER_CLASSIFY_PJ_REJECT_REYES_DISPLACEMENT, 1);
         }
 
         const bool isHW = contributes && !isSW && !isPageJob;
         const bool outputSW = contributes && isSW;
         const bool outputPageJob = contributes && isPageJob;
+
+        if (isHW)       WGTelemetryAdd(WG_COUNTER_CLASSIFY_ROUTED_HW, 1);
+        if (outputSW)   WGTelemetryAdd(WG_COUNTER_CLASSIFY_ROUTED_SW, 1);
+        if (outputPageJob) WGTelemetryAdd(WG_COUNTER_CLASSIFY_ROUTED_PAGEJOB, 1);
 
         // HW path: wave-cooperative bottom-up write
         {
@@ -2199,46 +2275,83 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 const uint pjRank = GetLaneRankInGroup(pjMask, WaveGetLaneIndex());
 
                 uint pjBase = 0;
-                uint pjCombinedBase = 0;
-                if (WaveGetLaneIndex() == pjLeader) {
-                    InterlockedAdd(replayState[0].visibleClusterCombinedCount, pjIterCount, pjCombinedBase);
-                }
-                pjCombinedBase = WaveReadLaneAt(pjCombinedBase, pjLeader);
+                if (useDedicatedComputePageJobBuffer) {
+                    StructuredBuffer<uint4> pageJobDescriptorBuffer =
+                        ResourceDescriptorHeap[ResourceDescriptorIndex(CLOD_WG_COMPUTE_PAGE_JOB_DESCRIPTOR_BUFFER_ID)];
+                    const uint2 descriptorPair = pageJobDescriptorBuffer[0].xy;
+                    RWStructuredBuffer<uint> pageJobVisibleClusterCounter =
+                        ResourceDescriptorHeap[descriptorPair.y];
+                    if (WaveGetLaneIndex() == pjLeader) {
+                        InterlockedAdd(pageJobVisibleClusterCounter[0], pjIterCount, pjBase);
+                    }
+                    pjBase = WaveReadLaneAt(pjBase, pjLeader);
 
-                pjAvail =
-                    (pjCombinedBase < visibleClusterCapacity)
-                        ? min(pjIterCount, visibleClusterCapacity - pjCombinedBase)
-                        : 0u;
+                    pjAvail =
+                        (pjBase < visibleClusterCapacity)
+                            ? min(pjIterCount, visibleClusterCapacity - pjBase)
+                            : 0u;
 
-                if (WaveGetLaneIndex() == pjLeader) {
-                    InterlockedAdd(swVisibleClusterCounter[0], pjAvail, pjBase);
-                }
-                pjBase = WaveReadLaneAt(pjBase, pjLeader);
+                    if (WaveGetLaneIndex() == pjLeader && (pjBase + pjIterCount > visibleClusterCapacity)) {
+                        InterlockedMin(pageJobVisibleClusterCounter[0], visibleClusterCapacity);
+                    }
 
-                if (WaveGetLaneIndex() == pjLeader && (pjCombinedBase + pjIterCount > visibleClusterCapacity)) {
-                    InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
-                }
+                    if (outputPageJob && (pjRank < pjAvail)) {
+                        globallycoherent RWByteAddressBuffer pageJobVisibleClusters =
+                            ResourceDescriptorHeap[descriptorPair.x];
+                        const uint pjIndex = pjBase + pjRank;
+                        CLodStoreVisibleClusterGloballyCoherent(
+                            pageJobVisibleClusters,
+                            pjIndex,
+                            b.viewId,
+                            b.instanceIndex,
+                            localMeshletIndex,
+                            visibleGroupId,
+                            b.pageSlabDescriptorIndex,
+                            b.pageSlabByteOffset,
+                            shadowClipmapIndex);
+                    }
+                } else {
+                    uint pjCombinedBase = 0;
+                    if (WaveGetLaneIndex() == pjLeader) {
+                        InterlockedAdd(replayState[0].visibleClusterCombinedCount, pjIterCount, pjCombinedBase);
+                    }
+                    pjCombinedBase = WaveReadLaneAt(pjCombinedBase, pjLeader);
 
-                if (outputPageJob && (pjRank < pjAvail)) {
-                    const uint pjIndex = visibleClusterCapacity - 1 - (swWriteBase + pjBase + pjRank);
-                    CLodStoreVisibleClusterGloballyCoherent(
-                        visibleClusters,
-                        pjIndex,
-                        b.viewId,
-                        b.instanceIndex,
-                        localMeshletIndex,
-                        visibleGroupId,
-                        b.pageSlabDescriptorIndex,
-                        b.pageSlabByteOffset,
-                        shadowClipmapIndex);
+                    pjAvail =
+                        (pjCombinedBase < visibleClusterCapacity)
+                            ? min(pjIterCount, visibleClusterCapacity - pjCombinedBase)
+                            : 0u;
+
+                    if (WaveGetLaneIndex() == pjLeader) {
+                        InterlockedAdd(swVisibleClusterCounter[0], pjAvail, pjBase);
+                    }
+                    pjBase = WaveReadLaneAt(pjBase, pjLeader);
+
+                    if (WaveGetLaneIndex() == pjLeader && (pjCombinedBase + pjIterCount > visibleClusterCapacity)) {
+                        InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
+                    }
+
+                    if (outputPageJob && (pjRank < pjAvail)) {
+                        const uint pjIndex = visibleClusterCapacity - 1 - (swWriteBase + pjBase + pjRank);
+                        CLodStoreVisibleClusterGloballyCoherent(
+                            visibleClusters,
+                            pjIndex,
+                            b.viewId,
+                            b.instanceIndex,
+                            localMeshletIndex,
+                            visibleGroupId,
+                            b.pageSlabDescriptorIndex,
+                            b.pageSlabByteOffset,
+                            shadowClipmapIndex);
 
 #if CLOD_WG_ENABLE_SW_NODE_OUTPUT
-                    gs_pageJobBatchIndices[pageJobPending + pjRank] = pjIndex;
+                        gs_pageJobBatchIndices[pageJobPending + pjRank] = pjIndex;
 #endif
+                    }
                 }
             }
 #if CLOD_WG_ENABLE_SW_NODE_OUTPUT
-            pageJobPending += pjAvail;
+            pageJobPending += useDedicatedComputePageJobBuffer ? 0u : pjAvail;
 #endif
         }
 #endif
@@ -2294,7 +2407,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 
 #define CLOD_CLUSTER_CULL_PAGEJOB_EPILOGUE() \
     GroupMemoryBarrierWithGroupSync(); \
-    const uint pjNumBatches = (pageJobPending + PAGEJOB_BUILD_MAX_CLUSTERS - 1) / PAGEJOB_BUILD_MAX_CLUSTERS; \
+    const uint pjNumBatches = CLodWorkGraphUseComputeSWRaster() ? 0u : ((pageJobPending + PAGEJOB_BUILD_MAX_CLUSTERS - 1) / PAGEJOB_BUILD_MAX_CLUSTERS); \
     GroupNodeOutputRecords<PageJobBuildBatchRecord> pjBatchOut = \
         pageJobOutput.GetGroupNodeOutputRecords(pjNumBatches); \
     if (GI == 0) { \
@@ -2468,4 +2581,7 @@ void WG_ClusterCull64(
 #define CLOD_SW_RASTER_DYNAMIC_ALPHA_TEST 1
 #include "ClusterLOD/softwareRaster.hlsl"
 #undef CLOD_SW_RASTER_DYNAMIC_ALPHA_TEST
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+#include "ClusterLOD/pageJobRaster.hlsl"
+#endif
 #endif

@@ -163,10 +163,17 @@ private:
     std::shared_ptr<Buffer> m_shadowDirectionalPageViewInfoBuffer;
     std::shared_ptr<Buffer> m_shadowRuntimeStateBuffer;
     std::shared_ptr<Buffer> m_shadowStatsBuffer;
+    std::shared_ptr<Buffer> m_swPageJobVisibleClustersBuffer;
+    std::shared_ptr<Buffer> m_swPageJobVisibleClustersCounterBuffer;
+    std::shared_ptr<Buffer> m_swPageJobRecordsBuffer;
+    std::shared_ptr<Buffer> m_swPageJobCountBuffer;
+    std::shared_ptr<Buffer> m_swPageJobIndirectArgsBuffer;
+    std::shared_ptr<Buffer> m_swPageJobClusterTagsBuffer;
 
     std::unique_ptr<CLodStreamingSystem> m_streamingSystem;
     bool m_providerRegisteredForCurrentRegistry = false;
     bool m_shadowVirtualResourcesNeedReset = true;
     uint32_t m_shadowConfiguredBackingResolution = 0u;
     uint32_t m_shadowConfiguredMaxPhysicalPageCount = 0u;
+    uint32_t m_shadowConfiguredPageJobMaxPages = 0u;
 };

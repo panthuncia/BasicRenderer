@@ -95,6 +95,36 @@ enum class CLodWorkGraphCounterIndex : uint32_t {
     PageJobRasterPixelsWritten,
     PageJobRasterFlagWrites,
 
+    ClassifyContributing,
+    ClassifyRoutedHW,
+    ClassifyRoutedSW,
+    ClassifyRoutedPageJob,
+    ClassifyPJRejectReyesDisplacement,
+    ClassifyPJRejectAlphaTested,
+    ClassifyPJRejectNoClipmapIndex,
+    ClassifyPJRejectBelowThreshold,
+    ClassifyPJRejectDisabled,
+    ClassifyPJRejectAlreadySW,
+    ClassifySwDisabled,
+
+    PageJobBuildGroupsLaunched,
+    PageJobBuildNoClipmap,
+    PageJobBuildPagesScanned,
+    PageJobBuildZeroDirtyPages,
+    PageJobRasterJobsLaunched,
+    PageJobRasterTotalTriangles,
+    PageJobRasterTrisDepthReject,
+    PageJobRasterTrisBackfaceCull,
+    PageJobRasterTrisAABBEmpty,
+    PageJobRasterTrisRasterized,
+    PageJobRasterPixelsTested,
+    PageJobRasterJobsWithPixels,
+
+    PageJobDbgPhysDescriptor,
+    PageJobDbgAtlasWidth,
+    PageJobDbgAtlasHeight,
+    PageJobDbgOobPixels,
+
     Count
 };
 

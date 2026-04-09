@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 
 #include <boost/container_hash/hash.hpp>
 #include <rhi.h>
@@ -43,6 +44,8 @@ public:
         std::shared_ptr<Buffer> visibleClustersBuffer,
         std::shared_ptr<Buffer> visibleClustersCounterBuffer,
         std::shared_ptr<Buffer> swVisibleClustersCounterBuffer,
+        std::shared_ptr<Buffer> pageJobVisibleClustersBuffer,
+        std::shared_ptr<Buffer> pageJobVisibleClustersCounterBuffer,
         std::shared_ptr<Buffer> histogramIndirectCommand,
         std::shared_ptr<Buffer> workGraphTelemetryBuffer,
         std::shared_ptr<Buffer> occlusionReplayBuffer,
@@ -67,6 +70,8 @@ public:
     void Update(const UpdateExecutionContext& executionContext) override;
     bool DeclaredResourcesChanged() const override;
     void Cleanup() override;
+    std::shared_ptr<Resource> ProvideResource(ResourceIdentifier const& key) override;
+    std::vector<ResourceIdentifier> GetSupportedKeys() override;
 
 private:
     struct ObjectCullRecord
@@ -91,6 +96,10 @@ private:
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
     std::shared_ptr<Buffer> m_swVisibleClustersCounterBuffer;
+    std::shared_ptr<Buffer> m_pageJobVisibleClustersBuffer;
+    std::shared_ptr<Buffer> m_pageJobVisibleClustersCounterBuffer;
+    std::shared_ptr<Buffer> m_workGraphComputePageJobDescriptorsBuffer;
+    std::string m_workGraphComputePageJobDescriptorResourceId;
     std::shared_ptr<Buffer> m_scratchBuffer;
     std::shared_ptr<Buffer> m_histogramIndirectCommand;
     std::shared_ptr<Buffer> m_workGraphTelemetryBuffer;

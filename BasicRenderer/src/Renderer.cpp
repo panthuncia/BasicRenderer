@@ -795,7 +795,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableOcclusionCulling", m_occlusionCulling);
 	settingsManager.registerSetting<bool>("enableMeshletCulling", m_meshletCulling);
     settingsManager.registerSetting<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName, CLodSoftwareRasterMode::WorkGraph);
-    settingsManager.registerSetting<bool>(CLodEnablePageJobVSMSettingName, false);
+    settingsManager.registerSetting<bool>(CLodEnablePageJobVSMSettingName, true);
     settingsManager.registerSetting<uint32_t>(CLodPageJobDiameterThresholdSettingName, 64u);
     settingsManager.registerSetting<float>(CLodPageJobSparseRatioSettingName, 0.5f);
     settingsManager.registerSetting<uint32_t>(CLodPageJobMaxPagesPerClusterSettingName, 32u);

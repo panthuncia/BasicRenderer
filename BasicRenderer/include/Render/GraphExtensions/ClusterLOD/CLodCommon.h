@@ -22,6 +22,7 @@ inline constexpr const char* CLodPageJobDiameterThresholdSettingName = "clodPage
 inline constexpr const char* CLodPageJobSparseRatioSettingName = "clodPageJobSparseRatio";
 inline constexpr const char* CLodPageJobMaxPagesPerClusterSettingName = "clodPageJobMaxPagesPerCluster";
 inline constexpr const char* CLodPageJobForceAllSettingName = "clodPageJobForceAll";
+inline constexpr const char* CLodWorkGraphComputePageJobDescriptorBufferId = "CLod::WorkGraphComputePageJobDescriptors";
 inline constexpr const char* CLodDirectionalVirtualShadowMaxBackingResolutionSettingName = "clodDirectionalVirtualShadowMaxBackingResolution";
 inline constexpr const char* CLodDirectionalVirtualShadowMaxPhysicalPagesSettingName = "clodDirectionalVirtualShadowMaxPhysicalPages";
 inline constexpr const char* CLodDirectionalVirtualShadowLodBiasSettingName = "clodDirectionalVirtualShadowLodBias";
@@ -81,6 +82,29 @@ struct RasterizeClustersCommand
     unsigned int rasterBucketID;
     unsigned int dispatchX, dispatchY, dispatchZ;
 };
+
+struct CLodSoftwareRasterPageJobRecord
+{
+    uint32_t sortedClusterIndex = 0u;
+    uint32_t physicalPageIndex = 0u;
+    uint32_t packedPagePixelOrigin = 0u;
+    uint32_t packedAtlasOrigin = 0u;
+    uint32_t clipmapLayer = 0u;
+    uint32_t wrappedPageX = 0u;
+    uint32_t wrappedPageY = 0u;
+};
+
+static_assert(sizeof(CLodSoftwareRasterPageJobRecord) == 28u, "CLodSoftwareRasterPageJobRecord size must match HLSL");
+
+struct CLodWorkGraphComputePageJobDescriptors
+{
+    uint32_t visibleClustersUAVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t visibleClustersCounterUAVDescriptorIndex = 0xFFFFFFFFu;
+    uint32_t pad0 = 0u;
+    uint32_t pad1 = 0u;
+};
+
+static_assert(sizeof(CLodWorkGraphComputePageJobDescriptors) == 16u, "CLodWorkGraphComputePageJobDescriptors size must match HLSL");
 
 struct CLodViewRasterInfo
 {
