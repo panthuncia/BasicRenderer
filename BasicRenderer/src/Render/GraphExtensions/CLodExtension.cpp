@@ -927,6 +927,14 @@ void CLodExtension::InitializeShadowResources()
         false,
         false);
     m_swPageJobRecordsBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Records Buffer"));
+    m_swPageJobRecordsBufferSkinned = CreateAliasedUnmaterializedStructuredBuffer(
+        pageJobRecordCapacity,
+        sizeof(CLodSoftwareRasterPageJobRecord),
+        true,
+        false,
+        false,
+        false);
+    m_swPageJobRecordsBufferSkinned->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Records Buffer Skinned"));
 
     m_swPageJobRecordsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(
         pageJobRecordCapacity,
@@ -936,18 +944,34 @@ void CLodExtension::InitializeShadowResources()
         false,
         false);
     m_swPageJobRecordsBufferPhase2->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Records Buffer Phase2"));
+    m_swPageJobRecordsBufferPhase2Skinned = CreateAliasedUnmaterializedStructuredBuffer(
+        pageJobRecordCapacity,
+        sizeof(CLodSoftwareRasterPageJobRecord),
+        true,
+        false,
+        false,
+        false);
+    m_swPageJobRecordsBufferPhase2Skinned->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Records Buffer Phase2 Skinned"));
 
     m_swPageJobCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
     m_swPageJobCountBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Count Buffer"));
+    m_swPageJobCountBufferSkinned = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_swPageJobCountBufferSkinned->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Count Buffer Skinned"));
 
     m_swPageJobCountBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
     m_swPageJobCountBufferPhase2->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Count Buffer Phase2"));
+    m_swPageJobCountBufferPhase2Skinned = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
+    m_swPageJobCountBufferPhase2Skinned->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Count Buffer Phase2 Skinned"));
 
     m_swPageJobIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, false);
     m_swPageJobIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Indirect Args Buffer Phase1"));
+    m_swPageJobIndirectArgsBufferSkinned = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, false);
+    m_swPageJobIndirectArgsBufferSkinned->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Indirect Args Buffer Phase1 Skinned"));
 
     m_swPageJobIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, false);
     m_swPageJobIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Indirect Args Buffer Phase2"));
+    m_swPageJobIndirectArgsBufferPhase2Skinned = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, false);
+    m_swPageJobIndirectArgsBufferPhase2Skinned->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Indirect Args Buffer Phase2 Skinned"));
 
     m_swPageJobClusterTagsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         m_maxVisibleClusters,
@@ -1067,11 +1091,17 @@ void CLodExtension::TagShadowResourceUsages()
     tagBufferUsage(m_swPageJobVisibleClustersBufferPhase2, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_swPageJobVisibleClustersCounterBufferPhase2, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_swPageJobRecordsBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobRecordsBufferSkinned, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_swPageJobCountBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobCountBufferSkinned, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_swPageJobRecordsBufferPhase2, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobRecordsBufferPhase2Skinned, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_swPageJobCountBufferPhase2, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobCountBufferPhase2Skinned, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_swPageJobIndirectArgsBuffer, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobIndirectArgsBufferSkinned, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_swPageJobIndirectArgsBufferPhase2, "Cluster LOD virtual shadow maps");
+    tagBufferUsage(m_swPageJobIndirectArgsBufferPhase2Skinned, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_swPageJobClusterTagsBuffer, "Cluster LOD virtual shadow maps");
     tagBufferUsage(m_swPageJobClusterTagsBufferPhase2, "Cluster LOD virtual shadow maps");
 }
@@ -1188,11 +1218,17 @@ void CLodExtension::ReleaseBufferBackings()
     releaseBufferBacking(m_swPageJobVisibleClustersBufferPhase2);
     releaseBufferBacking(m_swPageJobVisibleClustersCounterBufferPhase2);
     releaseBufferBacking(m_swPageJobRecordsBuffer);
+    releaseBufferBacking(m_swPageJobRecordsBufferSkinned);
     releaseBufferBacking(m_swPageJobCountBuffer);
+    releaseBufferBacking(m_swPageJobCountBufferSkinned);
     releaseBufferBacking(m_swPageJobRecordsBufferPhase2);
+    releaseBufferBacking(m_swPageJobRecordsBufferPhase2Skinned);
     releaseBufferBacking(m_swPageJobCountBufferPhase2);
+    releaseBufferBacking(m_swPageJobCountBufferPhase2Skinned);
     releaseBufferBacking(m_swPageJobIndirectArgsBuffer);
+    releaseBufferBacking(m_swPageJobIndirectArgsBufferSkinned);
     releaseBufferBacking(m_swPageJobIndirectArgsBufferPhase2);
+    releaseBufferBacking(m_swPageJobIndirectArgsBufferPhase2Skinned);
     releaseBufferBacking(m_swPageJobClusterTagsBuffer);
     releaseBufferBacking(m_swPageJobClusterTagsBufferPhase2);
 }
@@ -1218,11 +1254,17 @@ void CLodExtension::ReleaseShadowResourceBackings()
     releaseBufferBacking(m_swPageJobVisibleClustersBufferPhase2);
     releaseBufferBacking(m_swPageJobVisibleClustersCounterBufferPhase2);
     releaseBufferBacking(m_swPageJobRecordsBuffer);
+    releaseBufferBacking(m_swPageJobRecordsBufferSkinned);
     releaseBufferBacking(m_swPageJobCountBuffer);
+    releaseBufferBacking(m_swPageJobCountBufferSkinned);
     releaseBufferBacking(m_swPageJobRecordsBufferPhase2);
+    releaseBufferBacking(m_swPageJobRecordsBufferPhase2Skinned);
     releaseBufferBacking(m_swPageJobCountBufferPhase2);
+    releaseBufferBacking(m_swPageJobCountBufferPhase2Skinned);
     releaseBufferBacking(m_swPageJobIndirectArgsBuffer);
+    releaseBufferBacking(m_swPageJobIndirectArgsBufferSkinned);
     releaseBufferBacking(m_swPageJobIndirectArgsBufferPhase2);
+    releaseBufferBacking(m_swPageJobIndirectArgsBufferPhase2Skinned);
     releaseBufferBacking(m_swPageJobClusterTagsBuffer);
     releaseBufferBacking(m_swPageJobClusterTagsBufferPhase2);
     m_shadowVirtualResourcesNeedReset = true;
@@ -2405,6 +2447,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                         m_shadowClipmapInfoBuffer,
                         m_swPageJobRecordsBuffer,
                         m_swPageJobCountBuffer,
+                        m_swPageJobRecordsBufferSkinned,
+                        m_swPageJobCountBufferSkinned,
                         m_swPageJobClusterTagsBuffer,
                         std::max(1u, m_maxVisibleClusters * m_shadowConfiguredPageJobMaxPages),
                         slabGroup,
@@ -2416,6 +2460,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     std::make_shared<ClusterSoftwareRasterPageJobBuildArgsPass>(
                         m_swPageJobCountBuffer,
                         m_swPageJobIndirectArgsBuffer,
+                        m_swPageJobCountBufferSkinned,
+                        m_swPageJobIndirectArgsBufferSkinned,
                         true)));
 
             outPasses.push_back(
@@ -2430,6 +2476,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                         m_swPageJobCountBuffer,
                         m_swPageJobRecordsBuffer,
                         m_swPageJobIndirectArgsBuffer,
+                        m_swPageJobCountBufferSkinned,
+                        m_swPageJobRecordsBufferSkinned,
+                        m_swPageJobIndirectArgsBufferSkinned,
                         slabGroup,
                         true)));
             shadowClearDirtyBitsAfterPassName = MakeVariantPassName(traits, "SoftwareRasterPageJobRasterPass1");
@@ -2886,6 +2935,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                         m_shadowClipmapInfoBuffer,
                         m_swPageJobRecordsBufferPhase2,
                         m_swPageJobCountBufferPhase2,
+                        m_swPageJobRecordsBufferPhase2Skinned,
+                        m_swPageJobCountBufferPhase2Skinned,
                         m_swPageJobClusterTagsBufferPhase2,
                         std::max(1u, m_maxVisibleClusters * m_shadowConfiguredPageJobMaxPages),
                         slabGroup,
@@ -2897,6 +2948,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                     std::make_shared<ClusterSoftwareRasterPageJobBuildArgsPass>(
                         m_swPageJobCountBufferPhase2,
                         m_swPageJobIndirectArgsBufferPhase2,
+                        m_swPageJobCountBufferPhase2Skinned,
+                        m_swPageJobIndirectArgsBufferPhase2Skinned,
                         true)));
 
             outPasses.push_back(
@@ -2911,6 +2964,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                         m_swPageJobCountBufferPhase2,
                         m_swPageJobRecordsBufferPhase2,
                         m_swPageJobIndirectArgsBufferPhase2,
+                        m_swPageJobCountBufferPhase2Skinned,
+                        m_swPageJobRecordsBufferPhase2Skinned,
+                        m_swPageJobIndirectArgsBufferPhase2Skinned,
                         slabGroup,
                         true)));
             shadowClearDirtyBitsAfterPassName = MakeVariantPassName(traits, "SoftwareRasterPageJobRasterPass2");

@@ -58,6 +58,23 @@ uint3 PJ_DecodeTriangle(ByteAddressBuffer slab, uint triStreamBase, uint triByte
     return uint3(i0, i1, i2);
 }
 
+SkinningInfluences PJ_DecodePackedJointsScalar(
+    uint meshletLocalVertex,
+    uint attributeMask,
+    uint vertexAttributeOffset,
+    uint jointArrayOffset,
+    uint pageByteOffset,
+    uint pagePoolSlabDescriptorIndex)
+{
+    SkinningInfluences skinning = (SkinningInfluences)0;
+    if ((attributeMask & CLOD_PAGE_ATTRIBUTE_JOINTS) == 0u) return skinning;
+    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
+    uint addr = pageByteOffset + jointArrayOffset + (vertexAttributeOffset + meshletLocalVertex) * 32u;
+    skinning.joints0 = LoadUint4(addr, slab);
+    skinning.joints1 = LoadUint4(addr + 16u, slab);
+    return skinning;
+}
+
 SkinningInfluences PJ_DecodePackedJoints(
     uint meshletLocalVertex,
     CLodPageHeader hdr,
@@ -65,16 +82,29 @@ SkinningInfluences PJ_DecodePackedJoints(
     uint pageByteOffset,
     uint pagePoolSlabDescriptorIndex)
 {
-    SkinningInfluences skinning;
-    skinning.joints0 = uint4(0, 0, 0, 0);
-    skinning.joints1 = uint4(0, 0, 0, 0);
-    skinning.weights0 = float4(0, 0, 0, 0);
-    skinning.weights1 = float4(0, 0, 0, 0);
-    if ((hdr.attributeMask & CLOD_PAGE_ATTRIBUTE_JOINTS) == 0u) return skinning;
+    return PJ_DecodePackedJointsScalar(
+        meshletLocalVertex,
+        hdr.attributeMask,
+        desc.vertexAttributeOffset,
+        hdr.jointArrayOffset,
+        pageByteOffset,
+        pagePoolSlabDescriptorIndex);
+}
+
+SkinningInfluences PJ_DecodePackedWeightsScalar(
+    uint meshletLocalVertex,
+    uint attributeMask,
+    uint vertexAttributeOffset,
+    uint weightArrayOffset,
+    uint pageByteOffset,
+    uint pagePoolSlabDescriptorIndex,
+    SkinningInfluences skinning)
+{
+    if ((attributeMask & CLOD_PAGE_ATTRIBUTE_WEIGHTS) == 0u) return skinning;
     ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
-    uint addr = pageByteOffset + hdr.jointArrayOffset + (desc.vertexAttributeOffset + meshletLocalVertex) * 32u;
-    skinning.joints0 = LoadUint4(addr, slab);
-    skinning.joints1 = LoadUint4(addr + 16u, slab);
+    uint addr = pageByteOffset + weightArrayOffset + (vertexAttributeOffset + meshletLocalVertex) * 32u;
+    skinning.weights0 = LoadFloat4(addr, slab);
+    skinning.weights1 = LoadFloat4(addr + 16u, slab);
     return skinning;
 }
 
@@ -86,12 +116,14 @@ SkinningInfluences PJ_DecodePackedWeights(
     uint pagePoolSlabDescriptorIndex,
     SkinningInfluences skinning)
 {
-    if ((hdr.attributeMask & CLOD_PAGE_ATTRIBUTE_WEIGHTS) == 0u) return skinning;
-    ByteAddressBuffer slab = ResourceDescriptorHeap[pagePoolSlabDescriptorIndex];
-    uint addr = pageByteOffset + hdr.weightArrayOffset + (desc.vertexAttributeOffset + meshletLocalVertex) * 32u;
-    skinning.weights0 = LoadFloat4(addr, slab);
-    skinning.weights1 = LoadFloat4(addr + 16u, slab);
-    return skinning;
+    return PJ_DecodePackedWeightsScalar(
+        meshletLocalVertex,
+        hdr.attributeMask,
+        desc.vertexAttributeOffset,
+        hdr.weightArrayOffset,
+        pageByteOffset,
+        pagePoolSlabDescriptorIndex,
+        skinning);
 }
 
 void PJ_ComputeScreenBounds(float2 screenPositions[SW_RASTER_MAX_VERTS], uint vertCount, out float2 ssMin, out float2 ssMax)

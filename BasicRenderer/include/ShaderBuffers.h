@@ -99,6 +99,7 @@ struct PerObjectCB {
 
 struct PerMeshCB {
     unsigned int materialDataIndex;
+    unsigned int rasterBucketIndex;
     unsigned int vertexFlags;
 	unsigned int vertexByteSize;
     unsigned int skinningVertexByteSize;
@@ -113,7 +114,6 @@ struct PerMeshCB {
     unsigned int vertexBufferOffset;
     unsigned int numVertices;
     unsigned int numMeshlets;
-    unsigned int pad[1];
 };
 
 struct PerMeshInstanceCB {

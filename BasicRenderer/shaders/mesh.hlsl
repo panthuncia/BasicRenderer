@@ -176,6 +176,14 @@ SkinningInfluences DecodePackedWeights(uint meshletLocalVertex, MeshletSetup set
 
 void ApplyClodSkinningToVertex(uint meshletLocalVertex, MeshletSetup setup, inout Vertex vertex)
 {
+#if defined(PSO_SKINNED)
+    SkinningInfluences skinning = DecodePackedJoints(meshletLocalVertex, setup);
+    skinning = DecodePackedWeights(meshletLocalVertex, setup, skinning);
+    float4x4 skinMatrix = BuildSkinMatrix(setup.meshInstanceBuffer.skinningInstanceSlot, skinning);
+    vertex.position = mul(float4(vertex.position, 1.0f), skinMatrix).xyz;
+    vertex.normal = mul(vertex.normal, (float3x3)skinMatrix);
+    vertex.skinning = skinning;
+#else
     if ((setup.meshBuffer.vertexFlags & VERTEX_SKINNED) == 0u)
     {
         return;
@@ -187,6 +195,7 @@ void ApplyClodSkinningToVertex(uint meshletLocalVertex, MeshletSetup setup, inou
     vertex.position = mul(float4(vertex.position, 1.0f), skinMatrix).xyz;
     vertex.normal = mul(vertex.normal, (float3x3)skinMatrix);
     vertex.skinning = skinning;
+#endif
 }
 
 float2 DecodeCompressedUV(

@@ -235,6 +235,7 @@ struct PerObjectBuffer {
 
 struct PerMeshBuffer {
     uint materialDataIndex;
+    uint rasterBucketIndex;
     uint vertexFlags;
     uint vertexByteSize;
     uint skinningVertexByteSize;
@@ -249,7 +250,6 @@ struct PerMeshBuffer {
     uint vertexBufferOffset;
     uint numVertices;
     uint numMeshlets;
-    uint pad[1];
 };
 
 struct PerMeshInstanceBuffer {

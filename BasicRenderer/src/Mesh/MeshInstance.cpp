@@ -62,6 +62,9 @@ void MeshInstance::SyncSkinningStateFromSkeleton() {
 
 void MeshInstance::SetBufferViews(std::unique_ptr<BufferView> perMeshInstanceBufferView) {
 	m_perMeshInstanceBufferView = std::move(perMeshInstanceBufferView);
+	if (!m_perMeshInstanceBufferView) {
+        return; // nothing to update
+    }
     InitializeBoundsFromMesh_();
 
 	if (m_pCurrentMeshManager != nullptr) {

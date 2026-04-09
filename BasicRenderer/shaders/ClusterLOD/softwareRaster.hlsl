@@ -327,12 +327,18 @@ void SWRasterCluster(
             hdr.compressedPositionQuantExp,
             int3(desc.minQx, desc.minQy, desc.minQz),
             pageSlabDescriptorIndex);
+#if defined(PSO_SKINNED)
+        SkinningInfluences skinning = SWDecodePackedJoints(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex);
+        skinning = SWDecodePackedWeights(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex, skinning);
+        localPos = mul(float4(localPos, 1.0f), BuildSkinMatrix(meshInst.skinningInstanceSlot, skinning)).xyz;
+#else
         if ((perMeshBuffer[meshInst.perMeshBufferIndex].vertexFlags & VERTEX_SKINNED) != 0u)
         {
             SkinningInfluences skinning = SWDecodePackedJoints(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex);
             skinning = SWDecodePackedWeights(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex, skinning);
             localPos = mul(float4(localPos, 1.0f), BuildSkinMatrix(meshInst.skinningInstanceSlot, skinning)).xyz;
         }
+#endif
 
         float4 localPos4 = float4(localPos, 1.0f);
         float4 clipPos  = mul(localPos4, modelViewProjection);

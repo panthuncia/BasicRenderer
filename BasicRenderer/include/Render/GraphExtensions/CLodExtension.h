@@ -166,11 +166,17 @@ private:
     std::shared_ptr<Buffer> m_swPageJobVisibleClustersBufferPhase2;
     std::shared_ptr<Buffer> m_swPageJobVisibleClustersCounterBufferPhase2;
     std::shared_ptr<Buffer> m_swPageJobRecordsBuffer;
+    std::shared_ptr<Buffer> m_swPageJobRecordsBufferSkinned;
     std::shared_ptr<Buffer> m_swPageJobCountBuffer;
+    std::shared_ptr<Buffer> m_swPageJobCountBufferSkinned;
     std::shared_ptr<Buffer> m_swPageJobRecordsBufferPhase2;
+    std::shared_ptr<Buffer> m_swPageJobRecordsBufferPhase2Skinned;
     std::shared_ptr<Buffer> m_swPageJobCountBufferPhase2;
+    std::shared_ptr<Buffer> m_swPageJobCountBufferPhase2Skinned;
     std::shared_ptr<Buffer> m_swPageJobIndirectArgsBuffer;
+    std::shared_ptr<Buffer> m_swPageJobIndirectArgsBufferSkinned;
     std::shared_ptr<Buffer> m_swPageJobIndirectArgsBufferPhase2;
+    std::shared_ptr<Buffer> m_swPageJobIndirectArgsBufferPhase2Skinned;
     std::shared_ptr<Buffer> m_swPageJobClusterTagsBuffer;
     std::shared_ptr<Buffer> m_swPageJobClusterTagsBufferPhase2;
 

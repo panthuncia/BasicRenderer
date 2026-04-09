@@ -2003,10 +2003,7 @@ void ClusterRasterBucketsHistogramCSMain(uint3 DTid : SV_DispatchThreadID)
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     uint perMeshIndex = perMeshInstance[instanceIndex].perMeshBufferIndex;
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
-    uint materialDataIndex = perMeshBuffer[perMeshIndex].materialDataIndex;
-    StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
-
-    uint rasterBucketIndex = materialDataBuffer[materialDataIndex].rasterBucketIndex;
+    uint rasterBucketIndex = perMeshBuffer[perMeshIndex].rasterBucketIndex;
 
     // Group threads in the wave by matId
     uint4 mask = WaveMatch(rasterBucketIndex);
@@ -2191,13 +2188,10 @@ uint GetRasterBucketIndexFromInstance(uint instanceID)
 {
     StructuredBuffer<PerMeshInstanceBuffer> perMeshInstance = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
-    StructuredBuffer<MaterialInfo> materialDataBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMaterialDataBuffer)];
 
     PerMeshInstanceBuffer instanceData = perMeshInstance[instanceID];
     PerMeshBuffer meshBuffer = perMeshBuffer[instanceData.perMeshBufferIndex];
-    MaterialInfo materialInfo = materialDataBuffer[meshBuffer.materialDataIndex];
-
-    return materialInfo.rasterBucketIndex;
+    return meshBuffer.rasterBucketIndex;
 }
 
 static const uint CLOD_COMPACTION_GROUP_SIZE = CLUSTER_HISTOGRAM_GROUP_SIZE;

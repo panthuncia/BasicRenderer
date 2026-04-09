@@ -80,8 +80,6 @@ void SWPageJobExpandCSMain(uint3 dtid : SV_DispatchThreadID, uint GI : SV_GroupI
     StructuredBuffer<PerMeshInstanceBuffer> meshInstBuf =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
     PerMeshInstanceBuffer meshInst = meshInstBuf[instanceID];
-    StructuredBuffer<PerMeshBuffer> perMeshBuffer =
-        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> objBuf =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
     PerObjectBuffer objData = objBuf[meshInst.perObjectBufferIndex];
@@ -137,12 +135,11 @@ void SWPageJobExpandCSMain(uint3 dtid : SV_DispatchThreadID, uint GI : SV_GroupI
             hdr.compressedPositionQuantExp,
             int3(desc.minQx, desc.minQy, desc.minQz),
             pageSlabDescriptorIndex);
-        if ((perMeshBuffer[meshInst.perMeshBufferIndex].vertexFlags & VERTEX_SKINNED) != 0u)
-        {
-            SkinningInfluences skinning = PJ_DecodePackedJoints(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex);
-            skinning = PJ_DecodePackedWeights(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex, skinning);
-            localPos = mul(float4(localPos, 1.0f), BuildSkinMatrix(meshInst.skinningInstanceSlot, skinning)).xyz;
-        }
+#if defined(PSO_SKINNED)
+        SkinningInfluences skinning = PJ_DecodePackedJoints(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex);
+        skinning = PJ_DecodePackedWeights(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex, skinning);
+        localPos = mul(float4(localPos, 1.0f), BuildSkinMatrix(meshInst.skinningInstanceSlot, skinning)).xyz;
+#endif
 
         float4 clipPos = mul(float4(localPos, 1.0f), modelViewProjection);
         float invW = 1.0f / clipPos.w;
@@ -342,8 +339,15 @@ void SWPageJobRasterPageCSMain(uint3 dtid : SV_DispatchThreadID, uint GI : SV_Gr
     }
 
     StructuredBuffer<CLodSoftwareRasterPageJobRecord> pageJobRecords = ResourceDescriptorHeap[CLOD_RASTER_PAGE_JOB_RECORDS_DESCRIPTOR_INDEX];
-    CLodSoftwareRasterPageJobRecord rec = pageJobRecords[pageJobIndex];
+    const CLodSoftwareRasterPageJobRecord rec = pageJobRecords[pageJobIndex];
     const uint sortedClusterIndex = rec.sortedClusterIndex;
+    const uint pagePixelMinX = rec.packedPagePixelOrigin & 0xFFFFu;
+    const uint pagePixelMinY = (rec.packedPagePixelOrigin >> 16u) & 0xFFFFu;
+    const uint atlasBaseX = rec.packedAtlasOrigin & 0xFFFFu;
+    const uint atlasBaseY = (rec.packedAtlasOrigin >> 16u) & 0xFFFFu;
+    const uint wrappedPageX = rec.wrappedPageX;
+    const uint wrappedPageY = rec.wrappedPageY;
+    const uint clipmapLayer = rec.clipmapLayer;
     ByteAddressBuffer compactedVisibleClusters = ResourceDescriptorHeap[CLOD_RASTER_COMPACTED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX];
     const uint4 packedCluster = CLodLoadVisibleClusterPacked(compactedVisibleClusters, sortedClusterIndex);
 
@@ -353,64 +357,94 @@ void SWPageJobRasterPageCSMain(uint3 dtid : SV_DispatchThreadID, uint GI : SV_Gr
     const uint pageSlabDescriptorIndex = CLodVisibleClusterPageSlabDescriptorIndex(packedCluster);
     const uint pageSlabByteOffset = CLodVisibleClusterPageSlabByteOffset(packedCluster);
 
-    CLodPageHeader hdr = LoadPageHeader(pageSlabDescriptorIndex, pageSlabByteOffset);
-    CLodMeshletDescriptor desc = LoadMeshletDescriptor(
+    const CLodPageHeader hdr = LoadPageHeader(pageSlabDescriptorIndex, pageSlabByteOffset);
+    const CLodMeshletDescriptor desc = LoadMeshletDescriptor(
         pageSlabDescriptorIndex,
         pageSlabByteOffset,
         hdr.descriptorOffset,
         localMeshletIndex);
     const uint vertCount = CLodDescVertexCount(desc);
     const uint triCount = CLodDescTriangleCount(desc);
+    const uint positionBitstreamBase = pageSlabByteOffset + hdr.positionBitstreamOffset;
+    const uint triangleStreamBase = pageSlabByteOffset + hdr.triangleStreamOffset;
+    const uint positionBitOffset = desc.positionBitOffset;
+    const uint triangleByteOffset = desc.triangleByteOffset;
+    const uint bitsX = CLodDescBitsX(desc);
+    const uint bitsY = CLodDescBitsY(desc);
+    const uint bitsZ = CLodDescBitsZ(desc);
+    const uint positionQuantExp = hdr.compressedPositionQuantExp;
+    const uint attributeMask = hdr.attributeMask;
+    const uint vertexAttributeOffset = desc.vertexAttributeOffset;
+    const uint jointArrayOffset = hdr.jointArrayOffset;
+    const uint weightArrayOffset = hdr.weightArrayOffset;
+    const int3 minQ = int3(desc.minQx, desc.minQy, desc.minQz);
 
     StructuredBuffer<PerMeshInstanceBuffer> meshInstBuf =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshInstanceBuffer)];
-    PerMeshInstanceBuffer meshInst = meshInstBuf[instanceID];
-    StructuredBuffer<PerMeshBuffer> perMeshBuffer =
-        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
+    const PerMeshInstanceBuffer meshInst = meshInstBuf[instanceID];
+    const uint perMeshBufferIndex = meshInst.perMeshBufferIndex;
+    const uint perObjectBufferIndex = meshInst.perObjectBufferIndex;
+    const uint skinningInstanceSlot = meshInst.skinningInstanceSlot;
     StructuredBuffer<PerObjectBuffer> objBuf =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
-    PerObjectBuffer objData = objBuf[meshInst.perObjectBufferIndex];
     StructuredBuffer<CullingCameraInfo> cullingCameras =
         ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::CullingCameraBuffer)];
-    CullingCameraInfo cam = cullingCameras[viewID];
     StructuredBuffer<ClodViewRasterInfo> viewRasterInfoBuf =
         ResourceDescriptorHeap[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX];
-    ClodViewRasterInfo rasterInfo = viewRasterInfoBuf[viewID];
+    row_major matrix modelViewProjection;
+    float4 modelViewZ;
+    bool reverseWinding = false;
+    {
+        const PerObjectBuffer objData = objBuf[perObjectBufferIndex];
+        const CullingCameraInfo cam = cullingCameras[viewID];
+        reverseWinding = (objData.objectFlags & OBJECT_FLAG_REVERSE_WINDING) != 0u;
+        modelViewProjection = mul(objData.model, cam.viewProjection);
+        modelViewZ = mul(objData.model, cam.viewZ);
+    }
 
+    const ClodViewRasterInfo rasterInfo = viewRasterInfoBuf[viewID];
     const float visWidth = float(rasterInfo.scissorMaxX - rasterInfo.scissorMinX);
     const float visHeight = float(rasterInfo.scissorMaxY - rasterInfo.scissorMinY);
-    const float scissorMinXf = float(rasterInfo.scissorMinX);
-    const float scissorMinYf = float(rasterInfo.scissorMinY);
-    const uint positionBitstreamBase = pageSlabByteOffset + hdr.positionBitstreamOffset;
-    row_major matrix modelViewProjection = mul(objData.model, cam.viewProjection);
-    float4 modelViewZ = mul(objData.model, cam.viewZ);
+    const float screenScaleX = 0.5f * visWidth;
+    const float screenScaleY = -0.5f * visHeight;
+    const float screenBiasX = screenScaleX + float(rasterInfo.scissorMinX);
+    const float screenBiasY = -screenScaleY + float(rasterInfo.scissorMinY);
 
     for (uint v = GI; v < vertCount; v += SW_RASTER_THREADS)
     {
         float3 localPos = PJ_DecodeCompressedPosition(
             v,
             positionBitstreamBase,
-            desc.positionBitOffset,
-            CLodDescBitsX(desc), CLodDescBitsY(desc), CLodDescBitsZ(desc),
-            hdr.compressedPositionQuantExp,
-            int3(desc.minQx, desc.minQy, desc.minQz),
+            positionBitOffset,
+            bitsX, bitsY, bitsZ,
+            positionQuantExp,
+            minQ,
             pageSlabDescriptorIndex);
-        if ((perMeshBuffer[meshInst.perMeshBufferIndex].vertexFlags & VERTEX_SKINNED) != 0u)
-        {
-            SkinningInfluences skinning = PJ_DecodePackedJoints(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex);
-            skinning = PJ_DecodePackedWeights(v, hdr, desc, pageSlabByteOffset, pageSlabDescriptorIndex, skinning);
-            localPos = mul(float4(localPos, 1.0f), BuildSkinMatrix(meshInst.skinningInstanceSlot, skinning)).xyz;
-        }
+#if defined(PSO_SKINNED)
+        SkinningInfluences skinning = PJ_DecodePackedJointsScalar(
+            v,
+            attributeMask,
+            vertexAttributeOffset,
+            jointArrayOffset,
+            pageSlabByteOffset,
+            pageSlabDescriptorIndex);
+        skinning = PJ_DecodePackedWeightsScalar(
+            v,
+            attributeMask,
+            vertexAttributeOffset,
+            weightArrayOffset,
+            pageSlabByteOffset,
+            pageSlabDescriptorIndex,
+            skinning);
+        localPos = mul(float4(localPos, 1.0f), BuildSkinMatrix(skinningInstanceSlot, skinning)).xyz;
+#endif
 
-        float4 localPos4 = float4(localPos, 1.0f);
-        float4 clipPos = mul(localPos4, modelViewProjection);
-        float viewZ = dot(localPos4, modelViewZ);
-        float invW = 1.0f / clipPos.w;
-        float2 ndc = clipPos.xy * invW;
-        float2 screen;
-        screen.x = (ndc.x + 1.0f) * 0.5f * visWidth + scissorMinXf;
-        screen.y = (1.0f - ndc.y) * 0.5f * visHeight + scissorMinYf;
-        gs_pageRasterScreenPos[v] = screen;
+        const float4 clipPos = mul(float4(localPos, 1.0f), modelViewProjection);
+        const float invW = rcp(clipPos.w);
+        const float viewZ = dot(float4(localPos, 1.0f), modelViewZ);
+        gs_pageRasterScreenPos[v] = float2(
+            clipPos.x * invW * screenScaleX + screenBiasX,
+            clipPos.y * invW * screenScaleY + screenBiasY);
         gs_pageRasterLinearDepth[v] = -viewZ;
     }
 
@@ -418,13 +452,7 @@ void SWPageJobRasterPageCSMain(uint3 dtid : SV_DispatchThreadID, uint GI : SV_Gr
 
     RWTexture2D<uint> physicalPages = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX];
     RWTexture2DArray<uint> pageTable = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX];
-    const bool reverseWinding = (objData.objectFlags & OBJECT_FLAG_REVERSE_WINDING) != 0u;
     ByteAddressBuffer slab = ResourceDescriptorHeap[pageSlabDescriptorIndex];
-
-    const uint pagePixelMinX = rec.packedPagePixelOrigin & 0xFFFFu;
-    const uint pagePixelMinY = (rec.packedPagePixelOrigin >> 16u) & 0xFFFFu;
-    const uint atlasBaseX = rec.packedAtlasOrigin & 0xFFFFu;
-    const uint atlasBaseY = (rec.packedAtlasOrigin >> 16u) & 0xFFFFu;
     const uint pagePixelMaxX = pagePixelMinX + kCLodVirtualShadowPhysicalPageSize - 1u;
     const uint pagePixelMaxY = pagePixelMinY + kCLodVirtualShadowPhysicalPageSize - 1u;
 
@@ -432,7 +460,7 @@ void SWPageJobRasterPageCSMain(uint3 dtid : SV_DispatchThreadID, uint GI : SV_Gr
 
     for (uint t = GI; t < triCount; t += SW_RASTER_THREADS)
     {
-        uint3 tri = PJ_DecodeTriangle(slab, pageSlabByteOffset + hdr.triangleStreamOffset, desc.triangleByteOffset, t);
+        uint3 tri = PJ_DecodeTriangle(slab, triangleStreamBase, triangleByteOffset, t);
         if (reverseWinding) { uint tmp = tri.y; tri.y = tri.z; tri.z = tmp; }
 
         float2 s0 = gs_pageRasterScreenPos[tri.x];
@@ -443,29 +471,25 @@ void SWPageJobRasterPageCSMain(uint3 dtid : SV_DispatchThreadID, uint GI : SV_Gr
         float depth2 = gs_pageRasterLinearDepth[tri.z];
         if (depth0 <= 0.0f || depth1 <= 0.0f || depth2 <= 0.0f) continue;
 
-        float2 e01 = s1 - s0;
-        float2 e02 = s2 - s0;
-        float twiceArea = e01.x * e02.y - e01.y * e02.x;
+        const float twiceArea =
+            (s1.x - s0.x) * (s2.y - s0.y) -
+            (s1.y - s0.y) * (s2.x - s0.x);
         if (twiceArea >= 0.0f) continue;
 
         const float invTwiceArea = -1.0f / twiceArea;
-        float2 bbMinF = min(min(s0, s1), s2);
-        float2 bbMaxF = max(max(s0, s1), s2);
+        const float2 bbMinF = min(min(s0, s1), s2);
+        const float2 bbMaxF = max(max(s0, s1), s2);
         int2 minPx = max(int2(floor(bbMinF)), int2(pagePixelMinX, pagePixelMinY));
         int2 maxPx = min(int2(floor(bbMaxF)), int2(pagePixelMaxX, pagePixelMaxY));
         if (minPx.x > maxPx.x || minPx.y > maxPx.y) continue;
 
-        float2 origin = float2(float(minPx.x) + 0.5f, float(minPx.y) + 0.5f);
-        float2 e12 = s2 - s1;
-        float2 e20 = s0 - s2;
-        float row_b0 = ((origin.x - s1.x) * e12.y - (origin.y - s1.y) * e12.x) * invTwiceArea;
-        float row_b1 = ((origin.x - s2.x) * e20.y - (origin.y - s2.y) * e20.x) * invTwiceArea;
-        float dx_b0 = e12.y * invTwiceArea;
-        float dx_b1 = e20.y * invTwiceArea;
-        float dy_b0 = -e12.x * invTwiceArea;
-        float dy_b1 = -e20.x * invTwiceArea;
-        float scanline_b0 = row_b0;
-        float scanline_b1 = row_b1;
+        const float2 origin = float2(float(minPx.x) + 0.5f, float(minPx.y) + 0.5f);
+        const float2 e12 = s2 - s1;
+        const float2 e20 = s0 - s2;
+        const float dx_b0 = e12.y * invTwiceArea;
+        const float dx_b1 = e20.y * invTwiceArea;
+        float scanline_b0 = ((origin.x - s1.x) * e12.y - (origin.y - s1.y) * e12.x) * invTwiceArea;
+        float scanline_b1 = ((origin.x - s2.x) * e20.y - (origin.y - s2.y) * e20.x) * invTwiceArea;
 
         for (int py = minPx.y; py <= maxPx.y; ++py)
         {
@@ -477,16 +501,18 @@ void SWPageJobRasterPageCSMain(uint3 dtid : SV_DispatchThreadID, uint GI : SV_Gr
                 if (b0 >= 0.0f && b1 >= 0.0f && b2 >= 0.0f)
                 {
                     const float depth = b0 * depth0 + b1 * depth1 + b2 * depth2;
-                    const uint2 localPixel = uint2(px - pagePixelMinX, py - pagePixelMinY);
-                    const uint2 atlasPixel = uint2(atlasBaseX + localPixel.x, atlasBaseY + localPixel.y);
-                    InterlockedMin(physicalPages[atlasPixel], asuint(depth));
+                    InterlockedMin(
+                        physicalPages[uint2(
+                            atlasBaseX + uint(px - int(pagePixelMinX)),
+                            atlasBaseY + uint(py - int(pagePixelMinY)))],
+                        asuint(depth));
                     anyPixelWritten = true;
                 }
                 b0 += dx_b0;
                 b1 += dx_b1;
             }
-            scanline_b0 += dy_b0;
-            scanline_b1 += dy_b1;
+            scanline_b0 -= e12.x * invTwiceArea;
+            scanline_b1 -= e20.x * invTwiceArea;
         }
     }
 
@@ -494,7 +520,7 @@ void SWPageJobRasterPageCSMain(uint3 dtid : SV_DispatchThreadID, uint GI : SV_Gr
     {
         uint ignored = 0u;
         InterlockedOr(
-            pageTable[uint3(uint2(rec.wrappedPageX, rec.wrappedPageY), rec.clipmapLayer)],
+            pageTable[uint3(uint2(wrappedPageX, wrappedPageY), clipmapLayer)],
             kCLodVirtualShadowContentValidMask | kCLodVirtualShadowRerenderedThisFrameMask,
             ignored);
     }

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <array>
 #include <memory>
+#include <vector>
 
 #include <rhi.h>
 
@@ -26,9 +28,12 @@ public:
         std::shared_ptr<PixelBuffer> virtualShadowPageTableTexture,
         std::shared_ptr<PixelBuffer> virtualShadowPhysicalPagesTexture,
         std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer,
-        std::shared_ptr<Buffer> pageJobCountBuffer,
-        std::shared_ptr<Buffer> pageJobRecordsBuffer,
-        std::shared_ptr<Buffer> pageJobIndirectArgsBuffer,
+        std::shared_ptr<Buffer> rigidPageJobCountBuffer,
+        std::shared_ptr<Buffer> rigidPageJobRecordsBuffer,
+        std::shared_ptr<Buffer> rigidPageJobIndirectArgsBuffer,
+        std::shared_ptr<Buffer> skinnedPageJobCountBuffer,
+        std::shared_ptr<Buffer> skinnedPageJobRecordsBuffer,
+        std::shared_ptr<Buffer> skinnedPageJobIndirectArgsBuffer,
         std::shared_ptr<ResourceGroup> slabResourceGroup = nullptr,
         bool runWhenComputeSWRasterEnabledOnly = false)
         : m_compactedVisibleClustersBuffer(std::move(compactedVisibleClustersBuffer))
@@ -36,9 +41,9 @@ public:
         , m_virtualShadowPageTableTexture(std::move(virtualShadowPageTableTexture))
         , m_virtualShadowPhysicalPagesTexture(std::move(virtualShadowPhysicalPagesTexture))
         , m_virtualShadowClipmapInfoBuffer(std::move(virtualShadowClipmapInfoBuffer))
-        , m_pageJobCountBuffer(std::move(pageJobCountBuffer))
-        , m_pageJobRecordsBuffer(std::move(pageJobRecordsBuffer))
-        , m_pageJobIndirectArgsBuffer(std::move(pageJobIndirectArgsBuffer))
+        , m_pageJobCountBuffers{ std::move(rigidPageJobCountBuffer), std::move(skinnedPageJobCountBuffer) }
+        , m_pageJobRecordsBuffers{ std::move(rigidPageJobRecordsBuffer), std::move(skinnedPageJobRecordsBuffer) }
+        , m_pageJobIndirectArgsBuffers{ std::move(rigidPageJobIndirectArgsBuffer), std::move(skinnedPageJobIndirectArgsBuffer) }
         , m_slabResourceGroup(std::move(slabResourceGroup))
         , m_runWhenComputeSWRasterEnabledOnly(runWhenComputeSWRasterEnabledOnly)
     {
@@ -53,12 +58,19 @@ public:
             PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
             m_commandSignature);
 
-        m_pso = PSOManager::GetInstance().MakeComputePipeline(
+        m_rigidPso = PSOManager::GetInstance().MakeComputePipeline(
             PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
             L"Shaders/ClusterLOD/softwareRasterPageJobs.hlsl",
             L"SWPageJobRasterPageCSMain",
             {},
             "CLod_SoftwarePageJobRasterPSO");
+        std::vector<DxcDefine> skinnedDefines = { DxcDefine{ L"PSO_SKINNED", L"1" } };
+        m_skinnedPso = PSOManager::GetInstance().MakeComputePipeline(
+            PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
+            L"Shaders/ClusterLOD/softwareRasterPageJobs.hlsl",
+            L"SWPageJobRasterPageCSMain",
+            skinnedDefines,
+            "CLod_SoftwarePageJobRasterSkinnedPSO");
     }
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override
@@ -74,10 +86,12 @@ public:
                 m_compactedVisibleClustersBuffer,
                 m_viewRasterInfoBuffer,
                 m_virtualShadowClipmapInfoBuffer,
-                m_pageJobCountBuffer,
-                m_pageJobRecordsBuffer)
+                m_pageJobCountBuffers[0],
+                m_pageJobRecordsBuffers[0],
+                m_pageJobCountBuffers[1],
+                m_pageJobRecordsBuffers[1])
             .WithUnorderedAccess(m_virtualShadowPageTableTexture, m_virtualShadowPhysicalPagesTexture)
-            .WithIndirectArguments(m_pageJobIndirectArgsBuffer)
+            .WithIndirectArguments(m_pageJobIndirectArgsBuffers[0], m_pageJobIndirectArgsBuffers[1])
             .WithConstantBuffer(Builtin::PerFrameBuffer);
 
         if (m_slabResourceGroup) {
@@ -112,35 +126,38 @@ public:
         misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] = m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
         misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
         misc[CLOD_RASTER_VIRTUAL_SHADOW_PHYSICAL_PAGES_DESCRIPTOR_INDEX] = m_virtualShadowPhysicalPagesTexture->GetUAVShaderVisibleInfo(0).slot.index;
-        misc[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] = m_pageJobCountBuffer->GetSRVInfo(0).slot.index;
-        misc[CLOD_RASTER_PAGE_JOB_RECORDS_DESCRIPTOR_INDEX] = m_pageJobRecordsBuffer->GetSRVInfo(0).slot.index;
-
-        commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
-        BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-        commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-        commandList.ExecuteIndirect(
-            m_commandSignature->GetHandle(),
-            m_pageJobIndirectArgsBuffer->GetAPIResource().GetHandle(),
-            0,
-            {},
-            0,
-            1);
+        for (uint32_t variantIndex = 0u; variantIndex < m_pageJobCountBuffers.size(); ++variantIndex) {
+            const PipelineState& pso = variantIndex != 0u ? m_skinnedPso : m_rigidPso;
+            misc[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] = m_pageJobCountBuffers[variantIndex]->GetSRVInfo(0).slot.index;
+            misc[CLOD_RASTER_PAGE_JOB_RECORDS_DESCRIPTOR_INDEX] = m_pageJobRecordsBuffers[variantIndex]->GetSRVInfo(0).slot.index;
+            commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
+            BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
+            commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
+            commandList.ExecuteIndirect(
+                m_commandSignature->GetHandle(),
+                m_pageJobIndirectArgsBuffers[variantIndex]->GetAPIResource().GetHandle(),
+                0,
+                {},
+                0,
+                1);
+        }
         return {};
     }
 
     void Cleanup() override {}
 
 private:
-    PipelineState m_pso;
+    PipelineState m_rigidPso;
+    PipelineState m_skinnedPso;
     rhi::CommandSignaturePtr m_commandSignature;
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
     std::shared_ptr<PixelBuffer> m_virtualShadowPageTableTexture;
     std::shared_ptr<PixelBuffer> m_virtualShadowPhysicalPagesTexture;
     std::shared_ptr<Buffer> m_virtualShadowClipmapInfoBuffer;
-    std::shared_ptr<Buffer> m_pageJobCountBuffer;
-    std::shared_ptr<Buffer> m_pageJobRecordsBuffer;
-    std::shared_ptr<Buffer> m_pageJobIndirectArgsBuffer;
+    std::array<std::shared_ptr<Buffer>, 2> m_pageJobCountBuffers;
+    std::array<std::shared_ptr<Buffer>, 2> m_pageJobRecordsBuffers;
+    std::array<std::shared_ptr<Buffer>, 2> m_pageJobIndirectArgsBuffers;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;
     bool m_runWhenComputeSWRasterEnabledOnly = false;
 };

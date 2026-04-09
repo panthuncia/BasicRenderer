@@ -36,6 +36,7 @@ public:
     void PostUpdate();
     std::shared_ptr<Scene> AppendScene(std::shared_ptr<Scene> scene);
     void Activate(ManagerInterface managerInterface);
+    void Deactivate();
 
     void ProcessEntitySkins(bool overrideExistingSkins = false);
     std::shared_ptr<Scene> Clone() const;
@@ -74,4 +75,5 @@ private:
     bool m_propagateQueriesBuilt = false;
 
     void ActivateAllAnimatedEntities();
+    bool IsActive() const;
 };

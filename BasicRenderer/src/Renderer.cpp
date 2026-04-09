@@ -1742,6 +1742,9 @@ void Renderer::Cleanup() {
     m_currentEnvironment.reset();
     m_defaultEnvironmentCubemap.reset();
     m_defaultEnvironmentPrefilteredCubemap.reset();
+    if (currentScene) {
+        currentScene->Deactivate();
+    }
 	currentScene.reset();
 	m_pIndirectCommandBufferManager.reset();
 	m_pViewManager.reset();
@@ -1799,6 +1802,9 @@ void Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
         m_completedSceneSnapshot.reset();
     }
         m_sceneRenderBridge.Clear(m_managerInterface);
+        if (currentScene) {
+            currentScene->Deactivate();
+        }
         currentScene.reset();
         rebuildRenderGraph = true;
         IsSceneReadyForFrame(true);
@@ -1807,6 +1813,9 @@ void Renderer::SetCurrentScene(std::shared_ptr<Scene> newScene) {
 
 	if (currentScene != newScene) {
 		m_sceneRenderBridge.Clear(m_managerInterface);
+        if (currentScene) {
+            currentScene->Deactivate();
+        }
 	}
 
     m_sceneTaskCompleted.store(false);

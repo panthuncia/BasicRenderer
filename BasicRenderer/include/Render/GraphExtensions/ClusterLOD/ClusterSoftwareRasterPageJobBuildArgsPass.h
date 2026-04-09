@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <memory>
 
 #include "Managers/Singletons/PSOManager.h"
@@ -14,11 +15,13 @@
 class ClusterSoftwareRasterPageJobBuildArgsPass : public ComputePass {
 public:
     ClusterSoftwareRasterPageJobBuildArgsPass(
-        std::shared_ptr<Buffer> pageJobCountBuffer,
-        std::shared_ptr<Buffer> pageJobIndirectArgsBuffer,
+        std::shared_ptr<Buffer> rigidPageJobCountBuffer,
+        std::shared_ptr<Buffer> rigidPageJobIndirectArgsBuffer,
+        std::shared_ptr<Buffer> skinnedPageJobCountBuffer,
+        std::shared_ptr<Buffer> skinnedPageJobIndirectArgsBuffer,
         bool runWhenComputeSWRasterEnabledOnly = false)
-        : m_pageJobCountBuffer(std::move(pageJobCountBuffer))
-        , m_pageJobIndirectArgsBuffer(std::move(pageJobIndirectArgsBuffer))
+        : m_pageJobCountBuffers{ std::move(rigidPageJobCountBuffer), std::move(skinnedPageJobCountBuffer) }
+        , m_pageJobIndirectArgsBuffers{ std::move(rigidPageJobIndirectArgsBuffer), std::move(skinnedPageJobIndirectArgsBuffer) }
         , m_runWhenComputeSWRasterEnabledOnly(runWhenComputeSWRasterEnabledOnly)
     {
         m_pso = PSOManager::GetInstance().MakeComputePipeline(
@@ -31,8 +34,8 @@ public:
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override
     {
-        builder->WithShaderResource(m_pageJobCountBuffer)
-            .WithUnorderedAccess(m_pageJobIndirectArgsBuffer);
+        builder->WithShaderResource(m_pageJobCountBuffers[0], m_pageJobCountBuffers[1])
+            .WithUnorderedAccess(m_pageJobIndirectArgsBuffers[0], m_pageJobIndirectArgsBuffers[1]);
     }
 
     void Setup() override {}
@@ -40,7 +43,9 @@ public:
     void Update(const UpdateExecutionContext&) override
     {
         const RasterizeClustersCommand zeroArgs = {};
-        BUFFER_UPLOAD(&zeroArgs, sizeof(RasterizeClustersCommand), rg::runtime::UploadTarget::FromShared(m_pageJobIndirectArgsBuffer), 0);
+        for (const auto& pageJobIndirectArgsBuffer : m_pageJobIndirectArgsBuffers) {
+            BUFFER_UPLOAD(&zeroArgs, sizeof(RasterizeClustersCommand), rg::runtime::UploadTarget::FromShared(pageJobIndirectArgsBuffer), 0);
+        }
     }
 
     PassReturn Execute(PassExecutionContext& executionContext) override
@@ -58,13 +63,14 @@ public:
         commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
 
         uint32_t misc[NumMiscUintRootConstants] = {};
-        misc[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] = m_pageJobCountBuffer->GetSRVInfo(0).slot.index;
-        misc[CLOD_RASTER_PAGE_JOB_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_pageJobIndirectArgsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-
-        commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
         BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
         commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-        commandList.Dispatch(1, 1, 1);
+        for (uint32_t variantIndex = 0u; variantIndex < m_pageJobCountBuffers.size(); ++variantIndex) {
+            misc[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] = m_pageJobCountBuffers[variantIndex]->GetSRVInfo(0).slot.index;
+            misc[CLOD_RASTER_PAGE_JOB_INDIRECT_ARGS_DESCRIPTOR_INDEX] = m_pageJobIndirectArgsBuffers[variantIndex]->GetUAVShaderVisibleInfo(0).slot.index;
+            commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
+            commandList.Dispatch(1, 1, 1);
+        }
         return {};
     }
 
@@ -72,7 +78,7 @@ public:
 
 private:
     PipelineState m_pso;
-    std::shared_ptr<Buffer> m_pageJobCountBuffer;
-    std::shared_ptr<Buffer> m_pageJobIndirectArgsBuffer;
+    std::array<std::shared_ptr<Buffer>, 2> m_pageJobCountBuffers;
+    std::array<std::shared_ptr<Buffer>, 2> m_pageJobIndirectArgsBuffers;
     bool m_runWhenComputeSWRasterEnabledOnly = false;
 };

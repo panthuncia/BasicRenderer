@@ -19,6 +19,7 @@
 #include "Managers/SkeletonManager.h"
 #include "Managers/MaterialManager.h"
 #include "Mesh/MeshInstance.h"
+#include "Mesh/VertexFlags.h"
 #include "Animation/AnimationController.h"
 #include "Utilities/MathUtils.h"
 #include "Resources/Sampler.h"
@@ -95,6 +96,14 @@ namespace {
 
 	Components::StableSceneID MakeStableSceneID() {
 		return { globalStableSceneId.fetch_add(1, std::memory_order_relaxed) + 1 };
+	}
+
+	MaterialRasterFlags ComposeRuntimeRasterFlags(Mesh& mesh) {
+		MaterialRasterFlags rasterFlags = mesh.material->Technique().rasterFlags;
+		if ((mesh.GetPerMeshCBData().vertexFlags & VERTEX_SKINNED) != 0u) {
+			rasterFlags |= MaterialRasterFlagsSkinned;
+		}
+		return rasterFlags;
 	}
 
 	void AssignStableSceneID(flecs::entity entity) {
@@ -288,6 +297,10 @@ void Scene::ActivateRenderable(flecs::entity& entity) {
 			m_managerInterface.GetMaterialManager()->IncrementMaterialUsageCount(*meshInstance->GetMesh()->material);
 			auto materialDataIndex = m_managerInterface.GetMaterialManager()->GetMaterialSlot(meshInstance->GetMesh()->material->GetMaterialID());
 			meshInstance->GetMesh()->SetMaterialDataIndex(materialDataIndex);
+			const MaterialRasterFlags runtimeRasterFlags = ComposeRuntimeRasterFlags(*meshInstance->GetMesh());
+			const unsigned int rasterBucketIndex =
+				m_managerInterface.GetMaterialManager()->AcquireRasterBucket(runtimeRasterFlags);
+			meshInstance->GetMesh()->SetRasterBucketIndex(rasterBucketIndex);
 
 			// Register mesh if not already present
 			if (!globalMeshLibrary.meshes.contains(meshInstance->GetMesh()->GetGlobalID())) {
@@ -618,14 +631,62 @@ void Scene::MakeResident() {
 }
 
 void Scene::MakeNonResident() {
-	// TODO
+	if (m_managerInterface.GetMeshManager() == nullptr || m_managerInterface.GetMaterialManager() == nullptr) {
+		return;
+	}
+
+	std::vector<flecs::entity> renderables;
+
+	VisitSceneDescendants(ECSSceneRoot, [&](flecs::entity entity) {
+		if (entity.has<Components::MeshInstances>()) {
+			renderables.push_back(entity);
+		}
+	});
+
+	for (auto& entity : renderables) {
+		auto meshInstances = entity.try_get<Components::MeshInstances>();
+		if (!meshInstances) {
+			continue;
+		}
+
+		for (auto& meshInstance : meshInstances->meshInstances) {
+			auto mesh = meshInstance->GetMesh();
+			if (!mesh) {
+				continue;
+			}
+
+			m_managerInterface.GetMeshManager()->RemoveMeshInstance(meshInstance.get());
+			m_managerInterface.GetMaterialManager()->ReleaseRasterBucket(ComposeRuntimeRasterFlags(*mesh));
+			m_managerInterface.GetMaterialManager()->DecrementMaterialUsageCount(*mesh->material);
+		}
+	}
+}
+
+void Scene::Deactivate() {
+	for (auto& child : m_childScenes) {
+		if (child) {
+			child->Deactivate();
+		}
+	}
+
+	if (!ECSSceneRoot.is_alive()) {
+		m_managerInterface = {};
+		return;
+	}
+
+	if (IsActive()) {
+		MakeNonResident();
+		ECSSceneRoot.remove<Components::ActiveScene>();
+	}
+
+	m_managerInterface = {};
 }
 
 Scene::~Scene() {
 	m_updatedCleanupQuery = {};
 	m_dirtyQuery = {};
 	m_propagateQueriesBuilt = false;
-	MakeNonResident();
+	Deactivate();
 }
 
 void activate_hierarchy(flecs::entity src) {
@@ -666,6 +727,10 @@ void Scene::Activate(ManagerInterface managerInterface) {
 	ECSSceneRoot.add<Components::Active>();
 
 	MakeResident();
+}
+
+bool Scene::IsActive() const {
+	return ECSSceneRoot.is_alive() && ECSSceneRoot.has<Components::ActiveScene>();
 }
 
 void recurse_hierarchy(flecs::entity src, flecs::entity dst_parent = {}) {

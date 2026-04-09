@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <vector>
 
@@ -34,8 +35,10 @@ public:
         std::shared_ptr<Buffer> viewRasterInfoBuffer,
         std::shared_ptr<PixelBuffer> virtualShadowPageTableTexture,
         std::shared_ptr<Buffer> virtualShadowClipmapInfoBuffer,
-        std::shared_ptr<Buffer> pageJobRecordsBuffer,
-        std::shared_ptr<Buffer> pageJobCountBuffer,
+        std::shared_ptr<Buffer> rigidPageJobRecordsBuffer,
+        std::shared_ptr<Buffer> rigidPageJobCountBuffer,
+        std::shared_ptr<Buffer> skinnedPageJobRecordsBuffer,
+        std::shared_ptr<Buffer> skinnedPageJobCountBuffer,
         std::shared_ptr<Buffer> pageJobClusterTagsBuffer,
         uint32_t pageJobRecordCapacity,
         std::shared_ptr<ResourceGroup> slabResourceGroup = nullptr,
@@ -46,8 +49,8 @@ public:
         , m_viewRasterInfoBuffer(std::move(viewRasterInfoBuffer))
         , m_virtualShadowPageTableTexture(std::move(virtualShadowPageTableTexture))
         , m_virtualShadowClipmapInfoBuffer(std::move(virtualShadowClipmapInfoBuffer))
-        , m_pageJobRecordsBuffer(std::move(pageJobRecordsBuffer))
-        , m_pageJobCountBuffer(std::move(pageJobCountBuffer))
+        , m_pageJobRecordsBuffers{ std::move(rigidPageJobRecordsBuffer), std::move(skinnedPageJobRecordsBuffer) }
+        , m_pageJobCountBuffers{ std::move(rigidPageJobCountBuffer), std::move(skinnedPageJobCountBuffer) }
         , m_pageJobClusterTagsBuffer(std::move(pageJobClusterTagsBuffer))
         , m_pageJobRecordCapacity(pageJobRecordCapacity)
         , m_slabResourceGroup(std::move(slabResourceGroup))
@@ -64,12 +67,19 @@ public:
             PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
             m_commandSignature);
 
-        m_pso = PSOManager::GetInstance().MakeComputePipeline(
+        m_rigidPso = PSOManager::GetInstance().MakeComputePipeline(
             PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
             L"Shaders/ClusterLOD/softwareRasterPageJobs.hlsl",
             L"SWPageJobExpandCSMain",
             {},
             "CLod_SoftwarePageJobExpandPSO");
+        std::vector<DxcDefine> skinnedDefines = { DxcDefine{ L"PSO_SKINNED", L"1" } };
+        m_skinnedPso = PSOManager::GetInstance().MakeComputePipeline(
+            PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
+            L"Shaders/ClusterLOD/softwareRasterPageJobs.hlsl",
+            L"SWPageJobExpandCSMain",
+            skinnedDefines,
+            "CLod_SoftwarePageJobExpandSkinnedPSO");
     }
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override
@@ -89,8 +99,10 @@ public:
                 m_virtualShadowClipmapInfoBuffer)
             .WithUnorderedAccess(
                 m_virtualShadowPageTableTexture,
-                m_pageJobRecordsBuffer,
-                m_pageJobCountBuffer,
+                m_pageJobRecordsBuffers[0],
+                m_pageJobCountBuffers[0],
+                m_pageJobRecordsBuffers[1],
+                m_pageJobCountBuffers[1],
                 m_pageJobClusterTagsBuffer)
             .WithIndirectArguments(m_rasterBucketsIndirectArgsBuffer)
             .WithConstantBuffer(Builtin::PerFrameBuffer);
@@ -105,7 +117,9 @@ public:
     void Update(const UpdateExecutionContext&) override
     {
         const uint32_t zero = 0u;
-        BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_pageJobCountBuffer), 0);
+        for (const auto& pageJobCountBuffer : m_pageJobCountBuffers) {
+            BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(pageJobCountBuffer), 0);
+        }
 
         const uint32_t invalidTag = 0xFFFFFFFFu;
         const uint32_t tagCount = static_cast<uint32_t>(m_pageJobClusterTagsBuffer->GetSize() / sizeof(uint32_t));
@@ -142,8 +156,6 @@ public:
         misc[CLOD_RASTER_VIEW_RASTER_INFO_BUFFER_DESCRIPTOR_INDEX] = m_viewRasterInfoBuffer->GetSRVInfo(0).slot.index;
         misc[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX] = m_virtualShadowPageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
         misc[CLOD_RASTER_VIRTUAL_SHADOW_CLIPMAP_INFO_DESCRIPTOR_INDEX] = m_virtualShadowClipmapInfoBuffer->GetSRVInfo(0).slot.index;
-        misc[CLOD_RASTER_PAGE_JOB_RECORDS_DESCRIPTOR_INDEX] = m_pageJobRecordsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-        misc[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] = m_pageJobCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
         misc[CLOD_RASTER_PAGE_JOB_CLUSTER_TAGS_DESCRIPTOR_INDEX] = m_pageJobClusterTagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
         misc[CLOD_RASTER_PAGE_JOB_RECORD_CAPACITY] = m_pageJobRecordCapacity;
 
@@ -158,11 +170,6 @@ public:
         pageJobFlags |= (maxPages << CLOD_WG_PAGE_JOB_MAX_PAGES_SHIFT);
         misc[CLOD_RASTER_PAGE_JOB_FLAGS] = pageJobFlags;
 
-        commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
-
-        BindResourceDescriptorIndices(commandList, m_pso.GetResourceDescriptorSlots());
-        commandList.BindPipeline(m_pso.GetAPIPipelineState().GetHandle());
-
         const uint32_t numBuckets = context.materialManager->GetRasterBucketCount();
         if (numBuckets == 0) {
             return {};
@@ -171,6 +178,18 @@ public:
         auto apiResource = m_rasterBucketsIndirectArgsBuffer->GetAPIResource();
         const uint64_t stride = sizeof(RasterizeClustersCommand);
         for (uint32_t i = 0; i < numBuckets; ++i) {
+            const MaterialRasterFlags flags = context.materialManager->GetRasterFlagsForBucket(i);
+            const uint32_t variantIndex = (flags & MaterialRasterFlagsSkinned) ? 1u : 0u;
+            const PipelineState& pso = variantIndex != 0u ? m_skinnedPso : m_rigidPso;
+
+            misc[CLOD_RASTER_PAGE_JOB_RECORDS_DESCRIPTOR_INDEX] =
+                m_pageJobRecordsBuffers[variantIndex]->GetUAVShaderVisibleInfo(0).slot.index;
+            misc[CLOD_RASTER_PAGE_JOB_COUNT_DESCRIPTOR_INDEX] =
+                m_pageJobCountBuffers[variantIndex]->GetUAVShaderVisibleInfo(0).slot.index;
+            commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, misc);
+            BindResourceDescriptorIndices(commandList, pso.GetResourceDescriptorSlots());
+            commandList.BindPipeline(pso.GetAPIPipelineState().GetHandle());
+
             const uint64_t argOffset = static_cast<uint64_t>(i) * stride;
             commandList.ExecuteIndirect(
                 m_commandSignature->GetHandle(),
@@ -187,7 +206,8 @@ public:
     void Cleanup() override {}
 
 private:
-    PipelineState m_pso;
+    PipelineState m_rigidPso;
+    PipelineState m_skinnedPso;
     rhi::CommandSignaturePtr m_commandSignature;
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsHistogramBuffer;
@@ -195,8 +215,8 @@ private:
     std::shared_ptr<Buffer> m_viewRasterInfoBuffer;
     std::shared_ptr<PixelBuffer> m_virtualShadowPageTableTexture;
     std::shared_ptr<Buffer> m_virtualShadowClipmapInfoBuffer;
-    std::shared_ptr<Buffer> m_pageJobRecordsBuffer;
-    std::shared_ptr<Buffer> m_pageJobCountBuffer;
+    std::array<std::shared_ptr<Buffer>, 2> m_pageJobRecordsBuffers;
+    std::array<std::shared_ptr<Buffer>, 2> m_pageJobCountBuffers;
     std::shared_ptr<Buffer> m_pageJobClusterTagsBuffer;
     uint32_t m_pageJobRecordCapacity = 0u;
     std::shared_ptr<ResourceGroup> m_slabResourceGroup;

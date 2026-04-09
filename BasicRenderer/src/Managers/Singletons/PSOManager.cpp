@@ -1388,6 +1388,12 @@ std::vector<DxcDefine> PSOManager::GetRasterShaderDefines(MaterialRasterFlags ra
         macro.Name = L"PSO_GEOMETRIC_DISPLACEMENT";
         defines.insert(defines.begin(), macro);
     }
+    if (rasterFlags & MaterialRasterFlags::MaterialRasterFlagsSkinned) {
+        DxcDefine macro;
+        macro.Value = L"1";
+        macro.Name = L"PSO_SKINNED";
+        defines.insert(defines.begin(), macro);
+    }
     return defines;
 }
 
