@@ -662,6 +662,200 @@ bool CLodVirtualShadowMeshletTouchesDirtyPages(float3 worldCenter, float radiusW
     return CLodVirtualShadowBoundsTouchDirtyPages(worldCenter, radiusWorld, viewId);
 }
 
+bool CLodVirtualShadowComputeMeshletBlockCoverage(
+    float3 worldCenter,
+    float radiusWorld,
+    uint shadowClipmapIndex,
+    CLodVirtualShadowClipmapInfo clipmapInfo,
+    out uint2 minPageCoord,
+    out uint2 maxPageCoord,
+    out uint2 minBlockCoord,
+    out uint2 blockCount)
+{
+    minPageCoord = uint2(0u, 0u);
+    maxPageCoord = uint2(0u, 0u);
+    minBlockCoord = uint2(0u, 0u);
+    blockCount = uint2(0u, 0u);
+
+    if (shadowClipmapIndex >= kCLodVirtualShadowClipmapCount || !CLodVirtualShadowClipmapIsValid(clipmapInfo))
+    {
+        return false;
+    }
+
+    StructuredBuffer<CLodVirtualShadowCompactShadowCameraInfo> shadowCameras =
+        ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodCompactShadowCameras)];
+    const CLodVirtualShadowCompactShadowCameraInfo shadowCamera = shadowCameras[shadowClipmapIndex];
+
+    float2 uvMin = 0.0f.xx;
+    float2 uvMax = 0.0f.xx;
+    bool queryClipped = false;
+    const bool queryValid = CLodVirtualShadowComputeSphereAabbUvBounds(
+        worldCenter,
+        radiusWorld,
+        shadowCamera,
+        uvMin,
+        uvMax,
+        queryClipped);
+    if (!queryValid)
+    {
+        return false;
+    }
+
+    minPageCoord = CLodVirtualShadowVirtualPageCoordsFromUv(uvMin, clipmapInfo);
+    maxPageCoord = CLodVirtualShadowVirtualPageCoordsFromUv(uvMax, clipmapInfo);
+    minBlockCoord = CLodVirtualShadowBlockCoordFromPageCoord(minPageCoord);
+    const uint2 maxBlockCoord = CLodVirtualShadowBlockCoordFromPageCoord(maxPageCoord);
+    blockCount = maxBlockCoord - minBlockCoord + 1u;
+    return all(blockCount > uint2(0u, 0u));
+}
+
+bool CLodVirtualShadowBuildVisibleClusterBlockPayload(
+    uint shadowClipmapIndex,
+    CLodVirtualShadowClipmapInfo clipmapInfo,
+    RWTexture2DArray<uint> pageTable,
+    uint2 meshletMinPageCoord,
+    uint2 meshletMaxPageCoord,
+    uint2 blockCoord,
+    out uint vsmPayload)
+{
+    vsmPayload = 0u;
+
+    const uint2 blockOriginPageCoord = CLodVirtualShadowBlockOriginFromBlockCoord(blockCoord);
+    uint2 minLocalPageCoord = uint2(kCLodVirtualShadowBlockPagesPerAxis - 1u, kCLodVirtualShadowBlockPagesPerAxis - 1u);
+    uint2 maxLocalPageCoord = uint2(0u, 0u);
+    bool hasActivePage = false;
+
+    [unroll]
+    for (uint localPageY = 0u; localPageY < kCLodVirtualShadowBlockPagesPerAxis; ++localPageY)
+    {
+        [unroll]
+        for (uint localPageX = 0u; localPageX < kCLodVirtualShadowBlockPagesPerAxis; ++localPageX)
+        {
+            const uint2 localPageCoord = uint2(localPageX, localPageY);
+            const uint2 pageCoord = blockOriginPageCoord + localPageCoord;
+            if (any(pageCoord < meshletMinPageCoord) || any(pageCoord > meshletMaxPageCoord))
+            {
+                continue;
+            }
+
+            if (pageCoord.x >= clipmapInfo.pageTableResolution || pageCoord.y >= clipmapInfo.pageTableResolution)
+            {
+                continue;
+            }
+
+            const uint2 wrappedPageCoord = CLodVirtualShadowWrappedPageCoords(pageCoord, clipmapInfo);
+            const uint pageEntry = pageTable[uint3(wrappedPageCoord, clipmapInfo.pageTableLayer)];
+            if (!CLodVirtualShadowPageEntryCanRaster(pageEntry))
+            {
+                continue;
+            }
+
+            hasActivePage = true;
+            minLocalPageCoord = min(minLocalPageCoord, localPageCoord);
+            maxLocalPageCoord = max(maxLocalPageCoord, localPageCoord);
+        }
+    }
+
+    if (!hasActivePage)
+    {
+        return false;
+    }
+
+    vsmPayload = CLodPackVisibleClusterVsmPayloadForBlock(
+        shadowClipmapIndex,
+        blockCoord,
+        minLocalPageCoord,
+        maxLocalPageCoord,
+        false);
+    return true;
+}
+
+uint CLodVirtualShadowCountVisibleClusterBlocksForMeshlet(
+    uint shadowClipmapIndex,
+    CLodVirtualShadowClipmapInfo clipmapInfo,
+    RWTexture2DArray<uint> pageTable,
+    uint2 meshletMinPageCoord,
+    uint2 meshletMaxPageCoord,
+    uint2 minBlockCoord,
+    uint2 blockCount)
+{
+    uint activeBlockCount = 0u;
+    const uint totalBlockCount = blockCount.x * blockCount.y;
+    [loop]
+    for (uint blockLinearIndex = 0u; blockLinearIndex < totalBlockCount; ++blockLinearIndex)
+    {
+        const uint2 blockCoord = uint2(blockLinearIndex % blockCount.x, blockLinearIndex / blockCount.x) + minBlockCoord;
+        uint vsmPayload = 0u;
+        if (CLodVirtualShadowBuildVisibleClusterBlockPayload(
+                shadowClipmapIndex,
+                clipmapInfo,
+                pageTable,
+                meshletMinPageCoord,
+                meshletMaxPageCoord,
+                blockCoord,
+                vsmPayload))
+        {
+            activeBlockCount++;
+        }
+    }
+
+    return activeBlockCount;
+}
+
+void CLodVirtualShadowEmitVisibleClusterBlocksForMeshlet(
+    globallycoherent RWByteAddressBuffer visibleClusters,
+    uint writeBase,
+    uint maxWriteCount,
+    uint viewId,
+    uint instanceIndex,
+    uint localMeshletIndex,
+    uint visibleGroupId,
+    uint pageSlabDescriptorIndex,
+    uint pageSlabByteOffset,
+    uint shadowClipmapIndex,
+    CLodVirtualShadowClipmapInfo clipmapInfo,
+    RWTexture2DArray<uint> pageTable,
+    uint2 meshletMinPageCoord,
+    uint2 meshletMaxPageCoord,
+    uint2 minBlockCoord,
+    uint2 blockCount)
+{
+    uint emittedCount = 0u;
+    const uint totalBlockCount = blockCount.x * blockCount.y;
+    [loop]
+    for (uint blockLinearIndex = 0u; blockLinearIndex < totalBlockCount; ++blockLinearIndex)
+    {
+        const uint2 blockCoord = uint2(blockLinearIndex % blockCount.x, blockLinearIndex / blockCount.x) + minBlockCoord;
+        uint vsmPayload = 0u;
+        if (!CLodVirtualShadowBuildVisibleClusterBlockPayload(
+                shadowClipmapIndex,
+                clipmapInfo,
+                pageTable,
+                meshletMinPageCoord,
+                meshletMaxPageCoord,
+                blockCoord,
+                vsmPayload))
+        {
+            continue;
+        }
+
+        if (emittedCount < maxWriteCount)
+        {
+            CLodStoreVisibleClusterWithVsmPayloadGloballyCoherent(
+                visibleClusters,
+                writeBase + emittedCount,
+                viewId,
+                instanceIndex,
+                localMeshletIndex,
+                visibleGroupId,
+                pageSlabDescriptorIndex,
+                pageSlabByteOffset,
+                vsmPayload);
+        }
+        emittedCount++;
+    }
+}
+
 bool CLodVirtualShadowInstanceInvalidatedThisFrame(uint instanceIndex)
 {
     if (instanceIndex >= kCLodVirtualShadowMovedInstanceBitCapacity)
@@ -1789,6 +1983,9 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
     RWStructuredBuffer<CLodReplayBufferState> replayState =
         ResourceDescriptorHeap[CLOD_WG_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX];
     const uint visibleClusterCapacity = CLOD_WG_VISIBLE_CLUSTERS_CAPACITY;
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+    RWTexture2DArray<uint> shadowPageTable = ResourceDescriptorHeap[CLOD_WG_VIRTUAL_SHADOW_PAGE_TABLE_UAV_DESCRIPTOR_INDEX];
+#endif
 
     // Phase 2: read Phase 1's final HW count to offset writes and avoid overwriting Phase 1 entries.
     // Always bind the resource to avoid DXC ICE with conditional ResourceDescriptorHeap casts.
@@ -1819,6 +2016,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         uint localMeshletIndex = 0;
         bool survives = false;
         float3 meshletCenterViewSpace = float3(0, 0, -1); // default: behind camera
+        float3 meshletCenterWorld = 0.0f.xxx;
         float meshletRadiusWorld = 0.0f;
 
         if (active) {
@@ -1840,6 +2038,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                         skinningInstanceSlot);
                 }
                 meshletCenterViewSpace = ToViewSpace(meshletBounds.sphere.xyz, objectModelMatrix, viewMatrix);
+                meshletCenterWorld = mul(float4(meshletBounds.sphere.xyz, 1.0f), objectModelMatrix).xyz;
                 meshletRadiusWorld = meshletBounds.sphere.w * cullUniformScale;
                 survives = replaySource || !SphereOutsideFrustumViewSpace(meshletCenterViewSpace, meshletRadiusWorld, frustumPlanes);
                 
@@ -1853,7 +2052,6 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                     bool touchesDirtyPages = true;
                     if (CLodWorkGraphShadowDirtyPageCullingEnabled())
                     {
-                        const float3 meshletCenterWorld = mul(float4(meshletBounds.sphere.xyz, 1.0f), objectModelMatrix).xyz;
                         touchesDirtyPages = CLodVirtualShadowMeshletTouchesDirtyPages(meshletCenterWorld, meshletRadiusWorld, b.viewId);
                     }
 
@@ -1986,10 +2184,10 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         const bool contributes = active && survives;
         const uint visibleGroupId = UnpackGroupId(b.groupIdPacked);
         uint shadowClipmapIndex = CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX;
+        CLodVirtualShadowClipmapInfo shadowClipmapInfo = (CLodVirtualShadowClipmapInfo)0;
 #if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
         if (contributes)
         {
-            CLodVirtualShadowClipmapInfo shadowClipmapInfo = (CLodVirtualShadowClipmapInfo)0;
             if (!CLodVirtualShadowFindClipmapForView(b.viewId, shadowClipmapIndex, shadowClipmapInfo))
             {
                 shadowClipmapIndex = CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX;
@@ -1998,24 +2196,54 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 #endif
 
 #if !CLOD_WG_ENABLE_SW_CLASSIFICATION
-        const uint4 hwMask = WaveActiveBallot(contributes);
-        const uint hwCount = CountBits128(hwMask);
-        totalSurvivors += hwCount;
+        uint hwLaneWriteCount = contributes ? 1u : 0u;
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+        uint2 hwMinPageCoord = uint2(0u, 0u);
+        uint2 hwMaxPageCoord = uint2(0u, 0u);
+        uint2 hwMinBlockCoord = uint2(0u, 0u);
+        uint2 hwBlockCount = uint2(0u, 0u);
+        const bool hwUsesVsmBlocks =
+            contributes &&
+            shadowClipmapIndex != CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX &&
+            CLodVirtualShadowComputeMeshletBlockCoverage(
+                meshletCenterWorld,
+                meshletRadiusWorld,
+                shadowClipmapIndex,
+                shadowClipmapInfo,
+                hwMinPageCoord,
+                hwMaxPageCoord,
+                hwMinBlockCoord,
+                hwBlockCount);
+        if (hwUsesVsmBlocks)
+        {
+            hwLaneWriteCount = CLodVirtualShadowCountVisibleClusterBlocksForMeshlet(
+                shadowClipmapIndex,
+                shadowClipmapInfo,
+                shadowPageTable,
+                hwMinPageCoord,
+                hwMaxPageCoord,
+                hwMinBlockCoord,
+                hwBlockCount);
+        }
+#endif
+        const uint4 hwMask = WaveActiveBallot(hwLaneWriteCount != 0u);
+        const uint hwWriteCount = WaveActiveSum(hwLaneWriteCount);
+        totalSurvivors += hwWriteCount;
 
-        if (hwCount > 0) {
+        if (hwWriteCount > 0u) {
             const uint hwLeader = WaveFirstLaneFromMask(hwMask);
-            const uint hwRank = GetLaneRankInGroup(hwMask, WaveGetLaneIndex());
+            const uint hwPrefix = WavePrefixSum(hwLaneWriteCount);
 
-            uint hwBase = 0;
-            uint hwCombinedBase = 0;
+            uint hwBase = 0u;
+            uint hwCombinedBase = 0u;
             if (WaveGetLaneIndex() == hwLeader) {
-                InterlockedAdd(replayState[0].visibleClusterCombinedCount, hwCount, hwCombinedBase);
+                InterlockedAdd(replayState[0].visibleClusterCombinedCount, hwWriteCount, hwCombinedBase);
             }
             hwCombinedBase = WaveReadLaneAt(hwCombinedBase, hwLeader);
 
             const uint hwAvail =
                 (hwCombinedBase < visibleClusterCapacity)
-                    ? min(hwCount, visibleClusterCapacity - hwCombinedBase)
+                    ? min(hwWriteCount, visibleClusterCapacity - hwCombinedBase)
                     : 0u;
 
             if (WaveGetLaneIndex() == hwLeader) {
@@ -2024,8 +2252,12 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
             hwBase = WaveReadLaneAt(hwBase, hwLeader);
 
             const uint hwGlobalBase = phase1HWBase + hwBase;
+            const uint hwLaneAvail =
+                (hwPrefix < hwAvail)
+                    ? min(hwLaneWriteCount, hwAvail - hwPrefix)
+                    : 0u;
 
-            if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwCount > visibleClusterCapacity)) {
+            if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwWriteCount > visibleClusterCapacity)) {
                 InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
             }
 
@@ -2033,17 +2265,42 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES, hwAvail);
             }
 
-            if (contributes && (hwRank < hwAvail)) {
-                CLodStoreVisibleClusterGloballyCoherent(
-                    visibleClusters,
-                    hwGlobalBase + hwRank,
-                    b.viewId,
-                    b.instanceIndex,
-                    localMeshletIndex,
-                    visibleGroupId,
-                    b.pageSlabDescriptorIndex,
-                    b.pageSlabByteOffset,
-                    shadowClipmapIndex);
+            if (hwLaneAvail != 0u) {
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+                if (hwUsesVsmBlocks)
+                {
+                    CLodVirtualShadowEmitVisibleClusterBlocksForMeshlet(
+                        visibleClusters,
+                        hwGlobalBase + hwPrefix,
+                        hwLaneAvail,
+                        b.viewId,
+                        b.instanceIndex,
+                        localMeshletIndex,
+                        visibleGroupId,
+                        b.pageSlabDescriptorIndex,
+                        b.pageSlabByteOffset,
+                        shadowClipmapIndex,
+                        shadowClipmapInfo,
+                        shadowPageTable,
+                        hwMinPageCoord,
+                        hwMaxPageCoord,
+                        hwMinBlockCoord,
+                        hwBlockCount);
+                }
+                else
+#endif
+                {
+                    CLodStoreVisibleClusterGloballyCoherent(
+                        visibleClusters,
+                        hwGlobalBase + hwPrefix,
+                        b.viewId,
+                        b.instanceIndex,
+                        localMeshletIndex,
+                        visibleGroupId,
+                        b.pageSlabDescriptorIndex,
+                        b.pageSlabByteOffset,
+                        shadowClipmapIndex);
+                }
             }
         }
 #else
@@ -2051,24 +2308,54 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         // Survivors go straight through the HW path so the work-graph cost excludes
         // the software-raster routing logic itself.
         if (!swRasterEnabled) {
-            const uint4 hwMask = WaveActiveBallot(contributes);
-            const uint hwCount = CountBits128(hwMask);
-            totalSurvivors += hwCount;
+            uint hwLaneWriteCount = contributes ? 1u : 0u;
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+            uint2 hwMinPageCoord = uint2(0u, 0u);
+            uint2 hwMaxPageCoord = uint2(0u, 0u);
+            uint2 hwMinBlockCoord = uint2(0u, 0u);
+            uint2 hwBlockCount = uint2(0u, 0u);
+            const bool hwUsesVsmBlocks =
+                contributes &&
+                shadowClipmapIndex != CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX &&
+                CLodVirtualShadowComputeMeshletBlockCoverage(
+                    meshletCenterWorld,
+                    meshletRadiusWorld,
+                    shadowClipmapIndex,
+                    shadowClipmapInfo,
+                    hwMinPageCoord,
+                    hwMaxPageCoord,
+                    hwMinBlockCoord,
+                    hwBlockCount);
+            if (hwUsesVsmBlocks)
+            {
+                hwLaneWriteCount = CLodVirtualShadowCountVisibleClusterBlocksForMeshlet(
+                    shadowClipmapIndex,
+                    shadowClipmapInfo,
+                    shadowPageTable,
+                    hwMinPageCoord,
+                    hwMaxPageCoord,
+                    hwMinBlockCoord,
+                    hwBlockCount);
+            }
+#endif
+            const uint4 hwMask = WaveActiveBallot(hwLaneWriteCount != 0u);
+            const uint hwWriteCount = WaveActiveSum(hwLaneWriteCount);
+            totalSurvivors += hwWriteCount;
 
-            if (hwCount > 0) {
+            if (hwWriteCount > 0u) {
                 const uint hwLeader = WaveFirstLaneFromMask(hwMask);
-                const uint hwRank = GetLaneRankInGroup(hwMask, WaveGetLaneIndex());
+                const uint hwPrefix = WavePrefixSum(hwLaneWriteCount);
 
-                uint hwBase = 0;
-                uint hwCombinedBase = 0;
+                uint hwBase = 0u;
+                uint hwCombinedBase = 0u;
                 if (WaveGetLaneIndex() == hwLeader) {
-                    InterlockedAdd(replayState[0].visibleClusterCombinedCount, hwCount, hwCombinedBase);
+                    InterlockedAdd(replayState[0].visibleClusterCombinedCount, hwWriteCount, hwCombinedBase);
                 }
                 hwCombinedBase = WaveReadLaneAt(hwCombinedBase, hwLeader);
 
                 const uint hwAvail =
                     (hwCombinedBase < visibleClusterCapacity)
-                        ? min(hwCount, visibleClusterCapacity - hwCombinedBase)
+                        ? min(hwWriteCount, visibleClusterCapacity - hwCombinedBase)
                         : 0u;
 
                 if (WaveGetLaneIndex() == hwLeader) {
@@ -2077,8 +2364,12 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 hwBase = WaveReadLaneAt(hwBase, hwLeader);
 
                 const uint hwGlobalBase = phase1HWBase + hwBase;
+                const uint hwLaneAvail =
+                    (hwPrefix < hwAvail)
+                        ? min(hwLaneWriteCount, hwAvail - hwPrefix)
+                        : 0u;
 
-                if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwCount > visibleClusterCapacity)) {
+                if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwWriteCount > visibleClusterCapacity)) {
                     InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
                 }
 
@@ -2086,17 +2377,42 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES, hwAvail);
                 }
 
-                if (contributes && (hwRank < hwAvail)) {
-                    CLodStoreVisibleClusterGloballyCoherent(
-                        visibleClusters,
-                        hwGlobalBase + hwRank,
-                        b.viewId,
-                        b.instanceIndex,
-                        localMeshletIndex,
-                        visibleGroupId,
-                        b.pageSlabDescriptorIndex,
-                        b.pageSlabByteOffset,
-                        shadowClipmapIndex);
+                if (hwLaneAvail != 0u) {
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+                    if (hwUsesVsmBlocks)
+                    {
+                        CLodVirtualShadowEmitVisibleClusterBlocksForMeshlet(
+                            visibleClusters,
+                            hwGlobalBase + hwPrefix,
+                            hwLaneAvail,
+                            b.viewId,
+                            b.instanceIndex,
+                            localMeshletIndex,
+                            visibleGroupId,
+                            b.pageSlabDescriptorIndex,
+                            b.pageSlabByteOffset,
+                            shadowClipmapIndex,
+                            shadowClipmapInfo,
+                            shadowPageTable,
+                            hwMinPageCoord,
+                            hwMaxPageCoord,
+                            hwMinBlockCoord,
+                            hwBlockCount);
+                    }
+                    else
+#endif
+                    {
+                        CLodStoreVisibleClusterGloballyCoherent(
+                            visibleClusters,
+                            hwGlobalBase + hwPrefix,
+                            b.viewId,
+                            b.instanceIndex,
+                            localMeshletIndex,
+                            visibleGroupId,
+                            b.pageSlabDescriptorIndex,
+                            b.pageSlabByteOffset,
+                            shadowClipmapIndex);
+                    }
                 }
             }
 
@@ -2155,25 +2471,54 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
 
         // HW path: wave-cooperative bottom-up write
         {
-            const uint4 hwMask = WaveActiveBallot(isHW);
-            const uint hwCount = CountBits128(hwMask);
-            totalSurvivors += hwCount;
+            uint hwLaneWriteCount = isHW ? 1u : 0u;
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+            uint2 hwMinPageCoord = uint2(0u, 0u);
+            uint2 hwMaxPageCoord = uint2(0u, 0u);
+            uint2 hwMinBlockCoord = uint2(0u, 0u);
+            uint2 hwBlockCount = uint2(0u, 0u);
+            const bool hwUsesVsmBlocks =
+                isHW &&
+                shadowClipmapIndex != CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX &&
+                CLodVirtualShadowComputeMeshletBlockCoverage(
+                    meshletCenterWorld,
+                    meshletRadiusWorld,
+                    shadowClipmapIndex,
+                    shadowClipmapInfo,
+                    hwMinPageCoord,
+                    hwMaxPageCoord,
+                    hwMinBlockCoord,
+                    hwBlockCount);
+            if (hwUsesVsmBlocks)
+            {
+                hwLaneWriteCount = CLodVirtualShadowCountVisibleClusterBlocksForMeshlet(
+                    shadowClipmapIndex,
+                    shadowClipmapInfo,
+                    shadowPageTable,
+                    hwMinPageCoord,
+                    hwMaxPageCoord,
+                    hwMinBlockCoord,
+                    hwBlockCount);
+            }
+#endif
+            const uint4 hwMask = WaveActiveBallot(hwLaneWriteCount != 0u);
+            const uint hwWriteCount = WaveActiveSum(hwLaneWriteCount);
+            totalSurvivors += hwWriteCount;
 
-            if (hwCount > 0) {
+            if (hwWriteCount > 0u) {
                 const uint hwLeader = WaveFirstLaneFromMask(hwMask);
-                const uint hwRank = GetLaneRankInGroup(hwMask, WaveGetLaneIndex());
+                const uint hwPrefix = WavePrefixSum(hwLaneWriteCount);
 
-                uint hwBase = 0;
-                uint hwCombinedBase = 0;
+                uint hwBase = 0u;
+                uint hwCombinedBase = 0u;
                 if (WaveGetLaneIndex() == hwLeader) {
-                    InterlockedAdd(replayState[0].visibleClusterCombinedCount, hwCount, hwCombinedBase);
+                    InterlockedAdd(replayState[0].visibleClusterCombinedCount, hwWriteCount, hwCombinedBase);
                 }
                 hwCombinedBase = WaveReadLaneAt(hwCombinedBase, hwLeader);
 
-                // Global write position accounts for Phase 1 entries (phase1HWBase == 0 for Phase 1).
                 const uint hwAvail =
                     (hwCombinedBase < visibleClusterCapacity)
-                        ? min(hwCount, visibleClusterCapacity - hwCombinedBase)
+                        ? min(hwWriteCount, visibleClusterCapacity - hwCombinedBase)
                         : 0u;
 
                 if (WaveGetLaneIndex() == hwLeader) {
@@ -2182,8 +2527,12 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                 hwBase = WaveReadLaneAt(hwBase, hwLeader);
 
                 const uint hwGlobalBase = phase1HWBase + hwBase;
+                const uint hwLaneAvail =
+                    (hwPrefix < hwAvail)
+                        ? min(hwLaneWriteCount, hwAvail - hwPrefix)
+                        : 0u;
 
-                if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwCount > visibleClusterCapacity)) {
+                if (WaveGetLaneIndex() == hwLeader && (hwCombinedBase + hwWriteCount > visibleClusterCapacity)) {
                     InterlockedMin(replayState[0].visibleClusterCombinedCount, visibleClusterCapacity);
                 }
 
@@ -2191,17 +2540,42 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                     WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_VISIBLE_CLUSTER_WRITES, hwAvail);
                 }
 
-                if (isHW && (hwRank < hwAvail)) {
-                    CLodStoreVisibleClusterGloballyCoherent(
-                        visibleClusters,
-                        hwGlobalBase + hwRank,
-                        b.viewId,
-                        b.instanceIndex,
-                        localMeshletIndex,
-                        visibleGroupId,
-                        b.pageSlabDescriptorIndex,
-                        b.pageSlabByteOffset,
-                        shadowClipmapIndex);
+                if (hwLaneAvail != 0u) {
+#if CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
+                    if (hwUsesVsmBlocks)
+                    {
+                        CLodVirtualShadowEmitVisibleClusterBlocksForMeshlet(
+                            visibleClusters,
+                            hwGlobalBase + hwPrefix,
+                            hwLaneAvail,
+                            b.viewId,
+                            b.instanceIndex,
+                            localMeshletIndex,
+                            visibleGroupId,
+                            b.pageSlabDescriptorIndex,
+                            b.pageSlabByteOffset,
+                            shadowClipmapIndex,
+                            shadowClipmapInfo,
+                            shadowPageTable,
+                            hwMinPageCoord,
+                            hwMaxPageCoord,
+                            hwMinBlockCoord,
+                            hwBlockCount);
+                    }
+                    else
+#endif
+                    {
+                        CLodStoreVisibleClusterGloballyCoherent(
+                            visibleClusters,
+                            hwGlobalBase + hwPrefix,
+                            b.viewId,
+                            b.instanceIndex,
+                            localMeshletIndex,
+                            visibleGroupId,
+                            b.pageSlabDescriptorIndex,
+                            b.pageSlabByteOffset,
+                            shadowClipmapIndex);
+                    }
                 }
             }
         }

@@ -377,6 +377,15 @@ struct VisibleCluster {
     unsigned int pageSlabDescriptorIndex; // pre-resolved page slab descriptor
     unsigned int pageSlabByteOffset;      // pre-resolved page slab byte offset
     unsigned int shadowClipmapIndex;      // Virtual shadow clipmap index, or 0xFFFFFFFF when not applicable
+    unsigned int virtualShadowPayload;
+    bool hasVirtualShadowBlockData;
+    bool virtualShadowBlockOverflowed;
+    unsigned int virtualShadowBlockCoordX;
+    unsigned int virtualShadowBlockCoordY;
+    unsigned int virtualShadowActiveMinPageX;
+    unsigned int virtualShadowActiveMinPageY;
+    unsigned int virtualShadowActiveMaxPageX;
+    unsigned int virtualShadowActiveMaxPageY;
 };
 
 inline constexpr uint32_t PackedVisibleClusterViewBits = 8u;
@@ -389,6 +398,20 @@ inline constexpr uint32_t PackedVisibleClusterPageShift = 18u;
 inline constexpr uint32_t PackedVisibleClusterPageSizeBytes = 1u << PackedVisibleClusterPageShift;
 inline constexpr uint32_t PackedVisibleClusterInvalidShadowClipmapIndex = 0xFFFFFFFFu;
 inline constexpr uint32_t PackedVisibleClusterStrideBytes = 16u;
+inline constexpr uint32_t PackedVisibleClusterVsmClipmapBits = 5u;
+inline constexpr uint32_t PackedVisibleClusterVsmBlockCoordBits = 5u;
+inline constexpr uint32_t PackedVisibleClusterVsmLocalPageBits = 2u;
+inline constexpr uint32_t PackedVisibleClusterVsmClipmapMask = (1u << PackedVisibleClusterVsmClipmapBits) - 1u;
+inline constexpr uint32_t PackedVisibleClusterVsmInvalidClipmapBits = PackedVisibleClusterVsmClipmapMask;
+inline constexpr uint32_t PackedVisibleClusterVsmClipmapShift = 0u;
+inline constexpr uint32_t PackedVisibleClusterVsmBlockXShift = PackedVisibleClusterVsmClipmapShift + PackedVisibleClusterVsmClipmapBits;
+inline constexpr uint32_t PackedVisibleClusterVsmBlockYShift = PackedVisibleClusterVsmBlockXShift + PackedVisibleClusterVsmBlockCoordBits;
+inline constexpr uint32_t PackedVisibleClusterVsmRectMinXShift = PackedVisibleClusterVsmBlockYShift + PackedVisibleClusterVsmBlockCoordBits;
+inline constexpr uint32_t PackedVisibleClusterVsmRectMinYShift = PackedVisibleClusterVsmRectMinXShift + PackedVisibleClusterVsmLocalPageBits;
+inline constexpr uint32_t PackedVisibleClusterVsmRectMaxXShift = PackedVisibleClusterVsmRectMinYShift + PackedVisibleClusterVsmLocalPageBits;
+inline constexpr uint32_t PackedVisibleClusterVsmRectMaxYShift = PackedVisibleClusterVsmRectMaxXShift + PackedVisibleClusterVsmLocalPageBits;
+inline constexpr uint32_t PackedVisibleClusterVsmOverflowShift = PackedVisibleClusterVsmRectMaxYShift + PackedVisibleClusterVsmLocalPageBits;
+inline constexpr uint32_t PackedVisibleClusterVsmHasBlockDataShift = PackedVisibleClusterVsmOverflowShift + 1u;
 
 inline VisibleCluster DecodePackedVisibleCluster(const std::byte* data)
 {
@@ -408,7 +431,21 @@ inline VisibleCluster DecodePackedVisibleCluster(const std::byte* data)
     cluster.groupID = ((word1 >> PackedVisibleClusterLocalMeshletBits) & 0x3FFFFu) | ((word2 & 0x3u) << 18u);
     cluster.pageSlabDescriptorIndex = (word2 >> 2u) & 0xFFFFFu;
     cluster.pageSlabByteOffset = ((word2 >> 22u) & 0x3FFu) << PackedVisibleClusterPageShift;
-    cluster.shadowClipmapIndex = word3;
+    cluster.virtualShadowPayload = word3;
+
+    const uint32_t encodedClipmapIndex =
+        (word3 >> PackedVisibleClusterVsmClipmapShift) & PackedVisibleClusterVsmClipmapMask;
+    cluster.shadowClipmapIndex = encodedClipmapIndex == PackedVisibleClusterVsmInvalidClipmapBits
+        ? PackedVisibleClusterInvalidShadowClipmapIndex
+        : encodedClipmapIndex;
+    cluster.hasVirtualShadowBlockData = ((word3 >> PackedVisibleClusterVsmHasBlockDataShift) & 0x1u) != 0u;
+    cluster.virtualShadowBlockOverflowed = ((word3 >> PackedVisibleClusterVsmOverflowShift) & 0x1u) != 0u;
+    cluster.virtualShadowBlockCoordX = (word3 >> PackedVisibleClusterVsmBlockXShift) & 0x1Fu;
+    cluster.virtualShadowBlockCoordY = (word3 >> PackedVisibleClusterVsmBlockYShift) & 0x1Fu;
+    cluster.virtualShadowActiveMinPageX = (word3 >> PackedVisibleClusterVsmRectMinXShift) & 0x3u;
+    cluster.virtualShadowActiveMinPageY = (word3 >> PackedVisibleClusterVsmRectMinYShift) & 0x3u;
+    cluster.virtualShadowActiveMaxPageX = (word3 >> PackedVisibleClusterVsmRectMaxXShift) & 0x3u;
+    cluster.virtualShadowActiveMaxPageY = (word3 >> PackedVisibleClusterVsmRectMaxYShift) & 0x3u;
     return cluster;
 }
 

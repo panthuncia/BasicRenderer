@@ -38,6 +38,10 @@ static const uint kCLodVirtualShadowMovedInstanceBitWordCount =
     (kCLodVirtualShadowMovedInstanceBitCapacity + 31u) / 32u;
 static const uint kInvalidShadowCameraIndex = 0xFFFFFFFFu;
 static const uint kCLodVirtualShadowMarkTileSize = 16u;
+static const uint kCLodVirtualShadowBlockPagesPerAxis = 4u;
+static const uint kCLodVirtualShadowBlockPackedPhysicalPageIndexCount =
+    (kCLodVirtualShadowBlockPagesPerAxis * kCLodVirtualShadowBlockPagesPerAxis) / 2u;
+static const uint kCLodVirtualShadowBlockMaxTrackedPerCluster = 32u;
 
 struct CLodVirtualShadowClipmapInfo
 {
@@ -159,6 +163,15 @@ struct CLodVirtualShadowStats
     uint visitedDirtyPageTableEntries[kCLodVirtualShadowClipmapCount];
 };
 
+struct CLodVirtualShadowBlockMeta
+{
+    uint packedVirtualBlockOrigin;
+    uint packedWrappedBlockOrigin;
+    uint activePageMask;
+    uint packedActiveRectAndFlags;
+    uint packedPhysicalPageIndices[kCLodVirtualShadowBlockPackedPhysicalPageIndexCount];
+};
+
 bool CLodVirtualShadowClipmapIsValid(CLodVirtualShadowClipmapInfo clipmapInfo)
 {
     return (clipmapInfo.flags & kCLodVirtualShadowClipmapValidFlag) != 0u &&
@@ -269,6 +282,63 @@ uint2 CLodVirtualShadowVirtualPageCoordsFromPixel(uint2 pixel, CLodVirtualShadow
         clampedPageTableResolution - 1u);
 }
 
+uint2 CLodVirtualShadowBlockCoordFromPageCoord(uint2 pageCoord)
+{
+    return pageCoord / kCLodVirtualShadowBlockPagesPerAxis;
+}
+
+uint2 CLodVirtualShadowBlockOriginFromBlockCoord(uint2 blockCoord)
+{
+    return blockCoord * kCLodVirtualShadowBlockPagesPerAxis;
+}
+
+uint CLodVirtualShadowBlockLocalPageIndex(uint2 localPageCoord)
+{
+    return localPageCoord.x + localPageCoord.y * kCLodVirtualShadowBlockPagesPerAxis;
+}
+
+uint CLodVirtualShadowPackBlockPageCoords(uint2 pageCoords)
+{
+    return (pageCoords.x & 0xFFFFu) | ((pageCoords.y & 0xFFFFu) << 16u);
+}
+
+uint2 CLodVirtualShadowUnpackBlockPageCoords(uint packedPageCoords)
+{
+    return uint2(packedPageCoords & 0xFFFFu, (packedPageCoords >> 16u) & 0xFFFFu);
+}
+
+uint CLodVirtualShadowPackBlockActiveRect(uint2 minLocalPageCoord, uint2 maxLocalPageCoord, bool overflowed)
+{
+    return
+        ((minLocalPageCoord.x & 0x3u) << 0u) |
+        ((minLocalPageCoord.y & 0x3u) << 2u) |
+        ((maxLocalPageCoord.x & 0x3u) << 4u) |
+        ((maxLocalPageCoord.y & 0x3u) << 6u) |
+        ((overflowed ? 1u : 0u) << 8u);
+}
+
+uint2 CLodVirtualShadowUnpackBlockActiveRectMin(uint packedActiveRect)
+{
+    return uint2((packedActiveRect >> 0u) & 0x3u, (packedActiveRect >> 2u) & 0x3u);
+}
+
+uint2 CLodVirtualShadowUnpackBlockActiveRectMax(uint packedActiveRect)
+{
+    return uint2((packedActiveRect >> 4u) & 0x3u, (packedActiveRect >> 6u) & 0x3u);
+}
+
+bool CLodVirtualShadowBlockActiveRectOverflowed(uint packedActiveRect)
+{
+    return ((packedActiveRect >> 8u) & 0x1u) != 0u;
+}
+
+bool CLodVirtualShadowBlockActiveRectContainsPage(uint packedActiveRect, uint2 localPageCoord)
+{
+    const uint2 minLocalPageCoord = CLodVirtualShadowUnpackBlockActiveRectMin(packedActiveRect);
+    const uint2 maxLocalPageCoord = CLodVirtualShadowUnpackBlockActiveRectMax(packedActiveRect);
+    return all(localPageCoord >= minLocalPageCoord) && all(localPageCoord <= maxLocalPageCoord);
+}
+
 bool CLodVirtualShadowAnyRenderablePageInPixelRect(
     uint2 minPixel,
     uint2 maxPixel,
@@ -287,6 +357,40 @@ bool CLodVirtualShadowAnyRenderablePageInPixelRect(
 
     const uint2 minPageCoords = CLodVirtualShadowVirtualPageCoordsFromPixel(minPixel, clipmapInfo);
     const uint2 maxPageCoords = CLodVirtualShadowVirtualPageCoordsFromPixel(maxPixel, clipmapInfo);
+
+    [loop]
+    for (uint pageY = minPageCoords.y; pageY <= maxPageCoords.y; ++pageY)
+    {
+        [loop]
+        for (uint pageX = minPageCoords.x; pageX <= maxPageCoords.x; ++pageX)
+        {
+            const uint2 wrappedPageCoords = CLodVirtualShadowWrappedPageCoords(uint2(pageX, pageY), clipmapInfo);
+            const uint pageEntry = pageTable[uint3(wrappedPageCoords, clipmapInfo.pageTableLayer)];
+            if (CLodVirtualShadowPageEntryCanRaster(pageEntry))
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool CLodVirtualShadowAnyRenderablePageInPageRect(
+    uint2 minPageCoords,
+    uint2 maxPageCoords,
+    CLodVirtualShadowClipmapInfo clipmapInfo,
+    RWTexture2DArray<uint> pageTable)
+{
+    if (!CLodVirtualShadowClipmapIsValid(clipmapInfo))
+    {
+        return false;
+    }
+
+    if (minPageCoords.x > maxPageCoords.x || minPageCoords.y > maxPageCoords.y)
+    {
+        return false;
+    }
 
     [loop]
     for (uint pageY = minPageCoords.y; pageY <= maxPageCoords.y; ++pageY)

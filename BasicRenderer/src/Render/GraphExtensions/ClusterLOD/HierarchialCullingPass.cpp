@@ -216,16 +216,14 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
         builder->WithShaderResource(
             Builtin::Shadows::CLodClipmapInfo,
             Builtin::Shadows::CLodCompactShadowCameras,
-            m_shadowDirtyHierarchyTexture);
+            m_shadowDirtyHierarchyTexture)
+            .WithUnorderedAccess(Builtin::Shadows::CLodPageTable);
         if (m_shadowInvalidatedInstancesBitsetBuffer) {
             builder->WithShaderResource(m_shadowInvalidatedInstancesBitsetBuffer);
         }
     }
     if (UsesWorkGraphSWRaster(m_workGraphMode) && UsesVirtualShadowOutput(m_rasterOutputKind)) {
-        builder->WithShaderResource(
-                Builtin::Shadows::CLodPageTable)
-            .WithUnorderedAccess(Builtin::Shadows::CLodPhysicalPages)
-            .WithUnorderedAccess(Builtin::Shadows::CLodPageTable);
+        builder->WithUnorderedAccess(Builtin::Shadows::CLodPhysicalPages);
     }
 
     // Phase 2 reads Phase 1's HW counter to offset writes in the visible clusters buffer.
@@ -645,6 +643,16 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
     multiNodeGpuInput.numNodeInputs = 2;
     multiNodeGpuInput.pad0 = 0;
     multiNodeGpuInput.nodeInputStride = sizeof(CLodNodeGpuInput);
+
+    // Replay dispatch descriptors need stable GPU virtual addresses during Update.
+    // These CLod-owned control buffers are small non-aliased resources, so it is safe to materialize
+    // them eagerly here before building the replay node input table.
+    if (!m_occlusionNodeGpuInputsBuffer->IsMaterialized()) {
+        m_occlusionNodeGpuInputsBuffer->Materialize();
+    }
+    if (!m_occlusionReplayBuffer->IsMaterialized()) {
+        m_occlusionReplayBuffer->Materialize();
+    }
 
     if (ID3D12Resource* nodeInputResource = rhi::dx12::get_resource(m_occlusionNodeGpuInputsBuffer->GetAPIResource())) {
         const uint64_t nodeInputBufferAddress = nodeInputResource->GetGPUVirtualAddress();

@@ -555,6 +555,7 @@ void EmitCachedMeshletVisBufferVerticesForViewCLod(
 bool ClodTriangleTouchesRenderableVirtualShadowPages(
     uint3 tri,
     ClodViewRasterInfo rasterInfo,
+    uint shadowVsmPayload,
     CLodVirtualShadowClipmapInfo clipmapInfo,
     RWTexture2DArray<uint> pageTable)
 {
@@ -600,9 +601,46 @@ bool ClodTriangleTouchesRenderableVirtualShadowPages(
         return false;
     }
 
-    return CLodVirtualShadowAnyRenderablePageInPixelRect(
-        uint2(minPx),
-        uint2(maxPx),
+    uint2 minPageCoords = CLodVirtualShadowVirtualPageCoordsFromPixel(uint2(minPx), clipmapInfo);
+    uint2 maxPageCoords = CLodVirtualShadowVirtualPageCoordsFromPixel(uint2(maxPx), clipmapInfo);
+
+    if (CLodVisibleClusterHasVsmBlockDataFromPayload(shadowVsmPayload))
+    {
+        const uint2 blockCoord = CLodVisibleClusterVsmBlockCoordFromPayload(shadowVsmPayload);
+        const uint2 minTouchedBlockCoord = CLodVirtualShadowBlockCoordFromPageCoord(minPageCoords);
+        const uint2 maxTouchedBlockCoord = CLodVirtualShadowBlockCoordFromPageCoord(maxPageCoords);
+        if (any(blockCoord < minTouchedBlockCoord) || any(blockCoord > maxTouchedBlockCoord))
+        {
+            return false;
+        }
+
+        const uint packedActiveRect = CLodVisibleClusterVsmActiveRectFromPayload(shadowVsmPayload);
+        const uint2 blockOriginPageCoord = CLodVisibleClusterVsmBlockOriginPageCoordFromPayload(shadowVsmPayload);
+        const uint2 blockMaxPageCoord = blockOriginPageCoord + uint2(kCLodVirtualShadowBlockPagesPerAxis - 1u, kCLodVirtualShadowBlockPagesPerAxis - 1u);
+        const uint2 activeMinLocalPageCoord = CLodVirtualShadowUnpackBlockActiveRectMin(packedActiveRect);
+        const uint2 activeMaxLocalPageCoord = CLodVirtualShadowUnpackBlockActiveRectMax(packedActiveRect);
+        const uint2 activeMinPageCoord = blockOriginPageCoord + activeMinLocalPageCoord;
+        const uint2 activeMaxPageCoord = blockOriginPageCoord + activeMaxLocalPageCoord;
+
+        if (minPageCoords.x > blockMaxPageCoord.x || minPageCoords.y > blockMaxPageCoord.y ||
+            maxPageCoords.x < blockOriginPageCoord.x || maxPageCoords.y < blockOriginPageCoord.y)
+        {
+            return false;
+        }
+
+        if (minPageCoords.x > activeMaxPageCoord.x || minPageCoords.y > activeMaxPageCoord.y ||
+            maxPageCoords.x < activeMinPageCoord.x || maxPageCoords.y < activeMinPageCoord.y)
+        {
+            return false;
+        }
+
+        minPageCoords = max(minPageCoords, activeMinPageCoord);
+        maxPageCoords = min(maxPageCoords, activeMaxPageCoord);
+    }
+
+    return CLodVirtualShadowAnyRenderablePageInPageRect(
+        minPageCoords,
+        maxPageCoords,
         clipmapInfo,
         pageTable);
 }
@@ -700,6 +738,7 @@ bool InitializeMeshletFromCompactedCluster(uint4 packedCluster, out MeshletSetup
     setup.meshInstanceBuffer = meshInstanceBuffer[CLodVisibleClusterInstanceID(packedCluster)];
     setup.viewID = CLodVisibleClusterViewID(packedCluster);
     setup.shadowClipmapIndex = CLodVisibleClusterShadowClipmapIndex(packedCluster);
+    setup.virtualShadowPayload = CLodVisibleClusterVsmPayload(packedCluster);
 
     StructuredBuffer<PerMeshBuffer> perMeshBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerMeshBuffer)];
     StructuredBuffer<PerObjectBuffer> perObjectBuffer = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::PerObjectBuffer)];
@@ -826,7 +865,7 @@ void ClusterLODBucketMSMain(
             uGroupThreadID,
             setup,
             setup.viewID,
-            setup.shadowClipmapIndex,
+            setup.virtualShadowPayload,
             unsortedClusterIndex,
             viewRasterInfo);
         GroupMemoryBarrierWithGroupSync();
@@ -864,6 +903,7 @@ void ClusterLODBucketMSMain(
                 ClodTriangleTouchesRenderableVirtualShadowPages(
                     tri,
                     viewRasterInfo,
+                    setup.virtualShadowPayload,
                     gs_clodVsmClipmapInfo,
                     pageTable))
             {
@@ -892,7 +932,7 @@ void ClusterLODBucketMSMain(
                 uGroupThreadID,
                 setup,
                 setup.viewID,
-                setup.shadowClipmapIndex,
+                setup.virtualShadowPayload,
                 unsortedClusterIndex,
                 outputVertices);
             EmitFilteredMeshletTriangles(uGroupThreadID, setup, outputTriangles, primitiveInfo);
@@ -902,7 +942,7 @@ void ClusterLODBucketMSMain(
             uGroupThreadID,
             setup,
             setup.viewID,
-            setup.shadowClipmapIndex,
+            setup.virtualShadowPayload,
             unsortedClusterIndex,
             viewRasterInfo,
             outputVertices,

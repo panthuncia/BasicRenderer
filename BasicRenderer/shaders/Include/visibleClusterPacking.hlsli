@@ -1,10 +1,35 @@
 #ifndef CLOD_VISIBLE_CLUSTER_PACKING_HLSLI
 #define CLOD_VISIBLE_CLUSTER_PACKING_HLSLI
 
+#include "include/clodVirtualShadowClipmap.hlsli"
+
 static const uint CLOD_PACKED_VISIBLE_CLUSTER_STRIDE = 16u;
 static const uint CLOD_PACKED_VISIBLE_CLUSTER_PAGE_SHIFT = 18u;
 static const uint CLOD_PACKED_VISIBLE_CLUSTER_PAGE_MASK = 0x3FFu;
 static const uint CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX = 0xFFFFFFFFu;
+static const uint CLOD_PACKED_VISIBLE_CLUSTER_VSM_CLIPMAP_BITS = 5u;
+static const uint CLOD_PACKED_VISIBLE_CLUSTER_VSM_BLOCK_COORD_BITS = 5u;
+static const uint CLOD_PACKED_VISIBLE_CLUSTER_VSM_LOCAL_PAGE_BITS = 2u;
+static const uint CLOD_PACKED_VISIBLE_CLUSTER_VSM_CLIPMAP_MASK =
+    (1u << CLOD_PACKED_VISIBLE_CLUSTER_VSM_CLIPMAP_BITS) - 1u;
+static const uint CLOD_PACKED_VISIBLE_CLUSTER_VSM_INVALID_CLIPMAP_BITS = CLOD_PACKED_VISIBLE_CLUSTER_VSM_CLIPMAP_MASK;
+static const uint CLOD_PACKED_VISIBLE_CLUSTER_VSM_CLIPMAP_SHIFT = 0u;
+static const uint CLOD_PACKED_VISIBLE_CLUSTER_VSM_BLOCK_X_SHIFT =
+    CLOD_PACKED_VISIBLE_CLUSTER_VSM_CLIPMAP_SHIFT + CLOD_PACKED_VISIBLE_CLUSTER_VSM_CLIPMAP_BITS;
+static const uint CLOD_PACKED_VISIBLE_CLUSTER_VSM_BLOCK_Y_SHIFT =
+    CLOD_PACKED_VISIBLE_CLUSTER_VSM_BLOCK_X_SHIFT + CLOD_PACKED_VISIBLE_CLUSTER_VSM_BLOCK_COORD_BITS;
+static const uint CLOD_PACKED_VISIBLE_CLUSTER_VSM_RECT_MIN_X_SHIFT =
+    CLOD_PACKED_VISIBLE_CLUSTER_VSM_BLOCK_Y_SHIFT + CLOD_PACKED_VISIBLE_CLUSTER_VSM_BLOCK_COORD_BITS;
+static const uint CLOD_PACKED_VISIBLE_CLUSTER_VSM_RECT_MIN_Y_SHIFT =
+    CLOD_PACKED_VISIBLE_CLUSTER_VSM_RECT_MIN_X_SHIFT + CLOD_PACKED_VISIBLE_CLUSTER_VSM_LOCAL_PAGE_BITS;
+static const uint CLOD_PACKED_VISIBLE_CLUSTER_VSM_RECT_MAX_X_SHIFT =
+    CLOD_PACKED_VISIBLE_CLUSTER_VSM_RECT_MIN_Y_SHIFT + CLOD_PACKED_VISIBLE_CLUSTER_VSM_LOCAL_PAGE_BITS;
+static const uint CLOD_PACKED_VISIBLE_CLUSTER_VSM_RECT_MAX_Y_SHIFT =
+    CLOD_PACKED_VISIBLE_CLUSTER_VSM_RECT_MAX_X_SHIFT + CLOD_PACKED_VISIBLE_CLUSTER_VSM_LOCAL_PAGE_BITS;
+static const uint CLOD_PACKED_VISIBLE_CLUSTER_VSM_OVERFLOW_SHIFT =
+    CLOD_PACKED_VISIBLE_CLUSTER_VSM_RECT_MAX_Y_SHIFT + CLOD_PACKED_VISIBLE_CLUSTER_VSM_LOCAL_PAGE_BITS;
+static const uint CLOD_PACKED_VISIBLE_CLUSTER_VSM_HAS_BLOCK_DATA_SHIFT =
+    CLOD_PACKED_VISIBLE_CLUSTER_VSM_OVERFLOW_SHIFT + 1u;
 
 uint4 CLodLoadVisibleClusterPacked(ByteAddressBuffer buffer, uint clusterIndex)
 {
@@ -84,9 +109,85 @@ uint CLodVisibleClusterPageSlabByteOffset(uint4 packedCluster)
     return ((packedCluster.z >> 22u) & CLOD_PACKED_VISIBLE_CLUSTER_PAGE_MASK) << CLOD_PACKED_VISIBLE_CLUSTER_PAGE_SHIFT;
 }
 
-uint CLodVisibleClusterShadowClipmapIndex(uint4 packedCluster)
+uint CLodVisibleClusterVsmPayload(uint4 packedCluster)
 {
     return packedCluster.w;
+}
+
+uint CLodBuildVisibleClusterVsmPayloadFromClipmapIndex(uint shadowClipmapIndex)
+{
+    const uint encodedClipmapIndex =
+        shadowClipmapIndex == CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX
+            ? CLOD_PACKED_VISIBLE_CLUSTER_VSM_INVALID_CLIPMAP_BITS
+            : (shadowClipmapIndex & CLOD_PACKED_VISIBLE_CLUSTER_VSM_CLIPMAP_MASK);
+    return encodedClipmapIndex << CLOD_PACKED_VISIBLE_CLUSTER_VSM_CLIPMAP_SHIFT;
+}
+
+uint CLodPackVisibleClusterVsmPayloadForBlock(
+    uint shadowClipmapIndex,
+    uint2 blockCoord,
+    uint2 minLocalPageCoord,
+    uint2 maxLocalPageCoord,
+    bool overflowed)
+{
+    uint payload = CLodBuildVisibleClusterVsmPayloadFromClipmapIndex(shadowClipmapIndex);
+    payload |= (blockCoord.x & 0x1Fu) << CLOD_PACKED_VISIBLE_CLUSTER_VSM_BLOCK_X_SHIFT;
+    payload |= (blockCoord.y & 0x1Fu) << CLOD_PACKED_VISIBLE_CLUSTER_VSM_BLOCK_Y_SHIFT;
+    payload |= (minLocalPageCoord.x & 0x3u) << CLOD_PACKED_VISIBLE_CLUSTER_VSM_RECT_MIN_X_SHIFT;
+    payload |= (minLocalPageCoord.y & 0x3u) << CLOD_PACKED_VISIBLE_CLUSTER_VSM_RECT_MIN_Y_SHIFT;
+    payload |= (maxLocalPageCoord.x & 0x3u) << CLOD_PACKED_VISIBLE_CLUSTER_VSM_RECT_MAX_X_SHIFT;
+    payload |= (maxLocalPageCoord.y & 0x3u) << CLOD_PACKED_VISIBLE_CLUSTER_VSM_RECT_MAX_Y_SHIFT;
+    payload |= (overflowed ? 1u : 0u) << CLOD_PACKED_VISIBLE_CLUSTER_VSM_OVERFLOW_SHIFT;
+    payload |= 1u << CLOD_PACKED_VISIBLE_CLUSTER_VSM_HAS_BLOCK_DATA_SHIFT;
+    return payload;
+}
+
+uint CLodVisibleClusterShadowClipmapIndexFromPayload(uint vsmPayload)
+{
+    const uint encodedClipmapIndex =
+        (vsmPayload >> CLOD_PACKED_VISIBLE_CLUSTER_VSM_CLIPMAP_SHIFT) & CLOD_PACKED_VISIBLE_CLUSTER_VSM_CLIPMAP_MASK;
+    return encodedClipmapIndex == CLOD_PACKED_VISIBLE_CLUSTER_VSM_INVALID_CLIPMAP_BITS
+        ? CLOD_PACKED_VISIBLE_CLUSTER_INVALID_SHADOW_CLIPMAP_INDEX
+        : encodedClipmapIndex;
+}
+
+uint CLodVisibleClusterShadowClipmapIndex(uint4 packedCluster)
+{
+    return CLodVisibleClusterShadowClipmapIndexFromPayload(CLodVisibleClusterVsmPayload(packedCluster));
+}
+
+bool CLodVisibleClusterHasVsmBlockDataFromPayload(uint vsmPayload)
+{
+    return ((vsmPayload >> CLOD_PACKED_VISIBLE_CLUSTER_VSM_HAS_BLOCK_DATA_SHIFT) & 0x1u) != 0u;
+}
+
+uint2 CLodVisibleClusterVsmBlockCoordFromPayload(uint vsmPayload)
+{
+    return uint2(
+        (vsmPayload >> CLOD_PACKED_VISIBLE_CLUSTER_VSM_BLOCK_X_SHIFT) & 0x1Fu,
+        (vsmPayload >> CLOD_PACKED_VISIBLE_CLUSTER_VSM_BLOCK_Y_SHIFT) & 0x1Fu);
+}
+
+uint2 CLodVisibleClusterVsmBlockOriginPageCoordFromPayload(uint vsmPayload)
+{
+    return CLodVirtualShadowBlockOriginFromBlockCoord(CLodVisibleClusterVsmBlockCoordFromPayload(vsmPayload));
+}
+
+uint CLodVisibleClusterVsmActiveRectFromPayload(uint vsmPayload)
+{
+    return CLodVirtualShadowPackBlockActiveRect(
+        uint2(
+            (vsmPayload >> CLOD_PACKED_VISIBLE_CLUSTER_VSM_RECT_MIN_X_SHIFT) & 0x3u,
+            (vsmPayload >> CLOD_PACKED_VISIBLE_CLUSTER_VSM_RECT_MIN_Y_SHIFT) & 0x3u),
+        uint2(
+            (vsmPayload >> CLOD_PACKED_VISIBLE_CLUSTER_VSM_RECT_MAX_X_SHIFT) & 0x3u,
+            (vsmPayload >> CLOD_PACKED_VISIBLE_CLUSTER_VSM_RECT_MAX_Y_SHIFT) & 0x3u),
+        ((vsmPayload >> CLOD_PACKED_VISIBLE_CLUSTER_VSM_OVERFLOW_SHIFT) & 0x1u) != 0u);
+}
+
+bool CLodVisibleClusterVsmBlockOverflowedFromPayload(uint vsmPayload)
+{
+    return ((vsmPayload >> CLOD_PACKED_VISIBLE_CLUSTER_VSM_OVERFLOW_SHIFT) & 0x1u) != 0u;
 }
 
 uint4 CLodPackVisibleCluster(
@@ -103,7 +204,24 @@ uint4 CLodPackVisibleCluster(
         (viewID & 0xFFu) | ((instanceID & 0xFFFFFFu) << 8u),
         (localMeshletIndex & 0x3FFFu) | ((groupID & 0x3FFFFu) << 14u),
         ((groupID >> 18u) & 0x3u) | ((pageSlabDescriptorIndex & 0xFFFFFu) << 2u) | ((pageIndex & CLOD_PACKED_VISIBLE_CLUSTER_PAGE_MASK) << 22u),
-        shadowClipmapIndex);
+        CLodBuildVisibleClusterVsmPayloadFromClipmapIndex(shadowClipmapIndex));
+}
+
+uint4 CLodPackVisibleClusterWithVsmPayload(
+    uint viewID,
+    uint instanceID,
+    uint localMeshletIndex,
+    uint groupID,
+    uint pageSlabDescriptorIndex,
+    uint pageSlabByteOffset,
+    uint vsmPayload)
+{
+    const uint pageIndex = pageSlabByteOffset >> CLOD_PACKED_VISIBLE_CLUSTER_PAGE_SHIFT;
+    return uint4(
+        (viewID & 0xFFu) | ((instanceID & 0xFFFFFFu) << 8u),
+        (localMeshletIndex & 0x3FFFu) | ((groupID & 0x3FFFFu) << 14u),
+        ((groupID >> 18u) & 0x3u) | ((pageSlabDescriptorIndex & 0xFFFFFu) << 2u) | ((pageIndex & CLOD_PACKED_VISIBLE_CLUSTER_PAGE_MASK) << 22u),
+        vsmPayload);
 }
 
 void CLodStoreVisibleClusterRW(
@@ -130,6 +248,30 @@ void CLodStoreVisibleClusterRW(
             shadowClipmapIndex));
 }
 
+void CLodStoreVisibleClusterWithVsmPayloadRW(
+    RWByteAddressBuffer buffer,
+    uint clusterIndex,
+    uint viewID,
+    uint instanceID,
+    uint localMeshletIndex,
+    uint groupID,
+    uint pageSlabDescriptorIndex,
+    uint pageSlabByteOffset,
+    uint vsmPayload)
+{
+    CLodStoreVisibleClusterPackedWordsRW(
+        buffer,
+        clusterIndex,
+        CLodPackVisibleClusterWithVsmPayload(
+            viewID,
+            instanceID,
+            localMeshletIndex,
+            groupID,
+            pageSlabDescriptorIndex,
+            pageSlabByteOffset,
+            vsmPayload));
+}
+
 void CLodStoreVisibleClusterGloballyCoherent(
     globallycoherent RWByteAddressBuffer buffer,
     uint clusterIndex,
@@ -152,6 +294,30 @@ void CLodStoreVisibleClusterGloballyCoherent(
             pageSlabDescriptorIndex,
             pageSlabByteOffset,
             shadowClipmapIndex));
+}
+
+void CLodStoreVisibleClusterWithVsmPayloadGloballyCoherent(
+    globallycoherent RWByteAddressBuffer buffer,
+    uint clusterIndex,
+    uint viewID,
+    uint instanceID,
+    uint localMeshletIndex,
+    uint groupID,
+    uint pageSlabDescriptorIndex,
+    uint pageSlabByteOffset,
+    uint vsmPayload)
+{
+    CLodStoreVisibleClusterPackedWordsGloballyCoherent(
+        buffer,
+        clusterIndex,
+        CLodPackVisibleClusterWithVsmPayload(
+            viewID,
+            instanceID,
+            localMeshletIndex,
+            groupID,
+            pageSlabDescriptorIndex,
+            pageSlabByteOffset,
+            vsmPayload));
 }
 
 #endif

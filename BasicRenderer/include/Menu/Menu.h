@@ -535,6 +535,10 @@ private:
     std::function<uint32_t()> getCLodPageJobMaxPagesPerCluster;
     std::function<void(uint32_t)> setCLodPageJobMaxPagesPerCluster;
 
+    uint32_t m_clodPageJobRecordCapacity = CLodPageJobDefaultRecordCapacity;
+    std::function<uint32_t()> getCLodPageJobRecordCapacity;
+    std::function<void(uint32_t)> setCLodPageJobRecordCapacity;
+
     bool m_clodPageJobForceAll = false;
     std::function<bool()> getCLodPageJobForceAll;
     std::function<void(bool)> setCLodPageJobForceAll;
@@ -823,6 +827,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     setCLodPageJobMaxPagesPerCluster = settingsManager.getSettingSetter<uint32_t>(CLodPageJobMaxPagesPerClusterSettingName);
     m_clodPageJobMaxPagesPerCluster = getCLodPageJobMaxPagesPerCluster();
     observerSetting(m_clodPageJobMaxPagesPerCluster, CLodPageJobMaxPagesPerClusterSettingName);
+
+    getCLodPageJobRecordCapacity = settingsManager.getSettingGetter<uint32_t>(CLodPageJobRecordCapacitySettingName);
+    setCLodPageJobRecordCapacity = settingsManager.getSettingSetter<uint32_t>(CLodPageJobRecordCapacitySettingName);
+    m_clodPageJobRecordCapacity = getCLodPageJobRecordCapacity();
+    observerSetting(m_clodPageJobRecordCapacity, CLodPageJobRecordCapacitySettingName);
 
     getCLodPageJobForceAll = settingsManager.getSettingGetter<bool>(CLodPageJobForceAllSettingName);
     setCLodPageJobForceAll = settingsManager.getSettingSetter<bool>(CLodPageJobForceAllSettingName);
@@ -1207,6 +1216,11 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
             if (ImGui::SliderInt("Page-Job Max Pages/Cluster", &maxPages, 1, 255)) {
                 m_clodPageJobMaxPagesPerCluster = static_cast<uint32_t>(std::clamp(maxPages, 1, 255));
                 setCLodPageJobMaxPagesPerCluster(m_clodPageJobMaxPagesPerCluster);
+            }
+            int pageJobRecordCapacity = static_cast<int>(m_clodPageJobRecordCapacity);
+            if (ImGui::SliderInt("Page-Job Record Capacity", &pageJobRecordCapacity, 1, 8 * 1024 * 1024)) {
+                m_clodPageJobRecordCapacity = static_cast<uint32_t>(std::clamp(pageJobRecordCapacity, 1, 8 * 1024 * 1024));
+                setCLodPageJobRecordCapacity(m_clodPageJobRecordCapacity);
             }
             if (ImGui::Checkbox("Force All Opaque VSM -> Page-Job", &m_clodPageJobForceAll)) {
                 setCLodPageJobForceAll(m_clodPageJobForceAll);

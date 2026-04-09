@@ -21,6 +21,7 @@ inline constexpr const char* CLodEnablePageJobVSMSettingName = "clodEnablePageJo
 inline constexpr const char* CLodPageJobDiameterThresholdSettingName = "clodPageJobDiameterThreshold";
 inline constexpr const char* CLodPageJobSparseRatioSettingName = "clodPageJobSparseRatio";
 inline constexpr const char* CLodPageJobMaxPagesPerClusterSettingName = "clodPageJobMaxPagesPerCluster";
+inline constexpr const char* CLodPageJobRecordCapacitySettingName = "clodPageJobRecordCapacity";
 inline constexpr const char* CLodPageJobForceAllSettingName = "clodPageJobForceAll";
 inline constexpr const char* CLodWorkGraphComputePageJobDescriptorBufferId = "CLod::WorkGraphComputePageJobDescriptors";
 inline constexpr const char* CLodDirectionalVirtualShadowMaxBackingResolutionSettingName = "clodDirectionalVirtualShadowMaxBackingResolution";
@@ -189,11 +190,16 @@ inline constexpr uint32_t CLodVirtualShadowDefaultSmrtSamplesPerRayDirectional =
 inline constexpr float CLodVirtualShadowDefaultSmrtMaxRayAngleFromLightDegrees = 5.0f;
 inline constexpr float CLodVirtualShadowDefaultSmrtRayLengthScaleDirectional = 1.0f;
 inline constexpr uint32_t CLodVirtualShadowMarkTileSize = 16u;
+inline constexpr uint32_t CLodVirtualShadowBlockPagesPerAxis = 4u;
+inline constexpr uint32_t CLodVirtualShadowBlockPackedPhysicalPageIndexCount =
+    (CLodVirtualShadowBlockPagesPerAxis * CLodVirtualShadowBlockPagesPerAxis) / 2u;
+inline constexpr uint32_t CLodVirtualShadowBlockMaxTrackedPerCluster = 32u;
 inline constexpr uint32_t CLodVirtualShadowMaxMarkTileGridDimension = 512u;
 inline constexpr uint32_t CLodVirtualShadowMaxMarkTileCount =
     CLodVirtualShadowMaxMarkTileGridDimension * CLodVirtualShadowMaxMarkTileGridDimension;
 inline constexpr uint32_t CLodVirtualShadowMaxAllocationRequests = 1u << 16;
 inline constexpr uint32_t CLodVirtualShadowMaxInvalidationInputs = 1u << 16;
+inline constexpr uint32_t CLodPageJobDefaultRecordCapacity = 1u << 20;
 inline constexpr uint32_t CLodVirtualShadowMovedInstanceBitCapacity = 1u << 20;
 inline constexpr uint32_t CLodVirtualShadowPredictiveCandidateCapacity = 1u << 16;
 inline constexpr uint32_t CLodVirtualShadowPredictiveRawPageCapacity = 1u << 20;
@@ -420,6 +426,11 @@ inline uint32_t CLodVirtualShadowGetConfiguredMaxPhysicalPageCapacity()
         CLodVirtualShadowGetConfiguredMaxBackingResolution());
 }
 
+inline uint32_t CLodVirtualShadowGetConfiguredComputeClusterCapacity(uint32_t maxVisibleClusters)
+{
+    return (std::max)(1u, maxVisibleClusters);
+}
+
 inline float CLodVirtualShadowAutomaticDirectionalLodBiasFromBudget(uint32_t maxPhysicalPages, float autoLodBiasScale)
 {
     const uint32_t sanitizedMaxPhysicalPages = CLodVirtualShadowSanitizePhysicalPageCount(maxPhysicalPages);
@@ -549,6 +560,17 @@ struct CLodVirtualShadowMarkTileWorkItem
 };
 
 static_assert(sizeof(CLodVirtualShadowMarkTileWorkItem) == 16u, "CLodVirtualShadowMarkTileWorkItem size must match HLSL");
+
+struct CLodVirtualShadowBlockMeta
+{
+    uint32_t packedVirtualBlockOrigin = 0u;
+    uint32_t packedWrappedBlockOrigin = 0u;
+    uint32_t activePageMask = 0u;
+    uint32_t packedActiveRectAndFlags = 0u;
+    uint32_t packedPhysicalPageIndices[CLodVirtualShadowBlockPackedPhysicalPageIndexCount] = {};
+};
+
+static_assert(sizeof(CLodVirtualShadowBlockMeta) == 48u, "CLodVirtualShadowBlockMeta size must match HLSL");
 
 struct CLodVirtualShadowPageAllocationRequest
 {

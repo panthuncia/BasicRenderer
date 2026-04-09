@@ -26,6 +26,9 @@ public:
 
 private:
     bool IsReyesTessellationDisabled() const;
+    void RefreshShadowConfiguredSettings();
+    uint32_t GetVisibleClusterCapacity() const;
+    void RefreshCoreVisibleClusterCapacity();
     void InitializeCoreResources();
     void InitializeDeepVisibilityResources();
     void InitializeShadowResources();
@@ -39,6 +42,7 @@ private:
 
     CLodExtensionType m_type;
     uint32_t m_maxVisibleClusters = 0u;
+    uint32_t m_visibleClusterCapacity = 0u;
     uint32_t m_reyesFullClusterOutputCapacity = 0u;
     uint32_t m_reyesOwnedClusterCapacity = 0u;
     uint32_t m_reyesSplitQueueCapacity = 0u;
@@ -179,6 +183,10 @@ private:
     std::shared_ptr<Buffer> m_swPageJobIndirectArgsBufferPhase2Skinned;
     std::shared_ptr<Buffer> m_swPageJobClusterTagsBuffer;
     std::shared_ptr<Buffer> m_swPageJobClusterTagsBufferPhase2;
+    std::shared_ptr<Buffer> m_vsmExpandedVisibleClustersBuffer;
+    std::shared_ptr<Buffer> m_vsmExpandedBlockMetaBuffer;
+    std::shared_ptr<Buffer> m_vsmExpandedVisibleClustersBufferSw;
+    std::shared_ptr<Buffer> m_vsmExpandedBlockMetaBufferSw;
 
     std::unique_ptr<CLodStreamingSystem> m_streamingSystem;
     bool m_providerRegisteredForCurrentRegistry = false;
@@ -186,4 +194,7 @@ private:
     uint32_t m_shadowConfiguredBackingResolution = 0u;
     uint32_t m_shadowConfiguredMaxPhysicalPageCount = 0u;
     uint32_t m_shadowConfiguredPageJobMaxPages = 0u;
+    uint32_t m_shadowConfiguredPageJobRecordCapacity = 0u;
+    uint32_t m_shadowConfiguredComputeClusterCapacity = 0u;
+    uint32_t m_shadowConfiguredExpandedRecordCapacity = 0u;
 };

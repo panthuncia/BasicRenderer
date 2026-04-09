@@ -1,5 +1,6 @@
 #include "include/cbuffers.hlsli"
 #include "include/clodVirtualShadowClipmap.hlsli"
+#include "include/visibleClusterPacking.hlsli"
 #include "include/structs.hlsli"
 #include "include/utilities.hlsli"
 #include "include/waveIntrinsicsHelpers.hlsli"
@@ -86,7 +87,8 @@ void VirtualShadowBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsF
     TestAlpha(input.texcoord, input.materialDataIndex);
 #endif
 
-    const uint clipmapIndex = input.shadowClipmapIndex;
+    const uint shadowVsmPayload = input.shadowClipmapIndex;
+    const uint clipmapIndex = CLodVisibleClusterShadowClipmapIndexFromPayload(shadowVsmPayload);
     if (clipmapIndex >= kCLodVirtualShadowClipmapCount)
     {
         return;
@@ -102,6 +104,23 @@ void VirtualShadowBufferPSMain(VisBufferPSInput input, bool isFrontFace : SV_IsF
     const float virtualResolution = max((float)CLOD_RASTER_VIRTUAL_SHADOW_VIRTUAL_RESOLUTION, 1.0f);
     const float2 shadowUv = saturate((float2(pixel) + 0.5f) / virtualResolution);
     const uint2 virtualPageCoords = CLodVirtualShadowVirtualPageCoordsFromUv(shadowUv, clipmapInfo);
+
+    if (CLodVisibleClusterHasVsmBlockDataFromPayload(shadowVsmPayload))
+    {
+        const uint2 blockCoord = CLodVisibleClusterVsmBlockCoordFromPayload(shadowVsmPayload);
+        if (any(CLodVirtualShadowBlockCoordFromPageCoord(virtualPageCoords) != blockCoord))
+        {
+            return;
+        }
+
+        const uint packedActiveRect = CLodVisibleClusterVsmActiveRectFromPayload(shadowVsmPayload);
+        const uint2 localPageCoord = virtualPageCoords - CLodVisibleClusterVsmBlockOriginPageCoordFromPayload(shadowVsmPayload);
+        if (!CLodVirtualShadowBlockActiveRectContainsPage(packedActiveRect, localPageCoord))
+        {
+            return;
+        }
+    }
+
     const uint2 wrappedPageCoords = CLodVirtualShadowWrappedPageCoords(virtualPageCoords, clipmapInfo);
 
     RWTexture2DArray<uint> pageTable = ResourceDescriptorHeap[CLOD_RASTER_VIRTUAL_SHADOW_PAGE_TABLE_DESCRIPTOR_INDEX];
