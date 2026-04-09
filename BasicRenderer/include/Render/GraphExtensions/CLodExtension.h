@@ -163,11 +163,16 @@ private:
     std::shared_ptr<Buffer> m_shadowStatsBuffer;
     std::shared_ptr<Buffer> m_swPageJobVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_swPageJobVisibleClustersCounterBuffer;
+    std::shared_ptr<Buffer> m_swPageJobVisibleClustersBufferPhase2;
+    std::shared_ptr<Buffer> m_swPageJobVisibleClustersCounterBufferPhase2;
     std::shared_ptr<Buffer> m_swPageJobRecordsBuffer;
     std::shared_ptr<Buffer> m_swPageJobCountBuffer;
+    std::shared_ptr<Buffer> m_swPageJobRecordsBufferPhase2;
+    std::shared_ptr<Buffer> m_swPageJobCountBufferPhase2;
     std::shared_ptr<Buffer> m_swPageJobIndirectArgsBuffer;
     std::shared_ptr<Buffer> m_swPageJobIndirectArgsBufferPhase2;
     std::shared_ptr<Buffer> m_swPageJobClusterTagsBuffer;
+    std::shared_ptr<Buffer> m_swPageJobClusterTagsBufferPhase2;
 
     std::unique_ptr<CLodStreamingSystem> m_streamingSystem;
     bool m_providerRegisteredForCurrentRegistry = false;
