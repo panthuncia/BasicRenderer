@@ -2337,10 +2337,14 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_deepVisibilityOverflowCounterBuffer,
                 m_deepVisibilityStatsBuffer,
                 CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters)));
-            auto resolveInsertPoint = RenderGraph::ExternalInsertPoint::After("LightCullingPass");
-            resolveInsertPoint.before.push_back("Screen-Space Reflections Pass");
-			resolveInsertPoint.before.push_back("luminanceHistogramPass");
-            resolveDeepVisibilityPassDesc.At(std::move(resolveInsertPoint));
+        auto resolveInsertPoint = RenderGraph::ExternalInsertPoint::After("LightCullingPass");
+        // The shadow extension's post-raster cache-maintenance tail is only chained
+        // after the shadow raster pass, so without an explicit dependency this resolve
+        // can sample VSM state before the cache has been finalized for the frame.
+        resolveInsertPoint.after.push_back("CLodShadow::VirtualShadowDeduplicatePredictedPagesPass");
+        resolveInsertPoint.before.push_back("PPLL Resolve pass");
+        //resolveInsertPoint.before.push_back("luminanceHistogramPass");
+        resolveDeepVisibilityPassDesc.At(std::move(resolveInsertPoint));
         outPasses.push_back(std::move(resolveDeepVisibilityPassDesc));
         return;
     }
