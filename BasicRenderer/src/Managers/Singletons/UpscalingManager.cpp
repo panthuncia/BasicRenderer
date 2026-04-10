@@ -289,7 +289,7 @@ void UpscalingManager::EvaluateDLSS(rhi::CommandList& commandList, const Compone
 	consts.jitterOffset.x = camera->jitterPixelSpace.x;
     consts.jitterOffset.y = camera->jitterPixelSpace.y;
 
-    consts.mvecScale = { -1.0f , 1.0f };
+    consts.mvecScale = { 1.0f / renderRes.x, -1.0f / renderRes.y };
 
     consts.cameraPinholeOffset = { 0, 0 };
     consts.cameraPos = { camera->info.positionWorldSpace.x, camera->info.positionWorldSpace.y, camera->info.positionWorldSpace.z };

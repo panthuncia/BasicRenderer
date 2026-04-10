@@ -118,7 +118,7 @@ private:
 	void EvaluateDLSS(rhi::CommandList& commandList, const Components::Camera* camera, uint64_t frameNumber, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
     void EvaluateFSR3(rhi::CommandList& commandList, const Components::Camera* camera, double elapsedSeconds, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
 	void EvaluateNone(rhi::CommandList& commandList, const Components::Camera* camera, PixelBuffer* pHDRTarget, PixelBuffer* pUpscaledHDRTarget, PixelBuffer* pDepthTexture, PixelBuffer* pMotionVectors);
-	UpscalingMode m_upscalingMode = UpscalingMode::None;
+	UpscalingMode m_upscalingMode = UpscalingMode::DLSS;
     UpscaleQualityMode m_upscaleQualityMode = UpscaleQualityMode::DLAA;
     std::function<DirectX::XMUINT2()> m_getRenderRes;
 	std::function<DirectX::XMUINT2()> m_getOutputRes;
