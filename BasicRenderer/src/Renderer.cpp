@@ -217,7 +217,6 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     UpscalingManager::GetInstance().Setup();
 
     CreateTextures();
-    CreateGlobalResources();
 
     // Initialize GPU resource managers
     m_pLightManager = LightManager::CreateUnique();
@@ -241,6 +240,8 @@ void Renderer::Initialize(HWND hwnd, UINT x_res, UINT y_res) {
     m_pMeshManager->SetViewManager(m_pViewManager.get());
 	m_pSkeletonManager = SkeletonManager::CreateUnique();
     m_pTextureFactory = TextureFactory::CreateUnique();
+
+    CreateGlobalResources();
 
 	m_managerInterface.SetManagers(
         m_pMeshManager.get(), 
@@ -642,6 +643,14 @@ void Renderer::PublishFrameTaskGraphCapture() {
 }
 
 void Renderer::CreateGlobalResources() {
+    auto blueNoiseAsset = LoadTextureFromFile(L"BuiltinTextures/BlueNoise470.png", nullptr, false);
+    if (blueNoiseAsset) {
+        blueNoiseAsset->EnsureUploaded(*m_pTextureFactory);
+        m_blueNoiseTexture = blueNoiseAsset->ImagePtr();
+        if (m_blueNoiseTexture) {
+            m_blueNoiseTexture->SetName("Blue Noise 2D");
+        }
+    }
 }
 
 void Renderer::CreateDefaultEnvironmentResources() {
@@ -752,7 +761,7 @@ flecs::entity Renderer::GetValidatedPrimaryRenderCamera(bool attemptResync) {
 void Renderer::SetSettings() {
 	auto& settingsManager = SettingsManager::GetInstance();
 
-    uint8_t numDirectionalCascades = 8;
+    uint8_t numDirectionalCascades = static_cast<uint8_t>(CLodVirtualShadowDefaultClipmapCount);
 	float maxShadowDistance = 100.0f;
     float directionalShadowVerticalExtent = maxShadowDistance;
 	settingsManager.registerSetting<uint8_t>("numDirectionalLightCascades", numDirectionalCascades);
@@ -2132,6 +2141,10 @@ void Renderer::CreateRenderGraph() {
 
     newGraph->RegisterResource(Builtin::Environment::CurrentCubemap, currentEnvironmentCubemap);
     newGraph->RegisterResource(Builtin::Environment::CurrentPrefilteredCubemap, currentEnvironmentPrefilteredCubemap);
+
+    if (m_blueNoiseTexture) {
+        newGraph->RegisterResource(Builtin::Noise::BlueNoise2D, m_blueNoiseTexture);
+    }
 
     if (m_currentEnvironment != nullptr) {
         newGraph->BuildComputePass<SkyboxRenderPass>("SkyboxPass");

@@ -306,10 +306,10 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
             }
             
             LightFragmentData lightFragmentInfo = getLightParametersForFragment(light, fragmentInfo.fragPosWorldSpace.xyz);
-            if (shadow > 0.95)
-            {
-                continue; // skip light if shadowed
-            }
+            // if (shadow > 0.95)
+            // {
+            //     continue; // skip light if shadowed
+            // }
             if (lightFragmentInfo.distance > light.maxRange && light.type != 2)
             {
                 continue;

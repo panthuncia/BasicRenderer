@@ -120,6 +120,9 @@
     "ActiveDrawSetIndices": {},
     "BRDFLUT": {},
     "DebugTexture": {},
-    "DebugVisualization": {}
+    "DebugVisualization": {},
+    "Noise": {
+      "BlueNoise2D": {}
+    }
   }
 }

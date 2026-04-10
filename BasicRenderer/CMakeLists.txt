@@ -279,6 +279,16 @@ add_symlink_or_copy_per_config(
     "textures"
 )
 
+set(BUILTIN_TEXTURES_SRC_DIR "${BASICRENDERER_SOURCE_ROOT}/BuiltinTextures")
+set(BUILTIN_TEXTURES_DEST_PATH "${BASICRENDERER_OUTPUT_ROOT}/BuiltinTextures")
+
+add_symlink_or_copy_per_config(
+    "${BUILTIN_TEXTURES_SRC_DIR}"
+    "${BUILTIN_TEXTURES_DEST_PATH}"
+    TRUE  # IS_DIRECTORY
+    "builtin_textures"
+)
+
 
 set(tex_dir "${BASICRENDERER_OUTPUT_ROOT}/Textures")
 set(tex_link "${BASICRENDERER_OUTPUT_ROOT}/textures")

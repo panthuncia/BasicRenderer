@@ -75,6 +75,7 @@ void DeepVisibilityResolvePass::DeclareResourceUsages(ComputePassBuilder* builde
             Builtin::SkeletonResources::InverseBindMatrices,
             Builtin::SkeletonResources::BoneTransforms,
             Builtin::SkeletonResources::SkinningInstanceInfo,
+			Builtin::Noise::BlueNoise2D,
             m_visibleClustersBuffer,
             m_deepVisibilityNodesBuffer,
             m_deepVisibilityCounterBuffer,

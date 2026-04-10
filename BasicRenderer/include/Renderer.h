@@ -133,6 +133,7 @@ private:
 	std::unique_ptr<Environment> m_currentEnvironment = nullptr;
     std::shared_ptr<PixelBuffer> m_defaultEnvironmentCubemap = nullptr;
     std::shared_ptr<PixelBuffer> m_defaultEnvironmentPrefilteredCubemap = nullptr;
+    std::shared_ptr<PixelBuffer> m_blueNoiseTexture = nullptr;
     bool m_warnedUsingFallbackEnvironment = false;
     bool m_warnedNullScene = false;
     bool m_warnedMissingPrimaryCamera = false;

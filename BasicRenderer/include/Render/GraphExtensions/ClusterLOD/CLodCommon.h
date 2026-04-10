@@ -156,8 +156,8 @@ struct CLodDeepVisibilityStats
 
 static_assert(sizeof(CLodDeepVisibilityStats) == 32u, "CLodDeepVisibilityStats size must match HLSL");
 
-inline constexpr uint32_t CLodVirtualShadowMaxSupportedClipmapCount = 16u;
-inline constexpr uint32_t CLodVirtualShadowDefaultClipmapCount = 16u;
+inline constexpr uint32_t CLodVirtualShadowMaxSupportedClipmapCount = 22u;
+inline constexpr uint32_t CLodVirtualShadowDefaultClipmapCount = 22u;
 inline constexpr uint32_t CLodVirtualShadowPhysicalPageSize = 128u;
 inline constexpr uint32_t CLodVirtualShadowFixedVirtualPageCountPerAxis = 128u;
 inline constexpr uint32_t CLodVirtualShadowFixedVirtualResolution =
@@ -185,12 +185,12 @@ inline constexpr uint32_t CLodVirtualShadowDefaultPhysicalPageCount =
 inline constexpr uint32_t CLodVirtualShadowMaxPhysicalPageCount =
     CLodVirtualShadowMaxPhysicalAtlasPagesWide * CLodVirtualShadowMaxPhysicalAtlasPagesHigh;
 inline constexpr float CLodVirtualShadowDefaultDirectionalLodBias = 3.0f;
-inline constexpr float CLodVirtualShadowDefaultDirectionalSourceAngleDegrees = 0.5f;
-inline constexpr uint32_t CLodVirtualShadowDefaultSmrtRayCountDirectional = 8u;
-inline constexpr uint32_t CLodVirtualShadowDefaultSmrtSamplesPerRayDirectional = 8u;
+inline constexpr float CLodVirtualShadowDefaultDirectionalSourceAngleDegrees = 6.0f;
+inline constexpr uint32_t CLodVirtualShadowDefaultSmrtRayCountDirectional = 2u;
+inline constexpr uint32_t CLodVirtualShadowDefaultSmrtSamplesPerRayDirectional = 2u;
 inline constexpr float CLodVirtualShadowDefaultSmrtMaxRayAngleFromLightDegrees = 5.0f;
-inline constexpr float CLodVirtualShadowDefaultSmrtRayLengthScaleDirectional = 1.0f;
-inline constexpr float CLodVirtualShadowDefaultSmrtMaxTraceDistanceWorld = 300.0f;
+inline constexpr float CLodVirtualShadowDefaultSmrtRayLengthScaleDirectional = 0.02f;
+inline constexpr float CLodVirtualShadowDefaultSmrtMaxTraceDistanceWorld = 150.0f;
 inline constexpr uint32_t CLodVirtualShadowMarkTileSize = 16u;
 inline constexpr uint32_t CLodVirtualShadowBlockPagesPerAxis = 4u;
 inline constexpr uint32_t CLodVirtualShadowBlockPackedPhysicalPageIndexCount =

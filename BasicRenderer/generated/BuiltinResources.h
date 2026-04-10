@@ -82,6 +82,9 @@ struct Builtin {
     inline static constexpr std::string_view MeshletTriangles = "Builtin::MeshResources::MeshletTriangles";
     inline static constexpr std::string_view MeshletVertexIndices = "Builtin::MeshResources::MeshletVertexIndices";
   };
+  struct Noise {
+    inline static constexpr std::string_view BlueNoise2D = "Builtin::Noise::BlueNoise2D";
+  };
   inline static constexpr std::string_view NormalMatrixBuffer = "Builtin::NormalMatrixBuffer";
   struct PPLL {
     inline static constexpr std::string_view Counter = "Builtin::PPLL::Counter";

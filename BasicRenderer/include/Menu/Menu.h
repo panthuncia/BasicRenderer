@@ -1326,8 +1326,8 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
                 "Directional VSM SMRT Ray Length Scale",
                 &m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional,
                 0.0f,
-                4.0f,
-                "%.2f")) {
+                0.25f,
+                "%.3f")) {
             m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional =
                 std::max(m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional, 0.0f);
             setCLodDirectionalVirtualShadowSmrtRayLengthScaleDirectional(

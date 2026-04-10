@@ -33,6 +33,8 @@ struct CLodVirtualShadowLookupResult
     float occlusion;
     float closestDepth;
     float sampledLinearDepth;
+    uint sampledClipmapIndex;
+    uint sampledPhysicalPageIndex;
     CLodVirtualShadowClipmapInfo clipmapInfo;
 };
 
@@ -56,6 +58,8 @@ CLodVirtualShadowLookupResult CLodVirtualShadowInitLookupResult()
     result.occlusion = 0.0f;
     result.closestDepth = 0.0f;
     result.sampledLinearDepth = 0.0f;
+    result.sampledClipmapIndex = 0xFFFFFFFFu;
+    result.sampledPhysicalPageIndex = 0xFFFFFFFFu;
     result.clipmapInfo = (CLodVirtualShadowClipmapInfo)0;
     return result;
 }
@@ -116,6 +120,17 @@ void CLodVirtualShadowBuildOrthonormalBasis(float3 direction, out float3 tangent
     const float3 helper = abs(direction.z) < 0.999f ? float3(0.0f, 0.0f, 1.0f) : float3(0.0f, 1.0f, 0.0f);
     tangent = normalize(cross(helper, direction));
     bitangent = cross(direction, tangent);
+}
+
+// R2 quasi-random sequence for low-discrepancy sampling.
+// Based on the plastic constant g ≈ 1.32471795724.
+static const float kCLodVirtualShadowR2Alpha1 = 0.7548776662466927f; // 1/g
+static const float kCLodVirtualShadowR2Alpha2 = 0.5698402909980532f; // 1/g^2
+
+float2 CLodVirtualShadowR2Sequence(uint n)
+{
+    return frac(float2(0.5f + (float)n * kCLodVirtualShadowR2Alpha1,
+                       0.5f + (float)n * kCLodVirtualShadowR2Alpha2));
 }
 
 float3 CLodVirtualShadowDebugClipmapColor(uint clipmapIndex)
@@ -235,8 +250,7 @@ float2 CLodVirtualShadowDirectionalNormalOffsetUv(
 float CLodVirtualShadowReceiverPlaneDepthBias(
     float3 normal,
     CLodVirtualShadowCompactShadowCameraInfo lightCamera,
-    CLodVirtualShadowClipmapInfo clipmapInfo,
-    float2 uvDitherTexels)
+    float2 ditherWorld)
 {
     const float3 normalLightSpace = normalize(mul(float4(normalize(normal), 0.0f), lightCamera.view).xyz);
     const float safeNormalZ = abs(normalLightSpace.z) > 1.0e-4f ? normalLightSpace.z : 0.0f;
@@ -247,7 +261,7 @@ float CLodVirtualShadowReceiverPlaneDepthBias(
 
     // Positive UV Y maps to negative light-space Y because the shadow UV is flipped.
     const float2 planeSlope = clamp(normalLightSpace.xy / safeNormalZ, -8.0f, 8.0f);
-    const float2 ditherLightSpace = float2(uvDitherTexels.x, -uvDitherTexels.y) * clipmapInfo.texelWorldSize;
+    const float2 ditherLightSpace = float2(ditherWorld.x, -ditherWorld.y);
     return dot(ditherLightSpace, planeSlope);
 }
 
@@ -273,7 +287,7 @@ CLodVirtualShadowLookupResult CLodVirtualShadowLookupDirectionalOcclusionProject
     uint preferredClipmapIndex,
     float2 preferredUv,
     float preferredLinearLightDepth,
-    float2 uvDitherTexels,
+    float2 ditherWorld,
     uint activeClipmapCount,
     StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos,
     StructuredBuffer<CLodVirtualShadowCompactShadowCameraInfo> compactShadowCameraBuffer,
@@ -305,8 +319,8 @@ CLodVirtualShadowLookupResult CLodVirtualShadowLookupDirectionalOcclusionProject
             CLodVirtualShadowProjectWorldToUvDepth(samplePosWorldSpace, lightCamera, uv, unusedLinearDepth);
         }
 
-        const float2 uvTexelSize = 1.0f / max((float)clipmapInfo.virtualResolution, 1.0f);
-        uv += uvDitherTexels * uvTexelSize;
+        const float2 uvDitherFromWorld = ditherWorld / max(clipmapInfo.texelWorldSize * (float)clipmapInfo.virtualResolution, 1.0e-6f);
+        uv += uvDitherFromWorld;
 
         if (uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f)
             continue;
@@ -353,7 +367,7 @@ CLodVirtualShadowLookupResult CLodVirtualShadowLookupDirectionalOcclusionProject
         const float4 samplePosCachedPageLightView = mul(float4(samplePosWorldSpace, 1.0f), cachedPageView);
         const float linearLightDepth =
             -samplePosCachedPageLightView.z +
-            CLodVirtualShadowReceiverPlaneDepthBias(normal, lightCamera, clipmapInfo, uvDitherTexels);
+            CLodVirtualShadowReceiverPlaneDepthBias(normal, lightCamera, ditherWorld);
         if (linearLightDepth <= 0.0f)
             continue;
 
@@ -364,6 +378,8 @@ CLodVirtualShadowLookupResult CLodVirtualShadowLookupDirectionalOcclusionProject
         result.clipmapInfo = clipmapInfo;
         result.valid = 1u;
         result.sampledLinearDepth = linearLightDepth;
+        result.sampledClipmapIndex = candidateIndex;
+        result.sampledPhysicalPageIndex = physicalPageIndex;
         if (storedDepthBits == 0x7F7FFFFFu)
         {
             if (attempt == 0u)
@@ -479,7 +495,7 @@ CLodVirtualShadowLookupResult CLodVirtualShadowLookupDirectionalOcclusion(
     Texture2DArray<uint> pageTable,
     Texture2D<uint> physicalPages,
     uint applyReceiverBias,
-    float2 uvDitherTexels,
+    float2 ditherWorld,
     out CLodVirtualShadowDebugInfo debugInfo)
 {
     CLodVirtualShadowLookupResult result = CLodVirtualShadowInitLookupResult();
@@ -535,8 +551,8 @@ CLodVirtualShadowLookupResult CLodVirtualShadowLookupDirectionalOcclusion(
         if (uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f || uv.z < 0.0f || uv.z > 1.0f)
             continue;
 
-        const float2 uvTexelSize = 1.0f / max((float)clipmapInfo.virtualResolution, 1.0f);
-        uv.xy += uvDitherTexels * uvTexelSize;
+        const float2 uvDitherFromWorld = ditherWorld / max(clipmapInfo.texelWorldSize * (float)clipmapInfo.virtualResolution, 1.0e-6f);
+        uv.xy += uvDitherFromWorld;
 
         if (uv.x < 0.0f || uv.x > 1.0f || uv.y < 0.0f || uv.y > 1.0f)
             continue;
@@ -583,7 +599,7 @@ CLodVirtualShadowLookupResult CLodVirtualShadowLookupDirectionalOcclusion(
         const float4 samplePosCachedPageLightView = mul(float4(samplePosWorldSpace, 1.0f), cachedPageView);
         const float linearLightDepth =
             -samplePosCachedPageLightView.z +
-            CLodVirtualShadowReceiverPlaneDepthBias(normal, lightCamera, clipmapInfo, uvDitherTexels);
+            CLodVirtualShadowReceiverPlaneDepthBias(normal, lightCamera, ditherWorld);
         if (linearLightDepth <= 0.0f)
             continue;
 
@@ -600,6 +616,8 @@ CLodVirtualShadowLookupResult CLodVirtualShadowLookupDirectionalOcclusion(
             result.depthAvailable = 0u;
             result.occlusion = 0.0f;
             result.closestDepth = asfloat(storedDepthBits);
+            result.sampledClipmapIndex = candidateIndex;
+            result.sampledPhysicalPageIndex = physicalPageIndex;
             return result;
         }
         if (storedDepthBits == 0xFFFFFFFFu)
@@ -612,8 +630,10 @@ CLodVirtualShadowLookupResult CLodVirtualShadowLookupDirectionalOcclusion(
         const float closestDepth = asfloat(storedDepthBits);
         result.clipmapInfo = clipmapInfo;
         result.valid = 1u;
-    result.depthAvailable = 1u;
-    result.closestDepth = closestDepth;
+        result.depthAvailable = 1u;
+        result.closestDepth = closestDepth;
+        result.sampledClipmapIndex = candidateIndex;
+        result.sampledPhysicalPageIndex = physicalPageIndex;
         const float depthDelta = linearLightDepth - closestDepth;
         result.occlusion = smoothstep(0.0f, clipmapInfo.texelWorldSize * 0.5f, depthDelta);
         return result;
@@ -635,6 +655,10 @@ float calculateDirectionalVSMShadowDetailed(float2 pixelCoords, float3 fragPosWo
     StructuredBuffer<float4> directionalPageViewInfo = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodDirectionalPageViewInfo)];
     Texture2DArray<uint> pageTable = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPageTable)];
     Texture2D<uint> physicalPages = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Shadows::CLodPhysicalPages)];
+    Texture2D<float4> blueNoiseTex = ResourceDescriptorHeap[ResourceDescriptorIndex(Builtin::Noise::BlueNoise2D)];
+
+    uint2 blueNoiseSize;
+    blueNoiseTex.GetDimensions(blueNoiseSize.x, blueNoiseSize.y);
 
     const uint activeClipmapCount = min(numDirectionalClipmaps, kCLodVirtualShadowClipmapCount);
     const float3 lightToFrag = -light.dirWorldSpace.xyz;
@@ -693,12 +717,14 @@ float calculateDirectionalVSMShadowDetailed(float2 pixelCoords, float3 fragPosWo
         debugInfo.sampledClipmapIndex != 0xFFFFFFFFu ?
         debugInfo.sampledClipmapIndex :
         debugInfo.preferredClipmapIndex;
+    const CLodVirtualShadowClipmapInfo receiverClipmapInfo = clipmapInfos[receiverClipmapIndex];
     const CLodVirtualShadowCompactShadowCameraInfo receiverLightCamera = compactShadowCameraBuffer[receiverClipmapIndex];
     float2 rayStartUv;
     float rayStartLinearDepth;
     CLodVirtualShadowProjectWorldToUvDepth(fragPosWorldSpace, receiverLightCamera, rayStartUv, rayStartLinearDepth);
 
-    const float2 rotation = CLodVirtualShadowSmrtRotation(pixelCoordsInt, perFrameBuffer.frameIndex);
+    const float2 blueNoiseBase = blueNoiseTex.Load(int3(pixelCoordsInt % blueNoiseSize, 0)).xy;
+    const float2 rotation = frac(blueNoiseBase + CLodVirtualShadowSmrtRotation(pixelCoordsInt, perFrameBuffer.frameIndex));
     const float lightDiskTan = tan(coneAngleRadians);
     const float invSamplesPerRay = 1.0f / max((float)samplesPerRay, 1.0f);
     const float texelDitherScale = 0.5f;
@@ -709,23 +735,18 @@ float calculateDirectionalVSMShadowDetailed(float2 pixelCoords, float3 fragPosWo
     [loop]
     for (uint rayIndex = 0u; rayIndex < rayCount; ++rayIndex)
     {
-        float2 diskSample = float2(0.0f, 0.0f);
-        if (rayIndex > 0u && rayCount > 1u)
-        {
-            float2 xi = CLodVirtualShadowHammersley2D(rayIndex - 1u, rayCount - 1u);
-            xi = frac(xi + rotation);
-            const float diskRadius = sqrt(xi.x);
-            const float diskAngle = kCLodVirtualShadowTwoPi * xi.y;
-            diskSample = diskRadius * float2(cos(diskAngle), sin(diskAngle));
-        }
+        const int2 rayBnOffset = int2(CLodVirtualShadowR2Sequence(rayIndex + receiverClipmapIndex * 17u + 1u) * float2(blueNoiseSize));
+        const float2 rayBn = blueNoiseTex.Load(int3((pixelCoordsInt + rayBnOffset) % blueNoiseSize, 0)).xy;
+        float2 xi = CLodVirtualShadowHammersley2D(rayIndex, rayCount);
+        xi = frac(xi + rotation + rayBn);
+        const float diskRadius = sqrt(xi.x);
+        const float diskAngle = kCLodVirtualShadowTwoPi * xi.y;
+        const float2 diskSample = diskRadius * float2(cos(diskAngle), sin(diskAngle));
 
         const float rayJitter = frac(rotation.x + (float)rayIndex * 0.618033988749895f);
-        const uint rayDitherHash = CLodVirtualShadowHash(
-            pixelCoordsInt,
-            perFrameBuffer.frameIndex * 1024u + rayIndex);
-        const float2 rayUvDitherTexels = texelDitherScale * float2(
-            (float)(rayDitherHash & 0xFFFFu) / 65536.0f - 0.5f,
-            (float)((rayDitherHash >> 16u) & 0xFFFFu) / 65536.0f - 0.5f);
+        const int2 ditherBnOffset = int2(CLodVirtualShadowR2Sequence(rayCount + rayIndex + receiverClipmapIndex * 29u + 3u) * float2(blueNoiseSize));
+        const float2 rayDitherBn = blueNoiseTex.Load(int3((pixelCoordsInt + ditherBnOffset) % blueNoiseSize, 0)).xy;
+        const float2 rayDitherWorld = texelDitherScale * (rayDitherBn - 0.5f) * receiverClipmapInfo.texelWorldSize;
         const float3 rayEndWorldSpace = fragPosWorldSpace + baseFragToLight * tFar +
             tangent * (diskSample.x * lightDiskTan * tFar) +
             bitangent * (diskSample.y * lightDiskTan * tFar);
@@ -733,12 +754,16 @@ float calculateDirectionalVSMShadowDetailed(float2 pixelCoords, float3 fragPosWo
         float rayEndLinearDepth;
         CLodVirtualShadowProjectWorldToUvDepth(rayEndWorldSpace, receiverLightCamera, rayEndUv, rayEndLinearDepth);
 
-        float rayOcclusion = 0.0f;
+        bool rayHit = false;
         bool rayHadValidSample = false;
         bool depthHistoryValid = false;
         float depthHistory = 0.0f;
         float depthSlope = 0.0f;
         float depthHistoryDistance = 0.0f;
+        float prevSampledLinearDepth = 0.0f;
+        uint prevSampledClipmapIndex = 0xFFFFFFFFu;
+        uint prevSampledPhysicalPageIndex = 0xFFFFFFFFu;
+        bool mustResetHistory = false;
         [loop]
         for (uint sampleIndex = 0u; sampleIndex < samplesPerRay; ++sampleIndex)
         {
@@ -755,7 +780,7 @@ float calculateDirectionalVSMShadowDetailed(float2 pixelCoords, float3 fragPosWo
                 receiverClipmapIndex,
                 sampleUv,
                 sampleLinearDepth,
-                rayUvDitherTexels,
+                rayDitherWorld,
                 activeClipmapCount,
                 clipmapInfos,
                 compactShadowCameraBuffer,
@@ -763,58 +788,106 @@ float calculateDirectionalVSMShadowDetailed(float2 pixelCoords, float3 fragPosWo
                 pageTable,
                 physicalPages,
                 unusedDebugInfo);
-            if (raySample.valid != 0u)
+
+            if (raySample.valid == 0u || raySample.depthAvailable == 0u)
             {
-                rayHadValidSample = true;
-                float comparedDepth = raySample.closestDepth;
-                if (raySample.depthAvailable != 0u && depthHistoryValid)
-                {
-                    const float stepDistance = max(sampleDistance - depthHistoryDistance, 1.0e-4f);
-                    const float extrapolatedDepth = depthHistory + depthSlope * stepDistance;
-                    comparedDepth = lerp(raySample.closestDepth, extrapolatedDepth, 0.5f);
-                }
+                mustResetHistory = true;
+                continue;
+            }
+
+            rayHadValidSample = true;
+
+            const bool pageChanged =
+                mustResetHistory ||
+                raySample.sampledClipmapIndex != prevSampledClipmapIndex ||
+                raySample.sampledPhysicalPageIndex != prevSampledPhysicalPageIndex;
+
+            prevSampledClipmapIndex = raySample.sampledClipmapIndex;
+            prevSampledPhysicalPageIndex = raySample.sampledPhysicalPageIndex;
+            mustResetHistory = false;
+
+            if (pageChanged)
+            {
+                depthHistoryValid = false;
+                depthSlope = 0.0f;
+            }
+
+            const float closestDepth = raySample.closestDepth;
+            const float refDepth = raySample.sampledLinearDepth;
+
+            if (!depthHistoryValid)
+            {
+                // First valid sample in this page-local frame: simple depth test.
+                depthHistory = closestDepth;
+                depthHistoryDistance = sampleDistance;
+                depthHistoryValid = true;
+                prevSampledLinearDepth = refDepth;
 
                 const float depthTolerance = max(
-                    raySample.clipmapInfo.texelWorldSize * 0.35f,
-                    abs(raySample.sampledLinearDepth) * 1.0e-4f);
-                const float sampleOcclusion = raySample.depthAvailable != 0u ?
-                    smoothstep(0.0f, depthTolerance, raySample.sampledLinearDepth - comparedDepth) :
-                    0.0f;
-                rayOcclusion = max(rayOcclusion, sampleOcclusion);
-
-                if (raySample.depthAvailable != 0u)
+                    raySample.clipmapInfo.texelWorldSize * 0.15f,
+                    abs(refDepth) * 1.0e-4f);
+                if (refDepth > closestDepth + depthTolerance)
                 {
-                    if (depthHistoryValid)
-                    {
-                        const float stepDistance = max(sampleDistance - depthHistoryDistance, 1.0e-4f);
-                        const float measuredSlope = clamp(
-                            (raySample.closestDepth - depthHistory) / stepDistance,
-                            -4.0f,
-                            4.0f);
-                        depthSlope = lerp(depthSlope, measuredSlope, 0.5f);
-                    }
-                    depthHistory = raySample.closestDepth;
-                    depthHistoryDistance = sampleDistance;
-                    depthHistoryValid = true;
-                }
-
-                if (rayOcclusion >= 0.99f)
-                {
+                    rayHit = true;
                     break;
                 }
+
+                continue;
             }
+
+            const float stepDist = max(sampleDistance - depthHistoryDistance, 1.0e-4f);
+
+            // Is the shadow map showing a surface far behind the ray?
+            // This happens when the texel shows the ground past the occluder.
+            const float behindTolerance = max(
+                abs(refDepth - prevSampledLinearDepth) * 1.05f,
+                raySample.clipmapInfo.texelWorldSize * 0.1f);
+            const bool bBehind = (closestDepth - refDepth) > behindTolerance;
+
+            float depthForComparison;
+            if (bBehind)
+            {
+                // Shadow map doesn't show the tracked surface — extrapolate
+                depthForComparison = depthHistory + depthSlope * stepDist;
+            }
+            else
+            {
+                // Shadow map shows a surface near the ray — use it directly
+                depthForComparison = closestDepth;
+                if (abs(closestDepth - depthHistory) > 1.0e-6f)
+                {
+                    depthSlope = clamp(
+                        (closestDepth - depthHistory) / stepDist,
+                        -4.0f, 4.0f);
+                }
+                depthHistory = closestDepth;
+                depthHistoryDistance = sampleDistance;
+            }
+
+            // For receiver-to-light march: hit when ray is behind
+            // the tracked/extrapolated surface
+            const float hitTolerance = max(
+                raySample.clipmapInfo.texelWorldSize * 0.15f,
+                abs(refDepth) * 1.0e-4f);
+            if (refDepth - depthForComparison > hitTolerance)
+            {
+                rayHit = true;
+                break;
+            }
+
+            prevSampledLinearDepth = refDepth;
         }
 
         if (rayHadValidSample)
         {
             validRayCount += 1.0f;
-            visibleRayCount += (1.0f - rayOcclusion);
-            if (rayOcclusion < 0.5f)
+            visibleRayCount += rayHit ? 0.0f : 1.0f;
+            if (!rayHit)
                 allRaysBlockedSoFar = false;
         }
 
         // Wave early-out: all lanes fully lit after center ray
-        if (rayIndex == 0u && rayHadValidSample && WaveActiveAllTrue(rayOcclusion < 0.01f))
+        if (rayIndex == 0u && rayHadValidSample && WaveActiveAllTrue(!rayHit))
         {
             break;
         }
