@@ -73,6 +73,7 @@ private:
     // Settings funcs
 	std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<std::vector<float>()> getDirectionalLightCascadeSplits;
+	std::function<float()> getMaxShadowDistance;
     std::function<uint16_t()> getShadowResolution;
 	std::function<float()> getDirectionalVirtualShadowSourceAngleDegrees;
     std::function<void(std::shared_ptr<void>)> markForDelete;

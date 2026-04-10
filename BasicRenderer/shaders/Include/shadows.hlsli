@@ -15,6 +15,7 @@ static const uint kCLodVirtualShadowDebugFlagSampledRerenderedThisFrame = 0x20u;
 static const float kCLodVirtualShadowPi = 3.14159265359f;
 static const float kCLodVirtualShadowTwoPi = 6.28318530718f;
 static const float kCLodVirtualShadowDegreesToRadians = kCLodVirtualShadowPi / 180.0f;
+static const float kCLodVirtualShadowGoldenRatioConjugate = 0.618033988749895f;
 
 struct CLodVirtualShadowDebugInfo
 {
@@ -133,18 +134,22 @@ float2 CLodVirtualShadowR2Sequence(uint n)
                        0.5f + (float)n * kCLodVirtualShadowR2Alpha2));
 }
 
+float3 CLodVirtualShadowHueToRgb(float hue)
+{
+    const float3 offsets = float3(0.0f, 2.0f / 3.0f, 1.0f / 3.0f);
+    return saturate(abs(frac(hue + offsets) * 6.0f - 3.0f) - 1.0f);
+}
+
 float3 CLodVirtualShadowDebugClipmapColor(uint clipmapIndex)
 {
-    switch (clipmapIndex)
+    if (clipmapIndex == 0xFFFFFFFFu)
     {
-    case 0u: return float3(0.95f, 0.20f, 0.15f);
-    case 1u: return float3(0.95f, 0.55f, 0.12f);
-    case 2u: return float3(0.90f, 0.85f, 0.20f);
-    case 3u: return float3(0.20f, 0.80f, 0.25f);
-    case 4u: return float3(0.20f, 0.65f, 0.95f);
-    case 5u: return float3(0.55f, 0.30f, 0.90f);
-    default: return float3(1.0f, 0.0f, 1.0f);
+        return float3(1.0f, 0.0f, 1.0f);
     }
+
+    const float hue = frac(0.08f + (float)clipmapIndex * kCLodVirtualShadowGoldenRatioConjugate);
+    const float3 rgb = CLodVirtualShadowHueToRgb(hue);
+    return lerp(float3(0.18f, 0.22f, 0.28f), float3(0.95f, 0.92f, 0.85f), rgb);
 }
 
 float3 CLodVirtualShadowDebugPageStateColor(CLodVirtualShadowDebugInfo debugInfo)

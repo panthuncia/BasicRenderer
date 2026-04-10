@@ -520,7 +520,8 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 		entity.add<Components::Active>();
 	}
 
-    setDirectionalLightCascadeSplits(calculateCascadeSplits(getNumDirectionalLightCascades(), zNear, getMaxShadowDistance(), 100.f));
+    const float shadowDistance = std::max(getMaxShadowDistance(), zNear);
+    setDirectionalLightCascadeSplits(calculateCascadeSplits(getNumDirectionalLightCascades(), zNear, shadowDistance, shadowDistance));
 
 	m_primaryCamera = entity;
 }

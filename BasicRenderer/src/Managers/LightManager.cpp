@@ -34,6 +34,7 @@ LightManager::LightManager() {
 
 	getNumDirectionalLightCascades = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades");
 	getDirectionalLightCascadeSplits = SettingsManager::GetInstance().getSettingGetter<std::vector<float>>("directionalLightCascadeSplits");
+	getMaxShadowDistance = SettingsManager::GetInstance().getSettingGetter<float>("maxShadowDistance");
 	getShadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution");
 	getDirectionalVirtualShadowSourceAngleDegrees = SettingsManager::GetInstance().getSettingGetter<float>(
 		CLodDirectionalVirtualShadowSourceAngleDegreesSettingName);
@@ -278,7 +279,9 @@ LightManager::CreateDirectionalLightViewInfo(const LightInfo& info, uint64_t ent
 
 	// Virtual shadow clip levels are nested around the primary camera.
 	const float clipVerticalExtent = std::max(
-		SettingsManager::GetInstance().getSettingGetter<float>("directionalShadowVerticalExtent")(),
+		std::max(
+			SettingsManager::GetInstance().getSettingGetter<float>("directionalShadowVerticalExtent")(),
+			getMaxShadowDistance()),
 		1.0f);
 	auto cascades = setupDirectionalClipmaps(numCascades, info.dirWorldSpace,
 		DirectX::XMLoadFloat3(&posFloats), 
@@ -463,7 +466,9 @@ void LightManager::UpdateLightViewInfo(flecs::entity light) {
 		auto& matrix = m_currentCamera.get<Components::Matrix>().matrix;
 		auto posFloats = GetGlobalPositionFromMatrix(matrix);
 		const float clipVerticalExtent = std::max(
-			SettingsManager::GetInstance().getSettingGetter<float>("directionalShadowVerticalExtent")(),
+			std::max(
+				SettingsManager::GetInstance().getSettingGetter<float>("directionalShadowVerticalExtent")(),
+				getMaxShadowDistance()),
 			1.0f);
 		auto cascades = setupDirectionalClipmaps(numCascades, lightInfo.lightInfo.dirWorldSpace, DirectX::XMLoadFloat3(&posFloats), GetForwardFromMatrix(matrix), GetUpFromMatrix(matrix), camera.zNear, camera.fov, camera.aspect, getDirectionalLightCascadeSplits(), clipVerticalExtent);
 		PublishDirectionalShadowDebug(cascades);

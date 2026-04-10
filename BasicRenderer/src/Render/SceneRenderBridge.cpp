@@ -555,11 +555,13 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
     const auto renderResolution = SettingsManager::GetInstance().getSettingGetter<DirectX::XMUINT2>("renderResolution")();
     const auto shadowResolution = SettingsManager::GetInstance().getSettingGetter<uint16_t>("shadowResolution")();
     const auto directionalCascadeCount = SettingsManager::GetInstance().getSettingGetter<uint8_t>("numDirectionalLightCascades")();
+    const auto maxShadowDistance = SettingsManager::GetInstance().getSettingGetter<float>("maxShadowDistance")();
     const auto directionalShadowVerticalExtent = SettingsManager::GetInstance().getSettingGetter<float>("directionalShadowVerticalExtent")();
     const bool lightResourceSettingsChanged =
         !m_hasLightResourceSettings ||
         m_lastShadowResolution != shadowResolution ||
         m_lastDirectionalCascadeCount != directionalCascadeCount ||
+        m_lastMaxShadowDistance != maxShadowDistance ||
         m_lastDirectionalShadowVerticalExtent != directionalShadowVerticalExtent ||
         m_lastHasPrimaryCamera != snapshot.hasPrimaryCamera;
 
@@ -654,6 +656,7 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
 
     m_lastShadowResolution = shadowResolution;
     m_lastDirectionalCascadeCount = directionalCascadeCount;
+    m_lastMaxShadowDistance = maxShadowDistance;
     m_lastDirectionalShadowVerticalExtent = directionalShadowVerticalExtent;
     m_lastHasPrimaryCamera = snapshot.hasPrimaryCamera;
     m_hasLightResourceSettings = true;
