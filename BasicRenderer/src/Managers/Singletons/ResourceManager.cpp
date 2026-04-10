@@ -80,6 +80,8 @@ void ResourceManager::UpdatePerFrameBuffer(UINT cameraIndex, UINT numLights, Dir
         SettingsManager::GetInstance().getSettingGetter<float>(CLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegreesSettingName)();
     perFrameCBData.shadowVirtualSmrtRayLengthScaleDirectional =
         SettingsManager::GetInstance().getSettingGetter<float>(CLodDirectionalVirtualShadowSmrtRayLengthScaleDirectionalSettingName)();
+	perFrameCBData.shadowVirtualSmrtMaxTraceDistanceWorld =
+		SettingsManager::GetInstance().getSettingGetter<float>(CLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorldSettingName)();
 
 	BUFFER_UPLOAD(&perFrameCBData, sizeof(PerFrameCB), rg::runtime::UploadTarget::FromShared(m_perFrameBuffer), 0);
 }

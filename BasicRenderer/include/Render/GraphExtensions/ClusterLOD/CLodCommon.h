@@ -34,6 +34,7 @@ inline constexpr const char* CLodDirectionalVirtualShadowSmrtRayCountDirectional
 inline constexpr const char* CLodDirectionalVirtualShadowSmrtSamplesPerRayDirectionalSettingName = "clodDirectionalVirtualShadowSmrtSamplesPerRayDirectional";
 inline constexpr const char* CLodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegreesSettingName = "clodDirectionalVirtualShadowSmrtMaxRayAngleFromLightDegrees";
 inline constexpr const char* CLodDirectionalVirtualShadowSmrtRayLengthScaleDirectionalSettingName = "clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional";
+inline constexpr const char* CLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorldSettingName = "clodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld";
 enum class CLodPriorityMode : uint8_t {
     Max, // Duplicate group requests keep the maximum reported priority
     Sum, // Duplicate group requests accumulate (sum) their priorities
@@ -189,6 +190,7 @@ inline constexpr uint32_t CLodVirtualShadowDefaultSmrtRayCountDirectional = 8u;
 inline constexpr uint32_t CLodVirtualShadowDefaultSmrtSamplesPerRayDirectional = 8u;
 inline constexpr float CLodVirtualShadowDefaultSmrtMaxRayAngleFromLightDegrees = 5.0f;
 inline constexpr float CLodVirtualShadowDefaultSmrtRayLengthScaleDirectional = 1.0f;
+inline constexpr float CLodVirtualShadowDefaultSmrtMaxTraceDistanceWorld = 300.0f;
 inline constexpr uint32_t CLodVirtualShadowMarkTileSize = 16u;
 inline constexpr uint32_t CLodVirtualShadowBlockPagesPerAxis = 4u;
 inline constexpr uint32_t CLodVirtualShadowBlockPackedPhysicalPageIndexCount =

@@ -583,6 +583,10 @@ private:
     std::function<float()> getCLodDirectionalVirtualShadowSmrtRayLengthScaleDirectional;
     std::function<void(float)> setCLodDirectionalVirtualShadowSmrtRayLengthScaleDirectional;
 
+    float m_clodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld = CLodVirtualShadowDefaultSmrtMaxTraceDistanceWorld;
+    std::function<float()> getCLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld;
+    std::function<void(float)> setCLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld;
+
     uint8_t m_numDirectionalLightCascades = 0u;
     std::function<uint8_t()> getNumDirectionalLightCascades;
     std::function<void(uint8_t)> setNumDirectionalLightCascades;
@@ -887,6 +891,11 @@ inline void Menu::Initialize(HWND hwnd, IDXGISwapChain3* swapChain) {
     setCLodDirectionalVirtualShadowSmrtRayLengthScaleDirectional = settingsManager.getSettingSetter<float>(CLodDirectionalVirtualShadowSmrtRayLengthScaleDirectionalSettingName);
     m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional = getCLodDirectionalVirtualShadowSmrtRayLengthScaleDirectional();
     observerSetting(m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional, CLodDirectionalVirtualShadowSmrtRayLengthScaleDirectionalSettingName);
+
+    getCLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld = settingsManager.getSettingGetter<float>(CLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorldSettingName);
+    setCLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld = settingsManager.getSettingSetter<float>(CLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorldSettingName);
+    m_clodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld = getCLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld();
+    observerSetting(m_clodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld, CLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorldSettingName);
 
     getNumDirectionalLightCascades = settingsManager.getSettingGetter<uint8_t>("numDirectionalLightCascades");
     setNumDirectionalLightCascades = settingsManager.getSettingSetter<uint8_t>("numDirectionalLightCascades");
@@ -1323,6 +1332,17 @@ inline void Menu::Render(const RenderContext& context, rhi::CommandList commandL
                 std::max(m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional, 0.0f);
             setCLodDirectionalVirtualShadowSmrtRayLengthScaleDirectional(
                 m_clodDirectionalVirtualShadowSmrtRayLengthScaleDirectional);
+        }
+        if (ImGui::SliderFloat(
+                "Directional VSM SMRT Max Trace Distance",
+                &m_clodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld,
+                1.0f,
+                2000.0f,
+                "%.1f")) {
+            m_clodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld =
+                std::max(m_clodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld, 1.0f);
+            setCLodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld(
+                m_clodDirectionalVirtualShadowSmrtMaxTraceDistanceWorld);
         }
         const CLodVirtualShadowResolutionConfig virtualShadowConfig =
             CLodVirtualShadowBuildRuntimeResolutionConfig();

@@ -86,6 +86,8 @@ struct PerFrameCB {
     unsigned int shadowVirtualSmrtDirectionalCountsPacked = 0u;
     float shadowVirtualSmrtMaxRayAngleFromLightDegrees = 0.0f;
     float shadowVirtualSmrtRayLengthScaleDirectional = 0.0f;
+    float shadowVirtualSmrtMaxTraceDistanceWorld = 0.0f;
+    float _padSmrt = 0.0f;
 };
 
 // Object flags (shared with HLSL OBJECT_FLAG_* defines)

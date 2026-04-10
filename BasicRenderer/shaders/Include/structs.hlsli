@@ -132,6 +132,8 @@ struct PerFrameBuffer {
     uint shadowVirtualSmrtDirectionalCountsPacked;
     float shadowVirtualSmrtMaxRayAngleFromLightDegrees;
     float shadowVirtualSmrtRayLengthScaleDirectional;
+    float shadowVirtualSmrtMaxTraceDistanceWorld;
+    float _padSmrt;
 };
 
 struct BoundingSphere {
