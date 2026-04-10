@@ -2338,7 +2338,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_deepVisibilityStatsBuffer,
                 CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters)));
             auto resolveInsertPoint = RenderGraph::ExternalInsertPoint::After("LightCullingPass");
-            resolveInsertPoint.before.push_back("PPLLResolvePass");
+            resolveInsertPoint.before.push_back("Screen-Space Reflections Pass");
+			resolveInsertPoint.before.push_back("luminanceHistogramPass");
             resolveDeepVisibilityPassDesc.At(std::move(resolveInsertPoint));
         outPasses.push_back(std::move(resolveDeepVisibilityPassDesc));
         return;

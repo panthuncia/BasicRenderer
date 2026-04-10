@@ -2152,7 +2152,7 @@ void Renderer::CreateRenderGraph() {
 
     BuildPrimaryPass(newGraph.get(), m_currentEnvironment.get());
 
-    BuildPPLLPipeline(newGraph.get());
+    //BuildPPLLPipeline(newGraph.get());
 
 	// Start of post-processing passes
 
@@ -2169,10 +2169,10 @@ void Renderer::CreateRenderGraph() {
     rg::memory::SetResourceUsageHint(*histogramBuffer, "Post-Processing resources");
 	newGraph->RegisterResource(Builtin::PostProcessing::LuminanceHistogram, histogramBuffer);
 
-        newGraph->BuildComputePass<LuminanceHistogramPass>("luminanceHistogramPass");
-        newGraph->BuildComputePass<LuminanceHistogramAveragePass>("LuminanceAveragePass");
+    newGraph->BuildComputePass<LuminanceHistogramPass>("luminanceHistogramPass");
+    newGraph->BuildComputePass<LuminanceHistogramAveragePass>("LuminanceAveragePass");
 
-        newGraph->BuildRenderPass<UpscalingPass>("UpscalingPass");
+    newGraph->BuildRenderPass<UpscalingPass>("UpscalingPass");
 
     if (m_bloom) {
         BuildBloomPipeline(newGraph.get());
