@@ -6,6 +6,7 @@
 #define DX12RENDERER_H
 
 #include <windows.h>
+#include <d3d12.h>
 #include <chrono>
 #include <directxmath.h>
 #include <memory>
@@ -21,8 +22,6 @@
 #include "Scene/Scene.h"
 #include "Managers/InputManager.h"
 #include "Render/RenderGraph/RenderGraph.h"
-#include "Resources/ShadowMaps.h"
-#include "NsightAftermathGpuCrashTracker.h"
 #include "Managers/ViewManager.h"
 #include "Managers/LightManager.h"
 #include "Managers/MeshManager.h"
@@ -71,8 +70,7 @@ private:
 
 class Renderer {
 public:
-    Renderer() : m_gpuCrashTracker(m_markerMap){
-    }
+    Renderer() = default;
 
     void Initialize(HWND hwnd, UINT x_res, UINT y_res);
     void OnResize(UINT newWidth, UINT newHeight);
@@ -233,11 +231,6 @@ private:
 	std::function<bool()> getImageBasedLightingEnabled;
 
 	std::vector<SettingsManager::Subscription> m_settingsSubscriptions;
-
-    GpuCrashTracker::MarkerMap m_markerMap;
-    // Nsight Aftermath instrumentation
-    GFSDK_Aftermath_ContextHandle m_hAftermathCommandListContext;
-    GpuCrashTracker m_gpuCrashTracker;
 
 	DeferredFunctions m_preFrameDeferredFunctions;
     int32_t m_lastFrameTaskNodeIndex = -1;

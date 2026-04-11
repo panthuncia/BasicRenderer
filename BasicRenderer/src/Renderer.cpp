@@ -44,9 +44,6 @@
 #include "Resources/TextureDescription.h"
 #include "Menu/Menu.h"
 #include "Managers/Singletons/DeletionManager.h"
-#include "NsightAftermathGpuCrashTracker.h"
-#include "Aftermath/GFSDK_Aftermath.h"
-#include "NsightAftermathHelpers.h"
 #include "Managers/Singletons/CommandSignatureManager.h"
 #include "Managers/Singletons/RendererECSManager.h"
 #include "Managers/IndirectCommandBufferManager.h"
@@ -1080,10 +1077,6 @@ void Renderer::ToggleMeshShaders(bool useMeshShaders) {
 void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     UINT dxgiFactoryFlags = 0;
 
-#if defined(ENABLE_NSIGHT_AFTERMATH)
-    m_gpuCrashTracker.Initialize();
-#endif
-
     DeviceManager::GetInstance().Initialize();
 
 	auto device = DeviceManager::GetInstance().GetDevice();
@@ -1091,20 +1084,6 @@ void Renderer::LoadPipeline(HWND hwnd, UINT x_res, UINT y_res) {
     UpscalingManager::GetInstance().InitializeAdapter();
 
     auto result = device.CreateSwapchain(hwnd, x_res, y_res, rhi::Format::R8G8B8A8_UNorm, m_numFramesInFlight, m_allowTearing, m_swapChain);
-
-
-#if defined(ENABLE_NSIGHT_AFTERMATH)
-    const uint32_t aftermathFlags =
-        GFSDK_Aftermath_FeatureFlags_EnableMarkers |             // Enable event marker tracking.
-        GFSDK_Aftermath_FeatureFlags_EnableResourceTracking |    // Enable tracking of resources.
-        GFSDK_Aftermath_FeatureFlags_CallStackCapturing |        // Capture call stacks for all draw calls, compute dispatches, and resource copies.
-        GFSDK_Aftermath_FeatureFlags_GenerateShaderDebugInfo;    // Generate debug information for shaders.
-
-    AFTERMATH_CHECK_ERROR(GFSDK_Aftermath_DX12_Initialize(
-        GFSDK_Aftermath_Version_API,
-        aftermathFlags,
-        rhi::dx12::get_device(device)));
-#endif
 
     // Create RTV descriptor heap
 	rhi::DescriptorHeapDesc rtvHeapDesc = {};

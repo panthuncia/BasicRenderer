@@ -299,9 +299,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     if (!hGetPixDLL) {
         spdlog::warn("could not load the PIX library");
     }
-
-    // Aftermath
-
 #if BUILD_TYPE == BUILD_TYPE_DEBUG
     HMODULE pixLoaded = PIXLoadLatestWinPixGpuCapturerLibrary();
     if (!pixLoaded) {
