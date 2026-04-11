@@ -32,7 +32,6 @@
 #include "RenderPasses/EnvironmentFilterPass.h"
 #include "RenderPasses/ClearUAVsPass.h"
 #include "RenderPasses/DebugSpheresPass.h"
-#include "RenderPasses/SkinningPass.h"
 #include "RenderPasses/Base/ComputePass.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
 #include "RenderPasses/PostProcessing/Tonemapping.h"
@@ -819,7 +818,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<UpscaleQualityMode>("upscalingQualityMode", UpscalingManager::GetInstance().GetCurrentUpscalingQualityMode());
 	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
     settingsManager.registerSetting<bool>("useAsyncCompute", true);
-	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", false);
+	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", true);
 	settingsManager.registerSetting<AutoAliasMode>("autoAliasMode", AutoAliasMode::Balanced);
     settingsManager.registerSetting<AutoAliasPackingStrategy>("autoAliasPackingStrategy", AutoAliasPackingStrategy::GreedySweepLine);
     settingsManager.registerSetting<bool>("autoAliasEnableLogging", false);
@@ -2066,9 +2065,6 @@ void Renderer::CreateRenderGraph() {
     BuildBRDFIntegrationPass(newGraph.get());
 
     BuildEnvironmentPipeline(newGraph.get());
-
-    // Skinning comes before Z prepass
-    newGraph->BuildComputePass<SkinningPass>("SkinningPass");
     
     bool indirect = getIndirectDrawsEnabled();
     if (!useMeshShaders) { // Indirect draws only supported with mesh shaders

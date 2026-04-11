@@ -287,7 +287,9 @@ void CLodStreamingSystem::GatherStructuralPasses(RenderGraph& rg, std::vector<Re
         [this]() {
             ProcessStreamingRequestsBudgeted();
         }));
-    streamingBeginPassDesc.At(RenderGraph::ExternalInsertPoint::After("SkinningPass"));
+    // Keep the CLod front-end behind the visibility/depth clear so the graph
+    // cannot legally sink ClearVisibilityBufferPass after CLod rasterization.
+    streamingBeginPassDesc.At(RenderGraph::ExternalInsertPoint::After("ClearVisibilityBufferPass"));
     outPasses.push_back(std::move(streamingBeginPassDesc));
 }
 
