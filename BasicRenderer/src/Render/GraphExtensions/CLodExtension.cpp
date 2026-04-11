@@ -958,7 +958,7 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodVirtualShadowStatsTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_swPageJobVisibleClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_maxVisibleClusters * PackedVisibleClusterStrideBytes, true, true, true, false, true);
+    m_swPageJobVisibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(m_maxVisibleClusters * PackedVisibleClusterStrideBytes, true, false, true);
     m_swPageJobVisibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Visible Clusters Buffer"));
 
     m_swPageJobVisibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
@@ -1014,9 +1014,8 @@ void CLodExtension::InitializeShadowResources()
 
     m_swPageJobClusterTagsBufferPhase2 = m_swPageJobClusterTagsBuffer;
 
-    m_vsmExpandedVisibleClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(
+    m_vsmExpandedVisibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(
         static_cast<uint64_t>(vsmExpandedRecordCapacity) * PackedVisibleClusterStrideBytes,
-        1, // Byte-address
         true,
 		false);
     m_vsmExpandedVisibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Expanded Visible Clusters Buffer"));
