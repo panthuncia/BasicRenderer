@@ -472,9 +472,6 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
         m_managerInterface.GetIndirectCommandBufferManager()->UnregisterBuffers(m_primaryCamera.id());
     }
 
-	SettingsManager::GetInstance().getSettingSetter<float>("maxShadowDistance")(zFar);
-
-
     CameraInfo info;
 	auto planes = GetFrustumPlanesPerspective(aspect, fov, zNear, zFar);
 	info.view = XMMatrixIdentity();
@@ -520,6 +517,8 @@ void Scene::SetCamera(XMFLOAT3 lookAt, XMFLOAT3 up, float fov, float aspect, flo
 		entity.add<Components::Active>();
 	}
 
+    // Keep shadow distance independent from the camera far plane so large
+    // scene view ranges do not silently inflate every directional clipmap.
     const float shadowDistance = std::max(getMaxShadowDistance(), zNear);
     setDirectionalLightCascadeSplits(calculateCascadeSplits(getNumDirectionalLightCascades(), zNear, shadowDistance, shadowDistance));
 
