@@ -88,11 +88,13 @@ private:
         rhi::Device device,
         rhi::PipelineLayoutHandle globalRootSignature,
         rhi::WorkGraphPtr& outGraph,
-        PipelineState& outCreateCommandPipeline);
+        PipelineState& outCreateCommandPipeline,
+        PipelineState& outClearPipeline);
 
     PipelineResources m_pipelineResources;
     rhi::WorkGraphPtr m_workGraph;
     PipelineState m_createCommandPipelineState;
+    PipelineState m_clearPipelineState;
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
     std::shared_ptr<Buffer> m_swVisibleClustersCounterBuffer;

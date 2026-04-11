@@ -6,7 +6,6 @@
 #include "Managers/Singletons/PSOManager.h"
 #include "Managers/Singletons/SettingsManager.h"
 #include "Render/GraphExtensions/ClusterLOD/CLodCommon.h"
-#include "Render/Runtime/UploadServiceAccess.h"
 #include "Render/RenderContext.h"
 #include "RenderPasses/Base/ComputePass.h"
 #include "Resources/Buffers/Buffer.h"
@@ -40,18 +39,15 @@ public:
 
     void Setup() override {}
 
-    void Update(const UpdateExecutionContext&) override
-    {
-        const RasterizeClustersCommand zeroArgs = {};
-        for (const auto& pageJobIndirectArgsBuffer : m_pageJobIndirectArgsBuffers) {
-            BUFFER_UPLOAD(&zeroArgs, sizeof(RasterizeClustersCommand), rg::runtime::UploadTarget::FromShared(pageJobIndirectArgsBuffer), 0);
-        }
-    }
+    void Update(const UpdateExecutionContext&) override {}
 
     PassReturn Execute(PassExecutionContext& executionContext) override
     {
         if (m_runWhenComputeSWRasterEnabledOnly &&
             !CLodSoftwareRasterUsesCompute(SettingsManager::GetInstance().getSettingGetter<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName)())) {
+            return {};
+        }
+        if (!SettingsManager::GetInstance().getSettingGetter<bool>(CLodEnablePageJobVSMSettingName)()) {
             return {};
         }
 

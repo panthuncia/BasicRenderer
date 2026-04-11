@@ -18,8 +18,8 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
-#include "Render/Runtime/UploadServiceAccess.h"
 #include "ShaderBuffers.h"
+#include "../../../../shaders/PerPassRootConstants/clodClearUintBufferRootConstants.h"
 #include "../../../../shaders/PerPassRootConstants/clodWorkGraphRootConstants.h"
 #include "../../../../shaders/PerPassRootConstants/clodRasterizationRootConstants.h"
 
@@ -80,6 +80,12 @@ public:
             L"SWPageJobExpandCSMain",
             skinnedDefines,
             "CLod_SoftwarePageJobExpandSkinnedPSO");
+        m_clearPso = PSOManager::GetInstance().MakeComputePipeline(
+            PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
+            L"Shaders/ClusterLOD/clodUtil.hlsl",
+            L"ClearUintStructuredBufferCSMain",
+            {},
+            "CLod_SoftwarePageJobExpandClearUintPSO");
     }
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override
@@ -114,22 +120,7 @@ public:
 
     void Setup() override {}
 
-    void Update(const UpdateExecutionContext&) override
-    {
-        const uint32_t zero = 0u;
-        for (const auto& pageJobCountBuffer : m_pageJobCountBuffers) {
-            BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(pageJobCountBuffer), 0);
-        }
-
-        const uint32_t invalidTag = 0xFFFFFFFFu;
-        const uint32_t tagCount = static_cast<uint32_t>(m_pageJobClusterTagsBuffer->GetSize() / sizeof(uint32_t));
-        std::vector<uint32_t> clearedTags(tagCount, invalidTag);
-        BUFFER_UPLOAD(
-            clearedTags.data(),
-            static_cast<uint32_t>(clearedTags.size() * sizeof(uint32_t)),
-            rg::runtime::UploadTarget::FromShared(m_pageJobClusterTagsBuffer),
-            0);
-    }
+    void Update(const UpdateExecutionContext&) override {}
 
     PassReturn Execute(PassExecutionContext& executionContext) override
     {
@@ -149,6 +140,57 @@ public:
 
         commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
         commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
+
+        BindResourceDescriptorIndices(commandList, m_clearPso.GetResourceDescriptorSlots());
+        commandList.BindPipeline(m_clearPso.GetAPIPipelineState().GetHandle());
+
+        uint32_t clearRootConstants[NumMiscUintRootConstants] = {};
+        for (const auto& pageJobCountBuffer : m_pageJobCountBuffers) {
+            clearRootConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = pageJobCountBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+            clearRootConstants[CLOD_CLEAR_UINT_BUFFER_VALUE] = 0u;
+            clearRootConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] = 1u;
+            commandList.PushConstants(
+                rhi::ShaderStage::Compute,
+                0,
+                MiscUintRootSignatureIndex,
+                0,
+                NumMiscUintRootConstants,
+                clearRootConstants);
+            commandList.Dispatch(1u, 1u, 1u);
+        }
+
+        const uint32_t tagCount = static_cast<uint32_t>(m_pageJobClusterTagsBuffer->GetSize() / sizeof(uint32_t));
+        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = m_pageJobClusterTagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_VALUE] = 0xFFFFFFFFu;
+        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] = tagCount;
+        if (tagCount > 0u) {
+            commandList.PushConstants(
+                rhi::ShaderStage::Compute,
+                0,
+                MiscUintRootSignatureIndex,
+                0,
+                NumMiscUintRootConstants,
+                clearRootConstants);
+            commandList.Dispatch((tagCount + 63u) / 64u, 1u, 1u);
+        }
+
+        std::array<rhi::BufferBarrier, 3> clearBarriers{};
+        for (uint32_t variantIndex = 0u; variantIndex < m_pageJobCountBuffers.size(); ++variantIndex) {
+            clearBarriers[variantIndex].buffer = m_pageJobCountBuffers[variantIndex]->GetAPIResource().GetHandle();
+            clearBarriers[variantIndex].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+            clearBarriers[variantIndex].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+            clearBarriers[variantIndex].beforeSync = rhi::ResourceSyncState::ComputeShading;
+            clearBarriers[variantIndex].afterSync = rhi::ResourceSyncState::ComputeShading;
+        }
+        clearBarriers[2].buffer = m_pageJobClusterTagsBuffer->GetAPIResource().GetHandle();
+        clearBarriers[2].beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+        clearBarriers[2].afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+        clearBarriers[2].beforeSync = rhi::ResourceSyncState::ComputeShading;
+        clearBarriers[2].afterSync = rhi::ResourceSyncState::ComputeShading;
+
+        rhi::BarrierBatch clearBarrierBatch{};
+        clearBarrierBatch.buffers = rhi::Span<rhi::BufferBarrier>(clearBarriers.data(), static_cast<uint32_t>(clearBarriers.size()));
+        commandList.Barriers(clearBarrierBatch);
 
         uint32_t misc[NumMiscUintRootConstants] = {};
         misc[CLOD_RASTER_RASTER_BUCKETS_HISTOGRAM_DESCRIPTOR_INDEX] = m_rasterBucketsHistogramBuffer->GetSRVInfo(0).slot.index;
@@ -208,6 +250,7 @@ public:
 private:
     PipelineState m_rigidPso;
     PipelineState m_skinnedPso;
+    PipelineState m_clearPso;
     rhi::CommandSignaturePtr m_commandSignature;
     std::shared_ptr<Buffer> m_compactedVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_rasterBucketsHistogramBuffer;

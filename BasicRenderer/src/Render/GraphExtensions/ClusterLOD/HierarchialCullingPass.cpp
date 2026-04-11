@@ -25,6 +25,7 @@
 #include "Resources/Resolvers/ResourceGroupResolver.h"
 #include "BuiltinResources.h"
 #include "ShaderBuffers.h"
+#include "../shaders/PerPassRootConstants/clodClearUintBufferRootConstants.h"
 #include "../shaders/PerPassRootConstants/clodCreateCommandRootConstants.h"
 #include "../shaders/PerPassRootConstants/clodWorkGraphRootConstants.h"
 
@@ -98,7 +99,8 @@ HierarchialCullingPass::HierarchialCullingPass(
         DeviceManager::GetInstance().GetDevice(),
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
         m_workGraph,
-        m_createCommandPipelineState);
+        m_createCommandPipelineState,
+        m_clearPipelineState);
     auto memSize = m_workGraph->GetRequiredScratchMemorySize();
     m_scratchBuffer = Buffer::CreateShared(
         rhi::HeapType::DeviceLocal,
@@ -263,6 +265,37 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
 
     commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
     commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
+
+    if (m_pageJobVisibleClustersCounterBuffer) {
+        BindResourceDescriptorIndices(commandList, m_clearPipelineState.GetResourceDescriptorSlots());
+        commandList.BindPipeline(m_clearPipelineState.GetAPIPipelineState().GetHandle());
+
+        uint32_t clearRootConstants[NumMiscUintRootConstants] = {};
+        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] =
+            m_pageJobVisibleClustersCounterBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_VALUE] = 0u;
+        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] = 1u;
+        commandList.PushConstants(
+            rhi::ShaderStage::Compute,
+            0,
+            MiscUintRootSignatureIndex,
+            0,
+            NumMiscUintRootConstants,
+            clearRootConstants);
+        commandList.Dispatch(1u, 1u, 1u);
+
+        rhi::BufferBarrier pageJobCounterBarrier{};
+        pageJobCounterBarrier.buffer = m_pageJobVisibleClustersCounterBuffer->GetAPIResource().GetHandle();
+        pageJobCounterBarrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+        pageJobCounterBarrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+        pageJobCounterBarrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
+        pageJobCounterBarrier.afterSync = rhi::ResourceSyncState::ComputeShading;
+
+        rhi::BarrierBatch clearBarrierBatch{};
+        clearBarrierBatch.buffers = { &pageJobCounterBarrier };
+        commandList.Barriers(clearBarrierBatch);
+    }
+
     commandList.SetWorkGraph(m_workGraph->GetHandle(), m_scratchBuffer->GetAPIResource().GetHandle(), true);
 
     BindResourceDescriptorIndices(commandList, m_pipelineResources);
@@ -511,9 +544,6 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
     if (UsesSWClassification(m_workGraphMode)) {
         BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_swVisibleClustersCounterBuffer), 0);
     }
-    if (m_pageJobVisibleClustersCounterBuffer) {
-        BUFFER_UPLOAD(&zero, sizeof(uint32_t), rg::runtime::UploadTarget::FromShared(m_pageJobVisibleClustersCounterBuffer), 0);
-    }
 
     CLodWorkGraphComputePageJobDescriptors pageJobDescriptors{};
     if (m_pageJobVisibleClustersBuffer && m_pageJobVisibleClustersCounterBuffer) {
@@ -719,7 +749,8 @@ void HierarchialCullingPass::CreatePipelines(
     rhi::Device device,
     rhi::PipelineLayoutHandle globalRootSignature,
     rhi::WorkGraphPtr& outGraph,
-    PipelineState& outCreateCommandPipeline)
+    PipelineState& outCreateCommandPipeline,
+    PipelineState& outClearPipeline)
 {
     ShaderLibraryInfo libInfo(L"shaders/ClusterLOD/workGraphCulling.hlsl", L"lib_6_8");
     std::wstring pageJobDescriptorResourceIdWide(
@@ -797,4 +828,10 @@ void HierarchialCullingPass::CreatePipelines(
         L"CreateRasterBucketsHistogramCommandCSMain",
         {},
         "HierarchialLODCommandCreation");
+    outClearPipeline = PSOManager::GetInstance().MakeComputePipeline(
+        globalRootSignature,
+        L"shaders/ClusterLOD/clodUtil.hlsl",
+        L"ClearUintStructuredBufferCSMain",
+        {},
+        "HierarchialCullingClearUintPSO");
 }
