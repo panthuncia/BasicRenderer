@@ -28,12 +28,9 @@
 #include "RenderPasses/Base/RenderPass.h"
 #include "RenderPasses/ForwardRenderPass.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "RenderPasses/DebugRenderPass.h"
 #include "RenderPasses/SkyboxRenderPass.h"
 #include "RenderPasses/EnvironmentFilterPass.h"
 #include "RenderPasses/ClearUAVsPass.h"
-#include "RenderPasses/ObjectCullingPass.h"
-#include "RenderPasses/MeshletCullingPass.h"
 #include "RenderPasses/DebugSpheresPass.h"
 #include "RenderPasses/SkinningPass.h"
 #include "RenderPasses/Base/ComputePass.h"
@@ -803,7 +800,7 @@ void Renderer::SetSettings() {
 	settingsManager.registerSetting<bool>("enableGTAO", m_gtaoEnabled);
 	settingsManager.registerSetting<bool>("enableOcclusionCulling", m_occlusionCulling);
 	settingsManager.registerSetting<bool>("enableMeshletCulling", m_meshletCulling);
-    settingsManager.registerSetting<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName, CLodSoftwareRasterMode::WorkGraph);
+    settingsManager.registerSetting<CLodSoftwareRasterMode>(CLodSoftwareRasterModeSettingName, CLodSoftwareRasterMode::Compute);
     settingsManager.registerSetting<bool>(CLodEnablePageJobVSMSettingName, true);
     settingsManager.registerSetting<uint32_t>(CLodPageJobDiameterThresholdSettingName, 64u);
     settingsManager.registerSetting<float>(CLodPageJobSparseRatioSettingName, 0.5f);
@@ -2116,14 +2113,6 @@ void Renderer::CreateRenderGraph() {
         BuildLightClusteringPipeline(newGraph.get());
     }
 
-    auto& debugPassBuilder = newGraph->BuildRenderPass<DebugRenderPass>("DebugPass");
-
-    auto drawShadows = getShadowsEnabled();
-    if (drawShadows) {
-        BuildMainShadowPass(newGraph.get());
-        debugPassBuilder.WithShaderResource(Builtin::PrimaryCamera::LinearDepthMap);
-    }
-
     // Linear depth downsample is scheduled by CLodExtension between phase-1 and phase-2.
 	
     auto currentEnvironmentCubemap = m_defaultEnvironmentCubemap;
@@ -2149,8 +2138,6 @@ void Renderer::CreateRenderGraph() {
     }
 
     BuildPrimaryPass(newGraph.get(), m_currentEnvironment.get());
-
-    //BuildPPLLPipeline(newGraph.get());
 
 	// Start of post-processing passes
 
@@ -2195,13 +2182,6 @@ void Renderer::CreateRenderGraph() {
     newGraph->BuildRenderPass<DebugResolvePass>("DebugResolvePass");
 
     newGraph->BuildRenderPass<MenuRenderPass>("MenuRenderPass");
-	if (m_coreResourceProvider.m_currentDebugTexture != nullptr) {
-		auto debugRenderPass = newGraph->GetRenderPassByName("DebugPass");
-		std::shared_ptr<DebugRenderPass> debugPass = std::dynamic_pointer_cast<DebugRenderPass>(debugRenderPass);
-        if (debugPass) {
-            debugPass->SetTexture(m_coreResourceProvider.m_currentDebugTexture.get());
-        }
-	}
 
     if (getDrawBoundingSpheres()) {
         newGraph->BuildRenderPass<DebugSpherePass>("DebugSpherePass");
@@ -2237,20 +2217,5 @@ void Renderer::SetEnvironmentInternal(std::wstring name) {
             spdlog::warn("Environment file not found: {}. Falling back to blank environment resources.", envpath.string());
             m_warnedUsingFallbackEnvironment = true;
         }
-    }
-}
-
-void Renderer::SetDebugTexture(std::shared_ptr<PixelBuffer> texture) {
-    m_coreResourceProvider.m_currentDebugTexture = texture;
-	if (currentRenderGraph == nullptr) {
-		return;
-	}
-    auto pPass = currentRenderGraph->GetRenderPassByName("DebugPass");
-    if (pPass != nullptr) {
-        auto pDebugPass = std::dynamic_pointer_cast<DebugRenderPass>(pPass);
-        pDebugPass->SetTexture(texture.get());
-    }
-    else {
-        spdlog::warn("Debug pass does not exist");
     }
 }

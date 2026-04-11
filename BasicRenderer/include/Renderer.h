@@ -22,7 +22,6 @@
 #include "Managers/InputManager.h"
 #include "Render/RenderGraph/RenderGraph.h"
 #include "Resources/ShadowMaps.h"
-#include "RenderPasses/DebugRenderPass.h"
 #include "NsightAftermathGpuCrashTracker.h"
 #include "Managers/ViewManager.h"
 #include "Managers/LightManager.h"
@@ -85,7 +84,6 @@ public:
     void SetCurrentScene(std::shared_ptr<Scene> newScene);
     InputManager& GetInputManager();
     void SetInputMode(InputMode mode);
-    void SetDebugTexture(std::shared_ptr<PixelBuffer> texture);
     void SetEnvironment(std::string name);
     std::shared_ptr<Scene> AppendScene(std::shared_ptr<Scene> scene);
 	bool IsInitialized() const { return m_isInitialized; }
@@ -277,7 +275,6 @@ private:
 
     class CoreResourceProvider : public IResourceProvider {
 	public:
-        std::shared_ptr<PixelBuffer> m_currentDebugTexture = nullptr;
         std::shared_ptr<PixelBuffer> m_HDRColorTarget = nullptr;
 		std::shared_ptr<PixelBuffer> m_upscaledHDRColorTarget = nullptr;
 		std::shared_ptr<PixelBuffer> m_gbufferMotionVectors = nullptr;
@@ -287,8 +284,6 @@ private:
 				return m_gbufferMotionVectors;
             if (key.ToString() == Builtin::Color::HDRColorTarget)
 				return m_HDRColorTarget;
-            if (key.ToString() == Builtin::DebugTexture)
-				return m_currentDebugTexture;
             if (key.ToString() == Builtin::PostProcessing::UpscaledHDR)
 				return m_upscaledHDRColorTarget;
 		
@@ -314,7 +309,6 @@ private:
 		}
 
         void Cleanup() {
-            m_currentDebugTexture = nullptr;
 			m_HDRColorTarget = nullptr;
 			m_upscaledHDRColorTarget = nullptr;
 			m_gbufferMotionVectors = nullptr;

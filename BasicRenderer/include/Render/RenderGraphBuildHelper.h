@@ -4,8 +4,6 @@
 #include "../../generated/BuiltinResources.h"
 #include "RenderPasses/PostProcessing/BloomSamplePass.h"
 #include "RenderPasses/PostProcessing/BloomBlendPass.h"
-#include "RenderPasses/VisibilityBufferPass.h"
-#include "RenderPasses/GBufferConstructionPass.h"
 #include "RenderPasses/PrimaryDepthCopyPass.h"
 #include "RenderPasses/VisUtil/BuildPixelListPass.h"
 #include "RenderPasses/VisUtil/EvaluateMaterialGroupsPass.h"
@@ -15,8 +13,6 @@
 #include "RenderPasses/VisUtil/MaterialBlockOffsetsPass.h"
 #include "RenderPasses/VisUtil/BuildMaterialIndirectCommandBufferPass.h"
 #include "RenderPasses/brdfIntegrationPass.h"
-#include "RenderPasses/ShadowPass.h"
-#include "RenderPasses/GBuffer.h"
 #include "RenderPasses/GTAO/XeGTAODenoisePass.h"
 #include "RenderPasses/GTAO/XeGTAOFilterPass.h"
 #include "RenderPasses/GTAO/XeGTAOMainPass.h"
@@ -26,8 +22,6 @@
 #include "RenderPasses/EnvironmentSHPass.h"
 #include "RenderPasses/DeferredShadingPass.h"
 #include "RenderPasses/SkyboxRenderPass.h"
-#include "RenderPasses/PPLLFillPass.h"
-#include "RenderPasses/PPLLResolvePass.h"
 #include "RenderPasses/PostProcessing/ScreenSpaceReflectionsPass.h"
 #include "RenderPasses/PostProcessing/SpecularIBLPass.h"
 #include "RenderPasses/FidelityFX/Downsample.h"
@@ -146,21 +140,7 @@ void BuildBRDFIntegrationPass(RenderGraph* graph) {
     brdfIntegrationTexture->SetName("BRDF Integration Texture");
     brdfIntegrationTexture->EnableIdleDematerialization(120);
 	graph->RegisterResource(Builtin::BRDFLUT, brdfIntegrationTexture);
-
-        graph->BuildRenderPass<BRDFIntegrationPass>("BRDF Integration Pass");
-}
-
-void BuildOcclusionCullingPipeline(RenderGraph* graph) {
-
-	bool shadowsEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableShadows")();
-	bool meshShadersEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableMeshShader")();
-	bool wireframeEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableWireframe")();
-	bool visibilityRenderingEnabled = SettingsManager::GetInstance().getSettingGetter<bool>("enableVisibilityRendering")();
-
-}
-
-void BuildGeneralCullingPipeline(RenderGraph* graph) {
-
+	graph->BuildRenderPass<BRDFIntegrationPass>("BRDF Integration Pass");
 }
 
 inline void RegisterVisUtilResources(RenderGraph* graph)
@@ -214,14 +194,6 @@ void BuildGBufferPipeline(RenderGraph* graph) {
     bool clearRTVs = false;
     if (!occlusionCulling || !indirect) {
         clearRTVs = true; // We will not run an earlier pass
-    }
-
-    if (!visibilityRendering) {
-        graph->BuildRenderPass<GBufferPass>("newObjectsPrepass", GBufferPassInputs{
-                enableWireframe,
-                useMeshShaders,
-                indirect,
-                clearRTVs });
     }
     else {
 
@@ -354,10 +326,6 @@ void BuildEnvironmentPipeline(RenderGraph* graph) {
     graph->BuildComputePass<EnvironmentSHPass>("Environment Spherical Harmonics Pass");
 
     graph->BuildRenderPass<EnvironmentFilterPass>("Environment Prefilter Pass");
-}
-
-void BuildMainShadowPass(RenderGraph* graph) {
-    (void)graph;
 }
 
 void BuildLinearDepthDownsamplePass(RenderGraph* graph) {
