@@ -20,6 +20,16 @@
 				"out/build/debug"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "Build BasicRenderer",
+			"type": "shell",
+			"command": "cmake",
+			"args": [
+				"--build",
+				"out/build/debug"
+			],
+			"isBackground": false
 		}
 	]
 }

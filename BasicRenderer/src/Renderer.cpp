@@ -2148,10 +2148,6 @@ void Renderer::CreateRenderGraph() {
         newGraph->RegisterResource(Builtin::Noise::BlueNoise2D, m_blueNoiseTexture);
     }
 
-    if (m_currentEnvironment != nullptr) {
-        newGraph->BuildComputePass<SkyboxRenderPass>("SkyboxPass");
-    }
-
     BuildPrimaryPass(newGraph.get(), m_currentEnvironment.get());
 
     //BuildPPLLPipeline(newGraph.get());

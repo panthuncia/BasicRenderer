@@ -105,9 +105,9 @@ void EnvironmentManager::SetFromHDRI(Environment* e, std::string hdriPath) {
 		for (int i = 0; i < 6; i++) {
 			skyboxDesc.imageDimensions.push_back(dims);
 		}
-		skyboxDesc.channels = 3;
+		skyboxDesc.channels = 4;
 		skyboxDesc.isCubemap = true;
-		skyboxDesc.format = rhi::Format::R8G8B8A8_UNorm;
+		skyboxDesc.format = rhi::Format::R16G16B16A16_Float;
 		skyboxDesc.hasUAV = true;
 
 		auto envCubemap = PixelBuffer::CreateShared(skyboxDesc);

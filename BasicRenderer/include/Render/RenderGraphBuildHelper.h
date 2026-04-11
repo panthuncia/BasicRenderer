@@ -25,6 +25,7 @@
 #include "RenderPasses/EnvironmentConversionPass.h"
 #include "RenderPasses/EnvironmentSHPass.h"
 #include "RenderPasses/DeferredShadingPass.h"
+#include "RenderPasses/SkyboxRenderPass.h"
 #include "RenderPasses/PPLLFillPass.h"
 #include "RenderPasses/PPLLResolvePass.h"
 #include "RenderPasses/PostProcessing/ScreenSpaceReflectionsPass.h"
@@ -376,6 +377,14 @@ void BuildPrimaryPass(RenderGraph* graph, Environment* currentEnvironment) {
 
 	// Uses existing GBuffer resources
     graph->BuildComputePass<DeferredShadingPass>("DeferredShadingPass");
+
+    // Skybox needs the final opaque depth classification. In the CLod two-phase path,
+    // a second linear-depth copy is inserted immediately before DeferredShadingPass.
+    // Building the skybox here keeps it after that final depth write while still
+    // letting forward/transparent passes blend over the background.
+    if (currentEnvironment != nullptr) {
+        graph->BuildComputePass<SkyboxRenderPass>("SkyboxPass");
+    }
 
 	// Forward pass for materials incompatible with deferred rendering
     graph->BuildRenderPass<ForwardRenderPass>("Forward render pass", ForwardRenderPassInputs{

@@ -305,34 +305,6 @@ uint64_t BufferBytes(uint32_t elementCount, size_t elementSize)
     return static_cast<uint64_t>(elementCount) * static_cast<uint64_t>(elementSize);
 }
 
-//std::shared_ptr<Buffer> CreateCLodStructuredBuffer(
-//    uint32_t numElements,
-//    uint32_t elementSize,
-//    bool unorderedAccess = true,
-//    bool unorderedAccessCounter = false,
-//    bool createNonShaderVisibleUAV = false)
-//{
-//    return CreateAliasedUnmaterializedStructuredBuffer(
-//        numElements,
-//        elementSize,
-//        unorderedAccess,
-//        unorderedAccessCounter,
-//        createNonShaderVisibleUAV,
-//        ShouldAllowCLodBufferAlias(BufferBytes(numElements, elementSize)));
-//}
-//
-//std::shared_ptr<Buffer> CreateCLodRawBuffer(
-//    uint64_t bufferSizeBytes,
-//    bool unorderedAccess = true,
-//    bool createNonShaderVisibleUAV = false)
-//{
-//    return CreateAliasedUnmaterializedRawBuffer(
-//        bufferSizeBytes,
-//        unorderedAccess,
-//        createNonShaderVisibleUAV,
-//        ShouldAllowCLodBufferAlias(bufferSizeBytes));
-//}
-
 uint32_t BytesToElementCount(uint64_t allocatedBytes, size_t elementSize)
 {
     if (elementSize == 0u) {
@@ -1044,9 +1016,9 @@ void CLodExtension::InitializeShadowResources()
 
     m_vsmExpandedVisibleClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         static_cast<uint64_t>(vsmExpandedRecordCapacity) * PackedVisibleClusterStrideBytes,
+        1, // Byte-address
         true,
-        false,
-		true);
+		false);
     m_vsmExpandedVisibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Expanded Visible Clusters Buffer"));
 
     m_vsmExpandedBlockMetaBuffer = CreateAliasedUnmaterializedStructuredBuffer(
