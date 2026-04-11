@@ -3,6 +3,7 @@
 #include "include/structs.hlsli"
 #include "include/waveIntrinsicsHelpers.hlsli"
 #include "PerPassRootConstants/clodCreateCommandRootConstants.h"
+#include "PerPassRootConstants/clodClearUintBufferRootConstants.h"
 #include "PerPassRootConstants/clodHistogramRootConstants.h"
 #include "PerPassRootConstants/clodPrefixScanRootConstants.h"
 #include "PerPassRootConstants/clodPrefixOffsetsRootConstants.h"
@@ -83,6 +84,19 @@ groupshared uint gCLodVirtualShadowShouldClearPage;
 groupshared uint gCLodVirtualShadowMarkTileHasGeometry;
 groupshared uint gCLodVirtualShadowMarkTileMinDepthBits;
 groupshared uint gCLodVirtualShadowMarkTileMaxDepthBits;
+
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void ClearUintStructuredBufferCSMain(uint3 dtid : SV_DispatchThreadID)
+{
+    if (dtid.x >= CLOD_CLEAR_UINT_BUFFER_COUNT)
+    {
+        return;
+    }
+
+    RWStructuredBuffer<uint> outBuffer = ResourceDescriptorHeap[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX];
+    outBuffer[dtid.x] = CLOD_CLEAR_UINT_BUFFER_VALUE;
+}
 
 float CLodMaxAxisScale_RowVector(float4x4 M)
 {

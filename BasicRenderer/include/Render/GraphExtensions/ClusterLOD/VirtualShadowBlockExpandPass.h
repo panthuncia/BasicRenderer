@@ -17,6 +17,7 @@
 #include "RenderPasses/Base/ComputePass.h"
 #include "Resources/PixelBuffer.h"
 #include "Resources/Resolvers/ResourceGroupResolver.h"
+#include "../../../../shaders/PerPassRootConstants/clodClearUintBufferRootConstants.h"
 #include "../../../../shaders/PerPassRootConstants/clodVirtualShadowBlockExpandRootConstants.h"
 
 class Buffer;
@@ -96,6 +97,12 @@ public:
             entryPoint,
             skinnedDefines,
             skinnedName);
+        m_clearPso = PSOManager::GetInstance().MakeComputePipeline(
+            PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
+            L"Shaders/ClusterLOD/clodUtil.hlsl",
+            L"ClearUintStructuredBufferCSMain",
+            {},
+            "CLod_VirtualShadowBlockExpandClearUintPSO");
     }
 
     void DeclareResourceUsages(ComputePassBuilder* builder) override
@@ -142,29 +149,16 @@ public:
         auto& context = *updateContext;
         const uint32_t numBuckets = context.materialManager->GetRasterBucketCount();
 
-        std::vector<uint32_t> zeroBuckets(numBuckets, 0u);
         if (m_mode == VirtualShadowBlockExpandMode::Histogram) {
             if (m_expandedHistogramBuffer->GetSize() < static_cast<size_t>(numBuckets) * sizeof(uint32_t)) {
                 m_expandedHistogramBuffer->ResizeStructured(numBuckets);
             }
-
-            BUFFER_UPLOAD(
-                zeroBuckets.data(),
-                static_cast<uint32_t>(zeroBuckets.size() * sizeof(uint32_t)),
-                rg::runtime::UploadTarget::FromShared(m_expandedHistogramBuffer),
-                0);
         }
 
         if (m_mode == VirtualShadowBlockExpandMode::Emit) {
             if (m_expandedWriteCursorBuffer->GetSize() < static_cast<size_t>(numBuckets) * sizeof(uint32_t)) {
                 m_expandedWriteCursorBuffer->ResizeStructured(numBuckets);
             }
-
-            BUFFER_UPLOAD(
-                zeroBuckets.data(),
-                static_cast<uint32_t>(zeroBuckets.size() * sizeof(uint32_t)),
-                rg::runtime::UploadTarget::FromShared(m_expandedWriteCursorBuffer),
-                0);
         }
     }
 
@@ -181,6 +175,36 @@ public:
 
         commandList.SetDescriptorHeaps(context.textureDescriptorHeap.GetHandle(), context.samplerDescriptorHeap.GetHandle());
         commandList.BindLayout(PSOManager::GetInstance().GetComputeRootSignature().GetHandle());
+        const uint32_t numBuckets = context.materialManager->GetRasterBucketCount();
+        if (numBuckets == 0u) {
+            return {};
+        }
+
+        const std::shared_ptr<Buffer>& bufferToClear =
+            m_mode == VirtualShadowBlockExpandMode::Histogram
+                ? m_expandedHistogramBuffer
+                : m_expandedWriteCursorBuffer;
+
+        BindResourceDescriptorIndices(commandList, m_clearPso.GetResourceDescriptorSlots());
+        commandList.BindPipeline(m_clearPso.GetAPIPipelineState().GetHandle());
+
+        uint32_t clearRootConstants[NumMiscUintRootConstants] = {};
+        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_DESCRIPTOR_INDEX] = bufferToClear->GetUAVShaderVisibleInfo(0).slot.index;
+        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_VALUE] = 0u;
+        clearRootConstants[CLOD_CLEAR_UINT_BUFFER_COUNT] = numBuckets;
+        commandList.PushConstants(rhi::ShaderStage::Compute, 0, MiscUintRootSignatureIndex, 0, NumMiscUintRootConstants, clearRootConstants);
+        commandList.Dispatch((numBuckets + 63u) / 64u, 1u, 1u);
+
+        rhi::BufferBarrier clearBarrier{};
+        clearBarrier.buffer = bufferToClear->GetAPIResource().GetHandle();
+        clearBarrier.beforeAccess = rhi::ResourceAccessType::UnorderedAccess;
+        clearBarrier.afterAccess = rhi::ResourceAccessType::UnorderedAccess;
+        clearBarrier.beforeSync = rhi::ResourceSyncState::ComputeShading;
+        clearBarrier.afterSync = rhi::ResourceSyncState::ComputeShading;
+
+        rhi::BarrierBatch clearBarrierBatch{};
+        clearBarrierBatch.buffers = { &clearBarrier };
+        commandList.Barriers(clearBarrierBatch);
 
         uint32_t misc[NumMiscUintRootConstants] = {};
         misc[CLOD_VSM_BLOCK_EXPAND_SOURCE_HISTOGRAM_DESCRIPTOR_INDEX] = m_sourceHistogramBuffer->GetSRVInfo(0).slot.index;
@@ -197,11 +221,6 @@ public:
             misc[CLOD_VSM_BLOCK_EXPAND_EXPANDED_WRITE_CURSOR_DESCRIPTOR_INDEX] = m_expandedWriteCursorBuffer->GetUAVShaderVisibleInfo(0).slot.index;
             misc[CLOD_VSM_BLOCK_EXPAND_EXPANDED_VISIBLE_CLUSTERS_DESCRIPTOR_INDEX] = m_expandedVisibleClustersBuffer->GetUAVShaderVisibleInfo(0).slot.index;
             misc[CLOD_VSM_BLOCK_EXPAND_EXPANDED_BLOCK_META_DESCRIPTOR_INDEX] = m_expandedBlockMetaBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-        }
-
-        const uint32_t numBuckets = context.materialManager->GetRasterBucketCount();
-        if (numBuckets == 0u) {
-            return {};
         }
 
         const auto apiResource = m_sourceIndirectArgsBuffer->GetAPIResource();
@@ -233,6 +252,7 @@ private:
     VirtualShadowBlockExpandMode m_mode = VirtualShadowBlockExpandMode::Histogram;
     PipelineState m_rigidPso;
     PipelineState m_skinnedPso;
+    PipelineState m_clearPso;
     rhi::CommandSignaturePtr m_commandSignature;
     std::shared_ptr<Buffer> m_sourceVisibleClustersBuffer;
     std::shared_ptr<Buffer> m_sourceHistogramBuffer;

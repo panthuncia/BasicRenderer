@@ -32,9 +32,11 @@ private:
     void CreatePipelines(
         rhi::Device device,
         rhi::PipelineLayoutHandle globalRootSignature,
-        PipelineState& outHistogramPipeline);
+        PipelineState& outHistogramPipeline,
+        PipelineState& outClearPipeline);
 
     PipelineState m_histogramPipeline;
+    PipelineState m_clearPipeline;
     rhi::CommandSignaturePtr m_histogramCommandSignature;
     std::shared_ptr<Buffer> m_visibleClustersBuffer;
     std::shared_ptr<Buffer> m_visibleClustersCounterBuffer;
