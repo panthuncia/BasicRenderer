@@ -102,8 +102,6 @@
       "CLodClipmapInfo": {},
       "CLodPhysicalPages": {},
       "CLodPageTable": {},
-      "ShadowMaps": {},
-      "LinearShadowMaps": {},
       "CLodDirectionalPageViewInfo": {},
       "CLodCompactMainCamera": {},
       "CLodCompactShadowCameras": {}

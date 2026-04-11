@@ -26,8 +26,4 @@ public:
 private:
     PipelineState m_pso;
     std::shared_ptr<PixelBuffer> m_pageTableTexture;
-    std::shared_ptr<Buffer> m_allocationRequestsBuffer;
-    std::shared_ptr<Buffer> m_allocationCountBuffer;
-    std::shared_ptr<Buffer> m_indirectArgsBuffer;
-    rhi::CommandSignaturePtr m_commandSignature;
 };

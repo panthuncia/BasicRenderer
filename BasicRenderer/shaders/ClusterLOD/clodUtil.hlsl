@@ -995,12 +995,31 @@ void CLodVirtualShadowSetupCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     {
         pageTable[dispatchThreadId] = 0u;
     }
-    else if ((existingPageEntry & (kCLodVirtualShadowVisitedMask | kCLodVirtualShadowRerenderedThisFrameMask)) != 0u)
+    else
     {
-        // Only clear Visited — Dirty is managed by ClearPages (set) and
-        // ClearDirtyBits (clear) which both iterate the allocation request list.
-        pageTable[dispatchThreadId] =
-            existingPageEntry & ~(kCLodVirtualShadowVisitedMask | kCLodVirtualShadowRerenderedThisFrameMask);
+        const bool staleDirtyPage =
+            (existingPageEntry & kCLodVirtualShadowDirtyMask) != 0u &&
+            (existingPageEntry & kCLodVirtualShadowRerenderedThisFrameMask) == 0u;
+        if (staleDirtyPage)
+        {
+            // Dirty pages should either be rerendered in the same frame or be
+            // retired before the next one. If they survive into setup without
+            // RerenderedThisFrame, they were requested but never written.
+            pageTable[dispatchThreadId] = existingPageEntry & ~(
+                kCLodVirtualShadowDirtyMask |
+                kCLodVirtualShadowVisitedMask |
+                kCLodVirtualShadowRerenderedThisFrameMask);
+            CLodVirtualShadowStatsIncrementSetupStaleDirtyClear(statsBuffer, dispatchThreadId.z);
+            if ((existingPageEntry & kCLodVirtualShadowContentValidMask) == 0u)
+            {
+                CLodVirtualShadowStatsIncrementClearedUnwrittenDirty(statsBuffer, dispatchThreadId.z);
+            }
+        }
+        else if ((existingPageEntry & (kCLodVirtualShadowVisitedMask | kCLodVirtualShadowRerenderedThisFrameMask)) != 0u)
+        {
+            pageTable[dispatchThreadId] =
+                existingPageEntry & ~(kCLodVirtualShadowVisitedMask | kCLodVirtualShadowRerenderedThisFrameMask);
+        }
     }
 
     if (dispatchThreadId.z != 0u)
@@ -1866,37 +1885,27 @@ void CLodVirtualShadowBuildDirtyHierarchyCSMain(uint3 dispatchThreadId : SV_Disp
 }
 
 [shader("compute")]
-[numthreads(64, 1, 1)]
+[numthreads(8, 8, 1)]
 void CLodVirtualShadowClearDirtyBitsCSMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    StructuredBuffer<uint> allocationCountBuffer = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_REQUEST_COUNT_DESCRIPTOR_INDEX];
-    const uint requestCount = allocationCountBuffer.Load(0);
-    const uint requestIndex = dispatchThreadId.x;
-    if (requestIndex >= requestCount)
+    if (dispatchThreadId.z >= kCLodVirtualShadowClipmapCount ||
+        dispatchThreadId.x >= CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_RESOLUTION ||
+        dispatchThreadId.y >= CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_RESOLUTION)
     {
         return;
     }
 
-    StructuredBuffer<uint4> allocationRequests = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_REQUESTS_DESCRIPTOR_INDEX];
     RWTexture2DArray<uint> pageTable = ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_DESCRIPTOR_INDEX];
-
-    const uint4 request = allocationRequests[requestIndex];
-    const uint virtualAddress = request.x;
-    const uint clipmapIndex = request.y;
-    if (clipmapIndex >= kCLodVirtualShadowClipmapCount)
-    {
-        return;
-    }
-
-    const uint pageX = virtualAddress % CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_RESOLUTION;
-    const uint pageY = virtualAddress / CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_RESOLUTION;
-    if (pageY >= CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_RESOLUTION)
+    const uint3 pageCoords = dispatchThreadId;
+    const uint pageEntry = pageTable[pageCoords];
+    if ((pageEntry & (kCLodVirtualShadowAllocatedMask | kCLodVirtualShadowRerenderedThisFrameMask)) !=
+        (kCLodVirtualShadowAllocatedMask | kCLodVirtualShadowRerenderedThisFrameMask))
     {
         return;
     }
 
     uint ignoredPrev = 0u;
-    InterlockedAnd(pageTable[uint3(pageX, pageY, clipmapIndex)], ~kCLodVirtualShadowDirtyMask, ignoredPrev);
+    InterlockedAnd(pageTable[pageCoords], ~kCLodVirtualShadowDirtyMask, ignoredPrev);
 }
 
 uint CLodGetHistogramVisibleClusterReadIndex(uint linearizedID)

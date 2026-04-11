@@ -17,33 +17,22 @@ VirtualShadowMapClearDirtyBitsPass::VirtualShadowMapClearDirtyBitsPass(
     std::shared_ptr<Buffer> allocationCountBuffer,
     std::shared_ptr<Buffer> indirectArgsBuffer)
     : m_pageTableTexture(std::move(pageTableTexture))
-    , m_allocationRequestsBuffer(std::move(allocationRequestsBuffer))
-    , m_allocationCountBuffer(std::move(allocationCountBuffer))
-    , m_indirectArgsBuffer(std::move(indirectArgsBuffer))
 {
+    (void)allocationRequestsBuffer;
+    (void)allocationCountBuffer;
+    (void)indirectArgsBuffer;
+
     m_pso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
         L"Shaders/ClusterLOD/clodUtil.hlsl",
         L"CLodVirtualShadowClearDirtyBitsCSMain",
         {},
         "CLod.VirtualShadow.ClearDirtyBits.PSO");
-
-    rhi::IndirectArg dispatchArgs[] = {
-        {.kind = rhi::IndirectArgKind::Dispatch }
-    };
-
-    auto device = DeviceManager::GetInstance().GetDevice();
-    device.CreateCommandSignature(
-        rhi::CommandSignatureDesc{ rhi::Span<rhi::IndirectArg>(dispatchArgs, 1), sizeof(CLodReyesDispatchIndirectCommand) },
-        PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
-        m_commandSignature);
 }
 
 void VirtualShadowMapClearDirtyBitsPass::DeclareResourceUsages(ComputePassBuilder* builder)
 {
-    builder->WithShaderResource(m_allocationRequestsBuffer, m_allocationCountBuffer)
-        .WithIndirectArguments(m_indirectArgsBuffer)
-        .WithUnorderedAccess(m_pageTableTexture);
+    builder->WithUnorderedAccess(m_pageTableTexture);
 
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
@@ -66,8 +55,6 @@ PassReturn VirtualShadowMapClearDirtyBitsPass::Execute(PassExecutionContext& exe
 
     uint32_t rootConstants[NumMiscUintRootConstants] = {};
     rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_DESCRIPTOR_INDEX] = m_pageTableTexture->GetUAVShaderVisibleInfo(UAVViewType::Texture2DArrayFull, 0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_REQUESTS_DESCRIPTOR_INDEX] = m_allocationRequestsBuffer->GetSRVInfo(0).slot.index;
-    rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_REQUEST_COUNT_DESCRIPTOR_INDEX] = m_allocationCountBuffer->GetSRVInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_CLEAR_DIRTY_BITS_PAGE_TABLE_RESOLUTION] = virtualShadowConfig.pageTableResolution;
 
     commandList.PushConstants(
@@ -78,7 +65,10 @@ PassReturn VirtualShadowMapClearDirtyBitsPass::Execute(PassExecutionContext& exe
         NumMiscUintRootConstants,
         rootConstants);
 
-    commandList.ExecuteIndirect(m_commandSignature->GetHandle(), m_indirectArgsBuffer->GetAPIResource().GetHandle(), 0, {}, 0, 1);
+    constexpr uint32_t threadsPerDimension = 8u;
+    const uint32_t groupCountX = (virtualShadowConfig.pageTableResolution + threadsPerDimension - 1u) / threadsPerDimension;
+    const uint32_t groupCountY = (virtualShadowConfig.pageTableResolution + threadsPerDimension - 1u) / threadsPerDimension;
+    commandList.Dispatch(groupCountX, groupCountY, CLodVirtualShadowMaxSupportedClipmapCount);
     return {};
 }
 

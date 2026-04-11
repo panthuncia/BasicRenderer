@@ -22,7 +22,6 @@ class SortedUnsignedIntBuffer;
 
 struct AddLightReturn {
 	Components::LightViewInfo lightViewInfo;
-	std::optional<Components::DepthMap> shadowMap;
 	std::optional<Components::FrustumPlanes> frustumPlanes;
 };
 
@@ -59,8 +58,6 @@ private:
 
 	std::shared_ptr<ResourceGroup> m_pLightViewInfoResourceGroup;
 	std::shared_ptr<ResourceGroup> m_pLightBufferResourceGroup;
-	std::shared_ptr<ShadowMaps> m_pShadowMapResourceGroup;
-	std::shared_ptr<LinearShadowMaps> m_pLinearShadowMapResourceGroup;
 
 	std::shared_ptr<Buffer> m_pClusterBuffer;
 	std::shared_ptr<Buffer> m_pLightPagesBuffer;

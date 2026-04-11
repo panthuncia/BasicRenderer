@@ -37,8 +37,6 @@ namespace Components {
         uint32_t lightBufferIndex = 0;
         uint32_t viewInfoBufferIndex = 0;
         Matrix projectionMatrix;
-        std::shared_ptr<PixelBuffer> depthMap;
-        std::shared_ptr<PixelBuffer> linearDepthMap;
         uint32_t depthResX = 0;
         uint32_t depthResY = 0;
     };

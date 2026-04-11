@@ -3,7 +3,6 @@
 #include "Managers/Singletons/ResourceManager.h"
 #include "Utilities/Utilities.h"
 #include "Managers/Singletons/SettingsManager.h"
-#include "Resources/ShadowMaps.h"
 #include "Managers/IndirectCommandBufferManager.h"
 #include "Managers/Singletons/DeletionManager.h"
 #include "Managers/Singletons/RendererECSManager.h"
@@ -76,17 +75,10 @@ LightManager::LightManager() {
 	m_resources[Builtin::Light::DirectionalLightCascadeBuffer] = m_directionalViewInfo;
 	m_resources[Builtin::Light::ActiveLightIndices] = m_activeLightIndices;
 
-	m_pShadowMapResourceGroup = std::make_shared<ShadowMaps>("ShadowMaps");
-	m_pLinearShadowMapResourceGroup = std::make_shared<LinearShadowMaps>("linearShadowMaps");
-
 	m_resolvers[Builtin::Light::ViewResourceGroup] = 
 		std::make_shared<ResourceGroupResolver>(m_pLightViewInfoResourceGroup);
 	m_resolvers[Builtin::Light::BufferGroup] = 
 		std::make_shared<ResourceGroupResolver>(m_pLightBufferResourceGroup);
-	m_resolvers[Builtin::Shadows::ShadowMaps] =
-		std::make_shared<ResourceGroupResolver>(m_pShadowMapResourceGroup);
-	m_resolvers[Builtin::Shadows::LinearShadowMaps] =
-		std::make_shared<ResourceGroupResolver>(m_pLinearShadowMapResourceGroup);
 }
 
 LightManager::~LightManager() {
@@ -125,7 +117,6 @@ AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
     m_activeLightIndices->Insert(lightIndex);
 
     Components::LightViewInfo viewInfo;
-    std::optional<Components::DepthMap> shadowMapComponent = std::nullopt;
     std::optional<Components::FrustumPlanes> planes = std::nullopt;
 
     if (lightInfo->shadowCaster) {
@@ -144,24 +135,14 @@ AddLightReturn LightManager::AddLight(LightInfo* lightInfo, uint64_t entityId) {
                 break;
         }
 
-        if (m_pShadowMapResourceGroup != nullptr) {
-            auto map = m_pShadowMapResourceGroup->AddMap(lightInfo, getShadowResolution());
-			auto linearMap = m_pLinearShadowMapResourceGroup->AddMap(lightInfo, getShadowResolution());
-            shadowMapComponent = Components::DepthMap(map, linearMap, nullptr);
-			viewInfo.depthMap = map;
-			viewInfo.linearDepthMap = linearMap;
-			viewInfo.depthResX = map->GetWidth();
-			viewInfo.depthResY = map->GetHeight();
-			for (auto viewId : viewInfo.viewIDs) {
-				m_pViewManager->AttachDepth(viewId, map, linearMap);
-			}
-        }
+		viewInfo.depthResX = getShadowResolution();
+		viewInfo.depthResY = getShadowResolution();
     }
 
     viewInfo.lightBufferIndex = lightIndex;
     viewInfo.lightBufferView = lightBufferView;
     
-    return { viewInfo, shadowMapComponent, planes };
+	return { viewInfo, planes };
 }
 
 
@@ -177,15 +158,6 @@ void LightManager::RemoveLight(flecs::entity light) {
 	auto& viewInfo = light.get<Components::LightViewInfo>();
 	m_activeLightIndices->Remove(viewInfo.lightBufferIndex);
 	m_lightBuffer->Remove(viewInfo.lightBufferView.get());
-
-	if (auto depthMap = light.try_get<Components::DepthMap>()) {
-		if (depthMap->depthMap) {
-			m_pShadowMapResourceGroup->RemoveResource(depthMap->depthMap.get());
-		}
-		if (depthMap->linearDepthMap) {
-			m_pLinearShadowMapResourceGroup->RemoveResource(depthMap->linearDepthMap.get());
-		}
-	}
 
 	RemoveLightViewInfo(light);
 }

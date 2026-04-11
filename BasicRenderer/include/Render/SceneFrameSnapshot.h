@@ -17,6 +17,7 @@ struct SnapshotRenderable {
     Components::Matrix matrix;
     Components::MeshInstances meshInstances;
     std::string name;
+    bool transformChanged = false;
     bool skinned = false;
     bool skipShadowPass = false;
 };

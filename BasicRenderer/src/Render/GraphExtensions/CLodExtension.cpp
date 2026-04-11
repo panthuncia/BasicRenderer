@@ -156,7 +156,7 @@ const CLodVariantTraits& GetVariantTraits(CLodExtensionType type)
             CLodRasterOutputKind::VirtualShadow,
             CLodVariantTraits::ScheduleMode::TwoPassVisibility,
             false,
-            true,
+            false,
             false,
             true
         },
@@ -2653,47 +2653,44 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             MakeVariantPassName(traits, "LinearDepthDownsamplePass1"),
             std::make_shared<DownsamplePass>()));
 
-    if (!traits.usesPhase2OcclusionReplay) {
-        return;
-    }
+    if (traits.usesPhase2OcclusionReplay) {
+        HierarchialCullingPassInputs cullPassInputs2;
+        cullPassInputs2.isFirstPass = false;
+        cullPassInputs2.maxVisibleClusters = m_visibleClusterCapacity;
+        cullPassInputs2.workGraphMode = workGraphMode;
+        cullPassInputs2.renderPhase = renderPhase;
+        cullPassInputs2.clodOnlyWorkloads = true;
+        cullPassInputs2.useShadowCascadeViews = (traits.type == CLodExtensionType::Shadow);
+        cullPassInputs2.rasterOutputKind = traits.rasterOutputKind;
+        auto cullPassDesc2 = RenderGraph::ExternalPassDesc::Compute(
+            MakeVariantPassName(traits, "HierarchialCullingPass2"),
+            std::make_shared<HierarchialCullingPass>(
+                cullPassInputs2,
+                m_visibleClustersBuffer,
+                m_visibleClustersCounterBufferPhase2,
+                m_swVisibleClustersCounterBufferPhase2,
+                traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersBufferPhase2 : nullptr,
+                traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersCounterBufferPhase2 : nullptr,
+                m_histogramIndirectCommand,
+                m_workGraphTelemetryBuffer,
+                m_occlusionReplayBuffer,
+                m_occlusionReplayStateBuffer,
+                m_occlusionNodeGpuInputsBuffer,
+                m_viewDepthSrvIndicesBuffer,
+                m_viewRasterInfoBuffer,
+                traits.type == CLodExtensionType::Shadow ? m_shadowDirtyPageHierarchyTexture : nullptr,
+                slabGroup,
+                m_visibleClustersCounterBuffer,
+                m_swVisibleClustersCounterBuffer,
+                    traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidatesBuffer : nullptr,
+                    traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidateCountBuffer : nullptr,
+                traits.type == CLodExtensionType::Shadow ? m_shadowInvalidatedInstancesBitsetBuffer : nullptr,
+                traits.type == CLodExtensionType::Shadow ? m_shadowPageTableTexture : nullptr,
+                traits.type == CLodExtensionType::Shadow ? m_shadowPhysicalPagesTexture : nullptr));
+        cullPassDesc2.At(RenderGraph::ExternalInsertPoint::After(MakeVariantPassName(traits, "LinearDepthDownsamplePass1")));
+        outPasses.push_back(std::move(cullPassDesc2));
 
-    HierarchialCullingPassInputs cullPassInputs2;
-    cullPassInputs2.isFirstPass = false;
-    cullPassInputs2.maxVisibleClusters = m_visibleClusterCapacity;
-    cullPassInputs2.workGraphMode = workGraphMode;
-    cullPassInputs2.renderPhase = renderPhase;
-    cullPassInputs2.clodOnlyWorkloads = true;
-    cullPassInputs2.useShadowCascadeViews = (traits.type == CLodExtensionType::Shadow);
-    cullPassInputs2.rasterOutputKind = traits.rasterOutputKind;
-    auto cullPassDesc2 = RenderGraph::ExternalPassDesc::Compute(
-        MakeVariantPassName(traits, "HierarchialCullingPass2"),
-        std::make_shared<HierarchialCullingPass>(
-            cullPassInputs2,
-            m_visibleClustersBuffer,
-            m_visibleClustersCounterBufferPhase2,
-            m_swVisibleClustersCounterBufferPhase2,
-            traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersBufferPhase2 : nullptr,
-            traits.rasterOutputKind == CLodRasterOutputKind::VirtualShadow ? m_swPageJobVisibleClustersCounterBufferPhase2 : nullptr,
-            m_histogramIndirectCommand,
-            m_workGraphTelemetryBuffer,
-            m_occlusionReplayBuffer,
-            m_occlusionReplayStateBuffer,
-            m_occlusionNodeGpuInputsBuffer,
-            m_viewDepthSrvIndicesBuffer,
-            m_viewRasterInfoBuffer,
-            traits.type == CLodExtensionType::Shadow ? m_shadowDirtyPageHierarchyTexture : nullptr,
-            slabGroup,
-            m_visibleClustersCounterBuffer,
-            m_swVisibleClustersCounterBuffer,
-                traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidatesBuffer : nullptr,
-                traits.type == CLodExtensionType::Shadow ? m_shadowPredictiveInvalidationCandidateCountBuffer : nullptr,
-            traits.type == CLodExtensionType::Shadow ? m_shadowInvalidatedInstancesBitsetBuffer : nullptr,
-            traits.type == CLodExtensionType::Shadow ? m_shadowPageTableTexture : nullptr,
-            traits.type == CLodExtensionType::Shadow ? m_shadowPhysicalPagesTexture : nullptr));
-    cullPassDesc2.At(RenderGraph::ExternalInsertPoint::After(MakeVariantPassName(traits, "LinearDepthDownsamplePass1")));
-    outPasses.push_back(std::move(cullPassDesc2));
-
-    if (!disableReyesTessellation) {
+        if (!disableReyesTessellation) {
         outPasses.push_back(
             RenderGraph::ExternalPassDesc::Compute(
                 MakeVariantPassName(traits, "ReyesQueueResetPass2"),
@@ -2859,7 +2856,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         }
     }
 
-    outPasses.push_back(
+        outPasses.push_back(
         RenderGraph::ExternalPassDesc::Compute(
             MakeVariantPassName(traits, "RasterBucketsHistogramPass2"),
             std::make_shared<RasterBucketHistogramPass>(
@@ -2870,7 +2867,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 reyesOwnershipBitsetBufferPhase2,
                 m_visibleClustersCounterBuffer)));
 
-    outPasses.push_back(
+        outPasses.push_back(
         RenderGraph::ExternalPassDesc::Compute(
             MakeVariantPassName(traits, "RasterBucketsPrefixScanPass2"),
             std::make_shared<RasterBucketBlockScanPass>(
@@ -2878,7 +2875,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_rasterBucketsOffsetsBuffer,
                 m_rasterBucketsBlockSumsBuffer)));
 
-    outPasses.push_back(
+        outPasses.push_back(
         RenderGraph::ExternalPassDesc::Compute(
             MakeVariantPassName(traits, "RasterBucketsPrefixOffsetsPass2"),
             std::make_shared<RasterBucketBlockOffsetsPass>(
@@ -2887,7 +2884,7 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_rasterBucketsScannedBlockSumsBuffer,
                 m_rasterBucketsTotalCountBuffer)));
 
-    outPasses.push_back(
+        outPasses.push_back(
         RenderGraph::ExternalPassDesc::Compute(
             MakeVariantPassName(traits, "RasterBucketsCompactAndArgsPass2"),
             std::make_shared<RasterBucketCompactAndArgsPass>(
@@ -2905,18 +2902,18 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_visibleClusterCapacity,
                 true)));
 
-    ClusterRasterizationPassInputs rasterizePassInputs2;
-    rasterizePassInputs2.clearGbuffer = false;
-    rasterizePassInputs2.wireframe = false;
-    rasterizePassInputs2.renderPhase = renderPhase;
-    rasterizePassInputs2.outputKind = traits.rasterOutputKind;
-    std::shared_ptr<Buffer> rasterClustersBufferPhase2 = m_compactedVisibleClustersBuffer;
-    std::shared_ptr<Buffer> rasterHistogramBufferPhase2 = m_rasterBucketsHistogramBufferPhase2;
-    std::shared_ptr<Buffer> rasterIndirectArgsBufferPhase2 = m_rasterBucketsIndirectArgsBufferPhase2;
+        ClusterRasterizationPassInputs rasterizePassInputs2;
+        rasterizePassInputs2.clearGbuffer = false;
+        rasterizePassInputs2.wireframe = false;
+        rasterizePassInputs2.renderPhase = renderPhase;
+        rasterizePassInputs2.outputKind = traits.rasterOutputKind;
+        std::shared_ptr<Buffer> rasterClustersBufferPhase2 = m_compactedVisibleClustersBuffer;
+        std::shared_ptr<Buffer> rasterHistogramBufferPhase2 = m_rasterBucketsHistogramBufferPhase2;
+        std::shared_ptr<Buffer> rasterIndirectArgsBufferPhase2 = m_rasterBucketsIndirectArgsBufferPhase2;
 
-    auto rasterizePassDesc2 = RenderGraph::ExternalPassDesc::Render(
-        MakeVariantPassName(traits, "RasterizeClustersPass2"),
-        std::make_shared<ClusterRasterizationPass>(
+        auto rasterizePassDesc2 = RenderGraph::ExternalPassDesc::Render(
+            MakeVariantPassName(traits, "RasterizeClustersPass2"),
+            std::make_shared<ClusterRasterizationPass>(
             rasterizePassInputs2,
             rasterClustersBufferPhase2,
             rasterHistogramBufferPhase2,
@@ -2929,12 +2926,12 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
             shadowPageTable,
             shadowPhysicalPages,
             shadowClipmapInfo));
-    rasterizePassDesc2.At(RenderGraph::ExternalInsertPoint::Before("MaterialHistogramPass"));
-    rasterizePassDesc2.GeometryPass();
+        rasterizePassDesc2.At(RenderGraph::ExternalInsertPoint::Before("MaterialHistogramPass"));
+        rasterizePassDesc2.GeometryPass();
             shadowClearDirtyBitsAfterPassName = MakeVariantPassName(traits, "RasterizeClustersPass2");
-    outPasses.push_back(std::move(rasterizePassDesc2));
+        outPasses.push_back(std::move(rasterizePassDesc2));
 
-    if (useComputeSWRaster) {
+        if (useComputeSWRaster) {
         outPasses.push_back(
             RenderGraph::ExternalPassDesc::Compute(
                 MakeVariantPassName(traits, "RasterBucketsCreateCommandPassSW2"),
@@ -3212,12 +3209,13 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
         }
     }
 
-    if (traits.schedulesPerViewDepthCopy) {
-        auto depthCopyPassDesc2 = RenderGraph::ExternalPassDesc::Compute(
-            MakeVariantPassName(traits, "LinearDepthCopyPass2"),
-            std::make_shared<PerViewLinearDepthCopyPass>());
-        depthCopyPassDesc2.At(RenderGraph::ExternalInsertPoint::Before("DeferredShadingPass"));
-        outPasses.push_back(std::move(depthCopyPassDesc2));
+        if (traits.schedulesPerViewDepthCopy) {
+            auto depthCopyPassDesc2 = RenderGraph::ExternalPassDesc::Compute(
+                MakeVariantPassName(traits, "LinearDepthCopyPass2"),
+                std::make_shared<PerViewLinearDepthCopyPass>());
+            depthCopyPassDesc2.At(RenderGraph::ExternalInsertPoint::Before("DeferredShadingPass"));
+            outPasses.push_back(std::move(depthCopyPassDesc2));
+        }
     }
 
     if (traits.type == CLodExtensionType::Shadow && !shadowClearDirtyBitsAfterPassName.empty()) {

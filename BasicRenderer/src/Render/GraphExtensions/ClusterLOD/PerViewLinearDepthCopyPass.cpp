@@ -18,7 +18,7 @@ PerViewLinearDepthCopyPass::PerViewLinearDepthCopyPass() {
 
 void PerViewLinearDepthCopyPass::DeclareResourceUsages(ComputePassBuilder* builder) {
     builder->WithShaderResource(Builtin::PrimaryCamera::VisibilityTexture)
-        .WithUnorderedAccess(Builtin::PrimaryCamera::LinearDepthMap, Builtin::Shadows::LinearShadowMaps, Builtin::PrimaryCamera::ProjectedDepthTexture);
+        .WithUnorderedAccess(Builtin::PrimaryCamera::LinearDepthMap, Builtin::PrimaryCamera::ProjectedDepthTexture);
     builder->WithConstantBuffer(Builtin::PerFrameBuffer);
 }
 

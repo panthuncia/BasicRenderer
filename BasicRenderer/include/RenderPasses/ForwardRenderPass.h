@@ -70,8 +70,7 @@ public:
             Builtin::Shadows::CLodCompactShadowCameras,
             Builtin::Shadows::CLodDirectionalPageViewInfo,
             Builtin::Shadows::CLodPageTable,
-            Builtin::Shadows::CLodPhysicalPages,
-            Builtin::Shadows::ShadowMaps)
+            Builtin::Shadows::CLodPhysicalPages)
             .WithRenderTarget(Builtin::Color::HDRColorTarget)
             .WithDepthReadWrite(Builtin::PrimaryCamera::DepthTexture)
             .IsGeometryPass();

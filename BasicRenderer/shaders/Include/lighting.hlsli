@@ -249,16 +249,24 @@ LightingOutput lightFragment(FragmentInfo fragmentInfo, Camera mainCamera, uint 
             float shadow = 0.0;
             if (enableShadows)
             {
-                if (light.shadowViewInfoIndex != -1 && light.shadowMapIndex != -1)
+                if (light.shadowViewInfoIndex != -1)
                 {
                     switch (light.type)
                     {
                     case 0:{ // Point light
+                            if (light.shadowMapIndex == -1)
+                            {
+                                break;
+                            }
                             shadow = calculatePointShadow(fragmentInfo.fragPosWorldSpace, fragmentInfo.normalWS.xyz, light, pointShadowViewInfoIndexBuffer, cameraBuffer);
                         //return float4(shadow, shadow, shadow, 1.0);
                             break;
                         }
                     case 1:{ // Spot light
+                            if (light.shadowMapIndex == -1)
+                            {
+                                break;
+                            }
                             uint spotShadowCameraIndex = spotShadowViewInfoIndexBuffer[light.shadowViewInfoIndex];
                             Camera camera = cameraBuffer[spotShadowCameraIndex];
                             shadow = calculateSpotShadow(fragmentInfo.fragPosWorldSpace, fragmentInfo.normalWS, light, camera.viewProjection, light.nearPlane, light.farPlane);

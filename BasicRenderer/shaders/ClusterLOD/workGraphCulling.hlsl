@@ -1917,6 +1917,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
         pageMeshletCount = pageHeader.meshletCount;
         pageDescriptorOffset = pageHeader.descriptorOffset;
 
+#if !CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
         if (!cullCameraIsOrtho || CLOD_VSM_OCCLUSION_CULLING) {
             StructuredBuffer<CLodViewDepthSRVIndex> viewDepthSRVIndices =
                 ResourceDescriptorHeap[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX];
@@ -1925,6 +1926,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
             numDepthMips = cameras[b.viewId].numDepthMips;
             hzbUVScale = cameras[b.viewId].UVScaleToNextPowerOf2;
         }
+#endif
 
         // Per-meshlet condition 2 + streaming fallback state
         const float objectUniformScale = MaxAxisScale_RowVector(objectModelMatrix);
@@ -2123,6 +2125,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                     }
                 }
 
+ #if !CLOD_SW_RASTER_OUTPUT_VIRTUAL_SHADOW
                 if (survives && CLodWorkGraphOcclusionEnabled() && depthMapDescriptorIndex != 0) {
                     bool occlusionCulled = false;
                     // Load only the occlusion-specific camera matrices when needed,
@@ -2172,6 +2175,7 @@ void ClusterCullBody(MeshletBucketRecord b, bool hasBucket, uint GI, uint inputC
                         WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_OCCLUSION, 1);
                     }
                 }
+ #endif
             } else {
                 WGTelemetryAdd(WG_COUNTER_CLUSTER_CULL_REJECTED_PAGE_BOUNDS, 1);
             }

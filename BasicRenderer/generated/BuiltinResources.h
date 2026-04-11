@@ -120,8 +120,6 @@ struct Builtin {
     inline static constexpr std::string_view CLodDirectionalPageViewInfo = "Builtin::Shadows::CLodDirectionalPageViewInfo";
     inline static constexpr std::string_view CLodPageTable = "Builtin::Shadows::CLodPageTable";
     inline static constexpr std::string_view CLodPhysicalPages = "Builtin::Shadows::CLodPhysicalPages";
-    inline static constexpr std::string_view LinearShadowMaps = "Builtin::Shadows::LinearShadowMaps";
-    inline static constexpr std::string_view ShadowMaps = "Builtin::Shadows::ShadowMaps";
   };
   struct SkeletonResources {
     inline static constexpr std::string_view BoneTransforms = "Builtin::SkeletonResources::BoneTransforms";

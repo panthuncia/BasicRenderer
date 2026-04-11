@@ -53,6 +53,11 @@ bool UsesVirtualShadowOutput(CLodRasterOutputKind outputKind)
     return outputKind == CLodRasterOutputKind::VirtualShadow;
 }
 
+bool UsesPerViewDepthMapOcclusion(CLodRasterOutputKind outputKind)
+{
+    return !UsesVirtualShadowOutput(outputKind);
+}
+
 ViewFilter GetCullViewFilter(bool useShadowCascadeViews)
 {
     if (!useShadowCascadeViews) {
@@ -164,8 +169,7 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
             m_workGraphTelemetryBuffer,
             m_occlusionReplayBuffer,
             m_occlusionReplayStateBuffer,
-            m_occlusionNodeGpuInputsBuffer,
-            m_viewDepthSrvIndicesBuffer)
+            m_occlusionNodeGpuInputsBuffer)
         .WithUnorderedAccess(
             Builtin::CLod::StreamingLoadRequests,
             Builtin::CLod::StreamingLoadCounter,
@@ -192,13 +196,16 @@ void HierarchialCullingPass::DeclareResourceUsages(ComputePassBuilder* builder) 
             Builtin::SkeletonResources::InverseBindMatrices,
             Builtin::SkeletonResources::BoneTransforms,
             Builtin::SkeletonResources::SkinningInstanceInfo,
-            Builtin::PrimaryCamera::LinearDepthMap,
-            Builtin::Shadows::LinearShadowMaps,
             m_visibleClustersCounterBuffer,
             m_occlusionReplayStateBuffer,
             Builtin::PerMaterialDataBuffer,
             m_workGraphComputePageJobDescriptorResourceId.c_str())
         .WithShaderResource(ECSResourceResolver(drawSetIndicesQuery));
+
+    if (UsesPerViewDepthMapOcclusion(m_rasterOutputKind)) {
+        builder->WithUnorderedAccess(m_viewDepthSrvIndicesBuffer)
+            .WithShaderResource(Builtin::PrimaryCamera::LinearDepthMap);
+    }
 
     if (UsesSWClassification(m_workGraphMode)) {
         builder->WithUnorderedAccess(m_swVisibleClustersCounterBuffer);
@@ -313,7 +320,8 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     if (IsCLodWorkGraphTelemetryEnabled()) {
         workGraphFlags |= CLOD_WG_FLAG_TELEMETRY_ENABLED;
     }
-    if (SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")()) {
+    if (UsesPerViewDepthMapOcclusion(m_rasterOutputKind) &&
+        SettingsManager::GetInstance().getSettingGetter<bool>("enableOcclusionCulling")()) {
         workGraphFlags |= CLOD_WG_FLAG_OCCLUSION_ENABLED;
     }
     const bool enableSoftwareRaster = UsesSWClassification(m_workGraphMode);
@@ -365,7 +373,10 @@ PassReturn HierarchialCullingPass::Execute(PassExecutionContext& executionContex
     uintRootConstants[CLOD_WG_OCCLUSION_REPLAY_BUFFER_DESCRIPTOR_INDEX] = m_occlusionReplayBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_WG_OCCLUSION_REPLAY_STATE_DESCRIPTOR_INDEX] = m_occlusionReplayStateBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     uintRootConstants[CLOD_WG_WORKGRAPH_NODE_INPUTS_DESCRIPTOR_INDEX] = m_occlusionNodeGpuInputsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
-    uintRootConstants[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX] = m_viewDepthSrvIndicesBuffer->GetSRVInfo(0).slot.index;
+    uintRootConstants[CLOD_WG_VIEW_DEPTH_SRV_INDICES_DESCRIPTOR_INDEX] =
+        UsesPerViewDepthMapOcclusion(m_rasterOutputKind)
+            ? m_viewDepthSrvIndicesBuffer->GetSRVInfo(0).slot.index
+            : 0u;
     uintRootConstants[CLOD_WG_VISIBLE_CLUSTERS_CAPACITY] = static_cast<uint32_t>(m_maxVisibleClusters);
     uintRootConstants[CLOD_WG_SHADOW_DIRTY_HIERARCHY_DESCRIPTOR_INDEX] =
         m_shadowDirtyHierarchyTexture
@@ -629,44 +640,46 @@ void HierarchialCullingPass::Update(const UpdateExecutionContext& executionConte
         rg::runtime::UploadTarget::FromShared(m_occlusionReplayStateBuffer),
         0);
 
-    std::vector<CLodViewDepthSRVIndex> viewDepthSrvIndices(CLodMaxViewDepthIndices);
-    for (uint32_t i = 0; i < CLodMaxViewDepthIndices; ++i) {
-        viewDepthSrvIndices[i].cameraBufferIndex = i;
-        viewDepthSrvIndices[i].linearDepthSRVIndex = 0;
+    if (UsesPerViewDepthMapOcclusion(m_rasterOutputKind)) {
+        std::vector<CLodViewDepthSRVIndex> viewDepthSrvIndices(CLodMaxViewDepthIndices);
+        for (uint32_t i = 0; i < CLodMaxViewDepthIndices; ++i) {
+            viewDepthSrvIndices[i].cameraBufferIndex = i;
+            viewDepthSrvIndices[i].linearDepthSRVIndex = 0;
+        }
+
+        context.viewManager->ForEachView([&](uint64_t viewID) {
+            const auto* view = context.viewManager->Get(viewID);
+            if (!view || !view->gpu.linearDepthMap) {
+                return;
+            }
+
+            const uint32_t cameraBufferIndex = view->gpu.cameraBufferIndex;
+            if (cameraBufferIndex >= CLodMaxViewDepthIndices) {
+                return;
+            }
+
+            const auto linearDepthMap = view->gpu.linearDepthMap;
+            uint32_t slice = 0;
+            if (view->cameraInfo.depthBufferArrayIndex >= 0) {
+                slice = static_cast<uint32_t>(view->cameraInfo.depthBufferArrayIndex);
+            }
+
+            const uint32_t maxSlices = linearDepthMap->GetNumSRVSlices();
+            if (maxSlices == 0) {
+                return;
+            }
+
+            slice = (std::min)(slice, maxSlices - 1);
+            viewDepthSrvIndices[cameraBufferIndex].cameraBufferIndex = cameraBufferIndex;
+            viewDepthSrvIndices[cameraBufferIndex].linearDepthSRVIndex = linearDepthMap->GetSRVInfo(0, slice).slot.index;
+        });
+
+        BUFFER_UPLOAD(
+            viewDepthSrvIndices.data(),
+            static_cast<uint32_t>(viewDepthSrvIndices.size() * sizeof(CLodViewDepthSRVIndex)),
+            rg::runtime::UploadTarget::FromShared(m_viewDepthSrvIndicesBuffer),
+            0);
     }
-
-    context.viewManager->ForEachView([&](uint64_t viewID) {
-        const auto* view = context.viewManager->Get(viewID);
-        if (!view || !view->gpu.linearDepthMap) {
-            return;
-        }
-
-        const uint32_t cameraBufferIndex = view->gpu.cameraBufferIndex;
-        if (cameraBufferIndex >= CLodMaxViewDepthIndices) {
-            return;
-        }
-
-        const auto linearDepthMap = view->gpu.linearDepthMap;
-        uint32_t slice = 0;
-        if (view->cameraInfo.depthBufferArrayIndex >= 0) {
-            slice = static_cast<uint32_t>(view->cameraInfo.depthBufferArrayIndex);
-        }
-
-        const uint32_t maxSlices = linearDepthMap->GetNumSRVSlices();
-        if (maxSlices == 0) {
-            return;
-        }
-
-        slice = (std::min)(slice, maxSlices - 1);
-        viewDepthSrvIndices[cameraBufferIndex].cameraBufferIndex = cameraBufferIndex;
-        viewDepthSrvIndices[cameraBufferIndex].linearDepthSRVIndex = linearDepthMap->GetSRVInfo(0, slice).slot.index;
-    });
-
-    BUFFER_UPLOAD(
-        viewDepthSrvIndices.data(),
-        static_cast<uint32_t>(viewDepthSrvIndices.size() * sizeof(CLodViewDepthSRVIndex)),
-        rg::runtime::UploadTarget::FromShared(m_viewDepthSrvIndicesBuffer),
-        0);
 
     CLodNodeGpuInput nodeGpuInputs[3] = {};
     CLodMultiNodeGpuInput multiNodeGpuInput{};

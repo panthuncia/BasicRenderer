@@ -125,6 +125,7 @@ void DestroyRendererLight(flecs::entity entity, LightManager& lightManager) {
     if (entity.has<Components::LightViewInfo>()) {
         lightManager.RemoveLight(entity);
     }
+    entity.remove<Components::DepthMap>();
 }
 
 void CopyCommonComponents(flecs::entity dst, flecs::entity src) {
@@ -286,14 +287,12 @@ LightResourceSignature BuildLightSignature(const Components::Light& light, uint1
 }
 
 void ApplyLightRendererBindings(Components::Light& light, flecs::entity dst) {
+    light.lightInfo.shadowViewInfoIndex = -1;
+    light.lightInfo.shadowMapIndex = -1;
+    light.lightInfo.shadowSamplerIndex = -1;
+
     if (const auto* viewInfo = dst.try_get<Components::LightViewInfo>()) {
         light.lightInfo.shadowViewInfoIndex = viewInfo->viewInfoBufferIndex;
-        if (const auto* depthMap = dst.try_get<Components::DepthMap>()) {
-            if (depthMap->depthMap) {
-                light.lightInfo.shadowMapIndex = depthMap->depthMap->GetSRVInfo(0).slot.index;
-                light.lightInfo.shadowSamplerIndex = Sampler::GetDefaultShadowSampler()->GetDescriptorIndex();
-            }
-        }
     }
 }
 
@@ -317,12 +316,6 @@ void SyncLightDerivedState(
         AddLightReturn addInfo = lightManager.AddLight(&rendererLight.lightInfo, dst.id());
         dst.set<Components::LightViewInfo>(addInfo.lightViewInfo);
 
-        if (addInfo.shadowMap.has_value()) {
-            dst.set<Components::DepthMap>(*addInfo.shadowMap);
-        } else {
-            dst.remove<Components::DepthMap>();
-        }
-
         if (sceneFrustumPlanes) {
             dst.set<Components::FrustumPlanes>(*sceneFrustumPlanes);
         } else {
@@ -336,6 +329,8 @@ void SyncLightDerivedState(
     } else if (sceneFrustumPlanes) {
         dst.set<Components::FrustumPlanes>(*sceneFrustumPlanes);
     }
+
+	dst.remove<Components::DepthMap>();
 
     ApplyLightRendererBindings(rendererLight, dst);
     if (const auto* viewInfo = dst.try_get<Components::LightViewInfo>()) {
@@ -461,6 +456,7 @@ SceneFrameSnapshot SceneRenderBridge::ExportSnapshot(Scene& scene, uint64_t snap
             renderable.stableID = stableSceneID.value;
             renderable.matrix = matrix;
             renderable.meshInstances = meshInstances;
+            renderable.transformChanged = transformChanged;
             if (const auto* name = src.try_get<Components::Name>()) {
                 renderable.name = name->name;
             }
@@ -582,7 +578,11 @@ void SceneRenderBridge::IngestSnapshot(const SceneFrameSnapshot& snapshot, const
         // Entity is in the changed list, so always update common components
         CopyCommonComponents(dst, renderable.stableID, renderable.name, renderable.matrix);
         entityState.lastMatrix = renderable.matrix.matrix;
-        dst.add<Components::RenderTransformUpdated>();
+        if (renderable.transformChanged || isNew) {
+            dst.add<Components::RenderTransformUpdated>();
+        } else {
+            dst.remove<Components::RenderTransformUpdated>();
+        }
 
         if (isNew || meshChanged) {
             SyncRenderableDerivedState(dst, &renderable.meshInstances, *objectManager);

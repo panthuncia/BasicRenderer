@@ -927,7 +927,11 @@ inline std::shared_ptr<Buffer> CreateAliasedUnmaterializedStructuredBuffer(
         unorderedAccessCounter,
         createNonShaderVisibleUAV,
         rhi::HeapType::DeviceLocal);
-    buffer->SetAllowAlias(allowAlias);
+    // Read-only structured buffers in the CLod pipeline are typically populated via
+    // BUFFER_UPLOAD before their first graph pass reads them. The aliasing planner
+    // cannot synthesize an initialization write for that pattern, so disallow aliasing
+    // unless the buffer participates in unordered-access writes.
+    buffer->SetAllowAlias(allowAlias && unorderedAccess);
     return buffer;
 }
 

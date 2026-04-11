@@ -40,7 +40,6 @@ public:
 			Builtin::Shadows::CLodDirectionalPageViewInfo,
 			Builtin::Shadows::CLodPageTable,
 			Builtin::Shadows::CLodPhysicalPages,
-			Builtin::Shadows::ShadowMaps,
 			Builtin::Noise::BlueNoise2D)
 			.WithUnorderedAccess(Builtin::Color::HDRColorTarget,
 				Builtin::DebugVisualization);
