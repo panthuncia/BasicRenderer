@@ -305,40 +305,33 @@ uint64_t BufferBytes(uint32_t elementCount, size_t elementSize)
     return static_cast<uint64_t>(elementCount) * static_cast<uint64_t>(elementSize);
 }
 
-constexpr uint64_t CLodAliasableBufferMinBytes = 64ull * 1024ull;
-
-bool ShouldAllowCLodBufferAlias(uint64_t bufferBytes)
-{
-    return bufferBytes >= CLodAliasableBufferMinBytes;
-}
-
-std::shared_ptr<Buffer> CreateCLodStructuredBuffer(
-    uint32_t numElements,
-    uint32_t elementSize,
-    bool unorderedAccess = true,
-    bool unorderedAccessCounter = false,
-    bool createNonShaderVisibleUAV = false)
-{
-    return CreateAliasedUnmaterializedStructuredBuffer(
-        numElements,
-        elementSize,
-        unorderedAccess,
-        unorderedAccessCounter,
-        createNonShaderVisibleUAV,
-        ShouldAllowCLodBufferAlias(BufferBytes(numElements, elementSize)));
-}
-
-std::shared_ptr<Buffer> CreateCLodRawBuffer(
-    uint64_t bufferSizeBytes,
-    bool unorderedAccess = true,
-    bool createNonShaderVisibleUAV = false)
-{
-    return CreateAliasedUnmaterializedRawBuffer(
-        bufferSizeBytes,
-        unorderedAccess,
-        createNonShaderVisibleUAV,
-        ShouldAllowCLodBufferAlias(bufferSizeBytes));
-}
+//std::shared_ptr<Buffer> CreateCLodStructuredBuffer(
+//    uint32_t numElements,
+//    uint32_t elementSize,
+//    bool unorderedAccess = true,
+//    bool unorderedAccessCounter = false,
+//    bool createNonShaderVisibleUAV = false)
+//{
+//    return CreateAliasedUnmaterializedStructuredBuffer(
+//        numElements,
+//        elementSize,
+//        unorderedAccess,
+//        unorderedAccessCounter,
+//        createNonShaderVisibleUAV,
+//        ShouldAllowCLodBufferAlias(BufferBytes(numElements, elementSize)));
+//}
+//
+//std::shared_ptr<Buffer> CreateCLodRawBuffer(
+//    uint64_t bufferSizeBytes,
+//    bool unorderedAccess = true,
+//    bool createNonShaderVisibleUAV = false)
+//{
+//    return CreateAliasedUnmaterializedRawBuffer(
+//        bufferSizeBytes,
+//        unorderedAccess,
+//        createNonShaderVisibleUAV,
+//        ShouldAllowCLodBufferAlias(bufferSizeBytes));
+//}
 
 uint32_t BytesToElementCount(uint64_t allocatedBytes, size_t elementSize)
 {
@@ -534,60 +527,60 @@ void CLodExtension::InitializeCoreResources()
     auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
     const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
 
-    m_visibleClustersBuffer = CreateCLodRawBuffer(static_cast<uint64_t>(m_visibleClusterCapacity) * PackedVisibleClusterStrideBytes, true, false);
+    m_visibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(static_cast<uint64_t>(m_visibleClusterCapacity) * PackedVisibleClusterStrideBytes, true, false, true);
     m_visibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Visible Clusters Buffer (uncompacted)"));
 
-    m_histogramIndirectCommand = CreateCLodStructuredBuffer(1, sizeof(RasterBucketsHistogramIndirectCommand), true, false);
+    m_histogramIndirectCommand = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterBucketsHistogramIndirectCommand), true, false, true, true);
     m_histogramIndirectCommand->SetName(MakeVariantResourceName(traits, "Raster Buckets Histogram Indirect Command Buffer"));
 
-    m_rasterBucketsHistogramBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_rasterBucketsHistogramBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_rasterBucketsHistogramBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket histogram"));
 
-    m_visibleClustersCounterBuffer = CreateCLodStructuredBuffer(1, sizeof(unsigned int), true, false, false);
+    m_visibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, true);
     m_visibleClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "Visible Clusters Counter Buffer"));
     m_visibleClustersCounterBuffer->GetECSEntity()
         .set<Components::Resource>({ m_visibleClustersCounterBuffer })
         .add<VisibleClustersCounterTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_workGraphTelemetryBuffer = CreateCLodStructuredBuffer(CLodWorkGraphCounterCount, sizeof(uint32_t), true, false, false);
+    m_workGraphTelemetryBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodWorkGraphCounterCount, sizeof(uint32_t), true, false, false, true);
     m_workGraphTelemetryBuffer->SetName(MakeVariantResourceName(traits, "Work Graph Telemetry Buffer"));
     m_workGraphTelemetryBuffer->GetECSEntity()
         .set<Components::Resource>({ m_workGraphTelemetryBuffer })
         .add<CLodWorkGraphTelemetryBufferTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_occlusionReplayBuffer = CreateCLodStructuredBuffer(CLodReplayBufferNumUints, sizeof(uint32_t), true, false, false);
+    m_occlusionReplayBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodReplayBufferNumUints, sizeof(uint32_t), true, false, false, true);
     m_occlusionReplayBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Replay Buffer"));
 
-    m_occlusionReplayStateBuffer = CreateCLodStructuredBuffer(1, sizeof(CLodReplayBufferState), true, false, false);
+    m_occlusionReplayStateBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReplayBufferState), true, false, false, true);
     m_occlusionReplayStateBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Replay State Buffer"));
 
-    m_occlusionNodeGpuInputsBuffer = CreateCLodStructuredBuffer(3, sizeof(CLodNodeGpuInput), true, false, false);
+    m_occlusionNodeGpuInputsBuffer = CreateAliasedUnmaterializedStructuredBuffer(3, sizeof(CLodNodeGpuInput), true, false, false, true);
     m_occlusionNodeGpuInputsBuffer->SetName(MakeVariantResourceName(traits, "Occlusion Node GPU Inputs Buffer"));
 
-    m_viewDepthSrvIndicesBuffer = CreateCLodStructuredBuffer(CLodMaxViewDepthIndices, sizeof(CLodViewDepthSRVIndex), true, false, false);
+    m_viewDepthSrvIndicesBuffer = CreateAliasedUnmaterializedStructuredBuffer(CLodMaxViewDepthIndices, sizeof(CLodViewDepthSRVIndex), true, false, false, false);
     m_viewDepthSrvIndicesBuffer->SetName(MakeVariantResourceName(traits, "View Depth SRV Indices Buffer"));
 
-    m_rasterBucketsOffsetsBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsOffsetsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_rasterBucketsOffsetsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket offsets"));
 
-    m_rasterBucketsBlockSumsBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsBlockSumsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_rasterBucketsBlockSumsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket block sums"));
 
-    m_rasterBucketsScannedBlockSumsBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsScannedBlockSumsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_rasterBucketsScannedBlockSumsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket scanned block sums"));
 
-    m_rasterBucketsTotalCountBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsTotalCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_rasterBucketsTotalCountBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket total count"));
 
-    m_rasterBucketsTotalCountBufferPhase1 = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsTotalCountBufferPhase1 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_rasterBucketsTotalCountBufferPhase1->SetName(MakeVariantResourceName(traits, "Raster bucket total count phase1"));
 
-    m_rasterBucketsTotalCountBufferPhase1Sw = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false);
+    m_rasterBucketsTotalCountBufferPhase1Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_rasterBucketsTotalCountBufferPhase1Sw->SetName(MakeVariantResourceName(traits, "Raster bucket total count phase1 SW"));
 
-    m_compactedVisibleClustersBuffer = CreateCLodRawBuffer(static_cast<uint64_t>(m_visibleClusterCapacity) * PackedVisibleClusterStrideBytes, true, false);
+    m_compactedVisibleClustersBuffer = CreateAliasedUnmaterializedRawBuffer(static_cast<uint64_t>(m_visibleClusterCapacity) * PackedVisibleClusterStrideBytes, true, false);
     m_compactedVisibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Compacted Visible Clusters Buffer"));
 
     m_visibleClustersBuffer->GetECSEntity()
@@ -596,58 +589,58 @@ void CLodExtension::InitializeCoreResources()
         .add<VisibleClustersBufferTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_rasterBucketsWriteCursorBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_rasterBucketsWriteCursorBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_rasterBucketsWriteCursorBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor"));
 
-    m_rasterBucketsIndirectArgsBuffer = CreateCLodStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
+    m_rasterBucketsIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, true);
     m_rasterBucketsIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args HW phase1"));
 
-    m_rasterBucketsIndirectArgsBufferPhase2 = CreateCLodStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
+    m_rasterBucketsIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, true);
     m_rasterBucketsIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args HW phase2"));
 
-    m_rasterBucketsIndirectArgsBufferSw = CreateCLodStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
+    m_rasterBucketsIndirectArgsBufferSw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, true);
     m_rasterBucketsIndirectArgsBufferSw->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args SW phase1"));
 
-    m_rasterBucketsIndirectArgsBufferPhase2Sw = CreateCLodStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
+    m_rasterBucketsIndirectArgsBufferPhase2Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, true);
     m_rasterBucketsIndirectArgsBufferPhase2Sw->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args SW phase2"));
 
-    m_rasterBucketsIndirectArgsBufferPageJob = CreateCLodStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
+    m_rasterBucketsIndirectArgsBufferPageJob = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, true);
     m_rasterBucketsIndirectArgsBufferPageJob->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args Page Job phase1"));
 
-    m_rasterBucketsIndirectArgsBufferPhase2PageJob = CreateCLodStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false);
+    m_rasterBucketsIndirectArgsBufferPhase2PageJob = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false, true);
     m_rasterBucketsIndirectArgsBufferPhase2PageJob->SetName(MakeVariantResourceName(traits, "Raster bucket indirect args Page Job phase2"));
 
-    m_visibleClustersCounterBufferPhase2 = CreateCLodStructuredBuffer(1, sizeof(unsigned int), true, false, false);
+    m_visibleClustersCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, true);
     m_visibleClustersCounterBufferPhase2->SetName(MakeVariantResourceName(traits, "Visible Clusters Counter Buffer Phase2"));
 
-    m_rasterBucketsHistogramBufferPhase2 = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_rasterBucketsHistogramBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_rasterBucketsHistogramBufferPhase2->SetName(MakeVariantResourceName(traits, "Raster bucket histogram phase2"));
 
-    m_rasterBucketsHistogramBufferSw = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_rasterBucketsHistogramBufferSw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_rasterBucketsHistogramBufferSw->SetName(MakeVariantResourceName(traits, "Raster bucket histogram SW phase1"));
 
-    m_rasterBucketsHistogramBufferPhase2Sw = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_rasterBucketsHistogramBufferPhase2Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_rasterBucketsHistogramBufferPhase2Sw->SetName(MakeVariantResourceName(traits, "Raster bucket histogram SW phase2"));
 
-    m_rasterBucketsWriteCursorBufferPhase2 = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_rasterBucketsWriteCursorBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_rasterBucketsWriteCursorBufferPhase2->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor phase2"));
 
-    m_rasterBucketsWriteCursorBufferSw = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_rasterBucketsWriteCursorBufferSw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_rasterBucketsWriteCursorBufferSw->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor SW phase1"));
 
-    m_rasterBucketsWriteCursorBufferPhase2Sw = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_rasterBucketsWriteCursorBufferPhase2Sw = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_rasterBucketsWriteCursorBufferPhase2Sw->SetName(MakeVariantResourceName(traits, "Raster bucket write cursor SW phase2"));
 
-    m_swVisibleClustersCounterBuffer = CreateCLodStructuredBuffer(1, sizeof(unsigned int), true, false, false);
+    m_swVisibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, true);
     m_swVisibleClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "SW Visible Clusters Counter Buffer Phase1"));
 
-    m_swVisibleClustersCounterBufferPhase2 = CreateCLodStructuredBuffer(1, sizeof(unsigned int), true, false, false);
+    m_swVisibleClustersCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(unsigned int), true, false, false, true);
     m_swVisibleClustersCounterBufferPhase2->SetName(MakeVariantResourceName(traits, "SW Visible Clusters Counter Buffer Phase2"));
 
-    m_sortedToUnsortedMappingBuffer = CreateCLodStructuredBuffer(m_visibleClusterCapacity, sizeof(uint32_t), true, false);
+    m_sortedToUnsortedMappingBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_visibleClusterCapacity, sizeof(uint32_t), true, false, false, true);
     m_sortedToUnsortedMappingBuffer->SetName(MakeVariantResourceName(traits, "Sorted-to-Unsorted Mapping Buffer"));
 
-    m_viewRasterInfoBuffer = CreateCLodStructuredBuffer(1, sizeof(CLodViewRasterInfo), false, false, false);
+    m_viewRasterInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodViewRasterInfo), false, false, false, false);
     m_viewRasterInfoBuffer->SetName(MakeVariantResourceName(traits, "View Raster Info Buffer"));
 }
 
@@ -661,34 +654,36 @@ void CLodExtension::InitializeDeepVisibilityResources()
     auto& ecsWorld = RendererECSManager::GetInstance().GetWorld();
     const flecs::entity typeEntity = traits.ensureTypeEntity(ecsWorld);
 
-    m_deepVisibilityNodesBuffer = CreateCLodStructuredBuffer(
+    m_deepVisibilityNodesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         1,
         sizeof(CLodDeepVisibilityNode),
         true,
         false,
-        false);
+        false,
+        true);
     m_deepVisibilityNodesBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Nodes Buffer"));
 
-    m_deepVisibilityCounterBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, true);
+    m_deepVisibilityCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_deepVisibilityCounterBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Counter Buffer"));
     m_deepVisibilityCounterBuffer->GetECSEntity()
         .set<Components::Resource>({ m_deepVisibilityCounterBuffer })
         .add<CLodDeepVisibilityCounterTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_deepVisibilityOverflowCounterBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, true);
+    m_deepVisibilityOverflowCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_deepVisibilityOverflowCounterBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Overflow Counter Buffer"));
     m_deepVisibilityOverflowCounterBuffer->GetECSEntity()
         .set<Components::Resource>({ m_deepVisibilityOverflowCounterBuffer })
         .add<CLodDeepVisibilityOverflowCounterTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_deepVisibilityStatsBuffer = CreateCLodStructuredBuffer(
+    m_deepVisibilityStatsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         1,
         sizeof(CLodDeepVisibilityStats),
         true,
         false,
-        true);
+        true,
+		true);
     m_deepVisibilityStatsBuffer->SetName(MakeVariantResourceName(traits, "Deep Visibility Stats Buffer"));
     m_deepVisibilityStatsBuffer->GetECSEntity()
         .set<Components::Resource>({ m_deepVisibilityStatsBuffer })
@@ -724,10 +719,11 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodVirtualShadowPhysicalPagesTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowPageMetadataBuffer = CreateCLodStructuredBuffer(
+    m_shadowPageMetadataBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         maxShadowPhysicalPageCount,
         sizeof(CLodVirtualShadowPhysicalPageMeta),
         true,
+        false,
         false,
         false);
     m_shadowPageMetadataBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Page Metadata Buffer"));
@@ -736,7 +732,7 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodVirtualShadowPageMetadataTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowInvalidationInputsBuffer = CreateCLodStructuredBuffer(
+    m_shadowInvalidationInputsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         CLodVirtualShadowMaxInvalidationInputs,
         sizeof(CLodVirtualShadowInvalidationInput),
         false,
@@ -748,14 +744,14 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodVirtualShadowInvalidationInputsTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowInvalidationCountBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), false, false, false);
+    m_shadowInvalidationCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), false, false, false);
     m_shadowInvalidationCountBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Invalidation Count Buffer"));
     m_shadowInvalidationCountBuffer->GetECSEntity()
         .set<Components::Resource>({ m_shadowInvalidationCountBuffer })
         .add<CLodVirtualShadowInvalidationCountTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowInvalidatedInstancesBitsetBuffer = CreateCLodStructuredBuffer(
+    m_shadowInvalidatedInstancesBitsetBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         CLodVirtualShadowMovedInstanceBitWordCount(),
         sizeof(uint32_t),
         false,
@@ -763,7 +759,7 @@ void CLodExtension::InitializeShadowResources()
         false);
     m_shadowInvalidatedInstancesBitsetBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Invalidated Instances Bitset Buffer"));
 
-    m_shadowPredictiveInvalidationCandidatesBuffer = CreateCLodStructuredBuffer(
+    m_shadowPredictiveInvalidationCandidatesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         CLodVirtualShadowPredictiveCandidateCapacity,
         sizeof(CLodVirtualShadowPredictiveInvalidationCandidate),
         true,
@@ -774,13 +770,13 @@ void CLodExtension::InitializeShadowResources()
         .set<Components::Resource>({ m_shadowPredictiveInvalidationCandidatesBuffer })
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowPredictiveInvalidationCandidateCountBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_shadowPredictiveInvalidationCandidateCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_shadowPredictiveInvalidationCandidateCountBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Predictive Invalidation Candidate Count Buffer"));
     m_shadowPredictiveInvalidationCandidateCountBuffer->GetECSEntity()
         .set<Components::Resource>({ m_shadowPredictiveInvalidationCandidateCountBuffer })
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowPredictiveRawPagesBuffer = CreateCLodStructuredBuffer(
+    m_shadowPredictiveRawPagesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         CLodVirtualShadowPredictiveRawPageCapacity,
         sizeof(CLodVirtualShadowPredictedRawPage),
         true,
@@ -791,18 +787,19 @@ void CLodExtension::InitializeShadowResources()
         .set<Components::Resource>({ m_shadowPredictiveRawPagesBuffer })
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowPredictiveRawPageCountBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_shadowPredictiveRawPageCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_shadowPredictiveRawPageCountBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Predictive Raw Page Count Buffer"));
     m_shadowPredictiveRawPageCountBuffer->GetECSEntity()
         .set<Components::Resource>({ m_shadowPredictiveRawPageCountBuffer })
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowPredictedInvalidationScratchBitsetBuffer = CreateCLodStructuredBuffer(
+    m_shadowPredictedInvalidationScratchBitsetBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         CLodVirtualShadowPredictedPageBitsetWordCount(),
         sizeof(uint32_t),
         true,
         false,
-        false);
+        false,
+		true);
     m_shadowPredictedInvalidationScratchBitsetBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Predicted Invalidation Scratch Bitset Buffer"));
     m_shadowPredictedInvalidationScratchBitsetBuffer->GetECSEntity()
         .set<Components::Resource>({ m_shadowPredictedInvalidationScratchBitsetBuffer })
@@ -822,52 +819,55 @@ void CLodExtension::InitializeShadowResources()
         .set<Components::Resource>({ m_shadowPredictedInvalidationPagesBufferA })
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowPredictedInvalidationPageCountBufferA = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true);
+    m_shadowPredictedInvalidationPageCountBufferA = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, false);
     m_shadowPredictedInvalidationPageCountBufferA->SetName(MakeVariantResourceName(traits, "Virtual Shadow Predicted Invalidation Page Count Buffer"));
     m_shadowPredictedInvalidationPageCountBufferA->GetECSEntity()
         .set<Components::Resource>({ m_shadowPredictedInvalidationPageCountBufferA })
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowAllocationRequestsBuffer = CreateCLodStructuredBuffer(
+    m_shadowAllocationRequestsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         CLodVirtualShadowMaxAllocationRequests,
         sizeof(CLodVirtualShadowPageAllocationRequest),
         true,
         false,
-        false);
+        false,
+		true);
     m_shadowAllocationRequestsBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Allocation Requests Buffer"));
     m_shadowAllocationRequestsBuffer->GetECSEntity()
         .set<Components::Resource>({ m_shadowAllocationRequestsBuffer })
         .add<CLodVirtualShadowAllocationRequestsTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowAllocationCountBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_shadowAllocationCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_shadowAllocationCountBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Allocation Count Buffer"));
     m_shadowAllocationCountBuffer->GetECSEntity()
         .set<Components::Resource>({ m_shadowAllocationCountBuffer })
         .add<CLodVirtualShadowAllocationCountTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowAllocationIndirectArgsBuffer = CreateCLodStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
+    m_shadowAllocationIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
     m_shadowAllocationIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Allocation Indirect Args Buffer"));
 
-    m_shadowMarkTileWorkBuffer = CreateCLodStructuredBuffer(
+    m_shadowMarkTileWorkBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         CLodVirtualShadowMaxMarkTileCount,
         sizeof(CLodVirtualShadowMarkTileWorkItem),
         true,
         false,
-        false);
+        false,
+        true);
     m_shadowMarkTileWorkBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Mark Tile Work Buffer"));
 
-    m_shadowMarkTileCountBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_shadowMarkTileCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_shadowMarkTileCountBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Mark Tile Count Buffer"));
 
-    m_shadowMarkTileIndirectArgsBuffer = CreateCLodStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
+    m_shadowMarkTileIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
     m_shadowMarkTileIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Mark Tile Indirect Args Buffer"));
 
-    m_shadowFreePhysicalPagesBuffer = CreateCLodStructuredBuffer(
+    m_shadowFreePhysicalPagesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         maxShadowPhysicalPageCount,
         sizeof(uint32_t),
         true,
+        false,
         false,
         false);
     m_shadowFreePhysicalPagesBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Free Physical Pages Buffer"));
@@ -876,10 +876,11 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodVirtualShadowFreePhysicalPagesTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowReusablePhysicalPagesBuffer = CreateCLodStructuredBuffer(
+    m_shadowReusablePhysicalPagesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         maxShadowPhysicalPageCount,
         sizeof(uint32_t),
         true,
+        false,
         false,
         false);
     m_shadowReusablePhysicalPagesBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Reusable Physical Pages Buffer"));
@@ -888,17 +889,18 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodVirtualShadowReusablePhysicalPagesTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowPageListHeaderBuffer = CreateCLodStructuredBuffer(1, sizeof(CLodVirtualShadowPageListHeader), true, false, false);
+    m_shadowPageListHeaderBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodVirtualShadowPageListHeader), true, false, false, false);
     m_shadowPageListHeaderBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Page List Header Buffer"));
     m_shadowPageListHeaderBuffer->GetECSEntity()
         .set<Components::Resource>({ m_shadowPageListHeaderBuffer })
         .add<CLodVirtualShadowPageListHeaderTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowDirtyPageFlagsBuffer = CreateCLodStructuredBuffer(
+    m_shadowDirtyPageFlagsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         CLodVirtualShadowDirtyWordCount(maxShadowPhysicalPageCount),
         sizeof(uint32_t),
         true,
+        false,
         false,
         false);
     m_shadowDirtyPageFlagsBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Dirty Page Flags Buffer"));
@@ -914,10 +916,11 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodVirtualShadowDirtyHierarchyTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowClipmapInfoBuffer = CreateCLodStructuredBuffer(
+    m_shadowClipmapInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         CLodVirtualShadowMaxSupportedClipmapCount,
         sizeof(CLodVirtualShadowClipmapInfo),
         true,
+        false,
         false,
         false);
     m_shadowClipmapInfoBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Clipmap Info Buffer"));
@@ -926,10 +929,11 @@ void CLodExtension::InitializeShadowResources()
         .add<CLodVirtualShadowClipmapInfoTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowMarkClipmapDataBuffer = CreateCLodStructuredBuffer(
+    m_shadowMarkClipmapDataBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         CLodVirtualShadowMaxSupportedClipmapCount,
         sizeof(CLodVirtualShadowMarkClipmapData),
         true,
+        false,
         false,
         false);
     m_shadowMarkClipmapDataBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Mark Clipmap Data Buffer"));
@@ -937,111 +941,119 @@ void CLodExtension::InitializeShadowResources()
         .set<Components::Resource>({ m_shadowMarkClipmapDataBuffer })
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowCompactMainCameraBuffer = CreateCLodStructuredBuffer(
+    m_shadowCompactMainCameraBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         1,
         sizeof(CLodVirtualShadowMainCameraInfo),
         true,
         false,
+        false,
         false);
     m_shadowCompactMainCameraBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Compact Main Camera Buffer"));
 
-    m_shadowCompactShadowCameraBuffer = CreateCLodStructuredBuffer(
+    m_shadowCompactShadowCameraBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         CLodVirtualShadowMaxSupportedClipmapCount,
         sizeof(CLodVirtualShadowCompactShadowCameraInfo),
         true,
         false,
+        false,
         false);
     m_shadowCompactShadowCameraBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Compact Shadow Camera Buffer"));
 
-    m_shadowDirectionalPageViewInfoBuffer = CreateCLodStructuredBuffer(
+    m_shadowDirectionalPageViewInfoBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         CLodVirtualShadowMaxDirectionalPageViewInfoEntryCount(),
         sizeof(float) * 4u,
         true,
         false,
-        false);
+        false,
+		false);
     m_shadowDirectionalPageViewInfoBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Directional Page View Info Buffer"));
     m_shadowDirectionalPageViewInfoBuffer->GetECSEntity()
         .set<Components::Resource>({ m_shadowDirectionalPageViewInfoBuffer })
         .add<CLodVirtualShadowDirectionalPageViewInfoTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowRuntimeStateBuffer = CreateCLodStructuredBuffer(1, sizeof(CLodVirtualShadowRuntimeState), true, false, false);
+    m_shadowRuntimeStateBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodVirtualShadowRuntimeState), true, false, false);
     m_shadowRuntimeStateBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Runtime State Buffer"));
     m_shadowRuntimeStateBuffer->GetECSEntity()
         .set<Components::Resource>({ m_shadowRuntimeStateBuffer })
         .add<CLodVirtualShadowRuntimeStateTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_shadowStatsBuffer = CreateCLodStructuredBuffer(1, sizeof(CLodVirtualShadowStats), true, false, false);
+    m_shadowStatsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodVirtualShadowStats), true, false, false, true);
     m_shadowStatsBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Stats Buffer"));
     m_shadowStatsBuffer->GetECSEntity()
         .set<Components::Resource>({ m_shadowStatsBuffer })
         .add<CLodVirtualShadowStatsTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_swPageJobVisibleClustersBuffer = CreateCLodRawBuffer(m_maxVisibleClusters * PackedVisibleClusterStrideBytes, true, false);
+    m_swPageJobVisibleClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_maxVisibleClusters * PackedVisibleClusterStrideBytes, true, true, true, false, true);
     m_swPageJobVisibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Visible Clusters Buffer"));
 
-    m_swPageJobVisibleClustersCounterBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_swPageJobVisibleClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_swPageJobVisibleClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Visible Clusters Counter Buffer"));
 
     m_swPageJobVisibleClustersBufferPhase2 = m_swPageJobVisibleClustersBuffer;
     m_swPageJobVisibleClustersCounterBufferPhase2 = m_swPageJobVisibleClustersCounterBuffer;
 
-    m_swPageJobRecordsBuffer = CreateCLodStructuredBuffer(
+    m_swPageJobRecordsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         pageJobRecordCapacity,
         sizeof(CLodSoftwareRasterPageJobRecord),
         true,
         false,
-        false);
+        false,
+        true);
     m_swPageJobRecordsBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Records Buffer"));
-    m_swPageJobRecordsBufferSkinned = CreateCLodStructuredBuffer(
+    m_swPageJobRecordsBufferSkinned = CreateAliasedUnmaterializedStructuredBuffer(
         pageJobRecordCapacity,
         sizeof(CLodSoftwareRasterPageJobRecord),
         true,
         false,
-        false);
+        false,
+        true);
     m_swPageJobRecordsBufferSkinned->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Records Buffer Skinned"));
 
     m_swPageJobRecordsBufferPhase2 = m_swPageJobRecordsBuffer;
     m_swPageJobRecordsBufferPhase2Skinned = m_swPageJobRecordsBufferSkinned;
 
-    m_swPageJobCountBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_swPageJobCountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_swPageJobCountBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Count Buffer"));
-    m_swPageJobCountBufferSkinned = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_swPageJobCountBufferSkinned = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false, true);
     m_swPageJobCountBufferSkinned->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Count Buffer Skinned"));
 
     m_swPageJobCountBufferPhase2 = m_swPageJobCountBuffer;
     m_swPageJobCountBufferPhase2Skinned = m_swPageJobCountBufferSkinned;
 
-    m_swPageJobIndirectArgsBuffer = CreateCLodStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false);
+    m_swPageJobIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false);
     m_swPageJobIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Indirect Args Buffer Phase1"));
-    m_swPageJobIndirectArgsBufferSkinned = CreateCLodStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false);
+    m_swPageJobIndirectArgsBufferSkinned = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(RasterizeClustersCommand), true, false, false);
     m_swPageJobIndirectArgsBufferSkinned->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Indirect Args Buffer Phase1 Skinned"));
 
     m_swPageJobIndirectArgsBufferPhase2 = m_swPageJobIndirectArgsBuffer;
     m_swPageJobIndirectArgsBufferPhase2Skinned = m_swPageJobIndirectArgsBufferSkinned;
 
-    m_swPageJobClusterTagsBuffer = CreateCLodStructuredBuffer(
+    m_swPageJobClusterTagsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         m_maxVisibleClusters,
         sizeof(uint32_t),
         true,
         false,
-        false);
+        false,
+        true);
     m_swPageJobClusterTagsBuffer->SetName(MakeVariantResourceName(traits, "Software Raster Page Job Cluster Tags Buffer"));
 
     m_swPageJobClusterTagsBufferPhase2 = m_swPageJobClusterTagsBuffer;
 
-    m_vsmExpandedVisibleClustersBuffer = CreateCLodRawBuffer(
+    m_vsmExpandedVisibleClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         static_cast<uint64_t>(vsmExpandedRecordCapacity) * PackedVisibleClusterStrideBytes,
         true,
-        false);
+        false,
+		true);
     m_vsmExpandedVisibleClustersBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Expanded Visible Clusters Buffer"));
 
-    m_vsmExpandedBlockMetaBuffer = CreateCLodStructuredBuffer(
+    m_vsmExpandedBlockMetaBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         vsmExpandedRecordCapacity,
         sizeof(CLodVirtualShadowBlockMeta),
         true,
+        false,
         false,
         false);
     m_vsmExpandedBlockMetaBuffer->SetName(MakeVariantResourceName(traits, "Virtual Shadow Expanded Block Metadata Buffer"));
@@ -1397,81 +1409,81 @@ void CLodExtension::EnsureReyesResourcesInitialized()
     m_reyesAllocatedBudgetBytes = reyesResourceSizing.allocatedBudgetBytes;
     m_reyesBudgetLimited = reyesResourceSizing.budgetLimited;
 
-    m_reyesFullClusterOutputsBuffer = CreateCLodStructuredBuffer(m_reyesFullClusterOutputCapacity, sizeof(CLodReyesFullClusterOutput), true, false, false);
+    m_reyesFullClusterOutputsBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_reyesFullClusterOutputCapacity, sizeof(CLodReyesFullClusterOutput), true, false, false, true);
     m_reyesFullClusterOutputsBuffer->SetName(MakeVariantResourceName(traits, "Reyes Full Cluster Outputs Buffer"));
 
-    m_reyesFullClusterOutputsCounterBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_reyesFullClusterOutputsCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_reyesFullClusterOutputsCounterBuffer->SetName(MakeVariantResourceName(traits, "Reyes Full Cluster Outputs Counter Buffer"));
     m_reyesFullClusterOutputsCounterBuffer->GetECSEntity()
         .set<Components::Resource>({ m_reyesFullClusterOutputsCounterBuffer })
         .add<CLodReyesFullClustersCounterTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesOwnedClustersBuffer = CreateCLodStructuredBuffer(m_reyesOwnedClusterCapacity, sizeof(CLodReyesOwnedClusterEntry), true, false, false);
+    m_reyesOwnedClustersBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_reyesOwnedClusterCapacity, sizeof(CLodReyesOwnedClusterEntry), true, false, false, true);
     m_reyesOwnedClustersBuffer->SetName(MakeVariantResourceName(traits, "Reyes Owned Clusters Buffer"));
 
-    m_reyesOwnedClustersCounterBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_reyesOwnedClustersCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_reyesOwnedClustersCounterBuffer->SetName(MakeVariantResourceName(traits, "Reyes Owned Clusters Counter Buffer"));
 
-    m_reyesOwnershipBitsetBuffer = CreateCLodStructuredBuffer(m_reyesOwnershipBitsetWordCount, sizeof(uint32_t), true, false, false);
+    m_reyesOwnershipBitsetBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_reyesOwnershipBitsetWordCount, sizeof(uint32_t), true, false, false, true);
     m_reyesOwnershipBitsetBuffer->SetName(MakeVariantResourceName(traits, "Reyes Ownership Bitset Buffer"));
 
     if (usesPhase2ReyesResources) {
-        m_reyesOwnershipBitsetBufferPhase2 = CreateCLodStructuredBuffer(m_reyesOwnershipBitsetWordCount, sizeof(uint32_t), true, false, false);
+        m_reyesOwnershipBitsetBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(m_reyesOwnershipBitsetWordCount, sizeof(uint32_t), true, false, false, true);
         m_reyesOwnershipBitsetBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Ownership Bitset Buffer Phase2"));
     }
 
-    m_reyesClassifyIndirectArgsBuffer = CreateCLodStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
+    m_reyesClassifyIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
     m_reyesClassifyIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Reyes Classify Indirect Args Buffer"));
 
     if (usesPhase2ReyesResources) {
-        m_reyesClassifyIndirectArgsBufferPhase2 = CreateCLodStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
+        m_reyesClassifyIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
         m_reyesClassifyIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Classify Indirect Args Buffer Phase2"));
     }
 
-    m_reyesSplitIndirectArgsBuffer = CreateCLodStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
+    m_reyesSplitIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
     m_reyesSplitIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Reyes Split Indirect Args Buffer"));
 
     if (usesPhase2ReyesResources) {
-        m_reyesSplitIndirectArgsBufferPhase2 = CreateCLodStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
+        m_reyesSplitIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
         m_reyesSplitIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Split Indirect Args Buffer Phase2"));
     }
 
-    m_reyesSplitQueueBufferA = CreateCLodStructuredBuffer(m_reyesSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry), true, false);
+    m_reyesSplitQueueBufferA = CreateAliasedUnmaterializedStructuredBuffer(m_reyesSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry), true, false, true);
     m_reyesSplitQueueBufferA->SetName(MakeVariantResourceName(traits, "Reyes Split Queue Buffer A"));
 
-    m_reyesSplitQueueCounterBufferA = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_reyesSplitQueueCounterBufferA = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_reyesSplitQueueCounterBufferA->SetName(MakeVariantResourceName(traits, "Reyes Split Queue Counter Buffer A"));
     m_reyesSplitQueueCounterBufferA->GetECSEntity()
         .set<Components::Resource>({ m_reyesSplitQueueCounterBufferA })
         .add<CLodReyesSplitQueueCounterATag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesSplitQueueOverflowBufferA = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_reyesSplitQueueOverflowBufferA = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_reyesSplitQueueOverflowBufferA->SetName(MakeVariantResourceName(traits, "Reyes Split Queue Overflow Buffer A"));
     m_reyesSplitQueueOverflowBufferA->GetECSEntity()
         .set<Components::Resource>({ m_reyesSplitQueueOverflowBufferA })
         .add<CLodReyesSplitQueueOverflowATag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesSplitQueueBufferB = CreateCLodStructuredBuffer(m_reyesSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry), true, false);
+    m_reyesSplitQueueBufferB = CreateAliasedUnmaterializedStructuredBuffer(m_reyesSplitQueueCapacity, sizeof(CLodReyesSplitQueueEntry), true, false, true);
     m_reyesSplitQueueBufferB->SetName(MakeVariantResourceName(traits, "Reyes Split Queue Buffer B"));
 
-    m_reyesSplitQueueCounterBufferB = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_reyesSplitQueueCounterBufferB = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_reyesSplitQueueCounterBufferB->SetName(MakeVariantResourceName(traits, "Reyes Split Queue Counter Buffer B"));
     m_reyesSplitQueueCounterBufferB->GetECSEntity()
         .set<Components::Resource>({ m_reyesSplitQueueCounterBufferB })
         .add<CLodReyesSplitQueueCounterBTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesSplitQueueOverflowBufferB = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_reyesSplitQueueOverflowBufferB = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_reyesSplitQueueOverflowBufferB->SetName(MakeVariantResourceName(traits, "Reyes Split Queue Overflow Buffer B"));
     m_reyesSplitQueueOverflowBufferB->GetECSEntity()
         .set<Components::Resource>({ m_reyesSplitQueueOverflowBufferB })
         .add<CLodReyesSplitQueueOverflowBTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesDiceQueueBuffer = CreateCLodStructuredBuffer(m_reyesDiceQueuePhysicalCapacity, sizeof(CLodReyesDiceQueueEntry), true, false);
+    m_reyesDiceQueueBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_reyesDiceQueuePhysicalCapacity, sizeof(CLodReyesDiceQueueEntry), true, false, true);
     m_reyesDiceQueueBuffer->SetName(MakeVariantResourceName(traits, "Reyes Dice Queue Buffer"));
     m_reyesDiceQueueBuffer->GetECSEntity()
         .set<Components::Resource>({ m_reyesDiceQueueBuffer })
@@ -1479,9 +1491,10 @@ void CLodExtension::EnsureReyesResourcesInitialized()
         .add<CLodExtensionTypeTag>(typeEntity);
 
     const ReyesTessellationTableData& reyesTessellationTableData = GetReyesTessellationTableData();
-    m_reyesTessTableConfigsBuffer = CreateCLodStructuredBuffer(
+    m_reyesTessTableConfigsBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         static_cast<uint32_t>(reyesTessellationTableData.configs.size()),
         sizeof(CLodReyesTessTableConfigEntry),
+        false,
         false,
         false,
         false);
@@ -1491,9 +1504,10 @@ void CLodExtension::EnsureReyesResourcesInitialized()
         .add<CLodReyesTessTableConfigsTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesTessTableVerticesBuffer = CreateCLodStructuredBuffer(
+    m_reyesTessTableVerticesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         static_cast<uint32_t>(reyesTessellationTableData.vertices.size()),
         sizeof(uint32_t),
+        false,
         false,
         false,
         false);
@@ -1503,9 +1517,10 @@ void CLodExtension::EnsureReyesResourcesInitialized()
         .add<CLodReyesTessTableVerticesTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesTessTableTrianglesBuffer = CreateCLodStructuredBuffer(
+    m_reyesTessTableTrianglesBuffer = CreateAliasedUnmaterializedStructuredBuffer(
         static_cast<uint32_t>(reyesTessellationTableData.triangles.size()),
         sizeof(uint32_t),
+        false,
         false,
         false,
         false);
@@ -1515,7 +1530,7 @@ void CLodExtension::EnsureReyesResourcesInitialized()
         .add<CLodReyesTessTableTrianglesTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesDiceQueueCounterBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_reyesDiceQueueCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_reyesDiceQueueCounterBuffer->SetName(MakeVariantResourceName(traits, "Reyes Dice Queue Counter Buffer"));
     m_reyesDiceQueueCounterBuffer->GetECSEntity()
         .set<Components::Resource>({ m_reyesDiceQueueCounterBuffer })
@@ -1523,46 +1538,46 @@ void CLodExtension::EnsureReyesResourcesInitialized()
         .add<CLodExtensionTypeTag>(typeEntity);
 
     if (usesPhase2ReyesResources) {
-        m_reyesDiceQueuePhase1CountBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), false, false, false);
+        m_reyesDiceQueuePhase1CountBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), false, false, false);
         m_reyesDiceQueuePhase1CountBuffer->SetName(MakeVariantResourceName(traits, "Reyes Dice Queue Phase1 Count Buffer"));
     }
 
-    m_reyesDiceQueueOverflowBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_reyesDiceQueueOverflowBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_reyesDiceQueueOverflowBuffer->SetName(MakeVariantResourceName(traits, "Reyes Dice Queue Overflow Buffer"));
     m_reyesDiceQueueOverflowBuffer->GetECSEntity()
         .set<Components::Resource>({ m_reyesDiceQueueOverflowBuffer })
         .add<CLodReyesDiceQueueOverflowTag>()
         .add<CLodExtensionTypeTag>(typeEntity);
 
-    m_reyesRasterWorkBuffer = CreateCLodStructuredBuffer(m_reyesRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry), true, false, false);
+    m_reyesRasterWorkBuffer = CreateAliasedUnmaterializedStructuredBuffer(m_reyesRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry), true, false, false, true);
     m_reyesRasterWorkBuffer->SetName(MakeVariantResourceName(traits, "Reyes Raster Work Buffer"));
 
-    m_reyesRasterWorkCounterBuffer = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+    m_reyesRasterWorkCounterBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
     m_reyesRasterWorkCounterBuffer->SetName(MakeVariantResourceName(traits, "Reyes Raster Work Counter Buffer"));
 
-    m_reyesRasterWorkIndirectArgsBuffer = CreateCLodStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
+    m_reyesRasterWorkIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
     m_reyesRasterWorkIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Reyes Raster Work Indirect Args Buffer"));
 
     if (usesPhase2ReyesResources) {
-        m_reyesRasterWorkBufferPhase2 = CreateCLodStructuredBuffer(m_reyesRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry), true, false, false);
+        m_reyesRasterWorkBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(m_reyesRasterWorkCapacity, sizeof(CLodReyesRasterWorkEntry), true, false, false, true);
         m_reyesRasterWorkBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Raster Work Buffer Phase2"));
 
-        m_reyesRasterWorkCounterBufferPhase2 = CreateCLodStructuredBuffer(1, sizeof(uint32_t), true, false, false);
+        m_reyesRasterWorkCounterBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(uint32_t), true, false, false);
         m_reyesRasterWorkCounterBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Raster Work Counter Buffer Phase2"));
 
-        m_reyesRasterWorkIndirectArgsBufferPhase2 = CreateCLodStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
+        m_reyesRasterWorkIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
         m_reyesRasterWorkIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Raster Work Indirect Args Buffer Phase2"));
     }
 
-    m_reyesDiceIndirectArgsBuffer = CreateCLodStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
+    m_reyesDiceIndirectArgsBuffer = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
     m_reyesDiceIndirectArgsBuffer->SetName(MakeVariantResourceName(traits, "Reyes Dice Indirect Args Buffer"));
 
     if (usesPhase2ReyesResources) {
-        m_reyesDiceIndirectArgsBufferPhase2 = CreateCLodStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
+        m_reyesDiceIndirectArgsBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesDispatchIndirectCommand), true, false, false);
         m_reyesDiceIndirectArgsBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Dice Indirect Args Buffer Phase2"));
     }
 
-    m_reyesTelemetryBufferPhase1 = CreateCLodStructuredBuffer(1, sizeof(CLodReyesTelemetry), true, false, false);
+    m_reyesTelemetryBufferPhase1 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesTelemetry), true, false, false, true);
     m_reyesTelemetryBufferPhase1->SetName(MakeVariantResourceName(traits, "Reyes Telemetry Buffer Phase1"));
     m_reyesTelemetryBufferPhase1->GetECSEntity()
         .set<Components::Resource>({ m_reyesTelemetryBufferPhase1 })
@@ -1570,7 +1585,7 @@ void CLodExtension::EnsureReyesResourcesInitialized()
         .add<CLodExtensionTypeTag>(typeEntity);
 
     if (usesPhase2ReyesResources) {
-        m_reyesTelemetryBufferPhase2 = CreateCLodStructuredBuffer(1, sizeof(CLodReyesTelemetry), true, false, false);
+        m_reyesTelemetryBufferPhase2 = CreateAliasedUnmaterializedStructuredBuffer(1, sizeof(CLodReyesTelemetry), true, false, false, true);
         m_reyesTelemetryBufferPhase2->SetName(MakeVariantResourceName(traits, "Reyes Telemetry Buffer Phase2"));
         m_reyesTelemetryBufferPhase2->GetECSEntity()
             .set<Components::Resource>({ m_reyesTelemetryBufferPhase2 })
@@ -2338,12 +2353,9 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_deepVisibilityStatsBuffer,
                 CLodReyesPatchVisibilityIndexBase(m_maxVisibleClusters)));
         auto resolveInsertPoint = RenderGraph::ExternalInsertPoint::After("LightCullingPass");
-        // The shadow extension's post-raster cache-maintenance tail is only chained
-        // after the shadow raster pass, so without an explicit dependency this resolve
-        // can sample VSM state before the cache has been finalized for the frame.
         resolveInsertPoint.after.push_back("CLodShadow::VirtualShadowDeduplicatePredictedPagesPass");
-        resolveInsertPoint.before.push_back("PPLL Resolve pass");
-        //resolveInsertPoint.before.push_back("luminanceHistogramPass");
+        resolveInsertPoint.before.push_back("Screen-Space Reflections Pass");
+        resolveInsertPoint.before.push_back("luminanceHistogramPass");
         resolveDeepVisibilityPassDesc.At(std::move(resolveInsertPoint));
         outPasses.push_back(std::move(resolveDeepVisibilityPassDesc));
         return;

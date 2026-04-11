@@ -822,6 +822,7 @@ void Renderer::SetSettings() {
     settingsManager.registerSetting<UpscaleQualityMode>("upscalingQualityMode", UpscalingManager::GetInstance().GetCurrentUpscalingQualityMode());
 	settingsManager.registerSetting<bool>("enableScreenSpaceReflections", m_screenSpaceReflections);
     settingsManager.registerSetting<bool>("useAsyncCompute", true);
+	settingsManager.registerSetting<bool>("renderGraphCompileDumpEnabled", false);
 	settingsManager.registerSetting<AutoAliasMode>("autoAliasMode", AutoAliasMode::Balanced);
     settingsManager.registerSetting<AutoAliasPackingStrategy>("autoAliasPackingStrategy", AutoAliasPackingStrategy::GreedySweepLine);
     settingsManager.registerSetting<bool>("autoAliasEnableLogging", false);
@@ -1585,6 +1586,7 @@ void Renderer::Render() {
         orgSettings.numFramesInFlight        = m_numFramesInFlight;
         orgSettings.collectPipelineStatistics = false;
         orgSettings.useAsyncCompute           = sm.getSettingGetter<bool>("useAsyncCompute")();
+        orgSettings.renderGraphCompileDumpEnabled = sm.getSettingGetter<bool>("renderGraphCompileDumpEnabled")();
         orgSettings.autoAliasMode             = static_cast<uint8_t>(sm.getSettingGetter<AutoAliasMode>("autoAliasMode")());
         orgSettings.autoAliasPackingStrategy  = static_cast<uint8_t>(sm.getSettingGetter<AutoAliasPackingStrategy>("autoAliasPackingStrategy")());
         orgSettings.autoAliasEnableLogging    = sm.getSettingGetter<bool>("autoAliasEnableLogging")();
