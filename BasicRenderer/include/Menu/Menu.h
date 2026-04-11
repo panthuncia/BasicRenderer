@@ -2417,7 +2417,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
         if (readbackService) {
             readbackService->RequestReadbackCapture(
-                "CLodShadow::HierarchialCullingPass2",
+                "CLodShadow::HierarchialCullingPass1",
                 shadowClodTelemetryResource,
                 RangeSpec{},
                 [this](ReadbackCaptureResult&& result) {
@@ -2472,7 +2472,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
 
             if (readbackService) {
                 readbackService->RequestReadbackCapture(
-                    "CLodShadow::HierarchialCullingPass2",
+                    "CLodShadow::HierarchialCullingPass1",
                     shadowClodVisibleCounterResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {
@@ -2492,7 +2492,7 @@ inline void Menu::DrawCLodTelemetryWindow() {
                     });
 
                 readbackService->RequestReadbackCapture(
-                    "CLodShadow::HierarchialCullingPass2",
+                    "CLodShadow::HierarchialCullingPass1",
                     shadowClodVisibleClustersResource,
                     RangeSpec{},
                     [this, captureId](ReadbackCaptureResult&& result) {
@@ -3199,6 +3199,10 @@ inline void Menu::DrawCLodTelemetryWindow() {
         uint32_t totalResidentDirtyHits = 0u;
         uint32_t totalRequestedPages = 0u;
         uint32_t totalDirtyPageTableEntries = 0u;
+        uint32_t totalPredictiveInvalidatedPageTableEntries = 0u;
+        uint32_t totalInvalidatedCurrentBoundsPageTableEntries = 0u;
+        uint32_t totalInvalidatedPreviousBoundsPageTableEntries = 0u;
+        uint32_t totalInvalidatedSkinnedPageTableEntries = 0u;
         for (uint32_t clipmapIndex = 0u; clipmapIndex < displayedClipmapCount; ++clipmapIndex) {
             totalVisitedPageTableEntries += stats.visitedPageTableEntries[clipmapIndex];
             totalVisitedDirtyPageTableEntries += stats.visitedDirtyPageTableEntries[clipmapIndex];
@@ -3206,6 +3210,10 @@ inline void Menu::DrawCLodTelemetryWindow() {
             totalResidentDirtyHits += stats.markResidentDirtyHits[clipmapIndex];
             totalRequestedPages += stats.requestedPages[clipmapIndex];
             totalDirtyPageTableEntries += stats.dirtyPageTableEntries[clipmapIndex];
+            totalPredictiveInvalidatedPageTableEntries += stats.predictiveInvalidatedPageTableEntries[clipmapIndex];
+            totalInvalidatedCurrentBoundsPageTableEntries += stats.invalidatedCurrentBoundsPageTableEntries[clipmapIndex];
+            totalInvalidatedPreviousBoundsPageTableEntries += stats.invalidatedPreviousBoundsPageTableEntries[clipmapIndex];
+            totalInvalidatedSkinnedPageTableEntries += stats.invalidatedSkinnedPageTableEntries[clipmapIndex];
         }
         ImGui::Text("Cache lifecycle: cleanHits=%u dirtyHits=%u requests=%u visitedPT=%u visitedDirtyPT=%u dirtyPT=%u",
             totalResidentCleanHits,
@@ -3214,7 +3222,21 @@ inline void Menu::DrawCLodTelemetryWindow() {
             totalVisitedPageTableEntries,
             totalVisitedDirtyPageTableEntries,
             totalDirtyPageTableEntries);
-        if (ImGui::BeginTable("##VirtualShadowStatsTable", 16, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+        ImGui::Text("Request creators: predictiveInv=%u invalidateCurr=%u invalidatePrev=%u invalidateSkinned=%u wrapClr=%u staleClr=%u",
+            totalPredictiveInvalidatedPageTableEntries,
+            totalInvalidatedCurrentBoundsPageTableEntries,
+            totalInvalidatedPreviousBoundsPageTableEntries,
+            totalInvalidatedSkinnedPageTableEntries,
+            std::accumulate(
+                std::begin(stats.setupWrappedClearedPageTableEntries),
+                std::end(stats.setupWrappedClearedPageTableEntries),
+                0u),
+            std::accumulate(
+                std::begin(stats.setupStaleDirtyClearedPageTableEntries),
+                std::end(stats.setupStaleDirtyClearedPageTableEntries),
+                0u));
+        ImGui::TextDisabled("Dirty PT is sampled at GatherStatsPass before ClearPages re-marks cleared pages dirty for the hierarchy build.");
+        if (ImGui::BeginTable("##VirtualShadowStatsTable", 20, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
             ImGui::TableSetupColumn("Clip");
             ImGui::TableSetupColumn("Selected");
             ImGui::TableSetupColumn("Proj Reject");
@@ -3231,6 +3253,10 @@ inline void Menu::DrawCLodTelemetryWindow() {
             ImGui::TableSetupColumn("Visited Dirty");
             ImGui::TableSetupColumn("Dirty PT");
             ImGui::TableSetupColumn("NoWrite Clr");
+            ImGui::TableSetupColumn("Pred Inv");
+            ImGui::TableSetupColumn("Inv Curr");
+            ImGui::TableSetupColumn("Inv Prev");
+            ImGui::TableSetupColumn("Inv Skin");
             ImGui::TableHeadersRow();
 
             for (uint32_t clipmapIndex = 0u; clipmapIndex < displayedClipmapCount; ++clipmapIndex) {
@@ -3267,6 +3293,14 @@ inline void Menu::DrawCLodTelemetryWindow() {
                 ImGui::Text("%u", stats.dirtyPageTableEntries[clipmapIndex]);
                 ImGui::TableSetColumnIndex(15);
                 ImGui::Text("%u", stats.clearedUnwrittenDirtyPages[clipmapIndex]);
+                ImGui::TableSetColumnIndex(16);
+                ImGui::Text("%u", stats.predictiveInvalidatedPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(17);
+                ImGui::Text("%u", stats.invalidatedCurrentBoundsPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(18);
+                ImGui::Text("%u", stats.invalidatedPreviousBoundsPageTableEntries[clipmapIndex]);
+                ImGui::TableSetColumnIndex(19);
+                ImGui::Text("%u", stats.invalidatedSkinnedPageTableEntries[clipmapIndex]);
             }
 
             ImGui::EndTable();

@@ -693,10 +693,14 @@ struct CLodVirtualShadowStats
     uint32_t clearedUnwrittenDirtyPages[CLodVirtualShadowMaxSupportedClipmapCount] = {};
     uint32_t visitedPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
     uint32_t visitedDirtyPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t predictiveInvalidatedPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t invalidatedCurrentBoundsPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t invalidatedPreviousBoundsPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
+    uint32_t invalidatedSkinnedPageTableEntries[CLodVirtualShadowMaxSupportedClipmapCount] = {};
 };
 
 static_assert(
-    sizeof(CLodVirtualShadowStats) == (16u * sizeof(uint32_t)) + (15u * CLodVirtualShadowMaxSupportedClipmapCount * sizeof(uint32_t)),
+    sizeof(CLodVirtualShadowStats) == (16u * sizeof(uint32_t)) + (19u * CLodVirtualShadowMaxSupportedClipmapCount * sizeof(uint32_t)),
     "CLodVirtualShadowStats size must match HLSL");
 
 

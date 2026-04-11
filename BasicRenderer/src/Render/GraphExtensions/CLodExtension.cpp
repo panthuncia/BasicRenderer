@@ -1822,7 +1822,8 @@ void CLodExtension::GatherStructuralPasses(RenderGraph& rg, std::vector<RenderGr
                 m_shadowPageTableTexture,
                 m_shadowDirtyPageFlagsBuffer,
                 m_shadowPageMetadataBuffer,
-                m_shadowDirectionalPageViewInfoBuffer));
+                m_shadowDirectionalPageViewInfoBuffer,
+                m_shadowStatsBuffer));
         shadowConsumePredictedPagesPassDesc.At(RenderGraph::ExternalInsertPoint::After(shadowFreeWrappedPagesPassName));
         outPasses.push_back(std::move(shadowConsumePredictedPagesPassDesc));
 

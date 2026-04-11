@@ -131,6 +131,9 @@ private:
     std::vector<PendingStreamingRequest> m_pendingStreamingRequests;
     CLodPriorityMode m_priorityMode = CLodPriorityMode::Max;
     bool m_streamingDomainDirty = true;
+    uint64_t m_streamingDiagnosticTick = 0;
+    std::unordered_map<uint32_t, uint64_t> m_lastInProgressSuppressionLogTick;
+    std::unordered_map<uint32_t, uint64_t> m_lastMeshManagerQueuedLogTick;
 
     MeshManager::CLodStreamingDomainSnapshot m_cachedDomainSnapshot;
 

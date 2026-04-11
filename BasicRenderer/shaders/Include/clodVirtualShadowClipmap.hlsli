@@ -161,6 +161,10 @@ struct CLodVirtualShadowStats
     uint clearedUnwrittenDirtyPages[kCLodVirtualShadowClipmapCount];
     uint visitedPageTableEntries[kCLodVirtualShadowClipmapCount];
     uint visitedDirtyPageTableEntries[kCLodVirtualShadowClipmapCount];
+    uint predictiveInvalidatedPageTableEntries[kCLodVirtualShadowClipmapCount];
+    uint invalidatedCurrentBoundsPageTableEntries[kCLodVirtualShadowClipmapCount];
+    uint invalidatedPreviousBoundsPageTableEntries[kCLodVirtualShadowClipmapCount];
+    uint invalidatedSkinnedPageTableEntries[kCLodVirtualShadowClipmapCount];
 };
 
 struct CLodVirtualShadowBlockMeta

@@ -15,7 +15,8 @@ VirtualShadowMapConsumePredictedPagesPass::VirtualShadowMapConsumePredictedPages
     std::shared_ptr<PixelBuffer> pageTableTexture,
     std::shared_ptr<Buffer> dirtyPageFlagsBuffer,
     std::shared_ptr<Buffer> pageMetadataBuffer,
-    std::shared_ptr<Buffer> directionalPageViewInfoBuffer)
+    std::shared_ptr<Buffer> directionalPageViewInfoBuffer,
+    std::shared_ptr<Buffer> statsBuffer)
     : m_predictedPagesBuffer(std::move(predictedPagesBuffer))
     , m_predictedPageCountBuffer(std::move(predictedPageCountBuffer))
     , m_clipmapInfoBuffer(std::move(clipmapInfoBuffer))
@@ -23,6 +24,7 @@ VirtualShadowMapConsumePredictedPagesPass::VirtualShadowMapConsumePredictedPages
     , m_dirtyPageFlagsBuffer(std::move(dirtyPageFlagsBuffer))
     , m_pageMetadataBuffer(std::move(pageMetadataBuffer))
     , m_directionalPageViewInfoBuffer(std::move(directionalPageViewInfoBuffer))
+    , m_statsBuffer(std::move(statsBuffer))
 {
     m_consumePso = PSOManager::GetInstance().MakeComputePipeline(
         PSOManager::GetInstance().GetComputeRootSignature().GetHandle(),
@@ -50,7 +52,8 @@ void VirtualShadowMapConsumePredictedPagesPass::DeclareResourceUsages(ComputePas
             m_pageTableTexture,
             m_dirtyPageFlagsBuffer,
             m_pageMetadataBuffer,
-            m_directionalPageViewInfoBuffer);
+            m_directionalPageViewInfoBuffer,
+            m_statsBuffer);
 }
 
 void VirtualShadowMapConsumePredictedPagesPass::Setup() {}
@@ -74,6 +77,7 @@ PassReturn VirtualShadowMapConsumePredictedPagesPass::Execute(PassExecutionConte
     rootConstants[CLOD_VIRTUAL_SHADOW_CONSUME_PREDICTED_DIRTY_FLAGS_DESCRIPTOR_INDEX] = m_dirtyPageFlagsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_CONSUME_PREDICTED_PAGE_METADATA_DESCRIPTOR_INDEX] = m_pageMetadataBuffer->GetUAVShaderVisibleInfo(0).slot.index;
     rootConstants[CLOD_VIRTUAL_SHADOW_CONSUME_PREDICTED_PAGE_VIEW_INFO_DESCRIPTOR_INDEX] = m_directionalPageViewInfoBuffer->GetUAVShaderVisibleInfo(0).slot.index;
+    rootConstants[CLOD_VIRTUAL_SHADOW_CONSUME_PREDICTED_STATS_DESCRIPTOR_INDEX] = m_statsBuffer->GetUAVShaderVisibleInfo(0).slot.index;
 
     commandList.BindPipeline(m_consumePso.GetAPIPipelineState().GetHandle());
     commandList.PushConstants(

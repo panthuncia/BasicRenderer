@@ -35,6 +35,7 @@ public:
 		uint32_t residentGroups = 0;
 		uint32_t residentAllocations = 0;
 		uint32_t queuedRequests = 0;
+		uint32_t queuedOrInFlightGroups = 0;
 		uint32_t completedResults = 0;
 		uint64_t residentAllocationBytes = 0;
 		uint64_t completedResultBytes = 0;

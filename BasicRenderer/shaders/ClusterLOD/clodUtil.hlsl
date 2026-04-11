@@ -72,6 +72,10 @@ struct CLodVirtualShadowPredictedPage
 static const uint kCLodVirtualShadowInvalidationFlagUsePreviousBounds = 0x1u;
 static const uint kCLodVirtualShadowInvalidationFlagUseCurrentBounds = 0x2u;
 static const uint kCLodVirtualShadowInvalidationFlagSkinned = 0x4u;
+static const uint kCLodVirtualShadowInvalidationStatsReasonPredictive = 0x1u;
+static const uint kCLodVirtualShadowInvalidationStatsReasonCurrentBounds = 0x2u;
+static const uint kCLodVirtualShadowInvalidationStatsReasonPreviousBounds = 0x4u;
+static const uint kCLodVirtualShadowInvalidationStatsReasonSkinned = 0x8u;
 static const uint kCLodVirtualShadowPredictiveCandidateCapacity = (1u << 16);
 static const uint kCLodVirtualShadowPredictiveRawPageCapacity = (1u << 20);
 static const uint kCLodVirtualShadowPredictedPageEntriesPerClipmap =
@@ -294,6 +298,49 @@ void CLodVirtualShadowStatsIncrementVisited(RWStructuredBuffer<CLodVirtualShadow
 void CLodVirtualShadowStatsIncrementVisitedDirty(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
 {
     CLOD_VSM_STATS_INCREMENT(visitedDirtyPageTableEntries, clipmapIndex);
+}
+
+void CLodVirtualShadowStatsIncrementPredictiveInvalidated(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
+{
+    CLOD_VSM_STATS_INCREMENT(predictiveInvalidatedPageTableEntries, clipmapIndex);
+}
+
+void CLodVirtualShadowStatsIncrementInvalidatedCurrentBounds(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
+{
+    CLOD_VSM_STATS_INCREMENT(invalidatedCurrentBoundsPageTableEntries, clipmapIndex);
+}
+
+void CLodVirtualShadowStatsIncrementInvalidatedPreviousBounds(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
+{
+    CLOD_VSM_STATS_INCREMENT(invalidatedPreviousBoundsPageTableEntries, clipmapIndex);
+}
+
+void CLodVirtualShadowStatsIncrementInvalidatedSkinned(RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer, uint clipmapIndex)
+{
+    CLOD_VSM_STATS_INCREMENT(invalidatedSkinnedPageTableEntries, clipmapIndex);
+}
+
+void CLodVirtualShadowStatsIncrementInvalidatedByReason(
+    RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer,
+    uint clipmapIndex,
+    uint reasonFlags)
+{
+    if ((reasonFlags & kCLodVirtualShadowInvalidationStatsReasonPredictive) != 0u)
+    {
+        CLodVirtualShadowStatsIncrementPredictiveInvalidated(statsBuffer, clipmapIndex);
+    }
+    if ((reasonFlags & kCLodVirtualShadowInvalidationStatsReasonCurrentBounds) != 0u)
+    {
+        CLodVirtualShadowStatsIncrementInvalidatedCurrentBounds(statsBuffer, clipmapIndex);
+    }
+    if ((reasonFlags & kCLodVirtualShadowInvalidationStatsReasonPreviousBounds) != 0u)
+    {
+        CLodVirtualShadowStatsIncrementInvalidatedPreviousBounds(statsBuffer, clipmapIndex);
+    }
+    if ((reasonFlags & kCLodVirtualShadowInvalidationStatsReasonSkinned) != 0u)
+    {
+        CLodVirtualShadowStatsIncrementInvalidatedSkinned(statsBuffer, clipmapIndex);
+    }
 }
 
 bool CLodProjectWorldToShadowUv(float3 positionWS, CLodVirtualShadowCompactShadowCameraInfo shadowCamera, out float2 shadowUv);
@@ -587,7 +634,9 @@ bool CLodInvalidateVirtualShadowWrappedPage(
     RWTexture2DArray<uint> pageTable,
     RWStructuredBuffer<uint> dirtyFlags,
     RWStructuredBuffer<uint4> pageMetadata,
-    RWStructuredBuffer<float4> directionalPageViewInfo)
+    RWStructuredBuffer<float4> directionalPageViewInfo,
+    RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer,
+    uint reasonFlags)
 {
     (void)frameIndex;
     (void)directionalPageViewRow;
@@ -604,6 +653,7 @@ bool CLodInvalidateVirtualShadowWrappedPage(
     const uint physicalPageIndex = previousPageState & kCLodVirtualShadowPhysicalPageIndexMask;
     pageMetadata[physicalPageIndex] = uint4(0u, 0u, 0u, 0u);
     directionalPageViewInfo[CLodDirectionalShadowPageViewInfoIndex(wrappedPageCoords, clipmapIndex, pageTableResolution)] = 0.0f.xxxx;
+    CLodVirtualShadowStatsIncrementInvalidatedByReason(statsBuffer, clipmapIndex, reasonFlags);
     return true;
 }
 
@@ -697,6 +747,7 @@ void CLodInvalidateVirtualShadowSphere(
     float radiusWS,
     uint clipmapCount,
     uint frameIndex,
+    uint reasonFlags,
     StructuredBuffer<CLodVirtualShadowCompactShadowCameraInfo> shadowCameras,
     StructuredBuffer<CLodVirtualShadowClipmapInfo> clipmapInfos,
     RWTexture2DArray<uint> pageTable,
@@ -760,7 +811,9 @@ void CLodInvalidateVirtualShadowSphere(
                             pageTable,
                             dirtyFlags,
                             pageMetadata,
-                            directionalPageViewInfo);
+                            directionalPageViewInfo,
+                            statsBuffer,
+                            reasonFlags);
                     }
                 }
             }
@@ -1180,6 +1233,8 @@ void CLodVirtualShadowConsumePredictedPagesCSMain(uint3 dispatchThreadId : SV_Di
         ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CONSUME_PREDICTED_PAGE_METADATA_DESCRIPTOR_INDEX];
     RWStructuredBuffer<float4> directionalPageViewInfo =
         ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CONSUME_PREDICTED_PAGE_VIEW_INFO_DESCRIPTOR_INDEX];
+    RWStructuredBuffer<CLodVirtualShadowStats> statsBuffer =
+        ResourceDescriptorHeap[CLOD_VIRTUAL_SHADOW_CONSUME_PREDICTED_STATS_DESCRIPTOR_INDEX];
 
     const uint predictedPageCount = min(predictedPageCountBuffer[0], kCLodVirtualShadowPredictedPageListCapacity);
     const uint predictedPageIndex = dispatchThreadId.x;
@@ -1218,7 +1273,9 @@ void CLodVirtualShadowConsumePredictedPagesCSMain(uint3 dispatchThreadId : SV_Di
         pageTable,
         dirtyFlags,
         pageMetadata,
-        directionalPageViewInfo);
+        directionalPageViewInfo,
+        statsBuffer,
+        kCLodVirtualShadowInvalidationStatsReasonPredictive);
 }
 
 [shader("compute")]
@@ -1637,6 +1694,8 @@ void CLodVirtualShadowInvalidatePagesCSMain(uint3 dispatchThreadId : SV_Dispatch
             baseRadius * currentScale,
             clipmapCount,
             perFrameBuffer.frameIndex,
+            kCLodVirtualShadowInvalidationStatsReasonCurrentBounds |
+                (((input.flags & kCLodVirtualShadowInvalidationFlagSkinned) != 0u) ? kCLodVirtualShadowInvalidationStatsReasonSkinned : 0u),
             compactShadowCameraBuffer,
             clipmapInfos,
             pageTable,
@@ -1655,6 +1714,8 @@ void CLodVirtualShadowInvalidatePagesCSMain(uint3 dispatchThreadId : SV_Dispatch
             baseRadius * previousScale,
             clipmapCount,
             perFrameBuffer.frameIndex,
+            kCLodVirtualShadowInvalidationStatsReasonPreviousBounds |
+                (((input.flags & kCLodVirtualShadowInvalidationFlagSkinned) != 0u) ? kCLodVirtualShadowInvalidationStatsReasonSkinned : 0u),
             compactShadowCameraBuffer,
             clipmapInfos,
             pageTable,
